@@ -22,6 +22,7 @@
           "value": "${workspaceFolder}/bin/x64/Debug"
         }
       ],
+      "preLaunchTask": "Compile",
       "externalConsole": false,
       "MIMode": "gdb"
     },
@@ -43,6 +44,7 @@
           "value": "${workspaceFolder}/bin/x64/Debug"
         }
       ],
+      "preLaunchTask": "Compile",
       "externalConsole": false,
       "MIMode": "gdb"
     }
