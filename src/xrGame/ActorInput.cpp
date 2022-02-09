@@ -410,8 +410,8 @@ void CActor::IR_OnControllerPress(int cmd, float x, float y)
     {
         const float LookFactor = GetLookFactor();
         CCameraBase* C = cameras[cam_active];
-        float scale = (cam_Active()->f_fov / g_fov) * psControllerSens * psMouseSensScale / 50.f / LookFactor; // XXX: use psControllerSensScale
-        OnAxisMove(x, y, scale, false); // XXX: controller axes invert
+        float scale = (cam_Active()->f_fov / g_fov) * psControllerSens * psControllerSensScale / 50.f / LookFactor;
+        OnAxisMove(x, y, scale, psControllerInvertY.test(1));
         break;
     }
 
@@ -506,8 +506,8 @@ void CActor::IR_OnControllerHold(int cmd, float x, float y)
     {
         const float LookFactor = GetLookFactor();
         CCameraBase* C = cameras[cam_active];
-        float scale = (cam_Active()->f_fov / g_fov) * psControllerSens * psMouseSensScale / 50.f / LookFactor; // XXX: use psControllerSensScale
-        OnAxisMove(x, y, scale,  false); // XXX: controller axes invert
+        float scale = (cam_Active()->f_fov / g_fov) * psControllerSens * psControllerSensScale / 50.f / LookFactor;
+        OnAxisMove(x, y, scale, psControllerInvertY.test(1));
         break;
     }
 
