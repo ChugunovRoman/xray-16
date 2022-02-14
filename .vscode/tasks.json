@@ -33,7 +33,7 @@
       "options": {
         "cwd": "${workspaceFolder}/bin"
       },
-      "command": "CFLAGS='-march=native' CXXFLAGS='-march=native' cmake .. -DCMAKE_BUILD_TYPE=Debug",
+      "command": "cmake .. -DCMAKE_BUILD_TYPE=Debug",
       "dependsOn": [
         "mkdir"
       ]
@@ -55,7 +55,7 @@
       "options": {
         "cwd": "${workspaceFolder}/bin"
       },
-      "command": "CFLAGS='-march=native' CXXFLAGS='-march=native' cmake .. -DCMAKE_BUILD_TYPE=Mixed",
+      "command": "cmake .. -DCMAKE_BUILD_TYPE=Mixed",
       "dependsOn": [
         "mkdir"
       ]
