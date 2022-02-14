@@ -43,15 +43,20 @@ public:
     virtual void IR_OnControllerPress(int /*dik*/, float /*x*/, float /*y*/) {}
     virtual void IR_OnControllerRelease(int /*dik*/, float /*x*/, float /*y*/) {}
     virtual void IR_OnControllerHold(int /*dik*/, float /*x*/, float /*y*/) {}
+
+    virtual void IR_OnControllerAttitudeChange(Fvector /*change*/) {}
 };
 
 ENGINE_API extern float psMouseSens;
 ENGINE_API extern float psMouseSensScale;
 ENGINE_API extern Flags32 psMouseInvert;
 
-ENGINE_API extern float psControllerSens;
-ENGINE_API extern float psControllerSensScale;
-ENGINE_API extern float psControllerDeadZoneSens;
+ENGINE_API extern float psControllerStickSens;
+ENGINE_API extern float psControllerStickSensScale;
+ENGINE_API extern float psControllerStickDeadZone;
+ENGINE_API extern float psControllerSensorSens;
+ENGINE_API extern float psControllerSensorDeadZone;
 ENGINE_API extern Flags32 psControllerInvertY;
+ENGINE_API extern Flags32 psControllerEnableSensors;
 
 #endif

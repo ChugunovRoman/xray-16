@@ -735,7 +735,7 @@ void CDemoRecord::IR_OnControllerHold(int key, float x, float y)
     case kLOOK_AROUND:
     {
         m_angle_speed = speed;
-        const float scale = .05f; // psControllerSens;
+        const float scale = .05f; // psControllerStickSens;
         OnAxisMove(x, y, scale, psControllerInvertY.test(1));
         break;
     }
@@ -808,6 +808,18 @@ void CDemoRecord::IR_OnControllerRelease(int key, float x, float y)
         IR_OnKeyboardRelease(key);
         break;
     }
+}
+
+void CDemoRecord::IR_OnControllerAttitudeChange(Fvector change)
+{
+    if (m_b_redirect_input_to_level)
+    {
+        g_pGameLevel->IR_OnControllerAttitudeChange(change);
+        return;
+    }
+    
+    const float scale = 5.f; // psControllerSensorSens;
+    OnAxisMove(change.x, change.y, scale, psControllerInvertY.test(1));
 }
 
 void CDemoRecord::RecordKey()
