@@ -38,7 +38,6 @@
 #define _copysign copysign
 
 #define _cdecl //__attribute__((cdecl))
-#define _stdcall //__attribute__((stdcall))
 #define _fastcall //__attribute__((fastcall))
 
 #define __cdecl
