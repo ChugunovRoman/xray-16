@@ -46,3 +46,6 @@
 [submodule "Externals/sse2neon"]
 	path = Externals/sse2neon
 	url = https://github.com/DLTcollab/sse2neon.git
+[submodule "Externals/lfs"]
+	path = Externals/lfs
+	url = https://github.com/ChugunovRoman/luafilesystem.git
