@@ -9,6 +9,7 @@
 extern "C" {
 #include <lua.h>
 #include <lfs.h>
+#include <lmarshal.h>
 #include <lualib.h>
 #include <lauxlib.h>
 }

@@ -966,6 +966,7 @@ void CScriptEngine::init(ExporterFunc exporterFunc, bool loadGlobalNamespace)
     luajit::open_lib(lua(), LUA_BITLIBNAME, luaopen_bit);
     luajit::open_lib(lua(), LUA_FFILIBNAME, luaopen_ffi);
     luajit::open_lib(lua(), LUA_FSLIBNAME, luaopen_lfs);
+    luajit::open_lib(lua(), LUA_MARSHALLIBNAME, luaopen_marshal);
 #ifndef MASTER_GOLD
     luajit::open_lib(lua(), LUA_DBLIBNAME, luaopen_debug);
 #endif
