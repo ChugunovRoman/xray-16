@@ -134,10 +134,10 @@
     <ClCompile Include="cryptopp\simple.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="cryptopp\sha-simd.cpp">
+    <ClCompile Include="cryptopp\sha_simd.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="cryptopp\rijndael-simd.cpp">
+    <ClCompile Include="cryptopp\rijndael_simd.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

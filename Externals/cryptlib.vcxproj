@@ -204,10 +204,10 @@
     <ClCompile Include="cryptopp\randpool.cpp" />
     <ClCompile Include="cryptopp\rdrand.cpp" />
     <ClCompile Include="cryptopp\rdtables.cpp" />
-    <ClCompile Include="cryptopp\rijndael-simd.cpp" />
+    <ClCompile Include="cryptopp\rijndael_simd.cpp" />
     <ClCompile Include="cryptopp\rijndael.cpp" />
     <ClCompile Include="cryptopp\rng.cpp" />
-    <ClCompile Include="cryptopp\sha-simd.cpp" />
+    <ClCompile Include="cryptopp\sha_simd.cpp" />
     <ClCompile Include="cryptopp\sha.cpp" />
     <ClCompile Include="cryptopp\simple.cpp" />
   </ItemGroup>
