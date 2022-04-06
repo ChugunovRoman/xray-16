@@ -239,6 +239,8 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/Externals
     ${CMAKE_SOURCE_DIR}/Externals/luabind
     ${CMAKE_SOURCE_DIR}/Externals/lua-marshal
+    ${CMAKE_SOURCE_DIR}/Externals/xrLuaFS
+    ${CMAKE_SOURCE_DIR}/Externals/xrLuaFS/src
 )
 
 add_subdirectory(Externals)

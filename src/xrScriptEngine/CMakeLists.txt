@@ -51,6 +51,7 @@ target_include_directories(${PROJECT_NAME}
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/Externals/luabind
     ${CMAKE_SOURCE_DIR}/Externals/lua-marshal
+    ${CMAKE_SOURCE_DIR}/Externals/xrLuaFS
     ${SDL_INCLUDE_DIRS}
 )
 
@@ -60,6 +61,7 @@ target_link_libraries(${PROJECT_NAME}
     xrCore
     xrLuabind
     xrMarshal
+    xrLuaFS
     ${LUA_LIBRARIES}
 )
 
