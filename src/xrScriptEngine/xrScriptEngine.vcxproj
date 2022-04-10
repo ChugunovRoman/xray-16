@@ -26,7 +26,9 @@
       <AdditionalIncludeDirectories>
         $(xrExternals)xrLuaFS;
         $(xrExternals)xrLuaFS\src;
-        $(xrExternals)xrLuaFS\lua-marshal;
+        $(xrExternals)\lua-marshal;
+        $(xrExternals)\lua_extensions;
+        $(xrExternals)\lua_extensions\src;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
     </ClCompile>
@@ -98,6 +100,9 @@
     </ProjectReference>
     <ProjectReference Include="$(xrExternals)lua-marshal.vcxproj">
       <Project>{b67b8b20-8f49-4d6b-91a4-e4cd0a28c745}</Project>
+    </ProjectReference>
+    <ProjectReference Include="$(xrExternals)lua_extensions.vcxproj">
+      <Project>{1e07bca7-6fc2-4d7c-9542-5090cc513cdd}</Project>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>

@@ -11,6 +11,7 @@
         $(xrExternals)luajit\src;
         $(xrExternals)lua-marshal;
         $(xrExternals)xrLuaFS\src;
+        $(xrExternals)lua_extensions\src;
         $(xrExternals)luabind;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>

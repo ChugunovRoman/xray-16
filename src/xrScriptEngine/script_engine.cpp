@@ -16,6 +16,8 @@
 #include "script_debugger.hpp"
 #endif
 #include <lfs.h>
+#include <lmarshal.h>
+#include <lua_extensions.h>
 #include <stdarg.h>
 #include "Common/Noncopyable.hpp"
 #include "xrCore/ModuleLookup.hpp"
@@ -949,6 +951,7 @@ void CScriptEngine::init(ExporterFunc exporterFunc, bool loadGlobalNamespace)
     luajit::open_lib(lua(), LUA_FFILIBNAME, luaopen_ffi);
     luajit::open_lib(lua(), LUA_MARSHALLIBNAME, luaopen_marshal);
     luajit::open_lib(lua(), LUA_FSLIBNAME, luaopen_lfs);
+    luajit::open_lib(lua(), LUA_EXTENSIONSLIBNAME, luaopen_lua_extensions);
 #ifndef MASTER_GOLD
     luajit::open_lib(lua(), LUA_DBLIBNAME, luaopen_debug);
 #endif
