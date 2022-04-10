@@ -29,6 +29,7 @@
     <ClCompile Include="lua_extensions\src\lua_extend_string.cpp" />
     <ClCompile Include="lua_extensions\src\lua_extend_table.cpp" />
     <ClCompile Include="lua_extensions\src\lua_extensions.cpp" />
+    <ClCompile Include="lua_extensions\src\common.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="$(xrExternals)LuaJIT-proj\LuaJIT.vcxproj">

@@ -26,7 +26,9 @@
       <AdditionalIncludeDirectories>
         $(xrExternals)xrLuaFS;
         $(xrExternals)xrLuaFS\src;
-        $(xrExternals)xrLuaFS\lua-marshal;
+        $(xrExternals)\lua-marshal;
+        $(xrExternals)\lua_extensions;
+        $(xrExternals)\lua_extensions\src;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
     </ClCompile>
