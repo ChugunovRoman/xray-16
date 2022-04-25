@@ -6,6 +6,7 @@
 //	Description : Script ini file class
 ////////////////////////////////////////////////////////////////////////////
 
+#include "pch_script.h"
 #include "StdAfx.h"
 #include "script_ini_file.h"
 #include "xrScriptEngine/script_engine.hpp"
@@ -211,6 +212,23 @@ void CScriptIniFile::remove_line(pcstr S, pcstr L)
 void CScriptIniFile::set_override_names(bool b)
 {
     inherited::set_override_names(b);
+}
+
+void CScriptIniFile::section_for_each(const luabind::functor<void>& functor)
+{
+    using sections_type = CInifile::Root;
+    sections_type& sections = this->sections();
+
+    for (auto& section : sections)
+    {
+        functor(section->Name.c_str());
+    }
+}
+
+
+void CScriptIniFile::set_readonly(bool b)
+{
+    inherited::m_flags.set(eReadOnly, b);
 }
 
 u32 CScriptIniFile::section_count()
