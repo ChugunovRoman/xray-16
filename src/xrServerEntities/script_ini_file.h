@@ -8,7 +8,12 @@
 
 #pragma once
 
+#include "pch_script.h"
 #include "script_token_list.h"
+#include "xrScriptEngine/Functor.hpp"
+
+using namespace luabind;
+using namespace luabind::policy;
 
 class CScriptIniFile : public CInifile
 {
