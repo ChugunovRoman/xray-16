@@ -61,7 +61,31 @@ SCRIPT_EXPORT(KeyBindings, (),
                 value("kINVENTORY",                 int(kINVENTORY)),
                 value("kBUY",                       int(kBUY)),
                 value("kSKIN",                      int(kSKIN)),
-                value("kTEAM",                      int(kTEAM))
+                value("kTEAM",                      int(kTEAM)),
+                value("kQUICK_SAVE",                int(kQUICK_SAVE)),
+                value("kQUICK_LOAD",                int(kQUICK_LOAD)),
+                value("kCAM_AUTOAIM",               int(kCAM_AUTOAIM)),
+                value("kCUSTOM1",                   int(kCUSTOM1)),
+                value("kCUSTOM2",                   int(kCUSTOM2)),
+                value("kCUSTOM3",                   int(kCUSTOM3)),
+                value("kCUSTOM4",                   int(kCUSTOM4)),
+                value("kCUSTOM5",                   int(kCUSTOM5)),
+                value("kCUSTOM6",                   int(kCUSTOM6)),
+                value("kCUSTOM7",                   int(kCUSTOM7)),
+                value("kCUSTOM8",                   int(kCUSTOM8)),
+                value("kCUSTOM9",                   int(kCUSTOM9)),
+                value("kCUSTOM10",                  int(kCUSTOM10)),
+                value("kCUSTOM11",                  int(kCUSTOM11)),
+                value("kCUSTOM12",                  int(kCUSTOM12)),
+                value("kCUSTOM13",                  int(kCUSTOM13)),
+                value("kCUSTOM14",                  int(kCUSTOM14)),
+                value("kCUSTOM15",                  int(kCUSTOM15)),
+                value("kPDA_TAB1",                  int(kPDA_TAB1)),
+                value("kPDA_TAB2",                  int(kPDA_TAB2)),
+                value("kPDA_TAB3",                  int(kPDA_TAB3)),
+                value("kPDA_TAB4",                  int(kPDA_TAB4)),
+                value("kPDA_TAB5",                  int(kPDA_TAB5)),
+                value("kPDA_TAB6",                  int(kPDA_TAB6))
             ],
 
         class_<KeyBindingRegistrator>("DIK_keys")
@@ -117,7 +141,7 @@ SCRIPT_EXPORT(KeyBindings, (),
                 value("DIK_RBRACKET",               int(SDL_SCANCODE_RIGHTBRACKET)),
                 value("DIK_BACKSLASH",              int(SDL_SCANCODE_BACKSLASH)),
                 value("DIK_NONUSHASH",              int(SDL_SCANCODE_NONUSHASH)),
-                
+
                 value("DIK_SEMICOLON",              int(SDL_SCANCODE_SEMICOLON)),
                 value("DIK_APOSTROPHE",             int(SDL_SCANCODE_APOSTROPHE)),
                 value("DIK_GRAVE",                  int(SDL_SCANCODE_GRAVE)),
@@ -340,14 +364,14 @@ SCRIPT_EXPORT(KeyBindings, (),
                 value("DIK_BRIGHTNESSDOWN",         int(SDL_SCANCODE_BRIGHTNESSDOWN)),
                 value("DIK_BRIGHTNESSUP",           int(SDL_SCANCODE_BRIGHTNESSUP)),
                 value("DIK_DISPLAYSWITCH",          int(SDL_SCANCODE_DISPLAYSWITCH)),
-               
+
                 value("DIK_KBDILLUMTOGGLE)",        int(SDL_SCANCODE_KBDILLUMTOGGLE)),
                 value("DIK_KBDILLUMDOWN",           int(SDL_SCANCODE_KBDILLUMDOWN)),
                 value("DIK_KBDILLUMUP",             int(SDL_SCANCODE_KBDILLUMUP)),
-               
+
                 value("DIK_EJECT",                  int(SDL_SCANCODE_EJECT)),
                 value("DIK_SLEEP",                  int(SDL_SCANCODE_SLEEP)),
-               
+
                 value("DIK_APP1",                   int(SDL_SCANCODE_APP1)),
                 value("DIK_APP2",                   int(SDL_SCANCODE_APP2)),
 

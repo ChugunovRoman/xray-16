@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <csignal>
 #include "ai_space.h"
 #include "alife_simulator.h"
 

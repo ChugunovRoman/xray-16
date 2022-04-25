@@ -246,6 +246,7 @@ private:
 public:
     bool m_bAllowDeathRemove;
 
+    bool use_HolderEx(CHolderCustom* object, bool bForce);
     void SetZoomRndSeed(s32 Seed = 0);
     s32 GetZoomRndSeed() { return m_ZoomRndSeed; };
     void SetShotRndSeed(s32 Seed = 0);
@@ -353,6 +354,7 @@ public:
     virtual bool feel_touch_on_contact(IGameObject* O);
 
     CGameObject* ObjectWeLookingAt() { return m_pObjectWeLookingAt; }
+    CScriptGameObject* ObjectWeLookingAt_script() { return m_pObjectWeLookingAt ? m_pObjectWeLookingAt->lua_game_object() : (0); }
     CInventoryOwner* PersonWeLookingAt() { return m_pPersonWeLookingAt; }
     LPCSTR GetDefaultActionForObject() { return *m_sDefaultObjAction; }
 protected:
@@ -691,6 +693,8 @@ protected:
     float m_fLastHealth;
     bool m_bWasHitted;
     bool m_bWasBackStabbed;
+    bool m_bNightVisionOn;
+    bool m_bNightVisionAllow;
 
     virtual bool Check_for_BackStab_Bone(u16 element);
 
@@ -705,6 +709,8 @@ public:
     virtual bool InventoryAllowSprint();
     virtual void OnNextWeaponSlot();
     virtual void OnPrevWeaponSlot();
+    bool GetNightVisionStatus() { return m_bNightVisionOn; }
+    void SetNightVisionAllowed(bool bAllow) { m_bNightVisionAllow = bAllow; }
     void SwitchNightVision();
     void SwitchTorch();
 
@@ -776,10 +782,8 @@ public:
     bool DisableHitMarks() { return m_disabled_hitmarks; };
     void set_inventory_disabled(bool is_disabled) { m_inventory_disabled = is_disabled; }
     bool inventory_disabled() const { return m_inventory_disabled; }
-private:
     void set_state_box(u32 mstate);
 
-private:
     bool m_disabled_hitmarks;
     bool m_inventory_disabled;
     // static CPhysicsShell		*actor_camera_shell;
@@ -814,5 +818,7 @@ IC CActorCondition& CActor::conditions() const
 }
 
 extern CActor* g_actor;
+extern Fvector g_start_position;
+extern int g_start_game_vertex_id;
 CActor* Actor();
 extern const float s_fFallTime;

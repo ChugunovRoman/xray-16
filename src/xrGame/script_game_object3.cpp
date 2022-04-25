@@ -48,6 +48,12 @@
 #include "eatable_item.h"
 #include "xrScriptEngine/script_callback_ex.h"
 #include "xrEngine/Feel_Touch.h"
+#include "WeaponAmmo.h"
+#include "WeaponMagazinedWGrenade.h"
+#include "level_path_manager.h"
+#include "game_path_manager.h"
+#include "danger_manager.h"
+#include "danger_object.h"
 #endif
 //-Alundaio
 
@@ -459,6 +465,24 @@ void CScriptGameObject::inactualize_patrol_path()
         GEnv.ScriptEngine->script_log(LuaMessageType::Error, "CAI_Stalker : cannot access class member movement!");
     else
         stalker->movement().patrol().make_inactual();
+}
+
+void CScriptGameObject::inactualize_level_path()
+{
+    CAI_Stalker					*stalker = smart_cast<CAI_Stalker*>(&object());
+    if (!stalker)
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "CAI_Stalker : cannot access class member movement!");
+    else
+        stalker->movement().level_path().make_inactual();
+}
+
+void CScriptGameObject::inactualize_game_path()
+{
+    CAI_Stalker					*stalker = smart_cast<CAI_Stalker*>(&object());
+    if (!stalker)
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "CAI_Stalker : cannot access class member movement!");
+    else
+        stalker->movement().game_path().make_inactual();
 }
 
 void CScriptGameObject::set_dest_level_vertex_id(u32 level_vertex_id)
@@ -1251,6 +1275,33 @@ bool CScriptGameObject::is_weapon_going_to_be_strapped(CScriptGameObject const* 
 
 //Alundaio: Taken from Radium
 #ifdef GAME_OBJECT_EXTENDED_EXPORTS
+u16 CScriptGameObject::AmmoGetCount()
+{
+    CWeaponAmmo* ammo = smart_cast<CWeaponAmmo*>(&object());
+    if (!ammo)
+        return 0;
+
+    return ammo->m_boxCurr;
+}
+
+void CScriptGameObject::AmmoSetCount(u16 count)
+{
+    CWeaponAmmo* ammo = smart_cast<CWeaponAmmo*>(&object());
+    if (!ammo)
+        return;
+
+    ammo->m_boxCurr = count;
+}
+
+u16 CScriptGameObject::AmmoBoxSize()
+{
+    CWeaponAmmo* ammo = smart_cast<CWeaponAmmo*>(&object());
+    if (!ammo)
+        return 0;
+
+    return ammo->m_boxSize;
+}
+
 float CScriptGameObject::GetArtefactHealthRestoreSpeed()
 {
     CArtefact* artefact = smart_cast<CArtefact*>(&object());
@@ -1403,6 +1454,15 @@ void CScriptGameObject::SwitchState(u32 state)
         if (itm)
             itm->SwitchState(state);
     }
+}
+
+bool CScriptGameObject::WeaponInGrenadeMode()
+{
+    CWeaponMagazinedWGrenade* wpn = smart_cast<CWeaponMagazinedWGrenade*>(&object());
+    if (!wpn)
+        return false;
+
+    return wpn->m_bGrenadeMode;
 }
 
 u32 CScriptGameObject::GetState()

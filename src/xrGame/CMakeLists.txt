@@ -49,6 +49,8 @@ set(SRC_FILES
     "Actor.h"
     "ActorHelmet.cpp"
     "ActorHelmet.h"
+    "ActorBackpack.cpp"
+    "ActorBackpack.h"
     "ActorInput.cpp"
     "actor_input_handler.cpp"
     "actor_input_handler.h"
@@ -383,6 +385,7 @@ set(SRC_FILES
     "CustomMonster_inline.h"
     "CustomMonster_VCPU.cpp"
     "CustomOutfit.cpp"
+    "CustomOutfit_script.cpp"
     "CustomOutfit.h"
     "CustomRocket.cpp"
     "CustomRocket.h"
@@ -2666,9 +2669,9 @@ target_compile_options(${PROJECT_NAME}
 )
 
 if ((CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo") AND PROJECT_PLATFORM_E2K) # E2K: hack for debug compile (MCST lcc compiler does not support a file > 4Gb, this is a bug in EDG frontend)
-    target_compile_options(${PROJECT_NAME} 
+    target_compile_options(${PROJECT_NAME}
         PRIVATE
-        -g0 
+        -g0
     )
     message(STATUS "Build type is ${CMAKE_BUILD_TYPE}, so disable generation of debug info for xrGame module, because MCST lcc compiler does not support a file > 4 GB (this is a bug in EDG frontend).")
 endif()

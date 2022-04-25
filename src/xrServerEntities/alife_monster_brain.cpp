@@ -91,7 +91,7 @@ CSE_ALifeSmartZone& CALifeMonsterBrain::smart_terrain()
 void CALifeMonsterBrain::process_task()
 {
     CALifeSmartTerrainTask* task = smart_terrain().task(&object());
-    THROW3(task, "smart terrain returned nil task, while npc is registered in it", smart_terrain().name_replace());
+    THROW3(task, make_string("smart terrain returned nil task, while npc is registered in it. Object name: %s is alive: %d, curr smart: %d, smart_id: %d", object().name_replace(), object().g_Alive(), m_smart_terrain->ID, object().m_smart_terrain_id).c_str(), smart_terrain().name_replace());
     movement().path_type(MovementManager::ePathTypeGamePath);
     movement().detail().target(*task);
 }

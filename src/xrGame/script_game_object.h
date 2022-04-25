@@ -491,8 +491,8 @@ public:
     float GetCurrentOutfitProtection(int hit_type);
 
     bool IsOnBelt(CScriptGameObject* obj) const;
-    CScriptGameObject* ItemOnBelt(u32 item_id) const;  
-    u32 BeltSize() const;  
+    CScriptGameObject* ItemOnBelt(u32 item_id) const;
+    u32 BeltSize() const;
 
     void deadbody_closed(bool status);
     bool deadbody_closed_status();
@@ -795,8 +795,10 @@ public:
     void unlock_door_for_npc();
     bool is_door_blocked_by_npc() const;
     bool is_weapon_going_to_be_strapped(CScriptGameObject const* object) const;
-    
+
 #ifdef GAME_OBJECT_EXTENDED_EXPORTS
+    void inactualize_level_path();
+    void inactualize_game_path();
     void SetHealthEx(float hp); //AVO
     //Alundaio
     float GetLuminocityHemi();
@@ -812,6 +814,9 @@ public:
     void SetRestrictionType(u8 type);
 
     //Weapon
+    LPCSTR Weapon_GetAmmoSection(u8 ammo_type);
+    void Weapon_SetCurrentScope(u8 type);
+    u8 Weapon_GetCurrentScope();
     void Weapon_AddonAttach(CScriptGameObject* item);
     void Weapon_AddonDetach(pcstr item_section);
     bool HasAmmoType(u8 type);
@@ -828,6 +833,7 @@ public:
     bool InstallUpgrade(pcstr upgrade);
     bool HasUpgrade(pcstr upgrade) const;
     void IterateInstalledUpgrades(luabind::functor<void> functor);
+    bool WeaponInGrenadeMode();
 
     //Car
     CScriptGameObject* GetAttachedVehicle();
@@ -857,6 +863,20 @@ public:
     void SetArtefactSatietyRestoreSpeed(float value);
     void SetArtefactPowerRestoreSpeed(float value);
     void SetArtefactBleedingRestoreSpeed(float value);
+
+    void RemoveDanger(const CDangerObject& dobject);
+
+    void RemoveMemorySoundObject(const MemorySpace::CSoundObject &memory_object);
+    void RemoveMemoryHitObject(const MemorySpace::CHitObject &memory_object);
+    void RemoveMemoryVisibleObject(const MemorySpace::CVisibleObject &memory_object);
+
+    //CWeaponAmmo
+    u16 AmmoGetCount();
+    void AmmoSetCount(u16 count);
+    u16 AmmoBoxSize();
+
+    //CAI_Stalker
+    void ResetBoneProtections(pcstr imm_sect, pcstr bone_sect);
 
     //Eatable items
     void SetRemainingUses(u8 value);

@@ -714,7 +714,7 @@ public:
         pInput->RegisterKeyMapChangeWatcher(this, REG_PRIORITY_HIGH);
     }
 
-    void Destroy() 
+    void Destroy()
     {
         if (pInput) // XXX: this check should not exist
             pInput->RemoveKeyMapChangeWatcher(this);
