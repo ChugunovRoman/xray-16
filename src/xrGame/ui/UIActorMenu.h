@@ -5,6 +5,8 @@
 #include "xrServerEntities/inventory_space.h"
 #include "xrUICore/Hint/UIHint.h"
 
+#include "script_game_object.h"
+
 class CUICharacterInfo;
 class CUIDragDropListEx;
 class CUIDragDropReferenceList;
@@ -109,6 +111,11 @@ protected:
         eListCount
     };
 
+    u8 m_slot_count;
+    CUIStatic* m_pInvSlotHighlight[LAST_SLOT + 1];
+    CUIProgressBar* m_pInvSlotProgress[LAST_SLOT + 1];
+    CUIDragDropListEx* m_pInvList[LAST_SLOT + 1];
+
     EMenuMode m_currMenuMode;
     ref_sound sounds[eSndMax];
     void PlaySnd(eActorMenuSndAction a);
@@ -168,6 +175,16 @@ protected:
 
     // Drag&Drop lists
     CUIDragDropListEx* m_pLists[eListCount]{};
+
+    CUIDragDropListEx* m_pInventoryBeltList;
+    CUIDragDropListEx* m_pInventoryBagList;
+
+    CUIDragDropListEx* m_pTradeActorBagList;
+    CUIDragDropListEx* m_pTradeActorList;
+    CUIDragDropListEx* m_pTradePartnerBagList;
+    CUIDragDropListEx* m_pTradePartnerList;
+    CUIDragDropListEx* m_pDeadBodyBagList;
+    CUIDragDropListEx* m_pTrashList;
 
 public:
     CUIDragDropReferenceList* m_pQuickSlot{};
@@ -390,6 +407,10 @@ public:
     void StoreAllToInventoryBox();
 
     IC UIHint* get_hint_wnd() { return m_hint_wnd; }
+    void UpdateConditionProgressBars();
+    CScriptGameObject* GetCurrentItemAsGameObject();
+    void HighlightSectionInSlot(pcstr section, u8 type, u16 slot_id = 0);
+    void HighlightForEachInSlot(const luabind::functor<bool>& functor, u8 type, u16 slot_id);
 
     void RefreshCurrentItemCell();
     void DonateCurrentItem(CUICellItem* cell_item); //Alundaio: Donate item via context menu while in trade menu

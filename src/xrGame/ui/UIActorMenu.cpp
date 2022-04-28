@@ -955,3 +955,39 @@ bool CUIActorMenu::CanSetItemToList(PIItem item, CUIDragDropListEx* l, u16& ret_
 
     return false;
 }
+
+CScriptGameObject* CUIActorMenu::GetCurrentItemAsGameObject()
+{
+    CGameObject* GO = smart_cast<CGameObject*>(CurrentIItem());
+    if (GO)
+        return GO->lua_game_object();
+
+    return nullptr;
+}
+
+void CUIActorMenu::UpdateConditionProgressBars()
+{
+    for (u8 i = 1; i <= m_slot_count; ++i)
+    {
+        PIItem itm = m_pActorInvOwner->inventory().ItemFromSlot(i);
+        if (m_pInvSlotProgress[i])
+            m_pInvSlotProgress[i]->SetProgressPos(itm ? iCeil(itm->GetCondition()*10.f) / 10.f : 0);
+    }
+
+    //Highlight 'equipped' items in actor bag
+    CUIDragDropListEx* slot_list = m_pInventoryBagList;
+    u32 const cnt = slot_list->ItemsCount();
+    for (u32 i = 0; i < cnt; ++i)
+    {
+        CUICellItem* ci = slot_list->GetItemIdx(i);
+        PIItem item = (PIItem)ci->m_pData;
+        if (!item)
+            continue;
+
+        if (item->m_highlight_equipped && item->m_pInventory &&
+            item->m_pInventory->ItemFromSlot(item->BaseSlot()) == item)
+            ci->m_select_equipped = true;
+        else
+            ci->m_select_equipped = false;
+    }
+}
