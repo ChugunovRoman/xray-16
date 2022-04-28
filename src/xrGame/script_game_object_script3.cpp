@@ -269,6 +269,7 @@ class_<CScriptGameObject>& script_register_game_object2(class_<CScriptGameObject
         .def("character_icon", &CScriptGameObject::CharacterIcon)
         .def("character_rank", &CScriptGameObject::CharacterRank)
         .def("set_character_rank", &CScriptGameObject::SetCharacterRank)
+        .def("change_character_rank", &CScriptGameObject::ChangeCharacterRank)
         .def("character_reputation", &CScriptGameObject::CharacterReputation)
         .def("change_character_reputation", &CScriptGameObject::ChangeCharacterReputation)
         .def("character_community", &CScriptGameObject::CharacterCommunity)
@@ -412,9 +413,18 @@ class_<CScriptGameObject>& script_register_game_object2(class_<CScriptGameObject
         .def("set_spatial_type", &CScriptGameObject::SetSpatialType)
         .def("get_spatial_type", &CScriptGameObject::GetSpatialType)
 
+        //For Ammo
+        .def("ammo_get_count", &CScriptGameObject::AmmoGetCount)
+        .def("ammo_set_count", &CScriptGameObject::AmmoSetCount)
+        .def("ammo_box_size", &CScriptGameObject::AmmoBoxSize)
+
         //For Weapons
+        .def("weapon_get_ammo_section", &CScriptGameObject::Weapon_GetAmmoSection)
         .def("weapon_addon_attach", &CScriptGameObject::Weapon_AddonAttach)
         .def("weapon_addon_detach", &CScriptGameObject::Weapon_AddonDetach)
+        .def("weapon_set_scope", &CScriptGameObject::Weapon_SetCurrentScope)
+        .def("weapon_get_scope", &CScriptGameObject::Weapon_GetCurrentScope)
+        .def("weapon_in_grenade_mode", &CScriptGameObject::WeaponInGrenadeMode)
 
         //For Weapon & Outfit
         .def("install_upgrade", &CScriptGameObject::InstallUpgrade)

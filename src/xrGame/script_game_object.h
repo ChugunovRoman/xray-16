@@ -812,6 +812,10 @@ public:
     void SetRestrictionType(u8 type);
 
     //Weapon
+    LPCSTR Weapon_GetAmmoSection(u8 ammo_type);
+    void Weapon_SetCurrentScope(u8 type);
+    u8 Weapon_GetCurrentScope();
+    bool WeaponInGrenadeMode();
     void Weapon_AddonAttach(CScriptGameObject* item);
     void Weapon_AddonDetach(pcstr item_section);
     bool HasAmmoType(u8 type);
@@ -857,6 +861,11 @@ public:
     void SetArtefactSatietyRestoreSpeed(float value);
     void SetArtefactPowerRestoreSpeed(float value);
     void SetArtefactBleedingRestoreSpeed(float value);
+
+    //CWeaponAmmo
+    u16 AmmoGetCount();
+    void AmmoSetCount(u16 count);
+    u16 AmmoBoxSize();
 
     //Eatable items
     void SetRemainingUses(u8 value);
