@@ -116,12 +116,30 @@
       ]
     },
     {
+      "label": "Run CoC Mixed",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/bin/x64/Mixed"
+      },
+      "command": "./xr_3da -nointro -fsltx ${COC_LTX_FILE_PATH}",
+      "problemMatcher": []
+    },
+    {
       "label": "Run CoC Release",
       "type": "shell",
       "options": {
         "cwd": "${workspaceFolder}/bin/x64/Release"
       },
       "command": "./xr_3da -nointro -fsltx ${COC_LTX_FILE_PATH}",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run CoP Mixed",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/bin/x64/Mixed"
+      },
+      "command": "./xr_3da -nointro -fsltx ${COP_LTX_FILE_PATH}",
       "problemMatcher": []
     },
     {
