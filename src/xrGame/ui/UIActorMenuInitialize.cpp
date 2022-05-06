@@ -188,7 +188,7 @@ void CUIActorMenu::InitializeUniversal(CUIXml& uiXml)
     constexpr std::tuple<eActorMenuListType, cpcstr, cpcstr, cpcstr, cpcstr, bool> inventory_lists[] =
     {
         // { id,                   "xml_section_name",         "condition_indicator,   "highlighter",             "blocker", is_it_critical_and_required }
-        { eInventoryKnifeList,     "dragdrop_knife",           "progess_bar_knife",    "inv_slot1_highlight",     nullptr,            true },
+        { eInventoryKnifeList,     "dragdrop_knife",           "progess_bar_knife",    "inv_slot1_highlight",     nullptr,            false },
         { eInventoryPistolList,    "dragdrop_pistol",          "progess_bar_weapon1",  "inv_slot2_highlight",     nullptr,            true },
         { eInventoryAutomaticList, "dragdrop_automatic",       "progess_bar_weapon2",  "inv_slot3_highlight",     nullptr,            true },
 
@@ -211,7 +211,7 @@ void CUIActorMenu::InitializeUniversal(CUIXml& uiXml)
 
         { eTrashList,              "dragdrop_trash",           nullptr,                nullptr,                   nullptr,            false },
 
-        { eInventorybackpackList,  "dragdrop_backpack",        nullptr,                "backpack_slot_highlight", nullptr,            true },
+        { eInventorybackpackList,  "dragdrop_backpack",        nullptr,                "backpack_slot_highlight", nullptr,            false },
     };
     static_assert(std::size(inventory_lists) == eListCount,
         "All lists should be listed in the tuple above.");

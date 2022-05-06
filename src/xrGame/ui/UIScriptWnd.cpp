@@ -44,7 +44,6 @@ void CUIDialogWndEx::AddCallback(
 
 bool CUIDialogWndEx::OnKeyboardAction(int dik, EUIMessages keyboard_action)
 {
-    Msg("CUIDialogWndEx::OnKeyboardAction(%d, %d)", dik, keyboard_action);
     return inherited::OnKeyboardAction(dik, keyboard_action);
 }
 void CUIDialogWndEx::Update() { inherited::Update(); }

@@ -912,19 +912,16 @@ void CUIActorMenu::TryHidePropertiesBox()
 void CUIActorMenu::ActivatePropertiesBox()
 {
     TryHidePropertiesBox();
-    Msg("CUIActorMenu::ActivatePropertiesBox 1");
     if (!(m_currMenuMode == mmInventory || m_currMenuMode == mmDeadBodySearch || m_currMenuMode == mmUpgrade || m_currMenuMode == mmTrade))
     {
         return;
     }
-    Msg("CUIActorMenu::ActivatePropertiesBox 2");
 
     PIItem item = CurrentIItem();
     if (!item)
     {
         return;
     }
-    Msg("CUIActorMenu::ActivatePropertiesBox 3, m_currMenuMode: %d", m_currMenuMode);
 
     CUICellItem* cell_item = CurrentItem();
     m_UIPropertiesBox->RemoveAll();
@@ -932,7 +929,6 @@ void CUIActorMenu::ActivatePropertiesBox()
 
     if (m_currMenuMode == mmInventory || m_currMenuMode == mmDeadBodySearch)
     {
-        Msg("CUIActorMenu::ActivatePropertiesBox 4");
         PropertiesBoxForSlots(item, b_show);
         PropertiesBoxForWeapon(cell_item, item, b_show);
         PropertiesBoxForAddon(item, b_show);
@@ -956,7 +952,6 @@ void CUIActorMenu::ActivatePropertiesBox()
         if (invlist->IsOwner(cell_item))
             PropertiesBoxForDonate(item, b_show);
     }
-    Msg("CUIActorMenu::ActivatePropertiesBox 5, b_show: %d", b_show);
     //-Alundaio
     if (b_show)
     {
