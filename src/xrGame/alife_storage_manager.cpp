@@ -57,6 +57,11 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
         }
     }
 
+    // To get the savegame fname to make our own custom save state
+    luabind::functor<void> functor;
+    if (GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_before_save", functor))
+        functor((LPCSTR)m_save_name);
+
     u32 source_count;
     u32 dest_count;
     void* dest_data;
@@ -92,12 +97,22 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
     Msg("* Game %s is successfully saved to file '%s'", m_save_name, temp);
 #endif // DEBUG
 
+    // To get the savegame fname to make our own custom save states
+    if (GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_save", functor))
+        functor(static_cast<pcstr>(m_save_name));
+
     if (!update_name)
         xr_strcpy(m_save_name, saveBackup);
 }
 
 void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR file_name)
 {
+    // So we can get the fname to make our own custom save states
+    luabind::functor<void> funct;
+    GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_load", funct);
+    if (funct)
+        funct(file_name);
+
     IReader source(buffer, buffer_size);
     header().load(source);
     time_manager().load(source);
