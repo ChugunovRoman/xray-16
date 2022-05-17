@@ -111,7 +111,11 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
     luabind::functor<void> funct;
     GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_load", funct);
     if (funct)
+    {
+        convert_path_separators((char*)file_name);
         funct(file_name);
+        restore_path_separators((char*)file_name);
+    }
 
     IReader source(buffer, buffer_size);
     header().load(source);
