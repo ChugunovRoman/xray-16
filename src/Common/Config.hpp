@@ -6,7 +6,7 @@
 // CONFIG_SCRIPT_ENGINE_LOG_SKIPPED_EXPORTS
 
 /* Callbacks */
-//#define ACTOR_BEFORE_DEATH_CALLBACK // For extending the life of the actor to fake death or do other tasks that need to happen before actor is dead
+#define ACTOR_BEFORE_DEATH_CALLBACK // For extending the life of the actor to fake death or do other tasks that need to happen before actor is dead
 
 /* Scripts */
 #define MORE_INVENTORY_SLOTS // Adds 5 more slots CUSTOM_SLOT_1..5
