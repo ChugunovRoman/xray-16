@@ -109,7 +109,7 @@ protected:
 
         eTrashList,
 
-        eInventorybackpackList,
+        eInventoryBackpackList,
 
         eListCount
     };

@@ -219,7 +219,7 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
 
         if (CanJump() && (mstate_wf & mcJump))
         {
-            CBackpack* backpack = smart_cast<CBackpack*>(inventory().ItemFromSlot(BACKPACK_SLOT));
+            CBackpack* backpack = GetBackpack();
             if (backpack)
                 m_fJumpSpeed *= backpack->m_fJumpSpeed;
 
@@ -311,7 +311,7 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
                         scale *= m_fWalk_StrafeFactor;
                 }
 
-                CBackpack* backpack = smart_cast<CBackpack*>(inventory().ItemFromSlot(BACKPACK_SLOT));
+                CBackpack* backpack = GetBackpack();
                 if (backpack)
                 {
                     scale *= backpack->m_fWalkAccel;
@@ -671,7 +671,7 @@ float CActor::get_additional_weight() const
         res += outfit->m_additional_weight;
     }
 
-    CBackpack* pBackpack = smart_cast<CBackpack*>(inventory().ItemFromSlot(BACKPACK_SLOT));
+    CBackpack* pBackpack = GetBackpack();
     if (pBackpack)
         res += pBackpack->m_additional_weight;
 
