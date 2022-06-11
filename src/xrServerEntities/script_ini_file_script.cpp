@@ -147,6 +147,26 @@ static void CScriptIniFile_Export(lua_State* luaState)
 #endif
             //Alundaio: extend
             def("reload_system_ini", &reload_system_ini),
+            def("get_platform", +[]()
+            {
+#if defined(XR_PLATFORM_WINDOWS)
+                return "windows";
+#elif defined(XR_PLATFORM_LINUX)
+                return "linux";
+#elif defined(XR_PLATFORM_FREEBSD)
+                return "freebsd";
+#endif
+            }),
+            def("get_path_separator", +[]()
+            {
+#if defined(XR_PLATFORM_WINDOWS)
+                return "\\";
+#elif defined(XR_PLATFORM_LINUX)
+                return "/";
+#elif defined(XR_PLATFORM_FREEBSD)
+                return "/";
+#endif
+            }),
             //Alundaio:: END
             def("system_ini", &get_system_ini), def("create_ini_file", &create_ini_file, adopt<0>())
     ];
