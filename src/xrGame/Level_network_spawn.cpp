@@ -192,7 +192,7 @@ CSE_Abstract* CLevel::spawn_item(
     //оружие спавним с полным магазинои
     CSE_ALifeItemWeapon* weapon = smart_cast<CSE_ALifeItemWeapon*>(abstract);
     if (weapon)
-        weapon->a_elapsed.data = weapon->get_ammo_magsize();
+        weapon->a_elapsed = weapon->get_ammo_magsize();
 
     // Fill
     abstract->s_name = section;

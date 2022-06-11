@@ -183,48 +183,9 @@ public:
     u32 timestamp;
     u8 wpn_flags;
     u8 wpn_state;
-    struct ammo_type_t
-    {
-        union
-        {
-            u8 data;
-            struct
-            {
-                u8 type1 : 4; // Type1 is normal ammo unless in grenade mode it's swapped 2^4 = 16
-                u8 type2 : 4; // Type2 is grenade ammo unless in grenade mode it's swapped
-            };
-        };
-    };
-    ammo_type_t ammo_type;
+    u8 ammo_type;
     u16 a_current;
-    struct ammo_elapsed_t
-    {
-        union
-        {
-            u16 data;
-            struct
-            {
-                u16 type1 : 8; // Type1 is normal ammo unless in grenade mode it's swapped  2^8 = 256 max ammo
-                u16 type2 : 8; // Type2 is grenade ammo unless in grenade mode it's swapped
-            };
-        };
-    };
-    ammo_elapsed_t a_elapsed;
-    struct current_addon_t
-    {
-        union
-        {
-            u16 data;
-            struct
-            {
-                u16 scope : 6; // 2^6 possible scope sections
-                u16 silencer : 5; // 2^5 possible silencer/launcher sections
-                u16 launcher : 5;
-            };
-        };
-    };
-    current_addon_t a_current_addon;
-
+    u16 a_elapsed;
     // count of grenades to spawn in grenade launcher [ttcccccc]
     // WARNING! hight 2 bits (tt bits) indicate type of grenade, so maximum grenade count is 2^6 = 64
     struct grenade_count_t
@@ -259,13 +220,13 @@ public:
     u16 get_ammo_total();
     u16 get_ammo_elapsed();
     u16 get_ammo_magsize();
-    void set_ammo_elapsed(u16 count) { a_elapsed.type1 = count; };
-    u16 get_ammo_elapsed2() { return a_elapsed.type2; };
-	void set_ammo_elapsed2(u16 count) {a_elapsed.type2 = count; };
-    u8 get_ammo_type() { return ammo_type.type1; };
-    u8 get_ammo_type2() { return ammo_type.type2; };
-    void set_ammo_type(u8 count) { ammo_type.type1 = count; };
-    void set_ammo_type2(u8 count) { ammo_type.type2 = count; };
+    void set_ammo_elapsed(u16 count) { a_elapsed = count; };
+    u16 get_ammo_elapsed2() { return a_elapsed; };
+	void set_ammo_elapsed2(u16 count) {a_elapsed = count; };
+    u8 get_ammo_type() { return ammo_type; };
+    u8 get_ammo_type2() { return ammo_type; };
+    void set_ammo_type(u8 count) { ammo_type = count; };
+    void set_ammo_type2(u8 count) { ammo_type = count; };
     Flags8& get_addon_flags() { return m_addon_flags; }
     void clone_addons(CSE_ALifeItemWeapon* parent);
 
