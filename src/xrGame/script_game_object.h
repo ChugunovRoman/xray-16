@@ -818,6 +818,7 @@ public:
     LPCSTR Weapon_GetAmmoSection(u8 ammo_type);
     void Weapon_SetCurrentScope(u8 type);
     u8 Weapon_GetCurrentScope();
+    bool WeaponInGrenadeMode();
     void Weapon_AddonAttach(CScriptGameObject* item);
     void Weapon_AddonDetach(pcstr item_section);
     bool HasAmmoType(u8 type);
@@ -834,7 +835,6 @@ public:
     bool InstallUpgrade(pcstr upgrade);
     bool HasUpgrade(pcstr upgrade) const;
     void IterateInstalledUpgrades(luabind::functor<void> functor);
-    bool WeaponInGrenadeMode();
 
     //Car
     CScriptGameObject* GetAttachedVehicle();

@@ -424,6 +424,11 @@ class_<CScriptGameObject>& script_register_game_object2(class_<CScriptGameObject
         .def("ammo_set_count", &CScriptGameObject::AmmoSetCount)
         .def("ammo_box_size", &CScriptGameObject::AmmoBoxSize)
 
+        //For Ammo
+        .def("ammo_get_count", &CScriptGameObject::AmmoGetCount)
+        .def("ammo_set_count", &CScriptGameObject::AmmoSetCount)
+        .def("ammo_box_size", &CScriptGameObject::AmmoBoxSize)
+
         //For Weapons
         .def("weapon_get_ammo_section", &CScriptGameObject::Weapon_GetAmmoSection)
         .def("weapon_addon_attach", &CScriptGameObject::Weapon_AddonAttach)

@@ -1830,7 +1830,7 @@ void CScriptGameObject::Weapon_SetCurrentScope(u8 type)
         return;
     }
 
-    weapon->m_cur_addon.scope = type;
+    weapon->m_cur_scope = type;
 }
 
 u8 CScriptGameObject::Weapon_GetCurrentScope()
@@ -1841,7 +1841,7 @@ u8 CScriptGameObject::Weapon_GetCurrentScope()
         GEnv.ScriptEngine->script_log(LuaMessageType::Error, "CWeaponMagazined : cannot access class member Weapon_GetCurrentScope!");
         return 255;
     }
-    return weapon->m_cur_addon.scope;
+    return weapon->m_cur_scope;
 }
 
 bool CScriptGameObject::InstallUpgrade(pcstr upgrade)
