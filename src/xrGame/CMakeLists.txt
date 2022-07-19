@@ -495,6 +495,7 @@ set(SRC_FILES
     "entity_alive.cpp"
     "entity_alive.h"
     "entity_alive_inline.h"
+    "EntityCondition_script.cpp"
     "EntityCondition.cpp"
     "EntityCondition.h"
     "Entity.cpp"
