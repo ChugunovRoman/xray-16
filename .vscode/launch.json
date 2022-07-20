@@ -91,7 +91,7 @@
       "preLaunchTask": "Compile",
       "externalConsole": false,
       "MIMode": "gdb"
-    }
+    },
     {
       "name": "(gdb) Debug GreatWar",
       "type": "cppdbg",
