@@ -8,11 +8,9 @@
 void CRenderTarget::DoAsyncScreenshot()
 {
     //	Igor: screenshot will not have postprocess applied.
-    //	TODO: fox that later
+    //	TODO: fix that later
     if (RImplementation.m_bMakeAsyncSS)
     {
-        HRESULT hr;
-
         //	HACK: unbind RT. CopyResourcess needs src and targetr to be unbound.
         //u_setrt				( Device.dwWidth,Device.dwHeight,get_base_rt(),nullptr,nullptr,get_base_zb());
 
@@ -78,8 +76,7 @@ void CRenderTarget::phase_combine()
     RCache.set_CullMode(CULL_NONE);
     RCache.set_Stencil(FALSE);
 
-    BOOL split_the_scene_to_minimize_wait = FALSE;
-    if (ps_r2_ls_flags.test(R2FLAG_EXP_SPLIT_SCENE)) split_the_scene_to_minimize_wait = TRUE;
+    //bool split_the_scene_to_minimize_wait = ps_r2_ls_flags.test(R2FLAG_EXP_SPLIT_SCENE);
 
     // draw skybox
     if (1)
@@ -217,13 +214,13 @@ void CRenderTarget::phase_combine()
 
         // Fill vertex buffer
         FVF::TL* pv = (FVF::TL*)RCache.Vertex.Lock(4, g_combine->vb_stride, Offset);
-        pv->set(-1, 1, 0, 0, 0, 0, scale_Y);
+        pv->set(-1, 1, 0, 1, 0, 0, scale_Y);
         pv++;
-        pv->set(-1, -1, 0, 1, 0, 0, 0);
+        pv->set(-1, -1, 0, 0, 0, 0, 0);
         pv++;
-        pv->set(1, 1, 1, 0, 0, scale_X, scale_Y);
+        pv->set(1, 1, 1, 1, 0, scale_X, scale_Y);
         pv++;
-        pv->set(1, -1, 1, 1, 0, scale_X, 0);
+        pv->set(1, -1, 1, 0, 0, scale_X, 0);
         pv++;
         RCache.Vertex.Unlock(4, g_combine->vb_stride);
 

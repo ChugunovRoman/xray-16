@@ -18,7 +18,6 @@
 
 #if defined(USE_DX11)
 #include "Layers/xrRenderDX10/3DFluid/dx103DFluidManager.h"
-#include "D3DX10Core.h"
 #endif
 
 CRender RImplementation;
@@ -202,7 +201,7 @@ static bool must_enable_old_cascades()
 }
 
 // Returns true if compute shaders for HDAO Ultra exist
-static bool ssao_hdao_cs_shaders_exist()
+[[maybe_unused]] static bool ssao_hdao_cs_shaders_exist()
 {
     IReader* hdao_cs      = open_shader("ssao_hdao.cs");
     IReader* hdao_cs_msaa = open_shader("ssao_hdao_msaa.cs");
@@ -602,6 +601,10 @@ void CRender::create()
     c_lmaterial = "L_material";
     c_sbase = "s_base";
     c_snoise = "s_noise";
+    c_ssky0 = "s_sky0";
+    c_ssky1 = "s_sky1";
+    c_sclouds0 = "s_clouds0";
+    c_sclouds1 = "s_clouds1";
 
     m_bMakeAsyncSS = false;
 
@@ -700,7 +703,7 @@ void CRender::reset_end()
     m_bFirstFrameAfterReset = true;
 }
 
-void CRender::BeforeFrame()
+void CRender::BeforeRender()
 {
     if (IGame_Persistent::MainMenuActiveOrLevelNotExist())
         return;
@@ -930,7 +933,7 @@ void CRender::rmNormal()
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
-CRender::CRender() : m_bFirstFrameAfterReset(false), Sectors_xrc("render")
+CRender::CRender() : Sectors_xrc("render")
 {
     init_cacades();
 }

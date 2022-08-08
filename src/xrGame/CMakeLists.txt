@@ -763,7 +763,6 @@ set(SRC_FILES
     "item_manager.cpp"
     "item_manager.h"
     "item_manager_inline.h"
-    "key_binding_registrator_script.cpp"
     "killer_victim_velocity_angle.cpp"
     "killer_victim_velocity_angle.h"
     "kills_store.cpp"
@@ -2630,7 +2629,7 @@ target_include_directories(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/xrServerEntities
-    ${CMAKE_SOURCE_DIR}/Externals/cximage
+    $<$<BOOL:${USE_CXIMAGE}>:${CMAKE_SOURCE_DIR}/Externals/cximage>
     ${CMAKE_SOURCE_DIR}/Externals/GameSpy/src
     ${CMAKE_SOURCE_DIR}/Externals/luabind
     ${CMAKE_SOURCE_DIR}/Externals/ode/include
@@ -2650,7 +2649,7 @@ target_link_libraries(${PROJECT_NAME}
     xrUICore
     xrSound
     xrScriptEngine
-    cximage
+    $<$<BOOL:${USE_CXIMAGE}>:cximage>
     xrGameSpy
     ${LUA_LIBRARIES}
     xrCDB

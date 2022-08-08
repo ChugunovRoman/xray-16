@@ -1,6 +1,5 @@
 #include "stdafx.h"
 #include "LightShadows.h"
-#include "FStaticRender_Types.h"
 #include "Layers/xrRender/LightTrack.h"
 #include "xrEngine/xr_object.h"
 #include "Layers/xrRender/FBasicVisual.h"
@@ -498,8 +497,7 @@ void CLightShadows::render()
             F.CreateFromMatrix(S.M, FRUSTUM_P_ALL);
 
             // Query
-            xrc.frustum_options(0);
-            xrc.frustum_query(DB, F);
+            xrc.frustum_query(0, DB, F);
             if (0 == xrc.r_count())
                 continue;
 
