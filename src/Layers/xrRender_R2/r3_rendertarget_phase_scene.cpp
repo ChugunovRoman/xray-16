@@ -5,24 +5,19 @@ void CRenderTarget::phase_scene_prepare()
 {
     PIX_EVENT(phase_scene_prepare);
     // Clear depth & stencil
-    //u_setrt	( Device.dwWidth,Device.dwHeight,get_base_rt(),NULL,NULL,get_base_zb() );
-    //CHK_DX	( HW.pDevice->Clear	( 0L, NULL, D3DCLEAR_ZBUFFER|D3DCLEAR_STENCIL, 0x0, 1.0f, 0L) );
+    // u_setrt	( Device.dwWidth,Device.dwHeight,get_base_rt(),NULL,NULL,get_base_zb() );
+    // CHK_DX	( HW.pDevice->Clear	( 0L, NULL, D3DCLEAR_ZBUFFER|D3DCLEAR_STENCIL, 0x0, 1.0f, 0L) );
     //	Igor: soft particles
 
     CEnvDescriptor& E = *g_pGamePersistent->Environment().CurrentEnv;
     float fValue = E.m_fSunShaftsIntensity;
     //	TODO: add multiplication by sun color here
-    //if (fValue<0.0001) FlagSunShafts = 0;
+    // if (fValue<0.0001) FlagSunShafts = 0;
 
     //	TODO: DX10: Check if complete clear of _ALL_ rendertargets will increase
     //	FPS. Make check for SLI configuration.
-    if (RImplementation.o.advancedpp &&
-        (
-            ps_r2_ls_flags.test(R2FLAG_SOFT_PARTICLES | R2FLAG_DOF) ||
-            ps_r_sun_shafts > 0 && fValue >= 0.0001 ||
-            ps_r_ssao > 0
-        )
-    )
+    if (RImplementation.o.advancedpp && (ps_r2_ls_flags.test(R2FLAG_SOFT_PARTICLES | R2FLAG_DOF) ||
+                                            ((ps_r_sun_shafts > 0) && (fValue >= 0.0001)) || (ps_r_ssao > 0)))
     {
         //	TODO: DX10: Check if we need to set RT here.
         u_setrt(Device.dwWidth, Device.dwHeight, rt_Position->pRT, 0, 0, rt_MSAADepth->pZRT);
@@ -59,23 +54,27 @@ void CRenderTarget::phase_scene_begin()
     // Targets, use accumulator for temporary storage
     if (!RImplementation.o.dx10_gbuffer_opt)
     {
-        if (RImplementation.o.albedo_wo) u_setrt(rt_Position, rt_Normal, rt_Accumulator, rt_MSAADepth->pZRT);
-        else u_setrt(rt_Position, rt_Normal, rt_Color, rt_MSAADepth->pZRT);
+        if (RImplementation.o.albedo_wo)
+            u_setrt(rt_Position, rt_Normal, rt_Accumulator, rt_MSAADepth->pZRT);
+        else
+            u_setrt(rt_Position, rt_Normal, rt_Color, rt_MSAADepth->pZRT);
     }
     else
     {
-        if (RImplementation.o.albedo_wo) u_setrt(rt_Position, rt_Accumulator, rt_MSAADepth->pZRT);
-        else u_setrt(rt_Position, rt_Color, rt_MSAADepth->pZRT);
-        //else								u_setrt		(rt_Position,	rt_Color, rt_Normal,		rt_MSAADepth->pZRT);
+        if (RImplementation.o.albedo_wo)
+            u_setrt(rt_Position, rt_Accumulator, rt_MSAADepth->pZRT);
+        else
+            u_setrt(rt_Position, rt_Color, rt_MSAADepth->pZRT);
+        // else								u_setrt		(rt_Position,	rt_Color, rt_Normal,		rt_MSAADepth->pZRT);
     }
 
     // Stencil - write 0x1 at pixel pos
-    RCache.set_Stencil(TRUE, D3DCMP_ALWAYS, 0x01, 0xff, 0x7f, D3DSTENCILOP_KEEP, D3DSTENCILOP_REPLACE,
-                       D3DSTENCILOP_KEEP);
+    RCache.set_Stencil(
+        TRUE, D3DCMP_ALWAYS, 0x01, 0xff, 0x7f, D3DSTENCILOP_KEEP, D3DSTENCILOP_REPLACE, D3DSTENCILOP_KEEP);
 
     // Misc		- draw only front-faces
     //	TODO: DX10: siable two-sided stencil here
-    //CHK_DX(HW.pDevice->SetRenderState	( D3DRS_TWOSIDEDSTENCILMODE,FALSE				));
+    // CHK_DX(HW.pDevice->SetRenderState	( D3DRS_TWOSIDEDSTENCILMODE,FALSE				));
     RCache.set_CullMode(CULL_CCW);
     RCache.set_ColorWriteEnable();
 }
@@ -84,7 +83,7 @@ void CRenderTarget::disable_aniso()
 {
     // Disable ANISO
     //	TODO: DX10: disable aniso here
-    //for (u32 i=0; i<HW.Caps.raster.dwStages; i++)
+    // for (u32 i=0; i<HW.Caps.raster.dwStages; i++)
     //	CHK_DX(HW.pDevice->SetSamplerState( i, D3DSAMP_MAXANISOTROPY, 1	));
 }
 
@@ -93,13 +92,15 @@ void CRenderTarget::phase_scene_end()
 {
     disable_aniso();
 
-    if (!RImplementation.o.albedo_wo) return;
+    if (!RImplementation.o.albedo_wo)
+        return;
 
     // transfer from "rt_Accumulator" into "rt_Color"
-    u_setrt(rt_Color, nullptr, nullptr, rt_MSAADepth->pZRT);
+    u_setrt(rt_Color, 0, 0, rt_MSAADepth->pZRT);
     RCache.set_CullMode(CULL_NONE);
     RCache.set_Stencil(TRUE, D3DCMP_LESSEQUAL, 0x01, 0xff, 0x00); // stencil should be >= 1
-    if (RImplementation.o.nvstencil) u_stencil_optimize(SO_Combine);
+    if (RImplementation.o.nvstencil)
+        u_stencil_optimize(CRenderTarget::SO_Combine);
     RCache.set_Stencil(TRUE, D3DCMP_LESSEQUAL, 0x01, 0xff, 0x00); // stencil should be >= 1
     RCache.set_ColorWriteEnable();
 

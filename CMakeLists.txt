@@ -208,6 +208,9 @@ if (NOT WIN32)
         find_package(Crypto++ REQUIRED)
     endif()
     find_package(JPEG)
+    if (JPEG_FOUND)
+        set(USE_CXIMAGE TRUE)
+    endif()
     find_package(Theora REQUIRED)
     find_package(Ogg REQUIRED)
     find_package(SDL REQUIRED)
@@ -246,6 +249,30 @@ include_directories(
 )
 
 add_subdirectory(Externals)
+
+set(CMAKE_CXX_FLAGS
+    "${CMAKE_CXX_FLAGS}"
+    "-Wall"
+    #"-Werror"
+    #"-Wextra"
+    #"-pedantic"
+    "-Wno-unknown-pragmas"
+    "-Wno-strict-aliasing"
+    "-Wno-class-memaccess"
+    "-Wno-parentheses"
+    "-Wno-unused-label"
+    "-Wno-switch"
+    #"-Wno-padded"
+    #"-Wno-c++98-compat"
+    #"-Wno-c++98-compat-pedantic"
+    #"-Wno-c++11-compat"
+    #"-Wno-c++11-compat-pedantic"
+    #"-Wno-c++14-compat"
+    #"-Wno-c++14-compat-pedantic"
+    #"-Wno-newline-eof"
+)
+string(REPLACE ";" " " CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+
 add_subdirectory(src)
 add_subdirectory(res)
 
