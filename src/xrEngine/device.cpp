@@ -113,6 +113,15 @@ void CRenderDevice::RenderEnd(void)
 
     GEnv.Render->End();
 
+    vCameraPositionSaved = vCameraPosition;
+    vCameraDirectionSaved = vCameraDirection;
+    vCameraTopSaved = vCameraTop;
+    vCameraRightSaved = vCameraRight;
+
+    mFullTransformSaved = mFullTransform;
+    mViewSaved = mView;
+    mProjectSaved = mProject;
+
     if (load_finished && m_editor)
         m_editor->on_load_finished();
 }
@@ -210,19 +219,11 @@ void CRenderDevice::BeforeRender()
     }
 
     // Matrices
+    mInvView.invert(mView);
     mFullTransform.mul(mProject, mView);
     mInvFullTransform.invert_44(mFullTransform);
     GEnv.Render->BeforeRender();
     GEnv.Render->SetCacheXform(mView, mProject);
-
-    vCameraPositionSaved = vCameraPosition;
-    vCameraDirectionSaved = vCameraDirection;
-    vCameraTopSaved = vCameraTop;
-    vCameraRightSaved = vCameraRight;
-
-    mFullTransformSaved = mFullTransform;
-    mViewSaved = mView;
-    mProjectSaved = mProject;
 }
 
 void CRenderDevice::DoRender()

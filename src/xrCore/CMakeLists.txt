@@ -178,6 +178,7 @@ set(MATH
     "_color.h"
     "_compressed_normal.cpp"
     "_compressed_normal.h"
+    "_cylinder.cpp"
     "_cylinder.h"
     "_fbox.h"
     "_fbox2.h"
@@ -201,16 +202,6 @@ set(MATH
     "dump_string.cpp"
     "dump_string.h"
     "math_constants.h"
-    "Math/MathUtil.cpp"
-    "Math/MathUtil.hpp"
-    "Math/PLC_CPP.cpp"
-    "Math/PLC_CPP.hpp"
-    "Math/PLC_SSE.cpp"
-    "Math/PLC_SSE.hpp"
-    "Math/SkinXW_CPP.cpp"
-    "Math/SkinXW_CPP.hpp"
-    "Math/SkinXW_SSE.cpp"
-    "Math/SkinXW_SSE.hpp"
     "vector.h"
     "xr_types.h"
 )
@@ -228,7 +219,6 @@ set(MATH_EXTENSIONS
     "xr_token.h"
     "xr_trims.cpp"
     "xr_trims.h"
-    "xr_vector_defs.h"
 )
 
 set(MATH_EXTENSIONS_BUFFER_VECTOR
@@ -417,7 +407,7 @@ add_library(${PROJECT_NAME} SHARED ${SRC_FILES})
 
 target_include_directories(${PROJECT_NAME}
     PUBLIC
-    ${SDL_INCLUDE_DIRS}
+    ${SDL2_INCLUDE_DIRS}
     PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
@@ -428,8 +418,7 @@ target_include_directories(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
     PUBLIC
     pthread
-    ${SDL_LIBRARIES}
-    $<$<BOOL:${USE_CRYPTOPP}>:${CRYPTO++_LIBRARIES}>
+    ${SDL2_LIBRARIES}
     PRIVATE
     xrMiscMath
     dl

@@ -303,7 +303,6 @@ set(SRC_FILES
     "BottleItem.h"
     "BreakableObject.cpp"
     "BreakableObject.h"
-    "CalculateTriangle.h"
     "CameraEffector.cpp"
     "CameraEffector.h"
     "CameraFirstEye.cpp"
@@ -498,6 +497,7 @@ set(SRC_FILES
     "EntityCondition_script.cpp"
     "EntityCondition.cpp"
     "EntityCondition.h"
+    "EntityCondition_script.cpp"
     "Entity.cpp"
     "Entity.h"
     "event_conditions_collection.cpp"
@@ -2548,9 +2548,7 @@ set(SRC_FILES
     "../xrServerEntities/object_item_single_inline.h"
     "../xrServerEntities/pch_script.cpp"
     "../xrServerEntities/pch_script.h"
-    "../xrServerEntities/PHNetState.cpp"
     "../xrServerEntities/PHNetState.h"
-    "../xrServerEntities/PHSynchronize.cpp"
     "../xrServerEntities/PHSynchronize.h"
     "../xrServerEntities/PropertiesListHelper.h"
     "../xrServerEntities/PropertiesListTypes.h"
@@ -2635,7 +2633,7 @@ target_include_directories(${PROJECT_NAME}
     ${CMAKE_SOURCE_DIR}/Externals/ode/include
     ${CMAKE_SOURCE_DIR}/Externals/OpenAutomate/inc
     ${CMAKE_SOURCE_DIR}/sdk/include
-    ${SDL_INCLUDE_DIRS}
+    ${SDL2_INCLUDE_DIRS}
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -2655,7 +2653,7 @@ target_link_libraries(${PROJECT_NAME}
     xrCDB
     xrPhysics
     xrNetServer
-    ${SDL_LIBRARIES}
+    ${SDL2_LIBRARIES}
 )
 
 target_compile_definitions(${PROJECT_NAME}
@@ -2678,11 +2676,13 @@ endif()
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
     PREFIX ""
+    UNITY_BUILD_BATCH_SIZE 50
 )
 
 target_precompile_headers(${PROJECT_NAME}
     PRIVATE
     "$<$<COMPILE_LANGUAGE:CXX>:StdAfx.h>"
+    "$<$<COMPILE_LANGUAGE:CXX>:pch_script.h>"
 )
 
 install(TARGETS ${PROJECT_NAME} LIBRARY

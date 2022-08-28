@@ -143,7 +143,7 @@ u32 CBlender_Compile::r_Sampler(
     if (u32(-1) != dwStage)
     {
 #if defined(USE_DX11)
-        r_dx10Texture(_name, texture, true);
+        r_dx11Texture(_name, texture, true);
 #elif defined(USE_DX9) || defined(USE_OGL)
         i_Texture(dwStage, texture);
 #else
@@ -170,6 +170,22 @@ u32 CBlender_Compile::r_Sampler(
             fmin = D3DTEXF_ANISOTROPIC;
             fmag = D3DTEXF_ANISOTROPIC;
         }
+
+#if defined(USE_OGL)
+        if (0 == xr_strcmp(_name, "s_position"))
+        {
+            address = D3DTADDRESS_CLAMP;
+            fmin = D3DTEXF_POINT;
+            fmip = D3DTEXF_NONE;
+            fmag = D3DTEXF_POINT;
+        }
+
+        if (0 == xr_strcmp(_name, "s_smap"))
+        {
+            address = D3DTADDRESS_CLAMP;
+            fmip = D3DTEXF_NONE;
+        }
+#endif
 
         // Sampler states
         i_Address(dwStage, address);

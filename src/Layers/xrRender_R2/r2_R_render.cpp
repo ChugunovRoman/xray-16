@@ -157,12 +157,12 @@ void CRender::render_menu()
 
     // Main Render
     {
-        Target->u_setrt(Target->rt_Generic_0, nullptr, nullptr, Target->get_base_zb()); // LDR RT
+        Target->u_setrt(Target->rt_Generic_0, nullptr, nullptr, Target->rt_Base_Depth); // LDR RT
         g_pGamePersistent->OnRenderPPUI_main(); // PP-UI
     }
     // Distort
     {
-        Target->u_setrt(Target->rt_Generic_1, nullptr, nullptr, Target->get_base_zb()); // Now RT is a distortion mask
+        Target->u_setrt(Target->rt_Generic_1, nullptr, nullptr, Target->rt_Base_Depth); // Now RT is a distortion mask
         RCache.ClearRT(Target->rt_Generic_1, color_rgba(127, 127, 0, 127));
         g_pGamePersistent->OnRenderPPUI_PP(); // PP-UI
     }
@@ -352,7 +352,7 @@ void CRender::Render()
     LP_normal.clear();
     LP_pending.clear();
 #if defined(USE_DX11) || defined(USE_OGL)
-    if (o.dx10_msaa)
+    if (o.msaa)
     {
         RCache.set_ZB(Target->rt_MSAADepth->pZRT);
     }
@@ -469,13 +469,13 @@ void CRender::Render()
 
 #if defined(USE_DX11) || defined(USE_OGL)
     // full screen pass to mark msaa-edge pixels in highest stencil bit
-    if (o.dx10_msaa)
+    if (o.msaa)
     {
         PIX_EVENT(MARK_MSAA_EDGES);
         Target->mark_msaa_edges();
     }
 
-    //	TODO: DX10: Implement DX10 rain.
+    //	TODO: DX11: Implement DX11 rain.
     if (ps_r2_ls_flags.test(R3FLAG_DYN_WET_SURF))
     {
         PIX_EVENT(DEFER_RAIN);
@@ -510,7 +510,7 @@ void CRender::Render()
         RCache.set_Stencil(TRUE, D3DCMP_ALWAYS, 0x01, 0xff, 0xff,
             D3DSTENCILOP_KEEP, D3DSTENCILOP_REPLACE, D3DSTENCILOP_KEEP);
 #elif defined(USE_DX11) || defined(USE_OGL)
-        if (!o.dx10_msaa)
+        if (!o.msaa)
         {
             RCache.set_Stencil(TRUE, D3DCMP_ALWAYS, 0x01, 0xff, 0xff,
                 D3DSTENCILOP_KEEP, D3DSTENCILOP_REPLACE, D3DSTENCILOP_KEEP);

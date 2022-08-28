@@ -64,6 +64,7 @@ public:
         u32 ssao_ultra : 1;
         u32 hbao_vectorized : 1;
 
+        u32 rain_smapsize : 16;
         u32 smapsize : 16;
         u32 depth16 : 1;
         u32 mrt : 1;
@@ -97,18 +98,18 @@ public:
         u32 advancedpp : 1; //	advanced post process (DOF, SSAO, volumetrics, etc.)
         u32 volumetricfog : 1;
 
-        u32 dx10_msaa : 1; // DX10.0 path
-        u32 dx10_msaa_hybrid : 1; // DX10.0 main path with DX10.1 A-test msaa allowed
-        u32 dx10_msaa_opt : 1; // DX10.1 path
-        u32 dx10_gbuffer_opt : 1;
-        u32 dx10_sm4_1 : 1; // DX10.1 path
-        u32 dx10_msaa_alphatest : 2; //	A-test mode
-        u32 dx10_msaa_samples : 4;
+        u32 msaa : 1; // DX10.0 path
+        u32 msaa_hybrid : 1; // DX10.0 main path with DX10.1 A-test msaa allowed
+        u32 msaa_opt : 1; // DX10.1 path
+        u32 gbuffer_opt : 1;
+        u32 dx11_sm4_1 : 1; // DX10.1 path
+        u32 msaa_alphatest : 2; //	A-test mode
+        u32 msaa_samples : 4;
 
-        u32 dx10_minmax_sm : 2;
-        u32 dx10_minmax_sm_screenarea_threshold;
+        u32 minmax_sm : 2;
+        u32 minmax_sm_screenarea_threshold;
 
-        u32 dx11_enable_tessellation : 1;
+        u32 tessellation : 1;
 
         u32 forcegloss : 1;
         u32 forceskinw : 1;
@@ -148,7 +149,6 @@ public:
     RenderR2Statistics Stats;
     // Sector detection and visibility
     CSector* pLastSector;
-    Fvector vLastCameraPos;
     u32 uLastLTRACK;
     xr_vector<IRender_Portal*> Portals;
     xr_vector<IRender_Sector*> Sectors;
@@ -180,6 +180,7 @@ public:
     SMAP_Allocator LP_smap_pool;
     light_Package LP_normal;
     light_Package LP_pending;
+    light RainLight;
 
     xr_vector<Fbox3> main_coarse_structure;
 
@@ -247,15 +248,7 @@ public:
     // HW-occlusion culling
     u32 occq_begin(u32& ID) { return HWOCC.occq_begin(ID); }
     void occq_end(u32& ID) { HWOCC.occq_end(ID); }
-#if defined(USE_DX9)
-    u32 occq_get(u32& ID) { return HWOCC.occq_get(ID); }
-#elif defined(USE_DX11)
-    R_occlusion::occq_result occq_get(u32& ID) { return HWOCC.occq_get(ID); }
-#elif defined(USE_OGL)
-    R_occlusion::occq_result occq_get(u32& ID) { return HWOCC.occq_get(ID); }
-#else
-#   error No graphics API selected or enabled!
-#endif
+    auto occq_get(u32& ID) { return HWOCC.occq_get(ID); }
 
     ICF void apply_object(IRenderable* O)
     {
@@ -280,7 +273,7 @@ public:
 #if defined(USE_DX9)
         VERIFY(RC_sampler == C->type);
 #elif defined(USE_DX11)
-        VERIFY(RC_dx10texture == C->type);
+        VERIFY(RC_dx11texture == C->type);
 #elif defined(USE_OGL)
         VERIFY(RC_sampler == C->type);
 #else
@@ -333,10 +326,8 @@ public:
     void level_Load(IReader*) override;
     void level_Unload() override;
 
-#if defined(USE_DX9)
+#if defined(USE_DX9) || defined(USE_DX11)
     ID3DBaseTexture* texture_load(pcstr fname, u32& msize);
-#elif defined(USE_DX11)
-    ID3DBaseTexture* texture_load(pcstr fname, u32& msize, bool bStaging = false);
 #elif defined(USE_OGL)
     GLuint           texture_load(pcstr fname, u32& msize, GLenum& ret_desc);
 #else
@@ -454,6 +445,7 @@ protected:
 
 private:
     FS_FileSet m_file_set;
+    CSector* m_largest_sector{};
 };
 
 extern CRender RImplementation;

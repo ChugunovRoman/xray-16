@@ -14,11 +14,12 @@
 #include "holder_custom.h"
 #include "script_game_object.h"
 
-using namespace luabind;
-
 IC static void CActor_Export(lua_State* luaState)
 {
-    module(luaState) [
+    using namespace luabind;
+
+    module(luaState)
+    [
         class_<CActor, CGameObject>("CActor")
             .def(constructor<>())
             .def("conditions", &CActor::conditions)

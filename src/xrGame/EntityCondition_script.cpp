@@ -1,12 +1,12 @@
-#include "StdAfx.h"
 #include "pch_script.h"
 #include "ActorCondition.h"
 #include "Wound.h"
 #include "xrScriptEngine/ScriptExporter.hpp"
 
-using namespace luabind;
+SCRIPT_EXPORT(CEntityCondition, (),
+{
+    using namespace luabind;
 
-SCRIPT_EXPORT(CEntityCondition, (), {
     module(luaState)
     [
         class_<CEntityCondition>("CEntityCondition")
@@ -55,14 +55,17 @@ SCRIPT_EXPORT(CEntityCondition, (), {
     ];
 });
 
-SCRIPT_EXPORT(CActorCondition, (CEntityCondition), {
+SCRIPT_EXPORT(CActorCondition, (CEntityCondition),
+{
+    using namespace luabind;
+
     module(luaState)
     [
-		class_<SBooster>("SBooster")
-			.def(constructor<>())
-			.def_readwrite("fBoostTime", &SBooster::fBoostTime)
-			.def_readwrite("fBoostValue", &SBooster::fBoostValue)
-			.def_readwrite("m_type", &SBooster::m_type),
+        class_<SBooster>("SBooster")
+            .def(constructor<>())
+            .def_readwrite("fBoostTime", &SBooster::fBoostTime)
+            .def_readwrite("fBoostValue", &SBooster::fBoostValue)
+            .def_readwrite("m_type", &SBooster::m_type),
         class_<CWound>("CWound")
             .def("TypeSize", &CWound::TypeSize)
             .def("BloodSize", &CWound::BloodSize)
@@ -77,10 +80,10 @@ SCRIPT_EXPORT(CActorCondition, (CEntityCondition), {
             .def("GetDestroy", &CWound::GetDestroy),
         class_<CActorCondition, CEntityCondition>("CActorCondition")
             .def("ClearAllBoosters", &CActorCondition::ClearAllBoosters)
-			.def("ApplyBooster", &CActorCondition::ApplyBooster_script)
+            .def("ApplyBooster", &CActorCondition::ApplyBooster_script)
             .def("BoosterForEach", &CActorCondition::BoosterForEach)
             .def("WoundForEach", &CActorCondition::WoundForEach)
-			.def("GetSatiety", &CActorCondition::GetSatiety)
+            .def("GetSatiety", &CActorCondition::GetSatiety)
             .def("BoostMaxWeight", &CActorCondition::BoostMaxWeight)
             .def("BoostHpRestore", &CActorCondition::BoostHpRestore)
             .def("BoostPowerRestore", &CActorCondition::BoostPowerRestore)

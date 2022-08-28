@@ -360,12 +360,12 @@ target_include_directories(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/Externals/ode/include
-    ${SDL_INCLUDE_DIRS}
+    ${SDL2_INCLUDE_DIRS}
 )
 
 target_link_libraries(${PROJECT_NAME}
     PUBLIC
-    ODE
+    xrODE
     PRIVATE
     xrCore
     xrEngine
@@ -391,7 +391,9 @@ target_precompile_headers(${PROJECT_NAME}
     "StdAfx.h"
 )
 
-install(TARGETS ${PROJECT_NAME} LIBRARY
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
-)
+if (NOT STATIC_BUILD)
+    install(TARGETS ${PROJECT_NAME} LIBRARY
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+    )
+endif()

@@ -8,14 +8,7 @@ void CRenderTarget::phase_ssao()
     RCache.ClearRT(rt_ssao_temp, {});
 
     // low/hi RTs
-    if (!RImplementation.o.dx10_msaa)
-    {
-        u_setrt(rt_ssao_temp, 0, 0, 0 /*get_base_zb()*/);
-    }
-    else
-    {
-        u_setrt(rt_ssao_temp, 0, 0, 0 /*RImplementation.Target->rt_MSAADepth->pZRT*/);
-    }
+    u_setrt(rt_ssao_temp, nullptr, nullptr, nullptr /*rt_MSAADepth*/);
 
     RCache.set_Stencil(FALSE);
 
@@ -26,9 +19,6 @@ void CRenderTarget::phase_ssao()
     }*/
 
     // Compute params
-    Fmatrix m_v2w;
-    m_v2w.invert(Device.mView);
-
     float fSSAONoise = 2.0f;
     fSSAONoise *= tan(deg2rad(67.5f));
     fSSAONoise /= tan(deg2rad(Device.fFOV));
@@ -62,19 +52,19 @@ void CRenderTarget::phase_ssao()
     RCache.set_Element(s_ssao->E[0]);
     RCache.set_Geometry(g_combine);
 
-    RCache.set_c("m_v2w", m_v2w);
+    RCache.set_c("m_v2w", Device.mInvView);
     RCache.set_c("ssao_noise_tile_factor", fSSAONoise);
     RCache.set_c("ssao_kernel_size", fSSAOKernelSize);
     RCache.set_c("resolution", _w, _h, 1.0f / _w, 1.0f / _h);
 
-    if (!RImplementation.o.dx10_msaa)
+    if (!RImplementation.o.msaa)
         RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
     else
     {
         RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
         /*RCache.set_Stencil( TRUE, D3DCMP_EQUAL, 0x01, 0x81, 0 );
         RCache.Render		( D3DPT_TRIANGLELIST,Offset,0,4,0,2);
-        if( RImplementation.o.dx10_msaa_opt )
+        if( RImplementation.o.msaa_opt )
         {
             RCache.set_Element( s_ssao_msaa[0]->E[0]	);
             RCache.set_Stencil( TRUE, D3DCMP_EQUAL, 0x81, 0x81, 0 );
@@ -82,7 +72,7 @@ void CRenderTarget::phase_ssao()
         }
         else
         {
-            for( u32 i = 0; i < RImplementation.o.dx10_msaa_samples; ++i )
+            for( u32 i = 0; i < RImplementation.o.msaa_samples; ++i )
             {
                 RCache.set_Element			( s_ssao_msaa[i]->E[0]	);
                 StateManager.SetSampleMask	( u32(1) << i  );
@@ -110,7 +100,7 @@ void CRenderTarget::phase_downsamp()
     // Fvector2	p0,p1;
     u32 Offset = 0;
 
-    u_setrt(rt_half_depth, 0, 0, 0 /*get_base_zb()*/);
+    u_setrt(rt_half_depth, nullptr, nullptr, nullptr /*rt_MSAADepth*/);
     RCache.ClearRT(rt_half_depth, {}); // black
     u32 w = Device.dwWidth;
     u32 h = Device.dwHeight;
@@ -125,9 +115,6 @@ void CRenderTarget::phase_downsamp()
     RCache.set_Stencil(FALSE);
 
     {
-        Fmatrix m_v2w;
-        m_v2w.invert(Device.mView);
-
         // Fill VB
         float scale_X = float(w) / float(TEX_jitter);
         float scale_Y = float(h) / float(TEX_jitter);
@@ -147,7 +134,7 @@ void CRenderTarget::phase_downsamp()
         // Draw
         RCache.set_Element(s_ssao->E[1]);
         RCache.set_Geometry(g_combine);
-        RCache.set_c("m_v2w", m_v2w);
+        RCache.set_c("m_v2w", Device.mInvView);
 
         RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
     }

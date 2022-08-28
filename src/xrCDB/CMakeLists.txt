@@ -43,14 +43,14 @@ add_library(${PROJECT_NAME} SHARED ${SRC_FILES})
 target_include_directories(${PROJECT_NAME}
     PRIVATE
     ${CMAKE_SOURCE_DIR}/src
-    ${SDL_INCLUDE_DIRS}
+    ${SDL2_INCLUDE_DIRS}
 )
 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
     xrCore
     xrMiscMath
-    OPCODE
+    xrOPCODE
     xrAPI
 )
 
