@@ -115,14 +115,14 @@
       "MIMode": "gdb"
     },
     {
-      "name": "(gdb) Debug GreatWar",
+      "name": "(gdb) Debug GlobalWar",
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/bin/x64/Debug/xr_3da",
       "args": [
         "-nointro",
         "-fsltx",
-        "${GREATWAR_LTX_FILE_PATH}",
+        "${GLOBALWAR_LTX_FILE_PATH}",
       ],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}/bin",
@@ -137,14 +137,14 @@
       "MIMode": "gdb"
     },
     {
-      "name": "(gdb) Mixed GreatWar",
+      "name": "(gdb) Mixed GlobalWar",
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/bin/x64/Mixed/xr_3da",
       "args": [
         "-nointro",
         "-fsltx",
-        "${GREATWAR_LTX_FILE_PATH}",
+        "${GLOBALWAR_LTX_FILE_PATH}",
       ],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}/bin",
@@ -159,14 +159,14 @@
       "MIMode": "gdb"
     },
     {
-      "name": "(gdb) Release GreatWar",
+      "name": "(gdb) Release GlobalWar",
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/bin/x64/Release/xr_3da",
       "args": [
         "-nointro",
         "-fsltx",
-        "${GREATWAR_LTX_FILE_PATH}",
+        "${GLOBALWAR_LTX_FILE_PATH}",
       ],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}/bin",
