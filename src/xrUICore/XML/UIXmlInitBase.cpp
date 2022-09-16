@@ -811,7 +811,7 @@ bool CUIXmlInitBase::InitFrameLine(CUIXml& xml_doc, LPCSTR path, int index, CUIF
     pWnd->SetTextureColor(color);
 
     InitWindow(xml_doc, path, index, pWnd);
-    
+
     return pWnd->InitFrameLineWnd(*base_name, pos, size, !vertical, fatal);
 }
 
@@ -1259,7 +1259,7 @@ bool CUIXmlInitBase::InitTrackBar(CUIXml& xml_doc, LPCSTR path, int index, CUITr
     {
         float fmin = xml_doc.ReadAttribFlt(path, index, "min", 0.0f);
         float fmax = xml_doc.ReadAttribFlt(path, index, "max", 0.0f);
-        
+
         if (fmin != fmax)
         {
             pWnd->SetOptFBounds(fmin, fmax);

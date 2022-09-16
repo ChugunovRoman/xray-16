@@ -11,6 +11,8 @@
 #include "ActorCondition.h"
 #include "level_changer.h"
 #include "xrScriptEngine/ScriptExporter.hpp"
+#include "holder_custom.h"
+#include "script_game_object.h"
 
 IC static void CActor_Export(lua_State* luaState)
 {

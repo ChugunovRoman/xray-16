@@ -18,6 +18,7 @@
 #include "GrenadeLauncher.h"
 #include "trade_parameters.h"
 #include "ActorHelmet.h"
+#include "ActorBackpack.h"
 #include "CustomOutfit.h"
 #include "CustomDetector.h"
 #include "eatable_item.h"
@@ -255,7 +256,7 @@ void CUIActorMenu::Update()
     case mmDeadBodySearch:
     {
         // Alundaio: remove distance check when opening inventory boxes
-        //CheckDistance(); 
+        //CheckDistance();
         break;
     }
     default: R_ASSERT(0); break;
@@ -317,7 +318,11 @@ EDDListType CUIActorMenu::GetListType(CUIDragDropListEx* l)
 
     if (l == m_pLists[eInventoryAutomaticList])
         return iActorSlot;
+    if (l == m_pLists[eInventoryKnifeList])
+        return iActorSlot;
     if (l == m_pLists[eInventoryPistolList])
+        return iActorSlot;
+    if (l == m_pLists[eInventoryBackpackList])
         return iActorSlot;
     if (l == m_pLists[eInventoryOutfitList])
         return iActorSlot;
@@ -525,10 +530,12 @@ void CUIActorMenu::UpdateItemsPlace()
 
 void CUIActorMenu::clear_highlight_lists()
 {
+    m_pLists[eInventoryKnifeList]->Highlight(false);
     m_pLists[eInventoryPistolList]->Highlight(false);
     m_pLists[eInventoryAutomaticList]->Highlight(false);
     if (m_pLists[eInventoryHelmetList])
         m_pLists[eInventoryHelmetList]->Highlight(false);
+    m_pLists[eInventoryBackpackList]->Highlight(false);
     m_pLists[eInventoryOutfitList]->Highlight(false);
     if (m_pLists[eInventoryDetectorList])
         m_pLists[eInventoryDetectorList]->Highlight(false);
@@ -566,12 +573,18 @@ void CUIActorMenu::highlight_item_slot(CUICellItem* cell_item)
 
     CWeapon* weapon = smart_cast<CWeapon*>(item);
     CHelmet* helmet = smart_cast<CHelmet*>(item);
+    CBackpack* backpack = smart_cast<CBackpack*>(item);
     CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(item);
     CCustomDetector* detector = smart_cast<CCustomDetector*>(item);
     CEatableItem* eatable = smart_cast<CEatableItem*>(item);
     CArtefact* artefact = smart_cast<CArtefact*>(item);
 
     u16 slot_id = item->BaseSlot();
+    if (weapon && slot_id == KNIFE_SLOT)
+    {
+        m_pLists[eInventoryKnifeList]->Highlight(true);
+        return;
+    }
     if (weapon && (slot_id == INV_SLOT_2 || slot_id == INV_SLOT_3))
     {
         m_pLists[eInventoryPistolList]->Highlight(true);
@@ -582,6 +595,11 @@ void CUIActorMenu::highlight_item_slot(CUICellItem* cell_item)
     {
         if (m_pLists[eInventoryHelmetList])
             m_pLists[eInventoryHelmetList]->Highlight(true);
+        return;
+    }
+    if (backpack && slot_id == BACKPACK_SLOT)
+    {
+        m_pLists[eInventoryBackpackList]->Highlight(true);
         return;
     }
     if (outfit && slot_id == OUTFIT_SLOT)
@@ -857,11 +875,13 @@ void CUIActorMenu::ClearAllLists()
     m_pLists[eInventoryBagList]->ClearAll(true);
 
     m_pLists[eInventoryBeltList]->ClearAll(true);
+    m_pLists[eInventoryBackpackList]->ClearAll(true);
     m_pLists[eInventoryOutfitList]->ClearAll(true);
     if (m_pLists[eInventoryHelmetList])
         m_pLists[eInventoryHelmetList]->ClearAll(true);
     if (m_pLists[eInventoryDetectorList])
         m_pLists[eInventoryDetectorList]->ClearAll(true);
+    m_pLists[eInventoryKnifeList]->ClearAll(true);
     m_pLists[eInventoryPistolList]->ClearAll(true);
     m_pLists[eInventoryAutomaticList]->ClearAll(true);
     if (m_pQuickSlot)
@@ -954,4 +974,40 @@ bool CUIActorMenu::CanSetItemToList(PIItem item, CUIDragDropListEx* l, u16& ret_
     }
 
     return false;
+}
+
+CScriptGameObject* CUIActorMenu::GetCurrentItemAsGameObject()
+{
+    CGameObject* GO = smart_cast<CGameObject*>(CurrentIItem());
+    if (GO)
+        return GO->lua_game_object();
+
+    return nullptr;
+}
+
+void CUIActorMenu::UpdateConditionProgressBars()
+{
+    for (u8 i = 1; i <= m_slot_count; ++i)
+    {
+        PIItem itm = m_pActorInvOwner->inventory().ItemFromSlot(i);
+        if (m_pInvSlotProgress[i])
+            m_pInvSlotProgress[i]->SetProgressPos(itm ? iCeil(itm->GetCondition()*10.f) / 10.f : 0);
+    }
+
+    //Highlight 'equipped' items in actor bag
+    CUIDragDropListEx* slot_list = m_pInventoryBagList;
+    u32 const cnt = slot_list->ItemsCount();
+    for (u32 i = 0; i < cnt; ++i)
+    {
+        CUICellItem* ci = slot_list->GetItemIdx(i);
+        PIItem item = (PIItem)ci->m_pData;
+        if (!item)
+            continue;
+
+        if (item->m_highlight_equipped && item->m_pInventory &&
+            item->m_pInventory->ItemFromSlot(item->BaseSlot()) == item)
+            ci->m_select_equipped = true;
+        else
+            ci->m_select_equipped = false;
+    }
 }

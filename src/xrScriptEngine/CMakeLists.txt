@@ -102,6 +102,9 @@ target_include_directories(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/Externals/luabind
+    ${CMAKE_SOURCE_DIR}/Externals/lua-marshal
+    ${CMAKE_SOURCE_DIR}/Externals/xrLuaFS
+    ${CMAKE_SOURCE_DIR}/Externals/lua_extensions
     ${SDL2_INCLUDE_DIRS}
 )
 
@@ -110,15 +113,19 @@ target_link_libraries(${PROJECT_NAME}
     xrAPI
     xrCore
     xrLuabind
+    xrMarshal
+    xrLuaFS
+    lua_extensions
     ${LUA_LIBRARIES}
 )
 
 target_compile_definitions(${PROJECT_NAME}
     PRIVATE
     -DXRSCRIPTENGINE_EXPORTS
+
     # Uncomment next string for debug script engine
-    #-DCONFIG_SCRIPT_ENGINE_LOG_EXPORTS
-    #-DCONFIG_SCRIPT_ENGINE_LOG_SKIPPED_EXPORTS
+    # -DCONFIG_SCRIPT_ENGINE_LOG_EXPORTS
+    # -DCONFIG_SCRIPT_ENGINE_LOG_SKIPPED_EXPORTS
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
@@ -131,6 +138,6 @@ target_precompile_headers(${PROJECT_NAME}
 )
 
 install(TARGETS ${PROJECT_NAME} LIBRARY
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
 )

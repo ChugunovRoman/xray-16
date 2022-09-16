@@ -913,7 +913,25 @@ void CGamePersistent::LoadTitle(bool change_tip, shared_str map_name)
                 noTips = true;
         }
         if (noTips)
+        {
+            // CoC Tips
+            LPCSTR tip_header;
+            LPCSTR tip_title;
+            LPCSTR tip_text;
+
+            luabind::functor<LPCSTR> m_functor;
+
+            if (GEnv.ScriptEngine->functor("loadscreen.get_tip_header", m_functor))
+                tip_header = m_functor(map_name.c_str());
+            if (GEnv.ScriptEngine->functor("loadscreen.get_tip_title", m_functor))
+                tip_title = m_functor(map_name.c_str());
+            if (GEnv.ScriptEngine->functor("loadscreen.get_tip_text", m_functor))
+                tip_text = m_functor(map_name.c_str());
+
+            pApp->LoadTitleInt(tip_header, tip_title, tip_text);
+
             return;
+        }
 
         xr_sprintf(buff, "%s%d:", StringTable().translate("ls_tip_number").c_str(), tip_num);
         shared_str tmp = buff;

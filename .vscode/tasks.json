@@ -116,12 +116,48 @@
       ]
     },
     {
-      "label": "Run Release",
+      "label": "Run GlobalWar Release",
       "type": "shell",
       "options": {
         "cwd": "${workspaceFolder}/bin/x64/Release"
       },
+      "command": "LD_LIBRARY_PATH=\"${workspaceFolder}/bin/x64/Release\" ./xr_3da -nointro -dbg -fsltx /run/media/ruut/99c9b836-a7b8-403c-9ef8-5bfc1e1ec831/games/stalker/GlobalWar1/fsgame.ltx",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run CoC Mixed",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/bin/x64/Mixed"
+      },
       "command": "./xr_3da -nointro -fsltx ${COC_LTX_FILE_PATH}",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run CoC Release",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/bin/x64/Release"
+      },
+      "command": "LD_LIBRARY_PATH=\"${workspaceFolder}/bin/x64/Release\" ./xr_3da -nointro -dbg -fsltx ${COC_LTX_FILE_PATH}",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run CoP Mixed",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/bin/x64/Mixed"
+      },
+      "command": "./xr_3da -nointro -fsltx ${COP_LTX_FILE_PATH}",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run CoP Release",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/bin/x64/Release"
+      },
+      "command": "./xr_3da -nointro -fsltx ${COP_LTX_FILE_PATH}",
       "problemMatcher": []
     },
   ]

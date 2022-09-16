@@ -16,7 +16,7 @@ int const it_max = ALife::infl_max_count - 1;
 
 class CUIHudStatesWnd : public CUIWindow
 {
-private:
+public:
     typedef CUIWindow inherited;
     //-	typedef ALife::EInfluenceType	EIndicatorType;
 
@@ -30,6 +30,8 @@ private:
     xr_map<ALife::EInfluenceType, CUIStatic*> m_resist_back;
     xr_map<ALife::EInfluenceType, CUIStatic*> m_indik;
 
+    u32 m_ui_weapon_ammo_color_active;
+    u32 m_ui_weapon_ammo_color_inactive;
     CUITextWnd* m_ui_weapon_cur_ammo;
     CUITextWnd* m_ui_weapon_fmj_ammo;
     CUITextWnd* m_ui_weapon_ap_ammo;

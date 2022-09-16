@@ -56,6 +56,7 @@ enum ECallbackType : u32
 
     //AVO: custom callbacks
     // Input
+    eActorHudAnimationEnd,
     eKeyPress,
     eKeyRelease,
     eKeyHold,
@@ -82,6 +83,8 @@ enum ECallbackType : u32
     eOnWeaponZoomIn,
     eOnWeaponZoomOut,
     eOnWeaponJammed,
+    eOnWeaponFired,
+    eOnWeaponMagazineEmpty,
 
     eDummy = u32(-1),
 };

@@ -40,7 +40,7 @@ bool r_line2(CScriptIniFile* self, pcstr S, pcstr L, luabind::string& N, luabind
 
     N = "";
     V = "";
-    
+
     cpcstr v = READ_IF_EXISTS(self, r_string, S, L, nullptr);
     if (!v)
         return false;
@@ -67,6 +67,17 @@ CScriptIniFile* reload_system_ini()
     FS.update_path(fname, "$game_config$", "system.ltx");
     pSettings = xr_new<CInifile>(fname);
     return (CScriptIniFile*)pSettings;
+}
+
+void section_for_each(CScriptIniFile* self, const luabind::functor<void>& functor)
+{
+    using sections_type = CInifile::Root;
+    sections_type& sections = self->sections();
+
+    for (auto& section : sections)
+    {
+        functor(section->Name.c_str());
+    }
 }
 //Alundaio: END
 
@@ -136,6 +147,26 @@ static void CScriptIniFile_Export(lua_State* luaState)
 #endif
             //Alundaio: extend
             def("reload_system_ini", &reload_system_ini),
+            def("get_platform", +[]()
+            {
+#if defined(XR_PLATFORM_WINDOWS)
+                return "windows";
+#elif defined(XR_PLATFORM_LINUX)
+                return "linux";
+#elif defined(XR_PLATFORM_FREEBSD)
+                return "freebsd";
+#endif
+            }),
+            def("get_path_separator", +[]()
+            {
+#if defined(XR_PLATFORM_WINDOWS)
+                return "\\";
+#elif defined(XR_PLATFORM_LINUX)
+                return "/";
+#elif defined(XR_PLATFORM_FREEBSD)
+                return "/";
+#endif
+            }),
             //Alundaio:: END
             def("system_ini", &get_system_ini), def("create_ini_file", &create_ini_file, adopt<0>())
     ];

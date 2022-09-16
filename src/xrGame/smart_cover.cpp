@@ -5,6 +5,7 @@
 //	Description : Smart cover class
 ////////////////////////////////////////////////////////////////////////////
 
+#include <csignal>
 #include "pch_script.h"
 
 #include "smart_cover.h"

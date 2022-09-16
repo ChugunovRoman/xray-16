@@ -118,6 +118,19 @@ SCRIPT_EXPORT(KeyBindings, (),
                 value("kQUICK_LOAD",                int(kQUICK_LOAD)),
                 value("kALIFE_CMD",                 int(kALIFE_CMD)),
 
+                value("kNUMPAD0",                   int(kNUMPAD0)),
+                value("kINSERT",                    int(kINSERT)),
+                value("kNUMPAD1",                   int(kNUMPAD1)),
+                value("kNUMPAD2",                   int(kNUMPAD2)),
+                value("kNUMPAD3",                   int(kNUMPAD3)),
+                value("kNUMPAD4",                   int(kNUMPAD4)),
+                value("kNUMPAD5",                   int(kNUMPAD5)),
+                value("kNUMPAD6",                   int(kNUMPAD6)),
+                value("kNUMPAD7",                   int(kNUMPAD7)),
+                value("kNUMPAD8",                   int(kNUMPAD8)),
+                value("kNUMPAD9",                   int(kNUMPAD9)),
+                value("kNUMPAD_ENTER",              int(kNUMPAD_ENTER)),
+
                 value("kCUSTOM1",                   int(kCUSTOM1)),
                 value("kCUSTOM2",                   int(kCUSTOM2)),
                 value("kCUSTOM3",                   int(kCUSTOM3)),
@@ -133,7 +146,6 @@ SCRIPT_EXPORT(KeyBindings, (),
                 value("kCUSTOM13",                  int(kCUSTOM13)),
                 value("kCUSTOM14",                  int(kCUSTOM14)),
                 value("kCUSTOM15",                  int(kCUSTOM15)),
-
                 value("kPDA_TAB1",                  int(kPDA_TAB1)),
                 value("kPDA_TAB2",                  int(kPDA_TAB2)),
                 value("kPDA_TAB3",                  int(kPDA_TAB3)),
@@ -197,7 +209,7 @@ SCRIPT_EXPORT(KeyBindings, (),
                 value("DIK_RBRACKET",               int(SDL_SCANCODE_RIGHTBRACKET)),
                 value("DIK_BACKSLASH",              int(SDL_SCANCODE_BACKSLASH)),
                 value("DIK_NONUSHASH",              int(SDL_SCANCODE_NONUSHASH)),
-                
+
                 value("DIK_SEMICOLON",              int(SDL_SCANCODE_SEMICOLON)),
                 value("DIK_APOSTROPHE",             int(SDL_SCANCODE_APOSTROPHE)),
                 value("DIK_GRAVE",                  int(SDL_SCANCODE_GRAVE)),
@@ -420,14 +432,14 @@ SCRIPT_EXPORT(KeyBindings, (),
                 value("DIK_BRIGHTNESSDOWN",         int(SDL_SCANCODE_BRIGHTNESSDOWN)),
                 value("DIK_BRIGHTNESSUP",           int(SDL_SCANCODE_BRIGHTNESSUP)),
                 value("DIK_DISPLAYSWITCH",          int(SDL_SCANCODE_DISPLAYSWITCH)),
-               
+
                 value("DIK_KBDILLUMTOGGLE)",        int(SDL_SCANCODE_KBDILLUMTOGGLE)),
                 value("DIK_KBDILLUMDOWN",           int(SDL_SCANCODE_KBDILLUMDOWN)),
                 value("DIK_KBDILLUMUP",             int(SDL_SCANCODE_KBDILLUMUP)),
-               
+
                 value("DIK_EJECT",                  int(SDL_SCANCODE_EJECT)),
                 value("DIK_SLEEP",                  int(SDL_SCANCODE_SLEEP)),
-               
+
                 value("DIK_APP1",                   int(SDL_SCANCODE_APP1)),
                 value("DIK_APP2",                   int(SDL_SCANCODE_APP2)),
 

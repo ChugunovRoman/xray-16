@@ -5268,6 +5268,9 @@
     <ClInclude Include="ActorHelmet.h">
       <Filter>Core\Client\Objects\items &amp; weapons\Outfit</Filter>
     </ClInclude>
+    <ClInclude Include="ActorBackpack.h">
+      <Filter>Core\Client\Objects\items &amp; weapons\Outfit</Filter>
+    </ClInclude>
     <ClInclude Include="BoneProtections.h">
       <Filter>Core\Client\Objects\items &amp; weapons\Outfit</Filter>
     </ClInclude>
@@ -8504,6 +8507,9 @@
     <ClCompile Include="ActorHelmet.cpp">
       <Filter>Core\Client\Objects\items &amp; weapons\Outfit</Filter>
     </ClCompile>
+    <ClCompile Include="ActorBackpack.cpp">
+      <Filter>Core\Client\Objects\items &amp; weapons\Outfit</Filter>
+    </ClCompile>
     <ClCompile Include="BoneProtections.cpp">
       <Filter>Core\Client\Objects\items &amp; weapons\Outfit</Filter>
     </ClCompile>
@@ -9859,6 +9865,9 @@
     </ClCompile>
     <ClCompile Include="game_cl_mp_script.cpp">
       <Filter>Core\Server\Games\client\mp_script</Filter>
+    </ClCompile>
+    <ClCompile Include="CustomOutfit_script.cpp">
+      <Filter>Core\Client\Objects\items &amp; weapons\Outfit</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

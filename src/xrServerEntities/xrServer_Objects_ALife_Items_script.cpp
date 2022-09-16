@@ -32,8 +32,31 @@ SCRIPT_EXPORT(CSE_ALifeItemAmmo, (CSE_ALifeItem),
     { module(luaState)[luabind_class_item1(CSE_ALifeItemAmmo, "cse_alife_item_ammo", CSE_ALifeItem)]; });
 
 SCRIPT_EXPORT(CSE_ALifeItemWeapon, (CSE_ALifeItem), {
-    module(luaState)[luabind_class_item1(CSE_ALifeItemWeapon, "cse_alife_item_weapon",
-        CSE_ALifeItem).def("clone_addons", &CSE_ALifeItemWeapon::clone_addons)];
+    module(luaState)[luabind_class_item1(CSE_ALifeItemWeapon, "cse_alife_item_weapon", CSE_ALifeItem)
+        .enum_("addon_flag")
+        [
+            value("eWeaponAddonGrenadeLauncher", int(CSE_ALifeItemWeapon::EWeaponAddonState::eWeaponAddonGrenadeLauncher)),
+            value("eWeaponAddonScope", int(CSE_ALifeItemWeapon::EWeaponAddonState::eWeaponAddonScope)),
+            value("eWeaponAddonSilencer", int(CSE_ALifeItemWeapon::EWeaponAddonState::eWeaponAddonSilencer)),
+            value("eAddonAttachable", int(CSE_ALifeItemWeapon::EWeaponAddonStatus::eAddonAttachable)),
+            value("eAddonDisabled", int(CSE_ALifeItemWeapon::EWeaponAddonStatus::eAddonDisabled)),
+            value("eAddonPermanent", int(CSE_ALifeItemWeapon::EWeaponAddonStatus::eAddonPermanent))
+        ]
+        .def("clone_addons", &CSE_ALifeItemWeapon::clone_addons)
+        .def("set_ammo_elapsed",	&CSE_ALifeItemWeapon::set_ammo_elapsed)
+        .def("set_ammo_elapsed2",	&CSE_ALifeItemWeapon::set_ammo_elapsed2)
+        .def("get_ammo_elapsed",	&CSE_ALifeItemWeapon::get_ammo_elapsed)
+        .def("get_ammo_elapsed2",	&CSE_ALifeItemWeapon::get_ammo_elapsed2)
+        .def("get_ammo_magsize",	&CSE_ALifeItemWeapon::get_ammo_magsize)
+        .def_readwrite("grenade_launcher_status", &CSE_ALifeItemWeapon::m_grenade_launcher_status)
+        .def_readwrite("silencer_status", &CSE_ALifeItemWeapon::m_silencer_status)
+        .def_readwrite("scope_status", &CSE_ALifeItemWeapon::m_scope_status)
+        .def("get_ammo_type",		&CSE_ALifeItemWeapon::get_ammo_type)
+        .def("get_ammo_type2",		&CSE_ALifeItemWeapon::get_ammo_type2)
+        .def("set_ammo_type",		&CSE_ALifeItemWeapon::set_ammo_type)
+        .def("set_ammo_type2",		&CSE_ALifeItemWeapon::set_ammo_type2)
+        .def("get_addon_flags", &CSE_ALifeItemWeapon::get_addon_flags)
+    ];
 });
 
 SCRIPT_EXPORT(CSE_ALifeItemWeaponShotGun, (CSE_ALifeItemWeapon), {

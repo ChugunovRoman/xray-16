@@ -51,6 +51,7 @@
 #include "inventory_upgrade_root.h"
 #include "inventory_item.h"
 #include "CustomOutfit.h"
+#include "ActorBackpack.h"
 #include "inventory_item_impl.h"
 #include "Inventory.h"
 #include "xrServer_Objects_ALife_Items.h"
@@ -154,6 +155,9 @@ bool CScriptGameObject::HasInfo(LPCSTR info_id)
     if (!pInventoryOwner)
         return false;
 
+    CGameObject* l_tpGameObject = smart_cast<CGameObject*>(&object());
+
+    // Msg("CScriptGameObject::HasInfo: %s, is_alive: %d, object_id: %d, Name: %s, - (%d|%s|%s)", info_id, pInventoryOwner->is_alive(), pInventoryOwner->object_id(), pInventoryOwner->Name(), l_tpGameObject->CLS_ID, l_tpGameObject->cNameSect_str(), l_tpGameObject->cNameVisual());
     return pInventoryOwner->HasInfo(info_id);
 }
 
@@ -752,6 +756,19 @@ void CScriptGameObject::ChangeCharacterReputation(int char_rep)
         return;
     }
     pInventoryOwner->ChangeReputation(char_rep);
+}
+
+void CScriptGameObject::SetCharacterReputation(int char_rep)
+{
+    CInventoryOwner* pInventoryOwner = smart_cast<CInventoryOwner*>(&object());
+
+    if (!pInventoryOwner)
+    {
+        GEnv.ScriptEngine->script_log(
+            LuaMessageType::Error, "SetCharacterReputation available only for InventoryOwner");
+        return;
+    }
+    pInventoryOwner->SetReputation(char_rep);
 }
 
 LPCSTR CScriptGameObject::CharacterCommunity()
@@ -1788,6 +1805,45 @@ void CScriptGameObject::Weapon_AddonDetach(pcstr item_section)
         weapon->Detach(item_section, true);
 }
 
+LPCSTR CScriptGameObject::Weapon_GetAmmoSection(u8 ammo_type)
+{
+    CWeaponMagazined* weapon = smart_cast<CWeaponMagazined*>(&object());
+    if (!weapon)
+    {
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "CWeaponMagazined : cannot access class member Weapon_GetAmmoSection!");
+        return "";
+    }
+
+    if (weapon->m_ammoTypes.empty() || ammo_type + 1 > weapon->m_ammoTypes.size())
+        return "";
+
+    return weapon->m_ammoTypes[ammo_type].c_str();
+
+}
+
+void CScriptGameObject::Weapon_SetCurrentScope(u8 type)
+{
+    CWeaponMagazined* weapon = smart_cast<CWeaponMagazined*>(&object());
+    if (!weapon)
+    {
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "CWeaponMagazined : cannot access class member Weapon_SetCurrentScope!");
+        return;
+    }
+
+    weapon->m_cur_scope = type;
+}
+
+u8 CScriptGameObject::Weapon_GetCurrentScope()
+{
+    CWeaponMagazined* weapon = smart_cast<CWeaponMagazined*>(&object());
+    if (!weapon)
+    {
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "CWeaponMagazined : cannot access class member Weapon_GetCurrentScope!");
+        return 255;
+    }
+    return weapon->m_cur_scope;
+}
+
 bool CScriptGameObject::InstallUpgrade(pcstr upgrade)
 {
     CInventoryItem* item = smart_cast<CInventoryItem*>(&object());
@@ -1936,50 +1992,72 @@ void CScriptGameObject::SetActorMaxWalkWeight(float max_walk_weight)
 // получить и задать доп. вес для костюма
 float CScriptGameObject::GetAdditionalMaxWeight() const
 {
+    CBackpack* pBackpack = smart_cast<CBackpack*>(&object());
     CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(&object());
-    if (!outfit)
+    if (!outfit && !pBackpack)
     {
         GEnv.ScriptEngine->script_log(LuaMessageType::Error,
                                         "CCustomOutfit : cannot access class member GetAdditionalMaxWeight!");
         return false;
     }
-    return outfit->m_additional_weight2;
+
+    if (outfit)
+        return outfit->m_additional_weight2;
+
+    return pBackpack->m_additional_weight2;
 }
 
 float CScriptGameObject::GetAdditionalMaxWalkWeight() const
 {
+    CBackpack* pBackpack = smart_cast<CBackpack*>(&object());
     CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(&object());
-    if (!outfit)
+    if (!outfit && !pBackpack)
     {
         GEnv.ScriptEngine->script_log(LuaMessageType::Error,
                                         "CCustomOutfit : cannot access class member GetAdditionalMaxWalkWeight!");
         return false;
     }
-    return outfit->m_additional_weight;
+
+    if (outfit)
+        return outfit->m_additional_weight2;
+
+    return pBackpack->m_additional_weight2;
 }
 
 void CScriptGameObject::SetAdditionalMaxWeight(float add_max_weight)
 {
+    CBackpack* pBackpack = smart_cast<CBackpack*>(&object());
     CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(&object());
-    if (!outfit)
+    if (!outfit && !pBackpack)
     {
         GEnv.ScriptEngine->script_log(LuaMessageType::Error,
                                         "CCustomOutfit : cannot access class member SetAdditionalMaxWeight!");
         return;
     }
-    outfit->m_additional_weight2 = add_max_weight;
+
+    if (outfit)
+        outfit->m_additional_weight2 = add_max_weight;
+
+    if (pBackpack)
+        pBackpack->m_additional_weight2 = add_max_weight;
 }
 
 void CScriptGameObject::SetAdditionalMaxWalkWeight(float add_max_walk_weight)
 {
+    CBackpack* pBackpack = smart_cast<CBackpack*>(&object());
     CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(&object());
-    if (!outfit)
+    if (!outfit && !pBackpack)
     {
         GEnv.ScriptEngine->script_log(LuaMessageType::Error,
                                         "CCustomOutfit : cannot access class member SetAdditionalMaxWalkWeight!");
         return;
     }
-    outfit->m_additional_weight = add_max_walk_weight;
+
+    if (outfit)
+        outfit->m_additional_weight = add_max_walk_weight;
+
+    if (pBackpack)
+        pBackpack->m_additional_weight = add_max_walk_weight;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2043,7 +2121,7 @@ void CScriptGameObject::SetActorJumpSpeed(float jump_speed)
         return;
     }
     pActor->m_fJumpSpeed = jump_speed;
-    //character_physics_support()->movement()->SetJumpUpVelocity(m_fJumpSpeed);  
+    //character_physics_support()->movement()->SetJumpUpVelocity(m_fJumpSpeed);
 }
 
 float CScriptGameObject::GetActorSprintKoef() const

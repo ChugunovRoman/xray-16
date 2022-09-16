@@ -48,8 +48,12 @@
 #include "eatable_item.h"
 #include "xrScriptEngine/script_callback_ex.h"
 #include "xrEngine/Feel_Touch.h"
+#include "WeaponAmmo.h"
+#include "WeaponMagazinedWGrenade.h"
 #include "level_path_manager.h"
 #include "game_path_manager.h"
+#include "danger_manager.h"
+#include "danger_object.h"
 #endif
 //-Alundaio
 
@@ -1271,6 +1275,33 @@ bool CScriptGameObject::is_weapon_going_to_be_strapped(CScriptGameObject const* 
 
 //Alundaio: Taken from Radium
 #ifdef GAME_OBJECT_EXTENDED_EXPORTS
+u16 CScriptGameObject::AmmoGetCount()
+{
+    CWeaponAmmo* ammo = smart_cast<CWeaponAmmo*>(&object());
+    if (!ammo)
+        return 0;
+
+    return ammo->m_boxCurr;
+}
+
+void CScriptGameObject::AmmoSetCount(u16 count)
+{
+    CWeaponAmmo* ammo = smart_cast<CWeaponAmmo*>(&object());
+    if (!ammo)
+        return;
+
+    ammo->m_boxCurr = count;
+}
+
+u16 CScriptGameObject::AmmoBoxSize()
+{
+    CWeaponAmmo* ammo = smart_cast<CWeaponAmmo*>(&object());
+    if (!ammo)
+        return 0;
+
+    return ammo->m_boxSize;
+}
+
 float CScriptGameObject::GetArtefactHealthRestoreSpeed()
 {
     CArtefact* artefact = smart_cast<CArtefact*>(&object());
@@ -1423,6 +1454,15 @@ void CScriptGameObject::SwitchState(u32 state)
         if (itm)
             itm->SwitchState(state);
     }
+}
+
+bool CScriptGameObject::WeaponInGrenadeMode()
+{
+    CWeaponMagazinedWGrenade* wpn = smart_cast<CWeaponMagazinedWGrenade*>(&object());
+    if (!wpn)
+        return false;
+
+    return wpn->m_bGrenadeMode;
 }
 
 u32 CScriptGameObject::GetState()
