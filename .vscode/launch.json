@@ -121,6 +121,7 @@
       "program": "${workspaceFolder}/bin/x64/Debug/xr_3da",
       "args": [
         "-nointro",
+        "-dbg",
         "-fsltx",
         "${GLOBALWAR_LTX_FILE_PATH}",
       ],
