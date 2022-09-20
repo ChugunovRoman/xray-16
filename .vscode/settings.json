@@ -8,6 +8,9 @@
   "[xml]": {
     "editor.formatOnSave": false
   },
+  "[cmake]": {
+    "editor.formatOnSave": false
+  },
   "files.trimTrailingWhitespace": false,
   "files.insertFinalNewline": false
 }
