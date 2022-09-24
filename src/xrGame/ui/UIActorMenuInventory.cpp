@@ -42,11 +42,11 @@ void CUIActorMenu::InitInventoryMode()
     ShowIfExist(m_pInventoryWnd, true);
     m_pLists[eInventoryBagList]->Show(true);
     m_pLists[eInventoryBeltList]->Show(true);
-    m_pLists[eInventoryBackpackList]->Show(true);
     m_pLists[eInventoryOutfitList]->Show(true);
     ShowIfExist(m_pLists[eInventoryHelmetList], true);
     ShowIfExist(m_pLists[eInventoryDetectorList], true);
-    m_pLists[eInventoryKnifeList]->Show(true);
+    ShowIfExist(m_pLists[eInventoryBackpackList], true);
+    ShowIfExist(m_pLists[eInventoryKnifeList], true);
     m_pLists[eInventoryPistolList]->Show(true);
     m_pLists[eInventoryAutomaticList]->Show(true);
     ShowIfExist(m_pQuickSlot, true);
