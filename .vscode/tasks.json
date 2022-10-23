@@ -121,7 +121,7 @@
       "options": {
         "cwd": "${workspaceFolder}/bin/x64/Release"
       },
-      "command": "LD_LIBRARY_PATH=\"${workspaceFolder}/bin/x64/Release\" ./xr_3da -nointro -dbg -fsltx /run/media/ruut/99c9b836-a7b8-403c-9ef8-5bfc1e1ec831/games/stalker/GlobalWar1/fsgame.ltx",
+      "command": "LD_LIBRARY_PATH=\"${workspaceFolder}/bin/x64/Release\" ./xr_3da -nointro -dbg -dump_bindings -fsltx /run/media/ruut/99c9b836-a7b8-403c-9ef8-5bfc1e1ec831/games/stalker/GlobalWar1/fsgame.ltx",
       "problemMatcher": []
     },
     {
