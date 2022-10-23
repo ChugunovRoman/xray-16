@@ -157,8 +157,8 @@ void CScriptIniFile::w_s8(pcstr S, pcstr L, s8 V, pcstr comment)
 
 void CScriptIniFile::w_string(pcstr S, pcstr L, pcstr V, pcstr comment)
 {
-    THROW3(inherited::section_exist(S), "Cannot find section", S);
-    THROW3(inherited::line_exist(S, L), "Cannot find line", L);
+    VERIFY3(inherited::section_exist(S), "Cannot find section", S);
+    VERIFY3(inherited::line_exist(S, L), "Cannot find line", L);
     inherited::w_string(S, L, V, comment);
 }
 
