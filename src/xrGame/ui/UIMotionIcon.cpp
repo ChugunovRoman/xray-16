@@ -262,12 +262,15 @@ void SetActorVisibility(u16 who_id, float value)
     if (!IsGameTypeSingle())
         return;
 
-    if (g_pMotionIcon)
+    if (g_pMotionIcon && g_pMotionIcon->IsShown())
         g_pMotionIcon->SetActorVisibility(who_id, value);
 }
 
 void CUIMotionIcon::SetActorVisibility(u16 who_id, float value)
 {
+    if (!IsShown())
+        return;
+
     if (m_luminosity_progress_shape)
     {
         clamp(value, 0.f, 1.f);
