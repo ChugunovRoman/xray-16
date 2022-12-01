@@ -858,6 +858,12 @@ public:
     void SetArtefactPowerRestoreSpeed(float value);
     void SetArtefactBleedingRestoreSpeed(float value);
 
+    void RemoveDanger(const CDangerObject& dobject);
+
+    void RemoveMemorySoundObject(const MemorySpace::CSoundObject& memory_object);
+    void RemoveMemoryHitObject(const MemorySpace::CHitObject& memory_object);
+    void RemoveMemoryVisibleObject(const MemorySpace::CVisibleObject& memory_object);
+
     //Eatable items
     void SetRemainingUses(u8 value);
     u8 GetRemainingUses();
