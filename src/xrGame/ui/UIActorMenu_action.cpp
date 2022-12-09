@@ -91,14 +91,14 @@ bool CUIActorMenu::OnItemDropOnItem(EDDListType t_old, EDDListType t_new, CUIDra
 
         const PIItem _iitem = _citem ? static_cast<PIItem>(_citem->m_pData) : nullptr;
 
-        CGameObject* GO1 = smart_cast<CGameObject*>(CurrentIItem());
-        CGameObject* GO2 = _iitem ? smart_cast<CGameObject*>(_iitem) : nullptr;
-        if (funct1(GO1 ? GO1->lua_game_object() : 0,
-            GO2 ? GO2->lua_game_object() : 0, (int)t_old, (int)t_new) == false)
+        if (_iitem == nullptr)
             return false;
+
+        CGameObject* GO1 = smart_cast<CGameObject*>(CurrentIItem());
+        CGameObject* GO2 = smart_cast<CGameObject*>(_iitem);
+
+        return funct1(GO1 ? GO1->lua_game_object() : 0, GO2 ? GO2->lua_game_object() : 0, (int)t_old, (int)t_new);
     }
-    //-Alundaio
-    return false;
 }
 bool CUIActorMenu::OnItemDrop(CUICellItem* itm)
 {
@@ -145,8 +145,7 @@ bool CUIActorMenu::OnItemDrop(CUICellItem* itm)
     break;
     case iActorBag:
     {
-        if(!OnItemDropOnItem(t_old, t_new, old_owner, new_owner))
-            return false;
+        OnItemDropOnItem(t_old, t_new, old_owner, new_owner);
 
         ToBag(itm, true);
     }
