@@ -13,10 +13,9 @@
 #ifdef _DEBUG
 #define D3D_DEBUG_INFO
 #endif
-#include <d3dx9.h>
+#include <D3D9.h>
 
 #include <D3D11.h>
-#include <D3Dx11core.h>
 #include <D3DCompiler.h>
 
 #if __has_include(<dxgi1_4.h>)
@@ -37,7 +36,6 @@
 #include "Layers/xrRenderDX11/CommonTypes.h"
 
 #include "Layers/xrRenderDX11/dx11HW.h"
-#include "Layers/xrRender/Debug/dxPixEventWrapper.h"
 
 #include "Layers/xrRender/Shader.h"
 

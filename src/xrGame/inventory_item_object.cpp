@@ -85,6 +85,7 @@ void CInventoryItemObject::OnEvent(NET_Packet& P, u16 type)
 
 bool CInventoryItemObject::net_Spawn(CSE_Abstract* DC)
 {
+    CInventoryItem::net_Spawn_install_upgrades(DC);
     BOOL res = CPhysicItem::net_Spawn(DC);
     CInventoryItem::net_Spawn(DC);
     return (res);
@@ -110,10 +111,10 @@ void CInventoryItemObject::load(IReader& packet)
     CInventoryItem::load(packet);
 }
 
-void CInventoryItemObject::renderable_Render(IRenderable* root)
+void CInventoryItemObject::renderable_Render(u32 context_id, IRenderable* root)
 {
-    CPhysicItem::renderable_Render(root);
-    CInventoryItem::renderable_Render(root);
+    CPhysicItem::renderable_Render(context_id, root);
+    CInventoryItem::renderable_Render(context_id, root);
 }
 
 void CInventoryItemObject::reload(LPCSTR section)

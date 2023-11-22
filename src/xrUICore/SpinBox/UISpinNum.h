@@ -2,10 +2,10 @@
 
 #include "xrUICore/SpinBox/UICustomSpin.h"
 
-class XRUICORE_API CUISpinNum : public CUICustomSpin
+class XRUICORE_API CUISpinNum final : public CUICustomSpin
 {
 public:
-    CUISpinNum();
+    CUISpinNum() = default;
 
     virtual void InitSpin(Fvector2 pos, Fvector2 size);
 
@@ -22,6 +22,9 @@ public:
     void SetMax(int max) { m_iMax = max; };
     void SetMin(int min) { m_iMin = min; };
     int Value() const { return m_iVal; }
+
+    pcstr GetDebugType() override { return "CUISpinNum"; }
+
 protected:
     void SetValue(int v);
     virtual bool CanPressUp();
@@ -29,17 +32,17 @@ protected:
     virtual void IncVal();
     virtual void DecVal();
 
-    int m_iMax;
-    int m_iMin;
-    int m_iStep;
-    int m_iVal;
-    int m_opt_backup_value;
+    int m_iMin{};
+    int m_iMax{ 100 };
+    int m_iStep{ 1 };
+    int m_iVal{};
+    int m_opt_backup_value{};
 };
 
-class XRUICORE_API CUISpinFlt : public CUICustomSpin
+class XRUICORE_API CUISpinFlt final : public CUICustomSpin
 {
 public:
-    CUISpinFlt();
+    CUISpinFlt() = default;
 
     virtual void InitSpin(Fvector2 pos, Fvector2 size);
 
@@ -56,6 +59,8 @@ public:
     void SetMax(float max);
     void SetMin(float min);
 
+    pcstr GetDebugType() override { return "CUISpinFlt"; }
+
 protected:
     void SetValue(float v);
     virtual bool CanPressUp();
@@ -63,9 +68,9 @@ protected:
     virtual void IncVal();
     virtual void DecVal();
 
-    float m_fMax;
-    float m_fMin;
-    float m_fStep;
-    float m_fVal;
-    float m_opt_backup_value;
+    float m_fMin{};
+    float m_fMax{ 100.0f };
+    float m_fStep{ 0.1f };
+    float m_fVal{};
+    float m_opt_backup_value{};
 };

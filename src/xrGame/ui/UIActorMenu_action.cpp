@@ -37,17 +37,18 @@ bool CUIActorMenu::AllowItemDrops(EDDListType from, EDDListType to)
 }
 class CUITrashIcon : public ICustomDrawDragItem
 {
-    CUIStatic m_icon;
+    CUIStatic m_icon{ "Trash icon" };
 
 public:
     CUITrashIcon()
     {
-        m_icon.SetWndSize(Fvector2().set(29.0f * UI().get_current_kx(), 36.0f));
+        m_icon.SetWndSize(Fvector2().set(29.0f * UI().get_current_kx(), 36.0f)); // XXX: unhardcode size
         m_icon.SetStretchTexture(true);
         //		m_icon.SetAlignment		(waCenter);
-        m_icon.InitTexture("ui_inGame2_inv_trash");
+        m_icon.InitTexture("ui_inGame2_inv_trash"); // XXX: unhardcode texture
     }
-    virtual void OnDraw(CUIDragItem* drag_item)
+
+    void OnDraw(CUIDragItem* drag_item) override
     {
         Fvector2 pos = drag_item->GetWndPos();
         Fvector2 icon_sz = m_icon.GetWndSize();
@@ -69,9 +70,9 @@ void CUIActorMenu::OnDragItemOnTrash(CUIDragItem* item, bool b_receive)
         item->SetCustomDraw(NULL);
 }
 
-bool CUIActorMenu::OnItemDropOnItem(EDDListType t_old, EDDListType t_new, CUIDragDropListEx* old_owner, CUIDragDropListEx* new_owner)
+bool CUIActorMenu::DropItemOnAnotherItem(EDDListType t_old, EDDListType t_new, CUIDragDropListEx* old_owner, CUIDragDropListEx* new_owner)
 {
-    //Alundaio: Here we export the action of dragging one inventory item on top of another! 
+    //Alundaio: Here we export the action of dragging one inventory item on top of another!
     luabind::functor<bool> funct1;
     if (GEnv.ScriptEngine->functor("actor_menu_inventory.CUIActorMenu_OnItemDropped", funct1))
     {
@@ -91,17 +92,19 @@ bool CUIActorMenu::OnItemDropOnItem(EDDListType t_old, EDDListType t_new, CUIDra
 
         const PIItem _iitem = _citem ? static_cast<PIItem>(_citem->m_pData) : nullptr;
 
+        // Callback handles dropping item on item, in other cases (moving, dropping from inventory) we do not fire it.
         if (_iitem == nullptr)
-            return false;
+            return true;
 
         CGameObject* GO1 = smart_cast<CGameObject*>(CurrentIItem());
         CGameObject* GO2 = smart_cast<CGameObject*>(_iitem);
 
-        return funct1(GO1 ? GO1->lua_game_object() : 0, GO2 ? GO2->lua_game_object() : 0, (int)t_old, (int)t_new);
+        return funct1(GO1 ? GO1->lua_game_object() : nullptr, GO2 ? GO2->lua_game_object() : nullptr, (int)t_old, (int)t_new);
     }
 
-    return false;
+    return true;
 }
+
 bool CUIActorMenu::OnItemDrop(CUICellItem* itm)
 {
     InfoCurItem(NULL);
@@ -119,6 +122,13 @@ bool CUIActorMenu::OnItemDrop(CUICellItem* itm)
         Msg("incorrect action [%d]->[%d]", t_old, t_new);
         return true;
     }
+
+    if (old_owner == new_owner)
+    {
+        DropItemOnAnotherItem(t_old, t_new, old_owner, new_owner);
+        return false;
+    }
+
     switch (t_new)
     {
     case iTrashSlot:
@@ -133,54 +143,61 @@ bool CUIActorMenu::OnItemDrop(CUICellItem* itm)
         }
         SendEvent_Item_Drop(CurrentIItem(), m_pActorInvOwner->object_id());
         SetCurrentItem(NULL);
+        break;
     }
-    break;
     case iActorSlot:
     {
-        //.			if(GetSlotList(CurrentIItem()->GetSlot())==new_owner)
+        // if(GetSlotList(CurrentIItem()->GetSlot())==new_owner)
         u16 slot_to_place;
         if (CanSetItemToList(CurrentIItem(), new_owner, slot_to_place))
             ToSlot(itm, true, slot_to_place);
-
-        OnItemDropOnItem(t_old, t_new, old_owner, new_owner);
+        break;
     }
-    break;
     case iActorBag:
     {
-        OnItemDropOnItem(t_old, t_new, old_owner, new_owner);
-
         ToBag(itm, true);
+        break;
     }
-    break;
-    case iActorBelt: { ToBelt(itm, true);
+    case iActorBelt:
+    {
+        ToBelt(itm, true);
+        break;
     }
-    break;
-    case iActorTrade: { ToActorTrade(itm, true);
+    case iActorTrade:
+    {
+        ToActorTrade(itm, true);
+        break;
     }
-    break;
     case iPartnerTrade:
     {
         if (t_old != iPartnerTradeBag)
             return false;
         ToPartnerTrade(itm, true);
+        break;
     }
-    break;
     case iPartnerTradeBag:
     {
         if (t_old != iPartnerTrade)
             return false;
         ToPartnerTradeBag(itm, true);
+        break;
     }
+    case iDeadBodyBag:
+    {
+        ToDeadBodyBag(itm, true);
     break;
-    case iDeadBodyBag: { ToDeadBodyBag(itm, true);
     }
-    break;
-    case iQuickSlot: { ToQuickSlot(itm);
+    case iQuickSlot:
+    {
+        ToQuickSlot(itm);
+        break;
     }
-    break;
     };
 
     OnItemDropped(CurrentIItem(), new_owner, old_owner);
+
+    if (!DropItemOnAnotherItem(t_old, t_new, old_owner, new_owner))
+        return false;
 
     UpdateItemsPlace();
 
@@ -266,11 +283,12 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
         ToBag(itm, false);
         break;
     }
-    case iQuickSlot: { ToQuickSlot(itm);
+    case iQuickSlot:
+    {
+        ToQuickSlot(itm);
+        break;
     }
-    break;
-
-    }; // switch
+    } // switch (t_old)
 
     UpdateItemsPlace();
 
@@ -326,7 +344,7 @@ bool CUIActorMenu::OnItemFocusedUpdate(CUICellItem* itm)
             set_highlight_item(itm);
         }
     }
-    if (Device.dwTimeGlobal < itm->FocusReceiveTime() + (m_ItemInfo ? m_ItemInfo->delay : 0))
+    if (Device.dwTimeGlobal < itm->FocusReceiveTime() + (m_ItemInfo ? m_ItemInfo->delay * Device.time_factor() : 0))
     {
         return true; // false
     }
@@ -411,7 +429,7 @@ void CUIActorMenu::OnPressUserKey(bool take)
         //		OnBtnPerformTrade( this, 0 );
         break;
     case mmUpgrade: TrySetCurUpgrade(); break;
-    case mmDeadBodySearch: 
+    case mmDeadBodySearch:
     {
         if (take)
             TakeAllFromPartner(this, 0);

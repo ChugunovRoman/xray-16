@@ -43,12 +43,14 @@ public:
     virtual void SetWidth(float width);
     virtual void SetHeight(float heigth);
 
+    pcstr GetDebugType() override { return "CUIInteractiveBackground"; }
+
 protected:
     T* m_states[S_Total];
 };
 
 template <class T>
-CUIInteractiveBackground<T>::CUIInteractiveBackground()
+CUIInteractiveBackground<T>::CUIInteractiveBackground() : CUIWindow("CUIInteractiveBackground")
 {
     ZeroMemory(m_states, S_Total * sizeof(T*));
 }
@@ -72,11 +74,24 @@ bool CUIInteractiveBackground<T>::InitIB(LPCSTR texture, Fvector2 pos, Fvector2 
 template <class T>
 bool CUIInteractiveBackground<T>::InitState(IBState state, pcstr texture, bool fatal /*= true*/)
 {
+    auto IBStateToText = [](const IBState state) constexpr -> pcstr
+    {
+        switch (state)
+        {
+        case S_Enabled:     return "Enabled state";
+        case S_Disabled:    return "Disabled state";
+        case S_Highlighted: return "Highlighted state";
+        case S_Touched:     return "Touched state";
+        case S_Current:     return "Current state";
+        default:            return "Unknown state";
+        }
+    };
+
     Fvector2 size = GetWndSize();
 
     if (!m_states[state])
     {
-        m_states[state] = xr_new<T>();
+        m_states[state] = xr_new<T>(IBStateToText(state));
         m_states[state]->SetAutoDelete(true);
         AttachChild(m_states[state]);
     }

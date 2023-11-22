@@ -4,6 +4,7 @@
 #include "CustomOutfit.h"
 #include "trade.h"
 #include "Weapon.h"
+#include "Grenade.h"
 
 #include "ui/UIInventoryUtilities.h"
 #include "ui/UIActorMenu.h"
@@ -48,72 +49,59 @@ bool defaultSlotActiveness[] =
     false // helmet
 };
 
-CInventorySlot::CInventorySlot()
-{
-    m_pIItem = NULL;
-    m_bAct = true;
-    m_bPersistent = false;
-}
-
-CInventorySlot::~CInventorySlot() {}
-bool CInventorySlot::CanBeActivated() const { return (m_bAct); };
 CInventory::CInventory()
 {
     m_fMaxWeight = pSettings->r_float("inventory", "max_weight");
     m_iMaxBelt = pSettings->read_if_exists<s32>("inventory", "max_belt", 5);
-    m_iActiveSlot = NO_ACTIVE_SLOT;
-    m_iNextActiveSlot = NO_ACTIVE_SLOT;
-    m_iPrevActiveSlot = NO_ACTIVE_SLOT;
 
-    u16 sz = 0;
-    string256 slot_persistent;
-    string256 slot_active;
-    xr_strcpy(slot_persistent, "slot_persistent_1");
-    xr_strcpy(slot_active, "slot_active_1");
+    u16 slotsCount = SLOTS_COUNT;
+    pSettings->read_if_exists<u16>(slotsCount, "inventory", "slots_count", "slots"); // slots_count in CS/COP, slots in SOC
+
+    // slots_count + 1 because [0] is the inactive slot
+    m_slots.reserve(slotsCount + 1u);
+
+    // Inactive slot [0]
+    m_slots.emplace_back(CInventorySlot{});
 
     // Dynamically create as many slots as we may define in system.ltx
-    while (pSettings->line_exist("inventory", slot_persistent) && pSettings->line_exist("inventory", slot_active))
+    u16 i = 0;
+    do
     {
-        m_iLastSlot = sz;
+        ++i;
 
-        m_slots.resize(sz + 1); // slot+1 because [0] is the inactive slot
+        string256 slot_persistent;
+        string256 slot_active;
+        xr_sprintf(slot_persistent, "slot_persistent_%d", i);
+        xr_sprintf(slot_active,     "slot_active_%d",     i);
 
-        m_slots[sz].m_bPersistent = !!pSettings->r_bool("inventory", slot_persistent);
-        m_slots[sz].m_bAct = !!pSettings->r_bool("inventory", slot_active);
+        if (!pSettings->line_exist("inventory", slot_persistent))
+        {
+            --i;
+            break;
+        }
 
-        ++sz;
+        const bool isPersistent = pSettings->r_bool("inventory", slot_persistent);
+        const bool isActive = pSettings->read_if_exists<bool>("inventory", slot_active,
+            ShadowOfChernobylMode ? defaultSlotActiveness[i] : false);
 
-        xr_sprintf(slot_persistent, "%s%d", "slot_persistent_", sz);
-        xr_sprintf(slot_active, "%s%d", "slot_active_", sz);
+        m_slots.emplace_back(CInventorySlot{ nullptr, isPersistent, isActive });
+    } while (true);
+
+    m_iLastSlot = i;
+#ifndef MASTER_GOLD
+    if (m_iLastSlot != slotsCount)
+    {
+        Log("~ Not critical, but check [inventory] section in your system.ltx.");
+        Msg("~ slots_count = %u, but real slots count is %u", slotsCount, m_iLastSlot);
     }
+#endif
 
-    m_slots.resize(sz + 1); // first is [1]
-    m_iLastSlot = sz - 1;
-
-    string256 temp;
-    for (u16 i = FirstSlot(); i <= LastSlot(); ++i)
-    {
-        xr_sprintf(temp, "slot_persistent_%d", i);
-        m_slots[i].m_bPersistent = !!READ_IF_EXISTS(pSettings, r_bool, "inventory", temp, false);
-
-        xr_sprintf(temp, "slot_active_%d", i);
-        m_slots[i].m_bAct = !!READ_IF_EXISTS(pSettings, r_bool, "inventory", temp, ShadowOfChernobylMode ? defaultSlotActiveness[i] : false);
-    };
-
-    m_bSlotsUseful = true;
-    m_bBeltUseful = false;
-
-    m_fTotalWeight = -1.f;
-    m_dwModifyFrame = 0;
-    m_drop_last_frame = false;
+    m_blocked_slots.resize(m_slots.size());
+    // ^ no need to initialize members of array
+    // ^ resize will default initialize everything with 0
 
     InitPriorityGroupsForQSwitch();
-    m_next_item_iteration_time = 0;
-
-    for (u16 i = 0; i < sz; ++i)
-    {
-        m_blocked_slots[i] = 0;
-    }
+    m_isActivatingNextGrenade = false;
 }
 
 CInventory::~CInventory() {}
@@ -535,6 +523,22 @@ bool CInventory::Ruck(PIItem pIItem, bool strict_placement)
     if (in_slot)
         pIItem->object().processing_deactivate();
 
+    CGrenade* pGrenade = smart_cast<CGrenade*>(pIItem);
+    if (pGrenade)
+    {
+        bool new_type = true;
+        for (auto grenade_type : m_available_grenade_types)
+        {
+            if (!xr_strcmp(pGrenade->cNameSect(), grenade_type))
+                new_type = false;
+        }
+        if (new_type)
+        {
+            m_available_grenade_types.push_back(pGrenade->cNameSect());
+            std::sort(m_available_grenade_types.begin(), m_available_grenade_types.end());
+        }
+    }
+
     return true;
 }
 /*
@@ -572,7 +576,6 @@ void CInventory::Activate(u16 slot, bool bForce)
     }
 
     R_ASSERT2(slot <= LastSlot(), make_string("wrong slot number. Slot = %d, LastSlot() = %d", slot, LastSlot()).c_str());
-
 
     if (slot != NO_ACTIVE_SLOT && !m_slots[slot].CanBeActivated())
         return;
@@ -807,6 +810,9 @@ void CInventory::Update()
                     return;
                 }
             }
+
+            if (m_isActivatingNextGrenade)
+                ActivateNextGrenade();
 
             if (GetNextActiveSlot() != NO_ACTIVE_SLOT)
             {
@@ -1333,7 +1339,6 @@ void CInventory::InvalidateState() throw()
     m_dwModifyFrame = Device.dwFrame;
 }
 
-//.#include "WeaponHUD.h"
 void CInventory::Items_SetCurrentEntityHud(bool current_entity)
 {
     TIItemContainer::iterator it;

@@ -172,9 +172,9 @@ void CPHDestroyable::Load(CInifile* ini, LPCSTR section)
         CInifile::Sect& data = ini->r_section(section);
         if (data.Data.size() > 0)
             m_flags.set(fl_destroyable, true);
-        for (auto I = data.Data.cbegin(); I != data.Data.cend(); ++I)
-            if (I->first.size())
-                m_destroyed_obj_visual_names.push_back(I->first);
+        for (const auto& I : data.Data)
+            if (I.first.size())
+                m_destroyed_obj_visual_names.push_back(I.first);
     }
 }
 void CPHDestroyable::Load(LPCSTR section)
@@ -337,7 +337,9 @@ void CPHDestroyable::NotificatePart(CPHDestroyableNotificate* dn)
 void CPHDestroyable::NotificateDestroy(CPHDestroyableNotificate* dn)
 {
     VERIFY(m_depended_objects);
+#ifdef DEBUG
     VERIFY(!physics_world()->Processing());
+#endif
     m_depended_objects--;
     PhysicallyRemovePart(dn);
     m_notificate_objects.push_back(dn);

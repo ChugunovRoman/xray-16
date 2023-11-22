@@ -41,6 +41,7 @@
 #include "raypick.h"
 #include "xrCDB/xr_collide_defs.h"
 #include "xrNetServer/NET_Messages.h"
+#include "xrEngine/Rain.h"
 
 LPCSTR command_line() { return Core.Params; }
 bool IsDynamicMusic() { return !!psActorFlags.test(AF_DYNAMIC_MUSIC); }
@@ -99,13 +100,13 @@ CScriptGameObject* get_object_by_id(u16 id)
 LPCSTR get_weather() { return *g_pGamePersistent->Environment().GetWeather(); }
 void set_weather(pcstr const weather_name, const bool forced)
 {
-    if (!Device.editor())
+    if (!Device.editor_mode())
         g_pGamePersistent->Environment().SetWeather(weather_name, forced);
 }
 
 bool set_weather_fx(pcstr const weather_name)
 {
-    if (!Device.editor())
+    if (!Device.editor_mode())
         return g_pGamePersistent->Environment().SetWeatherFX(weather_name);
 
     return false;
@@ -113,7 +114,7 @@ bool set_weather_fx(pcstr const weather_name)
 
 bool start_weather_fx_from_time(pcstr const weather_name, const float time)
 {
-    if (!Device.editor())
+    if (!Device.editor_mode())
         return g_pGamePersistent->Environment().StartWeatherFXFromTime(weather_name, time);
 
     return false;
@@ -124,7 +125,7 @@ float get_wfx_time() { return (g_pGamePersistent->Environment().wfx_time); }
 void stop_weather_fx() { g_pGamePersistent->Environment().StopWFX(); }
 void set_time_factor(const float time_factor)
 {
-    if (!OnServer() || Device.editor())
+    if (!OnServer() || Device.editor_mode())
         return;
 
     Level().Server->GetGameState()->SetGameTimeFactor(time_factor);
@@ -190,7 +191,34 @@ float low_cover_in_direction(u32 level_vertex_id, const Fvector& direction)
     return (ai().level_graph().low_cover_in_direction(y, level_vertex_id));
 }
 
-float rain_factor() { return (g_pGamePersistent->Environment().CurrentEnv->rain_density); }
+float rain_factor() { return (g_pGamePersistent->Environment().CurrentEnv.rain_density); }
+float rain_wetness() { return (g_pGamePersistent->Environment().wetness_factor); }
+float rain_hemi()
+{
+    CEffect_Rain* rain = g_pGamePersistent->pEnvironment->eff_Rain;
+
+    if (rain)
+    {
+        return rain->GetRainHemi();
+    }
+    else
+    {
+        IGameObject* E = g_pGameLevel->CurrentViewEntity();
+        if (E && E->renderable_ROS())
+        {
+            float* hemi_cube = E->renderable_ROS()->get_luminocity_hemi_cube();
+            float hemi_val = _max(hemi_cube[0], hemi_cube[1]);
+            hemi_val = _max(hemi_val, hemi_cube[2]);
+            hemi_val = _max(hemi_val, hemi_cube[3]);
+            hemi_val = _max(hemi_val, hemi_cube[5]);
+
+            return hemi_val;
+        }
+
+        return 0.f;
+    }
+}
+
 u32 vertex_in_direction(u32 level_vertex_id, Fvector direction, float max_distance)
 {
     direction.normalize_safe();
@@ -284,7 +312,13 @@ void show_indicators()
     psActorFlags.set(AF_GODMODE_RT, FALSE);
 }
 
-void show_weapon(bool b) { psHUD_Flags.set(HUD_WEAPON_RT2, b); }
+void show_weapon(bool b)
+{
+    if (psActorFlags.test(AF_GODMODE) && Actor())
+        return;
+
+    psHUD_Flags.set(HUD_WEAPON_RT2, b);
+}
 bool is_level_present() { return (!!g_pGameLevel); }
 void add_call(const luabind::functor<bool>& condition, const luabind::functor<void>& action)
 {
@@ -345,10 +379,13 @@ cphysics_world_scripted* physics_world_scripted()
     return get_script_wrapper<cphysics_world_scripted>(*physics_world());
 }
 CEnvironment* environment() { return (g_pGamePersistent->pEnvironment); }
-CEnvDescriptor* current_environment(CEnvironment* self) { return (self->CurrentEnv); }
+CEnvDescriptor* current_environment(CEnvironment* self) { return &self->CurrentEnv; }
 extern bool g_bDisableAllInput;
 void disable_input()
 {
+    if (psActorFlags.test(AF_GODMODE) && Actor())
+        return;
+
     g_bDisableAllInput = true;
 #ifdef DEBUG
     Msg("input disabled");
@@ -540,7 +577,20 @@ int g_get_general_goodwill_between(u16 from, u16 to)
     return presonal_goodwill + community_to_obj_goodwill + community_to_community_goodwill;
 }
 
-u32 vertex_id(Fvector position) { return (ai().level_graph().vertex_id(position)); }
+u32 vertex_id(Fvector position)
+{
+    return (ai().level_graph().vertex_id(position));
+}
+
+u64 vertex_id_awful(Fvector position)
+{
+    // Original Clear Sky's LuaJIT or luabind converts
+    // 4294967295 (which is u32(-1)) to 4294967296
+    // for some reason :(
+    const u32 id = ai().level_graph().vertex_id(position);
+    return id == u32(-1) ? id + 1 : id; // reproduce Clear Sky behaviour
+}
+
 u32 render_get_dx_level() { return GEnv.Render->get_dx_level(); }
 CUISequencer* g_tutorial = NULL;
 CUISequencer* g_tutorial2 = NULL;
@@ -657,6 +707,18 @@ bool ray_pick(const Fvector& start, const Fvector& dir, float range,
     return false;
 }
 
+// Graff46
+void jump_to_level(const Fvector& m_position, u32 m_level_vertex_id, GameGraph::_GRAPH_ID m_game_vertex_id, const Fvector& m_angles)
+{
+    NET_Packet p;
+    p.w_begin(M_CHANGE_LEVEL);
+    p.w(&m_game_vertex_id, sizeof(m_game_vertex_id));
+    p.w(&m_level_vertex_id, sizeof(m_level_vertex_id));
+    p.w_vec3(m_position);
+    p.w_vec3(m_angles);
+    Level().Send(p, net_flags(TRUE));
+}
+
 // XXX nitrocaster: one can export enum like class, without defining dummy type
 template<typename T>
 struct EnumCallbackType {};
@@ -713,6 +775,7 @@ IC static void CLevel_Export(lua_State* luaState)
 
         def("high_cover_in_direction", high_cover_in_direction), def("low_cover_in_direction", low_cover_in_direction),
         def("vertex_in_direction", vertex_in_direction), def("rain_factor", rain_factor),
+        def("rain_wetness", rain_wetness), def("rain_hemi", rain_hemi),
         def("patrol_path_exists", patrol_path_exists), def("vertex_position", vertex_position),
         def("name", +[]() { return Level().name().c_str(); }),
         def("prefetch_sound", prefetch_sound),
@@ -771,11 +834,24 @@ IC static void CLevel_Export(lua_State* luaState)
         def("add_complex_effector", &add_complex_effector),
         def("remove_complex_effector", &remove_complex_effector),
 
-        def("vertex_id", &vertex_id),
-
         def("game_id", &GameID),
         def("ray_pick", &ray_pick)
-    ],
+    ];
+
+    if (ClearSkyMode)
+    {
+        module(luaState, "level")
+        [
+            def("vertex_id", &vertex_id_awful)
+        ];
+    }
+    else
+    {
+        module(luaState, "level")
+        [
+            def("vertex_id", &vertex_id)
+        ];
+    }
 
     module(luaState, "actor_stats")
     [
@@ -882,12 +958,26 @@ IC static void CLevel_Export(lua_State* luaState)
         def("start_tutorial", &start_tutorial),
         def("stop_tutorial", &stop_tutorial),
         def("has_active_tutorial", &has_active_tutotial),
-	    def("active_tutorial_name", +[](){ return g_tutorial->GetTutorName(); }),
+        def("active_tutorial_name", +[](){ return g_tutorial->GetTutorName(); }),
         def("translate_string", &translate_string),
         def("reload_language", +[]() { StringTable().ReloadLanguage(); }),
-        def("log_stack_trace", &xrDebug::LogStackTrace)
+        def("log_stack_trace", &xrDebug::LogStackTrace),
+        def("jump_to_level", +[](pcstr level_name)
+        {
+            if (!ai().game_graph().header().level_exist(level_name))
+            {
+                GEnv.ScriptEngine->script_log(LuaMessageType::Error,
+                    "game.jump_to_level: cannot jump to level '%s' – it doesn't exist", level_name);
+                return;
+            }
+            ai().alife().jump_to_level(level_name);
+        }),
+        def("jump_to_level", &jump_to_level),
+        def("jump_to_level", +[](const Fvector& m_position, u32 m_level_vertex_id, GameGraph::_GRAPH_ID m_game_vertex_id)
+        {
+            jump_to_level(m_position, m_level_vertex_id, m_game_vertex_id, {});
+        })
     ];
-
 };
 
 SCRIPT_EXPORT_FUNC(CLevel, (), CLevel_Export);

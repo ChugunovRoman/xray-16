@@ -9,9 +9,10 @@
 #include "UIMapList.h"
 #include "UIGameCustom.h"
 
-ButtonListDialog::ButtonListDialog()
+ButtonListDialog::ButtonListDialog(pcstr window_name)
+    : CUIDialogWnd(window_name)
 {
-    Background = xr_new<CUIStatic>();
+    Background = xr_new<CUIStatic>("Background");
     Background->SetAutoDelete(true);
     AttachChild(Background);
     Header = xr_new<CUITextWnd>();
@@ -86,7 +87,7 @@ void ChangeWeatherDialog::InitChangeWeather(CUIXml& xmlDoc)
     auto& gameWeathers = gMapListHelper.GetGameWeathers();
     Initialize(gameWeathers.size());
     weathers.resize(gameWeathers.size());
-    
+
     // There is no mistake. Vanilla algorithm sorted config keys by alphabet.
     // We did it for vanilla bug fixes and compatibility with game data.
     string256 path;

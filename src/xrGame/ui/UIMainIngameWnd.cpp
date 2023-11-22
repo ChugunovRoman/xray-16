@@ -53,12 +53,7 @@ using namespace InventoryUtilities;
 static constexpr pcstr MAININGAME_XML = "maingame.xml";
 
 CUIMainIngameWnd::CUIMainIngameWnd()
-    : /*m_pGrenade(NULL),m_pItem(NULL),*/ m_pPickUpItem(nullptr), m_pMPChatWnd(nullptr), UIArtefactIcon(nullptr),
-      m_pMPLogWnd(nullptr), UIArtefactPanel(nullptr)
-
-{
-    UIZoneMap = xr_new<CUIZoneMap>();
-}
+    : CUIWindow(CUIMainIngameWnd::GetDebugType()), UIZoneMap(xr_new<CUIZoneMap>()) {}
 
 extern CUIProgressShape* g_MissileForceShape;
 
@@ -107,9 +102,6 @@ void CUIMainIngameWnd::Init()
     m_iPickUpItemIconX = UIPickUpItemIcon->GetWndRect().left;
     m_iPickUpItemIconY = UIPickUpItemIcon->GetWndRect().top;
     //---------------------------------------------------------
-
-    //индикаторы
-    UIZoneMap->Init();
 
     // Подсказки, которые возникают при наведении прицела на объект
     UIStaticQuickHelp = UIHelper::CreateTextWnd(uiXml, "quick_info", this);
@@ -178,9 +170,8 @@ void CUIMainIngameWnd::Init()
         UIArtefactIcon->Show(false);
     }
 
-    shared_str warningStrings[7] = {"jammed", "radiation", "wounds", "starvation", "fatigue",
-        "invincible"
-        "artefact"};
+    const static shared_str warningStrings[7] = {"jammed", "radiation", "wounds", "starvation", "fatigue",
+        "invincible", "artefact"};
 
     // Загружаем пороговые значения для индикаторов
     EWarningIcons j = ewiWeaponJammed;
@@ -212,11 +203,20 @@ void CUIMainIngameWnd::Init()
 
     UIMotionIcon = xr_new<CUIMotionIcon>();
     UIMotionIcon->SetAutoDelete(true);
-    const bool independent = UIMotionIcon->Init(UIZoneMap->MapFrame().GetWndRect());
-    if (!independent)
+    const bool attachedToMinimap = UIMotionIcon->Init();
+
+    //индикаторы
+    UIZoneMap->Init(attachedToMinimap);
+
+    if (attachedToMinimap)
+    {
         UIZoneMap->MapFrame().AttachChild(UIMotionIcon);
+        UIMotionIcon->AttachToMinimap(UIZoneMap->MapFrame().GetWndRect());
+    }
     else
+    {
         AttachChild(UIMotionIcon);
+    }
 
     UIStaticDiskIO = UIHelper::CreateStatic(uiXml, "disk_io", this);
 
@@ -454,11 +454,15 @@ void CUIMainIngameWnd::SetWarningIconColor(EWarningIcons icon, const u32 cl)
     // Задаем цвет требуемой иконки
     switch (icon)
     {
-    case ewiAll: bMagicFlag = false;
+    case ewiAll:
+        bMagicFlag = false;
+        [[fallthrough]];
+
     case ewiWeaponJammed:
         SetWarningIconColorUI(UIWeaponJammedIcon, cl);
         if (bMagicFlag)
             break;
+        [[fallthrough]];
 
     /*	case ewiRadiation:
             SetWarningIconColorUI	(&UIRadiaitionIcon, cl);
@@ -503,7 +507,7 @@ void CUIMainIngameWnd::InitFlashingIcons(CUIXml* node)
     // Пробегаемся по всем нодам и инициализируем из них статики
     for (int i = 0; i < staticsCount; ++i)
     {
-        pIcon = xr_new<CUIStatic>();
+        pIcon = xr_new<CUIStatic>(flashingIconNodeName);
         CUIXmlInit::InitStatic(*node, flashingIconNodeName, i, pIcon);
         shared_str iconType = node->ReadAttrib(flashingIconNodeName, i, "type", "none");
 
@@ -606,7 +610,7 @@ void CUIMainIngameWnd::OnConnected()
     }
 }
 
-void CUIMainIngameWnd::OnSectorChanged(int sector) { UIZoneMap->OnSectorChanged(sector); }
+void CUIMainIngameWnd::OnSectorChanged(IRender_Sector::sector_id_t sector) { UIZoneMap->OnSectorChanged(sector); }
 void CUIMainIngameWnd::reset_ui()
 {
     m_pPickUpItem = NULL;
@@ -962,110 +966,109 @@ void CUIMainIngameWnd::UpdateBoosterIndicators(const CEntityCondition::BOOSTER_M
     flags |= LA_ONLYALPHA;
     flags |= LA_TEXTURECOLOR;
 
-    xr_map<EBoostParams, SBooster>::const_iterator b = influences.begin(), e = influences.end();
-    for (; b != e; ++b)
+    for(const auto& [_, booster] : influences)
     {
-        switch (b->second.m_type)
+        switch (booster.m_type)
         {
         case eBoostHpRestore:
         {
             if (m_ind_boost_health)
             {
                 m_ind_boost_health->Show(true);
-                if (b->second.fBoostTime <= 3.0f)
+                if (booster.fBoostTime <= 3.0f)
                     m_ind_boost_health->SetColorAnimation(str_flag, flags);
                 else
                     m_ind_boost_health->ResetColorAnimation();
             }
+            break;
         }
-        break;
         case eBoostPowerRestore:
         {
             if (m_ind_boost_power)
             {
                 m_ind_boost_power->Show(true);
-                if (b->second.fBoostTime <= 3.0f)
+                if (booster.fBoostTime <= 3.0f)
                     m_ind_boost_power->SetColorAnimation(str_flag, flags);
                 else
                     m_ind_boost_power->ResetColorAnimation();
             }
+            break;
         }
-        break;
         case eBoostRadiationRestore:
         {
             if (m_ind_boost_rad)
             {
                 m_ind_boost_rad->Show(true);
-                if (b->second.fBoostTime <= 3.0f)
+                if (booster.fBoostTime <= 3.0f)
                     m_ind_boost_rad->SetColorAnimation(str_flag, flags);
                 else
                     m_ind_boost_rad->ResetColorAnimation();
             }
+            break;
         }
-        break;
         case eBoostBleedingRestore:
         {
             if (m_ind_boost_wound)
             {
                 m_ind_boost_wound->Show(true);
-                if (b->second.fBoostTime <= 3.0f)
+                if (booster.fBoostTime <= 3.0f)
                     m_ind_boost_wound->SetColorAnimation(str_flag, flags);
                 else
                     m_ind_boost_wound->ResetColorAnimation();
             }
+            break;
         }
-        break;
         case eBoostMaxWeight:
         {
             if (m_ind_boost_weight)
             {
                 m_ind_boost_weight->Show(true);
-                if (b->second.fBoostTime <= 3.0f)
+                if (booster.fBoostTime <= 3.0f)
                     m_ind_boost_weight->SetColorAnimation(str_flag, flags);
                 else
                     m_ind_boost_weight->ResetColorAnimation();
             }
+            break;
         }
-        break;
         case eBoostRadiationImmunity:
         case eBoostRadiationProtection:
         {
             if (m_ind_boost_radia)
             {
                 m_ind_boost_radia->Show(true);
-                if (b->second.fBoostTime <= 3.0f)
+                if (booster.fBoostTime <= 3.0f)
                     m_ind_boost_radia->SetColorAnimation(str_flag, flags);
                 else
                     m_ind_boost_radia->ResetColorAnimation();
             }
+            break;
         }
-        break;
         case eBoostTelepaticImmunity:
         case eBoostTelepaticProtection:
         {
             if (m_ind_boost_psy)
             {
                 m_ind_boost_psy->Show(true);
-                if (b->second.fBoostTime <= 3.0f)
+                if (booster.fBoostTime <= 3.0f)
                     m_ind_boost_psy->SetColorAnimation(str_flag, flags);
                 else
                     m_ind_boost_psy->ResetColorAnimation();
             }
+            break;
         }
-        break;
         case eBoostChemicalBurnImmunity:
         case eBoostChemicalBurnProtection:
         {
             if (m_ind_boost_chem)
             {
                 m_ind_boost_chem->Show(true);
-                if (b->second.fBoostTime <= 3.0f)
+                if (booster.fBoostTime <= 3.0f)
                     m_ind_boost_chem->SetColorAnimation(str_flag, flags);
                 else
                     m_ind_boost_chem->ResetColorAnimation();
             }
+            break;
         }
-        break;
         }
     }
 }

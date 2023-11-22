@@ -39,16 +39,12 @@ CUIInventoryUpgradeWnd::Scheme::Scheme() {}
 CUIInventoryUpgradeWnd::Scheme::~Scheme() { delete_data(cells); }
 // =============================================================================================
 
-CUIInventoryUpgradeWnd::CUIInventoryUpgradeWnd()
+CUIInventoryUpgradeWnd::CUIInventoryUpgradeWnd() : CUIWindow(CUIInventoryUpgradeWnd::GetDebugType())
 {
     // m_WeaponIconsShader = new ui_shader();
     //(*m_WeaponIconsShader)->create("hud" DELIMITER "default", "ui" DELIMITER "ui_actor_weapons");
     // m_OutfitIconsShader = new ui_shader();
     //(*m_OutfitIconsShader)->create("hud" DELIMITER "default", "ui" DELIMITER "ui_actor_armor");
-    m_inv_item = nullptr;
-    m_cur_upgrade_id = nullptr;
-    m_current_scheme = nullptr;
-    m_btn_repair = nullptr;
 }
 
 CUIInventoryUpgradeWnd::~CUIInventoryUpgradeWnd()
@@ -74,7 +70,7 @@ bool CUIInventoryUpgradeWnd::Init()
     m_item = UIHelper::CreateStatic(uiXml, "item_static", this, false);
     m_back = UIHelper::CreateNormalWindow(uiXml, "back", this, false);
     m_scheme_wnd = UIHelper::CreateNormalWindow(uiXml, "scheme", this);
-    
+
     m_item_info = xr_new<CUIItemInfo>();
     if (m_item_info->InitItemInfo("inventory_upgrade_info.xml"))
     {
@@ -85,7 +81,7 @@ bool CUIInventoryUpgradeWnd::Init()
     {
         xr_delete(m_item_info);
     }
-    
+
     m_btn_repair = UIHelper::Create3tButton(uiXml, "repair_button", this);
     CUIActorMenu* parent_wnd = smart_cast<CUIActorMenu*>(m_pParentWnd);
     if (parent_wnd)
@@ -258,7 +254,7 @@ bool CUIInventoryUpgradeWnd::install_item(CInventoryItem& inv_item, bool can_upg
             shared_str prop_name = upgrade_p->get_property_name(i);
             if (prop_name.size())
             {
-                Property_type* prop_p = get_manager().get_property(prop_name);
+                [[maybe_unused]] auto prop_p = get_manager().get_property(prop_name);
                 VERIFY(prop_p);
             }
         }

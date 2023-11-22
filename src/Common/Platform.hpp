@@ -7,8 +7,8 @@
 #   define XR_PLATFORM_LINUX
 #   define _XRAY_PLATFORM_MARKER "Linux"
 #elif defined(__FreeBSD__)
-#   define XR_PLATFORM_FREEBSD
-#   define _XRAY_PLATFORM_MARKER "FreeBSD"
+#   define XR_PLATFORM_BSD
+#   define _XRAY_PLATFORM_MARKER "BSD"
 #elif defined(__APPLE__)
 #   define XR_PLATFORM_APPLE
 #   define _XRAY_PLATFORM_MARKER "Apple"
@@ -28,6 +28,12 @@
 #elif defined (_M_ARM64) || defined(__aarch64__)
 #   define XR_ARCHITECTURE_ARM64
 #   define _XRAY_ARCHITECTURE_MARKER "ARM 64-bit"
+#elif defined(__powerpc64__) || defined(__ppc64__)
+#   define XR_ARCHITECTURE_PPC64
+#   define _XRAY_ARCHITECTURE_MARKER "PowerPC 64-bit"
+#elif defined (_M_PPC) || defined(__powerpc__)
+#   define XR_ARCHITECTURE_PPC
+#   define _XRAY_ARCHITECTURE_MARKER "PowerPC 32-bit"
 #elif defined (__e2k__)
 #   define XR_ARCHITECTURE_E2K
 #   define _XRAY_ARCHITECTURE_MARKER "E2K"
@@ -48,7 +54,7 @@
 #include "Common/PlatformWindows.inl"
 #elif defined(XR_PLATFORM_LINUX)
 #include "Common/PlatformLinux.inl"
-#elif defined(XR_PLATFORM_FREEBSD)
+#elif defined(XR_PLATFORM_BSD)
 #include "Common/PlatformBSD.inl"
 #elif defined(XR_PLATFORM_APPLE)
 #include "Common/PlatformApple.inl"

@@ -6,8 +6,8 @@
 #include "Include/xrRender/UIRender.h"
 #include "xrCore/_fbox2.h"
 
-const u32 MAX_TRACERS = (1024 * 5);
-const float TRACER_SIZE = 0.13f;
+//const u32 MAX_TRACERS = (1024 * 5);
+//const float TRACER_SIZE = 0.13f;
 
 CTracer::CTracer()
 {
@@ -20,6 +20,7 @@ CTracer::CTracer()
     m_aColors.clear();
     string64 LineName;
 
+    m_aColors.reserve(255);
     for (u8 i = 0; i < 255; i++)
     {
         xr_sprintf(LineName, "color_%d", i);

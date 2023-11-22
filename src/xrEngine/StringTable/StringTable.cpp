@@ -23,7 +23,10 @@ void CStringTable::Destroy()
     pData.reset(nullptr);
 
     for (auto& token : languagesToken)
-        xr_free(token.name);
+    {
+        auto tokenName = const_cast<char*>(token.name);
+        xr_free(tokenName);
+    }
 
     languagesToken.clear();
 }
@@ -140,6 +143,11 @@ void CStringTable::SetLanguage()
     }
 }
 
+shared_str CStringTable::GetCurrentLanguage() const
+{
+    return pData ? pData->m_sLanguage : nullptr;
+}
+
 xr_token* CStringTable::GetLanguagesToken() const { return languagesToken.data(); }
 
 void CStringTable::Load(LPCSTR xml_file_full)
@@ -157,8 +165,10 @@ void CStringTable::Load(LPCSTR xml_file_full)
     {
         LPCSTR string_name = uiXml.ReadAttrib(uiXml.GetRoot(), "string", i, "id", NULL);
 
-        VERIFY3(pData->m_StringTable.find(string_name) == pData->m_StringTable.end(), "duplicate string table id",
-            string_name);
+#ifndef MASTER_GOLD
+        if (pData->m_StringTable.find(string_name) != pData->m_StringTable.end())
+            Msg("~ duplicate string table id [%s]", string_name);
+#endif
 
         LPCSTR string_text = uiXml.Read(uiXml.GetRoot(), "string:text", i, NULL);
 
@@ -222,9 +232,32 @@ STRING_VALUE CStringTable::ParseLine(pcstr str)
 
 STRING_VALUE CStringTable::translate(const STRING_ID& str_id) const
 {
-    VERIFY(pData);
+    if (!pData)
+        return str_id;
 
     if (pData->m_StringTable.find(str_id) != pData->m_StringTable.end())
         return pData->m_StringTable[str_id];
     return str_id;
+}
+
+bool CStringTable::translate(const STRING_ID& str_id, STRING_VALUE& out) const
+{
+    if (!pData)
+        return false;
+
+    if (pData->m_StringTable.find(str_id) != pData->m_StringTable.end())
+    {
+        out = pData->m_StringTable[str_id];
+        return true;
+    }
+    return false;
+}
+
+pcstr CStringTable::translate(const STRING_ID& str_id, pcstr default_value) const
+{
+    STRING_VALUE out;
+    if (translate(str_id, out))
+        return out.c_str();
+
+    return default_value;
 }

@@ -2,7 +2,7 @@
 
 #include "xrUICore/Static/UIStatic.h"
 
-class CUIStatsIcon : public CUIStatic
+class CUIStatsIcon final : public CUIStatic
 {
     friend class CUIStatsPlayerList;
     friend class UITeamPanels;
@@ -10,6 +10,7 @@ class CUIStatsIcon : public CUIStatic
 public:
     CUIStatsIcon();
     void SetValue(LPCSTR str);
+    pcstr GetDebugType() override { return "CUIStatsIcon"; }
 
 protected:
     enum DEF_TEX

@@ -19,7 +19,7 @@ extern ENGINE_API bool bShowPauseString;
 void CallFunction(shared_str const& func)
 {
     luabind::functor<void> functor_to_call;
-    const bool functor_exists = GEnv.ScriptEngine->functor(func.c_str(), functor_to_call);
+    [[maybe_unused]] const bool functor_exists = GEnv.ScriptEngine->functor(func.c_str(), functor_to_call);
     THROW3(functor_exists, "Cannot find script function described in tutorial item ", func.c_str());
     if (functor_to_call.is_valid())
         functor_to_call();
@@ -81,7 +81,7 @@ void CUISequenceItem::Start()
     CallFunctions(m_start_lua_functions);
     if (m_onframe_lua_function.size())
     {
-        bool functor_exists = GEnv.ScriptEngine->functor(m_onframe_lua_function.c_str(), m_onframe_functor);
+        [[maybe_unused]] bool functor_exists = GEnv.ScriptEngine->functor(m_onframe_lua_function.c_str(), m_onframe_functor);
         THROW3(
             functor_exists, "Cannot find script function described in tutorial item ", m_onframe_lua_function.c_str());
     }
@@ -120,7 +120,7 @@ bool CUISequencer::Start(LPCSTR tutor_name)
     Device.seqFrame.Add(this, REG_PRIORITY_LOW - 10000);
 
     m_name = tutor_name;
-    m_UIWindow = xr_new<CUIWindow>();
+    m_UIWindow = xr_new<CUIWindow>("Window");
 
     m_flags.set(etsPlayEachItem, !!uiXml.ReadInt("play_each_item", 0, 0));
     m_flags.set(etsPersistent, !!uiXml.Read("persistent", 0, 0));
@@ -211,7 +211,7 @@ CUISequenceItem* CUISequencer::GetNextItem()
         if (f.size() == 0)
             break;
 
-        bool functor_exists = GEnv.ScriptEngine->functor(f.c_str(), functor_to_call);
+        [[maybe_unused]] bool functor_exists = GEnv.ScriptEngine->functor(f.c_str(), functor_to_call);
         THROW3(functor_exists, "Cannot find script function described in tutorial item ", f.c_str());
 
         bool call_result = true;
@@ -383,12 +383,6 @@ void CUISequencer::IR_OnMouseMove(int x, int y)
         m_pStoredInputReceiver->IR_OnMouseMove(x, y);
 }
 
-void CUISequencer::IR_OnMouseStop(int x, int y)
-{
-    if (!GrabInput() && m_pStoredInputReceiver)
-        m_pStoredInputReceiver->IR_OnMouseStop(x, y);
-}
-
 void CUISequencer::IR_OnKeyboardRelease(int dik)
 {
     if (!GrabInput() && m_pStoredInputReceiver)
@@ -409,14 +403,14 @@ void CUISequencer::IR_OnMouseWheel(int x, int y)
 
 void CUISequencer::IR_OnKeyboardPress(int dik)
 {
-    if (m_sequencer_items.size())
+    CUISequenceItem* item = m_sequencer_items.empty() ? nullptr : m_sequencer_items.front();
+
+    if (item)
         m_sequencer_items.front()->OnKeyboardPress(dik);
 
-    bool b = true;
-    if (m_sequencer_items.size())
-        b &= m_sequencer_items.front()->AllowKey(dik);
+    const bool b = item ? item->AllowKey(dik) : true;
 
-    bool binded = IsBinded(kQUIT, dik);
+    const bool binded = IsBinded(kQUIT, dik) || IsBinded(kUI_BACK, dik, EKeyContext::UI);
     if (b && binded)
     {
         Stop();
@@ -445,14 +439,14 @@ void CUISequencer::IR_OnKeyboardPress(int dik)
 
 void CUISequencer::IR_OnControllerPress(int key, float x, float y)
 {
-    if (m_sequencer_items.size())
-        m_sequencer_items.front()->OnControllerPress(key);
+    CUISequenceItem* item = m_sequencer_items.empty() ? nullptr : m_sequencer_items.front();
 
-    bool b = true;
-    if (m_sequencer_items.size())
-        b &= m_sequencer_items.front()->AllowKey(key);
+    if (item)
+        m_sequencer_items.front()->OnKeyboardPress(key);
 
-    bool binded = IsBinded(kQUIT, key);
+    const bool b = item ? item->AllowKey(key) : true;
+
+    const bool binded = IsBinded(kQUIT, key) || IsBinded(kUI_BACK, key, EKeyContext::UI);
     if (b && binded)
     {
         Stop();
@@ -495,8 +489,8 @@ void CUISequencer::IR_OnActivate()
 {
     if (!pInput)
         return;
-    int i;
-    for (i = 0; i < CInput::COUNT_KB_BUTTONS; i++)
+
+    for (int i = 0; i < CInput::COUNT_KB_BUTTONS; i++)
     {
         if (IR_GetKeyState(i))
         {
@@ -516,10 +510,8 @@ void CUISequencer::IR_OnActivate()
             case kL_LOOKOUT:
             case kR_LOOKOUT:
             case kWPN_FIRE:
-            {
                 IR_OnKeyboardPress(i);
-            }
-            break;
+                break;
             };
         };
     }

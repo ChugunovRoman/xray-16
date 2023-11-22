@@ -103,6 +103,7 @@ void CUILines::ParseText(bool force)
     BOOL bNewLines = FALSE;
 
     if (uFlags.test(flRecognizeNewLine))
+    {
         if (m_pFont->IsMultibyte())
         {
             CUILine* ptmp_line = xr_new<CUILine>();
@@ -113,7 +114,7 @@ void CUILines::ParseText(bool force)
                 char* pszTemp = NULL;
                 const u32 tcolor = line->m_subLines[i].m_color;
                 char szTempLine[MAX_MB_CHARS], *pszSearch = NULL;
-                size_t llen = xr_strlen(line->m_subLines[i].m_text.c_str());
+                [[maybe_unused]] auto llen = xr_strlen(line->m_subLines[i].m_text.c_str());
                 VERIFY(llen < MAX_MB_CHARS);
                 xr_strcpy(szTempLine, line->m_subLines[i].m_text.c_str());
                 pszSearch = szTempLine;
@@ -121,7 +122,12 @@ void CUILines::ParseText(bool force)
                 {
                     bNewLines = TRUE;
                     *pszTemp = '\0';
-                    ptmp_line->AddSubLine(pszSearch, tcolor);
+                    CUISubLine subline;
+                    subline.m_text = pszSearch;
+                    subline.m_color = tcolor;
+                    subline.m_last_in_line = true;
+                    //ptmp_line->AddSubLine(pszSearch, tcolor);
+                    ptmp_line->AddSubLine(&subline);
                     pszSearch = pszTemp + 2;
                 }
                 ptmp_line->AddSubLine(pszSearch, tcolor);
@@ -134,7 +140,7 @@ void CUILines::ParseText(bool force)
         {
             line->ProcessNewLines();
         }
-
+    }
     if (m_pFont->IsMultibyte())
     {
 #define UBUFFER_SIZE 100
@@ -163,8 +169,9 @@ void CUILines::ParseText(bool force)
         {
             for (int i = 0; i < vsz; i++)
             {
-                const char* pszText = line->m_subLines[i].m_text.c_str();
-                const u32 tcolor = line->m_subLines[i].m_color;
+                CUISubLine* pSubLine = &line->m_subLines[i];
+                const char* pszText = pSubLine->m_text.c_str();
+                const u32 tcolor = pSubLine->m_color;
                 u16 uFrom = 0, uPartLen = 0;
                 VERIFY(pszText);
                 u16 nMarkers = m_pFont->SplitByWidth(aMarkers, UBUFFER_SIZE, fTargetWidth, pszText);
@@ -185,8 +192,11 @@ void CUILines::ParseText(bool force)
                 }
                 strncpy_s(szTempLine, pszText + uFrom, MAX_MB_CHARS);
                 tmp_line.AddSubLine(szTempLine, tcolor);
-                m_lines.push_back(tmp_line);
-                tmp_line.Clear();
+                if (pSubLine->m_last_in_line || i == (vsz -1))
+                {
+                    m_lines.push_back(tmp_line);
+                    tmp_line.Clear();
+                }
             }
         }
     }
@@ -197,7 +207,8 @@ void CUILines::ParseText(bool force)
         CUILine tmp_line;
         string4096 buff;
         float curr_width = 0.0f;
-        bool bnew_line = false;
+        // XXX: use 'bnew_line' or remove it
+        [[maybe_unused]] bool bnew_line = false;
         float __eps = get_str_width(m_pFont, 'o'); // hack -(
         for (u32 sbl_idx = 0; sbl_idx < sbl_cnt; ++sbl_idx)
         {

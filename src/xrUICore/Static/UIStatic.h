@@ -31,15 +31,16 @@ private:
     typedef CUIWindow inherited;
     lanim_cont_xf m_lanim_xform;
     void EnableHeading_int(bool b) { m_bHeading = b; }
+
 public:
-    CUIStatic();
-    virtual ~CUIStatic();
+    CUIStatic(pcstr window_name);
+    ~CUIStatic() override;
 
     virtual void Draw();
     virtual void Update();
     virtual void OnFocusLost();
 
-    virtual pcstr GetText() { return TextItemControl()->GetText(); }
+    virtual pcstr GetText() const { return const_cast<CUIStatic*>(this)->TextItemControl()->GetText(); }
     virtual void SetText(pcstr txt) { TextItemControl()->SetText(txt); }
     virtual void SetTextST(pcstr txt) { TextItemControl()->SetTextST(txt); }
 
@@ -121,16 +122,19 @@ public:
     virtual void ColorAnimationSetTextureColor(u32 color, bool only_alpha);
     virtual void ColorAnimationSetTextColor(u32 color, bool only_alpha);
 
-protected:
-    CUILines* m_pTextControl;
+    pcstr GetDebugType() override { return "CUIStatic"; }
+    void FillDebugInfo() override;
 
-    bool m_bStretchTexture;
-    bool m_bTextureEnable;
+protected:
+    CUILines* m_pTextControl{};
+
+    bool m_bStretchTexture{};
+    bool m_bTextureEnable{ true };
     CUIStaticItem m_UIStaticItem;
 
-    bool m_bHeading;
-    bool m_bConstHeading;
-    float m_fHeading;
+    bool m_bHeading{};
+    bool m_bConstHeading{};
+    float m_fHeading{};
 
     Fvector2 m_TextureOffset;
 
@@ -139,14 +143,14 @@ public:
     shared_str m_stat_hint_text;
 };
 
-class XRUICORE_API CUITextWnd : public CUIWindow, public CUILightAnimColorConrollerImpl
+class XRUICORE_API CUITextWnd final : public CUIWindow, public CUILightAnimColorConrollerImpl
 {
     typedef CUIWindow inherited;
     CUILines m_lines;
 
 public:
     CUITextWnd();
-    virtual ~CUITextWnd(){};
+
     virtual void Draw();
     virtual void Update();
 
@@ -174,4 +178,7 @@ public:
     virtual void ColorAnimationSetTextColor(u32 color, bool only_alpha);
 
     CUILines& TextItemControl() { return m_lines; }
+
+    pcstr GetDebugType() override { return "CUITextWnd"; }
+    void FillDebugInfo() override;
 };

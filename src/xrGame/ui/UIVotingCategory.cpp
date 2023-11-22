@@ -9,7 +9,7 @@
 #include "game_cl_teamdeathmatch.h"
 #include "game_sv_mp_vote_flags.h"
 
-CUIVotingCategory::CUIVotingCategory()
+CUIVotingCategory::CUIVotingCategory() : CUIDialogWnd(CUIVotingCategory::GetDebugType())
 {
     xml_doc = NULL;
     kick = NULL;
@@ -17,10 +17,10 @@ CUIVotingCategory::CUIVotingCategory()
     change_map = NULL;
     change_gametype = NULL;
 
-    bkgrnd = xr_new<CUIStatic>();
+    bkgrnd = xr_new<CUIStatic>("Background");
     bkgrnd->SetAutoDelete(true);
     AttachChild(bkgrnd);
-    header = xr_new<CUIStatic>();
+    header = xr_new<CUIStatic>("Header");
     header->SetAutoDelete(true);
     AttachChild(header);
     btn_cancel = xr_new<CUI3tButton>();
@@ -33,7 +33,7 @@ CUIVotingCategory::CUIVotingCategory()
         btn[i]->SetAutoDelete(true);
         AttachChild(btn[i]);
 
-        txt[i] = xr_new<CUIStatic>();
+        txt[i] = xr_new<CUIStatic>("Text");
         txt[i]->SetAutoDelete(true);
         AttachChild(txt[i]);
     }

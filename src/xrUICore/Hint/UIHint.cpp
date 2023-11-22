@@ -12,7 +12,7 @@
 #include "Windows/UIFrameWindow.h"
 #include "XML/UIXmlInitBase.h"
 
-UIHint::UIHint()
+UIHint::UIHint() : CUIWindow("UIHint")
 {
     m_visible = false;
     m_rect.set(0.0f, 0.0f, UI_BASE_WIDTH, UI_BASE_HEIGHT);
@@ -26,7 +26,7 @@ void UIHint::init_from_xml(CUIXml& xml, LPCSTR path)
     XML_NODE new_root = xml.NavigateToNode(path, 0);
     xml.SetLocalRoot(new_root);
 
-    m_background = xr_new<CUIFrameWindow>();
+    m_background = xr_new<CUIFrameWindow>("Background");
     AttachChild(m_background);
     m_background->SetAutoDelete(true);
     CUIXmlInitBase::InitFrameWindow(xml, "background", 0, m_background);
@@ -73,7 +73,7 @@ void UIHint::Draw()
 
 // =================================================================================================
 
-UIHintWindow::UIHintWindow() : m_hint_wnd(NULL), m_hint_delay(1000), m_enable(false) {}
+UIHintWindow::UIHintWindow() : CUIWindow("UIHintWindow"), m_hint_wnd(NULL), m_hint_delay(1000), m_enable(false) {}
 void UIHintWindow::disable_hint()
 {
     if (!m_hint_wnd)
@@ -112,7 +112,7 @@ void UIHintWindow::update_hint_text()
     {
         return;
     }
-    if (Device.dwTimeGlobal < (m_dwFocusReceiveTime + m_hint_delay))
+    if (Device.dwTimeGlobal < (m_dwFocusReceiveTime + m_hint_delay * Device.time_factor()))
     {
         return;
     }

@@ -26,7 +26,10 @@ protected:
 
 public:
     IInputReceiver* m_pStoredInputReceiver;
+
     CUISequencer();
+    virtual ~CUISequencer() = default;
+
     bool Start(LPCSTR tutor_name);
     void Stop();
     void Next();
@@ -42,7 +45,6 @@ public:
     virtual void IR_OnMouseRelease(int btn);
     virtual void IR_OnMouseHold(int btn);
     virtual void IR_OnMouseMove(int x, int y);
-    virtual void IR_OnMouseStop(int x, int y);
 
     virtual void IR_OnKeyboardPress(int dik);
     virtual void IR_OnKeyboardRelease(int dik);
@@ -120,15 +122,20 @@ public:
 class CUISequenceSimpleItem : public CUISequenceItem
 {
     typedef CUISequenceItem inherited;
-    struct SSubItem
+    struct SSubItem final
     {
         CUIStatic* m_wnd;
-        float m_start;
-        float m_length;
-        bool m_visible;
+        float m_start{};
+        float m_length{};
+        bool m_visible{};
 
-        virtual void Start();
-        virtual void Stop();
+        SSubItem(CUIStatic* wnd) : m_wnd(wnd)
+        {
+            R_ASSERT(m_wnd);
+        }
+
+        void Start();
+        void Stop();
     };
     using SubItemVec = xr_vector<SSubItem>;
     SubItemVec m_subitems;
@@ -138,6 +145,8 @@ class CUISequenceSimpleItem : public CUISequenceItem
         shared_str m_functor;
         bool m_bfinalize;
     };
+
+    bool isTimeDilatedInPDA;
 
 public:
     CUIWindow* m_UIWindow;

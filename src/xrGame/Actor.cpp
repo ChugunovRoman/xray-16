@@ -75,28 +75,30 @@
 #include "ui/UIDragDropReferenceList.h"
 #include "xrCore/xr_token.h"
 
-const u32 patch_frames = 50;
-const float respawn_delay = 1.f;
-const float respawn_auto = 7.f;
+#include "xrEngine/Rain.h"
+
+//const u32 patch_frames = 50;
+//const float respawn_delay = 1.f;
+//const float respawn_auto = 7.f;
 
 constexpr float default_feedback_duration = 0.2f;
 
 extern float cammera_into_collision_shift;
 extern int g_first_person_death;
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1;
+extern ENGINE_API Fvector4 ps_r2_mask_control;
+extern ENGINE_API Fvector ps_r2_drops_control;
+extern ENGINE_API float ps_ssfx_gloss_factor;
+extern ENGINE_API Fvector3 ps_ssfx_gloss_minmax;
 
 string32 ACTOR_DEFS::g_quick_use_slots[4] = {};
 // skeleton
 
-static Fbox bbStandBox;
-static Fbox bbCrouchBox;
-static Fvector vFootCenter;
-static Fvector vFootExt;
-
 Flags32 psActorFlags =
 {
     AF_GODMODE_RT |
-    AF_AUTOPICKUP | 
-    AF_RUN_BACKWARD | 
+    AF_AUTOPICKUP |
+    AF_RUN_BACKWARD |
     AF_IMPORTANT_SAVE |
     AF_MULTI_ITEM_PICKUP
 };
@@ -194,7 +196,7 @@ CActor::CActor() : CEntityAlive(), current_ik_cam_shift(0)
     m_anims = xr_new<SActorMotions>();
     //Alundaio: Needed for car
     m_vehicle_anims = xr_new<SActorVehicleAnims>();
-	//-Alundaio
+    //-Alundaio
     m_entity_condition = NULL;
     m_iLastHitterID = u16(-1);
     m_iLastHittingWeaponID = u16(-1);
@@ -228,8 +230,8 @@ CActor::~CActor()
     Device.seqRender.Remove(this);
 #endif
     // xr_delete(Weapons);
-    for (int i = 0; i < eacMaxCam; ++i)
-        xr_delete(cameras[i]);
+    for (auto& camera : cameras)
+        xr_delete(camera);
 
     m_HeavyBreathSnd.destroy();
     m_BloodSnd.destroy();
@@ -240,9 +242,9 @@ CActor::~CActor()
     xr_delete(m_pPhysics_support);
 
     xr_delete(m_anims);
-	//Alundaio: For car
+    //Alundaio: For car
     xr_delete(m_vehicle_anims);
-	//-Alundaio
+    //-Alundaio
 }
 
 void CActor::reinit()
@@ -385,44 +387,42 @@ void CActor::Load(LPCSTR section)
 
     if (!GEnv.isDedicatedServer)
     {
-        LPCSTR hit_snd_sect = pSettings->r_string(section, "hit_sounds");
+        string256 buf;
+
+        cpcstr hit_snd_sect = pSettings->r_string(section, "hit_sounds");
         for (int hit_type = 0; hit_type < (int)ALife::eHitTypeMax; ++hit_type)
         {
-            string256 buf;
 
-            LPCSTR hit_name = ALife::g_cafHitType2String((ALife::EHitType)hit_type);
-            LPCSTR hit_snds = READ_IF_EXISTS(pSettings, r_string, hit_snd_sect, hit_name, "");
-            int cnt = _GetItemCount(hit_snds);
-            if (hit_type != (int)ALife::eHitTypePhysicStrike)
-                VERIFY(cnt != 0);
+            cpcstr hit_name = ALife::g_cafHitType2String((ALife::EHitType)hit_type);
+            cpcstr hit_snds = READ_IF_EXISTS(pSettings, r_string, hit_snd_sect, hit_name, "");
+            const int cnt = _GetItemCount(hit_snds);
+#ifndef MASTER_GOLD
+            if (cnt == 0)
+            {
+                Msg("~ [%s] is missing sounds for type [%s]", hit_snd_sect, hit_name);
+            }
+#endif
+            sndHit[hit_type].reserve(cnt);
             for (int i = 0; i < cnt; ++i)
             {
-                sndHit[hit_type].push_back(ref_sound());
-                sndHit[hit_type].back().create(_GetItem(hit_snds, i, buf), st_Effect, sg_SourceType);
+                sndHit[hit_type].emplace_back().create(_GetItem(hit_snds, i, buf), st_Effect, sg_SourceType);
             }
+        }
 
-            GEnv.Sound->create(
-                sndDie[0], strconcat(sizeof(buf), buf, *cName(), DELIMITER "die0"), st_Effect, SOUND_TYPE_MONSTER_DYING);
-            GEnv.Sound->create(
-                sndDie[1], strconcat(sizeof(buf), buf, *cName(), DELIMITER "die1"), st_Effect, SOUND_TYPE_MONSTER_DYING);
-            GEnv.Sound->create(
-                sndDie[2], strconcat(sizeof(buf), buf, *cName(), DELIMITER "die2"), st_Effect, SOUND_TYPE_MONSTER_DYING);
-            GEnv.Sound->create(
-                sndDie[3], strconcat(sizeof(buf), buf, *cName(), DELIMITER "die3"), st_Effect, SOUND_TYPE_MONSTER_DYING);
+        GEnv.Sound->create(sndDie[0], strconcat(buf, *cName(), "\\die0"), st_Effect, SOUND_TYPE_MONSTER_DYING);
+        GEnv.Sound->create(sndDie[1], strconcat(buf, *cName(), "\\die1"), st_Effect, SOUND_TYPE_MONSTER_DYING);
+        GEnv.Sound->create(sndDie[2], strconcat(buf, *cName(), "\\die2"), st_Effect, SOUND_TYPE_MONSTER_DYING);
+        GEnv.Sound->create(sndDie[3], strconcat(buf, *cName(), "\\die3"), st_Effect, SOUND_TYPE_MONSTER_DYING);
 
-            m_HeavyBreathSnd.create(
-                pSettings->r_string(section, "heavy_breath_snd"), st_Effect, SOUND_TYPE_MONSTER_INJURING);
-            m_BloodSnd.create(pSettings->r_string(section, "heavy_blood_snd"), st_Effect, SOUND_TYPE_MONSTER_INJURING);
-            if (pSettings->line_exist(section, "heavy_danger_snd"))
-            {
-                m_DangerSnd.create(pSettings->r_string(section, "heavy_danger_snd"),
-                    st_Effect, SOUND_TYPE_MONSTER_INJURING);
-            }
-            else
-            {
-                m_DangerSnd.create(pSettings->r_string(section, "heavy_blood_snd"),
-                    st_Effect, SOUND_TYPE_MONSTER_INJURING);
-            }
+        m_HeavyBreathSnd.create(
+            pSettings->r_string(section, "heavy_breath_snd"), st_Effect, SOUND_TYPE_MONSTER_INJURING);
+        m_BloodSnd.create(pSettings->r_string(section, "heavy_blood_snd"), st_Effect, SOUND_TYPE_MONSTER_INJURING);
+        if (!pSettings->line_exist(section, "heavy_danger_snd"))
+            m_DangerSnd = m_BloodSnd;
+        else
+        {
+            m_DangerSnd.create(pSettings->r_string(section, "heavy_danger_snd"),
+                st_Effect, SOUND_TYPE_MONSTER_INJURING);
         }
     }
     if (psActorFlags.test(AF_PSP))
@@ -1022,6 +1022,75 @@ float CActor::currentFOV()
     }
 }
 
+// Currently WIP
+// Visor Rain Drops
+void CActor::UpdateVisorRainDrops()
+{
+    float visorBuildSpeed = 4.f;
+    float visorDryingSpeed = 8.f;
+    float rainFactor = g_pGamePersistent->Environment().CurrentEnv.rain_density;
+    static u32 dropsUpdateTime = 0;
+    bool isInHideout = g_pGamePersistent->IsActorInHideout();
+
+    if (rainFactor > 0.f)
+    {
+        if (!isInHideout)
+        {
+            if (ps_r2_drops_control.x < 0.1f) // jump start the rain effect when we move out of cover
+                ps_r2_drops_control.x = 0.1f;
+
+            if (ps_r2_drops_control.x < 0.5f)
+                ps_r2_drops_control.x += (visorBuildSpeed * Device.fTimeDelta) / 100.f;
+            else if (Device.dwTimeGlobal > dropsUpdateTime)
+            {
+                ps_r2_drops_control.x += .0025f;
+                dropsUpdateTime = Device.dwTimeGlobal + 1000;
+            }
+        }
+        else
+        {
+            ps_r2_drops_control.x -= (visorDryingSpeed * Device.fTimeDelta) / 100.f;
+        }
+    }
+    else
+    {
+        ps_r2_drops_control.x -= (visorDryingSpeed * Device.fTimeDelta) / 100.f;
+    }
+
+    clamp(ps_r2_drops_control.x, 0.f, 1.f);
+
+    if ((rainFactor > 0.f && !isInHideout) || fsimilar(ps_r2_drops_control.x, 0.f, 0.05f))
+        ps_r2_drops_control.z = m_dropsIntensity / 2.f;
+}
+
+// Visor Condition, Reflection
+void CActor::UpdateVisor()
+{
+    PIItem pVisor = inventory().ItemFromSlot(HELMET_SLOT);
+    if (!pVisor)
+    {
+        auto pOutfit = smart_cast<CCustomOutfit*>(inventory().ItemFromSlot(OUTFIT_SLOT));
+        if (pOutfit && !pOutfit->bIsHelmetAvaliable) // if our outfit blocks the helmet, it probably includes it's own helmet
+            pVisor = pOutfit->cast_inventory_item();
+    }
+
+    if (pVisor)
+    {
+        float condition = 1.1f - pVisor->GetCondition();
+        ps_r2_mask_control.x = round(condition * 10.f);
+        // TODO: dont hardcode these
+        // and add cracking sounds when the condition changes
+        ps_r2_mask_control.y = 1.f;
+        ps_r2_mask_control.z = 1.f;
+    }
+    else
+    {
+        ps_r2_mask_control.x = 0.f;
+        ps_r2_mask_control.y = 0.f;
+        ps_r2_mask_control.z = 0.f;
+    }
+}
+
 void CActor::UpdateCL()
 {
     if (g_Alive() && Level().CurrentViewEntity() == this)
@@ -1172,7 +1241,7 @@ void CActor::UpdateCL()
                 };
             }
         }
-        
+
     }
 
     Fmatrix trans;
@@ -1188,6 +1257,9 @@ void CActor::UpdateCL()
 
     if (psActorFlags.test(AF_MULTI_ITEM_PICKUP))
         m_bPickupMode = false;
+
+    UpdateVisorRainDrops();
+    UpdateVisor();
 }
 
 float NET_Jump = 0;
@@ -1501,11 +1573,11 @@ void CActor::shedule_Update(u32 DT)
     Check_for_AutoPickUp();
 };
 #include "debug_renderer.h"
-void CActor::renderable_Render(IRenderable* root)
+void CActor::renderable_Render(u32 context_id, IRenderable* root)
 {
     VERIFY(_valid(XFORM()));
-    inherited::renderable_Render(root);
-    CInventoryOwner::renderable_Render(root);
+    inherited::renderable_Render(context_id, root);
+    CInventoryOwner::renderable_Render(context_id, root);
 }
 
 bool CActor::renderable_ShadowGenerate()
@@ -1545,11 +1617,11 @@ bool CActor::use_default_throw_force()
 float CActor::missile_throw_force() { return 0.f; }
 
 // HUD
-void CActor::OnHUDDraw(CCustomHUD* hud, IRenderable* root)
+void CActor::OnHUDDraw(u32 context_id, CCustomHUD* hud, IRenderable* root)
 {
     R_ASSERT(IsFocused());
     if (!((mstate_real & mcLookout) && !IsGameTypeSingle()))
-        g_player_hud->render_hud(root);
+        g_player_hud->render_hud(context_id, root);
 }
 
 void CActor::RenderIndicator(Fvector dpos, float r1, float r2, const ui_shader& IndShader)
@@ -1604,8 +1676,9 @@ void CActor::RenderIndicator(Fvector dpos, float r1, float r2, const ui_shader& 
 };
 
 static float mid_size = 0.097f;
-static float fontsize = 15.0f;
+//static float fontsize = 15.0f;
 static float upsize = 0.33f;
+
 void CActor::RenderText(LPCSTR Text, Fvector dpos, float* pdup, u32 color)
 {
     if (!g_Alive())

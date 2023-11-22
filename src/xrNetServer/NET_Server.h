@@ -10,12 +10,11 @@ struct SClientConnectData
     ClientID clientID;
     string64 name;
     string64 pass;
-    u32 process_id;
+    xrpid_t process_id{};
 
     SClientConnectData()
     {
         name[0] = pass[0] = 0;
-        process_id = 0;
     }
 };
 
@@ -77,7 +76,7 @@ public:
 
     ip_address m_cAddress;
     u32 m_dwPort;
-    u32 process_id;
+    xrpid_t process_id;
 
     IPureServer* server;
 
@@ -198,7 +197,7 @@ protected:
     void BannedList_Load();
     void IpList_Load();
     void IpList_Unload();
-    pcstr GetBannedListName() const;
+    constexpr pcstr GetBannedListName() const;
 
     void UpdateBannedList();
 

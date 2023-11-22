@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "r2.h"
 #include "Layers/xrRender/ShaderResourceTraits.h"
+#include "Layers/xrRenderDX9/dx9shader_utils.h"
 #include "xrCore/FileCRC32.h"
 
 template <typename T>
@@ -8,7 +9,7 @@ static HRESULT create_shader(LPCSTR const pTarget, DWORD const* buffer, u32 cons
     T*& result, bool const disasm)
 {
     HRESULT _hr = ShaderTypeTraits<T>::CreateHWShader(buffer, buffer_size, result->sh);
-    if (!SUCCEEDED(_hr))
+    if (FAILED(_hr))
     {
         Log("! Shader: ", file_name);
         Msg("! CreateHWShader hr == 0x%08x", _hr);
@@ -17,30 +18,29 @@ static HRESULT create_shader(LPCSTR const pTarget, DWORD const* buffer, u32 cons
 
     LPCVOID data = nullptr;
 
-    _hr = D3DXFindShaderComment(buffer, MAKEFOURCC('C', 'T', 'A', 'B'), &data, nullptr);
+    _hr = FindShaderComment(buffer, MAKEFOURCC('C', 'T', 'A', 'B'), &data, nullptr);
 
     if (SUCCEEDED(_hr) && data)
     {
         // Parse constant table data
-        LPD3DXSHADER_CONSTANTTABLE pConstants = LPD3DXSHADER_CONSTANTTABLE(data);
-        result->constants.parse(pConstants, ShaderTypeTraits<T>::GetShaderDest());
+        result->constants.parse(const_cast<void*>(data), ShaderTypeTraits<T>::GetShaderDest());
     }
     else
         Msg("! D3DXFindShaderComment %s hr == 0x%08x", file_name, _hr);
 
     if (disasm)
     {
-        ID3DXBuffer* disasm = nullptr;
-        D3DXDisassembleShader(LPDWORD(buffer), FALSE, nullptr, &disasm);
-        if (!disasm)
+        IShaderBlob* blob = nullptr;
+        DisassembleShader(buffer, buffer_size, FALSE, nullptr, &blob);
+        if (!blob)
             return _hr;
 
         string_path dname;
         strconcat(sizeof(dname), dname, "disasm" DELIMITER, file_name, ('v' == pTarget[0]) ? ".vs" : ".ps");
         IWriter* W = FS.w_open("$app_data_root$", dname);
-        W->w(disasm->GetBufferPointer(), disasm->GetBufferSize());
+        W->w(blob->GetBufferPointer(), blob->GetBufferSize());
         FS.w_close(W);
-        _RELEASE(disasm);
+        _RELEASE(blob);
     }
 
     return _hr;
@@ -59,56 +59,22 @@ inline HRESULT create_shader(LPCSTR const pTarget, DWORD const* buffer, u32 cons
     return E_FAIL;
 }
 
-class includer : public ID3DXInclude
-{
-public:
-    HRESULT __stdcall Open(
-        D3DXINCLUDE_TYPE IncludeType, LPCSTR pFileName, LPCVOID pParentData, LPCVOID* ppData, UINT* pBytes)
-    {
-        string_path pname;
-        strconcat(sizeof(pname), pname, GEnv.Render->getShaderPath(), pFileName);
-        IReader* R = FS.r_open("$game_shaders$", pname);
-        if (nullptr == R)
-        {
-            // possibly in shared directory or somewhere else - open directly
-            R = FS.r_open("$game_shaders$", pFileName);
-            if (nullptr == R)
-                return E_FAIL;
-        }
-
-        // duplicate and zero-terminate
-        const size_t size = R->length();
-        u8* data = xr_alloc<u8>(size + 1);
-        CopyMemory(data, R->pointer(), size);
-        data[size] = 0;
-        FS.r_close(R);
-
-        *ppData = data;
-        *pBytes = size;
-        return D3D_OK;
-    }
-    HRESULT __stdcall Close(LPCVOID pData)
-    {
-        xr_free(pData);
-        return D3D_OK;
-    }
-};
-
-static inline bool match_shader_id(
-    LPCSTR const debug_shader_id, LPCSTR const full_shader_id, FS_FileSet const& file_set, string_path& result);
-
 HRESULT CRender::shader_compile(
     pcstr name, IReader* fs, pcstr pFunctionName, pcstr pTarget, u32 Flags, void*& result)
 {
-    D3DXMACRO defines[128];
+    SHADER_MACRO defines[128];
     int def_it = 0;
-    
+
     // Don't move these variables to lower scope!
     string32 c_smapsize;
     string32 c_gloss;
     string32 c_sun_shafts;
     string32 c_ssao;
     string32 c_sun_quality;
+
+    // Ascii's Screen Space Shaders - SSS preprocessor stuff
+    char c_rain_quality[32];
+    char c_inter_grass[32];
 
     char sh_name[MAX_PATH] = "";
     u32 len = 0;
@@ -441,7 +407,50 @@ HRESULT CRender::shader_compile(
         ++len;
     }
 
+    if (ps_ssfx_rain_1.w > 0)
+    {
+        xr_sprintf(c_rain_quality, "%d", (u8)ps_ssfx_rain_1.w);
+        defines[def_it].Name = "SSFX_RAIN_QUALITY";
+        defines[def_it].Definition = c_rain_quality;
+        def_it++;
+        xr_strcat(sh_name, c_rain_quality);
+        len += xr_strlen(c_rain_quality);
+    }
+    else
+    {
+        sh_name[len] = '0';
+        ++len;
+    }
+
+    if (ps_ssfx_grass_interactive.y > 0)
+    {
+        xr_sprintf(c_inter_grass, "%d", (u8)ps_ssfx_grass_interactive.y);
+        defines[def_it].Name = "SSFX_INT_GRASS";
+        defines[def_it].Definition = c_inter_grass;
+        def_it++;
+        xr_strcat(sh_name, c_inter_grass);
+        len += xr_strlen(c_inter_grass);
+    }
+    else
+    {
+        sh_name[len] = '0';
+        ++len;
+    }
+
+    defines[def_it].Name = "SSFX_MODEXE";
+    defines[def_it].Definition = "1";
+    def_it++;
+    sh_name[len] = '1';
+    ++len;
+
     sh_name[len] = '\0';
+
+#ifndef USE_D3DX
+    // Required for compatibility with D3DCompile()
+    defines[def_it].Name = "point";
+    defines[def_it].Definition = "__pnt__";
+    def_it++;
+#endif
 
     // finish
     defines[def_it].Name = nullptr;
@@ -452,31 +461,16 @@ HRESULT CRender::shader_compile(
 
     char extension[3];
     strncpy_s(extension, pTarget, 2);
-    
+
     string_path filename;
     strconcat(sizeof(filename), filename, "r2" DELIMITER, name, ".", extension);
 
-    string_path folder_name, folder;
-    strconcat(sizeof(folder), folder, "r2" DELIMITER "objects" DELIMITER, filename);
-
-    FS.update_path(folder_name, "$game_shaders$", folder);
-    xr_strcat(folder_name, DELIMITER);
-
-    m_file_set.clear();
-    FS.file_list(m_file_set, folder_name, FS_ListFiles | FS_RootOnly, "*");
-
-    string_path temp_file_name, file_name;
-    if (!match_shader_id(name, sh_name, m_file_set, temp_file_name))
+    string_path file_name;
     {
         string_path file;
         strconcat(sizeof(file), file, "shaders_cache_oxr" DELIMITER, filename, DELIMITER, sh_name);
         strconcat(sizeof(filename), filename, filename, DELIMITER, sh_name);
         FS.update_path(file_name, "$app_data_root$", file);
-    }
-    else
-    {
-        xr_strcpy(file_name, folder_name);
-        xr_strcat(file_name, temp_file_name);
     }
 
     string_path shadersFolder;
@@ -511,14 +505,12 @@ HRESULT CRender::shader_compile(
 
     if (FAILED(_result))
     {
-        includer Includer;
-        LPD3DXBUFFER pShaderBuf = nullptr;
-        LPD3DXBUFFER pErrorBuf = nullptr;
-        LPD3DXCONSTANTTABLE pConstants = nullptr;
-        LPD3DXINCLUDE pInclude = (LPD3DXINCLUDE)&Includer;
+        ShaderIncluder includer;
+        IShaderBlob* pShaderBuf = nullptr;
+        IShaderBlob* pErrorBuf = nullptr;
 
-        _result = D3DXCompileShader((LPCSTR)fs->pointer(), fs->length(), defines, pInclude, pFunctionName, pTarget,
-            Flags | D3DXSHADER_USE_LEGACY_D3DX9_31_DLL, &pShaderBuf, &pErrorBuf, &pConstants);
+        _result = CompileShader(fs->pointer(), fs->length(), defines, &includer,
+            pFunctionName, pTarget, Flags, &pShaderBuf, &pErrorBuf);
         if (SUCCEEDED(_result))
         {
             IWriter* file = FS.w_open(file_name);
@@ -548,68 +540,4 @@ HRESULT CRender::shader_compile(
     }
 
     return _result;
-}
-
-static inline bool match_shader(
-    LPCSTR const debug_shader_id, LPCSTR const full_shader_id, LPCSTR const mask, size_t const mask_length)
-{
-    u32 const full_shader_id_length = xr_strlen(full_shader_id);
-    R_ASSERT2(full_shader_id_length == mask_length,
-        make_string("bad cache for shader %s, [%s], [%s]", debug_shader_id, mask, full_shader_id));
-    char const* i = full_shader_id;
-    char const* const e = full_shader_id + full_shader_id_length;
-    char const* j = mask;
-    for (; i != e; ++i, ++j)
-    {
-        if (*i == *j)
-            continue;
-
-        if (*j == '_')
-            continue;
-
-        return false;
-    }
-
-    return true;
-}
-
-static inline bool match_shader_id(
-    LPCSTR const debug_shader_id, LPCSTR const full_shader_id, FS_FileSet const& file_set, string_path& result)
-{
-#if 1
-    strcpy_s(result, "");
-    return false;
-#else // #if 1
-#ifdef DEBUG
-    LPCSTR temp = "";
-    bool found = false;
-    FS_FileSet::const_iterator i = file_set.begin();
-    FS_FileSet::const_iterator const e = file_set.end();
-    for (; i != e; ++i)
-    {
-        if (match_shader(debug_shader_id, full_shader_id, (*i).name.c_str(), (*i).name.size()))
-        {
-            VERIFY(!found);
-            found = true;
-            temp = (*i).name.c_str();
-        }
-    }
-
-    xr_strcpy(result, temp);
-    return found;
-#else // #ifdef DEBUG
-    FS_FileSet::const_iterator i = file_set.begin();
-    FS_FileSet::const_iterator const e = file_set.end();
-    for (; i != e; ++i)
-    {
-        if (match_shader(debug_shader_id, full_shader_id, (*i).name.c_str(), (*i).name.size()))
-        {
-            xr_strcpy(result, (*i).name.c_str());
-            return true;
-        }
-    }
-
-    return false;
-#endif // #ifdef DEBUG
-#endif // #if 1
 }

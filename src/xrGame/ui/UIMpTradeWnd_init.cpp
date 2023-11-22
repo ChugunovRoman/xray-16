@@ -12,11 +12,13 @@
 
 #include "Common/object_broker.h"
 
-LPCSTR _list_names[] = {
+pcstr _list_names[] =
+{
     "lst_pistol", "lst_pistol_ammo", "lst_rifle", "lst_rifle_ammo", "lst_outfit", "lst_medkit", "lst_granade",
     "lst_others", "lst_player_bag", "lst_shop",
 };
-CUIMpTradeWnd::CUIMpTradeWnd()
+
+CUIMpTradeWnd::CUIMpTradeWnd() : IBuyWnd("MP Trade Window")
 {
     m_money = 0;
     g_mp_restrictions.InitGroups();
@@ -65,7 +67,7 @@ void CUIMpTradeWnd::Init(const shared_str& sectionName, const shared_str& sectio
     }
     m_root_tab_control->ResetTab();
 
-    m_shop_wnd = xr_new<CUIWindow>();
+    m_shop_wnd = xr_new<CUIWindow>("Shop window");
     AttachChild(m_shop_wnd);
     m_shop_wnd->SetAutoDelete(true);
     CUIXmlInit::InitWindow(xml_doc, "shop_wnd", 0, m_shop_wnd);

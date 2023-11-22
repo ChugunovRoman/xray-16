@@ -34,7 +34,6 @@ private:
     CRandom random; // non-atomic intentionally, possible data-races can make it even more random
 
 private:
-    static void task_worker_entry(void* this_ptr);
     ICN void TaskWorkerStart();
 
     [[nodiscard]] Task* TryToSteal(TaskWorker* thief);
@@ -63,8 +62,11 @@ public:
     [[nodiscard]] Task& CreateTask(Task& parent, pcstr name, const Task::TaskFunc& taskFunc, size_t dataSize = 0, void* data = nullptr);
     [[nodiscard]] Task& CreateTask(Task& parent, pcstr name, const Task::OnFinishFunc& onFinishCallback, const Task::TaskFunc& taskFunc, size_t dataSize = 0, void* data = nullptr);
 
-    // Run task
+    // Run task in parallel
     void PushTask(Task& task);
+
+    // Run task immediately in this thread
+    void RunTask(Task& task);
 
     // Shortcut: create a task and run it immediately
     Task& AddTask(pcstr name, const Task::TaskFunc& taskFunc, size_t dataSize = 0, void* data = nullptr);
@@ -82,6 +84,7 @@ public:
 public:
     [[nodiscard]] size_t GetWorkersCount() const;
     [[nodiscard]] size_t GetActiveWorkersCount() const;
+    [[nodiscard]] static size_t GetCurrentWorkerID();
     void GetStats(size_t& allocated, size_t& allocatedWithFallback, size_t& pushed, size_t& finished);
 };
 

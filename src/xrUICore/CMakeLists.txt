@@ -5,7 +5,11 @@ set(SRC_FILES
     "pch.hpp"
     "ui_base.cpp"
     "ui_base.h"
+    "ui_debug.cpp"
+    "ui_debug.h"
     "ui_defs.h"
+    "ui_styles.cpp"
+    "ui_styles.h"
     "uiabstract.h"
     "UIMessages.h"
     "arrow/ui_arrow.cpp"
@@ -150,6 +154,7 @@ target_link_libraries(xrUICore
     xrScriptEngine
     xrEngine
     xrMiscMath
+    xrImGui
     xrCore
     xrLuabind
     ${SDL2_LIBRARIES}

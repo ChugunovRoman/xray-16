@@ -14,7 +14,7 @@ dxFontRender::~dxFontRender()
 void dxFontRender::Initialize(cpcstr cShader, cpcstr cTexture)
 {
     pShader.create(cShader, cTexture);
-    pGeom.create(FVF::F_TL, RCache.Vertex.Buffer(), RCache.QuadIB);
+    pGeom.create(FVF::F_TL, RImplementation.Vertex.Buffer(), RImplementation.QuadIB);
 }
 
 extern ENGINE_API bool g_bRendering;
@@ -29,7 +29,7 @@ void dxFontRender::OnRender(CGameFont& owner)
     if (!(owner.uFlags & CGameFont::fsValid))
     {
         R_ASSERT(pShader);
-        R_constant* C = RCache.get_c(RImplementation.c_sbase)._get(); // get sampler
+        R_constant* C = RCache.get_c(c_sbase)._get(); // get sampler
         CTexture* T = RCache.get_ActiveTexture(C ? C->samp.index : 0);
         R_ASSERT(T);
         owner.vTS.set((int)T->get_Width(), (int)T->get_Height());
@@ -63,7 +63,7 @@ void dxFontRender::OnRender(CGameFont& owner)
 
         // lock AGP memory
         u32 vOffset;
-        FVF::TL* v = (FVF::TL*)RCache.Vertex.Lock(length * 4, pGeom.stride(), vOffset);
+        FVF::TL* v = (FVF::TL*)RImplementation.Vertex.Lock(length * 4, pGeom.stride(), vOffset);
         FVF::TL* start = v;
 
         // fill vertices
@@ -73,7 +73,7 @@ void dxFontRender::OnRender(CGameFont& owner)
             CGameFont::String& PS = owner.strings[i];
             xr_wide_char wsStr[MAX_MB_CHARS];
 
-            int len = owner.IsMultibyte() ? mbhMulti2Wide(wsStr, nullptr, MAX_MB_CHARS, PS.string) : xr_strlen(PS.string);
+            const u16 len = owner.IsMultibyte() ? mbhMulti2Wide(wsStr, nullptr, MAX_MB_CHARS, PS.string) : xr_strlen(PS.string);
 
             if (len)
             {
@@ -109,7 +109,7 @@ void dxFontRender::OnRender(CGameFont& owner)
                 Y2 -= 0.5f;
 #endif // !USE_DX9
 
-                for (int j = 0; j < len; j++)
+                for (u16 j = 0; j < len; j++)
                 {
                     if (owner.IsMultibyte())
                     {
@@ -121,16 +121,13 @@ void dxFontRender::OnRender(CGameFont& owner)
 
                             cpcstr binding = GetActionBinding(actionId);
 
-                            const size_t sz = xr_strlen(binding);
-                            xr_wide_char* wideBinding = static_cast<xr_wide_char*>(xr_alloca(sz));
-                            mbhMulti2Wide(wideBinding, nullptr, sz, binding);
-                            ++wideBinding;
+                            xr_wide_char wideBinding[MAX_MB_CHARS];
+                            const auto bindingLen = mbhMulti2Wide(wideBinding, nullptr, MAX_MB_CHARS, binding);
 
-                            while (wideBinding[0])
+                            for (size_t k = 0; k < bindingLen; ++k)
                             {
-                                const Fvector l = owner.GetCharTC(wideBinding[0]);
+                                const Fvector l = owner.GetCharTC(wideBinding[1 + k]);
                                 ImprintChar(l, owner, v, X, Y2, clr2, Y, clr, wsStr, j);
-                                ++wideBinding;
                             }
                         }
                         else
@@ -168,7 +165,7 @@ void dxFontRender::OnRender(CGameFont& owner)
 
         // Unlock and draw
         u32 vCount = (u32)(v - start);
-        RCache.Vertex.Unlock(vCount, pGeom.stride());
+        RImplementation.Vertex.Unlock(vCount, pGeom.stride());
         if (vCount)
         {
             RCache.set_Geometry(pGeom);

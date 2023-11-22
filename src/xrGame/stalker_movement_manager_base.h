@@ -14,7 +14,7 @@
 #include "ai_monster_space.h"
 #include "stalker_movement_params.h"
 
-#ifndef MASTER_GOLD
+#if defined(DEBUG) || !defined(MASTER_GOLD)
 #include "detail_path_manager.h"
 #include "ai/stalker/ai_stalker.h"
 #else
@@ -127,12 +127,12 @@ public:
     SBoneRotation m_head;
 
 private:
-    const CGameObject* m_last_query_object;
+    const CGameObject* m_last_query_object{};
     Fvector m_last_query_position;
     Fvector m_last_query_object_position;
     float m_last_query_distance;
-    bool m_last_query_result;
-    bool m_force_update;
+    bool m_last_query_result{};
+    bool m_force_update{};
 }; // class stalker_movement_manager_base
 
 #include "stalker_movement_manager_base_inline.h"

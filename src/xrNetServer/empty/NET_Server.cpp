@@ -49,7 +49,8 @@ void IBannedClient::Load(CInifile& ini, const shared_str& sect)
 
     tm _tm_banned;
     const shared_str& time_to = ini.r_string(sect, "time_to");
-    int res_t = sscanf(time_to.c_str(), "%02d.%02d.%d_%02d:%02d:%02d", &_tm_banned.tm_mday, &_tm_banned.tm_mon,
+
+    [[maybe_unused]] int res_t = sscanf(time_to.c_str(), "%02d.%02d.%d_%02d:%02d:%02d", &_tm_banned.tm_mday, &_tm_banned.tm_mon,
         &_tm_banned.tm_year, &_tm_banned.tm_hour, &_tm_banned.tm_min, &_tm_banned.tm_sec);
     VERIFY(res_t == 6);
 
@@ -114,7 +115,7 @@ IClientStatistic::IClientStatistic(const IClientStatistic& rhs)
 
 IClientStatistic::~IClientStatistic()
 {
-    delete m_pimpl;
+    xr_delete(m_pimpl);
 }
 
 u32 IClientStatistic::getPing() const { return 0; }
@@ -286,10 +287,7 @@ IPureServer::EConnect IPureServer::Connect(pcstr options, GameDescriptionData& g
     //-------------------------------------------------------------------
 
     if (!psNET_direct_connect) {
-//---------------------------
-#ifdef DEBUG
-        string1024 tmp;
-#endif // DEBUG
+    //---------------------------
 
         bool bSimulator = false;
         if (strstr(Core.Params, "-netsim"))
@@ -528,7 +526,7 @@ bool IPureServer::DisconnectClient(IClient* C, pcstr Reason)
 bool IPureServer::DisconnectAddress(const ip_address& Address, pcstr reason)
 {
     u32 players_count = net_players.ClientsCount();
-    buffer_vector<IClient*> PlayersToDisconnect(_alloca(players_count * sizeof(IClient*)), players_count);
+    buffer_vector<IClient*> PlayersToDisconnect(xr_alloca(players_count * sizeof(IClient*)), players_count);
 
     struct ToDisconnectFillerFunctor {
         IPureServer* m_owner;
@@ -693,4 +691,4 @@ void IPureServer::UpdateBannedList()
     }
 }
 
-pcstr IPureServer::GetBannedListName() const { return "banned_list_ip.ltx"; }
+constexpr pcstr IPureServer::GetBannedListName() { return "banned_list_ip.ltx"; }

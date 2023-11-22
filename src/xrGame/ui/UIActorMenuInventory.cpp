@@ -64,6 +64,7 @@ void CUIActorMenu::DeInitInventoryMode()
     ShowIfExist(m_pInventoryWnd, false);
     ShowIfExist(m_pLists[eTrashList], false);
     ShowIfExist(m_clock_value, false);
+    clear_highlight_lists();
 }
 
 void CUIActorMenu::SendEvent_ActivateSlot(u16 slot, u16 recipient)
@@ -72,6 +73,7 @@ void CUIActorMenu::SendEvent_ActivateSlot(u16 slot, u16 recipient)
     CGameObject::u_EventGen(P, GEG_PLAYER_ACTIVATE_SLOT, recipient);
     P.w_u16(slot);
     CGameObject::u_EventSend(P);
+    clear_highlight_lists();
 }
 
 void CUIActorMenu::SendEvent_Item2Slot(PIItem pItem, u16 recipient, u16 slot_id)
@@ -86,6 +88,7 @@ void CUIActorMenu::SendEvent_Item2Slot(PIItem pItem, u16 recipient, u16 slot_id)
     CGameObject::u_EventSend(P);
 
     PlaySnd(eItemToSlot);
+    clear_highlight_lists();
 };
 
 void CUIActorMenu::SendEvent_Item2Belt(PIItem pItem, u16 recipient)
@@ -99,6 +102,7 @@ void CUIActorMenu::SendEvent_Item2Belt(PIItem pItem, u16 recipient)
     CGameObject::u_EventSend(P);
 
     PlaySnd(eItemToBelt);
+    clear_highlight_lists();
 };
 
 void CUIActorMenu::SendEvent_Item2Ruck(PIItem pItem, u16 recipient)
@@ -112,6 +116,7 @@ void CUIActorMenu::SendEvent_Item2Ruck(PIItem pItem, u16 recipient)
     CGameObject::u_EventSend(P);
 
     PlaySnd(eItemToRuck);
+    clear_highlight_lists();
 };
 
 void CUIActorMenu::SendEvent_Item_Eat(PIItem pItem, u16 recipient)
@@ -123,6 +128,7 @@ void CUIActorMenu::SendEvent_Item_Eat(PIItem pItem, u16 recipient)
     CGameObject::u_EventGen(P, GEG_PLAYER_ITEM_EAT, recipient);
     P.w_u16(pItem->object().ID());
     CGameObject::u_EventSend(P);
+    clear_highlight_lists();
 };
 
 void CUIActorMenu::SendEvent_Item_Drop(PIItem pItem, u16 recipient)
@@ -136,6 +142,7 @@ void CUIActorMenu::SendEvent_Item_Drop(PIItem pItem, u16 recipient)
     P.w_u16(pItem->object().ID());
     pItem->object().u_EventSend(P);
     PlaySnd(eDropItem);
+    clear_highlight_lists();
 }
 
 void CUIActorMenu::DropAllCurrentItem()
@@ -238,8 +245,8 @@ void CUIActorMenu::OnInventoryAction(PIItem pItem, u16 action_type)
     CUIDragDropListEx* all_lists[] =
     {
         m_pLists[eInventoryBeltList], m_pLists[eInventoryKnifeList], m_pLists[eInventoryPistolList], m_pLists[eInventoryAutomaticList],
-        m_pLists[eInventoryBackpackList], m_pLists[eInventoryOutfitList], m_pLists[eInventoryHelmetList], m_pLists[eInventoryDetectorList], m_pLists[eInventoryBagList],
-        m_pLists[eTradeActorBagList], m_pLists[eTradeActorList]
+        m_pLists[eInventoryBackpackList], m_pLists[eInventoryOutfitList], m_pLists[eInventoryHelmetList], m_pLists[eInventoryDetectorList],
+        m_pLists[eInventoryBagList], m_pLists[eTradeActorBagList], m_pLists[eTradeActorList]
     };
 
     switch (action_type)
@@ -564,7 +571,7 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
             }
         }
 
-        bool result = (!b_own_item) || m_pActorInvOwner->inventory().Slot(slot_id, iitem);
+        [[maybe_unused]] bool result = !b_own_item || m_pActorInvOwner->inventory().Slot(slot_id, iitem);
         VERIFY(result);
 
         CUICellItem* i = old_owner->RemoveItem(itm, (old_owner == new_owner));
@@ -599,10 +606,10 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
         if (slot_id == KNIFE_SLOT && m_pActorInvOwner->inventory().CanPutInSlot(iitem, KNIFE_SLOT))
             return ToSlot(itm, force_place, KNIFE_SLOT);
 
-        if (slot_id == INV_SLOT_2 && m_pActorInvOwner->inventory().CanPutInSlot(iitem, INV_SLOT_3))
+        if (slot_id == INV_SLOT_2 && m_pActorInvOwner->inventory().CanPutInSlot(iitem, INV_SLOT_3) && CallOfPripyatMode)
             return ToSlot(itm, force_place, INV_SLOT_3);
 
-        if (slot_id == INV_SLOT_3 && m_pActorInvOwner->inventory().CanPutInSlot(iitem, INV_SLOT_2))
+        if (slot_id == INV_SLOT_3 && m_pActorInvOwner->inventory().CanPutInSlot(iitem, INV_SLOT_2) && CallOfPripyatMode)
             return ToSlot(itm, force_place, INV_SLOT_2);
 
         CUIDragDropListEx* slot_list = GetSlotList(slot_id);
@@ -614,7 +621,7 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
         CUIDragDropListEx* invlist = GetListByType(iActorBag);
         if (invlist != slot_list)
         {
-            if (!slot_list->ItemsCount() == 1)
+            if (slot_list->ItemsCount() != 1)
                 return false;
 
             CUICellItem* slot_cell = slot_list->GetItemIdx(0);
@@ -676,7 +683,7 @@ bool CUIActorMenu::ToBag(CUICellItem* itm, bool b_use_cursor_pos)
 
     if (m_pActorInvOwner->inventory().CanPutInRuck(iitem) || (b_already && (new_owner != old_owner)))
     {
-        bool result = b_already || (!b_own_item || m_pActorInvOwner->inventory().Ruck(iitem));
+        [[maybe_unused]] bool result = b_already || !b_own_item || m_pActorInvOwner->inventory().Ruck(iitem);
         VERIFY(result);
         CUICellItem* i = old_owner->RemoveItem(itm, (old_owner == new_owner));
         if (!i)
@@ -741,7 +748,7 @@ bool CUIActorMenu::ToBelt(CUICellItem* itm, bool b_use_cursor_pos)
         else
             new_owner = m_pLists[eInventoryBeltList];
 
-        bool result = (!b_own_item) || m_pActorInvOwner->inventory().Belt(iitem);
+        [[maybe_unused]] bool result = !b_own_item || m_pActorInvOwner->inventory().Belt(iitem);
         VERIFY(result);
         CUICellItem* i = old_owner->RemoveItem(itm, (old_owner == new_owner));
 

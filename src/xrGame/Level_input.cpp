@@ -51,7 +51,7 @@ void CLevel::IR_OnMouseWheel(int x, int y)
     /* avo: script callback */
     if (g_actor)
     {
-        g_actor->callback(GameObject::eMouseWheel)(x);
+        g_actor->callback(GameObject::eMouseWheel)(y, x);
     }
 
     if (CurrentGameUI()->IR_UIOnMouseWheel(x, y))
@@ -122,9 +122,6 @@ void CLevel::IR_OnKeyboardPress(int key)
     if (Device.dwPrecacheFrame)
         return;
 
-    if (Device.editor() && (pInput->iGetAsyncKeyState(SDL_SCANCODE_LALT) || pInput->iGetAsyncKeyState(SDL_SCANCODE_RALT)))
-        return;
-
     bool b_ui_exist = !!CurrentGameUI();
 
     EGameActions _curr = GetBindedAction(key);
@@ -137,7 +134,7 @@ void CLevel::IR_OnKeyboardPress(int key)
 
     if (_curr == kPAUSE)
     {
-        if (Device.editor())
+        if (Device.editor_mode())
             return;
 
         if (!g_block_pause && (IsGameTypeSingle() || IsDemoPlay()))
@@ -152,6 +149,12 @@ void CLevel::IR_OnKeyboardPress(int key)
         return;
     }
 
+    if (_curr == kEDITOR)
+    {
+        Device.editor().SwitchToNextState();
+        return;
+    }
+
     if (g_bDisableAllInput)
         return;
 
@@ -160,16 +163,14 @@ void CLevel::IR_OnKeyboardPress(int key)
     case kSCREENSHOT:
         GEnv.Render->Screenshot();
         return;
-        break;
 
     case kCONSOLE:
         Console->Show();
         return;
-        break;
 
     case kQUIT:
     {
-        if (b_ui_exist && CurrentGameUI()->TopInputReceiver())
+        if (b_ui_exist && CurrentGameUI()->TopInputReceiver() && !Device.Paused())
         {
             if (CurrentGameUI()->IR_UIOnKeyboardPress(key))
                 return; // special case for mp and main_menu
@@ -192,9 +193,9 @@ void CLevel::IR_OnKeyboardPress(int key)
             Log("! failed to get sim_combat.start_attack functor");
         }
 #endif
+        break;
     }
-    break;
-    };
+    } // switch (_curr)
 
     if (!bReady || !b_ui_exist)
         return;
@@ -257,51 +258,6 @@ void CLevel::IR_OnKeyboardPress(int key)
         Send(net_packet, net_flags(TRUE));
         return;
     }
-    case SDL_SCANCODE_KP_DIVIDE:
-    {
-        if (!Server)
-            break;
-
-        SetGameTimeFactor(g_fTimeFactor);
-
-#ifdef DEBUG
-        if (!m_bEnvPaused)
-            SetEnvironmentGameTimeFactor(GetEnvironmentGameTime(), g_fTimeFactor);
-#else // DEBUG
-        SetEnvironmentGameTimeFactor(GetEnvironmentGameTime(), g_fTimeFactor);
-#endif // DEBUG
-
-        break;
-    }
-    case SDL_SCANCODE_KP_MULTIPLY:
-    {
-        if (!Server)
-            break;
-
-        SetGameTimeFactor(1000.f);
-#ifdef DEBUG
-        if (!m_bEnvPaused)
-            SetEnvironmentGameTimeFactor(GetEnvironmentGameTime(), 1000.f);
-#else // DEBUG
-        SetEnvironmentGameTimeFactor(GetEnvironmentGameTime(), 1000.f);
-#endif // DEBUG
-
-        break;
-    }
-#ifdef DEBUG
-    case SDL_SCANCODE_KP_MINUS:
-    {
-        if (!Server)
-            break;
-        if (m_bEnvPaused)
-            SetEnvironmentGameTimeFactor(GetEnvironmentGameTime(), g_fTimeFactor);
-        else
-            SetEnvironmentGameTimeFactor(GetEnvironmentGameTime(), 0.00001f);
-
-        m_bEnvPaused = !m_bEnvPaused;
-        break;
-    }
-#endif // DEBUG
     case SDL_SCANCODE_KP_5:
     {
         if (GameID() != eGameIDSingle)
@@ -436,7 +392,7 @@ void CLevel::IR_OnKeyboardPress(int key)
     // Lain: added
     case SDL_SCANCODE_F5:
     {
-        if (CBaseMonster* pBM = smart_cast<CBaseMonster*>(CurrentEntity()))
+        if (smart_cast<CBaseMonster*>(CurrentEntity()))
         {
             DBG().log_debug_info();
         }
@@ -460,43 +416,7 @@ void CLevel::IR_OnKeyboardPress(int key)
     }
 
 #endif
-#ifdef DEBUG
-    case SDL_SCANCODE_F9:
-    {
-        //		if (!ai().get_alife())
-        //			break;
-        //		const_cast<CALifeSimulatorHeader&>(ai().alife().header()).set_state(ALife::eZoneStateSurge);
-        break;
-    }
-        return;
-//	case SDL_SCANCODE_F10:{
-//		ai().level_graph().set_dest_point();
-//		ai().level_graph().build_detail_path();
-//		if (!Objects.FindObjectByName("m_stalker_e0000") || !Objects.FindObjectByName("localhost/dima"))
-//			return;
-//		if (!m_bSynchronization) {
-//			m_bSynchronization	= true;
-//			ai().level_graph().set_start_point();
-//			m_bSynchronization	= false;
-//		}
-//		luabind::functor<void>	functor;
-//		GEnv.ScriptEngine->functor("alife_test.set_switch_online",functor);
-//		functor(0,false);
-//	}
-//		return;
-//	case SDL_SCANCODE_F11:
-//		ai().level_graph().build_detail_path();
-//		if (!Objects.FindObjectByName("m_stalker_e0000") || !Objects.FindObjectByName("localhost/dima"))
-//			return;
-//		if (!m_bSynchronization) {
-//			m_bSynchronization	= true;
-//			ai().level_graph().set_dest_point();
-//			ai().level_graph().select_cover_point();
-//			m_bSynchronization	= false;
-//		}
-//		return;
-#endif // DEBUG
-    }
+    } // switch (key)
 #endif // MASTER_GOLD
 
     if (g_consoleBindCmds.execute(key))
@@ -570,7 +490,7 @@ void CLevel::IR_OnKeyboardHold(int key)
         static u32 time = Device.dwTimeGlobal;
         if (Device.dwTimeGlobal - time > 20)
         {
-            if (CBaseMonster* pBM = smart_cast<CBaseMonster*>(CurrentEntity()))
+            if (smart_cast<CBaseMonster*>(CurrentEntity()))
             {
                 DBG().debug_info_up();
                 time = Device.dwTimeGlobal;
@@ -582,7 +502,7 @@ void CLevel::IR_OnKeyboardHold(int key)
         static u32 time = Device.dwTimeGlobal;
         if (Device.dwTimeGlobal - time > 20)
         {
-            if (CBaseMonster* pBM = smart_cast<CBaseMonster*>(CurrentEntity()))
+            if (smart_cast<CBaseMonster*>(CurrentEntity()))
             {
                 DBG().debug_info_down();
                 time = Device.dwTimeGlobal;
@@ -626,8 +546,6 @@ void CLevel::IR_OnTextInput(pcstr text)
             IR->IR_OnTextInput(text);
     }
 }
-
-void CLevel::IR_OnMouseStop(int /**axis**/, int /**value**/) {}
 
 void CLevel::IR_OnControllerPress(int key, float x, float y)
 {
@@ -768,8 +686,8 @@ void CLevel::IR_OnActivate()
 {
     if (!pInput)
         return;
-    int i;
-    for (i = 0; i < CInput::COUNT_KB_BUTTONS; i++)
+
+    for (int i = 0; i < CInput::COUNT_KB_BUTTONS; i++)
     {
         if (IR_GetKeyState(i))
         {
@@ -789,10 +707,8 @@ void CLevel::IR_OnActivate()
             case kL_LOOKOUT:
             case kR_LOOKOUT:
             case kWPN_FIRE:
-            {
                 IR_OnKeyboardPress(i);
-            }
-            break;
+                break;
             };
         };
     }

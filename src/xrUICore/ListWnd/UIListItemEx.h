@@ -1,7 +1,7 @@
 // File:        UIListWndEx.cpp
 // Description: Extended ListItem
 //              Required to use feature "Selected Item"
-// Created:     
+// Created:
 // Author:      Serhiy O. Vynnychenko
 // Mail:        narrator@gsc-game.kiev.ua
 
@@ -22,6 +22,8 @@ public:
     virtual void SendMessage(CUIWindow* pWnd, s16 msg, void* pData);
     virtual void SetSelectionColor(u32 dwColor);
     virtual void Draw();
+
+    pcstr GetDebugType() override { return "CUIListItemEx"; }
 
 protected:
     u32 m_dwSelectionColor;

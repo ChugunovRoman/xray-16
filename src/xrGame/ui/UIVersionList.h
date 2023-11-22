@@ -4,7 +4,7 @@
 
 struct SVersionDescription;
 
-class CUIVersionList : public CUIWindow
+class CUIVersionList final : public CUIWindow
 {
     CUIListBox* versionsList;
     CUIFrameLineWnd* header;
@@ -22,6 +22,8 @@ public:
     size_t GetItemsCount() const;
 
     virtual void SendMessage(CUIWindow* pWnd, s16 msg, void* pData);
+
+    pcstr GetDebugType() override { return "CUIVersionList"; }
 
 private:
     void UpdateVersionList();

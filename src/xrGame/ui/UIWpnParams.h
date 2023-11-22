@@ -7,15 +7,16 @@ class CInventoryItem;
 
 struct SLuaWpnParams;
 
-class CUIWpnParams : public CUIWindow
+class CUIWpnParams final : public CUIWindow
 {
 public:
     CUIWpnParams();
-    virtual ~CUIWpnParams();
 
     bool InitFromXml(CUIXml& xml_doc);
     void SetInfo(CInventoryItem* slot_wpn, CInventoryItem& cur_wpn);
     bool Check(const shared_str& wpn_section);
+
+    pcstr GetDebugType() override { return "CUIWpnParams"; }
 
 protected:
     CUIDoubleProgressBar m_progressAccuracy; // red or green
@@ -44,14 +45,15 @@ protected:
 
 // -------------------------------------------------------------------------------------------------
 
-class CUIConditionParams : public CUIWindow
+class CUIConditionParams final : public CUIWindow
 {
 public:
     CUIConditionParams();
-    virtual ~CUIConditionParams();
 
     bool InitFromXml(CUIXml& xml_doc);
     void SetInfo(CInventoryItem const* slot_wpn, CInventoryItem const& cur_wpn);
+
+    pcstr GetDebugType() override { return "CUIConditionParams"; }
 
 protected:
     CUIDoubleProgressBar m_progress; // red or green

@@ -22,9 +22,6 @@
 #include "xrScriptEngine/ScriptExporter.hpp"
 #include "xrNetServer/NET_Messages.h"
 
-using namespace luabind;
-using namespace luabind::policy;
-
 typedef xr_vector<std::pair<shared_str, int>> STORY_PAIRS;
 typedef STORY_PAIRS SPAWN_STORY_PAIRS;
 LPCSTR _INVALID_STORY_ID = "INVALID_STORY_ID";
@@ -77,30 +74,28 @@ void generate_story_ids(STORY_PAIRS& result, _id_type INVALID_ID, LPCSTR section
 {
     result.clear();
 
-    CInifile* Ini = pGameIni;
+    const CInifile* Ini = pGameIni;
 
     LPCSTR N, V;
-    u32 k;
-    shared_str temp;
-    LPCSTR section = section_name;
-    R_ASSERT(Ini->section_exist(section));
+    u32 k = 0;
+    R_ASSERT(Ini->section_exist(section_name));
 
-    for (k = 0; Ini->r_line(section, k, &N, &V); ++k)
+    result.reserve(Ini->line_count(section_name) + 1);
+    while (Ini->r_line(section_name, k, &N, &V))
     {
-        temp = Ini->r_string_wb(section, N);
+        const shared_str& temp = Ini->r_string_wb(section_name, N);
 
         R_ASSERT3(!strchr(*temp, ' '), invalid_id_description, *temp);
         R_ASSERT2(xr_strcmp(*temp, INVALID_ID_STRING), invalid_id_redefinition);
 
-        STORY_PAIRS::const_iterator I = result.begin();
-        STORY_PAIRS::const_iterator E = result.end();
-        for (; I != E; ++I)
-            R_ASSERT3((*I).first != temp, duplicated_id_description, *temp);
+        for (const auto& story : result)
+            R_ASSERT3(story.first != temp, duplicated_id_description, *temp);
 
-        result.push_back(std::make_pair(*temp, atoi(N)));
+        result.emplace_back(*temp, atoi(N));
+        ++k;
     }
 
-    result.push_back(std::make_pair(INVALID_ID_STRING, INVALID_ID));
+    result.emplace_back(INVALID_ID_STRING, INVALID_ID);
 }
 
 void kill_entity0(CALifeSimulator* alife, CSE_ALifeMonsterAbstract* monster, const GameGraph::_GRAPH_ID& game_vertex_id)
@@ -415,6 +410,9 @@ void set_start_game_vertex_id(int id)
 
 SCRIPT_EXPORT(CALifeSimulator, (),
 {
+    using namespace luabind;
+    using namespace luabind::policy;
+
     module(luaState)
     [
         class_<CALifeSimulator>("alife_simulator")
@@ -475,9 +473,11 @@ SCRIPT_EXPORT(CALifeSimulator, (),
         def("set_start_position", &set_start_position),
         def("set_start_game_vertex_id", &set_start_game_vertex_id)
     ];
+
     class CALifeSimulatorExporter1
     {
     };
+
     {
         if (story_ids.empty())
             generate_story_ids(story_ids, INVALID_STORY_ID, "story_ids", "INVALID_STORY_ID",
@@ -493,9 +493,11 @@ SCRIPT_EXPORT(CALifeSimulator, (),
 
         luabind::module(luaState)[instance];
     }
+
     class CALifeSimulatorExporter2
     {
     };
+
     {
         if (spawn_story_ids.empty())
             generate_story_ids(spawn_story_ids, INVALID_SPAWN_STORY_ID, "spawn_story_ids", "INVALID_SPAWN_STORY_ID",

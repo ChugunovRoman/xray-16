@@ -161,7 +161,7 @@ public:
         xr_free(data);
     }
 #pragma warning(pop)
-    bool save_to(LPCSTR fn);
+    bool save_to(LPCSTR fn) const;
     void flush() override {}
 };
 
@@ -380,6 +380,8 @@ public:
     }
     IC size_t length() const { return Size; }
     IC void* pointer() const { return &(data[Pos]); }
+    IC void* begin() const { return data; }
+    IC void* end() const { return data + Size; }
     IC void advance(size_t cnt)
     {
         Pos += cnt;
@@ -397,6 +399,11 @@ public:
     void r_stringZ(char* dest, size_t tgt_sz);
     void r_stringZ(shared_str& dest);
     void r_stringZ(xr_string& dest);
+
+    // Same as r_string but with the difference that it returns 'false' if the read string is longer than 'tgt_sz' and
+    // 'true' if it is shorter
+    [[nodiscard]]
+    bool try_r_string(char* dest, size_t tgt_sz);
 
 public:
     void close();
@@ -419,7 +426,7 @@ class XRCORE_API CVirtualFileRW final : public IReader
 private:
 #if defined(XR_PLATFORM_WINDOWS)
     void *hSrcFile, *hSrcMap;
-#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_APPLE)
+#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
     int hSrcFile;
 #else
 #   error Select or add implementation for your platform

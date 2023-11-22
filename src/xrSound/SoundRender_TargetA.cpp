@@ -4,13 +4,18 @@
 #include "SoundRender_Emitter.h"
 #include "SoundRender_Source.h"
 
+#if __has_include(<efx.h>)
+#   include <efx.h>
+#endif
+
 xr_vector<u8> g_target_temp_data;
 
-CSoundRender_TargetA::CSoundRender_TargetA() : CSoundRender_Target()
+CSoundRender_TargetA::CSoundRender_TargetA(ALuint slot) : CSoundRender_Target()
 {
     cache_gain = 0.f;
     cache_pitch = 1.f;
     pSource = 0;
+    pAuxSlot = slot;
     buf_block = 0;
 }
 
@@ -30,6 +35,10 @@ bool CSoundRender_TargetA::_initialize()
         A_CHK(alSourcef(pSource, AL_MAX_GAIN, 1.f));
         A_CHK(alSourcef(pSource, AL_GAIN, cache_gain));
         A_CHK(alSourcef(pSource, AL_PITCH, cache_pitch));
+#if __has_include(<efx.h>)
+        if (pAuxSlot != ALuint(-1))
+            A_CHK(alSource3i(pSource, AL_AUXILIARY_SEND_FILTER, pAuxSlot, 0, AL_FILTER_NULL));
+#endif
         return true;
     }
     Msg("! sound: OpenAL: Can't create source. Error: %s.", static_cast<pcstr>(alGetString(error)));
@@ -61,8 +70,8 @@ void CSoundRender_TargetA::start(CSoundRender_Emitter* E)
 
 void CSoundRender_TargetA::render()
 {
-    for (u32 buf_idx = 0; buf_idx < sdef_target_count; buf_idx++)
-        fill_block(pBuffers[buf_idx]);
+    for (ALuint pBuffer : pBuffers)
+        fill_block(pBuffer);
 
     A_CHK(alSourceQueueBuffers(pSource, sdef_target_count, pBuffers));
     A_CHK(alSourcePlay(pSource));
@@ -87,8 +96,8 @@ void CSoundRender_TargetA::rewind()
 
     A_CHK(alSourceStop(pSource));
     A_CHK(alSourcei(pSource, AL_BUFFER, 0));
-    for (u32 buf_idx = 0; buf_idx < sdef_target_count; buf_idx++)
-        fill_block(pBuffers[buf_idx]);
+    for (ALuint pBuffer : pBuffers)
+        fill_block(pBuffer);
     A_CHK(alSourceQueueBuffers(pSource, sdef_target_count, pBuffers));
     A_CHK(alSourcePlay(pSource));
 }
@@ -144,7 +153,7 @@ void CSoundRender_TargetA::update()
 
 void CSoundRender_TargetA::fill_parameters()
 {
-    CSoundRender_Emitter* SE = m_pEmitter;
+    [[maybe_unused]] CSoundRender_Emitter* SE = m_pEmitter;
     VERIFY(SE);
 
     inherited::fill_parameters();
@@ -161,6 +170,10 @@ void CSoundRender_TargetA::fill_parameters()
         -m_pEmitter->p_source.position.z));
 
     VERIFY2(m_pEmitter, SE->source()->file_name());
+    A_CHK(alSource3f(pSource, AL_VELOCITY, m_pEmitter->p_source.velocity.x, m_pEmitter->p_source.velocity.y,
+        -m_pEmitter->p_source.velocity.z));
+
+    VERIFY2(m_pEmitter, SE->source()->file_name());
     A_CHK(alSourcei(pSource, AL_SOURCE_RELATIVE, m_pEmitter->b2D));
 
     A_CHK(alSourcef(pSource, AL_ROLLOFF_FACTOR, psSoundRolloff));
@@ -175,8 +188,12 @@ void CSoundRender_TargetA::fill_parameters()
     }
 
     VERIFY2(m_pEmitter, SE->source()->file_name());
+
     float _pitch = m_pEmitter->p_source.freq;
-    clamp(_pitch, EPS_L, 2.f);
+    if (!m_pEmitter->bIgnoringTimeFactor)
+        _pitch *= psSoundTimeFactor; //--#SM+#-- Correct sound "speed" by time factor
+    clamp(_pitch, EPS_L, 100.f); //--#SM+#-- Increase sound frequency (speed) limit
+
     if (!fsimilar(_pitch, cache_pitch))
     {
         cache_pitch = _pitch;

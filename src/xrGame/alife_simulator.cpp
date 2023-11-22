@@ -25,8 +25,8 @@ LPCSTR alife_section = "alife";
 
 
 CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
-    : CALifeUpdateManager(server, alife_section), CALifeInteractionManager(server, alife_section),
-      CALifeSimulatorBase(server, alife_section)
+    : CALifeSimulatorBase(server, alife_section), CALifeUpdateManager(server, alife_section),
+      CALifeInteractionManager(server, alife_section)
 {
     // XXX: why do we need to reinitialize script engine?
     if (!strstr(Core.Params, "-keep_lua"))
@@ -52,10 +52,12 @@ CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
     xr_strcat(temp, p.m_alife);
     *command_line = temp;
 
+    const bool isNewGame = xr_strcmp(p.m_new_or_load, "new") != -1;
+
     LPCSTR start_game_callback = pSettings->r_string(alife_section, "start_game_callback");
     luabind::functor<void> functor;
     R_ASSERT2(GEnv.ScriptEngine->functor(start_game_callback, functor), "failed to get start game callback");
-    functor();
+    functor(isNewGame);
 
     load(p.m_game_or_spawn, !xr_strcmp(p.m_new_or_load, "load") ? false : true, !xr_strcmp(p.m_new_or_load, "new"));
 }

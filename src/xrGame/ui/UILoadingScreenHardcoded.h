@@ -19,9 +19,6 @@ R"(<w>
         <background stretch="1">
             <texture width="506" height="4" r="0" g="0" b="0" a="255">ui_mm_loading_progress_bar</texture>
         </background>
-        <min_color r="30" g="88" b="126"/>
-		<middle_color r="60" g="118" b="156"/>
-		<max_color r="90" g="148" b="186"/>
     </loading_progress>
     <loading_stage x="260" y="530" width="506" height="20">
         <text align="c" r="170" g="170" b="170" font="letterica18"/>
@@ -58,9 +55,6 @@ R"(<w>
         <background stretch="1">
             <texture width="405" height="5" r="0" g="0" b="0" a="255">ui_mm_loading_progress_bar</texture>
         </background>
-        <min_color r="30" g="88" b="126"/>
-		<middle_color r="60" g="118" b="156"/>
-		<max_color r="90" g="148" b="186"/>
     </loading_progress>
     <loading_stage x="310" y="530" width="405" height="20" stretch="1">
         <text align="c" r="170" g="170" b="170" font="letterica18"/>
@@ -83,6 +77,16 @@ R"(<w>
             <texture>ui_mm_loading_screen</texture>
         </auto_static>
 	</background>
+    <background_rus width="1024" height="768">
+        <auto_static width="1024" height="768">
+            <texture>ui_mm_loading_screen_ru</texture>
+        </auto_static>
+    </background_rus>
+    <background_eng width="1024" height="768">
+        <auto_static width="1024" height="768">
+            <texture>ui_mm_loading_screen_en</texture>
+        </auto_static>
+    </background_eng>
     <loading_logo x="257" y="369" width="512" height="256" stretch="1"/>
     <loading_progress x="379" y="726" width="268" height="37" mode="from_center" min="0" max="100" pos="0" inertion="5.0" under_background="0">
         <progress>
@@ -107,7 +111,19 @@ R"(<w>
             <texture>ui_mm_loading_right_widepanel</texture>
         </auto_static>
     </background>
+    <!--background_rus width="1024" height="768">
+        <auto_static x="0" y="0" width="1024" height="768">
+            <texture>ui_mm_loading_screen_ru</texture>
+        </auto_static>
+    </background_rus>
+    <background_eng width="1024" height="768">
+        <auto_static x="0" y="0" width="1024" height="768">
+            <texture>ui_mm_loading_screen_en</texture>
+        </auto_static>
+    </background_eng-->
     <loading_logo x="307" y="368.3" width="409.5" height="256" stretch="1"/>
+    <!--loading_logo_rus x="256" y="368.3" width="614.5" height="256"/>
+    <loading_logo_eng x="256" y="368.3" width="614.5" height="256"/-->
     <loading_progress x="379" y="726" width="268" height="37" mode="from_center" min="0" max="100" pos="0" inertion="5.0" under_background="0">
         <progress>
             <texture>ui_mm_loading_progress_bar</texture>
@@ -154,6 +170,12 @@ R"(<w>
     <file name="ui\ui_load">
         <texture id="ui_mm_loading_screen" x="0" y="0" width="1024" height="768" />
         <texture id="ui_mm_loading_progress_bar" x="0" y="768" width="268" height="37" />
+    </file>
+    <file name="ui\ui_load_ru">
+        <texture id="ui_mm_loading_screen_ru" x="0" y="0" width="1024" height="768" />
+    </file>
+    <file name="ui\ui_load_en">
+        <texture id="ui_mm_loading_screen_en" x="0" y="0" width="1024" height="768" />
     </file>
     <file name="ui\ui_ingame2_back_add2_w">
         <texture id="ui_mm_loading_left_widepanel" x="680" y="0" width="170" height="768" />

@@ -12,15 +12,16 @@
 #include "Common/object_broker.h"
 
 CUISkinSelectorWnd::CUISkinSelectorWnd(const char* strSectionName, s16 team)
+    : CUIDialogWnd(CUISkinSelectorWnd::GetDebugType())
 {
     m_team = team;
     m_iActiveIndex = -1;
-    m_pBackground = xr_new<CUIStatic>();
+    m_pBackground = xr_new<CUIStatic>("Background");
     AttachChild(m_pBackground);
-    m_pCaption = xr_new<CUIStatic>();
+    m_pCaption = xr_new<CUIStatic>("Caption");
     AttachChild(m_pCaption);
 
-    m_pFrames = xr_new<CUIStatic>();
+    m_pFrames = xr_new<CUIStatic>("Frames");
     AttachChild(m_pFrames);
 
     for (int i = 0; i < 6; i++)

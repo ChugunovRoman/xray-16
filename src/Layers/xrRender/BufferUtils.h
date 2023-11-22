@@ -4,11 +4,24 @@ u32 GetFVFVertexSize(u32 FVF);
 u32 GetDeclVertexSize(const VertexElement* decl, u32 Stream);
 u32 GetDeclLength(const VertexElement* decl);
 
+inline bool dcl_equal(const VertexElement* a, const VertexElement* b)
+{
+    // check sizes
+    const auto a_size = GetDeclLength(a);
+    const auto b_size = GetDeclLength(b);
+    if (a_size != b_size)
+        return false;
+    return 0 == memcmp(a, b, a_size * sizeof(VertexElement));
+}
+
 struct SDeclaration;
 
-void ConvertVertexDeclaration(u32 FVF, SDeclaration* decl);
 void ConvertVertexDeclaration(const VertexElement* dxdecl, SDeclaration* decl);
 void ConvertVertexDeclaration(const xr_vector<VertexElement>& declIn, xr_vector<InputElementDesc>& declOut);
+
+#ifdef USE_OGL
+void SetGLVertexPointer(SDeclaration* decl);
+#endif
 
 namespace BufferUtils
 {

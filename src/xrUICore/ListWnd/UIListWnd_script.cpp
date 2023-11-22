@@ -3,26 +3,28 @@
 #include "UIListWnd.h"
 #include "UIListItemEx.h"
 
-using namespace luabind;
-using namespace luabind::policy;
-
 bool CUIListWnd::AddItem_script(CUIListItem* item)
 {
     return AddItem(item, -1);
 }
 
-struct CUIListItemWrapper : public CUIListItem, public luabind::wrap_base
+struct CUIListItemWrapper final : public CUIListItem, public luabind::wrap_base
 {
+    pcstr GetDebugType() override { return "CUIListItemScript"; }
 };
 
-struct CUIListItemExWrapper : public CUIListItemEx, public luabind::wrap_base
+struct CUIListItemExWrapper final : public CUIListItemEx, public luabind::wrap_base
 {
+    pcstr GetDebugType() override { return "CUIListItemExScript"; }
 };
 
 // clang-format off
 #pragma optimize("s", on)
 SCRIPT_EXPORT(CUIListWnd, (CUIWindow),
 {
+    using namespace luabind;
+    using namespace luabind::policy;
+
     module(luaState)
     [
         class_<CUIListWnd, CUIWindow>("CUIListWnd")
@@ -59,6 +61,8 @@ SCRIPT_EXPORT(CUIListWnd, (CUIWindow),
 
 SCRIPT_EXPORT(CUIListItem, (CUIButton),
 {
+    using namespace luabind;
+
     module(luaState)
     [
         class_<CUIListItem, CUIButton, default_holder, CUIListItemWrapper>("CUIListItem")
@@ -68,6 +72,8 @@ SCRIPT_EXPORT(CUIListItem, (CUIButton),
 
 SCRIPT_EXPORT(CUIListItemEx, (CUIListItem),
 {
+    using namespace luabind;
+
     module(luaState)
     [
         class_<CUIListItemEx, CUIListItem, default_holder, CUIListItemExWrapper>("CUIListItemEx")

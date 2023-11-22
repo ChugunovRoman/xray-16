@@ -17,7 +17,8 @@
 
 
 CUITalkDialogWnd::CUITalkDialogWnd()
-    : m_uiXml(nullptr),
+    : CUIWindow("CUITalkDialogWnd"),
+      m_uiXml(nullptr),
       m_pParent(nullptr),
       mechanic_mode(false),
       m_ClickedQuestionID(""),
@@ -34,11 +35,12 @@ CUITalkDialogWnd::CUITalkDialogWnd()
       m_uOurReplicsColor(0) {}
 
 CUITalkDialogWnd::~CUITalkDialogWnd() { xr_delete(m_uiXml); }
+
 void CUITalkDialogWnd::InitTalkDialogWnd()
 {
-    constexpr pcstr TALK_XML = "talk.xml";
-    constexpr pcstr TALK_CHARACTER_XML = "talk_character.xml";
-    constexpr cpcstr TRADE_CHARACTER_XML = "trade_character.xml";
+    static constexpr pcstr TALK_XML = "talk.xml";
+    static constexpr pcstr TALK_CHARACTER_XML = "talk_character.xml";
+    static constexpr cpcstr TRADE_CHARACTER_XML = "trade_character.xml";
 
     m_uiXml = xr_new<CUIXml>();
     m_uiXml->Load(CONFIG_PATH, UI_PATH, UI_PATH_DEFAULT, TALK_XML);
@@ -81,7 +83,7 @@ void CUITalkDialogWnd::InitTalkDialogWnd()
         if (m_uiXml->NavigateToNode("frame_line_window", 1))
         {
             // XXX: Don't replace this with UI helper, until it's missing needed functionality to select the index
-            UIOurPhrasesFrame = xr_new<CUIFrameLineWnd>();
+            UIOurPhrasesFrame = xr_new<CUIFrameLineWnd>("Our phrases frame");
             UIOurPhrasesFrame->SetAutoDelete(true);
             AttachChild(UIOurPhrasesFrame);
             CUIXmlInitBase::InitFrameLine(*m_uiXml, "frame_line_window", 1, UIOurPhrasesFrame); // index for field is 1 (one) !!!
@@ -132,8 +134,6 @@ void CUITalkDialogWnd::InitTalkDialogWnd()
 
     CGameFont* pFont = nullptr;
     CUIXmlInit::InitFont(*m_uiXml, "font", 1, m_uOurReplicsColor, pFont);
-
-    SetWindowName("----CUITalkDialogWnd");
 
     Register(&UIToTradeButton);
     AddCallbackStr("question_item", LIST_ITEM_CLICKED, CUIWndCallback::void_function(this, &CUITalkDialogWnd::OnQuestionClicked));
@@ -268,7 +268,7 @@ void CUITalkDialogWnd::AddIconedAnswer(LPCSTR caption, LPCSTR text, LPCSTR textu
     Actor()->game_news_registry->registry().objects().push_back(news_data);
 }
 
-void CUITalkDialogWnd::AddIconedAnswer(cpcstr text, cpcstr texture_name, Frect texture_rect, cpcstr templ_name)
+void CUITalkDialogWnd::AddIconedAnswer(pcstr text, pcstr texture_name, Frect texture_rect, pcstr templ_name)
 {
     CUIAnswerItemIconed* itm = xr_new<CUIAnswerItemIconed>(m_uiXml, templ_name);
     itm->Init(text, texture_name, texture_rect);
@@ -338,8 +338,17 @@ void CUITalkDialogWnd::UpdateButtonsLayout(bool b_disable_break, bool trade_enab
     }
 }
 
+void CUITalkDialogWnd::TryScrollAnswersList(bool down)
+{
+    if (down)
+        UIAnswersList->ScrollBar()->TryScrollDec();
+    else
+        UIAnswersList->ScrollBar()->TryScrollInc();
+}
+
 void CUIQuestionItem::SendMessage(CUIWindow* pWnd, s16 msg, void* pData) { CUIWndCallback::OnEvent(pWnd, msg, pData); }
 CUIQuestionItem::CUIQuestionItem(CUIXml* xml_doc, LPCSTR path)
+    : CUIWindow("CUIQuestionItem")
 {
     CUIXmlInit::InitWindow(*xml_doc, path, 0, this);
 
@@ -372,6 +381,7 @@ void CUIQuestionItem::OnTextClicked(CUIWindow* w, void*)
 }
 
 CUIAnswerItem::CUIAnswerItem(CUIXml* xml_doc, LPCSTR path)
+    : CUIWindow("CUIAnswerItem")
 {
     CUIXmlInit::InitWindow(*xml_doc, path, 0, this);
 
@@ -401,7 +411,7 @@ void CUIAnswerItem::Init(LPCSTR text, LPCSTR name)
 
 CUIAnswerItemIconed::CUIAnswerItemIconed(CUIXml* xml_doc, LPCSTR path) : CUIAnswerItem(xml_doc, path)
 {
-    m_icon = xr_new<CUIStatic>();
+    m_icon = xr_new<CUIStatic>("Icon");
     m_icon->SetAutoDelete(true);
     CUIWindow::AttachChild(m_icon);
 
@@ -424,7 +434,7 @@ void CUIAnswerItemIconed::Init(LPCSTR text, LPCSTR name, LPCSTR texture_name)
     m_icon->SetStretchTexture(true);
 }
 
-void CUIAnswerItemIconed::Init(cpcstr text, cpcstr texture_name, Frect texture_rect)
+void CUIAnswerItemIconed::Init(pcstr text, pcstr texture_name, Frect texture_rect)
 {
     inherited::Init(text, "");
     m_icon->InitTexture(texture_name);

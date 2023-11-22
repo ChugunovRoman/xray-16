@@ -105,14 +105,15 @@ CLevel::CLevel()
     m_ph_commander_scripts = xr_new<CPHCommander>();
     pObjects4CrPr.clear();
     pActors4CrPr.clear();
+    pHUD = xr_new<CHUDManager>();
     g_player_hud = xr_new<player_hud>();
     g_player_hud->load_default();
-    Msg("%s", Core.Params);
 }
 
 CLevel::~CLevel()
 {
     xr_delete(g_player_hud);
+    xr_delete(pHUD);
     delete_data(hud_zones_list);
     hud_zones_list = nullptr;
     Msg("- Destroying level");
@@ -127,17 +128,17 @@ CLevel::~CLevel()
         xr_delete(m_ph_commander_physics_worldstep);
     }
     // destroy PSs
-    for (auto p_it = m_StaticParticles.begin(); m_StaticParticles.end() != p_it; ++p_it)
-        CParticlesObject::Destroy(*p_it);
+    for (auto& ps : m_StaticParticles)
+        CParticlesObject::Destroy(ps);
     m_StaticParticles.clear();
     // Unload sounds
     // unload prefetched sounds
     sound_registry.clear();
     // unload static sounds
-    for (u32 i = 0; i < static_Sounds.size(); ++i)
+    for (auto& sound : static_Sounds)
     {
-        static_Sounds[i]->destroy();
-        xr_delete(static_Sounds[i]);
+        sound->destroy();
+        xr_delete(sound);
     }
     static_Sounds.clear();
     xr_delete(m_level_sound_manager);
@@ -537,9 +538,6 @@ void CLevel::OnFrame()
             xr_delete(pStatGraphR);
 #endif
     }
-#ifdef DEBUG
-    g_pGamePersistent->Environment().m_paused = m_bEnvPaused;
-#endif
     g_pGamePersistent->Environment().SetGameTime(GetEnvironmentGameDayTimeSec(), game->GetEnvironmentGameTimeFactor());
     if (!GEnv.isDedicatedServer)
         GEnv.ScriptEngine->script_process(ScriptProcessor::Level)->update();
@@ -589,8 +587,6 @@ void test_precise_path();
 extern Flags32 dbg_net_Draw_Flags;
 #endif
 
-extern void draw_wnds_rects();
-
 void CLevel::OnRender()
 {
     GEnv.Render->BeforeWorldRender();	//--#SM+#-- +SecondVP+
@@ -616,7 +612,6 @@ void CLevel::OnRender()
         HUD().RenderUI();
 
 #ifdef DEBUG
-    draw_wnds_rects();
     physics_world()->OnRender();
 #endif
 #ifdef DEBUG
@@ -942,8 +937,16 @@ void CLevel::SetNumCrSteps(u32 NumSteps)
 }
 
 ALife::_TIME_ID CLevel::GetStartGameTime() { return (game->GetStartGameTime()); }
+
 ALife::_TIME_ID CLevel::GetGameTime() { return (game->GetGameTime()); }
-ALife::_TIME_ID CLevel::GetEnvironmentGameTime() { return (game->GetEnvironmentGameTime()); }
+
+ALife::_TIME_ID CLevel::GetEnvironmentGameTime() const
+{
+    if (!game)
+        return 0;
+    return (game->GetEnvironmentGameTime());
+}
+
 u8 CLevel::GetDayTime()
 {
     u32 dummy32, hours;
@@ -953,8 +956,10 @@ u8 CLevel::GetDayTime()
 }
 
 float CLevel::GetGameDayTimeSec() { return (float(s64(GetGameTime() % (24 * 60 * 60 * 1000))) / 1000.f); }
+
 u32 CLevel::GetGameDayTimeMS() { return (u32(s64(GetGameTime() % (24 * 60 * 60 * 1000)))); }
-float CLevel::GetEnvironmentGameDayTimeSec()
+
+float CLevel::GetEnvironmentGameDayTimeSec() const
 {
     return (float(s64(GetEnvironmentGameTime() % (24 * 60 * 60 * 1000))) / 1000.f);
 }
@@ -964,11 +969,33 @@ void CLevel::GetGameDateTime(u32& year, u32& month, u32& day, u32& hours, u32& m
     split_time(GetGameTime(), year, month, day, hours, mins, secs, milisecs);
 }
 
-float CLevel::GetGameTimeFactor() { return (game->GetGameTimeFactor()); }
-void CLevel::SetGameTimeFactor(const float fTimeFactor) { game->SetGameTimeFactor(fTimeFactor); }
+float CLevel::GetGameTimeFactor()
+{
+    return game->GetGameTimeFactor();
+}
+
+void CLevel::SetGameTimeFactor(const float fTimeFactor)
+{
+    game->SetGameTimeFactor(fTimeFactor);
+}
+
 void CLevel::SetGameTimeFactor(ALife::_TIME_ID GameTime, const float fTimeFactor)
 {
     game->SetGameTimeFactor(GameTime, fTimeFactor);
+}
+
+float CLevel::GetEnvironmentTimeFactor() const
+{
+    if (!game)
+        return 0.0f;
+    return game->GetEnvironmentGameTimeFactor();
+}
+
+void CLevel::SetEnvironmentTimeFactor(const float fTimeFactor)
+{
+    if (!game)
+        return;
+    game->SetEnvironmentGameTimeFactor(fTimeFactor);
 }
 
 void CLevel::SetEnvironmentGameTimeFactor(u64 const& GameTime, float const& fTimeFactor)

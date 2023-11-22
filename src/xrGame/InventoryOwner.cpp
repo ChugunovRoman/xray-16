@@ -282,12 +282,12 @@ void CInventoryOwner::StopTrading()
 
 bool CInventoryOwner::IsTrading() { return m_bTrading; }
 //==============
-void CInventoryOwner::renderable_Render(IRenderable* root)
+void CInventoryOwner::renderable_Render(u32 context_id, IRenderable* root)
 {
     if (inventory().ActiveItem())
-        inventory().ActiveItem()->renderable_Render(root);
+        inventory().ActiveItem()->renderable_Render(context_id, root);
 
-    CAttachmentOwner::renderable_Render(root);
+    CAttachmentOwner::renderable_Render(context_id, root);
 }
 
 void CInventoryOwner::OnItemTake(CInventoryItem* inventory_item)
@@ -387,6 +387,14 @@ void CInventoryOwner::SetCommunity(CHARACTER_COMMUNITY_INDEX new_community)
     trader->m_community_index = new_community;
 }
 
+void CInventoryOwner::SetMonsterCommunity() const
+{
+    CHARACTER_COMMUNITY community;
+    community.set("monster", true);
+    if (community.index() != NO_COMMUNITY_INDEX)
+        CharacterInfo().SetCommunity(community.index());
+}
+
 void CInventoryOwner::SetRank(CHARACTER_RANK_VALUE rank)
 {
     CEntityAlive* EA = smart_cast<CEntityAlive*>(this);
@@ -463,6 +471,7 @@ CCustomOutfit* CInventoryOwner::GetOutfit() const
 {
     return smart_cast<CCustomOutfit*>(inventory().ItemFromSlot(OUTFIT_SLOT));
 }
+
 CBackpack* CInventoryOwner::GetBackpack() const
 {
     return smart_cast<CBackpack*>(inventory().ItemFromSlot(BACKPACK_SLOT));

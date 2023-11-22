@@ -476,7 +476,7 @@ void CAI_Stalker::debug_text()
         {
             if (agent_manager().member().member(this).cover())
             {
-                DBG_OutText("%scover         : [%s][%f][%f][%f]", indent,
+                DBG_OutText("%cover         : [%s][%f][%f][%f]", indent,
                     agent_manager().member().member(this).cover()->m_is_smart_cover ? "smart" : "generated",
                     VPUSH(agent_manager().member().member(this).cover()->position()));
             }
@@ -951,9 +951,9 @@ void CAI_Stalker::debug_text()
     }
 }
 
-void CAI_Stalker::OnHUDDraw(CCustomHUD* hud, IRenderable* root)
+void CAI_Stalker::OnHUDDraw(u32 context_id, CCustomHUD* hud, IRenderable* root)
 {
-    inherited::OnHUDDraw(hud, root);
+    inherited::OnHUDDraw(context_id, hud, root);
     m_dbg_hud_draw = true;
 }
 
@@ -1128,8 +1128,6 @@ void CAI_Stalker::dbg_draw_visibility_rays()
 #define DEBUG_RENDER
 
 xr_vector<Fmatrix> g_stalker_skeleton;
-
-static Fvector s_spine_bone;
 
 static Fmatrix aim_on_actor(Fvector const& bone_position, Fvector const& weapon_position,
     Fvector const& weapon_direction, Fvector const& target, bool const& debug_draw)

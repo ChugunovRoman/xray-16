@@ -2,7 +2,7 @@
 #include "xrUICore/Windows/UIWindow.h"
 #include "xrUICore/Buttons/UIButton.h"
 
-class XRUICORE_API CUIProgressBar : public CUIWindow
+class XRUICORE_API CUIProgressBar final : public CUIWindow
 {
     friend class CUIXmlInitBase;
     typedef CUIWindow inherited;
@@ -33,6 +33,7 @@ protected:
 
 public:
     bool m_bUseColor;
+    bool m_bUseMiddleColor; // Hrust: optional middle color for CS/SoC compatibility, without middle color it doesn't looks correctly
     bool m_bUseGradient; //Alundaio: if false then use only solid color with m_maxColor
     Fcolor m_minColor;
     Fcolor m_middleColor;
@@ -65,4 +66,6 @@ public:
     bool IsShownBackground() { return m_bBackgroundPresent; }
     virtual void Draw();
     virtual void Update();
+
+    pcstr GetDebugType() override { return "CUIProgressBar"; }
 };

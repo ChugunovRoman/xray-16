@@ -76,15 +76,15 @@ void CAI_Crow::SSound::Load(LPCSTR prefix)
 
 void CAI_Crow::SSound::SetPosition(const Fvector& pos)
 {
-    for (int i = 0; i < (int)m_Sounds.size(); ++i)
-        if (m_Sounds[i]._feedback())
-            m_Sounds[i].set_position(pos);
+    for (auto& sound : m_Sounds)
+        if (sound._feedback())
+            sound.set_position(pos);
 }
 
 void CAI_Crow::SSound::Unload()
 {
-    for (int i = 0; i < (int)m_Sounds.size(); ++i)
-        GEnv.Sound->destroy(m_Sounds[i]);
+    for (auto& sound : m_Sounds)
+        GEnv.Sound->destroy(sound);
 }
 
 void cb_OnHitEndPlaying(CBlend* B) { ((CAI_Crow*)B->CallbackParam)->OnHitEndPlaying(B); }
@@ -268,7 +268,6 @@ void CAI_Crow::state_Flying(float fdt)
     VERIFY2(valid_pos(Position()), dbg_valide_pos_string(Position(), this, "state_Flying		(float fdt)"));
 }
 
-static Fvector vV = {0, 0, 0};
 void CAI_Crow::state_DeathFall()
 {
     Fvector tAcceleration;
@@ -324,10 +323,10 @@ void CAI_Crow::UpdateCL()
         XFORM().set(m_pPhysicsShell->mXFORM);
     }
 }
-void CAI_Crow::renderable_Render(IRenderable* root)
+void CAI_Crow::renderable_Render(u32 context_id, IRenderable* root)
 {
     UpdateWorkload(Device.fTimeDelta * (Device.dwFrame - o_workload_frame));
-    inherited::renderable_Render(root);
+    inherited::renderable_Render(context_id, root);
     o_workload_rframe = Device.dwFrame;
 }
 void CAI_Crow::shedule_Update(u32 DT)
@@ -359,8 +358,11 @@ void CAI_Crow::shedule_Update(u32 DT)
         if (Position().y <= vOldPosition.y)
             st_target = eFlyIdle;
         break;
-    case eDeathFall: state_DeathFall(); break;
+    case eDeathFall:
+        state_DeathFall();
+        break;
     }
+
     if ((eDeathFall != st_current) && (eDeathDead != st_current))
     {
         // At random times, change the direction (goal) of the plane
@@ -386,10 +388,9 @@ void CAI_Crow::shedule_Update(u32 DT)
     m_Sounds.m_idle.SetPosition(Position());
 
     // work
-    if (o_workload_rframe >= (Device.dwFrame - 2))
-        ;
-    else
+    if (o_workload_rframe < (Device.dwFrame - 2))
         UpdateWorkload(fDT);
+
     VERIFY2(valid_pos(Position()), dbg_valide_pos_string(Position(), this, " CAI_Crow::shedule_Update		(u32 DT)"));
 }
 

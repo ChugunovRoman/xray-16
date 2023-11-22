@@ -152,7 +152,7 @@ void CUIMpTradeWnd::DeleteHelperItems()
 {
     int lists[] = {e_medkit, e_granade, e_rifle_ammo, e_pistol_ammo};
 
-    for (int i = 0; i < sizeof(lists) / sizeof(lists[0]); ++i)
+    for (int i = 0; i < static_cast<int>(sizeof(lists) / sizeof(lists[0])); ++i)
     {
         DeleteHelperItems(m_list[lists[i]]);
     }
@@ -198,7 +198,7 @@ void CUIMpTradeWnd::UpdateHelperItems()
 
     int lists[] = {e_medkit, e_granade, e_rifle_ammo, e_pistol_ammo};
 
-    for (int i = 0; i < sizeof(lists) / sizeof(lists[0]); ++i)
+    for (int i = 0; i < static_cast<int>(sizeof(lists) / sizeof(lists[0])); ++i)
     {
         CreateHelperItems(m_list[lists[i]]);
     }
@@ -861,7 +861,7 @@ void CUICellItemTradeMenuDraw::OnDraw(CUICellItem* cell)
             acc = 1;
         string64 buff;
 
-        xr_sprintf(buff, " %d", acc - SDL_SCANCODE_ESCAPE);
+        xr_sprintf(buff, " %d", acc - SDL_SCANCODE_1 + 1); //записать в buf клавишу акселератор для cell
         CGameFont* pFont = UI().Font().pFontLetterica16Russian;
         pFont->SetAligment(CGameFont::alCenter);
         pFont->SetColor(color_rgba(135, 123, 116, 255));

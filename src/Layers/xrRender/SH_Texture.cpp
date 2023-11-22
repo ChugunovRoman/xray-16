@@ -16,7 +16,6 @@ void resptrcode_texture::create(LPCSTR _name) { _set(RImplementation.Resources->
 //////////////////////////////////////////////////////////////////////
 CTexture::CTexture()
 {
-    pSurface = nullptr;
     pAVI = nullptr;
     pTheora = nullptr;
     desc_cache = nullptr;
@@ -26,7 +25,7 @@ CTexture::CTexture()
     flags.bUser = false;
     flags.seqCycles = FALSE;
     m_material = 1.0f;
-    bind = fastdelegate::FastDelegate1<u32>(this, &CTexture::apply_load);
+    bind = fastdelegate::FastDelegate2<CBackend&,u32>(this, &CTexture::apply_load);
 }
 // XXX: render scripts should call this destructor before resource manager gets destroyed
 CTexture::~CTexture()
@@ -52,7 +51,7 @@ void CTexture::surface_set(ID3DBaseTexture* surf)
     pSurface = surf;
 }
 
-ID3DBaseTexture* CTexture::surface_get()
+ID3DBaseTexture* CTexture::surface_get() const
 {
     if (pSurface)
         pSurface->AddRef();
@@ -62,30 +61,30 @@ ID3DBaseTexture* CTexture::surface_get()
 void CTexture::PostLoad()
 {
     if (pTheora)
-        bind = fastdelegate::FastDelegate1<u32>(this, &CTexture::apply_theora);
+        bind = fastdelegate::FastDelegate2<CBackend&,u32>(this, &CTexture::apply_theora);
     else if (pAVI)
-        bind = fastdelegate::FastDelegate1<u32>(this, &CTexture::apply_avi);
+        bind = fastdelegate::FastDelegate2<CBackend&,u32>(this, &CTexture::apply_avi);
     else if (!seqDATA.empty())
-        bind = fastdelegate::FastDelegate1<u32>(this, &CTexture::apply_seq);
+        bind = fastdelegate::FastDelegate2<CBackend&,u32>(this, &CTexture::apply_seq);
     else
-        bind = fastdelegate::FastDelegate1<u32>(this, &CTexture::apply_normal);
+        bind = fastdelegate::FastDelegate2<CBackend&,u32>(this, &CTexture::apply_normal);
 }
 
-void CTexture::apply_load(u32 dwStage)
+void CTexture::apply_load(CBackend& cmd_list, u32 dwStage)
 {
     if (!flags.bLoaded)
         Load();
     else
         PostLoad();
-    bind(dwStage);
+    bind(cmd_list, dwStage);
 };
 
-void CTexture::apply_theora(u32 dwStage)
+void CTexture::apply_theora(CBackend& cmd_list, u32 dwStage)
 {
-    if (pTheora->Update(m_play_time != 0xFFFFFFFF ? m_play_time : RDEVICE.dwTimeContinual))
+    if (pTheora->Update(m_play_time != 0xFFFFFFFF ? m_play_time : Device.dwTimeContinual))
     {
         R_ASSERT(D3DRTYPE_TEXTURE == pSurface->GetType());
-        ID3DTexture2D* T2D = (ID3DTexture2D*)pSurface;
+        ID3DTexture2D* T2D = static_cast<ID3DTexture2D*>(pTempSurface);
         D3DLOCKED_RECT R;
         RECT rect;
         rect.left = 0;
@@ -101,15 +100,16 @@ void CTexture::apply_theora(u32 dwStage)
         pTheora->DecompressFrame((u32*)R.pBits, _w - rect.right, _pos);
         VERIFY(u32(_pos) == rect.bottom * _w);
         R_CHK(T2D->UnlockRect(0));
+        R_CHK(HW.pDevice->UpdateTexture(pTempSurface, pSurface));
     }
     CHK_DX(HW.pDevice->SetTexture(dwStage, pSurface));
 };
-void CTexture::apply_avi(u32 dwStage)
+void CTexture::apply_avi(CBackend& cmd_list, u32 dwStage) const
 {
     if (pAVI->NeedUpdate())
     {
         R_ASSERT(D3DRTYPE_TEXTURE == pSurface->GetType());
-        ID3DTexture2D* T2D = (ID3DTexture2D*)pSurface;
+        ID3DTexture2D* T2D = static_cast<ID3DTexture2D*>(pTempSurface);
 
         // AVI
         D3DLOCKED_RECT R;
@@ -122,13 +122,14 @@ void CTexture::apply_avi(u32 dwStage)
         //		R_ASSERT(pAVI->GetFrame((u8*)(&R.pBits)));
 
         R_CHK(T2D->UnlockRect(0));
+        R_CHK(HW.pDevice->UpdateTexture(pTempSurface, pSurface));
     }
     CHK_DX(HW.pDevice->SetTexture(dwStage, pSurface));
 };
-void CTexture::apply_seq(u32 dwStage)
+void CTexture::apply_seq(CBackend& cmd_list, u32 dwStage)
 {
     // SEQ
-    u32 frame = RDEVICE.dwTimeContinual / seqMSPF; // RDEVICE.dwTimeGlobal
+    u32 frame = Device.dwTimeContinual / seqMSPF; // Device.dwTimeGlobal
     u32 frame_data = seqDATA.size();
     if (flags.seqCycles)
     {
@@ -144,7 +145,11 @@ void CTexture::apply_seq(u32 dwStage)
     }
     CHK_DX(HW.pDevice->SetTexture(dwStage, pSurface));
 };
-void CTexture::apply_normal(u32 dwStage) { CHK_DX(HW.pDevice->SetTexture(dwStage, pSurface)); };
+void CTexture::apply_normal(CBackend& cmd_list, u32 dwStage) const
+{
+    CHK_DX(HW.pDevice->SetTexture(dwStage, pSurface));
+};
+
 void CTexture::Preload()
 {
     m_bumpmap = RImplementation.Resources->m_textures_description.GetBumpName(cName);
@@ -190,23 +195,23 @@ void CTexture::Load()
             {
                 flags.MemoryUsage = pTheora->Width(true) * pTheora->Height(true) * 4;
                 BOOL bstop_at_end = (nullptr != strstr(cName.c_str(), "intro" DELIMITER)) || (nullptr != strstr(cName.c_str(), "outro" DELIMITER));
-                pTheora->Play(!bstop_at_end, RDEVICE.dwTimeContinual);
+                pTheora->Play(!bstop_at_end, Device.dwTimeContinual);
 
                 // Now create texture
-                ID3DTexture2D* pTexture = nullptr;
                 u32 _w = pTheora->Width(false);
                 u32 _h = pTheora->Height(false);
 
-                HRESULT hrr =
-                    HW.pDevice->CreateTexture(_w, _h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &pTexture, nullptr);
+                const auto hr = HW.pDevice->CreateTexture(_w, _h, 1, 0,
+                    D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, reinterpret_cast<ID3DTexture2D**>(&pSurface), nullptr);
+                const auto hr2 = HW.pDevice->CreateTexture(_w, _h, 1, 0,
+                    D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, reinterpret_cast<ID3DTexture2D**>(&pTempSurface), nullptr);
 
-                pSurface = pTexture;
-                if (FAILED(hrr))
+                if (FAILED(hr) || FAILED(hr2))
                 {
                     FATAL("Invalid video stream");
-                    R_CHK(hrr);
                     xr_delete(pTheora);
-                    pSurface = nullptr;
+                    _RELEASE(pSurface);
+                    _RELEASE(pTempSurface);
                 }
             }
         }
@@ -225,16 +230,17 @@ void CTexture::Load()
                 flags.MemoryUsage = pAVI->m_dwWidth * pAVI->m_dwHeight * 4;
 
                 // Now create texture
-                ID3DTexture2D* pTexture = nullptr;
-                HRESULT hrr = HW.pDevice->CreateTexture(
-                    pAVI->m_dwWidth, pAVI->m_dwHeight, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &pTexture, nullptr);
-                pSurface = pTexture;
-                if (FAILED(hrr))
+                const auto hr = HW.pDevice->CreateTexture(pAVI->m_dwWidth, pAVI->m_dwHeight, 1, 0,
+                    D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, reinterpret_cast<ID3DTexture2D**>(&pSurface), nullptr);
+                const auto hr2 = HW.pDevice->CreateTexture(pAVI->m_dwWidth, pAVI->m_dwHeight, 1, 0,
+                    D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, reinterpret_cast<ID3DTexture2D**>(&pTempSurface), nullptr);
+
+                if (FAILED(hr) || FAILED(hr2))
                 {
                     FATAL("Invalid video stream");
-                    R_CHK(hrr);
                     xr_delete(pAVI);
-                    pSurface = nullptr;
+                    _RELEASE(pSurface);
+                    _RELEASE(pTempSurface);
                 }
             }
         }
@@ -315,11 +321,12 @@ void CTexture::Unload()
 
 
     _RELEASE(pSurface);
+    _RELEASE(pTempSurface);
 
     xr_delete(pAVI);
     xr_delete(pTheora);
 
-    bind = fastdelegate::FastDelegate1<u32>(this, &CTexture::apply_load);
+    bind = fastdelegate::FastDelegate2<CBackend&,u32>(this, &CTexture::apply_load);
 }
 
 void CTexture::desc_update()
@@ -337,19 +344,22 @@ void CTexture::desc_update()
 void CTexture::video_Play(BOOL looped, u32 _time)
 {
     if (pTheora)
-        pTheora->Play(looped, (_time != 0xFFFFFFFF) ? (m_play_time = _time) : RDEVICE.dwTimeContinual);
+        pTheora->Play(looped, (_time != 0xFFFFFFFF) ? (m_play_time = _time) : Device.dwTimeContinual);
 }
 
-void CTexture::video_Pause(BOOL state)
+void CTexture::video_Pause(BOOL state) const
 {
     if (pTheora)
         pTheora->Pause(state);
 }
 
-void CTexture::video_Stop()
+void CTexture::video_Stop() const
 {
     if (pTheora)
         pTheora->Stop();
 }
 
-BOOL CTexture::video_IsPlaying() { return (pTheora) ? pTheora->IsPlaying() : FALSE; }
+BOOL CTexture::video_IsPlaying() const
+{
+    return (pTheora) ? pTheora->IsPlaying() : FALSE;
+}

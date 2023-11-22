@@ -40,7 +40,7 @@ IBlender* CResourceManager::_GetBlender(LPCSTR Name)
         Msg("! Shader '%s' not found in library.", Name);
         return nullptr;
     }
-    
+
     return I->second;
 }
 
@@ -69,7 +69,7 @@ void CResourceManager::ED_UpdateBlender(LPCSTR Name, IBlender* data)
     }
     else
     {
-        m_blenders.insert(std::make_pair(xr_strdup(Name), data));
+        m_blenders.emplace(xr_strdup(Name), data);
     }
 }
 
@@ -122,9 +122,9 @@ ShaderElement* CResourceManager::_CreateElement(ShaderElement&& S)
         return nullptr;
 
     // Search equal in shaders array
-    for (u32 it = 0; it < v_elements.size(); it++)
-        if (S.equal(*(v_elements[it])))
-            return v_elements[it];
+    for (ShaderElement* elem : v_elements)
+        if (S.equal(*elem))
+            return elem;
 
     // Create _new_ entry
     ShaderElement* N = v_elements.emplace_back(xr_new<ShaderElement>(std::move(S)));
@@ -152,15 +152,17 @@ Shader* CResourceManager::_cpp_Create(
 
     // Access to template
     C.BT = B;
-    C.bEditor = FALSE;
+    C.bFFP = RImplementation.o.ffp;
     C.bDetail = FALSE;
+    C.HudElement = false;
+
 #ifdef _EDITOR
     if (!C.BT)
     {
         ELog.Msg(mtError, "Can't find shader '%s'", s_shader);
         return 0;
     }
-    C.bEditor = TRUE;
+    C.bFFP = true;
 #else
     UNUSED(s_shader);
 #endif
@@ -169,6 +171,13 @@ Shader* CResourceManager::_cpp_Create(
     _ParseList(C.L_textures, s_textures);
     _ParseList(C.L_constants, s_constants);
     _ParseList(C.L_matrices, s_matrices);
+
+#if defined(USE_DX11)
+    if (RImplementation.hud_loading && RImplementation.o.ssfx_hud_raindrops)
+    {
+        C.HudElement = true;
+    }
+#endif
 
     // Compile element	(LOD0 - HQ)
     {
@@ -313,14 +322,10 @@ Shader* CResourceManager::Create(LPCSTR s_shader, LPCSTR s_textures, LPCSTR s_co
     if (!GEnv.isDedicatedServer)
     {
 #if defined(USE_DX9)
-#   ifndef _EDITOR
-        if (_lua_HasShader(s_shader))
+        const bool useCppBlender = RImplementation.o.ffp && _GetBlender(s_shader);
+        if (!useCppBlender && _lua_HasShader(s_shader))
             return _lua_Create(s_shader, s_textures);
-        else
-#   endif
-        {
-            return _cpp_Create(s_shader, s_textures, s_constants, s_matrices);
-        }
+        return _cpp_Create(s_shader, s_textures, s_constants, s_matrices);
 #else // TODO: DX11: When all shaders are ready switch to common path
         if (_lua_HasShader(s_shader))
             return _lua_Create(s_shader, s_textures);
@@ -356,7 +361,7 @@ void CResourceManager::Delete(const Shader* S)
 
 void CResourceManager::DeferredUpload()
 {
-    if (!RDEVICE.b_is_Ready)
+    if (!Device.b_is_Ready)
         return;
 
 #if defined(USE_DX9) || defined(USE_DX11)
@@ -371,7 +376,7 @@ void CResourceManager::DeferredUpload()
 
 void CResourceManager::DeferredUnload()
 {
-    if (!RDEVICE.b_is_Ready)
+    if (!Device.b_is_Ready)
         return;
 
 #if defined(USE_DX9) || defined(USE_DX11)
@@ -441,7 +446,7 @@ void CResourceManager::_DumpMemoryUsage()
         {
             u32 m = I->second->flags.MemoryUsage;
             shared_str n = I->second->cName;
-            mtex.insert(std::make_pair(m, std::make_pair(I->second->dwReference, n)));
+            mtex.emplace(m, std::make_pair(I->second->ref_count.load(), n));
         }
     }
 

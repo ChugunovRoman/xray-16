@@ -329,7 +329,7 @@ public:
 
     void AddIconedTalkMessage_old(LPCSTR text, LPCSTR texture_name, LPCSTR templ_name){}
     void AddIconedTalkMessage(LPCSTR caption, LPCSTR text, LPCSTR texture_name, LPCSTR templ_name);
-    void AddIconedTalkMessage(cpcstr text, cpcstr texture_name, Frect tex_rect, cpcstr templ_name);
+    void AddIconedTalkMessage(pcstr text, pcstr texture_name, Frect tex_rect, pcstr templ_name);
 
     //предикаты наличия/отсутствия порции информации у персонажа
     bool HasInfo(LPCSTR info_id);
@@ -761,13 +761,13 @@ public:
     void set_smart_cover_target_fire_no_lookout();
     void set_smart_cover_target_default(bool value);
 
-    float const idle_min_time() const;
+    float idle_min_time() const;
     void idle_min_time(float value);
-    float const idle_max_time() const;
+    float idle_max_time() const;
     void idle_max_time(float value);
-    float const lookout_min_time() const;
+    float lookout_min_time() const;
     void lookout_min_time(float value);
-    float const lookout_max_time() const;
+    float lookout_max_time() const;
     void lookout_max_time(float value);
 
     bool in_loophole_fov(LPCSTR cover_id, LPCSTR loophole_id, Fvector object_position) const;
@@ -815,6 +815,11 @@ public:
     u8 GetRestrictionType();
     void SetRestrictionType(u8 type);
 
+    //CWeaponAmmo
+    u16 AmmoGetCount();
+    void AmmoSetCount(u16 count);
+    u16 AmmoBoxSize();
+
     //Weapon
     LPCSTR Weapon_GetAmmoSection(u8 ammo_type);
     void Weapon_SetCurrentScope(u8 type);
@@ -833,8 +838,13 @@ public:
     u8 GetAmmoType();
 
     //Weapon & Outfit
+    bool AddUpgrade(pcstr upgrade);
     bool InstallUpgrade(pcstr upgrade);
     bool HasUpgrade(pcstr upgrade) const;
+    bool HasUpgradeGroup(pcstr upgrade_group) const;
+    bool HasUpgradeGroupByUpgradeId(pcstr upgrade) const;
+    bool CanAddUpgrade(pcstr upgrade) const;
+    bool CanInstallUpgrade(pcstr upgrade) const;
     void IterateInstalledUpgrades(luabind::functor<void> functor);
 
     //Car
@@ -868,14 +878,9 @@ public:
 
     void RemoveDanger(const CDangerObject& dobject);
 
-    void RemoveMemorySoundObject(const MemorySpace::CSoundObject &memory_object);
-    void RemoveMemoryHitObject(const MemorySpace::CHitObject &memory_object);
-    void RemoveMemoryVisibleObject(const MemorySpace::CVisibleObject &memory_object);
-
-    //CWeaponAmmo
-    u16 AmmoGetCount();
-    void AmmoSetCount(u16 count);
-    u16 AmmoBoxSize();
+    void RemoveMemorySoundObject(const MemorySpace::CSoundObject& memory_object);
+    void RemoveMemoryHitObject(const MemorySpace::CHitObject& memory_object);
+    void RemoveMemoryVisibleObject(const MemorySpace::CVisibleObject& memory_object);
 
     //CAI_Stalker
     void ResetBoneProtections(pcstr imm_sect, pcstr bone_sect);

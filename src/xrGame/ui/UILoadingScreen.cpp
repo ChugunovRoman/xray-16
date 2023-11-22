@@ -17,7 +17,8 @@
 #include "xrUICore/XML/UITextureMaster.h"
 
 UILoadingScreen::UILoadingScreen()
-    : loadingProgress(nullptr), loadingProgressPercent(nullptr),
+    : CUIWindow("UILoadingScreen"),
+      loadingProgress(nullptr), loadingProgressPercent(nullptr),
       loadingLogo(nullptr),     loadingStage(nullptr),
       loadingHeader(nullptr),   loadingTipNumber(nullptr), loadingTip(nullptr)
 {
@@ -43,20 +44,33 @@ void UILoadingScreen::Initialize()
         uiXml.Set(GetLoadingScreenXML());
     }
 
+    pcstr xmlNode = "background";
+
+    string64 temp;
+    strconcat(temp, "background_", StringTable().GetCurrentLanguage().c_str());
+    if (uiXml.NavigateToNode(temp))
+        xmlNode = temp;
+
     if (uiXml.ReadAttribInt("loading_progress", 0, "under_background", 1))
     {
         loadingProgress = UIHelper::CreateProgressBar(uiXml, "loading_progress", this);
-        CUIXmlInit::InitWindow(uiXml, "background", 0, this);
+        CUIXmlInit::InitWindow(uiXml, xmlNode, 0, this);
     }
     else
     {
-        CUIXmlInit::InitWindow(uiXml, "background", 0, this);
+        CUIXmlInit::InitWindow(uiXml, xmlNode, 0, this);
         loadingProgress = UIHelper::CreateProgressBar(uiXml, "loading_progress", this);
     }
 
     alwaysShowStage = uiXml.ReadAttribInt("loading_stage", 0, "always_show");
 
-    loadingLogo = UIHelper::CreateStatic(uiXml, "loading_logo", this);
+    xmlNode = "loading_logo";
+    strconcat(temp, "loading_logo_", StringTable().GetCurrentLanguage().c_str());
+    if (uiXml.NavigateToNode(temp))
+        xmlNode = temp;
+
+    loadingLogo = UIHelper::CreateStatic(uiXml, xmlNode, this);
+
     loadingProgressPercent = UIHelper::CreateStatic(uiXml, "loading_progress_percent", this, false);
     loadingStage = UIHelper::CreateStatic(uiXml, "loading_stage", this, false);
     loadingHeader = UIHelper::CreateStatic(uiXml, "loading_header", this, false);
@@ -70,7 +84,7 @@ void UILoadingScreen::Update(const int stagesCompleted, const int stagesTotal)
 
     const float progress = float(stagesCompleted) / stagesTotal * loadingProgress->GetRange_max();
     loadingProgress->ForceSetProgressPos(progress); // XXX: use SetProgressPos() when CApplication rendering will be integrated into the normal rendering cycle
-    
+
     if (loadingProgressPercent)
     {
         string16 buf;
@@ -124,12 +138,13 @@ void UILoadingScreen::Show(bool show)
     if (!show)
     {
         loadingLogo->GetStaticItem()->GetShader()->destroy();
-        loadingStage->SetText(nullptr);
+        if (loadingStage)
+            loadingStage->SetText(nullptr);
         SetStageTip(nullptr, nullptr, nullptr);
     }
 }
 
-bool UILoadingScreen::IsShown()
+bool UILoadingScreen::IsShown() const
 {
     return CUIWindow::IsShown();
 }

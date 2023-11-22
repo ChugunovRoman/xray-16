@@ -5,8 +5,9 @@
 #include "xrUICore/Static/UIStatic.h"
 
 CUIMapInfo::CUIMapInfo()
+    : CUIWindow(CUIMapInfo::GetDebugType()),
+      m_view(xr_new<CUIScrollView>())
 {
-    m_view = xr_new<CUIScrollView>();
     AttachChild(m_view);
 }
 

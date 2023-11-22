@@ -8,7 +8,7 @@
 #include "xrEngine/xr_level_controller.h"
 #include "xrUICore/XML/UITextureMaster.h"
 #include "ui/UIXmlInit.h"
-#include "SDL.h"
+#include <SDL.h>
 #include "xrUICore/Buttons/UIBtnHint.h"
 #include "xrUICore/Cursor/UICursor.h"
 #include "xrGameSpy/GameSpy_Full.h"
@@ -44,6 +44,7 @@ extern ENGINE_API bool bShowPauseString;
 
 //#define DEMO_BUILD
 
+#ifdef XR_PLATFORM_WINDOWS
 constexpr cpcstr ErrMsgBoxTemplate[] =
 {
     "message_box_invalid_pass",
@@ -65,6 +66,7 @@ constexpr cpcstr ErrMsgBoxTemplate[] =
     "msg_box_error_loading",
     "message_box_download_level"
 };
+#endif
 
 extern bool b_shniaganeed_pp;
 
@@ -77,8 +79,14 @@ CMainMenu::CMainMenu()
         CMainMenu* m_mainmenu;
 
     public:
-        CResetEventCb(CID cid, CMainMenu* mm) : m_mainmenu(mm), CEventNotifierCallbackWithCid(cid) {}
-        void ProcessEvent() override { m_mainmenu->DestroyInternal(true); }
+        CResetEventCb(CID cid, CMainMenu* mm) : CEventNotifierCallbackWithCid(cid), m_mainmenu(mm) {}
+        void ProcessEvent() override
+        {
+            if (m_mainmenu->IsActive())
+                m_mainmenu->ReloadUI();
+            else
+                m_mainmenu->DestroyInternal(true);
+        }
     };
 
     m_script_reset_event_cid = ai().template Subscribe<CResetEventCb>(CAI_Space::EVENT_SCRIPT_ENGINE_RESET, this);
@@ -166,7 +174,9 @@ CMainMenu::~CMainMenu()
 
     xr_delete(g_btnHint);
     xr_delete(g_statHint);
+
     xr_delete(m_startDialog);
+
     g_pGamePersistent->m_pMainMenu = nullptr;
 
 #ifdef XR_PLATFORM_WINDOWS
@@ -247,17 +257,13 @@ void CMainMenu::Activate(bool bActivate)
 
         Device.seqRender.Remove(this);
 
-        bool b = !!Console->bVisible;
-        if (b)
-        {
+        const bool show = Console->bVisible;
+        if (show)
             Console->Hide();
-        }
 
         IR_Release();
-        if (b)
-        {
+        if (show)
             Console->Show();
-        }
 
         if (m_startDialog->IsShown())
             m_startDialog->HideDialog();
@@ -331,6 +337,7 @@ bool CMainMenu::ReloadUI()
         return false;
     }
     xr_delete(m_startDialog);
+
     m_startDialog = smart_cast<CUIDialogWnd*>(dlg);
     VERIFY(m_startDialog);
     m_startDialog->m_bWorkInPause = true;
@@ -373,20 +380,11 @@ void CMainMenu::IR_OnMouseMove(int x, int y)
     CDialogHolder::IR_UIOnMouseMove(x, y);
 };
 
-void CMainMenu::IR_OnMouseStop(int x, int y){};
-
 bool IWantMyMouseBackScreamed = false;
 void CMainMenu::IR_OnKeyboardPress(int dik)
 {
     if (!IsActive())
         return;
-
-    auto action = GetBindedAction(dik);
-    if (action == kCONSOLE)
-    {
-        Console->Show();
-        return;
-    }
 
     if ((pInput->iGetAsyncKeyState(SDL_SCANCODE_LALT) || pInput->iGetAsyncKeyState(SDL_SCANCODE_RALT))
         && (pInput->iGetAsyncKeyState(SDL_SCANCODE_LGUI) || pInput->iGetAsyncKeyState(SDL_SCANCODE_RGUI)))
@@ -396,9 +394,18 @@ void CMainMenu::IR_OnKeyboardPress(int dik)
         Device.SetWindowDraggable(true);
     }
 
-    if (action == kSCREENSHOT)
+    switch (GetBindedAction(dik))
     {
+    case kSCREENSHOT:
         GEnv.Render->Screenshot();
+        return;
+
+    case kCONSOLE:
+        Console->Show();
+        return;
+
+    case kEDITOR:
+        Device.editor().SwitchToNextState();
         return;
     }
 
@@ -416,7 +423,6 @@ void CMainMenu::IR_OnKeyboardRelease(int dik)
         pInput->GrabInput(true);
         Device.SetWindowDraggable(false);
     }
-
 
     CDialogHolder::IR_UIOnKeyboardRelease(dik);
 };
@@ -485,21 +491,17 @@ void CMainMenu::IR_OnControllerHold(int dik, float x, float y)
 }
 
 bool CMainMenu::OnRenderPPUI_query() { return IsActive() && !m_Flags.test(flGameSaveScreenshot) && b_shniaganeed_pp; }
-extern void draw_wnds_rects();
+
 void CMainMenu::OnRender()
 {
     if (m_Flags.test(flGameSaveScreenshot))
         return;
 
-    if (g_pGameLevel)
-        GEnv.Render->Calculate();
-
-    GEnv.Render->Render();
+    GEnv.Render->RenderMenu();
     if (!OnRenderPPUI_query())
     {
         DoRenderDialogs();
         UI().RenderFont();
-        draw_wnds_rects();
     }
 }
 
@@ -532,11 +534,9 @@ void CMainMenu::OnRenderPPUI_PP()
 
     UI().pp_start();
 
-    xr_vector<CUIWindow*>::iterator it = m_pp_draw_wnds.begin();
-    for (; it != m_pp_draw_wnds.end(); ++it)
-    {
-        (*it)->Draw();
-    }
+    for (auto& window : m_pp_draw_wnds)
+        window->Draw();
+
     UI().pp_stop();
 }
 /*
@@ -645,11 +645,42 @@ void CMainMenu::CheckForErrorDlg()
     m_NeedErrDialog = ErrNoError;
 };
 
+bool CMainMenu::FillDebugTree(const CUIDebugState& debugState)
+{
+#ifndef MASTER_GOLD
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
+    if (debugState.selected == this)
+        flags |= ImGuiTreeNodeFlags_Selected;
+
+    const bool open = ImGui::TreeNodeEx(this, flags, "Main menu (%s)", GetDebugType());
+    if (ImGui::IsItemClicked())
+        debugState.select(this);
+
+    if (open)
+    {
+        CDialogHolder::FillDebugTree(debugState);
+        if (m_startDialog)
+            m_startDialog->FillDebugTree(debugState);
+        else
+            ImGui::BulletText("Please, open main menu to see it's structure");
+        ImGui::TreePop();
+    }
+
+    return open;
+#else
+    UNUSED(debugState);
+    return false;
+#endif
+}
+
 void CMainMenu::SwitchToMultiplayerMenu() { m_startDialog->Dispatch(2, 1); };
 void CMainMenu::DestroyInternal(bool bForce)
 {
     if (m_startDialog && ((m_deactivated_frame < Device.dwFrame + 4) || bForce))
+    {
+        m_startDialog->HideDialog();
         xr_delete(m_startDialog);
+    }
 }
 
 void CMainMenu::OnPatchCheck(bool success, LPCSTR VersionName, LPCSTR URL)
@@ -937,13 +968,12 @@ void CMainMenu::Show_DownloadMPMap(LPCSTR text, LPCSTR url)
 {
     m_downloaded_mp_map_url._set(url);
 
-    CUIMessageBoxEx* downloadMsg = m_pMB_ErrDlgs[DownloadMPMap];
-    if (downloadMsg)
+    if (CUIMessageBoxEx* downloadMsg = m_pMB_ErrDlgs[DownloadMPMap])
     {
-        m_pMB_ErrDlgs[DownloadMPMap]->SetText(text);
-        m_pMB_ErrDlgs[DownloadMPMap]->SetTextEditURL(url);
+        downloadMsg->SetText(text);
+        downloadMsg->SetTextEditURL(url);
 
-        m_pMB_ErrDlgs[DownloadMPMap]->ShowDialog(false);
+        downloadMsg->ShowDialog(false);
     }
     else
     {
@@ -966,7 +996,7 @@ void CMainMenu::OnDownloadMPMap(CUIWindow* w, void* d)
     ShellExecute(0, "open", "cmd.exe", params, NULL, SW_SHOW);
 #else
     std::string command = "xdg-open " + std::string{url};
-    system(command.c_str());
+    std::ignore = system(command.c_str());
 #endif
 }
 

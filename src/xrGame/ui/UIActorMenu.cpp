@@ -173,7 +173,7 @@ void CUIActorMenu::SetMenuMode(EMenuMode mode)
 void CUIActorMenu::PlaySnd(eActorMenuSndAction a)
 {
     if (sounds[a]._handle())
-        sounds[a].play(NULL, sm_2D);
+        sounds[a].play(NULL, sm_2D | sm_IgnoreTimeFactor);
 }
 
 void CUIActorMenu::SendMessage(CUIWindow* pWnd, s16 msg, void* pData) { CUIWndCallback::OnEvent(pWnd, msg, pData); }
@@ -316,13 +316,13 @@ EDDListType CUIActorMenu::GetListType(CUIDragDropListEx* l)
     if (l == m_pLists[eInventoryBeltList])
         return iActorBelt;
 
+    if (l == m_pLists[eInventoryKnifeList] && m_pLists[eInventoryKnifeList] != nullptr)
+        return iActorSlot;
     if (l == m_pLists[eInventoryAutomaticList])
         return iActorSlot;
     if (l == m_pLists[eInventoryPistolList])
         return iActorSlot;
     if (l == m_pLists[eInventoryBackpackList] && m_pLists[eInventoryBackpackList] != nullptr)
-        return iActorSlot;
-    if (l == m_pLists[eInventoryKnifeList] && m_pLists[eInventoryKnifeList] != nullptr)
         return iActorSlot;
     if (l == m_pLists[eInventoryOutfitList])
         return iActorSlot;
@@ -497,8 +497,10 @@ CUICharacterInfo* CUIActorMenu::GetModeSpecificPartnerInfo(EMenuMode fallback) c
     case mmTrade:          return m_TradePartnerCharacterInfo;
     case mmDeadBodySearch: return m_SearchLootPartnerCharacterInfo;
     }
+
     if (m_PartnerCharacterInfo)
         return m_PartnerCharacterInfo;
+
     switch (fallback)
     {
     case mmTrade:          return m_TradePartnerCharacterInfo;
@@ -530,14 +532,14 @@ void CUIActorMenu::UpdateItemsPlace()
 
 void CUIActorMenu::clear_highlight_lists()
 {
+    if (m_pLists[eInventoryKnifeList])
+        m_pLists[eInventoryKnifeList]->Highlight(false);
     m_pLists[eInventoryPistolList]->Highlight(false);
     m_pLists[eInventoryAutomaticList]->Highlight(false);
     if (m_pLists[eInventoryHelmetList])
         m_pLists[eInventoryHelmetList]->Highlight(false);
     if (m_pLists[eInventoryBackpackList])
         m_pLists[eInventoryBackpackList]->Highlight(false);
-    if (m_pLists[eInventoryKnifeList])
-        m_pLists[eInventoryKnifeList]->Highlight(false);
     m_pLists[eInventoryOutfitList]->Highlight(false);
     if (m_pLists[eInventoryDetectorList])
         m_pLists[eInventoryDetectorList]->Highlight(false);
@@ -966,19 +968,70 @@ bool CUIActorMenu::CanSetItemToList(PIItem item, CUIDragDropListEx* l, u16& ret_
         return true;
     }
 
-    if (item_slot == INV_SLOT_3 && l == m_pLists[eInventoryPistolList])
+    if (item_slot == INV_SLOT_3 && l == m_pLists[eInventoryPistolList] && CallOfPripyatMode)
     {
         ret_slot = INV_SLOT_2;
         return true;
     }
 
-    if (item_slot == INV_SLOT_2 && l == m_pLists[eInventoryAutomaticList])
+    if (item_slot == INV_SLOT_2 && l == m_pLists[eInventoryAutomaticList] && CallOfPripyatMode)
     {
         ret_slot = INV_SLOT_3;
         return true;
     }
 
     return false;
+}
+
+void CUIActorMenu::HighlightSectionInSlot(pcstr section, EDDListType type, u16 slot_id /*= 0*/)
+{
+    CUIDragDropListEx* slot_list = GetListByType(type);
+
+    if (!slot_list)
+        slot_list = m_pLists[eInventoryBagList];
+
+    u32 const cnt = slot_list->ItemsCount();
+    for (u32 i = 0; i < cnt; ++i)
+    {
+        CUICellItem* ci = slot_list->GetItemIdx(i);
+        const PIItem item = static_cast<PIItem>(ci->m_pData);
+        if (!item)
+            continue;
+
+        if (strcmp(section, item->m_section_id.c_str()) != 0)
+            continue;
+
+        ci->m_select_armament = true;
+    }
+
+    m_highlight_clear = false;
+}
+
+void CUIActorMenu::HighlightForEachInSlot(const luabind::functor<bool>& functor, EDDListType type, u16 slot_id)
+{
+    if (!functor)
+        return;
+
+    CUIDragDropListEx* slot_list = GetListByType(type);
+
+    if (!slot_list)
+        slot_list = m_pLists[eInventoryBagList];
+
+    u32 const cnt = slot_list->ItemsCount();
+    for (u32 i = 0; i < cnt; ++i)
+    {
+        CUICellItem* ci = slot_list->GetItemIdx(i);
+        PIItem item = (PIItem)ci->m_pData;
+        if (!item)
+            continue;
+
+        if (functor(item->object().cast_game_object()->lua_game_object()) == false)
+            continue;
+
+        ci->m_select_armament = true;
+    }
+
+    m_highlight_clear = false;
 }
 
 CScriptGameObject* CUIActorMenu::GetCurrentItemAsGameObject()
@@ -988,31 +1041,4 @@ CScriptGameObject* CUIActorMenu::GetCurrentItemAsGameObject()
         return GO->lua_game_object();
 
     return nullptr;
-}
-
-void CUIActorMenu::UpdateConditionProgressBars()
-{
-    for (u8 i = 1; i <= m_slot_count; ++i)
-    {
-        PIItem itm = m_pActorInvOwner->inventory().ItemFromSlot(i);
-        if (m_pInvSlotProgress[i])
-            m_pInvSlotProgress[i]->SetProgressPos(itm ? iCeil(itm->GetCondition()*10.f) / 10.f : 0);
-    }
-
-    //Highlight 'equipped' items in actor bag
-    CUIDragDropListEx* slot_list = m_pInventoryBagList;
-    u32 const cnt = slot_list->ItemsCount();
-    for (u32 i = 0; i < cnt; ++i)
-    {
-        CUICellItem* ci = slot_list->GetItemIdx(i);
-        PIItem item = (PIItem)ci->m_pData;
-        if (!item)
-            continue;
-
-        if (item->m_highlight_equipped && item->m_pInventory &&
-            item->m_pInventory->ItemFromSlot(item->BaseSlot()) == item)
-            ci->m_select_equipped = true;
-        else
-            ci->m_select_equipped = false;
-    }
 }

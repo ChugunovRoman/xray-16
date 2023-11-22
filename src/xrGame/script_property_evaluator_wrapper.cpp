@@ -29,8 +29,8 @@ bool CScriptPropertyEvaluatorWrapper::evaluate()
     {
         return (luabind::call_member<bool>(this, "evaluate"));
     }
-#ifdef DEBUG
-    catch (luabind::cast_failed& exception)
+#if defined(DEBUG) && !defined(LUABIND_NO_EXCEPTIONS)
+    catch (const luabind::cast_failed& exception)
     {
 #ifdef LOG_ACTION
         GEnv.ScriptEngine->script_log(LuaMessageType::Error,

@@ -81,6 +81,51 @@ public:
     xr_vector<CPS_Instance*> ps_needtoplay;
 
 public:
+    enum GrassBenders_Anim
+    {
+        BENDER_ANIM_EXPLOSION = 0,
+        BENDER_ANIM_DEFAULT = 1,
+        BENDER_ANIM_WAVY = 2,
+        BENDER_ANIM_SUCK = 3,
+        BENDER_ANIM_BLOW = 4,
+        BENDER_ANIM_PULSE = 5,
+    };
+
+    void GrassBendersUpdateAnimations();
+    void GrassBendersAddExplosion(u16 id, Fvector position, Fvector3 dir, float fade, float speed, float intensity, float radius);
+    void GrassBendersAddShot(u16 id, Fvector position, Fvector3 dir, float fade, float speed, float intensity, float radius);
+    void GrassBendersRemoveById(u16 id);
+    void GrassBendersRemoveByIndex(u8& idx);
+    void GrassBendersUpdate(u16 id, u8& data_idx, u32& data_frame, Fvector& position, float radius, float str, bool CheckDistance);
+    void GrassBendersReset(u8 idx);
+    void GrassBendersSet(u8 idx, u16 id, Fvector position, Fvector3 dir, float fade, float speed, float str, float radius, GrassBenders_Anim anim, bool resetTime);
+    float GrassBenderToValue(float& current, float go_to, float intensity, bool use_easing);
+
+    CPerlinNoise1D* PerlinNoise1D{};
+
+    struct grass_data
+    {
+        u8 index;
+        s8 anim[16];
+        u16 id[16];
+        Fvector pos[16];
+        Fvector3 dir[16];
+        float radius[16];
+        float radius_curr[16];
+        float str[16];
+        float str_target[16];
+        float time[16];
+        float fade[16];
+        float speed[16];
+    } grass_shader_data{};
+
+    u32 m_last_ray_pick_time{};
+    bool m_isInHideout{};
+    bool IsActorInHideout() const;
+    void UpdateHudRaindrops() const;
+    void UpdateRainGloss() const;
+
+public:
     void destroy_particles(const bool& all_particles);
 
 public:
@@ -119,7 +164,7 @@ public:
     virtual void UpdateGameType(){};
     virtual void GetCurrentDof(Fvector3& dof) { dof.set(-1.4f, 0.0f, 250.f); };
     virtual void SetBaseDof(const Fvector3& /*dof*/) {};
-    virtual void OnSectorChanged(int /*sector*/) {};
+    virtual void OnSectorChanged(IRender_Sector::sector_id_t /*sector*/) {};
     virtual void OnAssetsChanged();
 
     virtual void RegisterModel(IRenderVisual* V)
@@ -157,6 +202,49 @@ public:
     virtual bool CanSkipSceneRendering() = 0;
     virtual void DestroyInternal(bool bForce) = 0;
 };
+
+// Anomaly
+extern ENGINE_API float ps_r2_img_exposure; // r2-only
+extern ENGINE_API float ps_r2_img_gamma; // r2-only
+extern ENGINE_API float ps_r2_img_saturation; // r2-only
+extern ENGINE_API Fvector ps_r2_img_cg; // r2-only
+
+extern ENGINE_API Fvector4 ps_r2_mask_control;
+extern ENGINE_API Fvector ps_r2_drops_control;
+extern ENGINE_API int ps_r2_nightvision;
+
+extern ENGINE_API Fvector4 ps_dev_param_1;
+extern ENGINE_API Fvector4 ps_dev_param_2;
+extern ENGINE_API Fvector4 ps_dev_param_3;
+extern ENGINE_API Fvector4 ps_dev_param_4;
+extern ENGINE_API Fvector4 ps_dev_param_5;
+extern ENGINE_API Fvector4 ps_dev_param_6;
+extern ENGINE_API Fvector4 ps_dev_param_7;
+extern ENGINE_API Fvector4 ps_dev_param_8;
+
+// Ascii's shaders
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1;
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_2;
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1_cfg;
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_2_cfg;
+extern ENGINE_API Fvector4 ps_ssfx_blood_decals;
+extern ENGINE_API Fvector4 ps_ssfx_rain_1;
+extern ENGINE_API Fvector4 ps_ssfx_rain_2;
+extern ENGINE_API Fvector4 ps_ssfx_rain_3;
+extern ENGINE_API Fvector4 ps_ssfx_grass_shadows;
+extern ENGINE_API Fvector3 ps_ssfx_shadow_cascades;
+extern ENGINE_API Fvector4 ps_ssfx_grass_interactive;
+extern ENGINE_API Fvector4 ps_ssfx_int_grass_params_1;
+extern ENGINE_API Fvector4 ps_ssfx_int_grass_params_2;
+
+extern ENGINE_API Fvector4 ps_ssfx_wetsurfaces_1;
+extern ENGINE_API Fvector4 ps_ssfx_wetsurfaces_2;
+extern ENGINE_API float ps_ssfx_gloss_factor;
+extern ENGINE_API Fvector3 ps_ssfx_gloss_minmax;
+extern ENGINE_API Fvector4 ps_ssfx_lightsetup_1;
+
+extern ENGINE_API float ps_r3_dyn_wet_surf_far; // 30.0f
+extern ENGINE_API int ps_r3_dyn_wet_surf_sm_res; // 256
 
 extern ENGINE_API IGame_Persistent* g_pGamePersistent;
 #endif // IGame_PersistentH

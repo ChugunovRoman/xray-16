@@ -28,7 +28,8 @@
 #include "Actor.h"
 
 UITaskListWnd::UITaskListWnd()
-    : hint_wnd(nullptr), m_background(nullptr), m_list(nullptr),
+    : CUIWindow("UITaskListWnd"),
+      hint_wnd(nullptr), m_background(nullptr), m_list(nullptr),
       m_caption(nullptr), m_bt_close(nullptr), m_orig_h(0) {}
 
 UITaskListWnd::~UITaskListWnd() {}
@@ -77,6 +78,17 @@ void UITaskListWnd::OnMouseScroll(float iDirection)
     else if (iDirection == WINDOW_MOUSE_WHEEL_DOWN)
         m_list->ScrollBar()->TryScrollInc();
 }
+
+bool UITaskListWnd::OnKeyboardAction(int dik, EUIMessages keyboard_action)
+{
+    return inherited::OnKeyboardAction(dik, keyboard_action);
+}
+
+bool UITaskListWnd::OnControllerAction(int axis, float x, float y, EUIMessages controller_action)
+{
+    return inherited::OnControllerAction(axis, x, y, controller_action);
+}
+
 void UITaskListWnd::Show(bool status)
 {
     inherited::Show(status);
@@ -168,7 +180,8 @@ void UITaskListWnd::UpdateCounter()
 // - -----------------------------------------------------------------------------------------------
 
 UITaskListWndItem::UITaskListWndItem()
-    : show_hint_can(false), show_hint(false),
+    : CUIWindow("UITaskListWndItem"),
+      show_hint_can(false), show_hint(false),
       m_task(nullptr), m_name(nullptr),
       m_bt_view(nullptr), m_st_story(nullptr),
       m_bt_focus(nullptr)
@@ -225,7 +238,7 @@ void UITaskListWndItem::Update()
 
     if (m_task && m_name->CursorOverWindow() && show_hint_can)
     {
-        if (Device.dwTimeGlobal > (m_name->FocusReceiveTime() + 700))
+        if (Device.dwTimeGlobal > (m_name->FocusReceiveTime() + 700 * Device.time_factor()))
         {
             show_hint = true;
             GetMessageTarget()->SendMessage(this, PDA_TASK_SHOW_HINT, (void*)m_task);
@@ -270,7 +283,7 @@ void UITaskListWndItem::update_view()
 
     const CGameTask* storyTask = Level().GameTaskManager().ActiveTask(eTaskTypeStoryline);
     const CGameTask* additionalTask = Level().GameTaskManager().ActiveTask(eTaskTypeAdditional);
-    
+
     if (m_task == storyTask || m_task == additionalTask)
     {
         m_name->SetStateTextColor(m_color_states[stt_activ], S_Enabled);
@@ -307,7 +320,7 @@ void UITaskListWndItem::SendMessage(CUIWindow* pWnd, s16 msg, void* pData)
             return;
         }
     }
-    
+
     if (pWnd == m_name)
     {
         if (msg == BUTTON_DOWN)

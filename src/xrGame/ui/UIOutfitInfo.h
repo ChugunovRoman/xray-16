@@ -9,14 +9,15 @@ class CUIStatic;
 class CUIDoubleProgressBar;
 class CUIXml;
 
-class CUIOutfitImmunity : public CUIWindow
+class CUIOutfitImmunity final : public CUIWindow
 {
 public:
     CUIOutfitImmunity();
-    virtual ~CUIOutfitImmunity();
 
     bool InitFromXml(CUIXml& xml_doc, LPCSTR base_str, u32 hit_type);
     void SetProgressValue(float cur, float comp);
+
+    pcstr GetDebugType() override { return "CUIOutfitImmunity"; }
 
 protected:
     CUIStatic m_name; // texture + name
@@ -28,14 +29,16 @@ protected:
 
 // -------------------------------------------------------------------------------------
 
-class CUIOutfitInfo : public CUIWindow
+class CUIOutfitInfo final : public CUIWindow
 {
 public:
-    CUIOutfitInfo();
+    CUIOutfitInfo() : CUIWindow("CUIOutfitInfo") {}
 
     void InitFromXml(CUIXml& xml_doc);
-    void UpdateInfo(CCustomOutfit* cur_outfit, CCustomOutfit* slot_outfit = NULL);
-    void UpdateInfo(CHelmet* cur_helmet, CHelmet* slot_helmet = NULL);
+    void UpdateInfo(CCustomOutfit* cur_outfit, CCustomOutfit* slot_outfit = nullptr);
+    void UpdateInfo(CHelmet* cur_helmet, CHelmet* slot_helmet = nullptr);
+
+    pcstr GetDebugType() override { return "CUIOutfitInfo"; }
 
 protected:
     enum
@@ -43,8 +46,8 @@ protected:
         max_count = ALife::eHitTypeMax - 3
     };
 
-    CUIStatic* m_caption;
-    CUIStatic* m_Prop_line;
-    CUIOutfitImmunity* m_items[max_count];
+    CUIStatic* m_caption{};
+    CUIStatic* m_Prop_line{};
+    CUIOutfitImmunity* m_items[max_count]{};
 
 }; // class CUIOutfitInfo

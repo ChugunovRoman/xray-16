@@ -59,8 +59,7 @@ extern ECORE_API float ps_r__tf_Mipbias;
 
 enum
 {
-    RFLAG_NO_RAM_TEXTURES = (1 << 0),
-    RFLAG_ACTOR_SHADOW = (1 << 1),
+    RFLAG_ACTOR_SHADOW = 1 << 0,
 };
 
 extern ECORE_API Flags32 ps_r__common_flags;
@@ -84,6 +83,8 @@ extern ECORE_API int ps_r1_SoftwareSkinning; // r1-only
 enum
 {
     R1FLAG_DLIGHTS = (1 << 0),
+    R1FLAG_FFP = (1 << 1), // don't use shaders, only fixed-function pipeline or software processing
+    R1FLAG_FFP_LIGHTMAPS = (1 << 2),
 };
 
 // R2
@@ -148,9 +149,9 @@ extern ECORE_API Fvector3 ps_r2_dof;
 extern ECORE_API float ps_r2_dof_sky; //	distance to sky
 extern ECORE_API float ps_r2_dof_kernel_size; //	7.0f
 
-extern ECORE_API float ps_r3_dyn_wet_surf_near; // 10.0f
-extern ECORE_API float ps_r3_dyn_wet_surf_far; // 30.0f
-extern ECORE_API int ps_r3_dyn_wet_surf_sm_res; // 256
+extern ENGINE_API float ps_r3_dyn_wet_surf_near; // 10.0f
+extern ENGINE_API float ps_r3_dyn_wet_surf_far; // 30.0f
+extern ENGINE_API int ps_r3_dyn_wet_surf_sm_res; // 256
 
 enum
 {
@@ -213,6 +214,7 @@ enum
     R2FLAGEXT_SUN_OLD = (1 << 9),
     R3FLAGEXT_SSR_HALF_DEPTH = (1 << 10),
     R3FLAGEXT_SSR_JITTER = (1 << 11),
+    R4FLAGEXT_NEW_SHADER_SUPPORT = (1 << 12),
 };
 
 extern void xrRender_initconsole();

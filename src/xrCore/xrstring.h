@@ -23,7 +23,7 @@
 struct XRCORE_API str_value
 {
     u32 dwReference;
-    u32 dwLength; // XXX: replace u32 with size_t
+    u32 dwLength;
     u32 dwCRC;
     str_value* next;
     char value[];
@@ -51,12 +51,14 @@ public:
     str_container();
     ~str_container();
 
-    str_value* dock(pcstr value);
-    void clean();
-    void dump();
-    void dump(IWriter* W);
-    void verify();
-    u32 stat_economy();
+    str_value* dock(pcstr value) const;
+    void clean() const;
+    void dump() const;
+    void dump(IWriter* W) const;
+    void verify() const;
+
+    [[nodiscard]]
+    size_t stat_economy() const;
 
 private:
     str_container_impl* impl;
@@ -99,7 +101,9 @@ public:
     // void _set (shared_str const &rhs) { str_value* v = g_pStringContainer->dock(rhs.c_str()); if (0!=v)
     // v->dwReference++; _dec(); p_ = v; }
 
+    [[nodiscard]]
     const str_value* _get() const { return p_; }
+
 public:
     // construction
     shared_str() { p_ = 0; }
@@ -125,26 +129,47 @@ public:
         _set(rhs);
         return (shared_str&)*this;
     }
-    // XXX tamlin: Remove operator*(). It may be convenient, but it's dangerous. Use 
+    // XXX tamlin: Remove operator*(). It may be convenient, but it's dangerous. Use
+    [[nodiscard]]
     pcstr operator*() const { return p_ ? p_->value : 0; }
+
+    [[nodiscard]]
     bool operator!() const { return p_ == 0; }
+
+    [[nodiscard]]
     char operator[](size_t id) { return p_->value[id]; }
+    [[nodiscard]]
+    char operator[](size_t id) const { return p_->value[id]; }
+
+    [[nodiscard]]
     pcstr c_str() const { return p_ ? p_->value : 0; }
+
     // misc func
-    u32 size() const
+    [[nodiscard]]
+    size_t size() const
     {
-        if (0 == p_)
+        if (nullptr == p_)
             return 0;
-        else
-            return p_->dwLength;
+
+        return p_->dwLength;
     }
-    void swap(shared_str& rhs)
+
+    [[nodiscard]]
+    bool empty() const
+    {
+        return size() == 0;
+    }
+
+    void swap(shared_str& rhs) noexcept
     {
         str_value* tmp = p_;
         p_ = rhs.p_;
         rhs.p_ = tmp;
     }
+
+    [[nodiscard]]
     bool equal(const shared_str& rhs) const { return (p_ == rhs.p_); }
+
     shared_str& __cdecl printf(const char* format, ...)
     {
         string4096 buf;
@@ -168,18 +193,15 @@ inline int xr_strcmp(const char* S1, const char* S2)
 }
 #endif
 
-namespace std
-{
 template<>
-struct hash<shared_str>
+struct std::hash<shared_str>
 {
-    // XXX: enable C++17 for all projects to be able to use nodiscard attribute
-    /*[[nodiscard]]*/ size_t operator()(const shared_str& str) const noexcept
+    [[nodiscard]] size_t operator()(const shared_str& str) const noexcept
     {
-        return std::hash<pcstr>{}(str._get()->value);
+        const auto str_val = str._get();
+        return std::hash<pcstr>{}(str_val ? str_val->value : nullptr);
     }
 };
-}
 
 // res_ptr == res_ptr
 // res_ptr != res_ptr
@@ -194,8 +216,8 @@ IC bool operator!=(shared_str const& a, shared_str const& b) { return a._get() !
 IC bool operator<(shared_str const& a, shared_str const& b) { return a._get() < b._get(); }
 IC bool operator>(shared_str const& a, shared_str const& b) { return a._get() > b._get(); }
 // externally visible standard functionality
-IC void swap(shared_str& lhs, shared_str& rhs) { lhs.swap(rhs); }
-IC u32 xr_strlen(const shared_str& a) noexcept { return a.size(); }
+IC void swap(shared_str& lhs, shared_str& rhs) noexcept { lhs.swap(rhs); }
+IC size_t xr_strlen(const shared_str& a) noexcept { return a.size(); }
 IC int xr_strcmp(const shared_str& a, const char* b) noexcept { return xr_strcmp(*a, b); }
 IC int xr_strcmp(const char* a, const shared_str& b) noexcept { return xr_strcmp(a, *b); }
 IC int xr_strcmp(const shared_str& a, const shared_str& b) noexcept

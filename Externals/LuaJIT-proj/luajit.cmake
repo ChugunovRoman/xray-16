@@ -15,6 +15,7 @@ set(RELVER 5)
 set(ABIVER 5.1)
 set(NODOTABIVER 51)
 
+set(CMAKE_OSX_SYSROOT "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
 set(LUAJIT_DIR ${CMAKE_SOURCE_DIR}/Externals/LuaJIT/src CACHE PATH "Location of luajit sources")
 
 option(BUILD_STATIC_LIB "Build static library" OFF)
@@ -68,7 +69,12 @@ else()
 	set(CCOPT_OPT_LEVEL "-O2")
 endif()
 
-set(CCOPT "${CCOPT_OPT_LEVEL} -fomit-frame-pointer -fno-stack-protector")
+# TODO Refactor all these options
+if (USE_ADDRESS_SANITIZER)
+	set(CCOPT "${CCOPT_OPT_LEVEL} -fno-stack-protector")
+else()
+	set(CCOPT "${CCOPT_OPT_LEVEL} -fomit-frame-pointer -fno-stack-protector")
+endif()
 
 # Target-specific compiler options
 set(CCOPT_x86 "-march=i686 -msse -msse2 -mfpmath=sse")
@@ -130,6 +136,10 @@ string(REPLACE " " ";" TESTARCH_C_FLAGS "${TESTARCH_C_FLAGS}")
 set(TESTARCH_FLAGS "${TESTARCH_C_FLAGS} ${CCOPTIONS} -E lj_arch.h -dM")
 string(REPLACE " " ";" TESTARCH_FLAGS "${TESTARCH_FLAGS}")
 
+if (APPLE)
+	set(ENV{SDKROOT} ${CMAKE_OSX_SYSROOT})
+endif()
+
 execute_process(
 	COMMAND ${CMAKE_C_COMPILER} ${TESTARCH_FLAGS}
 	WORKING_DIRECTORY ${LUAJIT_DIR}
@@ -149,11 +159,6 @@ elseif ("${TARGET_TESTARCH}" MATCHES "LJ_TARGET_ARM")
 	set(TARGET_LJARCH "arm")
 elseif ("${TARGET_TESTARCH}" MATCHES "LJ_TARGET_PPC")
 	set(TARGET_LJARCH "ppc")
-	if ("${TARGET_TESTARCH}" MATCHES "LJ_LE 1")
-		set(TARGET_ARCH "-DLJ_ARCH_ENDIAN=LUAJIT_LE")
-	else()
-		set(TARGET_ARCH "-DLJ_ARCH_ENDIAN=LUAJIT_BE")
-	endif()
 elseif ("${TARGET_TESTARCH}" MATCHES "LJ_TARGET_MIPS")
 	if ("${TARGET_TESTARCH}" MATCHES "MIPSEL")
 		set(TARGET_ARCH "-D__MIPSEL__=1")
@@ -289,6 +294,9 @@ if (TARGET_LJARCH STREQUAL "ppc")
 	if ("${TARGET_TESTARCH}" MATCHES "LJ_ARCH_PPC32ON64 1")
 		string(APPEND DASM_FLAGS " -D GPR64")
 	endif()
+	if ("${TARGET_TESTARCH}" MATCHES "LJ_ARCH_PPC64")
+		set(DASM_ARCH "ppc64")
+	endif()
 endif()
 
 set(HOST_ACFLAGS "${CMAKE_C_FLAGS} ${CCOPTIONS} ${TARGET_ARCH}")
@@ -317,18 +325,19 @@ if (NOT PROJECT_PLATFORM_E2K)
 		OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/HostBuildTools/minilua/minilua"
 		COMMAND ${CMAKE_COMMAND}
 			-B"HostBuildTools/minilua"
-			-H"${CMAKE_CURRENT_SOURCE_DIR}/HostBuildTools/minilua"
+			-G "${CMAKE_GENERATOR}"
+			-H${CMAKE_CURRENT_SOURCE_DIR}/HostBuildTools/minilua
 			-DCMAKE_VERBOSE_MAKEFILE=${CMAKE_VERBOSE_MAKEFILE}
 			-DCMAKE_BUILD_TYPE:STRING="Release"
-			-DLUAJIT_DIR="${LUAJIT_DIR}"
+			-DLUAJIT_DIR=${LUAJIT_DIR}
 			-DLUA_USE_POSIX="${LUA_USE_POSIX}"
 			-DHOST_ACFLAGS="${HOST_ACFLAGS}"
 			-DHOST_ALDFLAGS="${HOST_ALDFLAGS}"
-		COMMAND ${CMAKE_COMMAND} --build HostBuildTools/minilua --config Release
+		COMMAND ${CMAKE_COMMAND} --build "${CMAKE_CURRENT_BINARY_DIR}/HostBuildTools/minilua" --config Release
 	)
 
 	add_custom_command(OUTPUT ${BUILDVM_ARCH}
-		COMMAND ${CMAKE_CURRENT_BINARY_DIR}/HostBuildTools/minilua/minilua ${DASM} ${DASM_FLAGS} -o ${BUILDVM_ARCH} ${DASM_DASC}
+		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/HostBuildTools/minilua/minilua" ${DASM} ${DASM_FLAGS} -o ${BUILDVM_ARCH} ${DASM_DASC}
 		DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/HostBuildTools/minilua/minilua"
 	)
 
@@ -354,10 +363,11 @@ add_custom_command(
 	OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/HostBuildTools/buildvm/buildvm"
 	COMMAND ${CMAKE_COMMAND}
 		-B"HostBuildTools/buildvm"
-		-H"${CMAKE_CURRENT_SOURCE_DIR}/HostBuildTools/buildvm"
+		-G "${CMAKE_GENERATOR}"
+		-H${CMAKE_CURRENT_SOURCE_DIR}/HostBuildTools/buildvm
 		-DCMAKE_VERBOSE_MAKEFILE=${CMAKE_VERBOSE_MAKEFILE}
 		-DCMAKE_BUILD_TYPE:STRING="Release"
-		-DLUAJIT_DIR="${LUAJIT_DIR}"
+		-DLUAJIT_DIR=${LUAJIT_DIR}
 		-DBUILDVM_SRC="${BUILDVM_SRC}"
 		-DBUILDVM_ARCH="${BUILDVM_ARCH}"
 		-DHOST_ACFLAGS="${HOST_ACFLAGS}"
@@ -394,12 +404,12 @@ endif()
 
 macro(add_buildvm_target target mode)
 	add_custom_command(
-		OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${target}
-		COMMAND ${CMAKE_CURRENT_BINARY_DIR}/HostBuildTools/buildvm/buildvm ARGS -m ${mode} -o ${CMAKE_CURRENT_BINARY_DIR}/${target} ${ARGN}
-		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+		OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${target}"
+		COMMAND "${CMAKE_CURRENT_BINARY_DIR}/HostBuildTools/buildvm/buildvm" ARGS -m ${mode} -o ${CMAKE_CURRENT_BINARY_DIR}/${target} ${ARGN}
+		WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 		DEPENDS buildvm ${ARGN}
 	)
-endmacro(add_buildvm_target)
+endmacro()
 
 if (WIN32)
 	add_buildvm_target(lj_vm.obj peobj)

@@ -65,8 +65,6 @@ CApplication::CApplication()
     else
         Device.seqFrame.Add(&SoundProcessor);
 
-    Console->Show();
-
     // App Title
     loadingScreen = nullptr;
 }
@@ -140,10 +138,12 @@ void CApplication::OnEvent(EVENT E, u64 P1, u64 P2)
 
         if (g_pGameLevel)
         {
+            const bool show = Console->bVisible;
             Console->Hide();
             g_pGameLevel->net_Stop();
             DEL_INSTANCE(g_pGameLevel);
-            Console->Show();
+            if (show)
+                Console->Show();
 
             if ((false == Engine.Event.Peek("KERNEL:quit")) && (false == Engine.Event.Peek("KERNEL:start")))
             {
@@ -336,7 +336,7 @@ void gen_logo_name(string_path& dest, pcstr level_name, int num = -1)
 {
     strconcat(sizeof(dest), dest, "intro" DELIMITER "intro_", level_name);
 
-    u32 len = xr_strlen(dest);
+    const auto len = xr_strlen(dest);
     if (dest[len - 1] == _DELIMITER)
         dest[len - 1] = 0;
 

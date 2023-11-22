@@ -49,7 +49,7 @@ public:
     virtual void UpdateCL();
     virtual void shedule_Update(u32 dt);
 
-    void renderable_Render(IRenderable* root) override;
+    void renderable_Render(u32 context_id, IRenderable* root) override;
     void render_hud_mode() override;
     bool need_renderable() override;
 
@@ -372,11 +372,12 @@ protected:
     //фактор увеличения дисперсии при максимальной изношености
     //(на сколько процентов увеличится дисперсия)
     float fireDispersionConditionFactor;
-    //вероятность осечки при максимальной изношености
 
+    //вероятность осечки при максимальной изношености
+    float misfireProbability;
+    float misfireConditionK;
     // modified by Peacemaker [17.10.08]
-    //	float					misfireProbability;
-    //	float					misfireConditionK;
+    bool  misfireUseOldFormula{};
     float misfireStartCondition; //изношенность, при которой появляется шанс осечки
     float misfireEndCondition; //изношеность при которой шанс осечки становится константным
     float misfireStartProbability; //шанс осечки при изношености больше чем misfireStartCondition
@@ -385,8 +386,9 @@ protected:
     float conditionDecreasePerShot; //увеличение изношености при одиночном выстреле
 
 public:
-    float GetMisfireStartCondition() const { return misfireStartCondition; };
-    float GetMisfireEndCondition() const { return misfireEndCondition; };
+    float GetMisfireStartCondition() const { return misfireStartCondition; }
+    float GetMisfireEndCondition() const { return misfireEndCondition; }
+
 protected:
     struct SPDM
     {
@@ -404,11 +406,6 @@ protected:
 protected:
     //для отдачи оружия
     Fvector m_vRecoilDeltaAngle;
-
-    //для сталкеров, чтоб они знали эффективные границы использования
-    //оружия
-    float m_fMinRadius;
-    float m_fMaxRadius;
 
 protected:
     //для второго ствола
@@ -539,6 +536,8 @@ private:
     virtual bool ActivationSpeedOverriden(Fvector& dest, bool clear_override);
 
     bool m_bRememberActorNVisnStatus;
+
+    Lock render_lock{};
 
 public:
     virtual void SetActivationSpeedOverride(Fvector const& speed);

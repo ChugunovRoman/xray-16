@@ -8,6 +8,7 @@
 #define ITEM_HEIGHT (GetFont()->CurrentHeight() + 2.0f)
 
 CUIPropertiesBox::CUIPropertiesBox(CUIPropertiesBox* sub_property_box)
+    : CUIFrameWindow(CUIPropertiesBox::GetDebugType())
 {
     m_UIListWnd.SetFont(UI().Font().pFontArial14);
     m_UIListWnd.SetImmediateSelection(true);
@@ -205,4 +206,9 @@ void CUIPropertiesBox::AutoUpdateSize()
 CUIListBoxItem* CUIPropertiesBox::GetClickedItem() { return m_UIListWnd.GetSelectedItem(); }
 void CUIPropertiesBox::Update() { inherited::Update(); }
 void CUIPropertiesBox::Draw() { inherited::Draw(); }
-bool CUIPropertiesBox::OnKeyboardAction(int dik, EUIMessages keyboard_action) { return true; }
+bool CUIPropertiesBox::OnKeyboardAction(int dik, EUIMessages keyboard_action)
+{
+    if (keyboard_action == WINDOW_KEY_HOLD)
+        return false; // allow player to walk
+    return true;
+}

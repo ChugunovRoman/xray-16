@@ -1,13 +1,11 @@
 #pragma once
 
-#include "Layers/xrRender/HWCaps.h"
 #include "xrCore/ModuleLookup.hpp"
-#include "SDL.h"
-#include "SDL_syswm.h"
 
-#if !defined(_MAYA_EXPORT)
+#include "Layers/xrRender/HWCaps.h"
 #include "Layers/xrRender/stats_manager.h"
-#endif
+
+#include <SDL.h>
 
 class CHW
     : public pureAppActivate,
@@ -24,6 +22,8 @@ public:
     void DestroyDevice();
 
     void Reset();
+
+    void SetPrimaryAttributes(u32& windowFlags);
 
     BOOL support(D3DFORMAT fmt, u32 type, u32 usage) const;
     static bool GivenGPUIsIntelGMA(u32 id_vendor, u32 id_device);
@@ -51,6 +51,8 @@ private:
     bool ThisInstanceIsGlobal() const;
 
 public:
+    static constexpr auto IMM_CTX_ID = 0;
+
     CHWCaps Caps;
 
     u32 BackBufferCount{};
@@ -58,7 +60,7 @@ public:
 
     ID3DDevice* pDevice = nullptr; // render device
 
-    D3D_DRIVER_TYPE m_DriverType;
+    D3DDEVTYPE m_DriverType;
 
 #ifdef DEBUG
     IDirect3DStateBlock9* dwDebugSB = nullptr;

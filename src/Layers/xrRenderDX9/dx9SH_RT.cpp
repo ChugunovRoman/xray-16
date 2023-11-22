@@ -3,14 +3,6 @@
 
 #include "Layers/xrRender/ResourceManager.h"
 
-CRT::CRT()
-{
-    pSurface = NULL;
-    pRT = NULL;
-    dwWidth = 0;
-    dwHeight = 0;
-    fmt = D3DFMT_UNKNOWN;
-}
 CRT::~CRT()
 {
     destroy();
@@ -19,7 +11,7 @@ CRT::~CRT()
     RImplementation.Resources->_DeleteRT(this);
 }
 
-bool CRT::used_as_depth() const
+bool used_as_depth(D3DFORMAT fmt)
 {
     switch (fmt)
     {
@@ -27,6 +19,7 @@ bool CRT::used_as_depth() const
     case D3DFMT_D16_LOCKABLE:
     case D3DFMT_D24X8:
     case D3DFMT_D32:
+    case D3DFMT_D32F_LOCKABLE:
     case D3DFMT_D15S1:
     case D3DFMT_D24X4S4:
     case D3DFMT_D24S8:
@@ -37,13 +30,16 @@ bool CRT::used_as_depth() const
     }
 }
 
-void CRT::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/, Flags32 flags /*= {}*/)
+void CRT::set_slice_read(int slice) {}
+void CRT::set_slice_write(u32 context_id, int slice) {}
+
+void CRT::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/, u32 slices_num /*=1*/, Flags32 flags /*= {}*/)
 {
     if (pSurface)
         return;
 
     R_ASSERT(HW.pDevice && Name && Name[0] && w && h);
-    _order = CPU::QPC(); // RDEVICE.GetTimerGlobal()->GetElapsed_clk();
+    _order = CPU::QPC(); // Device.GetTimerGlobal()->GetElapsed_clk();
 
     HRESULT _hr;
 
@@ -52,10 +48,12 @@ void CRT::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/
     fmt = f;
     sampleCount = SampleCount;
 
+    const bool useAsDepth = used_as_depth(fmt);
+
     if (flags.test(CreateBase))
     {
         dwFlags |= CreateBase;
-        if (used_as_depth())
+        if (useAsDepth)
             R_CHK(HW.pDevice->GetDepthStencilSurface(&pRT));
         else
         {
@@ -95,7 +93,6 @@ void CRT::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/
         return;
 
     // Select usage
-    const bool useAsDepth = used_as_depth();
     const u32 usage = useAsDepth ? D3DUSAGE_DEPTHSTENCIL : D3DUSAGE_RENDERTARGET;
 
     // Validate render-target usage
@@ -162,9 +159,9 @@ void CRT::resolve_into(CRT& destination) const
         destination.pRT, nullptr, D3DTEXF_POINT);
 }
 
-void resptrcode_crt::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/, Flags32 flags /*= {}*/)
+void resptrcode_crt::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/, u32 slices_num /*=1*/, Flags32 flags /*= {}*/)
 {
-    _set(RImplementation.Resources->_CreateRT(Name, w, h, f, SampleCount, flags));
+    _set(RImplementation.Resources->_CreateRT(Name, w, h, f, SampleCount, 1, flags));
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -190,7 +187,7 @@ CRTC::~CRTC			()
 void CRTC::create	(LPCSTR Name, u32 size,	D3DFORMAT f)
 {
     R_ASSERT	(HW.pDevice && Name && Name[0] && size && btwIsPow2(size));
-    _order		= CPU::QPC();	//RDEVICE.GetTimerGlobal()->GetElapsed_clk();
+    _order		= CPU::QPC();	//Device.GetTimerGlobal()->GetElapsed_clk();
 
     HRESULT		_hr;
 

@@ -72,9 +72,6 @@ void CActor::IR_OnKeyboardPress(int cmd)
         }
     }
     break;
-    default: {
-    }
-    break;
     }
 
     if (!g_Alive())
@@ -218,14 +215,14 @@ void CActor::IR_OnMouseWheel(int x, int y)
 {
     if (hud_adj_mode)
     {
-        g_player_hud->tune(Ivector().set(0, 0, x));
+        g_player_hud->tune(Ivector().set(0, 0, y));
         return;
     }
 
-    if (inventory().Action((x > 0) ? (u16)kWPN_ZOOM_DEC : (u16)kWPN_ZOOM_INC, CMD_START))
+    if (inventory().Action((y > 0) ? (u16)kWPN_ZOOM_INC : (u16)kWPN_ZOOM_DEC, CMD_START))
         return;
 
-    if (x > 0)
+    if (y > 0)
         OnNextWeaponSlot();
     else
         OnPrevWeaponSlot();
@@ -314,8 +311,18 @@ void CActor::IR_OnKeyboardHold(int cmd)
         break;
 
     case kACCEL: mstate_wishful |= mcAccel; break;
-    case kL_STRAFE: mstate_wishful |= mcLStrafe; break;
-    case kR_STRAFE: mstate_wishful |= mcRStrafe; break;
+    case kL_STRAFE:
+    {
+        mstate_wishful &= ~mcSprint;
+        mstate_wishful |= mcLStrafe;
+        break;
+    }
+    case kR_STRAFE:
+    {
+        mstate_wishful &= ~mcSprint;
+        mstate_wishful |= mcRStrafe;
+        break;
+    }
     case kL_LOOKOUT: mstate_wishful |= mcLLookout; break;
     case kR_LOOKOUT: mstate_wishful |= mcRLookout; break;
     case kFWD: mstate_wishful |= mcFwd; break;
@@ -363,7 +370,7 @@ void CActor::IR_OnMouseMove(int dx, int dy)
         m_holder->OnMouseMove(dx, dy);
         return;
     }
-    
+
     const float LookFactor = GetLookFactor();
     const float scale = (cam_Active()->f_fov / g_fov) * psMouseSens * psMouseSensScale / 50.f / LookFactor;
     OnAxisMove(float(dx), float(dy), scale, psMouseInvert.test(1));
@@ -409,7 +416,6 @@ void CActor::IR_OnControllerPress(int cmd, float x, float y)
     case kLOOK_AROUND:
     {
         const float LookFactor = GetLookFactor();
-        CCameraBase* C = cameras[cam_active];
         float scale = (cam_Active()->f_fov / g_fov) * psControllerStickSens * psControllerStickSensScale / 50.f / LookFactor;
         OnAxisMove(x, y, scale, psControllerInvertY.test(1));
         break;
@@ -505,7 +511,6 @@ void CActor::IR_OnControllerHold(int cmd, float x, float y)
     case kLOOK_AROUND:
     {
         const float LookFactor = GetLookFactor();
-        CCameraBase* C = cameras[cam_active];
         float scale = (cam_Active()->f_fov / g_fov) * psControllerStickSens * psControllerStickSensScale / 50.f / LookFactor;
         OnAxisMove(x, y, scale, psControllerInvertY.test(1));
         break;
@@ -561,7 +566,7 @@ void CActor::IR_OnControllerAttitudeChange(Fvector change)
         m_holder->OnControllerAttitudeChange(change);
         return;
     }
-    
+
     const float LookFactor = GetLookFactor();
     const float scale = (cam_Active()->f_fov / g_fov) * psControllerSensorSens / 50.f / LookFactor;
     OnAxisMove(change.x, change.y, scale, psControllerInvertY.test(1));

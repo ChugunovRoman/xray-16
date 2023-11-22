@@ -32,6 +32,7 @@
 #include "UIGameSP.h"
 #include "ui/UIActorMenu.h"
 #include "xrUICore/Static/UIStatic.h"
+#include "xrUICore/ui_styles.h"
 #include "zone_effector.h"
 #include "GameTask.h"
 #include "MainMenu.h"
@@ -88,13 +89,9 @@ extern BOOL g_ShowAnimationInfo;
 extern BOOL g_bShowHitSectors;
 // extern	BOOL	g_bDebugDumpPhysicsStep	;
 extern ESingleGameDifficulty g_SingleGameDifficulty;
-XRUICORE_API extern BOOL g_show_wnd_rect2;
 //-----------------------------------------------------------
 extern float g_fTimeFactor;
 extern BOOL b_toggle_weapon_aim;
-
-extern u32 UIStyleID;
-extern xr_vector<xr_token> UIStyleToken;
 
 extern float g_smart_cover_factor;
 extern int g_upgrades_log;
@@ -112,6 +109,8 @@ int g_inv_highlight_equipped = 0;
 //-Alundaio
 
 int g_first_person_death = 0;
+int g_normalize_mouse_sens = 0;
+int g_normalize_upgrade_mouse_sens = 0;
 
 void register_mp_console_commands();
 //-----------------------------------------------------------
@@ -121,7 +120,7 @@ int net_cl_inputupdaterate = 50;
 Flags32 g_mt_config = {mtLevelPath | mtDetailPath | mtObjectHandler | mtSoundPlayer | mtAiVision | mtBullets |
     mtLUA_GC | mtLevelSounds | mtALife | mtMap};
 #ifdef DEBUG
-Flags32 dbg_net_Draw_Flags = {0};
+Flags32 dbg_net_Draw_Flags{};
 #endif
 
 #ifdef DEBUG
@@ -180,7 +179,6 @@ public:
     virtual void Execute(LPCSTR args) { full_memory_stats(); }
 };
 
-// console commands
 class CCC_GameDifficulty : public CCC_Token
 {
 public:
@@ -523,7 +521,7 @@ public:
 
         if (!pSettings->section_exist(args))
         {
-            InvalidSyntax();
+            Msg("! Section [%s] doesn't exist...", args);
             return;
         }
 
@@ -533,10 +531,40 @@ public:
 
     void Info(TInfo& I) override
     {
-        xr_strcpy(I, "valid name of entity or item that can be spawned");
+        xr_strcpy(I, "valid name of an entity or item that can be spawned");
     }
 };
 
+class CCC_SpawnToInventory : public IConsole_Command
+{
+public:
+    CCC_SpawnToInventory(pcstr name) : IConsole_Command(name) {}
+
+    void Execute(pcstr args) override
+    {
+        if (!g_pGameLevel)
+            return;
+
+        if (!IsGameTypeSingle())
+        {
+            Log("Spawn command is available only in singleplayer mode.");
+            return;
+        }
+
+        if (!pSettings->section_exist(args))
+        {
+            Msg("! Section [%s] doesn't exist...", args);
+            return;
+        }
+
+        Level().spawn_item(args, Actor()->Position(), false, Actor()->ID());
+    }
+
+    void Info(TInfo& I) override
+    {
+        xr_strcpy(I, "valid name of an item that can be spawned");
+    }
+};
 // helper functions --------------------------------------------
 
 bool valid_saved_game_name(LPCSTR file_name)
@@ -765,7 +793,7 @@ public:
             strncpy_s(saved_game, sizeof(saved_game), args, _MAX_PATH - 1);
         }
 
-        if (saved_game && *saved_game)
+        if (*saved_game)
         {
             xr_strcpy(g_last_saved_game, saved_game);
             return;
@@ -1052,11 +1080,22 @@ class CCC_DebugFonts : public IConsole_Command
 {
 public:
     CCC_DebugFonts(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+
+    ~CCC_DebugFonts()
+    {
+        xr_free(m_ui);
+    }
+
     virtual void Execute(LPCSTR args)
     {
-        // BUG: leak
-        (xr_new<CUIDebugFonts>())->ShowDialog(true);
+        if (!m_ui)
+            m_ui = xr_new<CUIDebugFonts>();
+
+        m_ui->ShowDialog(true);
     }
+
+private:
+    CUIDebugFonts* m_ui;
 };
 
 class CCC_DebugNode : public IConsole_Command
@@ -1190,23 +1229,29 @@ public:
 };
 #endif // DEBUG
 
-class CCC_PHFps : public IConsole_Command
+class CCC_PHFps : public CCC_Float
 {
-public:
-    CCC_PHFps(LPCSTR N) : IConsole_Command(N){};
-    virtual void Execute(LPCSTR args)
-    {
-        float step_count = (float)atof(args);
 #ifndef DEBUG
-        clamp(step_count, 50.f, 200.f);
+    static constexpr float MIN_FPS = 50;
+    static constexpr float MAX_FPS = 200;
+#else
+    static constexpr float MIN_FPS = 1;
+    static constexpr float MAX_FPS = 1000;
 #endif
-        // IPHWorld::SetStep(1.f/step_count);
-        ph_console::ph_step_time = 1.f / step_count;
-        // physics_world()->SetStep(1.f/step_count);
+
+    float m_dummy = 1.f / ph_console::ph_step_time;
+
+public:
+    CCC_PHFps(pcstr name) : CCC_Float(name, &m_dummy, MIN_FPS, MAX_FPS) { }
+
+    void Execute(pcstr args) override
+    {
+        CCC_Float::Execute(args);
+
+        ph_console::ph_step_time = 1.f / m_dummy;
         if (physics_world())
             physics_world()->SetStep(ph_console::ph_step_time);
     }
-    void GetStatus(TStatus& S) override { xr_sprintf(S, "%3.5f", 1.f / ph_console::ph_step_time); }
 };
 
 #ifdef DEBUG
@@ -1433,16 +1478,22 @@ public:
     }
 };
 
-extern void SetupUIStyle();
 class CCC_UIStyle : public CCC_Token
 {
-public:
-    CCC_UIStyle(pcstr name) : CCC_Token(name, &UIStyleID, UIStyleToken.data()) {}
+    u32 m_id = 0;
 
-    void Execute(pcstr args)
+public:
+    CCC_UIStyle(pcstr name) : CCC_Token(name, &m_id, nullptr) { }
+
+    void Execute(pcstr args) override
     {
         CCC_Token::Execute(args);
-        SetupUIStyle();
+        UIStyles->SetupStyle(m_id);
+    }
+
+    const xr_token* GetToken() noexcept override // may throw exceptions!
+    {
+        return UIStyles->GetToken().data();
     }
 };
 
@@ -1453,19 +1504,7 @@ public:
 
     void Execute(pcstr /*args*/) override
     {
-        // Hack: activate main menu to prevent crash
-        // I don't know why it crashes while in the game
-        bool shouldHideMainMenu = false;
-        if (g_pGamePersistent && g_pGamePersistent->m_pMainMenu)
-        {
-            shouldHideMainMenu = !g_pGamePersistent->m_pMainMenu->IsActive();
-            g_pGamePersistent->m_pMainMenu->Activate(true);
-        }
-
-        Device.seqUIReset.Process();
-
-        if (shouldHideMainMenu)
-            g_pGamePersistent->m_pMainMenu->Activate(false);
+        UIStyles->Reset();
     }
 };
 
@@ -1885,31 +1924,6 @@ public:
     }
 };
 
-// Change weather immediately
-class CCC_SetWeather : public IConsole_Command
-{
-public:
-    CCC_SetWeather(LPCSTR N) : IConsole_Command(N){};
-    virtual void Execute(LPCSTR args)
-    {
-        if (!xr_strlen(args))
-            return;
-        if (!g_pGamePersistent)
-            return;
-        if (!Device.editor())
-            g_pGamePersistent->Environment().SetWeather(args, true);
-    }
-    void fill_tips(vecTips& tips, u32 mode) override
-    {
-        if (!g_pGamePersistent || Device.editor())
-            return;
-        for (auto& [name, cycle] : g_pGamePersistent->Environment().WeatherCycles)
-        {
-            tips.push_back(name);
-        }
-    }
-};
-
 class CCC_CleanupTasks : public IConsole_Command
 {
 public:
@@ -1917,6 +1931,81 @@ public:
     void Execute(pcstr /*args*/) override
     {
         Level().GameTaskManager().CleanupTasks();
+    }
+};
+
+class CCC_UI_Time_Dilation_Mode : public IConsole_Command
+{
+    UITimeDilator::UIMode mode;
+    bool isEnable;
+
+public:
+    CCC_UI_Time_Dilation_Mode(pcstr name, UITimeDilator::UIMode mode) : IConsole_Command(name), mode(mode) {};
+
+    void Execute(pcstr args) override
+    {
+        if (EQ(args, "on") || EQ(args, "1"))
+        {
+            TimeDilator()->SetModeEnability(mode, true);
+            isEnable = true;
+        }
+        else if (EQ(args, "off") || EQ(args, "0"))
+        {
+            TimeDilator()->SetModeEnability(mode, false);
+            isEnable = false;
+        }
+        else
+            InvalidSyntax();
+    }
+
+    void GetStatus(TStatus& status) override
+    {
+        xr_strcpy(status, isEnable ? "on" : "off");
+    }
+
+    void Info(TInfo& info) override
+    {
+        xr_strcpy(info, "'on/off' or '1/0'");
+    }
+
+    void fill_tips(vecTips& tips, u32 /*mode*/) override
+    {
+        TStatus str;
+        xr_sprintf(str, sizeof(str), "%s (current) [on/off]", isEnable ? "on" : "off");
+        tips.push_back(str);
+    }
+};
+
+class CCC_UI_Time_Factor : public IConsole_Command
+{
+    float uiTimeFactor = 1.0;
+
+public:
+    CCC_UI_Time_Factor(pcstr name) : IConsole_Command(name){};
+
+    void Execute(pcstr args) override
+    {
+        float time_factor = (float)atof(args);
+        clamp(time_factor, EPS, 1.f);
+        TimeDilator()->SetUiTimeFactor(time_factor);
+        uiTimeFactor = time_factor;
+    }
+
+    void Info(TInfo& info) override
+    {
+        xr_strcpy(info, "[0.001 - 1.0]");
+    }
+
+    void fill_tips(vecTips& tips, u32 mode) override
+    {
+        TStatus str;
+        xr_sprintf(str, sizeof(str), "%3.3f (current) [0.001 - 1.0]", uiTimeFactor);
+        tips.push_back(str);
+    }
+
+    void GetStatus(TStatus& status) override
+    {
+        xr_sprintf(status, sizeof(status), "%f", uiTimeFactor);
     }
 };
 
@@ -2104,10 +2193,10 @@ void CCC_RegisterCommands()
     CMD1(CCC_ToggleNoClip, "g_no_clip");
     CMD3(CCC_Mask, "g_unlimitedammo", &psActorFlags, AF_UNLIMITEDAMMO);
     CMD1(CCC_Spawn, "g_spawn");
+    CMD1(CCC_SpawnToInventory, "g_spawn_to_inventory");
     CMD1(CCC_Script, "run_script");
     CMD1(CCC_ScriptCommand, "run_string");
     CMD1(CCC_TimeFactor, "time_factor");
-    CMD1(CCC_SetWeather, "set_weather");
 #endif // MASTER_GOLD
 
     CMD3(CCC_Mask, "g_autopickup", &psActorFlags, AF_AUTOPICKUP);
@@ -2119,6 +2208,8 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "g_inv_highlight_equipped", &g_inv_highlight_equipped, 0, 1);
     CMD4(CCC_Integer, "g_first_person_death", &g_first_person_death, 0, 1);
     CMD4(CCC_Integer, "g_unload_ammo_after_pick_up", &g_auto_ammo_unload, 0, 1);
+    CMD4(CCC_Integer, "g_normalize_mouse_sens", &g_normalize_mouse_sens, 0, 1);
+    CMD4(CCC_Integer, "g_normalize_upgrade_mouse_sens", &g_normalize_upgrade_mouse_sens, 0, 1);
 
     CMD1(CCC_CleanupTasks, "dbg_cleanup_tasks");
 
@@ -2307,7 +2398,6 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "dbg_imotion_draw_skeleton", &dbg_imotion_draw_skeleton, FALSE, TRUE);
     CMD4(CCC_Float, "dbg_imotion_draw_velocity_scale", &dbg_imotion_draw_velocity_scale, 0.0001f, 100.0f);
 
-    CMD4(CCC_Integer, "show_wnd_rect_all", &g_show_wnd_rect2, 0, 1);
     CMD4(CCC_Integer, "dbg_show_ani_info", &g_ShowAnimationInfo, 0, 1);
     CMD4(CCC_Integer, "dbg_dump_physics_step", &ph_console::g_bDebugDumpPhysicsStep, 0, 1);
     CMD1(CCC_InvUpgradesHierarchy, "inv_upgrades_hierarchy");
@@ -2378,5 +2468,9 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "dbg_load_pre_c5ef6c7_saves", &g_dbg_load_pre_c5ef6c7_saves, 0, 1); //Alundaio
 
     CMD4(CCC_Integer, "keypress_on_start", &g_keypress_on_start, 0, 1);
+    CMD1(CCC_UI_Time_Factor, "ui_time_factor");
+    CMD2(CCC_UI_Time_Dilation_Mode, "time_dilation_inventory", UITimeDilator::Inventory);
+    CMD2(CCC_UI_Time_Dilation_Mode, "time_dilation_pda", UITimeDilator::Pda);
+
     register_mp_console_commands();
 }

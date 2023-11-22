@@ -1,7 +1,7 @@
 #include "StdAfx.h"
 #include "UIDialogWnd.h"
 
-CUIDialogWnd::CUIDialogWnd()
+CUIDialogWnd::CUIDialogWnd(pcstr window_name) : CUIWindow(window_name)
 {
     m_pParentHolder = NULL;
     m_bWorkInPause = false;
@@ -40,13 +40,26 @@ bool CUIDialogWnd::IR_process()
     if (!IsEnabled())
         return false;
 
-    if (GetHolder()->IgnorePause())
+    if (GetHolder() && GetHolder()->IgnorePause())
         return true;
 
     if (Device.Paused() && !WorkInPause())
         return false;
 
     return true;
+}
+
+void CUIDialogWnd::FillDebugInfo()
+{
+#ifndef MASTER_GOLD
+    CUIWindow::FillDebugInfo();
+
+    if (ImGui::CollapsingHeader(CUIDialogWnd::GetDebugType()))
+    {
+        ImGui::LabelText("Current holder", "%s", m_pParentHolder ? m_pParentHolder->GetDebugType() : "none");
+        ImGui::LabelText("Work in pause", m_bWorkInPause ? "true" : "false");
+    }
+#endif
 }
 
 CDialogHolder* CurrentDialogHolder();

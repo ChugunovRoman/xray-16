@@ -23,8 +23,8 @@ shared_str transform_vertex(shared_str const& vertex_id, bool const& in);
 
 cover::cover(smart_cover::object const& object, DescriptionPtr description, bool const is_combat_cover,
     bool const can_fire, luabind::object const& loopholes_availability)
-    : inherited(object.Position(), object.ai_location().level_vertex_id()), m_object(object),
-      m_description(description), m_id(m_object.cName()), m_is_combat_cover(is_combat_cover), m_can_fire(can_fire)
+    : inherited(object.Position(), object.ai_location().level_vertex_id()), m_description(description),
+      m_object(object), m_id(m_object.cName()), m_is_combat_cover(is_combat_cover), m_can_fire(can_fire)
 {
     m_is_smart_cover = 1;
 
@@ -64,7 +64,7 @@ cover::cover(smart_cover::object const& object, DescriptionPtr description, bool
     {
         Fvector position = this->fov_position(**J);
         position.y += 2.0f;
-        u32 level_vertex_id = graph.vertex_id(position);
+        [[maybe_unused]] u32 level_vertex_id = graph.vertex_id(position);
         VERIFY2(graph.valid_vertex_id(level_vertex_id), make_string("invalid vertex id: smart cover[%s], loophole [%s]",
                                                             m_object.cName().c_str(), (*J)->id().c_str()));
         vertex(**J, (*i).second);
@@ -98,7 +98,7 @@ void cover::vertex(smart_cover::loophole const& loophole, smart_cover::loophole_
             u32 level_vertex_id = graph.vertex_id(pos);
             VERIFY2(graph.valid_vertex_id(level_vertex_id),
                 make_string("invalid vertex id: loophole [%s]", loophole.id().c_str()));
-            loophole_data.m_action_vertices.push_back(std::make_pair((*I).first, level_vertex_id));
+            loophole_data.m_action_vertices.emplace_back((*I).first, level_vertex_id);
         }
 }
 
@@ -217,8 +217,11 @@ bool cover::loophole_path(shared_str const& source_raw, shared_str const& target
     shared_str source = transform_vertex(source_raw, true);
     shared_str target = transform_vertex(target_raw, false);
 
+    // XXX: casting u32(-1) to _dist_type, this may be safe,
+    // but we may want to recheck that
+    // the same cast happens in xrGame/stalker_movement_manager_smart_cover.cpp
     typedef GraphEngineSpace::CBaseParameters CBaseParameters;
-    CBaseParameters parameters(u32(-1), u32(-1), u32(-1));
+    CBaseParameters parameters(_dist_type(u32(-1)), u32(-1), u32(-1));
     bool result = ai().graph_engine().search(m_description->transitions(), source, target, 0, parameters);
 
     VERIFY2(result, make_string("failde to find loophole path [%s]->[%s] in cover [%s]", source.c_str(), target.c_str(),

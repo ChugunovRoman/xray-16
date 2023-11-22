@@ -13,12 +13,13 @@
 #include "xrEngine/XR_IOConsole.h"
 
 CUIMpAdminMenu::CUIMpAdminMenu()
+    : CUIDialogWnd(CUIMpAdminMenu::GetDebugType())
 {
     xml_doc = NULL;
     m_pActiveDialog = NULL;
     m_sActiveSection = "";
 
-    m_pBack = xr_new<CUIStatic>();
+    m_pBack = xr_new<CUIStatic>("Background");
     m_pBack->SetAutoDelete(true);
     AttachChild(m_pBack);
 
@@ -142,16 +143,18 @@ void CUIMpAdminMenu::ShowMessageBox(CUIMessageBox::E_MESSAGEBOX_STYLE style, LPC
 {
     switch (style)
     {
-    case CUIMessageBox::MESSAGEBOX_RA_LOGIN: { m_pMessageBoxLogin->ShowDialog(true);
+    case CUIMessageBox::MESSAGEBOX_RA_LOGIN:
+    {
+        m_pMessageBoxLogin->ShowDialog(true);
+        break;
     }
-    break;
     case CUIMessageBox::MESSAGEBOX_OK:
     {
         m_pMessageBoxOk->SetText(reason);
         m_pMessageBoxOk->ShowDialog(true);
+        break;
     }
-    break;
-    }
+    } // switch (style)
 }
 
 void CUIMpAdminMenu::RemoteAdminLogin(CUIWindow*, void*)

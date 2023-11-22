@@ -57,8 +57,6 @@ class CGameObject : public IGameObject,
                     public RenderableBase,
                     public CollidableBase
 {
-    BENCH_SEC_SCRAMBLEMEMBER1
-    BENCH_SEC_SCRAMBLEVTBL2
     // Some property variables
     GameObjectProperties Props;
 public:
@@ -131,7 +129,7 @@ public:
     virtual void setID(u16 _ID) override { Props.net_ID = _ID; }
     virtual bool GetTmpPreDestroy() const override { return Props.bPreDestroy; }
     virtual void SetTmpPreDestroy(bool b) override { Props.bPreDestroy = b; }
-    virtual float shedule_Scale() override { return Device.vCameraPosition.distance_to(Position()) / 200.f; }
+    virtual float shedule_Scale() const override { return Device.vCameraPosition.distance_to(Position()) / 200.f; }
     virtual bool shedule_Needed() override;
     virtual void shedule_Update(u32 dt) override;
     // Parentness
@@ -160,7 +158,7 @@ public:
     virtual const Fvector& Position() const override { return renderable.xform.c; }
     virtual float Radius() const override;
     virtual const Fbox& BoundingBox() const override;
-    virtual IRender_Sector* Sector() override { return H_Root()->GetSpatialData().sector; }
+    virtual IRender_Sector::sector_id_t Sector() override { return H_Root()->GetSpatialData().sector_id; }
     virtual IRender_ObjectSpecific* ROS() override { return RenderableBase::renderable_ROS(); }
     virtual bool renderable_ShadowGenerate() override { return TRUE; }
     virtual bool renderable_ShadowReceive() override { return TRUE; }
@@ -250,11 +248,11 @@ public:
     virtual void ForceTransform(const Fmatrix& m) override {}
     void ForceTransformAndDirection(const Fmatrix& m) override { ForceTransform(m); }
 
-    void OnHUDDraw(CCustomHUD* /*hud*/, IRenderable* /*root*/) override {}
+    void OnHUDDraw(u32 context_id, CCustomHUD* /*hud*/, IRenderable* /*root*/) override {}
     void OnRenderHUD(IGameObject* pCurViewEntity) override {} //--#SM+#--
     void OnOwnedCameraMove(CCameraBase* pCam, float fOldYaw, float fOldPitch) override  {} //--#SM+#--
     virtual bool Ready() override { return getReady(); } // update only if active and fully initialized by/for network
-    void renderable_Render(IRenderable* root) override;
+    void renderable_Render(u32 context_id, IRenderable* root) override;
     virtual void OnEvent(NET_Packet& P, u16 type) override;
     virtual void Hit(SHit* pHDS) override {}
     virtual void SetHitInfo(IGameObject* who, IGameObject* weapon, s16 element, Fvector Pos, Fvector Dir) override {}

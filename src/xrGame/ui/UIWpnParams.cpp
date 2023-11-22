@@ -25,7 +25,7 @@ static SLuaWpnParams* g_lua_wpn_params = nullptr;
 
 SLuaWpnParams::SLuaWpnParams()
 {
-    bool functor_exists;
+    [[maybe_unused]] bool functor_exists;
     functor_exists = GEnv.ScriptEngine->functor("ui_wpn_params.GetRPM", m_functorRPM);
     VERIFY(functor_exists);
     functor_exists = GEnv.ScriptEngine->functor("ui_wpn_params.GetDamage", m_functorDamage);
@@ -42,7 +42,7 @@ SLuaWpnParams::~SLuaWpnParams() {}
 
 // =====================================================================
 
-CUIWpnParams::CUIWpnParams()
+CUIWpnParams::CUIWpnParams() : CUIWindow("Weapon Params")
 {
     AttachChild(&m_textAccuracy);
     AttachChild(&m_textDamage);
@@ -55,7 +55,6 @@ CUIWpnParams::CUIWpnParams()
     AttachChild(&m_progressRPM);
 }
 
-CUIWpnParams::~CUIWpnParams() {}
 bool CUIWpnParams::InitFromXml(CUIXml& xml_doc)
 {
     if (!xml_doc.NavigateToNode("wpn_params", 0))
@@ -248,12 +247,12 @@ bool CUIWpnParams::Check(const shared_str& wpn_section)
 // -------------------------------------------------------------------------------------------------
 
 CUIConditionParams::CUIConditionParams()
+    : CUIWindow("Condition Params"), m_text("Text")
 {
     AttachChild(&m_progress);
     AttachChild(&m_text);
 }
 
-CUIConditionParams::~CUIConditionParams() {}
 bool CUIConditionParams::InitFromXml(CUIXml& xml_doc)
 {
     if (!xml_doc.NavigateToNode("condition_params", 0))

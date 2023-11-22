@@ -69,9 +69,9 @@ private:
     CMissile* m_missile;
 
 private:
-    bool m_call_script_callback;
-    bool m_call_global_callback;
-    bool m_start_new_script_animation;
+    bool m_call_script_callback{ false };
+    bool m_call_global_callback{ false };
+    bool m_start_new_script_animation{};
 
 #ifdef USE_HEAD_BONE_PART_FAKE
 private:

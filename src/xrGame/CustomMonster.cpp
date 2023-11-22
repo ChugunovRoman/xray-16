@@ -62,9 +62,9 @@
 void SetActorVisibility(u16 who, float value);
 extern int g_AI_inactive_time;
 
-#ifndef MASTER_GOLD
+#if defined(DEBUG) || !defined(MASTER_GOLD)
 Flags32 psAI_Flags = {aiObstaclesAvoiding | aiUseSmartCovers};
-#endif // MASTER_GOLD
+#endif // defined(DEBUG) || !defined(MASTER_GOLD)
 
 void CCustomMonster::SAnimState::Create(IKinematicsAnimated* K, LPCSTR base)
 {
@@ -618,9 +618,9 @@ void CCustomMonster::update_range_fov(float& new_range, float& new_fov, float st
 {
     const float standard_far_plane = eye_range;
 
-    float current_fog_density = GamePersistent().Environment().CurrentEnv->fog_density;
+    float current_fog_density = GamePersistent().Environment().CurrentEnv.fog_density;
     // 0=no_fog, 1=full_fog, >1 = super-fog
-    float current_far_plane = GamePersistent().Environment().CurrentEnv->far_plane;
+    float current_far_plane = GamePersistent().Environment().CurrentEnv.far_plane;
     // 300=standart, 50=super-fog
 
     new_fov = start_fov;
@@ -784,7 +784,7 @@ bool CCustomMonster::net_Spawn(CSE_Abstract* DC)
 }
 
 #ifdef DEBUG
-void CCustomMonster::OnHUDDraw(CCustomHUD* /*hud*/, IRenderable* /*root*/) {}
+void CCustomMonster::OnHUDDraw(u32 context_id, CCustomHUD* /*hud*/, IRenderable* /*root*/) {}
 #endif
 
 void CCustomMonster::Exec_Action(float /**dt**/) {}
@@ -884,7 +884,9 @@ void CCustomMonster::load_killer_clsids(LPCSTR section)
     m_killer_clsids.clear();
     LPCSTR killers = pSettings->r_string(section, "killer_clsids");
     string16 temp;
-    for (u32 i = 0, n = _GetItemCount(killers); i < n; ++i)
+    const u32 n = _GetItemCount(killers);
+    m_killer_clsids.reserve(n);
+    for (u32 i = 0; i < n; ++i)
         m_killer_clsids.push_back(TEXT2CLSID(_GetItem(killers, i, temp)));
 }
 
@@ -1196,7 +1198,7 @@ void CCustomMonster::OnRender()
 		float const jump_time	=	0.3f;
 		TransferenceToThrowVel	(velocity,jump_time,physics_world()->Gravity());
 
-		bool const result	=	trajectory_intersects_geometry	(jump_time, 
+		bool const result	=	trajectory_intersects_geometry	(jump_time,
 																 start,
 																 end,
 																 velocity,

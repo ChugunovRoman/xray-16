@@ -10,14 +10,13 @@
 #include "game_sv_base.h"
 #include "xrMessages.h"
 
-using namespace luabind;
-using namespace luabind::policy;
-
 template<typename T>
 class enum_exporter {};
 
 SCRIPT_EXPORT(game_sv_GameState, (game_GameState),
 {
+    using namespace luabind;
+
     module(luaState, "game")
     [
         class_<game_sv_GameState, game_GameState>("game_sv_GameState")
@@ -28,14 +27,14 @@ SCRIPT_EXPORT(game_sv_GameState, (game_GameState),
             //.def("get_name_it",			&game_sv_GameState::get_name_it)
             .def("get_name_id", &game_sv_GameState::get_name_id)
             .def("get_player_name_id", &game_sv_GameState::get_player_name_id)
-        
+
             .def("get_players_count", &game_sv_GameState::get_players_count)
             .def("get_id_2_eid", &game_sv_GameState::get_id_2_eid)
-        
+
             .def("get_option_i", &game_sv_GameState::get_option_i)
             .def("get_option_s", &game_sv_GameState::get_option_s)
             .def("u_EventSend", &game_sv_GameState::u_EventSend)
-        
+
             .def("GenerateGameMessage", &game_sv_GameState::GenerateGameMessage)
             .def("getRP", &game_sv_GameState::getRP)
             .def("getRPcount", &game_sv_GameState::getRPcount)
@@ -44,6 +43,8 @@ SCRIPT_EXPORT(game_sv_GameState, (game_GameState),
 
 SCRIPT_EXPORT(EGameEnums, (),
 {
+    using namespace luabind;
+
     module (luaState)
     [
         class_<enum_exporter<EGamePlayerFlags>>("game_player_flags")

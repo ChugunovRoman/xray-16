@@ -83,7 +83,7 @@ protected:
     CGameFont* pFont;
     CGameFont* pFont2;
 
-    FactoryPtr<IUIShader>* m_hShader_back;
+    FactoryPtr<IUIShader>* m_hShader_back{};
 
     POINT m_mouse_pos;
     bool m_disable_tips;
@@ -95,7 +95,6 @@ private:
     u32 m_cmd_history_max;
     int m_cmd_history_idx;
     shared_str m_last_cmd;
-    BENCH_SEC_SCRAMBLEMEMBER1
 
     vecTips m_temp_tips;
     vecTipsEx m_tips;
@@ -115,9 +114,9 @@ public:
 
     virtual void OnRender();
     virtual void OnFrame();
-    
+
     void OnUIReset() override;
-    
+
     pcstr GetUserConfigFileName() override { return ConfigFile; }
 
     string64 ConfigFile;
@@ -148,8 +147,6 @@ public:
 protected:
     text_editor::line_editor* m_editor;
     text_editor::line_edit_control& ec();
-
-    BENCH_SEC_SCRAMBLEMEMBER2
 
     enum Console_mark // (int)=char
     {

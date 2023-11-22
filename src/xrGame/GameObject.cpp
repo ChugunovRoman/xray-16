@@ -110,7 +110,7 @@ void CGameObject::MakeMeCrow()
     u32 const object_frame_id = dwFrame_AsCrow;
 #ifdef XR_PLATFORM_WINDOWS // XXX: Just use std::atomic
     if ((u32)_InterlockedCompareExchange((long*)&dwFrame_AsCrow, device_frame_id, object_frame_id) == device_frame_id)
-#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_APPLE)
+#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
     if (__sync_val_compare_and_swap(&dwFrame_AsCrow, object_frame_id, device_frame_id) == device_frame_id)
 #else
 #   error Select or add implementation for your platform
@@ -118,8 +118,8 @@ void CGameObject::MakeMeCrow()
         return;
 
     VERIFY(dwFrame_AsCrow == device_frame_id);
-    Props.crow = 1;
     g_pGameLevel->Objects.o_crow(this);
+    Props.crow = 1;
 }
 
 void CGameObject::cName_set(shared_str N) { NameObject = N; }
@@ -383,9 +383,6 @@ void CGameObject::OnEvent(NET_Packet& P, u16 type)
         {
             if (GameID() != eGameIDSingle)
                 Game().m_WeaponUsageStatistic->OnBullet_Check_Request(&HDS);
-        }
-        break;
-        default: {
         }
         break;
         }
@@ -1040,8 +1037,10 @@ void CGameObject::setDestroy(bool _destroy)
         Msg("cl setDestroy [%d][%d]", ID(), Device.dwFrame);
 #endif //#ifdef MP_LOGGING
     }
+#ifdef DEBUG
     else
         VERIFY(!g_pGameLevel->Objects.registered_object_to_destroy(this));
+#endif
 }
 
 Fvector CGameObject::get_new_local_point_on_mesh(u16& bone_id) const
@@ -1071,12 +1070,12 @@ Fvector CGameObject::get_last_local_point_on_mesh(Fvector const& local_point, u1
     return result;
 }
 
-void CGameObject::renderable_Render(IRenderable* root)
+void CGameObject::renderable_Render(u32 context_id, IRenderable* root)
 {
     //
     MakeMeCrow();
     // ~
-    GEnv.Render->add_Visual(root, Visual(), XFORM());
+    GEnv.Render->add_Visual(context_id, root, Visual(), XFORM());
     Visual()->getVisData().hom_frame = Device.dwFrame;
 }
 
@@ -1112,7 +1111,7 @@ bool CGameObject::TestServerFlag(u32 Flag) const { return (m_server_flags.test(F
 void CGameObject::add_visual_callback(visual_callback callback)
 {
     VERIFY(smart_cast<IKinematics*>(Visual()));
-    CALLBACK_VECTOR_IT I = std::find(visual_callbacks().begin(), visual_callbacks().end(), callback);
+    [[maybe_unused]] auto I = std::find(visual_callbacks().begin(), visual_callbacks().end(), callback);
     VERIFY(I == visual_callbacks().end());
 
     if (m_visual_callback.empty())
@@ -1515,8 +1514,6 @@ void CGameObject::OnRender()
     }
 }
 #endif // DEBUG
-
-using namespace luabind; // XXX: is it required here?
 
 bool CGameObject::use(IGameObject* obj)
 {

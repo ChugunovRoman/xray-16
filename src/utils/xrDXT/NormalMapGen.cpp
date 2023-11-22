@@ -11,14 +11,13 @@ using namespace xray_nvi;
 using namespace XRay::Media;
 #endif
 
-enum KernelType
+enum KernelType : u32
 {
     KERNEL_4x,
     KERNEL_3x3,
     KERNEL_5x5,
     KERNEL_7x7,
     KERNEL_9x9,
-    KERNEL_FORCEDWORD = 0xffffffff
 };
 
 void MakeKernelElems(const float* pInWeightArray, int num_x, int num_y, ConvolutionKernelElement* pOutArray);
@@ -665,9 +664,9 @@ int DXTCompressBump(
         {
             res = 0;
         }
-        delete img;
+        xr_delete(img);
     }
-    delete pSrc;
+    xr_delete(pSrc);
     if (gloss_power < 0.1f)
     {
         res = -1000;

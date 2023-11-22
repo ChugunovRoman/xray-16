@@ -10,22 +10,23 @@
 #include "xrUICore/Cursor/UICursor.h"
 #include "UIGameCustom.h"
 
-CUISpawnWnd::CUISpawnWnd() : m_iCurTeam(0)
+CUISpawnWnd::CUISpawnWnd()
+    : CUIDialogWnd(CUISpawnWnd::GetDebugType()), m_iCurTeam(0)
 {
-    m_pBackground = xr_new<CUIStatic>();
+    m_pBackground = xr_new<CUIStatic>("Background");
     AttachChild(m_pBackground);
-    m_pCaption = xr_new<CUIStatic>();
+    m_pCaption = xr_new<CUIStatic>("Caption");
     AttachChild(m_pCaption);
     m_pImage1 = xr_new<CUIStatix>();
     AttachChild(m_pImage1);
     m_pImage2 = xr_new<CUIStatix>();
     AttachChild(m_pImage2);
 
-    m_pFrames[0] = xr_new<CUIStatic>();
+    m_pFrames[0] = xr_new<CUIStatic>("Frame 0");
     AttachChild(m_pFrames[0]);
-    m_pFrames[1] = xr_new<CUIStatic>();
+    m_pFrames[1] = xr_new<CUIStatic>("Frame 1");
     AttachChild(m_pFrames[1]);
-    //	m_pFrames[2]	= new CUIStatic();	AttachChild(m_pFrames[2]);
+    //	m_pFrames[2]	= new CUIStatic("Frame 2");	AttachChild(m_pFrames[2]);
 
     m_pTextDesc = xr_new<CUIScrollView>();
     AttachChild(m_pTextDesc);

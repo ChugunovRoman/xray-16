@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="windows-1251" ?>
+<string_table>
+	<string id="st_unload_magazine_after_pickup">
+		<text>Autounload weapon after pickup</text>
+	</string>
+	<string id="st_unload_magazine_all">
+		<text>unload all weapons</text>
+	</string>
+	<string id="st_unequip">
+		<text>unequip</text>
+	</string>
+	<string id="st_donate">
+		<text>Donate</text>
+	</string>
+	<string id="st_loading_lights">
+		<text>Loading lights</text>
+	</string>
+	<string id="st_client_connecting_to">
+		<text>CLIENT: Connecting to</text>
+	</string>
+	<string id="st_client_spawning">
+		<text>CLIENT: Spawning</text>
+	</string>
+	<string id="st_client_synchronising">
+		<text>CLIENT: Synchronizing</text>
+	</string>
+	<string id="st_creating_new_game">
+		<text>Creating new game</text>
+	</string>
+	<string id="ui_mm_always_active">
+		<text>Don't pause on Alt+Tab</text>
+	</string>
+	<string id="ui_mm_detail_radius">
+		<text>Grass detail radius</text>
+	</string>
+	<string id="ui_mm_ui_style">
+		<text>Interface style</text>
+	</string>
+	<string id="ui_style_default">
+		<text>Call of Pripyat</text>
+	</string>
+	<string id="ui_mm_simplified_item_pickup">
+		<text>Simplified item pickup</text>
+	</string>
+	<string id="ui_mm_multi_item_pickup">
+		<text>Multi item pickup</text>
+	</string>
+	<string id="ui_mm_loadingstages">
+		<text>Show loading stages</text>
+	</string>
+	<string id="renderer_gl">
+		<text>Enhanced full dyn. lighting (OpenGL)</text>
+	</string>
+	<string id="ui_mm_window_mode">
+		<text>Window mode</text>
+	</string>
+	<string id="st_opt_windowed">
+		<text>Windowed</text>
+	</string>
+	<string id="st_opt_windowed_borderless">
+		<text>Windowed borderless</text>
+	</string>
+	<string id="st_opt_fullscreen">
+		<text>Fullscreen</text>
+	</string>
+	<string id="st_opt_fullscreen_borderless">
+		<text>Fullscreen (fast Alt+Tab)</text>
+	</string>
+	<string id="ui_mm_r2_smap_size">
+		<text>Shadow map quality</text>
+	</string>
+	<string id="ui_mm_r3_dynamic_wet_surfaces_near">
+		<text>Wet surfaces near dist.</text>
+	</string>
+	<string id="ui_mm_r3_dynamic_wet_surfaces_far">
+		<text>Wet surfaces far dist.</text>
+	</string>
+	<string id="ui_mm_r3_dynamic_wet_surfaces_sm_res">
+		<text>Wet surfaces quality</text>
+	</string>
+	<string id="ui_mm_fov">
+		<text>Field of view</text>
+	</string>
+	<string id="st_switch_version_invitation">
+		<text>Do you really want to launch another version of the game?</text>
+	</string>	
+	<string id="ui_mm_localization">
+		<text>Language</text>
+	</string>
+	<string id="ui_mm_gamepad_setup">
+		<text>Gamepad setup</text>
+	</string>
+	<string id="ui_mm_fps_limit">
+		<text>In-game FPS limit</text>
+	</string>
+	<string id="ui_mm_fps_limit_in_menu">
+		<text>Menu FPS limit</text>
+	</string>
+	<string id="ui_mm_shader_preset">
+		<text>Graphics mode</text>
+	</string>
+	<string id="ui_mm_shader_preset_vanilla">
+		<text>vanilla</text>
+	</string>
+	<string id="ui_mm_shader_preset_enhanced_default">
+		<text>enhanced (Default)</text>
+	</string>
+	<string id="ui_mm_shader_preset_enhanced_high">
+		<text>enhanced (High)</text>
+	</string>
+	<string id="ui_mm_color_grading_preset">
+		<text>Colour grading</text>
+	</string>
+	<string id="ui_mm_color_grading_default">
+		<text>default</text>
+	</string>
+	<string id="ui_mm_color_grading_cold">
+		<text>cold</text>
+	</string>
+	<string id="ui_mm_color_grading_filmic_01">
+		<text>Filmic 1</text>
+	</string>
+	<string id="ui_mm_color_grading_filmic_02">
+		<text>Filmic 2</text>
+	</string>
+	<string id="ui_mm_color_grading_filmic_03">
+		<text>Filmic 3</text>
+	</string>
+	<string id="ui_mm_color_grading_hollywood">
+		<text>Hollywood</text>
+	</string>
+	<string id="ui_mm_color_grading_vanilla">
+		<text>Vanilla</text>
+	</string>
+	<string id="ui_mm_color_grading_vibrant">
+		<text>Vibrant</text>
+	</string>
+	<string id="ui_mm_color_grading_warm">
+		<text>warm</text>
+	</string>
+	<string id="eng">
+		<text>English</text>
+	</string>
+	<string id="fra">
+		<text>French</text>
+	</string>
+	<string id="ger">
+		<text>German</text>
+	</string>
+	<string id="ita">
+		<text>Italian</text>
+	</string>
+	<string id="pol">
+		<text>Polish</text>
+	</string>
+	<string id="rus">
+		<text>Russian</text>
+	</string>
+	<string id="spa">
+		<text>Spanish</text>
+	</string>
+</string_table>

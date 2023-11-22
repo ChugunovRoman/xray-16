@@ -10,13 +10,13 @@
 #include "xrEngine/XR_IOConsole.h"
 #include "UIGameCustom.h"
 
-CUIMpChangeMapAdm::CUIMpChangeMapAdm()
+CUIMpChangeMapAdm::CUIMpChangeMapAdm() : CUIWindow("CUIMpChangeMapAdm")
 {
-    map_pic = xr_new<CUIStatic>();
+    map_pic = xr_new<CUIStatic>("Map picture");
     map_pic->SetAutoDelete(true);
     AttachChild(map_pic);
 
-    map_frame = xr_new<CUIStatic>();
+    map_frame = xr_new<CUIStatic>("Map frame");
     map_frame->SetAutoDelete(true);
     AttachChild(map_frame);
 
@@ -33,7 +33,6 @@ CUIMpChangeMapAdm::CUIMpChangeMapAdm()
     AttachChild(btn_ok);
 }
 
-CUIMpChangeMapAdm::~CUIMpChangeMapAdm() {}
 void CUIMpChangeMapAdm::Init(CUIXml& xml_doc)
 {
     CUIXmlInit::InitWindow(xml_doc, "change_map_adm", 0, this);
@@ -82,9 +81,9 @@ void CUIMpChangeMapAdm::OnItemSelect()
 
 void CUIMpChangeMapAdm::OnBtnOk()
 {
-    u32 idx = lst->GetSelectedIDX();
+    const u32 idx = lst->GetSelectedIDX();
     const SGameTypeMaps& M = gMapListHelper.GetMapListFor((EGameIDs)GameID());
-    if (idx >= 0 && idx < M.m_map_names.size())
+    if (idx < M.m_map_names.size())
     {
         const shared_str& name = M.m_map_names[idx].map_name;
         const shared_str& ver = M.m_map_names[idx].map_ver;

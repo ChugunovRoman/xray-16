@@ -6,14 +6,14 @@
 
 void CResourceManager::OnDeviceDestroy(BOOL)
 {
-    if (RDEVICE.b_is_Ready)
+    if (Device.b_is_Ready)
         return;
     m_textures_description.UnLoad();
 
     // Matrices
     for (map_Matrix::iterator m = m_matrices.begin(); m != m_matrices.end(); ++m)
     {
-        R_ASSERT(1 == m->second->dwReference);
+        R_ASSERT(1 == m->second->ref_count);
         xr_delete(m->second);
     }
     m_matrices.clear();
@@ -21,7 +21,7 @@ void CResourceManager::OnDeviceDestroy(BOOL)
     // Constants
     for (map_Constant::iterator c = m_constants.begin(); c != m_constants.end(); ++c)
     {
-        R_ASSERT(1 == c->second->dwReference);
+        R_ASSERT(1 == c->second->ref_count);
         xr_delete(c->second);
     }
     m_constants.clear();
@@ -49,7 +49,7 @@ void CResourceManager::OnDeviceDestroy(BOOL)
 
 void CResourceManager::OnDeviceCreate(IReader* F)
 {
-    if (!RDEVICE.b_is_Ready)
+    if (!Device.b_is_Ready)
         return;
 
     string256 name;
@@ -111,7 +111,7 @@ void CResourceManager::OnDeviceCreate(IReader* F)
                 chunk->seek(0);
                 B->Load(*chunk, desc.version);
 
-                auto I = m_blenders.insert(std::make_pair(xr_strdup(desc.cName), B));
+                auto I = m_blenders.emplace(xr_strdup(desc.cName), B);
                 R_ASSERT2(I.second, "shader.xr - found duplicate name!!!");
             }
             chunk->close();
@@ -149,12 +149,10 @@ void CResourceManager::StoreNecessaryTextures()
     if (!m_necessary.empty())
         return;
 
-    auto it = m_textures.begin();
-    auto it_e = m_textures.end();
-
-    for (; it != it_e; ++it)
+    m_necessary.reserve(m_textures.size());
+    for (auto& mtex : m_textures)
     {
-        LPCSTR texture_name = it->first;
+        LPCSTR texture_name = mtex.first;
         if (strstr(texture_name, DELIMITER "levels" DELIMITER))
             continue;
         if (!strchr(texture_name, _DELIMITER))

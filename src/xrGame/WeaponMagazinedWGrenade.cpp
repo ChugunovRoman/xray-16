@@ -63,10 +63,6 @@ bool CWeaponMagazinedWGrenade::net_Spawn(CSE_Abstract* DC)
 {
     CSE_ALifeItemWeapon* const weapon = smart_cast<CSE_ALifeItemWeapon*>(DC);
     R_ASSERT(weapon);
-    if (IsGameTypeSingle())
-    {
-        inherited::net_Spawn_install_upgrades(weapon->m_upgrades);
-    }
 
     BOOL l_res = inherited::net_Spawn(DC);
 
@@ -138,16 +134,18 @@ void CWeaponMagazinedWGrenade::OnShot()
         inherited::OnShot();
 }
 
-bool CWeaponMagazinedWGrenade::SwitchMode()
+bool CWeaponMagazinedWGrenade::CanSwitchToGL()
 {
     bool bUsefulStateToSwitch =
         ((eIdle == GetState()) || (eHidden == GetState()) || (eMisfire == GetState()) || (eMagEmpty == GetState())) &&
         (!IsPending());
 
-    if (!bUsefulStateToSwitch)
-        return false;
+    return bUsefulStateToSwitch && IsGrenadeLauncherAttached();
+}
 
-    if (!IsGrenadeLauncherAttached())
+bool CWeaponMagazinedWGrenade::SwitchMode()
+{
+    if (!CanSwitchToGL())
         return false;
 
     OnZoomOut();
@@ -208,7 +206,7 @@ bool CWeaponMagazinedWGrenade::Action(u16 cmd, u32 flags)
     {
     case kWPN_FUNC:
     {
-        if (flags & CMD_START && !IsPending())
+        if (flags & CMD_START && !IsPending() && CanSwitchToGL())
             SwitchState(eSwitch);
         return true;
     }
@@ -512,12 +510,12 @@ bool CWeaponMagazinedWGrenade::Detach(LPCSTR item_section_name, bool b_spawn_ite
         !xr_strcmp(*m_sGrenadeLauncherName, item_section_name))
     {
         m_flagsAddOnState &= ~CSE_ALifeItemWeapon::eWeaponAddonGrenadeLauncher;
-		
+
 		// Now we need to unload GL's magazine
 		if (!m_bGrenadeMode)
 			PerformSwitchGL();
 		UnloadMagazine();
-		PerformSwitchGL();        
+		PerformSwitchGL();
 
         UpdateAddonsVisibility();
 
@@ -570,7 +568,7 @@ void CWeaponMagazinedWGrenade::PlayAnimShow()
             PlayHUDMotion("anm_show_g", "anim_draw_g", FALSE, this, GetState());
     }
     else
-        PlayHUDMotion("anm_show", "anim_show", FALSE, this, GetState());
+        PlayHUDMotion("anm_show", "anim_draw", FALSE, this, GetState());
 }
 
 void CWeaponMagazinedWGrenade::PlayAnimHide()
@@ -631,46 +629,88 @@ void CWeaponMagazinedWGrenade::PlayAnimIdle()
         }
         else
         {
-            int act_state = 0;
-            CActor* pActor = smart_cast<CActor*>(H_Parent());
-            if (pActor)
+            enum class state
+            {
+                idle,
+                sprint,
+                moving,
+                crouch
+            };
+            state act_state = state::idle;
+            if (const auto actor = smart_cast<CActor*>(H_Parent()))
             {
                 CEntity::SEntityState st;
-                pActor->g_State(st);
+                actor->g_State(st);
                 if (st.bSprint)
-                    act_state = 1;
-                else if (pActor->AnyMove())
+                    act_state = state::sprint;
+                else if (actor->AnyMove())
                 {
-                    if (!st.bCrouch)
-                        act_state = 2;
                     if (st.bCrouch)
-                        act_state = 3;
+                        act_state = state::crouch;
+                    else
+                        act_state = state::moving;
                 }
             }
 
             if (m_bGrenadeMode)
             {
-                if (act_state == 0)
-                    PlayHUDMotion("anm_idle_g", "anim_idle_g", /*FALSE*/TRUE, NULL, GetState()); //AVO: fix fast anim switch
-                else if (act_state == 1)
-                    PlayHUDMotion("anm_idle_sprint_g", "anim_idle_g", TRUE, NULL, GetState());
-                else if (act_state == 2)
-                    PlayHUDMotion("anm_idle_moving_g", "anim_idle_g", TRUE, NULL, GetState());
-                else if (act_state == 3)
+                switch (act_state)
+                {
+                case state::idle:
+                {
+                    PlayHUDMotion("anm_idle_g", "anim_idle_g", TRUE, nullptr, GetState());
+                    break;
+                }
+                case state::sprint:
+                {
+                    PlayHUDMotion("anm_idle_sprint_g", "anim_idle_g", TRUE, nullptr, GetState());
+                    break;
+                }
+                case state::crouch:
+                {
                     if (isHUDAnimationExist("anm_idle_moving_crouch_g"))
+                    {
                         PlayHUDMotion("anm_idle_moving_crouch_g", true, nullptr, GetState());
+                        break;
+                    }
+                    [[fallthrough]];
+                }
+                case state::moving:
+                {
+                    PlayHUDMotion("anm_idle_moving_g", "anim_idle_g", TRUE, nullptr, GetState());
+                    break;
+                }
+                } // switch (act_state)
             }
             else
             {
-                if (act_state == 0)
-                    PlayHUDMotion("anm_idle_w_gl", "anim_idle_gl", /*FALSE*/TRUE, NULL, GetState()); //AVO: fix fast anim switch
-                else if (act_state == 1)
-                    PlayHUDMotion("anm_idle_sprint_w_gl", "anim_idle_gl", TRUE, NULL, GetState());
-                else if (act_state == 2)
-                    PlayHUDMotion("anm_idle_moving_w_gl", "anim_idle_gl", TRUE, NULL, GetState());
-                else if (act_state == 3)
+                switch (act_state)
+                {
+                case state::idle:
+                {
+                    PlayHUDMotion("anm_idle_w_gl", "anim_idle_gl", TRUE, nullptr, GetState());
+                    break;
+                }
+                case state::sprint:
+                {
+                    PlayHUDMotion("anm_idle_sprint_w_gl", "anim_idle_sprint", TRUE, nullptr, GetState());
+                    break;
+                }
+                case state::crouch:
+                {
                     if (isHUDAnimationExist("anm_idle_moving_crouch_w_gl"))
+                    {
                         PlayHUDMotion("anm_idle_moving_crouch_w_gl", true, nullptr, GetState());
+                        break;
+                    }
+                    [[fallthrough]];
+                }
+                case state::moving:
+                {
+                    PlayHUDMotion("anm_idle_moving_w_gl", "anim_idle_gl", TRUE, nullptr, GetState());
+                    break;
+                }
+                } // switch (act_state)
             }
         }
     }
@@ -875,12 +915,6 @@ bool CWeaponMagazinedWGrenade::install_upgrade_impl(LPCSTR section, bool test)
     result |= result2;
 
     return result;
-}
-
-void CWeaponMagazinedWGrenade::net_Spawn_install_upgrades(Upgrades_type saved_upgrades)
-{
-    // do not delete this
-    // this is intended behaviour
 }
 
 bool CWeaponMagazinedWGrenade::GetBriefInfo(II_BriefInfo& info)

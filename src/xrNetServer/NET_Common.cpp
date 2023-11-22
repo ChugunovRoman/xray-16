@@ -42,8 +42,7 @@ void PrintParsedPacket(pcstr message, u16 message_type, const void* packet_data,
 */
 //==============================================================================
 
-#pragma pack(push)
-#pragma pack(1)
+#pragma pack(push, 1)
 struct MultipacketHeader
 {
     u8 tag;
@@ -68,7 +67,7 @@ MultipacketSender::MultipacketSender() : _buf_cs(xr_new<Lock>()) {}
 
 MultipacketSender::~MultipacketSender()
 {
-    delete _buf_cs;
+    xr_delete(_buf_cs);
 }
 
 void MultipacketSender::SendPacket(const void* packet_data, u32 packet_sz, u32 flags, u32 timeout)

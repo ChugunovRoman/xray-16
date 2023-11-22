@@ -1,17 +1,18 @@
 #include "stdafx.h"
 #pragma hdrstop // ???
-#include "xrCore/_fbox.h"
 
-#if defined(XR_ARCHITECTURE_X86) || defined(XR_ARCHITECTURE_X64) || defined(XR_ARCHITECTURE_E2K)
+#include "xrCore/_fbox.h"
+#include "xrCDB.h"
+
+#include <SDL.h>
+
+#if defined(XR_ARCHITECTURE_X86) || defined(XR_ARCHITECTURE_X64) || defined(XR_ARCHITECTURE_E2K) || defined(XR_ARCHITECTURE_PPC64)
 #include <xmmintrin.h>
 #elif defined(XR_ARCHITECTURE_ARM) || defined(XR_ARCHITECTURE_ARM64)
 #include "sse2neon/sse2neon.h"
 #else
 #error Add your platform here
 #endif
-
-#include "xrCDB.h"
-#include "SDL.h"
 
 namespace CDB
 {
@@ -28,6 +29,7 @@ struct alignas(16) aabb_t
     vec_t min;
     vec_t max;
 };
+
 struct alignas(16) ray_t
 {
     vec_t pos;
@@ -231,7 +233,7 @@ public:
         ray.fwd_dir.set(D);
         rRange = R;
         rRange2 = R * R;
-        if (!bUseSSE)
+        if constexpr (!bUseSSE)
         {
             // for FPU - zero out inf
             if (_abs(D.x) > flt_eps)
@@ -294,7 +296,7 @@ public:
         // if determinant is near zero, ray lies in plane of triangle
         pvec.crossproduct(ray.fwd_dir, edge2);
         det = edge1.dotproduct(pvec);
-        if (bCull)
+        if constexpr (bCull)
         {
             if (det < EPS)
                 return false;
@@ -338,7 +340,7 @@ public:
         if (r <= 0 || r > rRange)
             return;
 
-        if (bNearest)
+        if constexpr (bNearest)
         {
             if (dest->r_count())
             {
@@ -391,7 +393,7 @@ public:
         _mm_prefetch((char*)node->GetNeg(), _MM_HINT_NTA);
 
         // Actual ray/aabb test
-        if (bUseSSE)
+        if constexpr (bUseSSE)
         {
             // use SSE
             float d;
@@ -417,8 +419,11 @@ public:
             _stab(node->GetPos());
 
         // Early exit for "only first"
-        if (bFirst && dest->r_count())
-            return;
+        if constexpr (bFirst)
+        {
+            if (dest->r_count())
+                return;
+        }
 
         // 2nd chield
         if (node->HasLeaf2())
@@ -437,7 +442,7 @@ void COLLIDER::ray_query(u32 ray_mode, const MODEL* m_def, const Fvector& r_star
     const AABBNoLeafNode* N = T->GetNodes();
     r_clear();
 
-    if (SDL_HasSSE())
+    if (CPU::HasSSE)
     {
         // SSE
         // Binary dispatcher

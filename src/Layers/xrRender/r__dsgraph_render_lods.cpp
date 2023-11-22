@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "FLOD.h"
+#include "xrCommon/xr_array.h"
 
 #ifdef _EDITOR
 #include "IGame_Persistent.h"
@@ -15,10 +16,10 @@ extern float r_ssaLOD_B;
 template <class T> IC bool cmp_first_l(const T &lhs, const T &rhs) { return (lhs.first < rhs.first); }
 template <class T> IC bool cmp_first_h(const T &lhs, const T &rhs) { return (lhs.first > rhs.first); }
 
-ICF bool pred_dot(const std::pair<float, u32>& _1, const std::pair<float, u32>& _2) { return _1.first < _2.first; }
-
-void R_dsgraph_structure::r_dsgraph_render_lods(bool _setup_zb, bool _clear)
+void R_dsgraph_structure::render_lods(bool _setup_zb, bool _clear)
 {
+    PIX_EVENT_CTX(cmd_list, dsgraph_render_lods);
+
     if (mapLOD.empty())
         return;
 
@@ -39,7 +40,7 @@ void R_dsgraph_structure::r_dsgraph_render_lods(bool _setup_zb, bool _clear)
         ssaRange = EPS_S;
 
     const u32 uiVertexPerImposter = 4;
-    const u32 uiImpostersFit = RCache.Vertex.GetSize() / (firstV->geom->vb_stride * uiVertexPerImposter);
+    const u32 uiImpostersFit = RImplementation.Vertex.GetSize() / (firstV->geom->vb_stride * uiVertexPerImposter);
 
     //Msg("dbg_lods: shid[%d],firstV[%X]",shid,u32((void*)firstV));
     //Msg("dbg_lods: shader[%X]",u32((void*)firstV->shader._get()));
@@ -51,7 +52,7 @@ void R_dsgraph_structure::r_dsgraph_render_lods(bool _setup_zb, bool _clear)
         int cur_count = 0;
         u32 vOffset;
         FLOD::_hw* V =
-            (FLOD::_hw*)RCache.Vertex.Lock(iBatchSize * uiVertexPerImposter, firstV->geom->vb_stride, vOffset);
+            (FLOD::_hw*)RImplementation.Vertex.Lock(iBatchSize * uiVertexPerImposter, firstV->geom->vb_stride, vOffset);
 
         for (u32 j = 0; j < iBatchSize; ++j, ++i)
         {
@@ -83,27 +84,29 @@ void R_dsgraph_structure::r_dsgraph_render_lods(bool _setup_zb, bool _clear)
             svector<std::pair<float, u32>, 8> selector;
             for (u32 s = 0; s < 8; s++)
                 selector.push_back(std::make_pair(Ldir.dotproduct(facets[s].N), s));
-            std::sort(selector.begin(), selector.end(), pred_dot);
+            std::sort(selector.begin(), selector.end(), [](const auto& v1, const auto& v2)
+            {
+                return v1.first < v2.first;
+            });
 
-            float dot_best = selector[selector.size() - 1].first;
-            float dot_next = selector[selector.size() - 2].first;
-            float dot_next_2 = selector[selector.size() - 3].first;
-            u32 id_best = selector[selector.size() - 1].second;
-            u32 id_next = selector[selector.size() - 2].second;
+            const float dot_best = selector[selector.size() - 1].first;
+            const float dot_next = selector[selector.size() - 2].first;
+            const float dot_next_2 = selector[selector.size() - 3].first;
+            size_t id_best = selector[selector.size() - 1].second;
+            size_t id_next = selector[selector.size() - 2].second;
 
             // Now we have two "best" planes, calculate factor, and approx normal
-            float fA = dot_best, fB = dot_next, fC = dot_next_2;
-            float alpha = 0.5f + 0.5f * (1 - (fB - fC) / (fA - fC));
-            int iF = iFloor(alpha * 255.5f);
-            u32 uF = u32(clampr(iF, 0, 255));
+            const float fA = dot_best, fB = dot_next, fC = dot_next_2;
+            const float alpha = 0.5f + 0.5f * (1 - (fB - fC) / (fA - fC));
+            const int iF = iFloor(alpha * 255.5f);
+            const u32 uF = u32(clampr(iF, 0, 255));
 
             // Fill VB
-            FLOD::_face& FA = facets[id_best];
-            FLOD::_face& FB = facets[id_next];
-            static int vid[4] = {3, 0, 2, 1};
-            for (u32 vit = 0; vit < 4; vit++)
+            const FLOD::_face& FA = facets[id_best];
+            const FLOD::_face& FB = facets[id_next];
+            xr_array<int, 4> vid = {3, 0, 2, 1};
+            for (int id : vid)
             {
-                int id = vid[vit];
                 V->p0.add(FB.v[id].v, shift);
                 V->p1.add(FA.v[id].v, shift);
                 V->n0 = FB.N;
@@ -117,26 +120,25 @@ void R_dsgraph_structure::r_dsgraph_render_lods(bool _setup_zb, bool _clear)
             }
         }
         lstLODgroups.push_back(cur_count);
-        RCache.Vertex.Unlock(iBatchSize * uiVertexPerImposter, firstV->geom->vb_stride);
+        RImplementation.Vertex.Unlock(iBatchSize * uiVertexPerImposter, firstV->geom->vb_stride);
 
         // *** Render
-        RCache.set_xform_world(Fidentity);
+        cmd_list.set_xform_world(Fidentity);
         for (u32 uiPass = 0; uiPass < SHADER_PASSES_MAX; ++uiPass)
         {
             int current = 0;
             u32 vCurOffset = vOffset;
 
-            for (u32 g = 0; g < lstLODgroups.size(); g++)
+            for (int p_count : lstLODgroups)
             {
-                int p_count = lstLODgroups[g];
                 u32 uiNumPasses = lstLODs[current].pVisual->shader->E[shid]->passes.size();
                 if (uiPass < uiNumPasses)
                 {
-                    RCache.set_Element(lstLODs[current].pVisual->shader->E[shid], uiPass);
-                    RCache.set_Geometry(firstV->geom);
-                    RCache.Render(D3DPT_TRIANGLELIST, vCurOffset, 0, 4 * p_count, 0, 2 * p_count);
+                    cmd_list.set_Element(lstLODs[current].pVisual->shader->E[shid], uiPass);
+                    cmd_list.set_Geometry(firstV->geom);
+                    cmd_list.Render(D3DPT_TRIANGLELIST, vCurOffset, 0, 4 * p_count, 0, 2 * p_count);
                 }
-                RCache.stat.r.s_flora_lods.add(4 * p_count);
+                cmd_list.stat.r.s_flora_lods.add(4 * p_count);
                 current += p_count;
                 vCurOffset += 4 * p_count;
             }

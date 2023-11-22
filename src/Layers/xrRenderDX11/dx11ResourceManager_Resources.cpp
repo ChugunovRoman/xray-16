@@ -60,7 +60,7 @@ SVS* CResourceManager::_CreateVS(cpcstr shader, u32 flags /*= 0*/)
         xr_strcat(name, "_4");
         break;
     }
-    
+
     return CreateShader<SVS>(name, shader, flags);
 }
 
@@ -135,17 +135,8 @@ void CResourceManager::_DeleteCS(const SCS* CS) { DestroyShader(CS); }
 #endif
 
 //--------------------------------------------------------------------------------------------------------------
-static BOOL dcl_equal(D3DVERTEXELEMENT9* a, D3DVERTEXELEMENT9* b)
-{
-    // check sizes
-    u32 a_size = GetDeclLength(a);
-    u32 b_size = GetDeclLength(b);
-    if (a_size != b_size)
-        return FALSE;
-    return 0 == memcmp(a, b, a_size * sizeof(D3DVERTEXELEMENT9));
-}
 
-SDeclaration* CResourceManager::_CreateDecl(D3DVERTEXELEMENT9* dcl)
+SDeclaration* CResourceManager::_CreateDecl(const D3DVERTEXELEMENT9* dcl)
 {
     // Search equal code
     for (SDeclaration* D : v_declarations)
@@ -167,46 +158,12 @@ SDeclaration* CResourceManager::_CreateDecl(D3DVERTEXELEMENT9* dcl)
 }
 
 //--------------------------------------------------------------------------------------------------------------
-SGeometry* CResourceManager::CreateGeom(D3DVERTEXELEMENT9* decl, ID3DVertexBuffer* vb, ID3DIndexBuffer* ib)
-{
-    R_ASSERT(decl && vb);
-
-    SDeclaration* dcl = _CreateDecl(decl);
-    u32 vb_stride = GetDeclVertexSize(decl, 0);
-
-    // ***** first pass - search already loaded shader
-    for (SGeometry* v_geom : v_geoms)
-    {
-        SGeometry& G = *v_geom;
-        if ((G.dcl == dcl) && (G.vb == vb) && (G.ib == ib) && (G.vb_stride == vb_stride))
-            return v_geom;
-    }
-
-    SGeometry* Geom = v_geoms.emplace_back(xr_new<SGeometry>());
-    Geom->dwFlags |= xr_resource_flagged::RF_REGISTERED;
-    Geom->dcl = dcl;
-    Geom->vb = vb;
-    Geom->vb_stride = vb_stride;
-    Geom->ib = ib;
-
-    return Geom;
-}
-
-SGeometry* CResourceManager::CreateGeom(u32 FVF, ID3DVertexBuffer* vb, ID3DIndexBuffer* ib)
-{
-    D3DVERTEXELEMENT9 dcl[MAX_FVF_DECL_SIZE];
-    CHK_DX(D3DXDeclaratorFromFVF(FVF, dcl));
-    SGeometry* g = CreateGeom(dcl, vb, ib);
-    return g;
-}
-
-//--------------------------------------------------------------------------------------------------------------
-dx11ConstantBuffer* CResourceManager::_CreateConstantBuffer(ID3DShaderReflectionConstantBuffer* pTable)
+dx11ConstantBuffer* CResourceManager::_CreateConstantBuffer(u32 context_id, ID3DShaderReflectionConstantBuffer* pTable)
 {
     VERIFY(pTable);
     dx11ConstantBuffer* pTempBuffer = xr_new<dx11ConstantBuffer>(pTable);
 
-    for (dx11ConstantBuffer* buf : v_constant_buffer)
+    for (dx11ConstantBuffer* buf : v_constant_buffer[context_id])
     {
         if (pTempBuffer->Similar(*buf))
         {
@@ -216,15 +173,15 @@ dx11ConstantBuffer* CResourceManager::_CreateConstantBuffer(ID3DShaderReflection
     }
 
     pTempBuffer->dwFlags |= xr_resource_flagged::RF_REGISTERED;
-    v_constant_buffer.emplace_back(pTempBuffer);
+    v_constant_buffer[context_id].emplace_back(pTempBuffer);
     return pTempBuffer;
 }
 
-void CResourceManager::_DeleteConstantBuffer(const dx11ConstantBuffer* pBuffer)
+void CResourceManager::_DeleteConstantBuffer(u32 context_id, const dx11ConstantBuffer* pBuffer)
 {
     if (0 == (pBuffer->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
-    if (reclaim(v_constant_buffer, pBuffer))
+    if (reclaim(v_constant_buffer[context_id], pBuffer))
         return;
     Msg("! ERROR: Failed to find compiled constant buffer");
 }
@@ -255,5 +212,5 @@ void CResourceManager::_DeleteInputSignature(const SInputSignature* pSignature)
         return;
     if (reclaim(v_input_signature, pSignature))
         return;
-    Msg("! ERROR: Failed to find compiled constant buffer");
+    Msg("! ERROR: Failed to find input signature");
 }

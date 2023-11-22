@@ -20,6 +20,9 @@
 #include "Level.h"
 #include "WeaponMagazinedWGrenade.h"
 
+extern int g_normalize_mouse_sens;
+extern int g_normalize_upgrade_mouse_sens;
+
 bool CInventoryItem::has_upgrade_group(const shared_str& upgrade_group_id)
 {
     auto it = m_upgrades.cbegin();
@@ -32,6 +35,18 @@ bool CInventoryItem::has_upgrade_group(const shared_str& upgrade_group_id)
             return true;
     }
     return false;
+}
+
+bool CInventoryItem::has_upgrade_group_by_upgrade_id(const shared_str& upgrade_id)
+{
+    inventory::upgrade::Upgrade* upgrade = ai().alife().inventory_upgrade_manager().get_upgrade(upgrade_id);
+
+    if (!upgrade)
+    {
+        return false;
+    }
+
+    return has_upgrade_group(upgrade->parent_group_id());
 }
 
 bool CInventoryItem::has_upgrade(const shared_str& upgrade_id)
@@ -134,27 +149,34 @@ void CInventoryItem::log_upgrades()
 }
 #endif // DEBUG
 
-void CInventoryItem::net_Spawn_install_upgrades(Upgrades_type saved_upgrades) // net_Spawn
+void CInventoryItem::net_Spawn_install_upgrades(CSE_Abstract* DC) // net_Spawn
 {
-    m_upgrades.clear();
-
-    if (!ai().get_alife())
+    if (!IsGameTypeSingle() || !ai().get_alife())
     {
         return;
     }
 
+    CSE_ALifeInventoryItem* pSE_InventoryItem = smart_cast<CSE_ALifeInventoryItem*>(DC);
+    if (!pSE_InventoryItem)
+    {
+        return;
+    }
+
+    Upgrades_type saved_upgrades = pSE_InventoryItem->m_upgrades;
+
+    m_upgrades.clear();
+
     ai().alife().inventory_upgrade_manager().init_install(*this); // from pSettings
 
-    auto ib = saved_upgrades.begin();
-    auto ie = saved_upgrades.end();
-    for (; ib != ie; ++ib)
+    for (const auto& upgrade : saved_upgrades)
     {
-        ai().alife().inventory_upgrade_manager().upgrade_install(*this, (*ib), true);
+        ai().alife().inventory_upgrade_manager().upgrade_install(*this, *upgrade, true);
     }
 }
 
 bool CInventoryItem::install_upgrade(LPCSTR section) { return install_upgrade_impl(section, false); }
 bool CInventoryItem::verify_upgrade(LPCSTR section) { return install_upgrade_impl(section, true); }
+
 bool CInventoryItem::install_upgrade_impl(LPCSTR section, bool test)
 {
     bool result = process_if_exists(section, "cost", &CInifile::r_u32, m_cost, test);
@@ -179,11 +201,31 @@ bool CInventoryItem::install_upgrade_impl(LPCSTR section, bool test)
         }
         result |= result2;
 
-        result |=
-            process_if_exists(section, "control_inertion_factor", &CInifile::r_float, m_fControlInertionFactor, test);
+        if (!g_normalize_upgrade_mouse_sens)
+        {
+            result |= process_if_exists(section, "control_inertion_factor", &CInifile::r_float, m_fControlInertionFactor, test);
+        }
+
+        const bool needsNormalizedUpgradeSens = g_normalize_mouse_sens && !g_normalize_upgrade_mouse_sens;
+        if (needsNormalizedUpgradeSens)
+        {
+            if (m_fControlInertionFactor < 0.f)
+            {
+                float upgr_factor = pSettings->read_if_exists<float>(section, "control_inertion_factor", 1.0f);
+                if (abs(upgr_factor) > 1)
+                    upgr_factor /= 4;
+                else if (abs(upgr_factor) >= 0.5)
+                    upgr_factor /= 3;
+                else if (abs(upgr_factor) > 0.1)
+                    upgr_factor /= 2;
+
+                m_fControlInertionFactor = 1.f + upgr_factor;
+                clamp(m_fControlInertionFactor, 0.1f, 1.f);
+            }
+        }
     }
 
-    pcstr str;
+    pcstr str = nullptr;
     result2 = process_if_exists_set(section, "immunities_sect", &CInifile::r_string, str, test);
     if (result2 && !test)
         CHitImmunity::LoadImmunities(str, pSettings);

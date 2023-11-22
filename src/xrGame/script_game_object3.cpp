@@ -1279,7 +1279,11 @@ u16 CScriptGameObject::AmmoGetCount()
 {
     CWeaponAmmo* ammo = smart_cast<CWeaponAmmo*>(&object());
     if (!ammo)
+    {
+        GEnv.ScriptEngine->script_log(
+            LuaMessageType::Error, "CGameObject : cannot access class member AmmoGetCount!");
         return 0;
+    }
 
     return ammo->m_boxCurr;
 }
@@ -1288,7 +1292,11 @@ void CScriptGameObject::AmmoSetCount(u16 count)
 {
     CWeaponAmmo* ammo = smart_cast<CWeaponAmmo*>(&object());
     if (!ammo)
+    {
+        GEnv.ScriptEngine->script_log(
+            LuaMessageType::Error, "CGameObject : cannot access class member AmmoSetCount!");
         return;
+    }
 
     ammo->m_boxCurr = count;
 }
@@ -1297,7 +1305,11 @@ u16 CScriptGameObject::AmmoBoxSize()
 {
     CWeaponAmmo* ammo = smart_cast<CWeaponAmmo*>(&object());
     if (!ammo)
+    {
+        GEnv.ScriptEngine->script_log(
+            LuaMessageType::Error, "CGameObject : cannot access class member AmmoBoxSize!");
         return 0;
+    }
 
     return ammo->m_boxSize;
 }

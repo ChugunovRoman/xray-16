@@ -167,12 +167,10 @@ void CModelPool::Destroy()
     }
 
     // Base/Reference
-    xr_vector<ModelDef>::iterator I = Models.begin();
-    xr_vector<ModelDef>::iterator E = Models.end();
-    for (; I != E; ++I)
+    for (auto& md : Models)
     {
-        I->model->Release();
-        xr_delete(I->model);
+        md.model->Release();
+        xr_delete(md.model);
     }
 
     Models.clear();
@@ -255,7 +253,7 @@ dxRender_Visual* CModelPool::Create(const char* name, IReader* data)
         }
         // 3. If found - return (cloned) reference
         dxRender_Visual* Model = Instance_Duplicate(Base);
-        Registry.insert(std::make_pair(Model, low_name));
+        Registry.emplace(Model, low_name);
         return Model;
     }
 }
@@ -302,7 +300,7 @@ void CModelPool::DeleteInternal(dxRender_Visual*& V, BOOL bDiscard)
         if (it != Registry.end())
         {
             // Registry entry found - move it to pool
-            Pool.insert(std::make_pair(it->second, V));
+            Pool.emplace(it->second, V);
         }
         else
         {
@@ -406,12 +404,8 @@ void CModelPool::Prefetch()
 
 void CModelPool::ClearPool(BOOL b_complete)
 {
-    POOL_IT _I = Pool.begin();
-    POOL_IT _E = Pool.end();
-    for (; _I != _E; ++_I)
-    {
-        Discard(_I->second, b_complete);
-    }
+    for (auto& v : Pool)
+        Discard(v.second, b_complete);
     Pool.clear();
 }
 
@@ -473,12 +467,9 @@ void CModelPool::memory_stats(u32& vb_mem_video, u32& vb_mem_system, u32& ib_mem
     ib_mem_video = 0;
     ib_mem_system = 0;
 
-    xr_vector<ModelDef>::iterator it = Models.begin();
-    xr_vector<ModelDef>::const_iterator en = Models.end();
-
-    for (; it != en; ++it)
+    for (auto& md : Models)
     {
-        dxRender_Visual* ptr = it->model;
+        dxRender_Visual* ptr = md.model;
         Fvisual* vis_ptr = dynamic_cast<Fvisual*>(ptr);
 
         if (vis_ptr == nullptr)

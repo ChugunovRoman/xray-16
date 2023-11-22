@@ -53,6 +53,10 @@ extern float ps_current_detail_height;
 class ECORE_API CDetailManager
 {
 public:
+    float fade_distance = 99999;
+    Fvector light_position;
+    void details_clear();
+
     struct SlotItem
     { // один кустик
         float scale;
@@ -61,6 +65,8 @@ public:
         u32 vis_ID; // индекс в visibility списке он же тип [не качается, качается1, качается2]
         float c_hemi;
         float c_sun;
+        float distance;
+        Fvector position;
 #if RENDER == R_R1
         Fvector c_rgb;
 #endif
@@ -75,12 +81,10 @@ public:
         SlotItemVec r_items[3]; // список кустиков for render
     };
 
-    enum SlotType
+    enum SlotType : u32
     {
         stReady = 0, // Ready to use
         stPending, // Pending for decompression
-
-        stFORCEDWORD = 0xffffffff
     };
 
     struct Slot
@@ -172,6 +176,14 @@ public:
     virtual ObjectList* GetSnapList() = 0;
 #endif
 
+    bool UseVS() const;
+
+    // Software processor
+    ref_geom soft_Geom;
+    void soft_Load();
+    void soft_Unload();
+    void soft_Render();
+
     // Hardware processor
     ref_geom hw_Geom;
     size_t hw_BatchSize;
@@ -190,11 +202,11 @@ public:
     void hw_Load_Geom();
     void hw_Load_Shaders();
     void hw_Unload();
-    void hw_Render();
+    void hw_Render(CBackend& cmd_list);
 #if defined(USE_DX9)
-    void hw_Render_dump(ref_constant array, u32 var_id, u32 lod_id, u32 c_base);
+    void hw_Render_dump(CBackend& cmd_list, ref_constant array, u32 var_id, u32 lod_id, u32 c_base);
 #elif defined(USE_DX11) || defined(USE_OGL)
-    void hw_Render_dump(const Fvector4& consts, const Fvector4& wave, const Fvector4& wind, u32 var_id, u32 lod_id);
+    void hw_Render_dump(CBackend& cmd_list, const Fvector4& consts, const Fvector4& wave, const Fvector4& wind, u32 var_id, u32 lod_id);
 #else
 #   error No graphics API selected or enabled!
 #endif
@@ -216,7 +228,7 @@ public:
     int w2cg_Z(int z) { return cache_cz - dm_size + (dm_cache_line - 1 - z); }
     void Load();
     void Unload();
-    void Render();
+    void Render(CBackend& cmd_list);
 
     /// MT stuff
     Lock MT;
@@ -226,7 +238,7 @@ public:
     void MT_CALC();
     ICF void MT_SYNC()
     {
-        if (m_frame_calc == RDEVICE.dwFrame)
+        if (m_frame_calc == Device.dwFrame)
             return;
 
         MT_CALC();

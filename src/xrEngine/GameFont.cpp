@@ -183,8 +183,16 @@ CGameFont::~CGameFont()
     GEnv.RenderFactory->DestroyFontRender(pFontRender);
 }
 
-#define DI2PX(x) float(iFloor((x + 1) * float(GEnv.Render->getTarget()->get_width()) * 0.5f))
-#define DI2PY(y) float(iFloor((y + 1) * float(GEnv.Render->getTarget()->get_height()) * 0.5f))
+static inline float DI2PX(float x)
+{
+    auto& cmd_list = GEnv.Render->get_imm_command_list();
+    return float(iFloor((x + 1) * float(GEnv.Render->getTarget()->get_width(cmd_list)) * 0.5f));
+}
+static inline float DI2PY(float y)
+{
+    auto& cmd_list = GEnv.Render->get_imm_command_list();
+    return float(iFloor((y + 1) * float(GEnv.Render->getTarget()->get_height(cmd_list)) * 0.5f));
+}
 
 void CGameFont::OutSet(float x, float y)
 {
@@ -292,7 +300,7 @@ u16 CGameFont::SplitByWidth(u16* puBuffer, u16 uBufferSize, float fTargetWidth, 
 void CGameFont::MasterOut(bool bCheckDevice, bool bUseCoords, bool bScaleCoords, bool bUseSkip, float _x, float _y,
     float _skip, pcstr fmt, va_list p)
 {
-    if (bCheckDevice && (!RDEVICE.b_is_Active))
+    if (bCheckDevice && (!Device.b_is_Active))
         return;
 
     String rs;
@@ -397,12 +405,12 @@ float CGameFont::SizeOf_(const xr_wide_char* wsStr)
     if (!(wsStr && wsStr[0]))
         return 0;
 
-    unsigned int len = wsStr[0];
-    float X = 0.0f, fDelta = 0.0f;
+    const u16 len = wsStr[0];
+    float X = 0.0f;
 
     if (len)
     {
-        for (unsigned int j = 1; j <= len; j++)
+        for (u16 j = 1; j <= len; j++)
         {
             if (wsStr[j] == GAME_ACTION_MARK)
             {
@@ -412,20 +420,20 @@ float CGameFont::SizeOf_(const xr_wide_char* wsStr)
 
                 cpcstr binding = GetActionBinding(actionId);
 
-                const size_t sz = xr_strlen(binding);
-                xr_wide_char* wideBinding = static_cast<xr_wide_char*>(xr_alloca(sz));
-                mbhMulti2Wide(wideBinding, nullptr, sz, binding);
-                ++wideBinding;
+                xr_wide_char wideBinding[MAX_MB_CHARS];
+                const u16 bindingLen = mbhMulti2Wide(wideBinding, nullptr, MAX_MB_CHARS, binding);
 
-                while (wideBinding[0])
+                for (u16 i = 1; i <= bindingLen; ++i)
                 {
-                    X += GetCharTC(wideBinding[0]).z - 2;
-                    ++wideBinding;
+                    float fDelta = GetCharTC(wideBinding[i]).z - 2;
+                    if (IsNeedSpaceCharacter(wsStr[j]))
+                        fDelta += fXStep;
+                    X += fDelta;
                 }
             }
             else
             {
-                fDelta = GetCharTC(wsStr[j]).z - 2;
+                float fDelta = GetCharTC(wsStr[j]).z - 2;
                 if (IsNeedSpaceCharacter(wsStr[j]))
                     fDelta += fXStep;
                 X += fDelta;
@@ -439,7 +447,7 @@ float CGameFont::CurrentHeight_() { return fCurrentHeight * vInterval.y; }
 void CGameFont::SetHeightI(float S)
 {
     VERIFY(uFlags & fsDeviceIndependent);
-    fCurrentHeight = S * RDEVICE.dwHeight;
+    fCurrentHeight = S * Device.dwHeight;
 };
 
 void CGameFont::SetHeight(float S)

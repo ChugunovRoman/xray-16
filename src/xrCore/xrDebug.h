@@ -5,7 +5,7 @@
 #include "Threading/Lock.hpp"
 
 #include <string>
-#if defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_APPLE)
+#if defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
 #include <cstdio>
 #elif defined(XR_PLATFORM_WINDOWS)
 #pragma warning(push)
@@ -50,20 +50,26 @@ public:
     }
 };
 
-class IWindowHandler
+class XR_NOVTABLE IWindowHandler
 {
 public:
-    virtual ~IWindowHandler() = default;
+    virtual ~IWindowHandler() = 0;
+    virtual void* GetApplicationWindowHandle() const = 0;
     virtual SDL_Window* GetApplicationWindow() = 0;
     virtual void OnErrorDialog(bool beforeDialog) = 0;
+    virtual void OnFatalError() = 0;
 };
 
-class IUserConfigHandler
+inline IWindowHandler::~IWindowHandler() = default;
+
+class XR_NOVTABLE IUserConfigHandler
 {
 public:
-    virtual ~IUserConfigHandler() = default;
+    virtual ~IUserConfigHandler() = 0;
     virtual pcstr GetUserConfigFileName() = 0;
 };
+
+inline IUserConfigHandler::~IUserConfigHandler() = default;
 
 class XRCORE_API xrDebug
 {
@@ -107,6 +113,7 @@ public:
                      const char* desc = "assertion failed", const char* arg1 = nullptr, const char* arg2 = nullptr);
     static AssertionResult Fail(bool& ignoreAlways, const ErrorLocation& loc, const char* expr, const std::string& desc,
                      const char* arg1 = nullptr, const char* arg2 = nullptr);
+    [[noreturn]]
     static void DoExit(const std::string& message);
 
     static AssertionResult ShowMessage(pcstr title, pcstr message, bool simpleMode = true);

@@ -100,7 +100,7 @@ public:
     virtual void OnEvent(NET_Packet& P, u16 type);
 
     // Render
-    void renderable_Render(IRenderable* root) override;
+    void renderable_Render(u32 context_id, IRenderable* root) override;
     virtual bool renderable_ShadowGenerate();
     void feel_sound_new(IGameObject* who, int type, const CSound_UserDataPtr& user_data,
         const Fvector& position, float power) override;
@@ -306,7 +306,7 @@ public:
     void g_SetSprintAnimation(u32 mstate_rl, MotionID& head, MotionID& torso, MotionID& legs);
 
 public:
-    void OnHUDDraw(CCustomHUD* hud, IRenderable* root) override;
+    void OnHUDDraw(u32 context_id, CCustomHUD* hud, IRenderable* root) override;
     BOOL HUDview() const;
 
     // visiblity
@@ -332,6 +332,9 @@ protected:
     void cam_SetLadder();
     void cam_UnsetLadder();
     float currentFOV();
+
+    void UpdateVisorRainDrops();
+    void UpdateVisor();
 
     // Cameras
     CCameraBase* cameras[eacMaxCam];
@@ -412,6 +415,9 @@ public:
     bool AnyMove() { return (mstate_real & mcAnyMove) != 0; };
     bool is_jump();
     u32 MovingState() const { return mstate_real; }
+    float m_dropsIntensity{};
+    float m_dropsAnimIncrementor{};
+
 protected:
     u32 mstate_wishful;
     u32 mstate_old;

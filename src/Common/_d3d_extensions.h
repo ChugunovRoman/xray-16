@@ -6,8 +6,15 @@
 #ifndef NO_XR_LIGHT
 struct Flight
 {
+    enum class Type : u32
+    {
+        Point       = 1,
+        Spot        = 2,
+        Directional = 3,
+    };
+
 public:
-    u32 type; /* Type of light source */
+    Type type; /* Type of light source */
     Fcolor diffuse; /* Diffuse color of light */
     Fcolor specular; /* Specular color of light */
     Fcolor ambient; /* Ambient color of light */
@@ -21,7 +28,7 @@ public:
     float theta; /* Inner angle of spotlight cone */
     float phi; /* Outer angle of spotlight cone */
 
-    IC void set(u32 ltType, float x, float y, float z)
+    IC void set(Type ltType, float x, float y, float z)
     {
         ZeroMemory(this, sizeof(Flight));
         type = ltType;
@@ -40,13 +47,14 @@ public:
     }
 };
 
-/*
-#if sizeof(Flight)!=sizeof(D3DLIGHT9)
-#error Different structure size
-#endif
-*/
-
-#endif
+#   ifdef _d3d9TYPES_H_
+static_assert(sizeof(Flight::Type) == sizeof(D3DLIGHTTYPE));
+static_assert(sizeof(Flight) == sizeof(D3DLIGHT9));
+#   else
+static_assert(sizeof(Flight::Type) == 4);
+static_assert(sizeof(Flight) == 104);
+#   endif
+#endif // !NO_XR_LIGHT
 
 #ifndef NO_XR_MATERIAL
 struct Fmaterial
@@ -87,37 +95,11 @@ public:
     }
 };
 
-/*
-#if sizeof(Fmaterial)!=sizeof(D3DMATERIAL9)
-#error Different structure size
-#endif
-*/
-
-#endif
-
-#ifndef NO_XR_VDECLARATOR
-struct VDeclarator : public svector<D3DVERTEXELEMENT9, MAXD3DDECLLENGTH + 1>
-{
-    void set(u32 FVF)
-    {
-        D3DXDeclaratorFromFVF(FVF, begin());
-        resize(D3DXGetDeclLength(begin()) + 1);
-    }
-    void set(D3DVERTEXELEMENT9* dcl)
-    {
-        resize(D3DXGetDeclLength(dcl) + 1);
-        CopyMemory(begin(), dcl, size() * sizeof(D3DVERTEXELEMENT9));
-    }
-    void set(const VDeclarator& d) { *this = d; }
-    u32 vertex() { return D3DXGetDeclVertexSize(begin(), 0); }
-    BOOL equal(VDeclarator& d)
-    {
-        if (size() != d.size())
-            return false;
-        else
-            return 0 == memcmp(begin(), d.begin(), size() * sizeof(D3DVERTEXELEMENT9));
-    }
-};
-#endif
+#   ifdef _d3d9TYPES_H_
+static_assert(sizeof(Fmaterial) == sizeof(D3DMATERIAL9));
+#   else
+static_assert(sizeof(Fmaterial) == 68);
+#   endif
+#endif // !NO_XR_MATERIAL
 
 #endif

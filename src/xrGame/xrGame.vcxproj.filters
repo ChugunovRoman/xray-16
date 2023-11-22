@@ -4461,9 +4461,6 @@
     <ClInclude Include="script_abstract_action.h">
       <Filter>ScriptClasses\ScriptActions\script_abstract_action</Filter>
     </ClInclude>
-    <ClInclude Include="script_abstract_action_inline.h">
-      <Filter>ScriptClasses\ScriptActions\script_abstract_action</Filter>
-    </ClInclude>
     <ClInclude Include="script_movement_action.h">
       <Filter>ScriptClasses\ScriptActions\script_movement_action</Filter>
     </ClInclude>
@@ -4495,9 +4492,6 @@
       <Filter>ScriptClasses\ScriptActions\script_particle_action</Filter>
     </ClInclude>
     <ClInclude Include="particle_params.h">
-      <Filter>ScriptClasses\ScriptActions\script_particle_action\particle_params</Filter>
-    </ClInclude>
-    <ClInclude Include="particle_params_inline.h">
       <Filter>ScriptClasses\ScriptActions\script_particle_action\particle_params</Filter>
     </ClInclude>
     <ClInclude Include="script_object_action.h">
@@ -6039,9 +6033,6 @@
     <ClInclude Include="ui\UIScriptWnd.h">
       <Filter>UI\UIWindows\ScriptWnd</Filter>
     </ClInclude>
-    <ClInclude Include="ui\uiscriptwnd_script.h">
-      <Filter>UI\UIWindows\ScriptWnd</Filter>
-    </ClInclude>
     <ClInclude Include="ui\UICellCustomItems.h">
       <Filter>UI\UIWindows\DragDrop</Filter>
     </ClInclude>
@@ -6489,14 +6480,26 @@
     <ClInclude Include="ui\UIArtefactPanel.h">
       <Filter>UI\Common\MainIngame</Filter>
     </ClInclude>
-    <ClInclude Include="ai\monsters\chimera\chimera_attack_state.h" />
-    <ClInclude Include="ai\monsters\chimera\chimera_attack_state_inline.h" />
-    <ClInclude Include="Explosive.h" />
+    <ClInclude Include="ai\monsters\chimera\chimera_attack_state.h">
+      <Filter>AI\AMonsters\monsters\Chimera\states</Filter>
+    </ClInclude>
+    <ClInclude Include="ai\monsters\chimera\chimera_attack_state_inline.h">
+      <Filter>AI\AMonsters\monsters\Chimera\states</Filter>
+    </ClInclude>
+    <ClInclude Include="Explosive.h">
+      <Filter>Core\Client\Objects\items &amp; weapons\Explosives</Filter>
+    </ClInclude>
     <ClInclude Include="game_sv_mp_script.h">
       <Filter>Core\Server\Games\server\mp_script</Filter>
     </ClInclude>
     <ClInclude Include="game_cl_mp_script.h">
       <Filter>Core\Server\Games\client\mp_script</Filter>
+    </ClInclude>
+    <ClInclude Include="UITimeDilator.h">
+      <Filter>UI\Common\InventoryUtilities</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\UIMapFilters.h">
+      <Filter>UI\Common\PDA\Tasks</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -7652,9 +7655,6 @@
     <ClCompile Include="ai\stalker\ai_stalker_script_entity.cpp">
       <Filter>AI\AMonsters\humans\stalker\Miscellaneous</Filter>
     </ClCompile>
-    <ClCompile Include="script_abstract_action.cpp">
-      <Filter>ScriptClasses\ScriptActions\script_abstract_action</Filter>
-    </ClCompile>
     <ClCompile Include="script_movement_action.cpp">
       <Filter>ScriptClasses\ScriptActions\script_movement_action</Filter>
     </ClCompile>
@@ -7666,9 +7666,6 @@
     </ClCompile>
     <ClCompile Include="script_watch_action_script.cpp">
       <Filter>ScriptClasses\ScriptActions\script_watch_action</Filter>
-    </ClCompile>
-    <ClCompile Include="script_animation_action.cpp">
-      <Filter>ScriptClasses\ScriptActions\acript_animation_action</Filter>
     </ClCompile>
     <ClCompile Include="script_animation_action_script.cpp">
       <Filter>ScriptClasses\ScriptActions\acript_animation_action</Filter>
@@ -7685,9 +7682,6 @@
     <ClCompile Include="script_particle_action_script.cpp">
       <Filter>ScriptClasses\ScriptActions\script_particle_action</Filter>
     </ClCompile>
-    <ClCompile Include="particle_params.cpp">
-      <Filter>ScriptClasses\ScriptActions\script_particle_action\particle_params</Filter>
-    </ClCompile>
     <ClCompile Include="particle_params_script.cpp">
       <Filter>ScriptClasses\ScriptActions\script_particle_action\particle_params</Filter>
     </ClCompile>
@@ -7696,9 +7690,6 @@
     </ClCompile>
     <ClCompile Include="script_object_action_script.cpp">
       <Filter>ScriptClasses\ScriptActions\script_object_action</Filter>
-    </ClCompile>
-    <ClCompile Include="script_action_condition.cpp">
-      <Filter>ScriptClasses\ScriptActions\script_action_condition</Filter>
     </ClCompile>
     <ClCompile Include="script_action_condition_script.cpp">
       <Filter>ScriptClasses\ScriptActions\script_action_condition</Filter>
@@ -9871,6 +9862,12 @@
     </ClCompile>
     <ClCompile Include="CustomOutfit_script.cpp">
       <Filter>Core\Client\Objects\items &amp; weapons\Outfit</Filter>
+    </ClCompile>
+    <ClCompile Include="UITimeDilator.cpp">
+      <Filter>UI\Common\InventoryUtilities</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\UIMapFilters.cpp">
+      <Filter>UI\Common\PDA\Tasks</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

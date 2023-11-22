@@ -99,12 +99,50 @@ EFC_Visible CFrustum::testSphere(Fvector& c, float r, u32& test_mask) const
     return test_mask ? fcvPartial : fcvFully;
 }
 
-bool CFrustum::testSphere_dirty(Fvector& c, float r) const
+bool CFrustum::testSphere_dirty(const Fvector& c, float r) const
 {
-	VERIFY(p_count <= FRUSTUM_MAXPLANES); // '<=' is not a typo, this check is correct
-    if (p_count == 0)
-        return true;
-    return planes[p_count - 1].classify(c) <= r;
+    switch (p_count)
+    {
+    case 12:
+        if (planes[11].classify(c) > r)
+            return FALSE;
+    case 11:
+        if (planes[10].classify(c) > r)
+            return FALSE;
+    case 10:
+        if (planes[9].classify(c) > r)
+            return FALSE;
+    case 9:
+        if (planes[8].classify(c) > r)
+            return FALSE;
+    case 8:
+        if (planes[7].classify(c) > r)
+            return FALSE;
+    case 7:
+        if (planes[6].classify(c) > r)
+            return FALSE;
+    case 6:
+        if (planes[5].classify(c) > r)
+            return FALSE;
+    case 5:
+        if (planes[4].classify(c) > r)
+            return FALSE;
+    case 4:
+        if (planes[3].classify(c) > r)
+            return FALSE;
+    case 3:
+        if (planes[2].classify(c) > r)
+            return FALSE;
+    case 2:
+        if (planes[1].classify(c) > r)
+            return FALSE;
+    case 1:
+        if (planes[0].classify(c) > r)
+            return FALSE;
+    case 0: break;
+    default: NODEFAULT;
+    }
+    return TRUE;
 }
 
 EFC_Visible CFrustum::testAABB(const float* mM, u32& test_mask) const
@@ -258,10 +296,10 @@ void CFrustum::SimplifyPoly_AABB(sPoly* poly, Fplane& plane)
     Fvector2 min, max;
     min.set(flt_max, flt_max);
     max.set(flt_min, flt_min);
-    for (u32 i = 0; i < poly->size(); i++)
+    for (auto& v : *poly)
     {
         Fvector2 tmp;
-        mView.transform_tiny32(tmp, (*poly)[i]);
+        mView.transform_tiny32(tmp, v);
         min.min(tmp.x, tmp.y);
         max.max(tmp.x, tmp.y);
     }

@@ -4,7 +4,7 @@
   "version": "2.0.0",
   "options": {
     "env": {
-      "LD_LIBRARY_PATH": "${workspaceFolder}/bin/x64/Release"
+      "LD_LIBRARY_PATH": "${workspaceFolder}/bin/x64/Debug:${workspaceFolder}/bin/x64/Mixed:${workspaceFolder}/bin/x64/Release"
     }
   },
   "tasks": [
@@ -34,75 +34,16 @@
       ]
     },
     {
-      "label": "Configure Debug",
+      "label": "Configure",
       "type": "shell",
       "options": {
         "cwd": "${workspaceFolder}/bin"
       },
-      "command": "cmake .. -DCMAKE_BUILD_TYPE=Debug",
+      "command": "cmake .. -DCMAKE_BUILD_TYPE=${input:buildType}",
       "dependsOn": [
         "mkdir"
       ],
       "problemMatcher": []
-    },
-    {
-      "label": "Configure Release",
-      "type": "shell",
-      "options": {
-        "cwd": "${workspaceFolder}/bin"
-      },
-      "command": "CFLAGS='-march=native' CXXFLAGS='-march=native' cmake .. -DCMAKE_BUILD_TYPE=Release",
-      "dependsOn": [
-        "mkdir"
-      ]
-    },
-    {
-      "label": "Configure Mixed",
-      "type": "shell",
-      "options": {
-        "cwd": "${workspaceFolder}/bin"
-      },
-      "command": "cmake .. -DCMAKE_BUILD_TYPE=Mixed",
-      "dependsOn": [
-        "mkdir"
-      ]
-    },
-    {
-      "label": "Compile Debug",
-      "type": "shell",
-      "options": {
-        "cwd": "${workspaceFolder}/bin"
-      },
-      "command": "make -j${CPU_COUNT}",
-      "dependsOn": [
-        "mkdir",
-        "Configure Debug"
-      ]
-    },
-    {
-      "label": "Compile Release",
-      "type": "shell",
-      "options": {
-        "cwd": "${workspaceFolder}/bin"
-      },
-      "command": "make -j${CPU_COUNT}",
-      "dependsOn": [
-        "mkdir",
-        "Configure Release"
-      ],
-      "problemMatcher": []
-    },
-    {
-      "label": "Compile Mixed",
-      "type": "shell",
-      "options": {
-        "cwd": "${workspaceFolder}/bin"
-      },
-      "command": "make -j${CPU_COUNT}",
-      "dependsOn": [
-        "mkdir",
-        "Configure Mixed"
-      ]
     },
     {
       "label": "Compile",
@@ -110,55 +51,69 @@
       "options": {
         "cwd": "${workspaceFolder}/bin"
       },
-      "command": "make -j${CPU_COUNT}",
+      "command": "cmake --build . -j${CPU_COUNT}",
       "dependsOn": [
-        "mkdir"
+        "Configure"
       ]
     },
     {
-      "label": "Run GlobalWar Release",
+      "label": "Run GlobalWar",
       "type": "shell",
       "options": {
-        "cwd": "${workspaceFolder}/bin/x64/Release"
+        "cwd": "${workspaceFolder}/bin/x64/${input:buildType}"
       },
-      "command": "LD_LIBRARY_PATH=\"${workspaceFolder}/bin/x64/Release\" ./xr_3da -nointro -dbg -dump_bindings -fsltx /run/media/ruut/99c9b836-a7b8-403c-9ef8-5bfc1e1ec831/games/stalker/GlobalWar1/fsgame.ltx",
+      "command": "LD_LIBRARY_PATH=\"${workspaceFolder}/bin/x64/${input:buildType}\" ./xr_3da -nointro -dbg -dump_bindings -fsltx ${GLOBALWAR_LTX_FILE_PATH}",
       "problemMatcher": []
     },
     {
-      "label": "Run CoC Mixed",
+      "label": "Run SoC",
       "type": "shell",
       "options": {
-        "cwd": "${workspaceFolder}/bin/x64/Mixed"
+        "cwd": "${workspaceFolder}/bin/x64/${input:buildType}"
       },
-      "command": "./xr_3da -nointro -fsltx ${COC_LTX_FILE_PATH}",
+      "command": "./xr_3da -soc -nointro -fsltx ${SOC_LTX_FILE_PATH}",
+      "dependsOn": [
+        "Compile"
+      ],
       "problemMatcher": []
     },
     {
-      "label": "Run CoC Release",
+      "label": "Run CS",
       "type": "shell",
       "options": {
-        "cwd": "${workspaceFolder}/bin/x64/Release"
+        "cwd": "${workspaceFolder}/bin/x64/${input:buildType}"
       },
-      "command": "LD_LIBRARY_PATH=\"${workspaceFolder}/bin/x64/Release\" ./xr_3da -nointro -dbg -fsltx ${COC_LTX_FILE_PATH}",
+      "command": "./xr_3da -cs -nointro -fsltx ${CS_LTX_FILE_PATH}",
+      "dependsOn": [
+        "Compile"
+      ],
       "problemMatcher": []
     },
     {
-      "label": "Run CoP Mixed",
+      "label": "Run CoP",
       "type": "shell",
       "options": {
-        "cwd": "${workspaceFolder}/bin/x64/Mixed"
+        "cwd": "${workspaceFolder}/bin/x64/${input:buildType}"
       },
       "command": "./xr_3da -nointro -fsltx ${COP_LTX_FILE_PATH}",
+      "dependsOn": [
+        "Compile"
+      ],
       "problemMatcher": []
     },
+  ],
+  "inputs": [
     {
-      "label": "Run CoP Release",
-      "type": "shell",
-      "options": {
-        "cwd": "${workspaceFolder}/bin/x64/Release"
-      },
-      "command": "./xr_3da -nointro -fsltx ${COP_LTX_FILE_PATH}",
-      "problemMatcher": []
-    },
+      "id": "buildType",
+      "type": "pickString",
+      "description": "choose build type:",
+      "options": [
+        "Debug",
+        "Release",
+        "MinSizeRel",
+        "RelWithDebInfo"
+      ],
+      "default": "Debug"
+    }
   ]
 }

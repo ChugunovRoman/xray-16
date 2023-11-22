@@ -9,9 +9,6 @@
 #include "luabind/return_reference_to_policy.hpp"
 #include "xrCore/Threading/ScopeLock.hpp"
 
-using namespace luabind;
-using namespace luabind::policy;
-
 #ifdef DEBUG
 #define MDB Memory.dbg_check()
 #else
@@ -25,6 +22,12 @@ public:
     {
         return RImplementation.o.msaa_alphatest == CRender::MSAA_ATEST_DX10_0_ATOC;
     }
+
+	LPCSTR _get_level()
+	{
+		const shared_str level_name = g_pGameLevel->name();
+		return level_name.c_str();
+	}
 };
 
 // wrapper
@@ -289,6 +292,11 @@ public:
         C->r_StencilRef(Ref);
         return *this;
     }
+    adopt_compiler& _dx10CullMode(u32 Ref)
+    {
+        C->r_CullMode((D3DCULL)Ref);
+        return *this;
+    }
     adopt_compiler& _dx10ATOC(bool Enable)
     {
         C->RS.SetRS(XRDX11RS_ALPHATOCOVERAGE, Enable);
@@ -325,10 +333,14 @@ void CResourceManager::LS_Load()
     // clang-format off
     auto exporterFunc = [](lua_State* luaState)
     {
+        using namespace luabind;
+        using namespace luabind::policy;
+
         module(luaState)
         [
             class_<adopt_dx10options>("_dx10options")
                .def("dx10_msaa_alphatest_atoc", &adopt_dx10options::_dx10_msaa_alphatest_atoc)
+			   .def("getLevel", &adopt_dx10options::_get_level)
                //.def("",					&adopt_dx10options::_dx10Options		),	// returns options-object
             ,
 
@@ -374,6 +386,7 @@ void CResourceManager::LS_Load()
                 .def("dx10texture",            &adopt_compiler::_dx10texture,        return_reference_to<1>())
                 .def("dx10stencil",            &adopt_compiler::_dx10Stencil,        return_reference_to<1>())
                 .def("dx10stencil_ref",        &adopt_compiler::_dx10StencilRef,     return_reference_to<1>())
+                .def("dx10cullmode",           &adopt_compiler::_dx10CullMode,       return_reference_to<1>())
                 .def("dx10atoc",               &adopt_compiler::_dx10ATOC,           return_reference_to<1>())
                 .def("dx10zfunc",              &adopt_compiler::_dx10ZFunc,          return_reference_to<1>())
 
@@ -476,7 +489,7 @@ Shader* CResourceManager::_lua_Create(LPCSTR d_shader, LPCSTR s_textures)
 
     // Access to template
     C.BT = NULL;
-    C.bEditor = FALSE;
+    C.bFFP = FALSE;
     C.bDetail = FALSE;
 
     // Prepare
@@ -556,6 +569,8 @@ Shader* CResourceManager::_lua_Create(LPCSTR d_shader, LPCSTR s_textures)
 
 ShaderElement* CBlender_Compile::_lua_Compile(LPCSTR namesp, LPCSTR name)
 {
+    using namespace luabind;
+
     ShaderElement E;
     SH = &E;
     RS.Invalidate();

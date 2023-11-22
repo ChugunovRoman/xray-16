@@ -28,7 +28,7 @@ void SStaticSound::Load(IReader& F)
 
 void SStaticSound::Update(u32 game_time, u32 global_time)
 {
-    if ((0 == m_ActiveTime.x) && (0 == m_ActiveTime.y) ||
+    if (0 == m_ActiveTime.x && 0 == m_ActiveTime.y ||
         ((int(game_time) >= m_ActiveTime.x) && (int(game_time) < m_ActiveTime.y)))
     {
         if (0 == m_Source._feedback())
@@ -36,7 +36,7 @@ void SStaticSound::Update(u32 game_time, u32 global_time)
             Fvector occ[3];
             const float occluder_volume = GEnv.Sound->get_occlusion(m_Position, .2f, occ);
             const float vol = m_Volume * occluder_volume;
-            
+
             if ((0 == m_PauseTime.x) && (0 == m_PauseTime.y))
             {
                 m_Source.play_at_pos(0, m_Position, sm_Looped);
@@ -96,7 +96,7 @@ void SMusicTrack::Load(LPCSTR fn, LPCSTR params)
     m_SourceStereo.create(fn, st_Music, sg_Undefined, !left && !right);
 
     // parse params
-    int cnt = _GetItemCount(params);
+    [[maybe_unused]] auto cnt = _GetItemCount(params);
     VERIFY(cnt == 5);
     m_ActiveTime.set(0, 0);
     m_PauseTime.set(0, 0);
@@ -132,9 +132,9 @@ BOOL SMusicTrack::in(u32 game_time)
 
 void SMusicTrack::Play()
 {
-    m_SourceStereo.play_at_pos(0, Fvector().set(0.0f, 0.0f, 0.0f), sm_2D);
-    m_SourceLeft.play_at_pos(0, Fvector().set(-0.5f, 0.f, 0.3f), sm_2D);
-    m_SourceRight.play_at_pos(0, Fvector().set(+0.5f, 0.f, 0.3f), sm_2D);
+    m_SourceStereo.play_at_pos(0, Fvector().set(0.0f, 0.0f, 0.0f), sm_2D | sm_IgnoreTimeFactor);
+    m_SourceLeft.play_at_pos(0, Fvector().set(-0.5f, 0.f, 0.3f), sm_2D | sm_IgnoreTimeFactor);
+    m_SourceRight.play_at_pos(0, Fvector().set(+0.5f, 0.f, 0.3f), sm_2D | sm_IgnoreTimeFactor);
 
     SetVolume(1.0f);
 }

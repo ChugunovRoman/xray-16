@@ -10,10 +10,10 @@
 #include "game_cl_teamdeathmatch.h"
 #include "xrEngine/XR_IOConsole.h"
 
-CUIVote::CUIVote()
+CUIVote::CUIVote() : CUIDialogWnd(CUIVote::GetDebugType())
 {
     m_prev_upd_time = 0;
-    bkgrnd = xr_new<CUIStatic>();
+    bkgrnd = xr_new<CUIStatic>("Background");
     bkgrnd->SetAutoDelete(true);
     AttachChild(bkgrnd);
     msg = xr_new<CUITextWnd>();
@@ -74,7 +74,6 @@ void CUIVote::Update()
 {
     CUIDialogWnd::Update();
 
-    static string512 teaminfo;
     if (m_prev_upd_time > Device.dwTimeContinual - 1000)
         return;
     m_prev_upd_time = Device.dwTimeContinual;

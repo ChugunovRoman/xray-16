@@ -15,12 +15,10 @@
 #ifdef USE_DEBUGGER
 #include "script_debugger.hpp"
 #endif
-#include <lfs.h>
-#include <lmarshal.h>
-#include <lua_extensions.h>
 #include <stdarg.h>
 #include "Common/Noncopyable.hpp"
 #include "xrCore/ModuleLookup.hpp"
+#include "xrLuaFix/xrLuaFix.h"
 #include "luabind/class_info.hpp"
 
 Flags32 g_LuaDebug;
@@ -53,7 +51,7 @@ static void* lua_alloc(void* ud, void* ptr, size_t osize, size_t nsize)
 {
     (void)ud;
     (void)osize;
-    if (!nsize)
+    if (nsize == 0)
     {
         xr_free(ptr);
         return nullptr;
@@ -420,7 +418,8 @@ bool CScriptEngine::load_file_into_namespace(LPCSTR caScriptName, LPCSTR caNames
 
 bool CScriptEngine::namespace_loaded(LPCSTR name, bool remove_from_stack)
 {
-    int start = lua_gettop(lua());
+    [[maybe_unused]] int start = lua_gettop(lua());
+
     lua_pushstring(lua(), GlobalNamespace);
     lua_rawget(lua(), LUA_GLOBALSINDEX);
     string256 S2 = {0};
@@ -476,7 +475,8 @@ bool CScriptEngine::namespace_loaded(LPCSTR name, bool remove_from_stack)
 
 bool CScriptEngine::object(LPCSTR identifier, int type)
 {
-    int start = lua_gettop(lua());
+    [[maybe_unused]] int start = lua_gettop(lua());
+
     lua_pushnil(lua());
     while (lua_next(lua(), -2))
     {
@@ -497,7 +497,8 @@ bool CScriptEngine::object(LPCSTR identifier, int type)
 
 bool CScriptEngine::object(LPCSTR namespace_name, LPCSTR identifier, int type)
 {
-    int start = lua_gettop(lua());
+    [[maybe_unused]] int start = lua_gettop(lua());
+
     if (xr_strlen(namespace_name) && !namespace_loaded(namespace_name, false))
     {
         VERIFY(lua_gettop(lua()) == start);
@@ -606,8 +607,8 @@ bool CScriptEngine::print_output(lua_State* L, pcstr caScriptFileName, int error
 
 void CScriptEngine::print_error(lua_State* L, int iErrorCode)
 {
-    CScriptEngine* scriptEngine = GetInstance(L);
-    VERIFY(scriptEngine);
+    VERIFY(GetInstance(L));
+
     switch (iErrorCode)
     {
     case LUA_ERRRUN: Log("\n\nSCRIPT RUNTIME ERROR"); break;
@@ -635,8 +636,10 @@ void CScriptEngine::flush_log()
 #include "LuaStudio/LuaStudio.hpp"
 typedef cs::lua_studio::create_world_function_type create_world_function_type;
 typedef cs::lua_studio::destroy_world_function_type destroy_world_function_type;
+#ifdef XR_PLATFORM_WINDOWS
 static create_world_function_type s_create_world = nullptr;
 static destroy_world_function_type s_destroy_world = nullptr;
+#endif
 static LogCallback s_old_log_callback = nullptr;
 #endif
 #endif
@@ -949,12 +952,11 @@ void CScriptEngine::init(ExporterFunc exporterFunc, bool loadGlobalNamespace)
     luajit::open_lib(lua(), LUA_STRLIBNAME, luaopen_string);
     luajit::open_lib(lua(), LUA_BITLIBNAME, luaopen_bit);
     luajit::open_lib(lua(), LUA_FFILIBNAME, luaopen_ffi);
-    luajit::open_lib(lua(), LUA_MARSHALLIBNAME, luaopen_marshal);
-    luajit::open_lib(lua(), LUA_FSLIBNAME, luaopen_lfs);
-    luajit::open_lib(lua(), LUA_EXTENSIONSLIBNAME, luaopen_lua_extensions);
 #ifndef MASTER_GOLD
     luajit::open_lib(lua(), LUA_DBLIBNAME, luaopen_debug);
 #endif
+
+    luaopen_xrluafix(lua());
 
     // Game scripts doesn't call randomize but use random
     // So, we should randomize in the engine.
@@ -1219,7 +1221,7 @@ void CScriptEngine::collect_all_garbage()
 
 void CScriptEngine::on_error(lua_State* state)
 {
-    CScriptEngine* scriptEngine = GetInstance(state);
+    [[maybe_unused]] CScriptEngine* scriptEngine = GetInstance(state);
     VERIFY(scriptEngine);
 #if defined(USE_DEBUGGER) && defined(USE_LUA_STUDIO)
     if (!scriptEngine->debugger())
@@ -1230,12 +1232,12 @@ void CScriptEngine::on_error(lua_State* state)
 
 CScriptProcess* CScriptEngine::CreateScriptProcess(shared_str name, shared_str scripts)
 {
-    return new CScriptProcess(this, name, scripts);
+    return xr_new<CScriptProcess>(this, name, scripts);
 }
 
 CScriptThread* CScriptEngine::CreateScriptThread(LPCSTR caNamespaceName, bool do_string, bool reload)
 {
-    auto thread = new CScriptThread(this, caNamespaceName, do_string, reload);
+    auto thread = xr_new<CScriptThread>(this, caNamespaceName, do_string, reload);
     lua_State* threadLua = thread->lua();
     if (threadLua)
         RegisterState(threadLua, this);

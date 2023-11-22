@@ -49,6 +49,7 @@ public:
 
     //переключение в режим подствольника
     virtual bool SwitchMode();
+    bool CanSwitchToGL();
     void PerformSwitchGL();
     void OnAnimationEnd(u32 state);
     virtual void OnMagazineEmpty();
@@ -67,7 +68,6 @@ public:
     virtual void PlayAnimBore();
 
 private:
-    virtual void net_Spawn_install_upgrades(Upgrades_type saved_upgrades);
     virtual bool install_upgrade_impl(LPCSTR section, bool test);
     virtual bool install_upgrade_ammo_class(LPCSTR section, bool test);
 

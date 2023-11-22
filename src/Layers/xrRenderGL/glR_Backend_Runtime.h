@@ -247,7 +247,16 @@ ICF void CBackend::set_Vertices(GLuint _vb, u32 _vb_stride)
 #endif
         vb = _vb;
         vb_stride = _vb_stride;
-        CHK_GL(glBindVertexBuffer(0, vb, 0, vb_stride));
+
+        if (GLEW_ARB_vertex_attrib_binding)
+        {
+            CHK_GL(glBindVertexBuffer(0, vb, 0, vb_stride));
+        }
+        else
+        {
+            CHK_GL(glBindBuffer(GL_ARRAY_BUFFER, vb));
+            SetGLVertexPointer(decl);
+        }
     }
 }
 
@@ -450,6 +459,16 @@ ICF void CBackend::set_FillMode(u32 _mode)
     }
 }
 
+ICF void CBackend::SetTextureFactor(u32 /*factor*/) const
+{
+    // Not supported
+}
+
+ICF void CBackend::SetAmbient(u32 /*factor*/) const
+{
+    // Not supported
+}
+
 ICF void CBackend::set_VS(ref_vs& _vs)
 {
     set_VS(_vs->sh, _vs->cName.c_str());
@@ -468,13 +487,41 @@ IC void CBackend::set_Constants(R_constant_table* C)
     PGO(Msg("PGO:c-table"));
 
     // process constant-loaders
-    R_constant_table::c_table::iterator it = C->table.begin();
-    R_constant_table::c_table::iterator end = C->table.end();
-    for (; it != end; ++it)
+    for (auto& Cs : C->table)
+        if (Cs->handler) Cs->handler->setup(*this, &*Cs);
+}
+
+void CBackend::set_pass_targets(const ref_rt& _1, const ref_rt& _2, const ref_rt& _3, const ref_rt& zb)
+{
+    if (_1)
     {
-        R_constant* Cs = &**it;
-        if (Cs->handler) Cs->handler->setup(Cs);
+        curr_rt_width  = _1->dwWidth;
+        curr_rt_height = _1->dwHeight;
     }
+    else
+    {
+        VERIFY(zb);
+        curr_rt_width  = zb->dwWidth;
+        curr_rt_height = zb->dwHeight;
+    }
+
+    const GLenum buffers[3] = {
+        (GLenum)(_1 ? GL_COLOR_ATTACHMENT0 : GL_NONE),
+        (GLenum)(_2 ? GL_COLOR_ATTACHMENT1 : GL_NONE),
+        (GLenum)(_3 ? GL_COLOR_ATTACHMENT2 : GL_NONE)
+    };
+
+    set_RT(_1 ? _1->pRT : 0, 0);
+    set_RT(_2 ? _2->pRT : 0, 1);
+    set_RT(_3 ? _3->pRT : 0, 2);
+    set_ZB(zb ? zb->pZRT : 0);
+
+    [[maybe_unused]] GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    VERIFY(status == GL_FRAMEBUFFER_COMPLETE);
+    CHK_GL(glDrawBuffers(3, buffers));
+
+    const D3D_VIEWPORT viewport = { 0, 0, curr_rt_width, curr_rt_height, 0.f, 1.f };
+    SetViewport(viewport);
 }
 
 #endif	//	glR_Backend_Runtime_included

@@ -25,7 +25,6 @@ public:
 
 public:
     CMapSpot(CMapLocation*);
-    virtual ~CMapSpot();
     virtual void Load(CUIXml* xml, LPCSTR path);
     CMapLocation* MapLocation() { return m_map_location; }
     int get_location_level() { return m_location_level; }
@@ -37,9 +36,11 @@ public:
 
     void show_static_border(bool status);
     void mark_focused();
+
+    pcstr GetDebugType() override { return "CMapSpot"; }
 };
 
-class CMapSpotPointer : public CMapSpot
+class CMapSpotPointer final : public CMapSpot
 {
     typedef CMapSpot inherited;
     xr_string m_pointer_hint;
@@ -48,9 +49,10 @@ public:
     CMapSpotPointer(CMapLocation*);
     virtual ~CMapSpotPointer();
     virtual LPCSTR GetHint();
+    pcstr GetDebugType() override { return "CMapSpotPointer"; }
 };
 
-class CMiniMapSpot : public CMapSpot
+class CMiniMapSpot final : public CMapSpot
 {
     typedef CMapSpot inherited;
     ui_shader m_icon_above, m_icon_normal, m_icon_below;
@@ -61,10 +63,11 @@ public:
     virtual ~CMiniMapSpot();
     virtual void Load(CUIXml* xml, LPCSTR path);
     virtual void Draw();
+    pcstr GetDebugType() override { return "CMiniMapSpot"; }
 };
 
 // -------------------------------------------------------------------------------------------------
-class CUIStaticOrig : public CUIStatic
+class CUIStaticOrig final : public CUIStatic
 {
 protected:
     typedef CUIStatic inherited;
@@ -72,16 +75,17 @@ protected:
     Fvector2 m_origin_size;
 
 public:
+    CUIStaticOrig() : CUIStatic("CUIStaticOrig") {}
     IC void SetWndPosOrigin(const Fvector2& pos) { m_origin_pos = pos; }
     IC void SetWndSizeOrigin(const Fvector2& size) { m_origin_size = size; }
     IC const Fvector2& GetWndPosOrigin() const { return m_origin_pos; }
     IC const Fvector2& GetWndSizeOrigin() const { return m_origin_size; }
     void InitWndOrigin();
     void ScaleOrigin(float k);
-
+    pcstr GetDebugType() override { return "CUIStaticOrig"; }
 }; // class CUIStaticOrig
 
-class CComplexMapSpot : public CMapSpot
+class CComplexMapSpot final : public CMapSpot
 {
     typedef CMapSpot inherited;
 
@@ -118,6 +122,9 @@ public:
     }
     void SetTimerFinish(ALife::_TIME_ID time); // ms game_time
     ALife::_TIME_ID GetTimerFinish() const { return m_timer_finish; }
+
+    pcstr GetDebugType() override { return "CComplexMapSpot"; }
+
 protected:
     CUIStaticOrig* CreateStaticOrig(CUIXml& xml, LPCSTR ui_path);
 

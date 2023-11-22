@@ -26,10 +26,6 @@
 
 #define _LINUX // for GameSpy
 
-#if !defined(__INTEL_COMPILER)
-#define _alloca alloca
-#endif
-
 #define _MAX_PATH PATH_MAX + 1
 #define MAX_PATH PATH_MAX + 1
 
@@ -81,7 +77,7 @@ inline void _splitpath(const char* path, // Path Input
 {
     if(!path)
         return;
-    
+
     const char *p, *end;
 
     if(drive)
@@ -135,19 +131,7 @@ inline int GetExceptionCode()
     return 0;
 }
 
-inline void convert_path_separators(char * path)
-{
-    while (char* sep = strchr(path, '\\')) *sep = '/';
-}
-
-inline int xr_unlink(const char *path)
-{
-    char* conv_fn = strdup(path);
-    convert_path_separators(conv_fn);
-    int result = unlink(conv_fn);
-    free(conv_fn);
-    return result;
-}
+inline void convert_path_separators(char * path);
 
 #include <inttypes.h>
 typedef int32_t BOOL;
@@ -221,7 +205,11 @@ typedef void* HANDLE;
 typedef void* HMODULE;
 typedef void* PVOID;
 typedef void* LPVOID;
+#if defined(XR_ARCHITECTURE_PPC64)
+typedef LONG_PTR WPARAM;
+#else
 typedef UINT_PTR WPARAM;
+#endif
 typedef LONG_PTR LPARAM;
 typedef long HRESULT;
 typedef long LRESULT;
@@ -242,10 +230,6 @@ typedef struct tagPOINT {
 
 #define DWORD_PTR UINT_PTR
 #define WM_USER 0x0400
-#define WA_INACTIVE 0
-#define HIWORD(l)              ((WORD)((DWORD_PTR)(l) >> 16))
-#define LOWORD(l)              ((WORD)((DWORD_PTR)(l) & 0xFFFF))
-
 
 #define TRUE true
 #define FALSE false
@@ -409,7 +393,6 @@ inline int vsnprintf_s(char* buffer, size_t size, size_t, const char* format, va
     return vsnprintf(buffer, size, format, list);
 }
 #define vsprintf_s(dest, size, format, args) vsprintf(dest, format, args)
-#define _alloca alloca
 #define _snprintf snprintf
 #define sprintf_s(buffer, buffer_size, stringbuffer, ...) sprintf(buffer, stringbuffer, ##__VA_ARGS__)
 //#define GetProcAddress(handle, name) dlsym(handle, name)
@@ -1100,15 +1083,28 @@ decltype(auto) do_nothing(const T& obj)
 #define xr_fs_strlwr(str) do_nothing(str)
 #define xr_fs_nostrlwr(str) xr_strlwr(str)
 
-/** For backward compability of FS, for real filesystem delimiter set to back
- * @brief restore_path_separators
- * @param path
- */
+/// For backward compability of FS, for real filesystem delimiter set to back
 inline void restore_path_separators(char * path)
 {
     while (char* sep = strchr(path, '/')) *sep = '\\'; //
 }
 
+inline void convert_path_separators(char * path)
+{
+    while (char* sep = strchr(path, '\\')) *sep = '/';
+}
+
+inline int xr_unlink(const char *path)
+{
+    char* conv_fn = strdup(path);
+    convert_path_separators(conv_fn);
+    int result = unlink(conv_fn);
+    free(conv_fn);
+    return result;
+}
+
 inline tm* localtime_safe(const time_t *time, struct tm* result){ return localtime_r(time, result); }
 
 #define xr_strerror(errno, buffer, bufferSize) strerror_r(errno, buffer, sizeof(buffer))
+
+using xrpid_t = pid_t;

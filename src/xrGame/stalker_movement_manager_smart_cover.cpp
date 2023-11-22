@@ -31,11 +31,7 @@ namespace smart_cover
 shared_str transform_vertex(shared_str const& vertex_id, bool const& in);
 } // namespace smart_cover
 
-stalker_movement_manager_smart_cover::stalker_movement_manager_smart_cover(CAI_Stalker* object)
-    : inherited(object), m_property_storage(0), m_current_transition(0), m_current_transition_animation(0),
-      m_non_animated_loophole_change(false), m_apply_loophole_direction_distance(4.f), m_animation_selector(0),
-      m_entering_smart_cover_with_animation(false), m_default_behaviour(false), m_enter_cover_id(""),
-      m_enter_loophole_id(""), m_check_can_kill_enemy(false), m_combat_behaviour(false)
+stalker_movement_manager_smart_cover::stalker_movement_manager_smart_cover(CAI_Stalker* object) : inherited(object)
 {
     m_target.construct(this);
     m_target_selector = xr_new<target_selector_type>();
@@ -360,8 +356,11 @@ void stalker_movement_manager_smart_cover::loophole_path(smart_cover::cover cons
     shared_str source = smart_cover::transform_vertex(source_raw, true);
     shared_str target = smart_cover::transform_vertex(target_raw, false);
 
+    // XXX: casting u32(-1) to _dist_type, this may be safe,
+    // but we may want to recheck that
+    // the same cast happens in xrGame/smart_cover.cpp
     typedef GraphEngineSpace::CBaseParameters CBaseParameters;
-    CBaseParameters parameters(u32(-1), u32(-1), u32(-1));
+    CBaseParameters parameters(_dist_type(u32(-1)), u32(-1), u32(-1));
     path.clear();
     R_ASSERT2(ai().graph_engine().search(cover.get_description()->transitions(), source, target, &path, parameters),
         make_string("cannot build path via loopholes [%s] -> [%s] (cover %s)", source_raw.c_str(), target_raw.c_str(),

@@ -33,14 +33,10 @@ static float const air_resistance_epsilon = .1f;
 #endif // #ifdef DEBUG
 float g_bullet_time_factor = 1.f;
 
-SBullet::SBullet() {}
-SBullet::~SBullet() {}
-void SBullet::Init(const Fvector& position, const Fvector& direction, float starting_speed, float power,
-    //.				   float power_critical,
-    float impulse, u16 sender_id, u16 sendersweapon_id, ALife::EHitType e_hit_type, float maximum_distance,
-    const CCartridge& cartridge, float const air_resistance_factor, bool SendHit)
+SBullet::SBullet(const Fvector& position, const Fvector& direction, float starting_speed, float power,
+    /*float power_critical,*/ float impulse, u16 sender_id, u16 sendersweapon_id, ALife::EHitType e_hit_type,
+    float maximum_distance, const CCartridge& cartridge, float const air_resistance_factor, bool SendHit)
 {
-    flags._storage = 0;
     bullet_pos = position;
     speed = max_speed = starting_speed;
     VERIFY(speed > 0.f);
@@ -48,7 +44,6 @@ void SBullet::Init(const Fvector& position, const Fvector& direction, float star
     start_position = position;
     start_velocity.mul(direction, starting_speed);
     born_time = Device.dwTimeGlobal;
-    life_time = 0.f;
 
     VERIFY(direction.magnitude() > 0.f);
     dir.normalize(direction);
@@ -57,7 +52,6 @@ void SBullet::Init(const Fvector& position, const Fvector& direction, float star
     hit_param.impulse = impulse * cartridge.param_s.kImpulse;
 
     max_dist = maximum_distance * cartridge.param_s.kDist;
-    fly_dist = 0;
     tracer_start_position = bullet_pos;
 
     parent_id = sender_id;
@@ -80,9 +74,6 @@ void SBullet::Init(const Fvector& position, const Fvector& direction, float star
     //	flags.skipped_frame		= 0;
 
     init_frame_num = Device.dwFrame;
-
-    targetID = 0;
-    density_mode = 0;
 }
 
 CBulletManager::CBulletManager()
@@ -135,6 +126,7 @@ void CBulletManager::Load()
 
     LPCSTR whine_sounds = pSettings->r_string(bullet_manager_sect, "whine_sounds");
     int cnt = _GetItemCount(whine_sounds);
+    m_WhineSounds.reserve(cnt);
     xr_string tmp;
     for (int k = 0; k < cnt; ++k)
     {
@@ -144,6 +136,7 @@ void CBulletManager::Load()
 
     LPCSTR explode_particles = pSettings->r_string(bullet_manager_sect, "explode_particles");
     cnt = _GetItemCount(explode_particles);
+    m_ExplodeParticles.reserve(cnt);
     for (int k = 0; k < cnt; ++k)
         m_ExplodeParticles.push_back(_GetItem(explode_particles, k, tmp));
 }
@@ -186,15 +179,15 @@ void CBulletManager::AddBullet(const Fvector& position, const Fvector& direction
     // Always called in Primary thread
     // Uncomment below if you will change the behaviour
     // if (!g_mt_config.test(mtBullets))
+#ifdef DEBUG
     VERIFY(Threading::ThreadIdsAreEqual(m_thread_id, Threading::GetCurrThreadId()));
+#endif
 
     VERIFY(u16(-1) != cartridge.bullet_material_idx);
     //	u32 CurID					= Level().CurrentControlEntity()->ID();
     //	u32 OwnerID					= sender_id;
-    m_Bullets.push_back(SBullet());
-    SBullet& bullet = m_Bullets.back();
-    bullet.Init(position, direction, starting_speed, power, /*power_critical,*/ impulse, sender_id, sendersweapon_id,
-        e_hit_type, maximum_distance, cartridge, air_resistance_factor, SendHit);
+    SBullet& bullet = m_Bullets.emplace_back(position, direction, starting_speed, power, /*power_critical,*/ impulse, sender_id,
+        sendersweapon_id, e_hit_type, maximum_distance, cartridge, air_resistance_factor, SendHit);
     //	bullet.frame_num			= Device.dwFrame;
     bullet.flags.aim_bullet = AimBullet;
     if (!IsGameTypeSingle())
@@ -209,7 +202,9 @@ void CBulletManager::AddBullet(const Fvector& position, const Fvector& direction
 
 void CBulletManager::UpdateWorkload()
 {
+#ifdef DEBUG
     VERIFY(g_mt_config.test(mtBullets) || Threading::ThreadIdsAreEqual(m_thread_id, Threading::GetCurrThreadId()));
+#endif
 
     rq_storage.r_clear();
 
@@ -370,7 +365,7 @@ static float trajectory_select_pick_parabolic(
     float const max_test_distance = bullet.max_dist - bullet.fly_dist;
     Fvector const start =
         trajectory_position(bullet.start_position, bullet.start_velocity, gravity, air_resistance, start_low);
-    float const start_high = high;
+    [[maybe_unused]] float const start_high = high;
     float low = start_low;
     float check_time = high;
     while (!fsimilar(low, high))
@@ -395,7 +390,7 @@ static float trajectory_select_pick_parabolic(
 static bool trajectory_select_pick_ranges(float& result, SBullet& bullet, float const low, float const high,
     Fvector const& gravity, float const air_resistance)
 {
-    float const max_test_distance = bullet.max_dist - bullet.fly_dist;
+    [[maybe_unused]] float const max_test_distance = bullet.max_dist - bullet.fly_dist;
     VERIFY(max_test_distance > 0.f);
 
     if (air_resistance * (low + air_resistance_epsilon) >= 1.f)
@@ -847,9 +842,9 @@ void CBulletManager::Render()
 
     GEnv.UIRender->StartPrimitive((u32)bullet_num * 12, IUIRender::ptTriList, IUIRender::pttLIT);
 
-    for (auto it = m_BulletsRendered.begin(); it != m_BulletsRendered.end(); ++it)
+    for (auto& sbullet : m_BulletsRendered)
     {
-        SBullet* bullet = &(*it);
+        SBullet* bullet = &sbullet;
         if (!bullet->flags.allow_tracer)
             continue;
 
@@ -920,9 +915,8 @@ void CBulletManager::CommitEvents() // @ the start of frame
     if (m_Events.size() > 1000)
         Msg("! too many bullets during single frame: %d", m_Events.size());
 
-    for (u32 _it = 0; _it < m_Events.size(); _it++)
+    for (auto& E : m_Events)
     {
-        _event& E = m_Events[_it];
         switch (E.Type)
         {
         case EVENT_HIT:
@@ -931,16 +925,16 @@ void CBulletManager::CommitEvents() // @ the start of frame
                 DynamicObjectHit(E);
             else
                 StaticObjectHit(E);
+            break;
         }
-        break;
         case EVENT_REMOVE:
         {
             if (E.bullet.flags.allow_sendhit && GameID() != eGameIDSingle)
                 Game().m_WeaponUsageStatistic->OnBullet_Remove(&E.bullet);
             m_Bullets[E.tgt_material] = m_Bullets.back();
             m_Bullets.pop_back();
+            break;
         }
-        break;
         }
     }
     m_Events.clear();
@@ -957,10 +951,7 @@ void CBulletManager::RegisterEvent(
     }
 #endif // #ifdef DEBUG
 
-    m_Events.push_back(_event());
-    _event& E = m_Events.back();
-    E.Type = Type;
-    E.bullet = *bullet;
+    _event& E = m_Events.emplace_back(Type, *bullet);
 
     switch (Type)
     {
@@ -993,10 +984,13 @@ void CBulletManager::RegisterEvent(
                 }
             }
         };
+        break;
     }
-    break;
-    case EVENT_REMOVE: { E.tgt_material = tgt_material;
+
+    case EVENT_REMOVE:
+    {
+        E.tgt_material = tgt_material;
+        break;
     }
-    break;
     }
 }

@@ -1,5 +1,7 @@
 #include "stdafx.h"
 
+#include <FlexibleVertexFormat.h>
+
 void fix_texture_name(pstr fn);
 
 void simplify_texture(string_path& fn)
@@ -27,7 +29,7 @@ void simplify_texture(string_path& fn)
 
 SState* CResourceManager::_CreateState(SimulatorStates& state_code)
 {
-    // Search equal state-code 
+    // Search equal state-code
     for (SState* C : v_states)
     {
         SimulatorStates& base = C->state_code;
@@ -94,7 +96,7 @@ void CResourceManager::_DeleteConstantTable(const R_constant_table* C)
     Msg("! ERROR: Failed to find compiled constant-table");
 }
 
-CRT* CResourceManager::_CreateRT(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 sampleCount /* = 1 */, Flags32 flags /*= {}*/)
+CRT* CResourceManager::_CreateRT(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 sampleCount /* = 1 */, u32 slices_num /*=1*/, Flags32 flags /*= {}*/)
 {
     R_ASSERT(Name && Name[0] && w && h);
 
@@ -108,8 +110,8 @@ CRT* CResourceManager::_CreateRT(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 sam
         CRT* RT = xr_new<CRT>();
         RT->dwFlags |= xr_resource_flagged::RF_REGISTERED;
         m_rtargets.emplace(RT->set_name(Name), RT);
-        if (RDEVICE.b_is_Ready)
-            RT->create(Name, w, h, f, sampleCount, flags);
+        if (Device.b_is_Ready)
+            RT->create(Name, w, h, f, sampleCount, slices_num, flags);
         return RT;
     }
 }
@@ -164,6 +166,40 @@ void	CResourceManager::_DeleteRTC(const CRTC* RT)
 }
 */
 
+SGeometry* CResourceManager::CreateGeom(const VertexElement* decl, VertexBufferHandle vb, IndexBufferHandle ib)
+{
+    R_ASSERT(decl && vb);
+
+    SDeclaration* dcl = _CreateDecl(decl);
+    u32 vb_stride = GetDeclVertexSize(decl, 0);
+
+    // ***** first pass - search already loaded shader
+    for (SGeometry* geom : v_geoms)
+    {
+        SGeometry& G = *geom;
+        if (G.dcl == dcl && G.vb == vb && G.ib == ib && G.vb_stride == vb_stride)
+            return geom;
+    }
+
+    SGeometry* Geom = v_geoms.emplace_back(xr_new<SGeometry>());
+    Geom->dwFlags |= xr_resource_flagged::RF_REGISTERED;
+    Geom->dcl = dcl;
+    Geom->vb = vb;
+    Geom->vb_stride = vb_stride;
+    Geom->ib = ib;
+
+    return Geom;
+}
+
+SGeometry* CResourceManager::CreateGeom(u32 FVF, VertexBufferHandle vb, IndexBufferHandle ib)
+{
+    thread_local xr_vector<VertexElement> decl;
+    [[maybe_unused]] const bool result = FVF::CreateDeclFromFVF(FVF, decl);
+    VERIFY(result);
+    SGeometry* g = CreateGeom(decl.data(), vb, ib);
+    return g;
+}
+
 void CResourceManager::DeleteGeom(const SGeometry* Geom)
 {
     if (0 == (Geom->dwFlags & xr_resource_flagged::RF_REGISTERED))
@@ -183,7 +219,7 @@ void CResourceManager::DBG_VerifyGeoms()
     D3DVERTEXELEMENT9		test	[MAX_FVF_DECL_SIZE];
     u32						size	= 0;
     G->dcl->GetDeclaration			(test,(unsigned int*)&size);
-    u32 vb_stride					= D3DXGetDeclVertexSize	(test,0);
+    u32 vb_stride					= GetDeclVertexSize	(test,0);
     u32 vb_stride_cached			= G->vb_stride;
     R_ASSERT						(vb_stride == vb_stride_cached);
     }
@@ -214,7 +250,7 @@ CTexture* CResourceManager::_CreateTexture(LPCSTR _Name)
     T->dwFlags |= xr_resource_flagged::RF_REGISTERED;
     m_textures.emplace(T->set_name(Name), T);
     T->Preload();
-    if (RDEVICE.b_is_Ready && !bDeferredLoad)
+    if (Device.b_is_Ready && !bDeferredLoad)
         T->Load();
     return T;
 }
@@ -264,7 +300,7 @@ CMatrix* CResourceManager::_CreateMatrix(LPCSTR Name)
     {
         CMatrix* M = xr_new<CMatrix>();
         M->dwFlags |= xr_resource_flagged::RF_REGISTERED;
-        M->dwReference = 1;
+        M->ref_count = 1;
         m_matrices.emplace(M->set_name(Name), M);
         return M;
     }
@@ -304,7 +340,7 @@ CConstant* CResourceManager::_CreateConstant(LPCSTR Name)
     {
         CConstant* C = xr_new<CConstant>();
         C->dwFlags |= xr_resource_flagged::RF_REGISTERED;
-        C->dwReference = 1;
+        C->ref_count = 1;
         m_constants.emplace(C->set_name(Name), C);
         return C;
     }

@@ -155,15 +155,38 @@ bool Manager::item_upgrades_exist(shared_str const& item_id)
     return true;
 }
 
+class check_upgraded_inventory_section
+{
+    const CInifile::Sect* inv_section{};
+
+public:
+    check_upgraded_inventory_section(pcstr items_section)
+    {
+        if (pSettings->section_exist(items_section))
+            inv_section = &pSettings->r_section(items_section);
+    }
+
+    [[nodiscard]]
+    bool add_anyway(shared_str const& item_id) const
+    {
+        if (!inv_section)
+            return false;
+
+        const auto ib = inv_section->Data.begin();
+        const auto ie = inv_section->Data.end();
+
+        const auto it = std::find_if(ib, ie, [&](const CInifile::Item& item)
+        {
+            return item.first == item_id;
+        });
+
+        return it != ie;
+    }
+};
+
 void Manager::load_all_inventory()
 {
-    // LPCSTR items_section = "upgraded_inventory";
-
-    // if (!pSettings->section_exist(items_section) && ShadowOfChernobylMode)
-    //     return;
-
-    // VERIFY2(pSettings->section_exist(items_section), make_string("Section [%s] does not exist !", items_section));
-    // VERIFY2(pSettings->line_count(items_section), make_string("Section [%s] is empty !", items_section));
+    static constexpr pcstr items_section = "upgraded_inventory";
 
     // if (g_upgrades_log == 1)
     // {
@@ -192,19 +215,23 @@ void Manager::load_all_inventory()
         if (!pSettings->line_exist(section->Name, "upgrades") || !pSettings->r_string(section->Name, "upgrades"))
             continue;
 
-        if (!pSettings->line_exist(section->Name, "upgrade_scheme") || !pSettings->r_string(section->Name, "upgrade_scheme"))
-            continue;
+    const check_upgraded_inventory_section inv_section{ items_section };
 
-        add_root(section->Name);
+    // Alundaio: No longer the need to define upgradeable sections in [upgraded_inventory]
+    // Xottab_DUTY: But still follow original COP behaviour, i.e. add section anyway if it is defined in [upgraded_inventory]
+    for (const auto& section : pSettings->sections())
+    {
+        const auto& name = section->Name;
+
+        if (item_upgrades_exist(name) || inv_section.add_anyway(name))
+        {
+            add_root(name);
+        }
     }
     //-Alundaio
 
-    /*
-    float low, high; ///? <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    LPCSTR param = "cost";
-    compute_range( param, low ,high );
-    Msg( "Parameter <%s> min = %.3f, max = %.3f", param, low, high );
-    */
+        add_root(section->Name);
+    }
 }
 
 void Manager::load_all_properties()
@@ -309,7 +336,7 @@ void Manager::test_all_upgrades(CInventoryItem& item)
 
 Upgrade* Manager::upgrade_verify(shared_str const& item_section, shared_str const& upgrade_id)
 {
-    Root* root_p = get_root(item_section);
+    [[maybe_unused]] auto root_p = get_root(item_section);
     VERIFY2(root_p, make_string("Upgrades of item <%s> don`t exist!", item_section.c_str()));
 
     Upgrade* upgrade_p = get_upgrade(upgrade_id);
@@ -319,7 +346,7 @@ Upgrade* Manager::upgrade_verify(shared_str const& item_section, shared_str cons
     VERIFY2(root_p->contain_upgrade(upgrade_id),
         make_string("Inventory item <%s> not contain upgrade <%s> !", item_section.c_str(), upgrade_id.c_str()));
 
-    return (upgrade_p);
+    return upgrade_p;
 }
 
 bool Manager::make_known_upgrade(CInventoryItem& item, shared_str const& upgrade_id)
@@ -353,6 +380,40 @@ bool Manager::is_disabled_upgrade( CInventoryItem& item, shared_str const& upgra
     return upgrade_p->can_install( item );
 }
 */
+
+bool Manager::can_install_upgrade(CInventoryItem& item, shared_str const& upgrade_id)
+{
+    return upgrade_verify(item.m_section_id, upgrade_id)->can_install(item, false) == result_ok;
+}
+
+bool Manager::can_add_upgrade(CInventoryItem& item, shared_str const& upgrade_id)
+{
+    return upgrade_verify(item.m_section_id, upgrade_id)->can_add(item) == result_ok;
+}
+
+bool Manager::upgrade_add(CInventoryItem& item, shared_str const& upgrade_id)
+{
+    Upgrade* upgrade = upgrade_verify(item.m_section_id, upgrade_id);
+    UpgradeStateResult res = upgrade->can_add(item);
+
+    if (res == result_ok)
+    {
+        if (item.install_upgrade(upgrade->section()))
+        {
+            item.add_upgrade(upgrade_id, false);
+
+            return true;
+        }
+        else
+        {
+            FATAL(make_string("! Upgrade <%s> of item [%s] (id = %d) is EMPTY or FAILED !", upgrade_id.c_str(),
+                item.m_section_id.c_str(), item.object_id())
+                      .c_str());
+        }
+    }
+
+    return false;
+}
 
 bool Manager::upgrade_install(CInventoryItem& item, shared_str const& upgrade_id, bool loading)
 {

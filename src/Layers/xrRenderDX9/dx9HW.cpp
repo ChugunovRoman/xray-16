@@ -2,6 +2,8 @@
 
 #include "dx9HW.h"
 
+#include <SDL_syswm.h>
+
 CHW HW;
 
 CHW::CHW()
@@ -45,13 +47,27 @@ void CHW::OnAppDeactivate()
 void CHW::CreateD3D()
 {
     hD3D = XRay::LoadModule(GEnv.isDedicatedServer ? "xrD3D9-Null" : "d3d9");
-    R_ASSERT2(hD3D->IsLoaded(), "Can't find 'd3d9.dll'\nPlease install latest version of DirectX before running this program");
+    if (!hD3D->IsLoaded())
+        return;
 
-    using _Direct3DCreate9 = IDirect3D9* WINAPI(UINT SDKVersion);
-    const auto createD3D = (_Direct3DCreate9*)hD3D->GetProcAddress("Direct3DCreate9");
-    R_ASSERT(createD3D);
-    pD3D = createD3D(D3D_SDK_VERSION);
-    R_ASSERT2(pD3D, "Please install DirectX 9.0c");
+    // XXX: enable when D3DPOOL_MANAGED will be removed from the engine
+    //const auto createD3DEx = (decltype(&Direct3DCreate9Ex))hD3D->GetProcAddress("Direct3DCreate9Ex");
+    //if (createD3DEx)
+    //{
+    //    IDirect3D9Ex* pD3DEx{};
+    //    if (SUCCEEDED(createD3DEx(D3D_SDK_VERSION, &pD3DEx)))
+    //        pD3D = pD3DEx;
+    //}
+
+    //if (!pD3D)
+    {
+        const auto createD3D = (decltype(&Direct3DCreate9))hD3D->GetProcAddress("Direct3DCreate9");
+        if (createD3D)
+            pD3D = createD3D(D3D_SDK_VERSION);
+    }
+
+    if (!pD3D)
+        Log("! Found d3d9.dll, but couldn't initialize it. Please install latest DirectX 9.0.");
 }
 
 void CHW::DestroyD3D()
@@ -61,7 +77,7 @@ void CHW::DestroyD3D()
     hD3D = nullptr;
 }
 
-void CHW::CreateDevice(SDL_Window* m_sdlWnd)
+void CHW::CreateDevice(SDL_Window* sdlWnd)
 {
     CreateD3D();
 
@@ -105,6 +121,7 @@ void CHW::CreateDevice(SDL_Window* m_sdlWnd)
     {
         switch (psDeviceMode.BitsPerPixel)
         {
+        default:
         case 32:
             fTarget = D3DFMT_X8R8G8B8;
             if (SUCCEEDED(pD3D->CheckDeviceType(DevAdapter, m_DriverType, fTarget, fTarget, FALSE)))
@@ -118,7 +135,6 @@ void CHW::CreateDevice(SDL_Window* m_sdlWnd)
             fTarget = D3DFMT_UNKNOWN;
             break;
         case 16:
-        default:
             fTarget = D3DFMT_R5G6B5;
             if (SUCCEEDED(pD3D->CheckDeviceType(DevAdapter, m_DriverType, fTarget, fTarget, FALSE)))
                 break;
@@ -160,23 +176,18 @@ void CHW::CreateDevice(SDL_Window* m_sdlWnd)
 
     // Windoze
     P.SwapEffect = bWindowed ? D3DSWAPEFFECT_COPY : D3DSWAPEFFECT_DISCARD;
+    P.Windowed = bWindowed;
 
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
-    if (SDL_GetWindowWMInfo(m_sdlWnd, &info))
-    {
-        switch (info.subsystem)
-        {
-        case SDL_SYSWM_WINDOWS:
-            P.hDeviceWindow = info.info.win.window;
-            break;
-        default: break;
-        }
-    }
+    if (SDL_GetWindowWMInfo(sdlWnd, &info))
+        P.hDeviceWindow = info.info.win.window;
     else
-        Log("! Couldn't get window information: ", SDL_GetError());
-
-    P.Windowed = bWindowed;
+    {
+        cpcstr error = SDL_GetError();
+        Log("! Couldn't get window information: ", error);
+        FATAL(error);
+    }
 
     // Depth/stencil
     P.EnableAutoDepthStencil = TRUE;
@@ -279,7 +290,7 @@ void CHW::Reset()
     while (true)
     {
         const HRESULT result = pDevice->Reset(&DevPP);
-        
+
         if (SUCCEEDED(result))
             break;
 
@@ -289,6 +300,13 @@ void CHW::Reset()
 #ifdef DEBUG
     R_CHK(pDevice->CreateStateBlock(D3DSBT_ALL, &dwDebugSB));
 #endif
+}
+
+void CHW::SetPrimaryAttributes(u32& /*windowFlags*/)
+{
+    Caps.bForceGPU_SW      = strstr(Core.Params, "-gpu_sw");
+    Caps.bForceGPU_NonPure = strstr(Core.Params, "-gpu_nopure");
+    Caps.bForceGPU_REF     = strstr(Core.Params, "-gpu_ref");
 }
 
 D3DFORMAT CHW::selectDepthStencil(D3DFORMAT fTarget) const

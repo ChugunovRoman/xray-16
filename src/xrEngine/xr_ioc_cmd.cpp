@@ -565,6 +565,66 @@ virtual void Save (IWriter *F) {};
 
 ENGINE_API bool renderer_allow_override = false;
 
+// Anomaly
+ENGINE_API float ps_r2_img_exposure = 1.0f; // r2-only
+ENGINE_API float ps_r2_img_gamma = 1.0f; // r2-only
+ENGINE_API float ps_r2_img_saturation = 1.0f; // r2-only
+ENGINE_API Fvector ps_r2_img_cg = { .0f, .0f, .0f }; // r2-only
+ENGINE_API Fvector4 ps_r2_mask_control = { .0f, .0f, .0f, .0f }; // r2-only, condition, vignette?, visor reflection, null?
+ENGINE_API Fvector ps_r2_drops_control = { .0f, 1.15f, .0f }; // r2-only, power, null, speed
+ENGINE_API int ps_r2_nightvision = 0; // beef's nvg enable
+
+ENGINE_API Fvector4 ps_dev_param_1 = { .0f, .0f, .0f, .0f };
+ENGINE_API Fvector4 ps_dev_param_2 = { .0f, .0f, .0f, .0f };
+ENGINE_API Fvector4 ps_dev_param_3 = { .0f, .0f, .0f, .0f };
+ENGINE_API Fvector4 ps_dev_param_4 = { .0f, .0f, .0f, .0f };
+ENGINE_API Fvector4 ps_dev_param_5 = { .0f, .0f, .0f, .0f };
+ENGINE_API Fvector4 ps_dev_param_6 = { .0f, .0f, .0f, .0f };
+// beef's nvg
+// x = generation (1.0-3.0) . num_tubes (0.10, 0.20, 0.40, 0.11, 0.12)
+// y = gain_adjust (0.1-3.0) . washout_threshold (0.0 - 0.9)
+// z = vignette power (0.0-1.0) . glitch power (0-0.9)
+// w = gain offset (0.5-3.0) . mode (0.0-1.0)
+// TODO: put into it's own var, keep dev params for dev work
+ENGINE_API Fvector4 ps_dev_param_7 = { .0f, .0f, .0f, .0f };
+// beef's nvg
+// x = flipdown amount (1.0-100.0) . unused
+// y = unused . nvg_radius (0.0, 0.9)
+// z = unused
+// w = unused
+// TODO: put into it's own var, keep dev params for dev work
+ENGINE_API Fvector4 ps_dev_param_8 = { .0f, .0f, .0f, .0f };
+
+// Ascii1457's Screen Space Shaders
+ENGINE_API Fvector4 ps_ssfx_hud_drops_1 = { 1.0f, 1.0f, 30.f, .05f }; // Anim Speed, Int, Reflection, Refraction
+ENGINE_API Fvector4 ps_ssfx_hud_drops_2 = { .0225f, 1.f, 0.0f, 2.0f }; // Density, Size, Extra Gloss, Gloss
+ENGINE_API Fvector4 ps_ssfx_hud_drops_1_cfg = { 3.0f, 1.f, 1.f, 50.f }; // Quantity of drops, Refrelction intensity, Refraction intensity, Speed of the drops animation
+ENGINE_API Fvector4 ps_ssfx_hud_drops_2_cfg = { 50.f, 50.f, 0.75f, 2.f }; // Drops build up speed, Drying speed, Size of the drops, Raindrops gloss intensity
+ENGINE_API Fvector4 ps_ssfx_blood_decals = { 0.6f, 0.6f, 0.f, 0.f };
+ENGINE_API Fvector4 ps_ssfx_rain_1 = { 2.0f, 0.1f, 0.6f, 2.f }; // Len, Width, Speed, Quality
+ENGINE_API Fvector4 ps_ssfx_rain_2 = { 0.7f, 0.1f, 1.0f, 0.5f }; // Alpha, Brigthness, Refraction, Reflection
+ENGINE_API Fvector4 ps_ssfx_rain_3 = { 0.01f, 1.0f, 0.0f, 0.0f }; // Alpha, Refraction ( Splashes ) - Yohji: Alpha was edited (0.5->0.01f) due to a bug with transparency and other particles.
+ENGINE_API Fvector3 ps_ssfx_shadow_cascades = { 20.f, 40.f, 160.f };
+ENGINE_API Fvector4 ps_ssfx_grass_shadows = { .0f, .35f, 30.0f, .0f };
+ENGINE_API Fvector4 ps_ssfx_grass_interactive = { 1.0f, 8.f, 2000.0f, 1.0f };
+ENGINE_API Fvector4 ps_ssfx_int_grass_params_1 = { 1.0f, 1.0f, 1.0f, 25.0f };
+ENGINE_API Fvector4 ps_ssfx_int_grass_params_2 = { 1.0f, 5.0f, 1.0f, 1.0f };
+ENGINE_API Fvector4 ps_ssfx_wpn_dof_1 = { .0f, .0f, .0f, .0f };
+ENGINE_API Fvector4 ps_ssfx_wpn_dof_2 = { 0.15f, .0f, .0f, .0f };
+ENGINE_API Fvector4 ps_ssfx_florafixes_1 = { 0.3f, 0.21f, 0.3f, 0.21f }; // Flora fixes 1
+ENGINE_API Fvector4 ps_ssfx_florafixes_2 = { 2.0f, 1.0f, 0.0f, 0.0f }; // Flora fixes 2
+ENGINE_API Fvector4 ps_ssfx_wetsurfaces_1 = { 1.0f, 1.0f, 1.0f, 1.0f }; // Wet surfaces 1
+ENGINE_API Fvector4 ps_ssfx_wetsurfaces_2 = { 1.0f, 1.0f, 1.0f, 1.0f }; // Wet surfaces 2
+ENGINE_API int ps_ssfx_is_underground = 0;
+ENGINE_API int ps_ssfx_gloss_method = 1;
+ENGINE_API float ps_ssfx_gloss_factor = 0.5f;
+ENGINE_API Fvector3 ps_ssfx_gloss_minmax = { 0.0f,0.92f,0.0f }; // Gloss
+ENGINE_API Fvector4 ps_ssfx_lightsetup_1 = { 0.35f, 0.5f, 0.0f, 0.0f }; // Spec intensity
+
+ENGINE_API float ps_r3_dyn_wet_surf_near = 5.f; // 10.0f
+ENGINE_API float ps_r3_dyn_wet_surf_far = 20.f; // 30.0f
+ENGINE_API int ps_r3_dyn_wet_surf_sm_res = 256; // 256
+
 class CCC_renderer : public CCC_Token
 {
     typedef CCC_Token inherited;
@@ -594,7 +654,7 @@ public:
         tokens = VidQualityToken.data();
 
         inherited::Execute(args);
-    
+
         cmd_lock = true;
     }
 
@@ -720,6 +780,16 @@ public:
     }
 };
 
+class CCC_Editor : public IConsole_Command
+{
+public:
+    CCC_Editor(pcstr name) : IConsole_Command(name) { bEmptyArgsHandled = true; }
+    void Execute(pcstr args) override
+    {
+        Device.editor().SetState(xray::editor::ide::visible_state::full);
+    }
+};
+
 ENGINE_API float g_fov = 67.5f;
 ENGINE_API float psHUD_FOV = 0.45f;
 
@@ -736,6 +806,12 @@ extern int g_ErrorLineCount;
 
 ENGINE_API int ps_r__Supersample = 1;
 ENGINE_API int ps_r__WallmarksOnSkeleton = 0;
+ENGINE_API shared_str current_player_hud_sect{};
+
+Fvector3 ssfx_wetness_multiplier = { 1.0f, 0.3f, 0.0f };
+
+extern int ps_fps_limit;
+extern int ps_fps_limit_in_menu;
 
 void CCC_Register()
 {
@@ -779,6 +855,10 @@ void CCC_Register()
     CMD4(CCC_Integer, "r__supersample", &ps_r__Supersample, 1, 4);
     CMD4(CCC_Integer, "r__wallmarks_on_skeleton", &ps_r__WallmarksOnSkeleton, 0, 1);
 
+    CMD1(CCC_Editor, "rs_editor");
+
+    CMD4(CCC_Integer, "rs_fps_limit", &ps_fps_limit, 30, 501);
+    CMD4(CCC_Integer, "rs_fps_limit_in_menu", &ps_fps_limit_in_menu, 30, 501);
     CMD3(CCC_Mask, "rs_always_active", &psDeviceFlags, rsAlwaysActive);
     CMD3(CCC_Mask, "rs_v_sync", &psDeviceFlags, rsVSync);
     // CMD3(CCC_Mask, "rs_disable_objects_as_crows",&psDeviceFlags, rsDisableObjectsAsCrows );
@@ -821,8 +901,8 @@ void CCC_Register()
     CMD2(CCC_Float, "snd_volume_music", &psSoundVMusic);
     CMD1(CCC_SND_Restart, "snd_restart");
     CMD3(CCC_Mask, "snd_acceleration", &psSoundFlags, ss_Hardware);
-    CMD3(CCC_Mask, "snd_efx", &psSoundFlags, ss_EAX);
-    CMD4(CCC_Integer, "snd_targets", &psSoundTargets, 4, 32);
+    CMD3(CCC_Mask, "snd_efx", &psSoundFlags, ss_EFX);
+    CMD4(CCC_Integer, "snd_targets", &psSoundTargets, 4, 256);
     CMD4(CCC_Integer, "snd_cache_size", &psSoundCacheSizeMB, 4, 64);
     CMD3(CCC_Token, "snd_precache_all", &psSoundPrecacheAll, snd_precache_all_token);
 
@@ -853,6 +933,7 @@ void CCC_Register()
     psControllerSensorDeadZone = 0.005f;
     CMD4(CCC_Float, "gamepad_sensor_deadzone", &psControllerSensorDeadZone, 0.001f, 1.f);
     CMD3(CCC_ControllerSensorEnable, "gamepad_sensors_enable", &psControllerEnableSensors, 1);
+    CMD4(CCC_Float, "gamepad_cursor_autohide_time", &psControllerCursorAutohideTime, 0.5f, 3.f);
 
     // Camera
     CMD2(CCC_Float, "cam_inert", &psCamInert);
@@ -895,4 +976,6 @@ void CCC_Register()
     extern int g_bShowRedText;
     CMD4(CCC_Integer, "debug_show_red_text", &g_bShowRedText, 0, 1);
 #endif
+
+    CMD4(CCC_Vector3, "ssfx_wetness_multiplier", &ssfx_wetness_multiplier, Fvector3({ 0.1f, 0.1f, 0.0f} ), Fvector3({ 20.0f, 20.0f, 0.0f }));
 };

@@ -43,7 +43,7 @@ private:
 
 using ITEMS_vec = xr_vector<SBuyItemInfo*>;
 
-class CUIMpTradeWnd : public IBuyWnd, public CUIWndCallback
+class CUIMpTradeWnd final : public IBuyWnd, public CUIWndCallback
 {
     typedef CUIDialogWnd inherited;
     friend class CUICellItemTradeMenuDraw;
@@ -91,6 +91,7 @@ public:
 
     CUIMpTradeWnd();
     virtual ~CUIMpTradeWnd();
+
     virtual void SendMessage(CUIWindow* pWnd, s16 msg, void* pData = NULL);
 
     //
@@ -131,6 +132,9 @@ public:
 
     bool HasItemInGroup(shared_str const& section_name);
     CItemMgr const* GetItemMngr() const { return m_item_mngr; };
+
+    pcstr GetDebugType() override { return "CUIMpTradeWnd"; }
+
 private:
     // data
     shared_str m_sectionName;
@@ -268,7 +272,7 @@ private:
     dd_list_type GetListType(CUIDragDropListEx* l);
     CUIDragDropListEx* GetMatchedListForItem(const shared_str& sect_name);
     void UpdateCorrespondingItemsForList(CUIDragDropListEx* _list);
-    const u32 GetRank() const;
+    u32 GetRank() const;
     void SetInfoString(LPCSTR str);
     void SetMoneyChangeString(int diff);
     void CleanUserItems();

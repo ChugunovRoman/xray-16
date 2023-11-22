@@ -1,0 +1,37 @@
+AI:
+- src/xrAICore/**/*
+- src/xrGame/ai/**/*
+
+Documentation:
+- docs/**/*
+
+External (3rd party):
+- Externals/**/*
+
+Game assets:
+- res/**/*
+
+Physics:
+- src/xrPhysics/**/*
+
+Renderer:
+- src/Layers/**/*
+
+DirectX:
+- src/Layers/xrRenderDX*
+- src/Layers/xrRenderPC_R1
+- src/Layers/xrRenderPC_R2
+- src/Layers/xrRenderPC_R4
+
+OpenGL:
+- src/Layers/xrRenderGL
+- src/Layers/xrRenderPC_GL
+
+Sound:
+- src/xrSound/**/*
+
+UI:
+- src/xrUICore/**/*
+- src/xrGame/ui/**/*
+
+

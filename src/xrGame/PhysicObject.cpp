@@ -404,9 +404,9 @@ void CPhysicObject::AddElement(CPhysicsElement* root_e, int id)
     }
 
     CBoneData& BD = K->LL_GetData(u16(id));
-    for (vecBonesIt it = BD.children.begin(); BD.children.end() != it; ++it)
+    for (auto& bone : BD.children)
     {
-        AddElement(E, (*it)->GetSelfID());
+        AddElement(E, bone->GetSelfID());
     }
 }
 
@@ -436,10 +436,6 @@ void CPhysicObject::CreateBody(CSE_ALifeObjectPhysic* po)
     {
         // pKinematics->LL_SetBoneRoot(0);
         CreateSkeleton(po);
-    }
-    break;
-
-    default: {
     }
     break;
     }

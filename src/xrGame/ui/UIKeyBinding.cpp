@@ -6,10 +6,13 @@
 #include "xrUICore/ScrollView/UIScrollView.h"
 #include "xrEngine/xr_level_controller.h"
 
-CUIKeyBinding::CUIKeyBinding() : m_isGamepadBinds(false)
+CUIKeyBinding::CUIKeyBinding()
+    : CUIWindow(CUIKeyBinding::GetDebugType()),
+      m_header{ "Game actions header", "Primary bindings header", "Secondary bindings header" },
+      m_frame( "Frame" )
 {
-    for (u8 i = 0; i < 3; ++i)
-        AttachChild(&m_header[i]);
+    for (auto& header : m_header)
+        AttachChild(&header);
 
     AttachChild(&m_frame);
 
@@ -54,7 +57,7 @@ void CUIKeyBinding::FillUpList(CUIXml& xml_doc_ui, LPCSTR path_ui)
         shared_str grp_name = xml_doc.ReadAttrib("group", i, "name");
         R_ASSERT(xr_strlen(grp_name));
 
-        CUIStatic* item = xr_new<CUIStatic>();
+        CUIStatic* item = xr_new<CUIStatic>(grp_name.c_str());
         CUIXmlInit::InitStatic(xml_doc_ui, strconcat(sizeof(buf), buf, path_ui, ":scroll_view:item_group"), 0, item);
         item->TextItemControl()->SetTextST(grp_name.c_str());
         m_scroll_wnd->AddWindow(item, true);
@@ -69,7 +72,7 @@ void CUIKeyBinding::FillUpList(CUIXml& xml_doc_ui, LPCSTR path_ui)
             // first field of list item
             shared_str command_id = xml_doc.ReadAttrib("command", j, "id");
 
-            item = xr_new<CUIStatic>();
+            item = xr_new<CUIStatic>(command_id.c_str());
             CUIXmlInit::InitStatic(xml_doc_ui, strconcat(sizeof(buf), buf, path_ui, ":scroll_view:item_key"), 0, item);
             item->TextItemControl()->SetTextST(command_id.c_str());
             m_scroll_wnd->AddWindow(item, true);

@@ -101,10 +101,8 @@ target_include_directories(${PROJECT_NAME}
     PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/Externals/xrLuaFix
     ${CMAKE_SOURCE_DIR}/Externals/luabind
-    ${CMAKE_SOURCE_DIR}/Externals/lua-marshal
-    ${CMAKE_SOURCE_DIR}/Externals/xrLuaFS
-    ${CMAKE_SOURCE_DIR}/Externals/lua_extensions
     ${SDL2_INCLUDE_DIRS}
 )
 
@@ -112,10 +110,8 @@ target_link_libraries(${PROJECT_NAME}
     PRIVATE
     xrAPI
     xrCore
+    xrLuaFix
     xrLuabind
-    xrMarshal
-    xrLuaFS
-    lua_extensions
     ${LUA_LIBRARIES}
 )
 

@@ -43,7 +43,7 @@ constexpr cpcstr CARBODY_ITEM_XML    = "carbody_item.xml";
 }
 
 CUIActorMenu::CUIActorMenu()
-    : m_currMenuMode(mmUndefined), m_last_time(u32(-1)),
+    : CUIDialogWnd(CUIActorMenu::GetDebugType()), m_currMenuMode(mmUndefined), m_last_time(u32(-1)),
       m_repair_mode(false), m_item_info_view(false), m_highlight_clear(true),
       m_trade_partner_inventory_state(0)
 {
@@ -194,10 +194,10 @@ void CUIActorMenu::InitializeUniversal(CUIXml& uiXml)
 
     constexpr std::tuple<eActorMenuListType, cpcstr, cpcstr, cpcstr, cpcstr, bool> inventory_lists[] =
     {
-        // { id,                   "xml_section_name",         "condition_indicator,   "highlighter",             "blocker", is_it_critical_and_required }
-        { eInventoryKnifeList,     "dragdrop_knife",           "progess_bar_knife",    "inv_slot1_highlight",     nullptr,            false },
-        { eInventoryPistolList,    "dragdrop_pistol",          "progess_bar_weapon1",  "inv_slot2_highlight",     nullptr,            true },
-        { eInventoryAutomaticList, "dragdrop_automatic",       "progess_bar_weapon2",  "inv_slot3_highlight",     nullptr,            true },
+        // { id,                   "xml_section_name",         "condition_indicator,  "highlighter",             "blocker",          required }
+        { eInventoryKnifeList,     "dragdrop_knife",           "progess_bar_knife",   "inv_slot1_highlight",     nullptr,            false },
+        { eInventoryPistolList,    "dragdrop_pistol",          "progess_bar_weapon1", "inv_slot2_highlight",     nullptr,            true },
+        { eInventoryAutomaticList, "dragdrop_automatic",       "progess_bar_weapon2", "inv_slot3_highlight",     nullptr,            true },
 
         { eInventoryOutfitList,    "dragdrop_outfit",          "progess_bar_outfit",   "outfit_slot_highlight",   nullptr,            true },
         { eInventoryHelmetList,    "dragdrop_helmet",          "progess_bar_helmet",   "helmet_slot_highlight",   "helmet_over",      false },
@@ -218,19 +218,19 @@ void CUIActorMenu::InitializeUniversal(CUIXml& uiXml)
 
         { eTrashList,              "dragdrop_trash",           nullptr,               nullptr,                   nullptr,            false },
 
-        { eInventoryBackpackList,  "dragdrop_backpack",        nullptr,                "backpack_slot_highlight", nullptr,           false },
+        { eInventoryBackpackList,  "dragdrop_backpack",        nullptr,               "backpack_slot_highlight", nullptr,            false },
     };
     static_assert(std::size(inventory_lists) == eListCount,
         "All lists should be listed in the tuple above.");
 
-    for (auto [id, section, conditionIndicator, highlight, block, critical] : inventory_lists)
+    for (auto [id, section, conditionIndicator, highlight, block, required] : inventory_lists)
     {
         if (!section)
             continue;
 
         CUIDragDropListEx*& list = m_pLists[id];
 
-        list = UIHelper::CreateDragDropListEx(uiXml, section, this, critical);
+        list = UIHelper::CreateDragDropListEx(uiXml, section, this, required);
         if (!list)
             continue;
 
@@ -323,22 +323,24 @@ void CUIActorMenu::InitializeInventoryMode(CUIXml& uiXml)
     outfitInfo->SetAutoDelete(true);
     m_pInventoryWnd->AttachChild(outfitInfo);
 
-    std::tuple<eActorMenuListType, cpcstr, CUIWindow*> inventory_lists[] =
+    std::tuple<eActorMenuListType, cpcstr, CUIWindow*, bool> inventory_lists[] =
     {
         // { id,                   "xml_section_name",   parent }
-        { eInventoryPistolList,    "dragdrop_pistol",    m_pInventoryWnd },
-        { eInventoryAutomaticList, "dragdrop_automatic", m_pInventoryWnd },
-        { eInventoryBackpackList,  "dragdrop_backpack",  m_pInventoryWnd },
-        { eInventoryOutfitList,    "dragdrop_outfit",    m_pInventoryWnd },
-        { eInventoryBeltList,      "dragdrop_belt",      m_pInventoryWnd },
-        { eInventoryBagList,       "dragdrop_bag",       m_ActorWeightBar->m_BagWnd },
+        { eInventoryPistolList,    "dragdrop_pistol",    m_pInventoryWnd,            true },
+        { eInventoryAutomaticList, "dragdrop_automatic", m_pInventoryWnd,            true },
+        { eInventoryBackpackList,  "dragdrop_backpack",  m_pInventoryWnd,            false },
+        { eInventoryOutfitList,    "dragdrop_outfit",    m_pInventoryWnd,            true },
+        { eInventoryBeltList,      "dragdrop_belt",      m_pInventoryWnd,            true },
+        { eInventoryBagList,       "dragdrop_bag",       m_ActorWeightBar->m_BagWnd, true },
     };
-    for (auto [id, section, parent] : inventory_lists)
+    for (auto [id, section, parent, required] : inventory_lists)
     {
         if (id != eInventoryOutfitList)
-            m_pLists[id] = UIHelper::CreateDragDropListEx(uiXml, section, parent);
+            m_pLists[id] = UIHelper::CreateDragDropListEx(uiXml, section, parent, required);
         else // eInventoryOutfitList
         {
+            if (!required && !uiXml.NavigateToNode(section))
+                continue;
             CUIOutfitDragDropList* list = xr_new<CUIOutfitDragDropList>();
             list->SetAutoDelete(true);
             parent->AttachChild(list);

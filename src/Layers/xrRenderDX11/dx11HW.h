@@ -1,13 +1,11 @@
 #pragma once
 
-#include "Layers/xrRender/HWCaps.h"
 #include "xrCore/ModuleLookup.hpp"
-#include "SDL.h"
-#include "SDL_syswm.h"
 
-#if !defined(_MAYA_EXPORT)
+#include "Layers/xrRender/HWCaps.h"
 #include "Layers/xrRender/stats_manager.h"
-#endif
+
+#include <SDL.h>
 
 class CHW
     : public pureAppActivate,
@@ -24,6 +22,8 @@ public:
     void DestroyDevice();
 
     void Reset();
+
+    void SetPrimaryAttributes(u32& windowFlags);
 
     std::pair<u32, u32> GetSurfaceSize() const;
 
@@ -47,16 +47,21 @@ public:
     void OnAppDeactivate() override;
 
 private:
-    void CreateSwapChain(HWND hwnd);
+    bool CreateSwapChain(HWND hwnd);
     bool CreateSwapChain2(HWND hwnd);
 
     bool ThisInstanceIsGlobal() const;
 
 public:
-    void BeginPixEvent(LPCWSTR wszName) const;
-    void EndPixEvent() const;
+    ICF ID3DDeviceContext* get_context(u32 context_id)
+    {
+        VERIFY(context_id < R__NUM_CONTEXTS);
+        return d3d_contexts_pool[context_id];
+    }
 
 public:
+    static constexpr auto IMM_CTX_ID = R__NUM_PARALLEL_CONTEXTS;
+
     CHWCaps Caps;
 
     u32 BackBufferCount{};
@@ -68,7 +73,6 @@ public:
 
     IDXGIFactory1* m_pFactory = nullptr;
     IDXGIAdapter1* m_pAdapter = nullptr; // pD3D equivalent
-    ID3DDeviceContext* pContext = nullptr;
     IDXGISwapChain* m_pSwapChain = nullptr;
     D3D_FEATURE_LEVEL FeatureLevel;
     bool Valid = true;
@@ -76,6 +80,8 @@ public:
     bool DoublePrecisionFloatShaderOps;
     bool SAD4ShaderInstructions;
     bool ExtendedDoublesShaderInstructions;
+
+    ID3DDeviceContext* d3d_contexts_pool[R__NUM_CONTEXTS]{};
 
     bool DX10Only = false;
 #ifdef HAS_DX11_2
@@ -85,7 +91,6 @@ public:
     ID3D11Device3* pDevice3 = nullptr;
 #endif
     ID3D11DeviceContext1* pContext1 = nullptr;
-    ID3DUserDefinedAnnotation* pAnnotation = nullptr;
 
     using D3DCompileFunc = decltype(&D3DCompile);
     D3DCompileFunc D3DCompile = nullptr;

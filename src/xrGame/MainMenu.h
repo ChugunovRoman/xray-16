@@ -151,7 +151,6 @@ public:
     void IR_OnMouseHold(int btn) override;
     void IR_OnMouseWheel(int x, int y) override;
     void IR_OnMouseMove(int x, int y) override;
-    void IR_OnMouseStop(int x, int y) override;
 
     void IR_OnKeyboardPress(int dik) override;
     void IR_OnKeyboardRelease(int dik) override;
@@ -180,6 +179,9 @@ public:
     void SetErrorDialog(EErrorDlg ErrDlg);
     EErrorDlg GetErrorDialogType() const { return m_NeedErrDialog; }
     void CheckForErrorDlg();
+
+    pcstr GetDebugType() override { return "CMainMenu"; }
+    bool FillDebugTree(const CUIDebugState& debugState) override;
 
     void SwitchToMultiplayerMenu();
 

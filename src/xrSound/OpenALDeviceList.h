@@ -1,11 +1,6 @@
 #pragma once
 
-#include "openal/al.h"
-#include "openal/alc.h"
 #include "xrCore/_std_extensions.h"
-
-constexpr pcstr AL_GENERIC_HARDWARE = "Generic Hardware";
-constexpr pcstr AL_GENERIC_SOFTWARE = "Generic Software";
 
 struct ALDeviceDesc
 {
@@ -19,8 +14,6 @@ struct ALDeviceDesc
             u16 selected : 1;
             u16 eax : 3;
             u16 efx : 1;
-            u16 xram : 1;
-            u16 eax_unwanted : 1;
 
             u16 unused : 9;
         };
@@ -33,7 +26,6 @@ struct ALDeviceDesc
         minor_ver = mn;
         major_ver = mj;
         props.storage = 0;
-        props.eax_unwanted = true;
     }
 };
 
@@ -41,15 +33,24 @@ class ALDeviceList
 {
     xr_vector<ALDeviceDesc> m_devices;
     string256 m_defaultDeviceName;
+
     void Enumerate();
+    void IterateAndAddDevicesString(pcstr devices);
 
 public:
     ALDeviceList();
     ~ALDeviceList();
 
-    u32 GetNumDevices() const { return m_devices.size(); }
-    const ALDeviceDesc& GetDeviceDesc(u32 index) { return m_devices[index]; }
-    pcstr GetDeviceName(u32 index) const;
-    void GetDeviceVersion(u32 index, int* major, int* minor);
+    [[nodiscard]]
+    size_t GetNumDevices() const { return m_devices.size(); }
+
+    [[nodiscard]]
+    const ALDeviceDesc& GetDeviceDesc(size_t index) const { return m_devices[index]; }
+
+    [[nodiscard]]
+    pcstr GetDeviceName(size_t index) const;
+
+    void GetDeviceVersion(size_t index, int* major, int* minor);
+
     void SelectBestDevice();
 };

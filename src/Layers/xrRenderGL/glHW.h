@@ -16,7 +16,7 @@ public:
 
     void Reset();
 
-    void SetPrimaryAttributes();
+    void SetPrimaryAttributes(u32& windowFlags);
 
     IRender::RenderContext GetCurrentContext() const;
     int  MakeContextCurrent(IRender::RenderContext context) const;
@@ -42,11 +42,13 @@ public:
     void EndPixEvent() const;
 
 public:
+    static constexpr auto IMM_CTX_ID = 0;
+
     CHWCaps Caps;
 
     u32 BackBufferCount{};
     u32 CurrentBackBuffer{};
-    
+
     GLuint pFB{};
 
     SDL_Window* m_window{};

@@ -9,9 +9,9 @@ static void generate_jitter(u32* dest, u32 elem_count)
         Ivector2 test;
         test.set(Random.randI(0, 256), Random.randI(0, 256));
         BOOL valid = TRUE;
-        for (u32 t = 0; t < samples.size(); t++)
+        for (auto& sample : samples)
         {
-            int dist = _abs(test.x - samples[t].x) + _abs(test.y - samples[t].y);
+            int dist = _abs(test.x - sample.x) + _abs(test.y - sample.y);
             if (dist < 32)
             {
                 valid = FALSE;
@@ -46,6 +46,9 @@ void CRenderTarget::build_textures()
     }*/
     // Build material(s)
     {
+#ifdef XR_PLATFORM_BSD
+        fedisableexcept(FE_UNDERFLOW | FE_INEXACT); // XXX: I really want to see a better solution
+#endif
         // Surface
         glGenTextures(1, &t_material_surf);
         CHK_GL(glBindTexture(GL_TEXTURE_3D, t_material_surf));
@@ -55,8 +58,8 @@ void CRenderTarget::build_textures()
         t_material->surface_set(GL_TEXTURE_3D, t_material_surf);
 
         // Fill it (addr: x=dot(L,N),y=dot(L,H))
-        static const u32 RowPitch = TEX_material_LdotN * 2;
-        static const u32 SlicePitch = TEX_material_LdotH * RowPitch;
+        static constexpr u32 RowPitch = TEX_material_LdotN * 2;
+        static constexpr u32 SlicePitch = TEX_material_LdotH * RowPitch;
         u16 pBits[TEX_material_LdotN * TEX_material_LdotH * TEX_material_Count];
         for (u32 slice = 0; slice < TEX_material_Count; slice++)
         {
@@ -215,10 +218,8 @@ void CRenderTarget::build_textures()
             t_noise_mipped->surface_set(GL_TEXTURE_2D, t_noise_surf_mipped);
 
             //	Update texture. Generate mips.
-            CHK_GL(glCopyImageSubData(t_noise_surf[0], GL_TEXTURE_2D, 0, 0, 0, 0, t_noise_surf_mipped, GL_TEXTURE_2D
-                , 0, 0, 0, 0, TEX_jitter, TEX_jitter, 1));
-
             glBindTexture(GL_TEXTURE_2D, t_noise_surf_mipped);
+            CHK_GL(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, TEX_jitter, TEX_jitter, GL_RGBA, GL_UNSIGNED_BYTE, tempData[0]));
             CHK_GL(glGenerateMipmap(GL_TEXTURE_2D));
         }
     }

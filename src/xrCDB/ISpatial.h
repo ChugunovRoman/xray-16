@@ -1,16 +1,37 @@
 #pragma once
 
 #include "Common/Noncopyable.hpp"
+
 #include "xrCore/xrPool.h"
 //#include "xr_collide_defs.h"
-#include "xrCore/xrCore_benchmark_macros.h"
 #include "xrCore/xr_types.h"
 #include "xrCore/_vector3d.h"
 #include "xrCore/_sphere.h"
 #include "xrCore/FTimer.h"
+
 #include "xrCDB.h"
 
 #pragma pack(push, 4)
+
+//////////////////////////////////////////////////////////////////////////
+// definition (Portal)
+class IRender_Portal
+{
+public:
+    virtual ~IRender_Portal() = default;
+};
+
+//////////////////////////////////////////////////////////////////////////
+// definition (Sector)
+class IRender_Sector
+{
+public:
+    using sector_id_t = size_t;
+    static auto constexpr INVALID_SECTOR_ID = static_cast<sector_id_t>(-1);
+
+    virtual ~IRender_Sector() = default;
+    sector_id_t unique_id{INVALID_SECTOR_ID};
+};
 
 /*
 Requirements:
@@ -70,7 +91,6 @@ enum
 
 //////////////////////////////////////////////////////////////////////////
 class ISpatial_NODE;
-class IRender_Sector;
 class ISpatial_DB;
 class IGameObject;
 namespace Feel
@@ -88,11 +108,11 @@ public:
     Fvector node_center; // Cached node center for TBV optimization
     float node_radius; // Cached node bounds for TBV optimization
     ISpatial_NODE* node_ptr; // Cached parent node for "empty-members" optimization
-    IRender_Sector* sector;
+    IRender_Sector::sector_id_t sector_id;
     ISpatial_DB* space; // allow different spaces
 };
 
-class XRCDB_API ISpatial
+class XRCDB_API XR_NOVTABLE ISpatial
 {
 public:
     virtual ~ISpatial() = 0;
@@ -102,35 +122,35 @@ public:
     virtual void spatial_unregister() = 0;
     virtual void spatial_move() = 0;
     virtual Fvector spatial_sector_point() = 0;
-    virtual void spatial_updatesector() = 0;
+    virtual void spatial_updatesector(IRender_Sector::sector_id_t sector_id) = 0;
     virtual IGameObject* dcast_GameObject() = 0;
     virtual Feel::Sound* dcast_FeelSound() = 0;
     virtual IRenderable* dcast_Renderable() = 0;
     virtual IRender_Light* dcast_Light() = 0;
 };
 
-ICF ISpatial::~ISpatial() {}
-class XRCDB_API SpatialBase : public virtual ISpatial
+inline ISpatial::~ISpatial() = default;
+
+class XRCDB_API XR_NOVTABLE SpatialBase : public virtual ISpatial
 {
 public:
     SpatialData spatial;
 
 private:
-    void spatial_updatesector_internal();
+    void spatial_updatesector_internal(IRender_Sector::sector_id_t sector_id);
 
 public:
     virtual SpatialData& GetSpatialData() override final { return spatial; }
     virtual bool spatial_inside() override final;
     virtual void spatial_register() override;
     virtual void spatial_unregister() override;
-    BENCH_SEC_SCRAMBLEVTBL2
     virtual void spatial_move() override;
     virtual Fvector spatial_sector_point() override { return spatial.sphere.P; }
-    virtual void spatial_updatesector() override final
+    virtual void spatial_updatesector(IRender_Sector::sector_id_t sector_id) override final
     {
         if (0 == (spatial.type & STYPEFLAG_INVALIDSECTOR))
             return;
-        spatial_updatesector_internal();
+        spatial_updatesector_internal(sector_id);
     }
 
     virtual IGameObject* dcast_GameObject() override { return nullptr; }

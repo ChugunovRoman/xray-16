@@ -55,7 +55,7 @@ void CRenderTarget::phase_combine()
         phase_ssao();
 
     // low/hi RTs
-    u_setrt(rt_Generic_0, rt_Generic_1, 0, get_base_zb());
+    u_setrt(RCache, rt_Generic_0, rt_Generic_1, 0, get_base_zb());
     RCache.set_Stencil(FALSE);
 
     BOOL split_the_scene_to_minimize_wait = FALSE;
@@ -79,7 +79,7 @@ void CRenderTarget::phase_combine()
     RCache.set_Stencil(TRUE, D3DCMP_LESSEQUAL, 0x01, 0xff, 0x00); // stencil should be >= 1
     if (RImplementation.o.nvstencil)
     {
-        u_stencil_optimize(FALSE);
+        u_stencil_optimize(RCache, FALSE);
         RCache.set_ColorWriteEnable();
     }
     //}
@@ -102,7 +102,7 @@ void CRenderTarget::phase_combine()
     if (!_menu_pp)
     {
         // Compute params
-        CEnvDescriptorMixer& envdesc = *g_pGamePersistent->Environment().CurrentEnv;
+        const auto& envdesc = g_pGamePersistent->Environment().CurrentEnv;
         const float minamb = 0.001f;
         Fvector4 ambclr =
         {
@@ -113,28 +113,12 @@ void CRenderTarget::phase_combine()
         };
         ambclr.mul(ps_r2_sun_lumscale_amb);
 
-        Fvector4 envclr;
-        if (envdesc.old_style)
-        {
-            envclr =
-            {
-                envdesc.sky_color.x * 2 + EPS, envdesc.sky_color.y * 2 + EPS,
-                envdesc.sky_color.z * 2 + EPS, envdesc.weight
-            };
-        }
-        else
-        {
-            envclr =
-            {
-                envdesc.hemi_color.x * 2 + EPS, envdesc.hemi_color.y * 2 + EPS,
-                envdesc.hemi_color.z * 2 + EPS, envdesc.weight
-            };
-        }
-
-        Fvector4 fogclr = {envdesc.fog_color.x, envdesc.fog_color.y, envdesc.fog_color.z, 0};
+        Fvector4 envclr = envdesc.env_color;
         envclr.x *= 2 * ps_r2_sun_lumscale_hemi;
         envclr.y *= 2 * ps_r2_sun_lumscale_hemi;
         envclr.z *= 2 * ps_r2_sun_lumscale_hemi;
+
+        Fvector4 fogclr = {envdesc.fog_color.x, envdesc.fog_color.y, envdesc.fog_color.z, 0};
         Fvector4 sunclr, sundir;
 
         float fSSAONoise = 2.0f;
@@ -166,18 +150,18 @@ void CRenderTarget::phase_combine()
         p1.set((_w + .5f) / _w, (_h + .5f) / _h);
 
         // Fill vertex buffer
-        // Fvector4* pv             = (Fvector4*)   RCache.Vertex.Lock  (4,g_combine_VP->vb_stride,Offset);
+        // Fvector4* pv             = (Fvector4*)   RImplementation.Vertex.Lock  (4,g_combine_VP->vb_stride,Offset);
         // pv->set                      (hclip(EPS,     _w),    hclip(_h+EPS,   _h),    p0.x, p1.y);    pv++;
         // pv->set                      (hclip(EPS,     _w),    hclip(EPS,      _h),    p0.x, p0.y);    pv++;
         // pv->set                      (hclip(_w+EPS,  _w),    hclip(_h+EPS,   _h),    p1.x, p1.y);    pv++;
         // pv->set                      (hclip(_w+EPS,  _w),    hclip(EPS,      _h),    p1.x, p0.y);    pv++;
-        // RCache.Vertex.Unlock     (4,g_combine_VP->vb_stride);
+        // RImplementation.Vertex.Unlock     (4,g_combine_VP->vb_stride);
 
         // Fill VB
         float scale_X = float(Device.dwWidth) / float(TEX_jitter);
         float scale_Y = float(Device.dwHeight) / float(TEX_jitter);
 
-        FVF::TL* pv = (FVF::TL*)RCache.Vertex.Lock(4, g_combine_VP->vb_stride, Offset);
+        FVF::TL* pv = (FVF::TL*)RImplementation.Vertex.Lock(4, g_combine_VP->vb_stride, Offset);
         pv->set(hclip(EPS, _w), hclip(_h + EPS, _h), p0.x, p1.y, 0, 0, scale_Y);
         pv++;
         pv->set(hclip(EPS, _w), hclip(EPS, _h), p0.x, p0.y, 0, 0, 0);
@@ -186,17 +170,7 @@ void CRenderTarget::phase_combine()
         pv++;
         pv->set(hclip(_w + EPS, _w), hclip(EPS, _h), p1.x, p0.y, 0, scale_X, 0);
         pv++;
-        RCache.Vertex.Unlock(4, g_combine_VP->vb_stride);
-
-        dxEnvDescriptorMixerRender& envdescren = *(dxEnvDescriptorMixerRender*)(&*envdesc.m_pDescriptorMixer);
-
-        // Setup textures
-        ID3DBaseTexture* e0 = _menu_pp ? 0 : envdescren.sky_r_textures_env[0].second->surface_get();
-        ID3DBaseTexture* e1 = _menu_pp ? 0 : envdescren.sky_r_textures_env[1].second->surface_get();
-        t_envmap_0->surface_set(e0);
-        _RELEASE(e0);
-        t_envmap_1->surface_set(e1);
-        _RELEASE(e1);
+        RImplementation.Vertex.Unlock(4, g_combine_VP->vb_stride);
 
         // Draw
         RCache.set_Element(s_combine->E[0]);
@@ -218,7 +192,7 @@ void CRenderTarget::phase_combine()
     // Forward rendering
     {
         PIX_EVENT(Forward_rendering);
-        u_setrt(rt_Generic_0, 0, 0, get_base_zb()); // LDR RT
+        u_setrt(RCache, rt_Generic_0, 0, 0, get_base_zb()); // LDR RT
         RCache.set_CullMode(CULL_CCW);
         RCache.set_Stencil(FALSE);
         RCache.set_ColorWriteEnable();
@@ -240,19 +214,18 @@ void CRenderTarget::phase_combine()
     // Distortion filter
     BOOL bDistort = RImplementation.o.distortion_enabled; // This can be modified
     {
-        if ((0 == RImplementation.mapDistort.size()) && !_menu_pp)
+        auto& dsgraph = RImplementation.get_imm_context();
+        if ((0 == dsgraph.mapDistort.size()) && !_menu_pp)
             bDistort = FALSE;
         if (bDistort)
         {
             PIX_EVENT(render_distort_objects);
-            u_setrt(rt_Generic_1, 0, 0, get_base_zb()); // Now RT is a distortion mask
+            u_setrt(RCache, rt_Generic_1, 0, 0, get_base_zb()); // Now RT is a distortion mask
             RCache.ClearRT(rt_Generic_1, color_rgba(127, 127, 0, 127));
             RCache.set_CullMode(CULL_CCW);
             RCache.set_Stencil(FALSE);
             RCache.set_ColorWriteEnable();
-            RImplementation.r_dsgraph_render_distort();
-            if (g_pGamePersistent)
-                g_pGamePersistent->OnRenderPPUI_PP(); // PP-UI
+            dsgraph.render_distort();
         }
     }
 
@@ -264,9 +237,9 @@ void CRenderTarget::phase_combine()
 
     // Combine everything + perform AA
     if (PP_Complex)
-        u_setrt(rt_Color, 0, 0, get_base_zb()); // LDR RT
+        u_setrt(RCache, rt_Color, 0, 0, get_base_zb()); // LDR RT
     else
-        u_setrt(Device.dwWidth, Device.dwHeight, get_base_rt(), NULL, NULL, get_base_zb());
+        u_setrt(RCache, Device.dwWidth, Device.dwHeight, get_base_rt(), NULL, NULL, get_base_zb());
     //. u_setrt             ( Device.dwWidth,Device.dwHeight,get_base_rt(),NULL,NULL,get_base_zb());
     RCache.set_CullMode(CULL_NONE);
     RCache.set_Stencil(FALSE);
@@ -294,7 +267,7 @@ void CRenderTarget::phase_combine()
         p1.set((_w + .5f) / _w, (_h + .5f) / _h);
 
         // Fill vertex buffer
-        v_aa* pv = (v_aa*)RCache.Vertex.Lock(4, g_aa_AA->vb_stride, Offset);
+        v_aa* pv = (v_aa*)RImplementation.Vertex.Lock(4, g_aa_AA->vb_stride, Offset);
         pv->p.set(EPS, float(_h + EPS), EPS, 1.f);
         pv->uv0.set(p0.x, p1.y);
         pv->uv1.set(p0.x - ddw, p1.y - ddh);
@@ -331,7 +304,7 @@ void CRenderTarget::phase_combine()
         pv->uv5.set(p1.x - ddw, p0.y, p0.y, p1.x + ddw);
         pv->uv6.set(p1.x, p0.y - ddh, p0.y + ddh, p1.x);
         pv++;
-        RCache.Vertex.Unlock(4, g_aa_AA->vb_stride);
+        RImplementation.Vertex.Unlock(4, g_aa_AA->vb_stride);
 
         //  Set up variable
         Fvector2 vDofKernel;
@@ -463,12 +436,12 @@ if (0)      {
         p1.set                      ((_w+.5f)/_w, (_h+.5f)/_h );
 
         // Fill vertex buffer
-        FVF::TL* pv                 = (FVF::TL*) RCache.Vertex.Lock (4,g_combine->vb_stride,Offset);
+        FVF::TL* pv                 = (FVF::TL*) RImplementation.Vertex.Lock (4,g_combine->vb_stride,Offset);
         pv->set                     ((IX+0)*_w+EPS, (IY+1)*_h+EPS,  EPS,    1.f, C, p0.x, p1.y);    pv++;
         pv->set                     ((IX+0)*_w+EPS, (IY+0)*_h+EPS,  EPS,    1.f, C, p0.x, p0.y);    pv++;
         pv->set                     ((IX+1)*_w+EPS, (IY+1)*_h+EPS,  EPS,    1.f, C, p1.x, p1.y);    pv++;
         pv->set                     ((IX+1)*_w+EPS, (IY+0)*_h+EPS,  EPS,    1.f, C, p1.x, p0.y);    pv++;
-        RCache.Vertex.Unlock        (4,g_combine->vb_stride);
+        RImplementation.Vertex.Unlock        (4,g_combine->vb_stride);
 
         // Draw COLOR
         RCache.set_Shader           (s_combine_dbg_0);
@@ -484,12 +457,12 @@ if (0)      {
         p1.set                      ((_w+.5f)/_w, (_h+.5f)/_h );
 
         // Fill vertex buffer
-        FVF::TL* pv                 = (FVF::TL*) RCache.Vertex.Lock (4,g_combine->vb_stride,Offset);
+        FVF::TL* pv                 = (FVF::TL*) RImplementation.Vertex.Lock (4,g_combine->vb_stride,Offset);
         pv->set                     ((IX+0)*_w+EPS, (IY+1)*_h+EPS,  EPS,    1.f, C, p0.x, p1.y);    pv++;
         pv->set                     ((IX+0)*_w+EPS, (IY+0)*_h+EPS,  EPS,    1.f, C, p0.x, p0.y);    pv++;
         pv->set                     ((IX+1)*_w+EPS, (IY+1)*_h+EPS,  EPS,    1.f, C, p1.x, p1.y);    pv++;
         pv->set                     ((IX+1)*_w+EPS, (IY+0)*_h+EPS,  EPS,    1.f, C, p1.x, p0.y);    pv++;
-        RCache.Vertex.Unlock        (4,g_combine->vb_stride);
+        RImplementation.Vertex.Unlock        (4,g_combine->vb_stride);
 
         // Draw COLOR
         RCache.set_Shader           (s_combine_dbg_1);
@@ -510,7 +483,7 @@ void CRenderTarget::phase_wallmarks()
     // Targets
     RCache.set_RT(NULL, 2);
     RCache.set_RT(NULL, 1);
-    u_setrt(rt_Color, NULL, NULL, get_base_zb());
+    u_setrt(RCache, rt_Color, NULL, NULL, get_base_zb());
     // Stencil  - draw only where stencil >= 0x1
     RCache.set_Stencil(TRUE, D3DCMP_LESSEQUAL, 0x01, 0xff, 0x00);
     RCache.set_CullMode(CULL_CCW);
@@ -524,12 +497,12 @@ void CRenderTarget::phase_combine_volumetric()
     Fvector2 p0, p1;
 
     // u_setrt(rt_Generic_0,0,0,get_base_zb() );           // LDR RT
-    u_setrt(rt_Generic_0, rt_Generic_1, 0, get_base_zb());
+    u_setrt(RCache, rt_Generic_0, rt_Generic_1, 0, get_base_zb());
     //  Sets limits to both render targets
     RCache.set_ColorWriteEnable(D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
     {
         // Compute params
-        CEnvDescriptorMixer& envdesc = *g_pGamePersistent->Environment().CurrentEnv;
+        const auto& envdesc = g_pGamePersistent->Environment().CurrentEnv;
         const float minamb = 0.001f;
         Fvector4 ambclr =
         {
@@ -540,28 +513,12 @@ void CRenderTarget::phase_combine_volumetric()
         };
         ambclr.mul(ps_r2_sun_lumscale_amb);
 
-        Fvector4 envclr;
-        if (envdesc.old_style)
-        {
-            envclr =
-            {
-                envdesc.sky_color.x * 2 + EPS, envdesc.sky_color.y * 2 + EPS,
-                envdesc.sky_color.z * 2 + EPS, envdesc.weight
-            };
-        }
-        else
-        {
-            envclr =
-            {
-                envdesc.hemi_color.x * 2 + EPS, envdesc.hemi_color.y * 2 + EPS,
-                envdesc.hemi_color.z * 2 + EPS, envdesc.weight
-            };
-        }
-
-        Fvector4 fogclr = {envdesc.fog_color.x, envdesc.fog_color.y, envdesc.fog_color.z, 0};
+        Fvector4 envclr = envdesc.env_color;
         envclr.x *= 2 * ps_r2_sun_lumscale_hemi;
         envclr.y *= 2 * ps_r2_sun_lumscale_hemi;
         envclr.z *= 2 * ps_r2_sun_lumscale_hemi;
+
+        Fvector4 fogclr = {envdesc.fog_color.x, envdesc.fog_color.y, envdesc.fog_color.z, 0};
         Fvector4 sunclr, sundir;
 
         // sun-params
@@ -585,19 +542,19 @@ void CRenderTarget::phase_combine_volumetric()
         p1.set((_w + .5f) / _w, (_h + .5f) / _h);
 
         // Fill vertex buffer
-        // Fvector4* pv             = (Fvector4*)   RCache.Vertex.Lock  (4,g_combine_VP->vb_stride,Offset);
+        // Fvector4* pv             = (Fvector4*)   RImplementation.Vertex.Lock  (4,g_combine_VP->vb_stride,Offset);
         // pv->set                      (hclip(EPS,     _w),    hclip(_h+EPS,   _h),    p0.x, p1.y);    pv++;
         // pv->set                      (hclip(EPS,     _w),    hclip(EPS,      _h),    p0.x, p0.y);    pv++;
         // pv->set                      (hclip(_w+EPS,  _w),    hclip(_h+EPS,   _h),    p1.x, p1.y);    pv++;
         // pv->set                      (hclip(_w+EPS,  _w),    hclip(EPS,      _h),    p1.x, p0.y);    pv++;
-        // RCache.Vertex.Unlock     (4,g_combine_VP->vb_stride);
+        // RImplementation.Vertex.Unlock     (4,g_combine_VP->vb_stride);
 
         // Fill VB
         float scale_X = float(Device.dwWidth) / float(TEX_jitter);
         float scale_Y = float(Device.dwHeight) / float(TEX_jitter);
 
         // Fill vertex buffer
-        FVF::TL* pv = (FVF::TL*)RCache.Vertex.Lock(4, g_combine_VP->vb_stride, Offset);
+        FVF::TL* pv = (FVF::TL*)RImplementation.Vertex.Lock(4, g_combine_VP->vb_stride, Offset);
         pv->set(hclip(EPS, _w), hclip(_h + EPS, _h), p0.x, p1.y, 0, 0, scale_Y);
         pv++;
         pv->set(hclip(EPS, _w), hclip(EPS, _h), p0.x, p0.y, 0, 0, 0);
@@ -606,7 +563,7 @@ void CRenderTarget::phase_combine_volumetric()
         pv++;
         pv->set(hclip(_w + EPS, _w), hclip(EPS, _h), p1.x, p0.y, 0, scale_X, 0);
         pv++;
-        RCache.Vertex.Unlock(4, g_combine_VP->vb_stride);
+        RImplementation.Vertex.Unlock(4, g_combine_VP->vb_stride);
 
         // Draw
         RCache.set_Element(s_combine_volumetric->E[0]);

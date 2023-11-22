@@ -14,11 +14,11 @@
 #include "UIDialogHolder.h"
 #include "xrUICore/Windows/UIFrameWindow.h"
 
-CUIChangeMap::CUIChangeMap()
+CUIChangeMap::CUIChangeMap() : CUIDialogWnd(CUIChangeMap::GetDebugType())
 {
     m_prev_upd_time = 0;
 
-    bkgrnd = xr_new<CUIStatic>();
+    bkgrnd = xr_new<CUIStatic>("Background");
     bkgrnd->SetAutoDelete(true);
     AttachChild(bkgrnd);
 
@@ -26,11 +26,11 @@ CUIChangeMap::CUIChangeMap()
     header->SetAutoDelete(true);
     AttachChild(header);
 
-    map_pic = xr_new<CUIStatic>();
+    map_pic = xr_new<CUIStatic>("Map picture");
     map_pic->SetAutoDelete(true);
     AttachChild(map_pic);
 
-    map_frame = xr_new<CUIStatic>();
+    map_frame = xr_new<CUIStatic>("Map frame");
     map_frame->SetAutoDelete(true);
     AttachChild(map_frame);
 
@@ -38,11 +38,11 @@ CUIChangeMap::CUIChangeMap()
     map_version->SetAutoDelete(true);
     AttachChild(map_version);
 
-    frame = xr_new<CUIFrameWindow>();
+    frame = xr_new<CUIFrameWindow>("Frame");
     frame->SetAutoDelete(true);
     AttachChild(frame);
 
-    lst_back = xr_new<CUIFrameWindow>();
+    lst_back = xr_new<CUIFrameWindow>("Map list back");
     lst_back->SetAutoDelete(true);
     AttachChild(lst_back);
 
@@ -59,7 +59,6 @@ CUIChangeMap::CUIChangeMap()
     AttachChild(btn_cancel);
 }
 
-CUIChangeMap::~CUIChangeMap() {}
 void CUIChangeMap::InitChangeMap(CUIXml& xml_doc)
 {
     CUIXmlInit::InitWindow(xml_doc, "change_map", 0, this);
@@ -128,9 +127,9 @@ void CUIChangeMap::OnItemSelect()
 
 void CUIChangeMap::OnBtnOk()
 {
-    u32 idx = lst->GetSelectedIDX();
+    const u32 idx = lst->GetSelectedIDX();
     const SGameTypeMaps& M = gMapListHelper.GetMapListFor((EGameIDs)GameID());
-    if (idx >= 0 && idx < M.m_map_names.size())
+    if (idx < M.m_map_names.size())
     {
         const shared_str& name = M.m_map_names[idx].map_name;
         const shared_str& ver = M.m_map_names[idx].map_ver;

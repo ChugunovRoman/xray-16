@@ -18,7 +18,8 @@
 
 extern string_path g_last_saved_game;
 
-CUIMMMagnifer::CUIMMMagnifer() : m_bPP(false) {}
+CUIMMMagnifer::CUIMMMagnifer() : CUIStatic(CUIMMMagnifer::GetDebugType()) {}
+
 CUIMMMagnifer::~CUIMMMagnifer()
 {
     if (GetPPMode())
@@ -43,13 +44,13 @@ void CUIMMMagnifer::ResetPPMode()
 
 ////////////////////////////////////////////
 
-CUIMMShniaga::CUIMMShniaga()
+CUIMMShniaga::CUIMMShniaga() : CUIWindow(CUIMMShniaga::GetDebugType())
 {
     m_sound = xr_new<CMMSound>();
 
     m_view = xr_new<CUIScrollView>();
     AttachChild(m_view);
-    m_shniaga = xr_new<CUIStatic>();
+    m_shniaga = xr_new<CUIStatic>("Shniaga");
     AttachChild(m_shniaga);
     m_magnifier = xr_new<CUIMMMagnifer>();
     m_shniaga->AttachChild(m_magnifier);
@@ -198,16 +199,10 @@ void CUIMMShniaga::SetPage(enum_page_id page_id, LPCSTR xml_file, LPCSTR xml_pat
     xr_vector<CUITextWnd*>* lst = NULL;
     switch (page_id)
     {
-    case epi_main: { lst = &m_buttons;
+    case epi_main:             lst = &m_buttons;             break;
+    case epi_new_game:         lst = &m_buttons_new;         break;
+    case epi_new_network_game: lst = &m_buttons_new_network; break;
     }
-    break;
-    case epi_new_game: { lst = &m_buttons_new;
-    }
-    break;
-    case epi_new_network_game: { lst = &m_buttons_new_network;
-    }
-    break;
-    }; // switch (page_id)
     delete_data(*lst);
 
     CUIXml tmp_xml;
@@ -219,16 +214,22 @@ void CUIMMShniaga::ShowPage(enum_page_id page_id)
 {
     switch (page_id)
     {
-    case epi_main: { ShowMain();
+    case epi_main:
+    {
+        ShowMain();
+        break;
     }
-    break;
-    case epi_new_game: { ShowNewGame();
+    case epi_new_game:
+    {
+        ShowNewGame();
+        break;
     }
-    break;
-    case epi_new_network_game: { ShowNetworkGame();
+    case epi_new_network_game:
+    {
+        ShowNetworkGame();
+        break;
     }
-    break;
-    }; // switch (page_id)
+    }
 }
 
 void CUIMMShniaga::ShowMain()
@@ -396,22 +397,27 @@ void CUIMMShniaga::OnBtnClick()
 
 bool CUIMMShniaga::OnKeyboardAction(int dik, EUIMessages keyboard_action)
 {
-    int action = GetBindedAction(dik);
+    if (IsBinded(kQUIT, dik))
+    {
+        if (m_page != epi_main)
+            ShowMain();
+        return true;
+    }
+
+    const auto action = GetBindedAction(dik, EKeyContext::UI);
 
     // Check here only for key press to fix too fast clicks
     if (WINDOW_KEY_PRESSED == keyboard_action)
     {
         switch (action)
         {
-        case kENTER:
-        case kJUMP:
-        case kUSE:
+        case kUI_ACCEPT:
             if (WINDOW_KEY_HOLD == keyboard_action)
                 return false;
             OnBtnClick();
             return true;
 
-        case kQUIT:
+        case kUI_BACK:
             if (m_page != epi_main)
                 ShowMain();
             return true;
@@ -420,11 +426,9 @@ bool CUIMMShniaga::OnKeyboardAction(int dik, EUIMessages keyboard_action)
     // CInput sends both 'key hold' and 'key press' during one frame, no need to check WINDOW_KEY_PRESSED here
     else if (WINDOW_KEY_HOLD == keyboard_action)
     {
-    try_again:
         switch (action)
         {
-        case kUP:
-        case kFWD:
+        case kUI_MOVE_UP:
             if (WINDOW_KEY_HOLD == keyboard_action && !m_flags.test(fl_MovingStoped))
                 return true;
 
@@ -434,8 +438,7 @@ bool CUIMMShniaga::OnKeyboardAction(int dik, EUIMessages keyboard_action)
                 SelectBtn(BtnCount() - 1);
             return true;
 
-        case kDOWN:
-        case kBACK:
+        case kUI_MOVE_DOWN:
             if (WINDOW_KEY_HOLD == keyboard_action && !m_flags.test(fl_MovingStoped))
                 return true;
 
@@ -444,21 +447,6 @@ bool CUIMMShniaga::OnKeyboardAction(int dik, EUIMessages keyboard_action)
             else
                 SelectBtn(0);
             return true;
-
-        case kLEFT:
-        case kRIGHT:
-            break;
-
-        default:
-        {
-            switch (dik)
-            {
-            case XR_CONTROLLER_BUTTON_DPAD_UP:    action = kUP;    goto try_again;
-            case XR_CONTROLLER_BUTTON_DPAD_DOWN:  action = kDOWN;  goto try_again;
-            case XR_CONTROLLER_BUTTON_DPAD_LEFT:  action = kLEFT;  goto try_again;
-            case XR_CONTROLLER_BUTTON_DPAD_RIGHT: action = kRIGHT; goto try_again;
-            }
-        }
         } // switch (GetBindedAction(dik))
     }
 
@@ -469,7 +457,7 @@ bool CUIMMShniaga::OnControllerAction(int axis, float x, float y, EUIMessages co
 {
     if (WINDOW_KEY_PRESSED == controller_action || WINDOW_KEY_HOLD == controller_action)
     {
-        if (IsBinded(kMOVE_AROUND, axis) && !fis_zero(y))
+        if (IsBinded(kUI_MOVE, axis, EKeyContext::UI) && !fis_zero(y))
         {
             if (!m_flags.test(fl_MovingStoped))
                 return true;
@@ -511,10 +499,8 @@ float CUIMMShniaga::pos(float x1, float x2, u32 t)
 {
     float x = 0;
 
-    if (t >= 0 && t <= m_run_time)
+    if (t <= m_run_time)
         x = log(1 + (t * 10.0f) / m_run_time) / log(11.0f);
-    else if (t <= 0)
-        x = 0;
     else if (t > m_run_time)
         x = 1;
 

@@ -3,10 +3,10 @@
 #include "map_manager.h"
 #include "xrScriptEngine/ScriptExporter.hpp"
 
-using namespace luabind;
-
 SCRIPT_EXPORT(CMapManager, (),
 {
+    using namespace luabind;
+
     module(luaState)
     [
         class_<CMapManager>("CMapManager")
@@ -14,12 +14,13 @@ SCRIPT_EXPORT(CMapManager, (),
             .def("RemoveMapLocationByObjectID", &CMapManager::RemoveMapLocationByObjectID)
             .def("RemoveMapLocation", (void (CMapManager::*)(CMapLocation*))&CMapManager::RemoveMapLocation)
             .def("DisableAllPointers", &CMapManager::DisableAllPointers)
-
     ];
 });
 
 SCRIPT_EXPORT(CMapLocation, (),
 {
+    using namespace luabind;
+
     module(luaState)
     [
         class_<CMapLocation>("CMapLocation")

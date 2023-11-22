@@ -11,11 +11,26 @@ extern float psSoundVEffects;
 void CSoundRender_Emitter::set_position(const Fvector& pos)
 {
     if (source()->channels_num() == 1)
-        p_source.position = pos;
+        p_source.update_position(pos);
     else
-        p_source.position.set(0, 0, 0);
+        p_source.update_position({});
 
     bMoved = true;
+}
+
+void CSoundRender_Emitter::set_frequency(float scale)
+{
+    VERIFY(_valid(scale));
+    if (_valid(scale))
+        p_source.freq = scale;
+}
+
+// Перемотка звука на заданную секунду [rewind snd to target time] --#SM+#--
+void CSoundRender_Emitter::set_time(float t)
+{
+    VERIFY2(get_length_sec() >= t, "set_time: time is bigger than length of sound");
+    clamp(t, 0.0f, get_length_sec());
+    fTimeToRewind = t;
 }
 
 CSoundRender_Emitter::CSoundRender_Emitter()
@@ -39,10 +54,12 @@ CSoundRender_Emitter::CSoundRender_Emitter()
     b2D = false;
     bStopping = false;
     bRewind = false;
+    bIgnoringTimeFactor = false;
     iPaused = 0;
     fTimeStarted = 0.0f;
     fTimeToStop = 0.0f;
     fTimeToPropagade = 0.0f;
+    fTimeToRewind = 0.0f; //--#SM+#--
     marker = 0xabababab;
     starting_delay = 0.f;
     priority_scale = 1.f;
@@ -109,7 +126,7 @@ u32 CSoundRender_Emitter::play_time()
     return 0;
 }
 
-#include "SoundRender_Source.h"
+#include "SoundRender_Source.h" // XXX: remove maybe
 void CSoundRender_Emitter::set_cursor(u32 p)
 {
     m_stream_cursor = p;

@@ -30,7 +30,7 @@
 
 const float LOSE_CONTROL_DISTANCE = 0.5f; // fly distance to lose control
 const float CLAMB_DISTANCE = 0.5f;
-const float CLIMB_GETUP_HEIGHT = 0.3f;
+//const float CLIMB_GETUP_HEIGHT = 0.3f;
 
 float IC sgn(float v) { return v < 0.f ? -1.f : 1.f; }
 bool test_sides(const Fvector& center, const Fvector& side_dir, const Fvector& fv_dir, const Fvector& box, int tri_id)
@@ -150,12 +150,14 @@ CPHSimpleCharacter::CPHSimpleCharacter()
     m_ext_imulse.set(0, 0, 0);
     m_phys_ref_object = NULL;
     b_on_object = false;
+    b_was_on_object = false;
     m_friction_factor = 1.f;
     dVectorSetZero(m_control_force);
     dVectorSetZero(m_depart_position);
     is_contact = false;
     was_contact = false;
     is_control = false;
+    was_control = false;
     b_depart = false;
     b_meet = false;
     b_lose_control = true;
@@ -754,7 +756,7 @@ void CPHSimpleCharacter::PhTune(dReal step)
     if (b_jumping)
     {
         float air_factor = 1.f;
-        if (b_lose_control && CastActorCharacter()) //
+        if (b_lose_control && CastActorCharacter())
             air_factor = 10.f * m_air_control_factor;
 
         dReal proj = m_acceleration.x * chVel[0] + m_acceleration.z * chVel[2];
@@ -764,19 +766,23 @@ void CPHSimpleCharacter::PhTune(dReal step)
             current_pos[2] - m_jump_depart_position[2]};
         dReal amag = _sqrt(m_acceleration.x * m_acceleration.x + m_acceleration.z * m_acceleration.z);
         if (amag > 0.f)
+        {
             if (dif[0] * m_acceleration.x / amag + dif[2] * m_acceleration.z / amag < 0.3f)
             {
-                Fvector jump_fv = m_acceleration; //{ m_acceleration.x/amag*1000.f,0,m_acceleration.z/amag*1000.f }
+                Fvector jump_fv = m_acceleration;
                 jump_fv.mul(1000.f / amag * air_factor);
                 dBodyAddForce(m_body, jump_fv.x, 0, jump_fv.z);
             }
-        if (proj < 0.f)
-        {
-            dReal vmag = chVel[0] * chVel[0] + chVel[2] * chVel[2];
-
-            Fvector jump_fv = cast_fv(chVel);
-            jump_fv.mul(3000.f * air_factor / vmag / amag * proj);
-            dBodyAddForce(m_body, jump_fv.x, 0, jump_fv.z);
+            if (proj < 0.f)
+            {
+                dReal vmag = chVel[0] * chVel[0] + chVel[2] * chVel[2];
+                if (vmag > 0.f)
+                {
+                    Fvector jump_fv = cast_fv(chVel);
+                    jump_fv.mul(3000.f * air_factor / vmag / amag * proj);
+                    dBodyAddForce(m_body, jump_fv.x, 0, jump_fv.z);
+                }
+            }
         }
     }
     // else
@@ -804,7 +810,7 @@ void CPHSimpleCharacter::PhTune(dReal step)
 
 const float CHWON_ACCLEL_SHIFT = 0.4f;
 const float CHWON_AABB_FACTOR = 1.f;
-const float CHWON_ANG_COS = M_SQRT1_2;
+//const float CHWON_ANG_COS = M_SQRT1_2;
 const float CHWON_CALL_UP_SHIFT = 0.05f;
 const float CHWON_CALL_FB_HIGHT = 1.5f;
 const float CHWON_AABB_FB_FACTOR = 1.f;
@@ -1870,8 +1876,10 @@ void CPHSimpleCharacter::TestRestrictorContactCallbackFun(
     CPHActorCharacter* actor_character = (static_cast<CPHCharacter*>(obj_data->ph_object))->CastActorCharacter();
     if (!actor_character)
         return;
-    CPHSimpleCharacter* ch_this = static_cast<CPHSimpleCharacter*>(retrieveGeomUserData(g_this)->ph_object);
+
+    [[maybe_unused]] CPHSimpleCharacter* ch_this = static_cast<CPHSimpleCharacter*>(retrieveGeomUserData(g_this)->ph_object);
     VERIFY(ch_this);
+
     save_max(restrictor_depth, c.geom.depth);
     do_colide = true;
     c.surface.mu = 0.f;

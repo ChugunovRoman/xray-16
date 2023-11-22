@@ -118,7 +118,8 @@ bool CWeaponStatMgun::net_Spawn(CSE_Abstract* DC)
     m_destEnemyDir.setHP(m_bind_y_rot, m_bind_x_rot);
     XFORM().transform_dir(m_destEnemyDir);
 
-    inheritedShooting::Light_Create();
+    if (m_bLightShotEnabled)
+        inheritedShooting::Light_Create();
 
     processing_activate();
     setVisible(TRUE);
@@ -247,9 +248,9 @@ void CWeaponStatMgun::cam_Update(float dt, float fov)
     Level().Cameras().UpdateFromCamera(Camera());
 }
 
-void CWeaponStatMgun::renderable_Render(IRenderable* root)
+void CWeaponStatMgun::renderable_Render(u32 context_id, IRenderable* root)
 {
-    inheritedPH::renderable_Render(root);
+    inheritedPH::renderable_Render(context_id, root);
 
     RenderLight();
 }

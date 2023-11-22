@@ -10,9 +10,6 @@
 [submodule "Externals/AGS_SDK"]
 	path = Externals/AGS_SDK
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/AGS_SDK.git
-[submodule "Externals/lzo"]
-	path = Externals/lzo
-	url = https://github.com/alexgdi/lzo.git
 [submodule "Externals/zlib"]
 	path = Externals/zlib
 	url = https://github.com/madler/zlib.git
@@ -40,21 +37,12 @@
 [submodule "Externals/gli"]
 	path = Externals/gli
 	url = https://github.com/g-truc/gli.git
-[submodule "Externals/mimalloc"]
-	path = Externals/mimalloc
-	url = https://github.com/OpenXRay/mimalloc.git
 [submodule "Externals/sse2neon"]
 	path = Externals/sse2neon
 	url = https://github.com/DLTcollab/sse2neon.git
-[submodule "Externals/lua-marshal"]
-	path = Externals/lua-marshal
-	url = https://github.com/ChugunovRoman/lua-marshal.git
-	branch = open-x-ray-coc
-[submodule "Externals/xrLuaFS"]
-	path = Externals/xrLuaFS
-	url = https://github.com/ChugunovRoman/luafilesystem.git
-	branch = open-x-ray-coc
-[submodule "Externals/lua_extensions"]
-	path = Externals/lua_extensions
-	url = https://github.com/ChugunovRoman/lua_extensions.git
-	branch = master
+[submodule "Externals/imgui"]
+	path = Externals/imgui
+	url = https://github.com/ocornut/imgui.git
+[submodule "Externals/xrLuaFix"]
+	path = Externals/xrLuaFix
+	url = https://github.com/OpenXRay/xrLuaFix.git

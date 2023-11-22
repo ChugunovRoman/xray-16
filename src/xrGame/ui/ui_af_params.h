@@ -7,13 +7,15 @@ class CUIStatic;
 class CUITextWnd;
 class UIArtefactParamItem;
 
-class CUIArtefactParams : public CUIWindow
+class CUIArtefactParams final : public CUIWindow
 {
 public:
+    CUIArtefactParams() : CUIWindow("Artefact Params") {}
     ~CUIArtefactParams() override;
     bool InitFromXml(CUIXml& xml);
     bool Check(const shared_str& af_section);
     void SetInfo(const shared_str& af_section);
+    pcstr GetDebugType() override { return "CUIArtefactParams"; }
 
 protected:
     UIArtefactParamItem* CreateItem(CUIXml& uiXml, pcstr section,
@@ -34,11 +36,10 @@ protected:
 
 // -----------------------------------
 
-class UIArtefactParamItem : public CUIStatic
+class UIArtefactParamItem final : public CUIStatic
 {
 public:
     UIArtefactParamItem();
-    ~UIArtefactParamItem() override = default;
 
     enum class InitResult
     {
@@ -52,6 +53,8 @@ public:
     void SetDefaultValuesPlain(float magnitude, bool isSignInverse, const shared_str& unit);
     void SetCaption(LPCSTR name);
     void SetValue(float value);
+
+    pcstr GetDebugType() override { return "UIArtefactParamItem"; }
 
 protected:
     InitResult InitPlain(CUIXml& xml, pcstr section);

@@ -15,7 +15,10 @@
 
 void obstacles_query::set_intersection(const obstacles_query& query)
 {
-    // XXX: probably replace alloca
+    if (m_obstacles.empty())
+        return;
+
+    // XXX: probably replace xr_alloca
     const u32 n = m_obstacles.size();
     const u32 buffer_size = n * sizeof(OBSTACLES::value_type);
     OBSTACLES::value_type* temp = (OBSTACLES::value_type*)xr_alloca(buffer_size);

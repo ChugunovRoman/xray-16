@@ -8,7 +8,6 @@ private:
 
 public:
     CUIButton();
-    virtual ~CUIButton(){};
 
     virtual bool OnMouseAction(float x, float y, EUIMessages mouse_action);
     virtual void OnClick();
@@ -41,10 +40,12 @@ public:
     // Код акселератора берётся из файла SDL_scancode.h, из SDL2.
     // Например: кнопка A - код 4 (SDL_SCANCODE_A)
     void SetAccelerator(int iAccel, int idx);
-    const int GetAccelerator(int idx) const;
+    int GetAccelerator(int idx) const;
     bool IsAccelerator(int iAccel) const;
 
     shared_str m_hint_text;
+
+    pcstr GetDebugType() override { return "CUIButton"; }
 
 protected:
     E_BUTTON_STATE m_eButtonState;

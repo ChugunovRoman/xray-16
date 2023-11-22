@@ -15,7 +15,7 @@ class CUIHudStatesWnd;
 class CUIMotionIcon;
 class CUIArtefactPanel;
 
-class CUIMainIngameWnd : public CUIWindow
+class CUIMainIngameWnd final : public CUIWindow
 {
 public:
     CUIMainIngameWnd();
@@ -25,31 +25,35 @@ public:
     virtual void Draw();
     virtual void Update();
 
+    pcstr GetDebugType() override { return "CUIMainIngameWnd"; }
+
+protected:
+    CUIStatic* UIStaticDiskIO{};
+    CUITextWnd* UIStaticQuickHelp{};
+    CUIMotionIcon* UIMotionIcon{};
+    CUIZoneMap* UIZoneMap{};
+
+    CUIHudStatesWnd* m_ui_hud_states{};
+
+    CUIStatic* m_ind_bleeding{};
+    CUIStatic* m_ind_radiation{};
+    CUIStatic* m_ind_starvation{};
+    CUIStatic* m_ind_weapon_broken{};
+    CUIStatic* m_ind_helmet_broken{};
+    CUIStatic* m_ind_outfit_broken{};
+    CUIStatic* m_ind_overweight{};
+
 public:
-    CUIStatic* UIStaticDiskIO;
-    CUITextWnd* UIStaticQuickHelp;
-    CUIMotionIcon* UIMotionIcon;
-    CUIZoneMap* UIZoneMap;
+    CUIStatic* m_ind_boost_psy{};
+    CUIStatic* m_ind_boost_radia{};
+    CUIStatic* m_ind_boost_chem{};
+    CUIStatic* m_ind_boost_wound{};
+    CUIStatic* m_ind_boost_weight{};
+    CUIStatic* m_ind_boost_health{};
+    CUIStatic* m_ind_boost_power{};
+    CUIStatic* m_ind_boost_rad{};
 
-    CUIHudStatesWnd* m_ui_hud_states;
-
-    CUIStatic* m_ind_bleeding;
-    CUIStatic* m_ind_radiation;
-    CUIStatic* m_ind_starvation;
-    CUIStatic* m_ind_weapon_broken;
-    CUIStatic* m_ind_helmet_broken;
-    CUIStatic* m_ind_outfit_broken;
-    CUIStatic* m_ind_overweight;
-    CUIStatic* m_ind_boost_psy;
-    CUIStatic* m_ind_boost_radia;
-    CUIStatic* m_ind_boost_chem;
-    CUIStatic* m_ind_boost_wound;
-    CUIStatic* m_ind_boost_weight;
-    CUIStatic* m_ind_boost_health;
-    CUIStatic* m_ind_boost_power;
-    CUIStatic* m_ind_boost_rad;
-
-    CUIArtefactPanel* UIArtefactPanel;
+    CUIArtefactPanel* UIArtefactPanel{};
 
     void ShowZoneMap(bool status);
     void DrawZoneMap();
@@ -58,7 +62,7 @@ public:
     void DrawMainIndicatorsForInventory();
 
     CUIHudStatesWnd* get_hud_states() { return m_ui_hud_states; } // temp
-    void OnSectorChanged(int sector);
+    void OnSectorChanged(IRender_Sector::sector_id_t sector);
 
     xr_vector<CUIStatic*> m_quick_slots_icons;
     xr_vector<CUITextWnd*> m_quick_slots_texts;
@@ -70,18 +74,18 @@ protected:
     // - ранения
     // - голода
     // - усталости
-    CUIStatic* UIWeaponJammedIcon;
+    CUIStatic* UIWeaponJammedIcon{};
     //	CUIStatic			UIRadiaitionIcon;
     //	CUIStatic			UIWoundIcon;
     //	CUIStatic			UIStarvationIcon;
     //	CUIStatic			UIPsyHealthIcon;
-    CUIStatic* UIInvincibleIcon;
+    CUIStatic* UIInvincibleIcon{};
     //	CUIStatic			UISleepIcon;
-    CUIStatic* UIArtefactIcon;
+    CUIStatic* UIArtefactIcon{};
 
-    CUIScrollView* m_UIIcons;
-    CUIWindow* m_pMPChatWnd;
-    CUIWindow* m_pMPLogWnd;
+    CUIScrollView* m_UIIcons{};
+    CUIWindow* m_pMPChatWnd{};
+    CUIWindow* m_pMPLogWnd{};
 
 public:
     // Енумы соответсвующие предупреждающим иконкам
@@ -139,8 +143,8 @@ protected:
     using FlashingIcons = xr_map<EFlashingIcons, CUIStatic*>;
     FlashingIcons m_FlashingIcons;
 
-    //	CMissile*			m_pGrenade;
-    //	CInventoryItem*		m_pItem;
+    //	CMissile*			m_pGrenade{};
+    //	CInventoryItem*		m_pItem{};
 
     // Отображение подсказок при наведении прицела на объект
     void RenderQuickInfos();
@@ -151,8 +155,8 @@ public:
     void reset_ui();
 
 protected:
-    CInventoryItem* m_pPickUpItem;
-    CUIStatic* UIPickUpItemIcon;
+    CInventoryItem* m_pPickUpItem{};
+    CUIStatic* UIPickUpItemIcon{};
 
     float m_iPickUpItemIconX;
     float m_iPickUpItemIconY;

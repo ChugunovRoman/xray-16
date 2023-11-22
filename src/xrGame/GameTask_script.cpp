@@ -2,9 +2,6 @@
 #include "GameTask.h"
 #include "xrScriptEngine/ScriptExporter.hpp"
 
-using namespace luabind;
-using namespace luabind::policy;
-
 void CGameTask::AddObjective_script(SGameTaskObjective* O)
 {
     O->CommitScriptHelperContents();
@@ -18,6 +15,9 @@ SGameTaskObjective* CGameTask::GetObjective_script(TASK_OBJECTIVE_ID objective_i
 
 SCRIPT_EXPORT(CGameTask, (),
 {
+    using namespace luabind;
+    using namespace luabind::policy;
+
     class EnumTaskState {};
 
     module(luaState)
@@ -43,7 +43,7 @@ SCRIPT_EXPORT(CGameTask, (),
 
             .def("get_title", &SGameTaskObjective::GetTitle_script)
             .def("set_title", &SGameTaskObjective::SetTitle_script)
-                
+
             .def("get_description", &SGameTaskObjective::GetDescription_script)
             .def("set_description", &SGameTaskObjective::SetDescription_script)
 

@@ -1,19 +1,21 @@
 #pragma once
 #include "xrUICore/Static/UIStatic.h"
 
-class XRUICORE_API UI_Arrow : public CUIStatic
+class XRUICORE_API UI_Arrow final : public CUIStatic
 {
 private:
     typedef CUIStatic inherited;
 
 public:
     UI_Arrow();
-    virtual ~UI_Arrow();
 
     void init_from_xml(CUIXml& xml, LPCSTR path, CUIWindow* parent);
     void SetNewValue(float new_value);
     void SetPos(float pos);
     IC float GetPos() { return m_pos; }
+
+    pcstr GetDebugType() override { return "UI_Arrow"; }
+
 private:
     float m_angle_begin;
     float m_angle_end;

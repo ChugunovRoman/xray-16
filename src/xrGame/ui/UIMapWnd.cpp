@@ -24,8 +24,9 @@
 
 CUIMapWnd* g_map_wnd = NULL; // quick temporary solution -(
 CUIMapWnd* GetMapWnd() { return g_map_wnd; }
+
 CUIMapWnd::CUIMapWnd(UIHint* hint)
-    : m_ActionPlanner(nullptr)
+    : CUIWindow("CUIMapWnd"), m_ActionPlanner(nullptr)
 {
     m_tgtMap = NULL;
     m_GlobalMap = NULL;
@@ -226,7 +227,7 @@ bool CUIMapWnd::Init(cpcstr xml_name, cpcstr start_from, bool critical /*= true*
     m_ActionPlanner->setup(this);
     m_view_actor = true;
 
-    m_UIPropertiesBox =xr_new<CUIPropertiesBox>();
+    m_UIPropertiesBox = xr_new<CUIPropertiesBox>();
     m_UIPropertiesBox->SetAutoDelete(true);
     m_UIPropertiesBox->InitPropertiesBox(Fvector2().set(0, 0), Fvector2().set(300, 300));
     AttachChild(m_UIPropertiesBox);
@@ -413,39 +414,51 @@ bool CUIMapWnd::OnKeyboardAction(int dik, EUIMessages keyboard_action)
     {
     case WINDOW_KEY_PRESSED:
     {
-        switch (dik)
+        switch (GetBindedAction(dik, EKeyContext::PDA))
         {
-        case SDL_SCANCODE_KP_MINUS:
-            // SetZoom(GetZoom()/1.5f);
-            UpdateZoom(false);
-            // ResetActionPlanner();
+        case kPDA_MAP_ZOOM_RESET:
+            ViewGlobalMap();
             return true;
 
-        case SDL_SCANCODE_KP_PLUS:
-            // SetZoom(GetZoom()*1.5f);
-            UpdateZoom(true);
-            // ResetActionPlanner();
+        case kPDA_MAP_SHOW_ACTOR:
+            ViewActor();
+            return true;
+
+        case kPDA_MAP_SHOW_LEGEND:
+            OnBtnLegend_Push(this, nullptr);
             return true;
         } // switch (dik)
+        break;
     }
-    break;
 
     case WINDOW_KEY_HOLD:
     {
         Fvector2 pos_delta{};
 
-        switch (GetBindedAction(dik))
+        switch (GetBindedAction(dik, EKeyContext::PDA))
         {
-        case kUP:
+        case kPDA_MAP_ZOOM_OUT:
+            // SetZoom(GetZoom()/1.5f);
+            UpdateZoom(false);
+            // ResetActionPlanner();
+            return true;
+
+        case kPDA_MAP_ZOOM_IN:
+            // SetZoom(GetZoom()*1.5f);
+            UpdateZoom(true);
+            // ResetActionPlanner();
+            return true;
+
+        case kPDA_MAP_MOVE_UP:
             pos_delta.y += m_map_move_step;
             break;
-        case kDOWN:
+        case kPDA_MAP_MOVE_DOWN:
             pos_delta.y -= m_map_move_step;
             break;
-        case kLEFT:
+        case kPDA_MAP_MOVE_LEFT:
             pos_delta.x += m_map_move_step;
             break;
-        case kRIGHT:
+        case kPDA_MAP_MOVE_RIGHT:
             pos_delta.x -= m_map_move_step;
             break;
         }
@@ -455,11 +468,31 @@ bool CUIMapWnd::OnKeyboardAction(int dik, EUIMessages keyboard_action)
             MoveMap(pos_delta);
             return true;
         }
+        break;
     }
-    break;
     } // switch (keyboard_action)
 
     return inherited::OnKeyboardAction(dik, keyboard_action);
+}
+
+bool CUIMapWnd::OnControllerAction(int axis, float x, float y, EUIMessages controller_action)
+{
+    switch (GetBindedAction(axis, EKeyContext::PDA))
+    {
+    default:
+        return OnKeyboardAction(axis, controller_action);
+
+    case kPDA_MAP_MOVE:
+    {
+        if (controller_action != WINDOW_KEY_HOLD)
+            break;
+        const auto pos_delta = Fvector2{ m_map_move_step, m_map_move_step }.mul(Fvector2{ -x, -y }.normalize());
+        MoveMap(pos_delta);
+        return true;
+    }
+    } // switch (GetBindedAction(axis, EKeyContext::PDA))
+
+    return inherited::OnControllerAction(axis, x, y, controller_action);
 }
 
 bool CUIMapWnd::OnMouseAction(float x, float y, EUIMessages mouse_action)
@@ -479,7 +512,7 @@ bool CUIMapWnd::OnMouseAction(float x, float y, EUIMessages mouse_action)
             ActivatePropertiesBox(NULL);
             break;
         case WINDOW_MOUSE_MOVE:
-            if (pInput->iGetAsyncBtnState(0))
+            if (pInput->iGetAsyncKeyState(MOUSE_1))
             {
                 GlobalMap()->MoveWndDelta(GetUICursor().GetCursorPositionDelta());
                 UpdateScroll();
@@ -491,14 +524,12 @@ bool CUIMapWnd::OnMouseAction(float x, float y, EUIMessages mouse_action)
         case WINDOW_MOUSE_WHEEL_DOWN:
             UpdateZoom(true);
             return true;
-            break;
+
         case WINDOW_MOUSE_WHEEL_UP:
             UpdateZoom(false);
             return true;
-            break;
-
-        } // switch
-    };
+        } // switch (mouse_action)
+    }
 
     return false;
 }

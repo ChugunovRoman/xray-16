@@ -17,8 +17,6 @@
 #include "../ai_space.h"
 #include "xrScriptEngine/script_engine.hpp"
 
-using namespace luabind;
-
 FractionState::FractionState():
 	member_count(0),
 	resource(0.0f),
@@ -36,8 +34,8 @@ FractionState::FractionState():
 }
 
 FractionState::FractionState( shared_str const& id )
+	: FractionState()
 {
-	FractionState();
 	set_fraction_id2( id );
 }
 
@@ -47,7 +45,9 @@ FractionState::~FractionState()
 
 SCRIPT_EXPORT(FractionState, (),
 {
-	module(luaState)
+    using namespace luabind;
+
+    module(luaState)
     [
 		class_<FractionState>("FractionState")
             .def_readwrite("member_count",   &FractionState::member_count)

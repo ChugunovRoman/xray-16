@@ -33,7 +33,7 @@ enum EGameIDs_ext
 
 inline EGameIDs ParseStringToGameType(pcstr str)
 {
-    auto IS = [&](pcstr name)
+    const auto IS = [str](pcstr name)
     {
         return !xr_strcmp(str, name);
     };
@@ -55,9 +55,9 @@ using PropItemVec = xr_vector<PropItem*>;
 struct GameTypeChooser
 {
     Flags16 m_GameType;
-#ifndef XRGAME_EXPORTS
+#ifndef MASTER_GOLD
     void FillProp(LPCSTR pref, PropItemVec& items);
-#endif // #ifndef XRGAME_EXPORTS
+#endif
 
 #ifdef _EDITOR
     bool LoadStream(IReader& F);

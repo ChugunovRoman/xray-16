@@ -4,7 +4,7 @@
 #include "Buttons/UI3tButton.h"
 #include "EditBox/UIEditBox.h"
 
-CUIMessageBox::CUIMessageBox()
+CUIMessageBox::CUIMessageBox() : CUIStatic("CUIMessageBox")
 {
     m_UIButtonYesOk = NULL;
     m_UIButtonNo = NULL;
@@ -48,6 +48,86 @@ bool CUIMessageBox::OnMouseAction(float x, float y, EUIMessages mouse_action)
     return inherited::OnMouseAction(x, y, mouse_action);
 }
 
+bool CUIMessageBox::OnKeyboardAction(int dik, EUIMessages keyboard_action)
+{
+    if (IsInputHandlingAllowed() && keyboard_action == WINDOW_KEY_PRESSED)
+    {
+        const bool quitPressed = IsBinded(kQUIT, dik);
+        auto action = GetBindedAction(dik, EKeyContext::UI);
+
+        switch (m_eMessageBoxStyle)
+        {
+        case MESSAGEBOX_OK:
+        case MESSAGEBOX_INFO:
+        {
+            if (quitPressed)
+                action = kUI_BACK;
+            switch (action)
+            {
+            case kUI_ACCEPT:
+            case kUI_BACK:
+                OnYesOk();
+                return true;
+            }
+            break;
+        }
+        case MESSAGEBOX_DIRECT_IP:
+        case MESSAGEBOX_RA_LOGIN:
+        case MESSAGEBOX_PASSWORD:
+        case MESSAGEBOX_YES_NO:
+        case MESSAGEBOX_QUIT_GAME:
+        case MESSAGEBOX_QUIT_WINDOWS:
+        {
+            switch (action)
+            {
+            case kUI_ACCEPT:
+                OnYesOk();
+                return true;
+            case kUI_BACK:
+                m_UIButtonNo->OnClick();
+                return true;
+            }
+            break;
+        }
+        case MESSAGEBOX_YES_NO_CANCEL:
+        {
+            switch (action)
+            {
+            case kUI_ACCEPT:
+                OnYesOk();
+                return true;
+            case kUI_ACTION_1:
+                m_UIButtonNo->OnClick();
+                return true;
+            case kUI_BACK:
+                m_UIButtonCancel->OnClick();
+                return true;
+            }
+            break;
+        }
+        case MESSAGEBOX_YES_NO_COPY:
+        {
+            switch (action)
+            {
+            case kUI_ACCEPT:
+                OnYesOk();
+                return true;
+            case kUI_BACK:
+                m_UIButtonNo->OnClick();
+                return true;
+            case kUI_ACTION_1:
+                m_UIButtonCopy->OnClick();
+                return true;
+            }
+            break;
+        }
+        default:
+            VERIFY(!"Unknown message box type!");
+        } // switch (m_eMessageBoxStyle)
+    }
+    return CUIStatic::OnKeyboardAction(dik, keyboard_action);
+}
+
 bool CUIMessageBox::InitMessageBox(LPCSTR box_template)
 {
     Clear();
@@ -61,7 +141,7 @@ bool CUIMessageBox::InitMessageBox(LPCSTR box_template)
     strconcat(sizeof(str), str, box_template, ":picture");
     if (uiXml.NavigateToNode(str, 0))
     {
-        m_UIStaticPicture = xr_new<CUIStatic>();
+        m_UIStaticPicture = xr_new<CUIStatic>("Picture");
         AttachChild(m_UIStaticPicture);
         CUIXmlInitBase::InitStatic(uiXml, str, 0, m_UIStaticPicture);
     }
@@ -230,7 +310,7 @@ bool CUIMessageBox::InitMessageBox(LPCSTR box_template)
         m_UIEditUserPass->SetNextFocusCapturer(m_UIEditPass);
         m_UIEditPass->SetNextFocusCapturer(m_UIEditUserPass);
         m_UIEditUserPass->CaptureFocus(true);
-
+        [[fallthrough]];
     case MESSAGEBOX_QUIT_WINDOWS:
     case MESSAGEBOX_QUIT_GAME:
     case MESSAGEBOX_YES_NO:
@@ -381,13 +461,15 @@ void CUIMessageBox::SendMessage(CUIWindow* pWnd, s16 msg, void* pData)
                 GetMessageTarget()->SendMessage(this, MESSAGE_BOX_COPY_CLICKED);
             }
             break;
+        case MESSAGEBOX_INFO:
+            break;
         };
     };
     inherited::SendMessage(pWnd, msg, pData);
 }
 
 void CUIMessageBox::SetText(LPCSTR str) { m_UIStaticText->SetTextST(str); }
-LPCSTR CUIMessageBox::GetText() { return m_UIStaticText->GetText(); }
+LPCSTR CUIMessageBox::GetText() const { return m_UIStaticText->GetText(); }
 LPCSTR CUIMessageBox::GetHost()
 {
     if (m_UIEditHost)

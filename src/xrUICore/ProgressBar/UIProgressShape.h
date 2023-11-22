@@ -13,18 +13,20 @@ class CUIStatic;
     GetRange_min
     GetRange_max
 */
-class XRUICORE_API CUIProgressShape : public CUIStatic
+class XRUICORE_API CUIProgressShape final : public CUIStatic
 {
     friend class CUIXmlInitBase;
 
 public:
     CUIProgressShape();
-    virtual ~CUIProgressShape();
+
     void SetPos(int pos, int max);
     void SetPos(float pos);
     void SetTextVisible(bool b);
 
     virtual void Draw();
+
+    pcstr GetDebugType() override { return "CUIProgressShape"; }
 
 protected:
     bool m_bClockwise;

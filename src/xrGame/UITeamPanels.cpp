@@ -4,15 +4,19 @@
 #include "xrUICore/Windows/UIFrameLineWnd.h"
 #include "xrUICore/Static/UIStatic.h"
 
-UITeamPanels::UITeamPanels()
+constexpr cpcstr TEAM_NODE_NAME = "team";
+constexpr cpcstr FRAME_NODE_NAME = "frame";
+
+UITeamPanels::UITeamPanels() : CUIWindow("UITeamPanels")
 {
     need_update_players = false;
     need_update_panels = false;
 }
 
-UITeamPanels::~UITeamPanels() { CUIStatsIcon::FreeTexInfo(); }
-#define TEAM_NODE_NAME "team"
-#define FRAME_NODE_NAME "frame"
+UITeamPanels::~UITeamPanels()
+{
+    CUIStatsIcon::FreeTexInfo();
+}
 
 void UITeamPanels::Init(LPCSTR xmlName, LPCSTR panelsRootNode)
 {
@@ -40,14 +44,14 @@ void UITeamPanels::InitAllFrames(shared_str const& frame_node)
         LPCSTR frame_class = uiXml.ReadAttrib(tempFrameNode, "class", "class_of_frame_not_defined");
         if (!xr_strcmp(frame_class, "frame_line"))
         {
-            CUIFrameLineWnd* temp_frame_line = xr_new<CUIFrameLineWnd>();
+            CUIFrameLineWnd* temp_frame_line = xr_new<CUIFrameLineWnd>("Frameline");
             CUIXmlInit::InitFrameLine(uiXml, frame_node.c_str(), i, temp_frame_line);
             temp_frame_line->SetAutoDelete(true);
             AttachChild(temp_frame_line);
         }
         else if (!xr_strcmp(frame_class, "static"))
         {
-            CUIStatic* temp_static = xr_new<CUIStatic>();
+            CUIStatic* temp_static = xr_new<CUIStatic>("Static");
             CUIXmlInit::InitStatic(uiXml, frame_node.c_str(), i, temp_static);
             temp_static->SetAutoDelete(true);
             AttachChild(temp_static);

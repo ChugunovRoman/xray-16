@@ -2,11 +2,10 @@
 
 #include "xrUICore/Static/UIStatic.h"
 
-class CUIStatix : public CUIStatic
+class CUIStatix final : public CUIStatic
 {
 public:
     CUIStatix();
-    virtual ~CUIStatix();
 
     virtual void Update();
     virtual void OnFocusReceive();
@@ -15,8 +14,11 @@ public:
     void SetSelectedState(bool state);
     bool GetSelectedState();
 
+    pcstr GetDebugType() override { return "CUIStatix"; }
+
 private:
-    bool m_bSelected;
     void start_anim();
     void stop_anim();
+
+    bool m_bSelected{};
 };

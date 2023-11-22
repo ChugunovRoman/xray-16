@@ -1,6 +1,6 @@
 #include "stdafx.h"
 
-#include "SDL.h"
+#include <SDL.h>
 
 #if defined(XR_PLATFORM_WINDOWS)
 #include <Psapi.h>
@@ -8,52 +8,86 @@
 #include <sys/sysinfo.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#elif defined(XR_PLATFORM_BSD)
+#include <sys/time.h>
+#include <sys/resource.h>
 #endif
 
 // On other platforms these options are controlled by CMake
 #if defined(XR_PLATFORM_WINDOWS)
-#  define USE_MIMALLOC
-//#  define USE_PURE_ALLOC
+#   ifdef _DEBUG
+#       define USE_PURE_ALLOC
+#   else
+#       define USE_MIMALLOC
+#   endif
 #endif
 
 #if defined(USE_MIMALLOC)
-#include "mimalloc.h"
-#define xr_internal_malloc(size, alignment) mi_malloc_aligned(size, alignment);
-#define xr_internal_malloc_nothrow(size, alignment) mi_malloc_aligned(size, alignment);
-#define xr_internal_realloc(ptr, size, alignment) mi_realloc_aligned(ptr, size, alignment);
-#define xr_internal_free(ptr, alignment) mi_free_aligned(ptr, alignment);
+    #include "mimalloc.h"
+
+    static_assert(xrMemory::SMALL_SIZE_MAX <= MI_SMALL_SIZE_MAX, "Please, adjust SMALL_SIZE_ALLOC_MAX");
+
+    #define xr_internal_malloc(size) mi_malloc(size)
+    #define xr_internal_malloc_aligned(size, alignment) mi_malloc_aligned(size, alignment)
+    #define xr_internal_malloc_nothrow(size) mi_malloc(size)
+    #define xr_internal_malloc_nothrow_aligned(size, alignment) mi_malloc_aligned(size, alignment)
+    #define xr_internal_small_alloc(size) mi_malloc_small(size)
+    #define xr_internal_small_free(ptr) mi_free(ptr)
+
+    #define xr_internal_realloc(ptr, size) mi_realloc(ptr, size)
+    #define xr_internal_realloc_aligned(ptr, size, alignment) mi_realloc_aligned(ptr, size, alignment)
+
+    #define xr_internal_free(ptr) mi_free(ptr)
+    #define xr_internal_free_size(ptr, size) mi_free_size(ptr, size)
+    #define xr_internal_free_aligned(ptr, alignment) mi_free_aligned(ptr, alignment)
+    #define xr_internal_free_size_aligned(ptr, size, alignment) mi_free_size_aligned(ptr, size, alignment)
 #elif defined(USE_XR_ALIGNED_MALLOC)
-#include "Memory/xrMemory_align.h"
-#define xr_internal_malloc(size, alignment) xr_aligned_malloc(size, alignment)
-#define xr_internal_malloc_nothrow(size, alignment) xr_aligned_malloc(size, alignment)
-#define xr_internal_realloc(ptr, size, alignment) xr_aligned_realloc(ptr, size, alignment)
-#define xr_internal_free(ptr, alignment) xr_aligned_free(ptr)
+    #include "Memory/xrMemory_align.h"
+
+    #define xr_internal_malloc(size) malloc(size)
+    #define xr_internal_malloc_aligned(size, alignment) xr_aligned_malloc(size, alignment)
+    #define xr_internal_malloc_nothrow(size) xr_malloc(size)
+    #define xr_internal_malloc_nothrow_aligned(size, alignment) mi_malloc_aligned(size, alignment)
+    #define xr_internal_small_alloc(size) xr_aligned_malloc(size)
+    #define xr_internal_small_free(ptr) xr_aligned_free(ptr)
+
+    #define xr_internal_realloc(ptr, size) xr_aligned_realloc(ptr, size)
+    #define xr_internal_realloc_aligned(ptr, size, alignment) xr_aligned_realloc(ptr, size, alignment)
+
+    #define xr_internal_free(ptr) xr_aligned_free(ptr)
+    #define xr_internal_free_size(ptr, size) xr_aligned_free(ptr)
+    #define xr_internal_free_aligned(ptr, alignment) xr_aligned_free(ptr)
+    #define xr_internal_free_size_aligned(ptr, size, alignment) xr_aligned_free(ptr)
 #elif defined(USE_PURE_ALLOC)
-// Additional bytes of memory to hide memory problems on Release
-// But for Debug we don't need this if we want to find these problems
-#ifdef NDEBUG
-constexpr size_t xr_reserved_tail = 8;
-#else
-constexpr size_t xr_reserved_tail = 0;
-#endif
+    // Additional bytes of memory to hide memory problems on Release
+    // But for Debug we don't need this if we want to find these problems
+    #ifdef NDEBUG
+        constexpr size_t xr_reserved_tail = 8;
+    #else
+        constexpr size_t xr_reserved_tail = 0;
+    #endif
 
-#define xr_internal_malloc(size, alignment) malloc(size + xr_reserved_tail)
-#define xr_internal_malloc_nothrow(size, alignment) malloc(size + xr_reserved_tail)
-#define xr_internal_realloc(ptr, size, alignment) realloc(ptr, size + xr_reserved_tail)
-#define xr_internal_free(ptr, alignment) free(ptr)
-#else
-#error Please, define explicitly which allocator you want to use
-#endif
+    #define xr_internal_malloc(size) malloc(size + xr_reserved_tail)
+    #define xr_internal_malloc_aligned(size, alignment) malloc(size + xr_reserved_tail)
+    #define xr_internal_malloc_nothrow(size) malloc(size + xr_reserved_tail)
+    #define xr_internal_malloc_nothrow_aligned(size, alignment) malloc(size + xr_reserved_tail)
+    #define xr_internal_small_alloc(size) malloc(size + xr_reserved_tail)
+    #define xr_internal_small_free(ptr) free(ptr)
 
-constexpr size_t DEFAULT_ALIGNMENT = 16;
+    #define xr_internal_realloc(ptr, size) realloc(ptr, size + xr_reserved_tail)
+    #define xr_internal_realloc_aligned(ptr, size, alignment) realloc(ptr, size + xr_reserved_tail)
+
+    #define xr_internal_free(ptr) free(ptr)
+    #define xr_internal_free_size(ptr, size) free(ptr)
+    #define xr_internal_free_aligned(ptr, alignment) free(ptr)
+    #define xr_internal_free_size_aligned(ptr, size, alignment) free(ptr)
+#else
+    #error Please, define explicitly which allocator you want to use
+#endif
 
 xrMemory Memory;
 // Also used in src\xrCore\xrDebug.cpp to prevent use of g_pStringContainer before it initialized
 bool shared_str_initialized = false;
-
-xrMemory::xrMemory()
-{
-}
 
 void xrMemory::_initialize()
 {
@@ -112,10 +146,12 @@ size_t xrMemory::mem_usage()
         CloseHandle(h);
     }
     return pmc.PagefileUsage;
-#elif defined(XR_PLATFORM_LINUX)
+#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
     struct rusage ru;
     getrusage(RUSAGE_SELF, &ru);
     return (size_t)ru.ru_maxrss;
+#else
+#   error Select or add an implementation for your platform
 #endif
 }
 
@@ -147,49 +183,61 @@ void xrMemory::mem_compact()
 void* xrMemory::mem_alloc(size_t size)
 {
     stat_calls++;
-    return xr_internal_malloc(size, DEFAULT_ALIGNMENT);
+    return xr_internal_malloc(size);
 }
 
 void* xrMemory::mem_alloc(size_t size, size_t alignment)
 {
     stat_calls++;
-    return xr_internal_malloc(size, alignment);
+    return xr_internal_malloc_aligned(size, alignment);
 }
 
 void* xrMemory::mem_alloc(size_t size, const std::nothrow_t&) noexcept
 {
     stat_calls++;
-    return xr_internal_malloc_nothrow(size, DEFAULT_ALIGNMENT);
+    return xr_internal_malloc_nothrow(size);
 }
 
 void* xrMemory::mem_alloc(size_t size, size_t alignment, const std::nothrow_t&) noexcept
 {
     stat_calls++;
-    return xr_internal_malloc_nothrow(size, alignment);
+    return xr_internal_malloc_nothrow_aligned(size, alignment);
+}
+
+void* xrMemory::small_alloc(size_t size) noexcept
+{
+    stat_calls++;
+    return xr_internal_small_alloc(size);
+}
+
+void xrMemory::small_free(void* ptr) noexcept
+{
+    stat_calls++;
+    xr_internal_small_free(ptr);
 }
 
 void* xrMemory::mem_realloc(void* ptr, size_t size)
 {
     stat_calls++;
-    return xr_internal_realloc(ptr, size, DEFAULT_ALIGNMENT);
+    return xr_internal_realloc(ptr, size);
 }
 
 void* xrMemory::mem_realloc(void* ptr, size_t size, size_t alignment)
 {
     stat_calls++;
-    return xr_internal_realloc(ptr, size, alignment);
+    return xr_internal_realloc_aligned(ptr, size, alignment);
 }
 
 void xrMemory::mem_free(void* ptr)
 {
     stat_calls++;
-    xr_internal_free(ptr, DEFAULT_ALIGNMENT);
+    xr_internal_free(ptr);
 }
 
 void xrMemory::mem_free(void* ptr, size_t alignment)
 {
     stat_calls++;
-    xr_internal_free(ptr, alignment);
+    xr_internal_free_aligned(ptr, alignment);
 }
 
 // xr_strdup
@@ -200,8 +248,98 @@ XRCORE_API pstr xr_strdup(pcstr string)
 #else
     VERIFY(string);
     size_t len = xr_strlen(string) + 1;
-    char* memory = (char*)xr_malloc(len);
+    auto memory = static_cast<char*>(xr_malloc(len));
     CopyMemory(memory, string, len);
     return memory;
 #endif
+}
+
+[[nodiscard]] void* operator new(size_t size)
+{
+    return Memory.mem_alloc(size);
+}
+
+[[nodiscard]] void* operator new[](size_t size)
+{
+    return Memory.mem_alloc(size);
+}
+
+[[nodiscard]] void* operator new(size_t size, const std::nothrow_t&) noexcept
+{
+    return Memory.mem_alloc(size);
+}
+
+[[nodiscard]] void* operator new[](size_t size, const std::nothrow_t&) noexcept
+{
+    return Memory.mem_alloc(size);
+}
+
+[[nodiscard]] void* operator new(size_t size, std::align_val_t alignment)
+{
+    return Memory.mem_alloc(size, static_cast<size_t>(alignment));
+}
+
+[[nodiscard]] void* operator new[](size_t size, std::align_val_t alignment)
+{
+    return Memory.mem_alloc(size, static_cast<size_t>(alignment));
+}
+
+[[nodiscard]] void* operator new(size_t size, std::align_val_t alignment, const std::nothrow_t&) noexcept
+{
+    return Memory.mem_alloc(size, static_cast<size_t>(alignment));
+}
+
+[[nodiscard]] void* operator new[](size_t size, std::align_val_t alignment, const std::nothrow_t&) noexcept
+{
+    return Memory.mem_alloc(size, static_cast<size_t>(alignment));
+}
+
+void operator delete(void* ptr) noexcept
+{
+    Memory.mem_free(ptr);
+}
+
+void operator delete[](void* ptr) noexcept
+{
+    Memory.mem_free(ptr);
+}
+
+void operator delete(void* ptr, std::align_val_t alignment) noexcept
+{
+    Memory.mem_free(ptr, static_cast<size_t>(alignment));
+}
+
+void operator delete[](void* ptr, std::align_val_t alignment) noexcept
+{
+    Memory.mem_free(ptr, static_cast<size_t>(alignment));
+}
+
+void operator delete(void* ptr, size_t) noexcept
+{
+    Memory.mem_free(ptr);
+}
+
+void operator delete[](void* ptr, size_t) noexcept
+{
+    Memory.mem_free(ptr);
+}
+
+void operator delete(void* ptr, size_t, std::align_val_t alignment) noexcept
+{
+    Memory.mem_free(ptr, static_cast<size_t>(alignment));
+}
+
+void operator delete[](void* ptr, size_t, std::align_val_t alignment) noexcept
+{
+    Memory.mem_free(ptr, static_cast<size_t>(alignment));
+}
+
+XRCORE_API void* xr_malloc(size_t size)
+{
+    return Memory.mem_alloc(size);
+}
+
+XRCORE_API void* xr_realloc(void* ptr, size_t size)
+{
+    return Memory.mem_realloc(ptr, size);
 }

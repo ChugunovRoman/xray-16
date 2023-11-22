@@ -27,7 +27,6 @@ static BOOL bException = FALSE;
 #include <csignal>
 
 #if defined(XR_PLATFORM_WINDOWS)
-#   include <SDL_syswm.h>
 #   include <direct.h>
 #   include <new.h> // for _set_new_mode
 #   include <errorrep.h> // ReportFault
@@ -42,6 +41,14 @@ static BOOL bException = FALSE;
 #elif defined(XR_PLATFORM_APPLE)
 #   include <sys/types.h>
 #   include <sys/ptrace.h>
+#   define PTRACE_TRACEME PT_TRACE_ME
+#   define PTRACE_DETACH PT_DETACH
+#elif defined(XR_PLATFORM_BSD)
+#   include <sys/types.h>
+#   include <sys/ptrace.h>
+#   include <execinfo.h>
+#   include <cxxabi.h>
+#   include <dlfcn.h>
 #   define PTRACE_TRACEME PT_TRACE_ME
 #   define PTRACE_DETACH PT_DETACH
 #endif
@@ -59,6 +66,8 @@ static BOOL bException = FALSE;
 #       define MACHINE_TYPE IMAGE_FILE_MACHINE_ARM
 #   elif defined(XR_ARCHITECTURE_ARM64)
 #       define MACHINE_TYPE IMAGE_FILE_MACHINE_ARM64
+#   elif defined(XR_ARCHITECTURE_IA64)
+#       define MACHINE_TYPE IMAGE_FILE_MACHINE_IA64
 #   else
 #       error CPU architecture is not supported.
 #   endif
@@ -79,22 +88,8 @@ AssertionResult xrDebug::ShowMessage(pcstr title, pcstr message, bool simpleMode
 {
 #ifdef XR_PLATFORM_WINDOWS // because Windows default Message box is fancy
     HWND hwnd = nullptr;
-
     if (windowHandler)
-    {
-        SDL_SysWMinfo info;
-        SDL_VERSION(&info.version);
-        if (SDL_GetWindowWMInfo(windowHandler->GetApplicationWindow(), &info))
-        {
-            switch (info.subsystem)
-            {
-            case SDL_SYSWM_WINDOWS:
-                hwnd = info.info.win.window;
-                break;
-            default: break;
-            }
-        }
-    }
+        hwnd = static_cast<HWND>(windowHandler->GetApplicationWindowHandle());
 
     if (simpleMode)
     {
@@ -139,7 +134,7 @@ SDL_AssertState SDLAssertionHandler(const SDL_AssertData* data,
     if (data->always_ignore)
         return SDL_ASSERTION_ALWAYS_IGNORE;
 
-    constexpr pcstr desc = "SDL2 assertion triggered";
+    static constexpr pcstr desc = "SDL2 assertion triggered";
     bool alwaysIgnore = false;
 
     const auto result = xrDebug::Fail(alwaysIgnore,
@@ -182,7 +177,7 @@ Lock xrDebug::failLock;
 
 #if defined(XR_PLATFORM_WINDOWS)
 void xrDebug::SetBugReportFile(const char* fileName) { xr_strcpy(BugReportFile, fileName); }
-#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_APPLE)
+#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
 void xrDebug::SetBugReportFile(const char* fileName) { xr_strcpy(BugReportFile, 0, fileName); }
 #else
 #   error Select or add implementation for your platform
@@ -299,7 +294,6 @@ xr_vector<xr_string> xrDebug::BuildStackTrace(PCONTEXT threadCtx, u16 maxFramesC
     ScopeLock Lock(&dbgHelpLock);
 
     xr_vector<xr_string> traceResult;
-    STACKFRAME stackFrame = {};
     xr_string frameStr;
 
     if (!InitializeSymbolEngine())
@@ -310,26 +304,36 @@ xr_vector<xr_string> xrDebug::BuildStackTrace(PCONTEXT threadCtx, u16 maxFramesC
 
     traceResult.reserve(maxFramesCount);
 
-#if defined XR_ARCHITECTURE_X64
+    STACKFRAME stackFrame{};
     stackFrame.AddrPC.Mode = AddrModeFlat;
-    stackFrame.AddrPC.Offset = threadCtx->Rip;
     stackFrame.AddrStack.Mode = AddrModeFlat;
-    stackFrame.AddrStack.Offset = threadCtx->Rsp;
     stackFrame.AddrFrame.Mode = AddrModeFlat;
-    stackFrame.AddrFrame.Offset = threadCtx->Rbp;
-#elif defined XR_ARCHITECTURE_X86
-    stackFrame.AddrPC.Mode = AddrModeFlat;
+    stackFrame.AddrBStore.Mode = AddrModeFlat;
+
+    // https://learn.microsoft.com/en-us/windows/win32/api/dbghelp/ns-dbghelp-stackframe
+    // https://github.com/reactos/reactos/blob/master/base/applications/drwtsn32/stacktrace.cpp
+#if defined XR_ARCHITECTURE_X86
     stackFrame.AddrPC.Offset = threadCtx->Eip;
-    stackFrame.AddrStack.Mode = AddrModeFlat;
     stackFrame.AddrStack.Offset = threadCtx->Esp;
-    stackFrame.AddrFrame.Mode = AddrModeFlat;
     stackFrame.AddrFrame.Offset = threadCtx->Ebp;
+#elif defined XR_ARCHITECTURE_X64
+    stackFrame.AddrPC.Offset = threadCtx->Rip;
+    stackFrame.AddrStack.Offset = threadCtx->Rsp;
+    stackFrame.AddrFrame.Offset = threadCtx->Rbp;
 #elif defined XR_ARCHITECTURE_ARM
-#error TODO
+    stackFrame.AddrPC.Offset = threadCtx->Pc;
+    stackFrame.AddrStack.Offset = threadCtx->Sp;
+    stackFrame.AddrFrame.Offset = threadCtx->R11;
 #elif defined XR_ARCHITECTURE_ARM64
-#error TODO
+    stackFrame.AddrPC.Offset = threadCtx->Pc;
+    stackFrame.AddrStack.Offset = threadCtx->Sp;
+    stackFrame.AddrFrame.Offset = threadCtx->Fp;
+#elif defined XR_ARCHITECTURE_IA64
+    stackFrame.AddrPC.Offset = threadCtx->StIIP;
+    stackFrame.AddrStack.Offset = threadCtx->IntSp;
+    stackFrame.AddrBStore.Offset = threadCtx->RsBSP;
 #else
-#error CPU architecture is not supported.
+#   error CPU architecture is not supported.
 #endif
 
     while (GetNextStackFrameString(&stackFrame, threadCtx, frameStr) && traceResult.size() <= maxFramesCount)
@@ -408,7 +412,7 @@ void xrDebug::GatherInfo(char* assertionInfo, size_t bufferSize, const ErrorLoca
         }
     }
     buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "\n");
-    
+
     Log(assertionInfo);
     FlushLog();
 
@@ -430,7 +434,7 @@ void xrDebug::GatherInfo(char* assertionInfo, size_t bufferSize, const ErrorLoca
         buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "%s\n", stackTrace[i].c_str());
 #endif // USE_OWN_ERROR_MESSAGE_WINDOW
     }
-#elif defined(XR_PLATFORM_LINUX) && __has_include(<execinfo.h>)
+#elif defined(XR_PLATFORM_LINUX) && __has_include(<execinfo.h>) || defined(XR_PLATFORM_BSD)
     void *array[20];
     int nptrs = backtrace(array, 20);     // get void*'s for all entries on the stack
     char **strings = backtrace_symbols(array, nptrs);
@@ -541,6 +545,10 @@ AssertionResult xrDebug::Fail(bool& ignoreAlways, const ErrorLocation& loc, cons
 #ifdef USE_BUG_TRAP
             BT_SetUserMessage(assertionInfo);
 #endif
+            // calling DEBUG_BREAK with no debugger will trigger BugTrap
+            // we must hide the window
+            if (windowHandler && !DebuggerIsPresent())
+                windowHandler->OnFatalError();
             DEBUG_BREAK;
         } // switch (result)
     }
@@ -557,6 +565,7 @@ AssertionResult xrDebug::Fail(bool& ignoreAlways, const ErrorLocation& loc, cons
     return Fail(ignoreAlways, loc, expr, desc.c_str(), arg1, arg2);
 }
 
+[[noreturn]]
 void xrDebug::DoExit(const std::string& message)
 {
     ScopeLock lock(&failLock);
@@ -574,6 +583,9 @@ void xrDebug::DoExit(const std::string& message)
     }
     else
         ShowMessage(Core.ApplicationName, message.c_str());
+
+    if (windowHandler)
+        windowHandler->OnFatalError();
 
 #if defined(XR_PLATFORM_WINDOWS)
     TerminateProcess(GetCurrentProcess(), 1);
@@ -608,9 +620,9 @@ int out_of_memory_handler(size_t size)
     else
     {
         Memory.mem_compact();
-        size_t processHeap = Memory.mem_usage();
-        size_t ecoStrings = g_pStringContainer->stat_economy();
-        size_t ecoSmem = g_pSharedMemoryContainer->stat_economy();
+        const size_t processHeap = Memory.mem_usage();
+        const size_t ecoStrings = g_pStringContainer->stat_economy();
+        const size_t ecoSmem = g_pSharedMemoryContainer->stat_economy();
         Msg("* [x-ray]: process heap[%zu K]", processHeap / 1024);
         Msg("* [x-ray]: economy: strings[%zu K], smem[%zu K]", ecoStrings / 1024, ecoSmem);
     }
@@ -691,7 +703,7 @@ void xrDebug::SetupExceptionHandler()
     else if (!strstr(commandLine, "-detailed_minidump"))
         minidumpFlags |= MiniDumpFilterMemory;
 #endif
-    
+
     BT_SetDumpType(minidumpFlags);
     //BT_SetSupportEMail("cop-crash-report@stalker-game.com");
     BT_SetSupportEMail("openxray@yahoo.com");
@@ -794,13 +806,13 @@ LONG WINAPI xrDebug::UnhandledFilter(EXCEPTION_POINTERS* exPtrs)
     if (windowHandler)
         windowHandler->OnErrorDialog(true);
 
-    constexpr pcstr fatalError = "Fatal error";
+    static constexpr pcstr fatalError = "Fatal error";
 
     AssertionResult msgRes = AssertionResult::abort;
 
     if (!ErrorAfterDialog && ShowErrorMessage)
     {
-        constexpr pcstr msg = "Fatal error occurred\n\n"
+        static constexpr pcstr msg = "Fatal error occurred\n\n"
             "Press OK to abort program execution";
         msgRes = ShowMessage(fatalError, msg);
     }
@@ -821,7 +833,11 @@ LONG WINAPI xrDebug::UnhandledFilter(EXCEPTION_POINTERS* exPtrs)
 
     // Typically, PrevFilter is BugTrap filter
     if (PrevFilter)
+    {
+        if (windowHandler)
+            windowHandler->OnFatalError();
         PrevFilter(exPtrs);
+    }
 
     if (windowHandler)
         windowHandler->OnErrorDialog(false);
@@ -833,6 +849,7 @@ LONG WINAPI xrDebug::UnhandledFilter(EXCEPTION_POINTERS* exPtrs)
 }
 
 #ifndef USE_BUG_TRAP
+[[noreturn]]
 void _terminate()
 {
 #if defined(XR_PLATFORM_WINDOWS)

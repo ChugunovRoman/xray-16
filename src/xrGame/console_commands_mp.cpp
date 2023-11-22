@@ -168,7 +168,15 @@ public:
     virtual void Execute(LPCSTR args)
     {
         if (IsGameTypeSingle())
+        {
+#ifndef MASTER_GOLD
+            IGameObject* l_pObj = Level().CurrentControlEntity();
+            CEntity* l_pPlayer = smart_cast<CEntity*>(l_pObj);
+            if (l_pPlayer)
+                l_pPlayer->KillEntity(l_pPlayer->ID());
+#endif
             return;
+        }
         if (!g_pGameLevel)
             return;
         if (Game().local_player && Game().local_player->testFlag(GAME_PLAYER_FLAG_VERY_VERY_DEAD))
@@ -950,7 +958,7 @@ public:
 
         char hex_digest[64];
         s32 ban_time = 0;
-        if (sscanf(args_, "%s %i", &hex_digest, &ban_time) != 2)
+        if (sscanf(args_, "%63s %i", hex_digest, &ban_time) != 2)
         {
             Msg("! ERROR: bad command parameters.");
             Msg("Ban player. Format: \"sv_banplayer_by_digest <hex digest> <ban_time_in_sec>\". To get player hex "
@@ -1700,24 +1708,44 @@ public:
         Level().Server->GetGameState()->SetGameTimeFactor(NewTime, g_fTimeFactor);
     }
 };
+
 class CCC_SVSetWeather : public IConsole_Command
 {
 public:
-    CCC_SVSetWeather(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = false; };
-    virtual void Execute(LPCSTR weather_name)
+    CCC_SVSetWeather(pcstr name) : IConsole_Command(name) { bEmptyArgsHandled = false; }
+
+    void Execute(pcstr weather_name) override
+    {
+        if (!g_pGamePersistent || !weather_name || !weather_name[0])
+            return;
+        if (Device.editor_mode())
+        {
+            Log("~ Setting weather is disabled in editor mode");
+            return;
+        }
+
+#ifdef MASTER_GOLD
+        if (!OnServer())
+            return;
+        constexpr bool forced = false;
+#else
+        constexpr bool forced = true;
+#endif
+        g_pGamePersistent->Environment().SetWeather(weather_name, forced);
+    }
+
+    void Info(TInfo& I) override { xr_strcpy(I, "Set new weather"); }
+
+    void fill_tips(vecTips& tips, u32 mode) override
     {
         if (!g_pGamePersistent)
             return;
-        if (!OnServer())
-            return;
 
-        if (weather_name && weather_name[0])
+        for (auto& [name, cycle] : g_pGamePersistent->Environment().WeatherCycles)
         {
-            g_pGamePersistent->Environment().SetWeather(weather_name);
+            tips.emplace_back(name);
         }
-    };
-
-    virtual void Info(TInfo& I) { xr_strcpy(I, "Set new weather"); }
+    }
 };
 
 class CCC_SaveStatistic : public IConsole_Command

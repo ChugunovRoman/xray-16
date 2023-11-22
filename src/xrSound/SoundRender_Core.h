@@ -1,8 +1,9 @@
 #pragma once
 
 #include "SoundRender.h"
-#include "SoundRender_Environment.h"
 #include "SoundRender_Cache.h"
+#include "SoundRender_Environment.h"
+#include "SoundRender_Effects.h"
 #include "xrCommon/xr_unordered_map.h"
 
 class CSoundRender_Core : public ISoundManager
@@ -36,13 +37,15 @@ public:
 
     bool bPresent;
     bool bUserEnvironment;
-    bool bEAX; // Boolean variable to indicate presence of EAX Extension
-    bool bDeferredEAX;
     bool bReady;
 
     CTimer Timer;
+    CTimer TimerPersistent; // time-factor is always 1.0f
     float fTimer_Value;
     float fTimer_Delta;
+    float fTimerPersistent_Value;
+    float fTimerPersistent_Delta;
+
     sound_event* Handler;
 
 protected:
@@ -64,6 +67,7 @@ protected:
     u32 s_targets_pu; // parameters update
     SoundEnvironment_LIB* s_environment;
     CSoundRender_Environment s_user_environment;
+    CSoundRender_Effects* m_effects{};
 
     int m_iPauseCounter;
 
@@ -71,12 +75,6 @@ public:
     // Cache
     CSoundRender_Cache cache;
     u32 cache_bytes_per_line;
-
-protected:
-#if defined(XR_PLATFORM_WINDOWS)
-    virtual void i_eax_set(const GUID* guid, u32 prop, void* val, u32 sz) = 0;
-    virtual void i_eax_get(const GUID* guid, u32 prop, void* val, u32 sz) = 0;
-#endif
 
 public:
     CSoundRender_Core();
@@ -123,12 +121,7 @@ public:
     // listener
     //	virtual const Fvector&				listener_position		( )=0;
     virtual void update_listener(const Fvector& P, const Fvector& D, const Fvector& N, float dt) = 0;
-#if defined(XR_PLATFORM_WINDOWS)
-    // eax listener
-    void i_eax_commit_setting();
-    void i_eax_listener_set(CSound_environment* E);
-    void i_eax_listener_get(CSound_environment* E);
-#endif
+
     virtual SoundEnvironment_LIB* get_env_library() { return s_environment; }
     virtual void refresh_env_library();
     virtual void set_user_env(CSound_environment* E);
@@ -143,7 +136,7 @@ public:
     void i_create_all_sources();
 
     void i_destroy_source(CSoundRender_Source* S);
-    CSoundRender_Emitter* i_play(ref_sound* S, bool _loop, float delay);
+    CSoundRender_Emitter* i_play(ref_sound* S, u32 flags, float delay);
     void i_start(CSoundRender_Emitter* E);
     void i_stop(CSoundRender_Emitter* E);
     void i_rewind(CSoundRender_Emitter* E);

@@ -12,7 +12,7 @@
 
 #define FADE_SCALE_UP 4096.f
 #define FADE_SCALE_DOWN 1024.f
-#define MAX_GlowsDist1 float(g_pGamePersistent->Environment().CurrentEnv->far_plane)
+#define MAX_GlowsDist1 float(g_pGamePersistent->Environment().CurrentEnv.far_plane)
 #define MAX_GlowsDist2 float(MAX_GlowsDist1 * MAX_GlowsDist1)
 
 //////////////////////////////////////////////////////////////////////
@@ -115,7 +115,7 @@ void CGlowManager::Load(IReader* fs)
     }
     dwTestID = 0;
 
-    hGeom.create(FVF::F_LIT, RCache.Vertex.Buffer(), RCache.QuadIB);
+    hGeom.create(FVF::F_LIT, RImplementation.Vertex.Buffer(), RImplementation.QuadIB);
 }
 
 void CGlowManager::Unload()
@@ -267,7 +267,7 @@ void CGlowManager::render_selected()
 
         u32 vOffset;
         u32 end = pos + count;
-        FVF::LIT* pvs = pv = (FVF::LIT*)RCache.Vertex.Lock(count * 4, hGeom->vb_stride, vOffset);
+        FVF::LIT* pvs = pv = (FVF::LIT*)RImplementation.Vertex.Lock(count * 4, hGeom->vb_stride, vOffset);
         for (; pos < end; pos++)
         {
             // Cull invisible
@@ -303,7 +303,7 @@ void CGlowManager::render_selected()
             FillSprite(pv, G.position, G.radius, clr);
         }
         int vCount = int(pv - pvs);
-        RCache.Vertex.Unlock(vCount, hGeom->vb_stride);
+        RImplementation.Vertex.Unlock(vCount, hGeom->vb_stride);
         if (vCount)
         {
             RCache.set_Shader(T);

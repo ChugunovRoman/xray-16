@@ -14,7 +14,7 @@
 
 class CApplication;
 
-class UILoadingScreen : public ILoadingScreen, public CUIWindow
+class UILoadingScreen final : public ILoadingScreen, public CUIWindow
 {
     Lock loadingLock;
     bool alwaysShowStage;
@@ -34,7 +34,9 @@ public:
     void Initialize() override;
 
     void Show(bool show) override;
-    bool IsShown() override;
+
+    [[nodiscard]]
+    bool IsShown() const override;
 
     void Update(const int stagesCompleted, const int stagesTotal) override;
     void Draw() override;
@@ -42,4 +44,6 @@ public:
     void SetLevelLogo(const char* name) override;
     void SetStageTitle(const char* title) override;
     void SetStageTip(const char* header, const char* tipNumber, const char* tip) override;
+
+    pcstr GetDebugType() override { return "UILoadingScreen"; }
 };

@@ -14,11 +14,13 @@ public:
         flMax
     };
 
-    CUIFrameLineWnd();
+    CUIFrameLineWnd(pcstr window_name);
+
     bool InitFrameLineWnd(LPCSTR base_name, Fvector2 pos, Fvector2 size, bool horizontal = true, bool fatal = true);
     void InitFrameLineWnd(Fvector2 pos, Fvector2 size, bool horizontal = true);
     bool InitTexture(pcstr texture, bool fatal = true);
     bool InitTexture(pcstr texture, pcstr shader = "hud" DELIMITER "default", bool fatal = true);
+
     virtual void Draw();
 
     float GetTextureHeight() const { return m_tex_rect[0].height(); }
@@ -34,6 +36,8 @@ public:
         R_ASSERT(idx >= flFirst && idx <= flSecond);
         m_tex_rect[idx] = rect;
     }
+
+    pcstr GetDebugType() override { return "CUIFrameLineWnd"; }
 
 protected:
     bool bHorizontal;

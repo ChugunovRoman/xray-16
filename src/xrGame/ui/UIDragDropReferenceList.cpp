@@ -35,7 +35,7 @@ void CUIDragDropReferenceList::Initialize(pcstr labelSection /*= nullptr*/, pcst
     {
         for (int j = 0; j < cellsCapacity.y; j++)
         {
-            CUIStatic* reference = m_references.emplace_back(xr_new<CUIStatic>());
+            CUIStatic* reference = m_references.emplace_back(xr_new<CUIStatic>("Item reference"));
 
             const Fvector2 pos = Fvector2().set((cellSize.x + cellSpacing.x) * i, (cellSize.y + cellSpacing.y) * j);
             const Fvector2 size = Fvector2().set(cellSize.x, cellSize.y);
@@ -54,7 +54,7 @@ void CUIDragDropReferenceList::Initialize(pcstr labelSection /*= nullptr*/, pcst
                 CUITextWnd* label = UIHelper::CreateTextWnd(*uiXml, temp, this, false);
                 if (label)
                 {
-                    if (!label->WndPosIsProbablyRelative()) // Without this, UI Frustum will cull our label
+                    if (true /*!label->WndPosIsProbablyRelative()*/) // Without this, UI Frustum will cull our label
                     {
                         const Fvector2& lblPos = label->GetWndPos();
                         label->SetWndPos({ lblPos.x - listAbsPos.x, lblPos.y - listAbsPos.y });

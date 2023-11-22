@@ -6,7 +6,7 @@ class CUIStatic;
 class CUITextWnd;
 struct GAME_NEWS_DATA;
 
-class CUINewsItemWnd : public CUIWindow
+class CUINewsItemWnd final : public CUIWindow
 {
     typedef CUIWindow inherited;
 
@@ -17,8 +17,10 @@ class CUINewsItemWnd : public CUIWindow
 
 public:
     CUINewsItemWnd();
-    virtual ~CUINewsItemWnd();
+
     void Init(CUIXml& uiXml, LPCSTR start_from);
     void Setup(GAME_NEWS_DATA& news_data);
     virtual void Update(){};
+
+    pcstr GetDebugType() override { return "CUINewsItemWnd"; }
 };

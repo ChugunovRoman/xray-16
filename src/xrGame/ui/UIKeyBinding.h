@@ -8,12 +8,13 @@
 class CUIXml;
 class CUIScrollView;
 
-class CUIKeyBinding : public CUIWindow, public pureKeyMapChanged
+class CUIKeyBinding final : public CUIWindow, public pureKeyMapChanged
 {
 public:
     CUIKeyBinding();
     ~CUIKeyBinding() override;
     void InitFromXml(CUIXml& xml_doc, LPCSTR path);
+    pcstr GetDebugType() override { return "CUIKeyBinding"; }
 
 protected:
     void FillUpList(CUIXml& xml_doc, LPCSTR path);
@@ -26,9 +27,9 @@ protected:
 #endif
 
 protected:
-    bool m_isGamepadBinds;
+    bool m_isGamepadBinds{};
 
-    CUIFrameLineWnd m_header[3];
+    std::array<CUIFrameLineWnd, 3> m_header;
     CUIFrameWindow m_frame;
-    CUIScrollView* m_scroll_wnd;
+    CUIScrollView* m_scroll_wnd{};
 };

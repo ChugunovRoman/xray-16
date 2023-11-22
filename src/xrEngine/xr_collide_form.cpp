@@ -34,10 +34,13 @@ void CCF_Skeleton::SElement::center(Fvector& center) const
     default: NODEFAULT;
     }
 }
-bool pred_find_elem(const CCF_Skeleton::SElement& E, u16 elem) { return E.elem_id < elem; }
+
 bool CCF_Skeleton::_ElementCenter(u16 elem_id, Fvector& e_center)
 {
-    auto it = std::lower_bound(elements.begin(), elements.end(), elem_id, pred_find_elem);
+    const auto it = std::lower_bound(elements.begin(), elements.end(), elem_id, [](const SElement& E, u16 elem)
+    {
+        return E.elem_id < elem;
+    });
     if (it->elem_id == elem_id)
     {
         it->center(e_center);
@@ -86,9 +89,7 @@ CCF_Skeleton::CCF_Skeleton(IGameObject* O) : ICollisionForm(O, cftObject)
 {
     // getVisData
     IRenderVisual* pVisual = O->Visual();
-    // IKinematics* K = PKinematics(pVisual); VERIFY3(K,"Can't create skeleton without Kinematics.",*O->cNameVisual());
-    IKinematics* K = PKinematics(pVisual);
-    VERIFY3(K, "Can't create skeleton without Kinematics.", *O->cNameVisual());
+    VERIFY3(PKinematics(pVisual), "Can't create skeleton without Kinematics.", *O->cNameVisual());
     // bv_box.set (K->vis.box);
     bv_box.set(pVisual->getVisData().box);
     bv_box.getsphere(bv_sphere.P, bv_sphere.R);
@@ -130,8 +131,10 @@ void CCF_Skeleton::BuildState()
         Fmatrix ME, T, TW;
         const Fmatrix& Mbone = K->LL_GetTransform(I->elem_id);
 
+#ifdef DEBUG
         VERIFY2(DET(Mbone) > EPS,
             (make_string("0 scale bone matrix, %d \n", I->elem_id) + dbg_object_full_dump_string(owner)).c_str());
+#endif
 
         switch (I->type)
         {

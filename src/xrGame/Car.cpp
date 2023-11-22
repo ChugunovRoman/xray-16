@@ -125,7 +125,9 @@ void CCar::reload(LPCSTR section)
 
 void CCar::cb_Steer(CBoneInstance* B)
 {
+#ifdef DEBUG
     VERIFY2(fsimilar(DET(B->mTransform), 1.f, DET_CHECK_EPS), "Bones receive returns 0 matrix");
+#endif
     CCar* C = static_cast<CCar*>(B->callback_param());
     Fmatrix m;
 
@@ -446,7 +448,7 @@ void CCar::VisualUpdate(float fov)
     Fvector C, V;
     Center(C);
     V.set(lin_vel);
-    
+
     m_car_sound->Update();
     if (Owner())
     {
@@ -476,9 +478,9 @@ void CCar::VisualUpdate(float fov)
     m_lights.Update();
 }
 
-void CCar::renderable_Render(IRenderable* root)
+void CCar::renderable_Render(u32 context_id, IRenderable* root)
 {
-    inherited::renderable_Render(root);
+    inherited::renderable_Render(context_id, root);
     if (m_car_weapon)
         m_car_weapon->Render_internal();
 }
@@ -499,7 +501,7 @@ void CCar::net_Import(NET_Packet& P)
     //	P.w_u32 (NumItems);
 }
 
-void CCar::OnHUDDraw(CCustomHUD* /*hud*/, IRenderable* /*root*/)
+void CCar::OnHUDDraw(u32 context_id, CCustomHUD* /*hud*/, IRenderable* /*root*/)
 {
 #ifdef DEBUG
     Fvector velocity;
@@ -1988,7 +1990,7 @@ void CCar::SetfFuel(float fuel)
     m_fuel = fuel;
 }
 
-// получить и задать размер топливного бака 
+// получить и задать размер топливного бака
 float CCar::GetfFuelTank()
 {
     return m_fuel_tank;

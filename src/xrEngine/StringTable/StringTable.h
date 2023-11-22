@@ -26,12 +26,15 @@ public:
     static void Destroy();
 
     STRING_VALUE translate(const STRING_ID& str_id) const;
+    bool translate(const STRING_ID& str_id, STRING_VALUE& out) const;
+    pcstr translate(const STRING_ID& str_id, pcstr default_value) const;
     void rescan();
 
     void ReloadLanguage();
 
     static BOOL m_bWriteErrorsToLog;
 
+    shared_str GetCurrentLanguage() const;
     xr_token* GetLanguagesToken() const;
     static u32 LanguageID;
 

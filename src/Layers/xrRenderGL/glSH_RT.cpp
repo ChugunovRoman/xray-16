@@ -4,14 +4,6 @@
 #include "../xrRender/ResourceManager.h"
 #include "glTextureUtils.h"
 
-CRT::CRT()
-{
-    pRT = 0;
-    dwWidth = 0;
-    dwHeight = 0;
-    fmt = D3DFMT_UNKNOWN;
-}
-
 CRT::~CRT()
 {
     destroy();
@@ -20,25 +12,10 @@ CRT::~CRT()
     RImplementation.Resources->_DeleteRT(this);
 }
 
-bool CRT::used_as_depth() const
-{
-    switch (fmt)
-    {
-    case D3DFMT_D16:
-    case D3DFMT_D16_LOCKABLE:
-    case D3DFMT_D15S1:
-    case D3DFMT_D24X8:
-    case D3DFMT_D24S8:
-        return true; 
-    }
+void CRT::set_slice_read(int slice) {}
+void CRT::set_slice_write(u32 context_id, int slice) {}
 
-    if (fmt == MAKEFOURCC('D', 'F', '2', '4'))
-        return true;
-
-    return false;
-}
-
-void CRT::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/, Flags32 /*flags = {}*/)
+void CRT::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/, u32 slices_num /*=1*/, Flags32 /*flags = {}*/)
 {
     if (pRT) return;
 
@@ -54,8 +31,14 @@ void CRT::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/
 
     // Get caps
     GLint max_width, max_height;
+#ifdef XR_PLATFORM_APPLE
+    // https://developer.apple.com/library/archive/documentation/GraphicsImaging/Conceptual/OpenGL-MacProgGuide/opengl_offscreen/opengl_offscreen.html
+    CHK_GL(glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_width));
+    max_height = max_width;
+ #else
     CHK_GL(glGetIntegerv(GL_MAX_FRAMEBUFFER_WIDTH, &max_width));
     CHK_GL(glGetIntegerv(GL_MAX_FRAMEBUFFER_HEIGHT, &max_height));
+ #endif
 
     // Check width-and-height of render target surface
     // XXX: While seemingly silly, assert w/h are positive?
@@ -117,7 +100,7 @@ void CRT::resolve_into(CRT& destination) const
         GL_COLOR_BUFFER_BIT, GL_NEAREST));
 }
 
-void resptrcode_crt::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/, Flags32 flags /*= {}*/)
+void resptrcode_crt::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount /*= 1*/, u32 slices_num /*=1*/, Flags32 flags /*= {}*/)
 {
-    _set(RImplementation.Resources->_CreateRT(Name, w, h, f, SampleCount, flags));
+    _set(RImplementation.Resources->_CreateRT(Name, w, h, f, SampleCount, 1, flags));
 }

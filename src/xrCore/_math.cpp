@@ -5,7 +5,7 @@
 #   if defined(_M_FP_PRECISE)
 #       pragma fenv_access(on)
 #   endif
-#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_FREEBSD) || defined(XR_PLATFORM_APPLE)
+#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
 // XXX: check if these includes needed
 #include <pthread.h>
 #include <sys/time.h>
@@ -19,7 +19,7 @@
 #   else
 #       include <cfenv>
 #       pragma STDC FENV_ACCESS on
-#       if defined(XR_PLATFORM_FREEBSD)
+#       if defined(XR_PLATFORM_BSD)
 #           define USE_FPU_CONTROL_H
             typedef unsigned int fpu_control_t __attribute__((__mode__(__HI__))); // XXX: replace with type alias
 #           define _FPU_GETCW(x) asm volatile ("fnstcw %0" : "=m" ((*&x)))
@@ -34,9 +34,9 @@
 #endif
 
 #include <thread>
-#include "SDL.h"
+#include <SDL.h>
 
-#if (defined(XR_ARCHITECTURE_ARM) || defined(XR_ARCHITECTURE_ARM64) || defined(XR_ARCHITECTURE_E2K)) && !defined(XR_COMPILER_MSVC)
+#if (defined(XR_ARCHITECTURE_ARM) || defined(XR_ARCHITECTURE_ARM64) || defined(XR_ARCHITECTURE_E2K) || defined(XR_ARCHITECTURE_PPC64)) && !defined(XR_COMPILER_MSVC)
 #define _FPU_EXTENDED 0
 #define _FPU_DOUBLE 0
 #define _FPU_SINGLE 0
@@ -184,6 +184,8 @@ void initialize()
 
 namespace CPU
 {
+XRCORE_API bool HasSSE = SDL_HasSSE();
+
 XRCORE_API u64 qpc_freq = SDL_GetPerformanceFrequency();
 
 XRCORE_API u32 qpc_counter = 0;
@@ -236,6 +238,8 @@ void _initialize_cpu()
     Msg("* CPU features: %s", features);
     Msg("* CPU threads: %d", std::thread::hardware_concurrency());
 
+    CPU::HasSSE = SDL_HasSSE(); // just in case, not sure if needed
+
     Log("");
     Fidentity.identity(); // Identity matrix
     Didentity.identity(); // Identity matrix
@@ -247,7 +251,7 @@ void _initialize_cpu()
 }
 
 // per-thread initialization
-#if defined(XR_ARCHITECTURE_ARM) || defined(XR_ARCHITECTURE_ARM64)
+#if defined(XR_ARCHITECTURE_ARM) || defined(XR_ARCHITECTURE_ARM64) || defined(XR_ARCHITECTURE_PPC64)
 #define _MM_SET_FLUSH_ZERO_MODE(mode)
 #define _MM_SET_DENORMALS_ZERO_MODE(mode)
 #else

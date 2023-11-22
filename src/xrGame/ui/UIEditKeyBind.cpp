@@ -6,6 +6,7 @@
 #include "xrEngine/XR_IOConsole.h"
 
 CUIEditKeyBind::CUIEditKeyBind(bool primary, bool isGamepadBinds /*= false*/)
+    : CUIStatic("CUIEditKeyBind")
 {
     m_primary = primary;
     m_isGamepadBinds = isGamepadBinds;
@@ -15,8 +16,6 @@ CUIEditKeyBind::CUIEditKeyBind(bool primary, bool isGamepadBinds /*= false*/)
     m_opt_backup_value = NULL;
     m_action = NULL;
 }
-
-CUIEditKeyBind::~CUIEditKeyBind() {}
 
 u32 CutStringByLength(CGameFont* font, LPCSTR src, pstr dst, u32 dst_size, float length)
 {
@@ -168,7 +167,7 @@ bool CUIEditKeyBind::OnControllerAction(int axis, float x, float y, EUIMessages 
 }
 
 void CUIEditKeyBind::Update()
-{ 
+{
     CUIStatic::Update();
 }
 
@@ -269,7 +268,10 @@ void CUIEditKeyBind::OnMessage(LPCSTR message)
         return; // fuck
 
     game_action* other_action = ActionNameToPtr(command);
-    if (IsGroupNotConflicted(m_action->key_group, other_action->key_group))
+
+    bool no_conflict  = IsGroupNotConflicted(m_action->key_group, other_action->key_group);
+         no_conflict &= IsContextNotConflicted(m_action->key_context, other_action->key_context);
+    if (no_conflict)
         return;
 
     SetText("---");

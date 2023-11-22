@@ -101,8 +101,7 @@ void CEntity::Hit(SHit* pHDS)
     // *** process hit calculations
     // Calc impulse
     Fvector vLocalDir;
-    float m = pHDS->dir.magnitude();
-    VERIFY(m > EPS);
+    VERIFY(pHDS->dir.magnitude() > EPS);
 
     // convert impulse into local coordinate system
     Fmatrix mInvXForm;
@@ -200,7 +199,7 @@ bool CEntity::net_Spawn(CSE_Abstract* DC)
             MONSTER_COMMUNITY monster_community;
             monster_community.set(pSettings->r_string(*cNameSect(), "species"));
 
-            if (monster_community.team() != 255)
+            if (monster_community.team() != NO_COMMUNITY_INDEX)
                 id_Team = monster_community.team();
         }
     }

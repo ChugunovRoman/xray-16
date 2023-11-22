@@ -197,7 +197,7 @@ CMemoryInfo CMemoryManager::memory(const IGameObject* object) const
         if (visual().objects().end() != I)
         {
             (CMemoryObject<CGameObject>&)result = (CMemoryObject<CGameObject>&)(*I);
-            result.visible((*I).visible(mask));
+            [[maybe_unused]] const bool isVisible = result.visible((*I).visible(mask)); // XXX: this may be wrong, maybe code author wanted to SET visibility, not GET???
             result.m_visual_info = true;
             level_time = (*I).m_level_time;
             VERIFY(result.m_object);
@@ -237,7 +237,7 @@ u32 CMemoryManager::memory_time(const IGameObject* object) const
     if (!this->object().g_Alive())
         return (0);
 
-    const CGameObject* game_object = smart_cast<const CGameObject*>(object);
+    [[maybe_unused]] auto game_object = smart_cast<const CGameObject*>(object);
     VERIFY(game_object);
 
     {
@@ -271,7 +271,7 @@ Fvector CMemoryManager::memory_position(const IGameObject* object) const
     if (!this->object().g_Alive())
         return (result);
 
-    const CGameObject* game_object = smart_cast<const CGameObject*>(object);
+    [[maybe_unused]] auto game_object = smart_cast<const CGameObject*>(object);
     VERIFY(game_object);
 
     {

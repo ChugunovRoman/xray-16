@@ -14,7 +14,7 @@ class CActor;
 
 int const it_max = ALife::infl_max_count - 1;
 
-class CUIHudStatesWnd : public CUIWindow
+class CUIHudStatesWnd final : public CUIWindow
 {
 public:
     typedef CUIWindow inherited;
@@ -50,8 +50,8 @@ public:
 
     CUIProgressShape* m_progress_self;
     CUIStatic* m_radia_damage;
-    UI_Arrow* m_arrow;
-    UI_Arrow* m_arrow_shadow;
+    UI_Arrow* m_arrow{};
+    UI_Arrow* m_arrow_shadow{};
 
     CUIStatic* m_bleeding;
     /*
@@ -63,12 +63,12 @@ public:
         CUIStatic*			m_radiation_lev2;
         CUIStatic*			m_radiation_lev3;
     */
-    float m_last_health;
+    float m_last_health{};
     float m_health_blink;
 
-    float m_radia_self;
+    float m_radia_self{};
     //	float				m_actor_radia_factor;
-    float m_radia_hit;
+    float m_radia_hit{};
     shared_str m_lanim_name;
 
     float m_zone_cur_power[ALife::infl_max_count];
@@ -77,16 +77,15 @@ public:
     ALife::EHitType m_zone_hit_type[ALife::infl_max_count];
     float m_zone_threshold[ALife::infl_max_count];
 
-    float m_zone_feel_radius_max;
-    u32 m_timer_1sec;
+    float m_zone_feel_radius_max{};
+    u32 m_timer_1sec{};
 
-    bool m_fake_indicators_update;
+    bool m_fake_indicators_update{};
     std::bitset<it_max> m_cur_state_LA;
     bool m_b_force_update;
 
 public:
     CUIHudStatesWnd();
-    virtual ~CUIHudStatesWnd();
 
     void InitFromXml(CUIXml& xml, LPCSTR path);
     void Load_section();
@@ -107,6 +106,8 @@ public:
     void DrawZoneIndicators();
     void FakeUpdateIndicatorType(u8 t, float power);
     void EnableFakeIndicators(bool enable);
+
+    pcstr GetDebugType() override { return "CUIHudStatesWnd"; }
 
 protected:
     static ALife::EInfluenceType get_indik_type(ALife::EHitType hit_type);

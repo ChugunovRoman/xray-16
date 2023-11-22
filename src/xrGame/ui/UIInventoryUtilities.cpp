@@ -35,7 +35,7 @@ ui_shader* g_EquipmentIconsShader = NULL;
 ui_shader* g_MPCharIconsShader = NULL;
 ui_shader* g_OutfitUpgradeIconsShader = NULL;
 ui_shader* g_WeaponUpgradeIconsShader = NULL;
-static CUIStatic* GetUIStatic();
+//static CUIStatic* GetUIStatic();
 
 typedef std::pair<CHARACTER_RANK_VALUE, shared_str> CharInfoStringID;
 using CharInfoStrings = xr_map<CHARACTER_RANK_VALUE, shared_str>;
@@ -87,7 +87,7 @@ bool InventoryUtilities::GreaterRoomInRuck(PIItem item1, PIItem item2)
 
 bool InventoryUtilities::FreeRoom_inBelt(TIItemContainer& item_list, PIItem _item, int width, int height)
 {
-    bool* ruck_room = (bool*)alloca(width * height);
+    bool* ruck_room = (bool*)xr_alloca(width * height);
 
     int i, j, k, m;
     int place_row = 0, place_col = 0;

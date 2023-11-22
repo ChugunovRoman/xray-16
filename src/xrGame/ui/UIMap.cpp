@@ -8,14 +8,13 @@
 #include "xrEngine/xr_input.h" //remove me !!!
 #include "xrCore/_fbox2.h"
 
-const u32 activeLocalMapColor = 0xffffffff; // 0xffc80000;
-const u32 inactiveLocalMapColor = 0xffffffff; // 0xff438cd1;
-const u32 ourLevelMapColor = 0xffffffff;
+//const u32 activeLocalMapColor = 0xffffffff; // 0xffc80000;
+//const u32 inactiveLocalMapColor = 0xffffffff; // 0xff438cd1;
+//const u32 ourLevelMapColor = 0xffffffff;
 
-CUICustomMap::CUICustomMap()
+CUICustomMap::CUICustomMap() : CUIStatic("Custom Map")
 {
     m_BoundRect_.set(0, 0, 0, 0);
-    SetWindowName("map");
     m_flags.zero();
     SetPointerDistance(0.0f);
 }
@@ -45,7 +44,9 @@ void CUICustomMap::Initialize(shared_str name, LPCSTR sh_name)
         m_name = name;
     }
     if (levelIni != g_pGameLevel->pLevel)
-        xr_delete(levelIni);
+    {
+        xr_delete(const_cast<CInifile*>(levelIni));
+    }
 }
 
 void CUICustomMap::Update()
@@ -173,7 +174,7 @@ bool CUICustomMap::GetPointerTo(const Fvector2& src, float item_radius, Fvector2
     f_src.set(src.x, src.y);
     f_dir.sub(f_center, f_src);
     f_dir.normalize_safe();
-    Fvector2 f_intersect_point;
+    Fvector2 f_intersect_point{};
     res = f_clip_rect_local.Pick2(f_src, f_dir, f_intersect_point);
     if (!res)
         return false;
@@ -260,7 +261,7 @@ bool CUIGlobalMap::OnMouseAction(float x, float y, EUIMessages mouse_action)
 {
     if (inherited::OnMouseAction(x, y, mouse_action))
         return true;
-    if (mouse_action == WINDOW_MOUSE_MOVE && (FALSE == pInput->iGetAsyncBtnState(0)))
+    if (mouse_action == WINDOW_MOUSE_MOVE && (FALSE == pInput->iGetAsyncKeyState(MOUSE_1)))
     {
         if (MapWnd())
         {
@@ -509,7 +510,7 @@ void CUILevelMap::Update()
     if (m_bCursorOverWindow)
     {
         VERIFY(m_dwFocusReceiveTime >= 0);
-        if (Device.dwTimeGlobal > (m_dwFocusReceiveTime + 500))
+        if (Device.dwTimeGlobal > (m_dwFocusReceiveTime + 500 * Device.time_factor()))
         {
             if (fsimilar(MapWnd()->GlobalMap()->GetCurrentZoom().x, MapWnd()->GlobalMap()->GetMinZoom(), EPS_L))
                 MapWnd()->ShowHintStr(this, MapName().c_str());
@@ -526,7 +527,7 @@ bool CUILevelMap::OnMouseAction(float x, float y, EUIMessages mouse_action)
     if (MapWnd()->GlobalMap()->Locked())
         return true;
 
-    if (mouse_action == WINDOW_MOUSE_MOVE && (FALSE == pInput->iGetAsyncBtnState(0)))
+    if (mouse_action == WINDOW_MOUSE_MOVE && (FALSE == pInput->iGetAsyncKeyState(MOUSE_1)))
     {
         if (MapWnd())
         {
@@ -577,8 +578,6 @@ void CUIMiniMap::Init_internal(const shared_str& name, const CInifile& pLtx, con
     CUIStatic::SetTextureColor(0x7fffffff);
 }
 
-// XXX: examine the difference with CUILevelMap::UpdateSpots()
-// maybe we need to use inherited::UpdateSpots() here when minimap is not rounded..
 void CUIMiniMap::UpdateSpots()
 {
     DetachAll();

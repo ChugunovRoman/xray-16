@@ -22,6 +22,7 @@ set(COMMON
     "../Common/LevelGameDef.h"
     "../Common/Noncopyable.hpp"
     "../Common/Platform.hpp"
+    "../Common/OGF_GContainer_Vertices.hpp"
 )
 
 set(COMMON_OBJECT
@@ -163,7 +164,6 @@ set(KERNEL
     "xr_shortcut.h"
     "xrCore.cpp"
     "xrCore.h"
-    "xrCore_benchmark_macros.h"
 )
 
 set(KERNEL_COMMON
@@ -413,16 +413,18 @@ target_include_directories(${PROJECT_NAME}
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/Externals/mimalloc/include
     $<$<BOOL:${JPEG_FOUND}>:${JPEG_INCLUDE_DIRS}>
+    ${LZO_INCLUDE_DIRS}
 )
 
 target_link_libraries(${PROJECT_NAME}
     PUBLIC
     pthread
+    $<$<PLATFORM_ID:FreeBSD,OpenBSD,NetBSD,DragonFlyBSD>:execinfo>
     ${SDL2_LIBRARIES}
     PRIVATE
     xrMiscMath
     dl
-    $<$<STREQUAL:${MEMORY_ALLOCATOR},mimalloc>:mimalloc-static>
+    $<$<STREQUAL:${MEMORY_ALLOCATOR},mimalloc>:mimalloc>
     $<$<BOOL:${JPEG_FOUND}>:${JPEG_LIBRARIES}>
     ${LZO_LIBRARIES}
 )

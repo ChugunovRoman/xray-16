@@ -34,6 +34,7 @@ set(SRC_FILES
     "../xrRender/DetailManager_CACHE.cpp"
     "../xrRender/DetailManager.cpp"
     "../xrRender/DetailManager_Decompress.cpp"
+    "../xrRender/DetailManager_soft.cpp"
     "../xrRender/DetailManager.h"
     "../xrRender/DetailManager_VS.cpp"
     "../xrRender/DetailModel.cpp"
@@ -48,14 +49,14 @@ set(SRC_FILES
     "../xrRender/du_sphere.h"
     "../xrRender/du_sphere_part.cpp"
     "../xrRender/du_sphere_part.h"
-    "../xrRender/dxConsoleRender.cpp"
-    "../xrRender/dxConsoleRender.h"
     "../xrRender/dxDebugRender.cpp"
     "../xrRender/dxDebugRender.h"
     "../xrRender/dxEnvironmentRender.cpp"
     "../xrRender/dxEnvironmentRender.h"
     "../xrRender/dxFontRender.cpp"
     "../xrRender/dxFontRender.h"
+    "../xrRender/dxImGuiRender.cpp"
+    "../xrRender/dxImGuiRender.h"
     "../xrRender/dxLensFlareRender.cpp"
     "../xrRender/dxLensFlareRender.h"
     "../xrRender/dxObjectSpaceRender.cpp"
@@ -211,8 +212,8 @@ set(SRC_FILES
     "../xrRender/VertexCache.h"
     "../xrRender/WallmarksEngine.cpp"
     "../xrRender/WallmarksEngine.h"
-    #"../xrRender/xr_effgamma.cpp"
-    #"../xrRender/xr_effgamma.h"
+    "../xrRender/xr_effgamma.cpp"
+    "../xrRender/xr_effgamma.h"
     "../xrRender/xrRender_console.cpp"
     "../xrRender/xrRender_console.h"
     "../xrRender/xrStripify.cpp"
@@ -331,9 +332,9 @@ set(SRC_FILES
     "../xrRender_R2/r3_rendertarget_mark_msaa_edges.cpp"
     "../xrRender_R2/r3_rendertarget_phase_ssao.cpp"
     "../xrRender_R2/r3_rendertarget_phase_smap_D.cpp"
-    "../xrRender_R2/r3_rendertarget_phase_rain.cpp"
     "../xrRender_R2/r3_rendertarget_phase_occq.cpp"
     "../xrRender_R2/r3_rendertarget_phase_scene.cpp"
+    "../xrRender_R2/render_phase_sun.cpp"
     "../xrRender_R2/SMAP_Allocator.h"
     "../xrRenderGL/Blender_Recorder_GL.cpp"
     "../xrRenderGL/CommonTypes.h"
@@ -345,6 +346,7 @@ set(SRC_FILES
     "../xrRenderGL/glR_Backend_Runtime.h"
     "../xrRenderGL/glr_constants.cpp"
     "../xrRenderGL/glr_constants_cache.h"
+    "../xrRenderGL/glr_screenshot.cpp"
     "../xrRenderGL/glResourceManager_Resources.cpp"
     "../xrRenderGL/glResourceManager_Scripting.cpp"
     "../xrRenderGL/glSH_RT.cpp"
@@ -358,7 +360,6 @@ set(SRC_FILES
     "../xrRenderGL/glTextureUtils.h"
     "../../Include/xrRender/animation_blend.h"
     "../../Include/xrRender/animation_motion.h"
-    "../../Include/xrRender/ConsoleRender.h"
     "../../Include/xrRender/DebugRender.h"
     "../../Include/xrRender/DebugShader.h"
     "../../Include/xrRender/DrawUtils.h"
@@ -395,9 +396,10 @@ target_include_directories(${PROJECT_NAME}
     ${CMAKE_SOURCE_DIR}/src/Layers/xrRender
     ${CMAKE_SOURCE_DIR}/src/Include/xrRender
     ${CMAKE_SOURCE_DIR}/src/Layers/xrRender_R2
+    ${CMAKE_SOURCE_DIR}/sdk/include/DirectXMesh
     ${CMAKE_SOURCE_DIR}/Externals/luabind
     ${CMAKE_SOURCE_DIR}/Externals/gli
-    ${CMAKE_SOURCE_DIR}/Externals/gli/external/glm
+    ${CMAKE_SOURCE_DIR}/Externals/gli/external
     ${SDL2_INCLUDE_DIRS}
 )
 
@@ -410,6 +412,7 @@ target_link_libraries(${PROJECT_NAME}
     xrParticles
     xrScriptEngine
     xrLuabind
+    xrImGui
     OpenGL::GL
     GLEW::GLEW
 )
@@ -418,7 +421,6 @@ target_compile_definitions(${PROJECT_NAME}
     PRIVATE
     -DXRRENDER_GL_EXPORTS
     -DUSE_OGL
-    -DNO_XR_VDECLARATOR
 )
 
 set_target_properties(${PROJECT_NAME} PROPERTIES

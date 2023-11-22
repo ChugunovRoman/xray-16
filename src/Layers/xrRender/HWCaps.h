@@ -37,9 +37,9 @@ public:
 
 public:
     // force flags
-    BOOL bForceGPU_REF;
-    BOOL bForceGPU_SW;
-    BOOL bForceGPU_NonPure;
+    bool bForceGPU_REF;
+    bool bForceGPU_SW;
+    bool bForceGPU_NonPure;
     BOOL SceneMode;
 
     u32 iGPUNum;
@@ -58,6 +58,7 @@ public:
     u16 raster_minor;
     pcstr raster_profile;
     caps_Raster raster;
+    u32 max_ffp_lights;
 
     u32 id_vendor;
     u32 id_device;

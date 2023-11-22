@@ -178,6 +178,8 @@ public:
         CharacterInfo().m_SpecificCharacter.data()->m_icon_name = iconName;
     }
 
+    void SetMonsterCommunity() const;
+
     //для работы с relation system
     u16 object_id() const;
     CHARACTER_COMMUNITY_INDEX Community() const { return CharacterInfo().Community().index(); };
@@ -189,7 +191,7 @@ protected:
     xr_string m_game_name;
 
 public:
-    void renderable_Render(IRenderable* root) override;
+    void renderable_Render(u32 context_id, IRenderable* root) override;
     virtual void OnItemTake(CInventoryItem* inventory_item);
 
     virtual void OnItemBelt(CInventoryItem* inventory_item, const SInvItemPlace& previous_place);

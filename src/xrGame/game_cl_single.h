@@ -18,19 +18,19 @@ public:
     virtual ALife::_TIME_ID GetEnvironmentGameTime();
     virtual float GetEnvironmentGameTimeFactor();
     virtual void SetEnvironmentGameTimeFactor(const float fTimeFactor);
+    virtual void SetEnvironmentGameTimeFactor(ALife::_TIME_ID GameTime, const float fTimeFactor) override;
 
     void OnDifficultyChanged();
 };
 
 // game difficulty
-enum ESingleGameDifficulty
+enum ESingleGameDifficulty : u32
 {
     egdNovice = 0,
     egdStalker = 1,
     egdVeteran = 2,
     egdMaster = 3,
-    egdCount,
-    egd_force_u32 = u32(-1)
+    egdCount
 };
 
 extern ESingleGameDifficulty g_SingleGameDifficulty;

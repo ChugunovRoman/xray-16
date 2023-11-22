@@ -23,7 +23,7 @@ CUITrackBar::CUITrackBar()
     AttachChild(m_pSlider);
     m_pSlider->SetAutoDelete(true);
 
-    m_static = xr_new<CUIStatic>();
+    m_static = xr_new<CUIStatic>("Value as text");
     m_static->Enable(false);
     AttachChild(m_static);
     m_static->SetAutoDelete(true);
@@ -41,22 +41,24 @@ bool CUITrackBar::OnMouseAction(float x, float y, EUIMessages mouse_action)
     {
         if (m_bCursorOverWindow && m_b_mouse_capturer)
         {
-            if (pInput->iGetAsyncBtnState(0))
+            if (pInput->iGetAsyncKeyState(MOUSE_1))
                 UpdatePosRelativeToMouse();
         }
+        break;
     }
-    break;
     case WINDOW_LBUTTON_DOWN:
     {
         m_b_mouse_capturer = m_bCursorOverWindow;
         if (m_b_mouse_capturer)
             UpdatePosRelativeToMouse();
-    }
-    break;
 
-    case WINDOW_LBUTTON_UP: { m_b_mouse_capturer = false;
+        break;
     }
-    break;
+    case WINDOW_LBUTTON_UP:
+    {
+        m_b_mouse_capturer = false;
+        break;
+    }
     case WINDOW_MOUSE_WHEEL_UP:
     {
         if (m_b_is_float)
@@ -72,8 +74,8 @@ bool CUITrackBar::OnMouseAction(float x, float y, EUIMessages mouse_action)
         GetMessageTarget()->SendMessage(this, BUTTON_CLICKED, NULL);
         UpdatePos();
         OnChangedOptValue();
+        break;
     }
-    break;
     case WINDOW_MOUSE_WHEEL_DOWN:
     {
         if (m_b_is_float)
@@ -89,8 +91,10 @@ bool CUITrackBar::OnMouseAction(float x, float y, EUIMessages mouse_action)
         GetMessageTarget()->SendMessage(this, BUTTON_CLICKED, NULL);
         UpdatePos();
         OnChangedOptValue();
+        break;
     }
-    break;
+    default:
+        break;
     };
     return true;
 }
@@ -149,7 +153,7 @@ void CUITrackBar::Update()
 
     if (m_b_mouse_capturer)
     {
-        if (!pInput->iGetAsyncBtnState(0))
+        if (!pInput->iGetAsyncKeyState(MOUSE_1))
             m_b_mouse_capturer = false;
     }
 }
@@ -328,7 +332,7 @@ void CUITrackBar::UpdatePos()
 
     if (m_static->IsEnabled())
     {
-        string256 buff;      
+        string256 buff;
         if (m_b_is_float)
         {
             xr_sprintf(buff, (m_static_format == nullptr ? "%.1f" : m_static_format.c_str()), m_f_val);

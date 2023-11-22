@@ -6,15 +6,14 @@
 class TextLoadingScreen : public ILoadingScreen
 {
 public:
-    ~TextLoadingScreen() = default;
-
     void Initialize() override;
 
+    [[nodiscard]]
+    bool IsShown() const override;
     void Show(bool status) override;
-    void Draw() override;
-    bool IsShown() override;
 
     void Update(int stagesCompleted, int stagesTotal) override;
+    void Draw() override;
 
     void SetLevelLogo(cpcstr name) override;
     void SetStageTitle(cpcstr title) override;
@@ -27,7 +26,7 @@ private:
     typedef CConsole inherited;
 
 private:
-    HWND* m_pMainWnd;
+    HWND m_pMainWnd{};
 
     HWND m_hConsoleWnd;
     void CreateConsoleWnd();
@@ -56,7 +55,6 @@ private:
 
 public:
     CTextConsole();
-    virtual ~CTextConsole();
 
     virtual void Initialize();
     virtual void Destroy();

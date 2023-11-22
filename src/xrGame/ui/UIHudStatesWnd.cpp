@@ -21,7 +21,7 @@
 #include "xrUICore/XML/UITextureMaster.h"
 
 CUIHudStatesWnd::CUIHudStatesWnd()
-    : m_b_force_update(true), m_timer_1sec(0), m_last_health(0.0f), m_radia_self(0.0f), m_radia_hit(0.0f)
+    : CUIWindow(CUIHudStatesWnd::GetDebugType()), m_b_force_update(true)
 {
     for (int i = 0; i < ALife::infl_max_count; ++i)
     {
@@ -35,18 +35,11 @@ CUIHudStatesWnd::CUIHudStatesWnd()
     m_zone_hit_type[ALife::infl_psi] = ALife::eHitTypeTelepatic;
     m_zone_hit_type[ALife::infl_electra] = ALife::eHitTypeShock;
 
-    m_zone_feel_radius_max = 0.0f;
-
     m_health_blink = pSettings->read_if_exists<float>("actor_condition", "hud_health_blink", 0.f);
     clamp(m_health_blink, 0.0f, 1.0f);
-
-    m_fake_indicators_update = false;
-    m_arrow = nullptr;
-    m_arrow_shadow = nullptr;
     //-	Load_section();
 }
 
-CUIHudStatesWnd::~CUIHudStatesWnd() {}
 void CUIHudStatesWnd::reset_ui()
 {
     if (g_pGameLevel)
@@ -417,7 +410,7 @@ void CUIHudStatesWnd::UpdateActiveItemInfo(CActor* actor)
             }
             else
             {
-                m_ui_weapon_sign_ammo->Show(false);  
+                m_ui_weapon_sign_ammo->Show(false);
             }
         }
 
@@ -428,7 +421,7 @@ void CUIHudStatesWnd::UpdateActiveItemInfo(CActor* actor)
             m_ui_grenade->Show(true);
 
             m_ui_grenade->SetText(m_item_info.grenade.c_str());
-            
+
             CWeaponMagazinedWGrenade* wpn = smart_cast<CWeaponMagazinedWGrenade*>(item);
             if (wpn && wpn->m_bGrenadeMode)
                 m_ui_grenade->SetTextColor(color_rgba(238, 155, 23, 255));
@@ -495,14 +488,58 @@ void CUIHudStatesWnd::SetAmmoIcon(const shared_str& sect_name)
     m_ui_weapon_icon->GetUIStaticItem().SetTextureRect(texture_rect);
     m_ui_weapon_icon->SetStretchTexture(true);
 
-    float h = texture_rect.height() * 0.8f;
-    float w = texture_rect.width() * 0.8f;
-
-    // now perform only width scale for ammo, which (W)size >2
-    if (texture_rect.width() > 2.01f * INV_GRID_WIDTH)
-        w = INV_GRID_WIDTH * 1.5f;
-
-    m_ui_weapon_icon->SetWidth(w * UI().get_current_kx());
+    float w, h;
+    if (ShadowOfChernobylMode)
+    {
+        h = texture_rect.height() * 0.8f;
+        w = texture_rect.width() * (UI().is_widescreen() ? 0.7f : 0.8f);
+        float posx_16 = 30.0f;
+        float posx = 32.0f;
+        if (texture_rect.width() > 2.01f * INV_GRID_WIDTH)
+        {
+            w = INV_GRID_WIDTH * 1.6f;
+        }
+        if (texture_rect.width() < 1.01f * INV_GRID_WIDTH)
+        {
+            m_ui_weapon_icon->SetTextureOffset(UI().is_widescreen() ? posx_16 : posx, 5.0f);
+        }
+        else
+        {
+            posx_16 = 12.f;
+            posx = 14.f;
+            m_ui_weapon_icon->SetTextureOffset(UI().is_widescreen() ? posx_16 : posx, 5.0f);
+        }
+        m_ui_weapon_icon->SetWidth(w);
+    }
+    else if (ClearSkyMode)
+    {
+        h = texture_rect.height() * 0.65f;
+        w = texture_rect.width() * 0.65f;
+        float posx_16 = 8.33f;
+        float posx = 10.0f;
+        if (texture_rect.width() > 2.01f * INV_GRID_WIDTH)
+        {
+            w = INV_GRID_WIDTH * 1.5f;
+        }
+        if (texture_rect.width() < 1.01f * INV_GRID_WIDTH)
+        {
+            m_ui_weapon_icon->SetTextureOffset(UI().is_widescreen() ? posx_16 : posx, 0.0f);
+        }
+        else
+        {
+            m_ui_weapon_icon->SetTextureOffset(0.0f, 0.0f);
+        }
+        m_ui_weapon_icon->SetWidth(UI().is_widescreen() ? w * 0.833f : w);
+    }
+    else
+    {
+        h = texture_rect.height() * 0.8f;
+        w = texture_rect.width() * 0.8f;
+        // now perform only width scale for ammo, which (W)size >2
+        if (texture_rect.width() > 2.01f * INV_GRID_WIDTH)
+            w = INV_GRID_WIDTH * 1.5f;
+        m_ui_weapon_icon->SetWidth(w * UI().get_current_kx());
+    }
     m_ui_weapon_icon->SetHeight(h);
 }
 // ------------------------------------------------------------------------------------------------
@@ -674,7 +711,7 @@ void CUIHudStatesWnd::UpdateIndicatorType(CActor* actor, ALife::EInfluenceType t
     constexpr u32 c_green = color_rgba(0, 255, 0, 255);
     constexpr u32 c_yellow = color_rgba(255, 255, 0, 255);
     constexpr u32 c_red = color_rgba(255, 0, 0, 255);
-    
+
     LPCSTR texture = "";
     string256 str;
     switch (type)

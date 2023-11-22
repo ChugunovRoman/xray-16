@@ -10,23 +10,32 @@
 
 #include "xrUICore/UIMessages.h"
 #include "xrUICore/uiabstract.h"
+#include "xrUICore/ui_debug.h"
 
-class XRUICORE_API CUIWindow : public CUISimpleWindow
+class XRUICORE_API CUIWindow : public CUISimpleWindow, public CUIDebuggable
 {
 public:
-    CUIWindow();
-    virtual ~CUIWindow();
+    CUIWindow(pcstr window_name);
+    ~CUIWindow() override;
 
     ////////////////////////////////////
     //работа с дочерними и родительскими окнами
     virtual void AttachChild(CUIWindow* pChild);
     virtual void DetachChild(CUIWindow* pChild);
-    virtual bool IsChild(CUIWindow* pChild) const;
     virtual void DetachAll();
-    int GetChildNum() { return m_ChildWndList.size(); }
-    void SetParent(CUIWindow* pNewParent);
+
+    [[nodiscard]]
+    virtual bool IsChild(CUIWindow* pPossibleChild) const;
+
+    [[nodiscard]]
+    u32 GetChildNum() const { return (u32)m_ChildWndList.size(); }
+
+    [[nodiscard]]
     CUIWindow* GetParent() const { return m_pParentWnd; }
+    void SetParent(CUIWindow* pNewParent);
+
     //получить окно самого верхнего уровня
+    [[nodiscard]]
     CUIWindow* GetTop()
     {
         if (m_pParentWnd == NULL)
@@ -56,6 +65,7 @@ public:
     //сообщение посылается дочерним окном родительскому
     void SetCapture(CUIWindow* pChildWindow, bool capture_status);
     CUIWindow* GetMouseCapturer() { return m_pMouseCapturer; }
+
     //окошко, которому пересылаются сообщения,
     //если NULL, то шлем на GetParent()
     void SetMessageTarget(CUIWindow* pWindow) { m_pMessageTarget = pWindow; }
@@ -70,14 +80,20 @@ public:
     virtual void SendMessage(CUIWindow* pWnd, s16 msg, void* pData = NULL);
 
     virtual void Enable(bool status) { m_bIsEnabled = status; }
-    bool IsEnabled() { return m_bIsEnabled; }
+
+    [[nodiscard]]
+    bool IsEnabled() const { return m_bIsEnabled; }
+
     //убрать/показать окно и его дочерние окна
     virtual void Show(bool status)
     {
         SetVisible(status);
         Enable(status);
     }
-    virtual bool IsShown() { return GetVisible(); }
+
+    [[nodiscard]]
+    virtual bool IsShown() const { return GetVisible(); }
+
     void ShowChildren(bool show);
 
     //абсолютные координаты
@@ -118,18 +134,30 @@ public:
     using WINDOW_LIST = ui_list<CUIWindow*>;
 
     WINDOW_LIST& GetChildWndList() { return m_ChildWndList; }
-    IC bool IsAutoDelete() { return m_bAutoDelete; }
+
+    [[nodiscard]]
+    IC bool IsAutoDelete() const { return m_bAutoDelete; }
     IC void SetAutoDelete(bool auto_delete) { m_bAutoDelete = auto_delete; }
+
     // Name of the window
-    const shared_str WindowName() const { return m_windowName; }
-    void SetWindowName(LPCSTR wn) { m_windowName = wn; }
-    LPCSTR WindowName_script() { return m_windowName.c_str(); }
+    shared_str WindowName() const { return m_windowName; }
+    void SetWindowName(pcstr wn) { m_windowName = wn; }
+
     CUIWindow* FindChild(const shared_str name);
 
+    [[nodiscard]]
     IC bool CursorOverWindow() const { return m_bCursorOverWindow; }
+
+    [[nodiscard]]
     IC u32 FocusReceiveTime() const { return m_dwFocusReceiveTime; }
+
     IC bool GetCustomDraw() const { return m_bCustomDraw; }
     IC void SetCustomDraw(bool b) { m_bCustomDraw = b; }
+
+    pcstr GetDebugType() override { return "CUIWindow"; }
+    bool FillDebugTree(const CUIDebugState& debugState) override;
+    void FillDebugInfo() override;
+
 protected:
     IC void SafeRemoveChild(CUIWindow* child)
     {
@@ -139,20 +167,21 @@ protected:
     };
 
     shared_str m_windowName;
+
     //список дочерних окон
     WINDOW_LIST m_ChildWndList;
 
     //указатель на родительское окно
-    CUIWindow* m_pParentWnd;
+    CUIWindow* m_pParentWnd{};
 
     //дочернее окно которое, захватило ввод мыши
-    CUIWindow* m_pMouseCapturer;
+    CUIWindow* m_pMouseCapturer{};
 
     //дочернее окно которое, захватило ввод клавиатуры
-    CUIWindow* m_pKeyboardCapturer;
+    CUIWindow* m_pKeyboardCapturer{};
 
     //кому шлем сообщения
-    CUIWindow* m_pMessageTarget;
+    CUIWindow* m_pMessageTarget{};
 
     // Последняя позиция мышки
     Fvector2 cursor_pos;
@@ -160,22 +189,17 @@ protected:
     //время прошлого клика мышки
     //для определения DoubleClick
     u32 m_dwLastClickTime;
-    u32 m_dwFocusReceiveTime;
+    u32 m_dwFocusReceiveTime{};
 
     //флаг автоматического удаления во время вызова деструктора
-    bool m_bAutoDelete;
+    bool m_bAutoDelete{};
 
     // Is user input allowed
     bool m_bIsEnabled;
 
     // Если курсор над окном
-    bool m_bCursorOverWindow;
-    bool m_bCustomDraw;
-
-#ifdef DEBUG
-    int m_dbg_id;
-#endif
+    bool m_bCursorOverWindow{};
+    bool m_bCustomDraw{};
 };
 
-XRUICORE_API extern BOOL g_show_wnd_rect2;
 XRUICORE_API bool fit_in_rect(CUIWindow* w, Frect const& vis_rect, float border = 0.0f, float dx16pos = 0.0f);

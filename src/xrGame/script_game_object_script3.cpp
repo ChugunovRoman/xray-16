@@ -35,9 +35,6 @@
 #include "PhysicObject.h"
 #include "Artefact.h"
 
-using namespace luabind;
-using namespace luabind::policy;
-
 /*
     New luabind makes incorrect casts in this case. He makes casts only to 'true derived class'.
     For example:
@@ -56,8 +53,11 @@ TClass* ObjectCast(CScriptGameObject* scriptObj)
     return nullptr;
 }
 
-class_<CScriptGameObject>& script_register_game_object2(class_<CScriptGameObject>& instance)
+luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_<CScriptGameObject>& instance)
 {
+    using namespace luabind;
+    using namespace luabind::policy;
+
     instance
         .def("add_sound",
             (u32(CScriptGameObject::*)(LPCSTR, u32, ESoundTypes, u32, u32, u32))(&CScriptGameObject::add_sound))
@@ -164,6 +164,15 @@ class_<CScriptGameObject>& script_register_game_object2(class_<CScriptGameObject
         .def("give_info_portion", &CScriptGameObject::GiveInfoPortion)
         .def("disable_info_portion", &CScriptGameObject::DisableInfoPortion)
 
+        .def("give_game_news", +[](CScriptGameObject* self,
+            pcstr news, pcstr texture_name, Frect /*tex_rect*/, int delay, int show_time)
+        {
+            // SOC give_game_news style
+            // tex_rect is ignored, we could add support for it back, if really needed.
+            // It also should be safe to pass nullptr to caption param
+            self->GiveGameNews(nullptr, news, texture_name, delay, show_time);
+            return true;
+        })
         .def("give_game_news",
             (void (CScriptGameObject::*)(LPCSTR, LPCSTR, LPCSTR, int, int))(&CScriptGameObject::GiveGameNews))
         .def("give_game_news",
@@ -171,7 +180,7 @@ class_<CScriptGameObject>& script_register_game_object2(class_<CScriptGameObject
 
         .def("clear_game_news", &CScriptGameObject::ClearGameNews)
 
-        .def("give_talk_message", (void (CScriptGameObject::*)(cpcstr, cpcstr, Frect, cpcstr))
+        .def("give_talk_message", (void (CScriptGameObject::*)(pcstr, pcstr, Frect, pcstr))
             (&CScriptGameObject::AddIconedTalkMessage))
 
         .def("give_talk_message", (void (CScriptGameObject::*)(LPCSTR, LPCSTR, LPCSTR))
@@ -230,6 +239,10 @@ class_<CScriptGameObject>& script_register_game_object2(class_<CScriptGameObject
         .def("switch_to_upgrade", &CScriptGameObject::SwitchToUpgrade)
         .def("switch_to_talk", &CScriptGameObject::SwitchToTalk)
         .def("run_talk_dialog", &CScriptGameObject::RunTalkDialog)
+        .def("run_talk_dialog", +[](CScriptGameObject* self, CScriptGameObject* pToWho)
+        {
+            self->RunTalkDialog(pToWho, false);
+        })
         .def("allow_break_talk_dialog", &CScriptGameObject::AllowBreakTalkDialog)
 
         .def("hide_weapon", &CScriptGameObject::HideWeapon)
@@ -424,22 +437,18 @@ class_<CScriptGameObject>& script_register_game_object2(class_<CScriptGameObject
         .def("ammo_set_count", &CScriptGameObject::AmmoSetCount)
         .def("ammo_box_size", &CScriptGameObject::AmmoBoxSize)
 
-        //For Ammo
-        .def("ammo_get_count", &CScriptGameObject::AmmoGetCount)
-        .def("ammo_set_count", &CScriptGameObject::AmmoSetCount)
-        .def("ammo_box_size", &CScriptGameObject::AmmoBoxSize)
-
         //For Weapons
-        .def("weapon_get_ammo_section", &CScriptGameObject::Weapon_GetAmmoSection)
         .def("weapon_addon_attach", &CScriptGameObject::Weapon_AddonAttach)
         .def("weapon_addon_detach", &CScriptGameObject::Weapon_AddonDetach)
-        .def("weapon_set_scope", &CScriptGameObject::Weapon_SetCurrentScope)
-        .def("weapon_get_scope", &CScriptGameObject::Weapon_GetCurrentScope)
-        .def("weapon_in_grenade_mode", &CScriptGameObject::WeaponInGrenadeMode)
 
         //For Weapon & Outfit
+        .def("add_upgrade", &CScriptGameObject::AddUpgrade)
         .def("install_upgrade", &CScriptGameObject::InstallUpgrade)
         .def("has_upgrade", &CScriptGameObject::HasUpgrade)
+        .def("has_upgrade_group", &CScriptGameObject::HasUpgradeGroup)
+        .def("has_upgrade_group_by_upgrade_id", &CScriptGameObject::HasUpgradeGroupByUpgradeId)
+        .def("can_install_upgrade", &CScriptGameObject::CanInstallUpgrade)
+        .def("can_add_upgrade", &CScriptGameObject::CanAddUpgrade)
         .def("iterate_installed_upgrades", &CScriptGameObject::IterateInstalledUpgrades)
 
         // For CHudItem

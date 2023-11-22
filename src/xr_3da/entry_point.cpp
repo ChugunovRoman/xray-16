@@ -6,7 +6,7 @@
 
 #if defined(XR_PLATFORM_WINDOWS)
 #include "AccessibilityShortcuts.hpp"
-#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_APPLE)
+#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -35,7 +35,6 @@ int entry_point(pcstr commandLine)
 {
     xrDebug::Initialize(commandLine);
     R_ASSERT3(SDL_Init(SDL_INIT_VIDEO) == 0, "Unable to initialize SDL", SDL_GetError());
-    SDL_SetHint(SDL_HINT_WINDOWS_DISABLE_THREAD_NAMING, "0");
 
     if (!strstr(commandLine, "-nosplash"))
     {
@@ -125,7 +124,7 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, char* commandLine, int 
     }
     return result;
 }
-#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_APPLE)
+#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
 int main(int argc, char *argv[])
 {
     int result = EXIT_FAILURE;
@@ -148,13 +147,13 @@ int main(int argc, char *argv[])
                 strcat(commandLine, argv[i]);
                 strcat(commandLine, " ");
             }
+
+            result = entry_point(commandLine);
+
+            xr_free(commandLine);
         }
         else
-            commandLine = strdup("");
-
-        result = entry_point(commandLine);
-
-        xr_free(commandLine);
+            result = entry_point("");
     }
     catch (const std::overflow_error& e)
     {

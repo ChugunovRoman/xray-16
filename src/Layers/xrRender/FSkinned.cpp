@@ -19,8 +19,6 @@
 #include "xrCore/dump_string.h"
 #endif
 
-static shared_str sbones_array;
-
 //////////////////////////////////////////////////////////////////////
 // Body Part
 //////////////////////////////////////////////////////////////////////
@@ -37,7 +35,7 @@ void CSkeletonX_ST::Copy(dxRender_Visual* P)
     _Copy((CSkeletonX*)X);
 }
 //////////////////////////////////////////////////////////////////////
-void CSkeletonX_PM::Render(float LOD)
+void CSkeletonX_PM::Render(CBackend& cmd_list, float LOD, bool use_fast_geo)
 {
     int lod_id = inherited1::last_lod;
     if (LOD >= 0.f)
@@ -48,9 +46,9 @@ void CSkeletonX_PM::Render(float LOD)
     }
     VERIFY(lod_id >= 0 && lod_id < int(nSWI.count));
     FSlideWindow& SW = nSWI.sw[lod_id];
-    _Render(rm_geom, SW.num_verts, SW.offset, SW.num_tris);
+    _Render(cmd_list, rm_geom, SW.num_verts, SW.offset, SW.num_tris);
 }
-void CSkeletonX_ST::Render(float /*LOD*/) { _Render(rm_geom, vCount, 0, dwPrimitives); }
+void CSkeletonX_ST::Render(CBackend& cmd_list, float /*LOD*/, bool use_fast_geo) { _Render(cmd_list, rm_geom, vCount, 0, dwPrimitives); }
 //////////////////////////////////////////////////////////////////////
 void CSkeletonX_PM::Release() { inherited1::Release(); }
 void CSkeletonX_ST::Release() { inherited1::Release(); }
@@ -168,7 +166,7 @@ void CSkeletonX_ext::_Load_hw(Fvisual& V, void* _verts_)
     {
     case RM_SKINNING_SOFT:
         //Msg("skinning: software");
-        V.rm_geom.create(vertRenderFVF, RCache.Vertex.Buffer(), *V.p_rm_Indices);
+        V.rm_geom.create(vertRenderFVF, RImplementation.Vertex.Buffer(), *V.p_rm_Indices);
         break;
 
     case RM_SINGLE:
@@ -598,10 +596,10 @@ void fill_vertices_hw(CKinematics* parent, const Fmatrix& view, CSkeletonWallmar
     VERIFY(V->vStride == sizeof(T));
     T* vertices = static_cast<T*>(V->p_rm_Vertices->Map(V->vBase, V->vCount * V->vStride, true));
 
-    for (auto it = faces.begin(); it != faces.end(); ++it)
+    for (u16 face : faces)
     {
         Fvector p[3];
-        u32 idx = *it * 3;
+        u32 idx = face * 3;
         CSkeletonWallmark::WMFace F;
 
         for (u32 k = 0; k < 3; k++)
@@ -706,9 +704,9 @@ template <typename vertex_buffer_type>
 void TEnumBoneVertices(
     vertex_buffer_type vertices, u16* indices, CBoneData::FacesVec& faces, SEnumVerticesCallback& C)
 {
-    for (auto it = faces.begin(); it != faces.end(); ++it)
+    for (u16 face : faces)
     {
-        u32 idx = (*it) * 3;
+        u32 idx = face * 3;
         for (u32 k = 0; k < 3; k++)
         {
             Fvector P;

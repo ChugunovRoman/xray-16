@@ -1,15 +1,24 @@
+//////////////////////////////////////////////////////////////////////
+// UIPdaMsgListItem.h: элемент окна списка в основном
+// экране для сообщений PDA
+//////////////////////////////////////////////////////////////////////
 #pragma once
+
 #include "xrUICore/Static/UIStatic.h"
 
-class CUIPdaMsgListItem : public CUIColorAnimConrollerContainer
+class CUIPdaMsgListItem final : public CUIColorAnimConrollerContainer
 {
-    typedef CUIColorAnimConrollerContainer inherited;
+    using inherited = CUIColorAnimConrollerContainer;
 
 public:
-    void InitPdaMsgListItem(const Fvector2& size);
-    virtual void SetFont(CGameFont* pFont);
+    CUIPdaMsgListItem() : CUIColorAnimConrollerContainer("CUIPdaMsgListItem") {}
 
-    CUIStatic UIIcon;
+    void InitPdaMsgListItem(const Fvector2& size);
+    void SetFont(CGameFont* pFont) override;
+
+    pcstr GetDebugType() override { return "CUIPdaMsgListItem"; }
+
+    CUIStatic UIIcon{ "Icon" };
     CUITextWnd UITimeText;
     CUITextWnd UICaptionText;
     CUITextWnd UIMsgText;

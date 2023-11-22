@@ -26,10 +26,47 @@
         Console->AddCommand(&x##cls);      \
     }
 
-#include "xrCore/xrCore_benchmark_macros.h"
 #include "xrCore/xr_token.h"
 
 extern ENGINE_API bool renderer_allow_override; // allows to change renderer setting
+
+// Anomaly
+extern ENGINE_API float ps_r2_img_exposure;
+extern ENGINE_API float ps_r2_img_gamma;
+extern ENGINE_API float ps_r2_img_saturation;
+extern ENGINE_API Fvector ps_r2_img_cg;
+
+extern ENGINE_API Fvector4 ps_r2_mask_control;
+extern ENGINE_API Fvector ps_r2_drops_control;
+extern ENGINE_API int ps_r2_nightvision;
+
+extern ENGINE_API Fvector4 ps_dev_param_1;
+extern ENGINE_API Fvector4 ps_dev_param_2;
+extern ENGINE_API Fvector4 ps_dev_param_3;
+extern ENGINE_API Fvector4 ps_dev_param_4;
+extern ENGINE_API Fvector4 ps_dev_param_5;
+extern ENGINE_API Fvector4 ps_dev_param_6;
+extern ENGINE_API Fvector4 ps_dev_param_7;
+extern ENGINE_API Fvector4 ps_dev_param_8;
+
+// Ascii's Shaders
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1;
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_2;
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1_cfg;
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_2_cfg;
+extern ENGINE_API Fvector4 ps_ssfx_blood_decals;
+extern ENGINE_API Fvector4 ps_ssfx_rain_1;
+extern ENGINE_API Fvector4 ps_ssfx_rain_2;
+extern ENGINE_API Fvector4 ps_ssfx_rain_3;
+extern ENGINE_API Fvector4 ps_ssfx_grass_shadows;
+extern ENGINE_API Fvector3 ps_ssfx_shadow_cascades;
+extern ENGINE_API Fvector4 ps_ssfx_grass_interactive;
+extern ENGINE_API Fvector4 ps_ssfx_int_grass_params_1;
+extern ENGINE_API Fvector4 ps_ssfx_int_grass_params_2;
+
+extern ENGINE_API float ps_r3_dyn_wet_surf_near; // 10.0f
+extern ENGINE_API float ps_r3_dyn_wet_surf_far; // 30.0f
+extern ENGINE_API int ps_r3_dyn_wet_surf_sm_res; // 256
 
 class ENGINE_API IConsole_Command
 {
@@ -55,7 +92,7 @@ protected:
 
     IC bool EQ(pcstr S1, pcstr S2) { return xr_strcmp(S1, S2) == 0; }
 public:
-    IConsole_Command(pcstr N BENCH_SEC_SIGN) : cName(N), bEnabled(true), bLowerCaseArgs(false), bEmptyArgsHandled(false)
+    IConsole_Command(pcstr N) : cName(N), bEnabled(true), bLowerCaseArgs(false), bEmptyArgsHandled(false)
     {
         m_LRU.reserve(LRU_MAX_COUNT + 1);
         m_LRU.clear();
@@ -64,9 +101,7 @@ public:
     {
         if (Console)
             Console->RemoveCommand(this);
-    };
-
-    BENCH_SEC_SCRAMBLEVTBL3
+    }
 
     pcstr Name() { return cName; }
     void InvalidSyntax();
@@ -80,8 +115,6 @@ public:
         if (S[0])
             F->w_printf("%s %s\r\n", cName, S);
     }
-
-    BENCH_SEC_SCRAMBLEVTBL2
 
     virtual void fill_tips(vecTips& tips, u32 /*mode*/) { add_LRU_to_tips(tips); }
     // vecLRU& LRU () { return m_LRU; }
@@ -98,7 +131,7 @@ protected:
 
 public:
     CCC_Mask(pcstr N, Flags32* V, u32 M) : IConsole_Command(N), value(V), mask(M){};
-    const bool GetValue() const { return value->test(mask); }
+    bool GetValue() const { return value->test(mask); }
     virtual void Execute(pcstr args)
     {
         if (EQ(args, "on"))
@@ -130,7 +163,7 @@ protected:
 
 public:
     CCC_ToggleMask(pcstr N, Flags32* V, u32 M) : IConsole_Command(N), value(V), mask(M) { bEmptyArgsHandled = true; }
-    const bool GetValue() const { return value->test(mask); }
+    bool GetValue() const { return value->test(mask); }
     virtual void Execute(pcstr /*args*/)
     {
         value->set(mask, !GetValue());
@@ -194,13 +227,25 @@ public:
     }
     virtual void Info(TInfo& I)
     {
+        auto available_size = (std::intptr_t)std::size(I) - 1;
+
         I[0] = 0;
         const xr_token* tok = GetToken();
         while (tok->name)
         {
             if (I[0])
                 xr_strcat(I, "/");
+
+            const auto name_size = (std::intptr_t)xr_strlen(tok->name);
+            if (name_size > available_size)
+            {
+                if (available_size >= 3)
+                    xr_strcat(I, "...");
+                break; // don't just crash there, come in
+            }
+
             xr_strcat(I, tok->name);
+            available_size -= name_size;
             tok++;
         }
     }
@@ -242,7 +287,7 @@ protected:
 public:
     CCC_Float(pcstr N, float* V, float _min = 0, float _max = 1)
         : IConsole_Command(N), value(V), min(_min), max(_max){}
-    const float GetValue() const { return *value; }
+    float GetValue() const { return *value; }
     void GetBounds(float& fmin, float& fmax) const
     {
         fmin = min;
@@ -325,6 +370,69 @@ public:
     }
 };
 
+class CCC_Vector4 : public IConsole_Command
+{
+protected:
+    Fvector4* value;
+    Fvector4 min, max;
+
+public:
+    CCC_Vector4(pcstr name, Fvector4* val, const Fvector4 _min, const Fvector4 _max)
+        : IConsole_Command(name), value(val), min(_min), max(_max) {}
+
+    [[nodiscard]]
+    Fvector4 GetValue() const { return *value; }
+
+    [[nodiscard]]
+    Fvector4* GetValuePtr() const { return value; }
+
+    void Execute(pcstr args) override
+    {
+        Fvector4 v;
+        if (4 != sscanf(args, "%f,%f,%f,%f", &v.x, &v.y, &v.z, &v.w))
+        {
+            if (4 != sscanf(args, "(%f,%f,%f,%f)", &v.x, &v.y, &v.z, &v.w))
+            {
+                InvalidSyntax();
+                return;
+            }
+        }
+
+        if (v.x < min.x || v.y < min.y || v.z < min.z || v.w < min.w)
+        {
+            InvalidSyntax();
+            return;
+        }
+        if (v.x > max.x || v.y > max.y || v.z > max.z || v.w > max.w)
+        {
+            InvalidSyntax();
+            return;
+        }
+        value->set(v);
+    }
+
+    void GetStatus(TStatus& S) override
+    {
+        xr_sprintf(S, "(%f, %f, %f, %f)", value->x, value->y, value->z, value->w);
+    }
+
+    void Info(TInfo& I) override
+    {
+        xr_sprintf(I, "vector4 in range [%e,%e,%e,%e]-[%e,%e,%e,%e]", min.x, min.y, min.z, min.w, max.x,
+            max.y, max.z, max.w);
+    }
+
+    void fill_tips(vecTips& tips, u32 mode) override
+    {
+        TStatus str;
+        xr_sprintf(str, "(%e, %e, %e, %e) (current) [(%e,%e,%e,%e)-(%e,%e,%e,%e)]",
+            value->x, value->y, value->z, value->w,
+            min.x, min.y, min.z, min.w, max.x, max.y, max.z, max.w);
+        tips.emplace_back(str);
+        IConsole_Command::fill_tips(tips, mode);
+    }
+};
+
 class ENGINE_API CCC_Integer : public IConsole_Command
 {
 protected:
@@ -332,7 +440,7 @@ protected:
     int min, max;
 
 public:
-    const int GetValue() const { return *value; }
+    int GetValue() const { return *value; }
     void GetBounds(int& imin, int& imax) const
     {
         imin = min;

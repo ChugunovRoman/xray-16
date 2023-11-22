@@ -198,7 +198,9 @@ void xrServer::Update()
     stats.Update.Begin();
     NET_Packet Packet;
 
+#ifdef DEBUG
     VERIFY(verify_entities());
+#endif
 
     ProceedDelayedPackets();
     // game update
@@ -229,7 +231,9 @@ void xrServer::Update()
     if (game->sv_force_sync)
         Perform_game_export();
 
+#ifdef DEBUG
     VERIFY(verify_entities());
+#endif
     //-----------------------------------------------------
 
     PerformCheckClientsForMaxPing();
@@ -351,7 +355,9 @@ void xrServer::SendUpdatesToAll()
 #endif
         if (game->sv_force_sync)
             Perform_game_export();
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
         m_last_update_time = Device.dwTimeGlobal;
     }
     if (m_file_transfers)
@@ -370,7 +376,9 @@ u32 xrServer::OnDelayedMessage(NET_Packet& P, ClientID sender) // Non-Zero means
 
     // csPlayers.Enter			();
 
+#ifdef DEBUG
     VERIFY(verify_entities());
+#endif
     xrClientData* CL = ID_to_client(sender);
     // R_ASSERT2						(CL, make_string("packet type [%d]",type).c_str());
 
@@ -421,7 +429,9 @@ u32 xrServer::OnDelayedMessage(NET_Packet& P, ClientID sender) // Non-Zero means
     }
     break;
     }
+#ifdef DEBUG
     VERIFY(verify_entities());
+#endif
 
     // csPlayers.Leave					();
     return 0;
@@ -441,7 +451,9 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
     u16 type;
     P.r_begin(type);
 
+#ifdef DEBUG
     VERIFY(verify_entities());
+#endif
     xrClientData* CL = ID_to_client(sender);
 
     switch (type)
@@ -449,7 +461,9 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
     case M_UPDATE:
     {
         Process_update(P, sender); // No broadcast
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_SPAWN:
@@ -457,13 +471,17 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
         if (CL->flags.bLocal)
             Process_spawn(P, sender);
 
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_EVENT:
     {
         Process_event(P, sender);
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_EVENT_PACK:
@@ -493,7 +511,9 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
         //-------------------------------------------------------------------
         if (SV_Client)
             SendTo(SV_Client->ID, P, net_flags(TRUE, TRUE));
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_MOVE_PLAYERS_RESPOND:
@@ -513,26 +533,34 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
             CL->net_Ready = TRUE;
         if (SV_Client)
             SendTo(SV_Client->ID, P, net_flags(TRUE, TRUE));
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_GAMEMESSAGE:
     {
         SendBroadcast(BroadcastCID, P, net_flags(TRUE, TRUE));
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_CLIENTREADY:
     {
         game->OnPlayerConnectFinished(sender);
         // game->signal_Syncronize	();
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_SWITCH_DISTANCE:
     {
         game->switch_distance(P, sender);
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_CHANGE_LEVEL:
@@ -541,32 +569,42 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
         {
             SendBroadcast(BroadcastCID, P, net_flags(TRUE, TRUE));
         }
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_SAVE_GAME:
     {
         game->save_game(P, sender);
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_LOAD_GAME:
     {
         game->load_game(P, sender);
         SendBroadcast(BroadcastCID, P, net_flags(TRUE, TRUE));
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_RELOAD_GAME:
     {
         SendBroadcast(BroadcastCID, P, net_flags(TRUE, TRUE));
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_SAVE_PACKET:
     {
         Process_save(P, sender);
+#ifdef DEBUG
         VERIFY(verify_entities());
+#endif
     }
     break;
     case M_CLIENT_REQUEST_CONNECTION_DATA: { AddDelayedPacket(P, sender);
@@ -694,7 +732,9 @@ u32 xrServer::OnMessage(NET_Packet& P, ClientID sender) // Non-Zero means broadc
     break;
     }
 
+#ifdef DEBUG
     VERIFY(verify_entities());
+#endif
 
     return IPureServer::OnMessage(P, sender);
 }
@@ -1088,7 +1128,6 @@ void xrServer::GetServerInfo(CServerInfo* si)
         xr_strcat(tmp256, " [");
         xr_strcat(tmp256, xr_itoa(g_sv_ah_dwArtefactsNum, tmp, 10));
         xr_strcat(tmp256, "] ");
-        g_sv_ah_iReinforcementTime;
     }
 
     // if ( g_sv_dm_dwTimeLimit > 0 )
@@ -1139,10 +1178,10 @@ void xrServer::KickCheaters()
         IClient* tmp_client = GetClientByID(i->cheater_id);
         if (!tmp_client)
         {
-            Msg("! ERROR: KickCheaters: client [%u] not found", i->cheater_id);
+            Msg("! ERROR: KickCheaters: client [%u] not found", i->cheater_id.value());
             continue;
         }
-        ClientID tmp_client_id = tmp_client->ID;
+        const ClientID tmp_client_id = tmp_client->ID;
         DisconnectClient(tmp_client, i->reason.c_str());
 
         NET_Packet P;
@@ -1160,12 +1199,12 @@ void xrServer::MakeScreenshot(ClientID const& admin_id, ClientID const& cheater_
     {
         return;
     }
-    for (int i = 0; i < sizeof(m_screenshot_proxies) / sizeof(clientdata_proxy*); ++i)
+    for (const auto& screenshot_proxy : m_screenshot_proxies)
     {
-        if (!m_screenshot_proxies[i]->is_active())
+        if (!screenshot_proxy->is_active())
         {
-            m_screenshot_proxies[i]->make_screenshot(admin_id, cheater_id);
-            Msg("* admin [%d] is making screeshot of client [%d]", admin_id, cheater_id);
+            screenshot_proxy->make_screenshot(admin_id, cheater_id);
+            Msg("* admin [%d] is making screeshot of client [%d]", admin_id.value(), cheater_id.value());
             return;
         }
     }
@@ -1177,12 +1216,12 @@ void xrServer::MakeConfigDump(ClientID const& admin_id, ClientID const& cheater_
     {
         return;
     }
-    for (int i = 0; i < sizeof(m_screenshot_proxies) / sizeof(clientdata_proxy*); ++i)
+    for (const auto& screenshot_proxy : m_screenshot_proxies)
     {
-        if (!m_screenshot_proxies[i]->is_active())
+        if (!screenshot_proxy->is_active())
         {
-            m_screenshot_proxies[i]->make_config_dump(admin_id, cheater_id);
-            Msg("* admin [%d] is making config dump of client [%d]", admin_id, cheater_id);
+            screenshot_proxy->make_config_dump(admin_id, cheater_id);
+            Msg("* admin [%d] is making config dump of client [%d]", admin_id.value(), cheater_id.value());
             return;
         }
     }
@@ -1191,16 +1230,17 @@ void xrServer::MakeConfigDump(ClientID const& admin_id, ClientID const& cheater_
 
 void xrServer::initialize_screenshot_proxies()
 {
-    for (int i = 0; i < sizeof(m_screenshot_proxies) / sizeof(clientdata_proxy*); ++i)
+    for (auto& screenshot_proxy : m_screenshot_proxies)
     {
-        m_screenshot_proxies[i] = xr_new<clientdata_proxy>(m_file_transfers);
+        screenshot_proxy = xr_new<clientdata_proxy>(m_file_transfers);
     }
 }
+
 void xrServer::deinitialize_screenshot_proxies()
 {
-    for (int i = 0; i < sizeof(m_screenshot_proxies) / sizeof(clientdata_proxy*); ++i)
+    for (auto& screenshot_proxy : m_screenshot_proxies)
     {
-        xr_delete(m_screenshot_proxies[i]);
+        xr_delete(screenshot_proxy);
     }
 }
 

@@ -4,7 +4,7 @@
 class CUI3tButton;
 class CUIEditBox;
 
-class XRUICORE_API CUIMessageBox : public CUIStatic
+class XRUICORE_API CUIMessageBox final : public CUIStatic
 {
 private:
     typedef CUIStatic inherited;
@@ -30,7 +30,7 @@ public:
     virtual bool InitMessageBox(LPCSTR xml_template);
     void Clear();
     virtual void SetText(LPCSTR str);
-    virtual LPCSTR GetText();
+    virtual LPCSTR GetText() const;
     LPCSTR GetHost();
     LPCSTR GetPassword();
     LPCSTR GetUserPassword();
@@ -41,9 +41,16 @@ public:
     LPCSTR GetTextEditURL();
 
     virtual bool OnMouseAction(float x, float y, EUIMessages mouse_action);
+    bool OnKeyboardAction(int dik, EUIMessages keyboard_action) override;
     virtual void SendMessage(CUIWindow* pWnd, s16 msg, void* pData);
 
     void OnYesOk();
+
+    [[nodiscard]]
+    bool IsInputHandlingAllowed() const { return m_allowInputHandling; }
+    void AllowInputHandling(bool allow) { m_allowInputHandling = allow; }
+
+    pcstr GetDebugType() override { return "CUIMessageBox"; }
 
 protected:
     xr_string m_ret_val;
@@ -63,4 +70,5 @@ protected:
     CUIEditBox* m_UIEditURL;
 
     E_MESSAGEBOX_STYLE m_eMessageBoxStyle;
+    bool m_allowInputHandling{};
 };

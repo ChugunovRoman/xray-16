@@ -35,14 +35,6 @@ CSE_ALifeTraderAbstract* ch_info_get_from_id(u16 id)
     }
 }
 
-CUICharacterInfo::CUICharacterInfo() : m_ownerID(u16(-1)), pUIBio(NULL)
-{
-    ZeroMemory(m_icons, sizeof(m_icons));
-    m_bForceUpdate = false;
-    m_texture_name = NULL;
-}
-
-CUICharacterInfo::~CUICharacterInfo() {}
 void CUICharacterInfo::InitCharacterInfo(Fvector2 pos, Fvector2 size, CUIXml* xml_doc)
 {
     inherited::SetWndPos(pos);
@@ -337,9 +329,12 @@ void CUICharacterInfo::Update()
         if (m_icons[eIcon])
         {
             CSE_ALifeCreatureAbstract* pCreature = smart_cast<CSE_ALifeCreatureAbstract*>(T);
-            if (pCreature && !pCreature->g_Alive())
+            if (pCreature)
             {
-                m_icons[eIcon]->SetTextureColor(color_argb(255, 255, 160, 160));
+                if (pCreature->g_Alive())
+                    m_icons[eIcon]->SetTextureColor(color_argb(255, 255, 255, 160));
+                else
+                    m_icons[eIcon]->SetTextureColor(color_argb(255, 255, 160, 160));
             }
         }
     }

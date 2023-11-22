@@ -35,23 +35,17 @@ static bool r2_available = false;
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
-namespace
-{
-void __cdecl dummy(void) {}
-IFactoryObject* __cdecl dummy(CLASS_ID) { return nullptr; }
-template<typename T>
-void __cdecl dummy(T* p) { R_ASSERT2(p == nullptr, "Attempting to release an object that shouldn't be allocated"); }
-};
-
 CEngineAPI::CEngineAPI()
 {
-    hGame = nullptr;
-    hTuner = nullptr;
-    pCreate = dummy;
-    pDestroy = dummy;
-    tune_enabled = false;
-    tune_pause = dummy;
-    tune_resume = dummy;
+    pCreate = [](CLASS_ID) -> IFactoryObject*
+    {
+        return nullptr;
+    };
+
+    pDestroy = [](IFactoryObject* p)
+    {
+        R_ASSERT2(p == nullptr, "Attempting to release an object that shouldn't be allocated");
+    };
 }
 
 CEngineAPI::~CEngineAPI()
@@ -102,7 +96,7 @@ void CEngineAPI::InitializeRenderers()
     // Ask current renderer to setup GEnv
     R_ASSERT2(selectedRenderer, "Can't setup renderer");
     selectedRenderer->SetupEnv(selected_mode);
-    
+
     Log("Selected renderer:", selected_mode);
 }
 
@@ -126,28 +120,8 @@ void CEngineAPI::Initialize(void)
 
         pFinalizeGame = (FinalizeGameLibraryProc)hGame->GetProcAddress("finalize_library");
         R_ASSERT(pFinalizeGame);
-    	
+
         pInitializeGame();
-    }
-
-    //////////////////////////////////////////////////////////////////////////
-    // vTune
-    tune_enabled = false;
-    if (strstr(Core.Params, "-tune"))
-    {
-        hTuner = XRay::LoadModule("vTuneAPI");
-        tune_pause = (VTPause*)hTuner->GetProcAddress("VTPause");
-        tune_resume = (VTResume*)hTuner->GetProcAddress("VTResume");
-
-        if (!tune_pause || !tune_resume)
-        {
-            Log("Can't initialize Intel vTune");
-            tune_pause = dummy;
-            tune_resume = dummy;
-            return;
-        }
-
-        tune_enabled = true;
     }
 
     CloseUnusedLibraries();
@@ -157,16 +131,14 @@ void CEngineAPI::Destroy(void)
 {
     if (pFinalizeGame)
         pFinalizeGame();
-	
+
     pInitializeGame = nullptr;
     pFinalizeGame = nullptr;
     pCreate = nullptr;
     pDestroy = nullptr;
-	
+
     hGame = nullptr;
-	
-    hTuner = nullptr;
-	
+
     renderers.clear();
     Engine.Event._destroy();
     XRC.r_clear_compact();
@@ -242,27 +214,12 @@ void CEngineAPI::CreateRendererList()
             }
         }
     };
-    
-    if (GEnv.isDedicatedServer)
+
+    for (RendererDesc& desc : renderers)
     {
-#if defined(XR_PLATFORM_WINDOWS)
-        static cpcstr renderForDedicated = r1_library;
-#else
-        static cpcstr renderForDedicated = gl_library;
-#endif
-        const auto it = std::find_if(renderers.begin(), renderers.end(), [](RendererDesc& desc)
-        {
-            return desc.libraryName == renderForDedicated;
-        });
-        obtainModes(it->module);
+        obtainModes(desc.module);
     }
-    else
-    {
-        for (RendererDesc& desc : renderers)
-        {
-            obtainModes(desc.module);
-        }
-    }
+
     auto& modes = VidQualityToken;
     Msg("Available render modes[%d]:", modes.size());
     for (const auto& mode : modes)

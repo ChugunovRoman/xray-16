@@ -114,11 +114,15 @@ void description::load_loopholes(shared_str const& table_id)
     m_table_id = table_id;
 
     luabind::object loopholes;
-    bool result = GEnv.ScriptEngine->function_object(temp, loopholes, LUA_TTABLE);
+    [[maybe_unused]] bool result = GEnv.ScriptEngine->function_object(temp, loopholes, LUA_TTABLE);
     VERIFY2(result, make_string("bad or missing loopholes table in smart_cover [%s]", table_id.c_str()));
-    for (luabind::iterator I(loopholes), E; I != E; ++I)
+
+    luabind::iterator it(loopholes), end;
+    const size_t count = luabind_it_distance(it, end);
+    m_loopholes.reserve(count);
+    while (it != end)
     {
-        luabind::object table = *I;
+        const luabind::object& table = *it;
         if (luabind::type(table) != LUA_TTABLE)
         {
             VERIFY(luabind::type(table) != LUA_TNIL);
@@ -130,6 +134,7 @@ void description::load_loopholes(shared_str const& table_id)
             [=](smart_cover::loophole* const lh) { return loophole->id()._get() == lh->id()._get(); }));
 
         m_loopholes.push_back(loophole);
+        ++it;
     }
 
     VERIFY2(!m_loopholes.empty(), make_string("smart_cover [%s] doesn't have loopholes", m_table_id.c_str()));
@@ -164,7 +169,7 @@ void description::load_transitions(shared_str const& table_id)
     xr_strcat(temp, ".transitions");
 
     luabind::object transitions;
-    bool result = GEnv.ScriptEngine->function_object(temp, transitions, LUA_TTABLE);
+    [[maybe_unused]] bool result = GEnv.ScriptEngine->function_object(temp, transitions, LUA_TTABLE);
     VERIFY(result);
     for (luabind::iterator I(transitions), E; I != E; ++I)
     {

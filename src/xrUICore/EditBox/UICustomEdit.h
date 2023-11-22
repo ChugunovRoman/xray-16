@@ -14,7 +14,7 @@ private:
 
 public:
     CUICustomEdit();
-    virtual ~CUICustomEdit();
+    ~CUICustomEdit() override;
 
     void Init(u32 max_char_count, bool number_only_mode = false, bool read_mode = false, bool fn_mode = false);
 
@@ -33,12 +33,14 @@ public:
     void CaptureFocus(bool bCapture);
     void SetNextFocusCapturer(CUICustomEdit* next_capturer) { m_next_focus_capturer = next_capturer; };
     void ClearText();
-    virtual void SetText(LPCSTR str);
-    virtual LPCSTR GetText() const;
+    void SetText(LPCSTR str) override;
+    LPCSTR GetText() const override;
 
     virtual void Enable(bool status);
 
     void SetPasswordMode(bool mode = true);
+
+    pcstr GetDebugType() override { return "CUICustomEdit"; }
 
 protected:
     void Register_callbacks();

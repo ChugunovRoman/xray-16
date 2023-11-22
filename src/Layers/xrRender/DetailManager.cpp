@@ -17,7 +17,7 @@
 #else
 #include "xrEngine/IGame_Persistent.h"
 #include "xrEngine/Environment.h"
-#if defined(XR_ARCHITECTURE_X86) || defined(XR_ARCHITECTURE_X64) || defined(XR_ARCHITECTURE_E2K)
+#if defined(XR_ARCHITECTURE_X86) || defined(XR_ARCHITECTURE_X64) || defined(XR_ARCHITECTURE_E2K) || defined(XR_ARCHITECTURE_PPC64)
 #include <xmmintrin.h>
 #elif defined(XR_ARCHITECTURE_ARM) || defined(XR_ARCHITECTURE_ARM64)
 #include "sse2neon/sse2neon.h"
@@ -84,6 +84,7 @@ CDetailManager::CDetailManager() : xrc("detail manager")
 {
     dtFS = nullptr;
     dtSlots = nullptr;
+    soft_Geom = nullptr;
     hw_Geom = nullptr;
     hw_BatchSize = 0;
     m_time_rot_1 = 0;
@@ -109,15 +110,15 @@ CDetailManager::CDetailManager() : xrc("detail manager")
     cache = (Slot***)xr_malloc(dm_cache_line * sizeof(Slot**));
     for (u32 i = 0; i < dm_cache_line; ++i)
         cache[i] = (Slot**)xr_malloc(dm_cache_line * sizeof(Slot*));
-        
+
     cache_pool = (Slot *)xr_malloc(dm_cache_size * sizeof(Slot));
-    
+
     for (u32 i = 0; i < dm_cache_size; ++i)
         new(&cache_pool[i]) Slot();
     /*
     CacheSlot1 cache_level1[dm_cache1_line][dm_cache1_line];
     Slot* cache [dm_cache_line][dm_cache_line]; // grid-cache itself
-    Slot cache_pool [dm_cache_size]; // just memory for slots 
+    Slot cache_pool [dm_cache_size]; // just memory for slots
     */
 }
 
@@ -168,6 +169,7 @@ void CDetailManager::Load()
     dtFS->r_chunk_safe(0, &dtH, sizeof(dtH));
     R_ASSERT(dtH.version() == DETAIL_VERSION);
     u32 m_count = dtH.object_count();
+    objects.reserve(m_count);
 
     // Models
     IReader* m_fs = dtFS->open_chunk(1);
@@ -194,7 +196,11 @@ void CDetailManager::Load()
     // Make dither matrix
     bwdithermap(2, dither);
 
-    hw_Load();
+    // Hardware specific optimizations
+    if (UseVS())
+        hw_Load();
+    else
+        soft_Load();
 
     // swing desc
     // normal
@@ -213,7 +219,10 @@ void CDetailManager::Load()
 #endif
 void CDetailManager::Unload()
 {
-    hw_Unload();
+    if (UseVS())
+        hw_Unload();
+    else
+        soft_Unload();
 
     for (CDetail* detailObject : objects)
     {
@@ -259,7 +268,9 @@ void CDetailManager::UpdateVisibleM()
                 continue;
             }
             u32 mask = 0xff;
-            u32 res = View.testSAABB(MS.vis.sphere.P, MS.vis.sphere.R, MS.vis.box.data(), mask);
+
+            u32 res = View.testSphere(MS.vis.sphere.P, MS.vis.sphere.R, mask);
+
             if (fcvNone == res)
             {
                 continue; // invisible-view frustum
@@ -286,7 +297,7 @@ void CDetailManager::UpdateVisibleM()
                 if (fcvPartial == res)
                 {
                     u32 _mask = mask;
-                    u32 _res = View.testSAABB(S.vis.sphere.P, S.vis.sphere.R, S.vis.box.data(), _mask);
+                    u32 _res = View.testSphere(S.vis.sphere.P, S.vis.sphere.R, _mask);
                     if (fcvNone == _res)
                     {
                         continue; // invisible-view frustum
@@ -299,7 +310,7 @@ void CDetailManager::UpdateVisibleM()
                 }
 #endif
                 // Add to visibility structures
-                if (RDEVICE.dwFrame > S.frame)
+                if (Device.dwFrame > S.frame)
                 {
                     // Calc fade factor (per slot)
                     float dist_sq = EYE.distance_to_sqr(S.vis.sphere.P);
@@ -309,7 +320,7 @@ void CDetailManager::UpdateVisibleM()
                     float alpha_i = 1.f - alpha;
                     float dist_sq_rcp = 1.f / dist_sq;
 
-                    S.frame = RDEVICE.dwFrame + Random.randI(15, 30);
+                    S.frame = Device.dwFrame + Random.randI(15, 30);
                     for (int sp_id = 0; sp_id < dm_obj_in_slot; sp_id++)
                     {
                         SlotPart& sp = S.G[sp_id];
@@ -338,6 +349,8 @@ void CDetailManager::UpdateVisibleM()
 
                             sp.r_items[vis_id].push_back(siIT);
 
+                            Item.distance = dist_sq;
+                            Item.position = S.vis.sphere.P;
                             // 2 visible[vis_id][sp.id].push_back(&Item);
                         }
                     }
@@ -366,7 +379,12 @@ void CDetailManager::UpdateVisibleM()
     RImplementation.BasicStats.DetailVisibility.End();
 }
 
-void CDetailManager::Render()
+bool CDetailManager::UseVS() const
+{
+    return HW.Caps.geometry_major >= 1 && !RImplementation.o.ffp;
+}
+
+void CDetailManager::Render(CBackend& cmd_list)
 {
 #ifndef _EDITOR
     if (nullptr == dtFS)
@@ -388,16 +406,17 @@ void CDetailManager::Render()
 #endif
     swing_current.lerp(swing_desc[0], swing_desc[1], factor);
 
-    RCache.set_CullMode(CULL_NONE);
-    RCache.set_xform_world(Fidentity);
-
-    hw_Render();
-
-    RCache.set_CullMode(CULL_CCW);
+    cmd_list.set_CullMode(CULL_NONE);
+    cmd_list.set_xform_world(Fidentity);
+    if (UseVS())
+        hw_Render(cmd_list);
+    else
+        soft_Render();
+    cmd_list.set_CullMode(CULL_CCW);
 
     g_pGamePersistent->m_pGShaderConstants->m_blender_mode.w = 0.0f; //--#SM+#-- Флаг конца рендера травы [end of grass render]
     RImplementation.BasicStats.DetailRender.End();
-    m_frame_rendered = RDEVICE.dwFrame;
+    m_frame_rendered = Device.dwFrame;
 }
 
 void CDetailManager::MT_CALC()
@@ -414,8 +433,8 @@ void CDetailManager::MT_CALC()
     EYE = Device.vCameraPosition;
 
     MT.Enter();
-    if (m_frame_calc != RDEVICE.dwFrame)
-        if ((m_frame_rendered + 1) == RDEVICE.dwFrame) // already rendered
+    if (m_frame_calc != Device.dwFrame)
+        if ((m_frame_rendered + 1) == Device.dwFrame) // already rendered
         {
             int s_x = iFloor(EYE.x / dm_slot_size + .5f);
             int s_z = iFloor(EYE.z / dm_slot_size + .5f);
@@ -425,7 +444,30 @@ void CDetailManager::MT_CALC()
             RImplementation.BasicStats.DetailCache.End();
 
             UpdateVisibleM();
-            m_frame_calc = RDEVICE.dwFrame;
+            m_frame_calc = Device.dwFrame;
         }
     MT.Leave();
+}
+
+void CDetailManager::details_clear()
+{
+    // Disable fade, next render will be scene
+    fade_distance = 99999;
+
+    if (ps_ssfx_grass_shadows.x <= 0)
+        return;
+
+    for (u32 x = 0; x < 3; x++)
+    {
+        vis_list& list = m_visibles[x];
+        for (u32 O = 0; O < objects.size(); O++)
+        {
+            CDetail & Object = *objects[O];
+            xr_vector<SlotItemVec*>&vis = list[O];
+            if (!vis.empty())
+            {
+                vis.erase(vis.begin(), vis.end());
+            }
+        }
+    }
 }

@@ -672,6 +672,7 @@ CIKLimbsController* CEntityAlive::character_ik_controller()
         return NULL;
     }
 }
+
 CPHSoundPlayer* CEntityAlive::ph_sound_player()
 {
     if (character_physics_support())
@@ -680,7 +681,7 @@ CPHSoundPlayer* CEntityAlive::ph_sound_player()
     }
     else
     {
-        return NULL;
+        return ph_sound_player();
     }
 }
 
@@ -792,7 +793,7 @@ void CEntityAlive::fill_hit_bone_surface_areas() const
         default: NODEFAULT;
         }
 
-        m_hit_bone_surface_areas.push_back(std::make_pair(i, surface_area));
+        m_hit_bone_surface_areas.emplace_back(i, surface_area);
     }
 
     std::sort(m_hit_bone_surface_areas.begin(), m_hit_bone_surface_areas.end(), sort_surface_area_predicate());
@@ -826,7 +827,7 @@ Fvector CEntityAlive::get_new_local_point_on_mesh(u16& bone_id) const
         if (!kinematics->LL_GetBoneVisible((*i).first))
             continue;
 
-        SBoneShape const& shape = kinematics->LL_GetData((*i).first).shape;
+        [[maybe_unused]] SBoneShape const& shape = kinematics->LL_GetData((*i).first).shape;
         VERIFY(shape.type != SBoneShape::stNone);
         VERIFY(!shape.flags.is(SBoneShape::sfNoPickable));
 
@@ -842,7 +843,7 @@ Fvector CEntityAlive::get_new_local_point_on_mesh(u16& bone_id) const
         if (!kinematics->LL_GetBoneVisible((*i).first))
             continue;
 
-        SBoneShape const& shape = kinematics->LL_GetData((*i).first).shape;
+        [[maybe_unused]] SBoneShape const& shape = kinematics->LL_GetData((*i).first).shape;
         VERIFY(shape.type != SBoneShape::stNone);
         VERIFY(!shape.flags.is(SBoneShape::sfNoPickable));
 

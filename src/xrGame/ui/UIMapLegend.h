@@ -19,19 +19,21 @@ class CUICheckButton;
 class CUIFrameLineWnd;
 class UIHint;
 
-class UIMapLegend : public CUIWindow
+class UIMapLegend final : public CUIWindow
 {
 private:
     typedef CUIWindow inherited;
 
 public:
     UIMapLegend();
-    virtual ~UIMapLegend();
+    ~UIMapLegend() override;
 
     void init_from_xml(CUIXml& xml, LPCSTR path);
 
     virtual void Show(bool status);
     virtual void SendMessage(CUIWindow* pWnd, s16 msg, void* pData);
+
+    pcstr GetDebugType() override { return "UIMapLegend"; }
 
 private: // m_
     CUIFrameWindow* m_background;
@@ -44,17 +46,18 @@ private: // m_
 
 // -------------------------------------------------------------------------------------------------
 
-class UIMapLegendItem : public CUIWindow
+class UIMapLegendItem final : public CUIWindow
 {
 private:
     typedef CUIWindow inherited;
 
 public:
     UIMapLegendItem();
-    virtual ~UIMapLegendItem();
 
     void init_from_xml(CUIXml& xml, int index);
     //	virtual void	Update				();
+
+    pcstr GetDebugType() override { return "UIMapLegendItem"; }
 
 private: // m_
     CUIStatic* m_image[4];

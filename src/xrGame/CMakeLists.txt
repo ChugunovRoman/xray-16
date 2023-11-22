@@ -383,6 +383,7 @@ set(SRC_FILES
     "CustomMonster.h"
     "CustomMonster_inline.h"
     "CustomMonster_VCPU.cpp"
+    "CustomOutfit_script.cpp"
     "CustomOutfit.cpp"
     "CustomOutfit_script.cpp"
     "CustomOutfit.h"
@@ -511,7 +512,6 @@ set(SRC_FILES
     "ExplosiveRocket.cpp"
     "ExplosiveRocket.h"
     "ExplosiveScript.cpp"
-    "ExtendedGeom.h"
     "F1.h"
     "FadedBall.cpp"
     "FadedBall.h"
@@ -928,11 +928,7 @@ set(SRC_FILES
     "obstacles_query.cpp"
     "obstacles_query.h"
     "obstacles_query_inline.h"
-    "ode_include.h"
-    "ode_redefine.h"
-    "particle_params.cpp"
     "particle_params.h"
-    "particle_params_inline.h"
     "particle_params_script.cpp"
     "ParticlesObject.cpp"
     "ParticlesObject.h"
@@ -1142,10 +1138,7 @@ set(SRC_FILES
     "screenshot_server.h"
     "screenshots_writer.cpp"
     "screenshots_writer.h"
-    "script_abstract_action.cpp"
     "script_abstract_action.h"
-    "script_abstract_action_inline.h"
-    "script_action_condition.cpp"
     "script_action_condition.h"
     "script_action_condition_inline.h"
     "script_action_condition_script.cpp"
@@ -1158,7 +1151,6 @@ set(SRC_FILES
     "script_action_wrapper.cpp"
     "script_action_wrapper.h"
     "script_action_wrapper_inline.h"
-    "script_animation_action.cpp"
     "script_animation_action.h"
     "script_animation_action_inline.h"
     "script_animation_action_script.cpp"
@@ -1570,8 +1562,6 @@ set(SRC_FILES
     "trajectories.h"
     "UIAchivementsIndicator.cpp"
     "UIAchivementsIndicator.h"
-    #"UI.cpp"
-    #"UI.h"
     "UIDialogHolder.cpp"
     "UIDialogHolder.h"
     "ui_export_script.cpp"
@@ -1604,6 +1594,8 @@ set(SRC_FILES
     "UITeamPanels.h"
     "UITeamState.cpp"
     "UITeamState.h"
+    "UITimeDilator.cpp"
+    "UITimeDilator.h"
     "UIZoneMap.cpp"
     "UIZoneMap.h"
     "VersionSwitcher.cpp"
@@ -2390,6 +2382,8 @@ set(SRC_FILES
     "ui/UIMap.cpp"
     "ui/UIMapDesc.cpp"
     "ui/UIMapDesc.h"
+    "ui/UIMapFilters.cpp"
+    "ui/UIMapFilters.h"
     "ui/UIMap.h"
     "ui/UIMapInfo.cpp"
     "ui/UIMapInfo.h"
@@ -2454,7 +2448,6 @@ set(SRC_FILES
     "ui/UIScriptWnd.cpp"
     "ui/UIScriptWnd.h"
     "ui/UIScriptWnd_script.cpp"
-    "ui/uiscriptwnd_script.h"
     "ui/UISecondTaskWnd.cpp"
     "ui/UISecondTaskWnd.h"
     "ui/UIServerInfo.cpp"
@@ -2560,7 +2553,6 @@ set(SRC_FILES
     "../xrServerEntities/script_fvector_script.cpp"
     "../xrServerEntities/script_ini_file.cpp"
     "../xrServerEntities/script_ini_file.h"
-    "../xrServerEntities/script_ini_file_inline.h"
     "../xrServerEntities/script_ini_file_script.cpp"
     "../xrServerEntities/script_net_packet_script.cpp"
     "../xrServerEntities/script_reader_script.cpp"
@@ -2643,6 +2635,7 @@ target_link_libraries(${PROJECT_NAME}
     xrEngine
     xrMiscMath
     xrLuabind
+    xrImGui
     xrAPI
     xrAICore
     xrUICore
@@ -2654,7 +2647,6 @@ target_link_libraries(${PROJECT_NAME}
     xrCDB
     xrPhysics
     xrNetServer
-    ${SDL2_LIBRARIES}
 )
 
 target_compile_definitions(${PROJECT_NAME}

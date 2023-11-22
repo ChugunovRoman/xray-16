@@ -98,7 +98,9 @@ void CLevel::remove_objects()
 #endif // DEBUG
     if (!GEnv.isDedicatedServer)
     {
+#ifdef DEBUG
         VERIFY(client_spawn_manager().registry().empty());
+#endif
         client_spawn_manager().clear();
     }
 
@@ -344,7 +346,7 @@ const int ConnectionTimeOut = 60000; // 1 min
 
 bool CLevel::Connect2Server(const char* options)
 {
-    NET_Packet P;
+    //NET_Packet P;
     m_bConnectResultReceived = false;
     m_bConnectResult = true;
 

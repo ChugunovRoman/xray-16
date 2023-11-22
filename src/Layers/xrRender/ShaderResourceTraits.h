@@ -1,6 +1,9 @@
 #pragma once
 
 #include "ResourceManager.h"
+#ifdef USE_DX9
+#   include "Layers/xrRenderDX9/dx9shader_utils.h"
+#endif
 
 #ifdef USE_OGL
 static void show_compile_errors(cpcstr filename, GLuint program, GLuint shader)
@@ -61,7 +64,8 @@ inline std::pair<char, GLuint> GLCompileShader(pcstr* buffer, size_t size, pcstr
 
     const GLuint program = glCreateProgram();
     R_ASSERT(program);
-    CHK_GL(glObjectLabel(GL_PROGRAM, program, -1, name));
+    if (GLEW_VERSION_4_3)
+        CHK_GL(glObjectLabel(GL_PROGRAM, program, -1, name));
     CHK_GL(glProgramParameteri(program, GL_PROGRAM_SEPARABLE, (GLint)GL_TRUE));
     if (HW.ShaderBinarySupported)
         CHK_GL(glProgramParameteri(program, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, (GLint)GL_TRUE));
@@ -92,7 +96,8 @@ inline std::pair<char, GLuint> GLUseBinary(pcstr* buffer, size_t size, const GLe
 
     const GLuint program = glCreateProgram();
     R_ASSERT(program);
-    CHK_GL(glObjectLabel(GL_PROGRAM, program, -1, name));
+    if (GLEW_VERSION_4_3)
+        CHK_GL(glObjectLabel(GL_PROGRAM, program, -1, name));
     CHK_GL(glProgramParameteri(program, GL_PROGRAM_SEPARABLE, (GLint)GL_TRUE));
 
     CHK_GL(glBindFragDataLocation(program, 0, "SV_Target"));
@@ -116,7 +121,8 @@ static GLuint GLLinkMonolithicProgram(pcstr name, GLuint ps, GLuint vs, GLuint g
 {
     const GLuint program = glCreateProgram();
     R_ASSERT(program);
-    CHK_GL(glObjectLabel(GL_PROGRAM, program, -1, name));
+    if (GLEW_VERSION_4_3)
+        CHK_GL(glObjectLabel(GL_PROGRAM, program, -1, name));
     // XXX: support caching for monolithic programs
     //if (HW.ShaderBinarySupported)
     //    CHK_GL(glProgramParameteri(program, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, (GLint)GL_TRUE));
@@ -636,7 +642,7 @@ T* CResourceManager::CreateShader(cpcstr name, pcstr filename /*= nullptr*/, u32
         T* sh = xr_new<T>();
 
         sh->dwFlags |= xr_resource_flagged::RF_REGISTERED;
-        sh_map.insert(std::make_pair(sh->set_name(name), sh));
+        sh_map.emplace(sh->set_name(name), sh);
         if (0 == xr_stricmp(name, "null"))
         {
             sh->sh = 0;
@@ -691,17 +697,17 @@ T* CResourceManager::CreateShader(cpcstr name, pcstr filename /*= nullptr*/, u32
         pcstr c_target, c_entry;
         ShaderTypeTraits<T>::GetCompilationTarget(c_target, c_entry, data);
 
-#if defined(USE_DX9)
+#if defined(USE_D3DX)
 #   ifdef NDEBUG
         flags |= D3DXSHADER_PACKMATRIX_ROWMAJOR;
 #   else
         flags |= D3DXSHADER_PACKMATRIX_ROWMAJOR | (xrDebug::DebuggerIsPresent() ? D3DXSHADER_DEBUG : 0);
 #   endif
-#elif defined(USE_DX11)
+#elif !defined(USE_OGL)
 #   ifdef NDEBUG
         flags |= D3DCOMPILE_PACK_MATRIX_ROW_MAJOR | D3DCOMPILE_OPTIMIZATION_LEVEL3;
 #   else
-        flags |= D3DCOMPILE_PACK_MATRIX_ROW_MAJOR | (xrDebug::DebuggerIsPresent() ? D3DCOMPILE_DEBUG : 0);
+        flags |= D3DCOMPILE_PACK_MATRIX_ROW_MAJOR | D3DCOMPILE_DEBUG;
 #   endif
 #endif
 

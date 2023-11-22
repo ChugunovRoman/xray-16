@@ -6,7 +6,7 @@
 #include "Cursor/UICursor.h"
 #include "xrEngine/xr_input.h"
 
-CUIScrollView::CUIScrollView()
+CUIScrollView::CUIScrollView() : CUIWindow("CUIScrollView")
 {
     m_rightIndent = 0.0f;
     m_leftIndent = 0.0f;
@@ -19,7 +19,7 @@ CUIScrollView::CUIScrollView()
     m_VScrollBar = NULL;
     m_visible_rgn.set(-1, -1);
 }
-CUIScrollView::CUIScrollView(CUIScrollBar* scroll_bar)
+CUIScrollView::CUIScrollView(CUIScrollBar* scroll_bar) : CUIWindow("CUIScrollView")
 {
     m_rightIndent = 0.0f;
     m_leftIndent = 0.0f;
@@ -51,7 +51,7 @@ void CUIScrollView::InitScrollView()
 {
     if (!m_pad)
     {
-        m_pad = xr_new<CUIWindow>();
+        m_pad = xr_new<CUIWindow>("Scroll view pad");
         m_pad->SetAutoDelete(true);
         AttachChild(m_pad);
     }
@@ -224,8 +224,7 @@ void CUIScrollView::Draw()
         std::advance(it, m_visible_rgn.x);
         for (int idx = m_visible_rgn.x; idx <= m_visible_rgn.y; ++it, ++idx)
         {
-            CUIScrollView* sw = smart_cast<CUIScrollView*>(*it);
-            VERIFY(sw == NULL);
+            VERIFY(smart_cast<CUIScrollView*>(*it) == NULL);
 
             if ((*it)->GetVisible())
                 (*it)->Draw();
@@ -281,7 +280,7 @@ bool CUIScrollView::OnMouseAction(float x, float y, EUIMessages mouse_action)
         res = true;
         break;
     case WINDOW_MOUSE_MOVE:
-        if (pInput->iGetAsyncBtnState(0))
+        if (pInput->iGetAsyncKeyState(MOUSE_1))
         {
             Fvector2 curr_pad_pos = m_pad->GetWndPos();
             curr_pad_pos.y += GetUICursor().GetCursorPositionDelta().y;
@@ -356,7 +355,8 @@ void CUIScrollView::SetDownIndention(float val)
     m_flags.set(eNeedRecalc, TRUE);
 }
 
-u32 CUIScrollView::GetSize() { return m_pad->GetChildNum(); }
+u32 CUIScrollView::GetSize() const { return m_pad->GetChildNum(); }
+
 CUIWindow* CUIScrollView::GetItem(u32 idx)
 {
     if (m_pad->GetChildWndList().size() <= idx)

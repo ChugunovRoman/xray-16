@@ -36,7 +36,7 @@
 #define def_Y_SIZE_2 0.8f
 #define def_Z_SIZE_2 0.35f
 
-const u64 after_creation_collision_hit_block_steps_number = 100;
+//const u64 after_creation_collision_hit_block_steps_number = 100;
 
 CPHMovementControl::CPHMovementControl(IGameObject* parent)
 {
@@ -60,8 +60,6 @@ CPHMovementControl::CPHMovementControl(IGameObject* parent)
     eOldEnvironment = peInAir;
     eEnvironment = peInAir;
     aabb.set(-def_X_SIZE_2, 0, -def_Z_SIZE_2, def_X_SIZE_2, def_Y_SIZE_2 * 2, def_Z_SIZE_2);
-    /// vFootCenter.set		(0,0,0);
-    // vFootExt.set		(0,0,0);
     fMass = 100;
     fMinCrashSpeed = 12.0f;
     fMaxCrashSpeed = 25.0f;
@@ -1117,6 +1115,10 @@ void CPHMovementControl::PHReleaseObject()
 void CPHMovementControl::DestroyCharacter()
 {
     VERIFY(m_character);
+    // Remove Grass bender if PHCharacter is not NULL
+    if (m_character->PhysicsRefObject() != NULL)
+        g_pGamePersistent->GrassBendersRemoveById(m_character->PhysicsRefObject()->ObjectID());
+
     m_character->Destroy();
     phcapture_destroy(m_capture);
     // xr_delete(m_capture);
@@ -1315,16 +1317,11 @@ IElevatorState* CPHMovementControl::ElevatorState()
     // m_character->SetElevator()
 }
 
-struct STraceBorderQParams
+struct STraceBorderQParams : Noncopyable
 {
     CPHMovementControl* m_movement;
     const Fvector& m_dir;
-    STraceBorderQParams(CPHMovementControl* movement, const Fvector& dir) : m_dir(dir) { m_movement = movement; }
-    STraceBorderQParams& operator=(STraceBorderQParams& p)
-    {
-        VERIFY(FALSE);
-        return p;
-    }
+    STraceBorderQParams(CPHMovementControl* movement, const Fvector& dir) : m_movement(movement), m_dir(dir) {}
 };
 
 bool CPHMovementControl::BorderTraceCallback(collide::rq_result& result, LPVOID params)
@@ -1370,7 +1367,7 @@ void CPHMovementControl::TraceBorder(const Fvector& prev_position)
     collide::ray_defs RD(from_pos, dir, mag, 0, collide::rqtStatic);
     VERIFY(!fis_zero(RD.dir.square_magnitude()));
 
-    STraceBorderQParams p(this, dir);
+    STraceBorderQParams p{ this, dir };
     storage.r_clear();
     g_pGameLevel->ObjectSpace.RayQuery(
         storage, RD, BorderTraceCallback, &p, NULL, smart_cast<IGameObject*>(m_character->PhysicsRefObject()));

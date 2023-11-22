@@ -11,14 +11,16 @@ class CUIScrollView;
 class CUIXml;
 class CUITalkWnd;
 
-class CUITalkDialogWnd : public CUIWindow, public CUIWndCallback
+class CUITalkDialogWnd final : public CUIWindow, public CUIWndCallback
 {
     using inherited = CUIWindow;
     CUIXml* m_uiXml;
 
 public:
     CUITalkDialogWnd();
-    virtual ~CUITalkDialogWnd();
+    ~CUITalkDialogWnd() override;
+
+    pcstr GetDebugType() override { return "CUITalkDialogWnd"; }
 
     void InitTalkDialogWnd();
 
@@ -58,13 +60,15 @@ public:
     void AddQuestion(LPCSTR str, LPCSTR value, int number, bool b_finalizer);
     void AddAnswer(LPCSTR SpeakerName, const char* str, bool bActor);
     void AddIconedAnswer(LPCSTR caption, LPCSTR text, LPCSTR texture_name, LPCSTR templ_name);
-    void AddIconedAnswer(cpcstr text, cpcstr texture_name, Frect texture_rect, cpcstr templ_name);
+    void AddIconedAnswer(pcstr text, pcstr texture_name, Frect texture_rect, pcstr templ_name);
     void ClearAll();
     void ClearQuestions();
 
     void SetOsoznanieMode(bool b);
     void SetTradeMode();
     void UpdateButtonsLayout(bool b_disable_break, bool trade_enabled);
+
+    void TryScrollAnswersList(bool down);
 
 private:
     // List of questions we can ask the character
@@ -84,7 +88,7 @@ private:
     void OnExitClicked(CUIWindow* w, void*);
 };
 
-class CUIQuestionItem : public CUIWindow, public CUIWndCallback
+class CUIQuestionItem final : public CUIWindow, public CUIWndCallback
 {
     typedef CUIWindow inherited;
     float m_min_height;
@@ -98,9 +102,11 @@ public:
 
     virtual void SendMessage(CUIWindow* pWnd, s16 msg, void* pData = NULL);
     void OnTextClicked(CUIWindow* w, void*);
+
+    pcstr GetDebugType() override { return "CUIQuestionItem"; }
 };
 
-class CUIAnswerItem : public CUIWindow
+class CUIAnswerItem: public CUIWindow
 {
     typedef CUIWindow inherited;
 
@@ -112,9 +118,10 @@ class CUIAnswerItem : public CUIWindow
 public:
     CUIAnswerItem(CUIXml* xml_doc, LPCSTR path);
     void Init(LPCSTR text, LPCSTR name);
+    pcstr GetDebugType() override { return "CUIAnswerItem"; }
 };
 
-class CUIAnswerItemIconed : public CUIAnswerItem
+class CUIAnswerItemIconed final : public CUIAnswerItem
 {
     typedef CUIAnswerItem inherited;
     CUIStatic* m_icon;
@@ -122,5 +129,6 @@ class CUIAnswerItemIconed : public CUIAnswerItem
 public:
     CUIAnswerItemIconed(CUIXml* xml_doc, LPCSTR path);
     void Init(LPCSTR text, LPCSTR name, LPCSTR texture_name);
-    void Init(cpcstr text, cpcstr texture_name, Frect texture_rect);
+    void Init(pcstr text, pcstr texture_name, Frect texture_rect);
+    pcstr GetDebugType() override { return "CUIAnswerItemIconed"; }
 };

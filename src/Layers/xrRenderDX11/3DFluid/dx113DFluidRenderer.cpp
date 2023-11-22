@@ -349,9 +349,9 @@ void dx113DFluidRenderer::Draw(const dx113DFluidData& FluidData)
     //  raycasting is done at the smaller resolution, using a fullscreen quad
     RCache.ClearRT(RT[RRT_RayCastTex], {}); // black
 
-    pTarget->u_setrt(RT[RRT_RayCastTex], nullptr, nullptr, nullptr); // LDR RT
+    pTarget->u_setrt(RCache, RT[RRT_RayCastTex], nullptr, nullptr, nullptr); // LDR RT
 
-    RImplementation.rmNormal();
+    RImplementation.rmNormal(RCache);
 
     if (bRenderFire)
         RCache.set_Element(m_RendererTechnique[RS_QuadRaycastFire]);
@@ -364,14 +364,14 @@ void dx113DFluidRenderer::Draw(const dx113DFluidData& FluidData)
     // Render to the back buffer sampling from the raycast texture that we just created
     //  If and edge was detected at the current pixel we will raycast again to avoid
     //  smoke aliasing artifacts at scene edges
-    pTarget->u_setrt(pTarget->rt_Generic_0_r, nullptr, nullptr, pTarget->rt_MSAADepth->pZRT); // LDR RT
+    pTarget->u_setrt(RCache, pTarget->rt_Generic_0_r, nullptr, nullptr, pTarget->rt_MSAADepth->pZRT[RCache.context_id]); // LDR RT
 
     if (bRenderFire)
         RCache.set_Element(m_RendererTechnique[RS_QuadRaycastCopyFire]);
     else
         RCache.set_Element(m_RendererTechnique[RS_QuadRaycastCopyFog]);
 
-    RImplementation.rmNormal();
+    RImplementation.rmNormal(RCache);
 
     PrepareCBuffer(FluidData, Device.dwWidth, Device.dwHeight);
     RCache.set_c(strDiffuseLight, LightData.m_vLightIntencity.x, LightData.m_vLightIntencity.y,
@@ -386,10 +386,10 @@ void dx113DFluidRenderer::ComputeRayData(const dx113DFluidData &FluidData)
     RCache.ClearRT(RT[RRT_RayDataTex], {});
 
     CRenderTarget* pTarget = RImplementation.Target;
-    pTarget->u_setrt(RT[RRT_RayDataTex], nullptr, nullptr, nullptr); // LDR RT
+    pTarget->u_setrt(RCache, RT[RRT_RayDataTex], nullptr, nullptr, nullptr); // LDR RT
     RCache.set_Element(m_RendererTechnique[RS_CompRayData_Back]);
 
-    RImplementation.rmNormal();
+    RImplementation.rmNormal(RCache);
 
     PrepareCBuffer(FluidData, Device.dwWidth, Device.dwHeight);
 
@@ -400,7 +400,7 @@ void dx113DFluidRenderer::ComputeRayData(const dx113DFluidData &FluidData)
     // Render volume front faces using subtractive blending
     // We output xyz="position in grid space" and w=boxDepth,
     //  unless the pixel is occluded by the scene, in which case we output xyzw=(1,0,0,0)
-    pTarget->u_setrt(RT[RRT_RayDataTex], nullptr, nullptr, nullptr); // LDR RT
+    pTarget->u_setrt(RCache, RT[RRT_RayDataTex], nullptr, nullptr, nullptr); // LDR RT
     RCache.set_Element(m_RendererTechnique[RS_CompRayData_Front]);
     PrepareCBuffer(FluidData, Device.dwWidth, Device.dwHeight);
 
@@ -411,11 +411,11 @@ void dx113DFluidRenderer::ComputeRayData(const dx113DFluidData &FluidData)
 void dx113DFluidRenderer::ComputeEdgeTexture(const dx113DFluidData &FluidData)
 {
     CRenderTarget* pTarget = RImplementation.Target;
-    pTarget->u_setrt(RT[RRT_RayDataTexSmall], nullptr, nullptr, nullptr); // LDR RT
+    pTarget->u_setrt(RCache, RT[RRT_RayDataTexSmall], nullptr, nullptr, nullptr); // LDR RT
     RCache.set_Element(m_RendererTechnique[RS_QuadDownSampleRayDataTexture]);
 
     // First setup viewport to match the size of the destination low-res texture
-    RImplementation.rmNormal();
+    RImplementation.rmNormal(RCache);
 
     PrepareCBuffer(FluidData, m_iRenderTextureWidth, m_iRenderTextureHeight);
 
@@ -423,7 +423,7 @@ void dx113DFluidRenderer::ComputeEdgeTexture(const dx113DFluidData &FluidData)
     DrawScreenQuad();
 
     // Create an edge texture, performing edge detection on 'rayDataTexSmall'
-    pTarget->u_setrt(RT[RRT_EdgeTex], nullptr, nullptr, nullptr); // LDR RT
+    pTarget->u_setrt(RCache, RT[RRT_EdgeTex], nullptr, nullptr, nullptr); // LDR RT
     RCache.set_Element(m_RendererTechnique[RS_QuadEdgeDetect]);
     PrepareCBuffer(FluidData, m_iRenderTextureWidth, m_iRenderTextureHeight);
 
@@ -451,11 +451,11 @@ void dx113DFluidRenderer::CalculateLighting(const dx113DFluidData& FluidData, Fo
 
     const dx113DFluidData::Settings& VolumeSettings = FluidData.GetSettings();
 
-    Fvector4 hemi_color = g_pGamePersistent->Environment().CurrentEnv->hemi_color;
+    Fvector4 hemi_color = g_pGamePersistent->Environment().CurrentEnv.hemi_color;
     // hemi_color.mul(0.2f);
     hemi_color.mul(VolumeSettings.m_fHemi);
     LightData.m_vLightIntencity.set(hemi_color.x, hemi_color.y, hemi_color.z);
-    LightData.m_vLightIntencity.add(g_pGamePersistent->Environment().CurrentEnv->ambient);
+    LightData.m_vLightIntencity.add(g_pGamePersistent->Environment().CurrentEnv.ambient);
 
     const Fmatrix& Transform = FluidData.GetTransform();
 
@@ -517,7 +517,7 @@ void dx113DFluidRenderer::PrepareCBuffer(const dx113DFluidData &FluidData, u32 R
 
     // The near and far planes are used to unproject the scene's z-buffer values
     RCache.set_c(strZNear, VIEWPORT_NEAR);
-    RCache.set_c(strZFar, g_pGamePersistent->Environment().CurrentEnv->far_plane);
+    RCache.set_c(strZFar, g_pGamePersistent->Environment().CurrentEnv.far_plane);
 
     const XMMATRIX gridWorld = XMLoadFloat4x4(reinterpret_cast<const XMFLOAT4X4*>(&transform));
     const XMMATRIX View      = XMLoadFloat4x4(reinterpret_cast<const XMFLOAT4X4*>(&RCache.xforms.m_v));
@@ -529,8 +529,8 @@ void dx113DFluidRenderer::PrepareCBuffer(const dx113DFluidData &FluidData, u32 R
     RCache.set_c(strGridScaleFactor, worldScale);
 
     // We prepend the current world matrix with this other matrix which adds an offset (-0.5, -0.5, -0.5)
-    //  and scale factors to account for unequal number of voxels on different sides of the volume box. 
-    // This is because we want to preserve the aspect ratio of the original simulation grid when 
+    //  and scale factors to account for unequal number of voxels on different sides of the volume box.
+    // This is because we want to preserve the aspect ratio of the original simulation grid when
     //  raytracing through it.
     const XMMATRIX gridMatrix = XMLoadFloat4x4(reinterpret_cast<XMFLOAT4X4*>(&m_gridMatrix));
     WorldView = gridMatrix * WorldView;
@@ -553,7 +553,7 @@ void dx113DFluidRenderer::PrepareCBuffer(const dx113DFluidData &FluidData, u32 R
     }
 
     {
-        // Compute the inverse of the worldView matrix 
+        // Compute the inverse of the worldView matrix
         const XMMATRIX WorldViewInv = XMMatrixInverse(nullptr, WorldView);
 
         // Compute the eye's position in "grid space" (the 0-1 texture coordinate cube)

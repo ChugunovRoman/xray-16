@@ -7,24 +7,26 @@ class CUIXml;
 class CUIScrollView;
 class CMMSound;
 
-class CUIMMMagnifer : public CUIStatic
+class CUIMMMagnifer final : public CUIStatic
 {
 public:
     CUIMMMagnifer();
-    virtual ~CUIMMMagnifer();
+    ~CUIMMMagnifer() override;
     void SetPPMode();
     void ResetPPMode();
-    bool GetPPMode() { return m_bPP; };
+    bool GetPPMode() const { return m_bPP; };
+
+    pcstr GetDebugType() override { return "CUIMMMagnifer"; }
 
 protected:
-    bool m_bPP;
+    bool m_bPP{};
 };
 
-class CUIMMShniaga : public CUIWindow, public CDeviceResetNotifier
+class CUIMMShniaga final : public CUIWindow, public CDeviceResetNotifier
 {
 public:
     CUIMMShniaga();
-    virtual ~CUIMMShniaga();
+    ~CUIMMShniaga() override;
 
     void InitShniaga(CUIXml& xml_doc, LPCSTR path);
     virtual void Update();
@@ -62,6 +64,8 @@ protected:
     void ShowNewGame();
     void ShowNetworkGame();
     float pos(float x1, float x2, u32 t);
+
+    pcstr GetDebugType() override { return "CUIMMShniaga"; }
 
     CUIStatic* m_shniaga;
     CUIMMMagnifer* m_magnifier;

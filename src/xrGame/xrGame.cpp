@@ -7,13 +7,14 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+
 #include "object_factory.h"
-#include "xrUICore/XML/xrUIXmlParser.h"
+
 #include "xrEngine/xr_level_controller.h"
 #include "xrEngine/profiler.h"
 
-extern void FillUIStyleToken();
-extern void CleanupUIStyleToken();
+#include "xrUICore/XML/xrUIXmlParser.h"
+#include "xrUICore/ui_styles.h"
 
 void CCC_RegisterCommands();
 
@@ -40,7 +41,7 @@ extern "C"
         g_fTimeFactor = pSettings->r_float("alife", "time_factor"); // XXX: find a better place
 
         // Fill ui style token
-        FillUIStyleToken();
+        UIStyles = xr_new<UIStyleManager>();
         // register console commands
         CCC_RegisterCommands();
         // register localization
@@ -50,12 +51,28 @@ extern "C"
 #ifdef DEBUG
         g_profiler = xr_new<CProfiler>();
 #endif
+
+        ImGui::SetAllocatorFunctions(
+            [](size_t size, void* /*user_data*/)
+        {
+            return xr_malloc(size);
+        },
+            [](void* ptr, void* /*user_data*/)
+        {
+            xr_free(ptr);
+        }
+        );
+        ImGui::SetCurrentContext(Device.editor().GetImGuiContext());
     }
 
     XR_EXPORT void finalize_library()
     {
-        CleanupUIStyleToken();
+        xr_delete(UIStyles);
         StringTable().Destroy();
         CCC_DeregisterInput(); // XXX: Remove if possible
+
+#ifdef DEBUG
+        xr_delete(g_profiler);
+#endif
  }
 }

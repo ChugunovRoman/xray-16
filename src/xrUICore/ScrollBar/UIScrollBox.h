@@ -1,12 +1,14 @@
 #pragma once
 #include "Windows/UIFrameLineWnd.h"
 
-class CUIScrollBox : public CUIFrameLineWnd
+class CUIScrollBox final : public CUIFrameLineWnd
 {
     typedef CUIFrameLineWnd inherited;
 
 public:
-    CUIScrollBox();
+    CUIScrollBox() : CUIFrameLineWnd(GetDebugType()) {}
 
-    virtual bool OnMouseAction(float x, float y, EUIMessages mouse_action);
+    bool OnMouseAction(float x, float y, EUIMessages mouse_action) override;
+
+    pcstr GetDebugType() override { return "CUIScrollBox"; }
 };
