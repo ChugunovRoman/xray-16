@@ -71,7 +71,29 @@
       "preLaunchTask": "Compile",
       "externalConsole": false,
       "MIMode": "gdb"
-    }
+    },
+    {
+      "name": "(gdb) CoC",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/bin/x64/${input:buildType}/xr_3da",
+      "args": [
+        "-nointro",
+        "-fsltx",
+        "${COC_LTX_FILE_PATH}",
+      ],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/bin",
+      "environment": [
+        {
+          "name": "LD_LIBRARY_PATH",
+          "value": "${workspaceFolder}/bin/x64/${input:buildType}"
+        }
+      ],
+      "preLaunchTask": "Compile",
+      "externalConsole": false,
+      "MIMode": "gdb"
+    },
   ],
   "inputs": [
     {

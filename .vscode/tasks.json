@@ -57,6 +57,24 @@
       ]
     },
     {
+      "label": "Run GlobalWar",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/bin/x64/${input:buildType}"
+      },
+      "command": "LD_LIBRARY_PATH=\"${workspaceFolder}/bin/x64/${input:buildType}\" ./xr_3da -nointro -dbg -dump_bindings -fsltx ${GLOBALWAR_LTX_FILE_PATH}",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run CoC",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/bin/x64/${input:buildType}"
+      },
+      "command": "LD_LIBRARY_PATH=\"${workspaceFolder}/bin/x64/${input:buildType}\" ./xr_3da -nointro -dbg -dump_bindings -fsltx ${COC_LTX_FILE_PATH}",
+      "problemMatcher": []
+    },
+    {
       "label": "Run SoC",
       "type": "shell",
       "options": {
