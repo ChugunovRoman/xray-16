@@ -75,7 +75,7 @@ static void CSE_ALifeMonsterAbstract_Export(lua_State* luaState)
         luabind_class_monster2(
             CSE_ALifeMonsterAbstract, "cse_alife_monster_abstract", CSE_ALifeCreatureAbstract, CSE_ALifeSchedulable)
                 .def("smart_terrain_id", &smart_terrain_id)
-                .def_readonly("group_id", &CSE_ALifeMonsterAbstract::m_group_id)
+                .def_readwrite("group_id", &CSE_ALifeMonsterAbstract::m_group_id)
                 .def_readwrite("m_smart_terrain_id", &CSE_ALifeMonsterAbstract::m_smart_terrain_id)
                 .def("clear_smart_terrain", &clear_smart_terrain)
                 .def("brain", &monster_brain)
