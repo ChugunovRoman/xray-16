@@ -45,6 +45,8 @@ public:
     void set_character_profile(shared_str);
     shared_str specific_character();
     void set_specific_character(shared_str);
+    shared_str character_name();
+    void set_character_name(shared_str);
 #endif
 
     CHARACTER_COMMUNITY_INDEX m_community_index;
