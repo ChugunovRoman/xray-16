@@ -81,9 +81,6 @@
         "cwd": "${workspaceFolder}/bin/x64/${input:buildType}"
       },
       "command": "./xr_3da -soc -nointro -fsltx ${SOC_LTX_FILE_PATH}",
-      "dependsOn": [
-        "Compile"
-      ],
       "problemMatcher": []
     },
     {
@@ -93,9 +90,6 @@
         "cwd": "${workspaceFolder}/bin/x64/${input:buildType}"
       },
       "command": "./xr_3da -cs -nointro -fsltx ${CS_LTX_FILE_PATH}",
-      "dependsOn": [
-        "Compile"
-      ],
       "problemMatcher": []
     },
     {
@@ -105,9 +99,6 @@
         "cwd": "${workspaceFolder}/bin/x64/${input:buildType}"
       },
       "command": "./xr_3da -nointro -fsltx ${COP_LTX_FILE_PATH}",
-      "dependsOn": [
-        "Compile"
-      ],
       "problemMatcher": []
     },
   ],
