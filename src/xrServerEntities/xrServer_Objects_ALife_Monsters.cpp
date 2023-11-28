@@ -473,8 +473,6 @@ void CSE_ALifeTraderAbstract::set_specific_character(shared_str new_spec_char)
 
 void CSE_ALifeTraderAbstract::set_character_profile(shared_str new_profile) { m_sCharacterProfile = new_profile; }
 shared_str CSE_ALifeTraderAbstract::character_profile() { return m_sCharacterProfile; }
-void CSE_ALifeTraderAbstract::set_character_name(shared_str new_name) { m_character_name = new_name.c_str(); }
-shared_str CSE_ALifeTraderAbstract::character_name() { return m_character_name.c_str(); }
 #endif
 
 #ifdef XRGAME_EXPORTS
