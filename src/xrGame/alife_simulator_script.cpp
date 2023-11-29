@@ -363,6 +363,7 @@ CSE_Abstract* try_to_clone_object(CALifeSimulator* self, CSE_Abstract* object, p
     clone->m_upgrades = wpnmag->m_upgrades;
     clone->a_elapsed = wpnmag->a_elapsed;
     clone->a_current = wpnmag->a_current;
+    clone->a_elapsed_grenades = wpnmag->a_elapsed_grenades;
 
     return bRegister ? reprocess_spawn(self, absClone) : absClone;
 }

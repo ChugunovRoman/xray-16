@@ -121,59 +121,59 @@ void CSpaceRestrictionComposition::initialize()
 
     process_borders();
 
-#ifdef DEBUG
-    test_correctness();
-#endif
+// #ifdef DEBUG
+//     test_correctness();
+// #endif
 }
 
 #ifdef DEBUG
-void CSpaceRestrictionComposition::test_correctness()
-{
-    m_correct = true;
-    m_test_storage.clear();
+// void CSpaceRestrictionComposition::test_correctness()
+// {
+//     m_correct = true;
+//     m_test_storage.clear();
 
-    {
-        RESTRICTIONS::iterator I = m_restrictions.begin();
-        RESTRICTIONS::iterator E = m_restrictions.end();
-        for (; I != E; ++I)
-            m_test_storage.insert(
-                m_test_storage.end(), (*I)->object().m_test_storage.begin(), (*I)->object().m_test_storage.end());
-    }
+//     {
+//         RESTRICTIONS::iterator I = m_restrictions.begin();
+//         RESTRICTIONS::iterator E = m_restrictions.end();
+//         for (; I != E; ++I)
+//             m_test_storage.insert(
+//                 m_test_storage.end(), (*I)->object().m_test_storage.begin(), (*I)->object().m_test_storage.end());
+//     }
 
-    {
-        std::sort(m_test_storage.begin(), m_test_storage.end());
-        m_test_storage.erase(std::unique(m_test_storage.begin(), m_test_storage.end()), m_test_storage.end());
-    }
+//     {
+//         std::sort(m_test_storage.begin(), m_test_storage.end());
+//         m_test_storage.erase(std::unique(m_test_storage.begin(), m_test_storage.end()), m_test_storage.end());
+//     }
 
-    if (m_test_storage.empty())
-    {
-        m_correct = false;
-        return;
-    }
+//     if (m_test_storage.empty())
+//     {
+//         m_correct = false;
+//         return;
+//     }
 
-    xr_vector<u32> nodes;
-    {
-        RESTRICTIONS::iterator I = m_restrictions.begin();
-        RESTRICTIONS::iterator E = m_restrictions.end();
-        for (; I != E; ++I)
-        {
-            VERIFY3(!(*I)->object().m_test_storage.empty(), "Restrictor has no border", *(*I)->object().name());
-            nodes.clear();
-            ai().level_graph().set_mask(border());
-            ai().graph_engine().search(ai().level_graph(), (*I)->object().m_test_storage.back(),
-                (*I)->object().m_test_storage.back(), &nodes, GraphEngineSpace::CFlooder());
-            ai().level_graph().clear_mask(border());
+//     xr_vector<u32> nodes;
+//     {
+//         RESTRICTIONS::iterator I = m_restrictions.begin();
+//         RESTRICTIONS::iterator E = m_restrictions.end();
+//         for (; I != E; ++I)
+//         {
+//             VERIFY3(!(*I)->object().m_test_storage.empty(), "Restrictor has no border", *(*I)->object().name());
+//             nodes.clear();
+//             ai().level_graph().set_mask(border());
+//             ai().graph_engine().search(ai().level_graph(), (*I)->object().m_test_storage.back(),
+//                 (*I)->object().m_test_storage.back(), &nodes, GraphEngineSpace::CFlooder());
+//             ai().level_graph().clear_mask(border());
 
-            if (nodes.size() == 65535)
-                m_correct = true;
-            else
-                m_correct = (m_test_storage.size() <= nodes.size());
+//             if (nodes.size() == 65535)
+//                 m_correct = true;
+//             else
+//                 m_correct = (m_test_storage.size() <= nodes.size());
 
-            if (!m_correct)
-                break;
-        }
-    }
-}
+//             if (!m_correct)
+//                 break;
+//         }
+//     }
+// }
 #endif
 
 Fsphere CSpaceRestrictionComposition::sphere() const

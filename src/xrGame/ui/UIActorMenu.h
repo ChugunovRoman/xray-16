@@ -5,6 +5,8 @@
 #include "xrServerEntities/inventory_space.h"
 #include "xrUICore/Hint/UIHint.h"
 
+#include "script_game_object.h"
+
 class CUICharacterInfo;
 class CUIDragDropListEx;
 class CUIDragDropReferenceList;
@@ -171,6 +173,16 @@ protected:
     // Drag&Drop lists
     CUIDragDropListEx* m_pLists[eListCount]{};
 
+    CUIDragDropListEx* m_pInventoryBeltList;
+    CUIDragDropListEx* m_pInventoryBagList;
+
+    CUIDragDropListEx* m_pTradeActorBagList;
+    CUIDragDropListEx* m_pTradeActorList;
+    CUIDragDropListEx* m_pTradePartnerBagList;
+    CUIDragDropListEx* m_pTradePartnerList;
+    CUIDragDropListEx* m_pDeadBodyBagList;
+    CUIDragDropListEx* m_pTrashList;
+
 public:
     CUIDragDropReferenceList* m_pQuickSlot{};
 
@@ -251,6 +263,11 @@ protected:
 
 public:
     CUIDragDropListEx* GetListByType(EDDListType t); //Alundaio: Made public
+
+    // inventory
+// public:
+//     bool ToSlotScript(CScriptGameObject* GO, const bool force_place, u16 slot_id);
+//     bool ToBeltScript(CScriptGameObject* GO, const bool b_use_cursor_pos);
 
 protected:
     CUIDragDropListEx* GetSlotList(u16 slot_idx);
@@ -393,6 +410,7 @@ public:
     void StoreAllToInventoryBox();
 
     IC UIHint* get_hint_wnd() { return m_hint_wnd; }
+    void UpdateConditionProgressBars();
 
     CScriptGameObject* GetCurrentItemAsGameObject();
     void HighlightSectionInSlot(pcstr section, EDDListType type, u16 slot_id = 0);

@@ -131,6 +131,7 @@ void CSXML_IdToIndex::InitInternal(bool crashOnFail /*= true*/, bool ignoreMissi
 
     m_pItemDataVector = xr_new<T_VECTOR>();
 
+    Msg("file_str: %s", file_str);
     VERIFY(file_str);
     VERIFY(tag_name);
 

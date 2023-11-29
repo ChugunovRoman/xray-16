@@ -53,6 +53,7 @@ void CSE_ALifeObject::spawn_supplies(LPCSTR ini_string)
             }
         }
 
+
         if (!OnlyOne.empty())
         {
             s32 sel = Random.randI(0, OnlyOne.size());

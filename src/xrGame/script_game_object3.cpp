@@ -48,8 +48,12 @@
 #include "eatable_item.h"
 #include "xrScriptEngine/script_callback_ex.h"
 #include "xrEngine/Feel_Touch.h"
+#include "WeaponAmmo.h"
+#include "WeaponMagazinedWGrenade.h"
 #include "level_path_manager.h"
 #include "game_path_manager.h"
+#include "danger_manager.h"
+#include "danger_object.h"
 #endif
 //-Alundaio
 
@@ -1462,6 +1466,15 @@ void CScriptGameObject::SwitchState(u32 state)
         if (itm)
             itm->SwitchState(state);
     }
+}
+
+bool CScriptGameObject::WeaponInGrenadeMode()
+{
+    CWeaponMagazinedWGrenade* wpn = smart_cast<CWeaponMagazinedWGrenade*>(&object());
+    if (!wpn)
+        return false;
+
+    return wpn->m_bGrenadeMode;
 }
 
 u32 CScriptGameObject::GetState()

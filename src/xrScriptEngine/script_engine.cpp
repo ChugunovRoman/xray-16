@@ -25,19 +25,23 @@ Flags32 g_LuaDebug;
 
 #define SCRIPT_GLOBAL_NAMESPACE "_G"
 
-static const char* file_header_old = "local function script_name() \
+static const char* file_header_old =
+    "local function script_name() \
 return \"%s\" \
 end \
 local this = {} \
 %s this %s \
-setmetatable(this, {__index = " SCRIPT_GLOBAL_NAMESPACE "}) \
+setmetatable(this, {__index = " SCRIPT_GLOBAL_NAMESPACE
+    "}) \
 setfenv(1, this) ";
 
-static const char* file_header_new = "local function script_name() \
+static const char* file_header_new =
+    "local function script_name() \
 return \"%s\" \
 end \
 local this = {} \
-this." SCRIPT_GLOBAL_NAMESPACE " = " SCRIPT_GLOBAL_NAMESPACE " \
+this." SCRIPT_GLOBAL_NAMESPACE " = " SCRIPT_GLOBAL_NAMESPACE
+    " \
 %s this %s \
 setfenv(1, this) ";
 
@@ -96,7 +100,7 @@ bool RunJITCommand(lua_State* ls, const char* command)
     }
     return true;
 }
-}
+} // namespace
 
 const char* const CScriptEngine::GlobalNamespace = SCRIPT_GLOBAL_NAMESPACE;
 Lock CScriptEngine::stateMapLock;
@@ -221,32 +225,19 @@ void CScriptEngine::LogVariable(lua_State* luaState, pcstr name, int level)
 
     switch (ntype)
     {
-    case LUA_TNIL:
-        xr_strcpy(value, "nil");
-        break;
+    case LUA_TNIL: xr_strcpy(value, "nil"); break;
 
-    case LUA_TFUNCTION:
-        xr_strcpy(value, "[function]");
-        break;
+    case LUA_TFUNCTION: xr_strcpy(value, "[function]"); break;
 
-    case LUA_TTHREAD:
-        xr_strcpy(value, "[thread]");
-        break;
+    case LUA_TTHREAD: xr_strcpy(value, "[thread]"); break;
 
-    case LUA_TNUMBER:
-        xr_sprintf(value, "%f", lua_tonumber(luaState, -1));
-        break;
+    case LUA_TNUMBER: xr_sprintf(value, "%f", lua_tonumber(luaState, -1)); break;
 
-    case LUA_TBOOLEAN:
-        xr_sprintf(value, "%s", lua_toboolean(luaState, -1) ? "true" : "false");
-        break;
+    case LUA_TBOOLEAN: xr_sprintf(value, "%s", lua_toboolean(luaState, -1) ? "true" : "false"); break;
 
-    case LUA_TSTRING:
-        xr_sprintf(value, "%.127s", lua_tostring(luaState, -1));
-        break;
+    case LUA_TSTRING: xr_sprintf(value, "%.127s", lua_tostring(luaState, -1)); break;
 
-    case LUA_TTABLE:
-    {
+    case LUA_TTABLE: {
         if (level <= 3)
         {
             Msg("%s Table: %s", tabBuffer, name);
@@ -259,8 +250,7 @@ void CScriptEngine::LogVariable(lua_State* luaState, pcstr name, int level)
 
     // XXX: can we process lightuserdata like userdata? In other words, is this fallthrough allowed?
     // case LUA_TLIGHTUSERDATA:
-    case LUA_TUSERDATA:
-    {
+    case LUA_TUSERDATA: {
         /*
         lua_getmetatable(luaState, -1); // Maybe we can do this in another way
         if (lua_istable(luaState, -1))
@@ -293,14 +283,11 @@ void CScriptEngine::LogVariable(lua_State* luaState, pcstr name, int level)
         break;
     }
 
-    default:
-        xr_strcpy(value, "[not available]");
-        break;
+    default: xr_strcpy(value, "[not available]"); break;
     }
 
     Msg("%s %s %s : %s", tabBuffer, type, name, value);
 }
-
 
 bool CScriptEngine::parse_namespace(pcstr caNamespaceName, pstr b, size_t b_size, pstr c, size_t c_size)
 {
@@ -334,7 +321,7 @@ bool CScriptEngine::parse_namespace(pcstr caNamespaceName, pstr b, size_t b_size
 }
 
 bool CScriptEngine::load_buffer(
-lua_State* L, LPCSTR caBuffer, size_t tSize, LPCSTR caScriptName, LPCSTR caNameSpaceName)
+    lua_State* L, LPCSTR caBuffer, size_t tSize, LPCSTR caScriptName, LPCSTR caNameSpaceName)
 {
     int l_iErrorCode;
     if (caNameSpaceName && xr_strcmp(GlobalNamespace, caNameSpaceName))
@@ -376,8 +363,8 @@ bool CScriptEngine::do_file(LPCSTR caScriptName, LPCSTR caNameSpaceName)
         return false;
     }
     strconcat(sizeof(l_caLuaFileName), l_caLuaFileName, "@", caScriptName);
-    if (!load_buffer(lua(), static_cast<LPCSTR>(l_tpFileReader->pointer()), l_tpFileReader->length(),
-        l_caLuaFileName, caNameSpaceName))
+    if (!load_buffer(lua(), static_cast<LPCSTR>(l_tpFileReader->pointer()), l_tpFileReader->length(), l_caLuaFileName,
+            caNameSpaceName))
     {
         // VERIFY(lua_gettop(lua())>=4);
         // lua_pop(lua(), 4);
@@ -435,7 +422,7 @@ bool CScriptEngine::namespace_loaded(LPCSTR name, bool remove_from_stack)
 
     lua_pushstring(lua(), GlobalNamespace);
     lua_rawget(lua(), LUA_GLOBALSINDEX);
-    string256 S2 = { 0 };
+    string256 S2 = {0};
     xr_strcpy(S2, name);
     pstr S = S2;
     for (;;)
@@ -524,7 +511,7 @@ bool CScriptEngine::object(LPCSTR namespace_name, LPCSTR identifier, int type)
 
 luabind::object CScriptEngine::name_space(LPCSTR namespace_name)
 {
-    string256 S1 = { 0 };
+    string256 S1 = {0};
     xr_strcpy(S1, namespace_name);
     pstr S = S1;
     luabind::object lua_namespace = luabind::globals(lua());
@@ -549,7 +536,8 @@ struct raii_guard : private Noncopyable
 
     raii_guard(CScriptEngine* scriptEngine, int error_code, const char*& error_description)
         : m_script_engine(scriptEngine), m_error_code(error_code), m_error_description(error_description)
-    {}
+    {
+    }
 
     ~raii_guard()
     {
@@ -603,7 +591,7 @@ bool CScriptEngine::print_output(lua_State* L, pcstr caScriptFileName, int error
     {
         if (!errorCode)
             scriptEngine->script_log(LuaMessageType::Info, "Output from %s", caScriptFileName);
-        // scriptEngine->script_log(errorCode ? LuaMessageType::Error : LuaMessageType::Message, "%s", S);
+            // scriptEngine->script_log(errorCode ? LuaMessageType::Error : LuaMessageType::Message, "%s", S);
 #if defined(USE_DEBUGGER) && !defined(USE_LUA_STUDIO)
         if (debugger() && debugger()->Active())
         {
@@ -623,24 +611,12 @@ void CScriptEngine::print_error(lua_State* L, int iErrorCode)
 
     switch (iErrorCode)
     {
-    case LUA_ERRRUN:
-        Log("\n\nSCRIPT RUNTIME ERROR");
-        break;
-    case LUA_ERRMEM:
-        Log("\n\nSCRIPT ERROR (memory allocation)");
-        break;
-    case LUA_ERRERR:
-        Log("\n\nSCRIPT ERROR (while running the error handler function)");
-        break;
-    case LUA_ERRFILE:
-        Log("\n\nSCRIPT ERROR (while running file)");
-        break;
-    case LUA_ERRSYNTAX:
-        Log("\n\nSCRIPT SYNTAX ERROR");
-        break;
-    case LUA_YIELD:
-        Log("\n\nThread is yielded");
-        break;
+    case LUA_ERRRUN: Log("\n\nSCRIPT RUNTIME ERROR"); break;
+    case LUA_ERRMEM: Log("\n\nSCRIPT ERROR (memory allocation)"); break;
+    case LUA_ERRERR: Log("\n\nSCRIPT ERROR (while running the error handler function)"); break;
+    case LUA_ERRFILE: Log("\n\nSCRIPT ERROR (while running file)"); break;
+    case LUA_ERRSYNTAX: Log("\n\nSCRIPT SYNTAX ERROR"); break;
+    case LUA_YIELD: Log("\n\nThread is yielded"); break;
     default: NODEFAULT;
     }
 }
@@ -833,7 +809,7 @@ int CScriptEngine::lua_pcall_failed(lua_State* L)
 
     return LUA_ERRRUN;
 }
-#if 1 //!XRAY_EXCEPTIONS
+#if 1 //! XRAY_EXCEPTIONS
 void CScriptEngine::lua_cast_failed(lua_State* L, const luabind::type_id& info)
 {
     string128 buf;
@@ -920,10 +896,7 @@ struct luajit
         lua_call(L, 1, 0);
     }
 
-    static void allow_escape_sequences(bool allowed)
-    {
-        lj_allow_escape_sequences(allowed ? 1 : 0);
-    }
+    static void allow_escape_sequences(bool allowed) { lj_allow_escape_sequences(allowed ? 1 : 0); }
 };
 
 void CScriptEngine::init(ExporterFunc exporterFunc, bool loadGlobalNamespace)
@@ -1007,7 +980,7 @@ void CScriptEngine::init(ExporterFunc exporterFunc, bool loadGlobalNamespace)
     {
         luajit::open_lib(lua(), LUA_JITLIBNAME, luaopen_jit);
         // Xottab_DUTY: commented this. Let's use default opt level, which is 3
-        //RunJITCommand(lua(), "opt.start(2)");
+        // RunJITCommand(lua(), "opt.start(2)");
     }
 #ifdef USE_LUA_STUDIO
     if (m_lua_studio_world || strstr(Core.Params, "-lua_studio"))
@@ -1112,7 +1085,7 @@ bool CScriptEngine::function_object(LPCSTR function_to_call, luabind::object& ob
 {
     if (!xr_strlen(function_to_call))
         return false;
-    string256 name_space = { 0 }, function = { 0 };
+    string256 name_space = {0}, function = {0};
     parse_script_namespace(function_to_call, name_space, sizeof(name_space), function, sizeof(function));
     if (xr_strcmp(name_space, GlobalNamespace))
     {
@@ -1294,7 +1267,4 @@ void CScriptEngine::DestroyScriptThread(const CScriptThread* thread)
     UnregisterState(thread->lua());
 }
 
-bool CScriptEngine::is_editor()
-{
-    return m_is_editor;
-}
+bool CScriptEngine::is_editor() { return m_is_editor; }

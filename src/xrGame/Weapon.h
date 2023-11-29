@@ -188,6 +188,20 @@ protected:
     int m_iSilencerX, m_iSilencerY;
     int m_iGrenadeLauncherX, m_iGrenadeLauncherY;
 
+    struct current_addon_t
+    {
+        union
+        {
+            u16 data;
+            struct
+            {
+                u16 scope : 6; // 2^6 possible scope sections
+                u16 silencer : 5; // 2^5 possible silencer/launcher sections
+                u16 launcher : 5;
+            };
+        };
+    };
+
 protected:
     struct SZoomParams
     {
@@ -260,6 +274,8 @@ protected:
     bool m_bIsSingleHanded;
 
 public:
+    current_addon_t m_cur_addon;
+
     //загружаемые параметры
     Fvector vLoadedFirePoint;
     Fvector vLoadedFirePoint2;

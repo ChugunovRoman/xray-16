@@ -214,6 +214,13 @@ void CLevel::IR_OnKeyboardPress(int key)
     if (game && game->OnKeyboardPress(GetBindedAction(key)))
         return;
 
+    luabind::functor<bool> lua_function;
+    if (GEnv.ScriptEngine->functor("level_input.on_key_press", lua_function))
+    {
+        if (lua_function(key, _curr))
+            return;
+    }
+
     if (_curr == kQUICK_SAVE && IsGameTypeSingle())
     {
         Console->Execute("save");

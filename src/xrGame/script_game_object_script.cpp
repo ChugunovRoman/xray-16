@@ -94,6 +94,7 @@ SCRIPT_EXPORT(CScriptGameObject, (),
 
                 //AVO: custom callbacks
                 // Input
+                value("hud_animation_end", int(GameObject::eActorHudAnimationEnd)),
                 value("key_press", int(GameObject::eKeyPress)),
                 value("key_release", int(GameObject::eKeyRelease)),
                 value("key_hold", int(GameObject::eKeyHold)),
@@ -116,9 +117,11 @@ SCRIPT_EXPORT(CScriptGameObject, (),
                 value("on_use_vehicle", int(GameObject::eUseVehicle)),
 
                 // weapon
+                value("weapon_fired", int(GameObject::eOnWeaponFired)),
                 value("weapon_jammed", int(GameObject::eOnWeaponJammed)),
                 value("weapon_zoom_in", int(GameObject::eOnWeaponZoomIn)),
                 value("weapon_zoom_out", int(GameObject::eOnWeaponZoomOut)),
+                value("weapon_magazine_empty", int(GameObject::eOnWeaponMagazineEmpty)),
 
                 value("map_location_added", int(GameObject::eMapLocationAdded))
             ],

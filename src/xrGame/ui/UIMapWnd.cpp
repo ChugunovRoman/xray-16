@@ -511,7 +511,6 @@ bool CUIMapWnd::OnMouseAction(float x, float y, EUIMessages mouse_action)
         case WINDOW_RBUTTON_UP:
             ActivatePropertiesBox(NULL);
             break;
-
         case WINDOW_MOUSE_MOVE:
             if (pInput->iGetAsyncKeyState(MOUSE_1))
             {

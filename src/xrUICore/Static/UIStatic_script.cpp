@@ -82,6 +82,9 @@ SCRIPT_EXPORT(CUIStatic, (CUIWindow),
             .def("SetStretchTexture", &CUIStatic::SetStretchTexture)
             .def("GetStretchTexture", &CUIStatic::GetStretchTexture)
 
+            .def("SetTextureColor", &CUIStatic::SetTextureColor)
+            .def("GetTextureColor", &CUIStatic::GetTextureColor)
+
             .def("SetTextAlign", &CUIStatic::SetTextAlign_script)
             .def("GetTextAlign", &CUIStatic::GetTextAlign_script)
 

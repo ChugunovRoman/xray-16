@@ -5,6 +5,7 @@
 !.travis.yml
 !.editorconfig
 !.vscode
+.vscode/*.db*
 
 # exclude binaries and temporary files
 CMakeCache.txt
