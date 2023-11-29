@@ -148,6 +148,13 @@ enum EGameActions : u32
 
     kEDITOR,
 
+    // kPDA_TAB1,
+    // kPDA_TAB2,
+    // kPDA_TAB3,
+    // kPDA_TAB4,
+    // kPDA_TAB5,
+    // kPDA_TAB6,
+
     // Contextual actions:
     // UI
     kUI_MOVE,

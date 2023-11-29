@@ -557,6 +557,7 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
     CSE_ALifeItemWeapon* E = smart_cast<CSE_ALifeItemWeapon*>(e);
 
     // iAmmoCurrent					= E->a_current;
+    // TODO: rewite with m_bGrenadeMode
     iAmmoElapsed = E->a_elapsed;
     m_flagsAddOnState = E->m_addon_flags.get();
     m_ammoType = E->ammo_type;

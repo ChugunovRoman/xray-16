@@ -227,6 +227,14 @@ public:
     u16 get_ammo_total();
     u16 get_ammo_elapsed();
     u16 get_ammo_magsize();
+    void set_ammo_elapsed(u16 count) { a_elapsed = count; };
+    u16 get_ammo_elapsed2() { return a_elapsed; };
+	void set_ammo_elapsed2(u16 count) {a_elapsed = count; };
+    u8 get_ammo_type() { return ammo_type; };
+    u8 get_ammo_type2() { return ammo_type; };
+    void set_ammo_type(u8 count) { ammo_type = count; };
+    void set_ammo_type2(u8 count) { ammo_type = count; };
+    Flags8& get_addon_flags() { return m_addon_flags; }
     void clone_addons(CSE_ALifeItemWeapon* parent);
 
     virtual BOOL Net_Relevant();

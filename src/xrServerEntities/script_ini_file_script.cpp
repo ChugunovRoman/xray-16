@@ -65,6 +65,17 @@ CScriptIniFile* reload_system_ini()
     pSettings = xr_new<CInifile>(fname);
     return (CScriptIniFile*)pSettings;
 }
+
+void section_for_each(CScriptIniFile* self, const luabind::functor<void>& functor)
+{
+    using sections_type = CInifile::Root;
+    sections_type& sections = self->sections();
+
+    for (auto& section : sections)
+    {
+        functor(section->Name.c_str());
+    }
+}
 //Alundaio: END
 
 #ifdef XRGAME_EXPORTS

@@ -155,6 +155,9 @@ bool CScriptGameObject::HasInfo(LPCSTR info_id)
     if (!pInventoryOwner)
         return false;
 
+    CGameObject* l_tpGameObject = smart_cast<CGameObject*>(&object());
+
+    // Msg("CScriptGameObject::HasInfo: %s, is_alive: %d, object_id: %d, Name: %s, - (%d|%s|%s)", info_id, pInventoryOwner->is_alive(), pInventoryOwner->object_id(), pInventoryOwner->Name(), l_tpGameObject->CLS_ID, l_tpGameObject->cNameSect_str(), l_tpGameObject->cNameVisual());
     return pInventoryOwner->HasInfo(info_id);
 }
 
@@ -753,6 +756,19 @@ void CScriptGameObject::ChangeCharacterReputation(int char_rep)
         return;
     }
     pInventoryOwner->ChangeReputation(char_rep);
+}
+
+void CScriptGameObject::SetCharacterReputation(int char_rep)
+{
+    CInventoryOwner* pInventoryOwner = smart_cast<CInventoryOwner*>(&object());
+
+    if (!pInventoryOwner)
+    {
+        GEnv.ScriptEngine->script_log(
+            LuaMessageType::Error, "SetCharacterReputation available only for InventoryOwner");
+        return;
+    }
+    pInventoryOwner->SetReputation(char_rep);
 }
 
 LPCSTR CScriptGameObject::CharacterCommunity()
@@ -2014,6 +2030,7 @@ float CScriptGameObject::GetAdditionalMaxWeight() const
 {
     CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(&object());
     CBackpack* backpack = smart_cast<CBackpack*>(&object());
+
     if (!outfit && !backpack)
     {
         GEnv.ScriptEngine->script_log(LuaMessageType::Error,
@@ -2031,6 +2048,7 @@ float CScriptGameObject::GetAdditionalMaxWalkWeight() const
 {
     CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(&object());
     CBackpack* backpack = smart_cast<CBackpack*>(&object());
+
     if (!outfit && !backpack)
     {
         GEnv.ScriptEngine->script_log(LuaMessageType::Error,
@@ -2048,6 +2066,7 @@ void CScriptGameObject::SetAdditionalMaxWeight(float add_max_weight)
 {
     CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(&object());
     CBackpack* backpack = smart_cast<CBackpack*>(&object());
+
     if (!outfit && !backpack)
     {
         GEnv.ScriptEngine->script_log(LuaMessageType::Error,
@@ -2066,6 +2085,7 @@ void CScriptGameObject::SetAdditionalMaxWalkWeight(float add_max_walk_weight)
 {
     CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(&object());
     CBackpack* backpack = smart_cast<CBackpack*>(&object());
+
     if (!outfit && !backpack)
     {
         GEnv.ScriptEngine->script_log(LuaMessageType::Error,

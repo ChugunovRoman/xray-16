@@ -584,6 +584,11 @@ void CUIActorMenu::highlight_item_slot(CUICellItem* cell_item)
     CArtefact* artefact = smart_cast<CArtefact*>(item);
 
     u16 slot_id = item->BaseSlot();
+    if (weapon && slot_id == KNIFE_SLOT)
+    {
+        m_pLists[eInventoryKnifeList]->Highlight(true);
+        return;
+    }
     if (weapon && (slot_id == INV_SLOT_2 || slot_id == INV_SLOT_3))
     {
         m_pLists[eInventoryPistolList]->Highlight(true);

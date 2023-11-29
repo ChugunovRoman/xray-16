@@ -188,10 +188,32 @@ void Manager::load_all_inventory()
 {
     static constexpr pcstr items_section = "upgraded_inventory";
 
-    if (g_upgrades_log == 1)
+    // if (g_upgrades_log == 1)
+    // {
+    //     Msg("# Inventory upgrade manager is loaded.");
+    // }
+
+    // CInifile::Sect& inv_section = pSettings->r_section(items_section);
+    // auto ib = inv_section.Data.begin();
+    // auto ie = inv_section.Data.end();
+    // for (; ib != ie; ++ib)
+    // {
+    //     shared_str root_id((*ib).first);
+    //     //		if ( !item_upgrades_exist( root_id ) ) continue;
+    //     item_upgrades_exist(root_id);
+    //     add_root(root_id);
+    // }
+
+    // if (g_upgrades_log == 1)
+    // {
+    //     Msg("# Upgrades of inventory items loaded.");
+    // }
+
+    //Alundaio: No longer the need to define upgradeable sections in [upgraded_inventory]
+    for (auto& section : pSettings->sections())
     {
-        Msg("# Inventory upgrade manager is loaded.");
-    }
+        if (!pSettings->line_exist(section->Name, "upgrades") || !pSettings->r_string(section->Name, "upgrades"))
+            continue;
 
     const check_upgraded_inventory_section inv_section{ items_section };
 
@@ -208,9 +230,7 @@ void Manager::load_all_inventory()
     }
     //-Alundaio
 
-    if (g_upgrades_log == 1)
-    {
-        Msg("# Upgrades of inventory items loaded.");
+        add_root(section->Name);
     }
 }
 
