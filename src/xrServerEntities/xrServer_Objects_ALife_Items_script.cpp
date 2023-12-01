@@ -69,6 +69,9 @@ SCRIPT_EXPORT(CSE_ALifeItemWeapon, (CSE_ALifeItem),
                 value("eAddonDisabled", int(CSE_ALifeItemWeapon::EWeaponAddonStatus::eAddonDisabled)),
                 value("eAddonPermanent", int(CSE_ALifeItemWeapon::EWeaponAddonStatus::eAddonPermanent))
             ]
+            .def("get_addon_flags", +[](CSE_ALifeItemWeapon* self) {
+              return self->m_addon_flags;
+            })
             .def("clone_addons", &CSE_ALifeItemWeapon::clone_addons)
     ];
 });
