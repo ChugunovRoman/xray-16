@@ -25,12 +25,13 @@
 #include "eatable_item.h"
 #include "InventoryBox.h"
 #include "UIPdaWnd.h"
-#include "xrUICore/TabControl/UITabControl.h"
 #include "UIActorMenu.h"
 #include "UIMainIngameWnd.h"
 #include "UIZoneMap.h"
 #include "UIMotionIcon.h"
 #include "UIHudStatesWnd.h"
+#include "script_game_object.h"
+#include "script_game_object_impl.h"
 
 void CUIActorMenu::TryRepairItem(CUIWindow* w, void* d)
 {
@@ -146,9 +147,92 @@ SCRIPT_EXPORT(CUIActorMenu, (CUIDialogWnd),
             .def("highlight_section_in_slot", &CUIActorMenu::HighlightSectionInSlot)
             .def("highlight_for_each_in_slot", &CUIActorMenu::HighlightForEachInSlot)
             .def("refresh_current_cell_item", &CUIActorMenu::RefreshCurrentItemCell)
+            .def("CallMessageBoxYesNo", &CUIActorMenu::CallMessageBoxYesNo)
+            .def("CallMessageBoxOK", &CUIActorMenu::CallMessageBoxOK)
             .def("IsShown", &CUIActorMenu::IsShown)
             .def("ShowDialog", &CUIActorMenu::ShowDialog)
             .def("HideDialog", &CUIActorMenu::HideDialog)
+            .def("ToSlot", +[](CUIActorMenu* self, CScriptGameObject* GO,  const bool force_place, u16 slot_id) -> bool {
+              CInventoryItem* iitem = smart_cast<CInventoryItem*>(GO->object().dcast_GameObject());
+
+              if (!iitem || !self->m_pActorInvOwner->inventory().InRuck(iitem))
+                  return false;
+
+              CUIDragDropListEx* invlist = self->GetListByType(iActorBag);
+              CUICellContainer* c = invlist->GetContainer();
+              CUIWindow::WINDOW_LIST child_list = c->GetChildWndList();
+
+              for (auto& it : child_list)
+              {
+                  CUICellItem* i = static_cast<CUICellItem*>(it);
+                  const PIItem pitm = static_cast<PIItem>(i->m_pData);
+                  if (pitm == iitem)
+                  {
+                      self->ToSlot(i, force_place, slot_id);
+                      return true;
+                  }
+              }
+
+              return false;
+            })
+            .def("ToBelt", +[](CUIActorMenu* self, CScriptGameObject* GO, const bool b_use_cursor_pos) -> bool {
+              CInventoryItem* iitem = smart_cast<CInventoryItem*>(GO->object().dcast_GameObject());
+
+            if (!iitem || !self->m_pActorInvOwner->inventory().InRuck(iitem))
+              return false;
+
+            CUIDragDropListEx* invlist = self->GetListByType(iActorBag);
+            CUICellContainer* c = invlist->GetContainer();
+            CUIWindow::WINDOW_LIST child_list = c->GetChildWndList();
+
+              for (auto& it : child_list)
+              {
+                  CUICellItem* i = static_cast<CUICellItem*>(it);
+                  const PIItem pitm = static_cast<PIItem>(i->m_pData);
+                  if (pitm == iitem)
+                  {
+                      self->ToBelt(i, b_use_cursor_pos);
+                      return true;
+                  }
+              }
+
+            return false;
+            })
+            .def("SetMenuMode", &CUIActorMenu::SetMenuMode)
+            .def("GetMenuMode", &CUIActorMenu::GetMenuMode)
+            .def("GetPartner", +[](CUIActorMenu* self) -> CScriptGameObject* {
+              CInventoryOwner* io = self->GetPartner();
+              if (io)
+              {
+                  CGameObject* GO = smart_cast<CGameObject*>(io);
+                  return GO->lua_game_object();
+              }
+
+              return nullptr;
+            })
+            .def("GetInvBox", +[](CUIActorMenu* self)  -> CScriptGameObject* {
+              CInventoryBox* inv_box = self->GetInvBox();
+              if (inv_box)
+              {
+                  CGameObject* GO = smart_cast<CGameObject*>(inv_box);
+                  return GO->lua_game_object();
+              }
+
+              return nullptr;
+            })
+            .def("SetPartner", +[](CUIActorMenu* self, CScriptGameObject* GO) {
+              CInventoryOwner* io = GO->object().cast_inventory_owner();
+              if (io)
+                  self->SetPartner(io);
+            })
+            .def("SetInvBox", +[](CUIActorMenu* self, CScriptGameObject* GO) {
+              CInventoryBox* inv_box = smart_cast<CInventoryBox*>(&GO->object());
+              if (inv_box)
+                  self->SetInvBox(inv_box);
+            })
+            .def("SetActor", +[](CUIActorMenu* self) {
+              self->SetActor(Actor()->cast_inventory_owner());
+            })
     ];
 
     using namespace luabind;

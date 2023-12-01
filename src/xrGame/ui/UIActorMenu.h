@@ -117,7 +117,6 @@ protected:
     ref_sound sounds[eSndMax];
     void PlaySnd(eActorMenuSndAction a);
 
-    CInventoryOwner* m_pActorInvOwner{};
     CInventoryOwner* m_pPartnerInvOwner{};
     CInventoryBox* m_pInvBox{};
 
@@ -173,16 +172,6 @@ protected:
     // Drag&Drop lists
     CUIDragDropListEx* m_pLists[eListCount]{};
 
-    CUIDragDropListEx* m_pInventoryBeltList;
-    CUIDragDropListEx* m_pInventoryBagList;
-
-    CUIDragDropListEx* m_pTradeActorBagList;
-    CUIDragDropListEx* m_pTradeActorList;
-    CUIDragDropListEx* m_pTradePartnerBagList;
-    CUIDragDropListEx* m_pTradePartnerList;
-    CUIDragDropListEx* m_pDeadBodyBagList;
-    CUIDragDropListEx* m_pTrashList;
-
 public:
     CUIDragDropReferenceList* m_pQuickSlot{};
 
@@ -209,6 +198,8 @@ protected:
     u32 m_trade_partner_inventory_state;
 
 public:
+    CInventoryOwner* m_pActorInvOwner{};
+
     void SetMenuMode(EMenuMode mode);
     EMenuMode GetMenuMode() { return m_currMenuMode; };
     void SetActor(CInventoryOwner* io);
@@ -216,6 +207,7 @@ public:
     CInventoryOwner* GetPartner() { return m_pPartnerInvOwner; };
     void SetInvBox(CInventoryBox* box);
     CInventoryBox* GetInvBox() { return m_pInvBox; };
+
 private:
     void PropertiesBoxForSlots(PIItem item, bool& b_show);
     void PropertiesBoxForWeapon(CUICellItem* cell_item, PIItem item, bool& b_show);
@@ -264,11 +256,6 @@ protected:
 public:
     CUIDragDropListEx* GetListByType(EDDListType t); //Alundaio: Made public
 
-    // inventory
-// public:
-//     bool ToSlotScript(CScriptGameObject* GO, const bool force_place, u16 slot_id);
-//     bool ToBeltScript(CScriptGameObject* GO, const bool b_use_cursor_pos);
-
 protected:
     CUIDragDropListEx* GetSlotList(u16 slot_idx);
     bool CanSetItemToList(PIItem item, CUIDragDropListEx* l, u16& ret_slot);
@@ -306,6 +293,8 @@ protected:
 
 public:
     //Alundaio: Made public
+    bool ToSlot(CUICellItem* itm, bool force_place, u16 slot_id);
+    bool ToBelt(CUICellItem* itm, bool b_use_cursor_pos);
     void SetCurrentItem(CUICellItem* itm);
     CUICellItem* CurrentItem();
 
@@ -330,9 +319,7 @@ protected:
     void UpdateButtonsLayout();
 
     // inventory
-    bool ToSlot(CUICellItem* itm, bool force_place, u16 slot_id);
     bool ToBag(CUICellItem* itm, bool b_use_cursor_pos);
-    bool ToBelt(CUICellItem* itm, bool b_use_cursor_pos);
     bool TryUseItem(CUICellItem* cell_itm);
     bool ToQuickSlot(CUICellItem* itm);
 
@@ -410,7 +397,6 @@ public:
     void StoreAllToInventoryBox();
 
     IC UIHint* get_hint_wnd() { return m_hint_wnd; }
-    void UpdateConditionProgressBars();
 
     CScriptGameObject* GetCurrentItemAsGameObject();
     void HighlightSectionInSlot(pcstr section, EDDListType type, u16 slot_id = 0);
