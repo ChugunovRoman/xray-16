@@ -84,9 +84,11 @@ IC void CTradeParameters::process(_action_type type, CInifile& ini_file, const s
         }
 
         string256 temp0, temp1;
-        THROW3(_GetItemCount(*(*I).second) == 2, "Invalid parameters in section", *section);
-        _action.enable((*I).first, CTradeFactors((float)atof(_GetItem(*(*I).second, 0, temp0)),
-                                       (float)atof(_GetItem(*(*I).second, 1, temp1))));
+
+        LPCSTR param1 = _GetItem(*(*I).second, 0, temp0);
+        LPCSTR param2 = _GetItemCount(*(*I).second) >= 2 ? _GetItem(*(*I).second, 1, temp1) : param1;
+
+        _action.enable((*I).first, CTradeFactors((float)atof(param1), (float)atof(param2)));
     }
 }
 
