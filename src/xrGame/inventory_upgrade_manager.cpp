@@ -215,6 +215,9 @@ void Manager::load_all_inventory()
         if (!pSettings->line_exist(section->Name, "upgrades") || !pSettings->r_string(section->Name, "upgrades"))
             continue;
 
+        if (!pSettings->line_exist(section->Name, "upgrade_scheme") || !pSettings->r_string(section->Name, "upgrade_scheme"))
+            continue;
+
     const check_upgraded_inventory_section inv_section{ items_section };
 
     // Alundaio: No longer the need to define upgradeable sections in [upgraded_inventory]
