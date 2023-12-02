@@ -438,8 +438,12 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
         .def("ammo_box_size", &CScriptGameObject::AmmoBoxSize)
 
         //For Weapons
+        .def("weapon_get_ammo_section", &CScriptGameObject::Weapon_GetAmmoSection)
         .def("weapon_addon_attach", &CScriptGameObject::Weapon_AddonAttach)
         .def("weapon_addon_detach", &CScriptGameObject::Weapon_AddonDetach)
+        .def("weapon_set_scope", &CScriptGameObject::Weapon_SetCurrentScope)
+        .def("weapon_get_scope", &CScriptGameObject::Weapon_GetCurrentScope)
+        .def("weapon_in_grenade_mode", &CScriptGameObject::WeaponInGrenadeMode)
 
         //For Weapon & Outfit
         .def("add_upgrade", &CScriptGameObject::AddUpgrade)
