@@ -25,6 +25,8 @@ IGame_Level::IGame_Level()
     bReady = false;
     pCurrentEntity = NULL;
     pCurrentViewEntity = NULL;
+    Sound = GEnv.Sound->create_scene();
+    DefaultSoundScene = Sound;
 #ifndef MASTER_GOLD
     GEnv.Render->ResourcesDumpMemoryUsage();
 #endif
@@ -44,8 +46,8 @@ IGame_Level::~IGame_Level()
     Device.seqFrame.Remove(this);
     CCameraManager::ResetPP();
     ///////////////////////////////////////////
-    GEnv.Sound->set_geometry_occ(nullptr);
-    GEnv.Sound->set_handler(nullptr);
+    DefaultSoundScene = g_pGamePersistent->m_pSound;
+    GEnv.Sound->destroy_scene(Sound);
 #ifndef MASTER_GOLD
     GEnv.Render->ResourcesDumpMemoryUsage();
 #endif
@@ -71,11 +73,6 @@ void IGame_Level::net_Stop()
 
 //-------------------------------------------------------------------------------------------
 // extern CStatTimer tscreate;
-void _sound_event(const ref_sound_data_ptr& S, float range)
-{
-    if (g_pGameLevel && S && S->feedback)
-        g_pGameLevel->SoundEvent_Register(S, range);
-}
 
 static void build_callback(Fvector* V, int Vcnt, CDB::TRI* T, int Tcnt, void* params)
 {
@@ -120,8 +117,12 @@ bool IGame_Level::Load(u32 dwNum)
     g_pGamePersistent->SpatialSpace.initialize(ObjectSpace.GetBoundingVolume());
     g_pGamePersistent->SpatialSpacePhysic.initialize(ObjectSpace.GetBoundingVolume());
 
-    GEnv.Sound->set_geometry_occ(ObjectSpace.GetStaticModel());
-    GEnv.Sound->set_handler(_sound_event);
+    Sound->set_geometry_occ(ObjectSpace.GetStaticModel());
+    Sound->set_handler([](const ref_sound& S, float range)
+    {
+        if (g_pGameLevel && S && S->feedback)
+            g_pGameLevel->SoundEvent_Register(S, range);
+    });
 
     pApp->LoadSwitch();
 
@@ -258,7 +259,7 @@ void IGame_Level::SetViewEntity(IGameObject* O)
     pCurrentViewEntity = O;
 }
 
-void IGame_Level::SoundEvent_Register(ref_sound_data_ptr S, float range)
+void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
 {
     if (!g_bLoaded)
         return;
@@ -304,7 +305,7 @@ void IGame_Level::SoundEvent_Register(ref_sound_data_ptr S, float range)
 
         // Energy and signal
         VERIFY(_valid(it->GetSpatialData().sphere.P));
-        float dist = snd_position.distance_to(it->GetSpatialData().sphere.P);
+        const float dist = snd_position.distance_to(it->GetSpatialData().sphere.P);
         if (dist > p->max_ai_distance)
             continue;
         VERIFY(_valid(dist));
@@ -313,7 +314,7 @@ void IGame_Level::SoundEvent_Register(ref_sound_data_ptr S, float range)
         VERIFY(_valid(Power));
         if (Power > EPS_S)
         {
-            float occ = GEnv.Sound->get_occlusion_to(it->GetSpatialData().sphere.P, snd_position);
+            const float occ = Sound->get_occlusion_to(it->GetSpatialData().sphere.P, snd_position);
             VERIFY(_valid(occ));
             Power *= occ;
             if (Power > EPS_S)
