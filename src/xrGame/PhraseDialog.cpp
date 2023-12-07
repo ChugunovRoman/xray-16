@@ -255,7 +255,7 @@ CPhrase* CPhraseDialog::AddPhrase(
     CPhrase* phrase = NULL;
     CPhraseGraph::CVertex* _vertex = data()->m_PhraseGraph.vertex(phrase_id);
 
-    R_ASSERT2(!_vertex, make_string("Dublicate phrase ID: [%s] for phrase: [%s]. Existed phrase by this ID: [%s]", phrase_id.c_str(), text, _vertex->data()->GetText()));
+    VERIFY2(!_vertex, make_string("Dublicate phrase ID: [%s] for phrase: [%s]. Existed phrase by this ID: [%s]", phrase_id.c_str(), text, _vertex->data()->GetText()));
 
     phrase = xr_new<CPhrase>();
     VERIFY(phrase);
