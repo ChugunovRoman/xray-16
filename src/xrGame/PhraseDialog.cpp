@@ -257,14 +257,17 @@ CPhrase* CPhraseDialog::AddPhrase(
 
     VERIFY2(!_vertex, make_string("Dublicate phrase ID: [%s] for phrase: [%s]. Existed phrase by this ID: [%s]", phrase_id.c_str(), text, _vertex->data()->GetText()));
 
-    phrase = xr_new<CPhrase>();
-    VERIFY(phrase);
-    phrase->SetID(phrase_id);
+    if (!_vertex)
+    {
+        phrase = xr_new<CPhrase>();
+        VERIFY(phrase);
+        phrase->SetID(phrase_id);
 
-    phrase->SetText(text);
-    phrase->SetGoodwillLevel(goodwil_level);
+        phrase->SetText(text);
+        phrase->SetGoodwillLevel(goodwil_level);
 
-    data()->m_PhraseGraph.add_vertex(phrase, phrase_id);
+        data()->m_PhraseGraph.add_vertex(phrase, phrase_id);
+    }
 
     if (prev_phrase_id != "")
         data()->m_PhraseGraph.add_edge(prev_phrase_id, phrase_id, 0.f);
