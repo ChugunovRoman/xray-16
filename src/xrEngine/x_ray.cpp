@@ -6,454 +6,579 @@
 // AlexMX - Alexander Maksimchuk
 //-----------------------------------------------------------------------------
 #include "stdafx.h"
-#include "IGame_Level.h"
-#include "IGame_Persistent.h"
 
-#include "ILoadingScreen.h"
-#include "XR_IOConsole.h"
 #include "x_ray.h"
+
+#include "embedded_resources_management.h"
+
+#include "xrCore/Threading/TaskManager.hpp"
+#include "xrNetServer/NET_AuthCheck.h"
+
 #include "std_classes.h"
-#include "GameFont.h"
-#include "xrCDB/ISpatial.h"
+#include "IGame_Persistent.h"
+#include "LightAnimLibrary.h"
+#include "XR_IOConsole.h"
 #include "xrSASH.h"
-#include "xrServerEntities/smart_cast.h"
-#include "xr_input.h"
 
-//---------------------------------------------------------------------
+#if defined(XR_PLATFORM_WINDOWS)
+#include "AccessibilityShortcuts.hpp"
+#include "Text_Console.h"
+#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
+#define CTextConsole CConsole
+#pragma todo("Implement text console or it's alternative")
+#endif
 
-ENGINE_API CApplication* pApp = nullptr;
-extern CRenderDevice Device;
+#ifdef XR_PLATFORM_WINDOWS
+#include <locale>
 
-#ifdef MASTER_GOLD
-#define NO_MULTI_INSTANCES
-#endif // #ifdef MASTER_GOLD
+#include "DiscordGameSDK/discord.h"
+#define USE_DISCORD_INTEGRATION
 
-//////////////////////////////////////////////////////////////////////////
-struct _SoundProcessor : public pureFrame
+#include "xrCore/Text/StringConversion.hpp"
+#endif
+
+//#define PROFILE_TASK_SYSTEM
+
+#ifdef PROFILE_TASK_SYSTEM
+#include "xrCore/Threading/ParallelForEach.hpp"
+#endif
+
+// global variables
+constexpr u32 SPLASH_FRAMERATE = 30;
+
+constexpr size_t MAX_WINDOW_EVENTS = 32;
+
+#ifdef USE_DISCORD_INTEGRATION
+constexpr discord::ClientId DISCORD_APP_ID = 421286728695939072;
+#endif
+
+ENGINE_API CInifile* pGameIni = nullptr;
+ENGINE_API bool CallOfPripyatMode = false;
+ENGINE_API bool ClearSkyMode = false;
+ENGINE_API bool ShadowOfChernobylMode = false;
+
+ENGINE_API string512 g_sLaunchOnExit_params;
+ENGINE_API string512 g_sLaunchOnExit_app;
+ENGINE_API string_path g_sLaunchWorkingFolder;
+
+namespace
 {
-    virtual void OnFrame()
+struct PathIncludePred
+{
+private:
+    const xr_auth_strings_t* ignored;
+
+public:
+    explicit PathIncludePred(const xr_auth_strings_t* ignoredPaths) : ignored(ignoredPaths) {}
+    bool IsIncluded(pcstr path)
     {
-        // Msg ("------------- sound: %d [%3.2f,%3.2f,%3.2f]",u32(Device.dwFrame),VPUSH(Device.vCameraPosition));
-        GEnv.Sound->update(Device.vCameraPosition, Device.vCameraDirection, Device.vCameraTop);
+        if (!ignored)
+            return true;
+
+        return allow_to_include_path(*ignored, path);
     }
-} SoundProcessor;
-
-CApplication::CApplication()
-{
-    loaded = false;
-    ll_dwReference = 0;
-
-    max_load_stage = 0;
-
-    // events
-    eQuit = Engine.Event.Handler_Attach("KERNEL:quit", this);
-    eStart = Engine.Event.Handler_Attach("KERNEL:start", this);
-    eStartLoad = Engine.Event.Handler_Attach("KERNEL:load", this);
-    eDisconnect = Engine.Event.Handler_Attach("KERNEL:disconnect", this);
-    eConsole = Engine.Event.Handler_Attach("KERNEL:console", this);
-    eStartMPDemo = Engine.Event.Handler_Attach("KERNEL:start_mp_demo", this);
-
-    // levels
-    Level_Current = u32(-1);
-    Level_Scan();
-
-    // Register us
-    Device.seqFrame.Add(this, REG_PRIORITY_HIGH + 1000);
-
-    if (psDeviceFlags.test(mtSound))
-        Device.seqFrameMT.Add(&SoundProcessor);
-    else
-        Device.seqFrame.Add(&SoundProcessor);
-
-    // App Title
-    loadingScreen = nullptr;
+};
 }
 
-extern CInput* pInput;
+template <typename T>
+void InitConfig(T& config, pcstr name, bool fatal = true,
+    bool readOnly = true, bool loadAtStart = true, bool saveAtEnd = true,
+    u32 sectCount = 0, const CInifile::allow_include_func_t& allowIncludeFunc = nullptr)
+{
+    string_path fname;
+    FS.update_path(fname, "$game_config$", name);
+    config = xr_new<CInifile>(fname, readOnly, loadAtStart, saveAtEnd, sectCount, allowIncludeFunc);
+
+    CHECK_OR_EXIT(config->section_count() || !fatal,
+        make_string("Cannot find file %s.\nReinstalling application may fix this problem.", fname));
+}
+
+// XXX: make it more fancy
+// некрасиво слишком
+void set_shoc_mode()
+{
+    CallOfPripyatMode = false;
+    ShadowOfChernobylMode = true;
+    ClearSkyMode = false;
+}
+
+void set_cs_mode()
+{
+    CallOfPripyatMode = false;
+    ShadowOfChernobylMode = false;
+    ClearSkyMode = true;
+}
+
+void set_cop_mode()
+{
+    CallOfPripyatMode = true;
+    ShadowOfChernobylMode = false;
+    ClearSkyMode = false;
+}
+
+void set_free_mode()
+{
+    CallOfPripyatMode = false;
+    ShadowOfChernobylMode = false;
+    ClearSkyMode = false;
+}
+
+void InitSettings()
+{
+    xr_auth_strings_t ignoredPaths, checkedPaths;
+    fill_auth_check_params(ignoredPaths, checkedPaths); //TODO port xrNetServer to Linux
+    PathIncludePred includePred(&ignoredPaths);
+    CInifile::allow_include_func_t includeFilter;
+    includeFilter.bind(&includePred, &PathIncludePred::IsIncluded);
+
+    InitConfig(pSettings, "system.ltx");
+    InitConfig(pSettingsAuth, "system.ltx", true, true, true, false, 0, includeFilter);
+    InitConfig(pSettingsOpenXRay, "openxray.ltx", false, true, true, false);
+    InitConfig(pGameIni, "game.ltx");
+
+    if (strstr(Core.Params, "-shoc") || strstr(Core.Params, "-soc"))
+        set_shoc_mode();
+    else if (strstr(Core.Params, "-cs"))
+        set_cs_mode();
+    else if (strstr(Core.Params, "-cop"))
+        set_cop_mode();
+    else if (strstr(Core.Params, "-unlock_game_mode"))
+        set_free_mode();
+    else
+    {
+        pcstr gameMode = READ_IF_EXISTS(pSettingsOpenXRay, r_string, "compatibility", "game_mode", "cop");
+        if (xr_strcmpi("cop", gameMode) == 0)
+            set_cop_mode();
+        else if (xr_strcmpi("cs", gameMode) == 0)
+            set_cs_mode();
+        else if (xr_strcmpi("shoc", gameMode) == 0 || xr_strcmpi("soc", gameMode) == 0)
+            set_shoc_mode();
+        else if (xr_strcmpi("unlock", gameMode) == 0)
+            set_free_mode();
+    }
+}
+
+void InitConsole()
+{
+    if (GEnv.isDedicatedServer)
+        Console = xr_new<CTextConsole>();
+    else
+        Console = xr_new<CConsole>();
+
+    Console->Initialize();
+    xr_strcpy(Console->ConfigFile, "user.ltx");
+    if (strstr(Core.Params, "-ltx "))
+    {
+        string64 c_name;
+        sscanf(strstr(Core.Params, "-ltx ") + strlen("-ltx "), "%[^ ] ", c_name);
+        xr_strcpy(Console->ConfigFile, c_name);
+    }
+}
+
+void InitInput()
+{
+    bool captureInput = !strstr(Core.Params, "-i");
+    pInput = xr_new<CInput>(captureInput);
+}
+
+void destroyInput() { xr_delete(pInput); }
+void InitSoundDeviceList() { Engine.Sound.CreateDevicesList(); }
+void InitSound() { Engine.Sound.Create(); }
+void destroySound() { Engine.Sound.Destroy(); }
+void destroySettings()
+{
+    auto s = const_cast<CInifile**>(&pSettings);
+    xr_delete(*s);
+
+    auto sa = const_cast<CInifile**>(&pSettingsAuth);
+    xr_delete(*sa);
+
+    auto so = const_cast<CInifile**>(&pSettingsOpenXRay);
+    xr_delete(*so);
+
+    xr_delete(pGameIni);
+}
+
+void destroyConsole()
+{
+    Console->Execute("cfg_save");
+    Console->Destroy();
+    xr_delete(Console);
+}
+
+void execUserScript()
+{
+    Console->Execute("default_controls");
+    Console->ExecuteScript(Console->ConfigFile);
+}
+
+CApplication::CApplication(pcstr commandLine)
+{
+    xrDebug::Initialize(commandLine);
+    R_ASSERT3(SDL_Init(SDL_INIT_VIDEO) == 0, "Unable to initialize SDL", SDL_GetError());
+
+#ifdef XR_PLATFORM_WINDOWS
+    AccessibilityShortcuts shortcuts;
+    if (!GEnv.isDedicatedServer)
+        shortcuts.Disable();
+#endif
+
+#ifdef USE_DISCORD_INTEGRATION
+    discord::Core::Create(DISCORD_APP_ID, discord::CreateFlags::NoRequireDiscord, &m_discord_core);
+
+#   ifndef MASTER_GOLD
+    if (m_discord_core)
+    {
+        const auto level = xrDebug::DebuggerIsPresent() ? discord::LogLevel::Debug : discord::LogLevel::Info;
+        m_discord_core->SetLogHook(level, [](discord::LogLevel level, pcstr message)
+        {
+            switch (level)
+            {
+            case discord::LogLevel::Error: Log("!", message); break;
+            case discord::LogLevel::Warn:  Log("~", message); break;
+            case discord::LogLevel::Info:  Log("*", message); break;
+            case discord::LogLevel::Debug: Log("#", message); break;
+            }
+        });
+    }
+#   endif
+
+    discord::Activity activity{};
+    activity.SetType(discord::ActivityType::Playing);
+    activity.SetApplicationId(DISCORD_APP_ID);
+    if (m_discord_core)
+    {
+        std::lock_guard guard{ m_discord_lock };
+        m_discord_core->ActivityManager().UpdateActivity(activity, nullptr);
+    }
+#endif
+
+    if (!strstr(commandLine, "-nosplash"))
+    {
+        const bool topmost = !strstr(commandLine, "-splashnotop");
+#ifndef PROFILE_TASK_SYSTEM
+        ShowSplash(topmost);
+#endif
+    }
+
+    pcstr fsltx = "-fsltx ";
+    string_path fsgame = "";
+    if (strstr(commandLine, fsltx))
+    {
+        const size_t sz = xr_strlen(fsltx);
+        sscanf(strstr(commandLine, fsltx) + sz, "%[^ ] ", fsgame);
+    }
+
+    Core.Initialize("OpenXRay", commandLine, nullptr, true, *fsgame ? fsgame : nullptr);
+
+#ifdef PROFILE_TASK_SYSTEM
+    const auto task = [](const TaskRange<int>&){};
+
+    constexpr int task_count = 1048576;
+    constexpr int iterations = 250;
+    u64 results[iterations];
+
+    CTimer timer;
+    for (int i = 0; i < iterations; ++i)
+    {
+        timer.Start();
+        xr_parallel_for(TaskRange(0, task_count, 1), task);
+        results[i] = timer.GetElapsed_ns();
+    }
+
+    u64 min = std::numeric_limits<u64>::max();
+    u64 average{};
+    for (int i = 0; i < iterations; ++i)
+    {
+        min = std::min(min, results[i]);
+        average += results[i] / 1000;
+        Log("Time:", results[i]);
+    }
+    Msg("Time min: %f microseconds", float(min) / 1000.f);
+    Msg("Time average: %f microseconds", float(average) / float(iterations));
+
+    return;
+#endif
+    *g_sLaunchOnExit_app = 0;
+    *g_sLaunchOnExit_params = 0;
+
+    InitSettings();
+    // Adjust player & computer name for Asian
+    if (pSettings->line_exist("string_table", "no_native_input"))
+    {
+        xr_strcpy(Core.UserName, sizeof(Core.UserName), "Player");
+        xr_strcpy(Core.CompName, sizeof(Core.CompName), "Computer");
+    }
+
+    FPU::m24r();
+
+    Device.FillVideoModes();
+    InitInput();
+    InitConsole();
+
+    Engine.Initialize();
+    Device.Initialize();
+
+    Console->OnDeviceInitialize();
+#ifdef USE_DISCORD_INTEGRATION
+    const std::locale locale("");
+    activity.SetDetails(StringToUTF8(Core.ApplicationTitle, locale).c_str());
+    if (m_discord_core)
+    {
+        std::lock_guard guard{ m_discord_lock };
+        m_discord_core->ActivityManager().UpdateActivity(activity, nullptr);
+    }
+#endif
+
+    //if (CheckBenchmark())
+    //    return 0;
+
+    InitSoundDeviceList();
+    execUserScript();
+    InitSound();
+
+    // ...command line for auto start
+    pcstr startArgs = strstr(Core.Params, "-start ");
+    if (startArgs)
+        Console->Execute(startArgs + 1);
+    pcstr loadArgs = strstr(Core.Params, "-load ");
+    if (loadArgs)
+        Console->Execute(loadArgs + 1);
+
+    // Initialize APP
+    const auto& createLightAnim = TaskScheduler->AddTask("LALib.OnCreate()", [](Task&, void*)
+    {
+        LALib.OnCreate();
+    });
+
+    Device.Create();
+    TaskScheduler->Wait(createLightAnim);
+
+    g_pGamePersistent = dynamic_cast<IGame_Persistent*>(NEW_INSTANCE(CLSID_GAME_PERSISTANT));
+    R_ASSERT(g_pGamePersistent || Engine.External.CanSkipGameModuleLoading());
+    if (!g_pGamePersistent)
+        Console->Show();
+}
 
 CApplication::~CApplication()
 {
-    Console->Hide();
+#ifndef PROFILE_TASK_SYSTEM
+    // Destroy APP
+    DEL_INSTANCE(g_pGamePersistent);
+    Engine.Event.Dump();
 
-    Device.seqFrameMT.Remove(&SoundProcessor);
-    Device.seqFrame.Remove(&SoundProcessor);
-    Device.seqFrame.Remove(this);
+    // Destroying
+    destroyInput();
+    if (!g_bBenchmark && !g_SASH.IsRunning())
+        destroySettings();
 
-    // events
-    Engine.Event.Handler_Detach(eConsole, this);
-    Engine.Event.Handler_Detach(eDisconnect, this);
-    Engine.Event.Handler_Detach(eStartLoad, this);
-    Engine.Event.Handler_Detach(eStart, this);
-    Engine.Event.Handler_Detach(eQuit, this);
-    Engine.Event.Handler_Detach(eStartMPDemo, this);
+    LALib.OnDestroy();
+
+    if (!g_bBenchmark && !g_SASH.IsRunning())
+        destroyConsole();
+    else
+        Console->Destroy();
+
+    Device.CleanupVideoModes();
+    destroySound();
+
+    Device.Destroy();
+    Engine.Destroy();
+
+#ifdef USE_DISCORD_INTEGRATION
+    discord::Core::Destroy(&m_discord_core);
+#endif
+
+    // check for need to execute something external
+    if (/*xr_strlen(g_sLaunchOnExit_params) && */ xr_strlen(g_sLaunchOnExit_app))
+    {
+#if defined(XR_PLATFORM_WINDOWS)
+        // CreateProcess need to return results to next two structures
+        STARTUPINFO si = {};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi = {};
+        // We use CreateProcess to setup working folder
+        pcstr tempDir = xr_strlen(g_sLaunchWorkingFolder) ? g_sLaunchWorkingFolder : nullptr;
+        CreateProcess(g_sLaunchOnExit_app, g_sLaunchOnExit_params, nullptr, nullptr, FALSE, 0, nullptr, tempDir, &si, &pi);
+#endif
+    }
+#endif // PROFILE_TASK_SYSTEM
+
+    Core._destroy();
+    SDL_Quit();
 }
 
-void CApplication::OnEvent(EVENT E, u64 P1, u64 P2)
+int CApplication::Run()
 {
-    if (E == eQuit)
+#ifdef PROFILE_TASK_SYSTEM
+    return 0;
+#endif
+
+    // Main cycle
+    Device.Run();
+    HideSplash();
+
+    while (!SDL_QuitRequested()) // SDL_PumpEvents is here
     {
-        if (pInput != nullptr)
-            pInput->GrabInput(false);
+        bool canCallActivate = false;
+        bool shouldActivate = false;
 
-        g_SASH.EndBenchmark();
+        SDL_Event events[MAX_WINDOW_EVENTS];
+        const int count = SDL_PeepEvents(events, MAX_WINDOW_EVENTS,
+            SDL_GETEVENT, SDL_WINDOWEVENT, SDL_WINDOWEVENT);
 
-        SDL_Event quit = { SDL_QUIT };
-        SDL_PushEvent(&quit);
-
-        for (auto& level : Levels)
+        for (int i = 0; i < count; ++i)
         {
-            xr_free(level.folder);
-            xr_free(level.name);
-        }
-        Levels.clear();
-    }
-    else if (E == eStart)
-    {
-        pstr op_server = pstr(P1);
-        pstr op_client = pstr(P2);
-        Level_Current = u32(-1);
-        R_ASSERT(nullptr == g_pGameLevel);
-        R_ASSERT(nullptr != g_pGamePersistent);
-        Console->Execute("main_menu off");
-        Console->Hide();
-        //! this line is commented by Dima
-        //! because I don't see any reason to reset device here
-        //! Device.Reset (false);
-        //-----------------------------------------------------------
-        g_pGamePersistent->PreStart(op_server);
-        //-----------------------------------------------------------
-        g_pGameLevel = dynamic_cast<IGame_Level*>(NEW_INSTANCE(CLSID_GAME_LEVEL));
-        R_ASSERT(g_pGameLevel);
-        LoadBegin();
-        g_pGamePersistent->Start(op_server);
-        g_pGameLevel->net_Start(op_server, op_client);
-        LoadEnd();
-        xr_free(op_server);
-        xr_free(op_client);
-    }
-    else if (E == eDisconnect)
-    {
-        if (pInput != nullptr && true == Engine.Event.Peek("KERNEL:quit"))
-            pInput->GrabInput(false);
+            const SDL_Event event = events[i];
 
-        if (g_pGameLevel)
-        {
-            const bool show = Console->bVisible;
-            Console->Hide();
-            g_pGameLevel->net_Stop();
-            DEL_INSTANCE(g_pGameLevel);
-            if (show)
-                Console->Show();
-
-            if ((false == Engine.Event.Peek("KERNEL:quit")) && (false == Engine.Event.Peek("KERNEL:start")))
+            switch (event.type)
             {
-                Console->Execute("main_menu off");
-                Console->Execute("main_menu on");
+            case SDL_WINDOWEVENT:
+            {
+                switch (event.window.event)
+                {
+                case SDL_WINDOWEVENT_SHOWN:
+                case SDL_WINDOWEVENT_FOCUS_GAINED:
+                case SDL_WINDOWEVENT_RESTORED:
+                case SDL_WINDOWEVENT_MAXIMIZED:
+                    canCallActivate = true;
+                    shouldActivate = true;
+                    continue;
+
+                case SDL_WINDOWEVENT_HIDDEN:
+                case SDL_WINDOWEVENT_FOCUS_LOST:
+                case SDL_WINDOWEVENT_MINIMIZED:
+                    canCallActivate = true;
+                    shouldActivate = false;
+                    continue;
+
+                case SDL_WINDOWEVENT_ENTER:
+                    SDL_ShowCursor(SDL_FALSE);
+                    continue;
+
+                case SDL_WINDOWEVENT_LEAVE:
+                    SDL_ShowCursor(SDL_TRUE);
+                    continue;
+
+                case SDL_WINDOWEVENT_CLOSE:
+                    Engine.Event.Defer("KERNEL:disconnect");
+                    Engine.Event.Defer("KERNEL:quit");
+                    continue;
+                } // switch (event.window.event)
             }
-        }
-        if (g_pGamePersistent)
+            } // switch (event.type)
+
+            // Only process event in Device
+            // if it wasn't processed in the switch above
+            Device.ProcessEvent(event);
+        } // for (int i = 0; i < count; ++i)
+
+        // Workaround for screen blinking when there's too much timeouts
+        if (canCallActivate)
         {
-            g_pGamePersistent->Disconnect();
+            Device.OnWindowActivate(shouldActivate);
         }
-    }
-    else if (E == eConsole)
-    {
-        pstr command = (pstr)P1;
-        Console->ExecuteCommand(command, false);
-        xr_free(command);
-    }
-    else if (E == eStartMPDemo)
-    {
-        pstr demo_file = pstr(P1);
 
-        R_ASSERT(nullptr == g_pGameLevel);
-        R_ASSERT(nullptr != g_pGamePersistent);
+        Device.ProcessFrame();
 
-        Console->Execute("main_menu off");
-        Console->Hide();
-        Device.Reset(false);
+#ifdef USE_DISCORD_INTEGRATION
+        if (m_discord_core)
+            m_discord_core->RunCallbacks();
+#endif
+    } // while (!SDL_QuitRequested())
 
-        g_pGameLevel = smart_cast<IGame_Level*>(NEW_INSTANCE(CLSID_GAME_LEVEL));
-        VERIFY(g_pGameLevel);
-        shared_str server_options = g_pGameLevel->OpenDemoFile(demo_file);
+    Device.Shutdown();
 
-        //-----------------------------------------------------------
-        g_pGamePersistent->PreStart(server_options.c_str());
-        //-----------------------------------------------------------
-
-        LoadBegin();
-        g_pGamePersistent->Start(""); // server_options.c_str()); - no prefetch !
-        g_pGameLevel->net_StartPlayDemo();
-        LoadEnd();
-
-        xr_free(demo_file);
-    }
+    return 0;
 }
 
-static CTimer phase_timer;
-
-void CApplication::LoadBegin()
+void CApplication::ShowSplash(bool topmost)
 {
-    ll_dwReference++;
-    if (1 == ll_dwReference)
-    {
-        loaded = false;
-        phase_timer.Start();
-        load_stage = 0;
-    }
-}
-
-void CApplication::LoadEnd()
-{
-    ll_dwReference--;
-    if (0 == ll_dwReference)
-    {
-        Msg("* phase time: %d ms", phase_timer.GetElapsed_ms());
-        Msg("* phase cmem: %d K", Memory.mem_usage() / 1024);
-        Console->Execute("stat_memory");
-        loaded = true;
-    }
-}
-
-void CApplication::SetLoadingScreen(ILoadingScreen* newScreen)
-{
-    R_ASSERT(!loadingScreen);
-    loadingScreen = newScreen;
-}
-
-void CApplication::DestroyLoadingScreen()
-{
-    xr_delete(loadingScreen);
-}
-
-void CApplication::ShowLoadingScreen(bool show)
-{
-    loadingScreen->Show(show);
-}
-
-void CApplication::LoadDraw()
-{
-    if (loaded)
+    if (m_window)
         return;
 
-    Device.dwFrame += 1;
+    m_surfaces = std::move(ExtractSplashScreen());
 
-    if (!Device.RenderBegin())
-        return;
-
-    if (GEnv.isDedicatedServer)
-        Console->OnRender();
-    else
-        load_draw_internal();
-
-    Device.RenderEnd();
-}
-
-void CApplication::SetLoadStageTitle(pcstr _ls_title)
-{
-    loadingScreen->SetStageTitle(_ls_title);
-}
-
-void CApplication::LoadTitleInt(pcstr str1, pcstr str2, pcstr str3)
-{
-    loadingScreen->SetStageTip(str1, str2, str3);
-}
-
-void CApplication::LoadStage(bool draw /*= true*/)
-{
-    VERIFY(ll_dwReference);
-    if (!load_screen_renderer.IsActive())
+    if (m_surfaces.empty())
     {
-        Msg("* phase time: %d ms", phase_timer.GetElapsed_ms());
-        Msg("* phase cmem: %d K", Memory.mem_usage() / 1024);
-        phase_timer.Start();
-    }
-
-    if (g_pGamePersistent->GameType() == 1 && !xr_strcmp(g_pGamePersistent->m_game_params.m_alife, "alife"))
-        max_load_stage = 18;
-    else
-        max_load_stage = 14;
-
-    loadingScreen->Show(true);
-    loadingScreen->Update(load_stage, max_load_stage);
-
-    if (draw)
-        LoadDraw();
-    ++load_stage;
-}
-
-void CApplication::LoadSwitch() {}
-
-// Sequential
-void CApplication::OnFrame()
-{
-    Engine.Event.OnFrame();
-}
-
-void CApplication::Level_Append(pcstr folder)
-{
-    string_path N1, N2, N3, N4;
-    strconcat(sizeof(N1), N1, folder, "level");
-    strconcat(sizeof(N2), N2, folder, "level.ltx");
-    strconcat(sizeof(N3), N3, folder, "level.geom");
-    strconcat(sizeof(N4), N4, folder, "level.cform");
-    if (FS.exist("$game_levels$", N1) && FS.exist("$game_levels$", N2) && FS.exist("$game_levels$", N3) &&
-        FS.exist("$game_levels$", N4))
-    {
-        sLevelInfo LI;
-        LI.folder = xr_strdup(folder);
-        LI.name = nullptr;
-        Levels.push_back(LI);
-    }
-}
-
-void CApplication::Level_Scan()
-{
-    for (auto& level : Levels)
-    {
-        xr_free(level.folder);
-        xr_free(level.name);
-    }
-    Levels.clear();
-
-    xr_vector<char*>* folder = FS.file_list_open("$game_levels$", FS_ListFolders | FS_RootOnly);
-    if (!folder)
-    {
-        Log("! No levels found in game data");
+        Log("! Couldn't create surface from image:", SDL_GetError());
         return;
     }
 
-    for (u32 i = 0; i < folder->size(); ++i)
-        Level_Append((*folder)[i]);
+    Uint32 flags = SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN;
 
-    FS.file_list_close(folder);
+#if SDL_VERSION_ATLEAST(2,0,5)
+    if (topmost)
+        flags |= SDL_WINDOW_ALWAYS_ON_TOP;
+#endif
+
+    SDL_Surface* surface = m_surfaces.front();
+    m_window = SDL_CreateWindow("OpenXRay", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, surface->w, surface->h, flags);
+
+    const auto current = SDL_GetWindowSurface(m_window);
+    SDL_BlitSurface(surface, nullptr, current, nullptr);
+    SDL_ShowWindow(m_window);
+    SDL_UpdateWindowSurface(m_window);
+
+    Threading::SpawnThread(+[](void* self_ptr)
+    {
+        auto& self = *static_cast<CApplication*>(self_ptr);
+        self.SplashProc();
+    }, "X-Ray Splash Thread", 0, this);
+
+    while (!m_thread_operational)
+        SDL_PumpEvents();
+    SDL_PumpEvents();
 }
 
-void gen_logo_name(string_path& dest, pcstr level_name, int num = -1)
+void CApplication::SplashProc()
 {
-    strconcat(sizeof(dest), dest, "intro" DELIMITER "intro_", level_name);
+    m_thread_operational = true;
 
-    const auto len = xr_strlen(dest);
-    if (dest[len - 1] == _DELIMITER)
-        dest[len - 1] = 0;
-
-    if (num < 0)
-        return;
-
-    string16 buff;
-    xr_strcat(dest, sizeof(dest), "_");
-    xr_strcat(dest, sizeof(dest), xr_itoa(num + 1, buff, 10));
-}
-
-// Return true if logo exists
-// Always sets the path even if logo doesn't exist
-bool set_logo_path(string_path& path, pcstr levelName, int count = -1)
-{
-    gen_logo_name(path, levelName, count);
-    string_path temp2;
-    return FS.exist(temp2, "$game_textures$", path, ".dds") || FS.exist(temp2, "$level$", path, ".dds");
-}
-
-void CApplication::Level_Set(u32 L)
-{
-    if (L >= Levels.size())
-        return;
-    FS.get_path("$level$")->_set(Levels[L].folder);
-    Level_Current = L;
-
-    static string_path path;
-    path[0] = 0;
-
-    int count = 0;
     while (true)
     {
-        if (set_logo_path(path, Levels[L].folder, count))
-            count++;
-        else
+        if (m_should_exit.Wait(SPLASH_FRAMERATE))
             break;
-    }
 
-    if (count)
-    {
-        const int num = ::Random.randI(count);
-        gen_logo_name(path, Levels[L].folder, num);
-    }
-    else if (!set_logo_path(path, Levels[L].folder))
-    {
-        if (!set_logo_path(path, "no_start_picture"))
-            path[0] = 0;
-    }
-
-    if (path[0])
-        loadingScreen->SetLevelLogo(path);
-}
-
-int CApplication::Level_ID(pcstr name, pcstr ver, bool bSet)
-{
-    int result = -1;
-    auto it = FS.m_archives.begin();
-    auto it_e = FS.m_archives.end();
-    bool arch_res = false;
-
-    for (; it != it_e; ++it)
-    {
-        CLocatorAPI::archive& A = *it;
-        if (!A.hSrcFile)
+        if (m_surfaces.size() > 1)
         {
-            pcstr ln = A.header->r_string("header", "level_name");
-            pcstr lv = A.header->r_string("header", "level_ver");
-            if (0 == xr_stricmp(ln, name) && 0 == xr_stricmp(lv, ver))
+            if (m_current_surface_idx >= m_surfaces.size())
+                m_current_surface_idx = 0;
+
+            const auto current = SDL_GetWindowSurface(m_window);
+            const auto next = m_surfaces[m_current_surface_idx++]; // It's important to have postfix increment!
+            SDL_BlitSurface(next, nullptr, current, nullptr);
+            SDL_UpdateWindowSurface(m_window);
+
+#ifdef USE_DISCORD_INTEGRATION
+            if (m_discord_core)
             {
-                FS.LoadArchive(A);
-                arch_res = true;
+                std::lock_guard guard{ m_discord_lock };
+                m_discord_core->RunCallbacks();
             }
+#endif
         }
     }
 
-    if (arch_res)
-        Level_Scan();
+    for (SDL_Surface* surface : m_surfaces)
+        SDL_FreeSurface(surface);
+    m_surfaces.clear();
 
-    string256 buffer;
-    strconcat(sizeof(buffer), buffer, name, DELIMITER);
-    for (u32 I = 0; I < Levels.size(); ++I)
-    {
-        if (0 == xr_stricmp(buffer, Levels[I].folder))
-        {
-            result = int(I);
-            break;
-        }
-    }
+    SDL_DestroyWindow(m_window);
+    m_window = nullptr;
 
-    if (bSet && result != -1)
-        Level_Set(result);
-
-    if (arch_res)
-        g_pGamePersistent->OnAssetsChanged();
-    return result;
+    m_thread_operational = false;
 }
 
-CInifile* CApplication::GetArchiveHeader(pcstr name, pcstr ver)
+void CApplication::HideSplash()
 {
-    auto it = FS.m_archives.begin();
-    auto it_e = FS.m_archives.end();
+    if (!m_window)
+        return;
 
-    for (; it != it_e; ++it)
+    m_should_exit.Set();
+    while (m_thread_operational)
     {
-        CLocatorAPI::archive& A = *it;
-        if (!A.header)
-            continue;
-
-        pcstr ln = A.header->r_string("header", "level_name");
-        pcstr lv = A.header->r_string("header", "level_ver");
-        if (0 == xr_stricmp(ln, name) && 0 == xr_stricmp(lv, ver))
-        {
-            return A.header;
-        }
+        SDL_PumpEvents();
+        SwitchToThread();
     }
-    return nullptr;
-}
-
-void CApplication::load_draw_internal()
-{
-    loadingScreen->Draw();
 }

@@ -169,7 +169,7 @@ public:
     // Scene control
     void ProcessFrame();
 
-    void PreCache(u32 amount, bool draw_loadscreen, bool wait_user_input);
+    void PreCache(u32 amount, bool wait_user_input);
 
     bool BeforeFrame();
     void FrameMove();
@@ -191,9 +191,15 @@ public:
 public:
     // Creation & Destroying
     void Create();
-    void Run();
     void Destroy();
+
     void Reset(bool precache = true);
+
+    void Run();
+    void Shutdown();
+
+    void ProcessEvent(const SDL_Event& event);
+    void OnWindowActivate(bool activated);
 
     void UpdateWindowProps();
     void UpdateWindowRects();
@@ -257,10 +263,6 @@ public:
 
 private:
     void CalcFrameStats();
-
-    void OnWindowActivate(bool activated);
-
-    void message_loop();
 
 public:
     [[nodiscard]]

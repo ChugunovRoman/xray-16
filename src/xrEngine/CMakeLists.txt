@@ -206,15 +206,6 @@ target_sources_grouped(
 
 target_sources_grouped(
     TARGET xrEngine
-    NAME "Engine\\Game API\\MaterialSystem"
-    FILES
-    GameMtlLib.cpp
-    GameMtlLib.h
-    GameMtlLib_Engine.cpp
-)
-
-target_sources_grouped(
-    TARGET xrEngine
     NAME "Engine\\Game API\\Objects"
     FILES
     IGame_ObjectPool.cpp
@@ -241,14 +232,12 @@ target_sources_grouped(
     TARGET xrEngine
     NAME "General"
     FILES
+    AccessibilityShortcuts.hpp
     defines.cpp
     defines.h
     embedded_resources_management.h
     main.cpp
-    main.h
     mp_logging.h
-    splash.cpp
-    splash.h
     stdafx.cpp
     stdafx.h
     x_ray.cpp
@@ -442,6 +431,7 @@ target_link_libraries(xrEngine
     PRIVATE
     xrAPI
     xrCDB
+    xrMaterialSystem
     xrCore
     xrSound
     xrScriptEngine

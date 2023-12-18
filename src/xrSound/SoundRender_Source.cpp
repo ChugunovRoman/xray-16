@@ -16,7 +16,10 @@ CSoundRender_Source::CSoundRender_Source()
 }
 
 CSoundRender_Source::~CSoundRender_Source() { unload(); }
-bool ov_error(int res)
+
+namespace
+{
+bool ov_can_continue_read(long res)
 {
     switch (res)
     {
@@ -47,79 +50,40 @@ bool ov_error(int res)
     }
     return false;
 }
+}
 
-void CSoundRender_Source::i_decompress_fr(OggVorbis_File* ovf, char* _dest, u32 left)
+void CSoundRender_Source::i_decompress(OggVorbis_File* ovf, char* _dest, u32 size) const
 {
-    // vars
-    //	char		eof = 0;
-    int current_section;
-    long TotalRet = 0, ret;
-
-    //.	char		*PCM;
-    //.	PCM = new char[left];
+    long TotalRet = 0;
 
     // Read loop
-    while (TotalRet < (long)left)
+    while (TotalRet < static_cast<long>(size))
     {
-        ret = ov_read(ovf, /*PCM*/ _dest + TotalRet, left - TotalRet, 0, 2, 1, &current_section);
-        // BUG: ov_read can return negative value indicating an error, making this loop infinite
-        // if end of file or read limit exceeded
-        if (ret == 0)
+        const auto ret = ov_read(ovf, _dest + TotalRet, size - TotalRet, 0, 2, 1, nullptr);
+        if (ret <= 0 && !ov_can_continue_read(ret))
             break;
-        else if (ret < 0) // Error in bitstream
-        {
-            //
-        }
-        else
-        {
-            TotalRet += ret;
-        }
+        TotalRet += ret;
     }
-    //.	memcpy(_dest, PCM,TotalRet);
-    //.	delete [] PCM;
 }
 
-/*
-void CSoundRender_Source::i_decompress_fr(OggVorbis_File* ovf, char* _dest, u32 left)
+void CSoundRender_Source::i_decompress(OggVorbis_File* ovf, float* _dest, u32 size) const
 {
-    float** pcm;
-    int val;
-    long channels = ov_info(ovf, -1)->channels;
-    long bytespersample = 2 / channels;
-    int dummy;
-    left /= bytespersample;
-    short* buffer = (short*)_dest;
+    s32 left = s32(size / m_wformat.nBlockAlign);
     while (left)
     {
-        int samples = ov_read_float(ovf, &pcm, left, &dummy);
-        if (samples > 0)
-        {
-            for (int i = 0; i < channels; i++)
-            {
-                float* src = pcm[i];
-                short* dest = (short *)buffer + i;
+        float** pcm;
+        long samples = ov_read_float(ovf, &pcm, left, nullptr);
 
-                for (int j = 0; j < samples; j++)
-                {
-                    val = iFloor(src[j] * 32768.f);
-                    if (val > 32767)
-                        val = 32767;
-                    else if (val < -32768)
-                        val = -32768;
-
-                    *dest = short(val);
-                    dest += channels;
-                }
-            }
-            left -= samples;
-            buffer += samples;
-        }
-        else
-        {
-            if (ov_error(samples)) continue;
+        if (samples <= 0 && !ov_can_continue_read(samples))
             break;
-        }
+
+        if (samples > left)
+            samples = left;
+
+        for (long j = 0; j < samples; j++)
+            for (long i = 0; i < m_wformat.nChannels; i++)
+                *_dest++ = pcm[i][j];
+
+        left -= samples;
     }
 }
-*/
-

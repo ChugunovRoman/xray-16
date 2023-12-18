@@ -4,8 +4,6 @@
 #include "XR_IOConsole.h"
 #include "xr_ioc_cmd.h"
 
-#include "main.h"
-
 xrSASH ENGINE_API g_SASH;
 
 xrSASH::~xrSASH()
@@ -434,15 +432,13 @@ void xrSASH::GetBenchmarks()
 }
 #endif
 
-void Startup();
-
 void xrSASH::RunBenchmark(pcstr pszName)
 {
     Msg("SASH:: RunBenchmark.");
 
     TryInitEngine(false);
 
-    Startup();
+    //Startup();
 
     m_bReinitEngine = true;
 
@@ -453,7 +449,7 @@ void xrSASH::TryInitEngine(bool bNoRun)
 {
     if (m_bReinitEngine)
     {
-        InitEngine();
+        //InitEngine();
         // It was destroyed on previous exit
         Console->Initialize();
     }
@@ -489,12 +485,12 @@ void xrSASH::TryInitEngine(bool bNoRun)
         xr_delete(pTmp);
     }
 
-    InitInput();
+    //InitInput();
 
     Engine.External.Initialize();
 
-    if (bNoRun)
-        InitSoundDeviceList();
+    //if (bNoRun)
+    //    InitSoundDeviceList();
 
     Console->Execute("unbindall");
     Console->ExecuteScript(Console->ConfigFile);
@@ -507,7 +503,7 @@ void xrSASH::TryInitEngine(bool bNoRun)
 
     if (bNoRun)
     {
-        InitSound();
+        //InitSound();
         Device.Create();
     }
 }
@@ -516,11 +512,11 @@ void xrSASH::ReleaseEngine()
 {
     m_bReinitEngine = true;
 
-    destroyInput();
+    //destroyInput();
     Console->Destroy();
     Device.CleanupVideoModes();
-    destroySound();
-    destroyEngine();
+    //destroySound();
+    //destroyEngine();
 }
 
 #ifdef XR_PLATFORM_WINDOWS

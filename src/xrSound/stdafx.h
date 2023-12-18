@@ -3,16 +3,16 @@
 #include "Common/Common.hpp"
 #include "xrCore/xrCore.h"
 #include "xrCore/_std_extensions.h"
+#include "xrCore/xr_resource.h"
+
+#include "xrCDB/xrCDB.h"
+
+#include "Sound.h"
+
+#include <vorbis/codec.h>
+#include <vorbis/vorbisfile.h>
 
 #if defined(XR_PLATFORM_WINDOWS)
-// mmsystem.h
-#define MMNOSOUND
-#define MMNOMIDI
-#define MMNOAUX
-#define MMNOMIXER
-#define MMNOJOY
-#include <mmsystem.h>
-
 // mmreg.h
 #define NOMMIDS
 #define NONEWRIFF
@@ -20,16 +20,17 @@
 #define NONEWIC
 #define NOBITMAP
 #include <mmreg.h>
-#endif
+#else
+#define WAVE_FORMAT_PCM        0x0001
+#define WAVE_FORMAT_IEEE_FLOAT 0x0003
 
-#include <vorbis/codec.h>
-#include <vorbis/vorbisfile.h>
-
-#include "xrCDB/xrCDB.h"
-#include "Sound.h"
-
-#include "xrCore/xr_resource.h"
-
-#ifdef _EDITOR
-#include "utils/ETools/ETools.h"
+typedef struct {
+    WORD  wFormatTag;
+    WORD  nChannels;
+    DWORD nSamplesPerSec;
+    DWORD nAvgBytesPerSec;
+    WORD  nBlockAlign;
+    WORD  wBitsPerSample;
+    WORD  cbSize;
+} WAVEFORMATEX, *LPWAVEFORMATEX;
 #endif

@@ -1,32 +1,19 @@
 #include "stdafx.h"
-#include "xrCDB/Frustum.h"
 
-#include "x_ray.h"
 #include "Render.h"
 
 #include "xrCore/FS_impl.h"
 #include "xrCore/Threading/TaskManager.hpp"
+#include "xrScriptEngine/ScriptExporter.hpp"
 
 #include "xrSASH.h"
-#include "IGame_Persistent.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 #include "XR_IOConsole.h"
 #include "xr_input.h"
-#include "splash.h"
 
-#include <thread>
+#include "IGame_Level.h"
+#include "IGame_Persistent.h"
 
 #include <SDL.h>
-
-// mmsystem.h
-#if defined(XR_PLATFORM_WINDOWS)
-#define MMNOSOUND
-#define MMNOMIDI
-#define MMNOAUX
-#define MMNOMIXER
-#define MMNOJOY
-#include <mmsystem.h>
-#endif
 
 ENGINE_API CRenderDevice Device;
 ENGINE_API CLoadScreenRenderer load_screen_renderer;
@@ -35,8 +22,6 @@ ENGINE_API bool g_bRendering = false;
 
 int ps_fps_limit = 501;
 int ps_fps_limit_in_menu = 60;
-
-constexpr size_t MAX_WINDOW_EVENTS = 32;
 
 bool g_bLoaded = false;
 ref_light precache_light = 0;
@@ -69,7 +54,33 @@ bool CRenderDevice::RenderBegin()
 }
 
 void CRenderDevice::Clear() { GEnv.Render->Clear(); }
-extern void CheckPrivilegySlowdown();
+
+namespace
+{
+void CheckPrivilegySlowdown()
+{
+#ifndef MASTER_GOLD
+    const auto slowdownthread = +[](void*)
+    {
+        for (;;)
+        {
+            if (Device.GetStats().fFPS < 30)
+                Sleep(1);
+            if (Device.mt_bMustExit || !pSettings || !Console || !pInput)
+                return;
+        }
+    };
+
+    if (strstr(Core.Params, "-slowdown"))
+        Threading::SpawnThread(slowdownthread, "slowdown", 0, nullptr);
+    if (strstr(Core.Params, "-slowdown2x"))
+    {
+        Threading::SpawnThread(slowdownthread, "slowdown", 0, nullptr);
+        Threading::SpawnThread(slowdownthread, "slowdown", 0, nullptr);
+    }
+#endif
+}
+}
 
 void CRenderDevice::RenderEnd(void)
 {
@@ -121,8 +132,7 @@ void CRenderDevice::RenderEnd(void)
     mProjectSaved = mProject;
 }
 
-#include "IGame_Level.h"
-void CRenderDevice::PreCache(u32 amount, bool draw_loadscreen, bool wait_user_input)
+void CRenderDevice::PreCache(u32 amount, bool wait_user_input)
 {
     if (GEnv.isDedicatedServer)
         amount = 0;
@@ -139,7 +149,7 @@ void CRenderDevice::PreCache(u32 amount, bool draw_loadscreen, bool wait_user_in
         precache_light->set_range(5.0f);
         precache_light->set_active(true);
     }
-    if (amount && draw_loadscreen && !load_screen_renderer.IsActive())
+    if (amount && !load_screen_renderer.IsActive())
     {
         load_screen_renderer.Start(wait_user_input);
     }
@@ -189,7 +199,7 @@ bool CRenderDevice::BeforeFrame()
     {
         if (g_loading_events.front()())
             g_loading_events.pop_front();
-        pApp->LoadDraw();
+        g_pGamePersistent->LoadDraw();
         return false;
     }
 
@@ -286,128 +296,77 @@ void CRenderDevice::ProcessFrame()
         Sleep(1);
 }
 
-void CRenderDevice::message_loop()
+void CRenderDevice::ProcessEvent(const SDL_Event& event)
 {
-    while (!SDL_QuitRequested()) // SDL_PumpEvents is here
+    switch (event.type)
     {
-        bool canCallActivate = false;
-        bool shouldActivate = false;
-
-        SDL_Event events[MAX_WINDOW_EVENTS];
-        const int count = SDL_PeepEvents(events, MAX_WINDOW_EVENTS,
-            SDL_GETEVENT, SDL_WINDOWEVENT, SDL_WINDOWEVENT);
-
-        for (int i = 0; i < count; ++i)
-        {
-            const SDL_Event event = events[i];
-
-            switch (event.type)
-            {
 #if SDL_VERSION_ATLEAST(2, 0, 9)
-            case SDL_DISPLAYEVENT:
-            {
-                switch (event.display.type)
-                {
-                case SDL_DISPLAYEVENT_ORIENTATION:
+    case SDL_DISPLAYEVENT:
+    {
+        switch (event.display.type)
+        {
+        case SDL_DISPLAYEVENT_ORIENTATION:
 #if SDL_VERSION_ATLEAST(2, 0, 14)
-                case SDL_DISPLAYEVENT_CONNECTED:
-                case SDL_DISPLAYEVENT_DISCONNECTED:
+        case SDL_DISPLAYEVENT_CONNECTED:
+        case SDL_DISPLAYEVENT_DISCONNECTED:
 #endif
-                    CleanupVideoModes();
-                    FillVideoModes();
+            CleanupVideoModes();
+            FillVideoModes();
 #if SDL_VERSION_ATLEAST(2, 0, 14)
-                    if (event.display.display == psDeviceMode.Monitor && event.display.type != SDL_DISPLAYEVENT_CONNECTED)
+            if (event.display.display == psDeviceMode.Monitor && event.display.type != SDL_DISPLAYEVENT_CONNECTED)
 #else
                     if (event.display.display == psDeviceMode.Monitor)
 #endif
-                        Reset();
-                    else
-                        UpdateWindowProps();
-                    break;
-                } // switch (event.display.type)
-                break;
-            }
+                Reset();
+            else
+                UpdateWindowProps();
+            break;
+        } // switch (event.display.type)
+        break;
+    }
 #endif
-            case SDL_WINDOWEVENT:
-            {
-                switch (event.window.event)
-                {
-                case SDL_WINDOWEVENT_MOVED:
-                {
-                    UpdateWindowRects();
+    case SDL_WINDOWEVENT:
+    {
+        switch (event.window.event)
+        {
+        case SDL_WINDOWEVENT_MOVED:
+        {
+            UpdateWindowRects();
 #if !SDL_VERSION_ATLEAST(2, 0, 18) // without SDL_WINDOWEVENT_DISPLAY_CHANGED, let's detect monitor change ourselves
                     const int display = SDL_GetWindowDisplayIndex(m_sdlWnd);
                     if (display != -1)
                         psDeviceMode.Monitor = display;
 #endif
-                    break;
-                }
-
-#if SDL_VERSION_ATLEAST(2, 0, 18)
-                case SDL_WINDOWEVENT_DISPLAY_CHANGED:
-                    psDeviceMode.Monitor = event.window.data1;
-                    break;
-#endif
-
-                case SDL_WINDOWEVENT_SIZE_CHANGED:
-                {
-                    if (psDeviceMode.WindowStyle != rsFullscreen)
-                    {
-                        if (static_cast<int>(psDeviceMode.Width) == event.window.data1 &&
-                            static_cast<int>(psDeviceMode.Height) == event.window.data2)
-                            break; // we don't need to reset device if resolution wasn't really changed
-
-                        psDeviceMode.Width = event.window.data1;
-                        psDeviceMode.Height = event.window.data2;
-
-                        Reset();
-                    }
-                    else
-                        UpdateWindowRects();
-
-                    break;
-                }
-
-                case SDL_WINDOWEVENT_SHOWN:
-                case SDL_WINDOWEVENT_FOCUS_GAINED:
-                case SDL_WINDOWEVENT_RESTORED:
-                case SDL_WINDOWEVENT_MAXIMIZED:
-                    canCallActivate = true;
-                    shouldActivate = true;
-                    break;
-
-                case SDL_WINDOWEVENT_HIDDEN:
-                case SDL_WINDOWEVENT_FOCUS_LOST:
-                case SDL_WINDOWEVENT_MINIMIZED:
-                    canCallActivate = true;
-                    shouldActivate = false;
-                    break;
-
-                case SDL_WINDOWEVENT_ENTER:
-                    SDL_ShowCursor(SDL_FALSE);
-                    break;
-
-                case SDL_WINDOWEVENT_LEAVE:
-                    SDL_ShowCursor(SDL_TRUE);
-                    break;
-
-                case SDL_WINDOWEVENT_CLOSE:
-                    Engine.Event.Defer("KERNEL:disconnect");
-                    Engine.Event.Defer("KERNEL:quit");
-                    break;
-                } // switch (event.window.event)
-            }
-            } // switch (event.type)
-        } // for (int i = 0; i < count; ++i)
-
-        // Workaround for screen blinking when there's too much timeouts
-        if (canCallActivate)
-        {
-            OnWindowActivate(shouldActivate);
+            break;
         }
 
-        ProcessFrame();
+#if SDL_VERSION_ATLEAST(2, 0, 18)
+        case SDL_WINDOWEVENT_DISPLAY_CHANGED:
+            psDeviceMode.Monitor = event.window.data1;
+            break;
+#endif
+
+        case SDL_WINDOWEVENT_SIZE_CHANGED:
+        {
+            if (psDeviceMode.WindowStyle != rsFullscreen)
+            {
+                if (static_cast<int>(psDeviceMode.Width) == event.window.data1 &&
+                    static_cast<int>(psDeviceMode.Height) == event.window.data2)
+                    break; // we don't need to reset device if resolution wasn't really changed
+
+                psDeviceMode.Width = event.window.data1;
+                psDeviceMode.Height = event.window.data2;
+
+                Reset();
+            }
+            else
+                UpdateWindowRects();
+
+            break;
+        }
+        } // switch (event.window.event)
     }
+    } // switch (event.type)
 }
 
 void CRenderDevice::Run()
@@ -430,17 +389,16 @@ void CRenderDevice::Run()
     // Pre start
     seqAppStart.Process();
 
-    splash::hide();
     SDL_HideWindow(m_sdlWnd); // workaround for SDL bug
     UpdateWindowProps();
     SDL_ShowWindow(m_sdlWnd);
     SDL_RaiseWindow(m_sdlWnd);
     if (GEnv.isDedicatedServer || strstr(Core.Params, "-center_screen"))
         SDL_SetWindowPosition(m_sdlWnd, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+}
 
-    // Message cycle
-    message_loop();
-
+void CRenderDevice::Shutdown()
+{
     // Stop Balance-Thread
     mt_bMustExit = true;
 
@@ -502,7 +460,6 @@ void CRenderDevice::FrameMove()
 }
 
 ENGINE_API bool bShowPauseString = true;
-#include "IGame_Persistent.h"
 
 void CRenderDevice::Pause(bool bOn, bool bTimer, bool bSound, [[maybe_unused]] pcstr reason)
 {
@@ -627,8 +584,8 @@ void CLoadScreenRenderer::Start(bool b_user_input)
     m_registered = true;
     m_need_user_input = b_user_input;
 
-    pApp->ShowLoadingScreen(true);
-    pApp->LoadBegin();
+    g_pGamePersistent->ShowLoadingScreen(true);
+    g_pGamePersistent->LoadBegin();
 }
 
 void CLoadScreenRenderer::Stop()
@@ -641,16 +598,16 @@ void CLoadScreenRenderer::Stop()
     m_registered = false;
     m_need_user_input = false;
 
-    pApp->ShowLoadingScreen(false);
-    pApp->LoadEnd();
+    g_pGamePersistent->ShowLoadingScreen(false);
+    g_pGamePersistent->LoadEnd();
 }
 
 void CLoadScreenRenderer::OnFrame()
 {
-    pApp->LoadStage(false);
+    g_pGamePersistent->LoadStage(false);
 }
 
 void CLoadScreenRenderer::OnRender()
 {
-    pApp->load_draw_internal();
+    g_pGamePersistent->load_draw_internal();
 }

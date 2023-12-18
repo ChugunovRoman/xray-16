@@ -12,7 +12,7 @@ class CUISequencer;
 class UICore;
 class AnselManager;
 
-class CGamePersistent : public IGame_Persistent, public IEventReceiver
+class CGamePersistent : public IGame_Persistent
 {
 protected:
     using inherited = IGame_Persistent;
@@ -82,15 +82,11 @@ public:
 
     virtual void UpdateGameType();
 
-    virtual void RegisterModel(IRenderVisual* V);
-    virtual float MtlTransparent(u32 mtl_idx);
     virtual void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert) override;
 
     virtual bool OnRenderPPUI_query();
     virtual void OnRenderPPUI_main();
     virtual void OnRenderPPUI_PP();
-    virtual void LoadTitle(bool change_tip = false, shared_str map_name = "");
-    void SetLoadStageTitle(pcstr ls_title = nullptr) override;
 
     virtual bool CanBePaused();
 

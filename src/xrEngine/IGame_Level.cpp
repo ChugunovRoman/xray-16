@@ -2,8 +2,6 @@
 #include "IGame_Level.h"
 #include "IGame_Persistent.h"
 
-#include "x_ray.h"
-#include "std_classes.h"
 #include "CustomHUD.h"
 #include "Render.h"
 #include "GameFont.h"
@@ -11,7 +9,6 @@
 #include "CameraManager.h"
 #include "xr_object.h"
 #include "Feel_Sound.h"
-#include "xrServerEntities/smart_cast.h"
 
 ENGINE_API IGame_Level* g_pGameLevel = NULL;
 extern bool g_bLoaded;
@@ -92,15 +89,14 @@ static bool deserialize_callback(IReader& reader)
 bool IGame_Level::Load(u32 dwNum)
 {
     // Initialize level data
-    pApp->Level_Set(dwNum);
+    g_pGamePersistent->Level_Set(dwNum);
     string_path temp;
     if (!FS.exist(temp, "$level$", "level.ltx"))
         xrDebug::Fatal(DEBUG_INFO, "Can't find level configuration file '%s'.", temp);
     pLevel = xr_new<CInifile>(temp);
 
     // Open
-    g_pGamePersistent->SetLoadStageTitle("st_opening_stream");
-    g_pGamePersistent->LoadTitle();
+    g_pGamePersistent->LoadTitle("st_opening_stream");
     IReader* LL_Stream = FS.r_open("$level$", "level");
     IReader& fs = *LL_Stream;
 
@@ -110,8 +106,7 @@ bool IGame_Level::Load(u32 dwNum)
     R_ASSERT2(XRCL_PRODUCTION_VERSION == H.XRLC_version, "Incompatible level version.");
 
     // CForms
-    g_pGamePersistent->SetLoadStageTitle("st_loading_cform");
-    g_pGamePersistent->LoadTitle();
+    g_pGamePersistent->LoadTitle("st_loading_cform");
 
     ObjectSpace.Load(build_callback, serialize_callback, deserialize_callback);
     g_pGamePersistent->SpatialSpace.initialize(ObjectSpace.GetBoundingVolume());
@@ -123,8 +118,6 @@ bool IGame_Level::Load(u32 dwNum)
         if (g_pGameLevel && S && S->feedback)
             g_pGameLevel->SoundEvent_Register(S, range);
     });
-
-    pApp->LoadSwitch();
 
     // Render-level Load
     GEnv.Render->level_Load(LL_Stream);

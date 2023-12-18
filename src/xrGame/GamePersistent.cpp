@@ -2,7 +2,7 @@
 #include "GamePersistent.h"
 #include "xrCore/FMesh.hpp"
 #include "xrEngine/XR_IOConsole.h"
-#include "xrEngine/GameMtlLib.h"
+#include "xrMaterialSystem/GameMtlLib.h"
 #include "Include/xrRender/Kinematics.h"
 #include "xrEngine/profiler.h"
 #include "MainMenu.h"
@@ -22,7 +22,6 @@
 
 #include "xrEngine/xrSASH.h"
 #include "ai_space.h"
-#include "xrScriptEngine/script_engine.hpp"
 
 #include "holder_custom.h"
 #include "game_cl_base.h"
@@ -32,7 +31,6 @@
 #include "xrEngine/GameFont.h"
 #include "xrEngine/PerformanceAlert.hpp"
 #include "xrEngine/xr_input.h"
-#include "xrEngine/x_ray.h"
 #include "ui/UILoadingScreen.h"
 #include "AnselManager.h"
 #include "xrCore/Threading/TaskManager.hpp"
@@ -110,38 +108,6 @@ void CGamePersistent::PreStart(LPCSTR op)
     inherited::PreStart(op);
 }
 
-void CGamePersistent::RegisterModel(IRenderVisual* V)
-{
-    // Check types
-    switch (V->getType())
-    {
-    case MT_SKELETON_ANIM:
-    case MT_SKELETON_RIGID:
-    {
-        u16 def_idx = GMLib.GetMaterialIdx("default_object");
-        R_ASSERT2(GMLib.GetMaterialByIdx(def_idx)->Flags.is(SGameMtl::flDynamic), "'default_object' - must be dynamic");
-        IKinematics* K = smart_cast<IKinematics*>(V);
-        VERIFY(K);
-        const u16 cnt = K->LL_BoneCount();
-        for (u16 k = 0; k < cnt; k++)
-        {
-            CBoneData& bd = K->LL_GetData(k);
-            if (*(bd.game_mtl_name))
-            {
-                bd.game_mtl_idx = GMLib.GetMaterialIdx(*bd.game_mtl_name);
-                R_ASSERT2(GMLib.GetMaterialByIdx(bd.game_mtl_idx)->Flags.is(SGameMtl::flDynamic),
-                    "Required dynamic game material");
-            }
-            else
-            {
-                bd.game_mtl_idx = def_idx;
-            }
-        }
-    }
-    break;
-    }
-}
-
 extern void clean_game_globals();
 extern void init_game_globals();
 
@@ -162,11 +128,12 @@ void CGamePersistent::OnAppStart()
 
     GEnv.UI = xr_new<UICore>();
     m_pMainMenu = xr_new<CMainMenu>();
+    if (GEnv.isDedicatedServer)
+        m_pLoadingScreen = xr_new<NullLoadingScreen>();
+    else
+        m_pLoadingScreen = xr_new<UILoadingScreen>();
 
     inherited::OnAppStart();
-
-    if (!GEnv.isDedicatedServer)
-        pApp->SetLoadingScreen(xr_new<UILoadingScreen>());
 
 #ifdef XR_PLATFORM_WINDOWS
     ansel = xr_new<AnselManager>();
@@ -184,7 +151,7 @@ void CGamePersistent::OnAppEnd()
     if (m_pMainMenu->IsActive())
         m_pMainMenu->Activate(false);
 
-    pApp->DestroyLoadingScreen();
+    xr_delete(m_pLoadingScreen);
     xr_delete(m_pMainMenu);
     xr_delete(GEnv.UI);
 
@@ -518,7 +485,7 @@ void CGamePersistent::OnFrame()
 {
     if (Device.dwPrecacheFrame == 5 && m_intro_event.empty())
     {
-        SetLoadStageTitle();
+        LoadTitle();
         m_intro_event.bind(this, &CGamePersistent::game_loaded);
     }
 
@@ -721,7 +688,7 @@ void CGamePersistent::OnEvent(EVENT E, u64 P1, u64 P2)
         xr_free(saved_name);
         return;
     }
-    else if (E == eDemoStart)
+    if (E == eDemoStart)
     {
         string256 cmd;
         pstr demo = pstr(P1);
@@ -729,7 +696,9 @@ void CGamePersistent::OnEvent(EVENT E, u64 P1, u64 P2)
         Console->Execute(cmd);
         xr_free(demo);
         uTime2Change = Device.TimerAsync() + u32(P2) * 1000;
+        return;
     }
+    inherited::OnEvent(E, P1, P2);
 }
 
 void CGamePersistent::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
@@ -749,10 +718,6 @@ void CGamePersistent::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
 #endif
 }
 
-float CGamePersistent::MtlTransparent(u32 mtl_idx)
-{
-    return GMLib.GetMaterialByIdx((u16)mtl_idx)->fVisTransparencyFactor;
-}
 static BOOL bRestorePause = FALSE;
 static BOOL bEntryFlag = TRUE;
 
@@ -806,77 +771,6 @@ void CGamePersistent::OnRenderPPUI_main()
 }
 
 void CGamePersistent::OnRenderPPUI_PP() { MainMenu()->OnRenderPPUI_PP(); }
-
-#include "xrEngine/x_ray.h"
-void CGamePersistent::LoadTitle(bool change_tip, shared_str map_name)
-{
-    pApp->LoadStage();
-    if (change_tip)
-    {
-        bool noTips = false;
-        string512 buff;
-        u8 tip_num;
-        luabind::functor<u8> m_functor;
-        const bool is_single = !xr_strcmp(m_game_params.m_game_type, "single");
-        if (is_single)
-        {
-            if (GEnv.ScriptEngine->functor("loadscreen.get_tip_number", m_functor))
-                tip_num = m_functor(map_name.c_str());
-            else
-                noTips = true;
-        }
-        else
-        {
-            if (GEnv.ScriptEngine->functor("loadscreen.get_mp_tip_number", m_functor))
-                tip_num = m_functor(map_name.c_str());
-            else
-                noTips = true;
-        }
-        if (noTips)
-        {
-            // CoC Tips
-            LPCSTR tip_header;
-            LPCSTR tip_title;
-            LPCSTR tip_text;
-
-            luabind::functor<LPCSTR> m_functor;
-
-            if (GEnv.ScriptEngine->functor("loadscreen.get_tip_header", m_functor))
-                tip_header = m_functor(map_name.c_str());
-            if (GEnv.ScriptEngine->functor("loadscreen.get_tip_title", m_functor))
-                tip_title = m_functor(map_name.c_str());
-            if (GEnv.ScriptEngine->functor("loadscreen.get_tip_text", m_functor))
-                tip_text = m_functor(map_name.c_str());
-
-            pApp->LoadTitleInt(tip_header, tip_title, tip_text);
-
-            return;
-        }
-
-        xr_sprintf(buff, "%s%d:", StringTable().translate("ls_tip_number").c_str(), tip_num);
-        shared_str tmp = buff;
-
-        if (is_single)
-            xr_sprintf(buff, "ls_tip_%d", tip_num);
-        else
-            xr_sprintf(buff, "ls_mp_tip_%d", tip_num);
-
-        pApp->LoadTitleInt(
-            StringTable().translate("ls_header").c_str(), tmp.c_str(), StringTable().translate(buff).c_str());
-    }
-}
-
-void CGamePersistent::SetLoadStageTitle(pcstr ls_title)
-{
-    string256 buff;
-    if (ls_title)
-    {
-        xr_sprintf(buff, "%s%s", StringTable().translate(ls_title).c_str(), "...");
-        pApp->SetLoadStageTitle(buff);
-    }
-    else
-        pApp->SetLoadStageTitle("");
-}
 
 bool CGamePersistent::CanBePaused() { return IsGameTypeSingle() || (g_pGameLevel && Level().IsDemoPlay()); }
 void CGamePersistent::SetPickableEffectorDOF(bool bSet)

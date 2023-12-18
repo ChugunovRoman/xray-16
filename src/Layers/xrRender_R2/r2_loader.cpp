@@ -4,7 +4,6 @@
 #include "Layers/xrRender/FBasicVisual.h"
 #include "xrCore/FMesh.hpp"
 #include "Common/LevelStructure.hpp"
-#include "xrEngine/x_ray.h"
 #include "xrEngine/IGame_Persistent.h"
 #include "xrCore/stream_reader.h"
 
@@ -19,13 +18,12 @@ void CRender::level_Load(IReader* fs)
     R_ASSERT(!b_loaded);
 
     // Begin
-    pApp->LoadBegin();
+    g_pGamePersistent->LoadBegin();
     Resources->DeferredLoad(TRUE);
     IReader* chunk;
 
     // Shaders
-    g_pGamePersistent->SetLoadStageTitle("st_loading_shaders");
-    g_pGamePersistent->LoadTitle();
+    g_pGamePersistent->LoadTitle("st_loading_shaders");
     {
         chunk = fs->open_chunk(fsL_SHADERS);
         R_ASSERT2(chunk, "Level doesn't builded correctly.");
@@ -54,8 +52,7 @@ void CRender::level_Load(IReader* fs)
     if (!GEnv.isDedicatedServer)
     {
         // VB,IB,SWI
-        g_pGamePersistent->SetLoadStageTitle("st_loading_geometry");
-        g_pGamePersistent->LoadTitle();
+        g_pGamePersistent->LoadTitle("st_loading_geometry");
         {
             CStreamReader* geom = FS.rs_open("$level$", "level.geom");
             R_ASSERT2(geom, "level.geom");
@@ -73,21 +70,18 @@ void CRender::level_Load(IReader* fs)
         }
 
         // Visuals
-        g_pGamePersistent->SetLoadStageTitle("st_loading_spatial_db");
-        g_pGamePersistent->LoadTitle();
+        g_pGamePersistent->LoadTitle("st_loading_spatial_db");
         chunk = fs->open_chunk(fsL_VISUALS);
         LoadVisuals(chunk);
         chunk->close();
 
         // Details
-        g_pGamePersistent->SetLoadStageTitle("st_loading_details");
-        g_pGamePersistent->LoadTitle();
+        g_pGamePersistent->LoadTitle("st_loading_details");
         Details->Load();
     }
 
     // Sectors
-    g_pGamePersistent->SetLoadStageTitle("st_loading_sectors_portals");
-    g_pGamePersistent->LoadTitle();
+    g_pGamePersistent->LoadTitle("st_loading_sectors_portals");
     LoadSectors(fs);
 
 #if defined(USE_DX11)
@@ -99,12 +93,11 @@ void CRender::level_Load(IReader* fs)
     HOM.Load();
 
     // Lights
-    g_pGamePersistent->SetLoadStageTitle("st_loading_lights");
-    g_pGamePersistent->LoadTitle();
+    g_pGamePersistent->LoadTitle("st_loading_lights");
     LoadLights(fs);
 
     // End
-    pApp->LoadEnd();
+    g_pGamePersistent->LoadEnd();
 
     // signal loaded
     b_loaded = TRUE;

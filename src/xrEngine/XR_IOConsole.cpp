@@ -8,7 +8,6 @@
 #include "IGame_Level.h"
 #include "IGame_Persistent.h"
 
-#include "x_ray.h"
 #include "xr_input.h"
 #include "xr_ioc_cmd.h"
 #include "GameFont.h"
@@ -124,6 +123,8 @@ void CConsole::Initialize()
     m_cur_cmd = NULL;
     reset_selected_tip();
 
+    eConsole = Engine.Event.Handler_Attach("KERNEL:console", this);
+
     // Commands
     extern void CCC_Register();
     CCC_Register();
@@ -142,6 +143,7 @@ void CConsole::Destroy()
     xr_delete(pFont);
     xr_delete(pFont2);
     Commands.clear();
+    Engine.Event.Handler_Detach(eConsole, this);
 }
 
 void CConsole::AddCommand(IConsole_Command* cc) { Commands[cc->Name()] = cc; }
@@ -162,6 +164,13 @@ void CConsole::OnFrame()
     {
         update_tips();
     }
+}
+
+void CConsole::OnEvent(EVENT E, u64 P1, u64 P2)
+{
+    pstr command = (pstr)P1;
+    ExecuteCommand(command, false);
+    xr_free(command);
 }
 
 void CConsole::OutFont(pcstr text, float& pos_y)

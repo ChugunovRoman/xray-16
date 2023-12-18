@@ -124,9 +124,6 @@
     <Filter Include="OpenAutomate">
       <UniqueIdentifier>{fe56b488-34f8-4632-9f5e-7805f761b338}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Game API\MaterialSystem">
-      <UniqueIdentifier>{59004dc1-5e77-4968-8321-6290b1ab9d3a}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Game API\Level">
       <UniqueIdentifier>{6e4e4f2d-02fc-4141-9ae3-ca29550fc16d}</UniqueIdentifier>
     </Filter>
@@ -345,9 +342,6 @@
     <ClInclude Include="xrSASH.h">
       <Filter>OpenAutomate</Filter>
     </ClInclude>
-    <ClInclude Include="GameMtlLib.h">
-      <Filter>Game API\MaterialSystem</Filter>
-    </ClInclude>
     <ClInclude Include="IGameFont.hpp">
       <Filter>Render\Font output</Filter>
     </ClInclude>
@@ -360,17 +354,11 @@
     <ClInclude Include="profiler_inline.h">
       <Filter>General\Profiler</Filter>
     </ClInclude>
-    <ClInclude Include="splash.h">
-      <Filter>General</Filter>
-    </ClInclude>
     <ClInclude Include="vis_object_data.h">
       <Filter>Render\Visibility</Filter>
     </ClInclude>
     <ClInclude Include="ShadersExternalData.h">
       <Filter>Render\Visibility</Filter>
-    </ClInclude>
-    <ClInclude Include="main.h">
-      <Filter>General</Filter>
     </ClInclude>
     <ClInclude Include="ILoadingScreen.h">
       <Filter>Interfaces\ILoadingScreen</Filter>
@@ -404,6 +392,9 @@
     </ClInclude>
     <ClInclude Include="editor_helper.h">
       <Filter>editor</Filter>
+    </ClInclude>
+    <ClInclude Include="AccessibilityShortcuts.hpp">
+      <Filter>General</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -584,12 +575,6 @@
     <ClCompile Include="xrSASH.cpp">
       <Filter>OpenAutomate</Filter>
     </ClCompile>
-    <ClCompile Include="GameMtlLib.cpp">
-      <Filter>Game API\MaterialSystem</Filter>
-    </ClCompile>
-    <ClCompile Include="GameMtlLib_Engine.cpp">
-      <Filter>Game API\MaterialSystem</Filter>
-    </ClCompile>
     <ClCompile Include="IGame_Level.cpp">
       <Filter>Game API\Level</Filter>
     </ClCompile>
@@ -601,9 +586,6 @@
     </ClCompile>
     <ClCompile Include="profiler.cpp">
       <Filter>General\Profiler</Filter>
-    </ClCompile>
-    <ClCompile Include="splash.cpp">
-      <Filter>General</Filter>
     </ClCompile>
     <ClCompile Include="device.cpp">
       <Filter>Render\Device</Filter>

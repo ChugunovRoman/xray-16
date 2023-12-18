@@ -11,10 +11,10 @@ inline SDL_Surface* XRSDL_SurfaceVerticalFlip(SDL_Surface*& source)
     const size_t pitch = source->pitch;
     const size_t size = pitch * source->h;
 
-    // XXX: get rid of xr_alloca usage, possible stack overflow
-    //auto original = new u8(size);
+    // XXX: don't alloc at all, flip surface in-place
+    auto ptr = static_cast<u8*>(xr_malloc(size));
+    auto original = ptr;
 
-    auto original = static_cast<u8*>(xr_alloca(size));
     CopyMemory(original, source->pixels, size);
 
     auto flipped = static_cast<u8*>(source->pixels) + size;
@@ -26,7 +26,7 @@ inline SDL_Surface* XRSDL_SurfaceVerticalFlip(SDL_Surface*& source)
         flipped -= pitch;
     }
 
-    //xr_delete(original);
+    xr_free(ptr);
     return source;
 }
 
@@ -36,7 +36,6 @@ inline HANDLE ExtractImage(int idx, UINT type)
     return LoadImage(GetModuleHandle(nullptr), MAKEINTRESOURCE(idx),
         type, 0, 0, LR_CREATEDIBSECTION);
 }
-
 
 inline SDL_Surface* CreateSurfaceFromBitmap(HBITMAP bitmapHandle)
 {
