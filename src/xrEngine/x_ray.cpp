@@ -246,6 +246,8 @@ CApplication::CApplication(pcstr commandLine)
     discord::Activity activity{};
     activity.SetType(discord::ActivityType::Playing);
     activity.SetApplicationId(DISCORD_APP_ID);
+    activity.SetState("Starting engine...");
+    activity.GetAssets().SetLargeImage("logo");
     if (m_discord_core)
     {
         std::lock_guard guard{ m_discord_lock };
@@ -322,7 +324,7 @@ CApplication::CApplication(pcstr commandLine)
     Console->OnDeviceInitialize();
 #ifdef USE_DISCORD_INTEGRATION
     const std::locale locale("");
-    activity.SetDetails(StringToUTF8(Core.ApplicationTitle, locale).c_str());
+    activity.SetState(StringToUTF8(Core.ApplicationTitle, locale).c_str());
     if (m_discord_core)
     {
         std::lock_guard guard{ m_discord_lock };
@@ -481,10 +483,7 @@ int CApplication::Run()
 
         Device.ProcessFrame();
 
-#ifdef USE_DISCORD_INTEGRATION
-        if (m_discord_core)
-            m_discord_core->RunCallbacks();
-#endif
+        UpdateDiscordStatus();
     } // while (!SDL_QuitRequested())
 
     Device.Shutdown();
@@ -549,15 +548,8 @@ void CApplication::SplashProc()
             const auto next = m_surfaces[m_current_surface_idx++]; // It's important to have postfix increment!
             SDL_BlitSurface(next, nullptr, current, nullptr);
             SDL_UpdateWindowSurface(m_window);
-
-#ifdef USE_DISCORD_INTEGRATION
-            if (m_discord_core)
-            {
-                std::lock_guard guard{ m_discord_lock };
-                m_discord_core->RunCallbacks();
-            }
-#endif
         }
+        UpdateDiscordStatus();
     }
 
     for (SDL_Surface* surface : m_surfaces)
@@ -581,4 +573,15 @@ void CApplication::HideSplash()
         SDL_PumpEvents();
         SwitchToThread();
     }
+}
+
+void CApplication::UpdateDiscordStatus()
+{
+#ifdef USE_DISCORD_INTEGRATION
+    if (!m_discord_core)
+        return;
+
+    std::lock_guard guard{ m_discord_lock };
+    m_discord_core->RunCallbacks();
+#endif
 }
