@@ -91,7 +91,7 @@ UpgradeStateResult Group::can_install(CInventoryItem& item, UpgradeBase& test_up
         else
         {
             Upgrade* U = smart_cast<Upgrade*>(*ib);
-            cant_install = !item.has_upgrade_group(U->parent_group_id());;
+            cant_install = !item.has_upgrade_group(U->parent_group_id());
         }
 
         if (cant_install)

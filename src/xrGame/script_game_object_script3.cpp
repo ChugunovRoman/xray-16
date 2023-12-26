@@ -232,6 +232,12 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
         .def("transfer_item", &CScriptGameObject::TransferItem)
         .def("transfer_money", &CScriptGameObject::TransferMoney)
         .def("give_money", &CScriptGameObject::GiveMoney)
+        .def("set_money", +[](CScriptGameObject* self, int money) {
+          CInventoryOwner* pOurOwner = smart_cast<CInventoryOwner*>(&self->object());
+          VERIFY(pOurOwner);
+
+          pOurOwner->set_money(money, true);
+        })
         .def("money", &CScriptGameObject::Money)
         .def("make_item_active", &CScriptGameObject::MakeItemActive)
 
