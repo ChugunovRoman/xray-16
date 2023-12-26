@@ -79,6 +79,7 @@ public:
     void reset_highlight(CInventoryItem& item);
 
 private:
+    void add_section_by_class(CInifile::Sect *const &section);
     void load_all_inventory();
     void load_all_properties();
 

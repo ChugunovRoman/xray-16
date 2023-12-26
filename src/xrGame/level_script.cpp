@@ -577,6 +577,19 @@ int g_get_general_goodwill_between(u16 from, u16 to)
     return presonal_goodwill + community_to_obj_goodwill + community_to_community_goodwill;
 }
 
+LUABIND_API luabind::object get_sections(lua_State* L, ESectionTypeName type) {
+  R_ASSERT2(type < ESectionTypeName::latest, make_string("Invalid type of getting section, passed type=[%d], latest type in enum=[%d]", type, ESectionTypeName::latest));
+
+  luabind::object result = luabind::newtable(L);
+  std::size_t index = 1;
+
+  for (const auto& name : Level().sections_map[type])
+  {
+      result[index++] = name;
+  }
+  return result;
+}
+
 u32 vertex_id(Fvector position)
 {
     return (ai().level_graph().vertex_id(position));
@@ -909,6 +922,37 @@ IC static void CLevel_Export(lua_State* luaState)
 
         def("community_relation", &g_get_community_relation), def("set_community_relation", &g_set_community_relation),
         def("get_general_goodwill_between", &g_get_general_goodwill_between)
+    ];
+
+    module(luaState, "sections_registry")
+    [
+        class_<EnumCallbackType<ESectionTypeName>>("section_type")
+        .enum_("section_types")
+        [
+            value("sctypAmmo", int(ESectionTypeName::ammo)),
+            value("sctypKnife", int(ESectionTypeName::knife)),
+            value("sctypPistol", int(ESectionTypeName::pistol)),
+            value("sctypAuto_pistol", int(ESectionTypeName::auto_pistol)),
+            value("sctypShotgun", int(ESectionTypeName::shotgun)),
+            value("sctypRifle", int(ESectionTypeName::rifle)),
+            value("sctypSniper_rifle", int(ESectionTypeName::sniper_rifle)),
+            value("sctypHeavy_rifle", int(ESectionTypeName::heavy_rifle)),
+            value("sctypOutfit", int(ESectionTypeName::outfit)),
+            value("sctypArtefact", int(ESectionTypeName::artefact)),
+            value("sctypItem_quest", int(ESectionTypeName::item_quest)),
+            value("sctypItem_misc", int(ESectionTypeName::item_misc)),
+            value("sctypItem_consumable", int(ESectionTypeName::item_consumable)),
+            value("sctypNpc", int(ESectionTypeName::npc)),
+            value("sctypMutant", int(ESectionTypeName::mutant)),
+            value("sctypSquad_npc", int(ESectionTypeName::squad_npc)),
+            value("sctypSquad_mutant", int(ESectionTypeName::squad_mutant)),
+            value("sctypVehicle", int(ESectionTypeName::vehicle)),
+            value("sctypPhysic", int(ESectionTypeName::physic)),
+            value("sctypModels", int(ESectionTypeName::models)),
+            value("sctypAnomaly", int(ESectionTypeName::anomaly)),
+            value("sctypPhantom", int(ESectionTypeName::phantom))
+        ],
+        def("get_sections", &get_sections)
     ];
 
     module(luaState, "game")
