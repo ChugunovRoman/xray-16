@@ -577,7 +577,7 @@ int g_get_general_goodwill_between(u16 from, u16 to)
     return presonal_goodwill + community_to_obj_goodwill + community_to_community_goodwill;
 }
 
-LUABIND_API luabind::object get_sections(lua_State* L, ESectionTypeName type) {
+luabind::object get_sections(lua_State* L, ESectionTypeName type) {
   R_ASSERT2(type < ESectionTypeName::latest, make_string("Invalid type of getting section, passed type=[%d], latest type in enum=[%d]", type, ESectionTypeName::latest));
 
   luabind::object result = luabind::newtable(L);
