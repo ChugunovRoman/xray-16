@@ -33,6 +33,8 @@ bool CUIXmlInit::InitTabButtonMP(CUIXml& xml_doc, LPCSTR path, int index, CUITab
     string256 buff;
     strconcat(sizeof(buff), buff, path, ":idention");
 
+    pWnd->SetWindowName(path);
+
     if (xml_doc.NavigateToNode(buff, index))
     {
         pWnd->m_text_ident_cursor_over.x = xml_doc.ReadAttribFlt(buff, index, "over_x", 0);
@@ -66,6 +68,7 @@ bool CUIXmlInit::InitDragDropListEx(CUIXml& xml_doc, LPCSTR path, int index, CUI
     InitAlignment(xml_doc, path, index, pos.x, pos.y, pWnd);
 
     pWnd->InitDragDropList(pos, size);
+    pWnd->SetWindowName(path);
 
     Ivector2 w_cell_sz, w_cells, w_cell_sp;
 
@@ -128,6 +131,7 @@ bool CUIXmlInit::InitHintWindow(CUIXml& xml_doc, LPCSTR path, int index, UIHintW
     InitWindow(xml_doc, path, index, pWnd);
     LPCSTR hint_text = xml_doc.Read(path, index, "no hint");
     pWnd->set_hint_text_ST(hint_text);
+    pWnd->SetWindowName(path);
 
     pWnd->set_hint_delay((u32)xml_doc.ReadAttribInt(path, index, "delay"));
     return true;

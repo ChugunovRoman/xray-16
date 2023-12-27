@@ -76,6 +76,7 @@ bool CUIXmlInitBase::InitWindow(CUIXml& xml_doc, LPCSTR path, int index, CUIWind
     size.y = xml_doc.ReadAttribFlt(path, index, "height");
     pWnd->SetWndPos(pos);
     pWnd->SetWndSize(size);
+    pWnd->SetWindowName(path);
 
     string512 buf;
     strconcat(buf, path, ":window_name");
@@ -229,6 +230,7 @@ bool CUIXmlInitBase::InitCheck(CUIXml& xml_doc, LPCSTR path, int index, CUICheck
     LPCSTR texture = xml_doc.Read(buf, index, "ui_checker");
 
     pWnd->InitCheckButton(pWnd->GetWndPos(), pWnd->GetWndSize(), texture);
+    pWnd->SetWindowName(path);
 
     u32 color;
     strconcat(sizeof(buf), buf, path, ":text_color:e");
@@ -271,6 +273,7 @@ bool CUIXmlInitBase::InitSpin(CUIXml& xml_doc, LPCSTR path, int index, CUICustom
 
     InitOptionsItem(xml_doc, path, index, pWnd);
     pWnd->InitSpin(pWnd->GetWndPos(), pWnd->GetWndSize());
+    pWnd->SetWindowName(path);
 
     string256 foo;
     u32 color;
@@ -364,6 +367,7 @@ bool CUIXmlInitBase::Init3tButton(CUIXml& xml_doc, LPCSTR path, int index, CUI3t
 
     InitWindow(xml_doc, path, index, pWnd);
     pWnd->InitButton(pWnd->GetWndPos(), pWnd->GetWndSize());
+    pWnd->SetWindowName(path);
 
     string256 buf;
     InitText(xml_doc, strconcat(sizeof(buf), buf, path, ":text"), index, pWnd);
@@ -494,6 +498,7 @@ bool CUIXmlInitBase::InitProgressBar(CUIXml& xml_doc, LPCSTR path, int index, CU
     }
 
     pWnd->InitProgressBar(pos, size, mode);
+    pWnd->SetWindowName(path);
 
     float min = xml_doc.ReadAttribFlt(path, index, "min");
     float max = xml_doc.ReadAttribFlt(path, index, "max");
@@ -579,6 +584,8 @@ bool CUIXmlInitBase::InitProgressShape(CUIXml& xml_doc, LPCSTR path, int index, 
     pWnd->m_blend = (xml_doc.ReadAttribInt(path, index, "blend", 1) == 1) ? true : false;
     pWnd->m_angle_begin = xml_doc.ReadAttribFlt(path, index, "begin_angle", 0.0f);
     pWnd->m_angle_end = xml_doc.ReadAttribFlt(path, index, "end_angle", PI_MUL_2);
+
+    pWnd->SetWindowName(path);
 
     return true;
 }
@@ -783,6 +790,8 @@ bool CUIXmlInitBase::InitTabControl(CUIXml& xml_doc, LPCSTR path,
         pWnd->AddItem(newButton);
     }
 
+    pWnd->SetWindowName(path);
+
     xml_doc.SetLocalRoot(xml_doc.GetRoot());
 
     return status;
@@ -827,6 +836,7 @@ bool CUIXmlInitBase::InitFrameLine(CUIXml& xml_doc, LPCSTR path, int index, CUIF
 
     u32 color = GetColor(xml_doc, buf, index, 0xff);
     pWnd->SetTextureColor(color);
+    pWnd->SetWindowName(path);
 
     InitWindow(xml_doc, path, index, pWnd);
 
@@ -848,6 +858,7 @@ bool CUIXmlInitBase::InitCustomEdit(CUIXml& xml_doc, LPCSTR path, int index, CUI
         return false;
 
     pWnd->InitCustomEdit(pWnd->GetWndPos(), pWnd->GetWndSize());
+    pWnd->SetWindowName(path);
 
     string256 foo;
     u32 color;
@@ -1180,6 +1191,7 @@ bool CUIXmlInitBase::InitScrollView(CUIXml& xml_doc, LPCSTR path, int index, CUI
     pWnd->SetScrollBarProfile(xml_doc.ReadAttrib(path, index, "scroll_profile", "default"));
 
     pWnd->InitScrollView();
+    pWnd->SetWindowName(path);
 
     bool bVertFlip = (1 == xml_doc.ReadAttribInt(path, index, "flip_vert", 0));
     pWnd->SetVertFlip(bVertFlip);
@@ -1247,6 +1259,7 @@ bool CUIXmlInitBase::InitListWnd(CUIXml& xml_doc, pcstr path, int index, CUIList
     pWnd->SetScrollBarProfile(xml_doc.ReadAttrib(path, index, "scroll_profile", "default"));
     pWnd->InitListWnd(pos, size, item_height);
     pWnd->EnableActiveBackground(!!active_background);
+    pWnd->SetWindowName(path);
 
     if (xml_doc.ReadAttribInt(path, index, "always_show_scroll"))
     {
@@ -1281,6 +1294,7 @@ bool CUIXmlInitBase::InitListBox(CUIXml& xml_doc, LPCSTR path, int index, CUILis
 
     pWnd->SetTextColor(t_color);
     pWnd->SetFont(pFnt);
+    pWnd->SetWindowName(path);
 
     float h = xml_doc.ReadAttribFlt(path, index, "item_height", 20.0f);
     pWnd->SetItemHeight(h);
@@ -1296,6 +1310,7 @@ bool CUIXmlInitBase::InitTrackBar(CUIXml& xml_doc, LPCSTR path, int index, CUITr
     int is_integer = xml_doc.ReadAttribInt(path, index, "is_integer", 0);
     pWnd->SetType(!is_integer);
     InitOptionsItem(xml_doc, path, 0, pWnd);
+    pWnd->SetWindowName(path);
 
     int invert = xml_doc.ReadAttribInt(path, index, "invert", 0);
     pWnd->SetInvert(!!invert);
@@ -1348,6 +1363,7 @@ bool CUIXmlInitBase::InitComboBox(CUIXml& xml_doc, LPCSTR path, int index, CUICo
     InitWindow(xml_doc, path, index, pWnd);
     pWnd->InitComboBox(pWnd->GetWndPos(), pWnd->GetWidth());
     InitOptionsItem(xml_doc, path, index, pWnd);
+    pWnd->SetWindowName(path);
 
     bool b = (1 == xml_doc.ReadAttribInt(path, index, "always_show_scroll", 1));
 
