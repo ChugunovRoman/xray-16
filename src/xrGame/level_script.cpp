@@ -950,7 +950,8 @@ IC static void CLevel_Export(lua_State* luaState)
             value("sctypPhysic", int(ESectionTypeName::physic)),
             value("sctypModels", int(ESectionTypeName::models)),
             value("sctypAnomaly", int(ESectionTypeName::anomaly)),
-            value("sctypPhantom", int(ESectionTypeName::phantom))
+            value("sctypPhantom", int(ESectionTypeName::phantom)),
+            value("sctypBackpack", int(ESectionTypeName::backpack))
         ],
         def("get_sections", &get_sections)
     ];

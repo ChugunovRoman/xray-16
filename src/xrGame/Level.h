@@ -83,6 +83,7 @@ enum ESectionTypeName : u32
     models,
     anomaly,
     phantom,
+    backpack,
 
     latest,
 };

@@ -277,6 +277,11 @@ void Manager::add_section_by_class(CInifile::Sect *const &section)
   {
     Level().sections_map[ESectionTypeName::phantom].push_back(name.c_str());
   }
+  // backpack
+  if (exist && xr_strcmp(value, "EQ_BAKPK") == 0)
+  {
+    Level().sections_map[ESectionTypeName::backpack].push_back(name.c_str());
+  }
 }
 
 void Manager::load_all_inventory()
