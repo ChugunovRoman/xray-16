@@ -78,29 +78,21 @@ void CUIDebugger::OnFrame()
             ImGui::EndMenuBar();
         }
 
-        constexpr ImGuiTableFlags flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable |
-            ImGuiTableFlags_BordersInner | ImGuiTableFlags_SizingFixedFit |
-            ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY;
-
-        if (ImGui::BeginTable("UI tree and properties", 2, flags))
+        ImGui::BeginChild("UI tree", ImVec2(ImGui::GetWindowWidth() - 400, ImGui::GetContentRegionAvail().y), true, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        ImGui::Text("UI tree");
+        for (const auto& window : m_root_windows)
         {
-            ImGui::TableSetupColumn("Tree");
-            ImGui::TableSetupColumn("Selected element properties", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableHeadersRow();
-
-            ImGui::TableNextColumn();
-            for (const auto& window : m_root_windows)
-            {
-                window->FillDebugTree(m_state);
-                if (m_state.selected != m_state.newSelected)
-                    m_state.selected = m_state.newSelected;
-            }
-            ImGui::TableNextColumn();
-            if (m_state.selected)
-                m_state.selected->FillDebugInfo();
-
-            ImGui::EndTable();
+            window->FillDebugTree(m_state);
+            if (m_state.selected != m_state.newSelected)
+                m_state.selected = m_state.newSelected;
         }
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("UI properties", ImVec2(0, ImGui::GetContentRegionAvail().y), true, ImGuiWindowFlags_AlwaysAutoResize);
+        ImGui::Text("UI properties");
+        if (m_state.selected)
+            m_state.selected->FillDebugInfo();
+        ImGui::EndChild();
     }
     ImGui::End();
 #endif
