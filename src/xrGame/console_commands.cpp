@@ -1456,6 +1456,16 @@ public:
 
 #include "GamePersistent.h"
 
+struct CCC_LuaHelp : public IConsole_Command
+{
+	CCC_LuaHelp(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+
+	virtual void Execute(LPCSTR args)
+	{
+    GEnv.ScriptEngine->dumpScriptBindings();
+	}
+};
+
 class CCC_MainMenu : public IConsole_Command
 {
 public:
@@ -2198,6 +2208,8 @@ void CCC_RegisterCommands()
     CMD1(CCC_ScriptCommand, "run_string");
     CMD1(CCC_TimeFactor, "time_factor");
 #endif // MASTER_GOLD
+
+    CMD1(CCC_LuaHelp, "dump_lua");
 
     CMD3(CCC_Mask, "g_autopickup", &psActorFlags, AF_AUTOPICKUP);
     CMD3(CCC_Mask, "g_dynamic_music", &psActorFlags, AF_DYNAMIC_MUSIC);

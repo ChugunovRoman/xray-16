@@ -106,7 +106,7 @@ void BindingsDumper::PrintFunction(SignatureFormatter formatter, const void* fco
         }
         lua_pop(ls, 1); // pop upvalue
     }
-    if (cfunc && !done && hasupvalue) // property
+    if (cfunc && !done && hasupvalue && luabindFunc) // property
     {
         const char* propName = lua_tostring(ls, -2);
         function_object* getter = get_upvalue_function(ls, 1);
@@ -350,12 +350,18 @@ void BindingsDumper::PrintNamespace(luabind::object& namesp)
         proxy.push(ls);
         object innerNamesp(from_stack(ls, -1));
         auto namespaceName = lua_tostring(ls, -2);
-        PrintfIndented("namespace %s\n", namespaceName);
-        PrintIndented("{\n");
-        shiftLevel++;
-        PrintNamespace(innerNamesp);
-        shiftLevel--;
-        PrintIndented("}\n");
+        if (xr_strcmp(namespaceName, "_G") != 0 && xr_strcmp(namespaceName, "string") != 0
+            && xr_strcmp(namespaceName, "bit") != 0 && xr_strcmp(namespaceName, "table") != 0
+            && xr_strcmp(namespaceName, "package") != 0 && xr_strcmp(namespaceName, "loaders") != 0
+            && xr_strcmp(namespaceName, "io") != 0 && xr_strcmp(namespaceName, "math") != 0)
+        {
+            PrintfIndented("namespace %s\n", namespaceName);
+            PrintIndented("{\n");
+            shiftLevel++;
+            PrintNamespace(innerNamesp);
+            shiftLevel--;
+            PrintIndented("}\n");
+        }
         lua_pop(ls, 1);
     }
 }

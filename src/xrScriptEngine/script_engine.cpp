@@ -926,22 +926,6 @@ void CScriptEngine::init(ExporterFunc exporterFunc, bool loadGlobalNamespace)
     setup_callbacks();
     if (exporterFunc)
         exporterFunc(lua());
-    if (std::strstr(Core.Params, "-dump_bindings") && !bindingsDumped)
-    {
-        bindingsDumped = true;
-        static int dumpId = 1;
-        string_path filePath;
-        xr_sprintf(filePath, "ScriptBindings_%d.txt", dumpId++);
-        FS.update_path(filePath, "$app_data_root$", filePath);
-        IWriter* writer = FS.w_open(filePath);
-        BindingsDumper dumper;
-        BindingsDumper::Options options = {};
-        options.ShiftWidth = 4;
-        options.IgnoreDerived = true;
-        options.StripThis = true;
-        dumper.Dump(lua(), writer, options);
-        FS.w_close(writer);
-    }
 
     luajit::open_lib(lua(), "", luaopen_base);
     luajit::open_lib(lua(), LUA_LOADLIBNAME, luaopen_package);
@@ -1012,6 +996,28 @@ void CScriptEngine::init(ExporterFunc exporterFunc, bool loadGlobalNamespace)
     }
     m_stack_level = lua_gettop(lua());
     setvbuf(stderr, g_ca_stdout, _IOFBF, sizeof(g_ca_stdout));
+
+    if (std::strstr(Core.Params, "-dump_bindings") && !bindingsDumped)
+    {
+        bindingsDumped = true;
+        dumpScriptBindings();
+    }
+}
+
+void CScriptEngine::dumpScriptBindings()
+{
+    static int dumpId = 1;
+    string_path filePath;
+    xr_sprintf(filePath, "ScriptBindings_%d.txt", dumpId++);
+    FS.update_path(filePath, "$app_data_root$", filePath);
+    IWriter* writer = FS.w_open(filePath);
+    BindingsDumper dumper;
+    BindingsDumper::Options options = {};
+    options.ShiftWidth = 4;
+    options.IgnoreDerived = true;
+    options.StripThis = true;
+    dumper.Dump(lua(), writer, options);
+    FS.w_close(writer);
 }
 
 void CScriptEngine::remove_script_process(const ScriptProcessor& process_id)
