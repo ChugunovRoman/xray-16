@@ -18,7 +18,7 @@ void CBolt::Load(LPCSTR section)
 {
     inherited::Load(section);
 
-    m_count = pSettings->r_float(section, "count");
+    m_count = pSettings->r_u16(section, "count");
 
     if (pSettings->line_exist(section, "tip_text"))
         set_tip_text(pSettings->r_string(section, "tip_text"));
