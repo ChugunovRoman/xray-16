@@ -132,7 +132,8 @@ bool CUIGameSP::IR_UIOnKeyboardPress(int dik)
     {
     case kACTIVE_JOBS:
     {
-        if (!pActor->inventory_disabled())
+        CPda* pda = pInvOwner->GetPDA();
+        if (!pActor->inventory_disabled() && pda)
             ShowPdaMenu();
         break;
     }
