@@ -449,20 +449,22 @@ target_link_libraries(xrCore
 
     PRIVATE
     xrMiscMath
-    dl
     $<$<STREQUAL:${MEMORY_ALLOCATOR},mimalloc>:mimalloc>
     $<$<BOOL:${JPEG_FOUND}>:JPEG::JPEG>
     LZO::LZO
 )
 
+if (NOT CMAKE_SYSTEM_NAME STREQUAL "OpenBSD" AND NOT WIN32)
+    target_link_libraries(xrCore
+        PRIVATE
+        dl
+    )
+endif()
+
 target_compile_definitions(xrCore
     PRIVATE
     XRCORE_EXPORTS
     CI=$ENV{CI}
-    TRAVIS=$ENV{TRAVIS}
-    TRAVIS_BUILD_ID=$ENV{TRAVIS_BUILD_ID}
-    TRAVIS_BUILD_NUMBER=$ENV{TRAVIS_BUILD_NUMBER}
-    TRAVIS_REPO_SLUG=$ENV{TRAVIS_REPO_SLUG}
     GITHUB_ACTIONS=$ENV{GITHUB_ACTIONS}
     GITHUB_RUN_ID=$ENV{GITHUB_RUN_ID}
     GITHUB_RUN_NUMBER=$ENV{GITHUB_RUN_NUMBER}
