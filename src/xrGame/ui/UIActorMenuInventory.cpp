@@ -44,6 +44,10 @@ void CUIActorMenu::InitInventoryMode()
     m_pLists[eInventoryOutfitList]->Show(true);
     ShowIfExist(m_pLists[eInventoryHelmetList], true);
     ShowIfExist(m_pLists[eInventoryDetectorList], true);
+    ShowIfExist(m_pLists[eInventoryBinocularList], true);
+    ShowIfExist(m_pLists[eInventoryGrenadeList], true);
+    ShowIfExist(m_pLists[eInventoryBoltList], true);
+    ShowIfExist(m_pLists[eInventoryPdaList], true);
     ShowIfExist(m_pLists[eInventoryBackpackList], true);
     ShowIfExist(m_pLists[eInventoryKnifeList], true);
     m_pLists[eInventoryPistolList]->Show(true);
@@ -245,6 +249,7 @@ void CUIActorMenu::OnInventoryAction(PIItem pItem, u16 action_type)
     {
         m_pLists[eInventoryBeltList], m_pLists[eInventoryKnifeList], m_pLists[eInventoryPistolList], m_pLists[eInventoryAutomaticList],
         m_pLists[eInventoryBackpackList], m_pLists[eInventoryOutfitList], m_pLists[eInventoryHelmetList], m_pLists[eInventoryDetectorList],
+        m_pLists[eInventoryBinocularList], m_pLists[eInventoryGrenadeList], m_pLists[eInventoryBoltList], m_pLists[eInventoryPdaList],
         m_pLists[eInventoryBagList], m_pLists[eTradeActorBagList], m_pLists[eTradeActorList]
     };
 
@@ -257,11 +262,6 @@ void CUIActorMenu::OnInventoryAction(PIItem pItem, u16 action_type)
 
         CUIDragDropListEx* lst_to_add = nullptr;
         SInvItemPlace pl = pItem->m_ItemCurrPlace;
-        if (pItem->BaseSlot() == GRENADE_SLOT)
-        {
-            pl.type = eItemPlaceRuck;
-            pl.slot_id = GRENADE_SLOT;
-        }
 #ifndef MASTER_GOLD
         Msg("item place [%d]", pl);
 #endif // #ifndef MASTER_GOLD
@@ -391,9 +391,7 @@ void CUIActorMenu::InitCellForSlot(u16 slot_idx)
     //VERIFY(KNIFE_SLOT <= slot_idx && slot_idx <= LAST_SLOT);
     PIItem item = m_pActorInvOwner->inventory().ItemFromSlot(slot_idx);
     if (!item)
-    {
         return;
-    }
 
     CUIDragDropListEx* curr_list = GetSlotList(slot_idx);
     if (!curr_list)
@@ -459,6 +457,8 @@ void CUIActorMenu::InitInventoryContents(CUIDragDropListEx* pBagList, bool onlyB
     //Alundaio
     if (!m_pActorInvOwner->inventory().SlotIsPersistent(KNIFE_SLOT))
         InitCellForSlot(KNIFE_SLOT);
+    if (!m_pActorInvOwner->inventory().SlotIsPersistent(BOLT_SLOT))
+        InitCellForSlot(BOLT_SLOT);
     if (!m_pActorInvOwner->inventory().SlotIsPersistent(BINOCULAR_SLOT))
         InitCellForSlot(BINOCULAR_SLOT);
     if (!m_pActorInvOwner->inventory().SlotIsPersistent(ARTEFACT_SLOT))
@@ -491,14 +491,6 @@ bool CUIActorMenu::TryActiveSlot(CUICellItem* itm)
 
     if (slot == GRENADE_SLOT)
     {
-        PIItem prev_iitem = m_pActorInvOwner->inventory().ItemFromSlot(slot);
-        if (prev_iitem && (prev_iitem->object().cNameSect() != iitem->object().cNameSect()))
-        {
-            SendEvent_Item2Ruck(prev_iitem, m_pActorInvOwner->object_id());
-            SendEvent_Item2Slot(iitem, m_pActorInvOwner->object_id(), slot);
-        }
-        SendEvent_ActivateSlot(slot, m_pActorInvOwner->object_id());
-        return true;
     }
     if (slot == DETECTOR_SLOT)
     {
@@ -574,7 +566,7 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
         if (!force_place || slot_id == NO_ACTIVE_SLOT)
             return false;
 
-        if (m_pActorInvOwner->inventory().SlotIsPersistent(slot_id) && slot_id != DETECTOR_SLOT)
+        if (m_pActorInvOwner->inventory().SlotIsPersistent(slot_id) && (slot_id != DETECTOR_SLOT && slot_id != BINOCULAR_SLOT))
             return false;
 
         if (slot_id == KNIFE_SLOT && m_pActorInvOwner->inventory().CanPutInSlot(iitem, KNIFE_SLOT))
@@ -761,12 +753,16 @@ CUIDragDropListEx* CUIActorMenu::GetSlotList(u16 slot_idx)
 
     case DETECTOR_SLOT: return m_pLists[eInventoryDetectorList]; break;
 
-    case PDA_SLOT:
-    case TORCH_SLOT:
-    case ARTEFACT_SLOT:
-    case BINOCULAR_SLOT:
+    case PDA_SLOT: return m_pLists[eInventoryPdaList]; break;
 
-    case GRENADE_SLOT: // fake
+    case BOLT_SLOT: return m_pLists[eInventoryBoltList]; break;
+
+    case BINOCULAR_SLOT: return m_pLists[eInventoryBinocularList]; break;
+
+    case GRENADE_SLOT: return m_pLists[eInventoryGrenadeList]; break;
+
+    case TORCH_SLOT:
+    case ARTEFACT_SLOT: // fake
         if (m_currMenuMode == mmTrade)
         {
             return m_pLists[eTradeActorBagList];

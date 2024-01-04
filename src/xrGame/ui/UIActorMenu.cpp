@@ -11,6 +11,10 @@
 #include "UIInventoryUtilities.h"
 #include "game_cl_base.h"
 #include "Weapon.h"
+#include "PDA.h"
+#include "Bolt.h"
+#include "Grenade.h"
+#include "WeaponBinoculars.h"
 #include "WeaponMagazinedWGrenade.h"
 #include "WeaponAmmo.h"
 #include "Silencer.h"
@@ -330,6 +334,14 @@ EDDListType CUIActorMenu::GetListType(CUIDragDropListEx* l)
         return iActorSlot;
     if (l == m_pLists[eInventoryDetectorList] && m_pLists[eInventoryDetectorList] != nullptr)
         return iActorSlot;
+    if (l == m_pLists[eInventoryBinocularList] && m_pLists[eInventoryBinocularList] != nullptr)
+        return iActorSlot;
+    if (l == m_pLists[eInventoryGrenadeList] && m_pLists[eInventoryGrenadeList] != nullptr)
+        return iActorSlot;
+    if (l == m_pLists[eInventoryBoltList] && m_pLists[eInventoryBoltList] != nullptr)
+        return iActorSlot;
+    if (l == m_pLists[eInventoryPdaList] && m_pLists[eInventoryPdaList] != nullptr)
+        return iActorSlot;
 
     if (l == m_pLists[eTradeActorBagList])
         return iActorBag;
@@ -540,6 +552,14 @@ void CUIActorMenu::clear_highlight_lists()
         m_pLists[eInventoryHelmetList]->Highlight(false);
     if (m_pLists[eInventoryBackpackList])
         m_pLists[eInventoryBackpackList]->Highlight(false);
+    if (m_pLists[eInventoryBinocularList])
+        m_pLists[eInventoryBinocularList]->Highlight(false);
+    if (m_pLists[eInventoryGrenadeList])
+        m_pLists[eInventoryGrenadeList]->Highlight(false);
+    if (m_pLists[eInventoryBoltList])
+        m_pLists[eInventoryBoltList]->Highlight(false);
+    if (m_pLists[eInventoryPdaList])
+        m_pLists[eInventoryPdaList]->Highlight(false);
     m_pLists[eInventoryOutfitList]->Highlight(false);
     if (m_pLists[eInventoryDetectorList])
         m_pLists[eInventoryDetectorList]->Highlight(false);
@@ -576,12 +596,16 @@ void CUIActorMenu::highlight_item_slot(CUICellItem* cell_item)
         return;
 
     CWeapon* weapon = smart_cast<CWeapon*>(item);
+    CGrenade* grenade = smart_cast<CGrenade*>(item);
     CHelmet* helmet = smart_cast<CHelmet*>(item);
     CBackpack* backpack = smart_cast<CBackpack*>(item);
     CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(item);
     CCustomDetector* detector = smart_cast<CCustomDetector*>(item);
     CEatableItem* eatable = smart_cast<CEatableItem*>(item);
     CArtefact* artefact = smart_cast<CArtefact*>(item);
+    CWeaponBinoculars* binoc = smart_cast<CWeaponBinoculars*>(item);
+    CPda* pda = smart_cast<CPda*>(item);
+    CBolt* bolt = smart_cast<CBolt*>(item);
 
     u16 slot_id = item->BaseSlot();
     if (weapon && slot_id == KNIFE_SLOT)
@@ -616,6 +640,31 @@ void CUIActorMenu::highlight_item_slot(CUICellItem* cell_item)
     {
         if (m_pLists[eInventoryDetectorList])
             m_pLists[eInventoryDetectorList]->Highlight(true);
+        return;
+    }
+    if (binoc && slot_id == BINOCULAR_SLOT)
+    {
+        if (m_pLists[eInventoryBinocularList])
+            m_pLists[eInventoryBinocularList]->Highlight(true);
+        return;
+    }
+    if (grenade && slot_id == GRENADE_SLOT)
+    {
+      
+        if (m_pLists[eInventoryGrenadeList])
+            m_pLists[eInventoryGrenadeList]->Highlight(true);
+        return;
+    }
+    if (bolt && slot_id == BOLT_SLOT)
+    {
+        if (m_pLists[eInventoryBoltList])
+            m_pLists[eInventoryBoltList]->Highlight(true);
+        return;
+    }
+    if (pda && slot_id == PDA_SLOT)
+    {
+        if (m_pLists[eInventoryPdaList])
+            m_pLists[eInventoryPdaList]->Highlight(true);
         return;
     }
     if (eatable)
@@ -885,6 +934,14 @@ void CUIActorMenu::ClearAllLists()
         m_pLists[eInventoryHelmetList]->ClearAll(true);
     if (m_pLists[eInventoryDetectorList])
         m_pLists[eInventoryDetectorList]->ClearAll(true);
+    if (m_pLists[eInventoryBinocularList])
+        m_pLists[eInventoryBinocularList]->ClearAll(true);
+    if (m_pLists[eInventoryGrenadeList])
+        m_pLists[eInventoryGrenadeList]->ClearAll(true);
+    if (m_pLists[eInventoryBoltList])
+        m_pLists[eInventoryBoltList]->ClearAll(true);
+    if (m_pLists[eInventoryPdaList])
+        m_pLists[eInventoryPdaList]->ClearAll(true);
     if (m_pLists[eInventoryBackpackList])
         m_pLists[eInventoryBackpackList]->ClearAll(true);
     if (m_pLists[eInventoryKnifeList])

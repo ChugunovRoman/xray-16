@@ -216,9 +216,13 @@ void CUIActorMenu::InitializeUniversal(CUIXml& uiXml)
         { eSearchLootBagList,      "dragdrop_deadbody_bag",    nullptr,                nullptr,                   nullptr,            true },
         { eSearchLootActorBagList, nullptr,                    nullptr,                nullptr,                   nullptr,            false },
 
-        { eTrashList,              "dragdrop_trash",           nullptr,               nullptr,                   nullptr,            false },
+        { eTrashList,              "dragdrop_trash",           nullptr,                nullptr,                   nullptr,            false },
 
-        { eInventoryBackpackList,  "dragdrop_backpack",        nullptr,               "backpack_slot_highlight", nullptr,            false },
+        { eInventoryBackpackList,  "dragdrop_backpack",        nullptr,                "backpack_slot_highlight", nullptr,            false },
+        { eInventoryBinocularList, "dragdrop_binocular",       nullptr,                "binocular_slot_highlight",nullptr,            false },
+        { eInventoryGrenadeList,   "dragdrop_grenade",         nullptr,                "grenade_slot_highlight",  nullptr,            false },
+        { eInventoryBoltList,      "dragdrop_bolt",            nullptr,                "bolt_slot_highlight",     nullptr,            false },
+        { eInventoryPdaList,       "dragdrop_pda",             nullptr,                "pda_slot_highlight",      nullptr,            false },
     };
     static_assert(std::size(inventory_lists) == eListCount,
         "All lists should be listed in the tuple above.");
@@ -238,7 +242,7 @@ void CUIActorMenu::InitializeUniversal(CUIXml& uiXml)
         {
             m_pLists[id]->SetConditionIndicator(UIHelper::CreateProgressBar(uiXml, conditionIndicator, this, false));
         }
-        if (highlight)
+        if (highlight && uiXml.NavigateToNode(highlight))
         {
             const float dx = uiXml.ReadAttribFlt(highlight, 0, "dx", 0.0f);
             const float dy = uiXml.ReadAttribFlt(highlight, 0, "dy", 0.0f);
@@ -539,6 +543,11 @@ void CUIActorMenu::InitCallbacks()
 
     BindDragDropListEvents(m_pLists[eSearchLootBagList]);
     BindDragDropListEvents(m_pLists[eSearchLootActorBagList]);
+
+    BindDragDropListEvents(m_pLists[eInventoryBinocularList]);
+    BindDragDropListEvents(m_pLists[eInventoryGrenadeList]);
+    BindDragDropListEvents(m_pLists[eInventoryBoltList]);
+    BindDragDropListEvents(m_pLists[eInventoryPdaList]);
 
     if (m_pLists[eTrashList])
     {
