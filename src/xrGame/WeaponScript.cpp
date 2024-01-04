@@ -25,6 +25,8 @@
 #include "WeaponVal.h"
 #include "WeaponVintorez.h"
 #include "WeaponWalther.h"
+#include "Missile.h"
+#include "Bolt.h"
 #include "medkit.h"
 #include "antirad.h"
 #include "FoodItem.h"
@@ -74,6 +76,17 @@ SCRIPT_EXPORT(CWeaponBinoculars, (CWeaponMagazined),
     module(luaState)
     [
         class_<CWeaponBinoculars, CWeaponMagazined>("CWeaponBinoculars")
+            .def(constructor<>())
+    ];
+});
+
+SCRIPT_EXPORT(CBolt, (CGameObject),
+{
+    using namespace luabind;
+
+    module(luaState)
+    [
+        class_<CBolt, CGameObject>("CBolt")
             .def(constructor<>())
     ];
 });

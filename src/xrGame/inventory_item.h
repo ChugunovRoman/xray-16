@@ -97,6 +97,7 @@ public:
     virtual void Load(LPCSTR section);
     void ReloadNames();
 
+    LPCSTR TipItem();
     LPCSTR NameItem(); // remove <virtual> by sea
     LPCSTR NameShort();
     shared_str ItemDescription() { return m_Description; }
@@ -153,6 +154,7 @@ public:
     shared_str m_section_id;
     shared_str m_name;
     shared_str m_nameShort;
+    shared_str m_tip;
     shared_str m_nameComplex;
     bool m_highlight_equipped;
 

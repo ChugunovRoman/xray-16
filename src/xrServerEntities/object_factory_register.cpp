@@ -411,6 +411,7 @@ void CObjectFactory::register_classes()
     if (!GEnv.isDedicatedServer)
         return;
 
+    ADD(CBolt, CSE_ALifeItemBolt, TEXT2CLSID("S_BOLT"), "obj_bolt_s");
     ADD(CElectricBall, CSE_ALifeItemArtefact, TEXT2CLSID("SCRPTART"), "artefact_s");
     //	ADD(CtaGameArtefact			,CSE_ALifeItemArtefact			,TEXT2CLSID("AF_CTA")			,"ctaartefact_s");
     ADD(CTorch, CSE_ALifeItemTorch, TEXT2CLSID("TORCH_S"), "device_torch_s");

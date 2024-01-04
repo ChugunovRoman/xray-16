@@ -195,10 +195,10 @@ void CHUDTarget::Render()
                 }
                 else if (l_pI && our_inv_owner && PP.RQ.range < 2.0f * 2.0f)
                 {
-                    if (fuzzyShowInfo > 0.5f && l_pI->NameItem())
+                    if (fuzzyShowInfo > 0.5f && l_pI->TipItem())
                     {
                         F->SetColor(subst_alpha(C, u8(iFloor(255.f * (fuzzyShowInfo - 0.5f) * 2.f))));
-                        F->OutNext("%s", l_pI->NameItem());
+                        F->OutNext("%s", l_pI->TipItem());
                     }
                     fuzzyShowInfo += SHOW_INFO_SPEED * Device.fTimeDelta;
                 }

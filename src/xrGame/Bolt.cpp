@@ -14,6 +14,30 @@ void CBolt::OnH_A_Chield()
         SetInitiator(o->ID());
 }
 
+void CBolt::Load(LPCSTR section)
+{
+    inherited::Load(section);
+
+    m_count = pSettings->r_float(section, "count");
+
+    if (pSettings->line_exist(section, "tip_text"))
+        set_tip_text(pSettings->r_string(section, "tip_text"));
+}
+
+bool CBolt::GetBriefInfo(II_BriefInfo& info)
+{
+    VERIFY(m_pInventory);
+    info.clear();
+
+    info.name._set(m_nameShort);
+    info.icon._set(m_ammo_icon);
+
+    string16 stmp;
+    xr_sprintf(stmp, "%d", m_count);
+    info.cur_ammo._set(stmp);
+    return true;
+}
+
 void CBolt::Throw()
 {
     CMissile* l_pBolt = smart_cast<CMissile*>(m_fake_missile);
@@ -22,9 +46,71 @@ void CBolt::Throw()
     l_pBolt->set_destroy_time(u32(m_dwDestroyTimeMax / phTimefactor));
     inherited::Throw();
     spawn_fake_missile();
+    AddCount(-1);
+
+    if (m_count == 0)
+        DestroyObject();
 }
 
-bool CBolt::Useful() const { return false; }
+void CBolt::spawn_fake_missile()
+{
+    if (OnClient())
+        return;
+
+    if (!getDestroy())
+    {
+        CSE_Abstract* object = Level().spawn_item(
+            "bolt", Position(), (GEnv.isDedicatedServer) ? u32(-1) : ai_location().level_vertex_id(), ID(), true);
+
+        CSE_ALifeObject* alife_object = smart_cast<CSE_ALifeObject*>(object);
+        VERIFY(alife_object);
+        alife_object->m_flags.set(CSE_ALifeObject::flCanSave, FALSE);
+
+        NET_Packet P;
+        object->Spawn_Write(P, TRUE);
+        Level().Send(P, net_flags(TRUE));
+        F_entity_Destroy(object);
+    }
+}
+
+void CBolt::OnAnimationEnd(u32 state)
+{
+    switch (state)
+    {
+    case eHiding:
+    {
+        setVisible(FALSE);
+        SwitchState(eHidden);
+    }
+    break;
+    case eShowing:
+    {
+        setVisible(TRUE);
+        SwitchState(eIdle);
+    }
+    break;
+    case eThrowStart:
+    {
+        if (!m_fake_missile && !smart_cast<CMissile*>(H_Parent()))
+            spawn_fake_missile();
+
+        if (m_throw)
+            SwitchState(eThrow);
+        else
+            SwitchState(eReady);
+    }
+    break;
+    case eThrow: { SwitchState(eThrowEnd);
+    }
+    break;
+    case eThrowEnd: { SwitchState(eShowing);
+    }
+    break;
+    default: inherited::OnAnimationEnd(state);
+    }
+}
+
+bool CBolt::Useful() const { return true; }
 bool CBolt::Action(u16 cmd, u32 flags)
 {
     if (inherited::Action(cmd, flags))
@@ -59,3 +145,4 @@ void CBolt::activate_physic_shell()
 
 void CBolt::SetInitiator(u16 id) { m_thrower_id = id; }
 u16 CBolt::Initiator() { return m_thrower_id; }
+

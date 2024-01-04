@@ -574,6 +574,12 @@ void CUIMainIngameWnd::UpdatePickUpItem()
     int m_iXPos = pSettings->r_u32(sect_name, "inv_grid_x");
     int m_iYPos = pSettings->r_u32(sect_name, "inv_grid_y");
 
+    m_iGridWidth = READ_IF_EXISTS(pSettings, r_u32, sect_name, "inv_grid_width_second", m_iGridWidth);
+    m_iGridHeight = READ_IF_EXISTS(pSettings, r_u32, sect_name, "inv_grid_height_second", m_iGridHeight);
+
+    m_iXPos = READ_IF_EXISTS(pSettings, r_u32, sect_name, "inv_grid_x_second", m_iXPos);
+    m_iYPos = READ_IF_EXISTS(pSettings, r_u32, sect_name, "inv_grid_y_second", m_iYPos);
+
     float scale_x = m_iPickUpItemIconWidth / float(m_iGridWidth * INV_GRID_WIDTH);
 
     float scale_y = m_iPickUpItemIconHeight / float(m_iGridHeight * INV_GRID_HEIGHT);

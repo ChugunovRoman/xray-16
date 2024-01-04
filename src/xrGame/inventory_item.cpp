@@ -16,6 +16,7 @@
 #include "Level.h"
 #include "game_cl_base.h"
 #include "Actor.h"
+#include "Bolt.h"
 #include "Include/xrRender/Kinematics.h"
 #include "xrAICore/Navigation/ai_object_location.h"
 #include "Common/object_broker.h"
@@ -31,6 +32,7 @@
 constexpr pcstr INV_NAME_KEY = "inv_name";
 constexpr pcstr INV_NAME_SHORT_KEY = "inv_name_short";
 constexpr pcstr DESCRIPTION_KEY = "description";
+constexpr pcstr INV_TIP_KEY = "tip_text";
 extern int g_normalize_mouse_sens;
 
 net_updateInvData* CInventoryItem::NetSync()
@@ -56,7 +58,7 @@ CInventoryItem::CInventoryItem()
     m_flags.set(FUsingCondition, FALSE);
     m_fCondition = 1.0f;
 
-    m_name = m_nameShort = NULL;
+    m_name = m_nameShort = m_tip = NULL;
 
     m_ItemCurrPlace.value = 0;
     m_ItemCurrPlace.type = eItemPlaceUndefined;
@@ -100,6 +102,11 @@ void CInventoryItem::Load(LPCSTR section)
     m_name = StringTable().translate(pSettings->r_string(section, INV_NAME_KEY));
     m_nameShort = StringTable().translate(pSettings->r_string(section, INV_NAME_SHORT_KEY));
 
+    if (pSettings->line_exist(section, INV_TIP_KEY))
+        m_tip = StringTable().translate(pSettings->r_string(section, INV_TIP_KEY));
+    else
+        m_tip = StringTable().translate(pSettings->r_string(section, INV_NAME_KEY));
+
     m_weight = pSettings->r_float(section, "inv_weight");
     R_ASSERT(m_weight >= 0.f);
 
@@ -107,9 +114,19 @@ void CInventoryItem::Load(LPCSTR section)
     u32 sl = pSettings->read_if_exists<u32>(section, "slot", NO_ACTIVE_SLOT);
     m_ItemCurrPlace.base_slot_id = (sl == u32(-1)) ? 0 : (sl + 1);
 
+    string16 count{"0"};
+    CBolt* pBolt = smart_cast<CBolt*>(this);
+    if (pBolt)
+        xr_sprintf(count, "%d", pBolt->GetCount());
+
     // Description
     if (pSettings->line_exist(section, DESCRIPTION_KEY))
-        m_Description = StringTable().translate(pSettings->r_string(section, DESCRIPTION_KEY));
+    {
+        string2048 tmp_descr;
+        pcstr descr{StringTable().translate(pSettings->r_string(section, DESCRIPTION_KEY)).c_str()};
+        xr_sprintf(tmp_descr, descr, count);
+        m_Description = tmp_descr;
+    }
     else
         m_Description = "";
 
@@ -133,10 +150,29 @@ void CInventoryItem::Load(LPCSTR section)
 
 void CInventoryItem::ReloadNames()
 {
-    m_name = StringTable().translate(pSettings->r_string(m_object->cNameSect(), INV_NAME_KEY));
-    m_nameShort = StringTable().translate(pSettings->r_string(m_object->cNameSect(), INV_NAME_SHORT_KEY));
-    if (pSettings->line_exist(m_object->cNameSect(), DESCRIPTION_KEY))
-        m_Description = StringTable().translate(pSettings->r_string(m_object->cNameSect(), DESCRIPTION_KEY));
+    auto section = m_object->cNameSect();
+    m_name = StringTable().translate(pSettings->r_string(section, INV_NAME_KEY));
+    m_nameShort = StringTable().translate(pSettings->r_string(section, INV_NAME_SHORT_KEY));
+
+    if (pSettings->line_exist(section, INV_TIP_KEY))
+        m_tip = StringTable().translate(pSettings->r_string(section, INV_TIP_KEY));
+    else
+        m_tip = StringTable().translate(pSettings->r_string(section, INV_NAME_KEY));
+
+    string16 count{"0"};
+    CBolt* pBolt = smart_cast<CBolt*>(this);
+    if (pBolt)
+        xr_sprintf(count, "%d", pBolt->GetCount());
+
+
+    // Description
+    if (pSettings->line_exist(section, DESCRIPTION_KEY))
+    {
+        string2048 tmp_descr;
+        pcstr descr{StringTable().translate(pSettings->r_string(section, DESCRIPTION_KEY)).c_str()};
+        xr_sprintf(tmp_descr, descr, count);
+        m_Description = tmp_descr;
+    }
     else
         m_Description = "";
 }
@@ -158,6 +194,7 @@ void CInventoryItem::Hit(SHit* pHDS)
     ChangeCondition(-hit_power);
 }
 
+LPCSTR CInventoryItem::TipItem() { return m_tip.c_str(); }
 LPCSTR CInventoryItem::NameItem() { return m_name.c_str(); }
 LPCSTR CInventoryItem::NameShort() { return m_nameShort.c_str(); }
 /*
@@ -260,6 +297,16 @@ void CInventoryItem::OnEvent(NET_Packet& P, u16 type)
         state.position = p;
         state.previous_position = p;
         pSyncObj->set_State(state);
+    }
+    case GE_DESTROY:
+    case GE_RESPAWN:
+    case GE_OWNERSHIP_TAKE:
+    case GE_OWNERSHIP_REJECT:
+    case GE_WPN_STATE_CHANGE:
+    {
+        CBolt* pBolt = smart_cast<CBolt*>(this);
+        if (pBolt)
+            ReloadNames();
     }
     break;
     }

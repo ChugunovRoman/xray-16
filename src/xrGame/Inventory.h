@@ -38,6 +38,7 @@ public:
     float TotalWeight() const;
     float CalcTotalWeight();
 
+    bool HandleTakeBolt(CInventoryItem* pIItem);
     void Take(CGameObject* pObj, bool bNotActivate, bool strict_placement);
     // if just_before_destroy is true, then activate will be forced (because deactivate message will not deliver)
     bool DropItem(CGameObject* pObj, bool just_before_destroy, bool dont_create_shell);

@@ -5,6 +5,7 @@
 #include "trade.h"
 #include "Weapon.h"
 #include "Grenade.h"
+#include "Bolt.h"
 
 #include "ui/UIInventoryUtilities.h"
 #include "ui/UIActorMenu.h"
@@ -120,6 +121,65 @@ void CInventory::Clear()
     InvalidateState();
 }
 
+bool CInventory::HandleTakeBolt(CInventoryItem* pIItem)
+{
+    CBolt* pBolt = smart_cast<CBolt*>(pIItem);
+    if (pBolt)
+    {
+        PIItem target_item = ItemFromSlot(BOLT_SLOT);
+
+        if (!target_item)
+            target_item = Get("bolt_bug", true);
+        if (!target_item)
+            target_item = Get("bolt_bug_one", true);
+
+        if (target_item) {
+            CBolt* foundBoltBug = smart_cast<CBolt*>(target_item);
+
+            foundBoltBug->AddCount(pBolt->GetCount());
+            return true;
+        }
+        else if (xr_strcmp(pBolt->cNameSect().c_str(), "bolt") == 0)
+        {
+            Level().spawn_item("bolt_bug_one", Actor()->Position(), false, Actor()->ID());
+
+            pBolt->DestroyObject();
+            return true;
+        }
+    }
+
+    CWeaponAmmo* pAmmo = smart_cast<CWeaponAmmo*>(pIItem);
+    if (pAmmo && pAmmo->parent_id() == 0 && xr_strcmp(pAmmo->m_section_id.c_str(), "ammo_bolt") == 0)
+    {
+        u16 count = READ_IF_EXISTS(pSettings, r_u16, pAmmo->m_section_id, "box_size", 20);
+        PIItem target_item = ItemFromSlot(BOLT_SLOT);
+
+        if (!target_item)
+            target_item = Get("bolt_bug", true);
+        if (!target_item)
+            target_item = Get("bolt_bug_one", true);
+
+        if (!target_item)
+        {
+            Level().spawn_item("bolt_bug", Actor()->Position(), false, Actor()->ID());
+            Level().spawn_item("ammo_bolt", Actor()->Position(), false, Actor()->ID());
+
+            pAmmo->DestroyObject();
+            return true;
+        }
+
+        if (target_item) {
+            CBolt* foundBolt = smart_cast<CBolt*>(target_item);
+
+            foundBolt->AddCount(count);
+
+            pAmmo->DestroyObject();
+            return true;
+        }
+    }
+    return false;
+}
+
 void CInventory::Take(CGameObject* pObj, bool bNotActivate, bool strict_placement)
 {
     CInventoryItem* pIItem = smart_cast<CInventoryItem*>(pObj);
@@ -134,6 +194,9 @@ void CInventory::Take(CGameObject* pObj, bool bNotActivate, bool strict_placemen
     // usually net_Import arrived for objects that not has a parent object..
     // for unknown reason net_Import arrived for object that has a parent, so correction prediction schema will crash
     Level().RemoveObject_From_4CrPr(pObj);
+
+    if (HandleTakeBolt(pIItem))
+        return;
 
     m_all.push_back(pIItem);
 
@@ -305,7 +368,7 @@ bool CInventory::DropItem(CGameObject* pObj, bool just_before_destroy, bool dont
     if (it != m_all.end())
         m_all.erase(std::find(m_all.begin(), m_all.end(), pIItem));
     else
-        Msg("! CInventory::Drop item not found in inventory!!!");
+        Msg("! CInventory::Drop item not found in inventory!!! item sect=[%s]", pIItem->m_section_id.c_str());
 
     pIItem->m_pInventory = NULL;
 
