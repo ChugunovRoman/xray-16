@@ -650,7 +650,6 @@ void CUIActorMenu::highlight_item_slot(CUICellItem* cell_item)
     }
     if (grenade && slot_id == GRENADE_SLOT)
     {
-      
         if (m_pLists[eInventoryGrenadeList])
             m_pLists[eInventoryGrenadeList]->Highlight(true);
         return;
