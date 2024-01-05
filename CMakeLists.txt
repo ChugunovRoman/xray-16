@@ -84,6 +84,14 @@ if (MASTER_GOLD)
 endif()
 message(STATUS "MASTER_GOLD: ${MASTER_GOLD}")
 
+if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR  CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    set(LUA_LOGS_DEFAULT_VALUE ON)
+else()
+    set(LUA_LOGS_DEFAULT_VALUE OFF)
+endif()
+message(STATUS "LUA_LOGS: ${LUA_LOGS}")
+option(LUA_LOGS "Build with LUA_LOGS" ${LUA_LOGS_DEFAULT_VALUE})
+
 option(STATIC_BUILD "Use static build" ${MASTER_GOLD})
 if (STATIC_BUILD)
     # XXX: Uncomment only after build with XRAY_STATIC_BUILD is fixed

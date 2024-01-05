@@ -54,7 +54,7 @@
 
   <ItemDefinitionGroup Condition="$(Configuration.Contains('Debug'))">
     <ClCompile>
-      <PreprocessorDefinitions>DEBUG;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>DEBUG;_DEBUG;LUA_LOGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -94,7 +94,7 @@
   <!-- Mixed settings -->
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Mixed'">
     <ClCompile>
-      <PreprocessorDefinitions>DEBUG;MIXED;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>DEBUG;MIXED;LUA_LOGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <!-- Optimization is automatically enabled when UseDebugLibraries == false. That's why we'll turn it off manually -->
       <Optimization>Disabled</Optimization>
     </ClCompile>
