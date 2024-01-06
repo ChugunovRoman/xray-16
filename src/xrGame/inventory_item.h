@@ -122,6 +122,7 @@ public:
     virtual bool ActivateItem(); // !!! Переопределить. (см. в Inventory.cpp)
     virtual void DeactivateItem(); // !!! Переопределить. (см. в Inventory.cpp)
     virtual bool Action(u16 cmd, u32 flags) { return false; } // true если известная команда, иначе false
+    virtual bool IsItem(pcstr section) { return xr_strcmp(m_section_id, section) == 0; };
     virtual void DiscardState(){};
 
     virtual void OnH_B_Chield();

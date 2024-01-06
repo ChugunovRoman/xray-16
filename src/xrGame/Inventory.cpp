@@ -126,25 +126,31 @@ bool CInventory::HandleTakeBolt(CInventoryItem* pIItem)
     CBolt* pBolt = smart_cast<CBolt*>(pIItem);
     if (pBolt)
     {
-        PIItem target_item = ItemFromSlot(BOLT_SLOT);
-
-        if (!target_item)
-            target_item = Get("bolt_bug", true);
-        if (!target_item)
-            target_item = Get("bolt_bug_one", true);
-
-        if (target_item) {
-            CBolt* foundBoltBug = smart_cast<CBolt*>(target_item);
-
-            foundBoltBug->AddCount(pBolt->GetCount());
-            return true;
-        }
-        else if (xr_strcmp(pBolt->cNameSect().c_str(), "bolt") == 0)
+        if (pIItem->IsItem("bolt"))
         {
-            Level().spawn_item("bolt_bug_one", Actor()->Position(), false, Actor()->ID());
-
             pBolt->DestroyObject();
-            return true;
+            PIItem boltBagInSlot = GetBoltBag();
+
+            if (boltBagInSlot)
+            {
+                CBolt* bag = smart_cast<CBolt*>(boltBagInSlot);
+                bag->AddCount(1);
+            }
+            else
+                Level().spawn_item("bolt_bag_one", Actor()->Position(), false, Actor()->ID());
+        }
+
+        if (pIItem->IsItem("bolt_bag") || pIItem->IsItem("bolt_bag_one"))
+        {
+            PIItem boltBagInSlot = GetBoltBag();
+            int countBags = GetCount("bolt_bag", true);
+
+            if (countBags > 1)
+            {
+                CBolt* bag = smart_cast<CBolt*>(boltBagInSlot);
+                bag->AddCount(pBolt->GetCount());
+                pBolt->DestroyObject();
+            }
         }
     }
 
@@ -152,29 +158,19 @@ bool CInventory::HandleTakeBolt(CInventoryItem* pIItem)
     if (pAmmo && pAmmo->parent_id() == 0 && xr_strcmp(pAmmo->m_section_id.c_str(), "ammo_bolt") == 0)
     {
         u16 count = READ_IF_EXISTS(pSettings, r_u16, pAmmo->m_section_id, "box_size", 20);
-        PIItem target_item = ItemFromSlot(BOLT_SLOT);
+        PIItem bagItem = GetBoltBag();
 
-        if (!target_item)
-            target_item = Get("bolt_bug", true);
-        if (!target_item)
-            target_item = Get("bolt_bug_one", true);
-
-        if (!target_item)
+        if (bagItem)
         {
-            Level().spawn_item("bolt_bug", Actor()->Position(), false, Actor()->ID());
-            Level().spawn_item("ammo_bolt", Actor()->Position(), false, Actor()->ID());
-
-            pAmmo->DestroyObject();
-            return true;
-        }
-
-        if (target_item) {
-            CBolt* foundBolt = smart_cast<CBolt*>(target_item);
-
+            CBolt* foundBolt = smart_cast<CBolt*>(bagItem);
             foundBolt->AddCount(count);
-
             pAmmo->DestroyObject();
-            return true;
+        }
+        else
+        {
+            Level().spawn_item("bolt_bag", Actor()->Position(), false, Actor()->ID());
+            Level().spawn_item("ammo_bolt", Actor()->Position(), false, Actor()->ID());
+            pAmmo->DestroyObject();
         }
     }
     return false;
@@ -194,9 +190,6 @@ void CInventory::Take(CGameObject* pObj, bool bNotActivate, bool strict_placemen
     // usually net_Import arrived for objects that not has a parent object..
     // for unknown reason net_Import arrived for object that has a parent, so correction prediction schema will crash
     Level().RemoveObject_From_4CrPr(pObj);
-
-    if (HandleTakeBolt(pIItem))
-        return;
 
     m_all.push_back(pIItem);
 
@@ -291,6 +284,8 @@ void CInventory::Take(CGameObject* pObj, bool bNotActivate, bool strict_placemen
                 CurrentGameUI()->OnInventoryAction(pIItem, GE_OWNERSHIP_TAKE);
         }
     };
+
+    HandleTakeBolt(pIItem);
 }
 
 bool CInventory::DropItem(CGameObject* pObj, bool just_before_destroy, bool dont_create_shell)
@@ -299,7 +294,7 @@ bool CInventory::DropItem(CGameObject* pObj, bool just_before_destroy, bool dont
     VERIFY(pIItem);
     VERIFY(pIItem->m_pInventory);
     VERIFY(pIItem->m_pInventory == this);
-    VERIFY(pIItem->m_ItemCurrPlace.type != eItemPlaceUndefined);
+    VERIFY2(pIItem->m_ItemCurrPlace.type != eItemPlaceUndefined, make_string("item scetion=[%s], m_ItemCurrPlace.type=[%d]", pIItem->m_section_id.c_str(), pIItem->m_ItemCurrPlace.type));
 
     pIItem->object().processing_activate();
 
@@ -980,6 +975,40 @@ PIItem CInventory::SameSlot(const u16 slot, PIItem pIItem, bool bSearchRuck) con
     }
 
     return NULL;
+}
+
+//получить кол-во предметов определенного типа в инвентаре
+int CInventory::GetCount(LPCSTR name, bool bSearchRuck) const
+{
+    int count = 0;
+    const TIItemContainer& list = bSearchRuck ? m_ruck : m_belt;
+
+    for (TIItemContainer::const_iterator it = list.begin(); list.end() != it; ++it)
+    {
+        PIItem pIItem = *it;
+        if (strstr(pIItem->object().cNameSect().c_str(), name) && pIItem->Useful())
+            count++;
+    }
+    PIItem boltBag = ItemFromSlot(BOLT_SLOT);
+    if (boltBag && strstr(boltBag->object().cNameSect().c_str(), name))
+        count++;
+    return count;
+}
+PIItem CInventory::GetBoltBag() const
+{
+    PIItem boltBag = ItemFromSlot(BOLT_SLOT);
+    if (boltBag && (boltBag->IsItem("bolt_bag") || boltBag->IsItem("bolt_bag_one")))
+        return boltBag;
+
+    boltBag = Get("bolt_bag", true);
+    if (boltBag)
+        return boltBag;
+
+    boltBag = Get("bolt_bag_one", true);
+    if (boltBag)
+        return boltBag;
+
+    return nullptr;
 }
 
 //найти в инвенторе вещь с указанным именем
