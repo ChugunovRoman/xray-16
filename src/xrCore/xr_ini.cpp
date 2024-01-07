@@ -1117,6 +1117,22 @@ void CInifile::remove_line(pcstr S, pcstr L)
         data.Data.erase(A);
     }
 }
+void CInifile::truncate()
+{
+    R_ASSERT(!m_flags.test(eReadOnly));
+
+    for (auto r_it = DATA.begin(); r_it != DATA.end();)
+        DATA.erase(r_it);
+
+    IWriter* F = FS.w_open_ex(m_file_name);
+    if (!F)
+        return;
+
+    save_as(*F);
+    FS.w_close(F);
+
+    return;
+}
 
 void CInifile::set_readonly(bool b)
 {

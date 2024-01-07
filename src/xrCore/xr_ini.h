@@ -258,6 +258,7 @@ public:
     void w_bool(pcstr S, pcstr L, bool V, pcstr comment = nullptr);
 
     void remove_line(pcstr S, pcstr L);
+    void truncate();
     void set_readonly(bool b);
 };
 
