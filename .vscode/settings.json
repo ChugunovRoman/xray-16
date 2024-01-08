@@ -13,5 +13,7 @@
     "editor.formatOnSave": false
   },
   "files.trimTrailingWhitespace": false,
-  "files.insertFinalNewline": true
+  "files.insertFinalNewline": true,
+  "C_Cpp.intelliSenseMemoryLimit": 6144,
+  "C_Cpp.intelliSenseCacheSize": 6144
 }
