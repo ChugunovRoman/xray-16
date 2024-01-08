@@ -52,7 +52,7 @@ void CALifeGraphRegistry::update(CSE_ALifeDynamicObject* object)
         m_actor = smart_cast<CSE_ALifeCreatureActor*>(object);
         R_ASSERT2(m_actor, "Invalid flag M_SPAWN_OBJECT_ASPLAYER for non-actor object!");
 
-        if (g_start_game_vertex_id)
+        if (g_start_game_vertex_id != NULL)
         {
             m_actor->m_tGraphID = g_start_game_vertex_id;
             m_actor->o_Position = g_start_position;
@@ -96,7 +96,7 @@ void CALifeGraphRegistry::setup_current_level()
     VERIFY3(id >= 0, "Level is corrupted or doesn't exist", *(*I).second.name());
     ai().load(*(*I).second.name());
 
-    g_start_game_vertex_id = 0;
+    g_start_game_vertex_id = NULL;
 }
 
 void CALifeGraphRegistry::attach(CSE_Abstract& object, CSE_ALifeInventoryItem* item,

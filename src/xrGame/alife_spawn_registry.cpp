@@ -130,9 +130,25 @@ void CALifeSpawnRegistry::load(IReader& file_stream, xrGUID* save_guid)
 
     build_root_spawns();
 
+    load_spawn_position_from_smart();
+
     Msg("* %d spawn points are successfully loaded", m_spawns.vertex_count());
 }
 
+void CALifeSpawnRegistry::load_spawn_position_from_smart()
+{
+    SPAWN_GRAPH::vertex_iterator I = m_spawns.vertices().begin();
+    SPAWN_GRAPH::vertex_iterator E = m_spawns.vertices().end();
+    for (; I != E; ++I)
+    {
+        CSE_ALifeSmartZone* smart = (*I).second->data()->object().cast_smart_zone();
+        if (smart && xr_strcmp(g_start_position_smart.c_str(), smart->name_replace()) == 0)
+        {
+            g_start_game_vertex_id = smart->m_tGraphID;
+            g_start_position = smart->o_Position;
+        }
+    }
+}
 void CALifeSpawnRegistry::save_updates(IWriter& stream)
 {
     SPAWN_GRAPH::vertex_iterator I = m_spawns.vertices().begin();
