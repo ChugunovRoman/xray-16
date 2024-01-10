@@ -37,14 +37,8 @@ R"(<w>
 constexpr pcstr LoadingScreenXML16x9 =
 R"(<w>
     <background width="1024" height="768">
-        <auto_static x="102" y="0" width="819" height="768" stretch="1">
+        <auto_static x="0" y="0" width="1024" height="768" stretch="1">
             <texture>ui_mm_loading_screen</texture>
-        </auto_static>
-        <auto_static x="0" y="0" width="104" height="768" stretch="1">
-            <texture>ui_mm_loading_left_widepanel</texture>
-        </auto_static>
-        <auto_static x="920" y="0" width="104" height="768" stretch="1">
-            <texture>ui_mm_loading_right_widepanel</texture>
         </auto_static>
     </background>
     <loading_logo x="102" y="173" width="819" height="512" stretch="1"/>
