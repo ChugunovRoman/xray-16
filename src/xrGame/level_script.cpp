@@ -920,7 +920,8 @@ IC static void CLevel_Export(lua_State* luaState)
         def("set_community_goodwill", &g_set_community_goodwill),
         def("change_community_goodwill", &g_change_community_goodwill),
 
-        def("community_relation", &g_get_community_relation), def("set_community_relation", &g_set_community_relation),
+        def("community_relation", &g_get_community_relation),
+        def("set_community_relation", &g_set_community_relation),
         def("get_general_goodwill_between", &g_get_general_goodwill_between)
     ];
 
