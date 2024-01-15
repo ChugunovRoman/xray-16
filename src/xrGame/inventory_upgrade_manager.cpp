@@ -186,102 +186,102 @@ public:
 
 void Manager::add_section_by_class(CInifile::Sect *const &section)
 {
-  pcstr value{};
-  pcstr weaponClass{};
-  const auto& name = section->Name;
-  const bool exist = section->line_exist("class", &value);
-  const bool weaponClassExist = section->line_exist("weapon_class", &weaponClass);
+    pcstr value{};
+    pcstr weaponClass{};
+    const auto& name = section->Name;
+    const bool exist = section->line_exist("class", &value);
+    const bool weaponClassExist = section->line_exist("weapon_class", &weaponClass);
 
-  if (strstr(name.c_str(), "mp_") || strstr(name.c_str(), "animation_hit_"))
-  {
-    return;
-  }
+    if (strstr(name.c_str(), "mp_") || strstr(name.c_str(), "animation_hit_"))
+    {
+        return;
+    }
 
-  // Ammo
-  if (exist && xr_strcmp(value, "AMMO") == 0)
-  {
-    Level().sections_map[ESectionTypeName::ammo].push_back(name.c_str());
-  }
-  // wpn_knives
-  if (weaponClassExist && xr_strcmp(weaponClass, "knife") == 0)
-  {
-    Level().sections_map[ESectionTypeName::knife].push_back(name.c_str());
-  }
-  // wpn_pistols
-  if (weaponClassExist && xr_strcmp(weaponClass, "pistol") == 0)
-  {
-    Level().sections_map[ESectionTypeName::pistol].push_back(name.c_str());
-  }
-  // wpn_auto_pistols
-  if (weaponClassExist && xr_strcmp(weaponClass, "auto_pistol") == 0)
-  {
-    Level().sections_map[ESectionTypeName::auto_pistol].push_back(name.c_str());
-  }
-  // wpn_shotguns
-  if (weaponClassExist && xr_strcmp(weaponClass, "shotgun") == 0)
-  {
-    Level().sections_map[ESectionTypeName::shotgun].push_back(name.c_str());
-  }
-  // wpn_rifles
-  if (weaponClassExist && xr_strcmp(weaponClass, "assault_rifle") == 0)
-  {
-    Level().sections_map[ESectionTypeName::rifle].push_back(name.c_str());
-  }
-  // wpn_sniper_rifles
-  if (weaponClassExist && xr_strcmp(weaponClass, "sniper_rifle") == 0)
-  {
-    Level().sections_map[ESectionTypeName::sniper_rifle].push_back(name.c_str());
-  }
-  // wpn_heavy_rifle
-  if (weaponClassExist && xr_strcmp(weaponClass, "heavy_rifle") == 0)
-  {
-    Level().sections_map[ESectionTypeName::heavy_rifle].push_back(name.c_str());
-  }
-  // outfits
-  if (exist && xr_strcmp(value, "EQU_STLK") == 0)
-  {
-    Level().sections_map[ESectionTypeName::outfit].push_back(name.c_str());
-  }
-  // artefacts
-  if (exist && xr_strcmp(value, "ARTEFACT") == 0)
-  {
-    Level().sections_map[ESectionTypeName::artefact].push_back(name.c_str());
-  }
-  // squad_npc
-  if (exist && xr_strcmp(value, "ON_OFF_S") == 0 && xr_strcmp(value, "monster_sim_squad") != 0)
-  {
-    Level().sections_map[ESectionTypeName::squad_npc].push_back(name.c_str());
-  }
-  // squad_npc
-  if (exist && xr_strcmp(value, "ON_OFF_S") == 0 && xr_strcmp(value, "monster_sim_squad") == 0)
-  {
-    Level().sections_map[ESectionTypeName::squad_npc].push_back(name.c_str());
-  }
-  // npc
-  if (exist && xr_strcmp(value, "AI_STL_S") == 0)
-  {
-    Level().sections_map[ESectionTypeName::npc].push_back(name.c_str());
-  }
-  // mutant
-  if (exist && strstr(value, "SM_"))
-  {
-    Level().sections_map[ESectionTypeName::mutant].push_back(name.c_str());
-  }
-  // anomaly
-  if (exist && strstr(value, "ZS_"))
-  {
-    Level().sections_map[ESectionTypeName::anomaly].push_back(name.c_str());
-  }
-  // phantom
-  if (exist && xr_strcmp(value, "AI_PHANT") == 0)
-  {
-    Level().sections_map[ESectionTypeName::phantom].push_back(name.c_str());
-  }
-  // backpack
-  if (exist && xr_strcmp(value, "EQ_BAKPK") == 0)
-  {
-    Level().sections_map[ESectionTypeName::backpack].push_back(name.c_str());
-  }
+    // Ammo
+    if (exist && xr_strcmp(value, "AMMO") == 0)
+    {
+        Level().sections_map[ESectionTypeName::ammo].push_back(name.c_str());
+    }
+    // wpn_knives
+    if (weaponClassExist && xr_strcmp(weaponClass, "knife") == 0)
+    {
+        Level().sections_map[ESectionTypeName::knife].push_back(name.c_str());
+    }
+    // wpn_pistols
+    if (weaponClassExist && xr_strcmp(weaponClass, "pistol") == 0)
+    {
+        Level().sections_map[ESectionTypeName::pistol].push_back(name.c_str());
+    }
+    // wpn_auto_pistols
+    if (weaponClassExist && xr_strcmp(weaponClass, "auto_pistol") == 0)
+    {
+        Level().sections_map[ESectionTypeName::auto_pistol].push_back(name.c_str());
+    }
+    // wpn_shotguns
+    if (weaponClassExist && xr_strcmp(weaponClass, "shotgun") == 0)
+    {
+        Level().sections_map[ESectionTypeName::shotgun].push_back(name.c_str());
+    }
+    // wpn_rifles
+    if (weaponClassExist && xr_strcmp(weaponClass, "assault_rifle") == 0)
+    {
+        Level().sections_map[ESectionTypeName::rifle].push_back(name.c_str());
+    }
+    // wpn_sniper_rifles
+    if (weaponClassExist && xr_strcmp(weaponClass, "sniper_rifle") == 0)
+    {
+        Level().sections_map[ESectionTypeName::sniper_rifle].push_back(name.c_str());
+    }
+    // wpn_heavy_rifle
+    if (weaponClassExist && xr_strcmp(weaponClass, "heavy_rifle") == 0)
+    {
+        Level().sections_map[ESectionTypeName::heavy_rifle].push_back(name.c_str());
+    }
+    // outfits
+    if (exist && xr_strcmp(value, "EQU_STLK") == 0)
+    {
+        Level().sections_map[ESectionTypeName::outfit].push_back(name.c_str());
+    }
+    // artefacts
+    if (exist && xr_strcmp(value, "ARTEFACT") == 0)
+    {
+        Level().sections_map[ESectionTypeName::artefact].push_back(name.c_str());
+    }
+    // squad_npc
+    if (exist && xr_strcmp(value, "ON_OFF_S") == 0 && xr_strcmp(value, "monster_sim_squad") != 0)
+    {
+        Level().sections_map[ESectionTypeName::squad_npc].push_back(name.c_str());
+    }
+    // squad_npc
+    if (exist && xr_strcmp(value, "ON_OFF_S") == 0 && xr_strcmp(value, "monster_sim_squad") == 0)
+    {
+        Level().sections_map[ESectionTypeName::squad_npc].push_back(name.c_str());
+    }
+    // npc
+    if (exist && xr_strcmp(value, "AI_STL_S") == 0)
+    {
+        Level().sections_map[ESectionTypeName::npc].push_back(name.c_str());
+    }
+    // mutant
+    if (exist && strstr(value, "SM_"))
+    {
+        Level().sections_map[ESectionTypeName::mutant].push_back(name.c_str());
+    }
+    // anomaly
+    if (exist && strstr(value, "ZS_"))
+    {
+        Level().sections_map[ESectionTypeName::anomaly].push_back(name.c_str());
+    }
+    // phantom
+    if (exist && xr_strcmp(value, "AI_PHANT") == 0)
+    {
+        Level().sections_map[ESectionTypeName::phantom].push_back(name.c_str());
+    }
+    // backpack
+    if (exist && xr_strcmp(value, "EQ_BAKPK") == 0)
+    {
+        Level().sections_map[ESectionTypeName::backpack].push_back(name.c_str());
+    }
 }
 
 void Manager::load_all_inventory()

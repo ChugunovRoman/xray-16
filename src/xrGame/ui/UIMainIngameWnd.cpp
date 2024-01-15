@@ -95,12 +95,6 @@ void CUIMainIngameWnd::Init()
 	UIWeaponIcon_rect			= UIWeaponIcon.GetWndRect();
 */ //---------------------------------------------------------
     UIPickUpItemIcon = UIHelper::CreateStatic(uiXml, "pick_up_item", this);
-    UIPickUpItemIcon->SetShader(GetEquipmentIconsShader());
-
-    m_iPickUpItemIconWidth = UIPickUpItemIcon->GetWidth();
-    m_iPickUpItemIconHeight = UIPickUpItemIcon->GetHeight();
-    m_iPickUpItemIconX = UIPickUpItemIcon->GetWndRect().left;
-    m_iPickUpItemIconY = UIPickUpItemIcon->GetWndRect().top;
     //---------------------------------------------------------
 
     // Подсказки, которые возникают при наведении прицела на объект
@@ -567,21 +561,27 @@ void CUIMainIngameWnd::UpdatePickUpItem()
 
     shared_str sect_name = m_pPickUpItem->object().cNameSect();
 
+    R_ASSERT2(pSettings->line_exist(sect_name, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", sect_name));
+
+    auto inv_icon = pSettings->r_string(sect_name, "inv_icon");
+
+    inv_icon = READ_IF_EXISTS(pSettings, r_string, sect_name, "inv_icon_second", inv_icon);
+
+    UIPickUpItemIcon->SetShader(GetEquipmentIconShader(inv_icon));
+
+    m_iPickUpItemIconWidth = UIPickUpItemIcon->GetWidth();
+    m_iPickUpItemIconHeight = UIPickUpItemIcon->GetHeight();
+    m_iPickUpItemIconX = 0;
+    m_iPickUpItemIconY = 0;
+
     // properties used by inventory menu
     int m_iGridWidth = pSettings->r_u32(sect_name, "inv_grid_width");
     int m_iGridHeight = pSettings->r_u32(sect_name, "inv_grid_height");
 
-    int m_iXPos = pSettings->r_u32(sect_name, "inv_grid_x");
-    int m_iYPos = pSettings->r_u32(sect_name, "inv_grid_y");
-
     m_iGridWidth = READ_IF_EXISTS(pSettings, r_u32, sect_name, "inv_grid_width_second", m_iGridWidth);
     m_iGridHeight = READ_IF_EXISTS(pSettings, r_u32, sect_name, "inv_grid_height_second", m_iGridHeight);
 
-    m_iXPos = READ_IF_EXISTS(pSettings, r_u32, sect_name, "inv_grid_x_second", m_iXPos);
-    m_iYPos = READ_IF_EXISTS(pSettings, r_u32, sect_name, "inv_grid_y_second", m_iYPos);
-
     float scale_x = m_iPickUpItemIconWidth / float(m_iGridWidth * INV_GRID_WIDTH);
-
     float scale_y = m_iPickUpItemIconHeight / float(m_iGridHeight * INV_GRID_HEIGHT);
 
     scale_x = (scale_x > 1) ? 1.0f : scale_x;
@@ -590,14 +590,14 @@ void CUIMainIngameWnd::UpdatePickUpItem()
     float scale = scale_x < scale_y ? scale_x : scale_y;
 
     Frect texture_rect;
-    texture_rect.lt.set(m_iXPos * INV_GRID_WIDTH, m_iYPos * INV_GRID_HEIGHT);
-    texture_rect.rb.set(m_iGridWidth * INV_GRID_WIDTH, m_iGridHeight * INV_GRID_HEIGHT);
+    texture_rect.lt.set(0, 0);
+    texture_rect.rb.set(m_iGridWidth * ICON_GRID_WIDTH, m_iGridHeight * ICON_GRID_HEIGHT);
     texture_rect.rb.add(texture_rect.lt);
     UIPickUpItemIcon->GetStaticItem()->SetTextureRect(texture_rect);
     UIPickUpItemIcon->SetStretchTexture(true);
 
-    UIPickUpItemIcon->SetWidth(m_iGridWidth * INV_GRID_WIDTH * scale * UI().get_current_kx());
-    UIPickUpItemIcon->SetHeight(m_iGridHeight * INV_GRID_HEIGHT * scale);
+    UIPickUpItemIcon->SetWidth(m_iGridWidth * ICON_GRID_WIDTH * scale * UI().get_current_kx());
+    UIPickUpItemIcon->SetHeight(m_iGridHeight * ICON_GRID_HEIGHT * scale);
 
     UIPickUpItemIcon->SetWndPos(
         Fvector2().set(m_iPickUpItemIconX + (m_iPickUpItemIconWidth - UIPickUpItemIcon->GetWidth()) / 2.0f,
@@ -848,12 +848,14 @@ void CUIMainIngameWnd::UpdateQuickSlots()
                 wnd->TextItemControl()->SetText(str);
                 wnd->Show(true);
 
-                slot->SetShader(InventoryUtilities::GetEquipmentIconsShader());
+                R_ASSERT2(pSettings->line_exist(item_name, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", item_name));
+
+                slot->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(item_name, "inv_icon")));
                 Frect texture_rect;
-                texture_rect.x1 = pSettings->r_float(item_name, "inv_grid_x") * INV_GRID_WIDTH;
-                texture_rect.y1 = pSettings->r_float(item_name, "inv_grid_y") * INV_GRID_HEIGHT;
-                texture_rect.x2 = pSettings->r_float(item_name, "inv_grid_width") * INV_GRID_WIDTH;
-                texture_rect.y2 = pSettings->r_float(item_name, "inv_grid_height") * INV_GRID_HEIGHT;
+                texture_rect.x1 = 0;
+                texture_rect.y1 = 0;
+                texture_rect.x2 = pSettings->r_float(item_name, "inv_grid_width") * ICON_GRID_WIDTH;
+                texture_rect.y2 = pSettings->r_float(item_name, "inv_grid_height") * ICON_GRID_HEIGHT;
                 texture_rect.rb.add(texture_rect.lt);
                 slot->SetTextureRect(texture_rect);
                 slot->TextureOn();

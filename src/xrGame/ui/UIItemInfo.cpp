@@ -303,13 +303,14 @@ void CUIItemInfo::InitItem(CUICellItem* pCellItem, CInventoryItem* pCompareItem,
     }
     if (UIItemImage)
     {
+        R_ASSERT2(pSettings->line_exist(pInvItem->m_section_id.c_str(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", pInvItem->m_section_id.c_str()));
         // Загружаем картинку
-        UIItemImage->SetShader(InventoryUtilities::GetEquipmentIconsShader());
+        UIItemImage->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(pInvItem->m_section_id.c_str(), "inv_icon")));
 
         Irect item_grid_rect = pInvItem->GetInvGridRect();
         Frect texture_rect;
-        texture_rect.lt.set(item_grid_rect.x1 * INV_GRID_WIDTH, item_grid_rect.y1 * INV_GRID_HEIGHT);
-        texture_rect.rb.set(item_grid_rect.x2 * INV_GRID_WIDTH, item_grid_rect.y2 * INV_GRID_HEIGHT);
+        texture_rect.lt.set(0, 0);
+        texture_rect.rb.set(item_grid_rect.x2 * ICON_GRID_WIDTH, item_grid_rect.y2 * ICON_GRID_HEIGHT);
         texture_rect.rb.add(texture_rect.lt);
         UIItemImage->GetUIStaticItem().SetTextureRect(texture_rect);
         UIItemImage->TextureOn();

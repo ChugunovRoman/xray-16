@@ -152,9 +152,6 @@ void CUIHudStatesWnd::InitFromXml(CUIXml& xml, LPCSTR path)
     m_ui_grenade = UIHelper::CreateTextWnd(xml, "static_grenade", this, false);
 
     m_ui_weapon_icon = UIHelper::CreateStatic(xml, "static_wpn_icon", weaponsParent);
-    m_ui_weapon_icon->SetShader(InventoryUtilities::GetEquipmentIconsShader());
-    //	m_ui_weapon_icon->Enable	( false );
-    m_ui_weapon_icon_rect = m_ui_weapon_icon->GetWndRect();
 
     m_progress_self = UIHelper::CreateProgressShape(xml, "progress", this, false);
 
@@ -469,8 +466,10 @@ void CUIHudStatesWnd::UpdateActiveItemInfo(CActor* actor)
 
 void CUIHudStatesWnd::SetAmmoIcon(const shared_str& sect_name)
 {
-    if (!m_ui_weapon_icon)
-        return;
+    R_ASSERT2(pSettings->line_exist(sect_name, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", sect_name));
+
+    m_ui_weapon_icon->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(sect_name, "inv_icon")));
+    m_ui_weapon_icon_rect = m_ui_weapon_icon->GetWndRect();
 
     if (!sect_name.size())
     {
@@ -480,10 +479,10 @@ void CUIHudStatesWnd::SetAmmoIcon(const shared_str& sect_name)
     m_ui_weapon_icon->Show(true);
 
     Frect texture_rect;
-    texture_rect.x1 = pSettings->r_float(sect_name, "inv_grid_x") * INV_GRID_WIDTH;
-    texture_rect.y1 = pSettings->r_float(sect_name, "inv_grid_y") * INV_GRID_HEIGHT;
-    texture_rect.x2 = pSettings->r_float(sect_name, "inv_grid_width") * INV_GRID_WIDTH;
-    texture_rect.y2 = pSettings->r_float(sect_name, "inv_grid_height") * INV_GRID_HEIGHT;
+    texture_rect.x1 = 0;
+    texture_rect.y1 = 0;
+    texture_rect.x2 = pSettings->r_float(sect_name, "inv_grid_width") * ICON_GRID_WIDTH;
+    texture_rect.y2 = pSettings->r_float(sect_name, "inv_grid_height") * ICON_GRID_HEIGHT;
     texture_rect.rb.add(texture_rect.lt);
     m_ui_weapon_icon->GetUIStaticItem().SetTextureRect(texture_rect);
     m_ui_weapon_icon->SetStretchTexture(true);

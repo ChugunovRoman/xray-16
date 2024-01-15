@@ -24,19 +24,27 @@ void CUIArtefactPanel::InitFromXML(CUIXml& xml, pcstr path, int index)
 
 void CUIArtefactPanel::InitIcons(const xr_vector<const CArtefact*>& artefacts)
 {
-    m_StaticItem.SetShader(InventoryUtilities::GetEquipmentIconsShader());
     m_vRects.clear();
+    m_count_rects = 0;
 
     for (const CArtefact* artefact : artefacts)
     {
         const shared_str& sectionName = artefact->cNameSect();
+
+        R_ASSERT2(pSettings->line_exist(sectionName, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", sectionName));
+
         Frect texture_rect;
-        texture_rect.x1 = pSettings->read<float>(sectionName, "inv_grid_x") * INV_GRID_WIDTH;
-        texture_rect.y1 = pSettings->read<float>(sectionName, "inv_grid_y") * INV_GRID_HEIGHT;
-        texture_rect.x2 = pSettings->read<float>(sectionName, "inv_grid_width") * INV_GRID_WIDTH;
-        texture_rect.y2 = pSettings->read<float>(sectionName, "inv_grid_height") * INV_GRID_HEIGHT;
+        CUIStaticItem staticItem;
+        staticItem.SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(sectionName, "inv_icon")));
+        texture_rect.x1 = float(0);
+        texture_rect.y1 = float(0);
+        texture_rect.x2 = pSettings->read<float>(sectionName, "inv_grid_width") * ICON_GRID_WIDTH;
+        texture_rect.y2 = pSettings->read<float>(sectionName, "inv_grid_height") * ICON_GRID_HEIGHT;
         texture_rect.rb.add(texture_rect.lt);
+
         m_vRects.push_back(texture_rect);
+        m_vStaticRects.push_back(staticItem);
+        m_count_rects++;
     }
 }
 
@@ -52,21 +60,21 @@ void CUIArtefactPanel::Draw()
 
     float _s = m_cell_size.x/m_cell_size.y;
 
-    for (const Frect& r : m_vRects)
+    for (auto i = 0; i < m_count_rects; i++)
     {
         Fvector2 size;
-        size.x = m_fScale*(r.bottom - r.top);
-        size.y = _s*m_fScale*(r.right - r.left);
+        size.x = m_fScale*(m_vRects[i].bottom - m_vRects[i].top);
+        size.y = _s*m_fScale*(m_vRects[i].right - m_vRects[i].left);
 
-        m_StaticItem.SetTextureRect(r);
-        m_StaticItem.SetSize(size);
-        m_StaticItem.SetPos(x, y);
+        m_vStaticRects[i].SetTextureRect(m_vRects[i]);
+        m_vStaticRects[i].SetSize(size);
+        m_vStaticRects[i].SetPos(x, y);
         if (!m_bVert)
             x = x + m_iIndent + size.x;
         else
             y = y + m_iIndent + size.y;
 
-        m_StaticItem.Render();
+        m_vStaticRects[i].Render();
     }
 
     CUIWindow::Draw();

@@ -191,39 +191,62 @@ void CUIWpnParams::SetInfo(CInventoryItem* slot_wpn, CInventoryItem& cur_wpn)
         Frect tex_rect;
         if (m_stAmmoType1)
         {
-            m_stAmmoType1->SetShader(InventoryUtilities::GetEquipmentIconsShader());
-            tex_rect.x1 = float(pSettings->r_u32(ammo_types[0].c_str(), "inv_grid_x") * INV_GRID_WIDTH);
-            tex_rect.y1 = float(pSettings->r_u32(ammo_types[0].c_str(), "inv_grid_y") * INV_GRID_HEIGHT);
-            tex_rect.x2 = float(pSettings->r_u32(ammo_types[0].c_str(), "inv_grid_width") * INV_GRID_WIDTH);
-            tex_rect.y2 = float(pSettings->r_u32(ammo_types[0].c_str(), "inv_grid_height") * INV_GRID_HEIGHT);
+            R_ASSERT2(pSettings->line_exist(ammo_types[0].c_str(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", ammo_types[0].c_str()));
+            m_stAmmoType1->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(ammo_types[0].c_str(), "inv_icon")));
+            tex_rect.x1 = 0;
+            tex_rect.y1 = 0;
+            tex_rect.x2 = float(pSettings->r_u32(ammo_types[0].c_str(), "inv_grid_width") * ICON_GRID_WIDTH * 1.1);
+            tex_rect.y2 = float(pSettings->r_u32(ammo_types[0].c_str(), "inv_grid_height") * ICON_GRID_HEIGHT * 1.1);
             tex_rect.rb.add(tex_rect.lt);
             m_stAmmoType1->SetTextureRect(tex_rect);
             m_stAmmoType1->TextureOn();
             m_stAmmoType1->SetStretchTexture(true);
+            m_textAmmoCount->SetVisible(true);
+            m_stAmmo->SetVisible(true);
+            m_stAmmoType1->SetVisible(true);
             m_stAmmoType1->SetWndSize(
-                Fvector2().set((tex_rect.x2 - tex_rect.x1) * UI().get_current_kx(), tex_rect.y2 - tex_rect.y1));
+                Fvector2().set(tex_rect.x2 * 0.8 * UI().get_current_kx(), tex_rect.y2 * 0.8));
         }
 
         if (m_stAmmoType2)
         {
-            m_stAmmoType2->SetShader(InventoryUtilities::GetEquipmentIconsShader());
             if (ammo_types.size() == 1 && m_stAmmoType1)
             {
                 tex_rect.set(0, 0, 1, 1);
+                m_stAmmoType2->SetVisible(false);
             }
             else
             {
-                tex_rect.x1 = float(pSettings->r_u32(ammo_types[1].c_str(), "inv_grid_x") * INV_GRID_WIDTH);
-                tex_rect.y1 = float(pSettings->r_u32(ammo_types[1].c_str(), "inv_grid_y") * INV_GRID_HEIGHT);
-                tex_rect.x2 = float(pSettings->r_u32(ammo_types[1].c_str(), "inv_grid_width") * INV_GRID_WIDTH);
-                tex_rect.y2 = float(pSettings->r_u32(ammo_types[1].c_str(), "inv_grid_height") * INV_GRID_HEIGHT);
+                R_ASSERT2(pSettings->line_exist(ammo_types[1].c_str(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", ammo_types[1].c_str()));
+                m_stAmmoType2->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(ammo_types[1].c_str(), "inv_icon")));
+
+                tex_rect.x1 = 0;
+                tex_rect.y1 = 0;
+                tex_rect.x2 = float(pSettings->r_u32(ammo_types[1].c_str(), "inv_grid_width") * ICON_GRID_WIDTH * 1.1);
+                tex_rect.y2 = float(pSettings->r_u32(ammo_types[1].c_str(), "inv_grid_height") * ICON_GRID_HEIGHT * 1.1);
                 tex_rect.rb.add(tex_rect.lt);
+
+                m_stAmmoType2->SetTextureRect(tex_rect);
+                m_stAmmoType2->TextureOn();
+                m_stAmmoType2->SetStretchTexture(true);
+                m_stAmmoType2->SetVisible(true);
+                m_textAmmoCount2->SetVisible(true);
+                m_stAmmo->SetVisible(true);
+                m_stAmmoType2->SetWndSize(
+                    Fvector2().set(tex_rect.x2 * 0.8 * UI().get_current_kx(), tex_rect.y2 * 0.8));
             }
-            m_stAmmoType2->SetTextureRect(tex_rect);
-            m_stAmmoType2->TextureOn();
-            m_stAmmoType2->SetStretchTexture(true);
-            m_stAmmoType2->SetWndSize(
-                Fvector2().set((tex_rect.x2 - tex_rect.x1) * UI().get_current_kx(), tex_rect.y2 - tex_rect.y1));
+        }
+
+        auto slot_id = slot_wpn->BaseSlot();
+        if (slot_id == KNIFE_SLOT)
+        {
+            m_textAmmoTypes->SetVisible(false);
+            m_textAmmoUsedType->SetVisible(false);
+            m_stAmmoType1->SetVisible(false);
+            m_stAmmoType2->SetVisible(false);
+            m_textAmmoCount->SetVisible(false);
+            m_textAmmoCount2->SetVisible(false);
+            m_stAmmo->SetVisible(false);
         }
     }
 }
