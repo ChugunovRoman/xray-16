@@ -285,6 +285,7 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
         //////////////////////////////////////////////////////////////////////////
         .def("profile_name", &CScriptGameObject::ProfileName)
         .def("character_name", &CScriptGameObject::CharacterName)
+        .def("set_character_name", &CScriptGameObject::SetCharacterName)
         .def("character_icon", &CScriptGameObject::CharacterIcon)
         .def("character_rank", &CScriptGameObject::CharacterRank)
         .def("set_character_rank", &CScriptGameObject::SetCharacterRank)

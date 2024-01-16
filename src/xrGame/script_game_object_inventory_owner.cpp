@@ -679,6 +679,18 @@ LPCSTR CScriptGameObject::CharacterName()
     }
     return pInventoryOwner->Name();
 }
+void CScriptGameObject::SetCharacterName(LPCSTR name)
+{
+    CInventoryOwner* pInventoryOwner = smart_cast<CInventoryOwner*>(&object());
+
+    if (!pInventoryOwner)
+    {
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "SetCharacterName available only for InventoryOwner");
+        return;
+    }
+
+    pInventoryOwner->SetName(name);
+}
 
 LPCSTR CScriptGameObject::CharacterIcon()
 {

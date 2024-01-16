@@ -413,6 +413,7 @@ public:
 
     LPCSTR ProfileName();
     LPCSTR CharacterName();
+    void SetCharacterName(LPCSTR name);
     LPCSTR CharacterIcon();
     LPCSTR CharacterCommunity();
     int CharacterRank();
