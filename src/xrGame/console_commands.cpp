@@ -2020,7 +2020,7 @@ public:
     }
 };
 
-class ENGINE_API CCC_InvCellSize : public CCC_Integer
+class CCC_InvCellSize : public CCC_Integer
 {
 protected:
     int* value;
