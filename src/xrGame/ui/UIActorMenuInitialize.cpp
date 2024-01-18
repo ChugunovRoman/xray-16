@@ -237,6 +237,8 @@ void CUIActorMenu::InitializeUniversal(CUIXml& uiXml)
         list = UIHelper::CreateDragDropListEx(uiXml, section, this, required);
         if (!list)
             continue;
+        if (xr_strcmp(section, "dragdrop_bag") == 0)
+            dragdrop_bag = list;
 
         if (conditionIndicator)
         {

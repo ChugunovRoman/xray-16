@@ -16,6 +16,7 @@ public:
     virtual void SetIsHelper(bool is_helper);
     bool IsHelperOrHasHelperChild();
     void Update();
+    void UpdateIcon();
     CInventoryItem* object() { return (CInventoryItem*)m_pData; }
 
     pcstr GetDebugType() override { return "CUIInventoryCellItem"; }

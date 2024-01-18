@@ -106,6 +106,7 @@ ENGINE_API extern float g_console_sensitive;
 //Alundaio
 extern BOOL g_ai_die_in_anomaly;
 int g_inv_highlight_equipped = 0;
+int g_inv_inv_cell_size = 3;
 //-Alundaio
 
 int g_first_person_death = 0;
@@ -1462,7 +1463,7 @@ struct CCC_LuaHelp : public IConsole_Command
 
 	virtual void Execute(LPCSTR args)
 	{
-    GEnv.ScriptEngine->dumpScriptBindings();
+        GEnv.ScriptEngine->dumpScriptBindings();
 	}
 };
 
@@ -2019,6 +2020,77 @@ public:
     }
 };
 
+class ENGINE_API CCC_InvCellSize : public CCC_Integer
+{
+protected:
+    int* value;
+    int min, max;
+
+public:
+    int GetValue() const { return *value; }
+    void GetBounds(int& imin, int& imax) const
+    {
+        imin = min;
+        imax = max;
+    }
+
+    CCC_InvCellSize(pcstr N, int* V, int _min = 0, int _max = 999) : CCC_Integer(N, V, _min, _max), value(V), min(_min){
+        bEmptyArgsHandled = true;
+        int i = 1;
+
+        string32 section;
+        xr_sprintf(section, "inventory_size_%d", i);
+
+        bool section_exist = pSettings->section_exist(section);
+        do {
+            xr_sprintf(section, "inventory_size_%d", i);
+
+            i++;
+            section_exist = pSettings->section_exist(section);
+        } while(section_exist);
+
+        max = i - 2;
+
+        Msg("CCC_InvCellSize, i=[%d]", i);
+    }
+
+    virtual void Execute(pcstr args)
+    {
+        int num = atoi(args);
+        string32 section;
+        xr_sprintf(section, "inventory_size_%d", num);
+
+        bool section_exist = pSettings->section_exist(section);
+
+        if (!section_exist)
+        {
+            Msg("Section: '%s' not found in system.ltx", section);
+            InvalidSyntax();
+            return;
+        }
+        else
+            *value = num;
+
+        if (!g_pGameLevel)
+            return;
+        CUIGameSP* ui_game_sp = smart_cast<CUIGameSP*>(CurrentGameUI());
+        if (!ui_game_sp)
+            return;
+        CUIActorMenu& actor_menu = ui_game_sp->GetActorMenu();
+        actor_menu.UpdateGridSize();
+        actor_menu.UpdateActor();
+    }
+    virtual void GetStatus(TStatus& S) { xr_itoa(*value, S, 10); }
+    virtual void Info(TInfo& I) { xr_sprintf(I, sizeof(I), "integer value in range [%d,%d]", min, max); }
+    virtual void fill_tips(vecTips& tips, u32 mode)
+    {
+        TStatus str;
+        xr_sprintf(str, sizeof(str), "%d (current) [%d,%d]", *value, min, max);
+        tips.push_back(str);
+        IConsole_Command::fill_tips(tips, mode);
+    }
+};
+
 void CCC_RegisterCommands()
 {
     // options
@@ -2210,6 +2282,7 @@ void CCC_RegisterCommands()
 #endif // MASTER_GOLD
 
     CMD1(CCC_LuaHelp, "dump_lua");
+    CMD4(CCC_InvCellSize, "g_inv_cell_size", &g_inv_inv_cell_size, 1, 4);
 
     CMD3(CCC_Mask, "g_autopickup", &psActorFlags, AF_AUTOPICKUP);
     CMD3(CCC_Mask, "g_dynamic_music", &psActorFlags, AF_DYNAMIC_MUSIC);

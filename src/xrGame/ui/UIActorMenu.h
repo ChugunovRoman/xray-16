@@ -179,6 +179,7 @@ protected:
 
 public:
     CUIDragDropReferenceList* m_pQuickSlot{};
+    CUIDragDropListEx* dragdrop_bag;
 
 protected:
     // Condition bars
@@ -369,6 +370,7 @@ public:
     virtual void SendMessage(CUIWindow* pWnd, s16 msg, void* pData = NULL);
     virtual void Draw();
     virtual void Update();
+    virtual void UpdateGridSize();
     virtual void Show(bool status);
 
     virtual bool OnKeyboardAction(int dik, EUIMessages keyboard_action);

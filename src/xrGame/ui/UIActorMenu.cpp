@@ -39,7 +39,11 @@
 #include "UIMessageBoxEx.h"
 #include "xrUICore/PropertiesBox/UIPropertiesBox.h"
 #include "UIMainIngameWnd.h"
+#include "UICellItemFactory.h"
+#include "UICellCustomItems.h"
 #include "trade.h"
+
+extern int g_inv_inv_cell_size;
 
 void CUIActorMenu::SetActor(CInventoryOwner* io)
 {
@@ -211,6 +215,36 @@ void CUIActorMenu::Draw()
         m_hint_wnd->Draw();
     if (m_message_static)
         m_message_static->Draw();
+}
+
+void CUIActorMenu::UpdateGridSize()
+{
+    string32 section;
+    xr_sprintf(section, "inventory_size_%d", g_inv_inv_cell_size);
+
+    if (pSettings->section_exist(section))
+    {
+        Ivector2 w_cell_sz, w_cells;
+
+        w_cell_sz.x = pSettings->r_u16(section, "cell_width");
+        w_cell_sz.y = pSettings->r_u16(section, "cell_height");
+        w_cells.y = pSettings->r_u16(section, "rows_num");
+        w_cells.x = pSettings->r_u16(section, "cols_num");
+
+        dragdrop_bag->SetCellSize(w_cell_sz);
+        dragdrop_bag->SetStartCellsCapacity(w_cells);
+
+        TIItemContainer ruck_list = m_pActorInvOwner->inventory().m_ruck;
+        std::sort(ruck_list.begin(), ruck_list.end(), InventoryUtilities::GreaterRoomInRuck);
+
+        for (PIItem item : ruck_list)
+        {
+            CUIInventoryCellItem* cell = smart_cast<CUIInventoryCellItem*>(create_cell_item(item));
+            cell->UpdateIcon();
+        }
+    }
+    else
+        Msg("Section: '%s' not found in system.ltx", section);
 }
 
 void CUIActorMenu::Update()

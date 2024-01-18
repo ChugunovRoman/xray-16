@@ -23,6 +23,8 @@
 #include "UITabButtonMP.h"
 #include "xrUICore/Lines/UILines.h"
 
+extern int g_inv_inv_cell_size;
+
 CUIXmlInit::CUIXmlInit() : CUIXmlInitBase() {}
 CUIXmlInit::~CUIXmlInit() {}
 
@@ -76,6 +78,22 @@ bool CUIXmlInit::InitDragDropListEx(CUIXml& xml_doc, LPCSTR path, int index, CUI
     w_cell_sz.y = xml_doc.ReadAttribInt(path, index, "cell_height");
     w_cells.y = xml_doc.ReadAttribInt(path, index, "rows_num");
     w_cells.x = xml_doc.ReadAttribInt(path, index, "cols_num");
+
+    if (xr_strcmp(path, "dragdrop_bag") == 0)
+    {
+        string32 section;
+        xr_sprintf(section, "inventory_size_%d", g_inv_inv_cell_size);
+
+        if (pSettings->section_exist(section))
+        {
+            w_cell_sz.x = pSettings->r_u16(section, "cell_width");
+            w_cell_sz.y = pSettings->r_u16(section, "cell_height");
+            w_cells.y = pSettings->r_u16(section, "rows_num");
+            w_cells.x = pSettings->r_u16(section, "cols_num");
+        }
+        else
+            Msg("Section: '%s' not found in system.ltx", section);
+    }
 
     w_cell_sp.x = xml_doc.ReadAttribInt(path, index, "cell_sp_x");
     w_cell_sp.y = xml_doc.ReadAttribInt(path, index, "cell_sp_y");
