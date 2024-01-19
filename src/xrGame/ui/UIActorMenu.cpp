@@ -462,9 +462,10 @@ void CUIActorMenu::InfoCurItem(CUICellItem* cell_item)
     PIItem compare_item = NULL;
     u16 compare_slot = current_item->BaseSlot();
     if (compare_slot != NO_ACTIVE_SLOT)
-    {
         compare_item = m_pActorInvOwner->inventory().ItemFromSlot(compare_slot);
-    }
+
+    if (compare_item == NULL)
+        compare_item = current_item;
 
     if (GetMenuMode() == mmTrade)
     {
