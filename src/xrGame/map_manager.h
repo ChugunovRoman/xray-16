@@ -18,6 +18,7 @@ public:
     void Update();
     /*ICF */ vLocations& Locations(); //{return *m_locations;}
     CMapLocation* AddMapLocation(const shared_str& spot_type, u16 id);
+    CMapLocation* SetMapLocation(const shared_str& spot_type, u16 id);
     CMapLocation* AddRelationLocation(CInventoryOwner* pInvOwner);
     void RemoveMapLocation(const shared_str& spot_type, u16 id);
     bool HasMapLocation(const shared_str& spot_type, u16 id);

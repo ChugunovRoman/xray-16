@@ -235,9 +235,13 @@ void map_add_object_spot(u16 id, LPCSTR spot_type, LPCSTR text)
 {
     CMapLocation* ml = Level().MapManager().AddMapLocation(spot_type, id);
     if (xr_strlen(text))
-    {
         ml->SetHint(text);
-    }
+}
+void map_set_object_spot(u16 id, LPCSTR spot_type, LPCSTR text)
+{
+    CMapLocation* ml = Level().MapManager().SetMapLocation(spot_type, id);
+    if (xr_strlen(text))
+        ml->SetHint(text);
 }
 
 void map_add_object_spot_ser(u16 id, LPCSTR spot_type, LPCSTR text)
@@ -795,9 +799,12 @@ IC static void CLevel_Export(lua_State* luaState)
 
         def("client_spawn_manager", get_client_spawn_manager),
 
-        def("map_add_object_spot_ser", map_add_object_spot_ser), def("map_add_object_spot", map_add_object_spot),
+        def("map_add_object_spot_ser", map_add_object_spot_ser),
+        def("map_add_object_spot", map_add_object_spot),
+        def("map_set_object_spot", map_set_object_spot),
         // def("map_add_object_spot_complex", map_add_object_spot_complex),
-        def("map_remove_object_spot", map_remove_object_spot), def("map_has_object_spot", map_has_object_spot),
+        def("map_remove_object_spot", map_remove_object_spot),
+        def("map_has_object_spot", map_has_object_spot),
         def("map_change_spot_hint", map_change_spot_hint),
 
         def("start_stop_menu", start_stop_menu),
