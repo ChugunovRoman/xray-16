@@ -219,6 +219,11 @@ void CUIActorMenu::Draw()
 
 void CUIActorMenu::UpdateGridSize()
 {
+    if (m_pActorInvOwner == nullptr)
+        return;
+    if (dragdrop_bag == nullptr)
+        return;
+
     string32 section;
     xr_sprintf(section, "inventory_size_%d", g_inv_inv_cell_size);
 
@@ -240,7 +245,8 @@ void CUIActorMenu::UpdateGridSize()
         for (PIItem item : ruck_list)
         {
             CUIInventoryCellItem* cell = smart_cast<CUIInventoryCellItem*>(create_cell_item(item));
-            cell->UpdateIcon();
+            if (cell)
+                cell->UpdateIcon();
         }
     }
     else

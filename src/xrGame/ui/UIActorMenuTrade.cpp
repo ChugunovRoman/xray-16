@@ -327,6 +327,9 @@ bool CUIActorMenu::CanMoveToPartner(PIItem pItem)
 
 void CUIActorMenu::UpdateActor()
 {
+    if (!m_pActorInvOwner)
+        return;
+
     if (IsGameTypeSingle())
     {
         string64 buf;
