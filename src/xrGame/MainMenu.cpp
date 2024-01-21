@@ -647,30 +647,33 @@ void CMainMenu::CheckForErrorDlg()
 
 bool CMainMenu::FillDebugTree(const CUIDebugState& debugState)
 {
-#ifndef MASTER_GOLD
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
-    if (debugState.selected == this)
-        flags |= ImGuiTreeNodeFlags_Selected;
-
-    const bool open = ImGui::TreeNodeEx(this, flags, "Main menu (%s)", GetDebugType());
-    if (ImGui::IsItemClicked())
-        debugState.select(this);
-
-    if (open)
+    if (UiDebuggerEnabled)
     {
-        CDialogHolder::FillDebugTree(debugState);
-        if (m_startDialog)
-            m_startDialog->FillDebugTree(debugState);
-        else
-            ImGui::BulletText("Please, open main menu to see it's structure");
-        ImGui::TreePop();
-    }
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
+        if (debugState.selected == this)
+            flags |= ImGuiTreeNodeFlags_Selected;
 
-    return open;
-#else
-    UNUSED(debugState);
-    return false;
-#endif
+        const bool open = ImGui::TreeNodeEx(this, flags, "Main menu (%s)", GetDebugType());
+        if (ImGui::IsItemClicked())
+            debugState.select(this);
+
+        if (open)
+        {
+            CDialogHolder::FillDebugTree(debugState);
+            if (m_startDialog)
+                m_startDialog->FillDebugTree(debugState);
+            else
+                ImGui::BulletText("Please, open main menu to see it's structure");
+            ImGui::TreePop();
+        }
+
+        return open;
+    }
+    else
+    {
+        UNUSED(debugState);
+        return false;
+    }
 }
 
 void CMainMenu::SwitchToMultiplayerMenu() { m_startDialog->Dispatch(2, 1); };

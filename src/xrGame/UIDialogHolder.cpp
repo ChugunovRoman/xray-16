@@ -560,10 +560,11 @@ bool CDialogHolder::FillDebugTree(const CUIDebugState& debugState)
 
 void CDialogHolder::FillDebugInfo()
 {
-#ifndef MASTER_GOLD
+    if (!UiDebuggerEnabled)
+        return;
+
     if (ImGui::CollapsingHeader(CDialogHolder::GetDebugType()))
     {
 
     }
-#endif
 }

@@ -520,62 +520,66 @@ bool fit_in_rect(CUIWindow* w, Frect const& vis_rect, float border, float dx16po
 
 bool CUIWindow::FillDebugTree(const CUIDebugState& debugState)
 {
-#ifndef MASTER_GOLD
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
-    if (debugState.selected == this)
-        flags |= ImGuiTreeNodeFlags_Selected;
-    if (m_ChildWndList.empty())
-        flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet;
-
-    const bool open = ImGui::TreeNodeEx(this, flags, "%s (%s)", WindowName().c_str(), GetDebugType());
-    if (ImGui::IsItemClicked())
-        debugState.select(this);
-
-    const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
-    if (debugState.drawWndRects && (IsShown() || hovered))
+    if (UiDebuggerEnabled)
     {
-        Frect rect;
-        GetAbsoluteRect(rect);
-        UI().ClientToScreenScaled(rect.lt, rect.lt.x, rect.lt.y);
-        UI().ClientToScreenScaled(rect.rb, rect.rb.x, rect.rb.y);
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
+        if (debugState.selected == this)
+            flags |= ImGuiTreeNodeFlags_Selected;
+        if (m_ChildWndList.empty())
+            flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet;
 
-        // XXX: make colours user configurable
-        u32 color = color_rgba(255, 0, 0, 255);
-        if (hovered)
-            color = color_rgba(255, 255, 0, 255);
-        else if (debugState.coloredRects)
+        const bool open = ImGui::TreeNodeEx(this, flags, "%s (%s)", WindowName().c_str(), GetDebugType());
+        if (ImGui::IsItemClicked())
+            debugState.select(this);
+
+        const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
+        if (debugState.drawWndRects && (IsShown() || hovered))
         {
-            // This is pseudo RNG, so when we are seeding it with 'this' pointer
-            // we can expect predictable and stable values (no *blinking* at all)
-            CRandom rnd;
-            rnd.seed((s32)(intptr_t)this);
-            color = color_rgba(rnd.randI(255), rnd.randI(255), rnd.randI(255), 255);
+            Frect rect;
+            GetAbsoluteRect(rect);
+            UI().ClientToScreenScaled(rect.lt, rect.lt.x, rect.lt.y);
+            UI().ClientToScreenScaled(rect.rb, rect.rb.x, rect.rb.y);
+
+            // XXX: make colours user configurable
+            u32 color = color_rgba(255, 0, 0, 255);
+            if (hovered)
+                color = color_rgba(255, 255, 0, 255);
+            else if (debugState.coloredRects)
+            {
+                // This is pseudo RNG, so when we are seeding it with 'this' pointer
+                // we can expect predictable and stable values (no *blinking* at all)
+                CRandom rnd;
+                rnd.seed((s32)(intptr_t)this);
+                color = color_rgba(rnd.randI(255), rnd.randI(255), rnd.randI(255), 255);
+            }
+
+            const auto draw_list = hovered ? ImGui::GetForegroundDrawList() : ImGui::GetBackgroundDrawList();
+            draw_list->AddRect((const ImVec2&)rect.lt, (const ImVec2&)rect.rb, color);
         }
 
-        const auto draw_list = hovered ? ImGui::GetForegroundDrawList() : ImGui::GetBackgroundDrawList();
-        draw_list->AddRect((const ImVec2&)rect.lt, (const ImVec2&)rect.rb, color);
-    }
-
-    if (open)
-    {
-        for (const auto& child : m_ChildWndList)
+        if (open)
         {
-            child->FillDebugTree(debugState);
+            for (const auto& child : m_ChildWndList)
+            {
+                child->FillDebugTree(debugState);
+            }
+            if (!m_ChildWndList.empty())
+                ImGui::TreePop();
         }
-        if (!m_ChildWndList.empty())
-            ImGui::TreePop();
-    }
 
-    return open;
-#else
-    UNUSED(debugState);
-    return false;
-#endif
+        return open;
+    }
+    else
+    {
+        UNUSED(debugState);
+        return false;
+    }
 }
 
 void CUIWindow::FillDebugInfo()
 {
-#ifndef MASTER_GOLD
+    if (!UiDebuggerEnabled)
+        return;
     if (!ImGui::CollapsingHeader(CUIWindow::GetDebugType()))
         return;
 
@@ -601,5 +605,4 @@ void CUIWindow::FillDebugInfo()
     ImGui::LabelText("Mouse capturer", "%s", m_pMouseCapturer ? m_pMouseCapturer->WindowName().c_str() : "none");
     ImGui::LabelText("Keyboard capturer", "%s", m_pKeyboardCapturer ? m_pKeyboardCapturer->WindowName().c_str() : "none");
     ImGui::LabelText("Message target", "%s", m_pMessageTarget ? m_pMessageTarget->WindowName().c_str() : "none");
-#endif
 }

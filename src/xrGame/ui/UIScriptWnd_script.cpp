@@ -73,65 +73,68 @@ struct CUIDialogWndExWrapperBase final : public CUIDialogWndEx, public luabind::
 
     bool FillDebugTree(const CUIDebugState& debugState) override
     {
-#ifndef MASTER_GOLD
-        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
-        if (debugState.selected == this)
-            flags |= ImGuiTreeNodeFlags_Selected;
-
-        inherited::FillDebugTree(debugState);
-
-        const auto& wrap_ref = luabind::detail::wrap_access::ref(*this);
-
-        lua_State* ls = wrap_ref.state();
-        const int prev = lua_gettop(ls);
+        if (UiDebuggerEnabled)
         {
-            wrap_ref.get(ls);
-            luabind::detail::stack_pop pop{ ls, 1 };
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
+            if (debugState.selected == this)
+                flags |= ImGuiTreeNodeFlags_Selected;
 
-            const auto* obj = static_cast<luabind::detail::object_rep*>(lua_touserdata(ls, -1));
+            inherited::FillDebugTree(debugState);
 
-            ImGui::PushID(obj->crep()->name());
-            const bool open = ImGui::TreeNodeEx(this, flags, "%s * LUA", obj->crep()->name());
-            if (ImGui::IsItemClicked())
-                debugState.select(this);
+            const auto& wrap_ref = luabind::detail::wrap_access::ref(*this);
 
-            if (open)
+            lua_State* ls = wrap_ref.state();
+            const int prev = lua_gettop(ls);
             {
-                lua_getuservalue(ls, -1);
-                luabind::detail::stack_pop pop2{ ls, 1 };
+                wrap_ref.get(ls);
+                luabind::detail::stack_pop pop{ ls, 1 };
 
-                luabind::table members(luabind::from_stack(ls, -1));
-                for (luabind::iterator it(members), end; it != end; ++it)
+                const auto* obj = static_cast<luabind::detail::object_rep*>(lua_touserdata(ls, -1));
+
+                ImGui::PushID(obj->crep()->name());
+                const bool open = ImGui::TreeNodeEx(this, flags, "%s * LUA", obj->crep()->name());
+                if (ImGui::IsItemClicked())
+                    debugState.select(this);
+
+                if (open)
                 {
-                    auto proxy = *it;
-                    proxy.push(ls);
-                    luabind::detail::stack_pop pop3{ ls, 1 };
+                    lua_getuservalue(ls, -1);
+                    luabind::detail::stack_pop pop2{ ls, 1 };
 
-                    if (luabind::type(proxy) == LUA_TUSERDATA)
+                    luabind::table members(luabind::from_stack(ls, -1));
+                    for (luabind::iterator it(members), end; it != end; ++it)
                     {
-                        const auto ptr = luabind::detail::get_instance(ls, -1);
-                        if (!ptr)
-                            continue;
+                        auto proxy = *it;
+                        proxy.push(ls);
+                        luabind::detail::stack_pop pop3{ ls, 1 };
 
-                        const auto inst = ptr->get_instance(luabind::detail::registered_class<CUIWindow>::id).first;
-                        if (!inst)
-                            continue;
+                        if (luabind::type(proxy) == LUA_TUSERDATA)
+                        {
+                            const auto ptr = luabind::detail::get_instance(ls, -1);
+                            if (!ptr)
+                                continue;
 
-                        ((CUIWindow*)inst)->FillDebugTree(debugState);
+                            const auto inst = ptr->get_instance(luabind::detail::registered_class<CUIWindow>::id).first;
+                            if (!inst)
+                                continue;
+
+                            ((CUIWindow*)inst)->FillDebugTree(debugState);
+                        }
                     }
-                }
 
-                ImGui::TreePop();
-            } // if (open)
-            ImGui::PopID();
+                    ImGui::TreePop();
+                } // if (open)
+                ImGui::PopID();
+            }
+            R_ASSERT(lua_gettop(ls) == prev);
+
+            return true;
         }
-        R_ASSERT(lua_gettop(ls) == prev);
-
-        return true;
-#else
-        UNUSED(debugState);
-        return false;
-#endif
+        else
+        {
+            UNUSED(debugState);
+            return false;
+        }
     }
 
     void FillDebugInfo() override

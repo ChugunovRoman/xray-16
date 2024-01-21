@@ -321,44 +321,48 @@ void CChangeLevelWnd::OnOk()
 
 bool CUIGameSP::FillDebugTree(const CUIDebugState& debugState)
 {
-#ifndef MASTER_GOLD
-    if (!CUIGameCustom::FillDebugTree(debugState))
-        return false;
-
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
-    if (debugState.selected == this)
-        flags |= ImGuiTreeNodeFlags_Selected;
-
-    const bool open = ImGui::TreeNodeEx(this, flags, "Game UI (%s)", CUIGameSP::GetDebugType());
-    if (ImGui::IsItemClicked())
-        debugState.select(this);
-
-    if (open)
+    if (UiDebuggerEnabled)
     {
-        TalkMenu->FillDebugTree(debugState);
-        UIChangeLevelWnd->FillDebugTree(debugState);
-        if (m_game_objective)
-            m_game_objective->wnd()->FillDebugTree(debugState);
-        ImGui::TreePop();
-    }
+        if (!CUIGameCustom::FillDebugTree(debugState))
+            return false;
 
-    return open;
-#else
-    UNUSED(debugState);
-    return false;
-#endif
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
+        if (debugState.selected == this)
+            flags |= ImGuiTreeNodeFlags_Selected;
+
+        const bool open = ImGui::TreeNodeEx(this, flags, "Game UI (%s)", CUIGameSP::GetDebugType());
+        if (ImGui::IsItemClicked())
+            debugState.select(this);
+
+        if (open)
+        {
+            TalkMenu->FillDebugTree(debugState);
+            UIChangeLevelWnd->FillDebugTree(debugState);
+            if (m_game_objective)
+                m_game_objective->wnd()->FillDebugTree(debugState);
+            ImGui::TreePop();
+        }
+
+        return open;
+    }
+    else
+    {
+        UNUSED(debugState);
+        return false;
+    }
 }
 
 void CUIGameSP::FillDebugInfo()
 {
-#ifndef MASTER_GOLD
+    if (!UiDebuggerEnabled)
+        return;
+
     CUIGameCustom::FillDebugInfo();
 
     if (ImGui::CollapsingHeader(CUIGameSP::GetDebugType()))
     {
 
     }
-#endif
 }
 
 void CChangeLevelWnd::OnCancel()
@@ -433,7 +437,9 @@ void CChangeLevelWnd::HideDialog()
 
 void CChangeLevelWnd::FillDebugInfo()
 {
-#ifndef MASTER_GOLD
+    if (!UiDebuggerEnabled)
+        return;
+
     CUIDialogWnd::FillDebugInfo();
 
     if (ImGui::CollapsingHeader(CChangeLevelWnd::GetDebugType()))
@@ -448,5 +454,4 @@ void CChangeLevelWnd::FillDebugInfo()
         ImGui::DragFloat3("Position on cancel", (float*)&m_position_cancel);
         ImGui::DragFloat3("Angles on cancel", (float*)&m_angles_cancel);
     }
-#endif
 }

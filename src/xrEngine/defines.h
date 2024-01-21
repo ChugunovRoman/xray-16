@@ -9,6 +9,7 @@ ENGINE_API extern bool bDebug;
 extern ENGINE_API bool CallOfPripyatMode;
 extern ENGINE_API bool ClearSkyMode;
 extern ENGINE_API bool ShadowOfChernobylMode;
+extern ENGINE_API bool UiDebuggerEnabled;
 
 // textures
 ENGINE_API extern int psTextureLOD;

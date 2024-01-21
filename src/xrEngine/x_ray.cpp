@@ -57,6 +57,8 @@ ENGINE_API bool CallOfPripyatMode = false;
 ENGINE_API bool ClearSkyMode = false;
 ENGINE_API bool ShadowOfChernobylMode = false;
 
+ENGINE_API bool UiDebuggerEnabled = false;
+
 ENGINE_API string512 g_sLaunchOnExit_params;
 ENGINE_API string512 g_sLaunchOnExit_app;
 ENGINE_API string_path g_sLaunchWorkingFolder;
@@ -156,6 +158,9 @@ void InitSettings()
         else if (xr_strcmpi("unlock", gameMode) == 0)
             set_free_mode();
     }
+
+    if (strstr(Core.Params, "-uidbg"))
+        UiDebuggerEnabled = true;
 }
 
 void InitConsole()

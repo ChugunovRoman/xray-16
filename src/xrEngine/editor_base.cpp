@@ -203,26 +203,27 @@ void ide::ShowMain()
             }
             ImGui::EndMenu();
         }
-#ifndef MASTER_GOLD
-        if (ImGui::BeginMenu("Tools"))
+
+        if (UiDebuggerEnabled)
         {
-            ImGui::MenuItem("Weather Editor", nullptr, &m_show_weather_editor);
-            for (const auto& tool : m_tools)
+            if (ImGui::BeginMenu("Tools"))
             {
-                ImGui::MenuItem(tool->tool_name(), nullptr, &tool->get_open_state());
+                ImGui::MenuItem("Weather Editor", nullptr, &m_show_weather_editor);
+                for (const auto& tool : m_tools)
+                {
+                    ImGui::MenuItem(tool->tool_name(), nullptr, &tool->get_open_state());
+                }
+                ImGui::EndMenu();
             }
-            ImGui::EndMenu();
         }
-#endif
         if (ImGui::BeginMenu("About"))
         {
-#ifndef MASTER_GOLD
-#   ifdef DEBUG
+        if (UiDebuggerEnabled)
+        {
             ImGui::MenuItem("ImGui demo", nullptr, &show_imgui_demo);
-#   endif
             ImGui::MenuItem("ImGui metrics", nullptr, &show_imgui_metrics);
-#endif
             ImGui::EndMenu();
+        }
         }
         ImGui::EndMainMenuBar();
     }

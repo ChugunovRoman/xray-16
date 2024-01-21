@@ -24,18 +24,18 @@ void CUIDebuggable::UnregisterDebuggable()
 
 void CUIDebugger::Register(CUIDebuggable* debuggable)
 {
-#ifndef MASTER_GOLD
-    m_root_windows.emplace_back(debuggable);
-#endif
+    if (UiDebuggerEnabled)
+        m_root_windows.emplace_back(debuggable);
 }
 
 void CUIDebugger::Unregister(CUIDebuggable* debuggable)
 {
-#ifndef MASTER_GOLD
-    const auto it = std::find(m_root_windows.begin(), m_root_windows.end(), debuggable);
-    if (it != m_root_windows.end())
-        m_root_windows.erase(it);
-#endif
+    if (UiDebuggerEnabled)
+    {
+        const auto it = std::find(m_root_windows.begin(), m_root_windows.end(), debuggable);
+        if (it != m_root_windows.end())
+            m_root_windows.erase(it);
+    }
 }
 
 void CUIDebugger::SetSelected(CUIDebuggable* debuggable)
@@ -61,7 +61,8 @@ CUIDebugger::CUIDebugger()
 
 void CUIDebugger::OnFrame()
 {
-#ifndef MASTER_GOLD
+    if (!UiDebuggerEnabled)
+        return;
     if (!get_open_state())
         return;
 
@@ -95,5 +96,4 @@ void CUIDebugger::OnFrame()
         ImGui::EndChild();
     }
     ImGui::End();
-#endif
 }
