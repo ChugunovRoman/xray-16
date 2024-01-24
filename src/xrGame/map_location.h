@@ -83,6 +83,7 @@ public:
     LPCSTR GetHint();
     void SetHint(const shared_str& hint);
     void SetSize(const float width, const float height);
+    void SetColor(u32 color);
     CComplexMapSpot* complex_spot() { return m_complex_spot; }
     const CMapSpot* LevelMapSpot() { return m_level_spot; }
     const CMiniMapSpot* MiniMapSpot() { return m_minimap_spot; }

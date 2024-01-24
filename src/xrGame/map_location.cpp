@@ -723,6 +723,13 @@ void CMapLocation::SetSize(const float width, const float height)
 
     m_level_spot->SetSize(width, height);
 };
+void CMapLocation::SetColor(u32 color)
+{
+    if (!m_level_spot)
+        return;
+
+    m_level_spot->SetColor(color);
+};
 
 LPCSTR CMapLocation::GetHint()
 {
