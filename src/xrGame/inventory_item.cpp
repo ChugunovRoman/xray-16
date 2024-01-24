@@ -1473,19 +1473,12 @@ Irect CInventoryItem::GetInvGridRect() const
 {
     u32 x, y, w, h;
 
-    x = 0;
-    y = 0;
+    x = pSettings->r_u32(m_object->cNameSect(), "inv_grid_x");
+    y = pSettings->r_u32(m_object->cNameSect(), "inv_grid_y");
     w = pSettings->r_u32(m_object->cNameSect(), "inv_grid_width");
     h = pSettings->r_u32(m_object->cNameSect(), "inv_grid_height");
 
     return Irect().set(x, y, w, h);
-}
-
-pcstr CInventoryItem::GetInvIconPath() const
-{
-    R_ASSERT2(pSettings->line_exist(m_object->cNameSect(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", m_object->cNameSect()));
-
-    return pSettings->r_string(m_object->cNameSect(), "inv_icon");
 }
 
 Irect CInventoryItem::GetUpgrIconRect() const

@@ -70,12 +70,12 @@ void CEncyclopediaArticle::load_shared(LPCSTR)
 
     if (ltx)
     {
-        data()->image.SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(ltx, "inv_icon")));
+        data()->image.SetShader(InventoryUtilities::GetEquipmentIconsShader());
         Frect tex_rect;
-        tex_rect.x1 = float(0);
-        tex_rect.y1 = float(0);
-        tex_rect.x2 = float(pSettings->r_u32(ltx, "inv_grid_width") * ICON_GRID_WIDTH);
-        tex_rect.y2 = float(pSettings->r_u32(ltx, "inv_grid_height") * ICON_GRID_HEIGHT);
+        tex_rect.x1 = float(pSettings->r_u32(ltx, "inv_grid_x") * INV_GRID_WIDTH);
+        tex_rect.y1 = float(pSettings->r_u32(ltx, "inv_grid_y") * INV_GRID_HEIGHT);
+        tex_rect.x2 = float(pSettings->r_u32(ltx, "inv_grid_width") * INV_GRID_WIDTH);
+        tex_rect.y2 = float(pSettings->r_u32(ltx, "inv_grid_height") * INV_GRID_HEIGHT);
         tex_rect.rb.add(tex_rect.lt);
         data()->image.GetUIStaticItem().SetTextureRect(tex_rect);
     }

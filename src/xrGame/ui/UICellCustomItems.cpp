@@ -5,8 +5,8 @@
 #include "UIDragDropListEx.h"
 #include "xrUICore/ProgressBar/UIProgressBar.h"
 
-#define INV_GRID_WIDTHF 64.0f
-#define INV_GRID_HEIGHTF 64.0f
+#define INV_GRID_WIDTHF 50.0f
+#define INV_GRID_HEIGHTF 50.0f
 
 namespace detail
 {
@@ -20,8 +20,7 @@ CUIInventoryCellItem::CUIInventoryCellItem(CInventoryItem* itm)
 {
     m_pData = (void*)itm;
 
-    pcstr iconPath = itm->GetInvIconPath();
-    inherited::SetShader(InventoryUtilities::GetEquipmentIconShader(iconPath));
+    inherited::SetShader(InventoryUtilities::GetEquipmentIconsShader());
 
     m_grid_size.set(itm->GetInvGridRect().rb);
     Frect rect;
@@ -212,9 +211,7 @@ void CUIWeaponCellItem::CreateIcon(eAddonType t)
     m_addons[t] = xr_new<CUIStatic>("Addon icon");
     m_addons[t]->SetAutoDelete(true);
     AttachChild(m_addons[t]);
-    CInventoryItem* itm = (CInventoryItem*)m_pData;
-    R_ASSERT2(pSettings->line_exist(itm->m_section_id.c_str(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", itm->m_section_id.c_str()));
-    m_addons[t]->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(itm->m_section_id.c_str(), "inv_icon")));
+    m_addons[t]->SetShader(InventoryUtilities::GetEquipmentIconsShader());
 
     u32 color = GetTextureColor();
     m_addons[t]->SetTextureColor(color);
@@ -347,9 +344,6 @@ void CUIWeaponCellItem::InitAddon(CUIStatic* s, LPCSTR section, Fvector2 addon_o
     Frect tex_rect;
     Fvector2 base_scale;
 
-    R_ASSERT2(pSettings->line_exist(section, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", section));
-    s->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(section, "inv_icon")));
-
     if (Heading())
     {
         base_scale.x = GetHeight() / (INV_GRID_WIDTHF * m_grid_size.x);
@@ -410,6 +404,7 @@ CUIDragItem* CUIWeaponCellItem::CreateDragItem()
     {
         s = xr_new<CUIStatic>("Silencer");
         s->SetAutoDelete(true);
+        s->SetShader(InventoryUtilities::GetEquipmentIconsShader());
         InitAddon(s, *object()->GetSilencerName(), m_addon_offset[eSilencer], false);
         s->SetTextureColor(i->wnd()->GetTextureColor());
         i->wnd()->AttachChild(s);
@@ -419,6 +414,7 @@ CUIDragItem* CUIWeaponCellItem::CreateDragItem()
     {
         s = xr_new<CUIStatic>("Scope");
         s->SetAutoDelete(true);
+        s->SetShader(InventoryUtilities::GetEquipmentIconsShader());
         InitAddon(s, *object()->GetScopeName(), m_addon_offset[eScope], false);
         s->SetTextureColor(i->wnd()->GetTextureColor());
         i->wnd()->AttachChild(s);
@@ -428,6 +424,7 @@ CUIDragItem* CUIWeaponCellItem::CreateDragItem()
     {
         s = xr_new<CUIStatic>("Grenade launcher");
         s->SetAutoDelete(true);
+        s->SetShader(InventoryUtilities::GetEquipmentIconsShader());
         InitAddon(s, *object()->GetGrenadeLauncherName(), m_addon_offset[eLauncher], false);
         s->SetTextureColor(i->wnd()->GetTextureColor());
         i->wnd()->AttachChild(s);

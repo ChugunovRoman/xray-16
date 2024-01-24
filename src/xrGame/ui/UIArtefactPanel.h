@@ -12,10 +12,9 @@ protected:
     bool m_bVert;
     int m_iIndent;
     float m_fScale;
-    int m_count_rects{0};
     Fvector2 m_cell_size;
     xr_vector<Frect> m_vRects;
-    xr_vector<CUIStaticItem> m_vStaticRects;
+    CUIStaticItem m_StaticItem;
 
 public:
     CUIArtefactPanel();

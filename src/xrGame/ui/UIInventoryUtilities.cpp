@@ -16,6 +16,7 @@
 #include "Include/xrRender/UIShader.h"
 
 #define BUY_MENU_TEXTURE "ui" DELIMITER "ui_mp_buy_menu"
+#define EQUIPMENT_ICONS  "ui" DELIMITER "ui_icon_equipment"
 #define CHAR_ICONS "ui" DELIMITER "ui_icons_npc"
 #define MAP_ICONS "ui" DELIMITER "ui_icons_map"
 #define MP_CHAR_ICONS "ui" DELIMITER "ui_models_multiplayer"
@@ -34,7 +35,6 @@ ui_shader* g_EquipmentIconsShader = NULL;
 ui_shader* g_MPCharIconsShader = NULL;
 ui_shader* g_OutfitUpgradeIconsShader = NULL;
 ui_shader* g_WeaponUpgradeIconsShader = NULL;
-xr_map<pcstr, ui_shader> g_EquipmentIconShaderMap;
 //static CUIStatic* GetUIStatic();
 
 typedef std::pair<CHARACTER_RANK_VALUE, shared_str> CharInfoStringID;
@@ -169,22 +169,15 @@ const ui_shader& InventoryUtilities::GetBuyMenuShader()
     return *g_BuyMenuShader;
 }
 
-const ui_shader InventoryUtilities::GetEquipmentIconShader(pcstr filepath)
+const ui_shader& InventoryUtilities::GetEquipmentIconsShader()
 {
-    auto it = g_EquipmentIconShaderMap.find(filepath);
-    if (it == g_EquipmentIconShaderMap.end())
+    if (!g_EquipmentIconsShader)
     {
-        string512 fullpath;
-        xr_sprintf(fullpath, "ui\\%s", filepath);
-
-        ui_shader* shader = NULL;
-        shader = xr_new<ui_shader>();
-        (*shader)->create("hud" DELIMITER "default", fullpath);
-
-        g_EquipmentIconShaderMap.insert(std::make_pair(filepath, *shader));
+        g_EquipmentIconsShader = xr_new<ui_shader>();
+        (*g_EquipmentIconsShader)->create("hud" DELIMITER "default", EQUIPMENT_ICONS);
     }
 
-    return g_EquipmentIconShaderMap.at(filepath);
+    return *g_EquipmentIconsShader;
 }
 
 const ui_shader& InventoryUtilities::GetMPCharIconsShader()
