@@ -364,8 +364,8 @@ void CUIWeaponCellItem::InitAddon(CUIStatic* s, LPCSTR section, Fvector2 addon_o
     cell_size.x = pSettings->r_u32(section, "inv_grid_width") * INV_GRID_WIDTHF;
     cell_size.y = pSettings->r_u32(section, "inv_grid_height") * INV_GRID_HEIGHTF;
 
-    tex_rect.x1 = 0;
-    tex_rect.y1 = 0;
+    tex_rect.x1 = pSettings->r_u32(section, "inv_grid_x") * INV_GRID_WIDTHF;
+    tex_rect.y1 = pSettings->r_u32(section, "inv_grid_y") * INV_GRID_HEIGHTF;
 
     tex_rect.rb.add(tex_rect.lt, cell_size);
 
