@@ -82,6 +82,7 @@ public:
     IC bool HintEnabled() { return !!m_flags.test(eHintEnabled); }
     LPCSTR GetHint();
     void SetHint(const shared_str& hint);
+    void SetSize(const float width, const float height);
     CComplexMapSpot* complex_spot() { return m_complex_spot; }
     const CMapSpot* LevelMapSpot() { return m_level_spot; }
     const CMiniMapSpot* MiniMapSpot() { return m_minimap_spot; }

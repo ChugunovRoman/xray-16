@@ -243,6 +243,11 @@ void map_set_object_spot(u16 id, LPCSTR spot_type, LPCSTR text)
     if (xr_strlen(text))
         ml->SetHint(text);
 }
+void map_change_spot_size(u16 id, LPCSTR spot_type, float width, float height)
+{
+    CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    ml->SetSize(width, height);
+}
 
 void map_add_object_spot_ser(u16 id, LPCSTR spot_type, LPCSTR text)
 {
@@ -802,6 +807,7 @@ IC static void CLevel_Export(lua_State* luaState)
         def("map_add_object_spot_ser", map_add_object_spot_ser),
         def("map_add_object_spot", map_add_object_spot),
         def("map_set_object_spot", map_set_object_spot),
+        def("map_change_spot_size", map_change_spot_size),
         // def("map_add_object_spot_complex", map_add_object_spot_complex),
         def("map_remove_object_spot", map_remove_object_spot),
         def("map_has_object_spot", map_has_object_spot),

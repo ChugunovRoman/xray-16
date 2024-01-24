@@ -30,6 +30,7 @@ public:
     int get_location_level() { return m_location_level; }
     virtual LPCSTR GetHint();
     virtual void SetWndPos(const Fvector2& pos);
+    virtual void SetSize(float width, float height);
     virtual void Update();
     virtual bool OnMouseDown(int mouse_btn);
     virtual void OnFocusLost();

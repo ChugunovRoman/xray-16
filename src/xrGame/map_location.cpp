@@ -162,9 +162,8 @@ void CMapLocation::LoadSpot(LPCSTR type)
         if (xr_strlen(str))
         {
             if (!m_level_spot)
-            {
                 m_level_spot = xr_new<CMapSpot>(this);
-            }
+
             m_level_spot->Load(g_uiSpotXml, str);
         }
         else
@@ -179,9 +178,8 @@ void CMapLocation::LoadSpot(LPCSTR type)
         if (xr_strlen(str))
         {
             if (!m_level_spot_pointer)
-            {
                 m_level_spot_pointer = xr_new<CMapSpotPointer>(this);
-            }
+
             m_level_spot_pointer->Load(g_uiSpotXml, str);
         }
         else
@@ -203,9 +201,8 @@ void CMapLocation::LoadSpot(LPCSTR type)
         if (xr_strlen(str))
         {
             if (!m_minimap_spot)
-            {
                 m_minimap_spot = xr_new<CMiniMapSpot>(this);
-            }
+
             m_minimap_spot->Load(g_uiSpotXml, str);
         }
         else
@@ -219,9 +216,8 @@ void CMapLocation::LoadSpot(LPCSTR type)
         if (xr_strlen(str))
         {
             if (!m_minimap_spot_pointer)
-            {
                 m_minimap_spot_pointer = xr_new<CMapSpotPointer>(this);
-            }
+
             m_minimap_spot_pointer->Load(g_uiSpotXml, str);
         }
         else
@@ -720,6 +716,13 @@ void CMapLocation::SetHint(const shared_str& hint)
     }
     m_hint = hint;
 };
+void CMapLocation::SetSize(const float width, const float height)
+{
+    if (!m_level_spot)
+        return;
+
+    m_level_spot->SetSize(width, height);
+};
 
 LPCSTR CMapLocation::GetHint()
 {
@@ -734,21 +737,14 @@ CMapSpotPointer* CMapLocation::GetSpotPointer(CMapSpot* sp)
 {
     R_ASSERT(sp);
     if (!PointerEnabled())
-    {
         return NULL;
-    }
+
     if (sp == m_level_spot)
-    {
         return m_level_spot_pointer;
-    }
     else if (sp == m_minimap_spot)
-    {
         return m_minimap_spot_pointer;
-    }
     else if (sp == m_complex_spot)
-    {
         return m_complex_spot_pointer;
-    }
 
     return NULL;
 }

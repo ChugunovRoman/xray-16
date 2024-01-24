@@ -61,6 +61,10 @@ void CMapSpot::Load(CUIXml* xml, LPCSTR path)
 
 LPCSTR CMapSpot::GetHint() { return MapLocation()->GetHint(); };
 void CMapSpot::SetWndPos(const Fvector2& pos) { inherited::SetWndPos(pos); }
+void CMapSpot::SetSize(float width, float height)
+{
+    m_originSize = Fvector2().set(width, height * 1.2);
+}
 void CMapSpot::Update()
 {
     inherited::Update();
