@@ -261,10 +261,6 @@ void CInventoryItem::UpdateCL()
     {
         Interpolate();
     }
-
-    CBolt* pBolt = smart_cast<CBolt*>(this);
-        if (pBolt)
-            ReloadNames();
 }
 
 void CInventoryItem::OnEvent(NET_Packet& P, u16 type)
@@ -301,6 +297,16 @@ void CInventoryItem::OnEvent(NET_Packet& P, u16 type)
         state.position = p;
         state.previous_position = p;
         pSyncObj->set_State(state);
+    }
+    case GE_DESTROY:
+    case GE_RESPAWN:
+    case GE_OWNERSHIP_TAKE:
+    case GE_OWNERSHIP_REJECT:
+    case GE_WPN_STATE_CHANGE:
+    {
+        CBolt* pBolt = smart_cast<CBolt*>(this);
+        if (pBolt)
+            ReloadNames();
     }
     break;
     }
