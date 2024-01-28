@@ -248,6 +248,31 @@ void map_change_spot_size(u16 id, LPCSTR spot_type, float width, float height)
     CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
     ml->SetSize(width, height);
 }
+void map_change_spot_texture(u16 id, LPCSTR spot_type, LPCSTR path)
+{
+    CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    ml->SetTexture(path);
+}
+void map_change_spot_texture_rect(u16 id, LPCSTR spot_type, Frect rect)
+{
+    CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    ml->SetTextureRect(rect);
+}
+void map_change_spot_texture_offset(u16 id, LPCSTR spot_type, float x, float y)
+{
+    CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    ml->SetTextureOffset(x, y);
+}
+void map_change_spot_texture_offset_x(u16 id, LPCSTR spot_type, float x)
+{
+    CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    ml->SetTextureOffsetX(x);
+}
+void map_change_spot_texture_offset_y(u16 id, LPCSTR spot_type, float y)
+{
+    CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    ml->SetTextureOffsetY(y);
+}
 void map_change_spot_color(u16 id, LPCSTR spot_type, u32 color)
 {
     CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
@@ -813,6 +838,11 @@ IC static void CLevel_Export(lua_State* luaState)
         def("map_add_object_spot", map_add_object_spot),
         def("map_set_object_spot", map_set_object_spot),
         def("map_change_spot_size", map_change_spot_size),
+        def("map_change_spot_texture", map_change_spot_texture),
+        def("map_change_spot_texture_rect", map_change_spot_texture_rect),
+        def("map_change_spot_texture_offset", map_change_spot_texture_offset),
+        def("map_change_spot_texture_offset_x", map_change_spot_texture_offset_x),
+        def("map_change_spot_texture_offset_y", map_change_spot_texture_offset_y),
         def("map_change_spot_color", map_change_spot_color),
         // def("map_add_object_spot_complex", map_add_object_spot_complex),
         def("map_remove_object_spot", map_remove_object_spot),

@@ -83,6 +83,11 @@ public:
     LPCSTR GetHint();
     void SetHint(const shared_str& hint);
     void SetSize(const float width, const float height);
+    void SetTexture(LPCSTR path);
+    void SetTextureRect(Frect rect);
+    void SetTextureOffset(float x, float y);
+    void SetTextureOffsetX(float x);
+    void SetTextureOffsetY(float y);
     void SetColor(u32 color);
     CComplexMapSpot* complex_spot() { return m_complex_spot; }
     const CMapSpot* LevelMapSpot() { return m_level_spot; }

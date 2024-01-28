@@ -723,6 +723,59 @@ void CMapLocation::SetSize(const float width, const float height)
 
     m_level_spot->SetSize(width, height);
 };
+void CMapLocation::SetTexture(LPCSTR path)
+{
+    if (!m_level_spot)
+        return;
+
+    string512 fullpath;
+    xr_sprintf(fullpath, "ui\\%s", path);
+
+    ui_shader shader{};
+    shader->create("hud" DELIMITER "default", fullpath);
+
+    m_level_spot->SetShader(shader);
+};
+void CMapLocation::SetTextureRect(Frect rect)
+{
+    if (!m_level_spot)
+        return;
+
+    m_level_spot->SetTextureRect(rect);
+};
+void CMapLocation::SetTextureOffset(float x, float y)
+{
+    if (!m_level_spot)
+        return;
+
+    Frect rect = m_level_spot->GetTextureRect();
+    rect.x1 = x;
+    rect.y1 = y;
+
+    m_level_spot->SetTextureRect(rect);
+};
+void CMapLocation::SetTextureOffsetX(float x)
+{
+    if (!m_level_spot)
+        return;
+
+    Frect rect = m_level_spot->GetTextureRect();
+    rect.x1 = x;
+
+    Msg("SetTextureOffsetX, rect=[%.0f,%.0f,%.0f,%.0f]", rect.x1, rect.y1, rect.x2, rect.y2);
+
+    m_level_spot->SetTextureRect(rect);
+};
+void CMapLocation::SetTextureOffsetY(float y)
+{
+    if (!m_level_spot)
+        return;
+
+    Frect rect = m_level_spot->GetTextureRect();
+    rect.y1 = y;
+
+    m_level_spot->SetTextureRect(rect);
+};
 void CMapLocation::SetColor(u32 color)
 {
     if (!m_level_spot)
