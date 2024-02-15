@@ -9,6 +9,7 @@ class XRUICORE_API CUITrackBar final : public CUI_IB_FrameLineWnd, public CUIOpt
 public:
     CUITrackBar();
     // CUIOptionsItem
+    virtual void SetIValue(int value);
     virtual void SetCurrentOptValue(); // opt->current
     virtual void SaveBackUpOptValue(); // current->backup
     virtual void SaveOptValue(); // current->opt

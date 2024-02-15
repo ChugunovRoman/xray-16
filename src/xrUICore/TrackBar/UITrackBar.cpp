@@ -158,6 +158,12 @@ void CUITrackBar::Update()
     }
 }
 
+void CUITrackBar::SetIValue(int value)
+{
+    m_i_val = value;
+
+    UpdatePos();
+}
 void CUITrackBar::SetCurrentOptValue()
 {
     if (m_b_is_float)

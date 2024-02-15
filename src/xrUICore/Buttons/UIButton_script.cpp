@@ -60,6 +60,7 @@ SCRIPT_EXPORT(CUIButton, (CUIStatic, CUIWindow),
             .def("GetCheck", &CUITrackBar::GetCheck)
             .def("SetCheck", &CUITrackBar::SetCheck)
             .def("GetIValue", &CUITrackBar::GetIValue)
+            .def("SetIValue", &CUITrackBar::SetIValue)
             .def("GetFValue", &CUITrackBar::GetFValue)
             .def("SetOptIBounds", &CUITrackBar::SetOptIBounds)
             .def("SetOptFBounds", &CUITrackBar::SetOptFBounds)
