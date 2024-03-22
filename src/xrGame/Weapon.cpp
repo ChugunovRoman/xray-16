@@ -791,7 +791,7 @@ void CWeapon::LoadCurrentScopeParams(LPCSTR section)
 
     if (bScopeIsHasTexture)
     {
-        m_UIScope = xr_new<CUIWindow>();
+        m_UIScope = xr_new<CUIWindow>("Scope UI");
         LoadScope(scope_tex_name);
         CUIXmlInit::InitWindow(*pWpnScopeXml, scope_tex_name.c_str(), 0, m_UIScope);
     }

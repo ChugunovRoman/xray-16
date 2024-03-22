@@ -2311,7 +2311,6 @@ void CCC_RegisterCommands()
     {
         CMD3(CCC_Mask, "g_god", &psActorFlags, AF_GODMODE);
         CMD3(CCC_Mask, "g_unlimitedammo", &psActorFlags, AF_UNLIMITEDAMMO);
-        CMD1(CCC_SetWeather, "set_weather");
     }
     if (isCustomWeapon)
     {
