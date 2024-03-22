@@ -345,11 +345,14 @@ protected:
     float fCurAVelocity;
     CEffectorBobbing* pCamBobbing;
 
-    //менеджер эффекторов, есть у каждого актрера
+    // менеджер эффекторов, есть у каждого актрера
     CActorCameraManager* m_pActorEffector;
     static float f_Ladder_cam_limit;
 
 public:
+    float fFPCamYawMagnitude;   //--#SM+#--
+    float fFPCamPitchMagnitude; //--#SM+#--
+
     virtual void feel_touch_new(IGameObject* O);
     virtual void feel_touch_delete(IGameObject* O);
     virtual bool feel_touch_contact(IGameObject* O);
@@ -565,7 +568,7 @@ protected:
     xr_deque<net_update_A> NET_A;
 
     //---------------------------------------------
-    //	bool					m_bHasUpdate;
+    //	bool m_bHasUpdate;
     /// spline coeff /////////////////////
     float SCoeff[3][4]; //коэффициэнты для сплайна Бизье
     float HCoeff[3][4]; //коэффициэнты для сплайна Эрмита

@@ -107,6 +107,7 @@ enum EGameActions : u32
     kQUICK_SAVE,
     kQUICK_LOAD,
     kALIFE_CMD,
+    kWPN_NV_CHANGE,
 
     kNUMPAD0,
     kINSERT,

@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+// #include <dinput.h>
 #include "Actor.h"
 #include "Torch.h"
 #include "trade.h"
@@ -37,8 +38,23 @@ bool g_bAutoClearCrouch = true;
 
 void CActor::IR_OnKeyboardPress(int cmd)
 {
-    if (hud_adj_mode && pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
-        return;
+    if (hud_adj_mode)
+	{
+        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+        {
+		    if (pInput->iGetAsyncKeyState(SDL_SCANCODE_RETURN) ||
+                pInput->iGetAsyncKeyState(SDL_SCANCODE_BACKSPACE) ||
+			    pInput->iGetAsyncKeyState(SDL_SCANCODE_DELETE))
+			    g_player_hud->tune(Ivector().set(0, 0, 0));
+		    return;
+        }
+        else if (pInput->iGetAsyncKeyState(SDL_SCANCODE_END))
+        {
+            extern void logInfoAboutTunedItems(); //defined in player_hud_tune.cpp
+            logInfoAboutTunedItems();
+            return;
+        }
+	}
 
     if (Remote())
         return;
@@ -50,6 +66,13 @@ void CActor::IR_OnKeyboardPress(int cmd)
 
     if (load_screen_renderer.IsActive())
         return;
+
+    if (pInput->iGetAsyncKeyState(SDL_SCANCODE_KP_MEMADD)) // old DIK_ADD
+        inventory().Action((u16)kWPN_ZOOM_INC, CMD_START);
+    else if (pInput->iGetAsyncKeyState(SDL_SCANCODE_KP_MEMSUBTRACT)) // old DIK_SUBTRACT
+        inventory().Action((u16)kWPN_ZOOM_DEC, CMD_START);
+    else if (pInput->iGetAsyncKeyState(SDL_SCANCODE_AC_HOME)) // old DIK_HOME
+        inventory().Action((u16)kWPN_NV_CHANGE, CMD_START);
 
     bool quickSlot = false;
     switch (cmd)
@@ -273,7 +296,17 @@ void CActor::IR_OnKeyboardRelease(int cmd)
 void CActor::IR_OnKeyboardHold(int cmd)
 {
     if (hud_adj_mode && pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
-        return;
+	{
+		if (pInput->iGetAsyncKeyState(SDL_SCANCODE_UP)) // old DIK_UP
+			g_player_hud->tune(Ivector().set(0, -1, 0));
+		if (pInput->iGetAsyncKeyState(SDL_SCANCODE_DOWN)) // old DIK_DOWN
+			g_player_hud->tune(Ivector().set(0, 1, 0));
+		if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LEFT)) // old DIK_LEFT
+			g_player_hud->tune(Ivector().set(-1, 0, 0));
+		if (pInput->iGetAsyncKeyState(SDL_SCANCODE_RIGHT)) // old DIK_RIGHT
+			g_player_hud->tune(Ivector().set(1, 0, 0));
+		return;
+	}
 
     if (Remote() || !g_Alive())
         return;

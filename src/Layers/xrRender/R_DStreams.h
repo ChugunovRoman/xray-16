@@ -8,9 +8,7 @@ class ECORE_API _VertexStream
     u32 mSize{}; // size in bytes
     u32 mPosition{}; // position in bytes
     u32 mDiscardID{}; // ID of discard - usually for caching
-#ifdef DEBUG
     u32 dbg_lock{};
-#endif
 
 public:
     VertexBufferHandle old_pVB{};

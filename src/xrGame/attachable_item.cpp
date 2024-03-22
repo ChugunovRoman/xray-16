@@ -15,9 +15,7 @@
 #include "xrUICore/ui_base.h"
 #include "xrEngine/GameFont.h"
 
-#ifdef DEBUG
 CAttachableItem* CAttachableItem::m_dbgItem = NULL;
-#endif
 
 CPhysicsShellHolder& CAttachableItem::object() const { return (item().object()); }
 IFactoryObject* CAttachableItem::_construct()
@@ -31,9 +29,7 @@ IFactoryObject* CAttachableItem::_construct()
 CAttachableItem::~CAttachableItem() {}
 void CAttachableItem::reload(LPCSTR section)
 {
-#ifdef DEBUG
     m_valid = true;
-#endif
 
     if (load_attach_position(section))
         enable(false);
@@ -133,7 +129,6 @@ bool CAttachableItem::use_parent_ai_locations() const
     return !enabled();
 }
 
-#ifdef DEBUG
 float ATT_ITEM_MOVE_CURR = 0.01f;
 float ATT_ITEM_ROT_CURR = 0.1f;
 
@@ -226,4 +221,3 @@ void attach_draw_adjust_mode()
     xr_sprintf(_text, "attach_angle_offset IS [%3.3f][%3.3f][%3.3f]", _ang.x, _ang.y, _ang.z);
     F->OutNext(_text);
 }
-#endif // #ifdef DEBUG

@@ -472,7 +472,8 @@ void CHW::EndScene()
 
 void CHW::Present()
 {
-    pDevice->Present(nullptr, nullptr, nullptr, nullptr);
+    if (!Device.m_SecondViewport.IsSVPFrame() && !Device.m_SecondViewport.isCamReady) //--#SM+#-- +SecondVP+ Не выводим кадр из второго рендера на экран
+        pDevice->Present(nullptr, nullptr, nullptr, nullptr);
     CurrentBackBuffer = (CurrentBackBuffer + 1) % BackBufferCount;
 }
 

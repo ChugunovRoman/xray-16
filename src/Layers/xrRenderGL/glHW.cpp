@@ -264,8 +264,9 @@ void CHW::Present()
         0, 0, Device.dwWidth, Device.dwHeight,
         GL_COLOR_BUFFER_BIT, GL_NEAREST);
 #endif
-
-    SDL_GL_SwapWindow(m_window);
+    //  --#SM+#-- +SecondVP+ Не выводим кадр из второго рендера на экран
+    if (!Device.m_SecondViewport.IsSVPFrame() && !Device.m_SecondViewport.isCamReady)
+        SDL_GL_SwapWindow(m_window);
     CurrentBackBuffer = (CurrentBackBuffer + 1) % BackBufferCount;
 }
 

@@ -41,9 +41,7 @@ class demoplay_control;
 class demo_info;
 class CStreamReader;
 
-#ifdef DEBUG
 class CDebugRenderer;
-#endif
 
 extern ENGINE_API float g_fov;
 
@@ -135,9 +133,9 @@ protected:
     CSeniorityHierarchyHolder* m_seniority_hierarchy_holder = nullptr;
     CClientSpawnManager* m_client_spawn_manager = nullptr;
     CAutosaveManager* m_autosave_manager = nullptr;
+    CDebugRenderer* m_debug_renderer = nullptr;
 #ifdef DEBUG
     LevelGraphDebugRender* levelGraphDebugRender = nullptr;
-    CDebugRenderer* m_debug_renderer = nullptr;
 #endif
     CPHCommander* m_ph_commander = nullptr;
     CPHCommander* m_ph_commander_scripts = nullptr;
@@ -374,9 +372,7 @@ public:
     IC CSeniorityHierarchyHolder& seniority_holder();
     IC CClientSpawnManager& client_spawn_manager();
     IC CAutosaveManager& autosave_manager();
-#ifdef DEBUG
     IC CDebugRenderer& debug_renderer();
-#endif
     void script_gc(); // GC-cycle
     IC CPHCommander& ph_commander();
     IC CPHCommander& ph_commander_scripts();
@@ -498,13 +494,11 @@ IC CAutosaveManager& CLevel::autosave_manager()
     return *m_autosave_manager;
 }
 
-#ifdef DEBUG
 IC CDebugRenderer& CLevel::debug_renderer()
 {
     VERIFY(m_debug_renderer);
     return *m_debug_renderer;
 }
-#endif
 
 IC CPHCommander& CLevel::ph_commander()
 {

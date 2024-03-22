@@ -20,6 +20,8 @@ protected:
     EffectorCamVec m_EffectorsCam_added_deffered;
     EffectorPPVec m_EffectorsPP;
 
+    float fFovSecond;
+
     bool m_bAutoApply;
     SPPInfo pp_affected;
     void UpdateDeffered();
@@ -30,9 +32,7 @@ protected:
     void OnEffectorReleased(SBaseEffector* e);
 
 public:
-#ifdef DEBUG
     u32 dbg_upd_frame;
-#endif
 
     void Dump();
     u32 Count() { return m_EffectorsCam.size() + m_EffectorsCam_added_deffered.size(); }

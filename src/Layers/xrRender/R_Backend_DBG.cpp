@@ -33,7 +33,6 @@ void CBackend::dbg_DIP(D3DPRIMITIVETYPE pt, ref_geom geom, u32 baseV, u32 startV
     Render(pt, baseV, startV, countV, startI, PC);
 }
 
-#ifdef DEBUG
 
 void CBackend::dbg_Draw(D3DPRIMITIVETYPE T, FVF::L* pVerts, int vcnt, u16* pIdx, int pcnt)
 {
@@ -231,7 +230,6 @@ void CBackend::dbg_DrawEllipse(Fmatrix& T, u32 C)
     dbg_Draw(D3DPT_TRIANGLELIST, verts, vcnt, gFaces, 224);
     RCache.set_FillMode(D3DFILL_SOLID);
 }
-#endif
 
 void CBackend::dbg_OverdrawBegin()
 {

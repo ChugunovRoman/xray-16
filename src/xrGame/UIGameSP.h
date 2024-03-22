@@ -46,9 +46,7 @@ public:
     void StartDialog(CUIDialogWnd* pDialog, bool bDoHideIndicators) override;
     void StopDialog(CUIDialogWnd* pDialog) override;
 
-#ifdef DEBUG
     virtual void Render();
-#endif
     CUITalkWnd* TalkMenu;
     CChangeLevelWnd* UIChangeLevelWnd;
 

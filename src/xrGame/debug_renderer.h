@@ -8,7 +8,6 @@
 
 #pragma once
 
-#ifdef DEBUG
 
 #include "Include/xrRender/DebugRender.h"
 
@@ -32,4 +31,3 @@ public:
 
 #include "debug_renderer_inline.h"
 
-#endif // DEBUG

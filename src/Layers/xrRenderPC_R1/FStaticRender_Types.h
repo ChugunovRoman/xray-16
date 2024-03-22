@@ -8,6 +8,7 @@
 
 #define rt_RT_color_map "$user$rendertarget_color_map"
 #define rt_RT_distort "$user$distort"
+#define rt_RT_SecondVP "$user$viewport2" //--#SM+#-- +SecondVP+
 
 #define r1_RT_depth "$user$depth" // surface
 

@@ -71,6 +71,14 @@ struct hud_item_measures
         float m_origin_offset_aim;
         float m_tendto_speed;
         float m_tendto_speed_aim;
+        float m_tendto_ret_speed;
+        float m_tendto_ret_speed_aim;
+
+        float m_min_angle;
+        float m_min_angle_aim;
+
+        Fvector4 m_offset_LRUD;
+        Fvector4 m_offset_LRUD_aim;
     };
     inertion_params m_inertion_params; //--#SM+#--
 };
@@ -160,6 +168,9 @@ private:
     void load_ancors();
     void update_inertion(Fmatrix& trans) const;
     void update_additional(Fmatrix& trans) const;
+    void update_inertion(Fmatrix& trans);
+    void update_additional(Fmatrix& trans);
+public:
     bool inertion_allowed() const;
 
 private:

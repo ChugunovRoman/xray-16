@@ -61,10 +61,10 @@ public:
 
     xr_vector<HUD_SOUND_ITEM> m_sound_items; //Alundaio: made public
 
-    HUD_SOUND_ITEM* FindSoundItem(LPCSTR alias, bool b_assert); //AVO: made public to check if sound is loaded
-
     void PlaySound(LPCSTR alias, const Fvector& position, const IGameObject* parent, bool hud_mode, bool looped = false,
         u8 index = u8(-1));
+
+    HUD_SOUND_ITEM* FindSoundItem(LPCSTR alias, bool b_assert); //AVO: made public to check if sound is loaded
 
     void StopSound(LPCSTR alias);
 

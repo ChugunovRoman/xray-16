@@ -408,5 +408,23 @@ void CRender::render_forward()
 // Перед началом рендера мира --#SM+#--
 void CRender::BeforeWorldRender() {}
 
-// После рендера мира и пост-эффектов --#SM+#--
-void CRender::AfterWorldRender() {}
+// После рендера мира и пост-эффектов --#SM+#-- +SecondVP+
+void CRender::AfterWorldRender()
+{
+    if (Device.m_SecondViewport.IsSVPFrame())
+    {
+        // Делает копию бэкбуфера (текущего экрана) в рендер-таргет второго вьюпорта
+#ifdef USE_DX9
+        ID3DRenderTargetView* pBuffer = nullptr;
+        HW.pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBuffer); // Получаем ссылку на бэкбуфер
+        D3DXLoadSurfaceFromSurface(Target->rt_secondVP->pRT, 0, 0, pBuffer, 0, 0, D3DX_DEFAULT, 0);
+        pBuffer->Release(); // Корректно очищаем ссылку на бэкбуфер (иначе игра зависнет в опциях)
+#endif
+#ifdef USE_DX11
+        ID3DTexture2D* pBuffer = nullptr;
+        HW.m_pSwapChain->GetBuffer(0, __uuidof(ID3DTexture2D), (LPVOID*)&pBuffer);
+        HW.pContext->CopyResource(Target->rt_secondVP->pSurface, pBuffer);
+        pBuffer->Release(); // Корректно очищаем ссылку на бэкбуфер (иначе игра зависнет в опциях)
+#endif
+    }
+}

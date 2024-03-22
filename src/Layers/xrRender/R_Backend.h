@@ -135,7 +135,6 @@ private:
 #   error No graphics API selected or enabled!
 #endif
 
-#ifdef DEBUG
     LPCSTR ps_name;
     LPCSTR vs_name;
 #ifndef USE_DX9
@@ -149,7 +148,6 @@ private:
 #   ifdef USE_OGL
     pcstr pp_name;
 #   endif
-#endif // DEBUG
 
     u32 stencil_enable;
     u32 stencil_func;
@@ -554,7 +552,6 @@ public:
     void dbg_DIP(D3DPRIMITIVETYPE pt, ref_geom geom, u32 baseV, u32 startV, u32 countV, u32 startI, u32 PC);
     void dbg_SetRS(D3DRENDERSTATETYPE p1, u32 p2);
     void dbg_SetSS(u32 sampler, D3DSAMPLERSTATETYPE type, u32 value);
-#ifdef DEBUG
     void dbg_Draw(D3DPRIMITIVETYPE T, FVF::L* pVerts, int vcnt, u16* pIdx, int pcnt);
     void dbg_Draw(D3DPRIMITIVETYPE T, FVF::L* pVerts, int pcnt);
 
@@ -572,7 +569,6 @@ public:
     void dbg_DrawTRI(Fmatrix& T, Fvector& p1, Fvector& p2, Fvector& p3, u32 C);
     void dbg_DrawLINE(Fmatrix& T, Fvector& p1, Fvector& p2, u32 C);
     void dbg_DrawEllipse(Fmatrix& T, u32 C);
-#endif
     void dbg_OverdrawBegin();
     void dbg_OverdrawEnd();
 

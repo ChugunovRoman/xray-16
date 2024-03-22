@@ -186,10 +186,27 @@ void CRender::OnFrame()
 }
 
 // Перед началом рендера мира --#SM+#--
-void CRender::BeforeWorldRender() {}
+void CRender::BeforeWorldRender()
+{
+    if (Device.m_SecondViewport.IsSVPFrame())
+    {
+        Device.m_SecondViewport.isR1 = true;
+    }
+}
 
 // После рендера мира и пост-эффектов --#SM+#--
-void CRender::AfterWorldRender() {}
+void CRender::AfterWorldRender()
+{
+    if (Device.m_SecondViewport.IsSVPFrame())
+    {
+        // Делает копию бэкбуфера (текущего экрана) в рендер-таргет второго вьюпорта
+        IRender_Target* T = getTarget();
+        IDirect3DSurface9* pBackBuffer = nullptr;
+        HW.pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBackBuffer); // Получаем ссылку на бэкбуфер
+        D3DXLoadSurfaceFromSurface(Target->rt_SecondVP->pRT, 0, 0, pBackBuffer, 0, 0, D3DX_DEFAULT, 0);
+        pBackBuffer->Release(); // Корректно очищаем ссылку на бэкбуфер (иначе игра зависнет в опциях)
+    }
+}
 
 // Implementation
 IRender_ObjectSpecific* CRender::ros_create(IRenderable* parent) { return xr_new<CROS_impl>(); }

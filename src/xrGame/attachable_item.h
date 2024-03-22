@@ -27,9 +27,7 @@ private:
     Fmatrix m_offset;
     u16 m_bone_id;
     bool m_enabled;
-#ifdef DEBUG
     bool m_valid;
-#endif
 
 public:
     IC CAttachableItem();
@@ -56,7 +54,6 @@ public:
 protected:
     virtual bool use_parent_ai_locations() const = 0;
 public:
-#ifdef DEBUG
     static CAttachableItem* m_dbgItem;
     static Fvector get_angle_offset()
     {
@@ -126,7 +123,6 @@ public:
         c.z += val;
         m_dbgItem->m_offset.c = c;
     }
-#endif
 };
 
 #include "attachable_item_inline.h"

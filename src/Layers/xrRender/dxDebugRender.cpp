@@ -1,7 +1,5 @@
 #include "stdafx.h"
 
-#ifdef DEBUG
-
 #include "dxDebugRender.h"
 #include "dxUIShader.h"
 
@@ -166,4 +164,3 @@ public:
 } rdebug_render_impl;
 dxDebugRender* rdebug_render = &rdebug_render_impl;
 
-#endif //	DEBUG

@@ -46,6 +46,8 @@ CRenderTarget::CRenderTarget()
     }
     // RImplementation.o.color_mapping = RT_color_map->valid();
 
+    rt_SecondVP.create(rt_RT_SecondVP, rtWidth, rtHeight, HW.Caps.fTarget); //--#SM+#-- +SecondVP+
+
     if (rtHeight != Device.dwHeight || rtWidth != Device.dwWidth)
     {
         rt_Depth.create(r1_RT_depth, rtWidth, rtHeight, HW.Caps.fDepth, 0, { CRT::CreateSurface });

@@ -36,7 +36,11 @@ protected:
     //кадр момента пересчета UpdateSounds
     u32 dwUpdateSounds_Frame;
 
+public:
+    // Mortan: Новые параметры здеся
+    virtual bool bMarkCanShow() { return IsZoomed(); }
 protected:
+    int iMagSizeCurrent;
     virtual void OnMagazineEmpty();
 
     virtual void switch2_Idle();
@@ -46,6 +50,7 @@ protected:
     virtual void switch2_Hiding();
     virtual void switch2_Hidden();
     virtual void switch2_Showing();
+    virtual void switch2_Unmis();
 
     virtual void OnShot();
 
@@ -74,6 +79,7 @@ public:
     virtual void Load(LPCSTR section);
     void LoadSilencerKoeffs();
     virtual CWeaponMagazined* cast_weapon_magazined() { return this; }
+    virtual bool UseScopeTexture();
     virtual void SetDefaults();
     virtual void FireStart();
     virtual void FireEnd();
