@@ -254,7 +254,7 @@ bool CWeapon::install_upgrade_addon(LPCSTR section, bool test)
                     }
                 }
             }
-            if (!bUseAltScope)
+            else
             {
                 if (m_eScopeStatus == ALife::eAddonAttachable)
                 {

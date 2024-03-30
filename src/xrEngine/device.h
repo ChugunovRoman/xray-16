@@ -43,11 +43,11 @@ public:
 
         bool isR1;
 
-        IC bool IsSVPActive() { return isActive; }
-        IC void SetSVPActive(bool bState);
+        bool IsSVPActive() { return isActive; }
+        void SetSVPActive(bool bState);
         bool IsSVPFrame();
 
-        IC u8 GetSVPFrameDelay() { return frameDelay; }
+        u8 GetSVPFrameDelay() { return frameDelay; }
         void  SetSVPFrameDelay(u8 iDelay)
         {
             frameDelay = iDelay;

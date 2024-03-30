@@ -168,8 +168,6 @@ private:
     void load_ancors();
     void update_inertion(Fmatrix& trans) const;
     void update_additional(Fmatrix& trans) const;
-    void update_inertion(Fmatrix& trans);
-    void update_additional(Fmatrix& trans);
 public:
     bool inertion_allowed() const;
 

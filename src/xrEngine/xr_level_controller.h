@@ -109,8 +109,8 @@ enum EGameActions : u32
     kALIFE_CMD,
     kWPN_NV_CHANGE,
 
-    kNUMPAD0,
     kINSERT,
+    kNUMPAD0,
     kNUMPAD1,
     kNUMPAD2,
     kNUMPAD3,
