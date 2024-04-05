@@ -29,6 +29,7 @@ CCameraManager::CCameraManager(bool bApplyOnUpdate)
 
     m_bAutoApply = bApplyOnUpdate;
 
+    fFovSecond = 0.0f;
     pp_identity.blur = 0;
     pp_identity.gray = 0;
     pp_identity.duality.h = 0;
@@ -208,6 +209,24 @@ void CCameraManager::Update(const Fvector& P, const Fvector& D, const Fvector& N
     m_cam_info.fAspect = m_cam_info.fAspect * dst + (fASPECT_Dest * aspect) * src;
     m_cam_info.dont_apply = false;
 
+    if (Device.m_SecondViewport.IsSVPActive())
+    {
+        float fov = g_pGamePersistent->m_pGShaderConstants->hud_params.y;  //-V595
+
+        // что бы изначально прицел включался быстро, а при изменении приближения был эффект наезда камеры
+        if (fis_zero(fFovSecond))
+        {
+            fFovSecond = fov;
+        }
+        else
+        {
+            fFovSecond = fFovSecond * dst + fov * src;
+        }
+    }
+    else
+    {
+        fFovSecond = 0;
+    }
     UpdateCamEffectors();
 
     UpdatePPEffectors();
@@ -324,8 +343,26 @@ void CCameraManager::ApplyDevice()
     // projection
     Device.fFOV = m_cam_info.fFov;
     Device.fASPECT = m_cam_info.fAspect;
-    Device.mProject.build_projection(deg2rad(m_cam_info.fFov), m_cam_info.fAspect, m_cam_info.fNear, m_cam_info.fFar);
+    float aspect = m_cam_info.fAspect;
+    // Device.mProject.build_projection(deg2rad(m_cam_info.fFov), m_cam_info.fAspect, m_cam_info.fNear, m_cam_info.fFar);
 
+    // --#SM+# Begin-- +SecondVP+
+    // Пересчитываем FOV для второго вьюпорта [Recalculate scene FOV for SecondVP frame]
+    if (Device.m_SecondViewport.IsSVPFrame())
+    {
+        // Для второго вьюпорта FOV выставляем здесь
+        Device.fFOV = fFovSecond;
+
+        // Предупреждаем что мы изменили настройки камеры
+        Device.m_SecondViewport.isCamReady = true;
+    }
+    else
+        Device.m_SecondViewport.isCamReady = false;
+
+    Device.mProject.build_projection(deg2rad(Device.fFOV), aspect, m_cam_info.fNear, m_cam_info.fFar);
+    // --#SM+# End--
+
+    
     // Apply offset required for Nvidia Ansel
     Device.mProject._31 = -m_cam_info.offsetX;
     Device.mProject._32 = -m_cam_info.offsetY;

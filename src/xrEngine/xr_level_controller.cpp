@@ -126,9 +126,10 @@ game_action actions[] =
     { "quick_save",             kQUICK_SAVE,                _sp },
     { "quick_load",             kQUICK_LOAD,                _sp },
     { "alife_command",          kALIFE_CMD,                 _sp },
+    { "wpn_nv_change",          kWPN_NV_CHANGE,             _sp },
 
-    { "numpad0",                kNUMPAD0,                   _sp },
     { "insert",                 kINSERT,                    _sp },
+    { "numpad0",                kNUMPAD0,                   _sp },
     { "numpad1",                kNUMPAD1,                   _sp },
     { "numpad2",                kNUMPAD2,                   _sp },
     { "numpad3",                kNUMPAD3,                   _sp },

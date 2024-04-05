@@ -16,6 +16,7 @@ public:
     // Base targets
     xr_vector<ref_rt> rt_Base;
     ref_rt rt_Base_Depth;
+	ref_rt rt_SecondVP; //--#SM+#-- +SecondVP+
 
 private:
     ref_rt rt_Generic;

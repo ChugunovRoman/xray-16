@@ -73,11 +73,12 @@ extern u64 g_qwStartGameTime;
 extern u64 g_qwEStartGameTime;
 
 ENGINE_API
-extern float psHUD_FOV;
+extern float psHUD_FOV_def; // --#SM+#-- [it's now used in hud_fov]
 extern float psSqueezeVelocity;
 extern int psLUA_GCSTEP;
 extern int g_auto_ammo_unload;
 
+extern u32 hud_adj_mode;
 extern int x_m_x;
 extern int x_m_z;
 extern BOOL net_cl_inputguaranteed;
@@ -102,6 +103,10 @@ float g_aim_predict_time = 0.40f;
 int g_keypress_on_start = 1;
 
 ENGINE_API extern float g_console_sensitive;
+
+bool bCheatEnable = READ_IF_EXISTS(pSettingsOpenXRay, r_bool, "debug", "cheats_mode", false);
+bool isCustomWeapon = READ_IF_EXISTS(pSettingsOpenXRay, r_bool, "debug", "custom_weapon", false);
+bool SWM_3D_SCOPES = !!READ_IF_EXISTS(pSettingsOpenXRay, r_bool, "gameplay", "SWM_3D_scopes", false);
 
 //Alundaio
 extern BOOL g_ai_die_in_anomaly;
@@ -279,6 +284,40 @@ public:
     }
 };
 #endif // DEBUG
+
+class CCC_U32 : public IConsole_Command
+{
+protected:
+    unsigned* value;
+    unsigned min, max;
+
+public:
+    const unsigned GetValue() const { return *value; };
+    void GetBounds(u32& imin, u32& imax) const
+    {
+        imin = min;
+        imax = max;
+    }
+    CCC_U32(const char* N, unsigned* V, unsigned _min = 0, unsigned _max = 999)
+        : IConsole_Command(N), value(V), min(_min), max(_max) {};
+    virtual void Execute(const char* args)
+    {
+        int v = atoi(args);
+        if (v < min || v > max)
+            InvalidSyntax();
+        else
+            *value = v;
+    }
+    virtual void Status(TStatus& S) { itoa(*value, S, 10); }
+    virtual void Info(TInfo& I) { xr_sprintf(I, sizeof(I), "integer value in range [%d,%d]", min, max); }
+    virtual void fill_tips(vecTips& tips, u32 mode)
+    {
+        TStatus str;
+        xr_sprintf(str, sizeof(str), "%d  (current)  [%d,%d]", *value, min, max);
+        tips.push_back(str);
+        IConsole_Command::fill_tips(tips, mode);
+    }
+};
 
 class CCC_ALifeTimeFactor : public IConsole_Command
 {
@@ -1571,6 +1610,53 @@ struct CCC_TimeFactorSingle : public CCC_Float
     }
 };
 
+#include "attachable_item.h"
+#include "attachment_owner.h"
+#include "InventoryOwner.h"
+#include "Inventory.h"
+class CCC_TuneAttachableItem : public IConsole_Command
+{
+public:
+    CCC_TuneAttachableItem(LPCSTR N) : IConsole_Command(N) {};
+    virtual void Execute(LPCSTR args)
+    {
+        if (CAttachableItem::m_dbgItem)
+        {
+            CAttachableItem::m_dbgItem = NULL;
+            Msg("CCC_TuneAttachableItem switched to off");
+            return;
+        };
+
+        IGameObject* obj = Level().CurrentViewEntity();
+        VERIFY(obj);
+        shared_str ssss = args;
+
+        CAttachmentOwner* owner = smart_cast<CAttachmentOwner*>(obj);
+        CAttachableItem* itm = owner->attachedItem(ssss);
+        if (itm)
+        {
+            CAttachableItem::m_dbgItem = itm;
+        }
+        else
+        {
+            CInventoryOwner* iowner = smart_cast<CInventoryOwner*>(obj);
+            PIItem active_item = iowner->m_inventory->ActiveItem();
+            if (active_item && active_item->object().cNameSect() == ssss)
+                CAttachableItem::m_dbgItem = active_item->cast_attachable_item();
+        }
+
+        if (CAttachableItem::m_dbgItem)
+            Msg("CCC_TuneAttachableItem switched to ON for [%s]", args);
+        else
+            Msg("CCC_TuneAttachableItem cannot find attached item [%s]", args);
+    }
+
+    virtual void Info(TInfo& I)
+    {
+        xr_sprintf(I, "allows to change bind rotation and position offsets for attached item, <section_name> given as arguments");
+    }
+};
+
 #ifdef DEBUG
 class CCC_RadioGroupMask2;
 class CCC_RadioMask : public CCC_Mask
@@ -1642,54 +1728,6 @@ struct CCC_DbgBullets : public CCC_Integer
         g_hit[1].clear();
         g_hit[2].clear();
         CCC_Integer::Execute(args);
-    }
-};
-
-#include "attachable_item.h"
-#include "attachment_owner.h"
-#include "InventoryOwner.h"
-#include "Inventory.h"
-class CCC_TuneAttachableItem : public IConsole_Command
-{
-public:
-    CCC_TuneAttachableItem(LPCSTR N) : IConsole_Command(N){};
-    virtual void Execute(LPCSTR args)
-    {
-        if (CAttachableItem::m_dbgItem)
-        {
-            CAttachableItem::m_dbgItem = NULL;
-            Msg("CCC_TuneAttachableItem switched to off");
-            return;
-        };
-
-        IGameObject* obj = Level().CurrentViewEntity();
-        VERIFY(obj);
-        shared_str ssss = args;
-
-        CAttachmentOwner* owner = smart_cast<CAttachmentOwner*>(obj);
-        CAttachableItem* itm = owner->attachedItem(ssss);
-        if (itm)
-        {
-            CAttachableItem::m_dbgItem = itm;
-        }
-        else
-        {
-            CInventoryOwner* iowner = smart_cast<CInventoryOwner*>(obj);
-            PIItem active_item = iowner->m_inventory->ActiveItem();
-            if (active_item && active_item->object().cNameSect() == ssss)
-                CAttachableItem::m_dbgItem = active_item->cast_attachable_item();
-        }
-
-        if (CAttachableItem::m_dbgItem)
-            Msg("CCC_TuneAttachableItem switched to ON for [%s]", args);
-        else
-            Msg("CCC_TuneAttachableItem cannot find attached item [%s]", args);
-    }
-
-    virtual void Info(TInfo& I)
-    {
-        xr_sprintf(I,
-            "allows to change bind rotation and position offsets for attached item, <section_name> given as arguments");
     }
 };
 
@@ -2143,7 +2181,7 @@ void CCC_RegisterCommands()
     CMD3(CCC_Mask, "hud_crosshair_dist", &psHUD_Flags, HUD_CROSSHAIR_DIST);
     CMD3(CCC_Mask, "hud_left_handed", &psHUD_Flags, HUD_LEFT_HANDED);
 
-    CMD4(CCC_Float, "hud_fov", &psHUD_FOV, 0.1f, 1.0f);
+    CMD4(CCC_Float, "hud_fov", &psHUD_FOV_def, 0.1f, 1.0f);
     CMD4(CCC_Float, "fov", &g_fov, 5.0f, 180.0f);
 
     // Demo
@@ -2248,7 +2286,6 @@ void CCC_RegisterCommands()
 
     CMD1(CCC_ShowMonsterInfo, "ai_monster_info");
     CMD1(CCC_DebugFonts, "debug_fonts");
-    CMD1(CCC_TuneAttachableItem, "dbg_adjust_attachable_item");
 
     CMD1(CCC_ShowAnimationStats, "ai_show_animation_stats");
 #endif // DEBUG
@@ -2270,11 +2307,25 @@ void CCC_RegisterCommands()
     CMD4(CCC_FloatBlock, "ph_tri_query_ex_aabb_rate", &ph_console::ph_tri_query_ex_aabb_rate, 1.01f, 3.f);
 #endif // DEBUG
 
+    if (bCheatEnable)
+    {
+        CMD3(CCC_Mask, "g_god", &psActorFlags, AF_GODMODE);
+        CMD3(CCC_Mask, "g_unlimitedammo", &psActorFlags, AF_UNLIMITEDAMMO);
+    }
+    if (isCustomWeapon)
+    {
+        CMD1(CCC_TuneAttachableItem, "dbg_adjust_attachable_item");
+        CMD4(CCC_U32, "hud_adjust_mode", &hud_adj_mode, 0, 5); /// adjust mode support
+
+    }
+    if (SWM_3D_SCOPES)
+    {
+        CMD3(CCC_Mask, "g_3d_scopes", &psActorFlags, AF_3DSCOPE);
+        CMD3(CCC_Mask, "g_pnv_in_scope", &psActorFlags, AF_PNV_W_SCOPE_DIS);
+    }
 #ifndef MASTER_GOLD
     CMD1(CCC_JumpToLevel, "jump_to_level");
-    CMD3(CCC_Mask, "g_god", &psActorFlags, AF_GODMODE);
     CMD1(CCC_ToggleNoClip, "g_no_clip");
-    CMD3(CCC_Mask, "g_unlimitedammo", &psActorFlags, AF_UNLIMITEDAMMO);
     CMD1(CCC_Spawn, "g_spawn");
     CMD1(CCC_SpawnToInventory, "g_spawn_to_inventory");
     CMD1(CCC_Script, "run_script");

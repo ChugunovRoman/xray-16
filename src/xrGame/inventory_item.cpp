@@ -1477,7 +1477,7 @@ Irect CInventoryItem::GetInvGridRect() const
 
 pcstr CInventoryItem::GetInvIconPath() const
 {
-    R_ASSERT2(pSettings->line_exist(m_object->cNameSect(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", m_object->cNameSect()));
+    R_ASSERT2(pSettings->line_exist(m_object->cNameSect(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", m_object->cNameSect().c_str()));
 
     return pSettings->r_string(m_object->cNameSect(), "inv_icon");
 }

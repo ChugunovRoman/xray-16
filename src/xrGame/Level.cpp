@@ -51,13 +51,13 @@
 #include "xrNetServer/NET_Messages.h"
 #include "xrEngine/GameFont.h"
 
-#ifdef DEBUG
 #include "level_debug.h"
 #include "ai/stalker/ai_stalker.h"
 #include "debug_renderer.h"
 #include "PhysicObject.h"
 #include "PHDebug.h"
 #include "debug_text_tree.h"
+#ifdef DEBUG
 #include "LevelGraphDebugRender.hpp"
 #endif
 
@@ -95,11 +95,11 @@ CLevel::CLevel()
         m_space_restriction_manager = xr_new<CSpaceRestrictionManager>();
         m_client_spawn_manager = xr_new<CClientSpawnManager>();
         m_autosave_manager = xr_new<CAutosaveManager>();
-#ifdef DEBUG
         m_debug_renderer = xr_new<CDebugRenderer>();
+#ifdef DEBUG
         levelGraphDebugRender = xr_new<LevelGraphDebugRender>();
-        m_level_debug = xr_new<CLevelDebug>();
 #endif
+        // m_level_debug = xr_new<CLevelDebug>();
     }
     m_ph_commander = xr_new<CPHCommander>();
     m_ph_commander_scripts = xr_new<CPHCommander>();
@@ -146,9 +146,9 @@ CLevel::~CLevel()
     xr_delete(m_seniority_hierarchy_holder);
     xr_delete(m_client_spawn_manager);
     xr_delete(m_autosave_manager);
+    xr_delete(m_debug_renderer);
 #ifdef DEBUG
     xr_delete(levelGraphDebugRender);
-    xr_delete(m_debug_renderer);
 #endif
     if (!GEnv.isDedicatedServer)
         GEnv.ScriptEngine->remove_script_process(ScriptProcessor::Level);
@@ -610,7 +610,7 @@ void CLevel::OnRender()
 
     if (!Device.IsAnselActive)
         HUD().RenderUI();
-
+    debug_renderer().render();
 #ifdef DEBUG
     physics_world()->OnRender();
 #endif

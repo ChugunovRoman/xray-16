@@ -68,9 +68,7 @@ public:
         GEnv.RenderFactory = &RenderFactoryImpl;
         GEnv.DU = &DUImpl;
         GEnv.UIRender = &UIRenderImpl;
-#ifdef DEBUG
         GEnv.DRender = &DebugRenderImpl;
-#endif
         xrRender_initconsole();
     }
 } static s_r2_module;

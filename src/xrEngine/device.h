@@ -16,6 +16,7 @@
 #include "xrCore/ModuleLookup.hpp"
 
 #define VIEWPORT_NEAR 0.2f
+#define VIEWPORT_NEAR_3D 0.01f
 
 #define DEVICE_RESET_PRECACHE_FRAME_COUNT 10
 
@@ -31,6 +32,29 @@ class Task;
 class ENGINE_API CRenderDevice : public IWindowHandler
 {
 public:
+    class ENGINE_API CSecondVPParams //--#SM+#-- +SecondVP+
+    {
+        bool isActive; // Флаг активации рендера во второй вьюпорт
+        u8 frameDelay; // На каком кадре с момента прошлого рендера во второй вьюпорт мы начнём новый
+                       // (не может быть меньше 2 - каждый второй кадр, чем больше тем более низкий FPS во втором вьюпорте)
+
+    public:
+        bool isCamReady; // Флаг готовности камеры (FOV, позиция, и т.п) к рендеру второго вьюпорта
+
+        bool isR1;
+
+        bool IsSVPActive() { return isActive; }
+        void SetSVPActive(bool bState);
+        bool IsSVPFrame();
+
+        u8 GetSVPFrameDelay() { return frameDelay; }
+        void  SetSVPFrameDelay(u8 iDelay)
+        {
+            frameDelay = iDelay;
+            clamp<u8>(frameDelay, 2, u8(-1));
+        }
+    };
+
     // Main objects used for creating and rendering the 3D scene
     // Real application window resolution
     SDL_Rect m_rcWindowBounds{};
@@ -99,6 +123,7 @@ public:
     MessageRegistry<pureDeviceReset> seqDeviceReset;
     MessageRegistry<pureUIReset> seqUIReset;
     xr_vector<fastdelegate::FastDelegate0<>> seqParallel;
+    CSecondVPParams m_SecondViewport; // --#SM+#-- +SecondVP+
 
 private:
     struct RenderDeviceStatistics
@@ -158,6 +183,11 @@ public:
     CRenderDevice()
     {
         Timer.Start();
+
+        m_SecondViewport.SetSVPActive(false);
+        m_SecondViewport.SetSVPFrameDelay(2);
+        m_SecondViewport.isCamReady = false;
+        m_SecondViewport.isR1 = false;
     }
 
     void Pause(bool bOn, bool bTimer, bool bSound, pcstr reason);

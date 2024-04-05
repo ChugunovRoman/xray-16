@@ -25,6 +25,9 @@
 #include "IKLimbsController.h"
 #include "GamePersistent.h"
 
+ENGINE_API extern float psHUD_FOV; // --#SM+#--
+ENGINE_API extern float psHUD_FOV_def; // --#SM+#--
+
 void CActor::cam_Set(EActorCameras style)
 {
     CCameraBase* old_cam = cam_Active();
@@ -284,6 +287,17 @@ void CActor::cam_Update(float dt, float fFOV)
     if (m_holder)
         return;
 
+    // HUD FOV Update --#SM+#--
+    if (this == Level().CurrentControlEntity())
+    {
+        CWeapon* pWeapon = smart_cast<CWeapon*>(this->inventory().ActiveItem());
+        if (eacFirstEye == cam_active && pWeapon)
+            psHUD_FOV = pWeapon->GetHudFov();
+        else
+            psHUD_FOV = psHUD_FOV_def;
+    }
+    // --#SM+#--
+
     if ((mstate_real & mcClimb) && (cam_active != eacFreeLook))
         camUpdateLadder(dt);
     on_weapon_shot_update();
@@ -383,6 +397,20 @@ void CActor::cam_Update(float dt, float fFOV)
 
     fCurAVelocity = vPrevCamDir.sub(cameras[eacFirstEye]->vDirection).magnitude() / Device.fTimeDelta;
     vPrevCamDir = cameras[eacFirstEye]->vDirection;
+
+    // Высчитываем разницу между предыдущим и текущим Yaw \ Pitch от 1-го лица //--#SM+ Begin#--
+    float& cam_yaw_cur = cameras[eacFirstEye]->yaw;
+    static float cam_yaw_prev = cam_yaw_cur;
+
+    float& cam_pitch_cur = cameras[eacFirstEye]->pitch;
+    static float cam_pitch_prev = cam_pitch_cur;
+
+    fFPCamYawMagnitude = angle_difference_signed(cam_yaw_prev, cam_yaw_cur) / Device.fTimeDelta; // L+ / R-
+    fFPCamPitchMagnitude = angle_difference_signed(cam_pitch_prev, cam_pitch_cur) / Device.fTimeDelta; //U+ / D-
+
+    cam_yaw_prev = cam_yaw_cur;
+    cam_pitch_prev = cam_pitch_cur;
+    //--#SM+ End#--
 
 #ifdef DEBUG
     if (dbg_draw_camera_collision)

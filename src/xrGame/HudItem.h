@@ -127,6 +127,8 @@ public:
 
     virtual void UpdateXForm() = 0;
 
+    bool isHUDAnimationExist(LPCSTR anim_name);
+
     u32 PlayHUDMotion(const shared_str& M, BOOL bMixIn, CHudItem* W, u32 state);
     u32 PlayHUDMotion(const shared_str& M, const shared_str& M2, BOOL bMixIn, CHudItem* W, u32 state);
     u32 PlayHUDMotion_noCB(const shared_str& M, BOOL bMixIn);
