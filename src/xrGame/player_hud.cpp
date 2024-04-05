@@ -66,9 +66,8 @@ void player_hud_motion_container::load(IKinematicsAnimated* model, const shared_
                 pm.m_base_name = anm;
                 pm.m_additional_name = anm;
             }
-            else
+            else if (_GetItemCount(anm.c_str()) >= 2)
             {
-                R_ASSERT2(_GetItemCount(anm.c_str()) == 2, anm.c_str());
                 string512 str_item;
                 _GetItem(anm.c_str(), 0, str_item);
                 pm.m_base_name = str_item;

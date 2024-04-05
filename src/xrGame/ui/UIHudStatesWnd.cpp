@@ -466,7 +466,7 @@ void CUIHudStatesWnd::UpdateActiveItemInfo(CActor* actor)
 
 void CUIHudStatesWnd::SetAmmoIcon(const shared_str& sect_name)
 {
-    R_ASSERT2(pSettings->line_exist(sect_name, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", sect_name));
+    R_ASSERT2(pSettings->line_exist(sect_name, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", sect_name.c_str()));
 
     m_ui_weapon_icon->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(sect_name, "inv_icon")));
     m_ui_weapon_icon_rect = m_ui_weapon_icon->GetWndRect();

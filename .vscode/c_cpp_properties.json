@@ -8,6 +8,8 @@
                 "${workspaceFolder}",
                 "${workspaceFolder}/src",
                 "${workspaceFolder}/src/**",
+                "${workspaceFolder}/sdk/include/GL/*",
+                "${workspaceFolder}/sdk/include/**",
                 "${workspaceFolder}/**"
             ],
             "defines": [],

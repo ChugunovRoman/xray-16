@@ -560,7 +560,7 @@ void CUIMainIngameWnd::UpdatePickUpItem()
 
     shared_str sect_name = m_pPickUpItem->object().cNameSect();
 
-    R_ASSERT2(pSettings->line_exist(sect_name, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", sect_name));
+    R_ASSERT2(pSettings->line_exist(sect_name, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", sect_name.c_str()));
 
     auto inv_icon = pSettings->r_string(sect_name, "inv_icon");
 
@@ -847,7 +847,7 @@ void CUIMainIngameWnd::UpdateQuickSlots()
                 wnd->TextItemControl()->SetText(str);
                 wnd->Show(true);
 
-                R_ASSERT2(pSettings->line_exist(item_name, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", item_name));
+                R_ASSERT2(pSettings->line_exist(item_name, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", item_name.c_str()));
 
                 slot->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(item_name, "inv_icon")));
                 Frect texture_rect;
