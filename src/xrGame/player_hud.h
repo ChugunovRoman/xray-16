@@ -19,6 +19,7 @@ struct player_hud_motion
 {
     shared_str m_base_name;
     shared_str m_additional_name;
+    float m_diration_coff = 1.0;
     xr_vector<motion_descr> m_animations;
 };
 
