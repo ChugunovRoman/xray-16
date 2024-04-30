@@ -18,7 +18,6 @@
 #include "IGame_Persistent.h"
 #include "LightAnimLibrary.h"
 #include "XR_IOConsole.h"
-#include "xrSASH.h"
 
 #if defined(XR_PLATFORM_WINDOWS)
 #include "AccessibilityShortcuts.hpp"
@@ -319,6 +318,7 @@ CApplication::CApplication(pcstr commandLine)
 
     FPU::m24r();
 
+    Device.InitializeImGui();
     Device.FillVideoModes();
     InitInput();
     InitConsole();
@@ -336,9 +336,6 @@ CApplication::CApplication(pcstr commandLine)
         m_discord_core->ActivityManager().UpdateActivity(activity, nullptr);
     }
 #endif
-
-    //if (CheckBenchmark())
-    //    return 0;
 
     InitSoundDeviceList();
     execUserScript();
@@ -376,17 +373,14 @@ CApplication::~CApplication()
 
     // Destroying
     destroyInput();
-    if (!g_bBenchmark && !g_SASH.IsRunning())
-        destroySettings();
+    destroySettings();
 
     LALib.OnDestroy();
 
-    if (!g_bBenchmark && !g_SASH.IsRunning())
-        destroyConsole();
-    else
-        Console->Destroy();
+    destroyConsole();
 
     Device.CleanupVideoModes();
+    Device.DestroyImGui();
     destroySound();
 
     Device.Destroy();
@@ -442,34 +436,33 @@ int CApplication::Run()
             {
             case SDL_WINDOWEVENT:
             {
+                const auto window = SDL_GetWindowFromID(event.window.windowID);
+
                 switch (event.window.event)
                 {
                 case SDL_WINDOWEVENT_SHOWN:
                 case SDL_WINDOWEVENT_FOCUS_GAINED:
                 case SDL_WINDOWEVENT_RESTORED:
                 case SDL_WINDOWEVENT_MAXIMIZED:
-                    canCallActivate = true;
-                    shouldActivate = true;
+                    if (window != Device.m_sdlWnd)
+                        Device.OnWindowActivate(window, true);
+                    else
+                    {
+                        canCallActivate = true;
+                        shouldActivate = true;
+                    }
                     continue;
 
                 case SDL_WINDOWEVENT_HIDDEN:
                 case SDL_WINDOWEVENT_FOCUS_LOST:
                 case SDL_WINDOWEVENT_MINIMIZED:
-                    canCallActivate = true;
-                    shouldActivate = false;
-                    continue;
-
-                case SDL_WINDOWEVENT_ENTER:
-                    SDL_ShowCursor(SDL_FALSE);
-                    continue;
-
-                case SDL_WINDOWEVENT_LEAVE:
-                    SDL_ShowCursor(SDL_TRUE);
-                    continue;
-
-                case SDL_WINDOWEVENT_CLOSE:
-                    Engine.Event.Defer("KERNEL:disconnect");
-                    Engine.Event.Defer("KERNEL:quit");
+                    if (window != Device.m_sdlWnd)
+                        Device.OnWindowActivate(window, false);
+                    else
+                    {
+                        canCallActivate = true;
+                        shouldActivate = false;
+                    }
                     continue;
                 } // switch (event.window.event)
             }
@@ -483,7 +476,7 @@ int CApplication::Run()
         // Workaround for screen blinking when there's too much timeouts
         if (canCallActivate)
         {
-            Device.OnWindowActivate(shouldActivate);
+            Device.OnWindowActivate(Device.m_sdlWnd, shouldActivate);
         }
 
         Device.ProcessFrame();
@@ -524,21 +517,12 @@ void CApplication::ShowSplash(bool topmost)
     SDL_ShowWindow(m_window);
     SDL_UpdateWindowSurface(m_window);
 
-    Threading::SpawnThread(+[](void* self_ptr)
-    {
-        auto& self = *static_cast<CApplication*>(self_ptr);
-        self.SplashProc();
-    }, "X-Ray Splash Thread", 0, this);
-
-    while (!m_thread_operational)
-        SDL_PumpEvents();
+    m_splash_thread = Threading::RunThread("Splash Thread", &CApplication::SplashProc, this);
     SDL_PumpEvents();
 }
 
 void CApplication::SplashProc()
 {
-    m_thread_operational = true;
-
     while (true)
     {
         if (m_should_exit.Wait(SPLASH_FRAMERATE))
@@ -556,15 +540,6 @@ void CApplication::SplashProc()
         }
         UpdateDiscordStatus();
     }
-
-    for (SDL_Surface* surface : m_surfaces)
-        SDL_FreeSurface(surface);
-    m_surfaces.clear();
-
-    SDL_DestroyWindow(m_window);
-    m_window = nullptr;
-
-    m_thread_operational = false;
 }
 
 void CApplication::HideSplash()
@@ -573,11 +548,14 @@ void CApplication::HideSplash()
         return;
 
     m_should_exit.Set();
-    while (m_thread_operational)
-    {
-        SDL_PumpEvents();
-        SwitchToThread();
-    }
+    m_splash_thread.join();
+
+    SDL_DestroyWindow(m_window);
+    m_window = nullptr;
+
+    for (SDL_Surface* surface : m_surfaces)
+        SDL_FreeSurface(surface);
+    m_surfaces.clear();
 }
 
 void CApplication::UpdateDiscordStatus()

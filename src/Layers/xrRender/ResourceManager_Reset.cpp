@@ -26,10 +26,6 @@ void CResourceManager::reset_begin()
 
     RImplementation.Index.reset_begin();
     RImplementation.Vertex.reset_begin();
-
-#ifdef USE_DX9
-    DeferredUnload();
-#endif
 }
 
 bool cmp_rt(const CRT* A, const CRT* B) { return A->_order < B->_order; }
@@ -92,10 +88,6 @@ void CResourceManager::reset_end()
     {
         sstate->state_code.record(sstate->state);
     }
-
-#ifdef USE_DX9
-    DeferredUpload();
-#endif
 }
 
 template <class C>
@@ -130,11 +122,10 @@ void CResourceManager::Dump(bool bBrief)
     Msg("* RM_Dump: ps        : %d", m_ps.size());
     if (!bBrief)
         mdump(m_ps);
-#if defined(USE_DX11) || defined(USE_OGL)
     Msg("* RM_Dump: gs        : %d", m_gs.size());
     if (!bBrief)
         mdump(m_gs);
-#    ifdef USE_DX11
+#ifdef USE_DX11
     Msg("* RM_Dump: cs        : %d", m_cs.size());
     if (!bBrief)
         mdump(m_cs);
@@ -144,7 +135,6 @@ void CResourceManager::Dump(bool bBrief)
     Msg("* RM_Dump: ds        : %d", m_ds.size());
     if (!bBrief)
         mdump(m_ds);
-#    endif
 #endif
     Msg("* RM_Dump: dcl       : %d", v_declarations.size());
     Msg("* RM_Dump: states    : %d", v_states.size());

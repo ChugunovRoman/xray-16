@@ -62,6 +62,7 @@
     <ClInclude Include="..\..\Include\xrRender\UISequenceVideoItem.h" />
     <ClInclude Include="..\..\Include\xrRender\UIShader.h" />
     <ClInclude Include="..\..\Include\xrRender\WallMarkArray.h" />
+    <ClInclude Include="..\..\utils\xrLC_Light\R_light.h" />
     <ClInclude Include="..\xrRenderDX11\3DFluid\dx113DFluidBlenders.h" />
     <ClInclude Include="..\xrRenderDX11\3DFluid\dx113DFluidData.h" />
     <ClInclude Include="..\xrRenderDX11\3DFluid\dx113DFluidEmitters.h" />
@@ -469,9 +470,6 @@
     </ProjectReference>
     <ProjectReference Include="$(xrExternals)LuaJIT-proj\LuaJIT.vcxproj">
       <Project>{632aeeb6-dc06-4e15-9551-b2b09a4b73c5}</Project>
-    </ProjectReference>
-    <ProjectReference Include="$(xrExternals)oalib.vcxproj">
-      <Project>{61d4856f-fa82-4f02-bb88-909ddfb1fe74}</Project>
     </ProjectReference>
     <ProjectReference Include="..\..\..\Externals\imgui.vcxproj">
       <Project>{c8fbc3ce-d6de-4fc3-bc15-7b647614db09}</Project>

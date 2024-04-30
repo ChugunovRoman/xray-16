@@ -21,6 +21,8 @@ void CRenderDevice::Create()
     if (b_is_Ready)
         return; // prevent double call
 
+    secondaryThread = Threading::RunThread("Secondary thread", &CRenderDevice::SecondaryThreadProc, this);
+
     Statistic = xr_new<CStats>();
     Log("Starting RENDER device...");
 #ifdef _EDITOR
@@ -43,8 +45,8 @@ void CRenderDevice::Create()
     string_path fname;
     FS.update_path(fname, "$game_data$", "shaders.xr");
     GEnv.Render->OnDeviceCreate(fname);
-    if (!GEnv.isDedicatedServer)
-        m_editor.OnDeviceCreate();
+    m_imgui_render = GEnv.RenderFactory->CreateImGuiRender();
+    m_imgui_render->OnDeviceCreate(Device.GetImGuiContext());
     Statistic->OnDeviceCreate();
     dwFrame = 0;
 }

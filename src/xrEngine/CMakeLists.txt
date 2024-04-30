@@ -236,7 +236,6 @@ target_sources_grouped(
     defines.cpp
     defines.h
     embedded_resources_management.h
-    main.cpp
     mp_logging.h
     stdafx.cpp
     stdafx.h
@@ -311,20 +310,13 @@ target_sources_grouped(
 
 target_sources_grouped(
     TARGET xrEngine
-    NAME "OpenAutomate"
-    FILES
-    xrSASH.cpp
-    xrSASH.h
-)
-
-target_sources_grouped(
-    TARGET xrEngine
     NAME "Render\\Execution & 3D"
     FILES
     device.cpp
     device.h
     Device_create.cpp
     Device_destroy.cpp
+    Device_imgui.cpp
     Device_Initialize.cpp
     Device_mode.cpp
     Device_overdraw.cpp

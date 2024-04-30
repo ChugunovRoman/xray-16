@@ -55,8 +55,7 @@ const xr_token qsmapsize_token[] =
     { "2560", 2560 },
     { "3072", 3072 },
     { "3584", 3584 },
-    { "4096", 4096 },
-#if defined(USE_DX11) || defined(USE_OGL) // XXX: check if values more than 8192 are supported on OpenGL
+    { "4096", 4096 }, // XXX: runtime check for maximum smap-size on OpenGL
     { "5120", 5120 },
     { "6144", 6144 },
     { "7168", 7168 },
@@ -69,7 +68,6 @@ const xr_token qsmapsize_token[] =
     { "14336", 14336 },
     { "15360", 15360 },
     { "16384", 16384 },
-#endif // !USE_DX9
     { nullptr, 0 }
 };
 
@@ -81,16 +79,14 @@ const xr_token qsun_shafts_token[] = {{"st_opt_off", 0}, {"st_opt_low", 1}, {"st
 
 u32 ps_r_ssao = 3;
 const xr_token qssao_token[] = {{"st_opt_off", 0}, {"st_opt_low", 1}, {"st_opt_medium", 2}, {"st_opt_high", 3},
-#if defined(USE_DX11) || defined(USE_OGL)
     {"st_opt_ultra", 4},
-#endif
-    {nullptr, 0}};
+{nullptr, 0}};
 
 u32 ps_r_sun_quality = 1; // = 0;
 const xr_token qsun_quality_token[] = {{"st_opt_low", 0}, {"st_opt_medium", 1}, {"st_opt_high", 2},
 #if defined(USE_DX11) // TODO: OGL: fix ultra and extreme settings
     {"st_opt_ultra", 3}, {"st_opt_extreme", 4},
-#endif // !USE_DX9
+#endif // USE_DX11
     {nullptr, 0}};
 
 u32 ps_r_water_reflection = 3;
@@ -370,16 +366,13 @@ class CCC_tf_Aniso : public CCC_Integer
 public:
     void apply()
     {
-#if defined(USE_DX9) || defined(USE_DX11)
+#if defined(USE_DX11)
         if (nullptr == HW.pDevice)
             return;
 #endif
         int val = *value;
         clamp(val, 1, 16);
-#if defined(USE_DX9)
-        for (u32 i = 0; i < HW.Caps.raster.dwStages; i++)
-            CHK_DX(HW.pDevice->SetSamplerState(i, D3DSAMP_MAXANISOTROPY, val));
-#elif defined(USE_DX11)
+#if defined(USE_DX11)
         SSManager.SetMaxAnisotropy(val);
 #elif defined(USE_OGL)
         // OGL: don't set aniso here because it will be updated after vid restart
@@ -404,15 +397,10 @@ class CCC_tf_MipBias : public CCC_Float
 public:
     void apply()
     {
-#if defined(USE_DX9) || defined(USE_DX11)
+#if defined(USE_DX11)
         if (nullptr == HW.pDevice)
             return;
-#endif
 
-#if defined(USE_DX9)
-        for (u32 i = 0; i < HW.Caps.raster.dwStages; i++)
-            CHK_DX(HW.pDevice->SetSamplerState(i, D3DSAMP_MIPMAPLODBIAS, *((u32*)value)));
-#elif defined(USE_DX11)
         SSManager.SetMipLODBias(*value);
 #endif
     }
@@ -623,7 +611,7 @@ public:
     virtual void Execute(LPCSTR /*args*/)
     {
         // TODO: OGL: Implement memory usage statistics.
-#if defined(USE_DX9) || defined(USE_DX11)
+#if defined(USE_DX11)
         u32 m_base = 0;
         u32 c_base = 0;
         u32 m_lmaps = 0;

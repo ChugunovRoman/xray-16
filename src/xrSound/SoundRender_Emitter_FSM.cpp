@@ -8,7 +8,7 @@
 
 XRSOUND_API extern float psSoundCull;
 
-inline u32 calc_cursor(const float& fTimeStarted, float& fTime, const float& fTimeTotal, const float& fFreq, const SoundSourceInfo& info) //--#SM+#--
+inline u32 calc_cursor(const float& fTimeStarted, float& fTime, const float& fTimeTotal, const float& fFreq, const SoundDataInfo& info) //--#SM+#--
 {
     if (fTime < fTimeStarted)
         fTime = fTimeStarted; // Андрюха посоветовал, ассерт что ниже вылетел из за паузы как то хитро
@@ -39,7 +39,7 @@ void CSoundRender_Emitter::update(float fTime, float dt)
 
         set_cursor(0);
         if (target)
-            SoundRender->i_rewind(this);
+            target->rewind();
         bRewind = FALSE;
     }
 
@@ -107,7 +107,7 @@ void CSoundRender_Emitter::update(float fTime, float dt)
         {
             if (target)
             {
-                SoundRender->i_stop(this);
+                stop_target();
                 m_current_state = stSimulating;
             }
             fTimeStarted += dt;
@@ -118,7 +118,7 @@ void CSoundRender_Emitter::update(float fTime, float dt)
         if (fTime >= fTimeToStop)
         {
             // STOP
-            SoundRender->i_stop(this);
+            stop_target();
             m_current_state = stStopped;
         }
         else
@@ -126,7 +126,7 @@ void CSoundRender_Emitter::update(float fTime, float dt)
             if (!update_culling(dt))
             {
                 // switch to: SIMULATE
-                SoundRender->i_stop(this);
+                stop_target();
                 m_current_state = stSimulating;
             }
             else
@@ -151,7 +151,7 @@ void CSoundRender_Emitter::update(float fTime, float dt)
         }
         else
         {
-            const u32 ptr = calc_cursor(fTimeStarted, fTime, get_length_sec(), p_source.freq, source()->m_info); //--#SM+#--
+            const u32 ptr = calc_cursor(fTimeStarted, fTime, get_length_sec(), p_source.freq, source()->data_info()); //--#SM+#--
             set_cursor(ptr);
 
             if (update_culling(dt))
@@ -162,7 +162,7 @@ void CSoundRender_Emitter::update(float fTime, float dt)
                                 u32 ptr						= calc_cursor(	fTimeStarted,
                                                                             fTime,
                                                                             get_length_sec(),
-                                                                            source()->m_info);
+                                                                            source()->data_info());
                                 set_cursor					(ptr);
                 */
                 SoundRender->i_start(this);
@@ -174,7 +174,7 @@ void CSoundRender_Emitter::update(float fTime, float dt)
         {
             if (target)
             {
-                SoundRender->i_stop(this);
+                stop_target();
                 m_current_state = stSimulatingLooped;
             }
             fTimeStarted += dt;
@@ -184,7 +184,7 @@ void CSoundRender_Emitter::update(float fTime, float dt)
         if (!update_culling(dt))
         {
             // switch to: SIMULATE
-            SoundRender->i_stop(this);
+            stop_target();
             m_current_state = stSimulatingLooped; // switch state
         }
         else
@@ -204,7 +204,7 @@ void CSoundRender_Emitter::update(float fTime, float dt)
         {
             // switch to: PLAY
             m_current_state = stPlayingLooped; // switch state
-            const u32 ptr = calc_cursor(fTimeStarted, fTime, get_length_sec(), p_source.freq, source()->m_info); //--#SM+#--
+            const u32 ptr = calc_cursor(fTimeStarted, fTime, get_length_sec(), p_source.freq, source()->data_info()); //--#SM+#--
             set_cursor(ptr);
 
             SoundRender->i_start(this);
@@ -253,7 +253,7 @@ void CSoundRender_Emitter::update(float fTime, float dt)
                 fTimeToStop = fTime + fRemainingTime;
             }
 
-            const u32 ptr = calc_cursor(fTimeStarted, fTime, fLength, p_source.freq, source()->m_info);
+            const u32 ptr = calc_cursor(fTimeStarted, fTime, fLength, p_source.freq, source()->data_info());
             set_cursor(ptr);
 
             fTimeToRewind = 0.0f;
@@ -308,7 +308,7 @@ bool CSoundRender_Emitter::update_culling(float dt)
     else
     {
         // Check range
-        float dist = SoundRender->listener_position().distance_to(p_source.position);
+        const float dist = SoundRender->listener_position().distance_to(p_source.position);
         if (dist > p_source.max_distance)
         {
             smooth_volume = 0;
@@ -345,13 +345,16 @@ bool CSoundRender_Emitter::update_culling(float dt)
     // If we are playing already, return OK
     // --- else check availability of resources
     if (target)
+    {
+        target->set_priority(priority());
         return TRUE;
+    }
     return SoundRender->i_allow_play(this);
 }
 
 float CSoundRender_Emitter::priority() const
 {
-    float dist = SoundRender->listener_position().distance_to(p_source.position);
+    const float dist = SoundRender->listener_position().distance_to(p_source.position);
     float att = p_source.min_distance / (psSoundRolloff * dist);
     clamp(att, 0.f, 1.f);
     return smooth_volume * att * priority_scale;

@@ -6,7 +6,6 @@
 #include "xrCore/Threading/TaskManager.hpp"
 #include "xrScriptEngine/ScriptExporter.hpp"
 
-#include "xrSASH.h"
 #include "XR_IOConsole.h"
 #include "xr_input.h"
 
@@ -20,11 +19,16 @@ ENGINE_API CLoadScreenRenderer load_screen_renderer;
 
 ENGINE_API bool g_bRendering = false;
 
+ENGINE_API bool g_bBenchmark = false;
+string512 g_sBenchmarkName;
+
 int ps_fps_limit = 501;
 int ps_fps_limit_in_menu = 60;
 
 bool g_bLoaded = false;
 ref_light precache_light = 0;
+
+using namespace xray;
 
 bool CRenderDevice::RenderBegin()
 {
@@ -60,23 +64,23 @@ namespace
 void CheckPrivilegySlowdown()
 {
 #ifndef MASTER_GOLD
-    const auto slowdownthread = +[](void*)
+    const auto slowdownthread = []
     {
         for (;;)
         {
             if (Device.GetStats().fFPS < 30)
                 Sleep(1);
-            if (Device.mt_bMustExit || !pSettings || !Console || !pInput)
+            if (Device.mt_bMustExit.load(std::memory_order_acquire) || !pSettings || !Console || !pInput)
                 return;
         }
     };
 
     if (strstr(Core.Params, "-slowdown"))
-        Threading::SpawnThread(slowdownthread, "slowdown", 0, nullptr);
+        Threading::SpawnThread("slowdown", slowdownthread);
     if (strstr(Core.Params, "-slowdown2x"))
     {
-        Threading::SpawnThread(slowdownthread, "slowdown", 0, nullptr);
-        Threading::SpawnThread(slowdownthread, "slowdown", 0, nullptr);
+        Threading::SpawnThread("slowdown", slowdownthread);
+        Threading::SpawnThread("slowdown", slowdownthread);
     }
 #endif
 }
@@ -114,12 +118,8 @@ void CRenderDevice::RenderEnd(void)
             }
         }
     }
-    g_bRendering = false;
     // end scene
-    // Present goes here, so call OA Frame end.
-    if (g_SASH.IsBenchmarkRunning())
-        g_SASH.DisplayFrame(fTimeGlobal);
-
+    g_bRendering = false;
     GEnv.Render->End();
 
     vCameraPositionSaved = vCameraPosition;
@@ -203,9 +203,6 @@ bool CRenderDevice::BeforeFrame()
         return false;
     }
 
-    if (!dwPrecacheFrame && !g_SASH.IsBenchmarkRunning() && g_bLoaded)
-        g_SASH.StartBenchmark();
-
     return true;
 }
 
@@ -231,6 +228,16 @@ void CRenderDevice::BeforeRender()
     GEnv.Render->SetCacheXform(mView, mProject);
 }
 
+static void UpdateViewports()
+{
+    // Update and Render additional Platform Windows
+    if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+    {
+        ImGui::UpdatePlatformWindows();
+        ImGui::RenderPlatformWindowsDefault();
+    }
+}
+
 void CRenderDevice::DoRender()
 {
     if (GEnv.isDedicatedServer)
@@ -246,19 +253,39 @@ void CRenderDevice::DoRender()
 
         CalcFrameStats();
         Statistic->Show();
+
+        ImGui::Render();
+        m_imgui_render->Render(ImGui::GetDrawData());
+        UpdateViewports();
+
         RenderEnd(); // Present goes here
+    }
+    else
+    {
+        UpdateViewports();
     }
     renderTotalReal.End();
     renderTotalReal.FrameEnd();
     stats.RenderTotal.accum = renderTotalReal.accum;
 }
 
-void CRenderDevice::ProcessParallelSequence(Task&, void*)
+void CRenderDevice::SecondaryThreadProc()
 {
-    for (u32 pit = 0; pit < seqParallel.size(); pit++)
-        seqParallel[pit]();
-    seqParallel.clear();
-    seqFrameMT.Process();
+    TaskScheduler->RegisterThisThreadAsWorker();
+    while (!mt_bMustExit.load(std::memory_order_acquire))
+    {
+        if (executeSecondaryTasks.load(std::memory_order_acquire))
+        {
+            for (u32 pit = 0; pit < seqParallel.size(); pit++)
+                seqParallel[pit]();
+            seqParallel.clear();
+            seqFrameMT.Process();
+            executeSecondaryTasks.store(false, std::memory_order_relaxed);
+            secondaryTasksExecuted.store(true, std::memory_order_release);
+        }
+        TaskScheduler->ExecuteOneTask();
+    }
+    TaskScheduler->UnregisterThisThreadAsWorker();
 }
 
 void CRenderDevice::ProcessFrame()
@@ -272,7 +299,7 @@ void CRenderDevice::ProcessFrame()
 
     BeforeRender();
 
-    const auto& processSeqParallel = TaskScheduler->AddTask("Secondary Thread Proc", { this, &CRenderDevice::ProcessParallelSequence });
+    executeSecondaryTasks.store(true, std::memory_order_release);
 
     DoRender();
 
@@ -290,7 +317,10 @@ void CRenderDevice::ProcessFrame()
     if (frameTime < updateDelta)
         Sleep(updateDelta - frameTime);
 
-    TaskScheduler->Wait(processSeqParallel);
+    while (!secondaryTasksExecuted.load(std::memory_order_acquire))
+        TaskScheduler->ExecuteOneTask();
+
+    secondaryTasksExecuted.store(false, std::memory_order_relaxed);
 
     if (!b_is_Active)
         Sleep(1);
@@ -315,7 +345,7 @@ void CRenderDevice::ProcessEvent(const SDL_Event& event)
 #if SDL_VERSION_ATLEAST(2, 0, 14)
             if (event.display.display == psDeviceMode.Monitor && event.display.type != SDL_DISPLAYEVENT_CONNECTED)
 #else
-                    if (event.display.display == psDeviceMode.Monitor)
+            if (event.display.display == psDeviceMode.Monitor)
 #endif
                 Reset();
             else
@@ -327,16 +357,28 @@ void CRenderDevice::ProcessEvent(const SDL_Event& event)
 #endif
     case SDL_WINDOWEVENT:
     {
+        const auto window = SDL_GetWindowFromID(event.window.windowID);
+        if (!window)
+            break;
+        ImGuiViewport* viewport = ImGui::FindViewportByPlatformHandle(window);
+        if (!viewport)
+            break;
+
         switch (event.window.event)
         {
         case SDL_WINDOWEVENT_MOVED:
         {
-            UpdateWindowRects();
+            if (window == m_sdlWnd)
+            {
+                UpdateWindowRects();
 #if !SDL_VERSION_ATLEAST(2, 0, 18) // without SDL_WINDOWEVENT_DISPLAY_CHANGED, let's detect monitor change ourselves
-                    const int display = SDL_GetWindowDisplayIndex(m_sdlWnd);
-                    if (display != -1)
-                        psDeviceMode.Monitor = display;
+                const int display = SDL_GetWindowDisplayIndex(window);
+                if (display != -1)
+                    psDeviceMode.Monitor = display;
 #endif
+            }
+            if (viewport)
+                viewport->PlatformRequestMove = true;
             break;
         }
 
@@ -345,6 +387,11 @@ void CRenderDevice::ProcessEvent(const SDL_Event& event)
             psDeviceMode.Monitor = event.window.data1;
             break;
 #endif
+
+        case SDL_WINDOWEVENT_RESIZED:
+            if (viewport)
+                viewport->PlatformRequestResize = true;
+            break;
 
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         {
@@ -364,9 +411,24 @@ void CRenderDevice::ProcessEvent(const SDL_Event& event)
 
             break;
         }
+
+        case SDL_WINDOWEVENT_CLOSE:
+        {
+            if (viewport)
+                viewport->PlatformRequestClose = true;
+
+            if (window == m_sdlWnd)
+            {
+                Engine.Event.Defer("KERNEL:disconnect");
+                Engine.Event.Defer("KERNEL:quit");
+            }
+            break;
+        }
         } // switch (event.window.event)
     }
     } // switch (event.type)
+
+    editor().ProcessEvent(event);
 }
 
 void CRenderDevice::Run()
@@ -400,7 +462,8 @@ void CRenderDevice::Run()
 void CRenderDevice::Shutdown()
 {
     // Stop Balance-Thread
-    mt_bMustExit = true;
+    mt_bMustExit.store(true, std::memory_order_release);
+    secondaryThread.join();
 
     seqAppEnd.Process();
 }
@@ -446,17 +509,26 @@ void CRenderDevice::FrameMove()
         dwTimeGlobal = TimerGlobal.GetElapsed_ms();
         dwTimeDelta = dwTimeGlobal - _old_global;
     }
+    ImGui::GetIO().DeltaTime = fTimeDeltaReal;
+
+    m_imgui_render->Frame();
+    ImGui::NewFrame();
+
     // Frame move
     stats.EngineTotal.FrameStart();
     stats.EngineTotal.Begin();
     // TODO: HACK to test loading screen.
     // if(!g_bLoaded)
+
     seqFrame.Process();
+
     g_bLoaded = true;
     // else
     // seqFrame.Process(rp_Frame);
     stats.EngineTotal.End();
     stats.EngineTotal.FrameEnd();
+
+    ImGui::EndFrame();
 }
 
 ENGINE_API bool bShowPauseString = true;
@@ -514,8 +586,20 @@ void CRenderDevice::Pause(bool bOn, bool bTimer, bool bSound, [[maybe_unused]] p
 
 bool CRenderDevice::Paused() { return g_pauseMngr().Paused(); }
 
-void CRenderDevice::OnWindowActivate(bool activated)
+void CRenderDevice::OnWindowActivate(SDL_Window* window, bool activated)
 {
+    if (editor().GetState() == editor::ide::visible_state::full)
+    {
+        if (window != m_sdlWnd)
+        {
+            if (activated)
+                editor().OnAppActivate();
+            else
+                editor().OnAppDeactivate();
+        }
+        return;
+    }
+
     if (!GEnv.isDedicatedServer && activated)
         pInput->GrabInput(true);
     else
@@ -528,6 +612,7 @@ void CRenderDevice::OnWindowActivate(bool activated)
         b_is_InFocus = activated;
         if (b_is_InFocus)
         {
+            TaskScheduler->Pause(false);
             seqAppActivate.Process();
             app_inactive_time += TimerMM.GetElapsed_ms() - app_inactive_time_start;
         }
@@ -535,6 +620,7 @@ void CRenderDevice::OnWindowActivate(bool activated)
         {
             app_inactive_time_start = TimerMM.GetElapsed_ms();
             seqAppDeactivate.Process();
+            TaskScheduler->Pause(true);
         }
     }
 }

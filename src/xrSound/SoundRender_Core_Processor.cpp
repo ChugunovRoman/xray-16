@@ -43,16 +43,6 @@ void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector
         if (CSoundRender_Emitter* E = T->get_emitter())
         {
             update_emitter(E);
-
-            E = T->get_emitter(); // update can stop itself
-            if (E)
-                T->priority = E->priority();
-            else
-                T->priority = -1;
-        }
-        else
-        {
-            T->priority = -1;
         }
     }
 
@@ -143,7 +133,7 @@ void CSoundRender_Core::statistic(CSound_stats* dest, CSound_stats_ext* ext)
                 item.volume = emitter->smooth_volume;
                 if (emitter->owner_data)
                 {
-                    item.name = emitter->source()->fname;
+                    item.name = emitter->source()->file_name();
                     item.game_object = emitter->owner_data->g_object;
                     item.game_type = emitter->owner_data->g_type;
                     item.type = emitter->owner_data->s_type;
