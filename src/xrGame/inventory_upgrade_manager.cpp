@@ -198,9 +198,29 @@ void Manager::add_section_by_class(CInifile::Sect *const &section)
     }
 
     // Ammo
-    if (exist && xr_strcmp(value, "AMMO") == 0)
+    if (exist && (xr_strcmp(value, "AMMO") == 0 ||
+                xr_strcmp(value, "AMMO_S") == 0 ||
+                xr_strcmp(value, "S_OG7B") == 0 ||
+                xr_strcmp(value, "S_VOG25") == 0 ||
+                xr_strcmp(value, "S_VOG25") == 0 ||
+                xr_strcmp(value, "S_M209") == 0))
     {
         Level().sections_map[ESectionTypeName::ammo].push_back(name.c_str());
+    }
+    // Scopes
+    if (exist && xr_strcmp(value, "WP_SCOPE") == 0)
+    {
+        Level().sections_map[ESectionTypeName::scopes].push_back(name.c_str());
+    }
+    // Silencers
+    if (exist && xr_strcmp(value, "WP_SILEN") == 0)
+    {
+        Level().sections_map[ESectionTypeName::silencers].push_back(name.c_str());
+    }
+    // Launchers
+    if (exist && xr_strcmp(value, "WP_GLAUN") == 0)
+    {
+        Level().sections_map[ESectionTypeName::launchers].push_back(name.c_str());
     }
     // wpn_knives
     if (weaponClassExist && xr_strcmp(weaponClass, "knife") == 0)

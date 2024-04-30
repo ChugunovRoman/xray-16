@@ -980,6 +980,9 @@ IC static void CLevel_Export(lua_State* luaState)
         .enum_("section_types")
         [
             value("sctypAmmo", int(ESectionTypeName::ammo)),
+            value("sctypScopes", int(ESectionTypeName::scopes)),
+            value("sctypSilencers", int(ESectionTypeName::silencers)),
+            value("sctypLaunchers", int(ESectionTypeName::launchers)),
             value("sctypKnife", int(ESectionTypeName::knife)),
             value("sctypPistol", int(ESectionTypeName::pistol)),
             value("sctypAuto_pistol", int(ESectionTypeName::auto_pistol)),
