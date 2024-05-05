@@ -1017,7 +1017,7 @@ float CActor::currentFOV()
 
     CWeapon* pWeapon = smart_cast<CWeapon*>(inventory().ActiveItem());
 
-    if (eacFirstEye == cam_active && pWeapon && pWeapon->IsZoomed() &&
+    if (eacFirstEye == cam_active && pWeapon && (pWeapon->IsZoomed() || pWeapon->IsSecondZoomed()) &&
         (!pWeapon->ZoomTexture() || (!pWeapon->IsRotatingToZoom() && pWeapon->ZoomTexture())))
     {
         return pWeapon->GetZoomFactor() * (0.75f);
@@ -1158,7 +1158,7 @@ void CActor::UpdateCL()
     }
     if (pWeapon)
     {
-        if (pWeapon->IsZoomed())
+        if (pWeapon->IsZoomed() || pWeapon->IsSecondZoomed())
         {
             float full_fire_disp = pWeapon->GetFireDispersion(true);
 

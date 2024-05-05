@@ -718,6 +718,7 @@ bool CInventory::Action(u16 cmd, u32 flags)
         case kWPN_FIRE: { pActor->SetShotRndSeed();
         }
         break;
+        case kWPN_ZOOM_SECOND:
         case kWPN_ZOOM: { pActor->SetZoomRndSeed();
         }
         break;
@@ -752,6 +753,7 @@ bool CInventory::Action(u16 cmd, u32 flags)
         case kWPN_FIREMODE_NEXT:
         case kWPN_FIREMODE_PREV:
         case kWPN_ZOOM:
+        case kWPN_ZOOM_SECOND:
         case kTORCH:
         case kNIGHT_VISION: { SendActionEvent(cmd, flags);
         }

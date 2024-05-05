@@ -171,7 +171,7 @@ void CActor::OnEvent(NET_Packet& P, u16 type)
 
         if (flags & CMD_START)
         {
-            if (cmd == kWPN_ZOOM)
+            if (cmd == kWPN_ZOOM || cmd == kWPN_ZOOM_SECOND)
                 SetZoomRndSeed(ZoomRndSeed);
             if (cmd == kWPN_FIRE)
                 SetShotRndSeed(ShotRndSeed);

@@ -69,6 +69,7 @@ game_action actions[] =
     { "wpn_next",               kWPN_NEXT,                  _both }, // means next ammo type
     { "wpn_fire",               kWPN_FIRE,                  _both },
     { "wpn_zoom",               kWPN_ZOOM,                  _both },
+    { "wpn_zoom_second",        kWPN_ZOOM_SECOND,           _both },
     { "wpn_zoom_inc",           kWPN_ZOOM_INC,              _both },
     { "wpn_zoom_dec",           kWPN_ZOOM_DEC,              _both },
     { "wpn_reload",             kWPN_RELOAD,                _both },

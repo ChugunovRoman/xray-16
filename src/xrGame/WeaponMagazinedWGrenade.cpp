@@ -628,7 +628,7 @@ void CWeaponMagazinedWGrenade::PlayAnimIdle()
 {
     if (IsGrenadeLauncherAttached())
     {
-        if (IsZoomed())
+        if (IsZoomed() || IsSecondZoomed())
         {
             if (m_bGrenadeMode)
                 PlayHUDMotion("anm_idle_g_aim", "anim_idle_g_aim", /*FALSE*/TRUE, NULL, GetState()); //AVO: fix fast anim switch
@@ -737,7 +737,7 @@ void CWeaponMagazinedWGrenade::PlayAnimShoot()
         VERIFY(GetState() == eFire);
         if (IsGrenadeLauncherAttached())
         {
-            if (IsZoomed())
+            if (IsZoomed() || IsSecondZoomed())
             {
                 if (isHUDAnimationExist("anm_shots_w_gl_when_aim"))
                     PlayHUDMotion("anm_shots_w_gl_when_aim", FALSE, this, GetState());
@@ -849,8 +849,8 @@ bool CWeaponMagazinedWGrenade::IsNecessaryItem(const shared_str& item_sect)
 
 u8 CWeaponMagazinedWGrenade::GetCurrentHudOffsetIdx()
 {
-    bool b_aiming = ((IsZoomed() && m_zoom_params.m_fZoomRotationFactor <= 1.f) ||
-        (!IsZoomed() && m_zoom_params.m_fZoomRotationFactor > 0.f));
+    bool b_aiming = (((IsZoomed() || IsSecondZoomed()) && m_zoom_params.m_fZoomRotationFactor <= 1.f) ||
+        (!IsZoomed() && !IsSecondZoomed() && m_zoom_params.m_fZoomRotationFactor > 0.f));
 
     if (!b_aiming)
         return 0;

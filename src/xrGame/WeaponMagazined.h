@@ -38,7 +38,7 @@ protected:
 
 public:
     // Mortan: Новые параметры здеся
-    virtual bool bMarkCanShow() { return IsZoomed(); }
+    virtual bool bMarkCanShow() { return IsZoomed() || IsSecondZoomed(); }
 protected:
     int iMagSizeCurrent;
     virtual void OnMagazineEmpty();

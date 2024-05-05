@@ -50,6 +50,7 @@ enum EGameActions : u32
     kWPN_NEXT,
     kWPN_FIRE,
     kWPN_ZOOM,
+    kWPN_ZOOM_SECOND,
     kWPN_ZOOM_INC,
     kWPN_ZOOM_DEC,
     kWPN_RELOAD,

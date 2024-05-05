@@ -171,9 +171,7 @@ void attachable_hud_item::update(bool bForce)
 void attachable_hud_item::update_hud_additional(Fmatrix& trans) const
 {
     if (m_parent_hud_item)
-    {
         m_parent_hud_item->UpdateHudAdditonal(trans);
-    }
 }
 
 void attachable_hud_item::setup_firedeps(firedeps& fd)

@@ -891,10 +891,10 @@ void CActor::SwitchNightVision()
         CTorch* torch = smart_cast<CTorch*>(*it);
         if (torch)
         {
-            if (wpn1 && wpn1->IsZoomed())
+            if (wpn1 && (wpn1->IsZoomed() || wpn1->IsSecondZoomed()))
                 return;
 
-            if (wpn2 && wpn2->IsZoomed())
+            if (wpn2 && (wpn2->IsZoomed() || wpn2->IsSecondZoomed()))
                 return;
 
             torch->SwitchNightVision();

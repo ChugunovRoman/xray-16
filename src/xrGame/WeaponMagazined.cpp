@@ -1032,6 +1032,8 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
         UpdateAltScope();
         UpdateAddonsVisibility();
         InitAddons();
+        if (pScope)
+            LoadAltHudAim();
 
         return true;
     }
@@ -1077,6 +1079,7 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
         UpdateAltScope();
         UpdateAddonsVisibility();
         InitAddons();
+        LoadAltHudAim();
 
         return CInventoryItemObject::Detach(item_section_name, b_spawn_item);
     }
@@ -1227,7 +1230,7 @@ void CWeaponMagazined::PlayAnimIdle()
 {
     if (GetState() != eIdle)
         return;
-    if (IsZoomed())
+    if (IsZoomed() || IsSecondZoomed())
     {
         PlayAnimAim();
     }
@@ -1239,7 +1242,7 @@ void CWeaponMagazined::PlayAnimShoot()
 {
     VERIFY(GetState() == eFire);
 
-    if (IsZoomed())
+    if (IsZoomed() || IsSecondZoomed())
     {
         if (isHUDAnimationExist("anm_shots_when_aim"))
             PlayHUDMotion("anm_shots_when_aim", false, this, GetState());
@@ -1283,7 +1286,7 @@ void CWeaponMagazined::OnZoomIn()
 }
 void CWeaponMagazined::OnZoomOut()
 {
-    if (!IsZoomed())
+    if (!IsZoomed() && !IsSecondZoomed())
         return;
 
     inherited::OnZoomOut();
@@ -1324,22 +1327,38 @@ bool CWeaponMagazined::SwitchMode()
 
 void CWeaponMagazined::OnNextFireMode()
 {
+    auto state = GetState();
+
     if (!m_bHasDifferentFireModes)
         return;
-    if (GetState() != eIdle)
+    if (state != eIdle)
         return;
+
     m_iCurFireMode = (m_iCurFireMode + 1 + m_aFireModes.size()) % m_aFireModes.size();
     SetQueueSize(GetCurrentFireMode());
+
+    if(isHUDAnimationExist("anm_switch_mode"))
+        PlayHUDMotion("anm_switch_mode", true, this, state);
+    else if (isHUDAnimationExist("anm_changefiremode"))
+        PlayHUDMotion("anm_changefiremode", true, this, state);
 };
 
 void CWeaponMagazined::OnPrevFireMode()
 {
+    auto state = GetState();
+
     if (!m_bHasDifferentFireModes)
         return;
-    if (GetState() != eIdle)
+    if (state != eIdle)
         return;
+
     m_iCurFireMode = (m_iCurFireMode - 1 + m_aFireModes.size()) % m_aFireModes.size();
     SetQueueSize(GetCurrentFireMode());
+
+    if(isHUDAnimationExist("anm_switch_mode"))
+        PlayHUDMotion("anm_switch_mode", true, this, state);
+    else if (isHUDAnimationExist("anm_changefiremode"))
+        PlayHUDMotion("anm_changefiremode", true, this, state);
 };
 
 void CWeaponMagazined::OnH_A_Chield()

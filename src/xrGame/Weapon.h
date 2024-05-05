@@ -42,7 +42,7 @@ public:
     virtual bool bInZoomRightNow() const { return m_zoom_params.m_fZoomRotationFactor > 0.05; }
     IC bool bIsSecondVPZoomPresent() const { return GetSecondVPZoomFactor() > 0.000f; }
     bool bLoadAltScopesParams(LPCSTR section);
-    virtual bool bMarkCanShow() { return IsZoomed(); }
+    virtual bool bMarkCanShow() { return IsZoomed() || IsSecondZoomed(); }
     bool bChangeNVSecondVPStatus();
 
     virtual void UpdateSecondVP(bool bInGrenade = false);
@@ -206,6 +206,7 @@ public:
     void UpdateHUDAddonsVisibility();
     //инициализация свойств присоединенных аддонов
     virtual void InitAddons();
+    void LoadAltHudAim();
 
     //для отоброажения иконок апгрейдов в интерфейсе
     int GetScopeX();
@@ -258,10 +259,12 @@ protected:
     struct SZoomParams
     {
         bool m_bZoomEnabled; //разрешение режима приближения
+        bool m_bZoomSecondEnabled; //разрешение режима приближения на коллиматор
         bool m_bHideCrosshairInZoom;
         bool m_bZoomDofEnabled;
 
         bool m_bIsZoomModeNow; //когда режим приближения включен
+        bool m_bIsZoomSecondModeNow; //когда режим приближения включен на коллиматор
         float m_fCurrentZoomFactor; //текущий фактор приближения
         float m_fZoomRotateTime; //время приближения
 
@@ -289,13 +292,18 @@ protected:
     float m_fSecondRTZoomFactor; //текущий зум для 3д прицела
     CUIWindow* m_UIScope;
 
+    Fvector m_hands_offset[2][3]; // pos,rot/ normal,aim,GL
+
 public:
     IC bool IsZoomEnabled() const { return m_zoom_params.m_bZoomEnabled; }
+    IC bool IsZoomSecondEnabled() const { return m_zoom_params.m_bZoomSecondEnabled; }
     virtual void ZoomInc();
     virtual void ZoomDec();
     virtual void OnZoomIn();
     virtual void OnZoomOut();
+    virtual void OnZoomSecondIn();
     IC bool IsZoomed() const { return m_zoom_params.m_bIsZoomModeNow; };
+    IC bool IsSecondZoomed() const { return m_zoom_params.m_bIsZoomSecondModeNow; };
     CUIWindow* ZoomTexture();
 
     bool ZoomHideCrosshair();

@@ -221,6 +221,8 @@ bool is_snipper(u16 weaponID)
         return false;
     if (!WM->IsZoomed())
         return false;
+    if (!WM->IsSecondZoomed())
+        return false;
     // if( !WM->SingleShotMode() )
     // return false;
     if (!WM->IsScopeAttached())

@@ -172,7 +172,7 @@ void CWeapon::UpdateAltScope()
 
 bool CWeapon::bChangeNVSecondVPStatus()
 {
-    if (!bNVsecondVPavaible || !IsZoomed())
+    if (!bNVsecondVPavaible || (!IsZoomed() && !IsSecondZoomed()))
         return false;
 
     bNVsecondVPstatus = !bNVsecondVPstatus;
@@ -550,6 +550,7 @@ void CWeapon::Load(LPCSTR section)
     m_eGrenadeLauncherStatus = (ALife::EWeaponAddonStatus)pSettings->r_s32(section, "grenade_launcher_status");
 
     m_zoom_params.m_bZoomEnabled = !!pSettings->r_bool(section, "zoom_enabled");
+    m_zoom_params.m_bZoomSecondEnabled = READ_IF_EXISTS(pSettings, r_bool, section, "use_alt_aim_hud", false);
     m_zoom_params.m_fZoomRotateTime = READ_IF_EXISTS(pSettings, r_float, section, "zoom_rotate_time", ROTATION_TIME);
 
     m_zoom_params.m_bUseDynamicZoom = FALSE;
@@ -950,6 +951,7 @@ void CWeapon::save(NET_Packet& output_packet)
     save_data(m_flagsAddOnState, output_packet);
     save_data(m_ammoType, output_packet);
     save_data(m_zoom_params.m_bIsZoomModeNow, output_packet);
+    save_data(m_zoom_params.m_bIsZoomSecondModeNow, output_packet);
     save_data(m_bRememberActorNVisnStatus, output_packet);
     save_data(bNVsecondVPstatus, output_packet);
     save_data(m_fSecondRTZoomFactor, output_packet);
@@ -964,9 +966,14 @@ void CWeapon::load(IReader& input_packet)
     UpdateAddonsVisibility();
     load_data(m_ammoType, input_packet);
     load_data(m_zoom_params.m_bIsZoomModeNow, input_packet);
+    load_data(m_zoom_params.m_bIsZoomSecondModeNow, input_packet);
 
     if (m_zoom_params.m_bIsZoomModeNow)
         OnZoomIn();
+    else
+        OnZoomOut();
+    if (m_zoom_params.m_bIsZoomSecondModeNow)
+        OnZoomSecondIn();
     else
         OnZoomOut();
 
@@ -1034,6 +1041,7 @@ void CWeapon::OnH_B_Independent(bool just_before_destroy)
 
     m_strapped_mode = false;
     m_zoom_params.m_bIsZoomModeNow = false;
+    m_zoom_params.m_bIsZoomSecondModeNow = false;
     UpdateXForm();
     m_nearwall_last_hud_fov = psHUD_FOV_def;
 }
@@ -1136,7 +1144,7 @@ void CWeapon::UpdateCL()
         if (pActor && !pActor->AnyMove() && this == pActor->inventory().ActiveItem())
         {
             if (hud_adj_mode == 0 && GetState() == eIdle && (Device.dwTimeGlobal - m_dw_curr_substate_time > 20000) &&
-                !IsZoomed() && g_player_hud->attached_item(1) == nullptr)
+                (!IsZoomed() && !IsSecondZoomed()) && g_player_hud->attached_item(1) == nullptr)
             {
                 if (AllowBore())
                     SwitchState(eBore);
@@ -1230,6 +1238,7 @@ void CWeapon::SetDefaults()
     bMisfire = false;
     m_flagsAddOnState = 0;
     m_zoom_params.m_bIsZoomModeNow = false;
+    m_zoom_params.m_bIsZoomSecondModeNow = false;
 }
 
 void CWeapon::UpdatePosition(const Fmatrix& trans)
@@ -1279,6 +1288,48 @@ bool CWeapon::Action(u16 cmd, u32 flags)
     case kWPN_NEXT: { return SwitchAmmoType(flags);
     }
 
+    case kWPN_ZOOM_SECOND:
+        if (IsZoomSecondEnabled())
+        {
+            if (b_toggle_weapon_aim)
+            {
+                if (flags & CMD_START)
+                {
+                    if (IsZoomed())
+                        OnZoomOut();
+                    if (!IsSecondZoomed())
+                    {
+                        if (!IsPending())
+                        {
+                            if (GetState() != eIdle)
+                                SwitchState(eIdle);
+                            OnZoomSecondIn();
+                        }
+                    }
+                    else
+                        OnZoomOut();
+                }
+            }
+            else
+            {
+                if (flags & CMD_START)
+                {
+                    if (IsZoomed())
+                        OnZoomOut();
+                    if (!IsSecondZoomed() && !IsPending())
+                    {
+                        if (GetState() != eIdle)
+                            SwitchState(eIdle);
+                        OnZoomSecondIn();
+                    }
+                }
+                else if (IsSecondZoomed())
+                    OnZoomOut();
+            }
+            return true;
+        }
+        else
+            return false;
     case kWPN_ZOOM:
         if (IsZoomEnabled())
         {
@@ -1613,6 +1664,43 @@ void CWeapon::UpdateHUDAddonsVisibility()
         HudItemData()->set_bone_visible(wpn_grenade_launcher, TRUE, TRUE);
 }
 
+void CWeapon::LoadAltHudAim()
+{
+    const auto sectionNeedLoad = IsScopeAttached() ? GetNameWithAttachment() : m_section_id;
+
+    if (!IsScopeAttached())
+        m_fRTZoomFactor = m_zoom_params.m_fIronSightZoomFactor;
+
+    if (!pSettings->section_exist(sectionNeedLoad))
+        return;
+
+    m_zoom_params.m_bZoomSecondEnabled = READ_IF_EXISTS(pSettings, r_bool, sectionNeedLoad, "use_alt_aim_hud", false);
+
+    if (m_zoom_params.m_bZoomSecondEnabled)
+    {
+        const bool is_16x9 = UICore::is_widescreen();
+
+        string64 hud_sect;
+        string128 val_name;
+        string64 _prefix;
+
+        xr_sprintf(_prefix, "%s", is_16x9 ? "_16x9" : "");
+        xr_sprintf(hud_sect, "%s_hud", m_section_id.c_str());
+
+        m_hands_offset[0][0].set(0, 0, 0);
+        m_hands_offset[1][0].set(0, 0, 0);
+
+        strconcat(sizeof(val_name), val_name, "aim_hud_offset_pos", _prefix);
+        m_hands_offset[0][1] = pSettings->r_fvector3(hud_sect, val_name);
+        strconcat(sizeof(val_name), val_name, "aim_hud_offset_rot", _prefix);
+        m_hands_offset[1][1] = pSettings->r_fvector3(hud_sect, val_name);
+
+        strconcat(sizeof(val_name), val_name, "gl_hud_offset_pos", _prefix);
+        m_hands_offset[0][2] = pSettings->r_fvector3(hud_sect, val_name);
+        strconcat(sizeof(val_name), val_name, "gl_hud_offset_rot", _prefix);
+        m_hands_offset[1][2] = pSettings->r_fvector3(hud_sect, val_name);
+    }
+}
 void CWeapon::UpdateAddonsVisibility()
 {
     IKinematics* pWeaponVisual = smart_cast<IKinematics*>(Visual());
@@ -1704,7 +1792,7 @@ float CWeapon::CurrentZoomFactor()
 float CWeapon::GetControlInertionFactor() const
 {
     float fInertionFactor = inherited::GetControlInertionFactor();
-    if (IsScopeAttached() && IsZoomed())
+    if (IsScopeAttached() && (IsZoomed() || IsSecondZoomed()))
         return m_fScopeInertionFactor;
 
     return fInertionFactor;
@@ -1719,12 +1807,23 @@ void CWeapon::GetZoomData(const float scope_factor, float& delta, float& min_zoo
     delta = (delta_factor_total * (1 - m_fZoomMinKoeff)) / m_fZoomStepCount;
 }
 
+void CWeapon::OnZoomSecondIn()
+{
+    m_zoom_params.m_bIsZoomModeNow = false;
+    m_zoom_params.m_bIsZoomSecondModeNow = true;
+
+    SetZoomFactor(m_zoom_params.m_fIronSightZoomFactor);
+
+    if (m_zoom_params.m_bZoomDofEnabled && !IsScopeAttached())
+        GamePersistent().SetEffectorDOF(m_zoom_params.m_ZoomDof);
+
+    if (GetHUDmode())
+        GamePersistent().SetPickableEffectorDOF(true);
+}
 void CWeapon::OnZoomIn()
 {
     m_zoom_params.m_bIsZoomModeNow = true;
-
-    if (m_fSecondRTZoomFactor == -1)
-        ZoomDynamicMod(true, true);
+    m_zoom_params.m_bIsZoomSecondModeNow = false;
 
     if (!m_zoom_params.m_bUseDynamicZoom)
         SetZoomFactor(CurrentZoomFactor());
@@ -1767,9 +1866,10 @@ void CWeapon::OnZoomIn()
 
 void CWeapon::OnZoomOut()
 {
-    if (!bIsSecondVPZoomPresent() && !psActorFlags.test(AF_3DSCOPE))
+    if (!IsSecondZoomed() && !psActorFlags.test(AF_3DSCOPE))
         m_fRTZoomFactor = GetZoomFactor(); // Сохраняем текущий динамический зум
     m_zoom_params.m_bIsZoomModeNow = false;
+    m_zoom_params.m_bIsZoomSecondModeNow = false;
     SetZoomFactor(g_fov);
     // Включаем инерцию (также заменено  GetInertionFactor())
     // EnableHudInertion(TRUE);
@@ -2077,11 +2177,17 @@ void CWeapon::UpdateHudAdditonal(Fmatrix& trans)
     u8 idx = GetCurrentHudOffsetIdx();
 
     //============= Поворот ствола во время аима =============//
-    if ((IsZoomed() && m_zoom_params.m_fZoomRotationFactor <= 1.f) || (!IsZoomed() && m_zoom_params.m_fZoomRotationFactor > 0.f))
+    if (((IsZoomed() || IsSecondZoomed()) && m_zoom_params.m_fZoomRotationFactor <= 1.f) || (!IsZoomed() || !IsSecondZoomed() && m_zoom_params.m_fZoomRotationFactor > 0.f))
     {
         Fvector curr_offs, curr_rot;
         curr_offs = hi->m_measures.m_hands_offset[0][idx]; //pos,aim
         curr_rot = hi->m_measures.m_hands_offset[1][idx]; //rot,aim
+
+        if (IsZoomSecondEnabled() && IsSecondZoomed())
+        {
+            curr_offs = m_hands_offset[0][idx];
+            curr_rot = m_hands_offset[1][idx];
+        }
 
         curr_offs.mul(m_zoom_params.m_fZoomRotationFactor);
         curr_rot.mul(m_zoom_params.m_fZoomRotationFactor);
@@ -2483,7 +2589,7 @@ float CWeapon::Weight() const
     return res;
 }
 
-bool CWeapon::show_crosshair() { return !IsPending() && (!IsZoomed() || !ZoomHideCrosshair()); }
+bool CWeapon::show_crosshair() { return !IsPending() && ((!IsZoomed() && !IsSecondZoomed()) || !ZoomHideCrosshair()); }
 bool CWeapon::show_indicators() { return !(IsZoomed() && ZoomTexture()); }
 float CWeapon::GetConditionToShow() const
 {
@@ -2565,8 +2671,8 @@ u8 CWeapon::GetCurrentHudOffsetIdx()
     if (!pActor)
         return 0;
 
-    bool b_aiming = ((IsZoomed() && m_zoom_params.m_fZoomRotationFactor <= 1.f) ||
-        (!IsZoomed() && m_zoom_params.m_fZoomRotationFactor > 0.f));
+    bool b_aiming = (((IsZoomed() || IsSecondZoomed()) && m_zoom_params.m_fZoomRotationFactor <= 1.f) ||
+        ((!IsZoomed() && !IsSecondZoomed()) && m_zoom_params.m_fZoomRotationFactor > 0.f));
 
     if (!b_aiming)
         return 0;
@@ -2575,7 +2681,7 @@ u8 CWeapon::GetCurrentHudOffsetIdx()
 }
 
 void CWeapon::render_hud_mode() { RenderLight(); }
-bool CWeapon::MovingAnimAllowedNow() { return !IsZoomed(); }
+bool CWeapon::MovingAnimAllowedNow() { return !IsZoomed() && !IsSecondZoomed(); }
 bool CWeapon::IsHudModeNow() { return (HudItemData() != nullptr); }
 
 void CWeapon::ZoomDynamicMod(bool bIncrement, bool bForceLimit)
