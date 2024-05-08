@@ -37,6 +37,7 @@ void CUIInventoryCellItem::UpdateIcon()
     CInventoryItem* itm = (CInventoryItem*)m_pData;
 
     pcstr iconPath = itm->GetInvIconPath();
+    inherited::SetShader(InventoryUtilities::GetEquipmentIconShader(iconPath));
 
     m_grid_size.set(itm->GetInvGridRect().rb);
     Frect rect;
@@ -284,12 +285,16 @@ void CUIWeaponCellItem::Update()
                 CreateIcon(eScope);
                 RefreshOffset();
                 InitAddon(GetIcon(eScope), *object()->GetScopeName(), m_addon_offset[eScope], Heading());
+                UpdateIcon();
             }
         }
         else
         {
             if (m_addons[eScope])
+            {
                 DestroyIcon(eScope);
+                UpdateIcon();
+            }
         }
     }
 

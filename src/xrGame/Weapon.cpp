@@ -201,7 +201,7 @@ int CWeapon::GetScopeX()
     {
         if (m_eScopeStatus != ALife::eAddonPermanent && IsScopeAttached())
         {
-            return READ_IF_EXISTS(pSettings, r_u8, GetNameWithAttachment(), "scope_x", 0);
+            return READ_IF_EXISTS(pSettings, r_s32, GetNameWithAttachment(), "scope_x", 0);
         }
         else
         {
@@ -210,7 +210,7 @@ int CWeapon::GetScopeX()
     }
     else
     {
-        return READ_IF_EXISTS(pSettings, r_u8, m_scopes[m_cur_scope], "scope_x", 0);
+        return READ_IF_EXISTS(pSettings, r_s32, m_scopes[m_cur_scope], "scope_x", 0);
     }
 }
 
@@ -220,7 +220,7 @@ int CWeapon::GetScopeY()
     {
         if (m_eScopeStatus != ALife::eAddonPermanent && IsScopeAttached())
         {
-            return READ_IF_EXISTS(pSettings, r_u8, GetNameWithAttachment(), "scope_y", 0);
+            return READ_IF_EXISTS(pSettings, r_s32, GetNameWithAttachment(), "scope_y", 0);
         }
         else
         {
@@ -229,7 +229,7 @@ int CWeapon::GetScopeY()
     }
     else
     {
-        return READ_IF_EXISTS(pSettings, r_u8, m_scopes[m_cur_scope], "scope_y", 0);
+        return READ_IF_EXISTS(pSettings, r_s32, m_scopes[m_cur_scope], "scope_y", 0);
     }
 }
 
@@ -1027,6 +1027,20 @@ void CWeapon::shedule_Update(u32 dT)
 
     // Inherited
     inherited::shedule_Update(dT);
+
+    if (m_eSilencerStatus == ALife::eAddonAttachable)
+    {
+        m_sSilencerName = pSettings->r_string(m_section_id, "silencer_name");
+        m_iSilencerX = pSettings->r_s32(m_section_id, "silencer_x");
+        m_iSilencerY = pSettings->r_s32(m_section_id, "silencer_y");
+    }
+
+    if (m_eGrenadeLauncherStatus == ALife::eAddonAttachable)
+    {
+        m_sGrenadeLauncherName = pSettings->r_string(m_section_id, "grenade_launcher_name");
+        m_iGrenadeLauncherX = pSettings->r_s32(m_section_id, "grenade_launcher_x");
+        m_iGrenadeLauncherY = pSettings->r_s32(m_section_id, "grenade_launcher_y");
+    }
 }
 
 void CWeapon::OnH_B_Independent(bool just_before_destroy)
@@ -1669,6 +1683,8 @@ void CWeapon::LoadAltHudAim()
     const auto sectionNeedLoad = IsScopeAttached() ? GetNameWithAttachment() : m_section_id;
 
     R_ASSERT3(pSettings->section_exist(sectionNeedLoad), "Section doesn't exist", sectionNeedLoad.c_str());
+
+    m_alt_section_id = sectionNeedLoad;
 
     if (!IsScopeAttached())
         m_fRTZoomFactor = m_zoom_params.m_fIronSightZoomFactor;

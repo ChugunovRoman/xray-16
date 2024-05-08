@@ -153,6 +153,7 @@ public:
 public:
     CInventory* m_pInventory;
     shared_str m_section_id;
+    shared_str m_alt_section_id;
     shared_str m_name;
     shared_str m_nameShort;
     shared_str m_tip;
