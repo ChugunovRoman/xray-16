@@ -214,7 +214,10 @@ void CUIWeaponCellItem::CreateIcon(eAddonType t)
     AttachChild(m_addons[t]);
     CInventoryItem* itm = (CInventoryItem*)m_pData;
     R_ASSERT2(pSettings->line_exist(itm->m_section_id.c_str(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", itm->m_section_id.c_str()));
-    m_addons[t]->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(itm->m_section_id.c_str(), "inv_icon")));
+    if (pSettings->line_exist(itm->m_section_id.c_str(), "inv_icon_alt"))
+        m_addons[t]->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(itm->m_section_id.c_str(), "inv_icon_alt")));
+    else
+        m_addons[t]->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(itm->m_section_id.c_str(), "inv_icon")));
 
     u32 color = GetTextureColor();
     m_addons[t]->SetTextureColor(color);
@@ -348,7 +351,10 @@ void CUIWeaponCellItem::InitAddon(CUIStatic* s, LPCSTR section, Fvector2 addon_o
     Fvector2 base_scale;
 
     R_ASSERT2(pSettings->line_exist(section, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", section));
-    s->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(section, "inv_icon")));
+    if (pSettings->line_exist(section, "inv_icon_alt"))
+        s->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(section, "inv_icon_alt")));
+    else
+        s->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(section, "inv_icon")));
 
     if (Heading())
     {
@@ -361,8 +367,17 @@ void CUIWeaponCellItem::InitAddon(CUIStatic* s, LPCSTR section, Fvector2 addon_o
         base_scale.y = GetHeight() / (INV_GRID_HEIGHTF * m_grid_size.y);
     }
     Fvector2 cell_size;
-    cell_size.x = pSettings->r_u32(section, "inv_grid_width") * INV_GRID_WIDTHF;
-    cell_size.y = pSettings->r_u32(section, "inv_grid_height") * INV_GRID_HEIGHTF;
+
+    if (pSettings->line_exist(section, "inv_grid_alt_width") && pSettings->line_exist(section, "inv_grid_alt_height"))
+    {
+        cell_size.x = pSettings->r_u32(section, "inv_grid_alt_width") * INV_GRID_WIDTHF;
+        cell_size.y = pSettings->r_u32(section, "inv_grid_alt_height") * INV_GRID_HEIGHTF;
+    }
+    else
+    {
+        cell_size.x = pSettings->r_u32(section, "inv_grid_width") * INV_GRID_WIDTHF;
+        cell_size.y = pSettings->r_u32(section, "inv_grid_height") * INV_GRID_HEIGHTF;
+    }
 
     tex_rect.x1 = 0;
     tex_rect.y1 = 0;

@@ -140,7 +140,7 @@ const shared_str CWeapon::GetScopeName() const
     }
     else
     {
-        return pSettings->r_string(m_scopes[m_cur_scope], "scope_name");
+        return READ_IF_EXISTS(pSettings, r_string, m_scopes[m_cur_scope], "scope_name", "wpn_addon_scope");
     }
 }
 
@@ -201,7 +201,7 @@ int CWeapon::GetScopeX()
     {
         if (m_eScopeStatus != ALife::eAddonPermanent && IsScopeAttached())
         {
-            return pSettings->r_s32(GetNameWithAttachment(), "scope_x");
+            return READ_IF_EXISTS(pSettings, r_u8, GetNameWithAttachment(), "scope_x", 0);
         }
         else
         {
@@ -210,7 +210,7 @@ int CWeapon::GetScopeX()
     }
     else
     {
-        return pSettings->r_s32(m_scopes[m_cur_scope], "scope_x");
+        return READ_IF_EXISTS(pSettings, r_u8, m_scopes[m_cur_scope], "scope_x", 0);
     }
 }
 
@@ -220,7 +220,7 @@ int CWeapon::GetScopeY()
     {
         if (m_eScopeStatus != ALife::eAddonPermanent && IsScopeAttached())
         {
-            return pSettings->r_s32(GetNameWithAttachment(), "scope_y");
+            return READ_IF_EXISTS(pSettings, r_u8, GetNameWithAttachment(), "scope_y", 0);
         }
         else
         {
@@ -229,7 +229,7 @@ int CWeapon::GetScopeY()
     }
     else
     {
-        return pSettings->r_s32(m_scopes[m_cur_scope], "scope_y");
+        return READ_IF_EXISTS(pSettings, r_u8, m_scopes[m_cur_scope], "scope_y", 0);
     }
 }
 
@@ -1668,11 +1668,10 @@ void CWeapon::LoadAltHudAim()
 {
     const auto sectionNeedLoad = IsScopeAttached() ? GetNameWithAttachment() : m_section_id;
 
+    R_ASSERT3(pSettings->section_exist(sectionNeedLoad), "Section doesn't exist", sectionNeedLoad.c_str());
+
     if (!IsScopeAttached())
         m_fRTZoomFactor = m_zoom_params.m_fIronSightZoomFactor;
-
-    if (!pSettings->section_exist(sectionNeedLoad))
-        return;
 
     m_zoom_params.m_bZoomSecondEnabled = READ_IF_EXISTS(pSettings, r_bool, sectionNeedLoad, "use_alt_aim_hud", false);
 
@@ -1681,24 +1680,27 @@ void CWeapon::LoadAltHudAim()
         const bool is_16x9 = UICore::is_widescreen();
 
         string64 hud_sect;
+        string64 base_hud_sect;
         string128 val_name;
         string64 _prefix;
 
         xr_sprintf(_prefix, "%s", is_16x9 ? "_16x9" : "");
-        xr_sprintf(hud_sect, "%s_hud", m_section_id.c_str());
+        xr_sprintf(hud_sect, "%s_hud", sectionNeedLoad.c_str());
+        xr_sprintf(base_hud_sect, "%s_hud", m_section_id.c_str());
 
         m_hands_offset[0][0].set(0, 0, 0);
         m_hands_offset[1][0].set(0, 0, 0);
 
-        strconcat(sizeof(val_name), val_name, "aim_hud_offset_pos", _prefix);
-        m_hands_offset[0][1] = pSettings->r_fvector3(hud_sect, val_name);
-        strconcat(sizeof(val_name), val_name, "aim_hud_offset_rot", _prefix);
-        m_hands_offset[1][1] = pSettings->r_fvector3(hud_sect, val_name);
-
-        strconcat(sizeof(val_name), val_name, "gl_hud_offset_pos", _prefix);
-        m_hands_offset[0][2] = pSettings->r_fvector3(hud_sect, val_name);
-        strconcat(sizeof(val_name), val_name, "gl_hud_offset_rot", _prefix);
-        m_hands_offset[1][2] = pSettings->r_fvector3(hud_sect, val_name);
+        strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_pos", _prefix);
+        if (pSettings->line_exist(hud_sect, val_name))
+            m_hands_offset[0][1] = pSettings->r_fvector3(hud_sect, val_name);
+        else
+            m_hands_offset[0][1] = pSettings->r_fvector3(base_hud_sect, val_name);
+        strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_rot", _prefix);
+        if (pSettings->line_exist(hud_sect, val_name))
+            m_hands_offset[1][1] = pSettings->r_fvector3(hud_sect, val_name);
+        else
+            m_hands_offset[1][1] = pSettings->r_fvector3(base_hud_sect, val_name);
     }
 }
 void CWeapon::UpdateAddonsVisibility()
