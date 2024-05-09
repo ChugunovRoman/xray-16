@@ -500,6 +500,7 @@ bool CWeaponMagazinedWGrenade::Attach(PIItem pIItem, bool b_send_event)
                 pIItem->object().DestroyObject();
         }
         InitAddons();
+        UpdateAddonsOffset();
         UpdateAddonsVisibility();
 
         if (GetState() == eIdle)
@@ -529,6 +530,8 @@ bool CWeaponMagazinedWGrenade::Detach(LPCSTR item_section_name, bool b_spawn_ite
 
         if (GetState() == eIdle)
             PlayAnimIdle();
+
+        UpdateAddonsOffset();
 
         return CInventoryItemObject::Detach(item_section_name, b_spawn_item);
     }

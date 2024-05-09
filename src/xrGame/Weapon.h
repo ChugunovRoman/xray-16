@@ -207,6 +207,7 @@ public:
     //инициализация свойств присоединенных аддонов
     virtual void InitAddons();
     void LoadAltHudAim();
+    void UpdateAddonsOffset();
 
     //для отоброажения иконок апгрейдов в интерфейсе
     int GetScopeX();

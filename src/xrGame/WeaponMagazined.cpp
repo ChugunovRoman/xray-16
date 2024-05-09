@@ -1035,10 +1035,15 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
         if (pScope)
             LoadAltHudAim();
 
+        UpdateAddonsOffset();
         return true;
     }
     else
+    {
+        UpdateAddonsOffset();
         return inherited::Attach(pIItem, b_send_event);
+    }
+
 }
 
 bool CWeaponMagazined::DetachScope(const char* item_section_name, bool b_spawn_item)
@@ -1079,6 +1084,7 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
         UpdateAltScope();
         UpdateAddonsVisibility();
         InitAddons();
+        UpdateAddonsOffset();
         LoadAltHudAim();
 
         return CInventoryItemObject::Detach(item_section_name, b_spawn_item);
@@ -1094,6 +1100,7 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
 
         UpdateAddonsVisibility();
         InitAddons();
+        UpdateAddonsOffset();
         return CInventoryItemObject::Detach(item_section_name, b_spawn_item);
     }
     else if (m_eGrenadeLauncherStatus == ALife::eAddonAttachable && (m_sGrenadeLauncherName == item_section_name))
@@ -1107,11 +1114,11 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
 
         UpdateAddonsVisibility();
         InitAddons();
+        UpdateAddonsOffset();
         return CInventoryItemObject::Detach(item_section_name, b_spawn_item);
     }
     else
         return inherited::Detach(item_section_name, b_spawn_item);
-    ;
 }
 /*
 void CWeaponMagazined::LoadAddons()

@@ -579,6 +579,26 @@ void CWeapon::Load(LPCSTR section)
 
     UpdateAltScope();
     InitAddons();
+
+    const bool is_16x9 = UICore::is_widescreen();
+
+    string64 base_hud_sect;
+    string128 val_name;
+    string64 _prefix;
+
+    xr_sprintf(_prefix, "%s", is_16x9 ? "_16x9" : "");
+    xr_sprintf(base_hud_sect, "%s_hud", section);
+
+    m_hands_offset[0][0].set(0, 0, 0);
+    m_hands_offset[1][0].set(0, 0, 0);
+
+    strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_pos", _prefix);
+    if (pSettings->line_exist(base_hud_sect, val_name))
+        m_hands_offset[0][1] = pSettings->r_fvector3(base_hud_sect, val_name);
+    strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_rot", _prefix);
+    if (pSettings->line_exist(base_hud_sect, val_name))
+        m_hands_offset[1][1] = pSettings->r_fvector3(base_hud_sect, val_name);
+
     if (pSettings->line_exist(section, "weapon_remove_time"))
         m_dwWeaponRemoveTime = pSettings->r_u32(section, "weapon_remove_time");
     else
@@ -1027,20 +1047,6 @@ void CWeapon::shedule_Update(u32 dT)
 
     // Inherited
     inherited::shedule_Update(dT);
-
-    if (m_eSilencerStatus == ALife::eAddonAttachable)
-    {
-        m_sSilencerName = pSettings->r_string(m_section_id, "silencer_name");
-        m_iSilencerX = pSettings->r_s32(m_section_id, "silencer_x");
-        m_iSilencerY = pSettings->r_s32(m_section_id, "silencer_y");
-    }
-
-    if (m_eGrenadeLauncherStatus == ALife::eAddonAttachable)
-    {
-        m_sGrenadeLauncherName = pSettings->r_string(m_section_id, "grenade_launcher_name");
-        m_iGrenadeLauncherX = pSettings->r_s32(m_section_id, "grenade_launcher_x");
-        m_iGrenadeLauncherY = pSettings->r_s32(m_section_id, "grenade_launcher_y");
-    }
 }
 
 void CWeapon::OnH_B_Independent(bool just_before_destroy)
@@ -1678,6 +1684,56 @@ void CWeapon::UpdateHUDAddonsVisibility()
         HudItemData()->set_bone_visible(wpn_grenade_launcher, TRUE, TRUE);
 }
 
+void CWeapon::UpdateAddonsOffset()
+{
+    if (m_eScopeStatus == ALife::eAddonAttachable)
+    {
+        if (pSettings->line_exist(m_alt_section_id, "scope_name"))
+            m_sScopeName = pSettings->r_string(m_alt_section_id, "scope_name");
+        else if (pSettings->line_exist(m_section_id, "scope_name"))
+            m_sScopeName = pSettings->r_string(m_section_id, "scope_name");
+        if (pSettings->line_exist(m_alt_section_id, "scope_x"))
+            m_iScopeX = pSettings->r_s32(m_alt_section_id, "scope_x");
+        else if (pSettings->line_exist(m_section_id, "scope_x"))
+            m_iScopeX = pSettings->r_s32(m_section_id, "scope_x");
+        if (pSettings->line_exist(m_alt_section_id, "scope_y"))
+            m_iScopeY = pSettings->r_s32(m_alt_section_id, "scope_y");
+        else if (pSettings->line_exist(m_section_id, "scope_y"))
+            m_iScopeY = pSettings->r_s32(m_section_id, "scope_y");
+    }
+
+    if (m_eSilencerStatus == ALife::eAddonAttachable)
+    {
+        if (pSettings->line_exist(m_alt_section_id, "silencer_name"))
+            m_sSilencerName = pSettings->r_string(m_alt_section_id, "silencer_name");
+        else if (pSettings->line_exist(m_section_id, "silencer_name"))
+            m_sSilencerName = pSettings->r_string(m_section_id, "silencer_name");
+        if (pSettings->line_exist(m_alt_section_id, "silencer_x"))
+            m_iSilencerX = pSettings->r_s32(m_alt_section_id, "silencer_x");
+        else if (pSettings->line_exist(m_section_id, "silencer_x"))
+            m_iSilencerX = pSettings->r_s32(m_section_id, "silencer_x");
+        if (pSettings->line_exist(m_alt_section_id, "silencer_y"))
+            m_iSilencerY = pSettings->r_s32(m_alt_section_id, "silencer_y");
+        else if (pSettings->line_exist(m_section_id, "silencer_y"))
+            m_iSilencerY = pSettings->r_s32(m_section_id, "silencer_y");
+    }
+
+    if (m_eGrenadeLauncherStatus == ALife::eAddonAttachable)
+    {
+        if (pSettings->line_exist(m_alt_section_id, "grenade_launcher_name"))
+            m_sGrenadeLauncherName = pSettings->r_string(m_alt_section_id, "grenade_launcher_name");
+        else if (pSettings->line_exist(m_section_id, "grenade_launcher_name"))
+            m_sGrenadeLauncherName = pSettings->r_string(m_section_id, "grenade_launcher_name");
+        if (pSettings->line_exist(m_alt_section_id, "grenade_launcher_x"))
+            m_iGrenadeLauncherX = pSettings->r_s32(m_alt_section_id, "grenade_launcher_x");
+        else if (pSettings->line_exist(m_section_id, "grenade_launcher_x"))
+            m_iGrenadeLauncherX = pSettings->r_s32(m_section_id, "grenade_launcher_x");
+        if (pSettings->line_exist(m_alt_section_id, "grenade_launcher_y"))
+            m_iGrenadeLauncherY = pSettings->r_s32(m_alt_section_id, "grenade_launcher_y");
+        else if (pSettings->line_exist(m_section_id, "grenade_launcher_y"))
+            m_iGrenadeLauncherY = pSettings->r_s32(m_section_id, "grenade_launcher_y");
+    }
+}
 void CWeapon::LoadAltHudAim()
 {
     const auto sectionNeedLoad = IsScopeAttached() ? GetNameWithAttachment() : m_section_id;
@@ -1704,18 +1760,15 @@ void CWeapon::LoadAltHudAim()
         xr_sprintf(hud_sect, "%s_hud", sectionNeedLoad.c_str());
         xr_sprintf(base_hud_sect, "%s_hud", m_section_id.c_str());
 
-        m_hands_offset[0][0].set(0, 0, 0);
-        m_hands_offset[1][0].set(0, 0, 0);
-
         strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_pos", _prefix);
         if (pSettings->line_exist(hud_sect, val_name))
             m_hands_offset[0][1] = pSettings->r_fvector3(hud_sect, val_name);
-        else
+        else if (pSettings->line_exist(base_hud_sect, val_name))
             m_hands_offset[0][1] = pSettings->r_fvector3(base_hud_sect, val_name);
         strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_rot", _prefix);
         if (pSettings->line_exist(hud_sect, val_name))
             m_hands_offset[1][1] = pSettings->r_fvector3(hud_sect, val_name);
-        else
+        else if (pSettings->line_exist(base_hud_sect, val_name))
             m_hands_offset[1][1] = pSettings->r_fvector3(base_hud_sect, val_name);
     }
 }
