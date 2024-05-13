@@ -504,6 +504,8 @@ CSE_ALifeItemWeapon::CSE_ALifeItemWeapon(LPCSTR caSection) : CSE_ALifeItem(caSec
     m_addon_flags.zero();
 
     m_scope_status = (EWeaponAddonStatus)pSettings->r_s32(s_name, "scope_status");
+    if (pSettings->line_exist(s_name, "scopes") && xr_strcmp(pSettings->r_string(s_name, "scopes"), "") != 0)
+        m_scope_status = EWeaponAddonStatus::eAddonAttachable;
     m_silencer_status = (EWeaponAddonStatus)pSettings->r_s32(s_name, "silencer_status");
     m_grenade_launcher_status = (EWeaponAddonStatus)pSettings->r_s32(s_name, "grenade_launcher_status");
     m_ef_main_weapon_type = READ_IF_EXISTS(pSettings, r_u32, caSection, "ef_main_weapon_type", u32(-1));

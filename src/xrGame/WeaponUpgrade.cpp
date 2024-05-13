@@ -225,6 +225,8 @@ bool CWeapon::install_upgrade_addon(LPCSTR section, bool test)
     // 0 - no addon // 1 - permanent // 2 - attachable
     int temp_int = (int)m_eScopeStatus;
     bool result2 = process_if_exists_set(section, "scope_status", &CInifile::r_s32, temp_int, test);
+    if (pSettings->line_exist(section, "scopes") && xr_strcmp(pSettings->r_string(section, "scopes"), "") != 0)
+        result2 = true;
     if (result2 && !test)
     {
         m_eScopeStatus = (ALife::EWeaponAddonStatus)temp_int;

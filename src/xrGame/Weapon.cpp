@@ -549,6 +549,9 @@ void CWeapon::Load(LPCSTR section)
     m_eSilencerStatus = (ALife::EWeaponAddonStatus)pSettings->r_s32(section, "silencer_status");
     m_eGrenadeLauncherStatus = (ALife::EWeaponAddonStatus)pSettings->r_s32(section, "grenade_launcher_status");
 
+    if (pSettings->line_exist(section, "scopes") && xr_strcmp(pSettings->r_string(section, "scopes"), "") != 0)
+        m_eScopeStatus = ALife::EWeaponAddonStatus::eAddonAttachable;
+
     m_zoom_params.m_bZoomEnabled = !!pSettings->r_bool(section, "zoom_enabled");
     m_zoom_params.m_bZoomSecondEnabled = READ_IF_EXISTS(pSettings, r_bool, section, "use_alt_aim_hud", false);
     m_zoom_params.m_fZoomRotateTime = READ_IF_EXISTS(pSettings, r_float, section, "zoom_rotate_time", ROTATION_TIME);
@@ -1616,6 +1619,10 @@ bool CWeapon::IsGrenadeLauncherAttached() const
         ALife::eAddonPermanent == m_eGrenadeLauncherStatus;
 }
 
+bool CWeapon::IsScopePermament() const
+{
+    return pSettings->r_s32(m_section_id, "scope_status") == ALife::eAddonPermanent;
+}
 bool CWeapon::IsScopeAttached() const
 {
     return (ALife::eAddonAttachable == m_eScopeStatus &&
@@ -1910,12 +1917,12 @@ void CWeapon::OnZoomIn()
     if (GetHUDmode())
         GamePersistent().SetPickableEffectorDOF(true);
 
-    if (m_zoom_params.m_sUseBinocularVision.size() && IsScopeAttached() && nullptr == m_zoom_params.m_pVision)
+    if (m_zoom_params.m_sUseBinocularVision.size() && (IsScopeAttached() || IsScopePermament()) && nullptr == m_zoom_params.m_pVision)
         m_zoom_params.m_pVision = xr_new<CBinocularsVision>(m_zoom_params.m_sUseBinocularVision /*"wpn_binoc"*/);
 
     CActor* pA = smart_cast<CActor*>(H_Parent());
 
-    if (pA && IsScopeAttached())
+    if (pA && (IsScopeAttached() || IsScopePermament()))
     {
         if (psActorFlags.test(AF_PNV_W_SCOPE_DIS) && UseScopeTexture())
         {
@@ -2757,7 +2764,7 @@ bool CWeapon::IsHudModeNow() { return (HudItemData() != nullptr); }
 
 void CWeapon::ZoomDynamicMod(bool bIncrement, bool bForceLimit)
 {
-    if (!IsScopeAttached())
+    if (!IsScopeAttached() && !IsScopePermament())
         return;
     if (!m_zoom_params.m_bUseDynamicZoom)
         return;

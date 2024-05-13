@@ -1139,6 +1139,10 @@ void CWeaponMagazined::InitAddons()
             LoadCurrentScopeParams(GetScopeName().c_str());
         }
     }
+    else if (IsScopePermament())
+    {
+        LoadCurrentScopeParams(m_section_id.c_str());
+    }
     else
     {
         if (m_UIScope)

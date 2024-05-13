@@ -225,6 +225,8 @@ bool is_snipper(u16 weaponID)
         return false;
     // if( !WM->SingleShotMode() )
     // return false;
+    if (!WM->IsScopePermament())
+        return false;
     if (!WM->IsScopeAttached())
         return false;
 
