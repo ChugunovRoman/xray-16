@@ -1318,36 +1318,48 @@ bool CWeapon::Action(u16 cmd, u32 flags)
             {
                 if (flags & CMD_START)
                 {
-                    if (IsZoomed())
-                        OnZoomOut();
                     if (!IsSecondZoomed())
                     {
                         if (!IsPending())
                         {
-                            if (GetState() != eIdle)
+                            if (GetState() != eAimStart && isHUDAnimationExist("anm_idle_aim_start"))
+                                SwitchState(eAimStart);
+                            else if (GetState() != eIdle)
                                 SwitchState(eIdle);
+
                             OnZoomSecondIn();
                         }
                     }
                     else
+                    {
+                        if (GetState() != eAimEnd && isHUDAnimationExist("anm_idle_aim_end"))
+                            SwitchState(eAimEnd);
+
                         OnZoomOut();
+                    }
                 }
             }
             else
             {
                 if (flags & CMD_START)
                 {
-                    if (IsZoomed())
-                        OnZoomOut();
                     if (!IsSecondZoomed() && !IsPending())
                     {
-                        if (GetState() != eIdle)
+                        if (GetState() != eAimStart && isHUDAnimationExist("anm_idle_aim_start"))
+                            SwitchState(eAimStart);
+                        else if (GetState() != eIdle)
                             SwitchState(eIdle);
+
                         OnZoomSecondIn();
                     }
                 }
                 else if (IsSecondZoomed())
+                {
+                    if (GetState() != eAimEnd && isHUDAnimationExist("anm_idle_aim_end"))
+                        SwitchState(eAimEnd);
+
                     OnZoomOut();
+                }
             }
             return true;
         }
@@ -1364,13 +1376,21 @@ bool CWeapon::Action(u16 cmd, u32 flags)
                     {
                         if (!IsPending())
                         {
-                            if (GetState() != eIdle)
+                            if (GetState() != eAimStart && isHUDAnimationExist("anm_idle_aim_start"))
+                                SwitchState(eAimStart);
+                            else if (GetState() != eIdle)
                                 SwitchState(eIdle);
+
                             OnZoomIn();
                         }
                     }
                     else
+                    {
+                        if (GetState() != eAimEnd && isHUDAnimationExist("anm_idle_aim_end"))
+                            SwitchState(eAimEnd);
+
                         OnZoomOut();
+                    }
                 }
             }
             else
@@ -1379,13 +1399,21 @@ bool CWeapon::Action(u16 cmd, u32 flags)
                 {
                     if (!IsZoomed() && !IsPending())
                     {
-                        if (GetState() != eIdle)
+                        if (GetState() != eAimStart && isHUDAnimationExist("anm_idle_aim_start"))
+                            SwitchState(eAimStart);
+                        else if (GetState() != eIdle)
                             SwitchState(eIdle);
+
                         OnZoomIn();
                     }
                 }
                 else if (IsZoomed())
+                {
+                    if (GetState() != eAimEnd && isHUDAnimationExist("anm_idle_aim_end"))
+                        SwitchState(eAimEnd);
+
                     OnZoomOut();
+                }
             }
             return true;
         }
@@ -1889,6 +1917,7 @@ void CWeapon::OnZoomSecondIn()
 {
     m_zoom_params.m_bIsZoomModeNow = false;
     m_zoom_params.m_bIsZoomSecondModeNow = true;
+    m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::eSecondZoom;
 
     SetZoomFactor(m_zoom_params.m_fIronSightZoomFactor);
 
@@ -1902,6 +1931,7 @@ void CWeapon::OnZoomIn()
 {
     m_zoom_params.m_bIsZoomModeNow = true;
     m_zoom_params.m_bIsZoomSecondModeNow = false;
+    m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::eMainZoom;
 
     if (!m_zoom_params.m_bUseDynamicZoom)
         SetZoomFactor(CurrentZoomFactor());
@@ -2185,53 +2215,6 @@ bool CWeapon::ready_to_kill() const
         !IsMisfire() && ((GetState() == eIdle) || (GetState() == eFire) || (GetState() == eFire2)) && GetAmmoElapsed());
 }
 
-/*
-void CWeapon::UpdateHudAdditonal(Fmatrix& trans)
-{
-    CActor* pActor = smart_cast<CActor*>(H_Parent());
-    if (!pActor)
-        return;
-
-    if ((IsZoomed() && m_zoom_params.m_fZoomRotationFactor <= 1.f) ||
-        (!IsZoomed() && m_zoom_params.m_fZoomRotationFactor > 0.f))
-    {
-        u8 idx = GetCurrentHudOffsetIdx();
-        //      if(idx==0)                  return;
-
-        attachable_hud_item* hi = HudItemData();
-        R_ASSERT(hi);
-        Fvector curr_offs, curr_rot;
-        curr_offs = hi->m_measures.m_hands_offset[0][idx]; // pos,aim
-        curr_rot = hi->m_measures.m_hands_offset[1][idx]; // rot,aim
-        curr_offs.mul(m_zoom_params.m_fZoomRotationFactor);
-        curr_rot.mul(m_zoom_params.m_fZoomRotationFactor);
-
-        Fmatrix hud_rotation;
-        hud_rotation.identity();
-        hud_rotation.rotateX(curr_rot.x);
-
-        Fmatrix hud_rotation_y;
-        hud_rotation_y.identity();
-        hud_rotation_y.rotateY(curr_rot.y);
-        hud_rotation.mulA_43(hud_rotation_y);
-
-        hud_rotation_y.identity();
-        hud_rotation_y.rotateZ(curr_rot.z);
-        hud_rotation.mulA_43(hud_rotation_y);
-
-        hud_rotation.translate_over(curr_offs);
-        trans.mulB_43(hud_rotation);
-
-        if (pActor->IsZoomAimingMode())
-            m_zoom_params.m_fZoomRotationFactor += Device.fTimeDelta / m_zoom_params.m_fZoomRotateTime;
-        else
-            m_zoom_params.m_fZoomRotationFactor -= Device.fTimeDelta / m_zoom_params.m_fZoomRotateTime;
-
-        clamp(m_zoom_params.m_fZoomRotationFactor, 0.f, 1.f);
-    }
-}
-*/
-
 void _inertion(float& _val_cur, const float& _val_trgt, const float& _friction)
 {
     float friction_i = 1.f - _friction;
@@ -2243,7 +2226,7 @@ float _lerp(const float& _val_a, const float& _val_b, const float& _factor)
     return (_val_a * (1.0 - _factor)) + (_val_b * _factor);
 }
 
-void CWeapon::UpdateHudAdditonal(Fmatrix& trans)
+void CWeapon::UpdateHudAdditional(Fmatrix& trans)
 {
     CActor* pActor = smart_cast<CActor*>(H_Parent());
     if (!pActor)
@@ -2261,7 +2244,7 @@ void CWeapon::UpdateHudAdditonal(Fmatrix& trans)
         curr_offs = hi->m_measures.m_hands_offset[0][idx]; //pos,aim
         curr_rot = hi->m_measures.m_hands_offset[1][idx]; //rot,aim
 
-        if (IsZoomSecondEnabled() && IsSecondZoomed())
+        if (IsZoomSecondEnabled() && m_zoom_params.m_iLatestZoomType && m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eSecondZoom)
         {
             curr_offs = m_hands_offset[0][idx];
             curr_rot = m_hands_offset[1][idx];

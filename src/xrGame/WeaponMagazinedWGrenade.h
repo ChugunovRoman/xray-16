@@ -46,6 +46,8 @@ public:
 
     virtual void switch2_Reload();
     virtual void switch2_Unmis();
+	virtual void switch2_StartAim();
+	virtual void switch2_EndAim();
     virtual void state_Fire(float dt);
     virtual void OnShot();
     virtual void OnEvent(NET_Packet& P, u16 type);

@@ -123,7 +123,7 @@ public:
     virtual void UpdateCL();
     virtual void renderable_Render(u32 context_id, IRenderable* root);
 
-    virtual void UpdateHudAdditonal(Fmatrix&);
+    virtual void UpdateHudAdditional(Fmatrix&);
 
     virtual void UpdateXForm() = 0;
 

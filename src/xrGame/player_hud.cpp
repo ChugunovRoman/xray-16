@@ -171,7 +171,7 @@ void attachable_hud_item::update(bool bForce)
 void attachable_hud_item::update_hud_additional(Fmatrix& trans) const
 {
     if (m_parent_hud_item)
-        m_parent_hud_item->UpdateHudAdditonal(trans);
+        m_parent_hud_item->UpdateHudAdditional(trans);
 }
 
 void attachable_hud_item::setup_firedeps(firedeps& fd)
@@ -816,7 +816,7 @@ void player_hud::update_inertion(Fmatrix& trans) const
             inertion_data.m_min_angle_aim        = INERT_MIN_ANGLE_AIM;
         }
 
-        // Replaced by CWeapon::UpdateHudAdditonal()
+        // Replaced by CWeapon::UpdateHudAdditional()
         // Very FPS sensitive and hard to control
         /*
         // calc difference

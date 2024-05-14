@@ -129,6 +129,60 @@ void CWeaponMagazinedWGrenade::switch2_Reload()
         inherited::switch2_Reload();
 }
 
+void CWeaponMagazinedWGrenade::switch2_StartAim()
+{
+    VERIFY(GetState() == eAimStart);
+
+    if (IsGrenadeLauncherAttached())
+    {
+        if (m_bGrenadeMode)
+        {
+            if (iAmmoElapsed == 0 && isHUDAnimationExist("anm_idle_aim_start_g_empty"))
+                PlayHUDMotion("anm_idle_aim_start_g_empty", TRUE, this, GetState());
+            else
+                PlayHUDMotion("anm_idle_aim_start_g", TRUE, this, GetState());
+        }
+        else
+        {
+            if (iAmmoElapsed == 0 && isHUDAnimationExist("anm_idle_aim_start_w_gl_empty"))
+                PlayHUDMotion("anm_idle_aim_start_w_gl_empty", TRUE, this, GetState());
+            else
+                PlayHUDMotion("anm_idle_aim_start_w_gl", TRUE, this, GetState());
+        }
+    }
+    else
+        inherited::switch2_StartAim();
+
+
+
+}
+
+void CWeaponMagazinedWGrenade::switch2_EndAim()
+{
+    VERIFY(GetState() == eAimEnd);
+
+    if (IsGrenadeLauncherAttached())
+    {
+        if (m_bGrenadeMode)
+        {
+            if (iAmmoElapsed == 0 && isHUDAnimationExist("anm_idle_aim_end_g_empty"))
+                PlayHUDMotion("anm_idle_aim_end_g_empty", TRUE, this, GetState());
+            else
+                PlayHUDMotion("anm_idle_aim_end_g", TRUE, this, GetState());
+        }
+        else
+        {
+            if (iAmmoElapsed == 0 && isHUDAnimationExist("anm_idle_aim_end_w_gl_empty"))
+                PlayHUDMotion("anm_idle_aim_end_w_gl_empty", TRUE, this, GetState());
+            else
+                PlayHUDMotion("anm_idle_aim_end_w_gl", TRUE, this, GetState());
+        }
+    }
+    else
+        inherited::switch2_EndAim();
+
+}
+
 void CWeaponMagazinedWGrenade::OnShot()
 {
     if (m_bGrenadeMode)
@@ -733,23 +787,49 @@ void CWeaponMagazinedWGrenade::PlayAnimShoot()
 {
     if (m_bGrenadeMode)
     {
-        PlayHUDMotion("anm_shots_g", "anim_shoot_g", FALSE, this, eFire);
+        if (iAmmoElapsed > 1 || !isHUDAnimationExist("anm_shot_g_l"))
+        {
+            if (IsZoomed() || IsSecondZoomed() || isHUDAnimationExist("anm_shots_g_aim"))
+                PlayHUDMotion("anm_shots_g_aim", TRUE, this, GetState());
+            else
+                PlayHUDMotion("anm_shots_g", TRUE, this, GetState());
+        }
+        else
+        {
+            if(IsZoomed() || IsSecondZoomed() || isHUDAnimationExist("anm_shot_g_l_aim"))
+                PlayHUDMotion("anm_shot_g_l_aim", TRUE, this, GetState());
+            else
+                PlayHUDMotion("anm_shot_g_l", TRUE, this, GetState());
+        }		
     }
     else
     {
         VERIFY(GetState() == eFire);
         if (IsGrenadeLauncherAttached())
         {
-            if (IsZoomed() || IsSecondZoomed())
+            if (iAmmoElapsed > 1 || !isHUDAnimationExist("anm_shot_w_gl_l"))
             {
-                if (isHUDAnimationExist("anm_shots_w_gl_when_aim"))
-                    PlayHUDMotion("anm_shots_w_gl_when_aim", FALSE, this, GetState());
+                if (IsZoomed() || IsSecondZoomed())
+                {
+                    if (isHUDAnimationExist("anm_shots_w_gl_aim"))
+                        PlayHUDMotion("anm_shots_w_gl", TRUE, this, GetState());
+                    else if (isHUDAnimationExist("anm_shots_w_gl_when_aim"))
+                        PlayHUDMotion("anm_shots_w_gl_when_aim", FALSE, this, GetState());
+                }
                 else
-                    PlayHUDMotion("anm_shots_w_gl", "anim_shoot_gl", FALSE, this, GetState());
+                    PlayHUDMotion("anm_shots_w_gl_aim", TRUE, this, GetState());
             }
             else
             {
-                PlayHUDMotion("anm_shots_w_gl", "anim_shoot_gl", FALSE, this, GetState());
+                if (IsZoomed() || IsSecondZoomed())
+                {
+                    if (isHUDAnimationExist("anm_shot_w_gl_l_aim"))
+                        PlayHUDMotion("anm_shot_w_gl_l_aim", TRUE, this, GetState());
+                    else if (isHUDAnimationExist("anm_shots_w_gl_when_aim"))
+                        PlayHUDMotion("anm_shots_w_gl_when_aim", FALSE, this, GetState());
+                }
+                else
+                    PlayHUDMotion("anm_shot_w_gl_l", TRUE, this, GetState());
             }
         }
         else

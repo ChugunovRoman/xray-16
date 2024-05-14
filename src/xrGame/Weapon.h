@@ -155,6 +155,8 @@ public:
         eMagEmpty,
         eSwitch,
         eUnMisfire,
+        eAimStart,
+        eAimEnd,
     };
     enum EWeaponSubStates
     {
@@ -165,6 +167,12 @@ public:
     enum
     {
         undefined_ammo_type = u8(-1)
+    };
+    enum EWeaponLatestZoom
+    {
+        eMainZoom = 1, // Обычный зум
+        eSecondZoom, // Вторичный зум
+        eGLZoom, // На подствол
     };
 
     IC BOOL IsValid() const { return iAmmoElapsed; }
@@ -260,6 +268,8 @@ protected:
 protected:
     struct SZoomParams
     {
+        EWeaponLatestZoom m_iLatestZoomType; // какой был последний режим прицеливания
+
         bool m_bZoomEnabled; //разрешение режима приближения
         bool m_bZoomSecondEnabled; //разрешение режима приближения на коллиматор
         bool m_bHideCrosshairInZoom;
@@ -353,7 +363,7 @@ protected:
     virtual void UpdateFireDependencies_internal();
     virtual void UpdatePosition(const Fmatrix& transform); //.
     virtual void UpdateXForm();
-    virtual void UpdateHudAdditonal(Fmatrix&);
+    virtual void UpdateHudAdditional(Fmatrix&);
     IC void UpdateFireDependencies()
     {
         if (dwFP_Frame == Device.dwFrame)

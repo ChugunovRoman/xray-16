@@ -455,6 +455,8 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
             switch2_Hiding();
         break;
     case eHidden: switch2_Hidden(); break;
+    case eAimStart: switch2_StartAim(); break;
+    case eAimEnd: switch2_EndAim(); break;
     }
 }
 
@@ -677,6 +679,8 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
             --iAmmoElapsed;
             SwitchState(eIdle);
         }break; // End of UnMisfire animation
+    case eAimStart: SwitchState(eIdle); break;
+    case eAimEnd: SwitchState(eIdle); break;
     }
     inherited::OnAnimationEnd(state);
 }
@@ -841,6 +845,26 @@ void CWeaponMagazined::switch2_Showing()
 
     SetPending(true);
     PlayAnimShow();
+}
+
+void CWeaponMagazined::switch2_StartAim()
+{
+	VERIFY(GetState() == eAimStart);
+
+	if(iAmmoElapsed == 0 && isHUDAnimationExist("anm_idle_aim_start_empty"))
+		PlayHUDMotion("anm_idle_aim_start_empty", TRUE, this, GetState());
+	else
+		PlayHUDMotion("anm_idle_aim_start", TRUE, this, GetState());
+}
+
+void CWeaponMagazined::switch2_EndAim()
+{
+	VERIFY(GetState() == eAimEnd);
+
+	if (iAmmoElapsed == 0 && isHUDAnimationExist("anm_idle_aim_end_empty"))
+		PlayHUDMotion("anm_idle_aim_end_empty", TRUE, this, GetState());
+	else
+		PlayHUDMotion("anm_idle_aim_end", TRUE, this, GetState());
 }
 
 #include "CustomDetector.h"
@@ -1253,16 +1277,26 @@ void CWeaponMagazined::PlayAnimShoot()
 {
     VERIFY(GetState() == eFire);
 
-    if (IsZoomed() || IsSecondZoomed())
+    if (iAmmoElapsed > 1 || !isHUDAnimationExist("anm_shot_l"))
     {
-        if (isHUDAnimationExist("anm_shots_when_aim"))
-            PlayHUDMotion("anm_shots_when_aim", false, this, GetState());
+        if (IsZoomed() || IsSecondZoomed())
+        {
+            if (isHUDAnimationExist("anm_shots_when_aim"))
+                PlayHUDMotion("anm_shots_when_aim", false, this, GetState());
+            else if (isHUDAnimationExist("anm_shots_aim"))
+                PlayHUDMotion("anm_shots_aim", TRUE, this, GetState());
+            else
+                PlayHUDMotion("anm_shots", "anim_shoot", false, this, GetState());
+        }
         else
             PlayHUDMotion("anm_shots", "anim_shoot", false, this, GetState());
     }
-    else
+    else 
     {
-        PlayHUDMotion("anm_shots", "anim_shoot", false, this, GetState());
+        if ((IsZoomed() || IsSecondZoomed()) && isHUDAnimationExist("anm_shots_aim_l"))
+            PlayHUDMotion("anm_shots_aim_l", TRUE, this, GetState());
+        else
+            PlayHUDMotion("anm_shot_l", TRUE, this, GetState());
     }
 }
 

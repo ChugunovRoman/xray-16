@@ -51,6 +51,8 @@ protected:
     virtual void switch2_Hidden();
     virtual void switch2_Showing();
     virtual void switch2_Unmis();
+	virtual void switch2_StartAim();
+	virtual void switch2_EndAim();
 
     virtual void OnShot();
 

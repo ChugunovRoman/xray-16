@@ -173,7 +173,7 @@ void CHudItem::SendHiddenItem()
     }
 }
 
-void CHudItem::UpdateHudAdditonal(Fmatrix& hud_trans) {}
+void CHudItem::UpdateHudAdditional(Fmatrix& hud_trans) {}
 void CHudItem::UpdateCL()
 {
     if (m_current_motion_def)
