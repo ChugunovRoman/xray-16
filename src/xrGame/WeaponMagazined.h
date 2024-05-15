@@ -32,6 +32,7 @@ protected:
     ESoundTypes m_eSoundReloadMisfire;
 
     bool m_sounds_enabled;
+    bool m_needReload;
     // General
     //кадр момента пересчета UpdateSounds
     u32 dwUpdateSounds_Frame;
@@ -91,6 +92,9 @@ public:
     virtual void net_Destroy();
     virtual void net_Export(NET_Packet& P);
     virtual void net_Import(NET_Packet& P);
+
+    virtual void OnMotionMark(u32 state, const motion_marks& M);
+    virtual int CheckAmmoBeforeReload(u8& v_ammoType);
 
     virtual void OnH_A_Chield();
 

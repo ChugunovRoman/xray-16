@@ -130,12 +130,53 @@ void CWeaponMagazined::Load(LPCSTR section)
     {
         m_bHasDifferentFireModes = false;
     }
+
+    if (pSettings->line_exist(section, "bullet_bones"))
+    {
+        bHasBulletsToHide = true;
+        LPCSTR str = pSettings->r_string(section, "bullet_bones");
+        for (int i = 0, count = _GetItemCount(str); i < count; ++i)
+        {
+            string128 bullet_bone_name;
+            _GetItem(str, i, bullet_bone_name);
+            bullets_bones.push_back(bullet_bone_name);
+            bullet_cnt++;
+        }
+    }
+
     LoadSilencerKoeffs();
 }
 
 bool CWeaponMagazined::UseScopeTexture()
 {
     return bScopeIsHasTexture;
+}
+
+int CWeaponMagazined::CheckAmmoBeforeReload(u8& v_ammoType)
+{
+    if (m_set_next_ammoType_on_reload != undefined_ammo_type)
+        v_ammoType = m_set_next_ammoType_on_reload;
+
+    if (m_ammoTypes.size() <= v_ammoType)
+        return 0;
+
+    LPCSTR tmp_sect_name = m_ammoTypes[v_ammoType].c_str();
+
+    if (!tmp_sect_name)
+        return 0;
+
+    CWeaponAmmo* ammo = smart_cast<CWeaponAmmo*>(m_pInventory->GetAny(tmp_sect_name));
+
+    if (!ammo && !m_bLockType)
+        for (u8 i = 0; i < u8(m_ammoTypes.size()); ++i)
+            if (smart_cast<CWeaponAmmo*>(m_pInventory->GetAny(m_ammoTypes[i].c_str())))
+            {
+                v_ammoType = i;
+                break;
+            }
+
+    return GetAmmoCount(v_ammoType);
+
 }
 
 void CWeaponMagazined::FireStart()
@@ -282,6 +323,9 @@ void CWeaponMagazined::OnMagazineEmpty()
 
 void CWeaponMagazined::UnloadMagazine(bool spawn_ammo)
 {
+	last_hide_bullet = -1;
+	HUD_VisualBulletUpdate(true);
+
     xr_map<LPCSTR, u16> l_ammo;
 
     while (!m_magazine.empty())
@@ -328,11 +372,19 @@ void CWeaponMagazined::UnloadMagazine(bool spawn_ammo)
 
 void CWeaponMagazined::ReloadMagazine()
 {
+    m_needReload = false;
     m_BriefInfo_CalcFrame = 0;
 
     //устранить осечку при перезарядке
     if (IsMisfire())
+    {
         bMisfire = false;
+        if (bClearJamOnly)
+        {
+            bClearJamOnly = false;
+            return;
+        }
+    }
 
     if (!m_bLockType)
     {
@@ -422,6 +474,7 @@ void CWeaponMagazined::ReloadMagazine()
 
 void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
 {
+    HUD_VisualBulletUpdate();
     inherited::OnStateSwitch(S, oldState);
     CInventoryOwner* owner = smart_cast<CInventoryOwner*>(this->H_Parent());
     switch (S)
@@ -639,6 +692,8 @@ void CWeaponMagazined::OnShot()
     // Animation
     PlayAnimShoot();
 
+    HUD_VisualBulletUpdate();
+
     // Shell Drop
     Fvector vel;
     PHGetLinearVell(vel);
@@ -661,7 +716,8 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
         SwitchState(eIdle);
         break;
     case eReload:
-        ReloadMagazine();
+        if (m_needReload)
+            ReloadMagazine();
         SwitchState(eIdle);
         break; // End of reload animation
     case eHiding:
@@ -792,6 +848,7 @@ void CWeaponMagazined::switch2_Reload()
     bool bEmptyEnable = iAmmoElapsed > 0 && isHUDAnimationExist("anm_reload_empty");
     iMagSizeCurrent = bEmptyEnable ? iMagazineSize + 1 : iMagazineSize;
 
+    m_needReload = true;
     PlayReloadSound();
     PlayAnimReload();
     SetPending(true);
@@ -1230,6 +1287,7 @@ void CWeaponMagazined::ApplySilencerKoeffs() { cur_silencer_koef = m_silencer_ko
 void CWeaponMagazined::ResetSilencerKoeffs() { cur_silencer_koef.Reset(); }
 void CWeaponMagazined::PlayAnimShow()
 {
+    HUD_VisualBulletUpdate();
     VERIFY(GetState() == eShowing);
     PlayHUDMotion("anm_show", "anim_draw", false, this, GetState());
 }
@@ -1247,7 +1305,10 @@ void CWeaponMagazined::PlayAnimReload()
     if (bMisfire)
     {
         if (cpcstr anim_name = WhichHUDAnimationExist("anm_reload_misfire", "anim_reload_misfire"))
+        {
             PlayHUDMotion(anim_name, true, this, state);
+            bClearJamOnly = true;
+        }
         else
             PlayHUDMotion("anm_reload", "anim_reload", true, this, state);
     }
@@ -1299,6 +1360,37 @@ void CWeaponMagazined::PlayAnimShoot()
             PlayHUDMotion("anm_shot_l", TRUE, this, GetState());
     }
 }
+
+void CWeaponMagazined::OnMotionMark(u32 state, const motion_marks& M)
+{
+    inherited::OnMotionMark(state, M);
+    if (state == eReload)
+    {
+        if (bClearJamOnly)
+        {
+            bMisfire = false;
+            bClearJamOnly = false;
+            return;
+        }
+
+        if (bHasBulletsToHide && xr_strcmp(M.name.c_str(),"lmg_reload")==0)
+        {
+            u8 ammo_type = m_ammoType;
+            int ae = CheckAmmoBeforeReload(ammo_type);
+
+            if (ammo_type == m_ammoType)
+                ae += iAmmoElapsed;
+
+            last_hide_bullet = ae >= bullet_cnt ? bullet_cnt : bullet_cnt - ae - 1;
+
+            HUD_VisualBulletUpdate();
+        }
+        else
+            if (m_needReload)
+                ReloadMagazine();
+    }
+}
+
 
 void CWeaponMagazined::OnZoomIn()
 {
@@ -1470,6 +1562,12 @@ bool CWeaponMagazined::GetBriefInfo(II_BriefInfo& info)
     const int ae = GetAmmoElapsed();
     xr_sprintf(int_str, "%d", ae);
     info.cur_ammo = int_str;
+
+    if (bHasBulletsToHide)
+    {
+        last_hide_bullet = ae >= bullet_cnt ? bullet_cnt : bullet_cnt - ae - 1;
+        if (ae == 0) last_hide_bullet = -1;
+    }
 
     if (HasFireModes())
     {

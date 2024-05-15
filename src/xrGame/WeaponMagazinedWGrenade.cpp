@@ -119,6 +119,7 @@ void CWeaponMagazinedWGrenade::switch2_Reload()
     if (m_bGrenadeMode)
     {
         iMagSizeCurrent = iMagazineSize;
+        m_needReload = true;
 
         PlaySound("sndReloadG", get_LastFP2());
 
@@ -628,7 +629,10 @@ void CWeaponMagazinedWGrenade::PlayAnimShow()
     if (IsGrenadeLauncherAttached())
     {
         if (!m_bGrenadeMode)
+        {
+            HUD_VisualBulletUpdate();
             PlayHUDMotion("anm_show_w_gl", "anim_draw_gl", FALSE, this, GetState());
+        }
         else
             PlayHUDMotion("anm_show_g", "anim_draw_g", FALSE, this, GetState());
     }
@@ -660,7 +664,10 @@ void CWeaponMagazinedWGrenade::PlayAnimReload()
         if (bMisfire)
         {
             if (isHUDAnimationExist("anm_reload_misfire_w_gl"))
+            {
                 PlayHUDMotion("anm_reload_misfire_w_gl", true, this, state);
+                bClearJamOnly = true;
+            }
             else
                 PlayHUDMotion("anm_reload_w_gl", "anim_reload_gl", true, this, state);
         }
@@ -1031,6 +1038,11 @@ bool CWeaponMagazinedWGrenade::GetBriefInfo(II_BriefInfo& info)
     int ae = GetAmmoElapsed();
     xr_sprintf(int_str, "%d", ae);
     info.cur_ammo._set(int_str);
+    if (bHasBulletsToHide && !m_bGrenadeMode)
+    {
+        last_hide_bullet = ae >= bullet_cnt ? bullet_cnt : bullet_cnt - ae - 1;
+        if (ae == 0) last_hide_bullet = -1;
+    }
     if (HasFireModes())
     {
         if (m_iQueueSize == WEAPON_ININITE_QUEUE)

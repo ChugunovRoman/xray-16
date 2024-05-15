@@ -190,6 +190,7 @@ protected:
 
     // a misfire happens, you'll need to rearm weapon
     bool bMisfire;
+    bool bClearJamOnly; //used for "reload" misfire animation
 
     BOOL m_bAutoSpawnAmmo;
     virtual bool AllowBore();
@@ -305,6 +306,13 @@ protected:
     CUIWindow* m_UIScope;
 
     Fvector m_hands_offset[2][3]; // pos,rot/ normal,aim,GL
+
+    xr_vector<shared_str> bullets_bones;
+    int bullet_cnt;
+    int last_hide_bullet;
+    bool bHasBulletsToHide;
+
+    virtual void HUD_VisualBulletUpdate(bool force = false, int force_idx = -1);
 
 public:
     IC bool IsZoomEnabled() const { return m_zoom_params.m_bZoomEnabled; }
