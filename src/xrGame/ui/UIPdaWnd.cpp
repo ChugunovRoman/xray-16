@@ -255,6 +255,17 @@ void CUIPdaWnd::SetActiveSubdialog(const shared_str& section)
         InventoryUtilities::SendInfoToActor("ui_pda_actor_info");
     }
 
+    luabind::functor<CUIDialogWndEx*> functor;
+    if (GEnv.ScriptEngine->functor("pda.set_active_subdialog", functor))
+    {
+        CUIDialogWndEx* scriptWnd = functor(section.c_str());
+        if (scriptWnd)
+        {
+            scriptWnd->SetHolder(CurrentDialogHolder());
+            m_pActiveDialog = scriptWnd;
+        }
+    }
+
     R_ASSERT(m_pActiveDialog);
     UIMainPdaFrame->AttachChild(m_pActiveDialog);
     m_pActiveDialog->Show(true);
