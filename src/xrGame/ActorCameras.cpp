@@ -297,6 +297,7 @@ void CActor::cam_Update(float dt, float fFOV)
             psHUD_FOV = psHUD_FOV_def;
     }
     // --#SM+#--
+    ZoneScoped;
 
     if ((mstate_real & mcClimb) && (cam_active != eacFreeLook))
         camUpdateLadder(dt);
@@ -386,14 +387,7 @@ void CActor::cam_Update(float dt, float fFOV)
     {
         collide_camera(*cameras[eacFirstEye], _viewport_near, this);
     }
-    if (psActorFlags.test(AF_PSP))
-    {
-        Cameras().UpdateFromCamera(C);
-    }
-    else
-    {
-        Cameras().UpdateFromCamera(cameras[eacFirstEye]);
-    }
+    Cameras().UpdateFromCamera(C);
 
     fCurAVelocity = vPrevCamDir.sub(cameras[eacFirstEye]->vDirection).magnitude() / Device.fTimeDelta;
     vPrevCamDir = cameras[eacFirstEye]->vDirection;
@@ -422,7 +416,6 @@ void CActor::cam_Update(float dt, float fFOV)
 
     if (Level().CurrentEntity() == this)
     {
-        Level().Cameras().UpdateFromCamera(C);
         const bool allow = !Level().Cameras().GetCamEffector(cefDemo) && !Level().Cameras().GetCamEffector(cefAnsel);
         if (eacFirstEye == cam_active && allow)
         {

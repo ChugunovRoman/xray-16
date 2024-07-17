@@ -14,7 +14,6 @@
 #include "xrCore/Threading/TaskManager.hpp"
 #include "xrNetServer/NET_AuthCheck.h"
 
-#include "std_classes.h"
 #include "IGame_Persistent.h"
 #include "LightAnimLibrary.h"
 #include "XR_IOConsole.h"
@@ -36,15 +35,7 @@
 #include "xrCore/Text/StringConversion.hpp"
 #endif
 
-//#define PROFILE_TASK_SYSTEM
-
-#ifdef PROFILE_TASK_SYSTEM
-#include "xrCore/Threading/ParallelForEach.hpp"
-#endif
-
 // global variables
-constexpr u32 SPLASH_FRAMERATE = 30;
-
 constexpr size_t MAX_WINDOW_EVENTS = 32;
 
 #ifdef USE_DISCORD_INTEGRATION
@@ -126,6 +117,8 @@ void set_free_mode()
 
 void InitSettings()
 {
+    ZoneScoped;
+
     xr_auth_strings_t ignoredPaths, checkedPaths;
     fill_auth_check_params(ignoredPaths, checkedPaths); //TODO port xrNetServer to Linux
     PathIncludePred includePred(&ignoredPaths);
@@ -164,6 +157,8 @@ void InitSettings()
 
 void InitConsole()
 {
+    ZoneScoped;
+
     if (GEnv.isDedicatedServer)
         Console = xr_new<CTextConsole>();
     else
@@ -179,18 +174,9 @@ void InitConsole()
     }
 }
 
-void InitInput()
-{
-    bool captureInput = !strstr(Core.Params, "-i");
-    pInput = xr_new<CInput>(captureInput);
-}
-
-void destroyInput() { xr_delete(pInput); }
-void InitSoundDeviceList() { Engine.Sound.CreateDevicesList(); }
-void InitSound() { Engine.Sound.Create(); }
-void destroySound() { Engine.Sound.Destroy(); }
 void destroySettings()
 {
+    ZoneScoped;
     auto s = const_cast<CInifile**>(&pSettings);
     xr_delete(*s);
 
@@ -205,6 +191,7 @@ void destroySettings()
 
 void destroyConsole()
 {
+    ZoneScoped;
     Console->Execute("cfg_save");
     Console->Destroy();
     xr_delete(Console);
@@ -212,14 +199,27 @@ void destroyConsole()
 
 void execUserScript()
 {
+    ZoneScoped;
     Console->Execute("default_controls");
     Console->ExecuteScript(Console->ConfigFile);
 }
 
-CApplication::CApplication(pcstr commandLine)
+constexpr pcstr APPLICATION_STARTUP = "Application startup";
+constexpr pcstr APPLICATION_SHUTDOWN = "Application shutdown";
+
+CApplication::CApplication(pcstr commandLine, GameModule* game)
 {
+    Threading::SetCurrentThreadName("Primary thread");
+    FrameMarkStart(APPLICATION_STARTUP);
+
+    if (strstr(commandLine, "-dedicated"))
+        GEnv.isDedicatedServer = true;
+
     xrDebug::Initialize(commandLine);
-    R_ASSERT3(SDL_Init(SDL_INIT_VIDEO) == 0, "Unable to initialize SDL", SDL_GetError());
+    {
+        ZoneScopedN("SDL_Init");
+        R_ASSERT3(SDL_Init(SDL_INIT_VIDEO) == 0, "Unable to initialize SDL", SDL_GetError());
+    }
 
 #ifdef XR_PLATFORM_WINDOWS
     AccessibilityShortcuts shortcuts;
@@ -227,45 +227,29 @@ CApplication::CApplication(pcstr commandLine)
         shortcuts.Disable();
 #endif
 
-#ifdef USE_DISCORD_INTEGRATION
-    discord::Core::Create(DISCORD_APP_ID, discord::CreateFlags::NoRequireDiscord, &m_discord_core);
-
-#   ifndef MASTER_GOLD
-    if (m_discord_core)
-    {
-        const auto level = xrDebug::DebuggerIsPresent() ? discord::LogLevel::Debug : discord::LogLevel::Info;
-        m_discord_core->SetLogHook(level, [](discord::LogLevel level, pcstr message)
-        {
-            switch (level)
-            {
-            case discord::LogLevel::Error: Log("!", message); break;
-            case discord::LogLevel::Warn:  Log("~", message); break;
-            case discord::LogLevel::Info:  Log("*", message); break;
-            case discord::LogLevel::Debug: Log("#", message); break;
-            }
-        });
-    }
-#   endif
-
-    discord::Activity activity{};
-    activity.SetType(discord::ActivityType::Playing);
-    activity.SetApplicationId(DISCORD_APP_ID);
-    activity.SetState("Starting engine...");
-    activity.GetAssets().SetLargeImage("logo");
-    if (m_discord_core)
-    {
-        std::lock_guard guard{ m_discord_lock };
-        m_discord_core->ActivityManager().UpdateActivity(activity, nullptr);
-    }
-#endif
-
     if (!strstr(commandLine, "-nosplash"))
     {
         const bool topmost = !strstr(commandLine, "-splashnotop");
-#ifndef PROFILE_TASK_SYSTEM
         ShowSplash(topmost);
-#endif
     }
+
+    const auto& inputTask = TaskManager::AddTask([]
+    {
+        const bool captureInput = !strstr(Core.Params, "-i");
+        pInput = xr_new<CInput>(captureInput);
+    });
+
+    const auto& createSoundDevicesList = TaskManager::AddTask([]
+    {
+        Engine.Sound.CreateDevicesList();
+    });
+
+#ifdef XR_PLATFORM_WINDOWS
+    const auto& createRendererList = TaskManager::AddTask([]
+    {
+        Engine.External.CreateRendererList();
+    });
+#endif
 
     pcstr fsltx = "-fsltx ";
     string_path fsgame = "";
@@ -275,38 +259,7 @@ CApplication::CApplication(pcstr commandLine)
         sscanf(strstr(commandLine, fsltx) + sz, "%[^ ] ", fsgame);
     }
 
-    Core.Initialize("OpenXRay", commandLine, nullptr, true, *fsgame ? fsgame : nullptr);
-
-#ifdef PROFILE_TASK_SYSTEM
-    const auto task = [](const TaskRange<int>&){};
-
-    constexpr int task_count = 1048576;
-    constexpr int iterations = 250;
-    u64 results[iterations];
-
-    CTimer timer;
-    for (int i = 0; i < iterations; ++i)
-    {
-        timer.Start();
-        xr_parallel_for(TaskRange(0, task_count, 1), task);
-        results[i] = timer.GetElapsed_ns();
-    }
-
-    u64 min = std::numeric_limits<u64>::max();
-    u64 average{};
-    for (int i = 0; i < iterations; ++i)
-    {
-        min = std::min(min, results[i]);
-        average += results[i] / 1000;
-        Log("Time:", results[i]);
-    }
-    Msg("Time min: %f microseconds", float(min) / 1000.f);
-    Msg("Time average: %f microseconds", float(average) / float(iterations));
-
-    return;
-#endif
-    *g_sLaunchOnExit_app = 0;
-    *g_sLaunchOnExit_params = 0;
+    Core.Initialize("OpenXRay", commandLine, true, *fsgame ? fsgame : nullptr);
 
     InitSettings();
     // Adjust player & computer name for Asian
@@ -316,30 +269,26 @@ CApplication::CApplication(pcstr commandLine)
         xr_strcpy(Core.CompName, sizeof(Core.CompName), "Computer");
     }
 
-    FPU::m24r();
-
     Device.InitializeImGui();
     Device.FillVideoModes();
-    InitInput();
+    TaskScheduler->Wait(inputTask);
     InitConsole();
 
-    Engine.Initialize();
+#ifdef XR_PLATFORM_WINDOWS
+    TaskScheduler->Wait(createRendererList);
+#else
+    Engine.External.CreateRendererList();
+#endif
+    Engine.Initialize(game);
     Device.Initialize();
 
     Console->OnDeviceInitialize();
-#ifdef USE_DISCORD_INTEGRATION
-    const std::locale locale("");
-    activity.SetState(StringToUTF8(Core.ApplicationTitle, locale).c_str());
-    if (m_discord_core)
-    {
-        std::lock_guard guard{ m_discord_lock };
-        m_discord_core->ActivityManager().UpdateActivity(activity, nullptr);
-    }
-#endif
 
-    InitSoundDeviceList();
     execUserScript();
-    InitSound();
+    InitializeDiscord();
+
+    TaskScheduler->Wait(createSoundDevicesList);
+    Engine.Sound.Create();
 
     // ...command line for auto start
     pcstr startArgs = strstr(Core.Params, "-start ");
@@ -350,7 +299,7 @@ CApplication::CApplication(pcstr commandLine)
         Console->Execute(loadArgs + 1);
 
     // Initialize APP
-    const auto& createLightAnim = TaskScheduler->AddTask("LALib.OnCreate()", [](Task&, void*)
+    const auto& createLightAnim = TaskScheduler->AddTask([]
     {
         LALib.OnCreate();
     });
@@ -358,21 +307,30 @@ CApplication::CApplication(pcstr commandLine)
     Device.Create();
     TaskScheduler->Wait(createLightAnim);
 
-    g_pGamePersistent = dynamic_cast<IGame_Persistent*>(NEW_INSTANCE(CLSID_GAME_PERSISTANT));
-    R_ASSERT(g_pGamePersistent || Engine.External.CanSkipGameModuleLoading());
+    if (game)
+    {
+        m_game_module = game;
+        g_pGamePersistent = game->create_persistent();
+        R_ASSERT(g_pGamePersistent);
+    }
     if (!g_pGamePersistent)
         Console->Show();
+
+    FrameMarkEnd(APPLICATION_STARTUP);
 }
 
 CApplication::~CApplication()
 {
-#ifndef PROFILE_TASK_SYSTEM
+    FrameMarkStart(APPLICATION_SHUTDOWN);
+
     // Destroy APP
-    DEL_INSTANCE(g_pGamePersistent);
+    if (m_game_module)
+        m_game_module->destroy_persistent(g_pGamePersistent);
+
     Engine.Event.Dump();
 
     // Destroying
-    destroyInput();
+    xr_delete(pInput);
     destroySettings();
 
     LALib.OnDestroy();
@@ -381,7 +339,7 @@ CApplication::~CApplication()
 
     Device.CleanupVideoModes();
     Device.DestroyImGui();
-    destroySound();
+    Engine.Sound.Destroy();
 
     Device.Destroy();
     Engine.Destroy();
@@ -403,19 +361,19 @@ CApplication::~CApplication()
         CreateProcess(g_sLaunchOnExit_app, g_sLaunchOnExit_params, nullptr, nullptr, FALSE, 0, nullptr, tempDir, &si, &pi);
 #endif
     }
-#endif // PROFILE_TASK_SYSTEM
 
     Core._destroy();
-    SDL_Quit();
+    {
+        ZoneScopedN("SDL_Quit");
+        SDL_Quit();
+    }
+
+    xrDebug::Finalize();
+    FrameMarkEnd(APPLICATION_SHUTDOWN);
 }
 
 int CApplication::Run()
 {
-#ifdef PROFILE_TASK_SYSTEM
-    return 0;
-#endif
-
-    // Main cycle
     HideSplash();
     Device.Run();
 
@@ -482,6 +440,7 @@ int CApplication::Run()
         Device.ProcessFrame();
 
         UpdateDiscordStatus();
+        FrameMarkNamed("Primary thread");
     } // while (!SDL_QuitRequested())
 
     Device.Shutdown();
@@ -494,51 +453,41 @@ void CApplication::ShowSplash(bool topmost)
     if (m_window)
         return;
 
-    m_surfaces = std::move(ExtractSplashScreen());
+    ZoneScoped;
 
-    if (m_surfaces.empty())
+    m_surface = std::move(ExtractSplashScreen());
+    if (!m_surface)
     {
-        Log("! Couldn't create surface from image:", SDL_GetError());
+        Log("~ Couldn't create surface from image:", SDL_GetError());
         return;
     }
 
     Uint32 flags = SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN;
 
-#if SDL_VERSION_ATLEAST(2,0,5)
     if (topmost)
         flags |= SDL_WINDOW_ALWAYS_ON_TOP;
-#endif
 
-    SDL_Surface* surface = m_surfaces.front();
-    m_window = SDL_CreateWindow("OpenXRay", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, surface->w, surface->h, flags);
-
-    const auto current = SDL_GetWindowSurface(m_window);
-    SDL_BlitSurface(surface, nullptr, current, nullptr);
+    m_window = SDL_CreateWindow("OpenXRay", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, m_surface->w, m_surface->h, flags);
     SDL_ShowWindow(m_window);
-    SDL_UpdateWindowSurface(m_window);
 
     m_splash_thread = Threading::RunThread("Splash Thread", &CApplication::SplashProc, this);
     SDL_PumpEvents();
 }
 
+constexpr u32 SPLASH_FRAMERATE = 30;
+
 void CApplication::SplashProc()
 {
-    while (true)
     {
-        if (m_should_exit.Wait(SPLASH_FRAMERATE))
-            break;
-
-        if (m_surfaces.size() > 1)
-        {
-            if (m_current_surface_idx >= m_surfaces.size())
-                m_current_surface_idx = 0;
-
-            const auto current = SDL_GetWindowSurface(m_window);
-            const auto next = m_surfaces[m_current_surface_idx++]; // It's important to have postfix increment!
-            SDL_BlitSurface(next, nullptr, current, nullptr);
-            SDL_UpdateWindowSurface(m_window);
-        }
+        ZoneScopedN("Update splash image");
+        const auto current = SDL_GetWindowSurface(m_window);
+        SDL_BlitSurface(m_surface, nullptr, current, nullptr);
+        SDL_UpdateWindowSurface(m_window);
+    }
+    while (!m_should_exit.load(std::memory_order_acquire))
+    {
         UpdateDiscordStatus();
+        Sleep(SPLASH_FRAMERATE);
     }
 }
 
@@ -547,15 +496,56 @@ void CApplication::HideSplash()
     if (!m_window)
         return;
 
-    m_should_exit.Set();
+    ZoneScoped;
+
+    m_should_exit.store(true, std::memory_order_release);
     m_splash_thread.join();
 
     SDL_DestroyWindow(m_window);
     m_window = nullptr;
 
-    for (SDL_Surface* surface : m_surfaces)
-        SDL_FreeSurface(surface);
-    m_surfaces.clear();
+    SDL_FreeSurface(m_surface);
+}
+
+void CApplication::InitializeDiscord()
+{
+#ifdef USE_DISCORD_INTEGRATION
+    ZoneScoped;
+    discord::Core* core;
+    discord::Core::Create(DISCORD_APP_ID, discord::CreateFlags::NoRequireDiscord, &core);
+
+#   ifndef MASTER_GOLD
+    if (core)
+    {
+        const auto level = xrDebug::DebuggerIsPresent() ? discord::LogLevel::Debug : discord::LogLevel::Info;
+        core->SetLogHook(level, [](discord::LogLevel level, pcstr message)
+        {
+            switch (level)
+            {
+            case discord::LogLevel::Error: Log("!", message); break;
+            case discord::LogLevel::Warn:  Log("~", message); break;
+            case discord::LogLevel::Info:  Log("*", message); break;
+            case discord::LogLevel::Debug: Log("#", message); break;
+            }
+        });
+    }
+#   endif
+
+    if (core)
+    {
+        const std::locale locale("");
+
+        discord::Activity activity{};
+        activity.SetType(discord::ActivityType::Playing);
+        activity.SetApplicationId(DISCORD_APP_ID);
+        activity.SetState(StringToUTF8(Core.ApplicationTitle, locale).c_str());
+        activity.GetAssets().SetLargeImage("logo");
+        core->ActivityManager().UpdateActivity(activity, nullptr);
+
+        std::lock_guard guard{ m_discord_lock };
+        m_discord_core = core;
+    }
+#endif
 }
 
 void CApplication::UpdateDiscordStatus()
@@ -564,6 +554,7 @@ void CApplication::UpdateDiscordStatus()
     if (!m_discord_core)
         return;
 
+    ZoneScoped;
     std::lock_guard guard{ m_discord_lock };
     m_discord_core->RunCallbacks();
 #endif

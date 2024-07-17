@@ -454,7 +454,7 @@ public:
         if (!C)
             return;
 #ifdef USE_OGL
-        if (!HW.SeparateShaderObjectsSupported)
+        if (!GLAD_GL_ARB_separate_shader_objects)
             VERIFY(C->pp.program == pp);
 #endif
         constants.set(C, std::forward<Args>(args)...);
@@ -466,7 +466,7 @@ public:
         if (!C)
             return;
 #ifdef USE_OGL
-        if (!HW.SeparateShaderObjectsSupported)
+        if (!GLAD_GL_ARB_separate_shader_objects)
             VERIFY(C->pp.program == pp);
 #endif
         constants.seta(C, std::forward<Args>(args)...);

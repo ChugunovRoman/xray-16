@@ -19,20 +19,18 @@
 #endif
 #include "ShadersExternalData.h" //--#SM+#--
 
+class IGame_Level;
 class IRenderVisual;
 class ILoadingScreen;
 class IMainMenu;
 class ENGINE_API CPS_Instance;
 //-----------------------------------------------------------------------------------------------------------
 class ENGINE_API IGame_Persistent :
-#ifndef _EDITOR
-    public FactoryObjectBase,
-#endif
+    public pureFrame,
     public pureAppStart,
     public pureAppEnd,
     public pureAppActivate,
     public pureAppDeactivate,
-    public pureFrame,
     public IEventReceiver
 {
 public:
@@ -168,6 +166,9 @@ public:
     static CInifile* GetArchiveHeader(pcstr name, pcstr ver);
 
 public:
+    virtual IGame_Level* CreateLevel() { return nullptr; }
+    virtual void         DestroyLevel(IGame_Level*& lvl) { VERIFY(lvl == nullptr); }
+
     virtual void PreStart(pcstr op);
     virtual void Start(pcstr op);
     virtual void Disconnect();

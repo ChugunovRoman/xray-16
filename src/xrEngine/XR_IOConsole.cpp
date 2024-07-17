@@ -100,12 +100,7 @@ CConsole::CConsole()
 
 void CConsole::Initialize()
 {
-    scroll_delta = 0;
-    bVisible = false;
-    pFont = NULL;
-    pFont2 = NULL;
-
-    m_last_cmd = NULL;
+    ZoneScoped;
 
     m_cmd_history.reserve(m_cmd_history_max + 2);
     m_cmd_history.clear();
@@ -116,9 +111,6 @@ void CConsole::Initialize()
     m_temp_tips.reserve(MAX_TIPS_COUNT + 1);
     m_temp_tips.clear();
 
-    m_tips_mode = 0;
-    m_prev_length_str = 0;
-    m_cur_cmd = NULL;
     reset_selected_tip();
 
     eConsole = Engine.Event.Handler_Attach("KERNEL:console", this);
@@ -138,6 +130,8 @@ CConsole::~CConsole()
 
 void CConsole::Destroy()
 {
+    ZoneScoped;
+
     xr_delete(pFont);
     xr_delete(pFont2);
     Commands.clear();
@@ -156,6 +150,8 @@ void CConsole::RemoveCommand(IConsole_Command* cc)
 
 void CConsole::OnFrame()
 {
+    ZoneScoped;
+
     m_editor->on_frame();
 
     if (Device.dwFrame % 10 == 0)
@@ -219,6 +215,8 @@ void CConsole::OnUIReset()
 
 void CConsole::OnRender()
 {
+    ZoneScoped;
+
     if (!bVisible)
     {
         return;
@@ -828,7 +826,7 @@ void CConsole::update_tips()
     m_temp_tips.clear();
     m_tips.clear();
 
-    m_cur_cmd = NULL;
+    m_cur_cmd = nullptr;
     if (!bVisible)
     {
         return;

@@ -216,6 +216,8 @@ void CRender::OnDeviceCreate(pcstr shName)
 // Just two static storage
 void CRender::create()
 {
+    ZoneScoped;
+
     Device.seqFrame.Add(this, REG_PRIORITY_HIGH + 0x12345678);
 
     m_skinning = -1;
@@ -529,8 +531,6 @@ void CRender::create()
     Resources->RegisterConstantSetup("triLOD", &binder_LOD);
 #endif
 
-    m_bMakeAsyncSS = false;
-
     Target = xr_new<CRenderTarget>(); // Main target
 
     Models = xr_new<CModelPool>();
@@ -550,7 +550,6 @@ void CRender::create()
 
 void CRender::destroy()
 {
-    m_bMakeAsyncSS = false;
 #if defined(USE_DX11)
     FluidManager.Destroy();
 #endif
@@ -564,6 +563,7 @@ void CRender::destroy()
 
 void CRender::reset_begin()
 {
+    ZoneScoped;
     // Wait for tasks to be done
     r_main.sync();
     r_sun.sync();
@@ -612,6 +612,7 @@ void CRender::reset_begin()
 
 void CRender::reset_end()
 {
+    ZoneScoped;
     q_sync_point.Create();
     HWOCC.occq_create(occq_size);
 
@@ -638,25 +639,29 @@ void CRender::reset_end()
     m_bFirstFrameAfterReset = true;
 }
 
-void CRender::BeforeRender()
+void CRender::OnCameraUpdated()
 {
+    ZoneScoped;
+
+    // Frustum
+    ViewBase.CreateFromMatrix(Device.mFullTransform, FRUSTUM_P_LRTB + FRUSTUM_P_FAR);
+
     if (g_pGamePersistent->MainMenuActiveOrLevelNotExist())
         return;
 
-    ProcessHOMTask = &TaskScheduler->AddTask("MT-HOM", { &HOM, &CHOM::MT_RENDER });
+    ProcessHOMTask = &HOM.DispatchMTRender();
+    if (Details)
+        Details->DispatchMTCalc();
 }
 
 void CRender::OnFrame()
 {
+    ZoneScoped;
+
     Models->DeleteQueue();
+
     if (g_pGamePersistent->MainMenuActiveOrLevelNotExist())
         return;
-    if (ps_r2_ls_flags.test(R2FLAG_EXP_MT_CALC))
-    {
-        // MT-details (@front)
-        Device.seqParallel.insert(
-            Device.seqParallel.begin(), fastdelegate::FastDelegate0<>(Details, &CDetailManager::MT_CALC));
-    }
 
     if (Details)
         g_pGamePersistent->GrassBendersUpdateAnimations();

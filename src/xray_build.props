@@ -94,7 +94,14 @@
   <!-- Mixed settings -->
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Mixed'">
     <ClCompile>
-      <PreprocessorDefinitions>DEBUG;MIXED;LUA_LOGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>
+        DEBUG;
+        MIXED;
+        LUA_LOGS;
+        TRACY_ENABLE;
+        TRACY_NO_FRAME_IMAGE;
+        %(PreprocessorDefinitions)
+      </PreprocessorDefinitions>
       <!-- Optimization is automatically enabled when UseDebugLibraries == false. That's why we'll turn it off manually -->
       <Optimization>Disabled</Optimization>
     </ClCompile>

@@ -293,6 +293,8 @@ void CUISequencer::Stop()
 
 void CUISequencer::OnFrame()
 {
+    ZoneScoped;
+
     if (!Device.b_is_Active)
         return;
     if (!IsActive())
@@ -323,6 +325,8 @@ void CUISequencer::OnFrame()
 
 void CUISequencer::OnRender()
 {
+    ZoneScoped;
+
     if (m_UIWindow->IsShown())
         m_UIWindow->Draw();
 
@@ -395,7 +399,7 @@ void CUISequencer::IR_OnKeyboardHold(int dik)
         m_pStoredInputReceiver->IR_OnKeyboardHold(dik);
 }
 
-void CUISequencer::IR_OnMouseWheel(int x, int y)
+void CUISequencer::IR_OnMouseWheel(float x, float y)
 {
     if (!GrabInput() && m_pStoredInputReceiver)
         m_pStoredInputReceiver->IR_OnMouseWheel(x, y);

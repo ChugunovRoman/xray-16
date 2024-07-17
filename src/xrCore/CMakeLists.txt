@@ -401,7 +401,6 @@ target_sources_grouped(
     Threading/ParallelForEach.hpp
     Threading/ScopeLock.cpp
     Threading/ScopeLock.hpp
-    Threading/Task.cpp
     Threading/Task.hpp
     Threading/TaskManager.cpp
     Threading/TaskManager.hpp
@@ -436,6 +435,9 @@ target_sources_grouped(
 )
 
 target_include_directories(xrCore
+    PUBLIC
+    "${CMAKE_SOURCE_DIR}/Externals/tracy/public"
+
     PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/src"

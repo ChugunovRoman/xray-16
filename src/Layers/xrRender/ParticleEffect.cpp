@@ -137,6 +137,8 @@ void CParticleEffect::UpdateParent(const Fmatrix& m, const Fvector& velocity, BO
 
 void CParticleEffect::OnFrame(u32 frame_dt)
 {
+    ZoneScoped;
+
     if (m_Def && m_RT_Flags.is(flRT_Playing))
     {
         m_MemDT += frame_dt;
@@ -272,6 +274,8 @@ void CParticleEffect::OnDeviceDestroy()
 IC void FillSprite_fpu(FVF::LIT*& pv, const Fvector& T, const Fvector& R, const Fvector& pos, const Fvector2& lt,
     const Fvector2& rb, float r1, float r2, u32 clr, float sina, float cosa)
 {
+    ZoneScoped;
+
     Fvector Vr, Vt;
 
     Vr.x = T.x * r1 * sina + R.x * r1 * cosa;
@@ -303,6 +307,8 @@ IC void FillSprite_fpu(FVF::LIT*& pv, const Fvector& T, const Fvector& R, const 
 IC void FillSprite_fpu(FVF::LIT*& pv, const Fvector& pos, const Fvector& dir, const Fvector2& lt, const Fvector2& rb,
     float r1, float r2, u32 clr, float sina, float cosa)
 {
+    ZoneScoped;
+
     const Fvector& T = dir;
 
     Fvector R;
@@ -344,6 +350,8 @@ Lock m_sprite_section;
 IC void FillSprite(FVF::LIT*& pv, const Fvector& T, const Fvector& R, const Fvector& pos, const Fvector2& lt,
     const Fvector2& rb, float r1, float r2, u32 clr, float sina, float cosa)
 {
+    ZoneScoped;
+
     m_sprite_section.Enter();
 
     __m128 Vr, Vt, T_, R_, _pos, _zz, _sa, _ca, a, b, c, d;
@@ -404,9 +412,7 @@ IC void FillSprite(FVF::LIT*& pv, const Fvector& T, const Fvector& R, const Fvec
 IC void FillSprite(FVF::LIT*& pv, const Fvector& pos, const Fvector& dir, const Fvector2& lt, const Fvector2& rb,
     float r1, float r2, u32 clr, float sina, float cosa)
 {
-#ifdef _GPA_ENABLED
-    TAL_SCOPED_TASK_NAMED("FillSpriteTransform()");
-#endif // _GPA_ENABLED
+    ZoneScoped;
 
     const Fvector& T = dir;
     Fvector R;
@@ -835,7 +841,7 @@ void CParticleEffect::Render(float, bool)
                 Fmatrix FTold = Device.mFullTransform;
                 if (GetHudMode())
                 {
-                    Device.mProject.build_projection(deg2rad(psHUD_FOV * Device.fFOV), Device.fASPECT, VIEWPORT_NEAR,
+                    Device.mProject.build_projection(deg2rad(psHUD_FOV * Device.fFOV), Device.fASPECT, HUD_VIEWPORT_NEAR,
                         g_pGamePersistent->Environment().CurrentEnv.far_plane);
 
                     Device.mFullTransform.mul(Device.mProject, Device.mView);

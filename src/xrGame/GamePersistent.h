@@ -3,6 +3,7 @@
 #pragma once
 
 #include "xrEngine/IGame_Persistent.h"
+#include "player_hud_tune.h"
 
 class Task;
 class CMainMenu;
@@ -40,6 +41,9 @@ private:
 
     fastdelegate::FastDelegate0<> m_intro_event;
 
+    // hud tuner
+    CHudTuner m_hudTuner;
+
     void start_logo_intro();
     void update_logo_intro();
 
@@ -63,7 +67,10 @@ public:
     EVENT eDemoStart{};
 
     CGamePersistent();
-    virtual ~CGamePersistent();
+    ~CGamePersistent() override;
+
+    IGame_Level* CreateLevel() override;
+    void         DestroyLevel(IGame_Level*& lvl) override;
 
     void PreStart(LPCSTR op) override;
     virtual void Start(LPCSTR op);
@@ -98,6 +105,8 @@ public:
     virtual void SetBaseDof(const Fvector3& dof);
     virtual void OnSectorChanged(IRender_Sector::sector_id_t sector);
     virtual void OnAssetsChanged();
+
+    CHudTuner GetHudTuner() { return m_hudTuner; }
 };
 
 IC CGamePersistent& GamePersistent() { return *((CGamePersistent*)g_pGamePersistent); }

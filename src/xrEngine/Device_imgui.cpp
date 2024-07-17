@@ -9,6 +9,8 @@ void CRenderDevice::InitializeImGui()
     if (m_imgui_context)
         return;
 
+    ZoneScoped;
+
     ImGui::SetAllocatorFunctions(
         [](size_t size, void* /*user_data*/)
         {
@@ -70,9 +72,7 @@ void CRenderDevice::InitializeImGui()
         // See SDL hack in ImGui_ImplSDL2_ShowWindow().
         sdl_flags |= (viewport->Flags & ImGuiViewportFlags_NoTaskBarIcon) ? SDL_WINDOW_SKIP_TASKBAR : 0;
 #endif
-#if SDL_VERSION_ATLEAST(2, 0, 5)
         sdl_flags |= (viewport->Flags & ImGuiViewportFlags_TopMost) ? SDL_WINDOW_ALWAYS_ON_TOP : 0;
-#endif
 
         const auto vd = IM_NEW(ImGuiViewportData)
         {
@@ -190,13 +190,11 @@ void CRenderDevice::InitializeImGui()
         SDL_SetWindowTitle(vd->Window, title);
     };
 
-#if SDL_VERSION_ATLEAST(2, 0, 5)
     platform_io.Platform_SetWindowAlpha = [](ImGuiViewport* viewport, float alpha)
     {
         const auto vd = static_cast<ImGuiViewportData*>(viewport->PlatformUserData);
         SDL_SetWindowOpacity(vd->Window, alpha);
     };
-#endif
 #endif // IMGUI_ENABLE_VIEWPORTS
 
     editor().InitBackend();
@@ -209,6 +207,8 @@ void CRenderDevice::DestroyImGui()
 {
     if (!m_imgui_context)
         return;
+
+    ZoneScoped;
 
     m_imgui_render->OnDeviceDestroy();
     GEnv.RenderFactory->DestroyImGuiRender(m_imgui_render);

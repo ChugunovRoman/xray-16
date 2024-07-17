@@ -3,6 +3,8 @@
 #include "SoundRender_Core.h"
 #include "SoundRender_Source.h"
 
+#include <vorbis/vorbisfile.h>
+
 CSoundRender_Source::~CSoundRender_Source() { unload(); }
 
 namespace
@@ -40,47 +42,44 @@ bool ov_can_continue_read(long res)
 }
 }
 
-void CSoundRender_Source::decompress(void* dest, u32 byte_offset, u32 size)
+void CSoundRender_Source::decompress(void* dest, u32 byte_offset, u32 size, OggVorbis_File* ovf) const
 {
-    if (!wave)
-        attach();
-
-    std::lock_guard guard{ read_lock };
+    ZoneScoped;
 
     // seek
     const auto sample_offset = ogg_int64_t(byte_offset / m_data_info.blockAlign);
-    const u32 cur_pos = u32(ov_pcm_tell(&ovf));
+    const u32 cur_pos = u32(ov_pcm_tell(ovf));
     if (cur_pos != sample_offset)
-        ov_pcm_seek(&ovf, sample_offset);
+        ov_pcm_seek(ovf, sample_offset);
 
     // decompress
     if (m_data_info.format == SoundFormat::Float32)
-        i_decompress(static_cast<float*>(dest), size);
+        i_decompress(ovf, static_cast<float*>(dest), size);
     else
-        i_decompress(static_cast<char*>(dest), size);
+        i_decompress(ovf, static_cast<char*>(dest), size);
 }
 
-void CSoundRender_Source::i_decompress(char* _dest, u32 size)
+void CSoundRender_Source::i_decompress(OggVorbis_File* ovf, char* _dest, u32 size) const
 {
     long TotalRet = 0;
 
     // Read loop
     while (TotalRet < static_cast<long>(size))
     {
-        const auto ret = ov_read(&ovf, _dest + TotalRet, size - TotalRet, 0, 2, 1, nullptr);
+        const auto ret = ov_read(ovf, _dest + TotalRet, size - TotalRet, 0, 2, 1, nullptr);
         if (ret <= 0 && !ov_can_continue_read(ret))
             break;
         TotalRet += ret;
     }
 }
 
-void CSoundRender_Source::i_decompress(float* _dest, u32 size)
+void CSoundRender_Source::i_decompress(OggVorbis_File* ovf, float* _dest, u32 size) const
 {
     s32 left = s32(size / m_data_info.blockAlign);
     while (left)
     {
         float** pcm;
-        long samples = ov_read_float(&ovf, &pcm, left, nullptr);
+        long samples = ov_read_float(ovf, &pcm, left, nullptr);
 
         if (samples <= 0 && !ov_can_continue_read(samples))
             break;
@@ -122,8 +121,10 @@ constexpr ov_callbacks g_ov_callbacks =
         return 0;
     },
     // close
-    [](void* /*datasource*/) -> int
+    [](void* datasource) -> int
     {
+        auto* file = static_cast<IReader*>(datasource);
+        FS.r_close(file);
         return 0;
     },
     // tell
@@ -134,44 +135,43 @@ constexpr ov_callbacks g_ov_callbacks =
     },
 };
 
-void CSoundRender_Source::attach()
+OggVorbis_File* CSoundRender_Source::open() const
 {
-    std::lock_guard guard{ read_lock };
-    ++refs;
-    VERIFY(refs > 0);
-    if (refs == 1)
+    const auto file = FS.r_open(pname.c_str());
+    R_ASSERT3(file && file->length(), "Can't open wave file:", pname.c_str());
+
+    const auto ovf = xr_new<OggVorbis_File>();
+    ov_open_callbacks(file, ovf, nullptr, 0, g_ov_callbacks);
+
+    return ovf;
+}
+
+void CSoundRender_Source::close(OggVorbis_File*& ovf) const
+{
+    ov_clear(ovf);
+    xr_delete(ovf);
+}
+
+bool CSoundRender_Source::LoadWave(pcstr pName)
+{
+    ZoneScoped;
+
+    pname = pName;
+
+    // Load file into memory and parse WAV-format
+    OggVorbis_File ovf;
     {
-        wave = FS.r_open(pname.c_str());
+        IReader* wave = FS.r_open(pname.c_str());
         R_ASSERT3(wave && wave->length(), "Can't open wave file:", pname.c_str());
         ov_open_callbacks(wave, &ovf, nullptr, 0, g_ov_callbacks);
     }
-}
-
-void CSoundRender_Source::detach()
-{
-    std::lock_guard guard{ read_lock };
-    --refs;
-    if (refs == 0)
-    {
-        ov_clear(&ovf);
-        FS.r_close(wave);
-    }
-    if (refs < 0)
-        refs = 0;
-}
-
-bool CSoundRender_Source::LoadWave(pcstr pName, bool crashOnError)
-{
-    pname = pName;
-
-    attach();
 
     const vorbis_info* ovi = ov_info(&ovf, -1);
 
     // verify
-    R_ASSERT3_CURE(ovi, "Invalid source info:", pName, !crashOnError,
+    R_ASSERT3_CURE(ovi, "Invalid source info:", pName, true,
     {
-        detach();
+        ov_clear(&ovf);
         return false;
     });
 
@@ -244,17 +244,17 @@ bool CSoundRender_Source::LoadWave(pcstr pName, bool crashOnError)
 #endif
     }
 
-    R_ASSERT3_CURE(m_info.maxAIDist >= 0.1f && m_info.maxDist >= 0.1f, "Invalid max distance.", pName, !crashOnError,
+    R_ASSERT3_CURE(m_info.maxAIDist >= 0.1f && m_info.maxDist >= 0.1f, "Invalid max distance.", pName, true,
     {
-        detach();
+        ov_clear(&ovf);
         return false;
     });
 
-    detach();
+    ov_clear(&ovf);
     return true;
 }
 
-bool CSoundRender_Source::load(pcstr name, bool replaceWithNoSound /*= true*/, bool crashOnError /*= true*/)
+bool CSoundRender_Source::load(pcstr name)
 {
     string_path fn, N;
     xr_strcpy(N, name);
@@ -267,30 +267,31 @@ bool CSoundRender_Source::load(pcstr name, bool replaceWithNoSound /*= true*/, b
 
     fname = N;
 
-    strconcat(sizeof(fn), fn, N, ".ogg");
+    strconcat(fn, N, ".ogg");
     if (!FS.exist("$level$", fn))
         FS.update_path(fn, "$game_sounds$", fn);
 
-    bool soundExist = FS.exist(fn);
-    if (!soundExist && replaceWithNoSound)
+#ifndef MASTER_GOLD
+    if (!FS.exist(fn))
     {
-        Msg("! Can't find sound '%s'", name);
+        Msg("~ %s: Can't find sound '%s'", __FUNCTION__, name);
+#   ifdef _EDITOR
         FS.update_path(fn, "$game_sounds$", "$no_sound.ogg");
-        soundExist = FS.exist(fn);
+#   endif
     }
+#endif
 
-    if (soundExist)
+    if (FS.exist(fn))
     {
-        if (!LoadWave(fn, crashOnError))
-            return false;
+        if (LoadWave(fn))
+            return true;
     }
 
-    return soundExist;
+    return false;
 }
 
 void CSoundRender_Source::unload()
 {
     fTimeTotal = 0.0f;
     dwBytesTotal = 0;
-    detach();
 }

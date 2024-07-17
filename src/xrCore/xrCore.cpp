@@ -171,25 +171,27 @@ void xrCore::PrintBuildInfo()
     Log(buf); // "%s build %s from commit[%s] branch[%s] (built by %s)"
 }
 
-void xrCore::Initialize(pcstr _ApplicationName, pcstr commandLine, LogCallback cb, bool init_fs, pcstr fs_fname, bool plugin)
+void xrCore::Initialize(pcstr _ApplicationName, pcstr commandLine, bool init_fs, pcstr fs_fname, bool plugin)
 {
-    Threading::SetCurrentThreadName("Primary thread");
+    ZoneScoped;
     xr_strcpy(ApplicationName, _ApplicationName);
     PrintBuildInfo();
 
     if (0 == init_counter)
     {
+#if defined(XR_ARCHITECTURE_X86) || defined(XR_ARCHITECTURE_X64)
+        R_ASSERT2(CPU::HasSSE2, "Your CPU must support SSE2.");
+#endif
+
         PluginMode = plugin;
-        // Init COM so we can use CoCreateInstance
-        // HRESULT co_res =
         if (commandLine)
             Params = xr_strdup(commandLine);
         else
             Params = xr_strdup("");
 
-        CoInitializeMultithreaded();
-
 #if defined(XR_PLATFORM_WINDOWS)
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED); // needed for OpenAL initialization
+
         string_path fn, dr, di;
 
         // application path
@@ -271,10 +273,8 @@ void xrCore::Initialize(pcstr _ApplicationName, pcstr commandLine, LogCallback c
         SDL_LogSetOutputFunction(SDLLogOutput, nullptr);
         Msg("\ncommand line %s\n", Params);
         _initialize_cpu();
-#if defined(XR_ARCHITECTURE_X86) || defined(XR_ARCHITECTURE_X64)
-        R_ASSERT(SDL_HasSSE());
-#endif
         TaskScheduler = xr_make_unique<TaskManager>();
+        TaskScheduler->SpawnThreads();
         // xrDebug::Initialize ();
 
         rtc_initialize();
@@ -316,7 +316,6 @@ void xrCore::Initialize(pcstr _ApplicationName, pcstr commandLine, LogCallback c
         FS._initialize(flags, nullptr, fs_fname);
         EFS._initialize();
     }
-    SetLogCB(cb);
     init_counter++;
 }
 
@@ -325,6 +324,7 @@ void xrCore::_destroy()
     --init_counter;
     if (0 == init_counter)
     {
+        ZoneScoped;
         FS._destroy();
         EFS._destroy();
         xr_FS = nullptr;
@@ -339,15 +339,10 @@ void xrCore::_destroy()
         TaskScheduler = nullptr;
         xr_free(Params);
         Memory._destroy();
-    }
-}
-
-void xrCore::CoInitializeMultithreaded() const
-{
-#if defined(XR_PLATFORM_WINDOWS)
-    if (!strstr(Params, "-weather"))
-        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+#ifdef XR_PLATFORM_WINDOWS
+        CoUninitialize();
 #endif
+    }
 }
 
 #if defined(XR_PLATFORM_WINDOWS)

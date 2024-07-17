@@ -61,11 +61,6 @@ void CUIGameSP::SetClGame(game_cl_GameState* g)
     R_ASSERT(m_game);
 }
 
-void attach_adjust_mode_keyb(int dik);
-void attach_draw_adjust_mode();
-void hud_adjust_mode_keyb(int dik);
-void hud_draw_adjust_mode();
-
 void CUIGameSP::OnFrame()
 {
     inherited::OnFrame();
@@ -107,9 +102,6 @@ bool CUIGameSP::IR_UIOnKeyboardPress(int dik)
         return true;
     if (Device.Paused())
         return false;
-
-    hud_adjust_mode_keyb(dik);
-    attach_adjust_mode_keyb(dik);
 
     CInventoryOwner* pInvOwner = smart_cast<CInventoryOwner*>(Level().CurrentEntity());
     if (!pInvOwner)
@@ -179,8 +171,6 @@ bool CUIGameSP::IR_UIOnKeyboardPress(int dik)
 void CUIGameSP::Render()
 {
     inherited::Render();
-    hud_draw_adjust_mode();
-    attach_draw_adjust_mode();
 }
 
 void CUIGameSP::StartTrade(CInventoryOwner* pActorInv, CInventoryOwner* pOtherOwner)

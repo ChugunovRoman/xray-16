@@ -31,22 +31,21 @@
 #include "clsid_game.h"
 #include "HUDManager.h"
 #include "Weapon.h"
-
-extern u32 hud_adj_mode;
+#include "GamePersistent.h"
 
 bool g_bAutoClearCrouch = true;
 
 void CActor::IR_OnKeyboardPress(int cmd)
 {
     if (hud_adj_mode)
-	{
+    {
         if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
         {
-		    if (pInput->iGetAsyncKeyState(SDL_SCANCODE_RETURN) ||
+            if (pInput->iGetAsyncKeyState(SDL_SCANCODE_RETURN) ||
                 pInput->iGetAsyncKeyState(SDL_SCANCODE_BACKSPACE) ||
-			    pInput->iGetAsyncKeyState(SDL_SCANCODE_DELETE))
-			    g_player_hud->tune(Ivector().set(0, 0, 0));
-		    return;
+                pInput->iGetAsyncKeyState(SDL_SCANCODE_DELETE))
+                g_player_hud->tune(Ivector().set(0, 0, 0));
+            return;
         }
         else if (pInput->iGetAsyncKeyState(SDL_SCANCODE_END))
         {
@@ -54,7 +53,9 @@ void CActor::IR_OnKeyboardPress(int cmd)
             logInfoAboutTunedItems();
             return;
         }
-	}
+    }
+    if (GamePersistent().GetHudTuner().is_active())
+        return;
 
     if (Remote())
         return;
@@ -234,13 +235,10 @@ void CActor::IR_OnKeyboardPress(int cmd)
     }
 }
 
-void CActor::IR_OnMouseWheel(int x, int y)
+void CActor::IR_OnMouseWheel(float x, float y)
 {
-    if (hud_adj_mode)
-    {
-        g_player_hud->tune(Ivector().set(0, 0, y));
+    if (GamePersistent().GetHudTuner().is_active())
         return;
-    }
 
     if (inventory().Action((y > 0) ? (u16)kWPN_ZOOM_INC : (u16)kWPN_ZOOM_DEC, CMD_START))
         return;
@@ -253,7 +251,7 @@ void CActor::IR_OnMouseWheel(int x, int y)
 
 void CActor::IR_OnKeyboardRelease(int cmd)
 {
-    if (hud_adj_mode && pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+    if (GamePersistent().GetHudTuner().is_active())
         return;
 
     if (Remote())
@@ -296,17 +294,19 @@ void CActor::IR_OnKeyboardRelease(int cmd)
 void CActor::IR_OnKeyboardHold(int cmd)
 {
     if (hud_adj_mode && pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
-	{
-		if (pInput->iGetAsyncKeyState(SDL_SCANCODE_UP)) // old DIK_UP
-			g_player_hud->tune(Ivector().set(0, -1, 0));
-		if (pInput->iGetAsyncKeyState(SDL_SCANCODE_DOWN)) // old DIK_DOWN
-			g_player_hud->tune(Ivector().set(0, 1, 0));
-		if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LEFT)) // old DIK_LEFT
-			g_player_hud->tune(Ivector().set(-1, 0, 0));
-		if (pInput->iGetAsyncKeyState(SDL_SCANCODE_RIGHT)) // old DIK_RIGHT
-			g_player_hud->tune(Ivector().set(1, 0, 0));
-		return;
-	}
+    {
+        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_UP)) // old DIK_UP
+            g_player_hud->tune(Ivector().set(0, -1, 0));
+        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_DOWN)) // old DIK_DOWN
+            g_player_hud->tune(Ivector().set(0, 1, 0));
+        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LEFT)) // old DIK_LEFT
+            g_player_hud->tune(Ivector().set(-1, 0, 0));
+        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_RIGHT)) // old DIK_RIGHT
+            g_player_hud->tune(Ivector().set(1, 0, 0));
+        return;
+    }
+    if (GamePersistent().GetHudTuner().is_active())
+        return;
 
     if (Remote() || !g_Alive())
         return;
@@ -385,11 +385,8 @@ void CActor::OnAxisMove(float x, float y, float scale, bool invert)
 
 void CActor::IR_OnMouseMove(int dx, int dy)
 {
-    if (hud_adj_mode)
-    {
-        g_player_hud->tune(Ivector().set(dx, dy, 0));
+    if (GamePersistent().GetHudTuner().is_active())
         return;
-    }
 
     PIItem iitem = inventory().ActiveItem();
     if (iitem && iitem->cast_hud_item())

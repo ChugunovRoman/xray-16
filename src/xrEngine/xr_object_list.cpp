@@ -4,7 +4,6 @@
 
 #include "xrSheduler.h"
 #include "xr_object_list.h"
-#include "std_classes.h"
 
 #include "xr_object.h"
 #include "xrCore/net_utils.h"
@@ -216,6 +215,8 @@ void CObjectList::clear_crow_vec(Objects& o)
 
 void CObjectList::Update(bool bForce)
 {
+    ZoneScoped;
+
     if (statsFrame != Device.dwFrame)
     {
         statsFrame = Device.dwFrame;
@@ -459,6 +460,8 @@ void CObjectList::Load()
 
 void CObjectList::Unload()
 {
+    ZoneScoped;
+
     if (objects_sleeping.size() || objects_active.size())
         Msg("! objects-leaked: %d", objects_sleeping.size() + objects_active.size());
 

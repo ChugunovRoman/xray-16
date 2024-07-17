@@ -7,6 +7,8 @@ void CRenderDevice::Destroy()
 {
     if (!b_is_Ready)
         return;
+
+    ZoneScoped;
     Log("Destroying Render...");
     b_is_Ready = false;
     Statistic->OnDeviceDestroy();
@@ -29,6 +31,8 @@ void CRenderDevice::Destroy()
 
 void CRenderDevice::Reset(bool precache /*= true*/)
 {
+    ZoneScoped;
+
     const auto dwWidth_before = dwWidth;
     const auto dwHeight_before = dwHeight;
     pInput->GrabInput(false);
@@ -42,9 +46,7 @@ void CRenderDevice::Reset(bool precache /*= true*/)
 
     m_imgui_render->OnDeviceResetEnd();
 
-    // Update window props again for DX9 renderer
-    if (GEnv.Render->GetBackendAPI() == IRender::BackendAPI::D3D9) // XXX: I don't remember why this hack is needed, thus, I'm not sure if it is needed at all
-        UpdateWindowProps(); // hack
+    UpdateWindowProps(); // hack
 
     SetupStates();
 

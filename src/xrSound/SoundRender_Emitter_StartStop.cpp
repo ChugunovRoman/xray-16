@@ -36,6 +36,12 @@ void CSoundRender_Emitter::start(const ref_sound& _owner, u32 flags, float delay
     }
     bStopping = FALSE;
     bRewind = FALSE;
+
+    // Calc storage
+    for (auto& buf : temp_buf)
+        buf.resize(source()->data_info().bytesPerBuffer);
+
+    ovf = source()->open();
 }
 
 void CSoundRender_Emitter::i_stop()
@@ -43,8 +49,11 @@ void CSoundRender_Emitter::i_stop()
     bRewind = FALSE;
     if (target)
         stop_target();
+
+    wait_prefill();
     if (owner_data)
     {
+        source()->close(ovf);
         Event_ReleaseOwner();
         VERIFY(this == owner_data->feedback);
         owner_data->feedback = NULL;
@@ -100,6 +109,7 @@ void CSoundRender_Emitter::cancel()
 
 void CSoundRender_Emitter::stop_target()
 {
+    wait_prefill();
     R_ASSERT1_CURE(target, true, { return; });
     target->stop();
     target = nullptr;

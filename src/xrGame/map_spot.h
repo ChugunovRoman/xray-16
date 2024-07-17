@@ -25,7 +25,7 @@ public:
 
 public:
     CMapSpot(CMapLocation*);
-    virtual void Load(CUIXml* xml, LPCSTR path);
+    virtual void Load(CUIXml& xml, LPCSTR path);
     CMapLocation* MapLocation() { return m_map_location; }
     int get_location_level() { return m_location_level; }
     virtual LPCSTR GetHint();
@@ -62,7 +62,7 @@ class CMiniMapSpot final : public CMapSpot
 public:
     CMiniMapSpot(CMapLocation*);
     virtual ~CMiniMapSpot();
-    virtual void Load(CUIXml* xml, LPCSTR path);
+    virtual void Load(CUIXml& xml, LPCSTR path) override;
     virtual void Draw();
     pcstr GetDebugType() override { return "CMiniMapSpot"; }
 };
@@ -102,7 +102,7 @@ class CComplexMapSpot final : public CMapSpot
 public:
     CComplexMapSpot(CMapLocation*);
     virtual ~CComplexMapSpot();
-    virtual void Load(CUIXml* xml, LPCSTR path);
+    virtual void Load(CUIXml& xml, LPCSTR path) override;
     virtual void Update();
     virtual void SetWndSize(const Fvector2& size);
 

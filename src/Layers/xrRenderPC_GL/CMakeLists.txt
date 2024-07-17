@@ -169,7 +169,6 @@ target_sources(xrRender_GL PRIVATE
     ../xrRender/r__occlusion.h
     ../xrRender/r__pixel_calculator.cpp
     ../xrRender/r__pixel_calculator.h
-    ../xrRender/r__screenshot.cpp
     ../xrRender/r__sector.cpp
     ../xrRender/r__sector.h
     ../xrRender/r__sector_detect.cpp
@@ -384,6 +383,9 @@ target_sources(xrRender_GL PRIVATE
     ../../Include/xrRender/UIShader.h
     ../../Include/xrRender/WallMarkArray.h
     ../../utils/xrLC_Light/R_light.h
+    ../../../sdk/include/glad/gl.c
+    ../../../sdk/include/glad/gl.h
+    ../../../sdk/include/KHR/khrplatform.h
 )
 
 target_include_directories(xrRender_GL
@@ -393,6 +395,7 @@ target_include_directories(xrRender_GL
     "${CMAKE_SOURCE_DIR}/src/Layers/xrRender"
     "${CMAKE_SOURCE_DIR}/src/Include/xrRender"
     "${CMAKE_SOURCE_DIR}/src/Layers/xrRender_R2"
+    "${CMAKE_SOURCE_DIR}/sdk/include"
     "${CMAKE_SOURCE_DIR}/sdk/include/DirectXMesh"
     "${CMAKE_SOURCE_DIR}/Externals"
     "${CMAKE_SOURCE_DIR}/Externals/gli"
@@ -409,8 +412,6 @@ target_link_libraries(xrRender_GL
     xrParticles
     xrScriptEngine
     xrImGui
-    OpenGL::GL
-    GLEW::GLEW
 )
 
 target_compile_definitions(xrRender_GL
@@ -426,7 +427,7 @@ set_target_properties(xrRender_GL PROPERTIES
 
 target_precompile_headers(xrRender_GL
     PRIVATE
-    stdafx.h
+    $<$<COMPILE_LANGUAGE:CXX>:stdafx.h>
 )
 
 install(TARGETS xrRender_GL LIBRARY

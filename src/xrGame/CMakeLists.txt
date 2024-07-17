@@ -1005,6 +1005,7 @@ target_sources(xrGame PRIVATE
     player_hud.cpp
     player_hud.h
     player_hud_tune.cpp
+    player_hud_tune.h
     player_name_modifyer.cpp
     player_name_modifyer.h
     player_spot_params.cpp
@@ -1128,14 +1129,8 @@ target_sources(xrGame PRIVATE
     ScientificOutfit.h
     Scope.cpp
     Scope.h
-    screenshot_manager.cpp
-    screenshot_manager.h
-    screenshots_common.cpp
-    screenshots_common.h
     screenshot_server.cpp
     screenshot_server.h
-    screenshots_writer.cpp
-    screenshots_writer.h
     script_abstract_action.h
     script_action_condition.h
     script_action_condition_inline.h
@@ -1596,8 +1591,6 @@ target_sources(xrGame PRIVATE
     UITimeDilator.h
     UIZoneMap.cpp
     UIZoneMap.h
-    VersionSwitcher.cpp
-    VersionSwitcher.h
     vision_client.cpp
     vision_client.h
     vision_client_inline.h
@@ -1682,6 +1675,7 @@ target_sources(xrGame PRIVATE
     xrClientsPool.cpp
     xrClientsPool.h
     xrGame.cpp
+    xrGame.h
     xrgame_dll_detach.cpp
     xrGameSpy_GameSpyFuncs.cpp
     xrGameSpyServer_callbacks.cpp
@@ -2475,8 +2469,6 @@ target_sources(xrGame PRIVATE
     ui/UITradeBar.h
     ui/UITradeWnd.cpp
     ui/UITradeWnd.h
-    ui/UIVersionList.cpp
-    ui/UIVersionList.h
     ui/UIVote.cpp
     ui/UIVote.h
     ui/UIVoteStatusWnd.cpp
@@ -2605,7 +2597,6 @@ target_include_directories(xrGame
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/src"
     "${CMAKE_SOURCE_DIR}/src/xrServerEntities"
-    "$<$<BOOL:${USE_CXIMAGE}>:${CMAKE_SOURCE_DIR}/Externals/cximage>"
     "${CMAKE_SOURCE_DIR}/Externals/GameSpy/src"
     "${CMAKE_SOURCE_DIR}/Externals/ode/include"
     "${CMAKE_SOURCE_DIR}/Externals/OpenAutomate/inc"
@@ -2624,7 +2615,6 @@ target_link_libraries(xrGame
     xrUICore
     xrSound
     xrScriptEngine
-    $<$<BOOL:${USE_CXIMAGE}>:cximage>
     xrGameSpy
     xrCDB
     xrPhysics

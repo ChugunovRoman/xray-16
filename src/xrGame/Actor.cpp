@@ -187,8 +187,6 @@ CActor::CActor() : CEntityAlive(), current_ik_cam_shift(0)
 
     SetZoomAimingMode(false);
 
-    m_sDefaultObjAction = NULL;
-
     m_fSprintFactor = 4.f;
 
     // hFriendlyIndicator.create(FVF::F_LIT,RCache.Vertex.Buffer(),RCache.QuadIB);
@@ -1151,6 +1149,8 @@ void CActor::UpdateCL()
 
     cam_Update(float(Device.dwTimeDelta) / 1000.0f, currentFOV());
 
+    Device.OnCameraUpdated();
+
     if (Level().CurrentEntity() && this->ID() == Level().CurrentEntity()->ID())
     {
         psHUD_Flags.set(HUD_CROSSHAIR_RT2, true);
@@ -1348,7 +1348,7 @@ void CActor::shedule_Update(u32 DT)
 
     if (m_holder || !getEnabled() || !Ready())
     {
-        m_sDefaultObjAction = NULL;
+        m_sDefaultObjAction = nullptr;
         inherited::shedule_Update(DT);
         return;
     }
@@ -1582,19 +1582,19 @@ void CActor::shedule_Update(u32 DT)
                 }
                 else
                 {
-                    m_sDefaultObjAction = NULL;
+                    m_sDefaultObjAction = nullptr;
                 }
             }
         }
     }
     else
     {
-        m_pPersonWeLookingAt = NULL;
-        m_sDefaultObjAction = NULL;
-        m_pUsableObject = NULL;
-        m_pObjectWeLookingAt = NULL;
-        m_pVehicleWeLookingAt = NULL;
-        m_pInvBoxWeLookingAt = NULL;
+        m_pPersonWeLookingAt = nullptr;
+        m_sDefaultObjAction = nullptr;
+        m_pUsableObject = nullptr;
+        m_pObjectWeLookingAt = nullptr;
+        m_pVehicleWeLookingAt = nullptr;
+        m_pInvBoxWeLookingAt = nullptr;
     }
 
     //	UpdateSleep									();

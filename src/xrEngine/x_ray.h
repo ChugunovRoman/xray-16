@@ -3,7 +3,7 @@
 
 #include <mutex>
 
-#include "xrCore/Threading/Event.hpp"
+#include "xrEngine/Engine.h"
 
 struct SDL_Window;
 struct SDL_Surface;
@@ -18,14 +18,16 @@ class ENGINE_API CApplication final
 {
     SDL_Window* m_window{};
     std::thread m_splash_thread;
-    Event m_should_exit;
+    std::atomic_bool m_should_exit;
 
-    size_t m_current_surface_idx{};
-    xr_vector<SDL_Surface*> m_surfaces;
+    SDL_Surface* m_surface;
 
 private:
     std::mutex m_discord_lock;
     discord::Core* m_discord_core{};
+
+private:
+    GameModule* m_game_module{};
 
 private:
     void SplashProc();
@@ -33,11 +35,12 @@ private:
     void ShowSplash(bool topmost);
     void HideSplash();
 
+    void InitializeDiscord();
     void UpdateDiscordStatus();
 
 public:
     // Other
-    CApplication(pcstr commandLine);
+    CApplication(pcstr commandLine, GameModule* game);
     ~CApplication();
 
     int Run();

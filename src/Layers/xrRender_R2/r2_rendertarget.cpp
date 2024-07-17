@@ -206,6 +206,8 @@ void manually_assign_texture(ref_shader& shader, pcstr textureName, pcstr render
 
 CRenderTarget::CRenderTarget()
 {
+    ZoneScoped;
+
     static constexpr pcstr SAMPLE_DEFS[] = { "0", "1", "2", "3", "4", "5", "6", "7" };
 
     const auto& options = RImplementation.o;
@@ -744,8 +746,6 @@ CRenderTarget::~CRenderTarget()
 #if defined(USE_DX11)
     _RELEASE(t_ss_async);
 #elif defined(USE_OGL)
-    glDeleteTextures(1, &t_ss_async);
-
     // Textures
     t_material->surface_set(GL_TEXTURE_3D, 0);
     glDeleteTextures(1, &t_material_surf);

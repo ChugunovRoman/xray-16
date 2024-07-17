@@ -44,7 +44,18 @@ struct i_render_phase
         if (!o.active)
             return;
 
-        main_task = &TaskScheduler->CreateTask("phase_calculate", { this, &i_render_phase::calculate_task });
+        main_task = &TaskScheduler->CreateTask([this]
+        {
+            calculate();
+
+            if (o.mt_draw_enabled)
+            {
+                draw_task = &TaskScheduler->AddTask(*main_task, [this]
+                {
+                    render();
+                });
+            }
+        });
 
         if (o.mt_calc_enabled)
         {
@@ -76,21 +87,6 @@ struct i_render_phase
         flush();
 
         o.active = false;
-    }
-
-    void calculate_task(Task&, void*)
-    {
-        calculate();
-
-        if (o.mt_draw_enabled)
-        {
-            draw_task = &TaskScheduler->AddTask(*main_task, "phase_render", { this, &i_render_phase::render_task });
-        }
-    }
-
-    void render_task(Task&, void*)
-    {
-        render();
     }
 
     virtual void init() = 0;
@@ -344,7 +340,6 @@ public:
 
     R_sync_point q_sync_point;
 
-    bool m_bMakeAsyncSS;
     bool m_bFirstFrameAfterReset{}; // Determines weather the frame is the first after resetting device.
 
 private:
@@ -489,15 +484,13 @@ public:
     bool occ_visible(sPoly& P) override;
 
     // Main
-    void BeforeRender() override;
+    void OnCameraUpdated() override;
 
     void Calculate() override;
     void Render() override;
     void RenderMenu() override;
 
     void Screenshot(ScreenshotMode mode = SM_NORMAL, pcstr name = nullptr) override;
-    void ScreenshotAsyncBegin() override;
-    void ScreenshotAsyncEnd(CMemoryWriter& memory_writer) override;
     void OnFrame() override;
 
     void BeforeWorldRender() override; //--#SM+#-- +SecondVP+ Procedure is called before world render and post-effects

@@ -61,8 +61,9 @@ void CheckAndSetupRenderer()
 
 extern void msCreate(pcstr name);
 
-void CEngine::Initialize(void)
+void CEngine::Initialize(GameModule* game)
 {
+    ZoneScoped;
 #ifdef DEBUG
     msCreate("game");
 #endif
@@ -74,15 +75,16 @@ void CEngine::Initialize(void)
     Device.seqFrame.Add(&g_sound_processor, REG_PRIORITY_NORMAL - 1000); // Place it after Level update
     Device.seqFrameMT.Add(&g_sound_renderer);
 
-    External.CreateRendererList();
     CheckAndSetupRenderer();
 
-    External.Initialize();
+    External.Initialize(game);
     Sheduler.Initialize();
 }
 
 void CEngine::Destroy()
 {
+    ZoneScoped;
+
     Sheduler.Destroy();
     External.Destroy();
     Event._destroy();

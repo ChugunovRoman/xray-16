@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "xrEngine/x_ray.h"
+#include "xrGame/xrGame.h"
 
 #if defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
 #include <unistd.h>
@@ -21,10 +22,9 @@ XR_EXPORT u32 AmdPowerXpressRequestHighPerformance = 0x00000001; // PowerXpress 
 
 int entry_point(pcstr commandLine)
 {
-    if (strstr(commandLine, "-dedicated"))
-        GEnv.isDedicatedServer = true;
+    auto* game = strstr(commandLine, "-nogame") ? nullptr : &xrGame;
 
-    CApplication app{ commandLine };
+    CApplication app{ commandLine, game };
 
     return app.Run();
 }
@@ -50,6 +50,9 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, char* commandLine, int 
         _resetstkoflw();
         FATAL("stack overflow");
     }
+    if (!xrDebug::DebuggerIsPresent())
+        std::terminate(); // XXX: temporary to hide crashes on shutdown that make engine process hang
+
     return result;
 }
 #elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)

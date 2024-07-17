@@ -535,6 +535,8 @@ void CKinematics::LL_SetBonesVisible(u64 mask)
 
 void CKinematics::Visibility_Update()
 {
+    ZoneScoped;
+
     Update_Visibility = FALSE;
     // check visible
     for (u32 c_it = 0; c_it < children.size(); c_it++)
@@ -631,6 +633,8 @@ bool CKinematics::PickBone(const Fmatrix& parent_xform, IKinematics::pick_result
 void CKinematics::AddWallmark(
     const Fmatrix* parent_xform, const Fvector3& start, const Fvector3& dir, ref_shader shader, float size)
 {
+    ZoneScoped;
+
     Fvector S, D, normal = {0, 0, 0};
     // transform ray from world to model
     Fmatrix P;
@@ -732,6 +736,8 @@ void CKinematics::AddWallmark(
 
 void CKinematics::CalculateWallmarks(bool hud)
 {
+    ZoneScoped;
+
     if (!wallmarks.empty() && (wm_frame != Device.dwFrame))
     {
         wm_frame = Device.dwFrame;
@@ -765,6 +771,8 @@ void CKinematics::CalculateWallmarks(bool hud)
 
 void CKinematics::RenderWallmark(intrusive_ptr<CSkeletonWallmark> wm, FVF::LIT*& V)
 {
+    ZoneScoped;
+
     VERIFY(wm);
     VERIFY(V);
     VERIFY2(bones, "Invalid visual. Bones already released.");

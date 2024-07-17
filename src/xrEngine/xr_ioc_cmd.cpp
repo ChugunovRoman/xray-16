@@ -19,8 +19,6 @@ extern xr_map<u32, xr_vector<xr_token>> vid_mode_token;
 
 const xr_token vid_bpp_token[] = {{"16", 16}, {"32", 32}, {0, 0}};
 
-const xr_token snd_precache_all_token[] = {{"off", 0}, {"on", 1}, {nullptr, 0}};
-
 void IConsole_Command::InvalidSyntax()
 {
     TInfo I;
@@ -754,16 +752,6 @@ public:
     virtual void Info(TInfo& I) { xr_sprintf(I, sizeof(I), "hide console"); }
 };
 
-class CCC_CenterScreen : public IConsole_Command
-{
-public:
-    CCC_CenterScreen(pcstr name) : IConsole_Command(name) { bEmptyArgsHandled = true; }
-    void Execute(pcstr args) override
-    {
-        SDL_SetWindowPosition(Device.m_sdlWnd, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    }
-};
-
 class CCC_ControllerSensorEnable final : public CCC_Mask
 {
 public:
@@ -903,7 +891,6 @@ void CCC_Register()
     CMD3(CCC_Mask, "snd_use_float32", &psSoundFlags, ss_UseFloat32);
     CMD4(CCC_Integer, "snd_targets", &psSoundTargets, 4, 256);
     CMD4(CCC_Integer, "snd_cache_size", &psSoundCacheSizeMB, 4, 64);
-    CMD3(CCC_Token, "snd_precache_all", &psSoundPrecacheAll, snd_precache_all_token);
 
 #ifdef DEBUG
     CMD3(CCC_Mask, "snd_stats", &g_stats_flags, st_sound);
@@ -937,8 +924,6 @@ void CCC_Register()
     // Camera
     CMD2(CCC_Float, "cam_inert", &psCamInert);
     CMD2(CCC_Float, "cam_slide_inert", &psCamSlideInert);
-
-    CMD1(CCC_CenterScreen, "center_screen");
 
     CMD1(CCC_renderer, "renderer");
 

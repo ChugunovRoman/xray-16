@@ -50,7 +50,6 @@ XRSOUND_API extern float psSoundTimeFactor; //--#SM+#--
 XRSOUND_API extern Flags32 psSoundFlags;
 XRSOUND_API extern int psSoundTargets;
 XRSOUND_API extern int psSoundCacheSizeMB;
-XRSOUND_API extern u32 psSoundPrecacheAll;
 XRSOUND_API extern u32 snd_device_id;
 
 XRSOUND_API extern ISoundScene* DefaultSoundScene;
@@ -208,7 +207,7 @@ protected:
     friend struct CSound;
     friend struct resptrcode_sound;
 
-    virtual CSound* create(pcstr fName, esound_type sound_type, int game_type, bool replaceWithNoSound = true) = 0;
+    virtual CSound* create(pcstr fName, esound_type sound_type, int game_type) = 0;
     virtual void destroy(CSound& S) = 0;
 
     virtual void attach_tail(CSound& S, pcstr fName) = 0;
@@ -221,8 +220,6 @@ public:
 
     virtual void _restart() = 0;
     virtual bool i_locked() = 0;
-
-    virtual void prefetch() = 0;
 
     virtual void stop_emitters() = 0;
     virtual int pause_emitters(bool pauseState) = 0;
@@ -273,7 +270,7 @@ public:
 
 using CSound_UserDataPtr = resptr_core<CSound_UserData, resptr_base<CSound_UserData>>;
 
-struct CSound : public xr_resource
+struct CSound final : public xr_resource
 {
 public:
     //shared_str nm;
@@ -290,6 +287,7 @@ public:
     u32 dwBytesTotal{};
     float fTimeTotal{};
 
+    CSound(CSound_source* src) : handle(src) { VERIFY(src); }
     ~CSound() override { GEnv.Sound->destroy(*this); }
 };
 
@@ -320,10 +318,10 @@ struct resptrcode_sound : public resptr_base<CSound>
     [[nodiscard]]
     ICF CSound_UserDataPtr _g_userdata() const { VERIFY(p_); return p_ ? p_->g_userdata : nullptr; }
 
-    ICF bool create(pcstr name, esound_type sound_type, int game_type, bool replaceWithNoSound = true)
+    ICF bool create(pcstr name, esound_type sound_type, int game_type)
     {
         VerSndUnlocked();
-        _set(GEnv.Sound->create(name, sound_type, game_type, replaceWithNoSound));
+        _set(GEnv.Sound->create(name, sound_type, game_type));
         return _get();
     }
 
@@ -344,8 +342,7 @@ struct resptrcode_sound : public resptr_base<CSound>
     {
         if (!from._get())
             return;
-        _set(xr_new<CSound>());
-        p_->handle = from->handle;
+        _set(xr_new<CSound>(from->handle));
         p_->dwBytesTotal = from->dwBytesTotal;
         p_->fTimeTotal = from->fTimeTotal;
         p_->fn_attached[0] = from->fn_attached[0];

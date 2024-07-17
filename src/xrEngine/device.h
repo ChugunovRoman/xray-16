@@ -193,9 +193,6 @@ public:
     void Pause(bool bOn, bool bTimer, bool bSound, pcstr reason);
     bool Paused();
 
-private:
-    void SecondaryThreadProc();
-
 public:
     // Scene control
     void ProcessFrame();
@@ -205,7 +202,7 @@ public:
     bool BeforeFrame();
     void FrameMove();
 
-    void BeforeRender();
+    void OnCameraUpdated();
     void DoRender();
     bool RenderBegin();
     void Clear();
@@ -263,14 +260,9 @@ public:
         return (Timer.time_factor());
     }
 
-private:
-    std::thread secondaryThread;
-    std::atomic_bool executeSecondaryTasks{}, secondaryTasksExecuted{}, secondaryThreadFinished{};
-
 public:
     // Multi-threading
     Event PresentationFinished = nullptr;
-    std::atomic_bool mt_bMustExit{};
 
     static constexpr u32 MaximalWaitTime = 16; // ms
 

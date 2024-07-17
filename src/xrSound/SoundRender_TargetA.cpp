@@ -4,16 +4,13 @@
 #include "SoundRender_Emitter.h"
 #include "SoundRender_Source.h"
 
-#if __has_include(<efx.h>)
-#   include <efx.h>
-#endif
-
-CSoundRender_TargetA::CSoundRender_TargetA(ALuint slot)
-    : pAuxSlot(slot) {}
+CSoundRender_TargetA::CSoundRender_TargetA()
+{
+}
 
 bool CSoundRender_TargetA::_initialize()
 {
-    A_CHK(alGenBuffers(sdef_target_count, pBuffers));
+    A_CHK(alGenBuffers(sdef_target_count_submit, pBuffers));
     alGenSources(1, &pSource);
     const ALenum error = alGetError();
     if (AL_NO_ERROR == error)
@@ -23,10 +20,6 @@ bool CSoundRender_TargetA::_initialize()
         A_CHK(alSourcef(pSource, AL_MAX_GAIN, 1.f));
         A_CHK(alSourcef(pSource, AL_GAIN, cache_gain));
         A_CHK(alSourcef(pSource, AL_PITCH, cache_pitch));
-#if __has_include(<efx.h>)
-        if (pAuxSlot != ALuint(-1))
-            A_CHK(alSource3i(pSource, AL_AUXILIARY_SEND_FILTER, pAuxSlot, 0, AL_FILTER_NULL));
-#endif
         return true;
     }
     Msg("! sound: OpenAL: Can't create source. Error: %s.", static_cast<pcstr>(alGetString(error)));
@@ -35,11 +28,10 @@ bool CSoundRender_TargetA::_initialize()
 
 void CSoundRender_TargetA::_destroy()
 {
-    CSoundRender_Target::_destroy();
     // clean up target
     if (alIsSource(pSource))
         alDeleteSources(1, &pSource);
-    A_CHK(alDeleteBuffers(sdef_target_count, pBuffers));
+    A_CHK(alDeleteBuffers(sdef_target_count_submit, pBuffers));
 }
 
 void CSoundRender_TargetA::_restart()
@@ -48,16 +40,29 @@ void CSoundRender_TargetA::_restart()
     _initialize();
 }
 
+void CSoundRender_TargetA::start(CSoundRender_Emitter* E)
+{
+    inherited::start(E);
+
+    const auto& info = m_pEmitter->source()->data_info();
+    const bool mono = info.channels == 1;
+
+    if (info.format == SoundFormat::Float32)
+        dataFormat = mono ? AL_FORMAT_MONO_FLOAT32 : AL_FORMAT_STEREO_FLOAT32;
+    else
+        dataFormat = mono ? AL_FORMAT_MONO16 : AL_FORMAT_STEREO16;
+
+    sampleRate = info.samplesPerSec;
+}
+
 void CSoundRender_TargetA::render()
 {
     inherited::render();
 
     submit_all_buffers();
 
-    A_CHK(alSourceQueueBuffers(pSource, sdef_target_count, pBuffers));
+    A_CHK(alSourceQueueBuffers(pSource, sdef_target_count_submit, pBuffers));
     A_CHK(alSourcePlay(pSource));
-
-    dispatch_prefill_all();
 }
 
 void CSoundRender_TargetA::stop()
@@ -78,13 +83,10 @@ void CSoundRender_TargetA::rewind()
     A_CHK(alSourceStop(pSource));
     A_CHK(alSourcei(pSource, AL_BUFFER, 0));
 
-    fill_all_blocks();
     submit_all_buffers();
 
-    A_CHK(alSourceQueueBuffers(pSource, sdef_target_count, pBuffers));
+    A_CHK(alSourceQueueBuffers(pSource, sdef_target_count_submit, pBuffers));
     A_CHK(alSourcePlay(pSource));
-
-    dispatch_prefill_all();
 }
 
 void CSoundRender_TargetA::update()
@@ -108,8 +110,7 @@ void CSoundRender_TargetA::update()
         ALuint BufferID;
         A_CHK(alSourceUnqueueBuffers(pSource, 1, &BufferID));
 
-        const auto id = get_block_id(BufferID);
-        submit_buffer(BufferID, temp_buf[id].data(), temp_buf[id].size());
+        submit_buffer(BufferID);
 
         A_CHK(alSourceQueueBuffers(pSource, 1, &BufferID));
         processed--;
@@ -118,11 +119,7 @@ void CSoundRender_TargetA::update()
             Msg("! %s:: buffering data failed (0x%d)", __FUNCTION__, error);
             return;
         }
-        buffers_to_prefill.emplace_back(id);
     }
-
-    if (!buffers_to_prefill.empty())
-        dispatch_prefill();
 
     /* Make sure the source hasn't underrun */
     if (state != AL_PLAYING && state != AL_PAUSED)
@@ -145,28 +142,19 @@ void CSoundRender_TargetA::update()
 
 void CSoundRender_TargetA::fill_parameters()
 {
-    [[maybe_unused]] CSoundRender_Emitter* SE = m_pEmitter;
-    VERIFY(SE);
-
+    R_ASSERT1_CURE(m_pEmitter, true, { return; });
     inherited::fill_parameters();
 
     // 3D params
-    VERIFY2(m_pEmitter, SE->source()->file_name());
-    A_CHK(alSourcef(pSource, AL_REFERENCE_DISTANCE, m_pEmitter->p_source.min_distance));
+    const auto& src = m_pEmitter->p_source;
+    const auto& pos = src.position;
 
-    VERIFY2(m_pEmitter, SE->source()->file_name());
-    A_CHK(alSourcef(pSource, AL_MAX_DISTANCE, m_pEmitter->p_source.max_distance));
+    A_CHK(alSourcef (pSource, AL_REFERENCE_DISTANCE, src.min_distance));
+    A_CHK(alSourcef (pSource, AL_MAX_DISTANCE,       src.max_distance));
+    A_CHK(alSource3f(pSource, AL_POSITION,           pos.x, pos.y, -pos.z));
+    A_CHK(alSourcei (pSource, AL_SOURCE_RELATIVE,    m_pEmitter->b2D));
+    A_CHK(alSourcef (pSource, AL_ROLLOFF_FACTOR,     psSoundRolloff));
 
-    VERIFY2(m_pEmitter, SE->source()->file_name());
-    A_CHK(alSource3f(pSource, AL_POSITION, m_pEmitter->p_source.position.x, m_pEmitter->p_source.position.y,
-        -m_pEmitter->p_source.position.z));
-
-    VERIFY2(m_pEmitter, SE->source()->file_name());
-    A_CHK(alSourcei(pSource, AL_SOURCE_RELATIVE, m_pEmitter->b2D));
-
-    A_CHK(alSourcef(pSource, AL_ROLLOFF_FACTOR, psSoundRolloff));
-
-    VERIFY2(m_pEmitter, SE->source()->file_name());
     float _gain = m_pEmitter->smooth_volume;
     clamp(_gain, EPS_S, 1.f);
     if (!fsimilar(_gain, cache_gain, 0.01f))
@@ -175,9 +163,7 @@ void CSoundRender_TargetA::fill_parameters()
         A_CHK(alSourcef(pSource, AL_GAIN, _gain));
     }
 
-    VERIFY2(m_pEmitter, SE->source()->file_name());
-
-    float _pitch = m_pEmitter->p_source.freq;
+    float _pitch = src.freq;
     if (!m_pEmitter->bIgnoringTimeFactor)
         _pitch *= psSoundTimeFactor; //--#SM+#-- Correct sound "speed" by time factor
     clamp(_pitch, EPS_L, 100.f); //--#SM+#-- Increase sound frequency (speed) limit
@@ -187,35 +173,17 @@ void CSoundRender_TargetA::fill_parameters()
         cache_pitch = _pitch;
         A_CHK(alSourcef(pSource, AL_PITCH, _pitch));
     }
-    VERIFY2(m_pEmitter, SE->source()->file_name());
 }
 
-size_t CSoundRender_TargetA::get_block_id(ALuint BufferID) const
-{
-    const auto it = std::find(std::begin(pBuffers), std::end(pBuffers), BufferID);
-    return it - std::begin(pBuffers);
-}
-
-void CSoundRender_TargetA::submit_buffer(ALuint BufferID, const void* data, size_t dataSize) const
+void CSoundRender_TargetA::submit_buffer(ALuint BufferID) const
 {
     R_ASSERT1_CURE(m_pEmitter, true, { return; });
-
-    const auto& info = m_pEmitter->source()->data_info();
-    const bool mono = info.channels == 1;
-
-    ALuint format;
-    if (info.format == SoundFormat::Float32)
-        format = mono ? AL_FORMAT_MONO_FLOAT32 : AL_FORMAT_STEREO_FLOAT32;
-    else
-    {
-        format = mono ? AL_FORMAT_MONO16 : AL_FORMAT_STEREO16;
-    }
-
-    A_CHK(alBufferData(BufferID, format, data, dataSize, info.samplesPerSec));
+    const auto [data, dataSize] = m_pEmitter->obtain_block();
+    A_CHK(alBufferData(BufferID, dataFormat, data, static_cast<ALsizei>(dataSize), sampleRate));
 }
 
 void CSoundRender_TargetA::submit_all_buffers() const
 {
-    for (size_t i = 0; i < sdef_target_count; ++i)
-        submit_buffer(pBuffers[i], temp_buf[i].data(), temp_buf[i].size());
+    for (const auto buffer : pBuffers)
+        submit_buffer(buffer);
 }

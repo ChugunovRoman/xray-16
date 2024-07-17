@@ -48,6 +48,8 @@
 
 CGamePersistent::CGamePersistent()
 {
+    ZoneScoped;
+
     m_game_params.m_e_game_type = eGameIDNoGame;
 
     ambient_sound_next_time.reserve(32);
@@ -73,10 +75,22 @@ CGamePersistent::CGamePersistent()
 
 CGamePersistent::~CGamePersistent()
 {
+    ZoneScoped;
+
     FS.r_close(pDemoFile);
     Device.seqFrame.Remove(this);
     Engine.Event.Handler_Detach(eDemoStart, this);
     Engine.Event.Handler_Detach(eQuickLoad, this);
+}
+
+IGame_Level* CGamePersistent::CreateLevel()
+{
+    return xr_new<CLevel>();
+}
+
+void CGamePersistent::DestroyLevel(IGame_Level*& lvl)
+{
+    xr_delete(lvl);
 }
 
 void CGamePersistent::PreStart(LPCSTR op)
@@ -89,6 +103,8 @@ extern void init_game_globals();
 
 void CGamePersistent::OnAppStart()
 {
+    ZoneScoped;
+
     // load game materials
     GMLib.Load(); // XXX: not ready to be loaded in parallel. Crashes on Linux, rare crashes on Windows and bugs with water became mercury on Windows.
 
@@ -96,10 +112,7 @@ void CGamePersistent::OnAppStart()
 #ifndef XR_PLATFORM_WINDOWS
     init_game_globals();
 #else
-    const auto& initializeGlobals = TaskScheduler->AddTask("init_game_globals()", [](Task&, void*)
-    {
-        init_game_globals();
-    });
+    const auto& initializeGlobals = TaskScheduler->AddTask(init_game_globals);
 #endif
 
     GEnv.UI = xr_new<UICore>();
@@ -145,6 +158,8 @@ void CGamePersistent::OnAppEnd()
 void CGamePersistent::Start(LPCSTR op) { inherited::Start(op); }
 void CGamePersistent::Disconnect()
 {
+    ZoneScoped;
+
     // destroy ambient particles
     CParticlesObject::Destroy(ambient_particles);
 
@@ -207,6 +222,8 @@ void CGamePersistent::OnGameEnd()
 
 void CGamePersistent::WeathersUpdate()
 {
+    ZoneScoped;
+
     if (g_pGameLevel && !GEnv.isDedicatedServer)
     {
         CActor* actor = smart_cast<CActor*>(Level().CurrentViewEntity());
@@ -459,6 +476,8 @@ extern CUISequencer* g_tutorial2;
 
 void CGamePersistent::OnFrame()
 {
+    ZoneScoped;
+
     if (Device.dwPrecacheFrame == 5 && m_intro_event.empty())
     {
         LoadTitle();
@@ -637,6 +656,8 @@ void CGamePersistent::OnFrame()
 
 void CGamePersistent::OnEvent(EVENT E, u64 P1, u64 P2)
 {
+    ZoneScoped;
+
     if (E == eQuickLoad)
     {
         if (Device.Paused())

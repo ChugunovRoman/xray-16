@@ -15,10 +15,11 @@
 */
 #pragma once
 
-#include <mutex>
-
-#include "Event.hpp"
 #include "Task.hpp"
+
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 
 class TaskWorker;
 
@@ -29,6 +30,7 @@ private:
     xr_vector<std::thread> workerThreads;
     std::mutex workersLock;
 
+    inline static std::condition_variable newWorkArrived;
     std::atomic_size_t activeWorkersCount{};
 
     std::atomic_bool shouldPause{};
@@ -39,55 +41,69 @@ private:
 
     [[nodiscard]] Task* TryToSteal() const;
 
+    [[nodiscard]] static Task* AllocateTask() noexcept;
+
     static void ExecuteTask(Task& task);
-    static void FinalizeTask(Task& task);
 
-    [[nodiscard]] ICF static Task* AllocateTask();
-    static void ICF IncrementTaskJobsCounter(Task& parent);
-
-    void SetThreadStatus(bool active);
+    void SetThreadStatus(bool active) noexcept;
 
 public:
     TaskManager();
     ~TaskManager();
 
+    void SpawnThreads();
+
+    void RegisterThisThreadAsWorker();
+    void UnregisterThisThreadAsWorker();
+
 public:
-    // TaskFunc is at the end for fancy in-place lambdas
     // Create a task, but don't run it yet
-    [[nodiscard]] static Task& CreateTask(pcstr name, const Task::TaskFunc& taskFunc, size_t dataSize = 0, void* data = nullptr);
-    [[nodiscard]] static Task& CreateTask(pcstr name, const Task::OnFinishFunc& onFinishCallback, const Task::TaskFunc& taskFunc, size_t dataSize = 0, void* data = nullptr);
+    template <typename Invokable>
+    [[nodiscard]] static Task& CreateTask(Invokable func)
+    {
+        return *new (AllocateTask()) Task(func);
+    }
 
     // Create a task as child, but don't run it yet
-    [[nodiscard]] static Task& CreateTask(Task& parent, pcstr name, const Task::TaskFunc& taskFunc, size_t dataSize = 0, void* data = nullptr);
-    [[nodiscard]] static Task& CreateTask(Task& parent, pcstr name, const Task::OnFinishFunc& onFinishCallback, const Task::TaskFunc& taskFunc, size_t dataSize = 0, void* data = nullptr);
+    template <typename Invokable>
+    [[nodiscard]] static Task& CreateTask(Task& parent, Invokable func)
+    {
+        return *new (AllocateTask()) Task(func, &parent);
+    }
 
     // Run task in parallel
-    static void PushTask(Task& task);
+    static void PushTask(Task& task) noexcept;
 
     // Run task immediately in this thread
     static void RunTask(Task& task);
 
     // Shortcut: create a task and run it immediately
-    static Task& AddTask(pcstr name, const Task::TaskFunc& taskFunc, size_t dataSize = 0, void* data = nullptr);
-    static Task& AddTask(pcstr name, const Task::OnFinishFunc& onFinishCallback, const Task::TaskFunc& taskFunc, size_t dataSize = 0, void* data = nullptr);
+    template <typename Invokable>
+    static Task& AddTask(Invokable func)
+    {
+        Task& task = CreateTask(func);
+        PushTask(task);
+        return task;
+    }
 
     // Shortcut: create task and run it immediately
-    static Task& AddTask(Task& parent, pcstr name, const Task::TaskFunc& taskFunc, size_t dataSize = 0, void* data = nullptr);
-    static Task& AddTask(Task& parent, pcstr name, const Task::OnFinishFunc& onFinishCallback, const Task::TaskFunc& taskFunc, size_t dataSize = 0, void* data = nullptr);
+    template <typename Invokable>
+    static Task& AddTask(Task& parent, Invokable func)
+    {
+        Task& task = CreateTask(parent, func);
+        PushTask(task);
+        return task;
+    }
 
 public:
-    void RegisterThisThreadAsWorker();
-    void UnregisterThisThreadAsWorker();
-
     void Wait(const Task& task) const;
-    void WaitForChildren(const Task& task) const;
     bool ExecuteOneTask() const;
 
     void Pause(bool pause) { shouldPause.store(pause, std::memory_order_release); }
 
 public:
-    [[nodiscard]] size_t GetWorkersCount() const;
-    [[nodiscard]] static size_t GetCurrentWorkerID();
+    [[nodiscard]] size_t GetWorkersCount() const noexcept;
+    [[nodiscard]] static size_t GetCurrentWorkerID() noexcept;
     void GetStats(size_t& allocated, size_t& pushed, size_t& finished);
 };
 

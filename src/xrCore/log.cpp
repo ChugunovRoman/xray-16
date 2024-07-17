@@ -20,23 +20,20 @@ LogCallback LogCB = nullptr;
 
 bool ForceFlushLog = false;
 IWriter* LogWriter = nullptr;
-//size_t CachedLog = 0;
 
 void FlushLog()
 {
-    if (!no_log)
-    {
-        logCS.Enter();
-        if (LogWriter)
-            LogWriter->flush();
-        //CachedLog = 0;
-        logCS.Leave();
-    }
+    if (no_log)
+        return;
+
+    ScopeLock scope{ &logCS };
+    if (LogWriter)
+        LogWriter->flush();
 }
 
 void AddOne(pcstr split)
 {
-    logCS.Enter();
+    ScopeLock scope{ &logCS };
 
     OutputDebugString(split);
     OutputDebugString("\n");
@@ -49,32 +46,11 @@ void AddOne(pcstr split)
 
     if (LogWriter)
     {
-#ifdef USE_LOG_TIMING
-        char buf[64];
-        char curTime[64];
-
-        auto now = std::chrono::system_clock::now();
-        auto time = std::chrono::system_clock::to_time_t(now);
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) -
-            std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch());
-
-        std::strftime(buf, sizeof(buf), "%H:%M:%S", std::localtime(&time));
-        int len = xr_sprintf(curTime, 64, "[%s.%03lld] ", buf, ms.count());
-
-        LogWriter->w_printf("%s%s\r\n", curTime, split);
-        CachedLog += len;
-#else
         LogWriter->w_printf("%s\r\n", split);
-#endif
-        //CachedLog += xr_strlen(split) + 2;
 
-        if (ForceFlushLog /*|| CachedLog >= 32768*/)
+        if (ForceFlushLog)
             FlushLog();
-
-        //-RvP
     }
-
-    logCS.Leave();
 }
 
 void Log(pcstr s)
@@ -219,6 +195,7 @@ void Log(pcstr msg, const Fmatrix& dop)
 void LogWinErr(pcstr msg, long err_code) { Msg("%s: %s", msg, xrDebug::ErrorToString(err_code)); }
 LogCallback SetLogCB(const LogCallback& cb)
 {
+    ScopeLock scope{ &logCS };
     const LogCallback result = LogCB;
     LogCB = cb;
     return (result);
@@ -228,45 +205,33 @@ pcstr log_name() { return (log_file_name); }
 
 void CreateLog(bool nl)
 {
+    ZoneScoped;
     LogFile.reserve(1000);
 
     no_log = nl;
     strconcat(sizeof(log_file_name), log_file_name, Core.ApplicationName, "_", Core.UserName, ".log");
     if (FS.path_exist("$logs$"))
         FS.update_path(logFName, "$logs$", log_file_name);
-    if (!no_log)
+
+    if (no_log)
+        return;
+
+    // Alun: Backup existing log
+    const xr_string backup_logFName = EFS.ChangeFileExt(logFName, ".bkp");
+    FS.file_rename(logFName, backup_logFName.c_str(), true);
+    //-Alun
+
+    if (const auto w = FS.w_open(logFName))
     {
-        // Alun: Backup existing log
-        const xr_string backup_logFName = EFS.ChangeFileExt(logFName, ".bkp");
-        FS.file_rename(logFName, backup_logFName.c_str(), true);
-        //-Alun
-
-        LogWriter = FS.w_open(logFName);
-        if (LogWriter == nullptr)
-        {
-#if defined(XR_PLATFORM_WINDOWS)
-            MessageBox(nullptr, "Can't create log file.", "Error", MB_ICONERROR);
-#endif
-            abort();
-        }
-
-#ifdef USE_LOG_TIMING
-        time_t t = time(nullptr);
-        tm* ti = localtime(&t);
-        char buf[64];
-        strftime(buf, 64, "[%x %X]\t", ti);
-#endif
-
         for (u32 it = 0; it < LogFile.size(); it++)
         {
-            pcstr s = LogFile[it].c_str();
-#ifdef USE_LOG_TIMING
-            LogWriter->w_printf("%s%s\r\n", buf, s ? s : "");
-#else
-            LogWriter->w_printf("%s\r\n", s ? s : "");
-#endif
+            cpcstr s = LogFile[it].c_str();
+            w->w_printf("%s\r\n", s ? s : "");
         }
-        LogWriter->flush();
+        w->flush();
+
+        ScopeLock scope{ &logCS };
+        LogWriter = w;
     }
 
     if (strstr(Core.Params, "-force_flushlog"))
@@ -275,7 +240,10 @@ void CreateLog(bool nl)
 
 void CloseLog(void)
 {
+    ZoneScoped;
     FlushLog();
+
+    ScopeLock scope{ &logCS };
     if (LogWriter)
         FS.w_close(LogWriter);
 

@@ -1,8 +1,6 @@
 #pragma once
 
-#include <mutex>
-
-#include <vorbis/vorbisfile.h>
+struct OggVorbis_File;
 
 enum class SoundFormat
 {
@@ -33,11 +31,6 @@ struct SoundSourceInfo
 
 class XRSOUND_API CSoundRender_Source final : public CSound_source
 {
-    OggVorbis_File ovf{};
-    IReader* wave{};
-    int refs{};
-    std::mutex read_lock;
-
     shared_str pname;
     shared_str fname;
 
@@ -48,22 +41,28 @@ class XRSOUND_API CSoundRender_Source final : public CSound_source
     SoundSourceInfo m_info{};
 
 private:
-    void i_decompress(char* dest, u32 size);
-    void i_decompress(float* dest, u32 size);
+    void i_decompress(OggVorbis_File* ovf, char* dest, u32 size) const;
+    void i_decompress(OggVorbis_File* ovf, float* dest, u32 size) const;
 
-    bool LoadWave(pcstr name, bool crashOnError);
+    bool LoadWave(pcstr name);
 
 public:
-    CSoundRender_Source() = default;
+    CSoundRender_Source() noexcept = default;
     ~CSoundRender_Source() override;
 
-    bool load(pcstr name, bool replaceWithNoSound = true, bool crashOnError = true);
+    CSoundRender_Source(const CSoundRender_Source&) = delete;
+    CSoundRender_Source(CSoundRender_Source&&) noexcept = default;
+
+    CSoundRender_Source& operator=(const CSoundRender_Source&) = delete;
+    CSoundRender_Source& operator=(CSoundRender_Source&&) noexcept = default;
+
+    bool load(pcstr name);
     void unload();
 
-    void attach();
-    void detach();
+    OggVorbis_File* open() const;
+    void close(OggVorbis_File*& ovf) const;
 
-    void decompress(void* dest, u32 byte_offset, u32 size);
+    void decompress(void* dest, u32 byte_offset, u32 size, OggVorbis_File* ovf) const;
 
     [[nodiscard]] const auto& data_info() const { return m_data_info; }
     [[nodiscard]] const auto&      info() const { return m_info; }

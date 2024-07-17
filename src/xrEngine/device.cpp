@@ -35,6 +35,8 @@ bool CRenderDevice::RenderBegin()
     if (GEnv.isDedicatedServer)
         return true;
 
+    ZoneScoped;
+
     switch (GEnv.Render->GetDeviceState())
     {
     case DeviceState::Normal: break;
@@ -51,7 +53,6 @@ bool CRenderDevice::RenderBegin()
     default: R_ASSERT(0);
     }
     GEnv.Render->Begin();
-    FPU::m24r();
     g_bRendering = true;
 
     return true;
@@ -59,38 +60,12 @@ bool CRenderDevice::RenderBegin()
 
 void CRenderDevice::Clear() { GEnv.Render->Clear(); }
 
-namespace
-{
-void CheckPrivilegySlowdown()
-{
-#ifndef MASTER_GOLD
-    const auto slowdownthread = []
-    {
-        for (;;)
-        {
-            if (Device.GetStats().fFPS < 30)
-                Sleep(1);
-            if (Device.mt_bMustExit.load(std::memory_order_acquire) || !pSettings || !Console || !pInput)
-                return;
-        }
-    };
-
-    if (strstr(Core.Params, "-slowdown"))
-        Threading::SpawnThread("slowdown", slowdownthread);
-    if (strstr(Core.Params, "-slowdown2x"))
-    {
-        Threading::SpawnThread("slowdown", slowdownthread);
-        Threading::SpawnThread("slowdown", slowdownthread);
-    }
-#endif
-}
-}
-
 void CRenderDevice::RenderEnd(void)
 {
     if (GEnv.isDedicatedServer)
         return;
 
+    ZoneScoped;
     if (dwPrecacheFrame)
     {
         GEnv.Sound->set_master_volume(0.f);
@@ -109,7 +84,6 @@ void CRenderDevice::RenderEnd(void)
             Msg("* MEMORY USAGE: %d K", Memory.mem_usage() / 1024);
             Msg("* End of synchronization A[%d] R[%d]", b_is_Active, b_is_Ready);
             FIND_CHUNK_COUNTER_FLUSH();
-            CheckPrivilegySlowdown();
             if (g_pGamePersistent->GameType() == 1 && !psDeviceFlags.test(rsAlwaysActive)) // haCk
             {
                 const Uint32 flags = SDL_GetWindowFlags(m_sdlWnd);
@@ -184,6 +158,8 @@ ENGINE_API xr_list<LOADING_EVENT> g_loading_events;
 
 bool CRenderDevice::BeforeFrame()
 {
+    ZoneScoped;
+
     if (!b_is_Ready)
     {
         Sleep(100);
@@ -206,8 +182,14 @@ bool CRenderDevice::BeforeFrame()
     return true;
 }
 
-void CRenderDevice::BeforeRender()
+void CRenderDevice::OnCameraUpdated()
 {
+    static u32 frame{ u32(-1) };
+    if (frame == dwFrame)
+        return;
+
+    ZoneScoped;
+
     // Precache
     if (dwPrecacheFrame)
     {
@@ -224,8 +206,10 @@ void CRenderDevice::BeforeRender()
     mInvView.invert(mView);
     mFullTransform.mul(mProject, mView);
     mInvFullTransform.invert_44(mFullTransform);
-    GEnv.Render->BeforeRender();
+    GEnv.Render->OnCameraUpdated();
     GEnv.Render->SetCacheXform(mView, mProject);
+
+    frame = dwFrame;
 }
 
 static void UpdateViewports()
@@ -243,13 +227,17 @@ void CRenderDevice::DoRender()
     if (GEnv.isDedicatedServer)
         return;
 
+    ZoneScoped;
+
     CStatTimer renderTotalReal;
     renderTotalReal.FrameStart();
     renderTotalReal.Begin();
     if (b_is_Active && RenderBegin())
     {
-        // all rendering is done here
-        seqRender.Process();
+        {
+            ZoneScopedN("Render process");
+            seqRender.Process(); // all rendering is done here
+        }
 
         CalcFrameStats();
         Statistic->Show();
@@ -269,27 +257,10 @@ void CRenderDevice::DoRender()
     stats.RenderTotal.accum = renderTotalReal.accum;
 }
 
-void CRenderDevice::SecondaryThreadProc()
-{
-    TaskScheduler->RegisterThisThreadAsWorker();
-    while (!mt_bMustExit.load(std::memory_order_acquire))
-    {
-        if (executeSecondaryTasks.load(std::memory_order_acquire))
-        {
-            for (u32 pit = 0; pit < seqParallel.size(); pit++)
-                seqParallel[pit]();
-            seqParallel.clear();
-            seqFrameMT.Process();
-            executeSecondaryTasks.store(false, std::memory_order_relaxed);
-            secondaryTasksExecuted.store(true, std::memory_order_release);
-        }
-        TaskScheduler->ExecuteOneTask();
-    }
-    TaskScheduler->UnregisterThisThreadAsWorker();
-}
-
 void CRenderDevice::ProcessFrame()
 {
+    ZoneScoped;
+
     if (!BeforeFrame())
         return;
 
@@ -297,11 +268,20 @@ void CRenderDevice::ProcessFrame()
 
     FrameMove();
 
-    BeforeRender();
+    OnCameraUpdated();
 
-    executeSecondaryTasks.store(true, std::memory_order_release);
+    const auto& processSeqParallel = TaskScheduler->AddTask([this]
+    {
+        ZoneScopedN("ProcessParallelSequence");
+        for (u32 pit = 0; pit < seqParallel.size(); pit++)
+            seqParallel[pit]();
+        seqParallel.clear();
+        seqFrameMT.Process();
+    });
 
     DoRender();
+
+    TaskScheduler->Wait(processSeqParallel);
 
     const u64 frameEndTime = TimerGlobal.GetElapsed_ms();
     const u64 frameTime = frameEndTime - frameStartTime;
@@ -317,36 +297,26 @@ void CRenderDevice::ProcessFrame()
     if (frameTime < updateDelta)
         Sleep(updateDelta - frameTime);
 
-    while (!secondaryTasksExecuted.load(std::memory_order_acquire))
-        TaskScheduler->ExecuteOneTask();
-
-    secondaryTasksExecuted.store(false, std::memory_order_relaxed);
-
     if (!b_is_Active)
         Sleep(1);
 }
 
 void CRenderDevice::ProcessEvent(const SDL_Event& event)
 {
+    ZoneScoped;
+
     switch (event.type)
     {
-#if SDL_VERSION_ATLEAST(2, 0, 9)
     case SDL_DISPLAYEVENT:
     {
         switch (event.display.type)
         {
         case SDL_DISPLAYEVENT_ORIENTATION:
-#if SDL_VERSION_ATLEAST(2, 0, 14)
         case SDL_DISPLAYEVENT_CONNECTED:
         case SDL_DISPLAYEVENT_DISCONNECTED:
-#endif
             CleanupVideoModes();
             FillVideoModes();
-#if SDL_VERSION_ATLEAST(2, 0, 14)
             if (event.display.display == psDeviceMode.Monitor && event.display.type != SDL_DISPLAYEVENT_CONNECTED)
-#else
-            if (event.display.display == psDeviceMode.Monitor)
-#endif
                 Reset();
             else
                 UpdateWindowProps();
@@ -354,7 +324,6 @@ void CRenderDevice::ProcessEvent(const SDL_Event& event)
         } // switch (event.display.type)
         break;
     }
-#endif
     case SDL_WINDOWEVENT:
     {
         const auto window = SDL_GetWindowFromID(event.window.windowID);
@@ -371,32 +340,27 @@ void CRenderDevice::ProcessEvent(const SDL_Event& event)
             if (window == m_sdlWnd)
             {
                 UpdateWindowRects();
-#if !SDL_VERSION_ATLEAST(2, 0, 18) // without SDL_WINDOWEVENT_DISPLAY_CHANGED, let's detect monitor change ourselves
-                const int display = SDL_GetWindowDisplayIndex(window);
-                if (display != -1)
-                    psDeviceMode.Monitor = display;
-#endif
             }
             if (viewport)
                 viewport->PlatformRequestMove = true;
             break;
         }
 
-#if SDL_VERSION_ATLEAST(2, 0, 18)
         case SDL_WINDOWEVENT_DISPLAY_CHANGED:
             psDeviceMode.Monitor = event.window.data1;
             break;
-#endif
 
         case SDL_WINDOWEVENT_RESIZED:
-            if (viewport)
-                viewport->PlatformRequestResize = true;
+            if (window == m_sdlWnd)
+                UpdateWindowRects();
             break;
 
         case SDL_WINDOWEVENT_SIZE_CHANGED:
         {
-            if (psDeviceMode.WindowStyle != rsFullscreen)
+            if (window == m_sdlWnd)
             {
+                UpdateWindowRects();
+
                 if (static_cast<int>(psDeviceMode.Width) == event.window.data1 &&
                     static_cast<int>(psDeviceMode.Height) == event.window.data2)
                     break; // we don't need to reset device if resolution wasn't really changed
@@ -406,8 +370,8 @@ void CRenderDevice::ProcessEvent(const SDL_Event& event)
 
                 Reset();
             }
-            else
-                UpdateWindowRects();
+            if (viewport)
+                viewport->PlatformRequestResize = true;
 
             break;
         }
@@ -433,6 +397,8 @@ void CRenderDevice::ProcessEvent(const SDL_Event& event)
 
 void CRenderDevice::Run()
 {
+    ZoneScoped;
+
     g_bLoaded = false;
     Log("Starting engine...");
 
@@ -455,16 +421,10 @@ void CRenderDevice::Run()
     UpdateWindowProps();
     SDL_ShowWindow(m_sdlWnd);
     SDL_RaiseWindow(m_sdlWnd);
-    if (GEnv.isDedicatedServer || strstr(Core.Params, "-center_screen"))
-        SDL_SetWindowPosition(m_sdlWnd, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 }
 
 void CRenderDevice::Shutdown()
 {
-    // Stop Balance-Thread
-    mt_bMustExit.store(true, std::memory_order_release);
-    secondaryThread.join();
-
     seqAppEnd.Process();
 }
 
@@ -473,6 +433,8 @@ u32 app_inactive_time_start = 0;
 
 void CRenderDevice::FrameMove()
 {
+    ZoneScoped;
+
     dwFrame++;
     Core.dwFrame = dwFrame;
     dwTimeContinual = TimerMM.GetElapsed_ms() - app_inactive_time;
@@ -588,6 +550,8 @@ bool CRenderDevice::Paused() { return g_pauseMngr().Paused(); }
 
 void CRenderDevice::OnWindowActivate(SDL_Window* window, bool activated)
 {
+    ZoneScoped;
+
     if (editor().GetState() == editor::ide::visible_state::full)
     {
         if (window != m_sdlWnd)

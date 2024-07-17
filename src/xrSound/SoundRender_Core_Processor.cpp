@@ -11,6 +11,8 @@
 
 void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector& N, const Fvector& R)
 {
+    ZoneScoped;
+
     if (0 == bReady)
         return;
     Stats.Update.Begin();
@@ -80,18 +82,16 @@ void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector
 
 void CSoundRender_Core::render()
 {
+    ZoneScoped;
+
     isLocked = true;
     Stats.Render.Begin();
 
     for (CSoundRender_Target* T : s_targets)
     {
-        if (T->get_emitter())
+        if (CSoundRender_Emitter* emitter = T->get_emitter())
         {
-            T->fill_parameters();
-            if (T->get_Rendering())
-                T->update();
-            else
-                T->render();
+            emitter->render();
         }
     }
 
