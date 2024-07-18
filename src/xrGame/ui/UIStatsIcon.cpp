@@ -41,8 +41,8 @@ void CUIStatsIcon::InitTexInfo()
 
     R_ASSERT2(pSettings->line_exist(artefact_name, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", artefact_name));
 
-    m_tex_info[ARTEFACT][0].sh = InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(artefact_name, "inv_icon"));
-    m_tex_info[ARTEFACT][0].rect.set(0, 0, fXPos * ICON_GRID_WIDTH + fGridWidth * ICON_GRID_WIDTH, fYPos * ICON_GRID_HEIGHT + fGridHeight * ICON_GRID_HEIGHT);
+    (*m_tex_info)[ARTEFACT][0].sh = InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(artefact_name, "inv_icon"));
+    (*m_tex_info)[ARTEFACT][0].rect.set(0, 0, fXPos * ICON_GRID_WIDTH + fGridWidth * ICON_GRID_WIDTH, fYPos * ICON_GRID_HEIGHT + fGridHeight * ICON_GRID_HEIGHT);
 
     (*m_tex_info)[ARTEFACT][1] = (*m_tex_info)[ARTEFACT][0];
 

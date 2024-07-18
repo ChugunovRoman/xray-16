@@ -37,23 +37,6 @@ bool g_bAutoClearCrouch = true;
 
 void CActor::IR_OnKeyboardPress(int cmd)
 {
-    if (hud_adj_mode)
-    {
-        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
-        {
-            if (pInput->iGetAsyncKeyState(SDL_SCANCODE_RETURN) ||
-                pInput->iGetAsyncKeyState(SDL_SCANCODE_BACKSPACE) ||
-                pInput->iGetAsyncKeyState(SDL_SCANCODE_DELETE))
-                g_player_hud->tune(Ivector().set(0, 0, 0));
-            return;
-        }
-        else if (pInput->iGetAsyncKeyState(SDL_SCANCODE_END))
-        {
-            extern void logInfoAboutTunedItems(); //defined in player_hud_tune.cpp
-            logInfoAboutTunedItems();
-            return;
-        }
-    }
     if (GamePersistent().GetHudTuner().is_active())
         return;
 
@@ -293,18 +276,6 @@ void CActor::IR_OnKeyboardRelease(int cmd)
 
 void CActor::IR_OnKeyboardHold(int cmd)
 {
-    if (hud_adj_mode && pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
-    {
-        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_UP)) // old DIK_UP
-            g_player_hud->tune(Ivector().set(0, -1, 0));
-        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_DOWN)) // old DIK_DOWN
-            g_player_hud->tune(Ivector().set(0, 1, 0));
-        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LEFT)) // old DIK_LEFT
-            g_player_hud->tune(Ivector().set(-1, 0, 0));
-        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_RIGHT)) // old DIK_RIGHT
-            g_player_hud->tune(Ivector().set(1, 0, 0));
-        return;
-    }
     if (GamePersistent().GetHudTuner().is_active())
         return;
 

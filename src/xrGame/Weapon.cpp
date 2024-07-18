@@ -580,8 +580,8 @@ void CWeapon::Load(LPCSTR section)
     m_zoom_params.m_fZoomRotateTime = READ_IF_EXISTS(pSettings, r_float, section, "zoom_rotate_time", ROTATION_TIME);
 
     m_zoom_params.m_bUseDynamicZoom = FALSE;
-    m_zoom_params.m_sUseZoomPostprocess = 0;
-    m_zoom_params.m_sUseBinocularVision = 0;
+    m_zoom_params.m_sUseZoomPostprocess = "";
+    m_zoom_params.m_sUseBinocularVision = "";
 
     LoadModParams(section);
     bUseAltScope = !!bLoadAltScopesParams(section);
@@ -2737,7 +2737,7 @@ BOOL CWeapon::ParentIsActor()
 bool CWeapon::ZoomHideCrosshair()
 {
     CActor* pA = smart_cast<CActor*>(H_Parent());
-    if (pA && pA->active_cam() == eacLookAt || hud_adj_mode != 0)
+    if (pA && pA->active_cam() == eacLookAt || GamePersistent().GetHudTuner().is_active())
         return false;
     return m_zoom_params.m_bHideCrosshairInZoom || ZoomTexture();
 }

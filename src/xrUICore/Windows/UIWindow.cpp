@@ -573,14 +573,14 @@ bool CUIWindow::FillDebugTree(const CUIDebugState& debugState)
                 rnd.seed((s32)(intptr_t)this);
                 color = color_rgba(rnd.randI(255), rnd.randI(255), rnd.randI(255), 255);
             }
+            else if (GetCurrentFocusSystem() && GetCurrentFocusSystem()->GetFocused() == this)
+                color = color_rgba(200, 150, 200, 255);
+            else if (IsFocusValuable())
+                color = color_rgba(255, 0, 255, 255);
 
             const auto draw_list = hovered ? ImGui::GetForegroundDrawList() : ImGui::GetBackgroundDrawList();
             draw_list->AddRect((const ImVec2&)rect.lt, (const ImVec2&)rect.rb, color);
         }
-        else if (GetCurrentFocusSystem() && GetCurrentFocusSystem()->GetFocused() == this)
-            color = color_rgba(200, 150, 200, 255);
-        else if (IsFocusValuable())
-            color = color_rgba(255, 0, 255, 255);
 
         if (open)
         {
