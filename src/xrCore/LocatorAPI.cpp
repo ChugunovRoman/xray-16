@@ -1023,6 +1023,7 @@ void CLocatorAPI::_initialize(u32 flags, pcstr target_folder, pcstr fs_name)
 
             FS_Path* P = xr_new<FS_Path>(p_it != m_paths.end() ? p_it->second->m_Path : root, lp_add, lp_def, lp_capt, fl);
             bNoRecurse = !(fl & FS_Path::flRecurse);
+            VerifyPath(P->m_Path);
             Recurse(P->m_Path);
             auto I = m_paths.emplace(xr_strdup(id), P);
 #ifndef DEBUG
