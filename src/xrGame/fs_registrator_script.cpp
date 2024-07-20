@@ -100,37 +100,34 @@ public:
         eSortByModifUp,
         eSortByModifDown
     };
-    FS_file_list_ex(CLocatorAPI* fs, LPCSTR path, u32 flags, LPCSTR mask);
+    FS_file_list_ex(LPCSTR path, u32 flags, LPCSTR mask);
 
     u32 Size() { return m_file_items.size(); }
     FS_item GetAt(u32 idx) { return m_file_items[idx]; }
     void Sort(u32 flags);
 };
 
-FS_file_list_ex::FS_file_list_ex(CLocatorAPI* fs, LPCSTR path, u32 flags, LPCSTR mask)
+FS_file_list_ex::FS_file_list_ex(LPCSTR path, u32 flags, LPCSTR mask)
 {
-    xr_vector<pstr>* files = fs->file_list_open(path, flags);
+    FS_Path* P = FS.get_path(path);
+    P->m_Flags.set(FS_Path::flNeedRescan, TRUE);
+    FS.m_Flags.set(CLocatorAPI::flNeedCheck, TRUE);
+    FS.rescan_pathes();
 
-    string_path N;
+    FS_FileSet files;
+    FS.file_list(files, path, flags, mask);
 
-    if (fs->path_exist(path))
-        fs->update_path(N, path, "");
-    else
-        xr_strcpy(N, sizeof N, path);
-
-    auto I = files->begin();
-    auto E = files->end();
-    for (++I; I != E; ++I)
+    for (auto it = files.begin(); it != files.end(); ++it)
     {
-        string_path file_name;
-        FS.update_path(file_name, path, *I);
         m_file_items.push_back(FS_item());
         FS_item& itm = m_file_items.back();
         ZeroMemory(itm.name, sizeof(itm.name));
-        xr_strcat(itm.name, *I);
-        itm.modif = fs->get_file_age(file_name);
-        itm.size = fs->file_length(file_name);
+        xr_strcat(itm.name, it->name.c_str());
+        itm.modif = (u32)it->time_write;
+        itm.size = it->size;
     }
+
+    FS.m_Flags.set(CLocatorAPI::flNeedCheck, FALSE);
 }
 
 void FS_file_list_ex::Sort(u32 flags)
@@ -151,7 +148,7 @@ void FS_file_list_ex::Sort(u32 flags)
 
 FS_file_list_ex file_list_open_ex(CLocatorAPI* fs, LPCSTR path, u32 flags, LPCSTR mask)
 {
-    return FS_file_list_ex(fs, path, flags, mask);
+    return FS_file_list_ex(path, flags, mask);
 }
 
 FS_file_list file_list_open_script(CLocatorAPI* fs, LPCSTR initial, u32 flags)
