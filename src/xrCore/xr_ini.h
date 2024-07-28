@@ -260,7 +260,6 @@ public:
 
     void remove_line(pcstr S, pcstr L);
     void truncate();
-    void set_readonly(bool b);
 };
 
 #define READ_IF_EXISTS(ltx, method, section, name, default_value) \
