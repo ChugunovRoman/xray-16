@@ -1138,11 +1138,6 @@ void CInifile::truncate()
     return;
 }
 
-void CInifile::set_readonly(bool b)
-{
-    m_flags.set(eReadOnly, b);
-}
-
 template<>
 XRCORE_API pcstr CInifile::read(pcstr section, pcstr line) const
 {

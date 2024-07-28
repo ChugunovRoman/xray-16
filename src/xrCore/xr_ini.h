@@ -82,9 +82,10 @@ public:
     virtual ~CInifile();
     bool save_as(pcstr new_fname = nullptr);
     void save_as(IWriter& writer, bool bcheck = false) const;
-    void set_override_names(bool b) noexcept { m_flags.set(eOverrideNames, b); }
     void save_at_end(bool b) noexcept { m_flags.set(eSaveAtEnd, b); }
-    pcstr fname() const /*noexcept*/ { return m_file_name; };
+    void set_readonly(bool b) noexcept { m_flags.set(eReadOnly, b); }
+    void set_override_names(bool b) noexcept { m_flags.set(eOverrideNames, b); }
+    pcstr fname() const noexcept { return m_file_name; }
     Sect& r_section(pcstr S) const;
     Sect& r_section(const shared_str& S) const;
     bool line_exist(pcstr S, pcstr L)const;
