@@ -142,7 +142,7 @@ void CALifeSpawnRegistry::load_spawn_position_from_smart()
     for (; I != E; ++I)
     {
         CSE_ALifeSmartZone* smart = (*I).second->data()->object().cast_smart_zone();
-        if (smart && xr_strcmp(g_start_position_smart.c_str(), smart->name_replace()) == 0)
+        if (smart && g_start_position_smart != nullptr && xr_strcmp(g_start_position_smart.c_str(), smart->name_replace()) == 0)
         {
             g_start_game_vertex_id = smart->m_tGraphID;
             g_start_position = smart->o_Position;
