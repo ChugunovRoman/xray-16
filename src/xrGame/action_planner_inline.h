@@ -90,9 +90,12 @@ void CPlanner::update()
 
     THROW(!this->solution().empty());
 
+    if (this->solution().size() == 0)
+        Msg("Solution array is empty! solution().empty()=[%d], size=[%d] initialized=[%d] m_current_action_id=[%d]", this->solution().empty(), this->solution().size(), initialized(), m_current_action_id);
+
     if (initialized())
     {
-        if (current_action_id() != this->solution().front())
+        if (!this->solution().empty() && this->solution().size() > 0 && current_action_id() != this->solution().front())
         {
             current_action().finalize();
             m_current_action_id = this->solution().front();

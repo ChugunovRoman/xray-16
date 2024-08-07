@@ -182,7 +182,8 @@ void CUIPdaWnd::Show(bool status)
             else
                 SetActiveSubdialog("eptTasks");
         }
-        m_pActiveDialog->Show(true);
+        if (m_pActiveDialog)
+            m_pActiveDialog->Show(true);
     }
     else
     {
