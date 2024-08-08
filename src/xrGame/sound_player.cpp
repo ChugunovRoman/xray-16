@@ -199,6 +199,9 @@ void CSoundPlayer::play(
     **/
     sound_single.m_sound->clone((*I).second.second->random(id), st_Effect, sg_SourceType);
 
+    if (sound_single.m_sound->_get() == nullptr)
+        Msg("CSoundPlayer::play getted object pointer is null *sound.m_sound_prefix=[%s] m_object name=[%s] visual name=[%s]", *sound.m_sound_prefix, *m_object->cName(), *m_object->cNameVisual());
+
     sound_single.m_sound->_get()->g_object = m_object;
     sound_single.m_sound->_get()->g_userdata = (*I).second.first.m_data;
     VERIFY(sound_single.m_sound->_handle());
