@@ -15,9 +15,7 @@
 
 void LuaLog(pcstr caMessage)
 {
-#ifdef LUA_LOGS
     GEnv.ScriptEngine->script_log(LuaMessageType::Message, "%s", caMessage);
-#endif
 #if defined(USE_DEBUGGER) && !defined(USE_LUA_STUDIO)
     if (GEnv.ScriptEngine->debugger())
         GEnv.ScriptEngine->debugger()->Write(caMessage);
