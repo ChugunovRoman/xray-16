@@ -146,6 +146,7 @@ void CALifeSpawnRegistry::load_spawn_position_from_smart()
         {
             g_start_game_vertex_id = smart->m_tGraphID;
             g_start_position = smart->o_Position;
+            g_start_position_smart = nullptr;
         }
     }
 }

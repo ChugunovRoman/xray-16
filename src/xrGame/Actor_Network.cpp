@@ -57,7 +57,7 @@ u32 g_cl_InterpolationMaxPoints = 0;
 int g_dwInputUpdateDelta = 20;
 BOOL net_cl_inputguaranteed = FALSE;
 int g_start_game_vertex_id = NULL;
-shared_str g_start_position_smart = NULL;
+shared_str g_start_position_smart = nullptr;
 Fvector g_start_position{};
 CActor* g_actor = NULL;
 
