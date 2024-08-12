@@ -124,10 +124,11 @@ void CInventoryItem::Load(LPCSTR section)
     // Description
     if (pSettings->line_exist(section, DESCRIPTION_KEY))
     {
-        string2048 tmp_descr;
         pcstr descr{StringTable().translate(pSettings->r_string(section, DESCRIPTION_KEY)).c_str()};
-        xr_sprintf(tmp_descr, descr, count);
-        m_Description = tmp_descr;
+        if (strstr(descr, "%s"))
+            m_Description = make_string(descr, count).c_str();
+        else
+            m_Description = descr;
     }
     else
         m_Description = "";
