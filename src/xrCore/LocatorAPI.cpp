@@ -1100,7 +1100,13 @@ void CLocatorAPI::_destroy()
 
 const CLocatorAPI::file* CLocatorAPI::GetFileDesc(pcstr path)
 {
+    string_path temp;
     auto it = file_find_it(path);
+    if (path[0] == '$')
+    {
+        update_path(temp, path, "");
+        it = file_find_it(temp);
+    }
     return it != m_files.end() ? &*it : nullptr;
 }
 
