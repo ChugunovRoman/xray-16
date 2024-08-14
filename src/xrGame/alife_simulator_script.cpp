@@ -413,6 +413,10 @@ void set_start_game_vertex_id(int id)
 {
     g_start_game_vertex_id = id;
 }
+void set_start_game_level_id(int id)
+{
+    g_start_level_vertex_id = id;
+}
 
 SCRIPT_EXPORT(CALifeSimulator, (),
 {
@@ -478,7 +482,8 @@ SCRIPT_EXPORT(CALifeSimulator, (),
         def("alife", &alife),
         def("set_start_position_from_smart", &set_start_position_from_smart),
         def("set_start_position", &set_start_position),
-        def("set_start_game_vertex_id", &set_start_game_vertex_id)
+        def("set_start_game_vertex_id", &set_start_game_vertex_id),
+        def("set_start_game_level_id", &set_start_game_level_id)
     ];
 
     class CALifeSimulatorExporter1

@@ -824,6 +824,7 @@ IC CActorCondition& CActor::conditions() const
 
 extern Fvector g_start_position;
 extern int g_start_game_vertex_id;
+extern int g_start_level_vertex_id;
 extern shared_str g_start_position_smart;
 extern CActor* g_actor;
 CActor* Actor();
