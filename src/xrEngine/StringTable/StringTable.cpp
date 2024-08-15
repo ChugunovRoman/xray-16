@@ -302,3 +302,14 @@ pcstr CStringTable::translate(const STRING_ID& str_id, pcstr default_value) cons
 
     return default_value;
 }
+
+bool CStringTable::exist(const STRING_ID& str_id) const
+{
+    if (!pData)
+        return false;
+
+    if (pData->m_StringTable.find(str_id) != pData->m_StringTable.end())
+        return true;
+
+    return false;
+}

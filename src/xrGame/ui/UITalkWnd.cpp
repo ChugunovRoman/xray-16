@@ -403,9 +403,10 @@ void CUITalkWnd::PlaySnd(LPCSTR text)
 {
     u32 text_len = xr_strlen(text);
     if (text_len == 0)
-    {
         return;
-    }
+
+    if (!StringTable().exist(text))
+        return;
 
     string_path fn;
 
