@@ -30,8 +30,10 @@ private:
         m_tBlockCount = u32(tMaxValue - tMinValue) / tBlockSize + 1,
     };
 
-private:
+public:
     u32 m_available_count;
+
+private:
     SID_Block m_tppBlocks[m_tBlockCount];
 
 private:

@@ -454,6 +454,10 @@ SCRIPT_EXPORT(CALifeSimulator, (),
             .def("create", &CALifeSimulator__create)
             .def("create", &CALifeSimulator__spawn_item2)
             .def("create", &CALifeSimulator__spawn_item)
+            .def("get_available_count", +[](CALifeSimulator* self)
+            {
+                return self->server().GetAvailableCountId();
+            })
             .def("create_ammo", &CALifeSimulator__spawn_ammo)
             .def("release", &CALifeSimulator__release)
             .def("spawn_id", &CALifeSimulator__spawn_id)

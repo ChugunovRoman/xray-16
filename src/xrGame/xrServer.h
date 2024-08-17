@@ -185,6 +185,7 @@ public:
     IC void clear_ids() { m_tID_Generator = id_generator_type(); }
     virtual u16 PerformIDgen(u16 ID) override { return (m_tID_Generator.tfGetID(ID)); }
     virtual void FreeID(u16 ID, u32 time) override { return (m_tID_Generator.vfFreeID(ID, time)); }
+    virtual u32 GetAvailableCountId() override { return m_tID_Generator.m_available_count; } 
     void Perform_connect_spawn(CSE_Abstract* E, xrClientData* to, NET_Packet& P);
     void Perform_transfer(NET_Packet& PR, NET_Packet& PT, CSE_Abstract* what, CSE_Abstract* from, CSE_Abstract* to);
     void Perform_reject(CSE_Abstract* what, CSE_Abstract* from, int delta);
