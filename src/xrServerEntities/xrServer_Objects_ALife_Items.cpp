@@ -985,14 +985,26 @@ u32 CSE_ALifeItemBolt::ef_weapon_type() const
     return (m_ef_weapon_type);
 }
 
-void CSE_ALifeItemBolt::STATE_Write(NET_Packet& tNetPacket) { inherited::STATE_Write(tNetPacket); }
-void CSE_ALifeItemBolt::STATE_Read(NET_Packet& tNetPacket, u16 size) { inherited::STATE_Read(tNetPacket, size); }
+void CSE_ALifeItemBolt::STATE_Write(NET_Packet& tNetPacket)
+{
+    inherited::STATE_Write(tNetPacket);
+
+    tNetPacket.w_u16(m_count);
+}
+void CSE_ALifeItemBolt::STATE_Read(NET_Packet& tNetPacket, u16 size)
+{
+    inherited::STATE_Read(tNetPacket, size);
+    tNetPacket.r_u16(m_count);
+}
+void CSE_ALifeItemBolt::OnEvent(NET_Packet& P, u16 type, u32 time, ClientID sender)
+{
+    switch (type)
+    {
+    case GE_WPN_AMMO_ADD: { P.r_u16(m_count); }
+    }
+}
 void CSE_ALifeItemBolt::UPDATE_Write(NET_Packet& tNetPacket) { inherited::UPDATE_Write(tNetPacket); };
 void CSE_ALifeItemBolt::UPDATE_Read(NET_Packet& tNetPacket) { inherited::UPDATE_Read(tNetPacket); };
-bool CSE_ALifeItemBolt::can_save() const /* noexcept */
-{
-    return false; //! attached());
-}
 bool CSE_ALifeItemBolt::used_ai_locations() const /* noexcept */ { return false; }
 #ifndef MASTER_GOLD
 void CSE_ALifeItemBolt::FillProps(LPCSTR pref, PropItemVec& values) { inherited::FillProps(pref, values); }

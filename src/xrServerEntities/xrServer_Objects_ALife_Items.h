@@ -414,17 +414,22 @@ class CSE_ALifeItemBolt : public CSE_ALifeItem
 {
     using inherited = CSE_ALifeItem;
 
+private:
+    u16 m_count;
+
 public:
     u32 m_ef_weapon_type;
     CSE_ALifeItemBolt(LPCSTR caSection);
     virtual ~CSE_ALifeItemBolt();
-    virtual bool can_save() const /* noexcept */;
+    virtual CSE_ALifeItemBolt* cast_item_bolt() { return this; };
+    virtual bool can_save() const { return true; };
     virtual bool used_ai_locations() const /* noexcept */;
     virtual u32 ef_weapon_type() const;
     virtual void UPDATE_Read(NET_Packet& P);
     virtual void UPDATE_Write(NET_Packet& P);
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
+    virtual void OnEvent(NET_Packet& /*tNetPacket*/, u16 /*type*/, u32 /*time*/, ClientID /*sender*/);
     SERVER_ENTITY_EDITOR_METHODS
 };
 

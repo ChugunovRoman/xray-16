@@ -14,6 +14,9 @@ public:
 
     virtual void OnH_A_Chield();
 
+    virtual void save(NET_Packet& output_packet);
+    virtual void load(IReader& input_packet);
+
     virtual void Load(LPCSTR section);
 
     virtual void SetInitiator(u16 id);

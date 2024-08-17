@@ -182,6 +182,7 @@ public:
     virtual CSE_ALifeSmartZone* cast_smart_zone() { return nullptr; }
     virtual CSE_ALifeOnlineOfflineGroup* cast_online_offline_group() { return nullptr; }
     virtual CSE_ALifeItemPDA* cast_item_pda() { return nullptr; }
+    virtual CSE_ALifeItemBolt* cast_item_bolt() { return nullptr; }
 };
 
 extern u16 script_server_object_version();

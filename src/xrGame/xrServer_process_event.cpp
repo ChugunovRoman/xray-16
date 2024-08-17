@@ -372,6 +372,7 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
     case GE_REQUEST_PLAYERS_INFO: { SendPlayersInfo(sender);
     }
     break;
+    case GE_WPN_AMMO_ADD: break;
     default: R_ASSERT2(0, "Game Event not implemented!!!"); break;
     }
 }

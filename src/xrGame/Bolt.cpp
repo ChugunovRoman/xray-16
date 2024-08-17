@@ -24,6 +24,21 @@ void CBolt::Load(LPCSTR section)
         set_tip_text(pSettings->r_string(section, "tip_text"));
 }
 
+void CBolt::save(NET_Packet& output_packet)
+{
+    inherited::save(output_packet);
+    CInventoryItemObject::save(output_packet);
+
+    output_packet.w_u16(m_count);
+}
+void CBolt::load(IReader& input_packet)
+{
+    inherited::load(input_packet);
+    CInventoryItemObject::load(input_packet);
+
+    m_count = input_packet.r_u16();
+}
+
 bool CBolt::GetBriefInfo(II_BriefInfo& info)
 {
     VERIFY(m_pInventory);
@@ -47,6 +62,14 @@ void CBolt::Throw()
     inherited::Throw();
     spawn_fake_missile();
     AddCount(-1);
+
+    NET_Packet P;
+    P.w_begin(M_EVENT);
+    P.w_u32(Device.dwTimeGlobal);
+    P.w_u16(GE_WPN_AMMO_ADD);
+    P.w_u16(ID());
+    P.w_u16(m_count);
+    Level().Send(P, net_flags(TRUE, TRUE));
 
     if (m_count == 0)
         DestroyObject();
