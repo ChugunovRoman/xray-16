@@ -421,7 +421,6 @@ public:
     u32 m_ef_weapon_type;
     CSE_ALifeItemBolt(LPCSTR caSection);
     virtual ~CSE_ALifeItemBolt();
-    virtual CSE_ALifeItemBolt* cast_item_bolt() { return this; };
     virtual bool can_save() const { return true; };
     virtual bool used_ai_locations() const /* noexcept */;
     virtual u32 ef_weapon_type() const;

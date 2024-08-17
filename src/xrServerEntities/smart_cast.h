@@ -330,10 +330,6 @@ DECLARE_SPECIALIZATION(CSE_ALifeItemPDA, CSE_Abstract, cast_item_pda);
 #undef cast_type_list
 #define cast_type_list save_cast_list(CSE_ALifeItemPDA, CSE_Abstract)
 
-DECLARE_SPECIALIZATION(CSE_ALifeItemBolt, CSE_Abstract, cast_item_bolt);
-#undef cast_type_list
-#define cast_type_list save_cast_list(CSE_ALifeItemBolt, CSE_Abstract)
-
 #ifndef DO_NOT_DECLARE_TYPE_LIST
 #include "smart_cast_impl1.h"
 #endif
