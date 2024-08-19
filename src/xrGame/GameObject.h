@@ -321,7 +321,7 @@ public:
     virtual CScriptGameObject* lua_game_object() const override;
     virtual int clsid() const override
     {
-        // THROW2(m_script_clsid >= 0, make_string("Sect = %s, clsid = %d", NameSection.c_str(), m_script_clsid).c_str());
+        VERIFY(m_script_clsid >= 0);
         return m_script_clsid;
     }
     virtual CInifile* spawn_ini() override { return m_ini_file; }

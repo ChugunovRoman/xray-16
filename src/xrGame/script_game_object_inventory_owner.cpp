@@ -53,7 +53,6 @@
 #include "CustomOutfit.h"
 #include "ActorBackpack.h"
 #include "inventory_item_impl.h"
-#include "Inventory.h"
 #include "xrServer_Objects_ALife_Items.h"
 #include "xrServerEntities/inventory_space.h"
 //-Alundaio
@@ -292,7 +291,7 @@ void CScriptGameObject::ForEachInventoryItems(const luabind::functor<void>& func
 }
 
 // 1
-void CScriptGameObject::IterateInventory(luabind::functor<void> functor, luabind::object object)
+void CScriptGameObject::IterateInventory(luabind::functor<bool> functor, luabind::object object)
 {
     CInventoryOwner* inventory_owner = smart_cast<CInventoryOwner*>(&this->object());
     if (!inventory_owner)
@@ -302,14 +301,15 @@ void CScriptGameObject::IterateInventory(luabind::functor<void> functor, luabind
         return;
     }
 
-    TIItemContainer::iterator I = inventory_owner->inventory().m_all.begin();
-    TIItemContainer::iterator E = inventory_owner->inventory().m_all.end();
+    TIItemContainer::iterator	I = inventory_owner->inventory().m_all.begin();
+    TIItemContainer::iterator	E = inventory_owner->inventory().m_all.end();
     for (; I != E; ++I)
-        functor(object, (*I)->object().lua_game_object());
+        if (functor(object, (*I)->object().lua_game_object()) == true)
+            return;
 }
 
 #include "InventoryBox.h"
-void CScriptGameObject::IterateInventoryBox(luabind::functor<void> functor, luabind::object object)
+void CScriptGameObject::IterateInventoryBox(luabind::functor<bool> functor, luabind::object object)
 {
     CInventoryBox* inventory_box = smart_cast<CInventoryBox*>(&this->object());
     if (!inventory_box)
@@ -323,9 +323,9 @@ void CScriptGameObject::IterateInventoryBox(luabind::functor<void> functor, luab
     xr_vector<u16>::const_iterator E = inventory_box->m_items.end();
     for (; I != E; ++I)
     {
-        CGameObject* GO = smart_cast<CGameObject*>(Level().Objects.net_Find(*I));
-        if (GO)
-            functor(object, GO->lua_game_object());
+        if (const auto GO = smart_cast<CGameObject*>(Level().Objects.net_Find(*I)))
+            if (functor(object, GO->lua_game_object()) == true)
+                return;
     }
 }
 
@@ -776,8 +776,7 @@ void CScriptGameObject::SetCharacterReputation(int char_rep)
 
     if (!pInventoryOwner)
     {
-        GEnv.ScriptEngine->script_log(
-            LuaMessageType::Error, "SetCharacterReputation available only for InventoryOwner");
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "SetCharacterReputation available only for InventoryOwner");
         return;
     }
     pInventoryOwner->SetReputation(char_rep);
@@ -1783,7 +1782,6 @@ bool CScriptGameObject::is_door_blocked_by_npc() const
 
 
 //Alundaio: Methods for exporting the ability to detach/attach addons for magazined weapons
-#ifdef GAME_OBJECT_EXTENDED_EXPORTS
 void CScriptGameObject::Weapon_AddonAttach(CScriptGameObject* item)
 {
     auto weapon = smart_cast<CWeaponMagazined*>(&object());
@@ -2297,5 +2295,4 @@ void CScriptGameObject::SetCharacterIcon(pcstr iconName)
     }
     return pInventoryOwner->SetIcon(iconName);
 }
-#endif
 //-Alundaio

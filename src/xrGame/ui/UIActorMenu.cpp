@@ -167,6 +167,7 @@ void CUIActorMenu::SetMenuMode(EMenuMode mode)
         InitActorInfo();
         if (m_currMenuMode != mmUndefined && m_currMenuMode != mmInventory)
             InitPartnerInfo();
+        highlight_equipped();
         CurModeToScript();
     } // if
 
@@ -579,6 +580,8 @@ void CUIActorMenu::UpdateItemsPlace()
         UpdateOutfit();
         UpdateActor();
     }
+
+    highlight_equipped();
 }
 
 // ================================================================
@@ -962,6 +965,25 @@ void CUIActorMenu::highlight_weapons_for_addon(PIItem addon_item, CUIDragDropLis
     } // for i
 }
 
+void CUIActorMenu::highlight_equipped() const
+{
+    // Highlight 'equipped' items in actor bag
+    CUIDragDropListEx* slot_list = m_pLists[eInventoryBagList];
+    u32 const cnt = slot_list->ItemsCount();
+    for (u32 i = 0; i < cnt; ++i)
+    {
+        CUICellItem* ci = slot_list->GetItemIdx(i);
+        const auto item = static_cast<PIItem>(ci->m_pData);
+        if (!item)
+            continue;
+
+        if (item->m_highlight_equipped && item->m_pInventory && item->m_pInventory->ItemFromSlot(item->BaseSlot()) == item)
+            ci->m_select_equipped = true;
+        else
+            ci->m_select_equipped = false;
+    }
+}
+
 // -------------------------------------------------------------------
 
 void CUIActorMenu::ClearAllLists()
@@ -1083,9 +1105,10 @@ bool CUIActorMenu::CanSetItemToList(PIItem item, CUIDragDropListEx* l, u16& ret_
 void CUIActorMenu::HighlightSectionInSlot(pcstr section, EDDListType type, u16 slot_id /*= 0*/)
 {
     CUIDragDropListEx* slot_list = GetListByType(type);
-
     if (!slot_list)
         slot_list = m_pLists[eInventoryBagList];
+    if (!slot_list)
+        return;
 
     u32 const cnt = slot_list->ItemsCount();
     for (u32 i = 0; i < cnt; ++i)
@@ -1110,9 +1133,10 @@ void CUIActorMenu::HighlightForEachInSlot(const luabind::functor<bool>& functor,
         return;
 
     CUIDragDropListEx* slot_list = GetListByType(type);
-
     if (!slot_list)
         slot_list = m_pLists[eInventoryBagList];
+    if (!slot_list)
+        return;
 
     u32 const cnt = slot_list->ItemsCount();
     for (u32 i = 0; i < cnt; ++i)

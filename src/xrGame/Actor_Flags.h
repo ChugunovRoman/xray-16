@@ -17,6 +17,7 @@ enum
     AF_ALWAYS_USE_ATTITUDE_SENSORS = (1 << 13), // or only when zooming if false
     AF_3DSCOPE = (1 << 14),
     AF_PNV_W_SCOPE_DIS = (1 << 15),
+    AF_USE_TRACERS = (1 << 16),
 };
 
 extern Flags32 psActorFlags;

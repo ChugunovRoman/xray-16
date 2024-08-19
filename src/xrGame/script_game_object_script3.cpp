@@ -443,13 +443,12 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
         .def("start_particles", &CScriptGameObject::start_particles)
         .def("stop_particles", &CScriptGameObject::stop_particles)
 
-        //Alundaio: Extended exports
-        //For Car
+        // Alundaio: Extended exports
+        // For Car
         .def("attach_vehicle", &CScriptGameObject::AttachVehicle)
         .def("detach_vehicle", &CScriptGameObject::DetachVehicle)
         .def("get_attached_vehicle", &CScriptGameObject::GetAttachedVehicle)
 
-#ifdef GAME_OBJECT_EXTENDED_EXPORTS
         .def("reset_bone_protections", &CScriptGameObject::ResetBoneProtections)
         .def("iterate_feel_touch", &CScriptGameObject::IterateFeelTouch)
         .def("get_luminocity_hemi", &CScriptGameObject::GetLuminocityHemi)
@@ -465,7 +464,7 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
         .def("remove_memory_visible_object", &CScriptGameObject::RemoveMemoryVisibleObject)
         .def("remove_memory_hit_object", &CScriptGameObject::RemoveMemoryHitObject)
 
-        //For Ammo
+        // For Ammo
         .def("ammo_get_count", &CScriptGameObject::AmmoGetCount)
         .def("ammo_set_count", &CScriptGameObject::AmmoSetCount)
         .def("ammo_box_size", &CScriptGameObject::AmmoBoxSize)
@@ -478,7 +477,7 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
         .def("weapon_get_scope", &CScriptGameObject::Weapon_GetCurrentScope)
         .def("weapon_in_grenade_mode", &CScriptGameObject::WeaponInGrenadeMode)
 
-        //For Weapon & Outfit
+        // For Weapon & Outfit
         .def("add_upgrade", &CScriptGameObject::AddUpgrade)
         .def("install_upgrade", &CScriptGameObject::InstallUpgrade)
         .def("has_upgrade", &CScriptGameObject::HasUpgrade)
@@ -487,24 +486,25 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
         .def("can_install_upgrade", &CScriptGameObject::CanInstallUpgrade)
         .def("can_add_upgrade", &CScriptGameObject::CanAddUpgrade)
         .def("iterate_installed_upgrades", &CScriptGameObject::IterateInstalledUpgrades)
+        .def("weapon_in_grenade_mode", &CScriptGameObject::WeaponInGrenadeMode)
 
         // For CHudItem
         .def("play_hud_motion", &CScriptGameObject::PlayHudMotion)
         .def("switch_state", &CScriptGameObject::SwitchState)
         .def("get_state", &CScriptGameObject::GetState)
+
         // For EatableItem
         .def("set_remaining_uses", &CScriptGameObject::SetRemainingUses)
         .def("get_remaining_uses", &CScriptGameObject::GetRemainingUses)
         .def("get_max_uses", &CScriptGameObject::GetMaxUses)
+
         // Phantom
         .def("phantom_set_enemy", &CScriptGameObject::PhantomSetEnemy)
+
         // Actor
         .def("set_character_icon", &CScriptGameObject::SetCharacterIcon)
-#endif
-        //-Alundaio
 
-#ifdef GAME_OBJECT_CASTING_EXPORTS
-        // Casting objects
+        // Casting
         .def("cast_GameObject", &ObjectCast<CGameObject>)
         .def("cast_Car", &ObjectCast<CCar>)
         .def("cast_Heli", &ObjectCast<CHelicopter>)
@@ -541,8 +541,46 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
         //.def("cast_Torch", &ObjectCast<CTorch>)
         //.def("cast_WeaponMagazinedWGrenade", &ObjectCast<CWeaponMagazinedWGrenade>)
         //.def("cast_InventoryBox", &ObjectCast<CInventoryBox>)
-#endif // GAME_OBJECT_CASTING_EXPORTS
+        //-Alundaio
 
+        //AVO: additional functions
+        //.def("is_game_object", &CScriptGameObject::IsGameObject)
+        //.def("is_car", &CScriptGameObject::IsCar)
+        //.def("is_helicopter", &CScriptGameObject::IsHeli)
+        //.def("is_holder", &CScriptGameObject::IsHolderCustom)
+        .def("is_entity_alive", &CScriptGameObject::IsEntityAlive)
+        .def("is_inventory_item", &CScriptGameObject::IsInventoryItem)
+        .def("is_inventory_owner", &CScriptGameObject::IsInventoryOwner)
+        .def("is_actor", &CScriptGameObject::IsActor)
+        .def("is_custom_monster", &CScriptGameObject::IsCustomMonster)
+        .def("is_weapon", &CScriptGameObject::IsWeapon)
+        //.def("is_medkit", &CScriptGameObject::IsMedkit)
+        //.def("is_eatable_item", &CScriptGameObject::IsEatableItem)
+        //.def("is_antirad", &CScriptGameObject::IsAntirad)
+        .def("is_outfit", &CScriptGameObject::IsCustomOutfit)
+        .def("is_scope", &CScriptGameObject::IsScope)
+        .def("is_silencer", &CScriptGameObject::IsSilencer)
+        .def("is_grenade_launcher", &CScriptGameObject::IsGrenadeLauncher)
+        .def("is_weapon_magazined", &CScriptGameObject::IsWeaponMagazined)
+        .def("is_space_restrictor", &CScriptGameObject::IsSpaceRestrictor)
+        .def("is_stalker", &CScriptGameObject::IsStalker)
+        .def("is_anomaly", &CScriptGameObject::IsAnomaly)
+        .def("is_monster", &CScriptGameObject::IsMonster)
+        //.def("is_explosive", &CScriptGameObject::IsExplosive)
+        //.def("is_script_zone", &CScriptGameObject::IsScriptZone)
+        //.def("is_projector", &CScriptGameObject::IsProjector)
+        .def("is_trader", &CScriptGameObject::IsTrader)
+        .def("is_hud_item", &CScriptGameObject::IsHudItem)
+        //.def("is_food_item", &CScriptGameObject::IsFoodItem)
+        .def("is_artefact", &CScriptGameObject::IsArtefact)
+        .def("is_ammo", &CScriptGameObject::IsAmmo)
+        //.def("is_missile", &CScriptGameObject::IsMissile)
+        //.def("is_physics_shell_holder", &CScriptGameObject::IsPhysicsShellHolder)
+        //.def("is_grenade", &CScriptGameObject::IsGrenade)
+        //.def("is_bottle_item", &CScriptGameObject::IsBottleItem)
+        //.def("is_torch", &CScriptGameObject::IsTorch)
+        .def("is_weapon_gl", &CScriptGameObject::IsWeaponGL)
+        .def("is_inventory_box", &CScriptGameObject::IsInventoryBox)
 
         .def("is_on_belt", &CScriptGameObject::IsOnBelt)
         .def("item_on_belt", &CScriptGameObject::ItemOnBelt)

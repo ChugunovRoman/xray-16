@@ -39,7 +39,6 @@
 #include "stalker_decision_space.h"
 #include "space_restriction_manager.h"
 //Alundaio
-#ifdef GAME_OBJECT_EXTENDED_EXPORTS
 #include "Artefact.h"
 #include "holder_custom.h"
 #include "Actor.h"
@@ -52,9 +51,6 @@
 #include "WeaponMagazinedWGrenade.h"
 #include "level_path_manager.h"
 #include "game_path_manager.h"
-#include "danger_manager.h"
-#include "danger_object.h"
-#endif
 //-Alundaio
 
 namespace MemorySpace
@@ -1267,7 +1263,6 @@ bool CScriptGameObject::is_weapon_going_to_be_strapped(CScriptGameObject const* 
 }
 
 //Alundaio: Taken from Radium
-#ifdef GAME_OBJECT_EXTENDED_EXPORTS
 u16 CScriptGameObject::AmmoGetCount()
 {
     CWeaponAmmo* ammo = smart_cast<CWeaponAmmo*>(&object());
@@ -1387,22 +1382,21 @@ void CScriptGameObject::SetArtefactBleedingRestoreSpeed(float value)
     artefact->SetBleedingPower(value);
 }
 
-void CScriptGameObject::AttachVehicle(CScriptGameObject* veh)
+void CScriptGameObject::AttachVehicle(CScriptGameObject* veh, bool bForce)
 {
-    CActor* actor = smart_cast<CActor*>(&object());
-    if (actor)
+    if (CActor* actor = smart_cast<CActor*>(&object()))
     {
-        CHolderCustom* vehicle = veh->object().cast_holder_custom();//smart_cast<CHolderCustom*>(veh->object());
-        if (vehicle)
-            actor->attach_Vehicle(vehicle);
+        if (CHolderCustom* vehicle = veh->object().cast_holder_custom())
+            actor->use_HolderEx(vehicle, bForce);
     }
 }
 
-void CScriptGameObject::DetachVehicle()
+void CScriptGameObject::DetachVehicle(bool bForce)
 {
-    CActor* actor = smart_cast<CActor*>(&object());
-    if (actor)
-        actor->detach_Vehicle();
+    if (CActor* actor = smart_cast<CActor*>(&object()))
+    {
+        actor->use_HolderEx(nullptr, bForce);
+    }
 }
 
 CScriptGameObject* CScriptGameObject::GetAttachedVehicle()
@@ -1424,13 +1418,12 @@ CScriptGameObject* CScriptGameObject::GetAttachedVehicle()
 
 u32 CScriptGameObject::PlayHudMotion(pcstr M, bool mixIn, u32 state)
 {
-    CWeapon* Weapon = object().cast_weapon();
-    if (Weapon)
+    if (CWeapon* weapon = object().cast_weapon())
     {
-        if (!Weapon->isHUDAnimationExist(M))
+        if (!weapon->isHUDAnimationExist(M))
             return 0;
 
-        return Weapon->PlayHUDMotion(M, mixIn, Weapon, state);
+        return weapon->PlayHUDMotion(M, mixIn, weapon, state);
     }
 
     CHudItem* itm = object().cast_inventory_item()->cast_hud_item();
@@ -1452,11 +1445,9 @@ void CScriptGameObject::SwitchState(u32 state)
         return;
     }
 
-    CInventoryItem* IItem = object().cast_inventory_item();
-    if (IItem)
+    if (CInventoryItem* IItem = object().cast_inventory_item())
     {
-        CHudItem* itm = IItem->cast_hud_item();
-        if (itm)
+        if (CHudItem* itm = IItem->cast_hud_item())
             itm->SwitchState(state);
     }
 }
@@ -1472,19 +1463,23 @@ bool CScriptGameObject::WeaponInGrenadeMode()
 
 u32 CScriptGameObject::GetState()
 {
-    CWeapon* Weapon = object().cast_weapon();
-    if (Weapon)
-        return Weapon->GetState();
+    if (const auto weapon = object().cast_weapon())
+        return weapon->GetState();
 
-    CInventoryItem* IItem = object().cast_inventory_item();
-    if (IItem)
+    if (CInventoryItem* IItem = object().cast_inventory_item())
     {
-        CHudItem* itm = IItem->cast_hud_item();
-        if (itm)
+        if (const auto itm = IItem->cast_hud_item())
             return itm->GetState();
     }
 
     return 65535;
+}
+
+bool CScriptGameObject::WeaponInGrenadeMode()
+{
+    if (const auto wpn = smart_cast<CWeaponMagazinedWGrenade*>(&object()))
+        return wpn->m_bGrenadeMode;
+    return false;
 }
 
 void CScriptGameObject::SetBoneVisible(pcstr bone_name, bool bVisibility, bool bRecursive)
@@ -1518,7 +1513,7 @@ bool CScriptGameObject::IsBoneVisible(pcstr bone_name)
 
 float CScriptGameObject::GetLuminocityHemi()
 {
-    CGameObject* e = smart_cast<CGameObject*>(&object());
+    CGameObject* e = &object();
     if (!e || !e->renderable_ROS())
         return 0;
     return e->renderable_ROS()->get_luminocity_hemi();
@@ -1526,7 +1521,7 @@ float CScriptGameObject::GetLuminocityHemi()
 
 float CScriptGameObject::GetLuminocity()
 {
-    CGameObject* e = smart_cast<CGameObject*>(&object());
+    CGameObject* e = &object();
     if (!e || !e->renderable_ROS())
         return 0;
     return e->renderable_ROS()->get_luminocity();
@@ -1538,8 +1533,7 @@ void CScriptGameObject::ForceSetPosition(Fvector pos, bool bActivate)
     if (!sh)
         return;
 
-    CPhysicsShell* shell = sh->PPhysicsShell();
-    if (shell)
+    if (CPhysicsShell* shell = sh->PPhysicsShell())
     {
         if (bActivate)
             sh->activate_physic_shell();
@@ -1553,8 +1547,10 @@ void CScriptGameObject::ForceSetPosition(Fvector pos, bool bActivate)
             sh->character_physics_support()->ForceTransform(M);
     }
     else
-        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "force_set_position: object %s has no physics shell!",
-                                        *object().cName());
+    {
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error,
+            "force_set_position: object %s has no physics shell!", object().cName().c_str());
+    }
 }
 
 void CScriptGameObject::SetRemainingUses(u8 value)
@@ -1598,15 +1594,11 @@ u8 CScriptGameObject::GetMaxUses()
 
 void CScriptGameObject::IterateFeelTouch(luabind::functor<void> functor)
 {
-    Feel::Touch* touch = smart_cast<Feel::Touch*>(&object());
-    if (touch)
+    if (Feel::Touch* touch = smart_cast<Feel::Touch*>(&object()))
     {
         for (const auto& game_object : touch->feel_touch)
         {
-            // XXX Xottab_DUTY: Do we need this cast from IGameObject* to IGameObject* ?
-            IGameObject* o = smart_cast<IGameObject*>(game_object);
-            if (o)
-                functor(game_object->ID());
+            functor(game_object->ID());
         }
     }
 }
@@ -1623,8 +1615,7 @@ u32 CScriptGameObject::GetSpatialType()
 
 u8 CScriptGameObject::GetRestrictionType()
 {
-    CSpaceRestrictor* restr = smart_cast<CSpaceRestrictor*>(&object());
-    if (restr)
+    if (const auto restr = smart_cast<CSpaceRestrictor*>(&object()))
         return restr->m_space_restrictor_type;
 
     return -1;
@@ -1632,13 +1623,11 @@ u8 CScriptGameObject::GetRestrictionType()
 
 void CScriptGameObject::SetRestrictionType(u8 type)
 {
-    CSpaceRestrictor* restr = smart_cast<CSpaceRestrictor*>(&object());
-    if (restr)
+    if (const auto restr = smart_cast<CSpaceRestrictor*>(&object()))
     {
         restr->m_space_restrictor_type = type;
         if (type != RestrictionSpace::eRestrictorTypeNone)
             Level().space_restriction_manager().register_restrictor(restr, RestrictionSpace::ERestrictorTypes(type));
     }
 }
-#endif
 //-Alundaio

@@ -55,10 +55,11 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
         }
     }
 
-    // To get the savegame fname to make our own custom save state
-    luabind::functor<void> functor;
-    if (GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_before_save", functor))
-        functor((LPCSTR)m_save_name);
+	//Alundaio: To get the savegame fname to make our own custom save states
+    luabind::functor<void> funct1;
+    if (GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_before_save", funct1))
+        funct1((pcstr)m_save_name);
+	//-Alundaio
 
     u32 source_count;
     u32 dest_count;
@@ -95,9 +96,11 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
     Msg("* Game %s is successfully saved to file '%s'", m_save_name, temp);
 #endif // DEBUG
 
-    // To get the savegame fname to make our own custom save states
-    if (GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_save", functor))
-        functor(static_cast<pcstr>(m_save_name));
+	//Alundaio: To get the savegame fname to make our own custom save states
+    luabind::functor<void> funct2;
+    if (GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_save", funct2))
+        funct2((pcstr)m_save_name);
+    //-Alundaio
 
     if (!update_name)
         xr_strcpy(m_save_name, saveBackup);
@@ -105,15 +108,16 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
 
 void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR file_name)
 {
-    // So we can get the fname to make our own custom save states
+	//Alundaio: So we can get the fname to make our own custom save states
     luabind::functor<void> funct;
-    GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_load", funct);
-    if (funct)
+    if (GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_load", funct))
     {
+        // TODO: Проверить на Linux будет ли работать без них
         convert_path_separators((char*)file_name);
         funct(file_name);
         restore_path_separators((char*)file_name);
     }
+	//-Alundaio
 
     IReader source(buffer, buffer_size);
     header().load(source);

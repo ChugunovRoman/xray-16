@@ -227,6 +227,7 @@ public:
     u16 get_ammo_limit();
     u16 get_ammo_total();
     u16 get_ammo_elapsed();
+    void set_ammo_elapsed(u16 count);
     u16 get_ammo_magsize();
     void set_ammo_elapsed(u16 count) { a_elapsed = count; };
     u16 get_ammo_elapsed2() { return a_elapsed; };
