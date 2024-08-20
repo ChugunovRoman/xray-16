@@ -302,6 +302,7 @@ public:
     virtual IServerGameState* GetGameState() = 0;
     virtual u16 PerformIDgen(u16 ID) = 0;
     virtual void FreeID(u16 ID, u32 time) = 0;
+    virtual u32 GetAvailableCountId() = 0;
 
     virtual CSE_Abstract* entity_Create(pcstr name) = 0;
     virtual void entity_Destroy(CSE_Abstract*& entity) = 0;

@@ -8,8 +8,7 @@
         "/usr/include/linux",
         "${workspaceFolder}",
         "${workspaceFolder}/src",
-        "${workspaceFolder}/src/**",
-        "${workspaceFolder}/sdk/include/GL/*",
+        "${workspaceFolder}/src/**/*",
         "${workspaceFolder}/sdk/include/**",
         "${workspaceFolder}/src/xrCore/",
         "${workspaceFolder}/**"

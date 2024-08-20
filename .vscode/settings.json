@@ -16,5 +16,8 @@
   "files.trimTrailingWhitespace": false,
   "files.insertFinalNewline": true,
   "C_Cpp.intelliSenseMemoryLimit": 8192,
-  "C_Cpp.intelliSenseCacheSize": 8192
+  "C_Cpp.intelliSenseCacheSize": 8192,
+  "cmake.debugConfig": {
+    "cwd": "/home/ruut/Games/GlobalWar"
+  }
 }
