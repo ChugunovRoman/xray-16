@@ -442,11 +442,11 @@ void set_start_position(Fvector& pos)
 {
     g_start_position = pos;
 }
-void set_start_game_vertex_id(int id)
+void set_start_game_vertex_id(u16 id)
 {
     g_start_game_vertex_id = id;
 }
-void set_start_game_level_id(int id)
+void set_start_game_level_id(u32 id)
 {
     g_start_level_vertex_id = id;
 }
