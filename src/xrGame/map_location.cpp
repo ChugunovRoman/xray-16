@@ -695,7 +695,7 @@ void CMapLocation::SetColor(u32 color)
     if (!m_level_spot)
         return;
 
-    m_level_spot->SetColor(color);
+    m_level_spot->SetTextureColor(color);
 };
 
 pcstr CMapLocation::GetHint() const

@@ -125,7 +125,7 @@ CUIDragItem* CUIInventoryCellItem::CreateDragItem()
     {
         CUIStatic* s = xr_new<CUIStatic>("Layer");
         s->SetAutoDelete(true);
-        s->SetShader(InventoryUtilities::GetEquipmentIconsShader());
+        s->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(layer->m_name, "inv_icon")));
         InitLayer(s, layer->m_name, layer->offset, false, layer->m_scale);
         s->SetTextureColor(i->wnd()->GetTextureColor());
         i->wnd()->AttachChild(s);
@@ -179,7 +179,7 @@ CUIStatic* CUIInventoryCellItem::InitLayer(CUIStatic* s, pcstr section,
         s = xr_new<CUIStatic>("Layer");
         s->SetAutoDelete(true);
         AttachChild(s);
-        s->SetShader(InventoryUtilities::GetEquipmentIconsShader());
+        s->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(section, "inv_icon")));
         s->SetTextureColor(GetTextureColor());
     }
 

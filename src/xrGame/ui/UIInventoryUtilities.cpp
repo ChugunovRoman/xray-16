@@ -169,7 +169,7 @@ const ui_shader& InventoryUtilities::GetBuyMenuShader()
     return *g_BuyMenuShader;
 }
 
-const ui_shader InventoryUtilities::GetEquipmentIconShader(pcstr filepath)
+const ui_shader& InventoryUtilities::GetEquipmentIconShader(pcstr filepath)
 {
     auto it = g_EquipmentIconShaderMap.find(filepath);
     if (it == g_EquipmentIconShaderMap.end())

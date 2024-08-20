@@ -1452,15 +1452,6 @@ void CScriptGameObject::SwitchState(u32 state)
     }
 }
 
-bool CScriptGameObject::WeaponInGrenadeMode()
-{
-    CWeaponMagazinedWGrenade* wpn = smart_cast<CWeaponMagazinedWGrenade*>(&object());
-    if (!wpn)
-        return false;
-
-    return wpn->m_bGrenadeMode;
-}
-
 u32 CScriptGameObject::GetState()
 {
     if (const auto weapon = object().cast_weapon())

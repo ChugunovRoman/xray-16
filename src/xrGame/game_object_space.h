@@ -54,9 +54,6 @@ enum ECallbackType : u32
     eInvBoxItemTake,
     eWeaponNoAmmoAvailable,
 
-    //Alundaio: added defines
-    eActorHudAnimationEnd,
-
     //AVO: custom callbacks
     // Input
     eActorHudAnimationEnd,
