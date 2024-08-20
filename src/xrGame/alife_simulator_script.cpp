@@ -487,7 +487,7 @@ SCRIPT_EXPORT(CALifeSimulator, (),
             .def("create", &CALifeSimulator__create)
             .def("create", &CALifeSimulator__spawn_item2)
             .def("create", &CALifeSimulator__spawn_item)
-            .def("get_available_count", [](CALifeSimulator* self)
+            .def("get_available_count", +[](CALifeSimulator* self) -> u32
             {
                 return self->server().GetAvailableCountId();
             })
