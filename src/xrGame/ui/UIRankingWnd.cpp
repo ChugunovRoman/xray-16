@@ -286,6 +286,8 @@ void CUIRankingWnd::update_info()
     for (const auto& ranking : m_coc_ranking_vec)
         ranking->Update();
 
+    m_coc_ranking_actor->Update();
+
     get_statistic();
     get_best_monster();
     get_favorite_weapon();

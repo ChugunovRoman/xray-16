@@ -79,8 +79,18 @@ void CUIWindow::Update()
             OnFocusLost();
     }
 
-    for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
+    for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; it++)
     {
+        if (m_ChildWndList.size() == 0)
+            break;
+        if ((*it) == nullptr)
+        {
+            // Msg("m_ChildWndList, (*it) == nullptr =[%d] m_ChildWndList.size=[%d], i=[%d]", (*it) == nullptr, m_ChildWndList.size(), i);
+            break;
+        }
+        if ((*it)->m_windowName.c_str() == nullptr)
+            break;
+
         if (!(*it)->IsShown())
             continue;
         (*it)->Update();

@@ -399,6 +399,8 @@ bool CUIPdaWnd::OnKeyboardAction(int dik, EUIMessages keyboard_action)
 {
     if (inherited::OnKeyboardAction(dik, keyboard_action))
         return true;
+    if (!UITabControl->IsShown())
+        return true;
 
     switch (GetBindedAction(dik, EKeyContext::UI))
     {
