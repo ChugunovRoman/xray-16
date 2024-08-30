@@ -448,12 +448,12 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
     xr_sprintf(anim_name_r, "%s%s", anm_name_b.c_str(), m_attach_place_idx == 1 && is_16x9 ? "_16x9" : "");
 
     const player_hud_motion* anm = m_hand_motions.find_motion(anim_name_r);
-    speed *= anm->m_diration_coff;
 
     R_ASSERT2(anm, make_string("model [%s] has no motion alias defined [%s]", m_sect_name.c_str(), anim_name_r).c_str());
     R_ASSERT2(anm->m_animations.size(), make_string("model [%s] has no motion defined in motion_alias [%s]",
                                             m_visual_name.c_str(), anim_name_r)
                                             .c_str());
+    speed *= anm->m_diration_coff;
 
     rnd_idx = (u8)Random.randI(anm->m_animations.size());
     const motion_descr& M = anm->m_animations[rnd_idx];
