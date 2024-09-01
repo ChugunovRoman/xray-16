@@ -823,7 +823,7 @@ void CWeaponMagazinedWGrenade::PlayAnimShoot()
                     else if (isHUDAnimationExist("anm_shots_w_gl_when_aim"))
                         PlayHUDMotion("anm_shots_w_gl_when_aim", FALSE, this, GetState());
                 }
-                else
+                else if (isHUDAnimationExist("anm_shots_w_gl_aim"))
                     PlayHUDMotion("anm_shots_w_gl_aim", TRUE, this, GetState());
             }
             else
@@ -835,7 +835,7 @@ void CWeaponMagazinedWGrenade::PlayAnimShoot()
                     else if (isHUDAnimationExist("anm_shots_w_gl_when_aim"))
                         PlayHUDMotion("anm_shots_w_gl_when_aim", FALSE, this, GetState());
                 }
-                else
+                else if (isHUDAnimationExist("anm_shot_w_gl_l"))
                     PlayHUDMotion("anm_shot_w_gl_l", TRUE, this, GetState());
             }
         }
