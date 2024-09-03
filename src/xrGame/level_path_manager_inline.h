@@ -32,7 +32,8 @@ IC void CLevelManagerTemplate::build_path(const _vertex_id_type start_vertex_id,
 {
     START_PROFILE("Build Path/Level Path");
 
-    THROW(ai().level_graph().valid_vertex_id(start_vertex_id) && ai().level_graph().valid_vertex_id(dest_vertex_id));
+    R_ASSERT2(ai().level_graph().valid_vertex_id(start_vertex_id) && ai().level_graph().valid_vertex_id(dest_vertex_id),
+        make_string("start_vertex_id=[%d], dest_vertex_id=[%d]", start_vertex_id, dest_vertex_id));
 
     inherited::build_path(start_vertex_id, dest_vertex_id);
 

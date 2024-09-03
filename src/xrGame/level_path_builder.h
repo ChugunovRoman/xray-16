@@ -43,10 +43,12 @@ public:
     IC void setup(
         const u32& start_vertex_id, const u32& dest_vertex_id, bool extrapolate_path, const Fvector* precise_position)
     {
-        VERIFY(ai().level_graph().valid_vertex_id(start_vertex_id));
+        R_ASSERT2(
+            ai().level_graph().valid_vertex_id(start_vertex_id), make_string("Can't setup path start_vertex_id=[%d]", start_vertex_id));
         m_start_vertex_id = start_vertex_id;
 
-        VERIFY(ai().level_graph().valid_vertex_id(dest_vertex_id));
+        R_ASSERT2(
+            ai().level_graph().valid_vertex_id(dest_vertex_id), make_string("Can't setup path dest_vertex_id=[%d]", dest_vertex_id));
         m_dest_vertex_id = dest_vertex_id;
 
         m_extrapolate_path = extrapolate_path;
