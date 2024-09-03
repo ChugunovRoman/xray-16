@@ -38,7 +38,7 @@ constexpr pcstr LoadingScreenXML16x9 =
 R"(<w>
     <background width="1024" height="768">
         <auto_static x="0" y="0" width="1024" height="768" stretch="1">
-            <texture>ui_mm_loading_screen</texture>
+            <texture>ui_mm_loading_screen_16x9</texture>
         </auto_static>
     </background>
     <loading_logo x="102" y="173" width="819" height="512" stretch="1"/>
@@ -47,7 +47,7 @@ R"(<w>
             <texture>ui_mm_loading_progress_bar</texture>
         </progress>
         <background stretch="1">
-            <texture width="405" height="5" r="0" g="0" b="0" a="255">ui_mm_loading_progress_bar</texture>
+            <texture width="405" height="5" r="0" g="0" b="0" a="255">ui_mm_loading_progress_bar_16x9</texture>
         </background>
     </loading_progress>
     <loading_stage x="310" y="530" width="405" height="20" stretch="1">
@@ -151,6 +151,10 @@ R"(<w>
     <file name="ui\ui_actor_loadgame_screen">
         <texture id="ui_mm_loading_screen" x="0" y="0" width="1024" height="768" />
         <texture id="ui_mm_loading_progress_bar" x="0" y="772" width="506" height="4" />
+    </file>
+    <file name="ui\ui_actor_loadgame_screen_16x9">
+        <texture id="ui_mm_loading_screen_16x9" x="0" y="0" width="1024" height="768" />
+        <texture id="ui_mm_loading_progress_bar_16x9" x="0" y="772" width="506" height="4" />
     </file>
     <file name="ui\ui_actor_widescreen_sidepanels">
         <texture id="ui_mm_loading_left_widepanel" x="0" y="0" width="128" height="768" />
