@@ -107,7 +107,7 @@ IC _vertex_id_type CPathManagerTemplate::dest_vertex_id() const { return (m_dest
 TEMPLATE_SPECIALIZATION
 IC void CPathManagerTemplate::set_dest_vertex(const _vertex_id_type vertex_id)
 {
-    VERIFY(check_vertex(vertex_id));
+    R_ASSERT2(check_vertex(vertex_id), make_string("Invalid vertex id [%s]", vertex_id));
     m_actuality = m_actuality && (dest_vertex_id() == vertex_id);
     m_dest_vertex_id = vertex_id;
 }
