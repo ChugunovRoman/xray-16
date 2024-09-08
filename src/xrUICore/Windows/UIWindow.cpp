@@ -88,8 +88,6 @@ void CUIWindow::Update()
             Msg("m_ChildWndList, (*it) == nullptr =[%d] m_ChildWndList.size=[%d]", (*it) == nullptr, m_ChildWndList.size());
             break;
         }
-        if ((*it)->m_windowName.c_str() == nullptr)
-            break;
 
         if (!(*it)->IsShown())
             continue;

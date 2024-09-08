@@ -350,7 +350,7 @@ void CUIPdaWnd::UpdatePda()
 
 void CUIPdaWnd::UpdateRankingWnd()
 {
-    if (pUIRankingWnd)
+    if (pUIRankingWnd && pUIRankingWnd->IsShown())
         pUIRankingWnd->Update();
 }
 

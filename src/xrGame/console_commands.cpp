@@ -2111,6 +2111,8 @@ public:
         CUIActorMenu* actor_menu = smart_cast<CUIActorMenu*>(&ui_game_sp->GetActorMenu());
         if (!actor_menu)
             return;
+        if (!actor_menu->IsShown())
+            return;
         actor_menu->UpdateGridSize();
         actor_menu->UpdateActor();
     }
