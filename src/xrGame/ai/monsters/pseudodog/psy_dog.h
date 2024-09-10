@@ -97,6 +97,6 @@ public:
 
 private:
     void destroy_me();
-    void try_to_register_to_parent();
+    bool try_to_register_to_parent();
     bool is_wait_to_destroy_object() { return (m_parent_id == 0xffff); }
 };

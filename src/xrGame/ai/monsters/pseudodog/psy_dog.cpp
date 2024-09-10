@@ -185,7 +185,8 @@ bool CPsyDogPhantom::net_Spawn(CSE_Abstract* dc)
     m_parent = 0;
     VERIFY(m_parent_id != 0xffff);
 
-    try_to_register_to_parent();
+    if(!try_to_register_to_parent())
+        return FALSE;
 
     setVisible(FALSE);
     setEnabled(FALSE);
@@ -212,7 +213,8 @@ void CPsyDogPhantom::Think()
         return;
     inherited::Think();
 
-    try_to_register_to_parent();
+    if(!try_to_register_to_parent())
+        return;
 
     if (m_parent && m_parent->Position().distance_to(Position()) > 30)
     {
@@ -303,17 +305,19 @@ void CPsyDogPhantom::Die(IGameObject* who)
     destroy_me();
 }
 
-void CPsyDogPhantom::try_to_register_to_parent()
+bool CPsyDogPhantom::try_to_register_to_parent()
 {
     // parent not ready yet
     if (m_parent)
-        return;
+        return false;
 
     IGameObject* obj = Level().Objects.net_Find(m_parent_id);
     if (obj)
     {
         CPsyDog* dog = smart_cast<CPsyDog*>(obj);
-        VERIFY(dog);
+        
+        if (!dog)
+            return false;
 
         m_parent = dog;
         m_parent->register_phantom(this);
@@ -323,6 +327,8 @@ void CPsyDogPhantom::try_to_register_to_parent()
 
         m_state = eWaitToAppear;
     }
+
+    return true;
 }
 
 void CPsyDogPhantom::destroy_me()
