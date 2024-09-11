@@ -189,6 +189,9 @@ void CPatrolPathManager::select_point(const Fvector& position, u32& dest_vertex_
         {
             dest_vertex_id = vertex->data().level_vertex_id();
             m_dest_position = vertex->data().position();
+            if (!accessible(m_dest_position))
+                Msg("select_point, obj=[%s] dest_vertex_id=[%d] m_dest_position.x=[%.2f] name=[%s]", *m_game_object->cName(), dest_vertex_id,
+                    m_dest_position.x, *vertex->data().name());
             VERIFY(accessible(m_dest_position) || show_restrictions(m_object));
             m_actuality = true;
             m_completed = false;

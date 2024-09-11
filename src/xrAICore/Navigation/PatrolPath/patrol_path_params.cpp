@@ -77,6 +77,9 @@ bool CPatrolPathParams::flag(u32 index, u8 flag_index) const
 Flags32 CPatrolPathParams::flags(u32 index) const
 {
     VERIFY(m_path->vertex(index));
+    if (index == (u32)-1)
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "! ERROR: invalid vertex id: [%d] in CPatrolPathParams::flags", index);
+
     return (Flags32().assign(m_path->vertex(index)->data().flags()));
 }
 

@@ -60,6 +60,12 @@ IC void CDetailPathManager::set_dest_position(const Fvector& dest_position)
         xrDebug::LogStackTrace("error call stack");
     }
 #endif // DEBUG
+    if (!m_restricted_object)
+        Msg("! ERROR: m_restricted_object is null m_restricted_object=[%d] dest_position[%.2f,%.2f,%.2f]", m_restricted_object == nullptr, dest_position.x, dest_position.y, dest_position.z);
+
+    if (m_restricted_object && !m_restricted_object->accessible(dest_position))
+        Msg("! ERROR: Old movement destination is not accessible after changing restrictions! accessible[%d] dest_position[%.2f,%.2f,%.2f]", m_restricted_object->accessible(dest_position), dest_position.x, dest_position.y, dest_position.z);
+
     THROW2(!m_restricted_object || m_restricted_object->accessible(dest_position),
         "Old movement destination is not accessible after changing restrictions!");
 

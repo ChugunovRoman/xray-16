@@ -55,8 +55,8 @@ public:
     using CSolverPriorityQueue = CDataStorageBinaryHeap;
     // XXX: originally CSolverAlgorithm is constructed with 16*1024 limit
     // while the following definitions use 8*1024 limit -- check if that's a mistake
-    using CSolverVertexManager = CVertexManagerHashFixed<u32, _solver_index_type, 256, 8 * 1024>;
-    using CSolverVertexAllocator = CVertexAllocatorFixed<8 * 1024>;
+    using CSolverVertexManager = CVertexManagerHashFixed<u32, _solver_index_type, 256, 16 * 1024>;
+    using CSolverVertexAllocator = CVertexAllocatorFixed<16 * 1024>;
     using SolverAlgorithmStorage = CEdgePath<_solver_edge_type, true>;
     using CSolverAlgorithm = CAStar<_solver_dist_type, CSolverPriorityQueue, CSolverVertexManager,
         CSolverVertexAllocator, true, SolverAlgorithmStorage>;

@@ -502,9 +502,9 @@ void CScriptGameObject::set_dest_level_vertex_id(u32 level_vertex_id)
         {
             GEnv.ScriptEngine->script_log(LuaMessageType::Error,
                 "! you are trying to setup destination for the stalker %s, which is not accessible by its restrictors "
-                "in[%s] out[%s]",
+                "in[%s] out[%s] by level vertex [%d]",
                 stalker->cName().c_str(), Level().space_restriction_manager().in_restrictions(stalker->ID()).c_str(),
-                Level().space_restriction_manager().out_restrictions(stalker->ID()).c_str());
+                Level().space_restriction_manager().out_restrictions(stalker->ID()).c_str(), level_vertex_id);
             return;
         }
         stalker->movement().set_level_dest_vertex(level_vertex_id);

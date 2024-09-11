@@ -24,7 +24,7 @@ IC CPatrolPathManager::CPatrolPathManager(CRestrictedObject* object, CGameObject
     m_curr_point_index = u32(-1);
     m_prev_point_index = u32(-1);
     m_start_point_index = u32(-1);
-    m_dest_position.set(flt_max, flt_max, flt_max);
+    m_dest_position.set(0, 0, 0);
 }
 
 IC bool CPatrolPathManager::actual() const { return (m_actuality); }

@@ -58,6 +58,14 @@ public:
         {
             m_temp = *precise_position;
             m_precise_position = &m_temp;
+
+            if (precise_position->x == flt_max || precise_position->y == flt_max || precise_position->z == flt_max)
+                GEnv.ScriptEngine->script_log(LuaMessageType::Error,
+                    "! ERROR: object=[%s] start_vertex_id=[%d] dest_vertex_id=[%d] extrapolate_path=[%d] "
+                    "precise_position=[%.8f,%.8f,%.8f]",
+                    *m_object->object().cName(),
+                    start_vertex_id, dest_vertex_id, extrapolate_path, precise_position->x, precise_position->y,
+                    precise_position->z);
         }
     }
 
