@@ -145,8 +145,11 @@ bool CPhraseDialog::SayPhrase(DIALOG_SHARED_PTR& phrase_dialog, const shared_str
 
 CPhrase* CPhraseDialog::GetPhrase(const shared_str& phrase_id)
 {
+    R_ASSERT2(data()->m_PhraseGraph.vertex_count(),
+        make_string("CPhraseDialog::GetPhrase, No any dialogs, phrase=[%s] m_sCaption=[%s] m_DialogId=[%s]", *phrase_id,
+            *data()->m_sCaption, *m_DialogId));
     CPhraseGraph::CVertex* phrase_vertex = data()->m_PhraseGraph.vertex(phrase_id);
-    THROW(phrase_vertex);
+    R_ASSERT2(phrase_vertex, make_string("CPhraseDialog::GetPhrase, Phrase not found, phrase=[%s]", *phrase_id));
 
     return phrase_vertex->data();
 }
