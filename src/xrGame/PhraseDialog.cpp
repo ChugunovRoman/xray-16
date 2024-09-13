@@ -257,8 +257,16 @@ CPhrase* CPhraseDialog::AddPhrase(
 {
     CPhrase* phrase = NULL;
     CPhraseGraph::CVertex* _vertex = data()->m_PhraseGraph.vertex(phrase_id);
+    CPhraseGraph::CVertex* _prev_vertex = data()->m_PhraseGraph.vertex(prev_phrase_id);
 
-    VERIFY2(!_vertex, make_string("Dublicate phrase ID: [%s] for phrase: [%s]. Existed phrase by this ID: [%s]", phrase_id.c_str(), text, _vertex->data()->GetText()));
+    R_ASSERT2(!_vertex,
+        make_string("Dublicate phrase ID: [%s] for phrase: [%s]. Existed phrase by this ID: [%s]", phrase_id.c_str(),
+            text, _vertex->data()->GetText()));
+    if (xr_strcmp(phrase_id, "0") != 0)
+        R_ASSERT2(_prev_vertex,
+            make_string(
+                "! ERROR: Cannot create vertex for phrase id [%s] text [%s] parent phrase id [%s]. Parent phrase vertex not found !",
+                *phrase_id, text, *prev_phrase_id));
 
     if (!_vertex)
     {
