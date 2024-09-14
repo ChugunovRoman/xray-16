@@ -885,12 +885,12 @@ public:
             if (binding == currBinding)
                 continue;
 
-            const bool groupConflict = !IsGroupNotConflicted(binding->m_action->key_group, currBinding->m_action->key_group);
-            const bool contextConflict = !IsContextNotConflicted(binding->m_action->key_context, currBinding->m_action->key_context);
+            // const bool groupConflict = !IsGroupNotConflicted(binding->m_action->key_group, currBinding->m_action->key_group);
+            // const bool contextConflict = !IsContextNotConflicted(binding->m_action->key_context, currBinding->m_action->key_context);
 
-            for (u8 i = 0; i < bindtypes_count; ++i)
-                if (binding->m_keyboard[i] == keyboard && (groupConflict && contextConflict))
-                    binding->m_keyboard[i] = nullptr;
+            // for (u8 i = 0; i < bindtypes_count; ++i)
+            //     if (binding->m_keyboard[i] == keyboard && (groupConflict && contextConflict))
+            //         binding->m_keyboard[i] = nullptr;
         }
 
         TranslateBinding(g_key_bindings[actionId], g_action_bindings[actionId]);

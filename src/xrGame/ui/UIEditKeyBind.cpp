@@ -275,13 +275,13 @@ void CUIEditKeyBind::OnMessage(LPCSTR message)
     if (0 == xr_strcmp(m_action->action_name, command))
         return; // fuck
 
-    game_action* other_action = ActionNameToPtr(command);
+    // game_action* other_action = ActionNameToPtr(command);
 
-    bool no_conflict  = IsGroupNotConflicted(m_action->key_group, other_action->key_group);
-         no_conflict &= IsContextNotConflicted(m_action->key_context, other_action->key_context);
-    if (no_conflict)
-        return;
+    // bool no_conflict  = IsGroupNotConflicted(m_action->key_group, other_action->key_group);
+    //      no_conflict &= IsContextNotConflicted(m_action->key_context, other_action->key_context);
+    // if (no_conflict)
+    //     return;
 
-    SetText("---");
+    // SetText("---");
     m_keyboard = NULL;
 }
