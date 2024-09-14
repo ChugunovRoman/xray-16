@@ -126,12 +126,10 @@ void CUIActorMenu::DeInitDeadBodySearchMode() const
 
 bool CUIActorMenu::ToDeadBodyBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs)
 {
-    if (m_pPartnerInvOwner)
-        if (!m_pPartnerInvOwner->deadbody_can_take_status())
-            return false;
-    else // box
-        if (!m_pInvBox->can_take())
-            return false;
+    if (m_pPartnerInvOwner && !m_pPartnerInvOwner->deadbody_can_take_status())
+        return false;
+    else if (m_pInvBox && !m_pInvBox->can_take())
+        return false;
 
     PIItem quest_item = (PIItem)itm->m_pData;
     if (quest_item->IsQuestItem())
