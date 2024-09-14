@@ -564,7 +564,7 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
                 if (helmet_list && helmet_list->ItemsCount() == 1)
                 {
                     CUICellItem* helmet_cell = helmet_list->GetItemIdx(0);
-                    ToBag(helmet_cell, false);
+                    ToBag(helmet_cell, false, false);
                 }
             }
         }
@@ -588,9 +588,8 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
 
         // ColorizeItem						( itm, false );
         if (slot_id == OUTFIT_SLOT)
-        {
             MoveArtefactsToBag();
-        }
+
         return true;
     }
     else
@@ -626,7 +625,7 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
             if (!(slot_cell && static_cast<PIItem>(slot_cell->m_pData) == _iitem))
                 return false;
 
-            if (ToBag(slot_cell, false) == false)
+            if (ToBag(slot_cell, false, false) == false)
                 return false;
         }
         else
@@ -640,7 +639,7 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
                 const PIItem pitm = static_cast<PIItem>(i->m_pData);
                 if (pitm == _iitem)
                 {
-                    if (ToBag(i, false))
+                    if (ToBag(i, false, false))
                         break;
 
                     return false;
@@ -661,7 +660,7 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
     }
 }
 
-bool CUIActorMenu::ToBag(CUICellItem* itm, bool b_use_cursor_pos)
+bool CUIActorMenu::ToBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs)
 {
     PIItem iitem = (PIItem)itm->m_pData;
 
@@ -683,6 +682,33 @@ bool CUIActorMenu::ToBag(CUICellItem* itm, bool b_use_cursor_pos)
     {
         [[maybe_unused]] bool result = b_already || !b_own_item || m_pActorInvOwner->inventory().Ruck(iitem);
         VERIFY(result);
+
+        if (with_all_childs)
+        {
+            auto count = itm->ChildsCount();
+            for (u16 k = 0; k < count; k++)
+            {
+                CUICellItem* inv_cell_item = itm->Child(0);
+
+                PIItem iitem2 = (PIItem)inv_cell_item->m_pData;
+                [[maybe_unused]] bool result2 = b_already || !b_own_item || m_pActorInvOwner->inventory().Ruck(iitem2);
+                VERIFY(result2);
+
+                CUICellItem* ichld = old_owner->RemoveItem(inv_cell_item, (old_owner == new_owner));
+
+                if (b_use_cursor_pos)
+                    new_owner->SetItem(ichld, old_owner->GetDragItemPosition());
+                else
+                    new_owner->SetItem(ichld);
+
+                if (!b_already || !b_own_item)
+                    SendEvent_Item2Ruck(iitem2, m_pActorInvOwner->object_id());
+
+                if (m_currMenuMode == mmTrade && m_pPartnerInvOwner)
+                    ColorizeItem(inv_cell_item, !CanMoveToPartner(iitem2));
+            }
+        }
+
         CUICellItem* i = old_owner->RemoveItem(itm, (old_owner == new_owner));
         if (!i)
             return false;
@@ -696,9 +722,8 @@ bool CUIActorMenu::ToBag(CUICellItem* itm, bool b_use_cursor_pos)
             SendEvent_Item2Ruck(iitem, m_pActorInvOwner->object_id());
 
         if (m_currMenuMode == mmTrade && m_pPartnerInvOwner)
-        {
             ColorizeItem(itm, !CanMoveToPartner(iitem));
-        }
+
         return true;
     }
     return false;
@@ -780,7 +805,7 @@ bool CUIActorMenu::ToBelt(CUICellItem* itm, bool b_use_cursor_pos)
         CUICellItem* slot_cell = belt_list->GetCellAt(belt_cell_pos).m_item;
         //		VERIFY								(slot_cell && ((PIItem)slot_cell->m_pData)==_iitem);
 
-        bool result = ToBag(slot_cell, false);
+        bool result = ToBag(slot_cell, false, false);
         VERIFY(result);
 
         result = ToBelt(itm, b_use_cursor_pos);
@@ -957,6 +982,10 @@ void CUIActorMenu::ActivatePropertiesBox()
     else if (m_currMenuMode == mmTrade)
     {
         CUIDragDropListEx* invlist = GetListByType(iActorBag);
+        if (invlist->IsOwner(cell_item))
+            PropertiesBoxForSellItem(item, b_show);
+        if (invlist->IsOwner(cell_item))
+            PropertiesBoxForSellAllItems(item, b_show);
         if (invlist->IsOwner(cell_item))
             PropertiesBoxForDonate(item, b_show);
     }
@@ -1339,6 +1368,23 @@ void CUIActorMenu::PropertiesBoxForDonate(PIItem item, bool& b_show)
 }
 //-Alundaio
 
+void CUIActorMenu::PropertiesBoxForSellItem(PIItem item, bool& b_show)
+{
+    if (!item->IsQuestItem())
+    {
+        m_UIPropertiesBox->AddItem("st_sell_item", nullptr, INVENTORY_SELL_ITEM);
+        b_show = true;
+    }
+}
+void CUIActorMenu::PropertiesBoxForSellAllItems(PIItem item, bool& b_show)
+{
+    if (!item->IsQuestItem())
+    {
+        m_UIPropertiesBox->AddItem("st_sell_all_items", nullptr, INVENTORY_SELL_ALL_ITEMS);
+        b_show = true;
+    }
+}
+
 void CUIActorMenu::ProcessPropertiesBoxClicked(CUIWindow* w, void* d)
 {
     PIItem item = CurrentIItem();
@@ -1353,8 +1399,10 @@ void CUIActorMenu::ProcessPropertiesBoxClicked(CUIWindow* w, void* d)
     {
     case INVENTORY_TO_SLOT_ACTION: ToSlot(cell_item, true, item->BaseSlot()); break;
     case INVENTORY_TO_BELT_ACTION: ToBelt(cell_item, false); break;
-    case INVENTORY_TO_BAG_ACTION: ToBag(cell_item, false); break;
+    case INVENTORY_TO_BAG_ACTION: ToBag(cell_item, false, false); break;
     case INVENTORY_DONATE_ACTION: DonateCurrentItem(cell_item); break;
+    case INVENTORY_SELL_ITEM: ToActorTrade(cell_item, false, false); break;
+    case INVENTORY_SELL_ALL_ITEMS: ToActorTrade(cell_item, false, true); break;
     case INVENTORY_EAT_ACTION: TryUseItem(cell_item); break;
     case INVENTORY_EAT2_ACTION:
     {
@@ -1565,7 +1613,7 @@ void CUIActorMenu::MoveArtefactsToBag()
     {
         CUICellItem* ci = m_pLists[eInventoryBeltList]->GetItemIdx(0);
         VERIFY(ci && ci->m_pData);
-        ToBag(ci, false);
+        ToBag(ci, false, false);
     } // for i
     m_pLists[eInventoryBeltList]->ClearAll(true);
 }

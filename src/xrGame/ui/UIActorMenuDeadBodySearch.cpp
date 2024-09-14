@@ -124,22 +124,15 @@ void CUIActorMenu::DeInitDeadBodySearchMode() const
     }
 }
 
-bool CUIActorMenu::ToDeadBodyBag(CUICellItem* itm, bool b_use_cursor_pos)
+bool CUIActorMenu::ToDeadBodyBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs)
 {
     if (m_pPartnerInvOwner)
-    {
         if (!m_pPartnerInvOwner->deadbody_can_take_status())
-        {
             return false;
-        }
-    }
     else // box
-    {
         if (!m_pInvBox->can_take())
-        {
             return false;
-        }
-    }
+
     PIItem quest_item = (PIItem)itm->m_pData;
     if (quest_item->IsQuestItem())
         return false;
@@ -155,6 +148,28 @@ bool CUIActorMenu::ToDeadBodyBag(CUICellItem* itm, bool b_use_cursor_pos)
     else
         new_owner = m_pLists[eSearchLootBagList];
 
+    if (with_all_childs)
+    {
+        auto count = itm->ChildsCount();
+        for (u16 k = 0; k < count; k++)
+        {
+            CUICellItem* inv_cell_item = itm->Child(0);
+            CUICellItem* ichld = old_owner->RemoveItem(inv_cell_item, (old_owner == new_owner));
+
+            if (b_use_cursor_pos)
+                new_owner->SetItem(ichld, old_owner->GetDragItemPosition());
+            else
+                new_owner->SetItem(ichld);
+
+            PIItem iitem = (PIItem)ichld->m_pData;
+
+            if (m_pPartnerInvOwner)
+                move_item_from_to(m_pActorInvOwner->object_id(), m_pPartnerInvOwner->object_id(), iitem->object_id());
+            else // box
+                move_item_from_to(m_pActorInvOwner->object_id(), m_pInvBox->ID(), iitem->object_id());
+        }
+    }
+
     CUICellItem* i = old_owner->RemoveItem(itm, (old_owner == new_owner));
 
     if (b_use_cursor_pos)
@@ -165,13 +180,9 @@ bool CUIActorMenu::ToDeadBodyBag(CUICellItem* itm, bool b_use_cursor_pos)
     PIItem iitem = (PIItem)i->m_pData;
 
     if (m_pPartnerInvOwner)
-    {
         move_item_from_to(m_pActorInvOwner->object_id(), m_pPartnerInvOwner->object_id(), iitem->object_id());
-    }
     else // box
-    {
         move_item_from_to(m_pActorInvOwner->object_id(), m_pInvBox->ID(), iitem->object_id());
-    }
 
     UpdateDeadBodyBag();
     return true;

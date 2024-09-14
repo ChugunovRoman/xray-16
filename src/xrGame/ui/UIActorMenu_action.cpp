@@ -155,7 +155,7 @@ bool CUIActorMenu::OnItemDrop(CUICellItem* itm)
     }
     case iActorBag:
     {
-        ToBag(itm, true);
+        ToBag(itm, true, false);
         break;
     }
     case iActorBelt:
@@ -165,26 +165,29 @@ bool CUIActorMenu::OnItemDrop(CUICellItem* itm)
     }
     case iActorTrade:
     {
-        ToActorTrade(itm, true);
+        ToActorTrade(itm, true, false);
         break;
     }
     case iPartnerTrade:
     {
         if (t_old != iPartnerTradeBag)
             return false;
-        ToPartnerTrade(itm, true);
+        ToPartnerTrade(itm, true, false);
         break;
     }
     case iPartnerTradeBag:
     {
         if (t_old != iPartnerTrade)
             return false;
-        ToPartnerTradeBag(itm, true);
+        ToPartnerTradeBag(itm, true, false);
         break;
     }
     case iDeadBodyBag:
     {
-        ToDeadBodyBag(itm, true);
+        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+            ToDeadBodyBag(itm, true, true);
+        else
+            ToDeadBodyBag(itm, true, false);
     break;
     }
     case iQuickSlot:
@@ -222,21 +225,33 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
     case iActorSlot:
     {
         if (m_currMenuMode == mmDeadBodySearch)
-            ToDeadBodyBag(itm, false);
+            if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+                ToDeadBodyBag(itm, false, true);
+            else
+                ToDeadBodyBag(itm, false, false);
         else
-            ToBag(itm, false);
+            if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+                ToBag(itm, false, true);
+            else
+                ToBag(itm, false, false);
         break;
     }
     case iActorBag:
     {
         if (m_currMenuMode == mmTrade)
         {
-            ToActorTrade(itm, false);
+            if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+                ToActorTrade(itm, false, true);
+            else
+                ToActorTrade(itm, false, false);
             break;
         }
         else if (m_currMenuMode == mmDeadBodySearch)
         {
-            ToDeadBodyBag(itm, false);
+            if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+                ToDeadBodyBag(itm, false, true);
+            else
+                ToDeadBodyBag(itm, false, false);
             break;
         }
         if (m_currMenuMode != mmUpgrade && TryUseItem(itm))
@@ -251,7 +266,10 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
         if (!m_pActorInvOwner->inventory().SlotIsPersistent(iitem_to_place->BaseSlot())
             && m_pActorInvOwner->inventory().ItemFromSlot(iitem_to_place->BaseSlot()) == iitem_to_place)
         {
-            ToBag(itm, false);
+            if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+                ToBag(itm, false, true);
+            else
+                ToBag(itm, false, false);
         }
         else if (!ToSlot(itm, false, iitem_to_place->BaseSlot()))
         {
@@ -262,27 +280,39 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
     }
     case iActorBelt:
     {
-        ToBag(itm, false);
+        ToBag(itm, false, false);
         break;
     }
     case iActorTrade:
     {
-        ToBag(itm, false);
+        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+            ToBag(itm, false, true);
+        else
+            ToBag(itm, false, false);
         break;
     }
     case iPartnerTradeBag:
     {
-        ToPartnerTrade(itm, false);
+        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+            ToPartnerTrade(itm, false, true);
+        else
+            ToPartnerTrade(itm, false, false);
         break;
     }
     case iPartnerTrade:
     {
-        ToPartnerTradeBag(itm, false);
+        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+            ToPartnerTradeBag(itm, false, true);
+        else
+            ToPartnerTradeBag(itm, false, false);
         break;
     }
     case iDeadBodyBag:
     {
-        ToBag(itm, false);
+        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+            ToBag(itm, false, true);
+        else
+            ToBag(itm, false, false);
         break;
     }
     case iQuickSlot:

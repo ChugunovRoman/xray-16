@@ -222,6 +222,8 @@ private:
     void PropertiesBoxForDrop(CUICellItem* cell_item, PIItem item, bool& b_show);
     void PropertiesBoxForRepair(PIItem item, bool& b_show);
     void PropertiesBoxForDonate(PIItem item, bool& b_show); //Alundaio
+    void PropertiesBoxForSellItem(PIItem item, bool& b_show);
+    void PropertiesBoxForSellAllItems(PIItem item, bool& b_show);
 
 private:
     void clear_highlight_lists();
@@ -325,7 +327,7 @@ protected:
     void UpdateButtonsLayout();
 
     // inventory
-    bool ToBag(CUICellItem* itm, bool b_use_cursor_pos);
+    bool ToBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs);
     bool TryUseItem(CUICellItem* cell_itm);
     bool ToQuickSlot(CUICellItem* itm);
 
@@ -336,10 +338,10 @@ protected:
     void TryRepairItem(CUIWindow* w, void* d);
     bool CanUpgradeItem(PIItem item);
 
-    bool ToActorTrade(CUICellItem* itm, bool b_use_cursor_pos);
-    bool ToPartnerTrade(CUICellItem* itm, bool b_use_cursor_pos);
-    bool ToPartnerTradeBag(CUICellItem* itm, bool b_use_cursor_pos);
-    bool ToDeadBodyBag(CUICellItem* itm, bool b_use_cursor_pos);
+    bool ToActorTrade(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs);
+    bool ToPartnerTrade(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs);
+    bool ToPartnerTradeBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs);
+    bool ToDeadBodyBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs);
 
     void AttachAddon(PIItem item_to_upgrade);
     void DetachAddon(LPCSTR addon_name, PIItem itm = NULL);

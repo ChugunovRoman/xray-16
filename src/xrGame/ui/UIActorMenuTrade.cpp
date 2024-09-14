@@ -165,7 +165,7 @@ void CUIActorMenu::DeInitTradeMode()
     }
 }
 
-bool CUIActorMenu::ToActorTrade(CUICellItem* itm, bool b_use_cursor_pos)
+bool CUIActorMenu::ToActorTrade(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs)
 {
     PIItem iitem = (PIItem)itm->m_pData;
     if (!CanMoveToPartner(iitem))
@@ -191,6 +191,26 @@ bool CUIActorMenu::ToActorTrade(CUICellItem* itm, bool b_use_cursor_pos)
 
         [[maybe_unused]] bool result = (old_owner_type != iActorBag) ? m_pActorInvOwner->inventory().Ruck(iitem) : true;
         VERIFY(result);
+
+        if (with_all_childs)
+        {
+            auto count = itm->ChildsCount();
+            for (u16 k = 0; k < count; k++)
+            {
+                CUICellItem* inv_cell_item = itm->Child(0);
+                CUICellItem* ichld = old_owner->RemoveItem(inv_cell_item, (old_owner == new_owner));
+                PIItem iitem_child = (PIItem)ichld->m_pData;
+
+                if (b_use_cursor_pos)
+                    new_owner->SetItem(ichld, old_owner->GetDragItemPosition());
+                else
+                    new_owner->SetItem(ichld);
+
+                if (old_owner_type != iActorBag)
+                    SendEvent_Item2Ruck(iitem_child, m_pActorInvOwner->object_id());
+            }
+        }
+
         CUICellItem* i = old_owner->RemoveItem(itm, (old_owner == new_owner));
 
         if (b_use_cursor_pos)
@@ -206,7 +226,7 @@ bool CUIActorMenu::ToActorTrade(CUICellItem* itm, bool b_use_cursor_pos)
     }
 }
 
-bool CUIActorMenu::ToPartnerTrade(CUICellItem* itm, bool b_use_cursor_pos)
+bool CUIActorMenu::ToPartnerTrade(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs)
 {
     PIItem iitem = (PIItem)itm->m_pData;
     SInvItemPlace pl;
@@ -229,6 +249,21 @@ bool CUIActorMenu::ToPartnerTrade(CUICellItem* itm, bool b_use_cursor_pos)
     else
         new_owner = m_pLists[eTradePartnerList];
 
+    if (with_all_childs)
+    {
+        auto count = itm->ChildsCount();
+        for (u16 k = 0; k < count; k++)
+        {
+            CUICellItem* inv_cell_item = itm->Child(0);
+            CUICellItem* ichld = old_owner->RemoveItem(inv_cell_item, (old_owner == new_owner));
+
+            if (b_use_cursor_pos)
+                new_owner->SetItem(ichld, old_owner->GetDragItemPosition());
+            else
+                new_owner->SetItem(ichld);
+        }
+    }
+
     CUICellItem* i = old_owner->RemoveItem(itm, (old_owner == new_owner));
 
     if (b_use_cursor_pos)
@@ -240,7 +275,7 @@ bool CUIActorMenu::ToPartnerTrade(CUICellItem* itm, bool b_use_cursor_pos)
     return true;
 }
 
-bool CUIActorMenu::ToPartnerTradeBag(CUICellItem* itm, bool b_use_cursor_pos)
+bool CUIActorMenu::ToPartnerTradeBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs)
 {
     CUIDragDropListEx* old_owner = itm->OwnerList();
     CUIDragDropListEx* new_owner = NULL;
@@ -252,6 +287,21 @@ bool CUIActorMenu::ToPartnerTradeBag(CUICellItem* itm, bool b_use_cursor_pos)
     }
     else
         new_owner = m_pLists[eTradePartnerBagList];
+
+    if (with_all_childs)
+    {
+        auto count = itm->ChildsCount();
+        for (u16 k = 0; k < count; k++)
+        {
+            CUICellItem* inv_cell_item = itm->Child(0);
+            CUICellItem* ichld = old_owner->RemoveItem(inv_cell_item, (old_owner == new_owner));
+
+            if (b_use_cursor_pos)
+                new_owner->SetItem(ichld, old_owner->GetDragItemPosition());
+            else
+                new_owner->SetItem(ichld);
+        }
+    }
 
     CUICellItem* i = old_owner->RemoveItem(itm, (old_owner == new_owner));
 
