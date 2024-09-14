@@ -113,6 +113,9 @@ int g_first_person_death = 0;
 int g_normalize_mouse_sens = 0;
 int g_normalize_upgrade_mouse_sens = 0;
 
+int g_quick_unload_upgraded = 1;
+int g_quick_unload_new = 0;
+
 void register_mp_console_commands();
 //-----------------------------------------------------------
 
@@ -2536,6 +2539,8 @@ void CCC_RegisterCommands()
 #endif
     CMD4(CCC_Float, "con_sensitive", &g_console_sensitive, 0.01f, 1.0f);
     CMD4(CCC_Integer, "wpn_aim_toggle", &b_toggle_weapon_aim, 0, 1);
+    CMD4(CCC_Integer, "wpn_quick_unload_upgraded", &g_quick_unload_upgraded, 0, 1);
+    CMD4(CCC_Integer, "wpn_quick_unload_new", &g_quick_unload_new, 0, 1);
 
     CMD1(CCC_UIStyle, "ui_style");
     CMD1(CCC_UIRestart, "ui_restart");

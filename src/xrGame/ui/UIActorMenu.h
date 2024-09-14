@@ -80,6 +80,7 @@ protected:
         eAttachAddon,
         eDetachAddon,
         eItemUse,
+        eWpnUnload,
         eSndMax
     };
 
@@ -395,6 +396,8 @@ public:
     void UpdateActor();
     void UpdatePartnerBag();
     void UpdateDeadBodyBag();
+
+    void QuickUnloadWeapons();
 
     void OnBtnPerformTrade(CUIWindow* w, void* d);
     void OnBtnPerformTradeBuy(CUIWindow* w, void* d);

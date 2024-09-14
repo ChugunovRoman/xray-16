@@ -44,6 +44,8 @@
 #include "trade.h"
 
 extern int g_inv_inv_cell_size;
+extern int g_quick_unload_upgraded;
+extern int g_quick_unload_new;
 
 void CUIActorMenu::SetActor(CInventoryOwner* io)
 {
@@ -427,11 +429,58 @@ CUIDragDropListEx* CUIActorMenu::GetListByType(EDDListType t)
     case iActorBelt: { return m_pLists[eInventoryBeltList];
     }
     break;
-    default: { R_ASSERT("invalid call");
+    default: { R_ASSERT2("invalid type call [%d]", t);
     }
     break;
     }
     return NULL;
+}
+
+void CUIActorMenu::QuickUnloadWeapons()
+{
+    R_ASSERT(m_pActorInvOwner);
+    R_ASSERT(m_pActorInvOwner->cast_game_object());
+
+    bool any_wpn_was_unloaded = false;
+
+    TIItemContainer const ruck_list = m_pActorInvOwner->inventory().m_ruck;
+
+    for (PIItem const item : ruck_list)
+    {
+        CWeapon* const wpn = item->cast_weapon();
+        if (!wpn)
+            continue;
+
+        CWeaponMagazined* const m_wpn = wpn->cast_weapon_magazined();
+
+        if (!m_wpn)
+            continue;
+
+        if (g_quick_unload_upgraded && m_wpn->has_any_upgrades())
+            continue;
+        if (g_quick_unload_new && m_wpn->GetCondition() > 0.95f)
+            continue;
+
+        int const count = m_wpn->GetAmmoElapsed();
+        m_wpn->SetAmmoElapsed(0);
+        LPCSTR const ammo_sec = pSettings->r_string(m_wpn->m_section_id, "ammo_class");
+        R_ASSERT2(ammo_sec, make_string("! ERROR: Weapon [%s] doesn't contain property 'ammo_class' in config file!", m_wpn->m_section_id));
+
+        string128 _ammoItem;
+        int const count_type = _GetItemCount(ammo_sec);
+
+        if (m_wpn->GetAmmoType() > count_type)
+            _GetItem(ammo_sec, 0, _ammoItem);
+        else
+            _GetItem(ammo_sec, m_wpn->GetAmmoType(), _ammoItem);
+
+        m_wpn->SpawnAmmo(count, _ammoItem, m_pActorInvOwner->cast_game_object()->ID());
+
+        any_wpn_was_unloaded = true;
+    }
+
+    if (any_wpn_was_unloaded)
+        PlaySnd(eWpnUnload);
 }
 
 CUICellItem* CUIActorMenu::CurrentItem() { return m_pCurrentCellItem; }

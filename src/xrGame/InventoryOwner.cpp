@@ -515,21 +515,17 @@ void CInventoryOwner::sell_useless_items()
     for (; I != E; ++I)
     {
         if (smart_cast<CBolt*>(*I))
-        {
             continue;
-        }
+
         CInventoryItem* item = smart_cast<CInventoryItem*>(*I);
         if (item->CurrSlot() && item->cast_weapon())
             continue;
 
         CPda* pda = smart_cast<CPda*>(*I);
         if (pda)
-        {
             if (pda->GetOriginalOwnerID() == object->ID())
-            {
                 continue;
-            }
-        }
+
         (*I)->SetDropManual(FALSE);
         (*I)->object().DestroyObject();
     }

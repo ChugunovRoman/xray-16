@@ -429,6 +429,13 @@ bool CUIActorMenu::OnKeyboardAction(int dik, EUIMessages keyboard_action)
         return true;
     }
 
+    if (IsBinded(kWPN_QUICK_UNLOAD, dik))
+    {
+        if (WINDOW_KEY_PRESSED == keyboard_action && m_currMenuMode != mmUndefined)
+            QuickUnloadWeapons();
+        return true;
+    }
+
     if (IsBinded(kSPRINT_TOGGLE, dik))
     {
         if (WINDOW_KEY_PRESSED == keyboard_action)

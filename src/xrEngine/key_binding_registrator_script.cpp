@@ -80,6 +80,7 @@ SCRIPT_EXPORT(KeyBindings, (),
                 value("kWPN_FUNC",                  int(kWPN_FUNC)),
                 value("kWPN_FIREMODE_PREV",         int(kWPN_FIREMODE_PREV)),
                 value("kWPN_FIREMODE_NEXT",         int(kWPN_FIREMODE_NEXT)),
+                value("kWPN_QUICK_UNLOAD",          int(kWPN_QUICK_UNLOAD)),
 
                 value("kDROP",                      int(kDROP)),
                 value("kUSE",                       int(kUSE)),

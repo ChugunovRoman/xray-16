@@ -476,6 +476,7 @@ void CUIActorMenu::InitSounds(CUIXml& uiXml)
     sounds[eAttachAddon].create(uiXml.Read("snd_attach_addon", 0, NULL), st_Effect, sg_SourceType);
     sounds[eDetachAddon].create(uiXml.Read("snd_detach_addon", 0, NULL), st_Effect, sg_SourceType);
     sounds[eItemUse].create(uiXml.Read("snd_item_use", 0, NULL), st_Effect, sg_SourceType);
+    sounds[eWpnUnload].create(uiXml.Read("snd_wpn_unload", 0, NULL), st_Effect, sg_SourceType);
     uiXml.SetLocalRoot(stored_root);
 }
 
