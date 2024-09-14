@@ -184,7 +184,7 @@ bool CUIActorMenu::OnItemDrop(CUICellItem* itm)
     }
     case iDeadBodyBag:
     {
-        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+        if (pInput->iGetAsyncKeyState(GetActionDik(kMOVE_ALL_STACK_ITEMS)))
             ToDeadBodyBag(itm, true, true);
         else
             ToDeadBodyBag(itm, true, false);
@@ -225,12 +225,12 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
     case iActorSlot:
     {
         if (m_currMenuMode == mmDeadBodySearch)
-            if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+            if (pInput->iGetAsyncKeyState(GetActionDik(kMOVE_ALL_STACK_ITEMS)))
                 ToDeadBodyBag(itm, false, true);
             else
                 ToDeadBodyBag(itm, false, false);
         else
-            if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+            if (pInput->iGetAsyncKeyState(GetActionDik(kMOVE_ALL_STACK_ITEMS)))
                 ToBag(itm, false, true);
             else
                 ToBag(itm, false, false);
@@ -240,7 +240,7 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
     {
         if (m_currMenuMode == mmTrade)
         {
-            if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+            if (pInput->iGetAsyncKeyState(GetActionDik(kMOVE_ALL_STACK_ITEMS)))
                 ToActorTrade(itm, false, true);
             else
                 ToActorTrade(itm, false, false);
@@ -248,7 +248,7 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
         }
         else if (m_currMenuMode == mmDeadBodySearch)
         {
-            if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+            if (pInput->iGetAsyncKeyState(GetActionDik(kMOVE_ALL_STACK_ITEMS)))
                 ToDeadBodyBag(itm, false, true);
             else
                 ToDeadBodyBag(itm, false, false);
@@ -266,7 +266,7 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
         if (!m_pActorInvOwner->inventory().SlotIsPersistent(iitem_to_place->BaseSlot())
             && m_pActorInvOwner->inventory().ItemFromSlot(iitem_to_place->BaseSlot()) == iitem_to_place)
         {
-            if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+            if (pInput->iGetAsyncKeyState(GetActionDik(kMOVE_ALL_STACK_ITEMS)))
                 ToBag(itm, false, true);
             else
                 ToBag(itm, false, false);
@@ -285,7 +285,7 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
     }
     case iActorTrade:
     {
-        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+        if (pInput->iGetAsyncKeyState(GetActionDik(kMOVE_ALL_STACK_ITEMS)))
             ToBag(itm, false, true);
         else
             ToBag(itm, false, false);
@@ -293,7 +293,7 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
     }
     case iPartnerTradeBag:
     {
-        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+        if (pInput->iGetAsyncKeyState(GetActionDik(kMOVE_ALL_STACK_ITEMS)))
             ToPartnerTrade(itm, false, true);
         else
             ToPartnerTrade(itm, false, false);
@@ -301,7 +301,7 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
     }
     case iPartnerTrade:
     {
-        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+        if (pInput->iGetAsyncKeyState(GetActionDik(kMOVE_ALL_STACK_ITEMS)))
             ToPartnerTradeBag(itm, false, true);
         else
             ToPartnerTradeBag(itm, false, false);
@@ -309,7 +309,7 @@ bool CUIActorMenu::OnItemDbClick(CUICellItem* itm)
     }
     case iDeadBodyBag:
     {
-        if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+        if (pInput->iGetAsyncKeyState(GetActionDik(kMOVE_ALL_STACK_ITEMS)))
             ToBag(itm, false, true);
         else
             ToBag(itm, false, false);
@@ -441,13 +441,9 @@ bool CUIActorMenu::OnKeyboardAction(int dik, EUIMessages keyboard_action)
         if (WINDOW_KEY_PRESSED == keyboard_action)
         {
             if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LCTRL))
-            {
                 OnPressUserKey(false);
-            }
             else
-            {
                 OnPressUserKey(true);
-            }
         }
         return true;
     }

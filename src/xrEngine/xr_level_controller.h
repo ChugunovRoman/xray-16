@@ -58,6 +58,7 @@ enum EGameActions : u32
     kWPN_FIREMODE_PREV,
     kWPN_FIREMODE_NEXT,
     kWPN_QUICK_UNLOAD,
+    kMOVE_ALL_STACK_ITEMS,
 
     kPAUSE,
     kDROP,
