@@ -1002,15 +1002,17 @@ CVisualMemoryManager* CCustomMonster::visual_memory() const { return (&memory().
 void CCustomMonster::save(NET_Packet& packet)
 {
     inherited::save(packet);
-    if (g_Alive())
-        memory().save(packet);
+    // TODO: optimize data for save
+    // if (g_Alive())
+    //     memory().save(packet);
 }
 
 void CCustomMonster::load(IReader& packet)
 {
     inherited::load(packet);
-    if (g_Alive())
-        memory().load(packet);
+    // TODO: optimize data for load
+    // if (g_Alive())
+    //     memory().load(packet);
 }
 
 bool CCustomMonster::update_critical_wounded(const u16& bone_id, const float& power)
