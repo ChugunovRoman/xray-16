@@ -84,17 +84,18 @@ void CPlanner::update()
     }
 #else
 	if (bDbgAct && this->m_failed && current_action().m_action_name)
-		Msg("! ERROR: there is no action sequence, which can transfer current world state to the target one: action[%s]", current_action().m_action_name);
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, 
+            "! ERROR: there is no action sequence, which can transfer current world state to the target one: action[%s] object_name[%s]", current_action().m_action_name, *m_object->cName());
 #endif
 
     // THROW(!this->solution().empty());
 	//Alundaio:
-	if (this->solution().empty())
-		return;
-	//-Alundaio
-
-    if (this->solution().size() == 0)
+	if (this->solution().empty() || this->solution().size() == 0)
+    {
         Msg("Solution array is empty! solution().empty()=[%d], size=[%d] initialized=[%d] m_current_action_id=[%d]", this->solution().empty(), this->solution().size(), initialized(), m_current_action_id);
+		return;
+    }
+	//-Alundaio
 
     if (initialized())
     {

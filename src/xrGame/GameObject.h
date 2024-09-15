@@ -184,7 +184,12 @@ public:
     virtual void setEnabled(bool _enabled) override;
     virtual bool getEnabled() const override { return Props.bEnabled; }
     virtual void setDestroy(bool _destroy) override;
-    virtual bool getDestroy() const override { return Props.bDestroy; }
+    virtual bool getDestroy() const override
+    {
+        if (this)
+            return Props.bDestroy;
+        return false;
+    }
     virtual void setLocal(bool _local) override { Props.net_Local = _local ? 1 : 0; }
     virtual bool getLocal() const override { return Props.net_Local; }
     virtual void setSVU(bool _svu) override { Props.net_SV_Update = _svu ? 1 : 0; }

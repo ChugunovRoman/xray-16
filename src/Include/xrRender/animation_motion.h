@@ -36,6 +36,8 @@ public:
 
     ICF MotionID& operator=(const MotionID& other) noexcept
     {
+        R_ASSERT(this);
+
         val = other.val;
         return *this;
     }

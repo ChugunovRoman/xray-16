@@ -348,7 +348,7 @@ TEMPLATE_SPECIALIZATION
 IC _operator_ptr CProblemSolverAbstract::get_operator(const _operator_id_type& operator_id)
 {
     typename OPERATOR_VECTOR::iterator I = std::lower_bound(m_operators.begin(), m_operators.end(), operator_id);
-    THROW(m_operators.end() != I);
+    R_ASSERT2(m_operators.end() != I, make_string("m_operators.size=[%d], operator_id=[%d]", m_operators.size(), operator_id));
     return ((*I).get_operator());
 }
 
