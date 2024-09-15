@@ -859,7 +859,11 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
 
     // iAmmoCurrent					= E->a_current;
     // TODO: rewite with m_bGrenadeMode
-    iAmmoElapsed = E->a_elapsed;
+    if (E->a_elapsed > E->get_ammo_magsize())
+        iAmmoElapsed = E->get_ammo_magsize();
+    else
+        iAmmoElapsed = E->a_elapsed;
+
     m_flagsAddOnState = E->m_addon_flags.get();
     m_ammoType = E->ammo_type;
     if (E->cur_scope < m_scopes.size() && m_scopes.size() > 1)
