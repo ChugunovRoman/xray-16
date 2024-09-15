@@ -16,7 +16,7 @@ class shared_str;
 
 #pragma pack(push, 1)
 
-const u32 NET_PacketSizeLimit = 16 * 1024;
+const u32 NET_PacketSizeLimit = 74 * 1024;
 
 struct XRCORE_API IIniFileStream
 {
