@@ -15,6 +15,8 @@ extern ENGINE_API shared_str current_player_hud_sect;
 extern int psSkeletonUpdate;
 using namespace animation;
 
+constexpr cpcstr WPN_HAND_ANIMATION_FOLDER = "globalwar_weapons" DELIMITER "wpn_hand_animations" DELIMITER;
+
 //////////////////////////////////////////////////////////////////////////
 // BoneInstance methods
 void CBlendInstance::construct() { Blend.clear(); }
@@ -828,6 +830,30 @@ void CKinematicsAnimated::Load(const char* N, IReader* data, u32 dwFlags)
         strconcat(sizeof(nm), nm, N, ".ogf");
         m_Motions.push_back(SMotionsSlot());
         m_Motions.back().motions.create(nm, data, bones);
+    }
+
+    string_path fn;
+    if(strstr(N, "\\wpn_hand\\") && FS.exist(fn, "$game_meshes$", WPN_HAND_ANIMATION_FOLDER))
+    {
+
+        string_path _path;
+        FS.update_path(_path, "$game_meshes$", WPN_HAND_ANIMATION_FOLDER);
+
+        FS_FileSet fset;
+        FS.file_list(fset, _path, FS_ListFiles, "*.omf");
+
+        if (fset.size())
+        {
+            m_Motions.reserve(m_Motions.size() + fset.size() - 1);
+
+            for (FS_FileSet::iterator it = fset.begin(); it != fset.end(); it++)
+            {
+                string_path fn_omf = { 0 };
+                xr_strcat(fn_omf, WPN_HAND_ANIMATION_FOLDER);
+                xr_strcat(fn_omf, (*it).name.c_str());
+                loadOMF(fn_omf);
+            }
+        }
     }
 
     R_ASSERT2(m_Motions.size(), make_string("section '%s'\nmodel '%s'", current_player_hud_sect.c_str(), N).c_str());
