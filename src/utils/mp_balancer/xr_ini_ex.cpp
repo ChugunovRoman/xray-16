@@ -467,7 +467,10 @@ CInifileEx::Sect& CInifileEx::r_section(LPCSTR S)
     strlwr(section);
     RootIt I = std::lower_bound(DATA.begin(), DATA.end(), section, sect_pred);
     if (!(I != DATA.end() && xr_strcmp(*(*I)->Name, section) == 0))
-        FATAL(make_string("Can't open section '%s'", S).c_str());
+        if (strstr(Core.Params, "-skpsct") != NULL)
+            Msg(make_string("Can't open section '%s'", S).c_str());
+        else
+            FATAL(make_string("Can't open section '%s'", S).c_str());
     return **I;
 }
 

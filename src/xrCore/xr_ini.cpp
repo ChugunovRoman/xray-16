@@ -735,7 +735,10 @@ CInifile::Sect& CInifile::r_section(pcstr S) const
         // F->w_string ("shared strings:");
         // g_pStringContainer->dump(F);
         // FS.w_close (F);
-        xrDebug::Fatal(DEBUG_INFO, "Can't open section '%s' (only '%s' avail). Please attach [*.ini_log] file to your bug report", section, *(*I)->Name);
+        if (strstr(Core.Params, "-skpsct") != NULL)
+            Msg("Can't open section '%s' (only '%s' avail). Please attach [*.ini_log] file to your bug report", section, *(*I)->Name);
+        else
+            xrDebug::Fatal(DEBUG_INFO, "Can't open section '%s' (only '%s' avail). Please attach [*.ini_log] file to your bug report", section, *(*I)->Name);
     }
     return **I;
 }
