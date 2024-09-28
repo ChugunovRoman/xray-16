@@ -355,11 +355,24 @@ bool CHudItem::TryPlayAnimIdle()
         {
             CEntity::SEntityState st;
             pActor->g_State(st);
-            if (st.bSprint)
+
+            if (st.bSprint && !pActor->isSprintStarted && WhichHUDAnimationExist("anm_idle_sprint_start", "anim_idle_sprint_start"))
+            {
+                PlayAnimIdleSprintStart();
+                pActor->isSprintStarted = true;
+                return true;
+            }
+            if (st.bSprint && Device.dwTimeGlobal > m_dwMotionEndTm)
             {
                 PlayAnimIdleSprint();
                 return true;
             }
+            if (!st.bSprint && pActor->isSprintStarted && WhichHUDAnimationExist("anm_idle_sprint_end", "anim_idle_sprint_end"))
+            {
+                pActor->isSprintStarted = false;
+                PlayAnimIdleSprintEnd();
+            }
+
             if (pActor->AnyMove())
             {
                 if (!st.bCrouch && isHUDAnimationExist("anm_idle_moving"))
@@ -415,6 +428,20 @@ void CHudItem::PlayAnimIdleMoving() { PlayHUDMotion("anm_idle_moving", "anim_idl
 void CHudItem::PlayAnimIdleSprint()
 {
     if (cpcstr anim_name = WhichHUDAnimationExist("anm_idle_sprint", "anim_idle_sprint"))
+        PlayHUDMotion(anim_name, true, nullptr, GetState());
+    else
+        PlayHUDMotion("anm_idle", "anim_idle", true, nullptr, GetState());
+}
+void CHudItem::PlayAnimIdleSprintStart()
+{
+    if (cpcstr anim_name = WhichHUDAnimationExist("anm_idle_sprint_start", "anim_idle_sprint_start"))
+        PlayHUDMotion(anim_name, true, nullptr, GetState());
+    else
+        PlayHUDMotion("anm_idle", "anim_idle", true, nullptr, GetState());
+}
+void CHudItem::PlayAnimIdleSprintEnd()
+{
+    if (cpcstr anim_name = WhichHUDAnimationExist("anm_idle_sprint_end", "anim_idle_sprint_end"))
         PlayHUDMotion(anim_name, true, nullptr, GetState());
     else
         PlayHUDMotion("anm_idle", "anim_idle", true, nullptr, GetState());

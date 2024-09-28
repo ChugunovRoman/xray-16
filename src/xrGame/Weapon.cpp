@@ -774,7 +774,7 @@ void CWeapon::LoadOriginalScopesParams(LPCSTR section)
             LPCSTR str = pSettings->r_string(section, "scopes_sect");
             for (int i = 0, count = _GetItemCount(str); i < count; ++i)
             {
-                string128						scope_section;
+                string128 scope_section;
                 _GetItem(str, i, scope_section);
                 m_scopes.push_back(scope_section);
             }
@@ -832,9 +832,7 @@ void CWeapon::LoadCurrentScopeParams(LPCSTR section)
     m_fRTZoomFactor = m_zoom_params.m_fScopeZoomFactor;
 
     if (m_UIScope)
-    {
         xr_delete(m_UIScope);
-    }
 
     if (bScopeIsHasTexture)
     {

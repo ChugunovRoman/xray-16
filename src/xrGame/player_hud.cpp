@@ -60,13 +60,14 @@ void player_hud_motion_container::load(IKinematicsAnimated* model, const shared_
             0 == strncmp(name.c_str(), "anim_", sizeof("anim_") - 1))
         {
             player_hud_motion pm;
+            const int count = _GetItemCount(anm.c_str());
 
-            if (_GetItemCount(anm.c_str()) == 1)
+            if (count == 1)
             {
                 pm.m_base_name = anm;
                 pm.m_additional_name = anm;
             }
-            else if (_GetItemCount(anm.c_str()) == 2)
+            else if (count == 2)
             {
                 string512 str_item;
                 _GetItem(anm.c_str(), 0, str_item);
@@ -75,7 +76,7 @@ void player_hud_motion_container::load(IKinematicsAnimated* model, const shared_
                 _GetItem(anm.c_str(), 1, str_item);
                 pm.m_additional_name = str_item;
             }
-            else if (_GetItemCount(anm.c_str()) == 3)
+            else if (count == 3)
             {
                 string512 str_item;
                 _GetItem(anm.c_str(), 0, str_item);
@@ -92,10 +93,17 @@ void player_hud_motion_container::load(IKinematicsAnimated* model, const shared_
             for (u32 i = 0; i <= 8; ++i)
             {
                 string512 buff;
+                string512 buff2;
                 if (i == 0)
+                {
                     xr_strcpy(buff, pm.m_base_name.c_str());
+                    xr_strcpy(buff2, pm.m_additional_name.c_str());
+                }
                 else
+                {
                     xr_sprintf(buff, "%s%d", pm.m_base_name.c_str(), i);
+                    xr_sprintf(buff2, "%s%d", pm.m_additional_name.c_str(), i);
+                }
 
                 MotionID motion_ID = model->ID_Cycle_Safe(buff);
                 if (motion_ID.valid())
@@ -105,8 +113,19 @@ void player_hud_motion_container::load(IKinematicsAnimated* model, const shared_
 //					Msg(" alias=[%s] base=[%s] name=[%s]",pm.m_alias_name.c_str(), pm.m_base_name.c_str(), buff);
 #endif // #ifdef DEBUG
                 }
+                else if (count > 1)
+                {
+                    motion_ID = model->ID_Cycle_Safe(buff2);
+                    if (motion_ID.valid())
+                    {
+                        pm.m_animations.emplace_back(motion_descr{ std::move(motion_ID), buff2 });
+#ifdef DEBUG
+//					Msg(" alias=[%s] base=[%s] name=[%s]",pm.m_alias_name.c_str(), pm.m_base_name.c_str(), buff);
+#endif // #ifdef DEBUG
+                    }
+                }
             }
-            R_ASSERT2(!pm.m_animations.empty(), make_string("motion not found [%s]", pm.m_base_name.c_str()).c_str());
+            R_ASSERT2(!pm.m_animations.empty(), make_string("motion not found [%s][%s]", pm.m_base_name.c_str(), pm.m_additional_name.c_str()).c_str());
 
             m_anims.emplace(name, std::move(pm));
         }

@@ -122,6 +122,8 @@ public:
     virtual bool MovingAnimAllowedNow() { return true; }
     virtual void PlayAnimIdleMoving();
     virtual void PlayAnimIdleSprint();
+    virtual void PlayAnimIdleSprintStart();
+    virtual void PlayAnimIdleSprintEnd();
 
     virtual void UpdateCL();
     virtual void renderable_Render(u32 context_id, IRenderable* root);
