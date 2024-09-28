@@ -260,6 +260,7 @@ public:
 protected:
     CHolderCustom* m_holder;
     u16 m_holderID;
+    u8 m_wasDebugSwaned = 0;
     bool use_Holder(CHolderCustom* holder);
 
     bool use_Vehicle(CHolderCustom* object);

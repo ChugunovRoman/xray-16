@@ -705,6 +705,20 @@ bool CActor::net_Spawn(CSE_Abstract* DC)
         m_HeavyBreathSnd.stop();
     }
 
+    if (g_Alive() && m_wasDebugSwaned == 0 && strstr(Core.Params, "-dbgsspwn") != NULL && pSettings->section_exist("debug_start_spawn"))
+    {
+        const u16 count = pSettings->line_count("debug_start_spawn");
+        LPCSTR line;
+        LPCSTR name;
+        for (u16 i = 0; i < count; ++i)
+        {
+            pSettings->r_line("debug_start_spawn", i, &name, &line);
+            Level().spawn_item(name, Position(), false, ID());
+        }
+
+        m_wasDebugSwaned = 1;
+    }
+
     typedef CClientSpawnManager::CALLBACK_TYPE CALLBACK_TYPE;
     CALLBACK_TYPE callback;
     callback.bind(this, &CActor::on_requested_spawn);
@@ -1414,6 +1428,8 @@ void CActor::save(NET_Packet& output_packet)
     output_packet.w_stringZ(g_quick_use_slots[1]);
     output_packet.w_stringZ(g_quick_use_slots[2]);
     output_packet.w_stringZ(g_quick_use_slots[3]);
+
+    output_packet.w_u8(m_wasDebugSwaned);
 }
 
 void CActor::load(IReader& input_packet)
@@ -1441,6 +1457,8 @@ void CActor::load(IReader& input_packet)
     input_packet.r_stringZ(g_quick_use_slots[1], sizeof(g_quick_use_slots[1]));
     input_packet.r_stringZ(g_quick_use_slots[2], sizeof(g_quick_use_slots[2]));
     input_packet.r_stringZ(g_quick_use_slots[3], sizeof(g_quick_use_slots[3]));
+
+    m_wasDebugSwaned = input_packet.r_u8();
 }
 
 #ifdef DEBUG
