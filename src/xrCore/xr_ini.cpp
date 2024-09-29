@@ -721,7 +721,10 @@ CInifile::Sect& CInifile::r_section(pcstr S) const
     xr_strlwr(section);
     auto I = std::lower_bound(DATA.cbegin(), DATA.cend(), section, sect_pred);
     if (I == DATA.cend())
-        xrDebug::Fatal(DEBUG_INFO, "Can't find section '%s'.", S);
+        if (strstr(Core.Params, "-skpsct") != NULL)
+            Msg("Can't find section '%s'.", S);
+        else
+            xrDebug::Fatal(DEBUG_INFO, "Can't find section '%s'.", S);
     else if (xr_strcmp(*(*I)->Name, section))
     {
         // g_pStringContainer->verify();
@@ -736,9 +739,9 @@ CInifile::Sect& CInifile::r_section(pcstr S) const
         // g_pStringContainer->dump(F);
         // FS.w_close (F);
         if (strstr(Core.Params, "-skpsct") != NULL)
-            Msg("Can't open section '%s' (only '%s' avail). Please attach [*.ini_log] file to your bug report", section, *(*I)->Name);
+            Msg("! ERROR: Can't open section '%s' (only '%s' avail). Please attach [*.ini_log] file to your bug report", section, *(*I)->Name);
         else
-            xrDebug::Fatal(DEBUG_INFO, "Can't open section '%s' (only '%s' avail). Please attach [*.ini_log] file to your bug report", section, *(*I)->Name);
+            xrDebug::Fatal(DEBUG_INFO, "! ERROR: Can't open section '%s' (only '%s' avail). Please attach [*.ini_log] file to your bug report", section, *(*I)->Name);
     }
     return **I;
 }
