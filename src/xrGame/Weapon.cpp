@@ -1744,7 +1744,7 @@ void CWeapon::UpdateHUDAddonsVisibility()
         {
             HudItemData()->set_bone_visible(wpn_scope, FALSE, TRUE);
         }
-        else if (m_eScopeStatus == ALife::eAddonPermanent)
+        else if (IsScopePermament())
             HudItemData()->set_bone_visible(wpn_scope, TRUE, TRUE);
     }
 
@@ -1879,7 +1879,7 @@ void CWeapon::UpdateAddonsVisibility()
     bone_id = pWeaponVisual->LL_BoneID(wpn_scope);
     if (ScopeAttachable())
     {
-        if (IsScopeAttached())
+        if (IsScopeAttached() || IsScopePermament())
         {
             if (!pWeaponVisual->LL_GetBoneVisible(bone_id) && bone_id!=BI_NONE)
                 pWeaponVisual->LL_SetBoneVisible(bone_id, TRUE, TRUE);
