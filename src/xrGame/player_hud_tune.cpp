@@ -41,8 +41,8 @@ void CHudTuner::ResetToDefaultValues()
         if (wpn)
         {
             wpn->LoadAltHudAim();
-            m_hands_curr_offset[0][1] = wpn->m_hands_offset[0][1];
-            m_hands_curr_offset[1][1] = wpn->m_hands_offset[1][1];
+            m_hands_curr_offset[0][0] = wpn->m_hands_offset[0][1];
+            m_hands_curr_offset[1][0] = wpn->m_hands_offset[1][1];
         }
     }
     else
@@ -56,8 +56,8 @@ void CHudTuner::ResetToDefaultValues()
         curr_measures.m_hands_offset[1][1] = zero;
         curr_measures.m_hands_offset[0][2] = zero;
         curr_measures.m_hands_offset[1][2] = zero;
-        m_hands_curr_offset[0][1] = zero;
-        m_hands_curr_offset[1][1] = zero;
+        m_hands_curr_offset[0][0] = zero;
+        m_hands_curr_offset[1][0] = zero;
         curr_measures.m_item_attach[0] = zero;
         curr_measures.m_item_attach[1] = zero;
         curr_measures.m_fire_point_offset = zero;
@@ -66,8 +66,8 @@ void CHudTuner::ResetToDefaultValues()
     }
 
     new_measures = curr_measures;
-    m_hands_new_offset[0][1] = m_hands_curr_offset[0][1];
-    m_hands_new_offset[1][1] = m_hands_curr_offset[1][1];
+    m_hands_new_offset[0][0] = m_hands_curr_offset[0][0];
+    m_hands_new_offset[1][0] = m_hands_curr_offset[1][0];
 }
 
 void CHudTuner::UpdateValues()
@@ -75,13 +75,17 @@ void CHudTuner::UpdateValues()
     if (current_hud_item)
     {
         current_hud_item->m_measures = new_measures;
+
+        if (!current_hud_item->m_parent_hud_item)
+            return;
+
         CWeapon* wpn = smart_cast<CWeapon*>(current_hud_item->m_parent_hud_item);
 
-        if (wpn)
-        {
-            wpn->m_hands_offset[0][1] = m_hands_new_offset[0][1];
-            wpn->m_hands_offset[1][1] = m_hands_new_offset[1][1];
-        }
+        if (!wpn)
+            return;
+
+        wpn->m_hands_offset[0][1] = m_hands_new_offset[0][0];
+        wpn->m_hands_offset[1][1] = m_hands_new_offset[1][0];
     }
 }
 
@@ -153,8 +157,8 @@ void CHudTuner::OnFrame()
             ImGui::DragFloat3(hud_adj_modes[HUD_ROT], (float*)&new_measures.m_hands_attach[1], _delta_rot, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[HUD_POS_AIM], (float*)&new_measures.m_hands_offset[0][1], _delta_pos, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[HUD_ROT_AIM], (float*)&new_measures.m_hands_offset[1][1], _delta_rot, 0.f, 0.f, "%.7f");
-            ImGui::DragFloat3(hud_adj_modes[HUD_POS_ALT_AIM], (float*)&m_hands_new_offset[0][1], _delta_pos, 0.f, 0.f, "%.7f");
-            ImGui::DragFloat3(hud_adj_modes[HUD_ROT_ALT_AIM], (float*)&m_hands_new_offset[1][1], _delta_rot, 0.f, 0.f, "%.7f");
+            ImGui::DragFloat3(hud_adj_modes[HUD_POS_ALT_AIM], (float*)&m_hands_new_offset[0][0], _delta_pos, 0.f, 0.f, "%.7f");
+            ImGui::DragFloat3(hud_adj_modes[HUD_ROT_ALT_AIM], (float*)&m_hands_new_offset[1][0], _delta_rot, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[HUD_POS_GL], (float*)&new_measures.m_hands_offset[0][2], _delta_pos, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[HUD_ROT_GL], (float*)&new_measures.m_hands_offset[1][2], _delta_rot, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[ITEM_POS], (float*)&new_measures.m_item_attach[0], _delta_pos, 0.f, 0.f, "%.7f");
@@ -187,9 +191,9 @@ void CHudTuner::OnFrame()
                     ImGui::LogText(selectable);
                     xr_sprintf(selectable, "aim_hud_offset_rot%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_offset[1][1].x, new_measures.m_hands_offset[1][1].y, new_measures.m_hands_offset[1][1].z);
                     ImGui::LogText(selectable);
-                    xr_sprintf(selectable, "aim_hud_offset_alt_pos%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", m_hands_new_offset[0][1].x, m_hands_new_offset[0][1].y, m_hands_new_offset[0][1].z);
+                    xr_sprintf(selectable, "aim_hud_offset_alt_pos%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", m_hands_new_offset[0][0].x, m_hands_new_offset[0][0].y, m_hands_new_offset[0][0].z);
                     ImGui::LogText(selectable);
-                    xr_sprintf(selectable, "aim_hud_offset_alt_rot%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", m_hands_new_offset[1][1].x, m_hands_new_offset[1][1].y, m_hands_new_offset[1][1].z);
+                    xr_sprintf(selectable, "aim_hud_offset_alt_rot%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", m_hands_new_offset[1][0].x, m_hands_new_offset[1][0].y, m_hands_new_offset[1][0].z);
                     ImGui::LogText(selectable);
                     xr_sprintf(selectable, "gl_hud_offset_pos%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_offset[0][2].x, new_measures.m_hands_offset[0][2].y, new_measures.m_hands_offset[0][2].z);
                     ImGui::LogText(selectable);

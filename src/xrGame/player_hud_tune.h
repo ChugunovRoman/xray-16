@@ -67,7 +67,7 @@ private:
 
     float debug_point_size{ 0.005f };
     float _delta_pos{ 0.0005f };
-    float _delta_rot{ 0.05f };
+    float _delta_rot{ 0.0005f };
 
     attachable_hud_item* current_hud_item{};
     hud_item_idx current_hud_idx{ MAIN_ITEM };
