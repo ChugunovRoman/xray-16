@@ -1162,7 +1162,6 @@ CScriptGameObject* CGameObject::lua_game_object() const
     {
          GEnv.ScriptEngine->script_log(LuaMessageType::Error, 
             "! ERROR: you are trying to use a destroyed object [%s]", *cName());
-        DebugBreak();
     }
 // #endif
     R_ASSERT2(m_spawned, make_string("Object name [%s]", *cName()));
