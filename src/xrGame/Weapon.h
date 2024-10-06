@@ -305,8 +305,6 @@ protected:
     float m_fSecondRTZoomFactor; //текущий зум для 3д прицела
     CUIWindow* m_UIScope;
 
-    Fvector m_hands_offset[2][3]; // pos,rot/ normal,aim,GL
-
     xr_vector<shared_str> bullets_bones;
     int bullet_cnt;
     int last_hide_bullet;
@@ -336,6 +334,8 @@ public:
 
     virtual float Weight() const;
     virtual u32 Cost() const;
+
+    Fvector m_hands_offset[2][3]; // pos,rot/ normal,aim,GL
 
 public:
     virtual EHandDependence HandDependence() const { return eHandDependence; }

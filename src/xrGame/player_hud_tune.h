@@ -21,6 +21,8 @@ private:
         HUD_ROT,
         HUD_POS_AIM,
         HUD_ROT_AIM,
+        HUD_POS_ALT_AIM,
+        HUD_ROT_ALT_AIM,
         HUD_POS_GL,
         HUD_ROT_GL,
         ITEM_POS,
@@ -45,6 +47,8 @@ private:
         { HUD_ROT, "Hud Rotation (Default)" },
         { HUD_POS_AIM, "Hud Position (Aiming)" },
         { HUD_ROT_AIM, "Hud Rotation (Aiming)" },
+        { HUD_POS_ALT_AIM, "Hud Position (Second Aiming)" },
+        { HUD_ROT_ALT_AIM, "Hud Rotation (Second Aiming)" },
         { HUD_POS_GL, "Hud Position (GL)" },
         { HUD_ROT_GL, "Hud Rotation (GL)" },
         { ITEM_POS, "Item Position" },
@@ -70,4 +74,7 @@ private:
 
     hud_item_measures curr_measures{};
     hud_item_measures new_measures{};
+
+    Fvector m_hands_curr_offset[2][1]; // pos,rot/ alt_aim
+    Fvector m_hands_new_offset[2][1]; // pos,rot/ alt_aim
 };
