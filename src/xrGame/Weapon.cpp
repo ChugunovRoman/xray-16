@@ -218,44 +218,6 @@ shared_str CWeapon::GetNameWithAttachment()
     return (shared_str)str;
 }
 
-int CWeapon::GetScopeX()
-{
-    if (bUseAltScope)
-    {
-        if (m_eScopeStatus != ALife::eAddonPermanent && IsScopeAttached())
-        {
-            return READ_IF_EXISTS(pSettings, r_s32, GetNameWithAttachment(), "scope_x", 0);
-        }
-        else
-        {
-            return 0;
-        }
-    }
-    else
-    {
-        return READ_IF_EXISTS(pSettings, r_s32, m_scopes[m_cur_scope], "scope_x", 0);
-    }
-}
-
-int CWeapon::GetScopeY()
-{
-    if (bUseAltScope)
-    {
-        if (m_eScopeStatus != ALife::eAddonPermanent && IsScopeAttached())
-        {
-            return READ_IF_EXISTS(pSettings, r_s32, GetNameWithAttachment(), "scope_y", 0);
-        }
-        else
-        {
-            return 0;
-        }
-    }
-    else
-    {
-        return READ_IF_EXISTS(pSettings, r_s32, m_scopes[m_cur_scope], "scope_y", 0);
-    }
-}
-
 CWeapon::~CWeapon()
 {
     xr_delete(m_UIScope);
@@ -1614,6 +1576,12 @@ int CWeapon::GetAmmoCount_forType(shared_str const& ammo_type) const
     return res;
 }
 
+void CWeapon::OnMoveToRuck(const SInvItemPlace& previous_place)
+{
+    inherited::OnMoveToRuck(previous_place);
+    b_forceIconUpdate = false;
+}
+
 float CWeapon::GetConditionMisfireProbability() const
 {
     float mis;
@@ -1773,6 +1741,7 @@ void CWeapon::UpdateHUDAddonsVisibility()
 
 void CWeapon::UpdateAddonsOffset()
 {
+    Msg("CWeapon::UpdateAddonsOffset weapon=[%s] m_eScopeStatus=[%d]", *m_alt_section_id, m_eScopeStatus);
     if (m_eScopeStatus == ALife::eAddonAttachable)
     {
         if (pSettings->line_exist(m_alt_section_id, "scope_name"))

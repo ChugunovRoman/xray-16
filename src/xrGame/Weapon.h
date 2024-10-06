@@ -125,6 +125,7 @@ public:
     virtual void OnActiveItem();
     virtual void OnHiddenItem();
     virtual void SendHiddenItem(); // same as OnHiddenItem but for client... (sends message to a server)...
+    virtual void OnMoveToRuck(const SInvItemPlace& previous_place);
 
 public:
     virtual bool can_kill() const;
@@ -197,6 +198,7 @@ protected:
 
 public:
     u8 m_sub_state; // Alundaio: made public
+    bool b_forceIconUpdate = false;
 
     bool IsGrenadeLauncherAttached() const;
     bool IsScopeAttached() const;
@@ -219,9 +221,13 @@ public:
     void LoadAltHudAim();
     void UpdateAddonsOffset();
 
+    void SetScopeOffset(Ivector2 pos) { m_iScopeX = pos.x; m_iScopeY = pos.y; }
+    void SetSilencerOffset(Ivector2 pos) { m_iSilencerX = pos.x; m_iSilencerY = pos.y; }
+    void SetGLOffset(Ivector2 pos) { m_iGrenadeLauncherX = pos.x; m_iGrenadeLauncherY = pos.y; }
+
     //для отоброажения иконок апгрейдов в интерфейсе
-    int GetScopeX();
-    int GetScopeY();
+    int GetScopeX() { return m_iScopeX; }
+    int GetScopeY() { return m_iScopeY; }
     int GetSilencerX() { return m_iSilencerX; }
     int GetSilencerY() { return m_iSilencerY; }
     int GetGrenadeLauncherX() { return m_iGrenadeLauncherX; }

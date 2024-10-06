@@ -423,7 +423,7 @@ void CUIWeaponCellItem::Update()
     {
         if (object()->IsSilencerAttached())
         {
-            if (!GetIcon(eSilencer) || bForceReInitAddons)
+            if (!GetIcon(eSilencer) || bForceReInitAddons || object()->b_forceIconUpdate)
             {
                 CreateIcon(eSilencer);
                 RefreshOffset();
@@ -441,7 +441,7 @@ void CUIWeaponCellItem::Update()
     {
         if (object()->IsScopeAttached())
         {
-            if (!GetIcon(eScope) || bForceReInitAddons)
+            if (!GetIcon(eScope) || bForceReInitAddons || object()->b_forceIconUpdate)
             {
                 CreateIcon(eScope);
                 RefreshOffset();
@@ -463,7 +463,7 @@ void CUIWeaponCellItem::Update()
     {
         if (object()->IsGrenadeLauncherAttached())
         {
-            if (!GetIcon(eLauncher) || bForceReInitAddons)
+            if (!GetIcon(eLauncher) || bForceReInitAddons || object()->b_forceIconUpdate)
             {
                 CreateIcon(eLauncher);
                 RefreshOffset();

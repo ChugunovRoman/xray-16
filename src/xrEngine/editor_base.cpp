@@ -108,9 +108,7 @@ void ide::ShowMain()
             {
                 ImGui::MenuItem("Weather Editor", nullptr, &m_show_weather_editor);
                 for (const auto& tool : m_tools)
-                {
                     ImGui::MenuItem(tool->tool_name(), nullptr, &tool->get_open_state());
-                }
                 ImGui::EndMenu();
             }
         }

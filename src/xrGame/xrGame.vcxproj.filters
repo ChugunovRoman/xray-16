@@ -6485,6 +6485,9 @@
     <ClInclude Include="player_hud_tune.h">
       <Filter>Core\Client\Objects\items &amp; weapons\HudItem</Filter>
     </ClInclude>
+    <ClInclude Include="weapons_textures_addons_position.h">
+      <Filter>Core\Client\Objects\items &amp; weapons\HudItem</Filter>
+    </ClInclude>
     <ClInclude Include="HolderEntityObject.h">
       <Filter>Core\Client\Objects\base\GameObject\Holder</Filter>
     </ClInclude>
@@ -8525,6 +8528,9 @@
       <Filter>Core\Client\Objects\items &amp; weapons\HudItem</Filter>
     </ClCompile>
     <ClCompile Include="player_hud_tune.cpp">
+      <Filter>Core\Client\Objects\items &amp; weapons\HudItem</Filter>
+    </ClCompile>
+    <ClCompile Include="weapons_textures_addons_position.cpp">
       <Filter>Core\Client\Objects\items &amp; weapons\HudItem</Filter>
     </ClCompile>
     <ClCompile Include="Explosive.cpp">
