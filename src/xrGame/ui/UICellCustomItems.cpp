@@ -201,14 +201,6 @@ CUIStatic* CUIInventoryCellItem::InitLayer(CUIStatic* s, pcstr section,
         pSettings->r_float(section, "inv_grid_height") * INV_GRID_HEIGHTF
     };
 
-    Frect tex_rect
-    {
-        pSettings->r_float(section, "inv_grid_x") * INV_GRID_WIDTHF,
-        pSettings->r_float(section, "inv_grid_y") * INV_GRID_HEIGHTF
-    };
-
-    tex_rect.rb.add(tex_rect.lt, cell_size);
-
     cell_size.mul(base_scale);
 
     if (b_rotate)
@@ -230,7 +222,6 @@ CUIStatic* CUIInventoryCellItem::InitLayer(CUIStatic* s, pcstr section,
     }
 
     s->SetWndPos(addon_offset);
-    s->SetTextureRect(tex_rect);
     s->SetStretchTexture(true);
 
     s->EnableHeading(b_rotate);

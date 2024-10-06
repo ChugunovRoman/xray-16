@@ -224,7 +224,7 @@ void attachable_hud_item::setup_firedeps(firedeps& fd)
         VERIFY(_valid(fd.vLastFP2));
     }
 
-    if (m_measures.m_prop_flags.test(hud_item_measures::e_shell_point))
+    if (m_measures.m_prop_flags.test(hud_item_measures::e_shell_point) && m_measures.m_shell_bone != (u16)-1)
     {
         Fmatrix& fire_mat = m_model->LL_GetTransform(m_measures.m_shell_bone);
         fire_mat.transform_tiny(fd.vLastSP, m_measures.m_shell_point_offset);
