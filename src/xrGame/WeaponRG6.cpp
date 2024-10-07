@@ -132,6 +132,17 @@ void CWeaponRG6::FireStart()
     }
 }
 
+void CWeaponRG6::PlayAnimAddOneCartridgeWeapon()
+{
+    VERIFY(GetState() == eReload);
+    pcstr animName = make_string("anm_add_cartridge_%d_%d", m_rockets.size(), m_rockets.size() + 1).c_str();
+
+    if (isHUDAnimationExist(animName))
+        PlayHUDMotion(animName, "anim_add_cartridge", FALSE, this, GetState());
+    else if (isHUDAnimationExist("anm_add_cartridge"))
+        PlayHUDMotion("anm_add_cartridge", "anim_add_cartridge", FALSE, this, GetState());
+}
+
 u8 CWeaponRG6::AddCartridge(u8 cnt)
 {
     u8 t = inheritedSG::AddCartridge(cnt);
