@@ -1226,11 +1226,11 @@ void CActor::UpdateCL()
             pWeapon->UpdateSecondVP(); // --#SM+#-- +SecondVP+
 
             bool bUseMark = !!pWeapon->bMarkCanShow();
-            bool bInZoom = !!(pWeapon->bInZoomRightNow() && pWeapon->bIsSecondVPZoomPresent() && psActorFlags.test(AF_3DSCOPE));
+            // bool bInZoom = !!(pWeapon->bInZoomRightNow() && pWeapon->bIsSecondVPZoomPresent() && psActorFlags.test(AF_3DSCOPE));
+            bool bInZoom = pWeapon->bInZoomRightNow();
             bool bNVEnbl = !!pWeapon->bNVsecondVPstatus;
 
             // float fVPRotFactor = pWeapon->bNVsecondVPstatus ? pWeapon->GetZRotatingFactor() : 0.0f;
-
             // Обновляем информацию об оружии в шейдерах
             g_pGamePersistent->m_pGShaderConstants->hud_params.x = bInZoom;  //--#SM+#--
             g_pGamePersistent->m_pGShaderConstants->hud_params.y = pWeapon->GetSecondVPFov(); //--#SM+#--
