@@ -126,6 +126,8 @@ void CHudTuner::OnFrame()
                 }
                 Device.time_factor(time_factor);
             }
+            if (ImGui::RadioButton("PiP Scopes", psActorFlags.test(AF_3DSCOPE)))
+                psActorFlags.invert(AF_3DSCOPE);
 
             ImGui::EndMenuBar();
         }
