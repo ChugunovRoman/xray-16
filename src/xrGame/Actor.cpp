@@ -1236,6 +1236,11 @@ void CActor::UpdateCL()
             g_pGamePersistent->m_pGShaderConstants->hud_params.y = pWeapon->GetSecondVPFov(); //--#SM+#--
             g_pGamePersistent->m_pGShaderConstants->hud_params.z = bUseMark; //--#SM+#--
             g_pGamePersistent->m_pGShaderConstants->m_blender_mode.x = bNVEnbl;  //--#SM+#--
+
+            if (xr_strcmp(pWeapon->m_section_id, "wpn_p90") == 0)
+                g_pGamePersistent->m_pGShaderConstants->hud_params_2.x = 256;
+            else
+                g_pGamePersistent->m_pGShaderConstants->hud_params_2.x = 512;
         }
     }
     else

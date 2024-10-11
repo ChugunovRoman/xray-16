@@ -56,8 +56,7 @@ CHUDTarget::CHUDTarget()
 CHUDTarget::~CHUDTarget() {}
 void CHUDTarget::Load() { HUDCrosshair.Load(); }
 void CHUDTarget::ShowCrosshair(bool b) { m_bShowCrosshair = b; }
-//. fVisTransparencyFactor
-float fCurrentPickPower;
+
 ICF static bool pick_trace_callback(collide::rq_result& result, LPVOID params)
 {
     SPickParam* pp = (SPickParam*)params;

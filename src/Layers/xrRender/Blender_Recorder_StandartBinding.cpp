@@ -335,6 +335,11 @@ static class cl_hud_params : public R_constant_setup //--#SM+#--
     void setup(CBackend& cmd_list, R_constant* C) override { cmd_list.set_c(C, g_pGamePersistent->m_pGShaderConstants->hud_params); }
 } binder_hud_params;
 
+static class cl_hud_params_2 : public R_constant_setup //--#SM+#--
+{
+    void setup(CBackend& cmd_list, R_constant* C) override { cmd_list.set_c(C, g_pGamePersistent->m_pGShaderConstants->hud_params_2); }
+} binder_hud_params_2;
+
 static class cl_script_params : public R_constant_setup //--#SM+#--
 {
     void setup(CBackend& cmd_list, R_constant* C) override { cmd_list.set_c(C, g_pGamePersistent->m_pGShaderConstants->m_script_params); }
@@ -622,6 +627,7 @@ void CBlender_Compile::SetMapping()
 {
     // misc
     r_Constant("m_hud_params", &binder_hud_params); //--#SM+#--
+    r_Constant("m_hud_params_2", &binder_hud_params_2); //--#SM+#--
     r_Constant("m_script_params", &binder_script_params); //--#SM+#--
     r_Constant("m_blender_mode", &binder_blend_mode); //--#SM+#--
 
