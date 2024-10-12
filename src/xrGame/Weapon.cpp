@@ -1408,7 +1408,7 @@ bool CWeapon::Action(u16 cmd, u32 flags)
 
     case kWPN_ZOOM_INC:
     case kWPN_ZOOM_DEC:
-        if (IsZoomEnabled() && IsZoomed() && (flags&CMD_START) )
+        if ((IsZoomEnabled() || IsZoomed()) && (flags&CMD_START) )
         {
             if (cmd == kWPN_ZOOM_INC)
                 ZoomInc();
@@ -1741,7 +1741,6 @@ void CWeapon::UpdateHUDAddonsVisibility()
 
 void CWeapon::UpdateAddonsOffset()
 {
-    Msg("CWeapon::UpdateAddonsOffset weapon=[%s] m_eScopeStatus=[%d]", *m_alt_section_id, m_eScopeStatus);
     if (m_eScopeStatus == ALife::eAddonAttachable)
     {
         if (pSettings->line_exist(m_alt_section_id, "scope_name"))
@@ -1926,7 +1925,7 @@ float CWeapon::CurrentZoomFactor()
 float CWeapon::GetControlInertionFactor() const
 {
     float fInertionFactor = inherited::GetControlInertionFactor();
-    if (IsScopeAttached() && (IsZoomed() || IsSecondZoomed()))
+    if (IsScopeAttached() && IsZoomed())
         return m_fScopeInertionFactor;
 
     return fInertionFactor;

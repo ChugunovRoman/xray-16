@@ -152,6 +152,7 @@ protected:
 public:
     virtual void OnZoomIn();
     virtual void OnZoomOut();
+    virtual void OnZoomSecondIn();
     void OnNextFireMode();
     void OnPrevFireMode();
     bool HasFireModes() { return m_bHasDifferentFireModes; }

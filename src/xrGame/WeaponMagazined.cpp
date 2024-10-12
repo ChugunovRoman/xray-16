@@ -1326,9 +1326,7 @@ void CWeaponMagazined::PlayAnimIdle()
     if (GetState() != eIdle)
         return;
     if (IsZoomed() || IsSecondZoomed())
-    {
         PlayAnimAim();
-    }
     else
         inherited::PlayAnimIdle();
 }
@@ -1394,7 +1392,31 @@ void CWeaponMagazined::OnMotionMark(u32 state, const motion_marks& M)
     }
 }
 
+void CWeaponMagazined::OnZoomSecondIn()
+{
+    inherited::OnZoomSecondIn();
 
+    if (GetState() == eIdle)
+        PlayAnimIdle();
+
+    // Alundaio
+    if (const auto object = smart_cast<CGameObject*>(H_Parent()))
+    {
+        object->callback(GameObject::eOnWeaponZoomIn)(object->lua_game_object(), this->lua_game_object());
+    }
+
+    if (CActor* pActor = smart_cast<CActor*>(H_Parent()))
+    {
+        CEffectorZoomInertion* S = smart_cast<CEffectorZoomInertion*>(pActor->Cameras().GetCamEffector(eCEZoom));
+        if (!S)
+        {
+            S = (CEffectorZoomInertion*)pActor->Cameras().AddCamEffector(xr_new<CEffectorZoomInertion>());
+            S->Init(this);
+        };
+        S->SetRndSeed(pActor->GetZoomRndSeed());
+        R_ASSERT(S);
+    }
+}
 void CWeaponMagazined::OnZoomIn()
 {
     inherited::OnZoomIn();
