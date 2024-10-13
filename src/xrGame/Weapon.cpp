@@ -718,6 +718,8 @@ bool CWeapon::bLoadAltScopesParams(LPCSTR section)
             _GetItem(str, i, scope_section);
             m_scopes.push_back(scope_section);
         }
+
+        LoadCurrentScopeParams(section);
     }
     else if (m_eScopeStatus == ALife::eAddonPermanent)
     {
@@ -759,6 +761,12 @@ void CWeapon::LoadCurrentScopeParams(LPCSTR section)
     if (pSettings->line_exist(section, "scope_texture"))
     {
         scope_tex_name = pSettings->r_string(section, "scope_texture");
+        if (xr_strcmp(scope_tex_name, "none") != 0)
+            bScopeIsHasTexture = true;
+    }
+    else if (pSettings->line_exist(m_section_id, "scope_texture"))
+    {
+        scope_tex_name = pSettings->r_string(m_section_id, "scope_texture");
         if (xr_strcmp(scope_tex_name, "none") != 0)
             bScopeIsHasTexture = true;
     }
@@ -1668,9 +1676,15 @@ bool CWeapon::IsScopePermament() const
 }
 bool CWeapon::IsScopeAttached() const
 {
-    return (ALife::eAddonAttachable == m_eScopeStatus &&
-               0 != (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope)) ||
-        ALife::eAddonPermanent == m_eScopeStatus;
+    if (ALife::eAddonAttachable == m_eScopeStatus)
+    {
+        if (0 != (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope))
+            return true;
+    }
+    if (ALife::eAddonPermanent == m_eScopeStatus)
+        return true;
+
+    return false;
 }
 
 bool CWeapon::IsSilencerAttached() const
