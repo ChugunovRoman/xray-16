@@ -845,7 +845,7 @@ void CWeaponMagazined::switch2_Reload()
     CWeapon::FireEnd();
 
     bool bEmptyEnable = iAmmoElapsed > 0 && isHUDAnimationExist("anm_reload_empty");
-    iMagSizeCurrent = bEmptyEnable ? iMagazineSize + 1 : iMagazineSize;
+    iMagSizeCurrent = iMagazineSize;
 
     m_needReload = true;
     PlayReloadSound();
