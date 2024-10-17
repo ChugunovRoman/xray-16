@@ -1010,6 +1010,8 @@ target_sources(xrGame PRIVATE
     player_hud_tune.h
     weapons_textures_addons_position.cpp
     weapons_textures_addons_position.h
+    cam_anm_tool.cpp
+    cam_anm_tool.h
     player_name_modifyer.cpp
     player_name_modifyer.h
     player_spot_params.cpp

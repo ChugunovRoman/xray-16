@@ -5,6 +5,7 @@
 #include "xrEngine/IGame_Persistent.h"
 #include "player_hud_tune.h"
 #include "weapons_textures_addons_position.h"
+#include "cam_anm_tool.h"
 
 class Task;
 class CMainMenu;
@@ -45,6 +46,7 @@ private:
     // hud tuner
     const CHudTuner m_hudTuner;
     const CUITexturesAddonsPosition m_wpnTexturesPos;
+    const CUICamAnmTool m_camAnmLst;
 
     void start_logo_intro();
     void update_logo_intro();
@@ -110,6 +112,7 @@ public:
 
     CHudTuner GetHudTuner() { return m_hudTuner; }
     CUITexturesAddonsPosition GetWpnTextureAddonsPosTool() const { return m_wpnTexturesPos; }
+    CUICamAnmTool GetCamAnmLst() const { return m_camAnmLst; }
 };
 
 IC CGamePersistent& GamePersistent() { return *((CGamePersistent*)g_pGamePersistent); }
