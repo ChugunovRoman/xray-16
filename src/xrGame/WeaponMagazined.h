@@ -40,6 +40,7 @@ protected:
 public:
     // Mortan: Новые параметры здеся
     virtual bool bMarkCanShow() { return IsZoomed() || IsSecondZoomed(); }
+    void PlayCamAnim(LPCSTR name) { inherited::PlayCamAnim(name); };
 protected:
     int iMagSizeCurrent;
     virtual void OnMagazineEmpty();

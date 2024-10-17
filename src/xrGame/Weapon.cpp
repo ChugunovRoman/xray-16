@@ -545,6 +545,8 @@ void CWeapon::Load(LPCSTR section)
     m_zoom_params.m_sUseZoomPostprocess = "";
     m_zoom_params.m_sUseBinocularVision = "";
 
+    LoadCamAnims(section);
+
     LoadModParams(section);
     bUseAltScope = !!bLoadAltScopesParams(section);
 
@@ -624,6 +626,50 @@ void CWeapon::Load(LPCSTR section)
     m_flags.set(FUsingCondition, READ_IF_EXISTS(pSettings, r_bool, section, "use_condition", true));
 }
 
+void CWeapon::LoadCamAnims(LPCSTR section)
+{
+    const CInifile::Sect& _sect = pSettings->r_section(section);
+
+    for (const auto& [name, anm] : _sect.Data)
+    {
+        if (0 == strncmp(name.c_str(), "cam_anm_",  sizeof("cam_anm_")  - 1))
+        {
+            const int count = _GetItemCount(anm.c_str());
+            string512 str_item;
+            _GetItem(anm.c_str(), Random.randI(0, count), str_item);
+            cam_anims[name] = anm;
+        }
+    }
+}
+void CWeapon::PlayCamAnim(LPCSTR name)
+{
+    if (!psActorFlags.test(AF_USE_CAM_ANIMS))
+        return;
+
+    if (CActor* pActor = smart_cast<CActor*>(H_Parent()))
+    {
+        shared_str anms = cam_anims[name];
+        if (*anms)
+        {
+            const int count = _GetItemCount(anms.c_str());
+            string512 str_item;
+            _GetItem(anms.c_str(), Random.randI(0, count), str_item);
+
+            if (!strstr(str_item, ".anm"))
+                xr_strcat(str_item, ".anm");
+
+            string_path fn;
+            if (!FS.exist(fn, "$game_anims$", str_item))
+                FATAL(make_string("! ERROR: Cam animation doesn't exist '%s' for prop '%s' in weapon '%s'", str_item, name, *cName()).c_str());
+
+            CAnimatorCamEffectorScriptCB* e = xr_new<CAnimatorCamEffectorScriptCB>("");
+            e->SetType(ECamEffectorType::cefAnsel);
+            e->SetCyclic(false);
+            e->Start(str_item);
+            pActor->Cameras().AddCamEffector(e);
+        }
+    }
+}
 void CWeapon::LoadScope(const shared_str& section)
 {
     if (ShadowOfChernobylMode) // XXX: temporary check for SOC mode, to be removed
@@ -1967,6 +2013,8 @@ void CWeapon::OnZoomSecondIn()
 
     if (GetHUDmode())
         GamePersistent().SetPickableEffectorDOF(true);
+
+    PlayCamAnim("cam_anm_aim_in");
 }
 void CWeapon::OnZoomIn()
 {
@@ -2011,6 +2059,8 @@ void CWeapon::OnZoomIn()
             }
         }
     }
+
+    PlayCamAnim("cam_anm_aim_in");
 }
 
 void CWeapon::OnZoomOut()
@@ -2036,6 +2086,8 @@ void CWeapon::OnZoomOut()
         m_zoom_params.m_pNight_vision->Stop(100000.0f, false);
         xr_delete(m_zoom_params.m_pNight_vision);
     }
+
+    PlayCamAnim("cam_anm_aim_out");
 }
 
 CUIWindow* CWeapon::ZoomTexture()

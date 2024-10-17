@@ -47,6 +47,8 @@ public:
 
     virtual void UpdateSecondVP(bool bInGrenade = false);
     void LoadModParams(LPCSTR section);
+    void LoadCamAnims(LPCSTR section);
+    void PlayCamAnim(LPCSTR name);
     void Load3DScopeParams(LPCSTR section);
     void LoadOriginalScopesParams(LPCSTR section);
     void LoadCurrentScopeParams(LPCSTR section);
@@ -81,6 +83,8 @@ public:
     Fvector m_strafe_offset[4][2]; //pos,rot,data1,data2/ normal,aim-GL --#SM+#--
 
     // End=================================
+
+    xr_map<shared_str, shared_str> cam_anims;
 
     // Generic
     virtual void Load(LPCSTR section);

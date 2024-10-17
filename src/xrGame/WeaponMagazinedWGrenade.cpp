@@ -667,6 +667,7 @@ void CWeaponMagazinedWGrenade::PlayAnimReload()
             {
                 PlayHUDMotion("anm_reload_misfire_w_gl", true, this, state);
                 bClearJamOnly = true;
+                inherited::PlayCamAnim("cam_anm_reload_misfire");
             }
             else
                 PlayHUDMotion("anm_reload_w_gl", "anim_reload_gl", true, this, state);
@@ -854,6 +855,8 @@ void CWeaponMagazinedWGrenade::PlayAnimModeSwitch()
         PlayHUDMotion("anm_switch_g", "anim_switch_grenade_on", /*FALSE*/ TRUE, this, eSwitch); //AVO: fix fast anim switch
     else
         PlayHUDMotion("anm_switch", "anim_switch_grenade_off", /*FALSE*/ TRUE, this, eSwitch); //AVO: fix fast anim switch
+    
+    inherited::PlayCamAnim("cam_anm_swicth_gl");
 }
 
 void CWeaponMagazinedWGrenade::PlayAnimBore()
@@ -1158,7 +1161,10 @@ void CWeaponMagazinedWGrenade::switch2_Unmis()
 		}
 
 		if (isHUDAnimationExist("anm_reload_misfire_w_gl"))
+		{
 			PlayHUDMotion("anm_reload_misfire_w_gl", TRUE, this, GetState());
+            inherited::PlayCamAnim("cam_anm_reload_misfire");
+        }
 		else if (isHUDAnimationExist("anm_reload_empty_w_gl"))
 			PlayHUDMotion("anm_reload_empty_w_gl", TRUE, this, GetState());
 		else

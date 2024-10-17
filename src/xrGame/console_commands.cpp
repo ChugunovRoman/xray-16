@@ -2314,6 +2314,7 @@ void CCC_RegisterCommands()
     CMD1(CCC_TuneAttachableItem, "dbg_adjust_attachable_item");
     CMD3(CCC_Mask, "g_3d_scopes", &psActorFlags, AF_3DSCOPE);
     CMD3(CCC_Mask, "g_pnv_in_scope", &psActorFlags, AF_PNV_W_SCOPE_DIS);
+    CMD3(CCC_Mask, "g_weapons_cam_anims", &psActorFlags, AF_USE_CAM_ANIMS);
 #ifndef MASTER_GOLD
     CMD1(CCC_JumpToLevel, "jump_to_level");
     CMD1(CCC_ToggleNoClip, "g_no_clip");

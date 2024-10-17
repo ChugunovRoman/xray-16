@@ -878,7 +878,10 @@ void CWeaponMagazined::switch2_Unmis()
             PlaySound("sndReload", get_LastFP());
     }
     if(isHUDAnimationExist("anm_reload_misfire"))
+    {
         PlayHUDMotion("anm_reload_misfire", true, this, state);
+        PlayCamAnim("cam_anm_reload_misfire");
+    }
     else if (isHUDAnimationExist("anm_reload_misfire"))
         PlayHUDMotion("anm_reload_empty", true, this, state);
     else
@@ -1307,6 +1310,7 @@ void CWeaponMagazined::PlayAnimReload()
         {
             PlayHUDMotion(anim_name, true, this, state);
             bClearJamOnly = true;
+            PlayCamAnim("cam_anm_reload_misfire");
         }
         else
             PlayHUDMotion("anm_reload", "anim_reload", true, this, state);
@@ -1318,6 +1322,8 @@ void CWeaponMagazined::PlayAnimReload()
         else
             PlayHUDMotion("anm_reload", "anim_reload", true, this, state);
     }
+
+    PlayCamAnim("cam_anm_reload");
 }
 
 void CWeaponMagazined::PlayAnimAim() { PlayHUDMotion("anm_idle_aim", "anim_idle_aim", true, nullptr, GetState()); }
@@ -1334,6 +1340,8 @@ void CWeaponMagazined::PlayAnimIdle()
 void CWeaponMagazined::PlayAnimShoot()
 {
     VERIFY(GetState() == eFire);
+
+    PlayCamAnim("cam_anm_shoot");
 
     if (iAmmoElapsed < 2)
     {
@@ -1490,6 +1498,8 @@ void CWeaponMagazined::OnNextFireMode()
     m_iCurFireMode = (m_iCurFireMode + 1 + m_aFireModes.size()) % m_aFireModes.size();
     SetQueueSize(GetCurrentFireMode());
 
+    PlayCamAnim("cam_anm_swicth_mode");
+
     if(isHUDAnimationExist("anm_switch_mode"))
         PlayHUDMotion("anm_switch_mode", true, this, state);
     else if (isHUDAnimationExist("anm_changefiremode"))
@@ -1507,6 +1517,8 @@ void CWeaponMagazined::OnPrevFireMode()
 
     m_iCurFireMode = (m_iCurFireMode - 1 + m_aFireModes.size()) % m_aFireModes.size();
     SetQueueSize(GetCurrentFireMode());
+
+    PlayCamAnim("cam_anm_swicth_mode");
 
     if(isHUDAnimationExist("anm_switch_mode"))
         PlayHUDMotion("anm_switch_mode", true, this, state);

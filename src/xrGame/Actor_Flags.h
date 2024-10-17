@@ -18,6 +18,7 @@ enum
     AF_3DSCOPE = (1 << 14),
     AF_PNV_W_SCOPE_DIS = (1 << 15),
     AF_USE_TRACERS = (1 << 16),
+    AF_USE_CAM_ANIMS = (1 << 17),
 };
 
 extern Flags32 psActorFlags;
