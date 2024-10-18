@@ -231,18 +231,18 @@ void TContactShotMark(CDB::TRI* T, dContactGeom* c)
                 VERIFY(static_mtl);
                 if (!static_mtl->Flags.test(SGameMtl::flPassable))
                 {
-                    if (vel_cret > Pars::vel_cret_sound)
-                    {
-                        if (!mtl_pair->CollideSounds.empty())
-                        {
-                            float volume = collide_volume_min +
-                                vel_cret * (collide_volume_max - collide_volume_min) /
-                                    (_sqrt(mass_limit) * default_l_limit - Pars::vel_cret_sound);
-                            ref_sound& randSound =
-                                mtl_pair->CollideSounds[Random.randI(mtl_pair->CollideSounds.size())];
-                            randSound.play_no_feedback(0, 0, 0, ((Fvector*)c->pos), &volume);
-                        }
-                    }
+                    // if (vel_cret > Pars::vel_cret_sound)
+                    // {
+                    //     if (!mtl_pair->CollideSounds.empty())
+                    //     {
+                    //         float volume = collide_volume_min +
+                    //             vel_cret * (collide_volume_max - collide_volume_min) /
+                    //                 (_sqrt(mass_limit) * default_l_limit - Pars::vel_cret_sound);
+                    //         ref_sound& randSound =
+                    //             mtl_pair->CollideSounds[Random.randI(mtl_pair->CollideSounds.size())];
+                    //         randSound.play_no_feedback(0, 0, 0, ((Fvector*)c->pos), &volume);
+                    //     }
+                    // }
                 }
                 else
                 {
