@@ -64,6 +64,8 @@ public:
     shared_str NameSection;
     shared_str NameVisual;
 
+    bool m_spawned;
+
 protected:
     // Parentness
     IGameObject* Parent;
@@ -78,7 +80,6 @@ protected:
 private:
     shared_str m_sTipText;
     bool m_bNonscriptUsable;
-    bool m_spawned;
     Flags32 m_server_flags;
     CAI_ObjectLocation* m_ai_location;
     ALife::_STORY_ID m_story_id;

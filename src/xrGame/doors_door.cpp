@@ -156,6 +156,8 @@ void door::change_state(actor* initiator)
 
     if (m_state == m_target_state)
         return;
+    if (!m_object.m_spawned)
+        return;
 
     m_object.callback(GameObject::eUseObject)(m_object.lua_game_object(), initiator ? static_cast<CScriptGameObject*>(initiator->lua_game_object()) : nullptr);
 #ifdef DEBUG
