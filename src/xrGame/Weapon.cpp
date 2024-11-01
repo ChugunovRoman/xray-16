@@ -174,7 +174,7 @@ void CWeapon::UpdateAltScope()
 
     shared_str sectionNeedLoad;
 
-    sectionNeedLoad = IsScopeAttached() ? GetNameWithAttachment() : m_section_id;
+    sectionNeedLoad = IsScopePermament() ? m_section_id : IsScopeAttached() ? GetNameWithAttachment() : m_section_id;
 
     if (!pSettings->section_exist(sectionNeedLoad))
         return;
@@ -534,7 +534,7 @@ void CWeapon::Load(LPCSTR section)
     m_eSilencerStatus = (ALife::EWeaponAddonStatus)pSettings->r_s32(section, "silencer_status");
     m_eGrenadeLauncherStatus = (ALife::EWeaponAddonStatus)pSettings->r_s32(section, "grenade_launcher_status");
 
-    if (pSettings->line_exist(section, "scopes") && xr_strcmp(pSettings->r_string(section, "scopes"), "") != 0)
+    if (pSettings->line_exist(section, "scopes") && xr_strcmp(pSettings->r_string(section, "scopes"), "") != 0 && xr_strcmp(pSettings->r_string(section, "scopes"), "none") != 0)
         m_eScopeStatus = ALife::EWeaponAddonStatus::eAddonAttachable;
 
     m_zoom_params.m_bZoomEnabled = !!pSettings->r_bool(section, "zoom_enabled");
@@ -1851,7 +1851,7 @@ void CWeapon::UpdateAddonsOffset()
 }
 void CWeapon::LoadAltHudAim()
 {
-    const auto sectionNeedLoad = IsScopeAttached() ? GetNameWithAttachment() : m_section_id;
+    const auto sectionNeedLoad = IsScopePermament() ? m_section_id : IsScopeAttached() ? GetNameWithAttachment() : m_section_id;
 
     R_ASSERT3(pSettings->section_exist(sectionNeedLoad), "Section doesn't exist", sectionNeedLoad.c_str());
 
