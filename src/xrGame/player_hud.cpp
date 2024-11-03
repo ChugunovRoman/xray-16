@@ -197,7 +197,7 @@ void attachable_hud_item::setup_firedeps(firedeps& fd)
 {
     update(false);
     // fire point&direction
-    if (m_measures.m_prop_flags.test(hud_item_measures::e_fire_point))
+    if (m_measures.m_prop_flags.test(hud_item_measures::e_fire_point) && m_measures.m_fire_bone != (u16)-1)
     {
         Fmatrix& fire_mat = m_model->LL_GetTransform(m_measures.m_fire_bone);
         fire_mat.transform_tiny(fd.vLastFP, m_measures.m_fire_point_offset);
@@ -215,7 +215,7 @@ void attachable_hud_item::setup_firedeps(firedeps& fd)
         VERIFY(_valid(fd.m_FireParticlesXForm));
     }
 
-    if (m_measures.m_prop_flags.test(hud_item_measures::e_fire_point2))
+    if (m_measures.m_prop_flags.test(hud_item_measures::e_fire_point2) && m_measures.m_fire_bone2 != (u16)-1)
     {
         Fmatrix& fire_mat = m_model->LL_GetTransform(m_measures.m_fire_bone2);
         fire_mat.transform_tiny(fd.vLastFP2, m_measures.m_fire_point2_offset);
