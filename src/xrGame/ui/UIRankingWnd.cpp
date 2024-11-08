@@ -420,17 +420,12 @@ void CUIRankingWnd::get_favorite_weapon()
 
     if (m_favorite_weapon_icon && xr_strcmp(str, m_last_weapon_icon))
     {
-        if (pSettings->section_exist(str) && pSettings->line_exist(str, "upgr_icon_x"))
+        if (pSettings->section_exist(str) && pSettings->line_exist(str, "inv_upgrade_icon"))
         {
-            m_favorite_weapon_icon->SetShader(InventoryUtilities::GetWeaponUpgradeIconsShader());
-            if (!xr_strcmp(str, "wpn_rpg7"))
-                m_favorite_weapon_icon->SetShader(InventoryUtilities::GetOutfitUpgradeIconsShader());
+            pcstr iconUpgradePath = pSettings->r_string(str, "inv_upgrade_icon");
+            m_favorite_weapon_icon->SetShader(InventoryUtilities::GetEquipmentIconShader(iconUpgradePath));
 
-            Frect tex_rect;
-            tex_rect.x1 = float(pSettings->r_u32(str, "upgr_icon_x"));
-            tex_rect.y1 = float(pSettings->r_u32(str, "upgr_icon_y"));
-            tex_rect.x2 = float(pSettings->r_u32(str, "upgr_icon_width"));
-            tex_rect.y2 = float(pSettings->r_u32(str, "upgr_icon_height"));
+            Frect tex_rect = Frect().set(0, 0, 350, 200);
             tex_rect.rb.add(tex_rect.lt);
             m_favorite_weapon_icon->SetTextureRect(tex_rect);
             m_favorite_weapon_icon->TextureOn();

@@ -104,41 +104,25 @@ void CUIInventoryUpgradeWnd::InitInventory(CUICellItem* cellItem, bool can_upgra
     // Загружаем картинку
     if (m_item && m_inv_item)
     {
-        bool is_shader = false;
-        if (smart_cast<CWeapon*>(m_inv_item))
-        {
-            is_shader = true;
-            m_item->SetShader(InventoryUtilities::GetWeaponUpgradeIconsShader());
-            if (smart_cast<CWeaponRPG7*>(m_inv_item))
-                m_item->SetShader(InventoryUtilities::GetOutfitUpgradeIconsShader());
-        }
-        else if (smart_cast<CCustomOutfit*>(m_inv_item) || smart_cast<CHelmet*>(m_inv_item))
-        {
-            is_shader = true;
-            m_item->SetShader(InventoryUtilities::GetOutfitUpgradeIconsShader());
-        }
+        pcstr iconUpgradePath = m_inv_item->GetUpgrIconPath();
+        m_item->SetShader(InventoryUtilities::GetEquipmentIconShader(iconUpgradePath));
 
-        if (is_shader)
-        {
-            Irect item_upgrade_grid_rect = m_inv_item->GetUpgrIconRect();
-            Frect texture_rect;
-            texture_rect.lt.set(item_upgrade_grid_rect.x1, item_upgrade_grid_rect.y1);
-            texture_rect.rb.set(item_upgrade_grid_rect.x2, item_upgrade_grid_rect.y2);
-            texture_rect.rb.add(texture_rect.lt);
-            m_item->GetUIStaticItem().SetTextureRect(texture_rect);
-            m_item->TextureOn();
-            m_item->SetStretchTexture(true);
-            Fvector2 v_r = Fvector2().set(item_upgrade_grid_rect.x2, item_upgrade_grid_rect.y2);
-            if (UI().is_widescreen())
-                v_r.x *= 0.8f;
+        Irect item_upgrade_grid_rect = Irect().set(0, 0, 350, 200);
+        Frect texture_rect;
+        texture_rect.lt.set(item_upgrade_grid_rect.x1, item_upgrade_grid_rect.y1);
+        texture_rect.rb.set(item_upgrade_grid_rect.x2, item_upgrade_grid_rect.y2);
+        texture_rect.rb.add(texture_rect.lt);
+        m_item->GetUIStaticItem().SetTextureRect(texture_rect);
+        m_item->TextureOn();
+        m_item->SetStretchTexture(true);
+        Fvector2 v_r = Fvector2().set(item_upgrade_grid_rect.x2, item_upgrade_grid_rect.y2);
+        if (UI().is_widescreen())
+            v_r.x *= 0.8f;
 
-            m_item->GetUIStaticItem().SetSize(v_r);
-            m_item->SetWidth(v_r.x);
-            m_item->SetHeight(v_r.y);
-            m_item->Show(true);
-        }
-        else
-            m_item->Show(false);
+        m_item->GetUIStaticItem().SetSize(v_r);
+        m_item->SetWidth(v_r.x);
+        m_item->SetHeight(v_r.y);
+        m_item->Show(true);
     }
     else if (m_item)
         m_item->Show(false);

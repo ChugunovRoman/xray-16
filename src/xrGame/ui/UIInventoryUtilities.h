@@ -36,10 +36,6 @@ const ui_shader& GetBuyMenuShader();
 const ui_shader& GetEquipmentIconShader(pcstr filepath);
     // shader на иконки персонажей в мультиплеере
 const ui_shader& GetMPCharIconsShader();
-// get shader for outfit icons in upgrade menu
-const ui_shader& GetOutfitUpgradeIconsShader();
-// get shader for weapon icons in upgrade menu
-const ui_shader& GetWeaponUpgradeIconsShader();
 //удаляем все шейдеры
 void DestroyShaders();
 void CreateShaders();

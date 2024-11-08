@@ -198,28 +198,6 @@ const ui_shader& InventoryUtilities::GetMPCharIconsShader()
     return *g_MPCharIconsShader;
 }
 
-const ui_shader& InventoryUtilities::GetOutfitUpgradeIconsShader()
-{
-    if (!g_OutfitUpgradeIconsShader)
-    {
-        g_OutfitUpgradeIconsShader = xr_new<ui_shader>();
-        (*g_OutfitUpgradeIconsShader)->create("hud" DELIMITER "default", "ui" DELIMITER "ui_actor_armor");
-    }
-
-    return *g_OutfitUpgradeIconsShader;
-}
-
-const ui_shader& InventoryUtilities::GetWeaponUpgradeIconsShader()
-{
-    if (!g_WeaponUpgradeIconsShader)
-    {
-        g_WeaponUpgradeIconsShader = xr_new<ui_shader>();
-        (*g_WeaponUpgradeIconsShader)->create("hud" DELIMITER "default", "ui" DELIMITER "ui_actor_weapons");
-    }
-
-    return *g_WeaponUpgradeIconsShader;
-}
-
 //////////////////////////////////////////////////////////////////////////
 
 const shared_str InventoryUtilities::GetGameDateAsString(EDatePrecision datePrec, char dateSeparator)

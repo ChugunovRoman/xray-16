@@ -168,7 +168,7 @@ public:
 
     pcstr GetInvIconPath() const;
     Irect GetInvGridRect() const;
-    Irect GetUpgrIconRect() const;
+    pcstr GetUpgrIconPath() const;
     const shared_str& GetIconName() const { return m_icon_name; };
     Frect GetKillMsgRect() const;
     //---------------------------------------------------------------------

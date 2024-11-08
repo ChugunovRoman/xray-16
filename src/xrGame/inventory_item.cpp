@@ -1487,16 +1487,11 @@ pcstr CInventoryItem::GetInvIconPath() const
     return pSettings->r_string(m_alt_section_id, "inv_icon");
 }
 
-Irect CInventoryItem::GetUpgrIconRect() const
+pcstr CInventoryItem::GetUpgrIconPath() const
 {
-    u32 x, y, w, h;
+    R_ASSERT2(pSettings->line_exist(m_alt_section_id, "inv_upgrade_icon"), make_string("Item '%s' doesn't has property 'inv_upgrade_icon'", m_alt_section_id.c_str()));
 
-    x = READ_IF_EXISTS(pSettings, r_u32, m_object->cNameSect(), "upgr_icon_x", 0);
-    y = READ_IF_EXISTS(pSettings, r_u32, m_object->cNameSect(), "upgr_icon_y", 0);
-    w = READ_IF_EXISTS(pSettings, r_u32, m_object->cNameSect(), "upgr_icon_width", 0);
-    h = READ_IF_EXISTS(pSettings, r_u32, m_object->cNameSect(), "upgr_icon_height", 0);
-
-    return Irect().set(x, y, w, h);
+    return pSettings->r_string(m_alt_section_id, "inv_upgrade_icon");
 }
 
 bool CInventoryItem::IsNecessaryItem(CInventoryItem* item) { return IsNecessaryItem(item->object().cNameSect()); };
