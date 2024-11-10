@@ -315,6 +315,9 @@ void Manager::load_all_inventory()
 
     const check_upgraded_inventory_section inv_section{ items_section };
 
+    for (int i = 0; i <= ESectionTypeName::latest; i++)
+        Level().sections_map[i].clear();
+
     // Alundaio: No longer the need to define upgradeable sections in [upgraded_inventory]
     // Xottab_DUTY: But still follow original COP behaviour, i.e. add section anyway if it is defined in [upgraded_inventory]
     for (const auto& section : pSettings->sections())
