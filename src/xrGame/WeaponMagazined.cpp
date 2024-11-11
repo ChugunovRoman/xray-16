@@ -1129,6 +1129,24 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
 
 }
 
+void CWeaponMagazined::ReplaceWeaponAfterDetachScope()
+{
+    pcstr parentSect = READ_IF_EXISTS(pSettings, r_string, *m_section_id, "parent_section", *m_section_id);
+
+    if (xr_strcmp(parentSect, *m_section_id) == 0 && xr_strcmp(parentSect, *m_alt_section_id) == 0)
+        return;
+
+    cNameVisual_set(pSettings->r_string(parentSect, "visual"));
+    m_alt_section_id = parentSect;
+    m_section_id = parentSect;
+    m_cur_scope = 0;
+
+    bUseAltScope = !!bLoadAltScopesParams(parentSect);
+
+    if (!bUseAltScope)
+        LoadOriginalScopesParams(parentSect);
+}
+
 bool CWeaponMagazined::DetachScope(const char* item_section_name, bool b_spawn_item)
 {
     bool detached = false;
@@ -1137,13 +1155,10 @@ bool CWeaponMagazined::DetachScope(const char* item_section_name, bool b_spawn_i
     for (; it != m_scopes.end(); ++it)
     {
         if (bUseAltScope)
-        {
             iter_scope_name = (*it);
-        }
         else
-        {
             iter_scope_name = pSettings->r_string((*it), "scope_name");
-        }
+
         if (!xr_strcmp(iter_scope_name, item_section_name))
         {
             m_cur_scope = 0;
@@ -1157,12 +1172,14 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
 {
     if (m_eScopeStatus == ALife::eAddonAttachable && DetachScope(item_section_name, b_spawn_item))
     {
-        if ((m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 0)
+        if ((m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 0 && !IsScopeAttached())
         {
             Msg("ERROR: scope addon already detached.");
             return true;
         }
         m_flagsAddOnState &= ~CSE_ALifeItemWeapon::eWeaponAddonScope;
+
+        ReplaceWeaponAfterDetachScope();
 
         UpdateAltScope();
         UpdateAddonsVisibility();
@@ -1214,7 +1231,7 @@ void CWeaponMagazined::LoadAddons()
 void CWeaponMagazined::InitAddons()
 {
     m_zoom_params.m_fIronSightZoomFactor =
-        READ_IF_EXISTS(pSettings, r_float, cNameSect(), "ironsight_zoom_factor", 50.0f);
+        READ_IF_EXISTS(pSettings, r_float, cNameSect(), "ironsight_zoom_factor", 73.0f);
     if (IsScopeAttached())
     {
         if (m_eScopeStatus == ALife::eAddonAttachable)
@@ -1228,7 +1245,8 @@ void CWeaponMagazined::InitAddons()
     }
     else
     {
-        if (m_UIScope)
+        shared_str scope_tex_name = READ_IF_EXISTS(pSettings, r_string, cNameSect(), "scope_texture", "none");
+        if (m_UIScope && xr_strcmp(scope_tex_name, "none") == 0)
             xr_delete(m_UIScope);
 
         if (bIsSecondVPZoomPresent())

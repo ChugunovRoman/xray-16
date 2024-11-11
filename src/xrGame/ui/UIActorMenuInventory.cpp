@@ -1066,9 +1066,7 @@ void CUIActorMenu::PropertiesBoxForWeapon(CUICellItem* cell_item, PIItem item, b
     //отсоединение аддонов от вещи
     CWeapon* pWeapon = smart_cast<CWeapon*>(item);
     if (!pWeapon)
-    {
         return;
-    }
 
     if (pWeapon->GrenadeLauncherAttachable())
     {

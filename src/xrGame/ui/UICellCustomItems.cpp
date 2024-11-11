@@ -499,12 +499,10 @@ void CUIWeaponCellItem::SetTextureColor(u32 color)
 void CUIWeaponCellItem::OnAfterChild(CUIDragDropListEx* parent_list)
 {
     if (is_silencer() && GetIcon(eSilencer))
-        InitAddon(GetIcon(eSilencer), *object()->GetSilencerName(), m_addon_offset[eSilencer],
-            parent_list->GetVerticalPlacement());
+        InitAddon(GetIcon(eSilencer), *object()->GetSilencerName(), m_addon_offset[eSilencer], parent_list->GetVerticalPlacement());
 
     if (is_scope() && GetIcon(eScope))
-        InitAddon(
-            GetIcon(eScope), *object()->GetScopeName(), m_addon_offset[eScope], parent_list->GetVerticalPlacement());
+        InitAddon(GetIcon(eScope), *object()->GetScopeName(), m_addon_offset[eScope], parent_list->GetVerticalPlacement());
 
     if (is_launcher() && GetIcon(eLauncher))
         InitAddon(GetIcon(eLauncher), *object()->GetGrenadeLauncherName(), m_addon_offset[eLauncher],

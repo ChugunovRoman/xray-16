@@ -292,6 +292,7 @@ protected:
         float m_fZoomRotateTime; //время приближения
 
         float m_fIronSightZoomFactor; //коэффициент увеличения прицеливания
+        float m_fSecondScopeZoomFactor; //коэффициент увеличения второго прицела (коллиматора)
         float m_fScopeZoomFactor; //коэффициент увеличения прицела
 
         float m_f3dZoomFactor; //коэффициент мирового зума при использовании второго вьюпорта
