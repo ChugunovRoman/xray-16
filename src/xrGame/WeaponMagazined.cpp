@@ -1081,6 +1081,8 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
             }
         }
         m_flagsAddOnState |= CSE_ALifeItemWeapon::eWeaponAddonScope;
+        m_section_id = GetNameWithAttachment();
+        reload(*m_section_id);
         result = true;
     }
     else if (pSilencer && m_eSilencerStatus == ALife::eAddonAttachable &&
@@ -1133,18 +1135,14 @@ void CWeaponMagazined::ReplaceWeaponAfterDetachScope()
 {
     pcstr parentSect = READ_IF_EXISTS(pSettings, r_string, *m_section_id, "parent_section", *m_section_id);
 
-    if (xr_strcmp(parentSect, *m_section_id) == 0 && xr_strcmp(parentSect, *m_alt_section_id) == 0)
+    if (xr_strcmp(parentSect, *m_section_id) == 0)
         return;
 
     cNameVisual_set(pSettings->r_string(parentSect, "visual"));
-    m_alt_section_id = parentSect;
     m_section_id = parentSect;
     m_cur_scope = 0;
 
-    bUseAltScope = !!bLoadAltScopesParams(parentSect);
-
-    if (!bUseAltScope)
-        LoadOriginalScopesParams(parentSect);
+    reload(parentSect);
 }
 
 bool CWeaponMagazined::DetachScope(const char* item_section_name, bool b_spawn_item)

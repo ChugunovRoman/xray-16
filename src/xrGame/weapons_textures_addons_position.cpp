@@ -33,19 +33,19 @@ void CUITexturesAddonsPosition::ResetToDefaultWpn1Values()
         CInventory* inv = &Actor()->inventory();
         PIItem item_in_slot_2 = inv->ItemFromSlot(INV_SLOT_2);
 
-        if (item_in_slot_2 && pSettings->section_exist(item_in_slot_2->m_alt_section_id))
+        if (item_in_slot_2 && pSettings->section_exist(item_in_slot_2->m_section_id))
         {
             int x, y = 0;
-            x = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_2->m_alt_section_id, "scope_x", 0);
-            y = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_2->m_alt_section_id, "scope_y", 0);
+            x = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_2->m_section_id, "scope_x", 0);
+            y = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_2->m_section_id, "scope_y", 0);
             pos[0][0] = Ivector2().set(x, y);
 
-            x = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_2->m_alt_section_id, "silencer_x", 0);
-            y = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_2->m_alt_section_id, "silencer_y", 0);
+            x = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_2->m_section_id, "silencer_x", 0);
+            y = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_2->m_section_id, "silencer_y", 0);
             pos[0][1] = Ivector2().set(x, y);
 
-            x = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_2->m_alt_section_id, "grenade_launcher_x", 0);
-            y = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_2->m_alt_section_id, "grenade_launcher_y", 0);
+            x = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_2->m_section_id, "grenade_launcher_x", 0);
+            y = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_2->m_section_id, "grenade_launcher_y", 0);
             pos[0][2] = Ivector2().set(x, y);
         }
     }
@@ -69,19 +69,19 @@ void CUITexturesAddonsPosition::ResetToDefaultWpn2Values()
         CInventory* inv = &Actor()->inventory();
         PIItem item_in_slot_3 = inv->ItemFromSlot(INV_SLOT_3);
 
-        if (item_in_slot_3 && pSettings->section_exist(item_in_slot_3->m_alt_section_id))
+        if (item_in_slot_3 && pSettings->section_exist(item_in_slot_3->m_section_id))
         {
             int x, y = 0;
-            x = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_3->m_alt_section_id, "scope_x", 0);
-            y = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_3->m_alt_section_id, "scope_y", 0);
+            x = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_3->m_section_id, "scope_x", 0);
+            y = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_3->m_section_id, "scope_y", 0);
             pos[1][0] = Ivector2().set(x, y);
 
-            x = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_3->m_alt_section_id, "silencer_x", 0);
-            y = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_3->m_alt_section_id, "silencer_y", 0);
+            x = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_3->m_section_id, "silencer_x", 0);
+            y = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_3->m_section_id, "silencer_y", 0);
             pos[1][1] = Ivector2().set(x, y);
 
-            x = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_3->m_alt_section_id, "grenade_launcher_x", 0);
-            y = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_3->m_alt_section_id, "grenade_launcher_y", 0);
+            x = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_3->m_section_id, "grenade_launcher_x", 0);
+            y = READ_IF_EXISTS(pSettings, r_s32, item_in_slot_3->m_section_id, "grenade_launcher_y", 0);
             pos[1][2] = Ivector2().set(x, y);
         }
     }
@@ -113,7 +113,6 @@ void CUITexturesAddonsPosition::UpdateValues()
 
             if (wpn)
             {
-                // Msg("UpdateValues, wpn1=[%s] scope=[%d, %d] sil=[%d, %d]", *wpn->m_alt_section_id, new_pos[1][0].x, new_pos[1][0].y, new_pos[1][1].x, new_pos[1][1].y);
                 wpn->SetScopeOffset(new_pos[0][0]);
                 wpn->SetSilencerOffset(new_pos[0][1]);
                 wpn->SetGLOffset(new_pos[0][2]);
@@ -125,7 +124,6 @@ void CUITexturesAddonsPosition::UpdateValues()
 
             if (wpn)
             {
-                // Msg("UpdateValues, wpn2=[%s] scope=[%d, %d] sil=[%d, %d]", *wpn->m_alt_section_id, new_pos[1][0].x, new_pos[1][0].y, new_pos[1][1].x, new_pos[1][1].y);
                 wpn->SetScopeOffset(new_pos[1][0]);
                 wpn->SetSilencerOffset(new_pos[1][1]);
                 wpn->SetGLOffset(new_pos[1][2]);
@@ -154,19 +152,19 @@ void CUITexturesAddonsPosition::OnFrame()
     pcstr item1Sect = "[No weapon in slot]";
     pcstr item2Sect = "[No weapon in slot]";
 
-    if (item_in_slot_2 && curr_wpn_1 != *item_in_slot_2->m_alt_section_id)
+    if (item_in_slot_2 && curr_wpn_1 != *item_in_slot_2->m_section_id)
         ResetToDefaultWpn1Values();
-    if (item_in_slot_3 && curr_wpn_2 != *item_in_slot_3->m_alt_section_id)
+    if (item_in_slot_3 && curr_wpn_2 != *item_in_slot_3->m_section_id)
         ResetToDefaultWpn2Values();
 
     if (item_in_slot_2)
     {
-        item1Sect = *item_in_slot_2->m_alt_section_id;
+        item1Sect = *item_in_slot_2->m_section_id;
         curr_wpn_1 = item1Sect;
     }
     if (item_in_slot_3)
     {
-        item2Sect = *item_in_slot_3->m_alt_section_id;
+        item2Sect = *item_in_slot_3->m_section_id;
         curr_wpn_2 = item2Sect;
     }
 
@@ -211,7 +209,7 @@ void CUITexturesAddonsPosition::OnFrame()
                 string128 selectable;
 
                 ImGui::LogToClipboard();
-                xr_sprintf(selectable, "[%s]\n", *item_in_slot_2->m_alt_section_id);
+                xr_sprintf(selectable, "[%s]\n", *item_in_slot_2->m_section_id);
                 ImGui::LogText(selectable);
                 xr_sprintf(selectable, "scope_x = %d\n", new_pos[0][0].x);
                 ImGui::LogText(selectable);
@@ -260,7 +258,7 @@ void CUITexturesAddonsPosition::OnFrame()
                 string128 selectable;
 
                 ImGui::LogToClipboard();
-                xr_sprintf(selectable, "[%s]\n", *item_in_slot_3->m_alt_section_id);
+                xr_sprintf(selectable, "[%s]\n", *item_in_slot_3->m_section_id);
                 ImGui::LogText(selectable);
                 xr_sprintf(selectable, "scope_x = %d\n", new_pos[1][0].x);
                 ImGui::LogText(selectable);

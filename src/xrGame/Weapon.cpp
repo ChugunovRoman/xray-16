@@ -162,7 +162,7 @@ const shared_str CWeapon::GetScopeName() const
     else if (m_cur_scope)
         return READ_IF_EXISTS(pSettings, r_string, m_scopes[m_cur_scope], "scope_name", "wpn_addon_scope");
     else
-        return READ_IF_EXISTS(pSettings, r_string, m_alt_section_id, "scope_name", "wpn_addon_scope");
+        return READ_IF_EXISTS(pSettings, r_string, m_section_id, "scope_name", "wpn_addon_scope");
 }
 
 void CWeapon::UpdateAltScope()
@@ -581,11 +581,9 @@ void CWeapon::Load(LPCSTR section)
     m_hands_offset[1][0].set(0, 0, 0);
 
     strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_pos", _prefix);
-    if (pSettings->line_exist(base_hud_sect, val_name))
-        m_hands_offset[0][1] = pSettings->r_fvector3(base_hud_sect, val_name);
+    m_hands_offset[0][1] = READ_IF_EXISTS(pSettings, r_fvector3, base_hud_sect, val_name, Fvector().set(0.0f, 0.0f, 0.0f));
     strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_rot", _prefix);
-    if (pSettings->line_exist(base_hud_sect, val_name))
-        m_hands_offset[1][1] = pSettings->r_fvector3(base_hud_sect, val_name);
+    m_hands_offset[1][1] = READ_IF_EXISTS(pSettings, r_fvector3, base_hud_sect, val_name, Fvector().set(0.0f, 0.0f, 0.0f));
 
     if (pSettings->line_exist(section, "weapon_remove_time"))
         m_dwWeaponRemoveTime = pSettings->r_u32(section, "weapon_remove_time");
@@ -881,14 +879,17 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
 
     m_flagsAddOnState = E->m_addon_flags.get();
     m_ammoType = E->ammo_type;
-    if (IsScopeAttached())
+    if (IsScopeAttached() && pSettings->line_exist(*m_section_id, "scopes") && xr_strcmp(pSettings->r_string(*m_section_id, "scopes"), "none") != 0)
     {
-        if (pSettings->line_exist(*m_alt_section_id, "scope_zoom_factor"))
-            m_zoom_params.m_fScopeZoomFactor = pSettings->r_float(*m_alt_section_id, "scope_zoom_factor");
+        shared_str new_name = GetNameWithAttachment();
+
+        if (pSettings->line_exist(*m_section_id, "scope_zoom_factor"))
+            m_zoom_params.m_fScopeZoomFactor = pSettings->r_float(*m_section_id, "scope_zoom_factor");
         m_flagsAddOnState |= CSE_ALifeItemWeapon::eWeaponAddonScope;
     }
     else if (pSettings->line_exist(*m_section_id, "scope_zoom_factor"))
         m_zoom_params.m_fScopeZoomFactor = pSettings->r_float(*m_section_id, "scope_zoom_factor");
+
     m_fRTZoomFactor = m_zoom_params.m_fScopeZoomFactor;
     SetState(E->wpn_state);
     SetNextState(E->wpn_state);
@@ -1027,7 +1028,7 @@ void CWeapon::save(NET_Packet& output_packet)
     save_data(m_bRememberActorNVisnStatus, output_packet);
     save_data(bNVsecondVPstatus, output_packet);
     save_data(m_fSecondRTZoomFactor, output_packet);
-    save_data(m_alt_section_id, output_packet);
+    save_data(m_section_id, output_packet);
 }
 
 void CWeapon::load(IReader& input_packet)
@@ -1053,9 +1054,8 @@ void CWeapon::load(IReader& input_packet)
     load_data(m_bRememberActorNVisnStatus, input_packet);
     load_data(bNVsecondVPstatus, input_packet);
     load_data(m_fSecondRTZoomFactor, input_packet);
-    load_data(m_alt_section_id, input_packet);
-
-    m_section_id = m_alt_section_id;
+    load_data(m_section_id, input_packet);
+    reload(*m_section_id);
 }
 
 void CWeapon::OnEvent(NET_Packet& P, u16 type)
@@ -1730,7 +1730,7 @@ bool CWeapon::IsGrenadeLauncherAttached() const
 
 bool CWeapon::IsScopePermament() const
 {
-    return pSettings->r_s32(m_alt_section_id, "scope_status") == ALife::eAddonPermanent;
+    return pSettings->r_s32(m_section_id, "scope_status") == ALife::eAddonPermanent;
 }
 bool CWeapon::IsScopeAttached() const
 {
@@ -1755,7 +1755,21 @@ bool CWeapon::IsSilencerAttached() const
 }
 
 bool CWeapon::GrenadeLauncherAttachable() { return (ALife::eAddonAttachable == m_eGrenadeLauncherStatus); }
-bool CWeapon::ScopeAttachable() { return (ALife::eAddonAttachable == m_eScopeStatus); }
+bool CWeapon::ScopeAttachable()
+{
+    if (ALife::eAddonAttachable == m_eScopeStatus)
+        return true;
+    if (pSettings->line_exist(m_section_id.c_str(), "parent_section"))
+    {
+        shared_str parent = pSettings->r_string(m_section_id.c_str(), "parent_section");
+        if (pSettings->line_exist(*parent, "scope_status"))
+        {
+            if (pSettings->r_s32(*parent, "scope_status") == ALife::EWeaponAddonStatus::eAddonAttachable)
+                return true;
+        }
+    }
+    return false;
+}
 bool CWeapon::SilencerAttachable() { return (ALife::eAddonAttachable == m_eSilencerStatus); }
 
 
@@ -1817,49 +1831,31 @@ void CWeapon::UpdateAddonsOffset()
 {
     if (m_eScopeStatus == ALife::eAddonAttachable)
     {
-        if (pSettings->line_exist(m_alt_section_id, "scope_name"))
-            m_sScopeName = pSettings->r_string(m_alt_section_id, "scope_name");
-        else if (pSettings->line_exist(m_section_id, "scope_name"))
+        if (pSettings->line_exist(m_section_id, "scope_name"))
             m_sScopeName = pSettings->r_string(m_section_id, "scope_name");
-        if (pSettings->line_exist(m_alt_section_id, "scope_x"))
-            m_iScopeX = pSettings->r_s32(m_alt_section_id, "scope_x");
-        else if (pSettings->line_exist(m_section_id, "scope_x"))
+        if (pSettings->line_exist(m_section_id, "scope_x"))
             m_iScopeX = pSettings->r_s32(m_section_id, "scope_x");
-        if (pSettings->line_exist(m_alt_section_id, "scope_y"))
-            m_iScopeY = pSettings->r_s32(m_alt_section_id, "scope_y");
-        else if (pSettings->line_exist(m_section_id, "scope_y"))
+        if (pSettings->line_exist(m_section_id, "scope_y"))
             m_iScopeY = pSettings->r_s32(m_section_id, "scope_y");
     }
 
     if (m_eSilencerStatus == ALife::eAddonAttachable)
     {
-        if (pSettings->line_exist(m_alt_section_id, "silencer_name"))
-            m_sSilencerName = pSettings->r_string(m_alt_section_id, "silencer_name");
-        else if (pSettings->line_exist(m_section_id, "silencer_name"))
+        if (pSettings->line_exist(m_section_id, "silencer_name"))
             m_sSilencerName = pSettings->r_string(m_section_id, "silencer_name");
-        if (pSettings->line_exist(m_alt_section_id, "silencer_x"))
-            m_iSilencerX = pSettings->r_s32(m_alt_section_id, "silencer_x");
-        else if (pSettings->line_exist(m_section_id, "silencer_x"))
+        if (pSettings->line_exist(m_section_id, "silencer_x"))
             m_iSilencerX = pSettings->r_s32(m_section_id, "silencer_x");
-        if (pSettings->line_exist(m_alt_section_id, "silencer_y"))
-            m_iSilencerY = pSettings->r_s32(m_alt_section_id, "silencer_y");
-        else if (pSettings->line_exist(m_section_id, "silencer_y"))
+        if (pSettings->line_exist(m_section_id, "silencer_y"))
             m_iSilencerY = pSettings->r_s32(m_section_id, "silencer_y");
     }
 
     if (m_eGrenadeLauncherStatus == ALife::eAddonAttachable)
     {
-        if (pSettings->line_exist(m_alt_section_id, "grenade_launcher_name"))
-            m_sGrenadeLauncherName = pSettings->r_string(m_alt_section_id, "grenade_launcher_name");
-        else if (pSettings->line_exist(m_section_id, "grenade_launcher_name"))
+        if (pSettings->line_exist(m_section_id, "grenade_launcher_name"))
             m_sGrenadeLauncherName = pSettings->r_string(m_section_id, "grenade_launcher_name");
-        if (pSettings->line_exist(m_alt_section_id, "grenade_launcher_x"))
-            m_iGrenadeLauncherX = pSettings->r_s32(m_alt_section_id, "grenade_launcher_x");
-        else if (pSettings->line_exist(m_section_id, "grenade_launcher_x"))
+        if (pSettings->line_exist(m_section_id, "grenade_launcher_x"))
             m_iGrenadeLauncherX = pSettings->r_s32(m_section_id, "grenade_launcher_x");
-        if (pSettings->line_exist(m_alt_section_id, "grenade_launcher_y"))
-            m_iGrenadeLauncherY = pSettings->r_s32(m_alt_section_id, "grenade_launcher_y");
-        else if (pSettings->line_exist(m_section_id, "grenade_launcher_y"))
+        if (pSettings->line_exist(m_section_id, "grenade_launcher_y"))
             m_iGrenadeLauncherY = pSettings->r_s32(m_section_id, "grenade_launcher_y");
     }
 }
@@ -1869,7 +1865,7 @@ void CWeapon::LoadAltHudAim()
 
     R_ASSERT3(pSettings->section_exist(sectionNeedLoad), "Section doesn't exist", sectionNeedLoad.c_str());
 
-    m_alt_section_id = sectionNeedLoad;
+    // m_alt_section_id = sectionNeedLoad;
     m_zoom_params.m_bZoomSecondEnabled = READ_IF_EXISTS(pSettings, r_bool, sectionNeedLoad, "use_alt_aim_hud", false);
 
     if (m_zoom_params.m_bZoomSecondEnabled)
@@ -2148,9 +2144,13 @@ void CWeapon::reload(LPCSTR section)
 {
     CShootingObject::reload(section);
     CHudItemObject::reload(section);
-
+    
     m_can_be_strapped = true;
     m_strapped_mode = false;
+    b_forceIconUpdate = true;
+
+    if (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope)
+        UpdateAddonsOffset();
 
     if (pSettings->line_exist(section, "strap_bone0"))
         m_strap_bone0 = pSettings->r_string(section, "strap_bone0");
@@ -2161,6 +2161,37 @@ void CWeapon::reload(LPCSTR section)
         m_strap_bone1 = pSettings->r_string(section, "strap_bone1");
     else
         m_can_be_strapped = false;
+
+    m_eScopeStatus = (ALife::EWeaponAddonStatus)pSettings->r_s32(section, "scope_status");
+    m_eSilencerStatus = (ALife::EWeaponAddonStatus)pSettings->r_s32(section, "silencer_status");
+    m_eGrenadeLauncherStatus = (ALife::EWeaponAddonStatus)pSettings->r_s32(section, "grenade_launcher_status");
+
+    if (pSettings->line_exist(section, "scopes") && xr_strcmp(pSettings->r_string(section, "scopes"), "") != 0 && xr_strcmp(pSettings->r_string(section, "scopes"), "none") != 0)
+        m_eScopeStatus = ALife::EWeaponAddonStatus::eAddonAttachable;
+
+    m_zoom_params.m_bZoomSecondEnabled = READ_IF_EXISTS(pSettings, r_bool, section, "use_alt_aim_hud", false);
+    m_zoom_params.m_fZoomRotateTime = READ_IF_EXISTS(pSettings, r_float, section, "zoom_rotate_time", ROTATION_TIME);
+
+    bUseAltScope = !!bLoadAltScopesParams(section);
+
+    if (!bUseAltScope)
+        LoadOriginalScopesParams(section);
+
+    if (m_eSilencerStatus == ALife::eAddonAttachable)
+    {
+        m_sSilencerName = pSettings->r_string(section, "silencer_name");
+        m_iSilencerX = pSettings->r_s32(section, "silencer_x");
+        m_iSilencerY = pSettings->r_s32(section, "silencer_y");
+    }
+
+    if (m_eGrenadeLauncherStatus == ALife::eAddonAttachable)
+    {
+        m_sGrenadeLauncherName = pSettings->r_string(section, "grenade_launcher_name");
+        m_iGrenadeLauncherX = pSettings->r_s32(section, "grenade_launcher_x");
+        m_iGrenadeLauncherY = pSettings->r_s32(section, "grenade_launcher_y");
+    }
+
+    UpdateAltScope();
 
     if (m_eScopeStatus == ALife::eAddonAttachable)
     {
