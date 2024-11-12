@@ -115,6 +115,9 @@ int g_normalize_upgrade_mouse_sens = 0;
 
 int g_quick_unload_upgraded = 1;
 int g_quick_unload_new = 0;
+int g_quick_unload_scopes = 0;
+int g_quick_unload_gl = 0;
+int g_quick_unload_silencers = 0;
 
 void register_mp_console_commands();
 //-----------------------------------------------------------
@@ -2542,6 +2545,9 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "wpn_aim_toggle", &b_toggle_weapon_aim, 0, 1);
     CMD4(CCC_Integer, "wpn_quick_unload_upgraded", &g_quick_unload_upgraded, 0, 1);
     CMD4(CCC_Integer, "wpn_quick_unload_new", &g_quick_unload_new, 0, 1);
+    CMD4(CCC_Integer, "wpn_quick_unload_scopes", &g_quick_unload_scopes, 0, 1);
+    CMD4(CCC_Integer, "wpn_quick_unload_gl", &g_quick_unload_gl, 0, 1);
+    CMD4(CCC_Integer, "wpn_quick_unload_silencers", &g_quick_unload_silencers, 0, 1);
 
     CMD1(CCC_UIStyle, "ui_style");
     CMD1(CCC_UIRestart, "ui_restart");

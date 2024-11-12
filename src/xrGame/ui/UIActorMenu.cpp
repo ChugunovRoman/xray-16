@@ -46,6 +46,9 @@
 extern int g_inv_inv_cell_size;
 extern int g_quick_unload_upgraded;
 extern int g_quick_unload_new;
+extern int g_quick_unload_scopes;
+extern int g_quick_unload_gl;
+extern int g_quick_unload_silencers;
 
 void CUIActorMenu::SetActor(CInventoryOwner* io)
 {
@@ -475,6 +478,15 @@ void CUIActorMenu::QuickUnloadWeapons()
             _GetItem(ammo_sec, m_wpn->GetAmmoType(), _ammoItem);
 
         m_wpn->SpawnAmmo(count, _ammoItem, m_pActorInvOwner->cast_game_object()->ID());
+
+        if (g_quick_unload_scopes && m_wpn->ScopeAttachable() && m_wpn->IsScopeAttached())
+            DetachAddon(m_wpn->GetScopeName().c_str(), item);
+
+        if (g_quick_unload_gl && m_wpn->GrenadeLauncherAttachable() && m_wpn->IsGrenadeLauncherAttached())
+            DetachAddon(m_wpn->GetGrenadeLauncherName().c_str(), item);
+
+        if (g_quick_unload_silencers && m_wpn->SilencerAttachable() && m_wpn->IsSilencerAttached())
+            DetachAddon(m_wpn->GetSilencerName().c_str(), item);
 
         any_wpn_was_unloaded = true;
     }
