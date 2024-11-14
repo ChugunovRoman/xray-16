@@ -41,7 +41,9 @@ protected:
     int m_accelerator;
     CUIStatic* m_text;
     CUIStatic* m_upgrade;
+    CUIStatic* m_faction;
     Fvector2 m_upgrade_pos;
+    Fvector2 m_faction_pos;
 
     virtual void UpdateItemText();
     void init();

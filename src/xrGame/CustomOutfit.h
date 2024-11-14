@@ -43,6 +43,8 @@ protected:
     u32 m_artefact_count{};
 
 public:
+    shared_str m_faction;
+
     float m_fPowerLoss;
     float m_additional_weight;
     float m_additional_weight2;

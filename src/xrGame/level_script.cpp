@@ -622,6 +622,9 @@ luabind::object get_sections(lua_State* L, ESectionTypeName type) {
   luabind::object result = luabind::newtable(L);
   std::size_t index = 1;
 
+  if (!g_actor)
+    return result;
+
   for (const auto& name : Level().sections_map[type])
   {
       result[index++] = name;

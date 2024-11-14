@@ -1195,8 +1195,6 @@ void CUICellContainer::clear_select_armament()
     {
         CUICell& cell = (*itb);
         if (cell.m_item)
-        {
             cell.m_item->m_select_armament = false;
-        }
     }
 }

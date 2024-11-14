@@ -1472,24 +1472,24 @@ Irect CInventoryItem::GetInvGridRect() const
 
     x = 0;
     y = 0;
-    w = pSettings->r_u32(m_alt_section_id, "inv_grid_width");
-    h = pSettings->r_u32(m_alt_section_id, "inv_grid_height");
+    w = pSettings->r_u32(m_section_id, "inv_grid_width");
+    h = pSettings->r_u32(m_section_id, "inv_grid_height");
 
     return Irect().set(x, y, w, h);
 }
 
 pcstr CInventoryItem::GetInvIconPath() const
 {
-    R_ASSERT2(pSettings->line_exist(m_alt_section_id, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", m_alt_section_id.c_str()));
+    R_ASSERT2(pSettings->line_exist(m_section_id, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", m_section_id.c_str()));
 
-    return pSettings->r_string(m_alt_section_id, "inv_icon");
+    return pSettings->r_string(m_section_id, "inv_icon");
 }
 
 pcstr CInventoryItem::GetUpgrIconPath() const
 {
-    R_ASSERT2(pSettings->line_exist(m_alt_section_id, "inv_upgrade_icon"), make_string("Item '%s' doesn't has property 'inv_upgrade_icon'", m_alt_section_id.c_str()));
+    R_ASSERT2(pSettings->line_exist(m_section_id, "inv_upgrade_icon"), make_string("Item '%s' doesn't has property 'inv_upgrade_icon'", m_section_id.c_str()));
 
-    return pSettings->r_string(m_alt_section_id, "inv_upgrade_icon");
+    return pSettings->r_string(m_section_id, "inv_upgrade_icon");
 }
 
 bool CInventoryItem::IsNecessaryItem(CInventoryItem* item) { return IsNecessaryItem(item->object().cNameSect()); };

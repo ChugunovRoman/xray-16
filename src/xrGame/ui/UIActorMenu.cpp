@@ -793,9 +793,8 @@ void CUIActorMenu::set_highlight_item(CUICellItem* cell_item)
 {
     PIItem item = (PIItem)cell_item->m_pData;
     if (!item)
-    {
         return;
-    }
+
     highlight_item_slot(cell_item);
 
     switch (m_currMenuMode)
@@ -805,6 +804,7 @@ void CUIActorMenu::set_highlight_item(CUICellItem* cell_item)
     case mmUpgrade:
     {
         highlight_armament(item, m_pLists[eInventoryBagList]);
+        highlight_outfit(item, m_pLists[eInventoryBagList]);
         break;
     }
     case mmTrade:
@@ -825,6 +825,11 @@ void CUIActorMenu::set_highlight_item(CUICellItem* cell_item)
     m_highlight_clear = false;
 }
 
+void CUIActorMenu::highlight_outfit(PIItem item, CUIDragDropListEx* ddlist)
+{
+    ddlist->clear_select_armament();
+    highlight_outfits_for_patch(item, ddlist);
+}
 void CUIActorMenu::highlight_armament(PIItem item, CUIDragDropListEx* ddlist)
 {
     ddlist->clear_select_armament();
@@ -833,6 +838,32 @@ void CUIActorMenu::highlight_armament(PIItem item, CUIDragDropListEx* ddlist)
     highlight_weapons_for_addon(item, ddlist);
 }
 
+void CUIActorMenu::highlight_outfits_for_patch(PIItem patch_item, CUIDragDropListEx* ddlist)
+{
+    if (!patch_item)
+        return;
+    if (!ddlist)
+        return;
+
+    pcstr item_class = READ_IF_EXISTS(pSettings, r_string, *patch_item->m_section_id, "item_class", nullptr);
+    if (!item_class || xr_strcmp(item_class, "outfit_patch") != 0)
+        return;
+
+    u32 const cnt = ddlist->ItemsCount();
+    for (u32 i = 0; i < cnt; ++i)
+    {
+        CUICellItem* ci = ddlist->GetItemIdx(i);
+        PIItem item = (PIItem)ci->m_pData;
+        if (!item)
+            continue;
+
+        CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(item);
+        if (!outfit)
+            continue;
+
+        ci->m_select_armament = true;
+    }
+}
 void CUIActorMenu::highlight_ammo_for_weapon(PIItem weapon_item, CUIDragDropListEx* ddlist)
 {
     VERIFY(weapon_item);
@@ -842,24 +873,18 @@ void CUIActorMenu::highlight_ammo_for_weapon(PIItem weapon_item, CUIDragDropList
 
     CWeapon* weapon = smart_cast<CWeapon*>(weapon_item);
     if (!weapon)
-    {
         return;
-    }
+
     ammo_types.assign(weapon->m_ammoTypes.begin(), weapon->m_ammoTypes.end());
 
     CWeaponMagazinedWGrenade* wg = smart_cast<CWeaponMagazinedWGrenade*>(weapon_item);
     if (wg)
-    {
         if (wg->IsGrenadeLauncherAttached() && wg->m_ammoTypes2.size())
-        {
             ammo_types.insert(ammo_types.end(), wg->m_ammoTypes2.begin(), wg->m_ammoTypes2.end());
-        }
-    }
 
     if (ammo_types.size() == 0)
-    {
         return;
-    }
+
     xr_vector<shared_str>::iterator ite = ammo_types.end();
 
     u32 const cnt = ddlist->ItemsCount();

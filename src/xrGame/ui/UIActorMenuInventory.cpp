@@ -27,6 +27,7 @@
 #include "antirad.h"
 #include "CustomOutfit.h"
 #include "ActorHelmet.h"
+// #include "Actor.h"
 #include "xrUICore/Cursor/UICursor.h"
 #include "MPPlayersBag.h"
 #include "player_hud.h"
@@ -34,6 +35,8 @@
 #include "PDA.h"
 #include "actor_defs.h"
 #include "script_game_object_impl.h"
+
+// extern int g_outfit_faction;
 
 void move_item_from_to(u16 from_id, u16 to_id, u16 what_id);
 
@@ -1216,6 +1219,20 @@ void CUIActorMenu::PropertiesBoxForUsing(PIItem item, bool& b_show)
     CGameObject* GO = smart_cast<CGameObject*>(item);
     shared_str section_name = GO->cNameSect();
 
+    // pcstr item_class = READ_IF_EXISTS(pSettings, r_string, section_name, "item_class", nullptr);
+    // if (xr_strcmp(item_class, "outfit_patch") == 0)
+    // {
+    //     CInventory* inv = &m_pActorInvOwner->inventory();
+    //     PIItem outfit_in_slot = inv->ItemFromSlot(OUTFIT_SLOT);
+    //     if (outfit_in_slot)
+    //     {
+    //         shared_str str = StringTable().translate("st_attch_outfit_patch");
+    //         str.printf("%s %s", str.c_str(), outfit_in_slot->m_name.c_str());
+    //         m_UIPropertiesBox->AddItem(str.c_str(), nullptr, INVENTORY_REPLACE_PATCH_ADDON);
+    //         b_show = true;
+    //     }
+    // }
+
     //ability to set eat string from settings
     act_str = READ_IF_EXISTS(pSettings, r_string, section_name, "default_use_text", nullptr);
     if (act_str)
@@ -1471,6 +1488,20 @@ void CUIActorMenu::ProcessPropertiesBoxClicked(CUIWindow* w, void* d)
         }
         break;
     }
+    // case INVENTORY_REPLACE_PATCH_ADDON:
+    // {
+    //     if(g_outfit_faction == 0)
+    //     {
+    //         return;
+    //     }
+
+    //     PIItem item = CurrentIItem();
+    //     AttachAddon((PIItem)(m_UIPropertiesBox->GetClickedItem()->GetData()));
+    //     if (m_currMenuMode == mmDeadBodySearch)
+    //         RemoveItemFromList(m_pLists[eSearchLootBagList], item);
+
+    //     break;
+    // }
     case INVENTORY_ATTACH_ADDON:
     {
         PIItem item = CurrentIItem(); // temporary storing because of AttachAddon is setting curiitem to NULL

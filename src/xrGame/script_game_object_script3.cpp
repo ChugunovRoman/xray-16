@@ -35,6 +35,7 @@
 #include "PhysicObject.h"
 #include "Artefact.h"
 #include "level_changer.h"
+#include "CustomOutfit.h"
 
 /*
     New luabind makes incorrect casts in this case. He makes casts only to 'true derived class'.
@@ -279,6 +280,20 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
 
         .def("community_goodwill", &CScriptGameObject::GetCommunityGoodwill_obj)
         .def("set_community_goodwill", &CScriptGameObject::SetCommunityGoodwill_obj)
+
+        .def("set_outfit_faction", +[](const CScriptGameObject* self, pcstr faction)
+        {
+            if (auto* outfit = smart_cast<CCustomOutfit*>(&self->object()))
+                outfit->m_faction = faction;
+        })
+        .def("get_outfit_faction", +[](const CScriptGameObject* self)
+        {
+            pcstr faction = NULL;
+            if (auto* outfit = smart_cast<CCustomOutfit*>(&self->object()))
+                faction = outfit->m_faction.c_str();
+
+            return faction;
+        })
 
         .def("sympathy", &CScriptGameObject::GetSympathy)
         .def("set_sympathy", &CScriptGameObject::SetSympathy)

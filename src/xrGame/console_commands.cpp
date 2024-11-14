@@ -39,6 +39,8 @@
 #include "saved_game_wrapper.h"
 #include "xrAICore/Navigation/level_graph.h"
 #include "xrNetServer/NET_Messages.h"
+#include "character_community.h"
+#include "CustomOutfit.h"
 
 #include "CameraLook.h"
 #include "character_hit_animations_params.h"
@@ -118,6 +120,7 @@ int g_quick_unload_new = 0;
 int g_quick_unload_scopes = 0;
 int g_quick_unload_gl = 0;
 int g_quick_unload_silencers = 0;
+int g_outfit_faction = 1;
 
 void register_mp_console_commands();
 //-----------------------------------------------------------
@@ -943,6 +946,49 @@ public:
         {
             g_dwInputUpdateDelta = 1000 / (*value_blin);
         };
+    }
+};
+
+class CCC_Integer_Outfit_Faction : public CCC_Integer
+{
+protected:
+    int* value_blin;
+
+public:
+    CCC_Integer_Outfit_Faction(LPCSTR N, int* V, int _min = 0, int _max = 999)
+        : CCC_Integer(N, V, _min, _max), value_blin(V){};
+
+    virtual void Execute(LPCSTR args)
+    {
+        CCC_Integer::Execute(args);
+        int v = atoi(args);
+
+        if (v == 0)
+            return;
+
+        if (!g_actor)
+            return;
+
+        PIItem outfit_in_slot = g_actor->inventory().ItemFromSlot(OUTFIT_SLOT);
+        if (!outfit_in_slot)
+            return;
+
+        CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(outfit_in_slot);
+        if (!outfit)
+            return;
+
+        CHARACTER_COMMUNITY community;
+        string512 actor_faction;
+        xr_sprintf(actor_faction, "actor_%s", outfit->m_faction.c_str());
+        community.set(actor_faction);
+        if (community.index() == NO_COMMUNITY_INDEX)
+        {
+            GEnv.ScriptEngine->script_log(
+                LuaMessageType::Error, "SetCharacterCommunity can't set %s for %s", actor_faction, Name());
+            return;
+        }
+
+        g_actor->SetCommunity(community.index());
     }
 };
 
@@ -2548,6 +2594,8 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "wpn_quick_unload_scopes", &g_quick_unload_scopes, 0, 1);
     CMD4(CCC_Integer, "wpn_quick_unload_gl", &g_quick_unload_gl, 0, 1);
     CMD4(CCC_Integer, "wpn_quick_unload_silencers", &g_quick_unload_silencers, 0, 1);
+
+    CMD4(CCC_Integer_Outfit_Faction, "g_outfit_faction", &g_outfit_faction, 0, 1);
 
     CMD1(CCC_UIStyle, "ui_style");
     CMD1(CCC_UIRestart, "ui_restart");

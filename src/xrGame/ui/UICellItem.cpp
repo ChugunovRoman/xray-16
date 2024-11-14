@@ -10,6 +10,7 @@
 #include "Common/object_broker.h"
 #include "UIXmlInit.h"
 #include "xrUICore/ProgressBar/UIProgressBar.h"
+#include "UIInventoryUtilities.h"
 #include "Weapon.h"
 #include "CustomOutfit.h"
 #include "ActorHelmet.h"
@@ -26,6 +27,7 @@ CUICellItem::CUICellItem()
     m_text = NULL;
     //-	m_mark				= NULL;
     m_upgrade = NULL;
+    m_faction = NULL;
     m_pConditionState = NULL;
     m_drawn_frame = 0;
     SetAccelerator(0);
@@ -70,6 +72,13 @@ void CUICellItem::init()
     CUIXmlInit::InitStatic(uiXml, "cell_item_upgrade", 0, m_upgrade);
     m_upgrade_pos = m_upgrade->GetWndPos();
     m_upgrade->Show(false);
+
+    m_faction = xr_new<CUIStatic>("OutfitFaction");
+    m_faction->SetAutoDelete(true);
+    AttachChild(m_faction);
+    CUIXmlInit::InitStatic(uiXml, "cell_outfit_faction", 0, m_faction);
+    m_faction_pos = m_faction->GetWndPos();
+    m_faction->Show(false);
 
     // Try progress first and then progess
     m_pConditionState = UIHelper::CreateProgressBar(uiXml, "condition_progress_bar", this, false);
@@ -131,6 +140,24 @@ void CUICellItem::Update()
             m_upgrade->SetWndPos(pos);
         }
         m_upgrade->Show(m_has_upgrade);
+    }
+
+    CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(item);
+    if (outfit)
+    {
+        string512 fullpath;
+        xr_sprintf(fullpath, "ui_icon_equipment\\items\\patches\\%s_patch", *outfit->m_faction);
+        if (!m_faction->GetShader() || !m_faction->GetShader()->inited())
+            m_faction->SetShader(InventoryUtilities::GetEquipmentIconShader(fullpath));
+
+        Fvector2 pos;
+        pos.set(m_faction_pos);
+        if (!m_has_upgrade)
+            pos.x = 0;
+
+        m_faction->SetWndPos(pos);
+        m_faction->SetStretchTexture(true);
+        m_faction->Show(true);
     }
 }
 

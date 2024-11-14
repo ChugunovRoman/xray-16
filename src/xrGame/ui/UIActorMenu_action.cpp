@@ -392,9 +392,7 @@ bool CUIActorMenu::OnItemFocusedUpdate(CUICellItem* itm)
     {
         itm->m_selected = true;
         if (m_highlight_clear)
-        {
             set_highlight_item(itm);
-        }
     }
     if (Device.dwTimeGlobal < itm->FocusReceiveTime() + (m_ItemInfo ? m_ItemInfo->delay * Device.time_factor() : 0))
     {

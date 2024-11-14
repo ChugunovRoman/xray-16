@@ -4,6 +4,7 @@
 #include "xrPhysics/PhysicsShell.h"
 #include "inventory_space.h"
 #include "Inventory.h"
+#include "character_community.h"
 #include "Actor.h"
 #include "game_cl_base.h"
 #include "Level.h"
@@ -11,6 +12,8 @@
 #include "Include/xrRender/Kinematics.h"
 #include "player_hud.h"
 #include "ActorHelmet.h"
+
+extern int g_outfit_faction;
 
 CCustomOutfit::CCustomOutfit()
 {
@@ -21,6 +24,8 @@ CCustomOutfit::CCustomOutfit()
         m_HitTypeProtection[i] = 1.0f;
 
     m_boneProtection = xr_new<SBoneProtections>();
+
+    m_faction = "none";
 }
 
 CCustomOutfit::~CCustomOutfit() { xr_delete(m_boneProtection); }
@@ -76,6 +81,11 @@ void CCustomOutfit::Load(LPCSTR section)
         m_NightVisionSect = pSettings->r_string(section, "nightvision_sect");
     else
         m_NightVisionSect = "";
+
+    if (pSettings->line_exist(section, "faction"))
+        m_faction = pSettings->r_string(section, "faction");
+    else
+        xrDebug::Fatal(DEBUG_INFO, make_string("Outfit [%s] doesn't has the 'faction' property", section).c_str());
 
     if (pSettings->line_exist(section, "actor_visual"))
         m_ActorVisual = pSettings->r_string(section, "actor_visual");
@@ -206,6 +216,22 @@ void CCustomOutfit::OnMoveToSlot(const SInvItemPlace& prev)
             PIItem pHelmet = pActor->inventory().ItemFromSlot(HELMET_SLOT);
             if (pHelmet && !bIsHelmetAvaliable)
                 pActor->inventory().Ruck(pHelmet, false);
+
+            if (g_outfit_faction)
+            {
+                CHARACTER_COMMUNITY community;
+                string512 actor_faction;
+                xr_sprintf(actor_faction, "actor_%s", *m_faction);
+                community.set(actor_faction);
+                if (community.index() == NO_COMMUNITY_INDEX)
+                {
+                    GEnv.ScriptEngine->script_log(
+                        LuaMessageType::Error, "SetCharacterCommunity can't set %s for %s", actor_faction, Name());
+                    return;
+                }
+
+                pActor->SetCommunity(community.index());
+            }
         }
     }
 }
