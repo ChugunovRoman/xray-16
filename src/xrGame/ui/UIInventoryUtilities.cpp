@@ -34,7 +34,7 @@ ui_shader* g_EquipmentIconsShader = NULL;
 ui_shader* g_MPCharIconsShader = NULL;
 ui_shader* g_OutfitUpgradeIconsShader = NULL;
 ui_shader* g_WeaponUpgradeIconsShader = NULL;
-xr_map<pcstr, ui_shader> g_EquipmentIconShaderMap;
+AssociativeVector<shared_str, ui_shader> g_EquipmentIconShaderMap;
 //static CUIStatic* GetUIStatic();
 
 typedef std::pair<CHARACTER_RANK_VALUE, shared_str> CharInfoStringID;
@@ -171,20 +171,22 @@ const ui_shader& InventoryUtilities::GetBuyMenuShader()
 
 const ui_shader& InventoryUtilities::GetEquipmentIconShader(pcstr filepath)
 {
-    auto it = g_EquipmentIconShaderMap.find(filepath);
-    if (it == g_EquipmentIconShaderMap.end())
+    string512 fullpath;
+    xr_sprintf(fullpath, "ui\\%s", filepath);
+
+    for (auto &i : g_EquipmentIconShaderMap)
     {
-        string512 fullpath;
-        xr_sprintf(fullpath, "ui\\%s", filepath);
-
-        ui_shader* shader = NULL;
-        shader = xr_new<ui_shader>();
-        (*shader)->create("hud" DELIMITER "default", fullpath);
-
-        g_EquipmentIconShaderMap.insert(std::make_pair(filepath, *shader));
+        auto path = i.first.c_str();
+        if (xr_strcmp(path, fullpath) == 0)
+            return i.second;
     }
 
-    return g_EquipmentIconShaderMap.at(filepath);
+    ui_shader* shader = xr_new<ui_shader>();
+    (*shader)->create("hud" DELIMITER "default", fullpath);
+
+    g_EquipmentIconShaderMap.insert(std::make_pair(fullpath, *shader));
+
+    return *shader;
 }
 
 const ui_shader& InventoryUtilities::GetMPCharIconsShader()
