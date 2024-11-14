@@ -67,7 +67,6 @@ CInventoryItem::CInventoryItem()
 
     m_Description = "";
     m_section_id = "";
-    m_alt_section_id = "";
     m_flags.set(FIsHelperItem, FALSE);
 }
 
@@ -100,7 +99,6 @@ void CInventoryItem::Load(LPCSTR section)
         self->GetSpatialData().type |= STYPE_VISIBLEFORAI;
 
     m_section_id._set(section);
-    m_alt_section_id._set(section);
     m_name = StringTable().translate(pSettings->r_string(section, INV_NAME_KEY));
     m_nameShort = StringTable().translate(pSettings->r_string(section, INV_NAME_SHORT_KEY));
 
