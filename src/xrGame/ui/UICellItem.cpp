@@ -147,9 +147,8 @@ void CUICellItem::Update()
     {
         string512 fullpath;
         xr_sprintf(fullpath, "ui_icon_equipment\\items\\patches\\%s_patch", *outfit->m_faction);
-        if (!m_faction->GetShader() || !m_faction->GetShader()->inited())
-            m_faction->SetShader(InventoryUtilities::GetEquipmentIconShader(fullpath));
-
+        m_faction->SetShader(InventoryUtilities::GetEquipmentIconShader(fullpath));
+        
         Fvector2 pos;
         pos.set(m_faction_pos);
         if (!m_has_upgrade)

@@ -22,6 +22,7 @@
 #include "Common/object_broker.h"
 #include "xrEngine/IGame_Persistent.h"
 #include "xrNetServer/NET_Messages.h"
+#include "CustomOutfit.h"
 
 #ifdef DEBUG
 #include "debug_renderer.h"
@@ -149,6 +150,8 @@ void CInventoryItem::Load(LPCSTR section)
         m_fControlInertionFactor = g_normalize_mouse_sens ? 1.0f : pSettings->read_if_exists<float>(section, "control_inertion_factor", 1.0f);
     }
     m_icon_name = READ_IF_EXISTS(pSettings, r_string, section, "icon_name", NULL);
+
+    ReloadNames();
 }
 
 void CInventoryItem::ReloadNames()
@@ -163,18 +166,58 @@ void CInventoryItem::ReloadNames()
         m_tip = StringTable().translate(pSettings->r_string(section, INV_NAME_KEY));
 
     string16 count{"0"};
-    CBolt* pBolt = smart_cast<CBolt*>(this);
-    if (pBolt)
-        xr_sprintf(count, "%d", pBolt->GetCount());
-
 
     // Description
     if (pSettings->line_exist(section, DESCRIPTION_KEY))
     {
-        string2048 tmp_descr;
-        pcstr descr{StringTable().translate(pSettings->r_string(section, DESCRIPTION_KEY)).c_str()};
-        xr_sprintf(tmp_descr, descr, count);
-        m_Description = tmp_descr;
+        CBolt* pBolt = smart_cast<CBolt*>(this);
+        if (pBolt)
+        {
+            xr_sprintf(count, "%d", pBolt->GetCount());
+            string2048 tmp_descr;
+            pcstr descr{StringTable().translate(pSettings->r_string(section, DESCRIPTION_KEY)).c_str()};
+            xr_sprintf(tmp_descr, descr, count);
+            m_Description = tmp_descr;
+        }
+        else
+        {
+            pcstr descr{StringTable().translate(pSettings->r_string(section, DESCRIPTION_KEY)).c_str()};
+            if (strstr(descr, "%s"))
+                m_Description = make_string(descr, count).c_str();
+            else
+                m_Description = descr;
+        }
+
+        CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(this);
+        if (outfit)
+        {
+            shared_str str_outfit_properties = StringTable().translate("st_outfit_properties");
+            shared_str str_outfit_list_symbol = StringTable().translate("st_outfit_list_symbol");
+            shared_str str_outfit_property_faction = StringTable().translate("st_outfit_property_faction");
+            shared_str str_outfit_property_faction_name = StringTable().translate(pSettings->r_string(section, "faction"));
+            shared_str str_outfit_property_helmet = StringTable().translate("st_outfit_property_helmet");
+            shared_str str_outfit_property_helmet_available = StringTable().translate(outfit->bIsHelmetAvaliable ? "st_outfit_property_helmet_has" : "st_outfit_property_helmet_no");
+            shared_str str_outfit_property_sprint = StringTable().translate("st_outfit_property_sprint");
+            shared_str str_outfit_property_sprint_alowed = StringTable().translate(pSettings->read_if_exists<bool>(section, "sprint_allowed", true) ? "st_outfit_property_sprint_yes" : "st_outfit_property_sprint_no");
+            shared_str str_outfit_property_slots_count = StringTable().translate("st_outfit_property_slots_count");
+            shared_str str_outfit_property_inventory_weight = StringTable().translate("st_outfit_property_inventory_weight");
+            shared_str str_outfit_property_inventory_weight_suffix = StringTable().translate("st_kg");
+
+            float outfit_weaight = pSettings->read_if_exists<float>(section, "additional_inventory_weight", 0.0f);
+
+            if (xr_strcmp(*outfit->m_faction, "none") != 0)
+                str_outfit_property_faction_name = StringTable().translate(*outfit->m_faction);
+
+            if (outfit->m_additional_weight2 > 0.0f)
+                outfit_weaight = outfit->m_additional_weight2;
+
+            m_Description = make_string("%s\\n \\n%s\\n", *m_Description, *str_outfit_properties).c_str();
+            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_faction, *str_outfit_property_faction_name).c_str();
+            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_helmet, *str_outfit_property_helmet_available).c_str();
+            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_sprint, *str_outfit_property_sprint_alowed).c_str();
+            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %d\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_slots_count, outfit->get_artefact_count()).c_str();
+            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %.2f %s\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_inventory_weight, outfit_weaight, *str_outfit_property_inventory_weight_suffix).c_str();
+        }
     }
     else
         m_Description = "";
@@ -265,9 +308,7 @@ void CInventoryItem::UpdateCL()
         Interpolate();
     }
 
-    CBolt* pBolt = smart_cast<CBolt*>(this);
-        if (pBolt)
-            ReloadNames();
+    ReloadNames();
 }
 
 void CInventoryItem::OnEvent(NET_Packet& P, u16 type)

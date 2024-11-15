@@ -234,6 +234,8 @@ bool CInventoryItem::install_upgrade_impl(LPCSTR section, bool test)
     if (result2 && !test)
         CHitImmunity::AddImmunities(str, pSettings);
 
+    ReloadNames();
+
     return result;
 }
 
