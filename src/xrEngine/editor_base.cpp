@@ -60,10 +60,8 @@ void ide::OnFrame()
         [[fallthrough]];
 
     case visible_state::light:
-        if (m_show_weather_editor)
-            ShowWeatherEditor();
         for (const auto& tool : m_tools)
-            tool->OnFrame();
+            tool->on_tool_frame();
         break;
     }
 
@@ -106,9 +104,9 @@ void ide::ShowMain()
         {
             if (ImGui::BeginMenu("Tools"))
             {
-                ImGui::MenuItem("Weather Editor", nullptr, &m_show_weather_editor);
                 for (const auto& tool : m_tools)
                     ImGui::MenuItem(tool->tool_name(), nullptr, &tool->get_open_state());
+
                 ImGui::EndMenu();
             }
         }
@@ -149,7 +147,7 @@ bool ide::is_shown() const
         if (tool->get_open_state())
             return true;
     }
-    return m_show_weather_editor;
+    return false;
 }
 
 void ide::SetState(visible_state state)

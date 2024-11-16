@@ -17,7 +17,6 @@ configuration:
 
 platform:
 - x64
-- x86
 
 branches:
   except:
@@ -28,10 +27,6 @@ cache:
 
 for:
 -
-  matrix:
-    only:
-      - image: Visual Studio 2022
-
   before_build:
     - git submodule update --init --recursive
     - nuget restore src\engine.sln

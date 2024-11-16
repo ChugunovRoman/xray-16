@@ -35,8 +35,6 @@
 #include "account_manager.h"
 #include "login_manager.h"
 #include "profile_store.h"
-#include "stats_submitter.h"
-#include "atlas_submit_queue.h"
 #include "xrEngine/xr_input.h"
 
 // fwd. decl.
@@ -44,7 +42,6 @@ extern ENGINE_API bool bShowPauseString;
 
 //#define DEMO_BUILD
 
-#ifdef XR_PLATFORM_WINDOWS
 constexpr cpcstr ErrMsgBoxTemplate[] =
 {
     "message_box_invalid_pass",
@@ -58,15 +55,11 @@ constexpr cpcstr ErrMsgBoxTemplate[] =
     "message_box_gs_service_not_available",
     "message_box_sb_master_server_connect_failed",
     "msg_box_no_new_patch",
-    "msg_box_new_patch",
-    "msg_box_patch_download_error",
-    "msg_box_patch_download_success",
     "msg_box_connect_to_master_server",
     "msg_box_kicked_by_server",
     "msg_box_error_loading",
     "message_box_download_level"
 };
-#endif
 
 extern bool b_shniaganeed_pp;
 
@@ -103,17 +96,6 @@ CMainMenu::CMainMenu()
     g_statHint = NULL;
     m_deactivated_frame = 0;
 
-    m_sPatchURL = "";
-#ifdef XR_PLATFORM_WINDOWS
-    m_pGameSpyFull = NULL;
-    m_account_mngr = NULL;
-    m_login_mngr = NULL;
-    m_profile_store = NULL;
-    m_stats_submitter = NULL;
-    m_atlas_submit_queue = NULL;
-#endif
-
-    m_sPDProgress.IsInProgress = false;
     m_downloaded_mp_map_url._set("");
 
     //-------------------------------------------
@@ -131,7 +113,6 @@ CMainMenu::CMainMenu()
         g_statHint = xr_new<CUIButtonHint>();
         m_pGameSpyFull = xr_new<CGameSpy_Full>();
 
-#ifdef XR_PLATFORM_WINDOWS
         for (cpcstr name : ErrMsgBoxTemplate)
         {
             CUIMessageBoxEx* msgBox = m_pMB_ErrDlgs.emplace_back(xr_new<CUIMessageBoxEx>());
@@ -142,11 +123,6 @@ CMainMenu::CMainMenu()
             }
         }
 
-        m_pMB_ErrDlgs[PatchDownloadSuccess]->AddCallbackStr("button_yes", MESSAGE_BOX_YES_CLICKED,
-            CUIWndCallback::void_function(this, &CMainMenu::OnRunDownloadedPatch));
-        m_pMB_ErrDlgs[PatchDownloadSuccess]->AddCallbackStr("button_yes", MESSAGE_BOX_OK_CLICKED,
-            CUIWndCallback::void_function(this, &CMainMenu::OnConnectToMasterServerOkClicked));
-
         CUIMessageBoxEx* downloadMsg = m_pMB_ErrDlgs[DownloadMPMap];
         if (downloadMsg)
         {
@@ -156,15 +132,9 @@ CMainMenu::CMainMenu()
                 "button_yes", MESSAGE_BOX_YES_CLICKED, CUIWndCallback::void_function(this, &CMainMenu::OnDownloadMPMap));
         }
 
-#endif
-
         m_account_mngr = xr_new<gamespy_gp::account_manager>(m_pGameSpyFull->GetGameSpyGP());
         m_login_mngr = xr_new<gamespy_gp::login_manager>(m_pGameSpyFull);
-        m_profile_store = xr_new<gamespy_profile::profile_store>(m_pGameSpyFull);
-#ifdef XR_PLATFORM_WINDOWS
-        m_stats_submitter = xr_new<gamespy_profile::stats_submitter>(m_pGameSpyFull);
-        m_atlas_submit_queue = xr_new<atlas_submit_queue>(m_stats_submitter);
-#endif
+        m_profile_store = xr_new<gamespy_profile::profile_store>();
     }
 
     Device.seqFrame.Add(this, REG_PRIORITY_LOW - 1000);
@@ -181,15 +151,10 @@ CMainMenu::~CMainMenu()
 
     g_pGamePersistent->m_pMainMenu = nullptr;
 
-#ifdef XR_PLATFORM_WINDOWS
     xr_delete(m_account_mngr);
     xr_delete(m_login_mngr);
     xr_delete(m_profile_store);
-    xr_delete(m_stats_submitter);
-    xr_delete(m_atlas_submit_queue);
-
     xr_delete(m_pGameSpyFull);
-#endif
 
     xr_delete(m_demo_info_loader);
     delete_data(m_pMB_ErrDlgs);
@@ -581,7 +546,6 @@ void CMainMenu::OnFrame()
             Console->Show();
     }
 
-#ifdef XR_PLATFORM_WINDOWS
     if (IsActive() || m_sPDProgress.IsInProgress)
     {
         GSUpdateStatus status = m_pGameSpyFull->Update();
@@ -593,9 +557,7 @@ void CMainMenu::OnFrame()
         case GSUpdateStatus::Unknown: SetErrorDialog(ErrMasterServerConnectFailed); break;
         case GSUpdateStatus::OutOfService: SetErrorDialog(ErrGSServiceFailed); break;
         }
-        m_atlas_submit_queue->update();
     }
-#endif
 
     if (IsActive())
     {
@@ -692,7 +654,7 @@ void CMainMenu::DestroyInternal(bool bForce)
     }
 }
 
-void CMainMenu::OnPatchCheck(bool success, LPCSTR VersionName, LPCSTR URL)
+void CMainMenu::OnPatchCheck(bool success)
 {
     if (!success)
     {
@@ -701,75 +663,7 @@ void CMainMenu::OnPatchCheck(bool success, LPCSTR VersionName, LPCSTR URL)
     }
     if (m_sPDProgress.IsInProgress)
         return;
-
-    if (m_pMB_ErrDlgs[NewPatchFound])
-    {
-        delete_data(m_pMB_ErrDlgs[NewPatchFound]);
-        m_pMB_ErrDlgs[NewPatchFound] = NULL;
-    }
-    if (!m_pMB_ErrDlgs[NewPatchFound])
-    {
-        m_pMB_ErrDlgs[NewPatchFound] = xr_new<CUIMessageBoxEx>();
-        m_pMB_ErrDlgs[NewPatchFound]->InitMessageBox("msg_box_new_patch");
-
-        shared_str tmpText;
-        tmpText.printf(m_pMB_ErrDlgs[NewPatchFound]->GetText(), VersionName, URL);
-        m_pMB_ErrDlgs[NewPatchFound]->SetText(*tmpText);
-    }
-    m_sPatchURL = URL;
-
-    Register(m_pMB_ErrDlgs[NewPatchFound]);
-    m_pMB_ErrDlgs[NewPatchFound]->AddCallbackStr(
-        "button_yes", MESSAGE_BOX_YES_CLICKED, CUIWndCallback::void_function(this, &CMainMenu::OnDownloadPatch));
-    m_pMB_ErrDlgs[NewPatchFound]->ShowDialog(false);
-};
-
-void CMainMenu::OnDownloadPatch(CUIWindow*, void*)
-{
-#ifdef XR_PLATFORM_WINDOWS
-    CGameSpy_Available GSA;
-    shared_str result_string;
-    if (!GSA.CheckAvailableServices(result_string))
-    {
-        Msg(*result_string);
-        return;
-    };
-
-    LPCSTR fileName = *m_sPatchURL;
-    if (!fileName)
-        return;
-
-    string4096 FilePath = "";
-    char* FileName = NULL;
-    GetFullPathName(fileName, 4096, FilePath, &FileName);
-    string_path fname;
-    if (FS.path_exist("$downloads$"))
-    {
-        FS.update_path(fname, "$downloads$", FileName);
-        m_sPatchFileName = fname;
-    }
-    else
-        m_sPatchFileName.printf("downloads" DELIMITER "%s", FileName);
-
-    m_sPDProgress.IsInProgress = true;
-    m_sPDProgress.Progress = 0;
-    m_sPDProgress.FileName = m_sPatchFileName;
-    m_sPDProgress.Status = "";
-    CGameSpy_HTTP::CompletionCallback completionCallback;
-    completionCallback.bind(this, &CMainMenu::OnDownloadPatchResult);
-    CGameSpy_HTTP::ProgressCallback progressCallback;
-    progressCallback.bind(this, &CMainMenu::OnDownloadPatchProgress);
-    m_pGameSpyFull->GetGameSpyHTTP()->DownloadFile(
-        *m_sPatchURL, *m_sPatchFileName, completionCallback, progressCallback);
-#endif
 }
-
-void CMainMenu::OnDownloadPatchResult(bool success)
-{
-    m_sPDProgress.IsInProgress = false;
-    auto dialogId = success ? PatchDownloadSuccess : PatchDownloadError;
-    m_pMB_ErrDlgs[dialogId]->ShowDialog(false);
-};
 
 void CMainMenu::OnSessionTerminate(LPCSTR reason)
 {
@@ -803,28 +697,9 @@ void CMainMenu::OnLoadError(LPCSTR module)
     SetErrorDialog(CMainMenu::LoadingError);
 }
 
-void CMainMenu::OnDownloadPatchProgress(u64 bytesReceived, u64 totalSize)
-{
-    m_sPDProgress.Progress = (float(bytesReceived) / float(totalSize)) * 100.0f;
-};
-
-extern ENGINE_API string512 g_sLaunchOnExit_app;
-extern ENGINE_API string512 g_sLaunchOnExit_params;
-extern ENGINE_API string_path g_sLaunchWorkingFolder;
-void CMainMenu::OnRunDownloadedPatch(CUIWindow*, void*)
-{
-    xr_strcpy(g_sLaunchOnExit_app, *m_sPatchFileName);
-    xr_strcpy(g_sLaunchOnExit_params, "");
-    xr_strcpy(g_sLaunchWorkingFolder, "");
-    Console->Execute("quit");
-}
-
 void CMainMenu::CancelDownload()
 {
-#ifdef XR_PLATFORM_WINDOWS
-    m_pGameSpyFull->GetGameSpyHTTP()->StopDownload();
     m_sPDProgress.IsInProgress = false;
-#endif
 }
 
 void CMainMenu::SetNeedVidRestart() { m_Flags.set(flNeedVidRestart, TRUE); }
@@ -937,7 +812,6 @@ void CMainMenu::Hide_CTMS_Dialog()
     m_pMB_ErrDlgs[ConnectToMasterServer]->HideDialog();
 }
 
-void CMainMenu::OnConnectToMasterServerOkClicked(CUIWindow*, void*) { Hide_CTMS_Dialog(); }
 LPCSTR CMainMenu::GetGSVer()
 {
     static string256 buff;
@@ -947,7 +821,6 @@ LPCSTR CMainMenu::GetGSVer()
 
 LPCSTR CMainMenu::GetPlayerName()
 {
-#ifdef XR_PLATFORM_WINDOWS
     gamespy_gp::login_manager* l_mngr = GetLoginMngr();
     gamespy_gp::profile const* tmp_prof = l_mngr ? l_mngr->get_current_profile() : NULL;
 
@@ -956,7 +829,6 @@ LPCSTR CMainMenu::GetPlayerName()
         m_player_name = tmp_prof->unique_nick();
     }
     else
-#endif
     {
         string512 name;
         GetPlayerName_FromRegistry(name, sizeof(name));

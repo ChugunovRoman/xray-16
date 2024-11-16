@@ -59,7 +59,7 @@ CUIDebugger::CUIDebugger()
     ImGui::SetCurrentContext(Device.GetImGuiContext());
 }
 
-void CUIDebugger::OnFrame()
+void CUIDebugger::on_tool_frame()
 {
     if (!UiDebuggerEnabled)
         return;

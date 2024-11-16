@@ -47,7 +47,6 @@
 #include "inventory_upgrade_manager.h"
 
 #include "xrGameSpy/GameSpy_Full.h"
-#include "xrGameSpy/GameSpy_Patching.h"
 
 #include "ai_debug_variables.h"
 #include "xrPhysics/console_vars.h"
@@ -169,7 +168,7 @@ static void full_memory_stats()
     size_t _process_heap = ::Memory.mem_usage();
     int _eco_strings = (int)g_pStringContainer->stat_economy();
     int _eco_smem = (int)g_pSharedMemoryContainer->stat_economy();
-    Msg("* [ Render ]: textures[%d K]", (m_base + m_lmaps) / 1024);
+    Msg("* [ render ]: textures[%d K]", (m_base + m_lmaps) / 1024);
     Msg("* [ x-ray  ]: process heap[%u K]", _process_heap / 1024);
     Msg("* [ x-ray  ]: economy: strings[%d K], smem[%d K]", _eco_strings / 1024, _eco_smem);
 #ifdef FS_DEBUG
@@ -1922,20 +1921,7 @@ public:
 
 class CCC_GSCheckForUpdates : public IConsole_Command
 {
-private:
-    CGameSpy_Patching::PatchCheckCallback m_resultCallbackBinded;
-    std::atomic<bool> m_checkInProgress = false;
     bool m_informNoPatch = true;
-
-    void ResultCallback(bool success, pcstr VersionName, pcstr URL)
-    {
-        auto mm = MainMenu();
-        if ((success || m_informNoPatch) && mm != nullptr)
-        {
-            mm->OnPatchCheck(success, VersionName, URL);
-        }
-        m_checkInProgress.store(false);
-    }
 
     void SetupCallParams(pcstr args)
     {
@@ -1951,7 +1937,6 @@ private:
 public:
     CCC_GSCheckForUpdates(LPCSTR N) : IConsole_Command(N)
     {
-        m_resultCallbackBinded.bind(this, &CCC_GSCheckForUpdates::ResultCallback);
         bEmptyArgsHandled = true;
     };
 
@@ -1961,13 +1946,12 @@ public:
         if (mm == nullptr)
             return;
 
-#ifdef XR_PLATFORM_WINDOWS
-        if (!m_checkInProgress.exchange(true))
+        SetupCallParams(arguments);
+
+        if (m_informNoPatch)
         {
-            SetupCallParams(arguments);
-            mm->GetGS()->GetGameSpyPatching()->CheckForPatch(true, m_resultCallbackBinded);
+            mm->OnPatchCheck(false);
         }
-#endif
     }
 };
 
