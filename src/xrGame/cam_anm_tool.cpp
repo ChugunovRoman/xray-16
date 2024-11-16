@@ -20,7 +20,7 @@ bool CUICamAnmTool::is_active() const
     return is_open() && Device.editor().IsActiveState();
 }
 
-void CUICamAnmTool::OnFrame()
+void CUICamAnmTool::on_tool_frame()
 {
 #ifndef MASTER_GOLD
     if (!get_open_state())

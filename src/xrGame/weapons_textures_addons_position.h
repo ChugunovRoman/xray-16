@@ -4,7 +4,7 @@ class CUITexturesAddonsPosition final : public xray::editor::ide_tool
 {
 public:
     CUITexturesAddonsPosition();
-    void OnFrame() override;
+    void on_tool_frame() override;
     bool is_active() const override;
 
 private:

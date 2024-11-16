@@ -132,7 +132,7 @@ void CUITexturesAddonsPosition::UpdateValues()
     }
 }
 
-void CUITexturesAddonsPosition::OnFrame()
+void CUITexturesAddonsPosition::on_tool_frame()
 {
 #ifndef MASTER_GOLD
     if (!get_open_state())
