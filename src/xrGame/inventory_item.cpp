@@ -196,7 +196,6 @@ void CInventoryItem::ReloadNames()
             shared_str str_outfit_property_faction = StringTable().translate("st_outfit_property_faction");
             shared_str str_outfit_property_faction_name = StringTable().translate(pSettings->r_string(section, "faction"));
             shared_str str_outfit_property_helmet = StringTable().translate("st_outfit_property_helmet");
-            shared_str str_outfit_property_helmet_available = StringTable().translate(outfit->bIsHelmetAvaliable ? "st_outfit_property_helmet_has" : "st_outfit_property_helmet_no");
             shared_str str_outfit_property_sprint = StringTable().translate("st_outfit_property_sprint");
             shared_str str_outfit_property_sprint_alowed = StringTable().translate(pSettings->read_if_exists<bool>(section, "sprint_allowed", true) ? "st_outfit_property_sprint_yes" : "st_outfit_property_sprint_no");
             shared_str str_outfit_property_slots_count = StringTable().translate("st_outfit_property_slots_count");
@@ -211,11 +210,21 @@ void CInventoryItem::ReloadNames()
             if (outfit->m_additional_weight2 > 0.0f)
                 outfit_weaight = outfit->m_additional_weight2;
 
+            u32 artefact_count = outfit->get_artefact_count();
+            if (artefact_count == 0)
+                artefact_count = pSettings->read_if_exists<u32>(section, "artefact_count", 0);
+
+            bool IsHelmetAvaliable = outfit->bIsHelmetAvaliable;
+            if (!IsHelmetAvaliable)
+                IsHelmetAvaliable = pSettings->read_if_exists<bool>(section, "helmet_avaliable", true);
+
+            shared_str str_outfit_property_helmet_available = StringTable().translate(IsHelmetAvaliable ? "st_outfit_property_helmet_has" : "st_outfit_property_helmet_no");
+
             m_Description = make_string("%s\\n \\n%s\\n", *m_Description, *str_outfit_properties).c_str();
             m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_faction, *str_outfit_property_faction_name).c_str();
             m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_helmet, *str_outfit_property_helmet_available).c_str();
             m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_sprint, *str_outfit_property_sprint_alowed).c_str();
-            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %d\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_slots_count, outfit->get_artefact_count()).c_str();
+            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %d\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_slots_count, artefact_count).c_str();
             m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %.2f %s\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_inventory_weight, outfit_weaight, *str_outfit_property_inventory_weight_suffix).c_str();
         }
     }
