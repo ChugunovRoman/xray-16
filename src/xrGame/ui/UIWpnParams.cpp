@@ -205,7 +205,7 @@ void CUIWpnParams::SetInfo(CInventoryItem* slot_wpn, CInventoryItem& cur_wpn)
             m_stAmmo->SetVisible(true);
             m_stAmmoType1->SetVisible(true);
             m_stAmmoType1->SetWndSize(
-                Fvector2().set(tex_rect.x2 * 0.8 * UI().get_current_kx(), tex_rect.y2 * 0.8));
+                Fvector2().set(tex_rect.x2 * 0.7 * UI().get_current_kx(), tex_rect.y2 * 0.7));
         }
 
         if (m_stAmmoType2)
@@ -233,7 +233,7 @@ void CUIWpnParams::SetInfo(CInventoryItem* slot_wpn, CInventoryItem& cur_wpn)
                 m_textAmmoCount2->SetVisible(true);
                 m_stAmmo->SetVisible(true);
                 m_stAmmoType2->SetWndSize(
-                    Fvector2().set(tex_rect.x2 * 0.8 * UI().get_current_kx(), tex_rect.y2 * 0.8));
+                    Fvector2().set(tex_rect.x2 * 0.7 * UI().get_current_kx(), tex_rect.y2 * 0.7));
             }
         }
 
