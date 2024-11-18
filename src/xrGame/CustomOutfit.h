@@ -15,6 +15,9 @@ public:
 
     virtual void Load(LPCSTR section);
 
+    virtual void save(NET_Packet& output_packet);
+    virtual void load(IReader& input_packet);
+
     //уменьшенная версия хита, для вызова, когда костюм надет на персонажа
     virtual void Hit(float P, ALife::EHitType hit_type);
 
@@ -30,6 +33,8 @@ public:
     virtual void OnMoveToSlot(const SInvItemPlace& prev);
     virtual void OnMoveToRuck(const SInvItemPlace& previous_place);
     virtual void OnH_A_Chield();
+
+    void ChangeActorCommunity();
 
 protected:
     HitImmunity::HitTypeSVec m_HitTypeProtection;

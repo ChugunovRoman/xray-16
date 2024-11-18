@@ -218,22 +218,32 @@ void CCustomOutfit::OnMoveToSlot(const SInvItemPlace& prev)
                 pActor->inventory().Ruck(pHelmet, false);
 
             if (g_outfit_faction)
-            {
-                CHARACTER_COMMUNITY community;
-                string512 actor_faction;
-                xr_sprintf(actor_faction, "actor_%s", *m_faction);
-                community.set(actor_faction);
-                if (community.index() == NO_COMMUNITY_INDEX)
-                {
-                    GEnv.ScriptEngine->script_log(
-                        LuaMessageType::Error, "SetCharacterCommunity can't set %s for %s", actor_faction, Name());
-                    return;
-                }
-
-                pActor->SetCommunity(community.index());
-            }
+                ChangeActorCommunity();
         }
     }
+}
+
+void CCustomOutfit::ChangeActorCommunity()
+{
+    CActor* pActor = smart_cast<CActor*>(H_Parent());
+    if (!pActor)
+        return;
+
+    if (g_outfit_faction == 0)
+        return;
+
+    CHARACTER_COMMUNITY community;
+    string512 actor_faction;
+    xr_sprintf(actor_faction, "actor_%s", *m_faction);
+    community.set(actor_faction);
+    if (community.index() == NO_COMMUNITY_INDEX)
+    {
+        GEnv.ScriptEngine->script_log(
+            LuaMessageType::Error, "SetCharacterCommunity can't set %s for %s", actor_faction, Name());
+        return;
+    }
+
+    pActor->SetCommunity(community.index());
 }
 
 void CCustomOutfit::ApplySkinModel(CActor* pActor, bool bDress, bool bHUDOnly)
@@ -376,4 +386,20 @@ void CCustomOutfit::AddBonesProtection(LPCSTR bones_section)
 
     if (parent && parent->Visual() && m_BonesProtectionSect.size())
         m_boneProtection->add(bones_section, smart_cast<IKinematics*>(parent->Visual()));
+}
+
+void CCustomOutfit::save(NET_Packet& output_packet)
+{
+    inherited::save(output_packet);
+
+    output_packet.w_stringZ(m_faction);
+}
+
+void CCustomOutfit::load(IReader& input_packet)
+{
+    inherited::load(input_packet);
+
+    input_packet.r_stringZ(m_faction);
+
+    ChangeActorCommunity();
 }
