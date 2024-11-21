@@ -156,7 +156,7 @@ void door::change_state(actor* initiator)
 
     if (m_state == m_target_state)
         return;
-    if (!m_object.getDestroy())
+    if (m_object.getDestroy())
         return;
 
 
