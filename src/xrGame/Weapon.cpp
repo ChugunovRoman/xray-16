@@ -1387,7 +1387,7 @@ bool CWeapon::Action(u16 cmd, u32 flags)
                         if (GetState() != eAimEnd && isHUDAnimationExist("anm_idle_aim_end"))
                             SwitchState(eAimEnd);
 
-                        OnZoomOut();
+                        OnZoomSecondOut();
                     }
                 }
             }
@@ -1410,7 +1410,7 @@ bool CWeapon::Action(u16 cmd, u32 flags)
                     if (GetState() != eAimEnd && isHUDAnimationExist("anm_idle_aim_end"))
                         SwitchState(eAimEnd);
 
-                    OnZoomOut();
+                    OnZoomSecondOut();
                 }
             }
             return true;
@@ -1441,7 +1441,7 @@ bool CWeapon::Action(u16 cmd, u32 flags)
                         if (GetState() != eAimEnd && isHUDAnimationExist("anm_idle_aim_end"))
                             SwitchState(eAimEnd);
 
-                        OnZoomOut();
+                        OnZoomFirstOut();
                     }
                 }
             }
@@ -1464,7 +1464,7 @@ bool CWeapon::Action(u16 cmd, u32 flags)
                     if (GetState() != eAimEnd && isHUDAnimationExist("anm_idle_aim_end"))
                         SwitchState(eAimEnd);
 
-                    OnZoomOut();
+                    OnZoomFirstOut();
                 }
             }
             return true;
@@ -1720,7 +1720,13 @@ void CWeapon::HUD_VisualBulletUpdate(bool force, int force_idx)
 }
 
 BOOL CWeapon::IsMisfire() const { return bMisfire; }
-void CWeapon::Reload() { OnZoomOut(); }
+void CWeapon::Reload()
+{
+    if (IsZoomed())
+        OnZoomFirstOut();
+    else if (IsSecondZoomed())
+        OnZoomSecondOut();
+}
 bool CWeapon::IsGrenadeLauncherAttached() const
 {
     return (ALife::eAddonAttachable == m_eGrenadeLauncherStatus &&
@@ -2007,9 +2013,13 @@ void CWeapon::GetZoomData(const float scope_factor, float& delta, float& min_zoo
 
 void CWeapon::OnZoomSecondIn()
 { 
+    if (IsZoomed())
+        m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::eMainZoom;
     m_zoom_params.m_bIsZoomModeNow = false;
     m_zoom_params.m_bIsZoomSecondModeNow = true;
-    m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::eSecondZoom;
+
+    if (m_zoom_params.m_fZoomRotationFactor == 1.f)
+        m_zoom_params.m_fZoomRotationFactor = 0.f;
 
     SetZoomFactor(m_zoom_params.m_fSecondScopeZoomFactor);
 
@@ -2023,9 +2033,14 @@ void CWeapon::OnZoomSecondIn()
 }
 void CWeapon::OnZoomIn()
 {
+    if (IsSecondZoomed())
+        m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::eSecondZoom;
     m_zoom_params.m_bIsZoomModeNow = true;
     m_zoom_params.m_bIsZoomSecondModeNow = false;
-    m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::eMainZoom;
+
+    attachable_hud_item* hi = HudItemData();
+    if (m_zoom_params.m_fZoomRotationFactor == 1.f)
+        m_zoom_params.m_fZoomRotationFactor = 0.f;
 
     if (!IsScopeAttached())
         SetZoomFactor(m_fRTZoomFactor);
@@ -2054,22 +2069,28 @@ void CWeapon::OnZoomIn()
         {
             CTorch* pTorch = smart_cast<CTorch*>(pA->inventory().ItemFromSlot(TORCH_SLOT));
             if (pTorch && pTorch->GetNightVisionStatus())
-            {
                 OnZoomOut();
-            }
         }
         else if (m_zoom_params.m_sUseZoomPostprocess.size() && !psActorFlags.test(AF_3DSCOPE))
         {
             if (NULL == m_zoom_params.m_pNight_vision)
-            {
                 m_zoom_params.m_pNight_vision = xr_new<CNightVisionEffector>(m_zoom_params.m_sUseZoomPostprocess/*"device_torch"*/);
-            }
         }
     }
 
     PlayCamAnim("cam_anm_aim_in");
 }
 
+void CWeapon::OnZoomFirstOut()
+{
+    m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::eMainZoom;
+    OnZoomOut();
+}
+void CWeapon::OnZoomSecondOut()
+{
+    m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::eSecondZoom;
+    OnZoomOut();
+}
 void CWeapon::OnZoomOut()
 {
     if (!IsSecondZoomed() && !psActorFlags.test(AF_3DSCOPE))
@@ -2379,22 +2400,74 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
     R_ASSERT(hi);
 
     u8 idx = GetCurrentHudOffsetIdx();
+    float m_fZoomRotateTime = m_zoom_params.m_fZoomRotateTime;
 
     //============= Поворот ствола во время аима =============//
-    if (((IsZoomed() || IsSecondZoomed()) && m_zoom_params.m_fZoomRotationFactor <= 1.f) || (!IsZoomed() || !IsSecondZoomed() && m_zoom_params.m_fZoomRotationFactor > 0.f))
+    if (((IsZoomed() || IsSecondZoomed()) && m_zoom_params.m_fZoomRotationFactor <= 1.f) || ((!IsZoomed() || !IsSecondZoomed()) && m_zoom_params.m_fZoomRotationFactor > 0.f))
     {
-        Fvector curr_offs, curr_rot;
-        curr_offs = hi->m_measures.m_hands_offset[0][idx]; //pos,aim
-        curr_rot = hi->m_measures.m_hands_offset[1][idx]; //rot,aim
+        Fvector curr_offs;
+        Fvector curr_rot;
 
-        if (IsZoomSecondEnabled() && m_zoom_params.m_iLatestZoomType && m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eSecondZoom)
+        // Из дефолтного состояния в первичный зум
+        if ((IsZoomed() || (!IsSecondZoomed() && m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eMainZoom)) && (m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::noZoom || m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eMainZoom))
         {
-            curr_offs = m_hands_offset[0][idx];
-            curr_rot = m_hands_offset[1][idx];
+            curr_offs = hi->m_measures.m_hands_offset[0][idx]; //pos,aim
+            curr_rot = hi->m_measures.m_hands_offset[1][idx]; //rot,aim
+
+            curr_offs.mul(m_zoom_params.m_fZoomRotationFactor);
+            curr_rot.mul(m_zoom_params.m_fZoomRotationFactor);
+        }
+        // Из дефолтного состояния во вторичный зум
+        else if (IsZoomSecondEnabled() && !IsZoomed() && (IsSecondZoomed() || m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eSecondZoom) && (m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::noZoom || m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eSecondZoom))
+        {
+            curr_offs = m_hands_offset[0][idx]; //pos,aim
+            curr_rot = m_hands_offset[1][idx]; //rot,aim
+
+            curr_offs.mul(m_zoom_params.m_fZoomRotationFactor);
+            curr_rot.mul(m_zoom_params.m_fZoomRotationFactor);
+        }
+        // Из первичного зума во вторичный зум
+        else if (IsZoomSecondEnabled() && IsSecondZoomed() && m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eMainZoom)
+        {
+            Fvector curr_offs1, curr_rot1;
+            curr_offs1 = curr_offs = m_tmp_offs;
+            curr_rot1 = curr_rot = m_tmp_rot;
+
+            curr_offs1.sub(m_hands_offset[0][idx]);
+            curr_rot1.sub(m_hands_offset[1][idx]);
+
+            curr_offs1.mul(m_zoom_params.m_fZoomRotationFactor);
+            curr_rot1.mul(m_zoom_params.m_fZoomRotationFactor);
+
+            curr_offs.sub(curr_offs1);
+            curr_rot.sub(curr_rot1);
+
+            if (m_zoom_params.m_fZoomRotationFactor > 0.7f)
+                m_fZoomRotateTime += 0.15;
+        }
+        // Из вторичного зума в первичный зум
+        else if (IsZoomed() && m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eSecondZoom)
+        {
+            Fvector curr_offs1, curr_rot1;
+            curr_offs1 = curr_offs = m_tmp_offs;
+            curr_rot1 = curr_rot = m_tmp_rot;
+
+            curr_offs1.sub(hi->m_measures.m_hands_offset[0][idx]);
+            curr_rot1.sub(hi->m_measures.m_hands_offset[1][idx]);
+
+            curr_offs1.mul(m_zoom_params.m_fZoomRotationFactor);
+            curr_rot1.mul(m_zoom_params.m_fZoomRotationFactor);
+
+            curr_offs.sub(curr_offs1);
+            curr_rot.sub(curr_rot1);
+
+            if (m_zoom_params.m_fZoomRotationFactor > 0.7f)
+                m_fZoomRotateTime += 0.15;
         }
 
-        curr_offs.mul(m_zoom_params.m_fZoomRotationFactor);
-        curr_rot.mul(m_zoom_params.m_fZoomRotationFactor);
+        // Сохраняем промежуточные значения для плавного перехода из промежуточной позиции худа в другой зум
+        m_tmp_offs = curr_offs; //pos,aim
+        m_tmp_rot = curr_rot; //rot,aim
 
         Fmatrix hud_rotation;
         hud_rotation.identity();
@@ -2413,12 +2486,14 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
         trans.mulB_43(hud_rotation);
 
         if (pActor->IsZoomAimingMode())
-            m_zoom_params.m_fZoomRotationFactor += Device.fTimeDelta / m_zoom_params.m_fZoomRotateTime;
+            m_zoom_params.m_fZoomRotationFactor += Device.fTimeDelta / m_fZoomRotateTime;
         else
-            m_zoom_params.m_fZoomRotationFactor -= Device.fTimeDelta / m_zoom_params.m_fZoomRotateTime;
+            m_zoom_params.m_fZoomRotationFactor -= Device.fTimeDelta / m_fZoomRotateTime;
 
         clamp(m_zoom_params.m_fZoomRotationFactor, 0.f, 1.f);
     }
+    if (!IsZoomed() && !IsSecondZoomed() && m_zoom_params.m_fZoomRotationFactor == 0.f)
+        m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::noZoom;
 
     //============= Подготавливаем общие переменные =============//
 

@@ -178,6 +178,8 @@ public:
         eMainZoom = 1, // Обычный зум
         eSecondZoom, // Вторичный зум
         eGLZoom, // На подствол
+
+        noZoom,
     };
 
     IC BOOL IsValid() const { return iAmmoElapsed; }
@@ -279,7 +281,7 @@ protected:
 protected:
     struct SZoomParams
     {
-        EWeaponLatestZoom m_iLatestZoomType; // какой был последний режим прицеливания
+        EWeaponLatestZoom m_iLatestZoomType = EWeaponLatestZoom::noZoom; // какой был последний режим прицеливания
 
         bool m_bZoomEnabled; //разрешение режима приближения
         bool m_bZoomSecondEnabled; //разрешение режима приближения на коллиматор
@@ -330,6 +332,8 @@ public:
     virtual void ZoomDec();
     virtual void OnZoomIn();
     virtual void OnZoomOut();
+    virtual void OnZoomFirstOut();
+    virtual void OnZoomSecondOut();
     virtual void OnZoomSecondIn();
     IC bool IsZoomed() const { return m_zoom_params.m_bIsZoomModeNow; };
     IC bool IsSecondZoomed() const { return m_zoom_params.m_bIsZoomSecondModeNow; };
@@ -347,6 +351,8 @@ public:
     virtual u32 Cost() const;
 
     Fvector m_hands_offset[2][3]; // pos,rot/ normal,aim,GL
+    Fvector m_tmp_offs;
+    Fvector m_tmp_rot;
 
 public:
     virtual EHandDependence HandDependence() const { return eHandDependence; }
