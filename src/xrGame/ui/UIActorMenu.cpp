@@ -804,7 +804,7 @@ void CUIActorMenu::set_highlight_item(CUICellItem* cell_item)
     case mmUpgrade:
     {
         highlight_armament(item, m_pLists[eInventoryBagList]);
-        highlight_outfit(item, m_pLists[eInventoryBagList]);
+        highlight_outfits_for_patch(item, m_pLists[eInventoryBagList]);
         break;
     }
     case mmTrade:
@@ -825,11 +825,6 @@ void CUIActorMenu::set_highlight_item(CUICellItem* cell_item)
     m_highlight_clear = false;
 }
 
-void CUIActorMenu::highlight_outfit(PIItem item, CUIDragDropListEx* ddlist)
-{
-    ddlist->clear_select_armament();
-    highlight_outfits_for_patch(item, ddlist);
-}
 void CUIActorMenu::highlight_armament(PIItem item, CUIDragDropListEx* ddlist)
 {
     ddlist->clear_select_armament();
@@ -848,6 +843,8 @@ void CUIActorMenu::highlight_outfits_for_patch(PIItem patch_item, CUIDragDropLis
     pcstr item_class = READ_IF_EXISTS(pSettings, r_string, *patch_item->m_section_id, "item_class", nullptr);
     if (!item_class || xr_strcmp(item_class, "outfit_patch") != 0)
         return;
+
+    ddlist->clear_select_armament();
 
     u32 const cnt = ddlist->ItemsCount();
     for (u32 i = 0; i < cnt; ++i)
@@ -893,9 +890,8 @@ void CUIActorMenu::highlight_ammo_for_weapon(PIItem weapon_item, CUIDragDropList
         CUICellItem* ci = ddlist->GetItemIdx(i);
         PIItem item = (PIItem)ci->m_pData;
         if (!item)
-        {
             continue;
-        }
+
         CWeaponAmmo* ammo = smart_cast<CWeaponAmmo*>(item);
         if (!ammo)
         {
@@ -976,9 +972,7 @@ bool CUIActorMenu::highlight_addons_for_weapon(PIItem weapon_item, CUICellItem* 
 {
     PIItem item = (PIItem)ci->m_pData;
     if (!item)
-    {
         return false;
-    }
 
     CScope* pScope = smart_cast<CScope*>(item);
     if (pScope && weapon_item->CanAttach(pScope))
@@ -1000,6 +994,7 @@ bool CUIActorMenu::highlight_addons_for_weapon(PIItem weapon_item, CUICellItem* 
         ci->m_select_armament = true;
         return true;
     }
+
     return false;
 }
 
@@ -1013,9 +1008,7 @@ void CUIActorMenu::highlight_weapons_for_addon(PIItem addon_item, CUIDragDropLis
     CGrenadeLauncher* pGrenadeLauncher = smart_cast<CGrenadeLauncher*>(addon_item);
 
     if (!pScope && !pSilencer && !pGrenadeLauncher)
-    {
         return;
-    }
 
     u32 const cnt = ddlist->ItemsCount();
     for (u32 i = 0; i < cnt; ++i)
@@ -1023,14 +1016,11 @@ void CUIActorMenu::highlight_weapons_for_addon(PIItem addon_item, CUIDragDropLis
         CUICellItem* ci = ddlist->GetItemIdx(i);
         PIItem item = (PIItem)ci->m_pData;
         if (!item)
-        {
             continue;
-        }
+
         CWeapon* weapon = smart_cast<CWeapon*>(item);
         if (!weapon)
-        {
             continue;
-        }
 
         if (pScope && weapon->CanAttach(pScope))
         {

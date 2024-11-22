@@ -231,7 +231,6 @@ private:
     void set_highlight_item(CUICellItem* cell_item);
     void highlight_item_slot(CUICellItem* cell_item);
     void highlight_armament(PIItem item, CUIDragDropListEx* ddlist);
-    void highlight_outfit(PIItem item, CUIDragDropListEx* ddlist);
     void highlight_outfits_for_patch(PIItem patch_item, CUIDragDropListEx* ddlist);
     void highlight_ammo_for_weapon(PIItem weapon_item, CUIDragDropListEx* ddlist);
     void highlight_weapons_for_ammo(PIItem ammo_item, CUIDragDropListEx* ddlist);
