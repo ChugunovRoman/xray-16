@@ -2253,6 +2253,22 @@ void CWeapon::reload(LPCSTR section)
 
     m_ef_main_weapon_type = READ_IF_EXISTS(pSettings, r_u32, section, "ef_main_weapon_type", u32(-1));
     m_ef_weapon_type = READ_IF_EXISTS(pSettings, r_u32, section, "ef_weapon_type", u32(-1));
+
+    string64 base_hud_sect;
+    string128 val_name;
+    string64 _prefix;
+
+    const bool is_16x9 = UICore::is_widescreen();
+    xr_sprintf(_prefix, "%s", is_16x9 ? "_16x9" : "");
+    xr_sprintf(base_hud_sect, "%s_hud", section);
+
+    m_hands_offset[0][0].set(0, 0, 0);
+    m_hands_offset[1][0].set(0, 0, 0);
+
+    strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_pos", _prefix);
+    m_hands_offset[0][1] = READ_IF_EXISTS(pSettings, r_fvector3, base_hud_sect, val_name, Fvector().set(0.0f, 0.0f, 0.0f));
+    strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_rot", _prefix);
+    m_hands_offset[1][1] = READ_IF_EXISTS(pSettings, r_fvector3, base_hud_sect, val_name, Fvector().set(0.0f, 0.0f, 0.0f));
 }
 
 void CWeapon::create_physic_shell() { CPhysicsShellHolder::create_physic_shell(); }
