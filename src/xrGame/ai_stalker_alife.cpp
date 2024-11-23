@@ -119,6 +119,30 @@ void CAI_Stalker::attach_available_ammo(CWeapon* weapon)
             break;
     }
 }
+void CAI_Stalker::attach_available_addons(CWeapon* weapon)
+{
+    if (!weapon)
+        return;
+
+
+    TIItemContainer& l_list = inventory().m_ruck;
+    for (TIItemContainer::iterator l_it = l_list.begin(); l_list.end() != l_it; ++l_it)
+    {
+        PIItem pIItem = *l_it;
+
+        const CSilencer* pSilencer = smart_cast<const CSilencer*>(pIItem);
+        if (pSilencer && weapon->CanAttach(pIItem))
+            weapon->Attach(pIItem, true);
+
+        const CScope* pScope = smart_cast<const CScope*>(pIItem);
+        if (pScope && weapon->CanAttach(pIItem))
+            weapon->Attach(pIItem, true);
+
+        const CGrenadeLauncher* pGrenadeLauncher = smart_cast<const CGrenadeLauncher*>(pIItem);
+        if (pGrenadeLauncher && weapon->CanAttach(pIItem))
+            weapon->Attach(pIItem, true);
+    }
+}
 
 void CAI_Stalker::choose_weapon(ALife::EWeaponPriorityType weapon_priority_type)
 {
@@ -187,6 +211,7 @@ void CAI_Stalker::choose_weapon(ALife::EWeaponPriorityType weapon_priority_type)
     {
         buy_item_virtual(*best_weapon);
         attach_available_ammo(smart_cast<CWeapon*>(best_weapon->m_item));
+        attach_available_addons(smart_cast<CWeapon*>(best_weapon->m_item));
     }
 }
 
@@ -415,6 +440,79 @@ void CAI_Stalker::update_conflicted(CInventoryItem* item, const CWeapon* new_wea
     item->SetDropManual(TRUE);
 }
 
+void CAI_Stalker::on_after_take_silencer(const CSilencer* pSilencer)
+{
+    CWeapon* wpn1 = NULL;
+    CWeapon* wpn2 = NULL;
+    if (inventory().ItemFromSlot(INV_SLOT_2))
+        wpn1 = smart_cast<CWeapon*>(inventory().ItemFromSlot(INV_SLOT_2));
+    if (inventory().ItemFromSlot(INV_SLOT_3))
+        wpn2 = smart_cast<CWeapon*>(inventory().ItemFromSlot(INV_SLOT_3));
+    if (!wpn1 && !wpn2)
+        return;
+
+    if (wpn1 && wpn1->CanAttach((PIItem)pSilencer))
+    {
+        inventory().Ruck(wpn1);
+        wpn1->Attach((PIItem)pSilencer, true);
+        inventory().Slot(INV_SLOT_2, wpn1);
+    }
+    if (wpn2 && wpn2->CanAttach((PIItem)pSilencer))
+    {
+        inventory().Ruck(wpn2);
+        wpn2->Attach((PIItem)pSilencer, true);
+        inventory().Slot(INV_SLOT_3, wpn2);
+    }
+}
+void CAI_Stalker::on_after_take_scope(const CScope* pScope)
+{
+    CWeapon* wpn1 = NULL;
+    CWeapon* wpn2 = NULL;
+    if (inventory().ItemFromSlot(INV_SLOT_2))
+        wpn1 = smart_cast<CWeapon*>(inventory().ItemFromSlot(INV_SLOT_2));
+    if (inventory().ItemFromSlot(INV_SLOT_3))
+        wpn2 = smart_cast<CWeapon*>(inventory().ItemFromSlot(INV_SLOT_3));
+    if (!wpn1 && !wpn2)
+        return;
+
+    if (wpn1 && wpn1->CanAttach((PIItem)pScope))
+    {
+        inventory().Ruck(wpn1);
+        wpn1->Attach((PIItem)pScope, true);
+        inventory().Slot(INV_SLOT_2, wpn1);
+    }
+    if (wpn2 && wpn2->CanAttach((PIItem)pScope))
+    {
+        inventory().Ruck(wpn2);
+        wpn2->Attach((PIItem)pScope, true);
+        inventory().Slot(INV_SLOT_3, wpn2);
+    }
+}
+void CAI_Stalker::on_after_take_gl(const CGrenadeLauncher* pGrenadeLauncher)
+{
+    CWeapon* wpn1 = NULL;
+    CWeapon* wpn2 = NULL;
+    if (inventory().ItemFromSlot(INV_SLOT_2))
+        wpn1 = smart_cast<CWeapon*>(inventory().ItemFromSlot(INV_SLOT_2));
+    if (inventory().ItemFromSlot(INV_SLOT_3))
+        wpn2 = smart_cast<CWeapon*>(inventory().ItemFromSlot(INV_SLOT_3));
+    if (!wpn1 && !wpn2)
+        return;
+
+    if (wpn1 && wpn1->CanAttach((PIItem)pGrenadeLauncher))
+    {
+        inventory().Ruck(wpn1);
+        wpn1->Attach((PIItem)pGrenadeLauncher, true);
+        inventory().Slot(INV_SLOT_2, wpn1);
+    }
+    if (wpn2 && wpn2->CanAttach((PIItem)pGrenadeLauncher))
+    {
+        inventory().Ruck(wpn2);
+        wpn2->Attach((PIItem)pGrenadeLauncher, true);
+        inventory().Slot(INV_SLOT_3, wpn2);
+    }
+}
+
 void CAI_Stalker::on_after_take(const CGameObject* object)
 {
     if (!g_Alive())
@@ -422,6 +520,18 @@ void CAI_Stalker::on_after_take(const CGameObject* object)
 
     if (!READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "use_single_item_rule", true))
         return;
+
+    const CSilencer* pSilencer = smart_cast<const CSilencer*>(object);
+    if (pSilencer)
+        on_after_take_silencer(pSilencer);
+
+    const CScope* pScope = smart_cast<const CScope*>(object);
+    if (pScope)
+        on_after_take_scope(pScope);
+
+    const CGrenadeLauncher* pGrenadeLauncher = smart_cast<const CGrenadeLauncher*>(object);
+    if (pGrenadeLauncher)
+        on_after_take_gl(pGrenadeLauncher);
 
     const CWeapon* new_weapon = smart_cast<const CWeapon*>(object);
     if (!new_weapon)

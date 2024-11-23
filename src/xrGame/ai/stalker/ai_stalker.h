@@ -11,6 +11,9 @@
 #include "object_handler.h"
 #include "AI_PhraseDialogManager.h"
 #include "step_manager.h"
+#include "Silencer.h"
+#include "Scope.h"
+#include "GrenadeLauncher.h"
 
 #ifdef DEBUG
 template <typename _object_type>
@@ -331,6 +334,7 @@ protected:
 
     IC void buy_item_virtual(CTradeItem& item);
     void attach_available_ammo(CWeapon* weapon);
+    void attach_available_addons(CWeapon* weapon);
     void choose_food();
     void choose_weapon(ALife::EWeaponPriorityType weapon_priority_type);
     void choose_medikit();
@@ -351,6 +355,9 @@ protected:
     void update_conflicted(CInventoryItem* item, const CWeapon* new_weapon);
     void remove_personal_only_ammo(const CInventoryItem* item);
     void on_after_take(const CGameObject* object);
+    void on_after_take_silencer(const CSilencer* pSilencer);
+    void on_after_take_scope(const CScope* pScope);
+    void on_after_take_gl(const CGrenadeLauncher* pGrenadeLauncher);
     virtual bool AllowItemToTrade(CInventoryItem const* item, const SInvItemPlace& place) const;
 
 public:
