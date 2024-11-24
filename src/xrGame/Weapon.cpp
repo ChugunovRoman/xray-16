@@ -870,12 +870,7 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
     CSE_Abstract* e = (CSE_Abstract*)(DC);
     CSE_ALifeItemWeapon* E = smart_cast<CSE_ALifeItemWeapon*>(e);
 
-    // iAmmoCurrent					= E->a_current;
-    // TODO: rewite with m_bGrenadeMode
-    if (E->a_elapsed > E->get_ammo_magsize())
-        iAmmoElapsed = E->get_ammo_magsize();
-    else
-        iAmmoElapsed = E->a_elapsed;
+    iAmmoElapsed = E->a_elapsed;
 
     m_flagsAddOnState = E->m_addon_flags.get();
     m_ammoType = E->ammo_type;
@@ -910,6 +905,8 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
 
     VERIFY((u32)iAmmoElapsed == m_magazine.size());
     m_bAmmoWasSpawned = false;
+
+    Msg("CWeapon::net_Spawn, weapon=[%s] iAmmoElapsed=[%d]", *m_section_id, iAmmoElapsed);
 
     if (m_bLightShotEnabled)
         Light_Create();
@@ -1029,6 +1026,7 @@ void CWeapon::save(NET_Packet& output_packet)
     save_data(bNVsecondVPstatus, output_packet);
     save_data(m_fSecondRTZoomFactor, output_packet);
     save_data(m_section_id, output_packet);
+    Msg("CWeapon::save, weapon=[%s] iAmmoElapsed=[%d] iMagazineSize=[%d]", *m_section_id, iAmmoElapsed, iMagazineSize);
 }
 
 void CWeapon::load(IReader& input_packet)
@@ -1055,6 +1053,7 @@ void CWeapon::load(IReader& input_packet)
     load_data(bNVsecondVPstatus, input_packet);
     load_data(m_fSecondRTZoomFactor, input_packet);
     load_data(m_section_id, input_packet);
+    Msg("CWeapon::load, weapon=[%s] iAmmoElapsed=[%d] iMagazineSize=[%d]", *m_section_id, iAmmoElapsed, iMagazineSize);
     reload(*m_section_id);
 }
 
