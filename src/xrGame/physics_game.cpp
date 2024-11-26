@@ -155,7 +155,7 @@ static void play_object(dxGeomUserData* data, SGameMtlPair* mtl_pair, const dCon
     VERIFY(c);
 
     auto* phShell = static_cast<CPhysicsShellHolder*>(data->ph_ref_object);
-    if (phShell == nullptr)
+    if (phShell == nullptr || !phShell->b_sheduled)
         return;
     if (!phShell->m_pPhysicsShell && !phShell->character_physics_support() || phShell->getDestroy())
         return;

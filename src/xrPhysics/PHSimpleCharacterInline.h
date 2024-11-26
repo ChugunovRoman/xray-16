@@ -122,7 +122,8 @@ void CPHSimpleCharacter::UpdateDynamicDamage(dContact* c, u16 obj_material_idx, 
 #endif
     if (c_vel > m_collision_damage_info.m_contact_velocity)
     {
-        IPhysicsShellHolder* obj = bo1 ? retrieveRefObject(c->geom.g2) : retrieveRefObject(c->geom.g1);
+        IPhysicsShellHolder* object = bo1 ? retrieveRefObject(c->geom.g2) : retrieveRefObject(c->geom.g1);
+        IPhysicsShellHolder* obj = smart_cast<IPhysicsShellHolder*>(object);
         VERIFY(obj);
         if (!obj->ObjectGetDestroy())
         {

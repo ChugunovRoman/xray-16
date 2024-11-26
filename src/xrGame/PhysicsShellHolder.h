@@ -20,9 +20,9 @@ class CPhysicsShellHolder : public CGameObject,
                             public IPhysicsShellHolder
 
 {
-    bool b_sheduled;
 
 public:
+    bool b_sheduled;
     void SheduleRegister()
     {
         if (!IsSheduled())

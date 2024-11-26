@@ -312,7 +312,7 @@ void CPHActorCharacter::InitContact(dContact* c, bool& do_collide, u16 material_
             // MulSprDmp(c->surface.soft_cfm,c->surface.soft_erp,def_spring_rate,def_dumping_rate);
             c->surface.mu = 0.00f;
         }
-        else
+        else if (material_1 && material_2)
             inherited::InitContact(c, do_collide, material_idx_1, material_idx_2);
         if (b_restrictor && do_collide &&
             !(b1 ? static_cast<CPHCharacter*>(retrieveGeomUserData(c->geom.g2)->ph_object)->ActorMovable() :
