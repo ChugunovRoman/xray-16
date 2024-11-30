@@ -211,6 +211,8 @@ public:
     bool IsScopePermament() const;
     bool IsSilencerAttached() const;
 
+    ALife::EWeaponAddonStatus GetScopeStatusParent() const;
+
     virtual bool GrenadeLauncherAttachable();
     virtual bool ScopeAttachable();
     virtual bool SilencerAttachable();

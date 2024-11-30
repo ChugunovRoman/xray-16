@@ -1733,6 +1733,11 @@ bool CWeapon::IsGrenadeLauncherAttached() const
         ALife::eAddonPermanent == m_eGrenadeLauncherStatus;
 }
 
+ALife::EWeaponAddonStatus CWeapon::GetScopeStatusParent() const
+{
+    pcstr section = pSettings->read_if_exists<pcstr>(*m_section_id, "parent_section", *m_section_id);
+    return (ALife::EWeaponAddonStatus)pSettings->r_s32(section, "scope_status");
+}
 bool CWeapon::IsScopePermament() const
 {
     return pSettings->r_s32(m_section_id, "scope_status") == ALife::eAddonPermanent;
