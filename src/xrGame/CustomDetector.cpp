@@ -458,54 +458,6 @@ void CCustomDetector::UpdateHudAdditional(Fmatrix& trans)
     float fLR_Factor = m_fLR_MovingFactor + (m_fLR_CameraFactor * fInertiaPower);
     clamp(fLR_Factor, -1.0f, 1.0f); // Фактор боковой ходьбы не должен превышать эти лимиты
 
-    // Производим наклон ствола для нормального режима и аима
-    for (int _idx = 0; _idx <= 1; _idx++)//<-- Для плавного перехода
-    {
-        bool bEnabled = (m_strafe_offset[2][_idx].x != 0.0f);
-        if (!bEnabled)
-            continue;
-
-        Fvector curr_offs, curr_rot;
-
-        // Смещение позиции худа в стрейфе
-        curr_offs = m_strafe_offset[0][_idx]; //pos
-        curr_offs.mul(fLR_Factor);                   // Умножаем на фактор стрейфа
-
-        // Поворот худа в стрейфе
-        curr_rot = m_strafe_offset[1][_idx]; //rot
-        curr_rot.mul(-PI / 180.f);                          // Преобразуем углы в радианы
-        curr_rot.mul(fLR_Factor);                   // Умножаем на фактор стрейфа
-
-        // Мягкий переход между бедром \ прицелом
-        if (_idx == 0)
-        { // От бедра
-            curr_offs.mul(1.f - 0.2);
-            curr_rot.mul(1.f - 0.2);
-        }
-        else
-        { // Во время аима
-            curr_offs.mul(0.2);
-            curr_rot.mul(0.2);
-        }
-
-        Fmatrix hud_rotation;
-        Fmatrix hud_rotation_y;
-
-        hud_rotation.identity();
-        hud_rotation.rotateX(curr_rot.x);
-
-        hud_rotation_y.identity();
-        hud_rotation_y.rotateY(curr_rot.y);
-        hud_rotation.mulA_43(hud_rotation_y);
-
-        hud_rotation_y.identity();
-        hud_rotation_y.rotateZ(curr_rot.z);
-        hud_rotation.mulA_43(hud_rotation_y);
-
-        hud_rotation.translate_over(curr_offs);
-        trans.mulB_43(hud_rotation);
-    }
-
     //============= Инерция оружия =============//
    // Параметры инерции
     float fInertiaSpeedMod = _lerp(
