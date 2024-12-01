@@ -154,6 +154,8 @@ public:
     float m_fAfDetectRadius;
     virtual bool CheckCompatibility(CHudItem* itm);
 
+    virtual void UpdateHudAdditional(Fmatrix&);
+
     virtual u32 ef_detector_type() const { return 1; };
 protected:
     bool CheckCompatibilityInt(CHudItem* itm, u16* slot_to_activate);
@@ -168,6 +170,13 @@ protected:
     float m_fAfVisRadius;
     float m_fDecayRate; //Alundaio
     CAfList m_artefacts;
+
+    float m_fLR_MovingFactor;  // Фактор бокового наклона худа при ходьбе [-1; +1]
+    float m_fLR_CameraFactor;  // Фактор бокового наклона худа при движении камеры [-1; +1]
+    float m_fLR_InertiaFactor; // Фактор горизонтальной инерции худа при движении камеры [-1; +1]
+    float m_fUD_InertiaFactor; // Фактор вертикальной инерции худа при движении камеры [-1; +1]
+
+    Fvector m_strafe_offset[4][2]; //pos,rot,data1,data2/ normal,aim-GL --#SM+#--
 };
 
 class CZoneList : public CDetectList<CCustomZone>
