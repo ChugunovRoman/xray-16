@@ -43,6 +43,9 @@ void CLevelDebug::draw_debug_text()
         if (!ai_dbg::get_var("actor_view", debug_actor_view))
             debug_actor_view = false;
 
+        if (!debug_actor_view)
+            return;
+
         debug::text_tree* actor_view = m_p_texttree->find_node("ActorView");
         if (debug_actor_view && actor_view)
         {

@@ -188,11 +188,23 @@ void Manager::add_section_by_class(CInifile::Sect *const &section)
 {
     pcstr value{};
     pcstr weaponClass{};
+    pcstr itemClass{};
     const auto& name = section->Name;
     const bool exist = section->line_exist("class", &value);
     const bool weaponClassExist = section->line_exist("weapon_class", &weaponClass);
+    const bool itemClassExist = section->line_exist("debugger_category", &itemClass);
 
-    if (strstr(name.c_str(), "mp_") || strstr(name.c_str(), "animation_hit_"))
+    // if (weaponClassExist)
+    // {
+    //     if (pSettings->line_exist(*name, "scope_status"))
+    //         Msg("add_section_by_class item=[%s] weapon_class=[%s] scope_status=[%s]", *name, weaponClass, pSettings->r_string(*name, "scope_status"));
+    //     else
+    //         Msg("add_section_by_class item=[%s] weapon_class=[%s]", *name, weaponClass);
+    // }
+    // if (itemClass)
+    //     Msg("add_section_by_class item=[%s] debugger_category=[%s]", *name, itemClass);
+
+    if (strstr(name.c_str(), "mp_") || strstr(name.c_str(), "animation_hit_") || strstr(name.c_str(), "test"))
     {
         return;
     }

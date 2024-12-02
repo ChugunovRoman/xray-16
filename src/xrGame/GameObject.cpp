@@ -634,7 +634,9 @@ bool CGameObject::net_Spawn(CSE_Abstract* DC)
 void CGameObject::net_Save(NET_Packet& net_packet)
 {
     u32 position;
+    // Msg("CGameObject::net_Save 1 obj=[%s] count=[%d] r_pos=[%d]", *cName(), net_packet.B.count, net_packet.r_pos);
     net_packet.w_chunk_open16(position);
+    // Msg("CGameObject::net_Save 2 obj=[%s] count=[%d] r_pos=[%d] position=[%d]", *cName(), net_packet.B.count, net_packet.r_pos, position);
     save(net_packet);
 
 // Script Binder Save ---------------------------------------
@@ -1158,6 +1160,7 @@ CScriptGameObject* CGameObject::lua_game_object() const
     {
          GEnv.ScriptEngine->script_log(LuaMessageType::Error, 
             "! ERROR: you are trying to use a destroyed object [%s]", *cName());
+        xrDebug::Fatal(DEBUG_INFO, make_string("! ERROR: you are trying to use a destroyed object [%s]", *cName()).c_str());
     }
 // #endif
     R_ASSERT2(m_spawned, make_string("Object name [%s]", *cName()));
