@@ -247,7 +247,7 @@ void CActor::StartTalk(CInventoryOwner* talk_partner)
     if (det_active)
     {
         CCustomDetector* det = smart_cast<CCustomDetector*>(det_active);
-        det->HideDetector(true);
+        det->HideDetector(CCustomDetector::EDetectorFastModes::eQuick);
     }
 
     VERIFY(smart_cast<CGameObject*>(talk_partner));

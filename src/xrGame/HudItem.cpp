@@ -228,26 +228,13 @@ void CHudItem::OnH_B_Independent(bool just_before_destroy)
 {
     m_sounds.StopAllSounds();
     UpdateXForm();
-
-    // next code was commented
-    /*
-    if(HudItemData() && !just_before_destroy)
-    {
-        object().XFORM().set( HudItemData()->m_item_transform );
-    }
-
-    if (HudItemData())
-    {
-        g_player_hud->detach_item(this);
-        Msg("---Detaching hud item [%s][%d]", this->HudSection().c_str(), this->object().ID());
-    }*/
-    // SetHudItemData			(NULL);
 }
 
 void CHudItem::OnH_A_Independent()
 {
     if (HudItemData())
-        g_player_hud->detach_item(this);
+        DetachCurrentHudItemData();
+
     StopCurrentAnimWithoutCallback();
 }
 
@@ -313,8 +300,7 @@ u32 CHudItem::PlayHUDMotion_noCB(const shared_str& motion_name, BOOL bMixIn)
     }
     else
     {
-        m_started_rnd_anim_idx = 0;
-        return g_player_hud->motion_length(motion_name, HudSection(), m_current_motion_def);
+        return g_player_hud[0]->motion_length(motion_name, HudSection(), m_current_motion_def);
     }
 }
 
@@ -406,7 +392,7 @@ bool CHudItem::isHUDAnimationExist(pcstr anim_name) const
     else if (HudSection().c_str()) // Third person
     {
         const CMotionDef* temp_motion_def;
-        if (g_player_hud->motion_length(anim_name, HudSection(), temp_motion_def) > 100)
+        if (g_player_hud[0]->motion_length(anim_name, HudSection(), temp_motion_def) > 100)
             return true;
     }
     Msg("~ [WARNING] ------ Animation [%s] does not exist in [%s]", anim_name, HudSection().c_str());
@@ -508,17 +494,35 @@ void CHudItem::TransformDirFromWorldToHud(Fvector& worldDir)
     Fmatrix().set(mView).invert().transform_dir(worldDir);
 }
 
+void CHudItem::DetachCurrentHudItemData()
+{
+    attachable_hud_item* hi = NULL;
+    if (!g_player_hud[0] && !g_player_hud[1])
+        return;
+
+    hi = g_player_hud[0]->attached_item();
+    if (hi && hi->m_parent_hud_item == this)
+        g_player_hud[0]->detach_item(this);
+
+    hi = g_player_hud[1]->attached_item();
+    if (hi && hi->m_parent_hud_item == this)
+    {
+        g_player_hud[1]->detach_item(this);
+        g_player_hud[0]->after_detach_item_idx(this);
+    }
+}
+
 attachable_hud_item* CHudItem::HudItemData() const
 {
     attachable_hud_item* hi = NULL;
-    if (!g_player_hud)
+    if (!g_player_hud[0] && !g_player_hud[1])
         return hi;
 
-    hi = g_player_hud->attached_item(0);
+    hi = g_player_hud[0]->attached_item();
     if (hi && hi->m_parent_hud_item == this)
         return hi;
 
-    hi = g_player_hud->attached_item(1);
+    hi = g_player_hud[1]->attached_item();
     if (hi && hi->m_parent_hud_item == this)
         return hi;
 

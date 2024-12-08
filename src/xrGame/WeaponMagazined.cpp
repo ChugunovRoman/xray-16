@@ -21,6 +21,7 @@
 #include "xrScriptEngine/script_callback_ex.h"
 #include "script_game_object.h"
 #include "HudSound.h"
+#include "player_hud.h"
 
 CWeaponMagazined::CWeaponMagazined(ESoundTypes eSoundType) : CWeapon(), m_bStopedAfterQueueFired(false)
 {
@@ -500,6 +501,8 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
     case eReload:
         if (owner)
             m_sounds_enabled = owner->CanPlayShHdRldSounds();
+        if (g_player_hud[1]->attached_item())
+            g_player_hud[1]->hide_detector();
         switch2_Reload();
         break;
     case eShowing:
@@ -882,7 +885,7 @@ void CWeaponMagazined::switch2_Unmis()
         PlayHUDMotion("anm_reload_misfire", true, this, state);
         PlayCamAnim("cam_anm_reload_misfire");
     }
-    else if (isHUDAnimationExist("anm_reload_misfire"))
+    else if (isHUDAnimationExist("anm_reload_empty"))
         PlayHUDMotion("anm_reload_empty", true, this, state);
     else
         PlayHUDMotion("anm_reload", "anim_reload", true, this, state);
@@ -910,6 +913,8 @@ void CWeaponMagazined::switch2_StartAim()
 {
 	VERIFY(GetState() == eAimStart);
 
+    g_player_hud[1]->set_detector_state(EHudStates::eWpnZoomStart);
+
 	if(iAmmoElapsed == 0 && isHUDAnimationExist("anm_idle_aim_start_empty"))
 		PlayHUDMotion("anm_idle_aim_start_empty", TRUE, this, GetState());
 	else
@@ -919,6 +924,8 @@ void CWeaponMagazined::switch2_StartAim()
 void CWeaponMagazined::switch2_EndAim()
 {
 	VERIFY(GetState() == eAimEnd);
+
+    g_player_hud[1]->set_detector_state(EHudStates::eWpnZoomEnd);
 
 	if (iAmmoElapsed == 0 && isHUDAnimationExist("anm_idle_aim_end_empty"))
 		PlayHUDMotion("anm_idle_aim_end_empty", TRUE, this, GetState());
@@ -1386,6 +1393,13 @@ void CWeaponMagazined::PlayAnimShoot()
     }
     else
         PlayHUDMotion("anm_shots", "anim_shoot", false, this, GetState());
+
+    if (g_player_hud[1]->attached_item())
+    {
+        CCustomDetector* detector = smart_cast<CCustomDetector*>(g_player_hud[1]->attached_item()->m_parent_hud_item);
+        if (detector)
+            detector->PlayShootAnm();
+    }
 }
 
 void CWeaponMagazined::OnMotionMark(u32 state, const motion_marks& M)

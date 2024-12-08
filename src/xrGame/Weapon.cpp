@@ -1218,7 +1218,7 @@ void CWeapon::UpdateCL()
         if (pActor && !pActor->AnyMove() && this == pActor->inventory().ActiveItem())
         {
             if (!GamePersistent().GetHudTuner().is_active() && GetState() == eIdle && (Device.dwTimeGlobal - m_dw_curr_substate_time > 20000) &&
-                (!IsZoomed() && !IsSecondZoomed()) && g_player_hud->attached_item(1) == nullptr)
+                (!IsZoomed() && !IsSecondZoomed()) && g_player_hud[1]->attached_item() == nullptr)
             {
                 if (AllowBore())
                     SwitchState(eBore);
@@ -2034,6 +2034,7 @@ void CWeapon::OnZoomSecondIn()
         GamePersistent().SetPickableEffectorDOF(true);
 
     PlayCamAnim("cam_anm_aim_in");
+    g_player_hud[1]->set_detector_state(EHudStates::eWpnZoomStart);
 }
 void CWeapon::OnZoomIn()
 {
@@ -2083,6 +2084,7 @@ void CWeapon::OnZoomIn()
     }
 
     PlayCamAnim("cam_anm_aim_in");
+    g_player_hud[1]->set_detector_state(EHudStates::eWpnZoomStart);
 }
 
 void CWeapon::OnZoomFirstOut()
@@ -2120,6 +2122,7 @@ void CWeapon::OnZoomOut()
     }
 
     PlayCamAnim("cam_anm_aim_out");
+    g_player_hud[1]->set_detector_state(EHudStates::eWpnZoomEnd);
 }
 
 CUIWindow* CWeapon::ZoomTexture()
@@ -2529,7 +2532,7 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
     _inertion(fAvgTimeDelta, Device.fTimeDelta, 0.8f);
 
     //======== Проверяем доступность инерции и стрейфа ========//
-    if (!g_player_hud->inertion_allowed())
+    if (!g_player_hud[0]->inertion_allowed())
         return;
 
     //============= Боковой стрейф с оружием =============//

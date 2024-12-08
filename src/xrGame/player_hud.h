@@ -147,15 +147,18 @@ public:
     const shared_str& section_name() const { return m_sect_name; }
     attachable_hud_item* create_hud_item(const shared_str& sect);
 
+    void hide_detector();
+    void set_detector_state(const u32 state);
     void attach_item(CHudItem* item);
     bool allow_activation(CHudItem* item) const;
-    attachable_hud_item* attached_item(u16 item_idx) { return m_attached_items[item_idx]; };
-    void detach_item_idx(u16 idx);
+    attachable_hud_item* attached_item() { return m_attached_item; };
+    void after_detach_item_idx(u16 idx);
+    void after_detach_item_idx(CHudItem* item);
+    void detach_item_idx();
     void detach_item(CHudItem* item);
     void detach_all_items()
     {
-        m_attached_items[0] = NULL;
-        m_attached_items[1] = NULL;
+        m_attached_item = NULL;
     };
 
     void calc_transform(u16 attach_slot_idx, const Fmatrix& offset, Fmatrix& result) const;
@@ -163,6 +166,9 @@ public:
     u32 motion_length(const MotionID& M, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel) const;
     u32 motion_length(const shared_str& anim_name, const shared_str& hud_name, const CMotionDef*& md);
     void OnMovementChanged(ACTOR_DEFS::EMoveCommand cmd) const;
+
+    bool CheckCompatibility(CHudItem* item);
+    void set_bone_visible(const shared_str& bone_name, BOOL bVisibility, BOOL bSilent = FALSE);
 
 private:
     void load_ancors();
@@ -173,14 +179,15 @@ public:
 
 private:
     shared_str m_sect_name;
+    shared_str m_visual_name;
 
     Fmatrix m_attach_offset{};
 
     Fmatrix m_transform{ Fidentity };
     IKinematicsAnimated* m_model{};
     xr_vector<u16> m_ancors;
-    attachable_hud_item* m_attached_items[2]{};
+    attachable_hud_item* m_attached_item = NULL;
     xr_unordered_map<shared_str, attachable_hud_item*> m_pool;
 };
 
-extern player_hud* g_player_hud;
+extern player_hud* g_player_hud[2]; // 0 - right hand | 1 - left hand 

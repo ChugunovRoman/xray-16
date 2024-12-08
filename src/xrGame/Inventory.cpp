@@ -854,7 +854,7 @@ void CInventory::Update()
             if (Level().CurrentViewEntity() == pActor_owner)
             {
                 if ((m_iNextActiveSlot != NO_ACTIVE_SLOT) && ItemFromSlot(m_iNextActiveSlot) &&
-                    !g_player_hud->allow_activation(ItemFromSlot(m_iNextActiveSlot)->cast_hud_item()))
+                    !g_player_hud[1]->allow_activation(ItemFromSlot(m_iNextActiveSlot)->cast_hud_item()))
                     return;
             }
             if (ActiveItem())

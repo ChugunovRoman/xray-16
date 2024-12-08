@@ -61,7 +61,7 @@ bool CCustomDetector::CheckCompatibilityInt(CHudItem* itm, u16* slot_to_activate
         CWeapon* W = smart_cast<CWeapon*>(itm);
         if (W)
             bres = bres && (W->GetState() != CHUDState::eBore) && (W->GetState() != CWeapon::eReload) &&
-                (W->GetState() != CWeapon::eSwitch) && !W->IsZoomed() && !W->IsSecondZoomed();
+                (W->GetState() != CWeapon::eSwitch);
     }
     return bres;
 }
@@ -73,28 +73,38 @@ bool CCustomDetector::CheckCompatibility(CHudItem* itm)
 
     if (!CheckCompatibilityInt(itm, NULL))
     {
-        HideDetector(true);
+        HideDetector(EDetectorFastModes::eFast);
         return false;
     }
     return true;
 }
 
-void CCustomDetector::HideDetector(bool bFastMode)
+void CCustomDetector::HideDetector(EDetectorFastModes bFastMode)
 {
-    if (GetState() == eIdle)
+    if (GetState() == eIdle || GetState() == eWpnZoomEnd)
         ToggleDetector(bFastMode);
 }
 
-void CCustomDetector::ShowDetector(bool bFastMode)
+void CCustomDetector::ShowDetector(EDetectorFastModes bFastMode)
 {
     if (GetState() == eHidden)
         ToggleDetector(bFastMode);
 }
 
-void CCustomDetector::ToggleDetector(bool bFastMode)
+void CCustomDetector::PlayShootAnm()
+{
+    pcstr anm = "anm_wpn_shoot";
+    if (isHUDAnimationExist(anm))
+        PlayHUDMotion(anm, anm, FALSE, this, GetState());
+}
+
+void CCustomDetector::ToggleDetector(EDetectorFastModes bFastMode)
 {
     m_bNeedActivation = false;
     m_bFastAnimMode = bFastMode;
+
+    if (bFastMode == EDetectorFastModes::eNone)
+        g_player_hud[1]->set_bone_visible("r_clavicle", TRUE, FALSE);
 
     if (GetState() == eHidden)
     {
@@ -120,6 +130,20 @@ void CCustomDetector::ToggleDetector(bool bFastMode)
         SwitchState(eHiding);
 }
 
+shared_str CCustomDetector::GetToggleAnmName(pcstr const type) const
+{
+    shared_str anm = make_string("anm_%s", type).c_str();
+
+    if (m_bFastAnimMode == EDetectorFastModes::eFast)
+        anm = make_string("%s_fast", *anm).c_str();
+    if (m_bFastAnimMode == EDetectorFastModes::eQuick)
+        anm = make_string("%s_quick", *anm).c_str();
+    if (m_bFastAnimMode == EDetectorFastModes::eInZoomFast)
+        anm = "anm_zoom_hide_fast";
+
+    return anm;
+}
+
 void CCustomDetector::OnStateSwitch(u32 S, u32 oldState)
 {
     inherited::OnStateSwitch(S, oldState);
@@ -128,9 +152,11 @@ void CCustomDetector::OnStateSwitch(u32 S, u32 oldState)
     {
     case eShowing:
     {
-        g_player_hud->attach_item(this);
+        g_player_hud[1]->attach_item(this);
+        g_player_hud[0]->CheckCompatibility(this);
         m_sounds.PlaySound("sndShow", Fvector().set(0, 0, 0), this, true, false);
-        PlayHUDMotion(m_bFastAnimMode ? "anm_show_fast" : "anm_show", "anim_show", FALSE /*TRUE*/, this, GetState());
+        const shared_str anm = GetToggleAnmName("show");
+        PlayHUDMotion(anm, "anim_show", FALSE /*TRUE*/, this, GetState());
         SetPending(TRUE);
     }
     break;
@@ -139,9 +165,63 @@ void CCustomDetector::OnStateSwitch(u32 S, u32 oldState)
         if (oldState != eHiding)
         {
             m_sounds.PlaySound("sndHide", Fvector().set(0, 0, 0), this, true, false);
-            PlayHUDMotion(m_bFastAnimMode ? "anm_hide_fast" : "anm_hide", "anim_show", FALSE/*TRUE*/, this, GetState());
+            const shared_str anm = GetToggleAnmName("hide");
+            PlayHUDMotion(anm, "anim_hide", FALSE/*TRUE*/, this, GetState());
             SetPending(TRUE);
         }
+    }
+    break;
+    case eBoltThrowStart:
+    {
+        if (oldState != eHiding)
+            PlayHUDMotion(isHUDAnimationExist("anm_throw_start") ? "anm_throw_start" : "anm_idle", "anim_idle", FALSE, this, GetState());
+    }
+    break;
+    case eBoltThrowIdle:
+    {
+        if (oldState != eHiding)
+            PlayHUDMotion(isHUDAnimationExist("anm_throw") ? "anm_throw" : "anm_idle", "anim_idle", FALSE, this, GetState());
+    }
+    break;
+    case eBoltThrowEnd:
+    {
+        if (oldState != eHiding)
+            PlayHUDMotion(isHUDAnimationExist("anm_throw_end") ? "anm_throw_end" : "anm_idle", "anim_idle", FALSE, this, GetState());
+    }
+    break;
+    case eWpnZoomStart:
+    {
+        if (oldState != eHiding)
+            PlayHUDMotion(isHUDAnimationExist("anm_zoom_in") ? "anm_zoom_in" : "anm_idle", "anim_idle", FALSE, this, GetState());
+    }
+    break;
+    case eWpnZoomIdle:
+    {
+        if (oldState != eHiding)
+            PlayHUDMotion(isHUDAnimationExist("anm_idle_zoom") ? "anm_idle_zoom" : "anm_idle", "anim_idle", FALSE, this, GetState());
+        SetPending(FALSE);
+    }
+    break;
+    case eWpnZoomEnd:
+    {
+        attachable_hud_item* i0 = g_player_hud[0]->attached_item();
+        if (i0)
+        {
+            CWeapon* wpn = smart_cast<CWeapon*>(i0->m_parent_hud_item);
+            if (wpn)
+            {
+                u32 state = wpn->GetState();
+                if (state == CWeapon::eReload || state == CWeapon::eMagEmpty)
+                {
+                    SwitchState(eHiding);
+                    PlayHUDMotion(isHUDAnimationExist("anm_zoom_hide_fast") ? "anm_zoom_hide_fast" : "anm_idle", "anim_idle", FALSE, this, GetState());
+                    return;
+                }
+            }
+        }
+
+        if (oldState != eHiding)
+            PlayHUDMotion(isHUDAnimationExist("anm_zoom_out") ? "anm_zoom_out" : "anm_idle", "anim_idle", FALSE, this, GetState());
     }
     break;
     case eIdle:
@@ -163,13 +243,31 @@ void CCustomDetector::OnAnimationEnd(u32 state)
         SwitchState(eIdle);
         if (IsUsingCondition() && m_fDecayRate > 0.f)
             this->SetCondition(-m_fDecayRate);
+        if (g_player_hud[0]->attached_item())
+            g_player_hud[1]->set_bone_visible("r_clavicle", FALSE, FALSE);
+    }
+    break;
+    case eBoltThrowEnd:
+    case eWpnZoomEnd:
+    {
+        SwitchState(eIdle);
+        PlayAnimIdle();
+        SetPending(FALSE);
+    }
+    break;
+    case eWpnZoomStart:
+    {
+        SwitchState(eWpnZoomIdle);
+        SetPending(FALSE);
     }
     break;
     case eHiding:
     {
         SwitchState(eHidden);
         TurnDetectorInternal(false);
-        g_player_hud->detach_item(this);
+        g_player_hud[1]->detach_item(this);
+        g_player_hud[0]->after_detach_item_idx(this);
+        g_player_hud[0]->set_bone_visible("l_clavicle", TRUE, FALSE);
     }
     break;
     }
@@ -181,7 +279,7 @@ void CCustomDetector::OnHiddenItem() {}
 CCustomDetector::CCustomDetector()
 {
     m_ui = NULL;
-    m_bFastAnimMode = false;
+    m_bFastAnimMode = EDetectorFastModes::eNone;
     m_bNeedActivation = false;
     m_fLR_MovingFactor = 0.f;
     m_fLR_CameraFactor = 0.f;
@@ -244,13 +342,13 @@ void CCustomDetector::UpfateWork()
 void CCustomDetector::UpdateVisibility()
 {
     // check visibility
-    attachable_hud_item* i0 = g_player_hud->attached_item(0);
+    attachable_hud_item* i0 = g_player_hud[0]->attached_item();
     if (i0 && HudItemData())
     {
         bool bClimb = ((Actor()->MovingState() & mcClimb) != 0);
         if (bClimb)
         {
-            HideDetector(true);
+            HideDetector(EDetectorFastModes::eQuick);
             m_bNeedActivation = true;
         }
         else
@@ -259,9 +357,12 @@ void CCustomDetector::UpdateVisibility()
             if (wpn)
             {
                 u32 state = wpn->GetState();
-                if (wpn->IsZoomed() || wpn->IsSecondZoomed() || state == CWeapon::eReload || state == CWeapon::eSwitch)
+                if (state == CWeapon::eReload || state == CWeapon::eSwitch)
                 {
-                    HideDetector(true);
+                    if (GetState() == eWpnZoomEnd)
+                        HideDetector(EDetectorFastModes::eInZoomFast);
+                    else
+                        HideDetector(EDetectorFastModes::eQuick);
                     m_bNeedActivation = true;
                 }
             }
@@ -269,7 +370,7 @@ void CCustomDetector::UpdateVisibility()
     }
     else if (m_bNeedActivation)
     {
-        attachable_hud_item* i0 = g_player_hud->attached_item(0);
+        attachable_hud_item* i0 = g_player_hud[0]->attached_item();
         bool bClimb = ((Actor()->MovingState() & mcClimb) != 0);
         if (!bClimb)
         {
@@ -277,7 +378,7 @@ void CCustomDetector::UpdateVisibility()
             bool bChecked = !huditem || CheckCompatibilityInt(huditem, 0);
 
             if (bChecked)
-                ShowDetector(true);
+                ShowDetector(EDetectorFastModes::eQuick);
         }
     }
 }
@@ -316,7 +417,9 @@ void CCustomDetector::OnMoveToRuck(const SInvItemPlace& prev)
     if (prev.type == eItemPlaceSlot)
     {
         SwitchState(eHidden);
-        g_player_hud->detach_item(this);
+        g_player_hud[1]->detach_item(this);
+        g_player_hud[0]->after_detach_item_idx(this);
+        g_player_hud[0]->set_bone_visible("l_clavicle", TRUE, FALSE);
     }
     TurnDetectorInternal(false);
     StopCurrentAnimWithoutCallback();
@@ -380,7 +483,7 @@ void CCustomDetector::UpdateHudAdditional(Fmatrix& trans)
     fAvgTimeDelta = fAvgTimeDelta * 0.8f + Device.fTimeDelta * friction_i;
 
     //======== Проверяем доступность инерции и стрейфа ========//
-    if (!g_player_hud->inertion_allowed())
+    if (!g_player_hud[1]->inertion_allowed())
         return;
 
     //============= Боковой стрейф с оружием =============//

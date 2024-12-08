@@ -408,11 +408,13 @@ void CActor::g_SetAnimation(u32 mstate_rl)
     {
         if ((mstate_rl & mcSprint) != (mstate_old & mcSprint))
         {
-            g_player_hud->OnMovementChanged(mcSprint);
+            g_player_hud[0]->OnMovementChanged(mcSprint);
+            g_player_hud[1]->OnMovementChanged(mcSprint);
         }
         else if ((mstate_rl & mcAnyMove) != (mstate_old & mcAnyMove))
         {
-            g_player_hud->OnMovementChanged(mcAnyMove);
+            g_player_hud[0]->OnMovementChanged(mcAnyMove);
+            g_player_hud[1]->OnMovementChanged(mcAnyMove);
         }
     };
 

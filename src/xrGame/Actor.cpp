@@ -1305,16 +1305,23 @@ void CActor::UpdateCL()
 
     }
 
-    Fmatrix trans;
+    Fmatrix trans, trans2;
     if (cam_Active() == cam_FirstEye())
     {
         Cameras().hud_camera_Matrix(trans);
+        Cameras().hud_camera_Matrix(trans2);
     }
     else
+    {
         Cameras().camera_Matrix(trans);
+        Cameras().camera_Matrix(trans2);
+    }
 
     if (IsFocused())
-        g_player_hud->update(trans);
+    {
+        g_player_hud[0]->update(trans);
+        g_player_hud[1]->update(trans2);
+    }
 
     if (psActorFlags.test(AF_MULTI_ITEM_PICKUP))
         m_bPickupMode = false;
@@ -1354,23 +1361,25 @@ void CActor::shedule_Update(u32 DT)
                 {
                     if (pHudItem->IsHidden())
                     {
-                        g_player_hud->detach_item(pHudItem);
+                        g_player_hud[0]->detach_item(pHudItem);
+                        g_player_hud[1]->detach_item(pHudItem);
                     }
                     else
                     {
-                        g_player_hud->attach_item(pHudItem);
+                        g_player_hud[0]->attach_item(pHudItem);
+
+                        if (g_player_hud[1]->attached_item())
+                            g_player_hud[0]->set_bone_visible("l_clavicle", FALSE, FALSE);
                     }
                 }
             }
             else
-            {
-                g_player_hud->detach_item_idx(0);
-                // Msg("---No active item in inventory(), item 0 detached.");
-            }
+                g_player_hud[0]->detach_item_idx();
         }
         else
         {
-            g_player_hud->detach_all_items();
+            g_player_hud[0]->detach_all_items();
+            g_player_hud[1]->detach_all_items();
             // Msg("---No hud view found, all items detached.");
         }
     }
@@ -1682,7 +1691,10 @@ void CActor::OnHUDDraw(u32 context_id, CCustomHUD* hud, IRenderable* root)
 {
     R_ASSERT(IsFocused());
     if (!((mstate_real & mcLookout) && !IsGameTypeSingle()))
-        g_player_hud->render_hud(context_id, root);
+    {
+        g_player_hud[0]->render_hud(context_id, root);
+        g_player_hud[1]->render_hud(context_id, root);
+    }
 }
 
 void CActor::RenderIndicator(Fvector dpos, float r1, float r2, const ui_shader& IndShader)
@@ -2292,7 +2304,10 @@ void CActor::On_SetEntity()
 {
     auto pOutfit = GetOutfit();
     if (!pOutfit)
-        g_player_hud->load_default();
+    {
+        g_player_hud[0]->load_default();
+        g_player_hud[1]->load_default();
+    }
     else
         pOutfit->ApplySkinModel(this, true, true);
 }

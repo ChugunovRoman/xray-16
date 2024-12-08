@@ -108,15 +108,18 @@ CLevel::CLevel()
     pObjects4CrPr.clear();
     pActors4CrPr.clear();
     pHUD = xr_new<CHUDManager>();
-    g_player_hud = xr_new<player_hud>();
-    g_player_hud->load_default();
+    g_player_hud[0] = xr_new<player_hud>();
+    g_player_hud[0]->load_default();
+    g_player_hud[1] = xr_new<player_hud>();
+    g_player_hud[1]->load_default();
 }
 
 CLevel::~CLevel()
 {
     ZoneScoped;
 
-    xr_delete(g_player_hud);
+    xr_delete(g_player_hud[0]);
+    xr_delete(g_player_hud[1]);
     xr_delete(pHUD);
     delete_data(hud_zones_list);
     hud_zones_list = nullptr;

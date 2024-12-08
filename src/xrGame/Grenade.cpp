@@ -407,7 +407,8 @@ void CGrenade::UpdateHudAdditional(Fmatrix& trans)
         return;
 
     attachable_hud_item* hi = HudItemData();
-    R_ASSERT(hi);
+    if (!hi)
+        return;
 
     //============= Подготавливаем общие переменные =============//
 
@@ -425,7 +426,7 @@ void CGrenade::UpdateHudAdditional(Fmatrix& trans)
     fAvgTimeDelta = fAvgTimeDelta * 0.8f + Device.fTimeDelta * friction_i;
 
     //======== Проверяем доступность инерции и стрейфа ========//
-    if (!g_player_hud->inertion_allowed())
+    if (!g_player_hud[0]->inertion_allowed())
         return;
 
     //============= Боковой стрейф с оружием =============//

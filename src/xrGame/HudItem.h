@@ -23,7 +23,14 @@ public:
         eShowing,
         eHiding,
         eBore,
-        eLastBaseState = eBore,
+        eBoltThrowStart,
+        eBoltThrowIdle,
+        eBoltThrowEnd,
+        eWpnZoomStart,
+        eWpnZoomIdle,
+        eWpnZoomEnd,
+
+        eLastBaseState,
     };
 
 private:
@@ -140,6 +147,7 @@ public:
     IC void RenderHud(BOOL B) { m_huditem_flags.set(fl_renderhud, B); }
     IC BOOL RenderHud() { return m_huditem_flags.test(fl_renderhud); }
     attachable_hud_item* HudItemData() const;
+    void DetachCurrentHudItemData();
     virtual void on_a_hud_attach();
     virtual void on_b_hud_detach();
     IC BOOL HudInertionEnabled() const { return m_huditem_flags.test(fl_inertion_enable); }

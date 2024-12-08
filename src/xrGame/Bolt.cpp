@@ -146,10 +146,14 @@ void CBolt::OnAnimationEnd(u32 state)
             SwitchState(eReady);
     }
     break;
-    case eThrow: { SwitchState(eThrowEnd);
+    case eThrow:
+    {
+        SwitchState(eThrowEnd);
     }
     break;
-    case eThrowEnd: { SwitchState(eShowing);
+    case eThrowEnd:
+    {
+        SwitchState(eShowing);
     }
     break;
     default: inherited::OnAnimationEnd(state);
@@ -161,25 +165,7 @@ bool CBolt::Action(u16 cmd, u32 flags)
 {
     if (inherited::Action(cmd, flags))
         return true;
-    /*
-        switch(cmd)
-        {
-        case kDROP:
-            {
-                if(flags&CMD_START)
-                {
-                    m_throw = false;
-                    if(State() == MS_IDLE) State(MS_THREATEN);
-                }
-                else if(State() == MS_READY || State() == MS_THREATEN)
-                {
-                    m_throw = true;
-                    if(State() == MS_READY) State(MS_THROW);
-                }
-            }
-            return true;
-        }
-    */
+
     return false;
 }
 
@@ -196,7 +182,8 @@ void CBolt::UpdateHudAdditional(Fmatrix& trans)
         return;
 
     attachable_hud_item* hi = HudItemData();
-    R_ASSERT(hi);
+    if (!hi)
+        return;
 
     //============= Подготавливаем общие переменные =============//
 
@@ -214,7 +201,7 @@ void CBolt::UpdateHudAdditional(Fmatrix& trans)
     fAvgTimeDelta = fAvgTimeDelta * 0.8f + Device.fTimeDelta * friction_i;
 
     //======== Проверяем доступность инерции и стрейфа ========//
-    if (!g_player_hud->inertion_allowed())
+    if (!g_player_hud[0]->inertion_allowed())
         return;
 
     //============= Боковой стрейф с оружием =============//

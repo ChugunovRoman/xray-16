@@ -285,9 +285,13 @@ void CMissile::State(u32 state, u32 oldState)
         SetPending(TRUE);
         m_fThrowForce = m_fMinForce;
         PlayHUDMotion("anm_throw_begin", "anim_throw_begin", TRUE, this, GetState());
+        g_player_hud[1]->set_detector_state(EHudStates::eBoltThrowStart);
     }
     break;
-    case eReady: { PlayHUDMotion("anm_throw_idle", "anim_throw_idle", TRUE, this, GetState());
+    case eReady:
+    {
+        PlayHUDMotion("anm_throw_idle", "anim_throw_idle", TRUE, this, GetState());
+        g_player_hud[1]->set_detector_state(EHudStates::eBoltThrowIdle);
     }
     break;
     case eThrow:
@@ -295,11 +299,13 @@ void CMissile::State(u32 state, u32 oldState)
         SetPending(TRUE);
         m_throw = false;
         PlayHUDMotion("anm_throw", "anim_throw_act", TRUE, this, GetState());
+        g_player_hud[1]->set_detector_state(EHudStates::eBoltThrowEnd);
     }
     break;
     case eThrowEnd:
     {
         PlayHUDMotion("anm_throw_end", "anim_throw_end", TRUE, this, GetState());
+        g_player_hud[1]->set_detector_state(EHudStates::eIdle);
         SwitchState(eShowing);
     }
     break;

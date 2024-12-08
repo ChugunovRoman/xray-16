@@ -130,7 +130,7 @@ bool CHUDManager::RenderActiveItemUIQuery()
     if (!need_render_hud())
         return false;
 
-    return (g_player_hud && g_player_hud->render_item_ui_query());
+    return (g_player_hud[0] && g_player_hud[0]->render_item_ui_query() || g_player_hud[1] && g_player_hud[1]->render_item_ui_query());
 }
 
 void CHUDManager::RenderActiveItemUI()
@@ -138,7 +138,8 @@ void CHUDManager::RenderActiveItemUI()
     if (!psHUD_Flags.is(HUD_DRAW_RT2))
         return;
 
-    g_player_hud->render_item_ui();
+    g_player_hud[0]->render_item_ui();
+    g_player_hud[1]->render_item_ui();
 }
 
 extern ENGINE_API bool bShowPauseString;

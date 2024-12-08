@@ -31,7 +31,7 @@ bool CFlare::IsFlareActive()
     if (NULL == HudItemData())
         return false;
 
-    VERIFY(g_player_hud->attached_item(HudItemData()->m_attach_place_idx) == HudItemData());
+    VERIFY(g_player_hud[HudItemData()->m_attach_place_idx]->attached_item() == HudItemData());
 
     return (GetState() == eFlareIdle);
 }
@@ -44,7 +44,7 @@ void CFlare::OnStateSwitch(u32 S, u32 oldState)
     {
     case eFlareShowing:
     {
-        g_player_hud->attach_item(this);
+        g_player_hud[0]->attach_item(this);
         PlayHUDMotion("anm_show", "anim_show", TRUE, this, GetState());
         SetPending(TRUE);
     }

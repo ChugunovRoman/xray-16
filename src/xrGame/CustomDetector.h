@@ -119,9 +119,19 @@ class CCustomDetector : public CHudItemObject
 {
     typedef CHudItemObject inherited;
 
+public:
+    enum EDetectorFastModes
+    {
+        eFast = 0,
+        eQuick,
+        eInZoomFast,
+
+        eNone,
+    };
+
 protected:
     CUIArtefactDetectorBase* m_ui;
-    bool m_bFastAnimMode;
+    EDetectorFastModes m_bFastAnimMode = EDetectorFastModes::eFast;
     bool m_bNeedActivation;
 
 public:
@@ -148,9 +158,11 @@ public:
     virtual void OnAnimationEnd(u32 state);
     virtual void UpdateXForm();
 
-    void ToggleDetector(bool bFastMode);
-    void HideDetector(bool bFastMode);
-    void ShowDetector(bool bFastMode);
+    void ToggleDetector(EDetectorFastModes bFastMode);
+    void HideDetector(EDetectorFastModes bFastMode);
+    void ShowDetector(EDetectorFastModes bFastMode);
+    shared_str GetToggleAnmName(pcstr const type) const;
+    void PlayShootAnm();
     float m_fAfDetectRadius;
     virtual bool CheckCompatibility(CHudItem* itm);
 

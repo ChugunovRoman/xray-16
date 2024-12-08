@@ -284,7 +284,7 @@ void CWeaponKnife::MakeShot(Fvector const& pos, Fvector const& dir, float const 
     PlaySound("sndShot", pos);
     if (ParentIsActor())
     {
-        const bool left = (IsBinded(kWPN_FIRE, XR_CONTROLLER_AXIS_TRIGGER_LEFT) || IsBinded(kWPN_ZOOM, XR_CONTROLLER_AXIS_TRIGGER_LEFT)) && !g_player_hud->attached_item(1);
+        const bool left = (IsBinded(kWPN_FIRE, XR_CONTROLLER_AXIS_TRIGGER_LEFT) || IsBinded(kWPN_ZOOM, XR_CONTROLLER_AXIS_TRIGGER_LEFT)) && !g_player_hud[1]->attached_item();
         const bool right = IsBinded(kWPN_FIRE, XR_CONTROLLER_AXIS_TRIGGER_LEFT) || IsBinded(kWPN_ZOOM, XR_CONTROLLER_AXIS_TRIGGER_LEFT);
         pInput->Feedback(CInput::FeedbackTriggers, left ? k_hit : 0.0f, right ? k_hit : 0.0f, 0.1f);
     }

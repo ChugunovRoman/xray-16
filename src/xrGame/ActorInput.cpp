@@ -140,7 +140,10 @@ void CActor::IR_OnKeyboardPress(int cmd)
         if (det_active)
         {
             CCustomDetector* det = smart_cast<CCustomDetector*>(det_active);
-            det->ToggleDetector(g_player_hud->attached_item(0) != NULL);
+            det->ToggleDetector(g_player_hud[0]->attached_item() != NULL
+                ? CCustomDetector::EDetectorFastModes::eFast
+                : CCustomDetector::EDetectorFastModes::eNone
+            );
             return;
         }
     }
@@ -919,7 +922,10 @@ void CActor::NoClipFly(int cmd)
         if (det_active)
         {
             CCustomDetector* det = smart_cast<CCustomDetector*>(det_active);
-            det->ToggleDetector(g_player_hud->attached_item(0) != NULL);
+            det->ToggleDetector(g_player_hud[0]->attached_item() != NULL
+                ? CCustomDetector::EDetectorFastModes::eFast
+                : CCustomDetector::EDetectorFastModes::eNone
+            );
             return;
         }
     }

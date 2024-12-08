@@ -95,7 +95,7 @@ void CHudTuner::on_tool_frame()
     if (!get_open_state())
         return;
 
-    if (!g_player_hud)
+    if (!g_player_hud[0] && !g_player_hud[1])
         return;
 
     auto calcColumnCount = [](float columnWidth) -> int
@@ -105,7 +105,7 @@ void CHudTuner::on_tool_frame()
         return columnCount;
     };
 
-    auto hud_item = g_player_hud->attached_item(current_hud_idx);
+    auto hud_item = g_player_hud[current_hud_idx]->attached_item();
     if (current_hud_item != hud_item)
     {
         current_hud_item = hud_item;
@@ -336,6 +336,27 @@ void CHudTuner::on_tool_frame()
             {
                 for (const auto& [anim_name, motion] : current_hud_item->m_hand_motions.m_anims)
                 {
+                    if (strstr(anim_name.c_str(), "_16x9"))
+                        continue;
+
+                    ImGui::TableNextColumn();
+                    if (ImGui::Button(anim_name.c_str()))
+                    {
+                        current_hud_item->m_parent_hud_item->PlayHUDMotion_noCB(anim_name, false);
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                    {
+                        ImGui::SetTooltip("%s = %s, %s", anim_name.c_str(), motion.m_base_name.c_str(), motion.m_additional_name.c_str());
+                    }
+                }
+
+                ImGui::NewLine();
+
+                for (const auto& [anim_name, motion] : current_hud_item->m_hand_motions.m_anims)
+                {
+                    if (!strstr(anim_name.c_str(), "_16x9"))
+                        continue;
+
                     ImGui::TableNextColumn();
                     if (ImGui::Button(anim_name.c_str()))
                     {
