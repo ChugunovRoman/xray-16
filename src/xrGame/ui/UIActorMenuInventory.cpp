@@ -542,7 +542,7 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
     if (slot_id == HELMET_SLOT)
     {
         CCustomOutfit* pOutfit = m_pActorInvOwner->GetOutfit();
-        if (pOutfit && !pOutfit->bIsHelmetAvaliable)
+        if (pOutfit && !pOutfit->IsHelmetAllowed())
             return false;
     }
 
@@ -561,7 +561,7 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
         else*/ if (slot_id == OUTFIT_SLOT)
         {
             CCustomOutfit* pOutfit = smart_cast<CCustomOutfit*>(iitem);
-            if (pOutfit && !pOutfit->bIsHelmetAvaliable)
+            if (pOutfit && !pOutfit->IsHelmetAllowed())
             {
                 CUIDragDropListEx* helmet_list = GetSlotList(HELMET_SLOT);
                 if (helmet_list && helmet_list->ItemsCount() == 1)
@@ -1057,7 +1057,7 @@ void CUIActorMenu::PropertiesBoxForSlots(PIItem item, bool& b_show)
     }
 
     CCustomOutfit* outfit_in_slot = m_pActorInvOwner->GetOutfit();
-    if (pHelmet && !bAlreadyDressed && (!outfit_in_slot || outfit_in_slot->bIsHelmetAvaliable))
+    if (pHelmet && !bAlreadyDressed && (!outfit_in_slot || outfit_in_slot->IsHelmetAllowed()))
     {
         m_UIPropertiesBox->AddItem("st_dress_helmet", NULL, INVENTORY_TO_SLOT_ACTION);
         b_show = true;
@@ -1613,7 +1613,7 @@ void CUIActorMenu::UpdateOutfit()
     CCustomOutfit* outfit = m_pActorInvOwner->GetOutfit();
     if (m_pLists[eInventoryHelmetList])
     {
-        if (outfit && !outfit->bIsHelmetAvaliable)
+        if (outfit && !outfit->IsHelmetAllowed())
             m_pLists[eInventoryHelmetList]->SetCellsCapacity({ 0, 0 });
         else
             m_pLists[eInventoryHelmetList]->SetCellsCapacity(m_pLists[eInventoryHelmetList]->MaxCellsCapacity());

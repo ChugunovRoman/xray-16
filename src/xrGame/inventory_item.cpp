@@ -214,7 +214,7 @@ void CInventoryItem::ReloadNames()
             if (artefact_count == 0)
                 artefact_count = pSettings->read_if_exists<u32>(section, "artefact_count", 0);
 
-            bool IsHelmetAvaliable = outfit->bIsHelmetAvaliable;
+            bool IsHelmetAvaliable = outfit->IsHelmetAllowed();
             if (!IsHelmetAvaliable)
                 IsHelmetAvaliable = pSettings->read_if_exists<bool>(section, "helmet_avaliable", true);
 

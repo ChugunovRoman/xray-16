@@ -193,7 +193,7 @@ void ui_actor_state_wnd::UpdateActorInfo(CInventoryOwner* owner)
         m_state[stt_armor]->set_text(value);
 
         fwou_value += value * outfit->GetCondition();
-        if (!outfit->bIsHelmetAvaliable)
+        if (!outfit->IsHelmetAllowed())
         {
             const auto head_bone = ikv->LL_BoneID("bip01_head");
             fwou_value += outfit->GetBoneArmor(head_bone) * outfit->GetCondition();

@@ -201,6 +201,13 @@ bool CInventoryItem::install_upgrade_impl(LPCSTR section, bool test)
         }
         result |= result2;
 
+        result2 = process_if_exists_set(section, "helmet_avaliable", &CInifile::r_bool, value, test);
+        if (result2 && !test)
+        {
+            m_flags.set(FAllowHelmet, value);
+        }
+        result |= result2;
+
         if (!g_normalize_upgrade_mouse_sens)
         {
             result |= process_if_exists(section, "control_inertion_factor", &CInifile::r_float, m_fControlInertionFactor, test);

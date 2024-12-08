@@ -207,14 +207,14 @@ void CCustomOutfit::OnMoveToSlot(const SInvItemPlace& prev)
         if (pActor)
         {
             ApplySkinModel(pActor, true, false);
-            if (prev.type == eItemPlaceSlot && !bIsHelmetAvaliable)
+            if (prev.type == eItemPlaceSlot && !IsHelmetAllowed())
             {
                 CTorch* pTorch = smart_cast<CTorch*>(pActor->inventory().ItemFromSlot(TORCH_SLOT));
                 if (pTorch && pTorch->GetNightVisionStatus())
                     pTorch->SwitchNightVision(true, false);
             }
             PIItem pHelmet = pActor->inventory().ItemFromSlot(HELMET_SLOT);
-            if (pHelmet && !bIsHelmetAvaliable)
+            if (pHelmet && !IsHelmetAllowed())
                 pActor->inventory().Ruck(pHelmet, false);
 
             if (g_outfit_faction)
@@ -306,7 +306,7 @@ void CCustomOutfit::OnMoveToRuck(const SInvItemPlace& prev)
         {
             ApplySkinModel(pActor, false, false);
             CTorch* pTorch = smart_cast<CTorch*>(pActor->inventory().ItemFromSlot(TORCH_SLOT));
-            if (pTorch && !bIsHelmetAvaliable)
+            if (pTorch && !IsHelmetAllowed())
                 pTorch->SwitchNightVision(false);
         }
     }

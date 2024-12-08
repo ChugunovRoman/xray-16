@@ -1101,7 +1101,7 @@ void CActor::UpdateVisor()
     if (!pVisor)
     {
         auto pOutfit = smart_cast<CCustomOutfit*>(inventory().ItemFromSlot(OUTFIT_SLOT));
-        if (pOutfit && !pOutfit->bIsHelmetAvaliable) // if our outfit blocks the helmet, it probably includes it's own helmet
+        if (pOutfit && !pOutfit->IsHelmetAllowed()) // if our outfit blocks the helmet, it probably includes it's own helmet
             pVisor = pOutfit->cast_inventory_item();
     }
 

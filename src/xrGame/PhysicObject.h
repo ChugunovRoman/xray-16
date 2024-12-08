@@ -133,6 +133,7 @@ protected:
         FInInterpolation = (1 << 9),
         FInInterpolate = (1 << 10),
         FIsQuestItem = (1 << 11),
+        FAllowHelmet = (1 << 12),
     };
     Flags16 m_flags;
     bool m_just_after_spawn;

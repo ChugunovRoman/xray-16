@@ -1271,7 +1271,7 @@ bool CInventory::CanPutInSlot(PIItem pIItem, u16 slot_id) const
     if (slot_id == HELMET_SLOT)
     {
         CCustomOutfit* pOutfit = m_pOwner->GetOutfit();
-        if (pOutfit && !pOutfit->bIsHelmetAvaliable)
+        if (pOutfit && !pOutfit->IsHelmetAllowed())
             return false;
     }
 

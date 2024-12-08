@@ -84,6 +84,7 @@ protected:
         FInInterpolate = (1 << 10),
         FIsQuestItem = (1 << 11),
         FIsHelperItem = (1 << 12),
+        FAllowHelmet = (1 << 13),
     };
 
     Flags16 m_flags;
@@ -222,6 +223,7 @@ public:
     virtual ALife::_TIME_ID TimePassedAfterIndependant() const;
 
     virtual bool IsSprintAllowed() const { return !!m_flags.test(FAllowSprint); };
+    virtual bool IsHelmetAllowed() const { return !!m_flags.test(FAllowHelmet); };
     virtual float GetControlInertionFactor() const { return m_fControlInertionFactor; };
     virtual void UpdateXForm();
 
