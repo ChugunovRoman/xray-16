@@ -54,6 +54,7 @@ void CUIActorMenu::InitInventoryMode()
     ShowIfExist(m_pLists[eInventoryPdaList], true);
     ShowIfExist(m_pLists[eInventoryBackpackList], true);
     ShowIfExist(m_pLists[eInventoryKnifeList], true);
+    ShowIfExist(m_pLists[eInventoryTorchList], true);
     m_pLists[eInventoryPistolList]->Show(true);
     m_pLists[eInventoryAutomaticList]->Show(true);
     ShowIfExist(m_pQuickSlot, true);
@@ -251,7 +252,7 @@ void CUIActorMenu::OnInventoryAction(PIItem pItem, u16 action_type)
 {
     CUIDragDropListEx* all_lists[] =
     {
-        m_pLists[eInventoryBeltList], m_pLists[eInventoryKnifeList], m_pLists[eInventoryPistolList], m_pLists[eInventoryAutomaticList],
+        m_pLists[eInventoryBeltList], m_pLists[eInventoryKnifeList], m_pLists[eInventoryTorchList], m_pLists[eInventoryPistolList], m_pLists[eInventoryAutomaticList],
         m_pLists[eInventoryBackpackList], m_pLists[eInventoryOutfitList], m_pLists[eInventoryHelmetList], m_pLists[eInventoryDetectorList],
         m_pLists[eInventoryBinocularList], m_pLists[eInventoryGrenadeList], m_pLists[eInventoryBoltList], m_pLists[eInventoryPdaList],
         m_pLists[eInventoryBagList], m_pLists[eTradeActorBagList], m_pLists[eTradeActorList]
@@ -461,6 +462,8 @@ void CUIActorMenu::InitInventoryContents(CUIDragDropListEx* pBagList, bool onlyB
     //Alundaio
     if (!m_pActorInvOwner->inventory().SlotIsPersistent(KNIFE_SLOT))
         InitCellForSlot(KNIFE_SLOT);
+    if (!m_pActorInvOwner->inventory().SlotIsPersistent(TORCH_SLOT))
+        InitCellForSlot(TORCH_SLOT);
     if (!m_pActorInvOwner->inventory().SlotIsPersistent(BOLT_SLOT))
         InitCellForSlot(BOLT_SLOT);
     if (!m_pActorInvOwner->inventory().SlotIsPersistent(BINOCULAR_SLOT))
@@ -605,6 +608,9 @@ bool CUIActorMenu::ToSlot(CUICellItem* itm, bool force_place, u16 slot_id)
 
         if (slot_id == KNIFE_SLOT && m_pActorInvOwner->inventory().CanPutInSlot(iitem, KNIFE_SLOT))
             return ToSlot(itm, force_place, KNIFE_SLOT);
+
+        if (slot_id == TORCH_SLOT && m_pActorInvOwner->inventory().CanPutInSlot(iitem, TORCH_SLOT))
+            return ToSlot(itm, force_place, TORCH_SLOT);
 
         if (slot_id == INV_SLOT_2 && m_pActorInvOwner->inventory().CanPutInSlot(iitem, INV_SLOT_3) && CallOfPripyatMode)
             return ToSlot(itm, force_place, INV_SLOT_3);
@@ -828,6 +834,8 @@ CUIDragDropListEx* CUIActorMenu::GetSlotList(u16 slot_idx)
     {
     case KNIFE_SLOT: return m_pLists[eInventoryKnifeList]; break;
 
+    case TORCH_SLOT: return m_pLists[eInventoryTorchList]; break;
+
     case INV_SLOT_2: return m_pLists[eInventoryPistolList]; break;
 
     case INV_SLOT_3: return m_pLists[eInventoryAutomaticList]; break;
@@ -848,7 +856,6 @@ CUIDragDropListEx* CUIActorMenu::GetSlotList(u16 slot_idx)
 
     case GRENADE_SLOT: return m_pLists[eInventoryGrenadeList]; break;
 
-    case TORCH_SLOT:
     case ARTEFACT_SLOT: // fake
         if (m_currMenuMode == mmTrade)
         {

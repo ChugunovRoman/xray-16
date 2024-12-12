@@ -196,6 +196,7 @@ void CUIActorMenu::InitializeUniversal(CUIXml& uiXml)
     {
         // { id,                   "xml_section_name",         "condition_indicator,  "highlighter",             "blocker",          required }
         { eInventoryKnifeList,     "dragdrop_knife",           "progess_bar_knife",   "inv_slot1_highlight",     nullptr,            false },
+        { eInventoryTorchList, "dragdrop_torch", "progess_bar_torch", "torch_slot_highlight", nullptr, false},
         { eInventoryPistolList,    "dragdrop_pistol",          "progess_bar_weapon1", "inv_slot2_highlight",     nullptr,            true },
         { eInventoryAutomaticList, "dragdrop_automatic",       "progess_bar_weapon2", "inv_slot3_highlight",     nullptr,            true },
 
@@ -526,6 +527,7 @@ void CUIActorMenu::InitCallbacks()
         CUIWndCallback::void_function(this, &CUIActorMenu::TryRepairItem));
 
     BindDragDropListEvents(m_pLists[eInventoryKnifeList]);
+    BindDragDropListEvents(m_pLists[eInventoryTorchList]);
     BindDragDropListEvents(m_pLists[eInventoryPistolList]);
     BindDragDropListEvents(m_pLists[eInventoryAutomaticList]);
 

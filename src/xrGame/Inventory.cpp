@@ -659,28 +659,31 @@ void CInventory::Activate(u16 slot, bool bForce)
             }
         }
     }
-    //активный слот задействован
+    // активный слот задействован
     else if (slot == NO_ACTIVE_SLOT || tmp_item)
     {
         PIItem active_item = ActiveItem();
-        if (active_item && !bForce)
+        CHudItem* tempItem = active_item->cast_hud_item();
+        if (active_item && tempItem)
         {
-            CHudItem* tempItem = active_item->cast_hud_item();
-            R_ASSERT2(tempItem, active_item->object().cNameSect().c_str());
+            if (!bForce)
+            {
+                R_ASSERT2(tempItem, active_item->object().cNameSect().c_str());
 
-            tempItem->SendDeactivateItem();
+                tempItem->SendDeactivateItem();
 #ifdef DEBUG
-//			Msg("--- Inventory owner [%s]: send deactivate item [%s]", m_pOwner->Name(), active_item->NameItem());
+//      Msg("--- Inventory owner [%s]: send deactivate item [%s]", m_pOwner->Name(), active_item->NameItem());
 #endif // #ifdef DEBUG
-        }
-        else // in case where weapon is going to destroy
-        {
-            if (tmp_item)
-                tmp_item->ActivateItem();
+            }
+            else // in case where weapon is going to destroy
+            {
+                if (tmp_item)
+                    tmp_item->ActivateItem();
 
-            m_iActiveSlot = slot;
+                m_iActiveSlot = slot;
+            }
+            m_iNextActiveSlot = slot;
         }
-        m_iNextActiveSlot = slot;
     }
 }
 
@@ -893,7 +896,8 @@ void CInventory::Update()
 
             m_iActiveSlot = GetNextActiveSlot();
         }
-        if ((GetNextActiveSlot() != NO_ACTIVE_SLOT) && ActiveItem() && ActiveItem()->cast_hud_item()->IsHidden())
+        if ((GetNextActiveSlot() != NO_ACTIVE_SLOT) && ActiveItem() && ActiveItem()->cast_hud_item() &&
+            ActiveItem()->cast_hud_item()->IsHidden())
             ActiveItem()->ActivateItem();
     }
     UpdateDropTasks();
