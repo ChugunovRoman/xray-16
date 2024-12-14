@@ -33,6 +33,10 @@ public:
     void on_renderable_Render(u32 context_id, IRenderable* root) override;
     virtual void OnMoveToRuck(const SInvItemPlace& prev);
 
+    xr_map<shared_str, shared_str> cam_anims;
+    void LoadCamAnims(LPCSTR section);
+    void PlayCamAnim(LPCSTR name);
+
     virtual bool use_parent_ai_locations() const
     {
         return CInventoryItemObject::use_parent_ai_locations() && (Device.dwFrame != dwXF_Frame);

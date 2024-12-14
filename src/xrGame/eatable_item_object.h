@@ -60,6 +60,10 @@ public:
     void SetRestoreDetector(const bool v) { restor_detector = v; };
     bool GetRestoreDetector() const { return restor_detector; };
 
+    xr_map<shared_str, shared_str> cam_anims;
+    void LoadCamAnims(LPCSTR section);
+    void PlayCamAnim(LPCSTR name);
+
     // CHudItem methods
     virtual bool Action(u16 cmd, u32 flags);
     virtual void SwitchState(u32 S);
