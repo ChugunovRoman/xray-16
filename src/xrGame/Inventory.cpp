@@ -665,8 +665,7 @@ void CInventory::Activate(u16 slot, bool bForce)
     else if (slot == NO_ACTIVE_SLOT || tmp_item)
     {
         PIItem active_item = ActiveItem();
-        CHudItem* tempItem = active_item->cast_hud_item();
-        if (active_item && tempItem)
+        if (active_item && !bForce)
         {
             if (CHudItem* tempItem = active_item->cast_hud_item())
                 tempItem->SendDeactivateItem();
@@ -679,18 +678,17 @@ void CInventory::Activate(u16 slot, bool bForce)
             }
 
 #ifdef DEBUG
-//      Msg("--- Inventory owner [%s]: send deactivate item [%s]", m_pOwner->Name(), active_item->NameItem());
+//			Msg("--- Inventory owner [%s]: send deactivate item [%s]", m_pOwner->Name(), active_item->NameItem());
 #endif // #ifdef DEBUG
-            }
-            else // in case where weapon is going to destroy
-            {
-                if (tmp_item)
-                    tmp_item->ActivateItem();
-
-                m_iActiveSlot = slot;
-            }
-            m_iNextActiveSlot = slot;
         }
+        else // in case where weapon is going to destroy
+        {
+            if (tmp_item)
+                tmp_item->ActivateItem();
+
+            m_iActiveSlot = slot;
+        }
+        m_iNextActiveSlot = slot;
     }
 }
 
