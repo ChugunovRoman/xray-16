@@ -196,12 +196,13 @@ void CUIActorMenu::InitializeUniversal(CUIXml& uiXml)
     {
         // { id,                   "xml_section_name",         "condition_indicator,  "highlighter",             "blocker",          required }
         { eInventoryKnifeList,     "dragdrop_knife",           "progess_bar_knife",   "inv_slot1_highlight",     nullptr,            false },
-        { eInventoryTorchList, "dragdrop_torch", "progess_bar_torch", "torch_slot_highlight", nullptr, false},
         { eInventoryPistolList,    "dragdrop_pistol",          "progess_bar_weapon1", "inv_slot2_highlight",     nullptr,            true },
         { eInventoryAutomaticList, "dragdrop_automatic",       "progess_bar_weapon2", "inv_slot3_highlight",     nullptr,            true },
 
         { eInventoryOutfitList,    "dragdrop_outfit",          "progess_bar_outfit",   "outfit_slot_highlight",   nullptr,            true },
         { eInventoryHelmetList,    "dragdrop_helmet",          "progess_bar_helmet",   "helmet_slot_highlight",   "helmet_over",      false },
+
+        { eInventoryTorchList,     "dragdrop_torch",           "progess_bar_torch",    "torch_slot_highlight",   nullptr,            false},
 
         { eInventoryBeltList,      "dragdrop_belt",            nullptr,                "artefact_slot_highlight", "belt_list_over",   true },
         { eInventoryDetectorList,  "dragdrop_detector",        "progess_bar_detector", "detector_slot_highlight", nullptr,            true },
