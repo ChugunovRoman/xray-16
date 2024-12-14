@@ -241,6 +241,7 @@ void CCustomDetector::OnAnimationEnd(u32 state)
     case eShowing:
     {
         SwitchState(eIdle);
+        m_bDetectorActive = true;
         if (IsUsingCondition() && m_fDecayRate > 0.f)
             this->SetCondition(-m_fDecayRate);
         if (g_player_hud[0]->attached_item())
@@ -268,6 +269,7 @@ void CCustomDetector::OnAnimationEnd(u32 state)
         g_player_hud[1]->detach_item(this);
         g_player_hud[0]->after_detach_item_idx(this);
         g_player_hud[0]->set_bone_visible("l_clavicle", TRUE, FALSE);
+        m_bDetectorActive = false;
     }
     break;
     }
@@ -276,7 +278,7 @@ void CCustomDetector::OnAnimationEnd(u32 state)
 void CCustomDetector::UpdateXForm() { CInventoryItem::UpdateXForm(); }
 void CCustomDetector::OnActiveItem()
 {
-    m_bDetectorActive = true;
+    m_bDetectorActive = false;
 }
 void CCustomDetector::OnHiddenItem()
 {

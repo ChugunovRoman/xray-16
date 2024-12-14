@@ -244,7 +244,7 @@ void CEatableItemObject::RestoreSlot()
     if (restor_detector)
     {
         if (CCustomDetector* detector = smart_cast<CCustomDetector*>(Actor()->inventory().ItemFromSlot(DETECTOR_SLOT)))
-            detector->ShowDetector(CCustomDetector::eNone);
+            detector->ShowDetector(CCustomDetector::eFast);
     }
 
     restor_detector = false;

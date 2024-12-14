@@ -1186,10 +1186,13 @@ bool CInventory::Eat(PIItem pIItem)
     {
         if (CCustomDetector* detector = smart_cast<CCustomDetector*>(Actor()->inventory().ItemFromSlot(DETECTOR_SLOT)))
         {
-            detector->HideDetector(CCustomDetector::eQuick);
-            CEatableItemObject* pItemToEatObj = smart_cast<CEatableItemObject*>(pIItem);
-            if (pItemToEatObj)
-                pItemToEatObj->SetRestoreDetector(true);
+            if (detector->IsActive())
+            {
+                detector->HideDetector(CCustomDetector::eQuick);
+                CEatableItemObject* pItemToEatObj = smart_cast<CEatableItemObject*>(pIItem);
+                if (pItemToEatObj)
+                    pItemToEatObj->SetRestoreDetector(true);
+            }
         }
 
         CurrentGameUI()->GetActorMenu().HideDialog();
