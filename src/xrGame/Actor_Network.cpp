@@ -708,12 +708,21 @@ bool CActor::net_Spawn(CSE_Abstract* DC)
     if (g_Alive() && m_wasDebugSwaned == 0 && strstr(Core.Params, "-dbgsspwn") != NULL && pSettings->section_exist("debug_start_spawn"))
     {
         const u16 count = pSettings->line_count("debug_start_spawn");
-        LPCSTR line;
+        LPCSTR value;
         LPCSTR name;
         for (u16 i = 0; i < count; ++i)
         {
-            pSettings->r_line("debug_start_spawn", i, &name, &line);
-            Level().spawn_item(name, Position(), false, ID());
+            pSettings->r_line("debug_start_spawn", i, &name, &value);
+            if (value != "" && atoi(value))
+            {
+                for  (u32 i = 0; i < atoi(value); i++)
+                    Level().spawn_item(name, Position(), false, ID());
+                
+            }
+            else
+            {
+                Level().spawn_item(name, Position(), false, ID());
+            }
         }
 
         m_wasDebugSwaned = 1;
