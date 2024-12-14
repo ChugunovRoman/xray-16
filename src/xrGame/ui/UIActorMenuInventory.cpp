@@ -874,13 +874,9 @@ bool CUIActorMenu::TryUseItem(CUICellItem* cell_itm)
     CEatableItem* pEatableItem = smart_cast<CEatableItem*>(item);
 
     if (!(pMedkit || pAntirad || pEatableItem || pBottleItem))
-    {
         return false;
-    }
     if (!item->Useful())
-    {
         return false;
-    }
 
     //cell_itm->UpdateConditionProgressBar(); //Alundaio
 

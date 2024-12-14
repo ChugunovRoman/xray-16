@@ -11,7 +11,7 @@
 #include "physic_item.h"
 #include "eatable_item.h"
 
-class CEatableItemObject : public CEatableItem, public CPhysicItem
+class CEatableItemObject : public CEatableItem, public CPhysicItem, public CHudItem
 {
 public:
     CEatableItemObject();
@@ -25,9 +25,9 @@ public:
     virtual CWeapon* cast_weapon() { return 0; }
     virtual CFoodItem* cast_food_item() { return 0; }
     virtual CMissile* cast_missile() { return 0; }
-    virtual CHudItem* cast_hud_item() { return 0; }
     virtual CWeaponAmmo* cast_weapon_ammo() { return 0; }
     virtual CGameObject* cast_game_object() { return this; };
+    virtual CHudItem* cast_hud_item() { return this; }
 public:
     virtual void Load(LPCSTR section);
     virtual void Hit(SHit* pHDS);
@@ -50,6 +50,28 @@ public:
     virtual void reinit();
     virtual void activate_physic_shell();
     virtual void on_activate_physic_shell();
+
+    virtual bool UseBy();
+    virtual bool UseBy(CEntityAlive* npc);
+
+    void RestoreSlot();
+    void RemoveItemIfNecessaryOrMoveToRuck();
+
+    void SetRestoreDetector(const bool v) { restor_detector = v; };
+    bool GetRestoreDetector() const { return restor_detector; };
+
+    // CHudItem methods
+    virtual bool Action(u16 cmd, u32 flags);
+    virtual void SwitchState(u32 S);
+    virtual void OnStateSwitch(u32 S, u32 oldState);
+    virtual void OnAnimationEnd(u32 state);
+    virtual bool ActivateItem();
+    virtual void OnActiveItem();
+    virtual void DeactivateItem();
+    void on_renderable_Render(u32 context_id, IRenderable* root) override;
+    virtual void OnMoveToRuck(const SInvItemPlace& prev);
+    virtual void UpdateXForm();
+    // End CHudItem methods
 
 public:
     ////////// network //////////////////////////////////////////////////
@@ -74,5 +96,7 @@ public:
     virtual u32 ef_weapon_type() const;
 
 protected:
+    u16 prev_slot;
+    bool restor_detector{false};
     virtual bool use_parent_ai_locations() const { return CAttachableItem::use_parent_ai_locations(); }
 };

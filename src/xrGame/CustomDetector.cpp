@@ -274,8 +274,14 @@ void CCustomDetector::OnAnimationEnd(u32 state)
 }
 
 void CCustomDetector::UpdateXForm() { CInventoryItem::UpdateXForm(); }
-void CCustomDetector::OnActiveItem() { return; }
-void CCustomDetector::OnHiddenItem() {}
+void CCustomDetector::OnActiveItem()
+{
+    m_bDetectorActive = true;
+}
+void CCustomDetector::OnHiddenItem()
+{
+    m_bDetectorActive = false;
+}
 CCustomDetector::CCustomDetector()
 {
     m_ui = NULL;

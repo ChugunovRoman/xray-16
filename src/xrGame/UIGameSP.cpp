@@ -128,6 +128,10 @@ bool CUIGameSP::IR_UIOnKeyboardPress(int dik)
     }
     case kINVENTORY:
     {
+        PIItem itm = pActor->inventory().ActiveItem();
+        if (itm && itm->Action(0, 0))
+            return true;
+
         if (!pActor->inventory_disabled())
             ShowActorMenu();
 

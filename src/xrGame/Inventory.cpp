@@ -2,6 +2,7 @@
 #include "Inventory.h"
 #include "Actor.h"
 #include "CustomOutfit.h"
+#include "CustomDetector.h"
 #include "trade.h"
 #include "Weapon.h"
 #include "Grenade.h"
@@ -11,6 +12,7 @@
 #include "ui/UIActorMenu.h"
 
 #include "eatable_item.h"
+#include "eatable_item_object.h"
 #include "xrScriptEngine/script_engine.hpp"
 #include "xrMessages.h"
 #include "xrEngine/xr_level_controller.h"
@@ -25,6 +27,8 @@
 #include "xrNetServer/NET_Messages.h"
 
 using namespace InventoryUtilities;
+
+extern int g_enhancend_anims;
 
 // what to block
 u16 INV_STATE_LADDER = (1 << INV_SLOT_3 | 1 << BINOCULAR_SLOT);
@@ -1178,8 +1182,34 @@ bool CInventory::Eat(PIItem pIItem)
     if (pItemToEat->object().H_Parent()->ID() != entity_alive->ID())
         return false;
 
-    if (!pItemToEat->UseBy(entity_alive))
-        return false;
+    if (g_enhancend_anims && pSettings->line_exist(pIItem->m_section_id, "hud"))
+    {
+        if (CCustomDetector* detector = smart_cast<CCustomDetector*>(Actor()->inventory().ItemFromSlot(DETECTOR_SLOT)))
+        {
+            detector->HideDetector(CCustomDetector::eQuick);
+            CEatableItemObject* pItemToEatObj = smart_cast<CEatableItemObject*>(pIItem);
+            if (pItemToEatObj)
+                pItemToEatObj->SetRestoreDetector(true);
+        }
+
+        CurrentGameUI()->GetActorMenu().HideDialog();
+
+        Activate(NO_ACTIVE_SLOT);
+
+        pInventory->Slot(pIItem->BaseSlot(), pIItem, false, false);
+        NET_Packet P;
+        CGameObject::u_EventGen(P, GEG_PLAYER_ITEM2SLOT, pIItem->object().H_Parent()->ID());
+        P.w_u16(pIItem->object().ID());
+        P.w_u16(pIItem->BaseSlot());
+        CGameObject::u_EventSend(P);
+
+        Activate(pIItem->BaseSlot());
+    }
+    else
+    {
+        if (!pItemToEat->UseBy(entity_alive))
+            return false;
+    }
 
 #ifdef MP_LOGGING
     Msg("--- Actor [%d] use or eat [%d][%s]", entity_alive->ID(), pItemToEat->object().ID(),
@@ -1205,7 +1235,7 @@ bool CInventory::Eat(PIItem pIItem)
         CurrentGameUI()->GetActorMenu().SetCurrentItem(nullptr);
     }
 
-    if (pItemToEat->Empty())
+    if ((g_enhancend_anims == 0 || !pSettings->line_exist(pIItem->m_section_id, "hud")) && pItemToEat->Empty())
     {
         if (!pItemToEat->CanDelete())
             return false;
