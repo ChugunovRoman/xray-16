@@ -2,6 +2,7 @@
 #include "Inventory.h"
 #include "Actor.h"
 #include "CustomOutfit.h"
+#include "CustomDetector.h"
 #include "trade.h"
 #include "Weapon.h"
 #include "Grenade.h"
@@ -11,6 +12,7 @@
 #include "ui/UIActorMenu.h"
 
 #include "eatable_item.h"
+#include "eatable_item_object.h"
 #include "xrScriptEngine/script_engine.hpp"
 #include "xrMessages.h"
 #include "xrEngine/xr_level_controller.h"
@@ -26,6 +28,8 @@
 
 using namespace InventoryUtilities;
 
+extern int g_enhancend_anims;
+
 // what to block
 u16 INV_STATE_LADDER = (1 << INV_SLOT_3 | 1 << BINOCULAR_SLOT);
 u16 INV_STATE_CAR = INV_STATE_LADDER;
@@ -36,6 +40,7 @@ int g_auto_ammo_unload = 0;
 
 bool defaultSlotActiveness[] =
 {
+    false, // no slot
     true, // knife
     true, // pistol
     true, // automatic
@@ -232,33 +237,30 @@ void CInventory::Take(CGameObject* pObj, bool bNotActivate, bool strict_placemen
 
     if (pIItem->CurrPlace() == eItemPlaceUndefined)
     {
-        if (!pIItem->RuckDefault())
+        const bool slotFirst = pSettingsOpenXRay->read_if_exists<bool>("compatibility", "default_to_slot", ShadowOfChernobylMode);
+        const bool defaultToRuck = pIItem->RuckDefault();
+
+        if (slotFirst || !defaultToRuck)
         {
             if (CanPutInSlot(pIItem, pIItem->BaseSlot()))
             {
                 result = Slot(pIItem->BaseSlot(), pIItem, bNotActivate, strict_placement);
-                VERIFY(result);
             }
-            else if (CanPutInBelt(pIItem))
+            else if (!defaultToRuck && CanPutInBelt(pIItem))
             {
                 result = Belt(pIItem, strict_placement);
-                VERIFY(result);
-            }
-            else
-            {
-                result = Ruck(pIItem, strict_placement);
-                VERIFY(result);
-                CWeaponMagazined* pWeapon = smart_cast<CWeaponMagazined*>(pIItem);
-                if (pWeapon && result && g_auto_ammo_unload)
-                {
-                    pWeapon->UnloadMagazine();
-                }
             }
         }
-        else
+
+        if (!result)
         {
             result = Ruck(pIItem, strict_placement);
             VERIFY(result);
+            CWeaponMagazined* pWeapon = smart_cast<CWeaponMagazined*>(pIItem);
+            if (pWeapon && result && !defaultToRuck && g_auto_ammo_unload)
+            {
+                pWeapon->UnloadMagazine();
+            }
         }
     }
 
@@ -666,11 +668,16 @@ void CInventory::Activate(u16 slot, bool bForce)
         CHudItem* tempItem = active_item->cast_hud_item();
         if (active_item && tempItem)
         {
-            if (!bForce)
-            {
-                R_ASSERT2(tempItem, active_item->object().cNameSect().c_str());
-
+            if (CHudItem* tempItem = active_item->cast_hud_item())
                 tempItem->SendDeactivateItem();
+            else
+            {
+#ifndef MASTER_GOLD
+                Msg("! Can't cast [%s] to CHudItem", active_item->object().cNameSect().c_str());
+#endif
+                active_item->DeactivateItem();
+            }
+
 #ifdef DEBUG
 //      Msg("--- Inventory owner [%s]: send deactivate item [%s]", m_pOwner->Name(), active_item->NameItem());
 #endif // #ifdef DEBUG
@@ -864,7 +871,7 @@ void CInventory::Update()
             {
                 CHudItem* hi = ActiveItem()->cast_hud_item();
 
-                if (!hi->IsHidden())
+                if (hi && !hi->IsHidden())
                 {
                     if (hi->GetState() == CHUDState::eIdle && hi->GetNextState() == CHUDState::eIdle)
                         hi->SendDeactivateItem();
@@ -896,9 +903,13 @@ void CInventory::Update()
 
             m_iActiveSlot = GetNextActiveSlot();
         }
-        if ((GetNextActiveSlot() != NO_ACTIVE_SLOT) && ActiveItem() && ActiveItem()->cast_hud_item() &&
+        if (GetNextActiveSlot() != NO_ACTIVE_SLOT &&
+            ActiveItem() &&
+            ActiveItem()->cast_hud_item() &&
             ActiveItem()->cast_hud_item()->IsHidden())
+        {
             ActiveItem()->ActivateItem();
+        }
     }
     UpdateDropTasks();
 }
@@ -1173,8 +1184,34 @@ bool CInventory::Eat(PIItem pIItem)
     if (pItemToEat->object().H_Parent()->ID() != entity_alive->ID())
         return false;
 
-    if (!pItemToEat->UseBy(entity_alive))
-        return false;
+    if (g_enhancend_anims && pSettings->line_exist(pIItem->m_section_id, "hud"))
+    {
+        if (CCustomDetector* detector = smart_cast<CCustomDetector*>(Actor()->inventory().ItemFromSlot(DETECTOR_SLOT)))
+        {
+            detector->HideDetector(CCustomDetector::eQuick);
+            CEatableItemObject* pItemToEatObj = smart_cast<CEatableItemObject*>(pIItem);
+            if (pItemToEatObj)
+                pItemToEatObj->SetRestoreDetector(true);
+        }
+
+        CurrentGameUI()->GetActorMenu().HideDialog();
+
+        Activate(NO_ACTIVE_SLOT);
+
+        pInventory->Slot(pIItem->BaseSlot(), pIItem, false, false);
+        NET_Packet P;
+        CGameObject::u_EventGen(P, GEG_PLAYER_ITEM2SLOT, pIItem->object().H_Parent()->ID());
+        P.w_u16(pIItem->object().ID());
+        P.w_u16(pIItem->BaseSlot());
+        CGameObject::u_EventSend(P);
+
+        Activate(pIItem->BaseSlot());
+    }
+    else
+    {
+        if (!pItemToEat->UseBy(entity_alive))
+            return false;
+    }
 
 #ifdef MP_LOGGING
     Msg("--- Actor [%d] use or eat [%d][%s]", entity_alive->ID(), pItemToEat->object().ID(),
@@ -1200,7 +1237,7 @@ bool CInventory::Eat(PIItem pIItem)
         CurrentGameUI()->GetActorMenu().SetCurrentItem(nullptr);
     }
 
-    if (pItemToEat->Empty())
+    if ((g_enhancend_anims == 0 || !pSettings->line_exist(pIItem->m_section_id, "hud")) && pItemToEat->Empty())
     {
         if (!pItemToEat->CanDelete())
             return false;

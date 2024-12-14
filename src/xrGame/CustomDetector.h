@@ -133,10 +133,13 @@ protected:
     CUIArtefactDetectorBase* m_ui;
     EDetectorFastModes m_bFastAnimMode = EDetectorFastModes::eFast;
     bool m_bNeedActivation;
+    bool m_bDetectorActive;
 
 public:
     CCustomDetector();
     virtual ~CCustomDetector();
+
+    inline bool IsActive() const { return m_bDetectorActive; };
 
     virtual bool net_Spawn(CSE_Abstract* DC);
     virtual void Load(LPCSTR section);

@@ -178,3 +178,11 @@ float CEatableItem::Weight() const
 
     return res;
 }
+
+bool CEatableItem::GetBriefInfo(II_BriefInfo& info)
+{
+    info.clear();
+    info.name._set(m_nameShort);
+    info.icon._set(m_section_id);
+    return true;
+}

@@ -40,4 +40,6 @@ public:
     virtual u8 GetRemainingUses() const { return m_iRemainingUses; }
     void SetRemainingUses(u8 value) { if (value <= m_iMaxUses) m_iRemainingUses = value; };
     float Weight() const override;
+
+    virtual bool GetBriefInfo(II_BriefInfo& info);
 };

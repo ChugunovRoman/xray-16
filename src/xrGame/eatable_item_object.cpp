@@ -8,6 +8,8 @@
 
 #include "StdAfx.h"
 #include "eatable_item_object.h"
+#include "player_hud.h"
+#include "CustomDetector.h"
 
 CEatableItemObject::CEatableItemObject() {}
 CEatableItemObject::~CEatableItemObject() {}
@@ -15,49 +17,28 @@ IFactoryObject* CEatableItemObject::_construct()
 {
     CEatableItem::_construct();
     CPhysicItem::_construct();
+    CHudItem::_construct();
     return (this);
 }
 
 void CEatableItemObject::Load(LPCSTR section)
 {
+    CHudItem::Load(section);
     CPhysicItem::Load(section);
     CEatableItem::Load(section);
+
+    m_sounds.LoadSound(section, "use_anm_sound", "useAnmSound");
 }
 
-// void CEatableItemObject::Hit(float P, Fvector &dir,
-//						 IGameObject* who, s16 element,
-//						 Fvector position_in_object_space,
-//						 float impulse,
-//						 ALife::EHitType hit_type)
 void CEatableItemObject::Hit(SHit* pHDS)
 {
-    /*
-    CPhysicItem::Hit			(
-        P,
-        dir,
-        who,
-        element,
-        position_in_object_space,
-        impulse,
-        hit_type
-    );
-
-    CEatableItem::Hit			(
-        P,
-        dir,
-        who,
-        element,
-        position_in_object_space,
-        impulse,
-        hit_type
-    );
-    */
     CPhysicItem::Hit(pHDS);
     CEatableItem::Hit(pHDS);
 }
 
 void CEatableItemObject::OnH_A_Independent()
 {
+    CHudItem::OnH_A_Independent();
     CEatableItem::OnH_A_Independent();
     CPhysicItem::OnH_A_Independent();
     // If we are dropping used item before removing - don't show it
@@ -70,6 +51,7 @@ void CEatableItemObject::OnH_A_Independent()
 
 void CEatableItemObject::OnH_B_Independent(bool just_before_destroy)
 {
+    CHudItem::OnH_B_Independent(just_before_destroy);
     CEatableItem::OnH_B_Independent(just_before_destroy);
     CPhysicItem::OnH_B_Independent(just_before_destroy);
 }
@@ -78,35 +60,45 @@ void CEatableItemObject::OnH_B_Chield()
 {
     CPhysicItem::OnH_B_Chield();
     CEatableItem::OnH_B_Chield();
+    CHudItem::OnH_B_Chield();
 }
 
 void CEatableItemObject::OnH_A_Chield()
 {
     CPhysicItem::OnH_A_Chield();
     CEatableItem::OnH_A_Chield();
+    CHudItem::OnH_A_Chield();
 }
 
 void CEatableItemObject::UpdateCL()
 {
     CPhysicItem::UpdateCL();
     CEatableItem::UpdateCL();
+    CHudItem::UpdateCL();
+
+    if (GetState() == eHidden)
+        return;
 }
 
 void CEatableItemObject::OnEvent(NET_Packet& P, u16 type)
 {
     CPhysicItem::OnEvent(P, type);
     CEatableItem::OnEvent(P, type);
+    CHudItem::OnEvent(P, type);
 }
 
 bool CEatableItemObject::net_Spawn(CSE_Abstract* DC)
 {
-    BOOL res = CPhysicItem::net_Spawn(DC);
+    bool res = CPhysicItem::net_Spawn(DC);
     CEatableItem::net_Spawn(DC);
-    return (res);
+    CHudItem::net_Spawn(DC);
+
+    return res;
 }
 
 void CEatableItemObject::net_Destroy()
 {
+    CHudItem::net_Destroy();
     CEatableItem::net_Destroy();
     CPhysicItem::net_Destroy();
 }
@@ -117,16 +109,23 @@ void CEatableItemObject::save(NET_Packet& packet)
 {
     CPhysicItem::save(packet);
     CEatableItem::save(packet);
+
+    packet.w_u32(GetState());
 }
 
 void CEatableItemObject::load(IReader& packet)
 {
     CPhysicItem::load(packet);
     CEatableItem::load(packet);
+
+    const u32 state = packet.r_u32();
+    SetState(state);
+    SwitchState(state);
 }
 
 void CEatableItemObject::renderable_Render(u32 context_id, IRenderable* root)
 {
+    CHudItem::renderable_Render(context_id, root);
     CPhysicItem::renderable_Render(context_id, root);
     CEatableItem::renderable_Render(context_id, root);
 }
@@ -160,3 +159,154 @@ void CEatableItemObject::OnRender() { CEatableItem::OnRender(); }
 bool CEatableItemObject::NeedToDestroyObject() const { return CInventoryItem::NeedToDestroyObject(); }
 u32 CEatableItemObject::ef_weapon_type() const { return (0); }
 bool CEatableItemObject::Useful() const { return (CEatableItem::Useful()); }
+
+bool CEatableItemObject::UseBy()
+{
+    CInventoryOwner* m_pOwner = Parent->cast_inventory_owner();
+    if (!m_pOwner)
+        return false;
+
+    CEntityAlive* entity_alive = smart_cast<CEntityAlive*>(m_pOwner);
+    if (!entity_alive)
+        return false;
+
+    UseBy(entity_alive);
+
+    return true;
+}
+bool CEatableItemObject::UseBy(CEntityAlive* entity_alive)
+{
+    CEatableItem::UseBy(entity_alive);
+
+    return true;
+}
+
+bool CEatableItemObject::Action(u16 cmd, u32 flags)
+{
+    CInventoryItem::Action(cmd, flags);
+    CHudItem::Action(cmd, flags);
+
+    return IsPending();
+}
+
+void CEatableItemObject::SwitchState(u32 S)
+{
+    CHudItem::SwitchState(S);
+}
+void CEatableItemObject::OnStateSwitch(u32 S, u32 oldState)
+{
+    CHudItem::OnStateSwitch(S, oldState);
+
+    switch (S)
+    {
+    case eShowing:
+    {
+        g_player_hud[0]->attach_item(this);
+        m_sounds.PlaySound("useAnmSound", Fvector().set(0, 0, 0), this, true, false);
+        PlayHUDMotion("anm_use", "anim_use", FALSE, this, GetState());
+        SetPending(true);
+    }
+    break;
+    case eHiding:
+    {
+        if (prev_slot != NO_ACTIVE_SLOT)
+            RestoreSlot();
+
+        RemoveItemIfNecessaryOrMoveToRuck();
+    }
+    break;
+    }
+}
+
+void CEatableItemObject::RemoveItemIfNecessaryOrMoveToRuck()
+{
+    if (Empty())
+    {
+        if (!CanDelete())
+            return;
+        SetDropManual(true);
+    }
+
+    CInventoryOwner* m_pOwner = Parent->cast_inventory_owner();
+    if (!m_pOwner)
+        return;
+
+    m_pOwner->inventory().Ruck(this);
+}
+void CEatableItemObject::RestoreSlot()
+{
+    CInventoryOwner* m_pOwner = Parent->cast_inventory_owner();
+    if (!m_pOwner)
+        return;
+
+    m_pOwner->inventory().SetActiveSlot(prev_slot);
+
+    if (restor_detector)
+    {
+        if (CCustomDetector* detector = smart_cast<CCustomDetector*>(Actor()->inventory().ItemFromSlot(DETECTOR_SLOT)))
+            detector->ShowDetector(CCustomDetector::eNone);
+    }
+
+    restor_detector = false;
+}
+
+void CEatableItemObject::OnAnimationEnd(u32 state)
+{
+    CHudItem::OnAnimationEnd(state);
+
+    switch (state)
+    {
+    case eShowing:
+    {
+        UseBy();
+        SetPending(false);
+        SwitchState(eHiding);
+    }
+    break;
+    }
+}
+
+void CEatableItemObject::OnActiveItem()
+{
+    CInventoryOwner* m_pOwner = Parent->cast_inventory_owner();
+    if (!m_pOwner)
+        return;
+
+    const u16 prevSlot = m_pOwner->inventory().GetActiveSlot();
+    if (prevSlot != NO_ACTIVE_SLOT && prevSlot != SLOTS_COUNT)
+        prev_slot = prevSlot;
+
+    if (g_player_hud[0]->attached_item())
+        g_player_hud[0]->detach_all_items();
+    if (g_player_hud[1]->attached_item())
+        g_player_hud[1]->detach_all_items();
+
+    SwitchState(eShowing);
+    CHudItem::OnActiveItem();
+    SetNextState(eHiding);
+}
+
+void CEatableItemObject::OnMoveToRuck(const SInvItemPlace& prev)
+{
+    CInventoryItem::OnMoveToRuck(prev);
+    CHudItem::OnMoveToRuck(prev);
+}
+
+bool CEatableItemObject::ActivateItem()
+{
+    return CHudItem::ActivateItem();
+}
+void CEatableItemObject::DeactivateItem()
+{
+    CHudItem::DeactivateItem();
+}
+
+void CEatableItemObject::on_renderable_Render(u32 context_id, IRenderable* root)
+{
+    CInventoryItem::renderable_Render(context_id, root);
+}
+
+void CEatableItemObject::UpdateXForm()
+{
+    CInventoryItem::UpdateXForm();
+}

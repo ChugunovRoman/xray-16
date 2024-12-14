@@ -26,6 +26,8 @@
 #define MAX_SATIETY 1.0f
 #define START_SATIETY 0.5f
 
+extern int g_enhancend_anims;
+
 BOOL GodMode()
 {
     if (GameID() == eGameIDSingle)
@@ -830,7 +832,7 @@ bool CActorCondition::ApplyInfluence(const SMedicineInfluenceValues& V, const sh
 
     if (m_object->Local() && m_object == Level().CurrentViewEntity())
     {
-        if (pSettings->line_exist(sect, "use_sound"))
+        if ((g_enhancend_anims == 0 || !pSettings->line_exist(sect, "hud")) && pSettings->line_exist(sect, "use_sound"))
         {
             if (m_use_sound._feedback())
                 m_use_sound.stop();
@@ -854,7 +856,7 @@ bool CActorCondition::ApplyBooster(const SBooster& B, const shared_str& sect)
     {
         if (m_object->Local() && m_object == Level().CurrentViewEntity())
         {
-            if (pSettings->line_exist(sect, "use_sound"))
+            if ((g_enhancend_anims == 0 || !pSettings->line_exist(sect, "hud")) && pSettings->line_exist(sect, "use_sound"))
             {
                 if (m_use_sound._feedback())
                     m_use_sound.stop();

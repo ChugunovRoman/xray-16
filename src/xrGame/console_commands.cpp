@@ -120,6 +120,7 @@ int g_quick_unload_scopes = 0;
 int g_quick_unload_gl = 0;
 int g_quick_unload_silencers = 0;
 int g_outfit_faction = 1;
+int g_enhancend_anims = 1;
 
 void register_mp_console_commands();
 //-----------------------------------------------------------
@@ -2580,6 +2581,8 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "wpn_quick_unload_silencers", &g_quick_unload_silencers, 0, 1);
 
     CMD4(CCC_Integer_Outfit_Faction, "g_outfit_faction", &g_outfit_faction, 0, 1);
+
+    CMD4(CCC_Integer, "g_enhancend_anims", &g_enhancend_anims, 0, 1);
 
     CMD1(CCC_UIStyle, "ui_style");
     CMD1(CCC_UIRestart, "ui_restart");
