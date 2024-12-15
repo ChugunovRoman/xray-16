@@ -1182,7 +1182,7 @@ bool CInventory::Eat(PIItem pIItem)
     if (pItemToEat->object().H_Parent()->ID() != entity_alive->ID())
         return false;
 
-    if (g_enhancend_anims && pSettings->line_exist(pIItem->m_section_id, "hud"))
+    if (g_enhancend_anims && m_pOwner->object_id() == 0 && pSettings->line_exist(pIItem->m_section_id, "hud"))
     {
         if (CCustomDetector* detector = smart_cast<CCustomDetector*>(Actor()->inventory().ItemFromSlot(DETECTOR_SLOT)))
         {

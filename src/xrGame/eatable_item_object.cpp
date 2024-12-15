@@ -249,11 +249,28 @@ void CEatableItemObject::OnStateSwitch(u32 S, u32 oldState)
     {
     case eShowing:
     {
-        g_player_hud[0]->attach_item(this);
-        m_sounds.PlaySound("useAnmSound", Fvector().set(0, 0, 0), this, true, false);
-        PlayHUDMotion("anm_use", "anim_use", FALSE, this, GetState());
-        PlayCamAnim("cam_anm_use");
-        SetPending(true);
+        if (Parent)
+        {
+            CInventoryOwner* m_pOwner = Parent->cast_inventory_owner();
+            if (m_pOwner && m_pOwner->object_id() == 0)
+            {
+                g_player_hud[0]->attach_item(this);
+                m_sounds.PlaySound("useAnmSound", Fvector().set(0, 0, 0), this, true, false);
+                PlayHUDMotion("anm_use", "anim_use", FALSE, this, GetState());
+                PlayCamAnim("cam_anm_use");
+                SetPending(true);
+            }
+            else
+            {
+                UseBy();
+                SwitchState(eHiding);
+            }
+        }
+        else
+        {
+            UseBy();
+            SwitchState(eHiding);
+        }
     }
     break;
     case eHiding:
@@ -284,8 +301,11 @@ void CEatableItemObject::RemoveItemIfNecessaryOrMoveToRuck()
 }
 void CEatableItemObject::RestoreSlot()
 {
+    if (!Parent)
+        return;
+
     CInventoryOwner* m_pOwner = Parent->cast_inventory_owner();
-    if (!m_pOwner)
+    if (!m_pOwner || m_pOwner->object_id() != 0)
         return;
 
     m_pOwner->inventory().SetActiveSlot(prev_slot);
