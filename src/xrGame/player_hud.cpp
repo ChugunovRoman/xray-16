@@ -110,9 +110,6 @@ void player_hud_motion_container::load(IKinematicsAnimated* model, const shared_
                 if (motion_ID.valid())
                 {
                     pm.m_animations.emplace_back(motion_descr{ std::move(motion_ID), buff });
-#ifdef DEBUG
-//					Msg(" alias=[%s] base=[%s] name=[%s]",pm.m_alias_name.c_str(), pm.m_base_name.c_str(), buff);
-#endif // #ifdef DEBUG
                 }
                 else if (count > 1)
                 {
@@ -120,9 +117,6 @@ void player_hud_motion_container::load(IKinematicsAnimated* model, const shared_
                     if (motion_ID.valid())
                     {
                         pm.m_animations.emplace_back(motion_descr{ std::move(motion_ID), buff2 });
-#ifdef DEBUG
-//					Msg(" alias=[%s] base=[%s] name=[%s]",pm.m_alias_name.c_str(), pm.m_base_name.c_str(), buff);
-#endif // #ifdef DEBUG
                     }
                 }
             }

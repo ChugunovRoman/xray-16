@@ -713,7 +713,7 @@ bool CActor::net_Spawn(CSE_Abstract* DC)
         for (u16 i = 0; i < count; ++i)
         {
             pSettings->r_line("debug_start_spawn", i, &name, &value);
-            if (value != "" && atoi(value))
+            if (value && value != "" && atoi(value))
             {
                 for  (u32 i = 0; i < atoi(value); i++)
                     Level().spawn_item(name, Position(), false, ID());
