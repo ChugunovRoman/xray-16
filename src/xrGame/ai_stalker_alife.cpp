@@ -131,15 +131,15 @@ void CAI_Stalker::attach_available_addons(CWeapon* weapon)
         PIItem pIItem = *l_it;
 
         const CSilencer* pSilencer = smart_cast<const CSilencer*>(pIItem);
-        if (pSilencer && weapon->CanAttach(pIItem))
+        if (pSilencer && weapon->CanAttach(pIItem) && !weapon->IsSilencerAttached())
             weapon->Attach(pIItem, true);
 
         const CScope* pScope = smart_cast<const CScope*>(pIItem);
-        if (pScope && weapon->CanAttach(pIItem))
+        if (pScope && weapon->CanAttach(pIItem) && !weapon->IsScopeAttached())
             weapon->Attach(pIItem, true);
 
         const CGrenadeLauncher* pGrenadeLauncher = smart_cast<const CGrenadeLauncher*>(pIItem);
-        if (pGrenadeLauncher && weapon->CanAttach(pIItem))
+        if (pGrenadeLauncher && weapon->CanAttach(pIItem) && !weapon->IsGrenadeLauncherAttached())
             weapon->Attach(pIItem, true);
     }
 }
