@@ -5,8 +5,6 @@
 #include "xrServerEntities/inventory_space.h"
 #include "xrUICore/Hint/UIHint.h"
 
-#include "script_game_object.h"
-
 class CUICharacterInfo;
 class CUIDragDropListEx;
 class CUIDragDropReferenceList;

@@ -2966,7 +2966,16 @@ void CWeapon::ZoomInc()
 
 void CWeapon::ZoomDec()
 {
-    ZoomDynamicMod(false, false);
+    if (!IsScopeAttached() && !IsScopePermament())
+        return;
+    if (!m_zoom_params.m_bUseDynamicZoom)
+        return;
+    float delta, min_zoom_factor;
+    GetZoomData(m_zoom_params.m_fScopeZoomFactor, delta, min_zoom_factor);
+
+    float f = GetZoomFactor() + delta;
+    clamp(f, m_zoom_params.m_fScopeZoomFactor, min_zoom_factor);
+    SetZoomFactor(f);
 }
 
 u32 CWeapon::Cost() const

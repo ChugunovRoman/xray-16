@@ -111,12 +111,7 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
 	//Alundaio: So we can get the fname to make our own custom save states
     luabind::functor<void> funct;
     if (GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_load", funct))
-    {
-        // TODO: Проверить на Linux будет ли работать без них
-        convert_path_separators((char*)file_name);
         funct(file_name);
-        restore_path_separators((char*)file_name);
-    }
 	//-Alundaio
 
     IReader source(buffer, buffer_size);
@@ -148,6 +143,12 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
         return;
 
     Level().autosave_manager().on_game_loaded();
+
+	//Neloreck: For consistency with before/after save callbacks.
+    luabind::functor<void> funct2;
+    if (GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_after_load", funct2))
+        funct2(file_name);
+	//-Neloreck
 }
 
 bool CALifeStorageManager::load(LPCSTR save_name_no_check)

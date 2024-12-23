@@ -1526,7 +1526,6 @@ void CWeaponMagazined::OnNextFireMode()
         return;
     if (state != eIdle)
         return;
-
     m_iCurFireMode = (m_iCurFireMode + 1 + m_aFireModes.size()) % m_aFireModes.size();
     SetQueueSize(GetCurrentFireMode());
 
@@ -1546,7 +1545,6 @@ void CWeaponMagazined::OnPrevFireMode()
         return;
     if (state != eIdle)
         return;
-
     m_iCurFireMode = (m_iCurFireMode - 1 + m_aFireModes.size()) % m_aFireModes.size();
     SetQueueSize(GetCurrentFireMode());
 
