@@ -300,6 +300,8 @@ void CMissile::State(u32 state, u32 oldState)
         m_throw = false;
         PlayHUDMotion("anm_throw", "anim_throw_act", TRUE, this, GetState());
         g_player_hud[1]->set_detector_state(EHudStates::eBoltThrowEnd);
+        // XXX: could check it once at initialization stage (could use something like CHudItem::isHUDAnimationExist())
+        m_motion_marks_available = !m_current_motion_def->marks.empty();
     }
     break;
     case eThrowEnd:
@@ -352,13 +354,30 @@ void CMissile::OnAnimationEnd(u32 state)
             SwitchState(eReady);
     }
     break;
-    case eThrow: { SwitchState(eThrowEnd);
+    case eThrow:
+    {
+        SwitchState(eThrowEnd);
+        if (!m_motion_marks_available && !m_throw)
+        {
+            if (H_Parent())
+                Throw();
+        }
     }
     break;
     case eThrowEnd: { SwitchState(eShowing);
     }
     break;
     default: inherited::OnAnimationEnd(state);
+    }
+}
+
+void CMissile::OnMotionMark(u32 state, const motion_marks& M)
+{
+    inherited::OnMotionMark(state, M);
+    if (state == eThrow && !m_throw)
+    {
+        if (H_Parent())
+            Throw();
     }
 }
 
@@ -449,16 +468,6 @@ void CMissile::setup_throw_params()
     trans.c.set(FirePos);
     m_throw_matrix.set(trans);
     m_throw_direction.set(trans.k);
-}
-
-void CMissile::OnMotionMark(u32 state, const motion_marks& M)
-{
-    inherited::OnMotionMark(state, M);
-    if (state == eThrow && !m_throw)
-    {
-        if (H_Parent())
-            Throw();
-    }
 }
 
 void CMissile::Throw()

@@ -42,7 +42,7 @@ CSE_ALifeDynamicObject* alife_object(const CALifeSimulator* self, ALife::_OBJECT
     VERIFY(self);
     if (!valid_object_id(self, object_id))
     {
-        Log("! alife():object(id): invalid id specified");
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error,"! alife():object(id): invalid id[%u] specified", object_id);
         return nullptr;
     }
     return (self->objects().object(object_id, true));
@@ -204,7 +204,7 @@ CSE_Abstract* CALifeSimulator__spawn_item3(CALifeSimulator* self, pcstr section,
     const auto object = ai().alife().objects().object(id_parent, true);
     if (!object)
     {
-        Msg("! invalid parent id [%d] specified", id_parent);
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "! invalid parent id [%u] specified", id_parent);
         return nullptr;
     }
 
@@ -227,7 +227,7 @@ CSE_Abstract* CALifeSimulator__spawn_ammo(CALifeSimulator* self, LPCSTR section,
         object = ai().alife().objects().object(id_parent, true);
         if (!object)
         {
-            Msg("! invalid parent id [%d] specified", id_parent);
+            GEnv.ScriptEngine->script_log(LuaMessageType::Error, "! invalid parent id [%u] specified", id_parent);
             return (0);
         }
     }

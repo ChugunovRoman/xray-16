@@ -201,14 +201,12 @@ bool CTheoraStream::Decode(u32 in_tm_play)
                     if (d_frame < k_frame)
                     {
                         //. dbg_log ((stderr,"%04d: preroll\n",d_frame));
-                        //AVO: commented out VERIFY to get COC start in Debug - something is wrong with video stream
-                        //VERIFY((0 != d_frame % key_rate) ||
-                        //    (0 == d_frame % key_rate) && theora_packet_iskeyframe(&o_packet));
+                        VERIFY((0 != d_frame % key_rate) ||
+                            (0 == d_frame % key_rate) && theora_packet_iskeyframe(&o_packet));
                         continue;
                     }
-                    //AVO: commented out VERIFY to get COC start in Debug - something is wrong with video stream
-                    //[[maybe_unused]] bool is_key = theora_packet_iskeyframe(&o_packet);
-                    //VERIFY((d_frame != k_frame) || ((d_frame == k_frame) && is_key));
+                    [[maybe_unused]] bool is_key = theora_packet_iskeyframe(&o_packet);
+                    VERIFY((d_frame != k_frame) || ((d_frame == k_frame) && is_key));
                     // real decode
                     //. dbg_log ((stderr,"%04d: decode\n",d_frame));
                     [[maybe_unused]] int res = theora_decode_packetin(&t_state, &o_packet);

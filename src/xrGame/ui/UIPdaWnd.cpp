@@ -124,8 +124,35 @@ void CUIPdaWnd::Init()
     UITabControl = xr_new<CUITabControl>();
     UITabControl->SetAutoDelete(true);
     AttachChild(UITabControl);
-    CUIXmlInit::InitTabControl(uiXml, "tab", 0, UITabControl);
+    CUIXmlInit::InitTabControl(uiXml, "tab", 0, UITabControl, true, ShadowOfChernobylMode);
     UITabControl->SetMessageTarget(this);
+
+    constexpr std::tuple<pcstr, pcstr> known_soc_tab_ids[] =
+    {
+        {"0", "eptTasks"},
+        {"1", "eptMap"},
+        {"2", "eptDiary"},
+        {"3", "eptContacts"},
+        {"4", "eptStalkersRanking"},
+        {"5", "eptStatistics"},
+        {"6", "eptEncyclopedia"},
+    };
+
+    for (u32 i = 0; i < UITabControl->GetTabsCount(); i++)
+    {
+        CUITabButton* btn = UITabControl->GetButtonByIndex(i);
+        if (!btn || !btn->IsIdDefaultAssigned())
+            continue;
+
+        for (const auto& [id, replace] : known_soc_tab_ids)
+        {
+            if (btn->m_btn_id == id)
+            {
+                btn->m_btn_id = replace;
+                break;
+            }
+        }
+    }
 
     UINoice = xr_new<CUIStatic>("Noise");
     UINoice->SetAutoDelete(true);
@@ -327,14 +354,22 @@ void CUIPdaWnd::Draw()
 
 void CUIPdaWnd::DrawHint()
 {
-    if (m_sActiveSection == "eptTasks" && pUITaskWnd)
+    if (m_pActiveDialog == pUITaskWnd && pUITaskWnd)
         pUITaskWnd->DrawHint();
-    else if (m_sActiveSection == "eptMap" && pUIMapWnd)
+    else if (m_pActiveDialog == pUIMapWnd && pUIMapWnd)
         pUIMapWnd->DrawHint();
-    else if (m_sActiveSection == "eptRanking" && pUIRankingWnd)
+    else if (m_pActiveDialog == pUIRankingWnd && pUIRankingWnd)
         pUIRankingWnd->DrawHint();
 
     m_hint_wnd->Draw();
+}
+
+bool CUIPdaWnd::NeedCursor() const
+{
+    if (m_pActiveDialog && m_pActiveDialog->IsUsingCursorRightNow())
+       return true;
+
+    return CUIDialogWnd::NeedCursor();
 }
 
 void CUIPdaWnd::UpdatePda()
@@ -342,7 +377,7 @@ void CUIPdaWnd::UpdatePda()
     if (pUILogsWnd)
         pUILogsWnd->UpdateNews();
 
-    if (m_sActiveSection == "eptTasks" && pUITaskWnd)
+    if (m_pActiveDialog == pUITaskWnd && pUITaskWnd)
     {
         pUITaskWnd->ReloadTaskInfo();
     }
