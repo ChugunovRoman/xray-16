@@ -122,18 +122,6 @@ SCRIPT_EXPORT(CScriptGameObject, (),
                 value("item_to_ruck", int(GameObject::eItemToRuck)),
                 //-AVO
 
-                // vehicle
-                value("on_attach_vehicle", int(GameObject::eAttachVehicle)),
-                value("on_detach_vehicle", int(GameObject::eDetachVehicle)),
-                value("on_use_vehicle", int(GameObject::eUseVehicle)),
-
-                // weapon
-                value("weapon_fired", int(GameObject::eOnWeaponFired)),
-                value("weapon_jammed", int(GameObject::eOnWeaponJammed)),
-                value("weapon_zoom_in", int(GameObject::eOnWeaponZoomIn)),
-                value("weapon_zoom_out", int(GameObject::eOnWeaponZoomOut)),
-                value("weapon_magazine_empty", int(GameObject::eOnWeaponMagazineEmpty)),
-
                 value("map_location_added", int(GameObject::eMapLocationAdded))
             ],
 

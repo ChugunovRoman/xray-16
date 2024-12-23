@@ -6305,12 +6305,6 @@
     <ClInclude Include="player_hud_tune.h">
       <Filter>Core\Client\Objects\items &amp; weapons\HudItem</Filter>
     </ClInclude>
-    <ClInclude Include="weapons_textures_addons_position.h">
-      <Filter>Core\Client\Objects\items &amp; weapons\HudItem</Filter>
-    </ClInclude>
-    <ClInclude Include="cam_anm_tool.h">
-      <Filter>Core\Client\Objects\items &amp; weapons\HudItem</Filter>
-    </ClInclude>
     <ClInclude Include="HolderEntityObject.h">
       <Filter>Core\Client\Objects\base\GameObject\Holder</Filter>
     </ClInclude>

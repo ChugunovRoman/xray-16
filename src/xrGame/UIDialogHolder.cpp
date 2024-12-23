@@ -58,6 +58,12 @@ void CDialogHolder::StartMenu(CUIDialogWnd* pDialog, bool bDoHideIndicators)
     SetFocused(nullptr);
     pDialog->SetHolder(this);
 
+    if (pDialog->NeedCursor())
+    {
+        GetUICursor().Show();
+        m_become_visible_time = Device.dwTimeContinual;
+    }
+
     if (g_pGameLevel)
     {
         CActor* A = smart_cast<CActor*>(Level().CurrentViewEntity());
@@ -225,26 +231,7 @@ void CDialogHolder::OnFrame()
 
     m_b_in_update = true;
 
-    if (!GEnv.isDedicatedServer)
-    {
-        auto& cursor = GetUICursor();
-        const bool need_cursor = TopInputReceiver() && TopInputReceiver()->NeedCursor();
-
-        const u32 cur_time = Device.dwTimeContinual;
-
-        if (need_cursor)
-        {
-            if (!cursor.IsVisible())
-            {
-                cursor.Show();
-                m_become_visible_time = cur_time;
-            }
-        }
-        else if (float(cur_time - m_become_visible_time) > (psControllerCursorAutohideTime * 1000.f))
-        {
-            cursor.Hide();
-        }
-    }
+    UpdateCursorVisibility();
 
     CUIDialogWnd* wnd = TopInputReceiver();
     if (wnd && wnd->IsEnabled())
@@ -278,6 +265,33 @@ void CDialogHolder::CleanInternals()
 
     m_dialogsToRender.clear();
     GetUICursor().Hide();
+}
+
+void CDialogHolder::UpdateCursorVisibility()
+{
+    if (m_is_foremost && !GEnv.isDedicatedServer)
+    {
+        auto& cursor = GetUICursor();
+        const bool cursor_is_visible = cursor.IsVisible();
+        const bool need_cursor = TopInputReceiver() && TopInputReceiver()->NeedCursor();
+
+        const u32 cur_time = Device.dwTimeContinual;
+
+        // These conditions are optimal, don't reorder.
+        if (need_cursor)
+        {
+            if (!cursor_is_visible)
+            {
+                cursor.Show();
+                m_become_visible_time = cur_time;
+            }
+        }
+        else if (cursor_is_visible)
+        {
+            if (cur_time - m_become_visible_time > psControllerCursorAutohideTime * 1000.f)
+                cursor.Hide();
+        }
+    }
 }
 
 bool CDialogHolder::IR_UIOnKeyboardPress(int dik)
@@ -418,6 +432,8 @@ bool CDialogHolder::IR_UIOnMouseWheel(float x, float y)
     if (!TIR->IR_process())
         return false;
 
+    UpdateCursorVisibility();
+
     // Vertical scroll is in higher priority
     EUIMessages wheelMessage;
     if (y > 0)
@@ -441,6 +457,9 @@ bool CDialogHolder::IR_UIOnMouseMove(int dx, int dy)
         return false;
     if (!TIR->IR_process())
         return false;
+
+    UpdateCursorVisibility();
+
     if (GetUICursor().IsVisible())
     {
         GetUICursor().UpdateCursorPosition(dx, dy);

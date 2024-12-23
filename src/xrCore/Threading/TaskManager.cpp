@@ -304,7 +304,7 @@ void TaskManager::RunTask(Task& task)
     ExecuteTask(task);
 }
 
-void TaskManager::Wait(const Task& task, bool updateSystemEvents) const
+void TaskManager::Wait(const Task& task, bool updateSystemEvents /*= false*/) const
 {
     ZoneScoped;
     while (!task.IsFinished())
