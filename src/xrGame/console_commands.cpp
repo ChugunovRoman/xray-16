@@ -2140,18 +2140,6 @@ public:
         else
             *value = num;
 
-        if (!g_pGameLevel)
-            return;
-        CUIGameSP* ui_game_sp = smart_cast<CUIGameSP*>(CurrentGameUI());
-        if (!ui_game_sp)
-            return;
-        CUIActorMenu* actor_menu = smart_cast<CUIActorMenu*>(&ui_game_sp->GetActorMenu());
-        if (!actor_menu)
-            return;
-        if (!actor_menu->IsShown())
-            return;
-        actor_menu->UpdateGridSize();
-        actor_menu->UpdateActor();
     }
     virtual void GetStatus(TStatus& S) { xr_itoa(*value, S, 10); }
     virtual void Info(TInfo& I) { xr_sprintf(I, sizeof(I), "integer value in range [%d,%d]", min, max); }

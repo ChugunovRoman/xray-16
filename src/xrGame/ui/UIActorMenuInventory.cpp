@@ -423,6 +423,8 @@ void CUIActorMenu::InitInventoryContents(CUIDragDropListEx* pBagList, bool onlyB
 
     CUIDragDropListEx* curr_list = pBagList;
 
+    SetInvGridSize(curr_list);
+
     TIItemContainer ruck_list = m_pActorInvOwner->inventory().m_ruck;
     std::sort(ruck_list.begin(), ruck_list.end(), InventoryUtilities::GreaterRoomInRuck);
 

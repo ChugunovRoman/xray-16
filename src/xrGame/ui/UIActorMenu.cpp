@@ -223,13 +223,8 @@ void CUIActorMenu::Draw()
         m_message_static->Draw();
 }
 
-void CUIActorMenu::UpdateGridSize()
+void CUIActorMenu::SetInvGridSize(CUIDragDropListEx* dragdrop_inv)
 {
-    if (m_pActorInvOwner == nullptr)
-        return;
-    if (dragdrop_bag == nullptr)
-        return;
-
     string32 section;
     xr_sprintf(section, "inventory_size_%d", g_inv_inv_cell_size);
 
@@ -242,18 +237,8 @@ void CUIActorMenu::UpdateGridSize()
         w_cells.y = pSettings->r_u16(section, "rows_num");
         w_cells.x = pSettings->r_u16(section, "cols_num");
 
-        dragdrop_bag->SetCellSize(w_cell_sz);
-        dragdrop_bag->SetStartCellsCapacity(w_cells);
-
-        TIItemContainer ruck_list = m_pActorInvOwner->inventory().m_ruck;
-        std::sort(ruck_list.begin(), ruck_list.end(), InventoryUtilities::GreaterRoomInRuck);
-
-        for (PIItem item : ruck_list)
-        {
-            CUIInventoryCellItem* cell = smart_cast<CUIInventoryCellItem*>(create_cell_item(item));
-            if (cell)
-                cell->UpdateIcon();
-        }
+        dragdrop_inv->SetCellSize(w_cell_sz);
+        dragdrop_inv->SetStartCellsCapacity(w_cells);
     }
     else
         Msg("Section: '%s' not found in system.ltx", section);

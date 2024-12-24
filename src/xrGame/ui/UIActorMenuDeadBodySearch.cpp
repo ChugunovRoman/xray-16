@@ -58,6 +58,10 @@ void CUIActorMenu::InitDeadBodySearchMode()
     m_takeall_button->Show(true);
     GetModeSpecificPartnerInfo(mmDeadBodySearch)->Show(nullptr != m_pPartnerInvOwner);
 
+    SetInvGridSize(m_pLists[eSearchLootBagList]);
+    SetInvGridSize(m_pLists[eSearchLootActorBagList]);
+    SetInvGridSize(m_pLists[eInventoryBagList]);
+
     InitInventoryContents(m_pLists[eSearchLootActorBagList],
         m_pLists[eSearchLootActorBagList] != m_pLists[eInventoryBagList]);
 

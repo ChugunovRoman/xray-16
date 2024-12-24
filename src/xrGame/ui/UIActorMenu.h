@@ -372,7 +372,7 @@ public:
     virtual void SendMessage(CUIWindow* pWnd, s16 msg, void* pData = NULL);
     virtual void Draw();
     virtual void Update();
-    virtual void UpdateGridSize();
+    void SetInvGridSize(CUIDragDropListEx* dragdrop_inv);
     virtual void Show(bool status);
 
     virtual bool OnKeyboardAction(int dik, EUIMessages keyboard_action);
