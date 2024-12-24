@@ -86,11 +86,6 @@ void CUIActorMenu::InitPartnerInventoryContents()
     m_pPartnerInvOwner->inventory().AddAvailableItems(items_list, true);
     std::sort(items_list.begin(), items_list.end(), InventoryUtilities::GreaterRoomInRuck);
 
-    SetInvGridSize(m_pLists[eTradeActorList]);
-    SetInvGridSize(m_pLists[eTradeActorBagList]);
-    SetInvGridSize(m_pLists[eTradePartnerList]);
-    SetInvGridSize(m_pLists[eTradePartnerBagList]);
-
     TIItemContainer::iterator itb = items_list.begin();
     TIItemContainer::iterator ite = items_list.end();
     for (; itb != ite; ++itb)
