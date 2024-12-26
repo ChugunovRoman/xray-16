@@ -220,17 +220,17 @@ void Manager::add_section_by_class(CInifile::Sect *const &section)
         Level().sections_map[ESectionTypeName::ammo].push_back(name.c_str());
     }
     // Scopes
-    if (exist && xr_strcmp(value, "WP_SCOPE") == 0)
+    if (exist && itemClassExist && xr_strcmp(itemClass, "scopes") == 0)
     {
         Level().sections_map[ESectionTypeName::scopes].push_back(name.c_str());
     }
     // Silencers
-    if (exist && xr_strcmp(value, "WP_SILEN") == 0)
+    if (exist && itemClassExist && xr_strcmp(itemClass, "silencers") == 0)
     {
         Level().sections_map[ESectionTypeName::silencers].push_back(name.c_str());
     }
     // Launchers
-    if (exist && xr_strcmp(value, "WP_GLAUN") == 0)
+    if (exist && itemClassExist && xr_strcmp(itemClass, "grenade_launchers") == 0)
     {
         Level().sections_map[ESectionTypeName::launchers].push_back(name.c_str());
     }
