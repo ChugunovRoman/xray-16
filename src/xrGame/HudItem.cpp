@@ -151,8 +151,9 @@ void CHudItem::OnAnimationEnd(u32 state)
     }
     switch (state)
     {
-    case eBore: { SwitchState(eIdle);
-    }
+    case eBore: { SwitchState(eIdle); }
+    break;
+    case eIdle: { TryPlayAnimIdle(); }
     break;
     }
 }
