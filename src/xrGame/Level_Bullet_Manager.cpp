@@ -32,7 +32,7 @@ static float const air_resistance_epsilon = .1f;
 #endif // #ifdef DEBUG
 float g_bullet_time_factor = 1.f;
 
-SBullet::SBullet(const Fvector& position, const Fvector& direction, float starting_speed, float power,
+SBullet::SBullet(const Fvector& position, const Fvector& direction, float starting_speed, float power, float powerMonster,
     /*float power_critical,*/ float impulse, u16 sender_id, u16 sendersweapon_id, ALife::EHitType e_hit_type,
     float maximum_distance, const CCartridge& cartridge, float const air_resistance_factor, bool SendHit, int iShotNum /*= 0*/)
 {
@@ -47,7 +47,9 @@ SBullet::SBullet(const Fvector& position, const Fvector& direction, float starti
     VERIFY(direction.magnitude() > 0.f);
     dir.normalize(direction);
 
+
     hit_param.power = power * cartridge.param_s.kHit;
+    hit_param.powerMonster = powerMonster * cartridge.param_s.kHit;
     hit_param.impulse = impulse * cartridge.param_s.kImpulse;
 
     max_dist = maximum_distance * cartridge.param_s.kDist;
@@ -177,7 +179,7 @@ void CBulletManager::Clear()
     m_Events.clear();
 }
 
-void CBulletManager::AddBullet(const Fvector& position, const Fvector& direction, float starting_speed, float power,
+void CBulletManager::AddBullet(const Fvector& position, const Fvector& direction, float starting_speed, float power, float powerMonster,
     //.							   float power_critical,
     float impulse, u16 sender_id, u16 sendersweapon_id, ALife::EHitType e_hit_type, float maximum_distance,
     const CCartridge& cartridge, float const air_resistance_factor, bool SendHit, bool AimBullet, int iShotNum /*= 0*/)
@@ -192,7 +194,7 @@ void CBulletManager::AddBullet(const Fvector& position, const Fvector& direction
     VERIFY(u16(-1) != cartridge.bullet_material_idx);
     //	u32 CurID					= Level().CurrentControlEntity()->ID();
     //	u32 OwnerID					= sender_id;
-    SBullet& bullet = m_Bullets.emplace_back(position, direction, starting_speed, power, /*power_critical,*/ impulse, sender_id,
+    SBullet& bullet = m_Bullets.emplace_back(position, direction, starting_speed, power, powerMonster, impulse, sender_id,
         sendersweapon_id, e_hit_type, maximum_distance, cartridge, air_resistance_factor, SendHit, iShotNum);
     //	bullet.frame_num			= Device.dwFrame;
     bullet.flags.aim_bullet = AimBullet;

@@ -14,6 +14,7 @@
 struct SBullet_Hit
 {
     float power; // power          * cartridge
+    float powerMonster; // powerMonster          * cartridge
     float impulse; // impulse        * cartridge
 };
 
@@ -82,7 +83,7 @@ struct SBullet
     bool operator==(u32 ID) { return ID == m_dwID; }
 public:
     SBullet(const Fvector& position, const Fvector& direction, float start_speed, float power,
-        /*float power_critical,*/ float impulse, u16 sender_id, u16 sendersweapon_id, ALife::EHitType e_hit_type,
+        float powerMonster, float impulse, u16 sender_id, u16 sendersweapon_id, ALife::EHitType e_hit_type,
         float maximum_distance, const CCartridge& cartridge, float const air_resistance_factor, bool SendHit, int iShotNum = 0);
 
     bool CanBeRenderedNow() const { return (Device.dwFrame > init_frame_num); }
@@ -204,7 +205,7 @@ public:
 
     void Load();
     void Clear();
-    void AddBullet(const Fvector& position, const Fvector& direction, float starting_speed, float power,
+    void AddBullet(const Fvector& position, const Fvector& direction, float starting_speed, float power, float powerMonster,
         /*float power_critical,*/ float impulse, u16 sender_id, u16 sendersweapon_id, ALife::EHitType e_hit_type,
         float maximum_distance, const CCartridge& cartridge, float const air_resistance_factor, bool SendHit,
         bool AimBullet = false, int iShotNum = 0);

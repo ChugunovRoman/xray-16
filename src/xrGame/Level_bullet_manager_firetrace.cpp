@@ -347,7 +347,7 @@ void CBulletManager::DynamicObjectHit(CBulletManager::_event& E)
             };
         };
 
-        SHit Hit = SHit(hit_param.power, original_dir, NULL, u16(E.R.element), position_in_bone_space,
+        SHit Hit = SHit(hit_param.power, hit_param.powerMonster, original_dir, NULL, u16(E.R.element), position_in_bone_space,
             hit_param.impulse, E.bullet.hit_type, E.bullet.armor_piercing, E.bullet.flags.aim_bullet);
 
         Hit.GenHeader(u16((AddStatistic) ? GE_HIT_STATISTIC : GE_HIT) & 0xffff, E.R.O->ID());
@@ -432,7 +432,9 @@ bool CBulletManager::ObjectHit(SBullet_Hit* hit_res, SBullet* bullet, const Fvec
     //получить силу хита выстрела с учетом патрона
     *hit_res = bullet->hit_param; // default param
 
+
     hit_res->power = bullet->hit_param.power * speed_factor;
+    hit_res->powerMonster = bullet->hit_param.powerMonster * speed_factor;
 
     //(Если = 0, то пуля либо рикошетит(если контакт идёт по касательной), либо застряёт в текущем
     //объекте, если больше 0, то пуля прошивает объект)

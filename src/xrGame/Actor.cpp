@@ -1016,7 +1016,7 @@ void CActor::g_Physics(Fvector& _accel, float jump, float dt)
             //+ 2*::Random.randI(0,2))
             if (Level().CurrentControlEntity() == this)
             {
-                SHit HDS = SHit(character_physics_support()->movement()->gcontact_HealthLost,
+                SHit HDS = SHit(character_physics_support()->movement()->gcontact_HealthLost, .0,
                     //.								0.0f,
                     hdir, di->DamageInitiator(), character_physics_support()->movement()->ContactBone(), di->HitPos(),
                     0.f, di->HitType(), 0.0f, b_hit_initiated);

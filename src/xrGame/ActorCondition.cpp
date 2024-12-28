@@ -370,7 +370,7 @@ void CActorCondition::AffectDamage_InjuriousMaterialAndMonstersInfluence()
 
             if (damage > EPS)
             {
-                SHit HDS = SHit(damage,
+                SHit HDS = SHit(damage, .0,
                     //.								0.0f,
                     Fvector().set(0, 1, 0), NULL, BI_NONE, Fvector().set(0, 0, 0), 0.0f, type, 0.0f, false);
 

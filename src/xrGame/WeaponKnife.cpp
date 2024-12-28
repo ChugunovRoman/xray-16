@@ -289,7 +289,7 @@ void CWeaponKnife::MakeShot(Fvector const& pos, Fvector const& dir, float const 
         pInput->Feedback(CInput::FeedbackTriggers, left ? k_hit : 0.0f, right ? k_hit : 0.0f, 0.1f);
     }
 
-    Level().BulletManager().AddBullet(pos, dir, m_fStartBulletSpeed, fCurrentHit, fHitImpulse_cur, H_Parent()->ID(),
+    Level().BulletManager().AddBullet(pos, dir, m_fStartBulletSpeed, fCurrentHit, .0, fHitImpulse_cur, H_Parent()->ID(),
         ID(), m_eHitType, fireDistance, cartridge, 1.f, SendHit);
 }
 

@@ -78,6 +78,7 @@ void CShootingObject::LoadFireParams(LPCSTR section)
 {
     string32 buffer;
     shared_str s_sHitPower;
+    shared_str s_sHitPowerMonster;
     shared_str s_sHitPowerCritical;
 
     //базовая дисперсия оружия
@@ -85,48 +86,47 @@ void CShootingObject::LoadFireParams(LPCSTR section)
 
     //сила выстрела и его мощьность
     s_sHitPower = pSettings->r_string_wb(section, "hit_power"); //читаем строку силы хита пули оружия
+    s_sHitPowerMonster = pSettings->r_string_wb(section, "hit_power_monster"); //читаем строку силы хита пули оружия
     s_sHitPowerCritical = READ_IF_EXISTS(pSettings, r_string_wb, section, "hit_power_critical", s_sHitPower);
     fvHitPower[egdMaster] =
         (float)atof(_GetItem(*s_sHitPower, 0, buffer)); //первый параметр - это хит для уровня игры мастер
+    fvHitPowerMonster[egdMaster] =
+        (float)atof(_GetItem(*s_sHitPowerMonster, 0, buffer)); //первый параметр - это хит для уровня игры мастер
     fvHitPowerCritical[egdMaster] =
         (float)atof(_GetItem(*s_sHitPowerCritical, 0, buffer)); //первый параметр - это хит для уровня игры мастер
 
     fvHitPower[egdNovice] = fvHitPower[egdStalker] = fvHitPower[egdVeteran] =
         fvHitPower[egdMaster]; //изначально параметры для других уровней сложности такие же
+    fvHitPowerMonster[egdNovice] = fvHitPowerMonster[egdStalker] = fvHitPowerMonster[egdVeteran] =
+        fvHitPowerMonster[egdMaster]; //изначально параметры для других уровней сложности такие же
     fvHitPowerCritical[egdNovice] = fvHitPowerCritical[egdStalker] = fvHitPowerCritical[egdVeteran] =
         fvHitPowerCritical[egdMaster]; //изначально параметры для других уровней сложности такие же
 
     int num_game_diff_param = _GetItemCount(*s_sHitPower); //узнаём колличество параметров для хитов
     if (num_game_diff_param > 1) //если задан второй параметр хита
-    {
         fvHitPower[egdVeteran] = (float)atof(_GetItem(*s_sHitPower, 1, buffer)); //то вычитываем его для уровня ветерана
-    }
     if (num_game_diff_param > 2) //если задан третий параметр хита
-    {
         fvHitPower[egdStalker] = (float)atof(_GetItem(*s_sHitPower, 2, buffer)); //то вычитываем его для уровня сталкера
-    }
     if (num_game_diff_param > 3) //если задан четвёртый параметр хита
-    {
         fvHitPower[egdNovice] = (float)atof(_GetItem(*s_sHitPower, 3, buffer)); //то вычитываем его для уровня новичка
-    }
+
+    num_game_diff_param = _GetItemCount(*s_sHitPowerMonster); //узнаём колличество параметров для хитов
+    if (num_game_diff_param > 1) //если задан второй параметр хита
+        fvHitPowerMonster[egdVeteran] = (float)atof(_GetItem(*s_sHitPowerMonster, 1, buffer)); //то вычитываем его для уровня ветерана
+    if (num_game_diff_param > 2) //если задан третий параметр хита
+        fvHitPowerMonster[egdStalker] = (float)atof(_GetItem(*s_sHitPowerMonster, 2, buffer)); //то вычитываем его для уровня сталкера
+    if (num_game_diff_param > 3) //если задан четвёртый параметр хита
+        fvHitPowerMonster[egdNovice] = (float)atof(_GetItem(*s_sHitPowerMonster, 3, buffer)); //то вычитываем его для уровня новичка
 
     num_game_diff_param = _GetItemCount(*s_sHitPowerCritical); //узнаём колличество параметров
     if (num_game_diff_param > 1) //если задан второй параметр хита
-    {
-        fvHitPowerCritical[egdVeteran] =
-            (float)atof(_GetItem(*s_sHitPowerCritical, 1, buffer)); //то вычитываем его для уровня ветерана
-    }
+        fvHitPowerCritical[egdVeteran] = (float)atof(_GetItem(*s_sHitPowerCritical, 1, buffer)); //то вычитываем его для уровня ветерана
     if (num_game_diff_param > 2) //если задан третий параметр хита
-    {
-        fvHitPowerCritical[egdStalker] =
-            (float)atof(_GetItem(*s_sHitPowerCritical, 2, buffer)); //то вычитываем его для уровня сталкера
-    }
+        fvHitPowerCritical[egdStalker] = (float)atof(_GetItem(*s_sHitPowerCritical, 2, buffer)); //то вычитываем его для уровня сталкера
     if (num_game_diff_param > 3) //если задан четвёртый параметр хита
-    {
-        fvHitPowerCritical[egdNovice] =
-            (float)atof(_GetItem(*s_sHitPowerCritical, 3, buffer)); //то вычитываем его для уровня новичка
-    }
+        fvHitPowerCritical[egdNovice] = (float)atof(_GetItem(*s_sHitPowerCritical, 3, buffer)); //то вычитываем его для уровня новичка
 
+    Msg("CShootingObject::LoadFireParams, section=[%s] fvHitPowerMonster=[%.2f, %.2f, %.2f, %.2f]", section, fvHitPowerMonster[egdNovice], fvHitPowerMonster[egdStalker], fvHitPowerMonster[egdVeteran], fvHitPowerMonster[egdMaster]);
     fHitImpulse = pSettings->r_float(section, "hit_impulse");
     //максимальное расстояние полета пули
     fireDistance = pSettings->r_float(section, "fire_distance");
@@ -487,24 +487,29 @@ void CShootingObject::FireBullet(const Fvector& pos, const Fvector& shot_dir, fl
     m_fPredBulletTime = Device.fTimeGlobal;
 
     float l_fHitPower = 0.0f;
+    float l_fHitPowerMonster = 0.0f;
     if (ParentIsActor()) //если из оружия стреляет актёр(игрок)
     {
         if (GameID() == eGameIDSingle)
         {
             l_fHitPower = fvHitPower[g_SingleGameDifficulty];
+            l_fHitPowerMonster = fvHitPowerMonster[g_SingleGameDifficulty];
         }
         else
         {
             l_fHitPower = fvHitPower[egdMaster];
+            l_fHitPowerMonster = fvHitPowerMonster[egdMaster];
         }
     }
     else
     {
         l_fHitPower = fvHitPower[egdMaster];
+        l_fHitPowerMonster = fvHitPowerMonster[egdMaster];
     }
 
     Level().BulletManager().AddBullet(pos, dir, m_fStartBulletSpeed * cur_silencer_koef.bullet_speed,
-        l_fHitPower * cur_silencer_koef.hit_power, fHitImpulse * cur_silencer_koef.hit_impulse, parent_id, weapon_id,
+        l_fHitPower * cur_silencer_koef.hit_power, l_fHitPowerMonster * cur_silencer_koef.hit_power,
+        fHitImpulse * cur_silencer_koef.hit_impulse, parent_id, weapon_id,
         ALife::eHitTypeFireWound, fireDistance, cartridge, m_air_resistance_factor, send_hit, aim_bullet, iShotNum);
 }
 void CShootingObject::FireStart() { bWorking = true; }

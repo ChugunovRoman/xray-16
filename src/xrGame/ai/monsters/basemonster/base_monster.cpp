@@ -442,12 +442,14 @@ void CBaseMonster::Hit(SHit* pHDS)
                 d_hit_power = m_fHitFracMonster;
 
             hit_power *= d_hit_power;
+            hit_power += pHDS->powerMonster;
             VERIFY(hit_power >= 0.0f);
         }
         // пуля НЕ пробила шкуру
         else
         {
             hit_power *= m_fHitFracMonster;
+            hit_power += pHDS->powerMonster;
             pHDS->add_wound = false; //раны нет
         }
     }

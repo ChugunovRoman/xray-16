@@ -64,6 +64,7 @@ protected:
     float fModeShotTime;
     bool bCycleDown;
     Fvector4 fvHitPower{};
+    Fvector4 fvHitPowerMonster{};
     Fvector4 fvHitPowerCritical{};
     float fHitImpulse;
 

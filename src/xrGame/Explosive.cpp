@@ -400,7 +400,8 @@ void CExplosive::Explode()
         cartridge.bullet_material_idx = GMLib.GetMaterialIdx(WEAPON_MATERIAL_NAME);
         cartridge.m_flags.set(CCartridge::cfTracer, FALSE);
 
-        Level().BulletManager().AddBullet(pos, frag_dir, m_fFragmentSpeed, m_fFragHit, m_fFragHitImpulse, Initiator(),
+        Level().BulletManager().AddBullet(pos, frag_dir, m_fFragmentSpeed, m_fFragHit, .0, m_fFragHitImpulse,
+            Initiator(),
             cast_game_object()->ID(), m_eHitTypeFrag, m_fFragsRadius, cartridge, 1.f, SendHits);
     }
 

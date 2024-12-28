@@ -2,7 +2,7 @@
 
 struct SHit
 {
-    SHit(float powerA, Fvector& dirA, IGameObject* whoA, u16 elementA, Fvector p_in_bone_spaceA, float impulseA,
+    SHit(float powerA, float powerB, Fvector& dirA, IGameObject* whoA, u16 elementA, Fvector p_in_bone_spaceA, float impulseA,
         ALife::EHitType hit_typeA, float armor_piercingA /*=0.0f*/, bool AimBullet /*=false*/);
 
     SHit();
@@ -56,6 +56,7 @@ struct SHit
     u16 DestID;
 
     float power;
+    float powerMonster;
     Fvector dir;
     IGameObject* who;
     u16 whoID;

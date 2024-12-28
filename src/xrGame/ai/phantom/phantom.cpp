@@ -239,7 +239,7 @@ void CPhantom::OnFlyState()
             SwitchToState(stContact);
             float power = 1000.0f;
             float impulse = 100.0f;
-            SHit HDS(power, Fvector().set(0, 0, 1), this, BI_NONE, Fvector().set(0, 0, 0), impulse,
+            SHit HDS(power, .0, Fvector().set(0, 0, 1), this, BI_NONE, Fvector().set(0, 0, 0), impulse,
                 ALife::eHitTypeFireWound, 0.0f, false);
             Hit(&HDS);
         }
