@@ -288,7 +288,7 @@ void CDialogHolder::UpdateCursorVisibility()
         }
         else if (cursor_is_visible)
         {
-            if (cur_time - m_become_visible_time > psControllerCursorAutohideTime * 1000.f)
+            if (cur_time - m_become_visible_time > psControllerCursorAutohideTime * 100.f)
                 cursor.Hide();
         }
     }
