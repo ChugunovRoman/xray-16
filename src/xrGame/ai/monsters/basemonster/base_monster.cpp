@@ -20,6 +20,7 @@
 #include "Include/xrRender/KinematicsAnimated.h"
 #include "detail_path_manager.h"
 #include "memory_manager.h"
+#include "character_community.h"
 #include "visual_memory_manager.h"
 #include "ai/monsters/monster_velocity_space.h"
 #include "EntityCondition.h"
@@ -429,6 +430,15 @@ void CBaseMonster::Hit(SHit* pHDS)
         if (!critically_wounded())
             update_critical_wounded(pHDS->boneID, pHDS->power);
 
+    float powerMonster = pHDS->powerMonster;
+    if (g_actor)
+    {
+        CHARACTER_COMMUNITY community;
+        community.set(g_actor->Community());
+
+        if (strstr(*community.id(), "hunter"))
+            powerMonster *= 1.3;
+    }
     const bool copOrHigher = !ShadowOfChernobylMode && !ClearSkyMode;
     if (pHDS->hit_type == ALife::eHitTypeFireWound && copOrHigher)
     {
@@ -442,14 +452,14 @@ void CBaseMonster::Hit(SHit* pHDS)
                 d_hit_power = m_fHitFracMonster;
 
             hit_power *= d_hit_power;
-            hit_power += pHDS->powerMonster;
+            hit_power += powerMonster;
             VERIFY(hit_power >= 0.0f);
         }
         // пуля НЕ пробила шкуру
         else
         {
             hit_power *= m_fHitFracMonster;
-            hit_power += pHDS->powerMonster;
+            hit_power += powerMonster;
             pHDS->add_wound = false; //раны нет
         }
     }
