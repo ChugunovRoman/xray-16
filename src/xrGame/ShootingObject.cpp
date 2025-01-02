@@ -126,6 +126,7 @@ void CShootingObject::LoadFireParams(LPCSTR section)
     if (num_game_diff_param > 3) //если задан четвёртый параметр хита
         fvHitPowerCritical[egdNovice] = (float)atof(_GetItem(*s_sHitPowerCritical, 3, buffer)); //то вычитываем его для уровня новичка
 
+    Msg("CShootingObject::LoadFireParams, section=[%s] fvHitPowerMonster=[%.2f, %.2f, %.2f, %.2f]", section, fvHitPowerMonster[egdNovice], fvHitPowerMonster[egdStalker], fvHitPowerMonster[egdVeteran], fvHitPowerMonster[egdMaster]);
     fHitImpulse = pSettings->r_float(section, "hit_impulse");
     //максимальное расстояние полета пули
     fireDistance = pSettings->r_float(section, "fire_distance");
