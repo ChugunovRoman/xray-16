@@ -54,46 +54,52 @@ void CWeaponAutomaticShotgun::OnAnimationEnd(u32 state)
 
     switch (m_sub_state)
     {
-    case eSubstateReloadBegin:
-    {
-        m_sub_state = eSubstateReloadInProcess;
-        SwitchState(eReload);
-    }
-    break;
-
-    case eSubstateReloadInProcess:
-    {
-        if (0 != AddCartridge(1))
+        case eSubstateReloadBegin:
         {
-            m_sub_state = eSubstateReloadEnd;
+            m_sub_state = eSubstateReloadInProcess;
+            SwitchState(eReload);
         }
-        SwitchState(eReload);
-    }
-    break;
+        break;
 
-    case eSubstateReloadEnd:
-    {
-        m_sub_state = eSubstateReloadBegin;
-        SwitchState(eIdle);
-    }
-    break;
+        case eSubstateReloadInProcess:
+        {
+            if (0 != AddCartridge(1))
+            {
+                m_sub_state = eSubstateReloadEnd;
+            }
+            SwitchState(eReload);
+        }
+        break;
+
+        case eSubstateReloadEnd:
+        {
+            m_sub_state = eSubstateReloadBegin;
+            SwitchState(eIdle);
+        }
+        break;
     };
 }
 
 void CWeaponAutomaticShotgun::Reload()
 {
     if (m_bTriStateReload)
-    {
         TriStateReload();
-    }
     else
         inherited::Reload();
 }
 
 void CWeaponAutomaticShotgun::TriStateReload()
 {
-    if (m_magazine.size() == (u32)iMagazineSize || !HaveCartridgeInInventory(1))
+    if (IsMisfire() && iAmmoElapsed)
+    {
+        SetPending(true);
+        SwitchState(eUnMisfire);
         return;
+    }
+
+    if ((m_magazine.size() == (u32)iMagazineSize || !HaveCartridgeInInventory(1)))
+        return;
+
     CWeapon::Reload();
     m_sub_state = eSubstateReloadBegin;
     SwitchState(eReload);
@@ -127,6 +133,9 @@ void CWeaponAutomaticShotgun::OnStateSwitch(u32 S, u32 oldState)
             switch2_AddCartgidge();
         break;
     case eSubstateReloadEnd: switch2_EndReload(); break;
+    case eUnMisfire:
+        switch2_Unmis(); 
+        break;
     };
 }
 

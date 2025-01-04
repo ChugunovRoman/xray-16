@@ -742,6 +742,7 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
         {
             bMisfire = false;
             --iAmmoElapsed;
+            m_magazine.pop_back();
             SwitchState(eIdle);
         }break; // End of UnMisfire animation
     case eAimStart: SwitchState(eIdle); break;
