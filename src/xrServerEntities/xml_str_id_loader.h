@@ -129,7 +129,7 @@ void CSXML_IdToIndex::InitInternal(bool crashOnFail /*= true*/, bool ignoreMissi
 
     Msg("file_str: %s", file_str);
     VERIFY(file_str);
-    VERIFY(tag_name);
+    R_ASSERT2_CURE(tag_name, "XML tag name is missing", { return; });
 
     string_path xml_file;
     int count = _GetItemCount(file_str);

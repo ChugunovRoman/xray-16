@@ -617,33 +617,19 @@ int g_get_general_goodwill_between(u16 from, u16 to)
 }
 
 luabind::object get_sections(lua_State* L, ESectionTypeName type) {
-  R_ASSERT2(type < ESectionTypeName::latest, make_string("Invalid type of getting section, passed type=[%d], latest type in enum=[%d]", type, ESectionTypeName::latest));
+    R_ASSERT2(type < ESectionTypeName::latest, make_string("Invalid type of getting section, passed type=[%d], latest type in enum=[%d]", type, ESectionTypeName::latest));
 
-  luabind::object result = luabind::newtable(L);
-  std::size_t index = 1;
+    luabind::object result = luabind::newtable(L);
+    std::size_t index = 1;
 
-  if (!g_actor)
+    if (!g_actor)
     return result;
 
-  for (const auto& name : Level().sections_map[type])
-  {
-      result[index++] = name;
-  }
-  return result;
-}
-
-u32 vertex_id(Fvector position)
-{
-    return (ai().level_graph().vertex_id(position));
-}
-
-u64 vertex_id_awful(Fvector position)
-{
-    // Original Clear Sky's LuaJIT or luabind converts
-    // 4294967295 (which is u32(-1)) to 4294967296
-    // for some reason :(
-    const u32 id = ai().level_graph().vertex_id(position);
-    return id == u32(-1) ? id + 1 : id; // reproduce Clear Sky behaviour
+    for (const auto& name : Level().sections_map[type])
+    {
+        result[index++] = name;
+    }
+    return result;
 }
 
 u32 render_get_dx_level() { return GEnv.Render->get_dx_level(); }
@@ -902,20 +888,15 @@ IC static void CLevel_Export(lua_State* luaState)
         def("ray_pick", &ray_pick)
     ];
 
-    if (ClearSkyMode)
-    {
-        module(luaState, "level")
-        [
-            def("vertex_id", &vertex_id_awful)
-        ];
-    }
-    else
-    {
-        module(luaState, "level")
-        [
-            def("vertex_id", &vertex_id)
-        ];
-    }
+    module(luaState, "level")
+    [
+        def("vertex_id", +[](Fvector position) -> u64
+        {
+            // Original luabind converts 4294967295 (which is u32(-1)) to 4294967296
+            const u32 id = ai().level_graph().vertex_id(position);
+            return id == u32(-1) ? id + 1 : id; // reproduce original behaviour
+        })
+    ];
 
     module(luaState, "actor_stats")
     [

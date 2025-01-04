@@ -2374,6 +2374,8 @@ target_sources(xrGame PRIVATE
     ui/UIWarState.h
     ui/UIWeightBar.cpp
     ui/UIWeightBar.h
+    ui/UIWheelMenu.cpp
+    ui/UIWheelMenu.h
     ui/UIWindow_script.cpp
     ui/UIWpnParams.cpp
     ui/UIWpnParams.h
