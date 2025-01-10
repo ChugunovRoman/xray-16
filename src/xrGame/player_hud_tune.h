@@ -69,6 +69,7 @@ private:
     float _delta_pos{ 0.0005f };
     float _delta_rot{ 0.0005f };
 
+    shared_str current_section{};
     attachable_hud_item* current_hud_item{};
     hud_item_idx current_hud_idx{ MAIN_ITEM };
 
@@ -77,4 +78,8 @@ private:
 
     Fvector m_hands_curr_offset[2][1]; // pos,rot/ alt_aim
     Fvector m_hands_new_offset[2][1]; // pos,rot/ alt_aim
+
+    Fvector pos{};
+    Fvector hpb{};
+    Fvector scale{};
 };

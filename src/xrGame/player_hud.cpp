@@ -234,6 +234,27 @@ bool attachable_hud_item::need_renderable() const { return m_parent_hud_item->ne
 void attachable_hud_item::render(u32 context_id, IRenderable* root)
 {
     GEnv.Render->add_Visual(context_id, root, m_model->dcast_RenderVisual(), m_item_transform);
+
+    CWeapon* wpn = smart_cast<CWeapon*>(m_parent_hud_item);
+    if (wpn && wpn->bUseAttachmentSystem)
+    {
+        for (auto item: wpn->m_addon_items)
+        {
+            item.second->addon_item_transform = m_item_transform;
+
+            Fmatrix m_addon_attach_offset;
+            m_addon_attach_offset.setHPB(item.second->addon_item_hpb.x, item.second->addon_item_hpb.y, item.second->addon_item_hpb.z);
+            m_addon_attach_offset.translate_over(item.second->addon_item_pos);
+            item.second->addon_item_transform.mul(m_item_transform, m_addon_attach_offset);
+
+            Fmatrix m;
+            m.scale(item.second->addon_item_scale);
+            item.second->addon_item_transform.mulB_43(m);
+            if (item.second->addon_item_visible)
+                GEnv.Render->add_Visual(context_id, root, item.second->addon_item_model->dcast_RenderVisual(), item.second->addon_item_transform);
+        }
+    }
+
     m_parent_hud_item->render_hud_mode();
 }
 
@@ -437,6 +458,8 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
     m_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str()));
     GEnv.Render->hud_loading = false;
     m_attach_place_idx = pSettings->read_if_exists<u16>(m_sect_name, "attach_place_idx", 0);
+
+    auto visual = hands_model->dcast_PKinematics();
 
     IKinematicsAnimated* animatedHudItem;
     if (!m_monolithic && hands_model)

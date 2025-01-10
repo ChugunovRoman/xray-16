@@ -374,6 +374,7 @@ void CWeapon::Load(LPCSTR section)
 
     iAmmoElapsed = pSettings->r_s32(section, "ammo_elapsed");
     iMagazineSize = pSettings->r_s32(section, "ammo_mag_size");
+    bUseAttachmentSystem = pSettings->read_if_exists<bool>(section, "use_attachment_system", false);
 
     ////////////////////////////////////////////////////
     // дисперсия стрельбы

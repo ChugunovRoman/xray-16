@@ -1093,8 +1093,25 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
                     m_cur_scope = u8(it - m_scopes.begin());
             }
         }
-        m_flagsAddOnState |= CSE_ALifeItemWeapon::eWeaponAddonScope;
+
         m_section_id = GetNameWithAttachment();
+
+        auto found_addon = m_addon_items.find(*pIItem->m_section_id);
+        if (found_addon == m_addon_items.end())
+        {
+            addon_item* new_addon = xr_new<addon_item>();
+            new_addon->addon_item_name = pIItem->m_section_id;
+            new_addon->addon_item_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*pIItem->m_section_id, "visual")));
+            new_addon->addon_item_visible = true;
+            new_addon->addon_item_hpb = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_hpb", *pIItem->m_section_id).c_str(), Fvector().set(0.f,0.f,0.f));
+            new_addon->addon_item_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_pos", *pIItem->m_section_id).c_str(), Fvector().set(0.f,0.f,0.f));
+            new_addon->addon_item_scale = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_scale", *pIItem->m_section_id).c_str(), Fvector().set(1.f,1.f,1.f));
+            m_addon_items.insert(std::make_pair(*pIItem->m_section_id, new_addon));
+        }
+        else
+            m_addon_items[*pIItem->m_section_id]->addon_item_visible = true;
+
+        m_flagsAddOnState |= CSE_ALifeItemWeapon::eWeaponAddonScope;
         reload(*m_section_id);
         result = true;
     }
@@ -1144,20 +1161,6 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
 
 }
 
-void CWeaponMagazined::ReplaceWeaponAfterDetachScope()
-{
-    pcstr parentSect = READ_IF_EXISTS(pSettings, r_string, *m_section_id, "parent_section", *m_section_id);
-
-    if (xr_strcmp(parentSect, *m_section_id) == 0)
-        return;
-
-    cNameVisual_set(pSettings->r_string(parentSect, "visual"));
-    m_section_id = parentSect;
-    m_cur_scope = 0;
-
-    reload(parentSect);
-}
-
 bool CWeaponMagazined::DetachScope(const char* item_section_name, bool b_spawn_item)
 {
     bool detached = false;
@@ -1190,7 +1193,19 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
         }
         m_flagsAddOnState &= ~CSE_ALifeItemWeapon::eWeaponAddonScope;
 
-        ReplaceWeaponAfterDetachScope();
+        pcstr parentSect = pSettings->read_if_exists<pcstr>(*m_section_id, "parent_section", *m_section_id);
+        if (bUseAttachmentSystem)
+        {
+            auto found_addon = m_addon_items.find(item_section_name);
+            if (found_addon != m_addon_items.end())
+                m_addon_items[item_section_name]->addon_item_visible = false;
+        }
+        else if (xr_strcmp(parentSect, *m_section_id) != 0)
+            cNameVisual_set(pSettings->r_string(parentSect, "visual"));
+
+        m_section_id = parentSect;
+        m_cur_scope = 0;
+        reload(parentSect);
 
         UpdateAltScope();
         UpdateAddonsVisibility();

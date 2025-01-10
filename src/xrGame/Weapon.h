@@ -24,6 +24,18 @@ class CUIWindow;
 class CBinocularsVision;
 class CNightVisionEffector;
 
+class addon_item
+{
+public:
+	shared_str addon_item_name;
+	Fmatrix addon_item_transform;
+	Fvector addon_item_hpb;
+	Fvector addon_item_pos;
+	Fvector addon_item_scale;
+	IKinematics* addon_item_model;
+	BOOL addon_item_visible;
+};
+
 class CWeapon : public CHudItemObject, public CShootingObject
 {
     typedef CHudItemObject inherited;
@@ -38,6 +50,9 @@ public:
     bool bScopeIsHasTexture;
     bool bNVsecondVPavaible;
     bool bNVsecondVPstatus;
+    bool bUseAttachmentSystem;
+
+    xr_map<pcstr, addon_item*> m_addon_items;
 
     virtual bool bInZoomRightNow() const { return m_zoom_params.m_fZoomRotationFactor > 0.05; }
     IC bool bIsSecondVPZoomPresent() const { return GetSecondVPZoomFactor() > 0.000f; }

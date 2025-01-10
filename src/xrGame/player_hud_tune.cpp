@@ -85,7 +85,7 @@ void CHudTuner::UpdateValues()
             return;
 
         wpn->m_hands_offset[0][1] = m_hands_new_offset[0][0];
-        wpn->m_hands_offset[1][1] = m_hands_new_offset[1][0];
+        wpn->m_hands_offset[1][1] = m_hands_new_offset[1][0];   
     }
 }
 
@@ -305,6 +305,48 @@ void CHudTuner::on_tool_frame()
         }
 
         ImGui::NewLine();
+
+        if (ImGui::CollapsingHeader("Attachment Settings", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            if (current_hud_item)
+            {
+                CWeapon* wpn = smart_cast<CWeapon*>(current_hud_item->m_parent_hud_item);
+                if (wpn && wpn->bUseAttachmentSystem && wpn->m_addon_items.size() > 0)
+                {
+                    for (auto item: wpn->m_addon_items)
+                    {
+                        ImGui::LabelText("Current item", "%s", item.first);
+
+                        if (ImGui::RadioButton("Visible", item.second->addon_item_visible))
+                            item.second->addon_item_visible = !item.second->addon_item_visible;
+
+                        ImGui::NewLine();
+
+                        ImGui::DragFloat3(make_string("Addon %s Position", item.first).c_str(), (float*)&wpn->m_addon_items[item.first]->addon_item_pos, _delta_pos, 0.f, 0.f, "%.7f");
+                        ImGui::DragFloat3(make_string("Addon %s Rotation", item.first).c_str(), (float*)&wpn->m_addon_items[item.first]->addon_item_hpb, _delta_rot, 0.f, 0.f, "%.7f");
+                        ImGui::DragFloat3(make_string("Addon %s Scale", item.first).c_str(), (float*)&wpn->m_addon_items[item.first]->addon_item_scale, _delta_pos, 0.f, 0.f, "%.7f");
+
+                        ImGuiIO& io = ImGui::GetIO();
+                        string512 selectable;
+
+                        if (ImGui::Button(make_string("Copy %s values to clipboard", item.first).c_str()))
+                        {
+                            ImGui::LogToClipboard();
+
+                            xr_sprintf(selectable, "%s_hud_hpb = %f, %f, %f\n", item.first, item.second->addon_item_hpb.x, item.second->addon_item_hpb.y, item.second->addon_item_hpb.z);
+                            ImGui::LogText(selectable);
+                            xr_sprintf(selectable, "%s_hud_pos = %f, %f, %f\n", item.first, item.second->addon_item_pos.x, item.second->addon_item_pos.y, item.second->addon_item_pos.z);
+                            ImGui::LogText(selectable);
+                            xr_sprintf(selectable, "%s_hud_scale = %f, %f, %f\n", item.first, item.second->addon_item_scale.x, item.second->addon_item_scale.y, item.second->addon_item_scale.z);
+                            ImGui::LogText(selectable);
+                            ImGui::LogFinish();
+                        }
+
+                        ImGui::NewLine();
+                    }
+                }
+            }
+        }
 
         if (current_hud_item && ImGui::CollapsingHeader("Bone and Animation Debugging", ImGuiTreeNodeFlags_DefaultOpen))
         {
