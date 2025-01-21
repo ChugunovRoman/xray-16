@@ -335,6 +335,7 @@ protected:
     int bullet_cnt;
     int last_hide_bullet;
     bool bHasBulletsToHide;
+    u16 m_bullet_show_frame;
 
     virtual void HUD_VisualBulletUpdate(bool force = false, int force_idx = -1);
 

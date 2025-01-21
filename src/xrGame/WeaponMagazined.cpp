@@ -145,6 +145,8 @@ void CWeaponMagazined::Load(LPCSTR section)
         }
     }
 
+    m_bullet_show_frame = pSettings->read_if_exists<u16>(section, "bullet_show_frame", 0);
+
     LoadSilencerKoeffs();
 }
 
@@ -553,6 +555,9 @@ void CWeaponMagazined::UpdateCL()
         case eHidden: break;
         }
     }
+
+    if (m_bullet_show_frame > 0 && GetState() == eReload && Device.dwTimeGlobal >= (m_dwMotionStartTm + m_bullet_show_frame))
+        HUD_VisualBulletUpdate(true);
 
     UpdateSounds();
 }
