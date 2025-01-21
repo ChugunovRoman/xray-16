@@ -852,6 +852,8 @@ void CEnvironment::load_weathers()
     for (const auto& file : weathers)
     {
         pcstr fileName = file.name.c_str();
+        if (xr_strcmp(fileName, "[gswr_base_default].ltx") == 0)
+            continue;
         const size_t length = xr_strlen(fileName);
         id.assign(fileName, length - 4);
         EnvVec& env = WeatherCycles[id.c_str()];
@@ -864,7 +866,8 @@ void CEnvironment::load_weathers()
         env.reserve(sections.size());
 
         for (const auto& section : sections)
-            env.emplace_back(create_descriptor(section->Name, config));
+            if (!strstr(*section->Name, "gswr_"))
+                env.emplace_back(create_descriptor(section->Name, config));
 
         CInifile::Destroy(config);
     }
