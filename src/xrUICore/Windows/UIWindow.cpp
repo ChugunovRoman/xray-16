@@ -537,6 +537,12 @@ bool fit_in_rect(CUIWindow* w, Frect const& vis_rect, float border, float dx16po
 
 bool CUIWindow::FillDebugTree(const CUIDebugState& debugState)
 {
+    if (!UiDebuggerEnabled)
+    {
+        UNUSED(debugState);
+        return false;
+    }
+
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
     if (debugState.selected == this)
         flags |= ImGuiTreeNodeFlags_Selected;
@@ -588,11 +594,18 @@ bool CUIWindow::FillDebugTree(const CUIDebugState& debugState)
         const auto draw_list = examined ? ImGui::GetForegroundDrawList(mainVP) : ImGui::GetBackgroundDrawList(mainVP);
         draw_list->AddRect((const ImVec2&)rect.lt, (const ImVec2&)rect.rb, color.get_windows());
     }
-    else
+
+    if (open)
     {
-        UNUSED(debugState);
-        return false;
+        for (const auto& child : m_ChildWndList)
+        {
+            child->FillDebugTree(debugState);
+        }
+        if (!m_ChildWndList.empty())
+            ImGui::TreePop();
     }
+
+    return open;
 }
 
 void CUIWindow::FillDebugInfo()

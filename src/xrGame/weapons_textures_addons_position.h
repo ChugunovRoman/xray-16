@@ -8,7 +8,7 @@ public:
     bool is_active() const override;
 
 private:
-    pcstr tool_name() override { return "Texture position addons"; }
+    pcstr tool_name() const override { return "Texture position addons"; }
 
     void ResetToDefaultWpn1Values();
     void ResetToDefaultWpn2Values();

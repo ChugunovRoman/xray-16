@@ -8,7 +8,7 @@ public:
     bool is_active() const override;
 
 private:
-    pcstr tool_name() override { return "Camera Animation list"; }
+    pcstr tool_name() const override { return "Camera Animation list"; }
 
     xr_vector<shared_str> list_anm;
     xr_vector<shared_str> list_ppe;
