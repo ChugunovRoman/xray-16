@@ -22,18 +22,10 @@ public:
     bool OnControllerAction(int axis, float x, float y, EUIMessages controller_action) override;
 
     CDialogHolder* GetHolder() const { return m_pParentHolder; }
-
-    void SetHolder(CDialogHolder* h)
-    {
-        if (m_pParentHolder)
-            m_pParentHolder->UnregisterFocusable(this);
-        m_pParentHolder = h;
-    }
-
-    CUIFocusSystem* GetCurrentFocusSystem() const override { return GetHolder(); }
+    void SetHolder(CDialogHolder* h) { m_pParentHolder = h; }
 
     virtual bool StopAnyMove() { return true; }
-    virtual bool NeedCursor() const { return pInput->IsCurrentInputTypeKeyboardMouse(); }
+    virtual bool NeedCursor() const { return true; }
     virtual bool NeedCenterCursor() const { return true; }
     virtual bool WorkInPause() const { return m_bWorkInPause; }
     virtual bool Dispatch(int cmd, int param) { return true; }

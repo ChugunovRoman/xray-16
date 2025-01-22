@@ -9,8 +9,6 @@
 
 CUIComboBox::CUIComboBox() : CUIWindow("CUIComboBox")
 {
-    m_bFocusValuable = true;
-
     AttachChild(&m_frameLine);
     AttachChild(&m_text);
 
@@ -21,6 +19,13 @@ CUIComboBox::CUIComboBox() : CUIWindow("CUIComboBox")
     m_bInited = false;
     m_eState = LIST_FONDED;
     m_textColor[0] = 0xff00ff00;
+
+    UI().Focus().RegisterFocusable(this);
+}
+
+CUIComboBox::~CUIComboBox()
+{
+    UI().Focus().UnregisterFocusable(this);
 }
 
 void CUIComboBox::SetListLength(int length)
@@ -213,6 +218,34 @@ void CUIComboBox::SetItemToken(int tok_id)
     SetItemIDX(idx);
 }
 
+bool CUIComboBox::SetNextItemSelected(bool next, bool loop)
+{
+    const auto lastItem = (int)m_list_box.GetSize() - 1;
+
+    int idx = (int)m_list_box.GetSelectedIDX();
+
+    if (next)
+    {
+        if (idx < lastItem)
+            idx++;
+        else if (loop)
+            idx = 0;
+        else
+            return false;
+    }
+    else
+    {
+        if (idx > 0)
+            --idx;
+        else if (loop)
+            idx = lastItem;
+        else
+            return false;
+    }
+    SetItemIDX(idx);
+    return true;
+}
+
 void CUIComboBox::OnBtnClicked() { ShowList(!m_list_frame.IsShown()); }
 void CUIComboBox::ShowList(bool bShow)
 {
@@ -257,6 +290,8 @@ void CUIComboBox::OnFocusLost()
     CUIWindow::OnFocusLost();
     if (m_bIsEnabled)
         m_frameLine.SetCurrentState(S_Enabled);
+    if (m_eState == LIST_EXPANDED && pInput->IsCurrentInputTypeController())
+        ShowList(false);
 }
 
 void CUIComboBox::OnFocusReceive()
@@ -283,6 +318,98 @@ bool CUIComboBox::OnMouseAction(float x, float y, EUIMessages mouse_action)
         case LIST_FONDED:
             OnBtnClicked();
             return true;
+        }
+    }
+    else if (mouse_action == WINDOW_RBUTTON_DOWN)
+    {
+        SetNextItemSelected(true, true);
+    }
+
+    return false;
+}
+
+bool CUIComboBox::OnKeyboardAction(int dik, EUIMessages keyboard_action)
+{
+    if (CUIWindow::OnKeyboardAction(dik, keyboard_action))
+        return true;
+
+    if (CursorOverWindow() && keyboard_action == WINDOW_KEY_PRESSED)
+    {
+        switch (GetBindedAction(dik, EKeyContext::UI))
+        {
+        case kUI_ACCEPT:
+        case kUI_BACK:
+            if (m_list_frame.IsShown())
+            {
+                ShowList(false);
+                return true;
+            }
+            break;
+        case kUI_MOVE_LEFT:
+        {
+            if (!m_list_frame.IsShown())
+                SetNextItemSelected(false, false);
+            return true;
+        }
+        case kUI_MOVE_RIGHT:
+        {
+            if (!m_list_frame.IsShown())
+                SetNextItemSelected(true, false);
+            return true;
+        }
+        case kUI_MOVE_UP:
+        {
+            if (m_list_frame.IsShown())
+            {
+                SetNextItemSelected(false, false);
+                if (CUIListBoxItem* itm = m_list_box.GetSelectedItem())
+                    UI().Focus().SetFocused(itm);
+                return true;
+            }
+            break;
+        }
+        case kUI_MOVE_DOWN:
+        {
+            if (m_list_frame.IsShown())
+            {
+                SetNextItemSelected(true, false);
+                if (CUIListBoxItem* itm = m_list_box.GetSelectedItem())
+                    UI().Focus().SetFocused(itm);
+                return true;
+            }
+            break;
+        }
+        } // switch (action)
+    }
+
+    return false;
+}
+
+bool CUIComboBox::OnControllerAction(int axis, float x, float y, EUIMessages controller_action)
+{
+    if (CUIWindow::OnControllerAction(axis, x, y, controller_action))
+        return true;
+
+    if (CursorOverWindow())
+    {
+        if (IsBinded(kUI_MOVE, axis, EKeyContext::UI))
+        {
+            if (!fis_zero(x))
+            {
+                if (!m_list_frame.IsShown())
+                    SetNextItemSelected(x > 0, false);
+                return true;
+            }
+            if (!fis_zero(y))
+            {
+                if (m_list_frame.IsShown())
+                {
+                    SetNextItemSelected(y > 0, false);
+                    if (CUIListBoxItem* itm = m_list_box.GetSelectedItem())
+                        UI().Focus().SetFocused(itm);
+                    return true;
+                }
+            }
         }
     }
 

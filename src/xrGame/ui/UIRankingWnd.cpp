@@ -69,13 +69,13 @@ void CUIRankingWnd::Show(bool status)
 
 void CUIRankingWnd::Update()
 {
-    if (inherited::IsShown())
-        inherited::Update();
     if (Device.dwTimeGlobal - m_previous_time > m_delay)
     {
         m_previous_time = Device.dwTimeGlobal;
         update_info();
     }
+    if (IsShown())
+        inherited::Update();
 }
 
 bool CUIRankingWnd::Init()

@@ -16,6 +16,7 @@ class XRUICORE_API CUIComboBox final : public CUIWindow, public CUIOptionsItem, 
 
 public:
     CUIComboBox();
+    ~CUIComboBox() override;
 
     // CUIOptionsItem
     virtual void SetCurrentOptValue(); // opt->current
@@ -39,6 +40,8 @@ public:
     u32 GetSelectedIDX();
     void SetSelectedIDX(u32 idx);
 
+    bool SetNextItemSelected(bool next, bool loop);
+
     virtual void SendMessage(CUIWindow* pWnd, s16 msg, void* pData = 0);
     virtual void OnFocusLost();
     virtual void OnFocusReceive();
@@ -50,6 +53,8 @@ public:
 
 protected:
     virtual bool OnMouseAction(float x, float y, EUIMessages mouse_action);
+    bool OnKeyboardAction(int dik, EUIMessages keyboard_action) override;
+    bool OnControllerAction(int axis, float x, float y, EUIMessages controller_action) override;
     virtual void OnBtnClicked();
     void ShowList(bool bShow);
     void OnListItemSelect();

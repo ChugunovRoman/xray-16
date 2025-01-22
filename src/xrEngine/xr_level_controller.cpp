@@ -181,6 +181,9 @@ game_action actions[] =
 
     { "ui_move_secondary",      kUI_MOVE_SECONDARY,         _both,  EKeyContext::UI },
 
+    { "ui_click_1",             kUI_CLICK_1,                _both,  EKeyContext::UI },
+    { "ui_click_2",             kUI_CLICK_2,                _both,  EKeyContext::UI },
+
     { "ui_accept",              kUI_ACCEPT,                 _both,  EKeyContext::UI },
     { "ui_back",                kUI_BACK,                   _both,  EKeyContext::UI },
     { "ui_action_1",            kUI_ACTION_1,               _both,  EKeyContext::UI },
@@ -215,7 +218,6 @@ game_action actions[] =
     { "pda_map_show_legend",    kPDA_MAP_SHOW_LEGEND,       _sp,    EKeyContext::PDA },
 
     { "pda_filter_toggle",      kPDA_FILTER_TOGGLE,         _sp,    EKeyContext::PDA },
-    { "pda_tasks_toggle",       kPDA_TASKS_TOGGLE,          _sp,    EKeyContext::PDA },
 
     // Talk:
     { "talk_switch_to_trade",   kTALK_SWITCH_TO_TRADE,      _sp,    EKeyContext::Talk },
@@ -659,15 +661,16 @@ pcstr IdToActionName(EGameActions id)
 
 EGameActions ActionNameToId(pcstr name)
 {
-    game_action* action = ActionNameToPtr(name);
-    if (action)
+    if (const game_action* action = ActionNameToPtr(name))
         return action->id;
-    else
-        return kNOTBINDED;
+
+    return kNOTBINDED;
 }
 
 game_action* ActionNameToPtr(pcstr name)
 {
+    R_ASSERT1_CURE(name, return nullptr);
+
     size_t idx = 0;
     while (actions[idx].action_name)
     {
@@ -738,12 +741,15 @@ keyboard_key* DikToPtr(int dik, bool safe)
 
 int KeynameToDik(pcstr name)
 {
-    keyboard_key* kb = KeynameToPtr(name);
-    return kb->dik;
+    if (const keyboard_key* kb = KeynameToPtr(name))
+        return kb->dik;
+    return SDL_SCANCODE_UNKNOWN;
 }
 
 keyboard_key* KeynameToPtr(pcstr name)
 {
+    R_ASSERT1_CURE(name, return nullptr);
+
     size_t idx = 0;
     while (keyboards[idx].key_name)
     {
@@ -754,7 +760,7 @@ keyboard_key* KeynameToPtr(pcstr name)
     }
 
     Msg("! [KeynameToPtr] cant find corresponding 'keyboard_key' for keyname %s", name);
-    return NULL;
+    return nullptr;
 }
 
 bool IsGroupNotConflicted(EKeyGroup g1, EKeyGroup g2)
@@ -1011,6 +1017,9 @@ class CCC_DefControls : public CCC_UnBindAll
 
         { kUI_MOVE_SECONDARY,       { SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,       XR_CONTROLLER_AXIS_LEFT } },
 
+        { kUI_CLICK_1,              { SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,       XR_CONTROLLER_AXIS_TRIGGER_RIGHT } },
+        { kUI_CLICK_2,              { SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,       XR_CONTROLLER_AXIS_TRIGGER_LEFT } },
+
         { kUI_ACCEPT,               { SDL_SCANCODE_RETURN,  SDL_SCANCODE_F,             XR_CONTROLLER_BUTTON_A } },
         { kUI_BACK,                 { SDL_SCANCODE_ESCAPE,  SDL_SCANCODE_G,             XR_CONTROLLER_BUTTON_B } },
         { kUI_ACTION_1,             { SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_Y,             XR_CONTROLLER_BUTTON_X } },
@@ -1045,13 +1054,12 @@ class CCC_DefControls : public CCC_UnBindAll
         { kPDA_MAP_SHOW_LEGEND,     { SDL_SCANCODE_V,       SDL_SCANCODE_KP_MULTIPLY,   XR_CONTROLLER_BUTTON_INVALID } },
 
         { kPDA_FILTER_TOGGLE,       { SDL_SCANCODE_B,       SDL_SCANCODE_UNKNOWN,       XR_CONTROLLER_BUTTON_Y } },
-        { kPDA_TASKS_TOGGLE,        { SDL_SCANCODE_TAB,     SDL_SCANCODE_UNKNOWN,       XR_CONTROLLER_BUTTON_X } },
 
         // Talk:
         { kTALK_SWITCH_TO_TRADE,    { SDL_SCANCODE_X,       SDL_SCANCODE_UNKNOWN,       XR_CONTROLLER_BUTTON_X } },
-        { kTALK_LOG_SCROLL,         { SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,       XR_CONTROLLER_AXIS_RIGHT } },
-        { kTALK_LOG_SCROLL_UP,      { SDL_SCANCODE_E,       SDL_SCANCODE_PAGEUP,        XR_CONTROLLER_AXIS_TRIGGER_LEFT } },
-        { kTALK_LOG_SCROLL_DOWN,    { SDL_SCANCODE_Q,       SDL_SCANCODE_PAGEDOWN,      XR_CONTROLLER_AXIS_TRIGGER_RIGHT } },
+        { kTALK_LOG_SCROLL,         { SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,       XR_CONTROLLER_AXIS_LEFT } },
+        { kTALK_LOG_SCROLL_UP,      { SDL_SCANCODE_Q,       SDL_SCANCODE_PAGEUP,        SDL_SCANCODE_UNKNOWN } },
+        { kTALK_LOG_SCROLL_DOWN,    { SDL_SCANCODE_E,       SDL_SCANCODE_PAGEDOWN,      SDL_SCANCODE_UNKNOWN } },
 
         { kEDITOR,                  { SDL_SCANCODE_F10,     SDL_SCANCODE_UNKNOWN,       XR_CONTROLLER_BUTTON_INVALID } },
     };

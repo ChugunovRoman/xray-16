@@ -2,7 +2,6 @@
 
 #include "UIWindow.h"
 
-#include "ui_focus.h"
 #include "Cursor/UICursor.h"
 
 CUIWindow::CUIWindow(pcstr window_name) : m_windowName(window_name)
@@ -43,25 +42,6 @@ void CUIWindow::Draw(float x, float y)
 
 void CUIWindow::Update()
 {
-    /*if (auto* focusSystem = GetCurrentFocusSystem())
-    {
-        const bool valuable = IsFocusValuable();
-        const bool registered = focusSystem->IsRegistered(this);
-        if (valuable)
-        {
-            if (!registered)
-                focusSystem->RegisterFocusable(this);
-            if (!focusSystem->GetFocused())
-                focusSystem->SetFocused(this);
-        }
-        else if (!valuable && registered)
-        {
-            if (focusSystem->GetFocused() == this)
-                focusSystem->SetFocused(nullptr);
-            focusSystem->UnregisterFocusable(this);
-        }
-    }*/
-
     bool cursor_on_window = false;
     if (GetUICursor().IsVisible())
     {
@@ -134,7 +114,7 @@ void CUIWindow::DetachAll()
     }
 }
 
-void CUIWindow::GetAbsoluteRect(Frect& r)
+void CUIWindow::GetAbsoluteRect(Frect& r) const
 {
     auto parent = GetParent();
     if (parent == nullptr)
@@ -402,11 +382,14 @@ void CUIWindow::SetKeyboardCapture(CUIWindow* pChildWindow, bool capture_status)
 
     if (capture_status)
     {
-        //оповестить дочернее окно о потере фокуса клавиатуры
-        if (NULL != m_pKeyboardCapturer)
-            m_pKeyboardCapturer->SendMessage(this, WINDOW_KEYBOARD_CAPTURE_LOST);
+        if (m_pKeyboardCapturer != pChildWindow)
+        {
+            //оповестить дочернее окно о потере фокуса клавиатуры
+            if (m_pKeyboardCapturer)
+                m_pKeyboardCapturer->SendMessage(this, WINDOW_KEYBOARD_CAPTURE_LOST);
 
-        m_pKeyboardCapturer = pChildWindow;
+            m_pKeyboardCapturer = pChildWindow;
+        }
     }
     else
         m_pKeyboardCapturer = NULL;
@@ -451,7 +434,12 @@ CUIWindow* CUIWindow::GetChildMouseHandler()
 }
 
 //для перевода окна и потомков в исходное состояние
-void CUIWindow::Reset() { m_pMouseCapturer = NULL; }
+void CUIWindow::Reset()
+{
+    m_pMouseCapturer    = nullptr;
+    m_pKeyboardCapturer = nullptr;
+}
+
 void CUIWindow::ResetAll()
 {
     for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
@@ -549,58 +537,56 @@ bool fit_in_rect(CUIWindow* w, Frect const& vis_rect, float border, float dx16po
 
 bool CUIWindow::FillDebugTree(const CUIDebugState& debugState)
 {
-    if (UiDebuggerEnabled)
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
+    if (debugState.selected == this)
+        flags |= ImGuiTreeNodeFlags_Selected;
+    if (m_ChildWndList.empty())
+        flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet;
+
+    const bool open = ImGui::TreeNodeEx(this, flags, "%s (%s)", WindowName().c_str(), GetDebugType());
+
+    const bool examined = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
+    if (examined)
+        debugState.examined = this;
+    if (ImGui::IsItemClicked())
+        debugState.select(this);
+
+    if (debugState.settings.drawWndRects && (IsShown() || examined))
     {
-        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
-        if (debugState.selected == this)
-            flags |= ImGuiTreeNodeFlags_Selected;
-        if (m_ChildWndList.empty())
-            flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet;
+        const auto& focus = UI().Focus();
+        auto& colors = debugState.settings.colors;
 
-        const bool open = ImGui::TreeNodeEx(this, flags, "%s (%s)", WindowName().c_str(), GetDebugType());
-        if (ImGui::IsItemClicked())
-            debugState.select(this);
+        Frect rect;
+        GetAbsoluteRect(rect);
+        UI().ClientToScreenScaled(rect.lt, rect.lt.x, rect.lt.y);
+        UI().ClientToScreenScaled(rect.rb, rect.rb.x, rect.rb.y);
 
-        const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
-        if (debugState.drawWndRects && (IsShown() || hovered))
+        Fcolor color;
+        const bool hovered = CursorOverWindow();
+
+        if (examined)
+            color = colors.examined;
+        else if (focus.GetFocused() == this)
+            color = colors.focused;
+        else if (debugState.settings.coloredRects)
         {
-            Frect rect;
-            GetAbsoluteRect(rect);
-            UI().ClientToScreenScaled(rect.lt, rect.lt.x, rect.lt.y);
-            UI().ClientToScreenScaled(rect.rb, rect.rb.x, rect.rb.y);
-
-            // XXX: make colours user configurable
-            u32 color = color_rgba(255, 0, 0, 255);
-            if (hovered)
-                color = color_rgba(255, 255, 0, 255);
-            else if (debugState.coloredRects)
-            {
-                // This is pseudo RNG, so when we are seeding it with 'this' pointer
-                // we can expect predictable and stable values (no *blinking* at all)
-                CRandom rnd;
-                rnd.seed((s32)(intptr_t)this);
-                color = color_rgba(rnd.randI(255), rnd.randI(255), rnd.randI(255), 255);
-            }
-            else if (GetCurrentFocusSystem() && GetCurrentFocusSystem()->GetFocused() == this)
-                color = color_rgba(200, 150, 200, 255);
-            else if (IsFocusValuable())
-                color = color_rgba(255, 0, 255, 255);
-
-            const auto draw_list = hovered ? ImGui::GetForegroundDrawList() : ImGui::GetBackgroundDrawList();
-            draw_list->AddRect((const ImVec2&)rect.lt, (const ImVec2&)rect.rb, color);
+            const u32 alpha = hovered ? 255 : 200;
+            // This is pseudo RNG, so when we are seeding it with 'this' pointer
+            // we can expect predictable and stable values (no *blinking* at all)
+            CRandom rnd;
+            rnd.seed((s32)(intptr_t)this);
+            color = color_rgba(rnd.randI(255), rnd.randI(255), rnd.randI(255), alpha);
         }
+        else if (focus.IsValuable(this))
+            color = hovered ? colors.focusableValuableHovered : colors.focusableValuable;
+        else if (focus.IsNonValuable(this))
+            color = hovered ? colors.focusableNonValuableHovered : colors.focusableNonValuable;
+        else
+            color = hovered ? colors.normalHovered : colors.normal;
 
-        if (open)
-        {
-            for (const auto& child : m_ChildWndList)
-            {
-                child->FillDebugTree(debugState);
-            }
-            if (!m_ChildWndList.empty())
-                ImGui::TreePop();
-        }
-
-        return open;
+        const auto mainVP = ImGui::GetMainViewport();
+        const auto draw_list = examined ? ImGui::GetForegroundDrawList(mainVP) : ImGui::GetBackgroundDrawList(mainVP);
+        draw_list->AddRect((const ImVec2&)rect.lt, (const ImVec2&)rect.rb, color.get_windows());
     }
     else
     {

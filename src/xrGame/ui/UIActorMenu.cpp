@@ -133,7 +133,7 @@ void CUIActorMenu::SetMenuMode(EMenuMode mode)
         case mmTrade: DeInitTradeMode(); break;
         case mmUpgrade: DeInitUpgradeMode(); break;
         case mmDeadBodySearch: DeInitDeadBodySearchMode(); break;
-        default: R_ASSERT(0); break;
+        default: NODEFAULT; break;
         }
 
         CurrentGameUI()->UIMainIngameWnd->ShowZoneMap(false);
@@ -141,33 +141,12 @@ void CUIActorMenu::SetMenuMode(EMenuMode mode)
         m_currMenuMode = mode;
         switch (mode)
         {
-        case mmUndefined:
-#ifdef DEBUG
-            Msg("* now is Undefined mode");
-#endif // #ifdef DEBUG
-            ResetMode();
-            break;
-        case mmInventory: InitInventoryMode();
-#ifdef DEBUG
-            Msg("* now is Inventory mode");
-#endif // #ifdef DEBUG
-            break;
-        case mmTrade: InitTradeMode();
-#ifdef DEBUG
-            Msg("* now is Trade mode");
-#endif // #ifdef DEBUG
-            break;
-        case mmUpgrade: InitUpgradeMode();
-#ifdef DEBUG
-            Msg("* now is Upgrade mode");
-#endif // #ifdef DEBUG
-            break;
-        case mmDeadBodySearch: InitDeadBodySearchMode();
-#ifdef DEBUG
-            Msg("* now is DeadBodySearch mode");
-#endif // #ifdef DEBUG
-            break;
-        default: R_ASSERT(0); break;
+        case mmUndefined: ResetMode(); break;
+        case mmInventory: InitInventoryMode(); break;
+        case mmTrade: InitTradeMode(); break;
+        case mmUpgrade: InitUpgradeMode(); break;
+        case mmDeadBodySearch: InitDeadBodySearchMode(); break;
+        default: NODEFAULT; break;
         }
         InitActorInfo();
         if (m_currMenuMode != mmUndefined && m_currMenuMode != mmInventory)
@@ -207,6 +186,25 @@ void CUIActorMenu::Show(bool status)
     }
     m_ActorStateInfo->Show(status);
     m_message_static = nullptr;
+}
+
+void CUIActorMenu::ShowDialog(bool bDoHideIndicators)
+{
+    CUIDialogWnd::ShowDialog(bDoHideIndicators);
+
+    CUIDragDropListEx* bag{};
+    switch (m_currMenuMode)
+    {
+    case mmInventory:      bag = m_pLists[eInventoryBagList]; break;
+    case mmTrade:          bag = m_pLists[eTradeActorBagList]; break;
+    case mmUpgrade:        bag = m_pLists[eInventoryBagList]; break;
+    case mmDeadBodySearch: bag = m_pLists[eSearchLootActorBagList]; break;
+    }
+
+    if (bag && bag->ItemsCount() && pInput->IsCurrentInputTypeController())
+    {
+        UI().Focus().SetFocused(bag->GetItemIdx(0));
+    }
 }
 
 void CUIActorMenu::Draw()
@@ -315,6 +313,23 @@ bool CUIActorMenu::StopAnyMove() // true = актёр не идёт при от�
     case mmDeadBodySearch: return true;
     }
     return true;
+}
+
+bool CUIActorMenu::NeedCenterCursor() const
+{
+    CUIDragDropListEx* bag{};
+    switch (m_currMenuMode)
+    {
+    case mmInventory:      bag = m_pLists[eInventoryBagList]; break;
+    case mmTrade:          bag = m_pLists[eTradeActorBagList]; break;
+    case mmUpgrade:        bag = m_pLists[eInventoryBagList]; break;
+    case mmDeadBodySearch: bag = m_pLists[eSearchLootActorBagList]; break;
+    }
+
+    if (bag)
+        return bag->ItemsCount() == 0;
+
+    return CUIDialogWnd::NeedCenterCursor();
 }
 
 void CUIActorMenu::CheckDistance()
