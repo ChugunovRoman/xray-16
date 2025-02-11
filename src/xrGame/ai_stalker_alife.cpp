@@ -123,7 +123,8 @@ void CAI_Stalker::attach_available_addons(CWeapon* weapon)
 {
     if (!weapon)
         return;
-
+    if (strstr(*NameSection, "trader"))
+        return;
 
     TIItemContainer& l_list = inventory().m_ruck;
     for (TIItemContainer::iterator l_it = l_list.begin(); l_list.end() != l_it; ++l_it)
@@ -135,6 +136,7 @@ void CAI_Stalker::attach_available_addons(CWeapon* weapon)
             weapon->Attach(pIItem, true);
 
         const CScope* pScope = smart_cast<const CScope*>(pIItem);
+
         if (pScope && weapon->CanAttach(pIItem) && !weapon->IsScopeAttached() && !weapon->IsScopePermament())
             weapon->Attach(pIItem, true);
 
