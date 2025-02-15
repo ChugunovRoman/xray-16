@@ -725,6 +725,9 @@ u32 player_hud::motion_length(const MotionID& M, const CMotionDef*& md, float sp
     VERIFY(md);
     if (md->flags & esmStopAtEnd)
     {
+        if (!model->LL_ValidateBoneMonition(M))
+            return 0;
+
         CMotion* motion = model->LL_GetRootMotion(M);
         return iFloor(0.5f + 1000.f * motion->GetLength() / (md->Dequantize(md->speed) * speed));
     }

@@ -146,6 +146,15 @@ public:
     u16 LL_MotionsSlotCount() { return (u16)m_Motions.size(); }
     const shared_motions& LL_MotionsSlot(u16 idx) { return m_Motions[idx].motions; }
     CMotionDef* LL_GetMotionDef(MotionID id) { return m_Motions[id.slot].motions.motion_def(id.idx); }
+    bool LL_ValidateBoneMonition(MotionID id)
+    {
+        if (m_Motions.size() <= id.slot)
+            return false;
+        if (m_Motions[id.slot].bone_motions[iRoot]->size() <= id.idx)
+            return false;
+        
+        return true;
+    }
     CMotion* LL_GetRootMotion(MotionID id) { return &m_Motions[id.slot].bone_motions[iRoot]->at(id.idx); }
     CMotion* LL_GetMotion(MotionID id, u16 bone_id) { return &m_Motions[id.slot].bone_motions[bone_id]->at(id.idx); }
     virtual IBlendDestroyCallback* GetBlendDestroyCallback();
