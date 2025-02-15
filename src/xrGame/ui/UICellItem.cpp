@@ -125,7 +125,7 @@ void CUICellItem::Update()
             GetMessageTarget()->SendMessage(this, DRAG_DROP_ITEM_FOCUSED_UPDATE, NULL);
     }
 
-    PIItem item = (PIItem)m_pData;
+    PIItem item = static_cast<PIItem>(m_pData);
     m_has_upgrade = item ? item->has_any_upgrades() : false;
     if (m_upgrade)
     {
@@ -145,10 +145,12 @@ void CUICellItem::Update()
         }
         m_upgrade->Show(m_has_upgrade);
     }
+    if (!item)
+        return;
 
-    CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(item);
-    if (outfit)
+    if (item->BaseSlot() == OUTFIT_SLOT)
     {
+        CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(item);
         string512 fullpath;
         xr_sprintf(fullpath, "ui_icon_equipment\\items\\patches\\%s_patch", *outfit->m_faction);
         m_faction->SetShader(InventoryUtilities::GetEquipmentIconShader(fullpath));
@@ -259,7 +261,7 @@ void CUICellItem::UpdateConditionProgressBar()
     {
         PIItem itm = static_cast<PIItem>(m_pData);
 
-        if (itm && itm->IsUsingCondition())
+        if (itm && itm->m_pInventory != nullptr && itm->IsUsingCondition())
         {
             float cond = itm->GetCondition();
 
