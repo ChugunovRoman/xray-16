@@ -82,5 +82,8 @@ MotionID CStalkerAnimationManager::assign_global_animation(bool& animation_movem
     if (eMovementTypeRun == object().movement().movement_type() && b_state == eBodyStateStand)
         return (MotionID());
 
+    if (m_data_storage->m_part_animations.A[body_state()].m_global.A[1].A.size() == 0)
+        return (MotionID());
+
     return (global().select(m_data_storage->m_part_animations.A[body_state()].m_global.A[1].A));
 }
