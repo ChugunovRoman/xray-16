@@ -481,6 +481,18 @@ void CScriptGameObject::inactualize_game_path()
         stalker->movement().game_path().make_inactual();
 }
 
+bool CScriptGameObject::is_builded_path_failed()
+{
+    CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());
+    if (!stalker)
+    {
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "CAI_Stalker : cannot access class member movement!");
+        return false;
+    }
+
+    return stalker->movement().level_path().failed();
+}
+
 void CScriptGameObject::set_dest_level_vertex_id(u32 level_vertex_id)
 {
     CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());

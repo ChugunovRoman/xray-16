@@ -834,6 +834,7 @@ public:
     // Alundaio
     void inactualize_level_path();
     void inactualize_game_path();
+    bool is_builded_path_failed();
 
     void SetHealthEx(float hp); //AVO
     float GetLuminocityHemi();

@@ -289,6 +289,7 @@ luabind::class_<CScriptGameObject>& script_register_game_object1(luabind::class_
         .def("inactualize_patrol_path", &CScriptGameObject::inactualize_patrol_path)
         .def("inactualize_level_path", &CScriptGameObject::inactualize_level_path)
         .def("inactualize_game_path", &CScriptGameObject::inactualize_game_path)
+        .def("is_builded_path_failed", &CScriptGameObject::is_builded_path_failed)
         .def("set_dest_level_vertex_id", &CScriptGameObject::set_dest_level_vertex_id)
         .def("set_dest_game_vertex_id", &CScriptGameObject::set_dest_game_vertex_id)
         .def("set_movement_selection_type", &CScriptGameObject::set_movement_selection_type)
