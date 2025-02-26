@@ -417,8 +417,14 @@ void CAI_Stalker::update_best_item_info_impl()
     luabind::functor<CScriptGameObject*> funct;
     if (GEnv.ScriptEngine->functor("ai_stalker.update_best_weapon", funct))
     {
-        CGameObject* cur_itm = smart_cast<CGameObject*>(m_best_item_to_kill);
-        CScriptGameObject* GO = funct(lua_game_object(),cur_itm ? cur_itm->lua_game_object() : nullptr);
+        CScriptGameObject* GO = nullptr;
+        CGameObject* game_object = m_best_item_to_kill ? &m_best_item_to_kill->object() : nullptr;
+        if (m_best_item_to_kill && m_best_item_to_kill->m_pInventory && pSettings->section_exist(game_object->NameSection))
+        {
+            CWeapon* cur_itm = smart_cast<CWeapon*>(m_best_item_to_kill);
+            GO = funct(lua_game_object(), cur_itm ? cur_itm->lua_game_object() : nullptr);
+        }
+
         CInventoryItem* bw = GO ? smart_cast<CInventoryItem*>(&GO->object()): nullptr;
         if (bw)
         {

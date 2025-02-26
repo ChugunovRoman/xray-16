@@ -82,11 +82,35 @@ CScriptGameObject* CScriptGameObject::best_weapon()
     else
     {
         //Alundaio: extra security
+        CInventoryItem* inv_object = object_handler->best_weapon();
         CGameObject* game_object = object_handler->best_weapon() ? &object_handler->best_weapon()->object() : nullptr;
         if (!game_object)
             return nullptr;
+        if (!inv_object)
+            return nullptr;
+        if (!*inv_object->m_section_id)
+            return nullptr;
+        if (!inv_object->m_pInventory)
+            return nullptr;
+        if (!game_object->NameSection)
+            return nullptr;
+        if (!pSettings->section_exist(game_object->NameSection))
+            return nullptr;
+        if (!pSettings->section_exist(inv_object->m_section_id))
+        {
+            Msg("CScriptGameObject::best_weapon 1, inv_object=[%s]", *inv_object->m_name);
+            Msg("CScriptGameObject::best_weapon 2, inv_object=[%d]", pSettings->section_exist(inv_object->m_section_id));
+            Msg("CScriptGameObject::best_weapon 3, inv_object=[%s]", *inv_object->m_section_id);
+            return nullptr;
+        }
 
-        if (!game_object->H_Parent() || game_object->H_Parent()->ID() != object().ID())
+        if (!game_object->cNameSect())
+            return nullptr;
+        if (!game_object->H_Parent())
+            return nullptr;
+
+
+        if (game_object->H_Parent()->ID() != object().ID())
             return nullptr;
         //-Alundaio
         return game_object->lua_game_object();
