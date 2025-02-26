@@ -51,11 +51,14 @@ void InventoryUtilities::CreateShaders()
 
 void InventoryUtilities::DestroyShaders()
 {
+    g_EquipmentIconShaderMap.clear();
+
     xr_delete(g_BuyMenuShader);
     xr_delete(g_EquipmentIconsShader);
     xr_delete(g_MPCharIconsShader);
     xr_delete(g_OutfitUpgradeIconsShader);
     xr_delete(g_WeaponUpgradeIconsShader);
+
 }
 
 bool InventoryUtilities::GreaterRoomInRuck(PIItem item1, PIItem item2)
