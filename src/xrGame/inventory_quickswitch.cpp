@@ -257,8 +257,13 @@ PIItem CInventory::GetNextGrenade()
         int curr_num = 0;
         for (auto grenade_type : m_available_grenade_types)
         {
-            if (!xr_strcmp(ActiveItem()->cast_game_object()->cNameSect(), grenade_type))
-                break;
+            PIItem item = ActiveItem();
+            if (item)
+            {
+                CGameObject* obj = item->cast_game_object();
+                if (obj && !xr_strcmp(obj->cNameSect(), grenade_type))
+                    break;
+            }
             curr_num++;
         }
         int next_num = curr_num + 1;
