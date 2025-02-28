@@ -1,6 +1,5 @@
 #pragma once
-#ifndef VERTEX_CACHE_H
-#define VERTEX_CACHE_H
+
 #include"xrCore/xr_types.h"
 //#include"xrCore/_stl_extensions.h"
 
@@ -55,5 +54,3 @@ IC int VertexCache::AddEntry(int entry)
 
     return removed;
 }
-
-#endif

@@ -1,5 +1,3 @@
-#ifndef dxUIRender_included
-#define dxUIRender_included
 #pragma once
 
 #include "Include/xrRender/UIRender.h"
@@ -57,5 +55,3 @@ private:
 };
 
 extern dxUIRender UIRenderImpl;
-
-#endif //	dxUIRender_included

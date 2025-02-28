@@ -2,8 +2,6 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#ifndef DetailManagerH
-#define DetailManagerH
 #pragma once
 
 #include "xrCore/xrPool.h"
@@ -232,5 +230,3 @@ public:
     CDetailManager();
     virtual ~CDetailManager();
 };
-
-#endif // DetailManagerH

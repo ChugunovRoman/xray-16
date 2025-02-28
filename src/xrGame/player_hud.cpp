@@ -37,12 +37,14 @@ extern ENGINE_API shared_str current_player_hud_sect;
 // --#SM+# End--
 // clang-format on
 
-float CalcMotionSpeed(const shared_str& anim_name)
+float CalcMotionSpeed(const shared_str& anim_name, const float anim_speed)
 {
-    if (!IsGameTypeSingle() && (anim_name == "anm_show" || anim_name == "anm_hide"))
-        return 2.0f;
+    // Apply custom animation speeds / configuration only for singleplayer games.
+    // Fast reloading / showing / hiding animation does not seem fair.
+    if (IsGameTypeSingle())
+        return anim_speed;
     else
-        return 1.0f;
+        return (anim_name == "anm_show" || anim_name == "anm_hide") ? 2.0f : 1.0f;
 }
 
 const player_hud_motion* player_hud_motion_container::find_motion(const shared_str& name) const
@@ -67,15 +69,20 @@ void player_hud_motion_container::load(IKinematicsAnimated* model, const shared_
             {
                 pm.m_base_name = anm;
                 pm.m_additional_name = anm;
+                pm.m_anim_speed = 1.f;
             }
             else if (count == 2)
             {
+                R_ASSERT2(_GetItemCount(anm.c_str()) <= 3, anm.c_str());
                 string512 str_item;
                 _GetItem(anm.c_str(), 0, str_item);
                 pm.m_base_name = str_item;
 
                 _GetItem(anm.c_str(), 1, str_item);
-                pm.m_additional_name = str_item;
+                pm.m_additional_name = xr_strlen(str_item) > 0 ? str_item : pm.m_base_name;
+
+                _GetItem(anm.c_str(), 2, str_item);
+                pm.m_anim_speed = xr_strlen(str_item) > 0 ? atof(str_item) : 1.f;
             }
             else if (count == 3)
             {
@@ -481,8 +488,6 @@ void attachable_hud_item::reload_measures()
 
 u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, const CMotionDef*& md, u8& rnd_idx)
 {
-    float speed = CalcMotionSpeed(anm_name_b);
-
     string256 anim_name_r;
     bool is_16x9 = UICore::is_widescreen();
     if (strstr(anm_name_b.c_str(), "_16x9"))
@@ -496,7 +501,8 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
     R_ASSERT2(anm->m_animations.size(), make_string("model [%s] has no motion defined in motion_alias [%s]",
                                             m_visual_name.c_str(), anim_name_r)
                                             .c_str());
-    speed *= anm->m_diration_coff;
+
+    const float speed = CalcMotionSpeed(anm->m_base_name, anm->m_anim_speed);
 
     rnd_idx = (u8)Random.randI(anm->m_animations.size());
     const motion_descr& M = anm->m_animations[rnd_idx];
@@ -706,7 +712,7 @@ void player_hud::render_hud(u32 context_id, IRenderable* root)
 
 u32 player_hud::motion_length(const shared_str& anim_name, const shared_str& hud_name, const CMotionDef*& md)
 {
-    const float speed = CalcMotionSpeed(anim_name);
+    const float speed = CalcMotionSpeed(anim_name, 1.0f);
     attachable_hud_item* pi = create_hud_item(hud_name);
     const player_hud_motion* pm = pi->m_hand_motions.find_motion(anim_name);
 

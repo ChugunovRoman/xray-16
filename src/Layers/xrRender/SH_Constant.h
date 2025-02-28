@@ -1,5 +1,3 @@
-#ifndef SH_CONSTANT_H
-#define SH_CONSTANT_H
 #pragma once
 
 #include "xrEngine/WaveForm.h"
@@ -65,5 +63,3 @@ public:
 };
 
 typedef resptr_core<CConstant, resptr_base<CConstant>> ref_constant_obsolette;
-
-#endif

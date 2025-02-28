@@ -1,5 +1,3 @@
-#ifndef dx11StateCacheImpl_included
-#define dx11StateCacheImpl_included
 #pragma once
 #include "Layers/xrRenderDX11/dx11StateUtils.h"
 
@@ -91,5 +89,3 @@ IDeviceState* dx11StateCache<IDeviceState, StateDecs>::FindState(const StateDecs
         return NULL;
         */
 }
-
-#endif //	dx11StateCacheImpl_included

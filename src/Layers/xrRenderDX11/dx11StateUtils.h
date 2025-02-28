@@ -1,5 +1,3 @@
-#ifndef dx11StateUtils_included
-#define dx11StateUtils_included
 #pragma once
 
 namespace dx11StateUtils
@@ -36,5 +34,3 @@ void ValidateState(D3D_DEPTH_STENCIL_DESC& desc);
 void ValidateState(D3D_BLEND_DESC& desc);
 void ValidateState(D3D_SAMPLER_DESC& desc);
 };
-
-#endif //	dx11StateUtils_included

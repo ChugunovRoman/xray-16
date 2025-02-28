@@ -1,5 +1,3 @@
-#ifndef dx11ConstantBuffer_impl_included
-#define dx11ConstantBuffer_impl_included
 #pragma once
 
 IC Fvector4* dx11ConstantBuffer::Access(u16 offset)
@@ -187,5 +185,3 @@ IC void* dx11ConstantBuffer::AccessDirect(R_constant_load& L, size_t DataSize)
     else
         return 0;
 }
-
-#endif //	dx11ConstantBuffer_impl_included

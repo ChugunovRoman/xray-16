@@ -1,5 +1,3 @@
-#ifndef dx113DFluidBlenders_included
-#define dx113DFluidBlenders_included
 #pragma once
 
 class CBlender_fluid_advect : public IBlender
@@ -73,5 +71,3 @@ public:
     virtual BOOL canBeLMAPped() { return FALSE; }
     virtual void Compile(CBlender_Compile& C);
 };
-
-#endif //	dx113DFluidBlenders_included

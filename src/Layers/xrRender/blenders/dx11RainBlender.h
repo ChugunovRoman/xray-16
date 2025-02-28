@@ -1,5 +1,4 @@
-#ifndef dx11RainBlender_included
-#define dx11RainBlender_included
+#pragma once
 
 class CBlender_rain : public IBlender
 {
@@ -25,5 +24,3 @@ public:
     virtual BOOL canBeLMAPped() { return FALSE; }
     virtual void Compile(CBlender_Compile& C);
 };
-
-#endif //	dx11RainBlender_included

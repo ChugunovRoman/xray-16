@@ -1,5 +1,3 @@
-#ifndef SH_RT_H
-#define SH_RT_H
 #pragma once
 
 //////////////////////////////////////////////////////////////////////////
@@ -94,5 +92,3 @@ struct 		resptrcode_crtc	: public resptr_base<CRTC>
 };
 typedef	resptr_core<CRTC,resptrcode_crtc>		ref_rtc;
 */
-
-#endif // SH_RT_H

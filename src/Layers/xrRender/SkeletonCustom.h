@@ -1,6 +1,4 @@
-//---------------------------------------------------------------------------
-#ifndef SkeletonCustomH
-#define SkeletonCustomH
+#pragma once
 
 #include "FHierrarhyVisual.h"
 #include "xrCore/Animation/Bone.hpp"
@@ -318,6 +316,5 @@ public:
 private:
     bool m_is_original_lod;
 };
+
 IC CKinematics* PCKinematics(dxRender_Visual* V) { return V ? (CKinematics*)V->dcast_PKinematics() : 0; }
-//---------------------------------------------------------------------------
-#endif

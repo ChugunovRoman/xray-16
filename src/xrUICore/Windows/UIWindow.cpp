@@ -316,7 +316,7 @@ bool CUIWindow::OnKeyboardAction(int dik, EUIMessages keyboard_action)
 }
 
 //реакция на геймпад
-bool CUIWindow::OnControllerAction(int axis, float x, float y, EUIMessages controller_action)
+bool CUIWindow::OnControllerAction(int axis, const ControllerAxisState& state, EUIMessages controller_action)
 {
     bool result;
 
@@ -325,7 +325,7 @@ bool CUIWindow::OnControllerAction(int axis, float x, float y, EUIMessages contr
     // XXX: introduce m_pControllerCapturer?
     if (NULL != m_pKeyboardCapturer)
     {
-        result = m_pKeyboardCapturer->OnControllerAction(axis, x, y, controller_action);
+        result = m_pKeyboardCapturer->OnControllerAction(axis, state, controller_action);
 
         if (result)
             return true;
@@ -337,7 +337,7 @@ bool CUIWindow::OnControllerAction(int axis, float x, float y, EUIMessages contr
     {
         if ((*it)->IsEnabled())
         {
-            result = (*it)->OnControllerAction(axis, x, y, controller_action);
+            result = (*it)->OnControllerAction(axis, state, controller_action);
 
             if (result)
                 return true;

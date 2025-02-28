@@ -1,5 +1,3 @@
-#ifndef xrRender_consoleH
-#define xrRender_consoleH
 #pragma once
 
 // Common
@@ -225,5 +223,3 @@ enum
 
 extern void xrRender_initconsole();
 extern BOOL xrRender_test_hw();
-
-#endif

@@ -319,7 +319,9 @@ CApplication::CApplication(pcstr commandLine, GameModule* game)
         g_pGamePersistent = game->create_persistent();
         R_ASSERT(g_pGamePersistent);
     }
-    if (!g_pGamePersistent)
+    if (g_pGamePersistent)
+        g_pGamePersistent->OnAppStart();
+    else
         Console->Show();
 
     FrameMarkEnd(FRAME_MARK_APPLICATION_STARTUP);
@@ -329,13 +331,14 @@ CApplication::~CApplication()
 {
     FrameMarkStart(FRAME_MARK_APPLICATION_SHUTDOWN);
 
-    // Destroy APP
+    if (g_pGamePersistent)
+        g_pGamePersistent->OnAppEnd();
+
     if (m_game_module)
         m_game_module->destroy_persistent(g_pGamePersistent);
 
     Engine.Event.Dump();
 
-    // Destroying
     xr_delete(pInput);
     destroySettings();
 

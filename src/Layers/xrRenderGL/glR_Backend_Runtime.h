@@ -1,5 +1,3 @@
-#ifndef	glR_Backend_Runtime_included
-#define	glR_Backend_Runtime_included
 #pragma once
 
 #include "glStateUtils.h"
@@ -523,5 +521,3 @@ void CBackend::set_pass_targets(const ref_rt& _1, const ref_rt& _2, const ref_rt
     const D3D_VIEWPORT viewport = { 0, 0, curr_rt_width, curr_rt_height, 0.f, 1.f };
     SetViewport(viewport);
 }
-
-#endif	//	glR_Backend_Runtime_included

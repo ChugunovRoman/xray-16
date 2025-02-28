@@ -1,5 +1,3 @@
-#ifndef dx11SamplerStateCache_included
-#define dx11SamplerStateCache_included
 #pragma once
 
 class dx11SamplerStateCache
@@ -58,5 +56,3 @@ private:
 };
 
 extern dx11SamplerStateCache SSManager;
-
-#endif //	dx11SamplerStateCache_included

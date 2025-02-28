@@ -1,6 +1,4 @@
-//---------------------------------------------------------------------------
-#ifndef SkeletonAnimatedH
-#define SkeletonAnimatedH
+#pragma once
 
 #include "SkeletonCustom.h"
 #include "Animation.h"
@@ -229,10 +227,9 @@ public:
 
     virtual float get_animation_length(MotionID motion_ID);
 };
+
 // IC CKinematicsAnimated* PKinematicsAnimated(IRender_Visual* V) { return V?V->dcast_PKinematicsAnimated():0; }
 IC CKinematicsAnimated* PKinematicsAnimated(IRenderVisual* V)
 {
     return V ? (CKinematicsAnimated*)V->dcast_PKinematicsAnimated() : 0;
 }
-//---------------------------------------------------------------------------
-#endif

@@ -1,5 +1,3 @@
-#ifndef SH_MATRIX_H
-#define SH_MATRIX_H
 #pragma once
 
 #include "xrEngine/WaveForm.h"
@@ -72,5 +70,3 @@ public:
 };
 
 typedef resptr_core<CMatrix, resptr_base<CMatrix>> ref_matrix;
-
-#endif

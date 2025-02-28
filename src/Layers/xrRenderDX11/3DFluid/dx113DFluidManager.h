@@ -1,5 +1,3 @@
-#ifndef dx113DFluidManager_included
-#define dx113DFluidManager_included
 #pragma once
 
 class dx113DFluidData;
@@ -145,5 +143,3 @@ private:
 };
 
 extern dx113DFluidManager FluidManager;
-
-#endif //	dx113DFluidManager_included

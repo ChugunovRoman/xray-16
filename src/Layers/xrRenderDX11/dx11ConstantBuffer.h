@@ -1,5 +1,3 @@
-#ifndef dx11ConstantBuffer_included
-#define dx11ConstantBuffer_included
 #pragma once
 
 struct R_constant;
@@ -52,5 +50,3 @@ private:
 };
 
 typedef resptr_core<dx11ConstantBuffer, resptr_base<dx11ConstantBuffer>> ref_cbuffer;
-
-#endif //	dx11ConstantBuffer_included

@@ -2,8 +2,6 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#ifndef ResourceManagerH
-#define ResourceManagerH
 #pragma once
 
 #include "Shader.h"
@@ -273,5 +271,3 @@ private:
         return false;
     }
 };
-
-#endif // ResourceManagerH

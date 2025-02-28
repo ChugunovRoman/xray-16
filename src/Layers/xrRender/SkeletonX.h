@@ -2,8 +2,6 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#ifndef SkeletonXH
-#define SkeletonXH
 #pragma once
 
 #include "SkeletonCustom.h"
@@ -136,5 +134,3 @@ BOOL pick_bone(T_buffer vertices, CKinematics* Parent, IKinematics::pick_result&
     }
     return FALSE;
 }
-
-#endif // SkeletonXH

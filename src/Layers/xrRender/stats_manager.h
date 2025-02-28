@@ -4,8 +4,7 @@
 //	Copyright (C) GSC Game World - 2009
 ////////////////////////////////////////////////////////////////////////////
 
-#ifndef STATS_MANAGER_H_INCLUDED
-#define STATS_MANAGER_H_INCLUDED
+#pragma once
 
 enum enum_stats_buffer_type
 {
@@ -54,5 +53,3 @@ u32 get_format_pixel_size(D3DFORMAT format);
 #if defined(USE_DX11)
 u32 get_format_pixel_size(DXGI_FORMAT format);
 #endif
-
-#endif // #ifndef STATS_MANAGER_H_INCLUDED

@@ -62,7 +62,7 @@ public:
     RenderContext GetCurrentContext() const override { return IRender::PrimaryContext; }
     void MakeContextCurrent(RenderContext /*context*/) override {}
 
-    CBackend& get_imm_command_list() override
+    CBackend& get_imm_command_list()
     {
         return get_imm_context().cmd_list;
     }

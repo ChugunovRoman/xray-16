@@ -1,5 +1,5 @@
-#ifndef ParticleEffectH
-#define ParticleEffectH
+#pragma once
+
 #include "ParticleEffectDef.h"
 #ifdef _EDITOR
 #include "Layers/xrRender/FBasicVisual.h"
@@ -105,4 +105,3 @@ extern const u32 uDT_STEP;
 extern const float fDT_STEP;
 }
 //---------------------------------------------------------------------------
-#endif

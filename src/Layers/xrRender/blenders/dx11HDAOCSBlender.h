@@ -1,5 +1,4 @@
-#ifndef dx11HDAOCSBlender_included
-#define dx11HDAOCSBlender_included
+#pragma once
 
 class CBlender_CS_HDAO : public IBlender
 {
@@ -18,5 +17,3 @@ public:
     virtual BOOL canBeLMAPped() { return FALSE; }
     virtual void Compile(CBlender_Compile& C);
 };
-
-#endif

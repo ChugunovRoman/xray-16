@@ -1,5 +1,4 @@
-#ifndef dx11MSAABlender_included
-#define dx11MSAABlender_included
+#pragma once
 
 class CBlender_msaa : public IBlender
 {
@@ -9,5 +8,3 @@ public:
     virtual BOOL canBeLMAPped() { return FALSE; }
     virtual void Compile(CBlender_Compile& C);
 };
-
-#endif //	dx11RainBlender_included

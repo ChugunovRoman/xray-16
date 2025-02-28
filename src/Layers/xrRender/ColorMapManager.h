@@ -1,6 +1,4 @@
 #pragma once
-#ifndef ColorMapManager_included
-#define ColorMapManager_included
 
 //	Reduces amount of work if the texture was not changed.
 //	Stores used textures in a separate map to avoid removal of
@@ -28,5 +26,3 @@ private:
 
     map_Tex m_TexCache;
 };
-
-#endif //	ColorMapManager_included

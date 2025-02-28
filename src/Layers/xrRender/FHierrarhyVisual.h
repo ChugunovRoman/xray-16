@@ -2,8 +2,6 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#ifndef FHierrarhyVisualH
-#define FHierrarhyVisualH
 
 #pragma once
 
@@ -29,5 +27,3 @@ public:
         return NULL;
     }
 };
-
-#endif // FHierrarhyVisualH

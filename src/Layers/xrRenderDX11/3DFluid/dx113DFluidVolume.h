@@ -1,5 +1,3 @@
-#ifndef dx113DFluidVolume_included
-#define dx113DFluidVolume_included
 #pragma once
 
 #include "dx113DFluidData.h"
@@ -22,5 +20,3 @@ private:
 
     dx113DFluidData m_FluidData;
 };
-
-#endif //	dx113DFluidVolume_included

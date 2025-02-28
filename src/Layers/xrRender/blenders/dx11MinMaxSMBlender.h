@@ -1,5 +1,4 @@
-#ifndef dx11MinMaxSMBlender_included
-#define dx11MinMaxSMBlender_included
+#pragma once
 
 class CBlender_createminmax : public IBlender
 {
@@ -9,5 +8,3 @@ public:
     virtual BOOL canBeLMAPped() { return FALSE; }
     virtual void Compile(CBlender_Compile& C);
 };
-
-#endif

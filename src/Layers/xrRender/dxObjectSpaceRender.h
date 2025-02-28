@@ -1,5 +1,3 @@
-#ifndef dxObjectSpaceRender_included
-#define dxObjectSpaceRender_included
 #pragma once
 
 #ifdef DEBUG
@@ -25,5 +23,3 @@ private:
 };
 
 #endif // DEBUG
-
-#endif //	ObjectSpaceRender_included

@@ -1,5 +1,3 @@
-#ifndef r_backendH
-#define r_backendH
 #pragma once
 
 //#define RBackend_PGO
@@ -601,5 +599,3 @@ public:
 #pragma warning(pop)
 
 #define RCache RImplementation.get_imm_context().cmd_list
-
-#endif

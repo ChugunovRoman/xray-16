@@ -1,5 +1,3 @@
-#ifndef FBasicVisualH
-#define FBasicVisualH
 #pragma once
 
 #include "xrEngine/vis_common.h"
@@ -81,5 +79,3 @@ public:
     dxRender_Visual();
     virtual ~dxRender_Visual();
 };
-
-#endif // !FBasicVisualH

@@ -2,8 +2,6 @@
 //
 //////////////////////////////////////////////////////////////////////
 #pragma once
-#ifndef FSkinnedH
-#define FSkinnedH
 
 #include "FVisual.h"
 #include "FProgressive.h"
@@ -81,5 +79,3 @@ private:
     CSkeletonX_PM(const CSkeletonX_PM& other);
     void operator=(const CSkeletonX_PM& other);
 };
-
-#endif // FSkinnedH

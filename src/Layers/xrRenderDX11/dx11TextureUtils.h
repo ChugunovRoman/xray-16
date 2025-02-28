@@ -1,5 +1,3 @@
-#ifndef dx11TextureUtils_included
-#define dx11TextureUtils_included
 #pragma once
 
 // hack for dx9... That's it. I don't know if there's already DS64 format.
@@ -11,5 +9,3 @@ namespace dx11TextureUtils
 DXGI_FORMAT ConvertTextureFormat(D3DFORMAT dx9FMT);
 D3DFORMAT ConvertTextureFormat(DXGI_FORMAT dx11FMT);
 }
-
-#endif //	dx11TextureUtils_included

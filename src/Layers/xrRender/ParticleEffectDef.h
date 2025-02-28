@@ -1,6 +1,4 @@
-//---------------------------------------------------------------------------
-#ifndef ParticleEffectDefH
-#define ParticleEffectDefH
+#pragma once
 
 #include "Shader.h"
 
@@ -158,4 +156,3 @@ public:
 #define PED_CHUNK_EDATA 0x0024
 #define PED_CHUNK_ALIGN_TO_PATH 0x0025
 //---------------------------------------------------------------------------
-#endif

@@ -1,5 +1,4 @@
-#ifndef R_BACKEND_LOD_H_INCLUDED
-#define R_BACKEND_LOD_H_INCLUDED
+#pragma once
 
 class R_LOD
 {
@@ -15,5 +14,3 @@ public:
 
     CBackend& cmd_list;
 };
-
-#endif // #ifndef R_BACKEND_LOD_H_INCLUDED

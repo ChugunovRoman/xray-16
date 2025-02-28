@@ -1,5 +1,3 @@
-#ifndef dx113DFluidRenderer_included
-#define dx113DFluidRenderer_included
 #pragma once
 
 class dx113DFluidData;
@@ -107,5 +105,3 @@ private:
     //	TODO: DX11: Reserve memory on object creation
     xr_vector<ISpatial*> m_lstRenderables;
 };
-
-#endif //	dx113DFluidRenderer_included

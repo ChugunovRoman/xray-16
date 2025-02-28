@@ -1,5 +1,3 @@
-#ifndef dxRainRender_included
-#define dxRainRender_included
 #pragma once
 
 #include "Include/xrRender/RainRender.h"
@@ -25,5 +23,3 @@ private:
     ref_geom hGeom_Drops;
     ref_shader SH_Splash;
 };
-
-#endif //	RainRender_included

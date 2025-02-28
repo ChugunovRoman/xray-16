@@ -1,5 +1,3 @@
-#ifndef dx11ShaderResourceStateCache_included
-#define dx11ShaderResourceStateCache_included
 #pragma once
 
 class dx11ShaderResourceStateCache
@@ -51,5 +49,3 @@ private:
     bool m_bUpdateDSViews;
     bool m_bUpdateCSViews;
 };
-
-#endif //	dx11ShaderResourceStateCache_included

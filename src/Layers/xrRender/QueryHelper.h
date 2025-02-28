@@ -1,5 +1,3 @@
-#ifndef QueryHelper_included
-#define QueryHelper_included
 #pragma once
 
 //	Interface
@@ -94,5 +92,3 @@ IC HRESULT ReleaseQuery(GLuint query)
 #else
 #   error No graphics API selected or enabled!
 #endif
-
-#endif // QueryHelper_included

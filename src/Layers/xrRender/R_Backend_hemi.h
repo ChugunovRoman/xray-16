@@ -1,5 +1,3 @@
-#ifndef r_backend_hemiH
-#define r_backend_hemiH
 #pragma once
 
 #include "Include/xrRender/RenderVisual.h" //--#SM+#--
@@ -29,4 +27,3 @@ public:
 
     CBackend& cmd_list;
 };
-#endif

@@ -1,5 +1,3 @@
-#ifndef TSS_H
-#define TSS_H
 #pragma once
 
 #include "tss_def.h"
@@ -94,5 +92,3 @@ public:
     void SetRS(u32 N, u32 V) { RS.Set(container, N, V); }
     SimulatorStates& GetContainer() { return container; }
 };
-
-#endif

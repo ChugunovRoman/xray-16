@@ -1,5 +1,3 @@
-#ifndef DetailModelH
-#define DetailModelH
 #pragma once
 
 #include "IRenderDetailModel.h"
@@ -17,4 +15,3 @@ public:
     virtual void transfer(Fmatrix& mXform, fvfVertexOut* vDest, u32 C, u16* iDest, u32 iOffset, float du, float dv);
     virtual ~CDetail();
 };
-#endif

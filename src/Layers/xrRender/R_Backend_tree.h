@@ -1,5 +1,3 @@
-#ifndef r_backend_treeH
-#define r_backend_treeH
 #pragma once
 
 class ECORE_API R_tree
@@ -37,4 +35,3 @@ public:
 
     CBackend& cmd_list;
 };
-#endif

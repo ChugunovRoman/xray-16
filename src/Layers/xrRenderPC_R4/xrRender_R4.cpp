@@ -93,6 +93,8 @@ public:
         GEnv.DU = &DUImpl;
         GEnv.UIRender = &UIRenderImpl;
         GEnv.DRender = &DebugRenderImpl;
+        rdebug_render->Register();
+
         xrRender_initconsole();
     }
 
@@ -107,6 +109,9 @@ public:
             GEnv.DU = nullptr;
             GEnv.UIRender = nullptr;
             GEnv.DRender = nullptr;
+#ifdef DEBUG
+            rdebug_render->Unregister();
+#endif
         }
     }
 } static s_r4_module;

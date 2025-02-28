@@ -1,5 +1,3 @@
-#ifndef dxEnvironmentRender_included
-#define dxEnvironmentRender_included
 #pragma once
 
 #include "Include/xrRender/EnvironmentRender.h"
@@ -56,5 +54,3 @@ private:
     u32 tonemap_tstage_2sky{ u32(-1) };
     u32 tonemap_tstage_clouds{ u32(-1) };
 };
-
-#endif //	EnvironmentRender_included

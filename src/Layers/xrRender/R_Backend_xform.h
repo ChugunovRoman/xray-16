@@ -1,5 +1,3 @@
-#ifndef r_backend_xformH
-#define r_backend_xformH
 #pragma once
 
 class ECORE_API R_xforms
@@ -46,4 +44,3 @@ private:
 
     CBackend& cmd_list;
 };
-#endif

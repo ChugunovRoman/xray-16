@@ -1,5 +1,3 @@
-#ifndef glr_constants_cacheH
-#define glr_constants_cacheH
 #pragma once
 
 class ECORE_API R_constants
@@ -222,4 +220,3 @@ public:
     // TODO: OGL: Implement constant caching through UBOs
     ICF void flush() { }
 };
-#endif	//	glr_constants_cacheH

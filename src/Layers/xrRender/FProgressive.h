@@ -2,8 +2,6 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#ifndef FProgressiveH
-#define FProgressiveH
 #pragma once
 
 #include "FVisual.h"
@@ -28,5 +26,3 @@ private:
     FProgressive(const FProgressive& other);
     void operator=(const FProgressive& other);
 };
-
-#endif

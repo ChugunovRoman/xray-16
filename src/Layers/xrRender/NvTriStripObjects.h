@@ -1,6 +1,4 @@
-
-#ifndef NV_TRISTRIP_OBJECTS_H
-#define NV_TRISTRIP_OBJECTS_H
+#pragma once
 
 #include <assert.h>
 #include "VertexCache.h"
@@ -235,5 +233,3 @@ protected:
     // to these protected stripificaton methods if they want
     friend NvStripInfo;
 };
-
-#endif

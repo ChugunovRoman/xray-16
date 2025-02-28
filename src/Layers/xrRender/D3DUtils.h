@@ -1,11 +1,6 @@
-//----------------------------------------------------
-// file: D3DUtils.h
-//----------------------------------------------------
+#pragma once
 
-#ifndef D3DUtilsH
-#define D3DUtilsH
 #include "Include/xrRender/DrawUtils.h"
-//----------------------------------------------------
 
 #ifdef _EDITOR
 #define DU_DRAW_DIP EDevice.DIP
@@ -199,4 +194,3 @@ public:
 };
 extern ECORE_API CDrawUtilities DUImpl;
 //----------------------------------------------------
-#endif /*_INCDEF_D3DUtils_H_*/

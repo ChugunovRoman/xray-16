@@ -1,5 +1,3 @@
-#ifndef dx113DFluidObstacles_included
-#define dx113DFluidObstacles_included
 #pragma once
 
 class dx113DFluidGrid;
@@ -52,5 +50,3 @@ private:
     xr_vector<const IPhysicsShell*> m_lstShells;
     xr_vector<const IPhysicsElement*> m_lstElements;
 };
-
-#endif //	dx113DFluidObstacles_included

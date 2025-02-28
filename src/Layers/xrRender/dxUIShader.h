@@ -1,5 +1,3 @@
-#ifndef dxUIShader_included
-#define dxUIShader_included
 #pragma once
 
 #include "Include/xrRender/UIShader.h"
@@ -21,5 +19,3 @@ public:
 private:
     ref_shader hShader;
 };
-
-#endif //	dxUIShader_included

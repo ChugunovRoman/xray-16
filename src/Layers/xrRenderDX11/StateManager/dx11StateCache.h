@@ -1,5 +1,3 @@
-#ifndef dx11StateCache_included
-#define dx11StateCache_included
 #pragma once
 
 template <class IDeviceState, class StateDecs>
@@ -43,5 +41,3 @@ extern dx11StateCache<ID3DDepthStencilState, D3D_DEPTH_STENCIL_DESC> DSSManager;
 extern dx11StateCache<ID3DBlendState, D3D_BLEND_DESC> BSManager;
 
 #include "dx11StateCacheImpl.h"
-
-#endif //	dx11StateCache_included

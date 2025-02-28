@@ -1,5 +1,3 @@
-#ifndef dx11StateManager_included
-#define dx11StateManager_included
 #pragma once
 
 class dx11StateManager
@@ -92,5 +90,3 @@ private:
 
     CBackend& cmd_list;
 };
-
-#endif //	dx11StateManager_included

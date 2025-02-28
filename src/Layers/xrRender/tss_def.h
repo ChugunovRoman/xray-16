@@ -1,6 +1,3 @@
-#ifndef TSS_DEF_H
-#define TSS_DEF_H
-
 #pragma once
 
 #if defined(USE_OGL)
@@ -61,4 +58,3 @@ public:
         bool SamplerUsed[D3D_COMMONSHADER_SAMPLER_SLOT_COUNT], int iBaseSamplerIndex) const;
 #endif
 };
-#endif

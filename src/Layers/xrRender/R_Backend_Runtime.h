@@ -1,5 +1,3 @@
-#ifndef R_BACKEND_RUNTIMEH
-#define R_BACKEND_RUNTIMEH
 #pragma once
 
 #include "SH_Texture.h"
@@ -140,4 +138,3 @@ IC void CBackend::set_Pass(SPass* P)
 
 ICF void CBackend::set_Element(ShaderElement* S, u32 pass) { set_Pass(S->passes[pass]); }
 ICF void CBackend::set_Shader(Shader* S, u32 pass) { set_Element(S->E[0], pass); }
-#endif

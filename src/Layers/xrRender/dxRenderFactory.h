@@ -1,5 +1,3 @@
-#ifndef dxRenderFactory_included
-#define dxRenderFactory_included
 #pragma once
 
 #include "Include/xrRender/RenderFactory.h"
@@ -34,5 +32,3 @@ class dxRenderFactory : public IRenderFactory
 };
 
 extern dxRenderFactory RenderFactoryImpl;
-
-#endif //   RenderFactory_included

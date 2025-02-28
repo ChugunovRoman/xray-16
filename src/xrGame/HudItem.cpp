@@ -379,7 +379,7 @@ bool CHudItem::TryPlayAnimIdle()
 }
 
 //AVO: check if animation exists
-bool CHudItem::isHUDAnimationExist(pcstr anim_name) const
+bool CHudItem::isHUDAnimationExist(pcstr anim_name, bool silent) const
 {
     if (const auto* data = HudItemData()) // First person
     {
@@ -400,11 +400,11 @@ bool CHudItem::isHUDAnimationExist(pcstr anim_name) const
     return false;
 }
 
-pcstr CHudItem::WhichHUDAnimationExist(pcstr anim_name, pcstr anim_name2) const
+pcstr CHudItem::WhichHUDAnimationExist(pcstr anim_name, pcstr anim_name2, bool silent) const
 {
-    if (isHUDAnimationExist(anim_name))
+    if (isHUDAnimationExist(anim_name, silent))
         return anim_name;
-    if (isHUDAnimationExist(anim_name2))
+    if (isHUDAnimationExist(anim_name2, silent))
         return anim_name2;
     return nullptr;
 }

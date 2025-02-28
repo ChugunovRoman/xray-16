@@ -1,5 +1,3 @@
-#ifndef dxLensFlareRender_included
-#define dxLensFlareRender_included
 #pragma once
 
 #include "Include/xrRender/LensFlareRender.h"
@@ -30,5 +28,3 @@ public:
 private:
     ref_geom hGeom;
 };
-
-#endif //	LensFlareRender_included

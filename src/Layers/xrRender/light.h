@@ -1,5 +1,4 @@
-#ifndef LAYERS_XRRENDER_LIGHT_H_INCLUDED
-#define LAYERS_XRRENDER_LIGHT_H_INCLUDED
+#pragma once
 
 #include "xrCDB/ISpatial.h"
 
@@ -172,5 +171,3 @@ public:
     light();
     ~light() override;
 };
-
-#endif // #define LAYERS_XRRENDER_LIGHT_H_INCLUDED

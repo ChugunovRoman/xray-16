@@ -3,8 +3,6 @@
 //////////////////////////////////////////////////////////////////////
 
 #pragma once
-#if !defined(_PORTAL_H_)
-#define _PORTAL_H_
 #include "xrCore/_fbox2.h"
 
 class CPortal;
@@ -132,5 +130,3 @@ public:
     void dbg_draw();
 #endif
 };
-
-#endif // !defined(AFX_PORTAL_H__1FC2D371_4A19_49EA_BD1E_2D0F8DEBBF15__INCLUDED_)
