@@ -77,11 +77,14 @@ class CUIArtefactDetectorElite final : public CUIArtefactDetectorBase, public CU
     };
     xr_vector<SDrawOneItem> m_items_to_draw;
     CEliteDetector* m_parent{};
-    Fmatrix m_map_attach_offset;
 
     void GetUILocatorMatrix(Fmatrix& _m);
 
 public:
+    Fvector m_map_attach_p{0.0f,0.0f,0.0f};
+    Fvector m_map_attach_r{0.0f,0.0f,0.0f};
+    Fmatrix m_map_attach_offset;
+
     CUIArtefactDetectorElite() : CUIWindow(CUIArtefactDetectorElite::GetDebugType()) {}
 
     void update() override;
@@ -90,6 +93,8 @@ public:
     void construct(CEliteDetector* p);
     void Clear();
     void RegisterItemToDraw(const Fvector& p, const shared_str& palette_idx);
+
+    virtual void RecalcMapAttachOffset();
 
     pcstr GetDebugType() override { return "CUIArtefactDetectorElite"; }
 };

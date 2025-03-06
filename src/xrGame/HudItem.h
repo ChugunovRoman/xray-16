@@ -159,6 +159,12 @@ public:
     virtual void render_item_3d_ui() {}
     virtual bool render_item_3d_ui_query() { return false; }
     virtual bool CheckCompatibility(CHudItem*) { return true; }
+
+    virtual Fvector get_map_offset_pos() { return Fvector{0.0f,0.0f,0.0f}; };
+    virtual Fvector get_map_offset_rot() { return Fvector{0.0f,0.0f,0.0f}; };
+    virtual void set_map_offset_pos(Fvector pos) {};
+    virtual void set_map_offset_rot(Fvector rot) {};
+    virtual void RecalcMapAttachOffset() {};
 protected:
     IC void SetPending(BOOL H) { m_huditem_flags.set(fl_pending, H); }
     shared_str hud_sect;

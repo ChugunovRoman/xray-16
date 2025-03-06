@@ -16,8 +16,12 @@
 #include "debug_renderer.h"
 #include "xrEngine/GameFont.h"
 #include "player_hud_tune.h"
+#include "CustomDetector.h"
+#include "EliteDetector.h"
 
 extern ENGINE_API float psHUD_FOV;
+
+class CUIArtefactDetectorElite;
 
 CHudTuner::CHudTuner()
 {
@@ -37,12 +41,18 @@ void CHudTuner::ResetToDefaultValues()
         current_hud_item->reload_measures();
         curr_measures = current_hud_item->m_measures;
         CWeapon* wpn = smart_cast<CWeapon*>(current_hud_item->m_parent_hud_item);
+        CEliteDetector* detector = smart_cast<CEliteDetector*>(current_hud_item->m_parent_hud_item);
 
         if (wpn)
         {
             wpn->LoadAltHudAim();
             m_hands_curr_offset[0][0] = wpn->m_hands_offset[0][1];
             m_hands_curr_offset[1][0] = wpn->m_hands_offset[1][1];
+        }
+        if (detector)
+        {
+            m_artefact_map_p = detector->get_map_offset_pos();
+            m_artefact_map_r = detector->get_map_offset_rot();
         }
     }
     else
@@ -63,6 +73,8 @@ void CHudTuner::ResetToDefaultValues()
         curr_measures.m_fire_point_offset = zero;
         curr_measures.m_fire_point2_offset = zero;
         curr_measures.m_shell_point_offset = zero;
+        m_artefact_map_p = zero;
+        m_artefact_map_r = zero;
     }
 
     new_measures = curr_measures;
@@ -80,12 +92,20 @@ void CHudTuner::UpdateValues()
             return;
 
         CWeapon* wpn = smart_cast<CWeapon*>(current_hud_item->m_parent_hud_item);
+        CEliteDetector* detector = smart_cast<CEliteDetector*>(current_hud_item->m_parent_hud_item);
 
-        if (!wpn)
-            return;
+        if (wpn)
+        {
+            wpn->m_hands_offset[0][1] = m_hands_new_offset[0][0];
+            wpn->m_hands_offset[1][1] = m_hands_new_offset[1][0];   
+        }
+        if (detector)
+        {
+            detector->set_map_offset_pos(m_artefact_map_p);
+            detector->set_map_offset_rot(m_artefact_map_r);
+            detector->RecalcMapAttachOffset();
+        }
 
-        wpn->m_hands_offset[0][1] = m_hands_new_offset[0][0];
-        wpn->m_hands_offset[1][1] = m_hands_new_offset[1][0];   
     }
 }
 
@@ -168,6 +188,8 @@ void CHudTuner::on_tool_frame()
             ImGui::DragFloat3(hud_adj_modes[FIRE_POINT], (float*)&new_measures.m_fire_point_offset, _delta_pos, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[FIRE_POINT_2], (float*)&new_measures.m_fire_point2_offset, _delta_pos, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[SHELL_POINT], (float*)&new_measures.m_shell_point_offset, _delta_pos, 0.f, 0.f, "%.7f");
+            ImGui::DragFloat3(hud_adj_modes[ARTEFACT_POINT_POS], (float*)&m_artefact_map_p, _delta_pos, 0.f, 0.f, "%.7f");
+            ImGui::DragFloat3(hud_adj_modes[ARTEFACT_POINT_ROT], (float*)&m_artefact_map_r, _delta_pos, 0.f, 0.f, "%.7f");
 
             UpdateValues();
 
@@ -210,6 +232,10 @@ void CHudTuner::on_tool_frame()
                     xr_sprintf(selectable, "fire_point = %f,%f,%f\n", new_measures.m_fire_point2_offset.x, new_measures.m_fire_point2_offset.y, new_measures.m_fire_point2_offset.z);
                     ImGui::LogText(selectable);
                     xr_sprintf(selectable, "shell_point = %f,%f,%f\n", new_measures.m_shell_point_offset.x, new_measures.m_shell_point_offset.y, new_measures.m_shell_point_offset.z);
+                    ImGui::LogText(selectable);
+                    xr_sprintf(selectable, "ui_p = %f,%f,%f\n", m_artefact_map_p.x, m_artefact_map_p.y, m_artefact_map_p.z);
+                    ImGui::LogText(selectable);
+                    xr_sprintf(selectable, "ui_r = %f,%f,%f\n", m_artefact_map_r.x, m_artefact_map_r.y, m_artefact_map_r.z);
                     ImGui::LogText(selectable);
                     ImGui::LogFinish();
                 }

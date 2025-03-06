@@ -30,6 +30,8 @@ private:
         FIRE_POINT,
         FIRE_POINT_2,
         SHELL_POINT,
+        ARTEFACT_POINT_POS,
+        ARTEFACT_POINT_ROT,
     };
     enum hud_item_idx
     {
@@ -56,6 +58,8 @@ private:
         { FIRE_POINT, "Fire Point" },
         { FIRE_POINT_2, "Fire Point 2" },
         { SHELL_POINT, "Shell Point" },
+        { ARTEFACT_POINT_POS, "Artefact Dot Position" },
+        { ARTEFACT_POINT_ROT, "Artefact Dot Rotation" },
     };
 
     bool paused{};
@@ -82,4 +86,7 @@ private:
     Fvector pos{};
     Fvector hpb{};
     Fvector scale{};
+
+    Fvector m_artefact_map_p{0.0f,0.0f,0.0f};
+    Fvector m_artefact_map_r{0.0f,0.0f,0.0f};
 };

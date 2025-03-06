@@ -73,6 +73,27 @@ void fix_ws_wnd_size(CUIWindow* w, float kx)
     }
 }
 
+Fvector CEliteDetector::get_map_offset_pos()
+{
+    return ui().m_map_attach_p;
+}
+Fvector CEliteDetector::get_map_offset_rot()
+{
+    return ui().m_map_attach_r;
+}
+void CEliteDetector::set_map_offset_pos(Fvector pos)
+{
+    ui().m_map_attach_p = pos;
+}
+void CEliteDetector::set_map_offset_rot(Fvector rot)
+{
+    ui().m_map_attach_r = rot;
+}
+void CEliteDetector::RecalcMapAttachOffset()
+{
+    ui().RecalcMapAttachOffset();
+}
+
 void CUIArtefactDetectorElite::construct(CEliteDetector* p)
 {
     m_parent = p;
@@ -121,12 +142,17 @@ void CUIArtefactDetectorElite::construct(CEliteDetector* p)
     }
     uiXml.SetLocalRoot(pStoredRoot);
 
-    Fvector _map_attach_p = pSettings->r_fvector3(m_parent->cNameSect(), "ui_p");
-    Fvector _map_attach_r = pSettings->r_fvector3(m_parent->cNameSect(), "ui_r");
+    m_map_attach_p = pSettings->r_fvector3(m_parent->cNameSect(), "ui_p");
+    m_map_attach_r = pSettings->r_fvector3(m_parent->cNameSect(), "ui_r");
 
-    _map_attach_r.mul(PI / 180.f);
-    m_map_attach_offset.setHPB(_map_attach_r.x, _map_attach_r.y, _map_attach_r.z);
-    m_map_attach_offset.translate_over(_map_attach_p);
+    RecalcMapAttachOffset();
+}
+
+void CUIArtefactDetectorElite::RecalcMapAttachOffset()
+{
+    m_map_attach_r.mul(PI / 180.f);
+    m_map_attach_offset.setHPB(m_map_attach_r.x, m_map_attach_r.y, m_map_attach_r.z);
+    m_map_attach_offset.translate_over(m_map_attach_p);
 }
 
 void CUIArtefactDetectorElite::update()
