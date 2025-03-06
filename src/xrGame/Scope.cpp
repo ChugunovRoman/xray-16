@@ -7,6 +7,14 @@
 CScope::CScope() {}
 CScope::~CScope() {}
 
+void CScope::Load(LPCSTR section)
+{
+    inherited::Load(section);
+
+    if (pSettings->line_exist(section, "addon_type"))
+        m_addon_type = pSettings->r_string(section, "addon_type");
+}
+
 SCRIPT_EXPORT(CScope, (CGameObject),
 {
     using namespace luabind;

@@ -221,6 +221,7 @@ CWeapon::~CWeapon()
 {
     xr_delete(m_UIScope);
     delete_data(m_scopes);
+    delete_data(m_addons);
 }
 
 void CWeapon::Hit(SHit* pHDS) { inherited::Hit(pHDS); }
@@ -547,6 +548,7 @@ void CWeapon::Load(LPCSTR section)
 
     LoadModParams(section);
     bUseAltScope = !!bLoadAltScopesParams(section);
+    bLoadzCollimatorScopesParams(section);
 
     if (!bUseAltScope)
         LoadOriginalScopesParams(section);
@@ -725,6 +727,27 @@ bool CWeapon::bLoadAltScopesParams(LPCSTR section)
     }
 
     LoadCurrentScopeParams(section);
+
+    return true;
+}
+bool CWeapon::bLoadzCollimatorScopesParams(LPCSTR section)
+{
+    if (!pSettings->line_exist(section, "addons"))
+        return false;
+
+    if (!xr_strcmp(pSettings->r_string(section, "addons"), "none"))
+        return false;
+
+    if (m_eScopeStatus == ALife::eAddonAttachable && m_addons.size() == 0)
+    {
+        LPCSTR str = pSettings->r_string(section, "addons");
+        for (int i = 0, count = _GetItemCount(str); i < count; ++i)
+        {
+            string128 scope_section;
+            _GetItem(str, i, scope_section);
+            m_addons.push_back(scope_section);
+        }
+    }
 
     return true;
 }
@@ -1722,6 +1745,20 @@ bool CWeapon::IsSilencerAttached() const
         ALife::eAddonPermanent == m_eSilencerStatus;
 }
 
+bool CWeapon::hasInstalledAddonType(shared_str type) const
+{
+    if (!bUseAttachmentSystem)
+        return (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 1;
+    
+    for (auto addon: m_addon_items)
+    {
+        if (addon.second->addon_item_visible && xr_strcmp(*addon.second->addon_type, *type) == 0)
+            return true;
+    }
+
+    return false;
+}
+
 bool CWeapon::GrenadeLauncherAttachable() { return (ALife::eAddonAttachable == m_eGrenadeLauncherStatus); }
 bool CWeapon::ScopeAttachable()
 {
@@ -1864,6 +1901,30 @@ void CWeapon::LoadAltHudAim()
             m_hands_offset[1][1] = pSettings->r_fvector3(hud_sect, val_name);
         else if (pSettings->line_exist(base_hud_sect, val_name))
             m_hands_offset[1][1] = pSettings->r_fvector3(base_hud_sect, val_name);
+    }
+    LoadAltAddonHudAim();
+}
+void CWeapon::LoadAltAddonHudAim()
+{
+    if (bUseAttachmentSystem && m_addon_items.size() > 0)
+    {
+        string64 _prefix;
+
+        const bool is_16x9 = UICore::is_widescreen();
+        xr_sprintf(_prefix, "%s", is_16x9 ? "_16x9" : "");
+
+        for (auto addon: m_addon_items)
+        {
+            if (addon.second->addon_item_visible && xr_strcmp(*addon.second->addon_type, "colim_scope") == 0)
+            {
+                shared_str val{make_string("%s_aim_hud_offset_alt_pos%s", *addon.second->addon_item_name, _prefix).c_str()};
+                m_hands_offset[0][1] = READ_IF_EXISTS(pSettings, r_fvector3, *m_section_id, *val, Fvector().set(0.0f, 0.0f, 0.0f));
+                val = make_string("%s_aim_hud_offset_alt_rot%s", *addon.second->addon_item_name, _prefix).c_str();
+                m_hands_offset[1][1] = READ_IF_EXISTS(pSettings, r_fvector3, *m_section_id, *val, Fvector().set(0.0f, 0.0f, 0.0f));
+                val = make_string("%s_use_alt_aim_hud", *addon.second->addon_item_name).c_str();
+                m_zoom_params.m_bZoomSecondEnabled = READ_IF_EXISTS(pSettings, r_bool, *m_section_id, *val, false);
+            }
+        }
     }
 }
 void CWeapon::UpdateAddonsVisibility()
@@ -2168,6 +2229,7 @@ void CWeapon::reload(LPCSTR section)
     m_zoom_params.m_fZoomRotateTime = READ_IF_EXISTS(pSettings, r_float, section, "zoom_rotate_time", ROTATION_TIME);
 
     bUseAltScope = !!bLoadAltScopesParams(section);
+    bLoadzCollimatorScopesParams(section);
 
     if (!bUseAltScope)
         LoadOriginalScopesParams(section);
@@ -2243,6 +2305,8 @@ void CWeapon::reload(LPCSTR section)
     m_hands_offset[0][1] = READ_IF_EXISTS(pSettings, r_fvector3, base_hud_sect, val_name, Fvector().set(0.0f, 0.0f, 0.0f));
     strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_rot", _prefix);
     m_hands_offset[1][1] = READ_IF_EXISTS(pSettings, r_fvector3, base_hud_sect, val_name, Fvector().set(0.0f, 0.0f, 0.0f));
+
+    LoadAltAddonHudAim();
 }
 
 void CWeapon::create_physic_shell() { CPhysicsShellHolder::create_physic_shell(); }

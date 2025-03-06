@@ -15,4 +15,10 @@ private:
 public:
     CScope();
     virtual ~CScope();
+
+    // base_scope
+    // colim_scope
+    shared_str m_addon_type{"base_scope"};
+
+    virtual void Load(LPCSTR section);
 };

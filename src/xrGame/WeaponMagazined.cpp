@@ -1004,7 +1004,25 @@ bool CWeaponMagazined::CanAttach(PIItem pIItem)
     CSilencer* pSilencer = smart_cast<CSilencer*>(pIItem);
     CGrenadeLauncher* pGrenadeLauncher = smart_cast<CGrenadeLauncher*>(pIItem);
 
-    if (pScope && ((m_eScopeStatus == ALife::eAddonAttachable && (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 0) ||
+    if (pScope && xr_strcmp(*pScope->m_addon_type, "base_scope") != 0)
+    {
+        auto it = m_addons.begin();
+        for (; it != m_addons.end(); ++it)
+        {
+            if (bUseAltScope)
+            {
+                if (*it == pIItem->object().cNameSect())
+                    return true;
+            }
+            else
+            {
+                if (pSettings->r_string((*it), "scope_name") == pIItem->object().cNameSect())
+                    return true;
+            }
+        }
+        return false;
+    }
+    else if (pScope && ((m_eScopeStatus == ALife::eAddonAttachable && (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 0) ||
         (GetScopeStatusParent() == ALife::EWeaponAddonStatus::eAddonAttachable && (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 1)))
     {
         auto it = m_scopes.begin();
@@ -1037,6 +1055,15 @@ bool CWeaponMagazined::CanAttach(PIItem pIItem)
 
 bool CWeaponMagazined::CanDetach(const char* item_section_name)
 {
+    if (bUseAttachmentSystem && m_addon_items.size() > 0)
+    {
+        for (auto addon: m_addon_items)
+        {
+            if (xr_strcmp(*addon.second->addon_item_name, item_section_name) == 0)
+                return true;
+        }
+    }
+
     if (m_eScopeStatus == ALife::eAddonAttachable &&
         0 != (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope)) /* &&
            (m_scopes[cur_scope]->m_sScopeName	== item_section_name))*/
@@ -1077,12 +1104,39 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
     CSilencer* pSilencer = smart_cast<CSilencer*>(pIItem);
     CGrenadeLauncher* pGrenadeLauncher = smart_cast<CGrenadeLauncher*>(pIItem);
 
-    if (pScope && (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 1)
-        Detach(*GetScopeName(), true);
+    if (pScope)
+    {
+        if ((m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 1 && xr_strcmp(pScope->m_addon_type, "base_scope") == 0)
+            Detach(*GetScopeName(), true);
+        else if (hasInstalledAddonType(pScope->m_addon_type) && bUseAttachmentSystem && m_addon_items.size() > 0)
+                for (auto addon: m_addon_items)
+                    if (addon.second->addon_item_visible && xr_strcmp(addon.second->addon_type, pScope->m_addon_type) == 0)
+                        Detach(*addon.second->addon_item_name, true);
+                    
+    }
 
-    if (pScope && m_eScopeStatus == ALife::eAddonAttachable &&
-        (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 0 /*&&
-       (m_scopes[cur_scope]->m_sScopeName == pIItem->object().cNameSect())*/)
+    if (pScope && xr_strcmp(*pScope->m_addon_type, "base_scope") != 0 && !hasInstalledAddonType(pScope->m_addon_type))
+    {
+        auto found_addon = m_addon_items.find(*pIItem->m_section_id);
+        if (found_addon == m_addon_items.end())
+        {
+            addon_item* new_addon = xr_new<addon_item>();
+            new_addon->addon_item_name = pIItem->m_section_id;
+            new_addon->addon_type = pScope->m_addon_type;
+            new_addon->addon_item_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*pIItem->m_section_id, "visual")));
+            new_addon->addon_item_visible = true;
+            new_addon->addon_item_hpb = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_hpb", *pIItem->m_section_id).c_str(), Fvector().set(0.f,0.f,0.f));
+            new_addon->addon_item_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_pos", *pIItem->m_section_id).c_str(), Fvector().set(0.f,0.f,0.f));
+            new_addon->addon_item_scale = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_scale", *pIItem->m_section_id).c_str(), Fvector().set(1.f,1.f,1.f));
+            m_addon_items.insert(std::make_pair(*pIItem->m_section_id, new_addon));
+        }
+        else
+            m_addon_items[*pIItem->m_section_id]->addon_item_visible = true;
+
+        reload(*m_section_id);
+        result = true;
+    }
+    else if (pScope && m_eScopeStatus == ALife::eAddonAttachable && !hasInstalledAddonType(pScope->m_addon_type))
     {
         auto it = m_scopes.begin();
         for (; it != m_scopes.end(); ++it)
@@ -1106,6 +1160,7 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
         {
             addon_item* new_addon = xr_new<addon_item>();
             new_addon->addon_item_name = pIItem->m_section_id;
+            new_addon->addon_type = pScope->m_addon_type;
             new_addon->addon_item_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*pIItem->m_section_id, "visual")));
             new_addon->addon_item_visible = true;
             new_addon->addon_item_hpb = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_hpb", *pIItem->m_section_id).c_str(), Fvector().set(0.f,0.f,0.f));
@@ -1189,6 +1244,17 @@ bool CWeaponMagazined::DetachScope(const char* item_section_name, bool b_spawn_i
 
 bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
 {
+    if (bUseAttachmentSystem && m_addon_items.size() > 0)
+    {
+        auto found_addon = m_addon_items.find(item_section_name);
+        if (found_addon != m_addon_items.end() && xr_strcmp(found_addon->second->addon_type, "base_scope") != 0)
+        {
+            m_addon_items[item_section_name]->addon_item_visible = false;
+            reload(*m_section_id);
+            return CInventoryItemObject::Detach(item_section_name, b_spawn_item);
+        }
+    }
+
     if (m_eScopeStatus == ALife::eAddonAttachable && DetachScope(item_section_name, b_spawn_item))
     {
         if ((m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 0 && !IsScopeAttached())

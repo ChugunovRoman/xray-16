@@ -1072,6 +1072,20 @@ void CUIActorMenu::PropertiesBoxForWeapon(CUICellItem* cell_item, PIItem item, b
     if (!pWeapon)
         return;
 
+    if (pWeapon->m_addon_items.size() > 0)
+    {
+        for (auto addon: pWeapon->m_addon_items)
+        {
+            if (addon.second->addon_item_visible && xr_strcmp(addon.second->addon_type, "base_scope") != 0)
+            {
+                shared_str addon_name{StringTable().translate(pSettings->r_string(*addon.second->addon_item_name, "inv_name"))};
+                shared_str str{make_string(StringTable().translate("st_detach_addon").c_str(), *addon_name).c_str()};
+                m_UIPropertiesBox->AddItem(*str, (void*)addon.second->addon_item_name.c_str(), INVENTORY_DETACH_WEAPON_ADDON);
+                b_show = true;
+            }
+        }
+    }
+
     if (pWeapon->GrenadeLauncherAttachable())
     {
         if (pWeapon->IsGrenadeLauncherAttached())
@@ -1405,13 +1419,14 @@ void CUIActorMenu::ProcessPropertiesBoxClicked(CUIWindow* w, void* d)
 {
     PIItem item = CurrentIItem();
     CUICellItem* cell_item = CurrentItem();
-    if (!m_UIPropertiesBox->GetClickedItem() || !item || !cell_item || !cell_item->OwnerList())
+    CUIListBoxItem* clicked_item = m_UIPropertiesBox->GetClickedItem();
+    if (!clicked_item || !item || !cell_item || !cell_item->OwnerList())
     {
         return;
     }
     CWeapon* weapon = smart_cast<CWeapon*>(item);
 
-    switch (m_UIPropertiesBox->GetClickedItem()->GetTAG())
+    switch (clicked_item->GetTAG())
     {
     case INVENTORY_TO_SLOT_ACTION: ToSlot(cell_item, true, item->BaseSlot()); break;
     case INVENTORY_TO_BELT_ACTION: ToBelt(cell_item, false); break;
@@ -1478,7 +1493,7 @@ void CUIActorMenu::ProcessPropertiesBoxClicked(CUIWindow* w, void* d)
     }
     case INVENTORY_DROP_ACTION:
     {
-        void* d = m_UIPropertiesBox->GetClickedItem()->GetData();
+        void* d = clicked_item->GetData();
         if (d == (void*)33)
         {
             DropAllCurrentItem();
@@ -1497,7 +1512,7 @@ void CUIActorMenu::ProcessPropertiesBoxClicked(CUIWindow* w, void* d)
     //     }
 
     //     PIItem item = CurrentIItem();
-    //     AttachAddon((PIItem)(m_UIPropertiesBox->GetClickedItem()->GetData()));
+    //     AttachAddon((PIItem)(clicked_item->GetData()));
     //     if (m_currMenuMode == mmDeadBodySearch)
     //         RemoveItemFromList(m_pLists[eSearchLootBagList], item);
 
@@ -1506,7 +1521,7 @@ void CUIActorMenu::ProcessPropertiesBoxClicked(CUIWindow* w, void* d)
     case INVENTORY_ATTACH_ADDON:
     {
         PIItem item = CurrentIItem(); // temporary storing because of AttachAddon is setting curiitem to NULL
-        AttachAddon((PIItem)(m_UIPropertiesBox->GetClickedItem()->GetData()));
+        AttachAddon((PIItem)(clicked_item->GetData()));
         if (m_currMenuMode == mmDeadBodySearch)
             RemoveItemFromList(m_pLists[eSearchLootBagList], item);
 
@@ -1542,6 +1557,13 @@ void CUIActorMenu::ProcessPropertiesBoxClicked(CUIWindow* w, void* d)
                     DetachAddon(wpn->GetSilencerName().c_str(), child_iitm);
                 }
             }
+        }
+        break;
+    case INVENTORY_DETACH_WEAPON_ADDON:
+        if (weapon)
+        {
+            pcstr addon = (pcstr)(clicked_item->GetData());
+            DetachAddon(addon);
         }
         break;
     case INVENTORY_DETACH_GRENADE_LAUNCHER_ADDON:

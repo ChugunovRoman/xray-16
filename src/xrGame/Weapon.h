@@ -28,6 +28,7 @@ class addon_item
 {
 public:
 	shared_str addon_item_name;
+	shared_str addon_type;
 	Fmatrix addon_item_transform;
 	Fvector addon_item_hpb;
 	Fvector addon_item_pos;
@@ -57,6 +58,7 @@ public:
     virtual bool bInZoomRightNow() const { return m_zoom_params.m_fZoomRotationFactor > 0.05; }
     IC bool bIsSecondVPZoomPresent() const { return GetSecondVPZoomFactor() > 0.000f; }
     bool bLoadAltScopesParams(LPCSTR section);
+    bool bLoadzCollimatorScopesParams(LPCSTR section);
     virtual bool bMarkCanShow() { return IsZoomed() || IsSecondZoomed(); }
     bool bChangeNVSecondVPStatus();
 
@@ -222,6 +224,8 @@ public:
     bool IsScopePermament() const;
     bool IsSilencerAttached() const;
 
+    bool hasInstalledAddonType(shared_str type) const;
+
     ALife::EWeaponAddonStatus GetScopeStatusParent() const;
 
     virtual bool GrenadeLauncherAttachable();
@@ -238,6 +242,7 @@ public:
     //инициализация свойств присоединенных аддонов
     virtual void InitAddons();
     void LoadAltHudAim();
+    void LoadAltAddonHudAim();
     void UpdateAddonsOffset();
 
     void SetScopeOffset(Ivector2 pos) { m_iScopeX = pos.x; m_iScopeY = pos.y; }
@@ -566,21 +571,10 @@ protected:
 
 public:
     xr_vector<shared_str> m_ammoTypes;
-    /*
-        struct SScopes
-        {
-            shared_str			m_sScopeName;
-            int					m_iScopeX;
-            int					m_iScopeY;
-        };
-        DEFINE_VECTOR(SScopes*, SCOPES_VECTOR, SCOPES_VECTOR_IT);
-        SCOPES_VECTOR			m_scopes;
-
-        u8						cur_scope;
-    */
 
     using SCOPES_VECTOR = xr_vector<shared_str>;
     SCOPES_VECTOR m_scopes;
+    SCOPES_VECTOR m_addons;
     u8 m_cur_scope;
 
     CWeaponAmmo* m_pCurrentAmmo;
