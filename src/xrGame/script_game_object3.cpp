@@ -486,6 +486,10 @@ bool CScriptGameObject::is_builded_path_failed()
     CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(&object());
     if (!stalker)
     {
+        CCustomMonster* l_tpCustomMonster = smart_cast<CCustomMonster*>(&object());
+        if (l_tpCustomMonster)
+            return l_tpCustomMonster->movement().level_path().failed();
+
         GEnv.ScriptEngine->script_log(LuaMessageType::Error, "CAI_Stalker : cannot access class member movement!");
         return false;
     }
