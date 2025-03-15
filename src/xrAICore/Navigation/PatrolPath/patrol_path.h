@@ -39,9 +39,7 @@ protected:
     typedef CGraphAbstractSerialize<CPatrolPoint, float, u32> inherited;
 
 public:
-#ifdef DEBUG
     shared_str m_name;
-#endif
 
 public:
     CPatrolPath(shared_str name = "");

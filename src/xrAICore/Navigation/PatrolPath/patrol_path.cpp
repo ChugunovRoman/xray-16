@@ -13,9 +13,7 @@
 LPCSTR TEST_PATROL_PATH_NAME = "val_dogs_nest4_centre";
 
 CPatrolPath::CPatrolPath(shared_str name)
-#ifdef DEBUG
     : m_name(name)
-#endif
 {}
 
 CPatrolPath& CPatrolPath::load_raw(

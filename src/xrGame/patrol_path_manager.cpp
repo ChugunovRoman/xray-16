@@ -287,6 +287,9 @@ void CPatrolPathManager::select_point(const Fvector& position, u32& dest_vertex_
     m_prev_point_index = m_curr_point_index;
     m_curr_point_index = target;
     dest_vertex_id = m_path->vertex(m_curr_point_index)->data().level_vertex_id();
+    R_ASSERT2(ai().level_graph().valid_vertex_id(dest_vertex_id),
+        make_string(
+            "Can't setup path for object=[%s] dest_vertex_id=[%d] path name=[%s] point name=[%s]", *m_object->object().cName(), dest_vertex_id, *m_path->m_name, *vertex->data().name()));
     m_dest_position = m_path->vertex(m_curr_point_index)->data().position();
     VERIFY3(accessible(m_dest_position) || show_restrictions(m_object), *m_path_name, *m_game_object->cName());
     m_actuality = true;
