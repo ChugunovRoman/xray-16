@@ -13,6 +13,8 @@
 #include "Include/xrAPI/xrAPI.h"
 #endif
 
+namespace xray::render::RENDER_NAMESPACE
+{
 int psSkeletonUpdate = 32;
 Lock UCalc_Mutex
 #ifdef CONFIG_PROFILE_LOCKS
@@ -751,7 +753,7 @@ void CKinematics::CalculateWallmarks(bool hud)
             {
                 // append wm to WallmarkEngine
                 if (!hud && RImplementation.ViewBase.testSphere_dirty(wm->m_Bounds.P, wm->m_Bounds.R))
-                    ::RImplementation.add_SkeletonWallmark(wm);
+                    RImplementation.add_SkeletonWallmark(wm);
             }
             else
             {
@@ -892,3 +894,4 @@ CSkeletonWallmark::~CSkeletonWallmark()
     }
 }
 #endif
+} // namespace xray::render::RENDER_NAMESPACE

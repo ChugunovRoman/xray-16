@@ -23,6 +23,8 @@
 #include "xrCore/Threading/TaskManager.hpp"
 #include "xrCore/FMesh.hpp"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class CRenderTarget;
 class dxRender_Visual;
 
@@ -527,3 +529,4 @@ private:
 };
 
 extern CRender RImplementation;
+} // namespace xray::render::RENDER_NAMESPACE

@@ -3,12 +3,10 @@
 //////////////////////////////////////////////////////////////////////
 #pragma once
 
-#ifdef _EDITOR
 #include "FBasicVisual.h"
-#else
-#include "FBasicVisual.h"
-#endif
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class Fvisual : public dxRender_Visual, public IRender_Mesh
 {
 public:
@@ -23,3 +21,4 @@ public:
     Fvisual();
     virtual ~Fvisual();
 };
+} // namespace xray::render::RENDER_NAMESPACE

@@ -6,6 +6,8 @@
     virtual I##Class* Create##Class();\
     virtual void Destroy##Class(I##Class* pObject);
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class dxRenderFactory : public IRenderFactory
 {
 #ifndef _EDITOR
@@ -32,3 +34,4 @@ class dxRenderFactory : public IRenderFactory
 };
 
 extern dxRenderFactory RenderFactoryImpl;
+} // namespace xray::render::RENDER_NAMESPACE

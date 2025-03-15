@@ -1,5 +1,7 @@
 #pragma once
 
+namespace xray::render::RENDER_NAMESPACE
+{
 //	Interface
 #if defined(USE_DX11)
 IC HRESULT CreateQuery(ID3DQuery** ppQuery);
@@ -92,3 +94,4 @@ IC HRESULT ReleaseQuery(GLuint query)
 #else
 #   error No graphics API selected or enabled!
 #endif
+} // namespace xray::render::RENDER_NAMESPACE

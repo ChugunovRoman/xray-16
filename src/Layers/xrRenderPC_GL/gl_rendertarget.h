@@ -4,6 +4,8 @@
 
 class light;
 
+namespace xray::render::RENDER_NAMESPACE
+{
 //#define DU_SPHERE_NUMVERTEX 92
 //#define DU_SPHERE_NUMFACES	180
 //#define DU_CONE_NUMVERTEX	18
@@ -374,3 +376,4 @@ public:
     void dbg_addplane(Fplane& /*P0*/, u32 /*c*/) {}
 #endif
 };
+} // namespace xray::render::RENDER_NAMESPACE

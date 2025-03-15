@@ -1,5 +1,7 @@
 #pragma once
 
+namespace xray::render::RENDER_NAMESPACE
+{
 namespace dx11StateUtils
 {
 D3D_FILL_MODE ConvertFillMode(D3DFILLMODE Mode);
@@ -33,4 +35,5 @@ void ValidateState(D3D_RASTERIZER_DESC& desc);
 void ValidateState(D3D_DEPTH_STENCIL_DESC& desc);
 void ValidateState(D3D_BLEND_DESC& desc);
 void ValidateState(D3D_SAMPLER_DESC& desc);
-};
+} // namespace dx11StateUtils
+} // namespace xray::render::RENDER_NAMESPACE

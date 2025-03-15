@@ -1,9 +1,14 @@
 #include "stdafx.h"
+
 #include "Layers/xrRender/dxRenderFactory.h"
 #include "Layers/xrRender/dxUIRender.h"
 #include "Layers/xrRender/dxDebugRender.h"
 #include "Layers/xrRender/D3DUtils.h"
 
+#include "Include/xrRender/xrRender.h"
+
+namespace xray::render::RENDER_NAMESPACE
+{
 constexpr pcstr RENDERER_R2_MODE   = "renderer_r2";   // id 2
 constexpr pcstr RENDERER_R2_5_MODE = "renderer_r2.5"; // id 3
 constexpr pcstr RENDERER_R3_MODE   = "renderer_r3";   // id 4
@@ -27,7 +32,7 @@ public:
 
     const xr_vector<std::pair<pcstr, int>>& ObtainSupportedModes() override
     {
-        ZoneTransient(tracy_scoped_zone, true);
+        ZoneScoped;
 
         if (CheckCanAddMode())
         {
@@ -107,10 +112,8 @@ public:
     }
 } static s_rgl_module;
 
-extern "C"
-{
-XR_EXPORT RendererModule* GetRendererModule()
+RendererModule* GetRendererModule()
 {
     return &s_rgl_module;
 }
-}
+} // namespace xray::render::RENDER_NAMESPACE

@@ -2,6 +2,8 @@
 
 #include "Include/xrRender/UISequenceVideoItem.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class dxUISequenceVideoItem : public IUISequenceVideoItem
 {
 public:
@@ -18,3 +20,4 @@ public:
 private:
     CTexture* m_texture;
 };
+} // namespace xray::render::RENDER_NAMESPACE

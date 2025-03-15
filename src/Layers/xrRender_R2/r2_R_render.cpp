@@ -8,6 +8,8 @@
 
 #include "Layers/xrRender/FBasicVisual.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 void CRender::RenderMenu()
 {
 #if defined(USE_DX11)
@@ -426,3 +428,4 @@ void CRender::AfterWorldRender()
 #endif
     }
 }
+} // namespace xray::render::RENDER_NAMESPACE

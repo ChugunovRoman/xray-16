@@ -16,6 +16,59 @@
 #include "Layers/xrRenderDX11/StateManager/dx11SamplerStateCache.h"
 #endif
 
+#if (RENDER == R_R3) || (RENDER == R_R4)
+#   ifndef MASTER_GOLD
+#   include "Layers/xrRenderDX11/3DFluid/dx113DFluidManager.h"
+#   endif // MASTER_GOLD
+#endif // (RENDER == R_R3) || (RENDER == R_R4)
+
+// Anomaly
+extern ENGINE_API float ps_r2_img_exposure; // r2-only
+extern ENGINE_API float ps_r2_img_gamma; // r2-only
+extern ENGINE_API float ps_r2_img_saturation; // r2-only
+extern ENGINE_API Fvector ps_r2_img_cg; // r2-only
+extern ENGINE_API Fvector4 ps_r2_mask_control; // r2-only
+extern ENGINE_API Fvector ps_r2_drops_control; // r2-only
+extern ENGINE_API int ps_r2_nightvision;
+
+// Ascii1457's Screen Space Shaders
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1;
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_2;
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1_cfg;
+extern ENGINE_API Fvector4 ps_ssfx_hud_drops_2_cfg;
+extern ENGINE_API Fvector4 ps_ssfx_blood_decals;
+extern ENGINE_API Fvector4 ps_ssfx_rain_1;
+extern ENGINE_API Fvector4 ps_ssfx_rain_2;
+extern ENGINE_API Fvector4 ps_ssfx_rain_3;
+extern ENGINE_API Fvector3 ps_ssfx_shadow_cascades;
+extern ENGINE_API Fvector4 ps_ssfx_grass_shadows;
+extern ENGINE_API Fvector4 ps_ssfx_grass_interactive;
+extern ENGINE_API Fvector4 ps_ssfx_int_grass_params_1;
+extern ENGINE_API Fvector4 ps_ssfx_int_grass_params_2;
+extern ENGINE_API Fvector4 ps_ssfx_wpn_dof_1;
+extern ENGINE_API Fvector4 ps_ssfx_wpn_dof_2;
+extern ENGINE_API Fvector4 ps_ssfx_florafixes_1;
+extern ENGINE_API Fvector4 ps_ssfx_florafixes_2;
+extern ENGINE_API Fvector4 ps_ssfx_wetsurfaces_1;
+extern ENGINE_API Fvector4 ps_ssfx_wetsurfaces_2;
+extern ENGINE_API int ps_ssfx_is_underground;
+extern ENGINE_API int ps_ssfx_gloss_method;
+extern ENGINE_API float ps_ssfx_gloss_factor;
+extern ENGINE_API Fvector3 ps_ssfx_gloss_minmax;
+extern ENGINE_API Fvector4 ps_ssfx_lightsetup_1;
+
+//debug
+extern ENGINE_API Fvector4 ps_dev_param_1;
+extern ENGINE_API Fvector4 ps_dev_param_2;
+extern ENGINE_API Fvector4 ps_dev_param_3;
+extern ENGINE_API Fvector4 ps_dev_param_4;
+extern ENGINE_API Fvector4 ps_dev_param_5;
+extern ENGINE_API Fvector4 ps_dev_param_6;
+extern ENGINE_API Fvector4 ps_dev_param_7;
+extern ENGINE_API Fvector4 ps_dev_param_8;
+
+namespace xray::render::RENDER_NAMESPACE
+{
 u32 ps_Preset = 2;
 u32 ps_ShaderPreset = 0;
 u32 ps_ColorGradingPreset = 0;
@@ -233,10 +286,8 @@ float ps_r2_ls_squality = 1.0f; // 1.00f
 float ps_r2_sun_tsm_projection = 0.3f; // 0.18f
 float ps_r2_sun_tsm_bias = -0.01f; //
 float ps_r2_sun_near = 20.f; // 12.0f
-
-extern float OLES_SUN_LIMIT_27_01_07; //    actually sun_far
-
 float ps_r2_sun_near_border = 0.75f; // 1.0f
+float ps_r2_sun_far = 100.f; // 180.f
 float ps_r2_sun_depth_far_scale = 1.00000f; // 1.00001f
 float ps_r2_sun_depth_far_bias = -0.00002f; // -0.0000f
 float ps_r2_sun_depth_near_scale = 1.0000f; // 1.00001f
@@ -257,59 +308,10 @@ int ps_r2_wait_timeout = 500;
 float ps_r2_lt_smooth = 1.f; // 1.f
 float ps_r2_slight_fade = 0.5f; // 1.f
 
-// Anomaly
-extern ENGINE_API float ps_r2_img_exposure; // r2-only
-extern ENGINE_API float ps_r2_img_gamma; // r2-only
-extern ENGINE_API float ps_r2_img_saturation; // r2-only
-extern ENGINE_API Fvector ps_r2_img_cg; // r2-only
-extern ENGINE_API Fvector4 ps_r2_mask_control; // r2-only
-extern ENGINE_API Fvector ps_r2_drops_control; // r2-only
-extern ENGINE_API int ps_r2_nightvision;
-
-//debug
-extern ENGINE_API Fvector4 ps_dev_param_1;
-extern ENGINE_API Fvector4 ps_dev_param_2;
-extern ENGINE_API Fvector4 ps_dev_param_3;
-extern ENGINE_API Fvector4 ps_dev_param_4;
-extern ENGINE_API Fvector4 ps_dev_param_5;
-extern ENGINE_API Fvector4 ps_dev_param_6;
-extern ENGINE_API Fvector4 ps_dev_param_7;
-extern ENGINE_API Fvector4 ps_dev_param_8;
-
-// Ascii1457's Screen Space Shaders
-extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1;
-extern ENGINE_API Fvector4 ps_ssfx_hud_drops_2;
-extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1_cfg;
-extern ENGINE_API Fvector4 ps_ssfx_hud_drops_2_cfg;
-extern ENGINE_API Fvector4 ps_ssfx_blood_decals;
-extern ENGINE_API Fvector4 ps_ssfx_rain_1;
-extern ENGINE_API Fvector4 ps_ssfx_rain_2;
-extern ENGINE_API Fvector4 ps_ssfx_rain_3;
-extern ENGINE_API Fvector3 ps_ssfx_shadow_cascades;
-extern ENGINE_API Fvector4 ps_ssfx_grass_shadows;
-extern ENGINE_API Fvector4 ps_ssfx_grass_interactive;
-extern ENGINE_API Fvector4 ps_ssfx_int_grass_params_1;
-extern ENGINE_API Fvector4 ps_ssfx_int_grass_params_2;
-extern ENGINE_API Fvector4 ps_ssfx_wpn_dof_1;
-extern ENGINE_API Fvector4 ps_ssfx_wpn_dof_2;
-extern ENGINE_API Fvector4 ps_ssfx_florafixes_1;
-extern ENGINE_API Fvector4 ps_ssfx_florafixes_2;
-extern ENGINE_API Fvector4 ps_ssfx_wetsurfaces_1;
-extern ENGINE_API Fvector4 ps_ssfx_wetsurfaces_2;
-extern ENGINE_API int ps_ssfx_is_underground;
-extern ENGINE_API int ps_ssfx_gloss_method;
-extern ENGINE_API float ps_ssfx_gloss_factor;
-extern ENGINE_API Fvector3 ps_ssfx_gloss_minmax;
-extern ENGINE_API Fvector4 ps_ssfx_lightsetup_1;
-
 //  x - min (0), y - focus (1.4), z - max (100)
 Fvector3 ps_r2_dof = Fvector3().set(-1.25f, 1.4f, 600.f);
 float ps_r2_dof_sky = 30; //    distance to sky
 float ps_r2_dof_kernel_size = 5.0f; //  7.0f
-
-extern ENGINE_API float ps_r3_dyn_wet_surf_near;
-extern ENGINE_API float ps_r3_dyn_wet_surf_far;
-extern ENGINE_API int ps_r3_dyn_wet_surf_sm_res;
 
 u32 ps_steep_parallax = 0;
 int ps_r__detail_radius = 49;
@@ -836,9 +838,6 @@ public:
 //  Allow real-time fog config reload
 #if (RENDER == R_R3) || (RENDER == R_R4)
 #   ifndef MASTER_GOLD
-
-#   include "Layers/xrRenderDX11/3DFluid/dx113DFluidManager.h"
-
 class CCC_Fog_Reload : public IConsole_Command
 {
 public:
@@ -983,7 +982,7 @@ void xrRender_initconsole()
     CMD4(CCC_Float, "r2_sun_tsm_bias", &ps_r2_sun_tsm_bias, -0.5, +0.5);
     CMD4(CCC_Float, "r2_sun_near", &ps_r2_sun_near, 1.f, 150.f); //AVO: extended from 50.f to 150.f
 #if RENDER != R_R1
-    CMD4(CCC_Float, "r2_sun_far", &OLES_SUN_LIMIT_27_01_07, 51.f, 180.f);
+    CMD4(CCC_Float, "r2_sun_far", &ps_r2_sun_far, 51.f, 180.f);
 #endif
     CMD4(CCC_Float, "r2_sun_near_border", &ps_r2_sun_near_border, .5f, 1.0f);
     CMD4(CCC_Float, "r2_sun_depth_far_scale", &ps_r2_sun_depth_far_scale, 0.5, 1.5);
@@ -1165,3 +1164,4 @@ void xrRender_initconsole()
     tw_max.set(1, 1, 1);
     CMD4(CCC_Vector3, "r__color_grading", &ps_r2_img_cg, tw_min, tw_max);
 }
+} // namespace xray::render::RENDER_NAMESPACE

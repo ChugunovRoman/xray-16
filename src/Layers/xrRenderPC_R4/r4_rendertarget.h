@@ -2,6 +2,8 @@
 
 #include "Layers/xrRender/ColorMapManager.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class light;
 
 //#define DU_SPHERE_NUMVERTEX 92
@@ -410,3 +412,4 @@ public:
     void dbg_addplane(Fplane& /*P0*/, u32 /*c*/) {}
 #endif
 };
+} // namespace xray::render::RENDER_NAMESPACE

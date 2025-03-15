@@ -4,6 +4,8 @@
 
 #include "xrEngine/GameFont.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class dxFontRender : public IFontRender
 {
 public:
@@ -20,3 +22,4 @@ private:
     ref_shader pShader;
     ref_geom pGeom;
 };
+} // namespace xray::render::RENDER_NAMESPACE

@@ -9,8 +9,9 @@
 #include "Layers/xrRenderGL/glState.h"
 #endif
 
+namespace xray::render::RENDER_NAMESPACE
+{
 #pragma pack(push, 4)
-
 //////////////////////////////////////////////////////////////////////////
 // Atomic resources
 //////////////////////////////////////////////////////////////////////////
@@ -160,3 +161,4 @@ struct ECORE_API SDeclaration : public xr_resource_flagged
 typedef resptr_core<SDeclaration, resptr_base<SDeclaration>> ref_declaration;
 
 #pragma pack(pop)
+} // namespace xray::render::RENDER_NAMESPACE

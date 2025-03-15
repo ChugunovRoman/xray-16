@@ -1,5 +1,7 @@
 #pragma once
 
+namespace xray::render::RENDER_NAMESPACE
+{
 IC Fvector4* dx11ConstantBuffer::Access(u16 offset)
 {
     //	TODO: DX11: Implement code which will check if set actually changes code.
@@ -185,3 +187,4 @@ IC void* dx11ConstantBuffer::AccessDirect(R_constant_load& L, size_t DataSize)
     else
         return 0;
 }
+} // namespace xray::render::RENDER_NAMESPACE

@@ -12,6 +12,8 @@ using PAVec = xr_vector<ParticleAction*>;
 }
 struct EParticleAction;
 
+namespace xray::render::RENDER_NAMESPACE
+{
 namespace PS
 {
 class CParticleEffect;
@@ -156,3 +158,4 @@ public:
 #define PED_CHUNK_EDATA 0x0024
 #define PED_CHUNK_ALIGN_TO_PATH 0x0025
 //---------------------------------------------------------------------------
+} // namespace xray::render::RENDER_NAMESPACE

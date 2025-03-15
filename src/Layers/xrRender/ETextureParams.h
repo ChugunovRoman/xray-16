@@ -1,5 +1,9 @@
 #pragma once
 
+struct xr_token;
+
+namespace xray::render::RENDER_NAMESPACE
+{
 #pragma pack(push, 1)
 struct ECORE_API STextureParams
 {
@@ -171,7 +175,6 @@ struct ECORE_API STextureParams
 };
 #pragma pack(pop)
 
-struct xr_token;
 extern const xr_token tparam_token[];
 extern const xr_token tfmt_token[];
 extern const xr_token ttype_token[];
@@ -192,3 +195,4 @@ extern const xr_token ttype_token[];
 #define THUMB_HEIGHT 128
 #define THUMB_SIZE THUMB_HEIGHT* THUMB_WIDTH
 //----------------------------------------------------
+} // namespace xray::render::RENDER_NAMESPACE

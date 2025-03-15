@@ -7,6 +7,8 @@
 #include "xrEngine/Properties.h"
 #include "Blender_Recorder.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 #pragma pack(push, 4)
 class ECORE_API CBlender_DESC
 {
@@ -64,3 +66,4 @@ public:
     virtual ~IBlender();
 };
 #pragma pack(pop)
+} // namespace xray::render::RENDER_NAMESPACE

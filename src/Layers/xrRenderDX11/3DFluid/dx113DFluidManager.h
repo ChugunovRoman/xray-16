@@ -1,11 +1,13 @@
 #pragma once
 
+#include "dx113DFluidRenderer.h"
+
+namespace xray::render::RENDER_NAMESPACE
+{
 class dx113DFluidData;
 class dx113DFluidGrid;
 class dx113DFluidObstacles;
 class dx113DFluidEmitters;
-
-#include "dx113DFluidRenderer.h"
 
 class dx113DFluidManager
 {
@@ -143,3 +145,4 @@ private:
 };
 
 extern dx113DFluidManager FluidManager;
+} // namespace xray::render::RENDER_NAMESPACE

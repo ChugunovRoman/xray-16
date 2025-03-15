@@ -8,6 +8,8 @@
 #include "DetailFormat.h"
 #include "DetailModel.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 #ifdef _EDITOR
 //.	#include	"ESceneClassList.h"
 const int dm_max_decompress = 14;
@@ -230,3 +232,4 @@ public:
     CDetailManager();
     virtual ~CDetailManager();
 };
+} // namespace xray::render::RENDER_NAMESPACE

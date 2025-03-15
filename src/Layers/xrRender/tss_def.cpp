@@ -9,6 +9,8 @@
 #include "../xrRenderGL/glState.h"
 #endif
 
+namespace xray::render::RENDER_NAMESPACE
+{
 // TODO: DX11: Implement equivalent for SimulatorStates::record for DX11
 void SimulatorStates::record(ID3DState*& state)
 {
@@ -493,3 +495,4 @@ void SimulatorStates::UpdateDesc(D3D_SAMPLER_DESC descArray[D3D_COMMONSHADER_SAM
 }
 
 #endif // !USE_DX9 && !USE_OGL
+} // namespace xray::render::RENDER_NAMESPACE

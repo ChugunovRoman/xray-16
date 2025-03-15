@@ -208,7 +208,7 @@ constexpr pcstr FRAME_MARK_APPLICATION_STARTUP = "Application startup";
 constexpr pcstr FRAME_MARK_APPLICATION_SHUTDOWN = "Application shutdown";
 constexpr pcstr FRAME_MARK_APPLICATION_RUN = "Application run";
 
-CApplication::CApplication(pcstr commandLine, GameModule* game)
+CApplication::CApplication(pcstr commandLine, GameModule* game, const std::span<RendererModule*>& modules)
 {
     TracySetProgramName("OpenXRay");
     Threading::SetCurrentThreadName("Primary thread");
@@ -251,9 +251,9 @@ CApplication::CApplication(pcstr commandLine, GameModule* game)
     });
 
 #ifdef XR_PLATFORM_WINDOWS
-    const auto& createRendererList = TaskManager::AddTask([]
+    const auto& createRendererList = TaskManager::AddTask([&]
     {
-        Engine.External.CreateRendererList();
+        Engine.External.CreateRendererList(modules);
     });
 #endif
 
@@ -283,7 +283,7 @@ CApplication::CApplication(pcstr commandLine, GameModule* game)
 #ifdef XR_PLATFORM_WINDOWS
     TaskScheduler->Wait(createRendererList);
 #else
-    Engine.External.CreateRendererList();
+    Engine.External.CreateRendererList(modules);
 #endif
     Engine.Initialize(game);
     Device.Initialize();

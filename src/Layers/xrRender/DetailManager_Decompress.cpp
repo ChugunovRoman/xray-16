@@ -14,6 +14,8 @@
 #include "utils/ETools/ETools.h"
 #endif
 
+namespace xray::render::RENDER_NAMESPACE
+{
 //--------------------------------------------------- Decompression
 IC float Interpolate(float* base, u32 x, u32 y, u32 size)
 {
@@ -299,3 +301,4 @@ gray255[3]						=	255.f*float(c_pal->a3)/15.f;
     D.vis.box.set(Bounds);
     D.vis.box.getsphere(D.vis.sphere.P, D.vis.sphere.R);
 }
+} // namespace xray::render::RENDER_NAMESPACE

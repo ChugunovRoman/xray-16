@@ -2,6 +2,8 @@
 
 #include "Include/xrRender/particles_systems_library_interface.hpp"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 namespace PS
 {
 class CPEDef;
@@ -72,3 +74,4 @@ public:
 #define PS_CHUNK_FIRSTGEN 0x0002
 #define PS_CHUNK_SECONDGEN 0x0003
 #define PS_CHUNK_THIRDGEN 0x0004
+} // namespace xray::render::RENDER_NAMESPACE

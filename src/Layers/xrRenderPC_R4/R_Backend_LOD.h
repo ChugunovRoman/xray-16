@@ -1,5 +1,7 @@
 #pragma once
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class R_LOD
 {
 public:
@@ -14,3 +16,4 @@ public:
 
     CBackend& cmd_list;
 };
+} // namespace xray::render::RENDER_NAMESPACE

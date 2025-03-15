@@ -4,6 +4,8 @@
 
 #pragma once
 
+namespace xray::render::RENDER_NAMESPACE
+{
 const float lt_inc = 4.f;
 const float lt_dec = 2.f;
 const int lt_hemisamples = 26;
@@ -139,3 +141,4 @@ private:
     void smart_update(IRenderable* O);
 #endif //	RENDER!=R_R1
 };
+} // namespace xray::render::RENDER_NAMESPACE

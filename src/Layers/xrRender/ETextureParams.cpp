@@ -8,6 +8,8 @@
 #include "xrServerEntities/PropertiesListHelper.h"
 #endif
 
+namespace xray::render::RENDER_NAMESPACE
+{
 const xr_token tparam_token[] = {{"Advanced", STextureParams::kMIPFilterAdvanced},
 
     {"Point", STextureParams::kMIPFilterPoint}, {"Box", STextureParams::kMIPFilterBox},
@@ -411,3 +413,4 @@ u32 STextureParams::MemoryUsage(LPCSTR base_name)
     return mem_usage;
 }
 #endif
+} // namespace xray::render::RENDER_NAMESPACE

@@ -4,14 +4,17 @@
 #include "xrCore/Animation/Bone.hpp"
 #include "Include/xrRender/Kinematics.h"
 
+class CInifile;
+class CBoneData;
+struct SEnumVerticesCallback;
+
+namespace xray::render::RENDER_NAMESPACE
+{
 // consts
 extern Lock UCalc_Mutex;
 
 // refs
 class CKinematics;
-class CInifile;
-class CBoneData;
-struct SEnumVerticesCallback;
 class CSkeletonX;
 
 // MT-locker
@@ -318,3 +321,4 @@ private:
 };
 
 IC CKinematics* PCKinematics(dxRender_Visual* V) { return V ? (CKinematics*)V->dcast_PKinematics() : 0; }
+} // namespace xray::render::RENDER_NAMESPACE

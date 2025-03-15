@@ -3,6 +3,8 @@
 #include "Include/xrRender/StatGraphRender.h"
 #include "xrEngine/StatGraph.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class dxStatGraphRender : public IStatGraphRender
 {
 public:
@@ -23,3 +25,4 @@ private:
     ref_geom hGeomTri;
     ref_geom hGeomLine;
 };
+} // namespace xray::render::RENDER_NAMESPACE

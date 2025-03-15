@@ -2,6 +2,10 @@
 
 #include "Include/xrRender/EnvironmentRender.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
+class dxEnvironmentRender;
+
 class dxEnvDescriptorRender : public IEnvDescriptorRender
 {
     friend class dxEnvironmentRender;
@@ -54,3 +58,4 @@ private:
     u32 tonemap_tstage_2sky{ u32(-1) };
     u32 tonemap_tstage_clouds{ u32(-1) };
 };
+} // namespace xray::render::RENDER_NAMESPACE

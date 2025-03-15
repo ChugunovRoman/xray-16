@@ -5,6 +5,8 @@
 
 #include "xrCore/Threading/ParallelForEach.hpp"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 // eye-params
 float r__dtex_range = 50;
 class cl_dt_scaler : public R_constant_setup
@@ -330,3 +332,4 @@ BOOL CTextureDescrMngr::GetDetailTexture(const shared_str& tex_name, LPCSTR& res
     }
     return FALSE;
 }
+} // namespace xray::render::RENDER_NAMESPACE

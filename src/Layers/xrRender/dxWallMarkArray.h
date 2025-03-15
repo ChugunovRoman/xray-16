@@ -2,6 +2,8 @@
 
 #include "Include/xrRender/WallMarkArray.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class dxWallMarkArray : public IWallMarkArray
 {
 public:
@@ -20,3 +22,4 @@ private:
 
     ShaderVec m_CollideMarks;
 };
+} // namespace xray::render::RENDER_NAMESPACE

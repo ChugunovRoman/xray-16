@@ -40,6 +40,7 @@ public:
     shared_str GetCurrentFontPrefix() const;
     xr_token* GetLanguagesToken() const;
     static u32 LanguageID;
+    static string32 LanguageIDInLTX;
 
 private:
     void Load(LPCSTR xml_file);

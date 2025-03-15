@@ -3,6 +3,8 @@
 #include "dxDebugRender.h"
 #include "dxUIShader.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 dxDebugRender DebugRenderImpl;
 dxDebugRender::dxDebugRender()
 {
@@ -161,3 +163,4 @@ public:
 } rdebug_render_impl;
 dxDebugRender* rdebug_render = &rdebug_render_impl;
 
+} // namespace xray::render::RENDER_NAMESPACE

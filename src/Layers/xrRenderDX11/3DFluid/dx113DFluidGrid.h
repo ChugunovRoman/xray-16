@@ -1,5 +1,7 @@
 #pragma once
 
+namespace xray::render::RENDER_NAMESPACE
+{
 struct VS_INPUT_FLUIDSIM_STRUCT;
 
 class dx113DFluidGrid
@@ -46,3 +48,4 @@ private:
     int m_iNumVerticesBoundarySlices;
     int m_iNumVerticesBoundaryLines;
 };
+} // namespace xray::render::RENDER_NAMESPACE

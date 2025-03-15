@@ -2,6 +2,8 @@
 
 #include "Include/xrRender/RenderVisual.h" //--#SM+#--
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class ECORE_API R_hemi
 {
 public:
@@ -27,3 +29,4 @@ public:
 
     CBackend& cmd_list;
 };
+} // namespace xray::render::RENDER_NAMESPACE

@@ -8,10 +8,11 @@
 #   error No graphics API selected or enabled!
 #endif
 
-//-----------------------------------------------------------------------------
-#pragma pack(push, 4)
+namespace xray::render::RENDER_NAMESPACE
+{
 namespace FVF
 {
+#pragma pack(push, 4)
 struct L
 {
     Fvector p;
@@ -202,7 +203,6 @@ struct TL4uv
     };
 };
 const u32 F_TL4uv = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX4;
-};
 #pragma pack(pop)
-
-//-----------------------------------------------------------------------------
+} // namespace FVF
+} // namespace xray::render::RENDER_NAMESPACE

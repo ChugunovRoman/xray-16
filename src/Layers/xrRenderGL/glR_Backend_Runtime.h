@@ -2,6 +2,8 @@
 
 #include "glStateUtils.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 IC void CBackend::set_xform(u32 ID, const Fmatrix& M)
 {
     stat.xforms++;
@@ -521,3 +523,4 @@ void CBackend::set_pass_targets(const ref_rt& _1, const ref_rt& _2, const ref_rt
     const D3D_VIEWPORT viewport = { 0, 0, curr_rt_width, curr_rt_height, 0.f, 1.f };
     SetViewport(viewport);
 }
+} // namespace xray::render::RENDER_NAMESPACE

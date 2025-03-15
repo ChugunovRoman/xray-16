@@ -7,6 +7,8 @@
 
 #include "FBasicVisual.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class FHierrarhyVisual : public dxRender_Visual
 {
 public:
@@ -27,3 +29,4 @@ public:
         return NULL;
     }
 };
+} // namespace xray::render::RENDER_NAMESPACE

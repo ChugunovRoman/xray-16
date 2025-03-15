@@ -1,5 +1,7 @@
 #pragma once
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class dx11SamplerStateCache
 {
 public:
@@ -56,3 +58,4 @@ private:
 };
 
 extern dx11SamplerStateCache SSManager;
+} // namespace xray::render::RENDER_NAMESPACE

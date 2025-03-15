@@ -6,10 +6,13 @@
 
 #define VLOAD_NOVERTICES (1 << 0)
 
+class IParticleCustom;
+
+namespace xray::render::RENDER_NAMESPACE
+{
 // The class itself
 class CKinematicsAnimated;
 class CKinematics;
-class IParticleCustom;
 
 struct IRender_Mesh
 {
@@ -79,3 +82,4 @@ public:
     dxRender_Visual();
     virtual ~dxRender_Visual();
 };
+} // namespace xray::render::RENDER_NAMESPACE

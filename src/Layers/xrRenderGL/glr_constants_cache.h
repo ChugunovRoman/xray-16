@@ -1,5 +1,7 @@
 #pragma once
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class ECORE_API R_constants
 {
 private:
@@ -220,3 +222,4 @@ public:
     // TODO: OGL: Implement constant caching through UBOs
     ICF void flush() { }
 };
+} // namespace xray::render::RENDER_NAMESPACE

@@ -2,6 +2,8 @@
 
 #include "Include/xrRender/UIShader.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class dxUIShader : public IUIShader
 {
     friend class dxUIRender;
@@ -19,3 +21,4 @@ public:
 private:
     ref_shader hShader;
 };
+} // namespace xray::render::RENDER_NAMESPACE

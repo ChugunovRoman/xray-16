@@ -1,6 +1,8 @@
 #pragma once
 #include "Layers/xrRenderDX11/dx11StateUtils.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 using dx11StateUtils::operator==;
 
 template <class IDeviceState, class StateDecs>
@@ -89,3 +91,4 @@ IDeviceState* dx11StateCache<IDeviceState, StateDecs>::FindState(const StateDecs
         return NULL;
         */
 }
+} // namespace xray::render::RENDER_NAMESPACE

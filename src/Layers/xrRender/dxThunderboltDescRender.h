@@ -2,6 +2,8 @@
 
 #include "Include/xrRender/ThunderboltDescRender.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class IRender_DetailModel;
 
 class dxThunderboltDescRender : public IThunderboltDescRender
@@ -15,3 +17,4 @@ public:
 public:
     IRender_DetailModel* l_model;
 };
+} // namespace xray::render::RENDER_NAMESPACE

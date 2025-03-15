@@ -8,6 +8,8 @@
 #include <DirectXMath.h>
 #endif
 
+namespace xray::render::RENDER_NAMESPACE
+{
 void CBackend::OnFrameEnd()
 {
     if (!GEnv.isDedicatedServer)
@@ -515,3 +517,4 @@ void CBackend::apply_lmaterial()
                                 o_hemi_cube[CROS_impl::CUBE_FACE_NEG_Y],
                                 o_hemi_cube[CROS_impl::CUBE_FACE_NEG_Z]);
 }
+} // namespace xray::render::RENDER_NAMESPACE

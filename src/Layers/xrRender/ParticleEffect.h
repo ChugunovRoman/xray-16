@@ -9,6 +9,8 @@
 #include "Layers/xrRender/dxParticleCustom.h"
 #endif // _EDITOR
 
+namespace xray::render::RENDER_NAMESPACE
+{
 namespace PS
 {
 class ECORE_API CParticleEffect : public dxParticleCustom
@@ -105,3 +107,4 @@ extern const u32 uDT_STEP;
 extern const float fDT_STEP;
 }
 //---------------------------------------------------------------------------
+} // namespace xray::render::RENDER_NAMESPACE

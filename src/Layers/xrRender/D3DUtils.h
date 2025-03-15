@@ -10,6 +10,8 @@
 #define DU_DRAW_DP RCache.dbg_DP
 #endif
 
+namespace xray::render::RENDER_NAMESPACE
+{
 struct SPrimitiveBuffer
 {
     IndexStagingBuffer pIB;
@@ -194,3 +196,4 @@ public:
 };
 extern ECORE_API CDrawUtilities DUImpl;
 //----------------------------------------------------
+} // namespace xray::render::RENDER_NAMESPACE

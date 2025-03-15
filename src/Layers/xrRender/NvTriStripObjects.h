@@ -9,6 +9,8 @@
 //
 /////////////////////////////////////////////////////////////////////////////////
 
+namespace xray::render::RENDER_NAMESPACE
+{
 struct MyVertex
 {
     float x, y, z;
@@ -233,3 +235,4 @@ protected:
     // to these protected stripificaton methods if they want
     friend NvStripInfo;
 };
+} // namespace xray::render::RENDER_NAMESPACE

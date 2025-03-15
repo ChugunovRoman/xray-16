@@ -1,5 +1,7 @@
 #pragma once
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class ECORE_API R_tree
 {
 public:
@@ -35,3 +37,4 @@ public:
 
     CBackend& cmd_list;
 };
+} // namespace xray::render::RENDER_NAMESPACE

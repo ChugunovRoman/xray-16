@@ -4,6 +4,8 @@
 #include "Include/xrRender/ObjectSpaceRender.h"
 #include "xrEngine/xr_collide_form.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class dxObjectSpaceRender : public IObjectSpaceRender
 {
 public:
@@ -22,4 +24,5 @@ private:
     xr_vector<std::pair<Fsphere, u32>> dbg_S; // MT: dangerous
 };
 
+} // namespace xray::render::RENDER_NAMESPACE
 #endif // DEBUG

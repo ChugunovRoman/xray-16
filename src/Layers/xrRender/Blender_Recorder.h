@@ -8,6 +8,8 @@
 
 #pragma pack(push, 4)
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class CBlender_Compile
 {
 public:
@@ -180,3 +182,4 @@ public:
     ShaderElement* _lua_Compile(LPCSTR namesp, LPCSTR name);
 };
 #pragma pack(pop)
+} // namespace xray::render::RENDER_NAMESPACE

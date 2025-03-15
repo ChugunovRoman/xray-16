@@ -15,6 +15,8 @@
 #include "Layers/xrRenderDX11/3DFluid/dx113DFluidManager.h"
 #endif
 
+namespace xray::render::RENDER_NAMESPACE
+{
 CRender RImplementation;
 
 //////////////////////////////////////////////////////////////////////////
@@ -887,3 +889,4 @@ void CRender::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
     HOM.DumpStatistics(font, alert);
     Sectors_xrc.DumpStatistics(font, alert);
 }
+} // namespace xray::render::RENDER_NAMESPACE

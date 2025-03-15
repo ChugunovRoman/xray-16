@@ -6,6 +6,8 @@
 
 #include "Include/xrRender/KinematicsAnimated.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 //*** Bone Instance *******************************************************************************
 #pragma pack(push, 8)
 class CBlendInstance // Bone Instance Blend List (per-bone data)
@@ -233,3 +235,4 @@ IC CKinematicsAnimated* PKinematicsAnimated(IRenderVisual* V)
 {
     return V ? (CKinematicsAnimated*)V->dcast_PKinematicsAnimated() : 0;
 }
+} // namespace xray::render::RENDER_NAMESPACE

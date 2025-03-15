@@ -3,6 +3,8 @@
 #include "xrEngine/CustomHUD.h"
 #include "xrCore/Threading/TaskManager.hpp"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 float g_fSCREEN;
 
 extern float r_dtex_range;
@@ -150,3 +152,4 @@ void CRender::Calculate()
     else
         r_sun.run();
 }
+} // namespace xray::render::RENDER_NAMESPACE

@@ -11,6 +11,8 @@
 // refs
 struct lua_State;
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class dx11ConstantBuffer;
 
 // defs
@@ -271,3 +273,4 @@ private:
         return false;
     }
 };
+} // namespace xray::render::RENDER_NAMESPACE

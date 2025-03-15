@@ -1,10 +1,13 @@
 #pragma once
 
-class dx113DFluidGrid;
-class dx113DFluidData;
 class IPhysicsShell;
 class IPhysicsElement;
 class IPhysicsGeometry;
+
+namespace xray::render::RENDER_NAMESPACE
+{
+class dx113DFluidGrid;
+class dx113DFluidData;
 
 class dx113DFluidObstacles
 {
@@ -50,3 +53,4 @@ private:
     xr_vector<const IPhysicsShell*> m_lstShells;
     xr_vector<const IPhysicsElement*> m_lstElements;
 };
+} // namespace xray::render::RENDER_NAMESPACE

@@ -2,6 +2,8 @@
 
 #include "Include/xrRender/RainRender.h"
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class dxRainRender : public IRainRender
 {
 public:
@@ -23,3 +25,4 @@ private:
     ref_geom hGeom_Drops;
     ref_shader SH_Splash;
 };
+} // namespace xray::render::RENDER_NAMESPACE

@@ -1,5 +1,7 @@
 #pragma once
 
+namespace xray::render::RENDER_NAMESPACE
+{
 class dx11StateManager
 {
 public:
@@ -90,3 +92,4 @@ private:
 
     CBackend& cmd_list;
 };
+} // namespace xray::render::RENDER_NAMESPACE

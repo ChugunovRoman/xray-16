@@ -9,7 +9,12 @@
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/bin/x86_64/${input:buildType}/xr_3da",
-      "args": ["-soc", "-nointro", "-fsltx", "${SOC_LTX_FILE_PATH}"],
+      "args": [
+        "-soc",
+        "-nointro",
+        "-fsltx",
+        "${SOC_LTX_FILE_PATH}",
+      ],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}/bin",
       "environment": [
@@ -27,7 +32,12 @@
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/bin/x86_64/${input:buildType}/xr_3da",
-      "args": ["-cs", "-nointro", "-fsltx", "${CS_LTX_FILE_PATH}"],
+      "args": [
+        "-cs",
+        "-nointro",
+        "-fsltx",
+        "${CS_LTX_FILE_PATH}",
+      ],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}/bin",
       "environment": [
@@ -45,7 +55,11 @@
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/bin/x86_64/${input:buildType}/xr_3da",
-      "args": ["-nointro", "-fsltx", "${COP_LTX_FILE_PATH}"],
+      "args": [
+        "-nointro",
+        "-fsltx",
+        "${COP_LTX_FILE_PATH}",
+      ],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}/bin",
       "environment": [
@@ -63,7 +77,11 @@
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/bin/x86_64/${input:buildType}/xr_3da",
-      "args": ["-nointro", "-fsltx", "${COC_LTX_FILE_PATH}"],
+      "args": [
+        "-nointro",
+        "-fsltx",
+        "${COC_LTX_FILE_PATH}",
+      ],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}/bin",
       "environment": [
