@@ -9,6 +9,7 @@
 #include "pch_script.h"
 #include "inventory_item.h"
 #include "inventory_item_impl.h"
+#include "CustomOutfit.h"
 
 #include "xrAICore/Navigation/ai_object_location.h"
 #include "Common/object_broker.h"
@@ -204,7 +205,9 @@ bool CInventoryItem::install_upgrade_impl(LPCSTR section, bool test)
         result2 = process_if_exists_set(section, "helmet_avaliable", &CInifile::r_bool, value, test);
         if (result2 && !test)
         {
-            m_flags.set(FAllowHelmet, value);
+            CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(this);
+            if (outfit)
+                outfit->bIsHelmetAvaliable = true;
         }
         result |= result2;
 
