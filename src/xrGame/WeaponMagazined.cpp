@@ -1119,17 +1119,7 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
     {
         auto found_addon = m_addon_items.find(*pIItem->m_section_id);
         if (found_addon == m_addon_items.end())
-        {
-            addon_item* new_addon = xr_new<addon_item>();
-            new_addon->addon_item_name = pIItem->m_section_id;
-            new_addon->addon_type = pScope->m_addon_type;
-            new_addon->addon_item_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*pIItem->m_section_id, "visual")));
-            new_addon->addon_item_visible = true;
-            new_addon->addon_item_hpb = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_hpb", *pIItem->m_section_id).c_str(), Fvector().set(0.f,0.f,0.f));
-            new_addon->addon_item_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_pos", *pIItem->m_section_id).c_str(), Fvector().set(0.f,0.f,0.f));
-            new_addon->addon_item_scale = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_scale", *pIItem->m_section_id).c_str(), Fvector().set(1.f,1.f,1.f));
-            m_addon_items.insert(std::make_pair(*pIItem->m_section_id, new_addon));
-        }
+            addAddon(pIItem->m_section_id, pScope->m_addon_type);
         else
             m_addon_items[*pIItem->m_section_id]->addon_item_visible = true;
 

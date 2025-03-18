@@ -343,7 +343,7 @@ void CHudTuner::on_tool_frame()
                     {
                         ImGui::LabelText("Current item", "%s", item.first);
 
-                        if (ImGui::RadioButton("Visible", item.second->addon_item_visible))
+                        if (ImGui::RadioButton(make_string("Visible %s", item.first).c_str(), item.second->addon_item_visible))
                             item.second->addon_item_visible = !item.second->addon_item_visible;
 
                         ImGui::NewLine();
