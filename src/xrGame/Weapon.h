@@ -55,7 +55,7 @@ public:
 
     xr_map<pcstr, addon_item*> m_addon_items;
 
-    void addAddon(shared_str section_id, shared_str m_addon_type);
+    void addAddon(shared_str section_id, shared_str m_addon_type, bool visible = true);
 
     virtual bool bInZoomRightNow() const { return m_zoom_params.m_fZoomRotationFactor > 0.05; }
     IC bool bIsSecondVPZoomPresent() const { return GetSecondVPZoomFactor() > 0.000f; }

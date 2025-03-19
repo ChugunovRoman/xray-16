@@ -995,39 +995,37 @@ void CWeapon::net_Import(NET_Packet& P)
 void CWeapon::save(NET_Packet& output_packet)
 {
     inherited::save(output_packet);
-    save_data(iAmmoElapsed, output_packet);
-    save_data(m_cur_scope, output_packet);
-    save_data(m_flagsAddOnState, output_packet);
-    save_data(m_ammoType, output_packet);
-    save_data(m_zoom_params.m_bIsZoomModeNow, output_packet);
-    save_data(m_zoom_params.m_bIsZoomSecondModeNow, output_packet);
-    save_data(m_bRememberActorNVisnStatus, output_packet);
-    save_data(bNVsecondVPstatus, output_packet);
-    save_data(m_fSecondRTZoomFactor, output_packet);
-    save_data(m_section_id, output_packet);
 
-    save_data((u16)m_addon_items.size(), output_packet);
+    output_packet.w_u16(iAmmoElapsed);
+    output_packet.w_u8(m_cur_scope);
+    output_packet.w_u8(m_flagsAddOnState);
+    output_packet.w_u8(m_ammoType);
+    output_packet.w_u8(m_zoom_params.m_bIsZoomModeNow ? 1 : 0);
+    output_packet.w_u8(m_zoom_params.m_bIsZoomSecondModeNow ? 1 : 0);
+    output_packet.w_u8(m_bRememberActorNVisnStatus ? 1 : 0);
+    output_packet.w_u8(bNVsecondVPstatus ? 1 : 0);
+    output_packet.w_float(m_fSecondRTZoomFactor);
+    output_packet.w_stringZ(m_section_id);
+    output_packet.w_u16(m_addon_items.size());
 
     for (auto addon: m_addon_items)
     {
-        if (addon.second->addon_item_visible)
-        {
-            save_data(addon.second->addon_item_name, output_packet);
-            save_data(addon.second->addon_type, output_packet);
-        }
+        output_packet.w_stringZ(addon.second->addon_item_name);
+        output_packet.w_stringZ(addon.second->addon_type);
+        output_packet.w_u8(addon.second->addon_item_visible ? 1 : 0);
     }
 }
 
 void CWeapon::load(IReader& input_packet)
 {
     inherited::load(input_packet);
-    load_data(iAmmoElapsed, input_packet);
-    load_data(m_cur_scope, input_packet);
-    load_data(m_flagsAddOnState, input_packet);
+    iAmmoElapsed = input_packet.r_u16();
+    m_cur_scope = input_packet.r_u8();
+    m_flagsAddOnState = input_packet.r_u8();
     UpdateAddonsVisibility();
-    load_data(m_ammoType, input_packet);
-    load_data(m_zoom_params.m_bIsZoomModeNow, input_packet);
-    load_data(m_zoom_params.m_bIsZoomSecondModeNow, input_packet);
+    m_ammoType = input_packet.r_u8();
+    m_zoom_params.m_bIsZoomModeNow = input_packet.r_u8() == 1 ? true : false;
+    m_zoom_params.m_bIsZoomSecondModeNow = input_packet.r_u8() == 1 ? true : false;
 
     if (m_zoom_params.m_bIsZoomModeNow)
         OnZoomIn();
@@ -1038,22 +1036,25 @@ void CWeapon::load(IReader& input_packet)
     else
         OnZoomOut();
 
-    load_data(m_bRememberActorNVisnStatus, input_packet);
-    load_data(bNVsecondVPstatus, input_packet);
-    load_data(m_fSecondRTZoomFactor, input_packet);
-    load_data(m_section_id, input_packet);
+    m_bRememberActorNVisnStatus = input_packet.r_u8() == 1 ? true : false;
+    bNVsecondVPstatus = input_packet.r_u8() == 1 ? true : false;
+    m_fSecondRTZoomFactor = input_packet.r_float();
+    input_packet.r_stringZ(m_section_id);
 
-    u16 addonCount{0};
-    load_data(addonCount, input_packet);
-
+    u16 const addonCount = input_packet.r_u16();
+    
     for (int i = 0; i < addonCount; i++)
     {
-        shared_str section_id{""}, addon_type{""};
+        shared_str section_id{""};
+        shared_str addon_type{""};
 
-        load_data(section_id, input_packet);
-        load_data(addon_type, input_packet);
+        input_packet.r_stringZ(section_id);
+        input_packet.r_stringZ(addon_type);
 
-        addAddon(section_id, addon_type);
+        u8 const addon_visible{input_packet.r_u8()};
+
+        if (pSettings->section_exist(*section_id))
+            addAddon(section_id, addon_type, addon_visible == 1);
     }
 
     reload(*m_section_id);
@@ -1771,9 +1772,6 @@ bool CWeapon::IsSilencerAttached() const
 
 bool CWeapon::hasInstalledAddonType(shared_str type) const
 {
-    if (!bUseAttachmentSystem)
-        return (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 1;
-    
     for (auto addon: m_addon_items)
     {
         if (addon.second->addon_item_visible && xr_strcmp(*addon.second->addon_type, *type) == 0)
@@ -3157,18 +3155,23 @@ void CWeapon::UpdateSecondVP(bool bInGrenade)
     Device.m_SecondViewport.SetSVPActive(bCond_1 && bCond_2 && bCond_3 && !bInGrenade);
 }
 
-void CWeapon::addAddon(shared_str section_id, shared_str m_addon_type)
+void CWeapon::addAddon(shared_str section_id, shared_str m_addon_type, bool visible)
 {
     addon_item* new_addon = xr_new<addon_item>();
 
     new_addon->addon_item_name = section_id;
     new_addon->addon_type = m_addon_type;
     new_addon->addon_item_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*section_id, "visual")));
-    new_addon->addon_item_visible = true;
+    new_addon->addon_item_visible = visible;
     new_addon->addon_item_hpb = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_hpb", *section_id).c_str(), Fvector().set(0.f,0.f,0.f));
     new_addon->addon_item_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_pos", *section_id).c_str(), Fvector().set(0.f,0.f,0.f));
     new_addon->addon_item_scale = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_scale", *section_id).c_str(), Fvector().set(1.f,1.f,1.f));
 
-    m_addon_items.insert(std::make_pair(*section_id, new_addon));
+    auto found_addon = m_addon_items.find(*section_id);
+    if (found_addon == m_addon_items.end())
+        m_addon_items.insert(std::make_pair(*section_id, new_addon));
+    else
+        m_addon_items[*section_id] = new_addon;
+
 }
 
