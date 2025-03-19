@@ -2050,7 +2050,7 @@ float CWeapon::CurrentZoomFactor()
 float CWeapon::GetControlInertionFactor() const
 {
     float fInertionFactor = inherited::GetControlInertionFactor();
-    if (IsScopeAttached() && IsZoomed())
+    if (IsScopeAttached() && (IsZoomed() || IsSecondZoomed()))
         return m_fScopeInertionFactor;
 
     return fInertionFactor;
