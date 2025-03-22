@@ -236,7 +236,7 @@ void R_dsgraph_structure::insert_static(dxRender_Visual* pVisual)
         normalItems.emplace_back(_NormalItem{ SSA, pVisual });
 
         // Need to sort for HZB efficient use
-        if (SSA > normalItems.ssa)
+        if (normalItems.ssa && SSA > normalItems.ssa)
         {
             normalItems.ssa = SSA;
         }
