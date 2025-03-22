@@ -1294,16 +1294,35 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
         m_flagsAddOnState &= ~CSE_ALifeItemWeapon::eWeaponAddonScope;
 
         pcstr parentSect = pSettings->read_if_exists<pcstr>(*m_section_id, "parent_section", *m_section_id);
-        if (bUseAttachmentSystem)
-        {
-            auto found_addon = m_addon_items.find(item_section_name);
-            if (found_addon != m_addon_items.end())
-                m_addon_items[item_section_name]->addon_item_visible = false;
-        }
-        else if (xr_strcmp(parentSect, *m_section_id) != 0)
+        auto found_addon = m_addon_items.find(item_section_name);
+
+        if (!bUseAttachmentSystem && xr_strcmp(parentSect, *m_section_id) != 0)
             cNameVisual_set(pSettings->r_string(parentSect, "visual"));
 
         m_section_id = parentSect;
+
+        if (bUseAttachmentSystem && found_addon != m_addon_items.end())
+        {
+            m_addon_items[item_section_name]->addon_item_visible = false;
+
+            bool hasMainScope = hasInstalledAddonType("base_scope");
+            bool hasColimScope = hasInstalledAddonType("colim_scope");
+            addon_item* colimAddon = getFirstAddonByType("colim_scope");
+
+            if (hasColimScope && colimAddon)
+            {
+                bool hasAltProps = pSettings->line_exist(*m_section_id, make_string("%s_alt_hud_pos", *colimAddon->addon_item_name).c_str());
+
+                if (hasAltProps)
+                {
+                    colimAddon->addon_item_hpb = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_alt_hud_hpb", *colimAddon->addon_item_name).c_str(), Fvector().set(0.f,0.f,0.f));
+                    colimAddon->addon_item_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_alt_hud_pos", *colimAddon->addon_item_name).c_str(), Fvector().set(0.f,0.f,0.f));
+                    colimAddon->addon_item_scale = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_alt_hud_scale", *colimAddon->addon_item_name).c_str(), Fvector().set(1.f,1.f,1.f));
+                    m_addon_items[*colimAddon->addon_item_name] = colimAddon;
+                }
+            }
+        }
+
         m_cur_scope = 0;
         reload(parentSect);
 

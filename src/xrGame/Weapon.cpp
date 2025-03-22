@@ -1773,10 +1773,8 @@ bool CWeapon::IsSilencerAttached() const
 bool CWeapon::hasInstalledAddonType(shared_str type) const
 {
     for (auto addon: m_addon_items)
-    {
         if (addon.second->addon_item_visible && xr_strcmp(*addon.second->addon_type, *type) == 0)
             return true;
-    }
 
     return false;
 }
@@ -1935,16 +1933,28 @@ void CWeapon::LoadAltAddonHudAim()
         const bool is_16x9 = UICore::is_widescreen();
         xr_sprintf(_prefix, "%s", is_16x9 ? "_16x9" : "");
 
+
+        bool hasMainScope = hasInstalledAddonType("base_scope");
+
         for (auto addon: m_addon_items)
         {
             if (addon.second->addon_item_visible && xr_strcmp(*addon.second->addon_type, "colim_scope") == 0)
             {
-                shared_str val{make_string("%s_aim_hud_offset_alt_pos%s", *addon.second->addon_item_name, _prefix).c_str()};
+                bool hasAltProps = pSettings->line_exist(*m_section_id, make_string("%s_alt_hud_pos", *addon.second->addon_item_name).c_str());
+                shared_str val{make_string("%s_aim_hud_offset_alt%s%s", *addon.second->addon_item_name, hasAltProps ? "_2_pos" : "_pos", _prefix).c_str()};
                 m_hands_offset[0][1] = READ_IF_EXISTS(pSettings, r_fvector3, *m_section_id, *val, Fvector().set(0.0f, 0.0f, 0.0f));
-                val = make_string("%s_aim_hud_offset_alt_rot%s", *addon.second->addon_item_name, _prefix).c_str();
+                val = make_string("%s_aim_hud_offset_alt%s%s", *addon.second->addon_item_name, hasAltProps ? "_2_rot" : "_rot", _prefix).c_str();
                 m_hands_offset[1][1] = READ_IF_EXISTS(pSettings, r_fvector3, *m_section_id, *val, Fvector().set(0.0f, 0.0f, 0.0f));
                 val = make_string("%s_use_alt_aim_hud", *addon.second->addon_item_name).c_str();
                 m_zoom_params.m_bZoomSecondEnabled = READ_IF_EXISTS(pSettings, r_bool, *m_section_id, *val, false);
+
+                if (hasMainScope)
+                {
+                    val = make_string("%s_aim_hud_offset_alt_pos%s", *addon.second->addon_item_name, _prefix).c_str();
+                    m_hands_offset[0][1] = READ_IF_EXISTS(pSettings, r_fvector3, *m_section_id, *val, Fvector().set(0.0f, 0.0f, 0.0f));
+                    val = make_string("%s_aim_hud_offset_alt_rot%s", *addon.second->addon_item_name, _prefix).c_str();
+                    m_hands_offset[1][1] = READ_IF_EXISTS(pSettings, r_fvector3, *m_section_id, *val, Fvector().set(0.0f, 0.0f, 0.0f));
+                }
             }
         }
     }
@@ -2222,7 +2232,7 @@ void CWeapon::reload(LPCSTR section)
 {
     CShootingObject::reload(section);
     CHudItemObject::reload(section);
-    
+
     m_can_be_strapped = true;
     m_strapped_mode = false;
     b_forceIconUpdate = true;
@@ -3155,6 +3165,15 @@ void CWeapon::UpdateSecondVP(bool bInGrenade)
     Device.m_SecondViewport.SetSVPActive(bCond_1 && bCond_2 && bCond_3 && !bInGrenade);
 }
 
+addon_item* CWeapon::getFirstAddonByType(shared_str m_addon_type) const
+{
+    for (auto addon: m_addon_items)
+        if (addon.second->addon_item_visible && xr_strcmp(*addon.second->addon_type, *m_addon_type) == 0)
+            return addon.second;
+
+    return nullptr;
+}
+
 void CWeapon::addAddon(shared_str section_id, shared_str m_addon_type, bool visible)
 {
     addon_item* new_addon = xr_new<addon_item>();
@@ -3167,11 +3186,27 @@ void CWeapon::addAddon(shared_str section_id, shared_str m_addon_type, bool visi
     new_addon->addon_item_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_pos", *section_id).c_str(), Fvector().set(0.f,0.f,0.f));
     new_addon->addon_item_scale = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_scale", *section_id).c_str(), Fvector().set(1.f,1.f,1.f));
 
+    bool hasAltProps = pSettings->line_exist(*m_section_id, make_string("%s_alt_hud_pos", *section_id).c_str());
+    bool hasMainScope = hasInstalledAddonType("base_scope");
+    addon_item* colimAddon = getFirstAddonByType("colim_scope");
+
+    if (xr_strcmp(*m_addon_type, "colim_scope") == 0 && hasAltProps && !hasMainScope)
+    {
+        new_addon->addon_item_hpb = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_alt_hud_hpb", *section_id).c_str(), Fvector().set(0.f,0.f,0.f));
+        new_addon->addon_item_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_alt_hud_pos", *section_id).c_str(), Fvector().set(0.f,0.f,0.f));
+        new_addon->addon_item_scale = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_alt_hud_scale", *section_id).c_str(), Fvector().set(1.f,1.f,1.f));
+    }
+    if (xr_strcmp(*m_addon_type, "base_scope") == 0 && colimAddon)
+    {
+        colimAddon->addon_item_hpb = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_hpb", *colimAddon->addon_item_name).c_str(), Fvector().set(0.f,0.f,0.f));
+        colimAddon->addon_item_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_pos", *colimAddon->addon_item_name).c_str(), Fvector().set(0.f,0.f,0.f));
+        colimAddon->addon_item_scale = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_scale", *colimAddon->addon_item_name).c_str(), Fvector().set(1.f,1.f,1.f));
+    }
+
     auto found_addon = m_addon_items.find(*section_id);
     if (found_addon == m_addon_items.end())
         m_addon_items.insert(std::make_pair(*section_id, new_addon));
     else
         m_addon_items[*section_id] = new_addon;
-
 }
 
