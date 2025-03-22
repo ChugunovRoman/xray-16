@@ -4,6 +4,7 @@
 #include "xr_level_controller.h"
 
 #include "xrCore/XML/XMLDocument.hpp"
+#include "xrCore/Threading/ParallelForEach.hpp"
 
 constexpr pcstr OPENXRAY_XML = "openxray.xml";
 
@@ -13,6 +14,7 @@ CStringTable& StringTable()
     return string_table;
 }
 
+std::mutex CStringTable::pDataMutex;
 xr_unique_ptr<STRING_TABLE_DATA> CStringTable::pData{};
 BOOL CStringTable::m_bWriteErrorsToLog = FALSE;
 u32 CStringTable::LanguageID = std::numeric_limits<u32>::max();
@@ -57,18 +59,17 @@ void CStringTable::Init()
     string_path files_mask;
     xr_sprintf(files_mask, "text" DELIMITER "%s" DELIMITER "*.xml", pData->m_sLanguage.c_str());
     FS.file_list(fset, "$game_config$", FS_ListFiles, files_mask);
-    auto fit = fset.begin();
-    auto fit_e = fset.end();
 
-    for (; fit != fit_e; ++fit)
+    xr_parallel_for_each(fset, [this](const FS_File& it)
     {
         string_path fn, ext;
-        _splitpath((*fit).name.c_str(), 0, 0, fn, ext);
+        _splitpath(it.name.c_str(), nullptr, nullptr, fn, ext);
         xr_strcat(fn, ext);
 
         Load(fn);
-    }
-#ifdef DEBUG
+    });
+
+#ifndef MASTER_GOLD
     Msg("StringTable: loaded %d files", fset.size());
 #endif
 }
@@ -205,17 +206,11 @@ void CStringTable::Load(LPCSTR xml_file_full)
     uiXml.Load(CONFIG_PATH, _s, xml_file_full);
 
     //общий список всех записей таблицы в файле
-    const int string_num = uiXml.GetNodesNum(uiXml.GetRoot(), "string");
+    const size_t string_num = uiXml.GetNodesNum(uiXml.GetRoot(), "string");
 
-    for (int i = 0; i < string_num; ++i)
+    for (size_t i = 0; i < string_num; ++i)
     {
         LPCSTR string_name = uiXml.ReadAttrib(uiXml.GetRoot(), "string", i, "id", NULL);
-
-#ifndef MASTER_GOLD
-        if (pData->m_StringTable.find(string_name) != pData->m_StringTable.end())
-            Msg("~ duplicate string table id [%s]", string_name);
-#endif
-
         LPCSTR string_text = uiXml.Read(uiXml.GetRoot(), "string:text", i, NULL);
 
         if (m_bWriteErrorsToLog && string_text)
@@ -223,9 +218,19 @@ void CStringTable::Load(LPCSTR xml_file_full)
 
         VERIFY3(string_text, "string table entry does not has a text", string_name);
 
-        const STRING_VALUE str_val = ParseLine(string_text);
-
-        pData->m_StringTable[string_name] = str_val;
+        [[maybe_unused]] bool duplicate{};
+        const STRING_VALUE str_val = ParseLine(string_text); // NOLINT
+        {
+            std::lock_guard guard{ pDataMutex };
+#ifndef MASTER_GOLD
+            duplicate = pData->m_StringTable.find(string_name) != pData->m_StringTable.end();
+#endif
+            pData->m_StringTable[string_name] = str_val;
+        }
+#ifndef MASTER_GOLD
+        if (duplicate)
+            Msg("~ duplicate string table id [%s]", string_name);
+#endif
     }
 }
 
@@ -240,6 +245,8 @@ void CStringTable::ReloadLanguage()
 
 STRING_VALUE CStringTable::ParseLine(pcstr str)
 {
+    ZoneScoped;
+
     constexpr char   ACTION_STR[]     = "$$ACTION_";
     constexpr size_t ACTION_STR_LEN   = std::size(ACTION_STR) - 1;
 
@@ -273,7 +280,7 @@ STRING_VALUE CStringTable::ParseLine(pcstr str)
         }
     }
 
-    return STRING_VALUE(string.c_str());
+    return { string.c_str() };
 }
 
 STRING_VALUE CStringTable::translate(const STRING_ID& str_id) const

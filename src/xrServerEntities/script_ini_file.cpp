@@ -38,7 +38,10 @@ int CScriptIniFile::r_token(LPCSTR S, LPCSTR L, const CScriptTokenList& token_li
 
 u32 CScriptIniFile::line_count(LPCSTR S)
 {
-    THROW3(inherited::section_exist(S), "Cannot find section", S);
+    R_ASSERT3_CURE(inherited::section_exist(S), "Cannot find section", S,
+    {
+        return 0;
+    });
     return inherited::line_count(S);
 }
 

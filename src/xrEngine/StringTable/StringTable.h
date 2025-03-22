@@ -8,6 +8,8 @@
 #include "xrCore/xrstring.h"
 #include "xrCore/xr_token.h"
 
+#include <mutex>
+
 using STRING_ID = shared_str;
 using STRING_VALUE = shared_str;
 
@@ -47,6 +49,8 @@ private:
     void FillLanguageToken();
     void SetLanguage();
     static STRING_VALUE ParseLine(pcstr str);
+
+    static std::mutex pDataMutex;
     static xr_unique_ptr<STRING_TABLE_DATA> pData;
     static xr_vector<xr_token> languagesToken;
 };

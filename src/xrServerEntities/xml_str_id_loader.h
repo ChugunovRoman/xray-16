@@ -159,11 +159,13 @@ void CSXML_IdToIndex::InitInternal(bool crashOnFail /*= true*/, bool ignoreMissi
             LPCSTR item_name = uiXml->ReadAttrib(uiXml->GetRoot(), tag_name, i, "id", NULL);
             if (!item_name || !item_name[0])
             {
-                Msg("! id for %s don't set, number %d in %s", tag_name, i, xml_file_full);
+#ifndef MASTER_GOLD
+                Msg("! id for %s don't set, number %d in %s", tag_name, i, xml_file_full.c_str());
+#endif
                 continue;
             }
 
-            //проверетить ID на уникальность
+            //проверить ID на уникальность
             T_VECTOR::iterator t_it = m_pItemDataVector->begin();
             for (; m_pItemDataVector->end() != t_it; ++t_it)
             {
@@ -173,7 +175,9 @@ void CSXML_IdToIndex::InitInternal(bool crashOnFail /*= true*/, bool ignoreMissi
 
             if (m_pItemDataVector->end() != t_it)
             {
+#ifndef MASTER_GOLD
                 Msg("! duplicate %s with id[%s] in %s", tag_name, item_name, xml_file_full);
+#endif
                 continue;
             }
 
