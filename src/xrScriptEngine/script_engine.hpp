@@ -171,8 +171,8 @@ public:
     {
         int result = 0;
 
-        if (g_LuaDebug.test(1) || message == LuaMessageType::Error)
-        {
+        // if (g_LuaDebug.test(1) || message == LuaMessageType::Error)
+        // {
             string4096 log;
             result = xr_sprintf(log, format, std::forward<Args>(args)...);
 
@@ -181,7 +181,7 @@ public:
             m_output.w(luaLogHeader, xr_strlen(luaLogHeader));
             m_output.w(log, xr_strlen(log));
             m_output.w("\r\n", sizeof("\r\n"));
-        }
+        // }
 
         if (message == LuaMessageType::Error && !logReenterability)
         {
