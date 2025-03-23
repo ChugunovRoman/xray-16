@@ -160,6 +160,8 @@ public:
     void OnPrevFireMode();
     bool HasFireModes() { return m_bHasDifferentFireModes; }
 
+    virtual void reload(LPCSTR section);
+
     int GetCurrentFireMode() override
     {
         //AVO: fixed crash due to original GSC assumption that CWeaponMagazined will always have firemodes specified in configs.

@@ -249,6 +249,29 @@ void CWeaponMagazined::Reload()
     TryReload();
 }
 
+void CWeaponMagazined::reload(LPCSTR section)
+{
+    inherited::reload(section);
+
+    //звуки и партиклы глушителя, если такой есть
+    if (m_eSilencerStatus == ALife::eAddonAttachable || m_eSilencerStatus == ALife::eAddonPermanent)
+    {
+        if (pSettings->line_exist(section, "silencer_flame_particles"))
+            m_sSilencerFlameParticles = pSettings->r_string(section, "silencer_flame_particles");
+        if (pSettings->line_exist(section, "silencer_smoke_particles"))
+            m_sSilencerSmokeParticles = pSettings->r_string(section, "silencer_smoke_particles");
+
+        //Alundaio: LAYERED_SND_SHOOT Silencer
+        m_layered_sounds.LoadSound(section, "snd_silncer_shot", "sndSilencerShot", false, m_eSoundShot);
+        //-Alundaio
+    }
+
+    if (IsSilencerAttached() && m_layered_sounds.FindSoundItem("sndSilencerShot", false))
+        m_sSndShotCurrent = "sndSilencerShot";
+    else
+        m_sSndShotCurrent = "sndShot";
+}
+
 bool CWeaponMagazined::TryReload()
 {
     if (m_pInventory)
@@ -1485,7 +1508,11 @@ void CWeaponMagazined::PlayAnimReload()
     }
     else
     {
-        if (cpcstr anim_name = iAmmoElapsed == 0 ? WhichHUDAnimationExist("anm_reload_empty", "anim_reload_empty") : nullptr)
+        shared_str reload_anim = make_string("anm_reload_%d", iAmmoElapsed).c_str();
+
+        if (isHUDAnimationExist(*reload_anim))
+            PlayHUDMotion(reload_anim, TRUE, this, GetState());
+        else if (cpcstr anim_name = iAmmoElapsed == 0 ? WhichHUDAnimationExist("anm_reload_empty", "anim_reload_empty") : nullptr)
             PlayHUDMotion(anim_name, true, this, state);
         else
             PlayHUDMotion("anm_reload", "anim_reload", true, this, state);
