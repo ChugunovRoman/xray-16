@@ -72,6 +72,7 @@ public:
     void reset();
     void synchronize(IKinematicsAnimated* skeleton_animated, const CStalkerAnimationPair& stalker_animation_pair) const;
     MotionID select(const ANIM_VECTOR& array, const ANIMATION_WEIGHTS* weights = 0);
+    CAI_Stalker* object() const { return m_object; };
     IC bool actual() const;
     IC bool animation(const MotionID& animation);
     IC const MotionID& animation() const;

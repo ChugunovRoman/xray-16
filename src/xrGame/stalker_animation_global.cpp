@@ -58,10 +58,29 @@ MotionID CStalkerAnimationManager::global_critical_hit()
     VERIFY(animation_slot >= 1);
     VERIFY(animation_slot <= 3);
 
-    return (global().select(m_data_storage->m_part_animations.A[eBodyStateStand]
-                                .m_global.A[object().critical_wound_type() + 6 * (animation_slot - 1)]
-                                .A,
-        &object().critical_wound_weights()));
+    auto idx = object().critical_wound_type() + 6 * (animation_slot - 1);
+    if (
+        m_data_storage->m_part_animations.A.size() > eBodyStateStand
+        && m_data_storage->m_part_animations.A[eBodyStateStand].m_global.A.size() > idx
+    )
+    {
+        return (
+            global().select(
+                m_data_storage->m_part_animations.A[eBodyStateStand].m_global.A[idx].A,
+                &object().critical_wound_weights()
+            )
+        );
+    }
+    else
+        Msg(
+            "WARN ! Stalker global animation is not exists animation_slot=[%d] stalker=[%s] idx=[%d] anims eBodyStateStand size=[%d]",
+            animation_slot,
+            global().object() ? *global().object()->NameSection : "nullptr",
+            idx,
+            m_data_storage->m_part_animations.A[eBodyStateStand].m_global.A.size()
+        );
+
+    return (global().animation());
 }
 
 MotionID CStalkerAnimationManager::assign_global_animation(bool& animation_movement_controller)
