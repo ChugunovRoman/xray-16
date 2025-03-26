@@ -997,8 +997,9 @@ bool CWeaponMagazined::Action(u16 cmd, u32 flags)
                         Reload();
                 }
             }
-    }
+
         return true;
+    }
     case kWPN_FIREMODE_PREV:
     {
         if (flags & CMD_START)

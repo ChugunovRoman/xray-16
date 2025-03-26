@@ -1365,8 +1365,7 @@ bool CWeapon::Action(u16 cmd, u32 flags)
         return false;
     }
 
-    case kWPN_NEXT: { return SwitchAmmoType(flags);
-    }
+    case kWPN_NEXT: { return SwitchAmmoType(flags); }
 
     case kWPN_ZOOM_SECOND:
         if (IsZoomSecondEnabled())
@@ -1479,7 +1478,7 @@ bool CWeapon::Action(u16 cmd, u32 flags)
 
     case kWPN_ZOOM_INC:
     case kWPN_ZOOM_DEC:
-        if ((IsZoomEnabled() || IsZoomed()) && (flags&CMD_START) )
+        if (((IsZoomEnabled() && IsZoomed()) || (IsZoomSecondEnabled() && IsSecondZoomed())) && (flags&CMD_START) )
         {
             if (cmd == kWPN_ZOOM_INC)
                 ZoomInc();
