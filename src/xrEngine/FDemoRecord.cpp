@@ -487,7 +487,10 @@ void CDemoRecord::IR_OnKeyboardPress(int dik)
         m_speed = speed_3;
         m_angle_speed = speed_3;
         break;
-
+    case kEDITOR:
+        if (Device.b_is_Ready)
+            Device.editor().SwitchToNextState();
+        break;
     default:
     {
         switch (dik)
