@@ -61,6 +61,7 @@ public:
     u16 object_id() const;
     CHARACTER_COMMUNITY_INDEX Community() const;
     LPCSTR CommunityName() const;
+    void SetCommunityName(LPCSTR comm);
     CHARACTER_RANK_VALUE Rank();
     CHARACTER_REPUTATION_VALUE Reputation();
     void SetRank(CHARACTER_RANK_VALUE val);

@@ -481,6 +481,10 @@ shared_str CSE_ALifeTraderAbstract::character_profile() { return m_sCharacterPro
 u16 CSE_ALifeTraderAbstract::object_id() const { return base()->ID; }
 CHARACTER_COMMUNITY_INDEX CSE_ALifeTraderAbstract::Community() const { return m_community_index; }
 LPCSTR CSE_ALifeTraderAbstract::CommunityName() const { return *CHARACTER_COMMUNITY::IndexToId(m_community_index); }
+void CSE_ALifeTraderAbstract::SetCommunityName(LPCSTR comm)
+{
+    m_community_index = CHARACTER_COMMUNITY::IdToIndex(comm, NO_COMMUNITY_INDEX);
+}
 CHARACTER_RANK_VALUE CSE_ALifeTraderAbstract::Rank()
 {
     specific_character();
