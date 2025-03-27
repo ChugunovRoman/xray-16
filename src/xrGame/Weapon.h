@@ -33,6 +33,7 @@ public:
 	Fvector addon_item_hpb;
 	Fvector addon_item_pos;
 	Fvector addon_item_scale;
+	Fvector addon_item_dot_pos;
 	IKinematics* addon_item_model;
 	BOOL addon_item_visible;
 };

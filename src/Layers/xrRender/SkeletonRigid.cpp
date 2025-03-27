@@ -154,6 +154,10 @@ void CKinematics::LL_AddTransformToBone(KinematicsABT::additional_bone_transform
 {
     m_bones_offsets.push_back(offset);
 }
+void CKinematics::LL_SetTransformToBone(KinematicsABT::additional_bone_transform& offset)
+{
+    m_bones_pos.push_back(offset);
+}
 
 // Обнулить скриптовое смещение для конкретной кости или всех сразу (bone_id = BI_NONE) --#SM+#--
 void CKinematics::LL_ClearAdditionalTransform(u16 bone_id)
@@ -170,7 +174,7 @@ void CKinematics::LL_ClearAdditionalTransform(u16 bone_id)
         if (it->m_bone_id == bone_id)
         {
             it = m_bones_offsets.erase(it);
-        }
+        } 
         else
             ++it;
     }
@@ -180,6 +184,7 @@ void CKinematics::BuildBoneMatrix(
     const CBoneData* bd, CBoneInstance& bi, const Fmatrix* parent, u8 channel_mask /*= (1<<0)*/)
 {
     bi.mTransform.mul_43(*parent, bd->bind_transform);
+    CalculateBonesNewTransforms(bd, bi, parent, channel_mask); //--#SM+#--
     CalculateBonesAdditionalTransforms(bd, bi, parent, channel_mask); //--#SM+#--
 }
 
@@ -195,6 +200,20 @@ void CKinematics::CalculateBonesAdditionalTransforms(
             const Fvector vOldPos = bi.mTransform.c;
             bi.mTransform.mulB_43(it.m_transform); // Rotation
             bi.mTransform.c.add(vOldPos, it.m_transform.c); // Translation
+        }
+    }
+}
+
+void CKinematics::CalculateBonesNewTransforms(
+    const CBoneData* bd, CBoneInstance& bi, const Fmatrix* parent, u8 channel_mask /* = (1<<0)*/)
+{
+    // bi.mTransform.c - содержит смещение относительно первой кости модели\центра сцены (0, 0, 0)
+    for (auto& it : m_bones_pos)
+    {
+        if (it.m_bone_id == bd->GetSelfID())
+        {
+            bi.mTransform.mulB_43(it.m_transform); // Rotation
+            bi.mTransform.c.set(it.m_transform.c); // Translation
         }
     }
 }

@@ -254,6 +254,16 @@ void attachable_hud_item::render(u32 context_id, IRenderable* root)
             m_addon_attach_offset.translate_over(item.second->addon_item_pos);
             item.second->addon_item_transform.mul(m_item_transform, m_addon_attach_offset);
 
+            u16 bone_id = item.second->addon_item_model->LL_BoneID("dot");
+            if (bone_id != BI_NONE)
+            {
+                KinematicsABT::additional_bone_transform bone_offset;
+                bone_offset.m_bone_id = bone_id;
+                bone_offset.setPosOffset(item.second->addon_item_dot_pos);
+
+                item.second->addon_item_model->LL_SetTransformToBone(bone_offset);
+            }
+
             Fmatrix m;
             m.scale(item.second->addon_item_scale);
             item.second->addon_item_transform.mulB_43(m);

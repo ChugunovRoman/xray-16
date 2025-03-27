@@ -3184,6 +3184,7 @@ void CWeapon::addAddon(shared_str section_id, shared_str m_addon_type, bool visi
     new_addon->addon_item_hpb = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_hpb", *section_id).c_str(), Fvector().set(0.f,0.f,0.f));
     new_addon->addon_item_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_pos", *section_id).c_str(), Fvector().set(0.f,0.f,0.f));
     new_addon->addon_item_scale = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_scale", *section_id).c_str(), Fvector().set(1.f,1.f,1.f));
+    new_addon->addon_item_dot_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_dot_pos", *section_id).c_str(), Fvector().set(0.f,0.f,0.f));
 
     bool hasAltProps = pSettings->line_exist(*m_section_id, make_string("%s_alt_hud_pos", *section_id).c_str());
     bool hasMainScope = hasInstalledAddonType("base_scope");

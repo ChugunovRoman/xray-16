@@ -110,6 +110,7 @@ class CKinematics : public FHierrarhyVisual, public IKinematics
 protected: //--#SM+#--
     DEFINE_VECTOR(KinematicsABT::additional_bone_transform, BONE_TRANSFORM_VECTOR, BONE_TRANSFORM_VECTOR_IT)
     BONE_TRANSFORM_VECTOR m_bones_offsets;
+    BONE_TRANSFORM_VECTOR m_bones_pos;
 
 public:
 #ifdef DEBUG
@@ -127,6 +128,9 @@ public:
 
     virtual void CalculateBonesAdditionalTransforms(
         const CBoneData* bd, CBoneInstance& bi, const Fmatrix* parent, u8 mask_channel = (1 << 0)); //--#SM+#--
+    virtual void CalculateBonesNewTransforms(
+        const CBoneData* bd, CBoneInstance& bi, const Fmatrix* parent, u8 mask_channel = (1 << 0)); //--#SM+#--
+    virtual void LL_SetTransformToBone(KinematicsABT::additional_bone_transform& offset); //--#SM+#--
     virtual void LL_AddTransformToBone(KinematicsABT::additional_bone_transform& offset); //--#SM+#--
     virtual void LL_ClearAdditionalTransform(u16 bone_id = BI_NONE); //--#SM+#--
 public:

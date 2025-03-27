@@ -279,7 +279,7 @@ dxRender_Visual* CModelPool::Create(const char* name, IReader* data)
             else
                 Base = Instance_Load(low_name, TRUE);
             bAllowChildrenDuplicate = TRUE;
-#ifdef _EDITOR
+#ifdef _EDITOR  
             if (!Base)
                 return 0;
 #endif

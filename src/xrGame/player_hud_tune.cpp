@@ -351,6 +351,7 @@ void CHudTuner::on_tool_frame()
                         ImGui::DragFloat3(make_string("Addon %s Position", item.first).c_str(), (float*)&wpn->m_addon_items[item.first]->addon_item_pos, _delta_pos, 0.f, 0.f, "%.7f");
                         ImGui::DragFloat3(make_string("Addon %s Rotation", item.first).c_str(), (float*)&wpn->m_addon_items[item.first]->addon_item_hpb, _delta_rot, 0.f, 0.f, "%.7f");
                         ImGui::DragFloat3(make_string("Addon %s Scale", item.first).c_str(), (float*)&wpn->m_addon_items[item.first]->addon_item_scale, _delta_pos, 0.f, 0.f, "%.7f");
+                        ImGui::DragFloat3(make_string("Addon %s Dot Pos", item.first).c_str(), (float*)&wpn->m_addon_items[item.first]->addon_item_dot_pos, _delta_pos, 0.f, 0.f, "%.7f");
 
                         ImGuiIO& io = ImGui::GetIO();
                         string512 selectable;
@@ -364,6 +365,8 @@ void CHudTuner::on_tool_frame()
                             xr_sprintf(selectable, "%s_hud_pos = %f, %f, %f\n", item.first, item.second->addon_item_pos.x, item.second->addon_item_pos.y, item.second->addon_item_pos.z);
                             ImGui::LogText(selectable);
                             xr_sprintf(selectable, "%s_hud_scale = %f, %f, %f\n", item.first, item.second->addon_item_scale.x, item.second->addon_item_scale.y, item.second->addon_item_scale.z);
+                            ImGui::LogText(selectable);
+                            xr_sprintf(selectable, "%s_dot_pos = %f, %f, %f\n", item.first, item.second->addon_item_dot_pos.x, item.second->addon_item_dot_pos.y, item.second->addon_item_dot_pos.z);
                             ImGui::LogText(selectable);
                             ImGui::LogFinish();
                         }
