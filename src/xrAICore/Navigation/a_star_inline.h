@@ -24,7 +24,10 @@ TEMPLATE_SPECIALIZATION
 template <typename TPathManager>
 inline void CSAStar::initialize(TPathManager& path_manager)
 {
-    THROW2(!this->m_search_started, "Recursive graph engine usage is not allowed!");
+    //THROW2(!this->m_search_started, "Recursive graph engine usage is not allowed!");
+    if (this->m_search_started)
+        return;
+
     this->m_search_started = true;
     auto& data_storage = this->data_storage();
     // initialize data structures before we started path search
