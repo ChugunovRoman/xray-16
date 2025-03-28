@@ -139,8 +139,18 @@ const DIALOG_ID_VECTOR& CCharacterInfo::ActorDialogs() const
     return m_SpecificCharacter.data()->m_ActorDialogs;
 }
 
-void CCharacterInfo::load(IReader& stream) { stream.r_stringZ(m_StartDialog); }
-void CCharacterInfo::save(NET_Packet& stream) { stream.w_stringZ(m_StartDialog); }
+void CCharacterInfo::load(IReader& stream)
+{
+    stream.r_stringZ(m_StartDialog);
+    CHARACTER_COMMUNITY_INDEX community = stream.r_u32();
+
+    SetCommunity(community);
+}
+void CCharacterInfo::save(NET_Packet& stream)
+{
+    stream.w_stringZ(m_StartDialog);
+    stream.w_u32(m_CurrentCommunity.index());
+}
 #endif
 
 void CCharacterInfo::InitXmlIdToIndex()
