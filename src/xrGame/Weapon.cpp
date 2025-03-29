@@ -1295,6 +1295,36 @@ void CWeapon::renderable_Render(u32 context_id, IRenderable* root)
     else
         RenderHud(TRUE);
 
+    if (bUseAttachmentSystem)
+    {
+        Fmatrix m_item_transform = XFORM();
+        for (auto item: m_addon_items)
+        {
+            item.second->addon_item_transform = m_item_transform;
+
+            Fmatrix m_addon_attach_offset;
+            m_addon_attach_offset.setHPB(item.second->addon_item_hpb.x, item.second->addon_item_hpb.y, item.second->addon_item_hpb.z);
+            m_addon_attach_offset.translate_over(item.second->addon_item_pos_world);
+            item.second->addon_item_transform.mul(m_item_transform, m_addon_attach_offset);
+
+            u16 bone_id = item.second->addon_item_model->LL_BoneID("dot");
+            if (bone_id != BI_NONE)
+            {
+                KinematicsABT::additional_bone_transform bone_offset;
+                bone_offset.m_bone_id = bone_id;
+                bone_offset.setPosOffset(item.second->addon_item_dot_pos);
+
+                item.second->addon_item_model->LL_SetTransformToBone(bone_offset);
+            }
+
+            Fmatrix m;
+            m.scale(item.second->addon_item_scale);
+            item.second->addon_item_transform.mulB_43(m);
+            if (item.second->addon_item_visible)
+                GEnv.Render->add_Visual(context_id, root, item.second->addon_item_model->dcast_RenderVisual(), item.second->addon_item_transform);
+        }
+    }
+
     inherited::renderable_Render(context_id, root);
 }
 
@@ -1827,6 +1857,16 @@ void CWeapon::UpdateHUDAddonsVisibility()
         }
         else if (IsScopePermament())
             HudItemData()->set_bone_visible(wpn_scope, TRUE, TRUE);
+
+        if (bUseAttachmentSystem)
+        {
+            bool hasMainScope = hasInstalledAddonType("base_scope");
+
+            if (hasMainScope)
+                HudItemData()->set_bone_visible(wpn_scope, FALSE, TRUE);
+            else
+                HudItemData()->set_bone_visible(wpn_scope, TRUE, TRUE);
+        }
     }
 
     if (SilencerAttachable())
@@ -1988,6 +2028,16 @@ void CWeapon::UpdateAddonsVisibility()
         {
             if (pWeaponVisual->LL_GetBoneVisible(bone_id))
                 pWeaponVisual->LL_SetBoneVisible(bone_id, FALSE, TRUE);
+        }
+
+        if (bUseAttachmentSystem)
+        {
+            bool hasMainScope = hasInstalledAddonType("base_scope");
+
+            if (hasMainScope && pWeaponVisual->LL_GetBoneVisible(bone_id))
+                pWeaponVisual->LL_SetBoneVisible(bone_id, FALSE, TRUE);
+            else
+                pWeaponVisual->LL_SetBoneVisible(bone_id, TRUE, TRUE);
         }
     }
     if (m_eScopeStatus == ALife::eAddonDisabled && bone_id != BI_NONE && pWeaponVisual->LL_GetBoneVisible(bone_id))
@@ -3183,6 +3233,8 @@ void CWeapon::addAddon(shared_str section_id, shared_str m_addon_type, bool visi
     new_addon->addon_item_visible = visible;
     new_addon->addon_item_hpb = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_hpb", *section_id).c_str(), Fvector().set(0.f,0.f,0.f));
     new_addon->addon_item_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_pos", *section_id).c_str(), Fvector().set(0.f,0.f,0.f));
+    new_addon->addon_item_pos_world = new_addon->addon_item_pos;
+    new_addon->addon_item_pos_world.y += 0.13299999;
     new_addon->addon_item_scale = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_scale", *section_id).c_str(), Fvector().set(1.f,1.f,1.f));
     new_addon->addon_item_dot_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_dot_pos", *section_id).c_str(), Fvector().set(0.f,0.f,0.f));
 

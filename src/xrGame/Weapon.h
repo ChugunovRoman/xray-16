@@ -32,6 +32,7 @@ public:
 	Fmatrix addon_item_transform;
 	Fvector addon_item_hpb;
 	Fvector addon_item_pos;
+	Fvector addon_item_pos_world;
 	Fvector addon_item_scale;
 	Fvector addon_item_dot_pos;
 	IKinematics* addon_item_model;
