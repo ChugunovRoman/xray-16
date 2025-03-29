@@ -86,18 +86,24 @@ void CWeaponRevolver::PlayAnimReload()
 {
     auto state = GetState();
     VERIFY(state  == eReload);
-    if (iAmmoElapsed == 1)
-        PlayHUDMotion("anm_reload_1", true, this, state);
-    else if (iAmmoElapsed == 2)
-        PlayHUDMotion("anm_reload_2", true, this, state);
-    else if (iAmmoElapsed == 3)
-        PlayHUDMotion("anm_reload_3", true, this, state);
-    else if (iAmmoElapsed == 4)
-        PlayHUDMotion("anm_reload_4", true, this, state);
-    else if (iAmmoElapsed == 5)
-        PlayHUDMotion("anm_reload_5", true, this, state);
+
+    if (isHUDAnimationExist("anm_reload_1"))
+    {
+        if (iAmmoElapsed == 1)
+            PlayHUDMotion("anm_reload_1", true, this, state);
+        else if (iAmmoElapsed == 2)
+            PlayHUDMotion("anm_reload_2", true, this, state);
+        else if (iAmmoElapsed == 3)
+            PlayHUDMotion("anm_reload_3", true, this, state);
+        else if (iAmmoElapsed == 4)
+            PlayHUDMotion("anm_reload_4", true, this, state);
+        else if (iAmmoElapsed == 5)
+            PlayHUDMotion("anm_reload_5", true, this, state);
+        else
+            PlayHUDMotion("anm_reload", true, this, state);
+    }
     else
-        PlayHUDMotion("anm_reload", true, this, state);
+        inherited::PlayAnimReload();
 }
 
 
@@ -126,6 +132,7 @@ void CWeaponRevolver::PlayAnimShoot()
 void CWeaponRevolver::switch2_Reload()
 {
     inherited::switch2_Reload();
+    PlayAnimReload();
 }
 
 void CWeaponRevolver::OnAnimationEnd(u32 state)

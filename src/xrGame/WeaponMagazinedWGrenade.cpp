@@ -468,6 +468,10 @@ void CWeaponMagazinedWGrenade::ReloadMagazine()
 
 void CWeaponMagazinedWGrenade::OnStateSwitch(u32 S, u32 oldState)
 {
+    inherited::OnStateSwitch(S, oldState);
+
+    CInventoryOwner* owner = smart_cast<CInventoryOwner*>(this->H_Parent());
+
     switch (S)
     {
     case eSwitch:
@@ -478,10 +482,14 @@ void CWeaponMagazinedWGrenade::OnStateSwitch(u32 S, u32 oldState)
             return;
         }
     }
+    case eUnMisfire:
+        if (owner)
+            m_sounds_enabled = owner->CanPlayShHdRldSounds();
+        switch2_Unmis(); 
+        break;
     break;
     }
 
-    inherited::OnStateSwitch(S, oldState);
     UpdateGrenadeVisibility(!!iAmmoElapsed || S == eReload);
 }
 
@@ -1195,6 +1203,34 @@ void CWeaponMagazinedWGrenade::switch2_Unmis()
 		else
 			PlayHUDMotion("anm_reload_w_gl", TRUE, this, GetState());
 	}
+    else if (IsGrenadeLauncherAttached())
+    {
+        PlayReloadSound();
+        if (bMisfire)
+        {
+
+            if (isHUDAnimationExist("anm_reload_misfire_w_gl"))
+            {
+                PlayHUDMotion("anm_reload_misfire_w_gl", true, this, GetState());
+                bClearJamOnly = true;
+                inherited::PlayCamAnim("cam_anm_reload_misfire");
+            }
+            else
+                PlayHUDMotion("anm_reload_w_gl", "anim_reload_gl", true, this, GetState());
+        }
+        else
+        {
+            if (iAmmoElapsed == 0)
+            {
+                if (isHUDAnimationExist("anm_reload_empty_w_gl"))
+                    PlayHUDMotion("anm_reload_empty_w_gl", true, this, GetState());
+                else
+                    PlayHUDMotion("anm_reload_w_gl", "anim_reload_gl", true, this, GetState());
+            }
+            else
+                PlayHUDMotion("anm_reload_w_gl", "anim_reload_gl", true, this, GetState());
+        }
+    }
 	else
 		inherited::switch2_Unmis();
 }

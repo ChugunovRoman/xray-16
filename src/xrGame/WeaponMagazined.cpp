@@ -532,6 +532,7 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
         if (g_player_hud[1]->attached_item())
             g_player_hud[1]->hide_detector();
         switch2_Reload();
+        PlayAnimReload();
         break;
     case eShowing:
         if (owner)
@@ -884,7 +885,6 @@ void CWeaponMagazined::switch2_Reload()
 
     m_needReload = true;
     PlayReloadSound();
-    PlayAnimReload();
     SetPending(true);
 }
 void CWeaponMagazined::switch2_Hiding()

@@ -128,7 +128,11 @@ void CWeaponPistol::PlayAnimShoot()
         PlayHUDMotion("anm_shots", "anim_shoot", false, this, GetState());
 }
 
-void CWeaponPistol::switch2_Reload() { inherited::switch2_Reload(); }
+void CWeaponPistol::switch2_Reload()
+{
+    inherited::switch2_Reload();
+    inherited::PlayAnimReload();
+}
 void CWeaponPistol::OnAnimationEnd(u32 state) { inherited::OnAnimationEnd(state); }
 
 void CWeaponPistol::UpdateSounds()
