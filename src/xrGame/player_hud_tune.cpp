@@ -341,6 +341,9 @@ void CHudTuner::on_tool_frame()
                 {
                     for (auto item: wpn->m_addon_items)
                     {
+                        if (!item.second->addon_item_visible)
+                            continue;
+
                         ImGui::LabelText("Current item", "%s", item.first);
 
                         if (ImGui::RadioButton(make_string("Visible %s", item.first).c_str(), item.second->addon_item_visible))
