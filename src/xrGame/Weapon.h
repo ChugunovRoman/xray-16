@@ -55,6 +55,8 @@ public:
     bool bNVsecondVPstatus;
     bool bUseAttachmentSystem;
 
+    Fvector bAttachmentSystemOffsetOnWorldModel;
+
     xr_map<pcstr, addon_item*> m_addon_items;
 
     void addAddon(shared_str section_id, shared_str m_addon_type, bool visible = true);
