@@ -95,6 +95,9 @@ private:
         }
 
         value_type* newNodes = allocator::allocate(newLimit);
+        if (newNodes == nullptr)
+            DebugBreak();
+
         R_ASSERT(newNodes);
 
         if constexpr (std::is_pod<T>::value)

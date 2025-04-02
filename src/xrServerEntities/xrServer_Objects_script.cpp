@@ -13,7 +13,7 @@
 #include "script_ini_file.h"
 #include "xrScriptEngine/ScriptExporter.hpp"
 
-pcstr get_section_name(const CSE_Abstract* abstract) { return (abstract->s_name != nullptr ? abstract->name() : ""); }
+pcstr get_section_name(const CSE_Abstract* abstract) { return (abstract->name()); }
 pcstr get_name(const CSE_Abstract* abstract) { return (abstract->name_replace()); }
 CScriptIniFile* get_spawn_ini(CSE_Abstract* abstract) { return ((CScriptIniFile*)&abstract->spawn_ini()); }
 

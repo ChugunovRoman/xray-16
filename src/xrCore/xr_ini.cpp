@@ -387,7 +387,16 @@ static void insert_item(CInifile::Sect* tgt, const CInifile::Item& I)
         //#endif
     }
     else
-        tgt->Data.insert(sect_it, I);
+    {
+        try
+        {
+            tgt->Data.insert(sect_it, I);
+        }
+        catch (...)
+        {
+            Msg("insert_item, sect_it->first=[%s] I.first=[%s] I.second=[%s]", sect_it != tgt->Data.end() ? *sect_it->first : "endhui", *I.first, *I.second);
+        }
+    }
 }
 
 IC bool is_empty_line_now(IReader* F)
