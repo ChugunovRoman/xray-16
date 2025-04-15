@@ -3239,6 +3239,58 @@ void CWeapon::addAddon(shared_str section_id, shared_str m_addon_type, bool visi
     new_addon->addon_item_scale = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_hud_scale", *section_id).c_str(), Fvector().set(1.f,1.f,1.f));
     new_addon->addon_item_dot_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_dot_pos", *section_id).c_str(), Fvector().set(0.f,0.f,0.f));
 
+    // u16 bone_id = new_addon->addon_item_model->LL_BoneID("wpn_scope");
+    // if (bone_id != BI_NONE)
+    // {
+    //     attachable_hud_item* hi = HudItemData();
+    //     if (hi)
+    //     {
+    //         auto bi = new_addon->addon_item_model->LL_GetBoneInstance(bone_id);
+
+    //         Fvector cam_pos = Device.vCameraPosition;
+    //         Msg("CWeapon::addAddon, cam_pos=[%.7f, %.7f, %.7f]", cam_pos.x, cam_pos.y, cam_pos.z);
+    //         Fvector cam_dir = Device.vCameraDirection;
+    //         Msg("CWeapon::addAddon, cam_dir=[%.7f, %.7f, %.7f]", cam_dir.x, cam_dir.y, cam_dir.z);
+    //         cam_dir.mul(0.5);
+    //         Msg("CWeapon::addAddon, cam_dir after * 0.5=[%.7f, %.7f, %.7f]", cam_dir.x, cam_dir.y, cam_dir.z);
+    //         Fvector center = cam_pos.add(cam_dir);
+    //         Msg("CWeapon::addAddon, center=[%.7f, %.7f, %.7f]", center.x, center.y, center.z);
+    //         Msg("CWeapon::addAddon, hi->m_item_transform.c=[%.7f, %.7f, %.7f]", hi->m_item_transform.c.x, hi->m_item_transform.c.y, hi->m_item_transform.c.z);
+
+    //         Fmatrix m_bone_offset;
+    //         m_bone_offset.setHPB(0.f, 0.f, 0.f);
+    //         m_bone_offset.translate_over(bi.mTransform.c);
+
+    //         Msg("CWeapon::addAddon, bi.mTransform.c=[%.7f, %.7f, %.7f]", bi.mTransform.c.x, bi.mTransform.c.y, bi.mTransform.c.z);
+
+    //         new_addon->addon_item_transform = hi->m_item_transform;
+
+    //         Fmatrix m_addon_attach_offset;
+    //         m_addon_attach_offset.setHPB(new_addon->addon_item_hpb.x, new_addon->addon_item_hpb.y, new_addon->addon_item_hpb.z);
+    //         m_addon_attach_offset.translate_over(new_addon->addon_item_pos);
+    //         new_addon->addon_item_transform.mul(hi->m_item_transform, m_addon_attach_offset);
+
+    //         Msg("CWeapon::addAddon, new_addon->addon_item_transform.c=[%.7f, %.7f, %.7f]", new_addon->addon_item_transform.c.x, new_addon->addon_item_transform.c.y, new_addon->addon_item_transform.c.z);
+
+    //         Fmatrix bone_t;
+    //         bone_t.mul(new_addon->addon_item_transform, m_bone_offset);
+
+    //         Msg("CWeapon::addAddon, bone_t.c=[%.7f, %.7f, %.7f]", bone_t.c.x, bone_t.c.y, bone_t.c.z);
+
+    //         Fvector hud_offset = bone_t.c;
+    //         Fvector hud_offset_2 = center;
+
+    //         hud_offset.set(bone_t.c);
+    //         hud_offset_2.set(center);
+
+    //         hud_offset.sub(center);
+    //         hud_offset_2.sub(bone_t.c);
+
+    //         Msg("CWeapon::addAddon, hud_offset=[%.7f, %.7f, %.7f]", hud_offset.x, hud_offset.y, hud_offset.z);
+    //         Msg("CWeapon::addAddon, hud_offset_2=[%.7f, %.7f, %.7f]", hud_offset_2.x, hud_offset_2.y, hud_offset_2.z);
+    //     }
+    // }
+
     bool hasAltProps = pSettings->line_exist(*m_section_id, make_string("%s_alt_hud_pos", *section_id).c_str());
     bool hasMainScope = hasInstalledAddonType("base_scope");
     addon_item* colimAddon = getFirstAddonByType("colim_scope");

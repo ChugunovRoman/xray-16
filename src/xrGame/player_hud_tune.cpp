@@ -103,7 +103,6 @@ void CHudTuner::UpdateValues()
 
 void CHudTuner::on_tool_frame()
 {
-#ifndef MASTER_GOLD
     if (!get_open_state())
         return;
 
@@ -187,6 +186,91 @@ void CHudTuner::on_tool_frame()
             ImGui::DragFloat3(hud_adj_modes[ARTEFACT_POINT_POS], (float*)&m_artefact_map_p, _delta_pos, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[ARTEFACT_POINT_ROT], (float*)&m_artefact_map_r, _delta_pos, 0.f, 0.f, "%.7f");
 
+            if (hud_item)
+            {
+                Fvector offset{};
+                Fvector cam_pos = Device.vCameraPosition;
+                Fvector cam_dir{}, cam_dir_m{};
+                cam_dir.set(Device.vCameraDirection);
+                cam_dir_m.set(Device.vCameraDirection);
+                cam_dir.mul(0.5);
+                Fvector center{}, point_1{}, point_2{}, result_1{}, result_2{};
+                center.set(cam_pos);
+                center.add(cam_dir);
+
+                point_1.set(center);
+                point_1.sub(hud_item->hands_attach_pos());
+
+                point_2.set(center);
+                result_2.set(center);
+                float offset_y = 0;
+
+                offset.set(hud_item->hands_attach_pos());
+                CWeapon* wpn = smart_cast<CWeapon*>(hud_item->m_parent_hud_item);
+                if (wpn && wpn->bUseAttachmentSystem)
+                {
+                    for (auto item: wpn->m_addon_items)
+                    {
+                        u16 bone_id = item.second->addon_item_model->LL_BoneID("wpn_scope");
+                        if (bone_id != BI_NONE && item.second->addon_item_visible && xr_strcmp(*item.second->addon_type, "base_scope") == 0)
+                        {
+                            auto bi = item.second->addon_item_model->LL_GetBoneInstance(bone_id);
+                            offset.add(item.second->addon_item_pos);
+                            offset.add(bi.mTransform.c);
+
+                            point_2.sub(offset);
+
+                            // float y = abs(hud_item->hands_attach_pos().y + bi.mTransform.c.y);
+                            // float y = bi.mTransform.c.y - hud_item->m_measures.m_hands_offset[0][1].y;
+                            float y1, y2, y3;
+                            result_2.set(center);
+                            result_2.sub(point_2);
+                            result_2.x = -(result_2.x + (item.second->addon_item_pos.x + bi.mTransform.c.x));
+                            // result_2.y = y;
+                            result_2.z = hud_item->hands_attach_pos().z;
+
+                            float y = abs(hud_item->hands_attach_pos().y + result_2.y);
+
+                            offset_y = (center.y - (center.y * y)) * y;
+                            y1 = center.y * y;
+                            y2 = (center.y - (center.y * y)) * 0.1;
+                            y3 = y2 * y;
+
+                            ImGui::LabelText("y=", "[%.7f]", y);
+                            ImGui::LabelText("y1=", "[%.7f]", y1);
+                            ImGui::LabelText("y2=", "[%.7f]", y2);
+                            ImGui::LabelText("y3=", "[%.7f]", y3);
+                            ImGui::LabelText("center.y - point_2.y * 0.1=", "[%.7f]", (center.y - point_2.y) * 0.1);
+                            ImGui::LabelText("center.y - point_2.y=", "[%.7f]", center.y - point_2.y);
+                            ImGui::LabelText("center.y - point_1.y=", "[%.7f]", center.y - point_1.y);
+                        }
+                    }
+                }
+
+                result_1.set(center);
+                result_1.sub(point_1);
+
+                ImGui::LabelText("Device.vCameraPosition=", "[%.7f, %.7f, %.7f]", cam_pos.x, cam_pos.y, cam_pos.z);
+                ImGui::LabelText("Device.vCameraPosition center=", "[%.7f, %.7f, %.7f]", center.x, center.y, center.z);
+
+                ImGui::LabelText("m_item_transform.c=", "[%.7f, %.7f, %.7f]",hud_item->m_item_transform.c.x,hud_item->m_item_transform.c.y,hud_item->m_item_transform.c.z);
+                ImGui::LabelText("point_1=", "[%.7f, %.7f, %.7f]",point_1.x,point_1.y,point_1.z);
+                ImGui::LabelText("point_2=", "[%.7f, %.7f, %.7f]",point_2.x,point_2.y,point_2.z);
+                ImGui::LabelText("result_1=", "[%.7f, %.7f, %.7f]",result_1.x,result_1.y,result_1.z);
+                ImGui::LabelText("result_2=", "[%.7f, %.7f, %.7f]",result_2.x,result_2.y,result_2.z);
+                ImGui::LabelText("offset_y=", "[%.7f]",offset_y);
+
+                ImGui::LabelText("Device.vCameraDirection=", "[%.7f, %.7f, %.7f]",cam_dir.x,cam_dir.y,cam_dir.z);
+                ImGui::LabelText("Device.vCameraDirection mul 0.5=", "[%.7f, %.7f, %.7f]",cam_dir.x,cam_dir.y,cam_dir.z);
+
+                ImGui::LabelText("offset=", "[%.7f, %.7f, %.7f]",offset.x,offset.y,offset.z);
+                ImGui::LabelText("hands_attach_pos=", "[%.7f, %.7f, %.7f]",hud_item->hands_attach_pos().x,hud_item->hands_attach_pos().y,hud_item->hands_attach_pos().z);
+                ImGui::LabelText("hands_attach_rot=", "[%.7f, %.7f, %.7f]",hud_item->hands_attach_rot().x,hud_item->hands_attach_rot().y,hud_item->hands_attach_rot().z);
+                ImGui::LabelText("hands_offset_pos=", "[%.7f, %.7f, %.7f]",hud_item->hands_offset_pos().x,hud_item->hands_offset_pos().y,hud_item->hands_offset_pos().z);
+                ImGui::LabelText("hands_offset_rot=", "[%.7f, %.7f, %.7f]",hud_item->hands_offset_rot().x,hud_item->hands_offset_rot().y,hud_item->hands_offset_rot().z);
+                ImGui::LabelText("m_attach_offset.c=", "[%.7f, %.7f, %.7f]",hud_item->m_attach_offset.c.x,hud_item->m_attach_offset.c.y,hud_item->m_attach_offset.c.z);
+            }
+
             UpdateValues();
 
             string128 selectable;
@@ -238,7 +322,6 @@ void CHudTuner::on_tool_frame()
 
                 ImGui::NewLine();
 
-#ifdef DEBUG
                 firedeps fd;
                 current_hud_item->setup_firedeps(fd);
                 collide::rq_result& RQ = HUD().GetCurrentRayQuery();
@@ -317,7 +400,6 @@ void CHudTuner::on_tool_frame()
                     current_hud_item->m_parent_hud_item->TransformPosFromWorldToHud(point);
                     render.draw_aabb(point, debug_point_size, debug_point_size, debug_point_size, color_xrgb(255, 0, 0));
                 }
-#endif // DEBUG
             }
 
             if (ImGui::Button("Reset to default values"))
@@ -442,5 +524,4 @@ void CHudTuner::on_tool_frame()
         }
     }
     ImGui::End();
-#endif
 }

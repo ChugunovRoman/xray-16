@@ -335,6 +335,8 @@ Fmatrix hud_item_measures::load(const shared_str& sect_name, IKinematics* K)
     strconcat(val_name, "aim_hud_offset_rot", _prefix);
     m_hands_offset[1][1] = pSettings->r_fvector3(sect_name, val_name);
 
+    Msg("hud_item_measures::load, sect_name=[%s] m_hands_offset[0][1]=[%.7f, %.7f, %.7f]", *sect_name, m_hands_offset[0][1].x, m_hands_offset[0][1].y, m_hands_offset[0][1].z);
+
     strconcat(val_name, "gl_hud_offset_pos", _prefix);
     m_hands_offset[0][2] = pSettings->r_fvector3(sect_name, val_name);
     strconcat(val_name, "gl_hud_offset_rot", _prefix);
@@ -494,6 +496,107 @@ void attachable_hud_item::reload_measures()
         m_attach_offset = m_measures.load_monolithic(m_sect_name, m_model, m_parent_hud_item);
     else
         m_attach_offset = m_measures.load(m_sect_name, m_model);
+
+    CWeapon* wpn = smart_cast<CWeapon*>(m_parent_hud_item);
+    if (wpn && wpn->bUseAttachmentSystem)
+    {
+        for (auto item: wpn->m_addon_items)
+        {
+            u16 bone_id = item.second->addon_item_model->LL_BoneID("wpn_scope");
+            if (bone_id != BI_NONE && item.second->addon_item_visible && xr_strcmp(*item.second->addon_type, "base_scope") == 0)
+            {
+                Fvector offset{};
+                Fvector cam_pos = Device.vCameraPosition;
+                Fvector cam_dir{}, cam_dir_m{};
+                cam_dir.set(Device.vCameraDirection);
+                cam_dir_m.set(Device.vCameraDirection);
+                cam_dir.mul(0.5);
+                Fvector center{}, point_1{}, point_2{}, result_1{}, result_2{}, new_pos{};
+                center.set(cam_pos);
+                center.add(cam_dir);
+
+                point_1.set(center);
+                point_1.sub(hands_attach_pos());
+
+                point_2.set(center);
+                result_2.set(center);
+                float offset_y = 0;
+
+                offset.set(hands_attach_pos());
+                CWeapon* wpn = smart_cast<CWeapon*>(m_parent_hud_item);
+                if (wpn && wpn->bUseAttachmentSystem)
+                {
+                    for (auto item: wpn->m_addon_items)
+                    {
+                        u16 bone_id = item.second->addon_item_model->LL_BoneID("wpn_scope");
+                        if (bone_id != BI_NONE && item.second->addon_item_visible && xr_strcmp(*item.second->addon_type, "base_scope") == 0)
+                        {
+                            auto bi = item.second->addon_item_model->LL_GetBoneInstance(bone_id);
+                            offset.add(item.second->addon_item_pos);
+                            offset.add(bi.mTransform.c);
+
+                            Msg("attachable_hud_item::reload_measures, item.second->addon_item_pos=[%.7f, %.7f, %.7f]", item.second->addon_item_pos.x, item.second->addon_item_pos.y, item.second->addon_item_pos.z);
+                            Msg("attachable_hud_item::reload_measures, bi.mTransform.c=[%.7f, %.7f, %.7f]", bi.mTransform.c.x, bi.mTransform.c.y, bi.mTransform.c.z);
+
+                            // float y = abs(hands_attach_pos().y + bi.mTransform.c.y);
+                            // float y = bi.mTransform.c.y - m_measures.m_hands_offset[0][1].y;
+                            float y1, y2, y3;
+                            point_2.sub(offset);
+                            result_2.set(center);
+                            result_2.sub(point_2);
+                            // result_2.x = -(result_2.x + (item.second->addon_item_pos.x + bi.mTransform.c.x));
+                            // result_2.y = y + abs((center.y - point_2.y) * 0.1);
+                            // result_2.y = y;
+                            // result_2.z = hands_attach_pos().z;
+
+                            float y = abs(hands_attach_pos().y + result_2.y);
+
+                            new_pos.set(result_2);
+                            new_pos.x = -(result_2.x + (item.second->addon_item_pos.x + bi.mTransform.c.x));
+                            new_pos.y = y;
+                            new_pos.z = hands_attach_pos().z;
+
+                            offset_y = (center.y - (center.y * y)) * y;
+                            y1 = center.y * y;
+                            y2 = (center.y - (center.y * y)) * 0.1;
+                            y3 = y2 * y;
+
+                            // new_pos.y = y2;
+
+                            Msg("attachable_hud_item::reload_measures, y=[%.7f]", y);
+                            Msg("attachable_hud_item::reload_measures, y1=[%.7f]", y1);
+                            Msg("attachable_hud_item::reload_measures, y2=[%.7f]", y2);
+                            Msg("attachable_hud_item::reload_measures, y3=[%.7f]", y3);
+                            Msg("attachable_hud_item::reload_measures, center.y - point_2.y * 0.1=[%.7f]", (center.y - point_2.y) * 0.1);
+                            Msg("attachable_hud_item::reload_measures, center.y - point_2.y=[%.7f]", center.y - point_2.y);
+                            Msg("attachable_hud_item::reload_measures, center.y - point_1.y=[%.7f]", center.y - point_1.y);
+                        }
+                    }
+                }
+
+                result_1.set(center);
+                result_1.sub(point_1);
+
+                Msg("attachable_hud_item::reload_measures, Device.vCameraPosition=[%.7f, %.7f, %.7f]", cam_pos.x, cam_pos.y, cam_pos.z);
+                Msg("attachable_hud_item::reload_measures, Device.vCameraPosition center=[%.7f, %.7f, %.7f]", center.x, center.y, center.z);
+                Msg("attachable_hud_item::reload_measures, offset=[%.7f, %.7f, %.7f]", offset.x, offset.y, offset.z);
+
+                Msg("Device.vCameraDirection=[%.7f, %.7f, %.7f]",cam_dir.x,cam_dir.y,cam_dir.z);
+                Msg("Device.vCameraDirection mul 0.5=[%.7f, %.7f, %.7f]",cam_dir.x,cam_dir.y,cam_dir.z);
+
+                Msg("attachable_hud_item::reload_measures, m_item_transform.c=[%.7f, %.7f, %.7f]",m_item_transform.c.x,m_item_transform.c.y,m_item_transform.c.z);
+                Msg("attachable_hud_item::reload_measures, point_1=[%.7f, %.7f, %.7f]",point_1.x,point_1.y,point_1.z);
+                Msg("attachable_hud_item::reload_measures, point_2=[%.7f, %.7f, %.7f]",point_2.x,point_2.y,point_2.z);
+                Msg("attachable_hud_item::reload_measures, result_1=[%.7f, %.7f, %.7f]",result_1.x,result_1.y,result_1.z);
+                Msg("attachable_hud_item::reload_measures, result_2=[%.7f, %.7f, %.7f]",result_2.x,result_2.y,result_2.z);
+                Msg("attachable_hud_item::reload_measures, offset_y=[%.7f]", offset_y);
+                Msg("attachable_hud_item::reload_measures, old m_hands_offset=[%.7f, %.7f, %.7f]", m_measures.m_hands_offset[0][1].x, m_measures.m_hands_offset[0][1].y, m_measures.m_hands_offset[0][1].z);
+
+                m_measures.m_hands_offset[0][1] = new_pos;
+                m_measures.m_hands_offset[1][1] = Fvector().set(0.f,0.f,0.f);
+            }
+        }
+    }
 }
 
 u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, const CMotionDef*& md, u8& rnd_idx)

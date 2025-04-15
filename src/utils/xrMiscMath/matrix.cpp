@@ -142,6 +142,31 @@ Fmatrix& Fmatrix::mul_43(const Fmatrix& A, const Fmatrix& B)
 	return *this;
 }
 
+Fmatrix& Fmatrix::div_43(const Fmatrix& A, const Fmatrix& B)
+{
+	VERIFY((this != &A) && (this != &B));
+	m[0][0] = A.m[0][0] / B.m[0][0] + A.m[1][0] / B.m[0][1] + A.m[2][0] / B.m[0][2];
+	m[0][1] = A.m[0][1] / B.m[0][0] + A.m[1][1] / B.m[0][1] + A.m[2][1] / B.m[0][2];
+	m[0][2] = A.m[0][2] / B.m[0][0] + A.m[1][2] / B.m[0][1] + A.m[2][2] / B.m[0][2];
+	m[0][3] = 0;
+
+	m[1][0] = A.m[0][0] / B.m[1][0] + A.m[1][0] / B.m[1][1] + A.m[2][0] / B.m[1][2];
+	m[1][1] = A.m[0][1] / B.m[1][0] + A.m[1][1] / B.m[1][1] + A.m[2][1] / B.m[1][2];
+	m[1][2] = A.m[0][2] / B.m[1][0] + A.m[1][2] / B.m[1][1] + A.m[2][2] / B.m[1][2];
+	m[1][3] = 0;
+
+	m[2][0] = A.m[0][0] / B.m[2][0] + A.m[1][0] / B.m[2][1] + A.m[2][0] / B.m[2][2];
+	m[2][1] = A.m[0][1] / B.m[2][0] + A.m[1][1] / B.m[2][1] + A.m[2][1] / B.m[2][2];
+	m[2][2] = A.m[0][2] / B.m[2][0] + A.m[1][2] / B.m[2][1] + A.m[2][2] / B.m[2][2];
+	m[2][3] = 0;
+
+	m[3][0] = A.m[0][0] / B.m[3][0] + A.m[1][0] / B.m[3][1] + A.m[2][0] / B.m[3][2] + A.m[3][0];
+	m[3][1] = A.m[0][1] / B.m[3][0] + A.m[1][1] / B.m[3][1] + A.m[2][1] / B.m[3][2] + A.m[3][1];
+	m[3][2] = A.m[0][2] / B.m[3][0] + A.m[1][2] / B.m[3][1] + A.m[2][2] / B.m[3][2] + A.m[3][2];
+	m[3][3] = 1;
+	return *this;
+}
+
 Fmatrix& Fmatrix::invert(const Fmatrix& a)   // important: this is 4x3 invert, not the 4x4 one
 {
 	// faster than self-invert

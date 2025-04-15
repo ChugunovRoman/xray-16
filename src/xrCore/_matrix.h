@@ -99,6 +99,7 @@ struct Fmatrix
 
     // Multiply RES = A[4x3]*B[4x3] (no projection), faster than ordinary multiply
     SelfRef mul_43(const Self& A, const Self& B);
+    SelfRef div_43(const Self& A, const Self& B);
 
     IC SelfRef mulA_44(const Self& A) // mul after
     {
@@ -127,6 +128,14 @@ struct Fmatrix
         Self A;
         A.set(*this);
         mul_43(A, B);
+        return *this;
+    };
+
+    ICF SelfRef divB_43(const Self& B) // mul before (no projection)
+    {
+        Self A;
+        A.set(*this);
+        div_43(A, B);
         return *this;
     };
 
