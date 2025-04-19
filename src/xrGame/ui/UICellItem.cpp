@@ -157,8 +157,8 @@ void CUICellItem::Update()
         
         Fvector2 pos;
         pos.set(m_faction_pos);
-        if (!m_has_upgrade)
-            pos.x = 0;
+        pos.x = 0;
+        pos.y = 13;
 
         m_faction->SetWndPos(pos);
         m_faction->SetStretchTexture(true);
