@@ -121,16 +121,16 @@ void CSpaceRestrictionComposition::initialize()
 
     process_borders();
 
-// #ifdef DEBUG
-//     test_correctness();
-// #endif
+#ifdef DEBUG
+    test_correctness();
+#endif
 }
 
 #ifdef DEBUG
-// void CSpaceRestrictionComposition::test_correctness()
-// {
-//     m_correct = true;
-//     m_test_storage.clear();
+void CSpaceRestrictionComposition::test_correctness()
+{
+    m_correct = true;
+    m_test_storage.clear();
 
     {
         for (const auto& restriction : m_restrictions)
@@ -138,45 +138,45 @@ void CSpaceRestrictionComposition::initialize()
                 restriction->object().m_test_storage.end());
     }
 
-//     {
-//         std::sort(m_test_storage.begin(), m_test_storage.end());
-//         m_test_storage.erase(std::unique(m_test_storage.begin(), m_test_storage.end()), m_test_storage.end());
-//     }
+    {
+        std::sort(m_test_storage.begin(), m_test_storage.end());
+        m_test_storage.erase(std::unique(m_test_storage.begin(), m_test_storage.end()), m_test_storage.end());
+    }
 
-//     if (m_test_storage.empty())
-//     {
-//         m_correct = false;
-//         return;
-//     }
+    if (m_test_storage.empty())
+    {
+        m_correct = false;
+        return;
+    }
 
-    // xr_vector<u32> nodes;
-    // {
-    //     for (const auto& restriction : m_restrictions)
-    //     {
-    //         const bool has_border = !restriction->object().m_test_storage.empty();
-    //         VERIFY3(has_border, "Restrictor has no border", restriction->object().name().c_str());
-    //         if (!has_border)
-    //         {
-    //             m_correct = false;
-    //             break;
-    //         }
+    xr_vector<u32> nodes;
+    {
+        for (const auto& restriction : m_restrictions)
+        {
+            const bool has_border = !restriction->object().m_test_storage.empty();
+            VERIFY3(has_border, "Restrictor has no border", restriction->object().name().c_str());
+            if (!has_border)
+            {
+                m_correct = false;
+                break;
+            }
 
-    //         nodes.clear();
-    //         ai().level_graph().set_mask(border());
-    //         ai().graph_engine().search(ai().level_graph(), restriction->object().m_test_storage.back(),
-    //             restriction->object().m_test_storage.back(), &nodes, GraphEngineSpace::CFlooder());
-    //         ai().level_graph().clear_mask(border());
+            nodes.clear();
+            ai().level_graph().set_mask(border());
+            ai().graph_engine().search(ai().level_graph(), restriction->object().m_test_storage.back(),
+                restriction->object().m_test_storage.back(), &nodes, GraphEngineSpace::CFlooder());
+            ai().level_graph().clear_mask(border());
 
-//             if (nodes.size() == 65535)
-//                 m_correct = true;
-//             else
-//                 m_correct = (m_test_storage.size() <= nodes.size());
+            if (nodes.size() == 65535)
+                m_correct = true;
+            else
+                m_correct = (m_test_storage.size() <= nodes.size());
 
-//             if (!m_correct)
-//                 break;
-//         }
-//     }
-// }
+            if (!m_correct)
+                break;
+        }
+    }
+}
 #endif
 
 Fsphere CSpaceRestrictionComposition::sphere() const
