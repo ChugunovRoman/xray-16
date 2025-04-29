@@ -2,6 +2,7 @@
 #pragma hdrstop
 
 #include "FS_internal.h"
+#include "FS_impl.h"
 
 #if defined(XR_PLATFORM_WINDOWS)
 #include <io.h>
@@ -318,8 +319,6 @@ void IReader::close()
     IReader* self = this;
     xr_delete(self);
 }
-
-#include "FS_impl.h"
 
 #ifdef TESTING_IREADER
 IReaderTestPolicy::~IReaderTestPolicy() { xr_delete(m_test); };

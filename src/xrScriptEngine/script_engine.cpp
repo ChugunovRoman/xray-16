@@ -28,6 +28,7 @@
 #include <tracy/TracyLua.hpp>
 
 Flags32 g_LuaDebug;
+int g_LuaDumpDepth = 3;
 
 #define SCRIPT_GLOBAL_NAMESPACE "_G"
 
@@ -151,8 +152,6 @@ void CScriptEngine::print_stack(lua_State* L)
     if (L == nullptr)
         L = lua();
 
-    static bool dump = strstr(Core.Params, "-luadumpstate");
-
     if (lua_isstring(L, -1))
     {
         pcstr err = lua_tostring(L, -1);
@@ -181,127 +180,101 @@ void CScriptEngine::print_stack(lua_State* L)
         }
 
         // Giperion: verbose log
-        if (dump)
+        if (g_LuaDumpDepth > 0)
         {
-            const auto top = lua_gettop(L);
-
-            Log("\nLua state dump:\n\tLocals: ");
-            pcstr name = nullptr;
+            script_log(LuaMessageType::Error, "\t Locals: ");
             int VarID = 1;
-            try
-            {
-                while ((name = lua_getlocal(L, &l_tDebugInfo, VarID++)) != nullptr)
-                {
-                    LogVariable(L, name, 1);
+            pcstr name;
 
-                    lua_pop(L, 1); /* remove variable value */
-                }
-            }
-            catch (...)
+            while ((name = lua_getlocal(L, &l_tDebugInfo, VarID++)) != nullptr)
             {
-                Log("Can't dump lua state - Engine corrupted");
+                luabind::detail::stack_pop pop{ L, 1 };
+                log_value(L, name, 1);
             }
-            Log("End of Lua state dump.\n");
-
-            luabind::detail::stack_pop{ L, lua_gettop(L) - top }; // restore lua stack
         }
         // -Giperion
     }
 }
 
-void CScriptEngine::LogTable(lua_State* luaState, pcstr S, int level)
-{
-    if (!lua_istable(luaState, -1))
-        return;
-
-    lua_pushnil(luaState); /* first key */
-    while (lua_next(luaState, -2) != 0)
-    {
-        char sname[256];
-        char sFullName[256];
-        xr_sprintf(sname, "%s", lua_tostring(luaState, -2));
-        xr_sprintf(sFullName, "%s.%s", S, sname);
-        LogVariable(luaState, sFullName, level + 1);
-
-        lua_pop(luaState, 1); /* removes `value'; keeps `key' for next iteration */
-    }
-}
-
-void CScriptEngine::LogVariable(lua_State* luaState, pcstr name, int level)
+void CScriptEngine::log_value(lua_State* L, pcstr name, int depth)
 {
     using namespace luabind::detail;
-    const int ntype = lua_type(luaState, -1);
-    const pcstr type = lua_typename(luaState, ntype);
 
-    char tabBuffer[32] = {0};
-    memset(tabBuffer, '\t', level);
+    string32 tab_buffer{};
+    FillMemory(tab_buffer, std::min(int(sizeof(tab_buffer) - 1), depth), '\t');
 
-    char value[128];
+    string256 value{};
+    char colon{ ':' };
+    bool log_table{};
+
+    const int ntype = lua_type(L, -1);
+    pcstr type = lua_typename(L, ntype);
 
     switch (ntype)
     {
-    case LUA_TNIL: xr_strcpy(value, "nil"); break;
-
-    case LUA_TFUNCTION: xr_strcpy(value, "[function]"); break;
-
-    case LUA_TTHREAD: xr_strcpy(value, "[thread]"); break;
-
-    case LUA_TNUMBER: xr_sprintf(value, "%f", lua_tonumber(luaState, -1)); break;
-
-    case LUA_TBOOLEAN: xr_sprintf(value, "%s", lua_toboolean(luaState, -1) ? "true" : "false"); break;
-
-    case LUA_TSTRING: xr_sprintf(value, "%.127s", lua_tostring(luaState, -1)); break;
-
-    case LUA_TTABLE: {
-        if (level <= 3)
-        {
-            Msg("%s Table: %s", tabBuffer, name);
-            LogTable(luaState, name, level + 1);
-            return;
-        }
-        xr_sprintf(value, "[...]");
+    case LUA_TNIL:
+    case LUA_TFUNCTION:
+    case LUA_TTHREAD:
+        colon = '\0';
         break;
-    }
 
-    // XXX: can we process lightuserdata like userdata? In other words, is this fallthrough allowed?
-    // case LUA_TLIGHTUSERDATA:
-    case LUA_TUSERDATA: {
-        /*
-        lua_getmetatable(luaState, -1); // Maybe we can do this in another way
-        if (lua_istable(luaState, -1))
-        {
-            Msg("%s Userdata: %s", tabBuffer, name);
-            LogTable(luaState, name, level + 1);
-            lua_pop(luaState, 1); //Remove userobject
-            return;
-        }
-        //[[fallthrough]]
-        */
-        object_rep* object = get_instance(luaState, -1);
-        if (!object)
-        {
-            xr_strcpy(value, "Error! Can't get instance!");
-            break;
-        }
-
-        class_rep* rep = object->crep();
-        if (!rep)
-        {
-            xr_strcpy(value, "Error! Class userdata is null!");
-            break;
-        }
-
-        pcstr className = rep->name();
-        if (className)
-            xr_sprintf(value, "'%s'", className);
-
+    case LUA_TNUMBER:
+        xr_sprintf(value, "%f", lua_tonumber(L, -1));
         break;
-    }
+
+    case LUA_TBOOLEAN:
+        xr_sprintf(value, "%s", lua_toboolean(L, -1) ? "true" : "false");
+        break;
+
+    case LUA_TSTRING:
+        xr_sprintf(value, "%.255s", lua_tostring(L, -1));
+        break;
+
+    case LUA_TTABLE:
+        if (depth <= g_LuaDumpDepth)
+            log_table = true;
+        else
+            xr_sprintf(value, "[...]");
+        break;
+
+    case LUA_TUSERDATA:
+        if (const auto* object = get_instance(L, -1))
+        {
+            if (const auto* rep = object->crep())
+            {
+                type = rep->name();
+                if (depth <= g_LuaDumpDepth)
+                {
+                    lua_getfenv(L, -1);
+                    log_table = true;
+                }
+                else
+                    xr_sprintf(value, "[...]");
+                break;
+            }
+        }
+        [[fallthrough]];
 
     default: xr_strcpy(value, "[not available]"); break;
     }
 
-    Msg("%s %s %s : %s", tabBuffer, type, name, value);
+    script_log(LuaMessageType::Error, "%s %s %s %c %s", tab_buffer, type, name, colon, value);
+    if (log_table)
+    {
+        luabind::table members(luabind::from_stack(L, -1));
+        for (luabind::iterator it(members), end; it != end; ++it)
+        {
+            auto proxy = *it;
+            proxy.push(L);
+            stack_pop pop{ L, 1 };
+            if (lua_iscfunction(L, -1))
+                continue;
+            log_value(L, lua_tostring(L, -2), depth + 1);
+        }
+
+        if (ntype == LUA_TUSERDATA)
+            lua_pop(L, 1);
+    }
 }
 
 bool CScriptEngine::parse_namespace(pcstr caNamespaceName, pstr b, size_t b_size, pstr c, size_t c_size)

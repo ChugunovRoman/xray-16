@@ -318,8 +318,6 @@ void Manager::add_section_by_class(CInifile::Sect *const &section)
 
 void Manager::load_all_inventory()
 {
-    static constexpr pcstr items_section = "upgraded_inventory";
-
     if (g_upgrades_log == 1)
     {
         Msg("# Inventory upgrade manager is loaded.");
@@ -331,15 +329,12 @@ void Manager::load_all_inventory()
         Level().sections_map[i].clear();
 
     // Alundaio: No longer the need to define upgradeable sections in [upgraded_inventory]
-    // Xottab_DUTY: But still follow original COP behaviour, i.e. add section anyway if it is defined in [upgraded_inventory]
     for (const auto& section : pSettings->sections())
     {
         const auto& name = section->Name;
 
         if (item_upgrades_exist(name) || inv_section.add_anyway(name))
-        {
             add_root(name);
-        }
 
         add_section_by_class(section);
     }

@@ -36,8 +36,6 @@ public:
 
     void ReloadLanguage();
 
-    static BOOL m_bWriteErrorsToLog;
-
     shared_str GetCurrentLanguage() const;
     shared_str GetCurrentFontPrefix() const;
     xr_token* GetLanguagesToken() const;

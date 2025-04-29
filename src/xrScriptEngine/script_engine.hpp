@@ -55,7 +55,8 @@ enum class LuaMessageType : u32
     HookTailReturn = u32(-1),
 };
 
-extern Flags32 XRSCRIPTENGINE_API g_LuaDebug;
+extern XRSCRIPTENGINE_API Flags32 g_LuaDebug;
+extern XRSCRIPTENGINE_API int g_LuaDumpDepth;
 
 class XRSCRIPTENGINE_API CScriptEngine
 {
@@ -204,8 +205,9 @@ public:
     void flush_log();
     void print_stack(lua_State* L = nullptr);
 
-    void LogTable(lua_State* l, pcstr S, int level);
-    void LogVariable(lua_State* l, pcstr name, int level);
+    // Logs current value on the Lua stack
+    // Expands the tables/userdata and logs their contents too
+    void log_value(lua_State* L, pcstr name, int depth);
 
     using ExporterFunc = XRay::ScriptExporter::Node::ExporterFunc;
     CScriptEngine(bool is_editor = false, bool is_with_profiler = false);

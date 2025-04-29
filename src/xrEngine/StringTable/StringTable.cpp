@@ -16,7 +16,6 @@ CStringTable& StringTable()
 
 std::mutex CStringTable::pDataMutex;
 xr_unique_ptr<STRING_TABLE_DATA> CStringTable::pData{};
-BOOL CStringTable::m_bWriteErrorsToLog = FALSE;
 u32 CStringTable::LanguageID = std::numeric_limits<u32>::max();
 string32 CStringTable::LanguageIDInLTX{};
 xr_vector<xr_token> CStringTable::languagesToken;
@@ -60,14 +59,17 @@ void CStringTable::Init()
     xr_sprintf(files_mask, "text" DELIMITER "%s" DELIMITER "*.xml", pData->m_sLanguage.c_str());
     FS.file_list(fset, "$game_config$", FS_ListFiles, files_mask);
 
-    xr_parallel_for_each(fset, [this](const FS_File& it)
+    auto fit = fset.begin();
+    auto fit_e = fset.end();
+
+    for (; fit != fit_e; ++fit)
     {
         string_path fn, ext;
-        _splitpath(it.name.c_str(), nullptr, nullptr, fn, ext);
+        _splitpath(fit->name.c_str(), nullptr, nullptr, fn, ext);
         xr_strcat(fn, ext);
 
         Load(fn);
-    });
+    }
 
 #ifndef MASTER_GOLD
     Msg("StringTable: loaded %d files", fset.size());
@@ -213,15 +215,18 @@ void CStringTable::Load(LPCSTR xml_file_full)
         LPCSTR string_name = uiXml.ReadAttrib(uiXml.GetRoot(), "string", i, "id", NULL);
         LPCSTR string_text = uiXml.Read(uiXml.GetRoot(), "string:text", i, NULL);
 
-        if (m_bWriteErrorsToLog && string_text)
-            Msg("[string table] '%s' no translation in '%s'", string_name, pData->m_sLanguage.c_str());
-
-        VERIFY3(string_text, "string table entry does not has a text", string_name);
+        if (!string_text)
+        {
+#ifndef MASTER_GOLD
+            Msg("! [%s] string table entry[%s] doesn't have a translation (no 'text' tag)", xml_file_full, string_name);
+#endif
+            continue;
+        }
 
         [[maybe_unused]] bool duplicate{};
         const STRING_VALUE str_val = ParseLine(string_text); // NOLINT
         {
-            std::lock_guard guard{ pDataMutex };
+            //std::lock_guard guard{ pDataMutex };
 #ifndef MASTER_GOLD
             duplicate = pData->m_StringTable.find(string_name) != pData->m_StringTable.end();
 #endif
