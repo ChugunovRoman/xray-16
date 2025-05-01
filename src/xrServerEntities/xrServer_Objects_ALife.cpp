@@ -34,6 +34,8 @@ LPCSTR GAME_CONFIG = "game.ltx";
 #include <shlwapi.h>
 #pragma comment(lib, "shlwapi.lib")
 
+extern xr_map<shared_str, bool> g_logic_files;
+
 struct logical_string_predicate
 {
     static HRESULT AnsiToUnicode(LPCSTR pszA, LPVOID buffer, u32 const& buffer_size)
@@ -454,6 +456,9 @@ void CSE_ALifeObject::STATE_Read(NET_Packet& tNetPacket, u16 size)
         if (m_ini_file)
             xr_delete(m_ini_file);
         tNetPacket.r_stringZ(m_ini_string);
+
+        if (strstr(Core.Params, "-checks"))
+            check_ini();
     }
 
     if (m_wVersion > 61)
@@ -461,10 +466,54 @@ void CSE_ALifeObject::STATE_Read(NET_Packet& tNetPacket, u16 size)
 
     if (m_wVersion > 111)
         tNetPacket.r_u32(m_spawn_story_id);
+
+    if (strstr(Core.Params, "-checks"))
+        Msg("~~ Load object from spawn, type: %s name: %s", *s_name, name_replace());
 }
 
 void CSE_ALifeObject::UPDATE_Write(NET_Packet& /*tNetPacket*/) {}
 void CSE_ALifeObject::UPDATE_Read(NET_Packet& /*tNetPacket*/) {};
+
+void CSE_ALifeObject::check_ini()
+{
+    IReader reader((void*)(*(m_ini_string)), m_ini_string.size());
+    m_ini_file = xr_new<CInifile>(&reader, FS.get_path("$game_config$")->m_Path);
+    shared_str key = s_name;
+    auto line = strstr(m_ini_string.c_str(), "cfg");
+    bool file_exist = false;
+    string_path fn;
+
+    if (line)
+    {
+        xr_string _path{line + 6};
+        int spaceIndex = _path.find_first_of(" \t\r\n");
+        if (spaceIndex > 0)
+            _path.erase(spaceIndex);
+        _Trim(_path);
+        if (!FS.exist(fn, "$game_config$", _path.c_str()))
+            Msg("! Config file [%s] doesn't exist ! s_name: [%s] object: [%s] spaceIndex: [%d] line: (%s)", _path.c_str(), *s_name, name_replace(), spaceIndex, line);
+        else
+            file_exist = true;
+    }
+
+    if (file_exist)
+    {
+        CInifile* ini_file = xr_new<CInifile>(fn, true, true, false);
+        for (const auto& section : ini_file->sections())
+        {
+            u32 count = ini_file->line_count(section->Name);
+            for (u32 c = 0; c < count; c++)
+            {
+                LPCSTR key, value;
+                ini_file->r_line(section->Name, c, &key, &value);
+                if (value && strstr(value, ".ltx"))
+                    g_logic_files[value] = true;
+            }
+
+        }
+    }
+}
+
 
 #ifndef MASTER_GOLD
 void CSE_ALifeObject::FillProps(LPCSTR pref, PropItemVec& items)

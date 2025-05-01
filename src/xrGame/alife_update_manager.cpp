@@ -22,10 +22,12 @@
 #include "xrEngine/profiler.h"
 #include "mt_config.h"
 #include "xrNetServer/NET_Messages.h"
+#include "xrServerEntities/xrServer_Objects_Alife_Smartcovers.h"
 
 using namespace ALife;
 
 extern string_path g_last_saved_game;
+extern xr_map<shared_str, bool> g_logic_files;
 
 class CSwitchPredicate
 {
@@ -243,6 +245,9 @@ void CALifeUpdateManager::new_game(LPCSTR save_name)
 #endif // #ifdef DEBUG
 
     Msg("* New game is successfully created!");
+
+    if (strstr(Core.Params, "-checks"))
+        checks();
 }
 
 void CALifeUpdateManager::load(LPCSTR game_name, bool no_assert, bool new_only)
@@ -610,4 +615,47 @@ void CALifeUpdateManager::remove_all_restrictions(
     }
     default: NODEFAULT;
     }
+}
+
+void CALifeUpdateManager::checks()
+{
+    xr_map<shared_str, bool> exists_cover_names;
+    CALifeObjectRegistry::OBJECT_REGISTRY::iterator I = objects().objects().begin();
+    CALifeObjectRegistry::OBJECT_REGISTRY::iterator E = objects().objects().end();
+    for (; I != E; ++I)
+    {
+        CSE_SmartCover* smart_cover = smart_cast<CSE_SmartCover*>((*I).second);
+        if (smart_cover)
+            exists_cover_names[smart_cover->name_replace()] = true;
+    }
+
+    for (const auto& I : g_logic_files)
+    {
+        string_path fn;
+        xr_string path = "scripts";
+        path.append(DELIMITER);
+        path.append(*I.first);
+        _Trim(path);
+        FS.update_path(fn, "$game_config$", path.c_str());
+        CInifile* ini_file = xr_new<CInifile>(fn, true, true, false);
+        for (const auto& section : ini_file->sections())
+        {
+            u32 count = ini_file->line_count(section->Name);
+            for (u32 c = 0; c < count; c++)
+            {
+                LPCSTR key, value;
+                ini_file->r_line(section->Name, c, &key, &value);
+                if (value && key && strstr(key, "cover_name"))
+                {
+                    auto it = exists_cover_names.find(value);
+                    if (it == exists_cover_names.end())
+                        Msg("cover by name: %s doesn't exist! in file: %s, section: %s", value, path.c_str(), *section->Name);
+                }
+            }
+
+        }
+    }
+
+    exists_cover_names.clear();
+    g_logic_files.clear();
 }

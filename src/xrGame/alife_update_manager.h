@@ -39,6 +39,7 @@ protected:
     void new_game(LPCSTR save_name);
     void init_ef_storage() const;
     virtual void reload(LPCSTR section);
+    void checks();
 
 public:
     CALifeUpdateManager(IPureServer* server, LPCSTR section);

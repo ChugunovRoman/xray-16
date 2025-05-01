@@ -180,6 +180,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    void check_ini();
 };
 
 class CSE_ALifeGroupAbstract
