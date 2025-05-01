@@ -834,3 +834,4 @@ extern shared_str g_start_position_smart;
 extern CActor* g_actor;
 CActor* Actor();
 extern const float s_fFallTime;
+extern xr_map<shared_str, bool> g_logic_files;
