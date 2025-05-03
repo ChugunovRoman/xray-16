@@ -36,6 +36,7 @@ target_sources(xrGame PRIVATE
     ActorCondition.cpp
     ActorCondition.h
     Actor.cpp
+    Checker.cpp
     actor_defs.h
     ActorEffector.cpp
     ActorEffector.h
@@ -46,6 +47,7 @@ target_sources(xrGame PRIVATE
     ActorFollowers.cpp
     ActorFollowers.h
     Actor.h
+    Checker.h
     ActorHelmet.cpp
     ActorHelmet.h
     ActorBackpack.cpp

@@ -4734,6 +4734,9 @@
     <ClInclude Include="Actor.h">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClInclude>
+    <ClInclude Include="Checker.h">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClInclude>
     <ClInclude Include="actor_anim_defs.h">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClInclude>
@@ -7874,6 +7877,9 @@
       <Filter>Core\Client\Objects\actor\mp\state</Filter>
     </ClCompile>
     <ClCompile Include="Actor.cpp">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClCompile>
+    <ClCompile Include="Checker.cpp">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClCompile>
     <ClCompile Include="actor_communication.cpp">

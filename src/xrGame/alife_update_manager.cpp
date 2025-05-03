@@ -23,11 +23,16 @@
 #include "mt_config.h"
 #include "xrNetServer/NET_Messages.h"
 #include "xrServerEntities/xrServer_Objects_Alife_Smartcovers.h"
+#include "Checker.h"
+#include "ai_space.h"
+#include "xrAICore/Navigation/PatrolPath/patrol_path_storage.h"
+#include "xrAICore/Navigation/PatrolPath/patrol_path.h"
+#include "xrAICore/Navigation/PatrolPath/patrol_point.h"
 
 using namespace ALife;
 
 extern string_path g_last_saved_game;
-extern xr_map<shared_str, bool> g_logic_files;
+extern Checker g_checker;
 
 class CSwitchPredicate
 {
@@ -625,18 +630,29 @@ void CALifeUpdateManager::checks()
     for (; I != E; ++I)
     {
         CSE_SmartCover* smart_cover = smart_cast<CSE_SmartCover*>((*I).second);
+        CSE_ALifeSmartZone* smart_terrain = smart_cast<CSE_ALifeSmartZone*>((*I).second);
         if (smart_cover)
+        {
             exists_cover_names[smart_cover->name_replace()] = true;
+            g_checker.AddToDictLog(Dicts::SmartCovers, smart_cover->name_replace());
+        }
+        if (smart_terrain)
+            g_checker.AddToDictLog(Dicts::SmartTerrains, smart_terrain->name_replace());
+
+        if (xr_strcmp(*(*I).second->s_name, "campfire") == 0)
+            g_checker.AddToDictLog(Dicts::Campfires, (*I).second->name_replace());
+        if (xr_strcmp(*(*I).second->s_name, "inventory_box") == 0)
+            g_checker.AddToDictLog(Dicts::InventoryBox, (*I).second->name_replace());
+        if (xr_strcmp(*(*I).second->s_name, "space_restrictor") == 0)
+            g_checker.AddToDictLog(Dicts::SpaceRestrictor, (*I).second->name_replace());
+        if (xr_strcmp(*(*I).second->s_name, "anomal_zone") == 0)
+            g_checker.AddToDictLog(Dicts::AnomalZone, (*I).second->name_replace());
     }
 
-    for (const auto& I : g_logic_files)
+    for (const auto& I : g_checker.logic_files)
     {
         string_path fn;
-        xr_string path = "scripts";
-        path.append(DELIMITER);
-        path.append(*I.first);
-        _Trim(path);
-        FS.update_path(fn, "$game_config$", path.c_str());
+        FS.update_path(fn, "$game_config$", *I.first);
         CInifile* ini_file = xr_new<CInifile>(fn, true, true, false);
         for (const auto& section : ini_file->sections())
         {
@@ -649,7 +665,7 @@ void CALifeUpdateManager::checks()
                 {
                     auto it = exists_cover_names.find(value);
                     if (it == exists_cover_names.end())
-                        Msg("cover by name: %s doesn't exist! in file: %s, section: %s", value, path.c_str(), *section->Name);
+                        g_checker.AddToCheckLog(Checks::SmartCovers, make_string("! Сover by name: %s doesn't exist! in file: %s, section: %s", value, *I.first, *section->Name).c_str());
                 }
             }
 
@@ -657,5 +673,4 @@ void CALifeUpdateManager::checks()
     }
 
     exists_cover_names.clear();
-    g_logic_files.clear();
 }

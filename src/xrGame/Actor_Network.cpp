@@ -61,7 +61,7 @@ u32 g_start_level_vertex_id = (u32)-1;
 shared_str g_start_position_smart = nullptr;
 Fvector g_start_position{};
 CActor* g_actor = NULL;
-xr_map<shared_str, bool> g_logic_files;
+Checker g_checker{};
 
 CActor* Actor()
 {

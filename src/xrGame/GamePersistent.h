@@ -57,6 +57,8 @@ private:
     void start_game_intro();
     void update_game_intro();
 
+    void checks();
+
 #ifdef DEBUG
     u32 m_frame_counter{};
     u32 m_last_stats_frame{ u32(-2) };

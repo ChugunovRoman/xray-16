@@ -15,6 +15,7 @@
 #include "xrEngine/StatGraph.h"
 #include "PhraseDialogManager.h"
 #include "xrUICore/ui_defs.h"
+#include "Checker.h"
 
 #include "step_manager.h"
 
@@ -832,6 +833,6 @@ extern u16 g_start_game_vertex_id;
 extern u32 g_start_level_vertex_id;
 extern shared_str g_start_position_smart;
 extern CActor* g_actor;
+extern Checker g_checker;
 CActor* Actor();
 extern const float s_fFallTime;
-extern xr_map<shared_str, bool> g_logic_files;

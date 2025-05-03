@@ -1051,6 +1051,8 @@ void CLocatorAPI::_initialize(u32 flags, pcstr target_folder, pcstr fs_name)
         sscanf(strstr(Core.Params, "-overlaypath ") + 13, "%[^ ] ", c_newAppPathRoot);
         FS_Path* pLogsPath = get_path("$logs$");
         FS_Path* pAppdataPath = get_path("$app_data_root$");
+        FS_Path* pChecksPath = get_path("$checks$");
+        FS_Path* pDictionariesPath = get_path("$dictionaries$");
 
         if (pLogsPath)
             pLogsPath->_set_root(c_newAppPathRoot);
@@ -1066,6 +1068,12 @@ void CLocatorAPI::_initialize(u32 flags, pcstr target_folder, pcstr fs_name)
 
     CreateLog(nullptr != strstr(Core.Params, "-nolog"));
     xrDebug::OnFilesystemInitialized();
+
+    if (strstr(Core.Params, "-checks"))
+    {
+        dir_delete("$checks$", "", true);
+        dir_delete("$dictionaries$", "", true);
+    }
 }
 
 void CLocatorAPI::_destroy()

@@ -13,6 +13,7 @@
 #include "Common/object_broker.h"
 #include "restriction_space.h"
 #include "xrCore/xr_token.h"
+#include "xrGame/Checker.h"
 
 #ifndef AI_COMPILER
 #include "character_info.h"
@@ -34,7 +35,7 @@ LPCSTR GAME_CONFIG = "game.ltx";
 #include <shlwapi.h>
 #pragma comment(lib, "shlwapi.lib")
 
-extern xr_map<shared_str, bool> g_logic_files;
+extern Checker g_checker;
 
 struct logical_string_predicate
 {
@@ -468,7 +469,7 @@ void CSE_ALifeObject::STATE_Read(NET_Packet& tNetPacket, u16 size)
         tNetPacket.r_u32(m_spawn_story_id);
 
     if (strstr(Core.Params, "-checks"))
-        Msg("~~ Load object from spawn, type: %s name: %s", *s_name, name_replace());
+        g_checker.AddToDictLog(Dicts::AllSpawns, make_string("section: %s name: %s", *s_name, name_replace()).c_str());
 }
 
 void CSE_ALifeObject::UPDATE_Write(NET_Packet& /*tNetPacket*/) {}
@@ -491,9 +492,12 @@ void CSE_ALifeObject::check_ini()
             _path.erase(spaceIndex);
         _Trim(_path);
         if (!FS.exist(fn, "$game_config$", _path.c_str()))
-            Msg("! Config file [%s] doesn't exist ! s_name: [%s] object: [%s] spaceIndex: [%d] line: (%s)", _path.c_str(), *s_name, name_replace(), spaceIndex, line);
+            g_checker.AddToCheckLog(Checks::ScriptsLogicFiles, make_string("! Config file [%s] doesn't exist ! s_name: [%s] object: [%s] spaceIndex: [%d] line: (%s)", _path.c_str(), *s_name, name_replace(), spaceIndex, line).c_str());
         else
+        {
+            g_checker.logic_files[_path.c_str()] = true;
             file_exist = true;
+        }
     }
 
     if (file_exist)
@@ -507,7 +511,13 @@ void CSE_ALifeObject::check_ini()
                 LPCSTR key, value;
                 ini_file->r_line(section->Name, c, &key, &value);
                 if (value && strstr(value, ".ltx"))
-                    g_logic_files[value] = true;
+                {
+                    xr_string path = "scripts";
+                    path.append(DELIMITER);
+                    path.append(value);
+                    _Trim(path);
+                    g_checker.logic_files[path.c_str()] = true;
+                }
             }
 
         }

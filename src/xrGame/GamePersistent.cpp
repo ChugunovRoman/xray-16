@@ -17,10 +17,14 @@
 #include "ActorEffector.h"
 #include "Actor.h"
 #include "Spectator.h"
+#include "Checker.h"
 
 #include "xrUICore/XML/UITextureMaster.h"
 
 #include "ai_space.h"
+#include "xrAICore/Navigation/PatrolPath/patrol_path_storage.h"
+#include "xrAICore/Navigation/PatrolPath/patrol_path.h"
+#include "xrAICore/Navigation/PatrolPath/patrol_point.h"
 
 #include "holder_custom.h"
 #include "game_cl_base.h"
@@ -45,6 +49,8 @@
 #endif // _EDITOR
 
 #include "xrEngine/xr_level_controller.h"
+
+extern Checker g_checker;
 
 CGamePersistent::CGamePersistent()
 {
@@ -466,6 +472,70 @@ void CGamePersistent::start_game_intro()
             m_intro->Start("intro_game");
         }
     }
+
+    if (strstr(Core.Params, "-checks"))
+        checks();
+}
+
+void CGamePersistent::checks()
+{
+    for (const auto& I : g_checker.logic_files)
+    {
+        string_path fn;
+        FS.update_path(fn, "$game_config$", *I.first);
+        CInifile* ini_file = xr_new<CInifile>(fn, true, true, false);
+        for (const auto& section : ini_file->sections())
+        {
+            u32 count = ini_file->line_count(section->Name);
+            for (u32 c = 0; c < count; c++)
+            {
+                LPCSTR key, value;
+                ini_file->r_line(section->Name, c, &key, &value);
+                if (value && key && (
+                    strstr(key, "artefact_ways")
+                    || strstr(key, "path_walk")
+                    || strstr(key, "path_look")
+                ))
+                {
+                    auto it = ai().patrol_paths().patrol_paths().find(value);
+                    if (it == ai().patrol_paths().patrol_paths().end())
+                        g_checker.AddToCheckLog(
+                            Checks::PatrolPaths,
+                            make_string("! Patrol path: %s doesn't exist! Used in file: %s, section: %s", value, *I.first, *section->Name).c_str()
+                        );
+
+                    for (auto I : ai().patrol_paths().patrol_paths())
+                    {
+                        for (auto I2 : I.second->vertices())
+                        {
+                            if (I2.second->data().game_vertex_id() == (u16)-1 || I2.second->data().level_vertex_id() == (u32)-1)
+                                g_checker.AddToCheckLog(
+                                    Checks::InvalidVertexes,
+                                    make_string(
+                                        "! Patrol path: %s has invalid vertex: %s vertex_id: %d game_vertex_id: %d, level_vertex_id: %d",
+                                        value,
+                                        I2.second->data().name().c_str(),
+                                        I2.second->vertex_id(),
+                                        I2.second->data().game_vertex_id(),
+                                        I2.second->data().level_vertex_id()
+                                    ).c_str()
+                                );
+                        }
+                    }
+                }
+            }
+
+        }
+    }
+
+    auto I2 = ai().patrol_paths().patrol_paths().begin();
+    auto E2 = ai().patrol_paths().patrol_paths().end();
+
+    for (; I2 != E2; ++I2)
+        g_checker.AddToDictLog(Dicts::PatrolPaths, (*I2).first);
+
+    g_checker.CloseAllDescriptors();
+    g_checker.logic_files.clear();
 }
 
 void CGamePersistent::update_game_intro()

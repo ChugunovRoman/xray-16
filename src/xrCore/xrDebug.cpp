@@ -694,8 +694,10 @@ void xrDebug::SetupExceptionHandler()
 void xrDebug::OnFilesystemInitialized()
 {
 #ifdef USE_BUG_TRAP
-    string_path path{};
+    string_path path{}, path2{};
     FS.update_path(path, "$logs$", "", false);
+    FS.update_path(path2, "$checks$", "", false);
+    FS.update_path(path2, "$dictionaries$", "", false);
     if (!path[0] || path[0] != _DELIMITER && path[1] != ':') // relative path
     {
         string_path currentDir;
