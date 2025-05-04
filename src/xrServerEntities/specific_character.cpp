@@ -116,7 +116,10 @@ void CSpecificCharacter::load_shared(LPCSTR)
         path.append(".ogf");
         _Trim(path);
         if (!FS.exist(fn, "$game_meshes$", path.c_str()))
-            g_checker.AddToCheckLog(Checks::UnexistModels, path.c_str());
+            g_checker.AddToCheckLog(
+                Checks::UnexistModels,
+                make_string("Character id: %s visual: %s", *item_data.id, path.c_str()).c_str()
+            );
     }
 
 #ifdef XRGAME_EXPORTS
