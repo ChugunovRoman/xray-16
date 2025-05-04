@@ -1,5 +1,8 @@
 #include "StdAfx.h"
 #include "specific_character.h"
+#include "xrGame/Checker.h"
+
+extern Checker g_checker;
 
 #ifdef XRGAME_EXPORTS
 #include "PhraseDialog.h"
@@ -100,6 +103,21 @@ void CSpecificCharacter::load_shared(LPCSTR)
 #endif
 
     data()->m_sVisual = pXML->Read("visual", 0, "");
+
+    if (strstr(Core.Params, "-checks"))
+    {
+        g_checker.AddToDictLog(
+            Dicts::CharacterVisuals,
+            make_string("Character id: %s visual: %s", *item_data.id, data()->m_sVisual.c_str()).c_str()
+        );
+
+        string_path fn;
+        xr_string path = data()->m_sVisual.c_str();
+        path.append(".ogf");
+        _Trim(path);
+        if (!FS.exist(fn, "$game_meshes$", path.c_str()))
+            g_checker.AddToCheckLog(Checks::UnexistModels, path.c_str());
+    }
 
 #ifdef XRGAME_EXPORTS
     data()->m_sSupplySpawn = pXML->Read("supplies", 0, "");

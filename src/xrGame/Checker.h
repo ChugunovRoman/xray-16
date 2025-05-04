@@ -8,6 +8,7 @@ namespace Checks
     static const char* SmartCovers = "smart_covers"; // Проверка на использование несуществующих смарт-каверов в файлах логик
     static const char* PatrolPaths = "patrol_paths"; // Проверка на использование несуществующих патрул пазов в файлах логик
     static const char* InvalidVertexes = "invalid_vertexes"; // Проверка всех вертексов у каждого патрул паза game_vertex_id() == (u16)-1 || level_vertex_id() == (u32)-1
+    static const char* UnexistModels = "unexist_visual_models"; // Проверка на отсутствие моделей визуалов НПС
 };
 
 namespace Dicts
@@ -20,6 +21,7 @@ namespace Dicts
     static const char* AnomalZone = "anomal_zones"; // Список всех аномальных зон в игре
     static const char* Campfires = "campfires"; // Список всех костров в игре
     static const char* AllSpawns = "all_spawns"; // Список всех объектов из all.spawn
+    static const char* CharacterVisuals = "character_visuals"; // Список всех используемых моделей визуалов НПС
 };
 
 class Checker
