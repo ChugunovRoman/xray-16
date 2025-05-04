@@ -96,7 +96,8 @@ private:
 
         value_type* newNodes = allocator::allocate(newLimit);
         if (newNodes == nullptr)
-            DebugBreak();
+            return;
+            // DebugBreak();
 
         R_ASSERT(newNodes);
 
