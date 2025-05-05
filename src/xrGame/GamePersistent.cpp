@@ -495,6 +495,8 @@ void CGamePersistent::checks()
                     strstr(key, "artefact_ways")
                     || strstr(key, "path_walk")
                     || strstr(key, "path_look")
+                    || strstr(key, "path")
+                    || strstr(key, "reject_path")
                 ))
                 {
                     auto it = ai().patrol_paths().patrol_paths().find(value);
