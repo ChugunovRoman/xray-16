@@ -522,8 +522,6 @@ void CSE_ALifeObject::check_ini()
 
         }
     }
-
-    g_checker.logic_files["sr_teleport_sections.ltx"] = true;
 }
 
 

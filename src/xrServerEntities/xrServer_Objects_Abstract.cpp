@@ -11,6 +11,9 @@
 
 #include "xrServer_Objects_Abstract.h"
 #include "xrMessages.h"
+#include "xrGame/Checker.h"
+
+extern Checker g_checker;
 
 ////////////////////////////////////////////////////////////////////////////
 // CSE_Visual
@@ -49,6 +52,23 @@ void CSE_Visual::visual_read(NET_Packet& tNetPacket, u16 version)
     tNetPacket.r_stringZ(visual_name);
     if (version > 103)
         flags.assign(tNetPacket.r_u8());
+
+    if (strstr(Core.Params, "-checks"))
+        check();
+}
+
+void CSE_Visual::check()
+{
+    string_path fn;
+    xr_string _path = visual_name.c_str();
+    if (!strstr(_path.c_str(), ".ogf"))
+        _path.append(".ogf");
+    _Trim(_path);
+    if (!FS.exist(fn, "$game_meshes$", _path.c_str()))
+        g_checker.AddToCheckLog(
+            Checks::UnexistSpawnModels,
+            make_string("! Model file: %s doesn't exist!", _path.c_str()).c_str()
+        );
 }
 
 void CSE_Visual::visual_write(NET_Packet& tNetPacket)

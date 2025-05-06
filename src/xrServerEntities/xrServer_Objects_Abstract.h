@@ -69,6 +69,9 @@ public:
 #endif
 
     virtual CSE_Visual* visual() = 0;
+
+private:
+    void check();
 };
 
 class CSE_Motion

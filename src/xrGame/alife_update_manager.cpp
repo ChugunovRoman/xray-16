@@ -624,6 +624,8 @@ void CALifeUpdateManager::remove_all_restrictions(
 
 void CALifeUpdateManager::checks()
 {
+    g_checker.logic_files["sr_teleport_sections.ltx"] = true;
+
     xr_map<shared_str, bool> exists_cover_names;
     CALifeObjectRegistry::OBJECT_REGISTRY::iterator I = objects().objects().begin();
     CALifeObjectRegistry::OBJECT_REGISTRY::iterator E = objects().objects().end();

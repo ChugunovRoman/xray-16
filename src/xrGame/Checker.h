@@ -9,6 +9,8 @@ namespace Checks
     static const char* PatrolPaths = "patrol_paths"; // Проверка на использование несуществующих патрул пазов в файлах логик
     static const char* InvalidVertexes = "invalid_vertexes"; // Проверка всех вертексов у каждого патрул паза game_vertex_id() == (u16)-1 || level_vertex_id() == (u32)-1
     static const char* UnexistModels = "unexist_visual_models"; // Проверка на отсутствие моделей визуалов НПС
+    static const char* UnexistItemModels = "unexist_item_models"; // Проверка на отсутствие моделей предметов
+    static const char* UnexistSpawnModels = "unexist_spawn_models"; // Проверка на отсутствие моделей прописанных в all.spawn
 };
 
 namespace Dicts

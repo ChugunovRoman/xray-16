@@ -83,6 +83,9 @@ CGamePersistent::~CGamePersistent()
 {
     ZoneScoped;
 
+    g_checker.CloseAllDescriptors();
+    g_checker.logic_files.clear();
+
     FS.r_close(pDemoFile);
     Device.seqFrame.Remove(this);
     Engine.Event.Handler_Detach(eDemoStart, this);
@@ -530,14 +533,49 @@ void CGamePersistent::checks()
         }
     }
 
+    for (const auto& section : pSettings->sections())
+    {
+        u32 count = pSettings->line_count(section->Name);
+        for (u32 c = 0; c < count; c++)
+        {
+            LPCSTR key, value;
+            pSettings->r_line(section->Name, c, &key, &value);
+            if (value && key && strstr(key, "spawn_point"))
+            {
+                auto it = ai().patrol_paths().patrol_paths().find(value);
+                if (it == ai().patrol_paths().patrol_paths().end())
+                    g_checker.AddToCheckLog(
+                        Checks::PatrolPaths,
+                        make_string("! Patrol path: %s doesn't exist! Used in section: %s", value, *section->Name).c_str()
+                    );
+            }
+            if (value && key && (
+                strstr(key, "visual")
+                || strstr(key, "item_visual")
+                || strstr(key, "actor_visual")
+                || strstr(key, "npc_visual")
+            ))
+            {
+                string_path fn;
+                xr_string _path = value;
+                if (!strstr(value, ".ogf"))
+                    _path.append(".ogf");
+                _Trim(_path);
+                if (!FS.exist(fn, "$game_meshes$", _path.c_str()))
+                    g_checker.AddToCheckLog(
+                        Checks::UnexistItemModels,
+                        make_string("! Model file: %s doesn't exist! Used in section: %s in property: %s", value, *section->Name, key).c_str()
+                    );
+            }
+        }
+
+    }
+
     auto I2 = ai().patrol_paths().patrol_paths().begin();
     auto E2 = ai().patrol_paths().patrol_paths().end();
 
     for (; I2 != E2; ++I2)
         g_checker.AddToDictLog(Dicts::PatrolPaths, (*I2).first);
-
-    g_checker.CloseAllDescriptors();
-    g_checker.logic_files.clear();
 }
 
 void CGamePersistent::update_game_intro()
