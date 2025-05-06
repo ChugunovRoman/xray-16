@@ -514,24 +514,24 @@ void CGamePersistent::checks()
                                 make_string("! Patrol path: %s doesn't exist! Used in file: %s, section: %s", S1, *I.first, *section->Name).c_str()
                             );
 
-                        for (auto I : ai().patrol_paths().patrol_paths())
-                        {
-                            for (auto I2 : I.second->vertices())
-                            {
-                                if (I2.second->data().game_vertex_id() == (u16)-1 || I2.second->data().level_vertex_id() == (u32)-1)
-                                    g_checker.AddToCheckLog(
-                                        Checks::InvalidVertexes,
-                                        make_string(
-                                            "! Patrol path: %s has invalid vertex: %s vertex_id: %d game_vertex_id: %d, level_vertex_id: %d",
-                                            S1,
-                                            I2.second->data().name().c_str(),
-                                            I2.second->vertex_id(),
-                                            I2.second->data().game_vertex_id(),
-                                            I2.second->data().level_vertex_id()
-                                        ).c_str()
-                                    );
-                            }
-                        }
+                        // for (auto I : ai().patrol_paths().patrol_paths())
+                        // {
+                        //     for (auto I2 : I.second->vertices())
+                        //     {
+                        //         if (I2.second->data().game_vertex_id() == (u16)-1 || I2.second->data().level_vertex_id() == (u32)-1)
+                        //             g_checker.AddToCheckLog(
+                        //                 Checks::InvalidVertexes,
+                        //                 make_string(
+                        //                     "! Patrol path: %s has invalid vertex: %s vertex_id: %d game_vertex_id: %d, level_vertex_id: %d",
+                        //                     S1,
+                        //                     I2.second->data().name().c_str(),
+                        //                     I2.second->vertex_id(),
+                        //                     I2.second->data().game_vertex_id(),
+                        //                     I2.second->data().level_vertex_id()
+                        //                 ).c_str()
+                        //             );
+                        //     }
+                        // }
                     }
                 }
             }
@@ -562,16 +562,19 @@ void CGamePersistent::checks()
                 || strstr(key, "npc_visual")
             ))
             {
-                string_path fn;
-                xr_string _path = value;
-                if (!strstr(value, ".ogf"))
-                    _path.append(".ogf");
-                _Trim(_path);
-                if (!FS.exist(fn, "$game_meshes$", _path.c_str()))
-                    g_checker.AddToCheckLog(
-                        Checks::UnexistItemModels,
-                        make_string("! Model file: %s doesn't exist! Used in section: %s in property: %s", value, *section->Name, key).c_str()
-                    );
+                int count = _GetItemCount(value);
+                string512 S1;
+                for (int i = 0; i < count; ++i)
+                {
+                    _GetItem(value, i, S1);
+                    string_path fn;
+                    xr_string _path = S1;
+                    if (!strstr(S1, ".ogf"))
+                        _path.append(".ogf");
+                    _Trim(_path);
+                    if (!FS.exist(fn, "$game_meshes$", _path.c_str()))
+                        g_checker.AddToCheckLog(Checks::UnexistItemModels, S1);
+                }
             }
         }
 

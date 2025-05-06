@@ -65,10 +65,7 @@ void CSE_Visual::check()
         _path.append(".ogf");
     _Trim(_path);
     if (!FS.exist(fn, "$game_meshes$", _path.c_str()))
-        g_checker.AddToCheckLog(
-            Checks::UnexistSpawnModels,
-            make_string("! Model file: %s doesn't exist!", _path.c_str()).c_str()
-        );
+        g_checker.AddToCheckLog(Checks::UnexistSpawnModels, _path.c_str());
 }
 
 void CSE_Visual::visual_write(NET_Packet& tNetPacket)
