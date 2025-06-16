@@ -104,6 +104,12 @@ extern BOOL g_ai_use_old_vision;
 float g_aim_predict_time = 0.40f;
 int g_keypress_on_start = 1;
 
+float g_aim_z_offset_coff = -0.04f;
+float g_second_aim_z_offset_coff = -0.09f;
+extern BOOL debug_show_second_wpn_model;
+extern BOOL debug_show_thrid_wpn_model;
+extern BOOL debug_show_attachments_slots;
+
 ENGINE_API extern float g_console_sensitive;
 
 //Alundaio
@@ -2747,6 +2753,9 @@ void CCC_RegisterCommands()
     CMD4(CCC_Float, "ai_smart_cover_animation_speed_factor", &g_smart_cover_animation_speed_factor, .1f, 10.f);
     CMD4(CCC_Float, "air_resistance_epsilon", &air_resistance_epsilon, .0f, 1.f);
 #endif // #ifdef DEBUG
+    CMD4(CCC_Integer, "debug_show_second_wpn_model", &debug_show_second_wpn_model, 0, 1);
+    CMD4(CCC_Integer, "debug_show_thrid_wpn_model", &debug_show_thrid_wpn_model, 0, 1);
+    CMD4(CCC_Integer, "debug_show_attachments_slots", &debug_show_attachments_slots, 0, 1);
 
     CMD4(CCC_Integer, "g_sleep_time", &psActorSleepTime, 1, 24);
 
@@ -2755,6 +2764,8 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "ai_die_in_anomaly", &g_ai_die_in_anomaly, 0, 1); //Alundaio
 
     CMD4(CCC_Float, "ai_aim_predict_time", &g_aim_predict_time, 0.f, 10.f);
+    CMD4(CCC_Float, "g_aim_z_offset_coff", &g_aim_z_offset_coff, -1.f, 1.f);
+    CMD4(CCC_Float, "g_second_aim_z_offset_coff", &g_second_aim_z_offset_coff, -1.f, 1.f);
 
 #ifdef DEBUG
     // extern BOOL g_use_new_ballistics;

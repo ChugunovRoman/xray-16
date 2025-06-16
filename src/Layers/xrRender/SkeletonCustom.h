@@ -110,7 +110,7 @@ class CKinematics : public FHierrarhyVisual, public IKinematics
 protected: //--#SM+#--
     DEFINE_VECTOR(KinematicsABT::additional_bone_transform, BONE_TRANSFORM_VECTOR, BONE_TRANSFORM_VECTOR_IT)
     BONE_TRANSFORM_VECTOR m_bones_offsets;
-    BONE_TRANSFORM_VECTOR m_bones_pos;
+    xr_map<u16, KinematicsABT::additional_bone_transform> m_bones_pos;
 
 public:
 #ifdef DEBUG

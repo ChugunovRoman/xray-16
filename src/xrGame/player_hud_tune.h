@@ -68,6 +68,9 @@ private:
     bool draw_fd{};
     bool draw_fd2{};
     bool draw_sp{};
+    bool draw_bones{};
+    bool draw_bones_addon{};
+    bool draw_center{};
 
     float debug_point_size{ 0.005f };
     float _delta_pos{ 0.0005f };
@@ -84,9 +87,18 @@ private:
     Fvector m_hands_new_offset[2][1]; // pos,rot/ alt_aim
 
     Fvector pos{};
-    Fvector hpb{};
-    Fvector scale{};
 
     Fvector m_artefact_map_p{0.0f,0.0f,0.0f};
     Fvector m_artefact_map_r{0.0f,0.0f,0.0f};
+
+    Fvector dbg_center{0.0f,0.0f,0.0f};
+    Fvector dbg_wpn_scope_pos{0.0f,0.0f,0.0f};
+
+    struct SlotTransform
+    {
+        Fvector pos;
+        Fvector rot;
+    };
+    
+    xr_map<shared_str, SlotTransform> m_weapon_slots;
 };

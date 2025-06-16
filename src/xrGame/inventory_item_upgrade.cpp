@@ -277,5 +277,9 @@ void CInventoryItem::pre_install_upgrade()
             weapon->Detach(weapon->GetSilencerName().c_str(), true);
         if (weapon->GrenadeLauncherAttachable() && weapon->IsGrenadeLauncherAttached())
             weapon->Detach(weapon->GetGrenadeLauncherName().c_str(), true);
+
+        if (weapon->bUseAttachmentSystem)
+            for (auto& [id, addon] : weapon->m_addon_items)
+                weapon->Detach(id);
     }
 }

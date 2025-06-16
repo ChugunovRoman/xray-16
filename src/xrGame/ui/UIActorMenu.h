@@ -215,6 +215,7 @@ public:
 private:
     void PropertiesBoxForSlots(PIItem item, bool& b_show);
     void PropertiesBoxForWeapon(CUICellItem* cell_item, PIItem item, bool& b_show);
+    void GenerateMenuItemForAddon(PIItem weapon_item, PIItem addon_item);
     void PropertiesBoxForAddon(PIItem item, bool& b_show);
     void PropertiesBoxForUsing(PIItem item, bool& b_show);
     void PropertiesBoxForPlaying(PIItem item, bool& b_show);
@@ -343,8 +344,9 @@ protected:
     bool ToPartnerTradeBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs);
     bool ToDeadBodyBag(CUICellItem* itm, bool b_use_cursor_pos, bool with_all_childs);
 
-    void AttachAddon(PIItem item_to_upgrade);
+    void AttachAddon(PIItem item_to_upgrade, PIItem addon_item);
     void DetachAddon(LPCSTR addon_name, PIItem itm = NULL);
+    void DetachAddon(u32 addon_id, PIItem itm = NULL);
 
     void SendEvent_Item2Slot(PIItem pItem, u16 parent, u16 slot_id);
     void SendEvent_Item2Belt(PIItem pItem, u16 parent);

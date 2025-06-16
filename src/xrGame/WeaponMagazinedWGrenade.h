@@ -32,6 +32,7 @@ public:
     // =========================================
 
     virtual bool Attach(PIItem pIItem, bool b_send_event);
+    virtual bool Detach(u32 addon_id);
     virtual bool Detach(const char* item_section_name, bool b_spawn_item);
     virtual bool CanAttach(PIItem pIItem);
     virtual bool CanDetach(const char* item_section_name);

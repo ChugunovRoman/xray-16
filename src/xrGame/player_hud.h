@@ -90,6 +90,8 @@ struct attachable_hud_item
     shared_str m_sect_name;
     shared_str m_visual_name;
     IKinematics* m_model{};
+    IKinematics* m_model_2{};
+    IKinematics* m_model_3{};
     u16 m_attach_place_idx{};
     bool m_monolithic{};
     hud_item_measures m_measures;
@@ -97,6 +99,9 @@ struct attachable_hud_item
     // runtime positioning
     Fmatrix m_attach_offset{};
     Fmatrix m_item_transform{};
+    Fmatrix hud_transform{};
+    Fmatrix m_item_dot_transform{};
+    Fmatrix m_item_idle_transform{};
 
     player_hud_motion_container m_hand_motions;
 
@@ -104,6 +109,8 @@ struct attachable_hud_item
     ~attachable_hud_item();
 
     void reload_measures();
+    void calc_addon_aim_offset();
+    void set_idle_anm_for_second_model();
 
     void update(bool bForce);
     void update_hud_additional(Fmatrix& trans) const;
@@ -128,6 +135,7 @@ struct attachable_hud_item
     u32 m_upd_firedeps_frame{ u32(-1) };
     void tune(Ivector values);
     u32 anim_play(const shared_str& anim_name, BOOL bMixIn, const CMotionDef*& md, u8& rnd);
+    u32 anim_play(const shared_str& anim_name, BOOL bMixIn, const CMotionDef*& md, u8& rnd, IKinematics* model, bool useSecond);
 };
 
 class player_hud
@@ -142,6 +150,7 @@ public:
     void render_item_ui() const;
     bool render_item_ui_query() const;
     u32 anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel);
+    u32 anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel, IKinematicsAnimated* model, bool useSecond);
     const shared_str& section_name() const { return m_sect_name; }
     attachable_hud_item* create_hud_item(const shared_str& sect);
 
@@ -159,7 +168,7 @@ public:
         m_attached_item = NULL;
     };
 
-    void calc_transform(u16 attach_slot_idx, const Fmatrix& offset, Fmatrix& result) const;
+    void calc_transform(u16 attach_slot_idx, const Fmatrix& offset, const Fmatrix& offset2, Fmatrix& result, Fmatrix& result2, Fmatrix& result3) const;
     void tune(Ivector values);
     u32 motion_length(const MotionID& M, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel) const;
     u32 motion_length(const shared_str& anim_name, const shared_str& hud_name, const CMotionDef*& md);
@@ -173,7 +182,16 @@ private:
     void update_inertion(Fmatrix& trans) const;
     void update_additional(Fmatrix& trans) const;
 public:
+    IKinematicsAnimated* m_model{};
+    IKinematicsAnimated* m_model_2{}; // use for only calc aim offset
+    IKinematicsAnimated* m_model_3{}; // use for only laser dot
+
     bool inertion_allowed() const;
+
+    Fmatrix get_transform() const { return m_transform; }
+    Fvector hud_laser_dot_offset{};
+    Fmatrix hud_laser_dot_transform{ Fidentity };
+    xr_vector<u16> m_ancors;
 
 private:
     shared_str m_sect_name;
@@ -182,8 +200,7 @@ private:
     Fmatrix m_attach_offset{};
 
     Fmatrix m_transform{ Fidentity };
-    IKinematicsAnimated* m_model{};
-    xr_vector<u16> m_ancors;
+    Fmatrix m_second_transform{ Fidentity };
     attachable_hud_item* m_attached_item = NULL;
     xr_unordered_map<shared_str, attachable_hud_item*> m_pool;
 };

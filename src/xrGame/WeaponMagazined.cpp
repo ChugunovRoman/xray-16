@@ -23,6 +23,8 @@
 #include "HudSound.h"
 #include "player_hud.h"
 
+constexpr pcstr WPN_MAIN_SLOT = "slot_1";
+
 CWeaponMagazined::CWeaponMagazined(ESoundTypes eSoundType) : CWeapon(), m_bStopedAfterQueueFired(false)
 {
     m_eSoundShow = ESoundTypes(SOUND_TYPE_ITEM_TAKING | eSoundType);
@@ -509,12 +511,15 @@ void CWeaponMagazined::ReloadMagazine()
 
 void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
 {
+    Msg("CWeaponMagazined::OnStateSwitch, weapon: %s S: %d oldState: %d", *m_section_id, S, oldState);
     HUD_VisualBulletUpdate();
     inherited::OnStateSwitch(S, oldState);
     CInventoryOwner* owner = smart_cast<CInventoryOwner*>(this->H_Parent());
     switch (S)
     {
-    case eIdle: switch2_Idle(); break;
+    case eIdle:
+        switch2_Idle();
+        break;
     case eFire: switch2_Fire(); break;
     case eUnMisfire:
         if (owner)
@@ -538,6 +543,8 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
         if (owner)
             m_sounds_enabled = owner->CanPlayShHdRldSounds();
         switch2_Showing();
+        if (g_player_hud[0]->attached_item())
+            g_player_hud[0]->attached_item()->set_idle_anm_for_second_model();
         break;
     case eHiding:
         if (owner)
@@ -751,6 +758,7 @@ void CWeaponMagazined::OnShot()
 void CWeaponMagazined::OnEmptyClick() { PlaySound("sndEmptyClick", get_LastFP()); }
 void CWeaponMagazined::OnAnimationEnd(u32 state)
 {
+    Msg("CWeaponMagazined::OnAnimationEnd, weapon: %s state: %d", *m_section_id, state);
     switch (state)
     {
     case eFire:
@@ -766,6 +774,13 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
         break; // End of Hide
     case eShowing:
         SwitchState(eIdle);
+        if (g_player_hud[0]->attached_item())
+        {
+            g_player_hud[0]->attached_item()->set_idle_anm_for_second_model();
+            g_player_hud[0]->attached_item()->update(true);
+            calc_aim_addon_offset();
+        }
+
         break; // End of Show
     case eIdle:
         switch2_Idle();
@@ -1028,25 +1043,10 @@ bool CWeaponMagazined::CanAttach(PIItem pIItem)
     CSilencer* pSilencer = smart_cast<CSilencer*>(pIItem);
     CGrenadeLauncher* pGrenadeLauncher = smart_cast<CGrenadeLauncher*>(pIItem);
 
-    if (pScope && xr_strcmp(*pScope->m_addon_type, "base_scope") != 0)
-    {
-        auto it = m_addons.begin();
-        for (; it != m_addons.end(); ++it)
-        {
-            if (bUseAltScope)
-            {
-                if (*it == pIItem->object().cNameSect())
-                    return true;
-            }
-            else
-            {
-                if (pSettings->r_string((*it), "scope_name") == pIItem->object().cNameSect())
-                    return true;
-            }
-        }
-        return false;
-    }
-    else if (pScope && ((m_eScopeStatus == ALife::eAddonAttachable && (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 0) ||
+    if (bUseAttachmentSystem && pScope && m_addon_slot_type == pScope->m_slot_type)
+        return true;
+
+    if (pScope && ((m_eScopeStatus == ALife::eAddonAttachable && (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 0) ||
         (GetScopeStatusParent() == ALife::EWeaponAddonStatus::eAddonAttachable && (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 1)))
     {
         auto it = m_scopes.begin();
@@ -1081,9 +1081,9 @@ bool CWeaponMagazined::CanDetach(const char* item_section_name)
 {
     if (bUseAttachmentSystem && m_addon_items.size() > 0)
     {
-        for (auto addon: m_addon_items)
+        for (auto [addon_id, addon]: m_addon_items)
         {
-            if (xr_strcmp(*addon.second->addon_item_name, item_section_name) == 0)
+            if (xr_strcmp(*addon->addon_item_name, item_section_name) == 0)
                 return true;
         }
     }
@@ -1128,30 +1128,9 @@ bool CWeaponMagazined::AttachAttachment(PIItem pIItem)
     CSilencer* pSilencer = smart_cast<CSilencer*>(pIItem);
     CGrenadeLauncher* pGrenadeLauncher = smart_cast<CGrenadeLauncher*>(pIItem);
 
-    if (pScope && !hasInstalledAddonType(pScope->m_addon_type))
+    if (pScope)
     {
-        if (xr_strcmp(*pScope->m_addon_type, "base_scope") == 0)
-        {
-            auto it = m_scopes.begin();
-            for (; it != m_scopes.end(); ++it)
-            {
-                if (bUseAltScope)
-                {
-                    if (*it == pIItem->object().cNameSect())
-                        m_cur_scope = u8(it - m_scopes.begin());
-                }
-                else
-                {
-                    if (pSettings->r_string((*it), "scope_name") == pIItem->object().cNameSect())
-                        m_cur_scope = u8(it - m_scopes.begin());
-                }
-            }
-
-            m_section_id = GetNameWithAttachment();
-            m_flagsAddOnState |= CSE_ALifeItemWeapon::eWeaponAddonScope;
-        }
-
-        addAddon(pIItem->m_section_id, pScope->m_addon_type);
+        addAddon(pIItem);
 
         reload(*m_section_id);
         result = true;
@@ -1227,15 +1206,11 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
     CSilencer* pSilencer = smart_cast<CSilencer*>(pIItem);
     CGrenadeLauncher* pGrenadeLauncher = smart_cast<CGrenadeLauncher*>(pIItem);
 
-    if (pScope)
+    if (pScope && bUseAttachmentSystem)
     {
-        if ((m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 1 && xr_strcmp(pScope->m_addon_type, "base_scope") == 0)
-            Detach(*GetScopeName(), true);
-        else if (bUseAttachmentSystem && hasInstalledAddonType(pScope->m_addon_type) && m_addon_items.size() > 0)
-                for (auto addon: m_addon_items)
-                    if (addon.second->addon_item_visible && xr_strcmp(addon.second->addon_type, pScope->m_addon_type) == 0)
-                        Detach(*addon.second->addon_item_name, true);
-                    
+        auto addon = GetAddonFromSlot(pIItem->parent_addon, pIItem->attach_to_slot_name);
+        if (addon.second)
+            Detach(addon.first);
     }
 
     if (bUseAttachmentSystem)
@@ -1295,19 +1270,39 @@ bool CWeaponMagazined::DetachScope(const char* item_section_name, bool b_spawn_i
     return detached;
 }
 
-bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
+bool CWeaponMagazined::Detach(u32 addon_id)
 {
-    if (bUseAttachmentSystem && m_addon_items.size() > 0)
+    auto addon = m_addon_items.find(addon_id);
+    if (addon != m_addon_items.end())
     {
-        auto found_addon = m_addon_items.find(item_section_name);
-        if (found_addon != m_addon_items.end() && xr_strcmp(found_addon->second->addon_type, "base_scope") != 0)
+        for (auto slot: addon->second->addon_slots)
         {
-            m_addon_items[item_section_name]->addon_item_visible = false;
-            reload(*m_section_id);
-            return CInventoryItemObject::Detach(item_section_name, b_spawn_item);
+            auto depended_addon = std::find_if(m_addon_items.begin(), m_addon_items.end(), [addon_id, slot](std::pair<u32, addon_item*> addon) {
+                return addon.second->parent_id == addon_id && addon.second->slot == slot.first;
+            });
+            if (depended_addon != m_addon_items.end())
+                Detach(depended_addon->first);
         }
+
+        pcstr sect = addon->second->addon_item_name.c_str();
+        xr_delete(addon->second);
+        m_addon_items.erase(addon);
+
+        attachable_hud_item* hi = HudItemData();
+        if (hi)
+            hi->reload_measures();
+        UpdateAvailableSecondZoom();
+        // calc_aim_addon_offset();
+        reload(*m_section_id);
+        setSecondZoomOnFirstScopeIfHaveIt();
+
+        return CInventoryItemObject::Detach(sect, true);
     }
 
+    return false;
+}
+bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
+{
     if (m_eScopeStatus == ALife::eAddonAttachable && DetachScope(item_section_name, b_spawn_item))
     {
         if ((m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 0 && !IsScopeAttached())
@@ -1318,34 +1313,8 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
         m_flagsAddOnState &= ~CSE_ALifeItemWeapon::eWeaponAddonScope;
 
         pcstr parentSect = pSettings->read_if_exists<pcstr>(*m_section_id, "parent_section", *m_section_id);
-        auto found_addon = m_addon_items.find(item_section_name);
-
-        if (!bUseAttachmentSystem && xr_strcmp(parentSect, *m_section_id) != 0)
-            cNameVisual_set(pSettings->r_string(parentSect, "visual"));
 
         m_section_id = parentSect;
-
-        if (bUseAttachmentSystem && found_addon != m_addon_items.end())
-        {
-            m_addon_items[item_section_name]->addon_item_visible = false;
-
-            bool hasMainScope = hasInstalledAddonType("base_scope");
-            bool hasColimScope = hasInstalledAddonType("colim_scope");
-            addon_item* colimAddon = getFirstAddonByType("colim_scope");
-
-            if (hasColimScope && colimAddon)
-            {
-                bool hasAltProps = pSettings->line_exist(*m_section_id, make_string("%s_alt_hud_pos", *colimAddon->addon_item_name).c_str());
-
-                if (hasAltProps)
-                {
-                    colimAddon->addon_item_hpb = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_alt_hud_hpb", *colimAddon->addon_item_name).c_str(), Fvector().set(0.f,0.f,0.f));
-                    colimAddon->addon_item_pos = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_alt_hud_pos", *colimAddon->addon_item_name).c_str(), Fvector().set(0.f,0.f,0.f));
-                    colimAddon->addon_item_scale = pSettings->read_if_exists<Fvector>(*m_section_id, make_string("%s_alt_hud_scale", *colimAddon->addon_item_name).c_str(), Fvector().set(1.f,1.f,1.f));
-                    m_addon_items[*colimAddon->addon_item_name] = colimAddon;
-                }
-            }
-        }
 
         m_cur_scope = 0;
         reload(parentSect);

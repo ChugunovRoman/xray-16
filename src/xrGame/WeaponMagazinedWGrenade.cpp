@@ -575,6 +575,10 @@ bool CWeaponMagazinedWGrenade::Attach(PIItem pIItem, bool b_send_event)
         return inherited::Attach(pIItem, b_send_event);
 }
 
+bool CWeaponMagazinedWGrenade::Detach(u32 addon_id)
+{
+    return inherited::Detach(addon_id);
+}
 bool CWeaponMagazinedWGrenade::Detach(LPCSTR item_section_name, bool b_spawn_item)
 {
     if (ALife::eAddonAttachable == m_eGrenadeLauncherStatus &&
