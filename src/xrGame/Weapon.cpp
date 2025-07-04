@@ -2132,19 +2132,18 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
         };
         auto load_slot_offsets = [&](const char* format) {
             u16 index = 1;
-            char line_name[64];
-            char slot_key[64];
+            shared_str line_name;
+            shared_str slot_key;
             
             while (true)
             {
-                sprintf_s(line_name, format, index);
-                if (!pSettings->line_exist(section, line_name))
+                line_name = make_string(format, index).c_str();
+                if (!pSettings->line_exist(section, *line_name))
                     break;
 
-                sprintf_s(slot_key, "slot_%d", index);
-                shared_str key = slot_key;
+                slot_key = make_string("slot_%d", index).c_str();
 
-                load_slot(line_name, key);
+                load_slot(line_name, slot_key);
 
                 index++;
             }
@@ -3670,19 +3669,17 @@ void CWeapon::addAddon(PIItem item)
     world_trans.mul(parent_item->addon_item_pos, bAttachmentSystemOffsetOnWorldModel);
     world_trans.mulB_43(slot_transform);
 
-    const char* format = "slot_%d";
     u16 index = 1;
-    char bn[64];
+    shared_str slot_name;
     
     while (true)
     {
-        sprintf_s(bn, format, index);
-        u16 bone_id = new_addon->addon_item_model->LL_BoneID(bn);
+        slot_name = make_string("slot_%d", index).c_str();
+        u16 bone_id = new_addon->addon_item_model->LL_BoneID(slot_name);
         if (bone_id == BI_NONE)
             break;
 
         Fmatrix bone_transform = new_addon->addon_item_model->LL_GetTransform(bone_id);
-        pcstr slot_name = bn;
         addon_slot slot;
         slot.slot_name = slot_name;
         slot.transform.mul(new_addon->addon_item_pos, bone_transform);

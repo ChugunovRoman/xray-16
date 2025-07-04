@@ -9,6 +9,7 @@
 #include "ai/monsters/control_animation_base.h"
 #include "ai/monsters/control_movement_base.h"
 #include "PHMovementControl.h"
+#include "Include/xrRender/KinematicsAnimated.h"
 #ifdef _DEBUG
 #include "Actor.h"
 #include "xrAICore/Navigation/ai_object_location.h"
