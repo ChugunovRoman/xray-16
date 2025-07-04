@@ -2027,6 +2027,7 @@ target_sources(xrGame PRIVATE
     ai/monsters/states/monster_state_home_point_danger_inline.h
     ai/monsters/states/monster_state_home_point_rest.h
     ai/monsters/states/monster_state_home_point_rest_inline.h
+    ai/monsters/states/monster_state_move.h
     ai/monsters/states/monster_state_panic.h
     ai/monsters/states/monster_state_panic_inline.h
     ai/monsters/states/monster_state_panic_run.h

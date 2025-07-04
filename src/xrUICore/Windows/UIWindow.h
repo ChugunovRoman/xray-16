@@ -2,10 +2,6 @@
 
 #define ui_list xr_vector
 
-#define DEF_UILIST(N, T)  \
-    typedef ui_list<T> N; \
-    typedef N::iterator N##_it;
-
 //////////////////////////////////////////////////////////////////////////
 
 #include "xrUICore/UIMessages.h"

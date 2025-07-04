@@ -246,7 +246,7 @@ private:
     GameMtlPairVec material_pairs;
     GameMtlPairVec material_pairs_rt;
 
-    u32 m_file_age{};
+    u32 m_library_crc32{};
     EGameMtlVersion m_version{};
 
 public:
@@ -254,6 +254,7 @@ public:
     ~CGameMtlLibrary() {}
     void Unload()
     {
+        m_library_crc32 = 0;
         material_pairs_rt.clear();
         for (auto& mtl : materials)
             xr_delete(mtl);
@@ -351,12 +352,15 @@ public:
     GameMtlPairIt FirstMaterialPair() { return material_pairs.begin(); }
     GameMtlPairIt LastMaterialPair() { return material_pairs.end(); }
 
+	[[nodiscard]]
+	auto GetLibraryCrc32() const noexcept
+	{
+		return m_library_crc32;
+	}
+
     // IO routines
     void Load();
     bool Save();
-
-    [[nodiscard]]
-    auto GetFileAge() const { return m_file_age; }
 };
 
 extern MTL_EXPORT_API CGameMtlLibrary GMLib;

@@ -398,13 +398,9 @@ void CMissile::UpdateXForm()
             return;
 
         const CInventoryOwner* parent = smart_cast<const CInventoryOwner*>(E);
-        if (parent && parent->use_simplified_visual())
+        if (parent && parent->attached(this))
             return;
 
-        if (parent->attached(this))
-            return;
-
-        VERIFY(E);
         IKinematics* V = smart_cast<IKinematics*>(E->Visual());
         VERIFY(V);
 

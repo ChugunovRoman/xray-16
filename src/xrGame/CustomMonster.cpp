@@ -97,7 +97,6 @@ CCustomMonster::CCustomMonster()
     m_memory_manager = 0;
     m_movement_manager = 0;
     m_sound_player = 0;
-    m_already_dead = false;
     m_invulnerable = false;
     m_moving_object = 0;
 }

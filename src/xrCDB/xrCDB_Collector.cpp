@@ -289,7 +289,7 @@ void Collector::remove_duplicate_T()
     }
 }
 
-CollectorPacked::CollectorPacked(const Fbox& bb, int apx_vertices, int apx_faces)
+CollectorPacked::CollectorPacked(const Fbox& bb, u32 apx_vertices, u32 apx_faces)
 {
     // Params
     VMscale.set(bb.vMax.x - bb.vMin.x, bb.vMax.y - bb.vMin.y, bb.vMax.z - bb.vMin.z);
@@ -353,7 +353,7 @@ u32 CollectorPacked::VPack(const Fvector& V)
     clamp(iz, (u32)0, clpMZ);
 
     {
-        DWORDList* vl = &(VM[ix][iy][iz]);
+        auto* vl = &(VM[ix][iy][iz]);
         for (u32 it : *vl)
             if (verts[it].similar(V))
             {

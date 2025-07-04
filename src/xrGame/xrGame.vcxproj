@@ -432,6 +432,7 @@
     <ClInclude Include="ai\Monsters\States\monster_state_home_point_danger_inline.h" />
     <ClInclude Include="ai\Monsters\States\monster_state_home_point_rest.h" />
     <ClInclude Include="ai\Monsters\States\monster_state_home_point_rest_inline.h" />
+    <ClInclude Include="ai\monsters\states\monster_state_move.h" />
     <ClInclude Include="ai\Monsters\States\monster_state_panic.h" />
     <ClInclude Include="ai\Monsters\States\monster_state_panic_inline.h" />
     <ClInclude Include="ai\Monsters\States\monster_state_panic_run.h" />

@@ -13,27 +13,26 @@
 **OpenXRay** is an improved version of the X-Ray Engine, the game engine used in the world-famous S.T.A.L.K.E.R. game series by GSC Game World.
 
 This is a fan-made project not affiliated with GSC Game World in any way.
-However, they know about many community projects, including this, and support the S.T.A.L.K.E.R. community efforts to make the game better.
+However, they know about many community projects, including this, and support S.T.A.L.K.E.R. community efforts to make the game better.
 
 Installation instructions are on the [How to install and play](https://github.com/OpenXRay/xray-16/wiki/[EN]-How-to-install-and-play) page.
 
-## Main differences from the original X-Ray are:
+## Supported game platforms
+- Clear Sky 1.5.10. (minor bugs are possible, but the game is stable finishable. See [#382](https://github.com/OpenXRay/xray-16/issues/382))
+- Call of Pripyat 1.6.02.
+- Call of Chernobyl 1.4.22.
+
+Shadow of Chernobyl is **not supported** yet. (see [#392](https://github.com/OpenXRay/xray-16/issues/392)) <br>
+Legends of the Zone/Enhanced Edition is not supported and won't ever be likely. (see [#1865](https://github.com/OpenXRay/xray-16/issues/1865))
+
+## Main differences from the original X-Ray
 - Support for 64-bit.
 - Improved performance, better FPS.
 - Original bugs fixes.
 - New features for modmakers.
 - Works on Linux, macOS, *BSDs and supports ARM, ARM64, E2K (Elbrus 2000), PPC64LE architectures.
 
-You can see the detailed differences table [here](https://github.com/OpenXRay/xray-16/wiki/%5BEN%5D-Differences-from-original-X‐Ray)
-
-## Supported game platforms
-OpenXRay is based on X-Ray 1.6.02, used in S.T.A.L.K.E.R.: Call of Pripyat, but the engine was extended to support more than that:
-
-|Call of Pripyat|Clear Sky|Call of Chernobyl|
-|---|---|---|
-|Yes|Release candidate (see [#382](https://github.com/OpenXRay/xray-16/issues/382)).<br>Minor bugs possible, but game is stable finishable.|Yes|
-
-Shadow of Chernobyl is **not supported** yet (see [#392](https://github.com/OpenXRay/xray-16/issues/392)).
+You can see the detailed differences table [here](https://github.com/OpenXRay/xray-16/wiki/%5BEN%5D-Differences-from-original-X‐Ray).
 
 ## Goals
 1. Clean up engine code, boost performance, and fix original X-Ray Engine bugs that were polluting S.T.A.L.K.E.R. series.
@@ -81,9 +80,11 @@ Take a look at our [Issues](https://github.com/openxray/xray-16/issues) page:
 
 Make sure to visit our [wiki](https://github.com/OpenXRay/xray-16/wiki):
 * [Build instructions for Windows](https://github.com/OpenXRay/xray-16/wiki/[EN]-How-to-build-and-setup-on-Windows).
-* [Build instructions for Linux and other platforms](https://github.com/OpenXRay/xray-16/wiki/[EN]-How-to-build-and-setup-on-Linux).
+* [Build instructions for Linux and other platforms](https://github.com/OpenXRay/xray-16/wiki/%5BEN%5D-How-to-build-and-setup-on-Linux-and-MacOS).
 
 The `dev` branch is the default and base branch for the project. It is used for development, and all pull requests should go there. But be aware that this branch sometimes may be broken, and we can only rarely do force pushes to this branch.
+
+The code base is based on X-Ray 1.6.02 that is used in S.T.A.L.K.E.R.: Call of Pripyat and it was greatly refactored.
 
 ### Funding
 [![Financial Contributors](https://opencollective.com/openxray/tiers/badge.svg?label=Financial%20contributors)](https://opencollective.com/openxray) [![Sponsors](https://img.shields.io/github/sponsors/openxray?color=brightgreen&label=Sponsors)](https://github.com/sponsors/OpenXRay) [![Patreon](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fwww.patreon.com%2Fapi%2Fcampaigns%2F5950725&query=data.attributes.patron_count&suffix=%20Patrons&color=success&label=Patreon&style=flat)](https://patreon.com/openxray)
@@ -165,7 +166,7 @@ Thank you for your support!
     * [tamlin-mike](https://github.com/tamlin-mike) – work on the build system.
     * [Vincent](https://github.com/0xBADEAFFE) – work on the Linux port.
     * [abramcumner](https://github.com/abramcumner) – useful fixes and additions.
-    * [Morrey](https://github.com/morrey) (nouverbe, [viventaje](https://github.com/viventaje)) – work on Clear Sky support and his Return to Clear Sky mod, and work on DX12 support.
+    * [Morrey](https://github.com/morrey) (nouverbe, [viventaje](https://github.com/viventaje)) – work on DX12 renderer, Clear Sky support and his Return to Clear Sky mod.
     * [avoitishin](https://github.com/avoitishin) – work on scripting features expansion, other improvements and fixes.
   * Financial supporters:
     * [nitrocaster](https://github.com/nitrocaster), Lukas Friedrich, Luke Jones, NekoIt, Igor Polyakov,
@@ -174,7 +175,7 @@ Thank you for your support!
     * Valevicor, Nac, Midiy, Vadim Balashov, Jacob Arms,
     * CatWMuttonChops, Reed777, Interpreter_, nexusasx10, [Egor Olefirenko](https://github.com/olefirenque),
     * Igor Zharenko, SLF, Dmitriy Terletskiy, Alex Brodskiy, Neizvestniy Chelovek,
-    * LinuxNerd, [tyabus](https://github.com/tyabus), [Sevenfortyseven](https://github.com/Sevenfortyseven)
+    * LinuxNerd, [tyabus](https://github.com/tyabus), [Sevenfortyseven](https://github.com/Sevenfortyseven), 777yur0k, ItzVladik
 * Particular projects and their contributors:
   * [Oxygen](https://github.com/xrOxygen) – for being our friends and giving tips and help with new features, optimizations, bug fixes, etc.
   * [Shoker Weapon Mod](https://github.com/ShokerStlk/xray-16-SWM) – for first introducing 3D (PiP) scopes and implementing new features to overall improve the weaponry of the game.

@@ -260,10 +260,7 @@ void CWeapon::UpdateXForm()
     }
 
     const CInventoryOwner* parent = smart_cast<const CInventoryOwner*>(E);
-    if (!parent || parent->use_simplified_visual())
-        return;
-
-    if (parent->attached(this))
+    if (!parent || parent->attached(this))
         return;
 
     IKinematics* V = smart_cast<IKinematics*>(E->Visual());

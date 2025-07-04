@@ -340,15 +340,9 @@ void CArtefact::UpdateXForm()
 
         // Get access to entity and its visual
         CEntityAlive* E = smart_cast<CEntityAlive*>(H_Parent());
-
         if (!E)
             return;
 
-        const CInventoryOwner* parent = smart_cast<const CInventoryOwner*>(E);
-        if (parent && parent->use_simplified_visual())
-            return;
-
-        VERIFY(E);
         IKinematics* V = smart_cast<IKinematics*>(E->Visual());
         VERIFY(V);
         if (CAttachableItem::enabled())

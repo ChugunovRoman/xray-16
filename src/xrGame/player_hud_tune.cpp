@@ -308,49 +308,49 @@ void CHudTuner::on_tool_frame()
                 {
                     ImGui::LogToClipboard();
                     xr_sprintf(selectable, "[%s]\n", m_sect_name.c_str());
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "hands_position%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_attach[0].x, new_measures.m_hands_attach[0].y, new_measures.m_hands_attach[0].z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "hands_orientation%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_attach[1].x, new_measures.m_hands_attach[1].y, new_measures.m_hands_attach[1].z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "aim_hud_offset_pos%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_offset[0][1].x, new_measures.m_hands_offset[0][1].y, new_measures.m_hands_offset[0][1].z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "aim_hud_offset_rot%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_offset[1][1].x, new_measures.m_hands_offset[1][1].y, new_measures.m_hands_offset[1][1].z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "aim_hud_offset_alt_pos%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", wpn->m_hands_offset[0][1].x, wpn->m_hands_offset[0][1].y, wpn->m_hands_offset[0][1].z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "aim_hud_offset_alt_rot%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", wpn->m_hands_offset[1][1].x, wpn->m_hands_offset[1][1].y, wpn->m_hands_offset[1][1].z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "aim_hud_correct_offset_pos%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", wpn->m_hands_offset[0][3].x, wpn->m_hands_offset[0][3].y, wpn->m_hands_offset[0][3].z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "aim_hud_correct_offset_rot%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", wpn->m_hands_offset[1][3].x, wpn->m_hands_offset[1][3].y, wpn->m_hands_offset[1][3].z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "gl_hud_offset_pos%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_offset[0][2].x, new_measures.m_hands_offset[0][2].y, new_measures.m_hands_offset[0][2].z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "gl_hud_offset_rot%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_offset[1][2].x, new_measures.m_hands_offset[1][2].y, new_measures.m_hands_offset[1][2].z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "attachment_system_offset_on_world_model = %f,%f,%f\n", world_addons_pos.x, world_addons_pos.y, world_addons_pos.z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "item_position = %f,%f,%f\n", new_measures.m_item_attach[0].x, new_measures.m_item_attach[0].y, new_measures.m_item_attach[0].z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "item_orientation = %f,%f,%f\n", new_measures.m_item_attach[1].x, new_measures.m_item_attach[1].y, new_measures.m_item_attach[1].z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "fire_point = %f,%f,%f\n", new_measures.m_fire_point_offset.x, new_measures.m_fire_point_offset.y, new_measures.m_fire_point_offset.z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "fire_point = %f,%f,%f\n", new_measures.m_fire_point2_offset.x, new_measures.m_fire_point2_offset.y, new_measures.m_fire_point2_offset.z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "shell_point = %f,%f,%f\n", new_measures.m_shell_point_offset.x, new_measures.m_shell_point_offset.y, new_measures.m_shell_point_offset.z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "ui_p = %f,%f,%f\n", m_artefact_map_p.x, m_artefact_map_p.y, m_artefact_map_p.z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "ui_r = %f,%f,%f\n", m_artefact_map_r.x, m_artefact_map_r.y, m_artefact_map_r.z);
-                    ImGui::LogText(selectable);
+                    ImGui::LogText("%s", selectable);
                     if (wpn && wpn->bUseAttachmentSystem)
                     {
                         for (auto& [slot_id, data] : m_weapon_slots)
                         {
                             xr_sprintf(selectable, "addon_%s_offset = %d,%f,%f,%f,%f,%f,%f\n", slot_id.c_str(), data.type, data.pos.x, data.pos.y, data.pos.z, data.rot.x, data.rot.y, data.rot.z);
-                            ImGui::LogText(selectable);
+                            ImGui::LogText("%s", selectable);
                         }
                     }
                     ImGui::LogFinish();

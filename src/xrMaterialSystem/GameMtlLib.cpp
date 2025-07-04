@@ -181,7 +181,7 @@ void CGameMtlLibrary::Load()
         return;
     }
 
-    m_file_age = fs.get_age();
+	m_library_crc32 = crc32(fs.pointer(), fs.length());
 
     R_ASSERT(fs.find_chunk(GAMEMTLS_CHUNK_AUTOINC));
     material_index = fs.r_u32();

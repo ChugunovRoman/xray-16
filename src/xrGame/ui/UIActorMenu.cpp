@@ -85,7 +85,7 @@ void CUIActorMenu::InitPartnerInfo()
     if (m_pPartnerInvOwner)
     {
         CBaseMonster* monster = smart_cast<CBaseMonster*>(m_pPartnerInvOwner);
-        if (monster || m_pPartnerInvOwner->use_simplified_visual())
+        if (monster)
         {
             GetModeSpecificPartnerInfo(m_currMenuMode)->ClearInfo();
             if (monster)

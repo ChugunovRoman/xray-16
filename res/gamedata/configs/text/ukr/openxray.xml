@@ -1,109 +1,124 @@
 <?xml version="1.0" encoding="windows-1251" ?>
 <string_table>
+	<string id="st_unload_magazine_after_pickup">
+		<text>Розряд. зброю при піднятті</text>
+	</string>
+	<string id="st_unload_magazine_all">
+		<text>розрядити всю зброю</text>
+	</string>
 	<string id="st_unequip">
-		<text>wegstecken</text>
+		<text>сховати в рюкзак</text>
 	</string>
 	<string id="st_donate">
-		<text>Spenden</text>
+		<text>Подарувати</text>
 	</string>
 	<string id="st_loading_lights">
-		<text>Lade Lichter</text>
+		<text>Завантаження освітлення</text>
 	</string>
 	<string id="st_client_connecting_to">
-		<text>CLIENT: Verbinde zu</text>
+		<text>Клієнт: З'єднання с</text>
 	</string>
 	<string id="st_client_spawning">
-		<text>CLIENT: Spawne</text>
+		<text>Клієнт: Створення</text>
 	</string>
 	<string id="st_client_synchronising">
-		<text>CLIENT: Synchronisiere</text>
+		<text>Клієнт: Синхронізація</text>
 	</string>
 	<string id="st_creating_new_game">
-		<text>Erstelle neues Spiel</text>
+		<text>Створення нової гри</text>
 	</string>
 	<string id="ui_mm_always_active">
-		<text>Nicht pausieren bei Alt+Tab</text>
+		<text>Не ставити гру на пазу при Alt+Tab</text>
 	</string>
 	<string id="ui_mm_detail_radius">
-		<text>Grasdetail Radius</text>
+		<text>Відстань промальовування трави</text>
 	</string>
 	<string id="ui_mm_ui_style">
-		<text>Interfacedesign</text>
+		<text>Стиль інтерфейсу</text>
 	</string>
 	<string id="ui_style_default">
-		<text>Call of Pripyat</text>
+		<text>Поклик Прип'яті</text>
 	</string>
 	<string id="ui_mm_simplified_item_pickup">
-		<text>Vereinf. Aufheben (SoC)</text>
+		<text>Спрощ. підбір предметів</text>
 	</string>
 	<string id="ui_mm_multi_item_pickup">
-		<text>Wiederh. Aufheben (CoP)</text>
+		<text>Множ. підбір предметів</text>
 	</string>
 	<string id="ui_mm_loadingstages">
-		<text>Ladefortschritt anzeigen</text>
+		<text>Стадії завантаження</text>
 	</string>
 	<string id="renderer_rgl">
-		<text>Erw. Volldyn. Beleuchtung (OpenGL)</text>
+		<text>Покр. повне освітлення (OpenGL)</text>
 	</string>
 	<string id="ui_mm_window_mode">
-		<text>Window mode</text>
+		<text>Режим вікна</text>
 	</string>
 	<string id="st_opt_windowed">
-		<text>Windowed</text>
+		<text>Віконний</text>
 	</string>
 	<string id="st_opt_windowed_borderless">
-		<text>Windowed borderless</text>
+		<text>Віконний без рамок</text>
 	</string>
 	<string id="st_opt_fullscreen">
-		<text>Fullscreen</text>
+		<text>Повноекранний</text>
 	</string>
 	<string id="st_opt_fullscreen_borderless">
-		<text>Fullscreen (fast Alt+Tab)</text>
+		<text>Повноекранний (швидкий Alt+Tab)</text>
+	</string>
+	<string id="ui_mm_r2_fxaa">
+		<text>FXAA</text>
 	</string>
 	<string id="ui_mm_r2_smap_size">
-		<text>Qualitat der Schattenkarte</text>
+		<text>Якість карт тіней</text>
+	</string>
+	<string id="ui_mm_r3_dynamic_wet_surfaces_opt">
+		<text>Оптимізація намокання</text>
 	</string>
 	<string id="ui_mm_r3_dynamic_wet_surfaces_near">
-		<text>Nassflachen Nahbereich</text>
+		<text>Намокання поблизу</text>
 	</string>
 	<string id="ui_mm_r3_dynamic_wet_surfaces_far">
-		<text>Nassflachen Fernbereich</text>
+		<text>Намокання вдалині</text>
 	</string>
 	<string id="ui_mm_r3_dynamic_wet_surfaces_sm_res">
-		<text>Nassflachen Qualitat</text>
+		<text>Якість намокання</text>
 	</string>
 	<string id="ui_mm_fov">
-		<text>Blickwinkel (FOV)</text>
-	</string>
-	<string id="ui_mm_fps_limit">
-		<text>Spiel-FPS-Limit</text>
-	</string>
-	<string id="ui_mm_fps_limit_in_menu">
-		<text>Menь-FPS-Limit</text>
+		<text>Поле зору</text>
 	</string>
 	<string id="ui_mm_localization">
-		<text>Sprache</text>
+		<text>Мова</text>
+	</string>
+	<string id="ui_mm_gamepad_setup">
+		<text>Налаштування геймпаду</text>
+	</string>
+	<string id="ui_mm_fps_limit">
+		<text>Обмеження FPS у грі</text>
+	</string>
+	<string id="ui_mm_fps_limit_in_menu">
+		<text>Обмеження FPS в меню</text>
 	</string>
 	<string id="ui_mm_shader_preset">
-		<text>Graphics mode</text>
+		<text>Режим графіки</text>
 	</string>
 	<string id="ui_mm_shader_preset_vanilla">
-		<text>vanilla</text>
+		<text>оригінальна</text>
 	</string>
 	<string id="ui_mm_shader_preset_enhanced_default">
-		<text>enhanced (Default)</text>
+		<text>покращена (стандарт)</text>
 	</string>
 	<string id="ui_mm_shader_preset_enhanced_high">
-		<text>enhanced (High)</text>
+		<text>покращена (високо)</text>
 	</string>
 	<string id="ui_mm_color_grading_preset">
-		<text>Colour grading</text>
+		<text>Градація кольорів</text>
 	</string>
 	<string id="ui_mm_color_grading_default">
-		<text>default</text>
+		<text>стандартна</text>
 	</string>
 	<string id="ui_mm_color_grading_cold">
-		<text>cold</text>
+		<text>холодна</text>
 	</string>
 	<string id="ui_mm_color_grading_filmic_01">
 		<text>Filmic 1</text>
@@ -118,45 +133,39 @@
 		<text>Hollywood</text>
 	</string>
 	<string id="ui_mm_color_grading_vanilla">
-		<text>Vanilla</text>
+		<text>оригінальна</text>
 	</string>
 	<string id="ui_mm_color_grading_vibrant">
 		<text>Vibrant</text>
 	</string>
 	<string id="ui_mm_color_grading_warm">
-		<text>warm</text>
+		<text>тепла</text>
 	</string>
 	<string id="eng">
-		<text>Englisch (English)</text>
+		<text>Англійська (English)</text>
 	</string>
 	<string id="fra">
-		<text>Franzosisch (French)</text>
+		<text>Французька (French)</text>
 	</string>
 	<string id="ger">
-		<text>Deutsch (German)</text>
+		<text>Німецька (German)</text>
 	</string>
 	<string id="ita">
-		<text>Italienisch (Italian)</text>
+		<text>Італійська (Italian)</text>
 	</string>
 	<string id="pol">
-		<text>Polnisch (Polish)</text>
+		<text>Польська (Polish)</text>
 	</string>
 	<string id="rus">
-		<text>Russissch (Russian)</text>
+		<text>Російська (Russian)</text>
 	</string>
 	<string id="spa">
-		<text>Spanisch (Spanish)</text>
-	</string>
-	<string id="cze">
-		<text>Tschechisch (Tzech)</text>
+		<text>Іспанська (Spanish)</text>
 	</string>
 	<string id="ukr">
-		<text>Ukrainisch (Ukrainian)</text>
+		<text>Українська (Ukrainian)</text>
 	</string>
 	<string id="jpn">
-		<text>Japanisch (Japanese)</text>
-	</string>
-	<string id="ukr">
-		<text>Ukrainische (Ukrainian)</text>
+		<text>Японська (Japanese)</text>
 	</string>
 </string_table>
