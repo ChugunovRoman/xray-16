@@ -68,6 +68,13 @@ class CInventoryItem : public CAttachableItem,
 private:
     typedef CAttachableItem inherited;
 
+public:
+    enum EIIAddonOrt
+    {
+        FOrtNone = 0,
+        FOrtLeft,
+        FOrtRight,
+    };
 protected:
     enum EIIFlags
     {
@@ -114,6 +121,7 @@ public:
     virtual bool Attach(PIItem pIItem, bool b_send_event) { return false; }
     virtual bool Detach(PIItem pIItem) { return false; }
     //при детаче спаунится новая вещь при заданно названии секции
+    virtual bool Detach(u32 addon_id) { return false; }
     virtual bool Detach(const char* item_section_name, bool b_spawn_item);
     virtual bool CanAttach(PIItem pIItem) { return false; }
     virtual bool CanDetach(LPCSTR item_section_name) { return false; }
@@ -158,6 +166,10 @@ public:
     shared_str m_tip;
     shared_str m_nameComplex;
     bool m_highlight_equipped;
+
+    shared_str attach_to_slot_name; // Name of slot where item should be attached
+    u32 parent_addon;
+    EIIAddonOrt attach_to_ort{ FOrtNone };
 
     SInvItemPlace m_ItemCurrPlace;
 
@@ -332,5 +344,19 @@ public:
     IC bool is_helper_item() { return !!m_flags.test(FIsHelperItem); }
     IC void set_is_helper(bool is_helper) { m_flags.set(FIsHelperItem, is_helper); }
 }; // class CInventoryItem
+
+class AttchItemData
+{
+public:
+    PIItem m_Item;
+    shared_str attach_to_slot_name; // Name of slot where item should be attached
+    u32 parent_addon;
+    CInventoryItem::EIIAddonOrt attach_to_ort{ CInventoryItem::EIIAddonOrt::FOrtNone };
+};
+class DetachItemData
+{
+public:
+    u32 addon_id;
+};
 
 #include "inventory_item_inline.h"

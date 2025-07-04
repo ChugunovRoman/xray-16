@@ -258,6 +258,7 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
     }
     break;
     case GE_ADDON_ATTACH:
+    case GE_ATTACHMENT_DETACH:
     case GE_ADDON_DETACH: { SendBroadcast(BroadcastCID, P, net_flags(TRUE, TRUE));
     }
     break;

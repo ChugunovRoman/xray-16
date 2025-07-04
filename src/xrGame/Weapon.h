@@ -24,19 +24,46 @@ class CUIWindow;
 class CBinocularsVision;
 class CNightVisionEffector;
 
+struct addon_slot {
+    shared_str slot_name;
+    shared_str parent_section;
+    u32 parent;
+    Fmatrix transform;
+    shared_str busy_by;
+    u16 slot_type;
+};
+
 class addon_item
 {
 public:
+    u32 parent_id;
 	shared_str addon_item_name;
 	shared_str addon_type;
+	shared_str slot;
+	shared_str parent;
+	shared_str prop_model_name;
 	Fmatrix addon_item_transform;
-	Fvector addon_item_hpb;
-	Fvector addon_item_pos;
-	Fvector addon_item_pos_world;
-	Fvector addon_item_scale;
-	Fvector addon_item_dot_pos;
+	float addon_aim_z_rot;
+	float inherited_aim_z_rot;
+	Fmatrix addon_item_pos;
+	Fvector addon_item_pos_dot;
+	Fmatrix addon_item_pos_world;
+	Fvector calc_aim_offset{};
+	Fvector calc_aim_rot{};
+	Fvector calc_second_aim_offset{};
+	Fvector calc_second_aim_rot{};
 	IKinematics* addon_item_model;
-	BOOL addon_item_visible;
+	IKinematics* addon_item_model_dot;
+	BOOL is_dot_offset_calculated;
+	BOOL is_dot_pos_initialized{false};
+	BOOL has_second_aim_offset{false};
+	BOOL has_aim_offset{false};
+	BOOL is_latest_zoomed{false};
+	BOOL has_scope_texture{false};
+	BOOL on_first_line{false};
+    xr_map<shared_str, addon_slot> addon_slots;
+    CInventoryItem::EIIAddonOrt ort;
+    u16 provided_slot_type;
 };
 
 class CWeapon : public CHudItemObject, public CShootingObject
@@ -47,20 +74,28 @@ public:
     CWeapon();
     virtual ~CWeapon();
 
-    /*------------------STCoP Weapon Pack SECTION-----------------------*/
     // аддоны и управление аддонами
     bool bUseAltScope;
     bool bScopeIsHasTexture;
     bool bNVsecondVPavaible;
     bool bNVsecondVPstatus;
     bool bUseAttachmentSystem;
+    bool bCollectedAttachmentsForAI;
 
-    Fvector bAttachmentSystemOffsetOnWorldModel;
+    Fmatrix bAttachmentSystemOffsetOnWorldModel;
 
-    xr_map<pcstr, addon_item*> m_addon_items;
+    xr_map<u32, addon_item*> m_addon_items;
+    xr_map<shared_str, addon_slot*> m_addon_slots;
 
-    void addAddon(shared_str section_id, shared_str m_addon_type, bool visible = true);
-    addon_item* getFirstAddonByType(shared_str m_addon_type) const;
+    void addAddon(PIItem item);
+    void calc_aim_addon_offset();
+    void get_aim_offset_to_center(Fmatrix addon_offset, Fmatrix bone_transform, Fvector hud_aim_target_pos, Fmatrix rotation_matrix, Fvector add_rot, bool need_calc_with_rot, float coff, Fvector& out_offset, Fvector& out_rot);
+    void CollectAttachmentsAI(TIItemContainer& l_list);
+    bool DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool for_ai = false);
+    std::pair<u32, addon_item*> GetAddonFromSlot(u32 parent_id, shared_str slot_name) const;
+    std::pair<u32, addon_item*> GetAddonMainScope() const;
+    u16 getCountInstalledSecondAimAddons() const;
+    void setSecondZoomOnFirstScopeIfHaveIt();
 
     virtual bool bInZoomRightNow() const { return m_zoom_params.m_fZoomRotationFactor > 0.05; }
     IC bool bIsSecondVPZoomPresent() const { return GetSecondVPZoomFactor() > 0.000f; }
@@ -151,6 +186,21 @@ public:
     virtual void SendHiddenItem(); // same as OnHiddenItem but for client... (sends message to a server)...
     virtual void OnMoveToRuck(const SInvItemPlace& previous_place);
 
+private:
+    u32 m_addon_id{1};
+    typedef xr_map<u32, addon_item*>::iterator AddonIter;
+
+    // для переключения вторичного зума между аддонами
+    bool IsAddonSuitableForZoom(const std::pair<u32, addon_item*>& addon);
+    AddonIter FindCurrentZoomedAddon();
+    AddonIter FindNextAddon(AddonIter start, bool forward);
+    void UpdateZoomedAddon(AddonIter current, AddonIter found);
+    void SwitchZoomableAddon(bool direction);
+
+    void SwitchToNextZoomableAddon() { SwitchZoomableAddon(true); }
+    void SwitchToPrevZoomableAddon() { SwitchZoomableAddon(false); }
+
+
 public:
     virtual bool can_kill() const;
     virtual CInventoryItem* can_kill(CInventory* inventory) const;
@@ -188,6 +238,15 @@ public:
         eSubstateReloadBegin = 0,
         eSubstateReloadInProcess,
         eSubstateReloadEnd,
+    };
+    enum EWeaponAddonSlotType
+    {
+        ePicatinny = 0,
+        eWeaver,
+        eDovetail,
+        eG3,
+
+        eNone = u16(-1)
     };
     enum
     {
@@ -231,7 +290,9 @@ public:
     bool IsScopePermament() const;
     bool IsSilencerAttached() const;
 
-    bool hasInstalledAddonType(shared_str type) const;
+    bool mainScopeSlotIsBusy() const;
+
+    xr_vector<addon_slot> getAvaliableSlots() const;
 
     ALife::EWeaponAddonStatus GetScopeStatusParent() const;
 
@@ -249,8 +310,9 @@ public:
     //инициализация свойств присоединенных аддонов
     virtual void InitAddons();
     void LoadAltHudAim();
-    void LoadAltAddonHudAim();
     void UpdateAddonsOffset();
+    void UpdateAvailableSecondZoom();
+    void LoadAddonSlosts(LPCSTR section);
 
     void SetScopeOffset(Ivector2 pos) { m_iScopeX = pos.x; m_iScopeY = pos.y; }
     void SetSilencerOffset(Ivector2 pos) { m_iSilencerX = pos.x; m_iSilencerY = pos.y; }
@@ -325,6 +387,7 @@ protected:
         float m_f3dZoomFactor; //коэффициент мирового зума при использовании второго вьюпорта
 
         float m_fZoomRotationFactor;
+        float m_fSecondZoomRotationFactor;
         float m_fSecondVPFovFactor;
 
         Fvector m_ZoomDof;
@@ -332,6 +395,7 @@ protected:
         Fvector4 m_ReloadEmptyDof;
 
         bool m_bUseDynamicZoom;
+        bool m_bSwitchBetweenSecondsZooms{false};
         shared_str m_sUseZoomPostprocess;
         shared_str m_sUseBinocularVision;
         CBinocularsVision* m_pVision;
@@ -582,6 +646,7 @@ public:
     using SCOPES_VECTOR = xr_vector<shared_str>;
     SCOPES_VECTOR m_scopes;
     SCOPES_VECTOR m_addons;
+    EWeaponAddonSlotType m_addon_slot_type;
     u8 m_cur_scope;
 
     CWeaponAmmo* m_pCurrentAmmo;

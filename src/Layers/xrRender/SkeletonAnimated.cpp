@@ -37,7 +37,8 @@ void CBlendInstance::blend_add(CBlend* H)
         Blend.erase(_d);
     }
     VERIFY(Blend.size() < MAX_BLENDED);
-    Blend.push_back(H);
+    if (Blend.size() < MAX_BLENDED)
+        Blend.push_back(H);
 }
 void CBlendInstance::blend_remove(CBlend* H)
 {
@@ -354,6 +355,50 @@ void CKinematicsAnimated::IFXBlendSetup(
     B.channel = 0;
     B.fall_at_end = false;
 }
+
+CBlend* CKinematicsAnimated::LL_SetInitialPartPose(u16 part, MotionID motion_ID, BOOL bMixing, float blendAccrue,
+    float blendFalloff, float Speed, BOOL noloop, PlayCallback Callback, LPVOID CallbackParam, u8 channel /*=0*/)
+{
+    // validate and unroll
+    if (!motion_ID.valid())
+        return nullptr;
+    if (BI_NONE == part)
+    {
+        for (u16 i = 0; i < MAX_PARTS; i++)
+            LL_SetInitialPartPose(
+                i, motion_ID, bMixing, blendAccrue, blendFalloff, Speed, noloop, Callback, CallbackParam, channel);
+        return nullptr;
+    }
+    if (part >= MAX_PARTS)
+        return nullptr;
+    if (nullptr == m_Partition->part(part).Name)
+        return nullptr;
+
+    // Create temporary blend
+    CPartDef& P = (*m_Partition)[part];
+    CBlend* B = IBlend_Create();
+
+    // Setup blend to use first frame only
+    IBlendSetup(*B, part, channel, motion_ID, bMixing, blendAccrue, blendFalloff, Speed, noloop, Callback, CallbackParam);
+
+
+    // Force first frame
+    B->timeCurrent = 1;
+    B->playing = false; // Don't play animation
+    
+    // Apply to bones
+    for (u32 i = 0; i < P.bones.size(); i++)
+        Bone_Motion_Start((*bones)[P.bones[i]], B);
+    
+    // Update transforms immediately
+    UpdateTracks();
+    
+    // Free blend slot
+    B->set_free_state();
+
+    return B;
+}
+
 CBlend* CKinematicsAnimated::LL_PlayCycle(u16 part, MotionID motion_ID, BOOL bMixing, float blendAccrue,
     float blendFalloff, float Speed, BOOL noloop, PlayCallback Callback, LPVOID CallbackParam, u8 channel /*=0*/)
 {

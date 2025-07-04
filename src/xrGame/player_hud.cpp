@@ -9,8 +9,15 @@
 #include "WeaponMagazinedWGrenade.h" // XXX: move somewhere
 #include "CustomDetector.h"
 #include "GamePersistent.h"
+#include "HUDManager.h"
+#include "debug_renderer.h"
 
 player_hud* g_player_hud[2]{}; // 0 - right hand | 1 - left hand 
+
+BOOL debug_show_second_wpn_model = 0;
+BOOL debug_show_thrid_wpn_model = 0;
+BOOL debug_show_attachments_slots = 0;
+
 extern ENGINE_API shared_str current_player_hud_sect;
 // clang-format off
 // --#SM+# Begin--
@@ -171,17 +178,29 @@ void attachable_hud_item::update(bool bForce)
     const bool is_16x9 = UICore::is_widescreen();
 
     if (m_measures.m_prop_flags.test(hud_item_measures::e_16x9_mode_now) != is_16x9)
-    {
         reload_measures();
-    }
 
     if (GamePersistent().GetHudTuner().is_active())
         m_measures.update(m_attach_offset);
 
-    m_parent->calc_transform(m_attach_place_idx, m_attach_offset, m_item_transform);
+    m_parent->calc_transform(m_attach_place_idx, m_attach_offset, m_item_idle_transform, m_item_transform, hud_transform, m_item_dot_transform);
     m_upd_firedeps_frame = Device.dwFrame;
 
+    calc_addon_aim_offset();
+
     if (IKinematicsAnimated* ka = m_model->dcast_PKinematicsAnimated())
+    {
+        ka->UpdateTracks();
+        ka->dcast_PKinematics()->CalculateBones_Invalidate();
+        ka->dcast_PKinematics()->CalculateBones(TRUE);
+    }
+    if (IKinematicsAnimated* ka = m_model_2->dcast_PKinematicsAnimated())
+    {
+        ka->UpdateTracks();
+        ka->dcast_PKinematics()->CalculateBones_Invalidate();
+        ka->dcast_PKinematics()->CalculateBones(TRUE);
+    }
+    if (IKinematicsAnimated* ka = m_model_3->dcast_PKinematicsAnimated())
     {
         ka->UpdateTracks();
         ka->dcast_PKinematics()->CalculateBones_Invalidate();
@@ -240,35 +259,58 @@ bool attachable_hud_item::need_renderable() const { return m_parent_hud_item->ne
 
 void attachable_hud_item::render(u32 context_id, IRenderable* root)
 {
+    CDebugRenderer& render = Level().debug_renderer();
+
     GEnv.Render->add_Visual(context_id, root, m_model->dcast_RenderVisual(), m_item_transform);
+    if (debug_show_second_wpn_model)
+        GEnv.Render->add_Visual(context_id, root, m_model_2->dcast_RenderVisual(), hud_transform);
+    if (debug_show_thrid_wpn_model)
+        GEnv.Render->add_Visual(context_id, root, m_model_3->dcast_RenderVisual(), m_item_dot_transform);
 
     CWeapon* wpn = smart_cast<CWeapon*>(m_parent_hud_item);
     if (wpn && wpn->bUseAttachmentSystem)
     {
-        for (auto item: wpn->m_addon_items)
-        {
-            item.second->addon_item_transform = m_item_transform;
-
-            Fmatrix m_addon_attach_offset;
-            m_addon_attach_offset.setHPB(item.second->addon_item_hpb.x, item.second->addon_item_hpb.y, item.second->addon_item_hpb.z);
-            m_addon_attach_offset.translate_over(item.second->addon_item_pos);
-            item.second->addon_item_transform.mul(m_item_transform, m_addon_attach_offset);
-
-            u16 bone_id = item.second->addon_item_model->LL_BoneID("dot");
-            if (bone_id != BI_NONE)
+        if (debug_show_attachments_slots)
+            for (auto slot: wpn->m_addon_slots)
             {
-                KinematicsABT::additional_bone_transform bone_offset;
-                bone_offset.m_bone_id = bone_id;
-                bone_offset.setPosOffset(item.second->addon_item_dot_pos);
-
-                item.second->addon_item_model->LL_SetTransformToBone(bone_offset);
+                if (slot.second)
+                {
+                    Fmatrix pos;
+                    pos.mul(m_item_transform, slot.second->transform);
+                    render.draw_aabb(pos.c, 0.003f, 0.003f, 0.003f, color_xrgb(0, 255, 0));
+                }
             }
 
-            Fmatrix m;
-            m.scale(item.second->addon_item_scale);
-            item.second->addon_item_transform.mulB_43(m);
-            if (item.second->addon_item_visible)
-                GEnv.Render->add_Visual(context_id, root, item.second->addon_item_model->dcast_RenderVisual(), item.second->addon_item_transform);
+        for (auto [addon_id, item]: wpn->m_addon_items)
+        {
+            item->addon_item_transform.mul(m_item_transform, item->addon_item_pos);
+
+            if (debug_show_attachments_slots)
+                for (auto slot: item->addon_slots)
+                {
+                    Fmatrix pos;
+                    pos.mul(item->addon_item_transform, slot.second.transform);
+                    render.draw_aabb(pos.c, 0.003f, 0.003f, 0.003f, color_xrgb(0, 255, 0));
+                }
+
+            u16 bone_id = item->addon_item_model->LL_BoneID("dot");
+            if (bone_id != BI_NONE)
+            {
+                item->is_dot_pos_initialized = true;
+
+                Fmatrix addon_item_transform;
+
+                Fmatrix m_addon_attach_offset_2;
+                float h, p, b;
+                item->addon_item_pos.getHPB(h, p, b);
+                m_addon_attach_offset_2.setHPB(0.f, 0.f, b);
+                m_addon_attach_offset_2.translate_over(item->addon_item_pos_dot);
+                addon_item_transform.mul(m_item_dot_transform, m_addon_attach_offset_2);
+
+                GEnv.Render->add_Visual(context_id, root, item->addon_item_model_dot->dcast_RenderVisual(), addon_item_transform);
+            }
+
+            GEnv.Render->add_Visual(context_id, root, item->addon_item_model->dcast_RenderVisual(), item->addon_item_transform);
         }
     }
 
@@ -334,11 +376,16 @@ Fmatrix hud_item_measures::load(const shared_str& sect_name, IKinematics* K)
     m_hands_offset[0][1] = pSettings->r_fvector3(sect_name, val_name);
     strconcat(val_name, "aim_hud_offset_rot", _prefix);
     m_hands_offset[1][1] = pSettings->r_fvector3(sect_name, val_name);
-
+    
     strconcat(val_name, "gl_hud_offset_pos", _prefix);
     m_hands_offset[0][2] = pSettings->r_fvector3(sect_name, val_name);
     strconcat(val_name, "gl_hud_offset_rot", _prefix);
     m_hands_offset[1][2] = pSettings->r_fvector3(sect_name, val_name);
+
+    strconcat(val_name, "aim_hud_correct_offset_pos", _prefix);
+    m_hands_offset[0][3] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, Fvector3().set(0.f,0.f,0.f));
+    strconcat(val_name, "aim_hud_correct_offset_rot", _prefix);
+    m_hands_offset[1][3] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, Fvector3().set(0.f,0.f,0.f));
 
     R_ASSERT2(pSettings->line_exist(sect_name, "fire_point") == pSettings->line_exist(sect_name, "fire_bone"),
         sect_name.c_str());
@@ -454,6 +501,10 @@ attachable_hud_item::~attachable_hud_item()
 {
     IRenderVisual* v = m_model->dcast_RenderVisual();
     GEnv.Render->model_Delete(v);
+    IRenderVisual* v2 = m_model_2->dcast_RenderVisual();
+    GEnv.Render->model_Delete(v2);
+    IRenderVisual* v3 = m_model_3->dcast_RenderVisual();
+    GEnv.Render->model_Delete(v3);
 }
 
 attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& sect_name, IKinematicsAnimated* hands_model)
@@ -473,6 +524,8 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
     R_ASSERT3(!m_visual_name.empty(), "Missing 'item_visual' from weapon hud section.", m_sect_name.c_str());
     GEnv.Render->hud_loading = true;
     m_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str()));
+    m_model_2 = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str()));
+    m_model_3 = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str()));
     GEnv.Render->hud_loading = false;
     m_attach_place_idx = pSettings->read_if_exists<u16>(m_sect_name, "attach_place_idx", 0);
 
@@ -485,9 +538,55 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
         animatedHudItem = smart_cast<IKinematicsAnimated*>(m_model);
 
     m_hand_motions.load(animatedHudItem, m_sect_name);
+
+    set_idle_anm_for_second_model();
     reload_measures();
+    calc_addon_aim_offset();
 }
 
+void attachable_hud_item::set_idle_anm_for_second_model()
+{
+    if (!m_parent)
+        return;
+    if (!m_parent_hud_item)
+        return;
+
+    u8 rnd_idx_2 = u8(-1);
+    const CMotionDef* md2 = NULL;
+    shared_str anm_name = "anm_idle_aim";
+    const player_hud_motion* anm = m_hand_motions.find_motion(anm_name);
+    if (!anm)
+    {
+        anm_name = "anm_idle";
+        anm = m_hand_motions.find_motion(anm_name);
+    }
+    if (!anm)
+        anm_name = "anm_idle_0";
+    anim_play(anm_name, false, md2, rnd_idx_2, m_model_2, true);
+}
+void attachable_hud_item::calc_addon_aim_offset()
+{
+    CWeapon* wpn = smart_cast<CWeapon*>(m_parent_hud_item);
+    if (!wpn)
+        return;
+    if (!wpn->bUseAttachmentSystem)
+        return;
+
+    auto addon = wpn->GetAddonMainScope();
+    if (addon.second)
+    {
+        if (addon.second->has_second_aim_offset && !addon.second->has_scope_texture)
+        {
+            m_measures.m_hands_offset[0][1].set(addon.second->calc_second_aim_offset);
+            m_measures.m_hands_offset[1][1].set(addon.second->calc_second_aim_rot);
+        }
+        else
+        {
+            m_measures.m_hands_offset[0][1].set(addon.second->calc_aim_offset);
+            m_measures.m_hands_offset[1][1].set(addon.second->calc_aim_rot);
+        }
+    }
+}
 void attachable_hud_item::reload_measures()
 {
     if (m_monolithic)
@@ -497,6 +596,11 @@ void attachable_hud_item::reload_measures()
 }
 
 u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, const CMotionDef*& md, u8& rnd_idx)
+{
+    anim_play(anm_name_b, bMixIn, md, rnd_idx, m_model_3, false);
+    return anim_play(anm_name_b, bMixIn, md, rnd_idx, m_model, false);
+}
+u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, const CMotionDef*& md, u8& rnd_idx, IKinematics* model, bool useSecond)
 {
     string256 anim_name_r;
     bool is_16x9 = UICore::is_widescreen();
@@ -517,8 +621,12 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
     rnd_idx = (u8)Random.randI(anm->m_animations.size());
     const motion_descr& M = anm->m_animations[rnd_idx];
 
-    IKinematicsAnimated* ka = smart_cast<IKinematicsAnimated*>(m_model);
-    const u32 ret = m_parent->anim_play(m_attach_place_idx, M.mid, bMixIn, md, speed, m_monolithic ? ka : nullptr);
+    IKinematicsAnimated* ka = smart_cast<IKinematicsAnimated*>(model);
+    u32 ret = 0;
+    if (useSecond)
+        ret = m_parent->anim_play(m_attach_place_idx, M.mid, bMixIn, md, speed, m_monolithic ? ka : nullptr, m_parent->m_model_2, true);
+    else
+        ret = m_parent->anim_play(m_attach_place_idx, M.mid, bMixIn, md, speed, m_monolithic ? ka : nullptr, m_parent->m_model, false);
 
     if (ka)
     {
@@ -538,8 +646,8 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
 
         if (!m_monolithic)
         {
-            const u16 root_id = m_model->LL_GetBoneRoot();
-            CBoneInstance& root_binst = m_model->LL_GetBoneInstance(root_id);
+            const u16 root_id = model->LL_GetBoneRoot();
+            CBoneInstance& root_binst = model->LL_GetBoneInstance(root_id);
             root_binst.set_callback_overwrite(TRUE);
             root_binst.mTransform.identity();
         }
@@ -547,12 +655,20 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
         const u16 pc = ka->partitions().count();
         for (u16 pid = 0; pid < pc; ++pid)
         {
-            CBlend* B = ka->PlayCycle(pid, M2, bMixIn);
-            R_ASSERT(B);
-            B->speed *= speed;
+            if(useSecond)
+            {
+                CBlend* B = ka->LL_SetInitialPartPose(pid, M2, false, 1.0f, 1.0f, 1.0f, false, nullptr, nullptr);
+                R_ASSERT(B);
+            }
+            else
+            {
+                CBlend* B = ka->PlayCycle(pid, M2, bMixIn);
+                R_ASSERT(B);
+                B->speed *= speed;
+            }
         }
 
-        m_model->CalculateBones_Invalidate();
+        model->CalculateBones_Invalidate();
     }
 
     R_ASSERT2(m_parent_hud_item, "parent hud item is NULL");
@@ -592,6 +708,16 @@ player_hud::~player_hud()
         IRenderVisual* v = m_model->dcast_RenderVisual();
         GEnv.Render->model_Delete(v);
     }
+    if (m_model_2)
+    {
+        IRenderVisual* v = m_model_2->dcast_RenderVisual();
+        GEnv.Render->model_Delete(v);
+    }
+    if (m_model_3)
+    {
+        IRenderVisual* v = m_model_3->dcast_RenderVisual();
+        GEnv.Render->model_Delete(v);
+    }
 
     for (auto& [name, item] : m_pool)
     {
@@ -628,6 +754,8 @@ void player_hud::load(const shared_str& player_hud_sect)
     m_visual_name = pSettings->r_string(m_sect_name, "visual");
     GEnv.Render->hud_loading = true;
     m_model = smart_cast<IKinematicsAnimated*>(GEnv.Render->model_Create(m_visual_name.c_str()));
+    m_model_2 = smart_cast<IKinematicsAnimated*>(GEnv.Render->model_Create(m_visual_name.c_str()));
+    m_model_3 = smart_cast<IKinematicsAnimated*>(GEnv.Render->model_Create(m_visual_name.c_str()));
     GEnv.Render->hud_loading = false;
     load_ancors();
 
@@ -642,6 +770,10 @@ void player_hud::load(const shared_str& player_hud_sect)
     }
     m_model->dcast_PKinematics()->CalculateBones_Invalidate();
     m_model->dcast_PKinematics()->CalculateBones(TRUE);
+    m_model_2->dcast_PKinematics()->CalculateBones_Invalidate();
+    m_model_2->dcast_PKinematics()->CalculateBones(TRUE);
+    m_model_3->dcast_PKinematics()->CalculateBones_Invalidate();
+    m_model_3->dcast_PKinematics()->CalculateBones(TRUE);
 }
 
 void player_hud::load_ancors()
@@ -713,6 +845,10 @@ void player_hud::render_hud(u32 context_id, IRenderable* root)
 
     if (m_model)
         GEnv.Render->add_Visual(context_id, root, m_model->dcast_RenderVisual(), m_transform);
+    if (m_model_2 && debug_show_second_wpn_model)
+        GEnv.Render->add_Visual(context_id, root, m_model_2->dcast_RenderVisual(), m_second_transform);
+    if (m_model_3 && debug_show_thrid_wpn_model)
+        GEnv.Render->add_Visual(context_id, root, m_model_3->dcast_RenderVisual(), hud_laser_dot_transform);
 
     if (item0)
         item0->render(context_id, root);
@@ -762,10 +898,18 @@ void player_hud::update(const Fmatrix& cam_trans)
         trans.m[0][3] = -trans.m[0][3];
     }
 
+    attachable_hud_item* item0 = m_attached_item;
+
+    if (item0)
+        item0->hud_transform.set(trans);
+
     update_inertion(trans);
+
+    if (item0)
+        item0->m_item_dot_transform.set(trans);
+
     update_additional(trans);
 
-    attachable_hud_item* item0 = m_attached_item;
 
     const bool monolithic = item0 && item0->m_monolithic;
     if (!m_model || monolithic)
@@ -785,10 +929,21 @@ void player_hud::update(const Fmatrix& cam_trans)
 
         m_attach_offset.translate_over(tmp);
         m_transform.mul(trans, m_attach_offset);
+        if (item0)
+        {
+            m_second_transform.mul(item0->hud_transform, m_attach_offset);
+            hud_laser_dot_transform.mul(item0->m_item_dot_transform, m_attach_offset);
+        }
 
         m_model->UpdateTracks();
         m_model->dcast_PKinematics()->CalculateBones_Invalidate();
         m_model->dcast_PKinematics()->CalculateBones(TRUE);
+        m_model_2->UpdateTracks();
+        m_model_2->dcast_PKinematics()->CalculateBones_Invalidate();
+        m_model_2->dcast_PKinematics()->CalculateBones(TRUE);
+        m_model_3->UpdateTracks();
+        m_model_3->dcast_PKinematics()->CalculateBones_Invalidate();
+        m_model_3->dcast_PKinematics()->CalculateBones(TRUE);
     }
 
     if (item0)
@@ -797,23 +952,36 @@ void player_hud::update(const Fmatrix& cam_trans)
 
 u32 player_hud::anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel)
 {
-    if (!itemModel && m_model)
+    return anim_play(part, M, bMixIn, md, speed, itemModel, m_model, false);
+}
+u32 player_hud::anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel, IKinematicsAnimated* model, bool useSecond)
+{
+    if (!itemModel && model)
     {
         u16 part_id = u16(-1);
         // if (g_player_hud[0]->attached_item() && g_player_hud[1]->attached_item())
-        //     part_id = m_model->partitions().part_id((part == 0) ? "right_hand" : "left_hand");
+        //     part_id = model->partitions().part_id((part == 0) ? "right_hand" : "left_hand");
 
-        const u16 pc = m_model->partitions().count();
+        const u16 pc = model->partitions().count();
         for (u16 pid = 0; pid < pc; ++pid)
         {
             if (pid == 0 || pid == part_id || part_id == u16(-1))
             {
-                CBlend* B = m_model->PlayCycle(pid, M, bMixIn);
-                R_ASSERT(B);
-                B->speed *= speed;
+                if(useSecond)
+                {
+                    CBlend* B = model->LL_SetInitialPartPose(pid, M, false, 1.0f, 1.0f, 1.0f, false, nullptr, nullptr);
+                    R_ASSERT(B);
+                }
+                else
+                {
+                    CBlend* B = model->PlayCycle(pid, M, bMixIn);
+                    R_ASSERT(B);
+                    B->speed *= speed;
+                }
+
             }
         }
-        m_model->dcast_PKinematics()->CalculateBones_Invalidate();
+        model->dcast_PKinematics()->CalculateBones_Invalidate();
     }
 
     return motion_length(M, md, speed, itemModel);
@@ -979,6 +1147,7 @@ void player_hud::attach_item(CHudItem* item)
 
         pi->m_parent_hud_item = item;
         pi->reload_measures();
+        pi->calc_addon_aim_offset();
 
         if (item_idx == 0 && g_player_hud[1]->m_attached_item)
             g_player_hud[1]->m_attached_item->m_parent_hud_item->CheckCompatibility(item);
@@ -1071,15 +1240,36 @@ void player_hud::detach_item(CHudItem* item)
     after_detach_item_idx(item);
 }
 
-void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, Fmatrix& result) const
+void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, const Fmatrix& offset2, Fmatrix& result, Fmatrix& result2, Fmatrix& result3) const
 {
     const attachable_hud_item* item = m_attached_item;
     if (item && !item->m_monolithic)
     {
+        u16 bone_id = m_ancors[attach_slot_idx];
         IKinematics* k = smart_cast<IKinematics*>(m_model);
-        const Fmatrix ancor_m = k->LL_GetTransform(m_ancors[attach_slot_idx]);
+        const Fmatrix ancor_m = k->LL_GetTransform(bone_id);
         result.mul(m_transform, ancor_m);
         result.mulB_43(offset);
+
+
+        Fmatrix bone_transform;
+        bone_transform.set(m_model_2->dcast_PKinematics()->LL_GetTransform(bone_id));
+        Fvector rot;
+        bone_transform.getHPB(rot.x, rot.y, rot.z);
+        
+        result2.mul(m_second_transform, bone_transform);
+        result2.mulB_43(offset);
+
+        result3.mul(hud_laser_dot_transform, ancor_m);
+        result3.mulB_43(offset);
+
+        if (!bone_transform.c.similar(tmp))
+        {
+            tmp = bone_transform.c;
+            CWeapon* wpn = smart_cast<CWeapon*>(item->m_parent_hud_item);
+            if (wpn && wpn->bUseAttachmentSystem)
+                wpn->calc_aim_addon_offset();
+        }
     }
     else
     {

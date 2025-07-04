@@ -351,7 +351,7 @@ CUIWeaponCellItem::CUIWeaponCellItem(CWeapon* itm) : inherited(itm)
     if (itm->SilencerAttachable())
         m_addon_offset[eSilencer].set(object()->GetSilencerX(), object()->GetSilencerY());
 
-    if (itm->ScopeAttachable())
+    if (itm->ScopeAttachable() || itm->mainScopeSlotIsBusy())
         m_addon_offset[eScope].set(object()->GetScopeX(), object()->GetScopeY());
 
     if (itm->GrenadeLauncherAttachable())

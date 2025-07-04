@@ -127,6 +127,13 @@ void CAI_Stalker::attach_available_addons(CWeapon* weapon)
         return;
 
     TIItemContainer& l_list = inventory().m_ruck;
+
+    if (weapon->bUseAttachmentSystem)
+    {
+        weapon->CollectAttachmentsAI(l_list);
+        return;
+    }
+
     for (TIItemContainer::iterator l_it = l_list.begin(); l_list.end() != l_it; ++l_it)
     {
         PIItem pIItem = *l_it;
@@ -470,6 +477,7 @@ void CAI_Stalker::on_after_take_scope(const CScope* pScope)
 {
     CWeapon* wpn1 = NULL;
     CWeapon* wpn2 = NULL;
+    PIItem item = (PIItem)pScope;
     if (inventory().ItemFromSlot(INV_SLOT_2))
         wpn1 = smart_cast<CWeapon*>(inventory().ItemFromSlot(INV_SLOT_2));
     if (inventory().ItemFromSlot(INV_SLOT_3))
@@ -477,16 +485,28 @@ void CAI_Stalker::on_after_take_scope(const CScope* pScope)
     if (!wpn1 && !wpn2)
         return;
 
-    if (wpn1 && wpn1->CanAttach((PIItem)pScope))
+    if (wpn1 && wpn1->CanAttach(item))
     {
         inventory().Ruck(wpn1);
-        wpn1->Attach((PIItem)pScope, true);
+        if (wpn1->bUseAttachmentSystem)
+        {
+            const bool result = wpn1->DeterminateParentSlotForAddon(item, wpn1, true);
+            if (!result)
+            return;
+        }
+        wpn1->Attach(item, true);
         inventory().Slot(INV_SLOT_2, wpn1);
     }
-    if (wpn2 && wpn2->CanAttach((PIItem)pScope))
+    if (wpn2 && wpn2->CanAttach(item))
     {
         inventory().Ruck(wpn2);
-        wpn2->Attach((PIItem)pScope, true);
+        if (wpn2->bUseAttachmentSystem)
+        {
+            const bool result = wpn2->DeterminateParentSlotForAddon(item, wpn2, true);
+            if (!result)
+                return;
+        }
+        wpn2->Attach(item, true);
         inventory().Slot(INV_SLOT_3, wpn2);
     }
 }
@@ -520,9 +540,6 @@ void CAI_Stalker::on_after_take(const CGameObject* object)
     if (!g_Alive())
         return;
 
-    if (!READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "use_single_item_rule", true))
-        return;
-
     const CSilencer* pSilencer = smart_cast<const CSilencer*>(object);
     if (pSilencer)
         on_after_take_silencer(pSilencer);
@@ -534,6 +551,9 @@ void CAI_Stalker::on_after_take(const CGameObject* object)
     const CGrenadeLauncher* pGrenadeLauncher = smart_cast<const CGrenadeLauncher*>(object);
     if (pGrenadeLauncher)
         on_after_take_gl(pGrenadeLauncher);
+
+    if (!READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "use_single_item_rule", true))
+        return;
 
     const CWeapon* new_weapon = smart_cast<const CWeapon*>(object);
     if (!new_weapon)

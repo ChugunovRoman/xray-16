@@ -1,6 +1,7 @@
 {
   "editor.tabSize": 4,
   "tasksStatusbar.taskLabelFilter": "Compile|GlobalWar",
+  "terminal.integrated.defaultProfile.windows": "Git Bash",
   "[cpp]": {
     "editor.formatOnSave": false
   },

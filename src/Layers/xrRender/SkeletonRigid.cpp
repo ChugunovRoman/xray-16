@@ -156,7 +156,7 @@ void CKinematics::LL_AddTransformToBone(KinematicsABT::additional_bone_transform
 }
 void CKinematics::LL_SetTransformToBone(KinematicsABT::additional_bone_transform& offset)
 {
-    m_bones_pos.push_back(offset);
+    m_bones_pos[offset.m_bone_id] = offset;
 }
 
 // Обнулить скриптовое смещение для конкретной кости или всех сразу (bone_id = BI_NONE) --#SM+#--
@@ -210,10 +210,10 @@ void CKinematics::CalculateBonesNewTransforms(
     // bi.mTransform.c - содержит смещение относительно первой кости модели\центра сцены (0, 0, 0)
     for (auto& it : m_bones_pos)
     {
-        if (it.m_bone_id == bd->GetSelfID())
+        if (it.first == bd->GetSelfID())
         {
-            bi.mTransform.mulB_43(it.m_transform); // Rotation
-            bi.mTransform.c.set(it.m_transform.c); // Translation
+            bi.mTransform.mulB_43(it.second.m_transform); // Rotation
+            bi.mTransform.c.set(it.second.m_transform.c); // Translation
         }
     }
 }

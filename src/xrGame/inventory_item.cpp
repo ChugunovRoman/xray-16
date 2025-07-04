@@ -333,6 +333,12 @@ void CInventoryItem::OnEvent(NET_Packet& P, u16 type)
         Attach(ItemToAttach, true);
     }
     break;
+    case GE_ATTACHMENT_DETACH:
+    {
+        u32 addon_id = P.r_u32();
+        Detach(addon_id);
+    }
+    break;
     case GE_ADDON_DETACH:
     {
         string64 i_name;

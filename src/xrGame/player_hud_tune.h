@@ -23,8 +23,11 @@ private:
         HUD_ROT_AIM,
         HUD_POS_ALT_AIM,
         HUD_ROT_ALT_AIM,
+        HUD_POS_COR_AIM,
+        HUD_ROT_COR_AIM,
         HUD_POS_GL,
         HUD_ROT_GL,
+        ITEM_WRD_POS,
         ITEM_POS,
         ITEM_ROT,
         FIRE_POINT,
@@ -51,8 +54,11 @@ private:
         { HUD_ROT_AIM, "Hud Rotation (Aiming)" },
         { HUD_POS_ALT_AIM, "Hud Position (Second Aiming)" },
         { HUD_ROT_ALT_AIM, "Hud Rotation (Second Aiming)" },
+        { HUD_POS_COR_AIM, "Hud Position (Correction Aim)" },
+        { HUD_ROT_COR_AIM, "Hud Rotation (Correction Aim)" },
         { HUD_POS_GL, "Hud Position (GL)" },
         { HUD_ROT_GL, "Hud Rotation (GL)" },
+        { ITEM_WRD_POS, "Addons World Position" },
         { ITEM_POS, "Item Position" },
         { ITEM_ROT, "Item Rotation" },
         { FIRE_POINT, "Fire Point" },
@@ -68,6 +74,9 @@ private:
     bool draw_fd{};
     bool draw_fd2{};
     bool draw_sp{};
+    bool draw_bones{};
+    bool draw_bones_addon{};
+    bool draw_center{};
 
     float debug_point_size{ 0.005f };
     float _delta_pos{ 0.0005f };
@@ -84,9 +93,20 @@ private:
     Fvector m_hands_new_offset[2][1]; // pos,rot/ alt_aim
 
     Fvector pos{};
-    Fvector hpb{};
-    Fvector scale{};
+    Fvector world_addons_pos{};
 
     Fvector m_artefact_map_p{0.0f,0.0f,0.0f};
     Fvector m_artefact_map_r{0.0f,0.0f,0.0f};
+
+    Fvector dbg_center{0.0f,0.0f,0.0f};
+    Fvector dbg_wpn_scope_pos{0.0f,0.0f,0.0f};
+
+    struct SlotTransform
+    {
+        u16 type;
+        Fvector pos;
+        Fvector rot;
+    };
+    
+    xr_map<shared_str, SlotTransform> m_weapon_slots;
 };

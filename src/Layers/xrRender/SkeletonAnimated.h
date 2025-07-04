@@ -164,6 +164,8 @@ public:
     MotionID LL_MotionID(LPCSTR B);
     u16 LL_PartID(LPCSTR B);
 
+    CBlend* LL_SetInitialPartPose(u16 part, MotionID motion_ID, BOOL bMixing, float blendAccrue,
+        float blendFalloff, float Speed, BOOL noloop, PlayCallback Callback, LPVOID CallbackParam, u8 channel = 0);
     CBlend* LL_PlayFX(u16 bone, MotionID motion, float blendAccrue, float blendFalloff, float Speed, float Power);
     CBlend* LL_PlayCycle(u16 partition, MotionID motion, BOOL bMixing, float blendAccrue, float blendFalloff,
         float Speed, BOOL noloop, PlayCallback Callback, LPVOID CallbackParam, u8 channel = 0);
