@@ -1107,6 +1107,9 @@ void CUIActorMenu::PropertiesBoxForWeapon(CUICellItem* cell_item, PIItem item, b
     {
         for (auto [addon_id, addon]: pWeapon->m_addon_items)
         {
+            const std::string& slot_name = *addon->slot;
+            if (isdigit(slot_name.back()) == 0 && xr_strcmp(*addon->slot, "slot_tac_grip") != 0)
+                continue;
             shared_str addon_name{StringTable().translate(pSettings->r_string(*addon->addon_item_name, "inv_name"))};
             shared_str str{make_string(StringTable().translate("st_detach_addon").c_str(), *addon_name).c_str()};
             DetachItemData* data = xr_new<DetachItemData>();

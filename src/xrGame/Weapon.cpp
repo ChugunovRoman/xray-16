@@ -1936,6 +1936,10 @@ bool CWeapon::IsSilencerAttached() const
 bool CWeapon::mainScopeSlotIsBusy() const
 {
     for (auto [addon_id, addon]: m_addon_items)
+    {
+        if (addon->has_scope_texture)
+            return true;
+
         if (addon->parent_id == 0 && addon->slot == WPN_MAIN_SLOT)
         {
             if (xr_strcmp(*addon->addon_type, "attachment") == 0)
@@ -1947,6 +1951,7 @@ bool CWeapon::mainScopeSlotIsBusy() const
             else
                 return true;
         }
+    }
 
     return false;
 }
@@ -2116,6 +2121,9 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
 
             addon_slot* slot = xr_new<addon_slot>();
             pcstr str = pSettings->r_string(section, *line_name);
+            shared_str default_addon = "";
+            if (pSettings->line_exist(section, *slot_key))
+                default_addon = pSettings->r_string(section, *slot_key);
             u16 slot_type;
             Fvector3 pos = {0.f, 0.f, 0.f};
             Fvector3 rot = {0.f, 0.f, 0.f};
@@ -2129,6 +2137,28 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
             slot->parent = 0;
             slot->slot_type = slot_type;
             m_addon_slots[slot_key] = slot;
+
+            if (pSettings->section_exist(*default_addon))
+            {
+                if (HasAddonByName(default_addon))
+                    return;
+                auto addon = GetAddonFromSlot(0, slot_key);
+                if (addon.second)
+                    return;
+
+                AddAddonData data;
+                data.item_section_id = default_addon;
+                data.addon_type = pSettings->r_string(*default_addon, "addon_type");
+                data.slot_name = slot_key;
+                data.ort = CInventoryItem::EIIAddonOrt::FOrtNone;
+                data.parent_id = 0;
+                if (pSettings->line_exist(*default_addon, "provided_slot_type"))
+                    data.provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u8(*default_addon, "provided_slot_type");
+                else
+                    data.provided_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
+
+                addAddon(data);
+            }
         };
         auto load_slot_offsets = [&](const char* format) {
             u16 index = 1;
@@ -2150,7 +2180,11 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
         };
 
         load_slot_offsets("addon_slot_%d_offset");
+        load_slot("addon_slot_grip_offset", "slot_grip");
         load_slot("addon_slot_tac_grip_offset", "slot_tac_grip");
+        load_slot("addon_slot_cover_offset", "slot_cover");
+        load_slot("addon_slot_cev_up_offset", "slot_cev_up");
+        load_slot("addon_slot_cev_down_offset", "slot_cev_down");
     }
 }
 
@@ -3494,7 +3528,8 @@ bool CWeapon::DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool fo
         {
             allSlotsIsBusy = false;
             found_slot = slot;
-            break;
+            if (strstr(*item->m_section_id, "plnk_"))
+                break;
         }
     }
     if (for_ai & allSlotsIsBusy)
@@ -3503,7 +3538,11 @@ bool CWeapon::DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool fo
     {
         item->attach_to_slot_name = found_slot.slot_name;
         item->parent_addon = found_slot.parent;
-        if (pScope->m_has_ort)
+        Fvector hpb;
+        found_slot.transform.getHPB(hpb.x, hpb.y, hpb.z);
+        if (pScope->m_has_ort && hpb.z < -1.f)
+            item->attach_to_ort = CInventoryItem::EIIAddonOrt::FOrtRight;
+        else if (pScope->m_has_ort)
             item->attach_to_ort = CInventoryItem::EIIAddonOrt::FOrtLeft;
         else
             item->attach_to_ort = CInventoryItem::EIIAddonOrt::FOrtNone;
@@ -3520,6 +3559,9 @@ std::pair<u32, addon_item*> CWeapon::GetAddonMainScope() const
             return std::make_pair(addon_id, addon);
     for (auto [addon_id, addon]: m_addon_items)
         if (addon->has_scope_texture || (addon->on_first_line && (addon->has_aim_offset || addon->has_second_aim_offset)))
+            return std::make_pair(addon_id, addon);
+    for (auto [addon_id, addon]: m_addon_items)
+        if (addon->has_aim_offset || addon->has_second_aim_offset)
             return std::make_pair(addon_id, addon);
 
     return std::make_pair(0, nullptr);
@@ -3558,13 +3600,22 @@ void CWeapon::UpdateAvailableSecondZoom()
 
     m_zoom_params.m_bZoomSecondEnabled = false;
 }
+bool CWeapon::HasAddonByName(shared_str name)
+{
+    for (auto [addon_id, addon]: m_addon_items)
+        if (xr_strcmp(*addon->addon_item_name, *name) == 0)
+            return true;
+
+    return false;
+}
 
 xr_vector<addon_slot> CWeapon::getAvaliableSlots() const
 {
     xr_vector<addon_slot> slots;
 
     for (auto slot: m_addon_slots)
-        slots.push_back(*slot.second);
+        if (slot.second)
+            slots.push_back(*slot.second);
     for (auto [addon_id, addon]: m_addon_items)
     {
         for (auto slot: addon->addon_slots)
@@ -3598,18 +3649,33 @@ void CWeapon::addAddon(PIItem item)
     CScope* scope = smart_cast<CScope*>(item);
     R_ASSERT3(scope != nullptr, "Can't add addon to weapon: addon is not WP_SCOPE class", item->m_section_id.c_str());
 
+    AddAddonData data;
+    data.item_section_id = item->m_section_id;
+    data.addon_type = scope->m_addon_type;
+    data.slot_name = item->attach_to_slot_name;
+    data.ort = item->attach_to_ort;
+    data.parent_id = item->parent_addon;
+    data.has_scope_texture = scope->HasScopeTexture();
+    data.provided_slot_type = scope->m_provided_slot_type;
+    data.has_ort = scope->m_has_ort;
+    data.scope_dynamic_zoom = scope->m_scope_dynamic_zoom;
+
+    addAddon(data);
+}
+void CWeapon::addAddon(AddAddonData data)
+{
     addon_item* new_addon = xr_new<addon_item>();
 
-    new_addon->addon_item_name = item->m_section_id;
-    new_addon->addon_type = scope->m_addon_type;
-    new_addon->slot = item->attach_to_slot_name;
-    new_addon->ort = item->attach_to_ort;
-    new_addon->parent_id = item->parent_addon;
+    new_addon->addon_item_name = data.item_section_id;
+    new_addon->addon_type = data.addon_type;
+    new_addon->slot = data.slot_name;
+    new_addon->ort = data.ort;
+    new_addon->parent_id = data.parent_id;
     new_addon->addon_item_pos.identity();
-    new_addon->has_scope_texture = scope->HasScopeTexture();
-    new_addon->provided_slot_type = scope->m_provided_slot_type;
+    new_addon->has_scope_texture = data.has_scope_texture;
+    new_addon->provided_slot_type = data.provided_slot_type;
     
-    if (scope->m_has_ort)
+    if (data.has_ort)
     {
         shared_str prop = new_addon->ort == CInventoryItem::EIIAddonOrt::FOrtRight ? "visual_right" : "visual";
         new_addon->addon_item_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*new_addon->addon_item_name, *prop)));
@@ -3630,7 +3696,7 @@ void CWeapon::addAddon(PIItem item)
     addon_item* parent_item = new_addon->parent_id == 0 ? new_addon : m_addon_items[new_addon->parent_id];
     R_ASSERT3(parent_item, "Parent addon not found by id", make_string("%s", new_addon->parent_id).c_str());
 
-    if((new_addon->parent_id == 0 && xr_strcmp(*new_addon->slot, "slot_1") == 0) || parent_item->on_first_line)
+    if((new_addon->parent_id == 0 && xr_strcmp(*new_addon->slot, WPN_MAIN_SLOT) == 0) || parent_item->on_first_line)
         new_addon->on_first_line = true;
 
     Fmatrix slot_transform = new_addon->parent_id == 0 ? m_addon_slots[new_addon->slot]->transform : parent_item->addon_slots[new_addon->slot].transform;
@@ -3697,7 +3763,7 @@ void CWeapon::addAddon(PIItem item)
     if (bone_id != BI_NONE)
     {
         // Скрываем все кости у второй модели ЛЦУ кроме рутовой и dot
-        new_addon->addon_item_model_dot = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*item->m_section_id, "visual")));
+        new_addon->addon_item_model_dot = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*data.item_section_id, "visual")));
         new_addon->addon_item_model_dot->CalculateBones_Invalidate();
         new_addon->addon_item_model_dot->CalculateBones(TRUE);
         for (const auto& [bone_name, bi] : *new_addon->addon_item_model_dot->LL_Bones())
@@ -3721,7 +3787,7 @@ void CWeapon::addAddon(PIItem item)
         m_zoom_params.m_bZoomSecondEnabled = true;
         new_addon->has_second_aim_offset = true;
     }
-    m_zoom_params.m_bUseDynamicZoom = scope->m_scope_dynamic_zoom;
+    m_zoom_params.m_bUseDynamicZoom = data.scope_dynamic_zoom;
 
     new_addon->addon_item_pos_world = world_trans;
 
@@ -3885,12 +3951,12 @@ void CWeapon::calc_aim_addon_offset()
             item->addon_item_pos_dot.set(local_correction);
 
             item->calc_aim_offset.set(-0.04f, -0.04f, 0);
-            item->calc_aim_rot.set(0, 0, -0.04f);
-            item->calc_second_aim_offset.set(0, -0.04f, 0);
+            item->calc_aim_rot.set(0, 0, -0.2f);
+            item->calc_second_aim_offset.set(-0.04f, -0.04f, 0);
             item->calc_second_aim_rot.set(
                 0.f,
                 0.f,
-                -0.04f // Сохраняем исходный поворот
+                -0.2f
             );
             item->has_second_aim_offset = true;
             item->is_dot_offset_calculated = true;
