@@ -20,6 +20,7 @@
 #include "WeaponAutomaticShotgun.h"
 #include "WeaponGroza.h"
 #include "WeaponRG6.h"
+#include "WeaponSSRS.h"
 #include "WeaponShotgun.h"
 #include "WeaponUSP45.h"
 #include "WeaponVal.h"
@@ -278,6 +279,17 @@ SCRIPT_EXPORT(CWeaponRG6, (CWeaponShotgun),
     module(luaState)
     [
         class_<CWeaponRG6, CWeaponShotgun>("CWeaponRG6")
+            .def(constructor<>())
+    ];
+});
+
+SCRIPT_EXPORT(CWeaponSSRS, (CWeaponMagazined),
+{
+    using namespace luabind;
+
+    module(luaState)
+    [
+        class_<CWeaponSSRS, CWeaponMagazined>("CWeaponSSRS")
             .def(constructor<>())
     ];
 });

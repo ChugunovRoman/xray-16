@@ -5154,6 +5154,9 @@
     <ClInclude Include="WeaponRG6.h">
       <Filter>Core\Client\Objects\items &amp; weapons\Weapons\Various weapons\Weapon RG6</Filter>
     </ClInclude>
+    <ClInclude Include="WeaponSSRS.h">
+      <Filter>Core\Client\Objects\items &amp; weapons\Weapons\Various weapons\Weapon SSRS</Filter>
+    </ClInclude>
     <ClInclude Include="weaponBM16.h">
       <Filter>Core\Client\Objects\items &amp; weapons\Weapons\Various weapons\BM-16</Filter>
     </ClInclude>
@@ -8238,6 +8241,9 @@
     </ClCompile>
     <ClCompile Include="WeaponRG6.cpp">
       <Filter>Core\Client\Objects\items &amp; weapons\Weapons\Various weapons\Weapon RG6</Filter>
+    </ClCompile>
+    <ClCompile Include="WeaponSSRS.cpp">
+      <Filter>Core\Client\Objects\items &amp; weapons\Weapons\Various weapons\Weapon SSRS</Filter>
     </ClCompile>
     <ClCompile Include="weaponBM16.cpp">
       <Filter>Core\Client\Objects\items &amp; weapons\Weapons\Various weapons\BM-16</Filter>

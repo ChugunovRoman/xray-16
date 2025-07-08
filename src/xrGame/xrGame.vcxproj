@@ -1382,6 +1382,7 @@
     <ClInclude Include="WeaponPM.h" />
     <ClInclude Include="WeaponRevolver.h" />
     <ClInclude Include="WeaponRG6.h" />
+    <ClInclude Include="WeaponSSRS.h" />
     <ClInclude Include="WeaponRPG7.h" />
     <ClInclude Include="WeaponShotgun.h" />
     <ClInclude Include="WeaponStatMgun.h" />
@@ -3333,6 +3334,7 @@
     <ClCompile Include="WeaponPM.cpp" />
     <ClCompile Include="WeaponRevolver.cpp" />
     <ClCompile Include="WeaponRG6.cpp" />
+    <ClCompile Include="WeaponSSRS.cpp" />
     <ClCompile Include="WeaponRPG7.cpp" />
     <ClCompile Include="WeaponScript.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>

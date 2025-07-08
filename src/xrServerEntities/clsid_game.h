@@ -94,6 +94,7 @@ constexpr CLASS_ID CLSID_OBJECT_W_GROZA             = MK_CLSID('W', '_', 'G', 'R
 constexpr CLASS_ID CLSID_OBJECT_W_KNIFE             = MK_CLSID('W', '_', 'K', 'N', 'I', 'F', 'E', ' ');
 constexpr CLASS_ID CLSID_OBJECT_W_BM16              = MK_CLSID('W', '_', 'B', 'M', '1', '6', ' ', ' ');
 constexpr CLASS_ID CLSID_OBJECT_W_RG6               = MK_CLSID('W', '_', 'R', 'G', '6', ' ', ' ', ' ');
+constexpr CLASS_ID CLSID_OBJECT_W_SSRS              = MK_CLSID('W', '_', 'S', 'S', 'R', 'S', ' ', ' ');
 
 constexpr CLASS_ID CLSID_OBJECT_W_STATMGUN          = MK_CLSID('W', '_', 'S', 'T', 'M', 'G', 'U', 'N');
 

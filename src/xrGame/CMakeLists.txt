@@ -1546,6 +1546,8 @@ target_sources(xrGame PRIVATE
     WeaponRevolver.h
     WeaponRG6.cpp
     WeaponRG6.h
+    WeaponSSRS.cpp
+    WeaponSSRS.h
     WeaponRPG7.cpp
     WeaponRPG7.h
     WeaponScript.cpp
