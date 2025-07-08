@@ -74,9 +74,7 @@ void CPatrolPathStorage::load(IReader& stream)
         if (I != m_registry.end())
             Log("~ Duplicated patrol path found ", pair.first.c_str());
 
-#ifdef DEBUG
         pair.second->name(pair.first);
-#endif
 
         m_registry.insert(pair);
     }

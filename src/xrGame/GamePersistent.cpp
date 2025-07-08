@@ -514,24 +514,26 @@ void CGamePersistent::checks()
                                 make_string("! Patrol path: %s doesn't exist! Used in file: %s, section: %s", S1, *I.first, *section->Name).c_str()
                             );
 
-                        // for (auto I : ai().patrol_paths().patrol_paths())
-                        // {
-                        //     for (auto I2 : I.second->vertices())
-                        //     {
-                        //         if (I2.second->data().game_vertex_id() == (u16)-1 || I2.second->data().level_vertex_id() == (u32)-1)
-                        //             g_checker.AddToCheckLog(
-                        //                 Checks::InvalidVertexes,
-                        //                 make_string(
-                        //                     "! Patrol path: %s has invalid vertex: %s vertex_id: %d game_vertex_id: %d, level_vertex_id: %d",
-                        //                     S1,
-                        //                     I2.second->data().name().c_str(),
-                        //                     I2.second->vertex_id(),
-                        //                     I2.second->data().game_vertex_id(),
-                        //                     I2.second->data().level_vertex_id()
-                        //                 ).c_str()
-                        //             );
-                        //     }
-                        // }
+                        for (auto I : ai().patrol_paths().patrol_paths())
+                        {
+                            for (auto I2 : I.second->vertices())
+                            {
+                                // if (I2.second->data().game_vertex_id() == (u16)-1 || I2.second->data().level_vertex_id() == (u32)-1)
+                                // if (!ai().level_graph().valid_vertex_id(I2.second->data().level_vertex_id()))
+                                if (I2.second->data().level_vertex_id() == (u32)-1)
+                                    g_checker.AddToCheckLog(
+                                        Checks::InvalidVertexes,
+                                        make_string(
+                                            "! Patrol path: %s has invalid vertex: %s vertex_id: %d game_vertex_id: %d, level_vertex_id: %d",
+                                            S1,
+                                            I2.second->data().name().c_str(),
+                                            I2.second->vertex_id(),
+                                            I2.second->data().game_vertex_id(),
+                                            I2.second->data().level_vertex_id()
+                                        ).c_str()
+                                    );
+                            }
+                        }
                     }
                 }
             }

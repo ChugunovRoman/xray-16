@@ -51,11 +51,11 @@ public:
     IC const CVertex* point(const Fvector& position, const T& evaluator) const;
     IC const CVertex* point(const Fvector& position) const;
 
-#ifdef DEBUG
 public:
+#ifdef DEBUG
     virtual void load(IReader& stream);
-    IC void name(const shared_str& name);
 #endif
+    IC void name(const shared_str& name) { m_name = name; }
 };
 
 #include "xrAICore/Navigation/PatrolPath/patrol_path_inline.h"

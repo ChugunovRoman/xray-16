@@ -12,9 +12,7 @@
 
 LPCSTR TEST_PATROL_PATH_NAME = "val_dogs_nest4_centre";
 
-CPatrolPath::CPatrolPath(shared_str name)
-    : m_name(name)
-{}
+CPatrolPath::CPatrolPath(shared_str name): m_name(name) {}
 
 CPatrolPath& CPatrolPath::load_raw(
     const CLevelGraph* level_graph, const CGameLevelCrossTable* cross, const CGameGraph* game_graph, IReader& stream)
