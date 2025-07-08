@@ -288,9 +288,6 @@ void CHudTuner::on_tool_frame()
                         ImGui::DragFloat3(make_string("%s Rot", slot_id.c_str()).c_str(), (float*)&data.rot, _delta_pos, 0.f, 0.f, "%.7f");
                     }
                 }
-                if (wpn->m_addon_items.size() > 0)
-                    for (auto& [addon_id, addon] : wpn->m_addon_items)
-                        ImGui::SliderFloat(make_string("%s aim z rot", *addon->addon_item_name).c_str(), (float*)&addon->addon_aim_z_rot, -5.f, 5.f, "%.7f");
             }
 
             UpdateValues();

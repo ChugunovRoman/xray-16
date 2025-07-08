@@ -32,6 +32,7 @@
 
 #define WEAPON_REMOVE_TIME 60000
 #define ROTATION_TIME 0.25f
+#define ADDON_ID_NONE (u32(-1))
 
 ENGINE_API extern float psHUD_FOV_def;
 extern float g_aim_z_offset_coff;
@@ -891,6 +892,7 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
             m_magazine.push_back(m_DefaultCartridge);
     }
 
+    SpawnDefaultAddons();
     UpdateAltScope();
     UpdateAddonsVisibility();
     InitAddons();
@@ -1019,63 +1021,22 @@ void CWeapon::save(NET_Packet& output_packet)
     output_packet.w_u8(bNVsecondVPstatus ? 1 : 0);
     output_packet.w_float(m_fSecondRTZoomFactor);
     output_packet.w_stringZ(m_section_id);
+    output_packet.w_u8(default_addons_was_loaded ? 1 : 0);
     output_packet.w_u32(m_addon_id);
     output_packet.w_u16(m_addon_items.size());
 
     for (auto [addon_id, addon]: m_addon_items)
     {
-        Fvector pos = addon->addon_item_pos.c;
-        Fvector rot;
-        addon->addon_item_pos.getHPB(rot.x, rot.y, rot.z);
-
-        Fvector world_pos = addon->addon_item_pos_world.c;
-        Fvector world_rot;
-        addon->addon_item_pos_world.getHPB(world_rot.x, world_rot.y, world_rot.z);
-        
         output_packet.w_stringZ(addon->addon_item_name);
         output_packet.w_stringZ(addon->addon_type);
         output_packet.w_stringZ(addon->slot);
-        output_packet.w_stringZ(addon->prop_model_name);
+        output_packet.w_u8((u8)addon->ort);
         output_packet.w_u32(addon_id);
         output_packet.w_u32(addon->parent_id);
-        output_packet.w_u16(addon->provided_slot_type);
-        output_packet.w_u8((u8)addon->ort);
-        output_packet.w_float(addon->addon_aim_z_rot);
-        output_packet.w_vec3(pos);
-        output_packet.w_vec3(rot);
-        output_packet.w_vec3(world_pos);
-        output_packet.w_vec3(world_rot);
-        output_packet.w_vec3(addon->addon_item_pos_dot);
-        output_packet.w_vec3(addon->calc_aim_offset);
-        output_packet.w_vec3(addon->calc_aim_rot);
-        output_packet.w_vec3(addon->calc_second_aim_offset);
-        output_packet.w_vec3(addon->calc_second_aim_rot);
-        output_packet.w_float(addon->addon_aim_z_rot);
-        output_packet.w_float(addon->inherited_aim_z_rot);
-        output_packet.w_u8(addon->is_dot_offset_calculated ? 1 : 0);
-        output_packet.w_u8(addon->is_dot_pos_initialized ? 1 : 0);
-        output_packet.w_u8(addon->has_second_aim_offset ? 1 : 0);
-        output_packet.w_u8(addon->has_aim_offset ? 1 : 0);
-        output_packet.w_u8(addon->is_latest_zoomed ? 1 : 0);
         output_packet.w_u8(addon->has_scope_texture ? 1 : 0);
-
-        u8 slot_count = addon->addon_slots.size();
-        output_packet.w_u8(slot_count);
-
-        for (auto [slot_id, slot]: addon->addon_slots)
-        {
-            Fvector slot_pos = slot.transform.c;
-            Fvector slot_rot;
-            slot.transform.getHPB(slot_rot.x, slot_rot.y, slot_rot.z);
-
-            output_packet.w_stringZ(slot_id);
-            output_packet.w_stringZ(slot.busy_by);
-            output_packet.w_stringZ(slot.parent_section);
-            output_packet.w_stringZ(slot.slot_name);
-            output_packet.w_u32(slot.parent);
-            output_packet.w_vec3(slot_pos);
-            output_packet.w_vec3(slot_rot);
-        }
+        output_packet.w_u16(addon->provided_slot_type);
+        output_packet.w_u8(addon->ort != 0 ? 1 : 0);
+        output_packet.w_u8(addon->scope_dynamic_zoom != 0 ? 1 : 0);
     }
 }
 
@@ -1103,109 +1064,27 @@ void CWeapon::load(IReader& input_packet)
     bNVsecondVPstatus = input_packet.r_u8() == 1 ? true : false;
     m_fSecondRTZoomFactor = input_packet.r_float();
     input_packet.r_stringZ(m_section_id);
-
+    
+    default_addons_was_loaded = input_packet.r_u8() == 1 ? true : false;
     m_addon_id = input_packet.r_u32();
     u16 const addonCount = input_packet.r_u16();
-    
+
     for (int i = 0; i < addonCount; i++)
     {
-        addon_item* addon = xr_new<addon_item>();
+        AddAddonData data;
 
-        input_packet.r_stringZ(addon->addon_item_name);
-        input_packet.r_stringZ(addon->addon_type);
-        input_packet.r_stringZ(addon->slot);
-        input_packet.r_stringZ(addon->prop_model_name);
-        u32 const addon_id = input_packet.r_u32();
-        addon->parent_id = input_packet.r_u32();
-        addon->provided_slot_type = (EWeaponAddonSlotType)input_packet.r_u16();
-        addon->ort = (CInventoryItem::EIIAddonOrt)input_packet.r_u8();
-        addon->addon_aim_z_rot = input_packet.r_float();
-        Fvector addon_pos = input_packet.r_vec3();
-        Fvector addon_rot = input_packet.r_vec3();
-        Fvector addon_world_pos = input_packet.r_vec3();
-        Fvector addon_world_rot = input_packet.r_vec3();
-        addon->addon_item_pos_dot = input_packet.r_vec3();
-        addon->calc_aim_offset = input_packet.r_vec3();
-        addon->calc_aim_rot = input_packet.r_vec3();
-        addon->calc_second_aim_offset = input_packet.r_vec3();
-        addon->calc_second_aim_rot = input_packet.r_vec3();
-        addon->addon_aim_z_rot = input_packet.r_float();
-        addon->inherited_aim_z_rot = input_packet.r_float();
-        addon->is_dot_offset_calculated = input_packet.r_u8() == 1 ? true : false;
-        addon->is_dot_pos_initialized = input_packet.r_u8() == 1 ? true : false;
-        addon->has_second_aim_offset = input_packet.r_u8() == 1 ? true : false;
-        addon->has_aim_offset = input_packet.r_u8() == 1 ? true : false;
-        addon->is_latest_zoomed = input_packet.r_u8() == 1 ? true : false;
-        addon->has_scope_texture = input_packet.r_u8() == 1 ? true : false;
+        input_packet.r_stringZ(data.item_section_id);
+        input_packet.r_stringZ(data.addon_type);
+        input_packet.r_stringZ(data.slot_name);
+        data.ort = (CInventoryItem::EIIAddonOrt)input_packet.r_u8();
+        data.addon_id = input_packet.r_u32();
+        data.parent_id = input_packet.r_u32();
+        data.has_scope_texture = input_packet.r_u8() == 1 ? true : false;
+        data.provided_slot_type = (EWeaponAddonSlotType)input_packet.r_u16();
+        data.has_ort = input_packet.r_u8() == 1 ? true : false;
+        data.scope_dynamic_zoom = input_packet.r_u8() == 1 ? true : false;
 
-        u8 slot_count = input_packet.r_u8();
-
-        for (int j = 0; j < slot_count; j++)
-        {
-            Fvector slot_pos;
-            Fvector slot_rot;
-            addon_slot slot;
-            shared_str slot_id;
-
-            input_packet.r_stringZ(slot_id);
-            input_packet.r_stringZ(slot.busy_by);
-            input_packet.r_stringZ(slot.parent_section);
-            input_packet.r_stringZ(slot.slot_name);
-            slot.parent = input_packet.r_u32();
-            slot_pos = input_packet.r_vec3();
-            slot_rot = input_packet.r_vec3();
-
-            Fmatrix pos;
-            pos.setHPB(slot_rot.x, slot_rot.y, slot_rot.z);
-            pos.c.set(slot_pos);
-
-            addon->addon_slots[slot_id] = slot;
-        }
-
-        Fmatrix pos;
-        pos.setHPB(addon_rot.x, addon_rot.y, addon_rot.z);
-        pos.c.set(addon_pos);
-        addon->addon_item_pos = pos;
-
-        Fmatrix world_pos;
-        world_pos.setHPB(addon_world_rot.x, addon_world_rot.y, addon_world_rot.z);
-        world_pos.c.set(addon_world_pos);
-        addon->addon_item_pos_world = world_pos;
-
-        addon->addon_item_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*addon->addon_item_name, *addon->prop_model_name)));
-
-        u16 bone_id = addon->addon_item_model->LL_BoneID(DOT);
-        if (bone_id != BI_NONE)
-        {
-            // Скрываем все кости у второй модели ЛЦУ кроме рутовой и dot
-            addon->addon_item_model_dot = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*addon->addon_item_name, "visual")));
-            addon->addon_item_model_dot->CalculateBones_Invalidate();
-            addon->addon_item_model_dot->CalculateBones(TRUE);
-            for (const auto& [bone_name, bi] : *addon->addon_item_model_dot->LL_Bones())
-            {
-                if (bi == addon->addon_item_model_dot->LL_GetBoneRoot())
-                    continue;
-                if (xr_strcmp(*bone_name, DOT) == 0)
-                    continue;
-
-                addon->addon_item_model_dot->LL_SetBoneVisible(bi, FALSE, FALSE);
-            }
-
-            // У основной модели ЛЦУ скрываем только ксть dot (точку)
-            addon->addon_item_model->LL_SetBoneVisible(bone_id, FALSE, FALSE);
-            addon->has_second_aim_offset = true;
-        }
-        bone_id = addon->addon_item_model->LL_BoneID(WPN_SCOPE_2);
-        if (bone_id != BI_NONE)
-        {
-            m_zoom_params.m_bZoomSecondEnabled = true;
-            addon->has_second_aim_offset = true;
-        }
-
-        addon->addon_item_model->CalculateBones_Invalidate();
-        addon->addon_item_model->CalculateBones(TRUE);
-
-        m_addon_items[addon_id] = addon;
+        addAddon(data);
     }
 
     reload(*m_section_id);
@@ -2120,45 +1999,35 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
                 return;
 
             addon_slot* slot = xr_new<addon_slot>();
+            shared_str line_name_world = make_string("%s_world", *line_name).c_str();
             pcstr str = pSettings->r_string(section, *line_name);
-            shared_str default_addon = "";
-            if (pSettings->line_exist(section, *slot_key))
-                default_addon = pSettings->r_string(section, *slot_key);
+            string128 bone_name = "";
             u16 slot_type;
             Fvector3 pos = {0.f, 0.f, 0.f};
             Fvector3 rot = {0.f, 0.f, 0.f};
-            sscanf(str, "%hu,%f,%f,%f,%f,%f,%f", &slot_type, &pos.x, &pos.y, &pos.z, &rot.x, &rot.y, &rot.z);
+            sscanf(str, "%hu,%f,%f,%f,%f,%f,%f,%s", &slot_type, &pos.x, &pos.y, &pos.z, &rot.x, &rot.y, &rot.z, &bone_name);
+            Fvector3 pos_w = pos;
+            Fvector3 rot_w = rot;
+            if (pSettings->line_exist(section, *line_name_world))
+            {
+                str = pSettings->r_string(section, *line_name);
+                sscanf(str, "%f,%f,%f,%f,%f,%f", &pos_w.x, &pos_w.y, &pos_w.z, &rot_w.x, &rot_w.y, &rot_w.z);
+            }
             Fmatrix trans;
             trans.setHPB(rot.x, rot.y, rot.z);
             trans.translate_over(pos.x, pos.y, pos.z);
 
+            Fmatrix trans_w;
+            trans_w.setHPB(rot_w.x, rot_w.y, rot_w.z);
+            trans_w.translate_over(pos_w.x, pos_w.y, pos_w.z);
+
             slot->slot_name = slot_key;
             slot->transform = trans;
+            slot->transform_world = trans_w;
             slot->parent = 0;
             slot->slot_type = slot_type;
+            slot->bone_name = bone_name;
             m_addon_slots[slot_key] = slot;
-
-            if (pSettings->section_exist(*default_addon))
-            {
-                if (HasAddonByName(default_addon))
-                    return;
-                auto addon = GetAddonFromSlot(0, slot_key);
-                if (addon.second)
-                    return;
-
-                AddAddonData data;
-                data.item_section_id = default_addon;
-                data.addon_type = pSettings->r_string(*default_addon, "addon_type");
-                data.slot_name = slot_key;
-                data.ort = CInventoryItem::EIIAddonOrt::FOrtNone;
-                data.parent_id = 0;
-                if (pSettings->line_exist(*default_addon, "provided_slot_type"))
-                    data.provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u8(*default_addon, "provided_slot_type");
-                else
-                    data.provided_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
-
-                addAddon(data);
-            }
         };
         auto load_slot_offsets = [&](const char* format) {
             u16 index = 1;
@@ -2181,11 +2050,46 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
 
         load_slot_offsets("addon_slot_%d_offset");
         load_slot("addon_slot_grip_offset", "slot_grip");
+        load_slot("addon_slot_sight_offset", "slot_sight");
         load_slot("addon_slot_tac_grip_offset", "slot_tac_grip");
         load_slot("addon_slot_cover_offset", "slot_cover");
         load_slot("addon_slot_cev_up_offset", "slot_cev_up");
         load_slot("addon_slot_cev_down_offset", "slot_cev_down");
     }
+}
+void CWeapon::SpawnDefaultAddons()
+{
+    if (default_addons_was_loaded)
+        return;
+    for (auto [slot_key, slot] : m_addon_slots)
+    {
+        shared_str default_addon = "";
+        if (pSettings->line_exist(*m_section_id, *slot_key))
+            default_addon = pSettings->r_string(*m_section_id, *slot_key);
+        if (pSettings->section_exist(*default_addon))
+        {
+            if (HasAddonByName(default_addon))
+                return;
+            auto addon = GetAddonFromSlot(0, slot_key);
+            if (addon.second)
+                return;
+
+            AddAddonData data;
+            data.item_section_id = default_addon;
+            data.addon_type = pSettings->r_string(*default_addon, "addon_type");
+            data.slot_name = slot_key;
+            data.ort = CInventoryItem::EIIAddonOrt::FOrtNone;
+            data.addon_id = ADDON_ID_NONE;
+            data.parent_id = 0;
+            if (pSettings->line_exist(*default_addon, "provided_slot_type"))
+                data.provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u8(*default_addon, "provided_slot_type");
+            else
+                data.provided_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
+
+            addAddon(data);
+        }
+    }
+    default_addons_was_loaded = true;
 }
 
 void CWeapon::UpdateAddonsVisibility()
@@ -3654,6 +3558,7 @@ void CWeapon::addAddon(PIItem item)
     data.addon_type = scope->m_addon_type;
     data.slot_name = item->attach_to_slot_name;
     data.ort = item->attach_to_ort;
+    data.addon_id = ADDON_ID_NONE;
     data.parent_id = item->parent_addon;
     data.has_scope_texture = scope->HasScopeTexture();
     data.provided_slot_type = scope->m_provided_slot_type;
@@ -3674,6 +3579,7 @@ void CWeapon::addAddon(AddAddonData data)
     new_addon->addon_item_pos.identity();
     new_addon->has_scope_texture = data.has_scope_texture;
     new_addon->provided_slot_type = data.provided_slot_type;
+    new_addon->scope_dynamic_zoom = data.scope_dynamic_zoom;
     
     if (data.has_ort)
     {
@@ -3691,18 +3597,27 @@ void CWeapon::addAddon(AddAddonData data)
     new_addon->addon_item_model->CalculateBones(TRUE);
 
     u32 addon_id = m_addon_id++;
+    if (data.addon_id != ADDON_ID_NONE)
+        addon_id = data.addon_id;
     R_ASSERT2(m_addon_items[addon_id] == nullptr, make_string("Addon with id: %d already exist", addon_id).c_str());
 
     addon_item* parent_item = new_addon->parent_id == 0 ? new_addon : m_addon_items[new_addon->parent_id];
-    R_ASSERT3(parent_item, "Parent addon not found by id", make_string("%s", new_addon->parent_id).c_str());
+    R_ASSERT3(parent_item, "Parent addon not found by id", make_string("%d", new_addon->parent_id).c_str());
 
     if((new_addon->parent_id == 0 && xr_strcmp(*new_addon->slot, WPN_MAIN_SLOT) == 0) || parent_item->on_first_line)
         new_addon->on_first_line = true;
 
-    Fmatrix slot_transform = new_addon->parent_id == 0 ? m_addon_slots[new_addon->slot]->transform : parent_item->addon_slots[new_addon->slot].transform;
+    addon_slot target_slot = new_addon->parent_id == 0 ? *m_addon_slots[new_addon->slot] : parent_item->addon_slots[new_addon->slot];
+    Fmatrix slot_transform = target_slot.transform;
+
+    bool has_bone = target_slot.bone_name != nullptr && xr_strcmp(*target_slot.bone_name, "") != 0;
+    new_addon->bone_name = has_bone ? target_slot.bone_name : parent_item->bone_name;
 
     Fvector slot_rot;
     slot_transform.getHPB(slot_rot.x, slot_rot.y, slot_rot.z);
+
+    if (has_bone)
+        slot_rot.z = 0.0f;
 
     float ortY = new_addon->ort == CInventoryItem::EIIAddonOrt::FOrtNone ? 0.0f
         : new_addon->ort == CInventoryItem::EIIAddonOrt::FOrtRight ? deg2rad(-90.0f) : deg2rad(90.0f);
@@ -3727,13 +3642,11 @@ void CWeapon::addAddon(AddAddonData data)
 
     new_addon->addon_aim_z_rot = new_addon->inherited_aim_z_rot;
 
-    Fmatrix trans, world_trans, rot_y_t;
-
-    rot_y_t.identity();
+    Fmatrix trans, world_trans;
 
     trans.mul(parent_item->addon_item_pos, slot_transform);
     world_trans.mul(parent_item->addon_item_pos, bAttachmentSystemOffsetOnWorldModel);
-    world_trans.mulB_43(slot_transform);
+    world_trans.mulB_43(target_slot.transform_world);
 
     u16 index = 1;
     shared_str slot_name;
@@ -3754,8 +3667,6 @@ void CWeapon::addAddon(AddAddonData data)
 
         index++;
     }
-
-    trans.mulB_43(rot_y_t);
 
     new_addon->addon_item_pos.set(trans);
 
@@ -3787,7 +3698,7 @@ void CWeapon::addAddon(AddAddonData data)
         m_zoom_params.m_bZoomSecondEnabled = true;
         new_addon->has_second_aim_offset = true;
     }
-    m_zoom_params.m_bUseDynamicZoom = data.scope_dynamic_zoom;
+    m_zoom_params.m_bUseDynamicZoom = new_addon->scope_dynamic_zoom;
 
     new_addon->addon_item_pos_world = world_trans;
 
@@ -3796,13 +3707,23 @@ void CWeapon::addAddon(AddAddonData data)
     calc_aim_addon_offset();
 }
 
-void CWeapon::get_aim_offset_to_center(Fmatrix addon_offset, Fmatrix bone_transform, Fvector hud_aim_target_pos, Fmatrix rotation_matrix, Fvector add_rot, bool need_calc_with_rot, float coff, Fvector& out_offset, Fvector& out_rot)
+void CWeapon::get_aim_offset_to_center(Fmatrix addon_offset, Fmatrix bone_transform, Fvector hud_aim_target_pos, Fmatrix rotation_matrix, Fvector add_rot, bool need_calc_with_rot, float coff, shared_str bone_name, Fvector& out_offset, Fvector& out_rot)
 {
     attachable_hud_item* hi = HudItemData();
     if (!hi)
         return;
 
     Fmatrix m_item_transform = hi->hud_transform;
+    Fmatrix bone_transform_2;
+    bone_transform_2.identity();
+
+    bool has_bone = bone_name != nullptr && xr_strcmp(*bone_name, "") != 0;
+    if (has_bone)
+    {
+        const u16 bone_id = hi->m_model_2->LL_BoneID(*bone_name);
+        if (bone_id != BI_NONE)
+            bone_transform_2.set(hi->m_model_2->LL_GetTransform(bone_id));
+    }
 
     // 2. Создаем матрицу с дополнительным Z-поворотом из конфига
     Fmatrix m_item_with_rot = m_item_transform;
@@ -3812,12 +3733,16 @@ void CWeapon::get_aim_offset_to_center(Fmatrix addon_offset, Fmatrix bone_transf
     // 3. Позиция кости с кастомным поворотом
     Fmatrix scope_global_with_rot;
     scope_global_with_rot.set(m_item_with_rot);
+    if (has_bone)
+        scope_global_with_rot.mulB_43(bone_transform_2);
     scope_global_with_rot.mulB_43(addon_offset);
     scope_global_with_rot.mulB_43(bone_transform);
 
     // 4. Вычисляем где должна быть кость БЕЗ кастомного поворота
     Fmatrix scope_global_no_rot;
     scope_global_no_rot.set(m_item_transform);
+    if (has_bone)
+        scope_global_no_rot.mulB_43(bone_transform_2);
     scope_global_no_rot.mulB_43(addon_offset);
     scope_global_no_rot.mulB_43(bone_transform);
 
@@ -3895,7 +3820,7 @@ void CWeapon::calc_aim_addon_offset()
             R.rotateX(rot.x); rotation_matrix.mulA_43(R);
             R.rotateZ(rot.z); rotation_matrix.mulA_43(R);
 
-            get_aim_offset_to_center(addon_offset, bone_transform, hud_aim_target_pos, rotation_matrix, rot, !fis_zero(rot.magnitude()), g_aim_z_offset_coff, item->calc_aim_offset, item->calc_aim_rot);
+            get_aim_offset_to_center(addon_offset, bone_transform, hud_aim_target_pos, rotation_matrix, rot, !fis_zero(rot.magnitude()), g_aim_z_offset_coff, item->bone_name, item->calc_aim_offset, item->calc_aim_rot);
 
             item->has_aim_offset = true;
         }
@@ -3922,7 +3847,7 @@ void CWeapon::calc_aim_addon_offset()
                 R.rotateZ(rot.z); z_rotation_matrix.mulA_43(R);
             }
 
-            get_aim_offset_to_center(addon_offset, bone_transform, hud_aim_target_pos, z_rotation_matrix, rot, !fis_zero(rot.magnitude()), g_second_aim_z_offset_coff, item->calc_second_aim_offset, item->calc_second_aim_rot);
+            get_aim_offset_to_center(addon_offset, bone_transform, hud_aim_target_pos, z_rotation_matrix, rot, !fis_zero(rot.magnitude()), g_second_aim_z_offset_coff, item->bone_name, item->calc_second_aim_offset, item->calc_second_aim_rot);
 
             item->has_second_aim_offset = true;
         }

@@ -276,14 +276,28 @@ void attachable_hud_item::render(u32 context_id, IRenderable* root)
                 if (slot.second)
                 {
                     Fmatrix pos;
-                    pos.mul(m_item_transform, slot.second->transform);
+                    pos.set(m_item_transform);
+                    if (slot.second->bone_name != nullptr && xr_strcmp(*slot.second->bone_name, "") != 0)
+                    {
+                        const u16 bone_id = m_model->LL_BoneID(*slot.second->bone_name);
+                        if (bone_id != BI_NONE)
+                            pos.mulB_43(m_model->LL_GetTransform(bone_id));
+                    }
+                    pos.mulB_43(slot.second->transform);
                     render.draw_aabb(pos.c, 0.003f, 0.003f, 0.003f, color_xrgb(0, 255, 0));
                 }
             }
 
         for (auto [addon_id, item]: wpn->m_addon_items)
         {
-            item->addon_item_transform.mul(m_item_transform, item->addon_item_pos);
+            item->addon_item_transform.set(m_item_transform);
+            if (item->bone_name != nullptr && xr_strcmp(*item->bone_name, "") != 0)
+            {
+                const u16 bone_id = m_model->LL_BoneID(*item->bone_name);
+                if (bone_id != BI_NONE)
+                    item->addon_item_transform.mulB_43(m_model->LL_GetTransform(bone_id));
+            }
+            item->addon_item_transform.mulB_43(item->addon_item_pos);
 
             if (debug_show_attachments_slots)
                 for (auto slot: item->addon_slots)

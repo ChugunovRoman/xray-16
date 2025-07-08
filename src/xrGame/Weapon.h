@@ -27,8 +27,10 @@ class CNightVisionEffector;
 struct addon_slot {
     shared_str slot_name;
     shared_str parent_section;
+    shared_str bone_name;
     u32 parent;
     Fmatrix transform;
+    Fmatrix transform_world;
     shared_str busy_by;
     u16 slot_type;
 };
@@ -42,6 +44,7 @@ public:
 	shared_str slot;
 	shared_str parent;
 	shared_str prop_model_name;
+    shared_str bone_name;
 	Fmatrix addon_item_transform;
 	float addon_aim_z_rot;
 	float inherited_aim_z_rot;
@@ -61,6 +64,7 @@ public:
 	BOOL is_latest_zoomed{false};
 	BOOL has_scope_texture{false};
 	BOOL on_first_line{false};
+	BOOL scope_dynamic_zoom{false};
     xr_map<shared_str, addon_slot> addon_slots;
     CInventoryItem::EIIAddonOrt ort;
     u16 provided_slot_type;
@@ -71,6 +75,7 @@ struct AddAddonData {
     shared_str slot_name;
     shared_str addon_type;
     CInventoryItem::EIIAddonOrt ort;
+    u32 addon_id; // нужно только для того чтобы корректно востановить аддоны при загрузке
     u32 parent_id;
     u16 provided_slot_type;
     bool has_scope_texture{false};
@@ -102,7 +107,7 @@ public:
     void addAddon(AddAddonData data);
     void addAddon(PIItem item);
     void calc_aim_addon_offset();
-    void get_aim_offset_to_center(Fmatrix addon_offset, Fmatrix bone_transform, Fvector hud_aim_target_pos, Fmatrix rotation_matrix, Fvector add_rot, bool need_calc_with_rot, float coff, Fvector& out_offset, Fvector& out_rot);
+    void get_aim_offset_to_center(Fmatrix addon_offset, Fmatrix bone_transform, Fvector hud_aim_target_pos, Fmatrix rotation_matrix, Fvector add_rot, bool need_calc_with_rot, float coff, shared_str bone_name, Fvector& out_offset, Fvector& out_rot);
     void CollectAttachmentsAI(TIItemContainer& l_list);
     bool DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool for_ai = false);
     bool HasAddonByName(shared_str name);
@@ -201,6 +206,7 @@ public:
     virtual void OnMoveToRuck(const SInvItemPlace& previous_place);
 
 private:
+    bool default_addons_was_loaded{false};
     u32 m_addon_id{1};
     typedef xr_map<u32, addon_item*>::iterator AddonIter;
 
@@ -319,6 +325,7 @@ public:
     ALife::EWeaponAddonStatus get_SilencerStatus() const { return m_eSilencerStatus; }
     virtual bool UseScopeTexture() { return bScopeIsHasTexture; };
     //обновление видимости для косточек аддонов
+    void SpawnDefaultAddons();
     void UpdateAddonsVisibility();
     void UpdateHUDAddonsVisibility();
     //инициализация свойств присоединенных аддонов

@@ -771,7 +771,10 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
     case eShowing:
         SwitchState(eIdle);
         if (g_player_hud[0]->attached_item())
+        {
             g_player_hud[0]->attached_item()->set_idle_anm_for_second_model();
+            calc_aim_addon_offset();
+        }
 
         break; // End of Show
     case eIdle:
