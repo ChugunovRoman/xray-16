@@ -55,7 +55,7 @@ public:
 #ifdef DEBUG
     virtual void load(IReader& stream);
 #endif
-    IC void name(const shared_str& name) { m_name = name; }
+    IC void name(const shared_str& name);
 };
 
 #include "xrAICore/Navigation/PatrolPath/patrol_path_inline.h"
