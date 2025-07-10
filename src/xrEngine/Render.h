@@ -314,7 +314,9 @@ public:
     // virtual IRenderDetailModel* model_CreateDM (IReader* F) = 0;
     // virtual IRenderVisual* model_Create (pcstr name, IReader* data=0) = 0;
     virtual IRenderVisual* model_Create(pcstr name, IReader* data = 0) = 0;
+    virtual IRenderVisual* model_Create(pcstr name, LPCSTR suffix, IReader* data = 0) = 0;
     virtual IRenderVisual* model_CreateChild(pcstr name, IReader* data) = 0;
+    virtual IRenderVisual* model_CreateChild(pcstr name, LPCSTR suffix, IReader* data) = 0;
     virtual IRenderVisual* model_Duplicate(IRenderVisual* V) = 0;
     // virtual void model_Delete (IRenderVisual* & V, bool bDiscard=false) = 0;
     virtual void model_Delete(IRenderVisual*& V, bool bDiscard = false) = 0;
@@ -322,6 +324,9 @@ public:
     virtual void model_Logging(bool bEnable) = 0;
     virtual void models_Prefetch() = 0;
     virtual void models_Clear(bool b_complete) = 0;
+    virtual void emplace_texture_replacements(shared_str material_key, shared_str dds_path) = 0;
+
+    xr_map<shared_str, shared_str> texture_replacements;
 
     // Occlusion culling
     virtual bool occ_visible(vis_data& V) = 0;

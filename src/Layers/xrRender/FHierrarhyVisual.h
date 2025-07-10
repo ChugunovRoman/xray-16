@@ -20,6 +20,7 @@ public:
     virtual ~FHierrarhyVisual();
 
     virtual void Load(const char* N, IReader* data, u32 dwFlags);
+    virtual void Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags);
     virtual void Copy(dxRender_Visual* pFrom);
     virtual void Release();
     virtual IRenderVisual* getSubModel(u8 idx) //--#SM+#--

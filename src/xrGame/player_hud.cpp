@@ -401,6 +401,11 @@ Fmatrix hud_item_measures::load(const shared_str& sect_name, IKinematics* K)
     strconcat(val_name, "aim_hud_correct_offset_rot", _prefix);
     m_hands_offset[1][3] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, Fvector3().set(0.f,0.f,0.f));
 
+    strconcat(val_name, "aim_hud_correct_alt_offset_pos", _prefix);
+    m_hands_offset[0][4] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, Fvector3().set(0.f,0.f,0.f));
+    strconcat(val_name, "aim_hud_correct_alt_offset_rot", _prefix);
+    m_hands_offset[1][4] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, Fvector3().set(0.f,0.f,0.f));
+
     R_ASSERT2(pSettings->line_exist(sect_name, "fire_point") == pSettings->line_exist(sect_name, "fire_bone"),
         sect_name.c_str());
     R_ASSERT2(pSettings->line_exist(sect_name, "fire_point2") == pSettings->line_exist(sect_name, "fire_bone2"),
@@ -536,8 +541,40 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
         m_visual_name = pSettings->r_string(m_sect_name, "visual");
     }
     R_ASSERT3(!m_visual_name.empty(), "Missing 'item_visual' from weapon hud section.", m_sect_name.c_str());
+
+    shared_str model_suffix = pSettings->read_if_exists<pcstr>(*m_sect_name, "model_cache_suffix", "");
+    auto load_hud_materials = [&](const char* format) {
+        u16 index = 1;
+        shared_str line_name;
+        shared_str material_value;
+        shared_str material_key;
+        
+        while (true)
+        {
+            line_name = make_string(format, index).c_str();
+            if (!pSettings->line_exist(*m_sect_name, *line_name))
+                break;
+
+            string256 dds_path = "", shader_name = "";
+            material_value = pSettings->r_string(*m_sect_name, *line_name);
+            _GetItem(material_value.c_str(), 0, dds_path);
+            _GetItem(material_value.c_str(), 1, shader_name);
+            string256 low_name;
+            xr_strcpy(low_name, *m_visual_name);
+            if (strext(low_name))
+                *strext(low_name) = 0;
+            material_key = make_string("%s:%d%s", *low_name, index, *model_suffix).c_str();
+
+            GEnv.Render->emplace_texture_replacements(material_key, dds_path);
+
+            index++;
+        }
+    };
+
+    load_hud_materials("hud_material_%d");
+    
     GEnv.Render->hud_loading = true;
-    m_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str()));
+    m_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str(), *model_suffix));
     m_model_2 = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str()));
     m_model_3 = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str()));
     GEnv.Render->hud_loading = false;

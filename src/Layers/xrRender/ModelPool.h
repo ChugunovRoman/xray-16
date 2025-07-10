@@ -53,14 +53,18 @@ public:
     dxRender_Visual* Instance_Create(u32 Type);
     dxRender_Visual* Instance_Duplicate(dxRender_Visual* V);
     dxRender_Visual* Instance_Load(LPCSTR N, BOOL allow_register);
+    dxRender_Visual* Instance_Load(LPCSTR N, LPCSTR suffix, BOOL allow_register);
     dxRender_Visual* Instance_Load(LPCSTR N, IReader* data, BOOL allow_register);
+    dxRender_Visual* Instance_Load(LPCSTR N, LPCSTR suffix, IReader* data, BOOL allow_register);
     void Instance_Register(LPCSTR N, dxRender_Visual* V);
     dxRender_Visual* Instance_Find(LPCSTR N);
 
     dxRender_Visual* CreatePE(PS::CPEDef* source);
     dxRender_Visual* CreatePG(PS::CPGDef* source);
     dxRender_Visual* Create(LPCSTR name, IReader* data = nullptr);
+    dxRender_Visual* Create(LPCSTR name, LPCSTR suffix, IReader* data = nullptr);
     dxRender_Visual* CreateChild(LPCSTR name, IReader* data);
+    dxRender_Visual* CreateChild(LPCSTR name, LPCSTR suffix, IReader* data);
     void Delete(dxRender_Visual*& V, BOOL bDiscard = FALSE);
     void Discard(dxRender_Visual*& V, BOOL b_complete);
     void DeleteInternal(dxRender_Visual*& V, BOOL bDiscard = FALSE);

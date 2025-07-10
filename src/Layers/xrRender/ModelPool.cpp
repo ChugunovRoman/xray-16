@@ -82,6 +82,10 @@ dxRender_Visual* CModelPool::Instance_Duplicate(dxRender_Visual* V)
 
 dxRender_Visual* CModelPool::Instance_Load(const char* N, BOOL allow_register)
 {
+    return Instance_Load(N, "", allow_register);
+}
+dxRender_Visual* CModelPool::Instance_Load(const char* N, LPCSTR suffix, BOOL allow_register)
+{
     string_path fn;
     string_path name;
 
@@ -120,7 +124,7 @@ dxRender_Visual* CModelPool::Instance_Load(const char* N, BOOL allow_register)
     ogf_header H;
     data->r_chunk_safe(OGF_HEADER, &H, sizeof(H));
     dxRender_Visual* V = Instance_Create(H.type);
-    V->Load(N, data, 0);
+    V->Load(N, suffix, data, 0);
     FS.r_close(data);
 
     // Register material
@@ -154,23 +158,39 @@ dxRender_Visual* CModelPool::Instance_Load(const char* N, BOOL allow_register)
 
     // Registration
     if (allow_register)
-        Instance_Register(N, V);
+    {
+        string_path low_name_suffix;
+        xr_strcpy(low_name_suffix, N);
+        if (strlen(suffix) > 0)
+            xr_strcat(low_name_suffix, suffix);
+        Instance_Register(low_name_suffix, V);
+    }
 
     return V;
 }
 
 dxRender_Visual* CModelPool::Instance_Load(LPCSTR name, IReader* data, BOOL allow_register)
 {
+    return Instance_Load(name, "", data, allow_register);
+}
+dxRender_Visual* CModelPool::Instance_Load(LPCSTR name, LPCSTR suffix, IReader* data, BOOL allow_register)
+{
     dxRender_Visual* V;
 
     ogf_header H;
     data->r_chunk_safe(OGF_HEADER, &H, sizeof(H));
     V = Instance_Create(H.type);
-    V->Load(name, data, 0);
+    V->Load(name, suffix, data, 0);
 
     // Registration
     if (allow_register)
-        Instance_Register(name, V);
+    {
+        string_path low_name_suffix;
+        xr_strcpy(low_name_suffix, name);
+        if (strlen(suffix) > 0)
+            xr_strcat(low_name_suffix, suffix);
+        Instance_Register(low_name_suffix, V);
+    }
     return V;
 }
 
@@ -243,20 +263,27 @@ dxRender_Visual* CModelPool::Instance_Find(LPCSTR N)
 
 dxRender_Visual* CModelPool::Create(const char* name, IReader* data)
 {
+    return Create(name, "", data);
+}
+dxRender_Visual* CModelPool::Create(LPCSTR name, LPCSTR suffix, IReader* data)
+{
 #ifdef _EDITOR
     if (!name || !name[0])
         return 0;
 #endif
     string_path low_name;
+    string_path low_name_suffix;
     VERIFY(xr_strlen(name) < sizeof(low_name));
     xr_strcpy(low_name, name);
     xr_strlwr(low_name);
     if (strext(low_name))
         *strext(low_name) = 0;
-    //	Msg						("-CREATE %s",low_name);
+    xr_strcpy(low_name_suffix, low_name);
+    if (strlen(suffix) > 0)
+        xr_strcat(low_name_suffix, suffix);
 
     // 0. Search POOL
-    POOL_IT it = Pool.find(low_name);
+    POOL_IT it = Pool.find(low_name_suffix);
     if (it != Pool.end())
     {
         // 1. Instance found
@@ -268,16 +295,16 @@ dxRender_Visual* CModelPool::Create(const char* name, IReader* data)
     else
     {
         // 1. Search for already loaded model (reference, base model)
-        dxRender_Visual* Base = Instance_Find(low_name);
+        dxRender_Visual* Base = Instance_Find(low_name_suffix);
 
         if (nullptr == Base)
         {
             // 2. If not found
             bAllowChildrenDuplicate = FALSE;
             if (data)
-                Base = Instance_Load(low_name, data, TRUE);
+                Base = Instance_Load(low_name, suffix, data, TRUE);
             else
-                Base = Instance_Load(low_name, TRUE);
+                Base = Instance_Load(low_name, suffix, TRUE);
             bAllowChildrenDuplicate = TRUE;
 #ifdef _EDITOR  
             if (!Base)
@@ -286,29 +313,36 @@ dxRender_Visual* CModelPool::Create(const char* name, IReader* data)
         }
         // 3. If found - return (cloned) reference
         dxRender_Visual* Model = Instance_Duplicate(Base);
-        Registry.emplace(Model, low_name);
+        Registry.emplace(Model, low_name_suffix);
         return Model;
     }
 }
 
 dxRender_Visual* CModelPool::CreateChild(LPCSTR name, IReader* data)
 {
+    return CreateChild(name, "", data);
+}
+dxRender_Visual* CModelPool::CreateChild(LPCSTR name, LPCSTR suffix, IReader* data)
+{
     string256 low_name;
+    string256 low_name_suffix;
     VERIFY(xr_strlen(name) < 256);
     xr_strcpy(low_name, name);
     xr_strlwr(low_name);
     if (strext(low_name))
         *strext(low_name) = 0;
+    xr_strcpy(low_name_suffix, low_name);
+    if (strlen(suffix) > 0)
+        xr_strcat(low_name_suffix, suffix);
 
     // 1. Search for already loaded model
-    dxRender_Visual* Base = Instance_Find(low_name);
-    //.	if (0==Base) Base	 	= Instance_Load(name,data,FALSE);
+    dxRender_Visual* Base = Instance_Find(low_name_suffix);
     if (nullptr == Base)
     {
         if (data)
-            Base = Instance_Load(low_name, data, FALSE);
+            Base = Instance_Load(low_name, suffix, data, FALSE);
         else
-            Base = Instance_Load(low_name, FALSE);
+            Base = Instance_Load(low_name, suffix, FALSE);
     }
 
     dxRender_Visual* Model = bAllowChildrenDuplicate ? Instance_Duplicate(Base) : Base;

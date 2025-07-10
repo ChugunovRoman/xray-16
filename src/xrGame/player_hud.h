@@ -43,7 +43,7 @@ struct hud_item_measures
         e_16x9_mode_now = (1 << 3)
     };
 
-    Fvector m_hands_offset[2][4]{}; // pos,rot/ normal,aim,GL,correct
+    Fvector m_hands_offset[2][5]{}; // pos,rot/ normal,aim,GL,correct,alt_correct
     Fvector m_hands_attach[2]{}; // pos,rot
     Fvector m_item_attach[2]{}; // pos,rot
 

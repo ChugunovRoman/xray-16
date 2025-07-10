@@ -771,7 +771,11 @@ CBlend* CKinematicsAnimated::IBlend_Create()
 }
 void CKinematicsAnimated::Load(const char* N, IReader* data, u32 dwFlags)
 {
-    inherited::Load(N, data, dwFlags);
+    Load(N, "", data, dwFlags);
+}
+void CKinematicsAnimated::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
+{
+    inherited::Load(N, suffix, data, dwFlags);
 
     // Globals
     blend_instances = nullptr;

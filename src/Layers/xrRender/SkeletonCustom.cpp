@@ -165,8 +165,11 @@ CSkeletonX* CKinematics::LL_GetChild(u32 idx)
 
 void CKinematics::Load(const char* N, IReader* data, u32 dwFlags)
 {
-    // Msg              ("skeleton: %s",N);
-    inherited::Load(N, data, dwFlags);
+    Load(N, "", data, dwFlags);
+}
+void CKinematics::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
+{
+    inherited::Load(N, suffix, data, dwFlags);
 
     pUserData = nullptr;
     m_lod = nullptr;

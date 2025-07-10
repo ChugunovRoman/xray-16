@@ -20,7 +20,11 @@ Fvisual::~Fvisual()
 void Fvisual::Release() { dxRender_Visual::Release(); }
 void Fvisual::Load(const char* N, IReader* data, u32 dwFlags)
 {
-    dxRender_Visual::Load(N, data, dwFlags);
+    Load(N, "", data, dwFlags);
+}
+void Fvisual::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
+{
+    dxRender_Visual::Load(N, suffix, data, dwFlags);
 
     u32 fvf = 0;
     VertexElement* vFormat = nullptr;

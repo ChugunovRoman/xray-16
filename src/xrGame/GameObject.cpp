@@ -134,7 +134,37 @@ void CGameObject::cNameVisual_set(shared_str N)
     {
         IRenderVisual* old_v = renderable.visual;
         NameVisual = N;
-        renderable.visual = GEnv.Render->model_Create(*N);
+        shared_str model_suffix = pSettings->read_if_exists<pcstr>(*NameSection, "model_cache_suffix", "");
+        auto load_world_materials = [&](const char* format) {
+            u16 index = 1;
+            shared_str line_name;
+            shared_str material_value;
+            shared_str material_key;
+            
+            while (true)
+            {
+                line_name = make_string(format, index).c_str();
+                if (!pSettings->line_exist(*NameSection, *line_name))
+                    break;
+
+                string256 dds_path = "", shader_name = "";
+                material_value = pSettings->r_string(*NameSection, *line_name);
+                _GetItem(material_value.c_str(), 0, dds_path);
+                _GetItem(material_value.c_str(), 1, shader_name);
+                string256 low_name;
+                xr_strcpy(low_name, *NameSection);
+                if (strext(low_name))
+                    *strext(low_name) = 0;
+                material_key = make_string("%s:%d%s", *low_name, index, *model_suffix).c_str();
+
+                GEnv.Render->emplace_texture_replacements(material_key, dds_path);
+
+                index++;
+            }
+        };
+
+        load_world_materials("world_material_%d");
+        renderable.visual = GEnv.Render->model_Create(*N, *model_suffix);
         IKinematics* old_k = old_v ? old_v->dcast_PKinematics() : NULL;
         IKinematics* new_k = renderable.visual->dcast_PKinematics();
         /*

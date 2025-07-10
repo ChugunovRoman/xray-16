@@ -34,7 +34,11 @@ void FProgressive::Release()
 
 void FProgressive::Load(const char* N, IReader* data, u32 dwFlags)
 {
-    Fvisual::Load(N, data, dwFlags);
+    Load(N, "", data, dwFlags);
+}
+void FProgressive::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
+{
+    Fvisual::Load(N, suffix, data, dwFlags);
 
     // normal SWI
     destructor<IReader> lods(data->open_chunk(OGF_SWIDATA));

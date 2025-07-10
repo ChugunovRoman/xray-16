@@ -3810,6 +3810,7 @@ void CWeapon::calc_aim_addon_offset()
             bone_transform = item->addon_item_model->LL_GetTransform(bone_id);
 
             // берем попорот худа в режиме прицеливания (радианы)
+            Fvector offset = hi->m_measures.m_hands_offset[0][3];
             Fvector rot = hi->m_measures.m_hands_offset[1][3];
             if (item->has_scope_texture)
                 rot = Fvector().set(0.0f, 0.0f, 0.0f);
@@ -3819,6 +3820,11 @@ void CWeapon::calc_aim_addon_offset()
             R.rotateY(rot.y); rotation_matrix.mulA_43(R);
             R.rotateX(rot.x); rotation_matrix.mulA_43(R);
             R.rotateZ(rot.z); rotation_matrix.mulA_43(R);
+
+            Fmatrix offset_trans;
+            offset_trans.identity();
+            offset_trans.translate_over(offset);
+            addon_offset.mulB_43(offset_trans);
 
             get_aim_offset_to_center(addon_offset, bone_transform, hud_aim_target_pos, rotation_matrix, rot, !fis_zero(rot.magnitude()), g_aim_z_offset_coff, item->bone_name, item->calc_aim_offset, item->calc_aim_rot);
 
@@ -3833,7 +3839,8 @@ void CWeapon::calc_aim_addon_offset()
 
             Fmatrix z_rotation_matrix;
             z_rotation_matrix.identity();
-            Fvector rot = hi->m_measures.m_hands_offset[1][3];
+            Fvector offset = hi->m_measures.m_hands_offset[0][4];
+            Fvector rot = hi->m_measures.m_hands_offset[1][4];
             if (!fis_zero(item->addon_aim_z_rot))
             {
                 rot.set(0.0f, 0.0f, item->addon_aim_z_rot);
@@ -3846,6 +3853,11 @@ void CWeapon::calc_aim_addon_offset()
                 R.rotateX(rot.x); z_rotation_matrix.mulA_43(R);
                 R.rotateZ(rot.z); z_rotation_matrix.mulA_43(R);
             }
+
+            Fmatrix offset_trans;
+            offset_trans.identity();
+            offset_trans.translate_over(offset);
+            addon_offset.mulB_43(offset_trans);
 
             get_aim_offset_to_center(addon_offset, bone_transform, hud_aim_target_pos, z_rotation_matrix, rot, !fis_zero(rot.magnitude()), g_second_aim_z_offset_coff, item->bone_name, item->calc_second_aim_offset, item->calc_second_aim_rot);
 

@@ -25,7 +25,11 @@ FTreeVisual::~FTreeVisual(void) {}
 void FTreeVisual::Release() { dxRender_Visual::Release(); }
 void FTreeVisual::Load(const char* N, IReader* data, u32 dwFlags)
 {
-    dxRender_Visual::Load(N, data, dwFlags);
+    Load(N, "", data, dwFlags);
+}
+void FTreeVisual::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
+{
+    dxRender_Visual::Load(N, suffix, data, dwFlags);
 
     const VertexElement* vFormat = nullptr;
 
@@ -239,6 +243,7 @@ FTreeVisual_ST::FTreeVisual_ST(void) {}
 FTreeVisual_ST::~FTreeVisual_ST(void) {}
 void FTreeVisual_ST::Release() { inherited::Release(); }
 void FTreeVisual_ST::Load(const char* N, IReader* data, u32 dwFlags) { inherited::Load(N, data, dwFlags); }
+void FTreeVisual_ST::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags) { inherited::Load(N, suffix, data, dwFlags); }
 void FTreeVisual_ST::Render(CBackend& cmd_list, float LOD, bool use_fast_geo)
 {
     inherited::Render(cmd_list, LOD, use_fast_geo);
@@ -259,7 +264,11 @@ FTreeVisual_PM::~FTreeVisual_PM(void) {}
 void FTreeVisual_PM::Release() { inherited::Release(); }
 void FTreeVisual_PM::Load(const char* N, IReader* data, u32 dwFlags)
 {
-    inherited::Load(N, data, dwFlags);
+    Load(N, "", data, dwFlags);
+}
+void FTreeVisual_PM::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
+{
+    inherited::Load(N, suffix, data, dwFlags);
     R_ASSERT(data->find_chunk(OGF_SWICONTAINER));
     {
         u32 ID = data->r_u32();

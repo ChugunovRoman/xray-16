@@ -210,6 +210,7 @@ public:
     // General "Visual" stuff
     virtual void Copy(dxRender_Visual* pFrom);
     virtual void Load(const char* N, IReader* data, u32 dwFlags);
+    virtual void Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags);
     virtual void Release();
     virtual void Spawn();
     virtual IKinematicsAnimated* dcast_PKinematicsAnimated() { return this; }

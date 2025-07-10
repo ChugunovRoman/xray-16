@@ -298,6 +298,7 @@ public:
     // General "Visual" stuff
     void Copy(dxRender_Visual* pFrom) override;
     void Load(const char* N, IReader* data, u32 dwFlags) override;
+    void Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags) override;
     void Spawn() override;
     void Depart() override;
     void Release() override;

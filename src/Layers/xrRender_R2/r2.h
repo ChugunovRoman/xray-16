@@ -471,13 +471,16 @@ public:
     IRenderVisual* model_CreateParticles(LPCSTR name) override;
     IRender_DetailModel* model_CreateDM(IReader* F);
     IRenderVisual* model_Create(LPCSTR name, IReader* data = nullptr) override;
+    IRenderVisual* model_Create(LPCSTR name, LPCSTR suffix, IReader* data = nullptr) override;
     IRenderVisual* model_CreateChild(LPCSTR name, IReader* data) override;
+    IRenderVisual* model_CreateChild(LPCSTR name, LPCSTR suffix, IReader* data) override;
     IRenderVisual* model_Duplicate(IRenderVisual* V) override;
     void model_Delete(IRenderVisual*& V, bool bDiscard) override;
     void model_Delete(IRender_DetailModel*& F);
     void model_Logging(bool bEnable) override { Models->Logging(bEnable); }
     void models_Prefetch() override;
     void models_Clear(bool b_complete) override;
+    void emplace_texture_replacements(shared_str material_key, shared_str dds_path);
 
     // Occlusion culling
     bool occ_visible(vis_data& V) override;

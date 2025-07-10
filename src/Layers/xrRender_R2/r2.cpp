@@ -671,8 +671,11 @@ void CRender::MakeContextCurrent(RenderContext context)
 // Implementation
 IRender_ObjectSpecific* CRender::ros_create(IRenderable* parent) { return xr_new<CROS_impl>(); }
 void CRender::ros_destroy(IRender_ObjectSpecific*& p) { xr_delete(p); }
+void CRender::emplace_texture_replacements(shared_str material_key, shared_str dds_path) { texture_replacements.emplace(material_key, dds_path); }
 IRenderVisual* CRender::model_Create(LPCSTR name, IReader* data) { return Models->Create(name, data); }
+IRenderVisual* CRender::model_Create(LPCSTR name, LPCSTR suffix, IReader* data) { return Models->Create(name, suffix, data); }
 IRenderVisual* CRender::model_CreateChild(LPCSTR name, IReader* data) { return Models->CreateChild(name, data); }
+IRenderVisual* CRender::model_CreateChild(LPCSTR name, LPCSTR suffix, IReader* data) { return Models->CreateChild(name, suffix, data); }
 IRenderVisual* CRender::model_Duplicate(IRenderVisual* V) { return Models->Instance_Duplicate((dxRender_Visual*)V); }
 
 void CRender::model_Delete(IRenderVisual*& V, bool bDiscard)

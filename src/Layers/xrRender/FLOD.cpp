@@ -36,7 +36,11 @@ static VertexElement dwDecl[] =
 
 void FLOD::Load(LPCSTR name, IReader* data, u32 dwFlags)
 {
-    inherited::Load(name, data, dwFlags);
+    Load(name, "", data, dwFlags);
+}
+void FLOD::Load(LPCSTR name, LPCSTR suffix, IReader* data, u32 dwFlags)
+{
+    inherited::Load(name, suffix, data, dwFlags);
 
     // LOD-def
     R_ASSERT(data->find_chunk(OGF_LODDEF2));

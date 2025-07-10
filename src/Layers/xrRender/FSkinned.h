@@ -46,6 +46,7 @@ public:
     virtual ~CSkeletonX_ST() {}
     virtual void Render(CBackend& cmd_list, float LOD, bool use_fast_geo) override;
     virtual void Load(const char* N, IReader* data, u32 dwFlags);
+    virtual void Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags);
     virtual void Copy(dxRender_Visual* pFrom);
     virtual void Release();
     virtual void AfterLoad(CKinematics* parent, u16 child_idx);
@@ -70,6 +71,7 @@ public:
     virtual ~CSkeletonX_PM() {}
     virtual void Render(CBackend& cmd_list, float LOD, bool use_fast_geo) override;
     virtual void Load(const char* N, IReader* data, u32 dwFlags);
+    virtual void Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags);
     virtual void Copy(dxRender_Visual* pFrom);
     virtual void Release();
     virtual void AfterLoad(CKinematics* parent, u16 child_idx);

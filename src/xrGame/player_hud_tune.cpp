@@ -92,6 +92,8 @@ void CHudTuner::ResetToDefaultValues()
         curr_measures.m_hands_offset[1][2] = zero;
         curr_measures.m_hands_offset[0][3] = zero;
         curr_measures.m_hands_offset[1][3] = zero;
+        curr_measures.m_hands_offset[0][4] = zero;
+        curr_measures.m_hands_offset[1][4] = zero;
         m_hands_curr_offset[0][0] = zero;
         m_hands_curr_offset[1][0] = zero;
         curr_measures.m_item_attach[0] = zero;
@@ -259,6 +261,8 @@ void CHudTuner::on_tool_frame()
             ImGui::DragFloat3(hud_adj_modes[HUD_ROT_ALT_AIM], wpn ? (float*)&wpn->m_hands_offset[1][1] : (float*)&m_hands_new_offset[0][0], _delta_rot, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[HUD_POS_COR_AIM], (float*)&new_measures.m_hands_offset[0][3], _delta_pos, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[HUD_ROT_COR_AIM], (float*)&new_measures.m_hands_offset[1][3], _delta_rot, 0.f, 0.f, "%.7f");
+            ImGui::DragFloat3(hud_adj_modes[HUD_ALT_POS_COR_AIM], (float*)&new_measures.m_hands_offset[0][4], _delta_pos, 0.f, 0.f, "%.7f");
+            ImGui::DragFloat3(hud_adj_modes[HUD_ALT_ROT_COR_AIM], (float*)&new_measures.m_hands_offset[1][4], _delta_rot, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[HUD_POS_GL], (float*)&new_measures.m_hands_offset[0][2], _delta_pos, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[HUD_ROT_GL], (float*)&new_measures.m_hands_offset[1][2], _delta_rot, 0.f, 0.f, "%.7f");
             ImGui::DragFloat3(hud_adj_modes[ITEM_POS], (float*)&new_measures.m_item_attach[0], _delta_pos, 0.f, 0.f, "%.7f");
@@ -318,9 +322,13 @@ void CHudTuner::on_tool_frame()
                     ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "aim_hud_offset_alt_rot%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", wpn->m_hands_offset[1][1].x, wpn->m_hands_offset[1][1].y, wpn->m_hands_offset[1][1].z);
                     ImGui::LogText("%s", selectable);
-                    xr_sprintf(selectable, "aim_hud_correct_offset_pos%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", wpn->m_hands_offset[0][3].x, wpn->m_hands_offset[0][3].y, wpn->m_hands_offset[0][3].z);
+                    xr_sprintf(selectable, "aim_hud_correct_offset_pos%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_offset[0][3].x, new_measures.m_hands_offset[0][3].y, new_measures.m_hands_offset[0][3].z);
                     ImGui::LogText("%s", selectable);
-                    xr_sprintf(selectable, "aim_hud_correct_offset_rot%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", wpn->m_hands_offset[1][3].x, wpn->m_hands_offset[1][3].y, wpn->m_hands_offset[1][3].z);
+                    xr_sprintf(selectable, "aim_hud_correct_offset_rot%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_offset[1][3].x, new_measures.m_hands_offset[1][3].y, new_measures.m_hands_offset[1][3].z);
+                    ImGui::LogText("%s", selectable);
+                    xr_sprintf(selectable, "aim_hud_correct_alt_offset_pos%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_offset[0][4].x, new_measures.m_hands_offset[0][4].y, new_measures.m_hands_offset[0][4].z);
+                    ImGui::LogText("%s", selectable);
+                    xr_sprintf(selectable, "aim_hud_correct_alt_offset_rot%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_offset[1][4].x, new_measures.m_hands_offset[1][4].y, new_measures.m_hands_offset[1][4].z);
                     ImGui::LogText("%s", selectable);
                     xr_sprintf(selectable, "gl_hud_offset_pos%s = %f,%f,%f\n", (is_16x9) ? "_16x9" : "", new_measures.m_hands_offset[0][2].x, new_measures.m_hands_offset[0][2].y, new_measures.m_hands_offset[0][2].z);
                     ImGui::LogText("%s", selectable);
