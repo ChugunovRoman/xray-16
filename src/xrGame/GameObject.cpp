@@ -155,7 +155,7 @@ void CGameObject::cNameVisual_set(shared_str N)
                 xr_strcpy(low_name, *NameSection);
                 if (strext(low_name))
                     *strext(low_name) = 0;
-                material_key = make_string("%s:%d%s", *low_name, index, *model_suffix).c_str();
+                material_key = make_string("%s:%d%s", low_name, index, *model_suffix).c_str();
 
                 GEnv.Render->emplace_texture_replacements(material_key, dds_path);
 

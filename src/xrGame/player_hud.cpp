@@ -563,7 +563,7 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
             xr_strcpy(low_name, *m_visual_name);
             if (strext(low_name))
                 *strext(low_name) = 0;
-            material_key = make_string("%s:%d%s", *low_name, index, *model_suffix).c_str();
+            material_key = make_string("%s:%d%s", low_name, index, *model_suffix).c_str();
 
             GEnv.Render->emplace_texture_replacements(material_key, dds_path);
 
