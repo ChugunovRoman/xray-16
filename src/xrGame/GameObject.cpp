@@ -152,7 +152,7 @@ void CGameObject::cNameVisual_set(shared_str N)
                 _GetItem(material_value.c_str(), 0, dds_path);
                 _GetItem(material_value.c_str(), 1, shader_name);
                 string256 low_name;
-                xr_strcpy(low_name, *NameSection);
+                xr_strcpy(low_name, *NameVisual);
                 if (strext(low_name))
                     *strext(low_name) = 0;
                 material_key = make_string("%s:%d%s", low_name, index, *model_suffix).c_str();
