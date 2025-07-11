@@ -46,6 +46,9 @@ void CWeaponSSRS::Load(LPCSTR section)
 #include "InventoryOwner.h"
 void CWeaponSSRS::FireStart()
 {
+    if (iAmmoElapsed < 1)
+        return;
+
     if (GetState() == eIdle && getRocketCount())
     {
         inheritedWM::FireStart();
