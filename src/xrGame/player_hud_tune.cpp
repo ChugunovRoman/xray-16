@@ -57,6 +57,7 @@ void CHudTuner::ResetToDefaultValues()
                 t.pos = slot->transform.c;
                 slot->transform.getHPB(t.rot.x, t.rot.y, t.rot.z);
                 t.type = slot->slot_type;
+                t.bone_name = slot->bone_name;
                 m_weapon_slots[slot_key] = t;
             }
 
@@ -354,7 +355,7 @@ void CHudTuner::on_tool_frame()
                     {
                         for (auto& [slot_id, data] : m_weapon_slots)
                         {
-                            xr_sprintf(selectable, "addon_%s_offset = %d,%f,%f,%f,%f,%f,%f\n", slot_id.c_str(), data.type, data.pos.x, data.pos.y, data.pos.z, data.rot.x, data.rot.y, data.rot.z);
+                            xr_sprintf(selectable, "addon_%s_offset = %d,%f,%f,%f,%f,%f,%f,%s\n", slot_id.c_str(), data.type, data.pos.x, data.pos.y, data.pos.z, data.rot.x, data.rot.y, data.rot.z, *data.bone_name);
                             ImGui::LogText("%s", selectable);
                         }
                     }

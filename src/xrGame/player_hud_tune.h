@@ -108,6 +108,7 @@ private:
     struct SlotTransform
     {
         u16 type;
+        shared_str bone_name;
         Fvector pos;
         Fvector rot;
     };
