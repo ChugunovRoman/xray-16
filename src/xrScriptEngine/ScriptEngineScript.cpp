@@ -34,6 +34,14 @@ void ErrorLog(pcstr caMessage)
     R_ASSERT2(0, caMessage);
 }
 
+void LuaError(pcstr caMessage)
+{
+    GEnv.ScriptEngine->error_log("%s", caMessage);
+    R_ASSERT2(0, caMessage);
+    static bool ignoreAlways;
+    const auto result = xrDebug::Fail(ignoreAlways, DEBUG_INFO, "LUA error", caMessage);
+}
+
 //AVO:
 void PrintStack()
 {
@@ -151,6 +159,7 @@ SCRIPT_EXPORT(CScriptEngine, (),
 
         def("log", &LuaLog),
         def("error_log", &ErrorLog),
+        def("lua_error", &LuaError),
         def("flush", &FlushLogs),
         def("print_stack", &PrintStack),
         def("prefetch", &prefetch_module),
