@@ -98,6 +98,7 @@ public:
     bool bNVsecondVPstatus;
     bool bUseAttachmentSystem;
     bool bCollectedAttachmentsForAI;
+    bool bApplyAncorTransform{false};
 
     Fmatrix bAttachmentSystemOffsetOnWorldModel;
 
@@ -107,7 +108,19 @@ public:
     void addAddon(AddAddonData data);
     void addAddon(PIItem item);
     void calc_aim_addon_offset();
-    void get_aim_offset_to_center(Fmatrix addon_offset, Fmatrix bone_transform, Fvector hud_aim_target_pos, Fmatrix rotation_matrix, Fvector add_rot, bool need_calc_with_rot, float coff, shared_str bone_name, Fvector& out_offset, Fvector& out_rot);
+    void get_aim_offset_to_center(
+        Fmatrix hud_transform,
+        Fmatrix addon_offset,
+        Fmatrix bone_transform,
+        Fvector hud_aim_target_pos,
+        Fmatrix rotation_matrix,
+        Fvector add_rot,
+        bool need_calc_with_rot,
+        float coff,
+        shared_str bone_name,
+        Fvector& out_offset,
+        Fvector& out_rot
+    );
     void CollectAttachmentsAI(TIItemContainer& l_list);
     bool DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool for_ai = false);
     bool HasAddonByName(shared_str name);

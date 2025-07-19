@@ -53,6 +53,8 @@ void CHudTuner::ResetToDefaultValues()
             wpn->LoadAddonSlosts(*wpn->m_section_id);
             for (auto& [slot_key, slot] : wpn->m_addon_slots)
             {
+                if (slot == nullptr)
+                    continue;
                 SlotTransform t;
                 t.pos = slot->transform.c;
                 slot->transform.getHPB(t.rot.x, t.rot.y, t.rot.z);
@@ -355,7 +357,7 @@ void CHudTuner::on_tool_frame()
                     {
                         for (auto& [slot_id, data] : m_weapon_slots)
                         {
-                            xr_sprintf(selectable, "addon_%s_offset = %d,%f,%f,%f,%f,%f,%f,%s\n", slot_id.c_str(), data.type, data.pos.x, data.pos.y, data.pos.z, data.rot.x, data.rot.y, data.rot.z, *data.bone_name);
+                            xr_sprintf(selectable, "addon_%s_offset = %d,%f,%f,%f,%f,%f,%f%s\n", slot_id.c_str(), data.type, data.pos.x, data.pos.y, data.pos.z, data.rot.x, data.rot.y, data.rot.z, data.bone_name != nullptr && xr_strcmp(data.bone_name, "") != 0 ? make_string(",%s", data.bone_name).c_str() : "");
                             ImGui::LogText("%s", selectable);
                         }
                     }

@@ -191,7 +191,7 @@ public:
     Fmatrix get_transform() const { return m_transform; }
     Fmatrix hud_laser_dot_transform{ Fidentity };
     xr_vector<u16> m_ancors;
-    mutable Fvector tmp;
+    mutable Fmatrix tmp;
 
 private:
     shared_str m_sect_name;

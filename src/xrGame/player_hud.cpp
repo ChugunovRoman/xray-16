@@ -626,7 +626,7 @@ void attachable_hud_item::calc_addon_aim_offset()
     auto addon = wpn->GetAddonMainScope();
     if (addon.second)
     {
-        if (addon.second->has_second_aim_offset && !addon.second->has_scope_texture)
+        if (addon.second->has_second_aim_offset && !addon.second->has_scope_texture && !(xr_strcmp(addon.second->addon_type, "colim_scope") && addon.second->on_first_line))
         {
             m_measures.m_hands_offset[0][1].set(addon.second->calc_second_aim_offset);
             m_measures.m_hands_offset[1][1].set(addon.second->calc_second_aim_rot);
@@ -1314,9 +1314,9 @@ void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, cons
         result3.mul(hud_laser_dot_transform, ancor_m);
         result3.mulB_43(offset);
 
-        if (!bone_transform.c.similar(tmp))
+        if (!bone_transform.c.similar(tmp.c))
         {
-            tmp = bone_transform.c;
+            tmp = bone_transform;
             CWeapon* wpn = smart_cast<CWeapon*>(item->m_parent_hud_item);
             if (wpn && wpn->bUseAttachmentSystem)
                 wpn->calc_aim_addon_offset();
