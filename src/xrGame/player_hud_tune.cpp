@@ -114,7 +114,22 @@ void CHudTuner::ResetToDefaultValues()
     {
         CWeapon* target_wpn = smart_cast<CWeapon*>(RQ.O);
         if (target_wpn)
+        {
             world_addons_pos = target_wpn->bAttachmentSystemOffsetOnWorldModel.c;
+            for (auto& [slot_key, slot] : target_wpn->m_addon_slots)
+            {
+                if (slot == nullptr)
+                    continue;
+                SlotTransform t;
+                t.pos = slot->transform.c;
+                t.pos_w = slot->transform_world.c;
+                slot->transform.getHPB(t.rot.x, t.rot.y, t.rot.z);
+                slot->transform_world.getHPB(t.rot_w.x, t.rot_w.y, t.rot_w.z);
+                t.type = slot->slot_type;
+                t.bone_name = slot->bone_name;
+                m_weapon_slots[slot_key] = t;
+            }
+        }
     }
 
     new_measures = curr_measures;
@@ -130,10 +145,18 @@ void CHudTuner::UpdateValues()
         if (target_wpn)
         {
             target_wpn->bAttachmentSystemOffsetOnWorldModel.c.set(world_addons_pos);
+            for (auto& [slot_key, data] : m_weapon_slots)
+                if (target_wpn->m_addon_slots[slot_key])
+                {
+                    Fmatrix transform_world;
+                    transform_world.setHPB(data.rot_w.x, data.rot_w.y, data.rot_w.z);
+                    transform_world.c.set(data.pos_w);
+                    target_wpn->m_addon_slots[slot_key]->transform_world = transform_world;
+                }
             for (auto& [addon_id, item] : target_wpn->m_addon_items)
                 if (item->parent_id == 0)
                 {
-                    item->addon_item_pos = target_wpn->m_addon_slots[item->slot]->transform;
+                    item->addon_item_pos = target_wpn->m_addon_slots[item->slot]->transform_world;
                     item->addon_item_pos_world = item->addon_item_pos;
                     item->addon_item_pos_world.mulB_43(target_wpn->bAttachmentSystemOffsetOnWorldModel);
                 }
@@ -282,7 +305,17 @@ void CHudTuner::on_tool_frame()
             {
                 CWeapon* target_wpn = smart_cast<CWeapon*>(RQ.O);
                 if (target_wpn)
+                {
                     ImGui::DragFloat3(hud_adj_modes[ITEM_WRD_POS], (float*)&world_addons_pos, _delta_pos, 0.f, 0.f, "%.7f");
+                    for (auto& [slot_id, data] : m_weapon_slots)
+                    {
+                        if (pSettings->line_exist(*target_wpn->m_section_id, make_string("addon_%s_offset_world", slot_id.c_str()).c_str()))
+                        {
+                            ImGui::DragFloat3(make_string("%s W Pos", slot_id.c_str()).c_str(), (float*)&data.pos_w, _delta_pos, 0.f, 0.f, "%.7f");
+                            ImGui::DragFloat3(make_string("%s W Rot", slot_id.c_str()).c_str(), (float*)&data.rot_w, _delta_pos, 0.f, 0.f, "%.7f");
+                        }
+                    }
+                }
             }
 
             if (wpn && wpn->bUseAttachmentSystem)
@@ -307,6 +340,7 @@ void CHudTuner::on_tool_frame()
                 shared_str m_sect_name = current_hud_item->m_sect_name;
 
                 ImGuiIO& io = ImGui::GetIO();
+                collide::rq_result& RQ = HUD().GetCurrentRayQuery();
 
                 if (ImGui::Button("Copy formatted values to clipboard"))
                 {
@@ -357,8 +391,17 @@ void CHudTuner::on_tool_frame()
                     {
                         for (auto& [slot_id, data] : m_weapon_slots)
                         {
-                            xr_sprintf(selectable, "addon_%s_offset = %d,%f,%f,%f,%f,%f,%f%s\n", slot_id.c_str(), data.type, data.pos.x, data.pos.y, data.pos.z, data.rot.x, data.rot.y, data.rot.z, data.bone_name != nullptr && xr_strcmp(data.bone_name, "") != 0 ? make_string(",%s", data.bone_name).c_str() : "");
+                            xr_sprintf(selectable, "addon_%s_offset = %d,%f,%f,%f,%f,%f,%f%s\n", slot_id.c_str(), data.type, data.pos.x, data.pos.y, data.pos.z, data.rot.x, data.rot.y, data.rot.z, data.bone_name != nullptr && xr_strcmp(*data.bone_name, "") != 0 ? make_string(",%s", *data.bone_name).c_str() : "");
                             ImGui::LogText("%s", selectable);
+                            if (RQ.O)
+                            {
+                                CWeapon* target_wpn = smart_cast<CWeapon*>(RQ.O);
+                                if (target_wpn && pSettings->line_exist(*target_wpn->m_section_id, make_string("addon_%s_offset_world", slot_id.c_str()).c_str()))
+                                {
+                                    xr_sprintf(selectable, "addon_%s_offset_world = %f,%f,%f,%f,%f,%f\n", slot_id.c_str(), data.pos_w.x, data.pos_w.y, data.pos_w.z, data.rot_w.x, data.rot_w.y, data.rot_w.z);
+                                    ImGui::LogText("%s", selectable);
+                                }
+                            }
                         }
                     }
                     ImGui::LogFinish();
@@ -368,7 +411,6 @@ void CHudTuner::on_tool_frame()
 
                 firedeps fd;
                 current_hud_item->setup_firedeps(fd);
-                collide::rq_result& RQ = HUD().GetCurrentRayQuery();
 
                 CDebugRenderer& render = Level().debug_renderer();
 

@@ -27,6 +27,7 @@ class CNightVisionEffector;
 struct addon_slot {
     shared_str slot_name;
     shared_str parent_section;
+    shared_str parent_addon_section;
     shared_str bone_name;
     u32 parent;
     Fmatrix transform;
@@ -65,6 +66,7 @@ public:
 	BOOL has_scope_texture{false};
 	BOOL on_first_line{false};
 	BOOL scope_dynamic_zoom{false};
+	BOOL has_mag_size{false};
     xr_map<shared_str, addon_slot> addon_slots;
     CInventoryItem::EIIAddonOrt ort;
     u16 provided_slot_type;
@@ -124,6 +126,7 @@ public:
     void CollectAttachmentsAI(TIItemContainer& l_list);
     bool DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool for_ai = false);
     bool HasAddonByName(shared_str name);
+    bool HasAddonWithMagSize();
     std::pair<u32, addon_item*> GetAddonFromSlot(u32 parent_id, shared_str slot_name) const;
     std::pair<u32, addon_item*> GetAddonMainScope() const;
     u16 getCountInstalledSecondAimAddons() const;

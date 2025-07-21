@@ -2011,7 +2011,7 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
             Fvector3 rot_w = rot;
             if (pSettings->line_exist(section, *line_name_world))
             {
-                str = pSettings->r_string(section, *line_name);
+                str = pSettings->r_string(section, *line_name_world);
                 sscanf(str, "%f,%f,%f,%f,%f,%f", &pos_w.x, &pos_w.y, &pos_w.z, &rot_w.x, &rot_w.y, &rot_w.z);
             }
             Fmatrix trans;
@@ -2050,6 +2050,9 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
         };
 
         load_slot_offsets("addon_slot_%d_offset");
+        load_slot("addon_slot_bh_offset", "slot_bh");
+        load_slot("addon_slot_mag_offset", "slot_mag");
+        load_slot("addon_slot_dtk_offset", "slot_dtk");
         load_slot("addon_slot_grip_offset", "slot_grip");
         load_slot("addon_slot_sight_offset", "slot_sight");
         load_slot("addon_slot_tac_grip_offset", "slot_tac_grip");
@@ -2087,7 +2090,63 @@ void CWeapon::SpawnDefaultAddons()
             else
                 data.provided_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
 
+            if (pSettings->line_exist(*default_addon, "ammo_mag_size"))
+                iAmmoElapsed = pSettings->r_s32(*default_addon, "ammo_mag_size");
+
             addAddon(data);
+        }
+    }
+    auto load_attachment = [&](const char* slot_name, u32 parent, const char* key) {
+        shared_str addon_str = pSettings->r_string(*m_section_id, key);
+        string128 addon_section;
+        string128 addon_ort = "";
+        u16 count = _GetItemCount(addon_str.c_str(), '|');
+        _GetItem(addon_str.c_str(), 0, addon_section, '|');
+        if (count > 1)
+            _GetItem(addon_str.c_str(), 1, addon_ort, '|');
+
+        R_ASSERT2(pSettings->section_exist(addon_section), make_string("Section of addon: %s doesn't exist", addon_section).c_str());
+
+        AddAddonData data;
+        data.item_section_id = addon_section;
+        data.addon_type = pSettings->r_string(addon_section, "addon_type");
+        data.slot_name = slot_name;
+        data.ort = xr_strcmp(addon_ort, "") == 0 ? CInventoryItem::EIIAddonOrt::FOrtNone : xr_strcmp(addon_ort, "left") == 0 ? CInventoryItem::EIIAddonOrt::FOrtLeft : CInventoryItem::EIIAddonOrt::FOrtRight;
+        data.addon_id = ADDON_ID_NONE;
+        data.parent_id = parent;
+        if (pSettings->line_exist(addon_section, "provided_slot_type"))
+        data.provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u8(addon_section, "provided_slot_type");
+        else
+        data.provided_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
+        
+        if (data.ort != CInventoryItem::EIIAddonOrt::FOrtNone)
+            data.has_ort = true;
+
+        addAddon(data);
+    };
+
+    auto slots = getAvaliableSlots();
+    for (auto slot : slots)
+    {
+        shared_str key = make_string("%s.%s", *slot.parent_section, *slot.slot_name).c_str();
+
+        if(pSettings->line_exist(*m_section_id, *key))
+        {
+            load_attachment(*slot.slot_name, slot.parent, *key);
+
+            continue;
+        }
+    }
+    slots = getAvaliableSlots();
+    for (auto slot : slots)
+    {
+        shared_str key = make_string("%s.%s.%s", *slot.parent_addon_section, *slot.parent_section, *slot.slot_name).c_str();
+
+        if (pSettings->line_exist(*m_section_id, *key))
+        {
+            load_attachment(*slot.slot_name, slot.parent, *key);
+
+            continue;
         }
     }
     default_addons_was_loaded = true;
@@ -3514,6 +3573,15 @@ bool CWeapon::HasAddonByName(shared_str name)
     return false;
 }
 
+bool CWeapon::HasAddonWithMagSize()
+{
+    for (auto [addon_id, addon]: m_addon_items)
+        if (addon->has_mag_size)
+            return true;
+
+    return false;
+}
+
 xr_vector<addon_slot> CWeapon::getAvaliableSlots() const
 {
     xr_vector<addon_slot> slots;
@@ -3528,6 +3596,7 @@ xr_vector<addon_slot> CWeapon::getAvaliableSlots() const
             addon_slot item;
             item.slot_name = slot.first;
             item.parent_section = addon->addon_item_name;
+            item.parent_addon_section = addon->parent;
             item.transform = slot.second.transform;
             item.parent = addon_id;
             item.slot_type = addon->provided_slot_type;
@@ -3582,6 +3651,21 @@ void CWeapon::addAddon(AddAddonData data)
     new_addon->provided_slot_type = data.provided_slot_type;
     new_addon->scope_dynamic_zoom = data.scope_dynamic_zoom;
     
+    if (pSettings->line_exist(*new_addon->addon_item_name, "ammo_mag_size"))
+    {
+        iMagazineSize = pSettings->r_u32(*new_addon->addon_item_name, "ammo_mag_size");
+        new_addon->has_mag_size = true;
+
+        NET_Packet P;
+        CHudItem::object().u_EventGen(P, GE_WPN_STATE_CHANGE, CHudItem::object().ID());
+        P.w_u8(u8(eReload));
+        P.w_u8(u8(m_sub_state));
+        P.w_u8(m_ammoType);
+        P.w_u8(u8(iAmmoElapsed & 0xff));
+        P.w_u8(m_set_next_ammoType_on_reload);
+        CHudItem::object().u_EventSend(P, net_flags(TRUE, TRUE, FALSE, TRUE));
+    }
+
     if (data.has_ort)
     {
         shared_str prop = new_addon->ort == CInventoryItem::EIIAddonOrt::FOrtRight ? "visual_right" : "visual";
@@ -3604,6 +3688,7 @@ void CWeapon::addAddon(AddAddonData data)
 
     addon_item* parent_item = new_addon->parent_id == 0 ? new_addon : m_addon_items[new_addon->parent_id];
     R_ASSERT3(parent_item, "Parent addon not found by id", make_string("%d", new_addon->parent_id).c_str());
+    new_addon->parent = parent_item->addon_item_name;
 
     if((new_addon->parent_id == 0 && xr_strcmp(*new_addon->slot, WPN_MAIN_SLOT) == 0) || parent_item->on_first_line)
         new_addon->on_first_line = true;

@@ -894,7 +894,12 @@ void CWeaponMagazined::switch2_Reload()
     iMagSizeCurrent = iMagazineSize;
 
     m_needReload = true;
-    PlayReloadSound();
+    if (g_player_hud[0]->attached_item())
+    {
+        CWeaponMagazined* item = smart_cast<CWeaponMagazined*>(g_player_hud[0]->attached_item()->m_parent_hud_item);
+        if (item && xr_strcmp(*item->m_section_id, *m_section_id) == 0)
+            PlayReloadSound();
+    }
     SetPending(true);
 }
 void CWeaponMagazined::switch2_Hiding()

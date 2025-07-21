@@ -110,7 +110,9 @@ private:
         u16 type;
         shared_str bone_name;
         Fvector pos;
+        Fvector pos_w;
         Fvector rot;
+        Fvector rot_w;
     };
     
     xr_map<shared_str, SlotTransform> m_weapon_slots;
