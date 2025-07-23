@@ -1038,6 +1038,8 @@ void CWeapon::save(NET_Packet& output_packet)
         output_packet.w_u16(addon->provided_slot_type);
         output_packet.w_u8(addon->ort != 0 ? 1 : 0);
         output_packet.w_u8(addon->scope_dynamic_zoom != 0 ? 1 : 0);
+        output_packet.w_u8(addon->has_mag_size != 0 ? 1 : 0);
+        output_packet.w_u8(addon->was_inited_in_default_slots != 0 ? 1 : 0);
     }
 }
 
@@ -1084,6 +1086,8 @@ void CWeapon::load(IReader& input_packet)
         data.provided_slot_type = (EWeaponAddonSlotType)input_packet.r_u16();
         data.has_ort = input_packet.r_u8() == 1 ? true : false;
         data.scope_dynamic_zoom = input_packet.r_u8() == 1 ? true : false;
+        data.has_mag_size = input_packet.r_u8() == 1 ? true : false;
+        data.was_inited_in_default_slots = input_packet.r_u8() == 1 ? true : false;
 
         addAddon(data);
     }
@@ -1820,16 +1824,21 @@ bool CWeapon::mainScopeSlotIsBusy() const
         if (addon->has_scope_texture)
             return true;
 
-        if (addon->parent_id == 0 && addon->slot == WPN_MAIN_SLOT)
+        if (addon->parent_id == 0)
         {
-            if (xr_strcmp(*addon->addon_type, "attachment") == 0)
+            Fvector hpb;
+            m_addon_slots[addon->slot]->transform.getHPB(hpb.x, hpb.y, hpb.z);
+            if (fis_zero(hpb.z))
             {
-                for (auto [addon_id2, addon2]: m_addon_items)
-                    if (addon2->parent_id == addon_id && xr_strcmp(*addon2->addon_type, "attachment") != 0)
-                        return true;
+                if (xr_strcmp(*addon->addon_type, "attachment") == 0)
+                {
+                    for (auto [addon_id2, addon2]: m_addon_items)
+                        if (addon2->parent_id == addon_id && xr_strcmp(*addon2->addon_type, "attachment") != 0)
+                            return true;
+                }
+                else
+                    return true;
             }
-            else
-                return true;
         }
     }
 
@@ -2061,6 +2070,19 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
         load_slot("addon_slot_cev_down_offset", "slot_cev_down");
     }
 }
+shared_str CWeapon::GetSlotKey(shared_str slot_name, u32 addon_parent_id, u32 addon_id)
+{
+    if (m_addon_items[addon_parent_id]->parent_id == 0)
+    {
+        return make_string("%s.%s.%s", *m_addon_items[addon_parent_id]->slot, *m_addon_items[addon_parent_id]->addon_item_name, *slot_name).c_str();
+    }
+    else
+    {
+        shared_str key = make_string("%s.%s.%s", *m_addon_items[addon_parent_id]->slot, *m_addon_items[addon_parent_id]->addon_item_name, *slot_name).c_str();
+        return GetSlotKey(key, m_addon_items[addon_parent_id]->parent_id, addon_parent_id).c_str();
+    }
+}
+
 void CWeapon::SpawnDefaultAddons()
 {
     if (default_addons_was_loaded)
@@ -2072,11 +2094,9 @@ void CWeapon::SpawnDefaultAddons()
             default_addon = pSettings->r_string(*m_section_id, *slot_key);
         if (pSettings->section_exist(*default_addon))
         {
-            if (HasAddonByName(default_addon))
-                return;
             auto addon = GetAddonFromSlot(0, slot_key);
             if (addon.second)
-                return;
+                continue;
 
             AddAddonData data;
             data.item_section_id = default_addon;
@@ -2096,6 +2116,7 @@ void CWeapon::SpawnDefaultAddons()
             addAddon(data);
         }
     }
+
     auto load_attachment = [&](const char* slot_name, u32 parent, const char* key) {
         shared_str addon_str = pSettings->r_string(*m_section_id, key);
         string128 addon_section;
@@ -2125,30 +2146,44 @@ void CWeapon::SpawnDefaultAddons()
         addAddon(data);
     };
 
-    auto slots = getAvaliableSlots();
-    for (auto slot : slots)
+    bool addon_with_slot_has_been_added = false;
+
+    while (true)
     {
-        shared_str key = make_string("%s.%s", *slot.parent_section, *slot.slot_name).c_str();
+        addon_with_slot_has_been_added = false;
 
-        if(pSettings->line_exist(*m_section_id, *key))
+        for (auto [addon_id, addon] : m_addon_items)
         {
-            load_attachment(*slot.slot_name, slot.parent, *key);
+            if (addon->addon_slots.size() == 0)
+                continue;
+            if (addon->was_inited_in_default_slots)
+                continue;
+            
+            for (auto [slot_name, slot] : addon->addon_slots)
+            {
+                shared_str key = make_string("%s.%s.%s", *addon->slot, *addon->addon_item_name, *slot_name).c_str();
+                if (addon->parent_id != 0)
+                    key = GetSlotKey(*key, addon->parent_id, addon_id);
 
-            continue;
+                if (pSettings->line_exist(*m_section_id, *key))
+                {
+                    shared_str addon_str = pSettings->r_string(*m_section_id, *key);
+                    string128 addon_section;
+                    _GetItem(addon_str.c_str(), 0, addon_section, '|');
+
+                    load_attachment(*slot.slot_name, addon_id, *key);
+
+                    addon_with_slot_has_been_added = true;
+                }
+            }
+
+            addon->was_inited_in_default_slots = true;
         }
-    }
-    slots = getAvaliableSlots();
-    for (auto slot : slots)
-    {
-        shared_str key = make_string("%s.%s.%s", *slot.parent_addon_section, *slot.parent_section, *slot.slot_name).c_str();
 
-        if (pSettings->line_exist(*m_section_id, *key))
-        {
-            load_attachment(*slot.slot_name, slot.parent, *key);
-
-            continue;
-        }
+        if (!addon_with_slot_has_been_added)
+            break;
     }
+
     default_addons_was_loaded = true;
 }
 
@@ -3650,6 +3685,8 @@ void CWeapon::addAddon(AddAddonData data)
     new_addon->has_scope_texture = data.has_scope_texture;
     new_addon->provided_slot_type = data.provided_slot_type;
     new_addon->scope_dynamic_zoom = data.scope_dynamic_zoom;
+    new_addon->has_mag_size = data.has_mag_size;
+    new_addon->was_inited_in_default_slots = data.was_inited_in_default_slots;
     
     if (pSettings->line_exist(*new_addon->addon_item_name, "ammo_mag_size"))
     {
@@ -3689,19 +3726,19 @@ void CWeapon::addAddon(AddAddonData data)
     addon_item* parent_item = new_addon->parent_id == 0 ? new_addon : m_addon_items[new_addon->parent_id];
     R_ASSERT3(parent_item, "Parent addon not found by id", make_string("%d", new_addon->parent_id).c_str());
     new_addon->parent = parent_item->addon_item_name;
-
+    
     if((new_addon->parent_id == 0 && xr_strcmp(*new_addon->slot, WPN_MAIN_SLOT) == 0) || parent_item->on_first_line)
         new_addon->on_first_line = true;
 
     addon_slot target_slot = new_addon->parent_id == 0 ? *m_addon_slots[new_addon->slot] : parent_item->addon_slots[new_addon->slot];
     Fmatrix slot_transform = target_slot.transform;
-
+    
     bool has_bone = target_slot.bone_name != nullptr && xr_strcmp(*target_slot.bone_name, "") != 0;
     new_addon->bone_name = has_bone ? target_slot.bone_name : parent_item->bone_name;
-
+    
     Fvector slot_rot;
     slot_transform.getHPB(slot_rot.x, slot_rot.y, slot_rot.z);
-
+    
     if (has_bone)
         slot_rot.z = 0.0f;
 
@@ -3755,7 +3792,6 @@ void CWeapon::addAddon(AddAddonData data)
     }
 
     new_addon->addon_item_pos.set(trans);
-    Msg("addAddon, addon: %s addon_item_pos.c: %f %f %f", *new_addon->addon_item_name, new_addon->addon_item_pos.c.x, new_addon->addon_item_pos.c.y, new_addon->addon_item_pos.c.z);
 
     u16 bone_id = new_addon->addon_item_model->LL_BoneID(DOT);
     if (bone_id != BI_NONE)

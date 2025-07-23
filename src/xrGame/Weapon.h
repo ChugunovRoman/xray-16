@@ -67,6 +67,7 @@ public:
 	BOOL on_first_line{false};
 	BOOL scope_dynamic_zoom{false};
 	BOOL has_mag_size{false};
+	BOOL was_inited_in_default_slots{false};
     xr_map<shared_str, addon_slot> addon_slots;
     CInventoryItem::EIIAddonOrt ort;
     u16 provided_slot_type;
@@ -83,6 +84,8 @@ struct AddAddonData {
     bool has_scope_texture{false};
     bool scope_dynamic_zoom{false};
     bool has_ort{false};
+    bool has_mag_size{false};
+    bool was_inited_in_default_slots{false};
 };
 
 class CWeapon : public CHudItemObject, public CShootingObject
@@ -105,7 +108,7 @@ public:
     Fmatrix bAttachmentSystemOffsetOnWorldModel;
 
     xr_map<u32, addon_item*> m_addon_items;
-    xr_map<shared_str, addon_slot*> m_addon_slots;
+    mutable xr_map<shared_str, addon_slot*> m_addon_slots;
 
     void addAddon(AddAddonData data);
     void addAddon(PIItem item);
@@ -131,6 +134,7 @@ public:
     std::pair<u32, addon_item*> GetAddonMainScope() const;
     u16 getCountInstalledSecondAimAddons() const;
     void setSecondZoomOnFirstScopeIfHaveIt();
+    shared_str GetSlotKey(shared_str slot_name, u32 addon_parent_id, u32 addon_id);
 
     virtual bool bInZoomRightNow() const { return m_zoom_params.m_fZoomRotationFactor > 0.05; }
     IC bool bIsSecondVPZoomPresent() const { return GetSecondVPZoomFactor() > 0.000f; }
