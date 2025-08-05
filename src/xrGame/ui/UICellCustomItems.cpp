@@ -31,7 +31,6 @@ CUIInventoryCellItem::CUIInventoryCellItem(CInventoryItem* itm)
 
     rect.rb.set(rect.lt.x + INV_GRID_WIDTHF * m_grid_size.x, rect.lt.y + INV_GRID_HEIGHTF * m_grid_size.y);
 
-    inherited::SetTextureRect(rect);
     inherited::SetStretchTexture(true);
 
     //Alundaio; Layered icon
@@ -83,7 +82,6 @@ void CUIInventoryCellItem::UpdateIcon()
     rect.lt.set(INV_GRID_WIDTHF * itm->GetInvGridRect().x1, INV_GRID_HEIGHTF * itm->GetInvGridRect().y1);
     rect.rb.set(rect.lt.x + INV_GRID_WIDTHF * m_grid_size.x, rect.lt.y + INV_GRID_HEIGHTF * m_grid_size.y);
 
-    inherited::SetTextureRect(rect);
     inherited::SetStretchTexture(true);
 }
 
