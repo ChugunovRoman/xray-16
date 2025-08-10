@@ -4,6 +4,7 @@
 #include "Windows/UITextFrameLineWnd.h"
 #include "Buttons/UICheckButton.h"
 #include "SpinBox/UICustomSpin.h"
+#include "SpinBox/UISpinNum.h"
 #include "Buttons/UIRadioButton.h"
 #include "ProgressBar/UIProgressBar.h"
 #include "ProgressBar/UIProgressShape.h"
@@ -272,6 +273,19 @@ bool CUIXmlInitBase::InitSpin(CUIXml& xml_doc, pcstr path, int index, CUICustomS
         color = GetColor(xml_doc, foo, index, 0x00);
         pWnd->SetTextColorD(color);
     }
+
+    return true;
+}
+
+bool CUIXmlInitBase::InitSpinNum(CUIXml& xml_doc, pcstr path, int index, CUISpinNum* pWnd, bool fatal /*= true*/)
+{
+    if (!InitSpin(xml_doc, path, index, pWnd, fatal))
+        return false;
+
+    pWnd->SetMin(xml_doc.ReadAttribInt(path, index, "min_value", 0));
+    pWnd->SetMax(xml_doc.ReadAttribInt(path, index, "max_value", 100));
+    pWnd->SetStep(xml_doc.ReadAttribInt(path, index, "step", 1));
+    pWnd->SetValue(xml_doc.ReadAttribInt(path, index, "init_value", 1));
 
     return true;
 }

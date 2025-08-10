@@ -21,12 +21,13 @@ public:
 
     void SetMax(int max) { m_iMax = max; };
     void SetMin(int min) { m_iMin = min; };
+    void SetStep(int step) { m_iStep = step; };
     int Value() const { return m_iVal; }
+    void SetValue(int v);
 
     pcstr GetDebugType() override { return "CUISpinNum"; }
 
 protected:
-    void SetValue(int v);
     virtual bool CanPressUp();
     virtual bool CanPressDown();
     virtual void IncVal();

@@ -10,6 +10,7 @@ class CUIStaticItem;
 class CUIStatic;
 class CUICheckButton;
 class CUICustomSpin;
+class CUISpinNum;
 class CUIButton;
 class CUI3tButton;
 class CUIDragDropList;
@@ -48,6 +49,7 @@ public:
     static bool InitStatic(CUIXml& xml_doc, pcstr path, int index, CUIStatic* pWnd, bool fatal = true, bool textWnd = false);
     static bool InitCheck(CUIXml& xml_doc, pcstr path, int index, CUICheckButton* pWnd, bool fatal = true);
     static bool InitSpin(CUIXml& xml_doc, pcstr path, int index, CUICustomSpin* pWnd, bool fatal = true);
+    static bool InitSpinNum(CUIXml& xml_doc, pcstr path, int index, CUISpinNum* pWnd, bool fatal = true);
     static bool InitText(CUIXml& xml_doc, pcstr path, int index, CUILines* pLines);
     static bool Init3tButton(CUIXml& xml_doc, pcstr path, int index, CUI3tButton* pWnd, bool fatal = true);
     static bool InitProgressBar(CUIXml& xml_doc, pcstr path, int index, CUIProgressBar* pWnd, bool fatal = true);
