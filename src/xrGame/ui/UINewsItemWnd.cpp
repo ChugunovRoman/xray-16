@@ -7,6 +7,8 @@
 #include "UIInventoryUtilities.h"
 #include "UIHelper.h"
 
+#define ICON_SIZE 512.0f
+
 CUINewsItemWnd::CUINewsItemWnd() : CUIWindow("CUINewsItemWnd") {}
 
 void CUINewsItemWnd::Init(CUIXml& uiXml, LPCSTR start_from)
@@ -18,7 +20,11 @@ void CUINewsItemWnd::Init(CUIXml& uiXml, LPCSTR start_from)
     uiXml.SetLocalRoot(node);
 
     m_UIImage = UIHelper::CreateStatic(uiXml, "image", this);
+    m_UIImage2 = UIHelper::CreateStatic(uiXml, "image_2", this);
     m_UICaption = UIHelper::CreateStatic(uiXml, "caption_static", this, false); // no caption tag in SOC
+
+    m_UIImage2->SetStretchTexture(true);
+    m_UIImage2->SetTextureRect(Frect().set(0.0f, 0.0f, ICON_SIZE, ICON_SIZE));
 
     m_UIText = UIHelper::CreateStatic(uiXml, "text_static", this, false);
     m_UIDate = UIHelper::CreateStatic(uiXml, "date_static", this, false);
@@ -56,7 +62,19 @@ void CUINewsItemWnd::Setup(GAME_NEWS_DATA& news_data)
     m_UIText->AdjustHeightToText();
     float h1 = m_UIText->GetWndPos().y + m_UIText->GetHeight() + 6.0f;
 
-    m_UIImage->InitTexture(news_data.texture_name.c_str());
+    if (news_data.faction_name != nullptr)
+    {
+        pcstr icon = pSettingsFE->read_if_exists<pcstr>(news_data.faction_name.c_str(), "icon", make_string("icons\\patches\\%s", news_data.faction_name.c_str()).c_str());
+        pcstr sms_bg = pSettingsFE->read_if_exists<pcstr>(news_data.faction_name.c_str(), "sms_bg", "ui\\icons\\sms\\sms7");
+        m_UIImage->InitTexture(sms_bg);
+        m_UIImage2->InitTexture(icon);   
+    }
+    else
+    {
+        m_UIImage->InitTexture(news_data.texture_name.c_str());
+        m_UIImage2->SetTextureRect(Frect().set(0.0f, 0.0f, 0.0f, 0.0f));
+    }
+
     float h3 = m_UIImage->GetWndPos().y + m_UIImage->GetHeight();
     h1 = _max(h1, h3);
     SetHeight(h1);

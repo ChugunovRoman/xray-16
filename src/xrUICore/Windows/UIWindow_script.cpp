@@ -402,6 +402,7 @@ SCRIPT_EXPORT(EnumUIMessages, (),
             value("MESSAGE_BOX_QUIT_WIN_CLICKED", int(MESSAGE_BOX_QUIT_WIN_CLICKED)),
 
             value("EDIT_TEXT_COMMIT", int(EDIT_TEXT_COMMIT)),
+            value("EDIT_TEXT_CANCEL", int(EDIT_TEXT_CANCEL)),
             // CMainMenu
             value("MAIN_MENU_RELOADED", int(MAIN_MENU_RELOADED))
         ]

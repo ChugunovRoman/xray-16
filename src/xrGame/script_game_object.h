@@ -321,6 +321,8 @@ public:
 
     void GiveGameNews(LPCSTR caption, LPCSTR news, LPCSTR texture_name, int delay, int show_time);
     void GiveGameNews(LPCSTR caption, LPCSTR news, LPCSTR texture_name, int delay, int show_time, int type);
+    void GiveGameNews(LPCSTR caption, LPCSTR news, LPCSTR texture_name, LPCSTR faction_name, int delay, int show_time);
+    void GiveGameNews(LPCSTR caption, LPCSTR news, LPCSTR texture_name, LPCSTR faction_name, int delay, int show_time, int type);
     void ClearGameNews() const;
 
     void AddIconedTalkMessage_old(LPCSTR text, LPCSTR texture_name, LPCSTR templ_name){}

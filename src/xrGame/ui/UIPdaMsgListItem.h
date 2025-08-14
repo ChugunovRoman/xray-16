@@ -19,6 +19,7 @@ public:
     pcstr GetDebugType() override { return "CUIPdaMsgListItem"; }
 
     CUIStatic UIIcon       { "Icon" };
+    CUIStatic UIIcon2      { "Icon2" };
     CUIStatic UITimeText   { "Time text" };
     CUIStatic UICaptionText{ "Caption text" };
     CUIStatic UIMsgText    { "Message text" };

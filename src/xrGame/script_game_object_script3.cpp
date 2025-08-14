@@ -179,6 +179,10 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
             (void (CScriptGameObject::*)(LPCSTR, LPCSTR, LPCSTR, int, int))(&CScriptGameObject::GiveGameNews))
         .def("give_game_news",
             (void (CScriptGameObject::*)(LPCSTR, LPCSTR, LPCSTR, int, int, int))(&CScriptGameObject::GiveGameNews))
+        .def("give_game_news",
+            (void (CScriptGameObject::*)(LPCSTR, LPCSTR, LPCSTR, LPCSTR, int, int))(&CScriptGameObject::GiveGameNews))
+        .def("give_game_news",
+            (void (CScriptGameObject::*)(LPCSTR, LPCSTR, LPCSTR, LPCSTR, int, int, int))(&CScriptGameObject::GiveGameNews))
 
         .def("clear_game_news", &CScriptGameObject::ClearGameNews)
 

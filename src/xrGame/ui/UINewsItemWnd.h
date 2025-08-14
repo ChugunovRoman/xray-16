@@ -13,6 +13,7 @@ class CUINewsItemWnd final : public CUIWindow
     CUIStatic* m_UICaption;
     CUIStatic* m_UIText;
     CUIStatic* m_UIImage;
+    CUIStatic* m_UIImage2;
 
 public:
     CUINewsItemWnd();

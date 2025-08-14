@@ -117,7 +117,15 @@ void CUIMessagesWindow::AddIconedPdaMessage(const GAME_NEWS_DATA* news)
 
     pItem->SetColorAnimation(
         "ui_main_msgs_short", LA_ONLYALPHA | LA_TEXTCOLOR | LA_TEXTURECOLOR, float(news->show_time));
-    pItem->UIIcon.InitTexture(news->texture_name.c_str());
+    if (news->faction_name != nullptr)
+    {
+        pcstr icon = pSettingsFE->read_if_exists<pcstr>(news->faction_name.c_str(), "icon", make_string("icons\\patches\\%s", news->faction_name.c_str()).c_str());
+        pcstr sms_bg = pSettingsFE->read_if_exists<pcstr>(news->faction_name.c_str(), "sms_bg", "ui\\icons\\sms\\sms7");
+        pItem->UIIcon.InitTexture(sms_bg);
+        pItem->UIIcon2.InitTexture(icon);
+    }
+    else
+        pItem->UIIcon.InitTexture(news->texture_name.c_str());
 
     const float h1 = _max(pItem->UIIcon.GetHeight(), pItem->UIMsgText.GetWndPos().y + pItem->UIMsgText.GetHeight());
     pItem->SetHeight(h1 + 3.0f);

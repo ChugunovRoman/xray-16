@@ -112,16 +112,25 @@ void CScriptGameObject::AddIconedTalkMessage(LPCSTR caption, LPCSTR text, LPCSTR
 }
 
 void _give_news(LPCSTR caption, LPCSTR news, LPCSTR texture_name, int delay, int show_time, int type);
+void _give_news(LPCSTR caption, LPCSTR news, LPCSTR texture_name, LPCSTR faction_name, int delay, int show_time, int type);
 
 void CScriptGameObject::GiveGameNews(LPCSTR caption, LPCSTR news, LPCSTR texture_name, int delay, int show_time)
 {
     GiveGameNews(caption, news, texture_name, delay, show_time, GAME_NEWS_DATA::eNews);
 }
-
 void CScriptGameObject::GiveGameNews(
     LPCSTR caption, LPCSTR news, LPCSTR texture_name, int delay, int show_time, int type)
 {
     _give_news(caption, news, texture_name, delay, show_time, type);
+}
+void CScriptGameObject::GiveGameNews(LPCSTR caption, LPCSTR news, LPCSTR texture_name, LPCSTR faction_name, int delay, int show_time)
+{
+    GiveGameNews(caption, news, texture_name, faction_name, delay, show_time, GAME_NEWS_DATA::eNews);
+}
+void CScriptGameObject::GiveGameNews(
+    LPCSTR caption, LPCSTR news, LPCSTR texture_name, LPCSTR faction_name, int delay, int show_time, int type)
+{
+    _give_news(caption, news, texture_name, faction_name, delay, show_time, type);
 }
 
 void _give_news(LPCSTR caption, LPCSTR text, LPCSTR texture_name, int delay, int show_time, int type)
@@ -129,6 +138,26 @@ void _give_news(LPCSTR caption, LPCSTR text, LPCSTR texture_name, int delay, int
     GAME_NEWS_DATA news_data;
     news_data.m_type = (GAME_NEWS_DATA::eNewsType)type;
     news_data.news_caption = caption;
+    news_data.news_text = text;
+    if (show_time != 0)
+        news_data.show_time = show_time; // override default
+
+    VERIFY(xr_strlen(texture_name) > 0);
+
+    news_data.texture_name = texture_name;
+
+    if (delay == 0)
+        Actor()->AddGameNews(std::move(news_data));
+    else
+        Actor()->AddGameNews_deffered(std::move(news_data), delay);
+}
+
+void _give_news(LPCSTR caption, LPCSTR text, LPCSTR texture_name, LPCSTR faction_name, int delay, int show_time, int type)
+{
+    GAME_NEWS_DATA news_data;
+    news_data.m_type = (GAME_NEWS_DATA::eNewsType)type;
+    news_data.news_caption = caption;
+    news_data.faction_name = faction_name;
     news_data.news_text = text;
     if (show_time != 0)
         news_data.show_time = show_time; // override default
