@@ -657,6 +657,7 @@ void stop_tutorial()
 }
 
 LPCSTR translate_string(LPCSTR str) { return *StringTable().translate(str); }
+void replace_translate_string(LPCSTR str_id, LPCSTR new_str) { StringTable().replace(str_id, new_str); }
 bool has_active_tutotial() { return (g_tutorial != NULL); }
 
 // Alundaio: namespace level exports extension
@@ -1042,6 +1043,7 @@ IC static void CLevel_Export(lua_State* luaState)
         def("has_active_tutorial", &has_active_tutotial),
         def("active_tutorial_name", +[](){ return g_tutorial->GetTutorName(); }),
         def("translate_string", &translate_string),
+        def("replace_translate_string", &replace_translate_string),
         def("reload_language", +[]() { StringTable().ReloadLanguage(); }),
         def("log_stack_trace", &xrDebug::LogStackTrace),
         def("jump_to_level", +[](pcstr level_name)

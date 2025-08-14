@@ -288,6 +288,15 @@ STRING_VALUE CStringTable::ParseLine(pcstr str)
     return { string.c_str() };
 }
 
+void CStringTable::replace(const STRING_ID& str_id, const STRING_VALUE& new_str)
+{
+    if (!pData)
+        return;
+
+    if (pData->m_StringTable.find(str_id) != pData->m_StringTable.end())
+        pData->m_StringTable[str_id] = new_str;
+}
+
 STRING_VALUE CStringTable::translate(const STRING_ID& str_id) const
 {
     if (!pData)
