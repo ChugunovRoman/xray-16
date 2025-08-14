@@ -66,6 +66,14 @@ CScriptIniFile* reload_system_ini()
     Dbg.InitSectionLists();
     return (CScriptIniFile*)pSettings;
 }
+CScriptIniFile* reload_faction_editor_config()
+{
+    pSettingsFE->Destroy(const_cast<CInifile*>(pSettingsFE));
+    string_path fname;
+    FS.update_path(fname, "$game_config$", "faction_editor_config.ltx");
+    pSettingsFE = xr_new<CInifile>(fname);
+    return (CScriptIniFile*)pSettingsFE;
+}
 
 void section_for_each(CScriptIniFile* self, const luabind::functor<void>& functor)
 {
@@ -157,6 +165,7 @@ static void CScriptIniFile_Export(lua_State* luaState)
 #endif
             //Alundaio: extend
             def("reload_system_ini", &reload_system_ini),
+            def("reload_faction_editor_config", &reload_faction_editor_config),
             def("get_platform", +[]()
             {
 #if defined(XR_PLATFORM_WINDOWS)

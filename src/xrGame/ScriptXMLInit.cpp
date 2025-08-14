@@ -23,6 +23,8 @@
 #include "xrUICore/ScrollView/UIScrollView.h"
 #include "xrUICore/ListWnd/UIListWnd.h"
 #include "xrUICore/ProgressBar/UIProgressBar.h"
+#include "xrGame/ui/UIDragDropListEx.h"
+#include "xrGame/ui/UICellItem.h"
 #include "xrScriptEngine/ScriptExporter.hpp"
 
 void _attach_child(CUIWindow* _child, CUIWindow* _parent)
@@ -149,7 +151,7 @@ CUICheckButton* CScriptXmlInit::InitCheck(LPCSTR path, CUIWindow* parent)
 CUISpinNum* CScriptXmlInit::InitSpinNum(LPCSTR path, CUIWindow* parent)
 {
     CUISpinNum* pWnd = xr_new<CUISpinNum>();
-    CUIXmlInit::InitSpin(m_xml, path, 0, pWnd);
+    CUIXmlInit::InitSpinNum(m_xml, path, 0, pWnd);
     _attach_child(pWnd, parent);
     return pWnd;
 }
@@ -269,6 +271,22 @@ CUIEditBox* CScriptXmlInit::InitMPPlayerName(LPCSTR path, CUIWindow* parent)
     return pWnd;
 }
 
+CUIDragDropListEx* CScriptXmlInit::InitDragDropListEx(LPCSTR path, CUIWindow* parent)
+{
+    CUIDragDropListEx* pWnd = xr_new<CUIDragDropListEx>();
+    CUIXmlInit::InitDragDropListEx(m_xml, path, 0, pWnd);
+    _attach_child(pWnd, parent);
+    return pWnd;
+}
+
+CUICellItem* CScriptXmlInit::InitUICellItem(LPCSTR path, CUIWindow* parent)
+{
+    CUICellItem* pWnd = xr_new<CUICellItem>();
+    CUIXmlInit::InitStatic(m_xml, path, 0, pWnd);
+    _attach_child(pWnd, parent);
+    return pWnd;
+}
+
 SCRIPT_EXPORT(CScriptXmlInit, (),
 {
     using namespace luabind;
@@ -308,5 +326,7 @@ SCRIPT_EXPORT(CScriptXmlInit, (),
             .def("InitList", &CScriptXmlInit::InitListWnd)
             .def("InitListBox", &CScriptXmlInit::InitListBox)
             .def("InitProgressBar", &CScriptXmlInit::InitProgressBar)
+            .def("InitDragDropListEx", &CScriptXmlInit::InitDragDropListEx)
+            .def("InitUICellItem", &CScriptXmlInit::InitUICellItem)
     ];
 });

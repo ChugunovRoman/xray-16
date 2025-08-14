@@ -23,7 +23,7 @@ CUIInventoryCellItem::CUIInventoryCellItem(CInventoryItem* itm)
     m_pData = (void*)itm;
 
     pcstr iconPath = itm->GetInvIconPath();
-    inherited::SetShader(InventoryUtilities::GetEquipmentIconShader(iconPath));
+    inherited::SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(itm->m_section_id).c_str()));
 
     m_grid_size.set(itm->GetInvGridRect().rb);
     Frect rect;
@@ -63,6 +63,63 @@ CUIInventoryCellItem::CUIInventoryCellItem(CInventoryItem* itm)
     //-Alundaio
 }
 
+CUIInventoryCellItem::CUIInventoryCellItem(shared_str section_id)
+{
+    data_is_string = true;
+    m_section_id = section_id;
+
+    R_ASSERT2(pSettings->line_exist(*m_section_id, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", *m_section_id));
+
+    pcstr iconPath = pSettings->r_string(*m_section_id, "inv_icon");
+    inherited::SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(section_id).c_str()));
+
+    u32 x, y, w, h;
+
+    x = 0;
+    y = 0;
+    w = pSettings->r_u32(*m_section_id, "inv_grid_width");
+    h = pSettings->r_u32(*m_section_id, "inv_grid_height");
+
+    Irect rect1 = Irect().set(x, y, w, h);
+
+    m_grid_size.set(rect1.rb);
+    Frect rect;
+    rect.lt.set(INV_GRID_WIDTHF * rect1.x1, INV_GRID_HEIGHTF * rect1.y1);
+
+    rect.rb.set(rect.lt.x + INV_GRID_WIDTHF * m_grid_size.x, rect.lt.y + INV_GRID_HEIGHTF * m_grid_size.y);
+
+    inherited::SetStretchTexture(true);
+
+    //Alundaio; Layered icon
+    for (u8 i = 0; i < 255; ++i)
+    {
+        string32 layer_str;
+        xr_sprintf(layer_str, "%u%s", i, detail::ICON_LAYER_FIELD);
+        if (!pSettings->line_exist(*m_section_id, layer_str))
+            break;
+
+        cpcstr section = pSettings->r_string(*m_section_id, layer_str);
+        if (!section)
+            continue;
+
+        string32 temp;
+        const Fvector2 offset
+        {
+            pSettings->r_float(*m_section_id, strconcat(temp, layer_str, "_x")),
+            pSettings->r_float(*m_section_id, strconcat(temp, layer_str, "_y"))
+        };
+
+        cpcstr field_scale = strconcat(temp, layer_str, "_scale");
+        const float scale = pSettings->read_if_exists<float>(*m_section_id, field_scale, 1.0f);
+
+        //cpcstr field_color = strconcat(temp, layer_str, "_color");
+        //const u32 color = READ_IF_EXISTS(pSettings, r_color, itm->m_section_id, field_color, 0);
+
+        CreateLayer(section, offset, scale);
+    }
+    //-Alundaio
+}
+
 void CUIInventoryCellItem::OnAfterChild(CUIDragDropListEx* parent_list)
 {
     for (SIconLayer* layer : m_layers)
@@ -74,8 +131,11 @@ void CUIInventoryCellItem::UpdateIcon()
 {
     CInventoryItem* itm = (CInventoryItem*)m_pData;
 
+    if (!itm)
+        return;
+
     pcstr iconPath = itm->GetInvIconPath();
-    inherited::SetShader(InventoryUtilities::GetEquipmentIconShader(iconPath));
+    inherited::SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(itm->m_section_id).c_str()));
 
     m_grid_size.set(itm->GetInvGridRect().rb);
     Frect rect;
@@ -85,8 +145,31 @@ void CUIInventoryCellItem::UpdateIcon()
     inherited::SetStretchTexture(true);
 }
 
+shared_str CUIInventoryCellItem::GetIconPath(shared_str section_id)
+{
+    R_ASSERT2(pSettings->line_exist(*section_id, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", section_id.c_str()));
+
+    pcstr itemClass = pSettings->read_if_exists<pcstr>(*section_id, "item_class", "NULL");
+    if (xr_strcmp(itemClass, "outfit_patch") == 0)
+    {
+        std::string factionName{section_id.c_str()};
+        factionName.erase(factionName.length() - 6);
+
+        pcstr icon = pSettingsFE->read_if_exists<pcstr>(factionName.c_str(), "icon", make_string("icons\\patches\\%s", factionName.c_str()).c_str());
+        std::string iconPath{icon};
+        if (strstr(iconPath.c_str(), "ui\\"))
+            iconPath.erase(0, 3);
+        return iconPath.c_str();
+    }
+
+    return pSettings->r_string(*section_id, "inv_icon");
+}
+
 bool CUIInventoryCellItem::EqualTo(CUICellItem* itm)
 {
+    if (data_is_string && itm->data_is_string)
+        return xr_strcmp(itm->m_section_id.c_str(), m_section_id.c_str()) == 0;
+
     CUIInventoryCellItem* ci = smart_cast<CUIInventoryCellItem*>(itm);
     if (!itm)
     {
@@ -123,7 +206,7 @@ CUIDragItem* CUIInventoryCellItem::CreateDragItem()
     {
         CUIStatic* s = xr_new<CUIStatic>("Layer");
         s->SetAutoDelete(true);
-        s->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(layer->m_name, "inv_icon")));
+        s->SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(layer->m_name).c_str()));
         InitLayer(s, layer->m_name, layer->offset, false, layer->m_scale);
         s->SetTextureColor(i->wnd()->GetTextureColor());
         i->wnd()->AttachChild(s);
@@ -142,8 +225,20 @@ void CUIInventoryCellItem::SetTextureColor(u32 color)
     }
 }
 
-bool CUIInventoryCellItem::IsHelper() { return object()->is_helper_item(); }
-void CUIInventoryCellItem::SetIsHelper(bool is_helper) { object()->set_is_helper(is_helper); }
+bool CUIInventoryCellItem::IsHelper()
+{
+    if (data_is_string)
+        return false;
+
+    return object()->is_helper_item();
+}
+void CUIInventoryCellItem::SetIsHelper(bool is_helper)
+{
+    if (data_is_string)
+        return;
+
+    object()->set_is_helper(is_helper); 
+}
 
 //Alundaio
 void CUIInventoryCellItem::RemoveLayer(const SIconLayer* layer)
@@ -177,7 +272,7 @@ CUIStatic* CUIInventoryCellItem::InitLayer(CUIStatic* s, pcstr section,
         s = xr_new<CUIStatic>("Layer");
         s->SetAutoDelete(true);
         AttachChild(s);
-        s->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(section, "inv_icon")));
+        s->SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(section).c_str()));
         s->SetTextureColor(GetTextureColor());
     }
 
@@ -251,6 +346,9 @@ void CUIInventoryCellItem::Update()
         color = 0xffffffff;
     }
 
+    if (data_is_string)
+        color = 0xffffffff;
+
     SetTextureColor(color);
 
     for (SIconLayer* layer : m_layers)
@@ -265,7 +363,13 @@ void CUIInventoryCellItem::UpdateItemText()
     const u32 helper_count =
         (u32)std::count_if(m_childs.begin(), m_childs.end(), ::detail::is_helper_pred()) + IsHelper() ? 1 : 0;
 
-    const u32 count = ChildsCount() + 1 - helper_count;
+    const u32 count = data_is_string ? ChildsCount() + 1 : ChildsCount() + 1 - helper_count;
+
+    if (data_is_string && count <= 1)
+    {
+        m_text->Show(false);
+        return;
+    }
 
     string32 tempStr;
     pcstr finalText = nullptr;
@@ -292,6 +396,9 @@ bool CUIAmmoCellItem::EqualTo(CUICellItem* itm)
     if (!inherited::EqualTo(itm))
         return false;
 
+    if (data_is_string && itm->data_is_string)
+        return xr_strcmp(m_section_id.c_str(), itm->m_section_id.c_str()) == 0;
+
     CUIAmmoCellItem* ci = smart_cast<CUIAmmoCellItem*>(itm);
     if (!ci)
         return false;
@@ -302,6 +409,9 @@ bool CUIAmmoCellItem::EqualTo(CUICellItem* itm)
 CUIDragItem* CUIAmmoCellItem::CreateDragItem() { return IsHelper() ? NULL : inherited::CreateDragItem(); }
 u32 CUIAmmoCellItem::CalculateAmmoCount()
 {
+    if (data_is_string)
+        return 0;
+
     xr_vector<CUICellItem*>::iterator it = m_childs.begin();
     xr_vector<CUICellItem*>::iterator it_e = m_childs.end();
 
@@ -377,7 +487,7 @@ void CUIWeaponCellItem::CreateIcon(eAddonType t)
     if (pSettings->line_exist(itm->m_section_id.c_str(), "inv_icon_alt"))
         m_addons[t]->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(itm->m_section_id.c_str(), "inv_icon_alt")));
     else
-        m_addons[t]->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(itm->m_section_id.c_str(), "inv_icon")));
+        m_addons[t]->SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(itm->m_section_id).c_str()));
 
     u32 color = GetTextureColor();
     m_addons[t]->SetTextureColor(color);
@@ -392,6 +502,9 @@ void CUIWeaponCellItem::DestroyIcon(eAddonType t)
 CUIStatic* CUIWeaponCellItem::GetIcon(eAddonType t) { return m_addons[t]; }
 void CUIWeaponCellItem::RefreshOffset()
 {
+    if (data_is_string)
+        return;
+
     if (object()->SilencerAttachable())
         m_addon_offset[eSilencer].set(object()->GetSilencerX(), object()->GetSilencerY());
 
@@ -412,6 +525,9 @@ void CUIWeaponCellItem::Draw()
 
 void CUIWeaponCellItem::Update()
 {
+    if (data_is_string)
+        return;
+
     bool b = Heading();
     inherited::Update();
 
@@ -496,6 +612,9 @@ void CUIWeaponCellItem::SetTextureColor(u32 color)
 
 void CUIWeaponCellItem::OnAfterChild(CUIDragDropListEx* parent_list)
 {
+    if (data_is_string)
+        return;
+
     if (is_silencer() && GetIcon(eSilencer))
         InitAddon(GetIcon(eSilencer), *object()->GetSilencerName(), m_addon_offset[eSilencer], parent_list->GetVerticalPlacement());
 
@@ -516,7 +635,7 @@ void CUIWeaponCellItem::InitAddon(CUIStatic* s, LPCSTR section, Fvector2 addon_o
     if (pSettings->line_exist(section, "inv_icon_alt"))
         s->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(section, "inv_icon_alt")));
     else
-        s->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(section, "inv_icon")));
+        s->SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(section).c_str()));
 
     if (Heading())
     {

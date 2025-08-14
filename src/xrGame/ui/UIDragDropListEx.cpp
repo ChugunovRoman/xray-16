@@ -265,6 +265,9 @@ void CUIDragDropListEx::OnDragEvent(CUIDragItem* drag_item, bool b_receive)
 {
     if (m_f_drag_event)
         m_f_drag_event(drag_item, b_receive);
+    if (m_f_drag_event_lua && m_selected_item->data_is_string)
+        m_f_drag_event_lua(m_selected_item->m_section_id.c_str(), b_receive);
+
 }
 
 void CUIDragDropListEx::OnItemStartDragging(CUIWindow* w, void* pData)
@@ -292,6 +295,8 @@ void CUIDragDropListEx::OnItemDrop(CUIWindow* w, void* pData)
         DestroyDragItem();
         return;
     }
+    if (m_f_item_drop_lua && itm->data_is_string)
+        m_f_item_drop_lua(itm->m_section_id.c_str());
 
     CUIDragDropListEx* old_owner = itm->OwnerList();
     CUIDragDropListEx* new_owner = m_drag_item->BackList();
@@ -321,6 +326,8 @@ void CUIDragDropListEx::OnItemDBClick(CUIWindow* w, void* pData)
         DestroyDragItem();
         return;
     }
+    if (m_f_item_db_click_lua && itm->data_is_string)
+        m_f_item_db_click_lua(itm->m_section_id.c_str());
 
     CUIDragDropListEx* old_owner = itm->OwnerList();
     VERIFY(m_drag_item == NULL);
@@ -341,33 +348,35 @@ void CUIDragDropListEx::OnItemSelected(CUIWindow* w, void* pData)
     VERIFY(m_selected_item);
     if (m_f_item_selected)
         m_f_item_selected(m_selected_item);
+    if (m_f_item_selected_lua && m_selected_item->data_is_string)
+        m_f_item_selected_lua(m_selected_item->m_section_id.c_str());
 }
 
 void CUIDragDropListEx::OnItemFocusReceived(CUIWindow* w, void* pData)
 {
+    CUICellItem* itm = smart_cast<CUICellItem*>(w);
     if (m_f_item_focus_received)
-    {
-        CUICellItem* itm = smart_cast<CUICellItem*>(w);
         m_f_item_focus_received(itm);
-    }
+    if (m_f_item_focus_received_lua && itm->data_is_string)
+        m_f_item_focus_received_lua(itm->m_section_id.c_str());
 }
 
 void CUIDragDropListEx::OnItemFocusLost(CUIWindow* w, void* pData)
 {
+    CUICellItem* itm = smart_cast<CUICellItem*>(w);
     if (m_f_item_focus_lost)
-    {
-        CUICellItem* itm = smart_cast<CUICellItem*>(w);
         m_f_item_focus_lost(itm);
-    }
+    if (m_f_item_focus_lost_lua && itm->data_is_string)
+        m_f_item_focus_lost_lua(itm->m_section_id.c_str());
 }
 
 void CUIDragDropListEx::OnItemFocusedUpdate(CUIWindow* w, void* pData)
 {
+    CUICellItem* itm = smart_cast<CUICellItem*>(w);
     if (m_f_item_focused_update)
-    {
-        CUICellItem* itm = smart_cast<CUICellItem*>(w);
         m_f_item_focused_update(itm);
-    }
+    if (m_f_item_focused_update_lua && itm->data_is_string)
+        m_f_item_focused_update_lua(itm->m_section_id.c_str());
 }
 
 void CUIDragDropListEx::OnItemRButtonClick(CUIWindow* w, void* pData)
@@ -376,6 +385,8 @@ void CUIDragDropListEx::OnItemRButtonClick(CUIWindow* w, void* pData)
     CUICellItem* itm = smart_cast<CUICellItem*>(w);
     if (m_f_item_rbutton_click)
         m_f_item_rbutton_click(itm);
+    if (m_f_item_rbutton_click_lua && itm->data_is_string)
+        m_f_item_rbutton_click_lua(itm->m_section_id.c_str());
 }
 
 void CUIDragDropListEx::OnItemLButtonClick(CUIWindow* w, void* pData)
@@ -384,6 +395,8 @@ void CUIDragDropListEx::OnItemLButtonClick(CUIWindow* w, void* pData)
     CUICellItem* itm = smart_cast<CUICellItem*>(w);
     if (m_f_item_lbutton_click)
         m_f_item_lbutton_click(itm);
+    if (m_f_item_lbutton_click_lua  && itm->data_is_string)
+        m_f_item_lbutton_click_lua(itm->m_section_id.c_str());
 }
 
 void CUIDragDropListEx::GetClientArea(Frect& r)
@@ -587,6 +600,20 @@ CUICellItem* CUIDragDropListEx::RemoveItem(CUICellItem* itm, bool force_root)
     return i;
 }
 
+CUICellItem* CUIDragDropListEx::FindByKey(shared_str sect)
+{
+    CUICellItem* i = m_container->FindByKey(sect);
+    return i;
+}
+void CUIDragDropListEx::IterItems(std::function<void(CUICellItem*)> functor)
+{
+    m_container->IterItems(functor);
+}
+void CUIDragDropListEx::ResetAllSelected()
+{
+    m_container->ResetAllSelected();
+}
+
 u32 CUIDragDropListEx::ItemsCount() { return m_container->GetChildWndList().size(); }
 bool CUIDragDropListEx::IsOwner(CUICellItem* itm) { return m_container->IsChild(itm); }
 CUICellItem* CUIDragDropListEx::GetItemIdx(u32 idx)
@@ -653,7 +680,7 @@ bool CUICellContainer::AddSimilar(CUICellItem* itm)
 
     //Alundaio: Don't stack equipped items
     PIItem iitem = (PIItem)itm->m_pData;
-    if (iitem && iitem->m_pInventory)
+    if (!itm->data_is_string && iitem && iitem->m_pInventory)
     {
         if (g_inv_highlight_equipped)
             if (iitem->m_pInventory->ItemFromSlot(iitem->BaseSlot()) == iitem)
@@ -674,6 +701,34 @@ bool CUICellContainer::AddSimilar(CUICellItem* itm)
     return true;
 }
 
+void CUICellContainer::ResetAllSelected()
+{
+    for (auto& it : m_ChildWndList)
+    {
+        auto i = (CUICellItem*)it;
+        i->m_select_armament = false;
+    }
+}
+void CUICellContainer::IterItems(std::function<void(CUICellItem*)> functor)
+{
+    for (auto& it : m_ChildWndList)
+    {
+        auto i = (CUICellItem*)it;
+        functor(i);
+    }
+}
+CUICellItem* CUICellContainer::FindByKey(shared_str sect)
+{
+    for (auto& it : m_ChildWndList)
+    {
+        auto i = (CUICellItem*)it;
+        if (i->data_is_string && xr_strcmp(i->m_section_id.c_str(), sect.c_str()) == 0)
+            return i;
+    }
+
+    return nullptr;
+}
+
 CUICellItem* CUICellContainer::FindSimilar(CUICellItem* itm)
 {
     for (auto& it : m_ChildWndList)
@@ -683,9 +738,15 @@ CUICellItem* CUICellContainer::FindSimilar(CUICellItem* itm)
 #else
         auto i = (CUICellItem*)it;
 #endif
+        if (itm->data_is_string && i->data_is_string)
+        {
+            if (xr_strcmp(itm->m_section_id.c_str(), i->m_section_id.c_str()) == 0)
+                return i;
+        }
+
         //Alundaio: Don't stack equipped items
         PIItem iitem = (PIItem)i->m_pData;
-        if (iitem && iitem->m_pInventory)
+        if (!i->data_is_string && iitem && iitem->m_pInventory)
         {
             if (g_inv_highlight_equipped)
                 if (iitem->m_pInventory->ItemFromSlot(iitem->BaseSlot()) == iitem)

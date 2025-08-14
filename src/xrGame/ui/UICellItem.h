@@ -91,6 +91,9 @@ public:
     bool m_select_equipped{};
     bool m_cur_mark;
     bool m_has_upgrade;
+
+    bool data_is_string{false};
+    shared_str m_section_id;
 };
 
 class CUIDragItem final : public CUIWindow, public pureRender, public pureFrame

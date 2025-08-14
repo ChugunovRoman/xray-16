@@ -269,5 +269,6 @@ public:
 extern XRCORE_API CInifile const* pSettings;
 extern XRCORE_API CInifile const* pSettingsAuth;
 extern XRCORE_API CInifile const* pSettingsOpenXRay;
+extern XRCORE_API CInifile const* pSettingsFE;
 
 #endif //__XR_INI_H__

@@ -3148,6 +3148,7 @@
     <ClCompile Include="ui\UICDkey.cpp" />
     <ClCompile Include="ui\UICellCustomItems.cpp" />
     <ClCompile Include="ui\UICellItem.cpp" />
+    <ClCompile Include="ui\UICellItem_script.cpp" />
     <ClCompile Include="ui\UICellItemFactory.cpp" />
     <ClCompile Include="ui\UIChangeMap.cpp" />
     <ClCompile Include="ui\ChangeWeatherDialog.cpp" />
@@ -3160,6 +3161,7 @@
     <ClCompile Include="ui\UIDemoPlayControl.cpp" />
     <ClCompile Include="ui\UIDialogWnd.cpp" />
     <ClCompile Include="ui\UIDragDropListEx.cpp" />
+    <ClCompile Include="ui\UIDragDropListEx_script.cpp" />
     <ClCompile Include="ui\UIDragDropReferenceList.cpp" />
     <ClCompile Include="ui\UIEditKeyBind.cpp" />
     <ClCompile Include="ui\UIFactionWarWnd.cpp" />

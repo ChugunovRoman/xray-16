@@ -19,6 +19,7 @@ class CUIInventoryCellItem : public CUICellItem
 
 public:
     CUIInventoryCellItem(CInventoryItem* itm);
+    CUIInventoryCellItem(shared_str section_id);
 
     virtual bool EqualTo(CUICellItem* itm);
     virtual void UpdateItemText();
@@ -28,6 +29,7 @@ public:
     bool IsHelperOrHasHelperChild();
     void Update();
     void UpdateIcon();
+    shared_str GetIconPath(shared_str section_id);
     CInventoryItem* object() { return (CInventoryItem*)m_pData; }
 
     //Alundaio

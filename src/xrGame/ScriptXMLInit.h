@@ -29,6 +29,8 @@ class CUIListWnd;
 class CUIListBox;
 class CUIProgressBar;
 class UIHint;
+class CUIDragDropListEx;
+class CUICellItem;
 
 class CScriptXmlInit
 {
@@ -64,6 +66,8 @@ public:
     CUIListWnd* InitListWnd(pcstr path, CUIWindow* parent);
     CUIListBox* InitListBox(LPCSTR path, CUIWindow* parent);
     CUIProgressBar* InitProgressBar(LPCSTR path, CUIWindow* parent);
+    CUIDragDropListEx* InitDragDropListEx(LPCSTR path, CUIWindow* parent);
+    CUICellItem* InitUICellItem(LPCSTR path, CUIWindow* parent);
 
 	CUIXml&	GetXml() { return m_xml; }
 

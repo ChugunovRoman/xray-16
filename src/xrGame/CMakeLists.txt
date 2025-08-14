@@ -2188,6 +2188,7 @@ target_sources(xrGame PRIVATE
     ui/UICellCustomItems.cpp
     ui/UICellCustomItems.h
     ui/UICellItem.cpp
+    ui/UICellItem_script.cpp
     ui/UICellItemFactory.cpp
     ui/UICellItemFactory.h
     ui/UICellItem.h
@@ -2207,6 +2208,7 @@ target_sources(xrGame PRIVATE
     ui/UIDialogWnd.h
     ui/UIDiaryWnd.h
     ui/UIDragDropListEx.cpp
+    ui/UIDragDropListEx_script.cpp
     ui/UIDragDropListEx.h
     ui/UIDragDropReferenceList.cpp
     ui/UIDragDropReferenceList.h

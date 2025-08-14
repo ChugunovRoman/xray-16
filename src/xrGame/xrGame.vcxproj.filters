@@ -9112,10 +9112,16 @@
     <ClCompile Include="ui\UICellItem.cpp">
       <Filter>UI\UIWindows\DragDrop</Filter>
     </ClCompile>
+    <ClCompile Include="ui\UICellItem_script.cpp">
+      <Filter>UI\UIWindows\DragDrop</Filter>
+    </ClCompile>
     <ClCompile Include="ui\UICellItemFactory.cpp">
       <Filter>UI\UIWindows\DragDrop</Filter>
     </ClCompile>
     <ClCompile Include="ui\UIDragDropListEx.cpp">
+      <Filter>UI\UIWindows\DragDrop</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\UIDragDropListEx_script.cpp">
       <Filter>UI\UIWindows\DragDrop</Filter>
     </ClCompile>
     <ClCompile Include="ui\UIDragDropReferenceList.cpp">

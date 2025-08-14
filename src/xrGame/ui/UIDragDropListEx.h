@@ -2,6 +2,8 @@
 
 #include "xrUICore/Windows/UIWindow.h"
 #include "xrUICore/Callbacks/UIWndCallback.h"
+#include "xrScriptEngine/script_engine.hpp"
+#include "xrScriptEngine/script_callback_ex.h"
 
 class CUICellContainer;
 class CUIScrollBar;
@@ -96,6 +98,17 @@ public:
     DRAG_CELL_EVENT m_f_item_focused_update;
     DRAG_ITEM_EVENT m_f_drag_event;
 
+    CScriptCallbackEx<void> m_f_item_drop_lua;
+    CScriptCallbackEx<void> m_f_item_start_drag_lua;
+    CScriptCallbackEx<void> m_f_item_db_click_lua;
+    CScriptCallbackEx<void> m_f_item_selected_lua;
+    CScriptCallbackEx<void> m_f_item_lbutton_click_lua;
+    CScriptCallbackEx<void> m_f_item_rbutton_click_lua;
+    CScriptCallbackEx<void> m_f_item_focus_received_lua;
+    CScriptCallbackEx<void> m_f_item_focus_lost_lua;
+    CScriptCallbackEx<void> m_f_item_focused_update_lua;
+    CScriptCallbackEx<void> m_f_drag_event_lua;
+
     u32 back_color;
 
     const Ivector2& CellsCapacity();
@@ -183,7 +196,11 @@ public:
     u32 ItemsCount();
     CUICellItem* GetItemIdx(u32 idx);
     virtual CUICellItem* RemoveItem(CUICellItem* itm, bool force_root);
+    virtual CUICellItem* FindByKey(shared_str sect);
+    virtual void IterItems(std::function<void(CUICellItem*)> functor);
+    virtual void ResetAllSelected();
     void CreateDragItem(CUICellItem* itm);
+    CUICellItem* GetSelectedItem() { return m_selected_item; }
 
     void DestroyDragItem();
     void ClearAll(bool bDestroy);
@@ -258,6 +275,9 @@ protected:
 
     bool AddSimilar(CUICellItem* itm);
     CUICellItem* FindSimilar(CUICellItem* itm);
+    CUICellItem* FindByKey(shared_str sect);
+    void IterItems(std::function<void(CUICellItem*)> functor);
+    void ResetAllSelected();
 
     void PlaceItemAtPos(CUICellItem* itm, Ivector2& cell_pos);
     CUICellItem* RemoveItem(CUICellItem* itm, bool force_root);

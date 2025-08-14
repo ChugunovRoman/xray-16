@@ -125,6 +125,9 @@ void CUICellItem::Update()
             GetMessageTarget()->SendMessage(this, DRAG_DROP_ITEM_FOCUSED_UPDATE, NULL);
     }
 
+    if (data_is_string)
+        return;
+
     PIItem item = static_cast<PIItem>(m_pData);
     m_has_upgrade = item ? item->has_any_upgrades() : false;
     if (m_upgrade)
@@ -151,9 +154,11 @@ void CUICellItem::Update()
     if (item->BaseSlot() == OUTFIT_SLOT)
     {
         CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(item);
-        string512 fullpath;
-        xr_sprintf(fullpath, "ui_icon_equipment\\items\\patches\\%s_patch", *outfit->m_faction);
-        m_faction->SetShader(InventoryUtilities::GetEquipmentIconShader(fullpath));
+        pcstr icon = pSettingsFE->read_if_exists<pcstr>(*outfit->m_faction, "icon", make_string("icons\\patches\\%s", *outfit->m_faction).c_str());
+        std::string iconPath{icon};
+        if (strstr(iconPath.c_str(), "ui\\"))
+            iconPath.erase(0, 3);
+        m_faction->SetShader(InventoryUtilities::GetEquipmentIconShader(iconPath.c_str()));
         
         Fvector2 pos;
         pos.set(m_faction_pos);
@@ -256,6 +261,12 @@ void CUICellItem::UpdateConditionProgressBar()
 {
     if (!m_pConditionState)
         return;
+
+    if (data_is_string)
+    {
+        m_pConditionState->Show(false);
+        return;
+    }
 
     if (m_pParentList && m_pParentList->GetConditionProgBarVisibility())
     {

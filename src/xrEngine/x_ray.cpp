@@ -128,6 +128,7 @@ void InitSettings()
     InitConfig(pSettings, "system.ltx");
     InitConfig(pSettingsAuth, "system.ltx", true, true, true, false, 0, includeFilter);
     InitConfig(pSettingsOpenXRay, "openxray.ltx", false, true, true, false);
+    InitConfig(pSettingsFE, "faction_editor_config.ltx", true, true, true, false);
     InitConfig(pGameIni, "game.ltx");
 
     if (strstr(Core.Params, "-shoc") || strstr(Core.Params, "-soc"))
