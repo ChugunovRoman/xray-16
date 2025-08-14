@@ -153,6 +153,8 @@ void InitSettings()
 
     if (strstr(Core.Params, "-uidbg"))
         UiDebuggerEnabled = true;
+
+    Dbg.InitSectionLists();
 }
 
 void InitConsole()

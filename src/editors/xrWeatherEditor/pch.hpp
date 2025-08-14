@@ -25,6 +25,7 @@ typedef unsigned int u32;
 #pragma managed(pop)
 
 #include "xrCore/xrCore.h"
+#include "xrCore/xrDbg.h"
 #include "xrEngine/Engine.h"
 #include "xrEngine/device.h"
 #include "xrSound/Sound.h"

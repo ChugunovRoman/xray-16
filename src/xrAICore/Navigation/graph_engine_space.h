@@ -9,6 +9,7 @@
 #pragma once
 
 #include "xrCore/xrCore.h"
+#include "xrCore/xrDbg.h"
 
 template <typename _condition_type, typename _value_type>
 class COperatorConditionAbstract;

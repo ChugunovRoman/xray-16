@@ -17,6 +17,7 @@
 #endif
 
 #include "xrCore/xrCore.h"
+#include "xrCore/xrDbg.h"
 #include "xrCore/_std_extensions.h"
 
 #define ECORE_API

@@ -228,6 +228,8 @@ target_sources_grouped(
     xr_shortcut.h
     xrCore.cpp
     xrCore.h
+    xrDbg.cpp
+    xrDbg.h
 )
 
 target_sources_grouped(

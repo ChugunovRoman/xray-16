@@ -524,7 +524,7 @@ AssertionResult xrDebug::Fail(bool& ignoreAlways, const ErrorLocation& loc, cons
         case AssertionResult::abort:
             [[fallthrough]];
         default:
-#ifdef USE_BUG_TRAP
+#ifdef USE_BUG_TRAP 
             BT_SetUserMessage(assertionInfo);
 #endif
             // calling DEBUG_BREAK with no debugger will trigger BugTrap

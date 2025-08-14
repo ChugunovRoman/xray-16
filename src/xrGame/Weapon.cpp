@@ -761,7 +761,7 @@ bool CWeapon::bLoadzCollimatorScopesParams(LPCSTR section)
 
     if (m_eScopeStatus == ALife::eAddonAttachable && m_addons.size() == 0)
     {
-        for (const auto& name : Level().sections_map[ESectionTypeName::scopes])
+        for (const auto& name : Dbg.GetSections(ESectionTypeName::scopes))
         {
             if (pSettings->line_exist(name, "slot_type"))
             {

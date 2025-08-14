@@ -104,6 +104,7 @@ call .GitInfo.cmd</Command>
     <ClCompile Include="XML\tinyxmlparser.cpp" />
     <ClCompile Include="XML\XMLDocument.cpp" />
     <ClCompile Include="xrCore.cpp" />
+    <ClCompile Include="xrDbg.cpp" />
     <ClCompile Include="ModuleLookup.cpp" />
     <ClCompile Include="xrDebug.cpp" />
     <ClCompile Include="xrMemory.cpp" />
@@ -211,6 +212,7 @@ call .GitInfo.cmd</Command>
     <ClInclude Include="XML\tinyxml.h" />
     <ClInclude Include="XML\XMLDocument.hpp" />
     <ClInclude Include="xrCore.h" />
+    <ClInclude Include="xrDbg.h" />
     <ClInclude Include="ModuleLookup.hpp" />
     <ClInclude Include="xrDebug.h" />
     <ClInclude Include="xrDebug_macros.h" />

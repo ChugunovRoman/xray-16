@@ -63,6 +63,7 @@ CScriptIniFile* reload_system_ini()
     string_path fname;
     FS.update_path(fname, "$game_config$", "system.ltx");
     pSettings = xr_new<CInifile>(fname);
+    Dbg.InitSectionLists();
     return (CScriptIniFile*)pSettings;
 }
 

@@ -57,38 +57,6 @@ namespace file_transfer
 class client_site;
 }
 
-enum ESectionTypeName : u32
-{
-    ammo = u32(0),
-    knife,
-    pistol,
-    auto_pistol,
-    shotgun,
-    rifle,
-    sniper_rifle,
-    heavy_rifle,
-    scopes,
-    silencers,
-    launchers,
-    outfit,
-    artefact,
-    item_quest,
-    item_misc,
-    item_consumable,
-    npc,
-    mutant,
-    squad_npc,
-    squad_mutant,
-    vehicle,
-    physic,
-    models,
-    anomaly,
-    phantom,
-    backpack,
-
-    latest,
-};
-
 class CLevel : public IGame_Level, public IPureClient
 {
 public:
@@ -460,9 +428,6 @@ public:
     u8* m_lzo_working_buffer = nullptr;
     void init_compression();
     void deinit_compression();
-
-public:
-    xr_vector<pcstr> sections_map[0xff];
 
 #ifdef DEBUG
     LevelGraphDebugRender* GetLevelGraphDebugRender() const { return levelGraphDebugRender; }

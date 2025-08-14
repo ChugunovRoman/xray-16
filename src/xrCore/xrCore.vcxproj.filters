@@ -129,6 +129,9 @@
     <ClCompile Include="xrCore.cpp">
       <Filter>Kernel</Filter>
     </ClCompile>
+    <ClCompile Include="xrDbg.cpp">
+      <Filter>Kernel</Filter>
+    </ClCompile>
     <ClCompile Include="ModuleLookup.cpp">
       <Filter>Kernel</Filter>
     </ClCompile>
@@ -345,6 +348,9 @@
       <Filter>Kernel</Filter>
     </ClInclude>
     <ClInclude Include="xrCore.h">
+      <Filter>Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="xrDbg.h">
       <Filter>Kernel</Filter>
     </ClInclude>
     <ClInclude Include="ModuleLookup.hpp">

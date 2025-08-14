@@ -622,13 +622,9 @@ luabind::object get_sections(lua_State* L, ESectionTypeName type) {
     luabind::object result = luabind::newtable(L);
     std::size_t index = 1;
 
-    if (!g_actor)
-    return result;
-
-    for (const auto& name : Level().sections_map[type])
-    {
+    for (const auto& name : Dbg.GetSections(type))
         result[index++] = name;
-    }
+
     return result;
 }
 
@@ -968,20 +964,25 @@ IC static void CLevel_Export(lua_State* luaState)
             value("sctypLaunchers", int(ESectionTypeName::launchers)),
             value("sctypKnife", int(ESectionTypeName::knife)),
             value("sctypPistol", int(ESectionTypeName::pistol)),
-            value("sctypAuto_pistol", int(ESectionTypeName::auto_pistol)),
+            value("sctypAutoPistol", int(ESectionTypeName::auto_pistol)),
             value("sctypShotgun", int(ESectionTypeName::shotgun)),
             value("sctypRifle", int(ESectionTypeName::rifle)),
-            value("sctypSniper_rifle", int(ESectionTypeName::sniper_rifle)),
-            value("sctypHeavy_rifle", int(ESectionTypeName::heavy_rifle)),
+            value("sctypSniperRifle", int(ESectionTypeName::sniper_rifle)),
+            value("sctypHeavyRifle", int(ESectionTypeName::heavy_rifle)),
+            value("sctypExplosive", int(ESectionTypeName::explosive)),
             value("sctypOutfit", int(ESectionTypeName::outfit)),
             value("sctypArtefact", int(ESectionTypeName::artefact)),
-            value("sctypItem_quest", int(ESectionTypeName::item_quest)),
-            value("sctypItem_misc", int(ESectionTypeName::item_misc)),
-            value("sctypItem_consumable", int(ESectionTypeName::item_consumable)),
+            value("sctypItemQuest", int(ESectionTypeName::item_quest)),
+            value("sctypItemMisc", int(ESectionTypeName::item_misc)),
+            value("sctypItemConsumable", int(ESectionTypeName::item_consumable)),
+            value("sctypItemMedical", int(ESectionTypeName::item_medical)),
+            value("sctypItemFood", int(ESectionTypeName::item_food)),
+            value("sctypItemMisc", int(ESectionTypeName::item_misc)),
+            value("sctypItemQuest", int(ESectionTypeName::item_quest)),
             value("sctypNpc", int(ESectionTypeName::npc)),
             value("sctypMutant", int(ESectionTypeName::mutant)),
-            value("sctypSquad_npc", int(ESectionTypeName::squad_npc)),
-            value("sctypSquad_mutant", int(ESectionTypeName::squad_mutant)),
+            value("sctypSquadNpc", int(ESectionTypeName::squad_npc)),
+            value("sctypSquadMutant", int(ESectionTypeName::squad_mutant)),
             value("sctypVehicle", int(ESectionTypeName::vehicle)),
             value("sctypPhysic", int(ESectionTypeName::physic)),
             value("sctypModels", int(ESectionTypeName::models)),
