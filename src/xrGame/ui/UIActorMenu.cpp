@@ -490,7 +490,8 @@ void CUIActorMenu::QuickUnloadWeapons()
 
         if (m_wpn->bUseAttachmentSystem && m_wpn->m_addon_items.size() > 0)
             for (auto [addon_id, addon]: m_wpn->m_addon_items)
-                DetachAddon(addon_id, item);
+                if (!pSettings->line_exist(*m_wpn->m_section_id, *addon->slot))
+                    DetachAddon(addon_id, item);
 
         any_wpn_was_unloaded = true;
     }
