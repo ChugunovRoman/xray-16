@@ -13,6 +13,7 @@ SCRIPT_EXPORT(CUICellItem, (CUIStatic),
     [
         class_<CUICellItem, CUIStatic>("CUICellItem")
             .def(constructor<>())
+            .def_readwrite("prop", &CUICellItem::m_fSpawnProp)
     ];
 });
 // clang-format on

@@ -94,6 +94,7 @@ public:
 
     bool data_is_string{false};
     shared_str m_section_id;
+    float m_fSpawnProp;
 };
 
 class CUIDragItem final : public CUIWindow, public pureRender, public pureFrame
