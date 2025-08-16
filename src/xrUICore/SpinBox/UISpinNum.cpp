@@ -76,6 +76,11 @@ void CUISpinNum::SetValue(int v)
     string16 buff;
     m_pLines->SetText(xr_itoa(v, buff, 10));
 }
+void CUISpinNum::SetInitValue(int v)
+{
+    m_iVal = v;
+    SetValue(v);
+}
 
 bool CUISpinNum::CanPressUp() { return m_iVal + m_iStep <= m_iMax; }
 bool CUISpinNum::CanPressDown() { return m_iVal - m_iStep >= m_iMin; }

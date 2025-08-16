@@ -285,7 +285,7 @@ bool CUIXmlInitBase::InitSpinNum(CUIXml& xml_doc, pcstr path, int index, CUISpin
     pWnd->SetMin(xml_doc.ReadAttribInt(path, index, "min_value", 0));
     pWnd->SetMax(xml_doc.ReadAttribInt(path, index, "max_value", 100));
     pWnd->SetStep(xml_doc.ReadAttribInt(path, index, "step", 1));
-    pWnd->SetValue(xml_doc.ReadAttribInt(path, index, "init_value", 1));
+    pWnd->SetInitValue(xml_doc.ReadAttribInt(path, index, "init_value", 1));
 
     return true;
 }

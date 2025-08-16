@@ -23,6 +23,7 @@ public:
     void SetMin(int min) { m_iMin = min; };
     void SetStep(int step) { m_iStep = step; };
     int Value() const { return m_iVal; }
+    void SetInitValue(int v);
     void SetValue(int v);
 
     pcstr GetDebugType() override { return "CUISpinNum"; }
