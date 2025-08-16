@@ -58,7 +58,6 @@ public:
 	Fvector calc_second_aim_rot{};
 	IKinematics* addon_item_model;
 	IKinematics* addon_item_model_dot;
-	BOOL is_dot_offset_calculated;
 	BOOL is_dot_pos_initialized{false};
 	BOOL has_second_aim_offset{false};
 	BOOL has_aim_offset{false};

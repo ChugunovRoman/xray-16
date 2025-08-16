@@ -4060,7 +4060,7 @@ void CWeapon::calc_aim_addon_offset()
         }
 
         bone_id = item->addon_item_model->LL_BoneID(DOT);
-        if (bone_id != BI_NONE && !item->is_dot_offset_calculated)
+        if (bone_id != BI_NONE)
         {
             float depth = 5.0f;
             Fmatrix bone_dot_world;
@@ -4091,7 +4091,6 @@ void CWeapon::calc_aim_addon_offset()
                 -0.2f
             );
             item->has_second_aim_offset = true;
-            item->is_dot_offset_calculated = true;
         }
 
         if (item->has_second_aim_offset && !latest_was_inited)
