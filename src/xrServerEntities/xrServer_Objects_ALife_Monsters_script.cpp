@@ -14,6 +14,9 @@
 #include "xrServer_script_macroses.h"
 
 #include "xrScriptEngine/ScriptExporter.hpp"
+#include "xrGame/ui/UIInventoryUtilities.h"
+
+using namespace InventoryUtilities;
 
 #ifdef XRGAME_EXPORTS
 SCRIPT_EXPORT(CSE_ALifeTraderAbstract, (),
@@ -31,6 +34,10 @@ SCRIPT_EXPORT(CSE_ALifeTraderAbstract, (),
             .def("character_name", +[](CSE_ALifeTraderAbstract* ta) { return ta->m_character_name.c_str(); })
             .def("set_character_name", +[](CSE_ALifeTraderAbstract* ta, const pcstr str) { ta->m_character_name = str; })
             .def("rank", &CSE_ALifeTraderAbstract::Rank)
+            .def("rank_as_text", +[](CSE_ALifeTraderAbstract* ta) -> pcstr
+            {
+                return GetRankAsTextId(ta->Rank());
+            })
             .def("set_rank", &CSE_ALifeTraderAbstract::SetRank)
             .def("reputation", &CSE_ALifeTraderAbstract::Reputation)
             .def("character_icon", +[](CSE_ALifeTraderAbstract* ta)

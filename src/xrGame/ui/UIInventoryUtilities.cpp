@@ -21,6 +21,7 @@
 #define MP_CHAR_ICONS "ui" DELIMITER "ui_models_multiplayer"
 
 const LPCSTR relationsLtxSection = "game_relations";
+const LPCSTR ratings = "rating";
 const LPCSTR ratingField = "rating_names";
 const LPCSTR reputationgField = "reputation_names";
 const LPCSTR goodwillField = "goodwill_names";
@@ -41,6 +42,7 @@ typedef std::pair<CHARACTER_RANK_VALUE, shared_str> CharInfoStringID;
 using CharInfoStrings = xr_map<CHARACTER_RANK_VALUE, shared_str>;
 
 CharInfoStrings* charInfoReputationStrings = NULL;
+CharInfoStrings* charInfoRankIds = NULL;
 CharInfoStrings* charInfoRankStrings = NULL;
 CharInfoStrings* charInfoGoodwillStrings = NULL;
 
@@ -440,6 +442,14 @@ void InitCharacterInfoStrings()
         LoadStrings(charInfoRankStrings, relationsLtxSection, ratingField);
     }
 
+    if (!charInfoRankIds)
+    {
+        // Create string->Id DB
+        charInfoRankIds = xr_new<CharInfoStrings>();
+        // Ranks
+        LoadStrings(charInfoRankIds, relationsLtxSection, ratings);
+    }
+
     if (!charInfoGoodwillStrings)
     {
         // Create string->Id DB
@@ -455,6 +465,7 @@ void InventoryUtilities::ClearCharacterInfoStrings()
 {
     xr_delete(charInfoReputationStrings);
     xr_delete(charInfoRankStrings);
+    xr_delete(charInfoRankIds);
     xr_delete(charInfoGoodwillStrings);
 }
 
@@ -466,6 +477,16 @@ LPCSTR InventoryUtilities::GetRankAsText(CHARACTER_RANK_VALUE rankID)
     CharInfoStrings::const_iterator cit = charInfoRankStrings->upper_bound(rankID);
     if (charInfoRankStrings->end() == cit)
         return charInfoRankStrings->rbegin()->second.c_str();
+    return cit->second.c_str();
+}
+
+
+LPCSTR InventoryUtilities::GetRankAsTextId(CHARACTER_RANK_VALUE rankID)
+{
+    InitCharacterInfoStrings();
+    CharInfoStrings::const_iterator cit = charInfoRankIds->upper_bound(rankID);
+    if (charInfoRankIds->end() == cit)
+        return charInfoRankIds->rbegin()->second.c_str();
     return cit->second.c_str();
 }
 

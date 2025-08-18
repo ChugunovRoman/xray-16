@@ -75,6 +75,7 @@ void UpdateWeightStr(CUIStatic& wnd, CUIStatic& wnd_max, CInventoryOwner* pInvOw
 
 // Функции получения строки-идентификатора ранга и отношения по их числовому идентификатору
 LPCSTR GetRankAsText(CHARACTER_RANK_VALUE rankID);
+LPCSTR GetRankAsTextId(CHARACTER_RANK_VALUE rankID);
 LPCSTR GetReputationAsText(CHARACTER_REPUTATION_VALUE rankID);
 LPCSTR GetGoodwillAsText(CHARACTER_GOODWILL goodwill);
 

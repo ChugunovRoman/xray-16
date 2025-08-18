@@ -36,6 +36,9 @@
 #include "Artefact.h"
 #include "level_changer.h"
 #include "CustomOutfit.h"
+#include "ui/UIInventoryUtilities.h"
+
+using namespace InventoryUtilities;
 
 /*
     New luabind makes incorrect casts in this case. He makes casts only to 'true derived class'.
@@ -309,6 +312,18 @@ luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_
         .def("character_icon", &CScriptGameObject::CharacterIcon)
         .def("character_rank", &CScriptGameObject::CharacterRank)
         .def("set_character_rank", &CScriptGameObject::SetCharacterRank)
+        .def("rank_as_text", +[](const CScriptGameObject* self) -> pcstr
+        {
+            CInventoryOwner* pInventoryOwner = smart_cast<CInventoryOwner*>(&self->object());
+
+            if (!pInventoryOwner)
+            {
+                GEnv.ScriptEngine->script_log(LuaMessageType::Error, "rank_as_text available only for InventoryOwner");
+                return nullptr;
+            }
+
+            return GetRankAsTextId(pInventoryOwner->Rank());
+        })
         .def("change_character_rank", &CScriptGameObject::ChangeCharacterRank)
         .def("character_reputation", &CScriptGameObject::CharacterReputation)
         .def("set_character_reputation", &CScriptGameObject::SetCharacterReputation)
