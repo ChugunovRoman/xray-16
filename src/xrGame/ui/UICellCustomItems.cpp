@@ -66,12 +66,23 @@ CUIInventoryCellItem::CUIInventoryCellItem(CInventoryItem* itm)
 CUIInventoryCellItem::CUIInventoryCellItem(shared_str section_id)
 {
     data_is_string = true;
-    m_section_id = section_id;
+    m_section_attachs_id = section_id;
+    
+    if (strstr(*section_id, "|"))
+    {
+        int len = (int)strcspn(*section_id, "|");
+        char* result = new char[len + 1];
+        strncpy(result, *section_id, len);
+        result[len] = '\0';
+        m_section_id = result;
+    }
+    else
+        m_section_id = section_id;
 
     R_ASSERT2(pSettings->line_exist(*m_section_id, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", *m_section_id));
 
     pcstr iconPath = pSettings->r_string(*m_section_id, "inv_icon");
-    inherited::SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(section_id).c_str()));
+    inherited::SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(m_section_id).c_str()));
 
     u32 x, y, w, h;
 

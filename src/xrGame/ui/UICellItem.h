@@ -94,6 +94,7 @@ public:
 
     bool data_is_string{false};
     shared_str m_section_id;
+    shared_str m_section_attachs_id;
     float m_fSpawnProp;
 };
 
