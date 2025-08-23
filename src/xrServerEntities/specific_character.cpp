@@ -171,6 +171,9 @@ void CSpecificCharacter::load_shared(LPCSTR)
     if (data()->m_Community.index() == NO_COMMUNITY_INDEX)
         xrDebug::Fatal(DEBUG_INFO, "wrong 'community' '%s' in specific character %s ", team, *m_OwnId);
 
+    if (pSettingsFE->line_exist(team, "snd_config"))
+        data()->m_sound_voice_prefix = pSettingsFE->r_string(team, "snd_config");
+
     data()->m_Rank = pXML->ReadInt("rank", 0, NO_RANK);
     R_ASSERT3(data()->m_Rank != NO_RANK, "'rank' field not fulfiled for specific character", *m_OwnId);
     data()->m_Reputation = pXML->ReadInt("reputation", 0, NO_REPUTATION);
