@@ -209,6 +209,17 @@ void CSpecificCharacter::load_shared(LPCSTR)
         _GetItem(visuals, ::Random.randI(0, _GetItemCount(visuals)), visual_item);
         data()->m_sVisual = visual_item;
     }
+    if (pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "min_money"))
+        MoneyDef().min_money = pSettingsFE->r_u32(full_section_id.c_str(), "min_money");
+    if (pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "max_money"))
+        MoneyDef().max_money = pSettingsFE->r_u32(full_section_id.c_str(), "max_money");
+    if (pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "reputation"))
+        data()->m_Reputation = pSettingsFE->r_u32(full_section_id.c_str(), "reputation");
+
+    MoneyDef().max_money = _max(MoneyDef().max_money, MoneyDef().min_money);
+
+    if (pSettingsFE->section_exist(team) && pSettingsFE->line_exist(team, "names"))
+        data()->m_sGameName = pSettingsFE->r_string(team, "names");
 
 #endif
 
