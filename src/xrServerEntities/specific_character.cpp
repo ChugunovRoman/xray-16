@@ -1,6 +1,9 @@
 #include "StdAfx.h"
 #include "specific_character.h"
 #include "xrGame/Checker.h"
+#include "xrGame/ui/UIInventoryUtilities.h"
+
+using namespace InventoryUtilities;
 
 extern Checker g_checker;
 
@@ -192,6 +195,19 @@ void CSpecificCharacter::load_shared(LPCSTR)
         MoneyDef().min_money = 0;
         MoneyDef().max_money = 0;
         MoneyDef().inf_money = false;
+    }
+
+    xr_string full_section_id = team;
+    xr_string rank_name = GetRankAsTextId(data()->m_Rank);
+    full_section_id.append("_");
+    full_section_id.append(rank_name);
+    _Trim(full_section_id);
+    if (pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "visuals"))
+    {
+        LPCSTR visuals = pSettingsFE->r_string(full_section_id.c_str(), "visuals");
+        string128 visual_item;
+        _GetItem(visuals, ::Random.randI(0, _GetItemCount(visuals)), visual_item);
+        data()->m_sVisual = visual_item;
     }
 
 #endif
