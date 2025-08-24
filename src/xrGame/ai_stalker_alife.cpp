@@ -545,6 +545,8 @@ void CAI_Stalker::on_after_take(const CGameObject* object)
     if (xr_strcmp(object->cNameSect().c_str(), latest_addon_name) == 0)
         return;
 
+    latest_addon_name = object->cNameSect().c_str();
+
     const CSilencer* pSilencer = smart_cast<const CSilencer*>(object);
     if (pSilencer)
         on_after_take_silencer(pSilencer);
