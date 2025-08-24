@@ -14,6 +14,8 @@ SCRIPT_EXPORT(CUICellItem, (CUIStatic),
         class_<CUICellItem, CUIStatic>("CUICellItem")
             .def(constructor<>())
             .def_readwrite("prop", &CUICellItem::m_fSpawnProp)
+            .def_readwrite("points", &CUICellItem::m_iPoints)
+            .def_readwrite("allow", &CUICellItem::m_bAllow)
     ];
 });
 // clang-format on
