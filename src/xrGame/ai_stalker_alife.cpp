@@ -26,6 +26,8 @@
 
 extern u32 get_rank(const shared_str& section);
 
+pcstr latest_addon_name = "";
+
 namespace detail::stalker
 {
 static constexpr int MAX_AMMO_ATTACH_COUNT = 1;
@@ -492,7 +494,7 @@ void CAI_Stalker::on_after_take_scope(const CScope* pScope)
         {
             const bool result = wpn1->DeterminateParentSlotForAddon(item, wpn1, true);
             if (!result)
-            return;
+                return;
         }
         wpn1->Attach(item, true);
         inventory().Slot(INV_SLOT_2, wpn1);
@@ -538,6 +540,9 @@ void CAI_Stalker::on_after_take_gl(const CGrenadeLauncher* pGrenadeLauncher)
 void CAI_Stalker::on_after_take(const CGameObject* object)
 {
     if (!g_Alive())
+        return;
+
+    if (xr_strcmp(object->cNameSect().c_str(), latest_addon_name) == 0)
         return;
 
     const CSilencer* pSilencer = smart_cast<const CSilencer*>(object);
