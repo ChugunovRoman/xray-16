@@ -96,8 +96,6 @@ public:
     shared_str m_section_id;
     shared_str m_section_attachs_id;
     float m_fSpawnProp;
-    int m_iPoints;
-    bool m_bAllow;
 };
 
 class CUIDragItem final : public CUIWindow, public pureRender, public pureFrame
