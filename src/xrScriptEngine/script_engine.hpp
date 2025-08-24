@@ -184,7 +184,7 @@ public:
             m_output.w("\r\n", sizeof("\r\n"));
         // }
 
-        if (message == LuaMessageType::Error && !logReenterability)
+        if (strstr(Core.Params, "-prtStk") && message == LuaMessageType::Error && !logReenterability)
         {
             logReenterability = true;
             print_stack();
