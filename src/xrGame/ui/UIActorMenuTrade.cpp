@@ -457,12 +457,13 @@ void CUIActorMenu::OnBtnPerformTrade(CUIWindow* w, void* d)
     int partner_money = (int)m_pPartnerInvOwner->get_money();
     int actor_price = (int)CalcItemsPrice(m_pLists[eTradeActorList], m_partner_trade, true);
     int partner_price = (int)CalcItemsPrice(m_pLists[eTradePartnerList], m_partner_trade, false);
+    bool inf_partner_money = m_pPartnerInvOwner->InfinitiveMoney();
 
     int delta_price = actor_price - partner_price;
     actor_money += delta_price;
     partner_money -= delta_price;
 
-    if ((actor_money >= 0) && (partner_money >= 0) && (actor_price >= 0 || partner_price > 0))
+    if ((actor_money >= 0) && (partner_money >= 0 || inf_partner_money) && (actor_price >= 0 || partner_price > 0))
     {
         m_partner_trade->OnPerformTrade(partner_price, actor_price);
 
@@ -542,12 +543,13 @@ void CUIActorMenu::OnBtnPerformTradeSell(CUIWindow* w, void* d)
     int partner_money = (int)m_pPartnerInvOwner->get_money();
     int actor_price = (int)CalcItemsPrice(m_pLists[eTradeActorList], m_partner_trade, true);
     int partner_price = 0; //(int)CalcItemsPrice( m_pLists[eTradePartnerList], m_partner_trade, false );
+    bool inf_partner_money = m_pPartnerInvOwner->InfinitiveMoney();
 
     int delta_price = actor_price - partner_price;
     actor_money += delta_price;
     partner_money -= delta_price;
 
-    if ((actor_money >= 0) && (partner_money >= 0) && (actor_price >= 0 || partner_price > 0))
+    if ((actor_money >= 0) && (partner_money >= 0 || inf_partner_money) && (actor_price >= 0 || partner_price > 0))
     {
         m_partner_trade->OnPerformTrade(partner_price, actor_price);
 
