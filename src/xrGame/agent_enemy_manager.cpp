@@ -78,6 +78,8 @@ void CAgentEnemyManager::fill_enemies()
         CAgentMemberManager::iterator E = object().member().combat_members().end();
         for (; I != E; ++I)
         {
+            if (*I == nullptr || &(*I)->object() == nullptr)
+                continue;
             (*I)->probability(1.f);
             (*I)->object().memory().fill_enemies(CEnemyFiller(&m_enemies, object().member().mask(&(*I)->object())));
         }
