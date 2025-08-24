@@ -18,7 +18,7 @@ IC CScriptValueWrapperImpl<T>::CScriptValueWrapperImpl(luabind::object object, L
 template <typename T>
 IC void CScriptValueWrapperImpl<T>::assign()
 {
-    m_object[*m_name] = m_value;
+    m_object[m_name.c_str()] = m_value;
 }
 
 template <typename T>

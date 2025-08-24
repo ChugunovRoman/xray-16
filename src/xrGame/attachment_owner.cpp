@@ -36,7 +36,7 @@ void CAttachmentOwner::net_Destroy()
 #ifdef DEBUG
     if (!attached_objects().empty())
     {
-        Msg("Object %s has attached items :", *smart_cast<CGameObject*>(this)->cName());
+        Msg("Object %s has attached items :", smart_cast<CGameObject*>(this)->cName().c_str());
         //		xr_vector<CAttachableItem*>::const_iterator	I = attached_objects().begin();
         //		xr_vector<CAttachableItem*>::const_iterator	E = attached_objects().end();
         //		for ( ; I != E; ++I)

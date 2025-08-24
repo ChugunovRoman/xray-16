@@ -268,8 +268,8 @@ void CWeaponKnife::MakeShot(Fvector const& pos, Fvector const& dir, float const 
     cartridge.param_s.impair = 1.0f;
     cartridge.param_s.kDisp = 1.0f;
     cartridge.param_s.kHit = k_hit;
-    //.	cartridge.param_s.kCritical		= 1.0f;
     cartridge.param_s.kImpulse = 1.0f;
+    cartridge.param_s.kPierce = 1.0f;
     cartridge.param_s.kAP = EPS_L;
     cartridge.m_flags.set(CCartridge::cfTracer, FALSE);
     cartridge.m_flags.set(CCartridge::cfRicochet, FALSE);
@@ -461,47 +461,47 @@ void CWeaponKnife::LoadFireParams(LPCSTR section)
     s_sHitPowerCritical_2 = READ_IF_EXISTS(pSettings, r_string_wb, section, "hit_power_critical_2", s_sHitPower_2);
 
     fvHitPower_2[egdMaster] =
-        (float)atof(_GetItem(*s_sHitPower_2, 0, buffer)); //первый параметр - это хит для уровня игры мастер
+        (float)atof(_GetItem(s_sHitPower_2.c_str(), 0, buffer)); //первый параметр - это хит для уровня игры мастер
     fvHitPowerCritical_2[egdMaster] =
-        (float)atof(_GetItem(*s_sHitPowerCritical_2, 0, buffer)); //первый параметр - это хит для уровня игры мастер
+        (float)atof(_GetItem(s_sHitPowerCritical_2.c_str(), 0, buffer)); //первый параметр - это хит для уровня игры мастер
 
     fvHitPower_2[egdNovice] = fvHitPower_2[egdStalker] = fvHitPower_2[egdVeteran] =
         fvHitPower_2[egdMaster]; //изначально параметры для других уровней сложности такие же
     fvHitPowerCritical_2[egdNovice] = fvHitPowerCritical_2[egdStalker] = fvHitPowerCritical_2[egdVeteran] =
         fvHitPowerCritical_2[egdMaster]; //изначально параметры для других уровней сложности такие же
 
-    int num_game_diff_param = _GetItemCount(*s_sHitPower_2); //узнаём колличество параметров для хитов
+    int num_game_diff_param = _GetItemCount(s_sHitPower_2.c_str()); //узнаём количество параметров для хитов
     if (num_game_diff_param > 1) //если задан второй параметр хита
     {
         fvHitPower_2[egdVeteran] =
-            (float)atof(_GetItem(*s_sHitPower_2, 1, buffer)); //то вычитываем его для уровня ветерана
+            (float)atof(_GetItem(s_sHitPower_2.c_str(), 1, buffer)); //то вычитываем его для уровня ветерана
     }
     if (num_game_diff_param > 2) //если задан третий параметр хита
     {
         fvHitPower_2[egdStalker] =
-            (float)atof(_GetItem(*s_sHitPower_2, 2, buffer)); //то вычитываем его для уровня сталкера
+            (float)atof(_GetItem(s_sHitPower_2.c_str(), 2, buffer)); //то вычитываем его для уровня сталкера
     }
     if (num_game_diff_param > 3) //если задан четвёртый параметр хита
     {
         fvHitPower_2[egdNovice] =
-            (float)atof(_GetItem(*s_sHitPower_2, 3, buffer)); //то вычитываем его для уровня новичка
+            (float)atof(_GetItem(s_sHitPower_2.c_str(), 3, buffer)); //то вычитываем его для уровня новичка
     }
 
-    num_game_diff_param = _GetItemCount(*s_sHitPowerCritical_2); //узнаём колличество параметров
+    num_game_diff_param = _GetItemCount(s_sHitPowerCritical_2.c_str()); //узнаём количество параметров
     if (num_game_diff_param > 1) //если задан второй параметр хита
     {
         fvHitPowerCritical_2[egdVeteran] =
-            (float)atof(_GetItem(*s_sHitPowerCritical_2, 1, buffer)); //то вычитываем его для уровня ветерана
+            (float)atof(_GetItem(s_sHitPowerCritical_2.c_str(), 1, buffer)); //то вычитываем его для уровня ветерана
     }
     if (num_game_diff_param > 2) //если задан третий параметр хита
     {
         fvHitPowerCritical_2[egdStalker] =
-            (float)atof(_GetItem(*s_sHitPowerCritical_2, 2, buffer)); //то вычитываем его для уровня сталкера
+            (float)atof(_GetItem(s_sHitPowerCritical_2.c_str(), 2, buffer)); //то вычитываем его для уровня сталкера
     }
     if (num_game_diff_param > 3) //если задан четвёртый параметр хита
     {
         fvHitPowerCritical_2[egdNovice] =
-            (float)atof(_GetItem(*s_sHitPowerCritical_2, 3, buffer)); //то вычитываем его для уровня новичка
+            (float)atof(_GetItem(s_sHitPowerCritical_2.c_str(), 3, buffer)); //то вычитываем его для уровня новичка
     }
 
     fHitImpulse_2 = pSettings->r_float(section, "hit_impulse_2");

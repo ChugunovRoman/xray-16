@@ -12,44 +12,55 @@ class CControl_ComControlling;
 class CControl_Com
 {
 public:
-    CControl_Com() { m_inited = false; }
-    virtual ~CControl_Com() {}
+    CControl_Com() = default;
+
+    virtual ~CControl_Com() = default;
+
     // common routines
     void init_external(CControl_Manager* cm, CBaseMonster* obj)
     {
         m_man = cm;
         m_object = obj;
     }
-    virtual void load(LPCSTR section) {}
+    virtual void load(pcstr section) {}
+
     virtual void reinit()
     {
         m_active = false;
         m_inited = true;
     }
-    virtual void reload(LPCSTR section) {}
+
+    virtual void reload(pcstr section) {}
+
     // update
     virtual void update_schedule() {}
     virtual void update_frame() {}
+
     virtual CControl_ComControlled* ced() { return 0; }
     virtual CControl_ComControlling* cing() { return 0; }
+
     void set_active(bool val = true)
     {
         m_active = val;
         val ? activate() : deactivate();
     }
-    bool is_active() { return m_active; }
-    bool is_inited() { return m_inited; }
-    virtual bool check_start_conditions() { return true; }
+
+    [[nodiscard]] bool is_active() const { return m_active; }
+    [[nodiscard]] bool is_inited() const { return m_inited; }
+
+    [[nodiscard]] virtual bool check_start_conditions() { return true; }
+
 protected:
     virtual void activate() {}
     virtual void deactivate() {}
+
 protected:
-    CControl_Manager* m_man;
-    CBaseMonster* m_object;
+    CControl_Manager* m_man{};
+    CBaseMonster* m_object{};
 
 private:
-    bool m_active;
-    bool m_inited;
+    bool m_active{};
+    bool m_inited{};
 };
 
 //////////////////////////////////////////////////////////////////////////

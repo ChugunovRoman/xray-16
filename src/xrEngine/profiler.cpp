@@ -166,7 +166,8 @@ void CProfiler::show_stats			(IGameFont &font, bool show)
 
 	m_section.Enter				();
 
-	if (!m_portions.empty()) {
+	if (!m_portions.empty())
+    {
 		std::sort(m_portions.begin(), m_portions.end(), [](const CProfileResultPortion& first, const CProfileResultPortion& second)
         {
             return xr_strcmp(first.m_timer_id, second.m_timer_id) < 0;
@@ -193,16 +194,17 @@ void CProfiler::show_stats			(IGameFont &font, bool show)
 
 		m_section.Leave			();
 
-		if (!m_actual) {
+		if (!m_actual)
+        {
 			u32					max_string_size = 0;
 			TIMERS::iterator	I = m_timers.begin();
 			TIMERS::iterator	E = m_timers.end();
 			for ( ; I != E; ++I)
-				max_string_size	= _max(max_string_size,compute_string_length(*(*I).first));
+				max_string_size	= _max(max_string_size,compute_string_length(I->first.c_str()));
 
 			I					= m_timers.begin();
 			for ( ; I != E; ++I)
-				convert_string	(*(*I).first,(*I).second.m_name,max_string_size);
+				convert_string	(I->first.c_str(), I->second.m_name, max_string_size);
 
 			m_actual			= true;
 		}
@@ -229,7 +231,7 @@ void CProfiler::show_stats			(IGameFont &font, bool show)
 		font.OutNext		(
 //			"%s.. %8.3f %8.3f %8.3f %8.3f %8.3f %8d %12.3f",
 			"%s%c%c %8.3f %8.3f %8.3f %6.1f %8d %12.3f",
-			*(*I).second.m_name,
+			I->second.m_name.c_str(),
 			white_character,
 			white_character,
 			(*I).second.m_time,

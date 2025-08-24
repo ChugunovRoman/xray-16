@@ -255,7 +255,7 @@ public:
                 IGameObject* pObj = Level().Objects.net_Find(CObjID[CO]);
                 char color = (pObj->ID() == pEntity->ID) ? '-' : '!';
 
-                Msg("%c %4d: Client - %20s[%5d] <===> Server - %s [%d]", color, CO + 1, *(pObj->cNameSect()), pObj->ID(),
+                Msg("%c %4d: Client - %20s[%5d] <===> Server - %s [%d]", color, CO + 1, pObj->cNameSect().c_str(), pObj->ID(),
                     pEntity->s_name.c_str(), pEntity->ID);
             }
             else
@@ -263,7 +263,7 @@ public:
                 if (CO < CLObjNum)
                 {
                     IGameObject* pObj = Level().Objects.net_Find(CObjID[CO]);
-                    Msg("! %2d: Client - %s [%d] <===> Server - -----------------", CO + 1, *(pObj->cNameSect()),
+                    Msg("! %2d: Client - %s [%d] <===> Server - -----------------", CO + 1, pObj->cNameSect().c_str(),
                         pObj->ID());
                 }
                 else

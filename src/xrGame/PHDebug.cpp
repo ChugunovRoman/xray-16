@@ -802,7 +802,7 @@ static void DBG_DrawTarckObj()
     IRenderVisual* v = trace_object->Visual();
     if (!v)
         return;
-    DBG_OutText("visual name: %s ", *trace_object->cNameVisual());
+    DBG_OutText("visual name: %s ", trace_object->cNameVisual().c_str());
     IKinematics* k = smart_cast<IKinematics*>(v);
     if (!k)
         return;

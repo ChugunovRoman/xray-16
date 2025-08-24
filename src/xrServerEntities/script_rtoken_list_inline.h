@@ -20,7 +20,7 @@ IC LPCSTR CScriptRTokenList::get(u32 index)
 {
     if (index >= size())
         return (nullptr);
-    return (*m_values[index]);
+    return m_values[index].c_str();
 }
 
 IC u32 CScriptRTokenList::size() { return (u32(m_values.size())); }

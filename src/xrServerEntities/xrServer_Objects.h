@@ -252,13 +252,13 @@ public:
     using inherited2 = CSE_Visual;
 
     CSE_AbstractVisual(LPCSTR caSection);
-    virtual ~CSE_AbstractVisual();
+    virtual             ~CSE_AbstractVisual();
     virtual CSE_Visual* visual();
-    LPCSTR getStartupAnimation();
-    virtual void UPDATE_Read(NET_Packet& P);
-    virtual void UPDATE_Write(NET_Packet& P);
-    virtual void STATE_Read(NET_Packet& P, u16 size);
-    virtual void STATE_Write(NET_Packet& P);
+    pcstr               getStartupAnimation() const;
+    virtual void        UPDATE_Read(NET_Packet& P);
+    virtual void        UPDATE_Write(NET_Packet& P);
+    virtual void        STATE_Read(NET_Packet& P, u16 size);
+    virtual void        STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
 };
 

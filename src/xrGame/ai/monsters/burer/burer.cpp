@@ -22,13 +22,6 @@
 #include "xrCore/_vector3d_ext.h"
 #include "ai/monsters/control_direction_base.h"
 
-#define FX_STAND_FRONT { "fx_stand_f", true }
-#define FX_STAND_BACK { "fx_stand_b", true }
-#define FX_STAND_LEFT { "fx_stand_l", true }
-#define FX_STAND_RIGHT { "fx_stand_r", true }
-
-#define FX_STAND_ALL FX_STAND_FRONT, FX_STAND_BACK, FX_STAND_LEFT, FX_STAND_RIGHT
-
 bool CBurer::can_scan = true;
 
 CBurer::CBurer()
@@ -74,15 +67,8 @@ void CBurer::Load(LPCSTR section)
 {
     inherited::Load(section);
 
-    // anim().AddReplacedAnim		(&m_bDamaged, eAnimStandIdle,	eAnimStandDamaged);
-    // anim().AddReplacedAnim		(&m_bDamaged, eAnimRun,			eAnimRunDamaged);
-    // anim().AddReplacedAnim		(&m_bDamaged, eAnimWalkFwd,		eAnimWalkDamaged);
-
     anim().accel_load(section);
     anim().accel_chain_add(eAnimWalkFwd, eAnimRun);
-
-    anim().AddReplacedAnim(&m_bRunTurnLeft, eAnimRun, eAnimRunTurnLeft);
-    anim().AddReplacedAnim(&m_bRunTurnRight, eAnimRun, eAnimRunTurnRight);
 
     particle_gravi_wave = pSettings->r_string(section, "Particle_Gravi_Wave");
     particle_gravi_prepare = pSettings->r_string(section, "Particle_Gravi_Prepare");
@@ -92,9 +78,6 @@ void CBurer::Load(LPCSTR section)
     sound_tele_hold.create(pSettings->r_string(section, "sound_tele_hold"), st_Effect, SOUND_TYPE_WORLD);
     sound_tele_throw.create(pSettings->r_string(section, "sound_tele_throw"), st_Effect, SOUND_TYPE_WORLD);
 
-    m_gravi.cooldown = pSettings->r_u32(section, "Gravi_Cooldown");
-    m_gravi.min_dist = pSettings->r_float(section, "Gravi_MinDist");
-    m_gravi.max_dist = pSettings->r_float(section, "Gravi_MaxDist");
     m_gravi.speed = pSettings->r_float(section, "Gravi_Speed");
     m_gravi.step = pSettings->r_float(section, "Gravi_Step");
     m_gravi.time_to_hold = pSettings->r_u32(section, "Gravi_Time_To_Hold");
@@ -102,6 +85,12 @@ void CBurer::Load(LPCSTR section)
     m_gravi.impulse_to_objects = pSettings->r_float(section, "Gravi_Impulse_To_Objects");
     m_gravi.impulse_to_enemy = pSettings->r_float(section, "Gravi_Impulse_To_Enemy");
     m_gravi.hit_power = pSettings->r_float(section, "Gravi_Hit_Power");
+
+    m_gravi.min_dist = pSettings->read_if_exists<float>(section, "Gravi_MinDist", 1.0f);
+    m_gravi.max_dist = pSettings->read_if_exists<float>(section, "Gravi_MaxDist", m_gravi.radius * 3.0f);
+
+    const u32 default_cooldown = u32(std::round(m_gravi.impulse_to_enemy / m_gravi.hit_power * 5.0f));
+    m_gravi.cooldown = pSettings->read_if_exists<u32>(section, "Gravi_Cooldown", default_cooldown);
 
     m_weight_to_stamina_hit = READ_IF_EXISTS(pSettings, r_float, section, "weight_to_stamina_hit", 0.02f);
     m_weapon_drop_stamina_k = READ_IF_EXISTS(pSettings, r_float, section, "weapon_drop_stamina_k", 3.f);
@@ -134,87 +123,107 @@ void CBurer::Load(LPCSTR section)
     SVelocityParam& velocity_none = move().get_velocity(MonsterMovement::eVelocityParameterIdle);
     SVelocityParam& velocity_turn = move().get_velocity(MonsterMovement::eVelocityParameterStand);
     SVelocityParam& velocity_walk = move().get_velocity(MonsterMovement::eVelocityParameterWalkNormal);
-    SVelocityParam& velocity_run = move().get_velocity(MonsterMovement::eVelocityParameterRunNormal);
-    // SVelocityParam &velocity_walk_dmg	= 	move().get_velocity(MonsterMovement::eVelocityParameterWalkDamaged);
-    // SVelocityParam &velocity_run_dmg	= 	move().get_velocity(MonsterMovement::eVelocityParameterRunDamaged);
-    // SVelocityParam &velocity_steal		= 	move().get_velocity(MonsterMovement::eVelocityParameterSteal);
-    //		SVelocityParam &velocity_drag		= move().get_velocity(MonsterMovement::eVelocityParameterDrag);
+    SVelocityParam& velocity_run  = move().get_velocity(MonsterMovement::eVelocityParameterRunNormal);
 
-    anim().AddAnim(eAnimStandIdle, "stand_idle_", -1, &velocity_none,
-        PS_STAND, FX_STAND_ALL);
-    anim().AddAnim(eAnimStandTurnLeft, "stand_turn_ls_", -1, &velocity_turn,
-        PS_STAND, FX_STAND_ALL);
-    anim().AddAnim(eAnimStandTurnRight, "stand_turn_rs_", -1, &velocity_turn,
-        PS_STAND, FX_STAND_ALL);
-    //	anim().AddAnim(eAnimStandDamaged,	"stand_idle_dmg_",		-1, &velocity_none,		PS_STAND); //, "fx_stand_f",
-    //"fx_stand_b", "fx_stand_l", "fx_stand_r");
+    SVelocityParam& velocity_walk_dmg = move().get_velocity(MonsterMovement::eVelocityParameterWalkDamaged);
+    SVelocityParam& velocity_run_dmg  = move().get_velocity(MonsterMovement::eVelocityParameterRunDamaged);
+    SVelocityParam& velocity_steal    = move().get_velocity(MonsterMovement::eVelocityParameterSteal);
 
-    anim().AddAnim(eAnimWalkFwd, "stand_walk_fwd_", -1, &velocity_walk,
-        PS_STAND, FX_STAND_ALL);
-    // anim().AddAnim(eAnimWalkDamaged,	"stand_walk_fwd_dmg_",	-1, &velocity_walk_dmg,	PS_STAND); //, 	"fx_stand_f",
-    // "fx_stand_b", "fx_stand_l", "fx_stand_r");
-    anim().AddAnim(eAnimRun, "stand_run_fwd_", -1, &velocity_run,
-        PS_STAND, FX_STAND_ALL);
-    // anim().AddAnim(eAnimRunDamaged,		"stand_run_dmg_",		-1,	&velocity_run_dmg,	PS_STAND); //, "fx_stand_f",
-    // "fx_stand_b", "fx_stand_l", "fx_stand_r");
+    const SAnimItem::Effects fxs{ "fx_stand_f", "fx_stand_b", "fx_stand_l", "fx_stand_r" };
 
-    anim().AddAnim(eAnimAttack, "stand_attack_", -1, &velocity_turn,
-        PS_STAND, FX_STAND_ALL);
-
-    anim().AddAnim(eAnimDie, "stand_die_", -1, &velocity_none,
-        PS_STAND, FX_STAND_ALL);
-
-    anim().AddAnim(eAnimShieldStart, "stand_shield_", -1, &velocity_turn,
-        PS_STAND, FX_STAND_ALL);
-    anim().AddAnim(eAnimShieldContinue, "stand_shield_idle_", -1, &velocity_turn,
-        PS_STAND, FX_STAND_ALL);
-
-    anim().AddAnim(eAnimTeleFire, "stand_power_attack_", -1, &velocity_turn,
-        PS_STAND, FX_STAND_ALL);
-    anim().AddAnim(eAnimTelekinesis, "telekinesis_", -1, &velocity_turn,
-        PS_STAND, FX_STAND_ALL);
-    anim().AddAnim(eAnimGraviFire, "stand_power_attack_", -1, &velocity_turn,
-        PS_STAND, FX_STAND_ALL);
-
-    anim().AddAnim(eAnimRunTurnLeft, "stand_run_fwd_turn_left_", -1, &velocity_run, PS_STAND);
-    anim().AddAnim(eAnimRunTurnRight, "stand_run_fwd_turn_right_", -1, &velocity_run, PS_STAND);
-
-    // 	anim().AddAnim(eAnimScared,			"stand_scared_",		-1, &velocity_none,		PS_STAND); //, 	"fx_stand_f",
-    // "fx_stand_b",
-    // "fx_stand_l", "fx_stand_r");
-    // 	anim().AddAnim(eAnimSteal,			"stand_steal_",			-1, &velocity_steal,	PS_STAND); //, 	"fx_stand_f",
-    // "fx_stand_b",
-    // "fx_stand_l", "fx_stand_r");
-    // 	anim().AddAnim(eAnimEat,			"sit_eat_",				-1, &velocity_none,		PS_SIT); //, 	"fx_stand_f",
-    // "fx_stand_b",
-    // "fx_stand_l", "fx_stand_r");
-    //
-    // 	anim().AddAnim(eAnimSitIdle,		"sit_idle_",			-1, &velocity_none,		PS_SIT); //, 	"fx_stand_f",
-    // "fx_stand_b",
-    // "fx_stand_l", "fx_stand_r");
-    // 	anim().AddAnim(eAnimCheckCorpse,	"sit_check_corpse_",	-1, &velocity_none,		PS_SIT); //, "fx_stand_f",
-    // "fx_stand_b", "fx_stand_l", "fx_stand_r");
-    // 	anim().AddAnim(eAnimSitStandUp,		"sit_stand_up_",		-1, &velocity_none,		PS_SIT); //, "fx_stand_f",
-    // "fx_stand_b", "fx_stand_l", "fx_stand_r");
-    // 	anim().AddAnim(eAnimStandSitDown,	"stand_sit_down_",		-1, &velocity_none,		PS_STAND); //, "fx_stand_f",
-    // "fx_stand_b", "fx_stand_l", "fx_stand_r");
-
-    //	anim().AddTransition(PS_SIT,		PS_STAND,		eAnimSitStandUp,	false);
-    //	anim().AddTransition(PS_STAND,		PS_SIT,			eAnimStandSitDown,	false);
-
+    // Stand idle + damaged + turn + look around
+    anim().AddAnim(eAnimStandIdle, "stand_idle_", -1, &velocity_none, PS_STAND);
     anim().LinkAction(ACT_STAND_IDLE, eAnimStandIdle);
-    //	anim().LinkAction		(ACT_SIT_IDLE,		eAnimSitIdle);
-    //	anim().LinkAction		(ACT_LIE_IDLE,		eAnimSitIdle);
+
+    if (anim().AddAnim(eAnimStandDamaged, "stand_idle_dmg_", -1, &velocity_none, PS_STAND, fxs, false))
+        anim().AddReplacedAnim(&m_bDamaged, eAnimStandIdle, eAnimStandDamaged);
+
+    anim().AddAnim(eAnimStandTurnLeft, "stand_turn_ls_", -1, &velocity_turn, PS_STAND, fxs);
+    anim().AddAnim(eAnimStandTurnRight, "stand_turn_rs_", -1, &velocity_turn, PS_STAND, fxs);
+
+    if (anim().AddAnim(eAnimLookAround, "stand_idle_look_around", -1, &velocity_none, PS_STAND, fxs, false))
+        anim().LinkAction(ACT_LOOK_AROUND, eAnimLookAround);
+
+    // Stand walk + damaged
+    anim().AddAnim(eAnimWalkFwd, "stand_walk_fwd_", -1, &velocity_walk, PS_STAND, fxs);
     anim().LinkAction(ACT_WALK_FWD, eAnimWalkFwd);
     anim().LinkAction(ACT_WALK_BKWD, eAnimWalkFwd);
-    anim().LinkAction(ACT_RUN, eAnimRun);
-    // anim().LinkAction(ACT_EAT,			eAnimEat);
-    anim().LinkAction(ACT_SLEEP, eAnimStandIdle); // eAnimSitIdle);
-    anim().LinkAction(ACT_REST, eAnimStandIdle); // eAnimSitIdle);
     anim().LinkAction(ACT_DRAG, eAnimWalkFwd);
+
+    if (anim().AddAnim(eAnimWalkDamaged, "stand_walk_fwd_dmg_", -1, &velocity_walk_dmg, PS_STAND, fxs, false))
+        anim().AddReplacedAnim(&m_bDamaged, eAnimWalkFwd, eAnimWalkDamaged);
+
+    // Stand run + damaged + rurn
+    anim().AddAnim(eAnimRun, "stand_run_fwd_", -1, &velocity_run, PS_STAND, fxs);
+    anim().LinkAction(ACT_RUN, eAnimRun);
+
+    if (anim().AddAnim(eAnimRunDamaged, "stand_run_dmg_", -1, &velocity_run_dmg, PS_STAND, fxs, false))
+        anim().AddReplacedAnim(&m_bDamaged, eAnimRun, eAnimRunDamaged);
+
+    if (anim().AddAnim(eAnimRunTurnLeft, "stand_run_fwd_turn_left_", -1, &velocity_run, PS_STAND, false))
+        anim().AddReplacedAnim(&m_bRunTurnLeft, eAnimRun, eAnimRunTurnLeft);
+    if (anim().AddAnim(eAnimRunTurnRight, "stand_run_fwd_turn_right_", -1, &velocity_run, PS_STAND, false))
+        anim().AddReplacedAnim(&m_bRunTurnRight, eAnimRun, eAnimRunTurnRight);
+
+    // Stand steal
+    if (anim().AddAnim(eAnimSteal, "stand_steal_", -1, &velocity_steal, PS_STAND, fxs, false))
+        anim().LinkAction(ACT_STEAL, eAnimSteal);
+
+    // anim().AddAnim(eAnimScared, "stand_scared_", -1, &velocity_none, PS_STAND, fxs, false);
+
+    // Attack
+    anim().AddAnim(eAnimAttack, "stand_attack_", -1, &velocity_turn, PS_STAND, fxs);
     anim().LinkAction(ACT_ATTACK, eAnimAttack);
-// anim().LinkAction(ACT_STEAL,		eAnimSteal);
-// anim().LinkAction(ACT_LOOK_AROUND,	eAnimScared);
+
+    // Die
+    anim().AddAnim(eAnimDie, "stand_die_", -1, &velocity_none, PS_STAND, fxs);
+
+    // Shield
+    if (!anim().AddAnim(eAnimShieldStart, "stand_shield_", -1, &velocity_turn, PS_STAND, fxs, false))
+        anim().AddAnim(eAnimShieldStart, "stand_gravi_", 0, &velocity_turn, PS_STAND, fxs, false);
+
+    if (!anim().AddAnim(eAnimShieldContinue, "stand_shield_idle_", -1, &velocity_turn, PS_STAND, fxs, false))
+        anim().AddAnim(eAnimShieldContinue, "stand_gravi_", 1, &velocity_turn, PS_STAND, fxs, false);
+
+    // Telekinesis
+    if (!anim().AddAnim(eAnimTelekinesis, "telekinesis_", -1, &velocity_turn, PS_STAND, fxs, false))
+        anim().AddAnim(eAnimTelekinesis, "stand_tele_", -1, &velocity_turn, PS_STAND, fxs, false);
+
+    if (!anim().AddAnim(eAnimTeleFire, "stand_power_attack_", -1, &velocity_turn, PS_STAND, fxs, false))
+        anim().AddAnim(eAnimTeleFire, "stand_tele_", 2, &velocity_turn, PS_STAND, fxs, false);
+
+    // Gravi attack
+    m_use_three_gravi_anims = false;
+    if (!anim().AddAnim(eAnimGraviFire, "stand_power_attack_", -1, &velocity_turn, PS_STAND, fxs, false))
+    {
+        if (anim().AddAnim(eAnimGraviFire, "stand_gravi_", -1, &velocity_turn, PS_STAND, fxs, false))
+            m_use_three_gravi_anims = true;
+    }
+
+    // Sit
+    if (anim().AddAnim(eAnimSitStandUp, "sit_stand_up_", -1, &velocity_none, PS_SIT, fxs, false))
+        anim().AddTransition(PS_SIT, PS_STAND, eAnimSitStandUp, false);
+
+    if (anim().AddAnim(eAnimStandSitDown, "stand_sit_down_", -1, &velocity_none, PS_STAND, fxs, false))
+        anim().AddTransition(PS_STAND, PS_SIT, eAnimStandSitDown, false);
+
+    if (anim().AddAnim(eAnimSitIdle, "sit_idle_", -1, &velocity_none, PS_SIT, fxs, false))
+    {
+        anim().LinkAction(ACT_SIT_IDLE, eAnimSitIdle);
+        anim().LinkAction(ACT_LIE_IDLE, eAnimSitIdle);
+        anim().LinkAction(ACT_SLEEP, eAnimSitIdle);
+        anim().LinkAction(ACT_REST, eAnimSitIdle);
+    }
+    else
+    {
+        anim().LinkAction(ACT_SLEEP, eAnimStandIdle);
+        anim().LinkAction(ACT_REST, eAnimStandIdle);
+    }
+
+    if (anim().AddAnim(eAnimEat, "sit_eat_", -1, &velocity_none, PS_SIT, fxs, false))
+        anim().LinkAction(ACT_EAT, eAnimEat);
+
+    // anim().AddAnim(eAnimCheckCorpse, "sit_check_corpse_", -1, &velocity_none, PS_SIT, fxs, false);
 
 #ifdef DEBUG
     anim().accel_chain_test();
@@ -481,7 +490,7 @@ void CBurer::net_Relcase(IGameObject* O)
 {
     inherited::net_Relcase(O);
 
-    TTelekinesis::remove_links(O);
+    CTelekinesis::remove_links(O);
 
     if (m_gravi_object.enemy == O)
         m_gravi_object.deactivate();
@@ -522,18 +531,25 @@ void CBurer::face_enemy()
     set_action(ACT_STAND_IDLE);
 }
 
-extern CActor* g_actor;
-
-bool actor_is_reloading_weapon()
+bool CBurer::CanDeactivateShieldEarly() const
 {
-    if (!g_actor)
-    {
-        return false;
-    }
+    CEntityAlive const* enemy = EnemyMan.get_enemy();
+    if (!enemy)
+        return true;
 
-    CWeapon* const active_weapon = smart_cast<CWeapon*>(Actor()->inventory().ActiveItem());
+    auto* inv_owner = smart_cast<const CInventoryOwner*>(enemy);
+    if (!inv_owner)
+        return false;
+
+    CWeapon* const active_weapon = smart_cast<CWeapon*>(inv_owner->inventory().ActiveItem());
+
+    // When there's no weapon we should return false, otherwise
+    // it would be easy to exploit the shield:
+    // i.e. hide the weapon, see shield deactivated, take the weapon again.
     if (active_weapon && active_weapon->GetState() == CWeapon::eReload)
     {
+        // We want burers to be smart enough, so return true only
+        // if the enemy has a weapon right now and reloading it.
         return true;
     }
 

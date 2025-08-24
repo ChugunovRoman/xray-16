@@ -64,7 +64,7 @@ void CEffectorZoomInertion::Init(CWeaponMagazined* pWeapon)
     if (!pWeapon)
         return;
 
-    LoadParams(*pWeapon->cNameSect(), "ezi_");
+    LoadParams(pWeapon->cNameSect().c_str(), "ezi_");
 };
 
 void CEffectorZoomInertion::SetParams(float disp)

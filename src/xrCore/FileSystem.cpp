@@ -311,7 +311,7 @@ pcstr EFS_Utils::AppendFolderToName(
     {
         *d = 0;
         if (depth < sv_depth)
-            xr_strcat(dest_name, dest_name_size, *tmp);
+            xr_strcat(dest_name, dest_name_size, tmp.c_str());
     }
     else
     {

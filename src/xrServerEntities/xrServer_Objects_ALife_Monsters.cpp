@@ -47,7 +47,7 @@ void setup_location_types_section(GameGraph::TERRAIN_VECTOR& m_vertex_types, CIn
     auto E = sect.Data.cend();
     for (; I != E; ++I)
     {
-        pcstr S = *(*I).first;
+        pcstr S = I->first.c_str();
         string16 I2;
         u32 N = _GetItemCount(S);
 
@@ -147,7 +147,7 @@ CSE_Abstract* CSE_ALifeTraderAbstract::init()
     string4096 S;
     // xr_sprintf                        (S,"%s\r\n[game_info]\r\nname_id = default\r\n",!*base()->m_ini_string ? "" :
     // *base()->m_ini_string);
-    xr_sprintf(S, "%s\r\n[game_info]\r\n", !*base()->m_ini_string ? "" : *base()->m_ini_string);
+    xr_sprintf(S, "%s\r\n[game_info]\r\n", !base()->m_ini_string.c_str() ? "" : base()->m_ini_string.c_str());
     base()->m_ini_string = S;
 
     return (base());
@@ -356,7 +356,7 @@ shared_str CSE_ALifeTraderAbstract::specific_character()
             }
         }
         R_ASSERT3(
-            !m_DefaultCharacters.empty(), "no default specific character set for class", *char_info.data()->m_Class);
+            !m_DefaultCharacters.empty(), "no default specific character set for class", char_info.data()->m_Class.c_str());
 
 #ifdef XRGAME_EXPORTS
         if (m_CheckedCharacters.empty())
@@ -419,7 +419,7 @@ void CSE_ALifeTraderAbstract::set_specific_character(shared_str new_spec_char)
     CSE_ALifeMonsterAbstract* monster = smart_cast<CSE_ALifeMonsterAbstract*>(base());
     if (monster && selected_char.terrain_sect().size())
     {
-        setup_location_types_section(monster->m_tpaTerrain, pSettings, *(selected_char.terrain_sect()));
+        setup_location_types_section(monster->m_tpaTerrain, pSettings, selected_char.terrain_sect().c_str());
     }
     //----
     if (NO_RANK == m_rank)
@@ -430,7 +430,7 @@ void CSE_ALifeTraderAbstract::set_specific_character(shared_str new_spec_char)
 
     m_icon_name = selected_char.IconName();
 
-    m_character_name = *(StringTable().translate(selected_char.Name()));
+    m_character_name = StringTable().translate(selected_char.Name()).c_str();
 
     LPCSTR gen_name = "GENERATE_NAME_";
     if (strstr(m_character_name.c_str(), gen_name))
@@ -448,14 +448,14 @@ void CSE_ALifeTraderAbstract::set_specific_character(shared_str new_spec_char)
         n += subset;
         n += "_";
         n += xr_itoa(::Random.randI(name_cnt), S, 10);
-        m_character_name = *(StringTable().translate(n.c_str()));
+        m_character_name = StringTable().translate(n.c_str()).c_str();
         m_character_name += " ";
 
         n = "lname_";
         n += subset;
         n += "_";
         n += xr_itoa(::Random.randI(last_name_cnt), S, 10);
-        m_character_name += *(StringTable().translate(n.c_str()));
+        m_character_name += StringTable().translate(n.c_str()).c_str();
     }
     u32 min_m = selected_char.MoneyDef().min_money;
     u32 max_m = selected_char.MoneyDef().max_money;
@@ -480,7 +480,7 @@ shared_str CSE_ALifeTraderAbstract::character_profile() { return m_sCharacterPro
 //для работы с relation system
 u16 CSE_ALifeTraderAbstract::object_id() const { return base()->ID; }
 CHARACTER_COMMUNITY_INDEX CSE_ALifeTraderAbstract::Community() const { return m_community_index; }
-LPCSTR CSE_ALifeTraderAbstract::CommunityName() const { return *CHARACTER_COMMUNITY::IndexToId(m_community_index); }
+LPCSTR CSE_ALifeTraderAbstract::CommunityName() const { return CHARACTER_COMMUNITY::IndexToId(m_community_index).c_str(); }
 void CSE_ALifeTraderAbstract::SetCommunityName(LPCSTR comm)
 {
     m_community_index = CHARACTER_COMMUNITY::IdToIndex(comm, NO_COMMUNITY_INDEX);
@@ -664,11 +664,11 @@ void CSE_ALifeCustomZone::FillProps(LPCSTR pref, PropItemVec& items)
 {
     inherited::FillProps(pref, items);
     PHelper().CreateU32(
-        items, PrepareKey(pref, *s_name, "on/off mode" DELIMITER "Shift time (sec)"), &m_start_time_shift, 0, 100000);
+        items, PrepareKey(pref, s_name.c_str(), "on/off mode" DELIMITER "Shift time (sec)"), &m_start_time_shift, 0, 100000);
     PHelper().CreateU32(
-        items, PrepareKey(pref, *s_name, "on/off mode" DELIMITER "Enabled time (sec)"), &m_enabled_time, 0, 100000);
+        items, PrepareKey(pref, s_name.c_str(), "on/off mode" DELIMITER "Enabled time (sec)"), &m_enabled_time, 0, 100000);
     PHelper().CreateU32(
-        items, PrepareKey(pref, *s_name, "on/off mode" DELIMITER "Disabled time (sec)"), &m_disabled_time, 0, 100000);
+        items, PrepareKey(pref, s_name.c_str(), "on/off mode" DELIMITER "Disabled time (sec)"), &m_disabled_time, 0, 100000);
 }
 #endif // #ifndef MASTER_GOLD
 
@@ -760,10 +760,10 @@ void CSE_ALifeAnomalousZone::FillProps(LPCSTR pref, PropItemVec& items)
 {
     inherited::FillProps(pref, items);
     PHelper().CreateFloat(
-        items, PrepareKey(pref, *s_name, "offline interactive radius"), &m_offline_interactive_radius, 0.f, 100.f);
+        items, PrepareKey(pref, s_name.c_str(), "offline interactive radius"), &m_offline_interactive_radius, 0.f, 100.f);
     PHelper().CreateU16(
-        items, PrepareKey(pref, *s_name, "ALife" DELIMITER "Artefact spawn places count"), &m_artefact_spawn_count, 32, 256);
-    PHelper().CreateFlag32(items, PrepareKey(pref, *s_name, "ALife" DELIMITER "Visible for AI"), &m_flags, flVisibleForAI);
+        items, PrepareKey(pref, s_name.c_str(), "ALife" DELIMITER "Artefact spawn places count"), &m_artefact_spawn_count, 32, 256);
+    PHelper().CreateFlag32(items, PrepareKey(pref, s_name.c_str(), "ALife" DELIMITER "Visible for AI"), &m_flags, flVisibleForAI);
 }
 #endif // #ifndef MASTER_GOLD
 
@@ -835,7 +835,7 @@ void CSE_ALifeZoneVisual::FillProps(LPCSTR pref, PropItemVec& values)
     IServerEntity* abstract = smart_cast<IServerEntity*>(this);
     VERIFY(abstract);
     PHelper().CreateChoose(values, PrepareKey(pref, abstract->name(), "Attack animation"), &attack_animation,
-        smSkeletonAnims, nullptr, (void*)*visual_name);
+        smSkeletonAnims, nullptr, (void*)visual_name.c_str());
 }
 #endif // #ifndef MASTER_GOLD
 //-------------------------------------------------------------------------
@@ -977,10 +977,10 @@ u8 CSE_ALifeCreatureAbstract::g_group() { return s_group; }
 void CSE_ALifeCreatureAbstract::FillProps(LPCSTR pref, PropItemVec& items)
 {
     inherited::FillProps(pref, items);
-    PHelper().CreateU8(items, PrepareKey(pref, *s_name, "Team"), &s_team, 0, 64, 1);
-    PHelper().CreateU8(items, PrepareKey(pref, *s_name, "Squad"), &s_squad, 0, 64, 1);
-    PHelper().CreateU8(items, PrepareKey(pref, *s_name, "Group"), &s_group, 0, 64, 1);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Health"), &fHealth, 0, 2, 5);
+    PHelper().CreateU8(items, PrepareKey(pref, s_name.c_str(), "Team"), &s_team, 0, 64, 1);
+    PHelper().CreateU8(items, PrepareKey(pref, s_name.c_str(), "Squad"), &s_squad, 0, 64, 1);
+    PHelper().CreateU8(items, PrepareKey(pref, s_name.c_str(), "Group"), &s_group, 0, 64, 1);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Health"), &fHealth, 0, 2, 5);
 }
 #endif // #ifndef MASTER_GOLD
 
@@ -1151,15 +1151,15 @@ void CSE_ALifeMonsterAbstract::FillProps(LPCSTR pref, PropItemVec& items)
 {
     inherited1::FillProps(pref, items);
 
-    PHelper().CreateFlag32(items, PrepareKey(pref, *s_name, "ALife" DELIMITER "No move in offline"), &m_flags, flOfflineNoMove);
-    PHelper().CreateFlag32(items, PrepareKey(pref, *s_name, "Use smart terrain tasks"), &m_flags, flUseSmartTerrains);
+    PHelper().CreateFlag32(items, PrepareKey(pref, s_name.c_str(), "ALife" DELIMITER "No move in offline"), &m_flags, flOfflineNoMove);
+    PHelper().CreateFlag32(items, PrepareKey(pref, s_name.c_str(), "Use smart terrain tasks"), &m_flags, flUseSmartTerrains);
 
     if (pSettings->line_exist(s_name, "SpaceRestrictionSection"))
     {
         LPCSTR gcs = pSettings->r_string(s_name, "SpaceRestrictionSection");
-        PHelper().CreateChoose(items, PrepareKey(pref, *s_name, "out space restrictions"), &m_out_space_restrictors,
+        PHelper().CreateChoose(items, PrepareKey(pref, s_name.c_str(), "out space restrictions"), &m_out_space_restrictors,
             smSpawnItem, nullptr, (void*)gcs, 16);
-        PHelper().CreateChoose(items, PrepareKey(pref, *s_name, "in space restrictions"), &m_in_space_restrictors,
+        PHelper().CreateChoose(items, PrepareKey(pref, s_name.c_str(), "in space restrictions"), &m_in_space_restrictors,
             smSpawnItem, nullptr, (void*)gcs, 16);
     }
 }
@@ -1544,34 +1544,34 @@ void CSE_ALifeMonsterRat::FillProps(LPCSTR pref, PropItemVec& items)
     inherited1::FillProps(pref, items);
     inherited2::FillProps(pref, items);
     // personal characteristics
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Field of view"), &fEyeFov, 0, 170, 10);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Eye range"), &fEyeRange, 0, 300, 10);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Minimum speed"), &fMinSpeed, 0, 10, 0.1f);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Maximum speed"), &fMaxSpeed, 0, 10, 0.1f);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Attack speed"), &fAttackSpeed, 0, 10, 0.1f);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Field of view"), &fEyeFov, 0, 170, 10);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Eye range"), &fEyeRange, 0, 300, 10);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Minimum speed"), &fMinSpeed, 0, 10, 0.1f);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Maximum speed"), &fMaxSpeed, 0, 10, 0.1f);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Attack speed"), &fAttackSpeed, 0, 10, 0.1f);
     PHelper().CreateFloat(
-        items, PrepareKey(pref, *s_name, "Personal", "Pursuit distance"), &fMaxPursuitRadius, 0, 300, 10);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Home distance"), &fMaxHomeRadius, 0, 300, 10);
+        items, PrepareKey(pref, s_name.c_str(), "Personal", "Pursuit distance"), &fMaxPursuitRadius, 0, 300, 10);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Home distance"), &fMaxHomeRadius, 0, 300, 10);
     // morale
     PHelper().CreateFloat(
-        items, PrepareKey(pref, *s_name, "Morale", "Success attack quant"), &fMoraleSuccessAttackQuant, -100, 100, 5);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Morale", "Death quant"), &fMoraleDeathQuant, -100, 100, 5);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Morale", "Fear quant"), &fMoraleFearQuant, -100, 100, 5);
+        items, PrepareKey(pref, s_name.c_str(), "Morale", "Success attack quant"), &fMoraleSuccessAttackQuant, -100, 100, 5);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Morale", "Death quant"), &fMoraleDeathQuant, -100, 100, 5);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Morale", "Fear quant"), &fMoraleFearQuant, -100, 100, 5);
     PHelper().CreateFloat(
-        items, PrepareKey(pref, *s_name, "Morale", "Restore quant"), &fMoraleRestoreQuant, -100, 100, 5);
-    PHelper().CreateU16(items, PrepareKey(pref, *s_name, "Morale", "Restore time interval"),
+        items, PrepareKey(pref, s_name.c_str(), "Morale", "Restore quant"), &fMoraleRestoreQuant, -100, 100, 5);
+    PHelper().CreateU16(items, PrepareKey(pref, s_name.c_str(), "Morale", "Restore time interval"),
         &u16MoraleRestoreTimeInterval, 0, 65535, 500);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Morale", "Minimum value"), &fMoraleMinValue, -100, 100, 5);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Morale", "Maximum value"), &fMoraleMaxValue, -100, 100, 5);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Morale", "Minimum value"), &fMoraleMinValue, -100, 100, 5);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Morale", "Maximum value"), &fMoraleMaxValue, -100, 100, 5);
     PHelper().CreateFloat(
-        items, PrepareKey(pref, *s_name, "Morale", "Normal value"), &fMoraleNormalValue, -100, 100, 5);
+        items, PrepareKey(pref, s_name.c_str(), "Morale", "Normal value"), &fMoraleNormalValue, -100, 100, 5);
     // attack
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Attack", "Hit power"), &fHitPower, 0, 200, 5);
-    PHelper().CreateU16(items, PrepareKey(pref, *s_name, "Attack", "Hit interval"), &u16HitInterval, 0, 65535, 500);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Attack", "Distance"), &fAttackDistance, 0, 300, 10);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Attack", "Maximum angle"), &fAttackAngle, 0, 180, 10);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Attack", "Hit power"), &fHitPower, 0, 200, 5);
+    PHelper().CreateU16(items, PrepareKey(pref, s_name.c_str(), "Attack", "Hit interval"), &u16HitInterval, 0, 65535, 500);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Attack", "Distance"), &fAttackDistance, 0, 300, 10);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Attack", "Maximum angle"), &fAttackAngle, 0, 180, 10);
     PHelper().CreateFloat(
-        items, PrepareKey(pref, *s_name, "Attack", "Success probability"), &fAttackSuccessProbability, 0, 100, 1);
+        items, PrepareKey(pref, s_name.c_str(), "Attack", "Success probability"), &fAttackSuccessProbability, 0, 100, 1);
 }
 #endif // #ifndef MASTER_GOLD
 
@@ -1648,19 +1648,19 @@ void CSE_ALifeMonsterZombie::FillProps(LPCSTR pref, PropItemVec& items)
 {
     inherited::FillProps(pref, items);
     // personal characteristics
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Field of view"), &fEyeFov, 0, 170, 10);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Eye range"), &fEyeRange, 0, 300, 10);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Minimum speed"), &fMinSpeed, 0, 10, 0.1f);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Maximum speed"), &fMaxSpeed, 0, 10, 0.1f);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Attack speed"), &fAttackSpeed, 0, 10, 0.1f);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Field of view"), &fEyeFov, 0, 170, 10);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Eye range"), &fEyeRange, 0, 300, 10);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Minimum speed"), &fMinSpeed, 0, 10, 0.1f);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Maximum speed"), &fMaxSpeed, 0, 10, 0.1f);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Attack speed"), &fAttackSpeed, 0, 10, 0.1f);
     PHelper().CreateFloat(
-        items, PrepareKey(pref, *s_name, "Personal", "Pursuit distance"), &fMaxPursuitRadius, 0, 300, 10);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Personal", "Home distance"), &fMaxHomeRadius, 0, 300, 10);
+        items, PrepareKey(pref, s_name.c_str(), "Personal", "Pursuit distance"), &fMaxPursuitRadius, 0, 300, 10);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Personal", "Home distance"), &fMaxHomeRadius, 0, 300, 10);
     // attack
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Attack", "Hit power"), &fHitPower, 0, 200, 5);
-    PHelper().CreateU16(items, PrepareKey(pref, *s_name, "Attack", "Hit interval"), &u16HitInterval, 0, 65535, 500);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Attack", "Distance"), &fAttackDistance, 0, 300, 10);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Attack", "Maximum angle"), &fAttackAngle, 0, 100, 1);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Attack", "Hit power"), &fHitPower, 0, 200, 5);
+    PHelper().CreateU16(items, PrepareKey(pref, s_name.c_str(), "Attack", "Hit interval"), &u16HitInterval, 0, 65535, 500);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Attack", "Distance"), &fAttackDistance, 0, 300, 10);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Attack", "Maximum angle"), &fAttackAngle, 0, 100, 1);
 }
 #endif // #ifndef MASTER_GOLD
 
@@ -1797,7 +1797,7 @@ void CSE_ALifeHumanAbstract::FillProps(LPCSTR pref, PropItemVec& items)
 {
     inherited1::FillProps(pref, items);
     inherited2::FillProps(pref, items);
-    PHelper().CreateFlag32(items, PrepareKey(pref, *s_name, "Group behaviour"), &m_flags, flGroupBehaviour);
+    PHelper().CreateFlag32(items, PrepareKey(pref, s_name.c_str(), "Group behaviour"), &m_flags, flGroupBehaviour);
 }
 #endif // #ifndef MASTER_GOLD
 

@@ -788,7 +788,7 @@ void CCustomZone::PlayIdleParticles(bool bIdleLight)
 {
     m_idle_sound.play_at_pos(0, Position(), true);
 
-    if (*m_sIdleParticles)
+    if (m_sIdleParticles.c_str())
     {
         if (!m_pIdleParticles)
         {
@@ -861,7 +861,7 @@ void CCustomZone::PlayBlowoutParticles()
         return;
 
     CParticlesObject* pParticles;
-    pParticles = CParticlesObject::Create(*m_sBlowoutParticles, TRUE);
+    pParticles = CParticlesObject::Create(m_sBlowoutParticles.c_str(), TRUE);
     pParticles->UpdateParent(XFORM(), zero_vel);
     pParticles->Play(false);
     m_fBlowoutTimeLeft = (float)Device.dwTimeGlobal + m_BendGrass_Blowout_time;
@@ -1017,7 +1017,7 @@ void CCustomZone::PlayBulletParticles(Fvector& pos)
         return;
 
     CParticlesObject* pParticles;
-    pParticles = CParticlesObject::Create(*m_sEntranceParticlesSmall, TRUE);
+    pParticles = CParticlesObject::Create(m_sEntranceParticlesSmall.c_str(), TRUE);
 
     Fmatrix M;
     M = XFORM();
@@ -1385,9 +1385,9 @@ void CCustomZone::ThrowOutArtefact(CArtefact* pArtefact)
     pArtefact->XFORM().c.set(Position());
     pArtefact->XFORM().c.y += m_fArtefactSpawnHeight;
 
-    if (*m_sArtefactSpawnParticles)
+    if (m_sArtefactSpawnParticles.c_str())
     {
-        CParticlesObject* pParticles = CParticlesObject::Create(*m_sArtefactSpawnParticles, TRUE);
+        CParticlesObject* pParticles = CParticlesObject::Create(m_sArtefactSpawnParticles.c_str(), TRUE);
         pParticles->UpdateParent(pArtefact->XFORM(), zero_vel);
         pParticles->Play(false);
     }
@@ -1545,7 +1545,7 @@ void CCustomZone::PlayAccumParticles()
     if (m_sAccumParticles.size())
     {
         CParticlesObject* pParticles;
-        pParticles = CParticlesObject::Create(*m_sAccumParticles, TRUE);
+        pParticles = CParticlesObject::Create(m_sAccumParticles.c_str(), TRUE);
         pParticles->UpdateParent(XFORM(), zero_vel);
         pParticles->Play(false);
     }
@@ -1559,7 +1559,7 @@ void CCustomZone::PlayAwakingParticles()
     if (m_sAwakingParticles.size())
     {
         CParticlesObject* pParticles;
-        pParticles = CParticlesObject::Create(*m_sAwakingParticles, TRUE);
+        pParticles = CParticlesObject::Create(m_sAwakingParticles.c_str(), TRUE);
         pParticles->UpdateParent(XFORM(), zero_vel);
         pParticles->Play(false);
     }

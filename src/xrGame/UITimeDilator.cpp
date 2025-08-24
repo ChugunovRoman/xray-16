@@ -1,5 +1,6 @@
-#include "UITimeDilator.h"
 #include "StdAfx.h"
+
+#include "UITimeDilator.h"
 
 UITimeDilator* time_dilator;
 
@@ -25,9 +26,12 @@ void UITimeDilator::SetUiTimeFactor(float timeFactor)
 {
     uiTimeFactor = timeFactor;
     startTimeDilation();
-};
+}
 
-float UITimeDilator::GetUiTimeFactor() { return uiTimeFactor; };
+float UITimeDilator::GetUiTimeFactor() const
+{
+    return uiTimeFactor;
+}
 
 void UITimeDilator::SetModeEnability(UIMode mode, bool status)
 {
@@ -43,7 +47,10 @@ void UITimeDilator::SetModeEnability(UIMode mode, bool status)
     }
 }
 
-bool UITimeDilator::GetModeEnability(UIMode mode) { return enabledModes.is(mode); }
+bool UITimeDilator::GetModeEnability(UIMode mode) const
+{
+    return enabledModes.is(mode);
+}
 
 void UITimeDilator::SetCurrentMode(UIMode mode)
 {
@@ -66,5 +73,5 @@ void UITimeDilator::startTimeDilation()
 
 void UITimeDilator::stopTimeDilation()
 {
-    Device.time_factor(1.0);
+    Device.time_factor(1.0f);
 }

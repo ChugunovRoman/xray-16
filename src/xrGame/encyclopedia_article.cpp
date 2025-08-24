@@ -57,7 +57,7 @@ void CEncyclopediaArticle::load_shared(LPCSTR)
 
     // loading from XML
     XML_NODE pNode = pXML->NavigateToNode(id_to_index::tag_name, item_data.pos_in_file);
-    THROW3(pNode, "encyclopedia article id=", *item_data.id);
+    THROW3(pNode, "encyclopedia article id=", item_data.id.c_str());
 
     //текст
     data()->text = pXML->Read(pNode, "text", 0, "");
@@ -134,7 +134,7 @@ void CEncyclopediaArticle::load_shared(LPCSTR)
     }
     else
     {
-        Msg("incorrect article type definition for [%s]", *item_data.id);
+        Msg("incorrect article type definition for [%s]", item_data.id.c_str());
     }
 
     data()->ui_template_name = pXML->ReadAttrib(pNode, "ui_template", "common");

@@ -19,6 +19,7 @@ struct STRING_TABLE_DATA
 {
     shared_str m_fontPrefix;
     shared_str m_sLanguage;
+    shared_str m_sCurrency;
     STRING_TABLE_MAP m_StringTable;
 };
 
@@ -39,7 +40,9 @@ public:
 
     shared_str GetCurrentLanguage() const;
     shared_str GetCurrentFontPrefix() const;
+    shared_str GetCurrency() const;
     xr_token* GetLanguagesToken() const;
+
     static u32 LanguageID;
     static string32 LanguageIDInLTX;
 

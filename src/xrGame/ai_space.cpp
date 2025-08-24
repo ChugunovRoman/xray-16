@@ -88,11 +88,11 @@ void CAI_Space::RegisterScriptClasses()
     }
     shared_str registrators = READ_IF_EXISTS(l_tpIniFile, r_string, "common", "class_registrators", "");
     xr_delete(l_tpIniFile);
-    u32 registratorCount = _GetItemCount(*registrators);
+    u32 registratorCount = _GetItemCount(registrators.c_str());
     string256 I;
     for (u32 i = 0; i < registratorCount; i++)
     {
-        _GetItem(*registrators, i, I);
+        _GetItem(registrators.c_str(), i, I);
         luabind::functor<void> result;
         if (!GEnv.ScriptEngine->functor(I, result))
         {
@@ -123,11 +123,11 @@ void CAI_Space::LoadCommonScripts()
     if (l_tpIniFile->line_exist("common", "script"))
     {
         shared_str scriptString = l_tpIniFile->r_string("common", "script");
-        u32 scriptCount = _GetItemCount(*scriptString);
+        u32 scriptCount = _GetItemCount(scriptString.c_str());
         string256 scriptName;
         for (u32 i = 0; i < scriptCount; i++)
         {
-            _GetItem(*scriptString, i, scriptName);
+            _GetItem(scriptString.c_str(), i, scriptName);
             GEnv.ScriptEngine->load_file(scriptName, CScriptEngine::GlobalNamespace);
         }
     }

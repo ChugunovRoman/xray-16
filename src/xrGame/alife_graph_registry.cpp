@@ -93,9 +93,9 @@ void CALifeGraphRegistry::setup_current_level()
         ai().game_graph().header().levels().find(ai().game_graph().vertex(actor()->m_tGraphID)->level_id());
     R_ASSERT2(ai().game_graph().header().levels().end() != I, "Graph point level ID not found!");
 
-    [[maybe_unused]] const int id = g_pGamePersistent->Level_ID(*(*I).second.name(), "1.0", true);
-    VERIFY3(id >= 0, "Level is corrupted or doesn't exist", *(*I).second.name());
-    ai().load(*(*I).second.name());
+    [[maybe_unused]] const int id = g_pGamePersistent->Level_ID(I->second.name().c_str(), "1.0", true);
+    VERIFY3(id >= 0, "Level is corrupted or doesn't exist", I->second.name().c_str());
+    ai().load(I->second.name().c_str());
 
     g_start_game_vertex_id = (u16)-1;
     g_start_level_vertex_id = (u32)-1;
@@ -160,7 +160,7 @@ void CALifeGraphRegistry::detach(CSE_Abstract& object, CSE_ALifeInventoryItem* i
         {
             Msg("! ERROR: can't detach independant object. entity[%s:%d], parent[%s:%d], section[%s]",
                 item->base()->name_replace(), item->base()->ID, object.name_replace(), object.ID,
-                *item->base()->s_name);
+                item->base()->s_name.c_str());
         }
 #endif // DEBUG
         //		R_ASSERT2				(value,"Can't detach an item which is not on my own");

@@ -197,7 +197,7 @@ bool CALifeUpdateManager::change_level(NET_Packet& net_packet)
 
     string256 autoave_name;
     strconcat(sizeof(autoave_name), autoave_name, Core.UserName, " - ", "autosave");
-    LPCSTR temp0 = strchr(**m_server_command_line, '/');
+    LPCSTR temp0 = strchr(m_server_command_line->c_str(), '/');
     VERIFY(temp0);
     string256 temp;
     *m_server_command_line = strconcat(sizeof(temp), temp, autoave_name, temp0);
@@ -308,7 +308,7 @@ bool CALifeUpdateManager::load_game(LPCSTR game_name, bool no_assert)
     }
 
     string512 S, S1;
-    xr_strcpy(S, **m_server_command_line);
+    xr_strcpy(S, m_server_command_line->c_str());
     pstr temp = strchr(S, '/');
     R_ASSERT2(temp, "Invalid server options!");
     strconcat(sizeof(S1), S1, game_name, temp);
@@ -398,10 +398,10 @@ void CALifeUpdateManager::teleport_object(
     {
         Msg("[LSS] teleporting object [%s][%s][%d] from level [%s], position [%f][%f][%f] to level [%s], position "
             "[%f][%f][%f]",
-            object->name_replace(), *object->s_name, object->ID,
-            *(ai().game_graph().header().level(ai().game_graph().vertex(object->m_tGraphID)->level_id()).name()),
+            object->name_replace(), object->s_name.c_str(), object->ID,
+            ai().game_graph().header().level(ai().game_graph().vertex(object->m_tGraphID)->level_id()).name().c_str(),
             VPUSH(ai().game_graph().vertex(object->m_tGraphID)->level_point()),
-            *(ai().game_graph().header().level(ai().game_graph().vertex(game_vertex_id)->level_id()).name()),
+            ai().game_graph().header().level(ai().game_graph().vertex(game_vertex_id)->level_id()).name().c_str(),
             VPUSH(ai().game_graph().vertex(game_vertex_id)->level_point()));
     }
 #endif

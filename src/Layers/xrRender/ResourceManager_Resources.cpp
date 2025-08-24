@@ -122,14 +122,14 @@ void CResourceManager::_DeleteRT(const CRT* RT)
 {
     if (0 == (RT->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
-    pstr N = pstr(*RT->cName);
+    pstr N = pstr(RT->cName.c_str());
     map_RT::iterator I = m_rtargets.find(N);
     if (I != m_rtargets.end())
     {
         m_rtargets.erase(I);
         return;
     }
-    Msg("! ERROR: Failed to find render-target '%s'", *RT->cName);
+    Msg("! ERROR: Failed to find render-target '%s'", RT->cName.c_str());
 }
 
 //	DX10 cut
@@ -263,14 +263,14 @@ void CResourceManager::_DeleteTexture(const CTexture* T)
 
     if (0 == (T->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
-    pstr N = pstr(*T->cName);
+    pstr N = pstr(T->cName.c_str());
     map_Texture::iterator I = m_textures.find(N);
     if (I != m_textures.end())
     {
         m_textures.erase(I);
         return;
     }
-    Msg("! ERROR: Failed to find texture surface '%s'", *T->cName);
+    Msg("! ERROR: Failed to find texture surface '%s'", T->cName.c_str());
 }
 
 #ifdef DEBUG
@@ -283,7 +283,7 @@ void CResourceManager::DBG_VerifyTextures()
         R_ASSERT(I->first);
         R_ASSERT(I->second);
         R_ASSERT(I->second->cName);
-        R_ASSERT(0 == xr_strcmp(I->first, *I->second->cName));
+        R_ASSERT(0 == xr_strcmp(I->first, I->second->cName.c_str()));
     }
 }
 #endif
@@ -312,14 +312,14 @@ void CResourceManager::_DeleteMatrix(const CMatrix* M)
 {
     if (0 == (M->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
-    pstr N = pstr(*M->cName);
+    pstr N = pstr(M->cName.c_str());
     map_Matrix::iterator I = m_matrices.find(N);
     if (I != m_matrices.end())
     {
         m_matrices.erase(I);
         return;
     }
-    Msg("! ERROR: Failed to find xform-def '%s'", *M->cName);
+    Msg("! ERROR: Failed to find xform-def '%s'", M->cName.c_str());
 }
 
 void CResourceManager::ED_UpdateMatrix(LPCSTR Name, CMatrix* data)
@@ -351,14 +351,14 @@ void CResourceManager::_DeleteConstant(const CConstant* C)
 {
     if (0 == (C->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
-    pstr N = pstr(*C->cName);
+    pstr N = pstr(C->cName.c_str());
     map_Constant::iterator I = m_constants.find(N);
     if (I != m_constants.end())
     {
         m_constants.erase(I);
         return;
     }
-    Msg("! ERROR: Failed to find R1-constant-def '%s'", *C->cName);
+    Msg("! ERROR: Failed to find R1-constant-def '%s'", C->cName.c_str());
 }
 
 void CResourceManager::ED_UpdateConstant(LPCSTR Name, CConstant* data)

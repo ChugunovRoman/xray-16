@@ -1,148 +1,53 @@
 #include "StdAfx.h"
 #include "control_animation_base.h"
+#include "basemonster/base_monster.h"
 
-void CControlAnimationBase::AddAnim(EMotionAnim ma, std::pair<cpcstr, bool> target, int s_id, SVelocityParam* vel, EPState p_s, std::pair<cpcstr, bool> fx_front, std::pair<cpcstr, bool> fx_back, std::pair<cpcstr, bool> fx_left, std::pair<cpcstr, bool> fx_right)
+bool CControlAnimationBase::AddAnim(EMotionAnim ma, pcstr tn, int s_id, SVelocityParam* vel, EPState p_s,
+    const SAnimItem::Effects& fxs, bool required /*= true*/)
 {
-    SAnimItem* new_item = xr_new<SAnimItem>();
+    const auto visual = smart_cast<IKinematicsAnimated*>(m_object->Visual());
+    VERIFY(visual);
 
-    new_item->target_name = target.first;
-    new_item->target_may_not_exist = target.second;
-    new_item->spec_id = s_id;
-    new_item->velocity = *vel;
-    new_item->pos_state = p_s;
+    if (!required)
+    {
+        string128 buf;
+        strconcat(buf, tn, "0");
+        if (!visual->ID_Cycle_Safe(buf).valid() &&
+            !visual->ID_Cycle_Safe(tn).valid())
+        {
+            return false;
+        }
+    }
 
-    new_item->fxs.front = fx_front.first;
-    new_item->fxs.back = fx_back.first;
-    new_item->fxs.left = fx_left.first;
-    new_item->fxs.right = fx_right.first;
-
-    new_item->fxs.may_not_exist[0] = fx_front.second;
-    new_item->fxs.may_not_exist[1] = fx_back.second;
-    new_item->fxs.may_not_exist[2] = fx_left.second;
-    new_item->fxs.may_not_exist[3] = fx_right.second;
-
-    new_item->count = 0;
-
-    m_anim_storage[ma] = new_item;
-}
-
-void CControlAnimationBase::AddAnim(EMotionAnim ma, LPCSTR tn, int s_id, SVelocityParam* vel, EPState p_s,
-    std::pair<cpcstr, bool> fx_front, std::pair<cpcstr, bool> fx_back,
-    std::pair<cpcstr, bool> fx_left, std::pair<cpcstr, bool> fx_right)
-{
     SAnimItem* new_item = xr_new<SAnimItem>();
 
     new_item->target_name = tn;
-    new_item->target_may_not_exist = false;
     new_item->spec_id = s_id;
     new_item->velocity = *vel;
     new_item->pos_state = p_s;
-
-    new_item->fxs.front = fx_front.first;
-    new_item->fxs.back = fx_back.first;
-    new_item->fxs.left = fx_left.first;
-    new_item->fxs.right = fx_right.first;
-
-    new_item->fxs.may_not_exist[0] = fx_front.second;
-    new_item->fxs.may_not_exist[1] = fx_back.second;
-    new_item->fxs.may_not_exist[2] = fx_left.second;
-    new_item->fxs.may_not_exist[3] = fx_right.second;
-
     new_item->count = 0;
 
-    m_anim_storage[ma] = new_item;
-}
+    const auto fx_exist = [&visual](const anim_string& anim_fx)
+    {
+        if (anim_fx.empty())
+            return false;
+        return visual->ID_FX_Safe(anim_fx.c_str()).valid();
+    };
 
-void CControlAnimationBase::AddAnim(EMotionAnim ma, LPCSTR tn, int s_id, SVelocityParam* vel, EPState p_s,
-    LPCSTR fx_front, LPCSTR fx_back, LPCSTR fx_left, LPCSTR fx_right)
-{
-    SAnimItem* new_item = xr_new<SAnimItem>();
+    if (fx_exist(fxs.front))
+        new_item->fxs.front = fxs.front;
 
-    new_item->target_name = tn;
-    new_item->target_may_not_exist = false;
-    new_item->spec_id = s_id;
-    new_item->velocity = *vel;
-    new_item->pos_state = p_s;
+    if (fx_exist(fxs.back))
+        new_item->fxs.back = fxs.back;
 
-    new_item->fxs.front = fx_front;
-    new_item->fxs.back = fx_back;
-    new_item->fxs.left = fx_left;
-    new_item->fxs.right = fx_right;
+    if (fx_exist(fxs.left))
+        new_item->fxs.left = fxs.left;
 
-    new_item->fxs.may_not_exist.reset();
-
-    new_item->count = 0;
+    if (fx_exist(fxs.right))
+        new_item->fxs.right = fxs.right;
 
     m_anim_storage[ma] = new_item;
-}
-
-void CControlAnimationBase::AddAnim(EMotionAnim ma, std::pair<cpcstr, bool> target, int s_id, SVelocityParam* vel, EPState p_s,
-    LPCSTR fx_front, LPCSTR fx_back, LPCSTR fx_left, LPCSTR fx_right)
-{
-    SAnimItem* new_item = xr_new<SAnimItem>();
-
-    new_item->target_name = target.first;
-    new_item->target_may_not_exist = target.second;
-    new_item->spec_id = s_id;
-    new_item->velocity = *vel;
-    new_item->pos_state = p_s;
-
-    new_item->fxs.front = fx_front;
-    new_item->fxs.back = fx_back;
-    new_item->fxs.left = fx_left;
-    new_item->fxs.right = fx_right;
-
-    new_item->fxs.may_not_exist.reset();
-
-    new_item->count = 0;
-
-    m_anim_storage[ma] = new_item;
-}
-
-void CControlAnimationBase::AddAnim(EMotionAnim ma, std::pair<cpcstr, bool> target, int s_id, SVelocityParam* vel, EPState p_s)
-{
-    SAnimItem* new_item = xr_new<SAnimItem>();
-
-    new_item->target_name = target.first;
-    new_item->target_may_not_exist = target.second;
-    new_item->spec_id = s_id;
-    new_item->velocity = *vel;
-    new_item->pos_state = p_s;
-
-    new_item->count = 0;
-
-    m_anim_storage[ma] = new_item;
-}
-
-void CControlAnimationBase::AddAnim2(EMotionAnim ma, std::pair<cpcstr, cpcstr> target, int s_id, SVelocityParam* vel, EPState p_s)
-{
-    SAnimItem* new_item = xr_new<SAnimItem>();
-
-    new_item->target_name = target.first;
-    new_item->target_name2 = target.second;
-    new_item->target_may_not_exist = false;
-    new_item->spec_id = s_id;
-    new_item->velocity = *vel;
-    new_item->pos_state = p_s;
-
-    new_item->count = 0;
-
-    m_anim_storage[ma] = new_item;
-}
-
-void CControlAnimationBase::AddAnim(EMotionAnim ma, LPCSTR tn, int s_id, SVelocityParam* vel, EPState p_s)
-{
-    SAnimItem* new_item = xr_new<SAnimItem>();
-
-    new_item->target_name = tn;
-    new_item->target_may_not_exist = false;
-    new_item->spec_id = s_id;
-    new_item->velocity = *vel;
-    new_item->pos_state = p_s;
-
-    new_item->count = 0;
-
-    m_anim_storage[ma] = new_item;
+    return true;
 }
 
 void CControlAnimationBase::AddTransition(
@@ -161,7 +66,7 @@ void CControlAnimationBase::AddTransition(
 
     new_item.skip_if_aggressive = skip_aggressive;
 
-    m_tTransitions.push_back(new_item);
+    m_tTransitions.emplace_back(new_item);
 }
 
 void CControlAnimationBase::AddTransition(
@@ -179,7 +84,7 @@ void CControlAnimationBase::AddTransition(
     new_item.chain = chain;
     new_item.skip_if_aggressive = skip_aggressive;
 
-    m_tTransitions.push_back(new_item);
+    m_tTransitions.emplace_back(new_item);
 }
 
 void CControlAnimationBase::AddTransition(
@@ -197,7 +102,7 @@ void CControlAnimationBase::AddTransition(
     new_item.chain = chain;
     new_item.skip_if_aggressive = skip_aggressive;
 
-    m_tTransitions.push_back(new_item);
+    m_tTransitions.emplace_back(new_item);
 }
 
 void CControlAnimationBase::AddTransition(EPState from, EPState to, EMotionAnim trans, bool chain, bool skip_aggressive)
@@ -214,7 +119,7 @@ void CControlAnimationBase::AddTransition(EPState from, EPState to, EMotionAnim 
     new_item.chain = chain;
     new_item.skip_if_aggressive = skip_aggressive;
 
-    m_tTransitions.push_back(new_item);
+    m_tTransitions.emplace_back(new_item);
 }
 
 void CControlAnimationBase::LinkAction(
@@ -228,7 +133,7 @@ void CControlAnimationBase::LinkAction(
     new_item.turn.anim_right = pmt_right;
     new_item.turn.min_angle = pmt_angle;
 
-    m_tMotions.insert(std::make_pair(act, new_item));
+    m_tMotions.emplace(act, new_item);
 }
 
 void CControlAnimationBase::LinkAction(EAction act, EMotionAnim pmt_motion)
@@ -238,7 +143,7 @@ void CControlAnimationBase::LinkAction(EAction act, EMotionAnim pmt_motion)
     new_item.anim = pmt_motion;
     new_item.is_turn_params = false;
 
-    m_tMotions.insert(std::make_pair(act, new_item));
+    m_tMotions.emplace(act, new_item);
 }
 
 void CControlAnimationBase::AddReplacedAnim(bool* b_flag, EMotionAnim pmt_cur_anim, EMotionAnim pmt_new_anim)
@@ -249,5 +154,5 @@ void CControlAnimationBase::AddReplacedAnim(bool* b_flag, EMotionAnim pmt_cur_an
     ra.cur_anim = pmt_cur_anim;
     ra.new_anim = pmt_new_anim;
 
-    m_tReplacedAnims.push_back(ra);
+    m_tReplacedAnims.emplace_back(ra);
 }

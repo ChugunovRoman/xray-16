@@ -114,7 +114,7 @@ void CMincer::NotificateDestroy(CPHDestroyableNotificate* dn)
     CPhysicsShellHolder* obj = dn->PPhysicsShellHolder();
     m_telekinetics.draw_out_impact(dir, impulse);
     CParticlesPlayer* PP = smart_cast<CParticlesPlayer*>(obj);
-    if (PP && *m_torn_particles)
+    if (PP && m_torn_particles.c_str())
     {
         PP->StartParticles(m_torn_particles, Fvector().set(0, 1, 0), ID());
     }

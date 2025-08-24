@@ -9,23 +9,16 @@
 #include "actor_memory.h"
 
 CMonsterEnemyManager::CMonsterEnemyManager()
-    : vertex(0), time_last_seen(0), expediency(false),
-      enemy_see_me(false), m_script_enemy(nullptr)
 {
-    monster = nullptr;
-    enemy = nullptr;
     flags.zero();
-    forced = false;
-    prev_enemy = 0;
-    danger_type = eNone;
-    my_vertex_enemy_last_seen = u32(-1);
-    enemy_vertex_enemy_last_seen = u32(-1);
-    m_time_updated = 0;
-    m_time_start_see_enemy = 0;
+
 }
 
-CMonsterEnemyManager::~CMonsterEnemyManager() {}
-void CMonsterEnemyManager::init_external(CBaseMonster* M) { monster = M; }
+void CMonsterEnemyManager::init_external(CBaseMonster* m)
+{
+    monster = m;
+}
+
 void CMonsterEnemyManager::update()
 {
     if (m_script_enemy && (m_script_enemy->getDestroy() || !m_script_enemy->g_Alive()))
@@ -82,7 +75,7 @@ void CMonsterEnemyManager::update()
     }
 
     // проверить видимость
-    enemy_see_me = is_faced(enemy, monster);
+    const bool enemy_see_me = is_faced(enemy, monster);
 
     // обновить опасность врага
     danger_type = eNone;
@@ -107,11 +100,10 @@ void CMonsterEnemyManager::update()
     if (!enemy_see_me)
         flags._or (FLAG_ENEMY_DOESNT_SEE_ME);
 
-    float dist_now, dist_prev;
     if (prev_enemy == enemy)
     {
-        dist_now = position.distance_to(monster->Position());
-        dist_prev = prev_enemy_position.distance_to(monster->Position());
+        const float dist_now  = position.distance_to(monster->Position());
+        const float dist_prev = prev_enemy_position.distance_to(monster->Position());
 
         if (_abs(dist_now - dist_prev) < 0.2f)
             flags._or (FLAG_ENEMY_STANDING);
@@ -140,8 +132,6 @@ void CMonsterEnemyManager::update()
     // сохранить текущего врага
     prev_enemy = enemy;
     prev_enemy_position = position;
-
-    expediency = true;
 
     if (enemy && see_enemy_now())
     {
@@ -186,14 +176,18 @@ void CMonsterEnemyManager::unforce_enemy()
     update();
 }
 
-u32 CMonsterEnemyManager::get_enemies_count() { return monster->EnemyMemory.get_enemies_count(); }
+size_t CMonsterEnemyManager::get_enemies_count() const
+{
+    return monster->EnemyMemory.get_enemies_count();
+}
+
 void CMonsterEnemyManager::reinit()
 {
-    enemy = 0;
+    enemy = nullptr;
     time_last_seen = 0;
     flags.zero();
     forced = false;
-    prev_enemy = 0;
+    prev_enemy = nullptr;
     danger_type = eNone;
 
     my_vertex_enemy_last_seen = monster->ai_location().level_vertex_id();
@@ -205,32 +199,41 @@ void CMonsterEnemyManager::reinit()
     script_enemy();
 }
 
-void CMonsterEnemyManager::add_enemy(const CEntityAlive* enemy) { monster->EnemyMemory.add_enemy(enemy); }
-bool CMonsterEnemyManager::see_enemy_now() { return monster->memory().visual().visible_right_now(enemy); }
-bool CMonsterEnemyManager::see_enemy_now(const CEntityAlive* enemy)
+void CMonsterEnemyManager::add_enemy(const CEntityAlive* enemy)
+{
+    monster->EnemyMemory.add_enemy(enemy);
+}
+
+bool CMonsterEnemyManager::see_enemy_now() const
 {
     return monster->memory().visual().visible_right_now(enemy);
 }
 
-bool CMonsterEnemyManager::see_enemy_recently() { return see_enemy_recently(enemy); }
-bool CMonsterEnemyManager::see_enemy_recently(const CEntityAlive* enemy)
+bool CMonsterEnemyManager::see_enemy_now(const CEntityAlive* enemy) const
+{
+    return monster->memory().visual().visible_right_now(enemy);
+}
+
+bool CMonsterEnemyManager::see_enemy_recently() const
+{
+    return see_enemy_recently(enemy);
+}
+
+bool CMonsterEnemyManager::see_enemy_recently(const CEntityAlive* enemy) const
 {
     return monster->memory().visual().visible_now(enemy);
 }
 
-bool CMonsterEnemyManager::enemy_see_me_now()
+bool CMonsterEnemyManager::enemy_see_me_now() const
 {
     if (Actor() == enemy)
     {
-        return (Actor()->memory().visual().visible_right_now(monster));
+        return Actor()->memory().visual().visible_right_now(monster);
     }
-    else
+
+    if (const CCustomMonster* cm = const_cast<CEntityAlive*>(enemy)->cast_custom_monster())
     {
-        CCustomMonster* cm = const_cast<CEntityAlive*>(enemy)->cast_custom_monster();
-        if (cm)
-        {
-            return cm->memory().visual().visible_right_now(monster);
-        }
+        return cm->memory().visual().visible_right_now(monster);
     }
 
     return false;
@@ -264,12 +267,11 @@ bool CMonsterEnemyManager::is_faced(const CEntityAlive* object0, const CEntityAl
     return angle_difference(yaw1, yaw2) <= fYawFov && angle_difference(pitch1, pitch2) <= fPitchFov;
 }
 
-bool CMonsterEnemyManager::is_enemy(const CEntityAlive* obj)
+bool CMonsterEnemyManager::is_enemy(const CEntityAlive* obj) const
 {
     return ((monster->g_Team() != obj->g_Team()) && monster->is_relation_enemy(obj) && obj->g_Alive());
 }
 
-const Fvector& CMonsterEnemyManager::get_enemy_position() { return position; }
 void CMonsterEnemyManager::transfer_enemy(CBaseMonster* friend_monster)
 {
     // если у friend_monster нет врага
@@ -280,25 +282,29 @@ void CMonsterEnemyManager::transfer_enemy(CBaseMonster* friend_monster)
         friend_monster->EnemyMan.get_enemy_vertex(), friend_monster->EnemyMan.get_enemy_time_last_seen());
 }
 
-u32 CMonsterEnemyManager::see_enemy_duration()
+u32 CMonsterEnemyManager::see_enemy_duration() const
 {
     return ((m_time_start_see_enemy == 0) ? 0 : (time() - m_time_start_see_enemy));
 }
 
-void CMonsterEnemyManager::script_enemy() { m_script_enemy = 0; }
-void CMonsterEnemyManager::script_enemy(const CEntityAlive& enemy) { m_script_enemy = &enemy; }
+void CMonsterEnemyManager::script_enemy()
+{
+    m_script_enemy = nullptr;
+}
+
+void CMonsterEnemyManager::script_enemy(const CEntityAlive& enemy)
+{
+    m_script_enemy = &enemy;
+}
+
 void CMonsterEnemyManager::remove_links(IGameObject* O)
 {
     if (enemy == O)
-    {
-        enemy = NULL;
-    }
+        enemy = nullptr;
+
     if (prev_enemy == O)
-    {
-        prev_enemy = NULL;
-    }
+        prev_enemy = nullptr;
+
     if (m_script_enemy == O)
-    {
-        m_script_enemy = NULL;
-    }
+        m_script_enemy = nullptr;
 }

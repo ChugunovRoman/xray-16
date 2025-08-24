@@ -67,7 +67,7 @@ void CALifeSwitchManager::add_online(CSE_ALifeDynamicObject* object, bool update
 
 #ifndef MASTER_GOLD
     if (psAI_Flags.test(aiALife))
-        Msg("[LSS] Spawning object [%s][%s][%d]", object->name_replace(), *object->s_name, object->ID);
+        Msg("[LSS] Spawning object [%s][%s][%d]", object->name_replace(), object->s_name.c_str(), object->ID);
 #endif
 
     object->add_online(update_registries);
@@ -96,7 +96,7 @@ void CALifeSwitchManager::remove_online(CSE_ALifeDynamicObject* object, bool upd
 
 #ifdef DEBUG
     if (psAI_Flags.test(aiALife))
-        Msg("[LSS] Destroying object [%s][%s][%d]", object->name_replace(), *object->s_name, object->ID);
+        Msg("[LSS] Destroying object [%s][%s][%d]", object->name_replace(), object->s_name.c_str(), object->ID);
 #endif
 
     object->add_offline(m_saved_chidren, update_registries);
@@ -133,7 +133,7 @@ bool CALifeSwitchManager::synchronize_location(CSE_ALifeDynamicObject* I)
 {
     START_PROFILE("ALife/switch/synchronize_location")
 #ifdef DEBUG
-    // VERIFY3(ai().level_graph().level_id() == ai().game_graph().vertex(I->m_tGraphID)->level_id(), *I->s_name,
+    // VERIFY3(ai().level_graph().level_id() == ai().game_graph().vertex(I->m_tGraphID)->level_id(), I->s_name.c_str(),
     //     I->name_replace());
     // if (!I->children.empty())
     // {

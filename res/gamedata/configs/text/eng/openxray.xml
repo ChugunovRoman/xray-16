@@ -81,6 +81,9 @@
 	<string id="ui_mm_fov">
 		<text>Field of view</text>
 	</string>
+	<string id="ui_mm_hud_fov">
+		<text>HUD field of view</text>
+	</string>
 	<string id="ui_mm_localization">
 		<text>Language</text>
 	</string>
@@ -135,6 +138,9 @@
 	<string id="ui_mm_color_grading_warm">
 		<text>warm</text>
 	</string>
+	<string id="cze">
+    	<text>Czech</text>
+	</string>
 	<string id="eng">
 		<text>English</text>
 	</string>
@@ -146,6 +152,9 @@
 	</string>
 	<string id="ita">
 		<text>Italian</text>
+	</string>
+	<string id="jpn">
+    	<text>Japanese</text>
 	</string>
 	<string id="pol">
 		<text>Polish</text>

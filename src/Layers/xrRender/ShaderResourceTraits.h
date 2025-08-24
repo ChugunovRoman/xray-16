@@ -720,7 +720,7 @@ bool CResourceManager::DestroyShader(const T* sh)
 
     typename ShaderTypeTraits<T>::MapType& sh_map = GetShaderMap<typename ShaderTypeTraits<T>::MapType>();
 
-    pstr N = pstr(*sh->cName);
+    pstr N = pstr(sh->cName.c_str());
     auto iterator = sh_map.find(N);
 
     if (iterator != sh_map.end())

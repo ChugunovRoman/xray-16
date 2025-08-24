@@ -147,7 +147,7 @@ bool XMLDocument::Load(pcstr path_alias, pcstr path, pcstr xml_filename, bool fa
     shared_str fn = correct_file_name(path, xml_filename);
 
     string_path str;
-    xr_sprintf(str, "%s" DELIMITER "%s", path, *fn);
+    xr_sprintf(str, "%s" DELIMITER "%s", path, fn.c_str());
     return Load(path_alias, str, fatal);
 }
 
@@ -157,12 +157,12 @@ bool XMLDocument::Load(pcstr path_alias, pcstr path, pcstr path2, pcstr xml_file
     shared_str fn = correct_file_name(path, xml_filename);
 
     string_path str;
-    xr_sprintf(str, "%s" DELIMITER "%s", path, *fn);
+    xr_sprintf(str, "%s" DELIMITER "%s", path, fn.c_str());
     if (Load(path_alias, str, false))
         return true;
 
     fn = correct_file_name(path2, xml_filename);
-    xr_sprintf(str, "%s" DELIMITER "%s", path2, *fn);
+    xr_sprintf(str, "%s" DELIMITER "%s", path2, fn.c_str());
     return Load(path_alias, str, fatal);
 }
 

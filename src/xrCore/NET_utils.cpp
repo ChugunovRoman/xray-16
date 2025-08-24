@@ -56,8 +56,8 @@ void NET_Packet::w_sdir(const Fvector& D)
 void NET_Packet::w_stringZ(const shared_str& p)
 {
     W_guard g(&w_allow);
-    if (*p)
-        w(*p, p.size() + 1);
+    if (p.c_str())
+        w(p.c_str(), p.size() + 1);
     else
     {
         IIniFileStream* tmp = inistream;

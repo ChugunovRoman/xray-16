@@ -18,10 +18,7 @@ class CScriptEngine;
 class XRSCRIPTENGINE_API CScriptStackTracker
 {
 protected:
-    enum consts
-    {
-        max_stack_size = u32(256),
-    };
+    static constexpr size_t max_stack_size = 256;
 
 protected:
     CScriptEngine* scriptEngine;

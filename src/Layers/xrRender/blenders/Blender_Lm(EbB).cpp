@@ -226,7 +226,7 @@ void CBlender_LmEbB::compile_L(CBlender_Compile& C) const
 
 void CBlender_LmEbB::CompileProgrammable(CBlender_Compile& C) const
 {
-    R_ASSERT3(C.L_textures.size() >= 2, "Not enought textures for shader, base tex: %s", *C.L_textures[0]);
+    R_ASSERT3(C.L_textures.size() >= 2, "Not enought textures for shader, base tex: %s", C.L_textures[0].c_str());
 
     switch (C.iElement)
     {
@@ -242,13 +242,13 @@ void CBlender_LmEbB::CompileProgrammable(CBlender_Compile& C) const
         C.r_dx11Sampler("smp_base");
         C.r_dx11Texture("s_lmap", C.L_textures[1]);
         C.r_dx11Sampler("smp_linear");
-        C.r_dx11Texture("s_hemi", *C.L_textures[2]);
+        C.r_dx11Texture("s_hemi", C.L_textures[2].c_str());
         C.r_dx11Sampler("smp_rtlinear");
         C.r_dx11Texture("s_env", oT2_Name);
 #else
         C.r_Sampler("s_base", C.L_textures[0]);
         C.r_Sampler("s_lmap", C.L_textures[1]);
-        C.r_Sampler_clf("s_hemi", *C.L_textures[2]);
+        C.r_Sampler_clf("s_hemi", C.L_textures[2].c_str());
         C.r_Sampler("s_env", oT2_Name, false, D3DTADDRESS_CLAMP);
 #endif
         C.r_End();

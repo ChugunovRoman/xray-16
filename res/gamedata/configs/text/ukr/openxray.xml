@@ -85,7 +85,10 @@
 		<text>Якість намокання</text>
 	</string>
 	<string id="ui_mm_fov">
-		<text>Поле зору</text>
+		<text>Кут огляду</text>
+	</string>
+	<string id="ui_mm_hud_fov">
+		<text>Кут огляду HUD</text>
 	</string>
 	<string id="ui_mm_localization">
 		<text>Мова</text>
@@ -140,6 +143,9 @@
 	</string>
 	<string id="ui_mm_color_grading_warm">
 		<text>тепла</text>
+	</string>
+	<string id="cze">
+    	<text>Чеська (Czech)</text>
 	</string>
 	<string id="eng">
 		<text>Англійська (English)</text>

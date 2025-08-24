@@ -1,27 +1,29 @@
 #pragma once
+
 #include "xrEngine/CameraBase.h"
 #include "xrCore/_quaternion.h"
 
 class CCameraLook : public CCameraBase
 {
-    typedef CCameraBase inherited;
+    using inherited = CCameraBase;
 
-    Fvector2 lim_zoom;
-    float dist, prev_d;
+    Fvector2 lim_zoom{};
+    float dist{}, prev_d{};
 
 public:
-    CCameraLook(IGameObject* p, u32 flags = 0);
-    virtual ~CCameraLook();
-    virtual void Load(LPCSTR section);
-    virtual void Move(int cmd, float val = 0, float factor = 1.0f);
+    CCameraLook(IGameObject* p, u8 flags = 0) : CCameraBase(p, flags) {}
 
-    virtual void OnActivate(CCameraBase* old_cam);
-    virtual void Update(Fvector& point, Fvector& noise_dangle);
+    void Load(pcstr section) override;
+    void Move(int cmd, float val = 0, float factor = 1.0f) override;
 
-    virtual float GetWorldYaw() { return -yaw; };
-    virtual float GetWorldPitch() { return pitch; };
+    void OnActivate(CCameraBase* old_cam) override;
+    void Update(const Fvector& point, Fvector& noise_dangle) override;
+
+    float GetWorldYaw() override { return -yaw; }
+    float GetWorldPitch() override { return pitch; }
+
 protected:
-    void UpdateDistance(Fvector& point);
+    void UpdateDistance(const Fvector& point);
 };
 
 class CCameraLook2 : public CCameraLook
@@ -30,17 +32,16 @@ public:
     static Fvector m_cam_offset;
 
 protected:
-    IGameObject* m_locked_enemy;
-    Fvector2 m_autoaim_inertion_yaw;
-    Fvector2 m_autoaim_inertion_pitch;
+    IGameObject* m_locked_enemy{};
+    Fvector2 m_autoaim_inertion_yaw{};
+    Fvector2 m_autoaim_inertion_pitch{};
     void UpdateAutoAim();
 
 public:
-    CCameraLook2(IGameObject* p, u32 flags = 0) : CCameraLook(p, flags) { m_locked_enemy = NULL; };
-    virtual ~CCameraLook2() {}
-    virtual void OnActivate(CCameraBase* old_cam);
-    virtual void Update(Fvector& point, Fvector& noise_dangle);
-    virtual void Load(LPCSTR section);
+    CCameraLook2(IGameObject* p, u8 flags = 0) : CCameraLook(p, flags) {}
+
+    void Update(const Fvector& point, Fvector& noise_dangle) override;
+    void Load(pcstr section) override;
 };
 
 class CCameraFixedLook : public CCameraLook
@@ -48,15 +49,14 @@ class CCameraFixedLook : public CCameraLook
     typedef CCameraLook inherited;
 
 public:
-    CCameraFixedLook(IGameObject* p, u32 flags = 0) : CCameraLook(p, flags){};
-    virtual ~CCameraFixedLook(){};
-    virtual void Load(LPCSTR section);
-    virtual void Move(int cmd, float val = 0, float factor = 1.0f);
-    virtual void OnActivate(CCameraBase* old_cam);
-    virtual void Update(Fvector& point, Fvector& noise_dangle);
-    virtual void Set(float Y, float P, float R);
+    CCameraFixedLook(IGameObject* p, u8 flags = 0) : CCameraLook(p, flags) {}
+
+    void Move(int cmd, float val = 0, float factor = 1.0f) override;
+    void OnActivate(CCameraBase* old_cam) override;
+    void Update(const Fvector& point, Fvector& noise_dangle) override;
+    void Set(float Y, float P, float R) override;
 
 private:
-    Fquaternion m_final_dir;
-    Fquaternion m_current_dir;
+    Fquaternion m_final_dir{};
+    Fquaternion m_current_dir{};
 };

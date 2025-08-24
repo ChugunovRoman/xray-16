@@ -59,8 +59,8 @@ void CUIProgressShape::Draw()
 
     GEnv.UIRender->SetShader(*origin->GetShader());
 
-    Fvector2 tsize;
-    GEnv.UIRender->GetActiveTextureResolution(tsize);
+    Fvector2 tsize{};
+    origin->GetShader()->GetBaseTextureResolution(tsize);
 
     GEnv.UIRender->StartPrimitive(m_sectorCount * 3, IUIRender::ptTriList, UI().m_currentPointType);
 

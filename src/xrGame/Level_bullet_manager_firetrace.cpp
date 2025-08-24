@@ -161,19 +161,11 @@ bool CBulletManager::test_callback(const collide::ray_defs& rd, IGameObject* obj
     return bRes;
 }
 
-// callback функция
-//	result.O;		// 0-static else IGameObject*
-//	result.range;	// range from start to element
-//	result.element;	// if (O) "num tri" else "num bone"
-//	params;			// user defined abstract data
-//	Device.Statistic.TEST0.End();
-// return TRUE-продолжить трассировку / FALSE-закончить трассировку
-
 void CBulletManager::FireShotmark(SBullet* bullet, const Fvector& vDir, const Fvector& vEnd, collide::rq_result& R,
     u16 target_material, const Fvector& vNormal, bool ShowMark)
 {
     SGameMtlPair* mtl_pair = GMLib.GetMaterialPairByIndices(bullet->bullet_material_idx, target_material);
-    Fvector particle_dir = vNormal;
+    Fvector particle_dir;
 
     if (R.O)
     {
@@ -205,6 +197,7 @@ void CBulletManager::FireShotmark(SBullet* bullet, const Fvector& vDir, const Fv
     else
     {
         //вычислить нормаль к пораженной поверхности
+        particle_dir = vNormal;
         Fvector* pVerts = Level().ObjectSpace.GetStaticVerts();
         CDB::TRI* pTri = Level().ObjectSpace.GetStaticTris() + R.element;
 
@@ -229,7 +222,7 @@ void CBulletManager::FireShotmark(SBullet* bullet, const Fvector& vDir, const Fv
 
     LPCSTR ps_name = (!mtl_pair || mtl_pair->CollideParticles.empty()) ?
         NULL :
-        *mtl_pair->CollideParticles[::Random.randI(0, mtl_pair->CollideParticles.size())];
+        mtl_pair->CollideParticles[::Random.randI(0, mtl_pair->CollideParticles.size())].c_str();
 
     SGameMtl* tgt_mtl = GMLib.GetMaterialByIdx(target_material);
     BOOL bStatic = !tgt_mtl->Flags.test(SGameMtl::flDynamic);
@@ -320,7 +313,7 @@ void CBulletManager::DynamicObjectHit(CBulletManager::_event& E)
 
     if (V)
     {
-        VERIFY3(V->LL_GetBoneVisible(u16(E.R.element)), *E.R.O->cNameVisual(), V->LL_BoneName_dbg(u16(E.R.element)));
+        VERIFY3(V->LL_GetBoneVisible(u16(E.R.element)), E.R.O->cNameVisual().c_str(), V->LL_BoneName_dbg(u16(E.R.element)));
         Fmatrix& m_bone = (V->LL_GetBoneInstance(u16(E.R.element))).mTransform;
         Fmatrix m_inv_bone;
         m_inv_bone.invert(m_bone);
@@ -376,8 +369,7 @@ bool CBulletManager::ObjectHit(SBullet_Hit* hit_res, SBullet* bullet, const Fvec
     if (R.O)
     {
         //вернуть нормаль по которой играть партиклы
-        CCF_Skeleton* skeleton = smart_cast<CCF_Skeleton*>(R.O->GetCForm());
-        if (skeleton)
+        if (CCF_Skeleton* skeleton = smart_cast<CCF_Skeleton*>(R.O->GetCForm()))
         {
             Fvector e_center;
             hit_normal.set(0, 0, 0);

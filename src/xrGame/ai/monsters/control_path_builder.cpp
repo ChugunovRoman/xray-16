@@ -234,7 +234,7 @@ void CControlPathBuilder::fix_position(const Fvector& pos, u32 node, Fvector& re
                 VPUSH(res_pos));
         }
         VERIFY3((level_vertex_id == node) || show_restrictions(m_restricted_object),
-            "Invalid restrictions (see log for details) for object ", *(CControl_Com::m_object->cName()));
+            "Invalid restrictions (see log for details) for object ", CControl_Com::m_object->cName().c_str());
 #endif
     }
 }

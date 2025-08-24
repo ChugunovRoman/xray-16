@@ -124,7 +124,7 @@ void CALifeMonsterDetailPathManager::actualize()
         {
             const CGameGraph::CGameVertex* vertex = ai().game_graph().vertex(object().get_object().m_tGraphID);
             Msg("! [%d][%s][%f][%f][%f]", object().get_object().m_tGraphID,
-                *ai().game_graph().header().level(vertex->level_id()).name(), VPUSH(vertex->level_point()));
+                ai().game_graph().header().level(vertex->level_id()).name().c_str(), VPUSH(vertex->level_point()));
             Msg("! game_graph_mask -> [ %d, %d, %d, %d]", vertex->vertex_type()[0], vertex->vertex_type()[1],
                 vertex->vertex_type()[2], vertex->vertex_type()[3]);
         }
@@ -132,7 +132,7 @@ void CALifeMonsterDetailPathManager::actualize()
         {
             const CGameGraph::CGameVertex* vertex = ai().game_graph().vertex(m_destination.m_game_vertex_id);
             Msg("! [%d][%s][%f][%f][%f]", m_destination.m_game_vertex_id,
-                *ai().game_graph().header().level(vertex->level_id()).name(), VPUSH(vertex->level_point()));
+                ai().game_graph().header().level(vertex->level_id()).name().c_str(), VPUSH(vertex->level_point()));
             Msg("! game_graph_mask -> [ %d, %d, %d, %d]", vertex->vertex_type()[0], vertex->vertex_type()[1],
                 vertex->vertex_type()[2], vertex->vertex_type()[3]);
         }

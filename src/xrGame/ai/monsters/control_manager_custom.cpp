@@ -651,7 +651,6 @@ void CControlManagerCustom::fill_rotation_data(
     {
         motion = skeleton_animated->ID_Cycle_Safe(left1);
         data.anim_stop_ls = motion;
-        m_object->anim().AddAnimTranslation(motion, left1);
     }
     else
     {
@@ -662,7 +661,6 @@ void CControlManagerCustom::fill_rotation_data(
     {
         motion = skeleton_animated->ID_Cycle_Safe(left2);
         data.anim_run_ls = motion;
-        m_object->anim().AddAnimTranslation(motion, left2);
     }
     else
     {
@@ -673,7 +671,6 @@ void CControlManagerCustom::fill_rotation_data(
     {
         motion = skeleton_animated->ID_Cycle_Safe(right1);
         data.anim_stop_rs = motion;
-        m_object->anim().AddAnimTranslation(motion, right1);
     }
     else
     {
@@ -684,7 +681,6 @@ void CControlManagerCustom::fill_rotation_data(
     {
         motion = skeleton_animated->ID_Cycle_Safe(right2);
         data.anim_run_rs = motion;
-        m_object->anim().AddAnimTranslation(motion, right2);
     }
     else
     {

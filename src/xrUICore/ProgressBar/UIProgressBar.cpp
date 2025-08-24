@@ -19,11 +19,9 @@ CUIProgressBar::CUIProgressBar()
     m_ProgressPos.x = 0.0f;
     m_ProgressPos.y = 0.0f;
     m_inertion = 0.0f;
-    m_last_render_frame = u32(-1);
     m_orient_mode = om_horz;
 }
 
-CUIProgressBar::~CUIProgressBar(void) {}
 void CUIProgressBar::InitProgressBar(Fvector2 pos, Fvector2 size, EOrientMode mode)
 {
     m_orient_mode = mode;
@@ -151,5 +149,4 @@ void CUIProgressBar::Draw()
         m_UIProgressItem.Draw();
         UI().PopScissor();
     }
-    m_last_render_frame = Device.dwFrame;
 }

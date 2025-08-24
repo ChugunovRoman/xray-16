@@ -73,7 +73,7 @@ void CTextureDescrMngr::LoadLTX(pcstr initial, bool listTHM)
             string_path T;
             float s;
 
-            const int res = sscanf(*item.second, "%[^,],%f", T, &s);
+            const int res = sscanf(item.second.c_str(), "%[^,],%f", T, &s);
             R_ASSERT4(res == 2, "Bad texture association", item.first.c_str(), fname);
             desc.m_assoc->detail_name = T;
             if (dts)

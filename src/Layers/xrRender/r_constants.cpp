@@ -28,7 +28,7 @@ ref_constant R_constant_table::get(pcstr S, u16 type /*= u16(-1)*/) const
     {
         it = std::lower_bound(table.cbegin(), table.cend(), S, [](const ref_constant& C, cpcstr S)
         {
-            return xr_strcmp(*C->name, S) < 0;
+            return xr_strcmp(C->name.c_str(), S) < 0;
         });
     }
     else
@@ -82,7 +82,7 @@ void R_constant_table::merge(R_constant_table* T)
     for (u32 it = 0; it < T->table.size(); it++)
     {
         ref_constant src = T->table[it];
-        ref_constant C = get(*src->name, dx9compatibility ? src->type : u16(-1));
+        ref_constant C = get(src->name.c_str(), dx9compatibility ? src->type : u16(-1));
         if (!C || (dx9compatibility && C->type != src->type))
         {
             C = xr_new<R_constant>(); //.g_constant_allocator.create();

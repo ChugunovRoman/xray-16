@@ -3,7 +3,7 @@
 #include "Include/xrRender/KinematicsAnimated.h"
 #include "xrEngine/CameraManager.h"
 
-typedef u32 TTime;
+using TTime = u32;
 
 #define COLOR color_xrgb
 #define COLOR_RED COLOR(255, 0, 0)
@@ -43,20 +43,22 @@ class CBlend;
 #define HIT_LOW 0
 #define HIT_HIGH 1
 
-// Enemy flags
-#define FLAG_ENEMY_DIE (1 << 0)
-#define FLAG_ENEMY_LOST_SIGHT (1 << 1)
-#define FLAG_ENEMY_GO_CLOSER (1 << 2)
-#define FLAG_ENEMY_GO_FARTHER (1 << 3)
-#define FLAG_ENEMY_GO_CLOSER_FAST (1 << 4)
-#define FLAG_ENEMY_GO_FARTHER_FAST (1 << 5)
-#define FLAG_ENEMY_STANDING (1 << 6)
-#define FLAG_ENEMY_HIDING (1 << 7)
-#define FLAG_ENEMY_RUN_AWAY (1 << 8)
-#define FLAG_ENEMY_DOESNT_KNOW_ABOUT_ME (1 << 9)
-#define FLAG_ENEMY_GO_OFFLINE (1 << 10)
-#define FLAG_ENEMY_DOESNT_SEE_ME (1 << 11)
-#define FLAG_ENEMY_STATS_NOT_READY (1 << 12)
+enum EnemyFlags : u16
+{
+    FLAG_ENEMY_DIE                  = 1 << 0,
+    FLAG_ENEMY_LOST_SIGHT           = 1 << 1,
+    FLAG_ENEMY_GO_CLOSER            = 1 << 2,
+    FLAG_ENEMY_GO_FARTHER           = 1 << 3,
+    FLAG_ENEMY_GO_CLOSER_FAST       = 1 << 4,
+    FLAG_ENEMY_GO_FARTHER_FAST      = 1 << 5,
+    FLAG_ENEMY_STANDING             = 1 << 6,
+    FLAG_ENEMY_HIDING               = 1 << 7,
+    FLAG_ENEMY_RUN_AWAY             = 1 << 8,
+    FLAG_ENEMY_DOESNT_KNOW_ABOUT_ME = 1 << 9,
+    FLAG_ENEMY_GO_OFFLINE           = 1 << 10,
+    FLAG_ENEMY_DOESNT_SEE_ME        = 1 << 11,
+    FLAG_ENEMY_STATS_NOT_READY      = 1 << 12,
+};
 
 #define SOUND_ATTACK_HIT_MIN_DELAY 1000
 #define MORALE_NORMAL 0.5f
@@ -89,23 +91,14 @@ struct SVelocityParam
 {
     struct
     {
-        float linear;
-        float angular_path;
-        float angular_real;
-    } velocity;
-    float min_factor;
-    float max_factor;
+        float linear{};
+        float angular_path{};
+        float angular_real{};
+    } velocity{};
+    float min_factor{ 1.0f };
+    float max_factor{ 1.0f };
 
-    SVelocityParam()
-    {
-        velocity.linear = 0.f;
-        velocity.angular_real = 0.f;
-        velocity.angular_path = 0.f;
-        min_factor = 1.0f;
-        max_factor = 1.0f;
-    }
-
-    void Load(LPCSTR section, LPCSTR line)
+    void Load(pcstr section, pcstr line)
     {
         string32 buffer;
         velocity.linear = float(atof(_GetItem(pSettings->r_string(section, line), 0, buffer)));
@@ -117,9 +110,9 @@ struct SVelocityParam
 };
 
 // Activities
-enum EMotionAnim
+enum EMotionAnim : u8
 {
-    eAnimStandIdle = u32(0),
+    eAnimStandIdle,
     eAnimCapturePrepare,
     eAnimStandTurnLeft,
     eAnimStandTurnRight,
@@ -229,13 +222,13 @@ enum EMotionAnim
     eAnimFastStandTurnRight,
 
     eAnimCount,
-    eAnimUndefined = u32(-1)
+    eAnimUndefined = u8(-1),
 };
 
 // Generic actions
-enum EAction
+enum EAction : u8
 {
-    ACT_STAND_IDLE = u32(0),
+    ACT_STAND_IDLE,
     ACT_SIT_IDLE,
     ACT_LIE_IDLE,
     ACT_WALK_FWD,
@@ -251,10 +244,10 @@ enum EAction
     ACT_LOOK_AROUND,
     ACT_HOME_WALK_GROWL,
     ACT_HOME_WALK_SMELLING,
-    ACT_NONE = u32(-1)
+    ACT_NONE = u8(-1),
 };
 
-enum EPState
+enum EPState : u8
 {
     PS_STAND,
     PS_SIT,
@@ -262,43 +255,40 @@ enum EPState
     PS_STAND_UPPER
 };
 
-enum EHitSide
+enum EHitSide : u8
 {
-    eSideFront = u32(0),
+    eSideFront,
     eSideBack,
     eSideLeft,
     eSideRight,
     eSideCount
 };
 
-typedef shared_str anim_string;
-#define DEFAULT_ANIM eAnimStandIdle
+using anim_string = shared_str;
+
+constexpr auto DEFAULT_ANIM = eAnimStandIdle;
 
 // элемент анимации
 struct SAnimItem
 {
     anim_string target_name; // "stand_idle_"
-    anim_string target_name2; // "stand_idle_"
-    bool target_may_not_exist;
 
-    int spec_id; // (-1) - any,  (0 - ...) - идентификатор 3
+    s8 spec_id; // (-1) - any,  (0 - 127) - идентификатор 3
     u8 count; // количество анимаций : "idle_0", "idle_1", "idle_2"
+    EPState pos_state;
 
     SVelocityParam velocity;
 
-    EPState pos_state;
-
-    struct
+    struct Effects
     {
         anim_string front;
         anim_string back;
         anim_string left;
         anim_string right;
-        std::bitset<eSideCount> may_not_exist;
     } fxs;
 };
 
-#define SKIP_IF_AGGRESSIVE true
+constexpr bool SKIP_IF_AGGRESSIVE = true;
 
 // описание перехода
 struct STransition
@@ -338,7 +328,7 @@ struct SReplacedAnim
 };
 
 // Определение времени аттаки по анимации
-typedef struct
+struct SAttackAnimation
 {
     EMotionAnim anim; // параметры конкретной анимации
     u32 anim_i3;
@@ -361,8 +351,7 @@ typedef struct
     float pitch_from;
     float pitch_to;
     float dist;
-
-} SAttackAnimation;
+};
 
 struct SAAParam
 {
@@ -401,27 +390,32 @@ public:
 
     struct
     {
-        IC void _set_current(float v)
+        void _set_current(float v)
         {
             current = v;
             VERIFY2(_abs(v) < 1000, "_set_current(). monster speed is too big");
         }
-        IC void _set_target(float v)
+        void _set_target(float v)
         {
             target = v;
             VERIFY2(_abs(v) < 1000, "_set_target(). monster speed is too big");
 
         }
-        IC float _get_current() { return current; }
-        IC float _get_target() { return target; }
+
+        [[nodiscard]]
+        float _get_current() const { return current; }
+
+        [[nodiscard]]
+        float _get_target() const { return target; }
 
     private:
         float current;
         float target;
     } speed;
 
-    void set_motion(EMotionAnim new_motion);
-    EMotionAnim get_motion() const { return motion; }
+    [[nodiscard]]
+    auto get_motion() const { return motion; }
+    void set_motion(const EMotionAnim new_motion) { motion = new_motion; }
 };
 
 //////////////////////////////////////////////////////////////////////////
@@ -432,16 +426,7 @@ struct t_fx_index
     s8 back;
 };
 
-using ANIM_ITEM_VECTOR = xr_vector<SAnimItem*>;
-using TRANSITION_ANIM_VECTOR = xr_vector<STransition>;
-using MOTION_ITEM_MAP = xr_map<EAction, SMotionItem>;
 using SEQ_VECTOR = xr_vector<EMotionAnim>;
-using ATTACK_ANIM = xr_vector<SAttackAnimation>;
-using REPLACED_ANIM = xr_vector<SReplacedAnim>;
-
-using FX_MAP_U16 = xr_map<u16, t_fx_index>;
-using FX_MAP_STRING = xr_map<shared_str, t_fx_index>;
-
 using VELOCITY_CHAIN_VEC = xr_vector<SEQ_VECTOR>;
 
 struct SVelocity
@@ -467,13 +452,13 @@ struct SMotionVel
     }
 };
 
-enum EAccelType
+enum EAccelType : u8
 {
     eAT_Calm,
     eAT_Aggressive
 };
 
-enum EAccelValue
+enum EAccelValue : u8
 {
     eAV_Accel,
     eAV_Braking
@@ -531,16 +516,16 @@ using CORPSE_MAP_IT = CORPSE_MAP::iterator;
 struct SMonsterHit
 {
     IGameObject* object;
+    Fvector position;
     TTime time;
     EHitSide side;
-    Fvector position;
 
-    bool operator==(const IGameObject* obj) { return (object == obj); }
+    bool operator==(const IGameObject* obj) const { return (object == obj); }
 };
 
 using MONSTER_HIT_VECTOR = xr_vector<SMonsterHit>;
 
-enum EDangerType
+enum EDangerType : u8
 {
     eWeak,
     eNormal,

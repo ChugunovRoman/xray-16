@@ -143,7 +143,7 @@ public:
     virtual ~BasicPostProcessAnimator();
     void Clear();
     virtual void Load(pcstr name, bool internalFs = true);
-    IC pcstr Name() { return *m_Name; }
+    pcstr Name() const { return m_Name.c_str(); }
     virtual void Stop(float speed);
     void SetDesiredFactor(float f, float sp);
     void SetCurrentFactor(float f);

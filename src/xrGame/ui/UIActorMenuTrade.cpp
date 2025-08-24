@@ -386,7 +386,7 @@ void CUIActorMenu::UpdateActor()
     if (IsGameTypeSingle())
     {
         string64 buf;
-        xr_sprintf(buf, "%d RU", m_pActorInvOwner->get_money());
+        xr_sprintf(buf, "%d %s", m_pActorInvOwner->get_money(), StringTable().GetCurrency().c_str());
         m_ActorMoney->SetText(buf);
         if (m_ActorMoney != m_TradeActorMoney)
             m_TradeActorMoney->SetText(buf);
@@ -416,14 +416,13 @@ void CUIActorMenu::UpdatePartnerBag()
     {
         m_PartnerMoney->SetText("");
     }
-    else if (m_pPartnerInvOwner->InfinitiveMoney())
-    {
-        m_PartnerMoney->SetText("--- RU");
-    }
     else
     {
         string64 buf;
-        xr_sprintf(buf, "%d RU", m_pPartnerInvOwner->get_money());
+        if (m_pPartnerInvOwner->InfinitiveMoney())
+            xr_sprintf(buf, "--- %s", StringTable().GetCurrency().c_str());
+        else
+            xr_sprintf(buf, "%d %s", m_pPartnerInvOwner->get_money(), StringTable().GetCurrency().c_str());
         m_PartnerMoney->SetText(buf);
     }
 

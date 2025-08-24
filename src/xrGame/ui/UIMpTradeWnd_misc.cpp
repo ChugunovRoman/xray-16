@@ -109,7 +109,7 @@ void CUIMpTradeWnd::UpdateMoneyIndicator()
 void CUIMpTradeWnd::SetMoneyChangeString(int diff)
 {
     string128 buff;
-    xr_sprintf(buff, "%+d RU", diff);
+    xr_sprintf(buff, "%+d %s", diff, StringTable().GetCurrency().c_str());
     m_static_money_change->SetText(buff);
     u32 clr = (diff > 0) ? m_text_color_money_positive : m_text_color_money_negative;
     m_static_money_change->SetTextColor(clr);

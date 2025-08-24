@@ -81,7 +81,7 @@ void WeaponUsageStatistic::SaveData()
 #ifdef XR_PLATFORM_WINDOWS
     SYSTEMTIME Time;
     GetLocalTime(&Time);
-    xr_sprintf(mFileName, "(%s)_(%s)_%02d.%02d.%02d_%02d.%02d.%02d.wus", *(Level().name()), GameType, Time.wMonth,
+    xr_sprintf(mFileName, "(%s)_(%s)_%02d.%02d.%02d_%02d.%02d.%02d.wus", Level().name().c_str(), GameType, Time.wMonth,
         Time.wDay, Time.wYear, Time.wHour, Time.wMinute, Time.wSecond);
 #else
     time_t Time;
@@ -167,7 +167,7 @@ void Player_Statistic::Write(FILE* pFile)
     if (!pFile)
         return;
     //----------------------------------------------
-    fwrite(*PName, xr_strlen(PName) + 1, 1, pFile);
+    fwrite(PName.c_str(), xr_strlen(PName) + 1, 1, pFile);
     fwrite(&m_dwTotalShots, 4, 1, pFile);
     fwrite(m_dwTotalAliveTime, 4, 3, pFile);
     fwrite(m_dwTotalMoneyRound, 4, 3, pFile);
@@ -249,8 +249,8 @@ void Weapon_Statistic::Write(FILE* pFile)
     if (!pFile)
         return;
     //----------------------------------------------
-    fwrite(*WName, xr_strlen(WName) + 1, 1, pFile);
-    fwrite(*InvName, xr_strlen(InvName) + 1, 1, pFile);
+    fwrite(WName.c_str(), xr_strlen(WName) + 1, 1, pFile);
+    fwrite(InvName.c_str(), xr_strlen(InvName) + 1, 1, pFile);
     //----------------------------------------------
     fwrite(&NumBought, 4, 1, pFile);
     fwrite(&m_dwRoundsFired, 4, 1, pFile);
@@ -329,6 +329,6 @@ void HitData::Write(FILE* pFile)
     fwrite(&BoneID, 2, 1, pFile);
     fwrite(&Deadly, 1, 1, pFile);
 
-    fwrite(*TargetName, xr_strlen(TargetName) + 1, 1, pFile);
-    fwrite(*BoneName, xr_strlen(BoneName) + 1, 1, pFile);
+    fwrite(TargetName.c_str(), xr_strlen(TargetName) + 1, 1, pFile);
+    fwrite(BoneName.c_str(), xr_strlen(BoneName) + 1, 1, pFile);
 };

@@ -270,7 +270,7 @@ void CAI_Stalker::Hit(SHit* pHDS)
                 }
             }
         }
-        else if (ClearSkyMode)
+        else if (GMLib.GetLibraryVersion() >= GAMEMTL_VERSION_CS)
         {
             const float ap = HDS.armor_piercing;
 
@@ -291,7 +291,7 @@ void CAI_Stalker::Hit(SHit* pHDS)
                 HDS.add_wound = false;
             }
         }
-        else if (ShadowOfChernobylMode)
+        else if (GMLib.GetLibraryVersion() == GAMEMTL_VERSION_SOC)
         {
             const float NewHitPower = HDS.damage() - BoneArmor;
 

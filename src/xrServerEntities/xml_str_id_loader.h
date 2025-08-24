@@ -90,7 +90,7 @@ const ITEM_DATA* CSXML_IdToIndex::GetById(const shared_str& str_id, bool no_asse
             Msg("[%d]=[%s]", i, *(*it).id);
 #endif
 
-        R_ASSERT3(no_assert, "item not found, id", *str_id);
+        R_ASSERT3(no_assert, "item not found, id", str_id.c_str());
         return nullptr;
     }
 

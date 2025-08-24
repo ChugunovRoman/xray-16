@@ -10,14 +10,6 @@
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
-CCameraFirstEye::CCameraFirstEye(IGameObject* p, u32 flags) : CCameraBase(p, flags), lookat_active(false) {}
-CCameraFirstEye::~CCameraFirstEye() {}
-void CCameraFirstEye::Load(LPCSTR section)
-{
-    inherited::Load(section);
-    style = csFirstEye;
-}
-
 void CCameraFirstEye::UpdateLookat()
 {
     if (!lookat_active)
@@ -42,7 +34,7 @@ void CCameraFirstEye::UpdateLookat()
     pitch = angle_inertion_var(pitch, xyz.x, 1.0f, PI, PI, Device.fTimeDelta);
 }
 
-void CCameraFirstEye::Update(Fvector& point, Fvector& noise_dangle)
+void CCameraFirstEye::Update(const Fvector& point, Fvector& noise_dangle)
 {
     vPosition.set(point);
 

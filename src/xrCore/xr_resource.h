@@ -39,7 +39,7 @@ struct xr_resource_named : public xr_resource_flagged
     const char* set_name(const char* name)
     {
         cName = name;
-        return *cName;
+        return cName.c_str();
     }
 };
 

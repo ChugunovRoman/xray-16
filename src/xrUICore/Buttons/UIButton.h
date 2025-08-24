@@ -3,8 +3,8 @@
 
 class XRUICORE_API CUIButton : public CUIStatic
 {
-private:
-    typedef CUIStatic inherited;
+protected:
+    using inherited = CUIStatic;
 
 public:
     CUIButton();
@@ -23,11 +23,12 @@ public:
     virtual void OnFocusLost();
 
     //состояния в которых находится кнопка
-    typedef enum {
+    enum E_BUTTON_STATE : u8
+    {
         BUTTON_NORMAL, //кнопка никак не затрагивается
         BUTTON_PUSHED, //в нажатом сотоянии
         BUTTON_UP //при удерживаемой кнопки мыши
-    } E_BUTTON_STATE;
+    };
 
     //заново подготовить состояние
     virtual void Reset();
@@ -49,13 +50,13 @@ public:
     pcstr GetDebugType() override { return "CUIButton"; }
 
 protected:
-    struct ButtonAccelerator
+    struct alignas(2) ButtonAccelerator
     {
-        s16  accel;
-        bool isKey;
+        s16  accel : 15;
+        bool isKey : 1;
     };
 
-    E_BUTTON_STATE m_eButtonState;
     ButtonAccelerator m_accelerators[4]{};
+    E_BUTTON_STATE m_eButtonState;
     bool m_bIsSwitch;
 };

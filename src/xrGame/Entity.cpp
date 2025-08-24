@@ -197,7 +197,7 @@ bool CEntity::net_Spawn(CSE_Abstract* DC)
         if (monster)
         {
             MONSTER_COMMUNITY monster_community;
-            monster_community.set(pSettings->r_string(*cNameSect(), "species"));
+            monster_community.set(pSettings->r_string(cNameSect().c_str(), "species"));
 
             if (monster_community.team() != NO_COMMUNITY_INDEX)
                 id_Team = monster_community.team();
@@ -273,14 +273,14 @@ void CEntity::KillEntity(u16 whoID, bool bypass_actor_check)
 #ifdef DEBUG
         if (m_killer_id != ALife::_OBJECT_ID(-1))
         {
-            Msg("! Entity [%s][%s] already has killer with id %d, but new killer id arrived - %d", *cNameSect(),
-                *cName(), m_killer_id, whoID);
+            Msg("! Entity [%s][%s] already has killer with id %d, but new killer id arrived - %d", cNameSect().c_str(),
+                cName().c_str(), m_killer_id, whoID);
 
             IGameObject* old_killer = Level().Objects.net_Find(m_killer_id);
-            Msg("! Old killer is %s", old_killer ? *old_killer->cName() : "unknown");
+            Msg("! Old killer is %s", old_killer ? old_killer->cName().c_str() : "unknown");
 
             IGameObject* new_killer = Level().Objects.net_Find(whoID);
-            Msg("! New killer is %s", new_killer ? *new_killer->cName() : "unknown");
+            Msg("! New killer is %s", new_killer ? new_killer->cName().c_str() : "unknown");
 
             VERIFY(m_killer_id == ALife::_OBJECT_ID(-1));
         }

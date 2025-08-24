@@ -28,7 +28,7 @@ float const CBulletManager::parent_ignore_distance = 3.f;
 #ifdef DEBUG
 float air_resistance_epsilon = .1f;
 #else // #ifdef DEBUG
-static float const air_resistance_epsilon = .1f;
+constexpr float air_resistance_epsilon = .1f;
 #endif // #ifdef DEBUG
 float g_bullet_time_factor = 1.f;
 
@@ -69,7 +69,7 @@ SBullet::SBullet(const Fvector& position, const Fvector& direction, float starti
     VERIFY(u16(-1) != bullet_material_idx);
 
     //Alundaio: Tracer for every 5th bullet
-    if (flags.allow_tracer && cartridge.m_4to1_tracer && iShotNum % 5 != 0)
+    if (flags.allow_tracer && cartridge.m_flags.test(CCartridge::cf4to1Tracer) && iShotNum % 5 != 0)
         flags.allow_tracer = false;
     //-Alundaio
 
@@ -155,7 +155,7 @@ void CBulletManager::PlayExplodePS(const Fmatrix& xf)
         return;
 
     shared_str const& ps_name = m_ExplodeParticles[Random.randI(0, m_ExplodeParticles.size())];
-    CParticlesObject* const ps = CParticlesObject::Create(*ps_name, TRUE);
+    CParticlesObject* const ps = CParticlesObject::Create(ps_name.c_str(), TRUE);
     ps->UpdateParent(xf, zero_vel);
     GamePersistent().ps_needtoplay.push_back(ps);
 }
@@ -564,6 +564,13 @@ static void update_bullet(
     update_bullet_parabolic(bullet, data, gravity, air_resistance);
 }
 
+// callback функция
+//	result.O;		// 0-static else IGameObject*
+//	result.range;	// range from start to element
+//	result.element;	// if (O) "num tri" else "num bone"
+//	params;			// user defined abstract data
+//	Device.Statistic.TEST0.End();
+// return TRUE-продолжить трассировку / FALSE-закончить трассировку
 bool CBulletManager::firetrace_callback(collide::rq_result& result, LPVOID params)
 {
     bullet_test_callback_data& data = *(bullet_test_callback_data*)params;

@@ -3,6 +3,7 @@
 #include "UIWindow.h"
 
 #include "Cursor/UICursor.h"
+#include "xrEngine/editor_helper.h"
 
 CUIWindow::CUIWindow(pcstr window_name) : m_windowName(window_name)
 {
@@ -618,14 +619,28 @@ void CUIWindow::FillDebugInfo()
     ImGui::DragFloat2("Position", (float*)&m_wndPos);
     ImGui::DragFloat2("Size", (float*)&m_wndSize);
 
-    ImGui::Checkbox("Visible", &m_bShowMe);
-    ImGui::Checkbox("Enabled", &m_bIsEnabled);
+    bool v = m_bShowMe;
+    if (ImGui::Checkbox("Visible", &v))
+        m_bShowMe = v;
+
+    v = m_bIsEnabled;
+    if (ImGui::Checkbox("Enabled", &v))
+        m_bIsEnabled = v;
 
     ImGui::Separator();
     ImGui::BeginDisabled();
-    ImGui::Checkbox("Auto delete", &m_bAutoDelete);
-    ImGui::Checkbox("Cursor over window", &m_bCursorOverWindow);
-    ImGui::Checkbox("Custom draw", &m_bCustomDraw);
+
+    v = m_bAutoDelete;
+    if (ImGui::Checkbox("Auto delete", &v))
+        m_bAutoDelete = v;
+
+    v = m_bCursorOverWindow;
+    if (ImGui::Checkbox("Cursor over window", &v))
+        m_bCursorOverWindow = v;
+
+    v = m_bCustomDraw;
+    if (ImGui::Checkbox("Custom draw", &v))
+        v = m_bCustomDraw;
 
     ImGui::DragFloat2("Last cursor position", (float*)&cursor_pos);
     ImGui::DragScalar("Last click time", ImGuiDataType_U32, &m_dwLastClickTime);

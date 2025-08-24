@@ -57,7 +57,7 @@ void CUIRankingWnd::Show(bool status)
         if (m_money_value)
         {
             string64 buf;
-            xr_sprintf(buf, sizeof(buf), "%d %s", Actor()->get_money(), "RU");
+            xr_sprintf(buf, sizeof(buf), "%d %s", Actor()->get_money(), StringTable().GetCurrency().c_str());
             m_money_value->SetText(buf);
             m_money_value->AdjustWidthToText();
         }

@@ -82,7 +82,7 @@ void CRT::reset_begin()
 
 void CRT::reset_end()
 {
-    create(*cName, dwWidth, dwHeight, fmt, sampleCount, { dwFlags });
+    create(cName.c_str(), dwWidth, dwHeight, fmt, sampleCount, { dwFlags });
 }
 
 void CRT::resolve_into(CRT& destination) const

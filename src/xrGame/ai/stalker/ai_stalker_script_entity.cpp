@@ -296,7 +296,7 @@ bool CAI_Stalker::bfAssignObject(CScriptEntityAction* tpEntityAction)
     }
     case eObjectActionTake:
     {
-        if (inventory().GetItemFromInventory(*l_tObjectAction.m_tpObject->cName()))
+        if (inventory().GetItemFromInventory(l_tObjectAction.m_tpObject->cName().c_str()))
         {
             GEnv.ScriptEngine->script_log(LuaMessageType::Error, "item is already in the inventory!");
             return ((l_tObjectAction.m_bCompleted = true) == false);
@@ -307,7 +307,7 @@ bool CAI_Stalker::bfAssignObject(CScriptEntityAction* tpEntityAction)
     }
     case eObjectActionDrop:
     {
-        if (!inventory().GetItemFromInventory(*l_tObjectAction.m_tpObject->cName()))
+        if (!inventory().GetItemFromInventory(l_tObjectAction.m_tpObject->cName().c_str()))
         {
             GEnv.ScriptEngine->script_log(LuaMessageType::Error, "item is not in the inventory!");
             return ((l_tObjectAction.m_bCompleted = true) == false);

@@ -250,5 +250,5 @@ void CSE_AbstractVisual::FillProps(LPCSTR pref, PropItemVec& values)
 
 void CSE_AbstractVisual::UPDATE_Read(NET_Packet& tNetPacket) {}
 void CSE_AbstractVisual::UPDATE_Write(NET_Packet& tNetPacket) {}
-LPCSTR CSE_AbstractVisual::getStartupAnimation() { return *startup_animation; }
+pcstr CSE_AbstractVisual::getStartupAnimation() const { return startup_animation.c_str(); }
 CSE_Visual* CSE_AbstractVisual::visual() { return this; }

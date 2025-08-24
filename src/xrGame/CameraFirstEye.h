@@ -1,32 +1,30 @@
-#ifndef __CAMERA_FE_H__
-#define __CAMERA_FE_H__
+#pragma once
 
 #include "xrEngine/CameraBase.h"
 
 class CCameraFirstEye : public CCameraBase
 {
-    typedef CCameraBase inherited;
-    Fvector lookat_point;
-    bool lookat_active;
+    using inherited = CCameraBase;
+
+    Fvector lookat_point{};
+    bool lookat_active{};
+
     void UpdateLookat();
 
 public:
-    CCameraFirstEye(IGameObject* p, u32 flags = 0);
-    virtual ~CCameraFirstEye();
+    CCameraFirstEye(IGameObject* p, u8 flags = 0) : CCameraBase(p, flags) {}
 
-    virtual void Load(LPCSTR section);
-    virtual void Move(int cmd, float val = 0, float factor = 1.0f);
+    void Move(int cmd, float val = 0, float factor = 1.0f) override;
 
-    virtual void OnActivate(CCameraBase* old_cam);
-    virtual void Update(Fvector& point, Fvector& noise_angle);
+    void OnActivate(CCameraBase* old_cam) override;
+    void Update(const Fvector& point, Fvector& noise_angle) override;
 
-    virtual float GetWorldYaw() { return -yaw; };
-    virtual float GetWorldPitch() { return pitch; };
-    void LookAtPoint(Fvector p)
+    float GetWorldYaw() override { return -yaw; }
+    float GetWorldPitch() override { return pitch; }
+
+    void LookAtPoint(const Fvector& p)
     {
         lookat_point = p;
         lookat_active = true;
     }
 };
-
-#endif // __CAMERALOOK_H__

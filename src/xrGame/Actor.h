@@ -363,7 +363,8 @@ public:
 
     CGameObject* ObjectWeLookingAt() { return m_pObjectWeLookingAt; }
     CInventoryOwner* PersonWeLookingAt() { return m_pPersonWeLookingAt; }
-    LPCSTR GetDefaultActionForObject() { return *m_sDefaultObjAction; }
+    pcstr GetDefaultActionForObject() const { return m_sDefaultObjAction.c_str(); }
+
 protected:
     CGameObject* m_pUsableObject;
     // Person we're looking at

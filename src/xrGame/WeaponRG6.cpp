@@ -28,10 +28,10 @@ bool CWeaponRG6::net_Spawn(CSE_Abstract* DC)
             while (k)
             {
                 k--;
-                inheritedRL::SpawnRocket(*fake_grenade_name, this);
+                inheritedRL::SpawnRocket(fake_grenade_name.c_str(), this);
             }
         }
-        //			inheritedRL::SpawnRocket(*fake_grenade_name, this);
+        //			inheritedRL::SpawnRocket(fake_grenade_name.c_str(), this);
     }
 
     return l_res;
@@ -151,7 +151,7 @@ u8 CWeaponRG6::AddCartridge(u8 cnt)
     while (k)
     {
         --k;
-        inheritedRL::SpawnRocket(*fake_grenade_name, this);
+        inheritedRL::SpawnRocket(fake_grenade_name.c_str(), this);
     }
     return k;
 }

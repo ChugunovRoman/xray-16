@@ -179,7 +179,7 @@ void CEnvironment::SetWeather(shared_str name, bool forced)
             Msg("! Invalid weather name: %s", name.c_str());
             return;
         }
-        R_ASSERT3(it != WeatherCycles.end(), "Invalid weather name.", *name);
+        R_ASSERT3(it != WeatherCycles.end(), "Invalid weather name.", name.c_str());
         CurrentCycleName = it->first;
         if (forced)
         {
@@ -196,7 +196,7 @@ void CEnvironment::SetWeather(shared_str name, bool forced)
             SelectEnvs(fGameTime);
         }
 #ifdef WEATHER_LOGGING
-        Msg("Starting Cycle: %s [%s]", *name, forced ? "forced" : "deferred");
+        Msg("Starting Cycle: %s [%s]", name.c_str(), forced ? "forced" : "deferred");
 #endif
     }
     else
@@ -214,7 +214,7 @@ bool CEnvironment::SetWeatherFX(shared_str name)
     if (name.size())
     {
         auto it = WeatherFXs.find(name);
-        R_ASSERT3(it != WeatherFXs.end(), "Invalid weather effect name.", *name);
+        R_ASSERT3(it != WeatherFXs.end(), "Invalid weather effect name.", name.c_str());
         EnvVec* PrevWeather = CurrentWeather;
         VERIFY(PrevWeather);
         CurrentWeather = &it->second;
@@ -264,7 +264,7 @@ bool CEnvironment::SetWeatherFX(shared_str name)
         Current[0] = C0;
         Current[1] = C1;
 #ifdef WEATHER_LOGGING
-        Msg("Starting WFX: '%s' - %3.2f sec", *name, wfx_time);
+        Msg("Starting WFX: '%s' - %3.2f sec", name.c_str(), wfx_time);
 // for (auto l_it=CurrentWeather->begin(); l_it!=CurrentWeather->end(); l_it++)
 // Msg (". Env: '%s' Tm: %3.2f",*(*l_it)->m_identifier.c_str(),(*l_it)->exec_time);
 #endif

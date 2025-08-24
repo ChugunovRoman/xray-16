@@ -126,8 +126,8 @@ void CUIFrameLineWnd::DrawElements()
 {
     GEnv.UIRender->SetShader(*m_shader);
 
-    Fvector2 ts;
-    GEnv.UIRender->GetActiveTextureResolution(ts);
+    Fvector2 ts{};
+    m_shader->GetBaseTextureResolution(ts);
 
     Frect rect;
     GetAbsoluteRect(rect);

@@ -10,6 +10,7 @@ public:
     virtual void create(LPCSTR sh, LPCSTR tex = nullptr) = 0;
     virtual bool inited() = 0;
     virtual void destroy() = 0;
+    virtual bool GetBaseTextureResolution(Fvector2& res) = 0;
 };
 
 #endif //	UIShader_included

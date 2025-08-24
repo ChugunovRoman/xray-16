@@ -647,16 +647,16 @@ void CSpectator::GetSpectatorString(string1024& pStr)
     {
     case eacFreeFly:
     {
-        SpectatorMsg = *StringTable().translate("mp_spectator");
+        SpectatorMsg = StringTable().translate("mp_spectator").c_str();
         SpectatorMsg += " ";
-        SpectatorMsg += *StringTable().translate("mp_free_fly");
+        SpectatorMsg += StringTable().translate("mp_free_fly").c_str();
         break;
     }
     case eacFirstEye:
     {
-        SpectatorMsg = *StringTable().translate("mp_spectator");
+        SpectatorMsg = StringTable().translate("mp_spectator").c_str();
         SpectatorMsg += " ";
-        SpectatorMsg += *StringTable().translate("mp_first_eye");
+        SpectatorMsg += StringTable().translate("mp_first_eye").c_str();
         SpectatorMsg += " ";
         //			SpectatorMsg = "SPECTATOR (First-Eye): ";
         SpectatorMsg += m_pActorToLookAt ? m_pActorToLookAt->Name() : "";
@@ -664,9 +664,9 @@ void CSpectator::GetSpectatorString(string1024& pStr)
     }
     case eacFreeLook:
     {
-        SpectatorMsg = *StringTable().translate("mp_spectator");
+        SpectatorMsg = StringTable().translate("mp_spectator").c_str();
         SpectatorMsg += " ";
-        SpectatorMsg += *StringTable().translate("mp_free_look");
+        SpectatorMsg += StringTable().translate("mp_free_look").c_str();
         SpectatorMsg += " ";
         //			SpectatorMsg = "SPECTATOR (Free-Look):";
         SpectatorMsg += m_pActorToLookAt ? m_pActorToLookAt->Name() : "";
@@ -674,9 +674,9 @@ void CSpectator::GetSpectatorString(string1024& pStr)
     }
     case eacLookAt:
     {
-        SpectatorMsg = *StringTable().translate("mp_spectator");
+        SpectatorMsg = StringTable().translate("mp_spectator").c_str();
         SpectatorMsg += " ";
-        SpectatorMsg += *StringTable().translate("mp_look_at");
+        SpectatorMsg += StringTable().translate("mp_look_at").c_str();
         SpectatorMsg += " ";
         //			SpectatorMsg = "SPECTATOR (Look-At):";
         SpectatorMsg += m_pActorToLookAt ? m_pActorToLookAt->Name() : "";

@@ -47,7 +47,7 @@ void CExplosiveItem::Hit(SHit* pHDS)
 void CExplosiveItem::StartTimerEffects()
 {
     CParticlesPlayer::StartParticles(
-        pSettings->r_string(*cNameSect(), "set_timer_particles"), Fvector().set(0, 1, 0), ID());
+        pSettings->r_string(cNameSect().c_str(), "set_timer_particles"), Fvector().set(0, 1, 0), ID());
 }
 void CExplosiveItem::OnEvent(NET_Packet& P, u16 type)
 {

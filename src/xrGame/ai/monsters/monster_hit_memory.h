@@ -5,30 +5,26 @@ class CBaseMonster;
 
 class CMonsterHitMemory
 {
-    CBaseMonster* monster;
-    TTime time_memory;
+    CBaseMonster* monster{};
+    TTime time_memory{ 10000 };
 
     MONSTER_HIT_VECTOR m_hits;
 
 public:
-    CMonsterHitMemory();
-    ~CMonsterHitMemory();
-
     void init_external(CBaseMonster* M, TTime mem_time);
     void update();
 
-    // -----------------------------------------------------
-    bool is_hit() { return !m_hits.empty(); }
-    bool is_hit(IGameObject* pO);
+    [[nodiscard]] bool is_hit() const { return !m_hits.empty(); }
+    [[nodiscard]] bool is_hit(const IGameObject* pO);
 
     // Lain: added
-    int get_num_hits() { return m_hits.size(); }
+    auto get_num_hits() const { return m_hits.size(); }
     void add_hit(IGameObject* who, EHitSide side);
 
     Fvector get_last_hit_dir();
-    TTime get_last_hit_time();
-    IGameObject* get_last_hit_object();
-    Fvector get_last_hit_position();
+    TTime get_last_hit_time() const;
+    IGameObject* get_last_hit_object() const;
+    Fvector get_last_hit_position() const;
 
     void clear() { m_hits.clear(); }
     void remove_hit_info(const IGameObject* obj);

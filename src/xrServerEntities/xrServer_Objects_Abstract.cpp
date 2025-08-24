@@ -97,7 +97,7 @@ void CSE_Visual::FillProps(LPCSTR pref, PropItemVec& items)
         PHelper().CreateChoose(items, PrepareKey(pref, abstract->name(), "Model" DELIMITER "Visual"), &visual_name, smVisual);
     V->OnChangeEvent.bind(this, &CSE_Visual::OnChangeVisual);
     V = PHelper().CreateChoose(items, PrepareKey(pref, abstract->name(), "Model" DELIMITER "Animation"), &startup_animation,
-        smSkeletonAnims, nullptr, (void*)*visual_name);
+        smSkeletonAnims, nullptr, (void*)visual_name.c_str());
     V->OnChangeEvent.bind(this, &CSE_Visual::OnChangeAnim);
     PHelper().CreateFlag8(items, PrepareKey(pref, abstract->name(), "Model" DELIMITER "Obstacle"), &flags, flObstacle);
 }

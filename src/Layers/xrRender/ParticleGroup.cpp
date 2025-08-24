@@ -318,10 +318,10 @@ void OnGroupParticleBirth(void* owner, u32 param, PAPI::Particle& m, u32 idx)
     const CPGDef::SEffect* eff = PGD->m_Effects[param];
 
     if (eff->m_Flags.is(CPGDef::SEffect::flOnBirthChild))
-        PG->items[param].StartFreeChild(PE, *eff->m_OnBirthChildName, m);
+        PG->items[param].StartFreeChild(PE, eff->m_OnBirthChildName.c_str(), m);
 
     if (eff->m_Flags.is(CPGDef::SEffect::flOnPlayChild))
-        PG->items[param].StartRelatedChild(PE, *eff->m_OnPlayChildName, m);
+        PG->items[param].StartRelatedChild(PE, eff->m_OnPlayChildName.c_str(), m);
 }
 void OnGroupParticleDead(void* owner, u32 param, PAPI::Particle& m, u32 idx)
 {
@@ -341,7 +341,7 @@ void OnGroupParticleDead(void* owner, u32 param, PAPI::Particle& m, u32 idx)
         PG->items[param].StopRelatedChild(idx);
 
     if (eff->m_Flags.is(CPGDef::SEffect::flOnDeadChild))
-        PG->items[param].StartFreeChild(PE, *eff->m_OnDeadChildName, m);
+        PG->items[param].StartFreeChild(PE, eff->m_OnDeadChildName.c_str(), m);
 }
 //------------------------------------------------------------------------------
 void CParticleGroup::SItem::OnFrame(u32 u_dt, const CPGDef::SEffect& def, Fbox& box, bool& bPlaying)
@@ -555,7 +555,7 @@ BOOL CParticleGroup::Compile(CPGDef* def)
         items.resize(m_Def->m_Effects.size());
         for (CPGDef::EffectVec::const_iterator e_it = m_Def->m_Effects.begin(); e_it != m_Def->m_Effects.end(); ++e_it)
         {
-            CParticleEffect* eff = (CParticleEffect*)RImplementation.model_CreatePE(*(*e_it)->m_EffectName);
+            CParticleEffect* eff = (CParticleEffect*)RImplementation.model_CreatePE((*e_it)->m_EffectName.c_str());
             eff->SetBirthDeadCB(OnGroupParticleBirth, OnGroupParticleDead, this, u32(e_it - m_Def->m_Effects.begin()));
             items[e_it - def->m_Effects.begin()].Set(eff);
         }

@@ -50,7 +50,7 @@ public:
         m_value = luabind::object_cast<bool>(object[name]);
     }
 
-    virtual void assign() { m_object[*m_name] = !!m_value; }
+    virtual void assign() { m_object[m_name.c_str()] = !!m_value; }
     virtual BOOL* value() { return (&m_value); }
 };
 
@@ -71,9 +71,9 @@ public:
 
     virtual void assign()
     {
-        if (!*m_value)
+        if (!m_value.c_str())
             m_value = shared_str("");
-        m_object[*m_name] = *m_value;
+        m_object[m_name.c_str()] = m_value.c_str();
     }
 
     virtual shared_str* value() { return (&m_value); }

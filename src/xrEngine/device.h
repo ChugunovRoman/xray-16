@@ -15,10 +15,6 @@
 #include "xrCore/fastdelegate.h"
 #include "xrCore/ModuleLookup.hpp"
 
-#define VIEWPORT_NEAR 0.2f
-#define VIEWPORT_NEAR_3D 0.01f
-#define HUD_VIEWPORT_NEAR 0.05f
-
 #define DEVICE_RESET_PRECACHE_FRAME_COUNT 10
 
 #include "editor_base.h"
@@ -29,6 +25,10 @@
 
 // refs
 class Task;
+
+constexpr float VIEWPORT_NEAR = 0.2f;
+constexpr float VIEWPORT_NEAR_3D = 0.01f;
+constexpr float HUD_VIEWPORT_NEAR = 0.05f;
 
 class ENGINE_API CRenderDevice : public IWindowHandler
 {

@@ -33,21 +33,6 @@ CStateMonsterAttackAbstract::CStateMonsterAttack(_Object* obj) : inherited(obj)
     this->add_state(eStateAttack_MoveToHomePoint, xr_new<CStateMonsterAttackMoveToHomePoint<_Object>>(obj));
 }
 
-// Lain: added
-TEMPLATE_SPECIALIZATION
-CStateMonsterAttackAbstract::CStateMonsterAttack(_Object* obj, state_ptr state_move2home) : inherited(obj)
-{
-    this->add_state(eStateAttack_Run, xr_new<CStateMonsterAttackRun<_Object>>(obj));
-    this->add_state(eStateAttack_Melee, xr_new<CStateMonsterAttackMelee<_Object>>(obj));
-    this->add_state(eStateAttack_RunAttack, xr_new<CStateMonsterAttackRunAttack<_Object>>(obj));
-    this->add_state(eStateAttack_Attack_On_Run, xr_new<CStateMonsterAttackOnRun<_Object>>(obj));
-    this->add_state(eStateAttack_RunAway, xr_new<CStateMonsterHideFromPoint<_Object>>(obj));
-    this->add_state(eStateAttack_FindEnemy, xr_new<CStateMonsterFindEnemy<_Object>>(obj));
-    this->add_state(eStateAttack_Steal, xr_new<CStateMonsterSteal<_Object>>(obj));
-    this->add_state(eStateAttackCamp, xr_new<CStateMonsterAttackCamp<_Object>>(obj));
-    this->add_state(eStateAttack_MoveToHomePoint, state_move2home);
-}
-
 TEMPLATE_SPECIALIZATION
 CStateMonsterAttackAbstract::CStateMonsterAttack(_Object* obj, state_ptr state_run, state_ptr state_melee)
     : inherited(obj)

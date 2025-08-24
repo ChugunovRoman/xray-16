@@ -10,6 +10,7 @@ XRCORE_API void CLSID2TEXT(CLASS_ID id, pstr text)
         id >>= 8;
     }
 }
+
 XRCORE_API CLASS_ID TEXT2CLSID(pcstr text)
 {
     VERIFY3(xr_strlen(text) <= 8, "Beer from creator CLASS_ID:", text);
@@ -22,5 +23,5 @@ XRCORE_API CLASS_ID TEXT2CLSID(pcstr text)
         buf[8 - need] = ' ';
         need--;
     }
-    return MK_CLSID(buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]);
+    return xray::make_clsid(buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]);
 }

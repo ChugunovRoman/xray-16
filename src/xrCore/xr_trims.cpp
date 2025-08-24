@@ -388,11 +388,11 @@ shared_str _ListToSequence(const xr_vector<shared_str>& lst)
     xr_string out;
     if (lst.size())
     {
-        out = *lst.front();
+        out = lst.front().c_str();
         for (auto s_it = lst.cbegin() + 1; s_it != lst.cend(); ++s_it)
         {
             out += ",";
-            out += **s_it;
+            out += s_it->c_str();
         }
     }
     return shared_str(out.c_str());

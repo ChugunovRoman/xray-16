@@ -348,7 +348,7 @@ void game_cl_mp::TranslateGameMessage(u32 msg, NET_Packet& P)
     break;
     case GAME_EVENT_VOTE_START:
     {
-        xr_sprintf(Text, "%s%s", Color_Main, *StringTable().translate("mp_voting_started_msg"));
+        xr_sprintf(Text, "%s%s", Color_Main, StringTable().translate("mp_voting_started_msg").c_str());
         if (CurrentGameUI())
             CurrentGameUI()->CommonMessageOut(Text);
         OnVoteStart(P);
@@ -356,7 +356,7 @@ void game_cl_mp::TranslateGameMessage(u32 msg, NET_Packet& P)
     break;
     case GAME_EVENT_VOTE_STOP:
     {
-        xr_sprintf(Text, "%s%s", Color_Main, *StringTable().translate("mp_voting_broken"));
+        xr_sprintf(Text, "%s%s", Color_Main, StringTable().translate("mp_voting_broken").c_str());
         if (CurrentGameUI())
             CurrentGameUI()->CommonMessageOut(Text);
 
@@ -367,7 +367,7 @@ void game_cl_mp::TranslateGameMessage(u32 msg, NET_Packet& P)
     {
         string4096 Reason;
         P.r_stringZ(Reason);
-        xr_sprintf(Text, "%s%s", Color_Main, *StringTable().translate(Reason));
+        xr_sprintf(Text, "%s%s", Color_Main, StringTable().translate(Reason).c_str());
         if (CurrentGameUI())
             CurrentGameUI()->CommonMessageOut(Text);
         OnVoteEnd(P);
@@ -404,7 +404,7 @@ void game_cl_mp::TranslateGameMessage(u32 msg, NET_Packet& P)
     {
         string1024 mess;
         P.r_stringZ(mess);
-        xr_sprintf(Text, "%s%s", Color_Red, *StringTable().translate(mess));
+        xr_sprintf(Text, "%s%s", Color_Red, StringTable().translate(mess).c_str());
         if (CurrentGameUI())
             CurrentGameUI()->CommonMessageOut(Text);
     }
@@ -536,9 +536,9 @@ void game_cl_mp::OnChatMessage(NET_Packet* P)
     ///#ifdef DEBUG
     switch (team)
     {
-    case 0: Msg("%s: %s : %s", *StringTable().translate("mp_chat"), PlayerName.c_str(), ChatMsg.c_str()); break;
-    case 1: Msg("- %s: %s : %s", *StringTable().translate("mp_chat"), PlayerName.c_str(), ChatMsg.c_str()); break;
-    case 2: Msg("@ %s: %s : %s", *StringTable().translate("mp_chat"), PlayerName.c_str(), ChatMsg.c_str()); break;
+    case 0: Msg("%s: %s : %s", StringTable().translate("mp_chat").c_str(), PlayerName.c_str(), ChatMsg.c_str()); break;
+    case 1: Msg("- %s: %s : %s", StringTable().translate("mp_chat").c_str(), PlayerName.c_str(), ChatMsg.c_str()); break;
+    case 2: Msg("@ %s: %s : %s", StringTable().translate("mp_chat").c_str(), PlayerName.c_str(), ChatMsg.c_str()); break;
     }
 
     //#endif
@@ -673,8 +673,8 @@ void game_cl_mp::OnPlayerVoted(game_PlayerState* ps)
 
     string1024 resStr;
     xr_sprintf(resStr, "%s\"%s\" %s%s %s\"%s\"", Color_Teams[ps->team], ps->getName(), Color_Main,
-        *StringTable().translate("mp_voted"), ps->m_bCurrentVoteAgreed ? Color_Green : Color_Red,
-        *StringTable().translate(ps->m_bCurrentVoteAgreed ? "mp_voted_yes" : "mp_voted_no"));
+        StringTable().translate("mp_voted").c_str(), ps->m_bCurrentVoteAgreed ? Color_Green : Color_Red,
+        StringTable().translate(ps->m_bCurrentVoteAgreed ? "mp_voted_yes" : "mp_voted_no").c_str());
     if (CurrentGameUI())
         CurrentGameUI()->CommonMessageOut(resStr);
 }
@@ -858,7 +858,7 @@ void game_cl_mp::OnPlayerKilled(NET_Packet& P)
                     KMS.m_initiator.m_rect.y1 = 202;
                     KMS.m_initiator.m_rect.x2 = KMS.m_initiator.m_rect.x1 + 31;
                     KMS.m_initiator.m_rect.y2 = KMS.m_initiator.m_rect.y1 + 30;
-                    xr_sprintf(sWeapon, *StringTable().translate("mp_by_explosion"));
+                    xr_sprintf(sWeapon, StringTable().translate("mp_by_explosion").c_str());
                 }
                 else
                 {
@@ -877,7 +877,7 @@ void game_cl_mp::OnPlayerKilled(NET_Packet& P)
                     KMS.m_initiator.m_rect.y1 = 202;
                     KMS.m_initiator.m_rect.x2 = KMS.m_initiator.m_rect.x1 + 31;
                     KMS.m_initiator.m_rect.y2 = KMS.m_initiator.m_rect.y1 + 30;
-                    xr_sprintf(sWeapon, *StringTable().translate("mp_by_anomaly"));
+                    xr_sprintf(sWeapon, StringTable().translate("mp_by_anomaly").c_str());
                 }
             }
         }
@@ -894,14 +894,14 @@ void game_cl_mp::OnPlayerKilled(NET_Packet& P)
                     KMS.m_initiator.m_rect.y1 = 202;
                     KMS.m_initiator.m_rect.x2 = KMS.m_initiator.m_rect.x1 + 31;
                     KMS.m_initiator.m_rect.y2 = KMS.m_initiator.m_rect.y1 + 30;
-                    Msg("%s killed by anomaly", *KMS.m_victim.m_name);
+                    Msg("%s killed by anomaly", KMS.m_victim.m_name.c_str());
                     break;
                 }
             };
 
             if (pKiller)
             {
-                KMS.m_killer.m_name = pKiller ? pKiller->getName() : *(pOKiller->cNameSect());
+                KMS.m_killer.m_name = pKiller ? pKiller->getName() : pOKiller->cNameSect().c_str();
                 KMS.m_killer.m_color = pKiller ? Color_Teams_u32[ModifyTeam(pKiller->team) + 1] : Color_Neutral_u32;
             };
         };
@@ -933,7 +933,7 @@ void game_cl_mp::OnPlayerKilled(NET_Packet& P)
                 KMS.m_ext_info.m_rect.y2 = pBS->IconRects[0].y1 + pBS->IconRects[0].y2;
             };
 
-            xr_sprintf(sSpecial, *StringTable().translate("mp_with_headshot"));
+            xr_sprintf(sSpecial, StringTable().translate("mp_with_headshot").c_str());
 
             if (pOKiller && pOKiller == Level().CurrentViewEntity())
                 PlaySndMessage(ID_HEADSHOT);
@@ -952,7 +952,7 @@ void game_cl_mp::OnPlayerKilled(NET_Packet& P)
                 KMS.m_ext_info.m_rect.y2 = pBS->IconRects[0].y1 + pBS->IconRects[0].y2;
             };
 
-            xr_sprintf(sSpecial, *StringTable().translate("mp_with_eyeshot"));
+            xr_sprintf(sSpecial, StringTable().translate("mp_with_eyeshot").c_str());
 
             if (pOKiller && pOKiller == Level().CurrentViewEntity())
                 PlaySndMessage(ID_ASSASSIN);
@@ -971,7 +971,7 @@ void game_cl_mp::OnPlayerKilled(NET_Packet& P)
                 KMS.m_ext_info.m_rect.y2 = pBS->IconRects[0].y1 + pBS->IconRects[0].y2;
             };
 
-            xr_sprintf(sSpecial, *StringTable().translate("mp_with_backstab"));
+            xr_sprintf(sSpecial, StringTable().translate("mp_with_backstab").c_str());
             if (pOKiller && pOKiller == Level().CurrentViewEntity())
                 PlaySndMessage(ID_ASSASSIN);
             break;
@@ -988,13 +988,13 @@ void game_cl_mp::OnPlayerKilled(NET_Packet& P)
             KMS.m_ext_info.m_rect.x2 = KMS.m_ext_info.m_rect.x1 + 30;
             KMS.m_ext_info.m_rect.y2 = KMS.m_ext_info.m_rect.y1 + 30;
             //-------------------------------------
-            Msg(sWeapon[0] ? "%s killed himself by %s" : "%s killed himself", *KMS.m_killer.m_name,
+            Msg(sWeapon[0] ? "%s killed himself by %s" : "%s killed himself", KMS.m_killer.m_name.c_str(),
                 sWeapon[0] ? sWeapon + 5 : "");
         }
         else
         {
             //-------------------------------------
-            Msg("%s killed %s %s%s", *KMS.m_killer.m_name, *KMS.m_victim.m_name, sWeapon, sSpecial[0] ? sSpecial : "");
+            Msg("%s killed %s %s%s", KMS.m_killer.m_name.c_str(), KMS.m_victim.m_name.c_str(), sWeapon, sSpecial[0] ? sSpecial : "");
         }
     }
     break;
@@ -1018,22 +1018,22 @@ void game_cl_mp::OnPlayerKilled(NET_Packet& P)
                 KMS.m_ext_info.m_rect.x2 = KMS.m_ext_info.m_rect.x1 + 31;
                 KMS.m_ext_info.m_rect.y2 = KMS.m_ext_info.m_rect.y1 + 30;
 
-                Msg("%s died from bleeding, thanks to anomaly", *KMS.m_victim.m_name);
+                Msg("%s died from bleeding, thanks to anomaly", KMS.m_victim.m_name.c_str());
                 break;
             }
         };
 
         if (pKiller)
         {
-            KMS.m_killer.m_name = pKiller ? pKiller->getName() : *(pOKiller->cNameSect());
+            KMS.m_killer.m_name = pKiller ? pKiller->getName() : pOKiller->cNameSect().c_str();
             KMS.m_killer.m_color = pKiller ? Color_Teams_u32[ModifyTeam(pKiller->team) + 1] : Color_Neutral_u32;
             //-----------------------------------------------------------------------
-            Msg("%s died from bleeding, thanks to %s ", *KMS.m_victim.m_name, *KMS.m_killer.m_name);
+            Msg("%s died from bleeding, thanks to %s ", KMS.m_victim.m_name.c_str(), KMS.m_killer.m_name.c_str());
         }
         else
         {
             //-----------------------------------------------------------------
-            Msg("%s died from bleeding", *KMS.m_victim.m_name);
+            Msg("%s died from bleeding", KMS.m_victim.m_name.c_str());
         };
     }
     break;
@@ -1046,7 +1046,7 @@ void game_cl_mp::OnPlayerKilled(NET_Packet& P)
         KMS.m_initiator.m_rect.x2 = KMS.m_initiator.m_rect.x1 + 24;
         KMS.m_initiator.m_rect.y2 = KMS.m_initiator.m_rect.y1 + 24;
         //---------------------------------------------------------
-        Msg("%s killed by radiation", *KMS.m_victim.m_name);
+        Msg("%s killed by radiation", KMS.m_victim.m_name.c_str());
     }
     break;
     }
@@ -1065,8 +1065,8 @@ void game_cl_mp::OnPlayerChangeName(NET_Packet& P)
     P.r_stringZ(NewName);
 
     string1024 resStr;
-    xr_sprintf(resStr, "%s\"%s\" %s%s %s\"%s\"", Color_Teams[Team], OldName, Color_Main, *StringTable().translate("mp_is_now"),
-        Color_Teams[Team], NewName);
+    xr_sprintf(resStr, "%s\"%s\" %s%s %s\"%s\"", Color_Teams[Team], OldName, Color_Main,
+        StringTable().translate("mp_is_now").c_str(), Color_Teams[Team], NewName);
     if (CurrentGameUI())
         CurrentGameUI()->CommonMessageOut(resStr);
     Msg(NewName);
@@ -1097,8 +1097,8 @@ void game_cl_mp::OnRankChanged(u8 OldRank)
     string256 tmp;
     string1024 RankStr;
     xr_sprintf(tmp, "rank_%d", local_player->rank);
-    xr_sprintf(RankStr, "%s : %s", *StringTable().translate("mp_your_rank"),
-        *StringTable().translate(READ_IF_EXISTS(pSettings, r_string, tmp, "rank_name", "")));
+    xr_sprintf(RankStr, "%s : %s", StringTable().translate("mp_your_rank").c_str(),
+        StringTable().translate(READ_IF_EXISTS(pSettings, r_string, tmp, "rank_name", "")).c_str());
     if (CurrentGameUI())
         CurrentGameUI()->CommonMessageOut(RankStr);
 #ifdef DEBUG
@@ -1315,7 +1315,7 @@ void game_cl_mp::OnGameRoundStarted()
 {
     //			xr_sprintf(Text, "%sRound started !!!",Color_Main);
     string512 Text;
-    xr_sprintf(Text, "%s%s", Color_Main, *StringTable().translate("mp_match_started"));
+    xr_sprintf(Text, "%s%s", Color_Main, StringTable().translate("mp_match_started").c_str());
     if (CurrentGameUI())
         CurrentGameUI()->CommonMessageOut(Text);
     OnSwitchPhase_InProgress();

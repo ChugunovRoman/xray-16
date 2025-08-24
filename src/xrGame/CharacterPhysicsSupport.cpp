@@ -161,7 +161,7 @@ void CCharacterPhysicsSupport::in_NetSpawn(CSE_Abstract* e)
     IKinematicsAnimated* ka = smart_cast<IKinematicsAnimated*>(pVisual);
     IKinematics* pK = smart_cast<IKinematics*>(pVisual);
     VERIFY(&e->spawn_ini());
-    m_death_anims.setup(ka, *e->s_name, pSettings);
+    m_death_anims.setup(ka, e->s_name.c_str(), pSettings);
     if (!m_EntityAlife.g_Alive())
     {
         if (m_eType == etStalker)
@@ -235,7 +235,7 @@ void CCharacterPhysicsSupport::SpawnInitPhysics(CSE_Abstract* e)
     {
 #ifdef DEBUG
         if (ph_dbg_draw_mask1.test(ph_m1_DbgTrackObject) &&
-            xr_stricmp(PH_DBG_ObjectTrackName(), *m_EntityAlife.cName()) == 0)
+            xr_stricmp(PH_DBG_ObjectTrackName(), m_EntityAlife.cName().c_str()) == 0)
         {
             Msg("CCharacterPhysicsSupport::SpawnInitPhysics obj %s before collision correction %f,%f,%f",
                 PH_DBG_ObjectTrackName(), m_EntityAlife.Position().x, m_EntityAlife.Position().y,
@@ -254,7 +254,7 @@ void CCharacterPhysicsSupport::SpawnInitPhysics(CSE_Abstract* e)
 
 #ifdef DEBUG
         if (ph_dbg_draw_mask1.test(ph_m1_DbgTrackObject) &&
-            xr_stricmp(PH_DBG_ObjectTrackName(), *m_EntityAlife.cName()) == 0)
+            xr_stricmp(PH_DBG_ObjectTrackName(), m_EntityAlife.cName().c_str()) == 0)
         {
             Msg("CCharacterPhysicsSupport::SpawnInitPhysics obj %s after collision correction %f,%f,%f",
                 PH_DBG_ObjectTrackName(), m_EntityAlife.Position().x, m_EntityAlife.Position().y,
@@ -654,7 +654,7 @@ void CCharacterPhysicsSupport::CreateSkeleton(CPhysicsShell*& pShell)
     pShell->Build();
 
 #ifdef DEBUG
-    Msg("shell for %s[%d] created in %f ms", *m_EntityAlife.cName(), m_EntityAlife.ID(), t.GetElapsed_sec() * 1000.f);
+    Msg("shell for %s[%d] created in %f ms", m_EntityAlife.cName().c_str(), m_EntityAlife.ID(), t.GetElapsed_sec() * 1000.f);
 #endif
 }
 

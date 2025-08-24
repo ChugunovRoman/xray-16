@@ -363,7 +363,7 @@ void CExplosive::Explode()
     explode_matrix.c.set(pos);
 
     CParticlesObject* pStaticPG;
-    pStaticPG = CParticlesObject::Create(*m_sExplodeParticles, !m_bDynamicParticles);
+    pStaticPG = CParticlesObject::Create(m_sExplodeParticles.c_str(), !m_bDynamicParticles);
     if (m_bDynamicParticles)
         m_pExpParticle = pStaticPG;
     pStaticPG->UpdateParent(explode_matrix, vel);
@@ -393,8 +393,8 @@ void CExplosive::Explode()
         CCartridge cartridge;
         cartridge.param_s.kDist = 1.f;
         cartridge.param_s.kHit = 1.f;
-        //.		cartridge.param_s.kCritical			= 1.f;
         cartridge.param_s.kImpulse = 1.f;
+        cartridge.param_s.kPierce = 1.f;
         cartridge.param_s.kAP = 1.f;
         cartridge.param_s.fWallmarkSize = fWallmarkSize;
         cartridge.bullet_material_idx = GMLib.GetMaterialIdx(WEAPON_MATERIAL_NAME);

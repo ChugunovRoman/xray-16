@@ -294,7 +294,7 @@ bool CMainMenu::ReloadUI()
             m_startDialog->HideDialog();
         CleanInternals();
     }
-    IFactoryObject* dlg = NEW_INSTANCE(TEXT2CLSID("MAIN_MNU"));
+    IFactoryObject* dlg = NEW_INSTANCE(xray::make_clsid("MAIN_MNU"));
     if (!dlg)
     {
         m_Flags.set(flActive | flNeedChangeCapture, FALSE);

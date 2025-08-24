@@ -7,7 +7,7 @@ struct xr_token;
 class XRUICORE_API CUIOptionsItem
 {
 public:
-    enum ESystemDepends
+    enum ESystemDepends : u8
     {
         sdNothing,
         sdVidRestart,

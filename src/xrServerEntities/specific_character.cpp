@@ -53,7 +53,7 @@ void CSpecificCharacter::load_shared(LPCSTR)
     pXML->SetLocalRoot(pXML->GetRoot());
 
     XML_NODE item_node = pXML->NavigateToNode(id_to_index::tag_name, item_data.pos_in_file);
-    R_ASSERT3(item_node, "specific_character id=", *item_data.id);
+    R_ASSERT3(item_node, "specific_character id=", item_data.id.c_str());
 
     pXML->SetLocalRoot(item_node);
 
@@ -70,7 +70,7 @@ void CSpecificCharacter::load_shared(LPCSTR)
         data()->m_bDefaultForCommunity = false;
 
     R_ASSERT3(!(data()->m_bNoRandom && data()->m_bDefaultForCommunity),
-        "cannot set 'no_random' and 'team_default' flags simultaneously, profile id", *shared_str(item_data.id));
+        "cannot set 'no_random' and 'team_default' flags simultaneously, profile id", shared_str(item_data.id).c_str());
 
 #ifdef XRGAME_EXPORTS
 
@@ -164,7 +164,7 @@ void CSpecificCharacter::load_shared(LPCSTR)
 #ifdef XRGAME_EXPORTS
 
     LPCSTR team = pXML->Read("community", 0, NULL);
-    R_ASSERT3(team != NULL, "'community' field not fulfiled for specific character", *m_OwnId);
+    R_ASSERT3(team != NULL, "'community' field not fulfiled for specific character", m_OwnId.c_str());
 
     char* buf_str = xr_strdup(team);
     xr_strlwr(buf_str);
@@ -172,16 +172,16 @@ void CSpecificCharacter::load_shared(LPCSTR)
     xr_free(buf_str);
 
     if (data()->m_Community.index() == NO_COMMUNITY_INDEX)
-        xrDebug::Fatal(DEBUG_INFO, "wrong 'community' '%s' in specific character %s ", team, *m_OwnId);
+        xrDebug::Fatal(DEBUG_INFO, "wrong 'community' '%s' in specific character %s ", team, m_OwnId.c_str());
 
     if (pSettingsFE->line_exist(team, "snd_config"))
         data()->m_sound_voice_prefix = pSettingsFE->r_string(team, "snd_config");
 
     data()->m_Rank = pXML->ReadInt("rank", 0, NO_RANK);
-    R_ASSERT3(data()->m_Rank != NO_RANK, "'rank' field not fulfiled for specific character", *m_OwnId);
+    R_ASSERT3(data()->m_Rank != NO_RANK, "'rank' field not fulfiled for specific character", m_OwnId.c_str());
     data()->m_Reputation = pXML->ReadInt("reputation", 0, NO_REPUTATION);
     R_ASSERT3(
-        data()->m_Reputation != NO_REPUTATION, "'reputation' field not fulfiled for specific character", *m_OwnId);
+        data()->m_Reputation != NO_REPUTATION, "'reputation' field not fulfiled for specific character", m_OwnId.c_str());
 
     if (pXML->NavigateToNode(pXML->GetLocalRoot(), "money", 0))
     {

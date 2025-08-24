@@ -31,8 +31,7 @@ class CControl_Manager
     CONTROLLERS_MAP m_control_elems;
     CONTROLLERS_MAP m_base_elems;
 
-    using COM_VEC = xr_vector<CControl_Com*>;
-    COM_VEC m_active_elems;
+    xr_vector<CControl_Com*> m_active_elems;
 
     CControlAnimation* m_animation;
     CControlDirection* m_direction;
@@ -81,10 +80,10 @@ public:
 
     ControlCom::IComData* data(CControl_Com*, ControlCom::EControlType);
 
-    CControlAnimation& animation() { return (*m_animation); }
-    CControlDirection& direction() { return (*m_direction); }
-    CControlPathBuilder& path_builder() { return (*m_path); }
-    CControlMovement& movement() { return (*m_movement); }
+    CControlAnimation& animation() const { return (*m_animation); }
+    CControlDirection& direction() const { return (*m_direction); }
+    CControlPathBuilder& path_builder() const { return (*m_path); }
+    CControlMovement& movement() const { return (*m_movement); }
     void install_path_manager(CControlPathBuilder*);
 
     bool is_captured(ControlCom::EControlType);

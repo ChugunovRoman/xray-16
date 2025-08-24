@@ -86,19 +86,7 @@ void UIStyleManager::SetupStyle(u32 styleID)
 
 void UIStyleManager::Reset()
 {
-    // Hack: activate main menu to prevent crash
-    // I don't know why it crashes while in the game
-    bool shouldHideMainMenu = false;
-    if (g_pGamePersistent && g_pGamePersistent->m_pMainMenu)
-    {
-        shouldHideMainMenu = !g_pGamePersistent->m_pMainMenu->IsActive();
-        g_pGamePersistent->m_pMainMenu->Activate(true);
-    }
-
     Device.seqUIReset.Process();
-
-    if (shouldHideMainMenu)
-        g_pGamePersistent->m_pMainMenu->Activate(false);
 }
 
 bool UIStyleManager::SetStyle(pcstr name, bool reloadUI)

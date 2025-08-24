@@ -61,7 +61,7 @@ private:
     struct pred_rstr
     {
         bool operator()(const shared_str &lhs, const shared_str &rhs) const
-        { return xr_strcmp(*lhs, *rhs)<0; }
+        { return xr_strcmp(lhs.c_str(), rhs.c_str()) < 0; }
     };
 
 protected:

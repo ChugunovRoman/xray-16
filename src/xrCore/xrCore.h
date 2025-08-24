@@ -65,7 +65,7 @@ struct XRCORE_API xr_rtoken
         : name(_nm), id(_id) {}
 
     void rename(pcstr _nm) { name = _nm; }
-    bool equal(pcstr _nm) const { return (0 == xr_strcmp(*name, _nm)); }
+    bool equal(pcstr _nm) const { return (0 == xr_strcmp(name.c_str(), _nm)); }
 };
 
 #include "xr_shortcut.h"

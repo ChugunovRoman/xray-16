@@ -10,6 +10,7 @@ public:
     void RegisterDebuggable();
     void UnregisterDebuggable();
 
+    [[nodiscard]]
     virtual pcstr GetDebugType() = 0;
 
     virtual bool FillDebugTree(const CUIDebugState& debugState) = 0;

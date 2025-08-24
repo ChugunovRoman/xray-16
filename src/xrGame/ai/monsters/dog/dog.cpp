@@ -94,14 +94,14 @@ void CAI_Dog::Load(LPCSTR section)
     anim().AddAnim(eAnimRunTurnRight, "stand_run_turn_right_", -1, &velocity_run, PS_STAND);
 
     anim().AddAnim(eAnimCheckCorpse, "stand_check_corpse_", -1, &velocity_none, PS_STAND);
-    anim().AddAnim2(eAnimDragCorpse, { "stand_drage_", "stand_drag_" }, -1, &velocity_drag, PS_STAND);
+    anim().AddAnim(eAnimDragCorpse, "stand_drage_", -1, &velocity_drag, PS_STAND);
     // anim().AddAnim(eAnimSniff,		"stand_sniff_",			-1, &velocity_none,		PS_STAND);
     // anim().AddAnim(eAnimHowling,		"stand_howling_",		-1,	&velocity_none,		PS_STAND);
 
     // anim().AddAnim(eAnimJumpGlide,   	"jump_glide_",			-1, &velocity_none,		PS_STAND);
     anim().AddAnim(eAnimJumpGlide, "stand_jump_left_", 0, &velocity_none, PS_STAND);
 
-    anim().AddAnim2(eAnimSteal, { "stand_walk_fwd_", "stand_steal_" }, -1, &velocity_steal, PS_STAND);
+    anim().AddAnim(eAnimSteal, "stand_walk_fwd_", -1, &velocity_steal, PS_STAND);
     anim().AddAnim(eAnimThreaten, "stand_threaten_", -1, &velocity_none, PS_STAND);
 
     anim().AddAnim(eAnimSitLieDown, "sit_lie_down_", -1, &velocity_none, PS_SIT);
@@ -115,8 +115,8 @@ void CAI_Dog::Load(LPCSTR section)
 
     /////////////mob home
 
-    anim().AddAnim(eAnimHomeWalkSmelling, { "stand_walk_smelling_", true }, -1, &velocity_walk_smell, PS_STAND);
-    anim().AddAnim(eAnimHomeWalkGrowl, { "stand_growl_walk_", true }, -1, &velocity_walk_growl, PS_STAND);
+    anim().AddAnim(eAnimHomeWalkSmelling, "stand_walk_smelling_", -1, &velocity_walk_smell, PS_STAND);
+    anim().AddAnim(eAnimHomeWalkGrowl, "stand_growl_walk_", -1, &velocity_walk_growl, PS_STAND);
 
     /////////////end mob home
 

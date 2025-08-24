@@ -2,7 +2,7 @@
 
 struct OggVorbis_File;
 
-enum class SoundFormat
+enum class SoundFormat : u8
 {
     Unknown,
     PCM,

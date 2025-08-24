@@ -458,7 +458,7 @@ void game_sv_GameState::Create(shared_str& options)
 
 void game_sv_GameState::ReadOptions(shared_str& options)
 {
-    g_sv_base_dwRPointFreezeTime = get_option_i(*options, "rpfrz", g_sv_base_dwRPointFreezeTime / 1000) * 1000;
+    g_sv_base_dwRPointFreezeTime = get_option_i(options.c_str(), "rpfrz", g_sv_base_dwRPointFreezeTime / 1000) * 1000;
 
     //.	xr_strcpy(MAPROT_LIST, MAPROT_LIST_NAME);
     //.	if (!FS.exist(MAPROT_LIST))
@@ -466,7 +466,7 @@ void game_sv_GameState::ReadOptions(shared_str& options)
     if (FS.exist(MAPROT_LIST))
         Console->ExecuteScript(MAPROT_LIST);
 
-    g_sv_base_iVotingEnabled = get_option_i(*options, "vote", (g_sv_base_iVotingEnabled));
+    g_sv_base_iVotingEnabled = get_option_i(options.c_str(), "vote", (g_sv_base_iVotingEnabled));
     //---------------------------
     // Convert old vote param
     if (g_sv_base_iVotingEnabled != 0)
@@ -1066,8 +1066,8 @@ shared_str game_sv_GameState::parse_level_version(const shared_str& server_optio
 shared_str game_sv_GameState::parse_level_name(const shared_str& server_options)
 {
     string64 l_name = "";
-    VERIFY(_GetItemCount(*server_options, '/'));
-    return (_GetItem(*server_options, 0, l_name, '/'));
+    VERIFY(_GetItemCount(server_options.c_str(), '/'));
+    return (_GetItem(server_options.c_str(), 0, l_name, '/'));
 }
 
 void game_sv_GameState::on_death(CSE_Abstract* e_dest, CSE_Abstract* e_src)

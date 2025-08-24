@@ -269,7 +269,7 @@ void CWeaponAutomaticShotgun::net_Import(NET_Packet& P)
         if (LocalAmmoType == l_cartridge.m_LocalAmmoType)
             continue;
 #ifdef DEBUG
-        Msg("! %s reload to %s", *l_cartridge.m_ammoSect, m_ammoTypes[LocalAmmoType].c_str());
+        Msg("! %s reload to %s", l_cartridge.m_ammoSect.c_str(), m_ammoTypes[LocalAmmoType].c_str());
 #endif
         l_cartridge.Load(m_ammoTypes[LocalAmmoType].c_str(), LocalAmmoType);
     }

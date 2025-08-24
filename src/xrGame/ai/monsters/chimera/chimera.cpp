@@ -123,7 +123,7 @@ void CChimera::reinit()
 {
     inherited::reinit();
 
-    move().load_velocity(*cNameSect(), "Velocity_JumpGround", MonsterMovement::eChimeraVelocityParameterJumpGround);
+    move().load_velocity(cNameSect().c_str(), "Velocity_JumpGround", MonsterMovement::eChimeraVelocityParameterJumpGround);
 
     com_man().load_jump_data(0, //"jump_attack_0",
         0, //"jump_attack_0",

@@ -146,7 +146,7 @@ CInifile& CSE_Abstract::spawn_ini()
 #pragma warning(push)
 #pragma warning(disable : 4238)
         // XXX: what a casting mess.. Do we need to use shared_str for m_ini_string?
-        IReader reader((void*)(*(m_ini_string)), m_ini_string.size());
+        IReader reader((void*)m_ini_string.c_str(), m_ini_string.size());
         m_ini_file = xr_new<CInifile>(&reader, FS.get_path(_game_config_)->m_Path);
 #pragma warning(pop)
     }
@@ -354,7 +354,7 @@ void CSE_Abstract::load(NET_Packet& tNetPacket)
 CSE_Abstract* CSE_Abstract::base() { return (this); }
 const CSE_Abstract* CSE_Abstract::base() const { return (this); }
 CSE_Abstract* CSE_Abstract::init() { return (this); }
-LPCSTR CSE_Abstract::name() const { return (*s_name); }
+LPCSTR CSE_Abstract::name() const { return s_name.c_str(); }
 LPCSTR CSE_Abstract::name_replace() const { return (s_name_replace); }
 Fvector& CSE_Abstract::position() { return (o_Position); }
 Fvector& CSE_Abstract::angle() { return (o_Angle); }

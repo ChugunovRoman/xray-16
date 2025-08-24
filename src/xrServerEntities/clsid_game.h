@@ -1,236 +1,237 @@
 #pragma once
+
 #include "xrCore/clsid.h"
 
-constexpr CLASS_ID CLSID_OBJECT_ACTOR               = MK_CLSID('O', '_', 'A', 'C', 'T', 'O', 'R', ' ');
-constexpr CLASS_ID CLSID_OBJECT_HLAMP               = MK_CLSID('O', '_', 'H', 'L', 'A', 'M', 'P', ' ');
-constexpr CLASS_ID CLSID_ENTITY                     = MK_CLSID('E', 'N', 'T', 'I', 'T', 'Y', ' ', ' ');
-constexpr CLASS_ID CLSID_SPECTATOR                  = MK_CLSID('S', 'P', 'E', 'C', 'T', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_PROJECTOR           = MK_CLSID('O', '_', 'S', 'E', 'A', 'R', 'C', 'H');
+constexpr CLASS_ID CLSID_OBJECT_ACTOR               = xray::make_clsid("O_ACTOR ");
+constexpr CLASS_ID CLSID_OBJECT_HLAMP               = xray::make_clsid("O_HLAMP ");
+constexpr CLASS_ID CLSID_ENTITY                     = xray::make_clsid("ENTITY  ");
+constexpr CLASS_ID CLSID_SPECTATOR                  = xray::make_clsid("SPECT   ");
+constexpr CLASS_ID CLSID_OBJECT_PROJECTOR           = xray::make_clsid("O_SEARCH");
 
 // all the monsters
-constexpr CLASS_ID CLSID_LEVEL_POINT                = MK_CLSID('L', 'V', 'L', 'P', 'O', 'I', 'N', 'T');
-constexpr CLASS_ID CLSID_SCRIPT_OBJECT              = MK_CLSID('S', 'C', 'R', 'P', 'T', 'O', 'B', 'J');
-constexpr CLASS_ID CLSID_AI_GRAPH                   = MK_CLSID('A', 'I', '_', 'G', 'R', 'A', 'P', 'H');
-constexpr CLASS_ID CLSID_AI_CROW                    = MK_CLSID('A', 'I', '_', 'C', 'R', 'O', 'W', ' ');
+constexpr CLASS_ID CLSID_LEVEL_POINT                = xray::make_clsid("LVLPOINT");
+constexpr CLASS_ID CLSID_SCRIPT_OBJECT              = xray::make_clsid("SCRPTOBJ");
+constexpr CLASS_ID CLSID_AI_GRAPH                   = xray::make_clsid("AI_GRAPH");
+constexpr CLASS_ID CLSID_AI_CROW                    = xray::make_clsid("AI_CROW ");
 
-constexpr CLASS_ID CLSID_AI_ZOMBIE                  = MK_CLSID('A', 'I', '_', 'Z', 'O', 'M', ' ', ' ');
-constexpr CLASS_ID CLSID_AI_POLTERGEIST             = MK_CLSID('A', 'I', '_', 'P', 'O', 'L', 'T', 'R');
+constexpr CLASS_ID CLSID_AI_ZOMBIE                  = xray::make_clsid("AI_ZOM  ");
+constexpr CLASS_ID CLSID_AI_POLTERGEIST             = xray::make_clsid("AI_POLTR");
 
-constexpr CLASS_ID CLSID_AI_FLESH                   = MK_CLSID('A', 'I', '_', 'F', 'L', 'E', 'S', 'H');
-constexpr CLASS_ID CLSID_AI_FLESH_GROUP             = MK_CLSID('A', 'I', '_', 'F', 'L', 'E', '_', 'G');
+constexpr CLASS_ID CLSID_AI_FLESH                   = xray::make_clsid("AI_FLESH");
+constexpr CLASS_ID CLSID_AI_FLESH_GROUP             = xray::make_clsid("AI_FLE_G");
 
-constexpr CLASS_ID CLSID_AI_PHANTOM                 = MK_CLSID('A', 'I', '_', 'P', 'H', 'A', 'N', 'T');
-constexpr CLASS_ID CLSID_AI_SPONGER                 = MK_CLSID('A', 'I', '_', 'S', 'P', 'O', 'N', 'G');
-constexpr CLASS_ID CLSID_AI_CONTROLLER              = MK_CLSID('A', 'I', '_', 'C', 'O', 'N', 'T', 'R');
-constexpr CLASS_ID CLSID_AI_BLOODSUCKER             = MK_CLSID('A', 'I', '_', 'B', 'L', 'O', 'O', 'D');
-constexpr CLASS_ID CLSID_AI_STALKER                 = MK_CLSID('A', 'I', '_', 'S', 'T', 'L', ' ', ' ');
-constexpr CLASS_ID CLSID_AI_BURER                   = MK_CLSID('A', 'I', '_', 'B', 'U', 'R', 'E', 'R');
-constexpr CLASS_ID CLSID_AI_GIANT                   = MK_CLSID('A', 'I', '_', 'G', 'I', 'A', 'N', 'T');
-constexpr CLASS_ID CLSID_AI_CHIMERA                 = MK_CLSID('A', 'I', '_', 'H', 'I', 'M', 'E', 'R');
-constexpr CLASS_ID CLSID_AI_FRACTURE                = MK_CLSID('A', 'I', '_', 'F', 'R', 'A', 'C', 'T');
-constexpr CLASS_ID CLSID_AI_DOG_BLACK               = MK_CLSID('A', 'I', '_', 'D', 'O', 'G', '_', 'B');
-constexpr CLASS_ID CLSID_AI_DOG_RED                 = MK_CLSID('A', 'I', '_', 'D', 'O', 'G', '_', 'R');
-constexpr CLASS_ID CLSID_AI_DOG_PSY                 = MK_CLSID('A', 'I', '_', 'D', 'O', 'G', '_', 'P');
-constexpr CLASS_ID CLSID_AI_DOG_PSY_PHANTOM         = MK_CLSID('A', 'I', '_', 'D', 'O', 'G', '_', 'F');
-constexpr CLASS_ID CLSID_AI_TRADER                  = MK_CLSID('A', 'I', '_', 'T', 'R', 'A', 'D', 'E');
-constexpr CLASS_ID CLSID_AI_BOAR                    = MK_CLSID('A', 'I', '_', 'B', 'O', 'A', 'R', ' ');
-constexpr CLASS_ID CLSID_AI_SNORK                   = MK_CLSID('A', 'I', '_', 'S', 'N', 'O', 'R', 'K');
-constexpr CLASS_ID CLSID_AI_CAT                     = MK_CLSID('A', 'I', '_', 'C', 'A', 'T', ' ', ' ');
-constexpr CLASS_ID CLSID_AI_TUSHKANO                = MK_CLSID('A', 'I', '_', 'T', 'U', 'S', 'H', ' ');
-constexpr CLASS_ID CLSID_AI_RAT                     = MK_CLSID('A', 'I', '_', 'R', 'A', 'T', ' ', ' ');
+constexpr CLASS_ID CLSID_AI_PHANTOM                 = xray::make_clsid("AI_PHANT");
+constexpr CLASS_ID CLSID_AI_SPONGER                 = xray::make_clsid("AI_SPONG");
+constexpr CLASS_ID CLSID_AI_CONTROLLER              = xray::make_clsid("AI_CONTR");
+constexpr CLASS_ID CLSID_AI_BLOODSUCKER             = xray::make_clsid("AI_BLOOD");
+constexpr CLASS_ID CLSID_AI_STALKER                 = xray::make_clsid("AI_STL  ");
+constexpr CLASS_ID CLSID_AI_BURER                   = xray::make_clsid("AI_BURER");
+constexpr CLASS_ID CLSID_AI_GIANT                   = xray::make_clsid("AI_GIANT");
+constexpr CLASS_ID CLSID_AI_CHIMERA                 = xray::make_clsid("AI_HIMER");
+constexpr CLASS_ID CLSID_AI_FRACTURE                = xray::make_clsid("AI_FRACT");
+constexpr CLASS_ID CLSID_AI_DOG_BLACK               = xray::make_clsid("AI_DOG_B");
+constexpr CLASS_ID CLSID_AI_DOG_RED                 = xray::make_clsid("AI_DOG_R");
+constexpr CLASS_ID CLSID_AI_DOG_PSY                 = xray::make_clsid("AI_DOG_P");
+constexpr CLASS_ID CLSID_AI_DOG_PSY_PHANTOM         = xray::make_clsid("AI_DOG_F");
+constexpr CLASS_ID CLSID_AI_TRADER                  = xray::make_clsid("AI_TRADE");
+constexpr CLASS_ID CLSID_AI_BOAR                    = xray::make_clsid("AI_BOAR ");
+constexpr CLASS_ID CLSID_AI_SNORK                   = xray::make_clsid("AI_SNORK");
+constexpr CLASS_ID CLSID_AI_CAT                     = xray::make_clsid("AI_CAT  ");
+constexpr CLASS_ID CLSID_AI_TUSHKANO                = xray::make_clsid("AI_TUSH ");
+constexpr CLASS_ID CLSID_AI_RAT                     = xray::make_clsid("AI_RAT  ");
 
 // vehicles
-constexpr CLASS_ID CLSID_CAR                        = MK_CLSID('C', '_', 'N', 'I', 'V', 'A', ' ', ' ');
-constexpr CLASS_ID CLSID_VEHICLE_HELICOPTER         = MK_CLSID('C', '_', 'H', 'L', 'C', 'P', 'T', 'R');
+constexpr CLASS_ID CLSID_CAR                        = xray::make_clsid("C_NIVA  ");
+constexpr CLASS_ID CLSID_VEHICLE_HELICOPTER         = xray::make_clsid("C_HLCPTR");
 
-constexpr CLASS_ID CLSID_EVENT                      = MK_CLSID('E', 'V', 'E', 'N', 'T', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_FLYER               = MK_CLSID('O', '_', 'F', 'L', 'Y', 'E', 'R', ' ');
-constexpr CLASS_ID CLSID_OBJECT_DOOR                = MK_CLSID('O', '_', 'D', 'O', 'O', 'R', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_LIFT                = MK_CLSID('O', '_', 'L', 'I', 'F', 'T', ' ', ' ');
+constexpr CLASS_ID CLSID_EVENT                      = xray::make_clsid("EVENT   ");
+constexpr CLASS_ID CLSID_OBJECT_FLYER               = xray::make_clsid("O_FLYER ");
+constexpr CLASS_ID CLSID_OBJECT_DOOR                = xray::make_clsid("O_DOOR  ");
+constexpr CLASS_ID CLSID_OBJECT_LIFT                = xray::make_clsid("O_LIFT  ");
 
 // Artefacts
-constexpr CLASS_ID CLSID_AF_MERCURY_BALL            = MK_CLSID('A', 'F', '_', 'M', 'B', 'A', 'L', 'L');
-constexpr CLASS_ID CLSID_AF_GRAVI                   = MK_CLSID('A', 'F', '_', 'G', 'R', 'A', 'V', 'I');
-constexpr CLASS_ID CLSID_AF_BLACKDROPS              = MK_CLSID('A', 'F', '_', 'B', 'D', 'R', 'O', 'P');
-constexpr CLASS_ID CLSID_AF_NEEDLES                 = MK_CLSID('A', 'F', '_', 'N', 'E', 'E', 'D', 'L');
-constexpr CLASS_ID CLSID_AF_BAST                    = MK_CLSID('A', 'F', '_', 'B', 'A', 'S', 'T', ' ');
-constexpr CLASS_ID CLSID_AF_BLACK_GRAVI             = MK_CLSID('A', 'F', '_', 'B', 'G', 'R', 'A', 'V');
-constexpr CLASS_ID CLSID_AF_DUMMY                   = MK_CLSID('A', 'F', '_', 'D', 'U', 'M', 'M', 'Y');
-constexpr CLASS_ID CLSID_AF_ZUDA                    = MK_CLSID('A', 'F', '_', 'Z', 'U', 'D', 'A', ' ');
-constexpr CLASS_ID CLSID_AF_THORN                   = MK_CLSID('A', 'F', '_', 'T', 'H', 'O', 'R', 'N');
-constexpr CLASS_ID CLSID_AF_FADED_BALL              = MK_CLSID('A', 'F', '_', 'F', 'B', 'A', 'L', 'L');
-constexpr CLASS_ID CLSID_AF_ELECTRIC_BALL           = MK_CLSID('A', 'F', '_', 'E', 'B', 'A', 'L', 'L');
-constexpr CLASS_ID CLSID_AF_RUSTY_HAIR              = MK_CLSID('A', 'F', '_', 'R', 'H', 'A', 'I', 'R');
-constexpr CLASS_ID CLSID_AF_GALANTINE               = MK_CLSID('A', 'F', '_', 'G', 'A', 'L', 'A', 'N');
-constexpr CLASS_ID CLSID_AF_CTA                     = MK_CLSID('A', 'F', '_', 'C', 'T', 'A', ' ', ' ');
+constexpr CLASS_ID CLSID_AF_MERCURY_BALL            = xray::make_clsid("AF_MBALL");
+constexpr CLASS_ID CLSID_AF_GRAVI                   = xray::make_clsid("AF_GRAVI");
+constexpr CLASS_ID CLSID_AF_BLACKDROPS              = xray::make_clsid("AF_BDROP");
+constexpr CLASS_ID CLSID_AF_NEEDLES                 = xray::make_clsid("AF_NEEDL");
+constexpr CLASS_ID CLSID_AF_BAST                    = xray::make_clsid("AF_BAST ");
+constexpr CLASS_ID CLSID_AF_BLACK_GRAVI             = xray::make_clsid("AF_BGRAV");
+constexpr CLASS_ID CLSID_AF_DUMMY                   = xray::make_clsid("AF_DUMMY");
+constexpr CLASS_ID CLSID_AF_ZUDA                    = xray::make_clsid("AF_ZUDA ");
+constexpr CLASS_ID CLSID_AF_THORN                   = xray::make_clsid("AF_THORN");
+constexpr CLASS_ID CLSID_AF_FADED_BALL              = xray::make_clsid("AF_FBALL");
+constexpr CLASS_ID CLSID_AF_ELECTRIC_BALL           = xray::make_clsid("AF_EBALL");
+constexpr CLASS_ID CLSID_AF_RUSTY_HAIR              = xray::make_clsid("AF_RHAIR");
+constexpr CLASS_ID CLSID_AF_GALANTINE               = xray::make_clsid("AF_GALAN");
+constexpr CLASS_ID CLSID_AF_CTA                     = xray::make_clsid("AF_CTA  ");
 
-constexpr CLASS_ID CLSID_ARTEFACT                   = MK_CLSID('A', 'R', 'T', 'E', 'F', 'A', 'C', 'T');
+constexpr CLASS_ID CLSID_ARTEFACT                   = xray::make_clsid("ARTEFACT");
 
 // Weapons
-constexpr CLASS_ID CLSID_OBJECT_W_M134              = MK_CLSID('W', '_', 'M', '1', '3', '4', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_FN2000            = MK_CLSID('W', '_', 'F', 'N', '2', '0', '0', '0');
-constexpr CLASS_ID CLSID_OBJECT_W_AK74              = MK_CLSID('W', '_', 'A', 'K', '7', '4', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_LR300             = MK_CLSID('W', '_', 'L', 'R', '3', '0', '0', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_HPSA              = MK_CLSID('W', '_', 'H', 'P', 'S', 'A', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_PM                = MK_CLSID('W', '_', 'P', 'M', ' ', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_FORT              = MK_CLSID('W', '_', 'F', 'O', 'R', 'T', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_BINOCULAR         = MK_CLSID('W', '_', 'B', 'I', 'N', 'O', 'C', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_SHOTGUN           = MK_CLSID('W', '_', 'S', 'H', 'O', 'T', 'G', 'N');
-constexpr CLASS_ID CLSID_OBJECT_W_ASHOTGUN          = MK_CLSID('W', '_', 'A', 'S', 'H', 'T', 'G', 'N');
+constexpr CLASS_ID CLSID_OBJECT_W_M134              = xray::make_clsid("W_M134  ");
+constexpr CLASS_ID CLSID_OBJECT_W_FN2000            = xray::make_clsid("W_FN2000");
+constexpr CLASS_ID CLSID_OBJECT_W_AK74              = xray::make_clsid("W_AK74  ");
+constexpr CLASS_ID CLSID_OBJECT_W_LR300             = xray::make_clsid("W_LR300 ");
+constexpr CLASS_ID CLSID_OBJECT_W_HPSA              = xray::make_clsid("W_HPSA  ");
+constexpr CLASS_ID CLSID_OBJECT_W_PM                = xray::make_clsid("W_PM    ");
+constexpr CLASS_ID CLSID_OBJECT_W_FORT              = xray::make_clsid("W_FORT  ");
+constexpr CLASS_ID CLSID_OBJECT_W_BINOCULAR         = xray::make_clsid("W_BINOC ");
+constexpr CLASS_ID CLSID_OBJECT_W_SHOTGUN           = xray::make_clsid("W_SHOTGN");
+constexpr CLASS_ID CLSID_OBJECT_W_ASHOTGUN          = xray::make_clsid("W_ASHTGN");
 //  [8/15/2006]
-constexpr CLASS_ID CLSID_OBJECT_W_MAGAZINED         = MK_CLSID('W', '_', 'W', 'M', 'A', 'G', 'A', 'Z');
+constexpr CLASS_ID CLSID_OBJECT_W_MAGAZINED         = xray::make_clsid("W_WMAGAZ");
 //  [8/15/2006]
 //  [8/17/2006]
-constexpr CLASS_ID CLSID_OBJECT_W_MAGAZWGL          = MK_CLSID('W', '_', 'W', 'M', 'A', 'G', 'G', 'L');
+constexpr CLASS_ID CLSID_OBJECT_W_MAGAZWGL          = xray::make_clsid("W_WMAGGL");
 //  [8/17/2006]
-constexpr CLASS_ID CLSID_OBJECT_W_SVD               = MK_CLSID('W', '_', 'S', 'V', 'D', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_SVU               = MK_CLSID('W', '_', 'S', 'V', 'U', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_RPG7              = MK_CLSID('W', '_', 'R', 'P', 'G', '7', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_VAL               = MK_CLSID('W', '_', 'V', 'A', 'L', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_VINTOREZ          = MK_CLSID('W', '_', 'V', 'I', 'N', 'T', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_WALTHER           = MK_CLSID('W', '_', 'W', 'A', 'L', 'T', 'H', 'R');
-constexpr CLASS_ID CLSID_OBJECT_W_USP45             = MK_CLSID('W', '_', 'U', 'S', 'P', '4', '5', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_GROZA             = MK_CLSID('W', '_', 'G', 'R', 'O', 'Z', 'A', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_KNIFE             = MK_CLSID('W', '_', 'K', 'N', 'I', 'F', 'E', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_BM16              = MK_CLSID('W', '_', 'B', 'M', '1', '6', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_RG6               = MK_CLSID('W', '_', 'R', 'G', '6', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_SSRS              = MK_CLSID('W', '_', 'S', 'S', 'R', 'S', ' ', ' ');
+constexpr CLASS_ID CLSID_OBJECT_W_SVD               = xray::make_clsid("W_SVD   ");
+constexpr CLASS_ID CLSID_OBJECT_W_SVU               = xray::make_clsid("W_SVU   ");
+constexpr CLASS_ID CLSID_OBJECT_W_RPG7              = xray::make_clsid("W_RPG7  ");
+constexpr CLASS_ID CLSID_OBJECT_W_VAL               = xray::make_clsid("W_VAL   ");
+constexpr CLASS_ID CLSID_OBJECT_W_VINTOREZ          = xray::make_clsid("W_VINT  ");
+constexpr CLASS_ID CLSID_OBJECT_W_WALTHER           = xray::make_clsid("W_WALTHR");
+constexpr CLASS_ID CLSID_OBJECT_W_USP45             = xray::make_clsid("W_USP45 ");
+constexpr CLASS_ID CLSID_OBJECT_W_GROZA             = xray::make_clsid("W_GROZA ");
+constexpr CLASS_ID CLSID_OBJECT_W_KNIFE             = xray::make_clsid("W_KNIFE ");
+constexpr CLASS_ID CLSID_OBJECT_W_BM16              = xray::make_clsid("W_BM16  ");
+constexpr CLASS_ID CLSID_OBJECT_W_RG6               = xray::make_clsid("W_RG6   ");
+constexpr CLASS_ID CLSID_OBJECT_W_SSRS              = xray::make_clsid("W_SSRS  ");
 
-constexpr CLASS_ID CLSID_OBJECT_W_STATMGUN          = MK_CLSID('W', '_', 'S', 'T', 'M', 'G', 'U', 'N');
+constexpr CLASS_ID CLSID_OBJECT_W_STATMGUN          = xray::make_clsid("W_STMGUN");
 
 // Weapons Ammo
-constexpr CLASS_ID CLSID_OBJECT_AMMO                = MK_CLSID('A', 'M', 'M', 'O', ' ', ' ', ' ', ' ');
+constexpr CLASS_ID CLSID_OBJECT_AMMO                = xray::make_clsid("AMMO    ");
 //------------------------------------------        -----------------------------------
-constexpr CLASS_ID CLSID_OBJECT_A_VOG25             = MK_CLSID('A', '_', 'V', 'O', 'G', '2', '5', ' ');
-constexpr CLASS_ID CLSID_OBJECT_A_OG7B              = MK_CLSID('A', '_', 'O', 'G', '7', 'B', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_A_M209              = MK_CLSID('A', '_', 'M', '2', '0', '9', ' ', ' ');
+constexpr CLASS_ID CLSID_OBJECT_A_VOG25             = xray::make_clsid("A_VOG25 ");
+constexpr CLASS_ID CLSID_OBJECT_A_OG7B              = xray::make_clsid("A_OG7B  ");
+constexpr CLASS_ID CLSID_OBJECT_A_M209              = xray::make_clsid("A_M209  ");
 //------------------------------------------        -----------------------------------
 // Weapons Add-ons
-constexpr CLASS_ID CLSID_OBJECT_W_SCOPE             = MK_CLSID('W', '_', 'S', 'C', 'O', 'P', 'E', ' ');
-constexpr CLASS_ID CLSID_OBJECT_W_SILENCER          = MK_CLSID('W', '_', 'S', 'I', 'L', 'E', 'N', 'C');
-constexpr CLASS_ID CLSID_OBJECT_W_GLAUNCHER         = MK_CLSID('W', '_', 'G', 'L', 'A', 'U', 'N', 'C');
+constexpr CLASS_ID CLSID_OBJECT_W_SCOPE             = xray::make_clsid("W_SCOPE ");
+constexpr CLASS_ID CLSID_OBJECT_W_SILENCER          = xray::make_clsid("W_SILENC");
+constexpr CLASS_ID CLSID_OBJECT_W_GLAUNCHER         = xray::make_clsid("W_GLAUNC");
 
 // Modifiers
-constexpr CLASS_ID CLSID_OBJECT_M_QDAMAGE           = MK_CLSID('O', '_', 'Q', 'D', 'M', 'G', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_M_IMMORTAL          = MK_CLSID('O', '_', 'I', 'M', 'M', 'O', 'R', 'T');
-constexpr CLASS_ID CLSID_OBJECT_M_INVIS             = MK_CLSID('O', '_', 'I', 'N', 'V', 'I', 'S', ' ');
+constexpr CLASS_ID CLSID_OBJECT_M_QDAMAGE           = xray::make_clsid("O_QDMG  ");
+constexpr CLASS_ID CLSID_OBJECT_M_IMMORTAL          = xray::make_clsid("O_IMMORT");
+constexpr CLASS_ID CLSID_OBJECT_M_INVIS             = xray::make_clsid("O_INVIS ");
 
-constexpr CLASS_ID CLSID_OBJECT_HEALTH              = MK_CLSID('O', '_', 'H', 'E', 'A', 'L', 'T', 'H');
-constexpr CLASS_ID CLSID_OBJECT_ARMOR               = MK_CLSID('O', '_', 'A', 'R', 'M', 'O', 'R', ' ');
+constexpr CLASS_ID CLSID_OBJECT_HEALTH              = xray::make_clsid("O_HEALTH");
+constexpr CLASS_ID CLSID_OBJECT_ARMOR               = xray::make_clsid("O_ARMOR ");
 
-constexpr CLASS_ID CLSID_OBJECT_TRIGGER             = MK_CLSID('O', '_', 'T', 'R', 'I', 'G', 'E', 'R');
+constexpr CLASS_ID CLSID_OBJECT_TRIGGER             = xray::make_clsid("O_TRIGER");
 
 // Targets
-constexpr CLASS_ID CLSID_TARGET                     = MK_CLSID('T', '_', 'B', 'A', 'S', 'E', ' ', ' ');
-constexpr CLASS_ID CLSID_TARGET_ASSAULT             = MK_CLSID('T', '_', 'A', 'S', 'S', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_TARGET_CS_BASE             = MK_CLSID('T', '_', 'C', 'S', 'B', 'A', 'S', 'E');
-constexpr CLASS_ID CLSID_TARGET_CS                  = MK_CLSID('T', '_', 'C', 'S', ' ', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_TARGET_CS_CASK             = MK_CLSID('T', '_', 'C', 'S', 'C', 'A', 'S', 'K');
+constexpr CLASS_ID CLSID_TARGET                     = xray::make_clsid("T_BASE  ");
+constexpr CLASS_ID CLSID_TARGET_ASSAULT             = xray::make_clsid("T_ASS   ");
+constexpr CLASS_ID CLSID_TARGET_CS_BASE             = xray::make_clsid("T_CSBASE");
+constexpr CLASS_ID CLSID_TARGET_CS                  = xray::make_clsid("T_CS    ");
+constexpr CLASS_ID CLSID_TARGET_CS_CASK             = xray::make_clsid("T_CSCASK");
 
 // Standard level object
-constexpr CLASS_ID CLSID_OBJECT_ITEM_STD            = MK_CLSID('O', '_', 'I', 'T', 'E', 'M', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_BREAKABLE           = MK_CLSID('O', '_', 'B', 'R', 'K', 'B', 'L', ' ');
-constexpr CLASS_ID CLSID_OBJECT_CLIMABLE            = MK_CLSID('O', '_', 'C', 'L', 'M', 'B', 'L', ' ');
-constexpr CLASS_ID CLSID_OBJECT_HOLDER_ENT          = MK_CLSID('O', '_', 'H', 'L', 'D', 'R', '_', 'E');
+constexpr CLASS_ID CLSID_OBJECT_ITEM_STD            = xray::make_clsid("O_ITEM  ");
+constexpr CLASS_ID CLSID_OBJECT_BREAKABLE           = xray::make_clsid("O_BRKBL ");
+constexpr CLASS_ID CLSID_OBJECT_CLIMABLE            = xray::make_clsid("O_CLMBL ");
+constexpr CLASS_ID CLSID_OBJECT_HOLDER_ENT          = xray::make_clsid("O_HLDR_E");
 
 //
-constexpr CLASS_ID CLSID_PH_SKELETON_OBJECT         = MK_CLSID('P', '_', 'S', 'K', 'E', 'L', 'E', 'T');
-constexpr CLASS_ID CLSID_OBJECT_PHYSIC              = MK_CLSID('O', '_', 'P', 'H', 'Y', 'S', 'I', 'C');
-constexpr CLASS_ID CLSID_PHYSICS_DESTROYABLE        = MK_CLSID('P', '_', 'D', 'S', 'T', 'R', 'B', 'L');
-constexpr CLASS_ID CLSID_INVENTORY_BOX              = MK_CLSID('O', '_', 'I', 'N', 'V', 'B', 'O', 'X');
+constexpr CLASS_ID CLSID_PH_SKELETON_OBJECT         = xray::make_clsid("P_SKELET");
+constexpr CLASS_ID CLSID_OBJECT_PHYSIC              = xray::make_clsid("O_PHYSIC");
+constexpr CLASS_ID CLSID_PHYSICS_DESTROYABLE        = xray::make_clsid("P_DSTRBL");
+constexpr CLASS_ID CLSID_INVENTORY_BOX              = xray::make_clsid("O_INVBOX");
 
 // Zones
-constexpr CLASS_ID CLSID_ZONE                       = MK_CLSID('Z', '_', 'Z', 'O', 'N', 'E', ' ', ' ');
-constexpr CLASS_ID CLSID_Z_MBALD                    = MK_CLSID('Z', '_', 'M', 'B', 'A', 'L', 'D', ' ');
-constexpr CLASS_ID CLSID_Z_MINCER                   = MK_CLSID('Z', '_', 'M', 'I', 'N', 'C', 'E', 'R');
-constexpr CLASS_ID CLSID_Z_ACIDF                    = MK_CLSID('Z', '_', 'A', 'C', 'I', 'D', 'F', ' ');
-constexpr CLASS_ID CLSID_Z_GALANT                   = MK_CLSID('Z', '_', 'G', 'A', 'L', 'A', 'N', 'T');
-constexpr CLASS_ID CLSID_Z_RADIO                    = MK_CLSID('Z', '_', 'R', 'A', 'D', 'I', 'O', ' ');
-constexpr CLASS_ID CLSID_Z_BFUZZ                    = MK_CLSID('Z', '_', 'B', 'F', 'U', 'Z', 'Z', ' ');
-constexpr CLASS_ID CLSID_Z_RUSTYH                   = MK_CLSID('Z', '_', 'R', 'U', 'S', 'T', 'Y', 'H');
-constexpr CLASS_ID CLSID_Z_AMEBA                    = MK_CLSID('Z', '_', 'A', 'M', 'E', 'B', 'A', ' ');
-constexpr CLASS_ID CLSID_Z_NOGRAVITY                = MK_CLSID('Z', '_', 'N', 'O', 'G', 'R', 'A', 'V');
-constexpr CLASS_ID CLSID_Z_FRYUP                    = MK_CLSID('Z', '_', 'F', 'R', 'Y', 'U', 'P ', ' ');
-constexpr CLASS_ID CLSID_Z_DEAD                     = MK_CLSID('Z', '_', 'D', 'E', 'A', 'D', ' ', ' ');
+constexpr CLASS_ID CLSID_ZONE                       = xray::make_clsid("Z_ZONE  ");
+constexpr CLASS_ID CLSID_Z_MBALD                    = xray::make_clsid("Z_MBALD ");
+constexpr CLASS_ID CLSID_Z_MINCER                   = xray::make_clsid("Z_MINCER");
+constexpr CLASS_ID CLSID_Z_ACIDF                    = xray::make_clsid("Z_ACIDF ");
+constexpr CLASS_ID CLSID_Z_GALANT                   = xray::make_clsid("Z_GALANT");
+constexpr CLASS_ID CLSID_Z_RADIO                    = xray::make_clsid("Z_RADIO ");
+constexpr CLASS_ID CLSID_Z_BFUZZ                    = xray::make_clsid("Z_BFUZZ ");
+constexpr CLASS_ID CLSID_Z_RUSTYH                   = xray::make_clsid("Z_RUSTYH");
+constexpr CLASS_ID CLSID_Z_AMEBA                    = xray::make_clsid("Z_AMEBA ");
+constexpr CLASS_ID CLSID_Z_NOGRAVITY                = xray::make_clsid("Z_NOGRAV");
+constexpr CLASS_ID CLSID_Z_FRYUP                    = xray::make_clsid("Z_FRYUP ");
+constexpr CLASS_ID CLSID_Z_DEAD                     = xray::make_clsid("Z_DEAD  ");
 
 // Read more about this clsids in object_factory_register.cpp
-constexpr CLASS_ID CLSID_LEVEL_CHANGER              = MK_CLSID('L', 'V', 'L', 'C', 'H', 'N', 'G', 'R');
-constexpr CLASS_ID CLSID_LEVEL_CHANGER_S            = MK_CLSID('L', 'V', 'L', '_', 'C', 'H', 'N', 'G');
+constexpr CLASS_ID CLSID_LEVEL_CHANGER              = xray::make_clsid("LVLCHNGR");
+constexpr CLASS_ID CLSID_LEVEL_CHANGER_S            = xray::make_clsid("LVL_CHNG");
 
-constexpr CLASS_ID CLSID_SCRIPT_ZONE                = MK_CLSID('S', 'C', 'R', 'I', 'P', 'T', 'Z', 'N');
-constexpr CLASS_ID CLSID_Z_TEAM_BASE                = MK_CLSID('Z', '_', 'T', 'E', 'A', 'M', 'B', 'S');
-constexpr CLASS_ID CLSID_Z_TORRID                   = MK_CLSID('Z', '_', 'T', 'O', 'R', 'R', 'I', 'D');
-constexpr CLASS_ID CLSID_SPACE_RESTRICTOR           = MK_CLSID('S', 'P', 'A', 'C', 'E', '_', 'R', 'S');
-constexpr CLASS_ID CLSID_SMART_ZONE                 = MK_CLSID('S', 'M', 'R', 'T', 'Z', 'O', 'N', 'E');
-constexpr CLASS_ID CLSID_Z_CAMPFIRE                 = MK_CLSID('Z', '_', 'C', 'F', 'I', 'R', 'E', ' ');
+constexpr CLASS_ID CLSID_SCRIPT_ZONE                = xray::make_clsid("SCRIPTZN");
+constexpr CLASS_ID CLSID_Z_TEAM_BASE                = xray::make_clsid("Z_TEAMBS");
+constexpr CLASS_ID CLSID_Z_TORRID                   = xray::make_clsid("Z_TORRID");
+constexpr CLASS_ID CLSID_SPACE_RESTRICTOR           = xray::make_clsid("SPACE_RS");
+constexpr CLASS_ID CLSID_SMART_ZONE                 = xray::make_clsid("SMRTZONE");
+constexpr CLASS_ID CLSID_Z_CAMPFIRE                 = xray::make_clsid("Z_CFIRE ");
 
 // Detectors
-constexpr CLASS_ID CLSID_DETECTOR_SIMPLE            = MK_CLSID('D', '_', 'S', 'I', 'M', 'D', 'E', 'T');
-constexpr CLASS_ID CLSID_DETECTOR_VISUAL            = MK_CLSID('D','_','V','I','S','D','E','T');
-constexpr CLASS_ID CLSID_DETECTOR_ADVANCED          = MK_CLSID('D', '_', 'A', 'D', 'V', 'A', 'N', 'C');
-constexpr CLASS_ID CLSID_DETECTOR_ELITE             = MK_CLSID('D', '_', 'E', 'L', 'I', 'T', 'E', ' ');
-constexpr CLASS_ID CLSID_DETECTOR_SCIENTIFIC        = MK_CLSID('D', '_', 'S', 'C', 'I', 'E', 'N', 'T');
+constexpr CLASS_ID CLSID_DETECTOR_SIMPLE            = xray::make_clsid("D_SIMDET");
+constexpr CLASS_ID CLSID_DETECTOR_VISUAL            = xray::make_clsid("D_VISDET");
+constexpr CLASS_ID CLSID_DETECTOR_ADVANCED          = xray::make_clsid("D_ADVANC");
+constexpr CLASS_ID CLSID_DETECTOR_ELITE             = xray::make_clsid("D_ELITE ");
+constexpr CLASS_ID CLSID_DETECTOR_SCIENTIFIC        = xray::make_clsid("D_SCIENT");
 
 // PDA
-constexpr CLASS_ID CLSID_DEVICE_PDA                 = MK_CLSID('D', '_', 'P', 'D', 'A', ' ', ' ', ' ');
+constexpr CLASS_ID CLSID_DEVICE_PDA                 = xray::make_clsid("D_PDA   ");
 
 // Devices
-constexpr CLASS_ID CLSID_DEVICE_TORCH               = MK_CLSID('D', '_', 'T', 'O', 'R', 'C', 'H', ' ');
-constexpr CLASS_ID CLSID_DEVICE_AF_MERGER           = MK_CLSID('D', '_', 'A', 'F', 'M', 'E', 'R', 'G');
-constexpr CLASS_ID CLSID_DEVICE_FLARE               = MK_CLSID('D', '_', 'F', 'L', 'A', 'R', 'E', ' ');
+constexpr CLASS_ID CLSID_DEVICE_TORCH               = xray::make_clsid("D_TORCH ");
+constexpr CLASS_ID CLSID_DEVICE_AF_MERGER           = xray::make_clsid("D_AFMERG");
+constexpr CLASS_ID CLSID_DEVICE_FLARE               = xray::make_clsid("D_FLARE ");
 
 // Inventory items
-constexpr CLASS_ID CLSID_IITEM_BOLT                 = MK_CLSID('I', 'I', '_', 'B', 'O', 'L', 'T', ' ');
+constexpr CLASS_ID CLSID_IITEM_BOLT                 = xray::make_clsid("II_BOLT ");
 
-constexpr CLASS_ID CLSID_IITEM_MEDKIT               = MK_CLSID('I', 'I', '_', 'M', 'E', 'D', 'K', 'I');
-constexpr CLASS_ID CLSID_IITEM_BANDAGE              = MK_CLSID('I', 'I', '_', 'B', 'A', 'N', 'D', 'G');
-constexpr CLASS_ID CLSID_IITEM_FOOD                 = MK_CLSID('I', 'I', '_', 'F', 'O', 'O', 'D', ' ');
-constexpr CLASS_ID CLSID_IITEM_BOTTLE               = MK_CLSID('I', 'I', '_', 'B', 'O', 'T', 'T', 'L');
-constexpr CLASS_ID CLSID_IITEM_ANTIRAD              = MK_CLSID('I', 'I', '_', 'A', 'N', 'T', 'I', 'R');
-constexpr CLASS_ID CLSID_IITEM_EXPLOSIVE            = MK_CLSID('I', 'I', '_', 'E', 'X', 'P', 'L', 'O');
+constexpr CLASS_ID CLSID_IITEM_MEDKIT               = xray::make_clsid("II_MEDKI");
+constexpr CLASS_ID CLSID_IITEM_BANDAGE              = xray::make_clsid("II_BANDG");
+constexpr CLASS_ID CLSID_IITEM_FOOD                 = xray::make_clsid("II_FOOD ");
+constexpr CLASS_ID CLSID_IITEM_BOTTLE               = xray::make_clsid("II_BOTTL");
+constexpr CLASS_ID CLSID_IITEM_ANTIRAD              = xray::make_clsid("II_ANTIR");
+constexpr CLASS_ID CLSID_IITEM_EXPLOSIVE            = xray::make_clsid("II_EXPLO");
 
 // Info Document
-constexpr CLASS_ID CLSID_IITEM_DOCUMENT             = MK_CLSID('I', 'I', '_', 'D', 'O', 'C', ' ', ' ');
+constexpr CLASS_ID CLSID_IITEM_DOCUMENT             = xray::make_clsid("II_DOC  ");
 
-constexpr CLASS_ID CLSID_IITEM_ATTACH               = MK_CLSID('I', 'I', '_', 'A', 'T', 'T', 'C', 'H');
+constexpr CLASS_ID CLSID_IITEM_ATTACH               = xray::make_clsid("II_ATTCH");
 
 // Grenades
-constexpr CLASS_ID CLSID_GRENADE_F1                 = MK_CLSID('G', '_', 'F', '1', ' ', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_G_RPG7              = MK_CLSID('G', '_', 'R', 'P', 'G', '7', ' ', ' ');
-constexpr CLASS_ID CLSID_GRENADE_RGD5               = MK_CLSID('G', '_', 'R', 'G', 'D', '5', ' ', ' ');
-constexpr CLASS_ID CLSID_OBJECT_G_FAKE              = MK_CLSID('G', '_', 'F', 'A', 'K', 'E', ' ', ' ');
+constexpr CLASS_ID CLSID_GRENADE_F1                 = xray::make_clsid("G_F1    ");
+constexpr CLASS_ID CLSID_OBJECT_G_RPG7              = xray::make_clsid("G_RPG7  ");
+constexpr CLASS_ID CLSID_GRENADE_RGD5               = xray::make_clsid("G_RGD5  ");
+constexpr CLASS_ID CLSID_OBJECT_G_FAKE              = xray::make_clsid("G_FAKE  ");
 
 //---------------------------------------------------------------------------------
-constexpr CLASS_ID CLSID_OBJECT_PLAYERS_BAG         = MK_CLSID('M', 'P', '_', 'P', 'L', 'B', 'A', 'G');
+constexpr CLASS_ID CLSID_OBJECT_PLAYERS_BAG         = xray::make_clsid("MP_PLBAG");
 //---------------------------------------------------------------------------------
 
 // Equipment
-constexpr CLASS_ID CLSID_EQUIPMENT_SIMPLE           = MK_CLSID('E', 'Q', 'U', '_', 'S', 'M', 'P', 'L');
-constexpr CLASS_ID CLSID_EQUIPMENT_SCIENTIFIC       = MK_CLSID('E', 'Q', 'U', '_', 'S', 'C', 'I', 'E');
-constexpr CLASS_ID CLSID_EQUIPMENT_STALKER          = MK_CLSID('E', 'Q', 'U', '_', 'S', 'T', 'L', 'K');
-constexpr CLASS_ID CLSID_EQUIPMENT_MILITARY         = MK_CLSID('E', 'Q', 'U', '_', 'M', 'L', 'T', 'R');
-constexpr CLASS_ID CLSID_EQUIPMENT_EXO              = MK_CLSID('E', 'Q', 'U', '_', 'E', 'X', 'O', ' ');
-constexpr CLASS_ID CLSID_EQUIPMENT_HELMET           = MK_CLSID('E', 'Q', '_', 'H', 'L', 'M', 'E', 'T');
-constexpr CLASS_ID CLSID_EQUIPMENT_BACKPACK         = MK_CLSID('E', 'Q', '_', 'B', 'A', 'K', 'P', 'K');
+constexpr CLASS_ID CLSID_EQUIPMENT_SIMPLE           = xray::make_clsid("EQU_SMPL");
+constexpr CLASS_ID CLSID_EQUIPMENT_SCIENTIFIC       = xray::make_clsid("EQU_SCIE");
+constexpr CLASS_ID CLSID_EQUIPMENT_STALKER          = xray::make_clsid("EQU_STLK");
+constexpr CLASS_ID CLSID_EQUIPMENT_MILITARY         = xray::make_clsid("EQU_MLTR");
+constexpr CLASS_ID CLSID_EQUIPMENT_EXO              = xray::make_clsid("EQU_EXO ");
+constexpr CLASS_ID CLSID_EQUIPMENT_HELMET           = xray::make_clsid("EQ_HLMET");
+constexpr CLASS_ID CLSID_EQUIPMENT_BACKPACK         = xray::make_clsid("EQ_BAKPK");
 
 // Game types
-constexpr CLASS_ID CLSID_SV_GAME_SINGLE             = MK_CLSID('S', 'V', '_', 'S', 'I', 'N', 'G', 'L');
-constexpr CLASS_ID CLSID_SV_GAME_DEATHMATCH         = MK_CLSID('S', 'V', '_', 'D', 'M', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_SV_GAME_TEAMDEATHMATCH     = MK_CLSID('S', 'V', '_', 'T', 'D', 'M', ' ', ' ');
-constexpr CLASS_ID CLSID_SV_GAME_ARTEFACTHUNT       = MK_CLSID('S', 'V', '_', 'A', 'H', 'U', 'N', 'T');
-constexpr CLASS_ID CLSID_SV_GAME_CAPTURETHEARTEFACT = MK_CLSID('S', 'V', '_', 'C', 'T', 'A', ' ', ' ');
-//constexpr CLASS_ID CLSID_GAME_CS                    = MK_CLSID('S','V','_','C','S',' ',' ',' ');
-constexpr CLASS_ID CLSID_CL_GAME_SINGLE             = MK_CLSID('C', 'L', '_', 'S', 'I', 'N', 'G', 'L');
-constexpr CLASS_ID CLSID_CL_GAME_DEATHMATCH         = MK_CLSID('C', 'L', '_', 'D', 'M', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_CL_GAME_TEAMDEATHMATCH     = MK_CLSID('C', 'L', '_', 'T', 'D', 'M', ' ', ' ');
-constexpr CLASS_ID CLSID_CL_GAME_ARTEFACTHUNT       = MK_CLSID('C', 'L', '_', 'A', 'H', 'U', 'N', 'T');
-constexpr CLASS_ID CLSID_CL_GAME_CAPTURETHEARTEFACT = MK_CLSID('C', 'L', '_', 'C', 'T', 'A', ' ', ' ');
+constexpr CLASS_ID CLSID_SV_GAME_SINGLE             = xray::make_clsid("SV_SINGL");
+constexpr CLASS_ID CLSID_SV_GAME_DEATHMATCH         = xray::make_clsid("SV_DM   ");
+constexpr CLASS_ID CLSID_SV_GAME_TEAMDEATHMATCH     = xray::make_clsid("SV_TDM  ");
+constexpr CLASS_ID CLSID_SV_GAME_ARTEFACTHUNT       = xray::make_clsid("SV_AHUNT");
+constexpr CLASS_ID CLSID_SV_GAME_CAPTURETHEARTEFACT = xray::make_clsid("SV_CTA  ");
+//constexpr CLASS_ID CLSID_GAME_CS                    = xray::make_clsid("SV_CS   ");
+constexpr CLASS_ID CLSID_CL_GAME_SINGLE             = xray::make_clsid("CL_SINGL");
+constexpr CLASS_ID CLSID_CL_GAME_DEATHMATCH         = xray::make_clsid("CL_DM   ");
+constexpr CLASS_ID CLSID_CL_GAME_TEAMDEATHMATCH     = xray::make_clsid("CL_TDM  ");
+constexpr CLASS_ID CLSID_CL_GAME_ARTEFACTHUNT       = xray::make_clsid("CL_AHUNT");
+constexpr CLASS_ID CLSID_CL_GAME_CAPTURETHEARTEFACT = xray::make_clsid("CL_CTA  ");
 
 // Game UI types
-constexpr CLASS_ID CLSID_GAME_UI_SINGLE             = MK_CLSID('U', 'I', '_', 'S', 'I', 'N', 'G', 'L');
-constexpr CLASS_ID CLSID_GAME_UI_DEATHMATCH         = MK_CLSID('U', 'I', '_', 'D', 'M', ' ', ' ', ' ');
-constexpr CLASS_ID CLSID_GAME_UI_TEAMDEATHMATCH     = MK_CLSID('U', 'I', '_', 'T', 'D', 'M', ' ', ' ');
-constexpr CLASS_ID CLSID_GAME_UI_ARTEFACTHUNT       = MK_CLSID('U', 'I', '_', 'A', 'H', 'U', 'N', 'T');
-constexpr CLASS_ID CLSID_GAME_UI_CAPTURETHEARTEFACT = MK_CLSID('U', 'I', '_', 'C', 'T', 'A', ' ', ' ');
+constexpr CLASS_ID CLSID_GAME_UI_SINGLE             = xray::make_clsid("UI_SINGL");
+constexpr CLASS_ID CLSID_GAME_UI_DEATHMATCH         = xray::make_clsid("UI_DM   ");
+constexpr CLASS_ID CLSID_GAME_UI_TEAMDEATHMATCH     = xray::make_clsid("UI_TDM  ");
+constexpr CLASS_ID CLSID_GAME_UI_ARTEFACTHUNT       = xray::make_clsid("UI_AHUNT");
+constexpr CLASS_ID CLSID_GAME_UI_CAPTURETHEARTEFACT = xray::make_clsid("UI_CTA  ");
 
-constexpr CLASS_ID CLSID_ONLINE_OFFLINE_GROUP       = MK_CLSID('O', 'N', '_', 'O', 'F', 'F', '_', 'G');
+constexpr CLASS_ID CLSID_ONLINE_OFFLINE_GROUP       = xray::make_clsid("ON_OFF_G");

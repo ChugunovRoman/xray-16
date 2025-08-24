@@ -18,9 +18,9 @@ However, they know about many community projects, including this, and support S.
 Installation instructions are on the [How to install and play](https://github.com/OpenXRay/xray-16/wiki/[EN]-How-to-install-and-play) page.
 
 ## Supported game platforms
-- Clear Sky 1.5.10. (minor bugs are possible, but the game is stable finishable. See [#382](https://github.com/OpenXRay/xray-16/issues/382))
-- Call of Pripyat 1.6.02.
 - Call of Chernobyl 1.4.22.
+- Call of Pripyat 1.6.02.
+- Clear Sky 1.5.10. (minor bugs are possible, but the game is stable finishable. See [#382](https://github.com/OpenXRay/xray-16/issues/382))
 
 Shadow of Chernobyl is **not supported** yet. (see [#392](https://github.com/OpenXRay/xray-16/issues/392)) <br>
 Legends of the Zone/Enhanced Edition is not supported and won't ever be likely. (see [#1865](https://github.com/OpenXRay/xray-16/issues/1865))

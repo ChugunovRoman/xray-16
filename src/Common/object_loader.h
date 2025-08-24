@@ -134,7 +134,7 @@ struct CLoader
     {
         shared_str S;
         stream.r_stringZ(S);
-        data = xr_strdup(*S);
+        data = xr_strdup(S.c_str());
     }
 
     static void load_data(shared_str& data, M& stream, const P& p) { stream.r_stringZ(data); }
@@ -142,7 +142,7 @@ struct CLoader
     {
         shared_str S;
         stream.r_stringZ(S);
-        data = *S;
+        data = S.c_str();
     }
 
     template <typename T1, typename T2>

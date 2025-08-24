@@ -121,21 +121,20 @@ struct str_container_impl
         }
     }
 
-    ptrdiff_t stat_economy() const
+    std::pair<size_t, size_t> stat_economy() const
     {
-        ptrdiff_t counter = 0;
+        size_t bytes{}, count{};
         for (size_t i = 0; i < buffer_size; ++i)
         {
             const str_value* value = buffer[i];
             while (value)
             {
-                counter -= sizeof(str_value);
-                counter += (value->dwReference - 1) * (value->dwLength + 1);
+                ++count;
+                bytes += (value->dwReference - 1) * (value->dwLength + 1);
                 value = value->next;
             }
         }
-
-        return counter;
+        return { bytes, count };
     }
 };
 
@@ -234,14 +233,12 @@ void str_container::dump(IWriter* W) const
     impl->cs.Leave();
 }
 
-size_t str_container::stat_economy() const
+std::pair<size_t, size_t> str_container::stat_economy() const
 {
     impl->cs.Enter();
-    ptrdiff_t counter = 0;
-    counter -= sizeof(*this);
-    counter += impl->stat_economy();
+    const auto [bytes, count] = impl->stat_economy();
     impl->cs.Leave();
-    return size_t(counter);
+    return { bytes, count };
 }
 
 str_container::~str_container()

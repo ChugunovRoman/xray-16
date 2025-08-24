@@ -61,7 +61,7 @@ protected:
 public:
     game_cl_GameState();
     virtual ~game_cl_GameState();
-    LPCSTR type_name() const { return *m_game_type_name; };
+    pcstr type_name() const override { return m_game_type_name.c_str(); };
     void set_type_name(LPCSTR s);
     virtual void Init(){};
     virtual void net_import_state(NET_Packet& P);

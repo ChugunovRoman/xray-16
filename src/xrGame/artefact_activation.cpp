@@ -39,7 +39,7 @@ void SArtefactActivation::Load()
     for (int i = 0; i < (int)eMax; ++i)
         m_activation_states.push_back(SStateDef());
 
-    LPCSTR activation_seq = pSettings->r_string(*m_af->cNameSect(), "artefact_activation_seq");
+    LPCSTR activation_seq = pSettings->r_string(m_af->cNameSect().c_str(), "artefact_activation_seq");
 
     m_activation_states[(int)eStarting].Load(activation_seq, "starting");
     m_activation_states[(int)eFlying].Load(activation_seq, "flying");
@@ -131,7 +131,7 @@ void SArtefactActivation::ChangeEffects()
 
     if (state_def.m_snd.size())
     {
-        m_snd.create(*state_def.m_snd, st_Effect, sg_SourceType);
+        m_snd.create(state_def.m_snd.c_str(), st_Effect, sg_SourceType);
         m_snd.play_at_pos(m_af, m_af->Position());
     };
 
@@ -149,7 +149,7 @@ void SArtefactActivation::ChangeEffects()
     {
         IKinematicsAnimated* K = smart_cast<IKinematicsAnimated*>(m_af->Visual());
         if (K)
-            K->PlayCycle(*state_def.m_animation);
+            K->PlayCycle(state_def.m_animation.c_str());
     }
 }
 
@@ -166,7 +166,7 @@ void SArtefactActivation::SpawnAnomaly()
 {
     VERIFY(!physics_world()->Processing());
     string128 tmp;
-    cpcstr str = pSettings->r_string("artefact_spawn_zones", *m_af->cNameSect());
+    cpcstr str = pSettings->r_string("artefact_spawn_zones", m_af->cNameSect().c_str());
     VERIFY3(3 == _GetItemCount(str), "Bad record format in artefact_spawn_zones", str);
     const float zone_radius = (float)atof(_GetItem(str, 1, tmp));
     const float zone_power = (float)atof(_GetItem(str, 2, tmp));
@@ -193,7 +193,7 @@ void SArtefactActivation::SpawnAnomaly()
     Level().Send(P, net_flags(TRUE));
     F_entity_Destroy(object);
     //. #ifdef DEBUG
-    Msg("artefact [%s] spawned a zone [%s] at [%f]", *m_af->cName(), zone_sect, Device.fTimeGlobal);
+    Msg("artefact [%s] spawned a zone [%s] at [%f]", m_af->cName().c_str(), zone_sect, Device.fTimeGlobal);
     //. #endif
 }
 shared_str clear_brackets(LPCSTR src)

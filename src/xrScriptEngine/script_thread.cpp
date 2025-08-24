@@ -52,14 +52,14 @@ CScriptThread::CScriptThread(CScriptEngine* scriptEngine, LPCSTR caNamespaceName
                 l_iErrorCode = lua_pcall(engineLua, 0, 0, 0);
                 if (l_iErrorCode)
                 {
-                    CScriptEngine::print_output(engineLua, *m_script_name, l_iErrorCode);
+                    CScriptEngine::print_output(engineLua, m_script_name.c_str(), l_iErrorCode);
                     CScriptEngine::on_error(engineLua);
                     return;
                 }
             }
             else
             {
-                CScriptEngine::print_output(engineLua, *m_script_name, l_iErrorCode);
+                CScriptEngine::print_output(engineLua, m_script_name.c_str(), l_iErrorCode);
                 CScriptEngine::on_error(engineLua);
                 return;
             }
@@ -99,7 +99,7 @@ bool CScriptThread::update()
         int l_iErrorCode = lua_resume(lua(), 0);
         if (l_iErrorCode && l_iErrorCode != LUA_YIELD)
         {
-            CScriptEngine::print_output(lua(), *script_name(), l_iErrorCode);
+            CScriptEngine::print_output(lua(), m_script_name.c_str(), l_iErrorCode);
             CScriptEngine::on_error(scriptEngine->lua());
 #ifdef DEBUG
             print_stack(lua());
@@ -113,14 +113,14 @@ bool CScriptThread::update()
 #ifdef DEBUG
                 if (m_current_stack_level)
                 {
-                    CScriptEngine::print_output(lua(), *script_name(), l_iErrorCode);
+                    CScriptEngine::print_output(lua(), m_script_name.c_str(), l_iErrorCode);
                     CScriptEngine::on_error(scriptEngine->lua());
                     // print_stack(lua());
                 }
 #endif
                 m_active = false;
 #ifdef DEBUG
-                scriptEngine->script_log(LuaMessageType::Info, "Script %s is finished!", *m_script_name);
+                scriptEngine->script_log(LuaMessageType::Info, "Script %s is finished!", m_script_name.c_str());
 #endif
             }
             else

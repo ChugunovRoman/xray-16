@@ -12,13 +12,6 @@
 
 #define BULLET_MANAGER_SECTION "bullet_manager"
 
-CCartridge::CCartridge()
-{
-    m_flags.assign(cfTracer | cfRicochet);
-    param_s.Init();
-    bullet_material_idx = u16(-1);
-}
-
 void CCartridge::Load(LPCSTR section, u8 LocalAmmoType)
 {
     m_ammoSect = section;
@@ -26,10 +19,16 @@ void CCartridge::Load(LPCSTR section, u8 LocalAmmoType)
     param_s.kDist = pSettings->r_float(section, "k_dist");
     param_s.kDisp = pSettings->r_float(section, "k_disp");
     param_s.kHit = pSettings->r_float(section, "k_hit");
-    //.	param_s.kCritical			= pSettings->r_float(section, "k_hit_critical");
     param_s.kImpulse = pSettings->r_float(section, "k_impulse");
-    // m_kPierce				= pSettings->r_float(section, "k_pierce");
-    param_s.kAP = READ_IF_EXISTS(pSettings, r_float, section, "k_ap", 0.0f);
+
+    if (GMLib.GetLibraryVersion() >= GAMEMTL_VERSION_CS)
+        param_s.kAP = pSettings->r_float(section, "k_ap");
+    else
+    {
+        param_s.kPierce = pSettings->r_float(section, "k_pierce");
+        param_s.kAP     = pSettings->read_if_exists<float>(section, "k_ap", 0.0f);
+    }
+
     param_s.u8ColorID = READ_IF_EXISTS(pSettings, r_u8, section, "tracer_color_ID", 0);
 
     if (pSettings->line_exist(section, "k_air_resistance"))
@@ -57,7 +56,7 @@ void CCartridge::Load(LPCSTR section, u8 LocalAmmoType)
     }
 
     if (pSettings->line_exist(section, "4to1_tracer"))
-        m_4to1_tracer = pSettings->r_bool(section, "4to1_tracer");;
+        m_flags.set(cf4to1Tracer, pSettings->r_bool(section, "4to1_tracer"));
 
     if (pSettings->line_exist(section, "can_be_unlimited"))
         m_flags.set(cfCanBeUnlimited, pSettings->r_bool(section, "can_be_unlimited"));
@@ -67,8 +66,6 @@ void CCartridge::Load(LPCSTR section, u8 LocalAmmoType)
     bullet_material_idx = GMLib.GetMaterialIdx(WEAPON_MATERIAL_NAME);
     VERIFY(u16(-1) != bullet_material_idx);
     VERIFY(param_s.fWallmarkSize > 0);
-
-    m_InvShortName = StringTable().translate(pSettings->r_string(section, "inv_name_short"));
 }
 
 float CCartridge::Weight() const
@@ -87,8 +84,6 @@ float CCartridge::Weight() const
     return res;
 }
 
-CWeaponAmmo::CWeaponAmmo(void) {}
-CWeaponAmmo::~CWeaponAmmo(void) {}
 void CWeaponAmmo::Load(LPCSTR section)
 {
     inherited::Load(section);
@@ -96,10 +91,16 @@ void CWeaponAmmo::Load(LPCSTR section)
     cartridge_param.kDist = pSettings->r_float(section, "k_dist");
     cartridge_param.kDisp = pSettings->r_float(section, "k_disp");
     cartridge_param.kHit = pSettings->r_float(section, "k_hit");
-    //.	cartridge_param.kCritical	= pSettings->r_float(section, "k_hit_critical");
     cartridge_param.kImpulse = pSettings->r_float(section, "k_impulse");
-    // m_kPierce				= pSettings->r_float(section, "k_pierce");
-    cartridge_param.kAP = READ_IF_EXISTS(pSettings, r_float, section, "k_ap", 0.0f);
+
+    if (GMLib.GetLibraryVersion() >= GAMEMTL_VERSION_CS)
+        cartridge_param.kAP = pSettings->r_float(section, "k_ap");
+    else
+    {
+        cartridge_param.kPierce = pSettings->r_float(section, "k_pierce");
+        cartridge_param.kAP     = pSettings->read_if_exists<float>(section, "k_ap", 0.0f);
+    }
+
     cartridge_param.u8ColorID = READ_IF_EXISTS(pSettings, r_u8, section, "tracer_color_ID", 0);
 
     if (pSettings->line_exist(section, "k_air_resistance"))
@@ -174,9 +175,8 @@ bool CWeaponAmmo::Get(CCartridge& cartridge)
     cartridge.param_s = cartridge_param;
 
     cartridge.m_flags.set(CCartridge::cfTracer, m_tracer);
-    cartridge.m_4to1_tracer = m_4to1_tracer;
+    cartridge.m_flags.set(CCartridge::cf4to1Tracer, m_4to1_tracer);
     cartridge.bullet_material_idx = GMLib.GetMaterialIdx(WEAPON_MATERIAL_NAME);
-    cartridge.m_InvShortName = NameShort();
     --m_boxCurr;
     if (m_pInventory)
         m_pInventory->InvalidateState();
@@ -191,14 +191,14 @@ void CWeaponAmmo::renderable_Render(u32 context_id, IRenderable* root)
 
 void CWeaponAmmo::UpdateCL()
 {
-    VERIFY2(_valid(renderable.xform), *cName());
+    VERIFY2(_valid(renderable.xform), cName().c_str());
     inherited::UpdateCL();
-    VERIFY2(_valid(renderable.xform), *cName());
+    VERIFY2(_valid(renderable.xform), cName().c_str());
 
     if (!IsGameTypeSingle())
         make_Interpolation();
 
-    VERIFY2(_valid(renderable.xform), *cName());
+    VERIFY2(_valid(renderable.xform), cName().c_str());
 }
 
 void CWeaponAmmo::net_Export(NET_Packet& P)

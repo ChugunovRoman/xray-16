@@ -447,7 +447,7 @@ void CScriptProfiler::SaveSamplingReport(shared_str filename)
     if (IWriter* file = FS.w_open(filename.c_str()))
     {
         for (auto& it : m_sampling_profiling_log)
-            file->w_string(*it.GetFoldedStack());
+            file->w_string(it.GetFoldedStack().c_str());
 
         FS.w_close(file);
     }

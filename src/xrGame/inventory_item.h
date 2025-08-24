@@ -18,7 +18,7 @@
 #include "xrEngine/pure.h"
 #endif
 
-enum EHandDependence
+enum EHandDependence : u8
 {
     hdNone = 0,
     hd1Hand = 1,

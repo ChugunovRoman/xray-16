@@ -45,7 +45,7 @@ void CCarDamageParticles::Init(CCar* car)
 
 void CCarDamageParticles::Play1(CCar* car)
 {
-    if (*m_car_damage_particles1)
+    if (m_car_damage_particles1.c_str())
         for (auto& bone : bones1)
             car->StartParticles(m_car_damage_particles1, bone, Fvector().set(0, 1, 0), car->ID());
 }
@@ -53,7 +53,7 @@ void CCarDamageParticles::Play1(CCar* car)
 void CCarDamageParticles::Play2(CCar* car)
 {
     VERIFY(!physics_world()->Processing());
-    if (*m_car_damage_particles2)
+    if (m_car_damage_particles2.c_str())
         for (auto& bone : bones2)
             car->StartParticles(m_car_damage_particles2, bone, Fvector().set(0, 1, 0), car->ID());
 }
@@ -62,7 +62,7 @@ void CCarDamageParticles::Play2(CCar* car)
 // функции для выключения партиклов дыма
 void CCarDamageParticles::Stop1(CCar* car)
 {
-    if(*m_car_damage_particles1)
+    if(m_car_damage_particles1.c_str())
         for (auto& bone : bones1)
             car->StopParticles(car->ID(), bone, false);
 }
@@ -70,7 +70,7 @@ void CCarDamageParticles::Stop1(CCar* car)
 void CCarDamageParticles::Stop2(CCar* car)
 {
     VERIFY(!physics_world()->Processing());
-    if(*m_car_damage_particles2)
+    if(m_car_damage_particles2.c_str())
         for (auto& bone : bones2)
             car->StopParticles(car->ID(), bone, false);
 }
@@ -80,14 +80,14 @@ void CCarDamageParticles::Stop2(CCar* car)
 void CCarDamageParticles::PlayWheel1(CCar* car, u16 bone_id) const
 {
     VERIFY(!physics_world()->Processing());
-    if (*m_wheels_damage_particles1)
+    if (m_wheels_damage_particles1.c_str())
         car->StartParticles(m_wheels_damage_particles1, bone_id, Fvector().set(0, 1, 0), car->ID());
 }
 
 void CCarDamageParticles::PlayWheel2(CCar* car, u16 bone_id) const
 {
     VERIFY(!physics_world()->Processing());
-    if (*m_wheels_damage_particles2)
+    if (m_wheels_damage_particles2.c_str())
         car->StartParticles(m_wheels_damage_particles2, bone_id, Fvector().set(0, 1, 0), car->ID());
 }
 

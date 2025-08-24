@@ -63,8 +63,8 @@ void CALifeSpawnRegistry::load(IReader& file_stream, LPCSTR game_name)
     chunk->close();
 
     string_path file_name;
-    bool file_exists = !!FS.exist(file_name, "$game_spawn$", *m_spawn_name, ".spawn");
-    R_ASSERT3(file_exists, "Can't find spawn file:", *m_spawn_name);
+    bool file_exists = !!FS.exist(file_name, "$game_spawn$", m_spawn_name.c_str(), ".spawn");
+    R_ASSERT3(file_exists, "Can't find spawn file:", m_spawn_name.c_str());
 
     VERIFY(!m_file);
     m_file = FS.r_open(file_name);
@@ -78,7 +78,7 @@ void CALifeSpawnRegistry::load(LPCSTR spawn_name)
     Msg("* Loading spawn registry...");
     m_spawn_name = spawn_name;
     string_path file_name;
-    R_ASSERT3(FS.exist(file_name, "$game_spawn$", *m_spawn_name, ".spawn"), "Can't find spawn file:", *m_spawn_name);
+    R_ASSERT3(FS.exist(file_name, "$game_spawn$", m_spawn_name.c_str(), ".spawn"), "Can't find spawn file:", m_spawn_name.c_str());
 
     VERIFY(!m_file);
     m_file = FS.r_open(file_name);

@@ -232,10 +232,8 @@ bool CUITextureMaster::ItemExist(const shared_str& texture_name)
 
 void CUITextureMaster::GetTextureShader(const shared_str& texture_name, ui_shader& sh)
 {
-    xr_map<shared_str, TEX_INFO>::iterator it;
-    it = m_textures.find(texture_name);
-
+    const auto it = m_textures.find(texture_name);
     R_ASSERT3(it != m_textures.end(), "can't find texture", texture_name.c_str());
 
-    sh->create("hud" DELIMITER "default", *((*it).second.file));
+    sh->create("hud\\default", it->second.file.c_str());
 }

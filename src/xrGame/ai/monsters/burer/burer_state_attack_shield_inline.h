@@ -78,18 +78,5 @@ bool CStateBurerShield<Object>::check_completion()
     if (xr_current_time() > m_last_shield_started + this->object->m_shield_time)
         return true;
 
-    CEntityAlive const* enemy = this->object->EnemyMan.get_enemy();
-    if (!enemy)
-        return true;
-
-    if (enemy == Actor())
-    {
-        if (actor_is_reloading_weapon())
-            return true;
-    }
-
-    if (!this->object->EnemyMan.get_enemy())
-        return true;
-
-    return false;
+    return this->object->CanDeactivateShieldEarly();
 }

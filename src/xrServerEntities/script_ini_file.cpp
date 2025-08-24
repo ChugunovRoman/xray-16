@@ -23,7 +23,7 @@ LPCSTR CScriptIniFile::update(LPCSTR initial, LPCSTR file_name)
 {
     string_path S1;
     FS.update_path(S1, initial, file_name);
-    return *shared_str(S1);
+    return shared_str(S1).c_str(); // XXX: dangling pointer
 }
 
 int CScriptIniFile::r_clsid(LPCSTR S, LPCSTR L)

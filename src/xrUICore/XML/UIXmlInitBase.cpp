@@ -835,7 +835,7 @@ bool CUIXmlInitBase::InitFrameLine(CUIXml& xml_doc, pcstr path, int index, CUIFr
 
     InitWindow(xml_doc, path, index, pWnd);
 
-    return pWnd->InitFrameLineWnd(*base_name, pos, size, !vertical, fatal);
+    return pWnd->InitFrameLineWnd(base_name.c_str(), pos, size, !vertical, fatal);
 }
 
 bool CUIXmlInitBase::InitTextFrameLine(CUIXml& xml_doc, pcstr path, int index, CUITextFrameLineWnd* pWnd, bool fatal /*= true*/)
@@ -990,7 +990,7 @@ bool CUIXmlInitBase::InitMultiTexture(const CUIXml& xml_doc, pcstr path, int ind
 
     if (texture.size() > 0)
     {
-        pWnd->InitTexture(*texture);
+        pWnd->InitTexture(texture.c_str());
         return true;
     }
 
@@ -1231,7 +1231,7 @@ bool CUIXmlInitBase::InitListWnd(const CUIXml& xml_doc, pcstr path, int index, C
     u32 cl;
 
     const shared_str text_path = strconcat(buf, path, ":font");
-    InitFont(xml_doc, *text_path, index, cl, LocalFont);
+    InitFont(xml_doc, text_path.c_str(), index, cl, LocalFont);
     if (LocalFont)
     {
         pWnd->SetFont(LocalFont);

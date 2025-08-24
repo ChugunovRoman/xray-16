@@ -1,57 +1,33 @@
 #pragma once
-#ifndef CAMERA_DEFS_H_INCLUDED
-#define CAMERA_DEFS_H_INCLUDED
 
 #include "xrCore/fastdelegate.h"
 #include "xrCore/_vector3d.h"
 
-struct ENGINE_API SBaseEffector
+#include "device.h"
+
+struct SBaseEffector
 {
-    typedef fastdelegate::FastDelegate0<> CB_ON_B_REMOVE;
+    using CB_ON_B_REMOVE = fastdelegate::FastDelegate0<>;
     CB_ON_B_REMOVE m_on_b_remove_callback;
-    virtual ~SBaseEffector() {}
+    virtual ~SBaseEffector() = 0;
 };
 
-struct ENGINE_API SCamEffectorInfo
-{
-    Fvector p;
-    Fvector d;
-    Fvector n;
-    Fvector r;
-    float fFov;
-    float fNear;
-    float fFar;
-    float fAspect;
-    float offsetX; // Required for Nvidia Ansel
-    float offsetY; // Required for Nvidia Ansel
-    bool dont_apply;
-    bool affected_on_hud;
-    SCamEffectorInfo();
-    SCamEffectorInfo& operator=(const SCamEffectorInfo& other)
-    {
-        p = other.p;
-        d = other.d;
-        n = other.n;
-        r = other.r;
-        fFov = other.fFov;
-        fNear = other.fNear;
-        fFar = other.fFar;
-        fAspect = other.fAspect;
-        offsetX = other.offsetX;
-        offsetY = other.offsetY;
-        dont_apply = other.dont_apply;
-        affected_on_hud = other.affected_on_hud;
-        return *this;
-    }
-};
+inline SBaseEffector::~SBaseEffector() = default;
 
-enum ECameraStyle : u32
+struct SCamEffectorInfo
 {
-    csCamDebug,
-    csFirstEye,
-    csLookAt,
-    csMax,
-    csFixed,
+    Fvector p{ 0, 0, 0 };
+    Fvector d{ 0, 0, 1 };
+    Fvector n{ 0, 1, 0 };
+    Fvector r{};
+    float fFov{ 90.0f };
+    float fNear{ VIEWPORT_NEAR };
+    float fFar{ 100.0f };
+    float fAspect{ 1.f };
+    float offsetX{}; // Required for Nvidia Ansel
+    float offsetY{}; // Required for Nvidia Ansel
+    bool dont_apply{};
+    bool affected_on_hud{ true };
 };
 
 enum ECamEffectorType
@@ -70,5 +46,3 @@ enum EEffectorPPType
 class ENGINE_API CCameraBase;
 class ENGINE_API CEffectorCam;
 class ENGINE_API CEffectorPP;
-
-#endif

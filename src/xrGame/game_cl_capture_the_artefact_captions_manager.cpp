@@ -180,12 +180,12 @@ u32 CTAGameClCaptionsManager::SetWarmupTime(u32 current_warmup_time, u32 current
     warmup_message[0] = 0; // bad style
     if (time_remains > 10000)
     {
-        strconcat(sizeof(warmup_message), warmup_message, *st.translate("mp_time2start"), " ", time_str);
+        strconcat(sizeof(warmup_message), warmup_message, st.translate("mp_time2start").c_str(), " ", time_str);
     }
     else
     {
         if (time_remains < 1000)
-            strconcat(sizeof(warmup_message), warmup_message, *st.translate("mp_go"), "");
+            strconcat(sizeof(warmup_message), warmup_message, st.translate("mp_go").c_str(), "");
         else
         {
             u32 dwCurTimeRemains = time_remains / 1000;
@@ -198,7 +198,7 @@ u32 CTAGameClCaptionsManager::SetWarmupTime(u32 current_warmup_time, u32 current
             }
             dwLastTimeRemains = dwCurTimeRemains;
             xr_itoa(dwCurTimeRemains, time_str, 10);
-            strconcat(sizeof(warmup_message), warmup_message, *st.translate("mp_ready"), "...", time_str);
+            strconcat(sizeof(warmup_message), warmup_message, st.translate("mp_ready").c_str(), "...", time_str);
         }
     };
     return ret_value;

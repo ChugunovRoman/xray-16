@@ -18,12 +18,6 @@ public:
     virtual bool check_completion();
 
 private:
-    // выполнять состояние
-    void ExecuteGraviStart();
-    void ExecuteGraviContinue();
-    void ExecuteGraviFire();
-
-private:
     enum
     {
         ACTION_GRAVI_STARTED,

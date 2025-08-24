@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="windows-1251" ?>
+<?xml version="1.0" encoding="windows-1250" ?>
 <string_table>
 	<string id="st_unload_magazine_all">
 		<text>rozіaduj wszystkie bronie</text>
@@ -13,7 +13,7 @@
 		<text>Wczytywanie oњwietlenia</text>
 	</string>
 	<string id="st_client_connecting_to">
-		<text>Klient: Czenie z</text>
+		<text>Klient: Ј№czenie z</text>
 	</string>
 	<string id="st_client_spawning">
 		<text>Klient: Odradzanie</text>
@@ -76,7 +76,10 @@
 		<text>Jakoњж mokrych powierzchni</text>
 	</string>
 	<string id="ui_mm_fov">
-		<text>Pole widzenia</text>
+		<text>K№t widzenia</text>
+	</string>
+	<string id="ui_mm_hud_fov">
+		<text>K№t widzenia HUD</text>
 	</string>
 	<string id="ui_mm_localization">
 		<text>Jкzyk</text>
@@ -91,25 +94,25 @@
 		<text>Limit FPS w menu</text>
 	</string>
 	<string id="ui_mm_shader_preset">
-		<text>Graphics mode</text>
+		<text>Tryb graficzny</text>
 	</string>
 	<string id="ui_mm_shader_preset_vanilla">
-		<text>vanilla</text>
+		<text>Vanilla</text>
 	</string>
 	<string id="ui_mm_shader_preset_enhanced_default">
-		<text>enhanced (Default)</text>
+		<text>Rozszerzany (Domyњlny)</text>
 	</string>
 	<string id="ui_mm_shader_preset_enhanced_high">
-		<text>enhanced (High)</text>
+		<text>Rozszerzany (Wysoki)</text>
 	</string>
 	<string id="ui_mm_color_grading_preset">
-		<text>Colour grading</text>
+		<text>Kolorystyka</text>
 	</string>
 	<string id="ui_mm_color_grading_default">
-		<text>default</text>
+		<text>Domyњlna</text>
 	</string>
 	<string id="ui_mm_color_grading_cold">
-		<text>cold</text>
+		<text>Chіodna</text>
 	</string>
 	<string id="ui_mm_color_grading_filmic_01">
 		<text>Filmic 1</text>
@@ -130,7 +133,10 @@
 		<text>Vibrant</text>
 	</string>
 	<string id="ui_mm_color_grading_warm">
-		<text>warm</text>
+		<text>Ciepіa</text>
+	</string>
+	<string id="cze">
+    	<text>Czeski (Czech)</text>
 	</string>
 	<string id="eng">
 		<text>Angielski (English)</text>
@@ -140,6 +146,9 @@
 	</string>
 	<string id="ger">
 		<text>Niemiecki (German)</text>
+	</string>
+	<string id="jpn">
+    	<text>Japoсski (Japanese)</text>
 	</string>
 	<string id="ita">
 		<text>Wіoski (Italian)</text>
@@ -154,6 +163,6 @@
 		<text>Hiszpaсski (Spanish)</text>
 	</string>
 	<string id="ukr">
-		<text>Ukrainski (Ukrainian)</text>
+    	<text>Ukraiсski (Ukrainian)</text>
 	</string>
 </string_table>

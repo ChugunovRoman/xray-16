@@ -28,7 +28,7 @@ CParticlesPlayer::SParticlesInfo* CParticlesPlayer::SBoneInfo::AppendParticles(
         return pi;
     particles.push_back(SParticlesInfo());
     pi = &particles.back();
-    pi->ps = CParticlesObject::Create(*ps_name, FALSE);
+    pi->ps = CParticlesObject::Create(ps_name.c_str(), FALSE);
     return pi;
 }
 void CParticlesPlayer::SBoneInfo::StopParticles(const shared_str& ps_name, bool bDestroy)
@@ -84,10 +84,10 @@ void CParticlesPlayer::LoadParticles(IKinematics* K)
         CInifile::Sect& data = ini->r_section("particle_bones");
         for (const auto& item : data.Data)
         {
-            u16 index = K->LL_BoneID(*item.first);
-            R_ASSERT3(index != BI_NONE, "Particles bone not found", *item.first);
+            u16 index = K->LL_BoneID(item.first.c_str());
+            R_ASSERT3(index != BI_NONE, "Particles bone not found", item.first.c_str());
             Fvector offs;
-            sscanf(*item.second, "%f,%f,%f", &offs.x, &offs.y, &offs.z);
+            sscanf(item.second.c_str(), "%f,%f,%f", &offs.x, &offs.y, &offs.z);
             m_Bones.push_back(SBoneInfo(index, offs));
             bone_mask |= u64(1) << u64(index);
         }
@@ -136,7 +136,7 @@ void CParticlesPlayer::StartParticles(
     const shared_str& particles_name, u16 bone_num, const Fmatrix& xform, u16 sender_id, int life_time, bool auto_stop)
 {
     VERIFY(fis_zero(xform.c.magnitude()));
-    R_ASSERT(*particles_name);
+    R_ASSERT(particles_name.c_str());
 
     IGameObject* object = m_self_object;
     VERIFY(object);

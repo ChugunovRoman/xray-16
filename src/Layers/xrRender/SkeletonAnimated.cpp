@@ -76,7 +76,7 @@ std::pair<LPCSTR, LPCSTR> CKinematicsAnimated::LL_MotionDefName_dbg(MotionID ID)
     shared_motions& s_mots = m_Motions[ID.slot].motions;
     for (auto &it : *s_mots.motion_map())
         if (it.second == ID.idx)
-            return std::make_pair(*it.first, *s_mots.id());
+            return std::make_pair(it.first.c_str(), s_mots.id().c_str());
     return std::make_pair((LPCSTR)nullptr, (LPCSTR)nullptr);
 }
 
@@ -182,7 +182,7 @@ u16 CKinematicsAnimated::LL_PartID(LPCSTR B)
         CPartDef& P = (*m_Partition)[id];
         if (nullptr == P.Name)
             continue;
-        if (0 == xr_stricmp(B, *P.Name))
+        if (0 == xr_stricmp(B, P.Name.c_str()))
             return id;
     }
     return BI_NONE;

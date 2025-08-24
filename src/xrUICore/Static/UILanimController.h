@@ -11,20 +11,17 @@ class CLAItem;
 #define LA_TEXTCOLOR (1 << 2)
 #define LA_TEXTURECOLOR (1 << 3)
 
-struct XRUICORE_API color_animation
+struct color_animation
 {
-    color_animation();
-    CLAItem* m_lanim;
-    float m_lanim_start_time;
-    float m_lanim_delay_time;
-    Flags8 m_lanimFlags;
+    CLAItem* m_lanim{};
+    float m_lanim_start_time{ -1.0f };
+    float m_lanim_delay_time{};
+    Flags8 m_lanimFlags{};
 };
 
 struct xform_animation : public color_animation
 {
-    xform_animation();
-    Fvector2 m_origSize;
-    void set_defaults();
+    Fvector2 m_origSize{};
 };
 
 class CUILightAnimColorConroller

@@ -2,65 +2,76 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#if !defined(AFX_CAMERABASE_H__B11F8AE1_1213_11D4_B4E3_4854E82A090D__INCLUDED_)
-#define AFX_CAMERABASE_H__B11F8AE1_1213_11D4_B4E3_4854E82A090D__INCLUDED_
 #pragma once
 
 #include "CameraDefs.h"
 #include "device.h"
+
 // refs
 class IGameObject;
 
+// XXX: refactor:
+// 1. tag and style are used for the same purpose,
+// 2. Convert remaining bools to flags
 class ENGINE_API CCameraBase
 {
 protected:
     IGameObject* parent;
 
 public:
-    bool bClampYaw, bClampPitch, bClampRoll;
-    float yaw, pitch, roll;
-
-    enum
+    enum : u8
     {
-        flRelativeLink = (1 << 0),
-        flPositionRigid = (1 << 1),
-        flDirectionRigid = (1 << 2),
+        flRelativeLink   = 1 << 0,
+        flPositionRigid  = 1 << 1,
+        flDirectionRigid = 1 << 2,
     };
-    Flags32 m_Flags;
+    Flags8 m_Flags;
 
-    ECameraStyle style;
-    Fvector2 lim_yaw, lim_pitch, lim_roll;
-    Fvector rot_speed;
+    u8 tag{};
+    bool bClampYaw   : 1 {};
+    bool bClampPitch : 1 {};
+    bool bClampRoll  : 1 {};
 
-    Fvector vPosition;
-    Fvector vDirection;
-    Fvector vNormal;
-    float f_fov;
-    float f_aspect;
+    float yaw{}, pitch{}, roll{};
 
-    bool m_bInputDisabled; //--#SM+#-- Флаг, запрещающий любые повороты камеры игроком [flag for disable all user input]
+    Fvector2 lim_yaw{}, lim_pitch{}, lim_roll{};
+    Fvector rot_speed{};
 
-    IC Fvector Position() const { return vPosition; }
-    IC Fvector Direction() const { return vDirection; }
-    IC Fvector Up() const { return vNormal; }
-    IC Fvector Right() const { return Fvector().crossproduct(vNormal, vDirection); }
-    IC float Fov() const { return f_fov; }
-    IC float Aspect() const { return f_aspect; }
-    int tag;
+    Fvector vPosition { 0, 0, 0 };
+    Fvector vDirection{ 0, 0, 1 };
+    Fvector vNormal   { 0, 1, 0 };
+
+    float f_fov   { 90.0f };
+    float f_aspect{ 1.0f };
+
+    Fvector Position() const { return vPosition; }
+    Fvector Direction() const { return vDirection; }
+    Fvector Up() const { return vNormal; }
+    Fvector Right() const { return Fvector().crossproduct(vNormal, vDirection); }
+    float Fov() const { return f_fov; }
+    float Aspect() const { return f_aspect; }
 
 public:
-    CCameraBase(IGameObject* p, u32 flags);
-    virtual ~CCameraBase();
+    CCameraBase(IGameObject* p, u8 flags)
+        : parent(p), m_Flags{ flags }
+    {
+        VERIFY(p);
+    }
+
+    virtual ~CCameraBase() = 0;
+
     virtual void Load(pcstr section);
+
     void SetParent(IGameObject* p)
     {
         parent = p;
         VERIFY(p);
     }
+
     virtual void OnActivate(CCameraBase* old_cam) { ; }
     virtual void OnDeactivate() { ; }
-    virtual void Move(int cmd, float val = 0, float factor = 1.0f) { ; }
-    virtual void Update(Fvector& point, Fvector& noise_angle) { ; }
+    virtual void Move(int cmd, float val = 0, float factor = 1.0f) {}
+    virtual void Update(const Fvector& point, Fvector& noise_angle) {}
     virtual void Get(Fvector& P, Fvector& D, Fvector& N)
     {
         P.set(vPosition);
@@ -80,17 +91,17 @@ public:
         roll = R;
     }
 
-    virtual float GetWorldYaw() { return 0; };
-    virtual float GetWorldPitch() { return 0; };
+    virtual float GetWorldYaw() { return 0; }
+    virtual float GetWorldPitch() { return 0; }
     virtual float CheckLimYaw();
     virtual float CheckLimPitch();
     virtual float CheckLimRoll();
 
 private: //--#SM+#--
-    float saved_yaw, saved_pitch, saved_roll;
-    Fvector vSavedPosition;
-    Fvector vSavedDirection;
-    Fvector vSavedNormal;
+    float saved_yaw{}, saved_pitch{}, saved_roll{};
+    Fvector vSavedPosition{};
+    Fvector vSavedDirection{};
+    Fvector vSavedNormal{};
 
 public: //--#SM+#--
     virtual void SaveCamVec()
@@ -114,6 +125,8 @@ public: //--#SM+#--
     virtual IGameObject* GetOwner() { return parent; }
 };
 
+inline CCameraBase::~CCameraBase() = default;
+
 template <typename T>
 IC void viewport_size(float _viewport_near, const T& cam_info, float& h_w, float& h_h)
 {
@@ -123,5 +136,3 @@ IC void viewport_size(float _viewport_near, const T& cam_info, float& h_w, float
     VERIFY(aspect > EPS);
     h_w = h_h / aspect;
 }
-
-#endif // !defined(AFX_CAMERABASE_H__B11F8AE1_1213_11D4_B4E3_4854E82A090D__INCLUDED_)

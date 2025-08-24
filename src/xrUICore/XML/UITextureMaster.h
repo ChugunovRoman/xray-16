@@ -17,7 +17,7 @@ struct TEX_INFO
 {
     shared_str file;
     Frect rect;
-    LPCSTR get_file_name() { return *file; }
+    pcstr get_file_name() const { return file.c_str(); }
     Frect get_rect() { return rect; }
 };
 

@@ -59,7 +59,7 @@ void __cdecl callback_serverkey(int keyid, qr2_buffer_t outbuf, void* userdata)
         break; //		pQR2->BufferAdd(outbuf, gameState->type_name()); break;
     case GAMEMODE_KEY: pQR2->BufferAdd(outbuf, "openplaying"); break;
     case PASSWORD_KEY:
-        if (0 == *(pServer->Password))
+        if (0 == pServer->Password.c_str())
         {
             pQR2->BufferAdd_Int(outbuf, 0);
         }

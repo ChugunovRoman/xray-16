@@ -1,23 +1,24 @@
 #include "StdAfx.h"
 #pragma hdrstop
 
-#include "CameraLook.h"
 #include "xrEngine/CameraManager.h"
 #include "xrEngine/xr_level_controller.h"
-#include "Actor.h"
+#include "xrEngine/xr_input.h"
 
-CCameraLook::CCameraLook(IGameObject* p, u32 flags) : CCameraBase(p, flags) {}
-void CCameraLook::Load(LPCSTR section)
+#include "CameraLook.h"
+#include "Actor.h"
+#include "actor_memory.h"
+#include "visual_memory_manager.h"
+
+void CCameraLook::Load(pcstr section)
 {
     inherited::Load(section);
-    style = csLookAt;
     lim_zoom = pSettings->r_fvector2(section, "lim_zoom");
     dist = (lim_zoom[0] + lim_zoom[1]) * 0.5f;
     prev_d = 0;
 }
 
-CCameraLook::~CCameraLook() {}
-void CCameraLook::Update(Fvector& point, Fvector& /**noise_dangle**/)
+void CCameraLook::Update(const Fvector& point, Fvector& /**noise_dangle**/)
 {
     vPosition.set(point);
     Fmatrix mR;
@@ -34,7 +35,7 @@ void CCameraLook::Update(Fvector& point, Fvector& /**noise_dangle**/)
     UpdateDistance(point);
 }
 
-void CCameraLook::UpdateDistance(Fvector& point)
+void CCameraLook::UpdateDistance(const Fvector& point)
 {
     Fvector vDir;
     collide::rq_result R;
@@ -81,13 +82,9 @@ void CCameraLook::OnActivate(CCameraBase* old_cam)
         yaw += PI_MUL_2;
 }
 
-#include "xrEngine/xr_input.h"
-#include "visual_memory_manager.h"
-#include "actor_memory.h"
-
 Fvector CCameraLook2::m_cam_offset;
-void CCameraLook2::OnActivate(CCameraBase* old_cam) { CCameraLook::OnActivate(old_cam); }
-void CCameraLook2::Update(Fvector& point, Fvector&)
+
+void CCameraLook2::Update(const Fvector& point, Fvector&)
 {
     bool keyPressed = false;
     ForAllActionKeys(kCAM_AUTOAIM, [&](size_t /*keyboard_index*/, int key)
@@ -135,7 +132,7 @@ void CCameraLook2::Update(Fvector& point, Fvector&)
     {
         if (!keyPressed)
         {
-            m_locked_enemy = NULL;
+            m_locked_enemy = nullptr;
             //.			Msg				("enemy is NILL");
         }
     }
@@ -180,18 +177,12 @@ void CCameraLook2::UpdateAutoAim()
         angle_inertion_var(pitch, xyz.x, m_autoaim_inertion_pitch.x, m_autoaim_inertion_pitch.y, PI, Device.fTimeDelta);
 }
 
-void CCameraLook2::Load(LPCSTR section)
+void CCameraLook2::Load(pcstr section)
 {
     CCameraLook::Load(section);
     m_cam_offset = pSettings->r_fvector3(section, "offset");
     m_autoaim_inertion_yaw = pSettings->r_fvector2(section, "autoaim_speed_y");
     m_autoaim_inertion_pitch = pSettings->r_fvector2(section, "autoaim_speed_x");
-}
-
-void CCameraFixedLook::Load(LPCSTR section)
-{
-    CCameraLook::Load(section);
-    style = csFixed;
 }
 
 void CCameraFixedLook::OnActivate(CCameraBase* old_cam)
@@ -213,7 +204,8 @@ void CCameraFixedLook::OnActivate(CCameraBase* old_cam)
 }
 
 void CCameraFixedLook::Move(int cmd, float val, float factor) {}
-void CCameraFixedLook::Update(Fvector& point, Fvector& noise_dangle)
+
+void CCameraFixedLook::Update(const Fvector& point, Fvector& noise_dangle)
 {
     Fquaternion new_dir;
     new_dir.slerp(m_current_dir, m_final_dir, Device.fTimeDelta); // 1 sec

@@ -10,7 +10,12 @@ class CUIListBoxItem;
 class XRUICORE_API CUIComboBox final : public CUIWindow, public CUIOptionsItem, public pureRender
 {
     friend class CUIXmlInitBase;
-    typedef enum { LIST_EXPANDED, LIST_FONDED } E_COMBO_STATE;
+
+    enum E_COMBO_STATE : u8
+    {
+        LIST_EXPANDED,
+        LIST_FONDED
+    };
 
     xr_vector<int> m_disabled;
 
@@ -67,11 +72,11 @@ public:
     u32 GetSize() const;
 
 protected:
-    bool m_bInited;
     int m_iListHeight;
     int m_itoken_id;
-    E_COMBO_STATE m_eState;
     int m_opt_backup_value;
+    E_COMBO_STATE m_eState;
+    bool m_bInited;
 
     CUI_IB_FrameLineWnd m_frameLine;
     CUIStatic m_text{ "Text" };

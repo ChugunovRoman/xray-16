@@ -127,7 +127,7 @@ void CResourceManager::_DeletePP(const SPP* pp)
     if (0 == (pp->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
 
-    const pstr N = const_cast<pstr>(*pp->cName);
+    const pstr N = const_cast<pstr>(pp->cName.c_str());
     auto iterator = m_pp.find(N);
 
     if (iterator != m_pp.end())

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="windows-1251" ?>
+<?xml version="1.0" encoding="windows-1252" ?>
 <string_table>
 	<string id="st_unequip">
 		<text>wegstecken</text>
@@ -73,7 +73,10 @@
 		<text>Nassflachen Qualitat</text>
 	</string>
 	<string id="ui_mm_fov">
-		<text>Blickwinkel (FOV)</text>
+		<text>Sichtfeld</text>
+	</string>
+	<string id="ui_mm_hud_fov">
+		<text>Sichtfeld der HUD</text>
 	</string>
 	<string id="ui_mm_fps_limit">
 		<text>Spiel-FPS-Limit</text>
@@ -125,6 +128,9 @@
 	</string>
 	<string id="ui_mm_color_grading_warm">
 		<text>warm</text>
+	</string>
+	<string id="cze">
+    	<text>Tschechisch (Czech)</text>
 	</string>
 	<string id="eng">
 		<text>Englisch (English)</text>

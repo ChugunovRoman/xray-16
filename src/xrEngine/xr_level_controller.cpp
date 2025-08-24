@@ -1183,7 +1183,7 @@ void ConsoleBindCmds::save(IWriter* f)
     for (; it != m_bindConsoleCmds.end(); ++it)
     {
         pcstr keyname = DikToKeyname(it->first);
-        f->w_printf("bind_console %s %s\n", *it->second.cmd, keyname);
+        f->w_printf("bind_console %s %s\n", it->second.cmd.c_str(), keyname);
     }
 }
 

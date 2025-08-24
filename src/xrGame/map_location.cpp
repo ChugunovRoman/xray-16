@@ -306,7 +306,7 @@ void CMapLocation::CalcLevelName()
 
 bool CMapLocation::Update() // returns actual
 {
-    R_ASSERT(m_cached.m_updatedFrame != Device.dwFrame);
+    R_ASSERT1_CURE(m_cached.m_updatedFrame != Device.dwFrame, return m_cached.m_Actuality);
 
     if (m_flags.test(eTTL))
     {
@@ -709,7 +709,8 @@ pcstr CMapLocation::GetHint() const
 
 CMapSpotPointer* CMapLocation::GetSpotPointer(CMapSpot* sp)
 {
-    R_ASSERT(sp);
+    R_ASSERT1_CURE(sp, return nullptr);
+
     if (!PointerEnabled())
         return NULL;
 
@@ -725,7 +726,8 @@ CMapSpotPointer* CMapLocation::GetSpotPointer(CMapSpot* sp)
 
 CMapSpot* CMapLocation::GetSpotBorder(CMapSpot* sp)
 {
-    R_ASSERT(sp);
+    R_ASSERT1_CURE(sp, return nullptr);
+
     auto& uiXml = CMapManager::m_uiSpotXml;
     if (PointerEnabled())
     {

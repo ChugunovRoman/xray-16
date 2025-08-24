@@ -224,17 +224,17 @@ CLASS_ID game_GameState::getCLASS_ID(LPCSTR game_type_name, bool isServer)
     EGameIDs gameID = ParseStringToGameType(game_type_name);
     switch (gameID)
     {
-    case eGameIDSingle: return (isServer) ? TEXT2CLSID("SV_SINGL") : TEXT2CLSID("CL_SINGL"); break;
+    case eGameIDSingle: return isServer ? xray::make_clsid("SV_SINGL") : xray::make_clsid("CL_SINGL");
 
-    case eGameIDDeathmatch: return (isServer) ? TEXT2CLSID("SV_DM") : TEXT2CLSID("CL_DM"); break;
+    case eGameIDDeathmatch: return isServer ? xray::make_clsid("SV_DM   ") : xray::make_clsid("CL_DM   ");
 
-    case eGameIDTeamDeathmatch: return (isServer) ? TEXT2CLSID("SV_TDM") : TEXT2CLSID("CL_TDM"); break;
+    case eGameIDTeamDeathmatch: return isServer ? xray::make_clsid("SV_TDM  ") : xray::make_clsid("CL_TDM  ");
 
-    case eGameIDArtefactHunt: return (isServer) ? TEXT2CLSID("SV_AHUNT") : TEXT2CLSID("CL_AHUNT"); break;
+    case eGameIDArtefactHunt: return isServer ? xray::make_clsid("SV_AHUNT") : xray::make_clsid("CL_AHUNT");
 
-    case eGameIDCaptureTheArtefact: return (isServer) ? TEXT2CLSID("SV_CTA") : TEXT2CLSID("CL_CTA"); break;
+    case eGameIDCaptureTheArtefact: return isServer ? xray::make_clsid("SV_CTA  ") : xray::make_clsid("CL_CTA  ");
 
-    default: return (TEXT2CLSID("")); break;
+    default: return (xray::make_clsid("        "));
     }
 }
 

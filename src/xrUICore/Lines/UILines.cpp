@@ -60,7 +60,7 @@ void CUILines::SetText(const char* text)
         Reset();
     }
 }
-void CUILines::SetTextST(LPCSTR str_id) { SetText(*StringTable().translate(str_id)); }
+void CUILines::SetTextST(LPCSTR str_id) { SetText(StringTable().translate(str_id).c_str()); }
 LPCSTR CUILines::GetText() const { return m_text.c_str(); }
 void CUILines::Reset() { m_lines.clear(); }
 float get_str_width(CGameFont* pFont, char ch)

@@ -84,8 +84,8 @@ GameGraph::_GRAPH_ID CALifeSmartTerrainTask::game_vertex_id() const
 {
     if (m_game_vertex_id == GameGraph::_GRAPH_ID(-1))
     {
-        VERIFY3(ai().game_graph().valid_vertex_id(patrol_point().game_vertex_id()), *m_patrol_path_name,
-            *m_patrol_point->name());
+        VERIFY3(ai().game_graph().valid_vertex_id(patrol_point().game_vertex_id()), m_patrol_path_name.c_str(),
+            m_patrol_point->name().c_str());
         return (patrol_point().game_vertex_id());
     }
     else
@@ -99,8 +99,8 @@ u32 CALifeSmartTerrainTask::level_vertex_id() const
 {
     if (m_level_vertex_id == u32(-1))
     {
-        VERIFY3(ai().game_graph().valid_vertex_id(patrol_point().game_vertex_id()), *m_patrol_path_name,
-            *m_patrol_point->name());
+        VERIFY3(ai().game_graph().valid_vertex_id(patrol_point().game_vertex_id()), m_patrol_path_name.c_str(),
+            m_patrol_point->name().c_str());
         return (patrol_point().level_vertex_id());
     }
     else

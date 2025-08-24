@@ -211,7 +211,7 @@ void CActor::IR_OnKeyboardPress(int cmd)
             StaticDrawableWrapper* _s = CurrentGameUI()->AddCustomStatic("item_used", true, compat ? 3.0f : -1.0f);
 
             string1024 str;
-            strconcat(sizeof(str), str, *StringTable().translate("st_item_used"), ": ", itm->NameItem());
+            strconcat(sizeof(str), str, StringTable().translate("st_item_used").c_str(), ": ", itm->NameItem());
             _s->wnd()->SetText(str);
             if (quickSlot)
                 CurrentGameUI()->GetActorMenu().m_pQuickSlot->ReloadReferences(this);

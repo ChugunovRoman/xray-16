@@ -70,7 +70,7 @@ void CScriptPropertiesListHelper::FvectorRDOnDraw		(PropValue* sender)
 {
     shared_str		temp;
     PHelper().FvectorRDOnDraw(sender,temp);
-    draw_val	= *temp;
+    draw_val	= temp.c_str();
 }
 */
 
@@ -89,7 +89,7 @@ void CScriptPropertiesListHelper::floatRDOnDraw			(PropValue* sender,  pcstr& dr
 {
     shared_str		temp;
     PHelper().floatRDOnDraw(sender,temp);
-    draw_val	= *temp;
+    draw_val	= temp.c_str();
 }
 */
 
@@ -97,7 +97,7 @@ bool CScriptPropertiesListHelper::NameAfterEdit(PropValue* sender, pcstr& edit_v
 {
     shared_str temp;
     bool result = PHelper().NameAfterEdit(sender, temp);
-    edit_val = *temp;
+    edit_val = temp.c_str();
     return result;
 }
 
@@ -105,7 +105,7 @@ void CScriptPropertiesListHelper::NameBeforeEdit(PropValue* sender, pcstr& edit_
 {
     shared_str temp;
     PHelper().NameBeforeEdit(sender, temp);
-    edit_val = *temp;
+    edit_val = temp.c_str();
 }
 
 /*
@@ -113,7 +113,7 @@ void CScriptPropertiesListHelper::NameDraw				(PropValue* sender,  pcstr& draw_v
 {
     shared_str		temp;
     PHelper().NameDraw(sender,temp);
-    draw_val	= *temp;
+    draw_val	= temp.c_str();
 }
 */
 

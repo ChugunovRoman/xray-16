@@ -83,7 +83,7 @@ bool CPostprocessAnimator::Process(SPPInfo& PPInfo)
 
     if (PPInfo.noise.grain <= 0.0f)
     {
-        R_ASSERT3(0, "noise.grain cant be zero! see postprocess", *m_Name);
+        R_ASSERT3(0, "noise.grain cant be zero! see postprocess", m_Name.c_str());
     }
 
     if (fsimilar(m_factor, 0.0001f, EPS_S))

@@ -57,7 +57,7 @@ void CUIListWnd::InitListWnd(Fvector2 pos, Fvector2 size, float item_height)
     AttachChild(m_ScrollBar);
 
     if (!!m_scrollbar_profile)
-        m_ScrollBar->InitScrollBar(Fvector2().set(size.x, 0.0f), size.y, false, *m_scrollbar_profile);
+        m_ScrollBar->InitScrollBar(Fvector2().set(size.x, 0.0f), size.y, false, m_scrollbar_profile.c_str());
     else
         m_ScrollBar->InitScrollBar(Fvector2().set(size.x, 0.0f), size.y, false);
 

@@ -71,6 +71,13 @@ void CStringTable::Init()
         Load(fn);
     }
 
+    if (!translate("st_currency", pData->m_sCurrency) &&
+        !translate("ui_st_money_descr", pData->m_sCurrency) && // OGSR
+        !translate("ui_st_money_regional", pData->m_sCurrency)) // xp-dev
+    {
+        pData->m_sCurrency = pSettingsOpenXRay->read_if_exists<pcstr>("gameplay", "currency", "RU");
+    }
+
 #ifndef MASTER_GOLD
     Msg("StringTable: loaded %d files", fset.size());
 #endif
@@ -193,6 +200,11 @@ shared_str CStringTable::GetCurrentLanguage() const
 shared_str CStringTable::GetCurrentFontPrefix() const
 {
     return pData ? pData->m_fontPrefix : nullptr;
+}
+
+shared_str CStringTable::GetCurrency() const
+{
+    return pData ? pData->m_sCurrency : "RU";
 }
 
 xr_token* CStringTable::GetLanguagesToken() const { return languagesToken.data(); }

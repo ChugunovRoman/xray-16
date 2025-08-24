@@ -2,13 +2,6 @@
 #include "monster_hit_memory.h"
 #include "basemonster/base_monster.h"
 
-CMonsterHitMemory::CMonsterHitMemory()
-{
-    monster = 0;
-    time_memory = 10000;
-}
-
-CMonsterHitMemory::~CMonsterHitMemory() {}
 void CMonsterHitMemory::init_external(CBaseMonster* M, TTime mem_time)
 {
     monster = M;
@@ -21,23 +14,23 @@ void CMonsterHitMemory::update()
     remove_non_actual();
 }
 
-bool CMonsterHitMemory::is_hit(IGameObject* pO)
+bool CMonsterHitMemory::is_hit(const IGameObject* pO)
 {
-    return (std::find(m_hits.begin(), m_hits.end(), pO) != m_hits.end());
+    return std::find(m_hits.begin(), m_hits.end(), pO) != m_hits.end();
 }
 
 void CMonsterHitMemory::add_hit(IGameObject* who, EHitSide side)
 {
-    SMonsterHit new_hit_info;
-    new_hit_info.object = who;
-    new_hit_info.time = Device.dwTimeGlobal;
-    new_hit_info.side = side;
-    new_hit_info.position = monster->Position();
+    SMonsterHit new_hit_info
+    {
+        .object = who,
+        .position = monster->Position(),
+        .time = Device.dwTimeGlobal,
+        .side = side,
+    };
 
-    auto it = std::find(m_hits.begin(), m_hits.end(), who);
-
-    if (it == m_hits.end())
-        m_hits.push_back(new_hit_info);
+    if (const auto it = std::find(m_hits.begin(), m_hits.end(), who); it == m_hits.end())
+        m_hits.emplace_back(new_hit_info);
     else
         *it = new_hit_info;
 }
@@ -53,7 +46,7 @@ struct predicate_old_hit
         this->mem_time = mem_time;
     }
 
-    IC bool operator()(const SMonsterHit& hit_info)
+    IC bool operator()(const SMonsterHit& hit_info) const
     {
         if ((mem_time + hit_info.time) < cur_time)
             return true;
@@ -108,7 +101,7 @@ Fvector CMonsterHitMemory::get_last_hit_dir()
     return dir;
 }
 
-TTime CMonsterHitMemory::get_last_hit_time()
+TTime CMonsterHitMemory::get_last_hit_time() const
 {
     SMonsterHit last_hit;
     last_hit.time = 0;
@@ -122,7 +115,7 @@ TTime CMonsterHitMemory::get_last_hit_time()
     return last_hit.time;
 }
 
-IGameObject* CMonsterHitMemory::get_last_hit_object()
+IGameObject* CMonsterHitMemory::get_last_hit_object() const
 {
     SMonsterHit last_hit;
     last_hit.object = 0;
@@ -137,7 +130,7 @@ IGameObject* CMonsterHitMemory::get_last_hit_object()
     return last_hit.object;
 }
 
-Fvector CMonsterHitMemory::get_last_hit_position()
+Fvector CMonsterHitMemory::get_last_hit_position() const
 {
     SMonsterHit last_hit;
     last_hit.time = 0;
@@ -157,7 +150,7 @@ struct predicate_old_info
     const IGameObject* object;
 
     predicate_old_info(const IGameObject* obj) : object(obj) {}
-    IC bool operator()(const SMonsterHit& hit_info) { return (object == hit_info.object); }
+    IC bool operator()(const SMonsterHit& hit_info) const { return (object == hit_info.object); }
 };
 
 void CMonsterHitMemory::remove_hit_info(const IGameObject* obj)

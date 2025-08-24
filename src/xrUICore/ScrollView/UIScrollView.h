@@ -11,7 +11,7 @@ class XRUICORE_API CUIScrollView : public CUIWindow, public CUIWndCallback
     typedef CUIWindow inherited;
     friend class CUIXmlInitBase; // for init
 protected:
-    enum
+    enum : u16
     {
         eVertFlip = (1 << 0),
         eNeedRecalc = (1 << 1),

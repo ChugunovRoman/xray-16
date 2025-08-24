@@ -89,11 +89,11 @@ void CShootingObject::LoadFireParams(LPCSTR section)
     s_sHitPowerMonster = pSettings->r_string_wb(section, "hit_power_monster"); //читаем строку силы хита пули оружия
     s_sHitPowerCritical = READ_IF_EXISTS(pSettings, r_string_wb, section, "hit_power_critical", s_sHitPower);
     fvHitPower[egdMaster] =
-        (float)atof(_GetItem(*s_sHitPower, 0, buffer)); //первый параметр - это хит для уровня игры мастер
+        (float)atof(_GetItem(s_sHitPower.c_str(), 0, buffer)); //первый параметр - это хит для уровня игры мастер
     fvHitPowerMonster[egdMaster] =
-        (float)atof(_GetItem(*s_sHitPowerMonster, 0, buffer)); //первый параметр - это хит для уровня игры мастер
+        (float)atof(_GetItem(s_sHitPowerMonster.c_str(), 0, buffer)); //первый параметр - это хит для уровня игры мастер
     fvHitPowerCritical[egdMaster] =
-        (float)atof(_GetItem(*s_sHitPowerCritical, 0, buffer)); //первый параметр - это хит для уровня игры мастер
+        (float)atof(_GetItem(s_sHitPowerCritical.c_str(), 0, buffer)); //первый параметр - это хит для уровня игры мастер
 
     fvHitPower[egdNovice] = fvHitPower[egdStalker] = fvHitPower[egdVeteran] =
         fvHitPower[egdMaster]; //изначально параметры для других уровней сложности такие же
@@ -102,29 +102,29 @@ void CShootingObject::LoadFireParams(LPCSTR section)
     fvHitPowerCritical[egdNovice] = fvHitPowerCritical[egdStalker] = fvHitPowerCritical[egdVeteran] =
         fvHitPowerCritical[egdMaster]; //изначально параметры для других уровней сложности такие же
 
-    int num_game_diff_param = _GetItemCount(*s_sHitPower); //узнаём колличество параметров для хитов
+    int num_game_diff_param = _GetItemCount(s_sHitPower.c_str()); //узнаём колличество параметров для хитов
     if (num_game_diff_param > 1) //если задан второй параметр хита
-        fvHitPower[egdVeteran] = (float)atof(_GetItem(*s_sHitPower, 1, buffer)); //то вычитываем его для уровня ветерана
+        fvHitPower[egdVeteran] = (float)atof(_GetItem(s_sHitPower.c_str(), 1, buffer)); //то вычитываем его для уровня ветерана
     if (num_game_diff_param > 2) //если задан третий параметр хита
-        fvHitPower[egdStalker] = (float)atof(_GetItem(*s_sHitPower, 2, buffer)); //то вычитываем его для уровня сталкера
+        fvHitPower[egdStalker] = (float)atof(_GetItem(s_sHitPower.c_str(), 2, buffer)); //то вычитываем его для уровня сталкера
     if (num_game_diff_param > 3) //если задан четвёртый параметр хита
-        fvHitPower[egdNovice] = (float)atof(_GetItem(*s_sHitPower, 3, buffer)); //то вычитываем его для уровня новичка
+        fvHitPower[egdNovice] = (float)atof(_GetItem(s_sHitPower.c_str(), 3, buffer)); //то вычитываем его для уровня новичка
 
-    num_game_diff_param = _GetItemCount(*s_sHitPowerMonster); //узнаём колличество параметров для хитов
+    num_game_diff_param = _GetItemCount(s_sHitPowerMonster.c_str()); //узнаём колличество параметров для хитов
     if (num_game_diff_param > 1) //если задан второй параметр хита
-        fvHitPowerMonster[egdVeteran] = (float)atof(_GetItem(*s_sHitPowerMonster, 1, buffer)); //то вычитываем его для уровня ветерана
+        fvHitPowerMonster[egdVeteran] = (float)atof(_GetItem(s_sHitPowerMonster.c_str(), 1, buffer)); //то вычитываем его для уровня ветерана
     if (num_game_diff_param > 2) //если задан третий параметр хита
-        fvHitPowerMonster[egdStalker] = (float)atof(_GetItem(*s_sHitPowerMonster, 2, buffer)); //то вычитываем его для уровня сталкера
+        fvHitPowerMonster[egdStalker] = (float)atof(_GetItem(s_sHitPowerMonster.c_str(), 2, buffer)); //то вычитываем его для уровня сталкера
     if (num_game_diff_param > 3) //если задан четвёртый параметр хита
-        fvHitPowerMonster[egdNovice] = (float)atof(_GetItem(*s_sHitPowerMonster, 3, buffer)); //то вычитываем его для уровня новичка
+        fvHitPowerMonster[egdNovice] = (float)atof(_GetItem(s_sHitPowerMonster.c_str(), 3, buffer)); //то вычитываем его для уровня новичка
 
-    num_game_diff_param = _GetItemCount(*s_sHitPowerCritical); //узнаём колличество параметров
+    num_game_diff_param = _GetItemCount(s_sHitPowerCritical.c_str()); //узнаём колличество параметров
     if (num_game_diff_param > 1) //если задан второй параметр хита
-        fvHitPowerCritical[egdVeteran] = (float)atof(_GetItem(*s_sHitPowerCritical, 1, buffer)); //то вычитываем его для уровня ветерана
+        fvHitPowerCritical[egdVeteran] = (float)atof(_GetItem(s_sHitPowerCritical.c_str(), 1, buffer)); //то вычитываем его для уровня ветерана
     if (num_game_diff_param > 2) //если задан третий параметр хита
-        fvHitPowerCritical[egdStalker] = (float)atof(_GetItem(*s_sHitPowerCritical, 2, buffer)); //то вычитываем его для уровня сталкера
+        fvHitPowerCritical[egdStalker] = (float)atof(_GetItem(s_sHitPowerCritical.c_str(), 2, buffer)); //то вычитываем его для уровня сталкера
     if (num_game_diff_param > 3) //если задан четвёртый параметр хита
-        fvHitPowerCritical[egdNovice] = (float)atof(_GetItem(*s_sHitPowerCritical, 3, buffer)); //то вычитываем его для уровня новичка
+        fvHitPowerCritical[egdNovice] = (float)atof(_GetItem(s_sHitPowerCritical.c_str(), 3, buffer)); //то вычитываем его для уровня новичка
 
     fHitImpulse = pSettings->r_float(section, "hit_impulse");
     //максимальное расстояние полета пули
@@ -292,7 +292,7 @@ void CShootingObject::OnShellDrop(const Fvector& play_pos, const Fvector& parent
     if (Device.vCameraPosition.distance_to_sqr(play_pos) > 2 * 2)
         return;
 
-    CParticlesObject* pShellParticles = CParticlesObject::Create(*m_sShellParticles, TRUE);
+    CParticlesObject* pShellParticles = CParticlesObject::Create(m_sShellParticles.c_str(), TRUE);
 
     Fmatrix particles_pos;
     particles_pos.set(get_ParticlesXFORM());
@@ -318,7 +318,7 @@ void CShootingObject::OnShellDrop(const Fvector& play_pos, const Fvector& parent
 void CShootingObject::StartSmokeParticles(const Fvector& play_pos, const Fvector& parent_vel)
 {
     CParticlesObject* pSmokeParticles = NULL;
-    StartParticles(pSmokeParticles, *m_sSmokeParticlesCurrent, play_pos, parent_vel, true);
+    StartParticles(pSmokeParticles, m_sSmokeParticlesCurrent.c_str(), play_pos, parent_vel, true);
 }
 
 void CShootingObject::StartFlameParticles()
@@ -334,7 +334,7 @@ void CShootingObject::StartFlameParticles()
     }
 
     StopFlameParticles();
-    m_pFlameParticles = CParticlesObject::Create(*m_sFlameParticlesCurrent, FALSE);
+    m_pFlameParticles = CParticlesObject::Create(m_sFlameParticlesCurrent.c_str(), FALSE);
     UpdateFlameParticles();
 
     CSpectator* tmp_spectr = smart_cast<CSpectator*>(Level().CurrentControlEntity());
@@ -516,5 +516,5 @@ void CShootingObject::FireEnd() { bWorking = false; }
 void CShootingObject::StartShotParticles()
 {
     CParticlesObject* pSmokeParticles = NULL;
-    StartParticles(pSmokeParticles, *m_sShotParticles, m_vCurrentShootPos, m_vCurrentShootDir, true);
+    StartParticles(pSmokeParticles, m_sShotParticles.c_str(), m_vCurrentShootPos, m_vCurrentShootDir, true);
 }

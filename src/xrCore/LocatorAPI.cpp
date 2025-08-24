@@ -481,11 +481,11 @@ void CLocatorAPI::archive::open()
     if (hSrcFile && hSrcMap)
         return;
 
-    hSrcFile = CreateFile(*path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    hSrcFile = CreateFile(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
     R_ASSERT(hSrcFile != INVALID_HANDLE_VALUE);
     hSrcMap = CreateFileMapping(hSrcFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
     R_ASSERT(hSrcMap != INVALID_HANDLE_VALUE);
-    stat(*path, &file_info);
+    stat(path.c_str(), &file_info);
     modif = file_info.st_mtime;
 #elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
     // Open the file
@@ -1433,7 +1433,7 @@ void CLocatorAPI::file_from_archive(IReader*& R, pcstr fname, const file& desc)
 #endif
 
     string1024 temp;
-    xr_sprintf(temp, sizeof temp, "%s:%s", *A.path, fname);
+    xr_sprintf(temp, sizeof temp, "%s:%s", A.path.c_str(), fname);
 
 #ifdef FS_DEBUG
     register_file_mapping(ptr, sz, temp);

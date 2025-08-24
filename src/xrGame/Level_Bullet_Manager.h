@@ -63,30 +63,36 @@ struct SBullet
     //-------------------------------------------------------------------
     float max_speed; // maxspeed*cartridge
     float max_dist; // maxdist*cartridge
-    float armor_piercing; // ap
+    float material_piercing;
+    float armor_piercing;
     float wallmark_size;
     //-------------------------------------------------------------------
-    u8 m_u8ColorID;
 
     //тип наносимого хита
     ALife::EHitType hit_type;
     //---------------------------------
     u32 m_dwID;
-    ref_sound m_whine_snd;
-    ref_sound m_mtl_snd;
     //---------------------------------
     u16 targetID{};
+    u8 m_u8ColorID;
     //---------------------------------
     bool density_mode{};
     float density;
     Fvector begin_density;
-    bool operator==(u32 ID) { return ID == m_dwID; }
-public:
-    SBullet(const Fvector& position, const Fvector& direction, float start_speed, float power,
-        float powerMonster, float impulse, u16 sender_id, u16 sendersweapon_id, ALife::EHitType e_hit_type,
-        float maximum_distance, const CCartridge& cartridge, float const air_resistance_factor, bool SendHit, int iShotNum = 0);
 
-    bool CanBeRenderedNow() const { return (Device.dwFrame > init_frame_num); }
+    ref_sound m_whine_snd;
+    ref_sound m_mtl_snd;
+
+    [[nodiscard]]
+    bool operator==(const u32 id) const { return id == m_dwID; }
+
+public:
+    SBullet(const Fvector& position, const Fvector& direction, float starting_speed, float power, float powerMonster,
+        float impulse, u16 sender_id, u16 sendersweapon_id, ALife::EHitType e_hit_type, float maximum_distance,
+        const CCartridge& cartridge, float const air_resistance_factor, bool SendHit, int iShotNum = 0);
+
+    [[nodiscard]]
+    bool CanBeRenderedNow() const { return Device.dwFrame > init_frame_num; }
 };
 
 class CLevel;

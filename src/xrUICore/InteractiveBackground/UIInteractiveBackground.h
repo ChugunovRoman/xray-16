@@ -16,7 +16,7 @@
 #include "xrUICore/Windows/UIWindow.h"
 #include "xrUICore/Windows/UIFrameLineWnd.h"
 
-enum IBState
+enum IBState : u8
 {
     S_Enabled = 0,
     S_Disabled,

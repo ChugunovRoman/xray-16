@@ -17,7 +17,6 @@ constexpr pcstr dbg_action_name_table[] = {"ACT_STAND_IDLE", "ACT_SIT_IDLE", "AC
     "ACT_RUN", "ACT_EAT", "ACT_SLEEP", "ACT_REST", "ACT_DRAG", "ACT_ATTACK", "ACT_STEAL", "ACT_LOOK_AROUND",
     "ACT_JUMP"};
 
-void SCurrentAnimationInfo::set_motion(EMotionAnim new_motion) { motion = new_motion; }
 CControlAnimationBase::CControlAnimationBase()
 {
     m_override_animation = eAnimUndefined;
@@ -38,10 +37,7 @@ void CControlAnimationBase::reinit()
 
     accel_init();
 
-    aa_time_last_attack = 0;
-
     // обновить количество анимаций
-    m_anim_motion_map.clear();
     UpdateAnimCount();
 
     // инициализация информации о текущей анимации
@@ -63,7 +59,7 @@ void CControlAnimationBase::reinit()
     m_man->capture(this, ControlCom::eControlAnimation);
     m_man->subscribe(this, ControlCom::eventAnimationSignal);
 
-    AA_reload(pSettings->r_string(*(m_object->cNameSect()), "attack_params"));
+    AA_reload(pSettings->r_string(m_object->cNameSect().c_str(), "attack_params"));
 
     braking_mode = false;
 
@@ -214,7 +210,7 @@ void CControlAnimationBase::select_animation(bool anim_end)
     // установить анимацию
     string128 s1, s2;
     MotionID cur_anim = smart_cast<IKinematicsAnimated*>(
-        m_object->Visual())->ID_Cycle_Safe(strconcat(sizeof(s2), s2, *anim_it->target_name, xr_itoa(index, s1, 10)));
+        m_object->Visual())->ID_Cycle_Safe(strconcat(sizeof(s2), s2, anim_it->target_name.c_str(), xr_itoa(index, s1, 10)));
     if (!cur_anim.valid())
         FATAL(s2);
 
@@ -225,7 +221,7 @@ void CControlAnimationBase::select_animation(bool anim_end)
 
     // Заполнить текущую анимацию
     string64 st, tmp;
-    strconcat(sizeof(st), st, *anim_it->target_name, xr_itoa(index, tmp, 10));
+    strconcat(sizeof(st), st, anim_it->target_name.c_str(), xr_itoa(index, tmp, 10));
     //	xr_sprintf		(st, "%s%d", *anim_it->second.target_name, index);
     m_cur_anim.name = st;
     m_cur_anim.index = u8(index);
@@ -347,26 +343,23 @@ void CControlAnimationBase::FX_Play(EHitSide side, float amount)
     if (fx_time_last_play + FX_CAN_PLAY_MIN_INTERVAL > m_object->m_dwCurrentTime)
         return;
 
-    SAnimItem* anim_it = m_anim_storage[cur_anim_info().get_motion()];
+    const SAnimItem* anim_it = m_anim_storage[cur_anim_info().get_motion()];
     VERIFY(anim_it);
 
     clamp(amount, 0.f, 1.f);
 
-    shared_str* p_str = 0;
+    pcstr fx{};
     switch (side)
     {
-    case eSideFront: p_str = &anim_it->fxs.front; break;
-    case eSideBack: p_str = &anim_it->fxs.back; break;
-    case eSideLeft: p_str = &anim_it->fxs.left; break;
-    case eSideRight: p_str = &anim_it->fxs.right; break;
+    case eSideFront: fx = anim_it->fxs.front.c_str(); break;
+    case eSideBack:  fx = anim_it->fxs.back.c_str();  break;
+    case eSideLeft:  fx = anim_it->fxs.left.c_str();  break;
+    case eSideRight: fx = anim_it->fxs.right.c_str(); break;
     }
 
-    if (p_str && p_str->size())
+    if (fx && fx[0])
     {
-        if (anim_it->fxs.may_not_exist[side])
-            smart_cast<IKinematicsAnimated*>(m_object->Visual())->PlayFX_Safe(*(*p_str), amount);
-        else
-            smart_cast<IKinematicsAnimated*>(m_object->Visual())->PlayFX(*(*p_str), amount);
+        smart_cast<IKinematicsAnimated*>(m_object->Visual())->PlayFX(fx, amount);
     }
 
     fx_time_last_play = m_object->m_dwCurrentTime;
@@ -452,16 +445,16 @@ EAction CControlAnimationBase::GetActionFromPath()
 //////////////////////////////////////////////////////////////////////////
 // Debug
 
-LPCSTR CControlAnimationBase::GetAnimationName(EMotionAnim anim)
+pcstr CControlAnimationBase::GetAnimationName(EMotionAnim anim) const
 {
     SAnimItem* item_it = m_anim_storage[anim];
     VERIFY2(item_it, make_string("animation not found in m_anim_storage!"));
     ;
 
-    return *item_it->target_name;
+    return item_it->target_name.c_str();
 }
 
-LPCSTR CControlAnimationBase::GetActionName(EAction action) { return dbg_action_name_table[action]; }
+pcstr CControlAnimationBase::GetActionName(EAction action) { return dbg_action_name_table[action]; }
 ///////////////////////////////////////////////////////////////////////////////////////
 
 void CControlAnimationBase::ValidateAnimation()
@@ -502,7 +495,7 @@ void CControlAnimationBase::ValidateAnimation()
 void CControlAnimationBase::UpdateAnimCount()
 {
     IKinematicsAnimated* skel = smart_cast<IKinematicsAnimated*>(m_object->Visual());
-    xr_vector<u32> subjectsToDelete;
+    xr_vector<size_t> subjectsToDelete;
 
     for (auto it = m_anim_storage.begin(); it != m_anim_storage.end(); ++it)
     {
@@ -518,50 +511,30 @@ void CControlAnimationBase::UpdateAnimCount()
 
         for (int i = 0;; ++i)
         {
-            strconcat(sizeof(s_temp), s_temp, *((*it)->target_name), xr_itoa(i, s, 10));
+            strconcat(sizeof(s_temp), s_temp, (*it)->target_name.c_str(), xr_itoa(i, s, 10));
             LPCSTR name = s_temp;
             MotionID id = skel->ID_Cycle_Safe(name);
 
             if (id.valid())
             {
                 count++;
-                AddAnimTranslation(id, name);
             }
             else
                 break;
         }
 
-        if (count == 0 && (*it)->target_name2.size())
-        {
-            for (int i = 0;; ++i)
-            {
-                strconcat(sizeof(s_temp), s_temp, *((*it)->target_name2), xr_itoa(i, s, 10));
-                LPCSTR name = s_temp;
-                MotionID id = skel->ID_Cycle_Safe(name);
-
-                if (id.valid())
-                {
-                    count++;
-                    AddAnimTranslation(id, name);
-                }
-                else
-                    break;
-            }
-        }
-
         if (count != 0)
             (*it)->count = count;
-        else if ((*it)->target_may_not_exist)
-            subjectsToDelete.push_back(std::distance(m_anim_storage.begin(), it));
         else
         {
-            xr_sprintf(s, "Error! No animation: %s for monster %s", *((*it)->target_name), *m_object->cName());
-            R_ASSERT2(count != 0, s);
-            subjectsToDelete.push_back(std::distance(m_anim_storage.begin(), it));
+            xr_sprintf(s, "Error! No animation: %s for monster %s", (*it)->target_name.c_str(), m_object->cName().c_str());
+            Msg("! %s", s);
+            VERIFY2(count != 0, s);
+            subjectsToDelete.emplace_back(std::distance(m_anim_storage.begin(), it));
         }
     }
 
-    for (u32 idx : subjectsToDelete)
+    for (size_t idx : subjectsToDelete)
     {
         xr_delete(m_anim_storage[idx]);
         while (true)
@@ -584,31 +557,17 @@ void CControlAnimationBase::UpdateAnimCount()
 }
 
 void CControlAnimationBase::SetCurAnim(EMotionAnim a) { cur_anim_info().set_motion(a); }
-CMotionDef* CControlAnimationBase::get_motion_def(SAnimItem* it, u32 index)
+
+CMotionDef* CControlAnimationBase::get_motion_def(SAnimItem* it, u32 index) const
 {
     string128 s1, s2;
     IKinematicsAnimated* skeleton_animated = smart_cast<IKinematicsAnimated*>(m_object->Visual());
     const MotionID& motion_id =
-        skeleton_animated->ID_Cycle_Safe(strconcat(sizeof(s2), s2, *it->target_name, xr_itoa(index, s1, 10)));
+        skeleton_animated->ID_Cycle_Safe(strconcat(sizeof(s2), s2, it->target_name.c_str(), xr_itoa(index, s1, 10)));
     return (skeleton_animated->LL_GetMotionDef(motion_id));
 }
 
-void CControlAnimationBase::AddAnimTranslation(const MotionID& motion, LPCSTR str)
-{
-    m_anim_motion_map.insert(std::make_pair(motion, str));
-}
-shared_str CControlAnimationBase::GetAnimTranslation(const MotionID& motion)
-{
-    shared_str ret_value;
-
-    auto anim_it = m_anim_motion_map.find(motion);
-    if (anim_it != m_anim_motion_map.end())
-        ret_value = anim_it->second;
-
-    return ret_value;
-}
-
-MotionID CControlAnimationBase::get_motion_id(EMotionAnim a, u32 index)
+MotionID CControlAnimationBase::get_motion_id(EMotionAnim a, u32 index) const
 {
     // получить элемент SAnimItem, соответствующий текущей анимации
     SAnimItem* anim_it = m_anim_storage[a];
@@ -628,7 +587,7 @@ MotionID CControlAnimationBase::get_motion_id(EMotionAnim a, u32 index)
 
     string128 s1, s2;
     return (smart_cast<IKinematicsAnimated*>(m_object->Visual())
-                ->ID_Cycle_Safe(strconcat(sizeof(s2), s2, *anim_it->target_name, xr_itoa(index, s1, 10))));
+                ->ID_Cycle_Safe(strconcat(sizeof(s2), s2, anim_it->target_name.c_str(), xr_itoa(index, s1, 10))));
 }
 
 void CControlAnimationBase::stop_now()

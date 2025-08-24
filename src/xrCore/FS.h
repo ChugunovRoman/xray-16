@@ -69,12 +69,12 @@ public:
     IC void w_stringZ(const char* p) { w(p, xr_strlen(p) + 1); }
     IC void w_stringZ(const shared_str& p)
     {
-        w(*p ? *p : "", p.size());
+        w(p.c_str() ? p.c_str() : "", p.size());
         w_u8(0);
     }
     IC void w_stringZ(shared_str& p)
     {
-        w(*p ? *p : "", p.size());
+        w(p.c_str() ? p.c_str() : "", p.size());
         w_u8(0);
     }
     IC void w_stringZ(const xr_string& p)

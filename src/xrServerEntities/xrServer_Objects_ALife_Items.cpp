@@ -307,12 +307,12 @@ void CSE_ALifeInventoryItem::UPDATE_Read(NET_Packet& tNetPacket)
 #ifndef MASTER_GOLD
 void CSE_ALifeInventoryItem::FillProps(LPCSTR pref, PropItemVec& values)
 {
-    PHelper().CreateFloat(values, PrepareKey(pref, *base()->s_name, "Item condition"), &m_fCondition, 0.f, 1.f);
+    PHelper().CreateFloat(values, PrepareKey(pref, base()->s_name.c_str(), "Item condition"), &m_fCondition, 0.f, 1.f);
     CSE_ALifeObject* alife_object = smart_cast<CSE_ALifeObject*>(base());
     R_ASSERT(alife_object);
-    PHelper().CreateFlag32(values, PrepareKey(pref, *base()->s_name, "ALife" DELIMITER "Useful for AI"), &alife_object->m_flags,
+    PHelper().CreateFlag32(values, PrepareKey(pref, base()->s_name.c_str(), "ALife" DELIMITER "Useful for AI"), &alife_object->m_flags,
         CSE_ALifeObject::flUsefulForAI);
-    PHelper().CreateFlag32(values, PrepareKey(pref, *base()->s_name, "ALife" DELIMITER "Visible for AI"), &alife_object->m_flags,
+    PHelper().CreateFlag32(values, PrepareKey(pref, base()->s_name.c_str(), "ALife" DELIMITER "Visible for AI"), &alife_object->m_flags,
         CSE_ALifeObject::flVisibleForAI);
 }
 #endif // #ifndef MASTER_GOLD
@@ -631,19 +631,19 @@ BOOL CSE_ALifeItemWeapon::Net_Relevant()
 void CSE_ALifeItemWeapon::FillProps(LPCSTR pref, PropItemVec& items)
 {
     inherited::FillProps(pref, items);
-    PHelper().CreateU8(items, PrepareKey(pref, *s_name, "Ammo type:"), &ammo_type, 0, 255, 1);
-    PHelper().CreateU16(items, PrepareKey(pref, *s_name, "Ammo: in magazine"), &a_elapsed, 0, 30, 1);
+    PHelper().CreateU8(items, PrepareKey(pref, s_name.c_str(), "Ammo type:"), &ammo_type, 0, 255, 1);
+    PHelper().CreateU16(items, PrepareKey(pref, s_name.c_str(), "Ammo: in magazine"), &a_elapsed, 0, 30, 1);
 
     if (m_scope_status == ALife::eAddonAttachable)
-        PHelper().CreateFlag8(items, PrepareKey(pref, *s_name, "Addons" DELIMITER "Scope"), &m_addon_flags, eWeaponAddonScope);
+        PHelper().CreateFlag8(items, PrepareKey(pref, s_name.c_str(), "Addons" DELIMITER "Scope"), &m_addon_flags, eWeaponAddonScope);
 
     if (m_silencer_status == ALife::eAddonAttachable)
         PHelper().CreateFlag8(
-            items, PrepareKey(pref, *s_name, "Addons" DELIMITER "Silencer"), &m_addon_flags, eWeaponAddonSilencer);
+            items, PrepareKey(pref, s_name.c_str(), "Addons" DELIMITER "Silencer"), &m_addon_flags, eWeaponAddonSilencer);
 
     if (m_grenade_launcher_status == ALife::eAddonAttachable)
         PHelper().CreateFlag8(
-            items, PrepareKey(pref, *s_name, "Addons" DELIMITER "Podstvolnik"), &m_addon_flags, eWeaponAddonGrenadeLauncher);
+            items, PrepareKey(pref, s_name.c_str(), "Addons" DELIMITER "Podstvolnik"), &m_addon_flags, eWeaponAddonGrenadeLauncher);
 }
 #endif // #ifndef MASTER_GOLD
 
@@ -791,7 +791,7 @@ void CSE_ALifeItemAmmo::UPDATE_Write(NET_Packet& tNetPacket)
 void CSE_ALifeItemAmmo::FillProps(LPCSTR pref, PropItemVec& values)
 {
     inherited::FillProps(pref, values);
-    PHelper().CreateU16(values, PrepareKey(pref, *s_name, "Ammo: left"), &a_elapsed, 0, m_boxSize, m_boxSize);
+    PHelper().CreateU16(values, PrepareKey(pref, s_name.c_str(), "Ammo: left"), &a_elapsed, 0, m_boxSize, m_boxSize);
 }
 #endif // #ifndef MASTER_GOLD
 
@@ -834,7 +834,7 @@ void CSE_ALifeItemArtefact::UPDATE_Write(NET_Packet& tNetPacket) { inherited::UP
 void CSE_ALifeItemArtefact::FillProps(LPCSTR pref, PropItemVec& items)
 {
     inherited::FillProps(pref, items);
-    PHelper().CreateFloat(items, PrepareKey(pref, *s_name, "Anomaly value:"), &m_fAnomalyValue, 0.f, 200.f);
+    PHelper().CreateFloat(items, PrepareKey(pref, s_name.c_str(), "Anomaly value:"), &m_fAnomalyValue, 0.f, 200.f);
 }
 #endif // #ifndef MASTER_GOLD
 
@@ -928,8 +928,8 @@ void CSE_ALifeItemDocument::UPDATE_Write(NET_Packet& tNetPacket) { inherited::UP
 void CSE_ALifeItemDocument::FillProps(LPCSTR pref, PropItemVec& items)
 {
     inherited::FillProps(pref, items);
-    //	PHelper().CreateU16			(items, PrepareKey(pref, *s_name, "Document index :"), &m_wDocIndex, 0, 65535);
-    PHelper().CreateRText(items, PrepareKey(pref, *s_name, "Info portion :"), &m_wDoc);
+    //	PHelper().CreateU16			(items, PrepareKey(pref, s_name.c_str(), "Document index :"), &m_wDocIndex, 0, 65535);
+    PHelper().CreateRText(items, PrepareKey(pref, s_name.c_str(), "Info portion :"), &m_wDoc);
 }
 #endif // #ifndef MASTER_GOLD
 

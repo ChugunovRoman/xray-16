@@ -107,7 +107,7 @@ void CTorch::SwitchNightVision(bool vision_on, bool use_sounds)
         m_night_vision = xr_new<CNightVisionEffector>(cNameSect());
 
     LPCSTR disabled_names = pSettings->r_string(cNameSect(), "disabled_maps");
-    LPCSTR curr_map = *Level().name();
+    pcstr curr_map = Level().name().c_str();
     u32 cnt = _GetItemCount(disabled_names);
     bool b_allow = true;
     string512 tmp;
@@ -199,7 +199,7 @@ void CTorch::Switch(bool light_on)
     }
     glow_render->set_active(light_on);
 
-    if (*light_trace_bone)
+    if (light_trace_bone.c_str())
     {
         IKinematics* pVisual = smart_cast<IKinematics*>(Visual());
         VERIFY(pVisual);

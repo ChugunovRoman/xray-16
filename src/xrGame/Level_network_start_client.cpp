@@ -26,8 +26,8 @@ bool CLevel::net_start_client1()
     // name_of_server
     string64 name_of_server = "";
     //	xr_strcpy						(name_of_server,*m_caClientOptions);
-    if (strchr(*m_caClientOptions, '/'))
-        strncpy_s(name_of_server, *m_caClientOptions, strchr(*m_caClientOptions, '/') - *m_caClientOptions);
+    if (strchr(m_caClientOptions.c_str(), '/'))
+        strncpy_s(name_of_server, m_caClientOptions.c_str(), strchr(m_caClientOptions.c_str(), '/') - m_caClientOptions.c_str());
 
     if (strchr(name_of_server, '/'))
         *strchr(name_of_server, '/') = 0;
@@ -60,7 +60,7 @@ bool CLevel::net_start_client2()
         }
     }
 
-    connected_to_server = Connect2Server(*m_caClientOptions);
+    connected_to_server = Connect2Server(m_caClientOptions.c_str());
 
     return true;
 }

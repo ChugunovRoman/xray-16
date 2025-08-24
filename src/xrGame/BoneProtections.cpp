@@ -49,8 +49,10 @@ void SBoneProtections::reload(const shared_str& bone_sect, IKinematics* kinemati
         }
         else
         {
-            m_fHitFrac = 0.1f;
-            m_hitFracType = HitFractionNPC;
+            const bool is_cop = GMLib.GetLibraryVersion() >= GAMEMTL_VERSION_COP;
+
+            m_hitFracType     = is_cop ? HitFractionNPC : HitFraction;
+            m_fHitFrac        = 0.1f;
         }
     }
 

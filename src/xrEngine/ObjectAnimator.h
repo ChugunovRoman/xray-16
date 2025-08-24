@@ -30,7 +30,7 @@ public:
 
     void Clear();
     void Load(pcstr name);
-    IC pcstr Name() const { return *m_Name; }
+    pcstr Name() const { return m_Name.c_str(); }
     float& Speed() { return m_Speed; }
     COMotion* Play(bool bLoop, pcstr name = 0);
     void Pause(bool val) { return m_MParam.Pause(val); }

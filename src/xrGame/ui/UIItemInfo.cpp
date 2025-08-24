@@ -216,7 +216,7 @@ void CUIItemInfo::InitItem(CUICellItem* pCellItem, CInventoryItem* pCompareItem,
     {
         if (item_price != u32(-1))
         {
-            xr_sprintf(str, "%d RU", item_price); // will be owerwritten in multiplayer
+            xr_sprintf(str, "%d %s", item_price, StringTable().GetCurrency().c_str()); // will be owerwritten in multiplayer
             UICost->SetText(str);
             pos.x = UICost->GetWndPos().x;
             if (m_complex_desc)

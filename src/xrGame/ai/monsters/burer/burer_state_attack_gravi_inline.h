@@ -23,34 +23,88 @@ void CStateBurerAttackGravi<Object>::initialize()
 template <typename Object>
 void CStateBurerAttackGravi<Object>::execute()
 {
+    this->object->face_enemy();
+
+    const bool triple = this->object->m_use_three_gravi_anims;
+
     switch (m_action)
     {
-    case ACTION_GRAVI_STARTED: ExecuteGraviStart(); break;
+    case ACTION_GRAVI_STARTED:
+    {
+        this->object->anim().set_override_animation(eAnimGraviFire, 0);
 
-    case ACTION_GRAVI_CONTINUE: ExecuteGraviContinue(); break;
+        if (!m_time_gravi_started)
+        {
+            float const time = this->object->anim().get_animation_length(eAnimGraviFire, 0);
+            m_anim_end_tick = xr_current_time() + TTime(time * 1000);
+            m_time_gravi_started = Device.dwTimeGlobal;
+            this->object->StartGraviPrepare();
+        }
+        if (triple && xr_current_time() <= m_anim_end_tick)
+            break;
 
+        m_action = ACTION_GRAVI_CONTINUE;
+        break;
+    }
+    case ACTION_GRAVI_CONTINUE:
+    {
+        const u32 anim_idx = triple ? 1 : 0;
+        this->object->anim().set_override_animation(eAnimGraviFire, anim_idx);
+
+        // проверить на грави удар
+        const float dist = this->object->Position().distance_to(this->object->EnemyMan.get_enemy()->Position());
+
+        float time_to_hold = (abs(dist - this->object->m_gravi.min_dist) / this->object->m_gravi.min_dist);
+        clamp(time_to_hold, 0.f, 1.f);
+        time_to_hold *= float(this->object->m_gravi.time_to_hold);
+
+        if (m_time_gravi_started + u32(time_to_hold) >= Device.dwTimeGlobal)
+            break;
+
+        m_action = ACTION_GRAVI_FIRE;
+
+        if (triple)
+        {
+            this->object->anim().clear_override_animation();
+            this->object->anim().set_override_animation(eAnimGraviFire, 2);
+            float const time = this->object->anim().get_animation_length(eAnimGraviFire, 2);
+            m_anim_end_tick = xr_current_time() + TTime(time * 1000);
+        }
+        break;
+    }
     case ACTION_GRAVI_FIRE:
-        ExecuteGraviFire();
+    {
+        const u32 anim_idx = triple ? 2 : 0;
+        this->object->anim().set_override_animation(eAnimGraviFire, anim_idx);
+
+        Fvector from_pos = this->object->Position();
+        from_pos.y += 0.5f;
+
+        Fvector target_pos = this->object->EnemyMan.get_enemy()->Position();
+        target_pos.y += 0.5f;
+
+        this->object->m_gravi_object.activate(this->object->EnemyMan.get_enemy(), from_pos, target_pos);
+
+        this->object->StopGraviPrepare();
+        this->object->sound().play(CBurer::eMonsterSoundGraviAttack);
+
+        // Interactive Grass FX
+        g_pGamePersistent->GrassBendersAddExplosion(this->object->ID(), from_pos, this->object->Direction(),
+            1.33f, 3.0f, ps_ssfx_grass_interactive.w, 13.0f);
+
         m_action = ACTION_WAIT_ANIM_END;
         break;
-
+    }
     case ACTION_WAIT_ANIM_END:
+    {
         if (xr_current_time() > m_anim_end_tick)
         {
             m_action = ACTION_COMPLETED;
         }
-
-    case ACTION_COMPLETED: break;
     }
-
-    this->object->face_enemy();
-
-    if (xr_current_time() < m_anim_end_tick)
-    {
-        this->object->anim().set_override_animation(eAnimGraviFire);
-    }
-
-    this->object->set_action(ACT_STAND_IDLE);
+    case ACTION_COMPLETED:
+        break;
+    } // switch (m_action)
 }
 
 template <typename Object>
@@ -94,50 +148,4 @@ template <typename Object>
 bool CStateBurerAttackGravi<Object>::check_completion()
 {
     return m_action == ACTION_COMPLETED;
-}
-
-//////////////////////////////////////////////////////////////////////////
-
-template <typename Object>
-void CStateBurerAttackGravi<Object>::ExecuteGraviStart()
-{
-    float const time = this->object->anim().get_animation_length(eAnimGraviFire, 0);
-    m_anim_end_tick = xr_current_time() + TTime(time * 1000);
-    m_action = ACTION_GRAVI_CONTINUE;
-    m_time_gravi_started = Device.dwTimeGlobal;
-    this->object->StartGraviPrepare();
-}
-
-template <typename Object>
-void CStateBurerAttackGravi<Object>::ExecuteGraviContinue()
-{
-    // проверить на грави удар
-    const float dist = this->object->Position().distance_to(this->object->EnemyMan.get_enemy()->Position());
-
-    float time_to_hold = (abs(dist - this->object->m_gravi.min_dist) / this->object->m_gravi.min_dist);
-    clamp(time_to_hold, 0.f, 1.f);
-    time_to_hold *= float(this->object->m_gravi.time_to_hold);
-
-    if (m_time_gravi_started + u32(time_to_hold) < Device.dwTimeGlobal)
-    {
-        m_action = ACTION_GRAVI_FIRE;
-    }
-}
-
-extern ENGINE_API Fvector4 ps_ssfx_grass_interactive;
-template <typename Object>
-void CStateBurerAttackGravi<Object>::ExecuteGraviFire()
-{
-    Fvector from_pos = this->object->Position();
-    from_pos.y += 0.5f;
-
-    Fvector target_pos = this->object->EnemyMan.get_enemy()->Position();
-    target_pos.y += 0.5f;
-
-    this->object->m_gravi_object.activate(this->object->EnemyMan.get_enemy(), from_pos, target_pos);
-
-    this->object->StopGraviPrepare();
-    this->object->sound().play(CBurer::eMonsterSoundGraviAttack);
-    // Interactive Grass FX
-    g_pGamePersistent->GrassBendersAddExplosion(this->object->ID(), from_pos, this->object->Direction(), 1.33f, 3.0f, ps_ssfx_grass_interactive.w, 13.0f);
 }

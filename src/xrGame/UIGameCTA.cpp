@@ -910,7 +910,7 @@ void CUIGameCTA::LoadDefItemsForRank()
         const shared_str& ItemName = m_pCurBuyMenu->GetWeaponNameByIndex(pDefItem->SlotID, pDefItem->ItemID);
         if (!ItemName.size())
             continue;
-        if (!xr_strcmp(*ItemName, "mp_wpn_knife"))
+        if (!xr_strcmp(ItemName.c_str(), "mp_wpn_knife"))
             continue;
         if (!pSettings->line_exist(ItemName, "ammo_class"))
             continue;
