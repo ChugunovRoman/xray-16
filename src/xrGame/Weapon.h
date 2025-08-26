@@ -34,6 +34,10 @@ struct addon_slot {
     Fmatrix transform_world;
     shared_str busy_by;
     u16 slot_type;
+
+    explicit operator bool() const {
+        return !slot_name.empty(); // или любое другое условие
+    }
 };
 
 class addon_item

@@ -3495,56 +3495,200 @@ bool CWeapon::DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool fo
     if (!weapon->CanAttach(pScope))
         return false;
     
-    auto slots = wpn->getAvaliableSlots();
-    if (pScope->HasScopeTexture())
+    auto attach_plnk = [&](addon_slot slot)
     {
-        auto addon = std::find_if(wpn->m_addon_items.begin(), wpn->m_addon_items.end(), [](std::pair<u32, addon_item*> i) { return i.second->has_scope_texture; });
-        if (addon != wpn->m_addon_items.end())
-        {
-            item->attach_to_slot_name = (*addon).second->slot;
-            item->parent_addon = (*addon).second->parent_id;
-            item->attach_to_ort = CInventoryItem::EIIAddonOrt::FOrtNone;
-            return true;
-        }
-        auto slot = std::find_if(slots.begin(), slots.end(), [&](addon_slot slot) { return slot.slot_type == pScope->m_slot_type; });
-        if (slot != slots.end())
-        {
-            item->attach_to_slot_name = slot->slot_name;
-            item->parent_addon = slot->parent;
-            item->attach_to_ort = CInventoryItem::EIIAddonOrt::FOrtNone;
-            return true;
-        }
-        return false;
-    }
-
-    addon_slot found_slot;
-    bool allSlotsIsBusy = true;
-    for (auto slot : slots)
-    {
-        if (slot.parent == 0 && slot.slot_type == pScope->m_slot_type)
-            found_slot = slot;
-        if (slot.busy_by == nullptr && slot.slot_type == pScope->m_slot_type)
-        {
-            allSlotsIsBusy = false;
-            found_slot = slot;
-            if (strstr(*item->m_section_id, "plnk_"))
-                break;
-        }
-    }
-    if (for_ai & allSlotsIsBusy)
-        return false;
-    if (found_slot.slot_name != nullptr)
-    {
-        item->attach_to_slot_name = found_slot.slot_name;
-        item->parent_addon = found_slot.parent;
+        item->attach_to_slot_name = slot.slot_name;
+        item->parent_addon = slot.parent;
         Fvector hpb;
-        found_slot.transform.getHPB(hpb.x, hpb.y, hpb.z);
+        slot.transform.getHPB(hpb.x, hpb.y, hpb.z);
         if (pScope->m_has_ort && hpb.z < -1.f)
             item->attach_to_ort = CInventoryItem::EIIAddonOrt::FOrtRight;
         else if (pScope->m_has_ort)
             item->attach_to_ort = CInventoryItem::EIIAddonOrt::FOrtLeft;
         else
             item->attach_to_ort = CInventoryItem::EIIAddonOrt::FOrtNone;
+    };
+    auto attach_scope = [&](addon_slot slot)
+    {
+        item->attach_to_slot_name = slot.slot_name;
+        item->parent_addon = slot.parent;
+        item->attach_to_ort = CInventoryItem::EIIAddonOrt::FOrtNone;
+    };
+
+    
+    addon_slot plnk_1_slot;
+    addon_slot plnk_1_slot_busy_but_compatible;
+    addon_slot plnk_2_slot;
+    addon_slot wpn_1_slot;
+    addon_slot wpn_1_slot_busy_but_compatible;
+    addon_slot wpn_2_slot;
+    addon_slot wpn_3_slot;
+    addon_slot wpn_4_slot;
+    addon_slot wpn_5_slot;
+    addon_slot wpn_last_free_slot;
+    addon_slot free_slot;
+
+    auto slots = wpn->getAvaliableSlots();
+    for (auto slot : slots)
+    {
+        if (slot.parent == 0 && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by == nullptr && slot.slot_type == pScope->m_slot_type)
+            wpn_1_slot = slot;
+        if (slot.parent == 0 && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by != nullptr && slot.slot_type == pScope->m_slot_type)
+            wpn_1_slot_busy_but_compatible = slot;
+        if (slot.parent == 0 && slot.busy_by == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_2") == 0 && slot.slot_type == pScope->m_slot_type)
+            wpn_2_slot = slot;
+        if (slot.parent == 0 && slot.busy_by == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_3") && slot.slot_type == pScope->m_slot_type)
+            wpn_3_slot = slot;
+        if (slot.parent == 0 && slot.busy_by == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_4") && slot.slot_type == pScope->m_slot_type)
+            wpn_4_slot = slot;
+        if (slot.parent == 0 && slot.busy_by == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_5") && slot.slot_type == pScope->m_slot_type)
+            wpn_5_slot = slot;
+        if (slot.parent == 0 && slot.busy_by == nullptr && slot.slot_type == pScope->m_slot_type)
+            wpn_last_free_slot = slot;
+        if (slot.parent != 0 && slot.busy_by == nullptr && slot.slot_type == pScope->m_slot_type)
+            free_slot = slot;
+        if ((slot.parent_section != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by == nullptr && slot.slot_type == pScope->m_slot_type)
+            plnk_1_slot = slot;
+        if ((slot.parent_section != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by != nullptr && slot.slot_type == pScope->m_slot_type)
+            plnk_1_slot_busy_but_compatible = slot;
+        if ((slot.parent_section != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), "slot_2") == 0 && slot.busy_by == nullptr && slot.slot_type == pScope->m_slot_type)
+            plnk_2_slot = slot;
+    }
+
+    if (pScope->HasScopeTexture())
+    {
+        if (wpn_1_slot)
+        {
+            attach_scope(wpn_1_slot);
+            return true;
+        }
+        if (plnk_1_slot)
+        {
+            attach_scope(plnk_1_slot);
+            return true;
+        }
+        if (plnk_1_slot_busy_but_compatible)
+        {
+            attach_scope(plnk_1_slot_busy_but_compatible);
+            return true;
+        }
+        if (wpn_1_slot_busy_but_compatible)
+        {
+            attach_scope(wpn_1_slot_busy_but_compatible);
+            return true;
+        }
+    }
+    if (pScope->IsLsa())
+    {
+        if (wpn_3_slot)
+        {
+            attach_scope(wpn_3_slot);
+            return true;
+        }
+        if (wpn_2_slot)
+        {
+            attach_scope(wpn_2_slot);
+            return true;
+        }
+        if (plnk_1_slot)
+        {
+            attach_scope(plnk_1_slot);
+            return true;
+        }
+        if (plnk_2_slot)
+        {
+            attach_scope(plnk_2_slot);
+            return true;
+        }
+        if (wpn_last_free_slot)
+        {
+            attach_scope(wpn_last_free_slot);
+            return true;
+        }
+        if (free_slot)
+        {
+            attach_scope(free_slot);
+            return true;
+        }
+    }
+
+    if (strstr(item->m_section_id.c_str(), "plnk_"))
+    {
+        if (wpn_2_slot)
+        {
+            attach_plnk(wpn_2_slot);
+            return true;
+        }
+        if (wpn_3_slot)
+        {
+            attach_plnk(wpn_3_slot);
+            return true;
+        }
+        if (wpn_4_slot)
+        {
+            attach_plnk(wpn_4_slot);
+            return true;
+        }
+        if (wpn_5_slot)
+        {
+            attach_plnk(wpn_5_slot);
+            return true;
+        }
+        if (wpn_last_free_slot)
+        {
+            attach_plnk(wpn_last_free_slot);
+            return true;
+        }
+        if (free_slot)
+        {
+            attach_plnk(free_slot);
+            return true;
+        }
+    }
+
+    if (wpn_1_slot)
+    {
+        attach_scope(wpn_1_slot);
+        return true;
+    }
+    if (plnk_1_slot)
+    {
+        attach_scope(plnk_1_slot);
+        return true;
+    }
+    if (plnk_2_slot)
+    {
+        attach_scope(plnk_2_slot);
+        return true;
+    }
+    if (wpn_2_slot)
+    {
+        attach_scope(wpn_2_slot);
+        return true;
+    }
+    if (wpn_3_slot)
+    {
+        attach_scope(wpn_3_slot);
+        return true;
+    }
+    if (wpn_4_slot)
+    {
+        attach_scope(wpn_4_slot);
+        return true;
+    }
+    if (wpn_5_slot)
+    {
+        attach_scope(wpn_5_slot);
+        return true;
+    }
+    if (wpn_last_free_slot)
+    {
+        attach_scope(wpn_last_free_slot);
+        return true;
+    }
+    if (free_slot)
+    {
+        attach_scope(free_slot);
         return true;
     }
     

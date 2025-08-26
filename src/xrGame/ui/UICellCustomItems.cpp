@@ -67,7 +67,7 @@ CUIInventoryCellItem::CUIInventoryCellItem(shared_str section_id)
 {
     data_is_string = true;
     m_section_attachs_id = section_id;
-    
+
     if (strstr(*section_id, "|"))
     {
         int len = (int)strcspn(*section_id, "|");
@@ -179,7 +179,7 @@ shared_str CUIInventoryCellItem::GetIconPath(shared_str section_id)
 bool CUIInventoryCellItem::EqualTo(CUICellItem* itm)
 {
     if (data_is_string && itm->data_is_string)
-        return xr_strcmp(itm->m_section_id.c_str(), m_section_id.c_str()) == 0;
+        return xr_strcmp(itm->m_section_attachs_id.c_str(), m_section_attachs_id.c_str()) == 0;
 
     CUIInventoryCellItem* ci = smart_cast<CUIInventoryCellItem*>(itm);
     if (!itm)
@@ -408,7 +408,7 @@ bool CUIAmmoCellItem::EqualTo(CUICellItem* itm)
         return false;
 
     if (data_is_string && itm->data_is_string)
-        return xr_strcmp(m_section_id.c_str(), itm->m_section_id.c_str()) == 0;
+        return xr_strcmp(m_section_attachs_id.c_str(), itm->m_section_attachs_id.c_str()) == 0;
 
     CUIAmmoCellItem* ci = smart_cast<CUIAmmoCellItem*>(itm);
     if (!ci)

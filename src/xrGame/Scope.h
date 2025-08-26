@@ -20,6 +20,7 @@ public:
     bool IsBaseScope() const { return xr_strcmp(*m_addon_type, "base_scope") == 0; }
     bool IsColimScope() const { return xr_strcmp(*m_addon_type, "colim_scope") == 0; }
     bool IsAttachment() const { return xr_strcmp(*m_addon_type, "attachment") == 0; }
+    bool IsLsa() const { return xr_strcmp(*m_addon_type, "lsa") == 0; }
 
     // base_scope
     // colim_scope
