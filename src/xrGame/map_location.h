@@ -91,7 +91,7 @@ public:
     void SetColor(u32 color);
     CComplexMapSpot* complex_spot() const { return m_complex_spot; }
     const CMapSpot* LevelMapSpot() const { return m_level_spot; }
-    const CMiniMapSpot* MiniMapSpot() const { return m_minimap_spot; }
+    CMiniMapSpot* MiniMapSpot() { return m_minimap_spot; }
     Fvector2 SpotSize();
     void InitUserSpot(const shared_str& level_name, const Fvector& pos);
     void HighlightSpot(bool state, const Fcolor& color);

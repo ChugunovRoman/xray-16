@@ -277,6 +277,9 @@ void map_change_spot_color(u16 id, LPCSTR spot_type, u32 color)
 {
     CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
     ml->SetColor(color);
+    CMiniMapSpot* mini_spot = ml->MiniMapSpot();
+    if (mini_spot)
+        mini_spot->SetTextureColor(color);
 }
 
 void map_add_object_spot_ser(u16 id, LPCSTR spot_type, LPCSTR text)
