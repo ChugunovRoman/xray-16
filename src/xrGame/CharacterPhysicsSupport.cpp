@@ -700,6 +700,9 @@ bool CCharacterPhysicsSupport::CollisionCorrectObjPos(const Fvector& start_from,
     bool not_collide_characters = !DoCharacterShellCollide() && !character_create;
     bool set_rotation = !character_create;
 
+    if (!_valid(activation_pos) || !_valid(vbox))
+        return false;
+
     Fvector activation_res = Fvector().set(0, 0, 0);
     ////////////////
 
