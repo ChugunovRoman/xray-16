@@ -239,6 +239,8 @@ void CMissile::shedule_Update(u32 dt)
 
 void CMissile::State(u32 state, u32 oldState)
 {
+    CInventoryOwner* owner = smart_cast<CInventoryOwner*>(this->H_Parent());
+
     switch (state)
     {
     case eShowing:
@@ -285,13 +287,15 @@ void CMissile::State(u32 state, u32 oldState)
         SetPending(TRUE);
         m_fThrowForce = m_fMinForce;
         PlayHUDMotion("anm_throw_begin", "anim_throw_begin", TRUE, this, GetState());
-        g_player_hud[1]->set_detector_state(EHudStates::eBoltThrowStart);
+        if (owner && owner->object_id() == 0)
+            g_player_hud[1]->set_detector_state(EHudStates::eBoltThrowStart);
     }
     break;
     case eReady:
     {
         PlayHUDMotion("anm_throw_idle", "anim_throw_idle", TRUE, this, GetState());
-        g_player_hud[1]->set_detector_state(EHudStates::eBoltThrowIdle);
+        if (owner && owner->object_id() == 0)
+            g_player_hud[1]->set_detector_state(EHudStates::eBoltThrowIdle);
     }
     break;
     case eThrow:
@@ -299,7 +303,8 @@ void CMissile::State(u32 state, u32 oldState)
         SetPending(TRUE);
         m_throw = false;
         PlayHUDMotion("anm_throw", "anim_throw_act", TRUE, this, GetState());
-        g_player_hud[1]->set_detector_state(EHudStates::eBoltThrowEnd);
+        if (owner && owner->object_id() == 0)
+            g_player_hud[1]->set_detector_state(EHudStates::eBoltThrowEnd);
         // XXX: could check it once at initialization stage (could use something like CHudItem::isHUDAnimationExist())
         m_motion_marks_available = !m_current_motion_def->marks.empty();
     }
@@ -307,7 +312,8 @@ void CMissile::State(u32 state, u32 oldState)
     case eThrowEnd:
     {
         PlayHUDMotion("anm_throw_end", "anim_throw_end", TRUE, this, GetState());
-        g_player_hud[1]->set_detector_state(EHudStates::eIdle);
+        if (owner && owner->object_id() == 0)
+            g_player_hud[1]->set_detector_state(EHudStates::eIdle);
         SwitchState(eShowing);
     }
     break;

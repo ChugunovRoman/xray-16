@@ -512,6 +512,7 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
     HUD_VisualBulletUpdate();
     inherited::OnStateSwitch(S, oldState);
     CInventoryOwner* owner = smart_cast<CInventoryOwner*>(this->H_Parent());
+
     switch (S)
     {
     case eIdle:
@@ -530,9 +531,11 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
     case eMagEmpty: switch2_Empty(); break;
     case eReload:
         if (owner)
+        {
             m_sounds_enabled = owner->CanPlayShHdRldSounds();
-        if (g_player_hud[1]->attached_item())
-            g_player_hud[1]->hide_detector();
+            if (owner->object_id() == 0 && g_player_hud[1]->attached_item())
+                g_player_hud[1]->hide_detector();
+        }
         switch2_Reload();
         PlayAnimReload();
         break;
@@ -540,7 +543,7 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
         if (owner)
             m_sounds_enabled = owner->CanPlayShHdRldSounds();
         switch2_Showing();
-        if (g_player_hud[0]->attached_item())
+        if (owner && owner->object_id() == 0 && g_player_hud[0]->attached_item())
             g_player_hud[0]->attached_item()->set_idle_anm_for_second_model();
         break;
     case eHiding:
@@ -755,6 +758,8 @@ void CWeaponMagazined::OnShot()
 void CWeaponMagazined::OnEmptyClick() { PlaySound("sndEmptyClick", get_LastFP()); }
 void CWeaponMagazined::OnAnimationEnd(u32 state)
 {
+    CInventoryOwner* owner = smart_cast<CInventoryOwner*>(this->H_Parent());
+
     switch (state)
     {
     case eFire:
@@ -770,7 +775,7 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
         break; // End of Hide
     case eShowing:
         SwitchState(eIdle);
-        if (g_player_hud[0]->attached_item())
+        if (owner && owner->object_id() == 0 && g_player_hud[0]->attached_item())
         {
             g_player_hud[0]->attached_item()->set_idle_anm_for_second_model();
             calc_aim_addon_offset();

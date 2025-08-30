@@ -148,6 +148,10 @@ void CCustomDetector::OnStateSwitch(u32 S, u32 oldState)
 {
     inherited::OnStateSwitch(S, oldState);
 
+    CInventoryOwner* owner = smart_cast<CInventoryOwner*>(this->H_Parent());
+    if (owner && owner->object_id() != 0)
+        return;
+
     switch (S)
     {
     case eShowing:

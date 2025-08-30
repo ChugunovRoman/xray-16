@@ -122,18 +122,30 @@ void CPHSimpleCharacter::UpdateDynamicDamage(dContact* c, u16 obj_material_idx, 
 #endif
     if (c_vel > m_collision_damage_info.m_contact_velocity)
     {
-        IPhysicsShellHolder* object = bo1 ? retrieveRefObject(c->geom.g2) : retrieveRefObject(c->geom.g1);
-        IPhysicsShellHolder* obj = smart_cast<IPhysicsShellHolder*>(object);
-        VERIFY(obj);
-        if (obj && !obj->ObjectGetDestroy())
+        try
         {
-            m_collision_damage_info.m_contact_velocity = c_vel;
-            m_collision_damage_info.m_dmc_signum = bo1 ? 1.f : -1.f;
-            m_collision_damage_info.m_dmc_type = SCollisionDamageInfo::ctObject;
-            m_collision_damage_info.m_damege_contact = *c;
-            m_collision_damage_info.m_hit_callback = obj->ObjectGetCollisionHitCallback();
-            m_collision_damage_info.m_obj_id = obj->ObjectID();
+            IPhysicsShellHolder* object = bo1 ? retrieveRefObject(c->geom.g2) : retrieveRefObject(c->geom.g1);
+            if (object == nullptr)
+                return;
+            IPhysicsShellHolder* obj = smart_cast<IPhysicsShellHolder*>(object);
+            if (obj == nullptr)
+                return;
+            VERIFY(obj);
+            if (obj && !obj->ObjectGetDestroy())
+            {
+                m_collision_damage_info.m_contact_velocity = c_vel;
+                m_collision_damage_info.m_dmc_signum = bo1 ? 1.f : -1.f;
+                m_collision_damage_info.m_dmc_type = SCollisionDamageInfo::ctObject;
+                m_collision_damage_info.m_damege_contact = *c;
+                m_collision_damage_info.m_hit_callback = obj->ObjectGetCollisionHitCallback();
+                m_collision_damage_info.m_obj_id = obj->ObjectID();
+            }
         }
+        catch(...)
+        {
+            Msg("UpdateDynamicDamage, bo1: %s", bo1 ? "true" : "false");
+        }
+    
     }
 }
 

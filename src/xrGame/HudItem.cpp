@@ -396,7 +396,7 @@ bool CHudItem::isHUDAnimationExist(pcstr anim_name, bool silent) const
         if (g_player_hud[0]->motion_length(anim_name, HudSection(), temp_motion_def) > 100)
             return true;
     }
-    Msg("~ [WARNING] ------ Animation [%s] does not exist in [%s]", anim_name, HudSection().c_str());
+    // Msg("~ [WARNING] ------ Animation [%s] does not exist in [%s]", anim_name, HudSection().c_str());
     return false;
 }
 
