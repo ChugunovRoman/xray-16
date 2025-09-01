@@ -74,6 +74,15 @@ void CSpecificCharacter::load_shared(LPCSTR)
 
 #ifdef XRGAME_EXPORTS
 
+    if (pXML->NavigateToNode(pXML->GetLocalRoot(), "flags", 0))
+    {
+        data()->m_is_leader = pXML->ReadAttribInt("flags", 0, "is_leader") == 1;
+        data()->m_not_replace_visual = pXML->ReadAttribInt("flags", 0, "not_replace_visual") == 1;
+        data()->m_not_replace_money = pXML->ReadAttribInt("flags", 0, "not_replace_money") == 1;
+        data()->m_not_replace_reputation = pXML->ReadAttribInt("flags", 0, "not_replace_reputation") == 1;
+        data()->m_not_replace_snd_config = pXML->ReadAttribInt("flags", 0, "not_replace_snd_config") == 1;
+    }
+
     LPCSTR start_dialog = pXML->Read("start_dialog", 0, NULL);
     if (start_dialog)
     {
@@ -174,12 +183,30 @@ void CSpecificCharacter::load_shared(LPCSTR)
     if (data()->m_Community.index() == NO_COMMUNITY_INDEX)
         xrDebug::Fatal(DEBUG_INFO, "wrong 'community' '%s' in specific character %s ", team, m_OwnId.c_str());
 
-    if (pSettingsFE->line_exist(team, "snd_config"))
+    if (!data()->m_not_replace_snd_config)
     {
-        LPCSTR snds = pSettingsFE->r_string(team, "snd_config");
-        string128 snd_item;
-        _GetItem(snds, ::Random.randI(0, _GetItemCount(snds)), snd_item);
-        data()->m_sound_voice_prefix = snd_item;   
+        if (pSettingsFE->line_exist(team, "snd_config") && pSettingsFE->r_string(team, "snd_config") != NULL && pSettingsFE->r_string(team, "snd_config") != "")
+        {
+            LPCSTR snds = pSettingsFE->r_string(team, "snd_config");
+            string128 snd_item;
+            _GetItem(snds, ::Random.randI(0, _GetItemCount(snds)), snd_item);
+            data()->m_sound_voice_prefix = snd_item;
+        }
+        else
+            data()->m_sound_voice_prefix = "";
+    
+        if (data()->m_is_leader)
+        {
+            if (pSettingsFE->line_exist(team, "snd_config_leader") && pSettingsFE->r_string(team, "snd_config_leader") != NULL && pSettingsFE->r_string(team, "snd_config_leader") != "")
+            {
+                LPCSTR snds = pSettingsFE->r_string(team, "snd_config_leader");
+                string128 snd_item;
+                _GetItem(snds, ::Random.randI(0, _GetItemCount(snds)), snd_item);
+                data()->m_sound_voice_prefix = snd_item;
+            }
+            else
+                data()->m_sound_voice_prefix = "";
+        }
     }
 
     data()->m_Rank = pXML->ReadInt("rank", 0, NO_RANK);
@@ -207,21 +234,25 @@ void CSpecificCharacter::load_shared(LPCSTR)
     full_section_id.append("_");
     full_section_id.append(rank_name);
     _Trim(full_section_id);
-    if (pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "visuals"))
+    if (!data()->m_not_replace_visual &&pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "visuals"))
     {
         LPCSTR visuals = pSettingsFE->r_string(full_section_id.c_str(), "visuals");
         string128 visual_item;
         _GetItem(visuals, ::Random.randI(0, _GetItemCount(visuals)), visual_item);
         data()->m_sVisual = visual_item;
     }
-    if (pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "min_money"))
-        MoneyDef().min_money = pSettingsFE->r_u32(full_section_id.c_str(), "min_money");
-    if (pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "max_money"))
-        MoneyDef().max_money = pSettingsFE->r_u32(full_section_id.c_str(), "max_money");
-    if (pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "reputation"))
+    if (!data()->m_not_replace_money)
+    {
+        if (pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "min_money"))
+            MoneyDef().min_money = pSettingsFE->r_u32(full_section_id.c_str(), "min_money");
+        if (pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "max_money"))
+            MoneyDef().max_money = pSettingsFE->r_u32(full_section_id.c_str(), "max_money");
+
+        MoneyDef().max_money = _max(MoneyDef().max_money, MoneyDef().min_money);
+    }
+    if (!data()->m_not_replace_reputation && pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "reputation"))
         data()->m_Reputation = pSettingsFE->r_u32(full_section_id.c_str(), "reputation");
 
-    MoneyDef().max_money = _max(MoneyDef().max_money, MoneyDef().min_money);
 
     if (pSettingsFE->section_exist(team) && pSettingsFE->line_exist(team, "names"))
         data()->m_sGameName = pSettingsFE->r_string(team, "names");

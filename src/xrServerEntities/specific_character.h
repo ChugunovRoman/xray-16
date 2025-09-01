@@ -42,6 +42,12 @@ struct SSpecificCharacterData : CSharedResource
     int m_crouch_type{};
     bool m_upgrade_mechanic{};
 
+    bool m_is_leader{};
+    bool m_not_replace_visual{};
+    bool m_not_replace_money{};
+    bool m_not_replace_reputation{};
+    bool m_not_replace_snd_config{};
+
     xr_string m_critical_wound_weights;
 #endif
     shared_str m_terrain_sect;
