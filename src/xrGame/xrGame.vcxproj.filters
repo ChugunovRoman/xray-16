@@ -6353,6 +6353,9 @@
     <ClInclude Include="ai\monsters\states\monster_state_move.h">
       <Filter>AI\AMonsters\common\monster states\Move</Filter>
     </ClInclude>
+    <ClInclude Include="..\xrServerEntities\object_factory_spawner.h">
+      <Filter>Core\Common\ObjectFactory</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="damage_manager.cpp">
@@ -9596,6 +9599,9 @@
     </ClCompile>
     <ClCompile Include="..\xrServerEntities\script_properties_list_helper_script.cpp">
       <Filter>Core\Server\ServerEntities\scripts\script_properties_list_helper</Filter>
+    </ClCompile>
+    <ClCompile Include="..\xrServerEntities\object_factory_spawner.cpp">
+      <Filter>Core\Common\ObjectFactory</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

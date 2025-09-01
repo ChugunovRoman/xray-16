@@ -397,7 +397,7 @@ IC void CBackend::set_Geometry(SGeometry* _geom)
     set_Indices(_geom->ib);
 }
 
-IC void CBackend::set_Scissor(Irect* R)
+IC void CBackend::set_Scissor(const Irect* R)
 {
     if (R)
     {

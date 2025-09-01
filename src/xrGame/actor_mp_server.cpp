@@ -28,7 +28,6 @@ BOOL CSE_ActorMP::Net_Relevant()
     return (inherited::Net_Relevant());
 }
 
-#ifdef XRGAME_EXPORTS
 void CSE_ActorMP::on_death(CSE_Abstract* killer)
 {
     inherited::on_death(killer);
@@ -37,4 +36,3 @@ void CSE_ActorMP::on_death(CSE_Abstract* killer)
     fill_state(state);
     m_state_holder.relevant(state);
 }
-#endif

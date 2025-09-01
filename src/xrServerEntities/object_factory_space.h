@@ -8,10 +8,6 @@
 
 #pragma once
 
-#ifndef XRGAME_EXPORTS
-#define NO_XR_GAME
-#endif
-
 class IFactoryObject;
 class CSE_Abstract;
 

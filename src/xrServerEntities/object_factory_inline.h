@@ -93,6 +93,7 @@ IC void CObjectFactory::add(CObjectItemAbstract* item)
 {
     const_iterator I;
 
+#ifdef DEBUG
     I = std::find_if(clsids().begin(), clsids().end(), CObjectItemPredicateCLSID(item->clsid()));
     if (I != clsids().end())
     {
@@ -101,7 +102,6 @@ IC void CObjectFactory::add(CObjectItemAbstract* item)
         VERIFY2(0, make_string("clsid is duplicated : %s", temp));
     }
 
-#ifndef NO_XR_GAME
     I = std::find_if(clsids().begin(), clsids().end(), CObjectItemPredicateScript(item->script_clsid()));
     VERIFY(I == clsids().end());
 #endif

@@ -8,10 +8,15 @@
 
 #pragma once
 
+#include "xrEngine/editor_base.h"
+
 #include "object_item_abstract.h"
-#include "xrServer_Objects.h"
+#include "object_factory_spawner.h"
 
 class CObjectFactory
+#ifndef MASTER_GOLD
+    : public xray::editor::ide_tool
+#endif
 {
 public:
     using ClientObjectBaseClass = ObjectFactory::ClientObjectBaseClass;
@@ -78,6 +83,19 @@ public:
     void register_script_class(LPCSTR client_class, LPCSTR server_class, LPCSTR clsid, LPCSTR script_clsid);
     void register_script_class(LPCSTR unknown_class, LPCSTR clsid, LPCSTR script_clsid);
     void register_script_classes();
+
+#ifndef MASTER_GOLD
+public:
+    void on_tool_frame() override;
+    void init_spawn_data();
+
+private:
+    pcstr tool_name() const override { return "Spawner"; }
+
+    static constexpr auto CATEGORIES_COUNT = static_cast<size_t>(xray::SpawnCategory::CategoriesCount);
+
+    std::array<CInifile::Root, CATEGORIES_COUNT> m_spawner_sections;
+#endif
 };
 
 extern CObjectFactory* g_object_factory;

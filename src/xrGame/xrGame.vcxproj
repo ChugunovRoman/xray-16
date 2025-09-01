@@ -59,6 +59,7 @@
     <ClInclude Include="..\xrServerEntities\object_factory_impl.h" />
     <ClInclude Include="..\xrServerEntities\object_factory_inline.h" />
     <ClInclude Include="..\xrServerEntities\object_factory_space.h" />
+    <ClInclude Include="..\xrServerEntities\object_factory_spawner.h" />
     <ClInclude Include="..\xrServerEntities\object_item_abstract.h" />
     <ClInclude Include="..\xrServerEntities\object_item_abstract_inline.h" />
     <ClInclude Include="..\xrServerEntities\object_item_client_server.h" />
@@ -1428,6 +1429,7 @@
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
+    <ClCompile Include="..\xrServerEntities\object_factory_spawner.cpp" />
     <ClCompile Include="..\xrServerEntities\object_item_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>

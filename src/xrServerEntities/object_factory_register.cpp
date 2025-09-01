@@ -17,7 +17,6 @@
 #include "clsid_game.h"
 
 // client entities includes
-#ifndef NO_XR_GAME
 #include "Actor.h"
 #include "Spectator.h"
 
@@ -177,14 +176,9 @@
 #include "actor_mp_server.h"
 #include "actor_mp_client.h"
 #include "smart_cover_object.h"
-#endif // NO_XR_GAME
 
-#ifndef NO_XR_GAME
 #define ADD(a, b, c, d) add<a, b>(c, d)
 #define ADD_MP(a, b, c, d, e, f) add(xr_new<CObjectItemClientServerSingleMp<a, b, c, d>>(e, f))
-#else
-#define ADD(a, b, c, d) add<b>(c, d)
-#endif
 
 void CObjectFactory::register_classes()
 {
@@ -192,7 +186,6 @@ void CObjectFactory::register_classes()
 
     ZoneScoped;
 
-#ifndef NO_XR_GAME
     // Server Game type
     add<game_sv_Single>(CLSID_SV_GAME_SINGLE, "game_sv_single");
     add<game_sv_Deathmatch>(CLSID_SV_GAME_DEATHMATCH, "game_sv_deathmatch");
@@ -211,16 +204,11 @@ void CObjectFactory::register_classes()
     add<CUIGameTDM>(CLSID_GAME_UI_TEAMDEATHMATCH, "game_ui_team_deathmatch");
     add<CUIGameAHunt>(CLSID_GAME_UI_ARTEFACTHUNT, "game_ui_artefact_hunt");
     add<CUIGameCTA>(CLSID_GAME_UI_CAPTURETHEARTEFACT, "game_ui_capture_the_artefact");
-#endif // NO_XR_GAME
 
-#ifndef NO_XR_GAME
-    if (!ShadowOfChernobylMode)
-        ADD_MP(CActor, CActorMP, CSE_ALifeCreatureActor, CSE_ActorMP, CLSID_OBJECT_ACTOR, "actor");
-    else
-#endif
-    {
+    if (ShadowOfChernobylMode)
         ADD(CActor, CSE_ALifeCreatureActor, CLSID_OBJECT_ACTOR, "actor");
-    }
+    else
+        ADD_MP(CActor, CActorMP, CSE_ALifeCreatureActor, CSE_ActorMP, CLSID_OBJECT_ACTOR, "actor");
 
     // server entities
     add<CSE_ALifeGroupTemplate<CSE_ALifeMonsterBase>>(CLSID_AI_FLESH_GROUP, "flesh_group");
@@ -356,18 +344,14 @@ void CObjectFactory::register_classes()
     ADD(CHairsZone, CSE_ALifeZoneVisual, CLSID_Z_BFUZZ, "zone_bfuzz");
     ADD(CHairsZone, CSE_ALifeZoneVisual, CLSID_Z_RUSTYH, "zone_rusty_hair");
     ADD(CMosquitoBald, CSE_ALifeAnomalousZone, CLSID_Z_DEAD, "zone_dead");
+
     // We can't register both, since CLSID_LEVEL_CHANGER_S is created in COP scripts as "level_changer_s"
     // But in SOC scripts CLSID_LEVEL_CHANGER_S may be used as "level_changer"
-#ifndef NO_XR_GAME
     if (ShadowOfChernobylMode)
-    {
         ADD(CLevelChanger, CSE_ALifeLevelChanger, CLSID_LEVEL_CHANGER_S, "level_changer");
-    }
     else
-#endif // NO_XR_GAME
-    {
         ADD(CLevelChanger, CSE_ALifeLevelChanger, CLSID_LEVEL_CHANGER, "level_changer");
-    }
+
     ADD(CScriptZone, CSE_ALifeSpaceRestrictor, CLSID_SCRIPT_ZONE, "script_zone");
     ADD(CSmartZone, CSE_ALifeSmartZone, CLSID_SMART_ZONE, "smart_zone");
     ADD(CTeamBaseZone, CSE_ALifeTeamBaseZone, CLSID_Z_TEAM_BASE, "team_base_zone");
@@ -405,7 +389,6 @@ void CObjectFactory::register_classes()
     ADD(CInventoryBox, CSE_ALifeInventoryBox, CLSID_INVENTORY_BOX, "inventory_box");
     ADD(smart_cover::object, CSE_SmartCover, make_clsid("SMRTCOVR"), "smart_cover");
 
-#ifndef NO_XR_GAME
     // hack, for dedicated server only
     // because we do not have scripts
     // and script functionality is not
@@ -445,5 +428,4 @@ void CObjectFactory::register_classes()
     ADD(CRadioactiveZone, CSE_ALifeAnomalousZone, make_clsid("ZS_RADIO"), "zone_radio_s");
     ADD(CNoGravityZone, CSE_ALifeAnomalousZone, make_clsid("ZS_NGRAV"), "zone_nograv_s");
     ADD(CSpaceRestrictor, CSE_ALifeSpaceRestrictor, make_clsid("SPC_RS_S"), "script_restr");
-#endif // NO_XR_GAME
 }

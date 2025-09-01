@@ -144,6 +144,10 @@ void CAI_Space::SetupScriptEngine()
     RegisterScriptClasses();
     object_factory().register_script();
     LoadCommonScripts();
+
+#ifndef MASTER_GOLD
+    g_object_factory->init_spawn_data();
+#endif
 }
 
 void CAI_Space::RestartScriptEngine()

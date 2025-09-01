@@ -11,7 +11,6 @@
 #include "Common/object_broker.h"
 #include "xrServer_Objects_ALife_Monsters.h"
 
-#ifdef XRGAME_EXPORTS
 #include "alife_monster_movement_manager.h"
 #include "alife_monster_detail_path_manager.h"
 #include "alife_monster_patrol_path_manager.h"
@@ -30,28 +29,22 @@
 #include "map_location.h"
 #include "map_manager.h"
 #endif
-#endif
 
 CALifeOnlineOfflineGroupBrain::CALifeOnlineOfflineGroupBrain(object_type* object)
 {
     VERIFY(object);
     m_object = object;
 
-#ifdef XRGAME_EXPORTS
     m_movement_manager = xr_new<CALifeMonsterMovementManager>(object);
-#endif
 }
 
 CALifeOnlineOfflineGroupBrain::~CALifeOnlineOfflineGroupBrain()
 {
-#ifdef XRGAME_EXPORTS
     xr_delete(m_movement_manager);
-#endif
 }
 
 void CALifeOnlineOfflineGroupBrain::on_state_write(NET_Packet& packet) {}
 void CALifeOnlineOfflineGroupBrain::on_state_read(NET_Packet& packet) {}
-#ifdef XRGAME_EXPORTS
 
 void CALifeOnlineOfflineGroupBrain::on_register() {}
 void CALifeOnlineOfflineGroupBrain::on_unregister() {}
@@ -67,4 +60,3 @@ void CALifeOnlineOfflineGroupBrain::update()
 
 void CALifeOnlineOfflineGroupBrain::on_switch_online() { movement().on_switch_online(); }
 void CALifeOnlineOfflineGroupBrain::on_switch_offline() { movement().on_switch_offline(); }
-#endif // XRGAME_EXPORTS

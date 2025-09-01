@@ -9,28 +9,23 @@
 #include "shared_data.h"
 #include "xml_str_id_loader.h"
 
-class NET_Packet;
-
 #ifndef AI_COMPILER
 #include "specific_character.h"
 #endif
 
-#ifdef XRGAME_EXPORTS
 #include "PhraseDialogDefs.h"
 #include "character_community.h"
 #include "character_rank.h"
 #include "character_reputation.h"
+
+class NET_Packet;
 class CSE_ALifeTraderAbstract;
-#endif
 
 //////////////////////////////////////////////////////////////////////////
 // SCharacterProfile: данные профиля персонажа
 //////////////////////////////////////////////////////////////////////////
 struct SCharacterProfile : CSharedResource
 {
-    SCharacterProfile();
-    virtual ~SCharacterProfile();
-
     //если задано, то выбирается именно такой профиль,
     //иначе ищется случайно,удовлетворяющее шаблону
     shared_str m_CharacterId;
@@ -55,12 +50,8 @@ private:
     friend CSE_ALifeTraderAbstract;
 
 public:
-    CCharacterInfo();
-    ~CCharacterInfo();
-
     virtual void Load(shared_str id);
 
-#ifdef XRGAME_EXPORTS
     void load(IReader&);
     void save(NET_Packet&);
 
@@ -69,7 +60,6 @@ public:
     //указанному индексу
     void Init(CSE_ALifeTraderAbstract* trader);
     void InitSpecificCharacter(shared_str new_id);
-#endif
 
 protected:
     const SCharacterProfile* data() const
@@ -95,15 +85,12 @@ protected:
     //используется в данном экземпляре класса
     shared_str m_SpecificCharacterId;
 
-#ifdef XRGAME_EXPORTS
     shared_str m_StartDialog;
 
     //загруженная информация о конкретном персонаже
     CSpecificCharacter m_SpecificCharacter;
-#endif
 
 public:
-#ifdef XRGAME_EXPORTS
     shared_str Profile() const;
     LPCSTR Name() const;
     shared_str Bio() const;
@@ -124,13 +111,10 @@ public:
 
     shared_str StartDialog() const;
     const DIALOG_ID_VECTOR& ActorDialogs() const;
-#endif
 
 protected:
-#ifdef XRGAME_EXPORTS
     CHARACTER_RANK m_CurrentRank;
     CHARACTER_REPUTATION m_CurrentReputation;
     CHARACTER_COMMUNITY m_CurrentCommunity;
-    float m_Sympathy; // % влияния на группировку
-#endif
+    float m_Sympathy{}; // % влияния на группировку
 };

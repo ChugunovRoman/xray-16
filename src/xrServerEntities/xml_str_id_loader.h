@@ -1,11 +1,8 @@
 #pragma once
 
-#ifdef XRGAME_EXPORTS
-#include "xrUICore/XML/xrUIXmlParser.h"
-#else // XRGAME_EXPORTS
-#include "xrUIXmlParser.h"
 #include "Common/object_broker.h"
-#endif // XRGAME_EXPORTS
+
+#include "xrUICore/XML/xrUIXmlParser.h"
 
 // T_INIT -  класс где определена статическая InitXmlIdToIndex
 //          функция инициализации file_str и tag_name

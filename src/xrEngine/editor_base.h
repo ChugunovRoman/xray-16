@@ -111,6 +111,7 @@ private:
 
 private:
     visible_state m_state{};
+    bool m_tool_added{};
 
     struct ImGuiBackend
     {

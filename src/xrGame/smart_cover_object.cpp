@@ -26,14 +26,6 @@ void dbg_draw_frustum(float FOV, float _FAR, float A, Fvector& P, Fvector& D, Fv
 
 namespace smart_cover
 {
-void object::Load(LPCSTR section)
-{
-    inherited::Load(section);
-
-    m_enter_min_enemy_distance = pSettings->r_float(section, "enter_min_enemy_distance");
-    m_exit_min_enemy_distance = pSettings->r_float(section, "exit_min_enemy_distance");
-}
-
 bool object::net_Spawn(CSE_Abstract* server_entity)
 {
     CSE_SmartCover* smart_cover = smart_cast<CSE_SmartCover*>(server_entity);
@@ -71,6 +63,9 @@ bool object::net_Spawn(CSE_Abstract* server_entity)
         return (FALSE);
 
     spatial.type &= ~STYPE_VISIBLEFORAI;
+
+    m_enter_min_enemy_distance = smart_cover->m_enter_min_enemy_distance;
+    m_exit_min_enemy_distance = smart_cover->m_exit_min_enemy_distance;
 
     if (ai().get_alife() && smart_cover->m_description.size())
         m_cover = ai().cover_manager().add_smart_cover(smart_cover->m_description.c_str(), *this,

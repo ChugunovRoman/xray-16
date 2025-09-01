@@ -510,7 +510,7 @@ AssertionResult xrDebug::Fail(bool& ignoreAlways, const ErrorLocation& loc, cons
         case AssertionResult::tryAgain:
             ErrorAfterDialog = false;
             resetFullscreen = windowHandler != nullptr;
-            break;
+            break;  
 
         case AssertionResult::ignore:
             ErrorAfterDialog = false;

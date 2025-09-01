@@ -11,7 +11,6 @@
 #include "Common/object_broker.h"
 #include "xrServer_Objects_ALife_Monsters.h"
 
-#ifdef XRGAME_EXPORTS
 #include "alife_human_object_handler.h"
 #include "alife_monster_movement_manager.h"
 #include "alife_monster_detail_path_manager.h"
@@ -30,28 +29,23 @@
 #include "map_location.h"
 #include "map_manager.h"
 #endif
-#endif
 
 CALifeHumanBrain::CALifeHumanBrain(object_type* object) : inherited(object)
 {
     VERIFY(object);
     m_object = object;
 
-#ifdef XRGAME_EXPORTS
     m_object_handler = xr_new<CALifeHumanObjectHandler>(object);
-#endif
 
     m_dwTotalMoney = 0;
     m_cpEquipmentPreferences.resize(5);
     m_cpMainWeaponPreferences.resize(4);
 
-#ifdef XRGAME_EXPORTS
     m_cpEquipmentPreferences.resize(iFloor(ai().ef_storage().m_pfEquipmentType->ffGetMaxResultValue() + .5f));
     m_cpMainWeaponPreferences.resize(iFloor(ai().ef_storage().m_pfMainWeaponType->ffGetMaxResultValue() + .5f));
     R_ASSERT2((iFloor(ai().ef_storage().m_pfEquipmentType->ffGetMaxResultValue() + .5f) == 5) &&
             (iFloor(ai().ef_storage().m_pfMainWeaponType->ffGetMaxResultValue() + .5f) == 4),
         "Recompile Level Editor and xrAI and rebuild file \"game.spawn\"!");
-#endif
 
     for (int i = 0, n = m_cpEquipmentPreferences.size(); i < n; ++i)
         m_cpEquipmentPreferences[i] = u8(::Random.randI(3));
@@ -62,9 +56,7 @@ CALifeHumanBrain::CALifeHumanBrain(object_type* object) : inherited(object)
 
 CALifeHumanBrain::~CALifeHumanBrain()
 {
-#ifdef XRGAME_EXPORTS
     xr_delete(m_object_handler);
-#endif
 }
 
 void CALifeHumanBrain::on_state_write(NET_Packet& packet)

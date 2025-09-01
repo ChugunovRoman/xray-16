@@ -13,6 +13,8 @@ void CRenderDevice::InitializeImGui()
 
     ZoneScoped;
 
+    IMGUI_CHECKVERSION();
+
     ImGui::SetAllocatorFunctions(
         [](size_t size, void* /*user_data*/)
         {
@@ -43,6 +45,17 @@ void CRenderDevice::InitializeImGui()
 
     io.BackendPlatformName = "OpenXRay";
 
+    io.ConfigDebugIsDebuggerPresent = xrDebug::DebuggerIsPresent();
+#ifdef DEBUG
+    io.ConfigErrorRecoveryEnableAssert  = true;
+    io.ConfigErrorRecoveryEnableTooltip = true;
+    io.ConfigDebugHighlightIdConflicts  = true;
+#else
+    io.ConfigErrorRecoveryEnableAssert  = false;
+    io.ConfigErrorRecoveryEnableTooltip = false;
+    io.ConfigDebugHighlightIdConflicts  = false;
+#endif
+
     // Register platform interface (will be coupled with a renderer interface)
     ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
 
@@ -69,12 +82,12 @@ void CRenderDevice::InitializeImGui()
     {
         if (data->WantVisible)
         {
-            /*const*/ SDL_Rect r // this is not const because older versions of SDL accept non-const rect
+            const SDL_Rect r
             {
-                /*.x =*/ (int)(data->InputPos.x - viewport->Pos.x),
-                /*.y =*/ (int)(data->InputPos.y - viewport->Pos.y + data->InputLineHeight),
-                /*.w =*/ 1,
-                /*.h =*/ (int)data->InputLineHeight,
+                .x = (int)(data->InputPos.x - viewport->Pos.x),
+                .y = (int)(data->InputPos.y - viewport->Pos.y + data->InputLineHeight),
+                .w = 1,
+                .h = (int)data->InputLineHeight,
             };
             SDL_SetTextInputRect(&r);
         }

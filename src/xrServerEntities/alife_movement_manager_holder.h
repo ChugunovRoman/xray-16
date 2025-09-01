@@ -19,10 +19,8 @@ public:
     float m_fDistanceToPoint;
     GameGraph::TERRAIN_VECTOR m_tpaTerrain;
 
-#ifdef XRGAME_EXPORTS
 public:
     virtual void on_location_change() const = 0;
     virtual CSE_ALifeDynamicObject const& get_object() const = 0;
     virtual CSE_ALifeDynamicObject& get_object() = 0;
-#endif //#ifdef XRGAME_EXPORTS
 }; // CMovementManagerHolder

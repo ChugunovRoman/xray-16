@@ -24,6 +24,8 @@ ImGuiWindowFlags ide_tool::get_default_window_flags() const
 void ide::RegisterTool(ide_tool* tool)
 {
     m_tools.emplace_back(tool);
+    // can't sort here, because the tool is constructing right now
+    m_tool_added = true;
 }
 
 void ide::UnregisterTool(const ide_tool* tool)
@@ -106,6 +108,14 @@ void ide::ShowMain()
         {
             if (ImGui::BeginMenu("Tools"))
             {
+                if (m_tool_added)
+                {
+                    std::sort(m_tools.begin(), m_tools.end(), [](const ide_tool* left, const ide_tool* right)
+                    {
+                        return xr_strcmp(left->tool_name(), right->tool_name()) < 0;
+                    });
+                    m_tool_added = false;
+                }
                 for (const auto& tool : m_tools)
                     ImGui::MenuItem(tool->tool_name(), nullptr, &tool->get_open_state());
 

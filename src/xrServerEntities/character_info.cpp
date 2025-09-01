@@ -6,45 +6,15 @@
 #include "StdAfx.h"
 #include "character_info.h"
 
-#ifdef XRGAME_EXPORTS
 #include "xrUICore/XML/xrUIXmlParser.h"
 #include "PhraseDialog.h"
 #include "xrServer_Objects_ALife_Monsters.h"
-#else // XRGAME_EXPORTS
-#include "xrUIXmlParser.h"
-#endif // XRGAME_EXPORTS
 
-//////////////////////////////////////////////////////////////////////////
-SCharacterProfile::SCharacterProfile()
-{
-    m_CharacterId = nullptr;
-    m_Rank = NO_RANK;
-    m_Reputation = NO_REPUTATION;
-}
-
-SCharacterProfile::~SCharacterProfile() {}
-//////////////////////////////////////////////////////////////////////////
-
-CCharacterInfo::CCharacterInfo()
-{
-    m_ProfileId = nullptr;
-    m_SpecificCharacterId = nullptr;
-
-#ifdef XRGAME_EXPORTS
-    m_CurrentRank.set(NO_RANK);
-    m_CurrentReputation.set(NO_REPUTATION);
-    m_Sympathy = 0.0f;
-#endif
-}
-
-CCharacterInfo::~CCharacterInfo() {}
 void CCharacterInfo::Load(shared_str id)
 {
     m_ProfileId = id;
     inherited_shared::load_shared(m_ProfileId, nullptr);
 }
-
-#ifdef XRGAME_EXPORTS
 
 void CCharacterInfo::InitSpecificCharacter(shared_str new_id)
 {
@@ -61,8 +31,6 @@ void CCharacterInfo::InitSpecificCharacter(shared_str new_id)
     if (!m_StartDialog || !m_StartDialog.size())
         m_StartDialog = m_SpecificCharacter.data()->m_StartDialog;
 }
-
-#endif
 
 void CCharacterInfo::load_shared(LPCSTR)
 {
@@ -100,7 +68,6 @@ void CCharacterInfo::load_shared(LPCSTR)
         data()->m_CharacterId = spec_char;
 }
 
-#ifdef XRGAME_EXPORTS
 void CCharacterInfo::Init(CSE_ALifeTraderAbstract* trader)
 {
     SetCommunity(trader->m_community_index);
@@ -151,7 +118,6 @@ void CCharacterInfo::save(NET_Packet& stream)
     stream.w_stringZ(m_StartDialog);
     stream.w_u32(m_CurrentCommunity.index());
 }
-#endif
 
 void CCharacterInfo::InitXmlIdToIndex()
 {
