@@ -599,6 +599,9 @@ void CWeapon::Load(LPCSTR section)
 
     xr_sprintf(_prefix, "%s", is_16x9 ? "_16x9" : "");
     xr_sprintf(base_hud_sect, "%s_hud", section);
+    
+    if (pSettings->line_exist(section, "hud"))
+        xr_sprintf(base_hud_sect, "%s", pSettings->r_string(section, "hud"));
 
     m_hands_offset[0][0].set(0, 0, 0);
     m_hands_offset[1][0].set(0, 0, 0);
@@ -606,9 +609,15 @@ void CWeapon::Load(LPCSTR section)
     if (!bUseAttachmentSystem)
     {
         strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_pos", _prefix);
-        m_hands_offset[0][1] = READ_IF_EXISTS(pSettings, r_fvector3, base_hud_sect, val_name, Fvector().set(0.0f, 0.0f, 0.0f));
+        if (pSettings->line_exist(hud_sect, val_name))
+            m_hands_offset[0][1] = pSettings->r_fvector3(hud_sect, val_name);
+        else if (pSettings->line_exist(base_hud_sect, val_name))
+            m_hands_offset[0][1] = pSettings->r_fvector3(base_hud_sect, val_name);
         strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_rot", _prefix);
-        m_hands_offset[1][1] = READ_IF_EXISTS(pSettings, r_fvector3, base_hud_sect, val_name, Fvector().set(0.0f, 0.0f, 0.0f));
+        if (pSettings->line_exist(hud_sect, val_name))
+            m_hands_offset[1][1] = pSettings->r_fvector3(hud_sect, val_name);
+        else if (pSettings->line_exist(base_hud_sect, val_name))
+            m_hands_offset[1][1] = pSettings->r_fvector3(base_hud_sect, val_name);
     }
 
     if (pSettings->line_exist(section, "weapon_remove_time"))
@@ -2570,15 +2579,24 @@ void CWeapon::reload(LPCSTR section)
     xr_sprintf(_prefix, "%s", is_16x9 ? "_16x9" : "");
     xr_sprintf(base_hud_sect, "%s_hud", section);
 
+    if (pSettings->line_exist(section, "hud"))
+        xr_sprintf(base_hud_sect, "%s", pSettings->r_string(section, "hud"));
+
     m_hands_offset[0][0].set(0, 0, 0);
     m_hands_offset[1][0].set(0, 0, 0);
 
     if (!bUseAttachmentSystem)
     {
         strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_pos", _prefix);
-        m_hands_offset[0][1] = READ_IF_EXISTS(pSettings, r_fvector3, base_hud_sect, val_name, Fvector().set(0.0f, 0.0f, 0.0f));
+        if (pSettings->line_exist(hud_sect, val_name))
+            m_hands_offset[0][1] = pSettings->r_fvector3(hud_sect, val_name);
+        else if (pSettings->line_exist(base_hud_sect, val_name))
+            m_hands_offset[0][1] = pSettings->r_fvector3(base_hud_sect, val_name);
         strconcat(sizeof(val_name), val_name, "aim_hud_offset_alt_rot", _prefix);
-        m_hands_offset[1][1] = READ_IF_EXISTS(pSettings, r_fvector3, base_hud_sect, val_name, Fvector().set(0.0f, 0.0f, 0.0f));
+        if (pSettings->line_exist(hud_sect, val_name))
+            m_hands_offset[1][1] = pSettings->r_fvector3(hud_sect, val_name);
+        else if (pSettings->line_exist(base_hud_sect, val_name))
+            m_hands_offset[1][1] = pSettings->r_fvector3(base_hud_sect, val_name);
     }
 
     LoadCurrentScopeParams(*m_section_id);

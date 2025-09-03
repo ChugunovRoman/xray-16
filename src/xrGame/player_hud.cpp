@@ -342,9 +342,9 @@ Fmatrix hud_item_measures::load(const shared_str& sect_name, IKinematics* K)
     string128 val_name;
 
     strconcat(val_name, "hands_position", _prefix);
-    m_hands_attach[0] = pSettings->r_fvector3(sect_name, val_name);
+    m_hands_attach[0] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, pSettings->r_fvector3(sect_name, "hands_position_16x9"));
     strconcat(val_name, "hands_orientation", _prefix);
-    m_hands_attach[1] = pSettings->r_fvector3(sect_name, val_name);
+    m_hands_attach[1] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, pSettings->r_fvector3(sect_name, "hands_orientation_16x9"));
 
     m_item_attach[0] = pSettings->r_fvector3(sect_name, "item_position");
     m_item_attach[1] = pSettings->r_fvector3(sect_name, "item_orientation");
