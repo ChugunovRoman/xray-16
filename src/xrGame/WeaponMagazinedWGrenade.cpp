@@ -200,7 +200,7 @@ void CWeaponMagazinedWGrenade::OnShot()
 bool CWeaponMagazinedWGrenade::CanSwitchToGL()
 {
     bool bUsefulStateToSwitch =
-        ((eIdle == GetState()) || (eHidden == GetState()) || (eMisfire == GetState()) || (eMagEmpty == GetState())) &&
+        ((eIdle == GetState()) || (eSwitch == GetState()) || (eHidden == GetState()) || (eMisfire == GetState()) || (eMagEmpty == GetState())) &&
         (!IsPending());
 
     return bUsefulStateToSwitch && IsGrenadeLauncherAttached();
@@ -474,6 +474,11 @@ void CWeaponMagazinedWGrenade::OnStateSwitch(u32 S, u32 oldState)
 
     switch (S)
     {
+    case eReload:
+    {
+        switch2_Reload();
+        break;
+    }
     case eSwitch:
     {
         if (!SwitchMode())
@@ -481,13 +486,13 @@ void CWeaponMagazinedWGrenade::OnStateSwitch(u32 S, u32 oldState)
             SwitchState(eIdle);
             return;
         }
+        break;
     }
     case eUnMisfire:
         if (owner)
             m_sounds_enabled = owner->CanPlayShHdRldSounds();
         switch2_Unmis(); 
         break;
-    break;
     }
 
     UpdateGrenadeVisibility(!!iAmmoElapsed || S == eReload);
