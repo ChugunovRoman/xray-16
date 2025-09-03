@@ -79,6 +79,8 @@ protected:
     virtual void OnItemFocusedUpdate(CUIWindow* w, void* pData);
 
 public:
+    bool dragging_enabled{true};
+
     static CUIDragItem* m_drag_item;
     CUIDragDropListEx();
     virtual ~CUIDragDropListEx();

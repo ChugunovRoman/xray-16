@@ -110,6 +110,10 @@ SCRIPT_EXPORT(CUIDragDropListEx, (CUIWindow),
                     }
                 }
             })
+            .def("SetDraggingEnabled", +[](CUIDragDropListEx* self, bool enabled)
+            {
+                self->dragging_enabled = enabled;
+            })
             .def("ItemCount", +[](CUIDragDropListEx* self) -> u32
             {
                 return self->ItemsCount();

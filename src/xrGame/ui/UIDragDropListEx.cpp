@@ -240,6 +240,9 @@ void CUIDragDropListEx::OnScrollV(CUIWindow* w, void* pData)
 
 void CUIDragDropListEx::CreateDragItem(CUICellItem* itm)
 {
+    if (!dragging_enabled)
+        return;
+
     R_ASSERT(!m_drag_item);
     m_drag_item = itm->CreateDragItem();
 
@@ -251,6 +254,9 @@ void CUIDragDropListEx::CreateDragItem(CUICellItem* itm)
 
 void CUIDragDropListEx::DestroyDragItem()
 {
+    if (!dragging_enabled)
+        return;
+
     if (m_selected_item && m_drag_item && m_drag_item->ParentItem() == m_selected_item)
     {
         VERIFY(GetParent()->GetMouseCapturer() == m_drag_item);
@@ -263,6 +269,9 @@ void CUIDragDropListEx::DestroyDragItem()
 Fvector2 CUIDragDropListEx::GetDragItemPosition() { return m_drag_item->GetPosition(); }
 void CUIDragDropListEx::OnDragEvent(CUIDragItem* drag_item, bool b_receive)
 {
+    if (!dragging_enabled)
+        return;
+
     if (m_f_drag_event)
         m_f_drag_event(drag_item, b_receive);
     if (m_f_drag_event_lua && m_selected_item->data_is_string)
@@ -272,6 +281,9 @@ void CUIDragDropListEx::OnDragEvent(CUIDragItem* drag_item, bool b_receive)
 
 void CUIDragDropListEx::OnItemStartDragging(CUIWindow* w, void* pData)
 {
+    if (!dragging_enabled)
+        return;
+
     OnItemSelected(w, pData);
     CUICellItem* itm = smart_cast<CUICellItem*>(w);
 
@@ -286,6 +298,9 @@ void CUIDragDropListEx::OnItemStartDragging(CUIWindow* w, void* pData)
 
 void CUIDragDropListEx::OnItemDrop(CUIWindow* w, void* pData)
 {
+    if (!dragging_enabled)
+        return;
+
     OnItemSelected(w, pData);
     CUICellItem* itm = smart_cast<CUICellItem*>(w);
     VERIFY(itm->OwnerList() == itm->OwnerList());
