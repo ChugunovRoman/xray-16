@@ -280,6 +280,7 @@ void CInventoryItem::pre_install_upgrade()
 
         if (weapon->bUseAttachmentSystem)
             for (auto& [id, addon] : weapon->m_addon_items)
-                weapon->Detach(id);
+                if (!pSettings->line_exist(*weapon->m_section_id, *addon->slot))
+                    weapon->Detach(id);
     }
 }
