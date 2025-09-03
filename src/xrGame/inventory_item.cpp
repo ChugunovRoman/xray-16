@@ -206,7 +206,9 @@ void CInventoryItem::ReloadNames()
             if (xr_strcmp(*outfit->m_faction, "none") != 0)
                 str_outfit_property_faction_name = StringTable().translate(*outfit->m_faction);
 
-            if (outfit->m_additional_weight2 > 0.0f)
+            if (outfit->m_additional_weight > 0.0f && outfit->m_additional_weight < (float)-1.0f)
+                outfit_weaight = outfit->m_additional_weight;
+            if (outfit->m_additional_weight2 > 0.0f && outfit->m_additional_weight2 < (float)-1.0f)
                 outfit_weaight = outfit->m_additional_weight2;
 
             u32 artefact_count = outfit->get_artefact_count();
