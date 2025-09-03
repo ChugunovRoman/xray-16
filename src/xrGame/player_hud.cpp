@@ -601,6 +601,9 @@ void attachable_hud_item::set_idle_anm_for_second_model()
         return;
     if (!m_parent_hud_item)
         return;
+    CWeapon* wpn = smart_cast<CWeapon*>(m_parent_hud_item);
+    if (!wpn || !wpn->bUseAttachmentSystem)
+        return;
 
     u8 rnd_idx_2 = u8(-1);
     const CMotionDef* md2 = NULL;
@@ -613,6 +616,10 @@ void attachable_hud_item::set_idle_anm_for_second_model()
     }
     if (!anm)
         anm_name = "anm_idle_0";
+    anm = m_hand_motions.find_motion(anm_name);
+    if (!anm)
+        return;
+
     anim_play(anm_name, false, md2, rnd_idx_2, m_model_2, true);
 }
 void attachable_hud_item::calc_addon_aim_offset()
