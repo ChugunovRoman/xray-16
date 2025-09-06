@@ -275,7 +275,11 @@ void CDialogHolder::UpdateCursorVisibility()
     {
         auto& cursor = GetUICursor();
         const bool cursor_is_visible = cursor.IsVisible();
-        const bool need_cursor = TopInputReceiver() && TopInputReceiver()->NeedCursor();
+        bool need_cursor = false;
+        CUIDialogWnd* TIR = TopInputReceiver();
+
+        if (TIR)
+            need_cursor = TIR->NeedCursor();
 
         const u32 cur_time = Device.dwTimeContinual;
 
