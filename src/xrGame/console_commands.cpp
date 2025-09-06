@@ -564,6 +564,26 @@ public:
     }
 };
 
+class CCC_PrintNpcProfiles : public IConsole_Command
+{
+public:
+    CCC_PrintNpcProfiles(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = TRUE; };
+    virtual void Execute(LPCSTR args)
+    {
+        for (auto it : Dbg.profiles)
+        {
+            xr_string icons = "";
+
+            for (shared_str ico : it.second.icons)
+            {
+                icons.append(ico.c_str());
+                icons.append(",");
+            }
+            Msg("NPC profile data, visual: %s icons: %s", it.first.c_str(), icons.c_str());
+        }
+    }
+};
+
 class CCC_Spawn : public IConsole_Command
 {
 public:
@@ -2397,6 +2417,8 @@ void CCC_RegisterCommands()
 
     CMD3(CCC_Mask, "lua_debug", &g_LuaDebug, 1);
     CMD4(CCC_Integer, "lua_dump_depth", &g_LuaDumpDepth, 0, 16);
+
+    CMD1(CCC_PrintNpcProfiles, "debug_print_npc_profiles");
 
     CMD1(CCC_LuaProfiler, CCC_LuaProfiler::COMMAND_LUA_PROFILER_STATUS);
     CMD1(CCC_LuaProfiler, CCC_LuaProfiler::COMMAND_LUA_PROFILER_START);

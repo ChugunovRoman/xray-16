@@ -79,6 +79,12 @@ enum ESectionTypeName : u32
     latest,
 };
 
+struct NpcProfile
+{
+    bool exist{false};
+    xr_vector<shared_str> icons;
+};
+
 class XRCORE_API xrDbg
 {
     xr_vector<pcstr> sections_map[0xff];
@@ -86,6 +92,8 @@ class XRCORE_API xrDbg
 public:
     xrDbg();
 
+    xr_map<shared_str, NpcProfile> profiles;
+    
     xr_vector<pcstr> GetSections(ESectionTypeName type);
 
     void ClearAll();

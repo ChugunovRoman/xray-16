@@ -96,6 +96,22 @@ void CSpecificCharacter::load_shared(LPCSTR)
 
     data()->m_sVisual = pXML->Read("visual", 0, "");
 
+    if (strstr(Core.Params, "-fillNpcProfiles"))
+    {
+        if (!Dbg.profiles[data()->m_sVisual.c_str()].exist)
+        {
+            NpcProfile profile;
+            profile.icons.push_back(data()->m_icon_name.c_str());
+            profile.exist = true;
+            Dbg.profiles[data()->m_sVisual.c_str()] = profile;
+    
+        }
+        else
+        {
+            Dbg.profiles[data()->m_sVisual.c_str()].icons.push_back(data()->m_icon_name.c_str());
+        }
+    }
+
     if (strstr(Core.Params, "-checks"))
     {
         g_checker.AddToDictLog(
