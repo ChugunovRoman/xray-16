@@ -213,7 +213,8 @@ void CSpecificCharacter::load_shared(LPCSTR)
     {
         LPCSTR visuals = pSettingsFE->r_string(full_section_id.c_str(), "visuals");
         string128 visual_item;
-        _GetItem(visuals, ::Random.randI(0, _GetItemCount(visuals)), visual_item);
+        int rand = ::Random.randI(0, _GetItemCount(visuals));
+        _GetItem(visuals, rand, visual_item);
         data()->m_sVisual = visual_item;
     }
     if (!data()->m_not_replace_money)
@@ -231,6 +232,17 @@ void CSpecificCharacter::load_shared(LPCSTR)
 
     if (pSettingsFE->section_exist(team) && pSettingsFE->line_exist(team, "names"))
         data()->m_sGameName = pSettingsFE->r_string(team, "names");
+
+    if (pSettings->section_exist(data()->m_sVisual.c_str()))
+    {
+        if (pSettings->line_exist(data()->m_sVisual.c_str() , "icons"))
+        {
+            LPCSTR icons = pSettings->r_string(data()->m_sVisual.c_str(), "icons");
+            string128 icon;
+            _GetItem(icons, ::Random.randI(0, _GetItemCount(icons)), icon);
+            data()->m_icon_name = icon;
+        }
+    }
 
 #if 0
 	Msg			("CSpecificCharacter::load_shared() takes %f milliseconds",timer.GetElapsed_sec()*1000.f);
