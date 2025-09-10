@@ -433,6 +433,8 @@ void CSE_ALifeObject::STATE_Read(NET_Packet& tNetPacket, u16 size)
         u32 dwDummy;
         tNetPacket.r_u32(dwDummy);
         m_bDirectControl = !!dwDummy;
+        if (!m_bDirectControl)
+            Msg("CSE_ALifeObject::STATE_Read object: %s m_bDirectControl: %d", name_replace(), m_bDirectControl);
     }
 
     if (m_wVersion >= 8)
