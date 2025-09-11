@@ -84,4 +84,7 @@ public:
     pcstr GetDebugType() override { return "CDialogHolder"; }
     bool FillDebugTree(const CUIDebugState& debugState) override;
     void FillDebugInfo() override;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

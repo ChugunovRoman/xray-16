@@ -7,11 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "xrServer_Objects.h"
 #include "PHNetState.h"
 #include "xrServer_script_macroses.h"
 #include "script_ini_file.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
 pcstr get_section_name(const CSE_Abstract* abstract) { return (abstract->name()); }
 pcstr get_name(const CSE_Abstract* abstract) { return (abstract->name_replace()); }
@@ -51,7 +51,7 @@ struct CSEAbstractWrapperBase : public T, public luabind::wrap_base
     }
 };
 
-SCRIPT_EXPORT(CPureServerObject, (),
+void CPureServerObject::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -62,9 +62,9 @@ SCRIPT_EXPORT(CPureServerObject, (),
         class_<CPureServerObject, IPureServerObject>("cpure_server_object")
         //			.def(		constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_Abstract, (CPureServerObject),
+void CSE_Abstract::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -73,6 +73,8 @@ SCRIPT_EXPORT(CSE_Abstract, (CPureServerObject),
 
     module(luaState)
     [
+        def("script_server_object_version", &script_server_object_version),
+
         class_<CSE_Abstract, CPureServerObject, default_holder, WrapType>("cse_abstract")
             .def_readonly("id", &BaseType::ID)
             .def_readonly("parent_id", &BaseType::ID_Parent)
@@ -89,9 +91,9 @@ SCRIPT_EXPORT(CSE_Abstract, (CPureServerObject),
             .def("UPDATE_Write", &BaseType::UPDATE_Write, &WrapType::UPDATE_Write_static)
             //			.def(		constructor<pcstr>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_Shape, (),
+void CSE_Shape::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -100,9 +102,9 @@ SCRIPT_EXPORT(CSE_Shape, (),
         class_<CSE_Shape>("cse_shape")
         //			.def(		constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_Visual, (),
+void CSE_Visual::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -112,9 +114,9 @@ SCRIPT_EXPORT(CSE_Visual, (),
         //			.def(		constructor<>())
         //			.def(		constructor<pcstr>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_Motion, (),
+void CSE_Motion::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -124,9 +126,9 @@ SCRIPT_EXPORT(CSE_Motion, (),
         //			.def(		constructor<>())
         //			.def(		constructor<pcstr>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_Spectator, (CSE_Abstract),
+void CSE_Spectator::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -134,9 +136,9 @@ SCRIPT_EXPORT(CSE_Spectator, (CSE_Abstract),
     [
         luabind_class_abstract1(CSE_Spectator, "cse_spectator", CSE_Abstract)
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_Temporary, (CSE_Abstract),
+void CSE_Temporary::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -144,4 +146,4 @@ SCRIPT_EXPORT(CSE_Temporary, (CSE_Abstract),
     [
         luabind_class_abstract1(CSE_Temporary, "cse_temporary", CSE_Abstract)
     ];
-});
+}

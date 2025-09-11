@@ -314,4 +314,7 @@ public:
     static xr_string sanitize_filename(const xr_string& base_name);
 //-------------------------------------------------------------------------------------------------
 #include "game_cl_mp_messages_menu.h"
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(game_GameState);
 };

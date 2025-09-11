@@ -1,10 +1,10 @@
 #include "pch_script.h"
+
 #include "HairsZone.h"
 #include "AmebaZone.h"
 #include "NoGravityZone.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CHairsZone, (CGameObject),
+void CHairsZone::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -17,4 +17,4 @@ SCRIPT_EXPORT(CHairsZone, (CGameObject),
         class_<CNoGravityZone,CGameObject>("CNoGravityZone")
             .def(constructor<>())
     ];
-});
+}

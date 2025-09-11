@@ -20,4 +20,7 @@ protected:
     virtual void PlayAnimShow();
     virtual void PlayAnimHide();
     virtual void PlayAnimBore();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponShotgun);
 };

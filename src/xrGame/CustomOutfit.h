@@ -6,7 +6,6 @@ struct SBoneProtections;
 
 class CCustomOutfit : public CInventoryItemObject
 {
-    friend void CCustomOutfit_Export(lua_State* luaState);
     using inherited = CInventoryItemObject;
 
 public:
@@ -84,4 +83,7 @@ public:
 
 protected:
     virtual bool install_upgrade_impl(LPCSTR section, bool test);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

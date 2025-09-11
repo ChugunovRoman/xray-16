@@ -19,7 +19,6 @@
 #include "UIDragDropReferenceList.h"
 #include "UICellCustomItems.h"
 #include "xrScriptEngine/script_engine.hpp"
-#include "xrScriptEngine/ScriptExporter.hpp"
 #include "xrUICore/TabControl/UITabControl.h"
 #include "xrGame/ui/UIMainIngameWnd.h"
 #include "eatable_item.h"
@@ -120,7 +119,7 @@ void CUIActorMenu::CurModeToScript()
 template<class T>
 class enum_dummy {};
 
-SCRIPT_EXPORT(CUIActorMenu, (CUIDialogWnd),
+void CUIActorMenu::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -152,52 +151,8 @@ SCRIPT_EXPORT(CUIActorMenu, (CUIDialogWnd),
             .def("IsShown", &CUIActorMenu::IsShown)
             .def("ShowDialog", &CUIActorMenu::ShowDialog)
             .def("HideDialog", &CUIActorMenu::HideDialog)
-            .def("ToSlot", +[](CUIActorMenu* self, CScriptGameObject* GO,  const bool force_place, u16 slot_id) -> bool {
-              CInventoryItem* iitem = smart_cast<CInventoryItem*>(GO->object().dcast_GameObject());
-
-              if (!iitem || !self->m_pActorInvOwner->inventory().InRuck(iitem))
-                  return false;
-
-              CUIDragDropListEx* invlist = self->GetListByType(iActorBag);
-              CUICellContainer* c = invlist->GetContainer();
-              CUIWindow::WINDOW_LIST child_list = c->GetChildWndList();
-
-              for (auto& it : child_list)
-              {
-                  CUICellItem* i = static_cast<CUICellItem*>(it);
-                  const PIItem pitm = static_cast<PIItem>(i->m_pData);
-                  if (pitm == iitem)
-                  {
-                      self->ToSlot(i, force_place, slot_id);
-                      return true;
-                  }
-              }
-
-              return false;
-            })
-            .def("ToBelt", +[](CUIActorMenu* self, CScriptGameObject* GO, const bool b_use_cursor_pos) -> bool {
-              CInventoryItem* iitem = smart_cast<CInventoryItem*>(GO->object().dcast_GameObject());
-
-            if (!iitem || !self->m_pActorInvOwner->inventory().InRuck(iitem))
-              return false;
-
-            CUIDragDropListEx* invlist = self->GetListByType(iActorBag);
-            CUICellContainer* c = invlist->GetContainer();
-            CUIWindow::WINDOW_LIST child_list = c->GetChildWndList();
-
-              for (auto& it : child_list)
-              {
-                  CUICellItem* i = static_cast<CUICellItem*>(it);
-                  const PIItem pitm = static_cast<PIItem>(i->m_pData);
-                  if (pitm == iitem)
-                  {
-                      self->ToBelt(i, b_use_cursor_pos);
-                      return true;
-                  }
-              }
-
-            return false;
-            })
+            .def("ToSlot", &CUIActorMenu::ToSlotScript)
+            .def("ToBelt", &CUIActorMenu::ToBeltScript)
             .def("SetMenuMode", &CUIActorMenu::SetMenuMode)
             .def("GetMenuMode", &CUIActorMenu::GetMenuMode)
             .def("GetPartner", +[](CUIActorMenu* self) -> CScriptGameObject* {
@@ -232,26 +187,8 @@ SCRIPT_EXPORT(CUIActorMenu, (CUIDialogWnd),
             })
             .def("SetActor", +[](CUIActorMenu* self) {
               self->SetActor(Actor()->cast_inventory_owner());
-            })
-    ];
+            }),
 
-    using namespace luabind;
-
-    module(luaState, "ActorMenu")
-    [
-        def("get_pda_menu", +[](){ return &CurrentGameUI()->GetPdaMenu(); }),
-        def("get_actor_menu", +[](){ return &CurrentGameUI()->GetActorMenu(); }),
-        def("get_menu_mode", +[](){ return CurrentGameUI()->GetActorMenu().GetMenuMode(); }),
-        def("get_maingame", +[](){ return CurrentGameUI()->UIMainIngameWnd; })
-    ];
-});
-
-SCRIPT_EXPORT(CUIPdaWnd, (CUIDialogWnd),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
         class_<CUIPdaWnd, CUIDialogWnd>("CUIPdaWnd")
             .def(constructor<>())
             .def("IsShown", &CUIPdaWnd::IsShown)
@@ -263,4 +200,12 @@ SCRIPT_EXPORT(CUIPdaWnd, (CUIDialogWnd),
             .def("GetActiveSection", &CUIPdaWnd::GetActiveSection)
             .def("GetTabControl", &CUIPdaWnd::GetTabControl)
     ];
-});
+
+    module(luaState, "ActorMenu")
+    [
+        def("get_pda_menu", +[](){ return &CurrentGameUI()->GetPdaMenu(); }),
+        def("get_actor_menu", +[](){ return &CurrentGameUI()->GetActorMenu(); }),
+        def("get_menu_mode", +[](){ return CurrentGameUI()->GetActorMenu().GetMenuMode(); }),
+        def("get_maingame", +[](){ return CurrentGameUI()->UIMainIngameWnd; })
+    ];
+}

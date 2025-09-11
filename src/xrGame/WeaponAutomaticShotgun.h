@@ -37,4 +37,7 @@ protected:
     ESoundTypes m_eSoundOpen;
     ESoundTypes m_eSoundAddCartridge;
     ESoundTypes m_eSoundClose;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponMagazined);
 };

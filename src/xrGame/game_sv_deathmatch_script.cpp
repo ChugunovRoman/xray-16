@@ -12,7 +12,7 @@ struct CGameSvDeathmatchWrapperBase : T, luabind::wrap_base
     //	DEFINE_LUA_WRAPPER_METHOD_1(Money_SetStart, void, u32)
 };
 
-SCRIPT_EXPORT(game_sv_Deathmatch, (game_sv_GameState),
+void game_sv_Deathmatch::script_register(lua_State* luaState)
 {
     using BaseType = game_sv_Deathmatch;
     using WrapType = CGameSvDeathmatchWrapperBase<game_sv_Deathmatch>;
@@ -27,4 +27,4 @@ SCRIPT_EXPORT(game_sv_Deathmatch, (game_sv_GameState),
             .def("type_name", &BaseType::type_name, &WrapType::type_name_static)
         //			.def("Money_SetStart",		&WrapType::Money_SetStart,		&WrapType::Money_SetStart_static)
     ];
-});
+}

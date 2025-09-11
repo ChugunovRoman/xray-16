@@ -1,17 +1,16 @@
 #include "pch_script.h"
+
+#include "xrUICore/Static/UIStatic.h"
+
 #include "UIGameCustom.h"
 #include "Level.h"
-#include "xrUICore/Static/UIStatic.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CUIGameCustom, (CDialogHolder),
+void CUIGameCustom::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
     module(luaState)
     [
-        def("get_hud", +[]() -> CUIGameCustom* { return CurrentGameUI(); }),
-
         class_<StaticDrawableWrapper>("StaticDrawableWrapper")
             .def_readwrite("m_endTime", &StaticDrawableWrapper::m_endTime)
             .def("wnd", &StaticDrawableWrapper::wnd),
@@ -36,6 +35,8 @@ SCRIPT_EXPORT(CUIGameCustom, (CDialogHolder),
             .def("hide_messages", &CUIGameCustom::HideMessagesWindow)
             .def("GetCustomStatic", &CUIGameCustom::GetCustomStatic)
             .def("update_fake_indicators", &CUIGameCustom::update_fake_indicators)
-            .def("enable_fake_indicators", &CUIGameCustom::enable_fake_indicators)
+            .def("enable_fake_indicators", &CUIGameCustom::enable_fake_indicators),
+
+        def("get_hud", +[]() -> CUIGameCustom* { return CurrentGameUI(); })
     ];
-});
+}

@@ -7,24 +7,21 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "movement_manager_space.h"
 #include "alife_monster_movement_manager.h"
 #include "alife_monster_detail_path_manager.h"
 #include "alife_monster_patrol_path_manager.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-CALifeMonsterDetailPathManager* get_detail(const CALifeMonsterMovementManager* self) { return (&self->detail()); }
-CALifeMonsterPatrolPathManager* get_patrol(const CALifeMonsterMovementManager* self) { return (&self->patrol()); }
-
-SCRIPT_EXPORT(CALifeMonsterMovementManager, (),
+void CALifeMonsterMovementManager::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
     module(luaState)
     [
         class_<CALifeMonsterMovementManager>("CALifeMonsterMovementManager")
-            .def("detail", &get_detail)
-            .def("patrol", &get_patrol)
+            .def("detail", +[](const CALifeMonsterMovementManager* self) { return (&self->detail()); })
+            .def("patrol", +[](const CALifeMonsterMovementManager* self) { return (&self->patrol()); })
             .def("path_type", (void (CALifeMonsterMovementManager::*)(const MovementManager::EPathType&))(
                                   &CALifeMonsterMovementManager::path_type))
             .def("path_type", (const MovementManager::EPathType& (CALifeMonsterMovementManager::*)()
@@ -32,4 +29,4 @@ SCRIPT_EXPORT(CALifeMonsterMovementManager, (),
             .def("actual", &CALifeMonsterMovementManager::actual)
             .def("completed", &CALifeMonsterMovementManager::completed)
     ];
-});
+}

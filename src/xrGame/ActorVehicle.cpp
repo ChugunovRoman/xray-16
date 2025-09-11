@@ -29,9 +29,9 @@ void CActor::attach_Vehicle(CHolderCustom* vehicle)
     if(!vehicle || m_holder)
         return;
 
-	CCar* car = smart_cast<CCar*>(vehicle);
-	if (!car)
-		return;
+    CCar* car = smart_cast<CCar*>(vehicle);
+    if (!car)
+        return;
 
     //PickupModeOff();
     m_holder=vehicle;

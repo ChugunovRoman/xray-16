@@ -4,7 +4,6 @@
 #include "xrServer.h"
 #include "xrMessages.h"
 #include "game_cl_base.h"
-#include "PHCommander.h"
 #include "NET_Queue.h"
 #include "MainMenu.h"
 #include "space_restriction_manager.h"
@@ -21,6 +20,7 @@
 #include "xrNetServer/NET_Messages.h"
 
 #include "xrPhysics/PhysicsCommon.h"
+#include "xrPhysics/PHCommander.h"
 
 const int max_objects_size = 2 * 1024;
 const int max_objects_size_in_save = 8 * 1024;

@@ -28,7 +28,6 @@ target_sources_grouped(
     TARGET xrAICore
     NAME "AI\\Component\\ProblemSolver\\ConditionState\\ScriptWorldState"
     FILES
-    Components/script_world_state.h
     Components/script_world_state_script.cpp
 )
 
@@ -52,8 +51,6 @@ target_sources_grouped(
     TARGET xrAICore
     NAME "AI\\Component\\ProblemSolver\\OperatorCondition\\ScriptWorldProperty"
     FILES
-    Components/script_world_property.h
-    Components/script_world_property_inline.h
     Components/script_world_property_script.cpp
 )
 

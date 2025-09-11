@@ -1,113 +1,68 @@
 #pragma once
+
 #include "xrScriptEngine.hpp"
 
-struct lua_State;
+#include <array>
 
-namespace XRay
+namespace xray::script_export
 {
-class XRSCRIPTENGINE_API ScriptExporter
+class XRSCRIPTENGINE_API node;
+
+using export_func = void(*)(lua_State* luaState);
+using dependencies_getter = std::pair<const node* const*, size_t>(*)();
+
+class XRSCRIPTENGINE_API node
 {
+    node(const node&) = delete;
+    node(node&&) = delete;
+
+    node& operator=(const node&) = delete;
+    node& operator=(node&&) = delete;
+
 public:
-    class XRSCRIPTENGINE_API Node
-    {
-    public:
-        using ExporterFunc = void(__cdecl*)(lua_State* luaState);
+    node(export_func export_func, dependencies_getter deps_getter);
+    ~node();
 
-    private:
-        const char* id;
-        size_t depCount;
-        const char* const* deps;
-        ExporterFunc exporterFunc;
-        bool done;
-        Node* prevNode;
-        Node* nextNode;
-        static Node* firstNode;
-        static Node* lastNode;
-        static size_t nodeCount;
+    static void export_all(lua_State* luaState);
 
-    public:
-        Node(const char* id, size_t depCount, const char* const* deps, ExporterFunc exporterFunc);
-        ~Node();
+private:
+    static void sort();
 
-        void Export(lua_State* luaState);
-        void Reset() { done = false; }
-        const char* GetId() const { return id; }
-        size_t GetDependencyCount() const { return depCount; }
-        const char* const* GetDependencyIds() const { return deps; }
-        Node* GetPrev() const { return prevNode; }
-        Node* GetNext() const { return nextNode; }
-        static Node* GetFirst() { return firstNode; }
-        static Node* GetLast() { return lastNode; }
-        static size_t GetCount() { return nodeCount; }
-    private:
-        bool HasDependency(const Node* node) const;
-        static void InsertAfter(Node* target, Node* node);
-    };
+    static node* first_node;
 
-    ScriptExporter() = delete;
-    static void Export(lua_State* luaState);
-    static void Reset();
+    node* m_next_node{};
+    export_func m_export_func{};
+    dependencies_getter m_deps_getter{};
 };
+
+namespace detail
+{
+template <typename... Args>
+auto get_dependencies()
+{
+    static const std::array<const node*, sizeof...(Args)> dependencies
+    {
+        Args::script_export_node()...
+    };
+    return std::pair<const node* const*, size_t>
+    {
+        dependencies.data(),
+        dependencies.size()
+    };
 }
+} // namespace detail
+} // namespace xray::::script_export
 
-#define NOOP(...) __VA_ARGS__
-#define GLUE(x, y) x y
-#define ARG_COUNT(_1, _2, _3, _4, count, ...) count
-#define EXPAND_ARGS(args) ARG_COUNT args
-#define ARG_COUNT_4(...) EXPAND_ARGS((__VA_ARGS__, 4, 3, 2, 1, 0))
-#define OVERLOAD_MACRO2(name, count) name##count
-#define OVERLOAD_MACRO1(name, count) OVERLOAD_MACRO2(name, count)
-#define OVERLOAD_MACRO(name, count) OVERLOAD_MACRO1(name, count)
-#define CALL_OVERLOAD(name, ...) GLUE(OVERLOAD_MACRO(name, ARG_COUNT_4(__VA_ARGS__)), (__VA_ARGS__))
-
-#define SCRIPT_INHERIT1(_1) #_1
-#define SCRIPT_INHERIT2(_1, _2) #_1, #_2
-#define SCRIPT_INHERIT3(_1, _2, _3) #_1, #_2, #_3
-#define SCRIPT_INHERIT4(_1, _2, _3, _4) #_1, #_2, #_3, #_4
-#define SCRIPT_INHERIT(...) CALL_OVERLOAD(SCRIPT_INHERIT, __VA_ARGS__)
-
-#define SCRIPT_EXPORT_WRAP(id, dependencies, ...)                                                                 \
-    \
-namespace XRay                                                                                                    \
-    \
-{                                                                                                          \
-        \
-namespace ScriptExportDetails                                                                                     \
-        \
-{                                                                                                      \
-            __pragma(warning(push)) __pragma(warning(disable : 4003)) static const char* const id##_Deps[] = {    \
-                nullptr, SCRIPT_INHERIT(NOOP dependencies)};                                                      \
-            __pragma(warning(pop)) __pragma(optimize("s", on)) static void id##_ScriptExport(lua_State* luaState) \
-                __VA_ARGS__ static const ScriptExporter::Node id##_ScriptExporterNode(                            \
-                    #id, sizeof(id##_Deps) / sizeof(*id##_Deps) - 1, id##_Deps + 1, id##_ScriptExport);           \
-        \
-}                                                                                                      \
-    \
-}
-
-#define SCRIPT_EXPORT_FUNC_WRAP(id, dependencies, func)                                                           \
-    \
-namespace XRay                                                                                                    \
-    \
-{                                                                                                          \
-        \
-namespace ScriptExportDetails                                                                                     \
-        \
-{                                                                                                      \
-            __pragma(warning(push)) __pragma(warning(disable : 4003)) static const char* const id##_Deps[] = {    \
-                nullptr, SCRIPT_INHERIT(NOOP dependencies)};                                                      \
-            __pragma(warning(pop)) __pragma(optimize("s", on)) static void id##_ScriptExport(lua_State* luaState) \
-            {                                                                                                     \
-                func(luaState);                                                                                   \
-            }                                                                                                     \
-            static const ScriptExporter::Node id##_ScriptExporterNode(                                            \
-                #id, sizeof(id##_Deps) / sizeof(*id##_Deps) - 1, id##_Deps + 1, id##_ScriptExport);               \
-        \
-}                                                                                                      \
-    \
-}
-
-// register script exporter (accepts function body)
-#define SCRIPT_EXPORT(id, dependencies, ...) SCRIPT_EXPORT_WRAP(id, dependencies, __VA_ARGS__)
-// register script exporter (accepts function)
-#define SCRIPT_EXPORT_FUNC(id, dependencies, func) SCRIPT_EXPORT_FUNC_WRAP(id, dependencies, func)
+#define DECLARE_SCRIPT_REGISTER_FUNCTION(...)                          \
+    static void script_register(lua_State* luaState);                  \
+    template <typename... Args>                                        \
+    friend auto xray::script_export::detail::get_dependencies();       \
+    static const xray::script_export::node* script_export_node()       \
+    {                                                                  \
+        return &m_script_export_node;                                  \
+    }                                                                  \
+    inline static const xray::script_export::node m_script_export_node \
+    {                                                                  \
+        &script_register,                                              \
+        xray::script_export::detail::get_dependencies<__VA_ARGS__>     \
+    }

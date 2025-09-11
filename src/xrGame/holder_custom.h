@@ -65,4 +65,7 @@ public:
     virtual void Action(u16 id, u32 flags){};
     virtual void SetParam(int id, Fvector2 val){};
     virtual void SetParam(int id, Fvector val){};
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

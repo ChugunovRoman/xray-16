@@ -98,6 +98,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 class CSE_ALifeItem : public CSE_ALifeDynamicObjectVisual, public CSE_ALifeInventoryItem
@@ -122,6 +125,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeDynamicObjectVisual, CSE_ALifeInventoryItem);
 };
 
 class CSE_ALifeItemTorch : public CSE_ALifeItem
@@ -146,6 +152,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItem);
 };
 
 class CSE_ALifeItemAmmo : public CSE_ALifeItem
@@ -166,6 +175,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItem);
 };
 
 class CSE_ALifeItemWeapon : public CSE_ALifeItem
@@ -246,6 +258,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItem);
 };
 
 class CSE_ALifeItemWeaponMagazined : public CSE_ALifeItemWeapon
@@ -263,6 +278,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItemWeapon);
 };
 
 class CSE_ALifeItemWeaponMagazinedWGL : public CSE_ALifeItemWeaponMagazined
@@ -280,6 +298,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItemWeaponMagazined);
 };
 
 class CSE_ALifeItemWeaponShotGun : public CSE_ALifeItemWeaponMagazined
@@ -297,6 +318,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItemWeapon);
 };
 
 class CSE_ALifeItemWeaponAutoShotGun : public CSE_ALifeItemWeaponShotGun
@@ -313,6 +337,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItemWeapon);
 };
 
 class CSE_ALifeItemDetector : public CSE_ALifeItem
@@ -330,6 +357,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItem);
 };
 
 class CSE_ALifeItemArtefact : public CSE_ALifeItem
@@ -346,6 +376,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItem);
 };
 
 class CSE_ALifeItemPDA : public CSE_ALifeItem
@@ -364,6 +397,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItem);
 };
 
 class CSE_ALifeItemDocument : public CSE_ALifeItem
@@ -378,6 +414,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItem);
 };
 
 class CSE_ALifeItemGrenade : public CSE_ALifeItem
@@ -394,6 +433,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItem);
 };
 
 class CSE_ALifeItemExplosive : public CSE_ALifeItem
@@ -408,6 +450,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItem);
 };
 
 class CSE_ALifeItemBolt : public CSE_ALifeItem
@@ -430,6 +475,9 @@ public:
     virtual void STATE_Write(NET_Packet& P);
     virtual void OnEvent(NET_Packet& /*tNetPacket*/, u16 /*type*/, u32 /*time*/, ClientID /*sender*/);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItem);
 };
 
 class CSE_ALifeItemCustomOutfit : public CSE_ALifeItem
@@ -447,6 +495,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItem);
 };
 
 class CSE_ALifeItemHelmet : public CSE_ALifeItem
@@ -462,6 +513,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeItem);
 };
 
 #pragma warning(pop)

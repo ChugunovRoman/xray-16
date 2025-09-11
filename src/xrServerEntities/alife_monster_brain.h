@@ -57,7 +57,6 @@ public:
 
 public:
     void update(const bool forced = false);
-    void update_script() { this->update(true); }
     bool perform_attack();
     ALife::EMeetActionType action_type(
         CSE_ALifeSchedulable* tpALifeSchedulable, const int& iGroupIndex, const bool& bMutualDetection);
@@ -67,6 +66,9 @@ public:
     IC movement_manager_type& movement() const;
     CSE_ALifeSmartZone& smart_terrain();
     IC void can_choose_alife_tasks(bool value);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "alife_monster_brain_inline.h"

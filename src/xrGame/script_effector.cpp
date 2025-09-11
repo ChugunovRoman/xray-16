@@ -7,11 +7,18 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+
 #include "script_effector.h"
 #include "Actor.h"
 #include "ActorEffector.h"
 
-CScriptEffector::~CScriptEffector() { Msg("CScriptEffector::~CScriptEffector() called"); }
+CScriptEffector::~CScriptEffector()
+{
+#ifdef DEBUG
+    Log("CScriptEffector::~CScriptEffector() called");
+#endif
+}
+
 bool CScriptEffector::Process(SPPInfo& pp) { return (!!process(&pp)); }
 bool CScriptEffector::process(SPPInfo* pp) { return (!!inherited::Process(*pp)); }
 void CScriptEffector::Add() { Actor()->Cameras().AddPPEffector(this); }

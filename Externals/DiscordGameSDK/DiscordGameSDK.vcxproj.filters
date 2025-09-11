@@ -60,7 +60,4 @@
       <UniqueIdentifier>{2074231d-b44a-4fd4-a569-01e1d1303636}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
-  <ItemGroup>
-    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\discord_game_sdk.dll" />
-  </ItemGroup>
 </Project>

@@ -11,6 +11,8 @@
 #include "xrAICore/Navigation/game_graph_space.h"
 #include "xrAICore/Navigation/PatrolPath/patrol_path.h"
 
+#include "xrScriptEngine/ScriptExporter.hpp"
+
 class CPatrolPath;
 class CPatrolPathStorage;
 
@@ -38,6 +40,9 @@ public:
     bool flag(u32 index, u8 flag_index) const;
     Flags32 flags(u32 index) const;
     bool terminal(u32 index) const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "xrAICore/Navigation/PatrolPath/patrol_path_params_inline.h"

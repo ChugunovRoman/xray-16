@@ -1,8 +1,8 @@
 #include "pch_script.h"
-#include "fracture.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CFracture, (CGameObject),
+#include "fracture.h"
+
+void CFracture::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -11,4 +11,4 @@ SCRIPT_EXPORT(CFracture, (CGameObject),
         class_<CFracture, CGameObject>("CFracture")
             .def(constructor<>())
     ];
-});
+}

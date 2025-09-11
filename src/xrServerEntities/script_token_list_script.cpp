@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "script_token_list.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptTokenList, (),
+#include "script_token_list.h"
+
+void CScriptTokenList::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -28,4 +28,4 @@ SCRIPT_EXPORT(CScriptTokenList, (),
             .def("clear", &CScriptTokenList::clear)
             .def("id", &CScriptTokenList::id)
             .def("name", &CScriptTokenList::name)];
-});
+}

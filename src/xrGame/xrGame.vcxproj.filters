@@ -2047,9 +2047,6 @@
     <Filter Include="Physics\CharacterSupport\interactive_anims">
       <UniqueIdentifier>{0c046796-e4c9-4297-9421-3ac357864e14}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Physics\PHCommander">
-      <UniqueIdentifier>{d04f4571-bedc-4927-9b28-e0c0e659aafe}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Physics\DamagableItem">
       <UniqueIdentifier>{c95f3f47-da51-41f0-82c0-7efba6382172}</UniqueIdentifier>
     </Filter>
@@ -2067,9 +2064,6 @@
     </Filter>
     <Filter Include="Physics\MovementControl">
       <UniqueIdentifier>{d559c651-5980-4621-8d74-09ea88469ff1}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Physics\scripts">
-      <UniqueIdentifier>{66d4d9cb-fbc2-4e9a-8483-4eb5c1738ed9}</UniqueIdentifier>
     </Filter>
     <Filter Include="ScriptClasses">
       <UniqueIdentifier>{ab1b2732-d901-4a34-ba14-eaf215d9bd6d}</UniqueIdentifier>
@@ -2152,14 +2146,8 @@
     <Filter Include="ScriptClasses\ScriptNetPacket">
       <UniqueIdentifier>{809e504b-a9aa-414d-9340-974bf409d048}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ScriptClasses\ScriptRenderDevice">
-      <UniqueIdentifier>{078eb1f4-96f0-4ca0-b580-a649b7d8ecdb}</UniqueIdentifier>
-    </Filter>
     <Filter Include="ScriptClasses\ScriptSoundInfo">
       <UniqueIdentifier>{0db7dc10-e1ad-4a8d-a173-8831662a2508}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="ScriptClasses\ScriptSoundType">
-      <UniqueIdentifier>{246a7da2-6c1f-4bb8-9583-284e9ab2bf5a}</UniqueIdentifier>
     </Filter>
     <Filter Include="ScriptClasses\UI">
       <UniqueIdentifier>{b08ee833-e28c-4687-b6b5-0907349836ab}</UniqueIdentifier>
@@ -2170,14 +2158,8 @@
     <Filter Include="ScriptClasses\ScriptFS">
       <UniqueIdentifier>{ef5a4212-e157-425e-b5d5-87e90474397d}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ScriptClasses\Console">
-      <UniqueIdentifier>{e256099f-7f69-49b3-900a-087c7fde9645}</UniqueIdentifier>
-    </Filter>
     <Filter Include="ScriptClasses\BaseClientClasses">
       <UniqueIdentifier>{9902c3e6-be5f-44b6-b539-cca3243e5e07}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="ScriptClasses\ScriptLAnim">
-      <UniqueIdentifier>{0b7f91ec-8546-438f-9598-b42cc9f39725}</UniqueIdentifier>
     </Filter>
     <Filter Include="ScriptClasses\ScriptFcolor">
       <UniqueIdentifier>{735fa48e-0a26-4a28-993c-166e47ac4a79}</UniqueIdentifier>
@@ -6096,18 +6078,6 @@
     <ClInclude Include="physics_shell_animated.h">
       <Filter>Physics\CharacterSupport\interactive_anims</Filter>
     </ClInclude>
-    <ClInclude Include="PHCommander.h">
-      <Filter>Physics\PHCommander</Filter>
-    </ClInclude>
-    <ClInclude Include="PHReqComparer.h">
-      <Filter>Physics\PHCommander</Filter>
-    </ClInclude>
-    <ClInclude Include="PHScriptCall.h">
-      <Filter>Physics\PHCommander</Filter>
-    </ClInclude>
-    <ClInclude Include="PHSimpleCalls.h">
-      <Filter>Physics\PHCommander</Filter>
-    </ClInclude>
     <ClInclude Include="DamagableItem.h">
       <Filter>Physics\DamagableItem</Filter>
     </ClInclude>
@@ -6197,18 +6167,6 @@
     </ClInclude>
     <ClInclude Include="PHMovementControl.h">
       <Filter>Physics\MovementControl</Filter>
-    </ClInclude>
-    <ClInclude Include="physics_element_scripted.h">
-      <Filter>Physics\scripts</Filter>
-    </ClInclude>
-    <ClInclude Include="physics_joint_scripted.h">
-      <Filter>Physics\scripts</Filter>
-    </ClInclude>
-    <ClInclude Include="physics_shell_scripted.h">
-      <Filter>Physics\scripts</Filter>
-    </ClInclude>
-    <ClInclude Include="physics_world_scripted.h">
-      <Filter>Physics\scripts</Filter>
     </ClInclude>
     <ClInclude Include="ui\ChangeWeatherDialog.hpp">
       <Filter>UI\Multiplayer\Voting</Filter>
@@ -7654,14 +7612,8 @@
     <ClCompile Include="..\xrServerEntities\script_net_packet_script.cpp">
       <Filter>ScriptClasses\ScriptNetPacket</Filter>
     </ClCompile>
-    <ClCompile Include="script_render_device_script.cpp">
-      <Filter>ScriptClasses\ScriptRenderDevice</Filter>
-    </ClCompile>
     <ClCompile Include="script_sound_info_script.cpp">
       <Filter>ScriptClasses\ScriptSoundInfo</Filter>
-    </ClCompile>
-    <ClCompile Include="..\xrServerEntities\script_sound_type_script.cpp">
-      <Filter>ScriptClasses\ScriptSoundType</Filter>
     </ClCompile>
     <ClCompile Include="ScriptXMLInit.cpp">
       <Filter>ScriptClasses\UI</Filter>
@@ -7675,14 +7627,8 @@
     <ClCompile Include="fs_registrator_script.cpp">
       <Filter>ScriptClasses\ScriptFS</Filter>
     </ClCompile>
-    <ClCompile Include="console_registrator_script.cpp">
-      <Filter>ScriptClasses\Console</Filter>
-    </ClCompile>
     <ClCompile Include="base_client_classes_script.cpp">
       <Filter>ScriptClasses\BaseClientClasses</Filter>
-    </ClCompile>
-    <ClCompile Include="script_lanim.cpp">
-      <Filter>ScriptClasses\ScriptLAnim</Filter>
     </ClCompile>
     <ClCompile Include="..\xrServerEntities\script_fcolor_script.cpp">
       <Filter>ScriptClasses\ScriptFcolor</Filter>
@@ -7930,6 +7876,9 @@
     <ClCompile Include="ActorCondition.cpp">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClCompile>
+    <ClCompile Include="ActorCondition_script.cpp">
+      <Filter>Core\Client\Objects\actor\base</Filter>
+    </ClCompile>
     <ClCompile Include="ActorInput.cpp">
       <Filter>Core\Client\Objects\actor\base</Filter>
     </ClCompile>
@@ -7950,9 +7899,6 @@
     </ClCompile>
     <ClCompile Include="entity_alive.cpp">
       <Filter>Core\Client\Objects\base\EntityAlive</Filter>
-    </ClCompile>
-    <ClCompile Include="EntityCondition_script.cpp">
-      <Filter>Core\Client\Objects\base\EntityCondition</Filter>
     </ClCompile>
     <ClCompile Include="EntityCondition.cpp">
       <Filter>Core\Client\Objects\base\EntityCondition</Filter>
@@ -8821,9 +8767,6 @@
     <ClCompile Include="..\xrServerEntities\xrServer_Objects_ALife_Items_script2.cpp">
       <Filter>Core\Server\ServerEntities\objects_alife_items</Filter>
     </ClCompile>
-    <ClCompile Include="..\xrServerEntities\xrServer_Objects_ALife_Items_script3.cpp">
-      <Filter>Core\Server\ServerEntities\objects_alife_items</Filter>
-    </ClCompile>
     <ClCompile Include="..\xrServerEntities\xrServer_Objects_ALife_Monsters.cpp">
       <Filter>Core\Server\ServerEntities\objects_alife_monsters</Filter>
     </ClCompile>
@@ -9100,9 +9043,6 @@
     <ClCompile Include="ui\UIDialogWnd.cpp">
       <Filter>UI\UIWindows\Windows</Filter>
     </ClCompile>
-    <ClCompile Include="ui\UIWindow_script.cpp">
-      <Filter>UI\UIWindows\Windows</Filter>
-    </ClCompile>
     <ClCompile Include="ui\UIScriptWnd.cpp">
       <Filter>UI\UIWindows\ScriptWnd</Filter>
     </ClCompile>
@@ -9373,18 +9313,6 @@
     <ClCompile Include="physics_shell_animated.cpp">
       <Filter>Physics\CharacterSupport\interactive_anims</Filter>
     </ClCompile>
-    <ClCompile Include="PHCommander.cpp">
-      <Filter>Physics\PHCommander</Filter>
-    </ClCompile>
-    <ClCompile Include="PHScriptCall.cpp">
-      <Filter>Physics\PHCommander</Filter>
-    </ClCompile>
-    <ClCompile Include="PHSimpleCalls.cpp">
-      <Filter>Physics\PHCommander</Filter>
-    </ClCompile>
-    <ClCompile Include="PHSimpleCallsScript.cpp">
-      <Filter>Physics\PHCommander</Filter>
-    </ClCompile>
     <ClCompile Include="DamagableItem.cpp">
       <Filter>Physics\DamagableItem</Filter>
     </ClCompile>
@@ -9462,18 +9390,6 @@
     </ClCompile>
     <ClCompile Include="PHMovementDynamicActivate.cpp">
       <Filter>Physics\MovementControl</Filter>
-    </ClCompile>
-    <ClCompile Include="physics_element_scripted.cpp">
-      <Filter>Physics\scripts</Filter>
-    </ClCompile>
-    <ClCompile Include="physics_joint_scripted.cpp">
-      <Filter>Physics\scripts</Filter>
-    </ClCompile>
-    <ClCompile Include="physics_shell_scripted.cpp">
-      <Filter>Physics\scripts</Filter>
-    </ClCompile>
-    <ClCompile Include="physics_world_scripted.cpp">
-      <Filter>Physics\scripts</Filter>
     </ClCompile>
     <ClCompile Include="ui\ChangeWeatherDialog.cpp">
       <Filter>UI\Multiplayer\Voting</Filter>

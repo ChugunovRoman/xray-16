@@ -12,7 +12,6 @@
 #include "ai_space.h"
 #include "xrCore/ModuleLookup.hpp"
 #include "xrScriptEngine/script_engine.hpp"
-#include "xrScriptEngine/ScriptExporter.hpp"
 #include "xrServerEntities/script_token_list.h"
 
 struct CChooseType
@@ -57,7 +56,7 @@ IPropHelper& PHelper()
     return _PHelper();
 }
 
-SCRIPT_EXPORT(CScriptPropertiesListHelper, (),
+void CScriptPropertiesListHelper::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -341,4 +340,4 @@ SCRIPT_EXPORT(CScriptPropertiesListHelper, (),
             return (g_property_list_helper);
         })
     ];
-});
+}

@@ -7,17 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "alife_monster_patrol_path_manager.h"
 #include "xrAICore/Navigation/PatrolPath/patrol_path.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-Fvector CALifeMonsterPatrolPathManager__target_position(CALifeMonsterPatrolPathManager* self)
-{
-    THROW(self);
-    return self->target_position();
-}
-
-SCRIPT_EXPORT(CALifeMonsterPatrolPathManager, (),
+void CALifeMonsterPatrolPathManager::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -42,6 +36,6 @@ SCRIPT_EXPORT(CALifeMonsterPatrolPathManager, (),
                                        &CALifeMonsterPatrolPathManager::use_randomness))
             .def("target_game_vertex_id", &CALifeMonsterPatrolPathManager::target_game_vertex_id)
             .def("target_level_vertex_id", &CALifeMonsterPatrolPathManager::target_level_vertex_id)
-            .def("target_position", &CALifeMonsterPatrolPathManager__target_position)
+            .def("target_position", +[](const CALifeMonsterPatrolPathManager* self) { return self->target_position(); })
     ];
-});
+}

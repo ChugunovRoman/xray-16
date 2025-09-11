@@ -39,6 +39,9 @@ public:
     IC void SetAnimation(LPCSTR caAnimationToPlay);
     IC void SetMentalState(MonsterSpace::EMentalState tMentalState);
     IC void initialize();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_animation_action_inline.h"

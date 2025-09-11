@@ -11,9 +11,11 @@
 #include "xrAICore/Navigation/game_graph_space.h"
 #include "xrAICore/Navigation/game_level_cross_table.h"
 
+#include "xrScriptEngine/ScriptExporter.hpp"
+
 constexpr cpcstr GRAPH_NAME = "game.graph";
 
-class CGameGraph
+class XRAICORE_API CGameGraph
 {
 private:
     friend class CRenumbererConverter;
@@ -74,6 +76,9 @@ public:
     IC _GRAPH_ID vertex_id(const CGameVertex* vertex) const;
     IC void set_current_level(u32 level_id);
     IC const _GRAPH_ID& current_level_vertex() const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "xrAICore/Navigation/game_graph_inline.h"

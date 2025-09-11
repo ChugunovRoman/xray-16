@@ -193,6 +193,8 @@ protected:
     void update_tips();
     void select_for_filter(pcstr filter_str, const vecTips& in_v, vecTipsEx& out_v);
 
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 }; // class CConsole
 
 ENGINE_API extern CConsole* Console;

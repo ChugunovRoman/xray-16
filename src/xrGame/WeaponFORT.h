@@ -11,4 +11,7 @@ protected:
 public:
     CWeaponFORT() {}
     virtual ~CWeaponFORT() {}
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponMagazined);
 };

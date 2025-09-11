@@ -137,4 +137,7 @@ protected:
     Flags16 m_flags;
     bool m_just_after_spawn;
     bool m_activated;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

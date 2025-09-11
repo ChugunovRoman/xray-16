@@ -1,11 +1,10 @@
 #pragma once
-#include "xrCore/xrCore.h"
-#include "xrScriptEngine/xrScriptEngine.hpp"
+
+#include "xrScriptEngine.hpp"
 #include "script_debugger_messages.hpp"
 
 class CScriptProcess;
 class CScriptDebugger;
-struct lua_State;
 
 class XRSCRIPTENGINE_API CDbgScriptThreads
 {

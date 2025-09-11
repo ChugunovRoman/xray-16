@@ -1,4 +1,5 @@
 #include "pch_script.h"
+
 #include "Weapon.h"
 #include "WeaponMagazined.h"
 #include "WeaponMagazinedWGrenade.h"
@@ -34,9 +35,8 @@
 #include "BottleItem.h"
 #include "ExplosiveItem.h"
 #include "InventoryBox.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CWeapon, (CGameObject),
+void CWeapon::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -46,9 +46,9 @@ SCRIPT_EXPORT(CWeapon, (CGameObject),
             .def(constructor<>())
             .def("can_kill", (bool (CWeapon::*)() const)&CWeapon::can_kill)
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponMagazined, (CWeapon),
+void CWeaponMagazined::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -57,9 +57,9 @@ SCRIPT_EXPORT(CWeaponMagazined, (CWeapon),
         class_<CWeaponMagazined, CWeapon>("CWeaponMagazined")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponMagazinedWGrenade, (CWeaponMagazined),
+void CWeaponMagazinedWGrenade::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -68,9 +68,9 @@ SCRIPT_EXPORT(CWeaponMagazinedWGrenade, (CWeaponMagazined),
         class_<CWeaponMagazinedWGrenade, CWeaponMagazined>("CWeaponMagazinedWGrenade")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponBinoculars, (CWeaponMagazined),
+void CWeaponBinoculars::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -79,20 +79,31 @@ SCRIPT_EXPORT(CWeaponBinoculars, (CWeaponMagazined),
         class_<CWeaponBinoculars, CWeaponMagazined>("CWeaponBinoculars")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CBolt, (CGameObject),
+void CBolt::script_register(lua_State* luaState)
+{
+    using namespace luabind;
+
+    module(luaState)
+     [
+        class_<CBolt, CGameObject>("CBolt")
+            .def(constructor<>())
+    ];
+}
+
+void CWeaponShotgun::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
     module(luaState)
     [
-        class_<CBolt, CGameObject>("CBolt")
+        class_<CWeaponShotgun, CWeaponMagazined>("CWeaponShotgun")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponBM16, (CWeaponShotgun),
+void CWeaponBM16::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -101,9 +112,9 @@ SCRIPT_EXPORT(CWeaponBM16, (CWeaponShotgun),
         class_<CWeaponBM16, CWeaponShotgun>("CWeaponBM16")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponFN2000, (CWeaponMagazined),
+void CWeaponFN2000::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -112,9 +123,9 @@ SCRIPT_EXPORT(CWeaponFN2000, (CWeaponMagazined),
         class_<CWeaponFN2000, CWeaponMagazined>("CWeaponFN2000")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponFORT, (CWeaponMagazined),
+void CWeaponFORT::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -123,9 +134,9 @@ SCRIPT_EXPORT(CWeaponFORT, (CWeaponMagazined),
         class_<CWeaponFORT, CWeaponMagazined>("CWeaponFORT")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CF1, (CGameObject, CExplosive),
+void CF1::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -149,9 +160,9 @@ SCRIPT_EXPORT(CF1, (CGameObject, CExplosive),
         class_<CExplosiveItem, bases<CGameObject, CExplosive>>("CExplosiveItem")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponHPSA, (CWeaponMagazined),
+void CWeaponHPSA::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -160,9 +171,9 @@ SCRIPT_EXPORT(CWeaponHPSA, (CWeaponMagazined),
         class_<CWeaponHPSA, CWeaponMagazined>("CWeaponHPSA")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponKnife, (CWeapon),
+void CWeaponKnife::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -171,9 +182,9 @@ SCRIPT_EXPORT(CWeaponKnife, (CWeapon),
         class_<CWeaponKnife, CWeapon>("CWeaponKnife")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponLR300, (CWeaponMagazined),
+void CWeaponLR300::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -182,9 +193,9 @@ SCRIPT_EXPORT(CWeaponLR300, (CWeaponMagazined),
         class_<CWeaponLR300, CWeaponMagazined>("CWeaponLR300")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponPM, (CWeaponMagazined),
+void CWeaponPM::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -193,9 +204,9 @@ SCRIPT_EXPORT(CWeaponPM, (CWeaponMagazined),
         class_<CWeaponPM, CWeaponMagazined>("CWeaponPM")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CRGD5, (CGameObject, CExplosive),
+void CRGD5::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -204,9 +215,9 @@ SCRIPT_EXPORT(CRGD5, (CGameObject, CExplosive),
         class_<CRGD5, bases<CGameObject, CExplosive>>("CRGD5")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponRPG7, (CWeaponMagazined),
+void CWeaponRPG7::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -215,9 +226,9 @@ SCRIPT_EXPORT(CWeaponRPG7, (CWeaponMagazined),
         class_<CWeaponRPG7, CWeaponMagazined>("CWeaponRPG7")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponSVD, (CWeaponMagazined),
+void CWeaponSVD::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -226,9 +237,9 @@ SCRIPT_EXPORT(CWeaponSVD, (CWeaponMagazined),
         class_<CWeaponSVD, CWeaponMagazined>("CWeaponSVD")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponSVU, (CWeaponMagazined),
+void CWeaponSVU::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -237,9 +248,9 @@ SCRIPT_EXPORT(CWeaponSVU, (CWeaponMagazined),
         class_<CWeaponSVU, CWeaponMagazined>("CWeaponSVU")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponAK74, (CWeaponMagazinedWGrenade),
+void CWeaponAK74::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -248,9 +259,9 @@ SCRIPT_EXPORT(CWeaponAK74, (CWeaponMagazinedWGrenade),
         class_<CWeaponAK74, CWeaponMagazinedWGrenade>("CWeaponAK74")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponAutomaticShotgun, (CWeaponMagazined),
+void CWeaponAutomaticShotgun::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -259,9 +270,9 @@ SCRIPT_EXPORT(CWeaponAutomaticShotgun, (CWeaponMagazined),
         class_<CWeaponAutomaticShotgun, CWeaponMagazined>("CWeaponAutomaticShotgun")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponGroza, (CWeaponMagazinedWGrenade),
+void CWeaponGroza::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -270,9 +281,9 @@ SCRIPT_EXPORT(CWeaponGroza, (CWeaponMagazinedWGrenade),
         class_<CWeaponGroza, CWeaponMagazinedWGrenade>("CWeaponGroza")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponRG6, (CWeaponShotgun),
+void CWeaponRG6::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -281,9 +292,9 @@ SCRIPT_EXPORT(CWeaponRG6, (CWeaponShotgun),
         class_<CWeaponRG6, CWeaponShotgun>("CWeaponRG6")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponSSRS, (CWeaponMagazined),
+void CWeaponSSRS::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -292,20 +303,9 @@ SCRIPT_EXPORT(CWeaponSSRS, (CWeaponMagazined),
         class_<CWeaponSSRS, CWeaponMagazined>("CWeaponSSRS")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponShotgun, (CWeaponMagazined),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
-        class_<CWeaponShotgun, CWeaponMagazined>("CWeaponShotgun")
-            .def(constructor<>())
-    ];
-});
-
-SCRIPT_EXPORT(CWeaponUSP45, (CWeaponMagazined),
+void CWeaponUSP45::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -314,9 +314,9 @@ SCRIPT_EXPORT(CWeaponUSP45, (CWeaponMagazined),
         class_<CWeaponUSP45, CWeaponMagazined>("CWeaponUSP45")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponVal, (CWeaponMagazined),
+void CWeaponVal::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -325,9 +325,9 @@ SCRIPT_EXPORT(CWeaponVal, (CWeaponMagazined),
         class_<CWeaponVal, CWeaponMagazined>("CWeaponVal")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponVintorez, (CWeaponMagazined),
+void CWeaponVintorez::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -336,9 +336,9 @@ SCRIPT_EXPORT(CWeaponVintorez, (CWeaponMagazined),
         class_<CWeaponVintorez, CWeaponMagazined>("CWeaponVintorez")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CWeaponWalther, (CWeaponMagazined),
+void CWeaponWalther::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -347,4 +347,4 @@ SCRIPT_EXPORT(CWeaponWalther, (CWeaponMagazined),
         class_<CWeaponWalther, CWeaponMagazined>("CWeaponWalther")
             .def(constructor<>())
     ];
-});
+}

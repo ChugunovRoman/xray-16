@@ -88,6 +88,12 @@ public:
     virtual void save(NET_Packet& packet);
     virtual void load(IReader& packet);
 };
-typedef CActionPlanner<CScriptGameObject> CScriptActionPlanner;
+
+using CScriptActionPlanner = CActionPlanner<CScriptGameObject>;
+
+class CScriptActionPlannerExport
+{
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
+};
 
 #include "action_planner_inline.h"

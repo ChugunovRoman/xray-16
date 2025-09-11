@@ -1,12 +1,12 @@
 #include "pch_script.h"
+
 #include "StalkerOutfit.h"
 #include "ActorHelmet.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
 CStalkerOutfit::CStalkerOutfit() {}
 CStalkerOutfit::~CStalkerOutfit() {}
 
-SCRIPT_EXPORT(CStalkerOutfit, (CGameObject),
+void CStalkerOutfit::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -15,4 +15,4 @@ SCRIPT_EXPORT(CStalkerOutfit, (CGameObject),
         class_<CStalkerOutfit, CGameObject>("CStalkerOutfit")
             .def(constructor<>())
     ];
-});
+}

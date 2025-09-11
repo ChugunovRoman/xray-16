@@ -1,8 +1,8 @@
 #include "pch_script.h"
-#include "burer.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CBurer, (CGameObject),
+#include "burer.h"
+
+void CBurer::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -11,4 +11,4 @@ SCRIPT_EXPORT(CBurer, (CGameObject),
         class_<CBurer, CGameObject>("CBurer")
             .def(constructor<>())
     ];
-});
+}

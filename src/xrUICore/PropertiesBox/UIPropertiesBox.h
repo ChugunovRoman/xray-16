@@ -1,4 +1,5 @@
 #pragma once
+
 #include "xrUICore/Windows/UIFrameWindow.h"
 #include "xrUICore/ListBox/UIListBox.h"
 
@@ -48,4 +49,7 @@ private:
     Frect m_last_show_rect;
     CUIPropertiesBox* m_parent_sub_menu; // warning !!! dubling pointers to the same object !!!
     CUIWindow* m_item_sub_menu_initiator; // fills in ShowSubMenu
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIFrameWindow);
 };

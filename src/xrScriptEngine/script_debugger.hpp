@@ -1,13 +1,12 @@
 #pragma once
 
-#include "xrScriptEngine/xrScriptEngine.hpp"
+#include "xrScriptEngine.hpp"
 #include "script_lua_helper.hpp"
 #include "script_debugger_threads.hpp"
 #include "script_callStack.hpp"
 #include "script_debugger_messages.hpp"
 
 class CMailSlotMsg;
-struct lua_State;
 
 #define DMOD_NONE 0
 #define DMOD_STEP_INTO 1

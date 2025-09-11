@@ -7,27 +7,31 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch.hpp"
-#include "script_world_state.h"
-#include "condition_state.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptWorldState, (),
+#include "condition_state.h"
+#include "Navigation/graph_engine_space.h"
+
+#include "xrScriptEngine/script_space.hpp"
+
+namespace GraphEngineSpace
+{
+void CScriptWorldState::script_register(lua_State* luaState)
 {
     using namespace luabind;
+    using GraphEngineSpace::CWorldState;
 
     module(luaState)
     [
-        class_<CScriptWorldState>("world_state")
+        class_<CWorldState>("world_state")
             .def(constructor<>())
-            .def(constructor<CScriptWorldState>())
-            .def("add_property", (void (CScriptWorldState::*)(const CScriptWorldState::COperatorCondition&))(
-                                   &CScriptWorldState::add_condition))
-            .def("remove_property",
-              (void (CScriptWorldState::*)(const CScriptWorldState::COperatorCondition::condition_type&))(
-                  &CScriptWorldState::remove_condition))
-            .def("clear", &CScriptWorldState::clear)
-            .def("includes", &CScriptWorldState::includes)
-            .def("property", &CScriptWorldState::property)
-            .def(const_self < CScriptWorldState())
-            .def(const_self == CScriptWorldState())];
-});
+            .def(constructor<CWorldState>())
+            .def("add_property", (void (CWorldState::*)(const CWorldState::COperatorCondition&))&CWorldState::add_condition)
+            .def("remove_property", &CWorldState::remove_condition)
+            .def("clear", &CWorldState::clear)
+            .def("includes", &CWorldState::includes)
+            .def("property", &CWorldState::property)
+            .def(const_self < CWorldState())
+            .def(const_self == CWorldState())
+    ];
+}
+} // namespace GraphEngineSpace

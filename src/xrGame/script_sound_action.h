@@ -67,6 +67,9 @@ public:
     IC void SetAngles(const Fvector& tAngles);
     IC void SetSoundType(const ESoundTypes sound_type);
     IC void initialize();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_sound_action_inline.h"

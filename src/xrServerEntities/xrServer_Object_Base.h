@@ -48,6 +48,9 @@ public:
     virtual void save(IWriter& tMemoryStream);
     virtual void load(NET_Packet& tNetPacket);
     virtual void save(NET_Packet& tNetPacket);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 class CSE_Abstract : public IServerEntity, public CPureServerObject, public CScriptValueContainer
@@ -182,6 +185,9 @@ public:
     virtual CSE_ALifeSmartZone* cast_smart_zone() { return nullptr; }
     virtual CSE_ALifeOnlineOfflineGroup* cast_online_offline_group() { return nullptr; }
     virtual CSE_ALifeItemPDA* cast_item_pda() { return nullptr; }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CPureServerObject);
 };
 
 extern u16 script_server_object_version();

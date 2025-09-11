@@ -9,4 +9,7 @@ class CWeaponVintorez : public CWeaponMagazined
 public:
     CWeaponVintorez(void);
     virtual ~CWeaponVintorez(void);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponMagazined);
 };

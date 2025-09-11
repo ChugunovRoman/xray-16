@@ -1,4 +1,5 @@
 #include "pch_script.h"
+
 #include "PhysicsShellHolder.h"
 #include "xrPhysics/PhysicsShell.h"
 #include "xrMessages.h"
@@ -6,8 +7,8 @@
 #include "Include/xrRender/Kinematics.h"
 #include "xrScriptEngine/script_callback_ex.h"
 #include "Level.h"
-#include "PHCommander.h"
-#include "PHScriptCall.h"
+#include "xrPhysics/PHCommander.h"
+#include "xrPhysics/PHScriptCall.h"
 #include "CustomRocket.h"
 #include "Grenade.h"
 

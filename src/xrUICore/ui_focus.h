@@ -71,4 +71,7 @@ public:
     void FillDebugInfo() override;
 
     void DrawDebugInfo(const CUIWindow& from, const CUIWindow& to, u32 color, u32 textColor) const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

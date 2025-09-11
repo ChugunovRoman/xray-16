@@ -7,8 +7,8 @@
 
 #include <array>
 
-#include "xrEngine/Engine.h"
 #include "xrCore/clsid.h"
+#include "xrEngine/Engine.h"
 
 class IGame_Persistent;
 

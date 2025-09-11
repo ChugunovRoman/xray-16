@@ -7,8 +7,9 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
+
 #include "Common/object_type_traits.h"
+#include "base_client_classes_wrappers.h"
 
 template <typename T>
 T& set(T* self, const typename T::TYPE mask, bool value)
@@ -52,7 +53,7 @@ void one(T* self)
     self->assign(typename T::TYPE(-1));
 }
 
-SCRIPT_EXPORT(Flags8, (),
+void CScriptFlags::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -77,16 +78,8 @@ SCRIPT_EXPORT(Flags8, (),
             .def("is_any", &is_any<Flags8>)
             .def("test", &test<Flags8>)
             .def("equal", (bool(*)(Flags8*, const Flags8&))(&equal<Flags8>))
-            .def("equal", (bool(*)(Flags8*, const Flags8&, const Flags8::TYPE))(&equal<Flags8>))
-    ];
-});
+            .def("equal", (bool(*)(Flags8*, const Flags8&, const Flags8::TYPE))(&equal<Flags8>)),
 
-SCRIPT_EXPORT(Flags16, (),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
         class_<Flags16>("flags16")
             .def(constructor<>())
             .def("get", REMOVE_NOEXCEPT(&Flags16::get))
@@ -106,16 +99,8 @@ SCRIPT_EXPORT(Flags16, (),
             .def("is_any", &is_any<Flags16>)
             .def("test", &test<Flags16>)
             .def("equal", (bool (*)(Flags16*, const Flags16&))(&equal<Flags16>))
-            .def("equal", (bool (*)(Flags16*, const Flags16&, const Flags16::TYPE))(&equal<Flags16>))
-    ];
-});
+            .def("equal", (bool (*)(Flags16*, const Flags16&, const Flags16::TYPE))(&equal<Flags16>)),
 
-SCRIPT_EXPORT(Flags32, (),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
         class_<Flags32>("flags32")
             .def(constructor<>())
             .def("get", REMOVE_NOEXCEPT(&Flags32::get))
@@ -137,4 +122,4 @@ SCRIPT_EXPORT(Flags32, (),
             .def("equal", (bool(*)(Flags32*, const Flags32&))(&equal<Flags32>))
             .def("equal", (bool(*)(Flags32*, const Flags32&, const Flags32::TYPE))(&equal<Flags32>))
     ];
-});
+}

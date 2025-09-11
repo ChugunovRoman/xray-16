@@ -1,6 +1,6 @@
 #pragma once
-#include "xrScriptEngine/xrScriptEngine.hpp"
-#include "xrCore/xrCore.h"
+
+#include "xrScriptEngine.hpp"
 
 class BindingsDumper
 {

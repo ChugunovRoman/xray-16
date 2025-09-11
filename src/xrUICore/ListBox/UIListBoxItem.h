@@ -1,4 +1,5 @@
 #pragma once
+
 #include "xrUICore/Windows/UIFrameLineWnd.h"
 
 class CUIStatic;
@@ -41,4 +42,7 @@ protected:
     u32 tag;
     void* pData;
     float FieldsLength() const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIFrameLineWnd);
 };

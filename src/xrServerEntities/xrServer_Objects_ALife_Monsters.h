@@ -101,6 +101,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 class CSE_ALifeTrader : public CSE_ALifeDynamicObjectVisual, public CSE_ALifeTraderAbstract
@@ -134,6 +137,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeDynamicObjectVisual, CSE_ALifeTraderAbstract);
 };
 
 class CSE_ALifeCustomZone : public CSE_ALifeSpaceRestrictor
@@ -155,6 +161,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeDynamicObject, CSE_Shape);
 };
 
 class CSE_ALifeAnomalousZone : public CSE_ALifeCustomZone
@@ -192,6 +201,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeCustomZone);
 };
 
 class CSE_ALifeTorridZone : public CSE_ALifeCustomZone, public CSE_Motion
@@ -208,6 +220,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeCustomZone, CSE_Motion);
 };
 
 class CSE_ALifeZoneVisual : public CSE_ALifeAnomalousZone, public CSE_Visual
@@ -225,6 +240,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeAnomalousZone, CSE_Visual);
 };
 
 class CSE_ALifeCreatureAbstract : public CSE_ALifeDynamicObjectVisual
@@ -290,6 +308,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeDynamicObjectVisual);
 };
 
 class CSE_ALifeMonsterAbstract : public CSE_ALifeCreatureAbstract,
@@ -384,6 +405,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeCreatureAbstract, CSE_ALifeSchedulable);
 };
 
 class CSE_ALifeCreatureActor : public CSE_ALifeCreatureAbstract, public CSE_ALifeTraderAbstract, public CSE_PHSkeleton
@@ -436,6 +460,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeCreatureAbstract, CSE_ALifeTraderAbstract, CSE_PHSkeleton);
 };
 
 class CSE_ALifeCreatureCrow : public CSE_ALifeCreatureAbstract
@@ -451,6 +478,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeCreatureAbstract);
 };
 
 class CSE_ALifeCreaturePhantom : public CSE_ALifeCreatureAbstract
@@ -466,6 +496,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeCreatureAbstract);
 };
 
 class CSE_ALifeMonsterRat : public CSE_ALifeMonsterAbstract, public CSE_ALifeInventoryItem
@@ -511,6 +544,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeMonsterAbstract, CSE_ALifeInventoryItem);
 };
 
 class CSE_ALifeMonsterZombie : public CSE_ALifeMonsterAbstract
@@ -539,6 +575,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeMonsterAbstract);
 };
 
 class CSE_ALifeMonsterBase : public CSE_ALifeMonsterAbstract, public CSE_PHSkeleton
@@ -565,6 +604,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeMonsterAbstract, CSE_PHSkeleton);
 };
 
 class CSE_ALifePsyDogPhantom : public CSE_ALifeMonsterBase
@@ -581,6 +623,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeMonsterBase);
 };
 
 class CSE_ALifeHumanAbstract : public CSE_ALifeTraderAbstract, public CSE_ALifeMonsterAbstract
@@ -633,6 +678,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeTraderAbstract, CSE_ALifeMonsterAbstract);
 };
 
 class CSE_ALifeHumanStalker : public CSE_ALifeHumanAbstract, public CSE_PHSkeleton
@@ -652,6 +700,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeHumanAbstract, CSE_PHSkeleton);
 };
 
 class CSE_ALifeOnlineOfflineGroup : public CSE_ALifeDynamicObject,
@@ -735,6 +786,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeDynamicObject, CSE_ALifeSchedulable);
 };
 
 #pragma warning(pop)

@@ -113,7 +113,6 @@ protected:
 #endif
     CPHCommander* m_ph_commander = nullptr;
     CPHCommander* m_ph_commander_scripts = nullptr;
-    CPHCommander* m_ph_commander_physics_worldstep = nullptr;
 
     // Local events
     EVENT eChangeRP;
@@ -352,7 +351,6 @@ public:
     void script_gc(); // GC-cycle
     IC CPHCommander& ph_commander();
     IC CPHCommander& ph_commander_scripts();
-    IC CPHCommander& ph_commander_physics_worldstep();
 
     CLevel();
     virtual ~CLevel();
@@ -432,6 +430,9 @@ public:
 #ifdef DEBUG
     LevelGraphDebugRender* GetLevelGraphDebugRender() const { return levelGraphDebugRender; }
 #endif
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 // XXX nitrocaster: should not cast to inherited
@@ -483,12 +484,6 @@ IC CPHCommander& CLevel::ph_commander_scripts()
 {
     VERIFY(m_ph_commander_scripts);
     return *m_ph_commander_scripts;
-}
-
-IC CPHCommander& CLevel::ph_commander_physics_worldstep()
-{
-    VERIFY(m_ph_commander_scripts);
-    return *m_ph_commander_physics_worldstep;
 }
 
 extern bool g_bDebugEvents;

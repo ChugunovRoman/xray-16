@@ -22,4 +22,7 @@ public:
         direction = p_direction;
         time = p_time;
     }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

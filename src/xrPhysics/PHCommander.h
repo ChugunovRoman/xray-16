@@ -1,7 +1,6 @@
 #pragma once
-#ifndef PH_COMMANDER_H
-#define PH_COMMANDER_H
-#include "xrPhysics/IPHWorld.h"
+
+#include "xrCommon/xr_unordered_map.h"
 #include "xrCore/Threading/Lock.hpp"
 
 class CPHReqBase;
@@ -49,7 +48,7 @@ public:
     virtual bool obsolete() const { return false; }
 };
 
-class CPHCall
+class XRPHYSICS_API CPHCall
 {
     CPHAction* m_action;
     CPHCondition* m_condition;
@@ -69,10 +68,11 @@ public:
 
 using PHCALL_STORAGE = xr_vector<CPHCall*>;
 using PHCALL_I = PHCALL_STORAGE::iterator;
-class CPHCommander : public IPHWorldUpdateCallbck
+
+class XRPHYSICS_API CPHCommander
 {
-    Lock lock;
-    PHCALL_STORAGE m_calls;
+    Lock                             lock;
+    PHCALL_STORAGE                   m_calls;
     xr_unordered_map<CPHCall*, bool> m_callsUpdateDeferred;
 
 public:
@@ -100,7 +100,4 @@ public:
 
 private:
     void UpdateDeferred();
-    virtual void update_step() { update_threadsafety(); }
-    virtual void phys_shell_relcase(CPhysicsShell* sh);
 };
-#endif

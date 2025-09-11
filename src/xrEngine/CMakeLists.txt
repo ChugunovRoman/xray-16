@@ -29,6 +29,7 @@ target_sources_grouped(
     XR_IOConsole_callback.cpp
     XR_IOConsole_control.cpp
     XR_IOConsole_get.cpp
+    XR_IOConsole_script.cpp
 )
 
 target_sources_grouped(

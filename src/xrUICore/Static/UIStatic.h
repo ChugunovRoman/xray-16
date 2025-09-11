@@ -121,4 +121,7 @@ protected:
 public:
     CUILines* TextItemControl();
     shared_str m_stat_hint_text;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIWindow);
 };

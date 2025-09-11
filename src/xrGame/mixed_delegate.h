@@ -91,6 +91,24 @@ public:
 private:
     fastdelegate_type m_cpp_delegate;
     lua_delegate_type m_lua_delegate;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 }; // class mixed_delegate
+
+#define DEFINE_MIXED_DELEGATE_SCRIPT(type, name_str) \
+    template <> \
+    void type::script_register(lua_State* luaState) \
+    { \
+        using namespace luabind; \
+        module(luaState) \
+        [ \
+            class_<type>(name_str)\
+                .def(         constructor<>()) \
+                .def(         constructor<type::lua_object_type, type::lua_function_type>()) \
+                .def("bind",  (type::lua_bind_type)(&type::bind)) \
+                .def("clear", &type::clear) \
+        ]; \
+    }
 
 #endif //#ifndef MIXED_DELEGATE_INCLUDED

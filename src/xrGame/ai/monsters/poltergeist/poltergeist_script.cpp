@@ -1,8 +1,8 @@
 #include "pch_script.h"
-#include "poltergeist.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CPoltergeist, (CGameObject),
+#include "poltergeist.h"
+
+void CPoltergeist::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -11,4 +11,4 @@ SCRIPT_EXPORT(CPoltergeist, (CGameObject),
         class_<CPoltergeist, CGameObject>("CPoltergeist")
             .def(constructor<>())
     ];
-});
+}

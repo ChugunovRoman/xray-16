@@ -14,10 +14,8 @@
 //#include <assert.h> // ~440 - but it has no include guard! Perhaps that's intentional?
 #include <math.h>
 #include <queue> // ~360
-#include "luabind/luabind.hpp" // luabind/*, almost 5000
 #include "xrServerEntities/smart_cast.h" // a lot
 #include "xrScriptEngine/script_space_forward.hpp" // ~765 // XXX: See to it this goes to pch_script
-#include "xrScriptEngine/DebugMacros.hpp" // ~700 // XXX: See to it this goes to pch_script
 #include "Common/LevelStructure.hpp" // ~730
 #include "xrCommon/misc_math_types.h" // ~770
 #include "xrEngine/ISheduled.h" // ~740
@@ -64,7 +62,6 @@
 #include "loki/NullType.h" // only ~50, so small it's OK.
 #include "xrPhysics/PhysicsShell.h" // ~350
 #include "xrServerEntities/ShapeData.h" // ~330
-#include "xrScriptEngine/ScriptExporter.hpp" // ~330 // XXX: See to it this goes to pch_script
 #include "xrServerEntities/specific_character.h" // ~330
 #include "xrServerEntities/shared_data.h" // ~330
 #include "xrServerEntities/xml_str_id_loader.h" // ~330
@@ -102,7 +99,6 @@
 #include "xrCore/Crypto/xr_dsa_verifyer.h" // ~70, very heavy to compile
 #include "xrServerEntities/restriction_space.h" // only ~110, so small it's worth it
 #include "xrAICore/Components/condition_state.h" // only ~100, but it includes more
-//#include "xrScriptEngine/script_engine.hpp" // ~210 // XXX: See to it this goes to pch_script
 //#include "xrCore/dump_string.h" // ~260
 //#include "xrCore/Math/Random32.hpp" // ~220
 //#include "xrEngine/LightAnimLibrary.h" // ~200

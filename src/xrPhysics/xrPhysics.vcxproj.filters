@@ -121,9 +121,6 @@
     <Filter Include="physics\Base\Objects\StaticShell">
       <UniqueIdentifier>{5711bf0c-b30d-47a5-aef3-9366c2330984}</UniqueIdentifier>
     </Filter>
-    <Filter Include="physics\Base\Objects\script">
-      <UniqueIdentifier>{3a301380-824e-4e8b-a766-0fc216e31552}</UniqueIdentifier>
-    </Filter>
     <Filter Include="physics\Base\Impact">
       <UniqueIdentifier>{fe321485-7dc2-4ac0-a2b8-96c420de4247}</UniqueIdentifier>
     </Filter>
@@ -135,6 +132,9 @@
     </Filter>
     <Filter Include="physics\damage_receiver">
       <UniqueIdentifier>{633b90c0-0e90-4a1d-b5da-22e81159c94d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="physics\Base\Objects\PHCommander">
+      <UniqueIdentifier>{fe49908d-5e25-4c90-b5f7-f59ad8993975}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -306,9 +306,6 @@
     <ClCompile Include="PHStaticGeomShell.cpp">
       <Filter>physics\Base\Objects\StaticShell</Filter>
     </ClCompile>
-    <ClCompile Include="physics_scripted.cpp">
-      <Filter>physics\Base\Objects\script</Filter>
-    </ClCompile>
     <ClCompile Include="debug_output.cpp">
       <Filter>physics\Base\Debug</Filter>
     </ClCompile>
@@ -317,6 +314,24 @@
     </ClCompile>
     <ClCompile Include="collisiondamagereceiver.cpp">
       <Filter>physics\damage_receiver</Filter>
+    </ClCompile>
+    <ClCompile Include="PhysicsShellScript.cpp">
+      <Filter>physics\Base\Objects\BaseShell</Filter>
+    </ClCompile>
+    <ClCompile Include="PHWorldScript.cpp">
+      <Filter>physics\Base\Objects\World</Filter>
+    </ClCompile>
+    <ClCompile Include="PHCommander.cpp">
+      <Filter>physics\Base\Objects\PHCommander</Filter>
+    </ClCompile>
+    <ClCompile Include="PHScriptCall.cpp">
+      <Filter>physics\Base\Objects\PHCommander</Filter>
+    </ClCompile>
+    <ClCompile Include="PHSimpleCalls.cpp">
+      <Filter>physics\Base\Objects\PHCommander</Filter>
+    </ClCompile>
+    <ClCompile Include="PHSimpleCallsScript.cpp">
+      <Filter>physics\Base\Objects\PHCommander</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -575,12 +590,6 @@
     <ClInclude Include="PHStaticGeomShell.h">
       <Filter>physics\Base\Objects\StaticShell</Filter>
     </ClInclude>
-    <ClInclude Include="iphysics_scripted.h">
-      <Filter>physics\Base\Objects\script</Filter>
-    </ClInclude>
-    <ClInclude Include="physics_scripted.h">
-      <Filter>physics\Base\Objects\script</Filter>
-    </ClInclude>
     <ClInclude Include="PHImpact.h">
       <Filter>physics\Base\Impact</Filter>
     </ClInclude>
@@ -595,6 +604,18 @@
     </ClInclude>
     <ClInclude Include="SpaceUtils.h">
       <Filter>physics\Base\Objects\Utils\Math</Filter>
+    </ClInclude>
+    <ClInclude Include="PHCommander.h">
+      <Filter>physics\Base\Objects\PHCommander</Filter>
+    </ClInclude>
+    <ClInclude Include="PHReqComparer.h">
+      <Filter>physics\Base\Objects\PHCommander</Filter>
+    </ClInclude>
+    <ClInclude Include="PHScriptCall.h">
+      <Filter>physics\Base\Objects\PHCommander</Filter>
+    </ClInclude>
+    <ClInclude Include="PHSimpleCalls.h">
+      <Filter>physics\Base\Objects\PHCommander</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

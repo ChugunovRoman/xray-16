@@ -28,6 +28,10 @@
       <AdditionalDependencies>libogg_static.lib;libvorbis_static.lib;libvorbisfile.lib;OpenAL32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ImageHasSafeExceptionHandlers Condition="'$(Platform)'=='Win32'" />
     </Link>
+    <Lib>
+      <AdditionalDependencies>libogg_static.lib;libvorbis_static.lib;libvorbisfile.lib;OpenAL32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <ImageHasSafeExceptionHandlers Condition="'$(Platform)'=='Win32'" />
+    </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="OpenALDeviceList.h" />
@@ -86,14 +90,6 @@
     <ProjectReference Include="$(SolutionDir)xrMaterialSystem\xrMaterialSystem.vcxproj">
       <Project>{2c419512-6eee-4707-bc51-2e834855552e}</Project>
     </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
-    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\soft_oal.dll">
-      <FileType>Document</FileType>
-    </CopyFileToFolders>
-    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\OpenAL32.dll">
-      <FileType>Document</FileType>
-    </CopyFileToFolders>
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="..\OpenXRay.natvis" />

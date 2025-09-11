@@ -7,7 +7,6 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #pragma once
-#include "xrScriptEngine/DebugMacros.hpp" // for THROW // XXX: move debug macros to xrCore
 
 #define TEMPLATE_SPECIALIZATION template <typename _world_property>
 #define CConditionStateAbstract CConditionState<_world_property>

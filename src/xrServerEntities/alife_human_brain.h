@@ -46,6 +46,9 @@ public:
 public:
     IC object_type& object() const;
     IC object_handler_type& objects() const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CALifeMonsterBrain);
 };
 
 #include "alife_human_brain_inline.h"

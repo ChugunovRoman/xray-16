@@ -24,6 +24,9 @@ public:
     IC CScriptMonsterAction(MonsterSpace::EScriptMonsterGlobalAction action);
     IC CScriptMonsterAction(MonsterSpace::EScriptMonsterGlobalAction action, CScriptGameObject* tObj);
     void SetObject(CScriptGameObject* tObj);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_monster_action_inline.h"

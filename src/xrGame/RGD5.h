@@ -9,4 +9,7 @@ class CRGD5 : public CGrenade
 public:
     CRGD5() {}
     virtual ~CRGD5() {}
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject, CExplosive);
 };

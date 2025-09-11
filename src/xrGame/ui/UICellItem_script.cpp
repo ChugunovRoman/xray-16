@@ -4,10 +4,9 @@
 #include "xrScriptEngine/ScriptExporter.hpp"
 
 // clang-format off
-SCRIPT_EXPORT(CUICellItem, (CUIStatic),
+void CUICellItem::script_register(lua_State* luaState)
 {
     using namespace luabind;
-    using namespace luabind::policy;
 
     module(luaState)
     [
@@ -16,5 +15,5 @@ SCRIPT_EXPORT(CUICellItem, (CUIStatic),
             .def_readonly("name", &CUICellItem::m_section_id)
             .def_readwrite("prop", &CUICellItem::m_fSpawnProp)
     ];
-});
+}
 // clang-format on

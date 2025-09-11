@@ -7,12 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch.hpp"
+
 #include "ScriptEngineScript.hpp"
 #include "script_engine.hpp"
 #include "script_profiler.hpp"
 #include "script_debugger.hpp"
-#include "DebugMacros.hpp"
-#include "ScriptExporter.hpp"
 
 void LuaLog(pcstr caMessage)
 {
@@ -57,23 +56,54 @@ void FlushLogs()
 #endif
 }
 
-void verify_if_thread_is_running()
+void CScriptEngine::script_register(lua_State* luaState)
 {
-    THROW2(GEnv.ScriptEngine->current_thread(), "coroutine.yield() is called outside the LUA thread!");
+    using namespace luabind;
+
+    module(luaState)
+    [
+        def("log", &LuaLog),
+        def("error_log", &ErrorLog),
+        def("lua_error", &LuaError),
+        def("flush", &FlushLogs),
+        def("print_stack", +[]()
+        {
+            GEnv.ScriptEngine->print_stack();
+        }),
+        def("prefetch", +[](pcstr file_name)
+        {
+            GEnv.ScriptEngine->process_file(file_name);
+        }),
+        def("verify_if_thread_is_running", +[]()
+        {
+            THROW2(GEnv.ScriptEngine->current_thread(), "coroutine.yield() is called outside the LUA thread!");
+        }),
+        def("bit_and", +[](const int i, const int j)
+        {
+            return i & j;
+        }),
+        def("bit_or", +[](const int i, const int j)
+        {
+            return i | j;
+        }),
+        def("bit_xor", +[](const int i, const int j)
+        {
+            return i ^ j;
+        }),
+        def("bit_not", +[](const int i)
+        {
+            return ~i;
+        }),
+        def("editor", +[]()
+        {
+            return GEnv.ScriptEngine->is_editor();
+        }),
+        def("user_name", +[]()
+        {
+            return Core.UserName;
+        })
+    ];
 }
-
-bool is_editor()
-{
-    return GEnv.ScriptEngine->is_editor();
-}
-
-inline int bit_and(const int i, const int j) { return i & j; }
-inline int bit_or(const int i, const int j) { return i | j; }
-inline int bit_xor(const int i, const int j) { return i ^ j; }
-inline int bit_not(const int i) { return ~i; }
-inline const char* user_name() { return Core.UserName; }
-
-void prefetch_module(pcstr file_name) { GEnv.ScriptEngine->process_file(file_name); }
 
 struct profile_timer_script
 {
@@ -136,8 +166,12 @@ inline profile_timer_script operator+(const profile_timer_script& portion0, cons
     return result;
 }
 
-std::ostream& operator<<(std::ostream& os, const profile_timer_script& pt) { return os << pt.time(); }
-SCRIPT_EXPORT(CScriptEngine, (),
+std::ostream& operator<<(std::ostream& os, const profile_timer_script& pt)
+{
+    return os << pt.time();
+}
+
+void CScriptProfiler::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -155,21 +189,7 @@ SCRIPT_EXPORT(CScriptEngine, (),
             .def(tostring(self))
             .def("start", &profile_timer_script::start)
             .def("stop", &profile_timer_script::stop)
-            .def("time", &profile_timer_script::time),
-
-        def("log", &LuaLog),
-        def("error_log", &ErrorLog),
-        def("lua_error", &LuaError),
-        def("flush", &FlushLogs),
-        def("print_stack", &PrintStack),
-        def("prefetch", &prefetch_module),
-        def("verify_if_thread_is_running", &verify_if_thread_is_running),
-        def("bit_and", &bit_and),
-        def("bit_or", &bit_or),
-        def("bit_xor", &bit_xor),
-        def("bit_not", &bit_not),
-        def("editor", &is_editor),
-        def("user_name", &user_name)
+            .def("time", &profile_timer_script::time)
     ];
 
     module(luaState, "profiler")
@@ -223,4 +243,4 @@ SCRIPT_EXPORT(CScriptEngine, (),
             GEnv.ScriptEngine->m_profiler->SaveReport();
         })
     ];
-});
+}

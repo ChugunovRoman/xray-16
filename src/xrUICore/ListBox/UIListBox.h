@@ -1,4 +1,5 @@
 #pragma once
+
 #include "xrUICore/ScrollView/UIScrollView.h"
 
 class CUIListBoxItem;
@@ -50,4 +51,7 @@ protected:
     shared_str m_selection_texture;
 
     bool m_bImmediateSelection;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIScrollView);
 };

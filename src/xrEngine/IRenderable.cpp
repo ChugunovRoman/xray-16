@@ -1,7 +1,10 @@
 #include "stdafx.h"
-#include "xrCDB/ISpatial.h"
+
 #include "IRenderable.h"
-// XXX: rename this file to RenderableBase.cpp
+#include "Render.h"
+
+#include "xrCDB/ISpatial.h"
+
 RenderableBase::RenderableBase()
 {
     renderable.xform.identity();

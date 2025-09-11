@@ -129,4 +129,7 @@ private:
 
 public:
     CTraderAnimation& animation() { return (*AnimMan); }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

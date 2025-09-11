@@ -39,4 +39,7 @@ private:
 public:
     u32 m_target_node;
     bool start_threaten;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

@@ -4,8 +4,6 @@
 
 class game_sv_mp_script : public game_sv_mp
 {
-    friend void game_sv_mp_script_script_register(lua_State* luaState);
-
     using inherited = game_sv_mp;
 
 private:
@@ -36,4 +34,7 @@ protected:
     float GetHitParamsImpulse(NET_Packet* P);
     virtual void switch_Phase(u32 new_phase);
     void SpawnPlayer(ClientID id, LPCSTR N, LPCSTR SkinName, RPoint rp);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(game_sv_mp);
 };

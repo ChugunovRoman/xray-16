@@ -1,7 +1,9 @@
 #pragma once
 
-#include "xrScriptEngine/xrScriptEngine.hpp"
 #include <type_traits>
+
+#include "script_space.hpp"
+
 #include <luabind/detail/format_signature.hpp>
 
 namespace luabind

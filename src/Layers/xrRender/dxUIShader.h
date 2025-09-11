@@ -12,13 +12,14 @@ class dxUIShader : public IUIShader
     friend class CRender;
 
 public:
-
     virtual void Copy(IUIShader& _in);
     virtual void create(LPCSTR sh, LPCSTR tex = nullptr);
     virtual bool inited() { return hShader; }
     virtual void destroy();
 
+    CTexture* GetBaseTexture() const;
     bool GetBaseTextureResolution(Fvector2& res) override;
+    xrImTextureData GetImGuiTextureId() override;
 
 private:
     ref_shader hShader;

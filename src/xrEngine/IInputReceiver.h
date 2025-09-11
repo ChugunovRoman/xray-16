@@ -3,16 +3,12 @@
 //////////////////////////////////////////////////////////////////////
 
 #pragma once
-#ifndef IINPUTRECEIVERH
-#define IINPUTRECEIVERH
-#include "xrCore/_flags.h"
-#include "xrEngine/xr_level_controller.h"
 
-// fwd. decl.
-template <class T>
-struct _vector2;
-using Fvector2 = _vector2<float>;
-using Ivector2 = _vector2<int>;
+#include "xrCore/_flags.h"
+
+// despite being unused in this file, it's almost always used in IR_* functions
+// so it's logically correct to include it
+#include "xr_level_controller.h"
 
 class ENGINE_API IInputReceiver
 {
@@ -67,5 +63,3 @@ enum EControllerFlags
     ControllerInvertY,
     ControllerEnableSensors,
 };
-
-#endif

@@ -361,7 +361,7 @@ void ide::IR_OnKeyboardPress(int key)
         break;
 
     case kQUIT:
-        if (io.WantTextInput)
+        if (io.WantTextInput || Device.GetImGuiContext()->DebugItemPickerActive)
             break; // bypass to ImGui
 
         // First

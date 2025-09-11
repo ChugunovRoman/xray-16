@@ -1,8 +1,10 @@
 #include "StdAfx.h"
-#include "account_manager.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(account_manager, (),
+#include "account_manager.h"
+
+namespace gamespy_gp
+{
+void account_manager::script_register(lua_State* luaState)
 {
     using namespace luabind;
     using namespace luabind::policy;
@@ -32,68 +34,10 @@ SCRIPT_EXPORT(account_manager, (),
             .def("search_for_email", &account_manager::search_for_email)
             .def("stop_searching_email", &account_manager::stop_searching_email)
     ];
-});
+}
+} // namespace gamespy_gp
 
-SCRIPT_EXPORT(suggest_nicks_cb, (),
-{
-    using namespace luabind;
-    using namespace gamespy_gp;
-
-    module(luaState)
-    [
-        class_<suggest_nicks_cb>("suggest_nicks_cb")
-            .def(constructor<>())
-            .def(constructor<suggest_nicks_cb::lua_object_type,
-                suggest_nicks_cb::lua_function_type>())
-            .def("bind", (suggest_nicks_cb::lua_bind_type)(&suggest_nicks_cb::bind))
-            .def("clear", &suggest_nicks_cb::clear)
-    ];
-});
-
-SCRIPT_EXPORT(account_operation_cb, (),
-{
-    using namespace luabind;
-    using namespace gamespy_gp;
-
-    module(luaState)
-    [
-        class_<account_operation_cb>("account_operation_cb")
-            .def(constructor<>())
-            .def(constructor<account_operation_cb::lua_object_type,
-                account_operation_cb::lua_function_type>())
-            .def("bind", (account_operation_cb::lua_bind_type)(&account_operation_cb::bind))
-            .def("clear", &account_operation_cb::clear)
-    ];
-});
-
-SCRIPT_EXPORT(account_profiles_cb, (),
-{
-    using namespace luabind;
-    using namespace gamespy_gp;
-
-    module(luaState)
-    [
-        class_<account_profiles_cb>("account_profiles_cb")
-            .def(constructor<>())
-            .def(constructor<account_profiles_cb::lua_object_type,
-                account_profiles_cb::lua_function_type>())
-            .def("bind", (account_profiles_cb::lua_bind_type)(&account_profiles_cb::bind))
-            .def("clear", &account_profiles_cb::clear)
-    ];
-});
-
-SCRIPT_EXPORT(found_email_cb, (),
-{
-    using namespace luabind;
-    using namespace gamespy_gp;
-
-    module(luaState)
-    [
-        class_<found_email_cb>("found_email_cb")
-            .def(constructor<>())
-            .def(constructor<found_email_cb::lua_object_type,
-                found_email_cb::lua_function_type>())
-            .def("bind", (found_email_cb::lua_bind_type)(&found_email_cb::bind))
-            .def("clear", &found_email_cb::clear)
-    ];
-});
+DEFINE_MIXED_DELEGATE_SCRIPT(gamespy_gp::suggest_nicks_cb, "suggest_nicks_cb");
+DEFINE_MIXED_DELEGATE_SCRIPT(gamespy_gp::account_operation_cb, "account_operation_cb");
+DEFINE_MIXED_DELEGATE_SCRIPT(gamespy_gp::account_profiles_cb, "account_profiles_cb");
+DEFINE_MIXED_DELEGATE_SCRIPT(gamespy_gp::found_email_cb, "found_email_cb");

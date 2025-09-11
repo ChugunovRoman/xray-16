@@ -11,6 +11,7 @@
 #include "xrCore/xr_token.h"
 
 #include "xrScriptEngine/ScriptExporter.hpp"
+#include "xrScriptEngine/script_space.hpp"
 
 extern xr_vector<xr_token> VidQualityToken;
 
@@ -173,11 +174,18 @@ void CEngineAPI::CreateRendererList(const std::array<RendererModule*, 2>& module
     modes.emplace_back(nullptr, -1);
 }
 
-SCRIPT_EXPORT(CheckRendererSupport, (),
+struct CEngineAPIExport
+{
+    // Not in CEngineAPI directly due to linking problems with xrCDB
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
+};
+
+void CEngineAPIExport::script_register(lua_State* luaState)
 {
     using namespace luabind;
     module(luaState)
     [
+        def("is_enough_address_space_available", &is_enough_address_space_available),
         def("xrRender_test_r2_hw", +[](){ return true; })
     ];
-});
+}

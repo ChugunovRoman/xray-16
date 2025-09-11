@@ -8,6 +8,8 @@
 #include "xrUICore/uiabstract.h"
 #include "xrUICore/ui_debug.h"
 
+#include "xrScriptEngine/ScriptExporter.hpp"
+
 class XRUICORE_API CUIWindow : public CUIDebuggable
 {
 public:
@@ -401,6 +403,9 @@ protected:
     //для определения DoubleClick
     u32 m_dwLastClickTime;
     u32 m_dwFocusReceiveTime{};
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 XRUICORE_API bool fit_in_rect(CUIWindow* w, Frect const& vis_rect, float border = 0.0f, float dx16pos = 0.0f);

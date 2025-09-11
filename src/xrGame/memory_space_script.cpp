@@ -7,12 +7,12 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "memory_space.h"
 #include "script_game_object.h"
 #include "GameObject.h"
 #include "entity_alive.h"
 #include "danger_object.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
 CScriptGameObject* not_yet_visible_object(const MemorySpace::CNotYetVisibleObject& object)
 {
@@ -48,7 +48,7 @@ Fvector CDangerObject__position(const CDangerObject* self)
     return (self->position());
 }
 
-IC static void CMemoryInfo_Export(lua_State* luaState)
+void CMemoryInfo::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -150,5 +150,3 @@ IC static void CMemoryInfo_Export(lua_State* luaState)
             .def("dependent_object", &CDangerObject_dependent_object)
     ];
 }
-
-SCRIPT_EXPORT_FUNC(CMemoryInfo, (), CMemoryInfo_Export);

@@ -1,17 +1,15 @@
 #pragma once
 
-class CPHShell;
-class CPHShellSplitterHolder;
 #include "PHJoint.h"
 #include "PHElement.h"
 #include "PHDefs.h"
 #include "PHShellSplitter.h"
 #include "PHMoveStorage.h"
-#include "physics_scripted.h"
 
+class CPHShellSplitterHolder;
 class CPhysicsShellAnimator;
 
-class CPHShell : public CPhysicsShell, public CPHObject, public cphysics_scripted
+class CPHShell : public CPhysicsShell, public CPHObject
 {
     friend class CPHShellSplitterHolder;
     enum
@@ -294,8 +292,6 @@ private:
         return *(*elements.begin());
     }
 
-private:
-    virtual iphysics_scripted& get_scripted() { return *this; }
 public:
 #ifdef DEBUG
     virtual void dbg_draw_velocity(float scale, u32 color);

@@ -7,17 +7,17 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "script_game_object.h"
 #include "game_object_space.h"
 #include "script_ini_file.h"
 #include "sight_manager_space.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
 extern luabind::class_<CScriptGameObject>& script_register_game_object1(luabind::class_<CScriptGameObject>&);
 extern luabind::class_<CScriptGameObject>& script_register_game_object2(luabind::class_<CScriptGameObject>&);
 extern luabind::class_<CScriptGameObject>& script_register_game_object_trader(luabind::class_<CScriptGameObject>&);
 
-SCRIPT_EXPORT(CScriptGameObject, (),
+void CScriptGameObject::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -131,4 +131,4 @@ SCRIPT_EXPORT(CScriptGameObject, (),
         def("sell_condition", (void (*)(float, float))(&::sell_condition)),
         def("show_condition", &::show_condition)
     ];
-});
+}

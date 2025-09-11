@@ -93,9 +93,6 @@
     <ClCompile Include="Static\UIStatic.cpp">
       <Filter>Static</Filter>
     </ClCompile>
-    <ClCompile Include="Static\UIStatic_script.cpp">
-      <Filter>Static</Filter>
-    </ClCompile>
     <ClCompile Include="Static\UIStaticItem.cpp">
       <Filter>Static</Filter>
     </ClCompile>
@@ -120,9 +117,6 @@
     <ClCompile Include="Buttons\UIButton.cpp">
       <Filter>Buttons</Filter>
     </ClCompile>
-    <ClCompile Include="Buttons\UIButton_script.cpp">
-      <Filter>Buttons</Filter>
-    </ClCompile>
     <ClCompile Include="Buttons\UICheckButton.cpp">
       <Filter>Buttons</Filter>
     </ClCompile>
@@ -130,9 +124,6 @@
       <Filter>Buttons</Filter>
     </ClCompile>
     <ClCompile Include="ComboBox\UIComboBox.cpp">
-      <Filter>ComboBox</Filter>
-    </ClCompile>
-    <ClCompile Include="ComboBox\UIComboBox_script.cpp">
       <Filter>ComboBox</Filter>
     </ClCompile>
     <ClCompile Include="ui_base.cpp" />
@@ -146,9 +137,6 @@
       <Filter>EditBox</Filter>
     </ClCompile>
     <ClCompile Include="EditBox\UIEditBox.cpp">
-      <Filter>EditBox</Filter>
-    </ClCompile>
-    <ClCompile Include="EditBox\UIEditBox_script.cpp">
       <Filter>EditBox</Filter>
     </ClCompile>
     <ClCompile Include="EditBox\UIEditBoxEx.cpp">
@@ -172,9 +160,6 @@
     <ClCompile Include="ListBox\UIListBox.cpp">
       <Filter>ListBox</Filter>
     </ClCompile>
-    <ClCompile Include="ListBox\UIListBox_script.cpp">
-      <Filter>ListBox</Filter>
-    </ClCompile>
     <ClCompile Include="ListBox\UIListBoxItem.cpp">
       <Filter>ListBox</Filter>
     </ClCompile>
@@ -187,25 +172,16 @@
     <ClCompile Include="ProgressBar\UIProgressBar.cpp">
       <Filter>ProgressBar</Filter>
     </ClCompile>
-    <ClCompile Include="ProgressBar\UIProgressBar_script.cpp">
-      <Filter>ProgressBar</Filter>
-    </ClCompile>
     <ClCompile Include="ProgressBar\UIProgressShape.cpp">
       <Filter>ProgressBar</Filter>
     </ClCompile>
     <ClCompile Include="PropertiesBox\UIPropertiesBox.cpp">
       <Filter>PropertiesBox</Filter>
     </ClCompile>
-    <ClCompile Include="PropertiesBox\UIPropertiesBox_script.cpp">
-      <Filter>PropertiesBox</Filter>
-    </ClCompile>
     <ClCompile Include="Callbacks\UIWndCallback.cpp">
       <Filter>Callbacks</Filter>
     </ClCompile>
     <ClCompile Include="MessageBox\UIMessageBox.cpp">
-      <Filter>MessageBox</Filter>
-    </ClCompile>
-    <ClCompile Include="MessageBox\UIMessageBox_script.cpp">
       <Filter>MessageBox</Filter>
     </ClCompile>
     <ClCompile Include="ScrollBar\UIFixedScrollBar.cpp">
@@ -235,9 +211,6 @@
     <ClCompile Include="TabControl\UITabControl.cpp">
       <Filter>TabControl</Filter>
     </ClCompile>
-    <ClCompile Include="TabControl\UITabControl_script.cpp">
-      <Filter>TabControl</Filter>
-    </ClCompile>
     <ClCompile Include="TrackBar\UITrackBar.cpp">
       <Filter>TrackBar</Filter>
     </ClCompile>
@@ -253,19 +226,10 @@
     <ClCompile Include="FontManager\FontManager.cpp">
       <Filter>FontManager</Filter>
     </ClCompile>
-    <ClCompile Include="Windows\UIWindow_script.cpp">
-      <Filter>Windows</Filter>
-    </ClCompile>
-    <ClCompile Include="Options\UIOptionsManagerScript.cpp">
-      <Filter>Options</Filter>
-    </ClCompile>
     <ClCompile Include="ListWnd\UIListItemEx.cpp">
       <Filter>ListWnd</Filter>
     </ClCompile>
     <ClCompile Include="ListWnd\UIListWnd.cpp">
-      <Filter>ListWnd</Filter>
-    </ClCompile>
-    <ClCompile Include="ListWnd\UIListWnd_script.cpp">
       <Filter>ListWnd</Filter>
     </ClCompile>
     <ClCompile Include="ListWnd\UIListItem.cpp">
@@ -277,6 +241,7 @@
     <ClCompile Include="ui_styles.cpp" />
     <ClCompile Include="ui_debug.cpp" />
     <ClCompile Include="ui_focus.cpp" />
+    <ClCompile Include="ui_export_script.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="arrow\ui_arrow.h">
@@ -435,9 +400,6 @@
     </ClInclude>
     <ClInclude Include="FontManager\FontManager.h">
       <Filter>FontManager</Filter>
-    </ClInclude>
-    <ClInclude Include="Options\UIOptionsManagerScript.h">
-      <Filter>Options</Filter>
     </ClInclude>
     <ClInclude Include="ListWnd\UIListItem.h">
       <Filter>ListWnd</Filter>

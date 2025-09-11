@@ -16,4 +16,7 @@ protected:
     float m_min_speed_to_react;
     virtual bool BlowoutState();
     virtual void CheckForAwaking();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

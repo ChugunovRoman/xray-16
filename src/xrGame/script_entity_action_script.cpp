@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "script_entity_action.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptEntityAction, (),
+#include "script_entity_action.h"
+
+void CScriptEntityAction::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -37,4 +37,4 @@ SCRIPT_EXPORT(CScriptEntityAction, (),
             .def("all", (bool (CScriptEntityAction::*)())(&CScriptEntityAction::CheckIfActionCompleted))
             .def("completed", (bool (CScriptEntityAction::*)())(&CScriptEntityAction::CheckIfActionCompleted))
     ];
-});
+}

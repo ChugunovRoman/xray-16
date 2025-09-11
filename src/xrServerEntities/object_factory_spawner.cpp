@@ -9,6 +9,10 @@
 
 #include "alife_smart_terrain_registry.h"
 
+#include "xrGame/ui/UIInventoryUtilities.h"
+
+using namespace InventoryUtilities;
+
 extern CSE_Abstract* CALifeSimulator__spawn_item2(CALifeSimulator* self,
     pcstr section, const Fvector& position, u32 level_vertex_id,
     GameGraph::_GRAPH_ID game_vertex_id, ALife::_OBJECT_ID id_parent);
@@ -35,12 +39,18 @@ void CObjectFactory::init_spawn_data()
 
         SpawnCategory category = try_detect_spawn_category(kind, wpclass, clsid);
 
-        if (category >= SpawnCategory::ItemsFood && category <= SpawnCategory::ItemsUpgrades)
+        if (category >= SpawnCategory::Artefacts && category <= SpawnCategory::WeaponsMiscellaneous)
         {
-            if (pSettings->read_if_exists<bool>(name, "quest_item", false))
+            const auto width = pSettings->read_if_exists<u32>(name, "inv_grid_width", 0);
+            const auto height = pSettings->read_if_exists<u32>(name, "inv_grid_height", 0);
+
+            if (width == 0 && height == 0) // ban fake items
+                category = SpawnCategory::Unknown;
+            else if (pSettings->read_if_exists<bool>(name, "quest_item", false))
                 category = SpawnCategory::ItemsQuest;
         }
-        else if (category >= SpawnCategory::WeaponsAmmo && category <= SpawnCategory::WeaponsExplosives)
+
+        if (category >= SpawnCategory::WeaponsAmmo && category <= SpawnCategory::WeaponsExplosives)
         {
             cpcstr parent_section = pSettings->read_if_exists<pcstr>(name, "parent_section", name.c_str());
             if (parent_section != name)
@@ -215,6 +225,8 @@ void CObjectFactory::on_tool_frame()
 
     window_size.x = std::max(window_size.x, ImGui::GetContentRegionAvail().x / 3.0f);
 
+    const auto& sections = m_spawner_sections[u8(spawn_category)];
+
     // 2. Display the list of items available for spawning
     if (ImGui::BeginChild("Sections list", window_size, child_flags, window_flags))
     {
@@ -224,8 +236,6 @@ void CObjectFactory::on_tool_frame()
             DisplayLTXSections,
         };
         static int display_mode = DisplayLTXSections;
-
-        const auto& sections = m_spawner_sections[u8(spawn_category)];
 
         if (ImGui::BeginMenuBar())
         {
@@ -369,10 +379,31 @@ void CObjectFactory::on_tool_frame()
             ImGui::EndMenuBar();
         }
 
-        ImGui::TextWrapped("In the future update of the spawner you will see items icons here.");
-
         switch (where_to_spawn)
         {
+        case Spawn::NearActor:
+        case Spawn::ToInventory:
+        {
+            ImGui::PushStyleColor(ImGuiCol_Button, 0);
+
+            
+            for (const CInifile::Sect* section : sections)
+            {
+                const auto tex = InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(section->Name, "inv_icon"))->GetImGuiTextureId();
+                const float w = pSettings->read_if_exists<float>(section->Name, "inv_grid_width", 0) * ICON_GRID_WIDTH;
+                const float h = pSettings->read_if_exists<float>(section->Name, "inv_grid_height", 0) * ICON_GRID_HEIGHT;
+
+                if (fis_zero(w) || fis_zero(h))
+                    continue;
+
+                const bool spawn = ImGui::ImageButton(section->Name.c_str(), tex.texture, { w , h },
+                    { tex.size.x, tex.size.y }, { w / tex.size.x, h / tex.size.y });
+                if (spawn)
+                    spawn_section = section->Name.c_str();
+            }
+            ImGui::PopStyleColor();
+            break;
+        }
         case Spawn::OnSmart:
         {
             auto* alife = ai().get_alife();
@@ -380,7 +411,7 @@ void CObjectFactory::on_tool_frame()
 
             if (!alife || !game_graph)
             {
-                ImGui::Text("A-Life should be loaded for this spawn method to work.");
+                ImGui::TextWrapped("A-Life should be loaded for this spawn method to work.");
                 break;
             }
 
@@ -505,7 +536,7 @@ void CObjectFactory::on_tool_frame()
         {
             if (spawn_category == SpawnCategory::SquadsStalkers || spawn_category == SpawnCategory::SquadsMutants)
             {
-                
+
             }
             else if (!alife || spawn_category == SpawnCategory::CreaturesPhantoms)
             {

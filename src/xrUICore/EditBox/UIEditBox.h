@@ -27,4 +27,7 @@ public:
 protected:
     CUIFrameLineWnd* m_frameLine;
     shared_str m_opt_backup_value;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIWindow);
 };

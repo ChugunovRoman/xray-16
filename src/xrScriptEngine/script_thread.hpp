@@ -8,15 +8,13 @@
 
 #pragma once
 
-#include "xrScriptEngine/xrScriptEngine.hpp"
-#include "xrCore/xrCore.h"
+#include "xrScriptEngine.hpp"
+
 #ifdef DEBUG
 #include "script_stack_tracker.hpp"
 #endif
 
 #define LUABIND_HAS_BUGS_WITH_LUA_THREADS
-
-struct lua_State;
 
 #ifdef DEBUG
 class XRSCRIPTENGINE_API CScriptThread : public CScriptStackTracker

@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "alife_smart_terrain_task.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CALifeSmartTerrainTask, (),
+#include "alife_smart_terrain_task.h"
+
+void CALifeSmartTerrainTask::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -24,4 +24,4 @@ SCRIPT_EXPORT(CALifeSmartTerrainTask, (),
             .def("level_vertex_id", &CALifeSmartTerrainTask::level_vertex_id)
             .def("position", &CALifeSmartTerrainTask::position)
     ];
-});
+}

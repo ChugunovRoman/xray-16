@@ -65,4 +65,7 @@ protected:
     //проверка наличия/отсутствия информации
     INFO_VECTOR m_HasInfo;
     INFO_VECTOR m_DontHasInfo;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

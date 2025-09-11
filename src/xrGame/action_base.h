@@ -80,6 +80,12 @@ public:
     virtual void save(NET_Packet& packet) {}
     virtual void load(IReader& packet) {}
 };
-typedef CActionBase<CScriptGameObject> CScriptActionBase;
+
+using CScriptActionBase = CActionBase<CScriptGameObject>;
+
+class CScriptActionBaseExport
+{
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
+};
 
 #include "action_base_inline.h"

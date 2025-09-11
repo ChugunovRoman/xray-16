@@ -1,5 +1,7 @@
 #pragma once
 
+#include "xrScriptEngine.hpp"
+
 struct StackTrace
 {
     char szDesc[255];
@@ -27,8 +29,6 @@ struct Variable
         *szValue = 0;
     }
 };
-
-struct lua_State;
 
 struct SScriptThread
 {

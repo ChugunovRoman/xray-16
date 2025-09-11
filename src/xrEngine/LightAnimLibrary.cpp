@@ -3,6 +3,10 @@
 #pragma hdrstop
 
 #include "LightAnimLibrary.h"
+
+#include "xrScriptEngine/ScriptExporter.hpp"
+#include "xrScriptEngine/script_space.hpp"
+
 //---------------------------------------------------------------------------
 #define LANIM_VERSION 0x0001
 //---------------------------------------------------------------------------
@@ -339,3 +343,50 @@ void ELightAnimLibrary::RenameObject(pcstr nm0, pcstr nm1, EItemType type)
 }
 //---------------------------------------------------------------------------
 #endif
+
+struct lanim_wrapper
+{
+    CLAItem* item;
+
+public:
+    lanim_wrapper(pcstr name)
+    {
+        load(name);
+    }
+
+    void load(pcstr name)
+    {
+        item = LALib.FindItem(name);
+        R_ASSERT3(item, "Can't find color anim:", name);
+    }
+
+    u32 length() const
+    {
+        VERIFY(item);
+        return item->Length_ms();
+    }
+
+    Fcolor calculate(float T) const
+    {
+        int frame;
+        VERIFY(item);
+        return Fcolor(item->CalculateRGB(T, frame));
+    }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
+};
+
+void lanim_wrapper::script_register(lua_State* luaState)
+{
+    using namespace luabind;
+
+    module(luaState)
+    [
+        class_<lanim_wrapper>("color_animator")
+            .def(constructor<pcstr>())
+            .def("load", &lanim_wrapper::load)
+            .def("calculate", &lanim_wrapper::calculate)
+            .def("length", &lanim_wrapper::length)
+    ];
+}

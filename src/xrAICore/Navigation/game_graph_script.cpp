@@ -7,10 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch.hpp"
+
 #include "game_graph.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
-#include "xrScriptEngine/DebugMacros.hpp" // for THROW // XXX: move debug macros to xrCore
 #include "AISpaceBase.hpp"
+
+#include "xrScriptEngine/script_space.hpp"
 
 const CGameGraph* get_game_graph() { return &GEnv.AISpace->game_graph(); }
 const CGameGraph::CHeader* get_header(const CGameGraph* self_) { return (&self_->header()); }
@@ -34,7 +35,7 @@ GameGraph::LEVEL_MAP const& get_levels(CGameGraph const* graph)
     return graph->header().levels();
 }
 
-SCRIPT_EXPORT(CGameGraph, (),
+void CGameGraph::script_register(lua_State* luaState)
 {
     using namespace luabind;
     using namespace luabind::policy;
@@ -62,4 +63,4 @@ SCRIPT_EXPORT(CGameGraph, (),
             .def("level_id", &CGameVertex::level_id)
             .def("level_vertex_id", &CGameVertex::level_vertex_id)
     ];
-});
+}

@@ -37,6 +37,9 @@ public:
 private:
     xr_vector<xr_token> m_token;
     u32 m_style_id{ DEFAULT_STYLE_ID };
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 XRUICORE_API extern UIStyleManager* UIStyles;

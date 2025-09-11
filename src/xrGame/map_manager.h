@@ -38,4 +38,7 @@ public:
     void OnUIReset() override;
 
     inline static CUIXml m_uiSpotXml;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

@@ -1,13 +1,13 @@
 #include "stdafx.h"
 #pragma hdrstop
 
-#include	"Layers/xrRender/ResourceManager.h"
-#include	"Layers/xrRender/tss.h"
-#include	"Layers/xrRender/Blender.h"
-#include	"Layers/xrRender/Blender_Recorder.h"
+#include "Layers/xrRender/ResourceManager.h"
+#include "Layers/xrRender/tss.h"
+#include "Layers/xrRender/Blender.h"
+#include "Layers/xrRender/Blender_Recorder.h"
 //	adopt_compiler don't have = operator And it can't have = operator
-#include	"xrScriptEngine/script_engine.hpp"
-#include	"luabind/return_reference_to_policy.hpp"
+#include "xrScriptEngine/script_engine.hpp"
+#include "xrScriptEngine/script_space.hpp"
 #include "xrCore/Threading/ScopeLock.hpp"
 
 #ifdef	DEBUG

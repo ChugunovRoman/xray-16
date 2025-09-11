@@ -32,4 +32,7 @@ public:
     virtual void load(IReader* input_packet);
     virtual bool net_SaveRelevant();
     virtual void net_Relcase(CScriptGameObject* object);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

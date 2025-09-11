@@ -226,4 +226,7 @@ public:
     int m_sufficient_hits_before_vampire_random;
     virtual void on_attack_on_run_hit();
     bool done_enough_hits_before_vampire();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

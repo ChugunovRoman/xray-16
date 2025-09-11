@@ -818,6 +818,8 @@ public:
 
 private:
     ignored_touched_objects_type m_ignored_touched_objects;
+
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject, CScriptActionPlannerExport);
 };
 
 #include "ai_stalker_inline.h"

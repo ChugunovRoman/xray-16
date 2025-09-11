@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "property_storage.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CPropertyStorage, (),
+#include "property_storage.h"
+
+void CPropertyStorage::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -21,4 +21,4 @@ SCRIPT_EXPORT(CPropertyStorage, (),
             .def("set_property", &CPropertyStorage::set_property)
             .def("property", &CPropertyStorage::property)
     ];
-});
+}

@@ -11,9 +11,8 @@
 #include "xrNetServer/NET_Messages.h"
 
 #include "xrPhysics/IPHWorld.h"
-
-#include "PHCommander.h"
 #include "physics_game.h"
+
 extern pureFrame* g_pNetProcessor;
 
 bool CLevel::net_Start_client(const char* options) { return false; }
@@ -138,12 +137,9 @@ bool CLevel::net_start_client4()
 
         // Send physics to single or multithreaded mode
 
-        create_physics_world(!!psDeviceFlags.test(mtPhysics), &ObjectSpace, &Objects);
+        create_physics_world(psDeviceFlags.test(mtPhysics), &ObjectSpace, &Objects);
 
         R_ASSERT(physics_world());
-
-        m_ph_commander_physics_worldstep = xr_new<CPHCommander>();
-        physics_world()->set_update_callback(m_ph_commander_physics_worldstep);
 
         physics_world()->set_default_contact_shotmark(ContactShotMark);
         physics_world()->set_default_character_contact_shotmark(CharacterContactShotMark);

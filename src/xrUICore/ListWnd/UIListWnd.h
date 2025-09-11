@@ -40,8 +40,6 @@ public:
     bool AddItem(const char* str, const float shift = 0.0f, void* pData = NULL,
                  int value = 0, int insertBeforeIdx = -1);
 
-    virtual bool AddItem_script(CUIListItem* item);
-
     template <class Element>
     bool AddItem(Element* pItem, int insertBeforeIdx = -1);
 
@@ -157,6 +155,9 @@ protected:
 
     // Текущий уникальный идентификатор
     int m_iLastUniqueID;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIWindow);
 };
 
 #include "UIListWnd_inline.h"

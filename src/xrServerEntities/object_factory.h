@@ -96,6 +96,9 @@ private:
 
     std::array<CInifile::Root, CATEGORIES_COUNT> m_spawner_sections;
 #endif
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 extern CObjectFactory* g_object_factory;

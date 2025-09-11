@@ -142,6 +142,9 @@ public:
     virtual bool IsVisibleForZones() { return false; }
     virtual bool UsedAI_Locations();
     virtual void create_physic_shell();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };
 
 #endif

@@ -1,19 +1,24 @@
 #pragma once
 
+#include "Common/Noncopyable.hpp"
+
+#include "xrEngine/pure.h"
+
 #include "Physics.h"
 #include "PHUpdateObject.h"
 #include "IPHWorld.h"
-#include "Common/Noncopyable.hpp"
-#include "physics_scripted.h"
-#include "xrEngine/pure.h"
+
+#include "xrScriptEngine/ScriptExporter.hpp"
+
 // refs
 struct SGameMtlPair;
-// class	CPHCommander;
-// class	CPHCondition;
-// class	CPHAction;
+class CPHCommander;
+class CPHCondition;
+class CPHAction;
 struct SPHNetState;
 class CPHSynchronize;
 typedef xr_vector<std::pair<CPHSynchronize*, SPHNetState>> V_PH_WORLD_STATE;
+
 class CPHMesh
 {
     dGeomID Geom;
@@ -30,13 +35,12 @@ public:
 /////////////////////////////////////////////////////////////////////////////
 class CObjectSpace;
 class CObjectList;
-class CPHWorld : public pureFrame,
-                 public IPHWorld,
-                 public cphysics_scripted,
-                 private Noncopyable
+class CPHWorld final : public IPHWorld,
+                       public pureFrame,
+                       private Noncopyable
 #ifdef DEBUG
-                 ,
-                 public pureRender
+                       ,
+                       public pureRender
 #endif
 {
 private:
@@ -59,8 +63,7 @@ private:
     PH_UPDATE_OBJECT_STORAGE m_update_objects;
     PH_UPDATE_OBJECT_STORAGE m_freezed_update_objects;
     dGeomID m_motion_ray;
-    // CPHCommander				*m_commander;
-    IPHWorldUpdateCallbck* m_update_callback;
+    CPHCommander* m_commander;
     CObjectSpace* m_object_space;
     CObjectList* m_level_objects;
 
@@ -89,7 +92,6 @@ private:
 
 public:
     CPHWorld();
-    virtual ~CPHWorld(){};
 
     // IC	dSpaceID					GetSpace						()			{return Space;}	;
     IC bool Exist() { return b_exist; }
@@ -140,7 +142,8 @@ public:
         return *m_level_objects;
     }
 
-//	void						AddCall							(CPHCondition*c,CPHAction*a);
+	void AddCall(CPHCondition* c, CPHAction* a) override;
+
 #ifdef DEBUG
     virtual void OnRender();
 #endif
@@ -150,13 +153,11 @@ public:
 
 private:
     void StepNumIterations(int num_it);
-    iphysics_scripted& get_scripted() { return *this; }
     void set_step_time_callback(PhysicsStepTimeCallback* cb) { physics_step_time_callback = cb; }
-    void set_update_callback(IPHWorldUpdateCallbck* cb)
-    {
-        VERIFY(cb);
-        m_update_callback = cb;
-    }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
+
 extern XRPHYSICS_API CPHWorld* ph_world;
 IC CPHWorld& inl_ph_world() { return *ph_world; }

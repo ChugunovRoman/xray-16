@@ -7,11 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "script_sound.h"
 #include "script_game_object.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptSound, (),
+void CScriptSound::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -49,12 +49,10 @@ SCRIPT_EXPORT(CScriptSound, (),
                 (void (CScriptSound::*)(CScriptGameObject*, const Fvector&, float, int))(&CScriptSound::PlayAtPos))
             .def("play_no_feedback", &CScriptSound::PlayNoFeedback)
             .def("stop", &CScriptSound::Stop)
-            // preserved for backwards compatibility
-            // XXX: review
             .def("stop_deffered", &CScriptSound::StopDeferred)
             .def("stop_deferred", &CScriptSound::StopDeferred)
             .def("playing", &CScriptSound::IsPlaying)
             .def("length", &CScriptSound::Length)
             .def("attach_tail", &CScriptSound::AttachTail)
     ];
-});
+}

@@ -1,9 +1,9 @@
 #include "pch_script.h"
+
 #include "pseudodog.h"
 #include "psy_dog.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CAI_PseudoDog, (CGameObject),
+void CAI_PseudoDog::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -12,9 +12,9 @@ SCRIPT_EXPORT(CAI_PseudoDog, (CGameObject),
         class_<CAI_PseudoDog, CGameObject>("CAI_PseudoDog")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CPsyDog, (CGameObject),
+void CPsyDog::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -23,9 +23,9 @@ SCRIPT_EXPORT(CPsyDog, (CGameObject),
         class_<CPsyDog, CGameObject>("CPsyDog")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CPsyDogPhantom, (CGameObject),
+void CPsyDogPhantom::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -34,4 +34,4 @@ SCRIPT_EXPORT(CPsyDogPhantom, (CGameObject),
         class_<CPsyDogPhantom, CGameObject>("CPsyDogPhantom")
             .def(constructor<>())
     ];
-});
+}

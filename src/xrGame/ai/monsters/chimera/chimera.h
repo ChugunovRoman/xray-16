@@ -39,4 +39,7 @@ private:
 
 public:
     attack_params const& get_attack_params() const { return m_attack_params; }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

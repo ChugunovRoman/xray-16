@@ -41,9 +41,8 @@ public:
     BOOL m_is_combat_cover;
     BOOL m_can_fire;
     bool m_need_to_reparse_loopholes;
-#ifndef AI_COMPILER
+
     luabind::object m_available_loopholes;
-#endif // #ifndef AI_COMPILER
 
 #ifndef MASTER_GOLD
 private:
@@ -69,9 +68,8 @@ public:
     virtual bool can_switch_offline() const /* noexcept */;
     virtual bool interactive() const /* noexcept */;
     LPCSTR description() const;
-#ifndef AI_COMPILER
+
     void set_available_loopholes(luabind::object table);
-#endif // #ifndef AI_COMPILER
 
 #ifndef MASTER_GOLD
     virtual void on_render(CDUInterface* du, IServerEntityLEOwner* owner, bool bSelected,
@@ -92,6 +90,9 @@ public:
     virtual void STATE_Read(NET_Packet& P, u16 size);
     virtual void STATE_Write(NET_Packet& P);
     SERVER_ENTITY_EDITOR_METHODS
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CSE_ALifeDynamicObject);
 };
 #pragma warning(pop)
 #endif

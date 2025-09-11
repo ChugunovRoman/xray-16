@@ -8,8 +8,8 @@
 
 #pragma once
 
+#include "xrCore/PostProcess/PPInfo.hpp"
 #include "xrEngine/Effector.h"
-#include "xrEngine/CameraManager.h"
 
 class CScriptEffector : public CEffectorPP
 {
@@ -23,6 +23,9 @@ public:
     virtual bool process(SPPInfo* pp);
     virtual void Add();
     virtual void Remove();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_effector_inline.h"

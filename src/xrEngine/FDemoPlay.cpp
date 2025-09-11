@@ -191,10 +191,7 @@ void CDemoPlay::stat_Stop()
     }
 }
 
-#define FIX(a)           \
-    while (a >= m_count) \
-    a -= m_count
-void spline1(float t, Fvector* p, Fvector* ret)
+static void spline1(float t, Fvector* p, Fvector* ret)
 {
     float t2 = t * t;
     float t3 = t2 * t;
@@ -275,14 +272,23 @@ bool CDemoPlay::ProcessCam(SCamEffectorInfo& info)
             // stat_Start ();
         }
 
+        const auto clamp_by_max = [this](int& f)
+        {
+            while (f >= m_count)
+                f -= m_count;
+        };
+
         int f1 = frame;
-        FIX(f1);
+        clamp_by_max(f1);
+
         int f2 = f1 + 1;
-        FIX(f2);
+        clamp_by_max(f2);
+
         int f3 = f2 + 1;
-        FIX(f3);
+        clamp_by_max(f3);
+
         int f4 = f3 + 1;
-        FIX(f4);
+        clamp_by_max(f4);
 
         Fmatrix *m1, *m2, *m3, *m4;
         Fvector v[4];

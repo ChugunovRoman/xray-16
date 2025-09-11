@@ -89,6 +89,9 @@ public:
 
     typedef fastdelegate::FastDelegate2<CUIWindow*, CUIWindow*, bool> cmp_function;
     cmp_function m_sort_function;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIWindow);
 };
 
 #define ADD_TEXT_TO_VIEW3(txt, st, view)              \

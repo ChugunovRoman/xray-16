@@ -28,6 +28,7 @@ target_sources_grouped(
     Functor.hpp
     script_engine.cpp
     script_engine.hpp
+    script_space.hpp
     script_space_forward.hpp
     ScriptEngineScript.cpp
     ScriptEngineScript.hpp
@@ -46,10 +47,8 @@ target_sources_grouped(
     TARGET xrScriptEngine
     NAME "Kernel"
     FILES
-    DebugMacros.hpp
     pch.cpp
     pch.hpp
-    ScriptEngineConfig.hpp
     xrScriptEngine.cpp
     xrScriptEngine.hpp
 )
@@ -105,9 +104,6 @@ target_link_libraries(xrScriptEngine
 target_compile_definitions(xrScriptEngine
     PRIVATE
     XRSCRIPTENGINE_EXPORTS
-    # Uncomment next string for debug script engine
-    #CONFIG_SCRIPT_ENGINE_LOG_EXPORTS
-    #CONFIG_SCRIPT_ENGINE_LOG_SKIPPED_EXPORTS
 )
 
 set_target_properties(xrScriptEngine PROPERTIES

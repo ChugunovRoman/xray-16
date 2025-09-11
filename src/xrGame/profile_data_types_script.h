@@ -11,4 +11,9 @@
 namespace gamespy_profile
 {
 using store_operation_cb = mixed_delegate<void(bool, const char*), store_operation_cb_tag>;
+
+class profile_data_script_registrator
+{
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
+};
 }

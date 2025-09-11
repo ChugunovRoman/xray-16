@@ -7,8 +7,8 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "script_ini_file.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 #include "xrScriptEngine/Functor.hpp"
 
 bool r_line(const CScriptIniFile* self, pcstr S, int L, luabind::string& N, luabind::string& V)
@@ -85,7 +85,7 @@ void section_for_each(CScriptIniFile* self, const luabind::functor<void>& functo
 }
 //Alundaio: END
 
-static void CScriptIniFile_Export(lua_State* luaState)
+void CScriptIniFile::script_register(lua_State* luaState)
 {
     using namespace luabind;
     using namespace luabind::policy;
@@ -195,5 +195,3 @@ static void CScriptIniFile_Export(lua_State* luaState)
         )
     ];
 }
-
-SCRIPT_EXPORT_FUNC(CScriptIniFile, (), CScriptIniFile_Export);

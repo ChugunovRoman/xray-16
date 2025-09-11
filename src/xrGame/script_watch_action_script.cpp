@@ -7,12 +7,12 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "script_watch_action.h"
 #include "script_game_object.h"
 #include "sight_manager_space.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptWatchAction, (),
+void CScriptWatchAction::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -45,4 +45,4 @@ SCRIPT_EXPORT(CScriptWatchAction, (),
             .def("bone", &CScriptWatchAction::SetWatchBone)
             .def("completed", &CScriptAbstractAction::completed)
     ];
-});
+}

@@ -224,6 +224,9 @@ public:
     void OnDragEvent(CUIDragItem* drag_item, bool b_receive);
 
     pcstr GetDebugType() override { return "CUIDragDropListEx"; }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIWindow);
 };
 
 class CUICellContainer final : public CUIWindow

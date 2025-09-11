@@ -27,6 +27,9 @@
     <Link>
       <AdditionalDependencies>libogg_static.lib;libtheora_static.lib;vfw32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <Lib>
+      <AdditionalDependencies>libogg_static.lib;libtheora_static.lib;vfw32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="AccessibilityShortcuts.hpp" />
@@ -182,6 +185,7 @@
     <ClCompile Include="xr_collide_form.cpp" />
     <ClCompile Include="xr_efflensflare.cpp" />
     <ClCompile Include="xr_input.cpp" />
+    <ClCompile Include="XR_IOConsole_script.cpp" />
     <ClCompile Include="xr_level_controller.cpp" />
     <ClCompile Include="XR_IOConsole.cpp" />
     <ClCompile Include="XR_IOConsole_callback.cpp" />
@@ -237,11 +241,6 @@
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="..\OpenXRay.natvis" />
-  </ItemGroup>
-  <ItemGroup>
-    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\discord_game_sdk.dll">
-      <FileType>Document</FileType>
-    </CopyFileToFolders>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

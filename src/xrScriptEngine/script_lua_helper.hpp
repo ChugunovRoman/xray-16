@@ -1,9 +1,7 @@
 #pragma once
-#include "xrScriptEngine/xrScriptEngine.hpp"
 
-struct lua_State;
-struct Proto;
-struct lua_Debug;
+#include "xrScriptEngine.hpp"
+
 class CScriptDebugger;
 
 class XRSCRIPTENGINE_API CDbgLuaHelper

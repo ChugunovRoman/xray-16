@@ -7,9 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(Fvector, (),
+#include "base_client_classes_wrappers.h"
+
+void CScriptFvector::script_register(lua_State* luaState)
 {
     using namespace luabind;
     using namespace luabind::policy;
@@ -111,48 +112,21 @@ SCRIPT_EXPORT(Fvector, (),
             .def("getP", &Fvector::getP)
 
             .def("reflect", &Fvector::reflect, return_reference_to<1>())
-            .def("slide", &Fvector::slide, return_reference_to<1>())
+            .def("slide", &Fvector::slide, return_reference_to<1>()),
             //			.def("generate_orthonormal_basis",	&Fvector::generate_orthonormal_basis),
-    ];
-});
 
-SCRIPT_EXPORT(Fvector2, (),
-{
-    using namespace luabind;
-    using namespace luabind::policy;
-
-    module(luaState)
-    [
         class_<Fvector2>("vector2")
             .def_readwrite("x", &Fvector2::x)
             .def_readwrite("y", &Fvector2::y)
             .def(constructor<>())
             .def("set", (Fvector2 & (Fvector2::*)(float, float))(&Fvector2::set), return_reference_to<1>())
-            .def("set", (Fvector2 & (Fvector2::*)(const Fvector2&))(&Fvector2::set),
-                return_reference_to<1>())
-    ];
-});
+            .def("set", (Fvector2 & (Fvector2::*)(const Fvector2&))(&Fvector2::set), return_reference_to<1>()),
 
-SCRIPT_EXPORT(Fbox, (),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
         class_<Fbox>("Fbox")
             .def_readwrite("min", &Fbox::vMin)
             .def_readwrite("max", &Fbox::vMax)
-            .def(constructor<>())
-    ];
-});
+            .def(constructor<>()),
 
-SCRIPT_EXPORT(Frect, (),
-{
-    using namespace luabind;
-    using namespace luabind::policy;
-
-    module(luaState)
-    [
         class_<Frect>("Frect")
             .def(constructor<>())
             .def("set", (Frect& (Frect::*)(float, float, float, float))(&Frect::set), return_reference_to<1>())
@@ -163,4 +137,4 @@ SCRIPT_EXPORT(Frect, (),
             .def_readwrite("y1", &Frect::y1)
             .def_readwrite("y2", &Frect::y2)
     ];
-});
+}

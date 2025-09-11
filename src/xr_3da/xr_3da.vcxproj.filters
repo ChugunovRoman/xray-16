@@ -14,7 +14,7 @@
     <Filter Include="resources">
       <UniqueIdentifier>{ff5edb3a-265f-46de-b360-f24cfd97703c}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Dependecies">
+    <Filter Include="dependencies">
       <UniqueIdentifier>{6865aa32-039a-4a25-89fd-e1f88c548a3a}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
@@ -41,11 +41,38 @@
     <Natvis Include="..\OpenXRay.natvis" />
   </ItemGroup>
   <ItemGroup>
-    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\AnselSDK$(PlatformArchitecture).dll">
-      <Filter>Dependecies</Filter>
+    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\BugTrap.dll">
+      <Filter>dependencies</Filter>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\dbghelp.dll">
+      <Filter>dependencies</Filter>
+    </CopyFileToFolders>
+    <CopyFileToFolders Condition="'$(Platform)'=='Win32'" Include="..\..\sdk\binaries\$(PlatformShortName)\libcrypto-3.dll">
+      <Filter>dependencies</Filter>
+    </CopyFileToFolders>
+    <CopyFileToFolders Condition="'$(Platform)'=='x64'" Include="..\..\sdk\binaries\$(PlatformShortName)\libcrypto-3-x64.dll">
+      <Filter>dependencies</Filter>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\soft_oal.dll">
+      <Filter>dependencies</Filter>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\OpenAL32.dll">
+      <Filter>dependencies</Filter>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="$(WindowsSdkDir)Redist\D3D\$(PlatformShortName)\d3dcompiler_47.dll">
+      <Filter>dependencies</Filter>
     </CopyFileToFolders>
     <CopyFileToFolders Include="..\..\Externals\AGS_SDK\ags_lib\lib\amd_ags_$(PlatformShortName).dll">
-      <Filter>Dependecies</Filter>
+      <Filter>dependencies</Filter>
     </CopyFileToFolders>
+    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\discord_game_sdk.dll">
+      <Filter>dependencies</Filter>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\AnselSDK$(PlatformArchitecture).dll">
+      <Filter>dependencies</Filter>
+    </CopyFileToFolders>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
   </ItemGroup>
 </Project>

@@ -12,6 +12,7 @@
 #include "xrEProps.h"
 #include "ai_space.h"
 #include "xrScriptEngine/script_engine.hpp"
+#include "xrScriptEngine/script_space.hpp"
 #include "luabind/error.hpp"
 #ifdef XRGAME_EXPORTS
 #include "alife_smart_terrain_task.h"

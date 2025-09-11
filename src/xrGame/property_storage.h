@@ -25,6 +25,9 @@ public:
     IC void clear();
     IC void set_property(const _condition_type& condition_id, const _value_type& value);
     IC const _value_type& property(const _condition_type& condition_id) const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "property_storage_inline.h"

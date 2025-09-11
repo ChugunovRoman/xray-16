@@ -80,6 +80,9 @@ public:
     virtual void setup_physic_shell();
 
     virtual void afterDetach();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };
 
 class CNightVisionEffector

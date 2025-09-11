@@ -129,6 +129,9 @@ public:
         o_fastmode = FALSE;
         // processing_deactivate		();
     }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };
 
 struct SArtefactDetectorsSupport

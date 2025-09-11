@@ -32,4 +32,7 @@ protected:
     virtual void PlayAnimReload();
 
     shared_str m_sRocketSection;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponMagazined);
 };

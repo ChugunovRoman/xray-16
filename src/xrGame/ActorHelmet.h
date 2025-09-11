@@ -6,7 +6,6 @@ struct SBoneProtections;
 
 class CHelmet : public CInventoryItemObject
 {
-    friend void CHelmet_Export(lua_State* luaState);
     using inherited = CInventoryItemObject;
 
 public:
@@ -51,4 +50,7 @@ protected:
 
 protected:
     virtual bool install_upgrade_impl(LPCSTR section, bool test);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

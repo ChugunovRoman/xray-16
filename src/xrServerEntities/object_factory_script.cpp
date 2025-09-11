@@ -7,11 +7,12 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "object_factory.h"
-#include "ai_space.h"
-#include "xrScriptEngine/script_engine.hpp"
 #include "object_item_script.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
+#include "ai_space.h"
+
+#include "xrScriptEngine/script_engine.hpp"
 
 void CObjectFactory::register_script_class(LPCSTR client_class, LPCSTR server_class, LPCSTR clsid, LPCSTR script_clsid)
 {
@@ -79,7 +80,7 @@ void CObjectFactory::register_script() const
     luabind::module(GEnv.ScriptEngine->lua())[instance];
 }
 
-SCRIPT_EXPORT(CObjectFactory, (),
+void CObjectFactory::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -91,4 +92,4 @@ SCRIPT_EXPORT(CObjectFactory, (),
         .def("register", (void (CObjectFactory::*)(LPCSTR, LPCSTR, LPCSTR))(
                              &CObjectFactory::register_script_class))
     ];
-});
+}

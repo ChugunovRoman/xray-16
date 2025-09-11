@@ -1,9 +1,11 @@
 #include "StdAfx.h"
 #include "dcylinder/dCylinder.h"
-struct dContactGeom;
-int dCollideCylRay(dxGeom* o1, dxGeom* o2, int flags, dContactGeom* contact, int skip);
+#include "tri-colliderknoopc/dTriColliderCommon.h"
 
 #include "ode/ode/src/collision_std.h"
+
+struct dContactGeom;
+int dCollideCylRay(dxGeom* o1, dxGeom* o2, int flags, dContactGeom* contact, int skip);
 
 struct dxRayMotions
 {
@@ -17,8 +19,6 @@ struct dxRayMotions
 };
 
 int dRayMotionsClassUser = -1;
-
-#define CONTACT(p, skip) ((dContactGeom*)(((char*)p) + (skip)))
 
 int dCollideRMB(dxGeom* o1, dxGeom* o2, int flags, dContactGeom* contact, int skip)
 {

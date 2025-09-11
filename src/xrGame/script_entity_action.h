@@ -66,6 +66,9 @@ public:
     IC const CScriptObjectAction& object();
     IC const CScriptActionCondition& cond();
     IC void* data();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_entity_action_inline.h"

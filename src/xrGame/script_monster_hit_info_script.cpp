@@ -1,15 +1,15 @@
 #include "pch_script.h"
+
 #include "script_monster_hit_info.h"
 #include "script_game_object.h"
 #include "ai_monster_space.h"
 #include "ai/monsters/monster_sound_defs.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
 struct CMonsterSpace
 {
 };
 
-SCRIPT_EXPORT(CScriptMonsterHitInfo, (),
+void CScriptMonsterHitInfo::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -34,4 +34,4 @@ SCRIPT_EXPORT(CScriptMonsterHitInfo, (),
                 value("head_anim_kind", MonsterSpace::eHeadAnimKind)
             ]
     ];
-});
+}

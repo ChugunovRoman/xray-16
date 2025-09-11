@@ -7,9 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(IReader, (),
+#include "base_client_classes_wrappers.h"
+
+void CScriptReader::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -45,4 +46,4 @@ SCRIPT_EXPORT(IReader, (),
             .def("r_advance", &IReader::advance)
             .def("r_eof", &IReader::eof)
     ];
-});
+}

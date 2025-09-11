@@ -1,21 +1,24 @@
 #pragma once
 
+#include "xrCommon/misc_math_types.h" // SRotation
+
+#include "xrCore/FixedVector.h"
+
 #include "xrCDB/ISpatial.h"
 #include "ISheduled.h"
 
 #include "IRenderable.h"
 #include "ICollidable.h"
 #include "EngineAPI.h"
-#include "device.h"
 
-#include "xrServerEntities/xrServer_Space.h"
 #include "xrGame/game_object_space.h"
 #include "xrServerEntities/alife_space.h"
-#include "xrCommon/misc_math_types.h" // SRotation
+#include "xrServerEntities/xrServer_Space.h"
 
 // fwd. decl.
 class IRender_Sector;
 class IRender_ObjectSpecific;
+class IKinematics;
 class CCustomHUD;
 class NET_Packet;
 class CSE_Abstract;
@@ -34,7 +37,6 @@ class CInventoryItem;
 class CEntity;
 class CEntityAlive;
 class CActor;
-class CGameObject; // XXX: remove
 class CCustomZone;
 class CPhysicsShellHolder;
 class IInputReceiver;
@@ -246,7 +248,6 @@ public:
     virtual CEntity* cast_entity() = 0;
     virtual CEntityAlive* cast_entity_alive() = 0;
     virtual CActor* cast_actor() = 0;
-    virtual CGameObject* cast_game_object() = 0;
     virtual CCustomZone* cast_custom_zone() = 0;
     virtual CPhysicsShellHolder* cast_physics_shell_holder() = 0;
     virtual IInputReceiver* cast_input_receiver() = 0;

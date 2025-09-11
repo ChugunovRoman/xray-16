@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "ai/crow/ai_crow.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CAI_Crow, (CGameObject),
+#include "ai/crow/ai_crow.h"
+
+void CAI_Crow::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -19,4 +19,4 @@ SCRIPT_EXPORT(CAI_Crow, (CGameObject),
         class_<CAI_Crow, CGameObject>("CAI_Crow")
             .def(constructor<>())
     ];
-});
+}

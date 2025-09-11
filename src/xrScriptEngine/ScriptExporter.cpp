@@ -1,147 +1,101 @@
 #include "pch.hpp"
-#include "ScriptEngineConfig.hpp"
+
 #include "ScriptExporter.hpp"
-#include "xrCore/xrCore.h"
 
-using namespace XRay;
+#include "xrCommon/xr_unordered_map.h"
 
-ScriptExporter::Node* ScriptExporter::Node::firstNode = nullptr;
-ScriptExporter::Node* ScriptExporter::Node::lastNode = nullptr;
-size_t ScriptExporter::Node::nodeCount = 0;
-
-ScriptExporter::Node::Node(const char* id, size_t depCount, const char* const* deps, ExporterFunc exporterFunc)
+namespace xray::script_export
 {
-    this->id = id;
-    this->depCount = depCount;
-    this->deps = deps;
-    this->exporterFunc = exporterFunc;
-    done = false;
-    InsertAfter(nullptr, this);
+static size_t nodes_count = 0;
+
+node* node::first_node = nullptr;
+
+node::node(export_func export_func, dependencies_getter deps_getter)
+    : m_next_node(first_node), m_export_func(export_func), m_deps_getter(deps_getter)
+{
+    first_node = this;
+    ++nodes_count;
 }
 
-ScriptExporter::Node::~Node()
+node::~node()
 {
-    // Remap locals
-    // ... <-> N <-> this <-> N <-> ...
-    {
-        if (prevNode)
-            prevNode->nextNode = this->nextNode;
-
-        if (nextNode)
-            nextNode->prevNode = this->prevNode;
-    }
-
-    // Remap globals
-    {
-        // this <-> N <-> ...
-        if (firstNode == this)
-            firstNode = this->nextNode;
-
-        // ... <-> N <-> this
-        if (lastNode == this)
-            lastNode = this->prevNode;
-    }
-}
-
-void ScriptExporter::Node::Export(lua_State* luaState)
-{
-    if (done)
-    {
-#ifdef CONFIG_SCRIPT_ENGINE_LOG_SKIPPED_EXPORTS
-        Msg("* ScriptExporter: skipping exported node %s", id);
-#endif
-        return;
-    }
-
-    ZoneScoped;
-
-    // export dependencies recursively
-    for (size_t i = 0; i < depCount; i++)
-    {
-        // check if 'deps[i]' depends on 'node'
-        for (Node* n = GetFirst(); n; n = n->GetNext())
-        {
-            if (!n->done && !strcmp(deps[i], n->id))
-            {
-                n->Export(luaState);
-                break;
-            }
-        }
-    }
-#ifdef CONFIG_SCRIPT_ENGINE_LOG_EXPORTS
-    Msg("* ScriptExporter: exporting node %s", id);
-#endif
-    exporterFunc(luaState);
-    done = true;
-}
-
-bool ScriptExporter::Node::HasDependency(const Node* node) const
-{
-    for (size_t i = 0; i < depCount; i++)
-    {
-        if (!strcmp(deps[i], node->id))
-            return true;
-    }
-    for (size_t i = 0; i < depCount; i++)
-    {
-        // check if 'deps[i]' depends on 'node'
-        for (Node* n = GetFirst(); n; n = n->GetNext())
-        {
-            if (!strcmp(deps[i], n->id))
-            {
-                if (n->HasDependency(node))
-                    return true;
-                break;
-            }
-        }
-    }
-    return false;
-}
-
-void ScriptExporter::Node::InsertAfter(Node* target, Node* node)
-{
-    if (!target)
-    {
-        node->prevNode = nullptr;
-        node->nextNode = firstNode;
-        if (firstNode)
-            firstNode->prevNode = node;
-        else
-            lastNode = node;
-        firstNode = node;
-    }
+    if (first_node == this)
+        first_node = m_next_node;
     else
     {
-        node->prevNode = target;
-        node->nextNode = target->nextNode;
-        if (target == lastNode)
-            lastNode = node;
-        target->nextNode = node;
+        node* prev = first_node;
+        while (prev && prev->m_next_node != this)
+            prev = prev->m_next_node;
+        if (prev)
+            prev->m_next_node = m_next_node;
     }
-    nodeCount++;
 }
 
-void ScriptExporter::Export(lua_State* luaState)
+void node::sort()
 {
-    ZoneScoped;
-#ifdef CONFIG_SCRIPT_ENGINE_LOG_EXPORTS
-    Msg("* ScriptExporter: total nodes: %zu", Node::GetCount());
-    for (auto node = Node::GetFirst(); node; node = node->GetNext())
+    enum class state
     {
-        Msg("* %s", node->GetId());
-        size_t depCount = node->GetDependencyCount();
-        const char* const* depIds = node->GetDependencyIds();
-        for (int i = 0; i < depCount; i++)
-            Msg("* <- %s", depIds[i]);
+        not_visited, visiting, done
+    };
+    xr_unordered_map<const node*, state> map;
+    map.reserve(nodes_count);
+
+    for (auto n = first_node; n; n = n->m_next_node)
+        map[n] = state::not_visited;
+
+    xr_vector<node*> sorted;
+    sorted.reserve(map.size());
+
+    std::function<void(const node*)> depth_first_search = [&](const node* n)
+    {
+        const auto it = map.find(n);
+        if (it != map.end())
+        {
+            R_ASSERT2(it->second != state::visiting, "Cyclic dependency in script export!");
+            if (it->second == state::done)
+                return;
+        }
+
+        map[n] = state::visiting;
+
+        const auto& [deps, deps_count] = n->m_deps_getter();
+        for (size_t i = 0; i < deps_count; i++)
+            depth_first_search(deps[i]);
+
+        map[n] = state::done;
+        sorted.push_back(const_cast<node*>(n));
+    };
+
+    for (auto& [n, _] : map)
+        depth_first_search(n);
+
+    node* prev = nullptr;
+    for (auto it = sorted.rbegin(); it != sorted.rend(); ++it)
+    {
+        (*it)->m_next_node = prev;
+        prev = *it;
     }
-#endif
-    for (auto node = Node::GetFirst(); node; node = node->GetNext())
-        node->Export(luaState);
+    first_node = prev;
+
+    // This is always logged to help find out if some nodes are missing
+    Msg("* Script exporter has %zu nodes registered.", nodes_count);
 }
 
-void ScriptExporter::Reset()
+void node::export_all(lua_State* luaState)
 {
+    if (!first_node)
+        return;
+
     ZoneScoped;
-    for (auto node = Node::GetFirst(); node; node = node->GetNext())
-        node->Reset();
+
+    static bool sorted = false;
+    if (!sorted)
+    {
+        sort();
+        sorted = true;
+    }
+
+    for (auto node = first_node; node; node = node->m_next_node)
+        node->m_export_func(luaState);
 }
+} // namespace xray::script_export

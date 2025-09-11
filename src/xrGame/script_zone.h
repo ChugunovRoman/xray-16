@@ -35,4 +35,7 @@ public:
 #ifdef DEBUG
     virtual void OnRender();
 #endif
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

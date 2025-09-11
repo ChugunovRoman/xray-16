@@ -1,22 +1,17 @@
 #pragma once
-#include "PhysicsExternalCommon.h"
-#include "iphysics_scripted.h"
+
 #include "xrCore/FTimer.h"
 #include "xrCDB/xrCDB.h" // build_callback
+#include "PhysicsExternalCommon.h"
 
+class CObjectSpace;
+class CObjectList;
+class CGameMtlLibrary;
 class CPhysicsShell;
+class CPHCondition;
+class CPHAction;
 
-class IPHWorldUpdateCallbck
-{
-public:
-    virtual void update_step() = 0;
-    virtual void phys_shell_relcase(CPhysicsShell* sh) = 0;
-
-protected:
-    virtual ~IPHWorldUpdateCallbck() {}
-};
-
-class IPHWorld : public iphysics_scripted_class
+class IPHWorld
 {
 public:
     struct PHWorldStatistics
@@ -57,7 +52,7 @@ public:
     virtual void set_default_contact_shotmark(ContactCallbackFun* f) = 0;
     virtual void set_default_character_contact_shotmark(ContactCallbackFun* f) = 0;
     virtual void set_step_time_callback(PhysicsStepTimeCallback* cb) = 0;
-    virtual void set_update_callback(IPHWorldUpdateCallbck* cb) = 0;
+    virtual void AddCall(CPHCondition* c, CPHAction* a) = 0;
     virtual const PHWorldStatistics& GetStats() = 0;
     virtual void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert) = 0;
 #ifdef DEBUG
@@ -67,11 +62,7 @@ public:
 #endif
 };
 
-extern "C" XRPHYSICS_API IPHWorld* physics_world();
-class CObjectSpace;
-class CObjectList;
-extern "C" XRPHYSICS_API void create_physics_world(
-    bool mt, CObjectSpace* os, CObjectList* lo);
-extern "C" XRPHYSICS_API void destroy_physics_world();
-class CGameMtlLibrary;
-extern "C" XRPHYSICS_API void destroy_object_space(CObjectSpace*& os);
+XRPHYSICS_API IPHWorld* physics_world();
+XRPHYSICS_API void create_physics_world(bool mt, CObjectSpace* os, CObjectList* lo);
+XRPHYSICS_API void destroy_physics_world();
+XRPHYSICS_API void destroy_object_space(CObjectSpace*& os);

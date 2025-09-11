@@ -2,10 +2,9 @@
 
 #include "xr_level_controller.h"
 
-#include "xrScriptEngine/ScriptExporter.hpp"
+#include "xrScriptEngine/script_space.hpp"
 
-// clang-format off
-SCRIPT_EXPORT(KeyBindings, (),
+void key_binding_registrator::script_register(lua_State* luaState)
 {
     class EnumGameActionsContexts {};
     class EnumGameActions {};
@@ -557,5 +556,4 @@ SCRIPT_EXPORT(KeyBindings, (),
                 value("GAMEPAD_DPAD_TOUCHPAD",      int(XR_CONTROLLER_BUTTON_TOUCHPAD))
         ]
     ];
-});
-// clang-format on
+}

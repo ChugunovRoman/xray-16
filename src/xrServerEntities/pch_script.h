@@ -6,10 +6,8 @@
 //	Description : precompiled header for lua and luabind users
 ////////////////////////////////////////////////////////////////////////////
 
-#ifndef PCH_SCRIPT_H
-#define PCH_SCRIPT_H
+#pragma once
 
 #include "StdAfx.h"
-#include "xrScriptEngine/xrScriptEngine.hpp"
-
-#endif // PCH_SCRIPT_H
+#include "xrScriptEngine/ScriptExporter.hpp"
+#include "xrScriptEngine/script_space.hpp"

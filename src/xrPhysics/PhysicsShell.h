@@ -1,13 +1,14 @@
 #pragma once
 
+#include "xrCore/_flags.h"
+#include "xrEngine/IPhysicsShell.h"
+
 #include "PHDefs.h"
 #include "PhysicsCommon.h"
 #include "ICollideValidator.h"
 #include "xrServerEntities/alife_space.h"
-#include "xrCore/_flags.h"
 
-#include "xrEngine/IPhysicsShell.h"
-#include "iphysics_scripted.h"
+#include "xrScriptEngine/ScriptExporter.hpp"
 
 // fwd. decl.
 class CPhysicsJoint;
@@ -57,7 +58,7 @@ using BONE_P_PAIR_CIT = const BONE_P_MAP::iterator;
 class CPhysicsBase;
 extern XRPHYSICS_API void get_box(const CPhysicsBase* shell, const Fmatrix& form, Fvector& sz, Fvector& c);
 
-class XRPHYSICS_API CPhysicsBase : public iphysics_scripted_class
+class XRPHYSICS_API CPhysicsBase
 {
 public:
     Fmatrix mXFORM; // In parent space
@@ -201,6 +202,9 @@ public:
     virtual void get_Box(Fvector& sz, Fvector& c) const { return CPhysicsBase::get_Box(sz, c); }
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     virtual ~CPhysicsElement(){};
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 XRPHYSICS_API float NonElasticCollisionEnergy(
@@ -209,7 +213,7 @@ XRPHYSICS_API float NonElasticCollisionEnergy(
 // ABSTRACT:
 // Joint between two elements
 
-class XRPHYSICS_API CPhysicsJoint : public iphysics_scripted_class
+class XRPHYSICS_API CPhysicsJoint
 {
 public:
     bool bActive;
@@ -287,6 +291,9 @@ public:
     virtual bool IsHingeJoint() = 0;
     virtual void SetForce(const float force, const int axis_num = -1) = 0;
     virtual void SetVelocity(const float velocity = 0.f, const int axis_num = -1) = 0;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 // ABSTRACT:
@@ -417,6 +424,9 @@ public:
     virtual void SetPrefereExactIntegration() = 0;
     virtual ~CPhysicsShell();
     // build_FromKinematics		in returns elements  & joint pointers according bone IDs;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 struct dContact;

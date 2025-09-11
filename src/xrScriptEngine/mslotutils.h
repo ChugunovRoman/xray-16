@@ -1,4 +1,5 @@
 #pragma once
+
 #include "xrCore/xrCore.h"
 
 class CMailSlotMsg

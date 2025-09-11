@@ -18,6 +18,9 @@ struct SZoneMapEntityData
         pos.set(.0f, .0f, .0f);
         color = 0xff00ff00;
     }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 struct WeaponUsageStatistic;

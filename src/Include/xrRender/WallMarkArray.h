@@ -3,8 +3,8 @@
 #pragma once
 
 #include "FactoryPtr.h"
-#include "UIShader.h"
 
+class IUIShader;
 typedef FactoryPtr<IUIShader> wm_shader;
 
 class IWallMarkArray

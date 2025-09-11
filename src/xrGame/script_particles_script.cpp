@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "script_particles.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptParticles, (),
+#include "script_particles.h"
+
+void CScriptParticles::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -21,8 +21,6 @@ SCRIPT_EXPORT(CScriptParticles, (),
             .def("play", &CScriptParticles::Play)
             .def("play_at_pos", &CScriptParticles::PlayAtPos)
             .def("stop", &CScriptParticles::Stop)
-            // preserved for backwards compatibility
-            // XXX: review
             .def("stop_deffered", &CScriptParticles::StopDeferred)
             .def("stop_deferred", &CScriptParticles::StopDeferred)
 
@@ -40,4 +38,4 @@ SCRIPT_EXPORT(CScriptParticles, (),
             .def("stop_path", &CScriptParticles::StopPath)
             .def("pause_path", &CScriptParticles::PausePath)
     ];
-});
+}

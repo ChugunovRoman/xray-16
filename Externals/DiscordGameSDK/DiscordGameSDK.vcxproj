@@ -33,9 +33,6 @@
     <Lib>
       <AdditionalDependencies>discord_game_sdk.dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Lib>
-    <CopyFileToFolders>
-      <DestinationFolders>$(xrBinDir)</DestinationFolders>
-    </CopyFileToFolders>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="activity_manager.cpp" />
@@ -56,11 +53,6 @@
     <ClInclude Include="relationship_manager.h" />
     <ClInclude Include="types.h" />
     <ClInclude Include="user_manager.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\discord_game_sdk.dll">
-      <FileType>Document</FileType>
-    </CopyFileToFolders>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

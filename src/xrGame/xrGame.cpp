@@ -26,7 +26,7 @@ extern float g_fTimeFactor;
 
 extern "C"
 {
-XR_EXPORT IFactoryObject* __cdecl xrFactory_Create(CLASS_ID clsid)
+XRGAME_API IFactoryObject* __cdecl xrFactory_Create(CLASS_ID clsid)
 {
     IFactoryObject* object = object_factory().client_object(clsid);
 #ifdef DEBUG
@@ -38,7 +38,7 @@ XR_EXPORT IFactoryObject* __cdecl xrFactory_Create(CLASS_ID clsid)
     return (object);
 }
 
-XR_EXPORT void __cdecl xrFactory_Destroy(IFactoryObject* O) { xr_delete(O); }
+XRGAME_API void __cdecl xrFactory_Destroy(IFactoryObject* O) { xr_delete(O); }
 }
 
 void xrGameModule::initialize(Factory_Create*& pCreate, Factory_Destroy*& pDestroy)

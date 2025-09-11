@@ -133,6 +133,9 @@ public:
     pcstr GetDebugType() override { return "CUIGameCustom"; }
     bool FillDebugTree(const CUIDebugState& debugState) override;
     void FillDebugInfo() override;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CDialogHolder);
 };
 
 extern CUIGameCustom* CurrentGameUI();

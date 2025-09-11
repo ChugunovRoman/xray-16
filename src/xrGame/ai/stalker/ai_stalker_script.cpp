@@ -7,14 +7,14 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "ai_stalker.h"
 #include "stalker_decision_space.h"
 #include "ai_stalker_space.h"
 #include "script_game_object.h"
 #include "stalker_planner.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CStalkerPlanner, (CScriptActionPlanner),
+void CAI_Stalker::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -164,17 +164,9 @@ SCRIPT_EXPORT(CStalkerPlanner, (CScriptActionPlanner),
                 value("sound_enemy_killed_or_wounded", StalkerSpace::eStalkerSoundMaskEnemyKilledOrWounded),
 
                 value("sound_script", StalkerSpace::eStalkerSoundScript)
-            ]
-    ];
-});
+            ],
 
-SCRIPT_EXPORT(CAI_Stalker, (CGameObject),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
         class_<CAI_Stalker, CGameObject>("CAI_Stalker")
             .def(constructor<>())
     ];
-});
+}

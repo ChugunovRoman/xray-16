@@ -50,6 +50,9 @@ public:
 public:
     bool completed() const;
     bool actual() const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "alife_monster_movement_manager_inline.h"

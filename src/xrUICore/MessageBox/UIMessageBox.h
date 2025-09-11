@@ -66,4 +66,7 @@ protected:
 
     E_MESSAGEBOX_STYLE m_eMessageBoxStyle;
     bool m_allowInputHandling{};
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIStatic);
 };

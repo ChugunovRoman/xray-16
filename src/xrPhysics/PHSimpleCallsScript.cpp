@@ -1,9 +1,11 @@
-#include "pch_script.h"
-#include "PHSimpleCalls.h"
-#include "xrPhysics/PhysicsShell.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
+#include "StdAfx.h"
 
-SCRIPT_EXPORT(CPHCallOnStepCondition, (),
+#include "PHSimpleCalls.h"
+#include "PhysicsShell.h"
+
+#include "xrScriptEngine/script_space.hpp"
+
+void CPHCallOnStepCondition::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -22,9 +24,9 @@ SCRIPT_EXPORT(CPHCallOnStepCondition, (),
                 (void (CPHCallOnStepCondition::*)(float))(&CPHCallOnStepCondition::set_time_interval))
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CPHExpireOnStepCondition, (CPHCallOnStepCondition),
+void CPHExpireOnStepCondition::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -33,9 +35,9 @@ SCRIPT_EXPORT(CPHExpireOnStepCondition, (CPHCallOnStepCondition),
         class_<CPHExpireOnStepCondition, CPHCallOnStepCondition>("phcondition_expireonstep")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CPHConstForceAction, (),
+void CPHConstForceAction::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -44,4 +46,4 @@ SCRIPT_EXPORT(CPHConstForceAction, (),
         class_<CPHConstForceAction>("phaction_constforce")
             .def(constructor<CPhysicsShell*, const Fvector&>())
     ];
-});
+}

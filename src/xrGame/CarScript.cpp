@@ -1,11 +1,11 @@
 #include "pch_script.h"
+
 #include "alife_space.h"
 #include "Car.h"
 #include "CarWeapon.h"
 #include "script_game_object.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CCar, (CGameObject, CHolderCustom),
+void CCar::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -55,4 +55,4 @@ SCRIPT_EXPORT(CCar, (CGameObject, CHolderCustom),
             /***** added by Ray Twitty (aka Shadows) END *****/
             .def(constructor<>())
     ];
-});
+}

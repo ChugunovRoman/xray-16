@@ -86,4 +86,7 @@ protected:
     bool m_bAcceleratorsEnable{ false }; // Tab control itself accelerators
     bool m_bButtonsAcceleratorsEnable{ true }; // Tab buttons own accelerators
     shared_str m_opt_backup_value;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIWindow);
 };

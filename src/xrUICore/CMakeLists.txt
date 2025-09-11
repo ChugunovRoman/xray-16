@@ -8,6 +8,7 @@ target_sources(xrUICore PRIVATE
     ui_debug.cpp
     ui_debug.h
     ui_defs.h
+    ui_export_script.cpp
     ui_focus.cpp
     ui_focus.h
     ui_styles.cpp
@@ -22,7 +23,6 @@ target_sources(xrUICore PRIVATE
     Buttons/UIBtnHint.h
     Buttons/UIButton.cpp
     Buttons/UIButton.h
-    Buttons/UIButton_script.cpp
     Buttons/UICheckButton.cpp
     Buttons/UICheckButton.h
     Buttons/UIRadioButton.cpp
@@ -32,7 +32,6 @@ target_sources(xrUICore PRIVATE
     Callbacks/callback_info.h
     ComboBox/UIComboBox.cpp
     ComboBox/UIComboBox.h
-    ComboBox/UIComboBox_script.cpp
     Cursor/UICursor.cpp
     Cursor/UICursor.h
     EditBox/UICustomEdit.cpp
@@ -41,7 +40,6 @@ target_sources(xrUICore PRIVATE
     EditBox/UIEditBox.h
     EditBox/UIEditBoxEx.cpp
     EditBox/UIEditBoxEx.h
-    EditBox/UIEditBox_script.cpp
     FontManager/FontManager.cpp
     FontManager/FontManager.h
     Hint/UIHint.cpp
@@ -61,7 +59,6 @@ target_sources(xrUICore PRIVATE
     ListBox/UIListBoxItem.h
     ListBox/UIListBoxItemMsgChain.cpp
     ListBox/UIListBoxItemMsgChain.h
-    ListBox/UIListBox_script.cpp
     ListWnd/UIListItem.cpp
     ListWnd/UIListItem.h
     ListWnd/UIListItemEx.cpp
@@ -69,26 +66,20 @@ target_sources(xrUICore PRIVATE
     ListWnd/UIListWnd.cpp
     ListWnd/UIListWnd.h
     ListWnd/UIListWnd_inline.h
-    ListWnd/UIListWnd_script.cpp
     MessageBox/UIMessageBox.cpp
     MessageBox/UIMessageBox.h
-    MessageBox/UIMessageBox_script.cpp
     Options/UIOptionsItem.cpp
     Options/UIOptionsItem.h
     Options/UIOptionsManager.cpp
     Options/UIOptionsManager.h
-    Options/UIOptionsManagerScript.cpp
-    Options/UIOptionsManagerScript.h
     ProgressBar/UIDoubleProgressBar.cpp
     ProgressBar/UIDoubleProgressBar.h
     ProgressBar/UIProgressBar.cpp
     ProgressBar/UIProgressBar.h
-    ProgressBar/UIProgressBar_script.cpp
     ProgressBar/UIProgressShape.cpp
     ProgressBar/UIProgressShape.h
     PropertiesBox/UIPropertiesBox.cpp
     PropertiesBox/UIPropertiesBox.h
-    PropertiesBox/UIPropertiesBox_script.cpp
     ScrollBar/UIFixedScrollBar.cpp
     ScrollBar/UIFixedScrollBar.h
     ScrollBar/UIScrollBar.cpp
@@ -111,12 +102,10 @@ target_sources(xrUICore PRIVATE
     Static/UIStatic.h
     Static/UIStaticItem.cpp
     Static/UIStaticItem.h
-    Static/UIStatic_script.cpp
     TabControl/UITabButton.cpp
     TabControl/UITabButton.h
     TabControl/UITabControl.cpp
     TabControl/UITabControl.h
-    TabControl/UITabControl_script.cpp
     TrackBar/UITrackBar.cpp
     TrackBar/UITrackBar.h
     Windows/UIFrameLineWnd.cpp
@@ -127,7 +116,6 @@ target_sources(xrUICore PRIVATE
     Windows/UITextFrameLineWnd.h
     Windows/UIWindow.cpp
     Windows/UIWindow.h
-    Windows/UIWindow_script.cpp
     XML/UITextureMaster.cpp
     XML/UITextureMaster.h
     XML/UIXmlInitBase.cpp

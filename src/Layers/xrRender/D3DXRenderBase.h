@@ -60,6 +60,8 @@ public:
     virtual void OnAssetsChanged() override;
     virtual void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert) override;
 
+    xrImTextureData GetImGuiTextureId(pcstr texture_name) override;
+
     RenderContext GetCurrentContext() const override { return IRender::PrimaryContext; }
     void MakeContextCurrent(RenderContext /*context*/) override {}
 

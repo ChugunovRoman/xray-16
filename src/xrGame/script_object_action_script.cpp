@@ -7,11 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "script_object_action.h"
 #include "script_game_object.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptObjectAction, (),
+void CScriptObjectAction::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -53,4 +53,4 @@ SCRIPT_EXPORT(CScriptObjectAction, (),
                 (void (CScriptObjectAction::*)(CScriptGameObject*))(&CScriptObjectAction::SetObject))
             .def("completed", &CScriptAbstractAction::completed)
     ];
-});
+}

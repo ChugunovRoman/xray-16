@@ -1,8 +1,8 @@
 #include "pch_script.h"
-#include "Explosive.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CExplosive, (),
+#include "Explosive.h"
+
+void CExplosive::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -11,4 +11,4 @@ SCRIPT_EXPORT(CExplosive, (),
         class_<CExplosive>("explosive")
             .def("explode", &CExplosive::Explode)
     ];
-});
+}

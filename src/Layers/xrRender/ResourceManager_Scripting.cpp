@@ -6,7 +6,7 @@
 #include "Blender.h"
 #include "Blender_Recorder.h"
 #include "xrScriptEngine/script_engine.hpp"
-#include "luabind/return_reference_to_policy.hpp"
+#include "xrScriptEngine/script_space.hpp"
 #include "xrCore/Threading/ScopeLock.hpp"
 
 #ifdef DEBUG

@@ -1,9 +1,9 @@
 #include "pch_script.h"
+
 #include "script_sound_info.h"
 #include "script_game_object.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptSoundInfo, (),
+void CScriptSoundInfo::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -16,4 +16,4 @@ SCRIPT_EXPORT(CScriptSoundInfo, (),
             .def_readwrite("power", &CScriptSoundInfo::power)
             .def_readwrite("time", &CScriptSoundInfo::time)
     ];
-});
+}

@@ -54,7 +54,7 @@ void FactionState::ResetStates()
 	}*/
 }
 
-SCRIPT_EXPORT(FactionState, (),
+void FactionState::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -88,7 +88,7 @@ SCRIPT_EXPORT(FactionState, (),
             .property("war_state_hint4", &FactionState::get_war_state_hint4, &FactionState::set_war_state_hint4)
             .property("war_state_hint5", &FactionState::get_war_state_hint5, &FactionState::set_war_state_hint5)
 	];
-})
+}
 
 void FactionState::update_info()
 {
@@ -110,4 +110,3 @@ void FactionState::update_info()
     R_ASSERT(GEnv.ScriptEngine->functor( "pda.fill_faction_state", m_functor));
     m_functor(this);
 }
-

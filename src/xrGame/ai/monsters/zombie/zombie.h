@@ -52,4 +52,7 @@ public:
 #ifdef _DEBUG
     virtual void debug_on_key(int key);
 #endif
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

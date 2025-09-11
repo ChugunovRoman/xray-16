@@ -56,6 +56,9 @@ private:
 
 private:
     xr_vector<CPsyDogPhantom*> m_storage;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CAI_PseudoDog);
 };
 
 //////////////////////////////////////////////////////////////////////////
@@ -99,4 +102,7 @@ private:
     void destroy_me();
     bool try_to_register_to_parent();
     bool is_wait_to_destroy_object() { return (m_parent_id == 0xffff); }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CAI_PseudoDog);
 };

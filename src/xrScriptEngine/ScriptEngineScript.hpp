@@ -1,6 +1,6 @@
 #pragma once
-#include "xrCore/xrCore.h"
-#include "xrScriptEngine/xrScriptEngine.hpp"
+
+#include "xrScriptEngine.hpp"
 
 using ScriptTimeGlobalFunc = u32(__cdecl*)();
 

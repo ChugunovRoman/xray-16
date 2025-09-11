@@ -6,7 +6,7 @@
 #include "Layers/xrRender/blender_recorder.h"
 //	adopt_compiler don't have = operator And it can't have = operator
 #include "xrScriptEngine/script_engine.hpp"
-#include "luabind/return_reference_to_policy.hpp"
+#include "xrScriptEngine/script_space.hpp"
 #include "xrCore/Threading/ScopeLock.hpp"
 
 #ifdef DEBUG

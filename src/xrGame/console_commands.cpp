@@ -19,6 +19,7 @@
 #include "Actor_Flags.h"
 #include "CustomZone.h"
 #include "xrScriptEngine/script_engine.hpp"
+#include "xrScriptEngine/script_profiler.hpp"
 #include "xrScriptEngine/script_process.hpp"
 #include "xrServer_Objects.h"
 #include "ui/UIMainIngameWnd.h"

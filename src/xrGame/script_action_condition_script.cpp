@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "script_action_condition.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptActionCondition, (),
+#include "script_action_condition.h"
+
+void CScriptActionCondition::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -31,4 +31,4 @@ SCRIPT_EXPORT(CScriptActionCondition, (),
             .def(constructor<u32>())
             .def(constructor<u32, double>())
     ];
-});
+}

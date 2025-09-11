@@ -7,11 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "script_hit.h"
 #include "script_game_object.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptHit, (),
+void CScriptHit::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -42,4 +42,4 @@ SCRIPT_EXPORT(CScriptHit, (),
             .def(constructor<const CScriptHit*>())
             .def("bone", &CScriptHit::set_bone_name)
     ];
-});
+}

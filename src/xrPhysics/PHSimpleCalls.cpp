@@ -1,29 +1,30 @@
 #include "StdAfx.h"
-#include "xrPhysics/PhysicsShell.h"
-#include "PHSimpleCalls.h"
 
-// extern		CPHWorld			*ph_world;
-#include "xrPhysics/IPHWorld.h"
+#include "PhysicsShell.h"
+#include "PHSimpleCalls.h"
+#include "PHWorld.h"
+
+#include "xrEngine/device.h"
 
 CPHCallOnStepCondition::CPHCallOnStepCondition()
 {
-    if (physics_world())
-        set_step(physics_world()->StepsNum());
+    if (ph_world)
+        set_step(ph_world->StepsNum());
     else
         set_step(0);
 }
 
-IC bool CPHCallOnStepCondition::time_out() const { return physics_world()->StepsNum() > m_step; }
+IC bool CPHCallOnStepCondition::time_out() const { return ph_world->StepsNum() > m_step; }
 bool CPHCallOnStepCondition::is_true() { return time_out(); }
 bool CPHCallOnStepCondition::obsolete() const { return time_out(); }
-void CPHCallOnStepCondition::set_steps_interval(u64 steps) { set_step(physics_world()->StepsNum() + steps); }
+void CPHCallOnStepCondition::set_steps_interval(u64 steps) { set_step(ph_world->StepsNum() + steps); }
 void CPHCallOnStepCondition::set_time_interval(float time) { set_steps_interval(iCeil(time / fixed_step)); }
 void CPHCallOnStepCondition::set_time_interval(u32 time) { set_time_interval(float(time) / 1000.f); }
 void CPHCallOnStepCondition::set_global_time(float time)
 {
     float time_interval = Device.fTimeGlobal - time;
     if (time_interval < 0.f)
-        set_step(physics_world()->StepsNum());
+        set_step(ph_world->StepsNum());
     set_time_interval(time_interval);
 }
 void CPHCallOnStepCondition::set_global_time(u32 time) { set_global_time(float(time) / 1000.f); }

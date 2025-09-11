@@ -8,10 +8,10 @@
 
 #pragma once
 
-#include "xrAICore/AISpaceBase.hpp"
 #include "xrCommon/xr_array.h"
 #include "xrCommon/xr_smart_pointers.h"
 #include "xrCore/Events/Notifier.h"
+#include "xrAICore/AISpaceBase.hpp"
 
 class CGameGraph;
 class CGameLevelCrossTable;

@@ -1,8 +1,13 @@
 #pragma once
-#include "xrCore/xrstring.h"
+
 #include "xrCommon/xr_string.h"
 #include "xrCommon/xr_map.h"
+
+#include "xrCore/xrstring.h"
+
 #include "xrEngine/xr_input.h" // Don't remove this include
+
+#include "xrScriptEngine/ScriptExporter.hpp"
 
 enum EGameActions : u32
 {
@@ -324,3 +329,8 @@ public:
 };
 
 extern ENGINE_API ConsoleBindCmds g_consoleBindCmds;
+
+struct ENGINE_API key_binding_registrator
+{
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
+};

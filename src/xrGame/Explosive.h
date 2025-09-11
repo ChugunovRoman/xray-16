@@ -167,6 +167,9 @@ protected:
     {
         shared_str effect_sect_name;
     } effector;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 void random_point_in_object_box(Fvector& out_pos, IGameObject* obj);

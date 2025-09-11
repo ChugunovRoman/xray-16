@@ -19,7 +19,7 @@ BOOL debug_show_thrid_wpn_model = 0;
 BOOL debug_show_attachments_slots = 0;
 
 extern ENGINE_API shared_str current_player_hud_sect;
-// clang-format off
+
 // --#SM+# Begin--
 #define PITCH_OFFSET_R         0.0f     // Насколько сильно ствол смещается вбок (влево) при вертикальных поворотах камеры	--#SM+#--
 #define PITCH_OFFSET_N         0.0f     // Насколько сильно ствол поднимается\опускается при вертикальных поворотах камеры	--#SM+#--
@@ -42,7 +42,6 @@ extern ENGINE_API shared_str current_player_hud_sect;
 #define ORIGIN_OFFSET_OLD     -0.05f    // Фактор влияния инерции на положение ствола (чем меньше, тем маштабней инерция)
 #define ORIGIN_OFFSET_AIM_OLD -0.03f    // (Для прицеливания)
 // --#SM+# End--
-// clang-format on
 
 float CalcMotionSpeed(const shared_str& anim_name, const float anim_speed)
 {

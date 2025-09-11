@@ -189,6 +189,9 @@ struct CMemoryInfo : public CVisibleObject
         m_sound_info = false;
         m_hit_info = false;
     }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 template <typename T>

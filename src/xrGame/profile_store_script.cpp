@@ -1,8 +1,10 @@
 #include "StdAfx.h"
-#include "profile_store.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(profile_store, (),
+#include "profile_store.h"
+
+namespace gamespy_profile
+{
+void profile_store::script_register(lua_State* luaState)
 {
     using namespace luabind;
     using namespace luabind::policy;
@@ -33,4 +35,5 @@ SCRIPT_EXPORT(profile_store, (),
                 value("bst_score_types_count", int(bst_score_types_count))
             ]
     ];
-});
+}
+} // namespace gamespy_profile

@@ -183,6 +183,9 @@ public:
     IC void alife_evaluation(bool value);
     IC CNonALifeParams& non_alife();
     IC CALifeParams& alife();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "ef_storage_inline.h"

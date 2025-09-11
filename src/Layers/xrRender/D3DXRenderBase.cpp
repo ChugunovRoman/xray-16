@@ -351,6 +351,19 @@ void D3DXRenderBase::OnAssetsChanged()
     Resources->m_textures_description.Load();
 }
 
+xrImTextureData D3DXRenderBase::GetImGuiTextureId(pcstr texture_name)
+{
+    const auto texture = Resources->_CreateTexture(texture_name);
+    return
+    {
+        texture->GetImTextureID(),
+        {
+            (float)texture->get_Width(),
+            (float)texture->get_Height()
+        }
+    };
+}
+
 void D3DXRenderBase::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
 {
     BasicStats.FrameEnd();

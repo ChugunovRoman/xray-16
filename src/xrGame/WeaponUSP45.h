@@ -9,4 +9,7 @@ class CWeaponUSP45 : public CWeaponPistol
 public:
     CWeaponUSP45() {}
     virtual ~CWeaponUSP45() {}
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponMagazined);
 };

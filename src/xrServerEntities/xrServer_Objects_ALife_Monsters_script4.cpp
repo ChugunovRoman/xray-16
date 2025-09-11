@@ -14,8 +14,6 @@
 #include "relation_registry.h"
 #endif // #ifdef XRGAME_EXPORTS
 
-#include "xrScriptEngine/ScriptExporter.hpp"
-
 CALifeMonsterBrain* monster_brain(CSE_ALifeMonsterAbstract* monster)
 {
     THROW(monster);
@@ -66,7 +64,7 @@ void ForceSetGoodwill(CSE_ALifeMonsterAbstract* self, int goodwill, ALife::_OBJE
 }
 #endif // #ifdef XRGAME_EXPORTS
 
-static void CSE_ALifeMonsterAbstract_Export(lua_State* luaState)
+void CSE_ALifeMonsterAbstract::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -93,9 +91,8 @@ static void CSE_ALifeMonsterAbstract_Export(lua_State* luaState)
 #endif
     ];
 }
-SCRIPT_EXPORT_FUNC(CSE_ALifeMonsterAbstract, (CSE_ALifeCreatureAbstract, CSE_ALifeSchedulable), CSE_ALifeMonsterAbstract_Export);
 
-static void CSE_ALifeHumanAbstract_Export(lua_State* luaState)
+void CSE_ALifeHumanAbstract::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -111,9 +108,7 @@ static void CSE_ALifeHumanAbstract_Export(lua_State* luaState)
     ];
 }
 
-SCRIPT_EXPORT_FUNC(CSE_ALifeHumanAbstract, (CSE_ALifeTraderAbstract, CSE_ALifeMonsterAbstract), CSE_ALifeHumanAbstract_Export);
-
-SCRIPT_EXPORT(CSE_ALifePsyDogPhantom, (CSE_ALifeMonsterBase),
+void CSE_ALifePsyDogPhantom::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -121,4 +116,4 @@ SCRIPT_EXPORT(CSE_ALifePsyDogPhantom, (CSE_ALifeMonsterBase),
     [
         luabind_class_monster1(CSE_ALifePsyDogPhantom, "cse_alife_psydog_phantom", CSE_ALifeMonsterBase)
     ];
-});
+}

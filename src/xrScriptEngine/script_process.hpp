@@ -7,8 +7,8 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #pragma once
-#include "xrCore/xrCore.h"
-#include "xrScriptEngine/xrScriptEngine.hpp"
+
+#include "xrScriptEngine.hpp"
 
 class CScriptThread;
 

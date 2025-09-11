@@ -7,12 +7,12 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "script_property_evaluator_wrapper.h"
 #include "script_game_object.h"
 #include "property_evaluator_const.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptPropertyEvaluator, (),
+void CScriptPropertyEvaluatorExport::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -33,4 +33,4 @@ SCRIPT_EXPORT(CScriptPropertyEvaluator, (),
         class_<CPropertyEvaluatorConst<CScriptGameObject>, CScriptPropertyEvaluator>("property_evaluator_const")
             .def(constructor<CPropertyEvaluatorConst<CScriptGameObject>::_value_type>())
     ];
-});
+}

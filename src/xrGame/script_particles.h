@@ -60,6 +60,9 @@ public:
     void StartPath(bool looped);
     void StopPath();
     void PausePath(bool val);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_particles_inline.h"

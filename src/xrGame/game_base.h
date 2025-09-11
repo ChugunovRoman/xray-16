@@ -1,12 +1,13 @@
 #pragma once
 
+#include "xrCommon/xr_deque.h"
+#include "xrCommon/xr_vector.h"
+#include "xrEngine/EngineAPI.h"
+#include "GameObject.h" // Only for script export dependency
 #include "game_base_space.h"
 #include "alife_space.h"
 #include "gametype_chooser.h"
 #include "player_account.h"
-#include "xrCommon/xr_deque.h"
-#include "xrCommon/xr_vector.h"
-#include "xrEngine/EngineAPI.h"
 
 #pragma pack(push, 1)
 
@@ -24,6 +25,9 @@ struct RPoint
 
     RPoint() = default;
     bool operator==(const u16& ID) const { return (bBlocked && BlockedByID == ID); }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 struct Bonus_Money_Struct
@@ -114,6 +118,9 @@ struct game_PlayerState
 
     s32 LastBuyAcount;
     bool m_bClearRun;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 struct game_TeamState
@@ -202,9 +209,6 @@ public:
     // moved from game_sv_base (time routines)
 
 private:
-    friend void game_GameState_script_register(lua_State* luaState);
-
-private:
     // scripts
     u64 m_qwStartProcessorTime;
     u64 m_qwStartGameTime;
@@ -213,4 +217,7 @@ private:
     u64 m_qwEStartProcessorTime;
     u64 m_qwEStartGameTime;
     float m_fETimeFactor;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

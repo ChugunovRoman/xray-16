@@ -1,14 +1,33 @@
 #include "pch_script.h"
+
 #include "ActorCondition.h"
 #include "Wound.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CEntityCondition, (),
+void CActorCondition::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
     module(luaState)
     [
+        class_<SBooster>("SBooster")
+            .def(constructor<>())
+            .def_readwrite("fBoostTime", &SBooster::fBoostTime)
+            .def_readwrite("fBoostValue", &SBooster::fBoostValue)
+            .def_readwrite("m_type", &SBooster::m_type),
+
+        class_<CWound>("CWound")
+            .def("TypeSize", &CWound::TypeSize)
+            .def("BloodSize", &CWound::BloodSize)
+            .def("AddHit", &CWound::AddHit)
+            .def("Incarnation", &CWound::Incarnation)
+            .def("TotalSize", &CWound::TotalSize)
+            .def("SetBoneNum", &CWound::SetBoneNum)
+            .def("GetBoneNum", &CWound::GetBoneNum)
+            .def("GetParticleBoneNum", &CWound::GetParticleBoneNum)
+            .def("SetParticleBoneNum", &CWound::SetParticleBoneNum)
+            .def("SetDestroy", &CWound::SetDestroy)
+            .def("GetDestroy", &CWound::GetDestroy),
+
         class_<CEntityCondition>("CEntityCondition")
             .def("AddWound", &CEntityCondition::AddWound)
             .def("ClearWounds", &CEntityCondition::ClearWounds)
@@ -51,33 +70,8 @@ SCRIPT_EXPORT(CEntityCondition, (),
                 value("eBoostStrikeImmunity", int(EBoostParams::eBoostStrikeImmunity)),
                 value("eBoostFireWoundImmunity", int(EBoostParams::eBoostFireWoundImmunity)),
                 value("eBoostWoundImmunity", int(EBoostParams::eBoostWoundImmunity))
-            ]
-    ];
-});
+            ],
 
-SCRIPT_EXPORT(CActorCondition, (CEntityCondition),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
-        class_<SBooster>("SBooster")
-            .def(constructor<>())
-            .def_readwrite("fBoostTime", &SBooster::fBoostTime)
-            .def_readwrite("fBoostValue", &SBooster::fBoostValue)
-            .def_readwrite("m_type", &SBooster::m_type),
-        class_<CWound>("CWound")
-            .def("TypeSize", &CWound::TypeSize)
-            .def("BloodSize", &CWound::BloodSize)
-            .def("AddHit", &CWound::AddHit)
-            .def("Incarnation", &CWound::Incarnation)
-            .def("TotalSize", &CWound::TotalSize)
-            .def("SetBoneNum", &CWound::SetBoneNum)
-            .def("GetBoneNum", &CWound::GetBoneNum)
-            .def("GetParticleBoneNum", &CWound::GetParticleBoneNum)
-            .def("SetParticleBoneNum", &CWound::SetParticleBoneNum)
-            .def("SetDestroy", &CWound::SetDestroy)
-            .def("GetDestroy", &CWound::GetDestroy),
         class_<CActorCondition, CEntityCondition>("CActorCondition")
             .def("ClearAllBoosters", &CActorCondition::ClearAllBoosters)
             .def("ApplyBooster", &CActorCondition::ApplyBooster_script)
@@ -107,4 +101,4 @@ SCRIPT_EXPORT(CActorCondition, (CEntityCondition),
             .def("IsCantSprint", &CActorCondition::IsCantSprint)
             .def_readwrite("m_MaxWalkWeight", &CActorCondition::m_MaxWalkWeight)
     ];
-});
+}

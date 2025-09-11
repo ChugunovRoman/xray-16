@@ -7,11 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "xrServer_Objects_ALife_Monsters.h"
 #include "xrServer_script_macroses.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CSE_ALifeCreatureCrow, (CSE_ALifeCreatureAbstract),
+void CSE_ALifeCreatureCrow::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -19,9 +19,9 @@ SCRIPT_EXPORT(CSE_ALifeCreatureCrow, (CSE_ALifeCreatureAbstract),
     [
         luabind_class_creature1(CSE_ALifeCreatureCrow, "cse_alife_creature_crow", CSE_ALifeCreatureAbstract)
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifeMonsterZombie, (CSE_ALifeMonsterAbstract),
+void CSE_ALifeMonsterZombie::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -29,9 +29,9 @@ SCRIPT_EXPORT(CSE_ALifeMonsterZombie, (CSE_ALifeMonsterAbstract),
     [
         luabind_class_monster1(CSE_ALifeMonsterZombie, "cse_alife_monster_zombie", CSE_ALifeMonsterAbstract)
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifeMonsterBase, (CSE_ALifeMonsterAbstract, CSE_PHSkeleton),
+void CSE_ALifeMonsterBase::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -39,9 +39,9 @@ SCRIPT_EXPORT(CSE_ALifeMonsterBase, (CSE_ALifeMonsterAbstract, CSE_PHSkeleton),
     [
         luabind_class_monster2(CSE_ALifeMonsterBase, "cse_alife_monster_base", CSE_ALifeMonsterAbstract, CSE_PHSkeleton)
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifeHumanStalker, (CSE_ALifeHumanAbstract, CSE_PHSkeleton),
+void CSE_ALifeHumanStalker::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -49,4 +49,4 @@ SCRIPT_EXPORT(CSE_ALifeHumanStalker, (CSE_ALifeHumanAbstract, CSE_PHSkeleton),
     [
         luabind_class_monster2(CSE_ALifeHumanStalker, "cse_alife_human_stalker", CSE_ALifeHumanAbstract, CSE_PHSkeleton)
     ];
-});
+}

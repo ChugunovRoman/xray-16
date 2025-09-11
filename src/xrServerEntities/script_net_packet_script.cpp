@@ -7,32 +7,13 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "xrServer_Object_Base.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-bool r_eof(NET_Packet* self) { return (!!self->r_eof()); }
-pcstr r_stringZ(NET_Packet* self)
-{
-    shared_str temp;
-    self->r_stringZ(temp);
-    return (*temp);
-}
+#include "base_client_classes_wrappers.h"
 
-void w_bool(NET_Packet* self, bool value) { self->w_u8(value ? 1 : 0); }
-bool r_bool(NET_Packet* self) { return (!!self->r_u8()); }
-
-ClientID r_clientID(NET_Packet* self)
-{
-    ClientID clientID;
-    self->r_clientID(clientID);
-    return clientID;
-}
-
-//extern u16 script_server_object_version();
-
-SCRIPT_EXPORT(ClientID, (),
+void CScriptNetPacket::script_register(lua_State* luaState)
 {
     using namespace luabind;
+    using namespace luabind::policy;
 
     module(luaState)
     [
@@ -40,18 +21,8 @@ SCRIPT_EXPORT(ClientID, (),
             .def(constructor<>())
             .def("value", &ClientID::value)
             .def("set", &ClientID::set)
-            .def(self == other<ClientID>())
-    ];
-});
+            .def(self == other<ClientID>()),
 
-SCRIPT_EXPORT(NET_Packet, (),
-{
-    using namespace luabind;
-    using namespace luabind::policy;
-
-    module(luaState)
-    [
-        def("script_server_object_version", &script_server_object_version),
         class_<NET_Packet>("net_packet")
             .def(constructor<>())
             .def("w_begin", &NET_Packet::w_begin)
@@ -68,7 +39,10 @@ SCRIPT_EXPORT(NET_Packet, (),
             .def("w_s16", &NET_Packet::w_s16)
             .def("w_u8", &NET_Packet::w_u8)
             //			.def("w_s8",			&NET_Packet::w_s8			)
-            .def("w_bool", &w_bool)
+            .def("w_bool", +[](NET_Packet* self, bool value)
+            {
+                self->w_u8(value ? 1 : 0);
+            })
             .def("w_float_q16", &NET_Packet::w_float_q16)
             .def("w_float_q8", &NET_Packet::w_float_q8)
             .def("w_angle16", &NET_Packet::w_angle16)
@@ -88,7 +62,10 @@ SCRIPT_EXPORT(NET_Packet, (),
             .def("r_tell", &NET_Packet::r_tell)
             // XXX: used as r_vec3(vec) -- remove pure_out_value?
             .def("r_vec3", (void (NET_Packet::*)(Fvector&))(&NET_Packet::r_vec3), pure_out_value<2>())
-            .def("r_bool", &r_bool)
+            .def("r_bool", +[](NET_Packet* self)
+            {
+                return (!!self->r_u8());
+            })
             .def("r_float", (float (NET_Packet::*)())(&NET_Packet::r_float))
             .def("r_u64", (u64(NET_Packet::*)())(&NET_Packet::r_u64))
             .def("r_s64", (s64(NET_Packet::*)())(&NET_Packet::r_s64))
@@ -103,11 +80,24 @@ SCRIPT_EXPORT(NET_Packet, (),
             .def("r_angle8", &NET_Packet::r_angle8, out_value<2>())
             .def("r_dir", &NET_Packet::r_dir)
             .def("r_sdir", &NET_Packet::r_sdir)
-            .def("r_stringZ", &r_stringZ)
+            .def("r_stringZ", +[](NET_Packet* self)
+            {
+                shared_str temp;
+                self->r_stringZ(temp);
+                return (*temp);
+            })
             .def("r_matrix", &NET_Packet::r_matrix)
-            .def("r_clientID", &r_clientID)
+            .def("r_clientID", +[](NET_Packet* self)
+            {
+                ClientID clientID;
+                self->r_clientID(clientID);
+                return clientID;
+            })
             .def("r_elapsed", &NET_Packet::r_elapsed)
             .def("r_advance", &NET_Packet::r_advance)
-            .def("r_eof", &r_eof)
+            .def("r_eof", +[](NET_Packet* self)
+            {
+                return self->r_eof();
+            })
     ];
-});
+}

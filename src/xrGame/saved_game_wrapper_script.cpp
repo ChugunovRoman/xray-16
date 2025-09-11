@@ -7,15 +7,12 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "saved_game_wrapper.h"
 #include "ai_space.h"
-#include "xrAICore/Navigation/game_graph.h"
 #include "xr_time.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-xrTime CSavedGameWrapper__game_time(const CSavedGameWrapper* self) { return (xrTime(self->game_time())); }
-
-SCRIPT_EXPORT(CSavedGameWrapper, (),
+void CSavedGameWrapper::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -23,11 +20,14 @@ SCRIPT_EXPORT(CSavedGameWrapper, (),
     [
         class_<CSavedGameWrapper>("CSavedGameWrapper")
             .def(constructor<pcstr>())
-            .def("game_time", &CSavedGameWrapper__game_time)
+            .def("game_time", +[](const CSavedGameWrapper* self)
+            {
+                return (xrTime(self->game_time()));
+            })
             .def("level_id", &CSavedGameWrapper::level_id)
             .def("level_name", &CSavedGameWrapper::level_name)
             .def("actor_health", &CSavedGameWrapper::actor_health),
 
         def("valid_saved_game", (bool (*)(pcstr))(&CSavedGameWrapper::valid_saved_game))
     ];
-});
+}

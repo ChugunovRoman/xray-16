@@ -127,6 +127,9 @@ public:
 #ifdef DEBUG
     virtual void Dump(){};
 #endif
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 class CRelationMapLocation : public CMapLocation

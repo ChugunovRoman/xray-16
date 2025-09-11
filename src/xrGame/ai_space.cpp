@@ -139,8 +139,7 @@ void CAI_Space::SetupScriptEngine()
 {
     ZoneScoped;
 
-    XRay::ScriptExporter::Reset(); // mark all nodes as undone
-    GEnv.ScriptEngine->init(XRay::ScriptExporter::Export, true);
+    GEnv.ScriptEngine->init(xray::script_export::node::export_all, true);
     RegisterScriptClasses();
     object_factory().register_script();
     LoadCommonScripts();

@@ -72,4 +72,7 @@ public:
     void UseGradient(bool status) { m_bUseGradient = status; }
 
     pcstr GetDebugType() override { return "CUIProgressBar"; }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIWindow);
 };

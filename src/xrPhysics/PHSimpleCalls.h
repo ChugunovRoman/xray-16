@@ -2,10 +2,12 @@
 
 #include "PHCommander.h"
 #include "PHReqComparer.h"
-#include "alife_space.h"
+
+#include "xrScriptEngine/ScriptExporter.hpp"
 
 class CPhysicsShell;
-class CPHCallOnStepCondition : public CPHCondition
+
+class XRPHYSICS_API CPHCallOnStepCondition : public CPHCondition
 {
     u64 m_step;
 
@@ -24,15 +26,21 @@ public:
 #endif
 private:
     IC bool time_out() const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
-class CPHExpireOnStepCondition : public CPHCallOnStepCondition
+class XRPHYSICS_API CPHExpireOnStepCondition : public CPHCallOnStepCondition
 {
 public:
     virtual bool is_true() { return true; }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CPHCallOnStepCondition);
 };
 
-class CPHShellBasedAction : public CPHAction
+class XRPHYSICS_API CPHShellBasedAction : public CPHAction
 {
 protected:
     CPhysicsShell* m_shell;
@@ -44,7 +52,7 @@ public:
     virtual bool obsolete() const;
 };
 
-class CPHConstForceAction : public CPHShellBasedAction
+class XRPHYSICS_API CPHConstForceAction : public CPHShellBasedAction
 {
     Fvector m_force;
 
@@ -57,6 +65,9 @@ public:
 #ifdef DEBUG
     const Fvector& force() const { return m_force; }
 #endif
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 class CPHReqComparerHasShell : public CPHReqComparerV

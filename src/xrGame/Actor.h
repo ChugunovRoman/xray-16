@@ -819,6 +819,9 @@ private:
     {
         mstate_wishful = state;
     }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };
 
 extern bool isActorAccelerated(u32 mstate, bool ZoomMode);

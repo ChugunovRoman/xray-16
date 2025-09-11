@@ -1,10 +1,13 @@
 #pragma once
 
 #include "PhysicsShell.h"
+
 #include <ode/common.h>
-#include "physics_scripted.h"
+
+class CPHShell;
 class CPHJointDestroyInfo;
-class CPHJoint : public CPhysicsJoint, public cphysics_scripted
+
+class CPHJoint : public CPhysicsJoint
 {
     ///////////////////////////////////////////////////////
     u16 m_bone_id;
@@ -149,10 +152,6 @@ public:
     void SetShell(CPHShell* p);
 
     void ClearDestroyInfo();
-
-private:
-    virtual iphysics_scripted& get_scripted() { return *this; }
-public:
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

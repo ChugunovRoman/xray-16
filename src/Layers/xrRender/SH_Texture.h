@@ -111,7 +111,25 @@ public:
     virtual ~CTexture();
 
 #if defined(USE_DX11)
-    ID3DShaderResourceView* get_SRView() { return m_pSRView; }
+    ID3DShaderResourceView* get_SRView() const { return m_pSRView; }
+#endif
+
+#if defined(USE_DX11)
+    ImTextureID GetImTextureID()
+    {
+        if (!flags.bLoaded)
+            Load();
+        return reinterpret_cast<ImTextureID>(m_pSRView);
+    }
+#elif defined(USE_OGL)
+    ImTextureID GetImTextureID()
+    {
+        if (!flags.bLoaded)
+            Load();
+        return static_cast<ImTextureID>(pSurface);
+    }
+#else
+#   error No graphics API selected or enabled!
 #endif
 
 private:

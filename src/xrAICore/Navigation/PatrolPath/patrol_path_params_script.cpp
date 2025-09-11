@@ -7,9 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch.hpp"
+
 #include "patrol_path_params.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
-#include "xrScriptEngine/DebugMacros.hpp" // for THROW3 // XXX: move debug macros to xrCore
+
+#include "xrScriptEngine/script_space.hpp"
 
 Fvector CPatrolPathParams__point(const CPatrolPathParams* params, u32 index)
 {
@@ -17,7 +18,7 @@ Fvector CPatrolPathParams__point(const CPatrolPathParams* params, u32 index)
     return params->point(index);
 }
 
-SCRIPT_EXPORT(CPatrolPathParams, (),
+void CPatrolPathParams::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -55,4 +56,4 @@ SCRIPT_EXPORT(CPatrolPathParams, (),
             .def("flags", &CPatrolPathParams::flags)
             .def("terminal", &CPatrolPathParams::terminal)
     ];
-});
+}

@@ -35,7 +35,7 @@ FractionState::~FractionState()
 {
 }
 
-SCRIPT_EXPORT(FractionState, (),
+void FractionState::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -58,7 +58,7 @@ SCRIPT_EXPORT(FractionState, (),
             .property("target_desc",    &FractionState::get_target_desc,   &FractionState::set_target_desc)
             .property("location",       &FractionState::get_location,      &FractionState::set_location)
     ];
-})
+}
 
 void FractionState::update_info()
 {

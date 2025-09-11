@@ -74,6 +74,7 @@ target_sources_grouped(
     IPhysicsShellHolder.h
     PhysicsShell.cpp
     PhysicsShell.h
+    PhysicsShellScript.cpp
 )
 
 target_sources_grouped(
@@ -165,6 +166,20 @@ target_sources_grouped(
 
 target_sources_grouped(
     TARGET xrPhysics
+    NAME "Physics\\Base\\Objects\\PHCommander"
+    FILES
+    PHCommander.cpp
+    PHCommander.h
+    PHReqComparer.h
+    PHScriptCall.cpp
+    PHScriptCall.h
+    PHSimpleCalls.cpp
+    PHSimpleCalls.h
+    PHSimpleCallsScript.cpp
+)
+
+target_sources_grouped(
+    TARGET xrPhysics
     NAME "Physics\\Base\\Objects\\PHIsland"
     FILES
     PHIsland.cpp
@@ -237,15 +252,6 @@ target_sources_grouped(
     PHSimpleCharacter.cpp
     PHSimpleCharacter.h
     PHSimpleCharacterInline.h
-)
-
-target_sources_grouped(
-    TARGET xrPhysics
-    NAME "Physics\\Base\\Objects\\script"
-    FILES
-    iphysics_scripted.h
-    physics_scripted.cpp
-    physics_scripted.h
 )
 
 target_sources_grouped(
@@ -328,6 +334,7 @@ target_sources_grouped(
     PHItemList.h
     PHWorld.cpp
     PHWorld.h
+    PHWorldScript.cpp
     Physics.cpp
     Physics.h
 )

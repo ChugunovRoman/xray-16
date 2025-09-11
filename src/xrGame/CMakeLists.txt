@@ -35,6 +35,7 @@ target_sources(xrGame PRIVATE
     actor_communication.cpp
     ActorCondition.cpp
     ActorCondition.h
+    ActorCondition_script.cpp
     Actor.cpp
     Checker.cpp
     actor_defs.h
@@ -337,7 +338,6 @@ target_sources(xrGame PRIVATE
     configs_dump_verifyer.h
     console_commands.cpp
     console_commands_mp.cpp
-    console_registrator_script.cpp
     ContextMenu.cpp
     ContextMenu.h
     control_action.h
@@ -473,7 +473,6 @@ target_sources(xrGame PRIVATE
     entity_alive_inline.h
     EntityCondition.cpp
     EntityCondition.h
-    EntityCondition_script.cpp
     Entity.cpp
     Entity.h
     ExoOutfit.cpp
@@ -897,8 +896,6 @@ target_sources(xrGame PRIVATE
     pda_space.h
     PHCollisionDamageReceiver.cpp
     PHCollisionDamageReceiver.h
-    PHCommander.cpp
-    PHCommander.h
     PHDebug.cpp
     PHDebug.h
     PHDestroyable.cpp
@@ -918,15 +915,9 @@ target_sources(xrGame PRIVATE
     Phrase.h
     PhraseScript.cpp
     PhraseScript.h
-    PHReqComparer.h
-    PHScriptCall.cpp
-    PHScriptCall.h
     PHShellCreator.cpp
     PHShellCreator.h
     ph_shell_interface.h
-    PHSimpleCalls.cpp
-    PHSimpleCalls.h
-    PHSimpleCallsScript.cpp
     PHSkeleton.cpp
     PHSkeleton.h
     PHSoundPlayer.cpp
@@ -937,25 +928,16 @@ target_sources(xrGame PRIVATE
     PhysicObject.cpp
     PhysicObject.h
     PhysicObject_script.cpp
-    physics_element_scripted.cpp
-    physics_element_scripted.h
     physics_game.cpp
     physics_game.h
     PhysicsGamePars.cpp
     PhysicsGamePars.h
-    physics_joint_scripted.cpp
-    physics_joint_scripted.h
     physics_shell_animated.cpp
     physics_shell_animated.h
     PhysicsShellHolder.cpp
     PhysicsShellHolder.h
-    #PhysicsShellScript.cpp
-    physics_shell_scripted.cpp
-    physics_shell_scripted.h
     PhysicsSkeletonObject.cpp
     PhysicsSkeletonObject.h
-    physics_world_scripted.cpp
-    physics_world_scripted.h
     player_account.cpp
     player_account.h
     player_hud.cpp
@@ -1104,7 +1086,6 @@ target_sources(xrGame PRIVATE
     script_hit.h
     script_hit_inline.h
     script_hit_script.cpp
-    script_lanim.cpp
     script_monster_action.cpp
     script_monster_action.h
     script_monster_action_inline.h
@@ -1132,7 +1113,6 @@ target_sources(xrGame PRIVATE
     script_property_evaluator_wrapper.cpp
     script_property_evaluator_wrapper.h
     script_property_evaluator_wrapper_inline.h
-    script_render_device_script.cpp
     script_sound_action.cpp
     script_sound_action.h
     script_sound_action_inline.h
@@ -2383,7 +2363,6 @@ target_sources(xrGame PRIVATE
     ui/UIWeightBar.h
     ui/UIWheelMenu.cpp
     ui/UIWheelMenu.h
-    ui/UIWindow_script.cpp
     ui/UIWpnParams.cpp
     ui/UIWpnParams.h
     ui/UIXmlInit.cpp
@@ -2449,7 +2428,6 @@ target_sources(xrGame PRIVATE
     ../xrServerEntities/script_rtoken_list.h
     ../xrServerEntities/script_rtoken_list_inline.h
     ../xrServerEntities/script_rtoken_list_script.cpp
-    ../xrServerEntities/script_sound_type_script.cpp
     ../xrServerEntities/script_token_list.cpp
     ../xrServerEntities/script_token_list.h
     ../xrServerEntities/script_token_list_script.cpp
@@ -2482,15 +2460,14 @@ target_sources(xrGame PRIVATE
     ../xrServerEntities/xrServer_Objects_ALife.h
     ../xrServerEntities/xrServer_Objects_ALife_Items.cpp
     ../xrServerEntities/xrServer_Objects_ALife_Items.h
-    ../xrServerEntities/xrServer_Objects_ALife_Items_script2.cpp
-    ../xrServerEntities/xrServer_Objects_ALife_Items_script3.cpp
     ../xrServerEntities/xrServer_Objects_ALife_Items_script.cpp
+    ../xrServerEntities/xrServer_Objects_ALife_Items_script2.cpp
     ../xrServerEntities/xrServer_Objects_ALife_Monsters.cpp
     ../xrServerEntities/xrServer_Objects_ALife_Monsters.h
+    ../xrServerEntities/xrServer_Objects_ALife_Monsters_script.cpp
     ../xrServerEntities/xrServer_Objects_ALife_Monsters_script2.cpp
     ../xrServerEntities/xrServer_Objects_ALife_Monsters_script3.cpp
     ../xrServerEntities/xrServer_Objects_ALife_Monsters_script4.cpp
-    ../xrServerEntities/xrServer_Objects_ALife_Monsters_script.cpp
     ../xrServerEntities/xrServer_Objects_ALife_script2.cpp
     ../xrServerEntities/xrServer_Objects_ALife_script3.cpp
     ../xrServerEntities/xrServer_Objects_ALife_script.cpp

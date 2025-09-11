@@ -345,15 +345,6 @@
     <ClInclude Include="Components\operator_condition_inline.h">
       <Filter>AI\Components\ProblemSolver\OperatorCondition</Filter>
     </ClInclude>
-    <ClInclude Include="Components\script_world_state.h">
-      <Filter>AI\Components\ProblemSolver\ConditionState\ScriptWorldState</Filter>
-    </ClInclude>
-    <ClInclude Include="Components\script_world_property.h">
-      <Filter>AI\Components\ProblemSolver\OperatorCondition\ScriptWorldProperty</Filter>
-    </ClInclude>
-    <ClInclude Include="Components\script_world_property_inline.h">
-      <Filter>AI\Components\ProblemSolver\OperatorCondition\ScriptWorldProperty</Filter>
-    </ClInclude>
     <ClInclude Include="Components\condition_state.h">
       <Filter>AI\Components\ProblemSolver\ConditionState</Filter>
     </ClInclude>

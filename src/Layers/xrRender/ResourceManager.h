@@ -7,9 +7,8 @@
 #include "Shader.h"
 #include "tss_def.h"
 #include "TextureDescrManager.h"
+
 #include "xrScriptEngine/script_engine.hpp"
-// refs
-struct lua_State;
 
 namespace xray::render::RENDER_NAMESPACE
 {

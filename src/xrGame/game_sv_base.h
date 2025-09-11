@@ -274,4 +274,7 @@ public:
     virtual void DumpOnlineStatistic(){};
 
     bool CheckNewPlayer(xrClientData* CL);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(game_GameState);
 };

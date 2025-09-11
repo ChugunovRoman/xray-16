@@ -179,8 +179,7 @@ struct CGameSvMpScriptWrapperBase : public T, public luabind::wrap_base
 
 #pragma warning(pop)
 
-#pragma optimize("s", on)
-void game_sv_mp_script_register(lua_State* luaState)
+void game_sv_mp::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -195,7 +194,7 @@ void game_sv_mp_script_register(lua_State* luaState)
     ];
 }
 
-void game_sv_mp_script_script_register(lua_State* luaState)
+void game_sv_mp_script::script_register(lua_State* luaState)
 {
     using namespace luabind;
     using namespace luabind::policy;
@@ -229,6 +228,3 @@ void game_sv_mp_script_script_register(lua_State* luaState)
             .def("createPlayerState", &BaseType::createPlayerState, &WrapType::createPlayerState_static, adopt<0>())
     ];
 }
-
-SCRIPT_EXPORT_FUNC(game_sv_mp, (game_sv_GameState), game_sv_mp_script_register);
-SCRIPT_EXPORT_FUNC(game_sv_mp_script, (game_sv_mp), game_sv_mp_script_script_register);

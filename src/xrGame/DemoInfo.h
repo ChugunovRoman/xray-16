@@ -43,6 +43,9 @@ public:
     u8 const get_team() const { return m_team; };
     u8 const get_rank() const { return m_rank; };
     static u32 const demo_info_max_size;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 }; // class demo_player_info
 
 class demo_info : private Noncopyable
@@ -77,6 +80,9 @@ public:
     demo_player_info const* get_player(u32 player_index) const;
 
     static u32 const max_demo_info_size;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 }; // class DemoInfo
 
 #endif //#ifndef DEMOINFO_H

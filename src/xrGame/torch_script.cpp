@@ -1,12 +1,12 @@
 #include "pch_script.h"
+
 #include "Torch.h"
 #include "PDA.h"
 #include "SimpleDetector.h"
 #include "EliteDetector.h"
 #include "AdvancedDetector.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CTorch, (CGameObject),
+void CTorch::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -25,4 +25,4 @@ SCRIPT_EXPORT(CTorch, (CGameObject),
         class_<CSimpleDetector, CGameObject>("CSimpleDetector")
             .def(constructor<>())
     ];
-});
+}

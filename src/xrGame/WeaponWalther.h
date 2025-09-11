@@ -8,4 +8,7 @@ class CWeaponWalther : public CWeaponPistol
 public:
     CWeaponWalther() {}
     virtual ~CWeaponWalther() {}
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponMagazined);
 };

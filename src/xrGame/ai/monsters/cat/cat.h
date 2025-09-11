@@ -21,4 +21,7 @@ public:
     virtual void HitEntityInJump(const CEntity* pEntity);
 
     pcstr get_monster_class_name() override { return "cat"; }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

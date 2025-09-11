@@ -1,4 +1,5 @@
 #include "pch_script.h"
+
 #include "game_cl_mp_script.h"
 #include "xrServer_script_macroses.h"
 #include "UIGameCustom.h"
@@ -73,7 +74,7 @@ LPCSTR game_cl_mp_script::GetRoundTime()
     return bufTime;
 }
 
-SCRIPT_EXPORT(game_cl_GameState, (game_GameState),
+void game_cl_mp::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -81,22 +82,13 @@ SCRIPT_EXPORT(game_cl_GameState, (game_GameState),
     [
         class_<game_cl_GameState, game_GameState>("game_cl_GameState")
             .def_readwrite("local_svdpnid", &game_cl_GameState::local_svdpnid)
-            .def_readwrite("local_player", &game_cl_GameState::local_player)
-    ];
-});
+            .def_readwrite("local_player", &game_cl_GameState::local_player),
 
-SCRIPT_EXPORT(game_cl_mp, (game_cl_GameState),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
         class_<game_cl_mp, game_cl_GameState>("game_cl_mp")
     ];
+}
 
-});
-
-void game_cl_mp_script_script_register(lua_State* luaState)
+void game_cl_mp_script::script_register(lua_State* luaState)
 {
     using namespace luabind;
     using namespace luabind::policy;
@@ -135,5 +127,3 @@ void game_cl_mp_script_script_register(lua_State* luaState)
             .def("createGameUI", &BaseType::createGameUI, &WrapType::createGameUI_static, adopt<0>())
     ];
 }
-
-SCRIPT_EXPORT_FUNC(game_cl_mp_script, (game_cl_mp), game_cl_mp_script_script_register);

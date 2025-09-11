@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "alife_human_brain.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CALifeHumanBrain, (CALifeMonsterBrain),
+#include "alife_human_brain.h"
+
+void CALifeHumanBrain::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -18,4 +18,4 @@ SCRIPT_EXPORT(CALifeHumanBrain, (CALifeMonsterBrain),
     [
         class_<CALifeHumanBrain, CALifeMonsterBrain>("CALifeHumanBrain")
     ];
-});
+}

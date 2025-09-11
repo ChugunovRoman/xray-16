@@ -7,10 +7,9 @@
 #include "xrScriptEngine/ScriptExporter.hpp"
 
 // clang-format off
-SCRIPT_EXPORT(CUIDragDropListEx, (CUIWindow),
+void CUIDragDropListEx::script_register(lua_State* luaState)
 {
     using namespace luabind;
-    using namespace luabind::policy;
 
     module(luaState)
     [
@@ -241,5 +240,5 @@ SCRIPT_EXPORT(CUIDragDropListEx, (CUIWindow),
                 self->m_f_drag_event_lua.set(lua_function, context);
             })
     ];
-});
+}
 // clang-format on

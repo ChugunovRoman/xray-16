@@ -55,4 +55,7 @@ protected:
 
     // подсвечивается кнопка или нет?
     bool m_bHighlightText;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIButton);
 };

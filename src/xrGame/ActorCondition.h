@@ -174,6 +174,9 @@ protected:
     // typedef xr_vector<SMedicineInfluenceValues>::iterator BOOSTS_VECTOR_ITER;
     // BOOSTS_VECTOR m_vecBoosts;
     ref_sound m_use_sound;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 class CActorDeathEffector

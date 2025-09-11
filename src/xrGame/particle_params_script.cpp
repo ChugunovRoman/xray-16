@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "particle_params.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CParticleParams, (),
+#include "particle_params.h"
+
+void CParticleParams::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -22,4 +22,4 @@ SCRIPT_EXPORT(CParticleParams, (),
             .def(constructor<const Fvector&, const Fvector&>())
             .def(constructor<const Fvector&, const Fvector&, const Fvector&>())
     ];
-});
+}

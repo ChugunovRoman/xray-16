@@ -1,11 +1,12 @@
 #include "StdAfx.h"
-#include "login_manager.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(login_manager, (),
+#include "login_manager.h"
+
+namespace gamespy_gp
+{
+void login_manager::script_register(lua_State* luaState)
 {
     using namespace luabind;
-    using namespace gamespy_gp;
 
     module(luaState)
     [
@@ -28,12 +29,11 @@ SCRIPT_EXPORT(login_manager, (),
             .def("forgot_password", &login_manager::forgot_password)
 
     ];
-});
+}
 
-SCRIPT_EXPORT(profile, (),
+void profile::script_register(lua_State* luaState)
 {
     using namespace luabind;
-    using namespace gamespy_gp;
 
     module(luaState)
     [
@@ -41,19 +41,7 @@ SCRIPT_EXPORT(profile, (),
             .def("unique_nick", &profile::unique_nick)
             .def("online", &profile::online)
     ];
-});
+}
+} // namespace gamespy_gp
 
-SCRIPT_EXPORT(login_operation_cb, (),
-{
-    using namespace luabind;
-    using namespace gamespy_gp;
-
-    module(luaState)
-    [
-        class_<login_operation_cb>("login_operation_cb")
-            .def(constructor<>())
-            .def(constructor<login_operation_cb::lua_object_type, login_operation_cb::lua_function_type>())
-            .def("bind", (login_operation_cb::lua_bind_type)(&login_operation_cb::bind))
-            .def("clear", &login_operation_cb::clear)
-    ];
-});
+DEFINE_MIXED_DELEGATE_SCRIPT(gamespy_gp::login_operation_cb, "login_operation_cb");

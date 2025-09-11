@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "client_spawn_manager.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CClientSpawnManager, (),
+#include "client_spawn_manager.h"
+
+void CClientSpawnManager::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -25,4 +25,4 @@ SCRIPT_EXPORT(CClientSpawnManager, (),
             .def("remove", (void (CClientSpawnManager::*)(ALife::_OBJECT_ID, ALife::_OBJECT_ID))(
                                &CClientSpawnManager::remove))
     ];
-});
+}

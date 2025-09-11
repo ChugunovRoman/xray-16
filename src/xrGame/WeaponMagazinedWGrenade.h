@@ -100,4 +100,7 @@ public:
     u8 iAmmoElapsed2;
 
     virtual void UpdateGrenadeVisibility(bool visibility);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponMagazined);
 };

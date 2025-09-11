@@ -1,7 +1,8 @@
 #pragma once
+
 #include "encyclopedia_article_defs.h"
 #include "GameTaskDefs.h"
-struct lua_State;
+
 // XXX: include "xrScriptEngine/script_space_forward.hpp" into Functor.hpp, define functor
 #include "xrScriptEngine/Functor.hpp"
 
@@ -211,4 +212,7 @@ public:
 
     void AddObjective_script(SGameTaskObjective* O);
     SGameTaskObjective* GetObjective_script(TASK_OBJECTIVE_ID objective_id);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

@@ -57,6 +57,9 @@ public:
     void dump() const;
     void dump(ALife::_OBJECT_ID requesting_id) const;
 #endif // DEBUG
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "client_spawn_manager_inline.h"

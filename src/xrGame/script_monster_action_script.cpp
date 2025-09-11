@@ -7,11 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "script_monster_action.h"
 #include "script_game_object.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptMonsterAction, (),
+void CScriptMonsterAction::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -30,4 +30,4 @@ SCRIPT_EXPORT(CScriptMonsterAction, (),
             .def(constructor<MonsterSpace::EScriptMonsterGlobalAction>())
             .def(constructor<MonsterSpace::EScriptMonsterGlobalAction, CScriptGameObject*>())
     ];
-});
+}

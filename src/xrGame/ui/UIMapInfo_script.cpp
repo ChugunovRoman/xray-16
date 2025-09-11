@@ -1,8 +1,8 @@
 #include "pch_script.h"
-#include "UIMapInfo.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CUIMapInfo, (CUIWindow),
+#include "UIMapInfo.h"
+
+void CUIMapInfo::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -13,4 +13,4 @@ SCRIPT_EXPORT(CUIMapInfo, (CUIWindow),
             .def("Init", &CUIMapInfo::InitMapInfo)
             .def("InitMap", &CUIMapInfo::InitMap)
     ];
-});
+}

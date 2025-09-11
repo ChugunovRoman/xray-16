@@ -65,6 +65,9 @@ public:
 
     virtual void Center(Fvector& C) const;
     virtual float Radius() const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };
 
 #endif // HangingLampH

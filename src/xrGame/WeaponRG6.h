@@ -19,4 +19,7 @@ public:
 protected:
     virtual void FireStart();
     virtual u8 AddCartridge(u8 cnt);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponShotgun);
 };

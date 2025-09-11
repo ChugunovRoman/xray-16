@@ -42,4 +42,7 @@ public:
     virtual void Center(Fvector& C) const;
     virtual void NotificateDestroy(CPHDestroyableNotificate* dn);
     virtual float BlowoutRadiusPercent(CPhysicsShellHolder* GO);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

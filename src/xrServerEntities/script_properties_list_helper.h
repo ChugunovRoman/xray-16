@@ -168,4 +168,7 @@ public:
     //			RTextValue* 		CreateNameCB		(PropItemVec* items, pcstr key, luabind::object object, pcstr
     //name,
     // TOnDrawTextEvent=0, RTextValue::TOnBeforeEditEvent=0, RTextValue::TOnAfterEditEvent=0
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

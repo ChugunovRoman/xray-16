@@ -199,4 +199,7 @@ protected:
     //Alundaio: LAYERED_SND_SHOOT
     HUD_SOUND_COLLECTION_LAYERED m_layered_sounds;
     //-Alundaio
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeapon);
 };

@@ -1,10 +1,10 @@
 #include "pch_script.h"
+
 #include "MosquitoBald.h"
 #include "ZoneCampfire.h"
 #include "TorridZone.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CMosquitoBald, (CGameObject),
+void CMosquitoBald::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -20,4 +20,4 @@ SCRIPT_EXPORT(CMosquitoBald, (CGameObject),
             .def("turn_off", &CZoneCampfire::turn_off_script)
             .def("is_on", &CZoneCampfire::is_on)
     ];
-});
+}

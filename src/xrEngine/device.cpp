@@ -4,13 +4,14 @@
 
 #include "xrCore/FS_impl.h"
 #include "xrCore/Threading/TaskManager.hpp"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
 #include "XR_IOConsole.h"
 #include "xr_input.h"
 
 #include "IGame_Level.h"
 #include "IGame_Persistent.h"
+
+#include "xrScriptEngine/script_space.hpp"
 
 #include <SDL.h>
 
@@ -609,21 +610,58 @@ void CRenderDevice::RemoveSeqFrame(pureFrame* f)
     seqFrame.Remove(f);
 }
 
-CRenderDevice* get_device() { return &Device; }
-u32 script_time_global() { return Device.dwTimeGlobal; }
-u32 script_time_global_async() { return Device.TimerAsync_MMT(); }
-
-SCRIPT_EXPORT(Device, (),
+void CRenderDevice::script_register(lua_State* luaState)
 {
     using namespace luabind;
     module(luaState)
     [
-        def("time_global", &script_time_global),
-        def("time_global_async", &script_time_global_async),
-        def("device", &get_device),
-        def("is_enough_address_space_available", &is_enough_address_space_available)
+        class_<CRenderDevice>("render_device")
+            .def_readonly("width", &CRenderDevice::dwWidth)
+            .def_readonly("height", &CRenderDevice::dwHeight)
+            .def_readonly("time_delta", &CRenderDevice::dwTimeDelta)
+            .def_readonly("f_time_delta", &CRenderDevice::fTimeDelta)
+            .def_readonly("cam_pos", &CRenderDevice::vCameraPosition)
+            .def_readonly("cam_dir", &CRenderDevice::vCameraDirection)
+            .def_readonly("cam_top", &CRenderDevice::vCameraTop)
+            .def_readonly("cam_right", &CRenderDevice::vCameraRight)
+            //			.def_readonly("view",					&CRenderDevice::mView)
+            //			.def_readonly("projection",				&CRenderDevice::mProject)
+            //			.def_readonly("full_transform",			&CRenderDevice::mFullTransform)
+            .def_readonly("fov", &CRenderDevice::fFOV)
+            .def_readonly("aspect_ratio", &CRenderDevice::fASPECT)
+            .def_readonly("precache_frame", &CRenderDevice::dwPrecacheFrame)
+            .def_readonly("frame", &CRenderDevice::dwFrame)
+            .def("time_global", +[](const CRenderDevice* self)
+            {
+                return (self->dwTimeGlobal);
+            })
+            .def("is_paused", +[](CRenderDevice* device)
+            {
+                return device->Paused();
+            })
+            .def("pause", +[](CRenderDevice* device, bool b)
+            {
+                device->Pause(b, TRUE, FALSE, "set_device_paused_script");
+            }),
+
+        def("app_ready", +[]()
+        {
+            return g_pGamePersistent->IsLoaded();
+        }),
+        def("device", +[]()
+        {
+            return &Device;
+        }),
+        def("time_global", +[]()
+        {
+            return Device.dwTimeGlobal;
+        }),
+        def("time_global_async", +[]()
+        {
+            return Device.TimerAsync_MMT();
+        })
     ];
-});
+};
 
 void CLoadScreenRenderer::Start(bool b_user_input)
 {

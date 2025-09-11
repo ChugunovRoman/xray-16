@@ -1,9 +1,13 @@
 #pragma once
 
-#ifdef XRAPI_EXPORTS
-#define XRAPI_API XR_EXPORT
+#ifdef XRAY_STATIC_BUILD
+#   define XRAPI_API
 #else
-#define XRAPI_API XR_IMPORT
+#   ifdef XRAPI_EXPORTS
+#      define XRAPI_API XR_EXPORT
+#   else
+#      define XRAPI_API XR_IMPORT
+#   endif
 #endif
 
 class IRender;

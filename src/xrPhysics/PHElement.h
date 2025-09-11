@@ -7,23 +7,21 @@
 #include "Geometry.h"
 #include "PHDefs.h"
 #include "PhysicsCommon.h"
-#include "xrServerEntities/PHSynchronize.h"
 #include "PHDisabling.h"
 #include "PHGeometryOwner.h"
 #include "PHInterpolation.h"
 #include "PHFracture.h"
-#include "physics_scripted.h"
-class CPHElement;
-class CPHShell;
+
+#include "xrServerEntities/PHSynchronize.h"
 
 struct SPHImpact;
+class CPHShell;
 class CPHFracturesHolder;
 
 class CPHElement : public CPhysicsElement,
                    public CPHSynchronize,
                    public CPHDisablingFull,
-                   public CPHGeometryOwner,
-                   public cphysics_scripted
+                   public CPHGeometryOwner
 {
     friend class CPHFracturesHolder;
 
@@ -284,9 +282,6 @@ public: //
     //		bool						CheckBreakConsistent					()
     CPHElement(); // aux
     virtual ~CPHElement(); // aux
-private:
-    virtual iphysics_scripted& get_scripted() { return *this; }
-public:
 };
 
 IC CPHElement* cast_PHElement(CPhysicsElement* e) { return static_cast<CPHElement*>(static_cast<CPhysicsElement*>(e)); }

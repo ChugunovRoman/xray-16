@@ -7,12 +7,12 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "script_binder_object.h"
 #include "script_binder_object_wrapper.h"
 #include "xrServer_Objects_ALife.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptBinderObject, (),
+void CScriptBinderObject::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -33,4 +33,4 @@ SCRIPT_EXPORT(CScriptBinderObject, (),
             .def("net_save_relevant", &CScriptBinderObject::net_SaveRelevant, &CScriptBinderObjectWrapper::net_SaveRelevant_static)
             .def("net_Relcase", &CScriptBinderObject::net_Relcase, &CScriptBinderObjectWrapper::net_Relcase_static)
     ];
-});
+}

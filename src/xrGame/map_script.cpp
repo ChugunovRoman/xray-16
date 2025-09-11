@@ -1,9 +1,9 @@
 #include "pch_script.h"
+
 #include "map_location.h"
 #include "map_manager.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CMapManager, (),
+void CMapManager::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -15,9 +15,9 @@ SCRIPT_EXPORT(CMapManager, (),
             .def("RemoveMapLocation", (void (CMapManager::*)(CMapLocation*))&CMapManager::RemoveMapLocation)
             .def("DisableAllPointers", &CMapManager::DisableAllPointers)
     ];
-});
+}
 
-SCRIPT_EXPORT(CMapLocation, (),
+void CMapLocation::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -50,4 +50,4 @@ SCRIPT_EXPORT(CMapLocation, (),
             .def("ObjectID", &CMapLocation::ObjectID)
             .def("GetLastPosition", &CMapLocation::GetLastPosition)
     ];
-});
+}

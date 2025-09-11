@@ -26,8 +26,14 @@ public:
     FactoryObjectWrapperTpl() = default;
     virtual ~FactoryObjectWrapperTpl() = default;
 
-    virtual IFactoryObject* _construct() { return (luabind::call_member<IFactoryObject*>(this, "_construct")); }
-    static IFactoryObject* _construct_static(TBase* self) { return (self->TBase::_construct()); }
+    virtual IFactoryObject* _construct()
+    {
+        return (luabind::call_member<IFactoryObject*>(this, "_construct"));
+    }
+    static IFactoryObject* _construct_static(TBase* self)
+    {
+        return (self->TBase::_construct());
+    }
 
 private:
     // not exported
@@ -38,7 +44,7 @@ private:
     }
 };
 
-typedef FactoryObjectWrapperTpl<IFactoryObject> FactoryObjectWrapper;
+using FactoryObjectWrapper = FactoryObjectWrapperTpl<IFactoryObject>;
 
 template <typename TBase, typename... TClasses>
 class ISheduledWrapper : public TBase, public TClasses...
@@ -58,7 +64,7 @@ public:
     }
 };
 
-typedef ISheduledWrapper<ISheduled, luabind::wrap_base> CISheduledWrapper;
+using CISheduledWrapper = ISheduledWrapper<ISheduled, luabind::wrap_base>;
 
 template <typename... TBaseClasses>
 class IRenderableWrapper : public TBaseClasses...
@@ -80,13 +86,41 @@ public:
     CGameObjectWrapper() = default;
     virtual ~CGameObjectWrapper() = default;
 
-    virtual bool use(CGameObject* who_use) { return call<bool>("use", who_use); }
-    static bool use_static(CGameObject* self, CGameObject* who_use) { return self->CGameObject::use(who_use); }
-    virtual void net_Import(NET_Packet& packet) { call<void>("net_Import", &packet); }
-    static void net_Import_static(CGameObject* self, NET_Packet* packet) { self->CGameObject::net_Import(*packet); }
-    virtual void net_Export(NET_Packet& packet) { call<void>("net_Export", &packet); }
-    static void net_Export_static(CGameObject* self, NET_Packet* packet) { self->CGameObject::net_Export(*packet); }
-    virtual bool net_Spawn(CSE_Abstract* data) { return (luabind::call_member<bool>(this, "net_Spawn", data)); }
+    virtual bool use(CGameObject* who_use)
+    {
+        return call<bool>("use", who_use);
+    }
+
+    static bool use_static(CGameObject* self, CGameObject* who_use)
+    {
+        return self->CGameObject::use(who_use);
+    }
+
+    virtual void net_Import(NET_Packet& packet)
+    {
+        call<void>("net_Import", &packet);
+    }
+
+    static void net_Import_static(CGameObject* self, NET_Packet* packet)
+    {
+        self->CGameObject::net_Import(*packet);
+    }
+
+    virtual void net_Export(NET_Packet& packet)
+    {
+        call<void>("net_Export", &packet);
+    }
+
+    static void net_Export_static(CGameObject* self, NET_Packet* packet)
+    {
+        self->CGameObject::net_Export(*packet);
+    }
+
+    virtual bool net_Spawn(CSE_Abstract* data)
+    {
+        return (luabind::call_member<bool>(this, "net_Spawn", data));
+    }
+
     static bool net_Spawn_static(CGameObject* self, CSE_Abstract* abstract)
     {
         return (!!self->CGameObject::net_Spawn(abstract));
@@ -120,4 +154,39 @@ public:
         GEnv.ScriptEngine->script_log(
             LuaMessageType::Error, "You are trying to call a pure virtual function CEntity::HitImpulse!");
     }
+};
+
+class CScriptFlags
+{
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
+};
+
+class CScriptFcolor
+{
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
+};
+
+class CScriptFvector
+{
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
+};
+
+class CScriptFmatrix
+{
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
+};
+
+class fs_registrator
+{
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
+};
+
+class CScriptReader
+{
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CScriptFvector);
+};
+
+class CScriptNetPacket
+{
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CScriptFvector, CScriptFmatrix);
 };

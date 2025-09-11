@@ -9,11 +9,11 @@
 #include "xrPhysics/PhysicsExternalCommon.h"
 #include "PHSoundPlayer.h"
 #include "PhysicsShellHolder.h"
-#include "PHCommander.h"
+#include "xrPhysics/PHCommander.h"
 #include "xrPhysics/MathUtils.h"
 #include "xrPhysics/IPHWorld.h"
 
-#include "PHReqComparer.h"
+#include "xrPhysics/PHReqComparer.h"
 
 #include "Include/xrRender/FactoryPtr.h"
 #include "Include/xrRender/WallMarkArray.h"

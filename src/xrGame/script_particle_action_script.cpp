@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "script_particle_action.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptParticleAction, (),
+#include "script_particle_action.h"
+
+void CScriptParticleAction::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -30,4 +30,4 @@ SCRIPT_EXPORT(CScriptParticleAction, (),
             .def("set_velocity", &CScriptParticleAction::SetVelocity)
             .def("completed", &CScriptAbstractAction::completed)
     ];
-});
+}

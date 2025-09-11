@@ -33,6 +33,9 @@ public:
     IC void SetObjectAction(MonsterSpace::EObjectAction tObjectActionType);
     IC void SetQueueSize(u32 dwQueueSize);
     IC void initialize();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_object_action_inline.h"

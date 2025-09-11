@@ -4,6 +4,8 @@
 
 #include <SDL.h>
 
+#include "xrCore/_vector2.h"
+
 #if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__) && !(defined(__APPLE__) && TARGET_OS_IOS) && !defined(__amigaos4__)
 #   define SDL_HAS_CAPTURE_AND_GLOBAL_MOUSE 1
 #else

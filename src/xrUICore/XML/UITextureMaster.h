@@ -65,4 +65,7 @@ protected:
     static xr_map<shared_str, TEX_INFO> m_textures;
 
     static xr_map<sh_pair, ui_shader> m_shaders;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

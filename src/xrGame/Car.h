@@ -671,4 +671,6 @@ private:
     virtual CHolderCustom* cast_holder_custom() { return this; }
 private:
     car_memory* m_memory;
+
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject, CHolderCustom);
 };

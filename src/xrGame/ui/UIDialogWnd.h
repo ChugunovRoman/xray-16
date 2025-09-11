@@ -1,8 +1,8 @@
 #pragma once
-#include "xrUICore/Windows/UIWindow.h"
-#include "UIDialogHolder.h"
 
-class CDialogHolder;
+#include "xrUICore/Windows/UIWindow.h"
+
+#include "UIDialogHolder.h"
 
 class CUIDialogWnd : public CUIWindow
 {
@@ -37,4 +37,7 @@ public:
 
     pcstr GetDebugType() override { return "CUIDialogWnd"; }
     void FillDebugInfo() override;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIWindow, CDialogHolder);
 };

@@ -180,4 +180,7 @@ private:
     void fill_shapes_list(CEntityAlive const* entity, Fvector const& camera_endpos, victims_shapes_list_t& dest_shapes);
     void make_hit_sort_vectors(Fvector& basis_hit_specific, float& max_dist);
     void fill_shots_list(victims_shapes_list_t& victims_shapres, Fsphere const& query, shot_targets_t& dest_shots);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeapon);
 };

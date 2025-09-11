@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "alife_simulator.h"
 #include "ai_space.h"
 #include "alife_object_registry.h"
@@ -19,7 +20,7 @@
 #include "alife_registry_container.h"
 #include "xrServer.h"
 #include "Level.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
+
 #include "xrNetServer/NET_Messages.h"
 
 typedef xr_vector<std::pair<shared_str, int>> STORY_PAIRS;
@@ -451,7 +452,7 @@ void set_start_game_level_id(u32 id)
     g_start_level_vertex_id = id;
 }
 
-SCRIPT_EXPORT(CALifeSimulator, (),
+void CALifeSimulator::script_register(lua_State* luaState)
 {
     using namespace luabind;
     using namespace luabind::policy;
@@ -504,7 +505,7 @@ SCRIPT_EXPORT(CALifeSimulator, (),
             .def("set_switch_distance", (void (CALifeSimulator::*)(float))
                (&CALifeSimulator::set_switch_distance)) //Alundaio: renamed to set_switch_distance from switch_distance
             //Alundaio: extend alife simulator exports
-            .def("teleport_object", &teleport_object)
+            .def("teleport_object", &CALifeSimulator::teleport_object)
             .def("iterate_objects", &iterate_objects)
             .def("iterate_info", &IterateInfo)
             .def("clone_weapon", (CSE_Abstract* (*)(CALifeSimulator*, CSE_Abstract*, pcstr, const Fvector&, u32,
@@ -513,7 +514,7 @@ SCRIPT_EXPORT(CALifeSimulator, (),
                 GameGraph::_GRAPH_ID, ALife::_OBJECT_ID, bool))&try_to_clone_object)
             .def("register", &reprocess_spawn)
             .def("set_objects_per_update", &set_objects_per_update)
-            .def("set_process_time", &set_process_time)
+            .def("set_process_time", &CALifeSimulator::set_process_time)
             .def("get_children", &get_children, return_stl_iterator()),
             //Alundaio: END
 
@@ -563,7 +564,7 @@ SCRIPT_EXPORT(CALifeSimulator, (),
 
         luabind::module(luaState)[instance];
     }
-});
+}
 
 #if 0 // def DEBUG
 struct dummy {

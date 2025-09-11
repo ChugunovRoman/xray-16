@@ -34,6 +34,9 @@ public:
     IC CScriptActionCondition() = default;
     IC CScriptActionCondition(u32 dwFlags, double dTime = -1);
     IC void initialize();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_action_condition_inline.h"

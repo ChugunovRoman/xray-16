@@ -1,4 +1,5 @@
 #pragma once
+
 #include "xrUICore/Static/UIStatic.h"
 
 class XRUICORE_API CUIButton : public CUIStatic
@@ -59,4 +60,7 @@ protected:
     ButtonAccelerator m_accelerators[4]{};
     E_BUTTON_STATE m_eButtonState;
     bool m_bIsSwitch;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIStatic, CUIWindow);
 };

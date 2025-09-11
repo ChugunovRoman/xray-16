@@ -7,11 +7,12 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch.hpp"
+
 #include "patrol_path_params.h"
 #include "patrol_path_storage.h"
-#include "xrScriptEngine/script_engine.hpp"
-#include "xrScriptEngine/DebugMacros.hpp" // for THROW3 // XXX: move debug macros to xrCore
 #include "AISpaceBase.hpp"
+
+#include "xrScriptEngine/script_engine.hpp"
 
 CPatrolPathParams::CPatrolPathParams(LPCSTR caPatrolPathToGo, EPatrolStartType tPatrolPathStart,
     EPatrolRouteType tPatrolPathStop, bool bRandom, u32 index)

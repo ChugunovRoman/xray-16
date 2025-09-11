@@ -11,9 +11,6 @@
   <ImportGroup Label="PropertySheets">
     <Import Project="..\xray_project_configuration.props" />
   </ImportGroup>
-  <PropertyGroup Label="Configuration" Condition="$(Configuration.Contains('Master Gold'))">
-    <ConfigurationType>StaticLibrary</ConfigurationType>
-  </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
@@ -56,6 +53,7 @@
     <ClCompile Include="PHCaptureInit.cpp" />
     <ClCompile Include="PHCharacter.cpp" />
     <ClCompile Include="PHCollideValidator.cpp" />
+    <ClCompile Include="PHCommander.cpp" />
     <ClCompile Include="PHContactBodyEffector.cpp" />
     <ClCompile Include="PHDisabling.cpp" />
     <ClCompile Include="PHDynamicData.cpp" />
@@ -69,20 +67,24 @@
     <ClCompile Include="PHJointDestroyInfo.cpp" />
     <ClCompile Include="PHMoveStorage.cpp" />
     <ClCompile Include="PHObject.cpp" />
+    <ClCompile Include="PHScriptCall.cpp" />
     <ClCompile Include="PHShell.cpp" />
     <ClCompile Include="PHShellActivate.cpp" />
     <ClCompile Include="PHShellNetState.cpp" />
     <ClCompile Include="PHShellSplitter.cpp" />
+    <ClCompile Include="PHSimpleCalls.cpp" />
+    <ClCompile Include="PHSimpleCallsScript.cpp" />
     <ClCompile Include="PHSimpleCharacter.cpp" />
     <ClCompile Include="PHSplitedShell.cpp" />
     <ClCompile Include="PHStaticGeomShell.cpp" />
     <ClCompile Include="phvalide.cpp" />
     <ClCompile Include="PHWorld.cpp" />
+    <ClCompile Include="PHWorldScript.cpp" />
     <ClCompile Include="Physics.cpp" />
     <ClCompile Include="PhysicsExternalCommon.cpp" />
     <ClCompile Include="PhysicsShell.cpp" />
     <ClCompile Include="PhysicsShellAnimator.cpp" />
-    <ClCompile Include="physics_scripted.cpp" />
+    <ClCompile Include="PhysicsShellScript.cpp" />
     <ClCompile Include="ShellHit.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
@@ -124,7 +126,6 @@
     <ClInclude Include="IPHStaticGeomShell.h" />
     <ClInclude Include="IPHWorld.h" />
     <ClInclude Include="IPhysicsShellHolder.h" />
-    <ClInclude Include="iphysics_scripted.h" />
     <ClInclude Include="MathUtils.h" />
     <ClInclude Include="MathUtilsOde.h" />
     <ClInclude Include="matrix_utils.h" />
@@ -140,6 +141,7 @@
     <ClInclude Include="PHCapture.h" />
     <ClInclude Include="PHCharacter.h" />
     <ClInclude Include="PHCollideValidator.h" />
+    <ClInclude Include="PHCommander.h" />
     <ClInclude Include="PHContactBodyEffector.h" />
     <ClInclude Include="PHDefs.h" />
     <ClInclude Include="PHDisabling.h" />
@@ -156,9 +158,12 @@
     <ClInclude Include="PHJointDestroyInfo.h" />
     <ClInclude Include="PHMoveStorage.h" />
     <ClInclude Include="PHObject.h" />
+    <ClInclude Include="PHReqComparer.h" />
+    <ClInclude Include="PHScriptCall.h" />
     <ClInclude Include="PHShell.h" />
     <ClInclude Include="PHShellBuildJoint.h" />
     <ClInclude Include="PHShellSplitter.h" />
+    <ClInclude Include="PHSimpleCalls.h" />
     <ClInclude Include="PHSimpleCharacter.h" />
     <ClInclude Include="PHSimpleCharacterInline.h" />
     <ClInclude Include="PHSplitedShell.h" />
@@ -173,7 +178,6 @@
     <ClInclude Include="PhysicsShell.h" />
     <ClInclude Include="PhysicsShellAnimator.h" />
     <ClInclude Include="PhysicsShellAnimatorBoneData.h" />
-    <ClInclude Include="physics_scripted.h" />
     <ClInclude Include="ph_valid_ode.h" />
     <ClInclude Include="SpaceUtils.h" />
     <ClInclude Include="stdafx.h" />
@@ -219,6 +223,12 @@
     </ProjectReference>
     <ProjectReference Include="$(SolutionDir)xrMaterialSystem\xrMaterialSystem.vcxproj">
       <Project>{2c419512-6eee-4707-bc51-2e834855552e}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\Externals\luabind.vcxproj">
+      <Project>{ccd4afae-aa10-42c6-a452-fdee497ccdf1}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\Externals\LuaJIT-proj\LuaJIT.vcxproj">
+      <Project>{632aeeb6-dc06-4e15-9551-b2b09a4b73c5}</Project>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>

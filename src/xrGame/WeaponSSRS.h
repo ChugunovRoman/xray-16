@@ -18,5 +18,6 @@ protected:
     virtual void FireStart();
     virtual void OnStateSwitch(u32 S, u32 oldState);
 private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponMagazined);
     void ReloadRL();
 };

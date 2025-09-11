@@ -7,13 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "xrServer_Objects_ALife_Monsters.h"
 #include "xrServer_script_macroses.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-void set_yaw(CSE_ALifeObjectPhysic* obj, const float yaw) { obj->o_Angle.y = yaw; }
-
-SCRIPT_EXPORT(CSE_ALifeObjectHangingLamp, (CSE_ALifeDynamicObjectVisual, CSE_PHSkeleton),
+void CSE_ALifeObjectHangingLamp::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -22,9 +20,9 @@ SCRIPT_EXPORT(CSE_ALifeObjectHangingLamp, (CSE_ALifeDynamicObjectVisual, CSE_PHS
         luabind_class_dynamic_alife2(
             CSE_ALifeObjectHangingLamp, "cse_alife_object_hanging_lamp", CSE_ALifeDynamicObjectVisual, CSE_PHSkeleton)
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifeObjectPhysic, (CSE_ALifeDynamicObjectVisual, CSE_PHSkeleton),
+void CSE_ALifeObjectPhysic::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -33,11 +31,11 @@ SCRIPT_EXPORT(CSE_ALifeObjectPhysic, (CSE_ALifeDynamicObjectVisual, CSE_PHSkelet
         luabind_class_dynamic_alife2(
             CSE_ALifeObjectPhysic, "cse_alife_object_physic", CSE_ALifeDynamicObjectVisual, CSE_PHSkeleton
         )
-        .def("set_yaw", &set_yaw)
+        .def("set_yaw", +[](CSE_ALifeObjectPhysic* obj, const float yaw) { obj->o_Angle.y = yaw; })
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifeSmartZone, (CSE_ALifeSpaceRestrictor, CSE_ALifeSchedulable),
+void CSE_ALifeSmartZone::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -46,4 +44,4 @@ SCRIPT_EXPORT(CSE_ALifeSmartZone, (CSE_ALifeSpaceRestrictor, CSE_ALifeSchedulabl
         luabind_class_zone2(
             CSE_ALifeSmartZone, "cse_alife_smart_zone", CSE_ALifeSpaceRestrictor, CSE_ALifeSchedulable)
     ];
-});
+}

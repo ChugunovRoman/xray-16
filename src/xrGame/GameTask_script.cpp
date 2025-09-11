@@ -1,6 +1,6 @@
 #include "pch_script.h"
+
 #include "GameTask.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
 void CGameTask::AddObjective_script(SGameTaskObjective* O)
 {
@@ -13,7 +13,7 @@ SGameTaskObjective* CGameTask::GetObjective_script(TASK_OBJECTIVE_ID objective_i
     return &Objective(objective_id);
 }
 
-SCRIPT_EXPORT(CGameTask, (),
+void CGameTask::script_register(lua_State* luaState)
 {
     using namespace luabind;
     using namespace luabind::policy;
@@ -96,9 +96,9 @@ SCRIPT_EXPORT(CGameTask, (),
             .def("get_objective", &CGameTask::GetObjective_script)
 
             .def("get_objectives_cnt", &CGameTask::GetObjectivesCount)
-            .def("get_objectives_cnt", +[](CGameTask* self)
+            .def("get_objectives_cnt", +[](const CGameTask* self)
             {
                 return self->GetObjectivesCount(false);
             })
     ];
-});
+}

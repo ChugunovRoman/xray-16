@@ -7,11 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "xrServer_Objects_ALife.h"
 #include "xrServer_script_macroses.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CSE_ALifeSchedulable, (),
+void CSE_ALifeSchedulable::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -23,9 +23,9 @@ SCRIPT_EXPORT(CSE_ALifeSchedulable, (),
         class_<CSE_ALifeSchedulable, IPureSchedulableObject>("cse_alife_schedulable")
         //			.def(		constructor<pcstr>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifeGraphPoint, (CSE_Abstract),
+void CSE_ALifeGraphPoint::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -33,9 +33,9 @@ SCRIPT_EXPORT(CSE_ALifeGraphPoint, (CSE_Abstract),
     [
         luabind_class_abstract1(CSE_ALifeGraphPoint, "cse_alife_graph_point", CSE_Abstract)
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifeObject, (CSE_Abstract),
+void CSE_ALifeObject::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -54,9 +54,9 @@ SCRIPT_EXPORT(CSE_ALifeObject, (CSE_Abstract),
             .def_readonly("m_game_vertex_id", &CSE_ALifeObject::m_tGraphID)
             .def_readonly("m_story_id", &CSE_ALifeObject::m_story_id)
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifeGroupAbstract, (),
+void CSE_ALifeGroupAbstract::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -65,16 +65,19 @@ SCRIPT_EXPORT(CSE_ALifeGroupAbstract, (),
         class_<CSE_ALifeGroupAbstract>("cse_alife_group_abstract")
         //			.def(		constructor<pcstr>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifeDynamicObject, (CSE_ALifeObject),
+void CSE_ALifeDynamicObject::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
-    module(luaState)[luabind_class_dynamic_alife1(CSE_ALifeDynamicObject, "cse_alife_dynamic_object", CSE_ALifeObject)];
-});
+    module(luaState)
+    [
+        luabind_class_dynamic_alife1(CSE_ALifeDynamicObject, "cse_alife_dynamic_object", CSE_ALifeObject)
+    ];
+}
 
-SCRIPT_EXPORT(CSE_ALifeDynamicObjectVisual, (CSE_ALifeDynamicObject, CSE_Visual),
+void CSE_ALifeDynamicObjectVisual::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -83,9 +86,9 @@ SCRIPT_EXPORT(CSE_ALifeDynamicObjectVisual, (CSE_ALifeDynamicObject, CSE_Visual)
         luabind_class_dynamic_alife2(
             CSE_ALifeDynamicObjectVisual, "cse_alife_dynamic_object_visual", CSE_ALifeDynamicObject, CSE_Visual)
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifePHSkeletonObject, (CSE_ALifeDynamicObjectVisual, CSE_PHSkeleton),
+void CSE_ALifePHSkeletonObject::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -94,9 +97,9 @@ SCRIPT_EXPORT(CSE_ALifePHSkeletonObject, (CSE_ALifeDynamicObjectVisual, CSE_PHSk
         luabind_class_dynamic_alife2(
             CSE_ALifePHSkeletonObject, "cse_alife_ph_skeleton_object", CSE_ALifeDynamicObjectVisual, CSE_PHSkeleton)
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifeSpaceRestrictor, (CSE_ALifeDynamicObject, CSE_Shape),
+void CSE_ALifeSpaceRestrictor::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -105,9 +108,9 @@ SCRIPT_EXPORT(CSE_ALifeSpaceRestrictor, (CSE_ALifeDynamicObject, CSE_Shape),
         luabind_class_dynamic_alife2(
             CSE_ALifeSpaceRestrictor, "cse_alife_space_restrictor", CSE_ALifeDynamicObject, CSE_Shape)
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifeLevelChanger, (CSE_ALifeSpaceRestrictor),
+void CSE_ALifeLevelChanger::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -118,9 +121,9 @@ SCRIPT_EXPORT(CSE_ALifeLevelChanger, (CSE_ALifeSpaceRestrictor),
         )
         .property("get_dest_level_name", +[](CSE_ALifeLevelChanger* self) { return self->m_caLevelToChange.c_str(); })
     ];
-});
+}
 
-SCRIPT_EXPORT(CSE_ALifeInventoryBox, (CSE_ALifeDynamicObjectVisual),
+void CSE_ALifeInventoryBox::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -129,4 +132,4 @@ SCRIPT_EXPORT(CSE_ALifeInventoryBox, (CSE_ALifeDynamicObjectVisual),
         luabind_class_dynamic_alife1(
             CSE_ALifeInventoryBox, "cse_alife_inventory_box", CSE_ALifeDynamicObjectVisual)
     ];
-});
+}

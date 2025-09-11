@@ -33,6 +33,8 @@ public:
 private:
     typedef xr_list<std::pair<shared_str, IReader*>> configs_type;
     mutable configs_type m_configs_lru;
+
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #pragma warning(pop)

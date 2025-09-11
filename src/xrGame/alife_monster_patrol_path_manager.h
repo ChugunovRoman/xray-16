@@ -64,6 +64,9 @@ public:
     const _GRAPH_ID& target_game_vertex_id() const;
     const u32& target_level_vertex_id() const;
     const Fvector& target_position() const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "alife_monster_patrol_path_manager_inline.h"

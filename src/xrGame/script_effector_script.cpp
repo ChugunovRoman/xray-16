@@ -7,15 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "script_effector.h"
 #include "script_effector_wrapper.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-void SPPInfo_assign(SPPInfo* self, SPPInfo* obj) { *self = *obj; }
-void add_effector(CScriptEffector* self) { self->Add(); }
-void remove_effector(CScriptEffector* self) { self->Remove(); }
-
-SCRIPT_EXPORT(CScriptEffector, (),
+void CScriptEffector::script_register(lua_State* luaState)
 {
     using namespace luabind;
     using namespace luabind::policy;
@@ -54,12 +50,12 @@ SCRIPT_EXPORT(CScriptEffector, (),
             .def_readwrite("color_gray", &SPPInfo::color_gray)
             .def_readwrite("color_add", &SPPInfo::color_add)
             .def(constructor<>())
-            .def("assign", &SPPInfo_assign),
+            .def("assign", +[](SPPInfo* self, const SPPInfo* obj) { *self = *obj; }),
 
         class_<CScriptEffector, no_bases, default_holder, CScriptEffectorWrapper>("effector")
             .def(constructor<int, float>())
-            .def("start", &add_effector, adopt<1>())
-            .def("finish", &remove_effector, adopt<1>())
+            .def("start", +[](CScriptEffector* self) { self->Add(); }, adopt<1>())
+            .def("finish", +[](CScriptEffector* self) { self->Remove(); }, adopt<1>())
             .def("process", &CScriptEffector::process, &CScriptEffectorWrapper::process_static)
     ];
-});
+}

@@ -1,4 +1,5 @@
 #include "pch_script.h"
+
 #include "game_cl_single.h"
 #include "UIGameSP.h"
 #include "Actor.h"
@@ -6,7 +7,6 @@
 #include "ai_space.h"
 #include "alife_simulator.h"
 #include "alife_time_manager.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 #include "xrCore/xr_token.h"
 
 ESingleGameDifficulty g_SingleGameDifficulty = egdStalker;
@@ -90,24 +90,3 @@ void game_cl_Single::SetEnvironmentGameTimeFactor(ALife::_TIME_ID GameTime, cons
     else
         inherited::SetEnvironmentGameTimeFactor(GameTime, fTimeFactor);
 }
-
-SCRIPT_EXPORT(CScriptGameDifficulty, (),
-{
-    using namespace luabind;
-
-    class CScriptGameDifficulty
-    {
-    };
-
-    module(luaState)
-    [
-        class_<CScriptGameDifficulty>("game_difficulty")
-            .enum_("game_difficulty")
-        [
-            value("novice", int(egdNovice)),
-            value("stalker", int(egdStalker)),
-            value("veteran", int(egdVeteran)),
-            value("master", int(egdMaster))
-        ]
-    ];
-});

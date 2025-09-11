@@ -9,8 +9,6 @@
 #include "xrUICore/MessageBox/UIMessageBox.h"
 #include "xrUICore/PropertiesBox/UIPropertiesBox.h"
 
-#include "xrScriptEngine/ScriptExporter.hpp"
-
 #if LUA_VERSION_NUM < 502
 #   define lua_getuservalue lua_getfenv
 #   define lua_setuservalue lua_setfenv
@@ -214,8 +212,7 @@ struct CUIDialogWndExWrapperBase final : public CUIDialogWndEx, public luabind::
     }
 };
 
-// clang-format off
-SCRIPT_EXPORT(CUIDialogWndEx, (CUIDialogWnd, IFactoryObject),
+void CUIDialogWndEx::script_register(lua_State* luaState)
 {
     using namespace luabind;
     using BaseType = CUIDialogWndEx;
@@ -255,5 +252,4 @@ SCRIPT_EXPORT(CUIDialogWndEx, (CUIDialogWnd, IFactoryObject),
             .def("GetListBox",      &BaseType::GetControl<CUIListBox>)
             .def("GetListWnd",      &BaseType::GetControl<CUIListWnd>)
     ];
-});
-// clang-format on
+}

@@ -7,21 +7,27 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "script_action_planner_wrapper.h"
 #include "script_game_object.h"
 #include "action_base.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
 void set_goal_world_state(CScriptActionPlanner* action_planner, CScriptActionPlanner::CState* world_state)
 {
     action_planner->set_target_state(*world_state);
 }
 
-bool get_actual(const CScriptActionPlanner* action_planner) { return (action_planner->actual()); }
+bool get_actual(const CScriptActionPlanner* action_planner)
+{
+    return (action_planner->actual());
+}
 
-CScriptActionPlanner* cast_planner(CScriptActionBase* action) { return (smart_cast<CScriptActionPlanner*>(action)); }
+CScriptActionPlanner* cast_planner(CScriptActionBase* action)
+{
+    return (smart_cast<CScriptActionPlanner*>(action));
+}
 
-IC static void CScriptActionPlanner_Export(lua_State* luaState)
+void CScriptActionPlannerExport::script_register(lua_State* luaState)
 {
     using namespace luabind;
     using namespace luabind::policy;
@@ -60,5 +66,3 @@ IC static void CScriptActionPlanner_Export(lua_State* luaState)
         def("cast_planner", &cast_planner)
     ];
 }
-
-SCRIPT_EXPORT_FUNC(CScriptActionPlanner, (), CScriptActionPlanner_Export);

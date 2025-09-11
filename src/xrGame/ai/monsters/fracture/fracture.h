@@ -15,4 +15,7 @@ public:
     virtual void CheckSpecParams(u32 spec_params);
 
     pcstr get_monster_class_name() override { return "fracture"; }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

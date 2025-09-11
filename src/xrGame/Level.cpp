@@ -29,7 +29,6 @@
 #include "ClimableObject.h"
 #include "xrAICore/Navigation/level_graph.h"
 #include "mt_config.h"
-#include "PHCommander.h"
 #include "map_manager.h"
 #include "xrEngine/CameraManager.h"
 #include "level_sounds.h"
@@ -47,6 +46,7 @@
 #include "DemoInfo.h"
 #include "CustomDetector.h"
 #include "xrPhysics/IPHWorld.h"
+#include "xrPhysics/PHCommander.h"
 #include "xrPhysics/console_vars.h"
 #include "xrNetServer/NET_Messages.h"
 #include "xrEngine/GameFont.h"
@@ -132,7 +132,6 @@ CLevel::~CLevel()
     if (physics_world())
     {
         destroy_physics_world();
-        xr_delete(m_ph_commander_physics_worldstep);
     }
     // destroy PSs
     for (auto& ps : m_StaticParticles)

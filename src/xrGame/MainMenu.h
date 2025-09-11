@@ -200,6 +200,9 @@ public:
     demo_info const* GetDemoInfo(LPCSTR file_name);
 
     CEventNotifierCallback::CID m_script_reset_event_cid;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CDialogHolder);
 };
 
 extern CMainMenu* MainMenu();

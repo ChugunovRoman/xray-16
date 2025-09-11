@@ -7,16 +7,19 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "smart_cover.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(smart_cover_object, (CGameObject),
+#include "smart_cover.h"
+
+namespace smart_cover
+{
+void object::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
     module(luaState)
     [
         class_<smart_cover::object, CGameObject>("smart_cover_object")
-        .def(constructor<>())
+            .def(constructor<>())
     ];
-});
+}
+} // namespace smart_cover

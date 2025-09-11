@@ -8,10 +8,14 @@
 #include "Include/xrRender/WallMarkArray.h"
 #include "Include/xrRender/RenderFactory.h"
 
-#ifdef XRMTL_LIB_EXPORTS
-#define MTL_EXPORT_API XR_EXPORT
+#ifdef XRAY_STATIC_BUILD
+#   define MTL_EXPORT_API
 #else
-#define MTL_EXPORT_API XR_IMPORT
+#   ifdef XRMTL_LIB_EXPORTS
+#       define MTL_EXPORT_API XR_EXPORT
+#   else
+#       define MTL_EXPORT_API XR_IMPORT
+#   endif
 #endif
 
 constexpr u32 GAMEMTLS_CHUNK_VERSION      = 0x1000;

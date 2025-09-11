@@ -47,4 +47,7 @@ protected:
     float m_fUD_InertiaFactor; // Фактор вертикальной инерции худа при движении камеры [-1; +1]
 
     Fvector m_strafe_offset[4][2]; //pos,rot,data1,data2/ normal,aim-GL --#SM+#--
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

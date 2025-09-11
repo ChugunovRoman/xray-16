@@ -22,8 +22,6 @@ struct Rank_Struct
 
 class game_sv_mp : public game_sv_GameState
 {
-    friend void game_sv_mp_script_register(lua_State* luaState);
-
     using inherited = game_sv_GameState;
 
 protected:
@@ -212,6 +210,9 @@ public:
     virtual void Player_ExperienceFin(game_PlayerState* ps);
     virtual void Player_AddMoney(game_PlayerState* ps, s32 MoneyAmount);
     void SpawnPlayer(ClientID id, LPCSTR N);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(game_sv_GameState);
 };
 
 struct SearcherClientByName

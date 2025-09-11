@@ -16,12 +16,8 @@
         4458 : declaration of 'x' hides class member
         -->
       <DisableSpecificWarnings>4201;4251;4275;4458</DisableSpecificWarnings>
-      <!--
-        LUABIND_DYNAMIC_LINK : self-explanatory
-        MSVC;dSINGLE;WIN32 : for ODE and xrPhysics
-        -->
+      <!-- MSVC;dSINGLE;WIN32 : for ODE and xrPhysics -->
       <PreprocessorDefinitions>
-        LUABIND_DYNAMIC_LINK;
         MSVC;
         dSINGLE;
         WIN32;
@@ -44,6 +40,16 @@
       <LargeAddressAware>true</LargeAddressAware>
       <SubSystem>Windows</SubSystem>
     </Link>
+  </ItemDefinitionGroup>
+
+  <!-- Common non Master Gold settings -->
+  <ItemDefinitionGroup Condition="!$(Configuration.Contains('Master Gold'))">
+    <ClCompile>
+      <PreprocessorDefinitions>
+        LUABIND_DYNAMIC_LINK;
+        %(PreprocessorDefinitions)
+      </PreprocessorDefinitions>
+    </ClCompile>
   </ItemDefinitionGroup>
 
   <!-- Common debug settings -->
@@ -120,6 +126,7 @@
     <ClCompile>
       <ExceptionHandling>false</ExceptionHandling>
       <PreprocessorDefinitions>
+        XRAY_STATIC_BUILD;
         MASTER_GOLD;
         _HAS_EXCEPTIONS=0;
         LUABIND_NO_EXCEPTIONS;

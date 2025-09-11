@@ -1,4 +1,5 @@
 #include "pch_script.h"
+
 #include "HangingLamp.h"
 #include "xrEngine/LightAnimLibrary.h"
 #include "xrEngine/xr_collide_form.h"
@@ -10,7 +11,6 @@
 #include "game_object_space.h"
 #include "xrScriptEngine/script_callback_ex.h"
 #include "script_game_object.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -406,9 +406,14 @@ void CHangingLamp::CreateBody(CSE_ALifeObjectHangingLamp* lamp)
 void CHangingLamp::net_Export(NET_Packet& P) { VERIFY(Local()); }
 void CHangingLamp::net_Import(NET_Packet& P) { VERIFY(Remote()); }
 bool CHangingLamp::UsedAI_Locations() { return (FALSE); }
-SCRIPT_EXPORT(CHangingLamp, (CGameObject), {
-    luabind::module(luaState)[luabind::class_<CHangingLamp, CGameObject>("hanging_lamp")
-                                  .def(luabind::constructor<>())
-                                  .def("turn_on", &CHangingLamp::TurnOn)
-                                  .def("turn_off", &CHangingLamp::TurnOff)];
-});
+
+void CHangingLamp::script_register(lua_State* luaState)
+{
+    luabind::module(luaState)
+    [
+        luabind::class_<CHangingLamp, CGameObject>("hanging_lamp")
+            .def(luabind::constructor<>())
+            .def("turn_on", &CHangingLamp::TurnOn)
+            .def("turn_off", &CHangingLamp::TurnOff)
+    ];
+}

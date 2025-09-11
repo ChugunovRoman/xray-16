@@ -96,6 +96,9 @@ public:
     shared_str m_section_id;
     shared_str m_section_attachs_id;
     float m_fSpawnProp;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIStatic);
 };
 
 class CUIDragItem final : public CUIWindow, public pureRender, public pureFrame

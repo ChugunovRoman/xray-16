@@ -9,4 +9,7 @@ class CWeaponGroza : public CWeaponMagazinedWGrenade
 public:
     CWeaponGroza();
     virtual ~CWeaponGroza();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponMagazinedWGrenade);
 };

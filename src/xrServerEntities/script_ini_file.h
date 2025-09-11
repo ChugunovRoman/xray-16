@@ -49,4 +49,7 @@ public:
     void w_u8(pcstr S, pcstr L, u8 V, pcstr comment /* = nullptr */);
     bool save_as(pcstr new_fname /* = nullptr */);
     void remove_line(pcstr S, pcstr L);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

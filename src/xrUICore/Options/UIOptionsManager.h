@@ -1,4 +1,5 @@
 #pragma once
+
 #include "xrCore/xrstring.h"
 #include "xrCommon/xr_vector.h"
 #include "xrCommon/xr_map.h"
@@ -46,4 +47,7 @@ protected:
         e_system_restart = (1 << 3)
     };
     u8 m_restart_flags;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

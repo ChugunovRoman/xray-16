@@ -1,8 +1,8 @@
 #include "pch_script.h"
-#include "flesh.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CAI_Flesh, (CGameObject),
+#include "flesh.h"
+
+void CAI_Flesh::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -11,4 +11,4 @@ SCRIPT_EXPORT(CAI_Flesh, (CGameObject),
         class_<CAI_Flesh, CGameObject>("CAI_Flesh")
             .def(constructor<>())
     ];
-});
+}

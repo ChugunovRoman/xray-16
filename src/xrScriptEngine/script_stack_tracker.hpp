@@ -8,11 +8,8 @@
 
 #pragma once
 
-#include "xrCore/xrCore.h"
-#include "xrScriptEngine/xrScriptEngine.hpp"
+#include "xrScriptEngine.hpp"
 
-struct lua_Debug;
-struct lua_State;
 class CScriptEngine;
 
 class XRSCRIPTENGINE_API CScriptStackTracker

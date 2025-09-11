@@ -122,6 +122,9 @@ public:
     IC void SetPatrolRandom(bool bRandom);
     IC void SetInputKeys(const EInputKeys tInputKeys);
     IC void initialize();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_movement_action_inline.h"

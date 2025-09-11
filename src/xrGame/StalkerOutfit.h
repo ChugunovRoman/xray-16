@@ -15,4 +15,7 @@ private:
 public:
     CStalkerOutfit(void);
     virtual ~CStalkerOutfit(void);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

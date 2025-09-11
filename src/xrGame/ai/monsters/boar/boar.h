@@ -30,4 +30,7 @@ public:
 
     virtual bool ability_can_drag() { return true; }
     pcstr get_monster_class_name() override { return "boar"; }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

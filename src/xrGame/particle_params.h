@@ -18,5 +18,8 @@ struct CParticleParams final
         : m_tParticlePosition(tPositionOffset), m_tParticleAngles(tAnglesOffset), m_tParticleVelocity(tVelocity) {}
 
     void initialize() {}
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 

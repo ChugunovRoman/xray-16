@@ -115,6 +115,12 @@ public:
     virtual ~IRender_ObjectSpecific(){};
 };
 
+struct xrImTextureData
+{
+    ImTextureID texture{};
+    Fvector2 size{};
+};
+
 enum class DeviceState
 {
     Normal = 0,
@@ -281,6 +287,8 @@ public:
     virtual pcstr getShaderPath() = 0;
     // virtual ref_shader getShader (int id) = 0;
     virtual IRenderVisual* getVisual(int id) = 0;
+
+    virtual xrImTextureData GetImGuiTextureId(pcstr texture_name) = 0;
 
     // Main
     virtual void add_Visual(u32 context_id, IRenderable* root, IRenderVisual* V, Fmatrix& m) = 0; // add visual leaf (no culling performed at all)

@@ -1,8 +1,8 @@
 #include "pch_script.h"
-#include "snork.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CSnork, (CGameObject),
+#include "snork.h"
+
+void CSnork::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -11,4 +11,4 @@ SCRIPT_EXPORT(CSnork, (CGameObject),
         class_<CSnork, CGameObject>("CSnork")
         .def(constructor<>())
     ];
-});
+}

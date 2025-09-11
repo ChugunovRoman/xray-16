@@ -1,4 +1,5 @@
 #include "pch_script.h"
+
 #include "ScriptXMLInit.h"
 #include "ui/UIXmlInit.h"
 #include "xrUICore/XML/UITextureMaster.h"
@@ -25,7 +26,6 @@
 #include "xrUICore/ProgressBar/UIProgressBar.h"
 #include "xrGame/ui/UIDragDropListEx.h"
 #include "xrGame/ui/UICellItem.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
 void _attach_child(CUIWindow* _child, CUIWindow* _parent)
 {
@@ -287,7 +287,7 @@ CUICellItem* CScriptXmlInit::InitUICellItem(LPCSTR path, CUIWindow* parent)
     return pWnd;
 }
 
-SCRIPT_EXPORT(CScriptXmlInit, (),
+void CScriptXmlInit::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -329,4 +329,4 @@ SCRIPT_EXPORT(CScriptXmlInit, (),
             .def("InitDragDropListEx", &CScriptXmlInit::InitDragDropListEx)
             .def("InitUICellItem", &CScriptXmlInit::InitUICellItem)
     ];
-});
+}

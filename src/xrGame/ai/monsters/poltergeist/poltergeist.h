@@ -133,6 +133,9 @@ public:
 #endif
 
     friend class CPolterFlame;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };
 
 //////////////////////////////////////////////////////////////////////////

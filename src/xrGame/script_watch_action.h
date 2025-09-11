@@ -56,6 +56,9 @@ public:
     IC void SetWatchDirection(const Fvector& tDirection);
     IC void SetWatchBone(LPCSTR bone_to_watch);
     IC void initialize();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_watch_action_inline.h"

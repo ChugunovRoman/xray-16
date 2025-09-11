@@ -1,4 +1,5 @@
 #include "pch_script.h"
+
 #include "game_base.h"
 #include "xrServer_script_macroses.h"
 #include "xrCore/client_id.h"
@@ -16,7 +17,7 @@ struct CGamePlayerStateWrapperBase : public T, public luabind::wrap_base
     DEFINE_LUA_WRAPPER_METHOD_V0(clear)
 };
 
-SCRIPT_EXPORT(game_PlayerState, (),
+void game_PlayerState::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -52,14 +53,31 @@ SCRIPT_EXPORT(game_PlayerState, (),
         .def("net_Export", &BaseType::net_Export, &WrapType::net_Export_static)
         .def("net_Import", &BaseType::net_Import, &WrapType::net_Import_static)
     ];
-});
+}
 
-void game_GameState_script_register(lua_State* luaState)
+void game_GameState::script_register(lua_State* luaState)
 {
+    class EnumGameIDs {};
+
     using namespace luabind;
 
     module(luaState)
     [
+        class_<EnumGameIDs>("GAME_TYPE")
+            .enum_("gametype")
+            [
+                value("GAME_UNKNOWN", int(eGameIDNoGame)),
+                // SOC IDs
+                value("GAME_DEATHMATCH", int(eGameIDDeathmatch)),
+                value("GAME_TEAMDEATHMATCH", int(eGameIDTeamDeathmatch_SoC)),
+                value("GAME_ARTEFACTHUNT", int(eGameIDArtefactHunt_SoC)),
+                // CS/COP ids
+                value("eGameIDDeathmatch", int(eGameIDDeathmatch)),
+                value("eGameIDTeamDeathmatch", int(eGameIDTeamDeathmatch)),
+                value("eGameIDArtefactHunt", int(eGameIDArtefactHunt)),
+                value("eGameIDCaptureTheArtefact", int(eGameIDCaptureTheArtefact))
+            ],
+
         class_<game_GameState, IFactoryObject>("game_GameState")
             .def(constructor<>())
 
@@ -73,4 +91,3 @@ void game_GameState_script_register(lua_State* luaState)
             .def("StartTime", &game_GameState::StartTime)
     ];
 }
-SCRIPT_EXPORT_FUNC(game_GameState, (IFactoryObject), game_GameState_script_register);

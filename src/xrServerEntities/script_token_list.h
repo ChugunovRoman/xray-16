@@ -50,4 +50,7 @@ public:
     pcstr name(int id);
     const TOKEN_LIST& tokens() const noexcept { return m_token_list; }
     TOKEN_LIST& tokens() noexcept { return m_token_list; }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

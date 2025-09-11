@@ -20,6 +20,9 @@ public:
     IC Fvector const& position() const;
     IC u32 level_vertex_id() const;
     IC bool operator==(CCoverPoint const& point) const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "cover_point_inline.h"

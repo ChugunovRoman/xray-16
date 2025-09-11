@@ -7,17 +7,18 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch.hpp"
+
 #include "patrol_point.h"
 #include "Navigation/level_graph.h"
 #include "Navigation/level_graph.h"
 #include "Navigation/game_level_cross_table.h"
 #include "Navigation/game_graph.h"
-#include "Common/object_broker.h"
-#include "xrScriptEngine/DebugMacros.hpp"
-#include "AISpaceBase.hpp"
 #ifdef DEBUG
 #include "Navigation/PatrolPath/patrol_path.h"
 #endif
+
+#include "AISpaceBase.hpp"
+#include "Common/object_broker.h"
 
 CPatrolPoint::CPatrolPoint(const CPatrolPath* path)
     : m_flags(0), m_level_vertex_id(u32(-1)), m_game_vertex_id(GameGraph::_GRAPH_ID(-1))

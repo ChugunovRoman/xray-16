@@ -1,13 +1,13 @@
 #include "pch_script.h"
+
 #include "helicopter.h"
 #include "script_game_object.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
 int CHelicopter::GetMovementState() { return m_movement.type; }
 int CHelicopter::GetHuntState() { return m_enemy.type; }
 int CHelicopter::GetBodyState() { return m_body.type; }
 
-SCRIPT_EXPORT(CHelicopter, (CGameObject),
+void CHelicopter::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -100,4 +100,4 @@ SCRIPT_EXPORT(CHelicopter, (CGameObject),
             .def_readonly("m_exploded", &CHelicopter::m_exploded)
             .def_readonly("m_dead", &CHelicopter::m_dead)
     ];
-});
+}

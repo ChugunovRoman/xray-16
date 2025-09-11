@@ -1,8 +1,7 @@
 #include "pch_script.h"
 #include "ai_trader.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CAI_Trader, (CGameObject),
+void CAI_Trader::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -11,4 +10,4 @@ SCRIPT_EXPORT(CAI_Trader, (CGameObject),
         class_<CAI_Trader, CGameObject>("CAI_Trader")
             .def(constructor<>())
     ];
-});
+}

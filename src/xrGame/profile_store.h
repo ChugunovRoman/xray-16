@@ -22,5 +22,8 @@ private:
     // These are dummies
     all_awards_t m_awards;
     all_best_scores_t m_best_scores;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 }; // class profile_store
 } // namespace gamespy_profile

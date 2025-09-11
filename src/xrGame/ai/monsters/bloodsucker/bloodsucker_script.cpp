@@ -1,8 +1,8 @@
 #include "pch_script.h"
-#include "bloodsucker.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CAI_Bloodsucker, (CGameObject),
+#include "bloodsucker.h"
+
+void CAI_Bloodsucker::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -12,4 +12,4 @@ SCRIPT_EXPORT(CAI_Bloodsucker, (CGameObject),
             .def(constructor<>())
             .def("force_visibility_state", &CAI_Bloodsucker::force_visibility_state)
     ];
-});
+}

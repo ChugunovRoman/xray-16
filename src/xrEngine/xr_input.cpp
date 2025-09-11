@@ -6,7 +6,6 @@
 #include "GameFont.h"
 #include "XR_IOConsole.h"
 #include "xrCore/Text/StringConversion.hpp"
-#include "xrCore/xr_token.h"
 
 #include <locale>
 

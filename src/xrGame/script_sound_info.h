@@ -28,4 +28,7 @@ public:
         time = p_time;
         dangerous = int(p_danger);
     }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

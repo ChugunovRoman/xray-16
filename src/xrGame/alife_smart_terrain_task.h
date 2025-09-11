@@ -43,6 +43,9 @@ public:
     GameGraph::_GRAPH_ID game_vertex_id() const;
     u32 level_vertex_id() const;
     Fvector position() const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "alife_smart_terrain_task_inline.h"

@@ -21,4 +21,7 @@ protected:
     //для того чтобы blowout обновился один раз
     //после того как зона перключилась в другое состояние
     bool m_bLastBlowoutUpdate;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

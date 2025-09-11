@@ -130,6 +130,9 @@ private:
     /*static void __cdecl			profiles_cb		(GPConnection * connection,
                                                  void * arg,
                                                  void * param);*/
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 }; // class account_manager
 } // namespace gamespy_gp
 

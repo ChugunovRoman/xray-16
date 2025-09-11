@@ -1,13 +1,13 @@
 #include "pch_script.h"
+
 #include "PhysicObject.h"
 #include "PHCollisionDamageReceiver.h"
 #include "PHDestroyable.h"
 #include "hit_immunity.h"
 #include "damage_manager.h"
 #include "DestroyablePhysicsObject.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CPhysicObject, (CGameObject),
+void CPhysicObject::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -28,4 +28,4 @@ SCRIPT_EXPORT(CPhysicObject, (CGameObject),
         class_<CDestroyablePhysicsObject, CPhysicObject>("CDestroyablePhysicsObject")
             .def(constructor<>())
     ];
-});
+}

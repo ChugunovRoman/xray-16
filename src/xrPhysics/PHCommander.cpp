@@ -1,9 +1,10 @@
 #include "StdAfx.h"
+
 #include "PHCommander.h"
 #include "PHSimpleCalls.h"
 
 #ifdef DEBUG
-#include "xrPhysics/IPHWorld.h"
+//#include "PHWorld.h"
 #endif
 
 CPHCall::CPHCall(CPHCondition* condition, CPHAction* action)
@@ -160,8 +161,8 @@ void CPHCommander::remove_call(PHCALL_I i)
         float m = f.magnitude();
         if (m > EPS_S)
             f.mul(1.f / m);
-        // Msg(" const force removed: force: %f,  remove step: %d  world step: %d ,dir(%f,%f,%f) ", m, esc->step(),
-        // (u32)physics_world()->StepsNum(), f.x, f.y , f.z );
+        //Msg(" const force removed: force: %f,  remove step: %u  world step: %u, dir(%f, %f, %f) ",
+        //    m, esc->step(), (u32)ph_world->StepsNum(), VPUSH(f));
     }
 #endif
     delete_call(*i);
@@ -261,10 +262,4 @@ void CPHCommander::RemoveCallsDeferred(CPHReqComparerV* comparer)
             m_callsUpdateDeferred.emplace(call, false);
         }
     }
-}
-
-void CPHCommander::phys_shell_relcase(CPhysicsShell* sh)
-{
-    CPHReqComparerHasShell c(sh);
-    remove_calls_threadsafety(&c);
 }

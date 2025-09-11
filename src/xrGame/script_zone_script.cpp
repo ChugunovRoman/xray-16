@@ -7,12 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "script_zone.h"
 #include "smart_zone.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptZone, (IFactoryObject),
+void CScriptZone::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -21,9 +20,9 @@ SCRIPT_EXPORT(CScriptZone, (IFactoryObject),
         class_<CScriptZone, IFactoryObject>("ce_script_zone")
             .def(constructor<>())
     ];
-});
+}
 
-SCRIPT_EXPORT(CSmartZone, (IFactoryObject),
+void CSmartZone::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -32,4 +31,4 @@ SCRIPT_EXPORT(CSmartZone, (IFactoryObject),
         class_<CSmartZone, IFactoryObject>("ce_smart_zone")
             .def(constructor<>())
     ];
-});
+}

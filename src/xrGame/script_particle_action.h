@@ -47,6 +47,9 @@ public:
     IC void SetAngles(const Fvector& tAngleOffset);
     IC void SetVelocity(const Fvector& tVelocity);
     IC void initialize();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_particle_action_inline.h"

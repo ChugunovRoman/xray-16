@@ -1,7 +1,7 @@
-#ifndef IRENDERABLE_H_INCLUDED
-#define IRENDERABLE_H_INCLUDED
+#pragma once
 
-#include "Render.h"
+class IRenderVisual;
+class IRender_ObjectSpecific;
 
 //////////////////////////////////////////////////////////////////////////
 // definition ("Renderable")
@@ -52,5 +52,3 @@ public:
     bool renderable_HUD() override { return renderable.hud; }
     void renderable_HUD(bool value) override { renderable.hud = value; }
 };
-
-#endif // IRENDERABLE_H_INCLUDED

@@ -169,4 +169,7 @@ private:
 
 public:
     virtual bool run_home_point_when_enemy_inaccessible() const { return false; }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

@@ -7,30 +7,28 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #pragma once
-#include "xrCore/xrCore.h"
-#include "xrScriptEngine/xrScriptEngine.hpp"
-#include "xrScriptEngine/ScriptExporter.hpp"
-#include "xrScriptEngine/script_profiler.hpp"
-#include "xrScriptEngine/script_space_forward.hpp"
-#include "xrScriptEngine/Functor.hpp"
-#include "xrCore/Threading/Lock.hpp"
+
 #include "xrCommon/xr_unordered_map.h"
 
-struct lua_State;
+#include "xrCore/Containers/AssociativeVector.hpp"
+#include "xrCore/Threading/Lock.hpp"
+
+#include "xrScriptEngine.hpp"
+#include "ScriptExporter.hpp"
+#include "script_space_forward.hpp"
+#include "Functor.hpp"
 
 #ifndef MASTER_GOLD
 #define USE_DEBUGGER
 #define USE_LUA_STUDIO
 #endif
 
-#include "xrCore/Containers/AssociativeVector.hpp"
 
 //#define DBG_DISABLE_SCRIPTS
 
 class CScriptProcess;
+class CScriptProfiler;
 class CScriptThread;
-struct lua_State;
-struct lua_Debug;
 
 #ifdef USE_DEBUGGER
 class CScriptDebugger;
@@ -209,10 +207,11 @@ public:
     // Expands the tables/userdata and logs their contents too
     void log_value(lua_State* L, pcstr name, int depth);
 
-    using ExporterFunc = XRay::ScriptExporter::Node::ExporterFunc;
+    using export_func = xray::script_export::export_func;
+
     CScriptEngine(bool is_editor = false, bool is_with_profiler = false);
     virtual ~CScriptEngine();
-    void init(ExporterFunc exporterFunc, bool loadGlobalNamespace);
+    void init(export_func exporterFunc, bool loadGlobalNamespace);
     virtual void unload();
     static int lua_panic(lua_State* L);
     static void lua_error(lua_State* L);
@@ -247,6 +246,9 @@ public:
     // This function is called from CScriptThread destructor
     void DestroyScriptThread(const CScriptThread* thread);
     bool is_editor();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 template <typename TResult>

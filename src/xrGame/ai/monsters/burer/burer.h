@@ -169,4 +169,7 @@ private:
 
 public:
     void face_enemy();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };

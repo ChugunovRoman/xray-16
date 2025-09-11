@@ -20,6 +20,9 @@ public:
 
     CWeaponLR300();
     virtual ~CWeaponLR300();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponMagazined);
 };
 
 #endif //__XR_WEAPON_LR300_H__

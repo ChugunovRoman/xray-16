@@ -1,6 +1,5 @@
 #pragma once
-#ifndef xrDebug_macrosH
-#define xrDebug_macrosH
+
 #include "xrDebug.h"
 
 #define DEBUG_INFO {__FILE__, __LINE__, __FUNCTION__}
@@ -203,6 +202,29 @@
 #define CHK_DX(expr) expr
 #define CHK_GL(expr) expr
 #endif // DEBUG
+
+#if XRAY_EXCEPTIONS
+#define THROW3(expr, msg0, msg1)\
+    do\
+    {\
+        if (!(expr))\
+        {\
+            string4096 assertionInfo;\
+            xrDebug::GatherInfo(assertionInfo, sizeof(assertionInfo), DEBUG_INFO, #expr, msg0, msg1, nullptr);\
+            throw assertionInfo;\
+        }\
+    }\
+    while (false)
+
+#define THROW(expr) THROW3(expr, nullptr, nullptr)
+#define THROW2(expr, msg0) THROW3(expr, msg0, nullptr)
+
+#else
+#define THROW VERIFY
+#define THROW2 VERIFY2
+#define THROW3 VERIFY3
+#endif
+
 //---------------------------------------------------------------------------------------------
 // FIXMEs / TODOs / NOTE macros
 //---------------------------------------------------------------------------------------------
@@ -224,4 +246,3 @@
 #define todo(x) message(__FILE__LINE__" TODO : " #x "\n")
 #define fixme(x) message(__FILE__LINE__" FIXME: " #x "\n")
 
-#endif // xrDebug_macrosH

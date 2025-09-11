@@ -31,4 +31,7 @@ public:
     T* GetControl(pcstr name);
 
     pcstr GetDebugType() override { return "CUIDialogWndEx"; }
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIDialogWnd, CGameObject);
 };

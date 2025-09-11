@@ -23,6 +23,9 @@ public:
     IC u32 size();
     IC void clear();
     IC RTOKEN_LIST& tokens();
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_rtoken_list_inline.h"

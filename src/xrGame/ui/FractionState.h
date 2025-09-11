@@ -62,6 +62,8 @@ private:
 	shared_str		m_target_desc;
 	shared_str		m_location;
 
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 }; // struct FractionState
 
 

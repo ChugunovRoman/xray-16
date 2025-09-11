@@ -9,4 +9,7 @@ class CF1 : public CGrenade
 public:
     CF1() {}
     virtual ~CF1() {}
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject, CExplosive);
 };

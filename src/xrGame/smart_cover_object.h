@@ -49,6 +49,9 @@ public:
     IC float const& enter_min_enemy_distance() const;
     IC float const& exit_min_enemy_distance() const;
     IC cover const& get_cover() const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };
 
 } // namespace smart_cover

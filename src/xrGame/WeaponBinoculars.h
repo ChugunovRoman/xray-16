@@ -40,4 +40,7 @@ public:
 
 protected:
     CBinocularsVision* m_binoc_vision;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponMagazined);
 };

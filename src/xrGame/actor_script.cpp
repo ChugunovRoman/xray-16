@@ -7,14 +7,12 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "Actor.h"
 #include "ActorCondition.h"
 #include "level_changer.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
-#include "holder_custom.h"
-#include "script_game_object.h"
 
-IC static void CActor_Export(lua_State* luaState)
+void CActor::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -26,6 +24,4 @@ IC static void CActor_Export(lua_State* luaState)
         class_<CLevelChanger, CGameObject>("CLevelChanger")
             .def(constructor<>())
     ];
-};
-
-SCRIPT_EXPORT_FUNC(CActor, (CGameObject), CActor_Export);
+}

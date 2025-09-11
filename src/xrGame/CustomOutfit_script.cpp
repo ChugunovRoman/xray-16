@@ -1,9 +1,9 @@
 #include "pch_script.h"
+
 #include "CustomOutfit.h"
 #include "ActorHelmet.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-void CCustomOutfit_Export(lua_State* luaState)
+void CCustomOutfit::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -36,9 +36,7 @@ void CCustomOutfit_Export(lua_State* luaState)
     ];
 }
 
-SCRIPT_EXPORT_FUNC(CCustomOutfit, (CGameObject), CCustomOutfit_Export);
-
-void CHelmet_Export(lua_State* luaState)
+void CHelmet::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -64,5 +62,3 @@ void CHelmet_Export(lua_State* luaState)
             .def("GetBoneArmor", &CHelmet::GetBoneArmor)
     ];
 }
-
-SCRIPT_EXPORT_FUNC(CHelmet, (CGameObject), CHelmet_Export);

@@ -1,12 +1,14 @@
 #pragma once
+
 #include "PHReqComparer.h"
 #include "PHCommander.h"
-#include "xrScriptEngine/script_engine.hpp"
-#include "xrScriptEngine/script_space_forward.hpp"
-#include "xrScriptEngine/script_callback_ex.h"
+
 #include "xrEngine/xr_object.h"
 
-class CPHScriptCondition : public CPHCondition, public CPHReqComparerV
+#include "xrScriptEngine/script_engine.hpp"
+#include "xrScriptEngine/script_callback_ex.h"
+
+class XRPHYSICS_API CPHScriptCondition : public CPHCondition, public CPHReqComparerV
 {
     luabind::functor<bool>* m_lua_function;
 
@@ -26,7 +28,7 @@ public:
     }
 };
 
-class CPHScriptAction : public CPHAction, public CPHReqComparerV
+class XRPHYSICS_API CPHScriptAction : public CPHAction, public CPHReqComparerV
 {
     bool b_obsolete;
     luabind::functor<void>* m_lua_function;
@@ -46,7 +48,7 @@ public:
     }
 };
 
-class CPHScriptObjectCondition : public CPHCondition, public CPHReqComparerV
+class XRPHYSICS_API CPHScriptObjectCondition : public CPHCondition, public CPHReqComparerV
 {
     luabind::object* m_lua_object;
     shared_str m_method_name;
@@ -62,7 +64,7 @@ public:
     virtual bool compare(const CPHScriptObjectCondition* v) const;
 };
 
-class CPHScriptObjectAction : public CPHAction, public CPHReqComparerV
+class XRPHYSICS_API CPHScriptObjectAction : public CPHAction, public CPHReqComparerV
 {
     bool b_obsolete;
     luabind::object* m_lua_object;
@@ -80,7 +82,7 @@ public:
 };
 //////////////////////////////////////////////////////////////////////////////////////////
 
-class CPHScriptObjectConditionN : public CPHCondition, public CPHReqComparerV
+class XRPHYSICS_API CPHScriptObjectConditionN : public CPHCondition, public CPHReqComparerV
 {
     CScriptCallbackEx<bool> m_callback;
 
@@ -94,7 +96,7 @@ public:
     virtual bool compare(const CPHScriptObjectConditionN* v) const { return m_callback == v->m_callback; }
 };
 
-class CPHScriptObjectActionN : public CPHAction, public CPHReqComparerV
+class XRPHYSICS_API CPHScriptObjectActionN : public CPHAction, public CPHReqComparerV
 {
     bool b_obsolete;
     CScriptCallbackEx<void> m_callback;

@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "script_rtoken_list.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptRTokenList, (),
+#include "script_rtoken_list.h"
+
+void CScriptRTokenList::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -24,4 +24,4 @@ SCRIPT_EXPORT(CScriptRTokenList, (),
             .def("count", &CScriptRTokenList::size)
             .def("get", &CScriptRTokenList::get)
     ];
-});
+}

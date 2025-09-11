@@ -48,6 +48,9 @@ public:
     IC float GetMaxDistance() const;
     IC float GetVolume() const;
     IC bool IsPlaying() const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "script_sound_inline.h"

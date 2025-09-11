@@ -77,6 +77,9 @@ public:
     IC const PATH& path() const;
     IC const float& walked_distance() const;
     Fvector draw_level_position() const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "alife_monster_detail_path_manager_inline.h"

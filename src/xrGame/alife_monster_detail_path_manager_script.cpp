@@ -7,11 +7,11 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "alife_monster_detail_path_manager.h"
 #include "alife_smart_terrain_task.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CALifeMonsterDetailPathManager, (),
+void CALifeMonsterDetailPathManager::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -32,4 +32,4 @@ SCRIPT_EXPORT(CALifeMonsterDetailPathManager, (),
             .def("actual", &CALifeMonsterDetailPathManager::actual)
             .def("failed", &CALifeMonsterDetailPathManager::failed)
     ];
-});
+}

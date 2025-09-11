@@ -30,11 +30,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="BindingsDumper.hpp" />
-    <ClInclude Include="DebugMacros.hpp" />
     <ClInclude Include="Functor.hpp" />
     <ClInclude Include="mslotutils.h" />
     <ClInclude Include="pch.hpp" />
-    <ClInclude Include="ScriptEngineConfig.hpp" />
     <ClInclude Include="ScriptEngineScript.hpp" />
     <ClInclude Include="ScriptExporter.hpp" />
     <ClInclude Include="ScriptExportMacros.hpp" />
@@ -48,6 +46,7 @@
     <ClInclude Include="script_profiler.hpp" />
     <ClInclude Include="script_profiler_portions.hpp" />
     <ClInclude Include="script_process.hpp" />
+    <ClInclude Include="script_space.hpp" />
     <ClInclude Include="script_space_forward.hpp" />
     <ClInclude Include="script_stack_tracker.hpp" />
     <ClInclude Include="script_thread.hpp" />

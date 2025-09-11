@@ -2,6 +2,8 @@
 
 #include "xrCommon/xr_unordered_map.h"
 
+#include "xrScriptEngine.hpp"
+#include "ScriptExporter.hpp"
 #include "script_profiler_portions.hpp"
 
 enum class CScriptProfilerType : u32
@@ -77,4 +79,7 @@ private:
     static shared_str LuaJitProfilerDumpToString(lua_State* L, cpcstr format, int depth);
     static std::pair<cpcstr, size_t> LuaJitProfilerDump(lua_State* L, cpcstr format, int depth);
     static std::pair<lua_Debug, bool> LuaDebugStackInfo(lua_State* L, int level, cpcstr what);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

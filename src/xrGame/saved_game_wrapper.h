@@ -33,6 +33,9 @@ public:
     inline const _LEVEL_ID& level_id() const;
     inline LPCSTR level_name() const;
     inline const float& actor_health() const;
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
 #include "saved_game_wrapper_inline.h"

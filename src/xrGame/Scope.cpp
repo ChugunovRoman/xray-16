@@ -2,7 +2,6 @@
 #include "Scope.h"
 #include "Silencer.h"
 #include "GrenadeLauncher.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
 CScope::CScope() {}
 CScope::~CScope() {}
@@ -29,7 +28,7 @@ void CScope::Load(LPCSTR section)
         m_scope_dynamic_zoom = pSettings->r_bool(section, "scope_dynamic_zoom");
 }
 
-SCRIPT_EXPORT(CScope, (CGameObject),
+void CScope::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -44,4 +43,4 @@ SCRIPT_EXPORT(CScope, (CGameObject),
         class_<CGrenadeLauncher, CGameObject>("CGrenadeLauncher")
             .def(constructor<>())
     ];
-});
+}

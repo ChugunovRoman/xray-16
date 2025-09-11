@@ -7,63 +7,46 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+
 #include "base_client_classes_wrappers.h"
+
 #include "xrEngine/Feel_Sound.h"
 #include "Include/xrRender/RenderVisual.h"
 #include "Include/xrRender/Kinematics.h"
 #include "ai/stalker/ai_stalker.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-// clang-format off
-SCRIPT_EXPORT(IFactoryObject, (),
+// Include files below to force the linker to include the symbols
+#include "script_effector.h"
+#include "script_particles.h"
+
+void CGameObject::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
     module(luaState)
     [
+        class_<CBlend>("CBlend"),
+
+        class_<IKinematicsAnimated>("IKinematicsAnimated")
+            .def("PlayCycle", +[](IKinematicsAnimated* sa, pcstr anim)
+            {
+                sa->PlayCycle(anim);
+            }),
+
+        class_<IRenderVisual>("IRender_Visual")
+            .def("dcast_PKinematicsAnimated", &IRenderVisual::dcast_PKinematicsAnimated),
+
         // 'DLL_Pure' is preserved to maintain backward compatibility with mod scripts
         class_<IFactoryObject, no_bases, default_holder, FactoryObjectWrapper>("DLL_Pure")
             .def(constructor<>())
-            .def("_construct", &IFactoryObject::_construct, &FactoryObjectWrapper::_construct_static)
-    ];
-});
+            .def("_construct", &IFactoryObject::_construct, &FactoryObjectWrapper::_construct_static),
 
-SCRIPT_EXPORT(ISheduled, (),
-{
-    using namespace luabind;
+        class_<ISheduled, no_bases, default_holder, CISheduledWrapper>("ISheduled"),
 
-    module(luaState)
-    [
-        class_<ISheduled, no_bases, default_holder, CISheduledWrapper>("ISheduled")
-    ];
-});
+        class_<IRenderable, no_bases, default_holder, CIRenderableWrapper>("IRenderable"),
 
-SCRIPT_EXPORT(IRenderable, (),
-{
-    using namespace luabind;
+        class_<ICollidable>("ICollidable"),
 
-    module(luaState)
-    [
-        class_<IRenderable, no_bases, default_holder, CIRenderableWrapper>("IRenderable")
-    ];
-});
-
-SCRIPT_EXPORT(ICollidable, (),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
-        class_<ICollidable>("ICollidable")
-    ];
-});
-
-SCRIPT_EXPORT(CGameObject, (IFactoryObject, ISheduled, ICollidable, IRenderable),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
         class_<CGameObject, bases<IFactoryObject, ISheduled, ICollidable, IRenderable>, default_holder,
             CGameObjectWrapper>("CGameObject")
             .def(constructor<>())
@@ -79,39 +62,4 @@ SCRIPT_EXPORT(CGameObject, (IFactoryObject, ISheduled, ICollidable, IRenderable)
             .def("getVisible", &CGameObject::getVisible)
             .def("getEnabled", &CGameObject::getEnabled)
     ];
-});
-
-SCRIPT_EXPORT(IRenderVisual, (),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
-        class_<IRenderVisual>("IRender_Visual")
-            .def("dcast_PKinematicsAnimated", &IRenderVisual::dcast_PKinematicsAnimated)
-    ];
-});
-
-void IKinematicsAnimated_PlayCycle(IKinematicsAnimated* sa, pcstr anim) { sa->PlayCycle(anim); }
-
-SCRIPT_EXPORT(IKinematicsAnimated, (),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
-        class_<IKinematicsAnimated>("IKinematicsAnimated")
-            .def("PlayCycle", &IKinematicsAnimated_PlayCycle)
-    ];
-});
-
-SCRIPT_EXPORT(CBlend, (),
-{
-    using namespace luabind;
-
-    module(luaState)
-    [
-        class_<CBlend>("CBlend")
-    ];
-});
-// clang-format on
+}

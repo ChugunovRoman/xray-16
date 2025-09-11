@@ -55,6 +55,12 @@ public:
         inherited_action::load(packet);
     }
 };
-typedef CActionPlannerAction<CScriptGameObject> CScriptActionPlannerAction;
+
+using CScriptActionPlannerAction = CActionPlannerAction<CScriptGameObject>;
+
+class CScriptActionPlannerActionExport
+{
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CScriptActionPlannerExport, CScriptActionBaseExport);
+};
 
 #include "action_planner_action_inline.h"

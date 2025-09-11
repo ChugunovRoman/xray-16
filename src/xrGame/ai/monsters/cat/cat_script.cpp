@@ -1,8 +1,8 @@
 #include "pch_script.h"
-#include "cat.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CCat, (CGameObject),
+#include "cat.h"
+
+void CCat::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -11,4 +11,4 @@ SCRIPT_EXPORT(CCat, (CGameObject),
         class_<CCat, CGameObject>("CCat")
             .def(constructor<>())
     ];
-});
+}

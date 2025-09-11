@@ -7,10 +7,10 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
-#include "script_animation_action.h"
-#include "xrScriptEngine/ScriptExporter.hpp"
 
-SCRIPT_EXPORT(CScriptAnimationAction, (),
+#include "script_animation_action.h"
+
+void CScriptAnimationAction::script_register(lua_State* luaState)
 {
     using namespace luabind;
 
@@ -49,4 +49,4 @@ SCRIPT_EXPORT(CScriptAnimationAction, (),
             .def("type", &CScriptAnimationAction::SetMentalState)
             .def("completed", &CScriptAbstractAction::completed)
     ];
-});
+}

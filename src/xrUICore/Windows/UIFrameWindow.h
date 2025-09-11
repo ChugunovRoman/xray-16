@@ -48,4 +48,7 @@ protected:
     bool get_points(Frect const& r, int i, Fvector2& LTp, Fvector2& RBp, Fvector2& LTt, Fvector2& RBt);
     void draw_tile_line(Frect rect, int i, bool b_horz, Fvector2 const& ts);
     void draw_tile_rect(Frect rect, int i, Fvector2 const& ts);
+
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIWindow);
 };

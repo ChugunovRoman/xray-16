@@ -7,9 +7,9 @@
 
 #include "inventory_item_object.h"
 
-class CScope : public CInventoryItemObject
+class CScope final : public CInventoryItemObject
 {
-private:
+protected:
     typedef CInventoryItemObject inherited;
 
 public:
@@ -34,4 +34,6 @@ public:
     shared_str m_scope_texture;
 
     virtual void Load(LPCSTR section);
+private:
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);
 };
