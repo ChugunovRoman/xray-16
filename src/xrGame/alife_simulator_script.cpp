@@ -492,6 +492,14 @@ void CALifeSimulator::script_register(lua_State* luaState)
             {
                 return self->server().GetAvailableCountId();
             })
+            .def("has_enough_ids", +[](CALifeSimulator* self, u16 count) -> bool
+            {
+                return (bool)self->server().HasEnoughIDs(count);
+            })
+            .def("get_free_ids", +[](CALifeSimulator* self) -> u16
+            {
+                return self->server().GetFreeIDs();
+            })
             .def("create", &CALifeSimulator__spawn_item3)
             .def("create_ammo", &CALifeSimulator__spawn_ammo)
             .def("release", &CALifeSimulator__release)

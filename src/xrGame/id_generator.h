@@ -112,4 +112,32 @@ public:
         l_tID_Block.m_tpIDs[l_tID_Block.m_tCount++] = TYPE_ID((tValueID - tMinValue) % tBlockSize);
         l_tID_Block.m_tTimeID = tTimeID;
     }
+
+    IC bool HasEnoughIDs(VALUE_ID n) const
+    {
+        if (n <= 0)
+            return true;
+
+        if (n > u32(tMaxValue - tMinValue + 1))
+            return false;
+
+        u32 total_free = 0;
+        for (u32 i = 0; i < m_tBlockCount; ++i)
+        {
+            total_free += m_tppBlocks[i].m_tCount;
+            if (total_free >= n)
+                return true;
+        }
+
+        return total_free >= n;
+    }
+
+    IC u16 GetFreeIDs() const
+    {
+        u32 total_free = 0;
+        for (u32 i = 0; i < m_tBlockCount; ++i)
+            total_free += m_tppBlocks[i].m_tCount;
+
+        return total_free;
+    }
 };

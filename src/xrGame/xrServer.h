@@ -183,6 +183,8 @@ public:
     void PerformMigration(CSE_Abstract* E, xrClientData* from, xrClientData* to);
 
     IC void clear_ids() { m_tID_Generator = id_generator_type(); }
+    virtual u16 GetFreeIDs() override { return m_tID_Generator.GetFreeIDs(); }
+    virtual bool HasEnoughIDs(u16 count) override { return m_tID_Generator.HasEnoughIDs(count); }
     virtual u16 PerformIDgen(u16 ID) override { return (m_tID_Generator.tfGetID(ID)); }
     virtual void FreeID(u16 ID, u32 time) override { return (m_tID_Generator.vfFreeID(ID, time)); }
     virtual u32 GetAvailableCountId() { return m_tID_Generator.m_available_count; } 

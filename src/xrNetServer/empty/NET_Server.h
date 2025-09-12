@@ -300,6 +300,8 @@ public:
 
     const shared_str& GetConnectOptions() const { return connect_options; }
     virtual IServerGameState* GetGameState() = 0;
+    virtual u16 GetFreeIDs() = 0;
+    virtual bool HasEnoughIDs(u16 count) = 0;
     virtual u16 PerformIDgen(u16 ID) = 0;
     virtual void FreeID(u16 ID, u32 time) = 0;
     virtual u32 GetAvailableCountId() = 0;

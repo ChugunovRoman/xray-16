@@ -26,6 +26,7 @@ ENGINE_API CStatTimer gTestTimer3;
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 ENGINE_API bool g_bDisableRedText = false;
+ENGINE_API u16 g_iFreeIds = 0;
 int g_bShowRedText = 1;
 CStats::CStats()
 {
@@ -155,6 +156,15 @@ void CStats::Show()
     {
         const auto fps = u32(Device.GetStats().fFPS);
         fpsFont->Out(static_cast<float>(Device.dwWidth - 40), 5, "%3d", fps);
+        fpsFont->OnRender();
+    }
+    if (psDeviceFlags.test(rsShowIds))
+    {
+        u16 w = 160;
+        if (psDeviceFlags.test(rsShowFPS))
+            w = 200;
+
+        fpsFont->Out(static_cast<float>(Device.dwWidth - w), 5, "Free IDs: %5d", g_iFreeIds);
         fpsFont->OnRender();
     }
     if (psDeviceFlags.test(rsShowFPSGraph))
