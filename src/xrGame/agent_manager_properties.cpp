@@ -28,6 +28,14 @@ CAgentManagerPropertyEvaluatorItem::_value_type CAgentManagerPropertyEvaluatorIt
     for (; I != E; ++I)
     {
         VERIFY(*I);
+        if (*I == nullptr || &(*I)->object() == nullptr)
+            return (false);
+
+        const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>((*I)->m_object);
+
+        if (stalker == nullptr || stalker->NameObject == nullptr)
+            return (false);
+
         if ((*I)->object().memory().item().selected())
             return (true);
     }
@@ -45,6 +53,14 @@ CAgentManagerPropertyEvaluatorEnemy::_value_type CAgentManagerPropertyEvaluatorE
     for (; I != E; ++I)
     {
         VERIFY(*I);
+        if (*I == nullptr || &(*I)->object() == nullptr)
+            return (false);
+
+        const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>((*I)->m_object);
+
+        if (stalker == nullptr || stalker->NameObject == nullptr)
+            return (false);
+
         if ((*I)->object().memory().enemy().selected())
             return (true);
     }
@@ -62,6 +78,14 @@ CAgentManagerPropertyEvaluatorDanger::_value_type CAgentManagerPropertyEvaluator
     for (; I != E; ++I)
     {
         VERIFY(*I);
+        if (*I == nullptr || &(*I)->object() == nullptr)
+            return (false);
+
+        const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>((*I)->m_object);
+
+        if (stalker == nullptr || stalker->NameObject == nullptr)
+            return (false);
+
         if ((*I)->object().memory().danger().selected())
             return (true);
     }
