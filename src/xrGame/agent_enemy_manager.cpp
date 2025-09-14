@@ -80,6 +80,12 @@ void CAgentEnemyManager::fill_enemies()
         {
             if (*I == nullptr || &(*I)->object() == nullptr)
                 continue;
+
+            const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>((*I)->m_object);
+
+            if (stalker == nullptr || stalker->NameObject == nullptr)
+                continue;
+ 
             (*I)->probability(1.f);
             (*I)->object().memory().fill_enemies(CEnemyFiller(&m_enemies, object().member().mask(&(*I)->object())));
         }

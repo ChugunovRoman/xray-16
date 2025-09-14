@@ -98,7 +98,9 @@ struct CEnemyFunction : public T
     {
         if (this->ef_storage().non_alife().member())
             return (get_value(this->ef_storage().non_alife()));
-        return (get_value(this->ef_storage().alife()));
+        if (this->ef_storage().alife().member())
+            return (get_value(this->ef_storage().alife()));
+        return 0.f;
     }
 };
 

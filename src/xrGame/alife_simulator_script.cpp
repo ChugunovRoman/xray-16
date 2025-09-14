@@ -302,6 +302,11 @@ void CALifeSimulator__release(CALifeSimulator* self, CSE_Abstract* object, bool)
 
 LPCSTR get_level_name(const CALifeSimulator* self, int level_id)
 {
+    if (ai().game_graph().header().levels().find(level_id) == ai().game_graph().header().levels().end())
+    {
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "! get_level_name: invalid level id: [%d]", level_id);
+        GEnv.ScriptEngine->print_stack();
+    }
     LPCSTR result = *ai().game_graph().header().level((GameGraph::_LEVEL_ID)level_id).name();
     return (result);
 }

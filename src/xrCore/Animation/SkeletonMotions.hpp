@@ -324,6 +324,8 @@ public:
     [[nodiscard]] CMotionDef* motion_def(u16 idx) const
     {
         VERIFY(p_);
+        if (p_->m_mdefs.size() <= idx)
+            return &p_->m_mdefs[p_->m_mdefs.size() - 1];
         return &p_->m_mdefs[idx];
     }
 

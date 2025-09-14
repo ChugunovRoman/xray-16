@@ -53,8 +53,9 @@ public:
         }
     };
 
-protected:
     CAI_Stalker* m_object;
+
+protected:
     mutable const CCoverPoint* m_cover;
     bool m_initialized;
     float m_probability;
