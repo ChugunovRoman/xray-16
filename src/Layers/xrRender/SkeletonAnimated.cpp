@@ -465,7 +465,11 @@ CBlend* CKinematicsAnimated::PlayCycle(
     MotionID motion_ID, BOOL bMixIn, PlayCallback Callback, LPVOID CallbackParam, u8 channel /*= 0*/)
 {
     VERIFY(motion_ID.valid());
-    CMotionDef* m_def = m_Motions[motion_ID.slot].motions.motion_def(motion_ID.idx);
+    CMotionDef* m_def = nullptr;
+    if (motion_ID.slot >= m_Motions.size())
+        m_def = m_Motions[m_Motions.size() - 1].motions.motion_def(motion_ID.idx);
+    else
+        m_def = m_Motions[motion_ID.slot].motions.motion_def(motion_ID.idx);
     VERIFY(m_def);
     return LL_PlayCycle(m_def->bone_or_part, motion_ID, bMixIn, m_def->Accrue(), m_def->Falloff(), m_def->Speed(),
         m_def->StopAtEnd(), Callback, CallbackParam, channel);
@@ -475,7 +479,11 @@ CBlend* CKinematicsAnimated::PlayCycle(
     u16 partition, MotionID motion_ID, BOOL bMixIn, PlayCallback Callback, LPVOID CallbackParam, u8 channel /*= 0*/)
 {
     VERIFY(motion_ID.valid());
-    CMotionDef* m_def = m_Motions[motion_ID.slot].motions.motion_def(motion_ID.idx);
+    CMotionDef* m_def = nullptr;
+    if (motion_ID.slot >= m_Motions.size())
+        m_def = m_Motions[m_Motions.size() - 1].motions.motion_def(motion_ID.idx);
+    else
+        m_def = m_Motions[motion_ID.slot].motions.motion_def(motion_ID.idx);
     VERIFY(m_def);
     return LL_PlayCycle(partition, motion_ID, bMixIn, m_def->Accrue(), m_def->Falloff(), m_def->Speed(),
         m_def->StopAtEnd(), Callback, CallbackParam, channel);
