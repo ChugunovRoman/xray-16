@@ -339,7 +339,8 @@ void ISpatial_DB::_remove(ISpatial_NODE* N, ISpatial_NODE* N_sub)
         octant = 7;
     VERIFY(octant < 8);
     VERIFY(N_sub->_empty());
-    _node_destroy(N->children[octant]);
+    if (octant != u32(-1))
+        _node_destroy(N->children[octant]);
 
     // Recurse
     if (N->_empty())
