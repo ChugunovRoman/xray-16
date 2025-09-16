@@ -26,6 +26,7 @@ public:
     // colim_scope
     // attachment
     shared_str m_addon_type;
+    shared_str m_mag_type{""};
     CWeapon::EWeaponAddonSlotType m_slot_type;
     CWeapon::EWeaponAddonSlotType m_provided_slot_type;
     bool m_has_ort{false};

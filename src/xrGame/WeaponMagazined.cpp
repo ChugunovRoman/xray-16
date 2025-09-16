@@ -919,6 +919,101 @@ void CWeaponMagazined::switch2_Hiding()
     SetPending(true);
 }
 
+shared_str CWeaponMagazined::GetReloadAnimationName()
+{
+    shared_str magType = GetInstalledMagType();
+    shared_str gripType = GetInstalledTacGripType();
+
+    shared_str anm = make_string("anm_reload%s_%d", magType.c_str(), iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+    anm = make_string("anim_reload%s_%d", magType.c_str(), iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+    
+    anm = make_string("anim_reload%s%s_%d", gripType.c_str(), magType.c_str(), iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+    anm = make_string("anm_reload%s%s_%d", gripType.c_str(), magType.c_str(), iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+
+    anm = make_string("anim_reload%s_%d", gripType.c_str(), iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+    anm = make_string("anm_reload%s_%d", gripType.c_str(), iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+
+    anm = make_string("anim_reload_%d", iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+    anm = make_string("anm_reload_%d", iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+
+    if (iAmmoElapsed == 0)
+    {
+        anm = make_string("anm_reload%s%s_empty", gripType.c_str(), magType.c_str(), iAmmoElapsed).c_str();
+        if (isHUDAnimationExist(anm.c_str()))
+            return anm.c_str();
+        anm = make_string("anim_reload%s%s_empty", gripType.c_str(), magType.c_str(), iAmmoElapsed).c_str();
+        if (isHUDAnimationExist(anm.c_str()))
+            return anm.c_str();
+
+        anm = make_string("anm_reload%s_empty", magType.c_str(), iAmmoElapsed).c_str();
+        if (isHUDAnimationExist(anm.c_str()))
+            return anm.c_str();
+        anm = make_string("anim_reload%s_empty", magType.c_str(), iAmmoElapsed).c_str();
+        if (isHUDAnimationExist(anm.c_str()))
+            return anm.c_str();
+
+        anm = make_string("anm_reload%s_empty", gripType.c_str(), iAmmoElapsed).c_str();
+        if (isHUDAnimationExist(anm.c_str()))
+            return anm.c_str();
+        anm = make_string("anim_reload%s_empty", gripType.c_str(), iAmmoElapsed).c_str();
+        if (isHUDAnimationExist(anm.c_str()))
+            return anm.c_str();
+
+        anm = make_string("anm_reload_empty", iAmmoElapsed).c_str();
+        if (isHUDAnimationExist(anm.c_str()))
+            return anm.c_str();
+        anm = make_string("anim_reload_empty", iAmmoElapsed).c_str();
+        if (isHUDAnimationExist(anm.c_str()))
+            return anm.c_str();
+    }
+        
+    anm = make_string("anm_reload%s%s", gripType.c_str(), magType.c_str(), iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+    anm = make_string("anim_reload%s%s", gripType.c_str(), magType.c_str(), iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+
+    anm = make_string("anm_reload%s", magType.c_str(), iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+    anm = make_string("anim_reload%s", magType.c_str(), iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+
+    anm = make_string("anm_reload%s", gripType.c_str(), iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+    anm = make_string("anim_reload%s", gripType.c_str(), iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+
+    anm = make_string("anm_reload", iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+    anm = make_string("anim_reload", iAmmoElapsed).c_str();
+    if (isHUDAnimationExist(anm.c_str()))
+        return anm.c_str();
+
+    return "anm_reload";
+}
+
 void CWeaponMagazined::switch2_Unmis()
 {
     auto state = GetState();
@@ -1494,14 +1589,8 @@ void CWeaponMagazined::PlayAnimReload()
     }
     else
     {
-        shared_str reload_anim = make_string("anm_reload_%d", iAmmoElapsed).c_str();
-
-        if (isHUDAnimationExist(*reload_anim))
-            PlayHUDMotion(reload_anim, TRUE, this, GetState());
-        else if (cpcstr anim_name = iAmmoElapsed == 0 ? WhichHUDAnimationExist("anm_reload_empty", "anim_reload_empty") : nullptr)
-            PlayHUDMotion(anim_name, true, this, state);
-        else
-            PlayHUDMotion("anm_reload", "anim_reload", true, this, state);
+        shared_str reload_anim = GetReloadAnimationName();
+        PlayHUDMotion(reload_anim, TRUE, this, GetState());
     }
 
     PlayCamAnim("cam_anm_reload");

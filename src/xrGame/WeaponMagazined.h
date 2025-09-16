@@ -125,6 +125,8 @@ public:
     virtual void StopedAfterQueueFired(bool value) { m_bStopedAfterQueueFired = value; }
     virtual float GetFireDispersion(float cartridge_k, bool for_crosshair = false);
 
+    virtual shared_str GetReloadAnimationName();
+
 protected:
     //максимальный размер очереди, которой можно стрельнуть
     int m_iQueueSize;

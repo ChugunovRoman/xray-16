@@ -3761,6 +3761,24 @@ void CWeapon::UpdateAvailableSecondZoom()
 
     m_zoom_params.m_bZoomSecondEnabled = false;
 }
+shared_str CWeapon::GetInstalledMagType()
+{
+    shared_str type = "";
+    for (auto [addon_id, addon]: m_addon_items)
+        if (xr_strcmp(addon->slot.c_str(), "slot_mag") == 0 && pSettings->line_exist(addon->addon_item_name.c_str(), "mag_type"))
+            return make_string("_%s", pSettings->r_string(addon->addon_item_name.c_str(), "mag_type")).c_str();
+
+    return type;
+}
+shared_str CWeapon::GetInstalledTacGripType()
+{
+    shared_str type = "";
+    for (auto [addon_id, addon]: m_addon_items)
+        if (xr_strcmp(addon->slot.c_str(), "tac_grip") == 0 && pSettings->line_exist(addon->addon_item_name.c_str(), "grip_type"))
+            return make_string("_%s", pSettings->r_string(addon->addon_item_name.c_str(), "grip_type")).c_str();
+
+    return type;
+}
 bool CWeapon::HasAddonByName(shared_str name)
 {
     for (auto [addon_id, addon]: m_addon_items)

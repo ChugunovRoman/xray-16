@@ -26,6 +26,9 @@ void CScope::Load(LPCSTR section)
         m_scope_texture = pSettings->r_string(section, "scope_texture");
     if (pSettings->line_exist(section, "scope_dynamic_zoom"))
         m_scope_dynamic_zoom = pSettings->r_bool(section, "scope_dynamic_zoom");
+    
+    if (pSettings->line_exist(section, "mag_type"))
+        m_mag_type = pSettings->r_string(section, "mag_type");
 }
 
 void CScope::script_register(lua_State* luaState)

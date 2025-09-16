@@ -357,6 +357,8 @@ public:
     void UpdateAddonsOffset();
     void UpdateAvailableSecondZoom();
     void LoadAddonSlosts(LPCSTR section);
+    shared_str GetInstalledMagType();
+    shared_str GetInstalledTacGripType();
 
     void SetScopeOffset(Ivector2 pos) { m_iScopeX = pos.x; m_iScopeY = pos.y; }
     void SetSilencerOffset(Ivector2 pos) { m_iSilencerX = pos.x; m_iSilencerY = pos.y; }
