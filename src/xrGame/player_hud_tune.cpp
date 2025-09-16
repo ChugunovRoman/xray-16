@@ -165,6 +165,7 @@ void CHudTuner::UpdateValues()
 
     if (current_hud_item)
     {
+        current_hud_item->reload_measures();
         current_hud_item->m_measures = new_measures;
 
         if (!current_hud_item->m_parent_hud_item)

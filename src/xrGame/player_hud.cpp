@@ -386,24 +386,24 @@ Fmatrix hud_item_measures::load(const shared_str& sect_name, IKinematics* K)
     m_hands_offset[1][0] = {};
 
     strconcat(val_name, "aim_hud_offset_pos", _prefix);
-    m_hands_offset[0][1] = pSettings->r_fvector3(sect_name, val_name);
+    m_hands_offset[0][1] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, pSettings->read_if_exists<Fvector3>("aim_hud_offset_pos_16x9", val_name,  Fvector3().set(0.f,0.f,0.f)));
     strconcat(val_name, "aim_hud_offset_rot", _prefix);
-    m_hands_offset[1][1] = pSettings->r_fvector3(sect_name, val_name);
-    
+    m_hands_offset[1][1] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, pSettings->read_if_exists<Fvector3>("aim_hud_offset_rot_16x9", val_name,  Fvector3().set(0.f,0.f,0.f)));
+
     strconcat(val_name, "gl_hud_offset_pos", _prefix);
     m_hands_offset[0][2] = pSettings->r_fvector3(sect_name, val_name);
     strconcat(val_name, "gl_hud_offset_rot", _prefix);
     m_hands_offset[1][2] = pSettings->r_fvector3(sect_name, val_name);
 
     strconcat(val_name, "aim_hud_correct_offset_pos", _prefix);
-    m_hands_offset[0][3] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, Fvector3().set(0.f,0.f,0.f));
+    m_hands_offset[0][3] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, pSettings->read_if_exists<Fvector3>("aim_hud_correct_offset_pos_16x9", val_name,  Fvector3().set(0.f,0.f,0.f)));
     strconcat(val_name, "aim_hud_correct_offset_rot", _prefix);
-    m_hands_offset[1][3] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, Fvector3().set(0.f,0.f,0.f));
+    m_hands_offset[1][3] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, pSettings->read_if_exists<Fvector3>("aim_hud_correct_offset_rot_16x9", val_name,  Fvector3().set(0.f,0.f,0.f)));
 
     strconcat(val_name, "aim_hud_correct_alt_offset_pos", _prefix);
-    m_hands_offset[0][4] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, Fvector3().set(0.f,0.f,0.f));
+    m_hands_offset[0][4] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, pSettings->read_if_exists<Fvector3>("aim_hud_correct_alt_offset_pos_16x9", val_name,  Fvector3().set(0.f,0.f,0.f)));
     strconcat(val_name, "aim_hud_correct_alt_offset_rot", _prefix);
-    m_hands_offset[1][4] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, Fvector3().set(0.f,0.f,0.f));
+    m_hands_offset[1][4] = pSettings->read_if_exists<Fvector3>(sect_name, val_name, pSettings->read_if_exists<Fvector3>("aim_hud_correct_alt_offset_rot_16x9", val_name,  Fvector3().set(0.f,0.f,0.f)));
 
     R_ASSERT2(pSettings->line_exist(sect_name, "fire_point") == pSettings->line_exist(sect_name, "fire_bone"),
         sect_name.c_str());
