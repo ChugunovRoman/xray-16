@@ -574,7 +574,10 @@ void CUIMainIngameWnd::UpdatePickUpItem()
 
     inv_icon = READ_IF_EXISTS(pSettings, r_string, sect_name, "inv_icon_second", inv_icon);
 
-    UIPickUpItemIcon->SetShader(GetEquipmentIconShader(inv_icon));
+    Fvector2 texture_size;
+    auto uiShader = GetEquipmentIconShader(inv_icon);
+    uiShader->GetBaseTextureResolution(texture_size);
+    UIPickUpItemIcon->SetShader(uiShader);
 
     m_iPickUpItemIconWidth = UIPickUpItemIcon->GetWidth();
     m_iPickUpItemIconHeight = UIPickUpItemIcon->GetHeight();
@@ -598,7 +601,7 @@ void CUIMainIngameWnd::UpdatePickUpItem()
 
     Frect texture_rect;
     texture_rect.lt.set(0, 0);
-    texture_rect.rb.set(m_iGridWidth * ICON_GRID_WIDTH, m_iGridHeight * ICON_GRID_HEIGHT);
+    texture_rect.rb.set(texture_size.x, texture_size.y);
     texture_rect.rb.add(texture_rect.lt);
     UIPickUpItemIcon->GetStaticItem()->SetTextureRect(texture_rect);
     UIPickUpItemIcon->SetStretchTexture(true);
