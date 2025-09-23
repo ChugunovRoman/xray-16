@@ -57,9 +57,12 @@ void CHudTuner::ResetToDefaultValues()
                     continue;
                 SlotTransform t;
                 t.pos = slot->transform.c;
+                t.pos_2 = slot->transform_2.c;
                 slot->transform.getHPB(t.rot.x, t.rot.y, t.rot.z);
+                slot->transform_2.getHPB(t.rot_2.x, t.rot_2.y, t.rot_2.z);
                 t.type = slot->slot_type;
                 t.bone_name = slot->bone_name;
+                t.bone_2_name = slot->bone_2_name;
                 m_weapon_slots[slot_key] = t;
             }
 
@@ -122,11 +125,14 @@ void CHudTuner::ResetToDefaultValues()
                     continue;
                 SlotTransform t;
                 t.pos = slot->transform.c;
+                t.pos_2 = slot->transform_2.c;
                 t.pos_w = slot->transform_world.c;
                 slot->transform.getHPB(t.rot.x, t.rot.y, t.rot.z);
+                slot->transform_2.getHPB(t.rot_2.x, t.rot_2.y, t.rot_2.z);
                 slot->transform_world.getHPB(t.rot_w.x, t.rot_w.y, t.rot_w.z);
                 t.type = slot->slot_type;
                 t.bone_name = slot->bone_name;
+                t.bone_2_name = slot->bone_2_name;
                 m_weapon_slots[slot_key] = t;
             }
         }
@@ -192,6 +198,11 @@ void CHudTuner::UpdateValues()
                         transform.setHPB(data.rot.x, data.rot.y, data.rot.z);
                         transform.c.set(data.pos);
                         wpn->m_addon_slots[slot_key]->transform = transform;
+
+                        Fmatrix transform_2;
+                        transform_2.setHPB(data.rot_2.x, data.rot_2.y, data.rot_2.z);
+                        transform_2.c.set(data.pos_2);
+                        wpn->m_addon_slots[slot_key]->transform_2 = transform_2;
                     }
                 }
             }   
@@ -327,6 +338,12 @@ void CHudTuner::on_tool_frame()
                     {
                         ImGui::DragFloat3(make_string("%s Pos", slot_id.c_str()).c_str(), (float*)&data.pos, _delta_pos, 0.f, 0.f, "%.7f");
                         ImGui::DragFloat3(make_string("%s Rot", slot_id.c_str()).c_str(), (float*)&data.rot, _delta_pos, 0.f, 0.f, "%.7f");
+                        
+                        if (data.bone_2_name != nullptr && xr_strcmp(*data.bone_2_name, "") != 0)
+                        {
+                            ImGui::DragFloat3(make_string("%s Pos 2", slot_id.c_str()).c_str(), (float*)&data.pos_2, _delta_pos, 0.f, 0.f, "%.7f");
+                            ImGui::DragFloat3(make_string("%s Rot 2", slot_id.c_str()).c_str(), (float*)&data.rot_2, _delta_pos, 0.f, 0.f, "%.7f");
+                        }
                     }
                 }
             }
@@ -394,6 +411,11 @@ void CHudTuner::on_tool_frame()
                         {
                             xr_sprintf(selectable, "addon_%s_offset = %d,%f,%f,%f,%f,%f,%f%s\n", slot_id.c_str(), data.type, data.pos.x, data.pos.y, data.pos.z, data.rot.x, data.rot.y, data.rot.z, data.bone_name != nullptr && xr_strcmp(*data.bone_name, "") != 0 ? make_string(",%s", *data.bone_name).c_str() : "");
                             ImGui::LogText("%s", selectable);
+                            if (data.bone_2_name != nullptr && xr_strcmp(*data.bone_2_name, "") != 0)
+                            {
+                                xr_sprintf(selectable, "addon_%s_offset_2 = %f,%f,%f,%f,%f,%f\n", slot_id.c_str(), data.pos_2.x, data.pos_2.y, data.pos_2.z, data.rot_2.x, data.rot_2.y, data.rot_2.z);
+                                ImGui::LogText("%s", selectable);
+                            }
                             if (RQ.O)
                             {
                                 CWeapon* target_wpn = smart_cast<CWeapon*>(RQ.O);

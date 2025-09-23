@@ -290,13 +290,34 @@ void attachable_hud_item::render(u32 context_id, IRenderable* root)
         for (auto [addon_id, item]: wpn->m_addon_items)
         {
             item->addon_item_transform.set(m_item_transform);
+            Fmatrix addon_item_transform_2;
+            addon_item_transform_2.set(m_item_transform);
+
+            if (!fis_zero(item->scale))
+            {
+                Fmatrix m;
+                m.scale(Fvector3().set(item->scale, item->scale, item->scale));
+                item->addon_item_transform.mulB_43(m);
+                addon_item_transform_2.mulB_43(m);
+            }
+
             if (item->bone_name != nullptr && xr_strcmp(*item->bone_name, "") != 0)
             {
                 const u16 bone_id = m_model->LL_BoneID(*item->bone_name);
                 if (bone_id != BI_NONE)
                     item->addon_item_transform.mulB_43(m_model->LL_GetTransform(bone_id));
             }
+            if (item->has_bone_2)
+            {
+                const u16 bone_id = m_model->LL_BoneID(*item->bone_2_name);
+                if (bone_id != BI_NONE)
+                    addon_item_transform_2.mulB_43(m_model->LL_GetTransform(bone_id));
+
+                if (!fis_zero(wpn->m_addon_slots[item->slot]->transform_2.c.magnitude()))
+                    addon_item_transform_2.mulB_43(wpn->m_addon_slots[item->slot]->transform_2);
+            }
             item->addon_item_transform.mulB_43(item->addon_item_pos);
+            addon_item_transform_2.mulB_43(item->addon_item_pos);
 
             if (debug_show_attachments_slots)
                 for (auto slot: item->addon_slots)
@@ -324,6 +345,9 @@ void attachable_hud_item::render(u32 context_id, IRenderable* root)
             }
 
             GEnv.Render->add_Visual(context_id, root, item->addon_item_model->dcast_RenderVisual(), item->addon_item_transform);
+            
+            if (item->has_bone_2 && item->addon_item_model_2 != nullptr)
+                GEnv.Render->add_Visual(context_id, root, item->addon_item_model_2->dcast_RenderVisual(), addon_item_transform_2);
         }
     }
 

@@ -109,9 +109,12 @@ private:
     {
         u16 type;
         shared_str bone_name;
+        shared_str bone_2_name;
         Fvector pos;
+        Fvector pos_2;
         Fvector pos_w;
         Fvector rot;
+        Fvector rot_2;
         Fvector rot_w;
     };
     

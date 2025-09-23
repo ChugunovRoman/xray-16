@@ -29,8 +29,10 @@ struct addon_slot {
     shared_str parent_section;
     shared_str parent_addon_section;
     shared_str bone_name;
+    shared_str bone_2_name;
     u32 parent;
     Fmatrix transform;
+    Fmatrix transform_2;
     Fmatrix transform_world;
     shared_str busy_by;
     u16 slot_type;
@@ -50,9 +52,11 @@ public:
 	shared_str parent;
 	shared_str prop_model_name;
     shared_str bone_name;
+    shared_str bone_2_name;
 	Fmatrix addon_item_transform;
 	float addon_aim_z_rot;
 	float inherited_aim_z_rot;
+	float scale;
 	Fmatrix addon_item_pos;
 	Fvector addon_item_pos_dot;
 	Fmatrix addon_item_pos_world;
@@ -61,6 +65,7 @@ public:
 	Fvector calc_second_aim_offset{};
 	Fvector calc_second_aim_rot{};
 	IKinematics* addon_item_model;
+	IKinematics* addon_item_model_2;
 	IKinematics* addon_item_model_dot;
 	BOOL is_dot_pos_initialized{false};
 	BOOL has_second_aim_offset{false};
@@ -71,6 +76,7 @@ public:
 	BOOL scope_dynamic_zoom{false};
 	BOOL has_mag_size{false};
 	BOOL was_inited_in_default_slots{false};
+	BOOL has_bone_2{false};
     xr_map<shared_str, addon_slot> addon_slots;
     CInventoryItem::EIIAddonOrt ort;
     u16 provided_slot_type;

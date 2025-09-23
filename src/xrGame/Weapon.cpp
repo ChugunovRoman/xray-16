@@ -2020,16 +2020,40 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
             addon_slot* slot = xr_new<addon_slot>();
             shared_str line_name_world = make_string("%s_world", *line_name).c_str();
             pcstr str = pSettings->r_string(section, *line_name);
+            string128 bone_str = "";
             string128 bone_name = "";
+            string128 bone_2_name = "";
             u16 slot_type;
             Fvector3 pos = {0.f, 0.f, 0.f};
             Fvector3 rot = {0.f, 0.f, 0.f};
-            sscanf(str, "%hu,%f,%f,%f,%f,%f,%f,%s", &slot_type, &pos.x, &pos.y, &pos.z, &rot.x, &rot.y, &rot.z, &bone_name);
+            sscanf(str, "%hu,%f,%f,%f,%f,%f,%f,%s", &slot_type, &pos.x, &pos.y, &pos.z, &rot.x, &rot.y, &rot.z, &bone_str);
+            slot->transform_2 = Fmatrix().identity();
+            xr_strcpy(bone_name, bone_str);
+            if (strstr(bone_str, ","))
+            {
+                _GetItem(bone_str, 1, bone_2_name);
+                _GetItem(bone_str, 0, bone_name);
+
+                shared_str line_name_pos_2 = make_string("%s_2", *line_name).c_str();
+                if (pSettings->line_exist(section, line_name_pos_2.c_str()))
+                {
+                    Fvector3 pos_2 = {0.f, 0.f, 0.f};
+                    Fvector3 rot_2 = {0.f, 0.f, 0.f};
+                    str = pSettings->r_string(section, line_name_pos_2.c_str());
+                    sscanf(str, "%f,%f,%f,%f,%f,%f", &pos_2.x, &pos_2.y, &pos_2.z, &rot_2.x, &rot_2.y, &rot_2.z);
+
+                    Fmatrix trans_2;
+                    trans_2.setHPB(rot_2.x, rot_2.y, rot_2.z);
+                    trans_2.translate_over(pos_2.x, pos_2.y, pos_2.z);
+
+                    slot->transform_2 = trans_2;
+                }
+            }
             Fvector3 pos_w = pos;
             Fvector3 rot_w = rot;
-            if (pSettings->line_exist(section, *line_name_world))
+            if (pSettings->line_exist(section, line_name_world.c_str()))
             {
-                str = pSettings->r_string(section, *line_name_world);
+                str = pSettings->r_string(section, line_name_world.c_str());
                 sscanf(str, "%f,%f,%f,%f,%f,%f", &pos_w.x, &pos_w.y, &pos_w.z, &rot_w.x, &rot_w.y, &rot_w.z);
             }
             Fmatrix trans;
@@ -2046,6 +2070,7 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
             slot->parent = 0;
             slot->slot_type = slot_type;
             slot->bone_name = bone_name;
+            slot->bone_2_name = bone_2_name;
             m_addon_slots[slot_key] = slot;
         };
         auto load_slot_offsets = [&](const char* format) {
@@ -2101,7 +2126,7 @@ void CWeapon::SpawnDefaultAddons()
         shared_str default_addon = "";
         if (pSettings->line_exist(*m_section_id, *slot_key))
             default_addon = pSettings->r_string(*m_section_id, *slot_key);
-        if (pSettings->section_exist(*default_addon))
+        if (pSettings->section_exist(default_addon.c_str()))
         {
             auto addon = GetAddonFromSlot(0, slot_key);
             if (addon.second)
@@ -2109,18 +2134,18 @@ void CWeapon::SpawnDefaultAddons()
 
             AddAddonData data;
             data.item_section_id = default_addon;
-            data.addon_type = pSettings->r_string(*default_addon, "addon_type");
+            data.addon_type = pSettings->r_string(default_addon.c_str(), "addon_type");
             data.slot_name = slot_key;
             data.ort = CInventoryItem::EIIAddonOrt::FOrtNone;
             data.addon_id = ADDON_ID_NONE;
             data.parent_id = 0;
-            if (pSettings->line_exist(*default_addon, "provided_slot_type"))
-                data.provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u8(*default_addon, "provided_slot_type");
+            if (pSettings->line_exist(default_addon.c_str(), "provided_slot_type"))
+                data.provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u8(default_addon.c_str(), "provided_slot_type");
             else
                 data.provided_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
 
-            if (pSettings->line_exist(*default_addon, "ammo_mag_size"))
-                iAmmoElapsed = pSettings->r_s32(*default_addon, "ammo_mag_size");
+            if (pSettings->line_exist(default_addon.c_str(), "ammo_mag_size"))
+                iAmmoElapsed = pSettings->r_s32(default_addon.c_str(), "ammo_mag_size");
 
             addAddon(data);
         }
@@ -3898,6 +3923,11 @@ void CWeapon::addAddon(AddAddonData data)
     new_addon->addon_item_model->CalculateBones_Invalidate();
     new_addon->addon_item_model->CalculateBones(TRUE);
 
+    if (pSettings->line_exist(m_section_id.c_str(), make_string("%s_scale", new_addon->addon_item_name.c_str()).c_str()))
+    {
+        new_addon->scale = pSettings->r_float(m_section_id.c_str(), make_string("%s_scale", new_addon->addon_item_name.c_str()).c_str());
+    }
+
     u32 addon_id = m_addon_id++;
     if (data.addon_id != ADDON_ID_NONE)
         addon_id = data.addon_id;
@@ -3914,7 +3944,14 @@ void CWeapon::addAddon(AddAddonData data)
     Fmatrix slot_transform = target_slot.transform;
     
     bool has_bone = target_slot.bone_name != nullptr && xr_strcmp(*target_slot.bone_name, "") != 0;
+    bool has_bone_2 = target_slot.bone_2_name != nullptr && xr_strcmp(*target_slot.bone_2_name, "") != 0;
     new_addon->bone_name = has_bone ? target_slot.bone_name : parent_item->bone_name;
+    new_addon->bone_2_name = has_bone_2 ? target_slot.bone_2_name : parent_item->bone_2_name;
+
+    new_addon->has_bone_2 = has_bone_2;
+
+    if (target_slot.bone_2_name != nullptr)
+        new_addon->addon_item_model_2 = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*new_addon->addon_item_name, "visual")));
     
     Fvector slot_rot;
     slot_transform.getHPB(slot_rot.x, slot_rot.y, slot_rot.z);
