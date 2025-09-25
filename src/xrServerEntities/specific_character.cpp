@@ -178,6 +178,8 @@ void CSpecificCharacter::load_shared(LPCSTR)
     {
         if (pSettingsFE->line_exist(team, "snd_config") && pSettingsFE->r_string(team, "snd_config") != NULL && pSettingsFE->r_string(team, "snd_config") != "")
         {
+            CRandom random((u32)(CPU::QPC() & u32(-1)));
+
             LPCSTR snds = pSettingsFE->r_string(team, "snd_config");
             string128 snd_item;
             _GetItem(snds, ::Random.randI(0, _GetItemCount(snds)), snd_item);
@@ -190,6 +192,8 @@ void CSpecificCharacter::load_shared(LPCSTR)
         {
             if (pSettingsFE->line_exist(team, "snd_config_leader") && pSettingsFE->r_string(team, "snd_config_leader") != NULL && pSettingsFE->r_string(team, "snd_config_leader") != "")
             {
+                CRandom random((u32)(CPU::QPC() & u32(-1)));
+
                 LPCSTR snds = pSettingsFE->r_string(team, "snd_config_leader");
                 string128 snd_item;
                 _GetItem(snds, ::Random.randI(0, _GetItemCount(snds)), snd_item);
@@ -227,6 +231,8 @@ void CSpecificCharacter::load_shared(LPCSTR)
     _Trim(full_section_id);
     if (!data()->m_not_replace_visual &&pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "visuals"))
     {
+        CRandom random((u32)(CPU::QPC() & u32(-1)));
+
         LPCSTR visuals = pSettingsFE->r_string(full_section_id.c_str(), "visuals");
         string128 visual_item;
         int rand = ::Random.randI(0, _GetItemCount(visuals));
@@ -253,6 +259,8 @@ void CSpecificCharacter::load_shared(LPCSTR)
     {
         if (pSettings->line_exist(data()->m_sVisual.c_str() , "icons"))
         {
+            CRandom random((u32)(CPU::QPC() & u32(-1)));
+
             LPCSTR icons = pSettings->r_string(data()->m_sVisual.c_str(), "icons");
             string128 icon;
             _GetItem(icons, ::Random.randI(0, _GetItemCount(icons)), icon);
