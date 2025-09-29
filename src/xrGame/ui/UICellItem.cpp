@@ -125,18 +125,13 @@ void CUICellItem::Update()
             GetMessageTarget()->SendMessage(this, DRAG_DROP_ITEM_FOCUSED_UPDATE, NULL);
     }
 
-    if (data_is_string)
-        return;
-
-    PIItem item = static_cast<PIItem>(m_pData);
+    PIItem item = data_is_string ? nullptr : static_cast<PIItem>(m_pData);
     m_has_upgrade = item ? item->has_any_upgrades() : false;
+
     if (m_upgrade)
     {
-        if (item)
+        if (item || data_is_string)
         {
-            //		Fvector2 size      = GetWndSize();
-            //		Fvector2 up_size = m_upgrade->GetWndSize();
-            //		pos.x = size.x - up_size.x - 4.0f;
             Fvector2 pos;
             pos.set(m_upgrade_pos);
             if (ChildsCount())
@@ -148,13 +143,19 @@ void CUICellItem::Update()
         }
         m_upgrade->Show(m_has_upgrade);
     }
-    if (!item)
-        return;
 
-    if (item->BaseSlot() == OUTFIT_SLOT)
+    if ((data_is_string && b_isOutfit) || (item && item->BaseSlot() == OUTFIT_SLOT))
     {
-        CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(item);
-        pcstr icon = pSettingsFE->read_if_exists<pcstr>(*outfit->m_faction, "icon", make_string("icons\\patches\\%s", *outfit->m_faction).c_str());
+        shared_str faction = "";
+        if (item)
+        {
+            CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(item);
+            faction = outfit->m_faction;
+        }
+        else
+            faction = s_outfitFaction;
+
+        pcstr icon = pSettingsFE->read_if_exists<pcstr>(faction.c_str(), "icon", make_string("icons\\patches\\%s", faction.c_str()).c_str());
         std::string iconPath{icon};
         if (strstr(iconPath.c_str(), "ui\\"))
             iconPath.erase(0, 3);
@@ -262,57 +263,66 @@ void CUICellItem::UpdateConditionProgressBar()
     if (!m_pConditionState)
         return;
 
-    if (data_is_string)
-    {
-        m_pConditionState->Show(false);
-        return;
-    }
-
     if (m_pParentList && m_pParentList->GetConditionProgBarVisibility())
     {
-        PIItem itm = static_cast<PIItem>(m_pData);
+        float cond = 1.f;
+        bool show_cond{false};
+
+        PIItem itm = data_is_string ? nullptr : static_cast<PIItem>(m_pData);
 
         if (itm && itm->m_pInventory != nullptr && itm->IsUsingCondition())
         {
-            float cond = itm->GetCondition();
+            cond = itm->GetCondition();
 
-            CEatableItem* eitm = smart_cast<CEatableItem*>(itm);
+            CEatableItem* eitm = data_is_string ? nullptr : smart_cast<CEatableItem*>(itm);
             if (eitm)
             {
                 const u8 max_uses = eitm->GetMaxUses();
                 if (max_uses > 0)
                 {
                     const u8 remaining_uses = eitm->GetRemainingUses();
-
+    
                     if (max_uses < 8)
                         m_pConditionState->ShowBackground(false);
-
+    
                     if (remaining_uses < 1)
                         cond = 0.f;
                     else if (max_uses > 8)
                         cond = (float)remaining_uses / (float)max_uses;
                     else
                         cond = (float)remaining_uses * 0.125f - 0.0625f;
-
+    
                     m_pConditionState->UseGradient(false);
                 }
             }
 
+            show_cond = true;
+        }
+        if (data_is_string && (b_isOutfit || b_isWeapon || b_isHelmet || b_isPlastin))
+        {
+            cond = m_fCondition;
+            show_cond = true;
+        }
+
+        if (show_cond)
+        {
             Ivector2 itm_grid_size = GetGridSize();
             if (m_pParentList->GetVerticalPlacement())
                 std::swap(itm_grid_size.x, itm_grid_size.y);
-
+    
             Ivector2 cell_size = m_pParentList->CellSize();
             Ivector2 cell_space = m_pParentList->CellsSpacing();
             float x = 1.f;
             float y = itm_grid_size.y * (cell_size.y + cell_space.y) - m_pConditionState->GetHeight() - 2.f;
-
+    
             m_pConditionState->SetWndPos(Fvector2().set(x, y));
             m_pConditionState->SetProgressPos(iCeil(cond * 13.0f) / 13.0f);
             m_pConditionState->Show(true);
+
             return;
         }
     }
+
     m_pConditionState->Show(false);
 }
 

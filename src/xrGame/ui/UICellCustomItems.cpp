@@ -79,17 +79,39 @@ CUIInventoryCellItem::CUIInventoryCellItem(shared_str section_id)
     else
         m_section_id = section_id;
 
-    R_ASSERT2(pSettings->line_exist(*m_section_id, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", *m_section_id));
+    R_ASSERT2(pSettings->line_exist(m_section_id.c_str(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", m_section_id.c_str()));
 
-    pcstr iconPath = pSettings->r_string(*m_section_id, "inv_icon");
+    pcstr iconPath = pSettings->r_string(m_section_id.c_str(), "inv_icon");
     inherited::SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(m_section_id).c_str()));
+
+    if (pSettings->line_exist(m_section_id.c_str(), "box_size"))
+    {
+        m_iAmmoCount = pSettings->r_u32(m_section_id.c_str(), "box_size");
+        b_isAmmo = true;
+    }
+    if (pSettings->line_exist(m_section_id.c_str(), "ammo_class"))
+        b_isWeapon = true;
+    if (pSettings->line_exist(m_section_id.c_str(), "use_condition"))
+        b_isUseCondition = true;
+    if (pSettings->line_exist(m_section_id.c_str(), "class") && xr_strcmp(pSettings->r_string(m_section_id.c_str(), "class"), "E_HLMET") == 0)
+        b_isHelmet = true;
+    if (strstr(m_section_id.c_str(), "cev_plastin_"))
+        b_isPlastin = true;
+    if (!b_isOutfit && pSettings->line_exist(m_section_id.c_str(), "class") && xr_strcmp(pSettings->r_string(m_section_id.c_str(), "class"), "EQU_STLK") == 0)
+    {
+        b_isOutfit = true;
+        s_outfitFaction = pSettings->r_string(m_section_id.c_str(), "faction");
+    }
+
+    u32 sl = pSettings->read_if_exists<u32>(m_section_id.c_str(), "slot", NO_ACTIVE_SLOT - 1);
+    base_slot_id = sl + 1;
 
     u32 x, y, w, h;
 
     x = 0;
     y = 0;
-    w = pSettings->r_u32(*m_section_id, "inv_grid_width");
-    h = pSettings->r_u32(*m_section_id, "inv_grid_height");
+    w = pSettings->r_u32(m_section_id.c_str(), "inv_grid_width");
+    h = pSettings->r_u32(m_section_id.c_str(), "inv_grid_height");
 
     Irect rect1 = Irect().set(x, y, w, h);
 
@@ -106,22 +128,22 @@ CUIInventoryCellItem::CUIInventoryCellItem(shared_str section_id)
     {
         string32 layer_str;
         xr_sprintf(layer_str, "%u%s", i, detail::ICON_LAYER_FIELD);
-        if (!pSettings->line_exist(*m_section_id, layer_str))
+        if (!pSettings->line_exist(m_section_id.c_str(), layer_str))
             break;
 
-        cpcstr section = pSettings->r_string(*m_section_id, layer_str);
+        cpcstr section = pSettings->r_string(m_section_id.c_str(), layer_str);
         if (!section)
             continue;
 
         string32 temp;
         const Fvector2 offset
         {
-            pSettings->r_float(*m_section_id, strconcat(temp, layer_str, "_x")),
-            pSettings->r_float(*m_section_id, strconcat(temp, layer_str, "_y"))
+            pSettings->r_float(m_section_id.c_str(), strconcat(temp, layer_str, "_x")),
+            pSettings->r_float(m_section_id.c_str(), strconcat(temp, layer_str, "_y"))
         };
 
         cpcstr field_scale = strconcat(temp, layer_str, "_scale");
-        const float scale = pSettings->read_if_exists<float>(*m_section_id, field_scale, 1.0f);
+        const float scale = pSettings->read_if_exists<float>(m_section_id.c_str(), field_scale, 1.0f);
 
         //cpcstr field_color = strconcat(temp, layer_str, "_color");
         //const u32 color = READ_IF_EXISTS(pSettings, r_color, itm->m_section_id, field_color, 0);
@@ -376,14 +398,33 @@ void CUIInventoryCellItem::UpdateItemText()
 
     const u32 count = data_is_string ? ChildsCount() + 1 : ChildsCount() + 1 - helper_count;
 
-    if (data_is_string && count <= 1)
-    {
-        m_text->Show(false);
-        return;
-    }
-
     string32 tempStr;
     pcstr finalText = nullptr;
+
+    if (data_is_string)
+    {
+        if (b_isAmmo)
+        {
+            u32 count = GetAmmoCnt();
+            if (ChildsCount() > 0)
+                for (std::size_t i = 0; i < ChildsCount(); ++i)
+                    count += Child(i)->GetAmmoCnt();
+
+            xr_sprintf(tempStr, "%d", count);
+            finalText = tempStr;
+
+            if (m_text)
+            {
+                m_text->Show(nullptr != finalText);
+                m_text->SetText(finalText);
+            }
+
+            return;
+        }
+        else if (count <= 1)
+            m_text->Show(false);
+    }
+
     if (count > 1 || helper_count)
     {
         xr_sprintf(tempStr, "x%d", count);

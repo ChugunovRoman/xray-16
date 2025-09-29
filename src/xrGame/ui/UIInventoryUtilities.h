@@ -2,6 +2,7 @@
 #include "inventory_item.h"
 #include "character_info_defs.h"
 #include "xrUICore/ui_defs.h"
+#include "UICellItem.h"
 
 class CUIStatic;
 
@@ -27,6 +28,8 @@ namespace InventoryUtilities
 //сравнивает элементы по пространству занимаемому ими в рюкзаке
 //для сортировки
 bool GreaterRoomInRuck(PIItem item1, PIItem item2);
+Irect GetInvGridRect(shared_str m_section_id);
+bool GreaterRoomInRuckStr(CUICellItem* item1, CUICellItem* item2);
 //для проверки свободного места
 bool FreeRoom_inBelt(TIItemContainer& item_list, PIItem item, int width, int height);
 

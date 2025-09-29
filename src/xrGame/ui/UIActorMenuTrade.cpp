@@ -24,6 +24,12 @@
 #include "UIGameSP.h"
 #include "UITalkWnd.h"
 
+#include "xrNetServer/NET_Messages.h"
+
+#include "xrCore/Threading/ParallelFor.hpp"
+
+class CAI_ObjectLocation;
+
 void CUIActorMenu::InitTradeMode()
 {
     ShowIfExist(m_pTradeWnd, true);
@@ -84,34 +90,44 @@ void CUIActorMenu::InitPartnerInventoryContents()
 
     TIItemContainer items_list;
     m_pPartnerInvOwner->inventory().AddAvailableItems(items_list, true);
-    std::sort(items_list.begin(), items_list.end(), InventoryUtilities::GreaterRoomInRuck);
 
     SetInvGridSize(m_pLists[eTradePartnerList]);
     SetInvGridSize(m_pLists[eTradePartnerBagList]);
+    SetInvGridSize(m_pLists[eTradeActorList]);
+    SetInvGridSize(m_pLists[eTradeActorBagList]);
 
-    TIItemContainer::iterator itb = items_list.begin();
-    TIItemContainer::iterator ite = items_list.end();
-    for (; itb != ite; ++itb)
+    xr_vector<CUICellItem*> items;
+
+    xr_parallel_for(TaskRange<u32>(0, items_list.size()), [&](const TaskRange<u32>& range)
     {
-        if (!is_item_in_list(m_pLists[eTradePartnerList], *itb))
+        xr_vector<CUICellItem*> tmp;
+
+        for (u32 i = range.begin(); i != range.end(); ++i)
         {
-            CUICellItem* itm = create_cell_item(*itb);
-            m_pLists[eTradePartnerBagList]->SetItem(itm);
+            PIItem itm = items_list.at(i);
+            CUICellItem* cell_itm = create_cell_item(itm);
+
+            tmp.push_back(cell_itm);
         }
-    }
+        
+        std::lock_guard<std::mutex> lock(push_items_mtx);
+
+        items.insert(items.end(), tmp.begin(), tmp.end());
+
+        VERIFY(items.size());
+    });
+    std::sort(items.begin(), items.end(), InventoryUtilities::GreaterRoomInRuckStr);
+    for (auto& item : items)
+        m_pLists[eTradePartnerBagList]->SetItem(item);
     m_trade_partner_inventory_state = m_pPartnerInvOwner->inventory().ModifyFrame();
 }
 
 void CUIActorMenu::ColorizeItem(CUICellItem* itm, bool colorize)
 {
     if (colorize)
-    {
         itm->SetTextureColor(color_rgba(255, 100, 100, 255));
-    }
     else
-    {
         itm->SetTextureColor(color_rgba(255, 255, 255, 255));
-    }
 }
 
 void CUIActorMenu::DeInitTradeMode()
@@ -323,13 +339,13 @@ float CUIActorMenu::CalcItemsWeight(CUIDragDropListEx* pList)
     for (u32 i = 0; i < pList->ItemsCount(); ++i)
     {
         CUICellItem* itm = pList->GetItemIdx(i);
-        PIItem iitem = (PIItem)itm->m_pData;
-        res += iitem->Weight();
-        for (u32 j = 0; j < itm->ChildsCount(); ++j)
-        {
-            PIItem jitem = (PIItem)itm->Child(j)->m_pData;
-            res += jitem->Weight();
-        }
+            PIItem iitem = (PIItem)itm->m_pData;
+            res += iitem->Weight();
+            for (u32 j = 0; j < itm->ChildsCount(); ++j)
+            {
+                PIItem jitem = (PIItem)itm->Child(j)->m_pData;
+                res += jitem->Weight();
+            }
     }
     return res;
 }
@@ -340,12 +356,12 @@ u32 CUIActorMenu::CalcItemsPrice(CUIDragDropListEx* pList, CTrade* pTrade, bool 
     for (u32 i = 0; i < pList->ItemsCount(); ++i)
     {
         CUICellItem* itm = pList->GetItemIdx(i);
-        PIItem iitem = (PIItem)itm->m_pData;
-        res += pTrade->GetItemPrice(iitem, bBuying);
-        for (u32 j = 0; j < itm->ChildsCount(); ++j)
-        {
-            PIItem jitem = (PIItem)itm->Child(j)->m_pData;
-            res += pTrade->GetItemPrice(jitem, bBuying);
+            PIItem iitem = (PIItem)itm->m_pData;
+            res += pTrade->GetItemPrice(iitem, bBuying);
+            for (u32 j = 0; j < itm->ChildsCount(); ++j)
+            {
+                PIItem jitem = (PIItem)itm->Child(j)->m_pData;
+                res += pTrade->GetItemPrice(jitem, bBuying);
         }
     }
 
@@ -448,9 +464,7 @@ void CUIActorMenu::UpdatePrices()
 void CUIActorMenu::OnBtnPerformTrade(CUIWindow* w, void* d)
 {
     if (m_pLists[eTradeActorList]->ItemsCount() == 0 && m_pLists[eTradePartnerList]->ItemsCount() == 0)
-    {
         return;
-    }
 
     int actor_money = (int)m_pActorInvOwner->get_money();
     int partner_money = (int)m_pPartnerInvOwner->get_money();
@@ -509,7 +523,6 @@ void CUIActorMenu::OnBtnPerformTradeBuy(CUIWindow* w, void* d)
     {
         m_partner_trade->OnPerformTrade(partner_price, actor_price);
 
-        //		TransferItems( m_pLists[eTradeActorList],   m_pLists[eTradePartnerBagList], m_partner_trade, true );
         TransferItems(m_pLists[eTradePartnerList], m_pLists[eTradeActorBagList], m_partner_trade, false);
     }
     else
@@ -553,7 +566,6 @@ void CUIActorMenu::OnBtnPerformTradeSell(CUIWindow* w, void* d)
         m_partner_trade->OnPerformTrade(partner_price, actor_price);
 
         TransferItems(m_pLists[eTradeActorList], m_pLists[eTradePartnerBagList], m_partner_trade, true);
-        //		TransferItems( m_pLists[eTradePartnerList],	m_pLists[eTradeActorBagList],	m_partner_trade, false );
     }
     else
     {

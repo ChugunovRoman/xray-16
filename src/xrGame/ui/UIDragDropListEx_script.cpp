@@ -6,6 +6,9 @@
 #include "UICellCustomItems.h"
 #include "xrScriptEngine/ScriptExporter.hpp"
 
+#include "xrCore/Threading/ParallelFor.hpp"
+#include <mutex>
+
 // clang-format off
 void CUIDragDropListEx::script_register(lua_State* luaState)
 {
@@ -19,6 +22,40 @@ void CUIDragDropListEx::script_register(lua_State* luaState)
             {
                 CUIInventoryCellItem* item = xr_new<CUIInventoryCellItem>(item_name);
                 self->SetItem(item);
+            })
+            .def("AddItems", +[](CUIDragDropListEx* self, luabind::object item_tbl)
+            {
+                std::mutex push_items_mtx;
+                xr_vector<CUIInventoryCellItem*> items;
+                xr_vector<shared_str> strings;
+
+                for (luabind::iterator I(item_tbl), E; I != E; ++I)
+                {
+                    luabind::object value = *I;
+                    if (luabind::type(value) != LUA_TSTRING)
+                        continue;
+
+                    strings.push_back(luabind::object_cast<pcstr>(value));
+                }
+
+                xr_parallel_for(TaskRange<u32>(0, strings.size()), [&](const TaskRange<u32>& range)
+                {
+                    xr_vector<CUIInventoryCellItem*> tmp;
+
+                    for (u32 i = range.begin(); i != range.end(); ++i)
+                    {
+                        shared_str itm = strings.at(i);
+                        CUIInventoryCellItem* item = xr_new<CUIInventoryCellItem>(itm.c_str());
+
+                        tmp.push_back(item);
+                    }
+                    
+                    std::lock_guard<std::mutex> lock(push_items_mtx);
+                    items.insert(items.end(), tmp.begin(), tmp.end());
+                });
+
+                for (auto& item : items)
+                    self->SetItem(item);
             })
             .def("AddWeaponAttachments", +[](CUIDragDropListEx* self, pcstr weapon_section_id)
             {

@@ -45,12 +45,25 @@ protected:
     Fvector2 m_upgrade_pos;
     Fvector2 m_faction_pos;
 
+    float m_fCondition{ 1.0f };
+    u32 m_iAmmoCount{0};
+    bool b_isUseCondition{false};
+
     virtual void UpdateItemText();
     void init();
 
 public:
     CUICellItem();
     ~CUICellItem() override;
+
+    bool b_has_any_upgrades{false};
+    bool b_isAmmo{false};
+    bool b_isWeapon{false};
+    bool b_isHelmet{false};
+    bool b_isPlastin{false};
+    bool b_isOutfit{false};
+    u16 base_slot_id{6};
+    shared_str s_outfitFaction{""};
 
     virtual bool OnKeyboardAction(int dik, EUIMessages keyboard_action);
     virtual bool OnMouseAction(float x, float y, EUIMessages mouse_action);
@@ -68,6 +81,12 @@ public:
     IC void SetAccelerator(int dik) { m_accelerator = dik; };
     IC int GetAccelerator() const { return m_accelerator; };
     virtual CUIDragItem* CreateDragItem();
+
+    IC float GetCondition() const { return m_fCondition; }
+    IC void SetCondition(float val) { m_fCondition = val; }
+
+    IC u32 GetAmmoCnt() const { return m_iAmmoCount; }
+    IC void SetAmmoCnt(u32 val) { m_iAmmoCount = val; }
 
     CUIDragDropListEx* OwnerList() { return m_pParentList; }
     void SetOwnerList(CUIDragDropListEx* p);

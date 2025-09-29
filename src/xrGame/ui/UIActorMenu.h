@@ -5,6 +5,8 @@
 #include "xrServerEntities/inventory_space.h"
 #include "xrUICore/Hint/UIHint.h"
 
+#include <mutex>
+
 class CUICharacterInfo;
 class CUIDragDropListEx;
 class CUIDragDropReferenceList;
@@ -174,6 +176,8 @@ protected:
 
     // Drag&Drop lists
     CUIDragDropListEx* m_pLists[eListCount]{};
+
+    std::mutex push_items_mtx;
 
 public:
     CUIDragDropReferenceList* m_pQuickSlot{};
@@ -365,6 +369,8 @@ protected:
     void UpdatePrices();
     bool CanMoveToPartner(PIItem pItem);
     void TransferItems(CUIDragDropListEx* pSellList, CUIDragDropListEx* pBuyList, CTrade* pTrade, bool bBuying);
+    void TransferItemsToActorBagList(CUIDragDropListEx* pSrcList, CTrade* pTrade, bool bBuying);
+    void TransferItemsToPartnerBagList(CUIDragDropListEx* pSrcList, CTrade* pTrade, bool bBuying);
 
 public:
     CUIActorMenu();

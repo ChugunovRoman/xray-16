@@ -15,6 +15,8 @@
 #include "xrScriptEngine/script_engine.hpp"
 #include "Include/xrRender/UIShader.h"
 
+#include <mutex>
+
 #define BUY_MENU_TEXTURE "ui" DELIMITER "ui_mp_buy_menu"
 #define CHAR_ICONS "ui" DELIMITER "ui_icons_npc"
 #define MAP_ICONS "ui" DELIMITER "ui_icons_map"
@@ -36,6 +38,7 @@ ui_shader* g_MPCharIconsShader = NULL;
 ui_shader* g_OutfitUpgradeIconsShader = NULL;
 ui_shader* g_WeaponUpgradeIconsShader = NULL;
 AssociativeVector<shared_str, ui_shader> g_EquipmentIconShaderMap;
+std::mutex mtx;
 //static CUIStatic* GetUIStatic();
 
 typedef std::pair<CHARACTER_RANK_VALUE, shared_str> CharInfoStringID;
@@ -61,6 +64,43 @@ void InventoryUtilities::DestroyShaders()
     xr_delete(g_OutfitUpgradeIconsShader);
     xr_delete(g_WeaponUpgradeIconsShader);
 
+}
+
+Irect InventoryUtilities::GetInvGridRect(shared_str m_section_id)
+{
+    u32 x, y, w, h;
+    
+    x = 0;
+    y = 0;
+    w = pSettings->r_u32(m_section_id.c_str(), "inv_grid_width");
+    h = pSettings->r_u32(m_section_id.c_str(), "inv_grid_height");
+
+    return Irect().set(x, y, w, h);
+}
+bool InventoryUtilities::GreaterRoomInRuckStr(CUICellItem* item1, CUICellItem* item2)
+{
+    Ivector2 r1, r2;
+    PIItem iitem1 = (PIItem)item1->m_pData;
+    PIItem iitem2 = (PIItem)item2->m_pData;
+    shared_str m_section_id1 = item1->data_is_string ? item1->m_section_id : iitem1->m_section_id;
+    shared_str m_section_id2 = item2->data_is_string ? item2->m_section_id : iitem2->m_section_id;
+    r1 = GetInvGridRect(m_section_id1).rb;
+    r2 = GetInvGridRect(m_section_id2).rb;
+
+    if (r1.x > r2.x)
+        return true;
+
+    if (r1.x == r2.x)
+    {
+        if (r1.y > r2.y)
+            return true;
+
+        if (r1.y == r2.y)
+            return (item1->m_section_id.c_str() > item2->m_section_id.c_str());
+
+        return false;
+    }
+    return false;
 }
 
 bool InventoryUtilities::GreaterRoomInRuck(PIItem item1, PIItem item2)
@@ -176,11 +216,16 @@ const ui_shader& InventoryUtilities::GetBuyMenuShader()
 
 const ui_shader& InventoryUtilities::GetEquipmentIconShader(pcstr filepath)
 {
+    std::lock_guard<std::mutex> lock(mtx);
+
     string512 fullpath;
     xr_sprintf(fullpath, "ui\\%s", filepath);
 
     for (auto &i : g_EquipmentIconShaderMap)
     {
+        if (!i.first || !i.second)
+            continue;
+
         auto path = i.first.c_str();
         if (xr_strcmp(path, fullpath) == 0)
             return i.second;
