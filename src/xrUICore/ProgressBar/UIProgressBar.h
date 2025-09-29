@@ -70,6 +70,7 @@ public:
     void ShowBackground(bool status) { m_bBackgroundPresent = status; }
 
     void UseGradient(bool status) { m_bUseGradient = status; }
+    void UseColor(bool status) { m_bUseColor = status; }
 
     pcstr GetDebugType() override { return "CUIProgressBar"; }
 
