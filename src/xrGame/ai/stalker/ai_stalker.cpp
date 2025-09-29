@@ -510,6 +510,9 @@ void CAI_Stalker::Load(LPCSTR section)
     CObjectHandler::Load(section);
     sight().Load(section);
 
+    if (strstr(*NameSection, "trader"))
+        m_is_trader = true;
+
     // skeleton physics
     m_pPhysics_support->in_Load(section);
 

@@ -26,8 +26,6 @@
 
 extern u32 get_rank(const shared_str& section);
 
-pcstr latest_addon_name = "";
-
 namespace detail::stalker
 {
 static constexpr int MAX_AMMO_ATTACH_COUNT = 1;
@@ -125,7 +123,7 @@ void CAI_Stalker::attach_available_addons(CWeapon* weapon)
 {
     if (!weapon)
         return;
-    if (strstr(*NameSection, "trader"))
+    if (m_is_trader)
         return;
 
     TIItemContainer& l_list = inventory().m_ruck;
@@ -542,22 +540,20 @@ void CAI_Stalker::on_after_take(const CGameObject* object)
     if (!g_Alive())
         return;
 
-    if (xr_strcmp(object->cNameSect().c_str(), latest_addon_name) == 0)
-        return;
-
-    latest_addon_name = object->cNameSect().c_str();
-
-    const CSilencer* pSilencer = smart_cast<const CSilencer*>(object);
-    if (pSilencer)
-        on_after_take_silencer(pSilencer);
-
-    const CScope* pScope = smart_cast<const CScope*>(object);
-    if (pScope)
-        on_after_take_scope(pScope);
-
-    const CGrenadeLauncher* pGrenadeLauncher = smart_cast<const CGrenadeLauncher*>(object);
-    if (pGrenadeLauncher)
-        on_after_take_gl(pGrenadeLauncher);
+    if (!m_is_trader)
+    {
+        const CSilencer* pSilencer = smart_cast<const CSilencer*>(object);
+        if (pSilencer)
+            on_after_take_silencer(pSilencer);
+    
+        const CScope* pScope = smart_cast<const CScope*>(object);
+        if (pScope)
+            on_after_take_scope(pScope);
+    
+        const CGrenadeLauncher* pGrenadeLauncher = smart_cast<const CGrenadeLauncher*>(object);
+        if (pGrenadeLauncher)
+            on_after_take_gl(pGrenadeLauncher);
+    }
 
     if (!READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "use_single_item_rule", true))
         return;

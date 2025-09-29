@@ -114,6 +114,9 @@ private:
     float m_power_fx_factor;
 
 private:
+    bool m_is_trader{false};
+
+private:
     float m_fRankDisperison;
     float m_fRankVisibility;
     float m_fRankImmunity;
