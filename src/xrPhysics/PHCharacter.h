@@ -1,7 +1,5 @@
 #pragma once
-#ifndef dSINGLE
-#define dSINGLE
-#endif
+
 #include "PHObject.h"
 #include "PHInterpolation.h"
 #include "xrServerEntities/PHSynchronize.h"

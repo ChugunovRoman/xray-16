@@ -14,279 +14,6 @@
 
 namespace xray::render::RENDER_NAMESPACE
 {
-//////////////////////////////////////////////////////////////////////////
-// XXX: examine
-#define DW_AS_FLT(DW) (*(float*)&(DW))
-#define FLT_AS_DW(F) (*(u32*)&(F))
-#define FLT_SIGN(F) ((FLT_AS_DW(F) & 0x80000000L))
-#define ALMOST_ZERO(F) ((FLT_AS_DW(F) & 0x7f800000L) == 0)
-#define IS_SPECIAL(F) ((FLT_AS_DW(F) & 0x7f800000L) == 0x7f800000L)
-
-//////////////////////////////////////////////////////////////////////////
-struct BoundingBox
-{
-    glm::vec3 minPt;
-    glm::vec3 maxPt;
-
-    BoundingBox() : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f) {}
-
-    BoundingBox(const BoundingBox& other) : minPt(other.minPt), maxPt(other.maxPt) {}
-
-    explicit BoundingBox(const glm::vec3* points, u32 n) : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f)
-    {
-        for (unsigned int i = 0; i < n; i++)
-            Merge(&points[i]);
-    }
-
-    explicit BoundingBox(const xr_vector<glm::vec3>* points)
-        : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f)
-    {
-        for (const auto& point : *points)
-            Merge(&point);
-    }
-
-    explicit BoundingBox(const xr_vector<BoundingBox>* boxes)
-        : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f)
-    {
-        for (const auto & box : *boxes)
-        {
-            Merge(&box.maxPt);
-            Merge(&box.minPt);
-        }
-    }
-
-    void Merge(const glm::vec3* vec)
-    {
-        minPt.x = std::min(minPt.x, vec->x);
-        minPt.y = std::min(minPt.y, vec->y);
-        minPt.z = std::min(minPt.z, vec->z);
-        maxPt.x = std::max(maxPt.x, vec->x);
-        maxPt.y = std::max(maxPt.y, vec->y);
-        maxPt.z = std::max(maxPt.z, vec->z);
-    }
-};
-
-///////////////////////////////////////////////////////////////////////////
-//  PlaneIntersection
-//    computes the point where three planes intersect
-//    returns whether or not the point exists.
-static inline bool PlaneIntersection(glm::vec3* intersectPt, const glm::vec4& p0, const glm::vec4& p1,
-                                     const glm::vec4& p2)
-{
-    glm::vec3 n0 = glm::vec3(p0.x, p0.y, p0.z);
-    glm::vec3 n1 = glm::vec3(p1.x, p1.y, p1.z);
-    glm::vec3 n2 = glm::vec3(p2.x, p2.y, p2.z);
-
-    glm::vec3 n1_n2 = glm::cross(n1, n2);
-    glm::vec3 n2_n0 = glm::cross(n2, n0);
-    glm::vec3 n0_n1 = glm::cross(n0, n1);
-
-    float cosTheta = glm::dot(n0, n1_n2);
-
-    if (ALMOST_ZERO(cosTheta) || IS_SPECIAL(cosTheta))
-        return false;
-
-    float secTheta = 1.f / cosTheta;
-
-    n1_n2 *= p0.w;
-    n2_n0 *= p1.w;
-    n0_n1 *= p2.w;
-
-    *intersectPt = -(n1_n2 + n2_n0 + n0_n1) * secTheta;
-    return true;
-}
-
-struct Frustum
-{
-    explicit Frustum(const glm::mat4* matrix);
-
-    glm::vec4 camPlanes[6];
-    int nVertexLUT[6];
-    glm::vec3 pntList[8];
-};
-
-//  build a frustum from a camera (projection, or viewProjection) matrix
-Frustum::Frustum(const glm::mat4* matrix)
-{
-    //  build a view frustum based on the current view & projection matrices...
-    glm::vec4 column1 = glm::column(*matrix, 0);
-    glm::vec4 column2 = glm::column(*matrix, 1);
-    glm::vec4 column3 = glm::column(*matrix, 2);
-    glm::vec4 column4 = glm::column(*matrix, 3);
-
-    glm::vec4 planes[6];
-    planes[0] = column4 - column1; // left
-    planes[1] = column4 + column1; // right
-    planes[2] = column4 - column2; // bottom
-    planes[3] = column4 + column2; // top
-    planes[4] = column4 - column3; // near
-    planes[5] = column4 + column3; // far
-    // ignore near & far plane
-
-    int p;
-
-    for (p = 0; p < 6; p++) // normalize the planes
-    {
-        camPlanes[p] = glm::normalize(planes[p]);
-        // build a bit-field that will tell us the indices for the nearest and farthest vertices from each plane...
-        nVertexLUT[p] = (camPlanes[p].x < 0.f ? 1 : 0) | (camPlanes[p].y < 0.f ? 2 : 0) | (camPlanes[p].z < 0.f ? 4 : 0);
-    }
-
-    for (int i = 0; i < 8; i++) // compute extrema
-    {
-        const glm::vec4& p0 = i & 1 ? camPlanes[4] : camPlanes[5];
-        const glm::vec4& p1 = i & 2 ? camPlanes[3] : camPlanes[2];
-        const glm::vec4& p2 = i & 4 ? camPlanes[0] : camPlanes[1];
-        PlaneIntersection(&pntList[i], p0, p1, p2);
-    }
-}
-
-//////////////////////////////////////////////////////////////////////////
-Fvector3 wform(Fmatrix const& m, glm::vec3 const& v)
-{
-    Fvector4 r;
-    r.x = v.x * m._11 + v.y * m._21 + v.z * m._31 + m._41;
-    r.y = v.x * m._12 + v.y * m._22 + v.z * m._32 + m._42;
-    r.z = v.x * m._13 + v.y * m._23 + v.z * m._33 + m._43;
-    r.w = v.x * m._14 + v.y * m._24 + v.z * m._34 + m._44;
-    // VERIFY		(r.w>0.f);
-    const float invW = 1.0f / r.w;
-    return {r.x * invW, r.y * invW, r.z * invW};
-}
-
-Fvector3 wform(glm::mat4 const& m, Fvector3 const& v)
-{
-    Fvector4 r;
-    r.x = v.x * m[0][0] + v.y * m[1][0] + v.z * m[2][0] + m[3][0];
-    r.y = v.x * m[0][1] + v.y * m[1][1] + v.z * m[2][1] + m[3][1];
-    r.z = v.x * m[0][2] + v.y * m[1][2] + v.z * m[2][2] + m[3][2];
-    r.w = v.x * m[0][3] + v.y * m[1][3] + v.z * m[2][3] + m[3][3];
-    // VERIFY		(r.w>0.f);
-    const float invW = 1.0f / r.w;
-    return {r.x * invW, r.y * invW, r.z * invW};
-}
-
-Fvector3 wform(glm::mat4 const& m, glm::vec3 const& v)
-{
-    Fvector4 r;
-    r.x = v.x * m[0][0] + v.y * m[1][0] + v.z * m[2][0] + m[3][0];
-    r.y = v.x * m[0][1] + v.y * m[1][1] + v.z * m[2][1] + m[3][1];
-    r.z = v.x * m[0][2] + v.y * m[1][2] + v.z * m[2][2] + m[3][2];
-    r.w = v.x * m[0][3] + v.y * m[1][3] + v.z * m[2][3] + m[3][3];
-    // VERIFY		(r.w>0.f);
-    const float invW = 1.0f / r.w;
-    return {r.x * invW, r.y * invW, r.z * invW};
-}
-
-//////////////////////////////////////////////////////////////////////////
-// OLES: naive 3D clipper - roubustness around 0, but works for this sample
-// note: normals points to 'outside'
-//////////////////////////////////////////////////////////////////////////
-const float _eps = 0.000001f;
-
-struct DumbClipper
-{
-    CFrustum frustum;
-    xr_vector<glm::vec4> planes;
-
-    BOOL clip(glm::vec3& p0, glm::vec3& p1) // returns TRUE if result meaningfull
-    {
-        float denum;
-        glm::vec3 D;
-        for (auto P : planes)
-        {
-            float cls0 = glm::dot(P, glm::vec4(p0, 1));
-            float cls1 = glm::dot(P, glm::vec4(p1, 1));
-            if (cls0 > 0 && cls1 > 0)
-                return false; // fully outside
-
-            if (cls0 > 0)
-            {
-                // clip p0
-                D = p1 - p0;
-                denum = glm::dot(P, glm::vec4(D, 0));
-                if (denum != 0)
-                    p0 += -D * cls0 / denum;
-            }
-            if (cls1 > 0)
-            {
-                // clip p1
-                D = p0 - p1;
-                denum = glm::dot(P, glm::vec4(D, 0));
-                if (denum != 0)
-                    p1 += -D * cls1 / denum;
-            }
-        }
-        return true;
-    }
-
-    static glm::vec3 point(Fbox& bb, int i)
-    {
-        return glm::vec3(i & 1 ? bb.vMin.x : bb.vMax.x, i & 2 ? bb.vMin.y : bb.vMax.y, i & 4 ? bb.vMin.z : bb.vMax.z);
-    }
-
-    Fbox clipped_AABB(xr_vector<Fbox>& src, glm::mat4& xf)
-    {
-        Fbox3 result;
-        result.invalidate();
-        for (auto& bb : src)
-        {
-            u32 mask = frustum.getMask();
-            EFC_Visible res = frustum.testAABB(&bb.vMin.x, mask);
-            switch (res)
-            {
-            case fcvFully:
-                for (int c = 0; c < 8; c++)
-                {
-                    glm::vec3 p0 = point(bb, c);
-                    Fvector x0 = wform(xf, p0);
-                    result.modify(x0);
-                }
-                break;
-            case fcvPartial:
-                for (int c0 = 0; c0 < 8; c0++)
-                {
-                    for (int c1 = 0; c1 < 8; c1++)
-                    {
-                        if (c0 == c1)
-                            continue;
-                        glm::vec3 p0 = point(bb, c0);
-                        glm::vec3 p1 = point(bb, c1);
-                        if (!clip(p0, p1))
-                            continue;
-                        Fvector x0 = wform(xf, p0);
-                        Fvector x1 = wform(xf, p1);
-                        result.modify(x0);
-                        result.modify(x1);
-                    }
-                }
-                break;
-            } // switch (res)
-        }
-        return result;
-    }
-};
-
-xr_vector<Fbox> s_casters;
-
-glm::vec2 BuildTSMProjectionMatrix_caster_depth_bounds(glm::mat4& lightSpaceBasis)
-{
-    float min_z = 1e32f, max_z = -1e32f;
-    glm::mat4 minmax_xform = glm::make_mat4x4(&Device.mView.m[0][0]) * lightSpaceBasis;
-    for (auto& s_caster : s_casters)
-    {
-        Fvector3 pt;
-        for (int e = 0; e < 8; e++)
-        {
-            s_caster.getpoint(e, pt);
-            pt = wform(minmax_xform, pt);
-            min_z = _min(min_z, pt.z);
-            max_z = _max(max_z, pt.z);
-        }
-    }
-    return glm::vec2(min_z, max_z);
-}
-
 void render_sun_old::init()
 {
     u32 cascade_count = R__NUM_SUN_CASCADES;
@@ -327,7 +54,7 @@ void render_sun_old::init()
     VERIFY(context_id != R_dsgraph_structure::INVALID_CONTEXT_ID);
 }
 
-void render_sun_old::render_sun() const
+void render_sun_old::render_sun()
 {
     PIX_EVENT(render_sun);
     glm::mat4 m_LightViewProj;
@@ -506,7 +233,7 @@ void render_sun_old::render_sun() const
 
         //  also - transform the shadow caster bounding boxes into light projective space.  we want to translate along the Z axis so that
         //  all shadow casters are in front of the near plane.
-        glm::vec2 depthbounds = BuildTSMProjectionMatrix_caster_depth_bounds(lightSpaceBasis);
+        glm::vec2 depthbounds = BuildTSMProjectionMatrix_caster_depth_bounds(lightSpaceBasis, s_casters);
 
         float min_z = std::min(depthbounds.x, frustumBox.minPt.z);
         float max_z = std::max(depthbounds.y, frustumBox.maxPt.z);
@@ -1001,5 +728,26 @@ void render_sun_old::render_sun_filtered() const
     RImplementation.Target->phase_accumulator(RCache);
     PIX_EVENT(SE_SUN_LUMINANCE);
     RImplementation.Target->accum_direct(RCache, SE_SUN_LUMINANCE);
+}
+
+void render_sun_old::render()
+{
+    if (!o.active)
+        return;
+
+    render_sun_near();
+    render_sun();
+    render_sun_filtered();
+}
+
+void render_sun_old::flush()
+{
+    if (!o.active)
+        return;
+
+    auto& dsgraph = RImplementation.get_context(context_id);
+    dsgraph.cmd_list.submit();
+    RImplementation.release_context(context_id);
+    RImplementation.get_imm_command_list().Invalidate();
 }
 } // namespace xray::render::RENDER_NAMESPACE

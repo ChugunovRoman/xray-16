@@ -69,7 +69,6 @@ protected:
 
     Frect m_tex_rect[flMax];
     ui_shader m_shader;
-    shared_str dbg_tex_name;
 
 private:
     DECLARE_SCRIPT_REGISTER_FUNCTION(CUIWindow);

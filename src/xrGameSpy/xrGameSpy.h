@@ -37,3 +37,12 @@ XRGAMESPY_API void GetGameID(int* GameID, int verID);
 // XXX: remove hack
 #undef min
 #undef max
+#undef accept
+#undef bind
+#undef connect
+#undef getpeername
+#undef getsockname
+#undef getsockopt
+#undef recvfrom
+#undef sendto
+#undef setsockopt

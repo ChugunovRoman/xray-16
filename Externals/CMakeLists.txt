@@ -4,15 +4,15 @@ else()
     find_package(Lua51 REQUIRED)
 endif()
 
+add_subdirectory(luabind)
 add_subdirectory(xrLuaFix)
+add_subdirectory(OPCODE)
 add_subdirectory(ode)
 
 # Silence all warnings for external libraries
-add_compile_options("-w")
+add_compile_options(${XRAY_DISABLE_WARNINGS})
 
-add_subdirectory(luabind)
 add_subdirectory(GameSpy)
-add_subdirectory(OPCODE)
 add_subdirectory(imgui-proj)
 
 if (NOT TARGET xrLuabind)

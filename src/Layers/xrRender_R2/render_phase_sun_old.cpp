@@ -3,255 +3,6 @@
 
 namespace xray::render::RENDER_NAMESPACE
 {
-//////////////////////////////////////////////////////////////////////////
-// XXX: examine
-#define DW_AS_FLT(DW) (*(float*)&(DW))
-#define FLT_AS_DW(F) (*(u32*)&(F))
-#define FLT_SIGN(F) ((FLT_AS_DW(F) & 0x80000000L))
-#define ALMOST_ZERO(F) ((FLT_AS_DW(F) & 0x7f800000L) == 0)
-#define IS_SPECIAL(F) ((FLT_AS_DW(F) & 0x7f800000L) == 0x7f800000L)
-
-//////////////////////////////////////////////////////////////////////////
-struct BoundingBox
-{
-    XMFLOAT3 minPt;
-    XMFLOAT3 maxPt;
-
-    BoundingBox() : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f) {}
-
-    BoundingBox(const BoundingBox& other) : minPt(other.minPt), maxPt(other.maxPt) {}
-
-    explicit BoundingBox(const XMFLOAT3* points, u32 n) : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f)
-    {
-        for (unsigned int i = 0; i < n; i++)
-            Merge(&points[i]);
-    }
-
-    explicit BoundingBox(const xr_vector<XMFLOAT3>* points)
-        : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f)
-    {
-        for (unsigned int i = 0; i < points->size(); i++)
-            Merge(&(*points)[i]);
-    }
-
-    explicit BoundingBox(const xr_vector<BoundingBox>* boxes)
-        : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f)
-    {
-        for (unsigned int i = 0; i < boxes->size(); i++)
-        {
-            Merge(&(*boxes)[i].maxPt);
-            Merge(&(*boxes)[i].minPt);
-        }
-    }
-
-    void Merge(const XMFLOAT3* vec)
-    {
-        minPt.x = std::min(minPt.x, vec->x);
-        minPt.y = std::min(minPt.y, vec->y);
-        minPt.z = std::min(minPt.z, vec->z);
-        maxPt.x = std::max(maxPt.x, vec->x);
-        maxPt.y = std::max(maxPt.y, vec->y);
-        maxPt.z = std::max(maxPt.z, vec->z);
-    }
-};
-
-///////////////////////////////////////////////////////////////////////////
-//  PlaneIntersection
-//    computes the point where three planes intersect
-//    returns whether or not the point exists.
-static inline bool PlaneIntersection(
-    XMVECTOR& intersectPt, FXMVECTOR n0, FXMVECTOR n1, FXMVECTOR n2)
-{
-    XMVECTOR n1_n2 = XMVector3Cross(n1, n2);
-    XMVECTOR n2_n0 = XMVector3Cross(n2, n0);
-    XMVECTOR n0_n1 = XMVector3Cross(n0, n1);
-
-    const float cosTheta = XMVectorGetX(XMVector3Dot(n0, n1_n2));
-
-    if (ALMOST_ZERO(cosTheta) || IS_SPECIAL(cosTheta))
-        return false;
-
-    const float secTheta = 1.f / cosTheta;
-
-    n1_n2 = n1_n2 * XMVectorGetW(n0);
-    n2_n0 = n2_n0 * XMVectorGetW(n1);
-    n0_n1 = n0_n1 * XMVectorGetW(n2);
-
-    intersectPt = -(n1_n2 + n2_n0 + n0_n1) * secTheta;
-    return true;
-}
-
-struct Frustum
-{
-    Frustum(const XMFLOAT4X4* matrix);
-
-    XMFLOAT4 camPlanes[6];
-    int nVertexLUT[6];
-    XMFLOAT3 pntList[8];
-};
-
-//  build a frustum from a camera (projection, or viewProjection) matrix
-Frustum::Frustum(const XMFLOAT4X4* matrix)
-{
-    //  build a view frustum based on the current view & projection matrices...
-    const XMVECTOR column4 = XMVectorSet(matrix->_14, matrix->_24, matrix->_34, matrix->_44);
-    const XMVECTOR column1 = XMVectorSet(matrix->_11, matrix->_21, matrix->_31, matrix->_41);
-    const XMVECTOR column2 = XMVectorSet(matrix->_12, matrix->_22, matrix->_32, matrix->_42);
-    const XMVECTOR column3 = XMVectorSet(matrix->_13, matrix->_23, matrix->_33, matrix->_43);
-
-    XMVECTOR planes[6];
-    planes[0] = column4 - column1; // left
-    planes[1] = column4 + column1; // right
-    planes[2] = column4 - column2; // bottom
-    planes[3] = column4 + column2; // top
-    planes[4] = column4 - column3; // near
-    planes[5] = column4 + column3; // far
-    // ignore near & far plane
-
-    for (int p = 0; p < 6; p++) // normalize the planes
-        planes[p] = XMVector3Normalize(planes[p]);
-
-    for (int p = 0; p < 6; p++)
-        XMStoreFloat4(&camPlanes[p], planes[p]);
-
-    //  build a bit-field that will tell us the indices for the nearest and farthest vertices from each plane...
-    for (int i = 0; i < 6; i++)
-        nVertexLUT[i] = ((camPlanes[i].x < 0.f) ? 1 : 0) | ((camPlanes[i].y < 0.f) ? 2 : 0) | ((camPlanes[i].z < 0.f) ? 4 : 0);
-
-    for (int i = 0; i < 8; i++) // compute extrema
-    {
-        XMVECTOR intersect;
-        PlaneIntersection(intersect,
-            (i & 1) ? planes[4] : planes[5],
-            (i & 2) ? planes[3] : planes[2],
-            (i & 4) ? planes[0] : planes[1]);
-        XMStoreFloat3(&pntList[i], intersect);
-    }
-}
-
-//////////////////////////////////////////////////////////////////////////
-// OLES: naive 3D clipper - roubustness around 0, but works for this sample
-// note: normals points to 'outside'
-//////////////////////////////////////////////////////////////////////////
-const float _eps = 0.000001f;
-struct DumbClipper
-{
-    CFrustum frustum;
-    xr_vector<XMFLOAT4> planes;
-    bool clip(XMFLOAT3& p0, XMFLOAT3& p1) // returns true if result meaningfull
-    {
-        XMVECTOR v0 = XMLoadFloat3(&p0);
-        XMVECTOR v1 = XMLoadFloat3(&p1);
-        for (auto& plane : planes)
-        {
-            XMVECTOR P = XMLoadFloat4(&plane);
-            XMVECTOR cls0 = XMPlaneDotCoord(P, v0);
-            XMVECTOR cls1 = XMPlaneDotCoord(P, v1);
-            float cls0f = XMVectorGetX(cls0), cls1f = XMVectorGetX(cls1);
-            if (cls0f > 0 && cls1f > 0)
-                return false; // fully outside
-
-            if (cls0f > 0)
-            {
-                // clip v0
-                XMVECTOR D = v1 - v0;
-                XMVECTOR denum = XMPlaneDotNormal(P, D);
-                if (XMVectorGetX(denum) != 0)
-                {
-                    v0 += -D * cls0 / denum;
-                    XMStoreFloat3(&p0, v0);
-                }
-            }
-            if (cls1f > 0)
-            {
-                // clip v1
-                XMVECTOR D = v0 - v1;
-                XMVECTOR denum = XMPlaneDotNormal(P, D);
-                if (XMVectorGetX(denum) != 0)
-                {
-                    v1 += -D * cls1 / denum;
-                    XMStoreFloat3(&p1, v1);
-                }
-            }
-        }
-        return true;
-    }
-
-    XMFLOAT3 point(Fbox& bb, int i) const
-    {
-        return XMFLOAT3((i & 1) ? bb.vMin.x : bb.vMax.x, (i & 2) ? bb.vMin.y : bb.vMax.y, (i & 4) ? bb.vMin.z : bb.vMax.z);
-    }
-
-    Fbox clipped_AABB(xr_vector<Fbox>& src, Fmatrix& xf)
-    {
-        Fbox3 result;
-        result.invalidate();
-        for (int it = 0; it < int(src.size()); it++)
-        {
-            Fbox& bb = src[it];
-            u32 mask = frustum.getMask();
-            EFC_Visible res = frustum.testAABB(&bb.vMin.x, mask);
-            switch (res)
-            {
-            case fcvNone: continue;
-            case fcvFully:
-                for (int c = 0; c < 8; c++)
-                {
-                    XMFLOAT3 p0 = point(bb, c);
-                    Fvector x0 = wform(xf, *((Fvector*)(&p0)));
-                    result.modify(x0);
-                }
-                break;
-            case fcvPartial:
-                for (int c0 = 0; c0 < 8; c0++)
-                {
-                    for (int c1 = 0; c1 < 8; c1++)
-                    {
-                        if (c0 == c1)
-                            continue;
-                        XMFLOAT3 p0 = point(bb, c0);
-                        XMFLOAT3 p1 = point(bb, c1);
-                        if (!clip(p0, p1))
-                            continue;
-                        Fvector x0 = wform(xf, *((Fvector*)(&p0)));
-                        Fvector x1 = wform(xf, *((Fvector*)(&p1)));
-                        result.modify(x0);
-                        result.modify(x1);
-                    }
-                }
-                break;
-            } // switch (res)
-        }
-        return result;
-    }
-};
-
-xr_vector<Fbox> s_casters;
-
-XMFLOAT2 BuildTSMProjectionMatrix_caster_depth_bounds(FXMMATRIX lightSpaceBasis)
-{
-    float min_z = 1e32f, max_z = -1e32f;
-
-    Fmatrix minmax_xform;
-    {
-        XMMATRIX view      = XMLoadFloat4x4((XMFLOAT4X4*)&Device.mView);
-        XMMATRIX minmax_xf = XMMatrixMultiply(view, lightSpaceBasis);
-        XMStoreFloat4x4((XMFLOAT4X4*)&minmax_xform, minmax_xf);
-    }
-    for (u32 c = 0; c < s_casters.size(); c++)
-    {
-        Fvector3 pt;
-        for (int e = 0; e < 8; e++)
-        {
-            s_casters[c].getpoint(e, pt);
-            pt = wform(minmax_xform, pt);
-            min_z = std::min(min_z, pt.z);
-            max_z = std::max(max_z, pt.z);
-        }
-    }
-    return XMFLOAT2(min_z, max_z);
-}
-
 void render_sun_old::init()
 {
     u32 cascade_count = R__NUM_SUN_CASCADES;
@@ -292,7 +43,7 @@ void render_sun_old::init()
     VERIFY(context_id != R_dsgraph_structure::INVALID_CONTEXT_ID);
 }
 
-void render_sun_old::render_sun() const
+void render_sun_old::render_sun()
 {
     PIX_EVENT(render_sun);
     XMMATRIX m_LightViewProj;
@@ -460,7 +211,7 @@ void render_sun_old::render_sun() const
         //  also - transform the shadow caster bounding boxes into light projective space.  we want to translate along
         //  the Z axis so that
         //  all shadow casters are in front of the near plane.
-        XMFLOAT2 depthbounds = BuildTSMProjectionMatrix_caster_depth_bounds(lightSpaceBasis);
+        XMFLOAT2 depthbounds = BuildTSMProjectionMatrix_caster_depth_bounds(lightSpaceBasis, s_casters);
 
         float min_z = std::min(depthbounds.x, frustumBox.minPt.z);
         float max_z = std::max(depthbounds.y, frustumBox.maxPt.z);
@@ -886,11 +637,11 @@ void render_sun_old::render_sun_near()
             scissor.modify(xf);
         }
         s32 limit = RImplementation.o.smapsize - 1;
-        sun->X.D[0].minX = clampr(iFloor(scissor.vMin.x), 0, limit);
-        sun->X.D[0].maxX = clampr(iCeil(scissor.vMax.x), 0, limit);
-        sun->X.D[0].minY = clampr(iFloor(scissor.vMin.y), 0, limit);
-        sun->X.D[0].maxY = clampr(iCeil(scissor.vMax.y), 0, limit);
-        sun->X.D[0].combine = cull_xform;
+        sun->X.D[SE_SUN_NEAR].minX = clampr(iFloor(scissor.vMin.x), 0, limit);
+        sun->X.D[SE_SUN_NEAR].maxX = clampr(iCeil(scissor.vMax.x), 0, limit);
+        sun->X.D[SE_SUN_NEAR].minY = clampr(iFloor(scissor.vMin.y), 0, limit);
+        sun->X.D[SE_SUN_NEAR].maxY = clampr(iCeil(scissor.vMax.y), 0, limit);
+        sun->X.D[SE_SUN_NEAR].combine = cull_xform;
 
         // full-xform
     }
@@ -923,14 +674,14 @@ void render_sun_old::render_sun_near()
             RImplementation.Target->phase_smap_direct(dsgraph.cmd_list, sun, SE_SUN_NEAR);
             dsgraph.cmd_list.set_xform_world(Fidentity);
             dsgraph.cmd_list.set_xform_view(Fidentity);
-            dsgraph.cmd_list.set_xform_project(sun->X.D[0].combine);
+            dsgraph.cmd_list.set_xform_project(sun->X.D[SE_SUN_NEAR].combine);
             dsgraph.render_graph(0);
             if (ps_r2_ls_flags.test(R2FLAG_SUN_DETAILS))
                 RImplementation.Details->Render(dsgraph.cmd_list);
-            sun->X.D[0].transluent = FALSE;
+            sun->X.D[SE_SUN_NEAR].transluent = FALSE;
             if (bSpecial)
             {
-                sun->X.D[0].transluent = TRUE;
+                sun->X.D[SE_SUN_NEAR].transluent = TRUE;
                 RImplementation.Target->phase_smap_direct_tsh(dsgraph.cmd_list, sun, SE_SUN_NEAR);
                 dsgraph.render_graph(1); // normal level, secondary priority
                 dsgraph.render_sorted(); // strict-sorted geoms
@@ -958,16 +709,31 @@ void render_sun_old::render_sun_near()
 
 void render_sun_old::render_sun_filtered() const
 {
+    if (!RImplementation.o.sunfilter)
+        return;
+    auto& dsgraph = RImplementation.get_context(context_id);
+    RImplementation.Target->phase_accumulator(dsgraph.cmd_list);
+    PIX_EVENT(SE_SUN_LUMINANCE);
+    RImplementation.Target->accum_direct(dsgraph.cmd_list, SE_SUN_LUMINANCE);
+}
 
-    if (RImplementation.o.sunfilter)
-    {
-        auto& dsgraph = RImplementation.get_context(context_id);
-        auto& cmd_list_imm = RImplementation.get_imm_command_list();
-        RImplementation.Target->phase_accumulator(cmd_list_imm);
-        PIX_EVENT(SE_SUN_LUMINANCE);
-        RImplementation.Target->accum_direct(cmd_list_imm, SE_SUN_LUMINANCE);
-    }
+void render_sun_old::render()
+{
+    if (!o.active)
+        return;
 
+    render_sun_near();
+    render_sun();
+    render_sun_filtered();
+}
+
+void render_sun_old::flush()
+{
+    if (!o.active)
+        return;
+
+    auto& dsgraph = RImplementation.get_context(context_id);
+    dsgraph.cmd_list.submit();
     RImplementation.release_context(context_id);
     RImplementation.get_imm_command_list().Invalidate();
 }

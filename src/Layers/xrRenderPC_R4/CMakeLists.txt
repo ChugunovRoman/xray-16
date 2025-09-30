@@ -1,4 +1,4 @@
-add_library(xrRenderPC_R4 SHARED)
+add_library(xrRenderPC_R4)
 
 target_sources(xrRenderPC_R4 PRIVATE
     packages.config
@@ -37,6 +37,7 @@ target_link_libraries(xrRenderPC_R4
 target_compile_definitions(xrRenderPC_R4
     PRIVATE
     XRRENDER_R4_EXPORTS
+    USE_DX11
 )
 
 set_target_properties(xrRenderPC_R4 PROPERTIES
@@ -48,6 +49,8 @@ target_precompile_headers(xrRenderPC_R4
     stdafx.h
 )
 
-install(TARGETS xrRenderPC_R4 LIBRARY
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
+if (BUILD_SHARED_LIBS)
+    install(TARGETS xrRenderPC_R4 LIBRARY
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()

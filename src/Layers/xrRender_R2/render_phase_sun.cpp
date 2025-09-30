@@ -401,36 +401,34 @@ void render_sun::accumulate_cascade(u32 cascade_ind)
     //TracyD3D11Zone(HW.profiler_ctx, "render_sun::accumulate_cascade");
 #endif
 
+    auto* target  = RImplementation.Target;
     auto& dsgraph = RImplementation.get_context(contexts_ids[cascade_ind]);
 
-    if ((cascade_ind == SE_SUN_NEAR) && RImplementation.Target->use_minmax_sm_this_frame())
+    if ((cascade_ind == SE_SUN_NEAR) && target->use_minmax_sm_this_frame())
     {
         PIX_EVENT_CTX(dsgraph.cmd_list, SE_SUN_NEAR_MINMAX_GENERATE);
-        RImplementation.Target->create_minmax_SM(dsgraph.cmd_list);
+        target->create_minmax_SM(dsgraph.cmd_list);
     }
 
     // Accumulate
+    target->rt_smap_depth->set_slice_read(cascade_ind);
+    if (cascade_ind == 0)
     {
-        // Accumulate
-        RImplementation.Target->rt_smap_depth->set_slice_read(cascade_ind);
-        if (cascade_ind == 0)
-        {
-            PIX_EVENT_CTX(dsgraph.cmd_list, SE_SUN_NEAR);
-            RImplementation.Target->accum_direct_cascade(dsgraph.cmd_list, SE_SUN_NEAR, m_sun_cascades[cascade_ind].xform,
-                m_sun_cascades[cascade_ind].xform, m_sun_cascades[cascade_ind].bias);
-        }
-        else if (cascade_ind < R__NUM_SUN_CASCADES - 1)
-        {
-            PIX_EVENT_CTX(dsgraph.cmd_list, SE_SUN_MIDDLE);
-            RImplementation.Target->accum_direct_cascade(dsgraph.cmd_list, SE_SUN_MIDDLE, m_sun_cascades[cascade_ind].xform,
-                m_sun_cascades[cascade_ind - 1].xform, m_sun_cascades[cascade_ind].bias);
-        }
-        else
-        {
-            PIX_EVENT_CTX(dsgraph.cmd_list, SE_SUN_FAR);
-            RImplementation.Target->accum_direct_cascade(dsgraph.cmd_list, SE_SUN_FAR, m_sun_cascades[cascade_ind].xform,
-                m_sun_cascades[cascade_ind - 1].xform, m_sun_cascades[cascade_ind].bias);
-        }
+        PIX_EVENT_CTX(dsgraph.cmd_list, SE_SUN_NEAR);
+        target->accum_direct_cascade(dsgraph.cmd_list, SE_SUN_NEAR, m_sun_cascades[cascade_ind].xform,
+                                                     m_sun_cascades[cascade_ind].xform, m_sun_cascades[cascade_ind].bias);
+    }
+    else if (cascade_ind < R__NUM_SUN_CASCADES - 1)
+    {
+        PIX_EVENT_CTX(dsgraph.cmd_list, SE_SUN_MIDDLE);
+        target->accum_direct_cascade(dsgraph.cmd_list, SE_SUN_MIDDLE, m_sun_cascades[cascade_ind].xform,
+                                                     m_sun_cascades[cascade_ind - 1].xform, m_sun_cascades[cascade_ind].bias);
+    }
+    else
+    {
+        PIX_EVENT_CTX(dsgraph.cmd_list, SE_SUN_FAR);
+        target->accum_direct_cascade(dsgraph.cmd_list, SE_SUN_FAR, m_sun_cascades[cascade_ind].xform,
+                                                     m_sun_cascades[cascade_ind - 1].xform, m_sun_cascades[cascade_ind].bias);
     }
 
     dsgraph.cmd_list.submit(); // TODO: move into release (rename to submit?)

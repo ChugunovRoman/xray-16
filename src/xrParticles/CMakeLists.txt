@@ -1,4 +1,4 @@
-add_library(xrParticles SHARED)
+add_library(xrParticles)
 
 target_sources_grouped(
     TARGET xrParticles
@@ -55,6 +55,8 @@ target_precompile_headers(xrParticles
     stdafx.h
 )
 
-install(TARGETS xrParticles LIBRARY
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
+if (BUILD_SHARED_LIBS)
+    install(TARGETS xrParticles LIBRARY
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()

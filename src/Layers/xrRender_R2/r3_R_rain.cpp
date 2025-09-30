@@ -337,6 +337,12 @@ void render_rain::flush()
         RImplementation.release_context(context_id);
     }
 
+    if (!ps_r2_ls_flags.test(R3FLAG_DYN_WET_SURF))
+        return;
+
+    if (rain_factor < EPS_L)
+        return;
+
     auto& cmd_list_imm = RImplementation.get_imm_context().cmd_list;
 
 #if defined(USE_DX11)
@@ -351,18 +357,15 @@ void render_rain::flush()
     cmd_list_imm.set_xform_project(Device.mProject);
 
     // Accumulate
-    if (rain_factor >= EPS_L)
-    {
-        PIX_EVENT_CTX(cmd_list_imm, RainApply);
+    PIX_EVENT_CTX(cmd_list_imm, RainApply);
 
-        cmd_list_imm.set_pass_targets(
-            RImplementation.Target->rt_Color, /*rt_Normal*/
-            nullptr,
-            nullptr,
-            RImplementation.Target->rt_MSAADepth
-        );
-        RImplementation.Target->draw_rain(cmd_list_imm, RainLight);
-        RainLight.frame_render = Device.dwFrame;
-    }
+    cmd_list_imm.set_pass_targets(
+        RImplementation.Target->rt_Color, /*rt_Normal*/
+        nullptr,
+        nullptr,
+        RImplementation.Target->rt_MSAADepth
+    );
+    RImplementation.Target->draw_rain(cmd_list_imm, RainLight);
+    RainLight.frame_render = Device.dwFrame;
 }
 } // namespace xray::render::RENDER_NAMESPACE

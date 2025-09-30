@@ -1,4 +1,4 @@
-add_library(xrEngine SHARED)
+add_library(xrEngine)
 
 target_sources_grouped(
     TARGET xrEngine
@@ -400,6 +400,14 @@ target_sources_grouped(
 #    xrLoadSurface.cpp
 #)
 
+target_sources(xrEngine
+    PRIVATE
+    ClientServer.txt
+    "Effects description.txt"
+    features.txt
+    TODO.txt
+)
+
 target_include_directories(xrEngine
     PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -421,9 +429,10 @@ target_link_libraries(xrEngine
     xrScriptEngine
     xrNetServer
     xrImGui
-    ${OPENAL_LIBRARY}
+    OpenAL::OpenAL
     Ogg::Ogg
     Theora::Theora
+    SDL2::SDL2
 )
 
 target_compile_definitions(xrEngine
@@ -441,6 +450,8 @@ target_precompile_headers(xrEngine
     stdafx.h
 )
 
-install(TARGETS xrEngine LIBRARY
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
+if (BUILD_SHARED_LIBS)
+    install(TARGETS xrEngine LIBRARY
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()

@@ -155,21 +155,15 @@ struct render_sun_old : public i_render_phase
 
     void init() override;
     void calculate() override {}
-    void render() override
-    {
-        if (!o.active)
-            return;
+    void render() override;
+    void flush() override;
 
-        render_sun_near();
-        render_sun();
-        render_sun_filtered();
-    }
-
-    void render_sun() const;
+    void render_sun();
     void render_sun_near();
     void render_sun_filtered() const;
 
     xr_vector<sun::cascade> m_sun_cascades;
+    xr_vector<Fbox> s_casters;
     light* sun{ nullptr };
     u32 context_id{ R_dsgraph_structure::INVALID_CONTEXT_ID };
 };

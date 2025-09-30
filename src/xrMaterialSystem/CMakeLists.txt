@@ -1,4 +1,4 @@
-add_library(xrMaterialSystem SHARED)
+add_library(xrMaterialSystem)
 
 target_sources_grouped(
     TARGET xrMaterialSystem
@@ -38,6 +38,8 @@ target_precompile_headers(xrMaterialSystem
     stdafx.h
 )
 
-install(TARGETS xrMaterialSystem LIBRARY
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
+if (BUILD_SHARED_LIBS)
+    install(TARGETS xrMaterialSystem LIBRARY
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()

@@ -189,7 +189,7 @@ void CRenderTarget::accum_direct(CBackend& cmd_list, u32 sub_phase)
         Fmatrix m_shadow;
         {
             Fmatrix xf_project;
-            xf_project.mul(m_TexelAdjust, RImplementation.r_sun_old.sun->X.D[0].combine); // TODO: move into render_sun
+            xf_project.mul(m_TexelAdjust, RImplementation.r_sun_old.sun->X.D[sub_phase].combine); // TODO: move into render_sun
             m_shadow.mul(xf_project, Device.mInvView);
 
             // tsm-bias
@@ -345,8 +345,8 @@ void CRenderTarget::accum_direct(CBackend& cmd_list, u32 sub_phase)
 
         //	Igor: draw volumetric here
         // if (ps_r2_ls_flags.test(R2FLAG_SUN_SHAFTS))
-        if (RImplementation.o.advancedpp && (ps_r_sun_shafts > 0))
-            accum_direct_volumetric(cmd_list, sub_phase, Offset, m_shadow);
+        if (RImplementation.o.advancedpp && (ps_r_sun_shafts > 0) && sub_phase == SE_SUN_FAR)
+            accum_direct_volumetric(cmd_list, sub_phase, Offset, m_shadow, 0, ps_r2_sun_far);
     }
 }
 
@@ -471,7 +471,10 @@ void CRenderTarget::accum_direct_cascade(CBackend& cmd_list, u32 sub_phase, Fmat
     // Perform lighting
     {
         phase_accumulator(cmd_list);
-        cmd_list.set_CullMode(CULL_CCW); //******************************************************************
+        if (RImplementation.o.oldshadowcascades)
+            cmd_list.set_CullMode(CULL_NONE);
+        else
+            cmd_list.set_CullMode(CULL_CCW);
         cmd_list.set_ColorWriteEnable();
 
         // texture adjustment matrix
@@ -557,16 +560,22 @@ void CRenderTarget::accum_direct_cascade(CBackend& cmd_list, u32 sub_phase, Fmat
         j0.set(offset, offset);
         j1.set(scale_X, scale_X).add(offset);
 
+        u32 st_vertices;
+        u32 st_primitives;
+
         // Fill vertex buffer
-        u32 i_offset;
+        if (!RImplementation.o.oldshadowcascades)
         {
+            st_vertices   = std::size(accum_direct::corners);
+            st_primitives = std::size(accum_direct::facetable);
+
+            u32  i_offset;
             u16* pib = RImplementation.Index.Lock(sizeof(accum_direct::facetable) / sizeof(u16), i_offset);
             CopyMemory(pib, &accum_direct::facetable, sizeof(accum_direct::facetable));
             RImplementation.Index.Unlock(sizeof(accum_direct::facetable) / sizeof(u16));
 
             // corners
-
-            u32 ver_count = sizeof(accum_direct::corners) / sizeof(Fvector3);
+            constexpr u32 ver_count = sizeof(accum_direct::corners) / sizeof(Fvector3);
             Fvector4* pv = (Fvector4*)RImplementation.Vertex.Lock(ver_count, g_combine_cuboid.stride(), Offset);
 
             Fmatrix inv_XDcombine;
@@ -583,9 +592,33 @@ void CRenderTarget::accum_direct_cascade(CBackend& cmd_list, u32 sub_phase, Fmat
                 pv++;
             }
             RImplementation.Vertex.Unlock(ver_count, g_combine_cuboid.stride());
+            cmd_list.set_Geometry(g_combine_cuboid);
         }
+        else
+        {
+            st_vertices   = 4;
+            st_primitives = 2;
 
-        cmd_list.set_Geometry(g_combine_cuboid);
+            FVF::TL2uv* pv = (FVF::TL2uv*)RImplementation.Vertex.Lock(4, g_combine_2UV->vb_stride, Offset);
+            // pv->set						(EPS,			float(_h+EPS),	d_Z,	d_W, C, p0.x, p1.y, j0.x, j1.y);
+            // pv++;
+            // pv->set						(EPS,			EPS,			d_Z,	d_W, C, p0.x, p0.y, j0.x, j0.y);
+            // pv++;
+            // pv->set						(float(_w+EPS),	float(_h+EPS),	d_Z,	d_W, C, p1.x, p1.y, j1.x, j1.y);
+            // pv++;
+            // pv->set						(float(_w+EPS),	EPS,			d_Z,	d_W, C, p1.x, p0.y, j1.x, j0.y);
+            // pv++;
+            pv->set(-1, -1, d_Z, d_W, C, 0, 1, 0, scale_X);
+            pv++;
+            pv->set(-1, 1, d_Z, d_W, C, 0, 0, 0, 0);
+            pv++;
+            pv->set(1, -1, d_Z, d_W, C, 1, 1, scale_X, scale_X);
+            pv++;
+            pv->set(1, 1, d_Z, d_W, C, 1, 0, scale_X, 0);
+            pv++;
+            RImplementation.Vertex.Unlock(4, g_combine_2UV->vb_stride);
+            cmd_list.set_Geometry(g_combine_2UV);
+        }
 
         // setup
         cmd_list.set_Element(s_accum_direct->E[uiElementIndex]);
@@ -667,7 +700,7 @@ void CRenderTarget::accum_direct_cascade(CBackend& cmd_list, u32 sub_phase, Fmat
             // cmd_list.set_Stencil	(TRUE,D3DCMP_LESSEQUAL,dwLightMarkerID,0xff,0x00);
             cmd_list.set_Stencil(TRUE, D3DCMP_LESSEQUAL, dwLightMarkerID, 0xff, st_mask,
                 D3DSTENCILOP_KEEP, st_pass, D3DSTENCILOP_KEEP);
-            cmd_list.Render(D3DPT_TRIANGLELIST, Offset, 0, 8, 0, 16);
+            cmd_list.Render(D3DPT_TRIANGLELIST, Offset, 0, st_vertices, 0, st_primitives);
         }
         else
         {
@@ -675,7 +708,7 @@ void CRenderTarget::accum_direct_cascade(CBackend& cmd_list, u32 sub_phase, Fmat
             // cmd_list.set_Stencil	(TRUE,D3DCMP_EQUAL,dwLightMarkerID,0xff,0x00);
             cmd_list.set_Stencil(TRUE, D3DCMP_EQUAL, dwLightMarkerID, 0xff, st_mask,
                 D3DSTENCILOP_KEEP, st_pass, D3DSTENCILOP_KEEP);
-            cmd_list.Render(D3DPT_TRIANGLELIST, Offset, 0, 8, 0, 16);
+            cmd_list.Render(D3DPT_TRIANGLELIST, Offset, 0, st_vertices, 0, st_primitives);
 
             // per sample
             if (RImplementation.o.msaa_opt)
@@ -692,7 +725,7 @@ void CRenderTarget::accum_direct_cascade(CBackend& cmd_list, u32 sub_phase, Fmat
                 cmd_list.set_Stencil(TRUE, D3DCMP_EQUAL, dwLightMarkerID | 0x80, 0xff, st_mask,
                     D3DSTENCILOP_KEEP, st_pass, D3DSTENCILOP_KEEP);
                 cmd_list.set_CullMode(CULL_NONE);
-                cmd_list.Render(D3DPT_TRIANGLELIST, Offset, 0, 8, 0, 16);
+                cmd_list.Render(D3DPT_TRIANGLELIST, Offset, 0, st_vertices, 0, st_primitives);
             }
             else
             {
@@ -711,7 +744,7 @@ void CRenderTarget::accum_direct_cascade(CBackend& cmd_list, u32 sub_phase, Fmat
                         st_pass, D3DSTENCILOP_KEEP);
                     cmd_list.set_CullMode(CULL_NONE);
                     cmd_list.StateManager.SetSampleMask(u32(1) << i);
-                    cmd_list.Render(D3DPT_TRIANGLELIST, Offset, 0, 8, 0, 16);
+                    cmd_list.Render(D3DPT_TRIANGLELIST, Offset, 0, st_vertices, 0, st_primitives);
                 }
                 cmd_list.StateManager.SetSampleMask(0xffffffff);
             }
@@ -732,7 +765,10 @@ void CRenderTarget::accum_direct_cascade(CBackend& cmd_list, u32 sub_phase, Fmat
         //	Igor: draw volumetric here
         // if (ps_r2_ls_flags.test(R2FLAG_SUN_SHAFTS))
         if (RImplementation.o.advancedpp && (ps_r_sun_shafts > 0) && sub_phase == SE_SUN_FAR)
-            accum_direct_volumetric(cmd_list, sub_phase, Offset, m_shadow);
+        {
+            const float max = RImplementation.r_sun.m_sun_cascades[R__NUM_SUN_CASCADES - 1].size;
+            accum_direct_volumetric(cmd_list, sub_phase, Offset, m_shadow, 0, max);
+        }
     }
 }
 
@@ -949,7 +985,7 @@ void CRenderTarget::accum_direct_f(CBackend& cmd_list, u32 sub_phase)
         Fmatrix m_shadow;
         {
             Fmatrix xf_project;
-            xf_project.mul(m_TexelAdjust, fuckingsun->X.D[0].combine);
+            xf_project.mul(m_TexelAdjust, fuckingsun->X.D[sub_phase].combine);
             m_shadow.mul(xf_project, Device.mInvView);
 
             // tsm-bias
@@ -1180,7 +1216,8 @@ void CRenderTarget::accum_direct_lum(CBackend& cmd_list)
     }
 }
 
-void CRenderTarget::accum_direct_volumetric(CBackend& cmd_list, u32 sub_phase, const u32 Offset, const Fmatrix& mShadow)
+void CRenderTarget::accum_direct_volumetric(CBackend& cmd_list, u32 sub_phase,
+    const u32 Offset, const Fmatrix& mShadow, float zMin, float zMax)
 {
     PIX_EVENT(accum_direct_volumetric);
 
@@ -1200,9 +1237,8 @@ void CRenderTarget::accum_direct_volumetric(CBackend& cmd_list, u32 sub_phase, c
 
     ref_selement Element = s_accum_direct_volumetric->E[0];
 
-    const bool useMinMaxSMThisFrame = use_minmax_sm_this_frame();
     // if ( (sub_phase==SE_SUN_NEAR) && use_minmax_sm_this_frame())
-    if (useMinMaxSMThisFrame)
+    if (use_minmax_sm_this_frame())
         Element = s_accum_direct_volumetric_minmax->E[0];
 
     //	Assume everything was recalculated before this call by accum_direct
@@ -1224,7 +1260,7 @@ void CRenderTarget::accum_direct_volumetric(CBackend& cmd_list, u32 sub_phase, c
         // setup
         // cmd_list.set_Element			(s_accum_direct_volumetric->E[sub_phase]);
         cmd_list.set_Element(Element);
-        if (useMinMaxSMThisFrame || !RImplementation.o.oldshadowcascades)
+        if (!RImplementation.o.oldshadowcascades)
         {
             cmd_list.set_CullMode(CULL_CCW);
         }
@@ -1240,33 +1276,17 @@ void CRenderTarget::accum_direct_volumetric(CBackend& cmd_list, u32 sub_phase, c
 
         cmd_list.set_c("m_texgen", m_Texgen);
         //		cmd_list.set_c				("m_sunmask",			m_clouds_shadow);
-
-        // nv-DBT
-        float zMin, zMax;
-        if (SE_SUN_NEAR == sub_phase)
-        {
-            zMin = 0;
-            zMax = ps_r2_sun_near;
-        }
-        else
-        {
-            if (RImplementation.o.oldshadowcascades)
-                zMin = ps_r2_sun_near;
-            else
-                zMin = 0; /////*****************************************************************************************
-            zMax = ps_r2_sun_far;
-        }
-
         cmd_list.set_c("volume_range", zMin, zMax, 0.f, 0.f);
 
-        Fvector center_pt;
-        center_pt.mad(Device.vCameraPosition, Device.vCameraDirection, zMin);
-        Device.mFullTransform.transform(center_pt);
-        zMin = center_pt.z;
+        // nv-DBT
+        //Fvector center_pt;
+        //center_pt.mad(Device.vCameraPosition, Device.vCameraDirection, zMin);
+        //Device.mFullTransform.transform(center_pt);
+        //zMin = center_pt.z;
 
-        center_pt.mad(Device.vCameraPosition, Device.vCameraDirection, zMax);
-        Device.mFullTransform.transform(center_pt);
-        zMax = center_pt.z;
+        //center_pt.mad(Device.vCameraPosition, Device.vCameraDirection, zMax);
+        //Device.mFullTransform.transform(center_pt);
+        //zMax = center_pt.z;
 
         //	TODO: DX11: Check if DX11 has analog for NV DBT
         //		if (u_DBT_enable(zMin,zMax))	{

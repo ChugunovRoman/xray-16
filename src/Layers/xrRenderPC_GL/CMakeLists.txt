@@ -1,4 +1,4 @@
-add_library(xrRender_GL SHARED)
+add_library(xrRender_GL)
 
 target_sources(xrRender_GL PRIVATE
     gl_rendertarget_accum_direct.cpp
@@ -431,6 +431,8 @@ target_precompile_headers(xrRender_GL
     $<$<COMPILE_LANGUAGE:CXX>:stdafx.h>
 )
 
-install(TARGETS xrRender_GL LIBRARY
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
+if (BUILD_SHARED_LIBS)
+    install(TARGETS xrRender_GL LIBRARY
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()

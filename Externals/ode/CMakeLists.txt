@@ -1,8 +1,4 @@
-if (STATIC_BUILD)
-    add_library(xrODE STATIC)
-else()
-    add_library(xrODE SHARED)
-endif()
+add_library(xrODE)
 
 target_sources(xrODE PRIVATE
     ode/src/array.cpp
@@ -89,31 +85,18 @@ target_include_directories(xrODE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 
-# TODO platform-specific defines
 target_compile_definitions(xrODE
     PUBLIC
     dSINGLE
-    dNODEBUG
-
-    PRIVATE
-    LINUX
-    __cdecl=
+    "$<$<CONFIG:Release,ReleaseMasterGold>:dNODEBUG>"
 )
-
-if (MASTER_GOLD)
-    target_compile_definitions(xrODE
-        PUBLIC
-        dNODEBUG
-    )
-endif()
 
 set_target_properties(xrODE PROPERTIES
     PREFIX ""
-    POSITION_INDEPENDENT_CODE ON
     UNITY_BUILD OFF
 )
 
-if (NOT STATIC_BUILD)
+if (BUILD_SHARED_LIBS)
     install(TARGETS xrODE LIBRARY
         DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     )

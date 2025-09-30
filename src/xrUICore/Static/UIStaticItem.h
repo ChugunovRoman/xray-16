@@ -36,9 +36,6 @@ public:
     u32 dwColor;
 
     ui_shader hShader;
-#ifdef DEBUG
-    shared_str dbg_tex_name;
-#endif
 
     void CreateShader(LPCSTR tex, LPCSTR sh = "hud" DELIMITER "default");
     void SetShader(const ui_shader& sh) { hShader = sh; };

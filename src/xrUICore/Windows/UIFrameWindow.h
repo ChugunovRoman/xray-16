@@ -24,7 +24,6 @@ public:
     pcstr GetDebugType() override { return "CUIFrameWindow"; }
 
 protected:
-    bool m_bTextureVisible;
 
     enum EFramePart
     {
@@ -41,9 +40,10 @@ protected:
     };
 
     ui_shader m_shader;
-    shared_str dbg_tex_name;
     Frect m_tex_rect[fmMax];
     u32 m_texture_color;
+    bool m_bTextureVisible;
+
     void DrawElements();
     bool get_points(Frect const& r, int i, Fvector2& LTp, Fvector2& RBp, Fvector2& LTt, Fvector2& RBt);
     void draw_tile_line(Frect rect, int i, bool b_horz, Fvector2 const& ts);

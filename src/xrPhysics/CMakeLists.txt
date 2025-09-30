@@ -1,8 +1,4 @@
-if (STATIC_BUILD)
-    add_library(xrPhysics STATIC)
-else()
-    add_library(xrPhysics SHARED)
-endif()
+add_library(xrPhysics)
 
 target_sources_grouped(
     TARGET xrPhysics
@@ -386,7 +382,8 @@ target_sources_grouped(
     tri-colliderknoopc/dTriSphere.cpp
     tri-colliderknoopc/dTriSphere.h
     tri-colliderknoopc/dxTriList.h
-    tri-colliderknoopc/TriPrimitiveCollideClassDef.h)
+    tri-colliderknoopc/TriPrimitiveCollideClassDef.h
+)
 
 target_sources_grouped(
     TARGET xrPhysics
@@ -395,7 +392,6 @@ target_sources_grouped(
     collisiondamagereceiver.cpp
     icollisiondamagereceiver.h
 )
-
 
 target_include_directories(xrPhysics
     PUBLIC
@@ -430,7 +426,6 @@ target_compile_definitions(xrPhysics
 
 set_target_properties(xrPhysics PROPERTIES
     PREFIX ""
-    POSITION_INDEPENDENT_CODE ON
 )
 
 target_precompile_headers(xrPhysics
@@ -438,7 +433,7 @@ target_precompile_headers(xrPhysics
     StdAfx.h
 )
 
-if (NOT STATIC_BUILD)
+if (BUILD_SHARED_LIBS)
     install(TARGETS xrPhysics LIBRARY
         DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     )

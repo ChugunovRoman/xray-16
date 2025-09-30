@@ -1,4 +1,4 @@
-add_library(xrSound SHARED)
+add_library(xrSound)
 
 target_sources_grouped(
     TARGET xrSound
@@ -74,6 +74,8 @@ target_sources_grouped(
     stdafx.h
 )
 
+set_source_files_properties(guids.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+
 target_sources_grouped(
     TARGET xrSound
     NAME "Source"
@@ -120,7 +122,6 @@ target_include_directories(xrSound
     PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
     "${CMAKE_SOURCE_DIR}/src/xrEngine"
-    "${OPENAL_INCLUDE_DIR}"
 )
 
 target_link_libraries(xrSound
@@ -130,7 +131,7 @@ target_link_libraries(xrSound
     xrAPI
     xrCDB
     xrMaterialSystem
-    ${OPENAL_LIBRARY}
+    OpenAL::OpenAL
     Ogg::Ogg
     Vorbis::Vorbis
     Vorbis::VorbisFile
@@ -150,6 +151,8 @@ target_precompile_headers(xrSound
     stdafx.h
 )
 
-install(TARGETS xrSound LIBRARY
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
+if (BUILD_SHARED_LIBS)
+    install(TARGETS xrSound LIBRARY
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()

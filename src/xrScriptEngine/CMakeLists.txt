@@ -1,4 +1,4 @@
-add_library(xrScriptEngine SHARED)
+add_library(xrScriptEngine)
 
 target_sources_grouped(
     TARGET xrScriptEngine
@@ -115,6 +115,8 @@ target_precompile_headers(xrScriptEngine
     pch.hpp
 )
 
-install(TARGETS xrScriptEngine LIBRARY
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
+if (BUILD_SHARED_LIBS)
+    install(TARGETS xrScriptEngine LIBRARY
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()

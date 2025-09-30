@@ -1,4 +1,4 @@
-add_library(xrAICore SHARED)
+add_library(xrAICore)
 
 target_sources_grouped(
     TARGET xrAICore
@@ -313,6 +313,8 @@ target_precompile_headers(xrAICore
     pch.hpp
 )
 
-install(TARGETS xrAICore LIBRARY
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
+if (BUILD_SHARED_LIBS)
+    install(TARGETS xrAICore LIBRARY
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()

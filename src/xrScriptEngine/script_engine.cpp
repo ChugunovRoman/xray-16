@@ -32,7 +32,7 @@
 #include <stdarg.h>
 
 Flags32 g_LuaDebug;
-int g_LuaDumpDepth = 3;
+int g_LuaDumpDepth = 0;
 
 #define SCRIPT_GLOBAL_NAMESPACE "_G"
 

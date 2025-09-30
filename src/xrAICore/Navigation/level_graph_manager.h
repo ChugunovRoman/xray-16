@@ -6,9 +6,9 @@ namespace LevelGraph
 {
 class CLevelGraphManager
 {
-    bool m_compatibility_mode{};
     CLevelVertex* m_nodes; // nodes array
     size_t m_vertex_count;
+    bool m_compatibility_mode{};
 
 private:
     template <typename OldNodes>
@@ -53,7 +53,7 @@ public:
         {
         case XRAI_CURRENT_VERSION:
             static_assert(XRAI_CURRENT_VERSION == XRAI_VERSION_SKYLOADER,
-                "If you have changed the xrAI version, don't forget to add back compatibility older versions.");
+                "If you have changed the xrAI version, don't forget to add backward compatibility with older versions.");
             m_nodes = static_cast<CLevelVertex*>(stream->pointer());
             break;
 

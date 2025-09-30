@@ -12,13 +12,13 @@ using namespace DirectX;
 
 namespace xray::render::RENDER_NAMESPACE
 {
-static void XRVec3TransformCoordArray(glm::vec3* out, const glm::vec3* in, const glm::mat4& matrix, unsigned int elements)
+inline void XRVec3TransformCoordArray(glm::vec3* out, const glm::vec3* in, const glm::mat4& matrix, unsigned int elements)
 {
     for (unsigned int i = 0; i < elements; ++i)
         out[i] = glm::vec3(glm::translate(matrix, in[i]) * glm::vec4(1.f,1.f,1.f,1.f));
 }
 
-static void XRMatrixOrthoOffCenterLH(Fmatrix* pout, float l, float r, float b, float t, float zn, float zf)
+inline void XRMatrixOrthoOffCenterLH(Fmatrix* pout, float l, float r, float b, float t, float zn, float zf)
 {
     pout->identity();
     pout->m[0][0] = 2.0f / (r - l);
@@ -29,13 +29,19 @@ static void XRMatrixOrthoOffCenterLH(Fmatrix* pout, float l, float r, float b, f
     pout->m[3][2] = (zn + zf) / (zn -zf);
 }
 
-static void XRMatrixInverse(Fmatrix* pout, float* pdeterminant, const Fmatrix& pm)
+inline void XRMatrixInverse(Fmatrix* pout, float* pdeterminant, const Fmatrix& pm)
 {
     glm::mat4 out = glm::inverse(glm::make_mat4x4(&pm.m[0][0]));
     *pout = *(Fmatrix*)glm::value_ptr(out);
 }
 } // namespace xray::render::RENDER_NAMESPACE
 #endif
+
+#define DW_AS_FLT(DW) (*(float*)&(DW))
+#define FLT_AS_DW(F) (*(u32*)&(F))
+#define FLT_SIGN(F) ((FLT_AS_DW(F) & 0x80000000L))
+#define ALMOST_ZERO(F) ((FLT_AS_DW(F) & 0x7f800000L) == 0)
+#define IS_SPECIAL(F) ((FLT_AS_DW(F) & 0x7f800000L) == 0x7f800000L)
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -71,8 +77,7 @@ static constexpr int facetable[6][4] =
 };
 } // namespace sun
 
-//////////////////////////////////////////////////////////////////////////
-static inline Fvector3 wform(Fmatrix const& m, Fvector3 const& v)
+inline Fvector3 wform(Fmatrix const& m, Fvector3 const& v)
 {
     Fvector4 r;
     r.x = v.x * m._11 + v.y * m._21 + v.z * m._31 + m._41;
@@ -83,6 +88,683 @@ static inline Fvector3 wform(Fmatrix const& m, Fvector3 const& v)
     const float invW = 1.0f / r.w;
     return { r.x * invW, r.y * invW, r.z * invW };
 }
+
+#if defined(USE_DX11)
+struct BoundingBox
+{
+    XMFLOAT3 minPt;
+    XMFLOAT3 maxPt;
+
+    BoundingBox() : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f) {}
+
+    BoundingBox(const BoundingBox& other) : minPt(other.minPt), maxPt(other.maxPt) {}
+
+    explicit BoundingBox(const XMFLOAT3* points, u32 n) : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f)
+    {
+        for (unsigned int i = 0; i < n; i++)
+            Merge(&points[i]);
+    }
+
+    explicit BoundingBox(const xr_vector<XMFLOAT3>* points)
+        : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f)
+    {
+        for (unsigned int i = 0; i < points->size(); i++)
+            Merge(&(*points)[i]);
+    }
+
+    explicit BoundingBox(const xr_vector<BoundingBox>* boxes)
+        : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f)
+    {
+        for (unsigned int i = 0; i < boxes->size(); i++)
+        {
+            Merge(&(*boxes)[i].maxPt);
+            Merge(&(*boxes)[i].minPt);
+        }
+    }
+
+    void Merge(const XMFLOAT3* vec)
+    {
+        minPt.x = std::min(minPt.x, vec->x);
+        minPt.y = std::min(minPt.y, vec->y);
+        minPt.z = std::min(minPt.z, vec->z);
+        maxPt.x = std::max(maxPt.x, vec->x);
+        maxPt.y = std::max(maxPt.y, vec->y);
+        maxPt.z = std::max(maxPt.z, vec->z);
+    }
+};
+
+///////////////////////////////////////////////////////////////////////////
+//  PlaneIntersection
+//    computes the point where three planes intersect
+//    returns whether or not the point exists.
+inline bool PlaneIntersection(
+    XMVECTOR& intersectPt, FXMVECTOR n0, FXMVECTOR n1, FXMVECTOR n2)
+{
+    XMVECTOR n1_n2 = XMVector3Cross(n1, n2);
+    XMVECTOR n2_n0 = XMVector3Cross(n2, n0);
+    XMVECTOR n0_n1 = XMVector3Cross(n0, n1);
+
+    const float cosTheta = XMVectorGetX(XMVector3Dot(n0, n1_n2));
+
+    if (ALMOST_ZERO(cosTheta) || IS_SPECIAL(cosTheta))
+        return false;
+
+    const float secTheta = 1.f / cosTheta;
+
+    n1_n2 = n1_n2 * XMVectorGetW(n0);
+    n2_n0 = n2_n0 * XMVectorGetW(n1);
+    n0_n1 = n0_n1 * XMVectorGetW(n2);
+
+    intersectPt = -(n1_n2 + n2_n0 + n0_n1) * secTheta;
+    return true;
+}
+
+struct Frustum
+{
+    XMFLOAT4 camPlanes[6];
+    int nVertexLUT[6];
+    XMFLOAT3 pntList[8];
+
+    //  build a frustum from a camera (projection, or viewProjection) matrix
+    Frustum(const XMFLOAT4X4* matrix)
+    {
+        //  build a view frustum based on the current view & projection matrices...
+        const XMVECTOR column4 = XMVectorSet(matrix->_14, matrix->_24, matrix->_34, matrix->_44);
+        const XMVECTOR column1 = XMVectorSet(matrix->_11, matrix->_21, matrix->_31, matrix->_41);
+        const XMVECTOR column2 = XMVectorSet(matrix->_12, matrix->_22, matrix->_32, matrix->_42);
+        const XMVECTOR column3 = XMVectorSet(matrix->_13, matrix->_23, matrix->_33, matrix->_43);
+
+        XMVECTOR planes[6];
+        planes[0] = column4 - column1; // left
+        planes[1] = column4 + column1; // right
+        planes[2] = column4 - column2; // bottom
+        planes[3] = column4 + column2; // top
+        planes[4] = column4 - column3; // near
+        planes[5] = column4 + column3; // far
+        // ignore near & far plane
+
+        for (int p = 0; p < 6; p++) // normalize the planes
+            planes[p] = XMVector3Normalize(planes[p]);
+
+        for (int p = 0; p < 6; p++)
+            XMStoreFloat4(&camPlanes[p], planes[p]);
+
+        //  build a bit-field that will tell us the indices for the nearest and farthest vertices from each plane...
+        for (int i = 0; i < 6; i++)
+            nVertexLUT[i] = ((camPlanes[i].x < 0.f) ? 1 : 0) | ((camPlanes[i].y < 0.f) ? 2 : 0) | ((camPlanes[i].z < 0.f) ? 4 : 0);
+
+        for (int i = 0; i < 8; i++) // compute extrema
+        {
+            XMVECTOR intersect;
+            PlaneIntersection(intersect,
+                (i & 1) ? planes[4] : planes[5],
+                (i & 2) ? planes[3] : planes[2],
+                (i & 4) ? planes[0] : planes[1]);
+            XMStoreFloat3(&pntList[i], intersect);
+        }
+    }
+};
+
+//////////////////////////////////////////////////////////////////////////
+// OLES: naive 3D clipper - roubustness around 0, but works for this sample
+// note: normals points to 'outside'
+//////////////////////////////////////////////////////////////////////////
+struct DumbClipper
+{
+    CFrustum frustum;
+    xr_vector<XMFLOAT4> planes;
+    bool clip(XMFLOAT3& p0, XMFLOAT3& p1) // returns true if result meaningfull
+    {
+        XMVECTOR v0 = XMLoadFloat3(&p0);
+        XMVECTOR v1 = XMLoadFloat3(&p1);
+        for (auto& plane : planes)
+        {
+            XMVECTOR P = XMLoadFloat4(&plane);
+            XMVECTOR cls0 = XMPlaneDotCoord(P, v0);
+            XMVECTOR cls1 = XMPlaneDotCoord(P, v1);
+            float cls0f = XMVectorGetX(cls0), cls1f = XMVectorGetX(cls1);
+            if (cls0f > 0 && cls1f > 0)
+                return false; // fully outside
+
+            if (cls0f > 0)
+            {
+                // clip v0
+                XMVECTOR D = v1 - v0;
+                XMVECTOR denum = XMPlaneDotNormal(P, D);
+                if (XMVectorGetX(denum) != 0)
+                {
+                    v0 += -D * cls0 / denum;
+                    XMStoreFloat3(&p0, v0);
+                }
+            }
+            if (cls1f > 0)
+            {
+                // clip v1
+                XMVECTOR D = v0 - v1;
+                XMVECTOR denum = XMPlaneDotNormal(P, D);
+                if (XMVectorGetX(denum) != 0)
+                {
+                    v1 += -D * cls1 / denum;
+                    XMStoreFloat3(&p1, v1);
+                }
+            }
+        }
+        return true;
+    }
+
+    XMFLOAT3 point(Fbox& bb, int i) const
+    {
+        return XMFLOAT3((i & 1) ? bb.vMin.x : bb.vMax.x, (i & 2) ? bb.vMin.y : bb.vMax.y, (i & 4) ? bb.vMin.z : bb.vMax.z);
+    }
+
+    Fbox clipped_AABB(xr_vector<Fbox>& src, Fmatrix& xf)
+    {
+        Fbox3 result;
+        result.invalidate();
+        for (int it = 0; it < int(src.size()); it++)
+        {
+            Fbox& bb = src[it];
+            u32 mask = frustum.getMask();
+            EFC_Visible res = frustum.testAABB(&bb.vMin.x, mask);
+            switch (res)
+            {
+            case fcvNone: continue;
+            case fcvFully:
+                for (int c = 0; c < 8; c++)
+                {
+                    XMFLOAT3 p0 = point(bb, c);
+                    Fvector x0 = wform(xf, *((Fvector*)(&p0)));
+                    result.modify(x0);
+                }
+                break;
+            case fcvPartial:
+                for (int c0 = 0; c0 < 8; c0++)
+                {
+                    for (int c1 = 0; c1 < 8; c1++)
+                    {
+                        if (c0 == c1)
+                            continue;
+                        XMFLOAT3 p0 = point(bb, c0);
+                        XMFLOAT3 p1 = point(bb, c1);
+                        if (!clip(p0, p1))
+                            continue;
+                        Fvector x0 = wform(xf, *((Fvector*)(&p0)));
+                        Fvector x1 = wform(xf, *((Fvector*)(&p1)));
+                        result.modify(x0);
+                        result.modify(x1);
+                    }
+                }
+                break;
+            } // switch (res)
+        }
+        return result;
+    }
+};
+
+inline XMFLOAT2 BuildTSMProjectionMatrix_caster_depth_bounds(FXMMATRIX lightSpaceBasis, const xr_vector<Fbox>& casters)
+{
+    float min_z = 1e32f, max_z = -1e32f;
+
+    Fmatrix minmax_xform;
+    {
+        XMMATRIX view      = XMLoadFloat4x4((XMFLOAT4X4*)&Device.mView);
+        XMMATRIX minmax_xf = XMMatrixMultiply(view, lightSpaceBasis);
+        XMStoreFloat4x4((XMFLOAT4X4*)&minmax_xform, minmax_xf);
+    }
+    for (u32 c = 0; c < casters.size(); c++)
+    {
+        Fvector3 pt;
+        for (int e = 0; e < 8; e++)
+        {
+            casters[c].getpoint(e, pt);
+            pt = wform(minmax_xform, pt);
+            min_z = std::min(min_z, pt.z);
+            max_z = std::max(max_z, pt.z);
+        }
+    }
+    return XMFLOAT2(min_z, max_z);
+}
+#elif defined(USE_OGL)
+struct BoundingBox
+{
+    glm::vec3 minPt;
+    glm::vec3 maxPt;
+
+    BoundingBox() : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f) {}
+
+    BoundingBox(const BoundingBox& other) : minPt(other.minPt), maxPt(other.maxPt) {}
+
+    explicit BoundingBox(const glm::vec3* points, u32 n) : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f)
+    {
+        for (unsigned int i = 0; i < n; i++)
+            Merge(&points[i]);
+    }
+
+    explicit BoundingBox(const xr_vector<glm::vec3>* points)
+        : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f)
+    {
+        for (const auto& point : *points)
+            Merge(&point);
+    }
+
+    explicit BoundingBox(const xr_vector<BoundingBox>* boxes)
+        : minPt(1e33f, 1e33f, 1e33f), maxPt(-1e33f, -1e33f, -1e33f)
+    {
+        for (const auto & box : *boxes)
+        {
+            Merge(&box.maxPt);
+            Merge(&box.minPt);
+        }
+    }
+
+    void Merge(const glm::vec3* vec)
+    {
+        minPt.x = std::min(minPt.x, vec->x);
+        minPt.y = std::min(minPt.y, vec->y);
+        minPt.z = std::min(minPt.z, vec->z);
+        maxPt.x = std::max(maxPt.x, vec->x);
+        maxPt.y = std::max(maxPt.y, vec->y);
+        maxPt.z = std::max(maxPt.z, vec->z);
+    }
+};
+
+///////////////////////////////////////////////////////////////////////////
+//  PlaneIntersection
+//    computes the point where three planes intersect
+//    returns whether or not the point exists.
+inline bool PlaneIntersection(glm::vec3* intersectPt, const glm::vec4& p0, const glm::vec4& p1,
+                                     const glm::vec4& p2)
+{
+    glm::vec3 n0 = glm::vec3(p0.x, p0.y, p0.z);
+    glm::vec3 n1 = glm::vec3(p1.x, p1.y, p1.z);
+    glm::vec3 n2 = glm::vec3(p2.x, p2.y, p2.z);
+
+    glm::vec3 n1_n2 = glm::cross(n1, n2);
+    glm::vec3 n2_n0 = glm::cross(n2, n0);
+    glm::vec3 n0_n1 = glm::cross(n0, n1);
+
+    float cosTheta = glm::dot(n0, n1_n2);
+
+    if (ALMOST_ZERO(cosTheta) || IS_SPECIAL(cosTheta))
+        return false;
+
+    float secTheta = 1.f / cosTheta;
+
+    n1_n2 *= p0.w;
+    n2_n0 *= p1.w;
+    n0_n1 *= p2.w;
+
+    *intersectPt = -(n1_n2 + n2_n0 + n0_n1) * secTheta;
+    return true;
+}
+
+struct Frustum
+{
+    glm::vec4 camPlanes[6];
+    int nVertexLUT[6];
+    glm::vec3 pntList[8];
+
+    //  build a frustum from a camera (projection, or viewProjection) matrix
+    explicit Frustum(const glm::mat4* matrix)
+    {
+        //  build a view frustum based on the current view & projection matrices...
+        glm::vec4 column1 = glm::column(*matrix, 0);
+        glm::vec4 column2 = glm::column(*matrix, 1);
+        glm::vec4 column3 = glm::column(*matrix, 2);
+        glm::vec4 column4 = glm::column(*matrix, 3);
+
+        glm::vec4 planes[6];
+        planes[0] = column4 - column1; // left
+        planes[1] = column4 + column1; // right
+        planes[2] = column4 - column2; // bottom
+        planes[3] = column4 + column2; // top
+        planes[4] = column4 - column3; // near
+        planes[5] = column4 + column3; // far
+        // ignore near & far plane
+
+        for (int p = 0; p < 6; p++) // normalize the planes
+        {
+            camPlanes[p] = glm::normalize(planes[p]);
+            // build a bit-field that will tell us the indices for the nearest and farthest vertices from each plane...
+            nVertexLUT[p] = (camPlanes[p].x < 0.f ? 1 : 0) | (camPlanes[p].y < 0.f ? 2 : 0) | (camPlanes[p].z < 0.f ? 4 : 0);
+        }
+
+        for (int i = 0; i < 8; i++) // compute extrema
+        {
+            const glm::vec4& p0 = i & 1 ? camPlanes[4] : camPlanes[5];
+            const glm::vec4& p1 = i & 2 ? camPlanes[3] : camPlanes[2];
+            const glm::vec4& p2 = i & 4 ? camPlanes[0] : camPlanes[1];
+            PlaneIntersection(&pntList[i], p0, p1, p2);
+        }
+    }
+};
+
+inline Fvector3 wform(Fmatrix const& m, glm::vec3 const& v)
+{
+    Fvector4 r;
+    r.x = v.x * m._11 + v.y * m._21 + v.z * m._31 + m._41;
+    r.y = v.x * m._12 + v.y * m._22 + v.z * m._32 + m._42;
+    r.z = v.x * m._13 + v.y * m._23 + v.z * m._33 + m._43;
+    r.w = v.x * m._14 + v.y * m._24 + v.z * m._34 + m._44;
+    // VERIFY		(r.w>0.f);
+    const float invW = 1.0f / r.w;
+    return {r.x * invW, r.y * invW, r.z * invW};
+}
+
+inline Fvector3 wform(glm::mat4 const& m, Fvector3 const& v)
+{
+    Fvector4 r;
+    r.x = v.x * m[0][0] + v.y * m[1][0] + v.z * m[2][0] + m[3][0];
+    r.y = v.x * m[0][1] + v.y * m[1][1] + v.z * m[2][1] + m[3][1];
+    r.z = v.x * m[0][2] + v.y * m[1][2] + v.z * m[2][2] + m[3][2];
+    r.w = v.x * m[0][3] + v.y * m[1][3] + v.z * m[2][3] + m[3][3];
+    // VERIFY		(r.w>0.f);
+    const float invW = 1.0f / r.w;
+    return {r.x * invW, r.y * invW, r.z * invW};
+}
+
+inline Fvector3 wform(glm::mat4 const& m, glm::vec3 const& v)
+{
+    Fvector4 r;
+    r.x = v.x * m[0][0] + v.y * m[1][0] + v.z * m[2][0] + m[3][0];
+    r.y = v.x * m[0][1] + v.y * m[1][1] + v.z * m[2][1] + m[3][1];
+    r.z = v.x * m[0][2] + v.y * m[1][2] + v.z * m[2][2] + m[3][2];
+    r.w = v.x * m[0][3] + v.y * m[1][3] + v.z * m[2][3] + m[3][3];
+    // VERIFY		(r.w>0.f);
+    const float invW = 1.0f / r.w;
+    return {r.x * invW, r.y * invW, r.z * invW};
+}
+
+//////////////////////////////////////////////////////////////////////////
+// OLES: naive 3D clipper - roubustness around 0, but works for this sample
+// note: normals points to 'outside'
+//////////////////////////////////////////////////////////////////////////
+struct DumbClipper
+{
+    CFrustum frustum;
+    xr_vector<glm::vec4> planes;
+
+    BOOL clip(glm::vec3& p0, glm::vec3& p1) // returns TRUE if result meaningfull
+    {
+        float denum;
+        glm::vec3 D;
+        for (auto P : planes)
+        {
+            float cls0 = glm::dot(P, glm::vec4(p0, 1));
+            float cls1 = glm::dot(P, glm::vec4(p1, 1));
+            if (cls0 > 0 && cls1 > 0)
+                return false; // fully outside
+
+            if (cls0 > 0)
+            {
+                // clip p0
+                D = p1 - p0;
+                denum = glm::dot(P, glm::vec4(D, 0));
+                if (denum != 0)
+                    p0 += -D * cls0 / denum;
+            }
+            if (cls1 > 0)
+            {
+                // clip p1
+                D = p0 - p1;
+                denum = glm::dot(P, glm::vec4(D, 0));
+                if (denum != 0)
+                    p1 += -D * cls1 / denum;
+            }
+        }
+        return true;
+    }
+
+    static glm::vec3 point(Fbox& bb, int i)
+    {
+        return glm::vec3(i & 1 ? bb.vMin.x : bb.vMax.x, i & 2 ? bb.vMin.y : bb.vMax.y, i & 4 ? bb.vMin.z : bb.vMax.z);
+    }
+
+    Fbox clipped_AABB(xr_vector<Fbox>& src, glm::mat4& xf)
+    {
+        Fbox3 result;
+        result.invalidate();
+        for (auto& bb : src)
+        {
+            u32 mask = frustum.getMask();
+            EFC_Visible res = frustum.testAABB(&bb.vMin.x, mask);
+            switch (res)
+            {
+            case fcvFully:
+                for (int c = 0; c < 8; c++)
+                {
+                    glm::vec3 p0 = point(bb, c);
+                    Fvector x0 = wform(xf, p0);
+                    result.modify(x0);
+                }
+                break;
+            case fcvPartial:
+                for (int c0 = 0; c0 < 8; c0++)
+                {
+                    for (int c1 = 0; c1 < 8; c1++)
+                    {
+                        if (c0 == c1)
+                            continue;
+                        glm::vec3 p0 = point(bb, c0);
+                        glm::vec3 p1 = point(bb, c1);
+                        if (!clip(p0, p1))
+                            continue;
+                        Fvector x0 = wform(xf, p0);
+                        Fvector x1 = wform(xf, p1);
+                        result.modify(x0);
+                        result.modify(x1);
+                    }
+                }
+                break;
+            } // switch (res)
+        }
+        return result;
+    }
+};
+
+inline glm::vec2 BuildTSMProjectionMatrix_caster_depth_bounds(glm::mat4& lightSpaceBasis, const xr_vector<Fbox>& casters)
+{
+    float min_z = 1e32f, max_z = -1e32f;
+    glm::mat4 minmax_xform = glm::make_mat4x4(&Device.mView.m[0][0]) * lightSpaceBasis;
+    for (auto& caster : casters)
+    {
+        Fvector3 pt;
+        for (int e = 0; e < 8; e++)
+        {
+            caster.getpoint(e, pt);
+            pt = wform(minmax_xform, pt);
+            min_z = _min(min_z, pt.z);
+            max_z = _max(max_z, pt.z);
+        }
+    }
+    return glm::vec2(min_z, max_z);
+}
+#endif
+
+//////////////////////////////////////////////////////////////////////////
+// OLES: naive builder of infinite volume expanded from base frustum towards
+//		 light source. really slow, but it works for our simple usage :)
+// note: normals points to 'outside'
+//////////////////////////////////////////////////////////////////////////
+template <bool _debug>
+class DumbConvexVolume
+{
+public:
+    struct _poly
+    {
+        xr_vector<int> points;
+        Fvector3 planeN;
+        float planeD;
+        float classify(Fvector3& p) { return planeN.dotproduct(p) + planeD; }
+    };
+    struct _edge
+    {
+        int p0, p1;
+        int counter;
+        _edge(int _p0, int _p1, int m) : p0(_p0), p1(_p1), counter(m)
+        {
+            if (p0 > p1)
+                std::swap(p0, p1);
+        }
+        bool equal(_edge& E) { return p0 == E.p0 && p1 == E.p1; }
+    };
+
+public:
+    xr_vector<Fvector3> points;
+    xr_vector<_poly> polys;
+    xr_vector<_edge> edges;
+
+public:
+    void compute_planes()
+    {
+        for (int it = 0; it < int(polys.size()); it++)
+        {
+            _poly& P = polys[it];
+            Fvector3 t1, t2;
+            t1.sub(points[P.points[0]], points[P.points[1]]);
+            t2.sub(points[P.points[0]], points[P.points[2]]);
+            P.planeN.crossproduct(t1, t2);
+
+            float len = P.planeN.magnitude();
+
+            if (len > std::numeric_limits<float>::min())
+            {
+                P.planeN.mul(1 / len);
+            }
+            else
+            {
+                t2.sub(points[P.points[0]], points[P.points[3]]);
+                P.planeN.crossproduct(t1, t2);
+                if (len > std::numeric_limits<float>::min())
+                {
+                    P.planeN.mul(1 / len);
+                }
+                else
+                {
+                    //	HACK:	Remove plane.
+                    // VERIFY(!"Can't build normal to plane!");
+                    polys.erase(polys.begin() + it);
+                    --it;
+                    continue;
+                }
+            }
+            P.planeD = -P.planeN.dotproduct(points[P.points[0]]);
+
+            // verify
+            if constexpr (_debug)
+            {
+                Fvector& p0 = points[P.points[0]];
+                Fvector& p1 = points[P.points[1]];
+                Fvector& p2 = points[P.points[2]];
+                Fvector& p3 = points[P.points[3]];
+                Fplane p012;
+                p012.build(p0, p1, p2);
+                Fplane p123;
+                p123.build(p1, p2, p3);
+                Fplane p230;
+                p230.build(p2, p3, p0);
+                Fplane p301;
+                p301.build(p3, p0, p1);
+                VERIFY(p012.n.similar(p123.n) && p012.n.similar(p230.n) && p012.n.similar(p301.n));
+            }
+        }
+    }
+
+    void compute_caster_model(xr_vector<Fplane>& dest, Fvector3 direction)
+    {
+        CRenderTarget& T = *RImplementation.Target;
+
+        // COG
+        Fvector3 cog = { 0, 0, 0 };
+        for (int it = 0; it < int(points.size()); it++)
+            cog.add(points[it]);
+        cog.div(float(points.size()));
+
+        // planes
+        compute_planes();
+        for (int it = 0; it < int(polys.size()); it++)
+        {
+            _poly& base = polys[it];
+            if (base.classify(cog) > 0)
+                std::reverse(base.points.begin(), base.points.end());
+        }
+
+        // remove faceforward polys, build list of edges -> find open ones
+        compute_planes();
+        for (int it = 0; it < int(polys.size()); it++)
+        {
+            _poly& base = polys[it];
+            VERIFY(base.classify(cog) < 0); // debug
+
+            int marker = (base.planeN.dotproduct(direction) <= 0) ? -1 : 1;
+
+            // register edges
+            xr_vector<int>& plist = polys[it].points;
+            for (int p = 0; p < int(plist.size()); p++)
+            {
+                _edge E(plist[p], plist[(p + 1) % plist.size()], marker);
+                bool found = false;
+                for (int e = 0; e < int(edges.size()); e++)
+                    if (edges[e].equal(E))
+                    {
+                        edges[e].counter += marker;
+                        found = true;
+                        break;
+                    }
+                if (!found)
+                {
+                    if constexpr (_debug)
+                        T.dbg_addline(points[E.p0], points[E.p1], color_rgba(255, 0, 0, 255));
+                    edges.emplace_back(std::move(E));
+                }
+            }
+
+            // remove if unused
+            if (marker < 0)
+            {
+                polys.erase(polys.begin() + it);
+                it--;
+            }
+        }
+
+        // Extend model to infinity, the volume is not capped, so this is indeed up to infinity
+        for (int e = 0; e < int(edges.size()); e++)
+        {
+            if (edges[e].counter != 0)
+                continue;
+            _edge& E = edges[e];
+            if constexpr (_debug)
+                T.dbg_addline(points[E.p0], points[E.p1], color_rgba(255, 255, 255, 255));
+            Fvector3 point;
+            points.emplace_back(point.sub(points[E.p0], direction));
+            points.emplace_back(point.sub(points[E.p1], direction));
+            _poly& P = polys.emplace_back(_poly());
+            const int pend = int(points.size());
+            P.points.emplace_back(E.p0);
+            P.points.emplace_back(E.p1);
+            P.points.emplace_back(pend - 1); // p1 mod
+            P.points.emplace_back(pend - 2); // p0 mod
+            if constexpr (_debug)
+            {
+                T.dbg_addline(points[E.p0], point.mad(points[E.p0], direction, -1000), color_rgba(0, 255, 0, 255));
+                T.dbg_addline(points[E.p1], point.mad(points[E.p1], direction, -1000), color_rgba(0, 255, 0, 255));
+            }
+        }
+
+        // Reorient planes (try to write more inefficient code :)
+        compute_planes();
+        for (_poly& base : polys)
+        {
+            if (base.classify(cog) > 0)
+                std::reverse(base.points.begin(), base.points.end());
+        }
+
+        // Export
+        compute_planes();
+        for (_poly& poly : polys)
+            dest.emplace_back(Fplane{ poly.planeN, poly.planeD });
+    }
+};
 
 template <bool _debug>
 class FixedConvexVolume
@@ -350,191 +1032,6 @@ public:
         trans_mat.translate(translate);
         for (u32 i = 0; i < LIGHT_CUBOIDSIDEPOLYS_COUNT; ++i)
             light_cuboid_polys[i].plane.d -= translate.dotproduct(light_cuboid_polys[i].plane.n);
-    }
-};
-
-//////////////////////////////////////////////////////////////////////////
-// OLES: naive builder of infinite volume expanded from base frustum towards
-//		 light source. really slow, but it works for our simple usage :)
-// note: normals points to 'outside'
-//////////////////////////////////////////////////////////////////////////
-template <bool _debug>
-class DumbConvexVolume
-{
-public:
-    struct _poly
-    {
-        xr_vector<int> points;
-        Fvector3 planeN;
-        float planeD;
-        float classify(Fvector3& p) { return planeN.dotproduct(p) + planeD; }
-    };
-    struct _edge
-    {
-        int p0, p1;
-        int counter;
-        _edge(int _p0, int _p1, int m) : p0(_p0), p1(_p1), counter(m)
-        {
-            if (p0 > p1)
-                std::swap(p0, p1);
-        }
-        bool equal(_edge& E) { return p0 == E.p0 && p1 == E.p1; }
-    };
-
-public:
-    xr_vector<Fvector3> points;
-    xr_vector<_poly> polys;
-    xr_vector<_edge> edges;
-
-public:
-    void compute_planes()
-    {
-        for (int it = 0; it < int(polys.size()); it++)
-        {
-            _poly& P = polys[it];
-            Fvector3 t1, t2;
-            t1.sub(points[P.points[0]], points[P.points[1]]);
-            t2.sub(points[P.points[0]], points[P.points[2]]);
-            P.planeN.crossproduct(t1, t2);
-
-            float len = P.planeN.magnitude();
-
-            if (len > std::numeric_limits<float>::min())
-            {
-                P.planeN.mul(1 / len);
-            }
-            else
-            {
-                t2.sub(points[P.points[0]], points[P.points[3]]);
-                P.planeN.crossproduct(t1, t2);
-                if (len > std::numeric_limits<float>::min())
-                {
-                    P.planeN.mul(1 / len);
-                }
-                else
-                {
-                    //	HACK:	Remove plane.
-                    // VERIFY(!"Can't build normal to plane!");
-                    polys.erase(polys.begin() + it);
-                    --it;
-                    continue;
-                }
-            }
-            P.planeD = -P.planeN.dotproduct(points[P.points[0]]);
-
-            // verify
-            if constexpr (_debug)
-            {
-                Fvector& p0 = points[P.points[0]];
-                Fvector& p1 = points[P.points[1]];
-                Fvector& p2 = points[P.points[2]];
-                Fvector& p3 = points[P.points[3]];
-                Fplane p012;
-                p012.build(p0, p1, p2);
-                Fplane p123;
-                p123.build(p1, p2, p3);
-                Fplane p230;
-                p230.build(p2, p3, p0);
-                Fplane p301;
-                p301.build(p3, p0, p1);
-                VERIFY(p012.n.similar(p123.n) && p012.n.similar(p230.n) && p012.n.similar(p301.n));
-            }
-        }
-    }
-
-    void compute_caster_model(xr_vector<Fplane>& dest, Fvector3 direction)
-    {
-        CRenderTarget& T = *RImplementation.Target;
-
-        // COG
-        Fvector3 cog = { 0, 0, 0 };
-        for (int it = 0; it < int(points.size()); it++)
-            cog.add(points[it]);
-        cog.div(float(points.size()));
-
-        // planes
-        compute_planes();
-        for (int it = 0; it < int(polys.size()); it++)
-        {
-            _poly& base = polys[it];
-            if (base.classify(cog) > 0)
-                std::reverse(base.points.begin(), base.points.end());
-        }
-
-        // remove faceforward polys, build list of edges -> find open ones
-        compute_planes();
-        for (int it = 0; it < int(polys.size()); it++)
-        {
-            _poly& base = polys[it];
-            VERIFY(base.classify(cog) < 0); // debug
-
-            int marker = (base.planeN.dotproduct(direction) <= 0) ? -1 : 1;
-
-            // register edges
-            xr_vector<int>& plist = polys[it].points;
-            for (int p = 0; p < int(plist.size()); p++)
-            {
-                _edge E(plist[p], plist[(p + 1) % plist.size()], marker);
-                bool found = false;
-                for (int e = 0; e < int(edges.size()); e++)
-                    if (edges[e].equal(E))
-                    {
-                        edges[e].counter += marker;
-                        found = true;
-                        break;
-                    }
-                if (!found)
-                {
-                    if constexpr (_debug)
-                        T.dbg_addline(points[E.p0], points[E.p1], color_rgba(255, 0, 0, 255));
-                    edges.emplace_back(std::move(E));
-                }
-            }
-
-            // remove if unused
-            if (marker < 0)
-            {
-                polys.erase(polys.begin() + it);
-                it--;
-            }
-        }
-
-        // Extend model to infinity, the volume is not capped, so this is indeed up to infinity
-        for (int e = 0; e < int(edges.size()); e++)
-        {
-            if (edges[e].counter != 0)
-                continue;
-            _edge& E = edges[e];
-            if constexpr (_debug)
-                T.dbg_addline(points[E.p0], points[E.p1], color_rgba(255, 255, 255, 255));
-            Fvector3 point;
-            points.emplace_back(point.sub(points[E.p0], direction));
-            points.emplace_back(point.sub(points[E.p1], direction));
-            _poly& P = polys.emplace_back(_poly());
-            const int pend = int(points.size());
-            P.points.emplace_back(E.p0);
-            P.points.emplace_back(E.p1);
-            P.points.emplace_back(pend - 1); // p1 mod
-            P.points.emplace_back(pend - 2); // p0 mod
-            if constexpr (_debug)
-            {
-                T.dbg_addline(points[E.p0], point.mad(points[E.p0], direction, -1000), color_rgba(0, 255, 0, 255));
-                T.dbg_addline(points[E.p1], point.mad(points[E.p1], direction, -1000), color_rgba(0, 255, 0, 255));
-            }
-        }
-
-        // Reorient planes (try to write more inefficient code :)
-        compute_planes();
-        for (_poly& base : polys)
-        {
-            if (base.classify(cog) > 0)
-                std::reverse(base.points.begin(), base.points.end());
-        }
-
-        // Export
-        compute_planes();
-        for (_poly& poly : polys)
-            dest.emplace_back(Fplane{ poly.planeN, poly.planeD });
     }
 };
 } // namespace xray::render::RENDER_NAMESPACE

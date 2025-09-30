@@ -1,4 +1,4 @@
-add_library(xrNetServer SHARED)
+add_library(xrNetServer)
 
 target_sources(xrNetServer PRIVATE
     guids.cpp
@@ -52,6 +52,8 @@ target_precompile_headers(xrNetServer
     stdafx.h
 )
 
-install(TARGETS xrNetServer LIBRARY
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
+if (BUILD_SHARED_LIBS)
+    install(TARGETS xrNetServer LIBRARY
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()

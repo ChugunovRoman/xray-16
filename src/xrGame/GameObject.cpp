@@ -39,11 +39,6 @@
 #include "doors.h"
 #include "xrNetServer/NET_Messages.h"
 
-#ifdef XR_PLATFORM_WINDOWS // XXX: Just use std::atomic
-#include <intrin.h>
-#pragma intrinsic(_InterlockedCompareExchange)
-#endif
-
 extern MagicBox3 MagicMinBox(int iQuantity, const Fvector* akPoint);
 
 #ifdef DEBUG
@@ -105,20 +100,18 @@ void CGameObject::MakeMeCrow()
         return;
     if (!processing_enabled())
         return;
+
     u32 const device_frame_id = Device.dwFrame;
-    u32 const object_frame_id = dwFrame_AsCrow;
-#ifdef XR_PLATFORM_WINDOWS // XXX: Just use std::atomic
-    if ((u32)_InterlockedCompareExchange((long*)&dwFrame_AsCrow, device_frame_id, object_frame_id) == device_frame_id)
-#elif defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
-    if (__sync_val_compare_and_swap(&dwFrame_AsCrow, object_frame_id, device_frame_id) == device_frame_id)
-#else
-#   error Select or add implementation for your platform
-#endif
+    u32 object_frame_id = dwFrame_AsCrow.load(std::memory_order_relaxed);
+    if (object_frame_id == device_frame_id)
         return;
 
-    VERIFY(dwFrame_AsCrow == device_frame_id);
-    g_pGameLevel->Objects.o_crow(this);
-    Props.crow = 1;
+    if (dwFrame_AsCrow.compare_exchange_strong(object_frame_id, device_frame_id, std::memory_order_acq_rel))
+    {
+        VERIFY(dwFrame_AsCrow.load(std::memory_order_acquire) == device_frame_id);
+        g_pGameLevel->Objects.o_crow(this);
+        Props.crow = 1;
+    }
 }
 
 void CGameObject::cName_set(shared_str N) { NameObject = N; }

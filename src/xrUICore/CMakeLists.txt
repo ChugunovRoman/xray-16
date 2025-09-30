@@ -1,4 +1,4 @@
-add_library(xrUICore SHARED)
+add_library(xrUICore)
 
 target_sources(xrUICore PRIVATE
     pch.cpp
@@ -141,11 +141,6 @@ target_link_libraries(xrUICore
     xrSound
 )
 
-if (WIN32)
-    add_compile_options(/fp:fast "/Yupch.hpp")
-    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/pch.cpp" PROPERTIES COMPILE_FLAGS /Yc)
-endif()
-
 target_compile_definitions(xrUICore
     PRIVATE
     XRUICORE_EXPORTS
@@ -161,6 +156,8 @@ target_precompile_headers(xrUICore
     pch.hpp
 )
 
-install(TARGETS xrUICore LIBRARY
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
+if (BUILD_SHARED_LIBS)
+    install(TARGETS xrUICore LIBRARY
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+endif()

@@ -30,7 +30,6 @@ bool CUIFrameLineWnd::InitTexture(pcstr texture, bool fatal /*= true*/)
 
 bool CUIFrameLineWnd::InitTextureEx(pcstr texture, pcstr shader, bool fatal /*= true*/)
 {
-    dbg_tex_name = texture;
     string256 buf;
 
     const bool back_exist = CUITextureMaster::InitTexture(strconcat(sizeof(buf), buf, texture, "_back"), shader, m_shader, m_tex_rect[flBack]);
@@ -189,10 +188,6 @@ void CUIFrameLineWnd::FillDebugInfo()
 
     ImGui::SameLine();
     ImGui::Checkbox("Horizontal", &bHorizontal);
-
-    ImGui::BeginDisabled(true);
-    ImGui::LabelText("Texture name", "%s", dbg_tex_name.empty() ? "" : dbg_tex_name.c_str());
-    ImGui::EndDisabled();
 
     xray::imgui::ColorEdit4("Texture color", m_texture_color);
 

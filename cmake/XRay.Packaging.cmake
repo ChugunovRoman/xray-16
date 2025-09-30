@@ -1,3 +1,5 @@
+include_guard()
+
 set(CPACK_PACKAGE_VENDOR "OpenXRay Team")
 set(CPACK_PACKAGE_CONTACT "OpenXRay <openxray@yahoo.com>")
 set(CPACK_PACKAGE_DESCRIPTION ${CMAKE_PROJECT_DESCRIPTION})

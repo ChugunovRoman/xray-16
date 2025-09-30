@@ -24,10 +24,11 @@
 #define _ODE_UTIL_H_
 
 #include "objects.h"
-#include "float.h"
 
-#ifndef MSVC
-#include <cmath> // for fpclassify
+#if defined(_MSC_VER) || defined(__MINGW_FPCLASS_DEFINED)
+#include <float.h>
+#else
+#include <cmath>
 #endif
 
 void dInternalHandleAutoDisabling (dxWorld *world, dReal stepsize);
@@ -43,7 +44,7 @@ void dxProcessIslands (dxWorld *world, dReal stepsize, dstepper_fn_t stepper);
 
 inline bool dValid(const float x)
 {
-#ifdef MSVC
+#if defined(_MSC_VER) || defined(__MINGW_FPCLASS_DEFINED)
     // check for: Signaling NaN, Quiet NaN, Negative infinity (-INF), Positive infinity (+INF), Negative denormalized, Positive denormalized
     int cls = _fpclass(double(x));
     if (cls&(_FPCLASS_SNAN+_FPCLASS_QNAN+_FPCLASS_NINF+_FPCLASS_PINF+_FPCLASS_ND+_FPCLASS_PD))
@@ -59,13 +60,13 @@ inline bool dValid(const float x)
     default:
         break;
     }
-#endif
     /*	*****other cases are*****
      _FPCLASS_NN Negative normalized non-zero
      _FPCLASS_NZ Negative zero (-0)
      _FPCLASS_PZ Positive 0 (+0)
      _FPCLASS_PN Positive normalized non-zero
      */
+#endif
     return true;
 }
 #endif

@@ -1,7 +1,3 @@
-#ifndef dSINGLE
-#define dSINGLE
-#endif
-
 #pragma warning(push)
 #pragma warning(disable : 4995)
 #pragma warning(disable : 4267)

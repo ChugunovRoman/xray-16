@@ -329,7 +329,6 @@ void CRender::Render()
     }
 
     r_rain.sync();
-    RCache.ClearRT(Target->rt_Accumulator, {});
 
     // Directional light - fucking sun
     {

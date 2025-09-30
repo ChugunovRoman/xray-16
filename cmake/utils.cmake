@@ -1,3 +1,5 @@
+include_guard()
+
 function(target_sources_grouped)
     cmake_parse_arguments(
         PARSED_ARGS
@@ -24,14 +26,13 @@ function(target_sources_grouped)
     source_group(${PARSED_ARGS_NAME} FILES ${PARSED_ARGS_FILES})
 endfunction()
 
-macro(set_git_info)
+function(query_git_info output_sha output_branch)
     execute_process(COMMAND git rev-parse --verify HEAD
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
         OUTPUT_VARIABLE GIT_SHA1
         ERROR_QUIET
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    message(STATUS "git commit: ${GIT_SHA1}")
 
     execute_process(COMMAND git rev-parse --abbrev-ref HEAD
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -39,8 +40,10 @@ macro(set_git_info)
         ERROR_QUIET
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    message(STATUS "git branch: ${GIT_BRANCH}")
-endmacro()
+
+    set(${output_sha} ${GIT_SHA1} PARENT_SCOPE)
+    set(${output_branch} ${GIT_BRANCH} PARENT_SCOPE)
+endfunction()
 
 function(calculate_xray_build_id output)
     set(XRAY_START_DAY   31)

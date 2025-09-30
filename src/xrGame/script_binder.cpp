@@ -118,7 +118,7 @@ void CScriptBinder::net_Destroy()
     if (m_object)
     {
 #ifdef _DEBUG
-        Msg("* Core object %s is UNbinded from the script object", owner->cName());
+        Msg("* Core object %s is UNbinded from the script object", owner->cName().c_str());
 #endif // _DEBUG
         try
         {
@@ -138,7 +138,7 @@ void CScriptBinder::set_object(CScriptBinderObject* object)
     {
         VERIFY2(!m_object, "Cannot bind to the object twice!");
 #ifdef _DEBUG
-        Msg("* Core object %s is binded with the script object", owner->cName());
+        Msg("* Core object %s is binded with the script object", owner->cName().c_str());
 #endif // _DEBUG
         m_object = object;
     }

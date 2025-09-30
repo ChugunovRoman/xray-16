@@ -89,18 +89,19 @@ jobs:
         # cc is always set for the correct naming of the job.
         # Both cc and cxx should be set if we want to change the compiler.
         # You may also want to set XRAY_LINKER when changing the compiler.
-        - { name: Ubuntu, os: ubuntu-latest, arch: amd64,   cc: gcc, }
-        - { name: Ubuntu, os: ubuntu-latest, arch: amd64,   cc: clang, cxx: clang++, flags: "-DXRAY_LINKER=lld", }
-        - { name: Ubuntu, os: ubuntu-24.04-arm, arch: arm64,   cc: gcc }
-        #- { name: Ubuntu, os: ubuntu-latest, arch: ppc64el, cc: gcc,   container: 'dockcross/linux-ppc64le:latest', }
-        - { name: Alpine, os: ubuntu-latest, arch: x86_64,  cc: gcc,   shell: 'alpine.sh {0}', flags: "-DXRAY_LINKER=mold", }
-        - { name: Alpine, os: ubuntu-latest, arch: x86,     cc: gcc,   shell: 'alpine.sh {0}', flags: "-DXRAY_LINKER=mold", }
-        - { name: Fedora, os: ubuntu-latest, arch: x86_64,  cc: gcc,   container: 'fedora:latest', }
-        #- { name: Haiku,  os: ubuntu-latest, arch: x86_64,  cc: x86_64-unknown-haiku-gcc, cxx: x86_64-unknown-haiku-g++, container: 'haiku/cross-compiler:x86_64-r1beta4', }
-        - { name: macOS 13,  os: macos-13,   arch: x86_64,  cc: clang, flags: "-DCMAKE_OSX_DEPLOYMENT_TARGET=13.6" }
-        - { name: macOS 15,  os: macos-15,   arch: arm64,   cc: clang, flags: "-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0", threads: 3 }
+        #- { name: Windows,   os: windows-latest,   arch: x64,     cc: cl, }
+        #- { name: Windows,   os: windows-latest,   arch: x86,     cc: cl, }
+        - { name: Ubuntu,    os: ubuntu-latest,    arch: amd64,   cc: gcc, }
+        - { name: Ubuntu,    os: ubuntu-latest,    arch: amd64,   cc: clang, cxx: clang++, flags: "-DXRAY_LINKER=lld", }
+        - { name: Ubuntu,    os: ubuntu-24.04-arm, arch: arm64,   cc: gcc }
+        #- { name: Ubuntu,    os: ubuntu-latest,    arch: ppc64el, cc: gcc,   container: 'dockcross/linux-ppc64le:latest', }
+        - { name: Alpine,    os: ubuntu-latest,    arch: x86_64,  cc: gcc,   shell: 'alpine.sh {0}', flags: "-DXRAY_LINKER=mold", }
+        - { name: Alpine,    os: ubuntu-latest,    arch: x86,     cc: gcc,   shell: 'alpine.sh {0}', flags: "-DXRAY_LINKER=mold", }
+        - { name: Fedora,    os: ubuntu-latest,    arch: x86_64,  cc: gcc,   container: 'fedora:latest', }
+        #- { name: Haiku,     os: ubuntu-latest,    arch: x86_64,  cc: x86_64-unknown-haiku-gcc, cxx: x86_64-unknown-haiku-g++, container: 'haiku/cross-compiler:x86_64-r1beta4', }
+        - { name: macOS,     os: macos-latest,     arch: arm64,   cc: clang, threads: 3 }
 
-        configuration: [Debug, Release]
+        configuration: [Debug, Mixed, Release, ReleaseMasterGold]
 
     steps:
     - name: Install latest stable Alpine Linux and packages
@@ -150,7 +151,7 @@ jobs:
         submodules: recursive
 
     - name: Run CMake
-      run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DCMAKE_UNITY_BUILD=ON ${{ matrix.platform.flags }}
+      run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DCMAKE_UNITY_BUILD=ON ${{ matrix.platform.flags }} --log-level VERBOSE
 
     - name: Run CMake Build
       id: cmake-build
@@ -192,6 +193,9 @@ jobs:
         - { name: NetBSD,  os: netbsd,  os-version: '10.1',  arch: x86_64,
             install-cmd: "sudo pkgin -y install cmake SDL2 lzo libjpeg-turbo openal-soft libogg libtheora libvorbis",
           }
+        #- { name: Haiku,  os: haiku,  os-version: 'r1beta5',  arch: x86_64,
+        #    install-cmd: "sudo pkgman install -y cmake libsdl2_devel lzo_devel libjpeg_turbo_devel openal_devel libogg_devel libtheora_devel libvorbis_devel",
+        #  }
         configuration: [Debug, Release]
 
     steps:
@@ -223,7 +227,7 @@ jobs:
         environment_variables: CFLAGS CXXFLAGS
         shutdown_vm: false
         sync_files: false
-        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.Configuration }} -DCMAKE_UNITY_BUILD=ON
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.Configuration }} -DCMAKE_UNITY_BUILD=ON --log-level VERBOSE
 
     - name: Run CMake Build
       uses: cross-platform-actions/action@v0.29.0

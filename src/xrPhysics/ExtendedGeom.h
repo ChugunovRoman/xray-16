@@ -1,8 +1,5 @@
 #pragma once
 
-#ifndef dSINGLE
-#define dSINGLE
-#endif
 #include "PHObject.h"
 
 #include <ode/common.h>
