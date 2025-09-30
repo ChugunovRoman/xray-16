@@ -316,8 +316,14 @@ void CUICellItem::UpdateConditionProgressBar()
             float y = itm_grid_size.y * (cell_size.y + cell_space.y) - m_pConditionState->GetHeight() - 2.f;
     
             m_pConditionState->SetWndPos(Fvector2().set(x, y));
-            m_pConditionState->ForceSetProgressPos(iCeil(cond * 13.0f) / 13.0f);
-            m_pConditionState->UseColor(true);
+            if (data_is_string)
+            {
+                m_pConditionState->ForceSetProgressPos(iCeil(cond * 13.0f) / 13.0f);
+                m_pConditionState->UseColor(true);
+            }
+            else
+                m_pConditionState->SetProgressPos(iCeil(cond * 13.0f) / 13.0f);
+
             m_pConditionState->Show(true);
 
             return;
