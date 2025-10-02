@@ -77,7 +77,7 @@ Irect InventoryUtilities::GetInvGridRect(shared_str m_section_id)
 
     return Irect().set(x, y, w, h);
 }
-bool InventoryUtilities::GreaterRoomInRuckStr(CUICellItem* item1, CUICellItem* item2)
+bool InventoryUtilities::GreaterRoomInCells(CUICellItem* item1, CUICellItem* item2)
 {
     Ivector2 r1, r2;
     PIItem iitem1 = (PIItem)item1->m_pData;

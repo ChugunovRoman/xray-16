@@ -27,7 +27,6 @@
 #include "antirad.h"
 #include "CustomOutfit.h"
 #include "ActorHelmet.h"
-// #include "Actor.h"
 #include "xrUICore/Cursor/UICursor.h"
 #include "MPPlayersBag.h"
 #include "player_hud.h"
@@ -36,7 +35,7 @@
 #include "actor_defs.h"
 #include "script_game_object_impl.h"
 
-// extern int g_outfit_faction;
+#include "xrCore/Threading/ParallelFor.hpp"
 
 void move_item_from_to(u16 from_id, u16 to_id, u16 what_id);
 
@@ -447,27 +446,37 @@ void CUIActorMenu::InitInventoryContents(CUIDragDropListEx* pBagList, bool onlyB
     SetInvGridSize(curr_list);
 
     TIItemContainer ruck_list = m_pActorInvOwner->inventory().m_ruck;
-    std::sort(ruck_list.begin(), ruck_list.end(), InventoryUtilities::GreaterRoomInRuck);
 
-    for (PIItem item : ruck_list)
+    xr_vector<CUICellItem*> items;
+
+    xr_parallel_for(TaskRange<u32>(0, ruck_list.size()), [&](const TaskRange<u32>& range)
     {
-        CMPPlayersBag* bag = smart_cast<CMPPlayersBag*>(&item->object());
-        if (bag)
-            continue;
+        xr_vector<CUICellItem*> tmp;
 
-        CUICellItem* itm = create_cell_item(item);
-        curr_list->SetItem(itm);
-        if (m_currMenuMode == mmTrade && m_pPartnerInvOwner)
-            ColorizeItem(itm, !CanMoveToPartner(item));
+        for (u32 i = range.begin(); i != range.end(); ++i)
+        {
+            PIItem itm = ruck_list.at(i);
+            CMPPlayersBag* bag = smart_cast<CMPPlayersBag*>(&itm->object());
+            if (bag)
+                continue;
 
-        // CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(item);
-        // if(outfit)
-        //	outfit->ReloadBonesProtection();
+            CUICellItem* cell_itm = create_cell_item(itm);
 
-        // CHelmet* helmet = smart_cast<CHelmet*>(item);
-        // if(helmet)
-        //	helmet->ReloadBonesProtection();
-    }
+            if (m_currMenuMode == mmTrade && m_pPartnerInvOwner)
+                ColorizeItem(cell_itm, !CanMoveToPartner(itm));
+
+            tmp.push_back(cell_itm);
+        }
+        
+        std::lock_guard<std::mutex> lock(push_items_mtx);
+
+        items.insert(items.end(), tmp.begin(), tmp.end());
+
+        VERIFY(items.size());
+    });
+    std::sort(items.begin(), items.end(), InventoryUtilities::GreaterRoomInCells);
+    for (auto& item : items)
+        curr_list->SetItem(item);
 
     if (onlyBagList)
         return;

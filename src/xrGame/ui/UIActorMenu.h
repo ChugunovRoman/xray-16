@@ -177,6 +177,7 @@ protected:
     // Drag&Drop lists
     CUIDragDropListEx* m_pLists[eListCount]{};
 
+    std::mutex push_items_trade_mtx;
     std::mutex push_items_mtx;
 
 public:

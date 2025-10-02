@@ -110,13 +110,13 @@ void CUIActorMenu::InitPartnerInventoryContents()
             tmp.push_back(cell_itm);
         }
         
-        std::lock_guard<std::mutex> lock(push_items_mtx);
+        std::lock_guard<std::mutex> lock(push_items_trade_mtx);
 
         items.insert(items.end(), tmp.begin(), tmp.end());
 
         VERIFY(items.size());
     });
-    std::sort(items.begin(), items.end(), InventoryUtilities::GreaterRoomInRuckStr);
+    std::sort(items.begin(), items.end(), InventoryUtilities::GreaterRoomInCells);
     for (auto& item : items)
         m_pLists[eTradePartnerBagList]->SetItem(item);
     m_trade_partner_inventory_state = m_pPartnerInvOwner->inventory().ModifyFrame();
