@@ -48,7 +48,12 @@ Fvector CScriptSound::GetPosition() const
 
 void CScriptSound::Play(CScriptGameObject* object, float delay, int flags)
 {
-    THROW3(m_sound._handle() || m_bIsNoSound, "There is no sound", *m_caSoundToPlay);
+    if (!(m_sound._handle() || m_bIsNoSound))
+    {
+        Msg("There is no sound: %s", m_caSoundToPlay.c_str());
+        return;
+    }
+    // THROW3(m_sound._handle() || m_bIsNoSound, "There is no sound", *m_caSoundToPlay);
     //	Msg							("%6d : CScriptSound::Play (%s), delay %f, flags
     //%d",Device.dwTimeGlobal,m_sound._handle()->file_name(),delay,flags);
     m_sound.play((object) ? &object->object() : NULL, flags, delay);
@@ -56,7 +61,12 @@ void CScriptSound::Play(CScriptGameObject* object, float delay, int flags)
 
 void CScriptSound::PlayAtPos(CScriptGameObject* object, const Fvector& position, float delay, int flags)
 {
-    THROW3(m_sound._handle() || m_bIsNoSound, "There is no sound", *m_caSoundToPlay);
+    if (!(m_sound._handle() || m_bIsNoSound))
+    {
+        Msg("There is no sound: %s", m_caSoundToPlay.c_str());
+        return;
+    }
+    // THROW3(m_sound._handle() || m_bIsNoSound, "There is no sound", *m_caSoundToPlay);
     //	Msg							("%6d : CScriptSound::Play (%s), delay %f, flags
     //%d",m_sound._handle()->file_name(),delay,flags);
     m_sound.play_at_pos((object) ? &object->object() : NULL, position, flags, delay);
@@ -65,6 +75,11 @@ void CScriptSound::PlayAtPos(CScriptGameObject* object, const Fvector& position,
 void CScriptSound::PlayNoFeedback(
     CScriptGameObject* object, u32 flags /*!< Looping */, float delay /*!< Delay */, Fvector pos, float vol)
 {
-    THROW3(m_sound._handle() || m_bIsNoSound, "There is no sound", *m_caSoundToPlay);
+    if (!(m_sound._handle() || m_bIsNoSound))
+    {
+        Msg("There is no sound: %s", m_caSoundToPlay.c_str());
+        return;
+    }
+    // THROW3(m_sound._handle() || m_bIsNoSound, "There is no sound", *m_caSoundToPlay);
     m_sound.play_no_feedback((object) ? &object->object() : NULL, flags, delay, &pos, &vol);
 }
