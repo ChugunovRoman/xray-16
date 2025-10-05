@@ -313,6 +313,10 @@ public:
     CUICellItem* CurrentItem();
 
 protected:
+    bool trade_list_is_filling{false};
+    u32 latest_frame_trade_list_update{0};
+    TIItemContainer items_trade_list;
+
     PIItem CurrentIItem();
 
     void InfoCurItem(CUICellItem* cell_item); // on update item
@@ -364,6 +368,7 @@ protected:
 
     // trade
     void InitPartnerInventoryContents();
+    void FillPartnerInventoryContents();
     void ColorizeItem(CUICellItem* itm, bool colorize);
     float CalcItemsWeight(CUIDragDropListEx* pList);
     u32 CalcItemsPrice(CUIDragDropListEx* pList, CTrade* pTrade, bool bBuying);

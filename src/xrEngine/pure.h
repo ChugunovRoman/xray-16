@@ -1,5 +1,6 @@
 #pragma once
 #include "xrCommon/xr_vector.h"
+#include <mutex>
 
 // messages
 constexpr int REG_PRIORITY_LOW = 0x11111111;
@@ -34,6 +35,7 @@ class MessageRegistry
         int Prio;
     };
 
+    std::mutex add_msg_mtx;
     xr_vector<MessageObject> messages;
     bool changed, inProcess;
 
@@ -60,6 +62,8 @@ public:
             VERIFY(!(message.Prio != REG_PRIORITY_INVALID && message.Object == newMessage.Object));
         }
 #endif
+        std::lock_guard<std::mutex> lock(add_msg_mtx);
+
         messages.emplace_back(newMessage);
 
         if (inProcess)

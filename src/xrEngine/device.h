@@ -366,9 +366,12 @@ private:
 extern ENGINE_API CLoadScreenRenderer load_screen_renderer;
 
 class CDeviceResetNotifier : public pureDeviceReset
-{
+{    
 public:
-    CDeviceResetNotifier(const int prio = REG_PRIORITY_NORMAL) { Device.seqDeviceReset.Add(this, prio); }
+    CDeviceResetNotifier(const int prio = REG_PRIORITY_NORMAL)
+    {
+        Device.seqDeviceReset.Add(this, prio);
+    }
     virtual ~CDeviceResetNotifier() { Device.seqDeviceReset.Remove(this); }
 };
 

@@ -267,6 +267,8 @@ void CUIActorMenu::Update()
     {
         if (m_pPartnerInvOwner->inventory().ModifyFrame() != m_trade_partner_inventory_state)
             InitPartnerInventoryContents();
+        if (trade_list_is_filling && latest_frame_trade_list_update < Device.dwFrame)
+            FillPartnerInventoryContents();
         CheckDistance();
         if (m_message_static)
         {

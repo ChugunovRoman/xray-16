@@ -84,27 +84,17 @@ bool is_item_in_list(CUIDragDropListEx* pList, PIItem item)
     return false;
 }
 
-void CUIActorMenu::InitPartnerInventoryContents()
+void CUIActorMenu::FillPartnerInventoryContents()
 {
-    m_pLists[eTradePartnerBagList]->ClearAll(true);
-
-    TIItemContainer items_list;
-    m_pPartnerInvOwner->inventory().AddAvailableItems(items_list, true);
-
-    SetInvGridSize(m_pLists[eTradePartnerList]);
-    SetInvGridSize(m_pLists[eTradePartnerBagList]);
-    SetInvGridSize(m_pLists[eTradeActorList]);
-    SetInvGridSize(m_pLists[eTradeActorBagList]);
-
     xr_vector<CUICellItem*> items;
 
-    xr_parallel_for(TaskRange<u32>(0, items_list.size()), [&](const TaskRange<u32>& range)
+    xr_parallel_for(TaskRange<u32>(0, items_trade_list.size()), [&](const TaskRange<u32>& range)
     {
         xr_vector<CUICellItem*> tmp;
 
         for (u32 i = range.begin(); i != range.end(); ++i)
         {
-            PIItem itm = items_list.at(i);
+            PIItem itm = items_trade_list.at(i);
             CUICellItem* cell_itm = create_cell_item(itm);
 
             tmp.push_back(cell_itm);
@@ -117,9 +107,31 @@ void CUIActorMenu::InitPartnerInventoryContents()
         VERIFY(items.size());
     });
     std::sort(items.begin(), items.end(), InventoryUtilities::GreaterRoomInCells);
+
     for (auto& item : items)
         m_pLists[eTradePartnerBagList]->SetItem(item);
+
     m_trade_partner_inventory_state = m_pPartnerInvOwner->inventory().ModifyFrame();
+    trade_list_is_filling = false;
+}
+void CUIActorMenu::InitPartnerInventoryContents()
+{
+    if (trade_list_is_filling)
+        return;
+
+    trade_list_is_filling = true;
+
+    SetInvGridSize(m_pLists[eTradePartnerList]);
+    SetInvGridSize(m_pLists[eTradePartnerBagList]);
+    SetInvGridSize(m_pLists[eTradeActorList]);
+    SetInvGridSize(m_pLists[eTradeActorBagList]);
+
+    items_trade_list.clear();
+    m_pPartnerInvOwner->inventory().AddAvailableItems(items_trade_list, true);
+
+    m_pLists[eTradePartnerBagList]->ClearAll(true);
+
+    latest_frame_trade_list_update = Device.dwFrame + 1;
 }
 
 void CUIActorMenu::ColorizeItem(CUICellItem* itm, bool colorize)
