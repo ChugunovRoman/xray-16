@@ -18,7 +18,7 @@
 #include "xrCore/Threading/ScopeLock.hpp"
 #include <iostream>
 
-xr_map<shared_str, TEX_INFO> CUITextureMaster::m_textures;
+xr_map<xr_string, TEX_INFO> CUITextureMaster::m_textures;
 xr_map<sh_pair, ui_shader> CUITextureMaster::m_shaders;
 
 void CUITextureMaster::FreeTexInfo()
@@ -54,7 +54,7 @@ void CUITextureMaster::ParseShTexInfo(pcstr xml_file)
         info.rect.x2 = xml.ReadAttribFlt("texture", i, "width") + info.rect.x1;
         info.rect.y1 = xml.ReadAttribFlt("texture", i, "y");
         info.rect.y2 = xml.ReadAttribFlt("texture", i, "height") + info.rect.y1;
-        shared_str id = xml.ReadAttrib("texture", i, "id");
+        xr_string id = xml.ReadAttrib("texture", i, "id");
 
         if (m_textures.find(id) == m_textures.end())
             m_textures.emplace(id, info);
@@ -85,7 +85,7 @@ void CUITextureMaster::ParseShTexInfo(CUIXml& xml, bool override)
             info.rect.x2 = xml.ReadAttribFlt(node, "texture", i, "width") + info.rect.x1;
             info.rect.y1 = xml.ReadAttribFlt(node, "texture", i, "y");
             info.rect.y2 = xml.ReadAttribFlt(node, "texture", i, "height") + info.rect.y1;
-            shared_str id = xml.ReadAttrib(node, "texture", i, "id");
+            xr_string id = xml.ReadAttrib(node, "texture", i, "id");
 
             if (m_textures.find(id) == m_textures.end())
                 m_textures.emplace(id, info);
@@ -105,7 +105,8 @@ bool CUITextureMaster::IsSh(const shared_str& texture_name)
 bool CUITextureMaster::InitTexture(
     const shared_str& texture_name, const shared_str& shader_name, ui_shader& out_shader, Frect& out_rect)
 {
-    xr_map<shared_str, TEX_INFO>::iterator it = m_textures.find(texture_name);
+    xr_string key{texture_name.c_str()};
+    xr_map<xr_string, TEX_INFO>::iterator it = m_textures.find(key);
     if (it != m_textures.end())
     {
         sh_pair p = {it->second.file, shader_name};
@@ -124,7 +125,8 @@ bool CUITextureMaster::InitTexture(
 
 bool CUITextureMaster::InitTexture(const shared_str& texture_name, CUIStaticItem* tc, const shared_str& shader_name)
 {
-    xr_map<shared_str, TEX_INFO>::iterator it = m_textures.find(texture_name);
+    xr_string key{texture_name.c_str()};
+    xr_map<xr_string, TEX_INFO>::iterator it = m_textures.find(key);
     if (it != m_textures.end())
     {
         sh_pair p = {it->second.file, shader_name};
@@ -206,7 +208,8 @@ bool CUITextureMaster::FindItem(const shared_str& texture_name, TEX_INFO& outVal
 
 bool CUITextureMaster::FindItem(const shared_str& texture_name, pcstr default_texture, TEX_INFO& outValue)
 {
-    auto it = m_textures.find(texture_name);
+    xr_string key{texture_name.c_str()};
+    auto it = m_textures.find(key);
 
     if (it != m_textures.end())
     {
@@ -226,13 +229,15 @@ bool CUITextureMaster::FindItem(const shared_str& texture_name, pcstr default_te
 
 bool CUITextureMaster::ItemExist(const shared_str& texture_name)
 {
-    const auto it = m_textures.find(texture_name);
+    xr_string key{texture_name.c_str()};
+    const auto it = m_textures.find(key);
     return it != m_textures.end();
 }
 
 void CUITextureMaster::GetTextureShader(const shared_str& texture_name, ui_shader& sh)
 {
-    const auto it = m_textures.find(texture_name);
+    xr_string key{texture_name.c_str()};
+    const auto it = m_textures.find(key);
     R_ASSERT3(it != m_textures.end(), "can't find texture", texture_name.c_str());
 
     sh->create("hud\\default", it->second.file.c_str());
