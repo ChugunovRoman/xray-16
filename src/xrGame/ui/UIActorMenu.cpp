@@ -235,6 +235,9 @@ void CUIActorMenu::SetInvGridSize(CUIDragDropListEx* dragdrop_inv)
         w_cells.y = pSettings->r_u16(section, "rows_num");
         w_cells.x = pSettings->r_u16(section, "cols_num");
 
+        Ivector2 current_capacity = dragdrop_inv->CellsCapacity();
+        w_cells.y = current_capacity.y;
+
         dragdrop_inv->SetCellSize(w_cell_sz);
         dragdrop_inv->SetStartCellsCapacity(w_cells);
     }
