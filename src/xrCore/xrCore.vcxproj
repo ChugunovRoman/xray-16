@@ -26,12 +26,12 @@
       <PreprocessorDefinitions>_USRDLL;XRCORE_EXPORTS;CI=$(CI);APPVEYOR=$(APPVEYOR);APPVEYOR_BUILD_ID="$(APPVEYOR_BUILD_ID)";APPVEYOR_BUILD_VERSION="$(APPVEYOR_BUILD_VERSION)";APPVEYOR_ACCOUNT_NAME="$(APPVEYOR_ACCOUNT_NAME)";GITHUB_ACTIONS=$(GITHUB_ACTIONS);GITHUB_RUN_ID="$(GITHUB_RUN_ID)";GITHUB_RUN_NUMBER="$(GITHUB_RUN_NUMBER)";GITHUB_REPOSITORY="$(GITHUB_REPOSITORY)";OPENSSL_NO_DEPRECATED;TRACY_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>BugTrap.lib;DbgHelp.lib;FaultRep.lib;lzo.lib;jpeg-static.lib;libcrypto.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>BugTrap.lib;FaultRep.lib;lzo.lib;jpeg-static.lib;libcrypto.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalDependencies Condition="!$(Configuration.Contains('Debug'))">mimalloc-static.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalDependencies Condition="$(Configuration.Contains('Debug'))">mimalloc-static-debug.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Lib>
-      <AdditionalDependencies>BugTrap.lib;DbgHelp.lib;FaultRep.lib;lzo.lib;jpeg-static.lib;libcrypto.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>BugTrap.lib;FaultRep.lib;lzo.lib;jpeg-static.lib;libcrypto.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalDependencies Condition="!$(Configuration.Contains('Debug'))">mimalloc-static.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalDependencies Condition="$(Configuration.Contains('Debug'))">mimalloc-static-debug.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Lib>
@@ -63,6 +63,7 @@ call .GitInfo.cmd</Command>
     <ClCompile Include="Compression\ppmd_compressor.cpp" />
     <ClCompile Include="Compression\rt_compressor.cpp" />
     <ClCompile Include="Compression\rt_compressor9.cpp" />
+    <ClCompile Include="Debug\StackTrace.cpp" />
     <ClCompile Include="Math\fast_lc16.cpp" />
     <ClCompile Include="Media\ImageJPEG.cpp" />
     <ClCompile Include="crc32.cpp" />
@@ -72,7 +73,6 @@ call .GitInfo.cmd</Command>
     <ClCompile Include="Crypto\xr_dsa_verifyer.cpp" />
     <ClCompile Include="Crypto\xr_sha.cpp" />
     <ClCompile Include="Debug\dxerr.cpp" />
-    <ClCompile Include="Debug\MiniDump.cpp" />
     <ClCompile Include="dump_string.cpp" />
     <ClCompile Include="FileCRC32.cpp" />
     <ClCompile Include="FileSystem.cpp" />
@@ -169,7 +169,7 @@ call .GitInfo.cmd</Command>
     <ClInclude Include="Debug\DXGetErrorDescription.inl">
       <FileType>CppHeader</FileType>
     </ClInclude>
-    <ClInclude Include="Debug\MiniDump.h" />
+    <ClInclude Include="Debug\StackTrace.h" />
     <ClInclude Include="dump_string.h" />
     <ClInclude Include="Events\Notifier.h" />
     <ClInclude Include="fastdelegate.h" />

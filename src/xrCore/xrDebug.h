@@ -7,11 +7,6 @@
 #include <string>
 #if defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_BSD) || defined(XR_PLATFORM_APPLE)
 #include <cstdio>
-#elif defined(XR_PLATFORM_WINDOWS)
-#pragma warning(push)
-#pragma warning(disable : 4091) /// 'typedef ': ignored on left of '' when no variable is declared
-#include <DbgHelp.h>
-#pragma warning(pop)
 #endif
 
 struct SDL_Window;
@@ -121,23 +116,14 @@ public:
     static AssertionResult ShowMessage(pcstr title, pcstr message, bool simpleMode = true);
 
     static void LogStackTrace(const char* header);
-    static xr_vector<xr_string> BuildStackTrace(u16 maxFramesCount = 512);
 
 private:
-    static bool symEngineInitialized;
-    static Lock dbgHelpLock;
     static Lock failLock;
 
     static void FormatLastError(char* buffer, const size_t& bufferSize);
     static void SetupExceptionHandler();
     static LONG WINAPI UnhandledFilter(EXCEPTION_POINTERS* exPtrs);
     static void WINAPI PreErrorHandler(INT_PTR);
-#if defined(XR_PLATFORM_WINDOWS)
-    static xr_vector<xr_string> BuildStackTrace(PCONTEXT threadCtx, u16 maxFramesCount);
-    static bool GetNextStackFrameString(LPSTACKFRAME stackFrame, PCONTEXT threadCtx, xr_string& frameStr);
-    static bool InitializeSymbolEngine();
-    static void DeinitializeSymbolEngine(void);
-#endif //XR_PLATFORM_WINDOWS
 };
 
 // forward declaration

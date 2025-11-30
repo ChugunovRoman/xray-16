@@ -140,11 +140,6 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_options(-Og)
 endif()
 
-add_compile_definitions(
-    _MT
-    _CPPUNWIND
-)
-
 if (NOT WIN32)
     find_package(SDL2 2.0.18 REQUIRED)
     find_package(OpenAL REQUIRED)

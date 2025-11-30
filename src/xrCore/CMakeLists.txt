@@ -132,8 +132,6 @@ target_sources_grouped(
     TARGET xrCore
     NAME "Debug core"
     FILES
-    #Debug/MiniDump.cpp
-    #Debug/MiniDump.h
     xrDebug.cpp
     xrDebug.h
     xrDebug_macros.h
@@ -149,6 +147,14 @@ target_sources_grouped(
 #    Debug/DXGetErrorString.inl
 #    Debug/DXTrace.inl
 #)
+
+target_sources_grouped(
+    TARGET xrCore
+    NAME "Debug core\\StackTrace"
+    FILES
+    Debug/StackTrace.cpp
+    Debug/StackTrace.h
+)
 
 target_sources_grouped(
     TARGET xrCore

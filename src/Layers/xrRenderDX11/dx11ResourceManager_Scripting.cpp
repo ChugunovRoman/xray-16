@@ -25,11 +25,11 @@ public:
         return RImplementation.o.msaa_alphatest == CRender::MSAA_ATEST_DX10_0_ATOC;
     }
 
-	LPCSTR _get_level()
-	{
-		const shared_str level_name = g_pGameLevel->name();
-		return level_name.c_str();
-	}
+    LPCSTR _get_level()
+    {
+        const shared_str level_name = g_pGameLevel->name();
+        return level_name.c_str();
+    }
 };
 
 // wrapper

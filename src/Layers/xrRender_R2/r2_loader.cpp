@@ -67,11 +67,11 @@ void CRender::level_Load(IReader* fs)
         }
 
         //...and alternate/fast geometry
+        if (CStreamReader* geom = FS.rs_open("$level$", "level.geomX"))
         {
-            CStreamReader* geom = FS.rs_open("$level$", "level.geomx");
-            R_ASSERT2(geom, "level.geomX");
             LoadBuffers(geom, true);
             FS.r_close(geom);
+            m_fast_geom_loaded = true;
         }
 
         // Visuals
@@ -176,6 +176,8 @@ void CRender::level_Unload()
 
     nDC.clear();
     xDC.clear();
+
+    m_fast_geom_loaded = false;
 
     //*** Components
     xr_delete(Details);

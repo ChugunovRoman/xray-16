@@ -15,7 +15,6 @@
 #include "Render.h"
 #include "PS_instance.h"
 #include "CustomHUD.h"
-#include "perlin.h"
 #endif
 
 ENGINE_API IGame_Persistent* g_pGamePersistent = nullptr;
@@ -32,10 +31,6 @@ IGame_Persistent::IGame_Persistent()
     Device.seqFrame.Add(this, REG_PRIORITY_HIGH + 1);
     Device.seqAppActivate.Add(this);
     Device.seqAppDeactivate.Add(this);
-
-    PerlinNoise1D = xr_new<CPerlinNoise1D>(Random.randI(0, 0xFFFF));
-    PerlinNoise1D->SetOctaves(2);
-    PerlinNoise1D->SetAmplitude(0.66666f);
 
     pEnvironment = xr_new<CEnvironment>();
 
@@ -61,7 +56,6 @@ IGame_Persistent::~IGame_Persistent()
     Engine.Event.Handler_Detach(eStart, this);
     Engine.Event.Handler_Detach(eStartMPDemo, this);
 
-    xr_delete(PerlinNoise1D);
 #ifndef _EDITOR
     xr_delete(pEnvironment);
 #endif
@@ -564,11 +558,7 @@ void IGame_Persistent::OnFrame()
 
 #ifndef _EDITOR
     if (!Device.Paused() || Device.dwPrecacheFrame)
-    {
         Environment().OnFrame();
-        UpdateHudRaindrops();
-        UpdateRainGloss();
-    }
 
     stats.Starting = ps_needtoplay.size();
     stats.Active = ps_active.size();

@@ -37,6 +37,7 @@ int CConsole::InputCallback(ImGuiInputTextCallbackData* data)
 
                 xr_strcpy(new_str, size, (b_ra) ? radmin_cmd_name : "");
                 xr_strcat(new_str, size - offset, name_cmd);
+                data->CursorPos = 0;
                 data->BufTextLen = 0;
                 data->InsertChars(0, new_str, new_str + size);
             }
@@ -48,6 +49,7 @@ int CConsole::InputCallback(ImGuiInputTextCallbackData* data)
             IConsole_Command* cc = find_next_cmd(m_edit_string, out_str);
             if (cc && out_str.size())
             {
+                data->CursorPos = 0;
                 data->BufTextLen = 0;
                 data->InsertChars(0, out_str.c_str(), out_str.c_str() + out_str.size());
             }
@@ -81,6 +83,7 @@ int CConsole::InputCallback(ImGuiInputTextCallbackData* data)
             else if (data->EventKey == ImGuiKey_DownArrow)
                 Next_cmd();
 
+            data->CursorPos = 0;
             data->BufTextLen = 0;
             data->InsertChars(0, m_edit_string);
         }
@@ -91,6 +94,7 @@ int CConsole::InputCallback(ImGuiInputTextCallbackData* data)
             else if (data->EventKey == ImGuiKey_DownArrow)
                 Next_tip();
 
+            data->CursorPos = 0;
             data->BufTextLen = 0;
             data->InsertChars(0, m_edit_string);
         }

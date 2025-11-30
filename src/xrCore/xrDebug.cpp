@@ -2,6 +2,7 @@
 #pragma hdrstop
 
 #include "xrDebug.h"
+#include "Debug/StackTrace.h"
 #include "os_clipboard.h"
 #include "log.h"
 #include "Threading/ScopeLock.hpp"
@@ -11,23 +12,10 @@
 #include <csignal>
 
 #if defined(XR_PLATFORM_WINDOWS)
+#   include <dbghelp.h>
 #   include <direct.h>
 #   include <new.h> // for _set_new_mode
 #   include <errorrep.h> // ReportFault
-
-#   if defined(XR_ARCHITECTURE_X86)
-#       define MACHINE_TYPE IMAGE_FILE_MACHINE_I386
-#   elif defined(XR_ARCHITECTURE_X64)
-#       define MACHINE_TYPE IMAGE_FILE_MACHINE_AMD64
-#   elif defined(XR_ARCHITECTURE_ARM)
-#       define MACHINE_TYPE IMAGE_FILE_MACHINE_ARM
-#   elif defined(XR_ARCHITECTURE_ARM64)
-#       define MACHINE_TYPE IMAGE_FILE_MACHINE_ARM64
-#   elif defined(XR_ARCHITECTURE_IA64)
-#       define MACHINE_TYPE IMAGE_FILE_MACHINE_IA64
-#   else
-#       error CPU architecture is not supported.
-#   endif
 
 #   define USE_BUG_TRAP
 #   ifdef USE_BUG_TRAP
@@ -35,21 +23,9 @@
 #   endif
 
 #   include "Debug/dxerr.h"
-#   include "Debug/MiniDump.h"
 #endif
 
 #if defined(XR_PLATFORM_LINUX) || defined(XR_PLATFORM_APPLE) || defined(XR_PLATFORM_BSD)
-#   if __has_include(<execinfo.h>)
-#       include <execinfo.h>
-#       define BACKTRACE_AVAILABLE
-
-#       if __has_include(<cxxabi.h>)
-#           include <cxxabi.h>
-#           include <dlfcn.h>
-#           define CXXABI_AVAILABLE
-#       endif
-#   endif
-
 #   if __has_include(<sys/ptrace.h>)
 #       include <sys/ptrace.h>
 #       define PTRACE_AVAILABLE
@@ -155,8 +131,6 @@ string_path xrDebug::BugReportFile;
 bool xrDebug::ErrorAfterDialog = false;
 bool xrDebug::ShowErrorMessage = true;
 
-bool xrDebug::symEngineInitialized = false;
-Lock xrDebug::dbgHelpLock;
 #ifdef PROFILE_CRITICAL_SECTIONS
 Lock xrDebug::failLock(MUTEX_PROFILE_ID(xrDebug::Backend));
 #else
@@ -164,222 +138,6 @@ Lock xrDebug::failLock;
 #endif
 
 void xrDebug::SetBugReportFile(const char* fileName) { xr_strcpy(BugReportFile, fileName); }
-
-#if defined(XR_PLATFORM_WINDOWS)
-bool xrDebug::GetNextStackFrameString(LPSTACKFRAME stackFrame, PCONTEXT threadCtx, xr_string& frameStr)
-{
-    BOOL result = StackWalk(MACHINE_TYPE, GetCurrentProcess(), GetCurrentThread(), stackFrame, threadCtx, nullptr,
-                            SymFunctionTableAccess, SymGetModuleBase, nullptr);
-
-    if (result == FALSE || stackFrame->AddrPC.Offset == 0)
-    {
-        return false;
-    }
-
-    frameStr.clear();
-    string512 formatBuff;
-
-    ///
-    /// Module name
-    ///
-    HINSTANCE hModule = (HINSTANCE)SymGetModuleBase(GetCurrentProcess(), stackFrame->AddrPC.Offset);
-    if (hModule && GetModuleFileName(hModule, formatBuff, _countof(formatBuff)))
-    {
-        frameStr.append(formatBuff);
-    }
-
-    ///
-    /// Address
-    ///
-    xr_sprintf(formatBuff, _countof(formatBuff), " at %p", stackFrame->AddrPC.Offset);
-    frameStr.append(formatBuff);
-
-    ///
-    /// Function info
-    ///
-    u8 arrSymBuffer[512];
-    ZeroMemory(arrSymBuffer, sizeof(arrSymBuffer));
-    PIMAGEHLP_SYMBOL functionInfo = reinterpret_cast<PIMAGEHLP_SYMBOL>(arrSymBuffer);
-    functionInfo->SizeOfStruct = sizeof(*functionInfo);
-    functionInfo->MaxNameLength = sizeof(arrSymBuffer) - sizeof(*functionInfo) + 1;
-    DWORD_PTR dwFunctionOffset;
-
-    result = SymGetSymFromAddr(GetCurrentProcess(), stackFrame->AddrPC.Offset, &dwFunctionOffset, functionInfo);
-
-    if (result)
-    {
-        if (dwFunctionOffset)
-        {
-            xr_sprintf(formatBuff, _countof(formatBuff), " %s() + %Iu byte(s)", functionInfo->Name, dwFunctionOffset);
-        }
-        else
-        {
-            xr_sprintf(formatBuff, _countof(formatBuff), " %s()", functionInfo->Name);
-        }
-        frameStr.append(formatBuff);
-    }
-
-    ///
-    /// Source info
-    ///
-    DWORD dwLineOffset;
-    IMAGEHLP_LINE sourceInfo = {};
-    sourceInfo.SizeOfStruct = sizeof(sourceInfo);
-
-    result = SymGetLineFromAddr(GetCurrentProcess(), stackFrame->AddrPC.Offset, &dwLineOffset, &sourceInfo);
-
-    if (result)
-    {
-        if (dwLineOffset)
-        {
-            xr_sprintf(formatBuff, _countof(formatBuff), " in %s line %u + %u byte(s)", sourceInfo.FileName,
-                       sourceInfo.LineNumber, dwLineOffset);
-        }
-        else
-        {
-            xr_sprintf(formatBuff, _countof(formatBuff), " in %s line %u", sourceInfo.FileName, sourceInfo.LineNumber);
-        }
-        frameStr.append(formatBuff);
-    }
-
-    return true;
-}
-
-bool xrDebug::InitializeSymbolEngine()
-{
-    if (!symEngineInitialized)
-    {
-        u32 dwOptions = SymGetOptions();
-        SymSetOptions(dwOptions | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
-
-        if (SymInitialize(GetCurrentProcess(), nullptr, TRUE))
-        {
-            symEngineInitialized = true;
-        }
-    }
-
-    return symEngineInitialized;
-}
-
-void xrDebug::DeinitializeSymbolEngine(void)
-{
-    if (symEngineInitialized)
-    {
-        SymCleanup(GetCurrentProcess());
-
-        symEngineInitialized = false;
-    }
-}
-
-xr_vector<xr_string> xrDebug::BuildStackTrace(PCONTEXT threadCtx, u16 maxFramesCount)
-{
-    ScopeLock Lock(&dbgHelpLock);
-
-    xr_vector<xr_string> traceResult;
-    xr_string frameStr;
-
-    if (!InitializeSymbolEngine())
-    {
-        Msg("[xrDebug::BuildStackTrace]InitializeSymbolEngine failed with error: %d", GetLastError());
-        return traceResult;
-    }
-
-    traceResult.reserve(maxFramesCount);
-
-    STACKFRAME stackFrame{};
-    stackFrame.AddrPC.Mode = AddrModeFlat;
-    stackFrame.AddrStack.Mode = AddrModeFlat;
-    stackFrame.AddrFrame.Mode = AddrModeFlat;
-    stackFrame.AddrBStore.Mode = AddrModeFlat;
-
-    // https://learn.microsoft.com/en-us/windows/win32/api/dbghelp/ns-dbghelp-stackframe
-    // https://github.com/reactos/reactos/blob/master/base/applications/drwtsn32/stacktrace.cpp
-#if defined XR_ARCHITECTURE_X86
-    stackFrame.AddrPC.Offset = threadCtx->Eip;
-    stackFrame.AddrStack.Offset = threadCtx->Esp;
-    stackFrame.AddrFrame.Offset = threadCtx->Ebp;
-#elif defined XR_ARCHITECTURE_X64
-    stackFrame.AddrPC.Offset = threadCtx->Rip;
-    stackFrame.AddrStack.Offset = threadCtx->Rsp;
-    stackFrame.AddrFrame.Offset = threadCtx->Rbp;
-#elif defined XR_ARCHITECTURE_ARM
-    stackFrame.AddrPC.Offset = threadCtx->Pc;
-    stackFrame.AddrStack.Offset = threadCtx->Sp;
-    stackFrame.AddrFrame.Offset = threadCtx->R11;
-#elif defined XR_ARCHITECTURE_ARM64
-    stackFrame.AddrPC.Offset = threadCtx->Pc;
-    stackFrame.AddrStack.Offset = threadCtx->Sp;
-    stackFrame.AddrFrame.Offset = threadCtx->Fp;
-#elif defined XR_ARCHITECTURE_IA64
-    stackFrame.AddrPC.Offset = threadCtx->StIIP;
-    stackFrame.AddrStack.Offset = threadCtx->IntSp;
-    stackFrame.AddrBStore.Offset = threadCtx->RsBSP;
-#else
-#   error CPU architecture is not supported.
-#endif
-
-    while (GetNextStackFrameString(&stackFrame, threadCtx, frameStr) && traceResult.size() <= maxFramesCount)
-    {
-        traceResult.push_back(frameStr);
-    }
-
-    DeinitializeSymbolEngine();
-
-    return traceResult;
-}
-#endif // defined(XR_PLATFORM_WINDOWS)
-
-xr_vector<xr_string> xrDebug::BuildStackTrace(u16 maxFramesCount)
-{
-#if defined(XR_PLATFORM_WINDOWS)
-    CONTEXT currentThreadCtx = {};
-
-    RtlCaptureContext(&currentThreadCtx); /// GetThreadContext can't be used on the current thread
-    currentThreadCtx.ContextFlags = CONTEXT_FULL;
-
-    return BuildStackTrace(&currentThreadCtx, maxFramesCount);
-#elif defined(BACKTRACE_AVAILABLE)
-    xr_vector<xr_string> result;
-
-    void** array = reinterpret_cast<void**>(xr_alloca(sizeof(void*) * maxFramesCount));
-    int nptrs = backtrace(array, maxFramesCount); // get void*'s for all entries on the stack
-    char** strings = backtrace_symbols(array, nptrs);
-
-    if (strings)
-    {
-        size_t demangledBufSize = 0;
-        char* demangledName = nullptr;
-        for (int i = 1; i < nptrs; i++) // skip this function
-        {
-            char* functionName = strings[i];
-
-#   ifdef CXXABI_AVAILABLE
-            Dl_info info;
-
-            if (dladdr(array[i], &info))
-            {
-                if (info.dli_sname)
-                {
-                    int status = -1;
-                    demangledName = abi::__cxa_demangle(info.dli_sname, demangledName, &demangledBufSize, &status);
-                    if (status == 0)
-                    {
-                        functionName = demangledName;
-                    }
-                }
-            }
-#   endif
-            result.emplace_back(functionName);
-        }
-        ::free(demangledName);
-    }
-
-    return result;
-#else
-#pragma todo("Implement stack trace for Linux")
-    return {"Implement stack trace for Linux"};
-#endif
-}
 
 void xrDebug::LogStackTrace(const char* header)
 {

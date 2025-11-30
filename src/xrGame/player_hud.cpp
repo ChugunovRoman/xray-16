@@ -596,11 +596,10 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
 
     load_hud_materials("hud_material_%d");
     
-    GEnv.Render->hud_loading = true;
     m_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str(), *model_suffix));
     m_model_2 = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str()));
     m_model_3 = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str()));
-    GEnv.Render->hud_loading = false;
+
     m_attach_place_idx = pSettings->read_if_exists<u16>(m_sect_name, "attach_place_idx", 0);
 
     auto visual = hands_model->dcast_PKinematics();
@@ -833,11 +832,10 @@ void player_hud::load(const shared_str& player_hud_sect)
     }
 
     m_visual_name = pSettings->r_string(m_sect_name, "visual");
-    GEnv.Render->hud_loading = true;
     m_model = smart_cast<IKinematicsAnimated*>(GEnv.Render->model_Create(m_visual_name.c_str()));
     m_model_2 = smart_cast<IKinematicsAnimated*>(GEnv.Render->model_Create(m_visual_name.c_str()));
     m_model_3 = smart_cast<IKinematicsAnimated*>(GEnv.Render->model_Create(m_visual_name.c_str()));
-    GEnv.Render->hud_loading = false;
+
     load_ancors();
 
     if (!b_reload)

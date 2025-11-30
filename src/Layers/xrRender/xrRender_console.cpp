@@ -22,57 +22,10 @@
 #   endif // MASTER_GOLD
 #endif // (RENDER == R_R3) || (RENDER == R_R4)
 
-// Anomaly
-extern ENGINE_API float ps_r2_img_exposure; // r2-only
-extern ENGINE_API float ps_r2_img_gamma; // r2-only
-extern ENGINE_API float ps_r2_img_saturation; // r2-only
-extern ENGINE_API Fvector ps_r2_img_cg; // r2-only
-extern ENGINE_API Fvector4 ps_r2_mask_control; // r2-only
-extern ENGINE_API Fvector ps_r2_drops_control; // r2-only
-extern ENGINE_API int ps_r2_nightvision;
-
-// Ascii1457's Screen Space Shaders
-extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1;
-extern ENGINE_API Fvector4 ps_ssfx_hud_drops_2;
-extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1_cfg;
-extern ENGINE_API Fvector4 ps_ssfx_hud_drops_2_cfg;
-extern ENGINE_API Fvector4 ps_ssfx_blood_decals;
-extern ENGINE_API Fvector4 ps_ssfx_rain_1;
-extern ENGINE_API Fvector4 ps_ssfx_rain_2;
-extern ENGINE_API Fvector4 ps_ssfx_rain_3;
-extern ENGINE_API Fvector3 ps_ssfx_shadow_cascades;
-extern ENGINE_API Fvector4 ps_ssfx_grass_shadows;
-extern ENGINE_API Fvector4 ps_ssfx_grass_interactive;
-extern ENGINE_API Fvector4 ps_ssfx_int_grass_params_1;
-extern ENGINE_API Fvector4 ps_ssfx_int_grass_params_2;
-extern ENGINE_API Fvector4 ps_ssfx_wpn_dof_1;
-extern ENGINE_API Fvector4 ps_ssfx_wpn_dof_2;
-extern ENGINE_API Fvector4 ps_ssfx_florafixes_1;
-extern ENGINE_API Fvector4 ps_ssfx_florafixes_2;
-extern ENGINE_API Fvector4 ps_ssfx_wetsurfaces_1;
-extern ENGINE_API Fvector4 ps_ssfx_wetsurfaces_2;
-extern ENGINE_API int ps_ssfx_is_underground;
-extern ENGINE_API int ps_ssfx_gloss_method;
-extern ENGINE_API float ps_ssfx_gloss_factor;
-extern ENGINE_API Fvector3 ps_ssfx_gloss_minmax;
-extern ENGINE_API Fvector4 ps_ssfx_lightsetup_1;
-
-//debug
-extern ENGINE_API Fvector4 ps_dev_param_1;
-extern ENGINE_API Fvector4 ps_dev_param_2;
-extern ENGINE_API Fvector4 ps_dev_param_3;
-extern ENGINE_API Fvector4 ps_dev_param_4;
-extern ENGINE_API Fvector4 ps_dev_param_5;
-extern ENGINE_API Fvector4 ps_dev_param_6;
-extern ENGINE_API Fvector4 ps_dev_param_7;
-extern ENGINE_API Fvector4 ps_dev_param_8;
 
 namespace xray::render::RENDER_NAMESPACE
 {
 u32 ps_Preset = 2;
-u32 ps_ShaderPreset = 0;
-u32 ps_ColorGradingPreset = 0;
-
 const xr_token qpreset_token[] =
 {
     { "Minimum", 0 },
@@ -80,28 +33,6 @@ const xr_token qpreset_token[] =
     { "Default", 2 },
     { "High", 3 },
     { "Extreme", 4 },
-    { nullptr, 0 }
-};
-
-const xr_token qshader_preset_token[] =
-{
-    { "ui_mm_shader_preset_vanilla", 0 },
-    { "ui_mm_shader_preset_enhanced_default", 1 },
-    { "ui_mm_shader_preset_enhanced_high", 2 },
-    { nullptr, 0 }
-};
-
-const xr_token qcolorgrading_preset_token[] =
-{
-    { "ui_mm_color_grading_default", 0 },
-    { "ui_mm_color_grading_cold", 1 },
-    { "ui_mm_color_grading_filmic_01", 2 },
-    { "ui_mm_color_grading_filmic_02", 3 },
-    { "ui_mm_color_grading_filmic_03", 4 },
-    { "ui_mm_color_grading_hollywood", 5 },
-    { "ui_mm_color_grading_vanilla", 6 },
-    { "ui_mm_color_grading_vibrant", 7 },
-    { "ui_mm_color_grading_warm", 8 },
     { nullptr, 0 }
 };
 
@@ -313,6 +244,10 @@ Fvector3 ps_r2_dof = Fvector3().set(-1.25f, 1.4f, 600.f);
 float ps_r2_dof_sky = 30; //    distance to sky
 float ps_r2_dof_kernel_size = 5.0f; //  7.0f
 
+float ps_r3_dyn_wet_surf_near = 5.f; // 10.0f
+float ps_r3_dyn_wet_surf_far = 20.f; // 30.0f
+int ps_r3_dyn_wet_surf_sm_res = 256; // 256
+
 u32 ps_steep_parallax = 0;
 int ps_r__detail_radius = 49;
 
@@ -330,8 +265,8 @@ float dm_current_fade = 47.5; //float(2*dm_current_size)-.5f;
 float ps_current_detail_density = 0.6f;
 float ps_current_detail_height = 1.f;
 
-int ps_r2_mt_calculate = 0;
-int ps_r2_mt_render = 0;
+int ps_r2_mt_calculate = 1;
+int ps_r2_mt_render = 1;
 
 xr_token ext_quality_token[] = {{"qt_off", 0}, {"qt_low", 1}, {"qt_medium", 2},
     {"qt_high", 3}, {"qt_extreme", 4}, {nullptr, 0}};
@@ -339,7 +274,6 @@ xr_token ext_quality_token[] = {{"qt_off", 0}, {"qt_low", 1}, {"qt_medium", 2},
 
 //- Mad Max
 float ps_r2_gloss_factor = 4.0f;
-float ps_r2_gloss_min = 0.0f;
 //- Mad Max
 
 //AVO: detail draw radius
@@ -554,58 +488,6 @@ public:
         case 2: xr_strcpy(_cfg, "rspec_default.ltx"); break;
         case 3: xr_strcpy(_cfg, "rspec_high.ltx"); break;
         case 4: xr_strcpy(_cfg, "rspec_extreme.ltx"); break;
-        }
-        FS.update_path(_cfg, "$game_config$", _cfg);
-        strconcat(sizeof(cmd), cmd, "cfg_load", " ", _cfg);
-        Console->Execute(cmd);
-    }
-};
-
-class CCC_Shader_Preset : public CCC_Token
-{
-public:
-    CCC_Shader_Preset(LPCSTR N, u32* V, const xr_token* T) : CCC_Token(N, V, T) {};
-
-    virtual void Execute(LPCSTR args)
-    {
-        CCC_Token::Execute(args);
-        string_path _cfg;
-        string_path cmd;
-
-        switch (*value)
-        {
-        case 0: xr_strcpy(_cfg, "shaders_vanilla.ltx"); break;
-        case 1: xr_strcpy(_cfg, "shaders_new_default.ltx"); break;
-        case 2: xr_strcpy(_cfg, "shaders_new_high.ltx"); break;
-        }
-        FS.update_path(_cfg, "$game_config$", _cfg);
-        strconcat(sizeof(cmd), cmd, "cfg_load", " ", _cfg);
-        Console->Execute(cmd);
-    }
-};
-
-class CCC_ColorGrading_Preset : public CCC_Token
-{
-public:
-    CCC_ColorGrading_Preset(LPCSTR N, u32* V, const xr_token* T) : CCC_Token(N, V, T) {};
-
-    virtual void Execute(LPCSTR args)
-    {
-        CCC_Token::Execute(args);
-        string_path _cfg;
-        string_path cmd;
-
-        switch (*value)
-        {
-        case 0: xr_strcpy(_cfg, "grading_default.ltx"); break;
-        case 1: xr_strcpy(_cfg, "grading_cold.ltx"); break;
-        case 2: xr_strcpy(_cfg, "grading_filmic01.ltx"); break;
-        case 3: xr_strcpy(_cfg, "grading_filmic02.ltx"); break;
-        case 4: xr_strcpy(_cfg, "grading_filmic03.ltx"); break;
-        case 5: xr_strcpy(_cfg, "grading_hollywood.ltx"); break;
-        case 6: xr_strcpy(_cfg, "grading_vanilla.ltx"); break;
-        case 7: xr_strcpy(_cfg, "grading_vibrant.ltx"); break;
-        case 8: xr_strcpy(_cfg, "grading_warm.ltx"); break;
         }
         FS.update_path(_cfg, "$game_config$", _cfg);
         strconcat(sizeof(cmd), cmd, "cfg_load", " ", _cfg);
@@ -853,8 +735,6 @@ void xrRender_initconsole()
     ZoneScoped;
 
     CMD3(CCC_Preset, "_preset", &ps_Preset, qpreset_token);
-    CMD3(CCC_Shader_Preset, "_shader_preset", &ps_ShaderPreset, qshader_preset_token);
-    CMD3(CCC_ColorGrading_Preset, "_colorgrading_preset", &ps_ColorGradingPreset, qcolorgrading_preset_token);
 
     CMD4(CCC_Integer, "rs_skeleton_update", &psSkeletonUpdate, 2, 128);
 #ifndef MASTER_GOLD
@@ -882,11 +762,6 @@ void xrRender_initconsole()
     CMD4(CCC_Float, "r__wallmark_ttl", &ps_r__WallmarkTTL, 1.0f, 10.f * 60.f);
 
     CMD4(CCC_Integer, "r__supersample", &ps_r__Supersample, 1, 8);
-
-    // Anomaly
-    CMD4(CCC_Float, "r__exposure", &ps_r2_img_exposure, 0.5f, 4.0f);
-    CMD4(CCC_Float, "r__gamma", &ps_r2_img_gamma, 0.5f, 2.2f);
-    CMD4(CCC_Float, "r__saturation", &ps_r2_img_saturation, 0.0f, 2.0f);
 
     CMD4(CCC_Float, "r__geometry_lod", &ps_r__LOD, 0.1f, 2.f);
     //CMD4(CCC_Float, "r__geometry_lod_pow", &ps_r__LOD_Power, 0, 2);
@@ -961,8 +836,7 @@ void xrRender_initconsole()
 
     //- Mad Max
     CMD4(CCC_Float, "r2_gloss_factor", &ps_r2_gloss_factor, .0f, 10.f);
-    CMD4(CCC_Float, "r2_gloss_min", &ps_r2_gloss_min, .0f, 1.f);
-    //- Mad Max
+//- Mad Max
 
 #ifdef DEBUG
     CMD3(CCC_Mask, "r2_use_nvdbt", &ps_r2_ls_flags, R2FLAG_USE_NVDBT);
@@ -1079,7 +953,6 @@ void xrRender_initconsole()
     CMD3(CCC_Token, "r3_water_refl", &ps_r_water_reflection, qwater_reflection_quality_token);
     CMD3(CCC_Mask, "r3_water_refl_half_depth", &ps_r2_ls_flags_ext, R3FLAGEXT_SSR_HALF_DEPTH);
     CMD3(CCC_Mask, "r3_water_refl_jitter", &ps_r2_ls_flags_ext, R3FLAGEXT_SSR_JITTER);
-    CMD3(CCC_Mask, "r4_new_shader_support", &ps_r2_ls_flags_ext, R4FLAGEXT_NEW_SHADER_SUPPORT);
 
     //CMD3(CCC_Mask, "r3_msaa", &ps_r2_ls_flags, R3FLAG_MSAA);
     CMD3(CCC_Token, "r3_msaa", &ps_r3_msaa, qmsaa_token);
@@ -1112,56 +985,5 @@ void xrRender_initconsole()
 #if RENDER == R_R4
     CMD4(CCC_Integer, "r2_mt_render",       &ps_r2_mt_render,    0, 1);
 #endif
-
-    // Anomaly
-    Fvector4 tw2_min = { 0.f, 0.f, 0.f, 0.f };
-    Fvector4 tw2_max = { 10.f, 3.f, 1.f, 1.f };
-    tw_min.set(0.f, 0.f, 0.f);
-    tw_max.set(1.f, 2.f, 1.f);
-    CMD4(CCC_Integer, "r__nightvision", &ps_r2_nightvision, 0, 3); //For beef's nightvision shader or other stuff
-    CMD4(CCC_Vector4, "r2_mask_control", &ps_r2_mask_control, tw2_min, tw2_max);
-    CMD4(CCC_Vector3, "r2_drops_control", &ps_r2_drops_control, tw_min, tw_max);
-
-    tw2_max.set(-100.f, -100.f, -100.f, -100.f);
-    tw2_max.set(100.f, 100.f, 100.f, 100.f);
-    CMD4(CCC_Vector4, "shader_param_1", &ps_dev_param_1, tw2_min, tw2_max);
-    CMD4(CCC_Vector4, "shader_param_2", &ps_dev_param_2, tw2_min, tw2_max);
-    CMD4(CCC_Vector4, "shader_param_3", &ps_dev_param_3, tw2_min, tw2_max);
-    CMD4(CCC_Vector4, "shader_param_4", &ps_dev_param_4, tw2_min, tw2_max);
-    CMD4(CCC_Vector4, "shader_param_5", &ps_dev_param_5, tw2_min, tw2_max);
-    CMD4(CCC_Vector4, "shader_param_6", &ps_dev_param_6, tw2_min, tw2_max);
-    CMD4(CCC_Vector4, "shader_param_7", &ps_dev_param_7, tw2_min, tw2_max);
-    CMD4(CCC_Vector4, "shader_param_8", &ps_dev_param_8, tw2_min, tw2_max);
-
-    // Ascii's Screen Space Shaders
-    CMD4(CCC_Vector4, "ssfx_hud_drops_1", &ps_ssfx_hud_drops_1, Fvector4().set(0, 0, 0, 0), Fvector4().set(100000, 100, 100, 100));
-    CMD4(CCC_Vector4, "ssfx_hud_drops_2", &ps_ssfx_hud_drops_2, Fvector4().set(0, 0, 0, 0), tw2_max);
-    CMD4(CCC_Vector4, "ssfx_hud_drops_params_1", &ps_ssfx_hud_drops_1_cfg, Fvector4().set(0, 0, 0, 0), Fvector4().set(100.f, 100.f, 100.f, 100.f));
-    CMD4(CCC_Vector4, "ssfx_hud_drops_params_2", &ps_ssfx_hud_drops_2_cfg, Fvector4().set(0, 0, 0, 0), Fvector4().set(100.f, 100.f, 100.f, 100.f));
-    CMD4(CCC_Vector4, "ssfx_blood_decals", &ps_ssfx_blood_decals, Fvector4().set(0, 0, 0, 0), Fvector4().set(5, 5, 0, 0));
-    CMD4(CCC_Vector4, "ssfx_rain_1", &ps_ssfx_rain_1, Fvector4().set(0, 0, 0, 0), Fvector4().set(10, 5, 5, 2));
-    CMD4(CCC_Vector4, "ssfx_rain_2", &ps_ssfx_rain_2, Fvector4().set(0, 0, 0, 0), Fvector4().set(1, 10, 10, 10));
-    CMD4(CCC_Vector4, "ssfx_rain_3", &ps_ssfx_rain_3, Fvector4().set(0, 0, 0, 0), Fvector4().set(1, 10, 10, 10));
-    CMD4(CCC_Vector4, "ssfx_grass_shadows", &ps_ssfx_grass_shadows, Fvector4().set(0, 0, 0, 0), Fvector4().set(3, 1, 100, 100));
-    CMD4(CCC_Vector3, "ssfx_shadow_cascades", &ps_ssfx_shadow_cascades, Fvector3().set(1.0f, 1.0f, 1.0f), Fvector3().set(300, 300, 300));
-    CMD4(CCC_Vector4, "ssfx_grass_interactive", &ps_ssfx_grass_interactive, Fvector4().set(0, 0, 0, 0), Fvector4().set(1, 15, 5000, 1));
-    CMD4(CCC_Vector4, "ssfx_int_grass_params_1", &ps_ssfx_int_grass_params_1, Fvector4().set(0, 0, 0, 0), Fvector4().set(5, 5, 5, 60));
-    CMD4(CCC_Vector4, "ssfx_int_grass_params_2", &ps_ssfx_int_grass_params_2, Fvector4().set(0, 0, 0, 0), Fvector4().set(5, 20, 1, 5));
-    CMD4(CCC_Vector4, "ssfx_wpn_dof_1", &ps_ssfx_wpn_dof_1, tw2_min, tw2_max);
-    CMD4(CCC_Vector4, "ssfx_wpn_dof_2", &ps_ssfx_wpn_dof_2, tw2_min, tw2_max);
-
-    CMD4(CCC_Vector4, "ssfx_florafixes_1", &ps_ssfx_florafixes_1, Fvector4().set(0.0, 0.0, 0.0, 0.0), Fvector4().set(1.0, 1.0, 1.0, 1.0));
-    CMD4(CCC_Vector4, "ssfx_florafixes_2", &ps_ssfx_florafixes_2, Fvector4().set(0.0, 0.0, 0.0, 0.0), Fvector4().set(10.0, 1.0, 1.0, 1.0));
-    CMD4(CCC_Vector4, "ssfx_wetsurfaces_1", &ps_ssfx_wetsurfaces_1, Fvector4().set(0.01, 0.01, 0.01, 0.01), Fvector4().set(2.0, 2.0, 2.0, 2.0));
-    CMD4(CCC_Vector4, "ssfx_wetsurfaces_2", &ps_ssfx_wetsurfaces_2, Fvector4().set(0.01, 0.01, 0.01, 0.01), Fvector4().set(2.0, 2.0, 2.0, 2.0));
-    CMD4(CCC_Integer, "ssfx_is_underground", &ps_ssfx_is_underground, 0, 1);
-    CMD4(CCC_Integer, "ssfx_gloss_method", &ps_ssfx_gloss_method, 0, 1);
-    CMD4(CCC_Vector3, "ssfx_gloss_minmax", &ps_ssfx_gloss_minmax, Fvector3().set(0, 0, 0), Fvector3().set(1.0, 1.0, 1.0));
-    CMD4(CCC_Float, "ssfx_gloss_factor", &ps_ssfx_gloss_factor, 0.0f, 1.0f);
-    CMD4(CCC_Vector4, "ssfx_lightsetup_1", &ps_ssfx_lightsetup_1, Fvector4().set(0, 0, 0, 0), Fvector4().set(1.0, 1.0, 1.0, 1.0));
-
-    tw_min.set(0, 0, 0);
-    tw_max.set(1, 1, 1);
-    CMD4(CCC_Vector3, "r__color_grading", &ps_r2_img_cg, tw_min, tw_max);
 }
 } // namespace xray::render::RENDER_NAMESPACE

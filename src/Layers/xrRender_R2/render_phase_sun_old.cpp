@@ -474,6 +474,7 @@ void render_sun_old::render_sun()
     }
 
     PIX_EVENT(SE_SUN_FAR);
+    RImplementation.Target->rt_smap_depth->set_slice_read(SE_SUN_FAR);
     RImplementation.Target->accum_direct(dsgraph.cmd_list, SE_SUN_FAR);
 
     // Restore XForms
@@ -699,6 +700,7 @@ void render_sun_old::render_sun_near()
     }
 
     PIX_EVENT(SE_SUN_NEAR);
+    RImplementation.Target->rt_smap_depth->set_slice_read(SE_SUN_NEAR);
     RImplementation.Target->accum_direct(dsgraph.cmd_list, SE_SUN_NEAR);
 
     // Restore XForms

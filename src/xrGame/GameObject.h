@@ -339,6 +339,10 @@ public:
         VERIFY(m_ai_location);
         return *m_ai_location;
     }
+    virtual bool is_spawned() const override
+    {
+        return m_spawned;
+    }
     virtual u32 spawn_time() const override
     {
         VERIFY(m_spawned);

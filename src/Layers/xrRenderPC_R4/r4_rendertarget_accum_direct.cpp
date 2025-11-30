@@ -75,10 +75,10 @@ void CRenderTarget::accum_direct(CBackend& cmd_list, u32 sub_phase)
 
     // Perform masking (only once - on the first/near phase)
     cmd_list.set_CullMode(CULL_NONE);
-    PIX_EVENT(SE_SUN_NEAR_sub_phase);
-    if (SE_SUN_NEAR == sub_phase) //.
-    // if( 0 )
+    if (SE_SUN_NEAR == sub_phase)
     {
+        PIX_EVENT_CTX(cmd_list, Masking);
+
         // Fill vertex buffer
         FVF::TL* pv = (FVF::TL*)RImplementation.Vertex.Lock(4, g_combine->vb_stride, Offset);
         pv->set(EPS, float(_h + EPS), d_Z, d_W, C, p0.x, p1.y);
@@ -152,7 +152,7 @@ void CRenderTarget::accum_direct(CBackend& cmd_list, u32 sub_phase)
     if (RImplementation.o.nvstencil && (SE_SUN_NEAR == sub_phase))
         u_stencil_optimize(cmd_list); //. driver bug?
 
-    PIX_EVENT(Perform_lighting);
+    PIX_EVENT_CTX(cmd_list, Perform_lighting);
 
     // Perform lighting
     {
@@ -389,10 +389,10 @@ void CRenderTarget::accum_direct_cascade(CBackend& cmd_list, u32 sub_phase, Fmat
 
     // Perform masking (only once - on the first/near phase)
     cmd_list.set_CullMode(CULL_NONE);
-    PIX_EVENT_CTX(cmd_list, SE_SUN_NEAR_sub_phase);
-    if (SE_SUN_NEAR == sub_phase) //.
-    // if( 0 )
+    if (SE_SUN_NEAR == sub_phase)
     {
+        PIX_EVENT_CTX(cmd_list, Masking);
+
         // Fill vertex buffer
         FVF::TL* pv = (FVF::TL*)RImplementation.Vertex.Lock(4, g_combine->vb_stride, Offset);
         pv->set(EPS, float(_h + EPS), d_Z, d_W, C, p0.x, p1.y);
@@ -850,7 +850,7 @@ void CRenderTarget::accum_direct_blend(CBackend& cmd_list)
 
 void CRenderTarget::accum_direct_f(CBackend& cmd_list, u32 sub_phase)
 {
-    PIX_EVENT(accum_direct_f);
+    PIX_EVENT_CTX(cmd_list, accum_direct_f);
     // Select target
     if (SE_SUN_LUMINANCE == sub_phase)
     {
@@ -1076,7 +1076,7 @@ void CRenderTarget::accum_direct_f(CBackend& cmd_list, u32 sub_phase)
 
 void CRenderTarget::accum_direct_lum(CBackend& cmd_list)
 {
-    PIX_EVENT(accum_direct_lum);
+    PIX_EVENT_CTX(cmd_list, accum_direct_lum);
     //	TODO: DX11: Remove half pixel offset
     // Select target
     phase_accumulator(cmd_list);
@@ -1219,7 +1219,7 @@ void CRenderTarget::accum_direct_lum(CBackend& cmd_list)
 void CRenderTarget::accum_direct_volumetric(CBackend& cmd_list, u32 sub_phase,
     const u32 Offset, const Fmatrix& mShadow, float zMin, float zMax)
 {
-    PIX_EVENT(accum_direct_volumetric);
+    PIX_EVENT_CTX(cmd_list, accum_direct_volumetric);
 
     if (!need_to_render_sunshafts())
         return;

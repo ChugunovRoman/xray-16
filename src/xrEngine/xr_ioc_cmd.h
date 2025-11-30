@@ -30,44 +30,6 @@
 
 extern ENGINE_API bool renderer_allow_override; // allows to change renderer setting
 
-// Anomaly
-extern ENGINE_API float ps_r2_img_exposure;
-extern ENGINE_API float ps_r2_img_gamma;
-extern ENGINE_API float ps_r2_img_saturation;
-extern ENGINE_API Fvector ps_r2_img_cg;
-
-extern ENGINE_API Fvector4 ps_r2_mask_control;
-extern ENGINE_API Fvector ps_r2_drops_control;
-extern ENGINE_API int ps_r2_nightvision;
-
-extern ENGINE_API Fvector4 ps_dev_param_1;
-extern ENGINE_API Fvector4 ps_dev_param_2;
-extern ENGINE_API Fvector4 ps_dev_param_3;
-extern ENGINE_API Fvector4 ps_dev_param_4;
-extern ENGINE_API Fvector4 ps_dev_param_5;
-extern ENGINE_API Fvector4 ps_dev_param_6;
-extern ENGINE_API Fvector4 ps_dev_param_7;
-extern ENGINE_API Fvector4 ps_dev_param_8;
-
-// Ascii's Shaders
-extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1;
-extern ENGINE_API Fvector4 ps_ssfx_hud_drops_2;
-extern ENGINE_API Fvector4 ps_ssfx_hud_drops_1_cfg;
-extern ENGINE_API Fvector4 ps_ssfx_hud_drops_2_cfg;
-extern ENGINE_API Fvector4 ps_ssfx_blood_decals;
-extern ENGINE_API Fvector4 ps_ssfx_rain_1;
-extern ENGINE_API Fvector4 ps_ssfx_rain_2;
-extern ENGINE_API Fvector4 ps_ssfx_rain_3;
-extern ENGINE_API Fvector4 ps_ssfx_grass_shadows;
-extern ENGINE_API Fvector3 ps_ssfx_shadow_cascades;
-extern ENGINE_API Fvector4 ps_ssfx_grass_interactive;
-extern ENGINE_API Fvector4 ps_ssfx_int_grass_params_1;
-extern ENGINE_API Fvector4 ps_ssfx_int_grass_params_2;
-
-extern ENGINE_API float ps_r3_dyn_wet_surf_near; // 10.0f
-extern ENGINE_API float ps_r3_dyn_wet_surf_far; // 30.0f
-extern ENGINE_API int ps_r3_dyn_wet_surf_sm_res; // 256
-
 class ENGINE_API IConsole_Command
 {
 public:

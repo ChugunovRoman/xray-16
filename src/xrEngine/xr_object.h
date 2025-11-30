@@ -335,6 +335,7 @@ public:
     virtual int clsid() const = 0;
     virtual CInifile* spawn_ini() = 0;
     virtual CAI_ObjectLocation& ai_location() const = 0;
+    virtual bool is_spawned() const = 0;
     virtual u32 spawn_time() const = 0;
     virtual const ALife::_STORY_ID& story_id() const = 0;
     virtual u32 ef_creature_type() const = 0;

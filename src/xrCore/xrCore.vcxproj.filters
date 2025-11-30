@@ -121,6 +121,9 @@
     <Filter Include="Profiler">
       <UniqueIdentifier>{ea7e41e5-3ae4-44a3-8b2a-21337befa3c0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Debug core\StackTrace">
+      <UniqueIdentifier>{5c4e63d2-d5e9-4e42-8ae2-f8316acdd000}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="FTimer.cpp">
@@ -258,9 +261,6 @@
     <ClCompile Include="xrDebug.cpp">
       <Filter>Debug core</Filter>
     </ClCompile>
-    <ClCompile Include="Debug\MiniDump.cpp">
-      <Filter>Debug core</Filter>
-    </ClCompile>
     <ClCompile Include="XML\tinystr.cpp">
       <Filter>XML\TinyXML</Filter>
     </ClCompile>
@@ -338,6 +338,9 @@
     </ClCompile>
     <ClCompile Include="..\..\Externals\tracy\public\TracyClient.cpp">
       <Filter>Profiler</Filter>
+    </ClCompile>
+    <ClCompile Include="Debug\StackTrace.cpp">
+      <Filter>Debug core\StackTrace</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -617,9 +620,6 @@
     <ClInclude Include="Math\Random32.hpp">
       <Filter>Math\RNG</Filter>
     </ClInclude>
-    <ClInclude Include="Debug\MiniDump.h">
-      <Filter>Debug core</Filter>
-    </ClInclude>
     <ClInclude Include="..\Common\Noncopyable.hpp">
       <Filter>Common</Filter>
     </ClInclude>
@@ -721,6 +721,9 @@
     </ClInclude>
     <ClInclude Include="Math\fast_lc16.hpp">
       <Filter>Math\RNG</Filter>
+    </ClInclude>
+    <ClInclude Include="Debug\StackTrace.h">
+      <Filter>Debug core\StackTrace</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

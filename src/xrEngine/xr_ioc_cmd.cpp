@@ -556,68 +556,6 @@ virtual void Save (IWriter *F) {};
 
 ENGINE_API bool renderer_allow_override = false;
 
-// Anomaly
-ENGINE_API float ps_r2_img_exposure = 1.0f; // r2-only
-ENGINE_API float ps_r2_img_gamma = 1.0f; // r2-only
-ENGINE_API float ps_r2_img_saturation = 1.0f; // r2-only
-ENGINE_API Fvector ps_r2_img_cg = { .0f, .0f, .0f }; // r2-only
-ENGINE_API Fvector4 ps_r2_mask_control = { .0f, .0f, .0f, .0f }; // r2-only, condition, vignette?, visor reflection, null?
-ENGINE_API Fvector ps_r2_drops_control = { .0f, 1.15f, .0f }; // r2-only, power, null, speed
-ENGINE_API int ps_r2_nightvision = 0; // beef's nvg enable
-
-ENGINE_API Fvector4 ps_dev_param_1 = { .0f, .0f, .0f, .0f };
-ENGINE_API Fvector4 ps_dev_param_2 = { .0f, .0f, .0f, .0f };
-ENGINE_API Fvector4 ps_dev_param_3 = { .0f, .0f, .0f, .0f };
-ENGINE_API Fvector4 ps_dev_param_4 = { .0f, .0f, .0f, .0f };
-ENGINE_API Fvector4 ps_dev_param_5 = { .0f, .0f, .0f, .0f };
-ENGINE_API Fvector4 ps_dev_param_6 = { .0f, .0f, .0f, .0f };
-// beef's nvg
-// x = generation (1.0-3.0) . num_tubes (0.10, 0.20, 0.40, 0.11, 0.12)
-// y = gain_adjust (0.1-3.0) . washout_threshold (0.0 - 0.9)
-// z = vignette power (0.0-1.0) . glitch power (0-0.9)
-// w = gain offset (0.5-3.0) . mode (0.0-1.0)
-// TODO: put into it's own var, keep dev params for dev work
-ENGINE_API Fvector4 ps_dev_param_7 = { .0f, .0f, .0f, .0f };
-// beef's nvg
-// x = flipdown amount (1.0-100.0) . unused
-// y = unused . nvg_radius (0.0, 0.9)
-// z = unused
-// w = unused
-// TODO: put into it's own var, keep dev params for dev work
-ENGINE_API Fvector4 ps_dev_param_8 = { .0f, .0f, .0f, .0f };
-
-// Ascii1457's Screen Space Shaders
-ENGINE_API Fvector4 ps_ssfx_hud_drops_1 = { 1.0f, 1.0f, 30.f, .05f }; // Anim Speed, Int, Reflection, Refraction
-ENGINE_API Fvector4 ps_ssfx_hud_drops_2 = { .0225f, 1.f, 0.0f, 2.0f }; // Density, Size, Extra Gloss, Gloss
-ENGINE_API Fvector4 ps_ssfx_hud_drops_1_cfg = { 3.0f, 1.f, 1.f, 50.f }; // Quantity of drops, Refrelction intensity, Refraction intensity, Speed of the drops animation
-ENGINE_API Fvector4 ps_ssfx_hud_drops_2_cfg = { 50.f, 50.f, 0.75f, 2.f }; // Drops build up speed, Drying speed, Size of the drops, Raindrops gloss intensity
-ENGINE_API Fvector4 ps_ssfx_blood_decals = { 0.6f, 0.6f, 0.f, 0.f };
-ENGINE_API Fvector4 ps_ssfx_rain_1 = { 2.0f, 0.1f, 0.6f, 2.f }; // Len, Width, Speed, Quality
-ENGINE_API Fvector4 ps_ssfx_rain_2 = { 0.7f, 0.1f, 1.0f, 0.5f }; // Alpha, Brigthness, Refraction, Reflection
-ENGINE_API Fvector4 ps_ssfx_rain_3 = { 0.01f, 1.0f, 0.0f, 0.0f }; // Alpha, Refraction ( Splashes ) - Yohji: Alpha was edited (0.5->0.01f) due to a bug with transparency and other particles.
-ENGINE_API Fvector3 ps_ssfx_shadow_cascades = { 20.f, 40.f, 160.f };
-ENGINE_API Fvector4 ps_ssfx_grass_shadows = { .0f, .35f, 30.0f, .0f };
-ENGINE_API Fvector4 ps_ssfx_grass_interactive = { 1.0f, 8.f, 2000.0f, 1.0f };
-ENGINE_API Fvector4 ps_ssfx_int_grass_params_1 = { 1.0f, 1.0f, 1.0f, 25.0f };
-ENGINE_API Fvector4 ps_ssfx_int_grass_params_2 = { 1.0f, 5.0f, 1.0f, 1.0f };
-ENGINE_API Fvector4 ps_ssfx_wpn_dof_1 = { .0f, .0f, .0f, .0f };
-ENGINE_API Fvector4 ps_ssfx_wpn_dof_2 = { 0.15f, .0f, .0f, .0f };
-ENGINE_API Fvector4 ps_ssfx_florafixes_1 = { 0.3f, 0.21f, 0.3f, 0.21f }; // Flora fixes 1
-ENGINE_API Fvector4 ps_ssfx_florafixes_2 = { 2.0f, 1.0f, 0.0f, 0.0f }; // Flora fixes 2
-ENGINE_API Fvector4 ps_ssfx_wetsurfaces_1 = { 1.0f, 1.0f, 1.0f, 1.0f }; // Wet surfaces 1
-ENGINE_API Fvector4 ps_ssfx_wetsurfaces_2 = { 1.0f, 1.0f, 1.0f, 1.0f }; // Wet surfaces 2
-ENGINE_API int ps_ssfx_is_underground = 0;
-ENGINE_API int ps_ssfx_gloss_method = 0;
-ENGINE_API float ps_ssfx_gloss_factor = 0.5f;
-ENGINE_API Fvector3 ps_ssfx_gloss_minmax = { 0.0f,0.92f,0.0f }; // Gloss
-ENGINE_API Fvector4 ps_ssfx_lightsetup_1 = { 0.35f, 0.5f, 0.0f, 0.0f }; // Spec intensity
-
-ENGINE_API float ps_r3_dyn_wet_surf_near = 5.f; // 10.0f
-ENGINE_API float ps_r3_dyn_wet_surf_far = 20.f; // 30.0f
-ENGINE_API int ps_r3_dyn_wet_surf_sm_res = 256; // 256
-
-int ps_disable_lens_flare = 1;
-
 class CCC_renderer : public CCC_Token
 {
     typedef CCC_Token inherited;
@@ -776,8 +714,6 @@ extern int g_ErrorLineCount;
 ENGINE_API int ps_r__Supersample = 1;
 ENGINE_API int ps_r__WallmarksOnSkeleton = 0;
 ENGINE_API shared_str current_player_hud_sect{};
-
-Fvector3 ssfx_wetness_multiplier = { 1.0f, 0.3f, 0.0f };
 
 extern int ps_fps_limit;
 extern int ps_fps_limit_in_menu;
@@ -945,7 +881,6 @@ void CCC_Register()
     CMD4(CCC_Integer, "debug_show_red_text", &g_bShowRedText, 0, 1);
 #endif
 
-    CMD4(CCC_Vector3, "ssfx_wetness_multiplier", &ssfx_wetness_multiplier, Fvector3({ 0.1f, 0.1f, 0.0f} ), Fvector3({ 20.0f, 20.0f, 0.0f }));
-
+    extern int ps_disable_lens_flare;
     CMD4(CCC_Integer, "disable_lens_flare", &ps_disable_lens_flare, 0, 1);
 };

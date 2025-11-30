@@ -264,9 +264,6 @@ public:
         u32 support_rt_arrays : 1;
 
         float forcegloss_v;
-
-        // Yohji - New shader support
-        u32 new_shader_support : 1;
     } o;
 
     struct RenderR2Statistics
@@ -338,6 +335,8 @@ public:
 
     bool m_bFirstFrameAfterReset{}; // Determines weather the frame is the first after resetting device.
 
+    bool m_fast_geom_loaded{};
+
 private:
     // Loading / Unloading
     void LoadBuffers(CStreamReader* fs, bool alternative);
@@ -398,10 +397,7 @@ public:
 #if defined(USE_DX11)
     BackendAPI GetBackendAPI() const override { return IRender::BackendAPI::D3D11; }
     u32 get_dx_level() override { return HW.FeatureLevel >= D3D_FEATURE_LEVEL_10_1 ? 0x000A0001 : 0x000A0000; }
-    pcstr getShaderPath() override
-    {
-        return o.new_shader_support ? "r5\\" : "r3\\";
-    }
+    pcstr getShaderPath() override { return "r3\\"; }
 #elif defined(USE_OGL)
     BackendAPI GetBackendAPI() const override { return IRender::BackendAPI::OpenGL; }
     u32 get_dx_level() override { return /*HW.pDevice1?0x000A0001:*/0x000A0000; }
@@ -410,8 +406,13 @@ public:
 #   error No graphics API selected or enabled!
 #endif
 
+    [[nodiscard]]
+    bool IsFastGeomSupported() const
+    {
+        return m_fast_geom_loaded;
+    }
+
     // Loading / Unloading
-    void OnDeviceCreate(pcstr shName) override;
     void create() override;
     void destroy() override;
     void reset_begin() override;

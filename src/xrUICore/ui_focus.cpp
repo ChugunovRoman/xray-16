@@ -351,7 +351,8 @@ void CUIFocusSystem::DrawDebugInfo(const CUIWindow& from, const CUIWindow& to, u
     draw_list->AddCircleFilled((ImVec2&)toPos, radius, clr.get_windows());
 
     clr = textColor;
-    toPos.sub((Fvector2&)(text_size /= 2));
+    text_size /= 2;
+    toPos.sub((Fvector2&)text_size);
     draw_list->AddText((ImVec2&)toPos, clr.get_windows(), text);
 #endif
 }

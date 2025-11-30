@@ -39,7 +39,6 @@ for %%b in (%xbin%) do (
   if not exist %%b\dedicated (
     mkdir %%b\dedicated
   )
-  %cp_tool% bin\dbghelp.dll %%b\dbghelp.dll
   %cp_tool% bin\eax.dll %%b\eax.dll
   %cp_tool% bin\wrap_oal.dll %%b\wrap_oal.dll
   %cp_tool% bin\eax.dll %%b\dedicated\eax.dll

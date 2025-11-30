@@ -49,6 +49,7 @@
   <ItemDefinitionGroup Condition="!$(Configuration.Contains('Master Gold'))">
     <ClCompile>
       <PreprocessorDefinitions>
+        XRAY_EXCEPTIONS=1;
         LUABIND_DYNAMIC_LINK;
         %(PreprocessorDefinitions)
       </PreprocessorDefinitions>
@@ -130,6 +131,7 @@
       <ExceptionHandling>false</ExceptionHandling>
       <PreprocessorDefinitions>
         XRAY_STATIC_BUILD;
+        XRAY_EXCEPTIONS=0;
         MASTER_GOLD;
         _HAS_EXCEPTIONS=0;
         LUABIND_NO_EXCEPTIONS;

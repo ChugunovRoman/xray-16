@@ -450,22 +450,12 @@ bool CUIActorMenu::OnKeyboardAction(int dik, EUIMessages keyboard_action)
         return true;
     }
 
-    if (IsBinded(kUSE, dik) || IsBinded(kINVENTORY, dik))
+    if (IsBinded(kQUIT, dik) || IsBinded(kINVENTORY, dik) ||
+        IsBinded(kUI_BACK, dik, EKeyContext::UI))
     {
         if (WINDOW_KEY_PRESSED == keyboard_action)
         {
-            g_btnHint->Discard();
-            HideDialog();
-        }
-        return true;
-    }
-
-    if (IsBinded(kQUIT, dik) || IsBinded(kUI_BACK, dik, EKeyContext::UI))
-    {
-        if (WINDOW_KEY_PRESSED == keyboard_action)
-        {
-            g_btnHint->Discard();
-            HideDialog();
+            OnBtnExitClicked(this, nullptr);
         }
         return true;
     }

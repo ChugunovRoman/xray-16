@@ -237,12 +237,6 @@ void CRenderTarget::phase_combine()
         }
     }
 
-    //Copy previous rt
-    if (!RImplementation.o.msaa)
-        HW.get_context(CHW::IMM_CTX_ID)->CopyResource(rt_Generic_temp->pTexture->surface_get(), rt_Generic_0->pTexture->surface_get());
-    else
-        HW.get_context(CHW::IMM_CTX_ID)->CopyResource(rt_Generic_temp->pTexture->surface_get(), rt_Generic_0_r->pTexture->surface_get());
-
     // Forward rendering
     {
         PIX_EVENT(Forward_rendering);
@@ -297,26 +291,6 @@ void CRenderTarget::phase_combine()
     }
 
     RCache.set_Stencil(FALSE);
-
-    if (RImplementation.o.new_shader_support)
-    {
-        //(Anomaly) Compute blur textures
-        phase_blur();
-
-        //(Anomaly) Compute depth of field effect
-        if (ps_r2_ls_flags.test(R2FLAG_DOF))
-            phase_dof();
-
-        //(Anomaly) Compute night vision effect
-        if (ps_r2_nightvision > 0)
-            phase_nightvision();
-
-        if (ps_r2_mask_control.x > 0)
-        {
-            phase_gasmask_dudv();
-            phase_gasmask_drops();
-        }
-    }
 
     // PP enabled ?
     //	Render to RT texture to be able to copy RT even in windowed mode.
