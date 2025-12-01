@@ -28,6 +28,7 @@
 #include "eatable_item.h"
 #include "xrUICore/ProgressBar/UIProgressBar.h"
 #include "xrUICore/Cursor/UICursor.h"
+#include "xrUICore/ui_base.h"
 #include "UICellItem.h"
 #include "UICharacterInfo.h"
 #include "UIItemInfo.h"
@@ -225,15 +226,23 @@ void CUIActorMenu::SetInvGridSize(CUIDragDropListEx* dragdrop_inv)
 {
     string32 section;
     xr_sprintf(section, "inventory_size_%d", g_inv_inv_cell_size);
+    const bool is_16x9 = UICore::is_widescreen();
+    string64 _prefix;
+    xr_sprintf(_prefix, "%s", is_16x9 ? "_16x9" : "");
+    string128 val_name;
 
     if (pSettings->section_exist(section))
     {
         Ivector2 w_cell_sz, w_cells;
 
-        w_cell_sz.x = pSettings->r_u16(section, "cell_width");
-        w_cell_sz.y = pSettings->r_u16(section, "cell_height");
-        w_cells.y = pSettings->r_u16(section, "rows_num");
-        w_cells.x = pSettings->r_u16(section, "cols_num");
+        strconcat(val_name, "cell_width", _prefix);
+        w_cell_sz.x = pSettings->r_u16(section, val_name);
+        strconcat(val_name, "cell_height", _prefix);
+        w_cell_sz.y = pSettings->r_u16(section, val_name);
+        strconcat(val_name, "rows_num", _prefix);
+        w_cells.y = pSettings->r_u16(section, val_name);
+        strconcat(val_name, "cols_num", _prefix);
+        w_cells.x = pSettings->r_u16(section, val_name);
 
         Ivector2 current_capacity = dragdrop_inv->CellsCapacity();
         w_cells.y = current_capacity.y;
