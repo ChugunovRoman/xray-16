@@ -35,7 +35,10 @@ void CUIDragDropListEx::script_register(lua_State* luaState)
                     if (luabind::type(value) != LUA_TSTRING)
                         continue;
 
-                    strings.push_back(luabind::object_cast<pcstr>(value));
+                    pcstr section_name = luabind::object_cast<pcstr>(value);
+
+                    if (pSettings->section_exist(section_name))
+                        strings.push_back(section_name);
                 }
 
                 xr_parallel_for(TaskRange<u32>(0, strings.size()), [&](const TaskRange<u32>& range)
