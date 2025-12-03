@@ -1342,7 +1342,9 @@ void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, cons
         result3.mul(hud_laser_dot_transform, ancor_m);
         result3.mulB_43(offset);
 
-        if (!bone_transform.c.similar(tmp.c))
+        hud_aim_offset_update_interval += 1;
+
+        if (!bone_transform.c.similar(tmp.c) || hud_aim_offset_update_interval == 10)
         {
             tmp = bone_transform;
             CWeapon* wpn = smart_cast<CWeapon*>(item->m_parent_hud_item);

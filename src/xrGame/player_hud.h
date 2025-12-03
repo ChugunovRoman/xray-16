@@ -203,6 +203,8 @@ private:
     Fmatrix m_second_transform{ Fidentity };
     attachable_hud_item* m_attached_item = NULL;
     xr_unordered_map<shared_str, attachable_hud_item*> m_pool;
+
+    mutable u16 hud_aim_offset_update_interval = 0;
 };
 
 extern player_hud* g_player_hud[2]; // 0 - right hand | 1 - left hand 
