@@ -271,7 +271,7 @@ void CInventoryItem::pre_install_upgrade()
     CWeapon* weapon = smart_cast<CWeapon*>(this);
     if (weapon)
     {
-        if (weapon->ScopeAttachable() && weapon->IsScopeAttached())
+        if (!weapon->bUseAttachmentSystem && weapon->ScopeAttachable() && weapon->IsScopeAttached())
             weapon->Detach(weapon->GetScopeName().c_str(), true);
         if (weapon->SilencerAttachable() && weapon->IsSilencerAttached())
             weapon->Detach(weapon->GetSilencerName().c_str(), true);
