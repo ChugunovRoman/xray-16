@@ -260,7 +260,7 @@ XRCORE_API bool _parse(pstr dest, pcstr src)
     {
         while (*src)
         {
-            if (isspace((u8)*src))
+            if (iswspace((int)*src))
             {
                 if (bInsideSTR)
                 {
@@ -268,7 +268,7 @@ XRCORE_API bool _parse(pstr dest, pcstr src)
                     continue;
                 }
 
-                while (*src && isspace(*src))
+                while (*src && iswspace(*src))
                     ++src;
 
                 continue;

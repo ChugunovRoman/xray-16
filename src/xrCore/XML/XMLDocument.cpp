@@ -22,10 +22,8 @@ enum class ParseIncludeResult
 ParseIncludeResult ParseInclude(pstr string, pcstr& out_include_name)
 {
     // Skip any whitespace characters
-    while (*string != '\0' && std::isblank(*string))
-    {
+    while (*string != '\0' && std::isblank(static_cast<unsigned char>(*string)))
         ++string;
-    }
 
     // Check for #include
     static constexpr pcstr IncludeTag = "#include";
@@ -35,7 +33,7 @@ ParseIncludeResult ParseInclude(pstr string, pcstr& out_include_name)
     string += 8;
 
     // Skip any whitespace characters
-    while (*string != '\0' && std::isblank(*string))
+    while (*string != '\0' && std::isblank(static_cast<unsigned char>(*string)))
         ++string;
 
     // Check that after the tag there is a quote

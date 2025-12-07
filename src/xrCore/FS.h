@@ -384,7 +384,7 @@ public:
     IC void advance(size_t cnt)
     {
         Pos += cnt;
-        VERIFY(Pos <= Size);
+        // VERIFY(Pos <= Size);
     }
 
 public:

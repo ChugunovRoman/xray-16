@@ -189,6 +189,9 @@ void CUIFocusSystem::Update(const CUIWindow* root)
         temp.push_back(*it);
         it = m_valuable.erase(it);
 
+        if (it == m_valuable.end())
+            break;
+
         if (*it == m_current_focused)
             m_current_focused = nullptr;
     }
@@ -199,6 +202,8 @@ void CUIFocusSystem::Update(const CUIWindow* root)
             continue;
         m_valuable.emplace_back(*it);
         it = m_non_valuable.erase(it);
+        if (it == m_non_valuable.end())
+            break;
     }
 
     for (const auto window : temp)

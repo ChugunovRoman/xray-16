@@ -64,6 +64,9 @@ CUIDragDropListEx::~CUIDragDropListEx()
 {
     DestroyDragItem();
 
+    if (m_container)
+        m_container->ClearAll(true);
+
     delete_data(m_container);
 }
 

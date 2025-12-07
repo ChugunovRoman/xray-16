@@ -273,9 +273,9 @@ float CSoundRender_Scene::get_occlusion_to(const Fvector& hear_pt, const Fvector
 
         geom_DB.ray_query(CDB::OPT_CULL, geom_SOM, hear_pt, dir, range);
         const auto r_cnt = geom_DB.r_count();
-        CDB::RESULT* begin = geom_DB.r_begin();
         if (0 != r_cnt)
         {
+            CDB::RESULT* begin = geom_DB.r_begin();
             for (size_t k = 0; k < r_cnt; k++)
             {
                 CDB::RESULT* R = begin + k;
@@ -334,9 +334,9 @@ float CSoundRender_Scene::get_occlusion(const Fvector& P, float R, Fvector* occ)
     {
         geom_DB.ray_query(CDB::OPT_CULL, geom_SOM, base, dir, range);
         const auto r_cnt = geom_DB.r_count();
-        CDB::RESULT* begin = geom_DB.r_begin();
         if (0 != r_cnt)
         {
+            CDB::RESULT* begin = geom_DB.r_begin();
             for (size_t k = 0; k < r_cnt; k++)
             {
                 CDB::RESULT* R2 = begin + k;
