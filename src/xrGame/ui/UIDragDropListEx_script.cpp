@@ -36,8 +36,20 @@ void CUIDragDropListEx::script_register(lua_State* luaState)
                         continue;
 
                     pcstr section_name = luabind::object_cast<pcstr>(value);
+                    shared_str m_section_id;
 
-                    if (pSettings->section_exist(section_name))
+                    if (strstr(section_name, "|"))
+                    {
+                        int len = (int)strcspn(section_name, "|");
+                        char* result = new char[len + 1];
+                        strncpy(result, section_name, len);
+                        result[len] = '\0';
+                        m_section_id = result;
+                    }
+                    else
+                        m_section_id = section_name;
+
+                    if (pSettings->section_exist(m_section_id.c_str()))
                         strings.push_back(section_name);
                 }
 
