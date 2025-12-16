@@ -255,6 +255,16 @@ void CSpecificCharacter::load_shared(LPCSTR)
     if (pSettingsFE->section_exist(team) && pSettingsFE->line_exist(team, "names"))
         data()->m_sGameName = pSettingsFE->r_string(team, "names");
 
+    if (data()->m_is_leader && pSettingsFE->section_exist(team) && pSettingsFE->line_exist(team, "name_leader"))
+    {
+        xr_string name = pSettingsFE->r_string(team, "name_leader");
+        xr_string::size_type pos = name.find("_");
+        xr_string mutable_str(name);
+        if (pos != xr_string::npos)
+            std::replace(mutable_str.begin(), mutable_str.end(), '_', ' ');
+        data()->m_sGameName = mutable_str;
+    }
+
     if (pSettings->section_exist(data()->m_sVisual.c_str()))
     {
         if (pSettings->line_exist(data()->m_sVisual.c_str() , "icons"))
