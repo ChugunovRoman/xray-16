@@ -71,6 +71,8 @@ void CGameFont::Initialize(pcstr cShader, pcstr cTextureName)
     R_ASSERT2(FS.exist(fn, "$game_textures$", buf, ".ini"), fn);
     CInifile* ini = CInifile::Create(fn);
 
+    Msg("CGameFont::Initialize, ini path=[%s] cShader=[%s] cTextureName=[%s]", fn, cShader, cTextureName);
+
     nNumChars = 0x100;
     TCMap = (Fvector*)xr_realloc((void*)TCMap, nNumChars * sizeof(Fvector));
 
