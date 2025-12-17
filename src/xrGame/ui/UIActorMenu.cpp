@@ -493,7 +493,7 @@ void CUIActorMenu::QuickUnloadWeapons()
 
         m_wpn->SpawnAmmo(count, _ammoItem, m_pActorInvOwner->cast_game_object()->ID());
 
-        if (g_quick_unload_scopes && m_wpn->ScopeAttachable() && m_wpn->IsScopeAttached())
+        if (!m_wpn->bUseAttachmentSystem && g_quick_unload_scopes && m_wpn->ScopeAttachable() && m_wpn->IsScopeAttached())
             DetachAddon(m_wpn->GetScopeName().c_str(), item);
 
         if (g_quick_unload_gl && m_wpn->GrenadeLauncherAttachable() && m_wpn->IsGrenadeLauncherAttached())
@@ -504,7 +504,7 @@ void CUIActorMenu::QuickUnloadWeapons()
 
         if (m_wpn->bUseAttachmentSystem && m_wpn->m_addon_items.size() > 0)
             for (auto [addon_id, addon]: m_wpn->m_addon_items)
-                if (!pSettings->line_exist(*m_wpn->m_section_id, *addon->slot))
+                if (!pSettings->line_exist(*m_wpn->m_section_id, *addon->slot) && addon->parent_id == 0)
                     DetachAddon(addon_id, item);
 
         any_wpn_was_unloaded = true;
