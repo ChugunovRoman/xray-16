@@ -110,6 +110,7 @@ float g_second_aim_z_offset_coff = -0.09f;
 extern BOOL debug_show_second_wpn_model;
 extern BOOL debug_show_thrid_wpn_model;
 extern BOOL debug_show_attachments_slots;
+extern BOOL debug_ui_item_cell;
 
 ENGINE_API extern float g_console_sensitive;
 
@@ -2780,6 +2781,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "debug_show_second_wpn_model", &debug_show_second_wpn_model, 0, 1);
     CMD4(CCC_Integer, "debug_show_thrid_wpn_model", &debug_show_thrid_wpn_model, 0, 1);
     CMD4(CCC_Integer, "debug_show_attachments_slots", &debug_show_attachments_slots, 0, 1);
+    CMD4(CCC_Integer, "debug_ui_item_cell", &debug_ui_item_cell, 0, 1);
 
     CMD4(CCC_Integer, "g_sleep_time", &psActorSleepTime, 1, 24);
 

@@ -17,6 +17,7 @@ player_hud* g_player_hud[2]{}; // 0 - right hand | 1 - left hand
 BOOL debug_show_second_wpn_model = 0;
 BOOL debug_show_thrid_wpn_model = 0;
 BOOL debug_show_attachments_slots = 0;
+BOOL debug_ui_item_cell = 0;
 
 extern ENGINE_API shared_str current_player_hud_sect;
 

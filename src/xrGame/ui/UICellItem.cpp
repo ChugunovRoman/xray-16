@@ -18,6 +18,8 @@
 
 CUICellItem* CUICellItem::m_mouse_selected_item = NULL;
 
+extern BOOL debug_ui_item_cell;
+
 CUICellItem::CUICellItem()
     : CUIStatic("Cell Item")
 {
@@ -371,6 +373,8 @@ void CUICellItem::UpdateItemText()
 {
     string32 tempStr;
     pcstr finalText = nullptr;
+    if (debug_ui_item_cell)
+        Msg("CUICellItem::UpdateItemText 1 item: %s childs: %d", m_section_id.c_str(), ChildsCount());
     if (ChildsCount())
     {
         xr_sprintf(tempStr, "x%d", ChildsCount() + 1);
@@ -379,6 +383,8 @@ void CUICellItem::UpdateItemText()
 
     if (m_text)
     {
+        if (debug_ui_item_cell)
+            Msg("CUICellItem::UpdateItemText 2 item: %s childs: %d finalText: %s", m_section_id.c_str(), ChildsCount(), finalText);
         m_text->Show(nullptr != finalText);
         m_text->SetText(finalText);
     }

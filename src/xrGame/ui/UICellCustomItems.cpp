@@ -8,6 +8,8 @@
 #define INV_GRID_WIDTHF 64.0f
 #define INV_GRID_HEIGHTF 64.0f
 
+extern BOOL debug_ui_item_cell;
+
 namespace detail
 {
 static constexpr pcstr ICON_LAYER_FIELD = "icon_layer";
@@ -401,6 +403,9 @@ void CUIInventoryCellItem::UpdateItemText()
     string32 tempStr;
     pcstr finalText = nullptr;
 
+    if (debug_ui_item_cell)
+        Msg("CUIInventoryCellItem::UpdateItemText 1 data_is_string: %d item: %s childs: %d b_isAmmo: %d", data_is_string, m_section_id.c_str(), ChildsCount(), b_isAmmo);
+
     if (data_is_string)
     {
         if (b_isAmmo)
@@ -429,10 +434,14 @@ void CUIInventoryCellItem::UpdateItemText()
     {
         xr_sprintf(tempStr, "x%d", count);
         finalText = tempStr;
+        if (debug_ui_item_cell)
+            Msg("CUIInventoryCellItem::UpdateItemText 2 data_is_string: %d item: %s childs: %d finalText: %s", data_is_string, m_section_id.c_str(), ChildsCount(), finalText);
     }
 
     if (m_text)
     {
+        if (debug_ui_item_cell)
+            Msg("CUIInventoryCellItem::UpdateItemText 3 data_is_string: %d item: %s childs: %d finalText: %s", data_is_string, m_section_id.c_str(), ChildsCount(), finalText);
         m_text->Show(nullptr != finalText);
         m_text->SetText(finalText);
     }
