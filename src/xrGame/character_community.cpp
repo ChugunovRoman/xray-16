@@ -16,6 +16,8 @@ COMMUNITY_DATA::COMMUNITY_DATA(CHARACTER_COMMUNITY_INDEX idx, CHARACTER_COMMUNIT
 
 //////////////////////////////////////////////////////////////////////////
 CHARACTER_COMMUNITY::GOODWILL_TABLE CHARACTER_COMMUNITY::m_relation_table;
+// таблица отношений с значениями по умолчанию которые не меняются во время игры
+CHARACTER_COMMUNITY::GOODWILL_TABLE CHARACTER_COMMUNITY::m_default_relation_table;
 CHARACTER_COMMUNITY::SYMPATHY_TABLE CHARACTER_COMMUNITY::m_sympathy_table;
 
 //////////////////////////////////////////////////////////////////////////
@@ -30,6 +32,7 @@ void CHARACTER_COMMUNITY::InitIdToIndex()
     line_name = "communities";
 
     m_relation_table.set_table_params("communities_relations");
+    m_default_relation_table.set_table_params("communities_relations");
     m_sympathy_table.set_table_params("communities_sympathy", 1);
 }
 
@@ -40,6 +43,23 @@ CHARACTER_GOODWILL CHARACTER_COMMUNITY::relation(CHARACTER_COMMUNITY_INDEX from,
     VERIFY(to >= 0 && to < (int)m_relation_table.table().size());
 
     return m_relation_table.table()[from][to];
+}
+
+CHARACTER_GOODWILL CHARACTER_COMMUNITY::default_relation(CHARACTER_COMMUNITY_INDEX to) { return relation(m_current_index, to); }
+CHARACTER_GOODWILL CHARACTER_COMMUNITY::default_relation(CHARACTER_COMMUNITY_INDEX from, CHARACTER_COMMUNITY_INDEX to)
+{
+    VERIFY(from >= 0 && from < (int)m_default_relation_table.table().size());
+    VERIFY(to >= 0 && to < (int)m_default_relation_table.table().size());
+
+    return m_default_relation_table.table()[from][to];
+}
+void CHARACTER_COMMUNITY::reset_relations_to_default()
+{
+    for (int i = 0; i < m_default_relation_table.table().size(); i++) {
+        for (int j = 0; j < m_default_relation_table.table()[i].size(); j++) {
+            m_relation_table.table()[i][j] = m_default_relation_table.table()[i][j];
+        }
+    }
 }
 
 void CHARACTER_COMMUNITY::set_relation(

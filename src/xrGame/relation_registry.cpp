@@ -207,6 +207,16 @@ CHARACTER_GOODWILL RELATION_REGISTRY::GetCommunityRelation(
     return CHARACTER_COMMUNITY::relation(index1, index2);
 }
 
+CHARACTER_GOODWILL RELATION_REGISTRY::GetDefaultCommunityRelation(
+    CHARACTER_COMMUNITY_INDEX index1, CHARACTER_COMMUNITY_INDEX index2) const
+{
+    return CHARACTER_COMMUNITY::default_relation(index1, index2);
+}
+void RELATION_REGISTRY::ResetRelationsToDefault()
+{
+    CHARACTER_COMMUNITY::reset_relations_to_default();
+}
+
 CHARACTER_GOODWILL RELATION_REGISTRY::GetRankRelation(CHARACTER_RANK_VALUE rank1, CHARACTER_RANK_VALUE rank2) const
 {
     CHARACTER_RANK rank_from, rank_to;

@@ -554,6 +554,20 @@ int g_get_community_relation(LPCSTR comm_from, LPCSTR comm_to)
     return RELATION_REGISTRY().GetCommunityRelation(community_from.index(), community_to.index());
 }
 
+int g_get_default_community_relation(LPCSTR comm_from, LPCSTR comm_to)
+{
+    CHARACTER_COMMUNITY community_from;
+    community_from.set(comm_from);
+    CHARACTER_COMMUNITY community_to;
+    community_to.set(comm_to);
+
+    return RELATION_REGISTRY().GetDefaultCommunityRelation(community_from.index(), community_to.index());
+}
+void g_reset_relations_to_default()
+{
+    return RELATION_REGISTRY().ResetRelationsToDefault();
+}
+
 void g_set_community_relation(LPCSTR comm_from, LPCSTR comm_to, int value)
 {
     CHARACTER_COMMUNITY community_from;
@@ -935,6 +949,9 @@ void CLevel::script_register(lua_State* luaState)
         def("community_goodwill", &g_community_goodwill),
         def("set_community_goodwill", &g_set_community_goodwill),
         def("change_community_goodwill", &g_change_community_goodwill),
+
+        def("community_default_relation", &g_get_default_community_relation),
+        def("reset_relations_to_default", &g_reset_relations_to_default),
 
         def("community_relation", &g_get_community_relation),
         def("set_community_relation", &g_set_community_relation),

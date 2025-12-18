@@ -55,7 +55,9 @@ struct RELATION_REGISTRY
 
     void ClearRelations(u16 person_id);
 
+    void ResetRelationsToDefault();
     CHARACTER_GOODWILL GetCommunityRelation(CHARACTER_COMMUNITY_INDEX, CHARACTER_COMMUNITY_INDEX) const;
+    CHARACTER_GOODWILL GetDefaultCommunityRelation(CHARACTER_COMMUNITY_INDEX, CHARACTER_COMMUNITY_INDEX) const;
     void SetCommunityRelation(
         CHARACTER_COMMUNITY_INDEX index1, CHARACTER_COMMUNITY_INDEX index2, CHARACTER_GOODWILL goodwill);
 
