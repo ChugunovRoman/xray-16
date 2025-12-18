@@ -1001,6 +1001,9 @@ u8 CWeaponMagazinedWGrenade::GetCurrentHudOffsetIdx()
 
 bool CWeaponMagazinedWGrenade::install_upgrade_ammo_class(LPCSTR section, bool test)
 {
+    if (bUseAttachmentSystem && HasAddonWithMagSize())
+        return false;
+
     LPCSTR str;
 
     bool result = process_if_exists(section, "ammo_mag_size", &CInifile::r_s32, iMagazineSize2, test);
