@@ -240,7 +240,12 @@ void CUIPdaWnd::Update()
         m_clock->SetText(GetGameTimeAsString(InventoryUtilities::etpTimeToMinutes).c_str());
 
     if (pUILogsWnd)
-        Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(pUILogsWnd, &CUILogsWnd::PerformWork));
+    {
+        if (GEnv.Render->GetBackendAPI() == IRender::BackendAPI::OpenGL)
+            pUILogsWnd->PerformWork();
+        else
+            Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(pUILogsWnd, &CUILogsWnd::PerformWork));
+    }
 }
 
 void CUIPdaWnd::SetActiveSubdialog(const shared_str& section)
