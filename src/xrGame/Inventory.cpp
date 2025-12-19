@@ -1215,16 +1215,16 @@ bool CInventory::Eat(PIItem pIItem)
 
     if (g_enhancend_anims && m_pOwner->object_id() == 0 && pSettings->line_exist(pIItem->m_section_id, "hud"))
     {
-        if (CCustomDetector* detector = smart_cast<CCustomDetector*>(Actor()->inventory().ItemFromSlot(DETECTOR_SLOT)))
-        {
-            if (detector->IsActive())
-            {
-                detector->HideDetector(CCustomDetector::eQuick);
-                CEatableItemObject* pItemToEatObj = smart_cast<CEatableItemObject*>(pIItem);
-                if (pItemToEatObj)
-                    pItemToEatObj->SetRestoreDetector(true);
-            }
-        }
+        // if (CCustomDetector* detector = smart_cast<CCustomDetector*>(Actor()->inventory().ItemFromSlot(DETECTOR_SLOT)))
+        // {
+        //     if (detector->IsActive())
+        //     {
+        //         detector->HideDetector(CCustomDetector::eQuick);
+        //         CEatableItemObject* pItemToEatObj = smart_cast<CEatableItemObject*>(pIItem);
+        //         if (pItemToEatObj)
+        //             pItemToEatObj->SetRestoreDetector(true);
+        //     }
+        // }
 
         CurrentGameUI()->GetActorMenu().HideDialog();
 
