@@ -242,8 +242,11 @@ CActor::~CActor()
     for (auto& camera : cameras)
         xr_delete(camera);
 
+    m_HeavyBreathSnd.stop();
     m_HeavyBreathSnd.destroy();
+    m_BloodSnd.stop();
     m_BloodSnd.destroy();
+    m_DangerSnd.stop();
     m_DangerSnd.destroy();
 
     xr_delete(m_pActorEffector);
