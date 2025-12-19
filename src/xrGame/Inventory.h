@@ -27,6 +27,15 @@ private:
     xr_set<shared_str> m_sections;
 }; // class priority_group
 
+class LatestAction
+{
+public:
+    LatestAction(u16 _cmd, u32 _flags): cmd(_cmd), flags(_flags) {}
+
+    u16 cmd;
+    u32 flags;
+}; // class LatestAction
+
 typedef xr_vector<CInventorySlot> TISlotArr;
 
 class CInventory
@@ -129,6 +138,9 @@ public:
     TIItemContainer m_all;
     TIItemContainer m_ruck, m_belt;
     TIItemContainer m_activ_last_items;
+
+private:
+    LatestAction* latest_action = nullptr;
 
 protected:
     TISlotArr m_slots;

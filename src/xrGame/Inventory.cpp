@@ -769,6 +769,26 @@ bool CInventory::Action(u16 cmd, u32 flags)
         }
     }
 
+    if (g_player_hud[1]->attached_item())
+    {
+        CCustomDetector* detector = smart_cast<CCustomDetector*>(g_player_hud[1]->attached_item()->m_parent_hud_item);
+        if (detector && !detector->IsActive()) {
+            switch (cmd)
+            {
+            case kWPN_1:
+            case kWPN_2:
+            case kWPN_3:
+            case kWPN_4:
+            case kWPN_5:
+            case kWPN_6:
+            {
+                latest_action = xr_new<LatestAction>(cmd, flags);
+                return false;
+            }
+            }
+        }
+    }
+
     if (ActiveItem() && ActiveItem()->Action(cmd, flags))
         return true;
     bool b_send_event = false;
@@ -907,6 +927,17 @@ void CInventory::Update()
             ActiveItem()->cast_hud_item()->IsHidden())
         {
             ActiveItem()->ActivateItem();
+        }
+
+        if (latest_action && g_player_hud[1]->attached_item())
+        {
+            CCustomDetector* detector = smart_cast<CCustomDetector*>(g_player_hud[1]->attached_item()->m_parent_hud_item);
+            if (detector && detector->IsActive()) {
+                u16 slot = u16(latest_action->cmd - kWPN_1 + 1);
+                ActiveWeapon(slot);
+
+                xr_delete(latest_action);
+            }
         }
     }
     UpdateDropTasks();
