@@ -270,7 +270,7 @@ void CUIComboBox::ShowList(bool bShow)
 
 void CUIComboBox::SetCapture(CUIWindow* pChildWindow, bool capture_status)
 {
-    if (m_eState == LIST_EXPANDED)
+    if (m_eState == LIST_EXPANDED && !capture_status)
         return;
 }
 
