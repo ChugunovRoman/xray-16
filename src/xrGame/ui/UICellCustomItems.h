@@ -1,6 +1,7 @@
 #pragma once
 #include "UICellItem.h"
 #include "Weapon.h"
+#include "../eatable_item.h"
 
 struct SIconLayer
 {
@@ -19,6 +20,7 @@ class CUIInventoryCellItem : public CUICellItem
 
 public:
     CUIInventoryCellItem(CInventoryItem* itm);
+    CUIInventoryCellItem(CInventoryItem* itm, bool needCondBar, bool needFIcon, bool needUgrIcon);
     CUIInventoryCellItem(shared_str section_id);
 
     virtual bool EqualTo(CUICellItem* itm);

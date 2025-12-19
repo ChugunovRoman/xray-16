@@ -86,32 +86,25 @@ bool is_item_in_list(CUIDragDropListEx* pList, PIItem item)
 
 void CUIActorMenu::FillPartnerInventoryContents()
 {
-    xr_vector<CUICellItem*> items;
+    m_pLists[eTradePartnerBagList]->ClearAll(true);
 
-    xr_parallel_for(TaskRange<u32>(0, items_trade_list.size()), [&](const TaskRange<u32>& range)
+    TIItemContainer items_list;
+    m_pPartnerInvOwner->inventory().AddAvailableItems(items_list, true);
+    std::sort(items_list.begin(), items_list.end(), InventoryUtilities::GreaterRoomInRuck);
+
+    SetInvGridSize(m_pLists[eTradePartnerList]);
+    SetInvGridSize(m_pLists[eTradePartnerBagList]);
+
+    for (PIItem item : items_list)
     {
-        xr_vector<CUICellItem*> tmp;
-
-        for (u32 i = range.begin(); i != range.end(); ++i)
+        if (!is_item_in_list(m_pLists[eTradePartnerList], item))
         {
-            PIItem itm = items_trade_list.at(i);
-            CUICellItem* cell_itm = create_cell_item(itm);
-
-            tmp.push_back(cell_itm);
+            CUICellItem* itm = create_cell_item(item);
+            m_pLists[eTradePartnerBagList]->SetItem(itm);
         }
-        
-        std::lock_guard<std::mutex> lock(push_items_trade_mtx);
-
-        items.insert(items.end(), tmp.begin(), tmp.end());
-
-        VERIFY(items.size());
-    });
-    std::sort(items.begin(), items.end(), InventoryUtilities::GreaterRoomInCells);
-
-    for (auto& item : items)
-        m_pLists[eTradePartnerBagList]->SetItem(item);
-
+    }
     m_trade_partner_inventory_state = m_pPartnerInvOwner->inventory().ModifyFrame();
+
     trade_list_is_filling = false;
 }
 void CUIActorMenu::InitPartnerInventoryContents()

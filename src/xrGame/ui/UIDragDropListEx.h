@@ -199,6 +199,7 @@ public:
     CUICellItem* GetItemIdx(u32 idx);
     virtual CUICellItem* RemoveItem(CUICellItem* itm, bool force_root);
     virtual CUICellItem* FindByKey(shared_str sect);
+    virtual CUICellItem* FindBySect(shared_str sect);
     virtual void IterItems(std::function<void(CUICellItem*)> functor);
     virtual void ResetAllSelected();
     void CreateDragItem(CUICellItem* itm);
@@ -281,6 +282,7 @@ protected:
     bool AddSimilar(CUICellItem* itm);
     CUICellItem* FindSimilar(CUICellItem* itm);
     CUICellItem* FindByKey(shared_str sect);
+    CUICellItem* FindBySect(shared_str sect);
     void IterItems(std::function<void(CUICellItem*)> functor);
     void ResetAllSelected();
 

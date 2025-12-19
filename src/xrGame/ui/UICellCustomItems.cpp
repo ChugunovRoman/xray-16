@@ -20,9 +20,11 @@ struct is_helper_pred
 }; // struct is_helper_pred
 } // namespace detail
 
-CUIInventoryCellItem::CUIInventoryCellItem(CInventoryItem* itm)
+CUIInventoryCellItem::CUIInventoryCellItem(CInventoryItem* itm) : CUIInventoryCellItem(itm, true, true, true) {}
+CUIInventoryCellItem::CUIInventoryCellItem(CInventoryItem* itm, bool needCondBar, bool needFIcon, bool needUgrIcon) : CUICellItem(needCondBar, needFIcon, needUgrIcon)
 {
     m_pData = (void*)itm;
+    m_section_id = itm->m_section_id;
 
     pcstr iconPath = itm->GetInvIconPath();
     inherited::SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(itm->m_section_id).c_str()));
@@ -451,7 +453,7 @@ void CUIInventoryCellItem::UpdateItemText()
     }
 }
 
-CUIAmmoCellItem::CUIAmmoCellItem(CWeaponAmmo* itm) : inherited(itm) {}
+CUIAmmoCellItem::CUIAmmoCellItem(CWeaponAmmo* itm) : inherited(itm, false, false, false) {}
 bool CUIAmmoCellItem::EqualTo(CUICellItem* itm)
 {
     if (!inherited::EqualTo(itm))
@@ -511,7 +513,7 @@ void CUIAmmoCellItem::UpdateItemText()
     }
 }
 
-CUIWeaponCellItem::CUIWeaponCellItem(CWeapon* itm) : inherited(itm)
+CUIWeaponCellItem::CUIWeaponCellItem(CWeapon* itm) : inherited(itm, true, false, true)
 {
     m_addons[eSilencer] = NULL;
     m_addons[eScope] = NULL;

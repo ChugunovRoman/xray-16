@@ -618,8 +618,11 @@ CUICellItem* CUIDragDropListEx::RemoveItem(CUICellItem* itm, bool force_root)
 
 CUICellItem* CUIDragDropListEx::FindByKey(shared_str sect)
 {
-    CUICellItem* i = m_container->FindByKey(sect);
-    return i;
+    return m_container->FindByKey(sect);
+}
+CUICellItem* CUIDragDropListEx::FindBySect(shared_str sect)
+{
+    return m_container->FindBySect(sect);
 }
 void CUIDragDropListEx::IterItems(std::function<void(CUICellItem*)> functor)
 {
@@ -739,6 +742,17 @@ CUICellItem* CUICellContainer::FindByKey(shared_str sect)
     {
         auto i = (CUICellItem*)it;
         if (i->data_is_string && xr_strcmp(i->m_section_attachs_id.c_str(), sect.c_str()) == 0)
+            return i;
+    }
+
+    return nullptr;
+}
+CUICellItem* CUICellContainer::FindBySect(shared_str sect)
+{
+    for (auto& it : m_ChildWndList)
+    {
+        auto i = (CUICellItem*)it;
+        if (xr_strcmp(i->m_section_id.c_str(), sect.c_str()) == 0)
             return i;
     }
 

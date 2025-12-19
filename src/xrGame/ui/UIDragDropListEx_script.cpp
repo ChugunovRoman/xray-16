@@ -53,24 +53,11 @@ void CUIDragDropListEx::script_register(lua_State* luaState)
                         strings.push_back(section_name);
                 }
 
-                xr_parallel_for(TaskRange<u32>(0, strings.size()), [&](const TaskRange<u32>& range)
+                for (shared_str itm : strings)
                 {
-                    xr_vector<CUIInventoryCellItem*> tmp;
-
-                    for (u32 i = range.begin(); i != range.end(); ++i)
-                    {
-                        shared_str itm = strings.at(i);
-                        CUIInventoryCellItem* item = xr_new<CUIInventoryCellItem>(itm.c_str());
-
-                        tmp.push_back(item);
-                    }
-                    
-                    std::lock_guard<std::mutex> lock(push_items_mtx);
-                    items.insert(items.end(), tmp.begin(), tmp.end());
-                });
-
-                for (auto& item : items)
+                    CUIInventoryCellItem* item = xr_new<CUIInventoryCellItem>(itm.c_str());
                     self->SetItem(item);
+                }
             })
             .def("AddWeaponAttachments", +[](CUIDragDropListEx* self, pcstr weapon_section_id)
             {

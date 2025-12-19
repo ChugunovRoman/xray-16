@@ -17,6 +17,8 @@
 #include "UIHelper.h"
 
 CUICellItem* CUICellItem::m_mouse_selected_item = NULL;
+CUIXml uiXml;
+bool xml_loaded = false;
 
 extern BOOL debug_ui_item_cell;
 
@@ -39,6 +41,38 @@ CUICellItem::CUICellItem()
     m_cur_mark = false;
     m_has_upgrade = false;
 
+    create_flags.set(needConditionBar, true);
+    create_flags.set(needFactionIcon, true);
+    create_flags.set(needUpgradeIcon, true);
+
+    init();
+
+    UI().Focus().RegisterFocusable(this);
+}
+
+CUICellItem::CUICellItem(bool needCondBar, bool needFIcon, bool needUgrIcon)
+    : CUIStatic("Cell Item")
+{
+    m_pParentList = NULL;
+    m_pData = NULL;
+    m_custom_draw = NULL;
+    m_text = NULL;
+    //-	m_mark				= NULL;
+    m_upgrade = NULL;
+    m_faction = NULL;
+    m_pConditionState = NULL;
+    m_drawn_frame = 0;
+    SetAccelerator(0);
+    m_b_destroy_childs = true;
+    m_selected = false;
+    m_select_armament = false;
+    m_cur_mark = false;
+    m_has_upgrade = false;
+
+    create_flags.set(needConditionBar, needCondBar);
+    create_flags.set(needFactionIcon, needFIcon);
+    create_flags.set(needUpgradeIcon, needUgrIcon);
+
     init();
 
     UI().Focus().RegisterFocusable(this);
@@ -56,9 +90,10 @@ CUICellItem::~CUICellItem()
 
 void CUICellItem::init()
 {
-    CUIXml uiXml;
-    if (!uiXml.Load(CONFIG_PATH, UI_PATH, UI_PATH_DEFAULT, "actor_menu_item.xml", false))
+    if (!xml_loaded && !uiXml.Load(CONFIG_PATH, UI_PATH, UI_PATH_DEFAULT, "actor_menu_item.xml", false))
         return;
+
+    xml_loaded = true;
 
     m_text = xr_new<CUIStatic>("Text");
     m_text->SetAutoDelete(true);
@@ -72,28 +107,37 @@ void CUICellItem::init()
         CUIXmlInit::InitStatic	( uiXml, "cell_item_mark", 0, m_mark );
         m_mark->Show			( false );*/
 
-    m_upgrade = xr_new<CUIStatic>("Upgrade");
-    m_upgrade->SetAutoDelete(true);
-    AttachChild(m_upgrade);
-    CUIXmlInit::InitStatic(uiXml, "cell_item_upgrade", 0, m_upgrade);
-    m_upgrade_pos = m_upgrade->GetWndPos();
-    m_upgrade->Show(false);
+    if (create_flags.test(needUpgradeIcon))
+    {
+        m_upgrade = xr_new<CUIStatic>("Upgrade");
+        m_upgrade->SetAutoDelete(true);
+        AttachChild(m_upgrade);
+        CUIXmlInit::InitStatic(uiXml, "cell_item_upgrade", 0, m_upgrade);
+        m_upgrade_pos = m_upgrade->GetWndPos();
+        m_upgrade->Show(false);
+    }
 
-    m_faction = xr_new<CUIStatic>("OutfitFaction");
-    m_faction->SetAutoDelete(true);
-    AttachChild(m_faction);
-    CUIXmlInit::InitStatic(uiXml, "cell_outfit_faction", 0, m_faction);
-    m_faction_pos = m_faction->GetWndPos();
-    m_faction->Show(false);
+    if (create_flags.test(needFactionIcon))
+    {
+        m_faction = xr_new<CUIStatic>("OutfitFaction");
+        m_faction->SetAutoDelete(true);
+        AttachChild(m_faction);
+        CUIXmlInit::InitStatic(uiXml, "cell_outfit_faction", 0, m_faction);
+        m_faction_pos = m_faction->GetWndPos();
+        m_faction->Show(false);
+    }
 
-    // Try progress first and then progess
-    m_pConditionState = UIHelper::CreateProgressBar(uiXml, "condition_progress_bar", this, false);
-
-    if (!m_pConditionState)
-        m_pConditionState = UIHelper::CreateProgressBar(uiXml, "condition_progess_bar", this, false);
-
-    if (m_pConditionState)
-        m_pConditionState->Show(true);
+    if (create_flags.test(needConditionBar))
+    {
+        // Try progress first and then progess
+        m_pConditionState = UIHelper::CreateProgressBar(uiXml, "condition_progress_bar", this, false);
+    
+        if (!m_pConditionState)
+            m_pConditionState = UIHelper::CreateProgressBar(uiXml, "condition_progess_bar", this, false);
+    
+        if (m_pConditionState)
+            m_pConditionState->Show(true);
+    }
 }
 
 void CUICellItem::Draw()
@@ -128,49 +172,55 @@ void CUICellItem::Update()
     }
 
     PIItem item = data_is_string ? nullptr : static_cast<PIItem>(m_pData);
-    m_has_upgrade = item ? item->has_any_upgrades() : false;
-
-    if (m_upgrade)
+    if (create_flags.test(needUpgradeIcon))
     {
-        if (item)
+        m_has_upgrade = item ? item->has_any_upgrades() : false;
+    
+        if (m_upgrade)
         {
-            Fvector2 pos;
-            pos.set(m_upgrade_pos);
-            if (ChildsCount())
+            if (item)
             {
-                const float textSize = m_text ? m_text->GetWndSize().x : 0.f;
-                pos.x += textSize + 2.0f;
+                Fvector2 pos;
+                pos.set(m_upgrade_pos);
+                if (ChildsCount())
+                {
+                    const float textSize = m_text ? m_text->GetWndSize().x : 0.f;
+                    pos.x += textSize + 2.0f;
+                }
+                m_upgrade->SetWndPos(pos);
             }
-            m_upgrade->SetWndPos(pos);
+            m_upgrade->Show(m_has_upgrade);
         }
-        m_upgrade->Show(m_has_upgrade);
     }
 
-    if ((data_is_string && b_isOutfit) || (item && item->BaseSlot() == OUTFIT_SLOT))
+    if (create_flags.test(needFactionIcon))
     {
-        shared_str faction = "";
-        if (item)
+        if ((data_is_string && b_isOutfit) || (item && item->BaseSlot() == OUTFIT_SLOT))
         {
-            CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(item);
-            faction = outfit->m_faction;
+            shared_str faction = "";
+            if (item)
+            {
+                CCustomOutfit* outfit = smart_cast<CCustomOutfit*>(item);
+                faction = outfit->m_faction;
+            }
+            else
+                faction = s_outfitFaction;
+    
+            pcstr icon = pSettingsFE->read_if_exists<pcstr>(faction.c_str(), "icon", make_string("icons\\patches\\%s", faction.c_str()).c_str());
+            std::string iconPath{icon};
+            if (strstr(iconPath.c_str(), "ui\\"))
+                iconPath.erase(0, 3);
+            m_faction->SetShader(InventoryUtilities::GetEquipmentIconShader(iconPath.c_str()));
+            
+            Fvector2 pos;
+            pos.set(m_faction_pos);
+            pos.x = 0;
+            pos.y = 13;
+    
+            m_faction->SetWndPos(pos);
+            m_faction->SetStretchTexture(true);
+            m_faction->Show(true);
         }
-        else
-            faction = s_outfitFaction;
-
-        pcstr icon = pSettingsFE->read_if_exists<pcstr>(faction.c_str(), "icon", make_string("icons\\patches\\%s", faction.c_str()).c_str());
-        std::string iconPath{icon};
-        if (strstr(iconPath.c_str(), "ui\\"))
-            iconPath.erase(0, 3);
-        m_faction->SetShader(InventoryUtilities::GetEquipmentIconShader(iconPath.c_str()));
-        
-        Fvector2 pos;
-        pos.set(m_faction_pos);
-        pos.x = 0;
-        pos.y = 13;
-
-        m_faction->SetWndPos(pos);
-        m_faction->SetStretchTexture(true);
-        m_faction->Show(true);
     }
 }
 

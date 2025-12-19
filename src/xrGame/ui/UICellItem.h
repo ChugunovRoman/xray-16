@@ -49,11 +49,20 @@ protected:
     u32 m_iAmmoCount{0};
     bool b_isUseCondition{false};
 
+    enum
+    {
+        needConditionBar = (1 << 0),
+        needFactionIcon = (1 << 1),
+        needUpgradeIcon = (1 << 2),
+    };
+    Flags8 create_flags;
+
     virtual void UpdateItemText();
     void init();
 
 public:
     CUICellItem();
+    CUICellItem(bool needCondBar, bool needFIcon, bool needUgrIcon);
     ~CUICellItem() override;
 
     bool b_has_any_upgrades{false};
