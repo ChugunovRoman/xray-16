@@ -1609,7 +1609,10 @@ void CCustomZone::CalcDistanceTo(const Fvector& P, float& dist, float& radius)
             nearest_s = &s;
         }
     }
-    R_ASSERT(nearest_s);
+    // Msg("Shapes.size: %d", Shapes.size());
+    // R_ASSERT(nearest_s);
+    if (!nearest_s)
+        return;
 
     dist = nearest;
 
