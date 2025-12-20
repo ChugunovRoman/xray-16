@@ -835,17 +835,42 @@ void CWeapon::LoadCurrentScopeParams(LPCSTR section)
         if (bIsSecondVPZoomPresent())
             bNVsecondVPavaible = !!pSettings->line_exist(*scope_name, "scope_nightvision");
 
-        m_zoom_params.m_sUseZoomPostprocess = READ_IF_EXISTS(pSettings, r_string, *scope_name, "scope_nightvision", 0);
-        m_zoom_params.m_bUseDynamicZoom = READ_IF_EXISTS(pSettings, r_bool, *scope_name, "scope_dynamic_zoom", FALSE);
+        if (!m_zoom_params.m_sUseZoomPostprocess.size() || bUseAttachmentSystem)
+        {
+            if(bUseAttachmentSystem)
+            {
+                m_zoom_params.m_sUseZoomPostprocess = READ_IF_EXISTS(pSettings, r_string, *scope_name, "scope_nightvision", 0);
+                m_zoom_params.m_bUseDynamicZoom = READ_IF_EXISTS(pSettings, r_bool, *scope_name, "scope_dynamic_zoom", FALSE);
+            }
+            else
+            {
+                m_zoom_params.m_sUseZoomPostprocess = READ_IF_EXISTS(pSettings, r_string, section, "scope_nightvision", 0);
+                m_zoom_params.m_bUseDynamicZoom = READ_IF_EXISTS(pSettings, r_bool, section, "scope_dynamic_zoom", FALSE);
+            }
+        }
 
 
         if (m_zoom_params.m_bUseDynamicZoom)
         {
-            m_fZoomStepCount = READ_IF_EXISTS(pSettings, r_u8, *scope_name, "scope_zoom_steps", 3.0f);
-            m_fZoomMinKoeff = READ_IF_EXISTS(pSettings, r_u8, *scope_name, "min_zoom_k", 0.3f);
+            if(bUseAttachmentSystem)
+            {
+                m_fZoomStepCount = READ_IF_EXISTS(pSettings, r_u8, *scope_name, "scope_zoom_steps", 3.0f);
+                m_fZoomMinKoeff = READ_IF_EXISTS(pSettings, r_u8, *scope_name, "min_zoom_k", 0.3f);
+            }
+            else
+            {
+                m_fZoomStepCount = READ_IF_EXISTS(pSettings, r_u8, section, "scope_zoom_steps", 3.0f);
+                m_fZoomMinKoeff = READ_IF_EXISTS(pSettings, r_u8, section, "min_zoom_k", 0.3f);
+            }
         }
 
-        m_zoom_params.m_sUseBinocularVision = READ_IF_EXISTS(pSettings, r_string, *scope_name, "scope_alive_detector", 0);
+        if (!m_zoom_params.m_sUseBinocularVision.size() || bUseAttachmentSystem)
+        {
+            if(bUseAttachmentSystem)
+                m_zoom_params.m_sUseBinocularVision = READ_IF_EXISTS(pSettings, r_string, *scope_name, "scope_alive_detector", 0);
+            else
+                m_zoom_params.m_sUseBinocularVision = READ_IF_EXISTS(pSettings, r_string, section, "scope_alive_detector", 0);
+        }
     }
     else
     {
@@ -853,7 +878,10 @@ void CWeapon::LoadCurrentScopeParams(LPCSTR section)
         bNVsecondVPstatus = false;
     }
 
-    m_fScopeInertionFactor = READ_IF_EXISTS(pSettings, r_float, *scope_name, "scope_inertion_factor", m_fControlInertionFactor);
+    if(bUseAttachmentSystem)
+        m_fScopeInertionFactor = READ_IF_EXISTS(pSettings, r_float, *scope_name, "scope_inertion_factor", m_fControlInertionFactor);
+    else
+        m_fScopeInertionFactor = READ_IF_EXISTS(pSettings, r_float, section, "scope_inertion_factor", m_fControlInertionFactor);
 
     m_fRTZoomFactor = m_zoom_params.m_fScopeZoomFactor;
 
