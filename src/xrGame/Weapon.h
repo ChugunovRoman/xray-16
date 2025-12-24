@@ -145,7 +145,7 @@ public:
     void setSecondZoomOnFirstScopeIfHaveIt();
     shared_str GetSlotKey(shared_str slot_name, u32 addon_parent_id, u32 addon_id);
 
-    virtual bool bInZoomRightNow() const { return m_zoom_params.m_fZoomRotationFactor > 0.05; }
+    virtual bool bInZoomRightNow() const { return !IsSecondZoomed() && m_zoom_params.m_fZoomRotationFactor > 0.05; }
     IC bool bIsSecondVPZoomPresent() const { return GetSecondVPZoomFactor() > 0.000f; }
     bool bLoadAltScopesParams(LPCSTR section);
     bool bLoadzCollimatorScopesParams(LPCSTR section);

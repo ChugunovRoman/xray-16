@@ -418,8 +418,9 @@ void CRender::AfterWorldRender()
 #endif
 #ifdef USE_DX11
         ID3DTexture2D* pBuffer = nullptr;
-        HW.m_pSwapChain->GetBuffer(0, __uuidof(ID3DTexture2D), (LPVOID*)&pBuffer);
-        HW.pContext1->CopyResource(Target->rt_secondVP->pSurface, pBuffer);
+        HW.m_pSwapChain2->GetBuffer(0, __uuidof(ID3DTexture2D), (LPVOID*)&pBuffer);
+        auto pContext = HW.get_context(CHW::IMM_CTX_ID);
+        pContext->CopyResource(Target->rt_secondVP->pSurface, pBuffer);
         pBuffer->Release(); // Корректно очищаем ссылку на бэкбуфер (иначе игра зависнет в опциях)
 #endif
     }

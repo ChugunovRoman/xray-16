@@ -159,7 +159,7 @@ CWeapon::CWeapon()
 
     m_zoom_params.m_f3dZoomFactor = 0.0f;
     m_zoom_params.m_fSecondVPFovFactor = 0.0f;
-    m_fSecondRTZoomFactor = -1.0f;
+    m_fSecondRTZoomFactor = 0.0f;
 }
 
 const shared_str CWeapon::GetScopeName() const
@@ -825,7 +825,10 @@ void CWeapon::LoadCurrentScopeParams(LPCSTR section)
         bScopeIsHasTexture = true;
     }
 
-    Load3DScopeParams(*scope_name);
+    if(bUseAttachmentSystem)
+        Load3DScopeParams(*scope_name);
+    else
+        Load3DScopeParams(section);
 
     m_zoom_params.m_fScopeZoomFactor = pSettings->read_if_exists<float>(*scope_name, "scope_zoom_factor", 83.3f);
     m_zoom_params.m_fSecondScopeZoomFactor = pSettings->read_if_exists<float>(*scope_name, "scope_zoom_factor_alt", 73.0f);
@@ -900,6 +903,9 @@ void CWeapon::Load3DScopeParams(LPCSTR section)
 {
     m_zoom_params.m_fSecondVPFovFactor = READ_IF_EXISTS(pSettings, r_float, section, "3d_fov", 0.0f);
     m_zoom_params.m_f3dZoomFactor	   = READ_IF_EXISTS(pSettings, r_float, section, "3d_zoom_factor", 100.0f);
+
+    if (fis_zero(m_fSecondRTZoomFactor))
+        m_fSecondRTZoomFactor = m_zoom_params.m_f3dZoomFactor;
 }
 
 bool CWeapon::net_Spawn(CSE_Abstract* DC)
@@ -2345,8 +2351,8 @@ void CWeapon::UpdateAddonsVisibility()
 void CWeapon::InitAddons() {}
 float CWeapon::CurrentZoomFactor()
 {
-    if (psActorFlags.test(AF_3DSCOPE) && IsScopeAttached())
-        return bIsSecondVPZoomPresent() ? m_zoom_params.m_f3dZoomFactor : m_zoom_params.m_fScopeZoomFactor;
+    if (psActorFlags.test(AF_3DSCOPE) && (IsScopeAttached() || IsScopePermament()))
+        return m_zoom_params.m_f3dZoomFactor;
 
     if (IsScopePermament())
         return m_zoom_params.m_fScopeZoomFactor;
@@ -3437,12 +3443,18 @@ void CWeapon::ZoomDec()
         return;
     if (!m_zoom_params.m_bUseDynamicZoom)
         return;
+
+    bool bIsSecondZOOM = bIsSecondVPZoomPresent() && psActorFlags.test(AF_3DSCOPE);
+
     float delta, min_zoom_factor;
     GetZoomData(m_zoom_params.m_fScopeZoomFactor, delta, min_zoom_factor);
 
     float f = GetZoomFactor() + delta;
     clamp(f, m_zoom_params.m_fScopeZoomFactor, min_zoom_factor);
-    SetZoomFactor(f);
+    if (bIsSecondZOOM)
+        m_fSecondRTZoomFactor = f;
+    else
+        SetZoomFactor(f);
 }
 
 u32 CWeapon::Cost() const
@@ -3513,16 +3525,19 @@ float CWeapon::GetSecondVPFov() const
 // Вызывается только для активного оружия игрока
 void CWeapon::UpdateSecondVP(bool bInGrenade)
 {
-    bool b_is_active_item = (m_pInventory != NULL) && (m_pInventory->ActiveItem() == this);
-    R_ASSERT(ParentIsActor() && b_is_active_item); // Эта функция должна вызываться только для оружия в руках нашего игрока
+    // bool b_is_active_item = (m_pInventory != NULL) && (m_pInventory->ActiveItem() == this);
+    // R_ASSERT(ParentIsActor() && b_is_active_item); // Эта функция должна вызываться только для оружия в руках нашего игрока
 
-    CActor* pActor = smart_cast<CActor*>(H_Parent());
+    // CActor* pActor = smart_cast<CActor*>(H_Parent());
 
-    bool bCond_1 = bInZoomRightNow(); // Мы должны целиться
-    bool bCond_2 = bIsSecondVPZoomPresent() && psActorFlags.test(AF_3DSCOPE); // В конфиге должен быть прописан фактор зума для линзы (scope_lense_factor, больше чем 0)
-    bool bCond_3 = pActor->cam_Active() == pActor->cam_FirstEye(); // Мы должны быть от 1-го лица
+    // bool bCond_1 = bInZoomRightNow(); // Мы должны целиться
+    // bool bCond_2 = bIsSecondVPZoomPresent() && psActorFlags.test(AF_3DSCOPE); // В конфиге должен быть прописан фактор зума для линзы (scope_lense_factor, больше чем 0)
+    // // bool bCond_2 = psActorFlags.test(AF_3DSCOPE); // В конфиге должен быть прописан фактор зума для линзы (scope_lense_factor, больше чем 0)
+    // bool bCond_3 = pActor->cam_Active() == pActor->cam_FirstEye(); // Мы должны быть от 1-го лица
 
-    Device.m_SecondViewport.SetSVPActive(bCond_1 && bCond_2 && bCond_3 && !bInGrenade);
+    // Device.m_SecondViewport.SetSVPActive(bCond_1 && bCond_2 && bCond_3 && !bInGrenade);
+
+    Device.m_SecondViewport.SetSVPActive(m_zoom_params.m_fZoomRotationFactor > 0.05);
 }
 
 void CWeapon::CollectAttachmentsAI(TIItemContainer& l_list)
