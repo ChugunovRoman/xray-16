@@ -2833,7 +2833,6 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
         // Из дефолтного состояния в первичный зум
         if ((IsZoomed() || (!IsSecondZoomed() && m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eMainZoom)) && (m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::noZoom || m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eMainZoom))
         {
-
             curr_offs = hi->m_measures.m_hands_offset[0][idx]; //pos,aim
             curr_rot = hi->m_measures.m_hands_offset[1][idx]; //rot,aim
 
@@ -2880,6 +2879,23 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
 
             curr_offs.sub(curr_offs1);
             curr_rot.sub(curr_rot1);
+        }
+        // Из зума в дефолтное состояние
+        else
+        {
+            if (m_zoom_params.m_iLatestZoomType == EWeaponLatestZoom::eSecondZoom)
+            {
+                curr_offs = m_hands_offset[0][idx]; //pos,aim
+                curr_rot = m_hands_offset[1][idx]; //rot,aim
+            }
+            else
+            {
+                curr_offs = hi->m_measures.m_hands_offset[0][idx];
+                curr_rot = hi->m_measures.m_hands_offset[1][idx];
+            }
+
+            curr_offs.mul(curve);
+            curr_rot.mul(curve);
         }
 
         // Сохраняем промежуточные значения для плавного перехода из промежуточной позиции худа в другой зум
