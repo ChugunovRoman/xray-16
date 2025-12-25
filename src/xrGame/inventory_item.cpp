@@ -201,15 +201,15 @@ void CInventoryItem::ReloadNames()
             shared_str str_outfit_property_inventory_weight = StringTable().translate("st_outfit_property_inventory_weight");
             shared_str str_outfit_property_inventory_weight_suffix = StringTable().translate("st_kg");
 
-            float outfit_weaight = pSettings->read_if_exists<float>(section, "additional_inventory_weight", 0.0f);
+            float weight = pSettings->read_if_exists<float>(section, "additional_inventory_weight", 0.0f);
 
-            if (xr_strcmp(*outfit->m_faction, "none") != 0)
-                str_outfit_property_faction_name = StringTable().translate(*outfit->m_faction);
+            if (xr_strcmp(outfit->m_faction.c_str(), "none") != 0)
+                str_outfit_property_faction_name = StringTable().translate(outfit->m_faction.c_str());
 
             if (outfit->m_additional_weight > 0.0f && outfit->m_additional_weight < (float)-1.0f)
-                outfit_weaight = outfit->m_additional_weight;
+                weight = outfit->m_additional_weight;
             if (outfit->m_additional_weight2 > 0.0f && outfit->m_additional_weight2 < (float)-1.0f)
-                outfit_weaight = outfit->m_additional_weight2;
+                weight = outfit->m_additional_weight2;
 
             u32 artefact_count = outfit->get_artefact_count();
             if (artefact_count == 0)
@@ -221,12 +221,25 @@ void CInventoryItem::ReloadNames()
 
             shared_str str_outfit_property_helmet_available = StringTable().translate(IsHelmetAvaliable ? "st_outfit_property_helmet_has" : "st_outfit_property_helmet_no");
 
-            m_Description = make_string("%s\\n \\n%s\\n", *m_Description, *str_outfit_properties).c_str();
-            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_faction, *str_outfit_property_faction_name).c_str();
-            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_helmet, *str_outfit_property_helmet_available).c_str();
-            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_sprint, *str_outfit_property_sprint_alowed).c_str();
-            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %d\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_slots_count, artefact_count).c_str();
-            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %.2f %s\\n", *m_Description, *str_outfit_list_symbol, *str_outfit_property_inventory_weight, outfit_weaight, *str_outfit_property_inventory_weight_suffix).c_str();
+            m_Description = make_string("%s\\n \\n%s\\n", m_Description.c_str(), str_outfit_properties.c_str()).c_str();
+            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_faction.c_str(), str_outfit_property_faction_name.c_str()).c_str();
+            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_helmet.c_str(), str_outfit_property_helmet_available.c_str()).c_str();
+            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_sprint.c_str(), str_outfit_property_sprint_alowed.c_str()).c_str();
+            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %d\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_slots_count.c_str(), artefact_count).c_str();
+            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %.2f %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_inventory_weight.c_str(), weight, str_outfit_property_inventory_weight_suffix.c_str()).c_str();
+        }
+        CBackpack* backpack = smart_cast<CBackpack*>(this);
+        if (backpack)
+        {
+            shared_str str_props_title = StringTable().translate("st_outfit_properties");
+            shared_str str_outfit_list_symbol = StringTable().translate("st_outfit_list_symbol");
+            shared_str str_bp_weight = StringTable().translate("st_outfit_property_inventory_weight");
+            shared_str str_bp_weight_suffix = StringTable().translate("st_kg");
+
+            float weight = pSettings->read_if_exists<float>(section, "additional_inventory_weight", 0.0f);
+
+            m_Description = make_string("%s\\n \\n%s\\n", m_Description.c_str(), str_props_title.c_str()).c_str();
+            m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %.2f %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_bp_weight.c_str(), weight, str_bp_weight_suffix.c_str()).c_str();
         }
     }
     else
