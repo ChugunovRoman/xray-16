@@ -3553,7 +3553,7 @@ void CWeapon::UpdateSecondVP(bool bInGrenade)
 
     // Device.m_SecondViewport.SetSVPActive(bCond_1 && bCond_2 && bCond_3 && !bInGrenade);
 
-    Device.m_SecondViewport.SetSVPActive(m_zoom_params.m_fZoomRotationFactor > 0.05);
+    Device.m_SecondViewport.SetSVPActive(psActorFlags.test(AF_3DSCOPE) && m_zoom_params.m_fZoomRotationFactor > 0.05);
 }
 
 void CWeapon::CollectAttachmentsAI(TIItemContainer& l_list)
