@@ -14,6 +14,7 @@ class CUICellItem;
 class CUIDragItem;
 class ui_actor_state_wnd;
 class CUIItemInfo;
+class CUIOutfitInfo;
 class CUIFrameLineWnd;
 class CUIStatic;
 class CUI3tButton;
@@ -160,6 +161,7 @@ protected:
     CUIItemInfo* m_ItemInfoInventoryMode{};
     CUIItemInfo* m_ItemInfoTradeMode{};
     CUIItemInfo* m_ItemInfoSearchLootMode{};
+    CUIOutfitInfo* m_OutfitInfo{};
 
     // Money
     CUIStatic* m_ActorMoney{};

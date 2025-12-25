@@ -10,6 +10,8 @@
 #include "UIDragDropListEx.h"
 #include "UIDragDropReferenceList.h"
 #include "UICellCustomItems.h"
+#include "UIItemInfo.h"
+#include "UIOutfitInfo.h"
 #include "xrUICore/Windows/UIFrameLineWnd.h"
 #include "xrUICore/PropertiesBox/UIPropertiesBox.h"
 #include "xrUICore/ListBox/UIListBoxItem.h"
@@ -1058,7 +1060,7 @@ void CUIActorMenu::PropertiesBoxForSlots(PIItem item, bool& b_show)
         {
             if (!pHelmet)
             {
-                const bool has_translation = StringTable().translate("st_unequip", nullptr);
+                const bool has_translation = StringTable().has_translation("st_unequip");
                 if (m_currMenuMode == mmDeadBodySearch || !has_translation)
                     m_UIPropertiesBox->AddItem("st_move_to_bag", nullptr, INVENTORY_TO_BAG_ACTION);
                 else
@@ -1719,6 +1721,11 @@ void CUIActorMenu::UpdateOutfit()
             m_pLists[eInventoryHelmetList]->SetCellsCapacity({ 0, 0 });
         else
             m_pLists[eInventoryHelmetList]->SetCellsCapacity(m_pLists[eInventoryHelmetList]->MaxCellsCapacity());
+    }
+
+    if (m_OutfitInfo)
+    {
+        m_OutfitInfo->UpdateInfo(outfit, nullptr, true);
     }
 
     if (ShadowOfChernobylMode)

@@ -149,21 +149,39 @@ void CUIDebugger::on_tool_frame()
             ImGui::EndMenuBar();
         }
 
-        ImGui::BeginChild("UI tree", ImVec2(ImGui::GetWindowWidth() - 400, ImGui::GetContentRegionAvail().y), true, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_AlwaysVerticalScrollbar);
-        ImGui::Text("UI tree");
-        for (const auto& window : m_root_windows)
+        constexpr ImGuiTableFlags flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable |
+            ImGuiTableFlags_BordersInner | ImGuiTableFlags_SizingFixedFit |
+            ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY;
+
+        if (ImGui::BeginTable("UI tree and properties", 2, flags))
         {
-            window->FillDebugTree(m_state);
-            if (m_state.selected != m_state.newSelected)
-                m_state.selected = m_state.newSelected;
+            ImGui::TableSetupColumn("Tree");
+            ImGui::TableSetupColumn("Selected element properties", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableHeadersRow();
+
+            ImGui::TableNextColumn();
+            for (const auto& window : m_root_windows)
+            {
+                window->FillDebugTree(m_state);
+                if (m_state.selected != m_state.newSelected)
+                    m_state.selected = m_state.newSelected;
+            }
+            ImGui::TableNextColumn();
+            if (m_state.selected)
+            {
+                const bool debug = xrDebug::DebuggerIsPresent();
+                if (ImGui::Button("Debug break at element"))
+                {
+                    if (debug)
+                        DEBUG_BREAK;
+                }
+                if (!debug)
+                    ImGui::SetItemTooltip("No debugger attached to the process");
+
+                m_state.selected->FillDebugInfo();
+            }
+            ImGui::EndTable();
         }
-        ImGui::EndChild();
-        ImGui::SameLine();
-        ImGui::BeginChild("UI properties", ImVec2(0, ImGui::GetContentRegionAvail().y), true, ImGuiWindowFlags_AlwaysAutoResize);
-        ImGui::Text("UI properties");
-        if (m_state.selected)
-            m_state.selected->FillDebugInfo();
-        ImGui::EndChild();
     }
     ImGui::End();
 }

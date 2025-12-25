@@ -2243,8 +2243,6 @@ target_sources(xrGame PRIVATE
     ui/UIMainIngameWnd.cpp
     ui/UIMainIngameWnd.h
     ui/UIMap.cpp
-    ui/UIMapDesc.cpp
-    ui/UIMapDesc.h
     ui/UIMapFilters.cpp
     ui/UIMapFilters.h
     ui/UIMap.h
