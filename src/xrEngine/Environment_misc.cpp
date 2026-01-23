@@ -866,7 +866,7 @@ void CEnvironment::load_weathers()
         env.reserve(sections.size());
 
         for (const auto& section : sections)
-            if (!strstr(*section->Name, "gswr_"))
+            if (!strstr(section->Name.c_str(), "gswr_"))
                 env.emplace_back(create_descriptor(section->Name, config));
 
         CInifile::Destroy(config);

@@ -62,6 +62,10 @@ void CUIActorMenu::InitDeadBodySearchMode()
     SetInvGridSize(m_pLists[eSearchLootActorBagList]);
     SetInvGridSize(m_pLists[eInventoryBagList]);
 
+    auto partnerIcon = m_SearchLootPartnerCharacterInfo->GetParent();
+    if (partnerIcon != this)
+        partnerIcon->Show(false);
+
     InitInventoryContents(m_pLists[eSearchLootActorBagList],
         m_pLists[eSearchLootActorBagList] != m_pLists[eInventoryBagList]);
 

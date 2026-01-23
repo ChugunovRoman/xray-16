@@ -116,7 +116,7 @@ void CSpecificCharacter::load_shared(LPCSTR)
     {
         g_checker.AddToDictLog(
             Dicts::CharacterVisuals,
-            make_string("Character id: %s visual: %s", *item_data.id, data()->m_sVisual.c_str()).c_str()
+            make_string("Character id: %s visual: %s", item_data.id.c_str(), data()->m_sVisual.c_str()).c_str()
         );
 
         string_path fn;
@@ -126,7 +126,7 @@ void CSpecificCharacter::load_shared(LPCSTR)
         if (!FS.exist(fn, "$game_meshes$", path.c_str()))
             g_checker.AddToCheckLog(
                 Checks::UnexistModels,
-                make_string("Character id: %s visual: %s", *item_data.id, path.c_str()).c_str()
+                make_string("Character id: %s visual: %s", item_data.id.c_str(), path.c_str()).c_str()
             );
     }
 

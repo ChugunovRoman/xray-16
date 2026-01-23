@@ -114,7 +114,7 @@ IC void CGameLocationSelector::select_random_location(
 
         R_ASSERT2(ai().level_graph().valid_vertex_id(dest_vertex_id),
             make_string("Can't setup path for object=[%s] dest_vertex_id=[%d]",
-                *this->m_restricted_object->object().cName(), dest_vertex_id));
+                this->m_restricted_object->object().cName().c_str(), dest_vertex_id));
     }
     else
     {

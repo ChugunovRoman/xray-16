@@ -28,7 +28,7 @@ bool CWeaponSSRS::net_Spawn(CSE_Abstract* DC)
             while (k)
             {
                 k--;
-                inheritedRL::SpawnRocket(*fake_grenade_name, this);
+                inheritedRL::SpawnRocket(fake_grenade_name.c_str(), this);
             }
         }
         //			inheritedRL::SpawnRocket(*fake_grenade_name, this);
@@ -142,7 +142,7 @@ void CWeaponSSRS::ReloadRL()
     while (k)
     {
         --k;
-        inheritedRL::SpawnRocket(*fake_grenade_name, this);
+        inheritedRL::SpawnRocket(fake_grenade_name.c_str(), this);
     }
 }
 

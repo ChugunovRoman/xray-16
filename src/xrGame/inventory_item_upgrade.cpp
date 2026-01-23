@@ -171,7 +171,7 @@ void CInventoryItem::net_Spawn_install_upgrades(CSE_Abstract* DC) // net_Spawn
 
     for (const auto& upgrade : saved_upgrades)
     {
-        ai().alife().inventory_upgrade_manager().upgrade_install(*this, *upgrade, true);
+        ai().alife().inventory_upgrade_manager().upgrade_install(*this, upgrade.c_str(), true);
     }
 }
 
@@ -280,7 +280,7 @@ void CInventoryItem::pre_install_upgrade()
 
         if (weapon->bUseAttachmentSystem)
             for (auto& [id, addon] : weapon->m_addon_items)
-                if (!pSettings->line_exist(*weapon->m_section_id, *addon->slot))
+                if (!pSettings->line_exist(weapon->m_section_id.c_str(), addon->slot.c_str()))
                     weapon->Detach(id);
     }
 }

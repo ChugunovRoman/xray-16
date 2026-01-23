@@ -363,7 +363,7 @@ void CWeaponMagazined::UnloadMagazine(bool spawn_ammo)
         xr_map<LPCSTR, u16>::iterator l_it;
         for (l_it = l_ammo.begin(); l_ammo.end() != l_it; ++l_it)
         {
-            if (!xr_strcmp(*l_cartridge.m_ammoSect, l_it->first))
+            if (!xr_strcmp(l_cartridge.m_ammoSect.c_str(), l_it->first))
             {
                 ++(l_it->second);
                 break;
@@ -371,7 +371,7 @@ void CWeaponMagazined::UnloadMagazine(bool spawn_ammo)
         }
 
         if (l_it == l_ammo.end())
-            l_ammo[*l_cartridge.m_ammoSect] = 1;
+            l_ammo[l_cartridge.m_ammoSect.c_str()] = 1;
         m_magazine.pop_back();
         --iAmmoElapsed;
     }
@@ -468,7 +468,7 @@ void CWeaponMagazined::ReloadMagazine()
         return;
 
     //разрядить магазин, если загружаем патронами другого типа
-    if (!m_bLockType && !m_magazine.empty() && (!m_pCurrentAmmo || xr_strcmp(m_pCurrentAmmo->cNameSect(), *m_magazine.back().m_ammoSect)))
+    if (!m_bLockType && !m_magazine.empty() && (!m_pCurrentAmmo || xr_strcmp(m_pCurrentAmmo->cNameSect(), m_magazine.back().m_ammoSect.c_str())))
     {
         iMagSizeCurrent = iMagazineSize;
         UnloadMagazine();
@@ -829,8 +829,8 @@ void CWeaponMagazined::switch2_Fire()
 
 #ifdef DEBUG
     if (ii != io->inventory().ActiveItem())
-        Msg("! not an active item, item %s, owner %s, active item %s", *cName(), *H_Parent()->cName(),
-            io->inventory().ActiveItem() ? *io->inventory().ActiveItem()->object().cName() : "no_active_item");
+        Msg("! not an active item, item %s, owner %s, active item %s", cName().c_str(), H_Parent()->cName().c_str(),
+            io->inventory().ActiveItem() ? io->inventory().ActiveItem()->object().cName().c_str() : "no_active_item");
 
     if (!(io && (ii == io->inventory().ActiveItem())))
     {
@@ -902,7 +902,7 @@ void CWeaponMagazined::switch2_Reload()
     if (g_player_hud[0]->attached_item())
     {
         CWeaponMagazined* item = smart_cast<CWeaponMagazined*>(g_player_hud[0]->attached_item()->m_parent_hud_item);
-        if (item && xr_strcmp(*item->m_section_id, *m_section_id) == 0)
+        if (item && xr_strcmp(item->m_section_id.c_str(), m_section_id.c_str()) == 0)
             PlayReloadSound();
     }
     SetPending(true);
@@ -1194,7 +1194,7 @@ bool CWeaponMagazined::CanDetach(const char* item_section_name)
     {
         for (auto [addon_id, addon]: m_addon_items)
         {
-            if (xr_strcmp(*addon->addon_item_name, item_section_name) == 0)
+            if (xr_strcmp(addon->addon_item_name.c_str(), item_section_name) == 0)
                 return true;
         }
     }
@@ -1243,7 +1243,7 @@ bool CWeaponMagazined::AttachAttachment(PIItem pIItem)
     {
         addAddon(pIItem);
 
-        reload(*m_section_id);
+        reload(m_section_id.c_str());
         result = true;
     }
     else if (pSilencer && m_eSilencerStatus == ALife::eAddonAttachable &&
@@ -1289,7 +1289,7 @@ bool CWeaponMagazined::AttachByOldSystem(PIItem pIItem)
         }
         m_flagsAddOnState |= CSE_ALifeItemWeapon::eWeaponAddonScope;
         m_section_id = GetNameWithAttachment();
-        reload(*m_section_id);
+        reload(m_section_id.c_str());
         result = true;
     }
     else if (pSilencer && m_eSilencerStatus == ALife::eAddonAttachable &&
@@ -1404,7 +1404,7 @@ bool CWeaponMagazined::Detach(u32 addon_id)
             hi->reload_measures();
         UpdateAvailableSecondZoom();
         // calc_aim_addon_offset();
-        reload(*m_section_id);
+        reload(m_section_id.c_str());
         setSecondZoomOnFirstScopeIfHaveIt();
 
         return CInventoryItemObject::Detach(sect, true);
@@ -1423,7 +1423,7 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
         }
         m_flagsAddOnState &= ~CSE_ALifeItemWeapon::eWeaponAddonScope;
 
-        pcstr parentSect = pSettings->read_if_exists<pcstr>(*m_section_id, "parent_section", *m_section_id);
+        pcstr parentSect = pSettings->read_if_exists<pcstr>(m_section_id.c_str(), "parent_section", m_section_id.c_str());
 
         m_section_id = parentSect;
 
@@ -1514,7 +1514,7 @@ void CWeaponMagazined::InitAddons()
         m_sSndShotCurrent = "sndSilencerShot";
 
         //подсветка от выстрела
-        LoadLights(*cNameSect(), "silencer_");
+        LoadLights(cNameSect().c_str(), "silencer_");
     }
     else
     {
@@ -1523,7 +1523,7 @@ void CWeaponMagazined::InitAddons()
         m_sSndShotCurrent = "sndShot";
 
         //подсветка от выстрела
-        LoadLights(*cNameSect(), "");
+        LoadLights(cNameSect().c_str(), "");
     }
 
     if (silencer)

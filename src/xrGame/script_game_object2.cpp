@@ -88,7 +88,7 @@ CScriptGameObject* CScriptGameObject::best_weapon()
             return nullptr;
         if (!inv_object)
             return nullptr;
-        if (!*inv_object->m_section_id)
+        if (!inv_object->m_section_id.c_str())
             return nullptr;
         if (!inv_object->m_pInventory)
             return nullptr;
@@ -98,9 +98,9 @@ CScriptGameObject* CScriptGameObject::best_weapon()
             return nullptr;
         if (!pSettings->section_exist(inv_object->m_section_id))
         {
-            Msg("CScriptGameObject::best_weapon 1, inv_object=[%s]", *inv_object->m_name);
+            Msg("CScriptGameObject::best_weapon 1, inv_object=[%s]", inv_object->m_name.c_str());
             Msg("CScriptGameObject::best_weapon 2, inv_object=[%d]", pSettings->section_exist(inv_object->m_section_id));
-            Msg("CScriptGameObject::best_weapon 3, inv_object=[%s]", *inv_object->m_section_id);
+            Msg("CScriptGameObject::best_weapon 3, inv_object=[%s]", inv_object->m_section_id.c_str());
             return nullptr;
         }
 

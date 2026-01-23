@@ -152,19 +152,19 @@ void CUITexturesAddonsPosition::on_tool_frame()
     pcstr item1Sect = "[No weapon in slot]";
     pcstr item2Sect = "[No weapon in slot]";
 
-    if (item_in_slot_2 && curr_wpn_1 != *item_in_slot_2->m_section_id)
+    if (item_in_slot_2 && curr_wpn_1 != item_in_slot_2->m_section_id.c_str())
         ResetToDefaultWpn1Values();
-    if (item_in_slot_3 && curr_wpn_2 != *item_in_slot_3->m_section_id)
+    if (item_in_slot_3 && curr_wpn_2 != item_in_slot_3->m_section_id.c_str())
         ResetToDefaultWpn2Values();
 
     if (item_in_slot_2)
     {
-        item1Sect = *item_in_slot_2->m_section_id;
+        item1Sect = item_in_slot_2->m_section_id.c_str();
         curr_wpn_1 = item1Sect;
     }
     if (item_in_slot_3)
     {
-        item2Sect = *item_in_slot_3->m_section_id;
+        item2Sect = item_in_slot_3->m_section_id.c_str();
         curr_wpn_2 = item2Sect;
     }
 
@@ -209,7 +209,7 @@ void CUITexturesAddonsPosition::on_tool_frame()
                 string128 selectable;
 
                 ImGui::LogToClipboard();
-                xr_sprintf(selectable, "[%s]\n", *item_in_slot_2->m_section_id);
+                xr_sprintf(selectable, "[%s]\n", item_in_slot_2->m_section_id.c_str());
                 ImGui::LogText(selectable);
                 xr_sprintf(selectable, "scope_x = %d\n", new_pos[0][0].x);
                 ImGui::LogText(selectable);
@@ -258,7 +258,7 @@ void CUITexturesAddonsPosition::on_tool_frame()
                 string128 selectable;
 
                 ImGui::LogToClipboard();
-                xr_sprintf(selectable, "[%s]\n", *item_in_slot_3->m_section_id);
+                xr_sprintf(selectable, "[%s]\n", item_in_slot_3->m_section_id.c_str());
                 ImGui::LogText(selectable);
                 xr_sprintf(selectable, "scope_x = %d\n", new_pos[1][0].x);
                 ImGui::LogText(selectable);

@@ -5,7 +5,7 @@ Checker::Checker()
 {
     // 
 }
- Checker::~Checker()
+Checker::~Checker()
 {
     // 
 }
@@ -23,7 +23,7 @@ void Checker::AddToCheckLog(shared_str type, shared_str msg)
     checks[type][msg] = true;
 
     xr_string discriptor_name = "check_";
-    discriptor_name.append(*type);
+    discriptor_name.append(type.c_str());
     _Trim(discriptor_name);
 
     xr_string path = type.c_str();
@@ -63,7 +63,7 @@ void Checker::AddToDictLog(shared_str type, shared_str msg)
     dicts[type][msg] = true;
 
     xr_string discriptor_name = "dictionary_";
-    discriptor_name.append(*type);
+    discriptor_name.append(type.c_str());
     _Trim(discriptor_name);
 
     xr_string path = type.c_str();

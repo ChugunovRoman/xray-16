@@ -18,7 +18,6 @@ class CUIProgressBar;
 class CUIProgressShape;
 class CUITabControl;
 class CUIFrameLineWnd;
-class CUITextFrameLineWnd;
 class CUIEditBoxEx;
 class CUIEditBox;
 class CUICustomEdit;
@@ -43,7 +42,6 @@ public:
     static bool InitWindow(CUIXml& xml_doc, pcstr path, int index, CUIWindow* pWnd, bool fatal = true);
     static bool InitFrameWindow(CUIXml& xml_doc, pcstr path, int index, CUIFrameWindow* pWnd, bool fatal = true);
     static bool InitFrameLine(CUIXml& xml_doc, pcstr path, int index, CUIFrameLineWnd* pWnd, bool fatal = true);
-    static bool InitTextFrameLine(CUIXml& xml_doc, pcstr path, int index, CUITextFrameLineWnd* pWnd, bool fatal = true);
     static bool InitCustomEdit(CUIXml& xml_doc, pcstr paht, int index, CUICustomEdit* pWnd, bool fatal = true);
     static bool InitEditBox(CUIXml& xml_doc, pcstr paht, int index, CUIEditBox* pWnd, bool fatal = true);
     static bool InitStatic(CUIXml& xml_doc, pcstr path, int index, CUIStatic* pWnd, bool fatal = true, bool textWnd = false);
@@ -51,6 +49,7 @@ public:
     static bool InitSpin(CUIXml& xml_doc, pcstr path, int index, CUICustomSpin* pWnd, bool fatal = true);
     static bool InitSpinNum(CUIXml& xml_doc, pcstr path, int index, CUISpinNum* pWnd, bool fatal = true);
     static bool InitText(CUIXml& xml_doc, pcstr path, int index, CUILines* pLines);
+    static bool InitButton(CUIXml& xml_doc, LPCSTR path, int index, CUIButton* pWnd);
     static bool Init3tButton(CUIXml& xml_doc, pcstr path, int index, CUI3tButton* pWnd, bool fatal = true);
     static bool InitProgressBar(CUIXml& xml_doc, pcstr path, int index, CUIProgressBar* pWnd, bool fatal = true);
     static bool InitProgressShape(CUIXml& xml_doc, pcstr path, int index, CUIProgressShape* pWnd, bool fatal = true);

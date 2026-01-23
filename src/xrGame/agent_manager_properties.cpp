@@ -33,7 +33,7 @@ CAgentManagerPropertyEvaluatorItem::_value_type CAgentManagerPropertyEvaluatorIt
 
         const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>((*I)->m_object);
 
-        if (stalker == nullptr || stalker->NameObject == nullptr)
+        if (stalker == nullptr || stalker->NameObject.c_str() == nullptr)
             return (false);
 
         if ((*I)->object().memory().item().selected())
@@ -58,7 +58,7 @@ CAgentManagerPropertyEvaluatorEnemy::_value_type CAgentManagerPropertyEvaluatorE
 
         const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>((*I)->m_object);
 
-        if (stalker == nullptr || stalker->NameObject == nullptr)
+        if (stalker == nullptr || stalker->NameObject.c_str() == nullptr)
             return (false);
 
         if ((*I)->object().memory().enemy().selected())
@@ -83,7 +83,7 @@ CAgentManagerPropertyEvaluatorDanger::_value_type CAgentManagerPropertyEvaluator
 
         const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>((*I)->m_object);
 
-        if (stalker == nullptr || stalker->NameObject == nullptr)
+        if (stalker == nullptr || stalker->NameObject.c_str() == nullptr)
             return (false);
 
         if ((*I)->object().memory().danger().selected())

@@ -51,7 +51,7 @@ MotionID CStalkerAnimationManager::global_critical_hit()
 
     CWeapon* weapon = smart_cast<CWeapon*>(object().inventory().ActiveItem());
     VERIFY2(weapon, make_string("current active item: %s", object().inventory().ActiveItem() ?
-                            *object().inventory().ActiveItem()->object().cName() :
+                            object().inventory().ActiveItem()->object().cName().c_str() :
                             "no active item"));
     if (!weapon)
         return (global().animation());
@@ -77,7 +77,7 @@ MotionID CStalkerAnimationManager::global_critical_hit()
         Msg(
             "WARN ! Stalker global animation is not exists animation_slot=[%d] stalker=[%s] idx=[%d] anims eBodyStateStand size=[%d]",
             animation_slot,
-            global().object() ? *global().object()->NameSection : "nullptr",
+            global().object() ? global().object()->NameSection.c_str() : "nullptr",
             idx,
             m_data_storage->m_part_animations.A[eBodyStateStand].m_global.A.size()
         );

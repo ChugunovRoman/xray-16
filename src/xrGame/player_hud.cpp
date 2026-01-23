@@ -277,9 +277,9 @@ void attachable_hud_item::render(u32 context_id, IRenderable* root)
                 {
                     Fmatrix pos;
                     pos.set(m_item_transform);
-                    if (slot.second->bone_name != nullptr && xr_strcmp(*slot.second->bone_name, "") != 0)
+                    if (slot.second->bone_name.c_str() != nullptr && xr_strcmp(slot.second->bone_name.c_str(), "") != 0)
                     {
-                        const u16 bone_id = m_model->LL_BoneID(*slot.second->bone_name);
+                        const u16 bone_id = m_model->LL_BoneID(slot.second->bone_name.c_str());
                         if (bone_id != BI_NONE)
                             pos.mulB_43(m_model->LL_GetTransform(bone_id));
                     }
@@ -302,15 +302,15 @@ void attachable_hud_item::render(u32 context_id, IRenderable* root)
                 addon_item_transform_2.mulB_43(m);
             }
 
-            if (item->bone_name != nullptr && xr_strcmp(*item->bone_name, "") != 0)
+            if (item->bone_name.c_str() != nullptr && xr_strcmp(item->bone_name.c_str(), "") != 0)
             {
-                const u16 bone_id = m_model->LL_BoneID(*item->bone_name);
+                const u16 bone_id = m_model->LL_BoneID(item->bone_name.c_str());
                 if (bone_id != BI_NONE)
                     item->addon_item_transform.mulB_43(m_model->LL_GetTransform(bone_id));
             }
             if (item->has_bone_2)
             {
-                const u16 bone_id = m_model->LL_BoneID(*item->bone_2_name);
+                const u16 bone_id = m_model->LL_BoneID(item->bone_2_name.c_str());
                 if (bone_id != BI_NONE)
                     addon_item_transform_2.mulB_43(m_model->LL_GetTransform(bone_id));
 
@@ -566,7 +566,7 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
     }
     R_ASSERT3(!m_visual_name.empty(), "Missing 'item_visual' from weapon hud section.", m_sect_name.c_str());
 
-    shared_str model_suffix = pSettings->read_if_exists<pcstr>(*m_sect_name, "model_cache_suffix", "");
+    shared_str model_suffix = pSettings->read_if_exists<pcstr>(m_sect_name.c_str(), "model_cache_suffix", "");
     auto load_hud_materials = [&](const char* format) {
         u16 index = 1;
         shared_str line_name;
@@ -576,18 +576,18 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
         while (true)
         {
             line_name = make_string(format, index).c_str();
-            if (!pSettings->line_exist(*m_sect_name, *line_name))
+            if (!pSettings->line_exist(m_sect_name.c_str(), line_name.c_str()))
                 break;
 
             string256 dds_path = "", shader_name = "";
-            material_value = pSettings->r_string(*m_sect_name, *line_name);
+            material_value = pSettings->r_string(m_sect_name.c_str(), line_name.c_str());
             _GetItem(material_value.c_str(), 0, dds_path);
             _GetItem(material_value.c_str(), 1, shader_name);
             string256 low_name;
-            xr_strcpy(low_name, *m_visual_name);
+            xr_strcpy(low_name, m_visual_name.c_str());
             if (strext(low_name))
                 *strext(low_name) = 0;
-            material_key = make_string("%s:%d%s", low_name, index, *model_suffix).c_str();
+            material_key = make_string("%s:%d%s", low_name, index, model_suffix.c_str()).c_str();
 
             GEnv.Render->emplace_texture_replacements(material_key, dds_path);
 
@@ -597,7 +597,7 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
 
     load_hud_materials("hud_material_%d");
     
-    m_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str(), *model_suffix));
+    m_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str(), model_suffix.c_str()));
     m_model_2 = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str()));
     m_model_3 = smart_cast<IKinematics*>(GEnv.Render->model_Create(m_visual_name.c_str()));
 

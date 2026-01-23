@@ -94,7 +94,7 @@ CScriptGameObject* get_object_by_id(u16 id)
     return pGameObject->lua_game_object();
 }
 
-LPCSTR get_weather() { return *g_pGamePersistent->Environment().GetWeather(); }
+LPCSTR get_weather() { return g_pGamePersistent->Environment().GetWeather().c_str(); }
 void set_weather(pcstr const weather_name, const bool forced)
 {
     if (!Device.editor_mode())
@@ -639,7 +639,7 @@ void stop_tutorial()
         g_tutorial->Stop();
 }
 
-LPCSTR translate_string(LPCSTR str) { return *StringTable().translate(str); }
+LPCSTR translate_string(LPCSTR str) { return StringTable().translate(str).c_str(); }
 void replace_translate_string(LPCSTR str_id, LPCSTR new_str) { StringTable().replace(str_id, new_str); }
 bool has_active_tutotial() { return (g_tutorial != NULL); }
 

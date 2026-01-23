@@ -135,9 +135,9 @@ shared_str CCustomDetector::GetToggleAnmName(pcstr const type) const
     shared_str anm = make_string("anm_%s", type).c_str();
 
     if (m_bFastAnimMode == EDetectorFastModes::eFast)
-        anm = make_string("%s_fast", *anm).c_str();
+        anm = make_string("%s_fast", anm.c_str()).c_str();
     if (m_bFastAnimMode == EDetectorFastModes::eQuick)
-        anm = make_string("%s_quick", *anm).c_str();
+        anm = make_string("%s_quick", anm.c_str()).c_str();
     if (m_bFastAnimMode == EDetectorFastModes::eInZoomFast)
         anm = "anm_zoom_hide_fast";
 

@@ -645,20 +645,20 @@ void CALifeUpdateManager::checks()
         if (smart_terrain)
             g_checker.AddToDictLog(Dicts::SmartTerrains, smart_terrain->name_replace());
 
-        if (xr_strcmp(*(*I).second->s_name, "campfire") == 0)
+        if (xr_strcmp((*I).second->s_name.c_str(), "campfire") == 0)
             g_checker.AddToDictLog(Dicts::Campfires, (*I).second->name_replace());
-        if (xr_strcmp(*(*I).second->s_name, "inventory_box") == 0)
+        if (xr_strcmp((*I).second->s_name.c_str(), "inventory_box") == 0)
             g_checker.AddToDictLog(Dicts::InventoryBox, (*I).second->name_replace());
-        if (xr_strcmp(*(*I).second->s_name, "space_restrictor") == 0)
+        if (xr_strcmp((*I).second->s_name.c_str(), "space_restrictor") == 0)
             g_checker.AddToDictLog(Dicts::SpaceRestrictor, (*I).second->name_replace());
-        if (xr_strcmp(*(*I).second->s_name, "anomal_zone") == 0)
+        if (xr_strcmp((*I).second->s_name.c_str(), "anomal_zone") == 0)
             g_checker.AddToDictLog(Dicts::AnomalZone, (*I).second->name_replace());
     }
 
     for (const auto& I : g_checker.logic_files)
     {
         string_path fn;
-        FS.update_path(fn, "$game_config$", *I.first);
+        FS.update_path(fn, "$game_config$", I.first.c_str());
         CInifile* ini_file = xr_new<CInifile>(fn, true, true, false);
         for (const auto& section : ini_file->sections())
         {
@@ -671,7 +671,7 @@ void CALifeUpdateManager::checks()
                 {
                     auto it = exists_cover_names.find(value);
                     if (it == exists_cover_names.end())
-                        g_checker.AddToCheckLog(Checks::SmartCovers, make_string("! Сover by name: %s doesn't exist! in file: %s, section: %s", value, *I.first, *section->Name).c_str());
+                        g_checker.AddToCheckLog(Checks::SmartCovers, make_string("! Сover by name: %s doesn't exist! in file: %s, section: %s", value, I.first.c_str(), section->Name.c_str()).c_str());
                 }
             }
 

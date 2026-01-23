@@ -50,7 +50,7 @@ void CHudTuner::ResetToDefaultValues()
         if (wpn)
         {
             wpn->LoadAltHudAim();
-            wpn->LoadAddonSlosts(*wpn->m_section_id);
+            wpn->LoadAddonSlosts(wpn->m_section_id.c_str());
             for (auto& [slot_key, slot] : wpn->m_addon_slots)
             {
                 if (slot == nullptr)
@@ -321,7 +321,7 @@ void CHudTuner::on_tool_frame()
                     ImGui::DragFloat3(hud_adj_modes[ITEM_WRD_POS], (float*)&world_addons_pos, _delta_pos, 0.f, 0.f, "%.7f");
                     for (auto& [slot_id, data] : m_weapon_slots)
                     {
-                        if (pSettings->line_exist(*target_wpn->m_section_id, make_string("addon_%s_offset_world", slot_id.c_str()).c_str()))
+                        if (pSettings->line_exist(target_wpn->m_section_id.c_str(), make_string("addon_%s_offset_world", slot_id.c_str()).c_str()))
                         {
                             ImGui::DragFloat3(make_string("%s W Pos", slot_id.c_str()).c_str(), (float*)&data.pos_w, _delta_pos, 0.f, 0.f, "%.7f");
                             ImGui::DragFloat3(make_string("%s W Rot", slot_id.c_str()).c_str(), (float*)&data.rot_w, _delta_pos, 0.f, 0.f, "%.7f");
@@ -339,7 +339,7 @@ void CHudTuner::on_tool_frame()
                         ImGui::DragFloat3(make_string("%s Pos", slot_id.c_str()).c_str(), (float*)&data.pos, _delta_pos, 0.f, 0.f, "%.7f");
                         ImGui::DragFloat3(make_string("%s Rot", slot_id.c_str()).c_str(), (float*)&data.rot, _delta_pos, 0.f, 0.f, "%.7f");
                         
-                        if (data.bone_2_name != nullptr && xr_strcmp(*data.bone_2_name, "") != 0)
+                        if (data.bone_2_name.c_str() != nullptr && xr_strcmp(data.bone_2_name.c_str(), "") != 0)
                         {
                             ImGui::DragFloat3(make_string("%s Pos 2", slot_id.c_str()).c_str(), (float*)&data.pos_2, _delta_pos, 0.f, 0.f, "%.7f");
                             ImGui::DragFloat3(make_string("%s Rot 2", slot_id.c_str()).c_str(), (float*)&data.rot_2, _delta_pos, 0.f, 0.f, "%.7f");
@@ -409,9 +409,9 @@ void CHudTuner::on_tool_frame()
                     {
                         for (auto& [slot_id, data] : m_weapon_slots)
                         {
-                            xr_sprintf(selectable, "addon_%s_offset = %d,%f,%f,%f,%f,%f,%f%s\n", slot_id.c_str(), data.type, data.pos.x, data.pos.y, data.pos.z, data.rot.x, data.rot.y, data.rot.z, data.bone_name != nullptr && xr_strcmp(*data.bone_name, "") != 0 ? make_string(",%s", *data.bone_name).c_str() : "");
+                            xr_sprintf(selectable, "addon_%s_offset = %d,%f,%f,%f,%f,%f,%f%s\n", slot_id.c_str(), data.type, data.pos.x, data.pos.y, data.pos.z, data.rot.x, data.rot.y, data.rot.z, data.bone_name.c_str() != nullptr && xr_strcmp(data.bone_name.c_str(), "") != 0 ? make_string(",%s", data.bone_name.c_str()).c_str() : "");
                             ImGui::LogText("%s", selectable);
-                            if (data.bone_2_name != nullptr && xr_strcmp(*data.bone_2_name, "") != 0)
+                            if (data.bone_2_name.c_str() != nullptr && xr_strcmp(data.bone_2_name.c_str(), "") != 0)
                             {
                                 xr_sprintf(selectable, "addon_%s_offset_2 = %f,%f,%f,%f,%f,%f\n", slot_id.c_str(), data.pos_2.x, data.pos_2.y, data.pos_2.z, data.rot_2.x, data.rot_2.y, data.rot_2.z);
                                 ImGui::LogText("%s", selectable);
@@ -419,7 +419,7 @@ void CHudTuner::on_tool_frame()
                             if (RQ.O)
                             {
                                 CWeapon* target_wpn = smart_cast<CWeapon*>(RQ.O);
-                                if (target_wpn && pSettings->line_exist(*target_wpn->m_section_id, make_string("addon_%s_offset_world", slot_id.c_str()).c_str()))
+                                if (target_wpn && pSettings->line_exist(target_wpn->m_section_id.c_str(), make_string("addon_%s_offset_world", slot_id.c_str()).c_str()))
                                 {
                                     xr_sprintf(selectable, "addon_%s_offset_world = %f,%f,%f,%f,%f,%f\n", slot_id.c_str(), data.pos_w.x, data.pos_w.y, data.pos_w.z, data.rot_w.x, data.rot_w.y, data.rot_w.z);
                                     ImGui::LogText("%s", selectable);

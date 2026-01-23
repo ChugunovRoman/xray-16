@@ -186,7 +186,7 @@ void CEatableItemObject::PlayCamAnim(LPCSTR name)
     if (CActor* pActor = smart_cast<CActor*>(H_Parent()))
     {
         shared_str anms = cam_anims[name];
-        if (*anms)
+        if (anms.c_str())
         {
             const int count = _GetItemCount(anms.c_str());
             string512 str_item;
@@ -197,7 +197,7 @@ void CEatableItemObject::PlayCamAnim(LPCSTR name)
 
             string_path fn;
             if (!FS.exist(fn, "$game_anims$", str_item))
-                FATAL(make_string("! ERROR: Cam animation doesn't exist '%s' for prop '%s' in weapon '%s'", str_item, name, *cName()).c_str());
+                FATAL(make_string("! ERROR: Cam animation doesn't exist '%s' for prop '%s' in weapon '%s'", str_item, name, cName().c_str()).c_str());
 
             CAnimatorCamEffectorScriptCB* e = xr_new<CAnimatorCamEffectorScriptCB>("");
             e->SetType(ECamEffectorType::cefAnsel);

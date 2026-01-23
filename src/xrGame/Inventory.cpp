@@ -210,7 +210,7 @@ void CInventory::Take(CGameObject* pObj, bool bNotActivate, bool strict_placemen
             pIItem->m_ItemCurrPlace.type = eItemPlaceUndefined;
 #ifdef DEBUG
         if (!result)
-            Msg("cant put in belt item %s", *pIItem->object().cName());
+            Msg("cant put in belt item %s", pIItem->object().cName().c_str());
 #endif
 
         break;
@@ -220,7 +220,7 @@ void CInventory::Take(CGameObject* pObj, bool bNotActivate, bool strict_placemen
             pIItem->m_ItemCurrPlace.type = eItemPlaceUndefined;
 #ifdef DEBUG
         if (!result)
-            Msg("cant put in ruck item %s", *pIItem->object().cName());
+            Msg("cant put in ruck item %s", pIItem->object().cName().c_str());
 #endif
 
         break;
@@ -230,7 +230,7 @@ void CInventory::Take(CGameObject* pObj, bool bNotActivate, bool strict_placemen
             pIItem->m_ItemCurrPlace.type = eItemPlaceUndefined;
 #ifdef DEBUG
         if (!result)
-            Msg("cant slot in slot item %s", *pIItem->object().cName());
+            Msg("cant slot in slot item %s", pIItem->object().cName().c_str());
 #endif
         break;
     }
@@ -1426,7 +1426,7 @@ bool CInventory::CanTakeItem(CInventoryItem* inventory_item) const
     for (it = m_all.begin(); it != m_all.end(); ++it)
         if ((*it)->object().ID() == inventory_item->object().ID())
             break;
-    VERIFY3(it == m_all.end(), "item already exists in inventory", *inventory_item->object().cName());
+    VERIFY3(it == m_all.end(), "item already exists in inventory", inventory_item->object().cName().c_str());
 
     CActor* pActor = smart_cast<CActor*>(m_pOwner);
     //актер всегда может взять вещь
@@ -1438,6 +1438,8 @@ bool CInventory::CanTakeItem(CInventoryItem* inventory_item) const
 
 u32 CInventory::BeltWidth() const
 {
+    if (ShadowOfChernobylMode)
+        return m_iMaxBelt;
     CActor* pActor = smart_cast<CActor*>(m_pOwner);
     if (pActor)
     {

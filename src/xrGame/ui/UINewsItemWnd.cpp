@@ -62,7 +62,7 @@ void CUINewsItemWnd::Setup(GAME_NEWS_DATA& news_data)
     m_UIText->AdjustHeightToText();
     float h1 = m_UIText->GetWndPos().y + m_UIText->GetHeight() + 6.0f;
 
-    if (news_data.faction_name != nullptr)
+    if (news_data.faction_name.c_str() != nullptr)
     {
         pcstr icon = pSettingsFE->read_if_exists<pcstr>(news_data.faction_name.c_str(), "icon", make_string("icons\\patches\\%s", news_data.faction_name.c_str()).c_str());
         pcstr sms_bg = pSettingsFE->read_if_exists<pcstr>(news_data.faction_name.c_str(), "sms_bg", "ui\\icons\\sms\\sms7");

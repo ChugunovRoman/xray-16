@@ -470,7 +470,7 @@ void CSE_ALifeObject::STATE_Read(NET_Packet& tNetPacket, u16 size)
         tNetPacket.r_u32(m_spawn_story_id);
 
     if (strstr(Core.Params, "-checks"))
-        g_checker.AddToDictLog(Dicts::AllSpawns, make_string("section: %s name: %s", *s_name, name_replace()).c_str());
+        g_checker.AddToDictLog(Dicts::AllSpawns, make_string("section: %s name: %s", s_name.c_str(), name_replace()).c_str());
 }
 
 void CSE_ALifeObject::UPDATE_Write(NET_Packet& /*tNetPacket*/) {}
@@ -478,7 +478,7 @@ void CSE_ALifeObject::UPDATE_Read(NET_Packet& /*tNetPacket*/) {};
 
 void CSE_ALifeObject::check_ini()
 {
-    IReader reader((void*)(*(m_ini_string)), m_ini_string.size());
+    IReader reader((void*)(m_ini_string.c_str()), m_ini_string.size());
     m_ini_file = xr_new<CInifile>(&reader, FS.get_path("$game_config$")->m_Path);
     shared_str key = s_name;
     auto line = strstr(m_ini_string.c_str(), "cfg");
@@ -493,7 +493,7 @@ void CSE_ALifeObject::check_ini()
             _path.erase(spaceIndex);
         _Trim(_path);
         if (!FS.exist(fn, "$game_config$", _path.c_str()))
-            g_checker.AddToCheckLog(Checks::ScriptsLogicFiles, make_string("! Config file [%s] doesn't exist ! s_name: [%s] object: [%s] spaceIndex: [%d] line: (%s)", _path.c_str(), *s_name, name_replace(), spaceIndex, line).c_str());
+            g_checker.AddToCheckLog(Checks::ScriptsLogicFiles, make_string("! Config file [%s] doesn't exist ! s_name: [%s] object: [%s] spaceIndex: [%d] line: (%s)", _path.c_str(), s_name.c_str(), name_replace(), spaceIndex, line).c_str());
         else
         {
             g_checker.logic_files[_path.c_str()] = true;

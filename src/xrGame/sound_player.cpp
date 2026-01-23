@@ -169,7 +169,7 @@ void CSoundPlayer::play(
     {
 #ifdef DEBUG
         Msg("- There are no sounds in sound collection \"%s\" with internal type %d (sound_script = %d)",
-            *sound.m_sound_prefix, internal_type, StalkerSpace::eStalkerSoundScript);
+            sound.m_sound_prefix.c_str(), internal_type, StalkerSpace::eStalkerSoundScript);
 #endif
         return;
     }
@@ -201,7 +201,7 @@ void CSoundPlayer::play(
 
     if (sound_single.m_sound->_get() == nullptr)
     {
-        Msg("CSoundPlayer::play getted object pointer is null *sound.m_sound_prefix=[%s] m_object name=[%s] visual name=[%s]", *sound.m_sound_prefix, *m_object->cName(), *m_object->cNameVisual());
+        Msg("CSoundPlayer::play getted object pointer is null *sound.m_sound_prefix=[%s] m_object name=[%s] visual name=[%s]", sound.m_sound_prefix.c_str(), m_object->cName().c_str(), m_object->cNameVisual().c_str());
         return;
     }
 
@@ -245,12 +245,12 @@ CSoundPlayer::CSoundCollection::CSoundCollection(const CSoundCollectionParams& p
 {
     seed(u32(CPU::QPC() & 0xffffffff));
     m_sounds.clear();
-    for (int j = 0, N = _GetItemCount(*params.m_sound_prefix); j < N; ++j)
+    for (int j = 0, N = _GetItemCount(params.m_sound_prefix.c_str()); j < N; ++j)
     {
         string_path fn, s, temp;
         pstr S = (pstr)&s;
-        _GetItem(*params.m_sound_prefix, j, temp);
-        strconcat(sizeof(s), S, *params.m_sound_player_prefix, temp);
+        _GetItem(params.m_sound_prefix.c_str(), j, temp);
+        strconcat(sizeof(s), S, params.m_sound_player_prefix.c_str(), temp);
         if (FS.exist(fn, "$game_sounds$", S, ".ogg"))
         {
             ref_sound* temp = add(params.m_type, S);
@@ -271,7 +271,7 @@ CSoundPlayer::CSoundCollection::CSoundCollection(const CSoundCollectionParams& p
     }
 #ifdef DEBUG
     if (m_sounds.empty())
-        Msg("- There are no sounds with prefix %s", *params.m_sound_prefix);
+        Msg("- There are no sounds with prefix %s", params.m_sound_prefix.c_str());
 #endif
 }
 

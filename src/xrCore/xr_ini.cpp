@@ -394,7 +394,7 @@ static void insert_item(CInifile::Sect* tgt, const CInifile::Item& I)
         }
         catch (...)
         {
-            Msg("insert_item, sect_it->first=[%s] I.first=[%s] I.second=[%s]", sect_it != tgt->Data.end() ? *sect_it->first : "endhui", *I.first, *I.second);
+            Msg("insert_item, sect_it->first=[%s] I.first=[%s] I.second=[%s]", sect_it != tgt->Data.end() ? sect_it->first.c_str() : "endhui", I.first.c_str(), I.second.c_str());
         }
     }
 }

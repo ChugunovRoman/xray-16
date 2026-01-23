@@ -390,7 +390,7 @@ void CWeapon::Load(LPCSTR section)
 
     if (bUseAttachmentSystem)
     {
-        Fvector4 w_pos = pSettings->read_if_exists<Fvector4>(*m_section_id, "attachment_system_offset_on_world_model", Fvector4().set(0.f, 0.f, 0.f, 0.f));
+        Fvector4 w_pos = pSettings->read_if_exists<Fvector4>(m_section_id.c_str(), "attachment_system_offset_on_world_model", Fvector4().set(0.f, 0.f, 0.f, 0.f));
         bAttachmentSystemOffsetOnWorldModel.identity();
         bAttachmentSystemOffsetOnWorldModel.setHPB(0.0f, 0.0f, w_pos.w);
         bAttachmentSystemOffsetOnWorldModel.translate_over(w_pos.x, w_pos.y, w_pos.z);
@@ -826,24 +826,24 @@ void CWeapon::LoadCurrentScopeParams(LPCSTR section)
     }
 
     if(bUseAttachmentSystem)
-        Load3DScopeParams(*scope_name);
+        Load3DScopeParams(scope_name.c_str());
     else
         Load3DScopeParams(section);
 
-    m_zoom_params.m_fScopeZoomFactor = pSettings->read_if_exists<float>(*scope_name, "scope_zoom_factor", 83.3f);
-    m_zoom_params.m_fSecondScopeZoomFactor = pSettings->read_if_exists<float>(*scope_name, "scope_zoom_factor_alt", 73.0f);
+    m_zoom_params.m_fScopeZoomFactor = pSettings->read_if_exists<float>(scope_name.c_str(), "scope_zoom_factor", 83.3f);
+    m_zoom_params.m_fSecondScopeZoomFactor = pSettings->read_if_exists<float>(scope_name.c_str(), "scope_zoom_factor_alt", 73.0f);
 
     if (bScopeIsHasTexture || bIsSecondVPZoomPresent())
     {
         if (bIsSecondVPZoomPresent())
-            bNVsecondVPavaible = !!pSettings->line_exist(*scope_name, "scope_nightvision");
+            bNVsecondVPavaible = !!pSettings->line_exist(scope_name.c_str(), "scope_nightvision");
 
         if (!m_zoom_params.m_sUseZoomPostprocess.size() || bUseAttachmentSystem)
         {
             if(bUseAttachmentSystem)
             {
-                m_zoom_params.m_sUseZoomPostprocess = READ_IF_EXISTS(pSettings, r_string, *scope_name, "scope_nightvision", 0);
-                m_zoom_params.m_bUseDynamicZoom = READ_IF_EXISTS(pSettings, r_bool, *scope_name, "scope_dynamic_zoom", FALSE);
+                m_zoom_params.m_sUseZoomPostprocess = READ_IF_EXISTS(pSettings, r_string, scope_name.c_str(), "scope_nightvision", 0);
+                m_zoom_params.m_bUseDynamicZoom = READ_IF_EXISTS(pSettings, r_bool, scope_name.c_str(), "scope_dynamic_zoom", FALSE);
             }
             else
             {
@@ -857,8 +857,8 @@ void CWeapon::LoadCurrentScopeParams(LPCSTR section)
         {
             if(bUseAttachmentSystem)
             {
-                m_fZoomStepCount = READ_IF_EXISTS(pSettings, r_u8, *scope_name, "scope_zoom_steps", 3.0f);
-                m_fZoomMinKoeff = READ_IF_EXISTS(pSettings, r_u8, *scope_name, "min_zoom_k", 0.3f);
+                m_fZoomStepCount = READ_IF_EXISTS(pSettings, r_u8, scope_name.c_str(), "scope_zoom_steps", 3.0f);
+                m_fZoomMinKoeff = READ_IF_EXISTS(pSettings, r_u8, scope_name.c_str(), "min_zoom_k", 0.3f);
             }
             else
             {
@@ -870,7 +870,7 @@ void CWeapon::LoadCurrentScopeParams(LPCSTR section)
         if (!m_zoom_params.m_sUseBinocularVision.size() || bUseAttachmentSystem)
         {
             if(bUseAttachmentSystem)
-                m_zoom_params.m_sUseBinocularVision = READ_IF_EXISTS(pSettings, r_string, *scope_name, "scope_alive_detector", 0);
+                m_zoom_params.m_sUseBinocularVision = READ_IF_EXISTS(pSettings, r_string, scope_name.c_str(), "scope_alive_detector", 0);
             else
                 m_zoom_params.m_sUseBinocularVision = READ_IF_EXISTS(pSettings, r_string, section, "scope_alive_detector", 0);
         }
@@ -882,7 +882,7 @@ void CWeapon::LoadCurrentScopeParams(LPCSTR section)
     }
 
     if(bUseAttachmentSystem)
-        m_fScopeInertionFactor = READ_IF_EXISTS(pSettings, r_float, *scope_name, "scope_inertion_factor", m_fControlInertionFactor);
+        m_fScopeInertionFactor = READ_IF_EXISTS(pSettings, r_float, scope_name.c_str(), "scope_inertion_factor", m_fControlInertionFactor);
     else
         m_fScopeInertionFactor = READ_IF_EXISTS(pSettings, r_float, section, "scope_inertion_factor", m_fControlInertionFactor);
 
@@ -921,8 +921,8 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
 
     m_flagsAddOnState = E->m_addon_flags.get();
     m_ammoType = E->ammo_type;
-    if (pSettings->line_exist(*m_section_id, "scope_zoom_factor"))
-        m_zoom_params.m_fScopeZoomFactor = pSettings->r_float(*m_section_id, "scope_zoom_factor");
+    if (pSettings->line_exist(m_section_id.c_str(), "scope_zoom_factor"))
+        m_zoom_params.m_fScopeZoomFactor = pSettings->r_float(m_section_id.c_str(), "scope_zoom_factor");
 
     m_fRTZoomFactor = m_zoom_params.m_fScopeZoomFactor;
     SetState(E->wpn_state);
@@ -1135,7 +1135,7 @@ void CWeapon::load(IReader& input_packet)
         addAddon(data);
     }
 
-    reload(*m_section_id);
+    reload(m_section_id.c_str());
 
     if (iAmmoElapsed == (u16)-1)
         iAmmoElapsed = 0;       
@@ -1829,7 +1829,7 @@ bool CWeapon::IsGrenadeLauncherAttached() const
 
 ALife::EWeaponAddonStatus CWeapon::GetScopeStatusParent() const
 {
-    pcstr section = pSettings->read_if_exists<pcstr>(*m_section_id, "parent_section", *m_section_id);
+    pcstr section = pSettings->read_if_exists<pcstr>(m_section_id.c_str(), "parent_section", m_section_id.c_str());
     return (ALife::EWeaponAddonStatus)pSettings->r_s32(section, "scope_status");
 }
 bool CWeapon::IsScopePermament() const
@@ -1873,10 +1873,10 @@ bool CWeapon::mainScopeSlotIsBusy() const
             m_addon_slots[addon->slot]->transform.getHPB(hpb.x, hpb.y, hpb.z);
             if (fis_zero(hpb.z))
             {
-                if (xr_strcmp(*addon->addon_type, "attachment") == 0)
+                if (xr_strcmp(addon->addon_type.c_str(), "attachment") == 0)
                 {
                     for (auto [addon_id2, addon2]: m_addon_items)
-                        if (addon2->parent_id == addon_id && xr_strcmp(*addon2->addon_type, "attachment") != 0)
+                        if (addon2->parent_id == addon_id && xr_strcmp(addon2->addon_type.c_str(), "attachment") != 0)
                             return true;
                 }
                 else
@@ -1896,9 +1896,9 @@ bool CWeapon::ScopeAttachable()
     if (pSettings->line_exist(m_section_id.c_str(), "parent_section"))
     {
         shared_str parent = pSettings->r_string(m_section_id.c_str(), "parent_section");
-        if (pSettings->line_exist(*parent, "scope_status"))
+        if (pSettings->line_exist(parent.c_str(), "scope_status"))
         {
-            if (pSettings->r_s32(*parent, "scope_status") == ALife::EWeaponAddonStatus::eAddonAttachable)
+            if (pSettings->r_s32(parent.c_str(), "scope_status") == ALife::EWeaponAddonStatus::eAddonAttachable)
                 return true;
         }
     }
@@ -2048,12 +2048,12 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
     if (bUseAttachmentSystem)
     {
         auto load_slot = [&](shared_str line_name, shared_str slot_key) {
-            if (!pSettings->line_exist(section, *line_name))
+            if (!pSettings->line_exist(section, line_name.c_str()))
                 return;
 
             addon_slot* slot = xr_new<addon_slot>();
-            shared_str line_name_world = make_string("%s_world", *line_name).c_str();
-            pcstr str = pSettings->r_string(section, *line_name);
+            shared_str line_name_world = make_string("%s_world", line_name.c_str()).c_str();
+            pcstr str = pSettings->r_string(section, line_name.c_str());
             string128 bone_str = "";
             string128 bone_name = "";
             string128 bone_2_name = "";
@@ -2068,7 +2068,7 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
                 _GetItem(bone_str, 1, bone_2_name);
                 _GetItem(bone_str, 0, bone_name);
 
-                shared_str line_name_pos_2 = make_string("%s_2", *line_name).c_str();
+                shared_str line_name_pos_2 = make_string("%s_2", line_name.c_str()).c_str();
                 if (pSettings->line_exist(section, line_name_pos_2.c_str()))
                 {
                     Fvector3 pos_2 = {0.f, 0.f, 0.f};
@@ -2115,7 +2115,7 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
             while (true)
             {
                 line_name = make_string(format, index).c_str();
-                if (!pSettings->line_exist(section, *line_name))
+                if (!pSettings->line_exist(section, line_name.c_str()))
                     break;
 
                 slot_key = make_string("slot_%d", index).c_str();
@@ -2142,11 +2142,11 @@ shared_str CWeapon::GetSlotKey(shared_str slot_name, u32 addon_parent_id, u32 ad
 {
     if (m_addon_items[addon_parent_id]->parent_id == 0)
     {
-        return make_string("%s.%s.%s", *m_addon_items[addon_parent_id]->slot, *m_addon_items[addon_parent_id]->addon_item_name, *slot_name).c_str();
+        return make_string("%s.%s.%s", m_addon_items[addon_parent_id]->slot.c_str(), m_addon_items[addon_parent_id]->addon_item_name.c_str(), slot_name.c_str()).c_str();
     }
     else
     {
-        shared_str key = make_string("%s.%s.%s", *m_addon_items[addon_parent_id]->slot, *m_addon_items[addon_parent_id]->addon_item_name, *slot_name).c_str();
+        shared_str key = make_string("%s.%s.%s", m_addon_items[addon_parent_id]->slot.c_str(), m_addon_items[addon_parent_id]->addon_item_name.c_str(), slot_name.c_str()).c_str();
         return GetSlotKey(key, m_addon_items[addon_parent_id]->parent_id, addon_parent_id).c_str();
     }
 }
@@ -2158,8 +2158,8 @@ void CWeapon::SpawnDefaultAddons()
     for (auto [slot_key, slot] : m_addon_slots)
     {
         shared_str default_addon = "";
-        if (pSettings->line_exist(*m_section_id, *slot_key))
-            default_addon = pSettings->r_string(*m_section_id, *slot_key);
+        if (pSettings->line_exist(m_section_id.c_str(), slot_key.c_str()))
+            default_addon = pSettings->r_string(m_section_id.c_str(), slot_key.c_str());
         if (pSettings->section_exist(default_addon.c_str()))
         {
             auto addon = GetAddonFromSlot(0, slot_key);
@@ -2186,7 +2186,7 @@ void CWeapon::SpawnDefaultAddons()
     }
 
     auto load_attachment = [&](const char* slot_name, u32 parent, const char* key) {
-        shared_str addon_str = pSettings->r_string(*m_section_id, key);
+        shared_str addon_str = pSettings->r_string(m_section_id.c_str(), key);
         string128 addon_section;
         string128 addon_ort = "";
         u16 count = _GetItemCount(addon_str.c_str(), '|');
@@ -2229,17 +2229,17 @@ void CWeapon::SpawnDefaultAddons()
             
             for (auto [slot_name, slot] : addon->addon_slots)
             {
-                shared_str key = make_string("%s.%s.%s", *addon->slot, *addon->addon_item_name, *slot_name).c_str();
+                shared_str key = make_string("%s.%s.%s", addon->slot.c_str(), addon->addon_item_name.c_str(), slot_name.c_str()).c_str();
                 if (addon->parent_id != 0)
-                    key = GetSlotKey(*key, addon->parent_id, addon_id);
+                    key = GetSlotKey(key.c_str(), addon->parent_id, addon_id);
 
-                if (pSettings->line_exist(*m_section_id, *key))
+                if (pSettings->line_exist(m_section_id.c_str(), key.c_str()))
                 {
-                    shared_str addon_str = pSettings->r_string(*m_section_id, *key);
+                    shared_str addon_str = pSettings->r_string(m_section_id.c_str(), key.c_str());
                     string128 addon_section;
                     _GetItem(addon_str.c_str(), 0, addon_section, '|');
 
-                    load_attachment(*slot.slot_name, addon_id, *key);
+                    load_attachment(slot.slot_name.c_str(), addon_id, key.c_str());
 
                     addon_with_slot_has_been_added = true;
                 }
@@ -2658,7 +2658,7 @@ void CWeapon::reload(LPCSTR section)
             m_hands_offset[1][1] = pSettings->r_fvector3(base_hud_sect, val_name);
     }
 
-    LoadCurrentScopeParams(*m_section_id);
+    LoadCurrentScopeParams(m_section_id.c_str());
 }
 
 void CWeapon::create_physic_shell() { CPhysicsShellHolder::create_physic_shell(); }
@@ -3296,7 +3296,7 @@ float CWeapon::Weight() const
     if (bUseAttachmentSystem)
     {
         for (auto [addon_id, addon]: m_addon_items)
-            res += pSettings->r_float(*addon->addon_item_name, "inv_weight");
+            res += pSettings->r_float(addon->addon_item_name.c_str(), "inv_weight");
     }
 
     if (IsGrenadeLauncherAttached() && GetGrenadeLauncherName().size())
@@ -3633,27 +3633,27 @@ bool CWeapon::DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool fo
     auto slots = wpn->getAvaliableSlots();
     for (auto slot : slots)
     {
-        if (slot.parent == 0 && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by == nullptr && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by.c_str() == nullptr && slot.slot_type == pScope->m_slot_type)
             wpn_1_slot = slot;
-        if (slot.parent == 0 && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by != nullptr && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by.c_str() != nullptr && slot.slot_type == pScope->m_slot_type)
             wpn_1_slot_busy_but_compatible = slot;
-        if (slot.parent == 0 && slot.busy_by == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_2") == 0 && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_2") == 0 && slot.slot_type == pScope->m_slot_type)
             wpn_2_slot = slot;
-        if (slot.parent == 0 && slot.busy_by == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_3") && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_3") && slot.slot_type == pScope->m_slot_type)
             wpn_3_slot = slot;
-        if (slot.parent == 0 && slot.busy_by == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_4") && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_4") && slot.slot_type == pScope->m_slot_type)
             wpn_4_slot = slot;
-        if (slot.parent == 0 && slot.busy_by == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_5") && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_5") && slot.slot_type == pScope->m_slot_type)
             wpn_5_slot = slot;
-        if (slot.parent == 0 && slot.busy_by == nullptr && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && slot.slot_type == pScope->m_slot_type)
             wpn_last_free_slot = slot;
-        if (slot.parent != 0 && slot.busy_by == nullptr && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent != 0 && slot.busy_by.c_str() == nullptr && slot.slot_type == pScope->m_slot_type)
             free_slot = slot;
-        if ((slot.parent_section != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by == nullptr && slot.slot_type == pScope->m_slot_type)
+        if ((slot.parent_section.c_str() != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by.c_str() == nullptr && slot.slot_type == pScope->m_slot_type)
             plnk_1_slot = slot;
-        if ((slot.parent_section != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by != nullptr && slot.slot_type == pScope->m_slot_type)
+        if ((slot.parent_section.c_str() != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by.c_str() != nullptr && slot.slot_type == pScope->m_slot_type)
             plnk_1_slot_busy_but_compatible = slot;
-        if ((slot.parent_section != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), "slot_2") == 0 && slot.busy_by == nullptr && slot.slot_type == pScope->m_slot_type)
+        if ((slot.parent_section.c_str() != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), "slot_2") == 0 && slot.busy_by.c_str() == nullptr && slot.slot_type == pScope->m_slot_type)
             plnk_2_slot = slot;
     }
 
@@ -3866,7 +3866,7 @@ shared_str CWeapon::GetInstalledTacGripType()
 bool CWeapon::HasAddonByName(shared_str name)
 {
     for (auto [addon_id, addon]: m_addon_items)
-        if (xr_strcmp(*addon->addon_item_name, *name) == 0)
+        if (xr_strcmp(addon->addon_item_name.c_str(), name.c_str()) == 0)
             return true;
 
     return false;
@@ -3905,7 +3905,7 @@ xr_vector<addon_slot> CWeapon::getAvaliableSlots() const
     }
     for (auto [addon_id, addon]: m_addon_items)
     {
-        if (addon->slot == nullptr || xr_strcmp(*addon->slot, "") == 0)
+        if (addon->slot.c_str() == nullptr || xr_strcmp(addon->slot.c_str(), "") == 0)
             continue;
 
         std::for_each(slots.begin(), slots.end(), [&addon](addon_slot& slot) {
@@ -3952,9 +3952,9 @@ void CWeapon::addAddon(AddAddonData data)
     new_addon->has_mag_size = data.has_mag_size;
     new_addon->was_inited_in_default_slots = data.was_inited_in_default_slots;
     
-    if (pSettings->line_exist(*new_addon->addon_item_name, "ammo_mag_size"))
+    if (pSettings->line_exist(new_addon->addon_item_name.c_str(), "ammo_mag_size"))
     {
-        iMagazineSize = pSettings->r_u32(*new_addon->addon_item_name, "ammo_mag_size");
+        iMagazineSize = pSettings->r_u32(new_addon->addon_item_name.c_str(), "ammo_mag_size");
         new_addon->has_mag_size = true;
 
         NET_Packet P;
@@ -3970,12 +3970,12 @@ void CWeapon::addAddon(AddAddonData data)
     if (data.has_ort)
     {
         shared_str prop = new_addon->ort == CInventoryItem::EIIAddonOrt::FOrtRight ? "visual_right" : "visual";
-        new_addon->addon_item_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*new_addon->addon_item_name, *prop)));
+        new_addon->addon_item_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(new_addon->addon_item_name.c_str(), prop.c_str())));
         new_addon->prop_model_name = prop;
     }
     else
     {
-        new_addon->addon_item_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*new_addon->addon_item_name, "visual")));
+        new_addon->addon_item_model = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(new_addon->addon_item_name.c_str(), "visual")));
         new_addon->prop_model_name = "visual";
     }
 
@@ -3996,21 +3996,21 @@ void CWeapon::addAddon(AddAddonData data)
     R_ASSERT3(parent_item, "Parent addon not found by id", make_string("%d", new_addon->parent_id).c_str());
     new_addon->parent = parent_item->addon_item_name;
     
-    if((new_addon->parent_id == 0 && xr_strcmp(*new_addon->slot, WPN_MAIN_SLOT) == 0) || parent_item->on_first_line)
+    if((new_addon->parent_id == 0 && xr_strcmp(new_addon->slot.c_str(), WPN_MAIN_SLOT) == 0) || parent_item->on_first_line)
         new_addon->on_first_line = true;
 
     addon_slot target_slot = new_addon->parent_id == 0 ? *m_addon_slots[new_addon->slot] : parent_item->addon_slots[new_addon->slot];
     Fmatrix slot_transform = target_slot.transform;
     
-    bool has_bone = target_slot.bone_name != nullptr && xr_strcmp(*target_slot.bone_name, "") != 0;
-    bool has_bone_2 = target_slot.bone_2_name != nullptr && xr_strcmp(*target_slot.bone_2_name, "") != 0;
+    bool has_bone = target_slot.bone_name.c_str() != nullptr && xr_strcmp(target_slot.bone_name.c_str(), "") != 0;
+    bool has_bone_2 = target_slot.bone_2_name.c_str() != nullptr && xr_strcmp(target_slot.bone_2_name.c_str(), "") != 0;
     new_addon->bone_name = has_bone ? target_slot.bone_name : parent_item->bone_name;
     new_addon->bone_2_name = has_bone_2 ? target_slot.bone_2_name : parent_item->bone_2_name;
 
     new_addon->has_bone_2 = has_bone_2;
 
-    if (target_slot.bone_2_name != nullptr)
-        new_addon->addon_item_model_2 = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*new_addon->addon_item_name, "visual")));
+    if (target_slot.bone_2_name.c_str() != nullptr)
+        new_addon->addon_item_model_2 = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(new_addon->addon_item_name.c_str(), "visual")));
     
     Fvector slot_rot;
     slot_transform.getHPB(slot_rot.x, slot_rot.y, slot_rot.z);
@@ -4073,14 +4073,14 @@ void CWeapon::addAddon(AddAddonData data)
     if (bone_id != BI_NONE)
     {
         // Скрываем все кости у второй модели ЛЦУ кроме рутовой и dot
-        new_addon->addon_item_model_dot = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(*data.item_section_id, "visual")));
+        new_addon->addon_item_model_dot = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(data.item_section_id.c_str(), "visual")));
         new_addon->addon_item_model_dot->CalculateBones_Invalidate();
         new_addon->addon_item_model_dot->CalculateBones(TRUE);
         for (const auto& [bone_name, bi] : *new_addon->addon_item_model_dot->LL_Bones())
         {
             if (bi == new_addon->addon_item_model_dot->LL_GetBoneRoot())
                 continue;
-            if (xr_strcmp(*bone_name, DOT) == 0)
+            if (xr_strcmp(bone_name.c_str(), DOT) == 0)
                 continue;
 
             new_addon->addon_item_model_dot->LL_SetBoneVisible(bi, FALSE, FALSE);
@@ -4146,10 +4146,10 @@ void CWeapon::get_aim_offset_to_center(
     Fmatrix hand_ancor_transform = hi->m_parent->tmp;
 
     // 2. Получаем трансформацию кости оружия к которой прикреплен аддон если такая кость была указана в конфиге
-    bool has_bone = bone_name != nullptr && xr_strcmp(*bone_name, "") != 0;
+    bool has_bone = bone_name.c_str() != nullptr && xr_strcmp(bone_name.c_str(), "") != 0;
     if (has_bone)
     {
-        const u16 bone_id = hi->m_model_2->LL_BoneID(*bone_name);
+        const u16 bone_id = hi->m_model_2->LL_BoneID(bone_name.c_str());
         if (bone_id != BI_NONE)
             bone_transform_2.set(hi->m_model_2->LL_GetTransform(bone_id));
     }

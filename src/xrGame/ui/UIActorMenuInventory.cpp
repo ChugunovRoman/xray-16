@@ -447,7 +447,12 @@ void CUIActorMenu::InitInventoryContents(CUIDragDropListEx* pBagList, bool onlyB
 
     SetInvGridSize(curr_list);
 
-    TIItemContainer ruck_list = m_pActorInvOwner->inventory().m_ruck;
+    TIItemContainer ruck_list;
+    if (onlyBagList)
+        m_pActorInvOwner->inventory().AddAvailableItems(ruck_list, true);
+    else
+        ruck_list = m_pActorInvOwner->inventory().m_ruck;
+
     std::sort(ruck_list.begin(), ruck_list.end(), InventoryUtilities::GreaterRoomInRuck);
 
     for (PIItem item : ruck_list)
@@ -1100,13 +1105,13 @@ void CUIActorMenu::PropertiesBoxForWeapon(CUICellItem* cell_item, PIItem item, b
     {
         for (auto [addon_id, addon]: pWeapon->m_addon_items)
         {
-            if (pSettings->line_exist(*pWeapon->m_section_id, *addon->slot))
+            if (pSettings->line_exist(pWeapon->m_section_id.c_str(), addon->slot.c_str()))
                 continue;
-            shared_str addon_name{StringTable().translate(pSettings->r_string(*addon->addon_item_name, "inv_name"))};
-            shared_str str{make_string(StringTable().translate("st_detach_addon").c_str(), *addon_name).c_str()};
+            shared_str addon_name{StringTable().translate(pSettings->r_string(addon->addon_item_name.c_str(), "inv_name"))};
+            shared_str str{make_string(StringTable().translate("st_detach_addon").c_str(), addon_name.c_str()).c_str()};
             DetachItemData* data = xr_new<DetachItemData>();
             data->addon_id = addon_id;
-            m_UIPropertiesBox->AddItem(*str, (void*)data, INVENTORY_DETACH_WEAPON_ADDON);
+            m_UIPropertiesBox->AddItem(str.c_str(), (void*)data, INVENTORY_DETACH_WEAPON_ADDON);
             b_show = true;
         }
     }
@@ -1181,23 +1186,23 @@ void CUIActorMenu::GenerateMenuItemForAddon(PIItem weapon_item, PIItem addon_ite
             continue;
 
         shared_str ort = nullptr;
-        shared_str slot_name = StringTable().translate(*slot.slot_name);
+        shared_str slot_name = StringTable().translate(slot.slot_name.c_str());
 
         if (pScope->m_has_ort)
             ort = StringTable().translate("st_attach_ort_l");
         shared_str str = StringTable().translate("st_attach_scope_to_pistol");
-        str.printf("%s %s", str.c_str(), weapon_item->m_name.c_str());
+        xr_sprintf(str, "%s %s", str.c_str(), weapon_item->m_name.c_str());
         if (slot.parent != 0)
         {
             shared_str addon_name = StringTable().translate(pSettings->r_string(slot.parent_section, "inv_name"));
-            str.printf("%s %s", str.c_str(), *addon_name);
+            xr_sprintf(str, "%s %s", str.c_str(), addon_name.c_str());
         }
-        str.printf("%s %s%s", str.c_str(), *slot_name, ort != nullptr ? *ort : "");
-        if (slot.busy_by != nullptr)
+        xr_sprintf(str, "%s %s%s", str.c_str(), slot_name.c_str(), ort.c_str() != nullptr ? ort.c_str() : "");
+        if (slot.busy_by.c_str() != nullptr)
         {
-            shared_str addon_name = StringTable().translate(pSettings->r_string(*slot.busy_by, "inv_name"));
+            shared_str addon_name = StringTable().translate(pSettings->r_string(slot.busy_by.c_str(), "inv_name"));
             str = StringTable().translate("st_attach_replace_addon");
-            str.printf("%s %s%s %s", str.c_str(), *addon_name, ort != nullptr ? *ort : "", weapon_item->m_name.c_str());
+            xr_sprintf(str, "%s %s%s %s", str.c_str(), addon_name.c_str(), ort.c_str() != nullptr ? ort.c_str() : "", weapon_item->m_name.c_str());
         }
 
         AttchItemData* item = xr_new<AttchItemData>();
@@ -1212,18 +1217,18 @@ void CUIActorMenu::GenerateMenuItemForAddon(PIItem weapon_item, PIItem addon_ite
         {
             ort = StringTable().translate("st_attach_ort_r");
             str = StringTable().translate("st_attach_scope_to_pistol");
-            str.printf("%s %s", str.c_str(), weapon_item->m_name.c_str());
+            xr_sprintf(str, "%s %s", str.c_str(), weapon_item->m_name.c_str());
             if (slot.parent != 0)
             {
                 shared_str addon_name = StringTable().translate(pSettings->r_string(slot.parent_section, "inv_name"));
-                str.printf("%s %s", str.c_str(), *addon_name);
+                xr_sprintf(str, "%s %s", str.c_str(), addon_name.c_str());
             }
-            str.printf("%s %s%s", str.c_str(), *slot_name, ort != nullptr ? *ort : "");
-            if (slot.busy_by != nullptr)
+            xr_sprintf(str, "%s %s%s", str.c_str(), slot_name.c_str(), ort.c_str() != nullptr ? ort.c_str() : "");
+            if (slot.busy_by.c_str() != nullptr)
             {
-                shared_str addon_name = StringTable().translate(pSettings->r_string(*slot.busy_by, "inv_name"));
+                shared_str addon_name = StringTable().translate(pSettings->r_string(slot.busy_by.c_str(), "inv_name"));
                 str = StringTable().translate("st_attach_replace_addon");
-                str.printf("%s %s%s", str.c_str(), *addon_name, ort != nullptr ? *ort : "");
+                xr_sprintf(str, "%s %s%s", str.c_str(), addon_name.c_str(), ort.c_str() != nullptr ? ort.c_str() : "");
             }
             AttchItemData* item2 = xr_new<AttchItemData>();
             item2->m_Item = weapon_item;
@@ -1261,7 +1266,7 @@ void CUIActorMenu::PropertiesBoxForAddon(PIItem item, bool& b_show)
             else
             {
                 shared_str str = StringTable().translate("st_attach_scope_to_pistol");
-                str.printf("%s %s", str.c_str(), item_in_slot_2->m_name.c_str());
+                xr_sprintf(str, "%s %s", str.c_str(), item_in_slot_2->m_name.c_str());
                 AttchItemData* item = xr_new<AttchItemData>();
                 item->m_Item = item_in_slot_2;
                 m_UIPropertiesBox->AddItem(str.c_str(), (void*)item, INVENTORY_ATTACH_ADDON);
@@ -1276,7 +1281,7 @@ void CUIActorMenu::PropertiesBoxForAddon(PIItem item, bool& b_show)
             else
             {
                 shared_str str = StringTable().translate("st_attach_scope_to_pistol");
-                str.printf("%s %s", str.c_str(), item_in_slot_3->m_name.c_str());
+                xr_sprintf(str, "%s %s", str.c_str(), item_in_slot_3->m_name.c_str());
                 AttchItemData* item = xr_new<AttchItemData>();
                 item->m_Item = item_in_slot_3;
                 m_UIPropertiesBox->AddItem(str.c_str(), (void*)item, INVENTORY_ATTACH_ADDON);
@@ -1292,7 +1297,7 @@ void CUIActorMenu::PropertiesBoxForAddon(PIItem item, bool& b_show)
         if (item_in_slot_2 && item_in_slot_2->CanAttach(pSilencer))
         {
             shared_str str = StringTable().translate("st_attach_silencer_to_pistol");
-            str.printf("%s %s", str.c_str(), item_in_slot_2->m_name.c_str());
+            xr_sprintf(str, "%s %s", str.c_str(), item_in_slot_2->m_name.c_str());
             AttchItemData* item = xr_new<AttchItemData>();
             item->m_Item = item_in_slot_2;
             m_UIPropertiesBox->AddItem(str.c_str(), (void*)item, INVENTORY_ATTACH_ADDON);
@@ -1301,7 +1306,7 @@ void CUIActorMenu::PropertiesBoxForAddon(PIItem item, bool& b_show)
         if (item_in_slot_3 && item_in_slot_3->CanAttach(pSilencer))
         {
             shared_str str = StringTable().translate("st_attach_silencer_to_pistol");
-            str.printf("%s %s", str.c_str(), item_in_slot_3->m_name.c_str());
+            xr_sprintf(str, "%s %s", str.c_str(), item_in_slot_3->m_name.c_str());
             AttchItemData* item = xr_new<AttchItemData>();
             item->m_Item = item_in_slot_3;
             m_UIPropertiesBox->AddItem(str.c_str(), (void*)item, INVENTORY_ATTACH_ADDON);
@@ -1315,7 +1320,7 @@ void CUIActorMenu::PropertiesBoxForAddon(PIItem item, bool& b_show)
         if (item_in_slot_2 && item_in_slot_2->CanAttach(pGrenadeLauncher))
         {
             shared_str str = StringTable().translate("st_attach_gl_to_rifle");
-            str.printf("%s %s", str.c_str(), item_in_slot_2->m_name.c_str());
+            xr_sprintf(str, "%s %s", str.c_str(), item_in_slot_2->m_name.c_str());
             AttchItemData* item = xr_new<AttchItemData>();
             item->m_Item = item_in_slot_2;
             m_UIPropertiesBox->AddItem(str.c_str(), (void*)item, INVENTORY_ATTACH_ADDON);
@@ -1324,7 +1329,7 @@ void CUIActorMenu::PropertiesBoxForAddon(PIItem item, bool& b_show)
         if (item_in_slot_3 && item_in_slot_3->CanAttach(pGrenadeLauncher))
         {
             shared_str str = StringTable().translate("st_attach_gl_to_rifle");
-            str.printf("%s %s", str.c_str(), item_in_slot_3->m_name.c_str());
+            xr_sprintf(str, "%s %s", str.c_str(), item_in_slot_3->m_name.c_str());
             AttchItemData* item = xr_new<AttchItemData>();
             item->m_Item = item_in_slot_3;
             m_UIPropertiesBox->AddItem(str.c_str(), (void*)item, INVENTORY_ATTACH_ADDON);
@@ -1725,7 +1730,7 @@ void CUIActorMenu::UpdateOutfit()
 
     if (m_OutfitInfo)
     {
-        m_OutfitInfo->UpdateInfo(outfit, nullptr, true);
+        m_OutfitInfo->UpdateInfo(outfit, nullptr, true, true);
     }
 
     if (ShadowOfChernobylMode)

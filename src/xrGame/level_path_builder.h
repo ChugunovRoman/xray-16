@@ -45,12 +45,12 @@ public:
     {
         R_ASSERT2(ai().level_graph().valid_vertex_id(start_vertex_id),
             make_string(
-                "Can't setup path for object=[%s] start_vertex_id=[%d]", *m_object->object().cName(), start_vertex_id));
+                "Can't setup path for object=[%s] start_vertex_id=[%d]", m_object->object().cName().c_str(), start_vertex_id));
         m_start_vertex_id = start_vertex_id;
 
         R_ASSERT2(ai().level_graph().valid_vertex_id(dest_vertex_id),
             make_string(
-                "Can't setup path for object=[%s] dest_vertex_id=[%d]", *m_object->object().cName(), dest_vertex_id));
+                "Can't setup path for object=[%s] dest_vertex_id=[%d]", m_object->object().cName().c_str(), dest_vertex_id));
         m_dest_vertex_id = dest_vertex_id;
 
         m_extrapolate_path = extrapolate_path;
@@ -65,7 +65,7 @@ public:
                 GEnv.ScriptEngine->script_log(LuaMessageType::Error,
                     "! ERROR: object=[%s] start_vertex_id=[%d] dest_vertex_id=[%d] extrapolate_path=[%d] "
                     "precise_position=[%.8f,%.8f,%.8f]",
-                    *m_object->object().cName(),
+                    m_object->object().cName().c_str(),
                     start_vertex_id, dest_vertex_id, extrapolate_path, precise_position->x, precise_position->y,
                     precise_position->z);
         }

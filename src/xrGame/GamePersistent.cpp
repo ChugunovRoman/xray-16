@@ -485,7 +485,7 @@ void CGamePersistent::checks()
     for (const auto& I : g_checker.logic_files)
     {
         string_path fn;
-        FS.update_path(fn, "$game_config$", *I.first);
+        FS.update_path(fn, "$game_config$", I.first.c_str());
         CInifile* ini_file = xr_new<CInifile>(fn, true, true, false);
         for (const auto& section : ini_file->sections())
         {
@@ -511,7 +511,7 @@ void CGamePersistent::checks()
                         if (it == ai().patrol_paths().patrol_paths().end())
                             g_checker.AddToCheckLog(
                                 Checks::PatrolPaths,
-                                make_string("! Patrol path: %s doesn't exist! Used in file: %s, section: %s", S1, *I.first, *section->Name).c_str()
+                                make_string("! Patrol path: %s doesn't exist! Used in file: %s, section: %s", S1, I.first.c_str(), section->Name.c_str()).c_str()
                             );
 
                         for (auto I : ai().patrol_paths().patrol_paths())
@@ -554,7 +554,7 @@ void CGamePersistent::checks()
                 if (it == ai().patrol_paths().patrol_paths().end())
                     g_checker.AddToCheckLog(
                         Checks::PatrolPaths,
-                        make_string("! Patrol path: %s doesn't exist! Used in section: %s", value, *section->Name).c_str()
+                        make_string("! Patrol path: %s doesn't exist! Used in section: %s", value, section->Name.c_str()).c_str()
                     );
             }
             if (value && key && (

@@ -838,7 +838,7 @@ void CDetailPathManager::build_smooth_path(const xr_vector<u32>& level_path, u32
 
     R_ASSERT2(ai().level_graph().valid_vertex_id(m_dest_vertex_id),
         make_string(
-            "Can't setup path for object=[%s] m_dest_vertex_id=[%d]", *m_restricted_object->object().cName(), m_dest_vertex_id));
+            "Can't setup path for object=[%s] m_dest_vertex_id=[%d]", m_restricted_object->object().cName().c_str(), m_dest_vertex_id));
 
     if (m_restricted_object)
     {
