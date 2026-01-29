@@ -528,45 +528,77 @@ void CHudTuner::on_tool_frame()
                     dbg_center.set(center);
                 }
 
+                // 1. Отображение костей оружия
                 if (draw_bones)
                 {
                     CWeapon* wpn = smart_cast<CWeapon*>(current_hud_item->m_parent_hud_item);
                     if (wpn)
                     {
                         IKinematics* ik = current_hud_item->m_model;
-
                         for (const auto& [bone_name, bone_id] : *ik->LL_Bones())
                         {
-                            auto data = ik->LL_GetTransform(bone_id);
+                            Fmatrix m_res;
+                            // Стандартный mul_43 вместо mulB
+                            m_res.mul_43(current_hud_item->m_item_transform, ik->LL_GetTransform(bone_id));
 
-                            Fmatrix hud_transform;
-                            hud_transform.set(current_hud_item->m_item_transform);
-                            hud_transform.mulB_43(data);
+                            Fvector pos = m_res.c;
+                            current_hud_item->m_parent_hud_item->TransformPosFromWorldToHud(pos);
 
-                            current_hud_item->m_parent_hud_item->TransformPosFromWorldToHud(hud_transform.c);
-                            render.draw_aabb(hud_transform.c, debug_point_size, debug_point_size, debug_point_size, color_xrgb(255, 255, 0));
+                            // Рисуем точку
+                            render.draw_aabb(pos, debug_point_size, debug_point_size, debug_point_size, color_xrgb(255, 255, 0));
+
+                            Fvector text_pos = pos;
+                            text_pos.y += 0.01f;
+                            render.draw_debug_string(bone_name.c_str(), text_pos, 0.002f, color_xrgb(255, 255, 0));
                         }
                     }
                 }
+
+                // 2. Отображение костей аттачментов
                 if (draw_bones_addon)
                 {
                     CWeapon* wpn = smart_cast<CWeapon*>(current_hud_item->m_parent_hud_item);
                     if (wpn && wpn->bUseAttachmentSystem)
                     {
-                        for (auto [addon_id, item]: wpn->m_addon_items)
+                        for (auto [addon_id, item] : wpn->m_addon_items)
                         {
+                            Fmatrix m_addon_visual_root;
+
+                            // 1. Определяем базовую трансформацию аддона
+                            if (item->bone_name.size() > 0)
+                            {
+                                u16 parent_id = current_hud_item->m_model->LL_BoneID(item->bone_name.c_str());
+                                Fmatrix m_parent_bone = current_hud_item->m_model->LL_GetTransform(parent_id);
+
+                                // ВАРИАНТ А: Наследуем ПОЛНУЮ трансформацию кости (с поворотами)
+                                // Это покажет, как кость addon_1 крутит весь прицел
+                                m_addon_visual_root.mul_43(current_hud_item->m_item_transform, m_parent_bone);
+                            }
+                            else
+                            {
+                                // ВАРИАНТ Б: Если кости нет, берем из конфига (как раньше)
+                                m_addon_visual_root.mul_43(current_hud_item->m_item_transform, item->addon_item_pos);
+                            }
+
+                            // 2. Рендерим кости внутри этой системы координат
                             for (const auto& [bone_name, bone_id] : *item->addon_item_model->LL_Bones())
                             {
-                                auto data = item->addon_item_model->LL_GetTransform(bone_id);
-
-                                Fmatrix hud_transform;
-                                hud_transform.set(current_hud_item->m_item_transform);
+                                Fmatrix m_bone_local = item->addon_item_model->LL_GetTransform(bone_id);
                                 
-                                hud_transform.mulB_43(item->addon_item_pos);
-                                hud_transform.mulB_43(data);
+                                Fmatrix m_final;
+                                // Умножаем базу на локальную матрицу кости аддона
+                                m_final.mul_43(m_addon_visual_root, m_bone_local);
 
-                                current_hud_item->m_parent_hud_item->TransformPosFromWorldToHud(hud_transform.c);
-                                render.draw_aabb(hud_transform.c, 0.002, 0.002, 0.002, color_xrgb(0, 255, 255));
+                                Fvector pos = m_final.c;
+                                current_hud_item->m_parent_hud_item->TransformPosFromWorldToHud(pos);
+                                
+                                // Рендерим точку (Cyan для костей аддона)
+                                render.draw_aabb(pos, 0.002f, 0.002f, 0.002f, color_xrgb(0, 255, 255));
+                                
+                                // Рендерим текст
+                                Fvector text_p = pos;
+                                text_p.y += 0.005f;
+                                render.draw_debug_string(bone_name.c_str(), text_p, 0.002f, color_xrgb(0, 255, 255));
                             }
                         }
                     }

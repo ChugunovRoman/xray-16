@@ -259,8 +259,6 @@ bool attachable_hud_item::need_renderable() const { return m_parent_hud_item->ne
 
 void attachable_hud_item::render(u32 context_id, IRenderable* root)
 {
-    CDebugRenderer& render = Level().debug_renderer();
-
     GEnv.Render->add_Visual(context_id, root, m_model->dcast_RenderVisual(), m_item_transform);
     if (debug_show_second_wpn_model)
         GEnv.Render->add_Visual(context_id, root, m_model_2->dcast_RenderVisual(), hud_transform);
@@ -271,6 +269,9 @@ void attachable_hud_item::render(u32 context_id, IRenderable* root)
     if (wpn && wpn->bUseAttachmentSystem)
     {
         if (debug_show_attachments_slots)
+        {
+            CDebugRenderer& render = Level().debug_renderer();
+
             for (auto slot: wpn->m_addon_slots)
             {
                 if (slot.second)
@@ -285,28 +286,61 @@ void attachable_hud_item::render(u32 context_id, IRenderable* root)
                     }
                     pos.mulB_43(slot.second->transform);
                     render.draw_aabb(pos.c, 0.003f, 0.003f, 0.003f, color_xrgb(0, 255, 0));
+                    Fvector text_p = pos.c;
+                    text_p.y -= 0.001f;
+                    render.draw_debug_string(slot.second->bone_name.c_str(), text_p, 0.002f, color_xrgb(0, 255, 0));
                 }
             }
+
+            if (debug_show_second_wpn_model)
+            {
+                for (auto slot: wpn->m_addon_slots)
+                {
+                    if (slot.second)
+                    {
+                        Fmatrix pos;
+                        pos.set(hud_transform);
+                        if (slot.second->bone_name.c_str() != nullptr && xr_strcmp(slot.second->bone_name.c_str(), "") != 0)
+                        {
+                            const u16 bone_id = m_model->LL_BoneID(slot.second->bone_name.c_str());
+                            if (bone_id != BI_NONE)
+                                pos.mulB_43(m_model->LL_GetTransform(bone_id));
+                        }
+                        pos.mulB_43(slot.second->transform);
+                        render.draw_aabb(pos.c, 0.003f, 0.003f, 0.003f, color_xrgb(0, 255, 255));
+                        Fvector text_p = pos.c;
+                        text_p.y -= 0.001f;
+                        render.draw_debug_string(slot.second->bone_name.c_str(), text_p, 0.002f, color_xrgb(0, 255, 255));
+                    }
+                }
+            }
+        }
 
         for (auto [addon_id, item]: wpn->m_addon_items)
         {
             item->addon_item_transform.set(m_item_transform);
             Fmatrix addon_item_transform_2;
+            // Fmatrix debug_addon_item_t;
             addon_item_transform_2.set(m_item_transform);
+            // debug_addon_item_t.set(hud_transform);
 
             if (!fis_zero(item->scale))
             {
                 Fmatrix m;
                 m.scale(Fvector3().set(item->scale, item->scale, item->scale));
                 item->addon_item_transform.mulB_43(m);
+                // debug_addon_item_t.mulB_43(m);
                 addon_item_transform_2.mulB_43(m);
             }
 
-            if (item->bone_name.c_str() != nullptr && xr_strcmp(item->bone_name.c_str(), "") != 0)
+            if (item->bone_name.c_str() != nullptr)
             {
                 const u16 bone_id = m_model->LL_BoneID(item->bone_name.c_str());
                 if (bone_id != BI_NONE)
+                {
                     item->addon_item_transform.mulB_43(m_model->LL_GetTransform(bone_id));
+                    // debug_addon_item_t.mulB_43(m_model->LL_GetTransform(bone_id));
+                }
             }
             if (item->has_bone_2)
             {
@@ -318,15 +352,62 @@ void attachable_hud_item::render(u32 context_id, IRenderable* root)
                     addon_item_transform_2.mulB_43(wpn->m_addon_slots[item->slot]->transform_2);
             }
             item->addon_item_transform.mulB_43(item->addon_item_pos);
+            // debug_addon_item_t.mulB_43(item->addon_item_pos);
             addon_item_transform_2.mulB_43(item->addon_item_pos);
 
             if (debug_show_attachments_slots)
+            {
+                CDebugRenderer& render = Level().debug_renderer();
+
+                render.draw_aabb(item->addon_item_transform.c, 0.003f, 0.003f, 0.003f, color_xrgb(255, 255, 0));
+                Fvector text_p = item->addon_item_transform.c;
+                text_p.y += 0.0f;
+                render.draw_debug_string(item->addon_item_name.c_str(), text_p, 0.002f, color_xrgb(255, 255, 0));
+
+                u16 bone_id = item->addon_item_model->LL_BoneID("wpn_scope_2");
+                if (bone_id != BI_NONE)
+                {
+                    Fmatrix m_parent_bone = item->addon_item_model->LL_GetTransform(bone_id);
+                    Fmatrix wpn_scope_2_t;
+                    wpn_scope_2_t.mul_43(item->addon_item_transform, m_parent_bone);
+
+                    render.draw_aabb(wpn_scope_2_t.c, 0.003f, 0.003f, 0.003f, color_xrgb(255, 255, 0));
+                    Fvector text_p = wpn_scope_2_t.c;
+                    text_p.y += 0.002f;
+                    render.draw_debug_string("wpn_scope_2", text_p, 0.002f, color_xrgb(255, 255, 0));
+                }
+
                 for (auto slot: item->addon_slots)
                 {
                     Fmatrix pos;
                     pos.mul(item->addon_item_transform, slot.second.transform);
                     render.draw_aabb(pos.c, 0.003f, 0.003f, 0.003f, color_xrgb(0, 255, 0));
+                    Fvector text_p = pos.c;
+                    text_p.y += 0.002f;
+                    render.draw_debug_string(slot.first.c_str(), text_p, 0.002f, color_xrgb(0, 255, 0));
                 }
+
+                // if (debug_show_second_wpn_model)
+                // {
+                //     render.draw_aabb(debug_addon_item_t.c, 0.003f, 0.003f, 0.003f, color_xrgb(0, 255, 255));
+                //     Fvector text_p = debug_addon_item_t.c;
+                //     text_p.y += 0.0f;
+                //     render.draw_debug_string(item->addon_item_name.c_str(), text_p, 0.002f, color_xrgb(0, 255, 255));
+
+                //     u16 bone_id = item->addon_item_model->LL_BoneID("wpn_scope_2");
+                //     if (bone_id != BI_NONE)
+                //     {
+                //         Fmatrix m_parent_bone = item->addon_item_model->LL_GetTransform(bone_id);
+                //         Fmatrix wpn_scope_2_t;
+                //         wpn_scope_2_t.mul_43(debug_addon_item_t, m_parent_bone);
+
+                //         render.draw_aabb(wpn_scope_2_t.c, 0.003f, 0.003f, 0.003f, color_xrgb(0, 255, 255));
+                //         Fvector text_p = wpn_scope_2_t.c;
+                //         text_p.y += 0.002f;
+                //         render.draw_debug_string("wpn_scope_2", text_p, 0.002f, color_xrgb(0, 255, 255));
+                //     }
+                // }
+            }
 
             u16 bone_id = item->addon_item_model->LL_BoneID("dot");
             if (bone_id != BI_NONE)
@@ -1336,7 +1417,7 @@ void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, cons
         bone_transform.set(m_model_2->dcast_PKinematics()->LL_GetTransform(bone_id));
         Fvector rot;
         bone_transform.getHPB(rot.x, rot.y, rot.z);
-        
+
         result2.mul(m_second_transform, bone_transform);
         result2.mulB_43(offset);
 

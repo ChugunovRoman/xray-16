@@ -40,6 +40,7 @@ extern float g_second_aim_z_offset_coff;
 
 constexpr pcstr WPN_MAIN_SLOT = "slot_1";
 constexpr pcstr DOT = "dot";
+constexpr pcstr WPN_BODY = "wpn_body";
 constexpr pcstr WPN_SCOPE = "wpn_scope";
 constexpr pcstr WPN_SCOPE_2 = "wpn_scope_2";
 constexpr pcstr WPN_SILENCER = "wpn_silencer";
@@ -1378,7 +1379,16 @@ void CWeapon::renderable_Render(u32 context_id, IRenderable* root)
         Fmatrix m_item_transform = XFORM();
         for (auto [addon_id, item]: m_addon_items)
         {
-            item->addon_item_transform.mul(m_item_transform, item->addon_item_pos_world);
+            item->addon_item_transform.set(m_item_transform);
+
+            if (item->bone_name.c_str() != nullptr)
+            {
+                const u16 bone_id = Visual()->dcast_PKinematics()->LL_BoneID(item->bone_name.c_str());
+                if (bone_id != BI_NONE)
+                    item->addon_item_transform.mulB_43(Visual()->dcast_PKinematics()->LL_GetTransform(bone_id));
+            }
+
+            item->addon_item_transform.mulB_43(item->addon_item_pos);
 
             GEnv.Render->add_Visual(context_id, root, item->addon_item_model->dcast_RenderVisual(), item->addon_item_transform);
         }
@@ -4122,6 +4132,7 @@ void CWeapon::addAddon(AddAddonData data)
 // - out_rot - поворот худа в режиме прицеливания (радианы), записываем в конечный результат поворота
 void CWeapon::get_aim_offset_to_center(
     Fmatrix hud_transform,
+    Fmatrix hud_cam,
     Fmatrix addon_offset,
     Fmatrix bone_transform,
     Fvector hud_aim_target_pos,
@@ -4139,6 +4150,7 @@ void CWeapon::get_aim_offset_to_center(
         return;
 
     // 1. Получаем базовую трансформацию худа (обычно это позиция оружия в первом кадре анимации idle)
+    Fmatrix cam_base_transform = hud_cam;
     Fmatrix m_item_transform = hud_transform;
     Fmatrix bone_transform_2;
     bone_transform_2.identity();
@@ -4157,7 +4169,10 @@ void CWeapon::get_aim_offset_to_center(
     // 3. Создаем матрицу с дополнительным поворотом
     Fmatrix m_item_with_rot = m_item_transform;
     if (need_calc_with_rot)
+    {
         m_item_with_rot.mulB_43(rotation_matrix);
+        cam_base_transform.mulB_43(rotation_matrix);
+    }
 
     // 4. Позиция кости с кастомным поворотом
     Fmatrix scope_global_with_rot;
@@ -4185,7 +4200,8 @@ void CWeapon::get_aim_offset_to_center(
 
     // 8. Преобразуем коррекции в локальные координаты
     Fmatrix inv_item_transform;
-    inv_item_transform.invert(m_item_with_rot);
+    // inv_item_transform.invert(m_item_with_rot);
+    inv_item_transform.invert(cam_base_transform);
     Fvector local_correction;
     inv_item_transform.transform_dir(local_correction, world_correction);
     Fvector local_center_correction;
@@ -4274,6 +4290,7 @@ void CWeapon::calc_aim_addon_offset()
 
             get_aim_offset_to_center(
                 updated_transform,
+                hud_cam,
                 addon_offset,
                 bone_transform,
                 hud_aim_target_pos,
@@ -4304,7 +4321,7 @@ void CWeapon::calc_aim_addon_offset()
             offset_trans.translate_over(correct_offset);
             updated_transform.mulB_43(offset_trans);
 
-            // берем попорот худа в режиме прицеливания (радианы)
+            // берем поворот худа в режиме прицеливания (радианы)
             Fvector rot = ancor_rot;
             Fmatrix rotation_matrix;
             rotation_matrix.identity();
@@ -4320,6 +4337,7 @@ void CWeapon::calc_aim_addon_offset()
 
             get_aim_offset_to_center(
                 updated_transform,
+                hud_cam,
                 addon_offset,
                 bone_transform,
                 hud_aim_target_pos,

@@ -27,6 +27,9 @@ public:
     void draw_obb(const Fmatrix& matrix, const u32& color);
     void draw_obb(const Fmatrix& matrix, const Fvector& half_size, const u32& color);
     void draw_ellipse(const Fmatrix& matrix, const u32& color);
+
+    void draw_debug_char(char c, const Fvector& pos, float size, u32 color);
+    void draw_debug_string(const char* str, const Fvector& pos, float size, u32 color);
 };
 
 #include "debug_renderer_inline.h"

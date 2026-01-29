@@ -955,17 +955,29 @@ void CKinematicsAnimated::LL_BuldBoneMatrixDequatize(const CBoneData* bd, u8 cha
         // keys.blend_factors[channel][b_count]	=  B->blendAmount;
         keys.blends[channel][b_count] = B;
         CMotion& M = *LL_GetMotion(B->motionID, SelfID);
-        Dequantize(*D, *B, M);
-        QR2Quat(M._keysR[0], BK[channel][b_count].Q);
-        if (M.test_flag(flTKeyPresent))
+        if (M.get_count() == 0)
         {
-            if (M.test_flag(flTKey16IsBit))
-                QT16_2T(M._keysT16[0], M, BK[channel][b_count].T);
-            else
-                QT8_2T(M._keysT8[0], M, BK[channel][b_count].T);
+            D->Q.identity();
+            D->T.set(0, 0, 0);
+
+            BK[channel][b_count].Q.identity();
+            BK[channel][b_count].T.set(0, 0, 0);
         }
         else
-            BK[channel][b_count].T.set(M._initT);
+        {
+            Dequantize(*D, *B, M);
+            QR2Quat(M._keysR[0], BK[channel][b_count].Q);
+            if (M.test_flag(flTKeyPresent))
+            {
+                if (M.test_flag(flTKey16IsBit))
+                    QT16_2T(M._keysT16[0], M, BK[channel][b_count].T);
+                else
+                    QT8_2T(M._keysT8[0], M, BK[channel][b_count].T);
+            }
+            else
+                BK[channel][b_count].T.set(M._initT);
+        }
+
         ++b_count;
     }
     for (u16 j = 0; MAX_CHANNELS > j; ++j)
@@ -1023,6 +1035,50 @@ void CKinematicsAnimated::LL_BoneMatrixBuild(CBoneInstance& bi, const Fmatrix* p
 #endif
 }
 
+void CKinematicsAnimated::LL_BoneMatrixBuildAddon(CBoneInstance& bi, const CBoneData* bd, const Fmatrix* parent, const SKeyTable& keys)
+{
+    // 1. Смешиваем ключи (так как мы в Dequantize выставили 0 и Identity, 
+    // Result тоже будет нулевым/identity смещением)
+    CKey channel_keys[MAX_CHANNELS];
+    animation::channel_def BC[MAX_CHANNELS];
+    u16 ch_count = 0;
+
+    for (u16 j = 0; MAX_CHANNELS > j; ++j)
+    {
+        if (j != 0 && keys.chanel_blend_conts[j] == 0)
+            continue;
+        channels.get_def(j, BC[ch_count]);
+        process_single_channel(channel_keys[ch_count], BC[ch_count], keys.keys[j], keys.blends[j], keys.chanel_blend_conts[j]);
+        ++ch_count;
+    }
+
+    CKey Result;
+    MixChannels(Result, channel_keys, BC, ch_count);
+
+    // 2. Генерируем матрицу анимации (она будет Identity)
+    Fmatrix M_animation;
+    M_animation.mk_xform(Result.Q, Result.T);
+
+    // Локальная матрица = Bind Pose (из Blender) * Animation (Identity)
+    Fmatrix L;
+    L.mul_43(bd->bind_transform, M_animation);
+
+    // 4. Сборка с родителем (игнорируя его вращение)
+    if (parent)
+    {
+        bi.mTransform.identity();
+        bi.mTransform.c.set(parent->c); // Позиция родителя (wpn_body)
+        
+        // Перемножаем: (Позиция_Родителя) * (Локальный_Bind_Pose)
+        // mul_43 важен, чтобы сохранить правильную иерархию координат
+        bi.mTransform.mulB_43(L); 
+    }
+    else
+    {
+        bi.mTransform = L;
+    }
+}
+
 // Добавить скриптовое смещение для кости --#SM+#--
 void CKinematicsAnimated::LL_AddTransformToBone(KinematicsABT::additional_bone_transform& offset)
 {
@@ -1046,7 +1102,10 @@ void CKinematicsAnimated::BuildBoneMatrix(
     SKeyTable keys;
     LL_BuldBoneMatrixDequatize(bd, channel_mask, keys);
 
-    LL_BoneMatrixBuild(bi, parent, keys);
+    if (bd->name.c_str() && strstr(bd->name.c_str(), "addon_"))
+        LL_BoneMatrixBuildAddon(bi, bd, parent, keys);
+    else
+        LL_BoneMatrixBuild(bi, parent, keys);
 
     CalculateBonesNewTransforms(bd, bi, parent, channel_mask); //--#SM+#--
     CalculateBonesAdditionalTransforms(bd, bi, parent, channel_mask); //--#SM+#--

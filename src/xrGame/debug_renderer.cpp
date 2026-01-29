@@ -118,3 +118,69 @@ void CDebugRenderer::draw_ellipse(const Fmatrix& matrix, const u32& color)
     add_lines((Fvector*)&vertices[0], sizeof(vertices) / sizeof(Fvector), &pairs[0], sizeof(pairs) / (2 * sizeof(u16)),
         color);
 }
+
+
+void CDebugRenderer::draw_debug_char(char c, const Fvector& pos, float size, u32 color)
+{
+    auto draw_l = [&](float x1, float y1, float x2, float y2) {
+        draw_line(Fidentity, 
+            Fvector().set(pos.x + x1 * size, pos.y + y1 * size, pos.z),
+            Fvector().set(pos.x + x2 * size, pos.y + y2 * size, pos.z), 
+            color);
+    };
+
+    switch (toupper(c)) {
+        // Буквы
+        case 'A': draw_l(0,0, 0.5f,1); draw_l(0.5f,1, 1,0); draw_l(0.2f,0.4f, 0.8f,0.4f); break;
+        case 'B': draw_l(0,0, 0,1); draw_l(0,1, 0.8f,1); draw_l(0.8f,1, 0.8f,0.5f); draw_l(0.8f,0.5f, 0,0.5f); draw_l(0.8f,0.5f, 0.8f,0); draw_l(0.8f,0, 0,0); break;
+        case 'C': draw_l(1,1, 0,1); draw_l(0,1, 0,0); draw_l(0,0, 1,0); break;
+        case 'D': draw_l(0,0, 0,1); draw_l(0,1, 0.7f,1); draw_l(0.7f,1, 1,0.5f); draw_l(1,0.5f, 0.7f,0); draw_l(0.7f,0, 0,0); break;
+        case 'E': draw_l(0,0, 0,1); draw_l(0,1, 1,1); draw_l(0,0.5f, 0.7f,0.5f); draw_l(0,0, 1,0); break;
+        case 'F': draw_l(0,0, 0,1); draw_l(0,1, 1,1); draw_l(0,0.5f, 0.7f,0.5f); break;
+        case 'G': draw_l(1,0.7f, 1,1); draw_l(1,1, 0,1); draw_l(0,1, 0,0); draw_l(0,0, 1,0); draw_l(1,0, 1,0.4f); draw_l(1,0.4f, 0.5f,0.4f); break;
+        case 'H': draw_l(0,0, 0,1); draw_l(1,0, 1,1); draw_l(0,0.5f, 1,0.5f); break;
+        case 'I': draw_l(0.5f,0, 0.5f,1); draw_l(0.2f,1, 0.8f,1); draw_l(0.2f,0, 0.8f,0); break;
+        case 'J': draw_l(1,1, 1,0.2f); draw_l(1,0.2f, 0.5f,0); draw_l(0.5f,0, 0,0.2f); break;
+        case 'K': draw_l(0,0, 0,1); draw_l(0,0.5f, 1,1); draw_l(0,0.5f, 1,0); break;
+        case 'L': draw_l(0,1, 0,0); draw_l(0,0, 1,0); break;
+        case 'M': draw_l(0,0, 0,1); draw_l(0,1, 0.5f,0.5f); draw_l(0.5f,0.5f, 1,1); draw_l(1,1, 1,0); break;
+        case 'N': draw_l(0,0, 0,1); draw_l(0,1, 1,0); draw_l(1,0, 1,1); break;
+        case 'O': draw_l(0,0, 0,1); draw_l(0,1, 1,1); draw_l(1,1, 1,0); draw_l(1,0, 0,0); break;
+        case 'P': draw_l(0,0, 0,1); draw_l(0,1, 1,1); draw_l(1,1, 1,0.5f); draw_l(1,0.5f, 0,0.5f); break;
+        case 'Q': draw_l(0,0, 0,1); draw_l(0,1, 1,1); draw_l(1,1, 1,0); draw_l(1,0, 0,0); draw_l(0.5f,0.3f, 1,-0.2f); break;
+        case 'R': draw_l(0,0, 0,1); draw_l(0,1, 1,1); draw_l(1,1, 1,0.5f); draw_l(1,0.5f, 0,0.5f); draw_l(0.5f,0.5f, 1,0); break;
+        case 'S': draw_l(0,0, 1,0); draw_l(1,0, 1,0.5f); draw_l(1,0.5f, 0,0.5f); draw_l(0,0.5f, 0,1); draw_l(0,1, 1,1); break;
+        case 'T': draw_l(0.5f,0, 0.5f,1); draw_l(0,1, 1,1); break;
+        case 'U': draw_l(0,1, 0,0); draw_l(0,0, 1,0); draw_l(1,0, 1,1); break;
+        case 'V': draw_l(0,1, 0.5f,0); draw_l(0.5f,0, 1,1); break;
+        case 'W': draw_l(0,1, 0.2f,0); draw_l(0.2f,0, 0.5f,0.4f); draw_l(0.5f,0.4f, 0.8f,0); draw_l(0.8f,0, 1,1); break;
+        case 'X': draw_l(0,0, 1,1); draw_l(0,1, 1,0); break;
+        case 'Y': draw_l(0,1, 0.5f,0.5f); draw_l(1,1, 0.5f,0.5f); draw_l(0.5f,0.5f, 0.5f,0); break;
+        case 'Z': draw_l(0,1, 1,1); draw_l(1,1, 0,0); draw_l(0,0, 1,0); break;
+
+        // Цифры
+        case '1': draw_l(0.2f,0.7f, 0.5f,1); draw_l(0.5f,1, 0.5f,0); draw_l(0.2f,0, 0.8f,0); break;
+        case '2': draw_l(0,1, 1,1); draw_l(1,1, 1,0.5f); draw_l(1,0.5f, 0,0.5f); draw_l(0,0.5f, 0,0); draw_l(0,0, 1,0); break;
+        case '3': draw_l(0,1, 1,1); draw_l(1,1, 1,0); draw_l(1,0, 0,0); draw_l(0.2f,0.5f, 1,0.5f); break;
+        case '4': draw_l(0,1, 0,0.5f); draw_l(0,0.5f, 1,0.5f); draw_l(0.8f,1, 0.8f,0); break;
+        case '5': draw_l(1,1, 0,1); draw_l(0,1, 0,0.5f); draw_l(0,0.5f, 1,0.5f); draw_l(1,0.5f, 1,0); draw_l(1,0, 0,0); break;
+        case '6': draw_l(1,1, 0,1); draw_l(0,1, 0,0); draw_l(0,0, 1,0); draw_l(1,0, 1,0.5f); draw_l(1,0.5f, 0,0.5f); break;
+        case '7': draw_l(0,1, 1,1); draw_l(1,1, 0.4f,0); break;
+        case '8': draw_l(0,0, 0,1); draw_l(0,1, 1,1); draw_l(1,1, 1,0); draw_l(1,0, 0,0); draw_l(0,0.5f, 1,0.5f); break;
+        case '9': draw_l(0,0, 1,0); draw_l(1,0, 1,1); draw_l(1,1, 0,1); draw_l(0,1, 0,0.5f); draw_l(0,0.5f, 1,0.5f); break;
+        case '0': draw_l(0,0, 0,1); draw_l(0,1, 1,1); draw_l(1,1, 1,0); draw_l(1,0, 0,0); draw_l(0,1, 1,0); break; // С перечеркиванием
+
+        // Спецсимволы
+        case '_': draw_l(0,0, 1,0); break;
+        case '.': draw_l(0.45f,0, 0.55f,0); draw_l(0.45f,0.1f, 0.55f,0.1f); break;
+    }
+}
+
+void CDebugRenderer::draw_debug_string(const char* str, const Fvector& pos, float size, u32 color)
+{
+    Fvector current_pos = pos;
+    for (const char* p = str; *p; ++p) {
+        draw_debug_char(*p, current_pos, size, color);
+        current_pos.x += size * 1.5f; // Интервал между буквами
+    }
+}

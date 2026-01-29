@@ -124,6 +124,7 @@ public:
     void calc_aim_addon_offset();
     void get_aim_offset_to_center(
         Fmatrix hud_transform,
+        Fmatrix hud_cam,
         Fmatrix addon_offset,
         Fmatrix bone_transform,
         Fvector hud_aim_target_pos,

@@ -63,6 +63,7 @@ public:
     // interface for procedural animations :)
     virtual void LL_BuldBoneMatrixDequatize(const CBoneData* bd, u8 channel_mask, SKeyTable& keys) = 0;
     virtual void LL_BoneMatrixBuild(CBoneInstance& bi, const Fmatrix* parent, const SKeyTable& keys) = 0;
+    virtual void LL_BoneMatrixBuildAddon(CBoneInstance& bi, const CBoneData* bd, const Fmatrix* parent, const SKeyTable& keys) = 0;
 
     virtual void LL_AddTransformToBone(KinematicsABT::additional_bone_transform& offset) = 0; //--#SM+#--
     virtual void LL_SetTransformToBone(KinematicsABT::additional_bone_transform& offset) = 0; //--#SM+#--

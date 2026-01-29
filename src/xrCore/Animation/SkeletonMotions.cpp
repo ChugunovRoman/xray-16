@@ -199,6 +199,9 @@ BOOL motions_value::load(pcstr N, IReader* data, vecBones* bones)
         {
             const u16 bone_id = rm_bones[i];
             VERIFY2(bone_id != BI_NONE, "Invalid remap index.");
+            if ((bone_id == BI_NONE || bones->at(bone_id) == nullptr) || strstr(bones->at(bone_id)->name.c_str(), "addon_"))
+                continue;
+
             CMotion& M = m_motions[bones->at(bone_id)->name][m_idx];
             M.set_count(dwLen);
             M.set_flags(MS->r_u8());
