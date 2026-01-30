@@ -4158,7 +4158,7 @@ void CWeapon::get_aim_offset_to_center(
     Fmatrix hand_ancor_transform = hi->m_parent->tmp;
 
     // 2. Получаем трансформацию кости оружия к которой прикреплен аддон если такая кость была указана в конфиге
-    bool has_bone = bone_name.c_str() != nullptr && xr_strcmp(bone_name.c_str(), "") != 0;
+    bool has_bone = bone_name.c_str() != nullptr;
     if (has_bone)
     {
         const u16 bone_id = hi->m_model_2->LL_BoneID(bone_name.c_str());
@@ -4356,34 +4356,59 @@ void CWeapon::calc_aim_addon_offset()
         bone_id = item->addon_item_model->LL_BoneID(DOT);
         if (bone_id != BI_NONE)
         {
+            // Глубина по Z (на сколько далеко dot от камеры)
             float depth = 5.0f;
+            // мировые координаты кости dot
             Fmatrix bone_dot_world;
+            // Берем за осному мировые координаты текущего оружия на худе
             bone_dot_world.set(m_item_transform);
 
+            // Находим центр экрана в мировых координатах
             Fvector hud_dot_target_pos;
             hud_dot_target_pos.mad(hud_cam.c, hud_cam.k, depth);
 
-            // 4. Вычисляем полную коррекцию
+            // Вычисляем полную коррекцию
             Fvector world_correction;
             world_correction.sub(hud_dot_target_pos, bone_dot_world.c);
 
-            // 5. Преобразуем в локальные координаты HUD
+            //  Преобразуем в локальные координаты HUD
             Fmatrix inv_trans;
             inv_trans.invert(m_item_transform);
             Fvector local_correction;
             inv_trans.transform_dir(local_correction, world_correction);
-            // local_correction.y = local_correction.y * 2.4f;
 
-            item->addon_item_pos_dot.set(local_correction);
+            // Устанавливаем локальное смещения для кости dot чтобы она была в центре экрана но не близко
+            item->addon_item_dot_t.c.set(local_correction);
+
+            // Вычисляем вращение. 
+            // Нам нужно, чтобы локальные оси кости dot в мировом пространстве совпадали с осями камеры.
+            // Для этого инвертируем вращение m_item_transform и умножаем на вращение камеры.
+
+            Fmatrix inv_item_rot;
+            inv_item_rot.invert(m_item_transform); 
+            // Обнуляем позицию в инвертированной матрице, нам нужно только вращение
+            inv_item_rot.c.set(0, 0, 0);
+
+            Fmatrix cam_rot;
+            // Создаем матрицу из векторов камеры (i - право, j - верх, k - направление)
+            cam_rot.i.set(hud_cam.i);
+            cam_rot.j.set(hud_cam.j);
+            cam_rot.k.set(hud_cam.k);
+            cam_rot.c.set(0, 0, 0);
+
+            // Итоговый локальный поворот = [Инверсия мира оружия] * [Мировой поворот камеры]
+            Fmatrix local_rot;
+            local_rot.mul(inv_item_rot, cam_rot);
+
+            // Устанавливаем оси в итоговую матрицу аддона
+            item->addon_item_dot_t.i.set(local_rot.i);
+            item->addon_item_dot_t.j.set(local_rot.j);
+            item->addon_item_dot_t.k.set(local_rot.k);
 
             item->calc_aim_offset.set(-0.04f, -0.04f, 0);
             item->calc_aim_rot.set(0, 0, -0.2f);
             item->calc_second_aim_offset.set(-0.04f, -0.04f, 0);
-            item->calc_second_aim_rot.set(
-                0.f,
-                0.f,
-                -0.2f
-            );
+            item->calc_second_aim_rot.set(0.f, 0.f, -0.2f);
             item->has_second_aim_offset = true;
         }
 

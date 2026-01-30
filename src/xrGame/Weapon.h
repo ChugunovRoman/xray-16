@@ -58,7 +58,7 @@ public:
 	float inherited_aim_z_rot;
 	float scale;
 	Fmatrix addon_item_pos;
-	Fvector addon_item_pos_dot;
+	Fmatrix addon_item_dot_t;
 	Fmatrix addon_item_pos_world;
 	Fvector calc_aim_offset{};
 	Fvector calc_aim_rot{};

@@ -414,14 +414,9 @@ void attachable_hud_item::render(u32 context_id, IRenderable* root)
             {
                 item->is_dot_pos_initialized = true;
 
-                Fmatrix addon_item_transform;
+                Fmatrix addon_item_transform = m_item_dot_transform;
 
-                Fmatrix m_addon_attach_offset_2;
-                float h, p, b;
-                item->addon_item_pos.getHPB(h, p, b);
-                m_addon_attach_offset_2.setHPB(0.f, 0.f, b);
-                m_addon_attach_offset_2.translate_over(item->addon_item_pos_dot);
-                addon_item_transform.mul(m_item_dot_transform, m_addon_attach_offset_2);
+                addon_item_transform.mulB_43(item->addon_item_dot_t);
 
                 GEnv.Render->add_Visual(context_id, root, item->addon_item_model_dot->dcast_RenderVisual(), addon_item_transform);
             }
