@@ -59,6 +59,7 @@ public:
     // Calculation
 private:
     void LL_BuldBoneMatrixDequatize(const CBoneData* bd, u8 channel_mask, SKeyTable& keys);
+    void LL_BuldBoneMatrixAddonDequatize(const CBoneData* bd, u8 channel_mask, SKeyTable& keys);
     void LL_BoneMatrixBuild(CBoneInstance& bi, const Fmatrix* parent, const SKeyTable& keys);
     void LL_BoneMatrixBuildAddon(CBoneInstance& bi, const CBoneData* bd, const Fmatrix* parent, const SKeyTable& keys);
     virtual void BuildBoneMatrix(

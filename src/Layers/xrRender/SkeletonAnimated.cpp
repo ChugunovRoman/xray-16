@@ -938,6 +938,34 @@ void CKinematicsAnimated::Load(const char* N, LPCSTR suffix, IReader* data, u32 
     //.		Msg("* WARNING: model '%s' has only one motion. Candidate for SkeletonRigid???",N);
 }
 
+void CKinematicsAnimated::LL_BuldBoneMatrixAddonDequatize(const CBoneData* bd, u8 channel_mask, SKeyTable& keys)
+{
+    u16 SelfID = bd->GetSelfID();
+    CBlendInstance& BLEND_INST = LL_GetBlendInstance(SelfID);
+    CKey BK[MAX_CHANNELS][MAX_BLENDED]; // base keys
+
+    for (auto &it : BLEND_INST.blend_vector())
+    {
+        CBlend* B = it;
+        int& b_count = keys.chanel_blend_conts[B->channel];
+        CKey* D = &keys.keys[B->channel][b_count];
+        if (!(channel_mask & (1 << B->channel)))
+            continue;
+        u8 channel = B->channel;
+        keys.blends[channel][b_count] = B;
+
+        D->Q.identity();
+        D->T.set(0, 0, 0);
+
+        BK[channel][b_count].Q.identity();
+        BK[channel][b_count].T.set(0, 0, 0);
+
+        ++b_count;
+    }
+    for (u16 j = 0; MAX_CHANNELS > j; ++j)
+        if (channels.rule(j).extern_ == animation::add)
+            keys_substruct(keys.keys[j], BK[j], keys.chanel_blend_conts[j]);
+}
 void CKinematicsAnimated::LL_BuldBoneMatrixDequatize(const CBoneData* bd, u8 channel_mask, SKeyTable& keys)
 {
     u16 SelfID = bd->GetSelfID();
@@ -955,29 +983,17 @@ void CKinematicsAnimated::LL_BuldBoneMatrixDequatize(const CBoneData* bd, u8 cha
         // keys.blend_factors[channel][b_count]	=  B->blendAmount;
         keys.blends[channel][b_count] = B;
         CMotion& M = *LL_GetMotion(B->motionID, SelfID);
-        if (M.get_count() == 0)
+        Dequantize(*D, *B, M);
+        QR2Quat(M._keysR[0], BK[channel][b_count].Q);
+        if (M.test_flag(flTKeyPresent))
         {
-            D->Q.identity();
-            D->T.set(0, 0, 0);
-
-            BK[channel][b_count].Q.identity();
-            BK[channel][b_count].T.set(0, 0, 0);
+            if (M.test_flag(flTKey16IsBit))
+                QT16_2T(M._keysT16[0], M, BK[channel][b_count].T);
+            else
+                QT8_2T(M._keysT8[0], M, BK[channel][b_count].T);
         }
         else
-        {
-            Dequantize(*D, *B, M);
-            QR2Quat(M._keysR[0], BK[channel][b_count].Q);
-            if (M.test_flag(flTKeyPresent))
-            {
-                if (M.test_flag(flTKey16IsBit))
-                    QT16_2T(M._keysT16[0], M, BK[channel][b_count].T);
-                else
-                    QT8_2T(M._keysT8[0], M, BK[channel][b_count].T);
-            }
-            else
-                BK[channel][b_count].T.set(M._initT);
-        }
-
+            BK[channel][b_count].T.set(M._initT);
         ++b_count;
     }
     for (u16 j = 0; MAX_CHANNELS > j; ++j)
@@ -1100,12 +1116,17 @@ void CKinematicsAnimated::BuildBoneMatrix(
     // float				BA						[MAX_CHANNELS][MAX_BLENDED];	//all factors
     // int				b_counts				[MAX_CHANNELS]	= {0,0,0,0}; //channel counts
     SKeyTable keys;
-    LL_BuldBoneMatrixDequatize(bd, channel_mask, keys);
 
     if (bd->name.c_str() && strstr(bd->name.c_str(), "addon_"))
+    {
+        LL_BuldBoneMatrixAddonDequatize(bd, channel_mask, keys);
         LL_BoneMatrixBuildAddon(bi, bd, parent, keys);
+    }
     else
+    {
+        LL_BuldBoneMatrixDequatize(bd, channel_mask, keys);
         LL_BoneMatrixBuild(bi, parent, keys);
+    }
 
     CalculateBonesNewTransforms(bd, bi, parent, channel_mask); //--#SM+#--
     CalculateBonesAdditionalTransforms(bd, bi, parent, channel_mask); //--#SM+#--

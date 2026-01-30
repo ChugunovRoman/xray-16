@@ -62,6 +62,7 @@ public:
     virtual CMotion* LL_GetMotion(MotionID id, u16 bone_id) = 0;
     // interface for procedural animations :)
     virtual void LL_BuldBoneMatrixDequatize(const CBoneData* bd, u8 channel_mask, SKeyTable& keys) = 0;
+    virtual void LL_BuldBoneMatrixAddonDequatize(const CBoneData* bd, u8 channel_mask, SKeyTable& keys) = 0;
     virtual void LL_BoneMatrixBuild(CBoneInstance& bi, const Fmatrix* parent, const SKeyTable& keys) = 0;
     virtual void LL_BoneMatrixBuildAddon(CBoneInstance& bi, const CBoneData* bd, const Fmatrix* parent, const SKeyTable& keys) = 0;
 
