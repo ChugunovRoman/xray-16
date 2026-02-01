@@ -4139,6 +4139,8 @@ void CWeapon::get_aim_offset_to_center(
     Fmatrix bone_transform,
     Fvector hud_aim_target_pos,
     Fmatrix rotation_matrix,
+    const Fvector& correct_offset,
+    const Fvector& correct_rot,
     Fvector add_rot,
     bool need_calc_with_rot,
     float coff,
@@ -4168,8 +4170,16 @@ void CWeapon::get_aim_offset_to_center(
             bone_transform_2.set(hi->m_model_2->LL_GetTransform(bone_id));
     }
 
+    // Создаем матрицу коррекции "кривой" анимации
+    Fmatrix m_correction;
+    m_correction.setHPB(correct_rot.x, correct_rot.y, correct_rot.z);
+    m_correction.c.set(correct_offset);
+
+    Fmatrix m_item_cur;
+    m_item_cur.mul(m_item_transform, m_correction);
+
     // 3. Создаем матрицу с дополнительным поворотом
-    Fmatrix m_item_with_rot = m_item_transform;
+    Fmatrix m_item_with_rot = m_item_cur;
     if (need_calc_with_rot)
     {
         m_item_with_rot.mulB_43(rotation_matrix);
@@ -4186,7 +4196,7 @@ void CWeapon::get_aim_offset_to_center(
 
     // 5. Вычисляем где должна быть кость БЕЗ кастомного поворота
     Fmatrix scope_global_no_rot;
-    scope_global_no_rot.set(m_item_transform);
+    scope_global_no_rot.set(m_item_cur);
     if (has_bone)
         scope_global_no_rot.mulB_43(bone_transform_2);
     scope_global_no_rot.mulB_43(addon_offset);
@@ -4287,6 +4297,8 @@ void CWeapon::calc_aim_addon_offset()
                 bone_transform,
                 hud_aim_target_pos,
                 rotation_matrix,
+                hi->m_measures.m_hands_offset[0][idx],
+                correct_rot,
                 rot,
                 // false,
                 !fis_zero(rot.magnitude()),
@@ -4327,6 +4339,8 @@ void CWeapon::calc_aim_addon_offset()
                 bone_transform,
                 hud_aim_target_pos,
                 rotation_matrix,
+                hi->m_measures.m_hands_offset[0][idx],
+                correct_rot,
                 rot,
                 // false,
                 !fis_zero(rot.magnitude()),

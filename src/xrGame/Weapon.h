@@ -129,6 +129,8 @@ public:
         Fmatrix bone_transform,
         Fvector hud_aim_target_pos,
         Fmatrix rotation_matrix,
+        const Fvector& correct_offset,
+        const Fvector& correct_rot,
         Fvector add_rot,
         bool need_calc_with_rot,
         float coff,
