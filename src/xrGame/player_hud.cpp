@@ -260,8 +260,15 @@ bool attachable_hud_item::need_renderable() const { return m_parent_hud_item->ne
 void attachable_hud_item::render(u32 context_id, IRenderable* root)
 {
     GEnv.Render->add_Visual(context_id, root, m_model->dcast_RenderVisual(), m_item_transform);
-    if (debug_show_second_wpn_model)
+    if (debug_show_second_wpn_model){
         GEnv.Render->add_Visual(context_id, root, m_model_2->dcast_RenderVisual(), hud_transform);
+
+        // Fmatrix root_bone = m_model_2->LL_GetTransform(0);
+        // Fvector b_rot;
+        // root_bone.getHPB(b_rot.x, b_rot.y, b_rot.z);
+
+        // Msg("model_2 root_bone: [%f,%f,%f | %f,%f,%f]", root_bone.c.x, root_bone.c.y, root_bone.c.z, b_rot.x, b_rot.y, b_rot.z);
+    }
     if (debug_show_thrid_wpn_model)
         GEnv.Render->add_Visual(context_id, root, m_model_3->dcast_RenderVisual(), m_item_dot_transform);
 
@@ -1425,6 +1432,24 @@ void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, cons
         {
             tmp = bone_transform;
             CWeapon* wpn = smart_cast<CWeapon*>(item->m_parent_hud_item);
+            // for (const auto& [bone_name, bone_id] : *m_model_2->dcast_PKinematics()->LL_Bones())
+            // {
+            //     Fmatrix m_bone_local = m_model_2->dcast_PKinematics()->LL_GetTransform(bone_id);
+
+            //     Fvector b_rot;
+            //     m_bone_local.getHPB(b_rot.x, b_rot.y, b_rot.z);
+
+            //     Msg("hand bones with wpn: %s bone %s: [%f,%f,%f | %f,%f,%f]", wpn != nullptr ? wpn->m_section_id.c_str() : "NULL", bone_name.c_str(), m_bone_local.c.x, m_bone_local.c.y, m_bone_local.c.z, b_rot.x, b_rot.y, b_rot.z);
+            // }
+            // for (const auto& [bone_name, bone_id] : *item->m_model_2->LL_Bones())
+            // {
+            //     Fmatrix m_bone_local = item->m_model_2->LL_GetTransform(bone_id);
+
+            //     Fvector b_rot;
+            //     m_bone_local.getHPB(b_rot.x, b_rot.y, b_rot.z);
+
+            //     Msg("Weapon: %s bones, bone %s: [%f,%f,%f | %f,%f,%f]", wpn != nullptr ? wpn->m_section_id.c_str() : "NULL", bone_name.c_str(), m_bone_local.c.x, m_bone_local.c.y, m_bone_local.c.z, b_rot.x, b_rot.y, b_rot.z);
+            // }
             if (wpn && wpn->bUseAttachmentSystem)
                 wpn->calc_aim_addon_offset();
         }

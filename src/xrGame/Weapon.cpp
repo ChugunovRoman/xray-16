@@ -4024,6 +4024,8 @@ void CWeapon::addAddon(AddAddonData data)
     
     Fvector slot_rot;
     slot_transform.getHPB(slot_rot.x, slot_rot.y, slot_rot.z);
+
+    // Msg("addAddon slot_name: %s bone_name: %s slot_rot=[%f,%f,%f]", target_slot.slot_name.c_str(), target_slot.bone_name.c_str(), slot_rot.x, slot_rot.y, slot_rot.z);
     
     if (has_bone)
         slot_rot.z = 0.0f;
@@ -4241,11 +4243,8 @@ void CWeapon::calc_aim_addon_offset()
         Fmatrix bone_transform;
         Fmatrix m_item_transform = hi->hud_transform;
         Fmatrix hand_ancor_transform = hi->m_parent->tmp;
-        Fmatrix ancor_rot_mtx;
         Fvector ancor_rot;
         hand_ancor_transform.getHPB(ancor_rot.x, ancor_rot.y, ancor_rot.z);
-        ancor_rot_mtx.identity();
-        ancor_rot_mtx.setHPB(ancor_rot.x, ancor_rot.y, ancor_rot.z);
 
         if (!bApplyAncorTransform)
             ancor_rot.set(0.0f, 0.0f, 0.0f);
@@ -4265,31 +4264,24 @@ void CWeapon::calc_aim_addon_offset()
         {
             // 1. Получаем трансформацию кости прицела
             bone_transform = item->addon_item_model->LL_GetTransform(bone_id);
-            bone_transform.c.z = 0.0f;
-
-            Fmatrix offset_trans, updated_transform;
-            updated_transform.set(m_item_transform);
-            Fvector correct_offset = hi->m_measures.m_hands_offset[0][idx];
-            offset_trans.identity();
-            offset_trans.translate_over(correct_offset);
-            updated_transform.mulB_43(offset_trans);
 
             // берем попорот худа в режиме прицеливания (радианы)
             Fvector rot = ancor_rot;
             Fmatrix rotation_matrix;
             rotation_matrix.identity();
             Fmatrix R;
+            // Вектор корректировки поворота худа в локальных координатах в режиме прицеливания
             Fvector correct_rot = hi->m_measures.m_hands_offset[1][idx];
             rot.add(correct_rot);
             R.rotateZ(-item->addon_aim_z_rot); rotation_matrix.mulA_43(R);
-            R.rotateX(correct_rot.x); rotation_matrix.mulA_43(R);
-            R.rotateY(correct_rot.y); rotation_matrix.mulA_43(R);
-            R.rotateZ(correct_rot.z); rotation_matrix.mulA_43(R);
+            // R.rotateX(correct_rot.x); rotation_matrix.mulA_43(R);
+            // R.rotateY(correct_rot.y); rotation_matrix.mulA_43(R);
+            // R.rotateZ(correct_rot.z); rotation_matrix.mulA_43(R);
 
             rot.z += item->addon_aim_z_rot;
 
             get_aim_offset_to_center(
-                updated_transform,
+                m_item_transform,
                 hud_cam,
                 addon_offset,
                 bone_transform,
@@ -4312,37 +4304,31 @@ void CWeapon::calc_aim_addon_offset()
         {
             // Получаем трансформацию кости
             bone_transform = item->addon_item_model->LL_GetTransform(bone_id);
-            bone_transform.c.z = 0.0f;
-
-            Fmatrix offset_trans, updated_transform;
-            updated_transform.set(m_item_transform);
-            Fvector correct_offset = hi->m_measures.m_hands_offset[0][idx];
-            offset_trans.identity();
-            offset_trans.translate_over(correct_offset);
-            updated_transform.mulB_43(offset_trans);
 
             // берем поворот худа в режиме прицеливания (радианы)
             Fvector rot = ancor_rot;
             Fmatrix rotation_matrix;
             rotation_matrix.identity();
             Fmatrix R;
+            // Вектор корректировки поворота худа в локальных координатах в режиме прицеливания
             Fvector correct_rot = hi->m_measures.m_hands_offset[1][idx];
             rot.add(correct_rot);
             R.rotateZ(-item->addon_aim_z_rot); rotation_matrix.mulA_43(R);
-            R.rotateY(correct_rot.y); rotation_matrix.mulA_43(R);
-            R.rotateX(correct_rot.x); rotation_matrix.mulA_43(R);
-            R.rotateZ(correct_rot.z); rotation_matrix.mulA_43(R);
+            // R.rotateY(correct_rot.y); rotation_matrix.mulA_43(R);
+            // R.rotateX(correct_rot.x); rotation_matrix.mulA_43(R);
+            // R.rotateZ(correct_rot.z); rotation_matrix.mulA_43(R);
 
             rot.z += item->addon_aim_z_rot;
 
             get_aim_offset_to_center(
-                updated_transform,
+                m_item_transform,
                 hud_cam,
                 addon_offset,
                 bone_transform,
                 hud_aim_target_pos,
                 rotation_matrix,
                 rot,
+                // false,
                 !fis_zero(rot.magnitude()),
                 g_second_aim_z_offset_coff,
                 item->bone_name,
