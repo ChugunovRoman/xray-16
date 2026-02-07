@@ -21,6 +21,7 @@ public:
     bool IsColimScope() const { return xr_strcmp(m_addon_type.c_str(), "colim_scope") == 0; }
     bool IsAttachment() const { return xr_strcmp(m_addon_type.c_str(), "attachment") == 0; }
     bool IsLsa() const { return xr_strcmp(m_addon_type.c_str(), "lsa") == 0; }
+    bool IsSilencer() const { return xr_strcmp(m_addon_type.c_str(), "silencer") == 0; }
 
     // base_scope
     // colim_scope

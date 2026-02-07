@@ -1105,7 +1105,7 @@ void CUIActorMenu::PropertiesBoxForWeapon(CUICellItem* cell_item, PIItem item, b
     {
         for (auto [addon_id, addon]: pWeapon->m_addon_items)
         {
-            if (pSettings->line_exist(pWeapon->m_section_id.c_str(), addon->slot.c_str()))
+            if (!pWeapon->IsAddonCanBeDetached(addon))
                 continue;
             shared_str addon_name{StringTable().translate(pSettings->r_string(addon->addon_item_name.c_str(), "inv_name"))};
             shared_str str{make_string(StringTable().translate("st_detach_addon").c_str(), addon_name.c_str()).c_str()};

@@ -388,6 +388,10 @@ void CWeapon::Load(LPCSTR section)
     iAmmoElapsed = pSettings->r_s32(section, "ammo_elapsed");
     iMagazineSize = pSettings->r_s32(section, "ammo_mag_size");
     bUseAttachmentSystem = pSettings->read_if_exists<bool>(section, "use_attachment_system", false);
+    if (pSettings->line_exist(section, "dont_detachable_slots"))
+        sDontDetachableSlots = pSettings->r_string_wb(section, "dont_detachable_slots");
+    else
+        sDontDetachableSlots = nullptr;
 
     if (bUseAttachmentSystem)
     {
@@ -929,6 +933,8 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
     SetState(E->wpn_state);
     SetNextState(E->wpn_state);
 
+    SpawnDefaultAddons();
+
     m_DefaultCartridge.Load(m_ammoTypes[m_ammoType].c_str(), m_ammoType);
     if (iAmmoElapsed)
     {
@@ -937,7 +943,6 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
             m_magazine.push_back(m_DefaultCartridge);
     }
 
-    SpawnDefaultAddons();
     UpdateAltScope();
     UpdateAddonsVisibility();
     InitAddons();
@@ -1870,6 +1875,17 @@ bool CWeapon::IsSilencerAttached() const
         ALife::eAddonPermanent == m_eSilencerStatus;
 }
 
+bool CWeapon::IsAddonCanBeDetached(addon_item* addon) const
+{
+    if (!bUseAttachmentSystem)
+        return false;
+
+    if (addon->parent_id == 0 && sDontDetachableSlots.c_str() != nullptr && strstr(sDontDetachableSlots.c_str(), addon->slot.c_str()))
+        return false;
+
+    return true;
+}
+
 bool CWeapon::mainScopeSlotIsBusy() const
 {
     for (auto [addon_id, addon]: m_addon_items)
@@ -2189,7 +2205,10 @@ void CWeapon::SpawnDefaultAddons()
                 data.provided_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
 
             if (pSettings->line_exist(default_addon.c_str(), "ammo_mag_size"))
+            {
                 iAmmoElapsed = pSettings->r_s32(default_addon.c_str(), "ammo_mag_size");
+                iMagazineSize = pSettings->r_s32(default_addon.c_str(), "ammo_mag_size");
+            }
 
             addAddon(data);
         }
@@ -3964,7 +3983,14 @@ void CWeapon::addAddon(AddAddonData data)
     
     if (pSettings->line_exist(new_addon->addon_item_name.c_str(), "ammo_mag_size"))
     {
+        int oldMagazineSize = iMagazineSize;
+
         iMagazineSize = pSettings->r_u32(new_addon->addon_item_name.c_str(), "ammo_mag_size");
+        iAmmoElapsed = pSettings->r_u32(new_addon->addon_item_name.c_str(), "ammo_mag_size");
+
+        if (oldMagazineSize != iMagazineSize)
+            SetAmmoElapsed(0);
+
         new_addon->has_mag_size = true;
 
         NET_Packet P;

@@ -114,6 +114,8 @@ public:
     bool bCollectedAttachmentsForAI;
     bool bApplyAncorTransform{false};
 
+    shared_str sDontDetachableSlots;
+
     Fmatrix bAttachmentSystemOffsetOnWorldModel;
 
     xr_map<u32, addon_item*> m_addon_items;
@@ -341,6 +343,7 @@ public:
     bool IsScopeAttached() const;
     bool IsScopePermament() const;
     bool IsSilencerAttached() const;
+    bool IsAddonCanBeDetached(addon_item* addon) const;
 
     bool mainScopeSlotIsBusy() const;
 
