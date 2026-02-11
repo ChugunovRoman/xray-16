@@ -661,7 +661,7 @@ void CInventory::Activate(u16 slot, bool bForce)
             }
         }
     }
-    //активный слот задействован
+    // активный слот задействован
     else if (slot == NO_ACTIVE_SLOT || tmp_item)
     {
         PIItem active_item = ActiveItem();

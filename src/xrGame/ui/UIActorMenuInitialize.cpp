@@ -206,6 +206,8 @@ void CUIActorMenu::InitializeUniversal(CUIXml& uiXml)
         { eInventoryOutfitList,    "dragdrop_outfit",          "progess_bar_outfit",   "outfit_slot_highlight",   nullptr,            true },
         { eInventoryHelmetList,    "dragdrop_helmet",          "progess_bar_helmet",   "helmet_slot_highlight",   "helmet_over",      false },
 
+        { eInventoryTorchList,     "dragdrop_torch",           "progess_bar_torch",    "torch_slot_highlight",   nullptr,            false},
+
         { eInventoryBeltList,      "dragdrop_belt",            nullptr,                "artefact_slot_highlight", "belt_list_over",   true },
         { eInventoryDetectorList,  "dragdrop_detector",        "progess_bar_detector", "detector_slot_highlight", nullptr,            true },
 
@@ -537,6 +539,7 @@ void CUIActorMenu::InitCallbacks()
         CUIWndCallback::void_function(this, &CUIActorMenu::TryRepairItem));
 
     BindDragDropListEvents(m_pLists[eInventoryKnifeList]);
+    BindDragDropListEvents(m_pLists[eInventoryTorchList]);
     BindDragDropListEvents(m_pLists[eInventoryPistolList]);
     BindDragDropListEvents(m_pLists[eInventoryAutomaticList]);
 

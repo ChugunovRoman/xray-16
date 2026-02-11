@@ -319,6 +319,7 @@ void xrDebug::DoExit(const std::string& message)
     {
         const auto result = ShowMessage(Core.ApplicationName, message.c_str(), false);
         if (result != AssertionResult::abort && DebuggerIsPresent())
+
             DEBUG_BREAK;
     }
     else

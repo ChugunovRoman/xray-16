@@ -88,6 +88,7 @@ protected:
     enum eActorMenuListType
     {
         eInventoryKnifeList,
+        eInventoryTorchList,
         eInventoryPistolList,
         eInventoryAutomaticList,
 
