@@ -81,7 +81,7 @@ public:
     virtual ~CWeaponMagazined();
 
     virtual void Load(LPCSTR section);
-    void LoadSilencerKoeffs();
+    void LoadSilencerKoeffs(bool loadNow);
     virtual CWeaponMagazined* cast_weapon_magazined() { return this; }
     virtual bool UseScopeTexture();
     virtual void SetDefaults();

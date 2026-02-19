@@ -13,11 +13,11 @@ void CScope::Load(LPCSTR section)
     if (pSettings->line_exist(section, "addon_type"))
         m_addon_type = pSettings->r_string(section, "addon_type");
     if (pSettings->line_exist(section, "slot_type"))
-        m_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u8(section, "slot_type");
+        m_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u16(section, "slot_type");
     else
         m_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
     if (pSettings->line_exist(section, "provided_slot_type"))
-        m_provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u8(section, "provided_slot_type");
+        m_provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u16(section, "provided_slot_type");
     else
         m_provided_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
     if (pSettings->line_exist(section, "has_ort"))

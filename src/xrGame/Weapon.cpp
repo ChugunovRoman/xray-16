@@ -818,7 +818,7 @@ void CWeapon::LoadCurrentScopeParams(LPCSTR section)
     if(bUseAttachmentSystem)
     {
         auto addon = GetAddonMainScope();
-        if (addon.second)
+        if (addon.second && xr_strcmp(addon.second->addon_type.c_str(), "silencer") != 0 && xr_strcmp(addon.second->addon_type.c_str(), "attachment") != 0)
             scope_name = addon.second->addon_item_name;
     }
     else if (IsScopeAttached())
@@ -1897,12 +1897,13 @@ bool CWeapon::mainScopeSlotIsBusy() const
         {
             Fvector hpb;
             m_addon_slots[addon->slot]->transform.getHPB(hpb.x, hpb.y, hpb.z);
-            if (fis_zero(hpb.z))
+            if (fis_zero(hpb.z) && xr_strcmp(addon->addon_type.c_str(), "silencer") != 0)
             {
+
                 if (xr_strcmp(addon->addon_type.c_str(), "attachment") == 0)
                 {
                     for (auto [addon_id2, addon2]: m_addon_items)
-                        if (addon2->parent_id == addon_id && xr_strcmp(addon2->addon_type.c_str(), "attachment") != 0)
+                        if (addon2->parent_id == addon_id && (xr_strcmp(addon2->addon_type.c_str(), "attachment") != 0 && xr_strcmp(addon2->addon_type.c_str(), "silencer") != 0))
                             return true;
                 }
                 else
@@ -2233,9 +2234,9 @@ void CWeapon::SpawnDefaultAddons()
         data.addon_id = ADDON_ID_NONE;
         data.parent_id = parent;
         if (pSettings->line_exist(addon_section, "provided_slot_type"))
-        data.provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u8(addon_section, "provided_slot_type");
+            data.provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u8(addon_section, "provided_slot_type");
         else
-        data.provided_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
+            data.provided_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
         
         if (data.ort != CInventoryItem::EIIAddonOrt::FOrtNone)
             data.has_ort = true;
@@ -3927,7 +3928,7 @@ xr_vector<addon_slot> CWeapon::getAvaliableSlots() const
             item.parent_addon_section = addon->parent;
             item.transform = slot.second.transform;
             item.parent = addon_id;
-            item.slot_type = addon->provided_slot_type;
+            item.slot_type = slot.second.slot_type;
 
             slots.push_back(item);
         }
@@ -3949,19 +3950,20 @@ xr_vector<addon_slot> CWeapon::getAvaliableSlots() const
 void CWeapon::addAddon(PIItem item)
 {
     CScope* scope = smart_cast<CScope*>(item);
-    R_ASSERT3(scope != nullptr, "Can't add addon to weapon: addon is not WP_SCOPE class", item->m_section_id.c_str());
+    CSilencer* pSilencer = smart_cast<CSilencer*>(item);
+    R_ASSERT3(scope != nullptr || pSilencer != nullptr, "Can't add addon to weapon: addon is not WP_SCOPE or WP_SILEN class", item->m_section_id.c_str());
 
     AddAddonData data;
     data.item_section_id = item->m_section_id;
-    data.addon_type = scope->m_addon_type;
+    data.addon_type = scope != nullptr ? scope->m_addon_type : "silencer";
     data.slot_name = item->attach_to_slot_name;
     data.ort = item->attach_to_ort;
     data.addon_id = ADDON_ID_NONE;
     data.parent_id = item->parent_addon;
-    data.has_scope_texture = scope->HasScopeTexture();
-    data.provided_slot_type = scope->m_provided_slot_type;
-    data.has_ort = scope->m_has_ort;
-    data.scope_dynamic_zoom = scope->m_scope_dynamic_zoom;
+    data.has_scope_texture = scope != nullptr ? scope->HasScopeTexture() : false;
+    data.provided_slot_type = scope != nullptr ? scope->m_provided_slot_type : CWeapon::EWeaponAddonSlotType::eNone;
+    data.has_ort = scope != nullptr ? scope->m_has_ort : false;
+    data.scope_dynamic_zoom = scope != nullptr ? scope->m_scope_dynamic_zoom : false;
 
     addAddon(data);
 }
@@ -4099,6 +4101,11 @@ void CWeapon::addAddon(AddAddonData data)
         addon_slot slot;
         slot.slot_name = slot_name;
         slot.transform.mul(new_addon->addon_item_pos, bone_transform);
+
+        if (pSettings->line_exist(new_addon->addon_item_name.c_str(), slot_name.c_str()))
+            slot.slot_type = pSettings->r_u16(new_addon->addon_item_name.c_str(), slot_name.c_str());
+        else
+            slot.slot_type = new_addon->provided_slot_type;
 
         new_addon->addon_slots.insert(std::make_pair(slot_name, slot));
 

@@ -147,7 +147,7 @@ void CWeaponMagazined::Load(LPCSTR section)
 
     m_bullet_show_frame = pSettings->read_if_exists<u16>(section, "bullet_show_frame", 0);
 
-    LoadSilencerKoeffs();
+    LoadSilencerKoeffs(false);
 }
 
 bool CWeaponMagazined::UseScopeTexture()
@@ -1243,7 +1243,15 @@ bool CWeaponMagazined::AttachAttachment(PIItem pIItem)
     {
         addAddon(pIItem);
 
-        reload(m_section_id.c_str());
+        if (pScope->IsSilencer())
+        {
+            m_flagsAddOnState |= CSE_ALifeItemWeapon::eWeaponAddonSilencer;
+            m_sSilencerName = pIItem->m_section_id;
+            LoadSilencerKoeffs(true);
+        }
+        else
+            reload(m_section_id.c_str());
+
         result = true;
     }
     else if (pSilencer && m_eSilencerStatus == ALife::eAddonAttachable &&
@@ -1396,6 +1404,9 @@ bool CWeaponMagazined::Detach(u32 addon_id)
         }
 
         pcstr sect = addon->second->addon_item_name.c_str();
+        if (xr_strcmp(addon->second->addon_type.c_str(), "silencer") == 0 && (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonSilencer) != 0)
+            m_flagsAddOnState &= ~CSE_ALifeItemWeapon::eWeaponAddonSilencer;
+
         xr_delete(addon->second);
         m_addon_items.erase(addon);
 
@@ -1534,9 +1545,9 @@ void CWeaponMagazined::InitAddons()
     inherited::InitAddons();
 }
 
-void CWeaponMagazined::LoadSilencerKoeffs()
+void CWeaponMagazined::LoadSilencerKoeffs(bool loadNow)
 {
-    if (m_eSilencerStatus == ALife::eAddonAttachable)
+    if (loadNow || m_eSilencerStatus == ALife::eAddonAttachable)
     {
         LPCSTR sect = m_sSilencerName.c_str();
         m_silencer_koef.hit_power = READ_IF_EXISTS(pSettings, r_float, sect, "bullet_hit_power_k", 1.0f);
