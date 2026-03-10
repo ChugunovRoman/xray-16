@@ -72,6 +72,7 @@ game_action actions[] =
     { "wpn_zoom_second",        kWPN_ZOOM_SECOND,           _both },
     { "wpn_zoom_inc",           kWPN_ZOOM_INC,              _both },
     { "wpn_zoom_dec",           kWPN_ZOOM_DEC,              _both },
+    { "wpn_hud_fov_adjust",     kWPN_HUD_FOV_ADJUST,        _both },
     { "wpn_reload",             kWPN_RELOAD,                _both },
     { "wpn_func",               kWPN_FUNC,                  _both },
     { "wpn_firemode_prev",      kWPN_FIREMODE_PREV,         _both },

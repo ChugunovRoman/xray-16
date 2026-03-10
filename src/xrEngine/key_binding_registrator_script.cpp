@@ -75,6 +75,7 @@ void key_binding_registrator::script_register(lua_State* luaState)
                 value("kWPN_ZOOM_SECOND",           int(kWPN_ZOOM_SECOND)),
                 value("kWPN_ZOOM_INC",              int(kWPN_ZOOM_INC)),
                 value("kWPN_ZOOM_DEC",              int(kWPN_ZOOM_DEC)),
+                value("kWPN_HUD_FOV_ADJUST",        int(kWPN_HUD_FOV_ADJUST)),
                 value("kWPN_RELOAD",                int(kWPN_RELOAD)),
                 value("kWPN_FUNC",                  int(kWPN_FUNC)),
                 value("kWPN_FIREMODE_PREV",         int(kWPN_FIREMODE_PREV)),

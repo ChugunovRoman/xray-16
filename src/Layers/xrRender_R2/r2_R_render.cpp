@@ -178,7 +178,8 @@ void CRender::Render()
         PIX_EVENT(DEFER_PART0_NO_SPLIT);
         // level, DO NOT SPLIT
         Target->phase_scene_begin();
-        dsgraph.render_hud();
+        // Ранее здесь выполнялся общий deferred-рендер HUD в G-буфер.
+        // Теперь HUD переносится в forward-оверлей внутри phase_hud_overlay().
         dsgraph.render_graph(0);
         dsgraph.render_lods(true, true);
         if (Details)
@@ -190,6 +191,7 @@ void CRender::Render()
         PIX_EVENT(DEFER_PART0_SPLIT);
         // level, SPLIT
         Target->phase_scene_begin();
+        // Deferred HUD перенесён в forward-оверлей, здесь рендерим только сцену
         dsgraph.render_graph(0);
         Target->disable_aniso();
     }
@@ -276,9 +278,8 @@ void CRender::Render()
             dsgraph.cmd_list.set_Z(true);
         }
 
-        // level
+        // level (HUD is rendered in phase_hud_overlay, not into G-buffer)
         Target->phase_scene_begin();
-        dsgraph.render_hud();
         dsgraph.render_lods(true, true);
         if (Details)
             Details->Render(dsgraph.cmd_list);
@@ -396,7 +397,7 @@ void CRender::render_forward()
         dsgraph.mapLOD.clear();
         dsgraph.render_graph(1); // normal level, secondary priority
         dsgraph.PortalTraverser.fade_render(); // faded-portals
-        dsgraph.render_sorted(); // strict-sorted geoms
+        dsgraph.render_sorted(); // strict-sorted geoms (world, without HUD)
         g_pGamePersistent->Environment().RenderLast(); // rain/thunder-bolts
     }
 }
@@ -405,24 +406,9 @@ void CRender::render_forward()
 void CRender::BeforeWorldRender() {}
 
 // После рендера мира и пост-эффектов --#SM+#-- +SecondVP+
+// Пустая заглушка - копирование выполнено в Render() перед render_hud()
 void CRender::AfterWorldRender()
 {
-    if (Device.m_SecondViewport.IsSVPFrame())
-    {
-        // Делает копию бэкбуфера (текущего экрана) в рендер-таргет второго вьюпорта
-#ifdef USE_DX9
-        ID3DRenderTargetView* pBuffer = nullptr;
-        HW.pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBuffer); // Получаем ссылку на бэкбуфер
-        D3DXLoadSurfaceFromSurface(Target->rt_secondVP->pRT, 0, 0, pBuffer, 0, 0, D3DX_DEFAULT, 0);
-        pBuffer->Release(); // Корректно очищаем ссылку на бэкбуфер (иначе игра зависнет в опциях)
-#endif
-#ifdef USE_DX11
-        ID3DTexture2D* pBuffer = nullptr;
-        HW.m_pSwapChain2->GetBuffer(0, __uuidof(ID3DTexture2D), (LPVOID*)&pBuffer);
-        auto pContext = HW.get_context(CHW::IMM_CTX_ID);
-        pContext->CopyResource(Target->rt_secondVP->pSurface, pBuffer);
-        pBuffer->Release(); // Корректно очищаем ссылку на бэкбуфер (иначе игра зависнет в опциях)
-#endif
-    }
+    // Ничего не делаем - rt_secondVP уже заполнен в Render()
 }
 } // namespace xray::render::RENDER_NAMESPACE

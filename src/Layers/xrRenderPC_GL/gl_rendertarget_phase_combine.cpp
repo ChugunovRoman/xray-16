@@ -1,12 +1,103 @@
 #include "stdafx.h"
 #include "xrEngine/IGame_Persistent.h"
+#include "xrEngine/IGame_Level.h"
 #include "xrEngine/Environment.h"
 #include "Layers/xrRender/dxEnvironmentRender.h"
+#include "Layers/xrRender/Shader.h"
+#include "Layers/xrRender/xrRender_console.h"
+#include "Layers/xrRender_R2/r2_types.h"
+#include "gl_rendertarget.h"
 
 #define STENCIL_CULL 0
 
 namespace xray::render::RENDER_NAMESPACE
 {
+bool g_rendering_hud_overlay = false;
+
+void setup_hud_overlay_constants(CBackend& cmd_list, SPass* pass)
+{
+    light* fuckingsun = (light*)RImplementation.Lights.sun._get();
+    Fvector L_dir, L_clr;
+    float L_spec;
+    L_clr.set(fuckingsun->color.r, fuckingsun->color.g, fuckingsun->color.b);
+    L_spec = u_diffuse2s(L_clr);
+    Device.mView.transform_dir(L_dir, fuckingsun->direction);
+    L_dir.normalize();
+    Fvector4 sunclr{L_clr.x, L_clr.y, L_clr.z, L_spec};
+    Fvector4 sundir{L_dir.x, L_dir.y, L_dir.z, 0};
+    cmd_list.set_c("Ldynamic_color", sunclr);
+    cmd_list.set_c("Ldynamic_dir", sundir);
+
+    // Base deffer hud_overlay_state branch uses calc_model_lq_lighting() which needs L_sun_* (world space)
+    Fvector L_dir_w = fuckingsun->direction;
+    L_dir_w.normalize();
+    cmd_list.set_c("L_sun_color", L_clr.x, L_clr.y, L_clr.z, 0.f);
+    cmd_list.set_c("L_sun_dir_w", L_dir_w.x, L_dir_w.y, L_dir_w.z, 0.f);
+
+    // hud_use_shadow: 0 = no shadow (noshadows or no pass), 1 = use hud_shadow() in HUD pixel shaders
+    const float hud_use_shadow = (!RImplementation.o.noshadows && pass && pass->ps) ? 1.0f : 0.0f;
+    cmd_list.set_c("hud_use_shadow", hud_use_shadow, 0.0f, 0.0f, 0.0f);
+    // hud_show_shadow_debug: 1 = show shadow factor as grayscale on HUD (r2_hud_shadow_debug 1)
+    cmd_list.set_c("hud_show_shadow_debug", ps_r2_hud_shadow_debug ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+
+    // Use fuckingsun (Lights.sun): r_sun_old.sun is null when new cascades (o.oldshadowcascades=0).
+    if (!RImplementation.o.noshadows && pass && pass->ps)
+    {
+        // OGL: support_rt_arrays=false → single 2D smap, FAR overwrites. Use that cascade for HUD.
+        // (Stage D with rt_smap_depth_near caused level light artifacts - reverted until copy NEAR→near RT works)
+        auto* target = static_cast<CRenderTarget*>(RImplementation.Target);
+        const u32 cascade_ind = RImplementation.o.support_rt_arrays ? 0 : (R__NUM_SUN_CASCADES - 1);
+        const float fRange = (cascade_ind == 0) ? ps_r2_sun_depth_near_scale : ps_r2_sun_depth_far_scale;
+        const float fBias = (cascade_ind == 0) ? (-ps_r2_sun_depth_near_bias) : ps_r2_sun_depth_far_bias;
+        Fmatrix texel_adjust = {
+            0.5f, 0.0f, 0.0f, 0.0f,
+            0.0f, 0.5f, 0.0f, 0.0f,
+            0.0f, 0.0f, 0.5f * fRange, 0.0f,
+            0.5f, 0.5f, 0.5f + fBias, 1.0f
+        };
+        Fmatrix xf_project;
+        xf_project.mul(texel_adjust, fuckingsun->X.D[cascade_ind].combine);
+        Fmatrix m_shadow;
+        m_shadow.mul(xf_project, Device.mInvView);
+
+        // m_shadow must reach the fragment program. Ctable may route it to the wrong stage (VS).
+        // Prefer ctable location if it targets our fragment program; else glGetUniformLocation.
+        GLuint ps_prog = pass->ps->sh;
+        GLint loc = -1;
+        if (ref_constant C = cmd_list.get_c("m_shadow"))
+        {
+            if ((C->destination & RC_dest_pixel) && C->ps.program == ps_prog)
+                loc = (GLint)C->ps.location;
+            else if ((C->destination & RC_dest_all) && C->pp.program == ps_prog)
+                loc = (GLint)C->pp.location;
+        }
+        if (loc < 0)
+            loc = glGetUniformLocation(ps_prog, "m_shadow");
+        if (loc >= 0)
+            CHK_GL(glProgramUniformMatrix4fv(ps_prog, loc, 1, GL_TRUE, (float*)&m_shadow));
+
+        // Stage C: bind shadow map so HUD pixel shaders can sample s_smap in hud_shadow()
+        if (target->rt_smap_depth && target->rt_smap_depth->pTexture && pass->T)
+        {
+            const u32 smap_stage = pass->T->find_texture_stage(r2_RT_smap_depth, false);
+            if (smap_stage != u32(-1))
+                target->rt_smap_depth->pTexture->bind(cmd_list, smap_stage);
+        }
+    }
+
+    // Force L_sun_dir_w and L_sun_color into the pixel shader (OGL ctable may not apply them to PS)
+    if (pass && pass->ps)
+    {
+        GLuint ps_prog = pass->ps->sh;
+        GLint loc_dir = glGetUniformLocation(ps_prog, "L_sun_dir_w");
+        if (loc_dir >= 0)
+            CHK_GL(glProgramUniform3fv(ps_prog, loc_dir, 1, (const GLfloat*)&L_dir_w.x));
+        GLint loc_clr = glGetUniformLocation(ps_prog, "L_sun_color");
+        if (loc_clr >= 0)
+            CHK_GL(glProgramUniform3fv(ps_prog, loc_clr, 1, (const GLfloat*)&L_clr.x));
+    }
+}
+
 float hclip(float v, float dim) { return 2.f * v / dim - 1.f; }
 
 void CRenderTarget::phase_combine()
@@ -21,16 +112,17 @@ void CRenderTarget::phase_combine()
 
     //*** exposure-pipeline
     u32 gpu_id = Device.dwFrame % HW.Caps.iGPUNum;
-    if (Device.m_SecondViewport.IsSVPActive()) // --#SM+#-- +SecondVP+ Fix for screen flickering
-    {
-        // clang-format off
-        gpu_id = (Device.dwFrame - 1) % HW.Caps.iGPUNum;    // Фикс "мерцания" tonemapping (HDR) после выключения двойного рендера. 
-                                                            // Побочный эффект - при работе двойного рендера скорость изменения tonemapping (HDR) падает в два раза
-                                                            // Мерцание связано с тем, что HDR для своей работы хранит уменьшенние копии "прошлых кадров"
-                                                            // Эти кадры относительно похожи друг на друга, однако при включЄнном двойном рендере
-                                                            // в половине кадров оказывается картинка из второго рендера, и поскольку она часто может отличатся по цвету\яркости
-                                                            // то при попытке создания "плавного" перехода между ними получается эффект мерцания
-    }
+    // Этот фикс больше не актуален. Т.к. мы больше не "воруем" кадры для второго вьюпорта а просто копируем текущий
+    // if (Device.m_SecondViewport.IsSVPActive()) // --#SM+#-- +SecondVP+ Fix for screen flickering
+    // {
+    //     // clang-format off
+    //     gpu_id = (Device.dwFrame - 1) % HW.Caps.iGPUNum;    // Фикс "мерцания" tonemapping (HDR) после выключения двойного рендера. 
+    //                                                         // Побочный эффект - при работе двойного рендера скорость изменения tonemapping (HDR) падает в два раза
+    //                                                         // Мерцание связано с тем, что HDR для своей работы хранит уменьшенние копии "прошлых кадров"
+    //                                                         // Эти кадры относительно похожи друг на друга, однако при включЄнном двойном рендере
+    //                                                         // в половине кадров оказывается картинка из второго рендера, и поскольку она часто может отличатся по цвету\яркости
+    //                                                         // то при попытке создания "плавного" перехода между ними получается эффект мерцания
+    // }
     {
         t_LUM_src->surface_set(GL_TEXTURE_2D, rt_LUM_pool[gpu_id * 2 + 0]->pRT);
         t_LUM_dest->surface_set(GL_TEXTURE_2D, rt_LUM_pool[gpu_id * 2 + 1]->pRT);
@@ -414,12 +506,58 @@ void CRenderTarget::phase_combine()
     PIX_EVENT(LENS_FLARES);
     g_pGamePersistent->Environment().RenderFlares(); // lens-flares
 
+    // Bullet tracers: render before copy so they appear in 3D scopes
+    if (g_pGameLevel)
+    {
+        PIX_EVENT(RENDER_TRACERS);
+        // Restore main camera view/project (combine_2 may leave wrong matrices from lighting passes)
+        RCache.set_xform_view(Device.mView);
+        RCache.set_xform_project(Device.mProject);
+        // Ensure LDR RT is bound (tracers draw via UIRender to current RT)
+        ref_rt ldrRT = RImplementation.o.msaa ? rt_Generic : rt_Color;
+        u_setrt(RCache, ldrRT, nullptr, nullptr, rt_Base_Depth);
+        // Explicit viewport so tracers render into the full LDR RT (OGL may not set it in u_setrt path)
+        const D3D_VIEWPORT tracer_vp = {0, 0, ldrRT->dwWidth, ldrRT->dwHeight, 0.f, 1.f};
+        RCache.SetViewport(tracer_vp);
+        RCache.set_CullMode(CULL_NONE);
+        RCache.set_Stencil(FALSE);
+        RCache.set_ColorWriteEnable();
+        g_pGameLevel->RenderTracers();
+    }
+
+    // Copy full LDR frame (without HUD overlay yet) into second viewport for 3D scopes
+    {
+        PIX_EVENT(COPY_TO_SECOND_VP);
+        // Choose LDR source RT used by combine_2 / flares / tracers
+        ref_rt srcRT = RImplementation.o.msaa ? rt_Generic : rt_Color;
+
+        if (srcRT && rt_secondVP)
+        {
+            RCache.set_RT(srcRT->pRT, 0);
+            RCache.set_RT(rt_secondVP->pRT, 1);
+            constexpr GLenum buffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+            CHK_GL(glDrawBuffers(std::size(buffers), buffers));
+            CHK_GL(glReadBuffer(GL_COLOR_ATTACHMENT0));
+            CHK_GL(glDrawBuffer(GL_COLOR_ATTACHMENT1));
+            CHK_GL(glBlitFramebuffer(
+                0, 0, (GLint)Device.dwWidth, (GLint)Device.dwHeight,
+                0, 0, (GLint)rt_secondVP->dwWidth, (GLint)rt_secondVP->dwHeight,
+                GL_COLOR_BUFFER_BIT, GL_NEAREST));
+            // Restore draw target to main LDR so phase_hud_overlay and Present() use attachment 0
+            constexpr GLenum oneBuffer[] = {GL_COLOR_ATTACHMENT0};
+            CHK_GL(glDrawBuffers(1, oneBuffer));
+        }
+    }
+
     //	PP-if required
     if (PP_Complex)
     {
         PIX_EVENT(phase_pp);
         phase_pp();
     }
+
+    // Forward HUD overlay over final LDR frame (currently empty, will be filled later)
+    phase_hud_overlay();
 
     //	Re-adapt luminance
     RCache.set_Stencil(FALSE);
@@ -536,6 +674,26 @@ void CRenderTarget::phase_combine()
     dbg_lines.clear();
     dbg_planes.clear();
 #endif
+}
+
+void CRenderTarget::phase_hud_overlay()
+{
+    PIX_EVENT(phase_hud_overlay);
+    auto& dsgraph = RImplementation.get_imm_context();
+    dsgraph.rendering_hud_overlay = true;
+    g_rendering_hud_overlay = true;
+
+    // Constants (Ldynamic_*, m_shadow) are set per-HUD-draw in setup_hud_overlay_constants via render_item.
+    dsgraph.cmd_list.set_CullMode(CULL_CCW);
+    dsgraph.cmd_list.set_Stencil(FALSE);
+    dsgraph.cmd_list.set_ColorWriteEnable();
+    // Non-strict HUD (weapons, hands, etc.)
+    dsgraph.render_hud();
+    // Strict-sorted HUD (e.g. 3D scopes)
+    dsgraph.render_hud_sorted();
+
+    dsgraph.rendering_hud_overlay = false;
+    g_rendering_hud_overlay = false;
 }
 
 void CRenderTarget::phase_wallmarks()

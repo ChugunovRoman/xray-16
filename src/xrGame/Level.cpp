@@ -634,7 +634,7 @@ void CLevel::OnRender()
 {
     ZoneScoped;
 
-    GEnv.Render->BeforeWorldRender();	//--#SM+#-- +SecondVP+
+    GEnv.Render->BeforeWorldRender();
 
 #ifdef DEBUG
     CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(Level().CurrentEntity());
@@ -646,9 +646,7 @@ void CLevel::OnRender()
     if (!game)
         return;
     Game().OnRender();
-    // Device.Statistic->TEST1.Begin();
-    BulletManager().Render();
-    // Device.Statistic->TEST1.End();
+    // BulletManager().Render() moved to RenderTracers(), called from phase_combine before COPY_TO_SECOND_VP
 
     GEnv.Render->AfterWorldRender(); //--#SM+#-- +SecondVP+
     WorldRendered(true);
@@ -764,6 +762,11 @@ void CLevel::OnRender()
         }
     }
 #endif
+}
+
+void CLevel::RenderTracers()
+{
+    BulletManager().Render();
 }
 
 void CLevel::OnEvent(EVENT E, u64 P1, u64 /**P2**/)

@@ -23,6 +23,7 @@
 #include "xrEngine/CameraBase.h"
 
 extern ENGINE_API float psHUD_FOV;
+extern int g_3d_scope_type;
 
 class CUIArtefactDetectorElite;
 
@@ -262,8 +263,16 @@ void CHudTuner::on_tool_frame()
                 }
                 Device.time_factor(time_factor);
             }
-            if (ImGui::RadioButton("PiP Scopes", psActorFlags.test(AF_3DSCOPE)))
-                psActorFlags.invert(AF_3DSCOPE);
+            if (ImGui::BeginCombo("3D Scopes", g_3d_scope_type == 0 ? "Off" : (g_3d_scope_type == 1 ? "PiP (lens zoom)" : "PiP (main FOV)")))
+            {
+                if (ImGui::Selectable("Off", g_3d_scope_type == 0))
+                    g_3d_scope_type = 0;
+                if (ImGui::Selectable("PiP (lens zoom)", g_3d_scope_type == 1))
+                    g_3d_scope_type = 1;
+                if (ImGui::Selectable("PiP (main FOV)", g_3d_scope_type == 2))
+                    g_3d_scope_type = 2;
+                ImGui::EndCombo();
+            }
 
             ImGui::EndMenuBar();
         }

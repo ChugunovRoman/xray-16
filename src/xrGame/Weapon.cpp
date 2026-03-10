@@ -17,26 +17,34 @@
 #include "player_hud.h"
 #include "HUDManager.h"
 #include "GamePersistent.h"
+#include "xrEngine/ShadersExternalData.h"
 #include "EffectorFall.h"
 #include "debug_renderer.h"
 #include "static_cast_checked.hpp"
 #include "clsid_game.h"
 #include "WeaponKnife.h"
 #include "WeaponBinocularsVision.h"
+#include "WeaponBinoculars.h"
 #include "xrUICore/Windows/UIWindow.h"
 #include "ui/UIXmlInit.h"
 #include "Torch.h"
 #include "xrNetServer/NET_Messages.h"
 #include "xrCore/xr_token.h"
 #include "GamePersistent.h"
+#include "xrCommon/xr_map.h"
 
 #define WEAPON_REMOVE_TIME 60000
 #define ROTATION_TIME 0.25f
 #define ADDON_ID_NONE (u32(-1))
 
 ENGINE_API extern float psHUD_FOV_def;
+ENGINE_API extern float g_fov;
 extern float g_aim_z_offset_coff;
 extern float g_second_aim_z_offset_coff;
+extern int g_3d_scope_type;
+// Персональные пресеты HUD FOV в прицеливании для сочетаний "оружие+прицел"
+// Ключ формата "<weapon_section>;<scope_section>"
+extern xr_map<shared_str, float> g_scope_hud_fov_presets;
 
 constexpr pcstr WPN_MAIN_SLOT = "slot_1";
 constexpr pcstr DOT = "dot";
@@ -161,6 +169,40 @@ CWeapon::CWeapon()
     m_zoom_params.m_f3dZoomFactor = 0.0f;
     m_zoom_params.m_fSecondVPFovFactor = 0.0f;
     m_fSecondRTZoomFactor = 0.0f;
+    m_fScopeLenseZoomSmoothed = ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
+    m_hud_fov_before_zoom = psHUD_FOV_def;
+    m_hud_fov_main_fov_zoom_smoothed = psHUD_FOV_def;
+}
+
+shared_str CWeapon::GetScopeHudFovKey() const
+{
+    string128 key;
+    const shared_str& wpn_sect = m_section_id;
+    const shared_str& scope_sect = GetScopeName();
+    xr_sprintf(key, "%s;%s", wpn_sect.c_str(), scope_sect.c_str());
+    return shared_str(key);
+}
+
+bool CWeapon::GetScopeHudFovPreset(float& outValue) const
+{
+    if (g_scope_hud_fov_presets.empty())
+        return false;
+
+    shared_str key = GetScopeHudFovKey();
+    auto it = g_scope_hud_fov_presets.find(key);
+    if (it == g_scope_hud_fov_presets.end())
+        return false;
+
+    outValue = it->second;
+    return true;
+}
+
+void CWeapon::SetScopeHudFovPreset(float value)
+{
+    float v = value;
+    clamp(v, 0.1f, 2.0f);
+    shared_str key = GetScopeHudFovKey();
+    g_scope_hud_fov_presets[key] = v;
 }
 
 const shared_str CWeapon::GetScopeName() const
@@ -911,6 +953,9 @@ void CWeapon::Load3DScopeParams(LPCSTR section)
 
     if (fis_zero(m_fSecondRTZoomFactor))
         m_fSecondRTZoomFactor = m_zoom_params.m_f3dZoomFactor;
+    // Нижняя граница зума прицела (из этой же секции; m_fScopeZoomFactor в структуре выставится позже в LoadCurrentScopeParams)
+    float scope_zoom = pSettings->read_if_exists<float>(section, "scope_zoom_factor", 83.3f);
+    m_fSecondRTZoomFactor = _max(m_fSecondRTZoomFactor, scope_zoom);
 }
 
 bool CWeapon::net_Spawn(CSE_Abstract* DC)
@@ -1361,8 +1406,11 @@ void CWeapon::EnableActorNVisnAfterZoom()
 
 bool CWeapon::need_renderable()
 {
-    return !Device.m_SecondViewport.IsSVPFrame() && !(IsZoomed() && ZoomTexture() && !IsRotatingToZoom());
+    // НИ ЗА ЧТО сюда не добавляем условие !Device.m_SecondViewport.IsSVPFrame()
+    // Т.к. оружие начнет мерцать на худе!
+    return !(IsZoomed() && ZoomTexture() && !IsRotatingToZoom());
 }
+
 void CWeapon::renderable_Render(u32 context_id, IRenderable* root)
 {
     ScopeLock lock{ &render_lock };
@@ -2381,7 +2429,7 @@ void CWeapon::UpdateAddonsVisibility()
 void CWeapon::InitAddons() {}
 float CWeapon::CurrentZoomFactor()
 {
-    if (psActorFlags.test(AF_3DSCOPE) && (IsScopeAttached() || IsScopePermament()))
+    if (g_3d_scope_type == 1 && (IsScopeAttached() || IsScopePermament()))
         return m_zoom_params.m_f3dZoomFactor;
 
     if (IsScopePermament())
@@ -2400,7 +2448,7 @@ float CWeapon::GetControlInertionFactor() const
     return fInertionFactor;
 }
 
-void CWeapon::GetZoomData(const float scope_factor, float& delta, float& min_zoom_factor)
+void CWeapon::GetZoomData(const float scope_factor, float& delta, float& min_zoom_factor) const
 {
     float def_fov = bIsSecondVPZoomPresent() ? 75.0f : g_fov;//float(g_fov);
     float delta_factor_total = def_fov - scope_factor;
@@ -2416,6 +2464,16 @@ void CWeapon::OnZoomSecondIn()
     m_zoom_params.m_bIsZoomModeNow = false;
     m_zoom_params.m_bIsZoomSecondModeNow = true;
 
+    if (g_3d_scope_type == 2)
+    {
+        float preset = 0.0f;
+        if (GetScopeHudFovPreset(preset))
+            m_hud_fov_before_zoom = preset;
+        else
+            m_hud_fov_before_zoom = m_nearwall_last_hud_fov;
+
+        m_hud_fov_main_fov_zoom_smoothed = m_hud_fov_before_zoom; // старт без скачка
+    }
     m_zoom_params.m_fSecondZoomRotationFactor = 0.f;
     if (m_zoom_params.m_fZoomRotationFactor == 1.f)
         m_zoom_params.m_fZoomRotationFactor = 0.f;
@@ -2431,11 +2489,22 @@ void CWeapon::OnZoomSecondIn()
     PlayCamAnim("cam_anm_aim_in");
     g_player_hud[1]->set_detector_state(EHudStates::eWpnZoomStart);
 }
+
 void CWeapon::OnZoomIn()
 {
     if (IsSecondZoomed())
         m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::eSecondZoom;
     m_zoom_params.m_bIsZoomModeNow = true;
+    if (g_3d_scope_type == 2)
+    {
+        float preset = 0.0f;
+        if (GetScopeHudFovPreset(preset))
+            m_hud_fov_before_zoom = preset;
+        else
+            m_hud_fov_before_zoom = m_nearwall_last_hud_fov;
+
+        m_hud_fov_main_fov_zoom_smoothed = m_hud_fov_before_zoom; // старт без скачка
+    }
     m_zoom_params.m_bIsZoomSecondModeNow = false;
 
     attachable_hud_item* hi = HudItemData();
@@ -2447,7 +2516,7 @@ void CWeapon::OnZoomIn()
     else if (!m_zoom_params.m_bUseDynamicZoom)
         SetZoomFactor(CurrentZoomFactor());
     else
-        SetZoomFactor(psActorFlags.test(AF_3DSCOPE) ? m_zoom_params.m_f3dZoomFactor : m_fRTZoomFactor);
+        SetZoomFactor(g_3d_scope_type == 1 ? m_zoom_params.m_f3dZoomFactor : m_fRTZoomFactor);
 
     // Отключаем инерцию (Заменено GetInertionFactor())
     // EnableHudInertion(FALSE);
@@ -2471,7 +2540,7 @@ void CWeapon::OnZoomIn()
             if (pTorch && pTorch->GetNightVisionStatus())
                 OnZoomOut();
         }
-        else if (m_zoom_params.m_sUseZoomPostprocess.size() && !psActorFlags.test(AF_3DSCOPE))
+        else if (m_zoom_params.m_sUseZoomPostprocess.size() && g_3d_scope_type != 1)
         {
             if (NULL == m_zoom_params.m_pNight_vision)
                 m_zoom_params.m_pNight_vision = xr_new<CNightVisionEffector>(m_zoom_params.m_sUseZoomPostprocess/*"device_torch"*/);
@@ -2494,8 +2563,8 @@ void CWeapon::OnZoomSecondOut()
 }
 void CWeapon::OnZoomOut()
 {
-    if (!IsSecondZoomed() && !psActorFlags.test(AF_3DSCOPE))
-        m_fRTZoomFactor = GetZoomFactor(); // Сохраняем текущий динамический зум
+    if (!IsSecondZoomed() || g_3d_scope_type != 1)
+        m_fRTZoomFactor = GetZoomFactor(); // Сохраняем текущий динамический зум (для режима 0 и 2 — всегда; для 1 — только при не втором зуме)
     m_zoom_params.m_bIsZoomModeNow = false;
     m_zoom_params.m_bIsZoomSecondModeNow = false;
     m_zoom_params.m_bSwitchBetweenSecondsZooms = false;
@@ -2524,10 +2593,14 @@ void CWeapon::OnZoomOut()
 
 CUIWindow* CWeapon::ZoomTexture()
 {
-    if (UseScopeTexture() && !psActorFlags.test(AF_3DSCOPE))
+    CWeaponBinoculars* binoc = smart_cast<CWeaponBinoculars*>(this); 
+    if (UseScopeTexture() && binoc)
         return m_UIScope;
-    else
-        return nullptr;
+
+    // 2D прицельная сетка только при выключенных 3D прицелах (режим 0); в режимах 1 и 2 — PiP, сетку не показываем
+    if (UseScopeTexture() && g_3d_scope_type == 0)
+        return m_UIScope;
+    return nullptr;
 }
 
 void CWeapon::SwitchState(u32 S)
@@ -3432,9 +3505,13 @@ void CWeapon::ZoomDynamicMod(bool bIncrement, bool bForceLimit)
         {
             m_zoom_params.m_bSwitchBetweenSecondsZooms = true;
             m_zoom_params.m_fSecondZoomRotationFactor = 0.f;
-            SwitchToNextZoomableAddon();
+            if (bIncrement)
+                SwitchToNextZoomableAddon();
+            else
+                SwitchToPrevZoomableAddon();
         }
         return;
+        // иначе меняем зум в рамках текущего 3D-прицела — не выходим, идём к обновлению m_fSecondRTZoomFactor
     }
     if (!bUseAttachmentSystem && !IsScopeAttached() && !IsScopePermament())
         return;
@@ -3443,10 +3520,15 @@ void CWeapon::ZoomDynamicMod(bool bIncrement, bool bForceLimit)
 
     float delta, min_zoom_factor, max_zoom_factor;
 
-    bool bIsSecondZOOM = bIsSecondVPZoomPresent() && psActorFlags.test(AF_3DSCOPE);
+    bool bIsSecondZOOM = bIsSecondVPZoomPresent() && (g_3d_scope_type == 1);
 
     max_zoom_factor = (bIsSecondZOOM ? GetSecondVPZoomFactor() * 100.0f : m_zoom_params.m_fScopeZoomFactor);
     GetZoomData(max_zoom_factor, delta, min_zoom_factor);
+    // Для 3D-прицела (режим 1): scope_zoom_factor — нижняя граница зума
+    if (g_3d_scope_type == 1)
+        min_zoom_factor = 100.0f;
+    if (bIsSecondZOOM)
+        max_zoom_factor = _min(max_zoom_factor, m_zoom_params.m_fScopeZoomFactor);
 
     if (bForceLimit)
     {
@@ -3471,6 +3553,8 @@ void CWeapon::ZoomDynamicMod(bool bIncrement, bool bForceLimit)
 void CWeapon::ZoomInc()
 {
     ZoomDynamicMod(true, false);
+    if (ParentIsActor() && H_Parent() == Level().CurrentViewEntity() && g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
+        g_pGamePersistent->m_pGShaderConstants->hud_params.w = GetScopeLenseZoomSmoothed(Device.fTimeDelta);
 }
 
 void CWeapon::ZoomDec()
@@ -3483,6 +3567,12 @@ void CWeapon::ZoomDec()
             m_zoom_params.m_fSecondZoomRotationFactor = 0.f;
             SwitchToPrevZoomableAddon();
         }
+        else
+        {
+            ZoomDynamicMod(false, false);
+            if (ParentIsActor() && H_Parent() == Level().CurrentViewEntity() && g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
+                g_pGamePersistent->m_pGShaderConstants->hud_params.w = GetScopeLenseZoomSmoothed(Device.fTimeDelta);
+        }
         return;
     }
     if (!bUseAttachmentSystem && !IsScopeAttached() && !IsScopePermament())
@@ -3490,17 +3580,43 @@ void CWeapon::ZoomDec()
     if (!m_zoom_params.m_bUseDynamicZoom)
         return;
 
-    bool bIsSecondZOOM = bIsSecondVPZoomPresent() && psActorFlags.test(AF_3DSCOPE);
+    bool bIsSecondZOOM = bIsSecondVPZoomPresent() && (g_3d_scope_type == 1);
 
     float delta, min_zoom_factor;
     GetZoomData(m_zoom_params.m_fScopeZoomFactor, delta, min_zoom_factor);
 
-    float f = GetZoomFactor() + delta;
+    float factor = GetZoomFactor();
+    if (bIsSecondZOOM && (IsScopeAttached() || IsScopePermament()))
+        factor = m_fSecondRTZoomFactor;
+    float f = factor + delta;
     clamp(f, m_zoom_params.m_fScopeZoomFactor, min_zoom_factor);
     if (bIsSecondZOOM)
         m_fSecondRTZoomFactor = f;
     else
         SetZoomFactor(f);
+    if (ParentIsActor() && H_Parent() == Level().CurrentViewEntity() && g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
+        g_pGamePersistent->m_pGShaderConstants->hud_params.w = GetScopeLenseZoomSmoothed(Device.fTimeDelta);
+}
+
+void CWeapon::AdjustScopeHudFov(float wheel_delta)
+{
+    if (wheel_delta == 0.0f)
+        return;
+
+    // Базовое значение для редактирования — текущий m_hud_fov_before_zoom
+    float base = m_hud_fov_before_zoom;
+
+    // Шаг изменения на один тик колеса
+    const float step = 0.02f;
+    base += (wheel_delta > 0.f ? step : -step);
+
+    clamp(base, 0.1f, 2.0f);
+
+    m_hud_fov_before_zoom = base;
+    m_hud_fov_main_fov_zoom_smoothed = base;
+
+    // Сохраняем пресет для текущего оружия и прицела
+    SetScopeHudFovPreset(base);
 }
 
 u32 CWeapon::Cost() const
@@ -3532,6 +3648,33 @@ u32 CWeapon::Cost() const
 // Get the HUD FOV of the current weapon
 float CWeapon::GetHudFov()
 {
+    // При g_3d_scope_type == 2 и первом прицеле: HUD FOV меняется только когда реально меняется зум (FOV камеры).
+    // Во втором прицеле (IsSecondZoomed()) изменение HUD по зуму отключаем для режимов 0 и 2.
+    if (g_3d_scope_type == 2 && IsZoomed() && !IsSecondZoomed())
+    {
+        float camFOV = Device.fFOV;
+        // FOV камеры ещё не изменился (только вошли в прицел) — оставляем HUD как был
+        float base = m_hud_fov_before_zoom;
+        float preset;
+        if (GetScopeHudFovPreset(preset))
+            base = preset;
+        if (camFOV <= 0.1f || _abs(camFOV - g_fov) < 0.5f)
+            return base;
+        float fullTarget = base * (g_fov / camFOV);
+        float target = base + (fullTarget - base) * 0.3f;
+        float speed = 20.f;
+        float step = speed * Device.fTimeDelta;
+        if (step >= 1.f)
+            m_hud_fov_main_fov_zoom_smoothed = target;
+        else
+            m_hud_fov_main_fov_zoom_smoothed += (target - m_hud_fov_main_fov_zoom_smoothed) * step;
+        return m_hud_fov_main_fov_zoom_smoothed;
+    }
+    else
+    {
+        m_hud_fov_main_fov_zoom_smoothed = m_nearwall_last_hud_fov; // сброс при выходе из зума
+    }
+
     // We calculate the HUD FOV from the hip (taking into account the abutment against the walls)
     if (ParentIsActor() && Level().CurrentViewEntity() == H_Parent())
     {
@@ -3546,6 +3689,14 @@ float CWeapon::GetHudFov()
 
         // We calculate the basic HUD FOV from the hip
         float fBaseFov = psHUD_FOV_def + m_hud_fov_add_mod;
+
+        // Для 3D-прицелов (g_3d_scope_type != 0) в зуме можем использовать сохранённый пресет как базовый HUD FOV
+        if (g_3d_scope_type != 0 && (IsZoomed() || IsSecondZoomed()))
+        {
+            float preset = 0.0f;
+            if (GetScopeHudFovPreset(preset))
+                fBaseFov = preset;
+        }
         clamp(fBaseFov, 0.0f, FLT_MAX);
 
         // Smoothly calculate the final FOV from the hip
@@ -3567,23 +3718,54 @@ float CWeapon::GetSecondVPFov() const
     return GetSecondVPZoomFactor() * 75.0f; // g_fov;
 }
 
+// Зум линзы 3D-прицела для шейдера: чем меньше значение — тем сильнее увеличение в прицеле.
+// Маппинг m_fSecondRTZoomFactor из диапазона [zoomed_in, zoomed_out] (как в ZoomDynamicMod) в [scope_zoom_factor/100, SCOPE_LENSE_ZOOM_DEFAULT].
+float CWeapon::GetScopeLenseZoom() const
+{
+    if (!IsScopeAttached() && !IsScopePermament())
+        return ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
+    if (m_zoom_params.m_fZoomRotationFactor <= 0.05f)
+        return ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
+    if (g_3d_scope_type != 1)
+        return ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
+    if (!bIsSecondVPZoomPresent() || m_zoom_params.m_f3dZoomFactor <= 0.f)
+        return ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
+
+    const float min_out = m_zoom_params.m_fScopeZoomFactor / 100.f;
+    const float max_out = ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
+
+    float delta, zoomed_out;
+    float zoomed_in = GetSecondVPZoomFactor() * 100.f;
+    GetZoomData(zoomed_in, delta, zoomed_out);
+    zoomed_in = _min(zoomed_in, m_zoom_params.m_fScopeZoomFactor); // как в ZoomDynamicMod: нижняя граница по прицелу
+
+    float range = zoomed_out - zoomed_in;
+    if (range <= 0.f)
+        return min_out;
+
+    float val = min_out + (max_out - min_out) * (m_fSecondRTZoomFactor - zoomed_in) / range;
+    return clampr(val, min_out, max_out);
+}
+
+float CWeapon::GetScopeLenseZoomSmoothed(float dt)
+{
+    float target = GetScopeLenseZoom();
+    // При приближении — быстрее, при удалении (к SCOPE_LENSE_ZOOM_DEFAULT) — медленнее, чтобы уменьшение было плавным
+    float speed = (target < m_fScopeLenseZoomSmoothed) ? 5.0f : 3.0f;
+    float step = speed * dt;
+    if (step >= 1.0f)
+        m_fScopeLenseZoomSmoothed = target;
+    else
+        m_fScopeLenseZoomSmoothed += (target - m_fScopeLenseZoomSmoothed) * step;
+    m_fScopeLenseZoomSmoothed = clampr(m_fScopeLenseZoomSmoothed, 0.1f, ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT);
+    return m_fScopeLenseZoomSmoothed;
+}
+
 // Обновление необходимости включения второго вьюпорта +SecondVP+
 // Вызывается только для активного оружия игрока
 void CWeapon::UpdateSecondVP(bool bInGrenade)
 {
-    // bool b_is_active_item = (m_pInventory != NULL) && (m_pInventory->ActiveItem() == this);
-    // R_ASSERT(ParentIsActor() && b_is_active_item); // Эта функция должна вызываться только для оружия в руках нашего игрока
-
-    // CActor* pActor = smart_cast<CActor*>(H_Parent());
-
-    // bool bCond_1 = bInZoomRightNow(); // Мы должны целиться
-    // bool bCond_2 = bIsSecondVPZoomPresent() && psActorFlags.test(AF_3DSCOPE); // В конфиге должен быть прописан фактор зума для линзы (scope_lense_factor, больше чем 0)
-    // // bool bCond_2 = psActorFlags.test(AF_3DSCOPE); // В конфиге должен быть прописан фактор зума для линзы (scope_lense_factor, больше чем 0)
-    // bool bCond_3 = pActor->cam_Active() == pActor->cam_FirstEye(); // Мы должны быть от 1-го лица
-
-    // Device.m_SecondViewport.SetSVPActive(bCond_1 && bCond_2 && bCond_3 && !bInGrenade);
-
-    Device.m_SecondViewport.SetSVPActive(psActorFlags.test(AF_3DSCOPE) && m_zoom_params.m_fZoomRotationFactor > 0.05);
+    Device.m_SecondViewport.SetSVPActive((g_3d_scope_type != 0) && m_zoom_params.m_fZoomRotationFactor > 0.05);
 }
 
 void CWeapon::CollectAttachmentsAI(TIItemContainer& l_list)
@@ -4511,7 +4693,18 @@ CWeapon::AddonIter CWeapon::FindNextAddon(CWeapon::AddonIter start, bool forward
 
 bool CWeapon::IsAddonSuitableForZoom(const std::pair<u32, addon_item*>& addon)
 {
-    return addon.second && addon.second->has_second_aim_offset;
+    if (!addon.second)
+        return false;
+
+    // Аддон должен иметь второе прицеливание
+    if (!addon.second->has_second_aim_offset)
+        return false;
+
+    // При g_3d_scope_type == 0 пропускаем прицелы, у которых есть сетка (has_scope_texture)
+    if (g_3d_scope_type == 0 && addon.second->has_scope_texture)
+        return false;
+
+    return true;
 }
 
 CWeapon::AddonIter CWeapon::FindCurrentZoomedAddon()

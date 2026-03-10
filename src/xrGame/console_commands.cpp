@@ -44,6 +44,7 @@
 #include "CustomOutfit.h"
 
 #include "CameraLook.h"
+#include "xrCommon/xr_map.h"
 #include "character_hit_animations_params.h"
 #include "inventory_upgrade_manager.h"
 
@@ -118,6 +119,8 @@ ENGINE_API extern float g_console_sensitive;
 extern BOOL g_ai_die_in_anomaly;
 int g_inv_highlight_equipped = 0;
 int g_inv_inv_cell_size = 3;
+int g_3d_scope_type = 1; // 0 = off, 1 = PiP (lens zoom), 2 = PiP + main FOV zoom
+xr_map<shared_str, float> g_scope_hud_fov_presets;
 //-Alundaio
 
 int g_first_person_death = 0;
@@ -1593,6 +1596,51 @@ public:
     }
 };
 
+// g_w_scope_hud_fov <weapon_section>;<scope_section> <abs_hud_fov>
+class CCC_ScopeHudFov : public IConsole_Command
+{
+public:
+    CCC_ScopeHudFov(LPCSTR n) : IConsole_Command(n) { bEmptyArgsHandled = true; }
+
+    void Execute(LPCSTR args) override
+    {
+        if (!args || !*args)
+        {
+            for (const auto& it : g_scope_hud_fov_presets)
+                Msg("%s %s %f", cName, it.first.c_str(), it.second);
+            return;
+        }
+
+        string512 key;
+        float value = 0.0f;
+        *key = 0;
+
+        int parsed = sscanf(args, "%s %f", key, &value);
+        if (parsed <= 0)
+            return;
+
+        if (parsed == 1)
+        {
+            auto it = g_scope_hud_fov_presets.find(shared_str(key));
+            if (it != g_scope_hud_fov_presets.end())
+                g_scope_hud_fov_presets.erase(it);
+            return;
+        }
+
+        clamp(value, 0.1f, 2.0f);
+        g_scope_hud_fov_presets[shared_str(key)] = value;
+    }
+
+    void Save(IWriter* f) override
+    {
+        if (g_scope_hud_fov_presets.empty())
+            return;
+
+        for (const auto& it : g_scope_hud_fov_presets)
+            f->w_printf("%s %s %f\r\n", cName, it.first.c_str(), it.second);
+    }
+};
+
 #include "GamePersistent.h"
 
 struct CCC_LuaHelp : public IConsole_Command
@@ -2389,6 +2437,7 @@ void CCC_RegisterCommands()
 
     CMD4(CCC_Float, "hud_fov", &psHUD_FOV_def, 0.1f, 1.0f);
     CMD4(CCC_Float, "fov", &g_fov, 5.0f, 180.0f);
+    CMD1(CCC_ScopeHudFov, "g_w_scope_hud_fov");
 
     // Demo
     CMD1(CCC_DemoPlay, "demo_play");
@@ -2527,7 +2576,7 @@ void CCC_RegisterCommands()
     CMD3(CCC_Mask, "g_god", &psActorFlags, AF_GODMODE);
     CMD3(CCC_Mask, "g_unlimitedammo", &psActorFlags, AF_UNLIMITEDAMMO);
     CMD1(CCC_TuneAttachableItem, "dbg_adjust_attachable_item");
-    CMD3(CCC_Mask, "g_3d_scopes", &psActorFlags, AF_3DSCOPE);
+    CMD4(CCC_Integer, "g_3d_scopes", &g_3d_scope_type, 0, 2);
     CMD3(CCC_Mask, "g_pnv_in_scope", &psActorFlags, AF_PNV_W_SCOPE_DIS);
     CMD3(CCC_Mask, "g_weapons_cam_anims", &psActorFlags, AF_USE_CAM_ANIMS);
 #ifndef MASTER_GOLD

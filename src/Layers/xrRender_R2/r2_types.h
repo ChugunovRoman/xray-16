@@ -47,6 +47,7 @@ namespace xray::render::RENDER_NAMESPACE
 
 #define     r2_RT_smap_surf     "$user$smap_surf"   // --- directional
 #define     r2_RT_smap_depth    "$user$smap_depth"  // --- directional
+#define     r2_RT_smap_depth_near "$user$smap_depth_near"  // OGL: NEAR cascade for HUD shadows
 #define     r2_RT_smap_rain     "$user$smap_rain"
 #define     r2_RT_smap_depth_minmax "$user$smap_depth_minmax"
 
@@ -105,6 +106,7 @@ const u32 LUMINANCE_size = 16;
 #define SE_R2_NORMAL_HQ     0 // high quality/detail
 #define SE_R2_NORMAL_LQ     1 // low quality
 #define SE_R2_SHADOW        2 // shadow generation
+#define SE_R2_HUD           3 // HUD-only forward (GL: weapons with sun lighting)
 
 // spot
 #define SE_L_FILL           0

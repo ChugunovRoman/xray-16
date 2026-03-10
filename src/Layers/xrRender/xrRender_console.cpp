@@ -268,6 +268,8 @@ float ps_current_detail_height = 1.f;
 int ps_r2_mt_calculate = 1;
 int ps_r2_mt_render = 1;
 
+int ps_r2_hud_shadow_debug = 0; // 0=normal, 1=HUD shows shadow factor as grayscale (for debugging)
+
 xr_token ext_quality_token[] = {{"qt_off", 0}, {"qt_low", 1}, {"qt_medium", 2},
     {"qt_high", 3}, {"qt_extreme", 4}, {nullptr, 0}};
 //-AVO
@@ -900,6 +902,7 @@ void xrRender_initconsole()
 
     CMD4(CCC_Float, "r2_slight_fade", &ps_r2_slight_fade, .2f, 1.f);
     CMD3(CCC_Token, "r2_smap_size", &ps_r2_smapsize, qsmapsize_token);
+    CMD4(CCC_Integer, "r2_hud_shadow_debug", &ps_r2_hud_shadow_debug, 0, 1);
 
     Fvector tw_min, tw_max;
     tw_min.set(0, 0, 0);

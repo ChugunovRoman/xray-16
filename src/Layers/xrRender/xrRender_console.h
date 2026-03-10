@@ -157,6 +157,8 @@ extern ECORE_API Fvector3 ps_r2_dof;
 extern ECORE_API float ps_r2_dof_sky; //	distance to sky
 extern ECORE_API float ps_r2_dof_kernel_size; //	7.0f
 
+extern ECORE_API int ps_r2_hud_shadow_debug; //	0=normal, 1=show shadow factor as grayscale on HUD (debug)
+
 extern ECORE_API float ps_r3_dyn_wet_surf_near; // 10.0f
 extern ECORE_API float ps_r3_dyn_wet_surf_far; // 30.0f
 extern ECORE_API int ps_r3_dyn_wet_surf_sm_res; // 256

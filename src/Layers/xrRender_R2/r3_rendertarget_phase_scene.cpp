@@ -53,6 +53,10 @@ void CRenderTarget::phase_scene_prepare()
 // begin
 void CRenderTarget::phase_scene_begin()
 {
+#ifdef USE_OGL
+    // Guarantee deferred pass sees hud_overlay_state = 0 (only HUD overlay sets it to 1)
+    RCache.set_c("hud_overlay_state", 0.0f, 0.0f, 0.0f, 0.0f);
+#endif
     // Targets, use accumulator for temporary storage
     if (!RImplementation.o.gbuffer_opt)
     {

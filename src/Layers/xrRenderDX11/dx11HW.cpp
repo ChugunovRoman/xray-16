@@ -524,8 +524,9 @@ void CHW::EndScene() { }
 
 void CHW::Present()
 {
-    if (!Device.m_SecondViewport.IsSVPFrame() && !Device.m_SecondViewport.isCamReady) //--#SM+#-- +SecondVP+ Не выводим кадр из второго рендера на экран
-    {
+    // Убрал специально этоусловие чтобы мы не "воровали" кадры для второго вьюпорта, что сильно снижает ФПС!
+    // if (!Device.m_SecondViewport.IsSVPFrame() && !Device.m_SecondViewport.isCamReady) //--#SM+#-- +SecondVP+ Не выводим кадр из второго рендера на экран
+    // {
         const bool bUseVSync = psDeviceMode.WindowStyle == rsFullscreen &&
             psDeviceFlags.test(rsVSync); // xxx: weird tearing glitches when VSync turned on for windowed mode in DX11
 
@@ -536,7 +537,7 @@ void CHW::Present()
             doPresentTest = true;
             break;
         }
-    }
+    // }
 
     CurrentBackBuffer = (CurrentBackBuffer + 1) % BackBufferCount;
 

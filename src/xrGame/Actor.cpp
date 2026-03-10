@@ -42,6 +42,7 @@
 
 #include "Level.h"
 #include "GamePersistent.h"
+#include "xrEngine/ShadersExternalData.h"
 #include "game_cl_base.h"
 #include "game_cl_single.h"
 #include "xrMessages.h"
@@ -1041,6 +1042,7 @@ void CActor::g_Physics(Fvector& _accel, float jump, float dt)
     }
 }
 extern ENGINE_API float g_fov;
+extern int g_3d_scope_type;
 
 float CActor::currentFOV()
 {
@@ -1173,9 +1175,11 @@ void CActor::UpdateCL()
             g_pGamePersistent->m_pGShaderConstants->hud_params.x = bInZoom;  //--#SM+#--
             g_pGamePersistent->m_pGShaderConstants->hud_params.y = pWeapon->GetSecondVPFov(); //--#SM+#--
             g_pGamePersistent->m_pGShaderConstants->hud_params.z = bUseMark; //--#SM+#--
+            g_pGamePersistent->m_pGShaderConstants->hud_params.w = (g_3d_scope_type == 1) ? pWeapon->GetScopeLenseZoomSmoothed(Device.fTimeDelta) : ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT; //--#SM+#--
             g_pGamePersistent->m_pGShaderConstants->m_blender_mode.x = bNVEnbl;  //--#SM+#--
 
             g_pGamePersistent->m_pGShaderConstants->hud_params_2.x = 512;
+            g_pGamePersistent->m_pGShaderConstants->hud_params_2.y = ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
         }
     }
     else
@@ -1185,8 +1189,9 @@ void CActor::UpdateCL()
             HUD().SetCrosshairDisp(0.f);
             HUD().ShowCrosshair(false);
 
-            // Очищаем информацию об оружии в шейдерах
-            g_pGamePersistent->m_pGShaderConstants->hud_params.set(0.f, 0.f, 0.f, 0.f); // --#SM+#--
+            // Очищаем информацию об оружии в шейдерах (w = SCOPE_LENSE_ZOOM_DEFAULT — без зума линзы прицела)
+            g_pGamePersistent->m_pGShaderConstants->hud_params.set(0.f, 0.f, 0.f, ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT); // --#SM+#--
+            g_pGamePersistent->m_pGShaderConstants->hud_params_2.y = ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
             g_pGamePersistent->m_pGShaderConstants->m_blender_mode.set(0.f, 0.f, 0.f, 0.f); //--#SM+#--
 
             // Отключаем второй вьюпорт [Turn off SecondVP]

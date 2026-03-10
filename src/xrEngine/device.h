@@ -51,7 +51,7 @@ public:
         bool IsSVPFrame();
 
         u8 GetSVPFrameDelay() { return frameDelay; }
-        void  SetSVPFrameDelay(u8 iDelay)
+        void SetSVPFrameDelay(u8 iDelay)
         {
             frameDelay = iDelay;
             clamp<u8>(frameDelay, 2, u8(-1));

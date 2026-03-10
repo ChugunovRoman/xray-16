@@ -73,7 +73,14 @@ void R_dsgraph_structure::insert_dynamic(IRenderable* root, dxRender_Visual* pVi
     }
 
     // Select shader
+#if RENDER == R_GL
+    // GL: HUD uses dedicated shaders with Ldynamic_dir lighting (separate from deffer)
+    ShaderElement* sh = (root && root->renderable_HUD())
+        ? RImplementation.rimp_select_sh_hud(pVisual)
+        : RImplementation.rimp_select_sh_dynamic(pVisual, distSQ, o.phase);
+#else
     ShaderElement* sh = RImplementation.rimp_select_sh_dynamic(pVisual, distSQ, o.phase);
+#endif
     if (nullptr == sh)
         return;
     if (!o.pmask[sh->flags.iPriority / 2])

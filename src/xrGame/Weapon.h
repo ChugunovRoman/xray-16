@@ -162,7 +162,7 @@ public:
     void Load3DScopeParams(LPCSTR section);
     void LoadOriginalScopesParams(LPCSTR section);
     void LoadCurrentScopeParams(LPCSTR section);
-    void GetZoomData(const float scope_factor, float& delta, float& min_zoom_factor);
+    void GetZoomData(const float scope_factor, float& delta, float& min_zoom_factor) const;
     void ZoomDynamicMod(bool bIncrement, bool bForceLimit);
     void UpdateAltScope();
 
@@ -171,6 +171,9 @@ public:
     IC float GetSecondVPZoomFactor() const { return m_zoom_params.m_fSecondVPFovFactor; }
     float GetHudFov();
     float GetSecondVPFov() const;
+    float GetScopeLenseZoom() const;
+    /// Обновляет сглаженное значение зума линзы и возвращает его (для плавного уменьшения при выходе из прицела)
+    float GetScopeLenseZoomSmoothed(float dt);
 
     shared_str GetNameWithAttachment();
 
@@ -184,6 +187,8 @@ public:
     float m_nearwall_last_hud_fov;
     float m_nearwall_target_hud_fov;
     float m_nearwall_speed_mod;
+    float m_hud_fov_before_zoom;       // HUD FOV до прицеливания (для g_3d_scope_type == 2)
+    float m_hud_fov_main_fov_zoom_smoothed; // сглаженный HUD FOV при зуме main FOV (режим 2)
 
     float m_fLR_MovingFactor;  // Фактор бокового наклона худа при ходьбе [-1; +1]
     float m_fLR_CameraFactor;  // Фактор бокового наклона худа при движении камеры [-1; +1]
@@ -463,6 +468,7 @@ protected:
 
     float m_fRTZoomFactor; // run-time zoom factor
     float m_fSecondRTZoomFactor; //текущий зум для 3д прицела
+    float m_fScopeLenseZoomSmoothed; // сглаженное значение зума линзы для шейдера [0.1, 1.0], плавный переход при выходе из прицела
     CUIWindow* m_UIScope;
 
     xr_vector<shared_str> bullets_bones;
@@ -483,6 +489,8 @@ public:
     virtual void OnZoomFirstOut();
     virtual void OnZoomSecondOut();
     virtual void OnZoomSecondIn();
+    // Ручная подстройка базового HUD FOV в прицеливании (используется при зажатом LCTRL и прокрутке колеса)
+    void AdjustScopeHudFov(float wheel_delta);
     IC bool IsZoomed() const { return m_zoom_params.m_bIsZoomModeNow; };
     IC bool IsSecondZoomed() const { return m_zoom_params.m_bIsZoomSecondModeNow; };
     CUIWindow* ZoomTexture();
@@ -530,6 +538,11 @@ public:
     Fvector vLoadedFirePoint2;
 
 private:
+    // Ключ и операции для пресетов HUD FOV в прицеливании (per-weapon + per-scope)
+    shared_str GetScopeHudFovKey() const;
+    bool GetScopeHudFovPreset(float& outValue) const;
+    void SetScopeHudFovPreset(float value);
+
     firedeps m_current_firedeps;
 
 protected:

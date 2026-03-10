@@ -117,6 +117,8 @@ public:
 
     virtual void OnFrame(void);
     virtual void OnRender(void);
+    /// Render bullet tracers. Called from phase_combine before COPY_TO_SECOND_VP so tracers appear in 3D scopes.
+    virtual void RenderTracers() {}
     virtual void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert);
 
     [[nodiscard]] bool WorldRendered() const { return m_world_rendered; }

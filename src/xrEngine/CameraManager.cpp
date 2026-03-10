@@ -349,20 +349,12 @@ void CCameraManager::ApplyDevice()
     // Device.mProject.build_projection(deg2rad(m_cam_info.fFov), m_cam_info.fAspect, m_cam_info.fNear, m_cam_info.fFar);
 
     // --#SM+# Begin-- +SecondVP+
-    // Пересчитываем FOV для второго вьюпорта [Recalculate scene FOV for SecondVP frame]
-    if (Device.m_SecondViewport.IsSVPFrame())
-    {
-        // Для второго вьюпорта FOV выставляем здесь
-        Device.fFOV = fFovSecond;
-
-        // Предупреждаем что мы изменили настройки камеры
-        Device.m_SecondViewport.isCamReady = true;
-    }
-    else
-        Device.m_SecondViewport.isCamReady = false;
+    // Используем ОДИНАКОВЫЙ FOV для обоих вьюпортов
+    // FOV для прицела устанавливается в шейдерах через hud_params.y
+    Device.m_SecondViewport.isCamReady = Device.m_SecondViewport.IsSVPFrame();
+    // --#SM+# End--
 
     Device.mProject.build_projection(deg2rad(Device.fFOV), aspect, m_cam_info.fNear, m_cam_info.fFar);
-    // --#SM+# End--
 
     
     // Apply offset required for Nvidia Ansel

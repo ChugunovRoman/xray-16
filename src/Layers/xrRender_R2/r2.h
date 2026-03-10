@@ -365,6 +365,7 @@ public:
     auto get_largest_sector() const { return largest_sector_id; }
     ShaderElement* rimp_select_sh_static(dxRender_Visual* pVisual, float cdist_sq, u32 phase);
     ShaderElement* rimp_select_sh_dynamic(dxRender_Visual* pVisual, float cdist_sq, u32 phase);
+    ShaderElement* rimp_select_sh_hud(dxRender_Visual* pVisual);
     VertexElement* getVB_Format(int id, bool alternative = false);
     VertexStagingBuffer* getVB(int id, bool alternative = false);
     IndexStagingBuffer* getIB(int id, bool alternative = false);

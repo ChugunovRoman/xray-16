@@ -311,7 +311,7 @@ CRenderTarget::CRenderTarget()
         // generic(LDR) RTs
         rt_Generic_0.create(r2_RT_generic0, w, h, D3DFMT_A8R8G8B8, 1);
         rt_Generic_1.create(r2_RT_generic1, w, h, D3DFMT_A8R8G8B8, 1);
-        rt_secondVP.create(r2_RT_secondVP, w, h, D3DFMT_A8R8G8B8, 1); // --#SM+#-- +SecondVP+
+        rt_secondVP.create(r2_RT_secondVP, w, h, D3DFMT_A8R8G8B8, 1);
         rt_Generic.create(r2_RT_generic, w, h, D3DFMT_A8R8G8B8, 1);
 
         if (!options.msaa)
@@ -370,6 +370,11 @@ CRenderTarget::CRenderTarget()
         // otherwise - create texture with specified HW_smap_FORMAT
         const auto num_slices = RImplementation.o.support_rt_arrays ? R__NUM_SUN_CASCADES : 1;
         rt_smap_depth.create(r2_RT_smap_depth, smapsize, smapsize, depth_format, 1, num_slices, flags);
+#if (RENDER == R_GL)
+        // OGL: separate NEAR cascade for HUD shadows (FAR overwrites rt_smap_depth when support_rt_arrays=false)
+        if (!RImplementation.o.support_rt_arrays)
+            rt_smap_depth_near.create(r2_RT_smap_depth_near, smapsize, smapsize, depth_format, 1, 1, flags);
+#endif
         rt_smap_rain.create(r2_RT_smap_rain, options.rain_smapsize, options.rain_smapsize, depth_format);
         if (options.minmax_sm)
         {

@@ -303,6 +303,7 @@ public:
     void phase_bloom();
     void phase_luminance();
     void phase_combine();
+    void phase_hud_overlay();
     void phase_combine_volumetric();
     void phase_pp();
 #if 0 // kept for historical reasons

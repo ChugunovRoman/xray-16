@@ -701,7 +701,7 @@ void CLoadScreenRenderer::OnRender()
 void CRenderDevice::CSecondVPParams::SetSVPActive(bool bState) //--#SM+#-- +SecondVP+
 {
     isActive = bState;
-    if (g_pGamePersistent != NULL)
+    if (g_pGamePersistent != nullptr)
         g_pGamePersistent->m_pGShaderConstants->m_blender_mode.z = (isActive ? 1.0f : 0.0f);
 }
 

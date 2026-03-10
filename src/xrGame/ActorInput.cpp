@@ -33,6 +33,8 @@
 #include "Weapon.h"
 #include "GamePersistent.h"
 
+extern int g_3d_scope_type;
+
 bool g_bAutoClearCrouch = true;
 
 void CActor::IR_OnKeyboardPress(int cmd)
@@ -225,6 +227,30 @@ void CActor::IR_OnMouseWheel(float x, float y)
 {
     if (GamePersistent().GetHudTuner().is_active())
         return;
+
+    // Режим подстройки глубины HUD в прицеливании:
+    // зажат Action 'wpn_hud_fov_adjust', оружие в зуме, 3D-прицел активен
+    bool adjustHudFovPressed = false;
+    ForAllActionKeys(kWPN_HUD_FOV_ADJUST, [&](size_t /*idx*/, int dik)
+    {
+        if (pInput->iGetAsyncKeyState(dik))
+        {
+            adjustHudFovPressed = true;
+            return true;
+        }
+        return false;
+    });
+
+    if (adjustHudFovPressed)
+    {
+        PIItem activeItem = inventory().ActiveItem();
+        CWeapon* weapon = activeItem ? smart_cast<CWeapon*>(activeItem) : nullptr;
+        if (weapon && weapon->IsZoomed() && !weapon->IsSecondZoomed() && g_3d_scope_type != 0)
+        {
+            weapon->AdjustScopeHudFov(y);
+            return;
+        }
+    }
 
     if (inventory().Action((y > 0) ? (u16)kWPN_ZOOM_INC : (u16)kWPN_ZOOM_DEC, CMD_START))
         return;
@@ -705,7 +731,7 @@ void CActor::ActorUse()
                 }
                 else
                 {
-                    //только если находимся в режиме single
+                    //С‚РѕР»СЊРєРѕ РµСЃР»Рё РЅР°С…РѕРґРёРјСЃСЏ РІ СЂРµР¶РёРјРµ single
                     CUIGameSP* pGameSP = smart_cast<CUIGameSP*>(CurrentGameUI());
                     if (pGameSP)
                     {

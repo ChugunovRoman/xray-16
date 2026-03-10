@@ -58,6 +58,7 @@ enum EGameActions : u32
     kWPN_ZOOM_SECOND,
     kWPN_ZOOM_INC,
     kWPN_ZOOM_DEC,
+    kWPN_HUD_FOV_ADJUST,
     kWPN_RELOAD,
     kWPN_FUNC,
     kWPN_FIREMODE_PREV,
