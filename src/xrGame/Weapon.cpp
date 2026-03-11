@@ -3731,13 +3731,13 @@ float CWeapon::GetScopeLenseZoom() const
     if (!bIsSecondVPZoomPresent() || m_zoom_params.m_f3dZoomFactor <= 0.f)
         return ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
 
-    const float min_out = m_zoom_params.m_fScopeZoomFactor / 100.f;
+    const float min_out = m_zoom_params.m_fSecondVPFovFactor;
     const float max_out = ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
 
     float delta, zoomed_out;
     float zoomed_in = GetSecondVPZoomFactor() * 100.f;
     GetZoomData(zoomed_in, delta, zoomed_out);
-    zoomed_in = _min(zoomed_in, m_zoom_params.m_fScopeZoomFactor); // как в ZoomDynamicMod: нижняя граница по прицелу
+    zoomed_in = _min(zoomed_in, m_zoom_params.m_fSecondVPFovFactor); // как в ZoomDynamicMod: нижняя граница по прицелу
 
     float range = zoomed_out - zoomed_in;
     if (range <= 0.f)
