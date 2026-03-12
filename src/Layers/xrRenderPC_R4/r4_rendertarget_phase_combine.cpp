@@ -16,24 +16,6 @@ namespace xray::render::RENDER_NAMESPACE
 {
 bool g_rendering_hud_overlay = false;
 
-struct TL_2c3uv
-{
-    Fvector4 p;
-    u32 color0;
-    u32 color1;
-    Fvector2 uv[3];
-
-    void set(float x, float y, u32 c0, u32 c1, float u0, float v0, float u1, float v1, float u2, float v2)
-    {
-        p.set(x, y, EPS_S, 1.f);
-        color0 = c0;
-        color1 = c1;
-        uv[0].set(u0, v0);
-        uv[1].set(u1, v1);
-        uv[2].set(u2, v2);
-    }
-};
-
 void setup_hud_overlay_constants(CBackend& cmd_list, SPass* pass)
 {
     light* fuckingsun = (light*)RImplementation.Lights.sun._get();

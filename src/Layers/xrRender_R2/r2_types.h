@@ -143,4 +143,23 @@ IC float u_diffuse2s(Fvector3& c)
 {
     return u_diffuse2s(c.x, c.y, c.z);
 }
+
+// Vertex format for postprocess / NVG overlay quad (2 colors, 3 UVs). Used by phase_pp and phase_combine.
+struct TL_2c3uv
+{
+    Fvector4 p;
+    u32 color0;
+    u32 color1;
+    Fvector2 uv[3];
+
+    void set(float x, float y, u32 c0, u32 c1, float u0, float v0, float u1, float v1, float u2, float v2)
+    {
+        p.set(x, y, EPS_S, 1.f);
+        color0 = c0;
+        color1 = c1;
+        uv[0].set(u0, v0);
+        uv[1].set(u1, v1);
+        uv[2].set(u2, v2);
+    }
+};
 } // namespace xray::render::RENDER_NAMESPACE
