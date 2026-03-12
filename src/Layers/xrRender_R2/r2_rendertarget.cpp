@@ -313,6 +313,8 @@ CRenderTarget::CRenderTarget()
         rt_Generic_1.create(r2_RT_generic1, w, h, D3DFMT_A8R8G8B8, 1);
         rt_secondVP.create(r2_RT_secondVP, w, h, D3DFMT_A8R8G8B8, 1);
         rt_Generic.create(r2_RT_generic, w, h, D3DFMT_A8R8G8B8, 1);
+        // final LDR frame (scene + HUD) before NVG overlay
+        rt_final_scene.create("$user$final_scene", w, h, D3DFMT_A8R8G8B8, 1);
 
         if (!options.msaa)
         {

@@ -7,11 +7,7 @@ namespace xray::render::RENDER_NAMESPACE
 {
 dx11ConstantBuffer::~dx11ConstantBuffer()
 {
-    for (int id = 0; id < R__NUM_CONTEXTS; ++id)
-    {
-        RImplementation.Resources->_DeleteConstantBuffer(id, this);
-    }
-    //	Flush();
+    RImplementation.Resources->_UnregisterConstantBufferFromAllContexts(this);
     _RELEASE(m_pBuffer);
     xr_free(m_pBufferData);
 }

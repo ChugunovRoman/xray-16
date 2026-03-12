@@ -140,6 +140,8 @@ public:
 #if defined(USE_DX11)
     dx11ConstantBuffer* _CreateConstantBuffer(u32 context_id, ID3DShaderReflectionConstantBuffer* pTable);
     void _DeleteConstantBuffer(u32 context_id, const dx11ConstantBuffer* pBuffer);
+    /// Unregister from all contexts; call from dx11ConstantBuffer destructor. Returns true if removed from at least one context.
+    bool _UnregisterConstantBufferFromAllContexts(const dx11ConstantBuffer* pBuffer);
 
     SInputSignature* _CreateInputSignature(ID3DBlob* pBlob);
     void _DeleteInputSignature(const SInputSignature* pSignature);

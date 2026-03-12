@@ -14,6 +14,25 @@ namespace xray::render::RENDER_NAMESPACE
 {
 bool g_rendering_hud_overlay = false;
 
+// Local copy of TL_2c3uv used in phase_pp (r2_rendertarget_phase_PP.cpp)
+struct TL_2c3uv
+{
+    Fvector4 p;
+    u32 color0;
+    u32 color1;
+    Fvector2 uv[3];
+
+    void set(float x, float y, u32 c0, u32 c1, float u0, float v0, float u1, float v1, float u2, float v2)
+    {
+        p.set(x, y, EPS_S, 1.f);
+        color0 = c0;
+        color1 = c1;
+        uv[0].set(u0, v0);
+        uv[1].set(u1, v1);
+        uv[2].set(u2, v2);
+    }
+};
+
 void setup_hud_overlay_constants(CBackend& cmd_list, SPass* pass)
 {
     light* fuckingsun = (light*)RImplementation.Lights.sun._get();
@@ -43,8 +62,8 @@ void setup_hud_overlay_constants(CBackend& cmd_list, SPass* pass)
     // Use fuckingsun (Lights.sun): r_sun_old.sun is null when new cascades (o.oldshadowcascades=0).
     if (!RImplementation.o.noshadows && pass && pass->ps)
     {
-        // OGL: support_rt_arrays=false → single 2D smap, FAR overwrites. Use that cascade for HUD.
-        // (Stage D with rt_smap_depth_near caused level light artifacts - reverted until copy NEAR→near RT works)
+        // OGL: support_rt_arrays=false - use single 2D smap, FAR overwrites. Use that cascade for HUD.
+        // (Stage D with rt_smap_depth_near caused level light artifacts - reverted until copy NEAR near RT works)
         auto* target = static_cast<CRenderTarget*>(RImplementation.Target);
         const u32 cascade_ind = RImplementation.o.support_rt_arrays ? 0 : (R__NUM_SUN_CASCADES - 1);
         const float fRange = (cascade_ind == 0) ? ps_r2_sun_depth_near_scale : ps_r2_sun_depth_far_scale;
@@ -112,16 +131,16 @@ void CRenderTarget::phase_combine()
 
     //*** exposure-pipeline
     u32 gpu_id = Device.dwFrame % HW.Caps.iGPUNum;
-    // Этот фикс больше не актуален. Т.к. мы больше не "воруем" кадры для второго вьюпорта а просто копируем текущий
+    // Multi-GPU / SecondVP placeholder (commented-out block below).
     // if (Device.m_SecondViewport.IsSVPActive()) // --#SM+#-- +SecondVP+ Fix for screen flickering
     // {
     //     // clang-format off
-    //     gpu_id = (Device.dwFrame - 1) % HW.Caps.iGPUNum;    // Фикс "мерцания" tonemapping (HDR) после выключения двойного рендера. 
-    //                                                         // Побочный эффект - при работе двойного рендера скорость изменения tonemapping (HDR) падает в два раза
-    //                                                         // Мерцание связано с тем, что HDR для своей работы хранит уменьшенние копии "прошлых кадров"
-    //                                                         // Эти кадры относительно похожи друг на друга, однако при включЄнном двойном рендере
-    //                                                         // в половине кадров оказывается картинка из второго рендера, и поскольку она часто может отличатся по цвету\яркости
-    //                                                         // то при попытке создания "плавного" перехода между ними получается эффект мерцания
+    //     gpu_id = (Device.dwFrame - 1) % HW.Caps.iGPUNum;  // GPU selection for multi-GPU (placeholder)
+    // (reserved)
+    // (reserved)
+    // (reserved)
+    // (reserved)
+    // (reserved)
     // }
     {
         t_LUM_src->surface_set(GL_TEXTURE_2D, rt_LUM_pool[gpu_id * 2 + 0]->pRT);
@@ -506,7 +525,11 @@ void CRenderTarget::phase_combine()
     PIX_EVENT(LENS_FLARES);
     g_pGamePersistent->Environment().RenderFlares(); // lens-flares
 
-    // Bullet tracers: render before copy so they appear in 3D scopes
+    ref_rt ldrRT = RImplementation.o.msaa ? rt_Generic : rt_Color;
+    const bool nvg_active = PP_Complex && g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants &&
+        g_pGamePersistent->m_pGShaderConstants->shader_param_8.x > 0.5f;
+
+    // Bullet tracers: render after NVG so they stay visible on top of NVG
     if (g_pGameLevel)
     {
         PIX_EVENT(RENDER_TRACERS);
@@ -514,7 +537,6 @@ void CRenderTarget::phase_combine()
         RCache.set_xform_view(Device.mView);
         RCache.set_xform_project(Device.mProject);
         // Ensure LDR RT is bound (tracers draw via UIRender to current RT)
-        ref_rt ldrRT = RImplementation.o.msaa ? rt_Generic : rt_Color;
         u_setrt(RCache, ldrRT, nullptr, nullptr, rt_Base_Depth);
         // Explicit viewport so tracers render into the full LDR RT (OGL may not set it in u_setrt path)
         const D3D_VIEWPORT tracer_vp = {0, 0, ldrRT->dwWidth, ldrRT->dwHeight, 0.f, 1.f};
@@ -525,15 +547,39 @@ void CRenderTarget::phase_combine()
         g_pGameLevel->RenderTracers();
     }
 
-    // Copy full LDR frame (without HUD overlay yet) into second viewport for 3D scopes
+    // Copy LDR to rt_Generic_0 so phase_pp can display it (phase_pp samples s_image from rt_Generic_0)
+    if (ldrRT && rt_Generic_0)
+    {
+        PIX_EVENT(COPY_LDR_TO_GENERIC0);
+        u_setrt(RCache, ldrRT, nullptr, nullptr, rt_Base_Depth);
+        RCache.set_RT(ldrRT->pRT, 0);
+        RCache.set_RT(rt_Generic_0->pRT, 1);
+        constexpr GLenum twoBuffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+        CHK_GL(glDrawBuffers(std::size(twoBuffers), twoBuffers));
+        CHK_GL(glReadBuffer(GL_COLOR_ATTACHMENT0));
+        CHK_GL(glDrawBuffer(GL_COLOR_ATTACHMENT1));
+        CHK_GL(glBlitFramebuffer(
+            0, 0, (GLint)Device.dwWidth, (GLint)Device.dwHeight,
+            0, 0, (GLint)rt_Generic_0->dwWidth, (GLint)rt_Generic_0->dwHeight,
+            GL_COLOR_BUFFER_BIT, GL_NEAREST));
+        constexpr GLenum oneBuffer[] = {GL_COLOR_ATTACHMENT0};
+        CHK_GL(glDrawBuffers(1, oneBuffer));
+        RCache.set_RT(0, 1);
+    }
+
+    // PP: draw from rt_Generic_0 into rt_final_scene (см. phase_pp для OGL)
+    if (PP_Complex)
+    {
+        PIX_EVENT(phase_pp);
+        phase_pp();
+    }
+
+    // Копия финального LDR (scene + HUD, до NVG-оверлея) во второй вьюпорт для 3D прицелов
     {
         PIX_EVENT(COPY_TO_SECOND_VP);
-        // Choose LDR source RT used by combine_2 / flares / tracers
-        ref_rt srcRT = RImplementation.o.msaa ? rt_Generic : rt_Color;
-
-        if (srcRT && rt_secondVP)
+        if (rt_final_scene && rt_secondVP)
         {
-            RCache.set_RT(srcRT->pRT, 0);
+            RCache.set_RT(rt_final_scene->pRT, 0);
             RCache.set_RT(rt_secondVP->pRT, 1);
             constexpr GLenum buffers[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
             CHK_GL(glDrawBuffers(std::size(buffers), buffers));
@@ -543,21 +589,54 @@ void CRenderTarget::phase_combine()
                 0, 0, (GLint)Device.dwWidth, (GLint)Device.dwHeight,
                 0, 0, (GLint)rt_secondVP->dwWidth, (GLint)rt_secondVP->dwHeight,
                 GL_COLOR_BUFFER_BIT, GL_NEAREST));
-            // Restore draw target to main LDR so phase_hud_overlay and Present() use attachment 0
             constexpr GLenum oneBuffer[] = {GL_COLOR_ATTACHMENT0};
             CHK_GL(glDrawBuffers(1, oneBuffer));
         }
     }
 
-    //	PP-if required
-    if (PP_Complex)
-    {
-        PIX_EVENT(phase_pp);
-        phase_pp();
-    }
-
-    // Forward HUD overlay over final LDR frame (currently empty, will be filled later)
+    // HUD overlay: рисуем в rt_final_scene, чтобы HUD стал частью финального LDR кадра
+    u_setrt(RCache, rt_final_scene, nullptr, nullptr, rt_Base_Depth);
     phase_hud_overlay();
+
+
+    // Финальный NVG-оверлей: рисуем rt_final_scene на back buffer с ПНВ-эффектом
+    {
+        PIX_EVENT(NVG_OVERLAY);
+        u_setrt(RCache, Device.dwWidth, Device.dwHeight, get_base_rt(), 0, 0, get_base_zb());
+
+        ref_shader s_nvg_overlay;
+        s_nvg_overlay.create("nvg_overlay");
+        RCache.set_Element(s_nvg_overlay->E[0]);
+
+        u32 Offset;
+        float _w = float(Device.dwWidth);
+        float _h = float(Device.dwHeight);
+
+        float du = 0.0f, dv = 0.0f;
+        TL_2c3uv* pv = (TL_2c3uv*)RImplementation.Vertex.Lock(4, g_postprocess.stride(), Offset);
+
+        // lower-left
+        pv->set(du + 0,        dv + 0,        0xffffffff, 0xffffffff,
+                0.0f, 0.0f,    0.0f, 0.0f,    0.0f, 0.0f);
+        pv++;
+        // upper-left
+        pv->set(du + 0,        dv + _h,       0xffffffff, 0xffffffff,
+                0.0f, 1.0f,    0.0f, 1.0f,    0.0f, 1.0f);
+        pv++;
+        // lower-right
+        pv->set(du + _w,       dv + 0,        0xffffffff, 0xffffffff,
+                1.0f, 0.0f,    1.0f, 0.0f,    1.0f, 0.0f);
+        pv++;
+        // upper-right
+        pv->set(du + _w,       dv + _h,       0xffffffff, 0xffffffff,
+                1.0f, 1.0f,    1.0f, 1.0f,    1.0f, 1.0f);
+        pv++;
+
+        RImplementation.Vertex.Unlock(4, g_postprocess.stride());
+
+        RCache.set_Geometry(g_postprocess);
+        RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+    }
 
     //	Re-adapt luminance
     RCache.set_Stencil(FALSE);

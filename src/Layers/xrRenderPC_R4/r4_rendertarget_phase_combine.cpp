@@ -5,6 +5,7 @@
 #include "Layers/xrRender/dxEnvironmentRender.h"
 #include "Layers/xrRender/r__hud_overlay_flag.h"
 #include "Layers/xrRender/light.h"
+#include "Layers/xrRender/Shader.h"
 #include "Layers/xrRender/xrRender_console.h"
 #include "Layers/xrRender_R2/r2_types.h"
 #include "xrEngine/Engine.h"
@@ -14,6 +15,24 @@
 namespace xray::render::RENDER_NAMESPACE
 {
 bool g_rendering_hud_overlay = false;
+
+struct TL_2c3uv
+{
+    Fvector4 p;
+    u32 color0;
+    u32 color1;
+    Fvector2 uv[3];
+
+    void set(float x, float y, u32 c0, u32 c1, float u0, float v0, float u1, float v1, float u2, float v2)
+    {
+        p.set(x, y, EPS_S, 1.f);
+        color0 = c0;
+        color1 = c1;
+        uv[0].set(u0, v0);
+        uv[1].set(u1, v1);
+        uv[2].set(u2, v2);
+    }
+};
 
 void setup_hud_overlay_constants(CBackend& cmd_list, SPass* pass)
 {
@@ -77,17 +96,17 @@ void CRenderTarget::phase_combine()
 
     //*** exposure-pipeline
     u32 gpu_id = Device.dwFrame % HW.Caps.iGPUNum;
-    // Этот фикс больше не актуален. Т.к. мы больше не "воруем" кадры для второго вьюпорта а просто копируем текущий
-    // А значит и кадрые не будут отличатся друг от друга и не будет мерцания
+    // Multi-GPU / SecondVP placeholder (commented-out block below).
+    //
     // if (Device.m_SecondViewport.IsSVPActive()) // --#SM+#-- +SecondVP+ Fix for screen flickering
     // {
     //     // clang-format off
-    //     gpu_id = (Device.dwFrame - 1) % HW.Caps.iGPUNum;    // Фикс "мерцания" tonemapping (HDR) после выключения двойного рендера. 
-    //                                                         // Побочный эффект - при работе двойного рендера скорость изменения tonemapping (HDR) падает в два раза
-    //                                                         // Мерцание связано с тем, что HDR для своей работы хранит уменьшенние копии "прошлых кадров"
-    //                                                         // Эти кадры относительно похожи друг на друга, однако при включЄнном двойном рендере
-    //                                                         // в половине кадров оказывается картинка из второго рендера, и поскольку она часто может отличатся по цвету\яркости
-    //                                                         // то при попытке создания "плавного" перехода между ними получается эффект мерцания
+    //     gpu_id = (Device.dwFrame - 1) % HW.Caps.iGPUNum;  // GPU selection for multi-GPU (placeholder)
+    //                                                         // (reserved)
+    //                                                         // (reserved)
+    //                                                         // (reserved)
+    //                                                         // (reserved)
+    //                                                         // (reserved)
     // }
     {
         t_LUM_src->surface_set(rt_LUM_pool[gpu_id * 2 + 0]->pSurface);
@@ -111,7 +130,7 @@ void CRenderTarget::phase_combine()
         }
     }
 
-    // Сброс G-буффера, после него худ не будет рисоваться, если мы добавим рендер худа после то всясцена станет черной
+    // NVG fullscreen pass (see phase_combine below).
     // low/hi RTs
     {
         // Clear to zero
@@ -135,8 +154,8 @@ void CRenderTarget::phase_combine()
         // RCache.set_Z(FALSE);
         g_pGamePersistent->Environment().RenderSky();
 
-        //	Igor: Render clouds before compine without Z-test
-        //	to avoid siluets. HOwever, it's a bit slower process.
+        //	Igor: Render clouds before combine without Z-test
+        //	to avoid silhouettes. However, it's a bit slower process.
         g_pGamePersistent->Environment().RenderClouds();
 
         //	Moved to shader!
@@ -301,7 +320,7 @@ void CRenderTarget::phase_combine()
         RCache.set_CullMode(CULL_CCW);
         RCache.set_Stencil(FALSE);
         RCache.set_ColorWriteEnable();
-        //	TODO: DX11: CHeck this!
+        //	TODO: DX11: Check this!
         // g_pGamePersistent->Environment().RenderClouds	();
         RImplementation.render_forward();
         if (g_pGamePersistent)
@@ -477,56 +496,97 @@ void CRenderTarget::phase_combine()
     }
     RCache.set_Stencil(FALSE);
 
-    //	if FP16-BLEND !not! supported - draw flares here, overwise they are already in the bloom target
+    //	if FP16-BLEND !not! supported - draw flares here, otherwise they are already in the bloom target
     /* if (!RImplementation.o.fp16_blend)*/
     PIX_EVENT(LENS_FLARES);
     g_pGamePersistent->Environment().RenderFlares(); // lens-flares
 
-    // Bullet tracers: render before copy so they appear in 3D scopes
+    // LDR RT used for tracers and copy to second viewport
+    ref_rt ldrRT = RImplementation.o.msaa ? rt_Generic : rt_Color;
+
+    // Bullet tracers: render to LDR before phase_pp (so they appear in final frame and 3D scopes)
     if (g_pGameLevel)
     {
         PIX_EVENT(RENDER_TRACERS);
+        RCache.set_xform_view(Device.mView);
+        RCache.set_xform_project(Device.mProject);
+        u_setrt(RCache, ldrRT, nullptr, nullptr, rt_Base_Depth);
+        const D3D_VIEWPORT tracer_vp = {0, 0, ldrRT->dwWidth, ldrRT->dwHeight, 0.f, 1.f};
+        RCache.SetViewport(tracer_vp);
+        RCache.set_CullMode(CULL_NONE);
+        RCache.set_Stencil(FALSE);
+        RCache.set_ColorWriteEnable();
         g_pGameLevel->RenderTracers();
     }
 
-    // Copy full LDR frame (without HUD overlay yet) into second viewport for 3D scopes
+    // Copy LDR to albedo (rt_Color) so phase_pp can read it; when MSAA resolve to rt_Generic_0 first
+    if (ldrRT)
     {
-        PIX_EVENT(COPY_TO_SECOND_VP);
-        ID3D11Resource* src = nullptr;
+        PIX_EVENT(COPY_LDR_FOR_PP);
+        auto pCtx = HW.get_context(CHW::IMM_CTX_ID);
         if (RImplementation.o.msaa)
         {
-            if (rt_Generic)
-                src = rt_Generic->pSurface;
+            ldrRT->resolve_into(*rt_Generic_0);
+            pCtx->CopyResource(rt_Color->pSurface, rt_Generic_0->pSurface);
         }
-        else
-        {
-            if (rt_Color)
-                src = rt_Color->pSurface;
-        }
-
-        if (src && rt_secondVP)
-        {
-            auto pContext = HW.get_context(CHW::IMM_CTX_ID);
-            pContext->CopySubresourceRegion(
-                rt_secondVP->pSurface,
-                0, // DstSubresource
-                0, 0, 0, // DstX, DstY, DstZ
-                src,
-                0,      // SrcSubresource
-                nullptr // pSrcBox (whole resource)
-            );
-        }
+        // no-msaa: combine_2 and tracers already drew to rt_Color (ldrRT)
     }
 
-    //	PP-if required
+    // PP: draw from LDR into rt_final_scene (scene + tracers + PP effects, no HUD yet)
     if (PP_Complex)
     {
         PIX_EVENT(phase_pp);
         phase_pp();
     }
 
-    // Forward HUD overlay over final LDR frame (currently empty, will be filled later)
+    // Copy rt_final_scene to second viewport for 3D scopes (scene + PP, no HUD overlay)
+    {
+        PIX_EVENT(COPY_TO_SECOND_VP);
+        if (rt_final_scene && rt_secondVP)
+        {
+            auto pContext = HW.get_context(CHW::IMM_CTX_ID);
+            pContext->CopySubresourceRegion(
+                rt_secondVP->pSurface,
+                0, 0, 0, 0,
+                rt_final_scene->pSurface,
+                0, nullptr);
+        }
+    }
+
+    // HUD overlay: draw into rt_final_scene (scene + PP + HUD)
+    u_setrt(RCache, rt_final_scene, nullptr, nullptr, rt_Base_Depth);
     phase_hud_overlay();
+
+    // NVG overlay: draw rt_final_scene (scene + HUD) to back buffer with NVG effect
+    {
+        PIX_EVENT(NVG_OVERLAY);
+        u_setrt(RCache, Device.dwWidth, Device.dwHeight, get_base_rt(), 0, 0, get_base_zb());
+
+        ref_shader s_nvg_overlay;
+        s_nvg_overlay.create("nvg_overlay");
+        RCache.set_Element(s_nvg_overlay->E[0]);
+
+        u32 Offset;
+        float _w = float(Device.dwWidth);
+        float _h = float(Device.dwHeight);
+
+        float du = 0.0f, dv = 0.0f;
+        TL_2c3uv* pv = (TL_2c3uv*)RImplementation.Vertex.Lock(4, g_postprocess.stride(), Offset);
+        // DX11 vertex order: bottom-left, top-left, bottom-right, top-right (matches phase_pp)
+        pv->set(du + 0, dv + _h, 0xffffffff, 0xffffffff, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+        pv++;
+        pv->set(du + 0, dv + 0, 0xffffffff, 0xffffffff, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f);
+        pv++;
+        pv->set(du + _w, dv + _h, 0xffffffff, 0xffffffff, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f);
+        pv++;
+        pv->set(du + _w, dv + 0, 0xffffffff, 0xffffffff, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+        pv++;
+
+        RImplementation.Vertex.Unlock(4, g_postprocess.stride());
+
+        RCache.set_Geometry(g_postprocess);
+        RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+    }
 
     //	Re-adapt luminance
     RCache.set_Stencil(FALSE);
@@ -603,7 +663,7 @@ if (0)		{
         RCache.dbg_DrawAABB		(S.P,.05f,.05f,.05f,ccc);
     }
 #endif
-    // Draw quater-screen quad textured with our direct-shadow-map-image
+    // Draw quarter-screen quad textured with our direct-shadow-map-image
     if (1)
     {
         u32							IX=0,IY=1;
@@ -624,7 +684,7 @@ if (0)		{
         RCache.Render				(D3DPT_TRIANGLELIST,Offset,0,4,0,2);
     }
 
-    // Draw quater-screen quad textured with our accumulator
+    // Draw quarter-screen quad textured with our accumulator
     if (0)
     {
         u32							IX=1,IY=1;

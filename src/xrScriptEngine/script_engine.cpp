@@ -531,7 +531,7 @@ bool CScriptEngine::print_output(lua_State* L, pcstr caScriptFileName, int error
     }
 
     if (errorCode)
-        print_error(L, errorCode);
+        print_error(L, errorCode, caScriptFileName);
 
     if (!lua_isstring(L, -1))
         return false;
@@ -565,7 +565,7 @@ bool CScriptEngine::print_output(lua_State* L, pcstr caScriptFileName, int error
     return true;
 }
 
-void CScriptEngine::print_error(lua_State* L, int iErrorCode)
+void CScriptEngine::print_error(lua_State* L, int iErrorCode, pcstr caScriptFileName)
 {
     CScriptEngine* scriptEngine = GetInstance(L);
     VERIFY(scriptEngine);
@@ -582,10 +582,16 @@ void CScriptEngine::print_error(lua_State* L, int iErrorCode)
         scriptEngine->script_log(LuaMessageType::Error, "SCRIPT ERROR (while running the error handler function)");
         break;
     case LUA_ERRFILE:
-        scriptEngine->script_log(LuaMessageType::Error, "SCRIPT ERROR (while running file)");
+        if (caScriptFileName && caScriptFileName[0])
+            scriptEngine->script_log(LuaMessageType::Error, "SCRIPT ERROR (while running file): %s", caScriptFileName);
+        else
+            scriptEngine->script_log(LuaMessageType::Error, "SCRIPT ERROR (while running file)");
         break;
     case LUA_ERRSYNTAX:
-        scriptEngine->script_log(LuaMessageType::Error, "SCRIPT SYNTAX ERROR");
+        if (caScriptFileName && caScriptFileName[0])
+            scriptEngine->script_log(LuaMessageType::Error, "SCRIPT SYNTAX ERROR in %s", caScriptFileName);
+        else
+            scriptEngine->script_log(LuaMessageType::Error, "SCRIPT SYNTAX ERROR");
         break;
     case LUA_YIELD:
         scriptEngine->script_log(LuaMessageType::Info, "Thread is yielded");

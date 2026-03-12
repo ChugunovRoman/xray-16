@@ -386,7 +386,7 @@ bool CInventory::DropItem(CGameObject* pObj, bool just_before_destroy, bool dont
     return true;
 }
 
-//положить вещь в слот
+// put item in slot
 bool CInventory::Slot(u16 slot_id, PIItem pIItem, bool bNotActivate, bool strict_placement)
 {
     VERIFY(pIItem);
@@ -422,7 +422,7 @@ bool CInventory::Slot(u16 slot_id, PIItem pIItem, bool bNotActivate, bool strict
 
     m_slots[slot_id].m_pIItem = pIItem;
 
-    //удалить из рюкзака или пояса
+    // remove from rucksack or belt
     TIItemContainer::iterator it_ruck = std::find(m_ruck.begin(), m_ruck.end(), pIItem);
     TIItemContainer::iterator it_belt = std::find(m_belt.begin(), m_belt.end(), pIItem);
     if (!IsGameTypeSingle())
@@ -479,6 +479,20 @@ bool CInventory::Slot(u16 slot_id, PIItem pIItem, bool bNotActivate, bool strict
     pIItem->m_ItemCurrPlace.slot_id = slot_id;
     pIItem->OnMoveToSlot(p);
 
+    if (CCustomOutfit* pOutfit = smart_cast<CCustomOutfit*>(pIItem))
+    {
+        CActor* pActor = smart_cast<CActor*>(m_pOwner);
+        if (pActor && Level().CurrentViewEntity() == smart_cast<IGameObject*>(pActor) && g_player_hud[0] && g_player_hud[0]->attached_item())
+        {
+            CWeapon* wpn = smart_cast<CWeapon*>(g_player_hud[0]->attached_item()->m_parent_hud_item);
+            if (wpn && wpn->bUseAttachmentSystem)
+            {
+                g_player_hud[0]->attached_item()->set_idle_anm_for_second_model();
+                wpn->calc_aim_addon_offset();
+            }
+        }
+    }
+
     pIItem->object().processing_activate();
 
     return true;
@@ -489,7 +503,7 @@ bool CInventory::Belt(PIItem pIItem, bool strict_placement)
     if (!strict_placement && !CanPutInBelt(pIItem))
         return false;
 
-    //вещь была в слоте
+    // item was in slot
     bool in_slot = InSlot(pIItem);
     if (in_slot)
     {
@@ -541,7 +555,7 @@ bool CInventory::Ruck(PIItem pIItem, bool strict_placement)
     }
 
     bool in_slot = InSlot(pIItem);
-    //вещь была в слоте
+    // item was in slot
     if (in_slot)
     {
         if (GetActiveSlot() == pIItem->CurrSlot())
@@ -551,7 +565,7 @@ bool CInventory::Ruck(PIItem pIItem, bool strict_placement)
     }
     else
     {
-        //вещь была на поясе или вообще только поднята с земли
+        // item was on belt or just picked up from ground
         TIItemContainer::iterator it = std::find(m_belt.begin(), m_belt.end(), pIItem);
         if (m_belt.end() != it)
             m_belt.erase(it);
@@ -644,7 +658,7 @@ void CInventory::Activate(u16 slot, bool bForce)
 //	Msg("--- Activating slot [%d], inventory owner: [%s], Frame[%d]", slot, m_pOwner->Name(), Device.dwFrame);
 #endif // #ifdef DEBUG
 
-    //активный слот не выбран
+    // check slots
     if (GetActiveSlot() == NO_ACTIVE_SLOT)
     {
         if (tmp_item)
@@ -661,7 +675,7 @@ void CInventory::Activate(u16 slot, bool bForce)
             }
         }
     }
-    //активный слот задействован
+    // check slots
     else if (slot == NO_ACTIVE_SLOT || tmp_item)
     {
         PIItem active_item = ActiveItem();
@@ -945,7 +959,7 @@ void CInventory::Update()
 
 void CInventory::UpdateDropTasks()
 {
-    //проверить слоты
+    // check slots
     for (u16 i = FirstSlot(); i <= LastSlot(); ++i)
     {
         PIItem itm = ItemFromSlot(i);
@@ -989,7 +1003,7 @@ void CInventory::UpdateDropItem(PIItem pIItem)
     } // dropManual
 }
 
-//ищем на поясе гранату такоже типа
+// search for same item on belt/ruck
 PIItem CInventory::Same(const PIItem pIItem, bool bSearchRuck) const
 {
     const TIItemContainer& list = bSearchRuck ? m_ruck : m_belt;
@@ -1004,7 +1018,7 @@ PIItem CInventory::Same(const PIItem pIItem, bool bSearchRuck) const
     return NULL;
 }
 
-//ищем на поясе вещь для слота
+// search for item for slot on belt/ruck
 
 PIItem CInventory::SameSlot(const u16 slot, PIItem pIItem, bool bSearchRuck) const
 {
@@ -1023,7 +1037,7 @@ PIItem CInventory::SameSlot(const u16 slot, PIItem pIItem, bool bSearchRuck) con
     return NULL;
 }
 
-//получить кол-во предметов определенного типа в инвентаре
+// get count of items of specified type in inventory
 int CInventory::GetCount(LPCSTR name, bool bSearchRuck) const
 {
     int count = 0;
@@ -1057,7 +1071,7 @@ PIItem CInventory::GetBoltBag() const
     return nullptr;
 }
 
-//найти в инвенторе вещь с указанным именем
+// find item in inventory by name
 PIItem CInventory::Get(LPCSTR name, bool bSearchRuck) const
 {
     const TIItemContainer& list = bSearchRuck ? m_ruck : m_belt;
@@ -1186,13 +1200,13 @@ CInventoryItem* CInventory::get_object_by_id(ALife::_OBJECT_ID tObjectID)
     return (0);
 }
 
-//скушать предмет
+// eat item
 #include "game_object_space.h"
 #include "xrScriptEngine/script_callback_ex.h"
 #include "script_game_object.h"
 bool CInventory::Eat(PIItem pIItem)
 {
-    //устанаовить съедобна ли вещь
+    // check if item is edible
     CEatableItem* pItemToEat = smart_cast<CEatableItem*>(pIItem);
     if (!pItemToEat)
         return false;
@@ -1353,8 +1367,8 @@ bool CInventory::CanPutInSlot(PIItem pIItem, u16 slot_id) const
 
     return false;
 }
-//проверяет можем ли поместить вещь на пояс,
-//при этом реально ничего не меняется
+// checks if we can put item on belt
+// checks if we can put item in ruck
 bool CInventory::CanPutInBelt(PIItem pIItem)
 {
     if (InBelt(pIItem))
@@ -1368,8 +1382,8 @@ bool CInventory::CanPutInBelt(PIItem pIItem)
 
     return FreeRoom_inBelt(m_belt, pIItem, BeltWidth(), 1);
 }
-//проверяет можем ли поместить вещь в рюкзак,
-//при этом реально ничего не меняется
+// checks if we can put item on belt
+// checks if we can put item in ruck
 bool CInventory::CanPutInRuck(PIItem pIItem) const
 {
     if (InRuck(pIItem))
@@ -1429,7 +1443,7 @@ bool CInventory::CanTakeItem(CInventoryItem* inventory_item) const
     VERIFY3(it == m_all.end(), "item already exists in inventory", inventory_item->object().cName().c_str());
 
     CActor* pActor = smart_cast<CActor*>(m_pOwner);
-    //актер всегда может взять вещь
+    // actor can always take items
     if (!pActor && (TotalWeight() + inventory_item->Weight() > m_pOwner->MaxCarryWeight()))
         return false;
 

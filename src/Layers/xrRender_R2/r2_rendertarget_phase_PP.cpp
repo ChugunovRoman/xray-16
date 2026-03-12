@@ -131,7 +131,14 @@ struct TL_2c3uv
 void CRenderTarget::phase_pp()
 {
     // combination/postprocess
+#if defined(USE_OGL) || defined(USE_DX11)
+    // Для OpenGL и DX11 (R4): выводим результат постпроцессинга в rt_final_scene,
+    // а не напрямую в back buffer. Поверх него потом нарисуем HUD и NVG-оверлей.
+    u_setrt(RCache, rt_final_scene, nullptr, nullptr, rt_Base_Depth);
+#else
+    // Для DX9 оставляем старый путь (прямо в back buffer)
     u_setrt(RCache, Device.dwWidth, Device.dwHeight, get_base_rt(), 0, 0, get_base_zb());
+#endif
     //	Element 0 for for normal post-process
     //	Element 4 for color map post-process
     bool bCMap = u_need_CM();

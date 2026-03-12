@@ -203,6 +203,7 @@ void CTexture::Load()
 
             glGenTextures(1, &pTexture);
             glBindTexture(GL_TEXTURE_2D, pTexture);
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0); // Ensure PBO unbound - some drivers fail glTexStorage2D otherwise
             CHK_GL(glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, _w, _h));
 
             pSurface = pTexture;
@@ -212,7 +213,9 @@ void CTexture::Load()
             {
                 Msg("Invalid video stream: 0x%x", err);
                 xr_delete(pTheora);
+                glDeleteBuffers(1, &pBuffer);
                 pSurface = 0;
+                pBuffer = 0;
             }
         }
     }
@@ -235,6 +238,7 @@ void CTexture::Load()
             glGenBuffers(1, &pBuffer);
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pBuffer);
             CHK_GL(glBufferData(GL_PIXEL_UNPACK_BUFFER, flags.MemoryUsage, nullptr, GL_STREAM_DRAW));
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
             // Now create texture to copy PBO into
             GLuint pTexture = 0;
@@ -248,7 +252,10 @@ void CTexture::Load()
             {
                 FATAL("Invalid video stream");
                 xr_delete(pAVI);
+                glDeleteTextures(1, &pSurface);
+                glDeleteBuffers(1, &pBuffer);
                 pSurface = 0;
+                pBuffer = 0;
             }
         }
 #endif
@@ -326,6 +333,8 @@ void CTexture::Unload()
 
     CHK_GL(glDeleteTextures(1, &pSurface));
     CHK_GL(glDeleteBuffers(1, &pBuffer));
+    pSurface = 0;
+    pBuffer = 0;
 
 #ifdef XR_PLATFORM_WINDOWS
     xr_delete(pAVI);

@@ -59,12 +59,13 @@ public:
 
     // Second viewport
     ref_rt rt_secondVP; // 32bit (r,g,b,a) --//#SM+#-- +SecondVP+
-
+    
     //
     ref_rt rt_Accumulator; // 64bit		(r,g,b,specular)
     ref_rt rt_Accumulator_temp; // only for HW which doesn't feature fp16 blend
     ref_rt rt_Generic_0; // 32bit		(r,g,b,a)				// post-process, intermidiate results, etc.
     ref_rt rt_Generic_1; // 32bit		(r,g,b,a)				// post-process, intermidiate results, etc.
+    ref_rt rt_final_scene; // 32bit     (r,g,b,a)               // final LDR frame (scene + HUD) before NVG overlay
     //	Igor: for volumetric lights
     ref_rt rt_Generic_2; // 32bit		(r,g,b,a)				// post-process, intermidiate results, etc.
     ref_rt rt_Bloom_1; // 32bit, dim/4	(r,g,b,?)

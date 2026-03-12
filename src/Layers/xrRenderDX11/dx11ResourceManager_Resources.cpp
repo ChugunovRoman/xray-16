@@ -183,11 +183,23 @@ void CResourceManager::_DeleteConstantBuffer(u32 context_id, const dx11ConstantB
 {
     if (0 == (pBuffer->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
-    if (reclaim(v_constant_buffer[context_id], pBuffer))
-        return;
+    reclaim(v_constant_buffer[context_id], pBuffer);
+    // Do not Msg here: each buffer is registered in only one context; other contexts correctly "don't find" it.
+}
+
+bool CResourceManager::_UnregisterConstantBufferFromAllContexts(const dx11ConstantBuffer* pBuffer)
+{
+    if (0 == (pBuffer->dwFlags & xr_resource_flagged::RF_REGISTERED))
+        return true;
+    for (u32 id = 0; id < R__NUM_CONTEXTS; ++id)
+    {
+        if (reclaim(v_constant_buffer[id], pBuffer))
+            return true;
+    }
 #ifndef MASTER_GOLD
-    Msg("! ERROR: Failed to find compiled constant buffer");
+    Msg("! ERROR: Failed to find compiled constant buffer in any context (double free or never registered?)");
 #endif
+    return false;
 }
 
 //--------------------------------------------------------------------------------------------------------------
