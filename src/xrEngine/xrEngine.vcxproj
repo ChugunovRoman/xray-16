@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ImportGroup Label="PropertySheets">
     <Import Project="..\xray_project_configurations.props" />
@@ -152,6 +152,7 @@
     <ClCompile Include="IRenderable.cpp" />
     <ClCompile Include="ISheduled.cpp" />
     <ClCompile Include="key_binding_registrator_script.cpp" />
+    <ClCompile Include="KinematicsAnimatedRTTI.cpp" />
     <ClCompile Include="LightAnimLibrary.cpp" />
     <ClCompile Include="line_edit_control.cpp" />
     <ClCompile Include="mailSlot.cpp" />

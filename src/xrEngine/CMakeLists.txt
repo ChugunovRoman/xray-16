@@ -389,6 +389,7 @@ target_sources_grouped(
     NAME "Render\\Visuals\\Skeleton"
     FILES
     EnnumerateVertices.h
+    KinematicsAnimatedRTTI.cpp
 )
 
 # XXX: This is only used in utils, should be moved somewhere to utils
