@@ -2527,9 +2527,16 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "LCC")
     message("Debug information generation is disabled for xrGame, because MCST lcc compiler does not support object files greater than 4 GB (EDG frontend bug).")
 endif()
 
+set(xrGame_unity_batch_size 50)
+
+# OpenBSD clang runs out of memory on huge xrGame unity translation units in Debug.
+if (CMAKE_SYSTEM_NAME STREQUAL "OpenBSD")
+    set(xrGame_unity_batch_size 8)
+endif()
+
 set_target_properties(xrGame PROPERTIES
     PREFIX ""
-    UNITY_BUILD_BATCH_SIZE 50
+    UNITY_BUILD_BATCH_SIZE ${xrGame_unity_batch_size}
 )
 
 target_precompile_headers(xrGame
