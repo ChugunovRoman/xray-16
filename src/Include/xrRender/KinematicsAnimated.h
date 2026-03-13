@@ -6,6 +6,13 @@
 #include "animation_blend.h"
 #include "Layers/xrRender/KinematicAnimatedDefs.h"
 #include "Layers/xrRender/KinematicsAddBoneTransform.hpp" //--#SM+#--
+#include "xrEngine/Engine.h"
+
+#if !defined(XRAY_STATIC_BUILD) && (defined(__GNUC__) || defined(__clang__))
+#   define IKINEMATICS_ANIMATED_VISIBILITY __attribute__((visibility("default")))
+#else
+#   define IKINEMATICS_ANIMATED_VISIBILITY
+#endif
 
 class IKinematics;
 class CBlend;
@@ -32,10 +39,10 @@ struct SKeyTable
     SKeyTable() { std::fill_n(chanel_blend_conts, MAX_CHANNELS, 0); }
 };
 
-class XR_NOVTABLE IKinematicsAnimated
+class IKINEMATICS_ANIMATED_VISIBILITY XR_NOVTABLE IKinematicsAnimated
 {
 public:
-    virtual ~IKinematicsAnimated() = 0;
+    virtual ENGINE_API ~IKinematicsAnimated() = 0;
 
     // Calculation
 public:
@@ -127,7 +134,5 @@ public:
     //virtual const BlendSVec& blend_cycle(const u32& bone_part_id) const = 0;
     //#endif
 };
-
-inline IKinematicsAnimated::~IKinematicsAnimated() = default;
 
 #endif // KinematicsAnimated_included
