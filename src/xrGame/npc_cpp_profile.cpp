@@ -178,8 +178,9 @@ IC size_t to_index(const ENpcCppProfileStage stage)
 
 IC void update_max(std::atomic_ullong& target, const u64 value)
 {
-    u64 current = target.load(std::memory_order_relaxed);
-    while (current < value && !target.compare_exchange_weak(current, value, std::memory_order_relaxed))
+    std::atomic_ullong::value_type current = target.load(std::memory_order_relaxed);
+    const std::atomic_ullong::value_type desired = static_cast<std::atomic_ullong::value_type>(value);
+    while (current < desired && !target.compare_exchange_weak(current, desired, std::memory_order_relaxed))
     {
     }
 }
