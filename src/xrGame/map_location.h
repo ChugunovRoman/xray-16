@@ -63,6 +63,10 @@ protected:
     };
     SCachedValues m_cached;
 
+    // Smoothed position for map spot display (offline ALife objects only)
+    Fvector2 m_display_position{10000, 10000};
+    bool m_display_position_valid{false};
+
 protected:
     void UpdateSpot(CUICustomMap* map, CMapSpot* sp);
     void UpdateSpotPointer(CUICustomMap* map, CMapSpotPointer* sp);
@@ -111,6 +115,8 @@ public:
     const Fvector2& CalcDirection();
     IC const shared_str& GetLevelName() { return m_cached.m_LevelName; }
     const Fvector2& GetPosition() const { return m_cached.m_Position; }
+    /** Smoothed position for drawing map spots; equals GetPosition() for online objects. */
+    const Fvector2& GetDisplayPosition() const;
 
     u16 ObjectID() { return m_objectID; }
     virtual bool Update();

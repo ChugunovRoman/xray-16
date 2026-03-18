@@ -28,6 +28,17 @@
 #include "movement_manager.h"
 #include "xrScriptEngine/script_callback_ex.h"
 #include "game_object_space.h"
+#include "xrEngine/profiler.h"
+#include "npc_cpp_profile.h"
+
+namespace
+{
+// P3-opt: reduced from 4 to 2 to prevent 45ms spikes when explosion triggers
+// 100+ NPCs each processing 4 Lua sound callbacks in one frame.
+// LOD-based memory throttle (P1) further reduces call frequency for FAR NPCs.
+constexpr size_t SCRIPT_ENTITY_SOUND_CALLBACKS_PER_UPDATE = 2;
+constexpr size_t SCRIPT_ENTITY_SAVED_SOUND_LIMIT = 12; // slightly larger buffer to compensate
+}
 
 void ActionCallback(IKinematics* tpKinematics);
 
@@ -224,6 +235,8 @@ void CScriptEntity::vfFinishAction(CScriptEntityAction* tpEntityAction)
 
 void CScriptEntity::ProcessScripts()
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptEntityProcessScripts);
+    START_PROFILE("script_entity/process_scripts")
     CScriptEntityAction* l_tpEntityAction = 0;
 #ifdef DEBUG
     bool empty_queue = m_tpActionQueue.empty();
@@ -319,6 +332,7 @@ void CScriptEntity::ProcessScripts()
     {
         ResetScriptData();
     }
+    STOP_PROFILE
 }
 
 bool CScriptEntity::bfAssignWatch(CScriptEntityAction* tpEntityAction)
@@ -674,6 +688,19 @@ void CScriptEntity::sound_callback(
     if (!this->object().callback(GameObject::eSound))
         return;
 
+    for (CSavedSound& saved_sound : m_saved_sounds)
+    {
+        if (saved_sound.m_game_object_id != object->ID() || saved_sound.m_sound_type != sound_type)
+            continue;
+
+        saved_sound.m_position = position;
+        saved_sound.m_sound_power = _max(saved_sound.m_sound_power, sound_power);
+        return;
+    }
+
+    if (m_saved_sounds.size() >= SCRIPT_ENTITY_SAVED_SOUND_LIMIT)
+        m_saved_sounds.erase(m_saved_sounds.begin());
+
     m_saved_sounds.push_back(CSavedSound(object->ID(), sound_type, position, sound_power));
 }
 
@@ -682,13 +709,27 @@ CEntity* CScriptEntity::GetCurrentCorpse() { return (0); }
 int CScriptEntity::get_enemy_strength() { return (0); }
 void CScriptEntity::process_sound_callbacks()
 {
-    xr_vector<CSavedSound>::const_iterator I = m_saved_sounds.begin();
-    xr_vector<CSavedSound>::const_iterator E = m_saved_sounds.end();
-    for (; I != E; ++I)
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptEntityProcessSoundCallbacks);
+    if (m_saved_sounds.empty())
+        return;
+
+    const size_t processed_count = _min(m_saved_sounds.size(), SCRIPT_ENTITY_SOUND_CALLBACKS_PER_UPDATE);
     {
-        object().callback(GameObject::eSound)(
-            object().lua_game_object(), (*I).m_game_object_id, (*I).m_sound_type, (*I).m_position, (*I).m_sound_power);
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptEntitySoundCallbackDispatch);
+        for (size_t i = 0; i < processed_count; ++i)
+        {
+            const CSavedSound& saved_sound = m_saved_sounds[i];
+            object().callback(GameObject::eSound)(
+                object().lua_game_object(), saved_sound.m_game_object_id, saved_sound.m_sound_type, saved_sound.m_position,
+                saved_sound.m_sound_power);
+        }
     }
 
-    m_saved_sounds.clear();
+    if (processed_count == m_saved_sounds.size())
+    {
+        m_saved_sounds.clear();
+        return;
+    }
+
+    m_saved_sounds.erase(m_saved_sounds.begin(), m_saved_sounds.begin() + processed_count);
 }

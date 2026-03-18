@@ -24,9 +24,12 @@
 #include "xrEngine/IGame_Level.h"
 #include "Level.h"
 #include "xrScriptEngine/script_callback_ex.h"
+#include "xrEngine/profiler.h"
 #include "xrPhysics/MathUtils.h"
 #include "game_cl_base_weapon_usage_statistic.h"
 #include "game_cl_mp.h"
+#include "npc_cpp_profile.h"
+#include "performance_cvars.h"
 #include "xrAICore/Navigation/game_level_cross_table.h"
 #include "ai_obstacle.h"
 #include "magic_box3.h"
@@ -38,6 +41,7 @@
 #include "doors_door.h"
 #include "doors.h"
 #include "xrNetServer/NET_Messages.h"
+#include "smart_zone.h"
 
 extern MagicBox3 MagicMinBox(int iQuantity, const Fvector* akPoint);
 
@@ -100,6 +104,23 @@ void CGameObject::MakeMeCrow()
         return;
     if (!processing_enabled())
         return;
+
+    // Optimization: skip MakeMeCrow for dead entities that died long ago
+    // This reduces post-battle CPU tail significantly
+    // Note: keep this threshold aligned with DEATH_ANIMATION_GRACE_PERIOD_MS in CharacterPhysicsSupport.cpp
+    if (CEntityAlive* entity_alive = cast_entity_alive())
+    {
+        if (!entity_alive->g_Alive())
+        {
+            const u32 death_time = entity_alive->GetLevelDeathTime();
+            if (death_time && (Device.dwTimeGlobal - death_time > 3000))
+            {
+                // Dead for more than 3 seconds - no need to update as crow every frame
+                // This aligns with the death animation grace period
+                return;
+            }
+        }
+    }
 
     u32 const device_frame_id = Device.dwFrame;
     u32 object_frame_id = dwFrame_AsCrow.load(std::memory_order_relaxed);
@@ -1199,6 +1220,13 @@ void CGameObject::DestroyObject()
 
     if (Local())
     {
+        // When this object is in "pre-destroy" state (typically initiated after
+        // GE_OWNERSHIP_REJECT with just_before_destroy flag), the server will
+        // destroy it anyway. Sending GE_DESTROY again causes server-side
+        // "not found on server" spam due to event ordering/race.
+        if (GetTmpPreDestroy())
+            return;
+
         NET_Packet P;
         u_EventGen(P, GE_DESTROY, ID());
         u_EventSend(P);
@@ -1207,6 +1235,8 @@ void CGameObject::DestroyObject()
 
 void CGameObject::shedule_Update(u32 dt)
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::GameObjectScheduleUpdate);
+    START_PROFILE("game_object/schedule_update")
     //уничтожить
     if (NeedToDestroyObject())
     {
@@ -1219,18 +1249,103 @@ void CGameObject::shedule_Update(u32 dt)
     // IGameObject::shedule_Update(dt);
     // consistency check
     // Msg ("-SUB-:[%x][%s] IGameObject::shedule_Update",dynamic_cast<void*>(this),*cName());
+    START_PROFILE("game_object/schedule_update/base")
     ScheduledBase::shedule_Update(dt);
-    spatial_update(base_spu_epsP * 1, base_spu_epsR * 1);
+    STOP_PROFILE
+
+    // Optimization: check if this is a long-dead entity
+    CEntityAlive* entity_alive = cast_entity_alive();
+    const bool is_dead_entity = entity_alive && !entity_alive->g_Alive();
+    const u32 death_time = entity_alive && entity_alive->GetLevelDeathTime() ? entity_alive->GetLevelDeathTime() : 0;
+    const bool is_long_dead = is_dead_entity && death_time && (Device.dwTimeGlobal - death_time > 3000);
+    // P5-opt: after npc_perf_long_dead_skip_binder_ms skip script binder entirely for corpses (reduce schedule_update tail)
+    const bool very_long_dead = is_dead_entity && death_time && (Device.dwTimeGlobal - death_time > npc_perf_long_dead_skip_binder_ms);
+
+    // For long-dead entities, skip expensive spatial update
+    if (!is_long_dead)
+    {
+        START_PROFILE("game_object/schedule_update/spatial")
+        spatial_update(base_spu_epsP * 1, base_spu_epsR * 1);
+        STOP_PROFILE
+    }
+
     // Always make me crow on shedule-update
     // Makes sure that update-cl called at least with freq of shedule-update
+    START_PROFILE("game_object/schedule_update/crow")
     MakeMeCrow();
+    STOP_PROFILE
     /*
     if (AlwaysTheCrow()) MakeMeCrow ();
     else if (Device.vCameraPosition.distance_to_sqr(Position()) < CROW_RADIUS*CROW_RADIUS) MakeMeCrow ();
     */
     // ~
-    if (!GEnv.isDedicatedServer)
-        scriptBinder.shedule_Update(dt);
+    if (!GEnv.isDedicatedServer && !very_long_dead)
+    {
+        // BUGFIX: мёртвые мутанты/НПС тоже должны получать shedule_Update через script binder,
+        // иначе bind_monster:update() / bind_stalker:update() никогда не установят
+        // callback.use_object (лут частей мутанта, обыск трупа).
+        // Для живых объектов — без ограничений. Для мёртвых — throttle до ~5 Hz,
+        // чтобы сохранить выигрыш от оптимизации, но не ломать USE-колбэк.
+        // P5: после LONG_DEAD_SKIP_BINDER_MS (5s) script binder не вызывается.
+        // Доп. LOD: для объектов далеко от камеры снижаем частоту вызова binder,
+        // уменьшая пики в script_binder/luabind_update.
+        const bool is_dead_non_actor = is_dead_entity && !cast_actor();
+        const bool run_dead_binder = !is_dead_non_actor || (Device.dwFrame % 6u == u32(ID()) % 6u);
+
+        // Усиленный anti-synchronization для scriptBinder:
+        // для дальних объектов включаем binder не по кадру, а по "временным слотам",
+        // что режет одновременные пики luabind_update у множества NPC.
+        const float binder_far_dist_sqr = npc_perf_binder_far_dist * npc_perf_binder_far_dist;
+        const bool is_far_to_camera =
+            Device.vCameraPosition.distance_to_sqr(Position()) > binder_far_dist_sqr;
+
+        // Длительность слота и количество фаз в цикле:
+        // чем больше фаз, тем меньше шанс синхронизированных вызовов.
+        const u32 far_slot = Device.dwTimeGlobal / npc_perf_binder_far_interval_ms;
+        const u32 far_phase = far_slot % npc_perf_binder_far_phases;
+        const u32 obj_phase = u32(ID()) % npc_perf_binder_far_phases;
+        const bool run_far_binder = !is_far_to_camera || (far_phase == obj_phase);
+
+        const u32 now_ms = Device.dwTimeGlobal;
+
+        // Lazy init: stagger first binder run to avoid all objects running binder in the same frame.
+        if (m_next_script_binder_update_time == 0)
+            m_next_script_binder_update_time = now_ms + (u32(ID()) % 350u);
+
+        // Per-object throttle: reduces chances of large synchronized luabind_update bursts.
+        // Now we apply it both for far and near objects to prevent synchronized bursts.
+        constexpr u32 BINDER_NEAR_INTERVAL_MS = 180;
+        constexpr u32 BINDER_FAR_INTERVAL_TIMED_MS = 450;
+        const bool run_binder_timed = now_ms >= m_next_script_binder_update_time;
+
+        // Smart zones (смарт-террейны): no throttle — call binder every shedule_Update.
+        const bool is_smart_zone = (smart_cast<CSmartZone*>(this) != nullptr);
+        const bool run_binder = (run_dead_binder && run_far_binder && run_binder_timed) || is_smart_zone;
+
+        if (run_binder)
+        {
+            START_PROFILE("game_object/schedule_update/script_binder")
+            scriptBinder.shedule_Update(dt);
+            STOP_PROFILE
+
+            if (!is_smart_zone)
+            {
+                if (is_far_to_camera)
+                {
+                    // Jitter to avoid alignment between objects.
+                    const u32 jitter = (u32(ID()) % 200);
+                    m_next_script_binder_update_time = now_ms + BINDER_FAR_INTERVAL_TIMED_MS + jitter;
+                }
+                else
+                {
+                    // Near: smaller interval for responsiveness.
+                    const u32 jitter = (u32(ID()) % 120);
+                    m_next_script_binder_update_time = now_ms + BINDER_NEAR_INTERVAL_MS + jitter;
+                }
+            }
+        }
+    }
+    STOP_PROFILE
 }
 
 bool CGameObject::net_SaveRelevant() { return scriptBinder.net_SaveRelevant(); }
@@ -1401,18 +1516,40 @@ void CGameObject::UpdateCL()
     if (!CForm && (spatial.type & STYPE_COLLIDEABLE))
         xrDebug::Fatal(DEBUG_INFO, "Object %s registered as 'collidable' but has no collidable model", cName().c_str());
 #endif
-    spatial_update(base_spu_epsP * 5, base_spu_epsR * 5);
-    // crow
-    if (Parent == g_pGameLevel->CurrentViewEntity() || AlwaysTheCrow())
-        MakeMeCrow();
-    else
+
+    // Optimization: check if this is a long-dead entity
+    CEntityAlive* entity_alive = cast_entity_alive();
+    const bool is_dead_entity = entity_alive && !entity_alive->g_Alive();
+    const u32 time_since_death = is_dead_entity ? (Device.dwTimeGlobal - entity_alive->GetLevelDeathTime()) : 0;
+    
+    // Grace period: don't skip updates for the first 3 seconds after death
+    // This ensures death animation plays smoothly
+    constexpr u32 DEATH_ANIMATION_GRACE_PERIOD_MS = 3000;
+    const bool in_grace_period = is_dead_entity && (time_since_death < DEATH_ANIMATION_GRACE_PERIOD_MS);
+    
+    const bool is_long_dead = is_dead_entity && !in_grace_period && (time_since_death > 5000);
+
+    // For long-dead entities, skip expensive spatial update in UpdateCL
+    if (!is_long_dead)
     {
-        float dist = Device.vCameraPosition.distance_to_sqr(Position());
-        if (dist < CROW_RADIUS * CROW_RADIUS)
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::GameObjectUpdateCLSpatial);
+        spatial_update(base_spu_epsP * 5, base_spu_epsR * 5);
+    }
+
+    // crow
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::GameObjectUpdateCLCrow);
+        if (Parent == g_pGameLevel->CurrentViewEntity() || AlwaysTheCrow())
             MakeMeCrow();
-        else if ((Visual() && Visual()->getVisData().hom_frame + 2 > Device.dwFrame) &&
-            dist < CROW_RADIUS2 * CROW_RADIUS2)
-            MakeMeCrow();
+        else
+        {
+            float dist = Device.vCameraPosition.distance_to_sqr(Position());
+            if (dist < CROW_RADIUS * CROW_RADIUS)
+                MakeMeCrow();
+            else if ((Visual() && Visual()->getVisData().hom_frame + 2 > Device.dwFrame) &&
+                dist < CROW_RADIUS2 * CROW_RADIUS2)
+                MakeMeCrow();
+        }
     }
     // ~
     //	if (!is_ai_obstacle())
@@ -1421,10 +1558,17 @@ void CGameObject::UpdateCL()
     if (H_Parent())
         return;
 
+    // For long-dead entities, skip matrix change tracking
+    if (is_long_dead)
+        return;
+
     if (similar(XFORM(), m_previous_matrix, EPS))
         return;
 
-    on_matrix_change(m_previous_matrix);
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::GameObjectUpdateCLMatrixChange);
+        on_matrix_change(m_previous_matrix);
+    }
     m_previous_matrix = XFORM();
 }
 

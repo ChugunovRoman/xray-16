@@ -376,6 +376,7 @@ public:
     virtual void update(){};
 #else
     virtual void update();
+    virtual void update_position();
     virtual CSE_ALifeItemWeapon* tpfGetBestWeapon(ALife::EHitType& tHitType, float& fHitPower);
     virtual ALife::EMeetActionType tfGetActionType(
         CSE_ALifeSchedulable* tpALifeSchedulable, int iGroupIndex, bool bMutualDetection);
@@ -752,6 +753,7 @@ public:
     virtual bool bfActive();
     virtual CSE_ALifeDynamicObject* tpfGetBestDetector();
     virtual void update();
+    virtual void update_position();
     virtual bool need_update(CSE_ALifeDynamicObject* object);
     void register_member(ALife::_OBJECT_ID member_id);
     void unregister_member(ALife::_OBJECT_ID member_id);
@@ -766,6 +768,7 @@ public:
     virtual void switch_offline();
     virtual bool redundant() const;
     virtual void on_location_change() const;
+    virtual Fvector draw_level_position() const;
     virtual CSE_ALifeDynamicObject const& get_object() const { return *this; }
     virtual CSE_ALifeDynamicObject& get_object() { return *this; }
     ALife::_OBJECT_ID commander_id();

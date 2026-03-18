@@ -25,6 +25,7 @@
 #include "danger_object_location.h"
 #include "member_order.h"
 #include "Level.h"
+#include "Actor.h"
 #include "sound_player.h"
 #include "enemy_manager.h"
 #include "danger_manager.h"
@@ -88,6 +89,28 @@ bool CAI_Stalker::useful(const CEnemyManager* manager, const CEntityAlive* objec
     return (memory().enemy().useful(object));
 }
 
+bool CAI_Stalker::is_nearby_idle_state_optimization_candidate() const
+{
+    if (GetScriptControl())
+        return false;
+
+    if (movement().mental_state() != eMentalStateFree)
+        return false;
+
+    const MonsterSpace::EMovementType movement_type = movement().movement_type();
+    if ((movement_type != eMovementTypeStand) && (movement_type != eMovementTypeWalk))
+        return false;
+
+    if (memory().enemy().selected() || memory().danger().selected() || memory().item().selected())
+        return false;
+
+    CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
+    if (!actor)
+        return false;
+
+    return Position().distance_to_sqr(actor->Position()) <= (35.f * 35.f);
+}
+
 ALife::ERelationType CAI_Stalker::tfGetRelationType(const CEntityAlive* tpEntityAlive) const
 {
     const CInventoryOwner* pOtherIO = smart_cast<const CInventoryOwner*>(tpEntityAlive);
@@ -105,9 +128,19 @@ ALife::ERelationType CAI_Stalker::tfGetRelationType(const CEntityAlive* tpEntity
 
 void CAI_Stalker::react_on_grenades()
 {
-    CMemberOrder::CGrenadeReaction& reaction = agent_manager().member().member(this).grenade_reaction();
+    CMemberOrder* member_order = agent_manager().member().get_member(ID());
+    if (!member_order)
+        return;
+
+    CMemberOrder::CGrenadeReaction& reaction = member_order->grenade_reaction();
     if (!reaction.m_processing)
         return;
+
+    if (!reaction.m_grenade)
+    {
+        reaction.clear();
+        return;
+    }
 
     if (Device.dwTimeGlobal < reaction.m_time + GRENADE_INTERVAL)
         return;
@@ -152,9 +185,19 @@ void CAI_Stalker::react_on_grenades()
 
 void CAI_Stalker::react_on_member_death()
 {
-    CMemberOrder::CMemberDeathReaction& reaction = agent_manager().member().member(this).member_death_reaction();
+    CMemberOrder* member_order = agent_manager().member().get_member(ID());
+    if (!member_order)
+        return;
+
+    CMemberOrder::CMemberDeathReaction& reaction = member_order->member_death_reaction();
     if (!reaction.m_processing)
         return;
+
+    if (!reaction.m_member)
+    {
+        reaction.clear();
+        return;
+    }
 
     if (Device.dwTimeGlobal < reaction.m_time + TOLLS_INTERVAL)
         return;

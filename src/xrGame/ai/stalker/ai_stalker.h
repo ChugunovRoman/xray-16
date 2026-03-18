@@ -115,6 +115,16 @@ private:
 
 private:
     bool m_is_trader{false};
+    u32 m_next_think_update_time{0};
+    u32 m_think_update_interval{0};
+    u32 m_next_visibility_update_time{0};
+    u32 m_visibility_update_interval{0};
+    u32 m_next_agent_manager_update_time{0};
+    u32 m_agent_manager_update_interval{0};
+    u32 m_next_memory_update_time{0};
+    u32 m_memory_update_interval{0};
+    u32 m_next_feel_touch_update_time{0};
+    u32 m_feel_touch_update_interval{0};
 
 private:
     float m_fRankDisperison;
@@ -215,6 +225,7 @@ public:
     virtual bool useful(const CItemManager* manager, const CGameObject* object) const;
     virtual float evaluate(const CItemManager* manager, const CGameObject* object) const;
     virtual bool useful(const CEnemyManager* manager, const CEntityAlive* object) const;
+    bool is_nearby_idle_state_optimization_candidate() const;
 
     // PDA && Dialogs
     //	virtual void						ReceivePdaMessage					(u16 who, EPdaMsg msg, shared_str

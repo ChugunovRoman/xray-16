@@ -53,6 +53,8 @@
 #include "enemy_manager.h"
 #include "xrServerEntities/alife_human_brain.h"
 #include "xrEngine/profiler.h"
+#include "npc_cpp_profile.h"
+#include "performance_cvars.h"
 #include "BoneProtections.h"
 #include "stalker_animation_names.h"
 #include "stalker_decision_space.h"
@@ -71,6 +73,151 @@
 #endif // DEBUG
 
 using namespace StalkerSpace;
+
+namespace
+{
+enum class EStalkerUpdateLod : u32
+{
+    Near = 0,
+    Medium,
+    Far
+};
+
+constexpr float STALKER_LOD_NEAR_DIST_SQR = 35.f * 35.f;
+constexpr float STALKER_LOD_MEDIUM_DIST_SQR = 80.f * 80.f;
+constexpr u32 STALKER_THINK_INTERVAL_NEAR_IDLE_MS = 75;
+constexpr u32 STALKER_THINK_INTERVAL_MEDIUM_MS = 120;
+constexpr u32 STALKER_THINK_INTERVAL_FAR_MS = 280;
+// VIS intervals from npc_perf_stalker_vis_interval_* (user.ltx)
+constexpr u32 STALKER_AGENT_MANAGER_INTERVAL_MEDIUM_MS = 150;
+constexpr u32 STALKER_AGENT_MANAGER_INTERVAL_FAR_MS = 400;
+constexpr u32 STALKER_MEMORY_UPDATE_INTERVAL_MEDIUM_MS = 175;
+constexpr u32 STALKER_MEMORY_UPDATE_INTERVAL_FAR_MS = 600;
+// P6-opt: feel_touch_update throttle for FAR/MEDIUM (NPC_OPTIMIZATION_TECHNICAL_BRIEF_2026-03-17)
+constexpr u32 STALKER_FEEL_TOUCH_INTERVAL_MEDIUM_MS = 200;
+constexpr u32 STALKER_FEEL_TOUCH_INTERVAL_FAR_MS = 450;
+
+// P1-opt: separate longer interval for enemy-scan phase of memory update for
+// non-combat FAR NPCs. When combat starts (memory().enemy().selected()),
+// LOD switches to Near and interval drops to 0 automatically.
+constexpr u32 STALKER_ENEMY_SCAN_INTERVAL_FAR_MS   = 900;
+constexpr u32 STALKER_ENEMY_SCAN_INTERVAL_MEDIUM_MS = 250;
+
+IC u32 stalker_lod_offset(const u16 object_id, const u32 interval_ms)
+{
+    if (!interval_ms)
+        return 0;
+
+    constexpr u32 bucket_count = 8;
+    const u32 buckets = _min(bucket_count, interval_ms);
+    return (interval_ms * (object_id % buckets)) / buckets;
+}
+
+IC EStalkerUpdateLod get_stalker_update_lod(const CAI_Stalker& stalker)
+{
+#ifdef DEBUG
+    if (stalker.ShouldProcessOnRender())
+        return EStalkerUpdateLod::Near;
+#endif
+
+    if (stalker.memory().enemy().selected())
+        return EStalkerUpdateLod::Near;
+
+    CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
+    if (!actor)
+        return EStalkerUpdateLod::Near;
+
+    const float dist_sqr = stalker.Position().distance_to_sqr(actor->Position());
+    if (dist_sqr <= STALKER_LOD_NEAR_DIST_SQR)
+        return EStalkerUpdateLod::Near;
+    if (dist_sqr <= STALKER_LOD_MEDIUM_DIST_SQR)
+        return EStalkerUpdateLod::Medium;
+
+    return EStalkerUpdateLod::Far;
+}
+
+IC u32 get_stalker_think_interval(const CAI_Stalker& stalker, const EStalkerUpdateLod lod)
+{
+    if (lod == EStalkerUpdateLod::Near && stalker.is_nearby_idle_state_optimization_candidate())
+        return STALKER_THINK_INTERVAL_NEAR_IDLE_MS;
+
+    switch (lod)
+    {
+    case EStalkerUpdateLod::Near: return 0;
+    case EStalkerUpdateLod::Medium: return STALKER_THINK_INTERVAL_MEDIUM_MS;
+    case EStalkerUpdateLod::Far: return STALKER_THINK_INTERVAL_FAR_MS;
+    default: return 0;
+    }
+}
+
+IC u32 get_stalker_visibility_interval(const EStalkerUpdateLod lod)
+{
+    switch (lod)
+    {
+    case EStalkerUpdateLod::Near: return 0;
+    case EStalkerUpdateLod::Medium: return npc_perf_stalker_vis_interval_medium_ms;
+    case EStalkerUpdateLod::Far: return npc_perf_stalker_vis_interval_far_ms;
+    default: return 0;
+    }
+}
+
+IC u32 get_stalker_agent_manager_interval(const EStalkerUpdateLod lod)
+{
+    switch (lod)
+    {
+    case EStalkerUpdateLod::Near: return 0;
+    case EStalkerUpdateLod::Medium: return STALKER_AGENT_MANAGER_INTERVAL_MEDIUM_MS;
+    case EStalkerUpdateLod::Far: return STALKER_AGENT_MANAGER_INTERVAL_FAR_MS;
+    default: return 0;
+    }
+}
+
+IC u32 get_stalker_memory_update_interval(const EStalkerUpdateLod lod)
+{
+    switch (lod)
+    {
+    case EStalkerUpdateLod::Near: return 0;
+    case EStalkerUpdateLod::Medium: return STALKER_MEMORY_UPDATE_INTERVAL_MEDIUM_MS;
+    case EStalkerUpdateLod::Far: return STALKER_MEMORY_UPDATE_INTERVAL_FAR_MS;
+    default: return 0;
+    }
+}
+
+IC u32 get_stalker_feel_touch_interval(const EStalkerUpdateLod lod)
+{
+    switch (lod)
+    {
+    case EStalkerUpdateLod::Near: return 0;
+    case EStalkerUpdateLod::Medium: return STALKER_FEEL_TOUCH_INTERVAL_MEDIUM_MS;
+    case EStalkerUpdateLod::Far: return STALKER_FEEL_TOUCH_INTERVAL_FAR_MS;
+    default: return 0;
+    }
+}
+
+IC bool should_run_stalker_lod_stage(
+    const CAI_Stalker& stalker, u32& next_update_time, u32& current_interval, const u32 new_interval, const u32 now_ms)
+{
+    if (!new_interval)
+    {
+        current_interval = 0;
+        next_update_time = now_ms;
+        return true;
+    }
+
+    if (current_interval != new_interval)
+    {
+        current_interval = new_interval;
+        next_update_time = now_ms + stalker_lod_offset(stalker.ID(), new_interval);
+        return next_update_time <= now_ms;
+    }
+
+    if (next_update_time > now_ms)
+        return false;
+
+    next_update_time = now_ms + new_interval;
+    return true;
+}
+} // namespace
 
 extern int g_AI_inactive_time;
 
@@ -178,6 +325,12 @@ void CAI_Stalker::reinit()
     }
 
     m_update_rotation_on_frame = false;
+    
+    // Initialize LOD throttling timers
+    m_next_agent_manager_update_time = 0;
+    m_agent_manager_update_interval = 0;
+    m_next_memory_update_time = 0;
+    m_memory_update_interval = 0;
 }
 
 void CAI_Stalker::LoadSounds(LPCSTR section)
@@ -484,24 +637,24 @@ void CAI_Stalker::Die(IGameObject* who)
     if (!active_item)
         return;
 
-    CWeapon* weapon = smart_cast<CWeapon*>(active_item);
-    if (!weapon)
-        return;
+    // CWeapon* weapon = smart_cast<CWeapon*>(active_item);
+    // if (!weapon)
+    //     return;
 
-    {
-        TIItemContainer::iterator I = inventory().m_all.begin();
-        TIItemContainer::iterator E = inventory().m_all.end();
-        for (; I != E; ++I)
-        {
-            if (std::find(weapon->m_ammoTypes.begin(), weapon->m_ammoTypes.end(), (*I)->object().cNameSect()) ==
-                weapon->m_ammoTypes.end())
-                continue;
+    // {
+    //     TIItemContainer::iterator I = inventory().m_all.begin();
+    //     TIItemContainer::iterator E = inventory().m_all.end();
+    //     for (; I != E; ++I)
+    //     {
+    //         if (std::find(weapon->m_ammoTypes.begin(), weapon->m_ammoTypes.end(), (*I)->object().cNameSect()) ==
+    //             weapon->m_ammoTypes.end())
+    //             continue;
 
-            NET_Packet packet;
-            u_EventGen(packet, GE_DESTROY, (*I)->object().ID());
-            u_EventSend(packet);
-        }
-    }
+    //         NET_Packet packet;
+    //         u_EventGen(packet, GE_DESTROY, (*I)->object().ID());
+    //         u_EventSend(packet);
+    //     }
+    // }
 }
 
 void CAI_Stalker::Load(LPCSTR section)
@@ -547,8 +700,7 @@ bool CAI_Stalker::net_Spawn(CSE_Abstract* DC)
     if (ai().game_graph().valid_vertex_id(tpHuman->m_tGraphID))
         ai_location().game_vertex(tpHuman->m_tGraphID);
 
-    if (ai().game_graph().valid_vertex_id(tpHuman->m_tNextGraphID) &&
-        movement().restrictions().accessible(ai().game_graph().vertex(tpHuman->m_tNextGraphID)->level_point()))
+    if (ai().game_graph().valid_vertex_id(tpHuman->m_tNextGraphID))
         movement().set_game_dest_vertex(tpHuman->m_tNextGraphID);
 
     R_ASSERT2(ai().get_game_graph() && ai().get_level_graph() && ai().get_cross_table() &&
@@ -753,6 +905,7 @@ void CAI_Stalker::net_Import(NET_Packet& P)
 
 void CAI_Stalker::update_object_handler()
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerObjectHandlerUpdate);
     if (!g_Alive())
         return;
 
@@ -822,6 +975,7 @@ void CAI_Stalker::destroy_anim_mov_ctrl()
 
 void CAI_Stalker::UpdateCL()
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCL);
     START_PROFILE("stalker")
     START_PROFILE("stalker/client_update")
     VERIFY2(PPhysicsShell() || getEnabled(), cName().c_str());
@@ -830,6 +984,7 @@ void CAI_Stalker::UpdateCL()
     {
         if (g_mt_config.test(mtObjectHandler) && CObjectHandler::planner().initialized())
         {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLObjectHandlerDispatch);
             // XXX: task scheduler
             //TaskScheduler->AddTask("CAI_Stalker::update_object_handler",
             //    { this, &CAI_Stalker::update_object_handler },
@@ -846,6 +1001,7 @@ void CAI_Stalker::UpdateCL()
         else
         {
             START_PROFILE("stalker/client_update/object_handler")
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLObjectHandlerDispatch);
             update_object_handler();
             STOP_PROFILE
         }
@@ -865,37 +1021,55 @@ void CAI_Stalker::UpdateCL()
     }
 
     START_PROFILE("stalker/client_update/inherited")
-    inherited::UpdateCL();
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLInherited);
+        inherited::UpdateCL();
+    }
     STOP_PROFILE
 
     START_PROFILE("stalker/client_update/physics")
-    m_pPhysics_support->in_UpdateCL();
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLPhysics);
+        m_pPhysics_support->in_UpdateCL();
+    }
     STOP_PROFILE
 
     if (g_Alive())
     {
         START_PROFILE("stalker/client_update/sight_manager")
         VERIFY(!m_pPhysicsShell);
-        try
         {
-            sight().update();
-        }
-        catch (...)
-        {
-            sight().setup(CSightAction(SightManager::eSightTypeCurrentDirection));
-            sight().update();
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLSightManager);
+            try
+            {
+                sight().update();
+            }
+            catch (...)
+            {
+                sight().setup(CSightAction(SightManager::eSightTypeCurrentDirection));
+                sight().update();
+            }
         }
 
-        Exec_Look(client_update_fdelta());
+        {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLExecLook);
+            Exec_Look(client_update_fdelta());
+        }
         STOP_PROFILE
 
         START_PROFILE("stalker/client_update/step_manager")
-        CStepManager::update(false);
+        {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);
+            CStepManager::update(false);
+        }
         STOP_PROFILE
 
         START_PROFILE("stalker/client_update/weapon_shot_effector")
-        if (weapon_shot_effector().IsActive())
-            weapon_shot_effector().Update();
+        {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLWeaponEffector);
+            if (weapon_shot_effector().IsActive())
+                weapon_shot_effector().Update();
+        }
         STOP_PROFILE
     }
 #ifdef DEBUG
@@ -911,6 +1085,7 @@ CPHDestroyable* CAI_Stalker::ph_destroyable() { return smart_cast<CPHDestroyable
 
 void CAI_Stalker::shedule_Update(u32 DT)
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleUpdate);
     START_PROFILE("stalker")
     START_PROFILE("stalker/schedule_update")
     VERIFY2(getEnabled() || PPhysicsShell(), cName().c_str());
@@ -934,25 +1109,46 @@ void CAI_Stalker::shedule_Update(u32 DT)
     VERIFY(_valid(Position()));
     // *** general stuff
     float dt = float(DT) / 1000.f;
+    const u32 now_ms = Device.dwTimeGlobal;
+    const EStalkerUpdateLod update_lod = get_stalker_update_lod(*this);
+    const bool run_visibility = should_run_stalker_lod_stage(
+        *this, m_next_visibility_update_time, m_visibility_update_interval, get_stalker_visibility_interval(update_lod), now_ms);
+    const bool run_think = should_run_stalker_lod_stage(
+        *this, m_next_think_update_time, m_think_update_interval, get_stalker_think_interval(*this, update_lod), now_ms);
 
     if (g_Alive())
     {
+        START_PROFILE("stalker/schedule_update/precalc")
         animation().play_delayed_callbacks();
 
 #ifndef USE_SCHEDULER_IN_AGENT_MANAGER
-        agent_manager().update();
+        // Optimization: throttle agent_manager updates based on LOD
+        {
+            const bool run_agent_manager = should_run_stalker_lod_stage(*this, 
+                m_next_agent_manager_update_time, m_agent_manager_update_interval,
+                get_stalker_agent_manager_interval(update_lod), now_ms);
+        
+            if (run_agent_manager)
+            {
+                agent_manager().update();
+            }
+        }
 #endif // USE_SCHEDULER_IN_AGENT_MANAGER
 
 //		bool			check = !!memory().enemy().selected();
 #if 0 // def DEBUG
 		memory().visual().check_visibles();
 #endif
-        if (false && g_mt_config.test(mtAiVision))
-            Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
-        else
+        if (run_visibility)
         {
             START_PROFILE("stalker/schedule_update/vision")
-            Exec_Visibility();
+            {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleVisibility);
+                if (g_mt_config.test(mtAiVision))
+                    Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
+                else
+                    Exec_Visibility();
+            }
             STOP_PROFILE
         }
 
@@ -963,9 +1159,21 @@ void CAI_Stalker::shedule_Update(u32 DT)
         STOP_PROFILE
 
         START_PROFILE("stalker/schedule_update/memory/update")
-        memory().update(dt);
+        {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryUpdate);
+            // Optimization: throttle memory updates based on LOD
+            const bool run_memory_update = should_run_stalker_lod_stage(*this,
+                m_next_memory_update_time, m_memory_update_interval,
+                get_stalker_memory_update_interval(update_lod), now_ms);
+            
+            if (run_memory_update)
+            {
+                memory().update(dt);
+            }
+        }
         STOP_PROFILE
 
+        STOP_PROFILE
         STOP_PROFILE
     }
 
@@ -976,20 +1184,71 @@ void CAI_Stalker::shedule_Update(u32 DT)
     if (Remote())
     {
     }
+    else if (!g_Alive())
+    {
+        START_PROFILE("stalker/schedule_update/net_update")
+        net_update uNext;
+        uNext.dwTimeStamp = Level().timeServer();
+        uNext.o_model = movement().m_body.current.yaw;
+        uNext.o_torso = movement().m_head.current;
+        uNext.p_pos = vNewPosition;
+        uNext.fHealth = GetfHealth();
+        NET.push_back(uNext);
+        STOP_PROFILE
+
+        // BUGFIX: мёртвый сталкер должен вызывать Think(), чтобы
+        // CStalkerActionDead::execute() мог вызвать SetDropManual(TRUE) через
+        // can_drop_active_weapon(). Без этого оружие навсегда прилипает к руке.
+        //
+        // ИСПРАВЛЕНО: было "if (!GetScriptControl())" — условие было инвертировано!
+        // В CoC/GlobalWar все НПС под скрипт-контролем (xr_motivator вызывает
+        // SetScriptControl(true)). С отрицанием Think() никогда не запускался
+        // для мёртвых script-controlled НПС. Убрали условие — Think() теперь
+        // вызывается для ВСЕХ мёртвых сталкеров независимо от GetScriptControl().
+        m_fTimeUpdateDelta = dt;
+        Level().AIStats.Think.Begin();
+        {
+
+#ifdef DEBUG
+            if (Device.dwFrame > (spawn_time() + g_AI_inactive_time))
+#endif
+            {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleThinkApply);
+                Think();
+                m_dwLastUpdateTime = Device.dwTimeGlobal;
+            }
+        }
+        Level().AIStats.Think.End();
+    }
     else
     {
         // here is monster AI call
         VERIFY(_valid(Position()));
         m_fTimeUpdateDelta = dt;
         Level().AIStats.Think.Begin();
+        START_PROFILE("stalker/schedule_update/apply")
         if (GetScriptControl())
+        {
+            START_PROFILE("stalker/schedule_update/script_control")
             ProcessScripts();
+            m_dwLastUpdateTime = Device.dwTimeGlobal;
+            STOP_PROFILE
+        }
         else
 #ifdef DEBUG
             if (Device.dwFrame > (spawn_time() + g_AI_inactive_time))
 #endif
-            Think();
-        m_dwLastUpdateTime = Device.dwTimeGlobal;
+            if (run_think)
+            {
+                START_PROFILE("stalker/schedule_update/think_apply")
+                {
+                    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleThinkApply);
+                    Think();
+                }
+                m_dwLastUpdateTime = Device.dwTimeGlobal;
+                STOP_PROFILE
+            }
+        STOP_PROFILE
         Level().AIStats.Think.End();
         VERIFY(_valid(Position()));
 
@@ -997,13 +1256,20 @@ void CAI_Stalker::shedule_Update(u32 DT)
         float temp = conditions().health();
         if (temp > 0)
         {
-            START_PROFILE("stalker/schedule_update/feel_touch")
-            Fvector C;
-            float R;
-            Center(C);
-            R = Radius();
-            feel_touch_update(C, R);
-            STOP_PROFILE
+            // P6-opt: throttle feel_touch_update for FAR/MEDIUM LOD
+            const bool run_feel_touch = should_run_stalker_lod_stage(*this,
+                m_next_feel_touch_update_time, m_feel_touch_update_interval,
+                get_stalker_feel_touch_interval(update_lod), now_ms);
+            if (run_feel_touch)
+            {
+                START_PROFILE("stalker/schedule_update/feel_touch")
+                Fvector C;
+                float R;
+                Center(C);
+                R = Radius();
+                feel_touch_update(C, R);
+                STOP_PROFILE
+            }
 
             START_PROFILE("stalker/schedule_update/net_update")
             net_update uNext;
@@ -1030,9 +1296,14 @@ void CAI_Stalker::shedule_Update(u32 DT)
     }
     VERIFY(_valid(Position()));
 
-    START_PROFILE("stalker/schedule_update/inventory_owner")
-    UpdateInventoryOwner(DT);
-    STOP_PROFILE
+    // BUGFIX: UpdateInventoryOwner должен вызываться и для мёртвых сталкеров,
+    // чтобы обработать флаг SetDropManual(TRUE), выставленный CStalkerActionDead.
+    // Без этого предмет никогда не дропается из инвентаря трупа.
+    {
+        START_PROFILE("stalker/schedule_update/inventory_owner")
+        UpdateInventoryOwner(DT);
+        STOP_PROFILE
+    }
 
     //#ifdef DEBUG
     //	if (psAI_Flags.test(aiALife)) {
@@ -1066,13 +1337,17 @@ void CAI_Stalker::spawn_supplies()
 
 void CAI_Stalker::Think()
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerThink);
     START_PROFILE("stalker/schedule_update/think")
-    u32 update_delta = Device.dwTimeGlobal - m_dwLastUpdateTime;
+    const u32 update_delta = (m_dwLastUpdateTime == u32(-1)) ? 0 : (Device.dwTimeGlobal - m_dwLastUpdateTime);
 
     START_PROFILE("stalker/schedule_update/think/brain")
-    //	try {
-    //		try {
-    brain().update(update_delta);
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerBrainUpdate);
+        //	try {
+        //		try {
+        brain().update(update_delta);
+    }
 //		}
 #ifdef DEBUG
 //		catch (const luabind::cast_failed &message) {
@@ -1104,7 +1379,10 @@ void CAI_Stalker::Think()
         return;
 
     //	try {
-    movement().update(update_delta);
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerThinkMovementUpdate);
+        movement().update(update_delta);
+    }
 //	}
 #if 0 // def DEBUG
 	catch (const luabind::cast_failed& message) {

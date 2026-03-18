@@ -309,7 +309,8 @@ void CAI_Stalker::Hit(SHit* pHDS)
 
         if (!already_critically_wounded)
         {
-            const CCoverPoint* cover = agent_manager().member().member(this).cover();
+            CMemberOrder* member_order = agent_manager().member().get_member(ID());
+            const CCoverPoint* cover = member_order ? member_order->cover() : 0;
             if (!invulnerable() && cover && HDS.initiator() && (HDS.initiator()->ID() != ID()) &&
                 !fis_zero(HDS.damage()) && brain().affect_cover())
             {
@@ -1199,7 +1200,11 @@ bool CAI_Stalker::can_cry_enemy_is_wounded() const
 
     typedef CActionPlannerActionScript<CAI_Stalker> planner_type;
     planner_type* planner = smart_cast<planner_type*>(&brain().current_action());
-    VERIFY(planner);
+    if (!planner)
+        return (false);
+
+    if (!planner->initialized() || planner->solution().empty())
+        return (false);
 
     switch (planner->current_action_id())
     {

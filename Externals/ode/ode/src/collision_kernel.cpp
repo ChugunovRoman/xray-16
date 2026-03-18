@@ -52,6 +52,45 @@ struct SpaceGeomColliderData {
   int skip;
 };
 
+static unsigned int& ode_space_collide_depth()
+{
+  static unsigned int depth = 0;
+  return depth;
+}
+
+struct ODESpaceCollideDepthScope {
+  ODESpaceCollideDepthScope() { ++ode_space_collide_depth(); }
+  ~ODESpaceCollideDepthScope() { --ode_space_collide_depth(); }
+};
+
+static int geom_has_ancestor(dxGeom *geom, dxGeom *ancestor)
+{
+  for (dxGeom *parent = geom; parent; parent = parent->parent_space) {
+    if (parent == ancestor) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int should_abort_space_geom_collide(dxGeom *o1, dxGeom *o2)
+{
+  const unsigned int depth = ode_space_collide_depth();
+  if (o1 == o2 || geom_has_ancestor(o2, o1) || geom_has_ancestor(o1, o2)) {
+    dMessage(0,
+      "ODE recursion guard: aborting cyclic dCollideSpaceGeom depth=%u o1=%p class1=%d o2=%p class2=%d",
+      depth, o1, dGeomGetClass(o1), o2, dGeomGetClass(o2));
+    return 1;
+  }
+  if (depth > 96) {
+    dMessage(0,
+      "ODE recursion guard: aborting deep dCollideSpaceGeom depth=%u o1=%p class1=%d o2=%p class2=%d",
+      depth, o1, dGeomGetClass(o1), o2, dGeomGetClass(o2));
+    return 1;
+  }
+  return 0;
+}
+
 
 static void space_geom_collider (void *data, dxGeom *o1, dxGeom *o2)
 {
@@ -78,6 +117,10 @@ static void space_geom_collider (void *data, dxGeom *o1, dxGeom *o2)
 static int dCollideSpaceGeom (dxGeom *o1, dxGeom *o2, int flags,
 			      dContactGeom *contact, int skip)
 {
+  ODESpaceCollideDepthScope depth_scope;
+  if (should_abort_space_geom_collide(o1, o2)) {
+    return 0;
+  }
   SpaceGeomColliderData data;
   data.flags = flags;
   data.contact = contact;

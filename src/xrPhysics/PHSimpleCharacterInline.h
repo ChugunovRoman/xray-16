@@ -1,5 +1,23 @@
 #pragma once
 
+IC IPhysicsShellHolder* validated_contact_ref_object(dContact* c, bool bo1)
+{
+    dxGeomUserData* user_data = bo1 ? retrieveGeomUserData(c->geom.g2) : retrieveGeomUserData(c->geom.g1);
+    if (!user_data || !user_data->ph_ref_object || user_data->ref_object_id == u16(-1))
+        return nullptr;
+
+    auto* level_object = inl_ph_world().LevelObjects().net_Find(user_data->ref_object_id);
+    IPhysicsShellHolder* object = smart_cast<IPhysicsShellHolder*>(level_object);
+    if (!object || object != user_data->ph_ref_object || object->ObjectGetDestroy())
+    {
+        user_data->ph_ref_object = nullptr;
+        user_data->ref_object_id = u16(-1);
+        return nullptr;
+    }
+
+    return object;
+}
+
 void CPHSimpleCharacter::UpdateStaticDamage(dContact* c, SGameMtl* tri_material, bool bo1)
 {
     const dReal* v = dBodyGetLinearVel(m_body);
@@ -124,22 +142,16 @@ void CPHSimpleCharacter::UpdateDynamicDamage(dContact* c, u16 obj_material_idx, 
     {
         try
         {
-            IPhysicsShellHolder* object = bo1 ? retrieveRefObject(c->geom.g2) : retrieveRefObject(c->geom.g1);
-            if (object == nullptr)
+            IPhysicsShellHolder* obj = validated_contact_ref_object(c, bo1);
+            if (!obj)
                 return;
-            IPhysicsShellHolder* obj = smart_cast<IPhysicsShellHolder*>(object);
-            if (obj == nullptr)
-                return;
-            VERIFY(obj);
-            if (obj && !obj->ObjectGetDestroy())
-            {
-                m_collision_damage_info.m_contact_velocity = c_vel;
-                m_collision_damage_info.m_dmc_signum = bo1 ? 1.f : -1.f;
-                m_collision_damage_info.m_dmc_type = SCollisionDamageInfo::ctObject;
-                m_collision_damage_info.m_damege_contact = *c;
-                m_collision_damage_info.m_hit_callback = obj->ObjectGetCollisionHitCallback();
-                m_collision_damage_info.m_obj_id = obj->ObjectID();
-            }
+
+            m_collision_damage_info.m_contact_velocity = c_vel;
+            m_collision_damage_info.m_dmc_signum = bo1 ? 1.f : -1.f;
+            m_collision_damage_info.m_dmc_type = SCollisionDamageInfo::ctObject;
+            m_collision_damage_info.m_damege_contact = *c;
+            m_collision_damage_info.m_hit_callback = obj->ObjectGetCollisionHitCallback();
+            m_collision_damage_info.m_obj_id = obj->ObjectID();
         }
         catch(...)
         {

@@ -77,21 +77,24 @@ shared_str CSpaceRestrictionManager::out_restrictions(ALife::_OBJECT_ID id)
 shared_str CSpaceRestrictionManager::base_in_restrictions(ALife::_OBJECT_ID id)
 {
     CLIENT_RESTRICTIONS::iterator I = m_clients->find(id);
-    VERIFY(m_clients->end() != I);
+    if (m_clients->end() == I)
+        return ("");
     return ((*I).second.m_base_in_restrictions);
 }
 
 shared_str CSpaceRestrictionManager::base_out_restrictions(ALife::_OBJECT_ID id)
 {
     CLIENT_RESTRICTIONS::iterator I = m_clients->find(id);
-    VERIFY(m_clients->end() != I);
+    if (m_clients->end() == I)
+        return ("");
     return ((*I).second.m_base_out_restrictions);
 }
 
 CSpaceRestrictionManager::CRestrictionPtr CSpaceRestrictionManager::restriction(ALife::_OBJECT_ID id)
 {
     CLIENT_RESTRICTIONS::iterator I = m_clients->find(id);
-    VERIFY(m_clients->end() != I);
+    if (m_clients->end() == I)
+        return (0);
     return ((*I).second.m_restriction);
 }
 
@@ -140,7 +143,8 @@ void CSpaceRestrictionManager::restrict(ALife::_OBJECT_ID id, shared_str out_res
 void CSpaceRestrictionManager::unrestrict(ALife::_OBJECT_ID id)
 {
     CLIENT_RESTRICTIONS::iterator I = m_clients->find(id);
-    VERIFY(I != m_clients->end());
+    if (I == m_clients->end())
+        return;
     m_clients->erase(I);
     collect_garbage();
 }
@@ -186,7 +190,8 @@ CSpaceRestrictionManager::CRestrictionPtr CSpaceRestrictionManager::restriction(
 u32 CSpaceRestrictionManager::accessible_nearest(ALife::_OBJECT_ID id, const Fvector& position, Fvector& result)
 {
     CRestrictionPtr client_restriction = restriction(id);
-    VERIFY(client_restriction);
+    if (!client_restriction)
+        return (u32(-1));
     return (client_restriction->accessible_nearest(position, result));
 }
 

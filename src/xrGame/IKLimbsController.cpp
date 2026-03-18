@@ -350,11 +350,16 @@ void CIKLimbsController::Update()
     if (ph_dbg_draw_mask1.test(phDbgIKOff))
         return;
 #endif
+    update_blend(m_legs_blend);
+
+    // No active leg animation and no residual body shift means IK has nothing useful to refine this frame.
+    if (!m_legs_blend && fis_zero(_object_shift.shift(), EPS_L))
+        return;
+
     IKinematicsAnimated* skeleton_animated = m_object->Visual()->dcast_PKinematicsAnimated();
     VERIFY(skeleton_animated);
 
     skeleton_animated->UpdateTracks();
-    update_blend(m_legs_blend);
 
     _pose_extrapolation.update(m_object->XFORM());
     xr_vector<CIKLimb>::iterator i = _bone_chains.begin(), e = _bone_chains.end();

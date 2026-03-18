@@ -50,7 +50,8 @@ void CStalkerActionReachEnemyLocation::initialize()
 
     aim_ready();
 
-    object().agent_manager().member().member(m_object).cover(0);
+    if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
+        member_order->cover(0);
 
     const MemorySpace::CHitObject* hit = object().memory().hit().hit(object().memory().enemy().selected());
     if (!hit)

@@ -25,6 +25,7 @@
 #include "agent_location_manager.h"
 #include "cover_point.h"
 #include "danger_cover_location.h"
+#include "member_order.h"
 
 using namespace StalkerDecisionSpace;
 
@@ -62,7 +63,8 @@ void CStalkerActionDangerUnknownTakeCover::execute()
     if (!object().memory().danger().selected())
         return;
 
-    const CCoverPoint* point = object().agent_manager().member().member(&object()).cover();
+    const CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID());
+    const CCoverPoint* point = member_order ? member_order->cover() : 0;
     if (point)
     {
         object().movement().set_level_dest_vertex(point->level_vertex_id());
@@ -142,11 +144,12 @@ void CStalkerActionDangerUnknownSearch::execute()
 {
     inherited::execute();
 
-    if (object().agent_manager().member().member(&object()).cover())
+    const CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID());
+    const CCoverPoint* cover = member_order ? member_order->cover() : 0;
+    if (cover)
     {
         object().agent_manager().location().add(
-            xr_new<CDangerCoverLocation>(object().agent_manager().member().member(&object()).cover(), Device.dwTimeGlobal,
-                DANGER_INTERVAL, DANGER_DISTANCE));
+            xr_new<CDangerCoverLocation>(cover, Device.dwTimeGlobal, DANGER_INTERVAL, DANGER_DISTANCE));
         return;
     }
 

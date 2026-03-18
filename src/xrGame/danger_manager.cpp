@@ -15,6 +15,7 @@
 #include "enemy_manager.h"
 #include "Actor.h"
 #include "Common/object_broker.h"
+#include "npc_cpp_profile.h"
 
 struct CDangerPredicate
 {
@@ -212,6 +213,8 @@ float CDangerManager::do_evaluate(const CDangerObject& object) const
 
 void CDangerManager::add(const CVisibleObject& object)
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerDangerAddVisible);
+
     if (!object.m_enabled)
         return;
 
@@ -226,6 +229,8 @@ void CDangerManager::add(const CVisibleObject& object)
 
 void CDangerManager::add(const CSoundObject& object)
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerDangerAddSound);
+
     if (!object.m_enabled)
         return;
 
@@ -277,6 +282,8 @@ void CDangerManager::add(const CSoundObject& object)
 
 void CDangerManager::add(const CHitObject& object)
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerDangerAddHit);
+
     if (!object.m_enabled)
         return;
 
@@ -293,17 +300,25 @@ void CDangerManager::add(const CHitObject& object)
 
 void CDangerManager::add(const CDangerObject& object)
 {
-    if (m_object->memory().enemy().selected() && object.object()) // && !object.object()->g_Alive())
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerDangerAddDangerObject);
+
+    if (m_object->memory().enemy().selected() && object.object())
         ignore(object.object());
 
-    if (!is_useful(object))
-        return;
-
-    OBJECTS::iterator I = std::find_if(m_objects.begin(), m_objects.end(), CFindPredicate(object));
-    if (I != m_objects.end())
     {
-        *I = object;
-        return;
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerDangerUsefulCheck);
+        if (!is_useful(object))
+            return;
+    }
+
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerDangerFindExisting);
+        OBJECTS::iterator I = std::find_if(m_objects.begin(), m_objects.end(), CFindPredicate(object));
+        if (I != m_objects.end())
+        {
+            *I = object;
+            return;
+        }
     }
 
     m_objects.push_back(object);

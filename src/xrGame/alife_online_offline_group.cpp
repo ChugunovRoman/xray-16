@@ -62,7 +62,22 @@ void CSE_ALifeOnlineOfflineGroup::update()
     return;
 }
 
+void CSE_ALifeOnlineOfflineGroup::update_position()
+{
+    if (!bfActive())
+        return;
+    brain().update_position();
+}
+
 void CSE_ALifeOnlineOfflineGroup::on_location_change() const { brain().on_location_change(); }
+
+Fvector CSE_ALifeOnlineOfflineGroup::draw_level_position() const
+{
+    if (m_bOnline || m_members.empty())
+        return (Position());
+    return (brain().movement().detail().draw_level_position());
+}
+
 void CSE_ALifeOnlineOfflineGroup::register_member(ALife::_OBJECT_ID member_id)
 {
     VERIFY(m_members.find(member_id) == m_members.end());

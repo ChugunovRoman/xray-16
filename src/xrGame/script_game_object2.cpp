@@ -209,36 +209,89 @@ void CScriptGameObject::Hit(CScriptHit* tpLuaHit)
 CScriptGameObject::operator IGameObject*() { return (&object()); }
 CScriptGameObject* CScriptGameObject::GetBestEnemy()
 {
+    if (m_best_enemy_cache_time == Device.dwTimeGlobal)
+        return m_best_enemy_cache_object;
+
     const CCustomMonster* monster = smart_cast<const CCustomMonster*>(&object());
     if (!monster)
+    {
+        m_best_enemy_cache_time = Device.dwTimeGlobal;
+        m_best_enemy_cache_object = nullptr;
         return (0);
+    }
 
+    CScriptGameObject* result = nullptr;
     if (monster->memory().enemy().selected())
-        return (monster->memory().enemy().selected()->lua_game_object());
-    return (0);
+        result = monster->memory().enemy().selected()->lua_game_object();
+
+    m_best_enemy_cache_time = Device.dwTimeGlobal;
+    m_best_enemy_cache_object = result;
+    return result;
 }
 
-const CDangerObject* CScriptGameObject::GetBestDanger()
+const CDangerObject* CScriptGameObject::GetBestDanger() const
 {
+    if (m_best_danger_cache_time == Device.dwTimeGlobal)
+        return m_best_danger_cache_object;
+
     const CCustomMonster* monster = smart_cast<const CCustomMonster*>(&object());
     if (!monster)
+    {
+        m_best_danger_cache_time = Device.dwTimeGlobal;
+        m_best_danger_cache_object = nullptr;
         return (0);
+    }
 
-    if (!monster->memory().danger().selected())
-        return (0);
+    const CDangerObject* result = monster->memory().danger().selected();
 
-    return (monster->memory().danger().selected());
+    m_best_danger_cache_time = Device.dwTimeGlobal;
+    m_best_danger_cache_object = result;
+
+    return result;
+}
+
+SScriptBestDangerSnapshot CScriptGameObject::GetBestDangerSnapshot() const
+{
+    SScriptBestDangerSnapshot result;
+    const CDangerObject* danger = GetBestDanger();
+    if (!danger)
+        return result;
+
+    result.m_valid = true;
+    result.m_type = u32(danger->type());
+    result.m_perceive_type = u32(danger->perceive_type());
+    result.m_time = danger->time();
+    result.m_position = danger->position();
+
+    const CEntityAlive* danger_object = danger->object();
+    result.m_object_id = danger_object ? danger_object->ID() : u16(-1);
+
+    const IGameObject* dependent_object = danger->dependent_object();
+    result.m_dependent_object_id = dependent_object ? dependent_object->ID() : u16(-1);
+
+    return result;
 }
 
 CScriptGameObject* CScriptGameObject::GetBestItem()
 {
+    if (m_best_item_cache_time == Device.dwTimeGlobal)
+        return m_best_item_cache_object;
+
     const CCustomMonster* monster = smart_cast<const CCustomMonster*>(&object());
     if (!monster)
+    {
+        m_best_item_cache_time = Device.dwTimeGlobal;
+        m_best_item_cache_object = nullptr;
         return (0);
+    }
 
+    CScriptGameObject* result = nullptr;
     if (monster->memory().item().selected())
-        return (monster->memory().item().selected()->lua_game_object());
-    return (0);
+        result = monster->memory().item().selected()->lua_game_object();
+
+    m_best_item_cache_time = Device.dwTimeGlobal;
+    m_best_item_cache_object = result;
+    return result;
 }
 
 u32 CScriptGameObject::memory_time(const CScriptGameObject& lua_game_object)

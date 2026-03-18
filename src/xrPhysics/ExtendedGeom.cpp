@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "ExtendedGeom.h"
+#include "IPhysicsShellHolder.h"
 #include "dcylinder/dCylinder.h"
 bool IsCyliderContact(const dContact& c)
 {
@@ -23,6 +24,7 @@ bool IsCyliderContact(const dContact& c)
 //}
 
 dxGeomUserData* PHRetrieveGeomUserData(dGeomID geom) { return retrieveGeomUserData(geom); }
+u16 PHRetrieveRefObjectID(IPhysicsShellHolder* object) { return object ? object->ObjectID() : u16(-1); }
 void get_user_data(dxGeomUserData*& gd1, dxGeomUserData*& gd2, bool bo1, const dContactGeom& geom)
 {
     if (bo1)

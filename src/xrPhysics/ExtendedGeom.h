@@ -109,6 +109,7 @@ struct dxGeomUserData
     CDB::TRI *neg_tri, *b_neg_tri;
     CPHObject* ph_object;
     IPhysicsShellHolder* ph_ref_object;
+    u16 ref_object_id;
     u16 material;
     u16 tri_material;
     ContactCallbackFun* callback;
@@ -143,6 +144,7 @@ IC dGeomID retrieveGeom(dGeomID geom)
         return geom;
 }
 XRPHYSICS_API dxGeomUserData* PHRetrieveGeomUserData(dGeomID geom);
+XRPHYSICS_API u16 PHRetrieveRefObjectID(IPhysicsShellHolder* object);
 IC dxGeomUserData* retrieveGeomUserData(dGeomID geom)
 {
     return dGeomGetUserData(retrieveGeom(geom));
@@ -181,6 +183,7 @@ IC void dGeomCreateUserData(dxGeom* geom)
     (dGeomGetUserData(geom))->callback = NULL;
     (dGeomGetUserData(geom))->object_callbacks = NULL;
     (dGeomGetUserData(geom))->ph_ref_object = NULL;
+    (dGeomGetUserData(geom))->ref_object_id = u16(-1);
     (dGeomGetUserData(geom))->element_position = u16(-1);
     (dGeomGetUserData(geom))->bone_id = u16(-1);
     (dGeomGetUserData(geom))->callback_data = NULL;
@@ -215,6 +218,7 @@ IC void dGeomUserDataSetPhObject(dxGeom* geom, CPHObject* phObject) { (dGeomGetU
 IC void dGeomUserDataSetPhysicsRefObject(dxGeom* geom, IPhysicsShellHolder* phRefObject)
 {
     (dGeomGetUserData(geom))->ph_ref_object = phRefObject;
+    (dGeomGetUserData(geom))->ref_object_id = PHRetrieveRefObjectID(phRefObject);
 }
 
 IC void dGeomUserDataSetContactCallback(dxGeom* geom, ContactCallbackFun* callback)

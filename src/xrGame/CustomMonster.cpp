@@ -36,6 +36,8 @@
 #include "mt_config.h"
 #include "PHMovementControl.h"
 #include "xrEngine/profiler.h"
+#include "npc_cpp_profile.h"
+#include "performance_cvars.h"
 #include "date_time.h"
 #include "CharacterPhysicsSupport.h"
 #include "ai/monsters/snork/snork.h"
@@ -65,6 +67,65 @@ extern int g_AI_inactive_time;
 #if defined(DEBUG) || !defined(MASTER_GOLD)
 Flags32 psAI_Flags = {aiObstaclesAvoiding | aiUseSmartCovers};
 #endif // defined(DEBUG) || !defined(MASTER_GOLD)
+
+namespace
+{
+IC float custom_monster_vis_near_dist_sqr() { return npc_perf_monster_vis_near_dist * npc_perf_monster_vis_near_dist; }
+IC float custom_monster_vis_medium_dist_sqr() { return npc_perf_monster_vis_medium_dist * npc_perf_monster_vis_medium_dist; }
+
+IC u32 custom_monster_visibility_offset(const u16 object_id, const u32 interval_ms)
+{
+    if (!interval_ms)
+        return 0;
+
+    constexpr u32 bucket_count = 8;
+    const u32 buckets = _min(bucket_count, interval_ms);
+    return (interval_ms * (object_id % buckets)) / buckets;
+}
+
+IC u32 get_custom_monster_visibility_interval(const CCustomMonster& monster)
+{
+    if (monster.memory().enemy().selected() || monster.memory().danger().selected())
+        return 0;
+
+    CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
+    if (!actor)
+        return 0;
+
+    const float dist_sqr = monster.Position().distance_to_sqr(actor->Position());
+    if (dist_sqr <= custom_monster_vis_near_dist_sqr())
+        return 0;
+    if (dist_sqr <= custom_monster_vis_medium_dist_sqr())
+        return npc_perf_monster_vis_interval_medium_ms;
+
+    return npc_perf_monster_vis_interval_far_ms;
+}
+
+IC bool should_run_custom_monster_visibility(
+    const CCustomMonster& monster, u32& next_update_time, u32& current_interval, const u32 now_ms)
+{
+    const u32 new_interval = get_custom_monster_visibility_interval(monster);
+    if (!new_interval)
+    {
+        current_interval = 0;
+        next_update_time = now_ms;
+        return true;
+    }
+
+    if (current_interval != new_interval)
+    {
+        current_interval = new_interval;
+        next_update_time = now_ms + custom_monster_visibility_offset(monster.ID(), new_interval);
+        return next_update_time <= now_ms;
+    }
+
+    if (next_update_time > now_ms)
+        return false;
+
+    next_update_time = now_ms + new_interval;
+    return true;
+}
+} // namespace
 
 void CCustomMonster::SAnimState::Create(IKinematicsAnimated* K, LPCSTR base)
 {
@@ -211,6 +272,8 @@ void CCustomMonster::reinit()
     m_dwLastUpdateTime = 0xffffffff;
     m_tEyeShift.set(0, 0, 0);
     m_fEyeShiftYaw = 0.f;
+    m_next_visibility_update_time = 0;
+    m_visibility_update_interval = 0;
     NET_WasExtrapolating = FALSE;
 
     //////////////////////////////////////////////////////////////////////////
@@ -318,6 +381,7 @@ void CCustomMonster::net_Import(NET_Packet& P)
 
 void CCustomMonster::shedule_Update(u32 DT)
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterScheduleUpdate);
     VERIFY(!g_Alive() || processing_enabled());
     // Queue shrink
     VERIFY(_valid(Position()));
@@ -330,20 +394,37 @@ void CCustomMonster::shedule_Update(u32 DT)
     // *** general stuff
     if (g_Alive())
     {
-        if (false && g_mt_config.test(mtAiVision))
-#ifndef DEBUG
-            Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
-#else // DEBUG
+        START_PROFILE("CustomMonster/schedule_update/precalc")
+        const bool run_visibility = should_run_custom_monster_visibility(
+            *this, m_next_visibility_update_time, m_visibility_update_interval, Device.dwTimeGlobal);
+        if (run_visibility)
         {
-            if (!psAI_Flags.test(aiStalker) || !!smart_cast<CActor*>(Level().CurrentEntity()))
+            if (g_mt_config.test(mtAiVision))
+#ifndef DEBUG
                 Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
-            else
-                Exec_Visibility();
-        }
+#else // DEBUG
+            {
+                if (!psAI_Flags.test(aiStalker) || !!smart_cast<CActor*>(Level().CurrentEntity()))
+                    Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
+                else
+                    Exec_Visibility();
+            }
 #endif // DEBUG
-        else
-            Exec_Visibility();
-        memory().update(dt);
+            else
+            {
+                START_PROFILE("CustomMonster/schedule_update/vision")
+                Exec_Visibility();
+                STOP_PROFILE
+            }
+        }
+
+        START_PROFILE("CustomMonster/schedule_update/memory")
+        {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterMemoryUpdate);
+            memory().update(dt);
+        }
+        STOP_PROFILE
+        STOP_PROFILE
     }
     inherited::shedule_Update(DT);
 
@@ -357,19 +438,58 @@ void CCustomMonster::shedule_Update(u32 DT)
     if (Remote())
     {
     }
+    else if (!g_Alive())
+    {
+        net_update uNext;
+        uNext.dwTimeStamp = Level().timeServer();
+        uNext.o_model = movement().m_body.current.yaw;
+        uNext.o_torso = movement().m_body.current;
+        uNext.p_pos = Position();
+        uNext.fHealth = GetfHealth();
+        NET.push_back(uNext);
+
+        // BUGFIX: мёртвый НПС должен продолжать вызывать Think(), чтобы
+        // CStalkerActionDead::execute() мог выполнить SetDropManual(TRUE) через
+        // can_drop_active_weapon(). Без этого оружие навсегда прилипает к руке.
+        m_fTimeUpdateDelta = dt;
+        Level().AIStats.Think.Begin();
+        if (!GetScriptControl())
+        {
+            if (Device.dwFrame > spawn_time() + g_AI_inactive_time)
+            {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterThink);
+                Think();
+            }
+        }
+        m_dwLastUpdateTime = Device.dwTimeGlobal;
+        Level().AIStats.Think.End();
+    }
     else
     {
         // here is monster AI call
         m_fTimeUpdateDelta = dt;
         Level().AIStats.Think.Begin();
+        START_PROFILE("CustomMonster/schedule_update/apply")
         if (GetScriptControl())
+        {
+            START_PROFILE("CustomMonster/schedule_update/script_control")
             ProcessScripts();
+            STOP_PROFILE
+        }
         else
         {
             if (Device.dwFrame > spawn_time() + g_AI_inactive_time)
-                Think();
+            {
+                START_PROFILE("CustomMonster/schedule_update/think_apply")
+                {
+                    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterThink);
+                    Think();
+                }
+                STOP_PROFILE
+            }
         }
         m_dwLastUpdateTime = Device.dwTimeGlobal;
+        STOP_PROFILE
         Level().AIStats.Think.End();
 
         // Look and action streams
@@ -424,9 +544,14 @@ void CCustomMonster::net_update::lerp(CCustomMonster::net_update& A, CCustomMons
     fHealth = A.fHealth * (1.f - f) + B.fHealth * f;
 }
 
-void CCustomMonster::update_sound_player() { sound().update(client_update_fdelta()); }
+void CCustomMonster::update_sound_player()
+{
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterSoundPlayerUpdate);
+    sound().update(client_update_fdelta());
+}
 void CCustomMonster::UpdateCL()
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCL);
     START_PROFILE("CustomMonster/client_update")
     m_client_update_delta = (u32)std::min(Device.dwTimeGlobal - m_last_client_update_time, u32(100));
     m_last_client_update_time = Device.dwTimeGlobal;
@@ -437,7 +562,10 @@ void CCustomMonster::UpdateCL()
 #endif
 
     START_PROFILE("CustomMonster/client_update/inherited")
-    inherited::UpdateCL();
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLInherited);
+        inherited::UpdateCL();
+    }
     STOP_PROFILE
 
 #ifdef DEBUG
@@ -445,7 +573,13 @@ void CCustomMonster::UpdateCL()
         animation_movement()->DBG_verify_position_not_chaged();
 #endif
 
-    CScriptEntity::process_sound_callbacks();
+    if (!g_Alive())
+        return;
+
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLProcessSoundCallbacks);
+        CScriptEntity::process_sound_callbacks();
+    }
 
     /*	//. hack just to skip 'CalculateBones'
     if (sound().need_bone_data()) {
@@ -466,57 +600,63 @@ void CCustomMonster::UpdateCL()
     }
 
     START_PROFILE("CustomMonster/client_update/network extrapolation")
-    if (NET.empty())
     {
-        update_animation_movement_controller();
-        return;
-    }
-
-    m_dwCurrentTime = Device.dwTimeGlobal;
-
-    // distinguish interpolation/extrapolation
-    u32 dwTime = Level().timeServer() - NET_Latency;
-    net_update& N = NET.back();
-    if ((dwTime > N.dwTimeStamp) || (NET.size() < 2))
-    {
-        // BAD.	extrapolation
-        NET_Last = N;
-    }
-    else
-    {
-        // OK.	interpolation
-        NET_WasExtrapolating = FALSE;
-        // Search 2 keyframes for interpolation
-        int select = -1;
-        for (u32 id = 0; id < NET.size() - 1; ++id)
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLNetworkExtrapolation);
+        if (NET.empty())
         {
-            if ((NET[id].dwTimeStamp <= dwTime) && (dwTime <= NET[id + 1].dwTimeStamp))
-                select = id;
+            {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLAnimationController);
+                update_animation_movement_controller();
+            }
+            return;
         }
-        if (select >= 0)
-        {
-            // Interpolate state
-            net_update& A = NET[select + 0];
-            net_update& B = NET[select + 1];
-            u32 d1 = dwTime - A.dwTimeStamp;
-            u32 d2 = B.dwTimeStamp - A.dwTimeStamp;
-            //			VERIFY					(d2);
-            float factor = d2 ? (float(d1) / float(d2)) : 1.f;
-            Fvector l_tOldPosition = Position();
-            NET_Last.lerp(A, B, factor);
-            if (Local())
-            {
-                NET_Last.p_pos = l_tOldPosition;
-            }
-            else
-            {
-                if (!bfScriptAnimation())
-                    SelectAnimation(XFORM().k, movement().detail().direction(), movement().speed());
-            }
 
-            // Signal, that last time we used interpolation
-            NET_WasInterpolating = TRUE;
-            NET_Time = dwTime;
+        m_dwCurrentTime = Device.dwTimeGlobal;
+
+        // distinguish interpolation/extrapolation
+        u32 dwTime = Level().timeServer() - NET_Latency;
+        net_update& N = NET.back();
+        if ((dwTime > N.dwTimeStamp) || (NET.size() < 2))
+        {
+            // BAD.	extrapolation
+            NET_Last = N;
+        }
+        else
+        {
+            // OK.	interpolation
+            NET_WasExtrapolating = FALSE;
+            // Search 2 keyframes for interpolation
+            int select = -1;
+            for (u32 id = 0; id < NET.size() - 1; ++id)
+            {
+                if ((NET[id].dwTimeStamp <= dwTime) && (dwTime <= NET[id + 1].dwTimeStamp))
+                    select = id;
+            }
+            if (select >= 0)
+            {
+                // Interpolate state
+                net_update& A = NET[select + 0];
+                net_update& B = NET[select + 1];
+                u32 d1 = dwTime - A.dwTimeStamp;
+                u32 d2 = B.dwTimeStamp - A.dwTimeStamp;
+                //			VERIFY					(d2);
+                float factor = d2 ? (float(d1) / float(d2)) : 1.f;
+                Fvector l_tOldPosition = Position();
+                NET_Last.lerp(A, B, factor);
+                if (Local())
+                {
+                    NET_Last.p_pos = l_tOldPosition;
+                }
+                else
+                {
+                    if (!bfScriptAnimation())
+                        SelectAnimation(XFORM().k, movement().detail().direction(), movement().speed());
+                }
+
+                // Signal, that last time we used interpolation
+                NET_WasInterpolating = TRUE;
+                NET_Time = dwTime;
+            }
         }
     }
     STOP_PROFILE
@@ -530,12 +670,14 @@ void CCustomMonster::UpdateCL()
     {
 #pragma todo("Dima to All : this is FAKE, network is not supported here!")
 
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLUpdatePositionAnimation);
         UpdatePositionAnimation();
     }
 
     // Use interpolated/last state
     if (g_Alive())
     {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLApplyNetState);
         if (!animation_movement_controlled() && m_update_rotation_on_frame)
             XFORM().rotateY(NET_Last.o_model);
         if (!animation_movement_controlled())
@@ -556,10 +698,16 @@ void CCustomMonster::UpdateCL()
 
 #ifdef DEBUG
     if (IsMyCamera())
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLUpdateCamera);
         UpdateCamera();
+    }
 #endif // DEBUG
 
-    update_animation_movement_controller();
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLAnimationController);
+        update_animation_movement_controller();
+    }
 
 #ifdef DEBUG
     if (animation_movement())
@@ -664,6 +812,7 @@ void CCustomMonster::eye_pp_s2()
 
 void CCustomMonster::Exec_Visibility()
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterExecVisibility);
     // if (0==Sector())				return;
     if (!g_Alive())
         return;
@@ -672,10 +821,21 @@ void CCustomMonster::Exec_Visibility()
     switch (eye_pp_stage % 2)
     {
     case 0:
-        eye_pp_s0();
-        eye_pp_s1();
+        {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterVisibilityS0);
+            eye_pp_s0();
+        }
+        {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterVisibilityS1);
+            eye_pp_s1();
+        }
         break;
-    case 1: eye_pp_s2(); break;
+    case 1:
+        {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterVisibilityS2);
+            eye_pp_s2();
+        }
+        break;
     }
     ++eye_pp_stage;
     Level().AIStats.Vis.End();
@@ -735,26 +895,11 @@ bool CCustomMonster::net_Spawn(CSE_Abstract* DC)
             ai_location().game_vertex(E->m_tGraphID);
 
         if (ai().game_graph().valid_vertex_id(E->m_tNextGraphID) &&
-            (ai().game_graph().vertex(E->m_tNextGraphID)->level_id() == ai().level_graph().level_id()) &&
-            movement().restrictions().accessible(ai().game_graph().vertex(E->m_tNextGraphID)->level_vertex_id()))
+            (ai().game_graph().vertex(E->m_tNextGraphID)->level_id() == ai().level_graph().level_id()))
             movement().set_game_dest_vertex(E->m_tNextGraphID);
 
-        if (movement().restrictions().accessible(ai_location().level_vertex_id()))
+        if (ai().level_graph().valid_vertex_id(ai_location().level_vertex_id()))
             movement().set_level_dest_vertex(ai_location().level_vertex_id());
-        else
-        {
-            Fvector dest_position;
-            const Fvector vertex_pos = ai().level_graph().vertex_position(ai_location().level_vertex_id());
-            const u32 level_vertex_id = movement().restrictions().accessible_nearest(vertex_pos, dest_position);
-
-            const bool vertex_id_is_valid = ai().level_graph().valid_vertex_id(level_vertex_id);
-            VERIFY(vertex_id_is_valid);
-            if (vertex_id_is_valid)
-            {
-                movement().set_level_dest_vertex(level_vertex_id);
-                movement().detail().set_dest_position(dest_position);
-            }
-        }
     }
 
     // Eyes

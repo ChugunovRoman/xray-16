@@ -24,6 +24,8 @@
 #include "xrEngine/profiler.h"
 #include "agent_enemy_manager.h"
 #include "script_game_object.h"
+#include "Actor.h"
+#include "npc_cpp_profile.h"
 
 CMemoryManager::CMemoryManager(CEntityAlive* entity_alive, CSound_UserDataVisitor* visitor)
 {
@@ -86,6 +88,46 @@ void CMemoryManager::reload(LPCSTR section)
 extern bool g_enemy_manager_second_update;
 #endif // _DEBUG
 
+namespace
+{
+constexpr u32 STALKER_MEMORY_VISUAL_COMBAT_BUDGET = 12;
+constexpr u32 STALKER_MEMORY_SOUND_COMBAT_BUDGET = 8;
+constexpr u32 STALKER_MEMORY_HIT_COMBAT_BUDGET = 6;
+constexpr float STALKER_MEMORY_FULL_COLLECT_NEAR_DIST_SQR = 55.f * 55.f;
+
+template <typename TStage>
+IC void add_profile_counter(const TStage stage, const u64 start_qpc)
+{
+    if (!npc_cpp_profile::enabled())
+        return;
+
+    npc_cpp_profile::add(stage, CPU::QPC() - start_qpc);
+}
+
+IC u32 effective_memory_collect_budget(const bool limited_mode, const u32 object_count, const u32 budget)
+{
+    if (!limited_mode || !object_count)
+        return object_count;
+
+    return _min(object_count, budget);
+}
+
+IC bool should_force_full_memory_collect(const CAI_Stalker* stalker, const bool registered_in_combat)
+{
+    if (!stalker)
+        return false;
+
+    if (!registered_in_combat && !stalker->memory().enemy().selected() && !stalker->memory().danger().selected())
+        return false;
+
+    CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
+    if (!actor)
+        return false;
+
+    return stalker->Position().distance_to_sqr(actor->Position()) <= STALKER_MEMORY_FULL_COLLECT_NEAR_DIST_SQR;
+}
+} // namespace
+
 void CMemoryManager::update_enemies(const bool& registered_in_combat)
 {
 #ifdef _DEBUG
@@ -100,10 +142,10 @@ void CMemoryManager::update_enemies(const bool& registered_in_combat)
         m_stalker->agent_manager().enemy().distribute_enemies();
 
         if (visual().enabled())
-            update(visual().objects(), true);
+            update(visual().objects(), true, false, m_visual_update_cursor, STALKER_MEMORY_VISUAL_COMBAT_BUDGET);
 
-        update(sound().objects(), true);
-        update(hit().objects(), true);
+        update(sound().objects(), true, false, m_sound_update_cursor, STALKER_MEMORY_SOUND_COMBAT_BUDGET);
+        update(hit().objects(), true, false, m_hit_update_cursor, STALKER_MEMORY_HIT_COMBAT_BUDGET);
 
 #ifdef _DEBUG
         g_enemy_manager_second_update = true;
@@ -116,27 +158,55 @@ void CMemoryManager::update(float time_delta)
 {
     START_PROFILE("Memory Manager")
 
-    visual().update(time_delta);
-    sound().update();
-    hit().update();
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryVisualUpdate);
+        visual().update(time_delta);
+    }
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemorySoundUpdate);
+        sound().update();
+    }
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryHitUpdate);
+        hit().update();
+    }
 
     bool registered_in_combat = false;
     if (m_stalker)
         registered_in_combat = m_stalker->agent_manager().member().registered_in_combat(m_stalker);
+    const bool process_items = !registered_in_combat && !enemy().selected();
+    const bool limited_collect_mode =
+        (registered_in_combat || !!enemy().selected()) && !should_force_full_memory_collect(m_stalker, registered_in_combat);
 
     // update enemies and items
     enemy().reset();
     item().reset();
 
-    if (visual().enabled())
-        update(visual().objects(), true);
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryCollectObjects);
+        if (visual().enabled())
+            update(visual().objects(), true, process_items, m_visual_update_cursor,
+                effective_memory_collect_budget(limited_collect_mode, visual().objects().size(), STALKER_MEMORY_VISUAL_COMBAT_BUDGET));
 
-    update(sound().objects(), registered_in_combat ? true : false);
-    update(hit().objects(), registered_in_combat ? true : false);
+        update(sound().objects(), registered_in_combat ? true : false, process_items, m_sound_update_cursor,
+            effective_memory_collect_budget(limited_collect_mode, sound().objects().size(), STALKER_MEMORY_SOUND_COMBAT_BUDGET));
+        update(hit().objects(), registered_in_combat ? true : false, process_items, m_hit_update_cursor,
+            effective_memory_collect_budget(limited_collect_mode, hit().objects().size(), STALKER_MEMORY_HIT_COMBAT_BUDGET));
+    }
 
-    update_enemies(registered_in_combat);
-    item().update();
-    danger().update();
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryUpdateEnemies);
+        update_enemies(registered_in_combat);
+    }
+    if (process_items)
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryItemUpdate);
+        item().update();
+    }
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryDangerUpdate);
+        danger().update();
+    }
 
     STOP_PROFILE
 }
@@ -149,35 +219,103 @@ void CMemoryManager::enable(const IGameObject* object, bool enable)
 }
 
 template <typename T>
-void CMemoryManager::update(const xr_vector<T>& objects, bool add_enemies)
+void CMemoryManager::update(const xr_vector<T>& objects, bool add_enemies, bool add_items, u32& cursor, u32 budget)
 {
+    const bool profile_enabled = npc_cpp_profile::enabled();
+    const u64 total_start_qpc = profile_enabled ? CPU::QPC() : 0;
+    ENpcCppProfileStage collect_stage = ENpcCppProfileStage::StalkerMemoryCollectObjects;
+
+    if constexpr (std::is_same_v<T, CVisibleObject>)
+        collect_stage = ENpcCppProfileStage::StalkerMemoryCollectVisualObjects;
+    else if constexpr (std::is_same_v<T, CSoundObject>)
+        collect_stage = ENpcCppProfileStage::StalkerMemoryCollectSoundObjects;
+    else if constexpr (std::is_same_v<T, CHitObject>)
+        collect_stage = ENpcCppProfileStage::StalkerMemoryCollectHitObjects;
+
     squad_mask_type mask = m_stalker ? m_stalker->agent_manager().member().mask(m_stalker) : 0;
-    auto I = objects.cbegin();
-    auto E = objects.cend();
-    for (; I != E; ++I)
+    const u32 object_count = objects.size();
+    if (!object_count || !budget)
     {
-        if (!(*I).m_enabled)
-            continue;
+        add_profile_counter(collect_stage, total_start_qpc);
+        return;
+    }
 
-        if (m_stalker && !(*I).m_squad_mask.test(mask))
-            continue;
+    if (cursor >= object_count)
+        cursor %= object_count;
 
-        danger().add(*I);
+    u32 index = cursor;
+    const bool skip_stalker_items = add_items && !!m_stalker;
+    for (u32 i = 0; i < budget; ++i)
+    {
+        const T& object = objects[index];
+        if (!object.m_enabled)
+            goto advance_cursor;
+
+        if (m_stalker && !object.m_squad_mask.test(mask))
+            goto advance_cursor;
+
+        if (profile_enabled)
+        {
+            const u64 start_qpc = CPU::QPC();
+            danger().add(object);
+            npc_cpp_profile::add(ENpcCppProfileStage::StalkerMemoryCollectDangerAdd, CPU::QPC() - start_qpc);
+        }
+        else
+        {
+            danger().add(object);
+        }
 
         if (add_enemies)
         {
-            const CEntityAlive* entity_alive = smart_cast<const CEntityAlive*>((*I).m_object);
-            if (entity_alive && enemy().add(entity_alive))
-                continue;
+            const CEntityAlive* entity_alive = smart_cast<const CEntityAlive*>(object.m_object);
+            if (entity_alive)
+            {
+                bool added_enemy = false;
+                if (profile_enabled)
+                {
+                    const u64 start_qpc = CPU::QPC();
+                    added_enemy = enemy().add(entity_alive);
+                    npc_cpp_profile::add(ENpcCppProfileStage::StalkerMemoryCollectEnemyAdd, CPU::QPC() - start_qpc);
+                }
+                else
+                {
+                    added_enemy = enemy().add(entity_alive);
+                }
+
+                if (added_enemy)
+                    goto advance_cursor;
+            }
         }
 
-        const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>((*I).m_object);
-        if (m_stalker && stalker)
-            continue;
+        if (skip_stalker_items)
+        {
+            const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>(object.m_object);
+            if (stalker)
+                goto advance_cursor;
+        }
 
-        if ((*I).m_object)
-            item().add((*I).m_object);
+        if (add_items && object.m_object)
+        {
+            if (profile_enabled)
+            {
+                const u64 start_qpc = CPU::QPC();
+                item().add(object.m_object);
+                npc_cpp_profile::add(ENpcCppProfileStage::StalkerMemoryCollectItemAdd, CPU::QPC() - start_qpc);
+            }
+            else
+            {
+                item().add(object.m_object);
+            }
+        }
+
+advance_cursor:
+        ++index;
+        if (index == object_count)
+            index = 0;
     }
+
+    cursor = index;
+    add_profile_counter(collect_stage, total_start_qpc);
 }
 
 CMemoryInfo CMemoryManager::memory(const IGameObject* object) const

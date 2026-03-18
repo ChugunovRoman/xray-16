@@ -89,6 +89,11 @@ struct CEnemyFunction : public T
         P save = params;
         params.member() = params.enemy();
         params.member_item() = params.enemy_item();
+        if (!params.member())
+        {
+            params = save;
+            return 0.f;
+        }
         float value = T::ffGetValue();
         params = save;
         return (value);

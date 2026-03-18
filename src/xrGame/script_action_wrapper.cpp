@@ -11,6 +11,7 @@
 #include "script_game_object.h"
 #include "ai_space.h"
 #include "xrScriptEngine/script_engine.hpp"
+#include "npc_cpp_profile.h"
 
 void CScriptActionWrapper::setup(CScriptGameObject* object, CPropertyStorage* storage)
 {
@@ -22,9 +23,20 @@ void CScriptActionWrapper::setup_static(CScriptActionBase* action, CScriptGameOb
     action->CScriptActionBase::setup(object, storage);
 }
 
-void CScriptActionWrapper::initialize() { luabind::call_member<void>(this, "initialize"); }
+void CScriptActionWrapper::initialize()
+{
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptActionInitialize);
+    luabind::call_member<void>(this, "initialize");
+}
+
 void CScriptActionWrapper::initialize_static(CScriptActionBase* action) { action->CScriptActionBase::initialize(); }
-void CScriptActionWrapper::execute() { luabind::call_member<void>(this, "execute"); }
+
+void CScriptActionWrapper::execute()
+{
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptActionUpdate);
+    luabind::call_member<void>(this, "execute");
+}
+
 void CScriptActionWrapper::execute_static(CScriptActionBase* action) { action->CScriptActionBase::execute(); }
 void CScriptActionWrapper::finalize() { luabind::call_member<void>(this, "finalize"); }
 void CScriptActionWrapper::finalize_static(CScriptActionBase* action) { action->CScriptActionBase::finalize(); }

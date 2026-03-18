@@ -858,6 +858,8 @@ target_sources(xrGame PRIVATE
     NET_Queue.h
     NoGravityZone.cpp
     NoGravityZone.h
+    npc_cpp_profile.cpp
+    npc_cpp_profile.h
     object_actions.cpp
     object_actions.h
     object_actions_inline.h

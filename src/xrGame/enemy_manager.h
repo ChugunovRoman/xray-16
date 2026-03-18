@@ -22,6 +22,13 @@ public:
     typedef OBJECTS ENEMIES;
     typedef CScriptCallbackEx<bool> USEFULE_CALLBACK;
 
+    struct SUsefulCallbackCacheEntry
+    {
+        ALife::_OBJECT_ID enemy_id;
+        u32 timestamp;
+        bool result;
+    };
+
 private:
     CCustomMonster* m_object;
     CAI_Stalker* m_stalker;
@@ -31,6 +38,7 @@ private:
     u32 m_last_enemy_time;
     const CEntityAlive* m_last_enemy;
     USEFULE_CALLBACK m_useful_callback;
+    mutable xr_vector<SUsefulCallbackCacheEntry> m_useful_callback_cache;
     bool m_enable_enemy_change;
     CEntityAlive const* m_smart_cover_enemy;
 
@@ -44,6 +52,8 @@ private:
     bool change_from_wounded(const CEntityAlive* current, const CEntityAlive* previous) const;
     void remove_wounded();
     void try_change_enemy();
+    bool try_get_useful_callback_cache(ALife::_OBJECT_ID enemy_id, bool& result) const;
+    void store_useful_callback_cache(ALife::_OBJECT_ID enemy_id, bool result) const;
 
 protected:
     void on_enemy_change(const CEntityAlive* previous_enemy);
@@ -61,6 +71,10 @@ public:
     IC u32 last_enemy_time() const;
     IC const CEntityAlive* last_enemy() const;
     IC USEFULE_CALLBACK& useful_callback();
+    void set_useful_callback(const luabind::object& functor);
+    void set_useful_callback(const luabind::object& functor, const luabind::object& object);
+    void clear_useful_callback();
+    void clear_useful_callback_cache();
     void remove_links(IGameObject* object);
 
 public:

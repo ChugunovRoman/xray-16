@@ -69,25 +69,95 @@ struct CEnemyFiller
     }
 };
 
+IC xr_vector<ALife::_OBJECT_ID> combat_member_ids(const CAgentMemberManager::MEMBER_STORAGE& members)
+{
+    xr_vector<ALife::_OBJECT_ID> result;
+    result.reserve(members.size());
+
+    CAgentMemberManager::MEMBER_STORAGE::const_iterator I = members.begin();
+    CAgentMemberManager::MEMBER_STORAGE::const_iterator E = members.end();
+    for (; I != E; ++I)
+    {
+        if (!*I || !(*I)->m_object)
+            continue;
+
+        result.push_back((*I)->m_object->ID());
+    }
+
+    return result;
+}
+
+IC u32 combat_member_mask_index(squad_mask_type mask)
+{
+    VERIFY(mask);
+
+    u32 result = 0;
+    while (mask > squad_mask_type(1))
+    {
+        mask >>= 1;
+        ++result;
+    }
+
+    return result;
+}
+
+IC void build_combat_member_cache(CAgentMemberManager& member_manager, xr_vector<CMemberOrder*>& ordered_members,
+    xr_vector<CMemberOrder*>& members_by_mask_index)
+{
+    ordered_members.clear();
+    members_by_mask_index.clear();
+    members_by_mask_index.resize(member_manager.members().size(), 0);
+
+    const xr_vector<ALife::_OBJECT_ID> member_ids = combat_member_ids(member_manager.combat_members());
+    xr_vector<ALife::_OBJECT_ID>::const_iterator I = member_ids.begin();
+    xr_vector<ALife::_OBJECT_ID>::const_iterator E = member_ids.end();
+    for (; I != E; ++I)
+    {
+        CMemberOrder* member_order = member_manager.get_member(*I);
+        if (!member_order)
+            continue;
+
+        ordered_members.push_back(member_order);
+
+        const u32 mask_index = combat_member_mask_index(member_manager.mask(*I));
+        if (mask_index < members_by_mask_index.size())
+            members_by_mask_index[mask_index] = member_order;
+    }
+}
+
+IC CMemberOrder* combat_member_by_mask(const xr_vector<CMemberOrder*>& members_by_mask_index, squad_mask_type mask)
+{
+    if (!mask)
+        return 0;
+
+    const u32 mask_index = combat_member_mask_index(mask);
+    if (mask_index >= members_by_mask_index.size())
+        return 0;
+
+    return members_by_mask_index[mask_index];
+}
+
 void CAgentEnemyManager::fill_enemies()
 {
     m_enemies.clear();
 
     {
-        CAgentMemberManager::iterator I = object().member().combat_members().begin();
-        CAgentMemberManager::iterator E = object().member().combat_members().end();
+        const xr_vector<ALife::_OBJECT_ID> member_ids = combat_member_ids(object().member().combat_members());
+        xr_vector<ALife::_OBJECT_ID>::const_iterator I = member_ids.begin();
+        xr_vector<ALife::_OBJECT_ID>::const_iterator E = member_ids.end();
         for (; I != E; ++I)
         {
-            if (*I == nullptr || &(*I)->object() == nullptr)
+            CMemberOrder* member_order = object().member().get_member(*I);
+            if (!member_order)
                 continue;
 
-            const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>((*I)->m_object);
-
-            if (stalker == nullptr || stalker->NameObject.c_str() == nullptr)
+            const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>(member_order->m_object);
+            if (!stalker || !stalker->NameObject.c_str())
                 continue;
- 
-            (*I)->probability(1.f);
-            (*I)->object().memory().fill_enemies(CEnemyFiller(&m_enemies, object().member().mask(&(*I)->object())));
+
+            member_order->probability(1.f);
+            member_order->object().memory().fill_enemies(
+                CEnemyFiller(&m_enemies, object().member().mask(&member_order->object())));
         }
     }
 
@@ -154,8 +224,11 @@ void CAgentEnemyManager::fill_enemies()
 
 float CAgentEnemyManager::evaluate(const CEntityAlive* object0, const CEntityAlive* object1) const
 {
-    ai().ef_storage().non_alife().member_item() = 0;
-    ai().ef_storage().non_alife().enemy_item() = 0;
+    if (!object0 || !object1 || !object0->g_Alive() || !object1->g_Alive())
+        return 0.f;
+
+    ai().ef_storage().non_alife().clear();
+    ai().ef_storage().alife().clear();
     ai().ef_storage().non_alife().member() = object0;
     ai().ef_storage().non_alife().enemy() = object1;
     return (ai().ef_storage().m_pfVictoryProbability->ffGetValue() / 100.f);
@@ -182,11 +255,16 @@ void CAgentEnemyManager::compute_enemy_danger()
     for (; I != E; ++I)
     {
         float best = -1.f;
-        CAgentMemberManager::const_iterator i = object().member().combat_members().begin();
-        CAgentMemberManager::const_iterator e = object().member().combat_members().end();
+        const xr_vector<ALife::_OBJECT_ID> member_ids = combat_member_ids(object().member().combat_members());
+        xr_vector<ALife::_OBJECT_ID>::const_iterator i = member_ids.begin();
+        xr_vector<ALife::_OBJECT_ID>::const_iterator e = member_ids.end();
         for (; i != e; ++i)
         {
-            float value = evaluate((*I).m_object, &(*i)->object());
+            CMemberOrder* member_order = object().member().get_member(*i);
+            if (!member_order)
+                continue;
+
+            float value = evaluate((*I).m_object, &member_order->object());
             if (value > best)
                 best = value;
         }
@@ -246,17 +324,25 @@ void CAgentEnemyManager::assign_enemies()
 
 void CAgentEnemyManager::permutate_enemies()
 {
+    xr_vector<CMemberOrder*> ordered_members;
+    xr_vector<CMemberOrder*> members_by_mask_index;
+    build_combat_member_cache(object().member(), ordered_members, members_by_mask_index);
+
     // filling member enemies
-    CAgentMemberManager::iterator I = object().member().combat_members().begin();
-    CAgentMemberManager::iterator E = object().member().combat_members().end();
+    xr_vector<CMemberOrder*>::iterator I = ordered_members.begin();
+    xr_vector<CMemberOrder*>::iterator E = ordered_members.end();
     for (; I != E; ++I)
     {
+        CMemberOrder* member_order = *I;
+        if (!member_order)
+            continue;
+
         // clear enemies
-        (*I)->enemies().clear();
+        member_order->enemies().clear();
         // setup procesed flag
-        (*I)->processed(false);
+        member_order->processed(false);
         // get member squad mask
-        squad_mask_type member_mask = object().member().mask(&(*I)->object());
+        squad_mask_type member_mask = object().member().mask(&member_order->object());
         // setup if player has enemy
         bool enemy_selected = false;
         // iterate on enemies
@@ -265,11 +351,11 @@ void CAgentEnemyManager::permutate_enemies()
         for (; i != e; ++i)
         {
             if ((*i).m_mask.is(member_mask))
-                (*I)->enemies().push_back(u32(i - b));
+                member_order->enemies().push_back(u32(i - b));
 
             if ((*i).m_distribute_mask.is(member_mask))
             {
-                (*I)->selected_enemy(u32(i - b));
+                member_order->selected_enemy(u32(i - b));
                 enemy_selected = true;
             }
         }
@@ -278,31 +364,38 @@ void CAgentEnemyManager::permutate_enemies()
             continue;
 
         // otherwise temporary make the member processed
-        (*I)->processed(true);
+        member_order->processed(true);
     }
 
     // perform permutations
     bool changed;
+    u32 permutation_pass_count = 0;
+    const u32 max_permutation_pass_count = _max<u32>(1, u32(ordered_members.size() * m_enemies.size()));
     do
     {
         changed = false;
-        CAgentMemberManager::iterator I = object().member().combat_members().begin();
-        CAgentMemberManager::iterator E = object().member().combat_members().end();
+        xr_vector<CMemberOrder*>::iterator I = ordered_members.begin();
+        xr_vector<CMemberOrder*>::iterator E = ordered_members.end();
         for (; I != E; ++I)
         {
-            // if member is processed the continue;
-            if ((*I)->processed())
+            CMemberOrder* member_order = *I;
+            if (!member_order)
                 continue;
 
-            float best = (*I)->object().Position().distance_to(m_enemies[(*I)->selected_enemy()].m_object->Position());
+            // if member is processed the continue;
+            if (member_order->processed())
+                continue;
+
+            float best =
+                member_order->object().Position().distance_to_sqr(m_enemies[member_order->selected_enemy()].m_object->Position());
             bool found = false;
-            xr_vector<u32>::const_iterator i = (*I)->enemies().begin();
-            xr_vector<u32>::const_iterator e = (*I)->enemies().end();
+            xr_vector<u32>::const_iterator i = member_order->enemies().begin();
+            xr_vector<u32>::const_iterator e = member_order->enemies().end();
             for (; i != e; ++i)
             {
-                if ((*I)->selected_enemy() == *i)
+                if (member_order->selected_enemy() == *i)
                     continue;
-                float my_distance = (*I)->object().Position().distance_to(m_enemies[*i].m_object->Position());
+                float my_distance = member_order->object().Position().distance_to_sqr(m_enemies[*i].m_object->Position());
                 if (my_distance < best)
                 {
                     // check if we can exchange enemies
@@ -311,26 +404,29 @@ void CAgentEnemyManager::permutate_enemies()
                     for (; J; J &= J - 1)
                     {
                         K = (J & (J - 1)) ^ J;
-                        CAgentMemberManager::iterator j = object().member().member(K);
+                        CMemberOrder* enemy_owner = combat_member_by_mask(members_by_mask_index, K);
+                        if (!enemy_owner)
+                            continue;
+
                         xr_vector<u32>::iterator ii =
-                            std::find((*j)->enemies().begin(), (*j)->enemies().end(), (*I)->selected_enemy());
+                            std::find(enemy_owner->enemies().begin(), enemy_owner->enemies().end(), member_order->selected_enemy());
                         // check if member can my current enemy
-                        if (ii == (*j)->enemies().end())
+                        if (ii == enemy_owner->enemies().end())
                             continue;
 
                         // check if I'm closer to the enemy
                         float member_distance =
-                            (*j)->object().Position().distance_to(m_enemies[*i].m_object->Position());
+                            enemy_owner->object().Position().distance_to_sqr(m_enemies[*i].m_object->Position());
                         if (member_distance <= my_distance)
                             continue;
 
                         // check if our effectiveness is near the same
-                        float my_to_his = evaluate(&(*I)->object(), m_enemies[(*j)->selected_enemy()].m_object);
-                        float his_to_my = evaluate(&(*j)->object(), m_enemies[(*I)->selected_enemy()].m_object);
-                        if (!fsimilar(my_to_his, (*j)->probability()) || !fsimilar(his_to_my, (*I)->probability()))
+                        float my_to_his = evaluate(&member_order->object(), m_enemies[enemy_owner->selected_enemy()].m_object);
+                        float his_to_my = evaluate(&enemy_owner->object(), m_enemies[member_order->selected_enemy()].m_object);
+                        if (!fsimilar(my_to_his, enemy_owner->probability()) || !fsimilar(his_to_my, member_order->probability()))
                             continue;
 
-                        exchange_enemies(**I, **j);
+                        exchange_enemies(*member_order, *enemy_owner);
 
                         found = true;
                         best = my_distance;
@@ -344,38 +440,43 @@ void CAgentEnemyManager::permutate_enemies()
 
             if (!found)
             {
-                (*I)->processed(true);
+                member_order->processed(true);
                 continue;
             }
 
             changed = true;
         }
-    } while (changed);
+        ++permutation_pass_count;
+    } while (changed && (permutation_pass_count < max_permutation_pass_count));
 
     VERIFY(!m_enemies.empty());
     if (!m_only_wounded_left)
     {
-        CAgentMemberManager::iterator I = object().member().combat_members().begin();
-        CAgentMemberManager::iterator E = object().member().combat_members().end();
+        xr_vector<CMemberOrder*>::iterator I = ordered_members.begin();
+        xr_vector<CMemberOrder*>::iterator E = ordered_members.end();
         for (; I != E; ++I)
         {
-            CVisualMemoryManager& visual = (*I)->object().memory().visual();
-            CHitMemoryManager& hit = (*I)->object().memory().hit();
+            CMemberOrder* member_order = *I;
+            if (!member_order)
+                continue;
+
+            CVisualMemoryManager& visual = member_order->object().memory().visual();
+            CHitMemoryManager& hit = member_order->object().memory().hit();
+            const squad_mask_type member_mask = object().member().mask(&member_order->object());
             ENEMIES::iterator i = m_enemies.begin();
             ENEMIES::iterator e = m_enemies.end();
             for (; i != e; ++i)
             {
                 if (visual.visible_now((*i).m_object))
                 {
-                    (*i).m_distribute_mask.assign(
-                        (*i).m_distribute_mask.get() | object().member().mask(&(*I)->object()));
+                    (*i).m_distribute_mask.assign((*i).m_distribute_mask.get() | member_mask);
                     continue;
                 }
 
                 if (hit.last_hit_object_id() != (*i).m_object->ID())
                     continue;
 
-                (*i).m_distribute_mask.assign((*i).m_distribute_mask.get() | object().member().mask(&(*I)->object()));
+                (*i).m_distribute_mask.assign((*i).m_distribute_mask.get() | member_mask);
             }
         }
     }
@@ -404,12 +505,19 @@ void CAgentEnemyManager::assign_enemy_masks()
     {
         ENEMIES::iterator I = m_enemies.begin();
         ENEMIES::iterator E = m_enemies.end();
+        const xr_vector<ALife::_OBJECT_ID> member_ids = combat_member_ids(object().member().combat_members());
         for (; I != E; ++I)
         {
-            CAgentMemberManager::MEMBER_STORAGE::const_iterator i = object().member().combat_members().begin();
-            CAgentMemberManager::MEMBER_STORAGE::const_iterator e = object().member().combat_members().end();
+            xr_vector<ALife::_OBJECT_ID>::const_iterator i = member_ids.begin();
+            xr_vector<ALife::_OBJECT_ID>::const_iterator e = member_ids.end();
             for (; i != e; ++i)
-                (*i)->object().memory().make_object_visible_somewhen((*I).m_object);
+            {
+                CMemberOrder* member_order = object().member().get_member(*i);
+                if (!member_order)
+                    continue;
+
+                member_order->object().memory().make_object_visible_somewhen((*I).m_object);
+            }
         }
     }
 

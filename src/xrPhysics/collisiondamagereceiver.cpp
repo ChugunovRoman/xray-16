@@ -19,18 +19,25 @@ void DamageReceiverCollisionCallback(bool& do_colide, bool bo1, dContact& c, SGa
     SGameMtl* material_damager = bo1 ? material_2 : material_1;
     VERIFY(ud_self);
     IPhysicsShellHolder* o_self = ud_self->ph_ref_object;
+    // При выходе из уровня net_Destroy() вызывает SetPhysicsRefObject(NULL) до Deactivate(); коллбэк коллизий
+    // может сработать с уже обнулённым ph_ref_object — не обращаем контакт.
+    if (!o_self)
+        return;
     IPhysicsShellHolder* o_damager = NULL;
     if (ud_damager)
         o_damager = ud_damager->ph_ref_object;
     u16 source_id = o_damager ? o_damager->ObjectID() : u16(-1);
 
     // CPHCollisionDamageReceiver	*dr	= static_cast<CPhysicsShellHolder*>( o_self )->PHCollisionDamageReceiver();
-    ICollisionDamageReceiver* dr = (o_self)->ObjectPhCollisionDamageReceiver();
+    ICollisionDamageReceiver* dr = o_self->ObjectPhCollisionDamageReceiver();
     VERIFY2(dr, "wrong callback");
 
     float damager_material_factor = material_damager->fBounceDamageFactor;
 
-    if (ud_damager && ud_damager->ph_object && ud_damager->ph_object->CastType() == CPHObject::tpCharacter)
+    // BUGFIX: o_damager может быть NULL если SetPhysicsRefObject(NULL) вызван до Deactivate()
+    // (например при CPHSimpleCharacter::Destroy() во время CPHShell::Deactivate → StepTouch).
+    // ph_object при этом ещё жив, поэтому старая проверка не защищала от краша.
+    if (o_damager && ud_damager && ud_damager->ph_object && ud_damager->ph_object->CastType() == CPHObject::tpCharacter)
         o_damager->BonceDamagerCallback(damager_material_factor);
 
     // CCharacterPhysicsSupport* phs=static_cast<CPhysicsShellHolder*>(o_damager)->character_physics_support();

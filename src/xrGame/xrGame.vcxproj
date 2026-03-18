@@ -2487,6 +2487,7 @@
     <ClCompile Include="mp_config_sections.cpp" />
     <ClCompile Include="Needles.cpp" />
     <ClCompile Include="NoGravityZone.cpp" />
+    <ClCompile Include="npc_cpp_profile.cpp" />
     <ClCompile Include="object_actions.cpp" />
     <ClCompile Include="object_handler.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>

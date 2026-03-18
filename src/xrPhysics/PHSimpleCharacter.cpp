@@ -378,6 +378,9 @@ void CPHSimpleCharacter::Destroy()
 {
     if (!b_exist)
         return;
+
+    SetPhysicsRefObject(NULL);
+
     b_exist = false;
     R_ASSERT2(!ph_world->Processing(),
         "can not deactivate physics character shell during physics processing!!!"); // if(ph_world)
@@ -2029,4 +2032,11 @@ void CPHSimpleCharacter::NetRelcase(IPhysicsShellHolder* O)
 {
     inherited::NetRelcase(O);
     m_elevator_state.NetRelcase(O);
+
+    if (O && m_phys_ref_object == O)
+    {
+        m_collision_damage_info.m_hit_callback = NULL;
+        m_collision_damage_info.m_obj_id = u16(-1);
+        SetPhysicsRefObject(NULL);
+    }
 }

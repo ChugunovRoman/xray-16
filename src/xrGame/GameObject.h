@@ -100,6 +100,9 @@ private:
 
 protected:
     CScriptBinder scriptBinder;
+    // Anti-synchronization: script binder can cause large luabind_update spikes when many objects
+    // run in the same frame. We throttle binder per-object using a next-call timestamp.
+    u32 m_next_script_binder_update_time{0};
     bool m_bObjectRemoved;
     CInifile* m_ini_file;
     bool m_client_updated{};

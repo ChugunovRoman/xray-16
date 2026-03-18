@@ -26,6 +26,7 @@ private:
     collide::rq_results RQR;
     xr_vector<ISpatial*> r_spatial;
     IGameObject const* m_owner;
+    u32 m_trace_cursor{0};
 
     void o_new(IGameObject* E);
     void o_delete(IGameObject* E);

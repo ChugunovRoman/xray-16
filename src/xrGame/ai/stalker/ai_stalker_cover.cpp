@@ -242,7 +242,9 @@ const CCoverPoint* CAI_Stalker::best_cover(const Fvector& position_to_cover_from
 
     if (m_best_cover_actual)
     {
-        agent_manager().member().member(this).cover(m_best_cover);
+        CMemberOrder* member_order = agent_manager().member().get_member(ID());
+        if (member_order)
+            member_order->cover(m_best_cover);
         return (m_best_cover);
     }
 
@@ -259,7 +261,9 @@ const CCoverPoint* CAI_Stalker::best_cover(const Fvector& position_to_cover_from
 
     m_best_cover_value = m_best_cover ? best_cover_value(position_to_cover_from) : flt_max;
 
-    agent_manager().member().member(this).cover(m_best_cover);
+    CMemberOrder* member_order = agent_manager().member().get_member(ID());
+    if (member_order)
+        member_order->cover(m_best_cover);
 
     return (m_best_cover);
 }

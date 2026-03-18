@@ -73,6 +73,8 @@ public:
 
     u32 eye_pp_stage;
     u32 eye_pp_timestamp;
+    u32 m_next_visibility_update_time{0};
+    u32 m_visibility_update_interval{0};
     Fvector m_tEyeShift;
     float m_fEyeShiftYaw;
     BOOL NET_WasExtrapolating;

@@ -25,6 +25,8 @@ class CALifeUpdateManager : public CALifeSwitchManager,
 {
 private:
     bool m_first_time;
+    u32 m_position_update_interval_ms;
+    mutable u32 m_last_position_update_time;
 
 protected:
     u64 m_max_process_time;
@@ -34,6 +36,8 @@ protected:
 
 public:
     void update();
+    /** Call from Level every frame (or at interval). 0 = every call, >0 = throttle ms. */
+    void update_positions_only() const;
 
 protected:
     void new_game(LPCSTR save_name);

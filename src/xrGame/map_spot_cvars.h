@@ -1,0 +1,11 @@
+////////////////////////////////////////////////////////////////////////////
+//	Module 		: map_spot_cvars.h
+//	Description : Console variables for map spot display (smooth blending)
+////////////////////////////////////////////////////////////////////////////
+
+#pragma once
+
+extern Flags32 g_map_spot_config;
+extern float ps_map_spot_smooth_speed;
+
+#define MAP_SPOT_SMOOTH (1 << 0)

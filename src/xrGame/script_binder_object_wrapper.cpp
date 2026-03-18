@@ -10,6 +10,8 @@
 #include "script_binder_object_wrapper.h"
 #include "script_game_object.h"
 #include "xrServer_Objects_ALife.h"
+#include "xrEngine/profiler.h"
+#include "npc_cpp_profile.h"
 
 CScriptBinderObjectWrapper::CScriptBinderObjectWrapper(CScriptGameObject* object) : CScriptBinderObject(object) {}
 CScriptBinderObjectWrapper::~CScriptBinderObjectWrapper() {}
@@ -59,7 +61,10 @@ void CScriptBinderObjectWrapper::net_Export_static(CScriptBinderObject* script_b
 
 void CScriptBinderObjectWrapper::shedule_Update(u32 time_delta)
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptBinderLuabindUpdate);
+    START_PROFILE("script_binder/luabind_update")
     luabind::call_member<void>(this, "update", time_delta);
+    STOP_PROFILE
 }
 
 void CScriptBinderObjectWrapper::shedule_Update_static(CScriptBinderObject* script_binder_object, u32 time_delta)

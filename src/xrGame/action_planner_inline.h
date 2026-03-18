@@ -90,7 +90,17 @@ void CPlanner::update()
 
 	if (this->solution().empty() || this->solution().size() == 0)
     {
-        Msg("Solution array is empty! m_object=[%s] solution().empty()=[%d], size=[%d] initialized=[%d] m_current_action_id=[%d]", m_object->cName().c_str(), this->solution().empty(), this->solution().size(), initialized(), m_current_action_id);
+        static u32 s_last_empty_solution_log = 0;
+        if (Device.dwTimeGlobal - s_last_empty_solution_log >= 1000) {
+            s_last_empty_solution_log = Device.dwTimeGlobal;
+            Msg("Solution array is empty! m_object=[%s] solution().empty()=[%d], size=[%d] initialized=[%d] m_current_action_id=[%d]", m_object->cName().c_str(), this->solution().empty(), this->solution().size(), initialized(), m_current_action_id);
+        }
+        if (initialized())
+        {
+            current_action().finalize();
+            m_initialized = false;
+            m_current_action_id = _action_id_type(-1);
+        }
 		return;
     }
 

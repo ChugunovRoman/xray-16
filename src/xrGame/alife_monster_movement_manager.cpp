@@ -56,5 +56,18 @@ void CALifeMonsterMovementManager::update()
     };
 }
 
+void CALifeMonsterMovementManager::update_position()
+{
+    switch (path_type())
+    {
+    case MovementManager::ePathTypeGamePath:
+    case MovementManager::ePathTypePatrolPath:
+        detail().update_position();
+        break;
+    default:
+        break;
+    };
+}
+
 void CALifeMonsterMovementManager::on_switch_online() { detail().on_switch_online(); }
 void CALifeMonsterMovementManager::on_switch_offline() { detail().on_switch_offline(); }

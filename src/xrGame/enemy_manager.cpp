@@ -26,10 +26,13 @@
 #include "movement_manager.h"
 #include "agent_manager.h"
 #include "agent_enemy_manager.h"
+#include "npc_cpp_profile.h"
 
 static const u32 ENEMY_INERTIA_TIME_TO_SOMEBODY = 3000;
 static const u32 ENEMY_INERTIA_TIME_TO_ACTOR = 0;
 static const u32 ENEMY_INERTIA_TIME_FROM_ACTOR = 6000;
+static const u32 ENEMY_USEFUL_CALLBACK_CACHE_TTL_MS = 250;
+static const size_t ENEMY_USEFUL_CALLBACK_CACHE_SIZE = 32;
 
 #ifdef _DEBUG
 bool g_enemy_manager_second_update = false;
@@ -49,34 +52,126 @@ CEnemyManager::CEnemyManager(CCustomMonster* object)
     m_stalker = smart_cast<CAI_Stalker*>(object);
     m_enable_enemy_change = true;
     m_smart_cover_enemy = 0;
+    m_useful_callback_cache.reserve(ENEMY_USEFUL_CALLBACK_CACHE_SIZE);
+}
+
+bool CEnemyManager::try_get_useful_callback_cache(ALife::_OBJECT_ID enemy_id, bool& result) const
+{
+    const u32 now = Device.dwTimeGlobal;
+    for (const SUsefulCallbackCacheEntry& entry : m_useful_callback_cache)
+    {
+        if (entry.enemy_id != enemy_id)
+            continue;
+
+        if ((now - entry.timestamp) > ENEMY_USEFUL_CALLBACK_CACHE_TTL_MS)
+            return false;
+
+        result = entry.result;
+        return true;
+    }
+
+    return false;
+}
+
+void CEnemyManager::store_useful_callback_cache(ALife::_OBJECT_ID enemy_id, bool result) const
+{
+    const u32 now = Device.dwTimeGlobal;
+    for (SUsefulCallbackCacheEntry& entry : m_useful_callback_cache)
+    {
+        if (entry.enemy_id != enemy_id)
+            continue;
+
+        entry.timestamp = now;
+        entry.result = result;
+        return;
+    }
+
+    if (m_useful_callback_cache.size() >= ENEMY_USEFUL_CALLBACK_CACHE_SIZE)
+        m_useful_callback_cache.erase(m_useful_callback_cache.begin());
+
+    m_useful_callback_cache.push_back({enemy_id, now, result});
+}
+
+void CEnemyManager::clear_useful_callback_cache()
+{
+    m_useful_callback_cache.clear();
+}
+
+void CEnemyManager::set_useful_callback(const luabind::object& functor)
+{
+    m_useful_callback.set(functor);
+    clear_useful_callback_cache();
+}
+
+void CEnemyManager::set_useful_callback(const luabind::object& functor, const luabind::object& object)
+{
+    m_useful_callback.set(functor, object);
+    clear_useful_callback_cache();
+}
+
+void CEnemyManager::clear_useful_callback()
+{
+    m_useful_callback.clear();
+    clear_useful_callback_cache();
 }
 
 bool CEnemyManager::is_useful(const CEntityAlive* entity_alive) const { return (m_object->useful(this, entity_alive)); }
 bool CEnemyManager::useful(const CEntityAlive* entity_alive) const
 {
-    if (!entity_alive->g_Alive())
-        return (false);
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyUsefulCheck);
 
-    if ((entity_alive->spatial.type & STYPE_VISIBLEFORAI) != STYPE_VISIBLEFORAI)
-        return (false);
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyUsefulAliveCheck);
+        if (!entity_alive->g_Alive())
+            return (false);
+    }
 
-    if ((m_object->ID() == entity_alive->ID()) || !m_object->is_relation_enemy(entity_alive))
-        return (false);
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyUsefulSpatialCheck);
+        if ((entity_alive->spatial.type & STYPE_VISIBLEFORAI) != STYPE_VISIBLEFORAI)
+            return (false);
+    }
 
-    if (!ai().get_level_graph() || !ai().level_graph().valid_vertex_id(entity_alive->ai_location().level_vertex_id()))
-        return (false);
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyUsefulRelationCheck);
+        if ((m_object->ID() == entity_alive->ID()) || !m_object->is_relation_enemy(entity_alive))
+            return (false);
+    }
 
-    if (m_object->human_being() && !entity_alive->human_being() && !expedient(entity_alive) &&
-        (evaluate(entity_alive) >= m_ignore_monster_threshold) &&
-        (m_object->Position().distance_to(entity_alive->Position()) >= m_max_ignore_distance))
-        return (false);
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyUsefulVertexCheck);
+        if (!ai().get_level_graph() || !ai().level_graph().valid_vertex_id(entity_alive->ai_location().level_vertex_id()))
+            return (false);
+    }
 
-    return (m_useful_callback ? m_useful_callback(m_object->lua_game_object(), entity_alive->lua_game_object()) : true);
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyUsefulMonsterFilter);
+        if (m_object->human_being() && !entity_alive->human_being() && !expedient(entity_alive) &&
+            (evaluate(entity_alive) >= m_ignore_monster_threshold) &&
+            (m_object->Position().distance_to(entity_alive->Position()) >= m_max_ignore_distance))
+            return (false);
+    }
+
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyUsefulCallback);
+        if (!m_useful_callback)
+            return true;
+
+        bool cached_result = false;
+        if (try_get_useful_callback_cache(entity_alive->ID(), cached_result))
+            return cached_result;
+
+        const bool callback_result = m_useful_callback(m_object->lua_game_object(), entity_alive->lua_game_object());
+        store_useful_callback_cache(entity_alive->ID(), callback_result);
+        return callback_result;
+    }
 }
 
 float CEnemyManager::do_evaluate(const CEntityAlive* object) const { return (m_object->evaluate(this, object)); }
 float CEnemyManager::evaluate(const CEntityAlive* object) const
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyEvaluate);
+
     //	Msg						("[%6d] enemy manager %s evaluates
     //%s",Device.dwTimeGlobal,*m_object->cName(),*object->cName());
 
@@ -138,6 +233,8 @@ float CEnemyManager::evaluate(const CEntityAlive* object) const
 
 bool CEnemyManager::expedient(const CEntityAlive* object) const
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyExpedient);
+
     ai().ef_storage().non_alife().member() = m_object;
     VERIFY(ai().ef_storage().non_alife().member());
     ai().ef_storage().non_alife().enemy() = object;
@@ -158,6 +255,7 @@ void CEnemyManager::reload(LPCSTR section)
     m_last_enemy = 0;
     m_last_enemy_change = 0;
     m_useful_callback.clear();
+    clear_useful_callback_cache();
     VERIFY(m_ready_to_save);
 }
 
@@ -185,6 +283,8 @@ void CEnemyManager::remove_links(IGameObject* object)
 
     if (m_selected == object)
         m_selected = 0;
+
+    clear_useful_callback_cache();
 }
 
 void CEnemyManager::ignore_monster_threshold(const float& ignore_monster_threshold)
@@ -242,6 +342,8 @@ IC bool CEnemyManager::enemy_inertia(const CEntityAlive* previous_enemy) const
 
 void CEnemyManager::on_enemy_change(const CEntityAlive* previous_enemy)
 {
+    clear_useful_callback_cache();
+
     VERIFY(previous_enemy);
     VERIFY(selected());
 
@@ -360,14 +462,29 @@ bool CEnemyManager::need_update(const bool& only_wounded) const
 
 void CEnemyManager::try_change_enemy()
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyTryChange);
+
     const CEntityAlive* previous_selected = selected();
 
     bool only_wounded;
-    process_wounded(only_wounded);
-    if (!need_update(only_wounded))
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyProcessWounded);
+        process_wounded(only_wounded);
+    }
+
+    bool should_update = false;
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyNeedUpdate);
+        should_update = need_update(only_wounded);
+    }
+
+    if (!should_update)
         return;
 
-    inherited::update();
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyInertedUpdate);
+        inherited::update();
+    }
 
     if (selected() != previous_selected)
     {

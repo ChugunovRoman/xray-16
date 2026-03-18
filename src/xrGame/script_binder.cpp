@@ -15,6 +15,8 @@
 #include "script_game_object.h"
 #include "GameObject.h"
 #include "Level.h"
+#include "xrEngine/profiler.h"
+#include "npc_cpp_profile.h"
 
 // comment next string when commiting
 //#define DBG_DISABLE_SCRIPTS
@@ -150,11 +152,14 @@ void CScriptBinder::set_object(CScriptBinderObject* object)
 
 void CScriptBinder::shedule_Update(u32 time_delta)
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptBinderUpdate);
     if (m_object)
     {
         try
         {
+            START_PROFILE("script_binder/update")
             m_object->shedule_Update(time_delta);
+            STOP_PROFILE
         }
         catch (...)
         {

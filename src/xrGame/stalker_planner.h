@@ -25,6 +25,10 @@ protected:
 
 private:
     bool m_affect_cover;
+    u32 m_next_solve_update_time{0};
+    u32 m_solve_update_interval{0};
+    u32 m_next_actuality_check_time{0};
+    u32 m_actuality_check_interval{0};
 
 protected:
     void add_evaluators();

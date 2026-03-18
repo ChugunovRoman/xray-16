@@ -57,6 +57,7 @@ public:
 
 public:
     void update(const bool forced = false);
+    void update_position();
     bool perform_attack();
     ALife::EMeetActionType action_type(
         CSE_ALifeSchedulable* tpALifeSchedulable, const int& iGroupIndex, const bool& bMutualDetection);

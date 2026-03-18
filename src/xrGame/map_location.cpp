@@ -2,6 +2,7 @@
 #include "map_location.h"
 #include "map_spot.h"
 #include "map_manager.h"
+#include "map_spot_cvars.h"
 
 #include "Level.h"
 #include "xrEngine/xr_object.h"
@@ -233,6 +234,8 @@ void CMapLocation::CalcPosition()
     {
         m_position_global = Level().CurrentEntity()->Position();
         m_cached.m_Position.set(m_position_global.x, m_position_global.z);
+        m_display_position = m_cached.m_Position;
+        m_display_position_valid = true;
         return;
     }
 
@@ -243,13 +246,41 @@ void CMapLocation::CalcPosition()
         {
             m_position_global = m_owner_se_object->draw_level_position();
             m_cached.m_Position.set(m_position_global.x, m_position_global.z);
+            if (!g_map_spot_config.test(MAP_SPOT_SMOOTH))
+            {
+                m_display_position = m_cached.m_Position;
+                m_display_position_valid = true;
+            }
+            else
+            {
+                if (!m_display_position_valid || m_display_position.x > 9999.f)
+                {
+                    m_display_position = m_cached.m_Position;
+                    m_display_position_valid = true;
+                }
+                else
+                {
+                    float t = (Device.dwTimeDelta / 1000.f) * ps_map_spot_smooth_speed;
+                    if (t > 1.f)
+                        t = 1.f;
+                    m_display_position.x += (m_cached.m_Position.x - m_display_position.x) * t;
+                    m_display_position.y += (m_cached.m_Position.y - m_display_position.y) * t;
+                }
+            }
         }
     }
     else
     {
         m_position_global = pObject->Position();
         m_cached.m_Position.set(m_position_global.x, m_position_global.z);
+        m_display_position = m_cached.m_Position;
+        m_display_position_valid = true;
     }
+}
+
+const Fvector2& CMapLocation::GetDisplayPosition() const
+{
+    return m_display_position_valid ? m_display_position : m_cached.m_Position;
 }
 
 const Fvector2& CMapLocation::CalcDirection()
@@ -384,8 +415,8 @@ void CMapLocation::UpdateSpot(CUICustomMap* map, CMapSpot* sp)
             }
         }
 
-        // update spot position
-        Fvector2 position = GetPosition();
+        // update spot position (smoothed for offline objects)
+        Fvector2 position = GetDisplayPosition();
 
         m_position_on_map =
             map->ConvertRealToLocal(position, (map->Heading()) ? false : true); // for visibility calculating

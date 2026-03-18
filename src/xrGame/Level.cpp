@@ -11,6 +11,7 @@
 #include "game_cl_base.h"
 #include "entity_alive.h"
 #include "ai_space.h"
+#include "alife_simulator.h"
 #include "ai_debug.h"
 #include "ShootingObject.h"
 #include "GametaskManager.h"
@@ -452,6 +453,8 @@ void CLevel::OnFrame()
         make_NetCorrectionPrediction();
     if (!GEnv.isDedicatedServer)
     {
+        if (IsGameTypeSingle() && ai().get_alife())
+            ai().alife().update_positions_only();
         if (g_mt_config.test(mtMap))
         {
             R_ASSERT(m_map_manager);

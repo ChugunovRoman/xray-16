@@ -2,6 +2,7 @@
 #include "UIItemInfo.h"
 #include "xrUICore/Static/UIStatic.h"
 #include "UIXmlInit.h"
+#include "xrCore/xrCore.h"
 #include "xrUICore/ProgressBar/UIProgressBar.h"
 #include "xrUICore/ScrollView/UIScrollView.h"
 #include "xrUICore/Windows/UIFrameWindow.h"
@@ -192,7 +193,15 @@ void CUIItemInfo::InitItem(CUICellItem* pCellItem, CInventoryItem* pCompareItem,
     string256 str;
     if (UIName)
     {
-        UIName->SetText(pInvItem->NameItem());
+        shared_str nameText = pInvItem->NameItem();
+        if (strstr(Core.Params, "-dbg") != nullptr)
+        {
+            string256 buf;
+            xr_sprintf(buf, "%s (%s)", nameText.c_str(), pInvItem->m_section_id.c_str());
+            UIName->SetText(buf);
+        }
+        else
+            UIName->SetText(nameText.c_str());
         if (!soc_style)
             UIName->AdjustHeightToText();
         pos.y = UIName->GetWndPos().y + UIName->GetHeight() + 4.0f;

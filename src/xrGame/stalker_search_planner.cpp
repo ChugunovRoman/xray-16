@@ -15,6 +15,7 @@
 #include "script_game_object_impl.h"
 #include "agent_manager.h"
 #include "agent_member_manager.h"
+#include "member_order.h"
 #include "stalker_property_evaluators.h"
 #include "stalker_search_actions.h"
 
@@ -36,7 +37,8 @@ void CStalkerSearchPlanner::initialize()
 {
     inherited::initialize();
 
-    object().agent_manager().member().member(&object()).cover(0);
+    if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
+        member_order->cover(0);
 
     CScriptActionPlanner::m_storage.set_property(eWorldPropertyEnemyLocationReached, false);
     CScriptActionPlanner::m_storage.set_property(eWorldPropertyAmbushLocationReached, false);

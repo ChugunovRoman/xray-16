@@ -20,6 +20,7 @@
 #include "physics_shell_animated.h"
 #include "PHCollisionDamageReceiver.h"
 #include "xrEngine/IPhysicsShell.h"
+#include "npc_cpp_profile.h"
 #ifdef DEBUG
 #include "xrEngine/ObjectDump.h"
 #endif
@@ -342,9 +343,13 @@ void CPhysicsShellHolder::OnChangeVisual()
 
 void CPhysicsShellHolder::UpdateCL()
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::PhysicsShellHolderUpdateCL);
     inherited::UpdateCL();
     //обновить присоединенные партиклы
-    UpdateParticles();
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::PhysicsShellHolderUpdateParticles);
+        UpdateParticles();
+    }
 }
 float CPhysicsShellHolder::EffectiveGravity() { return physics_world()->Gravity(); }
 void CPhysicsShellHolder::save(NET_Packet& output_packet)

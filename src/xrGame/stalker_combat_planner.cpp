@@ -97,6 +97,35 @@ void CStalkerCombatPlanner::update()
 {
     inherited::update();
 
+    if (this->solution().empty())
+    {
+        CScriptActionPlanner::m_storage.set_property(eWorldPropertyInCover, false);
+        CScriptActionPlanner::m_storage.set_property(eWorldPropertyLookedOut, false);
+        CScriptActionPlanner::m_storage.set_property(eWorldPropertyPositionHolded, false);
+        CScriptActionPlanner::m_storage.set_property(eWorldPropertyEnemyDetoured, false);
+        CScriptActionPlanner::m_storage.set_property(eWorldPropertyUseSuddenness, false);
+        CScriptActionPlanner::m_storage.set_property(eWorldPropertyStartedToThrowGrenade, false);
+
+        CAgentManager* const agent_mgr =
+            Level().seniority_holder().team(object().g_Team()).squad(object().g_Squad()).group(object().g_Group()).get_agent_manager();
+        if (agent_mgr)
+        {
+            CMemberOrder* member_order = agent_mgr->member().get_member(object().ID());
+            if (member_order)
+                member_order->cover(0);
+        }
+
+        if (object().movement().in_smart_cover() || object().movement().entering_smart_cover_with_animation())
+        {
+            object().movement().target_default(true);
+            object().movement().target_idle();
+            object().movement().cleanup_after_animation_selector();
+        }
+
+        object().movement().clear_path();
+        return;
+    }
+
     object().react_on_grenades();
     object().react_on_member_death();
 
@@ -128,7 +157,8 @@ void CStalkerCombatPlanner::initialize()
 
     CScriptActionPlanner::m_storage.set_property(eWorldPropertyStartedToThrowGrenade, false);
 
-    object().agent_manager().member().member(m_object).cover(0);
+    if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
+        member_order->cover(0);
     // this is fake, should be revisited
     // we must clear path, since it can be built using eMentalStateFree velocities
     // and our new path may not be ready

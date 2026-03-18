@@ -58,5 +58,7 @@ void CALifeOnlineOfflineGroupBrain::update()
     movement().update();
 }
 
+void CALifeOnlineOfflineGroupBrain::update_position() { movement().update_position(); }
+
 void CALifeOnlineOfflineGroupBrain::on_switch_online() { movement().on_switch_online(); }
 void CALifeOnlineOfflineGroupBrain::on_switch_offline() { movement().on_switch_offline(); }

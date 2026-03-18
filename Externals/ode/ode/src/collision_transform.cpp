@@ -37,6 +37,17 @@ geom transform
 #pragma warning(disable:4291)  // for VC++, no complaints about "no matching operator delete found"
 #endif
 
+static unsigned int& ode_transform_collide_depth()
+{
+  static unsigned int depth = 0;
+  return depth;
+}
+
+struct ODETransformCollideDepthScope {
+  ODETransformCollideDepthScope() { ++ode_transform_collide_depth(); }
+  ~ODETransformCollideDepthScope() { --ode_transform_collide_depth(); }
+};
+
 //****************************************************************************
 // dxGeomTransform class
 
@@ -120,11 +131,25 @@ void dxGeomTransform::computeFinalTx()
 int dCollideTransform (dxGeom *o1, dxGeom *o2, int flags,
 		       dContactGeom *contact, int skip)
 {
+  ODETransformCollideDepthScope depth_scope;
   dIASSERT (skip >= (int)sizeof(dContactGeom));
   dIASSERT (o1->type == dGeomTransformClass);
 
   dxGeomTransform *tr = (dxGeomTransform*) o1;
   if (!tr->obj) return 0;
+  if (ode_transform_collide_depth() > 96 || tr->obj == o1 || tr->obj == o2) {
+    dMessage (0,
+	      "ODE recursion guard: aborting dCollideTransform depth=%u tr=%p obj=%p obj_class=%d other=%p other_class=%d",
+	      ode_transform_collide_depth(), tr, tr->obj, dGeomGetClass(tr->obj),
+	      o2, dGeomGetClass(o2));
+    return 0;
+  }
+  if (tr->obj->parent_space || tr->obj->body) {
+    dMessage (0,
+	      "ODE transform guard: invalid encapsulated geom tr=%p obj=%p parent_space=%p body=%p other=%p",
+	      tr, tr->obj, tr->obj->parent_space, tr->obj->body, o2);
+    return 0;
+  }
   dUASSERT (tr->obj->parent_space==0,
 	    "GeomTransform encapsulated object must not be in a space");
   dUASSERT (tr->obj->body==0,

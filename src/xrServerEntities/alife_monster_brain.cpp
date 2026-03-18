@@ -145,6 +145,8 @@ void CALifeMonsterBrain::update(const bool forced)
     movement().update();
 }
 
+void CALifeMonsterBrain::update_position() { movement().update_position(); }
+
 void CALifeMonsterBrain::default_behaviour() { movement().path_type(MovementManager::ePathTypeNoPath); }
 void CALifeMonsterBrain::on_switch_online() { movement().on_switch_online(); }
 void CALifeMonsterBrain::on_switch_offline() { movement().on_switch_offline(); }

@@ -38,6 +38,7 @@
 #include "ai/ai_monsters_misc.h"
 #include "agent_manager.h"
 #include "agent_member_manager.h"
+#include "member_order.h"
 #include "agent_enemy_manager.h"
 #include "agent_corpse_manager.h"
 #include "agent_location_manager.h"
@@ -469,27 +470,26 @@ void CAI_Stalker::debug_text()
             DBG_OutText(
                 "%sI am in combat    : %s", indent, agent_manager().member().registered_in_combat(this) ? "+" : "-");
         DBG_OutText("%smembers in detour : %d", indent, agent_manager().member().in_detour());
+        CMemberOrder* member_order = g_Alive() ? agent_manager().member().get_member(ID()) : 0;
         if (g_Alive())
-            DBG_OutText("%sI am in detour    : %s", indent, agent_manager().member().member(this).detour() ? "+" : "-");
+            DBG_OutText("%sI am in detour    : %s", indent, member_order && member_order->detour() ? "+" : "-");
 
         if (g_Alive())
         {
-            if (agent_manager().member().member(this).cover())
+            if (member_order && member_order->cover())
             {
                 DBG_OutText("%cover         : [%s][%f][%f][%f]", indent,
-                    agent_manager().member().member(this).cover()->m_is_smart_cover ? "smart" : "generated",
-                    VPUSH(agent_manager().member().member(this).cover()->position()));
+                    member_order->cover()->m_is_smart_cover ? "smart" : "generated", VPUSH(member_order->cover()->position()));
             }
 
-            if (agent_manager().member().member(this).member_death_reaction().m_processing)
+            if (member_order && member_order->member_death_reaction().m_processing)
                 DBG_OutText("%react on death : %s", indent,
-                    agent_manager().member().member(this).member_death_reaction().m_member->cName().c_str());
+                    member_order->member_death_reaction().m_member->cName().c_str());
 
-            if (agent_manager().member().member(this).grenade_reaction().m_processing)
+            if (member_order && member_order->grenade_reaction().m_processing)
                 DBG_OutText("%react on grenade : %s", indent,
-                    agent_manager().member().member(this).grenade_reaction().m_game_object ?
-                        agent_manager().member().member(this).grenade_reaction().m_game_object->cName().c_str() :
-                        "unknown");
+                    member_order->grenade_reaction().m_game_object ? member_order->grenade_reaction().m_game_object->cName().c_str() :
+                                                                    "unknown");
         }
     }
 

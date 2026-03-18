@@ -150,17 +150,19 @@ _value_type CStalkerPropertyEvaluatorDangerUnknownCoverActual::evaluate()
     if (!object().memory().danger().selected())
         return (false);
 
-    if (!object().agent_manager().member().member(&object()).cover())
+    CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID());
+    const CCoverPoint* member_cover = member_order ? member_order->cover() : 0;
+    if (!member_cover)
         m_cover_selection_position = object().Position();
 
     if (!property(StalkerDecisionSpace::eWorldPropertyCoverReached) && object().movement().path_completed())
         m_cover_selection_position = object().Position();
 
-    if (object().m_ce_best->selected() && !object().agent_manager().member().member(&object()).cover())
+    if (object().m_ce_best->selected() && !member_cover)
         object().m_ce_best->invalidate();
 
     bool result = false, first_time = true;
-    const CCoverPoint *point, *last_cover = object().agent_manager().member().member(m_object).cover();
+    const CCoverPoint *point, *last_cover = member_cover;
     Fvector position = object().memory().danger().selected()->position();
     for (;;)
     {

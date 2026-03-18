@@ -102,8 +102,6 @@ void CLevel::remove_objects()
         client_spawn_manager().clear();
     }
 
-    g_pGamePersistent->destroy_particles(false);
-
     //.	xr_delete									(m_seniority_hierarchy_holder);
     //.	m_seniority_hierarchy_holder				= new CSeniorityHierarchyHolder();
     if (!IsGameTypeSingle())
@@ -154,6 +152,8 @@ void CLevel::net_Stop()
     game_configured = FALSE;
 
     IGame_Level::net_Stop();
+    // Destroy particles after level objects are unloaded, so net_DestroyParticles() runs on valid pointers
+    g_pGamePersistent->destroy_particles(false);
     IPureClient::Disconnect();
 
     if (Server)

@@ -17,6 +17,7 @@
 #include "stalker_danger_property_evaluators.h"
 #include "agent_manager.h"
 #include "agent_member_manager.h"
+#include "member_order.h"
 
 using namespace StalkerDecisionSpace;
 
@@ -37,7 +38,8 @@ void CStalkerDangerInDirectionPlanner::initialize()
 {
     inherited::initialize();
 
-    object().agent_manager().member().member(&object()).cover(0);
+    if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
+        member_order->cover(0);
 
     CScriptActionPlanner::m_storage.set_property(eWorldPropertyInCover, false);
     CScriptActionPlanner::m_storage.set_property(eWorldPropertyLookedOut, false);

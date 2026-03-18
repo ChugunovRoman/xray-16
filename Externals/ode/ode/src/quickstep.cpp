@@ -34,15 +34,25 @@
 #include "stdlib.h"
 
 #include <algorithm>
+#include <vector>
 
 
 
 #define ALLOCA dALLOCA16
+static const int QUICKSTEP_STACK_ARRAY_LIMIT = 2048;
 
 typedef const dReal *dRealPtr;
 typedef dReal *dRealMutablePtr;
 #define dRealArray(name,n) dReal name[n];
-#define dRealAllocaArray(name,n) dReal *name = (dReal*) ALLOCA ((n)*sizeof(dReal));
+#define dRealAllocaArray(name,n) \
+	std::vector<dReal> name##_heap_storage; \
+	dReal *name = ((n) > QUICKSTEP_STACK_ARRAY_LIMIT ? (name##_heap_storage.resize(n), name##_heap_storage.data()) : (dReal*) ALLOCA ((n)*sizeof(dReal)));
+#define dIntAllocaArray(name,n) \
+	std::vector<int> name##_heap_storage; \
+	int *name = ((n) > QUICKSTEP_STACK_ARRAY_LIMIT ? (name##_heap_storage.resize(n), name##_heap_storage.data()) : (int*) alloca ((n)*sizeof(int)));
+#define dTypeAllocaArray(type,name,n) \
+	std::vector<type> name##_heap_storage; \
+	type *name = ((n) > QUICKSTEP_STACK_ARRAY_LIMIT ? (name##_heap_storage.resize(n), name##_heap_storage.data()) : (type*) alloca ((n)*sizeof(type)));
 
 //***************************************************************************
 // configuration
@@ -380,7 +390,7 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 	for (i=0; i<m; i++) Ad[i] *= cfm[i];
 
 	// order to solve constraint rows in
-	IndexError *order = (IndexError*) alloca (m*sizeof(IndexError));
+	dTypeAllocaArray (IndexError,order,m);
 
 #ifndef REORDER_CONSTRAINTS
 	// make sure constraints with findex < 0 come first.
@@ -591,7 +601,7 @@ static void SOR_LCP (int m, int nb, dRealMutablePtr J, int *jb, dxBody * const *
 	for (i=0; i<m; i++) Ad[i] *= cfm[i];
 
 	// order to solve constraint rows in
-	IndexError *order = (IndexError*) alloca (m*sizeof(IndexError));
+	dTypeAllocaArray (IndexError,order,m);
 
 #ifndef REORDER_CONSTRAINTS
 	// make sure constraints with findex < 0 come first.
@@ -818,7 +828,7 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 	// joints with m=0 are inactive and are removed from the joints array
 	// entirely, so that the code that follows does not consider them.
 	//@@@ do we really need to save all the info1's
-	dxJoint::Info1 *info = (dxJoint::Info1*) alloca (nj*sizeof(dxJoint::Info1));
+	dTypeAllocaArray (dxJoint::Info1,info,nj);
 	for (i=0, j=0; j<nj; j++) {	// i=dest, j=src
 		joint[j]->vtable->getInfo1 (joint[j],info+i);
 		dIASSERT (info[i].m >= 0 && info[i].m <= 6 && info[i].nub >= 0 && info[i].nub <= info[i].m);
@@ -831,7 +841,7 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 
 	// create the row offset array
 	int m = 0;
-	int *ofs = (int*) alloca (nj*sizeof(int));
+	dIntAllocaArray (ofs,nj);
 	for (i=0; i<nj; i++) {
 		ofs[i] = m;
 		m += info[i].m;
@@ -839,7 +849,7 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 
 	// if there are constraints, compute the constraint force
 	dRealAllocaArray (J,m*12);
-	int *jb = (int*) alloca (m*2*sizeof(int));
+	dIntAllocaArray (jb,m*2);
 	if (m > 0) {
 		// create a constraint equation right hand side vector `c', a constraint
 		// force mixing vector `cfm', and LCP low and high bound vectors, and an
@@ -848,7 +858,7 @@ void dxQuickStepper (dxWorld *world, dxBody * const *body, int nb,
 		dRealAllocaArray (cfm,m);
 		dRealAllocaArray (lo,m);
 		dRealAllocaArray (hi,m);
-		int *findex = (int*) alloca (m*sizeof(int));
+		dIntAllocaArray (findex,m);
 		dSetZero (c,m);
 		dSetValue (cfm,m,world->global_cfm);
 		dSetValue (lo,m,-dInfinity);

@@ -67,6 +67,8 @@ CALifeUpdateManager::CALifeUpdateManager(IPureServer* server, LPCSTR section)
     m_max_process_time = pSettings->r_s32(section, "process_time");
     m_update_monster_factor = pSettings->r_float(section, "update_monster_factor");
     m_objects_per_update = pSettings->r_u32(section, "objects_per_update");
+    m_position_update_interval_ms = pSettings->read_if_exists<u32>(section, "position_update_interval_ms", 100);
+    m_last_position_update_time = 0;
     m_changing_level = false;
     m_first_time = true;
 }
@@ -105,6 +107,22 @@ void CALifeUpdateManager::update()
 {
     update_switch();
     update_scheduled(false);
+}
+
+void CALifeUpdateManager::update_positions_only() const
+{
+    if (!initialized())
+        return;
+    const u32 now = Device.dwTimeGlobal;
+    if (m_position_update_interval_ms > 0 && m_last_position_update_time != 0 &&
+        (now - m_last_position_update_time) < m_position_update_interval_ms)
+        return;
+    m_last_position_update_time = now;
+
+    START_PROFILE("ALife/update_positions");
+    for (const auto& it : scheduled().objects())
+        it.second->update_position();
+    STOP_PROFILE
 }
 
 void CALifeUpdateManager::shedule_Update(u32 dt)
@@ -289,6 +307,7 @@ void CALifeUpdateManager::load(LPCSTR game_name, bool no_assert, bool new_only)
 void CALifeUpdateManager::reload(LPCSTR section)
 {
     CALifeSimulatorBase::reload(section);
+    m_position_update_interval_ms = pSettings->read_if_exists<u32>(section, "position_update_interval_ms", 100);
     set_process_time((int)m_max_process_time);
     objects_per_update(m_objects_per_update);
 }

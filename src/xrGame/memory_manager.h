@@ -41,13 +41,16 @@ protected:
 protected:
     CCustomMonster* m_object;
     CAI_Stalker* m_stalker;
+    u32 m_visual_update_cursor{0};
+    u32 m_sound_update_cursor{0};
+    u32 m_hit_update_cursor{0};
 
 private:
     void update_enemies(const bool& registered_in_combat);
 
 protected:
     template <typename T>
-    void update(const xr_vector<T>& objects, bool add_enemies);
+    void update(const xr_vector<T>& objects, bool add_enemies, bool add_items, u32& cursor, u32 budget);
 
 public:
     CMemoryManager(CEntityAlive* entity_alive, CSound_UserDataVisitor* visitor);

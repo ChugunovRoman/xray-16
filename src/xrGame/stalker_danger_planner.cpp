@@ -23,6 +23,7 @@
 #include "cover_point.h"
 #include "stalker_movement_restriction.h"
 #include "agent_member_manager.h"
+#include "member_order.h"
 #include "stalker_base_action.h"
 #include "stalker_danger_unknown_planner.h"
 #include "stalker_danger_in_direction_planner.h"
@@ -61,6 +62,29 @@ void CStalkerDangerPlanner::finalize()
 void CStalkerDangerPlanner::update()
 {
     inherited::update();
+
+    if (this->solution().empty())
+    {
+        CScriptActionPlanner::m_storage.set_property(eWorldPropertyInCover, false);
+        CScriptActionPlanner::m_storage.set_property(eWorldPropertyLookedOut, false);
+        CScriptActionPlanner::m_storage.set_property(eWorldPropertyPositionHolded, false);
+        CScriptActionPlanner::m_storage.set_property(eWorldPropertyEnemyDetoured, false);
+
+        CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID());
+        if (member_order)
+            member_order->cover(0);
+
+        if (object().movement().in_smart_cover() || object().movement().entering_smart_cover_with_animation())
+        {
+            object().movement().target_default(true);
+            object().movement().target_idle();
+            object().movement().cleanup_after_animation_selector();
+        }
+
+        object().movement().clear_path();
+        return;
+    }
+
     object().react_on_grenades();
     object().react_on_member_death();
 }
@@ -69,7 +93,8 @@ void CStalkerDangerPlanner::initialize()
 {
     inherited::initialize();
     object().sound().remove_active_sounds(u32(eStalkerSoundMaskNoHumming));
-    object().agent_manager().member().member(m_object).cover(0);
+    if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
+        member_order->cover(0);
 }
 
 void CStalkerDangerPlanner::add_evaluators()

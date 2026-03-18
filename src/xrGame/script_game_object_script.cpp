@@ -29,6 +29,16 @@ void CScriptGameObject::script_register(lua_State* luaState)
 
     module(luaState)
     [
+        class_<SScriptBestDangerSnapshot>("best_danger_snapshot")
+            .def(constructor<>())
+            .def_readonly("valid", &SScriptBestDangerSnapshot::m_valid)
+            .def_readonly("type", &SScriptBestDangerSnapshot::m_type)
+            .def_readonly("perceive_type", &SScriptBestDangerSnapshot::m_perceive_type)
+            .def_readonly("time", &SScriptBestDangerSnapshot::m_time)
+            .def_readonly("object_id", &SScriptBestDangerSnapshot::m_object_id)
+            .def_readonly("dependent_object_id", &SScriptBestDangerSnapshot::m_dependent_object_id)
+            .def_readonly("position", &SScriptBestDangerSnapshot::m_position),
+
         class_<CSightParams>("CSightParams")
             .enum_("bla-bla")
             [

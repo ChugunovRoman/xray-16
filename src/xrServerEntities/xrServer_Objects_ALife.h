@@ -83,6 +83,8 @@ public:
         CSE_ALifeSchedulable* tpALifeSchedulable, int iGroupIndex, bool bMutualDetection) = 0;
     virtual bool bfActive() = 0;
     virtual CSE_ALifeDynamicObject* tpfGetBestDetector() = 0;
+    /** Lightweight position-only update. Called every frame for smooth map spots. Default: no-op. */
+    virtual void update_position() {}
 #endif
 
 private:

@@ -352,9 +352,11 @@ void xrServer::Process_event(NET_Packet& P, ClientID sender)
     break;
     case GE_MONEY:
     {
+        u32 money = P.r_u32();
         CSE_Abstract* e_dest = receiver;
-        CSE_ALifeTraderAbstract* pTa = smart_cast<CSE_ALifeTraderAbstract*>(e_dest);
-        pTa->m_dwMoney = P.r_u32();
+        CSE_ALifeTraderAbstract* pTa = e_dest ? smart_cast<CSE_ALifeTraderAbstract*>(e_dest) : nullptr;
+        if (pTa)
+            pTa->m_dwMoney = money;
     }
     break;
     case GE_FREEZE_OBJECT: break;

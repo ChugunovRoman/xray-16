@@ -23,6 +23,7 @@
 #include "cover_point.h"
 #include "agent_manager.h"
 #include "agent_member_manager.h"
+#include "member_order.h"
 #include "Inventory.h"
 #include "Weapon.h"
 
@@ -56,7 +57,8 @@ void CStalkerActionDangerGrenadeTakeCover::execute()
     if (!object().memory().danger().selected())
         return;
 
-    const CCoverPoint* point = object().agent_manager().member().member(&object()).cover();
+    const CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID());
+    const CCoverPoint* point = member_order ? member_order->cover() : 0;
     if (point)
     {
         object().movement().set_level_dest_vertex(point->level_vertex_id());
@@ -179,7 +181,8 @@ void CStalkerActionDangerGrenadeTakeCoverAfterExplosion::execute()
     if (!object().memory().danger().selected())
         return;
 
-    const CCoverPoint* point = object().agent_manager().member().member(&object()).cover();
+    const CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID());
+    const CCoverPoint* point = member_order ? member_order->cover() : 0;
     if (point)
     {
         object().movement().set_level_dest_vertex(point->level_vertex_id());

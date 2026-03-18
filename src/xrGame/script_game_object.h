@@ -112,6 +112,17 @@ class CZoneCampfire;
 class CPhysicObject;
 class CArtefact;
 
+struct SScriptBestDangerSnapshot
+{
+    bool m_valid = false;
+    u32 m_type = u32(-1);
+    u32 m_perceive_type = u32(-1);
+    u32 m_time = 0;
+    u16 m_object_id = u16(-1);
+    u16 m_dependent_object_id = u16(-1);
+    Fvector m_position = {};
+};
+
 #ifdef DEBUG
 template <typename _object_type>
 class CActionBase;
@@ -153,6 +164,12 @@ class object;
 class CScriptGameObject
 {
     mutable CGameObject* m_game_object;
+    mutable u32 m_best_enemy_cache_time = u32(-1);
+    mutable CScriptGameObject* m_best_enemy_cache_object = nullptr;
+    mutable u32 m_best_danger_cache_time = u32(-1);
+    mutable const CDangerObject* m_best_danger_cache_object = nullptr;
+    mutable u32 m_best_item_cache_time = u32(-1);
+    mutable CScriptGameObject* m_best_item_cache_object = nullptr;
     CScriptGameObject(CScriptGameObject const& game_object);
 
 public:
@@ -461,7 +478,8 @@ public:
     u32 GetSuitableAmmoTotal() const;
     void SetQueueSize(u32 queue_size);
     CScriptGameObject* GetBestEnemy();
-    const CDangerObject* GetBestDanger();
+    const CDangerObject* GetBestDanger() const;
+    SScriptBestDangerSnapshot GetBestDangerSnapshot() const;
     CScriptGameObject* GetBestItem();
 
     _DECLARE_FUNCTION10(GetActionCount, u32);

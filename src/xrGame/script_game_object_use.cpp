@@ -136,7 +136,7 @@ void CScriptGameObject::set_enemy_callback(const luabind::functor<bool>& functor
             LuaMessageType::Error, "CCustomMonster : cannot access class member set_enemy_callback!");
         return;
     }
-    monster->memory().enemy().useful_callback().set(functor);
+    monster->memory().enemy().set_useful_callback(functor);
 }
 
 void CScriptGameObject::set_enemy_callback(const luabind::functor<bool>& functor, const luabind::object& object)
@@ -148,7 +148,7 @@ void CScriptGameObject::set_enemy_callback(const luabind::functor<bool>& functor
             LuaMessageType::Error, "CCustomMonster : cannot access class member set_enemy_callback!");
         return;
     }
-    monster->memory().enemy().useful_callback().set(functor, object);
+    monster->memory().enemy().set_useful_callback(functor, object);
 }
 
 void CScriptGameObject::set_enemy_callback()
@@ -160,7 +160,7 @@ void CScriptGameObject::set_enemy_callback()
             LuaMessageType::Error, "CCustomMonster : cannot access class member set_enemy_callback!");
         return;
     }
-    monster->memory().enemy().useful_callback().clear();
+    monster->memory().enemy().clear_useful_callback();
 }
 
 void CScriptGameObject::SetCallback(GameObject::ECallbackType type, const luabind::functor<void>& functor)

@@ -275,7 +275,8 @@ void CStalkerActionDangerInDirectionDetour::initialize()
 {
     inherited::initialize();
 
-    object().agent_manager().member().member(&object()).detour(true);
+    if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
+        member_order->detour(true);
     object().movement().set_desired_direction(0);
     object().movement().set_path_type(MovementManager::ePathTypeLevelPath);
     object().movement().set_detail_path_type(DetailPathManager::eDetailPathTypeSmooth);
@@ -287,7 +288,8 @@ void CStalkerActionDangerInDirectionDetour::initialize()
     select_queue_params(distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
     object().CObjectHandler::set_goal(eObjectActionAimReady1, object().best_weapon(), min_queue_size, max_queue_size,
         min_queue_interval, max_queue_interval);
-    object().agent_manager().member().member(m_object).cover(0);
+    if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
+        member_order->cover(0);
 }
 
 void CStalkerActionDangerInDirectionDetour::execute()
@@ -359,7 +361,8 @@ void CStalkerActionDangerInDirectionSearch::initialize()
     object().CObjectHandler::set_goal(eObjectActionAimReady1, object().best_weapon(), min_queue_size, max_queue_size,
         min_queue_interval, max_queue_interval);
 
-    object().agent_manager().member().member(m_object).cover(0);
+    if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
+        member_order->cover(0);
 }
 
 void CStalkerActionDangerInDirectionSearch::execute()

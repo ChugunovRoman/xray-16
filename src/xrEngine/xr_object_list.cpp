@@ -494,6 +494,10 @@ void CObjectList::Unload()
         O->net_Destroy();
         Destroy(O);
     }
+
+    // Unload() destroys objects directly; setDestroy(true) above pushed them into destroy_queue.
+    // Clear the queue so ~CObjectList() assertion (destroy_queue.empty()) does not fail.
+    destroy_queue.clear();
 }
 
 IGameObject* CObjectList::Create(pcstr name)

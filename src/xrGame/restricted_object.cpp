@@ -103,7 +103,13 @@ BOOL CRestrictedObject::net_Spawn(CSE_Abstract* data)
     return (TRUE);
 }
 
-void CRestrictedObject::net_Destroy() { Level().space_restriction_manager().unrestrict(m_object->ID()); }
+void CRestrictedObject::net_Destroy()
+{
+    if (!ai().get_level_graph())
+        return;
+
+    Level().space_restriction_manager().unrestrict(m_object->ID());
+}
 u32 CRestrictedObject::accessible_nearest(const Fvector& position, Fvector& result) const
 {
     START_PROFILE("Restricted Object/Accessible Nearest");

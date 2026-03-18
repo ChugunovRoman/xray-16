@@ -13,6 +13,8 @@
 #include "inventory_item.h"
 #include "PhysicsShellHolder.h"
 
+static void AttachmentCallback(IKinematics* tpKinematics);
+
 CAttachmentOwner::~CAttachmentOwner() {}
 void CAttachmentOwner::reload(LPCSTR section)
 {
@@ -33,16 +35,13 @@ void CAttachmentOwner::reload(LPCSTR section)
 void CAttachmentOwner::reinit() { VERIFY(m_attached_objects.empty()); }
 void CAttachmentOwner::net_Destroy()
 {
-#ifdef DEBUG
-    if (!attached_objects().empty())
+    if (!m_attached_objects.empty())
     {
-        Msg("Object %s has attached items :", smart_cast<CGameObject*>(this)->cName().c_str());
-        //		xr_vector<CAttachableItem*>::const_iterator	I = attached_objects().begin();
-        //		xr_vector<CAttachableItem*>::const_iterator	E = attached_objects().end();
-        //		for ( ; I != E; ++I)
-        //			Msg					("* %s",*(*I)->item().object().cName());
+        CGameObject* game_object = smart_cast<CGameObject*>(this);
+        if (game_object && game_object->Visual())
+            game_object->remove_visual_callback(AttachmentCallback);
+        m_attached_objects.clear();
     }
-#endif
     R_ASSERT(attached_objects().empty());
 }
 
@@ -54,7 +53,7 @@ void CAttachmentOwner::renderable_Render(u32 context_id, IRenderable* root)
         (*I)->renderable_Render(context_id, root);
 }
 
-void AttachmentCallback(IKinematics* tpKinematics)
+static void AttachmentCallback(IKinematics* tpKinematics)
 {
     CGameObject* game_object =
         smart_cast<CGameObject*>(static_cast<IGameObject*>(tpKinematics->GetUpdateCallbackParam()));

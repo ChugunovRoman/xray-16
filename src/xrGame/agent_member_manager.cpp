@@ -41,6 +41,8 @@ void CAgentMemberManager::add(CEntity* member)
     [[maybe_unused]] const auto I = std::find_if(m_members.begin(), m_members.end(), CMemberPredicate(stalker));
     VERIFY(I == m_members.end());
     m_members.push_back(xr_new<CMemberOrder>(stalker));
+    m_actuality = false;
+    m_combat_members.clear();
 }
 
 void CAgentMemberManager::remove(CEntity* member)
@@ -60,6 +62,8 @@ void CAgentMemberManager::remove(CEntity* member)
     VERIFY(I != m_members.end());
     xr_delete(*I);
     m_members.erase(I);
+    m_actuality = false;
+    m_combat_members.clear();
 }
 
 void CAgentMemberManager::update() {}
@@ -140,16 +144,16 @@ bool CAgentMemberManager::registered_in_combat(const CAI_Stalker* object) const
 
 CAgentMemberManager::MEMBER_STORAGE& CAgentMemberManager::combat_members()
 {
-    if (m_actuality)
-        return (m_combat_members);
-
     m_actuality = true;
-
     m_combat_members.clear();
+
     MEMBER_STORAGE::iterator I = members().begin();
     MEMBER_STORAGE::iterator E = members().end();
     for (; I != E; ++I)
     {
+        if (!*I || !(*I)->m_object)
+            continue;
+
         if (registered_in_combat(&(*I)->object()))
             m_combat_members.push_back(*I);
     }

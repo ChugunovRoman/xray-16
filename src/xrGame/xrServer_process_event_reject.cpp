@@ -10,27 +10,22 @@ bool xrServer::Process_event_reject(
     CSE_Abstract* e_parent = game->get_entity_from_eid(id_parent);
     CSE_Abstract* e_entity = game->get_entity_from_eid(id_entity);
 
-    //	R_ASSERT2( e_entity, make_string( "entity not found. parent_id = [%d], entity_id = [%d], frame = [%d]",
-    // id_parent, id_entity, Device.dwFrame ).c_str() );
-    VERIFY2(e_entity, make_string("entity not found. parent_id = [%d], entity_id = [%d], frame = [%d]", id_parent,
-                          id_entity, Device.dwFrame)
-                          .c_str());
+    // Entity or parent may already be destroyed (e.g. GE_DESTROY processed first, or shutdown cleanup).
+    // Treat as non-fatal: skip reject and do not spam release log.
     if (!e_entity)
     {
-        Msg("! ERROR on rejecting: entity not found. parent_id = [%d], entity_id = [%d], frame = [%d].", id_parent,
+#ifdef MP_LOGGING
+        Msg("--- SV: reject skipped, entity not found. parent_id = [%d], entity_id = [%d], frame = [%d].", id_parent,
             id_entity, Device.dwFrame);
+#endif
         return false;
     }
-
-    //	R_ASSERT2( e_parent, make_string( "parent not found. parent_id = [%d], entity_id = [%d], frame = [%d]",
-    // id_parent, id_entity, Device.dwFrame ).c_str() );
-    VERIFY2(e_parent, make_string("parent not found. parent_id = [%d], entity_id = [%d], frame = [%d]", id_parent,
-                          id_entity, Device.dwFrame)
-                          .c_str());
     if (!e_parent)
     {
-        Msg("! ERROR on rejecting: parent not found. parent_id = [%d], entity_id = [%d], frame = [%d].", id_parent,
+#ifdef MP_LOGGING
+        Msg("--- SV: reject skipped, parent not found. parent_id = [%d], entity_id = [%d], frame = [%d].", id_parent,
             id_entity, Device.dwFrame);
+#endif
         return false;
     }
 

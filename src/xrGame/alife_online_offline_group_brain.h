@@ -42,6 +42,7 @@ public:
 
 public:
     void update();
+    void update_position();
 
 public:
     IC object_type& object() const;

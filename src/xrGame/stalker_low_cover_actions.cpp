@@ -145,10 +145,17 @@ void CStalkerActionHoldPositionLowCover::execute()
         if (object().agent_manager().member().can_detour() || !object().agent_manager().member().cover_detouring() ||
             !fire_make_sense())
         {
-            CStalkerCombatPlanner& planner = smart_cast<CStalkerCombatPlanner&>(object().brain().current_action());
-            planner.CScriptActionPlanner::m_storage.set_property(eWorldPropertyLookedOut, true);
-            planner.CScriptActionPlanner::m_storage.set_property(eWorldPropertyPositionHolded, true);
-            planner.CScriptActionPlanner::m_storage.set_property(eWorldPropertyInCover, false);
+            if (object().brain().initialized() &&
+                object().brain().current_action_id() == StalkerDecisionSpace::eWorldOperatorCombatPlanner)
+            {
+                CStalkerCombatPlanner* planner = smart_cast<CStalkerCombatPlanner*>(&object().brain().current_action());
+                if (planner && planner->initialized() && !planner->solution().empty())
+                {
+                    planner->CScriptActionPlanner::m_storage.set_property(eWorldPropertyLookedOut, true);
+                    planner->CScriptActionPlanner::m_storage.set_property(eWorldPropertyPositionHolded, true);
+                    planner->CScriptActionPlanner::m_storage.set_property(eWorldPropertyInCover, false);
+                }
+            }
         }
     }
 

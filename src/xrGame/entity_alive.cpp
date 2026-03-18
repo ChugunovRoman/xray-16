@@ -204,6 +204,23 @@ void CEntityAlive::shedule_Update(u32 dt)
 {
     inherited::shedule_Update(dt);
 
+    if (!g_Alive())
+    {
+        // Keep only lightweight corpse visuals and one-shot kill finalization.
+        UpdateFireParticles();
+        UpdateBloodDrops();
+
+        if (Local() && !AlreadyDie())
+        {
+            if (conditions().GetWhoHitLastTime())
+                KillEntity(conditions().GetWhoHitLastTimeID());
+            else
+                KillEntity(ID());
+        }
+
+        return;
+    }
+
     // condition update with the game time pass
     conditions().UpdateConditionTime();
     conditions().UpdateCondition();
@@ -214,21 +231,6 @@ void CEntityAlive::shedule_Update(u32 dt)
     //обновить раны
     conditions().UpdateWounds();
 
-    //убить сущность
-    if (Local() && !g_Alive() && !AlreadyDie())
-    {
-        if (conditions().GetWhoHitLastTime())
-        {
-            //			Msg			("%6d : KillEntity from CEntityAlive (using who hit last time) for object
-            //%s",Device.dwTimeGlobal,*cName());
-            KillEntity(conditions().GetWhoHitLastTimeID());
-        }
-        else
-        {
-            //			Msg			("%6d : KillEntity from CEntityAlive for object %s",Device.dwTimeGlobal,*cName());
-            KillEntity(ID());
-        }
-    }
 }
 
 bool CEntityAlive::net_Spawn(CSE_Abstract* DC)

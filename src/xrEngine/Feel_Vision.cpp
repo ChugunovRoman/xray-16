@@ -9,6 +9,8 @@
 
 namespace Feel
 {
+constexpr u32 FEEL_VISION_TRACE_BUDGET = 12;
+
 Vision::Vision(IGameObject const* owner) : pure_relcase(&Vision::feel_vision_relcase), m_owner(owner) {}
 Vision::~Vision() {}
 struct SFeelParam
@@ -153,9 +155,27 @@ void Vision::feel_vision_update(IGameObject* parent, Fvector& P, float dt, float
 void Vision::o_trace(Fvector& P, float dt, float vis_threshold)
 {
     RQR.r_clear();
-    xr_vector<feel_visible_Item>::iterator I = feel_visible.begin(), E = feel_visible.end();
-    for (; I != E; ++I)
+
+    const u32 total = static_cast<u32>(feel_visible.size());
+    if (!total)
+        return;
+
+    const u32 budget = _min(total, FEEL_VISION_TRACE_BUDGET);
+    u32 start_index = 0;
+    if (total > budget)
     {
+        if (m_trace_cursor >= total)
+            m_trace_cursor = 0;
+
+        start_index = m_trace_cursor;
+        m_trace_cursor = (m_trace_cursor + budget) % total;
+    }
+
+    for (u32 trace_idx = 0; trace_idx < budget; ++trace_idx)
+    {
+        feel_visible_Item& item = feel_visible[(start_index + trace_idx) % total];
+        feel_visible_Item* I = &item;
+
         if (0 == I->O->GetCForm())
         {
             I->fuzzy = -1;
@@ -222,34 +242,37 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold)
                     // Log("query");
                 }
             }
-            // Log("Vis",feel_params.vis);
-            r_spatial.clear();
-            g_pGamePersistent->SpatialSpace.q_ray(r_spatial, 0, STYPE_VISIBLEFORAI, P, D, f);
-
-            RD.flags = CDB::OPT_ONLYFIRST;
-
-            bool collision_found = false;
-            xr_vector<ISpatial*>::const_iterator i = r_spatial.begin();
-            xr_vector<ISpatial*>::const_iterator e = r_spatial.end();
-            for (; i != e; ++i)
+            // If the static/material query already failed visibility, skip the extra dynamic-object ray pass.
+            if (feel_params.vis >= feel_params.vis_threshold)
             {
-                if (*i == m_owner)
-                    continue;
+                r_spatial.clear();
+                g_pGamePersistent->SpatialSpace.q_ray(r_spatial, 0, STYPE_VISIBLEFORAI, P, D, f);
 
-                if (*i == I->O)
-                    continue;
+                RD.flags = CDB::OPT_ONLYFIRST;
 
-                IGameObject const* object = (*i)->dcast_GameObject();
-                RQR.r_clear();
-                if (object && object->GetCForm() && !object->GetCForm()->_RayQuery(RD, RQR))
-                    continue;
+                bool collision_found = false;
+                xr_vector<ISpatial*>::const_iterator i = r_spatial.begin();
+                xr_vector<ISpatial*>::const_iterator e = r_spatial.end();
+                for (; i != e; ++i)
+                {
+                    if (*i == m_owner)
+                        continue;
 
-                collision_found = true;
-                break;
+                    if (*i == I->O)
+                        continue;
+
+                    IGameObject const* object = (*i)->dcast_GameObject();
+                    RQR.r_clear();
+                    if (object && object->GetCForm() && !object->GetCForm()->_RayQuery(RD, RQR))
+                        continue;
+
+                    collision_found = true;
+                    break;
+                }
+
+                if (collision_found)
+                    feel_params.vis = 0.f;
             }
-
-            if (collision_found)
-                feel_params.vis = 0.f;
 
             if (feel_params.vis < feel_params.vis_threshold)
             {

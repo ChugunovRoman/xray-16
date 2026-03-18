@@ -795,7 +795,8 @@ CStalkerActionDetourEnemy::CStalkerActionDetourEnemy(CAI_Stalker* object, LPCSTR
 void CStalkerActionDetourEnemy::initialize()
 {
     inherited::initialize();
-    object().agent_manager().member().member(&object()).detour(true);
+    if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
+        member_order->detour(true);
     object().movement().set_desired_direction(0);
     object().movement().set_path_type(MovementManager::ePathTypeLevelPath);
     object().movement().set_detail_path_type(DetailPathManager::eDetailPathTypeSmooth);
@@ -806,13 +807,14 @@ void CStalkerActionDetourEnemy::initialize()
     aim_ready();
 
 #ifdef DISABLE_COVER_BEFORE_DETOUR
-    if (/**(Random.randF(1.f) < .8f) && **/ object().agent_manager().member().member(m_object).cover())
-        object().agent_manager().location().add(
-            xr_new<CDangerCoverLocation>(object().agent_manager().member().member(m_object).cover(), Device.dwTimeGlobal,
+    if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
+        if (/**(Random.randF(1.f) < .8f) && **/ member_order->cover())
+            object().agent_manager().location().add(xr_new<CDangerCoverLocation>(member_order->cover(), Device.dwTimeGlobal,
                 TEMP_DANGER_INTERVAL, TEMP_DANGER_DISTANCE, object().agent_manager().member().mask(&object())));
 #endif
 
-    object().agent_manager().member().member(m_object).cover(0);
+    if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
+        member_order->cover(0);
 
 //#ifndef SILENT_COMBAT
     //Alundaio: Added sanity to make sure enemy exists
@@ -827,7 +829,8 @@ void CStalkerActionDetourEnemy::finalize()
     inherited::finalize();
 
     if (object().g_Alive())
-        object().agent_manager().member().member(&object()).detour(false);
+        if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
+            member_order->detour(false);
 }
 
 void CStalkerActionDetourEnemy::execute()

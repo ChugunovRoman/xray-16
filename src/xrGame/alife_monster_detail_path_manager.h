@@ -34,6 +34,9 @@ private:
     parameters m_destination;
     float m_walked_distance;
     float m_speed;
+    /** Last interpolated position for draw_level_position(); used when path is empty/cross-level to avoid spot jumping backward. */
+    mutable Fvector m_cached_draw_position;
+    mutable bool m_cached_draw_position_valid;
 
 private:
     PATH m_path;
@@ -64,6 +67,8 @@ public:
 
 public:
     void update();
+    /** Lightweight: advances position only. Call every frame for smooth map spots. */
+    void update_position();
     void on_switch_online();
     void on_switch_offline();
     IC void speed(const float& speed);

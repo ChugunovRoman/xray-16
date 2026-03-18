@@ -84,8 +84,11 @@ void CAgentCorpseManager::react_on_member_death()
             if (!(*I).reactor())
                 continue;
 
-            CMemberOrder::CMemberDeathReaction& reaction =
-                object().member().member((*I).reactor()).member_death_reaction();
+            CMemberOrder* member_order = object().member().get_member((*I).reactor()->ID());
+            if (!member_order)
+                continue;
+
+            CMemberOrder::CMemberDeathReaction& reaction = member_order->member_death_reaction();
             reaction.m_member = (*I).corpse();
             reaction.m_time = (*I).time();
             reaction.m_processing = true;

@@ -178,6 +178,7 @@ luabind::class_<CScriptGameObject>& script_register_game_object1(luabind::class_
         //		.def("best_hit",					&CScriptGameObject::GetBestHit)
         //		.def("best_sound",					&CScriptGameObject::GetBestSound)
         .def("best_danger", &CScriptGameObject::GetBestDanger)
+        .def("best_danger_snapshot", &CScriptGameObject::GetBestDangerSnapshot)
         .def("best_enemy", &CScriptGameObject::GetBestEnemy)
         .def("best_item", &CScriptGameObject::GetBestItem)
         .def("action_count", &CScriptGameObject::GetActionCount)

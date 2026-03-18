@@ -107,7 +107,16 @@ void CParticlesPlayer::net_DestroyParticles()
     {
         for (auto& p_info : b_info.particles)
         {
-            CParticlesObject::Destroy(p_info.ps);
+            CParticlesObject* p = p_info.ps;
+            if (!p)
+                continue;
+            // Clear all references to this particle (avoid double-destroy if same ptr in multiple slots)
+            for (auto& b2 : m_Bones)
+                for (auto& p2 : b2.particles)
+                    if (p2.ps == p)
+                        p2.ps = nullptr;
+            CParticlesObject* p_destroy = p;
+            CParticlesObject::Destroy(p_destroy);
         }
         b_info.particles.clear();
     }

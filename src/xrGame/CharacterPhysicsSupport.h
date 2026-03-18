@@ -86,6 +86,12 @@ private:
     SHit m_sv_hit;
     u32 m_hit_valide_time{ u32(-1) };
     u32 m_physics_shell_animated_time_destroy{ u32(-1) };
+    u32 m_next_ik_update_time{0};
+    u32 m_ik_update_interval{0};
+    u32 m_death_update_start_time{0};
+    u32 m_next_dead_update_time{0};
+    u32 m_dead_update_interval{0};
+    bool m_dead_ragdoll_sleep_applied{false};
 
 public:
     EType Type() { return m_eType; }

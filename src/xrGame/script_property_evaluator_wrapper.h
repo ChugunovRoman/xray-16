@@ -14,6 +14,14 @@ class CScriptGameObject;
 
 typedef CPropertyEvaluator<CScriptGameObject> CScriptPropertyEvaluator;
 
+enum class EScriptEvaluatorCachePolicy : u8
+{
+    NeverCache = 0,
+    CachePerFrame,     // для быстро меняющихся (danger, combat)
+    CacheFor10Frames,  // для умеренно стабильных (kill_wounded, dont_shoot) — ~330ms @ 30fps
+    CacheFor30Frames   // для редко меняющихся (campfire, npc_vs_box) — ~1sec @ 30fps
+};
+
 class CScriptPropertyEvaluatorWrapper : public CScriptPropertyEvaluator, public luabind::wrap_base
 {
 public:
@@ -22,6 +30,16 @@ public:
     static void setup_static(CScriptPropertyEvaluator* evaluator, CScriptGameObject* object, CPropertyStorage* storage);
     virtual bool evaluate();
     static bool evaluate_static(CScriptPropertyEvaluator* evaluator);
+
+private:
+    EScriptEvaluatorCachePolicy cache_policy() const;
+
+private:
+    mutable u32 m_cached_frame = u32(-1);
+    mutable bool m_cached_value = false;
+    mutable bool m_has_cached_value = false;
+    mutable EScriptEvaluatorCachePolicy m_cache_policy = EScriptEvaluatorCachePolicy::NeverCache;
+    mutable bool m_cache_policy_initialized = false;
 };
 
 #include "script_property_evaluator_wrapper_inline.h"

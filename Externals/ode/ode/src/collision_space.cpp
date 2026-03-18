@@ -70,6 +70,57 @@ void dGeomMoved (dxGeom *geom)
 
 #define GEOM_ENABLED(g) ((g)->gflags & GEOM_ENABLED)
 
+static unsigned int& ode_space_traversal_depth()
+{
+  static unsigned int depth = 0;
+  return depth;
+}
+
+struct ODESpaceTraversalDepthScope {
+  ODESpaceTraversalDepthScope() { ++ode_space_traversal_depth(); }
+  ~ODESpaceTraversalDepthScope() { --ode_space_traversal_depth(); }
+};
+
+static int geom_has_ancestor(dxGeom *geom, dxGeom *ancestor)
+{
+  for (dxGeom *parent = geom; parent; parent = parent->parent_space) {
+    if (parent == ancestor) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int should_abort_space_traversal(const char *tag, dxGeom *g1, dxGeom *g2)
+{
+  const unsigned int depth = ode_space_traversal_depth();
+  if (depth > 64) {
+    dMessage(0,
+      "ODE space guard: aborting deep traversal tag=%s depth=%u g1=%p class1=%d g2=%p class2=%d",
+      tag, depth, g1, g1 ? dGeomGetClass(g1) : -1, g2, g2 ? dGeomGetClass(g2) : -1);
+    return 1;
+  }
+
+  if (g1 && g2 && (g1 == g2 || geom_has_ancestor(g1, g2) || geom_has_ancestor(g2, g1))) {
+    dMessage(0,
+      "ODE space guard: aborting cyclic traversal tag=%s depth=%u g1=%p class1=%d g2=%p class2=%d",
+      tag, depth, g1, dGeomGetClass(g1), g2, dGeomGetClass(g2));
+    return 1;
+  }
+
+  return 0;
+}
+
+static int would_create_space_cycle(dxSpace *space, dxGeom *geom)
+{
+  for (dxGeom *parent = space; parent; parent = parent->parent_space) {
+    if (parent == geom) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 //****************************************************************************
 // dxSpace
 
@@ -182,6 +233,14 @@ void dxSpace::add (dxGeom *geom)
   dAASSERT (geom);
   dUASSERT (geom->parent_space == 0 && geom->next == 0,
 	    "geom is already in a space");
+  dUASSERT (!would_create_space_cycle(this, geom),
+	    "adding geom to space would create a cyclic space hierarchy");
+  if (would_create_space_cycle(this, geom)) {
+    dMessage (0,
+	      "ODE cycle guard: rejected dSpaceAdd space=%p geom=%p geom_class=%d",
+	      this, geom, dGeomGetClass(geom));
+    return;
+  }
 
   // add
   geom->parent_space = this;
@@ -730,6 +789,10 @@ void dSpaceCollide (dxSpace *space, void *data, dNearCallback *callback)
 {
   dAASSERT (space && callback);
   dUASSERT (dGeomIsSpace(space),"argument not a space");
+  ODESpaceTraversalDepthScope depth_scope;
+  if (should_abort_space_traversal("dSpaceCollide", space, 0)) {
+    return;
+  }
   space->collide (data,callback);
 }
 
@@ -738,6 +801,10 @@ void dSpaceCollide2 (dxGeom *g1, dxGeom *g2, void *data,
 		     dNearCallback *callback)
 {
   dAASSERT (g1 && g2 && callback);
+  ODESpaceTraversalDepthScope depth_scope;
+  if (should_abort_space_traversal("dSpaceCollide2", g1, g2)) {
+    return;
+  }
   dxSpace *s1,*s2;
 
   // see if either geom is a space

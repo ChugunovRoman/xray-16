@@ -154,10 +154,21 @@ static void play_object(dxGeomUserData* data, SGameMtlPair* mtl_pair, const dCon
     VERIFY(mtl_pair);
     VERIFY(c);
 
-    auto* phShell = static_cast<CPhysicsShellHolder*>(data->ph_ref_object);
-    if (phShell == nullptr || !phShell->b_sheduled)
+    if (data->ref_object_id == u16(-1))
         return;
-    if (!phShell->m_pPhysicsShell && !phShell->character_physics_support() || phShell->getDestroy())
+
+    CPhysicsShellHolder* phShell = smart_cast<CPhysicsShellHolder*>(Level().Objects.net_Find(data->ref_object_id));
+    if (!phShell || phShell != data->ph_ref_object || phShell->getDestroy())
+    {
+        data->ph_ref_object = nullptr;
+        data->ref_object_id = u16(-1);
+        return;
+    }
+
+    if (!phShell->b_sheduled)
+        return;
+
+    if ((!phShell->m_pPhysicsShell && !phShell->character_physics_support()) || phShell->getDestroy())
         return;
 
     if (CPHSoundPlayer* sp = phShell->ph_sound_player())
@@ -246,7 +257,7 @@ void TContactShotMark(CDB::TRI* T, dContactGeom* c)
                 }
                 else
                 {
-                    if (data->ph_ref_object && !mtl_pair->CollideSounds.empty())
+                    if (!mtl_pair->CollideSounds.empty())
                     {
                         play_object(data, mtl_pair, c);
                     }

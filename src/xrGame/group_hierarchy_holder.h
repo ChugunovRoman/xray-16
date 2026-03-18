@@ -62,9 +62,6 @@ public:
     u32 m_dwStandingCount;
 
 private:
-    IC CAgentManager* get_agent_manager() const;
-
-private:
     IC VISIBLE_OBJECTS& visible_objects() const;
     IC SOUND_OBJECTS& sound_objects() const;
     IC HIT_OBJECTS& hit_objects() const;
@@ -84,6 +81,7 @@ private:
 public:
     IC CGroupHierarchyHolder(CSquadHierarchyHolder* squad);
     virtual ~CGroupHierarchyHolder();
+    IC CAgentManager* get_agent_manager() const;
     IC CAgentManager& agent_manager() const;
     IC const MEMBER_REGISTRY& members() const;
     void register_member(CEntity* member);

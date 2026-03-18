@@ -147,6 +147,13 @@ void CSE_ALifeMonsterAbstract::update()
     **/
 }
 
+void CSE_ALifeMonsterAbstract::update_position()
+{
+    if (!bfActive())
+        return;
+    brain().update_position();
+}
+
 void CSE_ALifeMonsterAbstract::on_location_change() const { brain().on_location_change(); }
 CSE_ALifeItemWeapon* CSE_ALifeMonsterAbstract::tpfGetBestWeapon(ALife::EHitType& tHitType, float& fHitPower)
 {

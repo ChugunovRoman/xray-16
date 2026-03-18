@@ -29,11 +29,13 @@ CALifeMonsterDetailPathManager::CALifeMonsterDetailPathManager(object_type* obje
     m_destination.m_level_vertex_id = this->object().get_object().m_tNodeID;
     m_destination.m_position = this->object().get_object().o_Position;
     m_walked_distance = 0.f;
+    m_cached_draw_position_valid = false;
 }
 
 void CALifeMonsterDetailPathManager::target(
     const GameGraph::_GRAPH_ID& game_vertex_id, const u32& level_vertex_id, const Fvector& position)
 {
+    m_cached_draw_position_valid = false;
     VERIFY(ai().game_graph().valid_vertex_id(game_vertex_id));
     VERIFY((ai().game_graph().vertex(game_vertex_id)->level_id() != ai().alife().graph().level().level_id()) ||
         ai().level_graph().valid_vertex_id(level_vertex_id));
@@ -98,13 +100,33 @@ void CALifeMonsterDetailPathManager::update()
     if (current_time <= m_last_update_time)
         return;
 
-    //	if (ai().game_graph().vertex(object().m_tGraphID)->level_id() == ai().level_graph().level_id())
-    //		Msg							("[detail::update][%6d][%s]",Device.dwTimeGlobal,object().name_replace());
-
     ALife::_TIME_ID time_delta = current_time - m_last_update_time;
     update(time_delta);
-    // we advisedly "lost" time we need to process a query to avoid some undesirable effects
     m_last_update_time = ai().alife().time_manager().game_time();
+}
+
+void CALifeMonsterDetailPathManager::update_position()
+{
+    if (path().empty())
+        return;
+    ALife::_TIME_ID current_time = ai().alife().time_manager().game_time();
+    if (!m_last_update_time)
+    {
+        m_last_update_time = current_time;
+        return;
+    }
+    ALife::_TIME_ID time_delta;
+    if (current_time > m_last_update_time)
+        time_delta = current_time - m_last_update_time;
+    else
+    {
+        // Game time didn't advance (e.g. map open, pause). Use real time so position still updates every frame.
+        time_delta = (ALife::_TIME_ID)(Device.dwTimeDelta * ai().alife().time_manager().time_factor());
+        if (time_delta == 0)
+            return;
+    }
+    follow_path(time_delta);
+    m_last_update_time = current_time;
 }
 
 void CALifeMonsterDetailPathManager::make_inactual() { m_path.clear(); }
@@ -163,7 +185,6 @@ void CALifeMonsterDetailPathManager::actualize()
 
 void CALifeMonsterDetailPathManager::update(const ALife::_TIME_ID& time_delta)
 {
-    // first update has enormous time delta, therefore just skip it
     if (!m_last_update_time)
         return;
 
@@ -251,27 +272,51 @@ void CALifeMonsterDetailPathManager::follow_path(const ALife::_TIME_ID& time_del
     }
 }
 
-void CALifeMonsterDetailPathManager::on_switch_online() { m_path.clear(); }
-void CALifeMonsterDetailPathManager::on_switch_offline() { m_path.clear(); }
+void CALifeMonsterDetailPathManager::on_switch_online()
+{
+    m_path.clear();
+    m_cached_draw_position_valid = false;
+}
+void CALifeMonsterDetailPathManager::on_switch_offline()
+{
+    m_path.clear();
+    m_cached_draw_position_valid = false;
+}
 Fvector CALifeMonsterDetailPathManager::draw_level_position() const
 {
     if (path().empty())
+    {
+        if (m_cached_draw_position_valid)
+            return (m_cached_draw_position);
         return (object().get_object().Position());
+    }
 
     u32 path_size = path().size();
     if (path_size == 1)
-        return (object().get_object().Position());
+    {
+        Fvector pos = object().get_object().Position();
+        m_cached_draw_position = pos;
+        m_cached_draw_position_valid = true;
+        return (pos);
+    }
 
     VERIFY(m_path.back() == object().get_object().m_tGraphID);
 
     const GameGraph::CGameVertex* current = ai().game_graph().vertex(object().get_object().m_tGraphID);
     const GameGraph::CGameVertex* next = ai().game_graph().vertex(m_path[path_size - 2]);
     if (current->level_id() != next->level_id())
+    {
+        if (m_cached_draw_position_valid)
+            return (m_cached_draw_position);
         return (object().get_object().Position());
+    }
 
     Fvector current_vertex = current->level_point();
     Fvector next_vertex = next->level_point();
     Fvector direction = Fvector().sub(next_vertex, current_vertex);
     direction.normalize();
-    return (current_vertex.mad(direction, walked_distance()));
+    Fvector result = current_vertex.mad(direction, walked_distance());
+    m_cached_draw_position = result;
+    m_cached_draw_position_valid = true;
+    return (result);
 }
