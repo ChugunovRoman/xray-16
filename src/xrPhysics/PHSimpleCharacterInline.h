@@ -1,22 +1,8 @@
 #pragma once
 
-IC IPhysicsShellHolder* validated_contact_ref_object(dContact* c, bool bo1)
-{
-    dxGeomUserData* user_data = bo1 ? retrieveGeomUserData(c->geom.g2) : retrieveGeomUserData(c->geom.g1);
-    if (!user_data || !user_data->ph_ref_object || user_data->ref_object_id == u16(-1))
-        return nullptr;
-
-    auto* level_object = inl_ph_world().LevelObjects().net_Find(user_data->ref_object_id);
-    IPhysicsShellHolder* object = smart_cast<IPhysicsShellHolder*>(level_object);
-    if (!object || object != user_data->ph_ref_object || object->ObjectGetDestroy())
-    {
-        user_data->ph_ref_object = nullptr;
-        user_data->ref_object_id = u16(-1);
-        return nullptr;
-    }
-
-    return object;
-}
+// Declaration only: definition in PHSimpleCharacter.cpp so that IGameObject is a complete type
+// (required for smart_cast/dynamic_cast on Linux/macOS; MSVC is more permissive).
+IC IPhysicsShellHolder* validated_contact_ref_object(dContact* c, bool bo1);
 
 void CPHSimpleCharacter::UpdateStaticDamage(dContact* c, SGameMtl* tri_material, bool bo1)
 {

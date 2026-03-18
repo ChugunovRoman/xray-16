@@ -26,6 +26,24 @@
 #include "xrEngine/xr_object.h"
 #include "ph_valid_ode.h"
 
+IC IPhysicsShellHolder* validated_contact_ref_object(dContact* c, bool bo1)
+{
+    dxGeomUserData* user_data = bo1 ? retrieveGeomUserData(c->geom.g2) : retrieveGeomUserData(c->geom.g1);
+    if (!user_data || !user_data->ph_ref_object || user_data->ref_object_id == u16(-1))
+        return nullptr;
+
+    auto* level_object = inl_ph_world().LevelObjects().net_Find(user_data->ref_object_id);
+    IPhysicsShellHolder* object = smart_cast<IPhysicsShellHolder*>(level_object);
+    if (!object || object != user_data->ph_ref_object || object->ObjectGetDestroy())
+    {
+        user_data->ph_ref_object = nullptr;
+        user_data->ref_object_id = u16(-1);
+        return nullptr;
+    }
+
+    return object;
+}
+
 const float LOSE_CONTROL_DISTANCE = 0.5f; // fly distance to lose control
 const float CLAMB_DISTANCE = 0.5f;
 //const float CLIMB_GETUP_HEIGHT = 0.3f;
