@@ -42,6 +42,7 @@
 #include "doors.h"
 #include "xrNetServer/NET_Messages.h"
 #include "smart_zone.h"
+#include "xrScriptEngine/script_engine.hpp"
 
 extern MagicBox3 MagicMinBox(int iQuantity, const Fvector* akPoint);
 
@@ -1281,6 +1282,15 @@ void CGameObject::shedule_Update(u32 dt)
     // ~
     if (!GEnv.isDedicatedServer && !very_long_dead)
     {
+        // Lightweight per-frame Lua callback for actor only (hitmark, HUD, etc.). No full binder.
+        const bool is_actor = (cast_actor() != nullptr);
+        if (is_actor)
+        {
+            luabind::functor<void> actor_frame_update;
+            if (GEnv.ScriptEngine->functor("actor_frame_update", actor_frame_update))
+                actor_frame_update();
+        }
+
         // BUGFIX: мёртвые мутанты/НПС тоже должны получать shedule_Update через script binder,
         // иначе bind_monster:update() / bind_stalker:update() никогда не установят
         // callback.use_object (лут частей мутанта, обыск трупа).
@@ -1312,10 +1322,7 @@ void CGameObject::shedule_Update(u32 dt)
         if (m_next_script_binder_update_time == 0)
             m_next_script_binder_update_time = now_ms + (u32(ID()) % 350u);
 
-        // Per-object throttle: reduces chances of large synchronized luabind_update bursts.
-        // Now we apply it both for far and near objects to prevent synchronized bursts.
-        constexpr u32 BINDER_NEAR_INTERVAL_MS = 180;
-        constexpr u32 BINDER_FAR_INTERVAL_TIMED_MS = 450;
+        // Per-object throttle: intervals from npc_perf_binder_near_interval_ms / npc_perf_binder_far_throttle_ms (user.ltx).
         const bool run_binder_timed = now_ms >= m_next_script_binder_update_time;
 
         // Smart zones (смарт-террейны): no throttle — call binder every shedule_Update.
@@ -1332,15 +1339,13 @@ void CGameObject::shedule_Update(u32 dt)
             {
                 if (is_far_to_camera)
                 {
-                    // Jitter to avoid alignment between objects.
                     const u32 jitter = (u32(ID()) % 200);
-                    m_next_script_binder_update_time = now_ms + BINDER_FAR_INTERVAL_TIMED_MS + jitter;
+                    m_next_script_binder_update_time = now_ms + npc_perf_binder_far_throttle_ms + jitter;
                 }
                 else
                 {
-                    // Near: smaller interval for responsiveness.
                     const u32 jitter = (u32(ID()) % 120);
-                    m_next_script_binder_update_time = now_ms + BINDER_NEAR_INTERVAL_MS + jitter;
+                    m_next_script_binder_update_time = now_ms + npc_perf_binder_near_interval_ms + jitter;
                 }
             }
         }

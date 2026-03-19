@@ -22,6 +22,8 @@ extern u32 npc_perf_long_dead_skip_binder_ms;
 extern float npc_perf_binder_far_dist;
 extern u32 npc_perf_binder_far_interval_ms;
 extern u32 npc_perf_binder_far_phases;
+extern u32 npc_perf_binder_near_interval_ms;   // throttle: min interval between scriptBinder.shedule_Update for near NPCs (ms)
+extern u32 npc_perf_binder_far_throttle_ms;    // throttle: min interval between scriptBinder.shedule_Update for far NPCs (ms)
 
 // Stalker visibility (ai_stalker.cpp)
 extern u32 npc_perf_stalker_vis_interval_medium_ms;

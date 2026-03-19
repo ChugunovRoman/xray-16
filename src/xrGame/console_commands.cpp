@@ -187,6 +187,8 @@ u32 npc_perf_long_dead_skip_binder_ms = 5000;
 float npc_perf_binder_far_dist = 300.f;
 u32 npc_perf_binder_far_interval_ms = 250;
 u32 npc_perf_binder_far_phases = 6;
+u32 npc_perf_binder_near_interval_ms = 180;
+u32 npc_perf_binder_far_throttle_ms = 450;
 u32 npc_perf_stalker_vis_interval_medium_ms = 260;
 u32 npc_perf_stalker_vis_interval_far_ms = 550;
 float npc_perf_monster_vis_near_dist = 35.f;
@@ -2595,57 +2597,6 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "hit_anims_tune", &tune_hit_anims, 0, 1);
 /////////////////////////////////////////////HIT ANIMATION END////////////////////////////////////////////////////
 
-    // Performance / NPC throttling and cache (user.ltx)
-    CMD4(CCC_Float, "npc_perf_planner_near_dist", &npc_perf_planner_near_dist, 10.f, 100.f);
-    CMD4(CCC_Float, "npc_perf_planner_medium_dist", &npc_perf_planner_medium_dist, 30.f, 150.f);
-    CMD4(CCC_Integer, "npc_perf_planner_solve_interval_near_idle_ms", (int*)&npc_perf_planner_solve_interval_near_idle_ms, 50, 500);
-    CMD4(CCC_Integer, "npc_perf_planner_solve_interval_medium_ms", (int*)&npc_perf_planner_solve_interval_medium_ms, 150, 800);
-    CMD4(CCC_Integer, "npc_perf_planner_solve_interval_far_ms", (int*)&npc_perf_planner_solve_interval_far_ms, 400, 2000);
-    CMD4(CCC_Integer, "npc_perf_planner_solve_interval_combat_near_ms", (int*)&npc_perf_planner_solve_interval_combat_near_ms, 100, 600);
-    CMD4(CCC_Integer, "npc_perf_planner_actuality_interval_combat_ms", (int*)&npc_perf_planner_actuality_interval_combat_ms, 50, 300);
-    CMD4(CCC_Integer, "npc_perf_planner_actuality_interval_danger_ms", (int*)&npc_perf_planner_actuality_interval_danger_ms, 80, 300);
-    CMD4(CCC_Integer, "npc_perf_planner_actuality_interval_near_idle_ms", (int*)&npc_perf_planner_actuality_interval_near_idle_ms, 100, 500);
-    CMD4(CCC_Integer, "npc_perf_planner_graph_search_max_nodes", (int*)&npc_perf_planner_graph_search_max_nodes, 500, 5000);
-    CMD4(CCC_Integer, "npc_perf_long_dead_skip_binder_ms", (int*)&npc_perf_long_dead_skip_binder_ms, 2000, 15000);
-    CMD4(CCC_Float, "npc_perf_binder_far_dist", &npc_perf_binder_far_dist, 100.f, 600.f);
-    CMD4(CCC_Integer, "npc_perf_binder_far_interval_ms", (int*)&npc_perf_binder_far_interval_ms, 100, 600);
-    CMD4(CCC_Integer, "npc_perf_binder_far_phases", (int*)&npc_perf_binder_far_phases, 2, 16);
-    CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_medium_ms", (int*)&npc_perf_stalker_vis_interval_medium_ms, 150, 500);
-    CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_far_ms", (int*)&npc_perf_stalker_vis_interval_far_ms, 350, 1000);
-    CMD4(CCC_Float, "npc_perf_monster_vis_near_dist", &npc_perf_monster_vis_near_dist, 10.f, 80.f);
-    CMD4(CCC_Float, "npc_perf_monster_vis_medium_dist", &npc_perf_monster_vis_medium_dist, 40.f, 150.f);
-    CMD4(CCC_Integer, "npc_perf_monster_vis_interval_medium_ms", (int*)&npc_perf_monster_vis_interval_medium_ms, 120, 400);
-    CMD4(CCC_Integer, "npc_perf_monster_vis_interval_far_ms", (int*)&npc_perf_monster_vis_interval_far_ms, 200, 600);
-    CMD4(CCC_Integer, "npc_perf_ik_interval_near_idle_ms", (int*)&npc_perf_ik_interval_near_idle_ms, 30, 150);
-    CMD4(CCC_Integer, "npc_perf_ik_interval_medium_ms", (int*)&npc_perf_ik_interval_medium_ms, 100, 400);
-    CMD4(CCC_Integer, "npc_perf_ik_interval_far_ms", (int*)&npc_perf_ik_interval_far_ms, 250, 800);
-    CMD4(CCC_Integer, "npc_perf_ik_interval_disabled_ms", (int*)&npc_perf_ik_interval_disabled_ms, 10000, 60000);
-    CMD4(CCC_Integer, "npc_perf_state_mgr_animstate_ttl_ms", (int*)&npc_perf_state_mgr_animstate_ttl_ms, 50, 300);
-    CMD4(CCC_Integer, "npc_perf_script_combat_ttl_ms", (int*)&npc_perf_script_combat_ttl_ms, 50, 250);
-    CMD4(CCC_Integer, "npc_perf_evaluator_combat_enemy_cache_ttl_ms", (int*)&npc_perf_evaluator_combat_enemy_cache_ttl_ms, 50, 250);
-    CMD4(CCC_Integer, "npc_perf_danger_eval_ttl_ms", (int*)&npc_perf_danger_eval_ttl_ms, 80, 300);
-    CMD4(CCC_Integer, "npc_perf_script_danger_eval_ttl_ms", (int*)&npc_perf_script_danger_eval_ttl_ms, 80, 300);
-    CMD4(CCC_Integer, "npc_perf_state_mgr_idle_combat_ttl_ms", (int*)&npc_perf_state_mgr_idle_combat_ttl_ms, 40, 200);
-    CMD4(CCC_Integer, "npc_perf_state_mgr_end_ttl_ms", (int*)&npc_perf_state_mgr_end_ttl_ms, 60, 250);
-    CMD4(CCC_Integer, "npc_perf_planner_update_min_interval_ms", (int*)&npc_perf_planner_update_min_interval_ms, 20, 100);
-    CMD4(CCC_Integer, "npc_perf_planner_update_min_interval_far_ms", (int*)&npc_perf_planner_update_min_interval_far_ms, 30, 150);
-    CMD4(CCC_Integer, "npc_perf_evaluator_abuse_ttl_ms", (int*)&npc_perf_evaluator_abuse_ttl_ms, 50, 250);
-    CMD4(CCC_Integer, "npc_perf_gather_items_eval_ttl_ms", (int*)&npc_perf_gather_items_eval_ttl_ms, 40, 200);
-    CMD4(CCC_Integer, "npc_perf_state_mgr_movement_ttl_ms", (int*)&npc_perf_state_mgr_movement_ttl_ms, 40, 200);
-    CMD4(CCC_Integer, "npc_perf_motivator_medium_interval", (int*)&npc_perf_motivator_medium_interval, 400, 2000);
-    CMD4(CCC_Integer, "npc_perf_motivator_far_interval", (int*)&npc_perf_motivator_far_interval, 1500, 5000);
-    CMD4(CCC_Integer, "npc_perf_motivator_slow_near_interval", (int*)&npc_perf_motivator_slow_near_interval, 500, 2000);
-    CMD4(CCC_Integer, "npc_perf_motivator_slow_medium_interval", (int*)&npc_perf_motivator_slow_medium_interval, 2000, 6000);
-    CMD4(CCC_Integer, "npc_perf_motivator_slow_far_interval", (int*)&npc_perf_motivator_slow_far_interval, 4000, 10000);
-    CMD4(CCC_Integer, "npc_perf_motivator_switch_near_interval", (int*)&npc_perf_motivator_switch_near_interval, 400, 1500);
-    CMD4(CCC_Integer, "npc_perf_motivator_switch_medium_interval", (int*)&npc_perf_motivator_switch_medium_interval, 800, 3000);
-    CMD4(CCC_Integer, "npc_perf_motivator_switch_far_interval", (int*)&npc_perf_motivator_switch_far_interval, 2000, 6000);
-    CMD4(CCC_Integer, "npc_perf_motivator_callback_near_interval", (int*)&npc_perf_motivator_callback_near_interval, 400, 1500);
-    CMD4(CCC_Integer, "npc_perf_motivator_callback_medium_interval", (int*)&npc_perf_motivator_callback_medium_interval, 800, 3000);
-    CMD4(CCC_Integer, "npc_perf_motivator_callback_far_interval", (int*)&npc_perf_motivator_callback_far_interval, 2000, 6000);
-    CMD4(CCC_Integer, "npc_perf_motivator_dead_interval", (int*)&npc_perf_motivator_dead_interval, 1500, 6000);
-    CMD4(CCC_Integer, "npc_perf_sim_brain_actor_update_interval", (int*)&npc_perf_sim_brain_actor_update_interval, 5000, 20000);
-
     CMD1(CCC_DumpModelBones, "debug_dump_model_bones");
 
     CMD1(CCC_DrawGameGraphAll, "ai_draw_game_graph_all");
@@ -2666,6 +2617,59 @@ void CCC_RegisterCommands()
 
     CMD1(CCC_ShowAnimationStats, "ai_show_animation_stats");
 #endif // DEBUG
+
+    // Performance / NPC throttling and cache (user.ltx)
+    CMD4(CCC_Float, "npc_perf_planner_near_dist", &npc_perf_planner_near_dist, 1.f, 2000.f);
+    CMD4(CCC_Float, "npc_perf_planner_medium_dist", &npc_perf_planner_medium_dist, 1.f, 2000.f);
+    CMD4(CCC_Integer, "npc_perf_planner_solve_interval_near_idle_ms", (int*)&npc_perf_planner_solve_interval_near_idle_ms, 10, 60000);
+    CMD4(CCC_Integer, "npc_perf_planner_solve_interval_medium_ms", (int*)&npc_perf_planner_solve_interval_medium_ms, 10, 60000);
+    CMD4(CCC_Integer, "npc_perf_planner_solve_interval_far_ms", (int*)&npc_perf_planner_solve_interval_far_ms, 10, 60000);
+    CMD4(CCC_Integer, "npc_perf_planner_solve_interval_combat_near_ms", (int*)&npc_perf_planner_solve_interval_combat_near_ms, 10, 60000);
+    CMD4(CCC_Integer, "npc_perf_planner_actuality_interval_combat_ms", (int*)&npc_perf_planner_actuality_interval_combat_ms, 10, 60000);
+    CMD4(CCC_Integer, "npc_perf_planner_actuality_interval_danger_ms", (int*)&npc_perf_planner_actuality_interval_danger_ms, 10, 60000);
+    CMD4(CCC_Integer, "npc_perf_planner_actuality_interval_near_idle_ms", (int*)&npc_perf_planner_actuality_interval_near_idle_ms, 10, 60000);
+    CMD4(CCC_Integer, "npc_perf_planner_graph_search_max_nodes", (int*)&npc_perf_planner_graph_search_max_nodes, 100, 100000);
+    CMD4(CCC_Integer, "npc_perf_long_dead_skip_binder_ms", (int*)&npc_perf_long_dead_skip_binder_ms, 0, 120000);
+    CMD4(CCC_Float, "npc_perf_binder_far_dist", &npc_perf_binder_far_dist, 1.f, 2000.f);
+    CMD4(CCC_Integer, "npc_perf_binder_far_interval_ms", (int*)&npc_perf_binder_far_interval_ms, 10, 10000);
+    CMD4(CCC_Integer, "npc_perf_binder_far_phases", (int*)&npc_perf_binder_far_phases, 1, 64);
+    CMD4(CCC_Integer, "npc_perf_binder_near_interval_ms", (int*)&npc_perf_binder_near_interval_ms, 10, 5000);
+    CMD4(CCC_Integer, "npc_perf_binder_far_throttle_ms", (int*)&npc_perf_binder_far_throttle_ms, 50, 10000);
+    CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_medium_ms", (int*)&npc_perf_stalker_vis_interval_medium_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_far_ms", (int*)&npc_perf_stalker_vis_interval_far_ms, 10, 30000);
+    CMD4(CCC_Float, "npc_perf_monster_vis_near_dist", &npc_perf_monster_vis_near_dist, 1.f, 500.f);
+    CMD4(CCC_Float, "npc_perf_monster_vis_medium_dist", &npc_perf_monster_vis_medium_dist, 1.f, 500.f);
+    CMD4(CCC_Integer, "npc_perf_monster_vis_interval_medium_ms", (int*)&npc_perf_monster_vis_interval_medium_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_monster_vis_interval_far_ms", (int*)&npc_perf_monster_vis_interval_far_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_ik_interval_near_idle_ms", (int*)&npc_perf_ik_interval_near_idle_ms, 10, 60000);
+    CMD4(CCC_Integer, "npc_perf_ik_interval_medium_ms", (int*)&npc_perf_ik_interval_medium_ms, 10, 60000);
+    CMD4(CCC_Integer, "npc_perf_ik_interval_far_ms", (int*)&npc_perf_ik_interval_far_ms, 10, 60000);
+    CMD4(CCC_Integer, "npc_perf_ik_interval_disabled_ms", (int*)&npc_perf_ik_interval_disabled_ms, 1000, 120000);
+    CMD4(CCC_Integer, "npc_perf_state_mgr_animstate_ttl_ms", (int*)&npc_perf_state_mgr_animstate_ttl_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_script_combat_ttl_ms", (int*)&npc_perf_script_combat_ttl_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_evaluator_combat_enemy_cache_ttl_ms", (int*)&npc_perf_evaluator_combat_enemy_cache_ttl_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_danger_eval_ttl_ms", (int*)&npc_perf_danger_eval_ttl_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_script_danger_eval_ttl_ms", (int*)&npc_perf_script_danger_eval_ttl_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_state_mgr_idle_combat_ttl_ms", (int*)&npc_perf_state_mgr_idle_combat_ttl_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_state_mgr_end_ttl_ms", (int*)&npc_perf_state_mgr_end_ttl_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_planner_update_min_interval_ms", (int*)&npc_perf_planner_update_min_interval_ms, 10, 10000);
+    CMD4(CCC_Integer, "npc_perf_planner_update_min_interval_far_ms", (int*)&npc_perf_planner_update_min_interval_far_ms, 10, 10000);
+    CMD4(CCC_Integer, "npc_perf_evaluator_abuse_ttl_ms", (int*)&npc_perf_evaluator_abuse_ttl_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_gather_items_eval_ttl_ms", (int*)&npc_perf_gather_items_eval_ttl_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_state_mgr_movement_ttl_ms", (int*)&npc_perf_state_mgr_movement_ttl_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_motivator_medium_interval", (int*)&npc_perf_motivator_medium_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_motivator_far_interval", (int*)&npc_perf_motivator_far_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_motivator_slow_near_interval", (int*)&npc_perf_motivator_slow_near_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_motivator_slow_medium_interval", (int*)&npc_perf_motivator_slow_medium_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_motivator_slow_far_interval", (int*)&npc_perf_motivator_slow_far_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_motivator_switch_near_interval", (int*)&npc_perf_motivator_switch_near_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_motivator_switch_medium_interval", (int*)&npc_perf_motivator_switch_medium_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_motivator_switch_far_interval", (int*)&npc_perf_motivator_switch_far_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_motivator_callback_near_interval", (int*)&npc_perf_motivator_callback_near_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_motivator_callback_medium_interval", (int*)&npc_perf_motivator_callback_medium_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_motivator_callback_far_interval", (int*)&npc_perf_motivator_callback_far_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_motivator_dead_interval", (int*)&npc_perf_motivator_dead_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_sim_brain_actor_update_interval", (int*)&npc_perf_sim_brain_actor_update_interval, 1000, 120000);
 
 #ifndef MASTER_GOLD
     CMD3(CCC_Mask, "ai_ignore_actor", &psAI_Flags, aiIgnoreActor);
