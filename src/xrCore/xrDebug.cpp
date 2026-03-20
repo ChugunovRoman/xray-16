@@ -2,6 +2,7 @@
 #pragma hdrstop
 
 #include "xrDebug.h"
+#include "Debug/xrSentry.hpp"
 #include "Debug/StackTrace.h"
 #include "os_clipboard.h"
 #include "log.h"
@@ -17,8 +18,8 @@
 #   include <new.h> // for _set_new_mode
 #   include <errorrep.h> // ReportFault
 
-#   define USE_BUG_TRAP
-#   ifdef USE_BUG_TRAP
+#   if !defined(USE_SENTRY)
+#       define USE_BUG_TRAP
 #       include "BugTrap.h"
 #   endif
 
@@ -409,12 +410,14 @@ void WINAPI xrDebug::PreErrorHandler(INT_PTR)
 
 void xrDebug::SetupExceptionHandler()
 {
+#if defined(XR_PLATFORM_WINDOWS)
+    // disable 'appname has stopped working' popup dialog (BugTrap or Sentry)
+    const auto prevMode = SetErrorMode(SEM_NOGPFAULTERRORBOX);
+    SetErrorMode(prevMode | SEM_NOGPFAULTERRORBOX);
+#endif
 #if defined(USE_BUG_TRAP) && defined(XR_PLATFORM_WINDOWS)
     const auto commandLine = GetCommandLine();
 
-    // disable 'appname has stopped working' popup dialog
-    const auto prevMode = SetErrorMode(SEM_NOGPFAULTERRORBOX);
-    SetErrorMode(prevMode | SEM_NOGPFAULTERRORBOX);
     BT_InstallSehFilter();
 
     if (!GEnv.isDedicatedServer && !strstr(commandLine, "-silent_error_mode"))
@@ -560,10 +563,16 @@ LONG WINAPI xrDebug::UnhandledFilter(EXCEPTION_POINTERS* exPtrs)
         msgRes = ShowMessage(fatalError, msg);
     }
 
+#ifdef USE_BUG_TRAP
     BT_SetUserMessage(fatalError);
     BT_SaveSnapshotEx(exPtrs, nullptr);
+#endif
 
+#if !defined(USE_SENTRY)
     const auto reportRes = ReportFault(exPtrs, 0);
+#else
+    const auto reportRes = frrvOk;
+#endif
     if (msgRes != AssertionResult::abort ||
         reportRes == frrvLaunchDebugger)
     {
@@ -697,6 +706,9 @@ void xrDebug::OnThreadExit()
 void xrDebug::Initialize(pcstr commandLine)
 {
     ZoneScoped;
+#if defined(USE_SENTRY)
+    xrSentry_Initialize(commandLine);
+#endif
     *BugReportFile = 0;
     OnThreadSpawn();
     SetupExceptionHandler();
@@ -714,6 +726,10 @@ void xrDebug::Finalize()
 {
     OnThreadExit();
     SDL_SetAssertionHandler(nullptr, nullptr);
+#if defined(USE_SENTRY)
+    // Shut down Sentry (Crashpad) before removing the process exception filter.
+    xrSentry_Shutdown();
+#endif
 #if defined(XR_PLATFORM_WINDOWS)
     SetUnhandledExceptionFilter(nullptr);
 #endif

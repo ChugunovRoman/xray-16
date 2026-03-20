@@ -158,6 +158,14 @@ target_sources_grouped(
 
 target_sources_grouped(
     TARGET xrCore
+    NAME "Debug core\\Sentry"
+    FILES
+    Debug/xrSentry.cpp
+    Debug/xrSentry.hpp
+)
+
+target_sources_grouped(
+    TARGET xrCore
     NAME "Events"
     FILES
     Events/Notifier.h
@@ -493,6 +501,21 @@ if (MEMORY_ALLOCATOR STREQUAL "mimalloc")
     target_compile_definitions(xrCore PRIVATE USE_MIMALLOC)
 else()
     target_compile_definitions(xrCore PRIVATE USE_PURE_ALLOC)
+endif()
+
+if (WITH_SENTRY)
+    target_compile_definitions(xrCore PRIVATE USE_SENTRY)
+    target_link_libraries(xrCore PRIVATE sentry::sentry)
+    set(XRAY_SENTRY_EMBED_DSN "" CACHE STRING
+        "Optional Sentry DSN embedded in binary (overrides empty Debug/xrSentry_embed.h for this build)")
+    if (NOT XRAY_SENTRY_EMBED_DSN STREQUAL "")
+        set(_XRAY_SENTRY_GEN "${CMAKE_CURRENT_BINARY_DIR}/sentry_gen")
+        file(MAKE_DIRECTORY "${_XRAY_SENTRY_GEN}")
+        file(WRITE "${_XRAY_SENTRY_GEN}/xrSentry_embed_override.h"
+            "#pragma once\n"
+            "#define XRAY_SENTRY_DEFAULT_DSN_STR \"${XRAY_SENTRY_EMBED_DSN}\"\n")
+        target_include_directories(xrCore PRIVATE "${_XRAY_SENTRY_GEN}")
+    endif()
 endif()
 
 set_target_properties(xrCore PROPERTIES

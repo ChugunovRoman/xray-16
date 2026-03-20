@@ -1,0 +1,64 @@
+# One-click: download Symbols.Release x64 from a finished "Build" workflow run and upload PDBs to Sentry.
+# 1) Open the green check run for your commit → "Build" workflow → copy RUN_ID from the URL (.../actions/runs/RUN_ID)
+# 2) Actions → this workflow → Run workflow → paste run_id
+# Repo secrets: SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT (same as optional auto-upload in cibuild.yml)
+name: Sentry symbols from CI run
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Build workflow run ID (number in .../actions/runs/THIS)'
+        required: true
+        type: string
+      sentry_org:
+        description: 'Sentry org slug (empty = use secret SENTRY_ORG)'
+        required: false
+        default: ''
+      sentry_project:
+        description: 'Sentry project slug (empty = use secret SENTRY_PROJECT)'
+        required: false
+        default: ''
+
+jobs:
+  upload:
+    runs-on: windows-latest
+    steps:
+      - name: Download Symbols artifact from run
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: cibuild.yml
+          run_id: ${{ github.event.inputs.run_id }}
+          # Artifact name from cibuild.yml: Symbols.Release x64 (github-N).7z
+          name: ^Symbols\.Release x64 \(github-[0-9]+\)\.7z$
+          name_is_regexp: true
+          path: _sym_dl
+          if_no_artifact_found: fail
+
+      - name: Install sentry-cli
+        run: npm install -g @sentry/cli
+
+      - name: Extract 7z and upload to Sentry
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG_SECRET: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT_SECRET: ${{ secrets.SENTRY_PROJECT }}
+        shell: pwsh
+        run: |
+          if (-not $env:SENTRY_AUTH_TOKEN) { throw 'Set secret SENTRY_AUTH_TOKEN' }
+          $org = '${{ github.event.inputs.sentry_org }}'.Trim()
+          $proj = '${{ github.event.inputs.sentry_project }}'.Trim()
+          if (-not $org) { $org = $env:SENTRY_ORG_SECRET }
+          if (-not $proj) { $proj = $env:SENTRY_PROJECT_SECRET }
+          if (-not $org -or -not $proj) { throw 'Set SENTRY_ORG and SENTRY_PROJECT secrets, or fill workflow inputs.' }
+
+          $archives = Get-ChildItem -Path '_sym_dl' -Recurse -Filter '*.7z' -File
+          if ($archives.Count -eq 0) { throw 'No .7z found under _sym_dl' }
+          if ($archives.Count -gt 1) { Write-Warning "Multiple 7z files; using first: $($archives[0].FullName)" }
+          $seven = $archives[0].FullName
+          New-Item -ItemType Directory -Path '_sym_out' -Force | Out-Null
+          & 7z x $seven "-o_sym_out" -y
+          if ($LASTEXITCODE -ne 0) { throw "7z extract failed: $seven" }
+
+          sentry-cli debug-files upload --org $org --project $proj _sym_out

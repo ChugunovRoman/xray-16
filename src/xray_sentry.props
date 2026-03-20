@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Import from xrCore / xr_3da after xray.props (xr_variables defines xrCrashHelperLibs default). -->
+  <PropertyGroup>
+    <UseSentry Condition="'$(UseSentry)'==''">false</UseSentry>
+    <SentryNativeRoot>$(xrExternals)sentry-native\</SentryNativeRoot>
+    <SentryInstallRoot>$(xrSdkDir)sentry\$(xrPlatform)\$(Configuration)\</SentryInstallRoot>
+    <!-- sentry-native CMake install puts import libs under prefix/lib/ (GNUInstallDirs) -->
+    <SentryLibraryDir>$(SentryInstallRoot)lib\</SentryLibraryDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(UseSentry)'=='true'">
+    <xrCrashHelperLibs>sentry.lib;</xrCrashHelperLibs>
+  </PropertyGroup>
+</Project>

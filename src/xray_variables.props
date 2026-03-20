@@ -13,5 +13,7 @@
     <xrIntDir>$(SolutionDir)..\build\intermediate\$(xrPlatform)\$(Configuration)\</xrIntDir>
     <xrSdkDir>$(SolutionDir)..\sdk\</xrSdkDir>
     <xrExternals>$(SolutionDir)..\Externals\</xrExternals>
+    <!-- Overridden in xray_sentry.props when UseSentry=true (sentry.lib replaces BugTrap.lib) -->
+    <xrCrashHelperLibs>BugTrap.lib;</xrCrashHelperLibs>
   </PropertyGroup>
 </Project>

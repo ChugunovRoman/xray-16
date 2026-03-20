@@ -27,6 +27,7 @@
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\xray.props" />
+    <Import Project="..\xray_sentry_exe.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
@@ -87,7 +88,7 @@
     <Image Include="stalker_soc.ico" />
   </ItemGroup>
   <ItemGroup>
-    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\BugTrap.dll">
+    <CopyFileToFolders Include="..\..\sdk\binaries\$(PlatformShortName)\BugTrap.dll" Condition="'$(UseSentry)'!='true'">
       <FileType>Document</FileType>
     </CopyFileToFolders>
     <CopyFileToFolders Condition="'$(Platform)'=='Win32'" Include="..\..\sdk\binaries\$(PlatformShortName)\libcrypto-3.dll">

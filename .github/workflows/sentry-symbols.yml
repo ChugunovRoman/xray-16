@@ -1,0 +1,36 @@
+# Upload PDBs to Sentry (manual): PDB folder must exist in this checkout (e.g. local build).
+# For PDBs from GitHub Actions artifacts use workflow "Sentry symbols from CI run" instead.
+name: Sentry symbols (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pdb_path:
+        description: 'Directory containing PDBs (relative to repo root)'
+        required: true
+        default: 'bin/x64/Release'
+      sentry_org:
+        description: 'Sentry organization slug'
+        required: true
+      sentry_project:
+        description: 'Sentry project slug'
+        required: true
+
+jobs:
+  upload:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@main
+
+      - name: Install sentry-cli
+        run: npm install -g @sentry/cli
+
+      - name: Upload debug files
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        shell: pwsh
+        run: |
+          if (-not $env:SENTRY_AUTH_TOKEN) { throw "Configure secret SENTRY_AUTH_TOKEN" }
+          $pdb = Join-Path $env:GITHUB_WORKSPACE "${{ github.event.inputs.pdb_path }}"
+          if (-not (Test-Path $pdb)) { throw "Path not found: $pdb (build locally or adjust pdb_path)" }
+          sentry-cli debug-files upload --org "${{ github.event.inputs.sentry_org }}" --project "${{ github.event.inputs.sentry_project }}" $pdb

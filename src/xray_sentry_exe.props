@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="xray_sentry.props" />
+  <!-- Static xrCore (Master Gold): sentry symbols are resolved at final link of the executable. -->
+  <ItemDefinitionGroup Condition="'$(UseSentry)'=='true' and $(Configuration.Contains('Master Gold'))">
+    <Link>
+      <AdditionalLibraryDirectories>$(SentryLibraryDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>sentry.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <!-- Shared sentry: import lib is in lib\; runtime DLLs must sit next to xrEngine.exe (loader search path). -->
+  <Target Name="XrayEnsureSentryRuntimeDll" BeforeTargets="PrepareForBuild" Condition="'$(UseSentry)'=='true'">
+    <Error
+      Condition="!Exists('$(SentryInstallRoot)bin\sentry.dll')"
+      Text="Sentry: missing $(SentryInstallRoot)bin\sentry.dll. Run misc\windows\build_sentry_native.ps1 for this Platform/Configuration, then cmake --install (script does this). With shared sentry, the DLL is installed under the prefix\bin folder." />
+  </Target>
+  <Target Name="CopySentryRuntimeArtifacts" AfterTargets="Build" Condition="'$(UseSentry)'=='true'">
+    <Copy SourceFiles="$(SentryInstallRoot)bin\sentry.dll"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy Condition="Exists('$(SentryInstallRoot)bin\crashpad_wer.dll')"
+          SourceFiles="$(SentryInstallRoot)bin\crashpad_wer.dll"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy Condition="Exists('$(SentryInstallRoot)crashpad_handler.exe')"
+          SourceFiles="$(SentryInstallRoot)crashpad_handler.exe"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy Condition="!Exists('$(SentryInstallRoot)crashpad_handler.exe') AND Exists('$(SentryInstallRoot)bin\crashpad_handler.exe')"
+          SourceFiles="$(SentryInstallRoot)bin\crashpad_handler.exe"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

@@ -11,7 +11,9 @@ jobs:
   windows:
     name: Windows ${{ matrix.Configuration }} ${{ matrix.Platform }} (msvc)
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
+    env:
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
     strategy:
       fail-fast: false
       matrix:
@@ -22,7 +24,26 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Write xrSentry_embed.h from SENTRY_DSN
+      shell: bash
+      run: bash misc/ci/write_xr_sentry_embed.sh
+
     - uses: microsoft/setup-msbuild@main
+
+    - name: Cache sentry-native MSVC install (sdk/sentry)
+      id: cache-sentry-sdk
+      uses: actions/cache@v4
+      with:
+        path: sdk/sentry
+        key: sentry-msvc-${{ matrix.Platform }}-${{ matrix.Configuration }}-${{ hashFiles('Externals/sentry-native/CMakeLists.txt', 'misc/windows/build_sentry_native.ps1') }}
+
+    - name: Build sentry-native for MSBuild
+      if: steps.cache-sentry-sdk.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        $p = "${{ matrix.Platform }}"
+        if ($p -eq 'x86') { $p = 'Win32' }
+        & "${{ github.workspace }}\misc\windows\build_sentry_native.ps1" -Platform $p -Configuration "${{ matrix.Configuration }}"
 
     - uses: nuget/setup-nuget@main
 
@@ -31,11 +52,28 @@ jobs:
 
     - name: Build
       working-directory: src
-      run: msbuild /m /p:Configuration="${{ matrix.Configuration }}" /p:Platform="${{ matrix.Platform }}" engine.sln
+      run: msbuild /m /p:Configuration="${{ matrix.Configuration }}" /p:Platform="${{ matrix.Platform }}" /p:UseSentry=true engine.sln
 
     - name: Prepare artifacts
       shell: cmd
       run: misc/windows/xr_pack_build.cmd "${{ matrix.Configuration }}" "${{ matrix.Platform }}"
+
+    # Optional: set repo secrets SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT to auto-upload PDBs
+    # for Windows Release x64 after each successful pack (same PDBs as in Symbols.*.7z artifact).
+    - name: Upload PDBs to Sentry (Release x64, optional)
+      if: matrix.Configuration == 'Release' && matrix.Platform == 'x64'
+      env:
+        SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+        SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+      shell: pwsh
+      run: |
+        if (-not $env:SENTRY_AUTH_TOKEN) { Write-Host 'Sentry symbol upload skipped (no SENTRY_AUTH_TOKEN).'; exit 0 }
+        if (-not $env:SENTRY_ORG -or -not $env:SENTRY_PROJECT) { Write-Host 'Sentry symbol upload skipped (set SENTRY_ORG and SENTRY_PROJECT secrets).'; exit 0 }
+        npm install -g @sentry/cli
+        $pdbDir = Join-Path $env:GITHUB_WORKSPACE 'res\bin'
+        if (-not (Test-Path $pdbDir)) { throw "Expected PDB folder missing: $pdbDir" }
+        sentry-cli debug-files upload --org $env:SENTRY_ORG --project $env:SENTRY_PROJECT $pdbDir
 
     - name: Upload OpenXRay artifact
       uses: actions/upload-artifact@main
@@ -81,6 +119,7 @@ jobs:
     env:
       CFLAGS: "-w"
       CXXFLAGS: "-w"
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
     strategy:
       fail-fast: false
@@ -150,8 +189,11 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Write xrSentry_embed.h from SENTRY_DSN
+      run: bash misc/ci/write_xr_sentry_embed.sh
+
     - name: Run CMake
-      run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DCMAKE_UNITY_BUILD=ON ${{ matrix.platform.flags }} --log-level VERBOSE
+      run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DCMAKE_UNITY_BUILD=ON -DWITH_SENTRY=ON ${{ matrix.platform.flags }} --log-level VERBOSE
 
     - name: Run CMake Build
       id: cmake-build
@@ -180,6 +222,7 @@ jobs:
     env:
       CFLAGS: "-w"
       CXXFLAGS: "-w"
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
     strategy:
       fail-fast: false
       matrix:
@@ -203,6 +246,9 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Write xrSentry_embed.h from SENTRY_DSN
+      run: bash misc/ci/write_xr_sentry_embed.sh
+
     - name: Setup ${{ matrix.platform.name }} and packages
       uses: cross-platform-actions/action@v0.32.0
       with:
@@ -211,7 +257,7 @@ jobs:
         version: ${{ matrix.platform.os-version }}
         cpu_count: 4
         memory: 13G
-        environment_variables: CFLAGS CXXFLAGS
+        environment_variables: CFLAGS CXXFLAGS SENTRY_DSN
         shutdown_vm: false
         sync_files: runner-to-vm
         run: ${{ matrix.platform.install-cmd }}
@@ -224,7 +270,7 @@ jobs:
         version: ${{ matrix.platform.os-version }}
         cpu_count: 4
         memory: 13G
-        environment_variables: CFLAGS CXXFLAGS
+        environment_variables: CFLAGS CXXFLAGS SENTRY_DSN
         shutdown_vm: false
         sync_files: false
         run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.Configuration }} -DCMAKE_UNITY_BUILD=ON --log-level VERBOSE
@@ -237,7 +283,7 @@ jobs:
         version: ${{ matrix.platform.os-version }}
         cpu_count: 4
         memory: 13G
-        environment_variables: CFLAGS CXXFLAGS
+        environment_variables: CFLAGS CXXFLAGS SENTRY_DSN
         shutdown_vm: false
         sync_files: false
         run: cmake --build build --config ${{ matrix.Configuration }} --parallel 4
