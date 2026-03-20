@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Ensure Externals/sentry-native exists with crashpad (for WITH_SENTRY / MSBuild sentry build).
 # Use when sentry-native is not a git submodule in .gitmodules (e.g. fork only added Sentry in CMake).
-# After a fresh clone, applies misc/ci/apply_crashpad_gcc_fix.py (GCC + unity build template parse).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -34,17 +33,6 @@ fi
 if ! have_crashpad; then
     echo "[ensure_sentry_native] ERROR: crashpad still missing at ${CRASHPAD_CMAKE}" >&2
     exit 1
-fi
-
-_fix_py="${ROOT}/misc/ci/apply_crashpad_gcc_fix.py"
-if [[ -f "${_fix_py}" ]]; then
-    if command -v python3 >/dev/null 2>&1; then
-        python3 "${_fix_py}"
-    elif command -v python >/dev/null 2>&1; then
-        python "${_fix_py}"
-    else
-        echo "[ensure_sentry_native] WARNING: python3/python not found; skip apply_crashpad_gcc_fix.py" >&2
-    fi
 fi
 
 echo "[ensure_sentry_native] OK."

@@ -32,5 +32,10 @@ if (WITH_SENTRY)
     endif()
     set(SENTRY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(SENTRY_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    # OpenXRay enables CMAKE_UNITY_BUILD globally; Crashpad Linux snapshot sources then
+    # fail to parse under GCC in unity TU (template-id vs <). Build sentry-native without unity.
+    set(_xray_saved_unity_build "${CMAKE_UNITY_BUILD}")
+    set(CMAKE_UNITY_BUILD OFF)
     add_subdirectory("${_XRAY_SENTRY_ROOT}" "${CMAKE_BINARY_DIR}/externals/sentry-native-build")
+    set(CMAKE_UNITY_BUILD "${_xray_saved_unity_build}")
 endif()

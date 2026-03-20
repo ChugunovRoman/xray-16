@@ -9,9 +9,11 @@ cmake --build build
 
 **Linux:** sentry-native uses the **curl** transport and CMake’s `find_package(CURL COMPONENTS AsynchDNS)`. Install the distro **libcurl development** package (e.g. Debian/Ubuntu **`libcurl4-openssl-dev`**, Fedora **`libcurl-devel`**, Alpine **`curl-dev`**), otherwise configuration fails with `CURL: Required feature AsynchDNS is not found`.
 
+**Unity builds:** OpenXRay sets `CMAKE_UNITY_BUILD` for the main tree; **`Externals/CMakeLists.txt` turns it off** while adding `sentry-native`, because Crashpad’s Linux snapshot code hits GCC parse bugs in a combined translation unit.
+
 `Externals/sentry-native` must exist with **recursive submodules** (CMake does not auto-fetch sentry-native).
 
-**CI:** `misc/ci/ensure_sentry_native.sh` runs on GitHub Actions after checkout and clones [sentry-native](https://github.com/getsentry/sentry-native) `0.7.17` if the tree is missing (your fork may not list it in `.gitmodules` yet). It then runs `misc/ci/apply_crashpad_gcc_fix.py` so **GCC** can compile Crashpad Linux snapshot code (template/`!` parse issues with **unity builds**).
+**CI:** `misc/ci/ensure_sentry_native.sh` runs on GitHub Actions after checkout and clones [sentry-native](https://github.com/getsentry/sentry-native) `0.7.17` if the tree is missing (your fork may not list it in `.gitmodules` yet).
 
 **Рекомендация для репозитория:** добавить submodule и закоммитить, чтобы `git clone --recursive` сразу тянул дерево:
 
