@@ -18,8 +18,27 @@
 #include "xrAICore/Navigation/level_graph.h"
 #include "alife_monster_movement_manager.h"
 #include "alife_monster_detail_path_manager.h"
+#include <cstring>
 
 extern void setup_location_types_line(GameGraph::TERRAIN_VECTOR& m_vertex_types, LPCSTR string);
+
+namespace
+{
+bool squad_trace_enabled()
+{
+    return Core.Params && std::strstr(Core.Params, "-squad_trace");
+}
+
+void log_squad_trace_basic(const char* tag, const CSE_ALifeOnlineOfflineGroup* squad, ALife::_OBJECT_ID memberId = 0xffff)
+{
+    if (!squad_trace_enabled() || !squad)
+        return;
+
+    const ALife::_OBJECT_ID commander = !squad->squad_members().empty() ? squad->squad_members().begin()->first : 0xffff;
+    Msg("[SQUAD_TRACE][%s] squad_id=%u name=%s online=%s members=%u commander=%u member=%u",
+        tag, squad->ID, squad->name_replace(), squad->m_bOnline ? "true" : "false", squad->npc_count(), commander, memberId);
+}
+}
 
 CSE_ALifeItemWeapon* CSE_ALifeOnlineOfflineGroup::tpfGetBestWeapon(ALife::EHitType& tHitType, float& fHitPower)
 {
@@ -80,6 +99,7 @@ Fvector CSE_ALifeOnlineOfflineGroup::draw_level_position() const
 
 void CSE_ALifeOnlineOfflineGroup::register_member(ALife::_OBJECT_ID member_id)
 {
+    log_squad_trace_basic("register_member:begin", this, member_id);
     VERIFY(m_members.find(member_id) == m_members.end());
     CSE_ALifeDynamicObject* object = ai().alife().objects().object(member_id);
     CSE_ALifeMonsterAbstract* monster = smart_cast<CSE_ALifeMonsterAbstract*>(object);
@@ -111,6 +131,11 @@ void CSE_ALifeOnlineOfflineGroup::register_member(ALife::_OBJECT_ID member_id)
         alife().graph().level().remove(object);
     }
     VERIFY((monster->m_group_id == 0xffff) || (monster->m_group_id == ID));
+    if (squad_trace_enabled())
+    {
+        Msg("[SQUAD_TRACE][register_member:group_id] squad_id=%u member=%u prev_group=%u new_group=%u obj_online=%s obj_graph=%u",
+            ID, member_id, monster->m_group_id, ID, object->m_bOnline ? "true" : "false", object->m_tGraphID);
+    }
     monster->m_group_id = ID;
     m_members.emplace(member_id, monster);
 
@@ -124,16 +149,24 @@ void CSE_ALifeOnlineOfflineGroup::register_member(ALife::_OBJECT_ID member_id)
     m_fCurrentLevelGoingSpeed = monster->m_fCurrentLevelGoingSpeed;
     m_flags.set(flUsedAI_Locations, TRUE);
     alife().graph().update(this);
+    log_squad_trace_basic("register_member:end", this, member_id);
 }
 
 void CSE_ALifeOnlineOfflineGroup::unregister_member(ALife::_OBJECT_ID member_id)
 {
+    // DebugBreak();
+    log_squad_trace_basic("unregister_member:begin", this, member_id);
     CALifeGraphRegistry& graph = alife().graph();
     //	CALifeLevelRegistry			&level = graph.level();
 
     MEMBERS::iterator I = m_members.find(member_id);
     VERIFY(I != m_members.end());
     VERIFY((*I).second->m_group_id == ID);
+    if (squad_trace_enabled())
+    {
+        Msg("[SQUAD_TRACE][unregister_member:group_id] squad_id=%u member=%u prev_group=%u new_group=%u member_alive=%s",
+            ID, member_id, (*I).second->m_group_id, u16(0xffff), (*I).second->g_Alive() ? "true" : "false");
+    }
     (*I).second->m_group_id = 0xffff;
 
     graph.update((*I).second);
@@ -144,6 +177,7 @@ void CSE_ALifeOnlineOfflineGroup::unregister_member(ALife::_OBJECT_ID member_id)
     {
         m_flags.set(flUsedAI_Locations, FALSE);
     }
+    log_squad_trace_basic("unregister_member:end", this, member_id);
 }
 
 CSE_ALifeOnlineOfflineGroup::MEMBER* CSE_ALifeOnlineOfflineGroup::member(ALife::_OBJECT_ID member_id, bool no_assert)
@@ -175,6 +209,7 @@ bool CSE_ALifeOnlineOfflineGroup::synchronize_location()
 
 void CSE_ALifeOnlineOfflineGroup::try_switch_online()
 {
+    log_squad_trace_basic("try_switch_online", this);
     if (m_members.empty())
         return;
 
@@ -214,6 +249,7 @@ void CSE_ALifeOnlineOfflineGroup::try_switch_online()
 
 void CSE_ALifeOnlineOfflineGroup::try_switch_offline()
 {
+    log_squad_trace_basic("try_switch_offline", this);
     if (m_members.empty())
         return;
 
@@ -252,6 +288,7 @@ void CSE_ALifeOnlineOfflineGroup::try_switch_offline()
 
 void CSE_ALifeOnlineOfflineGroup::switch_online()
 {
+    log_squad_trace_basic("switch_online:begin", this);
     R_ASSERT(!m_bOnline);
     m_bOnline = true;
 
@@ -265,10 +302,12 @@ void CSE_ALifeOnlineOfflineGroup::switch_online()
 
     alife().scheduled().remove(this);
     alife().graph().remove(this, m_tGraphID, false);
+    log_squad_trace_basic("switch_online:end", this);
 }
 
 void CSE_ALifeOnlineOfflineGroup::switch_offline()
 {
+    log_squad_trace_basic("switch_offline:begin", this);
     R_ASSERT(m_bOnline);
     m_bOnline = false;
 
@@ -297,10 +336,19 @@ void CSE_ALifeOnlineOfflineGroup::switch_offline()
 
     alife().scheduled().add(this);
     alife().graph().add(this, m_tGraphID, false);
+    log_squad_trace_basic("switch_offline:end", this);
 }
 
 bool CSE_ALifeOnlineOfflineGroup::redundant() const { return (m_members.empty()); }
-void CSE_ALifeOnlineOfflineGroup::notify_on_member_death(MEMBER* member) { unregister_member(member->ID); }
+void CSE_ALifeOnlineOfflineGroup::notify_on_member_death(MEMBER* member)
+{
+    if (squad_trace_enabled() && member)
+    {
+        Msg("[SQUAD_TRACE][notify_on_member_death] squad_id=%u member=%u member_name=%s",
+            ID, member->ID, member->name_replace());
+    }
+    unregister_member(member->ID);
+}
 void CSE_ALifeOnlineOfflineGroup::on_before_register()
 {
     m_tGraphID = GameGraph::_GRAPH_ID(-1);
@@ -309,6 +357,7 @@ void CSE_ALifeOnlineOfflineGroup::on_before_register()
 
 void CSE_ALifeOnlineOfflineGroup::on_after_game_load()
 {
+    log_squad_trace_basic("on_after_game_load:begin", this);
     if (m_members.empty())
         return;
 
@@ -329,6 +378,8 @@ void CSE_ALifeOnlineOfflineGroup::on_after_game_load()
 
     for (i = temp; i != e; ++i)
         register_member(*i);
+
+    log_squad_trace_basic("on_after_game_load:end", this);
 }
 
 ALife::_OBJECT_ID CSE_ALifeOnlineOfflineGroup::commander_id()

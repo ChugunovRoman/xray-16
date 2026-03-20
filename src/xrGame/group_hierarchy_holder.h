@@ -86,6 +86,8 @@ public:
     IC const MEMBER_REGISTRY& members() const;
     void register_member(CEntity* member);
     void unregister_member(CEntity* member);
+    // After ALife/script hard-delete desync, group can exist without m_agent_manager while stalker still runs AI.
+    void lazy_ensure_agent_manager_for_stalker(class CAI_Stalker* stalker);
     IC CSquadHierarchyHolder& squad() const;
 
 #ifdef SQUAD_HIERARCHY_HOLDER_USE_LEADER

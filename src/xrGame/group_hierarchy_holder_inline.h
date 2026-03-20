@@ -28,7 +28,8 @@ IC CGroupHierarchyHolder::CGroupHierarchyHolder(CSquadHierarchyHolder* squad)
 
 IC CAgentManager& CGroupHierarchyHolder::agent_manager() const
 {
-    VERIFY(m_agent_manager);
+    // Release: VERIFY is a no-op; R_ASSERT2 avoids silent nullptr deref (e.g. hierarchy desync after ALife release).
+    R_ASSERT2(m_agent_manager, "CGroupHierarchyHolder::agent_manager: m_agent_manager is nullptr");
     return (*m_agent_manager);
 }
 

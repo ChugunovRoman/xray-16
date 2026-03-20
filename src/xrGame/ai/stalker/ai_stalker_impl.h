@@ -19,7 +19,13 @@
 
 IC CAgentManager& CAI_Stalker::agent_manager() const
 {
-    return (Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()).agent_manager());
+    CGroupHierarchyHolder& group = Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group());
+    if (!group.get_agent_manager())
+        const_cast<CGroupHierarchyHolder&>(group).lazy_ensure_agent_manager_for_stalker(const_cast<CAI_Stalker*>(this));
+
+    CAgentManager* const am = group.get_agent_manager();
+    R_ASSERT2(am, "CAI_Stalker::agent_manager: nullptr after lazy_ensure_agent_manager_for_stalker");
+    return (*am);
 }
 
 IC Fvector CAI_Stalker::weapon_shot_effector_direction(const Fvector& current) const

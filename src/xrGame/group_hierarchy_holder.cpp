@@ -10,6 +10,7 @@
 #include "group_hierarchy_holder.h"
 #include "squad_hierarchy_holder.h"
 #include "Entity.h"
+#include <algorithm>
 #include "agent_manager.h"
 #include "agent_member_manager.h"
 #include "agent_memory_manager.h"
@@ -26,6 +27,38 @@ CGroupHierarchyHolder::~CGroupHierarchyHolder()
     VERIFY(!m_sound_objects);
     VERIFY(!m_hit_objects);
     VERIFY(!m_agent_manager);
+}
+
+void CGroupHierarchyHolder::lazy_ensure_agent_manager_for_stalker(CAI_Stalker* stalker)
+{
+    if (!stalker || m_agent_manager)
+        return;
+
+    const auto it = std::find(m_members.begin(), m_members.end(), static_cast<CEntity*>(stalker));
+    if (it == m_members.end())
+    {
+        register_member(stalker);
+        return;
+    }
+
+    if (!m_visible_objects)
+    {
+        R_ASSERT2(!m_members.empty(), "lazy_ensure: missing squad sense buffers but member list empty");
+        m_visible_objects = xr_new<VISIBLE_OBJECTS>();
+        m_sound_objects = xr_new<SOUND_OBJECTS>();
+        m_hit_objects = xr_new<HIT_OBJECTS>();
+    }
+
+    m_agent_manager = xr_new<CAgentManager>();
+    agent_manager().memory().set_squad_objects(&visible_objects());
+    agent_manager().memory().set_squad_objects(&sound_objects());
+    agent_manager().memory().set_squad_objects(&hit_objects());
+
+    for (CEntity* entity : m_members)
+    {
+        if (smart_cast<CAI_Stalker*>(entity))
+            agent_manager().member().add(entity);
+    }
 }
 
 #ifdef SQUAD_HIERARCHY_HOLDER_USE_LEADER
