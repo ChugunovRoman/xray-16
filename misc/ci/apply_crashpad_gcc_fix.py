@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-Idempotent fixes for Crashpad Linux sources so GCC can parse template-id after ! and ?:.
-See misc/ci/patches/sentry-crashpad/0001-crashpad-linux-gcc-template-parse.patch (reference).
+Idempotent fixes for Crashpad Linux sources under GCC + CMAKE_UNITY_BUILD.
+
+- debug_rendezvous: `= Foo<Bar>(...)` and ternary + template are parsed as comparisons;
+  use `this->template InitializeSpecific<...>(...)`.
+- exception_snapshot_linux: `!(ReadSiginfo<...>(...))` breaks parsing; use local bools.
+
+Invoked from misc/ci/ensure_sentry_native.sh after clone/submodule init.
 """
 from __future__ import annotations
 
@@ -10,6 +15,85 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 NATIVE = ROOT / "Externals" / "sentry-native"
+
+DEBUG_FINAL = """  INITIALIZATION_STATE_SET_INITIALIZING(initialized_);
+  // Unity build + GCC: use template keyword so <Traits*> is a template-arg list,
+  // not comparison (init_ok = InitializeSpecific < Traits64 > ...).
+  bool init_ok;
+  if (memory.Is64Bit()) {
+    init_ok = this->template InitializeSpecific<Traits64>(memory, address);
+  } else {
+    init_ok = this->template InitializeSpecific<Traits32>(memory, address);
+  }
+  if (!init_ok) {
+    return false;
+  }"""
+
+DEBUG_OLD_TERNARY = """  INITIALIZATION_STATE_SET_INITIALIZING(initialized_);
+  if (!(memory.Is64Bit() ? InitializeSpecific<Traits64>(memory, address)
+                         : InitializeSpecific<Traits32>(memory, address))) {
+    return false;
+  }"""
+
+DEBUG_OLD_ASSIGN = """  INITIALIZATION_STATE_SET_INITIALIZING(initialized_);
+  bool init_ok;
+  if (memory.Is64Bit()) {
+    init_ok = InitializeSpecific<Traits64>(memory, address);
+  } else {
+    init_ok = InitializeSpecific<Traits32>(memory, address);
+  }
+  if (!init_ok) {
+    return false;
+  }"""
+
+EX_FINAL = """  if (process_reader->Is64Bit()) {
+    // Unity build + GCC: avoid !(ReadSiginfo<...>) — ! and < interact badly; use locals.
+    const bool context_ok_64 =
+        ReadContext<ContextTraits64>(process_reader, context_address);
+    const bool siginfo_ok_64 =
+        ReadSiginfo<Traits64>(process_reader, siginfo_address);
+    if (!context_ok_64 || !siginfo_ok_64) {
+      return false;
+    }
+  } else {
+#if !defined(ARCH_CPU_RISCV64)
+    const bool context_ok_32 =
+        ReadContext<ContextTraits32>(process_reader, context_address);
+    const bool siginfo_ok_32 =
+        ReadSiginfo<Traits32>(process_reader, siginfo_address);
+    if (!context_ok_32 || !siginfo_ok_32) {
+      return false;
+    }
+#endif
+  }"""
+
+EX_OLD_PLAIN = """  if (process_reader->Is64Bit()) {
+    if (!ReadContext<ContextTraits64>(process_reader, context_address) ||
+        !ReadSiginfo<Traits64>(process_reader, siginfo_address)) {
+      return false;
+    }
+  } else {
+#if !defined(ARCH_CPU_RISCV64)
+    if (!ReadContext<ContextTraits32>(process_reader, context_address) ||
+        !ReadSiginfo<Traits32>(process_reader, siginfo_address)) {
+      return false;
+    }
+#endif
+  }"""
+
+EX_OLD_PAREN = """  if (process_reader->Is64Bit()) {
+    if (!(ReadContext<ContextTraits64>(process_reader, context_address)) ||
+        !(ReadSiginfo<Traits64>(process_reader, siginfo_address))) {
+      return false;
+    }
+  } else {
+#if !defined(ARCH_CPU_RISCV64)
+    if (!(ReadContext<ContextTraits32>(process_reader, context_address)) ||
+        !(ReadSiginfo<Traits32>(process_reader, siginfo_address))) {
+      return false;
+    }
+#endif
+  }"""
 
 
 def fix_file(path: Path, replacements: list[tuple[str, str]]) -> bool:
@@ -40,56 +124,15 @@ def main() -> int:
     changed |= fix_file(
         dr,
         [
-            (
-                """  INITIALIZATION_STATE_SET_INITIALIZING(initialized_);
-  if (!(memory.Is64Bit() ? InitializeSpecific<Traits64>(memory, address)
-                         : InitializeSpecific<Traits32>(memory, address))) {
-    return false;
-  }""",
-                """  INITIALIZATION_STATE_SET_INITIALIZING(initialized_);
-  bool init_ok;
-  if (memory.Is64Bit()) {
-    init_ok = InitializeSpecific<Traits64>(memory, address);
-  } else {
-    init_ok = InitializeSpecific<Traits32>(memory, address);
-  }
-  if (!init_ok) {
-    return false;
-  }""",
-            ),
+            (DEBUG_OLD_TERNARY, DEBUG_FINAL),
+            (DEBUG_OLD_ASSIGN, DEBUG_FINAL),
         ],
     )
     changed |= fix_file(
         ex,
         [
-            (
-                """  if (process_reader->Is64Bit()) {
-    if (!ReadContext<ContextTraits64>(process_reader, context_address) ||
-        !ReadSiginfo<Traits64>(process_reader, siginfo_address)) {
-      return false;
-    }
-  } else {
-#if !defined(ARCH_CPU_RISCV64)
-    if (!ReadContext<ContextTraits32>(process_reader, context_address) ||
-        !ReadSiginfo<Traits32>(process_reader, siginfo_address)) {
-      return false;
-    }
-#endif
-  }""",
-                """  if (process_reader->Is64Bit()) {
-    if (!(ReadContext<ContextTraits64>(process_reader, context_address)) ||
-        !(ReadSiginfo<Traits64>(process_reader, siginfo_address))) {
-      return false;
-    }
-  } else {
-#if !defined(ARCH_CPU_RISCV64)
-    if (!(ReadContext<ContextTraits32>(process_reader, context_address)) ||
-        !(ReadSiginfo<Traits32>(process_reader, siginfo_address))) {
-      return false;
-    }
-#endif
-  }""",
-            ),
+            (EX_OLD_PLAIN, EX_FINAL),
+            (EX_OLD_PAREN, EX_FINAL),
         ],
     )
 
