@@ -153,7 +153,7 @@ jobs:
       with:
         arch: ${{ matrix.platform.arch }}
         branch: 'latest-stable'
-        packages: bash build-base cmake curl-dev git mold sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev
+        packages: bash build-base cmake curl-dev git mold python3 sdl2-dev lzo-dev libjpeg-turbo-dev openal-soft-dev libogg-dev libtheora-dev libvorbis-dev zlib-dev
 
     - name: Install Ubuntu packages
       if: ${{ matrix.platform.name == 'Ubuntu' }}

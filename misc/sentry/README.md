@@ -11,7 +11,7 @@ cmake --build build
 
 `Externals/sentry-native` must exist with **recursive submodules** (CMake does not auto-fetch sentry-native).
 
-**CI:** `misc/ci/ensure_sentry_native.sh` runs on GitHub Actions after checkout and clones [sentry-native](https://github.com/getsentry/sentry-native) `0.7.17` if the tree is missing (your fork may not list it in `.gitmodules` yet).
+**CI:** `misc/ci/ensure_sentry_native.sh` runs on GitHub Actions after checkout and clones [sentry-native](https://github.com/getsentry/sentry-native) `0.7.17` if the tree is missing (your fork may not list it in `.gitmodules` yet). It then runs `misc/ci/apply_crashpad_gcc_fix.py` so **GCC** can compile Crashpad Linux snapshot code (template/`!` parse issues with **unity builds**).
 
 **Рекомендация для репозитория:** добавить submodule и закоммитить, чтобы `git clone --recursive` сразу тянул дерево:
 

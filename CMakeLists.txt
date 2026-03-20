@@ -12,6 +12,20 @@ project(OpenXRay
     LANGUAGES CXX C
 )
 
+# Crashpad (Sentry) looks up mach *.defs under ${CMAKE_OSX_SYSROOT}/usr/include/mach/.
+# If SYSROOT is empty (some generators/CI), paths become /usr/include/... and configure fails.
+if (APPLE AND NOT CMAKE_OSX_SYSROOT)
+    execute_process(
+        COMMAND xcrun --show-sdk-path
+        OUTPUT_VARIABLE _xray_osx_sdk
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _xray_xcrun_rv)
+    if (_xray_xcrun_rv EQUAL 0 AND EXISTS "${_xray_osx_sdk}")
+        set(CMAKE_OSX_SYSROOT "${_xray_osx_sdk}" CACHE PATH "macOS SDK path" FORCE)
+        message(STATUS "CMAKE_OSX_SYSROOT set to ${CMAKE_OSX_SYSROOT} (xcrun --show-sdk-path)")
+    endif()
+endif()
+
 option(BUILD_SHARED_LIBS "Build shared libraries"     ${BUILD_SHARED_LIBS_DEFAULT_VALUE})
 
 option(XRAY_USE_LUAJIT   "Use LuaJIT"                 ON)
