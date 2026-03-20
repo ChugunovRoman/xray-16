@@ -7,6 +7,8 @@ cmake -B build -S . -DWITH_SENTRY=ON
 cmake --build build
 ```
 
+**Linux:** sentry-native uses the **curl** transport and CMake’s `find_package(CURL COMPONENTS AsynchDNS)`. Install the distro **libcurl development** package (e.g. Debian/Ubuntu **`libcurl4-openssl-dev`**, Fedora **`libcurl-devel`**, Alpine **`curl-dev`**), otherwise configuration fails with `CURL: Required feature AsynchDNS is not found`.
+
 `Externals/sentry-native` must exist with **recursive submodules** (CMake does not auto-fetch sentry-native).
 
 **CI:** `misc/ci/ensure_sentry_native.sh` runs on GitHub Actions after checkout and clones [sentry-native](https://github.com/getsentry/sentry-native) `0.7.17` if the tree is missing (your fork may not list it in `.gitmodules` yet).
