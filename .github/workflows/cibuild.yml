@@ -201,7 +201,12 @@ jobs:
       run: bash misc/ci/write_xr_sentry_embed.sh
 
     - name: Run CMake
-      run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DCMAKE_UNITY_BUILD=ON -DWITH_SENTRY=ON ${{ matrix.platform.flags }} --log-level VERBOSE
+      run: |
+        if [ "${{ matrix.platform.name }}" = "Alpine" ]; then
+          cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DCMAKE_UNITY_BUILD=ON -DWITH_SENTRY=OFF ${{ matrix.platform.flags }} --log-level VERBOSE
+        else
+          cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} -DCMAKE_UNITY_BUILD=ON -DWITH_SENTRY=ON ${{ matrix.platform.flags }} --log-level VERBOSE
+        fi
 
     - name: Run CMake Build
       id: cmake-build

@@ -11,6 +11,8 @@ cmake --build build
 
 **Unity builds:** OpenXRay sets `CMAKE_UNITY_BUILD` for the main tree; **`Externals/CMakeLists.txt` turns it off** while adding `sentry-native`, because Crashpad’s Linux snapshot code hits GCC parse bugs in a combined translation unit.
 
+**Alpine (musl):** GitHub Actions **CMake** job builds Alpine matrix rows **without** Sentry (`-DWITH_SENTRY=OFF`): Crashpad in sentry-native is not musl-clean upstream.
+
 `Externals/sentry-native` must exist with **recursive submodules** (CMake does not auto-fetch sentry-native).
 
 **CI:** `misc/ci/ensure_sentry_native.sh` runs on GitHub Actions after checkout and clones [sentry-native](https://github.com/getsentry/sentry-native) `0.7.17` if the tree is missing (your fork may not list it in `.gitmodules` yet).
@@ -46,7 +48,7 @@ BugTrap is disabled when `USE_SENTRY` is defined (`UseSentry=true`).
 Сборка с Sentry уже завязана на workflow:
 
 - **Windows (MSBuild):** после checkout вызывается `write_xr_sentry_embed.sh`, кэшируется `sdk/sentry`, при промахе кэша — `build_sentry_native.ps1` для текущих `matrix.Platform` / `matrix.Configuration`, затем `msbuild ... /p:UseSentry=true`.
-- **CMake (Ubuntu, macOS, Alpine, Fedora):** в строку CMake добавлено `-DWITH_SENTRY=ON`.
+- **CMake (Ubuntu, macOS, Fedora):** в `cibuild.yml` для шага CMake задано `-DWITH_SENTRY=ON`. **Alpine** в CI собирается **без** Sentry (`-DWITH_SENTRY=OFF`).
 
 **Обязательно в репозитории:** каталог `Externals/sentry-native` с инициализированными подмодулями (в CI `submodules: recursive`). Если этого нет — добавьте [sentry-native](https://github.com/getsentry/sentry-native) как submodule или закоммитьте дерево с `git submodule update --init --recursive`.
 
