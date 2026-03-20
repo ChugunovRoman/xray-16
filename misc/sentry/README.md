@@ -9,6 +9,17 @@ cmake --build build
 
 `Externals/sentry-native` must exist with **recursive submodules** (CMake does not auto-fetch sentry-native).
 
+**CI:** `misc/ci/ensure_sentry_native.sh` runs on GitHub Actions after checkout and clones [sentry-native](https://github.com/getsentry/sentry-native) `0.7.17` if the tree is missing (your fork may not list it in `.gitmodules` yet).
+
+**Рекомендация для репозитория:** добавить submodule и закоммитить, чтобы `git clone --recursive` сразу тянул дерево:
+
+```bash
+git submodule add -b 0.7.17 https://github.com/getsentry/sentry-native.git Externals/sentry-native
+git -C Externals/sentry-native submodule update --init --recursive
+git add .gitmodules Externals/sentry-native
+git commit -m "Add sentry-native submodule"
+```
+
 ## Visual Studio / MSBuild
 
 1. Ensure `Externals/sentry-native` exists (clone tag `0.7.17` from [getsentry/sentry-native](https://github.com/getsentry/sentry-native)), then run:
