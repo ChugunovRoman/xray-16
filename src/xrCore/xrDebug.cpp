@@ -3,6 +3,11 @@
 
 #include "xrDebug.h"
 #include "Debug/xrSentry.hpp"
+
+namespace
+{
+pcstr s_sentry_command_line = nullptr;
+}
 #include "Debug/StackTrace.h"
 #include "os_clipboard.h"
 #include "log.h"
@@ -706,9 +711,7 @@ void xrDebug::OnThreadExit()
 void xrDebug::Initialize(pcstr commandLine)
 {
     ZoneScoped;
-#if defined(USE_SENTRY)
-    xrSentry_Initialize(commandLine);
-#endif
+    s_sentry_command_line = commandLine;
     *BugReportFile = 0;
     OnThreadSpawn();
     SetupExceptionHandler();
@@ -719,6 +722,16 @@ void xrDebug::Initialize(pcstr commandLine)
 #endif
 #ifdef MASTER_GOLD
     ShowErrorMessage = commandLine ? !!strstr(commandLine, "-show_error_window") : false;
+#endif
+}
+
+void xrDebug::InitializeSentry(pcstr commandLine)
+{
+#if defined(USE_SENTRY)
+    const pcstr cmd = commandLine ? commandLine : s_sentry_command_line;
+    xrSentry_Initialize(cmd);
+#else
+    (void)commandLine;
 #endif
 }
 

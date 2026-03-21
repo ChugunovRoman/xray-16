@@ -363,8 +363,9 @@ CApplication::~CApplication()
     }
 
     // xrDebug::Finalize() must run while SDL is still initialized (it clears
-    // SDL_SetAssertionHandler) and before Core._destroy() so Sentry can shut down
-    // cleanly before xrMemory and other subsystems are torn down.
+    // SDL_SetAssertionHandler) and before Core._destroy() so Sentry (started after
+    // render device create) can shut down cleanly before xrMemory and other
+    // subsystems are torn down.
     xrDebug::Finalize();
     Core._destroy();
     {

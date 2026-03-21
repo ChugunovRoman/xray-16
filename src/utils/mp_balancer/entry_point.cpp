@@ -5,6 +5,7 @@
 void main(int argc, char* argv[])
 {
     xrDebug::Initialize(false);
+    xrDebug::InitializeSentry(nullptr);
     Core.Initialize("mp_balancer", nullptr, true, "fsgame.ltx");
 
     SetConsoleOutputCP(1251);

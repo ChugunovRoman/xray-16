@@ -25,6 +25,8 @@
 
 namespace
 {
+bool s_xr_sentry_started = false;
+
 sentry_value_t before_send_hook(sentry_value_t event, void* /*hint*/, void* /*closure*/)
 {
     // Hook for future scrubbing (paths, user folders). Keep event as-is for now.
@@ -48,6 +50,9 @@ bool build_path_next_to_exe(const char* fileName, char* out, size_t outSize)
 
 void xrSentry_Initialize(pcstr commandLine)
 {
+    if (s_xr_sentry_started)
+        return;
+
     sentry_options_t* options = sentry_options_new();
 
     const char* dsn = std::getenv("SENTRY_DSN");
@@ -128,7 +133,11 @@ void xrSentry_Initialize(pcstr commandLine)
     // On failure it frees them internally. The caller must not sentry_options_free()
     // after sentry_init — that would leave g_options dangling and crash on shutdown.
     if (sentry_init(options) != 0)
+    {
         Msg("! [Sentry]: sentry_init failed");
+        return;
+    }
+    s_xr_sentry_started = true;
 
     if (commandLine && std::strstr(commandLine, "-sentry_test_av_crash"))
     {
@@ -137,7 +146,13 @@ void xrSentry_Initialize(pcstr commandLine)
     }
 }
 
-void xrSentry_Shutdown() { sentry_close(); }
+void xrSentry_Shutdown()
+{
+    if (!s_xr_sentry_started)
+        return;
+    sentry_close();
+    s_xr_sentry_started = false;
+}
 
 #else // !USE_SENTRY
 

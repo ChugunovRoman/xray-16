@@ -38,6 +38,9 @@ void CRenderDevice::Create()
     UpdateWindowProps();
     GEnv.Render->Create(m_sdlWnd, dwWidth, dwHeight, fWidth_2, fHeight_2);
 
+    // Sentry (Crashpad) after GPU/device setup — avoids driver init races on some systems.
+    xrDebug::InitializeSentry(Core.Params);
+
     Memory.mem_compact();
     b_is_Ready = true;
 

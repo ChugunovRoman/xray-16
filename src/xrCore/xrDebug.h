@@ -84,6 +84,8 @@ private:
 public:
     xrDebug() = delete;
     static void Initialize(pcstr commandLine);
+    /** When USE_SENTRY: call after the render device exists (e.g. CRenderDevice::Create). If commandLine is null, uses the string passed to Initialize(). */
+    static void InitializeSentry(pcstr commandLine = nullptr);
     static void Finalize();
     static void OnThreadSpawn();
     static void OnThreadExit();
