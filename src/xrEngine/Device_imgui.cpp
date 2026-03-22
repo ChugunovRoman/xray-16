@@ -234,8 +234,8 @@ void CRenderDevice::InitializeImGui()
 
     editor().InitBackend();
 
-    if (io.BackendFlags & ImGuiBackendFlags_PlatformHasViewports)
-        io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    // ViewportsEnable is set in CRenderDevice::Initialize() after GEnv.Render exists: Windows + D3D11 keeps
+    // multi-viewport off to avoid stack overflow (0xC00000FD) in Present / NVIDIA UMD with extra swap chains.
 }
 
 void CRenderDevice::DestroyImGui()

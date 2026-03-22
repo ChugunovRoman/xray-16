@@ -395,6 +395,9 @@ public:
     virtual void Begin() = 0;
     virtual void Clear() = 0;
     virtual void End() = 0;
+    // Called after End() returns so IDXGISwapChain::Present runs with a shallower stack (driver + hooks
+    // are sensitive to remaining stack space; see 0xC00000FD in nvwgf2umx.dll).
+    virtual void PresentFrame() = 0;
     virtual void ClearTarget() = 0;
     virtual void SetCacheXform(Fmatrix& mView, Fmatrix& mProject) = 0;
     virtual void OnAssetsChanged() = 0;

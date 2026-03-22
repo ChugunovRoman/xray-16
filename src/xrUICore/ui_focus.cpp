@@ -20,7 +20,7 @@ limitations under the License.
 #include "Windows/UIWindow.h"
 #include "Cursor/UICursor.h"
 
-#include "xrCore/buffer_vector.h"
+#include "xrCommon/xr_vector.h"
 #include "xrEngine/editor_helper.h"
 
 #include <array>
@@ -179,37 +179,36 @@ bool CUIFocusSystem::IsNonValuable(const CUIWindow* focusable) const
 
 void CUIFocusSystem::Update(const CUIWindow* root)
 {
-    // temp vector allows to prevent calling for IsFocusValuable twice.
-    buffer_vector<const CUIWindow*> temp{ xr_alloca(sizeof(CUIWindow*) * m_valuable.size()), m_valuable.size() };
+    // Heap: xr_alloca(m_valuable.size()) could exceed stack if the focus list grows large.
+    xr_vector<const CUIWindow*> temp;
+    temp.reserve(m_valuable.size());
 
-    for (auto it = m_valuable.begin(); it != m_valuable.end(); ++it)
+    for (auto it = m_valuable.begin(); it != m_valuable.end();)
     {
         if ((*it)->IsFocusValuable(root, m_focus_locker))
+        {
+            ++it;
             continue;
-        temp.push_back(*it);
-        it = m_valuable.erase(it);
-
-        if (it == m_valuable.end())
-            break;
-
+        }
         if (*it == m_current_focused)
             m_current_focused = nullptr;
+        temp.push_back(*it);
+        it = m_valuable.erase(it);
     }
 
-    for (auto it = m_non_valuable.begin(); it != m_non_valuable.end(); ++it)
+    for (auto it = m_non_valuable.begin(); it != m_non_valuable.end();)
     {
         if (!(*it)->IsFocusValuable(root, m_focus_locker))
+        {
+            ++it;
             continue;
+        }
         m_valuable.emplace_back(*it);
         it = m_non_valuable.erase(it);
-        if (it == m_non_valuable.end())
-            break;
     }
 
     for (const auto window : temp)
         m_non_valuable.emplace_back(window);
-
-    // no need to clear temp vector, it's stack allocated.
 
     if (m_current_focused && !m_current_focused->CursorOverWindow())
         m_current_focused = nullptr;

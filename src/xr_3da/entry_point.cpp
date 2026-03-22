@@ -4,6 +4,10 @@
 #include "xrGame/xrGame.h"
 #include "Include/xrRender/xrRender.h"
 
+#if defined(XR_PLATFORM_WINDOWS)
+#include <Windows.h>
+#endif
+
 #if !defined(XR_PLATFORM_WINDOWS)
 #include <unistd.h>
 #include <stdlib.h>
@@ -43,13 +47,11 @@ struct tracy_raii
     }
 };
 
-int entry_point(pcstr commandLine)
+static int RunGameImpl(pcstr commandLine)
 {
     tracy_raii raii;
     auto* game = strstr(commandLine, "-nogame") ? nullptr : &xrGame;
-
     CApplication app{ commandLine, game, s_render_modules };
-
     return app.Run();
 }
 
@@ -61,10 +63,57 @@ int StackoverflowFilter(const int exceptionCode)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+// Main thread stack from the PE header can be ignored or capped in some setups; the render/D3D path
+// needs a large reserve. A dedicated thread with an explicit stack size is reliable.
+namespace
+{
+constexpr DWORD kGameThreadStackBytes = 128u * 1024u * 1024u;
+
+struct GameThreadCtx
+{
+    pcstr command_line{};
+    int exit_code{};
+};
+
+DWORD WINAPI GameThreadEntry(void* param)
+{
+    auto* ctx = static_cast<GameThreadCtx*>(param);
+    __try
+    {
+        ctx->exit_code = RunGameImpl(ctx->command_line);
+    }
+    __except (StackoverflowFilter(GetExceptionCode()))
+    {
+        _resetstkoflw();
+        FATAL("stack overflow");
+        ctx->exit_code = 0;
+    }
+    return 0;
+}
+} // namespace
+#endif
+
+int entry_point(pcstr commandLine)
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    GameThreadCtx ctx{ commandLine, 0 };
+    if (HANDLE h = ::CreateThread(nullptr, kGameThreadStackBytes, GameThreadEntry, &ctx,
+            STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr))
+    {
+        ::WaitForSingleObject(h, INFINITE);
+        ::CloseHandle(h);
+        return ctx.exit_code;
+    }
+#endif
+    return RunGameImpl(commandLine);
+}
+
+#if defined(XR_PLATFORM_WINDOWS)
 int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, char* commandLine, int cmdShow)
 {
     int result = 0;
-    // BugTrap can't handle stack overflow exception, so handle it here
+    // Stack overflow on the game thread is handled inside GameThreadEntry; this covers the fallback
+    // path when CreateThread fails and RunGameImpl runs on the main thread.
     __try
     {
         result = entry_point(commandLine);

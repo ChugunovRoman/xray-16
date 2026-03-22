@@ -311,6 +311,10 @@ void D3DXRenderBase::End()
     cleanup_contexts();
 
     HW.EndScene();
+}
+
+void D3DXRenderBase::PresentFrame()
+{
     HW.Present();
 }
 

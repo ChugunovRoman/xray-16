@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "embedded_resources_management.h"
 
+#include "Render.h"
 #include "xr_input.h"
 #include "GameFont.h"
 #include "PerformanceAlert.hpp"
@@ -98,6 +99,23 @@ void CRenderDevice::Initialize()
 #elif defined(__APPLE__) && defined(SDL_VIDEO_DRIVER_COCOA)
             main_viewport->PlatformHandleRaw = (void*)info.info.cocoa.window;
 #endif
+        }
+    }
+#endif
+
+#ifdef IMGUI_ENABLE_VIEWPORTS
+    if (!GEnv.isDedicatedServer && m_imgui_context && GEnv.Render)
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        if (io.BackendFlags & ImGuiBackendFlags_PlatformHasViewports)
+        {
+            bool enable_viewports = true;
+#if defined(XR_PLATFORM_WINDOWS)
+            if (GEnv.Render->GetBackendAPI() == IRender::BackendAPI::D3D11)
+                enable_viewports = false;
+#endif
+            if (enable_viewports)
+                io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
         }
     }
 #endif

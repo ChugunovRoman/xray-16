@@ -233,6 +233,11 @@ void CDialogHolder::OnFrame()
     UpdateCursorVisibility();
 
     CUIDialogWnd* wnd = TopInputReceiver();
+    // Run before CUIWindow::Update(): dialog Update() recurses the whole UI tree and can consume most of
+    // the thread stack; IsFocusValuable() on many focusables after that risks stack overflow (0xC00000FD).
+    if (m_is_foremost)
+        UI().Focus().Update(wnd);
+
     if (wnd && wnd->IsEnabled())
     {
         wnd->Update();
@@ -244,9 +249,6 @@ void CDialogHolder::OnFrame()
             if ((*it).enabled && (*it).wnd->IsEnabled())
                 (*it).wnd->Update();
     }
-
-    if (m_is_foremost)
-        UI().Focus().Update(wnd);
 
     m_b_in_update = false;
     if (!m_dialogsToRender_new.empty())

@@ -37,6 +37,12 @@ set_target_properties(xr_3da PROPERTIES
     PREFIX ""
 )
 
+# Default 1 MiB thread stack is often insufficient for Present → DXGI → NVIDIA UMD when hooks load
+# (RTSS, GeForce overlay). 32 MiB main thread reserve for RTX + heavy driver stacks.
+if (MSVC)
+    target_link_options(xr_3da PRIVATE /STACK:33554432)
+endif ()
+
 install(TARGETS xr_3da RUNTIME
     DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )

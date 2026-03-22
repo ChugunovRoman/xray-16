@@ -43,6 +43,8 @@
       <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
       <ImportLibrary>$(xrLibDir)xr_3da.lib</ImportLibrary>
       <ImageHasSafeExceptionHandlers Condition="'$(Configuration)|$(Platform)'=='Release Master Gold|Win32'" />
+      <!-- 32 MiB: Present + NVIDIA UMD + overlays; keep headroom after End() unwinds before PresentFrame() -->
+      <AdditionalOptions>/STACK:33554432 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <Manifest>
       <AdditionalManifestFiles>as-invoker-manifest-part.xml %(AdditionalManifestFiles)</AdditionalManifestFiles>

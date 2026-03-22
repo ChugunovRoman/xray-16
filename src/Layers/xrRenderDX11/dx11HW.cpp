@@ -119,6 +119,16 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
         createDeviceFlags |= D3D_CREATE_DEVICE_DEBUG;
 #endif
 
+    // EscapeCB / CheckMultiplaneOverlaySupport can run on a driver-internal thread with a small default
+    // stack; deep NV UMD chains then overflow (0xC00000FD) even when the game thread uses a large stack.
+    // This flag reduces D3D/runtime internal threading that can trigger that path.
+    constexpr u32 kPciVendorNvidia = 0x10DE;
+    if (Caps.id_vendor == kPciVendorNvidia && !strstr(Core.Params, "-d3d11_allow_internal_threads"))
+    {
+        createDeviceFlags |= D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS;
+        Msg("* D3D11: PREVENT_INTERNAL_THREADING_OPTIMIZATIONS (NVIDIA; -d3d11_allow_internal_threads to disable)");
+    }
+
     HRESULT R;
 
     D3D_FEATURE_LEVEL featureLevels[] =
@@ -253,11 +263,40 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
 
     const HWND hwnd = info.info.win.window;
 
-    if (!CreateSwapChain2(hwnd))
+    // CreateSwapChainForHwnd (DXGI 1.2+) drives D3DKMT_CheckMultiplaneOverlaySupport3 → EscapeCB → UMD; with a
+    // deep application stack (Release inlining, hooks) that overflows (0xC00000FD). Under the VS debugger the
+    // stack is often shallower, so the bug appears only on "normal" launch. Always try legacy
+    // IDXGIFactory::CreateSwapChain first unless the user opts into DXGI 1.2 ordering.
+    const bool prefer_modern_dxgi = strstr(Core.Params, "-dxgi_modern_swapchain");
+    const bool block_dxgi_1_2 = strstr(Core.Params, "-no_dx11_2") || strstr(Core.Params, "-dxgi_legacy_swapchain");
+
+    bool swap_chain_ok = false;
+    bool used_factory_create_swap_chain = false;
+    if (prefer_modern_dxgi && !block_dxgi_1_2)
     {
-        if (!CreateSwapChain(hwnd))
-            Valid = false;
+        if (CreateSwapChain2(hwnd))
+            swap_chain_ok = true;
+        else if (CreateSwapChain(hwnd))
+        {
+            swap_chain_ok = true;
+            used_factory_create_swap_chain = true;
+        }
     }
+    else
+    {
+        if (CreateSwapChain(hwnd))
+        {
+            swap_chain_ok = true;
+            used_factory_create_swap_chain = true;
+        }
+        else if (!block_dxgi_1_2 && CreateSwapChain2(hwnd))
+            swap_chain_ok = true;
+    }
+
+    if (!swap_chain_ok)
+        Valid = false;
+    else if (used_factory_create_swap_chain)
+        Msg("* DXGI: IDXGIFactory::CreateSwapChain (-dxgi_modern_swapchain opts in to CreateSwapChainForHwnd first)");
 
     // Select depth-stencil format
     constexpr DXGI_FORMAT formats[] =

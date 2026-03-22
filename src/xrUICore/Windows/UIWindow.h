@@ -240,17 +240,22 @@ public:
     [[nodiscard]]
     bool IsFocusValuable(const CUIWindow* top_parent, const CUIWindow* locker) const
     {
-        bool valuable;
+        bool valuable{};
         bool child_of_locker{};
         const CUIWindow* it = this;
-
-        for (;; it = it->GetParent())
+        // Cap walk depth: broken parent links (cycles) would spin forever; huge stacks blow the thread stack.
+        constexpr unsigned kMaxParentDepth = 256;
+        for (unsigned depth = 0; depth < kMaxParentDepth; ++depth)
         {
             valuable = it->IsShown() && it->IsEnabled();
             if (it == locker)
                 child_of_locker = true;
-            if (!valuable || !it->GetParent())
+            const CUIWindow* parent = it->GetParent();
+            if (!valuable || !parent)
                 break;
+            if (parent == it) // broken link: self-parent would spin until depth cap
+                break;
+            it = parent;
         }
 
         if (locker && !child_of_locker)

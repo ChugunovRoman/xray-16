@@ -55,6 +55,7 @@ public:
     virtual void Begin() override;
     virtual void Clear() override;
     virtual void End() override;
+    virtual void PresentFrame() override;
     virtual void ClearTarget() override;
     virtual void SetCacheXform(Fmatrix& mView, Fmatrix& mProject) override;
     virtual void OnAssetsChanged() override;

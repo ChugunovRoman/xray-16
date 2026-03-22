@@ -96,6 +96,7 @@ void CRenderDevice::RenderEnd(void)
     // end scene
     g_bRendering = false;
     GEnv.Render->End();
+    GEnv.Render->PresentFrame();
 
     vCameraPositionSaved = vCameraPosition;
     vCameraDirectionSaved = vCameraDirection;
@@ -245,9 +246,13 @@ void CRenderDevice::DoRender()
 
         ImGui::Render();
         m_imgui_render->Render(ImGui::GetDrawData());
-        UpdateViewports();
 
+        // Present before ImGui platform viewports (same order as official ImGui DX11 examples). Rendering
+        // child viewports first kept a very deep stack under IDXGISwapChain::Present and contributed to
+        // 0xC00000FD with some GPU hook / driver chains.
         RenderEnd(); // Present goes here
+
+        UpdateViewports();
     }
     else
     {
