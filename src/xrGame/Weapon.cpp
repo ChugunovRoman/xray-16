@@ -1350,15 +1350,24 @@ void CWeapon::UpdateCL()
     if ((GetNextState() == GetState()) && IsGameTypeSingle() && H_Parent() == Level().CurrentEntity())
     {
         CActor* pActor = smart_cast<CActor*>(H_Parent());
-        if (pActor && !pActor->AnyMove() && this == pActor->inventory().ActiveItem())
+        if (pActor && this == pActor->inventory().ActiveItem())
         {
-            if (!GamePersistent().GetHudTuner().is_active() && GetState() == eIdle && (Device.dwTimeGlobal - m_dw_curr_substate_time > 20000) &&
-                (!IsZoomed() && !IsSecondZoomed()) && g_player_hud[1]->attached_item() == nullptr)
+            // Bore with looping fallback (anm_bore -> idle motion) never fires OnAnimationEnd(eBore)
+            if (GetState() == eBore && pActor->AnyMove())
             {
-                if (AllowBore())
-                    SwitchState(eBore);
-
+                SwitchState(eIdle);
                 ResetSubStateTime();
+            }
+            else if (!pActor->AnyMove())
+            {
+                if (!GamePersistent().GetHudTuner().is_active() && GetState() == eIdle && (Device.dwTimeGlobal - m_dw_curr_substate_time > 20000) &&
+                    (!IsZoomed() && !IsSecondZoomed()) && g_player_hud[1]->attached_item() == nullptr)
+                {
+                    if (AllowBore())
+                        SwitchState(eBore);
+
+                    ResetSubStateTime();
+                }
             }
         }
     }

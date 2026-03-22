@@ -436,6 +436,18 @@ void CHudItem::PlayAnimIdleSprintEnd()
 
 void CHudItem::OnMovementChanged(ACTOR_DEFS::EMoveCommand cmd)
 {
+    // anm_bore often falls back to the same loop as idle; then no motion end callback runs and
+    // the HUD stays in eBore until fire/hide. Any move should restore normal idle like OnAnimationEnd(eBore).
+    if (GetState() == eBore)
+    {
+        if ((cmd == ACTOR_DEFS::mcSprint) || (cmd == ACTOR_DEFS::mcAnyMove))
+        {
+            SwitchState(eIdle);
+            ResetSubStateTime();
+        }
+        return;
+    }
+
     if (GetState() == eIdle && !m_bStopAtEndAnimIsRunning)
     {
         if ((cmd == ACTOR_DEFS::mcSprint) || (cmd == ACTOR_DEFS::mcAnyMove))
