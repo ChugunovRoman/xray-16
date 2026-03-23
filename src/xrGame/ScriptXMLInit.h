@@ -16,6 +16,7 @@ class CUICheckButton;
 class CUITabControl;
 class CUIFrameLineWnd;
 class CUIEditBox;
+class CUIMultiLineEdit;
 class CUIMultiTextStatic;
 class CUIAnimatedStatic;
 class CUISleepStatic;
@@ -42,6 +43,7 @@ public:
     CUIFrameWindow* InitFrame(LPCSTR path, CUIWindow* parent);
     CUIFrameLineWnd* InitFrameLine(LPCSTR path, CUIWindow* parent);
     CUIEditBox* InitEditBox(LPCSTR path, CUIWindow* parent);
+    CUIMultiLineEdit* InitMultiLineEdit(LPCSTR path, CUIWindow* parent);
     CUIStatic* InitStatic(LPCSTR path, CUIWindow* parent);
     CUIStatic* InitAnimStatic(LPCSTR path, CUIWindow* parent);
     CUIStatic* InitSleepStatic(LPCSTR path, CUIWindow* parent);

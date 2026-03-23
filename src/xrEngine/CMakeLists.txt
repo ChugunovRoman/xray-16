@@ -79,6 +79,16 @@ target_sources_grouped(
 
 target_sources_grouped(
     TARGET xrEngine
+    NAME "Engine\\text_editor\\multiline_editor_control"
+    FILES
+    multiline_edit_actions.cpp
+    multiline_edit_actions.h
+    multiline_edit_control.cpp
+    multiline_edit_control.h
+)
+
+target_sources_grouped(
+    TARGET xrEngine
     NAME "Engine\\Game API\\Animator"
     FILES
     ObjectAnimator.cpp

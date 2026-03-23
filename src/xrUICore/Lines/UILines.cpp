@@ -14,6 +14,58 @@
 constexpr auto COLOR_TAG_BEGIN = "%c[";
 constexpr auto COLOR_TAG_END = ']';
 
+namespace
+{
+// Same rules as CUILine::ProcessNewLines: LTX "\\n" plus real CR/LF (UTF-8: 0x0D/0x0A are single-byte).
+bool next_line_break_in_scan(pcstr pszSearch, size_t& out_off, size_t& out_skip)
+{
+    out_off = 0;
+    out_skip = 0;
+    pcstr best = nullptr;
+    size_t best_skip = 0;
+    auto consider = [&](pcstr p, size_t sk)
+    {
+        if (!p)
+            return;
+        if (!best || p < best)
+        {
+            best = p;
+            best_skip = sk;
+        }
+    };
+
+    consider(strstr(pszSearch, "\\n"), 2);
+
+    for (pcstr q = pszSearch; *q;)
+    {
+        const unsigned char c = static_cast<unsigned char>(*q);
+        if (c == '\r' && q[1] == '\n')
+        {
+            consider(q, 2);
+            q += 2;
+        }
+        else if (c == '\r')
+        {
+            consider(q, 1);
+            ++q;
+        }
+        else if (c == '\n')
+        {
+            consider(q, 1);
+            ++q;
+        }
+        else
+            ++q;
+    }
+
+    if (!best)
+        return false;
+    out_off = static_cast<size_t>(best - pszSearch);
+    out_skip = best_skip;
+    return true;
+}
+} // namespace
+
 CUILines::CUILines()
 {
     uFlags.set(flNeedReparse, false);
@@ -97,19 +149,20 @@ void CUILines::ParseText(bool force)
             VERIFY(vsz);
             for (size_t i = 0; i < vsz; i++)
             {
-                char* pszTemp;
                 const u32 tcolor = line.m_subLines[i].m_color;
                 char szTempLine[MAX_MB_CHARS], *pszSearch = nullptr;
                 [[maybe_unused]] const auto llen = line.m_subLines[i].m_text.size();
                 VERIFY(llen < MAX_MB_CHARS);
                 xr_strcpy(szTempLine, line.m_subLines[i].m_text.c_str());
                 pszSearch = szTempLine;
-                while ((pszTemp = strstr(pszSearch, "\\n")) != nullptr)
+                size_t br_off = 0, br_skip = 0;
+                while (next_line_break_in_scan(pszSearch, br_off, br_skip))
                 {
                     bNewLines = true;
-                    *pszTemp = '\0';
+                    char* seg_end = const_cast<char*>(pszSearch) + br_off;
+                    *seg_end = '\0';
                     tmp_line.AddSubLine({ pszSearch, tcolor, true });
-                    pszSearch = pszTemp + 2;
+                    pszSearch = seg_end + br_skip;
                 }
                 tmp_line.AddSubLine(pszSearch, tcolor);
             }
@@ -372,6 +425,237 @@ void CUILines::Draw(float x, float y)
 }
 
 void CUILines::OnDeviceReset() { uFlags.set(flNeedReparse, true); }
+
+bool CUILines::BuildVisualLineRanges(xr_vector<std::pair<size_t, size_t>>& out_ranges)
+{
+    out_ranges.clear();
+    ParseText(true);
+    const size_t text_len = m_text.size();
+    if (text_len == 0)
+        return true;
+
+    if (m_lines.empty())
+        return false;
+
+    size_t accum = 0;
+    for (auto& l : m_lines)
+    {
+        size_t line_len = 0;
+        for (auto& sl : l.m_subLines)
+            line_len += sl.m_text.length();
+        out_ranges.emplace_back(accum, line_len);
+        accum += line_len;
+
+        // Parsed visual lines don't keep newline separators; remap to source text indices.
+        if (accum < text_len)
+        {
+            if (m_text[accum] == '\r')
+            {
+                ++accum;
+                if (accum < text_len && m_text[accum] == '\n')
+                    ++accum;
+            }
+            else if (m_text[accum] == '\n')
+            {
+                ++accum;
+            }
+            else if (m_text[accum] == '\\' && (accum + 1) < text_len && m_text[accum + 1] == 'n')
+            {
+                accum += 2;
+            }
+        }
+    }
+    return true;
+}
+
+bool CUILines::ComputeCursorPlacement(size_t cursor_pos, float& out_x_in_line, size_t& out_visual_line_idx)
+{
+    out_x_in_line = 0.f;
+    out_visual_line_idx = 0;
+
+    if (!m_pFont)
+        return false;
+
+    if (!uFlags.test(flComplexMode))
+    {
+        const size_t c = std::min(cursor_pos, m_text.size());
+        xr_string slice;
+        slice.assign(m_text.c_str(), c);
+        // Same units as CUICustomEdit::Draw: raw SizeOf_, then parent scales with ClientToScreenScaled once.
+        out_x_in_line = m_pFont->SizeOf_(slice.c_str());
+        return true;
+    }
+
+    if (m_text.empty())
+        return true;
+
+    xr_vector<std::pair<size_t, size_t>> line_ranges;
+    if (!BuildVisualLineRanges(line_ranges) || line_ranges.empty())
+        return false;
+
+    const size_t text_len = m_text.size();
+    const size_t c = std::min(cursor_pos, text_len);
+
+    size_t vi = 0;
+    bool found = false;
+    for (size_t i = 0; i < line_ranges.size(); ++i)
+    {
+        const size_t start = line_ranges[i].first;
+        const size_t len = line_ranges[i].second;
+        if (c >= start && c <= start + len)
+        {
+            vi = i;
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+        return false;
+
+    const size_t line_start = line_ranges[vi].first;
+    const size_t span = c - line_start;
+
+    xr_string slice;
+    slice.assign(m_text.c_str() + line_start, span);
+    out_x_in_line = m_pFont->SizeOf_(slice.c_str());
+    out_visual_line_idx = vi;
+    return true;
+}
+
+bool CUILines::CursorPosFromLocalPoint(float local_x, float local_y, size_t& out_pos, float scroll_offset_y,
+    const float* vindent_override)
+{
+    out_pos = 0;
+    if (!m_pFont)
+        return false;
+
+    auto prefix_width = [&](size_t glyph_start, size_t n) -> float
+    {
+        if (n == 0)
+            return 0.f;
+        xr_string slice;
+        slice.assign(m_text.c_str() + glyph_start, n);
+        float w = m_pFont->SizeOf_(slice.c_str());
+        UI().ClientToScreenScaledWidth(w);
+        return w;
+    };
+
+    if (!uFlags.test(flComplexMode))
+    {
+        const size_t len = m_text.size();
+        if (len == 0)
+            return true;
+
+        const float rel_x = local_x - m_TextOffset.x - GetIndentByAlign();
+        for (size_t k = 0; k <= len; ++k)
+        {
+            const float w = prefix_width(0, k);
+            if (rel_x <= w)
+            {
+                out_pos = k;
+                return true;
+            }
+        }
+        out_pos = len;
+        return true;
+    }
+
+    ParseText(true);
+    if (m_text.empty())
+        return true;
+
+    xr_vector<std::pair<size_t, size_t>> line_ranges;
+    if (!BuildVisualLineRanges(line_ranges) || line_ranges.empty())
+        return false;
+
+    float line_h = m_pFont->CurrentHeight_();
+    UI().ClientToScreenScaledHeight(line_h);
+
+    const float vindent = vindent_override ? *vindent_override : GetVIndentByAlign();
+    const float rel_y = local_y - m_TextOffset.y - vindent + scroll_offset_y;
+    const float rel_x = local_x - m_TextOffset.x - GetIndentByAlign();
+
+    const float total_h = line_h * static_cast<float>(line_ranges.size());
+    int line_idx = 0;
+    if (line_h > EPS_L)
+    {
+        if (rel_y < 0.f)
+            line_idx = 0;
+        else if (rel_y >= total_h)
+            line_idx = static_cast<int>(line_ranges.size()) - 1;
+        else
+            line_idx = static_cast<int>(rel_y / line_h);
+    }
+
+    {
+        const int max_i = static_cast<int>(line_ranges.size()) - 1;
+        if (line_idx < 0)
+            line_idx = 0;
+        else if (line_idx > max_i)
+            line_idx = max_i;
+    }
+
+    const size_t start = line_ranges[line_idx].first;
+    const size_t line_len = line_ranges[line_idx].second;
+    const size_t line_end = start + line_len;
+
+    for (size_t k = 0; k <= line_len; ++k)
+    {
+        const float w = prefix_width(start, k);
+        if (rel_x <= w)
+        {
+            out_pos = start + k;
+            return true;
+        }
+    }
+    out_pos = line_end;
+    return true;
+}
+
+bool CUILines::MoveCursorByVisualLine(size_t& io_cursor, int delta)
+{
+    if (!uFlags.test(flComplexMode) || delta == 0 || (delta != -1 && delta != 1))
+        return false;
+
+    if (m_text.empty())
+        return false;
+
+    xr_vector<std::pair<size_t, size_t>> line_ranges;
+    if (!BuildVisualLineRanges(line_ranges) || line_ranges.empty())
+        return false;
+
+    const size_t text_len = m_text.size();
+
+    const size_t c = std::min(io_cursor, text_len);
+    size_t vi = 0;
+    size_t col = 0;
+    bool found = false;
+    for (size_t i = 0; i < line_ranges.size(); ++i)
+    {
+        const size_t start = line_ranges[i].first;
+        const size_t len = line_ranges[i].second;
+        if (c >= start && c <= start + len)
+        {
+            vi = i;
+            col = c - start;
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+        return false;
+
+    const int target_vi = static_cast<int>(vi) + delta;
+    if (target_vi < 0 || static_cast<size_t>(target_vi) >= line_ranges.size())
+        return false;
+
+    const size_t tgt_start = line_ranges[target_vi].first;
+    const size_t tgt_len = line_ranges[target_vi].second;
+    const size_t new_col = std::min(col, tgt_len);
+    io_cursor = tgt_start + new_col;
+    return true;
+}
+
 float CUILines::GetIndentByAlign() const
 {
     switch (m_eTextAlign)

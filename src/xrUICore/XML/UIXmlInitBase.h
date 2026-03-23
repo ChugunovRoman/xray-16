@@ -20,6 +20,7 @@ class CUITabControl;
 class CUIFrameLineWnd;
 class CUIEditBoxEx;
 class CUIEditBox;
+class CUIMultiLineEdit;
 class CUICustomEdit;
 class CUIAnimatedStatic;
 class CUISleepStatic;
@@ -44,6 +45,7 @@ public:
     static bool InitFrameLine(CUIXml& xml_doc, pcstr path, int index, CUIFrameLineWnd* pWnd, bool fatal = true);
     static bool InitCustomEdit(CUIXml& xml_doc, pcstr paht, int index, CUICustomEdit* pWnd, bool fatal = true);
     static bool InitEditBox(CUIXml& xml_doc, pcstr paht, int index, CUIEditBox* pWnd, bool fatal = true);
+    static bool InitMultiLineEdit(CUIXml& xml_doc, pcstr path, int index, CUIMultiLineEdit* pWnd, bool fatal = true);
     static bool InitStatic(CUIXml& xml_doc, pcstr path, int index, CUIStatic* pWnd, bool fatal = true, bool textWnd = false);
     static bool InitCheck(CUIXml& xml_doc, pcstr path, int index, CUICheckButton* pWnd, bool fatal = true);
     static bool InitSpin(CUIXml& xml_doc, pcstr path, int index, CUICustomSpin* pWnd, bool fatal = true);

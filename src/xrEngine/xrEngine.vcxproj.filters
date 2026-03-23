@@ -324,6 +324,12 @@
     <ClInclude Include="line_edit_control.h">
       <Filter>Engine\text_editor\line_editor_control</Filter>
     </ClInclude>
+    <ClInclude Include="multiline_edit_control.h">
+      <Filter>Engine\text_editor\multiline_editor_control</Filter>
+    </ClInclude>
+    <ClInclude Include="multiline_edit_actions.h">
+      <Filter>Engine\text_editor\multiline_editor_control</Filter>
+    </ClInclude>
     <ClInclude Include="edit_actions.h">
       <Filter>Engine\text_editor\edit_actions</Filter>
     </ClInclude>
@@ -547,6 +553,12 @@
     </ClCompile>
     <ClCompile Include="line_edit_control.cpp">
       <Filter>Engine\text_editor\line_editor_control</Filter>
+    </ClCompile>
+    <ClCompile Include="multiline_edit_control.cpp">
+      <Filter>Engine\text_editor\multiline_editor_control</Filter>
+    </ClCompile>
+    <ClCompile Include="multiline_edit_actions.cpp">
+      <Filter>Engine\text_editor\multiline_editor_control</Filter>
     </ClCompile>
     <ClCompile Include="edit_actions.cpp">
       <Filter>Engine\text_editor\edit_actions</Filter>

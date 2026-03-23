@@ -402,6 +402,8 @@ target_sources_grouped(
     TARGET xrCore
     NAME "Text"
     FILES
+    Text/LtxMultilineString.cpp
+    Text/LtxMultilineString.hpp
     Text/StringConversion.cpp
     Text/StringConversion.hpp
 )

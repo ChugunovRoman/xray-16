@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <utility>
+
 #include "xrUICore/Lines/UILine.h"
 #include "xrUICore/uiabstract.h"
 
@@ -49,6 +51,17 @@ public:
     float GetVisibleHeight();
     float GetIndentByAlign() const;
 
+    // Move cursor by wrapped (visual) lines; returns false if no move (e.g. boundary or non-complex text).
+    bool MoveCursorByVisualLine(size_t& io_cursor, int delta);
+
+    // Horizontal offset = raw SizeOf_(slice). Caller: ClientToScreenScaled(base), then += out_x (same as CUICustomEdit).
+    bool ComputeCursorPlacement(size_t cursor_pos, float& out_x_in_line, size_t& out_visual_line_idx);
+
+    // Mouse hit: coordinates relative to owning window (same as OnMouseAction x,y). Returns false if layout unknown.
+    // vindent_override: if non-null, used instead of GetVIndentByAlign() — must match Draw() (e.g. top when scrolled).
+    bool CursorPosFromLocalPoint(float local_x, float local_y, size_t& out_pos, float scroll_offset_y = 0.f,
+        const float* vindent_override = nullptr);
+
     Fvector2 m_TextOffset{};
     Fvector2 m_wndSize{};
     Fvector2 m_wndPos{};
@@ -59,6 +72,8 @@ protected:
     float GetVIndentByAlign();
     xr_string CutFirstColoredTextEntry(u32& color, xr_string& text) const;
     CUILine ParseTextToColoredLine(const std::string_view& str);
+
+    bool BuildVisualLineRanges(xr_vector<std::pair<size_t, size_t>>& out_ranges);
 
 protected:
     enum : u8

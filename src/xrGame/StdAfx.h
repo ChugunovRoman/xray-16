@@ -82,6 +82,9 @@
 #include "xrGame/detail_path_manager.h" // ~120 + 120 for its inlines
 #include "xrPhysics/MovementBoxDynamicActivate.h" // ~240
 #include "xrPhysics/PHItemList.h"
+#ifdef SendMessage
+#undef SendMessage
+#endif
 #include "xrUICore/EditBox/UIEditBox.h"
 #include "xrUICore/Windows/UIWindow.h" // ~225
 #include "xrUICore/UIMessages.h" // ~225  one single enum

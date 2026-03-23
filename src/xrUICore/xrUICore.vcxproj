@@ -68,6 +68,7 @@
     <ClInclude Include="Cursor\UICursor.h" />
     <ClInclude Include="EditBox\UICustomEdit.h" />
     <ClInclude Include="EditBox\UIEditBox.h" />
+    <ClInclude Include="EditBox\UIMultiLineEdit.h" />
     <ClInclude Include="EditBox\UIEditBoxEx.h" />
     <ClInclude Include="FontManager\FontManager.h" />
     <ClInclude Include="Hint\UIHint.h" />
@@ -131,6 +132,7 @@
     <ClCompile Include="Cursor\UICursor.cpp" />
     <ClCompile Include="EditBox\UICustomEdit.cpp" />
     <ClCompile Include="EditBox\UIEditBox.cpp" />
+    <ClCompile Include="EditBox\UIMultiLineEdit.cpp" />
     <ClCompile Include="EditBox\UIEditBoxEx.cpp" />
     <ClCompile Include="FontManager\FontManager.cpp" />
     <ClCompile Include="Hint\UIHint.cpp" />

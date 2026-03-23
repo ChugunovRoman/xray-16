@@ -40,6 +40,7 @@
 #include "PropertiesBox/UIPropertiesBox.h"
 
 #include "EditBox/UIEditBox.h"
+#include "EditBox/UIMultiLineEdit.h"
 
 #include "MessageBox/UIMessageBox.h"
 
@@ -870,6 +871,23 @@ void CUIEditBox::script_register(lua_State* luaState)
             .def(constructor<>())
             .def("InitTexture", &CUIEditBox::InitTexture)
             .def("InitTexture", +[](CUIEditBox* self, pcstr texture) { self->InitTexture(texture); })
+    ];
+}
+
+void CUIMultiLineEdit::script_register(lua_State* luaState)
+{
+    using namespace luabind;
+
+    module(luaState)
+    [
+        class_<CUIMultiLineEdit, CUIStatic>("CUIMultiLineEdit")
+            .def(constructor<>())
+            .def("SetText", &CUIMultiLineEdit::SetText)
+            .def("GetText", &CUIMultiLineEdit::GetText)
+            .def("SetTextFromLtxLine", &CUIMultiLineEdit::SetTextFromLtxLine)
+            .def("GetTextAsLtxLine", &CUIMultiLineEdit::GetTextAsLtxLine)
+            .def("CaptureFocus", &CUIMultiLineEdit::CaptureFocus)
+            .def("SetNextFocusCapturer", &CUIMultiLineEdit::SetNextFocusCapturer)
     ];
 }
 

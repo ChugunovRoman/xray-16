@@ -15,6 +15,7 @@
 #include "ui/UIMapList.h"
 #include "ui/UIKeyBinding.h"
 #include "xrUICore/EditBox/UIEditBox.h"
+#include "xrUICore/EditBox/UIMultiLineEdit.h"
 #include "xrUICore/Static/UIAnimatedStatic.h"
 #include "ui/UISleepStatic.h"
 #include "xrUICore/TrackBar/UITrackBar.h"
@@ -80,6 +81,14 @@ CUIEditBox* CScriptXmlInit::InitEditBox(LPCSTR path, CUIWindow* parent)
 {
     CUIEditBox* pWnd = xr_new<CUIEditBox>();
     CUIXmlInit::InitEditBox(m_xml, path, 0, pWnd);
+    _attach_child(pWnd, parent);
+    return pWnd;
+}
+
+CUIMultiLineEdit* CScriptXmlInit::InitMultiLineEdit(LPCSTR path, CUIWindow* parent)
+{
+    CUIMultiLineEdit* pWnd = xr_new<CUIMultiLineEdit>();
+    CUIXmlInit::InitMultiLineEdit(m_xml, path, 0, pWnd);
     _attach_child(pWnd, parent);
     return pWnd;
 }
@@ -302,6 +311,7 @@ void CScriptXmlInit::script_register(lua_State* luaState)
             .def("InitFrame", &CScriptXmlInit::InitFrame)
             .def("InitFrameLine", &CScriptXmlInit::InitFrameLine)
             .def("InitEditBox", &CScriptXmlInit::InitEditBox)
+            .def("InitMultiLineEdit", &CScriptXmlInit::InitMultiLineEdit)
             .def("InitStatic", &CScriptXmlInit::InitStatic)
             .def("InitTextWnd", &CScriptXmlInit::InitTextWnd)
             .def("InitLabel", &CScriptXmlInit::InitStatic)

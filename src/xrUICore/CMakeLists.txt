@@ -40,6 +40,8 @@ target_sources(xrUICore PRIVATE
     EditBox/UIEditBox.h
     EditBox/UIEditBoxEx.cpp
     EditBox/UIEditBoxEx.h
+    EditBox/UIMultiLineEdit.cpp
+    EditBox/UIMultiLineEdit.h
     FontManager/FontManager.cpp
     FontManager/FontManager.h
     Hint/UIHint.cpp

@@ -16,6 +16,7 @@
 
 #include "UITextureMaster.h"
 #include "Lines/UILines.h"
+#include "EditBox/UIMultiLineEdit.h"
 
 constexpr pcstr ARIAL_FONT_NAME       = "arial";
 
@@ -924,6 +925,34 @@ bool CUIXmlInitBase::InitEditBox(CUIXml& xml_doc, pcstr path, int index, CUIEdit
 
     InitTexture(xml_doc, path, index, pWnd);
     InitOptionsItem(xml_doc, path, index, pWnd);
+
+    return true;
+}
+
+bool CUIXmlInitBase::InitMultiLineEdit(CUIXml& xml_doc, pcstr path, int index, CUIMultiLineEdit* pWnd, bool fatal /*= true*/)
+{
+    if (!InitStatic(xml_doc, path, index, pWnd, fatal))
+        return false;
+
+    pWnd->InitCustomEdit(pWnd->GetWndPos(), pWnd->GetWndSize());
+    pWnd->SetWindowName(path);
+
+    string256 foo;
+    strconcat(foo, path, ":text_color:e");
+    if (xml_doc.NavigateToNode(foo, index))
+    {
+        const u32 color = GetColor(xml_doc, foo, index, color_rgba(0, 0, 0, 255));
+        pWnd->TextItemControl()->SetTextColor(color);
+    }
+
+    int max_count = xml_doc.ReadAttribInt(path, index, "max_symb_count", 0);
+    const bool read_only = (xml_doc.ReadAttribInt(path, index, "read_only", 0) == 1);
+    if (max_count <= 0)
+        max_count = 4096;
+
+    InitTexture(xml_doc, path, index, pWnd);
+
+    pWnd->Init(max_count, read_only);
 
     return true;
 }

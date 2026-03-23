@@ -11,4 +11,7 @@
 #include "ui_defs.h"
 #include "ui_base.h"
 
+#ifdef SendMessage
+#undef SendMessage
+#endif
 #include "Windows/UIWindow.h"

@@ -73,6 +73,8 @@
     <ClInclude Include="ISheduled.h" />
     <ClInclude Include="LightAnimLibrary.h" />
     <ClInclude Include="line_edit_control.h" />
+    <ClInclude Include="multiline_edit_actions.h" />
+    <ClInclude Include="multiline_edit_control.h" />
     <ClInclude Include="mp_logging.h" />
     <ClInclude Include="ObjectAnimator.h" />
     <ClInclude Include="ObjectDump.h" />
@@ -155,6 +157,8 @@
     <ClCompile Include="KinematicsAnimatedRTTI.cpp" />
     <ClCompile Include="LightAnimLibrary.cpp" />
     <ClCompile Include="line_edit_control.cpp" />
+    <ClCompile Include="multiline_edit_actions.cpp" />
+    <ClCompile Include="multiline_edit_control.cpp" />
     <ClCompile Include="mailSlot.cpp" />
     <ClCompile Include="ObjectAnimator.cpp" />
     <ClCompile Include="ObjectDump.cpp" />
