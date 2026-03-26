@@ -85,5 +85,5 @@ private:
     CUIFrameLineWnd* m_frameLine;
     CUIScrollBar* m_vscroll{};
 
-    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIWindow);
+    DECLARE_SCRIPT_REGISTER_FUNCTION(CUIStatic);
 };
