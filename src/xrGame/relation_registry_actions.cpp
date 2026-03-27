@@ -57,6 +57,31 @@ void load_attack_goodwill()
     gw_free.load("free_");
 }
 
+template <typename F>
+static void for_each_online_group_member_id(const CAI_Stalker* stalker, F&& cb)
+{
+    if (!stalker)
+        return;
+
+    const u8 team = stalker->g_Team();
+    const u8 squad = stalker->g_Squad();
+    const u8 group = stalker->g_Group();
+
+    CLevel& level = Level();
+    const u32 count = level.Objects.o_count();
+    for (u32 i = 0; i < count; ++i)
+    {
+        IGameObject* obj = level.Objects.o_get_by_iterator(i);
+        CAI_Stalker* member = smart_cast<CAI_Stalker*>(obj);
+        if (!member)
+            continue;
+        if (member->g_Team() != team || member->g_Squad() != squad || member->g_Group() != group)
+            continue;
+
+        cb(member->ID());
+    }
+}
+
 void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAction action)
 {
     static CHARACTER_GOODWILL friend_kill_goodwill = pSettings->r_s32(ACTIONS_POINTS_SECT, "friend_kill_goodwill");
@@ -190,15 +215,10 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
             {
                 //изменить отношение ко всем членам атакованой группы (если такая есть)
                 //как к тому кого атаковали
-                CGroupHierarchyHolder& group = Level()
-                                                   .seniority_holder()
-                                                   .team(stalker->g_Team())
-                                                   .squad(stalker->g_Squad())
-                                                   .group(stalker->g_Group());
-                for (size_t i = 0; i < group.members().size(); i++)
+                for_each_online_group_member_id(stalker, [&](const u16 member_id)
                 {
-                    ChangeGoodwill(group.members()[i]->ID(), from->ID(), delta_goodwill);
-                }
+                    ChangeGoodwill(member_id, from->ID(), delta_goodwill);
+                });
 
                 //*(CHARACTER_GOODWILL)( stalker->Sympathy() * (float)(delta_goodwill));
                 CHARACTER_GOODWILL community_goodwill =
@@ -262,18 +282,11 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
             {
                 //изменить отношение ко всем членам группы (если такая есть)
                 //убитого, кроме него самого
-                CGroupHierarchyHolder& group = Level()
-                                                   .seniority_holder()
-                                                   .team(stalker->g_Team())
-                                                   .squad(stalker->g_Squad())
-                                                   .group(stalker->g_Group());
-                for (size_t i = 0; i < group.members().size(); i++)
+                for_each_online_group_member_id(stalker, [&](const u16 member_id)
                 {
-                    if (stalker->ID() != group.members()[i]->ID())
-                    {
-                        ChangeGoodwill(group.members()[i]->ID(), from->ID(), delta_goodwill);
-                    }
-                }
+                    if (stalker->ID() != member_id)
+                        ChangeGoodwill(member_id, from->ID(), delta_goodwill);
+                });
 
                 //(CHARACTER_GOODWILL)( stalker->Sympathy() * (float)(delta_goodwill+community_member_kill_goodwill));
                 CHARACTER_GOODWILL community_goodwill =
@@ -330,15 +343,10 @@ void RELATION_REGISTRY::Action(CEntityAlive* from, CEntityAlive* to, ERelationAc
             {
                 //изменить отношение ко всем членам атакованой группы (если такая есть)
                 //как к тому кого атаковали
-                CGroupHierarchyHolder& group = Level()
-                                                   .seniority_holder()
-                                                   .team(stalker->g_Team())
-                                                   .squad(stalker->g_Squad())
-                                                   .group(stalker->g_Group());
-                for (size_t i = 0; i < group.members().size(); i++)
+                for_each_online_group_member_id(stalker, [&](const u16 member_id)
                 {
-                    ChangeGoodwill(group.members()[i]->ID(), from->ID(), delta_goodwill);
-                }
+                    ChangeGoodwill(member_id, from->ID(), delta_goodwill);
+                });
 
                 //*					ChangeCommunityGoodwill(stalker->Community(), from->ID(), (CHARACTER_GOODWILL)(
                 // stalker->Sympathy() * (float)delta_goodwill ));
