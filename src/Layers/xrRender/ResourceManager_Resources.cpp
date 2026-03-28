@@ -102,20 +102,27 @@ CRT* CResourceManager::_CreateRT(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 sam
 {
     R_ASSERT(Name && Name[0] && w && h);
 
-    // ***** first pass - search already created RT
+    // Reuse registered RT only if dimensions/format match. Otherwise the first _CreateRT wins forever
+    // (CRT::create returns early when pSurface exists) and callers render into a mismatched surface — UI shows empty/transient icons.
     pstr N = pstr(Name);
     map_RT::iterator I = m_rtargets.find(N);
     if (I != m_rtargets.end())
-        return I->second;
-    else
     {
-        CRT* RT = xr_new<CRT>();
-        RT->dwFlags |= xr_resource_flagged::RF_REGISTERED;
-        m_rtargets.emplace(RT->set_name(Name), RT);
-        if (Device.b_is_Ready)
-            RT->create(Name, w, h, f, sampleCount, slices_num, flags);
-        return RT;
+        CRT* RT = I->second;
+        if (RT->dwWidth == w && RT->dwHeight == h && RT->fmt == f && RT->sampleCount == sampleCount && RT->n_slices == slices_num)
+            return RT;
+
+        m_rtargets.erase(I);
+        RT->dwFlags &= ~xr_resource_flagged::RF_REGISTERED;
+        xr_delete(RT);
     }
+
+    CRT* RT = xr_new<CRT>();
+    RT->dwFlags |= xr_resource_flagged::RF_REGISTERED;
+    m_rtargets.emplace(RT->set_name(Name), RT);
+    if (Device.b_is_Ready)
+        RT->create(Name, w, h, f, sampleCount, slices_num, flags);
+    return RT;
 }
 
 void CResourceManager::_DeleteRT(const CRT* RT)

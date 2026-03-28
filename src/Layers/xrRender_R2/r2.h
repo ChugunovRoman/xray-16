@@ -508,6 +508,12 @@ public:
     void rmFar(CBackend& cmd_list);
     void rmNormal(CBackend& cmd_list);
 
+    bool WeaponIcon_RenderToTexture(pcstr texture_name, u32 w, u32 h, const Fmatrix& view, const Fmatrix& proj,
+        IRenderable* subject = nullptr) override;
+    void WeaponIcon_ReleaseUserIconRt(pcstr texture_name) override;
+    void WeaponIcon_ReleaseAllUserIconRts() override;
+    bool WeaponIcon_SavePersistedUserRtToDdsDxt5(pcstr user_texture_name, pcstr fs_root, pcstr fname) override;
+
     // Constructor/destructor/loader
     CRender();
     ~CRender() override;
@@ -526,6 +532,9 @@ private:
 
     IRender_Sector::sector_id_t largest_sector_id{ IRender_Sector::INVALID_SECTOR_ID };
 };
+
+// r2_weapon_icon.cpp: drop static ref_shader/ref_rt before xr_delete(Resources) on shutdown.
+void WeaponIcon_ReleaseStaticResources();
 
 extern CRender RImplementation;
 } // namespace xray::render::RENDER_NAMESPACE

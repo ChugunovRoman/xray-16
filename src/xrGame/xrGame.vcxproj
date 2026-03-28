@@ -1357,6 +1357,7 @@
     <ClInclude Include="wallmark_manager.h" />
     <ClInclude Include="weapons_textures_addons_position.h" />
     <ClInclude Include="cam_anm_tool.h" />
+    <ClInclude Include="weapon_inv_icon.h" />
     <ClInclude Include="Weapon.h" />
     <ClInclude Include="WeaponAK74.h" />
     <ClInclude Include="WeaponAmmo.h" />
@@ -3259,6 +3260,7 @@
     <ClCompile Include="wallmark_manager.cpp" />
     <ClCompile Include="weapons_textures_addons_position.cpp" />
     <ClCompile Include="cam_anm_tool.cpp" />
+    <ClCompile Include="weapon_inv_icon.cpp" />
     <ClCompile Include="Weapon.cpp" />
     <ClCompile Include="WeaponAK74.cpp" />
     <ClCompile Include="WeaponAmmo.cpp" />

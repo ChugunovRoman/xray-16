@@ -2,7 +2,7 @@
 #include "UICellItemFactory.h"
 #include "UICellCustomItems.h"
 
-CUICellItem* create_cell_item(CInventoryItem* itm)
+CUICellItem* create_cell_item(CInventoryItem* itm, EWeaponInvIconPreset weapon_icon_preset)
 {
     VERIFY(itm);
     CUICellItem* cell_item;
@@ -13,7 +13,7 @@ CUICellItem* create_cell_item(CInventoryItem* itm)
     if (pAmmo)
         cell_item = xr_new<CUIAmmoCellItem>(pAmmo);
     else if (pWeapon)
-        cell_item = xr_new<CUIWeaponCellItem>(pWeapon);
+        cell_item = xr_new<CUIWeaponCellItem>(pWeapon, weapon_icon_preset);
     else if (pEat)
         cell_item = xr_new<CUIInventoryCellItem>(itm, true, false, false);
     else

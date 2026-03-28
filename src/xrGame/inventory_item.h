@@ -11,6 +11,7 @@
 #include "inventory_space.h"
 #include "hit_immunity.h"
 #include "attachable_item.h"
+#include "weapon_inv_icon.h"
 #include "xrServer_Objects_ALife.h"
 #include "xrServer_Objects_ALife_Items.h"
 #include "xrCommon/xr_deque.h"
@@ -254,6 +255,18 @@ public:
     virtual CInventoryItem* can_make_killing(const CInventory* inventory) const;
     virtual bool ready_to_kill() const;
     IC bool useful_for_NPC() const;
+    void SetNeedDynamicInvIconUpgrade(bool v) { m_needDynamicInvIconUpgrade = v; }
+    bool NeedDynamicInvIconUpgrade() const { return m_needDynamicInvIconUpgrade; }
+    IC bool InvIconUsesSharedSectionRt() const { return m_inv_icon_shared_section_rt; }
+    bool DynamicInvIconPresetReady(EWeaponInvIconPreset p) const;
+    void SetDynamicInvIconPresetReady(EWeaponInvIconPreset p, bool v);
+    void InvalidateDynamicInventoryIcons();
+    // Сбросить готовность иконок и переставить в очередь, не отключая общий RT по секции (для net_Spawn после аддонов).
+    void QueueDynamicInvIconRefresh();
+    IC u32 DynamicInvIconRevision() const { return m_dynamic_inv_icon_revision; }
+    void EnsureInvIconQueueRetries();
+    bool ConsumeInvIconQueueRetryForRequeue();
+    void ClearInvIconQueueRetries();
 #ifdef DEBUG
     virtual void OnRender();
 #endif
@@ -339,6 +352,12 @@ protected:
 
     bool m_just_after_spawn;
     bool m_activated;
+    bool m_needDynamicInvIconUpgrade{};
+    bool m_dynamicInvIconPresetReady[eWpnInvIconPreset_COUNT]{};
+    bool m_inv_icon_shared_section_rt{true};
+    u32 m_inv_icon_rt_epoch{};
+    u8 m_inv_icon_q_retries{};
+    u32 m_dynamic_inv_icon_revision{};
 
 public:
     IC bool is_helper_item() { return !!m_flags.test(FIsHelperItem); }

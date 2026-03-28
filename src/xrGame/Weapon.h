@@ -13,6 +13,7 @@
 #include "first_bullet_controller.h"
 
 #include "CameraRecoil.h"
+#include "weapon_inv_icon.h"
 
 class CEntity;
 class ENGINE_API CMotionDef;
@@ -217,6 +218,8 @@ public:
     virtual void shedule_Update(u32 dt);
 
     void renderable_Render(u32 context_id, IRenderable* root) override;
+    void SetWeaponIconSnapshot(bool v) { m_bWeaponIconSnapshot = v; }
+    bool IsWeaponInventoryIconSnapshot() const override { return m_bWeaponIconSnapshot; }
     void render_hud_mode() override;
     bool need_renderable() override;
 
@@ -245,6 +248,7 @@ public:
     virtual void OnMoveToRuck(const SInvItemPlace& previous_place);
 
 private:
+    bool m_bWeaponIconSnapshot{};
     bool default_addons_was_loaded{false};
     u32 m_addon_id{1};
     typedef xr_map<u32, addon_item*>::iterator AddonIter;
@@ -332,6 +336,9 @@ public:
     EWeaponSubStates GetReloadState() const { return (EWeaponSubStates)m_sub_state; }
 protected:
     bool m_bTriStateReload;
+
+    // Inv icon GPU regen: set from attach/detach / GE_ADDON_CHANGE; consumed at end of CWeapon::reload().
+    bool m_defer_inv_icon_invalidate_after_reload{};
 
     // a misfire happens, you'll need to rearm weapon
     bool bMisfire;

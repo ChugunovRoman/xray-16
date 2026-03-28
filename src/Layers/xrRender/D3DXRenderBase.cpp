@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "D3DXRenderBase.h"
+#include "Layers/xrRender_R2/r2.h"
 #include "D3DUtils.h"
 #include "dxUIRender.h"
 #include "xrEngine/GameFont.h"
@@ -44,6 +45,7 @@ void D3DXRenderBase::updateGamma()
 
 void D3DXRenderBase::OnDeviceDestroy(bool bKeepTextures)
 {
+    WeaponIcon_ReleaseStaticResources();
     if (!GEnv.isDedicatedServer)
     {
         UIRenderImpl.DestroyUIGeom();
@@ -75,6 +77,7 @@ void D3DXRenderBase::OnDeviceDestroy(bool bKeepTextures)
 
 void D3DXRenderBase::Destroy()
 {
+    WeaponIcon_ReleaseStaticResources();
     xr_delete(Resources);
     HW.DestroyDevice();
 }

@@ -37,6 +37,8 @@ bool FreeRoom_inBelt(TIItemContainer& item_list, PIItem item, int width, int hei
 const ui_shader& GetBuyMenuShader();
 //получить shader на иконку предмета инвенторя
 const ui_shader& GetEquipmentIconShader(pcstr filepath);
+// $user$ / render-target texture name (no ui\ prefix)
+const ui_shader& GetInstanceRtIconShader(pcstr texture_resource_name);
     // shader на иконки персонажей в мультиплеере
 const ui_shader& GetMPCharIconsShader();
 //удаляем все шейдеры

@@ -308,6 +308,7 @@ target_sources(xrRender_GL PRIVATE
     ../xrRender_R2/r2_R_calculate.cpp
     ../xrRender_R2/r2_R_lights.cpp
     ../xrRender_R2/r2_R_render.cpp
+    ../xrRender_R2/r2_weapon_icon.cpp
     ../xrRender_R2/r2_R_sun_support.h
     ../xrRender_R2/r2_rendertarget.cpp
     ../xrRender_R2/r2_rendertarget_accum_omnipart_geom.cpp

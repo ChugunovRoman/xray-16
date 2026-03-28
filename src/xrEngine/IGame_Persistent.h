@@ -20,6 +20,7 @@
 #include "ShadersExternalData.h" //--#SM+#--
 
 class IGame_Level;
+class IRenderable;
 class IRenderVisual;
 class ILoadingScreen;
 class IMainMenu;
@@ -168,6 +169,18 @@ public:
     virtual void SetBaseDof(const Fvector3& /*dof*/) {};
     virtual void OnSectorChanged(IRender_Sector::sector_id_t /*sector*/) {};
     virtual void OnAssetsChanged();
+
+    // Called at the start of the main scene render pass (after level exists); used for dynamic weapon inventory icons.
+    virtual void OnWeaponIconRenderPass() {}
+
+    // begin=true: prepare subject (e.g. identity XFORM) before renderable_Render; begin=false: restore.
+    virtual void OnWeaponIconSnapshot(IRenderable* subject, bool begin) { (void)subject; (void)begin; }
+
+    // Called after Lua reload_system_ini() rebuilt pSettings (system.ltx).
+    virtual void OnSystemIniReloaded() {}
+
+    // Persisted $user$ weapon/item icon RTs were dropped (device destroy / render reset).
+    virtual void OnWeaponIconUserRtsReleased() {}
 
     IGame_Persistent();
     virtual ~IGame_Persistent();

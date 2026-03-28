@@ -33,6 +33,7 @@
 #include "ui/UIGameTutorial.h"
 #include "xrEngine/GameFont.h"
 #include "xrEngine/PerformanceAlert.hpp"
+#include "weapon_inv_icon.h"
 #include "xrEngine/xr_input.h"
 #include "ui/UILoadingScreen.h"
 #include "AnselManager.h"
@@ -183,6 +184,7 @@ void CGamePersistent::Disconnect()
 void CGamePersistent::OnGameStart()
 {
     inherited::OnGameStart();
+    weapon_inv_icon::LoadSettings();
     UpdateGameType();
 }
 
@@ -951,4 +953,24 @@ void CGamePersistent::OnAssetsChanged()
 {
     IGame_Persistent::OnAssetsChanged();
     StringTable().rescan();
+}
+
+void CGamePersistent::OnWeaponIconRenderPass()
+{
+    weapon_inv_icon::ProcessRenderPass();
+}
+
+void CGamePersistent::OnWeaponIconSnapshot(IRenderable* subject, bool begin)
+{
+    weapon_inv_icon::OnWeaponIconSnapshot(subject, begin);
+}
+
+void CGamePersistent::OnSystemIniReloaded()
+{
+    weapon_inv_icon::HotReloadInvIconSettings();
+}
+
+void CGamePersistent::OnWeaponIconUserRtsReleased()
+{
+    weapon_inv_icon::OnWeaponIconUserRtsReleased();
 }

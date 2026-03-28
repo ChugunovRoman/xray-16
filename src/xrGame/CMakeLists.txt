@@ -1497,6 +1497,8 @@ target_sources(xrGame PRIVATE
     WeaponBinocularsVision.h
     weaponBM16.cpp
     weaponBM16.h
+    weapon_inv_icon.cpp
+    weapon_inv_icon.h
     Weapon.cpp
     WeaponCustomPistol.cpp
     WeaponCustomPistol.h

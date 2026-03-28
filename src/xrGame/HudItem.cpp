@@ -64,8 +64,15 @@ void CHudItem::PlaySound(pcstr alias, const Fvector& position, u8 index)
 
 void CHudItem::renderable_Render(u32 context_id, IRenderable* root)
 {
-    UpdateXForm();
+    if (!IsWeaponInventoryIconSnapshot())
+        UpdateXForm();
     const bool _hud_render = root && root->renderable_HUD() && GetHUDmode();
+
+    if (IsWeaponInventoryIconSnapshot())
+    {
+        on_renderable_Render(context_id, root);
+        return;
+    }
 
     if (_hud_render && !IsHidden())
     {

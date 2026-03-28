@@ -55,6 +55,7 @@
 #include "GametaskManager.h"
 #include "performance_cvars.h"
 #include "map_spot_cvars.h"
+#include "weapon_inv_icon.h"
 
 #ifdef DEBUG
 #include "PHDebug.h"
@@ -709,6 +710,29 @@ public:
     void Info(TInfo& I) override
     {
         xr_strcpy(I, "valid name of an item that can be spawned");
+    }
+};
+
+class CCC_InvIconBakeDds final : public IConsole_Command
+{
+public:
+    CCC_InvIconBakeDds(pcstr name) : IConsole_Command(name) { bEmptyArgsHandled = true; }
+
+    void Execute(pcstr args) override
+    {
+        pcstr a = args;
+        while (a && *a == ' ')
+            ++a;
+        Msg("~ [weapon_inv_icon] inv_icon_bake_dds: command invoked, target=[%s]", (a && *a) ? a : "* (all sections)");
+        if (a && *a)
+            weapon_inv_icon::BakeDynamicInvIconsToDds(a);
+        else
+            weapon_inv_icon::BakeDynamicInvIconsToDds(nullptr);
+    }
+
+    void Info(TInfo& I) override
+    {
+        xr_strcpy(I, "[section] optional: bake inv+tech DDS DXT5 for use_dynamic_inv_icon weapons");
     }
 };
 // helper functions --------------------------------------------
@@ -2703,6 +2727,9 @@ void CCC_RegisterCommands()
     CMD1(CCC_ScriptCommand, "run_string");
     CMD1(CCC_TimeFactor, "time_factor");
 #endif // MASTER_GOLD
+
+    // Available in MASTER_GOLD Release: bake DDS for dynamic inv icons (modding / content pipeline).
+    CMD1(CCC_InvIconBakeDds, "inv_icon_bake_dds");
 
     CMD1(CCC_LuaHelp, "dump_lua");
     CMD4(CCC_InvCellSize, "g_inv_cell_size", &g_inv_inv_cell_size, 1, 4);

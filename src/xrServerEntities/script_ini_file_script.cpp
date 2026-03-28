@@ -62,6 +62,8 @@ CScriptIniFile* reload_system_ini()
     FS.update_path(fname, "$game_config$", "system.ltx");
     pSettings = xr_new<CInifile>(fname);
     Dbg.InitSectionLists();
+    if (g_pGamePersistent)
+        g_pGamePersistent->OnSystemIniReloaded();
     return (CScriptIniFile*)pSettings;
 }
 CScriptIniFile* reload_faction_editor_config()

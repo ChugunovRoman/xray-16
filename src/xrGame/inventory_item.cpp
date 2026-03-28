@@ -23,6 +23,7 @@
 #include "xrEngine/IGame_Persistent.h"
 #include "xrNetServer/NET_Messages.h"
 #include "CustomOutfit.h"
+#include "weapon_inv_icon.h"
 
 #ifdef DEBUG
 #include "debug_renderer.h"
@@ -458,11 +459,28 @@ bool CInventoryItem::net_Spawn(CSE_Abstract* DC)
 
     m_just_after_spawn = true;
     m_activated = false;
+
+    if (!GEnv.isDedicatedServer && GEnv.Render)
+    {
+        if (weapon_inv_icon::IsEnabledForItem(this))
+        {
+            for (u32 ii = 0; ii < eWpnInvIconPreset_COUNT; ++ii)
+                m_dynamicInvIconPresetReady[ii] = false;
+            m_inv_icon_rt_epoch = 0;
+            m_inv_icon_shared_section_rt = true;
+            m_needDynamicInvIconUpgrade = false;
+            m_inv_icon_q_retries = 0;
+            m_dynamic_inv_icon_revision++;
+        }
+    }
+
     return TRUE;
 }
 
 void CInventoryItem::net_Destroy()
 {
+    weapon_inv_icon::OnItemDestroyed(this);
+
     if (m_pInventory)
     {
         VERIFY(std::find(m_pInventory->m_all.begin(), m_pInventory->m_all.end(), this) == m_pInventory->m_all.end());
@@ -1305,6 +1323,82 @@ void CInventoryItem::reload(LPCSTR section)
     m_holder_range_modifier = READ_IF_EXISTS(pSettings, r_float, section, "holder_range_modifier", 1.f);
     m_holder_fov_modifier = READ_IF_EXISTS(pSettings, r_float, section, "holder_fov_modifier", 1.f);
 }
+
+bool CInventoryItem::DynamicInvIconPresetReady(EWeaponInvIconPreset p) const
+{
+    const u32 i = (u32)p;
+    if (i >= eWpnInvIconPreset_COUNT)
+        return false;
+    if (!m_dynamicInvIconPresetReady[i])
+        return false;
+    return m_inv_icon_rt_epoch == weapon_inv_icon::InvIconRtEpoch();
+}
+
+void CInventoryItem::SetDynamicInvIconPresetReady(EWeaponInvIconPreset p, bool v)
+{
+    const u32 i = (u32)p;
+    if (i >= eWpnInvIconPreset_COUNT)
+        return;
+    if (m_dynamicInvIconPresetReady[i] == v)
+    {
+        if (v && m_inv_icon_rt_epoch != weapon_inv_icon::InvIconRtEpoch())
+        {
+            m_inv_icon_rt_epoch = weapon_inv_icon::InvIconRtEpoch();
+            m_dynamic_inv_icon_revision++;
+        }
+        return;
+    }
+    m_dynamicInvIconPresetReady[i] = v;
+    if (v)
+        m_inv_icon_rt_epoch = weapon_inv_icon::InvIconRtEpoch();
+    m_dynamic_inv_icon_revision++;
+}
+
+void CInventoryItem::InvalidateDynamicInventoryIcons()
+{
+    for (u32 i = 0; i < eWpnInvIconPreset_COUNT; ++i)
+        m_dynamicInvIconPresetReady[i] = false;
+    m_inv_icon_shared_section_rt = false;
+    SetNeedDynamicInvIconUpgrade(true);
+    m_dynamic_inv_icon_revision++;
+    m_inv_icon_q_retries = 12;
+    // GPU pass: hot reload; CWeapon::reload() или конец net_Spawn после m_defer_inv_icon_invalidate_after_reload.
+    if (GEnv.Render && !GEnv.isDedicatedServer && weapon_inv_icon::IsEnabledForItem(this))
+    {
+        if (CWeapon* w = cast_weapon())
+            weapon_inv_icon::ScheduleItem(w);
+    }
+}
+
+void CInventoryItem::QueueDynamicInvIconRefresh()
+{
+    for (u32 i = 0; i < eWpnInvIconPreset_COUNT; ++i)
+        m_dynamicInvIconPresetReady[i] = false;
+    SetNeedDynamicInvIconUpgrade(true);
+    m_dynamic_inv_icon_revision++;
+    m_inv_icon_q_retries = 12;
+    if (GEnv.Render && !GEnv.isDedicatedServer && weapon_inv_icon::IsEnabledForItem(this))
+    {
+        if (CWeapon* w = cast_weapon())
+            weapon_inv_icon::ScheduleItem(w);
+    }
+}
+
+void CInventoryItem::EnsureInvIconQueueRetries()
+{
+    if (m_inv_icon_q_retries == 0)
+        m_inv_icon_q_retries = 12;
+}
+
+bool CInventoryItem::ConsumeInvIconQueueRetryForRequeue()
+{
+    if (m_inv_icon_q_retries == 0)
+        return false;
+    --m_inv_icon_q_retries;
+    return true;
+}
+
+void CInventoryItem::ClearInvIconQueueRetries() { m_inv_icon_q_retries = 0; }
 
 void CInventoryItem::reinit()
 {

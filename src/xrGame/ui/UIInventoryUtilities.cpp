@@ -14,6 +14,7 @@
 #include "ai_space.h"
 #include "xrScriptEngine/script_engine.hpp"
 #include "Include/xrRender/UIShader.h"
+#include "xrCommon/xr_unordered_map.h"
 
 #include <mutex>
 
@@ -37,7 +38,7 @@ ui_shader* g_EquipmentIconsShader = NULL;
 ui_shader* g_MPCharIconsShader = NULL;
 ui_shader* g_OutfitUpgradeIconsShader = NULL;
 ui_shader* g_WeaponUpgradeIconsShader = NULL;
-AssociativeVector<shared_str, ui_shader> g_EquipmentIconShaderMap;
+xr_unordered_map<shared_str, ui_shader> g_EquipmentIconShaderMap;
 std::mutex mtx;
 //static CUIStatic* GetUIStatic();
 
@@ -219,23 +220,50 @@ const ui_shader& InventoryUtilities::GetEquipmentIconShader(pcstr filepath)
     std::lock_guard<std::mutex> lock(mtx);
 
     string512 fullpath;
-    xr_sprintf(fullpath, "ui\\%s", filepath);
+    xr_sprintf(fullpath, "ui\\%s", filepath ? filepath : "");
+    const shared_str key(fullpath);
 
-    for (auto &i : g_EquipmentIconShaderMap)
-    {
-        if (!i.first || !i.second)
-            continue;
-
-        auto path = i.first.c_str();
-        if (xr_strcmp(path, fullpath) == 0)
-            return i.second;
-    }
+    const auto it = g_EquipmentIconShaderMap.find(key);
+    if (it != g_EquipmentIconShaderMap.end() && it->second)
+        return it->second;
 
     ui_shader* shader = xr_new<ui_shader>();
     (*shader)->create("hud" DELIMITER "default", fullpath);
 
-    g_EquipmentIconShaderMap.insert(std::make_pair(fullpath, *shader));
+    g_EquipmentIconShaderMap.insert(std::make_pair(key, *shader));
 
+    return *shader;
+}
+
+const ui_shader& InventoryUtilities::GetInstanceRtIconShader(pcstr texture_resource_name)
+{
+    std::lock_guard<std::mutex> lock(mtx);
+
+    // Нельзя вызывать GetEquipmentIconShader здесь — повторный lock(mtx) = deadlock.
+    if (!texture_resource_name || !texture_resource_name[0])
+    {
+        static constexpr pcstr k_ui_unknown = "ui\\unknown";
+        const shared_str unk(k_ui_unknown);
+        const auto itu = g_EquipmentIconShaderMap.find(unk);
+        if (itu != g_EquipmentIconShaderMap.end() && itu->second)
+            return itu->second;
+        ui_shader* sh = xr_new<ui_shader>();
+        (*sh)->create("hud" DELIMITER "default", k_ui_unknown);
+        g_EquipmentIconShaderMap.insert(std::make_pair(unk, *sh));
+        return *sh;
+    }
+
+    string512 key_buf;
+    xr_sprintf(key_buf, "rt:%s", texture_resource_name);
+    const shared_str key(key_buf);
+
+    const auto it = g_EquipmentIconShaderMap.find(key);
+    if (it != g_EquipmentIconShaderMap.end() && it->second)
+        return it->second;
+
+    ui_shader* shader = xr_new<ui_shader>();
+    (*shader)->create("hud" DELIMITER "default", texture_resource_name);
+    g_EquipmentIconShaderMap.insert(std::make_pair(key, *shader));
     return *shader;
 }
 

@@ -404,4 +404,28 @@ public:
 
     virtual RenderContext GetCurrentContext() const = 0;
     virtual void MakeContextCurrent(RenderContext context) = 0;
+
+    // Inventory weapon icon: render once to a named $user$ texture (see weapon_inv_icon). Default: unsupported.
+    virtual bool WeaponIcon_RenderToTexture(
+        pcstr texture_name, u32 w, u32 h, const Fmatrix& view, const Fmatrix& proj, IRenderable* subject = nullptr)
+    {
+        (void)texture_name;
+        (void)w;
+        (void)h;
+        (void)view;
+        (void)proj;
+        (void)subject;
+        return false;
+    }
+    // Drop persisted $user$ RT used by WeaponIcon_RenderToTexture (see r2_weapon_icon.cpp).
+    virtual void WeaponIcon_ReleaseUserIconRt(pcstr texture_name) { (void)texture_name; }
+    virtual void WeaponIcon_ReleaseAllUserIconRts() {}
+    // Save a persisted weapon icon RT (same key as WeaponIcon_RenderToTexture) to DDS DXT5/BC3. DX11 only.
+    virtual bool WeaponIcon_SavePersistedUserRtToDdsDxt5(pcstr user_texture_name, pcstr fs_root, pcstr fname)
+    {
+        (void)user_texture_name;
+        (void)fs_root;
+        (void)fname;
+        return false;
+    }
 };

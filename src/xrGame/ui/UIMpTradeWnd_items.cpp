@@ -9,8 +9,7 @@
 #include "Weapon.h"
 #include "WeaponMagazinedWGrenade.h"
 #include "UICellCustomItems.h"
-
-CUICellItem* create_cell_item(CInventoryItem* itm);
+#include "UICellItemFactory.h"
 
 SBuyItemInfo::SBuyItemInfo() { m_item_state = e_undefined; }
 SBuyItemInfo::~SBuyItemInfo()

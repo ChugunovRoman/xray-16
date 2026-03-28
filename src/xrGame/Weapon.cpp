@@ -32,6 +32,7 @@
 #include "xrCore/xr_token.h"
 #include "GamePersistent.h"
 #include "xrCommon/xr_map.h"
+#include "weapon_inv_icon.h"
 
 #define WEAPON_REMOVE_TIME 60000
 #define ROTATION_TIME 0.25f
@@ -276,6 +277,7 @@ shared_str CWeapon::GetNameWithAttachment()
 
 CWeapon::~CWeapon()
 {
+    weapon_inv_icon::OnWeaponDestroyed(this);
     xr_delete(m_UIScope);
     delete_data(m_scopes);
     delete_data(m_addons);
@@ -992,6 +994,15 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
     UpdateAddonsVisibility();
     InitAddons();
 
+    // SpawnDefaultAddons() ставит m_defer_inv_icon_invalidate_after_reload, но CWeapon::reload() к этому моменту
+    // уже отработал при спавне объекта — инвалидация в конце reload не выполняется. Сбрасываем флаг здесь,
+    // когда IKinematics аддонов уже созданы (addAddon в SpawnDefaultAddons).
+    if (m_defer_inv_icon_invalidate_after_reload)
+    {
+        m_defer_inv_icon_invalidate_after_reload = false;
+        InvalidateDynamicInventoryIcons();
+    }
+
     m_dwWeaponIndependencyTime = 0;
 
     VERIFY((u32)iAmmoElapsed == m_magazine.size());
@@ -1201,6 +1212,8 @@ void CWeapon::OnEvent(NET_Packet& P, u16 type)
         P.r_u8(m_flagsAddOnState);
         InitAddons();
         UpdateAddonsVisibility();
+        m_defer_inv_icon_invalidate_after_reload = true;
+        reload(m_section_id.c_str());
     }
     break;
 
@@ -1424,17 +1437,20 @@ void CWeapon::renderable_Render(u32 context_id, IRenderable* root)
 {
     ScopeLock lock{ &render_lock };
 
-    UpdateXForm();
+    if (!m_bWeaponIconSnapshot)
+        UpdateXForm();
 
-    //нарисовать подсветку
+    if (!m_bWeaponIconSnapshot)
+    {
+        //нарисовать подсветку
+        RenderLight();
 
-    RenderLight();
-
-    //если мы в режиме снайперки, то сам HUD рисовать не надо
-    if (IsZoomed() && !IsRotatingToZoom() && ZoomTexture())
-        RenderHud(FALSE);
-    else
-        RenderHud(TRUE);
+        //если мы в режиме снайперки, то сам HUD рисовать не надо
+        if (IsZoomed() && !IsRotatingToZoom() && ZoomTexture())
+            RenderHud(FALSE);
+        else
+            RenderHud(TRUE);
+    }
 
     if (bUseAttachmentSystem)
     {
@@ -2239,6 +2255,9 @@ void CWeapon::SpawnDefaultAddons()
 {
     if (default_addons_was_loaded)
         return;
+
+    u32 spawned_default_addon_count = 0;
+
     for (auto [slot_key, slot] : m_addon_slots)
     {
         shared_str default_addon = "";
@@ -2269,6 +2288,7 @@ void CWeapon::SpawnDefaultAddons()
             }
 
             addAddon(data);
+            ++spawned_default_addon_count;
         }
     }
 
@@ -2299,6 +2319,7 @@ void CWeapon::SpawnDefaultAddons()
             data.has_ort = true;
 
         addAddon(data);
+        ++spawned_default_addon_count;
     };
 
     bool addon_with_slot_has_been_added = false;
@@ -2340,6 +2361,11 @@ void CWeapon::SpawnDefaultAddons()
     }
 
     default_addons_was_loaded = true;
+
+    // Динамическая иконка рендерит мировую модель; дефолтные аддоны добавляются здесь, после reload().
+    // Любой заспавненный дефолтный аддон меняет состав мешей относительно «голого» ствола после reload().
+    if (weapon_inv_icon::IsEnabledForSection(m_section_id.c_str()) && spawned_default_addon_count > 0)
+        m_defer_inv_icon_invalidate_after_reload = true;
 }
 
 void CWeapon::UpdateAddonsVisibility()
@@ -2771,6 +2797,12 @@ void CWeapon::reload(LPCSTR section)
     }
 
     LoadCurrentScopeParams(m_section_id.c_str());
+
+    if (m_defer_inv_icon_invalidate_after_reload)
+    {
+        m_defer_inv_icon_invalidate_after_reload = false;
+        InvalidateDynamicInventoryIcons();
+    }
 }
 
 void CWeapon::create_physic_shell() { CPhysicsShellHolder::create_physic_shell(); }

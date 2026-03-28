@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "xrEngine/CustomHUD.h"
+#include "xrEngine/IGame_Persistent.h"
 #include "xrCore/Threading/TaskManager.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
@@ -141,6 +142,8 @@ void CRender::Calculate()
     // Main calc
     BasicStats.Culling.Begin();
     {
+        if (g_pGamePersistent)
+            g_pGamePersistent->OnWeaponIconRenderPass();
         r_main.run();
     }
     BasicStats.Culling.End();

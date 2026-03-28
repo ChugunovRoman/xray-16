@@ -28,6 +28,7 @@
 #include "UIHelper.h"
 #include "xrUICore/ui_defs.h"
 #include "Weapon.h"
+#include "weapon_inv_icon.h"
 #include "WeaponRPG7.h"
 #include "CustomOutfit.h"
 #include "ActorHelmet.h"
@@ -95,6 +96,82 @@ bool CUIInventoryUpgradeWnd::Init()
     return true;
 }
 
+void CUIInventoryUpgradeWnd::RefreshWeaponItemPortrait()
+{
+    VERIFY(m_item && m_inv_item);
+    const Irect item_upgrade_grid_rect = Irect().set(0, 0, 350, 200);
+    CWeapon* wpn = smart_cast<CWeapon*>(m_inv_item);
+    bool used_rt = false;
+    if (wpn && weapon_inv_icon::IsEnabledForItem(wpn))
+    {
+        if (wpn->DynamicInvIconPresetReady(eWpnInvIcon_Technician))
+        {
+            shared_str dyn = weapon_inv_icon::TextureResourceName(wpn, eWpnInvIcon_Technician);
+            m_item->SetShader(InventoryUtilities::GetInstanceRtIconShader(dyn.c_str()));
+            Frect texture_rect;
+            Fvector2 ts{};
+            if (m_item->GetUIStaticItem().GetShader()->GetBaseTextureResolution(ts) && ts.x > 0.f && ts.y > 0.f)
+            {
+                texture_rect.lt.set(0.f, 0.f);
+                texture_rect.rb.set(ts.x, ts.y);
+            }
+            else
+            {
+                u32 tw, th;
+                weapon_inv_icon::GetWeaponIconRtTexelSize(wpn, eWpnInvIcon_Technician, tw, th);
+                texture_rect.lt.set(0.f, 0.f);
+                texture_rect.rb.set(float(tw), float(th));
+            }
+            m_item->GetUIStaticItem().SetTextureRect(texture_rect);
+            used_rt = true;
+        }
+    }
+    if (!used_rt)
+    {
+        pcstr iconUpgradePath = m_inv_item->GetUpgrIconPath();
+        m_item->SetShader(InventoryUtilities::GetEquipmentIconShader(iconUpgradePath));
+
+        // Same as dynamic RT path: rect must match the real texture size (baked DDS can be 640×416 etc.).
+        // A fixed 350×200 rect breaks stretch and lets the quad draw at wrong scale vs item_static.
+        Frect texture_rect;
+        Fvector2 ts{};
+        if (m_item->GetUIStaticItem().GetShader()->GetBaseTextureResolution(ts) && ts.x > 0.f && ts.y > 0.f)
+        {
+            texture_rect.lt.set(0.f, 0.f);
+            texture_rect.rb.set(ts.x, ts.y);
+        }
+        else if (wpn && weapon_inv_icon::IsEnabledForItem(wpn))
+        {
+            u32 tw, th;
+            weapon_inv_icon::GetWeaponIconUiTexelSize(wpn, eWpnInvIcon_Technician, tw, th);
+            texture_rect.lt.set(0.f, 0.f);
+            texture_rect.rb.set(float(tw), float(th));
+        }
+        else
+        {
+            texture_rect.lt.set(0.f, 0.f);
+            texture_rect.rb.set(float(item_upgrade_grid_rect.x2 - item_upgrade_grid_rect.x1),
+                float(item_upgrade_grid_rect.y2 - item_upgrade_grid_rect.y1));
+        }
+        m_item->GetUIStaticItem().SetTextureRect(texture_rect);
+    }
+    m_item->TextureOn();
+    m_item->SetStretchTexture(true);
+    Fvector2 v_r = Fvector2().set(item_upgrade_grid_rect.x2, item_upgrade_grid_rect.y2);
+    if (UI().is_widescreen())
+        v_r.x *= 0.8f;
+
+    m_item->GetUIStaticItem().SetSize(v_r);
+    m_item->SetWidth(v_r.x);
+    m_item->SetHeight(v_r.y);
+
+    m_upgr_wpn_last_rt_bound = used_rt;
+    if (wpn)
+        m_upgr_wpn_seen_rev = wpn->DynamicInvIconRevision();
+    else
+        m_upgr_wpn_seen_rev = 0;
+}
+
 void CUIInventoryUpgradeWnd::InitInventory(CUICellItem* cellItem, bool can_upgrade)
 {
     if (m_item_info)
@@ -104,28 +181,15 @@ void CUIInventoryUpgradeWnd::InitInventory(CUICellItem* cellItem, bool can_upgra
     // Загружаем картинку
     if (m_item && m_inv_item)
     {
-        pcstr iconUpgradePath = m_inv_item->GetUpgrIconPath();
-        m_item->SetShader(InventoryUtilities::GetEquipmentIconShader(iconUpgradePath));
-
-        Irect item_upgrade_grid_rect = Irect().set(0, 0, 350, 200);
-        Frect texture_rect;
-        texture_rect.lt.set(item_upgrade_grid_rect.x1, item_upgrade_grid_rect.y1);
-        texture_rect.rb.set(item_upgrade_grid_rect.x2, item_upgrade_grid_rect.y2);
-        texture_rect.rb.add(texture_rect.lt);
-        m_item->GetUIStaticItem().SetTextureRect(texture_rect);
-        m_item->TextureOn();
-        m_item->SetStretchTexture(true);
-        Fvector2 v_r = Fvector2().set(item_upgrade_grid_rect.x2, item_upgrade_grid_rect.y2);
-        if (UI().is_widescreen())
-            v_r.x *= 0.8f;
-
-        m_item->GetUIStaticItem().SetSize(v_r);
-        m_item->SetWidth(v_r.x);
-        m_item->SetHeight(v_r.y);
+        RefreshWeaponItemPortrait();
         m_item->Show(true);
     }
     else if (m_item)
+    {
+        m_upgr_wpn_last_rt_bound = false;
+        m_upgr_wpn_seen_rev = 0;
         m_item->Show(false);
+    }
 
     m_scheme_wnd->DetachAll();
     m_scheme_wnd->Show(false);
@@ -151,9 +215,27 @@ void CUIInventoryUpgradeWnd::Show(bool status)
 {
     inherited::Show(status);
     UpdateAllUpgrades();
+    if (status && m_item && m_inv_item)
+        RefreshWeaponItemPortrait();
 }
 
-void CUIInventoryUpgradeWnd::Update() { inherited::Update(); }
+void CUIInventoryUpgradeWnd::Update()
+{
+    inherited::Update();
+
+    if (!m_item || !m_inv_item || !m_item->IsShown())
+        return;
+
+    CWeapon* wpn = smart_cast<CWeapon*>(m_inv_item);
+    if (!wpn || !weapon_inv_icon::IsEnabledForItem(wpn))
+        return;
+
+    const u32 rev = wpn->DynamicInvIconRevision();
+    const bool now_rt = wpn->DynamicInvIconPresetReady(eWpnInvIcon_Technician);
+
+    if (rev != m_upgr_wpn_seen_rev || now_rt != m_upgr_wpn_last_rt_bound)
+        RefreshWeaponItemPortrait();
+}
 void CUIInventoryUpgradeWnd::Reset()
 {
     for (Scheme* scheme : m_schemes)

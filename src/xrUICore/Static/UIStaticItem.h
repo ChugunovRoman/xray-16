@@ -38,7 +38,12 @@ public:
     ui_shader hShader;
 
     void CreateShader(LPCSTR tex, LPCSTR sh = "hud" DELIMITER "default");
-    void SetShader(const ui_shader& sh) { hShader = sh; };
+    void SetShader(const ui_shader& sh)
+    {
+        hShader = sh;
+        // Old TextureRect is for the previous base texture; UV = rect/ts would be wrong after swap (often fully transparent).
+        uFlags.set(flValidTextureRect, FALSE);
+    };
     void Init(LPCSTR tex, LPCSTR sh, float left, float top);
     void Render();
     void Render(float angle);

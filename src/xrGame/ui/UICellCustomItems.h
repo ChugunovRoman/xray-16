@@ -2,6 +2,7 @@
 #include "UICellItem.h"
 #include "Weapon.h"
 #include "../eatable_item.h"
+#include "weapon_inv_icon.h"
 
 struct SIconLayer
 {
@@ -22,6 +23,7 @@ public:
     CUIInventoryCellItem(CInventoryItem* itm);
     CUIInventoryCellItem(CInventoryItem* itm, bool needCondBar, bool needFIcon, bool needUgrIcon);
     CUIInventoryCellItem(shared_str section_id);
+    ~CUIInventoryCellItem() override;
 
     virtual bool EqualTo(CUICellItem* itm);
     virtual void UpdateItemText();
@@ -30,9 +32,26 @@ public:
     virtual void SetIsHelper(bool is_helper);
     bool IsHelperOrHasHelperChild();
     void Update();
-    void UpdateIcon();
+    virtual void UpdateIcon();
+    void DrawTexture() override;
     shared_str GetIconPath(shared_str section_id);
     CInventoryItem* object() { return (CInventoryItem*)m_pData; }
+protected:
+    EWeaponInvIconPreset m_inv_icon_preset{eWpnInvIcon_Inventory};
+    bool m_inv_ui_showing_rt{};
+    u32 m_inv_seen_rev{};
+    CUIStatic* m_dynamic_overlay{};
+    bool m_hide_base_for_dynamic{};
+    bool m_inv_dyn_overlay_layout_valid{};
+    Frect m_inv_dyn_overlay_abs_cache{};
+    bool m_inv_dyn_overlay_heading_cache{};
+    bool m_inv_layer_layout_valid{};
+    float m_inv_layer_cache_w{};
+    float m_inv_layer_cache_h{};
+    bool m_inv_layer_cache_heading{};
+    void UpdateDynamicOverlay(bool ready);
+    void InitDynamicOverlay(bool b_rotate);
+    void RemoveDynamicOverlay();
 
     //Alundaio
     void OnAfterChild(CUIDragDropListEx* parent_list) override;
@@ -91,7 +110,9 @@ protected:
 
 public:
     CUIWeaponCellItem(CWeapon* itm);
+    CUIWeaponCellItem(CWeapon* itm, EWeaponInvIconPreset preset);
     virtual ~CUIWeaponCellItem();
+    void UpdateIcon() override;
     virtual void Update();
     virtual void Draw();
     virtual void SetTextureColor(u32 color);

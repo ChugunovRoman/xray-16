@@ -112,6 +112,11 @@ public:
     virtual void OnSectorChanged(IRender_Sector::sector_id_t sector);
     virtual void OnAssetsChanged();
 
+    void OnWeaponIconRenderPass() override;
+    void OnWeaponIconSnapshot(IRenderable* subject, bool begin) override;
+    void OnSystemIniReloaded() override;
+    void OnWeaponIconUserRtsReleased() override;
+
     CHudTuner GetHudTuner() { return m_hudTuner; }
     CUITexturesAddonsPosition GetWpnTextureAddonsPosTool() const { return m_wpnTexturesPos; }
     CUICamAnmTool GetCamAnmLst() const { return m_camAnmLst; }

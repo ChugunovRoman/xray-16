@@ -1358,11 +1358,14 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
             LoadAltHudAim();
 
         UpdateAddonsOffset();
+        m_defer_inv_icon_invalidate_after_reload = true;
+        reload(m_section_id.c_str());
         return true;
     }
     else
     {
         UpdateAddonsOffset();
+        m_defer_inv_icon_invalidate_after_reload = true;
         return inherited::Attach(pIItem, b_send_event);
     }
 
@@ -1415,6 +1418,7 @@ bool CWeaponMagazined::Detach(u32 addon_id)
             hi->reload_measures();
         UpdateAvailableSecondZoom();
         // calc_aim_addon_offset();
+        m_defer_inv_icon_invalidate_after_reload = true;
         reload(m_section_id.c_str());
         setSecondZoomOnFirstScopeIfHaveIt();
 
@@ -1439,6 +1443,7 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
         m_section_id = parentSect;
 
         m_cur_scope = 0;
+        m_defer_inv_icon_invalidate_after_reload = true;
         reload(parentSect);
 
         UpdateAltScope();
@@ -1461,6 +1466,8 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
         UpdateAddonsVisibility();
         InitAddons();
         UpdateAddonsOffset();
+        m_defer_inv_icon_invalidate_after_reload = true;
+        reload(m_section_id.c_str());
         return CInventoryItemObject::Detach(item_section_name, b_spawn_item);
     }
     else if (m_eGrenadeLauncherStatus == ALife::eAddonAttachable && (m_sGrenadeLauncherName == item_section_name))
@@ -1475,6 +1482,8 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
         UpdateAddonsVisibility();
         InitAddons();
         UpdateAddonsOffset();
+        m_defer_inv_icon_invalidate_after_reload = true;
+        reload(m_section_id.c_str());
         return CInventoryItemObject::Detach(item_section_name, b_spawn_item);
     }
     else

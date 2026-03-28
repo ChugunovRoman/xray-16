@@ -91,6 +91,7 @@ private:
     void SetCurScheme(const shared_str& id);
     bool install_item(CInventoryItem& inv_item, bool can_upgrade);
     Manager_type& get_manager();
+    void RefreshWeaponItemPortrait();
 
 public:
     CUI3tButton* m_btn_repair{};
@@ -101,6 +102,9 @@ protected:
     CUIStatic* m_item{};
     CUIItemInfo* m_item_info{};
     CInventoryItem* m_inv_item{};
+    // Last bound mode for dynamic weapon icon in upgrade portrait (RT vs static fallback).
+    bool m_upgr_wpn_last_rt_bound{};
+    u32 m_upgr_wpn_seen_rev{};
 
     shared_str m_cell_textures[UIUpgrade::STATE_COUNT];
     shared_str m_point_textures[UIUpgrade::STATE_COUNT];
