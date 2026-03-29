@@ -228,8 +228,7 @@ void CActor::IR_OnMouseWheel(float x, float y)
     if (GamePersistent().GetHudTuner().is_active())
         return;
 
-    // Режим подстройки глубины HUD в прицеливании:
-    // зажат Action 'wpn_hud_fov_adjust', оружие в зуме, 3D-прицел активен
+    // Зажат 'wpn_hud_fov_adjust': от бедра — weapon_hud (per-weapon); в зуме — прежняя подстройка прицельного HUD FOV
     bool adjustHudFovPressed = false;
     ForAllActionKeys(kWPN_HUD_FOV_ADJUST, [&](size_t /*idx*/, int dik)
     {
@@ -245,6 +244,11 @@ void CActor::IR_OnMouseWheel(float x, float y)
     {
         PIItem activeItem = inventory().ActiveItem();
         CWeapon* weapon = activeItem ? smart_cast<CWeapon*>(activeItem) : nullptr;
+        if (weapon && !weapon->IsZoomed() && !weapon->IsSecondZoomed())
+        {
+            weapon->AdjustWeaponHudFov(y);
+            return;
+        }
         if (weapon && weapon->IsZoomed() && !weapon->IsSecondZoomed() && g_3d_scope_type != 0)
         {
             weapon->AdjustScopeHudFov(y);

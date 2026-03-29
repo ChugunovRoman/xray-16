@@ -47,6 +47,7 @@ extern int g_3d_scope_type;
 // Персональные пресеты HUD FOV в прицеливании для сочетаний "оружие+прицел"
 // Ключ формата "<weapon_section>;<scope_section>"
 extern xr_map<shared_str, float> g_scope_hud_fov_presets;
+extern xr_map<shared_str, float> g_weapon_hud_fov_presets;
 
 constexpr pcstr WPN_MAIN_SLOT = "slot_1";
 constexpr pcstr DOT = "dot";
@@ -161,6 +162,9 @@ CWeapon::CWeapon()
     bNVsecondVPstatus = false;
 
     m_nearwall_last_hud_fov = psHUD_FOV_def;
+    m_weapon_hud_config = 0.f;
+    m_weapon_hud_config_valid = false;
+    m_weapon_hud_adjust_smoothed = psHUD_FOV_def;
     m_fZoomStepCount = 3.0f;
     m_fZoomMinKoeff = 0.3f;
     m_fLR_MovingFactor = 0.f;
@@ -205,6 +209,45 @@ void CWeapon::SetScopeHudFovPreset(float value)
     clamp(v, 0.1f, 2.0f);
     shared_str key = GetScopeHudFovKey();
     g_scope_hud_fov_presets[key] = v;
+}
+
+bool CWeapon::GetWeaponHudFovPreset(float& outValue) const
+{
+    if (g_weapon_hud_fov_presets.empty())
+        return false;
+    auto it = g_weapon_hud_fov_presets.find(m_section_id);
+    if (it == g_weapon_hud_fov_presets.end())
+        return false;
+    outValue = it->second;
+    return true;
+}
+
+void CWeapon::SetWeaponHudFovPreset(float value)
+{
+    float v = value;
+    clamp(v, 0.1f, 2.0f);
+    g_weapon_hud_fov_presets[m_section_id] = v;
+}
+
+float CWeapon::GetWeaponHudBase() const
+{
+    float preset = 0.f;
+    if (GetWeaponHudFovPreset(preset))
+        return preset;
+    if (m_weapon_hud_config_valid)
+        return m_weapon_hud_config;
+    return psHUD_FOV_def;
+}
+
+void CWeapon::AdjustWeaponHudFov(float wheel_delta)
+{
+    if (wheel_delta == 0.f)
+        return;
+    float base = GetWeaponHudBase();
+    const float step = 0.02f;
+    base += (wheel_delta > 0.f ? step : -step);
+    clamp(base, 0.1f, 2.0f);
+    SetWeaponHudFovPreset(base);
 }
 
 const shared_str CWeapon::GetScopeName() const
@@ -745,6 +788,18 @@ void CWeapon::LoadModParams(LPCSTR section)
     // Modifier for HUD FOV from the hip
     m_hud_fov_add_mod = READ_IF_EXISTS(pSettings, r_float, section, "hud_fov_addition_modifier", 0.f);
 
+    if (pSettings->line_exist(section, "weapon_hud"))
+    {
+        m_weapon_hud_config = pSettings->r_float(section, "weapon_hud");
+        m_weapon_hud_config_valid = true;
+    }
+    else
+    {
+        m_weapon_hud_config = 0.f;
+        m_weapon_hud_config_valid = false;
+    }
+    m_weapon_hud_adjust_smoothed = GetWeaponHudBase();
+
     // Parameters for changing the HUD FOV when the player is standing close to the wall
     m_nearwall_dist_min = READ_IF_EXISTS(pSettings, r_float, section, "nearwall_dist_min", 0.5f);
     m_nearwall_dist_max = READ_IF_EXISTS(pSettings, r_float, section, "nearwall_dist_max", 1.f);
@@ -1267,7 +1322,9 @@ void CWeapon::OnH_B_Independent(bool just_before_destroy)
     m_zoom_params.m_bIsZoomModeNow = false;
     m_zoom_params.m_bIsZoomSecondModeNow = false;
     UpdateXForm();
-    m_nearwall_last_hud_fov = psHUD_FOV_def;
+    const float whBase = GetWeaponHudBase();
+    m_nearwall_last_hud_fov = whBase;
+    m_weapon_hud_adjust_smoothed = whBase;
 }
 
 void CWeapon::OnH_A_Independent()
@@ -1299,6 +1356,11 @@ void CWeapon::OnActiveItem()
     //-
 
     inherited::OnActiveItem();
+    {
+        const float whBase = GetWeaponHudBase();
+        m_nearwall_last_hud_fov = whBase;
+        m_weapon_hud_adjust_smoothed = whBase;
+    }
     //если мы занружаемся и оружие было в руках
     //. SetState                    (eIdle);
     //. SetNextState                (eIdle);
@@ -1343,7 +1405,11 @@ void CWeapon::OnH_B_Chield()
 
     OnZoomOut();
     m_set_next_ammoType_on_reload = undefined_ammo_type;
-    m_nearwall_last_hud_fov = psHUD_FOV_def;
+    {
+        const float whBase = GetWeaponHudBase();
+        m_nearwall_last_hud_fov = whBase;
+        m_weapon_hud_adjust_smoothed = whBase;
+    }
 }
 
 bool CWeapon::AllowBore() { return true; }
@@ -3774,8 +3840,17 @@ float CWeapon::GetHudFov()
         float fDistanceMod =
             ((dist - m_nearwall_dist_min) / (m_nearwall_dist_max - m_nearwall_dist_min)); // 0.f ... 1.f
 
-        // We calculate the basic HUD FOV from the hip
-        float fBaseFov = psHUD_FOV_def + m_hud_fov_add_mod;
+        // База HUD FOV: консоль/секция weapon_hud, иначе hud_fov; сглаживание к целевому значению
+        const float weaponHudTarget = GetWeaponHudBase();
+        {
+            float speed = 20.f;
+            float step = speed * Device.fTimeDelta;
+            if (step >= 1.f)
+                m_weapon_hud_adjust_smoothed = weaponHudTarget;
+            else
+                m_weapon_hud_adjust_smoothed += (weaponHudTarget - m_weapon_hud_adjust_smoothed) * step;
+        }
+        float fBaseFov = m_weapon_hud_adjust_smoothed + m_hud_fov_add_mod;
 
         // Для 3D-прицелов (g_3d_scope_type != 0) в зуме можем использовать сохранённый пресет как базовый HUD FOV
         if (g_3d_scope_type != 0 && (IsZoomed() || IsSecondZoomed()))

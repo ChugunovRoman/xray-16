@@ -124,6 +124,7 @@ int g_inv_highlight_equipped = 0;
 int g_inv_inv_cell_size = 3;
 int g_3d_scope_type = 1; // 0 = off, 1 = PiP (lens zoom), 2 = PiP + main FOV zoom
 xr_map<shared_str, float> g_scope_hud_fov_presets;
+xr_map<shared_str, float> g_weapon_hud_fov_presets;
 //-Alundaio
 
 int g_first_person_death = 0;
@@ -1725,6 +1726,51 @@ public:
     }
 };
 
+// weapon_hud <weapon_section> <abs_hud_fov>
+class CCC_WeaponHudFov : public IConsole_Command
+{
+public:
+    CCC_WeaponHudFov(LPCSTR n) : IConsole_Command(n) { bEmptyArgsHandled = true; }
+
+    void Execute(LPCSTR args) override
+    {
+        if (!args || !*args)
+        {
+            for (const auto& it : g_weapon_hud_fov_presets)
+                Msg("%s %s %f", cName, it.first.c_str(), it.second);
+            return;
+        }
+
+        string512 key;
+        float value = 0.0f;
+        *key = 0;
+
+        int parsed = sscanf(args, "%s %f", key, &value);
+        if (parsed <= 0)
+            return;
+
+        if (parsed == 1)
+        {
+            auto it = g_weapon_hud_fov_presets.find(shared_str(key));
+            if (it != g_weapon_hud_fov_presets.end())
+                g_weapon_hud_fov_presets.erase(it);
+            return;
+        }
+
+        clamp(value, 0.1f, 2.0f);
+        g_weapon_hud_fov_presets[shared_str(key)] = value;
+    }
+
+    void Save(IWriter* f) override
+    {
+        if (g_weapon_hud_fov_presets.empty())
+            return;
+
+        for (const auto& it : g_weapon_hud_fov_presets)
+            f->w_printf("%s %s %f\r\n", cName, it.first.c_str(), it.second);
+    }
+};
+
 #include "GamePersistent.h"
 
 struct CCC_LuaHelp : public IConsole_Command
@@ -2522,6 +2568,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Float, "hud_fov", &psHUD_FOV_def, 0.1f, 1.0f);
     CMD4(CCC_Float, "fov", &g_fov, 5.0f, 180.0f);
     CMD1(CCC_ScopeHudFov, "g_w_scope_hud_fov");
+    CMD1(CCC_WeaponHudFov, "weapon_hud");
 
     // Demo
     CMD1(CCC_DemoPlay, "demo_play");

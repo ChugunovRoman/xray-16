@@ -194,6 +194,10 @@ public:
     float m_hud_fov_before_zoom;       // HUD FOV до прицеливания (для g_3d_scope_type == 2)
     float m_hud_fov_main_fov_zoom_smoothed; // сглаженный HUD FOV при зуме main FOV (режим 2)
 
+    float m_weapon_hud_config;
+    bool m_weapon_hud_config_valid;
+    float m_weapon_hud_adjust_smoothed;
+
     float m_fLR_MovingFactor;  // Фактор бокового наклона худа при ходьбе [-1; +1]
     float m_fLR_CameraFactor;  // Фактор бокового наклона худа при движении камеры [-1; +1]
     float m_fLR_InertiaFactor; // Фактор горизонтальной инерции худа при движении камеры [-1; +1]
@@ -501,6 +505,8 @@ public:
     virtual void OnZoomSecondIn();
     // Ручная подстройка базового HUD FOV в прицеливании (используется при зажатом LCTRL и прокрутке колеса)
     void AdjustScopeHudFov(float wheel_delta);
+    // Per-weapon HUD FOV (от бедра): консоль weapon_hud / секция weapon_hud
+    void AdjustWeaponHudFov(float wheel_delta);
     IC bool IsZoomed() const { return m_zoom_params.m_bIsZoomModeNow; };
     IC bool IsSecondZoomed() const { return m_zoom_params.m_bIsZoomSecondModeNow; };
     CUIWindow* ZoomTexture();
@@ -552,6 +558,10 @@ private:
     shared_str GetScopeHudFovKey() const;
     bool GetScopeHudFovPreset(float& outValue) const;
     void SetScopeHudFovPreset(float value);
+
+    bool GetWeaponHudFovPreset(float& outValue) const;
+    void SetWeaponHudFovPreset(float value);
+    float GetWeaponHudBase() const;
 
     firedeps m_current_firedeps;
 
