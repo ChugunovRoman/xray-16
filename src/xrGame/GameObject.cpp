@@ -203,6 +203,26 @@ void CGameObject::cNameVisual_set(shared_str N)
     OnChangeVisual();
 }
 
+void CGameObject::ReloadVisualFromDisk()
+{
+    if (GEnv.isDedicatedServer || !GEnv.Render)
+        return;
+    shared_str v = NameVisual;
+    if (!v.size() || !v[0])
+        return;
+    // bDiscard: drop pool/base refs so mesh and skeleton changes on disk are picked up (same idea as HUD hot reload).
+    IRenderVisual* rv = renderable.visual;
+    if (rv)
+    {
+        GEnv.Render->model_Delete(rv, TRUE);
+        renderable.visual = rv;
+    }
+    NameVisual = nullptr;
+    OnChangeVisual();
+
+    cNameVisual_set(v);
+}
+
 // flagging
 void CGameObject::processing_activate()
 {

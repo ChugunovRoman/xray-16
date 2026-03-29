@@ -34,6 +34,8 @@
 #include "xrEngine/GameFont.h"
 #include "xrEngine/PerformanceAlert.hpp"
 #include "weapon_inv_icon.h"
+#include "Weapon.h"
+#include "player_hud.h"
 #include "xrEngine/xr_input.h"
 #include "ui/UILoadingScreen.h"
 #include "AnselManager.h"
@@ -968,6 +970,16 @@ void CGamePersistent::OnWeaponIconSnapshot(IRenderable* subject, bool begin)
 void CGamePersistent::OnSystemIniReloaded()
 {
     weapon_inv_icon::HotReloadInvIconSettings();
+
+    if (GEnv.isDedicatedServer || !g_pGameLevel)
+        return;
+
+    if (CActor* actor = smart_cast<CActor*>(Level().CurrentControlEntity()))
+    {
+        if (PIItem active = actor->inventory().ActiveItem())
+            if (CWeapon* wpn = smart_cast<CWeapon*>(active))
+                wpn->HotReloadModelsAfterSystemIni();
+    }
 }
 
 void CGamePersistent::OnWeaponIconUserRtsReleased()

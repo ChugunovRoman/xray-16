@@ -11,6 +11,7 @@
 #include "xrEngine/xr_level_controller.h"
 #include "game_cl_base.h"
 #include "Include/xrRender/Kinematics.h"
+#include "Include/xrRender/KinematicsAnimated.h"
 #include "xrAICore/Navigation/ai_object_location.h"
 #include "xrPhysics/MathUtils.h"
 #include "Common/object_broker.h"
@@ -1454,16 +1455,32 @@ void CWeapon::renderable_Render(u32 context_id, IRenderable* root)
 
     if (bUseAttachmentSystem)
     {
+        IKinematics* wpn_k = Visual() ? Visual()->dcast_PKinematics() : nullptr;
+        if (wpn_k)
+        {
+            if (IKinematicsAnimated* ka = wpn_k->dcast_PKinematicsAnimated())
+            {
+                ka->UpdateTracks();
+                wpn_k->CalculateBones_Invalidate();
+                wpn_k->CalculateBones(TRUE);
+            }
+            else
+            {
+                wpn_k->CalculateBones_Invalidate();
+                wpn_k->CalculateBones(TRUE);
+            }
+        }
+
         Fmatrix m_item_transform = XFORM();
         for (auto [addon_id, item]: m_addon_items)
         {
             item->addon_item_transform.set(m_item_transform);
 
-            if (item->bone_name.c_str() != nullptr)
+            if (wpn_k && !item->bone_name.empty())
             {
-                const u16 bone_id = Visual()->dcast_PKinematics()->LL_BoneID(item->bone_name.c_str());
+                const u16 bone_id = wpn_k->LL_BoneID(item->bone_name.c_str());
                 if (bone_id != BI_NONE)
-                    item->addon_item_transform.mulB_43(Visual()->dcast_PKinematics()->LL_GetTransform(bone_id));
+                    item->addon_item_transform.mulB_43(wpn_k->LL_GetTransform(bone_id));
             }
 
             item->addon_item_transform.mulB_43(item->addon_item_pos);
@@ -2143,100 +2160,129 @@ void CWeapon::LoadAltHudAim()
             m_hands_offset[1][1] = pSettings->r_fvector3(base_hud_sect, val_name);
     }
 }
+
+// Slot lines often live in [parent_section] while the weapon instance uses a derived [section].
+static shared_str SectionForAddonSlotLines(pcstr weapon_section)
+{
+    if (!weapon_section || !weapon_section[0] || !pSettings->section_exist(weapon_section))
+        return shared_str(weapon_section ? weapon_section : "");
+    if (pSettings->line_exist(weapon_section, "addon_slot_1_offset"))
+        return shared_str(weapon_section);
+    if (pSettings->line_exist(weapon_section, "parent_section"))
+    {
+        shared_str parent = pSettings->r_string(weapon_section, "parent_section");
+        if (parent.size() && pSettings->section_exist(parent.c_str()) &&
+            pSettings->line_exist(parent.c_str(), "addon_slot_1_offset"))
+            return parent;
+    }
+    return shared_str(weapon_section);
+}
+
 void CWeapon::LoadAddonSlosts(LPCSTR section)
 {
-    if (bUseAttachmentSystem)
-    {
-        auto load_slot = [&](shared_str line_name, shared_str slot_key) {
-            if (!pSettings->line_exist(section, line_name.c_str()))
-                return;
+    if (!bUseAttachmentSystem)
+        return;
 
-            addon_slot* slot = xr_new<addon_slot>();
-            shared_str line_name_world = make_string("%s_world", line_name.c_str()).c_str();
-            pcstr str = pSettings->r_string(section, line_name.c_str());
-            string128 bone_str = "";
-            string128 bone_name = "";
-            string128 bone_2_name = "";
-            u16 slot_type;
-            Fvector3 pos = {0.f, 0.f, 0.f};
-            Fvector3 rot = {0.f, 0.f, 0.f};
-            sscanf(str, "%hu,%f,%f,%f,%f,%f,%f,%s", &slot_type, &pos.x, &pos.y, &pos.z, &rot.x, &rot.y, &rot.z, &bone_str);
-            slot->transform_2 = Fmatrix().identity();
-            xr_strcpy(bone_name, bone_str);
-            if (strstr(bone_str, ","))
+    const shared_str slot_sect = SectionForAddonSlotLines(section);
+    pcstr S = slot_sect.c_str();
+
+    auto load_slot = [&](shared_str line_name, shared_str slot_key) {
+        if (!pSettings->line_exist(S, line_name.c_str()))
+            return;
+
+        addon_slot* slot = xr_new<addon_slot>();
+        shared_str line_name_world = make_string("%s_world", line_name.c_str()).c_str();
+        pcstr str = pSettings->r_string(S, line_name.c_str());
+        string256 bone_work{};
+        string128 bone_name = "";
+        string128 bone_2_name = "";
+        u16 slot_type;
+        Fvector3 pos = {0.f, 0.f, 0.f};
+        Fvector3 rot = {0.f, 0.f, 0.f};
+        const int n = sscanf(str, "%hu,%f,%f,%f,%f,%f,%f,%255s", &slot_type, &pos.x, &pos.y, &pos.z, &rot.x, &rot.y, &rot.z, bone_work);
+        if (n < 7)
+        {
+            xr_delete(slot);
+            return;
+        }
+        if (n < 8)
+            bone_work[0] = '\0';
+
+        slot->transform_2 = Fmatrix().identity();
+        xr_strcpy(bone_name, bone_work);
+        if (strstr(bone_work, ","))
+        {
+            _GetItem(bone_work, 1, bone_2_name);
+            _GetItem(bone_work, 0, bone_name);
+
+            shared_str line_name_pos_2 = make_string("%s_2", line_name.c_str()).c_str();
+            if (pSettings->line_exist(S, line_name_pos_2.c_str()))
             {
-                _GetItem(bone_str, 1, bone_2_name);
-                _GetItem(bone_str, 0, bone_name);
+                Fvector3 pos_2 = {0.f, 0.f, 0.f};
+                Fvector3 rot_2 = {0.f, 0.f, 0.f};
+                str = pSettings->r_string(S, line_name_pos_2.c_str());
+                sscanf(str, "%f,%f,%f,%f,%f,%f", &pos_2.x, &pos_2.y, &pos_2.z, &rot_2.x, &rot_2.y, &rot_2.z);
 
-                shared_str line_name_pos_2 = make_string("%s_2", line_name.c_str()).c_str();
-                if (pSettings->line_exist(section, line_name_pos_2.c_str()))
-                {
-                    Fvector3 pos_2 = {0.f, 0.f, 0.f};
-                    Fvector3 rot_2 = {0.f, 0.f, 0.f};
-                    str = pSettings->r_string(section, line_name_pos_2.c_str());
-                    sscanf(str, "%f,%f,%f,%f,%f,%f", &pos_2.x, &pos_2.y, &pos_2.z, &rot_2.x, &rot_2.y, &rot_2.z);
+                Fmatrix trans_2;
+                trans_2.setHPB(rot_2.x, rot_2.y, rot_2.z);
+                trans_2.translate_over(pos_2.x, pos_2.y, pos_2.z);
 
-                    Fmatrix trans_2;
-                    trans_2.setHPB(rot_2.x, rot_2.y, rot_2.z);
-                    trans_2.translate_over(pos_2.x, pos_2.y, pos_2.z);
-
-                    slot->transform_2 = trans_2;
-                }
+                slot->transform_2 = trans_2;
             }
-            Fvector3 pos_w = pos;
-            Fvector3 rot_w = rot;
-            if (pSettings->line_exist(section, line_name_world.c_str()))
-            {
-                str = pSettings->r_string(section, line_name_world.c_str());
-                sscanf(str, "%f,%f,%f,%f,%f,%f", &pos_w.x, &pos_w.y, &pos_w.z, &rot_w.x, &rot_w.y, &rot_w.z);
-            }
-            Fmatrix trans;
-            trans.setHPB(rot.x, rot.y, rot.z);
-            trans.translate_over(pos.x, pos.y, pos.z);
+        }
+        Fvector3 pos_w = pos;
+        Fvector3 rot_w = rot;
+        if (pSettings->line_exist(S, line_name_world.c_str()))
+        {
+            str = pSettings->r_string(S, line_name_world.c_str());
+            sscanf(str, "%f,%f,%f,%f,%f,%f", &pos_w.x, &pos_w.y, &pos_w.z, &rot_w.x, &rot_w.y, &rot_w.z);
+        }
+        Fmatrix trans;
+        trans.setHPB(rot.x, rot.y, rot.z);
+        trans.translate_over(pos.x, pos.y, pos.z);
 
-            Fmatrix trans_w;
-            trans_w.setHPB(rot_w.x, rot_w.y, rot_w.z);
-            trans_w.translate_over(pos_w.x, pos_w.y, pos_w.z);
+        Fmatrix trans_w;
+        trans_w.setHPB(rot_w.x, rot_w.y, rot_w.z);
+        trans_w.translate_over(pos_w.x, pos_w.y, pos_w.z);
 
-            slot->slot_name = slot_key;
-            slot->transform = trans;
-            slot->transform_world = trans_w;
-            slot->parent = 0;
-            slot->slot_type = slot_type;
-            slot->bone_name = bone_name;
-            slot->bone_2_name = bone_2_name;
-            m_addon_slots[slot_key] = slot;
-        };
-        auto load_slot_offsets = [&](const char* format) {
-            u16 index = 1;
-            shared_str line_name;
-            shared_str slot_key;
-            
-            while (true)
-            {
-                line_name = make_string(format, index).c_str();
-                if (!pSettings->line_exist(section, line_name.c_str()))
-                    break;
+        slot->slot_name = slot_key;
+        slot->transform = trans;
+        slot->transform_world = trans_w;
+        slot->parent = 0;
+        slot->slot_type = slot_type;
+        slot->bone_name = bone_name;
+        slot->bone_2_name = bone_2_name;
+        m_addon_slots[slot_key] = slot;
+    };
+    auto load_slot_offsets = [&](const char* format) {
+        u16 index = 1;
+        shared_str line_name;
+        shared_str slot_key;
 
-                slot_key = make_string("slot_%d", index).c_str();
+        while (true)
+        {
+            line_name = make_string(format, index).c_str();
+            if (!pSettings->line_exist(S, line_name.c_str()))
+                break;
 
-                load_slot(line_name, slot_key);
+            slot_key = make_string("slot_%d", index).c_str();
 
-                index++;
-            }
-        };
+            load_slot(line_name, slot_key);
 
-        load_slot_offsets("addon_slot_%d_offset");
-        load_slot("addon_slot_bh_offset", "slot_bh");
-        load_slot("addon_slot_mag_offset", "slot_mag");
-        load_slot("addon_slot_dtk_offset", "slot_dtk");
-        load_slot("addon_slot_grip_offset", "slot_grip");
-        load_slot("addon_slot_sight_offset", "slot_sight");
-        load_slot("addon_slot_tac_grip_offset", "slot_tac_grip");
-        load_slot("addon_slot_cover_offset", "slot_cover");
-        load_slot("addon_slot_cev_up_offset", "slot_cev_up");
-        load_slot("addon_slot_cev_down_offset", "slot_cev_down");
-    }
+            index++;
+        }
+    };
+
+    load_slot_offsets("addon_slot_%d_offset");
+    load_slot("addon_slot_bh_offset", "slot_bh");
+    load_slot("addon_slot_mag_offset", "slot_mag");
+    load_slot("addon_slot_dtk_offset", "slot_dtk");
+    load_slot("addon_slot_grip_offset", "slot_grip");
+    load_slot("addon_slot_sight_offset", "slot_sight");
+    load_slot("addon_slot_tac_grip_offset", "slot_tac_grip");
+    load_slot("addon_slot_cover_offset", "slot_cover");
+    load_slot("addon_slot_cev_up_offset", "slot_cev_up");
+    load_slot("addon_slot_cev_down_offset", "slot_cev_down");
 }
 shared_str CWeapon::GetSlotKey(shared_str slot_name, u32 addon_parent_id, u32 addon_id)
 {
@@ -4206,7 +4252,7 @@ void CWeapon::addAddon(AddAddonData data)
     new_addon->has_mag_size = data.has_mag_size;
     new_addon->was_inited_in_default_slots = data.was_inited_in_default_slots;
     
-    if (pSettings->line_exist(new_addon->addon_item_name.c_str(), "ammo_mag_size"))
+    if (!data.skip_magazine_sync_on_add && pSettings->line_exist(new_addon->addon_item_name.c_str(), "ammo_mag_size"))
     {
         int oldMagazineSize = iMagazineSize;
 
@@ -4765,5 +4811,193 @@ void CWeapon::UpdateZoomedAddon(AddonIter current, AddonIter found)
     found->second->is_latest_zoomed = true;
     m_hands_offset[0][1].set(found->second->calc_second_aim_offset);
     m_hands_offset[1][1].set(found->second->calc_second_aim_rot);
+}
+
+namespace
+{
+void destroy_addon_item_models(addon_item* a)
+{
+    if (!a || !GEnv.Render)
+        return;
+    if (a->addon_item_model)
+    {
+        IRenderVisual* v = a->addon_item_model->dcast_RenderVisual();
+        GEnv.Render->model_Delete(v);
+        a->addon_item_model = nullptr;
+    }
+    if (a->addon_item_model_2)
+    {
+        IRenderVisual* v = a->addon_item_model_2->dcast_RenderVisual();
+        GEnv.Render->model_Delete(v);
+        a->addon_item_model_2 = nullptr;
+    }
+    if (a->addon_item_model_dot)
+    {
+        IRenderVisual* v = a->addon_item_model_dot->dcast_RenderVisual();
+        GEnv.Render->model_Delete(v);
+        a->addon_item_model_dot = nullptr;
+    }
+}
+} // namespace
+
+void CWeapon::HotReloadModelsAfterSystemIni()
+{
+    if (GEnv.isDedicatedServer || !GEnv.Render)
+        return;
+
+    pcstr section = m_section_id.c_str();
+    if (!section || !section[0] || !pSettings->section_exist(section))
+        return;
+
+    const int saved_ammo = iAmmoElapsed;
+    const int saved_mag = iMagazineSize;
+
+    reload(section);
+    // Like CHudItem::Load but replace sndBore (LoadSound asserts if alias already exists).
+    // Use m_section_id (shared_str) so read_if_exists is not ambiguous vs pcstr overload.
+    hud_sect = pSettings->read_if_exists<pcstr>(m_section_id, "hud", nullptr);
+    if (m_animation_slot != u32(-1))
+        m_animation_slot = pSettings->read_if_exists<u32>(m_section_id, "animation_slot", m_animation_slot);
+    else
+        m_animation_slot = pSettings->r_u32(m_section_id.c_str(), "animation_slot");
+    m_sounds.RemoveSoundItem("sndBore");
+    m_sounds.LoadSound(section, "snd_bore", "sndBore", true);
+
+    // CWeapon::reload() does not refresh these (only Load() does); stale values break slot/world offsets after ini hot reload.
+    bUseAttachmentSystem = pSettings->read_if_exists<bool>(section, "use_attachment_system", false);
+    if (pSettings->line_exist(section, "dont_detachable_slots"))
+        sDontDetachableSlots = pSettings->r_string_wb(section, "dont_detachable_slots");
+    else
+        sDontDetachableSlots = nullptr;
+    if (bUseAttachmentSystem)
+    {
+        Fvector4 w_pos = pSettings->read_if_exists<Fvector4>(m_section_id.c_str(), "attachment_system_offset_on_world_model",
+            Fvector4().set(0.f, 0.f, 0.f, 0.f));
+        bAttachmentSystemOffsetOnWorldModel.identity();
+        bAttachmentSystemOffsetOnWorldModel.setHPB(0.0f, 0.0f, w_pos.w);
+        bAttachmentSystemOffsetOnWorldModel.translate_over(w_pos.x, w_pos.y, w_pos.z);
+        bApplyAncorTransform = pSettings->read_if_exists<bool>(section, "apply_anchor_transform", false);
+    }
+
+    if (pSettings->line_exist(section, "visual"))
+    {
+        string_path tmp;
+        xr_strcpy(tmp, pSettings->r_string(section, "visual"));
+        if (strext(tmp))
+            *strext(tmp) = 0;
+        xr_strlwr(tmp);
+        CHudItem::object().cNameVisual_set(tmp);
+    }
+    CHudItem::object().ReloadVisualFromDisk();
+
+    if (bUseAttachmentSystem)
+    {
+        xr_map<u32, AddAddonData> by_id;
+        for (auto& kv : m_addon_items)
+        {
+            addon_item* const a = kv.second;
+            if (!a)
+                continue;
+            AddAddonData d{};
+            d.item_section_id = a->addon_item_name;
+            d.addon_type = a->addon_type;
+            d.slot_name = a->slot;
+            d.ort = a->ort;
+            d.addon_id = kv.first;
+            d.parent_id = a->parent_id;
+            d.has_scope_texture = a->has_scope_texture != FALSE;
+            d.provided_slot_type = a->provided_slot_type;
+            d.has_ort = (a->ort != CInventoryItem::EIIAddonOrt::FOrtNone);
+            d.scope_dynamic_zoom = a->scope_dynamic_zoom != FALSE;
+            d.has_mag_size = a->has_mag_size != FALSE;
+            d.was_inited_in_default_slots = a->was_inited_in_default_slots != FALSE;
+            d.skip_magazine_sync_on_add = true;
+            by_id.emplace(kv.first, d);
+        }
+
+        for (auto& kv : m_addon_items)
+        {
+            destroy_addon_item_models(kv.second);
+            xr_delete(kv.second);
+        }
+        m_addon_items.clear();
+
+        for (auto& kv : m_addon_slots)
+            xr_delete(kv.second);
+        m_addon_slots.clear();
+
+        LoadAddonSlosts(section);
+
+        if (!by_id.empty())
+        {
+            xr_set<u32> done;
+            const size_t n = by_id.size();
+            while (done.size() < n)
+            {
+                bool progressed = false;
+                for (auto& kv : by_id)
+                {
+                    const u32 id = kv.first;
+                    if (done.count(id))
+                        continue;
+                    const u32 pid = kv.second.parent_id;
+                    if (pid == 0 || done.count(pid))
+                    {
+                        addAddon(kv.second);
+                        done.insert(id);
+                        progressed = true;
+                    }
+                }
+                if (!progressed)
+                {
+                    Msg("! HotReloadModelsAfterSystemIni: addon dependency order failed [%s]", section);
+                    break;
+                }
+            }
+
+            u32 max_id = 0;
+            for (auto& kv : by_id)
+                if (kv.first > max_id)
+                    max_id = kv.first;
+            m_addon_id = max_id + 1;
+        }
+
+        iMagazineSize = saved_mag;
+        iAmmoElapsed = saved_ammo;
+
+        UpdateAddonsVisibility();
+        UpdateAvailableSecondZoom();
+        setSecondZoomOnFirstScopeIfHaveIt();
+    }
+    else
+    {
+        for (auto& kv : m_addon_items)
+        {
+            destroy_addon_item_models(kv.second);
+            xr_delete(kv.second);
+        }
+        m_addon_items.clear();
+        for (auto& kv : m_addon_slots)
+            xr_delete(kv.second);
+        m_addon_slots.clear();
+    }
+
+    UpdateAddonsVisibility();
+
+    if (CHudItem* const hud = cast_hud_item())
+    {
+        if (g_player_hud[0])
+            g_player_hud[0]->hot_reload_attached_weapon_hud(hud);
+        if (g_player_hud[1])
+            g_player_hud[1]->hot_reload_attached_weapon_hud(hud);
+    }
+
+    if (bUseAttachmentSystem)
+        calc_aim_addon_offset();
+    LoadAltHudAim();
+    UpdateAddonsOffset();
+
+    InvalidateDynamicInventoryIcons();
+    weapon_inv_icon::RenderDynamicInvIconsImmediateForItem(this);
 }
 

@@ -188,24 +188,28 @@ void attachable_hud_item::update(bool bForce)
 
     calc_addon_aim_offset();
 
-    if (IKinematicsAnimated* ka = m_model->dcast_PKinematicsAnimated())
+    auto update_kinematics_bones = [](IKinematics* kin)
     {
-        ka->UpdateTracks();
-        ka->dcast_PKinematics()->CalculateBones_Invalidate();
-        ka->dcast_PKinematics()->CalculateBones(TRUE);
-    }
-    if (IKinematicsAnimated* ka = m_model_2->dcast_PKinematicsAnimated())
-    {
-        ka->UpdateTracks();
-        ka->dcast_PKinematics()->CalculateBones_Invalidate();
-        ka->dcast_PKinematics()->CalculateBones(TRUE);
-    }
-    if (IKinematicsAnimated* ka = m_model_3->dcast_PKinematicsAnimated())
-    {
-        ka->UpdateTracks();
-        ka->dcast_PKinematics()->CalculateBones_Invalidate();
-        ka->dcast_PKinematics()->CalculateBones(TRUE);
-    }
+        if (!kin)
+            return;
+        if (IKinematicsAnimated* ka = kin->dcast_PKinematicsAnimated())
+        {
+            ka->UpdateTracks();
+            ka->dcast_PKinematics()->CalculateBones_Invalidate();
+            ka->dcast_PKinematics()->CalculateBones(TRUE);
+        }
+        else
+        {
+            // Rigid HUD weapon skeleton: without this, LL_GetTransform for addon_* bones stays wrong and
+            // attachments collapse to the item root (e.g. wpn_body) when slot offsets are zero.
+            kin->CalculateBones_Invalidate();
+            kin->CalculateBones(TRUE);
+        }
+    };
+
+    update_kinematics_bones(m_model);
+    update_kinematics_bones(m_model_2);
+    update_kinematics_bones(m_model_3);
 }
 
 void attachable_hud_item::update_hud_additional(Fmatrix& trans) const
@@ -623,14 +627,31 @@ void hud_item_measures::update(Fmatrix& attach_offset)
     attach_offset.translate_over(m_item_attach[0]);
 }
 
+void attachable_hud_item::destroy_render_models(bool bDiscard)
+{
+    if (m_model)
+    {
+        IRenderVisual* v = m_model->dcast_RenderVisual();
+        m_model = nullptr;
+        GEnv.Render->model_Delete(v, bDiscard);
+    }
+    if (m_model_2)
+    {
+        IRenderVisual* v2 = m_model_2->dcast_RenderVisual();
+        m_model_2 = nullptr;
+        GEnv.Render->model_Delete(v2, bDiscard);
+    }
+    if (m_model_3)
+    {
+        IRenderVisual* v3 = m_model_3->dcast_RenderVisual();
+        m_model_3 = nullptr;
+        GEnv.Render->model_Delete(v3, bDiscard);
+    }
+}
+
 attachable_hud_item::~attachable_hud_item()
 {
-    IRenderVisual* v = m_model->dcast_RenderVisual();
-    GEnv.Render->model_Delete(v);
-    IRenderVisual* v2 = m_model_2->dcast_RenderVisual();
-    GEnv.Render->model_Delete(v2);
-    IRenderVisual* v3 = m_model_3->dcast_RenderVisual();
-    GEnv.Render->model_Delete(v3);
+    destroy_render_models(false);
 }
 
 attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& sect_name, IKinematicsAnimated* hands_model)
@@ -1296,6 +1317,25 @@ bool player_hud::CheckCompatibility(CHudItem* item)
 
     return true;
 }
+void player_hud::hot_reload_attached_weapon_hud(CHudItem* item)
+{
+    if (!item)
+        return;
+
+    attachable_hud_item* hi = m_attached_item;
+    if (!hi || hi->m_parent_hud_item != item)
+        return;
+
+    const shared_str pool_key = hi->m_sect_name;
+    item->on_b_hud_detach();
+    m_pool.erase(pool_key);
+    m_attached_item = nullptr;
+    // Discard instances so attachment bones from an updated .ogf are not masked by the model pool base mesh.
+    hi->destroy_render_models(true);
+    xr_delete(hi);
+    attach_item(item);
+}
+
 void player_hud::attach_item(CHudItem* item)
 {
     attachable_hud_item* pi = create_hud_item(item->HudSection());

@@ -108,6 +108,9 @@ struct attachable_hud_item
     attachable_hud_item(player_hud* parent, const shared_str& sect_name, IKinematicsAnimated* model);
     ~attachable_hud_item();
 
+    // bDiscard=true drops pool/base refs so the next model_Create can reload mesh from disk (ini hot reload).
+    void destroy_render_models(bool bDiscard);
+
     void reload_measures();
     void calc_addon_aim_offset();
     void set_idle_anm_for_second_model();
@@ -163,6 +166,7 @@ public:
     void after_detach_item_idx(CHudItem* item);
     void detach_item_idx();
     void detach_item(CHudItem* item);
+    void hot_reload_attached_weapon_hud(CHudItem* item);
     void detach_all_items()
     {
         m_attached_item = NULL;

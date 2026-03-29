@@ -96,6 +96,8 @@ struct AddAddonData {
     bool has_ort{false};
     bool has_mag_size{false};
     bool was_inited_in_default_slots{false};
+    // When restoring addons without changing gameplay state (e.g. ini hot reload).
+    bool skip_magazine_sync_on_add{};
 };
 
 class CWeapon : public CHudItemObject, public CShootingObject
@@ -149,6 +151,7 @@ public:
     std::pair<u32, addon_item*> GetAddonMainScope() const;
     u16 getCountInstalledSecondAimAddons() const;
     void setSecondZoomOnFirstScopeIfHaveIt();
+    void HotReloadModelsAfterSystemIni();
     shared_str GetSlotKey(shared_str slot_name, u32 addon_parent_id, u32 addon_id);
 
     virtual bool bInZoomRightNow() const { return !IsSecondZoomed() && m_zoom_params.m_fZoomRotationFactor > 0.05; }

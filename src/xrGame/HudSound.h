@@ -69,6 +69,7 @@ public:
     void StopSound(LPCSTR alias);
 
     void LoadSound(LPCSTR section, LPCSTR line, LPCSTR alias, bool exclusive = false, int type = sg_SourceType);
+    void RemoveSoundItem(LPCSTR alias);
 
     void SetPosition(LPCSTR alias, const Fvector& pos);
     void StopAllSounds();

@@ -624,6 +624,85 @@ void OnWeaponIconSnapshot(IRenderable* subject, bool begin)
     }
 }
 
+static void ProcessDynamicInvIconForSingleItem(CInventoryItem* item)
+{
+    if (!item || item->IsInvalid())
+    {
+        if (g_debug_trace)
+            Msg("~ [weapon_inv_icon]   skip destroyed/null item ptr");
+        return;
+    }
+
+    CWeapon* w = item->cast_weapon();
+    if (!w)
+    {
+        if (item->ConsumeInvIconQueueRetryForRequeue() && !IsInPending(item))
+            g_pending.push_back(item);
+        return;
+    }
+
+    for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
+    {
+        const auto preset = (EWeaponInvIconPreset)pi;
+        if (item->DynamicInvIconPresetReady(preset))
+            continue;
+        if (item->InvIconUsesSharedSectionRt() && SectionInvIconPresetReady(item->m_section_id, preset))
+        {
+            item->SetDynamicInvIconPresetReady(preset, true);
+            WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] SECTION_MAP_HIT id=%u sect=[%s] preset=%u tex=[%s] "
+                                   "(no GPU render, marked item ready)",
+                item->object_id(), item->m_section_id.c_str(), pi, TextureResourceName(item, preset).c_str());
+            continue;
+        }
+
+        Fmatrix view, proj;
+        BuildMatricesForWeapon(w, preset, view, proj);
+        u32 tw, th;
+        GetWeaponIconRtTexelSize(w, preset, tw, th);
+        shared_str tex = TextureResourceName(item, preset);
+        WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] RENDER_NEW id=%u sect=[%s] preset=%u shared_rt=%d tex=[%s]",
+            item->object_id(), item->m_section_id.c_str(), pi, item->InvIconUsesSharedSectionRt() ? 1 : 0, tex.c_str());
+        const bool ok = GEnv.Render->WeaponIcon_RenderToTexture(tex.c_str(), tw, th, view, proj, w);
+        if (ok)
+        {
+            item->SetDynamicInvIconPresetReady(preset, true);
+            if (item->InvIconUsesSharedSectionRt())
+            {
+                MarkSectionInvIconPresetReady(item->m_section_id, preset);
+                WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] SECTION_MAP_STORE sect=[%s] preset=%u (shared RT filled)",
+                    item->m_section_id.c_str(), pi);
+            }
+            if (g_debug_trace)
+                Msg("~ [weapon_inv_icon] generated icon (runtime GPU): id=%u sect=[%s] preset=[%s] %ux%u tex=[%s]",
+                    item->object_id(), item->m_section_id.c_str(), PresetSuffix(preset), tw, th, tex.c_str());
+        }
+        else if (g_debug_trace)
+            Msg("~ [weapon_inv_icon]   WeaponIcon_RenderToTexture id=%u preset=%u tex=[%s] ok=0", w->ID(), pi,
+                tex.c_str());
+    }
+
+    bool fully_ready = true;
+    for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
+    {
+        if (!item->DynamicInvIconPresetReady((EWeaponInvIconPreset)pi))
+        {
+            fully_ready = false;
+            break;
+        }
+    }
+    if (fully_ready)
+    {
+        item->SetNeedDynamicInvIconUpgrade(false);
+        item->ClearInvIconQueueRetries();
+    }
+    else
+    {
+        item->SetNeedDynamicInvIconUpgrade(true);
+        if (item->ConsumeInvIconQueueRetryForRequeue() && !IsInPending(item))
+            g_pending.push_back(item);
+    }
+}
+
 void ProcessRenderPass()
 {
     if (GEnv.isDedicatedServer || !GEnv.Render)
@@ -652,83 +731,20 @@ void ProcessRenderPass()
     {
         CInventoryItem* item = g_pending.front();
         g_pending.erase(g_pending.begin());
-
-        if (!item || item->IsInvalid())
-        {
-            if (g_debug_trace)
-                Msg("~ [weapon_inv_icon]   skip destroyed/null item ptr");
-            continue;
-        }
-
-        CWeapon* w = item->cast_weapon();
-        if (!w)
-        {
-            if (item->ConsumeInvIconQueueRetryForRequeue() && !IsInPending(item))
-                g_pending.push_back(item);
-            continue;
-        }
-
-        for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
-        {
-            const auto preset = (EWeaponInvIconPreset)pi;
-            if (item->DynamicInvIconPresetReady(preset))
-                continue;
-            if (item->InvIconUsesSharedSectionRt() && SectionInvIconPresetReady(item->m_section_id, preset))
-            {
-                item->SetDynamicInvIconPresetReady(preset, true);
-                WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] SECTION_MAP_HIT id=%u sect=[%s] preset=%u tex=[%s] "
-                                       "(no GPU render, marked item ready)",
-                    item->object_id(), item->m_section_id.c_str(), pi, TextureResourceName(item, preset).c_str());
-                continue;
-            }
-
-            Fmatrix view, proj;
-            BuildMatricesForWeapon(w, preset, view, proj);
-            u32 tw, th;
-            GetWeaponIconRtTexelSize(w, preset, tw, th);
-            shared_str tex = TextureResourceName(item, preset);
-            WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] RENDER_NEW id=%u sect=[%s] preset=%u shared_rt=%d tex=[%s]",
-                item->object_id(), item->m_section_id.c_str(), pi, item->InvIconUsesSharedSectionRt() ? 1 : 0, tex.c_str());
-            const bool ok = GEnv.Render->WeaponIcon_RenderToTexture(tex.c_str(), tw, th, view, proj, w);
-            if (ok)
-            {
-                item->SetDynamicInvIconPresetReady(preset, true);
-                if (item->InvIconUsesSharedSectionRt())
-                {
-                    MarkSectionInvIconPresetReady(item->m_section_id, preset);
-                    WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] SECTION_MAP_STORE sect=[%s] preset=%u (shared RT filled)",
-                        item->m_section_id.c_str(), pi);
-                }
-                if (g_debug_trace)
-                    Msg("~ [weapon_inv_icon] generated icon (runtime GPU): id=%u sect=[%s] preset=[%s] %ux%u tex=[%s]",
-                        item->object_id(), item->m_section_id.c_str(), PresetSuffix(preset), tw, th, tex.c_str());
-            }
-            else if (g_debug_trace)
-                Msg("~ [weapon_inv_icon]   WeaponIcon_RenderToTexture id=%u preset=%u tex=[%s] ok=0", w->ID(), pi,
-                    tex.c_str());
-        }
-
-        bool fully_ready = true;
-        for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
-        {
-            if (!item->DynamicInvIconPresetReady((EWeaponInvIconPreset)pi))
-            {
-                fully_ready = false;
-                break;
-            }
-        }
-        if (fully_ready)
-        {
-            item->SetNeedDynamicInvIconUpgrade(false);
-            item->ClearInvIconQueueRetries();
-        }
-        else
-        {
-            item->SetNeedDynamicInvIconUpgrade(true);
-            if (item->ConsumeInvIconQueueRetryForRequeue() && !IsInPending(item))
-                g_pending.push_back(item);
-        }
+        ProcessDynamicInvIconForSingleItem(item);
     }
+}
+
+void RenderDynamicInvIconsImmediateForItem(CInventoryItem* item)
+{
+    if (!item || GEnv.isDedicatedServer || !GEnv.Render)
+        return;
+    EnsureLoaded();
+    if (!g_global_enabled || !IsEnabledForItem(item))
+        return;
+
+    g_pending.erase(std::remove(g_pending.begin(), g_pending.end(), item), g_pending.end());
+    ProcessDynamicInvIconForSingleItem(item);
 }
 
 u32 InvIconRtEpoch() { return g_inv_icon_rt_epoch; }

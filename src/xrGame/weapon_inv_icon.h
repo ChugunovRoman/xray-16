@@ -35,6 +35,8 @@ bool IsEnabledForItem(const CInventoryItem* item);
 // Спавн, reload() и открытие инвентаря не вызывают — в UI остаются inv_icon / inv_upgrade_icon до регенерации.
 void ScheduleWeapon(CWeapon* w);
 void ScheduleItem(CInventoryItem* item);
+// Regenerate GPU dynamic icon for this item immediately (same pass as ProcessRenderPass, all presets, ignores frame budget).
+void RenderDynamicInvIconsImmediateForItem(CInventoryItem* item);
 void OnWeaponDestroyed(CWeapon* w);
 void OnItemDestroyed(CInventoryItem* item);
 

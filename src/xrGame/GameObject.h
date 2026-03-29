@@ -181,6 +181,8 @@ public:
     virtual void cNameSect_set(shared_str N) override;
     virtual shared_str cNameVisual() const override { return NameVisual; }
     virtual void cNameVisual_set(shared_str N) override;
+    // Recreate render model from disk even when cNameVisual is unchanged (dev: mesh/bone edits).
+    void ReloadVisualFromDisk();
     virtual shared_str shedule_Name() const override { return cName(); };
     // Properties
     virtual void processing_activate() override; // request to enable UpdateCL

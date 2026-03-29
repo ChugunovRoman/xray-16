@@ -188,6 +188,23 @@ void HUD_SOUND_COLLECTION::LoadSound(LPCSTR section, LPCSTR line, LPCSTR alias, 
     snd_item.m_b_exclusive = exclusive;
 }
 
+void HUD_SOUND_COLLECTION::RemoveSoundItem(LPCSTR alias)
+{
+    if (!alias)
+        return;
+    for (auto it = m_sound_items.begin(); it != m_sound_items.end();)
+    {
+        if (it->m_alias.size() && 0 == xr_stricmp(it->m_alias.c_str(), alias))
+        {
+            HUD_SOUND_ITEM::StopSound(*it);
+            HUD_SOUND_ITEM::DestroySound(*it);
+            it = m_sound_items.erase(it);
+        }
+        else
+            ++it;
+    }
+}
+
 //Alundaio:
 /*
     It's usage is to play a group of sounds HUD_SOUND_ITEMs as if they were a single layered entity. This is a achieved by
