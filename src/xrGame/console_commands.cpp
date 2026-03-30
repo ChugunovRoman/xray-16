@@ -1757,7 +1757,7 @@ public:
             return;
         }
 
-        clamp(value, 0.1f, 2.0f);
+        clamp(value, 0.1f, 1.0f);
         g_weapon_hud_fov_presets[shared_str(key)] = value;
     }
 

@@ -49,6 +49,9 @@ extern int g_3d_scope_type;
 extern xr_map<shared_str, float> g_scope_hud_fov_presets;
 extern xr_map<shared_str, float> g_weapon_hud_fov_presets;
 
+constexpr float kWeaponHudFovMin = 0.1f;
+constexpr float kWeaponHudFovMax = 1.0f;
+
 constexpr pcstr WPN_MAIN_SLOT = "slot_1";
 constexpr pcstr DOT = "dot";
 constexpr pcstr WPN_BODY = "wpn_body";
@@ -225,7 +228,7 @@ bool CWeapon::GetWeaponHudFovPreset(float& outValue) const
 void CWeapon::SetWeaponHudFovPreset(float value)
 {
     float v = value;
-    clamp(v, 0.1f, 2.0f);
+    clamp(v, kWeaponHudFovMin, kWeaponHudFovMax);
     g_weapon_hud_fov_presets[m_section_id] = v;
 }
 
@@ -233,9 +236,16 @@ float CWeapon::GetWeaponHudBase() const
 {
     float preset = 0.f;
     if (GetWeaponHudFovPreset(preset))
+    {
+        clamp(preset, kWeaponHudFovMin, kWeaponHudFovMax);
         return preset;
+    }
     if (m_weapon_hud_config_valid)
-        return m_weapon_hud_config;
+    {
+        float v = m_weapon_hud_config;
+        clamp(v, kWeaponHudFovMin, kWeaponHudFovMax);
+        return v;
+    }
     return psHUD_FOV_def;
 }
 
@@ -246,7 +256,7 @@ void CWeapon::AdjustWeaponHudFov(float wheel_delta)
     float base = GetWeaponHudBase();
     const float step = 0.02f;
     base += (wheel_delta > 0.f ? step : -step);
-    clamp(base, 0.1f, 2.0f);
+    clamp(base, kWeaponHudFovMin, kWeaponHudFovMax);
     SetWeaponHudFovPreset(base);
 }
 
@@ -791,6 +801,7 @@ void CWeapon::LoadModParams(LPCSTR section)
     if (pSettings->line_exist(section, "weapon_hud"))
     {
         m_weapon_hud_config = pSettings->r_float(section, "weapon_hud");
+        clamp(m_weapon_hud_config, kWeaponHudFovMin, kWeaponHudFovMax);
         m_weapon_hud_config_valid = true;
     }
     else
