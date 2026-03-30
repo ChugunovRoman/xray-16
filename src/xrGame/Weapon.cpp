@@ -1058,6 +1058,15 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
         m_defer_inv_icon_invalidate_after_reload = false;
         InvalidateDynamicInventoryIcons();
     }
+    // use_attachment_system: мировая модель из m_addon_items + при необходимости флаги прицел/ПГ/глушитель с сервера.
+    // Без инвалидации общий RT по секции мог остаться от «голого» ствола.
+    else if (weapon_inv_icon::IsEnabledForSection(m_section_id.c_str()) && bUseAttachmentSystem)
+    {
+        const u32 kSpawnAddonMask = CSE_ALifeItemWeapon::eWeaponAddonScope | CSE_ALifeItemWeapon::eWeaponAddonSilencer |
+            CSE_ALifeItemWeapon::eWeaponAddonGrenadeLauncher;
+        if (!m_addon_items.empty() || (m_flagsAddOnState & kSpawnAddonMask) != 0)
+            InvalidateDynamicInventoryIcons();
+    }
 
     m_dwWeaponIndependencyTime = 0;
 
