@@ -1549,7 +1549,7 @@ void CWeapon::renderable_Render(u32 context_id, IRenderable* root)
                     item->addon_item_transform.mulB_43(wpn_k->LL_GetTransform(bone_id));
             }
 
-            item->addon_item_transform.mulB_43(item->addon_item_pos);
+            item->addon_item_transform.mulB_43(item->addon_item_pos_world);
 
             GEnv.Render->add_Visual(context_id, root, item->addon_item_model->dcast_RenderVisual(), item->addon_item_transform);
         }
@@ -4428,7 +4428,11 @@ void CWeapon::addAddon(AddAddonData data)
     Fmatrix trans, world_trans;
 
     trans.mul(parent_item->addon_item_pos, slot_transform);
-    world_trans.mul(parent_item->addon_item_pos, bAttachmentSystemOffsetOnWorldModel);
+    // World model: use *_world slot offsets and a single attachment_system_offset_on_world_model at the weapon root.
+    if (new_addon->parent_id == 0)
+        world_trans.mul(parent_item->addon_item_pos, bAttachmentSystemOffsetOnWorldModel);
+    else
+        world_trans.set(parent_item->addon_item_pos_world);
     world_trans.mulB_43(target_slot.transform_world);
 
     u16 index = 1;
