@@ -196,8 +196,14 @@ void CUIItemInfo::InitItem(CUICellItem* pCellItem, CInventoryItem* pCompareItem,
         shared_str nameText = pInvItem->NameItem();
         if (strstr(Core.Params, "-dbg") != nullptr)
         {
-            string256 buf;
-            xr_sprintf(buf, "%s (%s)", nameText.c_str(), pInvItem->m_section_id.c_str());
+            string512 buf;
+            if (CWeapon* wpn = smart_cast<CWeapon*>(pInvItem))
+            {
+                xr_sprintf(buf, "%s (%s, use attachs=%d)", nameText.c_str(), pInvItem->m_section_id.c_str(),
+                    wpn->bUseAttachmentSystem ? 1 : 0);
+            }
+            else
+                xr_sprintf(buf, "%s (%s)", nameText.c_str(), pInvItem->m_section_id.c_str());
             UIName->SetText(buf);
         }
         else
