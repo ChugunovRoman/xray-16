@@ -2,6 +2,8 @@
 #include "weapon_inv_icon.h"
 #include "Weapon.h"
 #include "Level.h"
+#include "Actor.h"
+#include "Inventory.h"
 #include "InventoryOwner.h"
 #include "ai_space.h"
 #include "game_type.h"
@@ -838,6 +840,95 @@ public:
         renderable.visual->getVisData().hom_frame = Device.dwFrame;
     }
 };
+
+void BakeCurrentActorWeaponInvIconToDds()
+{
+    if (GEnv.isDedicatedServer || !GEnv.Render)
+    {
+        Msg("! [weapon_inv_icon] bake_current: need client with renderer");
+        return;
+    }
+    if (!g_pGameLevel)
+    {
+        Msg("! [weapon_inv_icon] bake_current: not in game level");
+        return;
+    }
+    if (!IsGameTypeSingle())
+    {
+        Msg("! [weapon_inv_icon] bake_current: single player only");
+        return;
+    }
+
+    CActor* actor = Actor();
+    if (!actor)
+    {
+        Msg("! [weapon_inv_icon] bake_current: actor not found");
+        return;
+    }
+
+    PIItem active_item = actor->inventory().ActiveItem();
+    CWeapon* wpn = active_item ? active_item->cast_weapon() : nullptr;
+    if (!wpn)
+    {
+        Msg("! [weapon_inv_icon] bake_current: active item is not a weapon");
+        return;
+    }
+
+    EnsureLoaded();
+    if (!g_global_enabled)
+        Msg("~ [weapon_inv_icon] bake_current: warning [weapon_inv_icon] enabled=false (render may still work)");
+
+    const shared_str section = wpn->cNameSect();
+    if (!section.size())
+    {
+        Msg("! [weapon_inv_icon] bake_current: weapon section is empty");
+        return;
+    }
+    Msg("~ [weapon_inv_icon] bake_current: started section=[%s] (active weapon in hands)", section.c_str());
+
+    bool ok_both = true;
+    u32 done = 0;
+    for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
+    {
+        const auto preset = (EWeaponInvIconPreset)pi;
+        Fmatrix view, proj;
+        BuildMatricesForWeapon(wpn, preset, view, proj);
+        u32 tw{}, th{};
+        GetWeaponIconRtTexelSize(wpn, preset, tw, th);
+        const shared_str tex = TextureResourceName(section.c_str(), preset);
+
+        const bool rendered = GEnv.Render->WeaponIcon_RenderToTexture(tex.c_str(), tw, th, view, proj, wpn);
+        if (!rendered)
+        {
+            Msg("! [weapon_inv_icon] bake_current: render failed [%s] preset=%u", section.c_str(), pi);
+            ok_both = false;
+            continue;
+        }
+
+        string_path rel{};
+        if (preset == eWpnInvIcon_Inventory)
+            xr_sprintf(rel, "ui\\weapon_inv_bake\\inventory\\%s.dds", section.c_str());
+        else
+            xr_sprintf(rel, "ui\\weapon_inv_bake\\technician\\%s.dds", section.c_str());
+
+        const bool saved = GEnv.Render->WeaponIcon_SavePersistedUserRtToDdsDxt5(tex.c_str(), "$game_textures$", rel);
+        if (!saved)
+        {
+            Msg("! [weapon_inv_icon] bake_current: save DDS failed [%s] preset=%u rel [%s]", section.c_str(), pi, rel);
+            ok_both = false;
+        }
+        else
+        {
+            ++done;
+            Msg("~ [weapon_inv_icon] bake_current: icon generated (DDS) sect=[%s] preset=[%s] %ux%u rel=[$game_textures$\\%s]",
+                section.c_str(), PresetSuffix(preset), tw, th, rel);
+        }
+        GEnv.Render->WeaponIcon_ReleaseUserIconRt(tex.c_str());
+    }
+
+    Msg("~ [weapon_inv_icon] bake_current: section=[%s] done=%u/%u result=%s",
+        section.c_str(), done, (u32)eWpnInvIconPreset_COUNT, ok_both ? "OK" : "FAILED");
+}
 
 void BakeDynamicInvIconsToDds(pcstr single_section_or_null)
 {

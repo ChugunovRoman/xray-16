@@ -736,6 +736,24 @@ public:
         xr_strcpy(I, "[section] optional: bake inv+tech DDS DXT5 for use_dynamic_inv_icon weapons");
     }
 };
+
+class CCC_InvIconBakeCurrentDds final : public IConsole_Command
+{
+public:
+    CCC_InvIconBakeCurrentDds(pcstr name) : IConsole_Command(name) { bEmptyArgsHandled = true; }
+
+    void Execute(pcstr args) override
+    {
+        if (args && *args)
+            Msg("~ [weapon_inv_icon] inv_icon_bake_current_dds: args are ignored");
+        weapon_inv_icon::BakeCurrentActorWeaponInvIconToDds();
+    }
+
+    void Info(TInfo& I) override
+    {
+        xr_strcpy(I, "bake active actor weapon to DDS (inventory+technician presets)");
+    }
+};
 // helper functions --------------------------------------------
 
 bool valid_saved_game_name(LPCSTR file_name)
@@ -2777,6 +2795,7 @@ void CCC_RegisterCommands()
 
     // Available in MASTER_GOLD Release: bake DDS for dynamic inv icons (modding / content pipeline).
     CMD1(CCC_InvIconBakeDds, "inv_icon_bake_dds");
+    CMD1(CCC_InvIconBakeCurrentDds, "inv_icon_bake_current_dds");
 
     CMD1(CCC_LuaHelp, "dump_lua");
     CMD4(CCC_InvCellSize, "g_inv_cell_size", &g_inv_inv_cell_size, 1, 4);

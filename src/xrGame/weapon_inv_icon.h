@@ -61,4 +61,6 @@ void DbgTraceWeaponCellShaderDecision(pcstr weapon_section);
 // Console: bake from [section] visual via model_Create (no spawn). Skips scope variants (parent_section != section).
 // DDS: $game_textures$/ui/weapon_inv_bake/inventory/<section>.dds and .../technician/<section>.dds. Single player.
 void BakeDynamicInvIconsToDds(pcstr single_section_or_null);
+// Console: bake currently active actor weapon (world model with current addons) into same DDS paths.
+void BakeCurrentActorWeaponInvIconToDds();
 } // namespace weapon_inv_icon
