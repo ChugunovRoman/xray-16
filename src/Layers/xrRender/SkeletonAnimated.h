@@ -114,6 +114,7 @@ private:
         float blendFalloff, float Speed, BOOL noloop, PlayCallback Callback, LPVOID CallbackParam);
     void IFXBlendSetup(
         CBlend& B, MotionID motion_ID, float blendAccrue, float blendFalloff, float Power, float Speed, u16 bone);
+    bool LL_MotionSampleValid(MotionID motion_ID, u16 bone_idx) const;
     //.	bool						LoadMotions				(LPCSTR N, IReader *data);
 public:
 #if (defined DEBUG || defined _EDITOR)
@@ -151,12 +152,7 @@ public:
     CMotionDef* LL_GetMotionDef(MotionID id) { return m_Motions[id.slot].motions.motion_def(id.idx); }
     bool LL_ValidateBoneMonition(MotionID id)
     {
-        if (m_Motions.size() <= id.slot)
-            return false;
-        if (m_Motions[id.slot].bone_motions[iRoot]->size() <= id.idx)
-            return false;
-        
-        return true;
+        return LL_MotionSampleValid(id, iRoot);
     }
     CMotion* LL_GetRootMotion(MotionID id) { return &m_Motions[id.slot].bone_motions[iRoot]->at(id.idx); }
     CMotion* LL_GetMotion(MotionID id, u16 bone_id) { return &m_Motions[id.slot].bone_motions[bone_id]->at(id.idx); }

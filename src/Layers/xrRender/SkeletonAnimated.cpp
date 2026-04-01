@@ -47,6 +47,21 @@ void CBlendInstance::blend_remove(CBlend* H)
         Blend.erase(I);
 }
 
+bool CKinematicsAnimated::LL_MotionSampleValid(MotionID motion_ID, u16 bone_idx) const
+{
+    if (!motion_ID.valid())
+        return false;
+    if (motion_ID.slot >= m_Motions.size())
+        return false;
+    const SMotionsSlot& slot = m_Motions[motion_ID.slot];
+    if (bone_idx >= slot.bone_motions.size())
+        return false;
+    const MotionVec* bm = slot.bone_motions[bone_idx];
+    if (!bm)
+        return false;
+    return motion_ID.idx < bm->size();
+}
+
 // Motion control
 void CKinematicsAnimated::Bone_Motion_Start(CBoneData* bd, CBlend* handle)
 {
@@ -378,6 +393,15 @@ CBlend* CKinematicsAnimated::LL_SetInitialPartPose(u16 part, MotionID motion_ID,
     CPartDef& P = (*m_Partition)[part];
     CBlend* B = IBlend_Create();
 
+    if (!LL_MotionSampleValid(motion_ID, iRoot))
+    {
+#ifndef MASTER_GOLD
+        Msg("! LL_SetInitialPartPose: motion sample OOR slot=%u idx=%u bone=%u", motion_ID.slot, motion_ID.idx, iRoot);
+#endif
+        B->set_free_state();
+        return nullptr;
+    }
+
     // Setup blend to use first frame only
     IBlendSetup(*B, part, channel, motion_ID, bMixing, blendAccrue, blendFalloff, Speed, noloop, Callback, CallbackParam);
 
@@ -431,6 +455,15 @@ CBlend* CKinematicsAnimated::LL_PlayCycle(u16 part, MotionID motion_ID, BOOL bMi
     }
     CPartDef& P = (*m_Partition)[part];
     CBlend* B = IBlend_Create();
+
+    if (!LL_MotionSampleValid(motion_ID, iRoot))
+    {
+#ifndef MASTER_GOLD
+        Msg("! LL_PlayCycle: motion sample OOR slot=%u idx=%u bone=%u", motion_ID.slot, motion_ID.idx, iRoot);
+#endif
+        B->set_free_state();
+        return nullptr;
+    }
 
     _DBG_SINGLE_USE_MARKER;
     IBlendSetup(
@@ -542,6 +575,14 @@ CBlend* CKinematicsAnimated::LL_PlayFX(
         bone = iRoot;
 
     CBlend* B = IBlend_Create();
+    if (!LL_MotionSampleValid(motion_ID, bone))
+    {
+#ifndef MASTER_GOLD
+        Msg("! LL_PlayFX: motion sample OOR slot=%u idx=%u bone=%u", motion_ID.slot, motion_ID.idx, bone);
+#endif
+        B->set_free_state();
+        return nullptr;
+    }
     _DBG_SINGLE_USE_MARKER;
     IFXBlendSetup(*B, motion_ID, blendAccrue, blendFalloff, Power, Speed, bone);
     Bone_Motion_Start((*bones)[bone], B);
