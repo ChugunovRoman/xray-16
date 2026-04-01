@@ -76,6 +76,8 @@ private:
     {
         shared_str weather_name;
         shared_str weather_time;
+        Sw() = default;
+        Sw(const shared_str& wname, const shared_str& wtime) : weather_name(wname), weather_time(wtime) {}
     };
     xr_vector<Sw> m_mapWeather;
     xr_string m_command;
