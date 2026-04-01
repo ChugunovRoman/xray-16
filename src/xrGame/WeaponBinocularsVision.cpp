@@ -8,6 +8,7 @@
 #include "actor_memory.h"
 #include "relation_registry.h"
 #include "Common/object_broker.h"
+#include "memory_space_impl.h"
 
 #include "game_base_space.h"
 #include "Level.h"
@@ -82,13 +83,23 @@ void SBinocVisibleObj::Update()
 
     m_flags.set(flVisObjNotValid, true);
 
-    if (!m_object->Visual())
+    if (m_object_id == u16(-1))
         return;
 
-    Fbox b = m_object->Visual()->getVisData().box;
+    CEntityAlive* EA = smart_cast<CEntityAlive*>(Level().Objects.net_Find(m_object_id));
+    if (!EA || !EA->g_Alive())
+        return;
+
+    m_object = EA;
+
+    IRenderVisual* vis = EA->Visual();
+    if (!vis)
+        return;
+
+    Fbox b = vis->getVisData().box;
 
     Fmatrix xform;
-    xform.mul(Device.mFullTransform, m_object->XFORM());
+    xform.mul(Device.mFullTransform, EA->XFORM());
     Fvector2 mn = {flt_max, flt_max}, mx = {flt_min, flt_min};
 
     for (u32 k = 0; k < 8; ++k)
@@ -157,8 +168,8 @@ void SBinocVisibleObj::Update()
                 //-----------------------------------------------------
 
                 CInventoryOwner* our_inv_owner = smart_cast<CInventoryOwner*>(pActor);
-                CInventoryOwner* others_inv_owner = smart_cast<CInventoryOwner*>(m_object);
-                CBaseMonster* monster = smart_cast<CBaseMonster*>(m_object);
+                CInventoryOwner* others_inv_owner = smart_cast<CInventoryOwner*>(EA);
+                CBaseMonster* monster = smart_cast<CBaseMonster*>(EA);
 
                 if (our_inv_owner && others_inv_owner && !monster)
                 {
@@ -174,7 +185,7 @@ void SBinocVisibleObj::Update()
                     else
                     {
                         CEntityAlive* our_ealive = smart_cast<CEntityAlive*>(pActor);
-                        CEntityAlive* others_ealive = smart_cast<CEntityAlive*>(m_object);
+                        CEntityAlive* others_ealive = smart_cast<CEntityAlive*>(EA);
                         if (our_ealive && others_ealive)
                         {
                             if (Game().IsEnemy(our_ealive, others_ealive))
@@ -230,11 +241,16 @@ void CBinocularsVision::Update()
     CVisualMemoryManager::VISIBLES::const_iterator v_it = vVisibles.begin();
     for (; v_it != vVisibles.end(); ++v_it)
     {
-        const IGameObject* _object_ = (*v_it).m_object;
-        if (!pActor->memory().visual().visible_right_now(smart_cast<const CGameObject*>(_object_)))
+        const u16 id = object_id((*v_it).m_object);
+        if (id == u16(-1))
             continue;
 
-        IGameObject* object_ = const_cast<IGameObject*>(_object_);
+        IGameObject* object_ = Level().Objects.net_Find(id);
+        if (!object_)
+            continue;
+
+        if (!pActor->memory().visual().visible_right_now(smart_cast<const CGameObject*>(object_)))
+            continue;
 
         CEntityAlive* EA = smart_cast<CEntityAlive*>(object_);
         if (!EA || !EA->g_Alive())
@@ -247,6 +263,8 @@ void CBinocularsVision::Update()
         if (found != m_active_objects.end())
         {
             (*found)->m_flags.set(flVisObjNotValid, false);
+            (*found)->m_object = object_;
+            (*found)->m_object_id = EA->ID();
         }
         else
         {
@@ -254,6 +272,7 @@ void CBinocularsVision::Update()
             SBinocVisibleObj* new_vis_obj = m_active_objects.back();
             new_vis_obj->m_flags.set(flVisObjNotValid, false);
             new_vis_obj->m_object = object_;
+            new_vis_obj->m_object_id = EA->ID();
             new_vis_obj->create_default(m_frame_color.get());
             new_vis_obj->m_upd_speed = m_rotating_speed;
 
@@ -304,5 +323,6 @@ void CBinocularsVision::remove_links(IGameObject* object)
     if (I == m_active_objects.end())
         return;
 
+    xr_delete(*I);
     m_active_objects.erase(I);
 }

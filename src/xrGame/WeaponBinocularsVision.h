@@ -1,4 +1,5 @@
 #pragma once
+#include "xrCore/xr_types.h"
 #include "xrUICore/Static/UIStatic.h"
 #include "HudSound.h"
 
@@ -14,8 +15,8 @@ struct SBinocVisibleObj
 {
     SBinocVisibleObj() = default;
 
-    IGameObject* m_object{}
-    ;
+    IGameObject* m_object{};
+    u16 m_object_id{ u16(-1) };
     CUIStatic m_lt{ "left top" };
     CUIStatic m_lb{ "left bottom" };
     CUIStatic m_rt{ "right top" };
