@@ -1,5 +1,7 @@
 #include "StdAfx.h"
 #include "xr_time.h"
+#include "xrCommon/xr_string.h"
+#include "xrCore/Debug/xrSentry.hpp"
 #include "xrScriptEngine/script_engine.hpp"
 #include "ui/UIInventoryUtilities.h"
 #include "Level.h"
@@ -85,9 +87,15 @@ float xrTime::diffSec_script(xrTime* other)
 {
     if (!other)
     {
-        Msg("! xrTime:diffSec(nil) — returning 0; Lua call stack:");
+        Msg("! xrTime:diffSec(nil) — returning 0");
         if (GEnv.ScriptEngine)
-            GEnv.ScriptEngine->print_stack();
+        {
+            xr_string lua_stack;
+            GEnv.ScriptEngine->format_lua_stack(nullptr, lua_stack);
+            xrSentry_CaptureSoftError("xrGame.xrTime",
+                "CTime:diffSec(nil): second argument must be CTime, got nil",
+                lua_stack.empty() ? nullptr : lua_stack.c_str());
+        }
         return 0.f;
     }
     return diffSec(*other);

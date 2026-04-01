@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "xrCommon/xr_string.h"
 #include "xrCommon/xr_unordered_map.h"
 
 #include "xrCore/Containers/AssociativeVector.hpp"
@@ -202,6 +203,8 @@ public:
 
     void flush_log();
     void print_stack(lua_State* L = nullptr);
+    /** Append current Lua call stack (same info as print_stack) into @a out for logs / Sentry. */
+    void format_lua_stack(lua_State* L, xr_string& out);
 
     // Logs current value on the Lua stack
     // Expands the tables/userdata and logs their contents too

@@ -13,6 +13,26 @@
 #include "script_profiler.hpp"
 #include "script_debugger.hpp"
 
+#include "xrCommon/xr_string.h"
+#include "xrCore/Debug/xrSentry.hpp"
+
+namespace
+{
+void LuaSentrySoftErrorImpl(pcstr logger, pcstr message)
+{
+    if (!message || !*message)
+        return;
+    pcstr lg = (logger && *logger) ? logger : "lua.script";
+    xr_string stack;
+    if (GEnv.ScriptEngine)
+        GEnv.ScriptEngine->format_lua_stack(nullptr, stack);
+    xrSentry_CaptureSoftError(lg, message, stack.empty() ? nullptr : stack.c_str());
+}
+
+void LuaSentrySoftError_MessageOnly(pcstr message) { LuaSentrySoftErrorImpl("lua.script", message); }
+void LuaSentrySoftError_LoggerMessage(pcstr logger, pcstr message) { LuaSentrySoftErrorImpl(logger, message); }
+} // namespace
+
 void LuaLog(pcstr caMessage)
 {
     GEnv.ScriptEngine->script_log(LuaMessageType::Message, "%s", caMessage);
@@ -70,6 +90,9 @@ void CScriptEngine::script_register(lua_State* luaState)
         {
             GEnv.ScriptEngine->print_stack();
         }),
+        // Same Sentry soft-event as xrSentry_CaptureSoftError: warning + native stack + extra.lua_stack (current Lua stack).
+        def("sentry_soft_error", static_cast<void (*)(pcstr)>(&LuaSentrySoftError_MessageOnly)),
+        def("sentry_soft_error", static_cast<void (*)(pcstr, pcstr)>(&LuaSentrySoftError_LoggerMessage)),
         def("prefetch", +[](pcstr file_name)
         {
             GEnv.ScriptEngine->process_file(file_name);

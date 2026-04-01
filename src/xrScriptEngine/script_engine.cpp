@@ -200,6 +200,43 @@ void CScriptEngine::print_stack(lua_State* L)
     }
 }
 
+void CScriptEngine::format_lua_stack(lua_State* L, xr_string& out)
+{
+    if (L == nullptr)
+        L = lua();
+
+    out.clear();
+    if (lua_isstring(L, -1))
+    {
+        pcstr err = lua_tostring(L, -1);
+        out += "lua_err_at_tos: ";
+        out += err;
+        out += "\n";
+    }
+
+    lua_Debug l_tDebugInfo{};
+    for (int i = 0; lua_getstack(L, i, &l_tDebugInfo); i++)
+    {
+        lua_getinfo(L, "nSlu", &l_tDebugInfo);
+        string_path line{};
+        if (!xr_strcmp(l_tDebugInfo.what, "C"))
+        {
+            xr_sprintf(line, "%2d : [C  ] %s\n", i, l_tDebugInfo.name ? l_tDebugInfo.name : "");
+        }
+        else
+        {
+            string_path temp;
+            if (l_tDebugInfo.name)
+                xr_sprintf(temp, "%s(%d)", l_tDebugInfo.name, l_tDebugInfo.linedefined);
+            else
+                xr_sprintf(temp, "function <%s:%d>", l_tDebugInfo.short_src, l_tDebugInfo.linedefined);
+            xr_sprintf(line, "%2d : [%3s] %s(%d) : %s\n", i, l_tDebugInfo.what, l_tDebugInfo.short_src,
+                l_tDebugInfo.currentline, temp);
+        }
+        out += line;
+    }
+}
+
 void CScriptEngine::log_value(lua_State* L, pcstr name, int depth)
 {
     using namespace luabind::detail;

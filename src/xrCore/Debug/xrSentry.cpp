@@ -11,9 +11,13 @@
 #endif
 #include <sentry.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <vector>
+
+#include "LocatorAPI.h"
 
 #if defined(XR_PLATFORM_WINDOWS)
 #include <Windows.h>
@@ -26,6 +30,63 @@
 namespace
 {
 bool s_xr_sentry_started = false;
+
+// Crashpad uploads these paths on crash; register likely logs at startup (after FS + CreateLog).
+constexpr size_t kMaxLogAttachments = 16;
+
+void sentry_add_logs_folder_attachments(sentry_options_t* options)
+{
+    if (!options)
+        return;
+    if (!FS.path_exist("$logs$"))
+        return;
+
+    string_path logs_dir{};
+    if (!FS.update_path(logs_dir, "$logs$", "", false) || !logs_dir[0])
+        return;
+
+    std::error_code ec;
+    const std::filesystem::path root(logs_dir);
+    if (!std::filesystem::is_directory(root, ec))
+        return;
+
+    struct LogEntry
+    {
+        std::filesystem::path path;
+        std::filesystem::file_time_type mtime{};
+    };
+    std::vector<LogEntry> logs;
+    for (const auto& entry : std::filesystem::directory_iterator(root, ec))
+    {
+        if (ec || !entry.is_regular_file(ec))
+            continue;
+        const auto& p = entry.path();
+        if (!p.has_extension() || p.extension() != ".log")
+            continue;
+        LogEntry le{ p, {} };
+        le.mtime = std::filesystem::last_write_time(p, ec);
+        logs.push_back(std::move(le));
+    }
+    if (logs.empty())
+        return;
+
+    std::sort(logs.begin(), logs.end(),
+        [](const LogEntry& a, const LogEntry& b) { return a.mtime > b.mtime; });
+
+    const size_t n = std::min(logs.size(), kMaxLogAttachments);
+    for (size_t i = 0; i < n; ++i)
+    {
+#if defined(XR_PLATFORM_WINDOWS)
+        sentry_options_add_attachmentw(options, logs[i].path.c_str());
+#else
+        const std::string narrow = logs[i].path.string();
+        sentry_options_add_attachment(options, narrow.c_str());
+#endif
+    }
+#ifndef MASTER_GOLD
+    Msg("[Sentry]: attached %zu log file(s) from [%s]", n, logs_dir);
+#endif
+}
 
 sentry_value_t before_send_hook(sentry_value_t event, void* /*hint*/, void* /*closure*/)
 {
@@ -129,6 +190,8 @@ void xrSentry_Initialize(pcstr commandLine)
 
     sentry_options_set_before_send(options, before_send_hook, nullptr);
 
+    sentry_add_logs_folder_attachments(options);
+
     // sentry_init() takes ownership of `options` on success (freed in sentry_close).
     // On failure it frees them internally. The caller must not sentry_options_free()
     // after sentry_init — that would leave g_options dangling and crash on shutdown.
@@ -154,9 +217,37 @@ void xrSentry_Shutdown()
     s_xr_sentry_started = false;
 }
 
+void XRCORE_API xrSentry_CaptureSoftError(pcstr logger, pcstr message, pcstr lua_stack)
+{
+    if (!s_xr_sentry_started || !message || !*message)
+        return;
+
+    sentry_value_t event = sentry_value_new_message_event(SENTRY_LEVEL_WARNING, logger ? logger : "OpenXRay", message);
+
+    // Tag for issue search / alert rules in Sentry: soft_error:true
+    sentry_value_t tags = sentry_value_new_object();
+    sentry_value_set_by_key(tags, "soft_error", sentry_value_new_string("true"));
+    sentry_value_set_by_key(event, "tags", tags);
+
+    if (lua_stack && *lua_stack)
+    {
+        constexpr size_t kMaxLua = 12000;
+        size_t len = std::strlen(lua_stack);
+        if (len > kMaxLua)
+            len = kMaxLua;
+        sentry_value_t extra = sentry_value_new_object();
+        sentry_value_set_by_key(extra, "lua_stack", sentry_value_new_string_n(lua_stack, len));
+        sentry_value_set_by_key(event, "extra", extra);
+    }
+
+    sentry_event_value_add_stacktrace(event, nullptr, 0);
+    sentry_capture_event(event);
+}
+
 #else // !USE_SENTRY
 
 void xrSentry_Initialize(pcstr /*commandLine*/) {}
 void xrSentry_Shutdown() {}
+void XRCORE_API xrSentry_CaptureSoftError(pcstr /*logger*/, pcstr /*message*/, pcstr /*lua_stack*/) {}
 
 #endif // USE_SENTRY
