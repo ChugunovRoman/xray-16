@@ -13,9 +13,57 @@
 #include "xrServer_script_macroses.h"
 #include "script_ini_file.h"
 
-pcstr get_section_name(const CSE_Abstract* abstract) { return (abstract->name()); }
-pcstr get_name(const CSE_Abstract* abstract) { return (abstract->name_replace()); }
-CScriptIniFile* get_spawn_ini(CSE_Abstract* abstract) { return ((CScriptIniFile*)&abstract->spawn_ini()); }
+#include "xrCore/Debug/xrSentry.hpp"
+#include "xrScriptEngine/script_engine.hpp"
+
+namespace
+{
+// Valid pcstr for Lua when server entity pointer is null (avoid nil deref in scripts that concatenate strings).
+static cpcstr kNullCseAbstractName = "<null_cse_abstract>";
+
+void report_null_cse_abstract(pcstr api_method)
+{
+    string256 msg;
+    xr_sprintf(msg, "script: %s() on null cse_abstract", api_method);
+    Msg("! %s", msg);
+    if (GEnv.ScriptEngine)
+    {
+        xr_string stack;
+        GEnv.ScriptEngine->format_lua_stack(nullptr, stack);
+        xrSentry_CaptureSoftError("xrGame.cse_abstract", msg, stack.empty() ? nullptr : stack.c_str());
+    }
+}
+} // namespace
+
+pcstr get_section_name(const CSE_Abstract* abstract)
+{
+    if (!abstract)
+    {
+        report_null_cse_abstract("section_name");
+        return kNullCseAbstractName;
+    }
+    return abstract->name();
+}
+
+pcstr get_name(const CSE_Abstract* abstract)
+{
+    if (!abstract)
+    {
+        report_null_cse_abstract("name");
+        return kNullCseAbstractName;
+    }
+    return abstract->name_replace();
+}
+
+CScriptIniFile* get_spawn_ini(CSE_Abstract* abstract)
+{
+    if (!abstract)
+    {
+        report_null_cse_abstract("spawn_ini");
+        return nullptr;
+    }
+    return ((CScriptIniFile*)&abstract->spawn_ini());
+}
 
 template <typename T>
 struct CSEAbstractWrapperBase : public T, public luabind::wrap_base
