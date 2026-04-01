@@ -6,6 +6,9 @@
 #include "xrCore/_vector3d_ext.h"
 #include "xrAICore/Navigation/level_graph.h"
 #include "xrGame/ai_space.h"
+#include "memory_space_impl.h"
+#include "xrServerEntities/smart_cast.h"
+#include "entity_alive.h"
 
 #define TEMPLATE_SIGNATURE template <typename _Object>
 
@@ -178,10 +181,29 @@ void ATTACK_ON_RUN_STATE::calculate_predicted_enemy_pos()
 TEMPLATE_SIGNATURE
 void ATTACK_ON_RUN_STATE::update_aim_side()
 {
-    CEntityAlive const* const enemy = m_attacking ? m_enemy_to_attack : this->object->EnemyMan.get_enemy();
+    CEntityAlive const* const enemy_raw = m_attacking ? m_enemy_to_attack : this->object->EnemyMan.get_enemy();
 
-    if (!enemy)
+    if (!enemy_raw)
         return;
+
+    u16 const enemy_id = object_id(static_cast<CGameObject const*>(enemy_raw));
+    CEntityAlive const* enemy = nullptr;
+    if (enemy_id != u16(-1))
+        if (IGameObject* const found = Level().Objects.net_Find(enemy_id))
+            enemy = smart_cast<const CEntityAlive*>(found);
+
+    if (!enemy || !enemy->g_Alive())
+    {
+        if (m_attacking)
+        {
+            m_attacking = false;
+            m_enemy_to_attack = nullptr;
+            EMotionAnim const override_animation = this->object->anim().get_override_animation();
+            if (override_animation == eAnimAttackOnRunLeft || override_animation == eAnimAttackOnRunRight)
+                this->object->anim().clear_override_animation();
+        }
+        return;
+    }
 
     Fvector const self_dir = this->object->Direction();
     Fvector const self_to_enemy = enemy->Position() - this->object->Position();
