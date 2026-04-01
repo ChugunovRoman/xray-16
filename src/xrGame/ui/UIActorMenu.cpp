@@ -10,6 +10,8 @@
 #include "ai/monsters/basemonster/base_monster.h"
 #include "UIInventoryUtilities.h"
 #include "game_cl_base.h"
+#include "Level.h"
+#include "GameObject.h"
 #include "Weapon.h"
 #include "PDA.h"
 #include "Bolt.h"
@@ -515,11 +517,42 @@ void CUIActorMenu::QuickUnloadWeapons()
 }
 
 CUICellItem* CUIActorMenu::CurrentItem() { return m_pCurrentCellItem; }
-PIItem CUIActorMenu::CurrentIItem() { return (m_pCurrentCellItem) ? (PIItem)m_pCurrentCellItem->m_pData : NULL; }
+PIItem CUIActorMenu::CurrentIItem()
+{
+    if (!m_pCurrentCellItem)
+        return nullptr;
+
+    void* const cell_data = m_pCurrentCellItem->m_pData;
+    if (!cell_data)
+        return nullptr;
+
+    if (m_currentIItemNetId != u16(-1))
+    {
+        IGameObject* o = Level().Objects.net_Find(m_currentIItemNetId);
+        PIItem resolved = o ? smart_cast<PIItem>(o) : nullptr;
+        if (!resolved || static_cast<void*>(resolved) != cell_data)
+        {
+            SetCurrentItem(nullptr);
+            return nullptr;
+        }
+        return resolved;
+    }
+
+    return static_cast<PIItem>(cell_data);
+}
 void CUIActorMenu::SetCurrentItem(CUICellItem* itm)
 {
     m_repair_mode = false;
     m_pCurrentCellItem = itm;
+    m_currentIItemNetId = u16(-1);
+    if (itm)
+    {
+        if (PIItem p = static_cast<PIItem>(itm->m_pData))
+        {
+            if (CGameObject* go = p->cast_game_object())
+                m_currentIItemNetId = go->ID();
+        }
+    }
     if (!itm)
     {
         InfoCurItem(NULL);

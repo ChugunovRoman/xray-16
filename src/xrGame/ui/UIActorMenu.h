@@ -1,5 +1,6 @@
 #pragma once
 
+#include "xrCore/xr_types.h"
 #include "UIDialogWnd.h"
 #include "xrUICore/Callbacks/UIWndCallback.h"
 #include "xrServerEntities/inventory_space.h"
@@ -130,6 +131,7 @@ protected:
     CTrade* m_partner_trade{};
 
     CUICellItem* m_pCurrentCellItem{};
+    u16 m_currentIItemNetId{ u16(-1) };
 
     // Messages
     CUIPropertiesBox* m_UIPropertiesBox{};
