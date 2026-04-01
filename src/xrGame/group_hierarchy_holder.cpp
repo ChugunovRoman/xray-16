@@ -50,6 +50,25 @@ IC bool is_entity_alive_safe(const CEntity* entity)
     return !!entity->g_Alive();
 #endif
 }
+
+IC bool entity_ids_equal_safe(const CEntity* a, const CEntity* b)
+{
+    if (!a || !b || is_invalid_entity_ptr(a) || is_invalid_entity_ptr(b))
+        return false;
+
+#if defined(XR_PLATFORM_WINDOWS)
+    __try
+    {
+        return a->ID() == b->ID();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+#else
+    return a->ID() == b->ID();
+#endif
+}
 } // namespace
 
 CGroupHierarchyHolder::~CGroupHierarchyHolder()
@@ -130,7 +149,7 @@ void CGroupHierarchyHolder::register_in_group(CEntity* member)
 void CGroupHierarchyHolder::register_in_squad(CEntity* member)
 {
 #ifdef SQUAD_HIERARCHY_HOLDER_USE_LEADER
-    if (!leader() && member->g_Alive())
+    if (!leader() && is_entity_alive_safe(member))
     {
         m_leader = member;
         if (!squad().leader())
@@ -179,11 +198,11 @@ void CGroupHierarchyHolder::unregister_in_squad(CEntity* member)
         return;
 
     const CEntity* currentLeader = leader();
-    if (!is_invalid_entity_ptr(currentLeader) && currentLeader->ID() == member->ID())
+    if (entity_ids_equal_safe(currentLeader, member))
     {
         update_leader();
         CEntity* squadLeader = squad().leader();
-        if (squadLeader && !is_invalid_entity_ptr(squadLeader) && squadLeader->ID() == member->ID())
+        if (entity_ids_equal_safe(squadLeader, member))
         {
             if (leader())
                 squad().leader(leader());
