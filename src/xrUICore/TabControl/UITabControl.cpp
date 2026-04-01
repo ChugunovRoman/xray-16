@@ -19,6 +19,14 @@ CUITabControl::CUITabControl() : CUIWindow("CUITabControl")
 CUITabControl::~CUITabControl() { RemoveAll(); }
 void CUITabControl::SetCurrentOptValue()
 {
+    if (m_TabsArr.empty())
+    {
+#ifndef MASTER_GOLD
+        Msg("! CUITabControl::SetCurrentOptValue: no tabs, skip");
+#endif
+        return;
+    }
+
     shared_str v = GetOptStringValue();
     CUITabButton* b = GetButtonById(v);
     if (NULL == b)
@@ -187,10 +195,22 @@ int CUITabControl::GetActiveIndex() const
 
 void CUITabControl::SetActiveTab(const shared_str& sNewTab)
 {
-    if (m_sPushedId == sNewTab)
+    if (m_TabsArr.empty())
         return;
 
-    m_sPushedId = sNewTab;
+    shared_str tab = sNewTab;
+    if (!GetButtonById(tab))
+    {
+#ifndef MASTER_GOLD
+        Msg("! CUITabControl::SetActiveTab: unknown tab [%s], using first", sNewTab.c_str());
+#endif
+        tab = m_TabsArr[0]->m_btn_id;
+    }
+
+    if (m_sPushedId == tab)
+        return;
+
+    m_sPushedId = tab;
     OnTabChange(m_sPushedId, m_sPrevPushedId);
 
     m_sPrevPushedId = m_sPushedId;
