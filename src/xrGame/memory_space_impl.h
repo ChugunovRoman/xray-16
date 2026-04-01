@@ -15,6 +15,7 @@
 #include "xrAICore/Navigation/ai_object_location.h"
 #include "xrAICore/Navigation/ai_object_location_impl.h"
 #include "xrAICore/Navigation/level_graph.h"
+#include <cstdint>
 
 template <typename T>
 IC SRotation CObjectParams<T>::orientation(const T* object) const
@@ -89,5 +90,23 @@ IC void CMemoryObject<T>::fill(const T* game_object, const T* self, const squad_
 template <typename T>
 IC u16 object_id(const T* object)
 {
-    return (object ? u16(object->ID()) : u16(0xffff));
+    if (!object)
+        return u16(0xffff);
+
+#if defined(XR_PLATFORM_WINDOWS)
+    const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(object);
+    if (address == ~std::uintptr_t(0) || address == 0xFFFFFFFFFFFF0000ull)
+        return u16(0xffff);
+
+    __try
+    {
+        return u16(object->ID());
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return u16(0xffff);
+    }
+#else
+    return u16(object->ID());
+#endif
 }

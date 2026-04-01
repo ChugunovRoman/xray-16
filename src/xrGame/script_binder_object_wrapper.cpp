@@ -10,8 +10,46 @@
 #include "script_binder_object_wrapper.h"
 #include "script_game_object.h"
 #include "xrServer_Objects_ALife.h"
+#include "xrScriptEngine/script_engine.hpp"
 #include "xrEngine/profiler.h"
 #include "npc_cpp_profile.h"
+
+namespace
+{
+#if defined(XR_PLATFORM_WINDOWS)
+void call_script_binder_update_seh_guarded(CScriptBinderObjectWrapper* self, u32 time_delta)
+{
+    __try
+    {
+        luabind::call_member<void>(self, "update", time_delta);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        if (strstr(Core.Params, "-dbg") != nullptr)
+        {
+            pcstr objName = "<null>";
+            pcstr objSection = "<null>";
+            u16 objId = u16(-1);
+            if (self->m_object)
+            {
+                objName = self->m_object->Name();
+                objSection = self->m_object->Section();
+                objId = self->m_object->ID();
+            }
+
+            Msg("! [script_binder] SEH in update(): object='%s' section='%s' id=%u dt=%u",
+                objName, objSection, objId, time_delta);
+
+            if (GEnv.ScriptEngine)
+            {
+                Msg("! [script_binder] Lua stack dump follows");
+                GEnv.ScriptEngine->print_stack();
+            }
+        }
+    }
+}
+#endif
+} // namespace
 
 CScriptBinderObjectWrapper::CScriptBinderObjectWrapper(CScriptGameObject* object) : CScriptBinderObject(object) {}
 CScriptBinderObjectWrapper::~CScriptBinderObjectWrapper() {}
@@ -63,7 +101,11 @@ void CScriptBinderObjectWrapper::shedule_Update(u32 time_delta)
 {
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptBinderLuabindUpdate);
     START_PROFILE("script_binder/luabind_update")
+#if defined(XR_PLATFORM_WINDOWS)
+    call_script_binder_update_seh_guarded(this, time_delta);
+#else
     luabind::call_member<void>(this, "update", time_delta);
+#endif
     STOP_PROFILE
 }
 

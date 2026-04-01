@@ -9,6 +9,9 @@
 bool CPHMovementControl::ActivateBoxDynamic(
     u32 id, int num_it /*=8*/, int num_steps /*5*/, float resolve_depth /*=0.01f*/)
 {
+    if (id >= 4)
+        return false;
+
     bool character_exist = CharacterExist();
     if (character_exist && trying_times[id] != u32(-1))
     {
@@ -20,7 +23,8 @@ bool CPHMovementControl::ActivateBoxDynamic(
         if (Device.dwTimeGlobal - trying_times[id] < 500 && dif.magnitude() < 0.05f)
             return false;
     }
-    if (!m_character || m_character->PhysicsRefObject()->ObjectPPhysicsShell())
+    IPhysicsShellHolder* ref_object = m_character ? m_character->PhysicsRefObject() : nullptr;
+    if (!m_character || !ref_object || ref_object->ObjectPPhysicsShell())
         return false;
     u32 old_id = BoxID();
 

@@ -805,6 +805,12 @@ void R_dsgraph_structure::build_subspace()
             // Exact sorting order (front-to-back)
             std::sort(lstRenderables.begin(), lstRenderables.end(), [&](ISpatial* s1, ISpatial* s2)
                 {
+                    if (s1 == s2)
+                        return false;
+                    if (!s1)
+                        return false; // nulls after valid
+                    if (!s2)
+                        return true;
                     const float d1 = s1->GetSpatialData().sphere.P.distance_to_sqr(o.view_pos);
                     const float d2 = s2->GetSpatialData().sphere.P.distance_to_sqr(o.view_pos);
                     return d1 < d2;
@@ -837,6 +843,8 @@ void R_dsgraph_structure::build_subspace()
         for (u32 o_it = 0; o_it < lstRenderables.size(); o_it++)
         {
             ISpatial* spatial = lstRenderables[o_it];
+            if (!spatial)
+                continue;
             if (o.is_main_pass)
             {
                 const auto& entity_pos = spatial->spatial_sector_point();

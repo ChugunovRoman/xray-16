@@ -154,12 +154,23 @@ void CGameFont::Initialize(pcstr cShader, pcstr cTextureName)
         }
         else
         {
-            R_ASSERT(ini->section_exist("font_size"));
-            fHeight = ini->r_float("font_size", "height");
-            float width = ini->r_float("font_size", "width");
-            const int cpl = ini->r_s32("font_size", "cpl");
-            for (u32 i = 0; i < nNumChars; i++)
-                TCMap[i].set((i % cpl) * width, (i / cpl) * fHeight, width);
+            if (!ini->section_exist("font_size"))
+            {
+                Msg("! CGameFont::Initialize: missing [font_size] section in [%s], using fallback metrics", fn);
+                fHeight = 8.0f;
+                const float width = 8.0f;
+                const int cpl = 16;
+                for (u32 i = 0; i < nNumChars; i++)
+                    TCMap[i].set((i % cpl) * width, (i / cpl) * fHeight, width);
+            }
+            else
+            {
+                fHeight = ini->r_float("font_size", "height");
+                float width = ini->r_float("font_size", "width");
+                const int cpl = ini->r_s32("font_size", "cpl");
+                for (u32 i = 0; i < nNumChars; i++)
+                    TCMap[i].set((i % cpl) * width, (i / cpl) * fHeight, width);
+            }
         }
     }
 

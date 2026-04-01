@@ -684,12 +684,13 @@ int CScriptEngine::lua_pcall_failed(lua_State* L)
     print_output(L, "", LUA_ERRRUN);
     on_error(L);
 
+    const auto err = lua_tostring(L, -1);
     luabind::detail::stack_pop pop{ L, lua_isstring(L, -1) ? 1 : 0 };
 
-    if (xrDebug::WouldShowErrorMessage())
+    // In shipped builds this callback is hit by script data mismatches (e.g. save/script version drift).
+    // Breaking into debugger here crashes unattended runs; keep hard break only on explicit opt-in flag.
+    if (xrDebug::WouldShowErrorMessage() && strstr(Core.Params, "-lua_break") != nullptr)
     {
-        const auto err = lua_tostring(L, -1);
-
         static bool ignoreAlways;
         const auto result = xrDebug::Fail(ignoreAlways, DEBUG_INFO, "LUA error", err);
 

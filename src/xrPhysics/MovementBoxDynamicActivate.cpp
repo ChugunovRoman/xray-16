@@ -301,6 +301,8 @@ bool ActivateBoxDynamic(IPHMovementControl* mov_control, bool character_exist, u
     // m_PhysicMovementControl->ActivateBox(id);
     VERIFY(mov_control);
     VERIFY(mov_control->character());
+    if (id >= 4)
+        return false;
 
     mov_control->character()->CPHObject::activate();
     ph_world->Freeze();
@@ -317,6 +319,14 @@ bool ActivateBoxDynamic(IPHMovementControl* mov_control, bool character_exist, u
     }*/
 
     saved_callback = mov_control->character()->ObjectContactCallBack();
+    auto cleanup = [&]()
+    {
+        mov_control->character()->SwitchInInitContact();
+        mov_control->character()->SetStaticContactCallBack(ph_world->default_character_contact_shotmark());
+        mov_control->character()->SetObjectContactCallback(saved_callback);
+        saved_callback = 0;
+        ph_world->UnFreeze();
+    };
 
     //	SetOjectContactCallback(TestDepthCallback);
 
@@ -348,6 +358,10 @@ bool ActivateBoxDynamic(IPHMovementControl* mov_control, bool character_exist, u
         num_steps = 1;
         resolve_depth = 0.1f;
     }
+    if (num_it < 1)
+        num_it = 1;
+    if (num_steps < 1)
+        num_steps = 1;
     ///////////////////////////////////////////////////////////////////////
     float fnum_it = float(num_it);
     float fnum_steps = float(num_steps);
@@ -359,13 +373,19 @@ bool ActivateBoxDynamic(IPHMovementControl* mov_control, bool character_exist, u
     float max_vel = pass / 2.f / fnum_it / fnum_steps / fixed_step;
     float max_a_vel = M_PI / 8.f / fnum_it / fnum_steps / fixed_step;
     VERIFY(mov_control->character());
-    dBodySetForce(mov_control->character()->get_body(), 0.f, 0.f, 0.f);
-    dBodySetLinearVel(mov_control->character()->get_body(), 0.f, 0.f, 0.f);
+    dBodyID body = mov_control->character()->get_body();
+    if (!body || !dBodyStateValide(body))
+    {
+        cleanup();
+        return false;
+    }
+    dBodySetForce(body, 0.f, 0.f, 0.f);
+    dBodySetLinearVel(body, 0.f, 0.f, 0.f);
 
     // Calculate(Fvector().set(0,0,0),Fvector().set(1,0,0),0,0,0,0);
     mov_control->actor_calculate(Fvector().set(0, 0, 0), Fvector().set(1, 0, 0), 0, 0, 0, 0);
 
-    CVelocityLimiter vl(mov_control->character()->get_body(), max_vel, max_vel);
+    CVelocityLimiter vl(body, max_vel, max_vel);
     max_vel = 1.f / fnum_it / fnum_steps / fixed_step;
 
     bool ret = false;
@@ -387,6 +407,11 @@ bool ActivateBoxDynamic(IPHMovementControl* mov_control, bool character_exist, u
         //		m_character->Enable();
         //}
         VERIFY(mov_control->character()->b_exist);
+        if (!dBodyStateValide(body))
+        {
+            cleanup();
+            return false;
+        }
         mov_control->character()->Enable();
 
         mov_control->character()->ApplyForce(0, ph_world->Gravity() * mov_control->character()->Mass(), 0);
@@ -413,6 +438,11 @@ bool ActivateBoxDynamic(IPHMovementControl* mov_control, bool character_exist, u
             // Calculate(Fvector().set(0,0,0),Fvector().set(1,0,0),0,0,0,0);
             mov_control->actor_calculate(Fvector().set(0, 0, 0), Fvector().set(1, 0, 0), 0, 0, 0, 0);
             // EnableCharacter();
+            if (!dBodyStateValide(body))
+            {
+                cleanup();
+                return false;
+            }
             mov_control->character()->Enable();
             mov_control->character()->ApplyForce(0, ph_world->Gravity() * mov_control->character()->Mass(), 0);
             ph_world->Step();

@@ -303,7 +303,12 @@ bool CMainMenu::ReloadUI()
     xr_delete(m_startDialog);
 
     m_startDialog = smart_cast<CUIDialogWnd*>(dlg);
-    VERIFY(m_startDialog);
+    if (!m_startDialog)
+    {
+        DEL_INSTANCE(dlg);
+        m_Flags.set(flActive | flNeedChangeCapture, FALSE);
+        return false;
+    }
     m_startDialog->m_bWorkInPause = true;
     m_startDialog->ShowDialog(true);
     return true;

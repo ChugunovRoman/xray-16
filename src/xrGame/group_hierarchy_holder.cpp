@@ -19,6 +19,38 @@
 #include "visual_memory_manager.h"
 #include "sound_memory_manager.h"
 #include "hit_memory_manager.h"
+#include <cstdint>
+
+namespace
+{
+IC bool is_invalid_entity_ptr(const CEntity* entity)
+{
+    if (!entity)
+        return true;
+
+    const std::uintptr_t p = reinterpret_cast<std::uintptr_t>(entity);
+    return p == ~std::uintptr_t(0) || p == 0xFFFFFFFFFFFFFFFFull;
+}
+
+IC bool is_entity_alive_safe(const CEntity* entity)
+{
+    if (is_invalid_entity_ptr(entity))
+        return false;
+
+#if defined(XR_PLATFORM_WINDOWS)
+    __try
+    {
+        return !!entity->g_Alive();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+#else
+    return !!entity->g_Alive();
+#endif
+}
+} // namespace
 
 CGroupHierarchyHolder::~CGroupHierarchyHolder()
 {
@@ -65,14 +97,14 @@ void CGroupHierarchyHolder::lazy_ensure_agent_manager_for_stalker(CAI_Stalker* s
 void CGroupHierarchyHolder::update_leader()
 {
     m_leader = 0;
-    MEMBER_REGISTRY::iterator I = m_members.begin();
-    MEMBER_REGISTRY::iterator E = m_members.end();
-    for (; I != E; ++I)
-        if ((*I)->g_Alive())
+    for (CEntity* entity : m_members)
+    {
+        if (is_entity_alive_safe(entity))
         {
-            m_leader = *I;
+            m_leader = entity;
             break;
         }
+    }
 }
 #endif // SQUAD_HIERARCHY_HOLDER_USE_LEADER
 
@@ -143,10 +175,15 @@ void CGroupHierarchyHolder::unregister_in_group(CEntity* member)
 void CGroupHierarchyHolder::unregister_in_squad(CEntity* member)
 {
 #ifdef SQUAD_HIERARCHY_HOLDER_USE_LEADER
-    if (leader() && (leader()->ID() == member->ID()))
+    if (!member || is_invalid_entity_ptr(member))
+        return;
+
+    const CEntity* currentLeader = leader();
+    if (!is_invalid_entity_ptr(currentLeader) && currentLeader->ID() == member->ID())
     {
         update_leader();
-        if (squad().leader()->ID() == member->ID())
+        CEntity* squadLeader = squad().leader();
+        if (squadLeader && !is_invalid_entity_ptr(squadLeader) && squadLeader->ID() == member->ID())
         {
             if (leader())
                 squad().leader(leader());

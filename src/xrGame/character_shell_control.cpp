@@ -9,7 +9,6 @@
 #include "xrPhysics/PhysicsShell.h"
 
 #include "Level.h"
-#include "CustomZone.h"
 
 #ifdef DEBUG
 extern BOOL death_anim_debug;
@@ -83,8 +82,10 @@ void character_shell_control::apply_start_velocity_factor(IGameObject* who, Fvec
 {
     velocity.mul(1.3f);
     velocity.mul(1.25f * m_after_death_velocity_factor);
-    // set shell params
-    if (!smart_cast<CCustomZone*>(who))
+    // set shell params — use virtual cast_custom_zone() instead of smart_cast(IGameObject*):
+    // avoids SmartDynamicCast chain on death path when H.who can be stale/odd state.
+    const bool from_custom_zone = who && who->cast_custom_zone();
+    if (!from_custom_zone)
     {
         velocity.mul(1.25f * m_after_death_velocity_factor);
     }

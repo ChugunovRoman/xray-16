@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "xr_time.h"
+#include "xrScriptEngine/script_engine.hpp"
 #include "ui/UIInventoryUtilities.h"
 #include "Level.h"
 #include "date_time.h"
@@ -54,6 +55,42 @@ void xrTime::set(int y, int mo, int d, int h, int mi, int s, int ms)
 void xrTime::get(u32& y, u32& mo, u32& d, u32& h, u32& mi, u32& s, u32& ms)
 {
     split_time(m_time, y, mo, d, h, mi, s, ms);
+}
+
+void xrTime::add_script(xrTime* other)
+{
+    if (!other)
+    {
+#ifndef MASTER_GOLD
+        Msg("! xrTime:add(nil) — ignored");
+#endif
+        return;
+    }
+    add(*other);
+}
+
+void xrTime::sub_script(xrTime* other)
+{
+    if (!other)
+    {
+#ifndef MASTER_GOLD
+        Msg("! xrTime:sub(nil) — ignored");
+#endif
+        return;
+    }
+    sub(*other);
+}
+
+float xrTime::diffSec_script(xrTime* other)
+{
+    if (!other)
+    {
+        Msg("! xrTime:diffSec(nil) — returning 0; Lua call stack:");
+        if (GEnv.ScriptEngine)
+            GEnv.ScriptEngine->print_stack();
+        return 0.f;
+    }
+    return diffSec(*other);
 }
 
 float xrTime::diffSec(const xrTime& other)
