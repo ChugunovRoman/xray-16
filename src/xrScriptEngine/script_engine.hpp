@@ -254,6 +254,9 @@ private:
     DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
+/** Msg, script log, Sentry warning with native stack + extra.lua_stack — SEH path in luabind server wrappers (MSVC). */
+XRSCRIPTENGINE_API void ReportLuabindServerWrapperSeh(cpcstr wrapper_method_name);
+
 template <typename TResult>
 IC bool CScriptEngine::functor(LPCSTR function_to_call, luabind::functor<TResult>& lua_function)
 {

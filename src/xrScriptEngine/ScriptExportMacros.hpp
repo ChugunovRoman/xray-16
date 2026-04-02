@@ -59,6 +59,36 @@
 #define CAST_FAILED(v_func_name, ret_type)
 #endif
 
+// C++ try/catch does not catch access violations from LuaJIT/luabind; SEH does (MSVC Windows).
+#if defined(_WIN32) && defined(_MSC_VER)
+#include <excpt.h>
+#include "script_engine.hpp" // ReportLuabindServerWrapperSeh — XRSCRIPTENGINE_API (avoid C4273 vs plain extern)
+#define XR_LUABIND_WRAPPER_SEH_BEGIN \
+    __try                              \
+    {                                  \
+        try                              \
+        {
+#define XR_LUABIND_WRAPPER_SEH_END(method_literal) \
+        }                                            \
+        catch (...)                                  \
+        {                                            \
+        }                                            \
+    }                                                \
+    __except (EXCEPTION_EXECUTE_HANDLER)             \
+    {                                                \
+        ReportLuabindServerWrapperSeh(method_literal); \
+    }
+#else
+#define XR_LUABIND_WRAPPER_SEH_BEGIN \
+    try                              \
+    {
+#define XR_LUABIND_WRAPPER_SEH_END(method_literal) \
+    }                                                \
+    catch (...)                                      \
+    {                                                \
+    }
+#endif
+
 #define DEFINE_LUA_WRAPPER_CONST_METHOD_0(v_func_name, ret_type) \
     virtual ret_type v_func_name() const noexcept\
     {                                                            \
@@ -97,49 +127,33 @@
 #define DEFINE_LUA_WRAPPER_METHOD_V0(v_func_name)  \
     virtual void v_func_name()                     \
     {                                              \
-        try                                        \
-        {                                          \
-            luabind::call_member<void>(this, #v_func_name); \
-        }                                          \
-        catch (...)                                \
-        {                                          \
-        }                                          \
+        XR_LUABIND_WRAPPER_SEH_BEGIN               \
+        luabind::call_member<void>(this, #v_func_name); \
+        XR_LUABIND_WRAPPER_SEH_END(#v_func_name)  \
     }                                              \
     static void v_func_name##_static(inherited* ptr) { ptr->self_type::inherited::v_func_name(); }
 #define DEFINE_LUA_WRAPPER_METHOD_V1(v_func_name, t1)  \
     virtual void v_func_name(t1 p1)                    \
     {                                                  \
-        try                                            \
-        {                                              \
-            luabind::call_member<void>(this, #v_func_name, p1); \
-        }                                              \
-        catch (...)                                    \
-        {                                              \
-        }                                              \
+        XR_LUABIND_WRAPPER_SEH_BEGIN                   \
+        luabind::call_member<void>(this, #v_func_name, p1); \
+        XR_LUABIND_WRAPPER_SEH_END(#v_func_name)      \
     }                                                  \
     static void v_func_name##_static(inherited* ptr, t1 p1) { ptr->self_type::inherited::v_func_name(p1); }
 #define DEFINE_LUA_WRAPPER_METHOD_V2(v_func_name, t1, t2)  \
     virtual void v_func_name(t1 p1, t2 p2)                 \
     {                                                      \
-        try                                                \
-        {                                                  \
-            luabind::call_member<void>(this, #v_func_name, p1, p2); \
-        }                                                  \
-        catch (...)                                        \
-        {                                                  \
-        }                                                  \
+        XR_LUABIND_WRAPPER_SEH_BEGIN                       \
+        luabind::call_member<void>(this, #v_func_name, p1, p2); \
+        XR_LUABIND_WRAPPER_SEH_END(#v_func_name)          \
     }                                                      \
     static void v_func_name##_static(inherited* ptr, t1 p1, t2 p2) { ptr->self_type::inherited::v_func_name(p1, p2); }
 #define DEFINE_LUA_WRAPPER_METHOD_V3(v_func_name, t1, t2, t3)             \
     virtual void v_func_name(t1 p1, t2 p2, t3 p3)                         \
     {                                                                     \
-        try                                                               \
-        {                                                                 \
-            luabind::call_member<void>(this, #v_func_name, p1, p2, p3);            \
-        }                                                                 \
-        catch (...)                                                       \
-        {                                                                 \
-        }                                                                 \
+        XR_LUABIND_WRAPPER_SEH_BEGIN                                      \
+        luabind::call_member<void>(this, #v_func_name, p1, p2, p3);       \
+        XR_LUABIND_WRAPPER_SEH_END(#v_func_name)                          \
     }                                                                     \
     static void v_func_name##_static(inherited* ptr, t1 p1, t2 p2, t3 p3) \
     {                                                                     \
@@ -149,13 +163,9 @@
 #define DEFINE_LUA_WRAPPER_METHOD_V4(v_func_name, t1, t2, t3, t4)                \
     virtual void v_func_name(t1 p1, t2 p2, t3 p3, t4 p4)                         \
     {                                                                            \
-        try                                                                      \
-        {                                                                        \
-            luabind::call_member<void>(this, #v_func_name, p1, p2, p3, p4);               \
-        }                                                                        \
-        catch (...)                                                              \
-        {                                                                        \
-        }                                                                        \
+        XR_LUABIND_WRAPPER_SEH_BEGIN                                             \
+        luabind::call_member<void>(this, #v_func_name, p1, p2, p3, p4);          \
+        XR_LUABIND_WRAPPER_SEH_END(#v_func_name)                                 \
     }                                                                            \
     static void v_func_name##_static(inherited* ptr, t1 p1, t2 p2, t3 p3, t4 p4) \
     {                                                                            \

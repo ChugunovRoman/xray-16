@@ -33,6 +33,23 @@ void LuaSentrySoftError_MessageOnly(pcstr message) { LuaSentrySoftErrorImpl("lua
 void LuaSentrySoftError_LoggerMessage(pcstr logger, pcstr message) { LuaSentrySoftErrorImpl(logger, message); }
 } // namespace
 
+void ReportLuabindServerWrapperSeh(cpcstr wrapper_method_name)
+{
+    cpcstr method = (wrapper_method_name && *wrapper_method_name) ? wrapper_method_name : "<unknown>";
+    string256 msg{};
+    xr_sprintf(msg, "SEH in luabind server wrapper %s (AV / invalid code)", method);
+    Msg("! %s", msg);
+
+    xr_string stack;
+    if (GEnv.ScriptEngine)
+    {
+        GEnv.ScriptEngine->format_lua_stack(nullptr, stack);
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "%s", msg);
+    }
+
+    xrSentry_CaptureSoftError("xrGame.luabind_server_wrapper", msg, stack.empty() ? nullptr : stack.c_str());
+}
+
 void LuaLog(pcstr caMessage)
 {
     GEnv.ScriptEngine->script_log(LuaMessageType::Message, "%s", caMessage);
