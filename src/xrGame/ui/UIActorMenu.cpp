@@ -260,7 +260,8 @@ void CUIActorMenu::Update()
 {
     { // all mode
         m_last_time = Device.dwTimeGlobal;
-        m_ActorStateInfo->UpdateActorInfo(m_pActorInvOwner);
+        if (m_pActorInvOwner)
+            m_ActorStateInfo->UpdateActorInfo(m_pActorInvOwner);
     }
 
     switch (m_currMenuMode)
@@ -279,6 +280,12 @@ void CUIActorMenu::Update()
     }
     case mmTrade:
     {
+        if (!m_pPartnerInvOwner)
+        {
+            HideDialog();
+            break;
+        }
+
         if (m_pPartnerInvOwner->inventory().ModifyFrame() != m_trade_partner_inventory_state)
             InitPartnerInventoryContents();
         if (trade_list_is_filling && latest_frame_trade_list_update < Device.dwFrame)
@@ -353,7 +360,11 @@ void CUIActorMenu::CheckDistance()
     CGameObject* pActorGO = smart_cast<CGameObject*>(m_pActorInvOwner);
     CGameObject* pPartnerGO = smart_cast<CGameObject*>(m_pPartnerInvOwner);
     CGameObject* pBoxGO = smart_cast<CGameObject*>(m_pInvBox);
-    VERIFY(pActorGO && (pPartnerGO || pBoxGO));
+    if (!pActorGO || (!pPartnerGO && !pBoxGO))
+    {
+        HideDialog();
+        return;
+    }
 
     if (pPartnerGO)
     {
