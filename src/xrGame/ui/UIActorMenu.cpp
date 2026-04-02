@@ -64,6 +64,12 @@ void CUIActorMenu::SetPartner(CInventoryOwner* io)
 {
     R_ASSERT(!IsShown());
     m_pPartnerInvOwner = io;
+    m_partnerInvOwnerNetId = u16(-1);
+    if (io)
+    {
+        if (CGameObject* go = smart_cast<CGameObject*>(io))
+            m_partnerInvOwnerNetId = go->ID();
+    }
 }
 
 void CUIActorMenu::InitActorInfo()
@@ -260,7 +266,7 @@ void CUIActorMenu::Update()
 {
     { // all mode
         m_last_time = Device.dwTimeGlobal;
-        if (m_pActorInvOwner)
+        if (m_pActorInvOwner && m_ActorStateInfo)
             m_ActorStateInfo->UpdateActorInfo(m_pActorInvOwner);
     }
 
@@ -280,7 +286,7 @@ void CUIActorMenu::Update()
     }
     case mmTrade:
     {
-        if (!m_pPartnerInvOwner)
+        if (!EnsureTradePartnerValid())
         {
             HideDialog();
             break;
@@ -355,8 +361,50 @@ bool CUIActorMenu::NeedCenterCursor() const
     return CUIDialogWnd::NeedCenterCursor();
 }
 
+bool CUIActorMenu::EnsureTradePartnerValid()
+{
+    if (!g_pGameLevel)
+        return false;
+
+    // Prefer ID from SetPartner: net_Find first avoids touching a possibly stale m_pPartnerInvOwner.
+    if (m_partnerInvOwnerNetId != u16(-1))
+    {
+        IGameObject* found = Level().Objects.net_Find(m_partnerInvOwnerNetId);
+        CInventoryOwner* io = found ? smart_cast<CInventoryOwner*>(found) : nullptr;
+        if (!io)
+        {
+            m_pPartnerInvOwner = nullptr;
+            m_partnerInvOwnerNetId = u16(-1);
+            return false;
+        }
+        m_pPartnerInvOwner = io;
+        return true;
+    }
+
+    if (!m_pPartnerInvOwner)
+        return false;
+
+    CGameObject* go = smart_cast<CGameObject*>(m_pPartnerInvOwner);
+    if (!go)
+    {
+        m_pPartnerInvOwner = nullptr;
+        return false;
+    }
+    m_partnerInvOwnerNetId = go->ID();
+    return EnsureTradePartnerValid();
+}
+
 void CUIActorMenu::CheckDistance()
 {
+    if (m_pPartnerInvOwner)
+    {
+        if (!EnsureTradePartnerValid())
+        {
+            HideDialog();
+            return;
+        }
+    }
+
     CGameObject* pActorGO = smart_cast<CGameObject*>(m_pActorInvOwner);
     CGameObject* pPartnerGO = smart_cast<CGameObject*>(m_pPartnerInvOwner);
     CGameObject* pBoxGO = smart_cast<CGameObject*>(m_pInvBox);

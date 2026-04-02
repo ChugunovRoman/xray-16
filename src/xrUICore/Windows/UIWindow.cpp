@@ -3,7 +3,67 @@
 #include "UIWindow.h"
 
 #include "Cursor/UICursor.h"
+#include "xrCore/Threading/Lock.hpp"
+#include "xrCore/Threading/ScopeLock.hpp"
+#include "xrEngine/device.h"
 #include "xrEngine/editor_helper.h"
+
+#include <utility>
+
+namespace
+{
+Lock s_deferredDetachLock;
+xr_vector<std::pair<CUIWindow*, CUIWindow*>> s_deferredDetaches;
+
+struct RegisterDeferredDetachCb
+{
+    RegisterDeferredDetachCb()
+    {
+        Device_RegisterDeferredUIFrameCb(&CUIWindow::ProcessDeferredDetachQueueForDeviceFrame);
+    }
+} s_registerDeferredDetachCb;
+} // namespace
+
+void CUIWindow::DetachChildImpl(CUIWindow* self, CUIWindow* pChild)
+{
+    R_ASSERT(self);
+    R_ASSERT(pChild);
+    if (!pChild)
+        return;
+
+    if (self->m_pMouseCapturer == pChild)
+        self->SetCapture(pChild, false);
+
+    auto it = std::find(self->m_ChildWndList.begin(), self->m_ChildWndList.end(), pChild);
+    if (it == self->m_ChildWndList.end())
+    {
+        Msg("! CUIWindow::DetachChild: child is not attached [parent:%s child:%s]",
+            self->m_windowName.c_str(), pChild->WindowName().c_str());
+        if (pChild->GetParent() == self)
+            pChild->SetParent(nullptr);
+        return;
+    }
+    self->m_ChildWndList.erase(it);
+
+    pChild->SetParent(NULL);
+
+    if (pChild->IsAutoDelete())
+        xr_delete(pChild);
+}
+
+void CUIWindow::ProcessDeferredDetachQueueForDeviceFrame()
+{
+    xr_vector<std::pair<CUIWindow*, CUIWindow*>> batch;
+    {
+        ScopeLock guard(&s_deferredDetachLock);
+        batch.swap(s_deferredDetaches);
+    }
+    for (auto& pr : batch)
+    {
+        if (pr.first && pr.second)
+            DetachChildImpl(pr.first, pr.second);
+    }
+}
 
 CUIWindow::CUIWindow(pcstr window_name) : m_windowName(window_name)
 {
@@ -93,27 +153,15 @@ void CUIWindow::DetachChild(CUIWindow* pChild)
     if (NULL == pChild)
         return;
 
-    if (m_pMouseCapturer == pChild)
-        SetCapture(pChild, false);
-
-    //.	SafeRemoveChild			(pChild);
-    auto it = std::find(m_ChildWndList.begin(), m_ChildWndList.end(), pChild);
-    if (it == m_ChildWndList.end())
+    // ALife / seqParallel runs Lua on worker threads; UI hierarchy is main-thread only.
+    if (!Device.IsUiThread())
     {
-        // Can happen on repeated detach from shutdown/destructor chains.
-        // Keep it non-fatal to avoid crashing on quit.
-        Msg("! CUIWindow::DetachChild: child is not attached [parent:%s child:%s]",
-            m_windowName.c_str(), pChild->WindowName().c_str());
-        if (pChild->GetParent() == this)
-            pChild->SetParent(nullptr);
+        ScopeLock guard(&s_deferredDetachLock);
+        s_deferredDetaches.emplace_back(this, pChild);
         return;
     }
-    m_ChildWndList.erase(it);
 
-    pChild->SetParent(NULL);
-
-    if (pChild->IsAutoDelete())
-        xr_delete(pChild);
+    DetachChildImpl(this, pChild);
 }
 
 void CUIWindow::DetachAll()

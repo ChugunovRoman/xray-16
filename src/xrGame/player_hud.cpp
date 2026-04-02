@@ -843,12 +843,14 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
             if(useSecond)
             {
                 CBlend* B = ka->LL_SetInitialPartPose(pid, M2, false, 1.0f, 1.0f, 1.0f, false, nullptr, nullptr);
-                R_ASSERT(B);
+                if (!B)
+                    continue;
             }
             else
             {
                 CBlend* B = ka->PlayCycle(pid, M2, bMixIn);
-                R_ASSERT(B);
+                if (!B)
+                    continue;
                 B->speed *= speed;
             }
         }
@@ -940,6 +942,32 @@ void player_hud::load(const shared_str& player_hud_sect)
     m_model = smart_cast<IKinematicsAnimated*>(GEnv.Render->model_Create(m_visual_name.c_str()));
     m_model_2 = smart_cast<IKinematicsAnimated*>(GEnv.Render->model_Create(m_visual_name.c_str()));
     m_model_3 = smart_cast<IKinematicsAnimated*>(GEnv.Render->model_Create(m_visual_name.c_str()));
+
+    if (!m_model || !m_model_2 || !m_model_3)
+    {
+        if (m_model)
+        {
+            IRenderVisual* v = m_model->dcast_RenderVisual();
+            GEnv.Render->model_Delete(v);
+            m_model = nullptr;
+        }
+        if (m_model_2)
+        {
+            IRenderVisual* v2 = m_model_2->dcast_RenderVisual();
+            GEnv.Render->model_Delete(v2);
+            m_model_2 = nullptr;
+        }
+        if (m_model_3)
+        {
+            IRenderVisual* v3 = m_model_3->dcast_RenderVisual();
+            GEnv.Render->model_Delete(v3);
+            m_model_3 = nullptr;
+        }
+#ifndef MASTER_GOLD
+        Msg("! player_hud::load: model_Create failed for [%s]", m_visual_name.c_str());
+#endif
+        return;
+    }
 
     load_ancors();
 
@@ -1154,12 +1182,14 @@ u32 player_hud::anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotio
                 if(useSecond)
                 {
                     CBlend* B = model->LL_SetInitialPartPose(pid, M, false, 1.0f, 1.0f, 1.0f, false, nullptr, nullptr);
-                    R_ASSERT(B);
+                    if (!B)
+                        continue;
                 }
                 else
                 {
                     CBlend* B = model->PlayCycle(pid, M, bMixIn);
-                    R_ASSERT(B);
+                    if (!B)
+                        continue;
                     B->speed *= speed;
                 }
 
@@ -1387,6 +1417,8 @@ void player_hud::after_detach_item_idx(u16 idx)
 {
     if (idx == 1 && g_player_hud[0]->attached_item())
     {
+        if (!m_model)
+            return;
         u16 part_idR = m_model->partitions().part_id("right_hand");
         u32 bc = m_model->LL_PartBlendsCount(part_idR);
         for (u32 bidx = 0; bidx < bc; ++bidx)
@@ -1403,6 +1435,8 @@ void player_hud::after_detach_item_idx(u16 idx)
                 if (pid != part_idR)
                 {
                     CBlend* B = m_model->PlayCycle(pid, M, TRUE); // this can destroy BR calling UpdateTracks !
+                    if (!B)
+                        continue;
                     if (BR->blend_state() != CBlend::eFREE_SLOT)
                     {
                         u16 bop = B->bone_or_part;

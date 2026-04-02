@@ -47,9 +47,11 @@ IDeviceState* dx11StateCache<IDeviceState, StateDecs>::GetState(StateDecs& desc)
     {
         StateRecord rec;
         rec.m_crc = crc;
+        rec.m_pState = nullptr;
         CreateState(desc, &rec.m_pState);
         pResult = rec.m_pState;
-        m_StateArray.push_back(rec);
+        if (pResult)
+            m_StateArray.push_back(rec);
     }
 
     return pResult;
@@ -63,6 +65,8 @@ IDeviceState* dx11StateCache<IDeviceState, StateDecs>::FindState(const StateDecs
     {
         if (m_StateArray[i].m_crc == StateCRC)
         {
+            if (!m_StateArray[i].m_pState)
+                continue;
             StateDecs descCandidate;
             m_StateArray[i].m_pState->GetDesc(&descCandidate);
             // if ( !memcmp(&descCandidate, &desc, sizeof(desc)) )

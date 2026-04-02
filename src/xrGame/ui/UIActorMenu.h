@@ -125,6 +125,7 @@ protected:
     void PlaySnd(eActorMenuSndAction a);
 
     CInventoryOwner* m_pPartnerInvOwner{};
+    u16 m_partnerInvOwnerNetId{ u16(-1) };
     CInventoryBox* m_pInvBox{};
 
     CTrade* m_actor_trade{};
@@ -332,6 +333,7 @@ protected:
     void TryHidePropertiesBox();
     void ProcessPropertiesBoxClicked(CUIWindow* w, void* d);
 
+    bool EnsureTradePartnerValid();
     void CheckDistance();
     void UpdateItemsPlace();
 

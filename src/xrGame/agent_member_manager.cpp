@@ -59,7 +59,15 @@ void CAgentMemberManager::remove(CEntity* member)
     object().memory().update_memory_mask(m, m_combat_mask);
 
     iterator I = std::find_if(m_members.begin(), m_members.end(), CMemberPredicate(stalker));
-    VERIFY(I != m_members.end());
+    if (I == m_members.end())
+        return;
+    if (!*I)
+    {
+        m_members.erase(I);
+        m_actuality = false;
+        m_combat_members.clear();
+        return;
+    }
     xr_delete(*I);
     m_members.erase(I);
     m_actuality = false;

@@ -25,6 +25,8 @@
 
 #include <SDL.h>
 
+#include <thread>
+
 // refs
 class Task;
 
@@ -182,9 +184,13 @@ public:
     bool m_allowWindowDrag{}; // For windowed mode
     bool IsAnselActive{};
 
+    /** Thread that owns UI / seqFrame (updated each FrameMove). */
+    std::thread::id m_uiThreadId{};
+
     CRenderDevice()
     {
         Timer.Start();
+        m_uiThreadId = std::this_thread::get_id();
 
         m_SecondViewport.SetSVPActive(false);
         m_SecondViewport.SetSVPFrameDelay(2);
@@ -203,6 +209,8 @@ public:
 
     bool BeforeFrame();
     void FrameMove();
+
+    [[nodiscard]] bool IsUiThread() const noexcept { return std::this_thread::get_id() == m_uiThreadId; }
 
     void OnCameraUpdated();
     void DoRender();
@@ -339,6 +347,9 @@ private:
 private:
     DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
+
+using DeferredUIFrameCb = void (*)();
+ENGINE_API void Device_RegisterDeferredUIFrameCb(DeferredUIFrameCb cb);
 
 extern ENGINE_API CRenderDevice Device;
 
