@@ -1656,7 +1656,70 @@ pcstr CInventoryItem::GetUpgrIconPath() const
 bool CInventoryItem::IsNecessaryItem(CInventoryItem* item) { return IsNecessaryItem(item->object().cNameSect()); };
 BOOL CInventoryItem::IsInvalid() const { return object().getDestroy() || GetDropManual(); }
 u16 CInventoryItem::object_id() const { return object().ID(); }
-u16 CInventoryItem::parent_id() const { return (object().H_Parent()) ? object().H_Parent()->ID() : u16(-1); }
+u16 CInventoryItem::parent_id() const
+{
+    // H_Parent() can be stale (UI still holds CUICellItem::m_pData after ownership moved); dereferencing
+    // then causes AV (e.g. read ~0x130). Validate via object registry when possible; SEH on Windows
+    // covers any remaining bad pointer from mods / race.
+#if defined(XR_PLATFORM_WINDOWS)
+    u16 out = u16(-1);
+    __try
+    {
+        if (!m_object)
+            out = u16(-1);
+        else
+        {
+            CGameObject* self = smart_cast<CGameObject*>(m_object);
+            if (!self)
+                out = u16(-1);
+            else if (IGameObject* pr = self->H_Parent())
+            {
+                if (CGameObject* pgo = smart_cast<CGameObject*>(pr))
+                {
+                    out = pgo->ID();
+                    if (g_pGameLevel)
+                    {
+                        if (IGameObject* reg = Level().Objects.net_Find(out); reg != pgo)
+                            out = u16(-1);
+                    }
+                    if (out != u16(-1) && pgo->getDestroy())
+                        out = u16(-1);
+                }
+                else
+                    out = u16(-1);
+            }
+            else
+                out = u16(-1);
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        out = u16(-1);
+    }
+    return out;
+#else
+    if (!m_object)
+        return u16(-1);
+    CGameObject* self = smart_cast<CGameObject*>(m_object);
+    if (!self)
+        return u16(-1);
+    IGameObject* pr = self->H_Parent();
+    if (!pr)
+        return u16(-1);
+    CGameObject* pgo = smart_cast<CGameObject*>(pr);
+    if (!pgo)
+        return u16(-1);
+    const u16 pid = pgo->ID();
+    if (g_pGameLevel)
+    {
+        if (IGameObject* reg = Level().Objects.net_Find(pid); reg != pgo)
+            return u16(-1);
+    }
+    if (pgo->getDestroy())
+        return u16(-1);
+    return pid;
+#endif
+}
 void CInventoryItem::SetDropManual(BOOL val)
 {
     m_flags.set(FdropManual, val);

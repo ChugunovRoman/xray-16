@@ -208,8 +208,11 @@ void CUIActorMenu::DropAllCurrentItem()
         for (u32 i = 0; i < cnt; ++i)
         {
             CUICellItem* itm = current_cell->PopChild(NULL);
+            if (!itm)
+                break;
             PIItem iitm = (PIItem)itm->m_pData;
-            SendEvent_Item_Drop(iitm, m_pActorInvOwner->object_id());
+            if (iitm)
+                SendEvent_Item_Drop(iitm, m_pActorInvOwner->object_id());
         }
 
         SendEvent_Item_Drop(current, m_pActorInvOwner->object_id());

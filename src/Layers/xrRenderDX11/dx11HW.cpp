@@ -119,14 +119,17 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
         createDeviceFlags |= D3D_CREATE_DEVICE_DEBUG;
 #endif
 
-    // EscapeCB / CheckMultiplaneOverlaySupport can run on a driver-internal thread with a small default
-    // stack; deep NV UMD chains then overflow (0xC00000FD) even when the game thread uses a large stack.
-    // This flag reduces D3D/runtime internal threading that can trigger that path.
+    // EscapeCB / CheckMultiplaneOverlaySupport can run on DXGI/driver threads with a small default stack;
+    // deep UMD chains (notably NVIDIA) overflow (0xC00000FD) even when the game exe uses a huge /STACK.
+    // This flag reduces D3D runtime internal threading that triggers that path.
     constexpr u32 kPciVendorNvidia = 0x10DE;
-    if (Caps.id_vendor == kPciVendorNvidia && !strstr(Core.Params, "-d3d11_allow_internal_threads"))
+    if (!strstr(Core.Params, "-d3d11_allow_internal_threads"))
     {
         createDeviceFlags |= D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS;
-        Msg("* D3D11: PREVENT_INTERNAL_THREADING_OPTIMIZATIONS (NVIDIA; -d3d11_allow_internal_threads to disable)");
+        if (Caps.id_vendor == kPciVendorNvidia)
+            Msg("* D3D11: PREVENT_INTERNAL_THREADING_OPTIMIZATIONS (NVIDIA; -d3d11_allow_internal_threads to disable)");
+        else
+            Msg("* D3D11: PREVENT_INTERNAL_THREADING_OPTIMIZATIONS (-d3d11_allow_internal_threads to disable)");
     }
 
     HRESULT R;
@@ -230,14 +233,12 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
 
     _SHOW_REF("* CREATE: DeviceREF:", pDevice);
 
-    // Register immediate context in profiler
+    // Register on the device thread: worker threads often use a small stack; Tracy D3D11 setup touches
+    // the device and can contribute to driver/DXGI re-entrancy issues alongside EscapeCB overflows.
     if (ThisInstanceIsGlobal())
     {
-        TaskScheduler->AddTask([this]
-        {
-            ZoneScopedN("TracyD3D11Context");
-            profiler_ctx = TracyD3D11Context(pDevice, get_context(CHW::IMM_CTX_ID));
-        });
+        ZoneScopedN("TracyD3D11Context");
+        profiler_ctx = TracyD3D11Context(pDevice, get_context(CHW::IMM_CTX_ID));
     }
 
     // Create deferred contexts
@@ -267,8 +268,12 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
     // deep application stack (Release inlining, hooks) that overflows (0xC00000FD). Under the VS debugger the
     // stack is often shallower, so the bug appears only on "normal" launch. Always try legacy
     // IDXGIFactory::CreateSwapChain first unless the user opts into DXGI 1.2 ordering.
+    // NVIDIA: skip CreateSwapChainForHwnd as fallback after failed legacy CreateSwapChain (same EscapeCB path);
+    // use -dxgi_modern_swapchain if your system only works with ForHwnd.
     const bool prefer_modern_dxgi = strstr(Core.Params, "-dxgi_modern_swapchain");
     const bool block_dxgi_1_2 = strstr(Core.Params, "-no_dx11_2") || strstr(Core.Params, "-dxgi_legacy_swapchain");
+    const bool allow_dxgi_1_2_fallback = !block_dxgi_1_2 &&
+        (prefer_modern_dxgi || Caps.id_vendor != kPciVendorNvidia);
 
     bool swap_chain_ok = false;
     bool used_factory_create_swap_chain = false;
@@ -289,7 +294,7 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
             swap_chain_ok = true;
             used_factory_create_swap_chain = true;
         }
-        else if (!block_dxgi_1_2 && CreateSwapChain2(hwnd))
+        else if (allow_dxgi_1_2_fallback && CreateSwapChain2(hwnd))
             swap_chain_ok = true;
     }
 

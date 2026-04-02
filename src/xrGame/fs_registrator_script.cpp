@@ -31,9 +31,15 @@ class FS_file_list
 
 public:
     FS_file_list(xr_vector<pstr>* p) : m_p(p) {}
-    u32 Size() { return m_p->size(); }
-    LPCSTR GetAt(u32 idx) { return m_p->at(idx); }
-    void Free() { FS.file_list_close(m_p); };
+    // file_list_open returns nullptr when the path has no VFS anchor (see LocatorAPI::file_list_open).
+    u32 Size() const { return m_p ? (u32)m_p->size() : 0; }
+    LPCSTR GetAt(u32 idx) const
+    {
+        if (!m_p || idx >= m_p->size())
+            return nullptr;
+        return (*m_p)[idx];
+    }
+    void Free() { FS.file_list_close(m_p); }
 };
 
 struct FS_item
