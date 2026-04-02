@@ -141,31 +141,78 @@ void CUIActorMenu::SendEvent_Item_Eat(PIItem pItem, u16 recipient)
 
 void CUIActorMenu::SendEvent_Item_Drop(PIItem pItem, u16 recipient)
 {
-    R_ASSERT(pItem->parent_id() == recipient);
+    if (!pItem)
+        return;
+
+    u16 parent = u16(-1);
+#if defined(XR_PLATFORM_WINDOWS)
+    __try
+    {
+        parent = pItem->parent_id();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        Msg("! CUIActorMenu::SendEvent_Item_Drop: invalid item pointer, skip");
+        return;
+    }
+#else
+    parent = pItem->parent_id();
+#endif
+
+    if (parent != recipient)
+    {
+#ifndef MASTER_GOLD
+        Msg("! CUIActorMenu::SendEvent_Item_Drop: parent mismatch [%u != %u], skip", parent, recipient);
+#endif
+        return;
+    }
+
     if (!IsGameTypeSingle())
         pItem->DenyTrade();
     // pItem->SetDropManual			(TRUE);
     NET_Packet P;
-    pItem->object().u_EventGen(P, GE_OWNERSHIP_REJECT, pItem->parent_id());
+#if defined(XR_PLATFORM_WINDOWS)
+    __try
+    {
+        pItem->object().u_EventGen(P, GE_OWNERSHIP_REJECT, parent);
+        P.w_u16(pItem->object().ID());
+        pItem->object().u_EventSend(P);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        Msg("! CUIActorMenu::SendEvent_Item_Drop: exception while sending drop event");
+        return;
+    }
+#else
+    pItem->object().u_EventGen(P, GE_OWNERSHIP_REJECT, parent);
     P.w_u16(pItem->object().ID());
     pItem->object().u_EventSend(P);
+#endif
     PlaySnd(eDropItem);
     clear_highlight_lists();
 }
 
 void CUIActorMenu::DropAllCurrentItem()
 {
-    if (CurrentIItem() && !CurrentIItem()->IsQuestItem())
+    PIItem current = CurrentIItem();
+    if (current && !current->IsQuestItem())
     {
-        u32 const cnt = CurrentItem()->ChildsCount();
+        CUICellItem* current_cell = CurrentItem();
+        if (!current_cell)
+        {
+            SetCurrentItem(NULL);
+            return;
+        }
+
+        u32 const cnt = current_cell->ChildsCount();
         for (u32 i = 0; i < cnt; ++i)
         {
-            CUICellItem* itm = CurrentItem()->PopChild(NULL);
+            CUICellItem* itm = current_cell->PopChild(NULL);
             PIItem iitm = (PIItem)itm->m_pData;
             SendEvent_Item_Drop(iitm, m_pActorInvOwner->object_id());
         }
 
-        SendEvent_Item_Drop(CurrentIItem(), m_pActorInvOwner->object_id());
+        SendEvent_Item_Drop(current, m_pActorInvOwner->object_id());
     }
     SetCurrentItem(NULL);
 }
