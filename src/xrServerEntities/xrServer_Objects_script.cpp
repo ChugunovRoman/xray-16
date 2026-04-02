@@ -33,6 +33,19 @@ void report_null_cse_abstract(pcstr api_method)
         xrSentry_CaptureSoftError("xrGame.cse_abstract", msg, stack.empty() ? nullptr : stack.c_str());
     }
 }
+
+void report_dangling_cse_abstract(pcstr api_method)
+{
+    string256 msg;
+    xr_sprintf(msg, "script: %s() on invalid/destroyed cse_abstract (memory access failed)", api_method);
+    Msg("! %s", msg);
+    if (GEnv.ScriptEngine)
+    {
+        xr_string stack;
+        GEnv.ScriptEngine->format_lua_stack(nullptr, stack);
+        xrSentry_CaptureSoftError("xrGame.cse_abstract_dangling", msg, stack.empty() ? nullptr : stack.c_str());
+    }
+}
 } // namespace
 
 pcstr get_section_name(const CSE_Abstract* abstract)
@@ -42,7 +55,19 @@ pcstr get_section_name(const CSE_Abstract* abstract)
         report_null_cse_abstract("section_name");
         return kNullCseAbstractName;
     }
+#if defined(XR_PLATFORM_WINDOWS)
+    __try
+    {
+        return abstract->name();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        report_dangling_cse_abstract("section_name");
+        return kNullCseAbstractName;
+    }
+#else
     return abstract->name();
+#endif
 }
 
 pcstr get_name(const CSE_Abstract* abstract)
@@ -52,7 +77,19 @@ pcstr get_name(const CSE_Abstract* abstract)
         report_null_cse_abstract("name");
         return kNullCseAbstractName;
     }
+#if defined(XR_PLATFORM_WINDOWS)
+    __try
+    {
+        return abstract->name_replace();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        report_dangling_cse_abstract("name");
+        return kNullCseAbstractName;
+    }
+#else
     return abstract->name_replace();
+#endif
 }
 
 CScriptIniFile* get_spawn_ini(CSE_Abstract* abstract)
