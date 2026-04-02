@@ -17,9 +17,6 @@
 
 ENGINE_API CRenderDevice Device;
 
-static DeferredUIFrameCb s_deferredUIFrameCb = nullptr;
-ENGINE_API void Device_RegisterDeferredUIFrameCb(DeferredUIFrameCb cb) { s_deferredUIFrameCb = cb; }
-
 ENGINE_API CLoadScreenRenderer load_screen_renderer;
 
 ENGINE_API bool g_bRendering = false;
@@ -444,8 +441,6 @@ void CRenderDevice::FrameMove()
     ZoneScoped;
 
     m_uiThreadId = std::this_thread::get_id();
-    if (s_deferredUIFrameCb)
-        s_deferredUIFrameCb();
 
     dwFrame++;
     Core.dwFrame = dwFrame;

@@ -145,7 +145,8 @@ void CUIActorMenu::SetMenuMode(EMenuMode mode)
         default: NODEFAULT; break;
         }
 
-        CurrentGameUI()->UIMainIngameWnd->ShowZoneMap(false);
+        if (CUIGameCustom* ui = CurrentGameUI(); ui && ui->UIMainIngameWnd)
+            ui->UIMainIngameWnd->ShowZoneMap(false);
 
         m_currMenuMode = mode;
         switch (mode)
@@ -186,14 +187,16 @@ void CUIActorMenu::Show(bool status)
     {
         SetMenuMode(m_currMenuMode);
         PlaySnd(eSndOpen);
-        m_ActorStateInfo->UpdateActorInfo(m_pActorInvOwner);
+        if (m_ActorStateInfo)
+            m_ActorStateInfo->UpdateActorInfo(m_pActorInvOwner);
     }
     else
     {
         PlaySnd(eSndClose);
         SetMenuMode(mmUndefined);
     }
-    m_ActorStateInfo->Show(status);
+    if (m_ActorStateInfo)
+        m_ActorStateInfo->Show(status);
     m_message_static = nullptr;
 }
 
@@ -218,8 +221,11 @@ void CUIActorMenu::ShowDialog(bool bDoHideIndicators)
 
 void CUIActorMenu::Draw()
 {
-    CurrentGameUI()->UIMainIngameWnd->DrawZoneMap();
-    CurrentGameUI()->UIMainIngameWnd->DrawMainIndicatorsForInventory();
+    if (CUIGameCustom* ui = CurrentGameUI(); ui && ui->UIMainIngameWnd)
+    {
+        ui->UIMainIngameWnd->DrawZoneMap();
+        ui->UIMainIngameWnd->DrawMainIndicatorsForInventory();
+    }
 
     inherited::Draw();
     if (m_ItemInfo)
@@ -281,7 +287,8 @@ void CUIActorMenu::Update()
                 InventoryUtilities::etpTimeToMinutes).c_str());
         }
 
-        CurrentGameUI()->UIMainIngameWnd->UpdateZoneMap();
+        if (CUIGameCustom* ui = CurrentGameUI(); ui && ui->UIMainIngameWnd)
+            ui->UIMainIngameWnd->UpdateZoneMap();
         break;
     }
     case mmTrade:
@@ -302,8 +309,11 @@ void CUIActorMenu::Update()
             m_message_static->Update();
             if (!m_message_static->IsActual())
             {
-                CurrentGameUI()->RemoveCustomStatic("not_enough_money_mine");
-                CurrentGameUI()->RemoveCustomStatic("not_enough_money_other");
+                if (CUIGameCustom* ui = CurrentGameUI())
+                {
+                    ui->RemoveCustomStatic("not_enough_money_mine");
+                    ui->RemoveCustomStatic("not_enough_money_other");
+                }
                 m_message_static = nullptr;
             }
         }
@@ -1274,7 +1284,8 @@ void CUIActorMenu::ShowMessage(pcstr text, pcstr staticMessage /*= nullptr*/, fl
         CallMessageBoxOK(text);
     else if (staticMessage && ShadowOfChernobylMode)
     {
-        m_message_static = CurrentGameUI()->AddCustomStatic(staticMessage, true, staticMsgTtl);
+        if (CUIGameCustom* ui = CurrentGameUI())
+            m_message_static = ui->AddCustomStatic(staticMessage, true, staticMsgTtl);
     }
 }
 

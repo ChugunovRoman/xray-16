@@ -1600,7 +1600,12 @@ ObjectContactCallbackFun* CPHMovementControl::ObjectContactCallback()
     else
         return NULL;
 }
-u16 CPHMovementControl::ContactBone() { return m_character->ContactBone(); }
+u16 CPHMovementControl::ContactBone()
+{
+    if (!m_character)
+        return 0;
+    return m_character->ContactBone();
+}
 const ICollisionDamageInfo* CPHMovementControl::CollisionDamageInfo() const
 {
     VERIFY(m_character);

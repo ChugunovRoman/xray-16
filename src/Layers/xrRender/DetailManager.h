@@ -147,9 +147,6 @@ public:
     DetailVec objects;
     vis_list m_visibles[3]; // 0=still, 1=Wave1, 2=Wave2
 
-#ifndef _EDITOR
-    xrXRC xrc;
-#endif
     //AVO: detail draw radius
     CacheSlot1** cache_level1;
     Slot*** cache; // grid-cache itself

@@ -1441,6 +1441,9 @@ void CPHSimpleCharacter::SetStaticContactCallBack(ContactCallbackFun* callback)
 ObjectContactCallbackFun* CPHSimpleCharacter::ObjectContactCallBack() { return m_object_contact_callback; }
 u16 CPHSimpleCharacter::RetriveContactBone()
 {
+    if (!m_phys_ref_object)
+        return 0;
+
     Fvector dir;
     m_collision_damage_info.HitDir(dir);
     collide::ray_defs Q(m_collision_damage_info.HitPos(), dir, m_radius, CDB::OPT_ONLYNEAREST | CDB::OPT_CULL,
@@ -1450,7 +1453,8 @@ u16 CPHSimpleCharacter::RetriveContactBone()
     //	IGameObject* object		=	smart_cast<IGameObject*>(m_phys_ref_object);
     // VERIFY	(object)	;
     VERIFY(!fis_zero(Q.dir.square_magnitude()));
-    if (inl_ph_world().ObjectSpace().RayQuery(RQR, m_phys_ref_object->ObjectCollisionModel(), Q))
+    ICollisionForm* collision_model = m_phys_ref_object->ObjectCollisionModel();
+    if (collision_model && inl_ph_world().ObjectSpace().RayQuery(RQR, collision_model, Q))
     {
         collide::rq_result* R = RQR.r_begin();
         contact_bone = (u16)R->element;
@@ -1470,7 +1474,11 @@ u16 CPHSimpleCharacter::RetriveContactBone()
     {
         // IKinematics* K=smart_cast<IKinematics*>(m_phys_ref_object->ObjectVisual());
         IKinematics* K = m_phys_ref_object->ObjectKinematics();
+        if (!K)
+            return 0;
         u16 count = K->LL_BoneCount();
+        if (!count)
+            return 0;
         CBoneInstance* bone_instances = &K->LL_GetBoneInstance(0);
         Fvector pos_in_object;
         pos_in_object.sub(m_collision_damage_info.HitPos(),

@@ -124,7 +124,8 @@ IC int CObjectFactory::script_clsid(const CLASS_ID& clsid) const
 
 inline CObjectFactory::ClientObjectBaseClass* CObjectFactory::client_object(const CLASS_ID& clsid) const
 {
-    return (item(clsid).client_object());
+    const CObjectItemAbstract* const o = item(clsid, true);
+    return o ? o->client_object() : nullptr;
 }
 
 inline CObjectFactory::ServerObjectBaseClass* CObjectFactory::server_object(const CLASS_ID& clsid, LPCSTR section) const

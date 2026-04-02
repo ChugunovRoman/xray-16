@@ -455,17 +455,9 @@ void CLevel::OnFrame()
     {
         if (IsGameTypeSingle() && ai().get_alife())
             ai().alife().update_positions_only();
-        if (g_mt_config.test(mtMap))
-        {
-            R_ASSERT(m_map_manager);
-            if (GEnv.Render->GetBackendAPI() == IRender::BackendAPI::OpenGL)
-                m_map_manager->Update();
-            else
-                Device.seqParallel.push_back(
-                    fastdelegate::FastDelegate0<>(m_map_manager, &CMapManager::Update));
-        }
-        else
-            MapManager().Update();
+        // CMapManager::Update may destroy CMapSpot (CUIWindow) — must not run on seqParallel/worker
+        // (~CUIWindow detaches from UI hierarchy; off-main-thread caused crashes / inconsistent UI state).
+        MapManager().Update();
         if (IsGameTypeSingle() && Device.dwPrecacheFrame == 0)
         {
             // XXX nitrocaster: was enabled in x-ray 1.5; to be restored or removed

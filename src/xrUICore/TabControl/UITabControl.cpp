@@ -181,6 +181,17 @@ void CUITabControl::OnTabChange(const shared_str& sCur, const shared_str& sPrev)
 
     if (CUIWindow* tgt = GetParent())
         tgt->SendMessage(this, TAB_CHANGED, NULL);
+
+    // Script dialogs (CUIDialogWndEx) register the tab with Register(tab, "tab") so
+    // GetMessageTarget() is the root dialog; AddCallback matches pWnd to the tab control.
+    // Parent is often an intermediate static (e.g. main_dialog:dialog), so TAB_CHANGED
+    // must also be sent to the message target or Lua OnTabChange never runs and tab
+    // panels stay hidden.
+    if (CUIWindow* msg_tgt = GetMessageTarget())
+    {
+        if (msg_tgt != GetParent())
+            msg_tgt->SendMessage(this, TAB_CHANGED, NULL);
+    }
 }
 
 int CUITabControl::GetActiveIndex() const

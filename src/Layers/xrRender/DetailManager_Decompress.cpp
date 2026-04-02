@@ -2,6 +2,7 @@
 #pragma hdrstop
 #include "DetailManager.h"
 #include "xrCDB/Intersect.hpp"
+#include "xrCDB/xrXRC.h"
 #include "xrMaterialSystem/GameMtlLib.h"
 
 #ifdef DEBUG
@@ -74,6 +75,8 @@ bool det_render_debug = false;
 void CDetailManager::cache_Decompress(Slot* S)
 {
     VERIFY(S);
+    // Per-call collider: cache_Decompress runs on several worker threads; shared member xrc would race on COLLIDER::rd.
+    xrXRC query_xrc("detail_decompress");
     Slot& D = *S;
     D.type = stReady;
     if (D.empty)
@@ -85,8 +88,8 @@ void CDetailManager::cache_Decompress(Slot* S)
     Fvector bC, bD;
     D.vis.box.get_CD(bC, bD);
 
-    xrc.box_query(CDB::OPT_FULL_TEST, g_pGameLevel->ObjectSpace.GetStaticModel(), bC, bD);
-    const auto triCount = xrc.r_count();
+    query_xrc.box_query(CDB::OPT_FULL_TEST, g_pGameLevel->ObjectSpace.GetStaticModel(), bC, bD);
+    const auto triCount = query_xrc.r_count();
     CDB::TRI* tris = g_pGameLevel->ObjectSpace.GetStaticTris();
     Fvector* verts = g_pGameLevel->ObjectSpace.GetStaticVerts();
 
@@ -195,7 +198,7 @@ void CDetailManager::cache_Decompress(Slot* S)
             float r_u, r_v, r_range;
             for (size_t tid = 0; tid < triCount; tid++)
             {
-                CDB::TRI& T = tris[xrc.r_begin()[tid].id];
+                CDB::TRI& T = tris[query_xrc.r_begin()[tid].id];
                 SGameMtl* mtl = GMLib.GetMaterialByIdx(T.material);
                 if (mtl->Flags.test(SGameMtl::flPassable))
                     continue;

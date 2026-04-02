@@ -3,26 +3,7 @@
 #include "UIWindow.h"
 
 #include "Cursor/UICursor.h"
-#include "xrCore/Threading/Lock.hpp"
-#include "xrCore/Threading/ScopeLock.hpp"
-#include "xrEngine/device.h"
 #include "xrEngine/editor_helper.h"
-
-#include <utility>
-
-namespace
-{
-Lock s_deferredDetachLock;
-xr_vector<std::pair<CUIWindow*, CUIWindow*>> s_deferredDetaches;
-
-struct RegisterDeferredDetachCb
-{
-    RegisterDeferredDetachCb()
-    {
-        Device_RegisterDeferredUIFrameCb(&CUIWindow::ProcessDeferredDetachQueueForDeviceFrame);
-    }
-} s_registerDeferredDetachCb;
-} // namespace
 
 void CUIWindow::DetachChildImpl(CUIWindow* self, CUIWindow* pChild)
 {
@@ -49,20 +30,6 @@ void CUIWindow::DetachChildImpl(CUIWindow* self, CUIWindow* pChild)
 
     if (pChild->IsAutoDelete())
         xr_delete(pChild);
-}
-
-void CUIWindow::ProcessDeferredDetachQueueForDeviceFrame()
-{
-    xr_vector<std::pair<CUIWindow*, CUIWindow*>> batch;
-    {
-        ScopeLock guard(&s_deferredDetachLock);
-        batch.swap(s_deferredDetaches);
-    }
-    for (auto& pr : batch)
-    {
-        if (pr.first && pr.second)
-            DetachChildImpl(pr.first, pr.second);
-    }
 }
 
 CUIWindow::CUIWindow(pcstr window_name) : m_windowName(window_name)
@@ -152,14 +119,6 @@ void CUIWindow::DetachChild(CUIWindow* pChild)
     R_ASSERT(pChild);
     if (NULL == pChild)
         return;
-
-    // ALife / seqParallel runs Lua on worker threads; UI hierarchy is main-thread only.
-    if (!Device.IsUiThread())
-    {
-        ScopeLock guard(&s_deferredDetachLock);
-        s_deferredDetaches.emplace_back(this, pChild);
-        return;
-    }
 
     DetachChildImpl(this, pChild);
 }

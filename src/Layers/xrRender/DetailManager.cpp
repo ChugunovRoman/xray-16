@@ -87,7 +87,7 @@ void CDetailManager::SSwingValue::lerp(const SSwingValue& A, const SSwingValue& 
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 // XXX stats: add to statistics
-CDetailManager::CDetailManager() : xrc("detail manager")
+CDetailManager::CDetailManager()
 {
     ZoneScoped;
 

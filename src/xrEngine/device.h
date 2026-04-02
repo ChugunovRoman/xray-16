@@ -348,9 +348,6 @@ private:
     DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 
-using DeferredUIFrameCb = void (*)();
-ENGINE_API void Device_RegisterDeferredUIFrameCb(DeferredUIFrameCb cb);
-
 extern ENGINE_API CRenderDevice Device;
 
 extern ENGINE_API bool g_bBenchmark;

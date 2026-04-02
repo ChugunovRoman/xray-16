@@ -146,9 +146,6 @@ public:
     virtual void DetachChild(CUIWindow* pChild);
     virtual void DetachAll();
 
-    /** Registered on CRenderDevice::FrameMove; runs DetachChild work queued from non-UI threads. */
-    static void ProcessDeferredDetachQueueForDeviceFrame();
-
     [[nodiscard]]
     virtual bool IsChild(CUIWindow* pPossibleChild) const;
 
