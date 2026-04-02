@@ -98,7 +98,16 @@ void CUIWindow::DetachChild(CUIWindow* pChild)
 
     //.	SafeRemoveChild			(pChild);
     auto it = std::find(m_ChildWndList.begin(), m_ChildWndList.end(), pChild);
-    R_ASSERT(it != m_ChildWndList.end());
+    if (it == m_ChildWndList.end())
+    {
+        // Can happen on repeated detach from shutdown/destructor chains.
+        // Keep it non-fatal to avoid crashing on quit.
+        Msg("! CUIWindow::DetachChild: child is not attached [parent:%s child:%s]",
+            m_windowName.c_str(), pChild->WindowName());
+        if (pChild->GetParent() == this)
+            pChild->SetParent(nullptr);
+        return;
+    }
     m_ChildWndList.erase(it);
 
     pChild->SetParent(NULL);
