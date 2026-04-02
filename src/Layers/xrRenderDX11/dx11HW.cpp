@@ -460,6 +460,8 @@ bool CHW::ThisInstanceIsGlobal() const
 
 void CHW::DestroyDevice()
 {
+    const bool is_quit_requested = SDL_QuitRequested();
+
     if (ThisInstanceIsGlobal()) // only if we are global HW
     {
         RSManager.ClearStateArray();
@@ -467,6 +469,17 @@ void CHW::DestroyDevice()
         BSManager.ClearStateArray();
         SSManager.ClearStateArray();
     }
+
+    // Some drivers keep DXGI watchdog/background activity alive during app quit.
+    // Releasing swapchain/device at this stage can race with that teardown and
+    // crash in dxgi (FullscreenWatchdogThreadWorker). On process exit it's safe
+    // to skip deep COM cleanup and let OS reclaim resources.
+    if (is_quit_requested)
+    {
+        Msg("* DX11: skipping deep DXGI teardown on quit");
+        return;
+    }
+
     //  Must switch to windowed mode to release swap chain
     if (!m_ChainDesc.Windowed && m_pSwapChain)
         m_pSwapChain->SetFullscreenState(FALSE, NULL);
