@@ -103,7 +103,7 @@ void CUIWindow::DetachChild(CUIWindow* pChild)
         // Can happen on repeated detach from shutdown/destructor chains.
         // Keep it non-fatal to avoid crashing on quit.
         Msg("! CUIWindow::DetachChild: child is not attached [parent:%s child:%s]",
-            m_windowName.c_str(), pChild->WindowName());
+            m_windowName.c_str(), pChild->WindowName().c_str());
         if (pChild->GetParent() == this)
             pChild->SetParent(nullptr);
         return;
