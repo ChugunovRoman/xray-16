@@ -13,7 +13,9 @@
 #include "xrEngine/IGame_Persistent.h"
 #include "xrScriptEngine/script_engine.hpp"
 #include "xrCore/xrDebug.h"
+#ifndef LUABIND_NO_EXCEPTIONS
 #include "luabind/error.hpp"
+#endif
 #include "MainMenu.h"
 #include "object_factory.h"
 #include "alife_object_registry.h"
@@ -59,6 +61,7 @@ CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
     LPCSTR start_game_callback = pSettings->r_string(alife_section, "start_game_callback");
     luabind::functor<void> functor;
     R_ASSERT2(GEnv.ScriptEngine->functor(start_game_callback, functor), "failed to get start game callback");
+#ifndef LUABIND_NO_EXCEPTIONS
     try
     {
         functor(isNewGame);
@@ -77,6 +80,9 @@ CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
         GEnv.ScriptEngine->print_stack();
         xrDebug::Fatal(DEBUG_INFO, "Exception in [alife] start_game_callback [%s]: %s", start_game_callback, e.what());
     }
+#else
+    functor(isNewGame);
+#endif
 
     load(p.m_game_or_spawn, !xr_strcmp(p.m_new_or_load, "load") ? false : true, !xr_strcmp(p.m_new_or_load, "new"));
 }
