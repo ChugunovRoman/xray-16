@@ -59,6 +59,10 @@ void actor::revert_states(doors_type& doors, door_state const state)
 //Alundaio: add the ability to get lua game object
 CScriptGameObject* actor::lua_game_object() const
 {
+    // During teardown (e.g. ~stalker_movement_manager_obstacles after net_Destroy),
+    // the stalker is no longer spawned; door::change_state must not call CGameObject::lua_game_object().
+    if (!m_object.is_spawned())
+        return nullptr;
     return m_object.lua_game_object();
 }
 //Alundaio: END
