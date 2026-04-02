@@ -28,6 +28,7 @@
 #include "client_spawn_manager.h"
 #include "memory_manager.h"
 #include "ai/monsters/basemonster/base_monster.h"
+#include "xrServerEntities/smart_cast.h"
 
 #ifndef MASTER_GOLD
 #include "Actor.h"
@@ -595,7 +596,14 @@ struct CVisibleObjectPredicateEx
             return (!visible_object.m_object);
         if (!visible_object.m_object)
             return (false);
-        return (m_object->ID() == visible_object.m_object->ID());
+        // visible_object.m_object may be stale; object_id() uses SEH on Windows for bad pointers.
+        const u16 vis_id = object_id(visible_object.m_object);
+        if (vis_id == u16(-1))
+            return false;
+        const CGameObject* go = smart_cast<const CGameObject*>(m_object);
+        if (!go)
+            return false;
+        return go->ID() == vis_id;
     }
 
     bool operator()(const MemorySpace::CNotYetVisibleObject& not_yet_visible_object) const
@@ -604,7 +612,13 @@ struct CVisibleObjectPredicateEx
             return (!not_yet_visible_object.m_object);
         if (!not_yet_visible_object.m_object)
             return (false);
-        return (m_object->ID() == not_yet_visible_object.m_object->ID());
+        const u16 vis_id = object_id(not_yet_visible_object.m_object);
+        if (vis_id == u16(-1))
+            return false;
+        const CGameObject* go = smart_cast<const CGameObject*>(m_object);
+        if (!go)
+            return false;
+        return go->ID() == vis_id;
     }
 };
 
