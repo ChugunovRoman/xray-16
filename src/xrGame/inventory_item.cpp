@@ -1656,6 +1656,11 @@ pcstr CInventoryItem::GetUpgrIconPath() const
 bool CInventoryItem::IsNecessaryItem(CInventoryItem* item) { return IsNecessaryItem(item->object().cNameSect()); };
 BOOL CInventoryItem::IsInvalid() const { return object().getDestroy() || GetDropManual(); }
 u16 CInventoryItem::object_id() const { return object().ID(); }
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+// Keep a real stack frame so SEH in this body and in UI callers reliably bounds hardware faults
+// on stale PIItem / bad H_Parent (inlining into SendEvent_Item_Drop broke __try coverage in some builds).
+__declspec(noinline)
+#endif
 u16 CInventoryItem::parent_id() const
 {
     // H_Parent() can be stale (UI still holds CUICellItem::m_pData after ownership moved); dereferencing

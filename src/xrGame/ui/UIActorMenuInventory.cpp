@@ -41,6 +41,21 @@
 
 void move_item_from_to(u16 from_id, u16 to_id, u16 what_id);
 
+#if defined(XR_PLATFORM_WINDOWS)
+namespace
+{
+// Separate function: __try must not span C++ objects that unwind (C2712). Isolates parent_id AV
+// when CUICellItem::m_pData is stale (vtable/member read ~0x130) even if parent_id is noinline.
+u16 ui_actor_menu_safe_parent_id(PIItem item)
+{
+    if (!item)
+        return u16(-1);
+    __try { return item->parent_id(); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return u16(-1); }
+}
+} // namespace
+#endif
+
 void CUIActorMenu::InitInventoryMode()
 {
     ShowIfExist(m_pInventoryWnd, true);
@@ -144,19 +159,10 @@ void CUIActorMenu::SendEvent_Item_Drop(PIItem pItem, u16 recipient)
     if (!pItem)
         return;
 
-    u16 parent = u16(-1);
 #if defined(XR_PLATFORM_WINDOWS)
-    __try
-    {
-        parent = pItem->parent_id();
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER)
-    {
-        Msg("! CUIActorMenu::SendEvent_Item_Drop: invalid item pointer, skip");
-        return;
-    }
+    const u16 parent = ui_actor_menu_safe_parent_id(pItem);
 #else
-    parent = pItem->parent_id();
+    const u16 parent = pItem->parent_id();
 #endif
 
     if (parent != recipient)

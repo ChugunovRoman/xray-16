@@ -210,6 +210,8 @@ void CEatableItemObject::PlayCamAnim(LPCSTR name)
 
 bool CEatableItemObject::UseBy()
 {
+    if (!Parent)
+        return false;
     CInventoryOwner* m_pOwner = Parent->cast_inventory_owner();
     if (!m_pOwner)
         return false;
@@ -293,6 +295,9 @@ void CEatableItemObject::RemoveItemIfNecessaryOrMoveToRuck()
         SetDropManual(true);
     }
 
+    if (!Parent)
+        return;
+
     CInventoryOwner* m_pOwner = Parent->cast_inventory_owner();
     if (!m_pOwner)
         return;
@@ -337,6 +342,8 @@ void CEatableItemObject::OnAnimationEnd(u32 state)
 
 void CEatableItemObject::OnActiveItem()
 {
+    if (!Parent)
+        return;
     CInventoryOwner* m_pOwner = Parent->cast_inventory_owner();
     if (!m_pOwner)
         return;

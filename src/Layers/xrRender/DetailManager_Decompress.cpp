@@ -75,6 +75,10 @@ bool det_render_debug = false;
 void CDetailManager::cache_Decompress(Slot* S)
 {
     VERIFY(S);
+#ifndef _EDITOR
+    if (!g_pGameLevel)
+        return;
+#endif
     // Per-call collider: cache_Decompress runs on several worker threads; shared member xrc would race on COLLIDER::rd.
     xrXRC query_xrc("detail_decompress");
     Slot& D = *S;

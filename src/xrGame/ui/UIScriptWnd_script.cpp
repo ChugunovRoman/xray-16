@@ -1,6 +1,7 @@
 #include "pch_script.h"
 
 #include "UIScriptWnd.h"
+#include "xrScriptEngine/script_callback_ex.h"
 
 #include "xrUICore/ListWnd/UIListWnd.h"
 #include "xrUICore/TabControl/UITabControl.h"
@@ -43,7 +44,19 @@ struct CUIDialogWndExWrapperBase final : public CUIDialogWndEx, public luabind::
 
     bool OnKeyboardAction(int dik, EUIMessages keyboard_action) override
     {
-        return luabind::call_member<bool>(this, "OnKeyboard", dik, keyboard_action);
+        try
+        {
+            try
+            {
+                return luabind::call_member<bool>(this, "OnKeyboard", dik, keyboard_action);
+            }
+            process_error catch (const std::exception&)
+            {
+                GEnv.ScriptEngine->print_output(GEnv.ScriptEngine->lua(), "", 1);
+            }
+        }
+        catch (...) {}
+        return inherited::OnKeyboardAction(dik, keyboard_action);
     }
 
     static bool OnKeyboard_static(inherited* ptr, int dik, EUIMessages keyboard_action)
@@ -53,7 +66,20 @@ struct CUIDialogWndExWrapperBase final : public CUIDialogWndEx, public luabind::
 
     void Update() override
     {
-        luabind::call_member<void>(this, "Update");
+        try
+        {
+            try
+            {
+                luabind::call_member<void>(this, "Update");
+                return;
+            }
+            process_error catch (const std::exception&)
+            {
+                GEnv.ScriptEngine->print_output(GEnv.ScriptEngine->lua(), "", 1);
+            }
+        }
+        catch (...) {}
+        inherited::Update();
     }
 
     static void Update_static(inherited* ptr)
@@ -63,7 +89,19 @@ struct CUIDialogWndExWrapperBase final : public CUIDialogWndEx, public luabind::
 
     bool Dispatch(int cmd, int param) override
     {
-        return luabind::call_member<bool>(this, "Dispatch", cmd, param);
+        try
+        {
+            try
+            {
+                return luabind::call_member<bool>(this, "Dispatch", cmd, param);
+            }
+            process_error catch (const std::exception&)
+            {
+                GEnv.ScriptEngine->print_output(GEnv.ScriptEngine->lua(), "", 1);
+            }
+        }
+        catch (...) {}
+        return inherited::Dispatch(cmd, param);
     }
 
     static bool Dispatch_static(inherited* ptr, int cmd, int param)
@@ -73,8 +111,19 @@ struct CUIDialogWndExWrapperBase final : public CUIDialogWndEx, public luabind::
 
     bool NeedCursor() const override
     {
-        if (luabind::call_member<bool>(this, "NeedCursor"))
-            return true;
+        try
+        {
+            try
+            {
+                if (luabind::call_member<bool>(this, "NeedCursor"))
+                    return true;
+            }
+            process_error catch (const std::exception&)
+            {
+                GEnv.ScriptEngine->print_output(GEnv.ScriptEngine->lua(), "", 1);
+            }
+        }
+        catch (...) {}
         return inherited::NeedCursor();
     }
 

@@ -468,16 +468,19 @@ void CUIHudStatesWnd::UpdateActiveItemInfo(CActor* actor)
 
 void CUIHudStatesWnd::SetAmmoIcon(const shared_str& sect_name)
 {
-    R_ASSERT2(pSettings->line_exist(sect_name, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", sect_name.c_str()));
+    if (!sect_name.size() || !pSettings->line_exist(sect_name, "inv_icon"))
+    {
+#ifndef MASTER_GOLD
+        if (sect_name.size())
+            Msg("! [HUD] SetAmmoIcon: section [%s] has no [inv_icon], hiding weapon ammo icon", sect_name.c_str());
+#endif
+        m_ui_weapon_icon->Show(false);
+        return;
+    }
 
     m_ui_weapon_icon->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(sect_name, "inv_icon")));
     m_ui_weapon_icon_rect = m_ui_weapon_icon->GetWndRect();
 
-    if (!sect_name.size())
-    {
-        m_ui_weapon_icon->Show(false);
-        return;
-    }
     m_ui_weapon_icon->Show(true);
 
     Frect texture_rect;

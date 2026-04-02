@@ -407,7 +407,8 @@ void CDetailManager::Render(CBackend& cmd_list)
 
     ZoneScoped;
 
-    TaskScheduler->Wait(*m_calc_task);
+    if (m_calc_task)
+        TaskScheduler->Wait(*m_calc_task);
 
     RImplementation.BasicStats.DetailRender.Begin();
     g_pGamePersistent->m_pGShaderConstants->m_blender_mode.w = 1.0f; //--#SM+#-- Флаг начала рендера травы [begin of grass render]
@@ -433,6 +434,12 @@ void CDetailManager::Render(CBackend& cmd_list)
 
 void CDetailManager::DispatchMTCalc()
 {
+    // Only one detail-cache task may run at a time: cache_Update/cache_Decompress mutate
+    // CDetailManager (cache_task, slots). Overlapping tasks corrupt heap and crash inside
+    // COLLIDER::r_add / vector growth even though each cache_Decompress uses a local xrXRC.
+    if (m_calc_task)
+        TaskScheduler->Wait(*m_calc_task);
+
     m_calc_task = &TaskScheduler->AddTask([this]
     {
 #ifndef _EDITOR

@@ -15,7 +15,12 @@ protected:
 
 public:
     IC CMemberPredicate(const CAI_Stalker* object) { m_object = object; }
-    IC bool operator()(const CMemberOrder* order) const { return (&order->object() == m_object); }
+    IC bool operator()(const CMemberOrder* order) const
+    {
+        if (!order || !order->m_object)
+            return false;
+        return (order->m_object == m_object);
+    }
 };
 
 IC CAgentMemberManager::CAgentMemberManager(CAgentManager* object) : m_last_throw_time(0), m_throw_time_interval(0)
@@ -45,6 +50,8 @@ IC MemorySpace::squad_mask_type CAgentMemberManager::mask(const CAI_Stalker* obj
 {
     const_iterator I = std::find_if(members().begin(), members().end(), CMemberPredicate(object));
     VERIFY(I != members().end());
+    if (I == members().end())
+        return 0;
     return (MemorySpace::squad_mask_type(1) << (I - members().begin()));
 }
 

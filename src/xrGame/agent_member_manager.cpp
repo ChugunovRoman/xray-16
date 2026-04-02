@@ -24,7 +24,12 @@ protected:
 
 public:
     IC CMemberPredicate2(const ALife::_OBJECT_ID& object_id) { m_object_id = object_id; }
-    IC bool operator()(const CMemberOrder* order) const { return (order->object().ID() == m_object_id); }
+    IC bool operator()(const CMemberOrder* order) const
+    {
+        if (!order || !order->m_object)
+            return false;
+        return (order->object().ID() == m_object_id);
+    }
 };
 
 CAgentMemberManager::~CAgentMemberManager() { delete_data(m_members); }
@@ -51,13 +56,6 @@ void CAgentMemberManager::remove(CEntity* member)
     if (!stalker)
         return;
 
-    if (registered_in_combat(stalker))
-        unregister_in_combat(stalker);
-
-    squad_mask_type m = mask(stalker);
-    object().memory().update_memory_masks(m);
-    object().memory().update_memory_mask(m, m_combat_mask);
-
     iterator I = std::find_if(m_members.begin(), m_members.end(), CMemberPredicate(stalker));
     if (I == m_members.end())
         return;
@@ -68,6 +66,14 @@ void CAgentMemberManager::remove(CEntity* member)
         m_combat_members.clear();
         return;
     }
+
+    if (registered_in_combat(stalker))
+        unregister_in_combat(stalker);
+
+    squad_mask_type m = mask(stalker);
+    object().memory().update_memory_masks(m);
+    object().memory().update_memory_mask(m, m_combat_mask);
+
     xr_delete(*I);
     m_members.erase(I);
     m_actuality = false;
@@ -81,6 +87,8 @@ void CAgentMemberManager::remove_links(IGameObject* object)
     MEMBER_STORAGE::iterator E = m_members.end();
     for (; I != E; ++I)
     {
+        if (!*I)
+            continue;
         if ((*I)->grenade_reaction().m_grenade)
         {
             const CGameObject* explosive = smart_cast<const CGameObject*>((*I)->grenade_reaction().m_grenade);
@@ -177,6 +185,8 @@ CAgentMemberManager::squad_mask_type CAgentMemberManager::non_combat_members_mas
     MEMBER_STORAGE::const_iterator E = members().end();
     for (; I != E; ++I)
     {
+        if (!*I || !(*I)->m_object)
+            continue;
         if (!registered_in_combat(&(*I)->object()))
             result |= mask(&(*I)->object());
     }
@@ -190,8 +200,10 @@ u32 CAgentMemberManager::in_detour() const
     MEMBER_STORAGE::const_iterator I = members().begin();
     MEMBER_STORAGE::const_iterator E = members().end();
     for (; I != E; ++I)
-        if ((*I)->detour())
+    {
+        if (*I && (*I)->detour())
             ++in_detour;
+    }
 
     return (in_detour);
 }
@@ -207,8 +219,10 @@ bool CAgentMemberManager::cover_detouring() const
     MEMBER_STORAGE::const_iterator I = members().begin();
     MEMBER_STORAGE::const_iterator E = members().end();
     for (; I != E; ++I)
-        if ((*I)->detour())
+    {
+        if (*I && (*I)->detour())
             return (true);
+    }
     return (false);
 }
 
@@ -218,6 +232,8 @@ bool CAgentMemberManager::can_cry_noninfo_phrase() const
     MEMBER_STORAGE::const_iterator E = members().end();
     for (; I != E; ++I)
     {
+        if (!*I || !(*I)->m_object)
+            continue;
         if (!registered_in_combat(&(*I)->object()))
             continue;
 
@@ -232,6 +248,8 @@ MemorySpace::squad_mask_type CAgentMemberManager::mask(const ALife::_OBJECT_ID& 
 {
     const_iterator I = std::find_if(members().begin(), members().end(), CMemberPredicate2(object_id));
     VERIFY(I != members().end());
+    if (I == members().end())
+        return 0;
     return (MemorySpace::squad_mask_type(1) << (I - members().begin()));
 }
 
@@ -256,6 +274,8 @@ bool CAgentMemberManager::can_throw_grenade(const Fvector& location) const
     MEMBER_STORAGE::const_iterator E = members().end();
     for (; I != E; ++I)
     {
+        if (!*I || !(*I)->m_object)
+            continue;
         if ((*I)->object().Position().distance_to_sqr(location) <= member_danger_radius_sqr)
             return (false);
 
