@@ -567,15 +567,15 @@ void CUIActorMenu::QuickUnloadWeapons()
         if (!m_wpn->bUseAttachmentSystem && g_quick_unload_scopes && m_wpn->ScopeAttachable() && m_wpn->IsScopeAttached())
             DetachAddon(m_wpn->GetScopeName().c_str(), item);
 
-        if (g_quick_unload_gl && m_wpn->GrenadeLauncherAttachable() && m_wpn->IsGrenadeLauncherAttached())
+        if (!m_wpn->bUseAttachmentSystem && g_quick_unload_gl && m_wpn->GrenadeLauncherAttachable() && m_wpn->IsGrenadeLauncherAttached())
             DetachAddon(m_wpn->GetGrenadeLauncherName().c_str(), item);
 
-        if (g_quick_unload_silencers && m_wpn->SilencerAttachable() && m_wpn->IsSilencerAttached())
+        if (!m_wpn->bUseAttachmentSystem && g_quick_unload_silencers && m_wpn->SilencerAttachable() && m_wpn->IsSilencerAttached())
             DetachAddon(m_wpn->GetSilencerName().c_str(), item);
 
         if (m_wpn->bUseAttachmentSystem && m_wpn->m_addon_items.size() > 0)
             for (auto [addon_id, addon]: m_wpn->m_addon_items)
-                if (!m_wpn->IsAddonCanBeDetached(addon))
+                if (m_wpn->IsAddonCanBeDetached(addon))
                     DetachAddon(addon_id, item);
 
         any_wpn_was_unloaded = true;

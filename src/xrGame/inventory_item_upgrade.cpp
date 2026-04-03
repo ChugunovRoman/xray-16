@@ -273,9 +273,9 @@ void CInventoryItem::pre_install_upgrade()
     {
         if (!weapon->bUseAttachmentSystem && weapon->ScopeAttachable() && weapon->IsScopeAttached())
             weapon->Detach(weapon->GetScopeName().c_str(), true);
-        if (weapon->SilencerAttachable() && weapon->IsSilencerAttached())
+        if (!weapon->bUseAttachmentSystem && weapon->SilencerAttachable() && weapon->IsSilencerAttached())
             weapon->Detach(weapon->GetSilencerName().c_str(), true);
-        if (weapon->GrenadeLauncherAttachable() && weapon->IsGrenadeLauncherAttached())
+        if (!weapon->bUseAttachmentSystem && weapon->GrenadeLauncherAttachable() && weapon->IsGrenadeLauncherAttached())
             weapon->Detach(weapon->GetGrenadeLauncherName().c_str(), true);
 
         if (weapon->bUseAttachmentSystem)
