@@ -39,6 +39,9 @@ const ui_shader& GetBuyMenuShader();
 const ui_shader& GetEquipmentIconShader(pcstr filepath);
 // $user$ / render-target texture name (no ui\ prefix)
 const ui_shader& GetInstanceRtIconShader(pcstr texture_resource_name);
+// После WeaponIcon_ReleaseUserIconRt / ReleaseAll: IUIShader в кэше ссылается на освобождённый RT — сбросить запись.
+void DropCachedRtIconShaderForUserTexture(pcstr texture_resource_name);
+void DropAllCachedRtIconShaders();
     // shader на иконки персонажей в мультиплеере
 const ui_shader& GetMPCharIconsShader();
 //удаляем все шейдеры

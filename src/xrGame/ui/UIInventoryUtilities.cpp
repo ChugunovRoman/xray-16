@@ -235,6 +235,29 @@ const ui_shader& InventoryUtilities::GetEquipmentIconShader(pcstr filepath)
     return *shader;
 }
 
+void InventoryUtilities::DropCachedRtIconShaderForUserTexture(pcstr texture_resource_name)
+{
+    if (!texture_resource_name || !texture_resource_name[0])
+        return;
+    std::lock_guard<std::mutex> lock(mtx);
+    string512 key_buf;
+    xr_sprintf(key_buf, "rt:%s", texture_resource_name);
+    g_EquipmentIconShaderMap.erase(shared_str(key_buf));
+}
+
+void InventoryUtilities::DropAllCachedRtIconShaders()
+{
+    std::lock_guard<std::mutex> lock(mtx);
+    for (auto it = g_EquipmentIconShaderMap.begin(); it != g_EquipmentIconShaderMap.end();)
+    {
+        const shared_str& k = it->first;
+        if (k.size() >= 3 && k.c_str()[0] == 'r' && k.c_str()[1] == 't' && k.c_str()[2] == ':')
+            it = g_EquipmentIconShaderMap.erase(it);
+        else
+            ++it;
+    }
+}
+
 const ui_shader& InventoryUtilities::GetInstanceRtIconShader(pcstr texture_resource_name)
 {
     std::lock_guard<std::mutex> lock(mtx);

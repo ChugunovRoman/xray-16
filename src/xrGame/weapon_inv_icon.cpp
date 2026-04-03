@@ -459,6 +459,7 @@ void OnItemDestroyed(CInventoryItem* item)
         {
             const shared_str tex = TextureResourceName(item, (EWeaponInvIconPreset)pi);
             GEnv.Render->WeaponIcon_ReleaseUserIconRt(tex.c_str());
+            InventoryUtilities::DropCachedRtIconShaderForUserTexture(tex.c_str());
         }
     }
     auto it = std::find(g_pending.begin(), g_pending.end(), item);
@@ -753,6 +754,7 @@ u32 InvIconRtEpoch() { return g_inv_icon_rt_epoch; }
 
 void OnWeaponIconUserRtsReleased()
 {
+    InventoryUtilities::DropAllCachedRtIconShaders();
     g_section_inv_icon_presets_ready.clear();
     ++g_inv_icon_rt_epoch;
 }
@@ -761,6 +763,9 @@ void HotReloadInvIconSettings()
 {
     if (GEnv.Render && !GEnv.isDedicatedServer)
         GEnv.Render->WeaponIcon_ReleaseAllUserIconRts();
+
+    // Иначе TryApplySectionInvIconCache пометит пресеты готовыми при пустых RT; UI оставит старые IUIShader из кэша.
+    OnWeaponIconUserRtsReleased();
 
     g_pending.clear();
 
@@ -924,6 +929,7 @@ void BakeCurrentActorWeaponInvIconToDds()
                 section.c_str(), PresetSuffix(preset), tw, th, rel);
         }
         GEnv.Render->WeaponIcon_ReleaseUserIconRt(tex.c_str());
+        InventoryUtilities::DropCachedRtIconShaderForUserTexture(tex.c_str());
     }
 
     Msg("~ [weapon_inv_icon] bake_current: section=[%s] done=%u/%u result=%s",
@@ -1050,6 +1056,7 @@ void BakeDynamicInvIconsToDds(pcstr single_section_or_null)
                     sec_name, PresetSuffix(preset), tw, th, rel);
             }
             GEnv.Render->WeaponIcon_ReleaseUserIconRt(tex.c_str());
+            InventoryUtilities::DropCachedRtIconShaderForUserTexture(tex.c_str());
         }
 
         if (ok_both)
