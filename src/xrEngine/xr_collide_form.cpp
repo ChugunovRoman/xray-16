@@ -36,6 +36,7 @@ void CCF_Skeleton::SElement::center(Fvector& center) const
 
 bool CCF_Skeleton::_ElementCenter(u16 elem_id, Fvector& e_center)
 {
+    std::lock_guard<std::mutex> guard(m_skeletonQueryCS);
     const auto it = std::lower_bound(elements.begin(), elements.end(), elem_id, [](const SElement& E, u16 elem)
     {
         return E.elem_id < elem;
@@ -205,6 +206,8 @@ bool CCF_Skeleton::_RayQuery(const collide::ray_defs& Q, collide::rq_results& R)
 {
     ZoneScoped;
 
+    std::lock_guard<std::mutex> guard(m_skeletonQueryCS);
+
     if (dwFrameTL != Device.dwFrame)
         BuildTopLevel();
 
@@ -225,7 +228,7 @@ bool CCF_Skeleton::_RayQuery(const collide::ray_defs& Q, collide::rq_results& R)
     else
     {
         IKinematics* K = PKinematics(owner->Visual());
-        if (K->LL_GetBonesVisible() != vis_mask)
+        if (K && K->LL_GetBonesVisible() != vis_mask)
         {
             // Model changed between ray-picks
             dwFrame = Device.dwFrame - 1;

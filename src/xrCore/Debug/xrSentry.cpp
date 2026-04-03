@@ -244,10 +244,38 @@ void XRCORE_API xrSentry_CaptureSoftError(pcstr logger, pcstr message, pcstr lua
     sentry_capture_event(event);
 }
 
+void XRCORE_API xrSentry_CaptureIniRStringError(pcstr ini_path, pcstr section, pcstr key)
+{
+    if (!s_xr_sentry_started)
+        return;
+
+    char message[768];
+    xr_sprintf(message, sizeof(message), "Can't find variable %s in [%s]", key ? key : "?", section ? section : "?");
+
+    sentry_value_t event = sentry_value_new_message_event(SENTRY_LEVEL_ERROR, "xrCore.Inifile", message);
+
+    sentry_value_t tags = sentry_value_new_object();
+    sentry_value_set_by_key(tags, "inifile_error", sentry_value_new_string("r_string"));
+    sentry_value_set_by_key(event, "tags", tags);
+
+    sentry_value_t extra = sentry_value_new_object();
+    if (ini_path && *ini_path)
+        sentry_value_set_by_key(extra, "ini_file", sentry_value_new_string(ini_path));
+    if (section && *section)
+        sentry_value_set_by_key(extra, "section", sentry_value_new_string(section));
+    if (key && *key)
+        sentry_value_set_by_key(extra, "key", sentry_value_new_string(key));
+    sentry_value_set_by_key(event, "extra", extra);
+
+    sentry_event_value_add_stacktrace(event, nullptr, 0);
+    sentry_capture_event(event);
+}
+
 #else // !USE_SENTRY
 
 void xrSentry_Initialize(pcstr /*commandLine*/) {}
 void xrSentry_Shutdown() {}
 void XRCORE_API xrSentry_CaptureSoftError(pcstr /*logger*/, pcstr /*message*/, pcstr /*lua_stack*/) {}
+void XRCORE_API xrSentry_CaptureIniRStringError(pcstr /*ini_path*/, pcstr /*section*/, pcstr /*key*/) {}
 
 #endif // USE_SENTRY

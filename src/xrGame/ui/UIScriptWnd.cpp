@@ -19,10 +19,26 @@ void CUIDialogWndEx::SendMessage(CUIWindow* pWnd, s16 msg, void* pData)
     if (it == m_callbacks.end())
         return inherited::SendMessage(pWnd, msg, pData);
 
-    (*it)->m_callback();
+    SCallbackInfo* cb = *it;
+    // CScriptCallbackEx catches C++ / luabind errors; ACCESS_VIOLATION_EXEC (JIT/stale functor) is SEH only.
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+    bool seh_in_callback = false;
+    __try { cb->m_callback(); }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        seh_in_callback = true;
+#ifndef MASTER_GOLD
+        Msg("! CUIDialogWndEx::SendMessage: SEH in script callback [%s] msg=%d", cb->m_control_name.c_str(), (int)msg);
+#endif
+    }
+    if (seh_in_callback)
+        cb->m_callback.clear();
+#else
+    cb->m_callback();
+#endif
 
-    //	if ( (*it)->m_cpp_callback )
-    //		(*it)->m_cpp_callback(pData);
+    //	if ( cb->m_cpp_callback )
+    //		cb->m_cpp_callback(pData);
 }
 
 bool CUIDialogWndEx::Load(pcstr /*xml_name*/) { return true; }

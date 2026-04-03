@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility>
+
 #include "xrCore/ModuleLookup.hpp"
 
 #include "Layers/xrRender/HWCaps.h"
@@ -51,6 +53,11 @@ public:
 private:
     bool CreateSwapChain(HWND hwnd);
     bool CreateSwapChain2(HWND hwnd);
+    // { swap_chain_ok, used_IDXGIFactory_CreateSwapChain }
+    std::pair<bool, bool> CreatePrimarySwapChains(HWND hwnd);
+#if defined(_WIN32)
+    static unsigned __stdcall SwapChainThreadProc(void* param);
+#endif
 
     bool ThisInstanceIsGlobal() const;
 

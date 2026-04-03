@@ -2,6 +2,8 @@
 #ifndef __XR_COLLIDE_FORM_H__
 #define __XR_COLLIDE_FORM_H__
 
+#include <mutex>
+
 #include "xrCDB/xr_collide_defs.h"
 #include "xrCore/_obb.h"
 #include "xrCore/_cylinder.h"
@@ -149,6 +151,8 @@ public:
 private:
     u64 vis_mask;
     ElementVec elements;
+    // RayQuery (e.g. AI on seqParallel worker) vs another thread in _RayQuery/BuildState on same object — data race on elements.
+    mutable std::mutex m_skeletonQueryCS;
 
     u32 dwFrame; // The model itself
     u32 dwFrameTL; // Top level
@@ -165,6 +169,7 @@ public:
 #ifdef DEBUG
     void _dbg_refresh()
     {
+        std::lock_guard<std::mutex> guard(m_skeletonQueryCS);
         BuildTopLevel();
         BuildState();
     }

@@ -32,7 +32,23 @@ XRGAME_API IFactoryObject* __cdecl xrFactory_Create(CLASS_ID clsid)
     if (!object)
         return nullptr;
     // XXX nitrocaster XRFACTORY: set clsid during factory initialization
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+    __try
+    {
+        object->GetClassId() = clsid;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+#ifndef MASTER_GOLD
+        Msg("! xrFactory_Create: SEH while setting class id (clsid=%llu); factory returned bad pointer — check spawn/UI scripts",
+            static_cast<unsigned long long>(clsid));
+#endif
+        // Do not xr_delete(object): vtable may be invalid and would fault again.
+        return nullptr;
+    }
+#else
     object->GetClassId() = clsid;
+#endif
     return object;
 }
 

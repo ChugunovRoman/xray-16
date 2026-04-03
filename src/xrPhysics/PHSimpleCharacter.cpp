@@ -1441,7 +1441,10 @@ void CPHSimpleCharacter::SetStaticContactCallBack(ContactCallbackFun* callback)
 ObjectContactCallbackFun* CPHSimpleCharacter::ObjectContactCallBack() { return m_object_contact_callback; }
 u16 CPHSimpleCharacter::RetriveContactBone()
 {
-    if (!m_phys_ref_object)
+    if (!m_phys_ref_object || m_phys_ref_object->ObjectGetDestroy())
+        return 0;
+
+    if (!ph_world)
         return 0;
 
     Fvector dir;
@@ -1452,9 +1455,11 @@ u16 CPHSimpleCharacter::RetriveContactBone()
     u16 contact_bone = 0;
     //	IGameObject* object		=	smart_cast<IGameObject*>(m_phys_ref_object);
     // VERIFY	(object)	;
-    VERIFY(!fis_zero(Q.dir.square_magnitude()));
+    if (fis_zero(Q.dir.square_magnitude()))
+        return 0;
+
     ICollisionForm* collision_model = m_phys_ref_object->ObjectCollisionModel();
-    if (collision_model && inl_ph_world().ObjectSpace().RayQuery(RQR, collision_model, Q))
+    if (collision_model && inl_ph_world().ObjectSpace().RayQuery(RQR, collision_model, Q) && RQR.r_count() > 0)
     {
         collide::rq_result* R = RQR.r_begin();
         contact_bone = (u16)R->element;

@@ -697,11 +697,14 @@ bool CAI_Stalker::net_Spawn(CSE_Abstract* DC)
         movement().m_body.target.yaw = angle_normalize_signed(-tpHuman->o_torso.yaw);
     movement().m_body.current.pitch = movement().m_body.target.pitch = 0;
 
-    if (ai().game_graph().valid_vertex_id(tpHuman->m_tGraphID))
-        ai_location().game_vertex(tpHuman->m_tGraphID);
+    if (ai().get_game_graph())
+    {
+        if (ai().game_graph().valid_vertex_id(tpHuman->m_tGraphID))
+            ai_location().game_vertex(tpHuman->m_tGraphID);
 
-    if (ai().game_graph().valid_vertex_id(tpHuman->m_tNextGraphID))
-        movement().set_game_dest_vertex(tpHuman->m_tNextGraphID);
+        if (ai().game_graph().valid_vertex_id(tpHuman->m_tNextGraphID))
+            movement().set_game_dest_vertex(tpHuman->m_tNextGraphID);
+    }
 
     R_ASSERT2(ai().get_game_graph() && ai().get_level_graph() && ai().get_cross_table() &&
             (ai().level_graph().level_id() != u32(-1)),
@@ -841,7 +844,7 @@ void CAI_Stalker::net_Export(NET_Packet& P)
     P.w(&l_game_vertex_id, sizeof(l_game_vertex_id));
     //	P.w						(&f1,						sizeof(f1));
     //	P.w						(&f1,						sizeof(f1));
-    if (ai().game_graph().valid_vertex_id(l_game_vertex_id))
+    if (ai().get_game_graph() && ai().game_graph().valid_vertex_id(l_game_vertex_id))
     {
         f1 = Position().distance_to(ai().game_graph().vertex(l_game_vertex_id)->level_point());
         P.w(&f1, sizeof(f1));

@@ -107,6 +107,11 @@ IC _vertex_id_type CPathManagerTemplate::dest_vertex_id() const { return (m_dest
 TEMPLATE_SPECIALIZATION
 IC void CPathManagerTemplate::set_dest_vertex(const _vertex_id_type vertex_id)
 {
+    if (!m_graph)
+    {
+        m_actuality = false;
+        return;
+    }
     R_ASSERT2(check_vertex(vertex_id),
         make_string("Invalid vertex id [%llu]", static_cast<unsigned long long>(vertex_id)));
     m_actuality = m_actuality && (dest_vertex_id() == vertex_id);
@@ -127,7 +132,7 @@ IC void CPathManagerTemplate::after_search() {}
 TEMPLATE_SPECIALIZATION
 IC bool CPathManagerTemplate::check_vertex(const _vertex_id_type vertex_id) const
 {
-    return (m_graph->valid_vertex_id(vertex_id));
+    return (m_graph && m_graph->valid_vertex_id(vertex_id));
 }
 
 TEMPLATE_SPECIALIZATION

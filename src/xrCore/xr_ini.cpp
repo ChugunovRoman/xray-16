@@ -1,5 +1,6 @@
 #include "stdafx.h"
 
+#include "Debug/xrSentry.hpp"
 #include "FileSystem.h"
 #include "xrCore/xr_token.h"
 
@@ -785,6 +786,7 @@ pcstr CInifile::r_string(pcstr S, pcstr L) const
     if (A != I.Data.cend() && xr_strcmp(A->first.c_str(), L) == 0)
         return A->second.c_str();
 
+    xrSentry_CaptureIniRStringError(fname(), S, L);
     xrDebug::Fatal(DEBUG_INFO, "Can't find variable %s in [%s]", L, S);
     return nullptr;
 }

@@ -4,6 +4,8 @@
 
 #include "base_client_classes_wrappers.h"
 
+#include <memory>
+
 LPCSTR get_file_age_str(CLocatorAPI* fs, LPCSTR nm);
 CLocatorAPI* getFS() { return &FS; }
 LPCSTR update_path_script(CLocatorAPI* fs, LPCSTR initial, LPCSTR src)
@@ -25,21 +27,33 @@ void rescan_path_script(CLocatorAPI* fs, pcstr initial)
 }
 //-Alundaio
 
+namespace
+{
+void fs_file_list_release(xr_vector<pstr>* lst)
+{
+    if (!lst)
+        return;
+    xr_vector<pstr>* tmp = lst;
+    FS.file_list_close(tmp);
+}
+} // namespace
+
+// Lua/luabind copies FS_file_list by value; raw m_p duplicates led to double-free / use-after-free on Size().
 class FS_file_list
 {
-    xr_vector<pstr>* m_p;
+    std::shared_ptr<xr_vector<pstr>> m_data;
 
 public:
-    FS_file_list(xr_vector<pstr>* p) : m_p(p) {}
+    explicit FS_file_list(xr_vector<pstr>* p) : m_data(p, fs_file_list_release) {}
     // file_list_open returns nullptr when the path has no VFS anchor (see LocatorAPI::file_list_open).
-    u32 Size() const { return m_p ? (u32)m_p->size() : 0; }
+    u32 Size() const { return m_data ? (u32)m_data->size() : 0; }
     LPCSTR GetAt(u32 idx) const
     {
-        if (!m_p || idx >= m_p->size())
+        if (!m_data || idx >= m_data->size())
             return nullptr;
-        return (*m_p)[idx];
+        return (*m_data)[idx];
     }
-    void Free() { FS.file_list_close(m_p); }
+    void Free() { m_data.reset(); }
 };
 
 struct FS_item

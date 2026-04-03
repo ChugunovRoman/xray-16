@@ -889,7 +889,7 @@ bool CCustomMonster::net_Spawn(CSE_Abstract* DC)
         // DEAD",Device.dwTimeGlobal,ID(),*cName(),*cNameSect());
     }
 
-    if (ai().get_level_graph() && UsedAI_Locations() && (e->ID_Parent == 0xffff))
+    if (ai().get_level_graph() && ai().get_game_graph() && UsedAI_Locations() && (e->ID_Parent == 0xffff))
     {
         if (ai().game_graph().valid_vertex_id(E->m_tGraphID))
             ai_location().game_vertex(E->m_tGraphID);

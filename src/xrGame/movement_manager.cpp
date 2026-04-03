@@ -94,9 +94,10 @@ void CMovementManager::reinit()
     m_build_at_once = false;
 
     enable_movement(true);
-    game_selector().reinit(&ai().game_graph());
+    CGameGraph* game_graph = ai().get_game_graph();
+    game_selector().reinit(game_graph);
     detail().reinit();
-    game_path().reinit(&ai().game_graph());
+    game_path().reinit(game_graph);
     level_path().reinit(ai().get_level_graph());
     patrol().reinit();
 

@@ -7,8 +7,32 @@
 
 #include <SDL_syswm.h>
 
+#if defined(_WIN32)
+#include <process.h>
+#endif
+
 namespace xray::render::RENDER_NAMESPACE
 {
+namespace
+{
+#if defined(_WIN32)
+struct SwapChainThreadData
+{
+    CHW* self{};
+    HWND hwnd{};
+    std::pair<bool, bool> out{};
+};
+#endif
+} // namespace
+
+#if defined(_WIN32)
+unsigned __stdcall CHW::SwapChainThreadProc(void* param)
+{
+    auto* d = static_cast<SwapChainThreadData*>(param);
+    d->out = d->self->CreatePrimarySwapChains(d->hwnd);
+    return 0;
+}
+#endif
 CHW HW;
 
 CHW::CHW()
@@ -264,38 +288,51 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
 
     const HWND hwnd = info.info.win.window;
 
-    // CreateSwapChainForHwnd (DXGI 1.2+) drives D3DKMT_CheckMultiplaneOverlaySupport3 → EscapeCB → UMD; with a
-    // deep application stack (Release inlining, hooks) that overflows (0xC00000FD). Under the VS debugger the
-    // stack is often shallower, so the bug appears only on "normal" launch. Always try legacy
-    // IDXGIFactory::CreateSwapChain first unless the user opts into DXGI 1.2 ordering.
-    // NVIDIA: skip CreateSwapChainForHwnd as fallback after failed legacy CreateSwapChain (same EscapeCB path);
-    // use -dxgi_modern_swapchain if your system only works with ForHwnd.
-    const bool prefer_modern_dxgi = strstr(Core.Params, "-dxgi_modern_swapchain");
-    const bool block_dxgi_1_2 = strstr(Core.Params, "-no_dx11_2") || strstr(Core.Params, "-dxgi_legacy_swapchain");
-    const bool allow_dxgi_1_2_fallback = !block_dxgi_1_2 &&
-        (prefer_modern_dxgi || Caps.id_vendor != kPciVendorNvidia);
-
     bool swap_chain_ok = false;
     bool used_factory_create_swap_chain = false;
-    if (prefer_modern_dxgi && !block_dxgi_1_2)
+
+    // EscapeCB runs with driver + DXGI frames on top of *our* calling thread's stack. Main exe may use /STACK:32M,
+    // but CreateDevice is still deep (SDL, caps, Tracy, deferred contexts). Run swap chain creation on a fresh
+    // thread with a large reserved stack so the entry frame is shallow (mitigates 0xC00000FD in nvwgf2umx).
+    constexpr u32 kPciVendorNvidiaSwap = 0x10DE;
+    const bool use_swapchain_big_stack_thread =
+#if defined(_WIN32)
+        (Caps.id_vendor == kPciVendorNvidiaSwap) || strstr(Core.Params, "-dxgi_swapchain_big_stack");
+#else
+        false;
+#endif
+
+#if defined(_WIN32)
+    if (use_swapchain_big_stack_thread)
     {
-        if (CreateSwapChain2(hwnd))
-            swap_chain_ok = true;
-        else if (CreateSwapChain(hwnd))
+        SwapChainThreadData data{};
+        data.self = this;
+        data.hwnd = hwnd;
+        constexpr unsigned kSwapChainThreadStack = 16u * 1024u * 1024u;
+        const uintptr_t th = _beginthreadex(nullptr, kSwapChainThreadStack, &CHW::SwapChainThreadProc, &data, 0, nullptr);
+        if (th)
         {
-            swap_chain_ok = true;
-            used_factory_create_swap_chain = true;
+            WaitForSingleObject(reinterpret_cast<HANDLE>(th), INFINITE);
+            CloseHandle(reinterpret_cast<HANDLE>(th));
+            swap_chain_ok = data.out.first;
+            used_factory_create_swap_chain = data.out.second;
+            Msg("* DXGI: swap chain init on auxiliary thread (%u MiB stack; NVIDIA or -dxgi_swapchain_big_stack)",
+                kSwapChainThreadStack / (1024u * 1024u));
+        }
+        else
+        {
+            Msg("! DXGI: _beginthreadex failed for swap chain init, using inline path");
+            const auto p = CreatePrimarySwapChains(hwnd);
+            swap_chain_ok = p.first;
+            used_factory_create_swap_chain = p.second;
         }
     }
     else
+#endif
     {
-        if (CreateSwapChain(hwnd))
-        {
-            swap_chain_ok = true;
-            used_factory_create_swap_chain = true;
-        }
-        else if (allow_dxgi_1_2_fallback && CreateSwapChain2(hwnd))
-            swap_chain_ok = true;
+        const auto p = CreatePrimarySwapChains(hwnd);
+        swap_chain_ok = p.first;
+        used_factory_create_swap_chain = p.second;
     }
 
     if (!swap_chain_ok)
@@ -324,6 +361,43 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
 
     const auto memory = Desc.DedicatedVideoMemory;
     Msg("*   Texture memory: %d M", memory / (1024 * 1024));
+}
+
+std::pair<bool, bool> CHW::CreatePrimarySwapChains(HWND hwnd)
+{
+    // CreateSwapChainForHwnd (DXGI 1.2+) drives D3DKMT_CheckMultiplaneOverlaySupport3 → EscapeCB → UMD; with a
+    // deep application stack that overflows (0xC00000FD). Prefer legacy IDXGIFactory::CreateSwapChain first
+    // unless the user opts into DXGI 1.2 ordering. NVIDIA: skip ForHwnd as fallback (same EscapeCB path);
+    // use -dxgi_modern_swapchain if your system only works with ForHwnd.
+    constexpr u32 kPciVendorNvidia = 0x10DE;
+    const bool prefer_modern_dxgi = strstr(Core.Params, "-dxgi_modern_swapchain");
+    const bool block_dxgi_1_2 = strstr(Core.Params, "-no_dx11_2") || strstr(Core.Params, "-dxgi_legacy_swapchain");
+    const bool allow_dxgi_1_2_fallback =
+        !block_dxgi_1_2 && (prefer_modern_dxgi || Caps.id_vendor != kPciVendorNvidia);
+
+    bool swap_chain_ok = false;
+    bool used_factory_create_swap_chain = false;
+    if (prefer_modern_dxgi && !block_dxgi_1_2)
+    {
+        if (CreateSwapChain2(hwnd))
+            swap_chain_ok = true;
+        else if (CreateSwapChain(hwnd))
+        {
+            swap_chain_ok = true;
+            used_factory_create_swap_chain = true;
+        }
+    }
+    else
+    {
+        if (CreateSwapChain(hwnd))
+        {
+            swap_chain_ok = true;
+            used_factory_create_swap_chain = true;
+        }
+        else if (allow_dxgi_1_2_fallback && CreateSwapChain2(hwnd))
+            swap_chain_ok = true;
+    }
+    return {swap_chain_ok, used_factory_create_swap_chain};
 }
 
 bool CHW::CreateSwapChain(HWND hwnd)
