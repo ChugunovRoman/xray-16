@@ -593,24 +593,25 @@ void CRenderTarget::phase_combine()
         float _w = float(Device.dwWidth);
         float _h = float(Device.dwHeight);
 
+        // Half-texel UVs (same convention as phase_pp USE_OGL branch in r2_rendertarget_phase_PP.cpp):
+        // linear 1:1 blit with 0..1 UVs blurs; align sample centers to texel centers.
+        const float tw = float(rt_final_scene ? rt_final_scene->dwWidth : Device.dwWidth);
+        const float th = float(rt_final_scene ? rt_final_scene->dwHeight : Device.dwHeight);
+        const float tc_u0 = 0.5f / tw;
+        const float tc_v0 = 0.5f / th;
+        const float tc_u1 = (tw + 0.5f) / tw;
+        const float tc_v1 = (th + 0.5f) / th;
+
         float du = 0.0f, dv = 0.0f;
         TL_2c3uv* pv = (TL_2c3uv*)RImplementation.Vertex.Lock(4, g_postprocess.stride(), Offset);
-
-        // lower-left
-        pv->set(du + 0,        dv + 0,        0xffffffff, 0xffffffff,
-                0.0f, 0.0f,    0.0f, 0.0f,    0.0f, 0.0f);
+        // Vertex order matches phase_pp OpenGL path (bottom-left, top-left, bottom-right, top-right in clip space)
+        pv->set(du + 0, dv + 0, 0xffffffff, 0xffffffff, tc_u0, tc_v0, 0.0f, 0.0f, 0.0f, 0.0f);
         pv++;
-        // upper-left
-        pv->set(du + 0,        dv + _h,       0xffffffff, 0xffffffff,
-                0.0f, 1.0f,    0.0f, 1.0f,    0.0f, 1.0f);
+        pv->set(du + 0, dv + _h, 0xffffffff, 0xffffffff, tc_u0, tc_v1, 0.0f, 0.0f, 0.0f, 0.0f);
         pv++;
-        // lower-right
-        pv->set(du + _w,       dv + 0,        0xffffffff, 0xffffffff,
-                1.0f, 0.0f,    1.0f, 0.0f,    1.0f, 0.0f);
+        pv->set(du + _w, dv + 0, 0xffffffff, 0xffffffff, tc_u1, tc_v0, 0.0f, 0.0f, 0.0f, 0.0f);
         pv++;
-        // upper-right
-        pv->set(du + _w,       dv + _h,       0xffffffff, 0xffffffff,
-                1.0f, 1.0f,    1.0f, 1.0f,    1.0f, 1.0f);
+        pv->set(du + _w, dv + _h, 0xffffffff, 0xffffffff, tc_u1, tc_v1, 0.0f, 0.0f, 0.0f, 0.0f);
         pv++;
 
         RImplementation.Vertex.Unlock(4, g_postprocess.stride());

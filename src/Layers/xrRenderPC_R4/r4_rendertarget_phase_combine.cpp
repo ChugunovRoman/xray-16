@@ -55,11 +55,9 @@ void setup_hud_overlay_constants(CBackend& cmd_list, SPass* pass)
         };
         Fmatrix xf_project;
         xf_project.mul(m_TexelAdjust, fuckingsun->X.D[cascade_ind].combine);
-        Fmatrix m_shadow;
-        m_shadow.mul(xf_project, Device.mInvView);
-        cmd_list.set_c("m_shadow", m_shadow);
-        // r3 hud_shadow.h uses m_hud_shadow to avoid redefinition with r3 shadow.h
-        cmd_list.set_c("m_hud_shadow", m_shadow);
+        Fmatrix hud_shadow_mtx;
+        hud_shadow_mtx.mul(xf_project, Device.mInvView);
+        cmd_list.set_c("m_hud_shadow", hud_shadow_mtx);
     }
 }
 
@@ -552,16 +550,24 @@ void CRenderTarget::phase_combine()
         float _w = float(Device.dwWidth);
         float _h = float(Device.dwHeight);
 
+        // Half-texel UVs (same as phase_pp): linear filter is identity for 1:1 blit; 0..1 UVs blur the frame.
+        const float tw = float(rt_final_scene ? rt_final_scene->dwWidth : Device.dwWidth);
+        const float th = float(rt_final_scene ? rt_final_scene->dwHeight : Device.dwHeight);
+        const float tc_u0 = 0.5f / tw;
+        const float tc_v0 = 0.5f / th;
+        const float tc_u1 = (tw + 0.5f) / tw;
+        const float tc_v1 = (th + 0.5f) / th;
+
         float du = 0.0f, dv = 0.0f;
         TL_2c3uv* pv = (TL_2c3uv*)RImplementation.Vertex.Lock(4, g_postprocess.stride(), Offset);
         // DX11 vertex order: bottom-left, top-left, bottom-right, top-right (matches phase_pp)
-        pv->set(du + 0, dv + _h, 0xffffffff, 0xffffffff, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+        pv->set(du + 0, dv + _h, 0xffffffff, 0xffffffff, tc_u0, tc_v1, 0.0f, 0.0f, 0.0f, 0.0f);
         pv++;
-        pv->set(du + 0, dv + 0, 0xffffffff, 0xffffffff, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f);
+        pv->set(du + 0, dv + 0, 0xffffffff, 0xffffffff, tc_u0, tc_v0, 0.0f, 0.0f, 0.0f, 0.0f);
         pv++;
-        pv->set(du + _w, dv + _h, 0xffffffff, 0xffffffff, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f);
+        pv->set(du + _w, dv + _h, 0xffffffff, 0xffffffff, tc_u1, tc_v1, 0.0f, 0.0f, 0.0f, 0.0f);
         pv++;
-        pv->set(du + _w, dv + 0, 0xffffffff, 0xffffffff, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+        pv->set(du + _w, dv + 0, 0xffffffff, 0xffffffff, tc_u1, tc_v0, 0.0f, 0.0f, 0.0f, 0.0f);
         pv++;
 
         RImplementation.Vertex.Unlock(4, g_postprocess.stride());
