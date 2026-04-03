@@ -3,6 +3,27 @@
 #include "Common/object_broker.h"
 #include "xrUICore/Callbacks/callback_info.h"
 
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+namespace
+{
+// C2712: __try cannot share a function with STL/callback unwinding (e.g. std::find_if in SendMessage).
+IC bool ui_dialog_script_callback_seh(CScriptCallbackEx<void>* fn)
+{
+    if (!fn)
+        return false;
+    __try
+    {
+        (*fn)();
+        return false;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return true;
+    }
+}
+} // namespace
+#endif
+
 CUIDialogWndEx::CUIDialogWndEx() : CUIDialogWnd("CUIDialogWndEx") {}
 CUIDialogWndEx::~CUIDialogWndEx() { delete_data(m_callbacks); }
 
@@ -22,17 +43,13 @@ void CUIDialogWndEx::SendMessage(CUIWindow* pWnd, s16 msg, void* pData)
     SCallbackInfo* cb = *it;
     // CScriptCallbackEx catches C++ / luabind errors; ACCESS_VIOLATION_EXEC (JIT/stale functor) is SEH only.
 #if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
-    bool seh_in_callback = false;
-    __try { cb->m_callback(); }
-    __except (EXCEPTION_EXECUTE_HANDLER)
+    if (ui_dialog_script_callback_seh(&cb->m_callback))
     {
-        seh_in_callback = true;
 #ifndef MASTER_GOLD
         Msg("! CUIDialogWndEx::SendMessage: SEH in script callback [%s] msg=%d", cb->m_control_name.c_str(), (int)msg);
 #endif
-    }
-    if (seh_in_callback)
         cb->m_callback.clear();
+    }
 #else
     cb->m_callback();
 #endif
