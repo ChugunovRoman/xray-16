@@ -418,13 +418,30 @@ void IReader::r_string(xr_string& dest)
 }
 void IReader::r_stringZ(char* dest, size_t tgt_sz)
 {
+    if (!dest || tgt_sz == 0)
+        return;
+
+    if (!data || Pos > Size)
+    {
+#ifndef MASTER_GOLD
+        Msg("! IReader::r_stringZ: invalid reader (data=%p Pos=%zu Size=%zu)", data, Pos, Size);
+#endif
+        dest[0] = 0;
+        return;
+    }
+
     char* src = (char*)data;
-    size_t sz = xr_strlen(src);
-    R_ASSERT2(sz < tgt_sz, "Dest string less than needed.");
+    // Length from current position (xr_strlen(data) was wrong and could scan the whole mapping).
+    size_t max_len = 0;
+    while (Pos + max_len < Size && src[Pos + max_len] != 0)
+        ++max_len;
+    R_ASSERT2(max_len < tgt_sz, "Dest string less than needed.");
+
     while ((src[Pos] != 0) && (!eof()))
         *dest++ = src[Pos++];
     *dest = 0;
-    Pos++;
+    if (Pos < Size)
+        ++Pos;
 }
 void IReader::r_stringZ(shared_str& dest)
 {

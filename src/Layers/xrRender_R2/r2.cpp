@@ -680,6 +680,8 @@ void CRender::model_Delete(IRenderVisual*& V, bool bDiscard)
 
 IRender_DetailModel* CRender::model_CreateDM(IReader* F)
 {
+    if (!F)
+        return nullptr;
     CDetail* D = xr_new<CDetail>();
     D->Load(F);
     return D;

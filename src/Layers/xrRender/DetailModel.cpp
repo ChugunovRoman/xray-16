@@ -83,6 +83,14 @@ void CDetail::transfer(Fmatrix& mXform, fvfVertexOut* vDest, u32 C, u16* iDest, 
 
 void CDetail::Load(IReader* S)
 {
+    if (!S)
+    {
+#ifndef MASTER_GOLD
+        Msg("! CDetail::Load: null reader (missing dm file or r_open failed?)");
+#endif
+        return;
+    }
+
     // Shader
     string256 fnT, fnS;
     S->r_stringZ(fnS, sizeof(fnS));

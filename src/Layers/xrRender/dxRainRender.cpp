@@ -6,6 +6,16 @@
 
 namespace xray::render::RENDER_NAMESPACE
 {
+namespace
+{
+Fsphere rain_drop_bounds_fallback()
+{
+    Fsphere s;
+    s.identity();
+    return s;
+}
+} // namespace
+
 //	Warning: duplicated in rain.cpp
 static const int max_desired_items = 2500;
 static const float source_radius = 12.5f;
@@ -27,9 +37,14 @@ const float particles_time = .3f;
 dxRainRender::dxRainRender()
 {
     IReader* F = FS.r_open("$game_meshes$", "dm" DELIMITER "rain.dm");
-    VERIFY3(F, "Can't open file.", "dm" DELIMITER "rain.dm");
-
-    DM_Drop = RImplementation.model_CreateDM(F);
+    if (!F)
+    {
+        Msg("! Rain: cannot open [%s] — place dm\\rain.dm under $game_meshes$ (see gamedata/meshes)",
+            "dm" DELIMITER "rain.dm");
+        DM_Drop = nullptr;
+    }
+    else
+        DM_Drop = RImplementation.model_CreateDM(F);
 
     //
     SH_Rain.create("effects" DELIMITER "rain", "fx" DELIMITER "fx_rain");
@@ -204,6 +219,8 @@ void dxRainRender::Render(CEffect_Rain& owner)
     CEffect_Rain::Particle* P = owner.particle_active;
     if (nullptr == P)
         return;
+    if (!DM_Drop)
+        return;
 
     {
         float dt = Device.fTimeDelta;
@@ -280,5 +297,11 @@ void dxRainRender::Render(CEffect_Rain& owner)
     }
 }
 
-const Fsphere& dxRainRender::GetDropBounds() const { return DM_Drop->bv_sphere; }
+const Fsphere& dxRainRender::GetDropBounds() const
+{
+    static const Fsphere s_fallback = rain_drop_bounds_fallback();
+    if (!DM_Drop)
+        return s_fallback;
+    return DM_Drop->bv_sphere;
+}
 } // namespace xray::render::RENDER_NAMESPACE
