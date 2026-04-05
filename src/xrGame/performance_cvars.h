@@ -18,6 +18,7 @@ extern u32 npc_perf_planner_actuality_interval_near_idle_ms;
 extern u32 npc_perf_planner_graph_search_max_nodes;
 
 // GameObject script binder (GameObject.cpp)
+extern int npc_perf_skip_script_net_relcase; // 1 = do not call scriptBinder.net_Relcase (O(N*M) broadcast); 0 = vanilla
 extern u32 npc_perf_long_dead_skip_binder_ms;
 extern float npc_perf_binder_far_dist;
 extern u32 npc_perf_binder_far_interval_ms;

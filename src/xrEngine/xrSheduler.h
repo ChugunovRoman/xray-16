@@ -81,3 +81,6 @@ public:
         return stats.Update;
     }
 };
+
+// Console: scheduler_max_steps_per_frame — max shedule_Update calls per ProcessStep per frame (0 = unlimited).
+ENGINE_API extern int ps_scheduler_max_steps_per_frame;

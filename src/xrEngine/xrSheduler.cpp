@@ -12,6 +12,9 @@ float psShedulerTarget = 10.f;
 const float psShedulerReaction = 0.1f;
 bool isSheduleInProgress = false;
 
+// Spread scheduler load: cap how many normal-priority shedule_Update calls run per frame (0 = vanilla, no cap).
+ENGINE_API int ps_scheduler_max_steps_per_frame = 512;
+
 //-------------------------------------------------------------------------------------
 void CSheduler::Initialize()
 {
@@ -60,6 +63,7 @@ void CSheduler::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
 
 void CSheduler::internal_Registration()
 {
+    ZoneScopedN("CSheduler::internal_Registration");
     for (u32 it = 0; it < Registration.size(); it++)
     {
         ItemReg& R = Registration[it];
@@ -317,10 +321,13 @@ void CSheduler::Pop()
 
 void CSheduler::ProcessStep()
 {
-    ZoneScoped;
+    ZoneScopedN("CSheduler::ProcessStep");
+    // shedule_Update is not parallelized: objects touch shared state and Register/Unregister the scheduler.
 
     // Normal priority
     const u32 dwTime = Device.dwTimeGlobal;
+    u32 steps_done = 0;
+    const u32 step_budget = ps_scheduler_max_steps_per_frame > 0 ? u32(ps_scheduler_max_steps_per_frame) : u32(-1);
 
 #ifdef DEBUG
     CTimer eTimer;
@@ -336,6 +343,7 @@ void CSheduler::ProcessStep()
 #ifdef DEBUG_SCHEDULER
             Msg("SCHEDULER: process unregister [%s][%x][%s]", item.scheduled_name.c_str(), item.Object, "false");
 #endif
+            ZoneScopedN("CSheduler::ProcessStep/PopStale");
             // Erase element
             Pop();
             continue;
@@ -360,22 +368,38 @@ void CSheduler::ProcessStep()
 #endif
 
         // Calc next update interval
-        const u32 dwMin = _max(u32(30), schedulerData.t_min);
-        u32 dwMax = (1000 + schedulerData.t_max) / 2;
-        const float scale = item.Object->shedule_Scale();
-        u32 dwUpdate = dwMin + iFloor(float(dwMax - dwMin) * scale);
-        clamp(dwUpdate, u32(_max(dwMin, u32(20))), dwMax);
+        u32 dwUpdate;
+        {
+            ZoneScopedN("CSheduler::ProcessStep/ComputeInterval");
+            const u32 dwMin = _max(u32(30), schedulerData.t_min);
+            u32 dwMax = (1000 + schedulerData.t_max) / 2;
+            const float scale = item.Object->shedule_Scale();
+            dwUpdate = dwMin + iFloor(float(dwMax - dwMin) * scale);
+            clamp(dwUpdate, u32(_max(dwMin, u32(20))), dwMax);
+        }
 
         m_current_step_obj = item.Object;
 
-        item.Object->shedule_Update(
-            clampr(Elapsed, u32(1), u32(_max(u32(schedulerData.t_max), u32(1000)))));
+        {
+            pcstr sched_name = item.scheduled_name.c_str();
+            if (!sched_name || !sched_name[0])
+                sched_name = "(no name)";
+            ZoneTransientN(___sched_su, sched_name, true);
+            item.Object->shedule_Update(
+                clampr(Elapsed, u32(1), u32(_max(u32(schedulerData.t_max), u32(1000)))));
+        }
         if (!m_current_step_obj)
         {
 #ifdef DEBUG_SCHEDULER
             Msg("SCHEDULER: process unregister (self unregistering) [%s][%x][%s]", item.scheduled_name.c_str(), item.Object,
                 "false");
 #endif
+            ++steps_done;
+            if (steps_done >= step_budget)
+            {
+                psShedulerTarget += psShedulerReaction * 3;
+                break;
+            }
             continue;
         }
 
@@ -385,6 +409,12 @@ void CSheduler::ProcessStep()
         item.dwTimeForExecute = dwTime + dwUpdate;
         item.dwTimeOfLastExecute = dwTime;
         ItemsProcessed.emplace_back(std::move(item));
+        ++steps_done;
+        if (steps_done >= step_budget)
+        {
+            psShedulerTarget += psShedulerReaction * 3;
+            break;
+        }
 
 #if 0 //def DEBUG
         auto itemName = item.Object->shedule_Name().c_str();
@@ -412,10 +442,13 @@ void CSheduler::ProcessStep()
     }
 
     // Push "processed" back
-    while (ItemsProcessed.size())
     {
-        Push(ItemsProcessed.back());
-        ItemsProcessed.pop_back();
+        ZoneScopedN("CSheduler::ProcessStep/RequeueHeap");
+        while (ItemsProcessed.size())
+        {
+            Push(ItemsProcessed.back());
+            ItemsProcessed.pop_back();
+        }
     }
 
     // always try to decrease target
@@ -424,13 +457,16 @@ void CSheduler::ProcessStep()
 
 void CSheduler::Update()
 {
-    ZoneScoped;
+    ZoneScopedN("CSheduler::Update");
 
     // Initialize
     stats.Update.Begin();
     cycles_start = CPU::QPC();
     cycles_limit = CPU::qpc_freq * u64(iCeil(psShedulerCurrent)) / 1000ul + cycles_start;
-    internal_Registration();
+    {
+        ZoneScopedN("CSheduler::Update/internal_Registration_pre");
+        internal_Registration();
+    }
     isSheduleInProgress = true;
 
 #ifdef DEBUG_SCHEDULER
@@ -439,28 +475,37 @@ void CSheduler::Update()
     // Realtime priority
     m_processing_now = true;
     const u32 dwTime = Device.dwTimeGlobal;
-    for (auto& item : ItemsRT)
     {
-        R_ASSERT(item.Object);
-#ifdef DEBUG_SCHEDULER
-        Msg("SCHEDULER: process step [%s][%x][true]", item.Object->shedule_Name().c_str(), item.Object);
-#endif
-        if (!item.Object->shedule_Needed())
+        ZoneScopedN("CSheduler::Update/ItemsRT");
+        for (auto& item : ItemsRT)
         {
+            R_ASSERT(item.Object);
 #ifdef DEBUG_SCHEDULER
-            Msg("SCHEDULER: process unregister [%s][%x][%s]", item.Object->shedule_Name().c_str(), item.Object, "false");
+            Msg("SCHEDULER: process step [%s][%x][true]", item.Object->shedule_Name().c_str(), item.Object);
 #endif
-            item.dwTimeOfLastExecute = dwTime;
-            continue;
-        }
+            if (!item.Object->shedule_Needed())
+            {
+#ifdef DEBUG_SCHEDULER
+                Msg("SCHEDULER: process unregister [%s][%x][%s]", item.Object->shedule_Name().c_str(), item.Object, "false");
+#endif
+                item.dwTimeOfLastExecute = dwTime;
+                continue;
+            }
 
-        const u32 Elapsed = dwTime - item.dwTimeOfLastExecute;
+            const u32 Elapsed = dwTime - item.dwTimeOfLastExecute;
 #ifdef DEBUG
-        VERIFY(item.Object->GetSchedulerData().dbg_startframe != Device.dwFrame);
-        item.Object->GetSchedulerData().dbg_startframe = Device.dwFrame;
+            VERIFY(item.Object->GetSchedulerData().dbg_startframe != Device.dwFrame);
+            item.Object->GetSchedulerData().dbg_startframe = Device.dwFrame;
 #endif
-        item.Object->shedule_Update(Elapsed);
-        item.dwTimeOfLastExecute = dwTime;
+            {
+                pcstr sched_name = item.scheduled_name.c_str();
+                if (!sched_name || !sched_name[0])
+                    sched_name = "(no name)";
+                ZoneTransientN(___sched_rt, sched_name, true);
+                item.Object->shedule_Update(Elapsed);
+            }
+            item.dwTimeOfLastExecute = dwTime;
+        }
     }
 
     // Normal (sheduled)
@@ -475,6 +520,9 @@ void CSheduler::Update()
 
     // Finalize
     isSheduleInProgress = false;
-    internal_Registration();
+    {
+        ZoneScopedN("CSheduler::Update/internal_Registration_post");
+        internal_Registration();
+    }
     stats.Update.End();
 }

@@ -216,6 +216,7 @@ BOOL CScriptBinder::net_SaveRelevant()
 
 void CScriptBinder::net_Relcase(IGameObject* object)
 {
+    ZoneScopedN("CScriptBinder::net_Relcase (Lua)");
     CGameObject* game_object = smart_cast<CGameObject*>(object);
     if (m_object && game_object)
     {

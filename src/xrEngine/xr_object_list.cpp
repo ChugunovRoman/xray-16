@@ -213,7 +213,7 @@ void CObjectList::clear_crow_vec(Objects& o)
 
 void CObjectList::Update(bool bForce)
 {
-    ZoneScoped;
+    ZoneScopedN("CObjectList::Update");
 
     if (statsFrame != Device.dwFrame)
     {
@@ -221,15 +221,18 @@ void CObjectList::Update(bool bForce)
         stats.FrameStart();
     }
 
-    for (auto& crows_list : m_secondary_crows)
     {
-        m_primary_crows.insert(m_primary_crows.end(), crows_list.cbegin(), crows_list.cend());
-        crows_list.clear();
+        ZoneScopedN("CObjectList::Update/MergeSecondaryCrows");
+        for (auto& crows_list : m_secondary_crows)
+        {
+            m_primary_crows.insert(m_primary_crows.end(), crows_list.cbegin(), crows_list.cend());
+            crows_list.clear();
+        }
     }
 
     if (!Device.Paused() || bForce)
     {
-        ZoneScopedN("UpdateCL");
+        ZoneScopedN("CObjectList::Update/UpdateCL");
 
         // Clients
         if (Device.fTimeDelta > EPS_S || bForce)
@@ -269,30 +272,57 @@ void CObjectList::Update(bool bForce)
 
             u32 const objects_count = workload->size();
             IGameObject** objects = (IGameObject**)xr_alloca(objects_count * sizeof(IGameObject*));
-            std::copy(workload->begin(), workload->end(), objects);
+            {
+                ZoneScopedN("CObjectList::Update/UpdateCL/CopyWorkload");
+                std::copy(workload->begin(), workload->end(), objects);
+            }
 
             m_primary_crows.clear();
 
             IGameObject** b = objects;
             IGameObject** e = objects + objects_count;
-            for (IGameObject** i = b; i != e; ++i)
             {
-                (*i)->IAmNotACrowAnyMore();
-                (*i)->SetCrowUpdateFrame(u32(-1));
+                ZoneScopedN("CObjectList::Update/UpdateCL/ResetCrowFlags");
+                for (IGameObject** i = b; i != e; ++i)
+                {
+                    (*i)->IAmNotACrowAnyMore();
+                    (*i)->SetCrowUpdateFrame(u32(-1));
+                }
             }
 
-            for (IGameObject** i = b; i != e; ++i)
+            constexpr u32 object_profile_batch = 256;
+            for (IGameObject** batch_b = b; batch_b < e; batch_b += object_profile_batch)
             {
-                (*i)->PreUpdateCL();
-                SingleUpdate(*i);
+                ZoneScopedN("CObjectList::Update/UpdateCL/PreAndSingleUpdate_batch");
+                IGameObject** batch_e = batch_b + object_profile_batch;
+                if (batch_e > e)
+                    batch_e = e;
+                ZoneTextF("[%u,%u) / %u", u32(batch_b - b), u32(batch_e - b), objects_count);
+
+                {
+                    ZoneScopedN("CObjectList::Update/UpdateCL/PreAndSingleUpdate_batch/PreUpdateCL");
+                    for (IGameObject** i = batch_b; i < batch_e; ++i)
+                        (*i)->PreUpdateCL();
+                }
+                {
+                    ZoneScopedN("CObjectList::Update/UpdateCL/PreAndSingleUpdate_batch/SingleUpdate");
+                    for (IGameObject** i = batch_b; i < batch_e; ++i)
+                        SingleUpdate(*i);
+                }
             }
 
             //--#SM+#-- PostUpdateCL для всех клиентских объектов [for crowed and non-crowed]
-            for (auto& object : objects_active)
-                object->PostUpdateCL(false);
+            {
+                ZoneScopedN("CObjectList::Update/UpdateCL/PostUpdateCL_active");
+                for (auto& object : objects_active)
+                    object->PostUpdateCL(false);
+            }
 
-            for (auto& object : objects_sleeping)
-                object->PostUpdateCL(true);
+            {
+                ZoneScopedN("CObjectList::Update/UpdateCL/PostUpdateCL_sleeping");
+                for (auto& object : objects_sleeping)
+                    object->PostUpdateCL(true);
+            }
 
             stats.Update.End();
         }
@@ -301,45 +331,60 @@ void CObjectList::Update(bool bForce)
     // Destroy
     if (!destroy_queue.empty())
     {
-        ZoneScopedN("net_Relcase");
+        ZoneScopedN("CObjectList::Update/net_Relcase");
 
-        // Info
-        for (Objects::iterator oit = objects_active.begin(); oit != objects_active.end(); ++oit)
-            for (int it = destroy_queue.size() - 1; it >= 0; it--)
-            {
-                (*oit)->net_Relcase(destroy_queue[it]);
-            }
-        for (Objects::iterator oit = objects_sleeping.begin(); oit != objects_sleeping.end(); ++oit)
-            for (int it = destroy_queue.size() - 1; it >= 0; it--)
-                (*oit)->net_Relcase(destroy_queue[it]);
-
-        for (int it = destroy_queue.size() - 1; it >= 0; it--)
-            g_pGameLevel->Sound->object_relcase(destroy_queue[it]);
-
-        RELCASE_CALLBACK_VEC::iterator it = m_relcase_callbacks.begin();
-        const RELCASE_CALLBACK_VEC::iterator ite = m_relcase_callbacks.end();
-        for (; it != ite; ++it)
         {
-            VERIFY(*(*it).m_ID == (it - m_relcase_callbacks.begin()));
-            for (auto& dit : destroy_queue)
+            ZoneScopedN("CObjectList::Update/net_Relcase/active_objects");
+            for (Objects::iterator oit = objects_active.begin(); oit != objects_active.end(); ++oit)
+                for (int it = destroy_queue.size() - 1; it >= 0; it--)
+                {
+                    (*oit)->net_Relcase(destroy_queue[it]);
+                }
+        }
+        {
+            ZoneScopedN("CObjectList::Update/net_Relcase/sleeping_objects");
+            for (Objects::iterator oit = objects_sleeping.begin(); oit != objects_sleeping.end(); ++oit)
+                for (int it = destroy_queue.size() - 1; it >= 0; it--)
+                {
+                    (*oit)->net_Relcase(destroy_queue[it]);
+                }
+        }
+
+        {
+            ZoneScopedN("CObjectList::Update/net_Relcase/sound_relcase");
+            for (int it = destroy_queue.size() - 1; it >= 0; it--)
+                g_pGameLevel->Sound->object_relcase(destroy_queue[it]);
+        }
+
+        {
+            ZoneScopedN("CObjectList::Update/net_Relcase/callbacks_and_hud");
+            RELCASE_CALLBACK_VEC::iterator it = m_relcase_callbacks.begin();
+            const RELCASE_CALLBACK_VEC::iterator ite = m_relcase_callbacks.end();
+            for (; it != ite; ++it)
             {
-                (*it).m_Callback(dit);
-                g_pGameLevel->pHUD->net_Relcase(dit);
+                VERIFY(*(*it).m_ID == (it - m_relcase_callbacks.begin()));
+                for (auto& dit : destroy_queue)
+                {
+                    (*it).m_Callback(dit);
+                    g_pGameLevel->pHUD->net_Relcase(dit);
+                }
             }
         }
 
-        // Destroy
-        for (int it = destroy_queue.size() - 1; it >= 0; it--)
         {
-            IGameObject* O = destroy_queue[it];
+            ZoneScopedN("CObjectList::Update/net_Relcase/net_Destroy");
+            for (int it = destroy_queue.size() - 1; it >= 0; it--)
+            {
+                IGameObject* O = destroy_queue[it];
 // Msg ("Object [%x]", O);
 #ifdef DEBUG
-            if (debug_destroy)
-                Msg("Destroying object[%x][%x] [%d][%s] frame[%d]", dynamic_cast<void*>(O), O, O->ID(), O->cName().c_str(),
-                    Device.dwFrame);
+                if (debug_destroy)
+                    Msg("Destroying object[%x][%x] [%d][%s] frame[%d]", dynamic_cast<void*>(O), O, O->ID(), O->cName().c_str(),
+                        Device.dwFrame);
 #endif // DEBUG
-            O->net_Destroy();
-            Destroy(O);
+                O->net_Destroy();
+                Destroy(O);
+            }
         }
         destroy_queue.clear();
     }

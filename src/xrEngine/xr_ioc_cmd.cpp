@@ -883,4 +883,7 @@ void CCC_Register()
 
     extern int ps_disable_lens_flare;
     CMD4(CCC_Integer, "disable_lens_flare", &ps_disable_lens_flare, 0, 1);
+
+    extern int ps_scheduler_max_steps_per_frame;
+    CMD4(CCC_Integer, "scheduler_max_steps_per_frame", &ps_scheduler_max_steps_per_frame, 0, 65535);
 };

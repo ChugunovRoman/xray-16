@@ -1413,6 +1413,7 @@ void CCustomZone::CreateHit(u16 id_to, u16 id_from, const Fvector& hit_dir, floa
 
 void CCustomZone::net_Relcase(IGameObject* O)
 {
+    ZoneScopedN("CCustomZone::net_Relcase");
     CGameObject* GO = smart_cast<CGameObject*>(O);
     auto it = std::find(m_ObjectInfoMap.begin(), m_ObjectInfoMap.end(), GO);
     if (it != m_ObjectInfoMap.end())

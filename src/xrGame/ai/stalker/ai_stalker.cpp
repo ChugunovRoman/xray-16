@@ -1422,16 +1422,23 @@ const SRotation CAI_Stalker::Orientation() const { return (movement().m_head.cur
 const MonsterSpace::SBoneRotation& CAI_Stalker::head_orientation() const { return (movement().head_orientation()); }
 void CAI_Stalker::net_Relcase(IGameObject* O)
 {
+    ZoneScopedN("CAI_Stalker::net_Relcase");
     inherited::net_Relcase(O);
 
-    sight().remove_links(O);
-    movement().remove_links(O);
+    {
+        ZoneScopedN("CAI_Stalker::net_Relcase sight_movement");
+        sight().remove_links(O);
+        movement().remove_links(O);
+    }
 
     if (!g_Alive())
         return;
 
-    agent_manager().remove_links(O);
-    m_pPhysics_support->in_NetRelcase(O);
+    {
+        ZoneScopedN("CAI_Stalker::net_Relcase agent_physics");
+        agent_manager().remove_links(O);
+        m_pPhysics_support->in_NetRelcase(O);
+    }
 }
 
 CMovementManager* CAI_Stalker::create_movement_manager()

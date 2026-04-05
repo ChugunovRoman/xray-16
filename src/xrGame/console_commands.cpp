@@ -186,6 +186,7 @@ u32 npc_perf_planner_actuality_interval_danger_ms = 120;
 u32 npc_perf_planner_actuality_interval_near_idle_ms = 220;
 u32 npc_perf_planner_graph_search_max_nodes = 1200;
 u32 npc_perf_long_dead_skip_binder_ms = 5000;
+int npc_perf_skip_script_net_relcase = 1;
 float npc_perf_binder_far_dist = 300.f;
 u32 npc_perf_binder_far_interval_ms = 250;
 u32 npc_perf_binder_far_phases = 6;
@@ -2719,6 +2720,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_planner_actuality_interval_near_idle_ms", (int*)&npc_perf_planner_actuality_interval_near_idle_ms, 10, 60000);
     CMD4(CCC_Integer, "npc_perf_planner_graph_search_max_nodes", (int*)&npc_perf_planner_graph_search_max_nodes, 100, 100000);
     CMD4(CCC_Integer, "npc_perf_long_dead_skip_binder_ms", (int*)&npc_perf_long_dead_skip_binder_ms, 0, 120000);
+    CMD4(CCC_Integer, "npc_perf_skip_script_net_relcase", &npc_perf_skip_script_net_relcase, 0, 1);
     CMD4(CCC_Float, "npc_perf_binder_far_dist", &npc_perf_binder_far_dist, 1.f, 2000.f);
     CMD4(CCC_Integer, "npc_perf_binder_far_interval_ms", (int*)&npc_perf_binder_far_interval_ms, 10, 10000);
     CMD4(CCC_Integer, "npc_perf_binder_far_phases", (int*)&npc_perf_binder_far_phases, 1, 64);

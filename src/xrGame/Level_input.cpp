@@ -121,6 +121,9 @@ extern float g_separate_radius;
 
 void CLevel::IR_OnKeyboardPress(int key)
 {
+    ZoneScopedN("CLevel::IR_OnKeyboardPress");
+    ZoneTextF("scancode %d", key);
+
     if (Device.dwPrecacheFrame)
         return;
 
@@ -131,6 +134,7 @@ void CLevel::IR_OnKeyboardPress(int key)
     /* avo: script callback */
     if (!g_bDisableAllInput && g_actor)
     {
+        ZoneScopedN("CLevel::IR_OnKeyboardPress/script_eKeyPress");
         g_actor->callback(GameObject::eKeyPress)(key);
     }
 
@@ -160,50 +164,58 @@ void CLevel::IR_OnKeyboardPress(int key)
     if (g_bDisableAllInput)
         return;
 
-    switch (_curr)
     {
-    case kSCREENSHOT:
-        GEnv.Render->Screenshot();
-        return;
-
-    case kCONSOLE:
-        Console->Show();
-        return;
-
-    case kQUIT:
-    {
-        if (b_ui_exist && CurrentGameUI()->TopInputReceiver() && !Device.Paused())
+        ZoneScopedN("CLevel::IR_OnKeyboardPress/switch_EGameActions");
+        switch (_curr)
         {
-            if (CurrentGameUI()->IR_UIOnKeyboardPress(key))
-                return; // special case for mp and main_menu
-            CurrentGameUI()->TopInputReceiver()->HideDialog();
-        }
-        else
+        case kSCREENSHOT:
+            GEnv.Render->Screenshot();
+            return;
+
+        case kCONSOLE:
+            Console->Show();
+            return;
+
+        case kQUIT:
         {
-            Console->Execute("main_menu");
+            if (b_ui_exist && CurrentGameUI()->TopInputReceiver() && !Device.Paused())
+            {
+                if (CurrentGameUI()->IR_UIOnKeyboardPress(key))
+                    return; // special case for mp and main_menu
+                CurrentGameUI()->TopInputReceiver()->HideDialog();
+            }
+            else
+            {
+                Console->Execute("main_menu");
+            }
+            return;
         }
-        return;
-    }
-    case kALIFE_CMD:
-    {
-        luabind::functor<void> functor;
-        if (GEnv.ScriptEngine->functor("sim_combat.start_attack", functor))
-            functor();
+        case kALIFE_CMD:
+        {
+            ZoneScopedN("CLevel::IR_OnKeyboardPress/script_sim_combat_start_attack");
+            luabind::functor<void> functor;
+            if (GEnv.ScriptEngine->functor("sim_combat.start_attack", functor))
+                functor();
 #ifndef MASTER_GOLD
-        else
-        {
-            Log("! failed to get sim_combat.start_attack functor");
-        }
+            else
+            {
+                Log("! failed to get sim_combat.start_attack functor");
+            }
 #endif
-        break;
+            break;
+        }
+        } // switch (_curr)
     }
-    } // switch (_curr)
 
     if (!bReady || !b_ui_exist)
         return;
 
-    if (b_ui_exist && CurrentGameUI()->IR_UIOnKeyboardPress(key))
-        return;
+    if (b_ui_exist)
+    {
+        ZoneScopedN("CLevel::IR_OnKeyboardPress/IR_UIOnKeyboardPress");
+        if (CurrentGameUI()->IR_UIOnKeyboardPress(key))
+            return;
+    }
 
 #ifndef MASTER_GOLD
     if (!psActorFlags.test(AF_NO_CLIP))
@@ -213,23 +225,31 @@ void CLevel::IR_OnKeyboardPress(int key)
             return;
     }
 
-    if (game && game->OnKeyboardPress(GetBindedAction(key)))
-        return;
-
-    luabind::functor<bool> funct;
-    if (GEnv.ScriptEngine->functor("level_input.on_key_press", funct))
     {
-        if (funct(key, _curr))
+        ZoneScopedN("CLevel::IR_OnKeyboardPress/game_cl_OnKeyboardPress");
+        if (game && game->OnKeyboardPress(GetBindedAction(key)))
             return;
+    }
+
+    {
+        ZoneScopedN("CLevel::IR_OnKeyboardPress/script_level_input_on_key_press");
+        luabind::functor<bool> funct;
+        if (GEnv.ScriptEngine->functor("level_input.on_key_press", funct))
+        {
+            if (funct(key, _curr))
+                return;
+        }
     }
 
     if (_curr == kQUICK_SAVE && IsGameTypeSingle())
     {
+        ZoneScopedN("CLevel::IR_OnKeyboardPress/quick_save");
         Console->Execute("save");
         return;
     }
     if (_curr == kQUICK_LOAD && IsGameTypeSingle())
     {
+        ZoneScopedN("CLevel::IR_OnKeyboardPress/quick_load");
 #ifdef DEBUG
         FS.get_path("$game_config$")->m_Flags.set(FS_Path::flNeedRescan, TRUE);
         FS.get_path("$game_scripts$")->m_Flags.set(FS_Path::flNeedRescan, TRUE);
@@ -246,9 +266,11 @@ void CLevel::IR_OnKeyboardPress(int key)
     }
 
 #ifndef MASTER_GOLD
-    switch (key)
     {
-    case SDL_SCANCODE_F7:
+        ZoneScopedN("CLevel::IR_OnKeyboardPress/debug_dev_keys");
+        switch (key)
+        {
+        case SDL_SCANCODE_F7:
     {
         if (GameID() != eGameIDSingle)
             return;
@@ -418,14 +440,19 @@ void CLevel::IR_OnKeyboardPress(int key)
     }
 
 #endif
-    } // switch (key)
+        } // switch (key)
+    }     // debug_dev_keys
 #endif // MASTER_GOLD
 
-    if (g_consoleBindCmds.execute(key))
-        return;
+    {
+        ZoneScopedN("CLevel::IR_OnKeyboardPress/consoleBindCmds");
+        if (g_consoleBindCmds.execute(key))
+            return;
+    }
 
     if (CURRENT_ENTITY())
     {
+        ZoneScopedN("CLevel::IR_OnKeyboardPress/CurrentEntity_IR_OnKeyboardPress");
         IInputReceiver* IR = smart_cast<IInputReceiver*>(smart_cast<CGameObject*>(CURRENT_ENTITY()));
         if (IR)
             IR->IR_OnKeyboardPress(GetBindedAction(key));

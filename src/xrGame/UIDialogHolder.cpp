@@ -304,6 +304,9 @@ void CDialogHolder::UpdateCursorVisibility()
 
 bool CDialogHolder::IR_UIOnKeyboardPress(int dik)
 {
+    ZoneScopedN("CDialogHolder::IR_UIOnKeyboardPress");
+    ZoneTextF("dik %d", dik);
+
     CUIDialogWnd* TIR = TopInputReceiver();
     if (!TIR)
         return false;
@@ -313,6 +316,7 @@ bool CDialogHolder::IR_UIOnKeyboardPress(int dik)
     // mouse click
     if (dik == MOUSE_1 || dik == MOUSE_2 || dik == MOUSE_3)
     {
+        ZoneScopedN("CDialogHolder::IR_UIOnKeyboardPress/OnMouseAction");
         Fvector2 cp = GetUICursor().GetCursorPosition();
         EUIMessages action =
             (dik == MOUSE_1) ? WINDOW_LBUTTON_DOWN : (dik == MOUSE_2) ? WINDOW_RBUTTON_DOWN : WINDOW_CBUTTON_DOWN;
@@ -320,8 +324,11 @@ bool CDialogHolder::IR_UIOnKeyboardPress(int dik)
             return true;
     }
 
-    if (TIR->OnKeyboardAction(dik, WINDOW_KEY_PRESSED))
-        return true;
+    {
+        ZoneScopedN("CDialogHolder::IR_UIOnKeyboardPress/OnKeyboardAction");
+        if (TIR->OnKeyboardAction(dik, WINDOW_KEY_PRESSED))
+            return true;
+    }
 
     if (UI().GetUICursor().IsVisible() && dik > XR_CONTROLLER_BUTTON_INVALID && dik < XR_CONTROLLER_BUTTON_MAX)
     {
@@ -358,6 +365,7 @@ bool CDialogHolder::IR_UIOnKeyboardPress(int dik)
             if (IR)
             //				IR->IR_OnKeyboardPress(get_binded_action(dik));
             {
+                ZoneScopedN("CDialogHolder::IR_UIOnKeyboardPress/fallback_CurrentEntity");
                 EGameActions action = GetBindedAction(dik);
                 if (action != kQUICK_USE_1 && action != kQUICK_USE_2 && action != kQUICK_USE_3 &&
                     action != kQUICK_USE_4)

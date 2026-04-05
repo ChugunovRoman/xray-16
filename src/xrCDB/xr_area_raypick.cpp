@@ -25,7 +25,7 @@ bool CObjectSpace::RayTest(const Fvector& start, const Fvector& dir, float range
 bool CObjectSpace::_RayTest(const Fvector& start, const Fvector& dir, float range, collide::rq_target tgt,
     collide::ray_cache* cache, IGameObject* ignore_object)
 {
-    ZoneScoped;
+    ZoneScopedN("CObjectSpace::_RayTest");
 
     VERIFY(_abs(dir.magnitude() - 1) < EPS);
     r_temp.r_clear();
@@ -109,7 +109,7 @@ bool CObjectSpace::_RayTest(const Fvector& start, const Fvector& dir, float rang
 bool CObjectSpace::RayPick(
     const Fvector& start, const Fvector& dir, float range, rq_target tgt, rq_result& R, IGameObject* ignore_object)
 {
-    ZoneScoped;
+    ZoneScopedN("CObjectSpace::RayPick");
 
     bool _res = _RayPick(start, dir, range, tgt, R, ignore_object);
     r_spatial.clear();
@@ -125,6 +125,7 @@ bool CObjectSpace::_RayPick(
     // static test
     if (tgt & rqtStatic)
     {
+        ZoneScopedN("CObjectSpace::_RayPick/static_xrc");
         xrc.ray_query(CDB::OPT_ONLYNEAREST | CDB::OPT_CULL, &Static, start, dir, range);
         if (xrc.r_count())
             R.set_if_less(xrc.r_begin());
@@ -136,12 +137,16 @@ bool CObjectSpace::_RayPick(
         // traverse object database
         u32 d_flags =
             STYPE_COLLIDEABLE | ((tgt & rqtObstacle) ? STYPE_OBSTACLE : 0) | ((tgt & rqtShape) ? STYPE_SHAPE : 0);
-        SpatialSpace->q_ray(r_spatial, 0, d_flags, start, dir, range);
+        {
+            ZoneScopedN("CObjectSpace::_RayPick/dynamic_q_ray");
+            SpatialSpace->q_ray(r_spatial, 0, d_flags, start, dir, range);
+        }
         // Determine visibility for dynamic part of scene
 #ifdef DEBUG
         if (bDebug())
             (*m_pRender)->dbgReserveSphere(r_spatial.size());
 #endif
+        ZoneScopedN("CObjectSpace::_RayPick/dynamic_cforms");
         for (auto* spatial : r_spatial)
         {
             IGameObject* collidable = spatial->dcast_GameObject();

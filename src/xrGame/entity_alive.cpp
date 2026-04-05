@@ -704,8 +704,12 @@ void CEntityAlive::set_collision_hit_callback(ICollisionHitCallback* cc)
 
 void CEntityAlive::net_Relcase(IGameObject* object)
 {
+    ZoneScopedN("CEntityAlive::net_Relcase");
     inherited::net_Relcase(object);
-    conditions().remove_links(object);
+    {
+        ZoneScopedN("CEntityAlive::net_Relcase conditions");
+        conditions().remove_links(object);
+    }
 }
 
 Fvector CEntityAlive::predict_position(const float& time_to_check) const { return (Position()); }

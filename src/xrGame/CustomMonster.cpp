@@ -1118,8 +1118,12 @@ IFactoryObject* CCustomMonster::_construct()
 
 void CCustomMonster::net_Relcase(IGameObject* object)
 {
+    ZoneScopedN("CCustomMonster::net_Relcase");
     inherited::net_Relcase(object);
-    memory().remove_links(object);
+    {
+        ZoneScopedN("CCustomMonster::net_Relcase memory");
+        memory().remove_links(object);
+    }
 }
 
 void CCustomMonster::set_fov(float new_fov)

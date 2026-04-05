@@ -247,33 +247,41 @@ void CInput::MouseUpdate()
 
 void CInput::KeyUpdate()
 {
-    ZoneScoped;
+    ZoneScopedN("CInput::KeyUpdate");
 
     SDL_Event events[MAX_KEYBOARD_EVENTS];
-    const auto count = SDL_PeepEvents(events, MAX_KEYBOARD_EVENTS,
-        SDL_GETEVENT, SDL_KEYDOWN, SDL_KEYMAPCHANGED);
+    int count;
+    {
+        ZoneScopedN("CInput::KeyUpdate/SDL_PeepEvents");
+        count = SDL_PeepEvents(events, MAX_KEYBOARD_EVENTS,
+            SDL_GETEVENT, SDL_KEYDOWN, SDL_KEYMAPCHANGED);
+    }
 
     // Let iGetAsyncKeyState work correctly during this frame immediately
-    for (int i = 0; i < count; ++i)
     {
-        const SDL_Event& event = events[i];
-
-        switch (event.type)
+        ZoneScopedN("CInput::KeyUpdate/SyncKeyState");
+        for (int i = 0; i < count; ++i)
         {
-        case SDL_KEYDOWN:
-            if (event.key.repeat)
-                continue;
-            keyboardState[event.key.keysym.scancode] = true;
-            break;
+            const SDL_Event& event = events[i];
 
-        case SDL_KEYUP:
-            keyboardState[event.key.keysym.scancode] = false;
-            break;
+            switch (event.type)
+            {
+            case SDL_KEYDOWN:
+                if (event.key.repeat)
+                    continue;
+                keyboardState[event.key.keysym.scancode] = true;
+                break;
+
+            case SDL_KEYUP:
+                keyboardState[event.key.keysym.scancode] = false;
+                break;
+            }
         }
     }
 
     if (keyboardState[SDL_SCANCODE_F4] && (keyboardState[SDL_SCANCODE_LALT] || keyboardState[SDL_SCANCODE_RALT]))
     {
+        ZoneScopedN("CInput::KeyUpdate/AltF4");
         AltF4Pressed = true;
         Engine.Event.Defer("KERNEL:disconnect");
         Engine.Event.Defer("KERNEL:quit");
@@ -290,37 +298,62 @@ void CInput::KeyUpdate()
     // If we find out something not work as expected.
     const auto cnt = textInputCounter;
 
-    for (int i = 0; i < count; ++i)
     {
-        const SDL_Event& event = events[i];
-
-        switch (event.type)
+        ZoneScopedN("CInput::KeyUpdate/DispatchEvents");
+        for (int i = 0; i < count; ++i)
         {
-        case SDL_KEYDOWN:
-            if (event.key.repeat)
-                continue;
-            cbStack.back()->IR_OnKeyboardPress(event.key.keysym.scancode);
+            const SDL_Event& event = events[i];
+
+            switch (event.type)
+            {
+            case SDL_KEYDOWN:
+                if (event.key.repeat)
+                    continue;
+                {
+                    ZoneScopedN("CInput::KeyUpdate/IR_OnKeyboardPress");
+                    ZoneTextF("#%d/%d scancode %d", i, count, (int)event.key.keysym.scancode);
+                    cbStack.back()->IR_OnKeyboardPress(event.key.keysym.scancode);
+                }
+                break;
+
+            case SDL_KEYUP:
+            {
+                ZoneScopedN("CInput::KeyUpdate/IR_OnKeyboardRelease");
+                cbStack.back()->IR_OnKeyboardRelease(event.key.keysym.scancode);
+            }
             break;
 
-        case SDL_KEYUP:
-            cbStack.back()->IR_OnKeyboardRelease(event.key.keysym.scancode);
-            break;
+            case SDL_TEXTINPUT:
+                if (cnt != textInputCounter)
+                    continue; // if input target changed, skip this frame
+                {
+                    ZoneScopedN("CInput::KeyUpdate/IR_OnTextInput");
+                    cbStack.back()->IR_OnTextInput(event.text.text);
+                }
+                break;
 
-        case SDL_TEXTINPUT:
-            if (cnt != textInputCounter)
-                continue; // if input target changed, skip this frame
-            cbStack.back()->IR_OnTextInput(event.text.text);
+            case SDL_KEYMAPCHANGED:
+            {
+                ZoneScopedN("CInput::KeyUpdate/KeyMapChanged_Process");
+                seqKeyMapChanged.Process();
+            }
             break;
-
-        case SDL_KEYMAPCHANGED:
-            seqKeyMapChanged.Process();
-            break;
+            }
         }
     }
 
-    for (u32 i = 0; i < COUNT_KB_BUTTONS; ++i)
-        if (keyboardState[i])
+    {
+        ZoneScopedN("CInput::KeyUpdate/IR_OnKeyboardHold_scan");
+        u32 held_keys = 0;
+        for (u32 i = 0; i < COUNT_KB_BUTTONS; ++i)
+        {
+            if (!keyboardState[i])
+                continue;
+            ++held_keys;
             cbStack.back()->IR_OnKeyboardHold(i);
+        }
+        ZoneTextF("held_keys %u / scancodes", held_keys);
+    }
 }
 
 bool ControllerState::attitude_changed() const

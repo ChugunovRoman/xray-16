@@ -381,6 +381,9 @@ void CConsole::OnEvent(EVENT E, u64 P1, u64 P2)
 
 void CConsole::IR_OnKeyboardPress(int key)
 {
+    ZoneScopedN("CConsole::IR_OnKeyboardPress");
+    ZoneTextF("scancode %d", key);
+
     switch (GetBindedAction(key))
     {
     case kQUIT:

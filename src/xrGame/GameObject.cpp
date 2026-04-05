@@ -1429,8 +1429,12 @@ u32 CGameObject::ef_detector_type() const
 
 void CGameObject::net_Relcase(IGameObject* O)
 {
-    if (!GEnv.isDedicatedServer)
-        scriptBinder.net_Relcase(O);
+    ZoneScopedN("CGameObject::net_Relcase");
+    if (GEnv.isDedicatedServer)
+        return;
+    if (npc_perf_skip_script_net_relcase)
+        return;
+    scriptBinder.net_Relcase(O);
 }
 
 CGameObject::CScriptCallbackExVoid& CGameObject::callback(GameObject::ECallbackType type) const

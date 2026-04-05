@@ -751,15 +751,19 @@ IFactoryObject* CBaseMonster::_construct()
 
 void CBaseMonster::net_Relcase(IGameObject* O)
 {
+    ZoneScopedN("CBaseMonster::net_Relcase");
     inherited::net_Relcase(O);
 
-    StateMan->remove_links(O);
-
-    com_man().remove_links(O);
+    {
+        ZoneScopedN("CBaseMonster::net_Relcase state_com");
+        StateMan->remove_links(O);
+        com_man().remove_links(O);
+    }
 
     // TODO: do not clear, remove only object O
     if (g_Alive())
     {
+        ZoneScopedN("CBaseMonster::net_Relcase alive_memories");
         EnemyMemory.remove_links(O);
         SoundMemory.remove_links(O);
         HitMemory.remove_hit_info(O);
@@ -771,8 +775,11 @@ void CBaseMonster::net_Relcase(IGameObject* O)
 
         monster_squad().remove_links(O);
     }
-    CorpseMemory.remove_links(O);
-    m_pPhysics_support->in_NetRelcase(O);
+    {
+        ZoneScopedN("CBaseMonster::net_Relcase corpse_physics");
+        CorpseMemory.remove_links(O);
+        m_pPhysics_support->in_NetRelcase(O);
+    }
 }
 
 void CBaseMonster::create_base_controls()

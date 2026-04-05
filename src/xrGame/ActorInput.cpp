@@ -39,6 +39,9 @@ bool g_bAutoClearCrouch = true;
 
 void CActor::IR_OnKeyboardPress(int cmd)
 {
+    ZoneScopedN("CActor::IR_OnKeyboardPress");
+    ZoneTextF("EGameAction %d", cmd);
+
     if (GamePersistent().GetHudTuner().is_active())
         return;
 
@@ -88,13 +91,18 @@ void CActor::IR_OnKeyboardPress(int cmd)
 
     if (m_holder && kUSE != cmd)
     {
+        ZoneScopedN("CActor::IR_OnKeyboardPress/holder_OnKeyboardPress");
         m_holder->OnKeyboardPress(cmd);
         if (m_holder->allowWeapon() && inventory().Action((u16)cmd, CMD_START))
             return;
         return;
     }
-    else if (inventory().Action((u16)cmd, CMD_START))
-        return;
+    else
+    {
+        ZoneScopedN("CActor::IR_OnKeyboardPress/inventory_Action");
+        if (inventory().Action((u16)cmd, CMD_START))
+            return;
+    }
 
 #ifndef MASTER_GOLD
     if (psActorFlags.test(AF_NO_CLIP))

@@ -362,6 +362,9 @@ void CMainMenu::IR_OnMouseMove(int x, int y)
 bool IWantMyMouseBackScreamed = false;
 void CMainMenu::IR_OnKeyboardPress(int dik)
 {
+    ZoneScopedN("CMainMenu::IR_OnKeyboardPress");
+    ZoneTextF("scancode %d", dik);
+
     if (!IsActive())
         return;
 
@@ -388,7 +391,10 @@ void CMainMenu::IR_OnKeyboardPress(int dik)
         return;
     }
 
-    CDialogHolder::IR_UIOnKeyboardPress(dik);
+    {
+        ZoneScopedN("CMainMenu::IR_OnKeyboardPress/CDialogHolder_IR_UI");
+        CDialogHolder::IR_UIOnKeyboardPress(dik);
+    }
 };
 
 void CMainMenu::IR_OnKeyboardRelease(int dik)
