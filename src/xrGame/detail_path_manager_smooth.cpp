@@ -208,12 +208,20 @@ bool CDetailPathManager::build_circle_trajectory(
     {
         int m = _min(iFloor(_abs(angle) / position.angular_velocity * 10.f + 1.5f),
             iFloor(position.radius * _abs(angle) / min_dist + 1.5f));
-#ifdef DEBUG
-        if (m >= 10000)
+        // Release must cap segment count too: tiny angular_velocity / huge angle makes m enormous,
+        // reserve/insert then OOM or null alloc → crash in xalloc::construct (parallel path build).
+        static constexpr int max_circle_segments = 10000;
+        if (m > max_circle_segments)
         {
-            Msg("! [position.radius=%f],[angle=%f],[m=%d]", position.radius, angle, m);
-            VERIFY(m < 10000);
+#ifndef MASTER_GOLD
+            Msg("! build_circle_trajectory: clamping segment count m=%d → %d (radius=%f angle=%f)", m, max_circle_segments,
+                position.radius, angle);
+#endif
+            m = max_circle_segments;
         }
+#ifdef DEBUG
+        else if (m >= max_circle_segments)
+            Msg("! [position.radius=%f],[angle=%f],[m=%d]", position.radius, angle, m);
 #endif
         n = !m ? 1 : m;
     }
@@ -413,12 +421,36 @@ bool CDetailPathManager::compute_path(STrajectoryPoint& _start, STrajectoryPoint
             {
                 if (!m_try_min_time || (time < min_time))
                 {
+                    if (m_tpTravelLine)
+                    {
+                        constexpr size_t max_detail_path_points = 131072u;
+                        if (m_temp_path.size() > max_detail_path_points)
+                        {
+#ifndef MASTER_GOLD
+                            static u32 s_last_warn_frame = 0;
+                            if (Device.dwFrame - s_last_warn_frame > 300)
+                            {
+                                s_last_warn_frame = Device.dwFrame;
+                                Msg("! CDetailPathManager::compute_path: trajectory too long (%zu points), skipped.",
+                                    m_temp_path.size());
+                            }
+#endif
+                            continue;
+                        }
+                        m_tpTravelLine->resize(size);
+                        try
+                        {
+                            m_tpTravelLine->insert(m_tpTravelLine->end(), m_temp_path.begin(), m_temp_path.end());
+                        }
+                        catch (...)
+                        {
+                            m_tpTravelLine->resize(size);
+                            continue;
+                        }
+                    }
                     min_time = time;
                     if (m_tpTravelLine)
                     {
-                        m_tpTravelLine->resize(size);
-                        m_tpTravelLine->insert(m_tpTravelLine->end(), m_temp_path.begin(), m_temp_path.end());
-
                         if (!m_try_min_time)
                             return (true);
                     }

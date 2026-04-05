@@ -38,6 +38,22 @@
 #include "movement_manager.h"
 #include "detail_path_manager.h"
 
+namespace
+{
+// CDangerObject can keep stale IGameObject* after entity destroy (race with remove_links); virtual ID() then jumps via null vptr.
+u16 script_danger_object_net_id(const IGameObject* o)
+{
+    if (!o)
+        return u16(-1);
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+    __try { return o->ID(); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return u16(-1); }
+#else
+    return o->ID();
+#endif
+}
+} // namespace
+
 void CScriptGameObject::explode(u32 level_time)
 {
     CExplosive* explosive = smart_cast<CExplosive*>(&object());
@@ -264,10 +280,10 @@ SScriptBestDangerSnapshot CScriptGameObject::GetBestDangerSnapshot() const
     result.m_position = danger->position();
 
     const CEntityAlive* danger_object = danger->object();
-    result.m_object_id = danger_object ? danger_object->ID() : u16(-1);
+    result.m_object_id = script_danger_object_net_id(danger_object);
 
     const IGameObject* dependent_object = danger->dependent_object();
-    result.m_dependent_object_id = dependent_object ? dependent_object->ID() : u16(-1);
+    result.m_dependent_object_id = script_danger_object_net_id(dependent_object);
 
     return result;
 }

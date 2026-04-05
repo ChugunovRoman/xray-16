@@ -399,23 +399,11 @@ void CCustomMonster::shedule_Update(u32 DT)
             *this, m_next_visibility_update_time, m_visibility_update_interval, Device.dwTimeGlobal);
         if (run_visibility)
         {
-            if (g_mt_config.test(mtAiVision))
-#ifndef DEBUG
-                Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
-#else // DEBUG
-            {
-                if (!psAI_Flags.test(aiStalker) || !!smart_cast<CActor*>(Level().CurrentEntity()))
-                    Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
-                else
-                    Exec_Visibility();
-            }
-#endif // DEBUG
-            else
-            {
-                START_PROFILE("CustomMonster/schedule_update/vision")
-                Exec_Visibility();
-                STOP_PROFILE
-            }
+            START_PROFILE("CustomMonster/schedule_update/vision")
+            // Always main thread: Feel::Vision (seen/query/diff) is updated from feel_vision_relcase during
+            // FrameMove; seqParallel runs concurrent with DoRender and races push_back vs erase → corrupt vector.
+            Exec_Visibility();
+            STOP_PROFILE
         }
 
         START_PROFILE("CustomMonster/schedule_update/memory")

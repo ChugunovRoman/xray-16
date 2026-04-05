@@ -248,6 +248,8 @@ AssertionResult xrDebug::Fail(bool& ignoreAlways, const ErrorLocation& loc, cons
     string4096 assertionInfo;
     GatherInfo(assertionInfo, sizeof(assertionInfo), loc, expr, desc, arg1, arg2);
 
+    xrSentry_CaptureDebugFail(expr, desc, arg1, arg2);
+
     if (ShowErrorMessage)
     {
         xr_strcat(assertionInfo,

@@ -224,6 +224,10 @@ void CHUDManager::OnUIReset()
 {
     ZoneScoped;
 
+    // pUIGame is created in Load() (network start); device resize can run before that.
+    if (!pUIGame)
+        return;
+
     pUIGame->HideShownDialogs();
 
     pUIGame->UnLoad();

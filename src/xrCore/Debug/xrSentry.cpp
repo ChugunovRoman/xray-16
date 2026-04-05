@@ -30,6 +30,7 @@
 namespace
 {
 bool s_xr_sentry_started = false;
+xrSentry_LuaStackFn s_lua_stack_provider{};
 
 // Crashpad uploads these paths on crash; register likely logs at startup (after FS + CreateLog).
 constexpr size_t kMaxLogAttachments = 16;
@@ -217,6 +218,30 @@ void xrSentry_Shutdown()
     s_xr_sentry_started = false;
 }
 
+void XRCORE_API xrSentry_SetLuaStackProvider(xrSentry_LuaStackFn fn) { s_lua_stack_provider = fn; }
+
+static void sentry_event_attach_lua_stack(sentry_value_t event, pcstr lua_stack)
+{
+    constexpr size_t kMaxLua = 12000;
+    xr_string from_provider;
+    if ((!lua_stack || !*lua_stack) && s_lua_stack_provider)
+    {
+        s_lua_stack_provider(from_provider);
+        if (!from_provider.empty())
+            lua_stack = from_provider.c_str();
+    }
+    if (!lua_stack || !*lua_stack)
+        return;
+
+    size_t len = std::strlen(lua_stack);
+    if (len > kMaxLua)
+        len = kMaxLua;
+
+    sentry_value_t extra = sentry_value_new_object();
+    sentry_value_set_by_key(extra, "lua_stack", sentry_value_new_string_n(lua_stack, len));
+    sentry_value_set_by_key(event, "extra", extra);
+}
+
 void XRCORE_API xrSentry_CaptureSoftError(pcstr logger, pcstr message, pcstr lua_stack)
 {
     if (!s_xr_sentry_started || !message || !*message)
@@ -229,19 +254,62 @@ void XRCORE_API xrSentry_CaptureSoftError(pcstr logger, pcstr message, pcstr lua
     sentry_value_set_by_key(tags, "soft_error", sentry_value_new_string("true"));
     sentry_value_set_by_key(event, "tags", tags);
 
-    if (lua_stack && *lua_stack)
-    {
-        constexpr size_t kMaxLua = 12000;
-        size_t len = std::strlen(lua_stack);
-        if (len > kMaxLua)
-            len = kMaxLua;
-        sentry_value_t extra = sentry_value_new_object();
-        sentry_value_set_by_key(extra, "lua_stack", sentry_value_new_string_n(lua_stack, len));
-        sentry_value_set_by_key(event, "extra", extra);
-    }
+    sentry_event_attach_lua_stack(event, lua_stack);
 
     sentry_event_value_add_stacktrace(event, nullptr, 0);
     sentry_capture_event(event);
+}
+
+void XRCORE_API xrSentry_CaptureError(pcstr logger, pcstr message, pcstr lua_stack)
+{
+    if (!s_xr_sentry_started || !message || !*message)
+        return;
+
+    sentry_value_t event = sentry_value_new_message_event(SENTRY_LEVEL_ERROR, logger ? logger : "OpenXRay", message);
+
+    sentry_value_t tags = sentry_value_new_object();
+    sentry_value_set_by_key(tags, "engine_error", sentry_value_new_string("true"));
+    sentry_value_set_by_key(event, "tags", tags);
+
+    sentry_event_attach_lua_stack(event, lua_stack);
+
+    sentry_event_value_add_stacktrace(event, nullptr, 0);
+    sentry_capture_event(event);
+}
+
+void XRCORE_API xrSentry_CaptureDebugFail(pcstr expr, pcstr desc, pcstr arg1, pcstr arg2)
+{
+    if (!s_xr_sentry_started)
+        return;
+
+    xr_string m;
+    if (expr && *expr)
+        m = expr;
+    if (desc && *desc)
+    {
+        if (!m.empty())
+            m += " | ";
+        m += desc;
+    }
+    if (arg1 && *arg1)
+    {
+        if (!m.empty())
+            m += " | ";
+        m += arg1;
+    }
+    if (arg2 && *arg2)
+    {
+        if (!m.empty())
+            m += " | ";
+        m += arg2;
+    }
+    if (m.empty())
+        m = "assertion failed";
+    constexpr size_t cap = 1800;
+    if (m.size() > cap)
+        m.resize(cap);
+
+    xrSentry_CaptureError("xrCore.xrDebug.Fail", m.c_str(), nullptr);
 }
 
 void XRCORE_API xrSentry_CaptureIniRStringError(pcstr ini_path, pcstr section, pcstr key)
@@ -275,7 +343,10 @@ void XRCORE_API xrSentry_CaptureIniRStringError(pcstr ini_path, pcstr section, p
 
 void xrSentry_Initialize(pcstr /*commandLine*/) {}
 void xrSentry_Shutdown() {}
+void XRCORE_API xrSentry_SetLuaStackProvider(xrSentry_LuaStackFn /*fn*/) {}
 void XRCORE_API xrSentry_CaptureSoftError(pcstr /*logger*/, pcstr /*message*/, pcstr /*lua_stack*/) {}
+void XRCORE_API xrSentry_CaptureError(pcstr /*logger*/, pcstr /*message*/, pcstr /*lua_stack*/) {}
+void XRCORE_API xrSentry_CaptureDebugFail(pcstr /*expr*/, pcstr /*desc*/, pcstr /*arg1*/, pcstr /*arg2*/) {}
 void XRCORE_API xrSentry_CaptureIniRStringError(pcstr /*ini_path*/, pcstr /*section*/, pcstr /*key*/) {}
 
 #endif // USE_SENTRY

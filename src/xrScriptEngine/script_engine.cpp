@@ -10,6 +10,7 @@
 
 #include "Common/Noncopyable.hpp"
 #include "xrCore/ModuleLookup.hpp"
+#include "xrCore/Debug/xrSentry.hpp"
 
 #include "script_engine.hpp"
 #include "script_process.hpp"
@@ -112,6 +113,12 @@ bool RunJITCommand(lua_State* ls, const char* command)
     return true;
 }
 } // namespace
+
+static void xrSentry_AppendLuaStackFromGEnv(xr_string& out)
+{
+    if (GEnv.ScriptEngine)
+        GEnv.ScriptEngine->format_lua_stack(nullptr, out);
+}
 
 const char* const CScriptEngine::GlobalNamespace = SCRIPT_GLOBAL_NAMESPACE;
 Lock CScriptEngine::stateMapLock;
@@ -664,10 +671,14 @@ CScriptEngine::CScriptEngine(bool is_editor, bool is_with_profiler)
 #endif
 #endif
     m_is_editor = is_editor;
+
+    xrSentry_SetLuaStackProvider(&xrSentry_AppendLuaStackFromGEnv);
 }
 
 CScriptEngine::~CScriptEngine()
 {
+    xrSentry_SetLuaStackProvider(nullptr);
+
     if (m_profiler)
     {
         if (m_virtual_machine)
@@ -723,6 +734,11 @@ int CScriptEngine::lua_pcall_failed(lua_State* L)
 
     const auto err = lua_tostring(L, -1);
     luabind::detail::stack_pop pop{ L, lua_isstring(L, -1) ? 1 : 0 };
+
+    xr_string lua_stack;
+    format_lua_stack(L, lua_stack);
+    xrSentry_CaptureError("xrScriptEngine.lua_pcall", (err && *err) ? err : "<no error string>",
+        lua_stack.empty() ? nullptr : lua_stack.c_str());
 
     // In shipped builds this callback is hit by script data mismatches (e.g. save/script version drift).
     // Breaking into debugger here crashes unattended runs; keep hard break only on explicit opt-in flag.

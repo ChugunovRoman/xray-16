@@ -3,6 +3,8 @@
 
 #include "QueryHelper.h"
 
+#include <new>
+
 namespace xray::render::RENDER_NAMESPACE
 {
 R_occlusion::~R_occlusion(void) { occq_destroy(); }
@@ -43,7 +45,18 @@ u32 R_occlusion::occq_begin(u32& ID)
 
     if (pool.empty())
     {
-        const auto sz = used.size();
+        const size_t sz = used.size();
+        // Cap growth: pathological light counts (or desync) can push sz until xr_alloc returns
+        // nullptr; vector then placement-new's at 0 (AV write in xalloc::construct).
+        static constexpr size_t slot_hard_cap = size_t(occq_size) * 32u;
+        if (sz >= slot_hard_cap)
+        {
+            if ((Device.dwFrame % 40) == 0)
+                Msg("! R_occlusion: occlusion slot cap reached (%zu); use -no_occq or reduce lights.", slot_hard_cap);
+            ID = iInvalidHandle;
+            return 0;
+        }
+
         Query q;
         q.order = static_cast<u32>(sz);
         if (FAILED(CreateQuery(&q.Q, D3D_QUERY_OCCLUSION)))
@@ -53,12 +66,27 @@ u32 R_occlusion::occq_begin(u32& ID)
             ID = iInvalidHandle;
             return 0;
         }
-        if (sz == used.capacity())
+
+        try
         {
-            used.reserve(sz + occq_size_base);
-            pool.reserve(sz + occq_size_base);
+            if (sz == used.capacity())
+            {
+                const size_t target_cap = sz + size_t(occq_size_base);
+                if (target_cap < sz)
+                    throw std::bad_alloc{};
+                used.reserve(target_cap);
+                pool.reserve(target_cap);
+            }
+            pool.emplace(pool.begin(), std::move(q));
         }
-        pool.emplace(pool.begin(), std::move(q));
+        catch (...)
+        {
+            ReleaseQuery(q.Q);
+            if ((Device.dwFrame % 40) == 0)
+                Msg("! R_occlusion: failed to grow occlusion query storage (out of memory?).");
+            ID = iInvalidHandle;
+            return 0;
+        }
     }
 
     RImplementation.BasicStats.OcclusionQueries++;

@@ -358,14 +358,20 @@ void CObjectList::Update(bool bForce)
 
         {
             ZoneScopedN("CObjectList::Update/net_Relcase/callbacks_and_hud");
-            RELCASE_CALLBACK_VEC::iterator it = m_relcase_callbacks.begin();
-            const RELCASE_CALLBACK_VEC::iterator ite = m_relcase_callbacks.end();
-            for (; it != ite; ++it)
+            // Snapshot delegates: a callback may destroy another object whose ~pure_relcase
+            // calls relcase_unregister(), mutating m_relcase_callbacks. A cached .end() then
+            // dangles and the next ++it walks past the vector (crashes in std::find inside
+            // e.g. Feel::Vision::feel_vision_relcase).
+            xr_vector<RELCASE_CALLBACK> callbacks_snapshot;
+            callbacks_snapshot.reserve(m_relcase_callbacks.size());
+            for (const auto& pair : m_relcase_callbacks)
+                callbacks_snapshot.push_back(pair.m_Callback);
+
+            for (const auto& cb : callbacks_snapshot)
             {
-                VERIFY(*(*it).m_ID == (it - m_relcase_callbacks.begin()));
-                for (auto& dit : destroy_queue)
+                for (auto* dit : destroy_queue)
                 {
-                    (*it).m_Callback(dit);
+                    cb(dit);
                     g_pGameLevel->pHUD->net_Relcase(dit);
                 }
             }

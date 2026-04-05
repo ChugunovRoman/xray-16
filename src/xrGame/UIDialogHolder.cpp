@@ -163,10 +163,33 @@ void CDialogHolder::OnExternalHideIndicators()
 
 CUIDialogWnd* CDialogHolder::TopInputReceiver()
 {
-    if (!m_input_receivers.empty())
-        return m_input_receivers.back().m_item;
-    return NULL;
-};
+    // m_item can outlive the dialog (destroyed window, stale recvItem) → virtual calls AV (e.g. NeedCursor).
+    while (!m_input_receivers.empty())
+    {
+        CUIDialogWnd* w = m_input_receivers.back().m_item;
+        if (!w)
+        {
+            m_input_receivers.pop_back();
+            continue;
+        }
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+        bool ok = false;
+        __try
+        {
+            (void)w->NeedCursor();
+            ok = true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+        if (!ok)
+        {
+            m_input_receivers.pop_back();
+            continue;
+        }
+#endif
+        return w;
+    }
+    return nullptr;
+}
 
 void CDialogHolder::SetMainInputReceiver(CUIDialogWnd* ir, bool _find_remove)
 {

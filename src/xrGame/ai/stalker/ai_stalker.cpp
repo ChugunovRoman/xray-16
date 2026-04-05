@@ -1147,10 +1147,8 @@ void CAI_Stalker::shedule_Update(u32 DT)
             START_PROFILE("stalker/schedule_update/vision")
             {
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleVisibility);
-                if (g_mt_config.test(mtAiVision))
-                    Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
-                else
-                    Exec_Visibility();
+                // See CCustomMonster::shedule_Update: vision must not run on seqParallel (race with relcase).
+                Exec_Visibility();
             }
             STOP_PROFILE
         }
