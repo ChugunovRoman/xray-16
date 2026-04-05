@@ -736,7 +736,10 @@ int CScriptEngine::lua_pcall_failed(lua_State* L)
     luabind::detail::stack_pop pop{ L, lua_isstring(L, -1) ? 1 : 0 };
 
     xr_string lua_stack;
-    format_lua_stack(L, lua_stack);
+    if (CScriptEngine* se = GetInstance(L))
+        se->format_lua_stack(L, lua_stack);
+    else if (GEnv.ScriptEngine)
+        GEnv.ScriptEngine->format_lua_stack(L, lua_stack);
     xrSentry_CaptureError("xrScriptEngine.lua_pcall", (err && *err) ? err : "<no error string>",
         lua_stack.empty() ? nullptr : lua_stack.c_str());
 

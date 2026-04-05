@@ -59,7 +59,7 @@ struct ray_cache
         result = _result;
     }
 
-    bool similar(const Fvector& _start, const Fvector& _dir, const float _range)
+    bool similar(const Fvector& _start, const Fvector& _dir, const float _range) const
     {
         if (!_start.similar(start))
             return false;

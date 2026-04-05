@@ -150,11 +150,14 @@ IC u32 get_stalker_think_interval(const CAI_Stalker& stalker, const EStalkerUpda
     }
 }
 
-IC u32 get_stalker_visibility_interval(const EStalkerUpdateLod lod)
+IC u32 get_stalker_visibility_interval(const CAI_Stalker& stalker, const EStalkerUpdateLod lod)
 {
     switch (lod)
     {
-    case EStalkerUpdateLod::Near: return 0;
+    case EStalkerUpdateLod::Near:
+        if (stalker.memory().enemy().selected())
+            return 0;
+        return npc_perf_stalker_vis_interval_near_ms;
     case EStalkerUpdateLod::Medium: return npc_perf_stalker_vis_interval_medium_ms;
     case EStalkerUpdateLod::Far: return npc_perf_stalker_vis_interval_far_ms;
     default: return 0;
@@ -1115,7 +1118,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
     const u32 now_ms = Device.dwTimeGlobal;
     const EStalkerUpdateLod update_lod = get_stalker_update_lod(*this);
     const bool run_visibility = should_run_stalker_lod_stage(
-        *this, m_next_visibility_update_time, m_visibility_update_interval, get_stalker_visibility_interval(update_lod), now_ms);
+        *this, m_next_visibility_update_time, m_visibility_update_interval, get_stalker_visibility_interval(*this, update_lod), now_ms);
     const bool run_think = should_run_stalker_lod_stage(
         *this, m_next_think_update_time, m_think_update_interval, get_stalker_think_interval(*this, update_lod), now_ms);
 

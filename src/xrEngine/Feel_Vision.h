@@ -78,3 +78,9 @@ public:
     virtual float feel_vision_mtl_transp(IGameObject* O, u32 element) = 0;
 };
 };
+
+// AI LOS / feel_vision ray tuning (defaults = vanilla behavior; see console_commands / user.ltx)
+ENGINE_API extern int npc_perf_vision_trace_budget;       // max rays per feel_vision_update pass (was hardcoded 12)
+ENGINE_API extern int npc_perf_vision_skip_dynamic_ray;   // 1 = skip dynamic cform ray pass after static query
+ENGINE_API extern int npc_perf_vision_static_only;        // 1 = static geometry only in main RayQuery (cheaper, less accurate)
+ENGINE_API extern float npc_perf_vision_cache_pos_slack_m; // >0 = reuse ray cache if eye moved less than this (meters)

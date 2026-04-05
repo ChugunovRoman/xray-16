@@ -54,6 +54,7 @@
 #include "xrPhysics/console_vars.h"
 #include "GametaskManager.h"
 #include "performance_cvars.h"
+#include "xrEngine/Feel_Vision.h"
 #include "map_spot_cvars.h"
 #include "weapon_inv_icon.h"
 
@@ -192,6 +193,7 @@ u32 npc_perf_binder_far_interval_ms = 250;
 u32 npc_perf_binder_far_phases = 6;
 u32 npc_perf_binder_near_interval_ms = 180;
 u32 npc_perf_binder_far_throttle_ms = 450;
+u32 npc_perf_stalker_vis_interval_near_ms = 0;
 u32 npc_perf_stalker_vis_interval_medium_ms = 260;
 u32 npc_perf_stalker_vis_interval_far_ms = 550;
 float npc_perf_monster_vis_near_dist = 35.f;
@@ -2727,8 +2729,13 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_binder_far_phases", (int*)&npc_perf_binder_far_phases, 1, 64);
     CMD4(CCC_Integer, "npc_perf_binder_near_interval_ms", (int*)&npc_perf_binder_near_interval_ms, 10, 5000);
     CMD4(CCC_Integer, "npc_perf_binder_far_throttle_ms", (int*)&npc_perf_binder_far_throttle_ms, 50, 10000);
+    CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_near_ms", (int*)&npc_perf_stalker_vis_interval_near_ms, 0, 30000);
     CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_medium_ms", (int*)&npc_perf_stalker_vis_interval_medium_ms, 10, 30000);
     CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_far_ms", (int*)&npc_perf_stalker_vis_interval_far_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_vision_trace_budget", &npc_perf_vision_trace_budget, 1, 128);
+    CMD4(CCC_Integer, "npc_perf_vision_skip_dynamic_ray", &npc_perf_vision_skip_dynamic_ray, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_vision_static_only", &npc_perf_vision_static_only, 0, 1);
+    CMD4(CCC_Float, "npc_perf_vision_cache_pos_slack_m", &npc_perf_vision_cache_pos_slack_m, 0.f, 5.f);
     CMD4(CCC_Float, "npc_perf_monster_vis_near_dist", &npc_perf_monster_vis_near_dist, 1.f, 500.f);
     CMD4(CCC_Float, "npc_perf_monster_vis_medium_dist", &npc_perf_monster_vis_medium_dist, 1.f, 500.f);
     CMD4(CCC_Integer, "npc_perf_monster_vis_interval_medium_ms", (int*)&npc_perf_monster_vis_interval_medium_ms, 10, 30000);

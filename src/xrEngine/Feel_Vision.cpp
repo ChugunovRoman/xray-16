@@ -7,9 +7,35 @@
 #include "IGame_Persistent.h"
 #include "xrCDB/Intersect.hpp"
 
+ENGINE_API int npc_perf_vision_trace_budget = 12;
+ENGINE_API int npc_perf_vision_skip_dynamic_ray = 0;
+ENGINE_API int npc_perf_vision_static_only = 0;
+ENGINE_API float npc_perf_vision_cache_pos_slack_m = 0.15f;
+
+namespace
+{
+IC bool feel_vision_ray_cache_reuse(const collide::ray_cache& C, const Fvector& P, const Fvector& D, float range)
+{
+    if (!C.result)
+        return false;
+
+    const float slack_m = npc_perf_vision_cache_pos_slack_m;
+    if (slack_m <= 0.f)
+        return C.similar(P, D, range);
+
+    const float slack2 = slack_m * slack_m;
+    if (P.distance_to_sqr(C.start) > slack2)
+        return false;
+    if (!fsimilar(1.f, D.dotproduct(C.dir)))
+        return false;
+    if (!fsimilar(range, C.range))
+        return false;
+    return true;
+}
+} // namespace
+
 namespace Feel
 {
-constexpr u32 FEEL_VISION_TRACE_BUDGET = 12;
 
 Vision::Vision(IGameObject const* owner) : pure_relcase(&Vision::feel_vision_relcase), m_owner(owner) {}
 Vision::~Vision() {}
@@ -160,7 +186,8 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold)
     if (!total)
         return;
 
-    const u32 budget = _min(total, FEEL_VISION_TRACE_BUDGET);
+    const int cfg_budget = _max(1, npc_perf_vision_trace_budget);
+    const u32 budget = _min(total, static_cast<u32>(cfg_budget));
     u32 start_index = 0;
     if (total > budget)
     {
@@ -205,11 +232,13 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold)
         {
             D.div(f);
             // setup ray defs & feel params
-            collide::ray_defs RD(P, D, f, CDB::OPT_CULL,
-                collide::rq_target(collide::rqtStatic | collide::rqtObject | collide::rqtObstacle));
+            const collide::rq_target rq_tgt = npc_perf_vision_static_only != 0
+                ? collide::rqtStatic
+                : collide::rq_target(collide::rqtStatic | collide::rqtObject | collide::rqtObstacle);
+            collide::ray_defs RD(P, D, f, CDB::OPT_CULL, rq_tgt);
             SFeelParam feel_params(this, &*I, vis_threshold);
             // check cache
-            if (I->Cache.result && I->Cache.similar(P, D, f))
+            if (feel_vision_ray_cache_reuse(I->Cache, P, D, f))
             {
                 // similar with previous query
                 feel_params.vis = I->Cache_vis;
@@ -243,7 +272,7 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold)
                 }
             }
             // If the static/material query already failed visibility, skip the extra dynamic-object ray pass.
-            if (feel_params.vis >= feel_params.vis_threshold)
+            if (npc_perf_vision_skip_dynamic_ray == 0 && feel_params.vis >= feel_params.vis_threshold)
             {
                 r_spatial.clear();
                 g_pGamePersistent->SpatialSpace.q_ray(r_spatial, 0, STYPE_VISIBLEFORAI, P, D, f);

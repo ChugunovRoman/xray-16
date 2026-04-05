@@ -27,8 +27,10 @@ extern u32 npc_perf_binder_near_interval_ms;   // throttle: min interval between
 extern u32 npc_perf_binder_far_throttle_ms;    // throttle: min interval between scriptBinder.shedule_Update for far NPCs (ms)
 
 // Stalker visibility (ai_stalker.cpp)
+extern u32 npc_perf_stalker_vis_interval_near_ms; // 0 = every schedule tick when Near; >0 when no selected enemy (crowd LOS throttle)
 extern u32 npc_perf_stalker_vis_interval_medium_ms;
 extern u32 npc_perf_stalker_vis_interval_far_ms;
+// npc_perf_vision_* : ENGINE_API in xrEngine/Feel_Vision.h (defined in Feel_Vision.cpp)
 
 // CustomMonster visibility (CustomMonster.cpp)
 extern float npc_perf_monster_vis_near_dist;
