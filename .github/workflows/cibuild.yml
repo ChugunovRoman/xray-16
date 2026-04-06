@@ -22,7 +22,20 @@ jobs:
     steps:
     - uses: actions/checkout@main
       with:
-        submodules: recursive
+        submodules: false
+
+    # Object DB + metadata for repo submodules (.git/modules). Key = commit: changes when submodule pins change.
+    # Avoid restore-keys: a partial match could mix object DB from another revision.
+    - uses: actions/cache@v4
+      id: cache-git-submodules
+      with:
+        path: .git/modules
+        key: git-modules-${{ runner.os }}-${{ github.sha }}
+
+    - name: Git submodules
+      run: |
+        git submodule sync --recursive
+        git submodule update --init --recursive --depth 1 --jobs 4
 
     # googlesource (sentry-native → linux-syscall-support) rate-limits CI; cache avoids repeated clones.
     - uses: actions/cache@v4
@@ -199,7 +212,18 @@ jobs:
 
     - uses: actions/checkout@main
       with:
-        submodules: recursive
+        submodules: false
+
+    - uses: actions/cache@v4
+      id: cache-git-submodules
+      with:
+        path: .git/modules
+        key: git-modules-${{ runner.os }}-${{ github.sha }}
+
+    - name: Git submodules
+      run: |
+        git submodule sync --recursive
+        git submodule update --init --recursive --depth 1 --jobs 4
 
     - uses: actions/cache@v4
       id: cache-sentry-native-src
