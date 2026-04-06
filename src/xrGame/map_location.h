@@ -82,6 +82,8 @@ public:
     void destroy() override;
 
     void LoadSpot(pcstr type);
+    /** After map_spots.xml reload (OnUIReset); nullptr => use registry spot_type. */
+    virtual pcstr SpotTypeForXmlReload() const { return nullptr; }
 
     IC bool HintEnabled() const { return !!m_flags.test(eHintEnabled); }
     pcstr GetHint() const;
@@ -152,6 +154,8 @@ protected:
     bool IsVisible() const { return m_b_visible; };
 public:
     CRelationMapLocation(const shared_str& type, u16 object_id, u16 pInvOwnerActorID);
+
+    pcstr SpotTypeForXmlReload() const override { return m_curr_spot_name.c_str(); }
 
     virtual bool Update();
 

@@ -155,7 +155,11 @@ void CMapManager::OnUIReset()
     m_uiSpotXml.Load(CONFIG_PATH, UI_PATH, UI_PATH_DEFAULT, "map_spots.xml");
     for (const SLocationKey& locationKey : Locations())
     {
-        locationKey.location->LoadSpot(locationKey.spot_type.c_str());
+        CMapLocation* loc = locationKey.location;
+        if (pcstr spot = loc->SpotTypeForXmlReload())
+            loc->LoadSpot(spot);
+        else
+            loc->LoadSpot(locationKey.spot_type.c_str());
     }
 }
 
