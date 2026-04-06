@@ -2,6 +2,8 @@
 
 #include "UIWindow.h"
 
+#include <algorithm>
+
 #include "Cursor/UICursor.h"
 #include "xrEngine/editor_helper.h"
 
@@ -52,13 +54,18 @@ CUIWindow::~CUIWindow()
 
 void CUIWindow::Draw()
 {
-    for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
+    const xr_vector<CUIWindow*> children_copy(m_ChildWndList.begin(), m_ChildWndList.end());
+    for (CUIWindow* child : children_copy)
     {
-        if (!(*it)->IsShown())
+        if (!child)
             continue;
-        if ((*it)->GetCustomDraw())
+        if (std::find(m_ChildWndList.begin(), m_ChildWndList.end(), child) == m_ChildWndList.end())
             continue;
-        (*it)->Draw();
+        if (!child->IsShown())
+            continue;
+        if (child->GetCustomDraw())
+            continue;
+        child->Draw();
     }
 }
 
@@ -87,19 +94,16 @@ void CUIWindow::Update()
             OnFocusLost();
     }
 
-    for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; it++)
+    const xr_vector<CUIWindow*> children_copy(m_ChildWndList.begin(), m_ChildWndList.end());
+    for (CUIWindow* child : children_copy)
     {
-        if (m_ChildWndList.size() == 0)
-            break;
-        if (*it == nullptr)
-        {
-            Msg("m_ChildWndList, (*it) == nullptr =[%d] m_ChildWndList.size=[%d]", (*it) == nullptr, m_ChildWndList.size());
-            break;
-        }
-
-        if (!(*it)->IsShown())
+        if (!child)
             continue;
-        (*it)->Update();
+        if (std::find(m_ChildWndList.begin(), m_ChildWndList.end(), child) == m_ChildWndList.end())
+            continue;
+        if (!child->IsShown())
+            continue;
+        child->Update();
     }
 }
 

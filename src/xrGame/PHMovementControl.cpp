@@ -200,10 +200,46 @@ void CPHMovementControl::Calculate(
     */
     // IPhysicsShellHolder * O=di->DamageObject();
     // SCollisionHitCallback* cc= O ? O->get_collision_hit_callback() : NULL;
-    ICollisionDamageInfo* cdi = CollisionDamageInfo();
-    if (cdi->HitCallback())
-        cdi->HitCallback()->call((m_character->PhysicsRefObject()), fMinCrashSpeed, fMaxCrashSpeed, fContactSpeed,
-            gcontact_HealthLost, CollisionDamageInfo());
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+    // Stale m_hit_callback / corrupt cdi can fault on HitCallback() before call(); guard whole block.
+    __try
+    {
+        ICollisionDamageInfo* const cdi = CollisionDamageInfo();
+        if (cdi)
+        {
+            ICollisionHitCallback* const cb = cdi->HitCallback();
+            if (cb)
+            {
+                IPhysicsShellHolder* const ref_obj = m_character ? m_character->PhysicsRefObject() : nullptr;
+                cb->call(ref_obj, fMinCrashSpeed, fMaxCrashSpeed, fContactSpeed, gcontact_HealthLost, cdi);
+            }
+        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        Msg("! CPHMovementControl::Calculate: collision damage / HitCallback fault; Reinit");
+        __try
+        {
+            if (m_character)
+            {
+                if (ICollisionDamageInfo* cdi2 = CollisionDamageInfo())
+                    cdi2->Reinit();
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+#else
+    if (ICollisionDamageInfo* cdi = CollisionDamageInfo())
+    {
+        if (ICollisionHitCallback* cb = cdi->HitCallback())
+        {
+            IPhysicsShellHolder* const ref_obj = m_character ? m_character->PhysicsRefObject() : nullptr;
+            cb->call(ref_obj, fMinCrashSpeed, fMaxCrashSpeed, fContactSpeed, gcontact_HealthLost, cdi);
+        }
+    }
+#endif
 
     ////////
 

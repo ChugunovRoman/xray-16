@@ -191,8 +191,8 @@ void CUIWpnParams::SetInfo(CInventoryItem* slot_wpn, CInventoryItem& cur_wpn)
         Frect tex_rect;
         if (m_stAmmoType1)
         {
-            R_ASSERT2(pSettings->line_exist(ammo_types[0].c_str(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", ammo_types[0].c_str()));
-            m_stAmmoType1->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(ammo_types[0].c_str(), "inv_icon")));
+            m_stAmmoType1->SetShader(
+                InventoryUtilities::GetEquipmentIconShaderForItemSection(ammo_types[0].c_str()));
             tex_rect.x1 = 0;
             tex_rect.y1 = 0;
             tex_rect.x2 = float(pSettings->r_u32(ammo_types[0].c_str(), "inv_grid_width") * ICON_GRID_WIDTH * 1.1);
@@ -217,8 +217,8 @@ void CUIWpnParams::SetInfo(CInventoryItem* slot_wpn, CInventoryItem& cur_wpn)
             }
             else
             {
-                R_ASSERT2(pSettings->line_exist(ammo_types[1].c_str(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", ammo_types[1].c_str()));
-                m_stAmmoType2->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(ammo_types[1].c_str(), "inv_icon")));
+                m_stAmmoType2->SetShader(
+                    InventoryUtilities::GetEquipmentIconShaderForItemSection(ammo_types[1].c_str()));
 
                 tex_rect.x1 = 0;
                 tex_rect.y1 = 0;

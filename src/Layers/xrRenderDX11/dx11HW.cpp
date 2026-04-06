@@ -294,10 +294,19 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
     // EscapeCB runs with driver + DXGI frames on top of *our* calling thread's stack. Main exe may use /STACK:32M,
     // but CreateDevice is still deep (SDL, caps, Tracy, deferred contexts). Run swap chain creation on a fresh
     // thread with a large reserved stack so the entry frame is shallow (mitigates 0xC00000FD in nvwgf2umx).
+    //
+    // Exclusive DXGI fullscreen (rsFullscreen, Windowed=FALSE swap chain) must not be initialized from a worker
+    // while the main thread blocks in WaitForSingleObject: drivers often post/callback to the HWND thread and
+    // deadlock. Borderless uses a windowed swap chain and stays on the auxiliary path. Override:
+    // -dxgi_swapchain_big_stack_fullscreen (not recommended unless debugging stack overflow in fullscreen).
     constexpr u32 kPciVendorNvidiaSwap = 0x10DE;
+    const bool nvidia_or_big_stack_flag =
+        (Caps.id_vendor == kPciVendorNvidiaSwap) || strstr(Core.Params, "-dxgi_swapchain_big_stack");
+    const bool exclusive_dxgi_fullscreen = ThisInstanceIsGlobal() && psDeviceMode.WindowStyle == rsFullscreen;
+    const bool force_aux_thread_in_fullscreen = strstr(Core.Params, "-dxgi_swapchain_big_stack_fullscreen");
     const bool use_swapchain_big_stack_thread =
 #if defined(_WIN32)
-        (Caps.id_vendor == kPciVendorNvidiaSwap) || strstr(Core.Params, "-dxgi_swapchain_big_stack");
+        nvidia_or_big_stack_flag && (!exclusive_dxgi_fullscreen || force_aux_thread_in_fullscreen);
 #else
         false;
 #endif
@@ -330,6 +339,10 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
     else
 #endif
     {
+#if defined(_WIN32)
+        if (exclusive_dxgi_fullscreen && !force_aux_thread_in_fullscreen && nvidia_or_big_stack_flag)
+            Msg("* DXGI: swap chain on main thread (exclusive fullscreen avoids off-thread deadlock)");
+#endif
         const auto p = CreatePrimarySwapChains(hwnd);
         swap_chain_ok = p.first;
         used_factory_create_swap_chain = p.second;

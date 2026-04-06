@@ -148,6 +148,7 @@ void CGameObject::cNameVisual_set(shared_str N)
     if (N.c_str() && N[0])
     {
         IRenderVisual* old_v = renderable.visual;
+        shared_str const prev_visual_name = NameVisual;
         NameVisual = N;
         shared_str model_suffix = pSettings->read_if_exists<pcstr>(NameSection.c_str(), "model_cache_suffix", "");
         auto load_world_materials = [&](const char* format) {
@@ -180,6 +181,14 @@ void CGameObject::cNameVisual_set(shared_str N)
 
         load_world_materials("world_material_%d");
         renderable.visual = GEnv.Render->model_Create(N.c_str(), model_suffix.c_str());
+        if (!renderable.visual)
+        {
+            Msg("! [%s] model_Create failed for visual [%s]", cName().c_str(), N.c_str());
+            NameVisual = prev_visual_name;
+            renderable.visual = old_v;
+            OnChangeVisual();
+            return;
+        }
         IKinematics* old_k = old_v ? old_v->dcast_PKinematics() : NULL;
         IKinematics* new_k = renderable.visual->dcast_PKinematics();
         /*

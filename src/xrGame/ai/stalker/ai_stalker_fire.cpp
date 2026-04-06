@@ -403,6 +403,15 @@ void CAI_Stalker::OnItemDrop(CInventoryItem* inventory_item, bool just_before_de
     m_item_actuality = false;
     m_sell_info_actuality = false;
 
+    if (inventory_item == m_best_item_to_kill)
+        m_best_item_to_kill = nullptr;
+    if (inventory_item == m_best_ammo)
+        m_best_ammo = nullptr;
+    if (inventory_item == m_best_found_item_to_kill)
+        m_best_found_item_to_kill = nullptr;
+    if (inventory_item == m_best_found_ammo)
+        m_best_found_ammo = nullptr;
+
     if (!g_Alive())
         return;
 
@@ -427,12 +436,32 @@ void CAI_Stalker::update_best_item_info()
 
 void CAI_Stalker::update_best_item_info_impl()
 {
+    if (m_best_item_to_kill)
+    {
+        bool still_in_inventory = false;
+        for (TIItemContainer::iterator it = inventory().m_all.begin(); it != inventory().m_all.end(); ++it)
+        {
+            if (*it == m_best_item_to_kill)
+            {
+                still_in_inventory = true;
+                break;
+            }
+        }
+        if (!still_in_inventory)
+        {
+            m_best_item_to_kill = nullptr;
+            m_best_ammo = nullptr;
+        }
+    }
+
     luabind::functor<CScriptGameObject*> funct;
     if (GEnv.ScriptEngine->functor("ai_stalker.update_best_weapon", funct))
     {
         CScriptGameObject* GO = nullptr;
         CGameObject* game_object = m_best_item_to_kill ? &m_best_item_to_kill->object() : nullptr;
-        if (m_best_item_to_kill && m_best_item_to_kill->m_pInventory && pSettings->section_exist(game_object->NameSection))
+        bool const can_query_section = m_best_item_to_kill && m_best_item_to_kill->m_pInventory && game_object &&
+            !game_object->getDestroy() && Level().Objects.net_Find(game_object->ID()) == game_object;
+        if (can_query_section && game_object->NameSection && pSettings->section_exist(game_object->NameSection))
         {
             CWeapon* cur_itm = smart_cast<CWeapon*>(m_best_item_to_kill);
             GO = funct(lua_game_object(), cur_itm ? cur_itm->lua_game_object() : nullptr);

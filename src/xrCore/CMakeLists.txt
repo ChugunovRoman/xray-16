@@ -484,9 +484,18 @@ if (NOT CMAKE_SYSTEM_NAME STREQUAL "OpenBSD" AND NOT CMAKE_SYSTEM_NAME STREQUAL 
     )
 endif()
 
+# Tracy: TracyClient.cpp + TRACY_EXPORTS must live in xrCore so other DLLs (TRACY_IMPORTS via xrCore.h) resolve
+# tracy::rpmalloc / InitRpmalloc / profiler. Without this, CMake shared builds can crash in ZoneScoped on worker threads.
+if (XRAY_ENABLE_TRACY)
+    set(_xray_tracy_client "${CMAKE_SOURCE_DIR}/Externals/tracy/public/TracyClient.cpp")
+    target_sources(xrCore PRIVATE "${_xray_tracy_client}")
+    set_source_files_properties("${_xray_tracy_client}" PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+endif()
+
 target_compile_definitions(xrCore
     PRIVATE
     XRCORE_EXPORTS
+    $<$<AND:$<BOOL:${XRAY_ENABLE_TRACY}>,$<BOOL:${BUILD_SHARED_LIBS}>>:TRACY_EXPORTS>
     CMAKE_INSTALL_FULL_LIBDIR=\"${CMAKE_INSTALL_FULL_LIBDIR}\"
     CMAKE_INSTALL_FULL_DATAROOTDIR=\"${CMAKE_INSTALL_FULL_DATAROOTDIR}\"
     CI=$ENV{CI}
@@ -508,6 +517,9 @@ endif()
 if (WITH_SENTRY)
     target_compile_definitions(xrCore PRIVATE USE_SENTRY)
     target_link_libraries(xrCore PRIVATE sentry::sentry)
+    if (WIN32)
+        target_link_libraries(xrCore PRIVATE dbghelp)
+    endif()
     set(XRAY_SENTRY_EMBED_DSN "" CACHE STRING
         "Optional Sentry DSN embedded in binary (overrides empty Debug/xrSentry_embed.h for this build)")
     if (NOT XRAY_SENTRY_EMBED_DSN STREQUAL "")

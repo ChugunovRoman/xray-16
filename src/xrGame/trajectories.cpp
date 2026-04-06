@@ -1,10 +1,24 @@
 #include "StdAfx.h"
 #include "trajectories.h"
 #include "Level.h"
+#include "GameObject.h"
 #include "xrPhysics/IPHWorld.h"
 #include "xrGame/ai_debug_variables.h"
 #include "xrEngine/xr_object.h"
 #include "xrCore/_vector3d_ext.h"
+
+// m_throw_ignore_object and similar can outlive the target; calling getEnabled on a freed CGameObject AVs.
+static IGameObject* trajectory_resolve_ignored_object(IGameObject* ignored_object)
+{
+    if (!ignored_object)
+        return nullptr;
+    CGameObject* go = smart_cast<CGameObject*>(ignored_object);
+    if (!go || go->getDestroy())
+        return nullptr;
+    if (Level().Objects.net_Find(go->ID()) != ignored_object)
+        return nullptr;
+    return ignored_object;
+}
 
 static void trajectory_get_position(
     Fvector& result, const Fvector& start_position, const Fvector& velocity, const Fvector& gravity, const float& time)
@@ -70,6 +84,11 @@ static bool trajectory_check_collision(float low, float high, Fvector const& pos
     Fvector& collide_position, collide::rq_results& temp_rq_results, Fvector box_size,
     xr_vector<trajectory_pick>* const out_trajectory_picks, xr_vector<Fvector>* const out_collide_tris)
 {
+    if (!self_object)
+        return false;
+
+    IGameObject* const ignore_obj = trajectory_resolve_ignored_object(ignored_object);
+
     Fvector start;
     trajectory_get_position(start, position, velocity, gravity, low);
 
@@ -91,10 +110,10 @@ static bool trajectory_check_collision(float low, float high, Fvector const& pos
     self_object->setEnabled(FALSE);
 
     BOOL throw_ignore_object_enabled = FALSE;
-    if (ignored_object)
+    if (ignore_obj)
     {
-        throw_ignore_object_enabled = ignored_object->getEnabled();
-        ignored_object->setEnabled(FALSE);
+        throw_ignore_object_enabled = ignore_obj->getEnabled();
+        ignore_obj->setEnabled(FALSE);
     }
 
     float const epsilon = 0.0001f;
@@ -140,8 +159,8 @@ static bool trajectory_check_collision(float low, float high, Fvector const& pos
         box_result = !Level().ObjectSpace.BoxQuery(box_center, box_z_axis, box_y_axis, box_size, out_collide_tris);
     }
 
-    if (ignored_object)
-        ignored_object->setEnabled(throw_ignore_object_enabled);
+    if (ignore_obj)
+        ignore_obj->setEnabled(throw_ignore_object_enabled);
 
     self_object->setEnabled(previous_enabled);
 
@@ -174,7 +193,7 @@ bool trajectory_intersects_geometry(float trajectory_time, Fvector const& trajec
     const float high = trajectory_time;
     for (;;)
     {
-        float time = trajectory_select_pick_time(low, high, trajectory_start, trajectory_start, gravity, epsilon);
+        float time = trajectory_select_pick_time(low, high, trajectory_start, trajectory_velocity, gravity, epsilon);
 
         if (!trajectory_check_collision(low, time, trajectory_start, trajectory_velocity, gravity, self_object,
                 ignored_object, collide_position, temp_rq_results, box_size, out_trajectory_picks, out_collide_tris))

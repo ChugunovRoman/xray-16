@@ -21,6 +21,7 @@
 
 #if defined(XR_PLATFORM_WINDOWS)
 #include <Windows.h>
+#include <dbghelp.h>
 #endif
 
 #if __has_include(".GitInfo.hpp")
@@ -105,6 +106,64 @@ bool build_path_next_to_exe(const char* fileName, char* out, size_t outSize)
         return false;
     slash[1] = '\0';
     xr_strcat(out, outSize, fileName);
+    return true;
+}
+
+// Live process snapshot for xrDebug::Fail (not a crash). sentry_capture_minidump() reads the file into the envelope synchronously.
+bool write_live_minidump_to_temp(char* pathOut, size_t pathOutSize)
+{
+    if (!pathOut || pathOutSize < MAX_PATH)
+        return false;
+
+    char tempDir[MAX_PATH]{};
+    if (!GetTempPathA(static_cast<DWORD>(sizeof(tempDir)), tempDir))
+        return false;
+    if (!GetTempFileNameA(tempDir, "xrdf", 0, pathOut))
+        return false;
+
+    const HANDLE hFile = CreateFileA(pathOut, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+        DeleteFileA(pathOut);
+        pathOut[0] = '\0';
+        return false;
+    }
+
+    HMODULE dbghelpMod = LoadLibraryA("dbghelp.dll");
+    if (!dbghelpMod)
+    {
+        CloseHandle(hFile);
+        DeleteFileA(pathOut);
+        pathOut[0] = '\0';
+        return false;
+    }
+
+    using MiniDumpWriteDump_t = BOOL(WINAPI*)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE,
+        PMINIDUMP_EXCEPTION_INFORMATION, PMINIDUMP_USER_STREAM_INFORMATION, PMINIDUMP_CALLBACK_INFORMATION);
+    auto const pfn = reinterpret_cast<MiniDumpWriteDump_t>(GetProcAddress(dbghelpMod, "MiniDumpWriteDump"));
+    if (!pfn)
+    {
+        FreeLibrary(dbghelpMod);
+        CloseHandle(hFile);
+        DeleteFileA(pathOut);
+        pathOut[0] = '\0';
+        return false;
+    }
+
+    const MINIDUMP_TYPE dumpType = static_cast<MINIDUMP_TYPE>(
+        MiniDumpWithDataSegs | MiniDumpWithIndirectlyReferencedMemory | MiniDumpScanMemory |
+        MiniDumpWithProcessThreadData | MiniDumpWithThreadInfo);
+
+    const BOOL ok = pfn(GetCurrentProcess(), GetCurrentProcessId(), hFile, dumpType, nullptr, nullptr, nullptr);
+    FreeLibrary(dbghelpMod);
+    CloseHandle(hFile);
+    if (!ok)
+    {
+        DeleteFileA(pathOut);
+        pathOut[0] = '\0';
+        return false;
+    }
     return true;
 }
 #endif
@@ -309,7 +368,50 @@ void XRCORE_API xrSentry_CaptureDebugFail(pcstr expr, pcstr desc, pcstr arg1, pc
     if (m.size() > cap)
         m.resize(cap);
 
-    xrSentry_CaptureError("xrCore.xrDebug.Fail", m.c_str(), nullptr);
+#if defined(XR_PLATFORM_WINDOWS)
+    sentry_set_tag("xrDebug.Fail", "true");
+    sentry_set_tag("logger", "xrCore.xrDebug.Fail");
+    sentry_set_extra("assertion", sentry_value_new_string(m.c_str()));
+
+    xr_string lua_for_extra;
+    if (s_lua_stack_provider)
+    {
+        s_lua_stack_provider(lua_for_extra);
+        constexpr size_t kMaxLua = 12000;
+        if (lua_for_extra.size() > kMaxLua)
+            lua_for_extra.resize(kMaxLua);
+        if (!lua_for_extra.empty())
+            sentry_set_extra("lua_stack", sentry_value_new_string(lua_for_extra.c_str()));
+    }
+
+    char dumpPath[MAX_PATH]{};
+    const bool dumped = write_live_minidump_to_temp(dumpPath, sizeof(dumpPath));
+    if (dumped)
+    {
+        sentry_capture_minidump(dumpPath);
+        // WinHTTP transport queues uploads; xrDebug::Fail soon hits DEBUG_BREAK — flush so the envelope
+        // (minidump + log attachments) is sent before the process may terminate or hang in the dialog.
+        constexpr uint64_t kSentryFlushMs = 10000;
+        if (sentry_flush(kSentryFlushMs) != 0)
+        {
+#ifndef MASTER_GOLD
+            Msg("! [Sentry]: sentry_flush timed out after xrDebug::Fail minidump (report may be incomplete)");
+#endif
+        }
+        DeleteFileA(dumpPath);
+    }
+
+    if (!lua_for_extra.empty())
+        sentry_remove_extra("lua_stack");
+    sentry_remove_extra("assertion");
+    sentry_remove_tag("logger");
+    sentry_remove_tag("xrDebug.Fail");
+
+    if (!dumped)
+#endif
+    {
+        xrSentry_CaptureError("xrCore.xrDebug.Fail", m.c_str(), nullptr);
+    }
 }
 
 void XRCORE_API xrSentry_CaptureIniRStringError(pcstr ini_path, pcstr section, pcstr key)

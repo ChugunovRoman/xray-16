@@ -70,7 +70,7 @@ void CEncyclopediaArticle::load_shared(LPCSTR)
 
     if (ltx)
     {
-        data()->image.SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(ltx, "inv_icon")));
+        data()->image.SetShader(InventoryUtilities::GetEquipmentIconShaderForItemSection(ltx));
         Frect tex_rect;
         tex_rect.x1 = float(0);
         tex_rect.y1 = float(0);

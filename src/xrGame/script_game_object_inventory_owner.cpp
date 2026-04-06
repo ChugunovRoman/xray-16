@@ -1369,7 +1369,18 @@ void CScriptGameObject::activate_slot(u32 slot_id)
             LuaMessageType::Error, "CInventoryOwner : cannot access class member activate_slot!");
         return;
     }
-    inventory_owner->inventory().Activate((u16)slot_id);
+    CInventory& inv = inventory_owner->inventory();
+    const u16 last = inv.LastSlot();
+    u16 slot = (slot_id <= 0xFFFFu) ? static_cast<u16>(slot_id) : NO_ACTIVE_SLOT;
+    if (slot > last)
+    {
+#ifndef MASTER_GOLD
+        Msg("! [%s] activate_slot: invalid slot %u (LastSlot=%u), using NO_ACTIVE_SLOT",
+            object().cName().c_str(), static_cast<u32>(slot_id), static_cast<u32>(last));
+#endif
+        slot = NO_ACTIVE_SLOT;
+    }
+    inv.Activate(slot);
 }
 
 void CScriptGameObject::enable_movement(bool enable)

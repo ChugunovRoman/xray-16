@@ -91,9 +91,6 @@ CUIInventoryCellItem::CUIInventoryCellItem(shared_str section_id)
     else
         m_section_id = section_id;
 
-    R_ASSERT2(pSettings->line_exist(m_section_id.c_str(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", m_section_id.c_str()));
-
-    pcstr iconPath = pSettings->r_string(m_section_id.c_str(), "inv_icon");
     inherited::SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(m_section_id).c_str()));
 
     if (pSettings->line_exist(m_section_id.c_str(), "box_size"))
@@ -247,7 +244,8 @@ void CUIInventoryCellItem::DrawTexture()
 
 shared_str CUIInventoryCellItem::GetIconPath(shared_str section_id)
 {
-    R_ASSERT2(pSettings->line_exist(section_id.c_str(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", section_id.c_str()));
+    if (!pSettings->line_exist(section_id.c_str(), "inv_icon"))
+        return "";
 
     pcstr itemClass = pSettings->read_if_exists<pcstr>(section_id.c_str(), "item_class", "NULL");
     if (xr_strcmp(itemClass, "outfit_patch") == 0)
@@ -827,9 +825,9 @@ void CUIWeaponCellItem::CreateIcon(eAddonType t)
     m_addons[t]->SetAutoDelete(true);
     AttachChild(m_addons[t]);
     CInventoryItem* itm = (CInventoryItem*)m_pData;
-    R_ASSERT2(pSettings->line_exist(itm->m_section_id.c_str(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", itm->m_section_id.c_str()));
     if (pSettings->line_exist(itm->m_section_id.c_str(), "inv_icon_alt"))
-        m_addons[t]->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(itm->m_section_id.c_str(), "inv_icon_alt")));
+        m_addons[t]->SetShader(
+            InventoryUtilities::GetEquipmentIconShaderForItemSection(itm->m_section_id.c_str(), "inv_icon_alt"));
     else
         m_addons[t]->SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(itm->m_section_id).c_str()));
 
@@ -990,9 +988,8 @@ void CUIWeaponCellItem::InitAddon(CUIStatic* s, LPCSTR section, Fvector2 addon_o
     Frect tex_rect;
     Fvector2 base_scale;
 
-    R_ASSERT2(pSettings->line_exist(section, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", section));
     if (pSettings->line_exist(section, "inv_icon_alt"))
-        s->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(section, "inv_icon_alt")));
+        s->SetShader(InventoryUtilities::GetEquipmentIconShaderForItemSection(section, "inv_icon_alt"));
     else
         s->SetShader(InventoryUtilities::GetEquipmentIconShader(GetIconPath(section).c_str()));
 

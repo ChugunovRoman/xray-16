@@ -219,8 +219,12 @@ const ui_shader& InventoryUtilities::GetEquipmentIconShader(pcstr filepath)
 {
     std::lock_guard<std::mutex> lock(mtx);
 
+    static constexpr pcstr k_placeholder_rel = "unknown";
+    if (!filepath || !*filepath)
+        filepath = k_placeholder_rel;
+
     string512 fullpath;
-    xr_sprintf(fullpath, "ui\\%s", filepath ? filepath : "");
+    xr_sprintf(fullpath, "ui\\%s", filepath);
     const shared_str key(fullpath);
 
     const auto it = g_EquipmentIconShaderMap.find(key);
@@ -233,6 +237,14 @@ const ui_shader& InventoryUtilities::GetEquipmentIconShader(pcstr filepath)
     g_EquipmentIconShaderMap.insert(std::make_pair(key, *shader));
 
     return *shader;
+}
+
+const ui_shader& InventoryUtilities::GetEquipmentIconShaderForItemSection(pcstr section, pcstr inv_icon_key)
+{
+    pcstr path = "";
+    if (section && inv_icon_key && *inv_icon_key && pSettings->line_exist(section, inv_icon_key))
+        path = pSettings->r_string(section, inv_icon_key);
+    return GetEquipmentIconShader(path && *path ? path : "");
 }
 
 void InventoryUtilities::DropCachedRtIconShaderForUserTexture(pcstr texture_resource_name)

@@ -96,32 +96,29 @@ bool CPHSkeleton::Spawn(CSE_Abstract* D)
         }
         SpawnInitPhysics(D);
         RestoreNetState(po);
-        if (obj->PPhysicsShell() && obj->PPhysicsShell()->isFullActive())
-            obj->PPhysicsShell()->GetGlobalTransformDynamic(&obj->XFORM());
+        CPhysicsShell* shell = obj->PPhysicsShell();
+        if (shell && shell->isFullActive())
+            shell->GetGlobalTransformDynamic(&obj->XFORM());
 
         CPHDestroyableNotificate::spawn_notificate(D);
 
         if (K)
         {
             CInifile* ini = K->LL_UserData();
-            if (ini && ini->section_exist("collide"))
+            if (shell && ini && ini->section_exist("collide"))
             {
                 if (ini->line_exist("collide", "not_collide_parts"))
                 {
                     CGID gr = RegisterGroup();
-                    obj->PPhysicsShell()->RegisterToCLGroup(gr);
+                    shell->RegisterToCLGroup(gr);
                 }
             }
-            if (ini && ini->section_exist("collide_parts"))
+            if (shell && ini && ini->section_exist("collide_parts"))
             {
                 if (ini->line_exist("collide_parts", "small_object"))
-                {
-                    obj->PPhysicsShell()->SetSmall();
-                }
+                    shell->SetSmall();
                 if (ini->line_exist("collide_parts", "ignore_small_objects"))
-                {
-                    obj->PPhysicsShell()->SetIgnoreSmall();
-                }
+                    shell->SetIgnoreSmall();
             }
         }
     }

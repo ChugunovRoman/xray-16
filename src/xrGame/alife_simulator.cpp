@@ -13,6 +13,7 @@
 #include "xrEngine/IGame_Persistent.h"
 #include "xrScriptEngine/script_engine.hpp"
 #include "xrCore/xrDebug.h"
+#include "xrCore/Debug/xrSentry.hpp"
 #ifndef LUABIND_NO_EXCEPTIONS
 #include "luabind/error.hpp"
 #endif
@@ -27,6 +28,7 @@
 
 LPCSTR alife_section = "alife";
 
+static bool ignore_start_game_callback_error() { return !!strstr(Core.Params, "-ignore_start_game_callback_error"); }
 
 CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
     : CALifeSimulatorBase(server, alife_section), CALifeUpdateManager(server, alife_section),
@@ -68,17 +70,51 @@ CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
     }
     catch (const luabind::error& e)
     {
+        pcstr const what = e.what();
+        pcstr const detail = (what && *what) ? what : "(empty Lua error message)";
         GEnv.ScriptEngine->script_log(LuaMessageType::Error, "CALifeSimulator: [alife] start_game_callback [%s] failed: %s",
-            start_game_callback, e.what());
+            start_game_callback, detail);
         GEnv.ScriptEngine->print_stack();
-        xrDebug::Fatal(DEBUG_INFO, "Lua error in [alife] start_game_callback [%s]: %s", start_game_callback, e.what());
+        if (ignore_start_game_callback_error())
+        {
+            xr_string lua_stack;
+            GEnv.ScriptEngine->format_lua_stack(nullptr, lua_stack);
+            xr_string sentry_msg;
+            sentry_msg.reserve(512);
+            sentry_msg += "[";
+            sentry_msg += start_game_callback;
+            sentry_msg += "] ";
+            sentry_msg += detail;
+            xrSentry_CaptureError("xrGame.alife.start_game_callback",
+                sentry_msg.c_str(), lua_stack.empty() ? nullptr : lua_stack.c_str());
+            Msg("! [ALife] start_game_callback failed; continuing because of -ignore_start_game_callback_error (fix scripts / check log).");
+        }
+        else
+            xrDebug::Fatal(DEBUG_INFO, "Lua error in [alife] start_game_callback [%s]: %s", start_game_callback, detail);
     }
     catch (const std::exception& e)
     {
+        pcstr const what = e.what();
+        pcstr const detail = (what && *what) ? what : "(empty exception message)";
         GEnv.ScriptEngine->script_log(LuaMessageType::Error, "CALifeSimulator: [alife] start_game_callback [%s] failed: %s",
-            start_game_callback, e.what());
+            start_game_callback, detail);
         GEnv.ScriptEngine->print_stack();
-        xrDebug::Fatal(DEBUG_INFO, "Exception in [alife] start_game_callback [%s]: %s", start_game_callback, e.what());
+        if (ignore_start_game_callback_error())
+        {
+            xr_string lua_stack;
+            GEnv.ScriptEngine->format_lua_stack(nullptr, lua_stack);
+            xr_string sentry_msg;
+            sentry_msg.reserve(512);
+            sentry_msg += "[";
+            sentry_msg += start_game_callback;
+            sentry_msg += "] ";
+            sentry_msg += detail;
+            xrSentry_CaptureError("xrGame.alife.start_game_callback",
+                sentry_msg.c_str(), lua_stack.empty() ? nullptr : lua_stack.c_str());
+            Msg("! [ALife] start_game_callback failed; continuing because of -ignore_start_game_callback_error (fix scripts / check log).");
+        }
+        else
+            xrDebug::Fatal(DEBUG_INFO, "Exception in [alife] start_game_callback [%s]: %s", start_game_callback, detail);
     }
 #else
     functor(isNewGame);

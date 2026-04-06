@@ -135,6 +135,28 @@ void* FileDownload(pcstr file_name, size_t* buffer_size)
     return (FileDownload(file_name, file_handle, *buffer_size));
 }
 
+IReader* TryCreateDiskFileReader(pcstr fname)
+{
+    int file_handle;
+    size_t file_size;
+    if (!file_handle_internal(fname, file_size, file_handle))
+        return nullptr;
+    void* buffer = xr_malloc(file_size);
+    if (!buffer)
+    {
+        _close(file_handle);
+        return nullptr;
+    }
+    const auto r_bytes = _read(file_handle, buffer, file_size);
+    const int close_err = _close(file_handle);
+    if (file_size != static_cast<size_t>(r_bytes) || close_err != 0)
+    {
+        xr_free(buffer);
+        return nullptr;
+    }
+    return xr_new<CTempReader>(static_cast<char*>(buffer), file_size, 0);
+}
+
 typedef char MARK[9];
 IC void mk_mark(MARK& M, const char* S) { strncpy_s(M, sizeof(M), S, 8); }
 void FileCompress(pcstr fn, pcstr sign, void* data, size_t size)
@@ -505,6 +527,89 @@ CFileReader::CFileReader(pcstr name)
     Pos = 0;
 };
 CFileReader::~CFileReader() { xr_free(data); };
+//---------------------------------------------------
+// virtual stream (memory-mapped), optional open without fatal assert
+#if defined(XR_PLATFORM_WINDOWS)
+CVirtualFileReader::CVirtualFileReader(void* hf, void* hm, char* mapped, size_t sz, pcstr dbgName)
+    : IReader(mapped, sz), hSrcFile(hf), hSrcMap(hm)
+{
+#ifdef FS_DEBUG
+    register_file_mapping(data, Size, dbgName);
+#endif
+}
+#elif defined(XR_PLATFORM_POSIX)
+CVirtualFileReader::CVirtualFileReader(int fd, char* mapped, size_t sz, pcstr dbgName)
+    : IReader(mapped, sz)
+{
+    hSrcFile = fd;
+#ifdef FS_DEBUG
+    register_file_mapping(data, Size, dbgName);
+#endif
+}
+#endif
+
+CVirtualFileReader* CVirtualFileReader::TryOpen(pcstr cFileName)
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    void* const hFile =
+        (void*)CreateFile(cFileName, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, 0, 0);
+    if (hFile == (void*)INVALID_HANDLE_VALUE)
+    {
+        Msg("! CVirtualFileReader::TryOpen: CreateFile failed [%s] err=%s", cFileName,
+            xrDebug::ErrorToString(static_cast<long>(GetLastError())));
+        return nullptr;
+    }
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx((HANDLE)hFile, &size) || size.QuadPart == 0)
+    {
+        Msg("! CVirtualFileReader::TryOpen: bad size [%s]", cFileName);
+        CloseHandle((HANDLE)hFile);
+        return nullptr;
+    }
+    void* const hMap = (void*)CreateFileMapping((HANDLE)hFile, 0, PAGE_READONLY, 0, 0, 0);
+    if (hMap == (void*)INVALID_HANDLE_VALUE)
+    {
+        CloseHandle((HANDLE)hFile);
+        return nullptr;
+    }
+    char* mapped = (char*)MapViewOfFile((HANDLE)hMap, FILE_MAP_READ, 0, 0, 0);
+    if (!mapped)
+    {
+        CloseHandle((HANDLE)hMap);
+        CloseHandle((HANDLE)hFile);
+        return nullptr;
+    }
+    // Private ctor: cannot use xr_new<T>(...) from header (access from non-friend template).
+    void* const mem = Memory.mem_alloc(sizeof(CVirtualFileReader));
+    return new (mem) CVirtualFileReader(hFile, hMap, mapped, static_cast<size_t>(size.QuadPart), cFileName);
+#elif defined(XR_PLATFORM_POSIX)
+    pstr conv_path = xr_strdup(cFileName);
+    if (!conv_path)
+        return nullptr;
+    convert_path_separators(conv_path);
+    const int fd = ::open(conv_path, O_RDONLY);
+    xr_free(conv_path);
+    if (fd == -1)
+        return nullptr;
+    struct stat file_info{};
+    if (::fstat(fd, &file_info) != 0 || file_info.st_size <= 0)
+    {
+        ::close(fd);
+        return nullptr;
+    }
+    const size_t sz = static_cast<size_t>(file_info.st_size);
+    char* data = (char*)::mmap(NULL, sz, PROT_READ, MAP_SHARED, fd, 0);
+    if (!data || data == MAP_FAILED)
+    {
+        ::close(fd);
+        return nullptr;
+    }
+    void* const mem = Memory.mem_alloc(sizeof(CVirtualFileReader));
+    return new (mem) CVirtualFileReader(fd, data, sz, cFileName);
+#else
+#   error Select or add implementation for your platform
+#endif
+}
 //---------------------------------------------------
 // compressed stream
 CCompressedReader::CCompressedReader(const char* name, const char* sign)

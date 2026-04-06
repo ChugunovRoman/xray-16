@@ -34,6 +34,7 @@ protected:
     void Validate(u32 levelId) const;
     void patrol_path_storage_raw(IReader& stream);
     void patrol_path_storage(IReader& stream);
+    void patrol_path_storage_clear();
     void SetGameGraph(CGameGraph* gameGraph);
 
 public:

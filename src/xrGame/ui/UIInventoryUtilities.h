@@ -37,6 +37,8 @@ bool FreeRoom_inBelt(TIItemContainer& item_list, PIItem item, int width, int hei
 const ui_shader& GetBuyMenuShader();
 //получить shader на иконку предмета инвенторя
 const ui_shader& GetEquipmentIconShader(pcstr filepath);
+// Секция без inv_icon / inv_icon_alt → placeholder (ui\unknown), без Fatal
+const ui_shader& GetEquipmentIconShaderForItemSection(pcstr section, pcstr inv_icon_key = "inv_icon");
 // $user$ / render-target texture name (no ui\ prefix)
 const ui_shader& GetInstanceRtIconShader(pcstr texture_resource_name);
 // После WeaponIcon_ReleaseUserIconRt / ReleaseAll: IUIShader в кэше ссылается на освобождённый RT — сбросить запись.

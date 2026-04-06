@@ -102,16 +102,17 @@ void CEntityCondition::LoadCondition(LPCSTR entity_section)
 
     m_change_v.load(section, "");
 
-    m_fMinWoundSize = pSettings->r_float(section, "min_wound_size");
-    m_fHealthHitPart = pSettings->r_float(section, "health_hit_part");
-    m_fPowerHitPart = pSettings->r_float(section, "power_hit_part");
+    constexpr float kBadFloat = 1.0f;
+    m_fMinWoundSize = pSettings->r_float_safe(section, "min_wound_size", kBadFloat, kBadFloat);
+    m_fHealthHitPart = pSettings->r_float_safe(section, "health_hit_part", kBadFloat, kBadFloat);
+    m_fPowerHitPart = pSettings->r_float_safe(section, "power_hit_part", kBadFloat, kBadFloat);
 
     m_use_limping_state = !!(READ_IF_EXISTS(pSettings, r_bool, section, "use_limping_state", FALSE));
-    m_limping_threshold = READ_IF_EXISTS(pSettings, r_float, section, "limping_threshold", .5f);
+    m_limping_threshold = pSettings->r_float_safe(section, "limping_threshold", .5f, kBadFloat);
 
-    m_fKillHitTreshold = READ_IF_EXISTS(pSettings, r_float, section, "killing_hit_treshold", 0.0f);
-    m_fLastChanceHealth = READ_IF_EXISTS(pSettings, r_float, section, "last_chance_health", 0.0f);
-    m_fInvulnerableTimeDelta = READ_IF_EXISTS(pSettings, r_float, section, "invulnerable_time", 0.0f) / 1000.f;
+    m_fKillHitTreshold = pSettings->r_float_safe(section, "killing_hit_treshold", 0.0f, kBadFloat);
+    m_fLastChanceHealth = pSettings->r_float_safe(section, "last_chance_health", 0.0f, kBadFloat);
+    m_fInvulnerableTimeDelta = pSettings->r_float_safe(section, "invulnerable_time", 0.0f, kBadFloat) / 1000.f;
 }
 
 void CEntityCondition::LoadTwoHitsDeathParams(LPCSTR section)

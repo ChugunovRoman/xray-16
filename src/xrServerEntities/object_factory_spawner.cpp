@@ -389,12 +389,14 @@ void CObjectFactory::on_tool_frame()
             
             for (const CInifile::Sect* section : sections)
             {
-                const auto tex = InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(section->Name, "inv_icon"))->GetImGuiTextureId();
                 const float w = pSettings->read_if_exists<float>(section->Name, "inv_grid_width", 0) * ICON_GRID_WIDTH;
                 const float h = pSettings->read_if_exists<float>(section->Name, "inv_grid_height", 0) * ICON_GRID_HEIGHT;
 
                 if (fis_zero(w) || fis_zero(h))
                     continue;
+
+                const auto tex =
+                    InventoryUtilities::GetEquipmentIconShaderForItemSection(section->Name.c_str())->GetImGuiTextureId();
 
                 const bool spawn = ImGui::ImageButton(section->Name.c_str(), tex.texture, { w , h },
                     { tex.size.x, tex.size.y }, { w / tex.size.x, h / tex.size.y });

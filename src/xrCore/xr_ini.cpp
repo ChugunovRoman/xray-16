@@ -1,5 +1,8 @@
 #include "stdafx.h"
 
+#include <cerrno>
+#include <cstdlib>
+
 #include "Debug/xrSentry.hpp"
 #include "FileSystem.h"
 #include "xrCore/xr_token.h"
@@ -368,8 +371,13 @@ CInifile::~CInifile()
 {
     ZoneScoped;
 
-    if (!m_flags.test(eReadOnly) && m_flags.test(eSaveAtEnd) && !save_as())
-        Log("!Can't save inifile:", m_file_name);
+    if (!m_flags.test(eReadOnly) && m_flags.test(eSaveAtEnd))
+    {
+        if (!m_file_name[0])
+            Log("!Can't save inifile: empty path (script object with save_at_end?)");
+        else if (!save_as())
+            Log("!Can't save inifile:", m_file_name);
+    }
 
     for (auto* val : DATA)
     {
@@ -701,11 +709,17 @@ bool CInifile::save_as(pcstr new_fname)
     if (new_fname && new_fname[0])
         xr_strcpy(m_file_name, sizeof m_file_name, new_fname);
 
-    R_ASSERT(m_file_name[0]);
+    if (!m_file_name[0])
+        return false;
+
     convert_path_separators(m_file_name);
     IWriter* F = FS.w_open_ex(m_file_name);
-    if (!F)
+    if (!F || !F->valid())
+    {
+        if (F)
+            FS.w_close(F);
         return false;
+    }
 
     save_as(*F);
     FS.w_close(F);
@@ -866,6 +880,29 @@ float CInifile::r_float(pcstr S, pcstr L) const
 {
     pcstr C = r_string(S, L);
     return float(atof(C));
+}
+
+float CInifile::r_float_safe(pcstr S, pcstr L, float default_if_missing, float default_if_invalid) const
+{
+    if (!line_exist(S, L))
+        return default_if_missing;
+
+    pcstr C = r_string(S, L);
+    if (!C)
+        return default_if_invalid;
+
+    char* end_ptr = nullptr;
+    errno = 0;
+    const float v = std::strtof(C, &end_ptr);
+    if (end_ptr == C)
+        return default_if_invalid;
+    if (errno == ERANGE)
+        return default_if_invalid;
+    while (*end_ptr == ' ' || *end_ptr == '\t' || *end_ptr == '\r' || *end_ptr == '\n')
+        ++end_ptr;
+    if (*end_ptr != '\0')
+        return default_if_invalid;
+    return v;
 }
 
 Fcolor CInifile::r_fcolor(pcstr S, pcstr L) const

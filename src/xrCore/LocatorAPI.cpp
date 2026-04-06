@@ -1357,37 +1357,56 @@ void CLocatorAPI::check_cached_files(pstr fname, const size_t& fname_size, const
         bCopy = true;
     }
 
+    bool redirect_to_cache = true;
     // copy if need
     if (bCopy)
     {
-        IReader* _src;
+        IReader* _src = nullptr;
         if (desc.size_real < 256 * 1024)
-            _src = xr_new<CFileReader>(fname);
+            _src = TryCreateDiskFileReader(fname);
         else
-            _src = xr_new<CVirtualFileReader>(fname);
-        IWriter* _dst = xr_new<CFileWriter>(fname_in_cache, false);
-        _dst->w(_src->pointer(), _src->length());
-        xr_delete(_dst);
-        xr_delete(_src);
-        set_file_age(fname_in_cache, desc.modif);
-        Register(fname_in_cache, VFS_STANDARD_FILE, 0, 0, desc.size_real, desc.size_real, desc.modif);
+            _src = CVirtualFileReader::TryOpen(fname);
+        if (!_src)
+            _src = TryCreateDiskFileReader(fname);
+        if (!_src)
+        {
+            Msg("! check_cached_files: cannot read source for cache copy, using original path [%s]", fname);
+            redirect_to_cache = false;
+        }
+        else
+        {
+            IWriter* _dst = xr_new<CFileWriter>(fname_in_cache, false);
+            _dst->w(_src->pointer(), _src->length());
+            xr_delete(_dst);
+            xr_delete(_src);
+            set_file_age(fname_in_cache, desc.modif);
+            Register(fname_in_cache, VFS_STANDARD_FILE, 0, 0, desc.size_real, desc.size_real, desc.modif);
+        }
     }
 
     // Use
     source_name = &fname_copy[0];
     xr_strcpy(fname_copy, sizeof fname_copy, fname);
-    xr_strcpy(fname, fname_size, fname_in_cache);
+    if (redirect_to_cache)
+        xr_strcpy(fname, fname_size, fname_in_cache);
 }
 
 void CLocatorAPI::file_from_cache_impl(IReader*& R, pstr fname, const file& desc)
 {
     if (desc.size_real < 16 * 1024)
     {
-        R = xr_new<CFileReader>(fname);
+        R = TryCreateDiskFileReader(fname);
+        if (!R)
+            Msg("! file_from_cache_impl: cannot open small file [%s]", fname);
         return;
     }
 
-    R = xr_new<CVirtualFileReader>(fname);
+    R = CVirtualFileReader::TryOpen(fname);
+    if (!R)
+    {
+        Msg("! file_from_cache_impl: mmap failed, full-buffer read [%s]", fname);
+        R = TryCreateDiskFileReader(fname);
+    }
 }
 
 void CLocatorAPI::file_from_cache_impl(CStreamReader*& R, pstr fname, const file& desc)

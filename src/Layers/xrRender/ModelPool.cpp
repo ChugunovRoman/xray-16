@@ -121,6 +121,15 @@ dxRender_Visual* CModelPool::Instance_Load(const char* N, LPCSTR suffix, BOOL al
 #endif // DEBUG
 
     IReader* data = FS.r_open(fn);
+    if (!data)
+    {
+        Msg("! model Instance_Load: FS.r_open failed for [%s] (resolved path [%s])", name, fn);
+#ifdef _EDITOR
+        return 0;
+#else
+        return nullptr;
+#endif
+    }
     ogf_header H;
     data->r_chunk_safe(OGF_HEADER, &H, sizeof(H));
     dxRender_Visual* V = Instance_Create(H.type);
@@ -175,6 +184,12 @@ dxRender_Visual* CModelPool::Instance_Load(LPCSTR name, IReader* data, BOOL allo
 }
 dxRender_Visual* CModelPool::Instance_Load(LPCSTR name, LPCSTR suffix, IReader* data, BOOL allow_register)
 {
+    if (!data)
+    {
+        Msg("! model Instance_Load: null IReader for [%s]", name);
+        return nullptr;
+    }
+
     dxRender_Visual* V;
 
     ogf_header H;
@@ -306,10 +321,8 @@ dxRender_Visual* CModelPool::Create(LPCSTR name, LPCSTR suffix, IReader* data)
             else
                 Base = Instance_Load(low_name, suffix, TRUE);
             bAllowChildrenDuplicate = TRUE;
-#ifdef _EDITOR  
             if (!Base)
-                return 0;
-#endif
+                return nullptr;
         }
         // 3. If found - return (cloned) reference
         dxRender_Visual* Model = Instance_Duplicate(Base);
@@ -344,6 +357,9 @@ dxRender_Visual* CModelPool::CreateChild(LPCSTR name, LPCSTR suffix, IReader* da
         else
             Base = Instance_Load(low_name, suffix, FALSE);
     }
+
+    if (!Base)
+        return nullptr;
 
     dxRender_Visual* Model = bAllowChildrenDuplicate ? Instance_Duplicate(Base) : Base;
     return Model;

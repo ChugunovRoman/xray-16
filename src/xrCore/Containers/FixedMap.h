@@ -95,11 +95,7 @@ private:
         }
 
         value_type* newNodes = allocator::allocate(newLimit);
-        if (newNodes == nullptr)
-            return;
-            // DebugBreak();
-
-        R_ASSERT(newNodes);
+        R_ASSERT2(newNodes, "xr_fixed_map::resize: allocation failed (would corrupt tree on next insert)");
 
         if constexpr (std::is_pod<T>::value)
         {

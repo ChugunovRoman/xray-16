@@ -137,6 +137,8 @@ void R_dsgraph_structure::insert_dynamic(IRenderable* root, dxRender_Visual* pVi
     for (u32 iPass = 0; iPass < sh->passes.size(); ++iPass)
     {
         SPass* pass = sh->passes[iPass]._get();
+        if (!pass)
+            continue;
         mapMatrix_T& map = mapMatrixPasses[sh->flags.iPriority / 2][iPass];
         mapMatrixItems& matrixItems = map[pass];
 
@@ -237,6 +239,8 @@ void R_dsgraph_structure::insert_static(dxRender_Visual* pVisual)
     for (u32 iPass = 0; iPass < sh->passes.size(); ++iPass)
     {
         SPass* pass = sh->passes[iPass]._get();
+        if (!pass)
+            continue;
         mapNormal_T& map = mapNormalPasses[sh->flags.iPriority / 2][iPass];
         mapNormalItems& normalItems = map[pass];
 

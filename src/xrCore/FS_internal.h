@@ -20,6 +20,10 @@ void* FileDownload(pcstr fn, size_t* pdwSize = nullptr);
 void FileCompress(pcstr fn, pcstr sign, void* data, size_t size);
 void* FileDecompress(pcstr fn, pcstr sign, size_t* size = nullptr);
 
+class IReader;
+// Full file into RAM via _sopen; nullptr if open/read failed (no assert).
+XRCORE_API IReader* TryCreateDiskFileReader(pcstr fname);
+
 class CFileWriter final : public IWriter
 {
 private:
@@ -28,23 +32,37 @@ private:
 public:
     CFileWriter(const char* name, bool exclusive)
     {
+        hf = nullptr;
         R_ASSERT(name && name[0]);
         fName = name;
         VerifyPath(fName.c_str());
         pstr conv_fn = xr_strdup(name);
+        if (!conv_fn)
+        {
+            Msg("! CFileWriter: OOM / strdup failed for path (exclusive=%d)", exclusive ? 1 : 0);
+            return;
+        }
         convert_path_separators(conv_fn);
         if (exclusive)
         {
             const int handle = _sopen(conv_fn, _O_WRONLY | _O_TRUNC | _O_CREAT | _O_BINARY, SH_DENYWR);
-#ifndef MASTER_GOLD
-            if (handle == -1)
+            if (handle != -1)
+            {
+                hf = _fdopen(handle, "wb");
+                if (!hf)
+                {
+                    _close(handle);
+                    string1024 error;
+                    xr_strerror(errno, error, sizeof(error));
+                    Msg("! _fdopen failed after _sopen: '%s'. Error: '%s'.", conv_fn, error);
+                }
+            }
+            else
             {
                 string1024 error;
                 xr_strerror(errno, error, sizeof(error));
-                Msg("! Can't create file: '%s'. Error: '%s'.", conv_fn, error);
+                Msg("! Can't create file (exclusive): '%s'. Error: '%s'.", conv_fn, error);
             }
-#endif
-            hf = _fdopen(handle, "wb");
         }
         else
         {
@@ -153,8 +171,15 @@ private:
 #   error Select or add implementation for your platform
 #endif
 
+#if defined(XR_PLATFORM_WINDOWS)
+    CVirtualFileReader(void* hf, void* hm, char* mapped, size_t sz, pcstr dbgName);
+#elif defined(XR_PLATFORM_POSIX)
+    CVirtualFileReader(int fd, char* mapped, size_t sz, pcstr dbgName);
+#endif
+
 public:
     CVirtualFileReader(pcstr cFileName);
+    static CVirtualFileReader* TryOpen(pcstr cFileName);
     ~CVirtualFileReader() override;
 };
 

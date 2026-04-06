@@ -39,17 +39,43 @@ void SetActorVisibility(u16 who, float value);
 
 struct SRemoveOfflinePredicate
 {
-    bool operator()(const CVisibleObject& object) const
+    static bool stale_or_offline(const CGameObject* stored)
     {
-        VERIFY(object.m_object);
-        return (!!object.m_object->getDestroy() || object.m_object->H_Parent());
+        if (!stored)
+            return true;
+        const u16 id = object_id(stored);
+        if (id == u16(-1))
+            return true;
+        auto* const raw_go = Level().Objects.net_Find(id);
+        if (!raw_go)
+            return true;
+        CGameObject* const live = smart_cast<CGameObject*>(raw_go);
+        if (!live)
+            return true;
+        const u16 live_id = object_id(live);
+        if (live_id != id)
+            return true;
+        // Same id but different pointer => stale ref in the list; remove so vision can re-add a valid ptr.
+        if (live != stored)
+            return true;
+
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+        __try
+        {
+            return (!!live->getDestroy() || live->H_Parent());
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return true;
+        }
+#else
+        return (!!live->getDestroy() || live->H_Parent());
+#endif
     }
 
-    bool operator()(const CNotYetVisibleObject& object) const
-    {
-        VERIFY(object.m_object);
-        return (!!object.m_object->getDestroy() || object.m_object->H_Parent());
-    }
+    bool operator()(const CVisibleObject& object) const { return stale_or_offline(object.m_object); }
+
+    bool operator()(const CNotYetVisibleObject& object) const { return stale_or_offline(object.m_object); }
 };
 
 struct CVisibleObjectPredicate
@@ -70,7 +96,12 @@ struct CNotYetVisibleObjectPredicate
     IC CNotYetVisibleObjectPredicate(const CGameObject* game_object) { m_game_object = game_object; }
     IC bool operator()(const CNotYetVisibleObject& object) const
     {
-        return (object.m_object->ID() == m_game_object->ID());
+        if (!m_game_object)
+            return false;
+        const u16 vis = object_id(object.m_object);
+        if (vis == u16(-1))
+            return false;
+        return (vis == m_game_object->ID());
     }
 };
 

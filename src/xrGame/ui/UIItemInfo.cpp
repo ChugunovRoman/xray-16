@@ -335,9 +335,9 @@ void CUIItemInfo::InitItem(CUICellItem* pCellItem, CInventoryItem* pCompareItem,
     }
     if (UIItemImage)
     {
-        R_ASSERT2(pSettings->line_exist(pInvItem->m_section_id.c_str(), "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", pInvItem->m_section_id.c_str()));
-        // Загружаем картинку
-        UIItemImage->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(pInvItem->m_section_id.c_str(), "inv_icon")));
+        // Загружаем картинку (нет inv_icon → placeholder)
+        UIItemImage->SetShader(
+            InventoryUtilities::GetEquipmentIconShaderForItemSection(pInvItem->m_section_id.c_str()));
 
         Irect item_grid_rect = pInvItem->GetInvGridRect();
         Frect texture_rect;

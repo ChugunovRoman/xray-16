@@ -31,11 +31,9 @@ void CUIArtefactPanel::InitIcons(const xr_vector<const CArtefact*>& artefacts)
     {
         const shared_str& sectionName = artefact->cNameSect();
 
-        R_ASSERT2(pSettings->line_exist(sectionName, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", sectionName.c_str()));
-
         Frect texture_rect;
         CUIStaticItem staticItem;
-        staticItem.SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(sectionName, "inv_icon")));
+        staticItem.SetShader(InventoryUtilities::GetEquipmentIconShaderForItemSection(sectionName.c_str()));
         texture_rect.x1 = float(0);
         texture_rect.y1 = float(0);
         texture_rect.x2 = pSettings->read<float>(sectionName, "inv_grid_width") * ICON_GRID_WIDTH;

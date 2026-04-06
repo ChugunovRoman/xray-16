@@ -21,6 +21,10 @@
 #include "hit_memory_manager.h"
 #include <cstdint>
 
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+#include <Windows.h>
+#endif
+
 namespace
 {
 IC bool is_invalid_entity_ptr(const CEntity* entity)
@@ -32,21 +36,82 @@ IC bool is_invalid_entity_ptr(const CEntity* entity)
     return p == ~std::uintptr_t(0) || p == 0xFFFFFFFFFFFFFFFFull;
 }
 
-IC bool is_entity_alive_safe(const CEntity* entity)
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+// Freed heap often stays in a no-access or decommitted guard region; VirtualQuery avoids touching it.
+static bool ptr_first_page_readable(const void* ptr, size_t need_bytes)
 {
-    if (is_invalid_entity_ptr(entity))
+    if (!ptr || need_bytes == 0)
         return false;
 
-#if defined(XR_PLATFORM_WINDOWS)
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery(ptr, &mbi, sizeof(mbi)) == 0)
+        return false;
+    if (mbi.State != MEM_COMMIT)
+        return false;
+
+    const DWORD prot = mbi.Protect & ~(PAGE_GUARD | PAGE_NOCACHE | PAGE_WRITECOMBINE);
+    const bool read_ok = (prot & PAGE_READONLY) || (prot & PAGE_READWRITE) || (prot & PAGE_WRITECOPY) ||
+        (prot & PAGE_EXECUTE_READ) || (prot & PAGE_EXECUTE_READWRITE) || (prot & PAGE_EXECUTE_WRITECOPY);
+    if (!read_ok)
+        return false;
+
+    const auto* region_base = reinterpret_cast<const std::uint8_t*>(mbi.BaseAddress);
+    const auto* p = reinterpret_cast<const std::uint8_t*>(ptr);
+    const size_t offset = static_cast<size_t>(p - region_base);
+    return offset + need_bytes <= mbi.RegionSize;
+}
+
+// /O2 can outline the virtual call to ID() outside the __try; disable optimizations in this TU region.
+#pragma optimize("g", off)
+__declspec(noinline) static bool is_entity_alive_safe_impl(const CEntity* entity)
+{
+    if (!ptr_first_page_readable(entity, sizeof(void*) * 8))
+        return false;
+
     __try
     {
+        const u16 id = entity->ID();
+        IGameObject* reg = Level().Objects.net_Find(id);
+        if (reg != entity)
+            return false;
         return !!entity->g_Alive();
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
         return false;
     }
+}
+#pragma optimize("", on)
+
+#pragma optimize("g", off)
+__declspec(noinline) static bool entity_ids_equal_safe_impl(const CEntity* a, const CEntity* b)
+{
+    if (!ptr_first_page_readable(a, sizeof(void*)) || !ptr_first_page_readable(b, sizeof(void*)))
+        return false;
+
+    __try
+    {
+        return a->ID() == b->ID();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+#pragma optimize("", on)
+#endif // XR_PLATFORM_WINDOWS && _MSC_VER
+
+IC bool is_entity_alive_safe(const CEntity* entity)
+{
+    if (is_invalid_entity_ptr(entity))
+        return false;
+
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+    return is_entity_alive_safe_impl(entity);
 #else
+    const u16 id = entity->ID();
+    if (Level().Objects.net_Find(id) != entity)
+        return false;
     return !!entity->g_Alive();
 #endif
 }
@@ -56,15 +121,8 @@ IC bool entity_ids_equal_safe(const CEntity* a, const CEntity* b)
     if (!a || !b || is_invalid_entity_ptr(a) || is_invalid_entity_ptr(b))
         return false;
 
-#if defined(XR_PLATFORM_WINDOWS)
-    __try
-    {
-        return a->ID() == b->ID();
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER)
-    {
-        return false;
-    }
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+    return entity_ids_equal_safe_impl(a, b);
 #else
     return a->ID() == b->ID();
 #endif

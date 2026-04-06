@@ -16,6 +16,25 @@ using doors::door;
 using doors::actor;
 using doors::door_state;
 
+// During net_Stop / level unload, doors may outlive stalker_movement_manager_obstacles::m_doors_actor;
+// m_initiators can then hold dangling actor*. Calling on_door_destroy would run std::find on freed memory.
+static void notify_actor_door_destroyed(actor* const a, door& d)
+{
+    if (!a)
+        return;
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+    __try
+    {
+        a->on_door_destroy(d);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+#else
+    a->on_door_destroy(d);
+#endif
+}
+
 [[maybe_unused]] static bool valid(door_state const state)
 {
     return (state == doors::door_state_open) || (state == doors::door_state_closed);
@@ -50,14 +69,10 @@ door::~door()
     if (m_initiators.empty())
         return;
 
-    actors_type::const_iterator i = m_initiators.begin();
-    actors_type::const_iterator const e = m_initiators.end();
-    for (; i != e; ++i)
-        (*i)->on_door_destroy(*this);
-
-#ifdef DEBUG
-    m_initiators.clear();
-#endif // #ifdef DEBUG
+    actors_type initiators;
+    initiators.swap(m_initiators);
+    for (actor* const a : initiators)
+        notify_actor_door_destroyed(a, *this);
 }
 
 Fvector const& door::position() const

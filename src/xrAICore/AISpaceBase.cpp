@@ -1,9 +1,21 @@
 #include "pch.hpp"
 #include "AISpaceBase.hpp"
+#include "Common/GUID.hpp"
 #include "Navigation/game_graph.h"
 #include "Navigation/level_graph.h"
 #include "Navigation/PatrolPath/patrol_path_storage.h"
 #include "Navigation/graph_engine.h"
+
+#include <cstring>
+
+namespace
+{
+void log_ai_guid(pcstr label, const xrGUID& g)
+{
+    Msg("    %s: %016llx:%016llx", label, static_cast<unsigned long long>(g.g[0]),
+        static_cast<unsigned long long>(g.g[1]));
+}
+} // namespace
 
 AISpaceBase::AISpaceBase() { GEnv.AISpace = this; }
 AISpaceBase::~AISpaceBase()
@@ -23,11 +35,45 @@ void AISpaceBase::Load(const char* levelName)
     auto& crossHeader = cross_table().header();
     auto& levelHeader = level_graph().header();
     auto& gameHeader = game_graph().header();
-    R_ASSERT2(crossHeader.level_guid() == levelHeader.guid(), "cross_table doesn't correspond to the AI-map");
-    R_ASSERT2(crossHeader.game_guid() == gameHeader.guid(), "graph doesn't correspond to the cross table");
+
+    const bool ignore_guid_mismatch = Core.Params && strstr(Core.Params, "-ignore_ai_cross_guid");
+
+    if (crossHeader.level_guid() != levelHeader.guid())
+    {
+        Msg("! AISpaceBase::Load(\"%s\"): cross_table.level_guid != level_graph.guid (rebuild level AI / game.graph).",
+            levelName);
+        log_ai_guid("cross_table.level_guid", crossHeader.level_guid());
+        log_ai_guid("level_graph.guid      ", levelHeader.guid());
+        if (!ignore_guid_mismatch)
+            R_ASSERT2(false, "cross_table doesn't correspond to the AI-map");
+        else
+            Msg("! Continuing with -ignore_ai_cross_guid; pathfinding may be wrong.");
+    }
+
+    if (crossHeader.game_guid() != gameHeader.guid())
+    {
+        Msg("! AISpaceBase::Load(\"%s\"): cross_table.game_guid != game_graph.guid.", levelName);
+        log_ai_guid("cross_table.game_guid", crossHeader.game_guid());
+        log_ai_guid("game_graph.guid       ", gameHeader.guid());
+        if (!ignore_guid_mismatch)
+            R_ASSERT2(false, "graph doesn't correspond to the cross table");
+        else
+            Msg("! Continuing with -ignore_ai_cross_guid; pathfinding may be wrong.");
+    }
+
     u32 vertexCount = _max(gameHeader.vertex_count(), levelHeader.vertex_count());
     m_graph_engine = xr_new<CGraphEngine>(vertexCount);
-    R_ASSERT2(currentLevel.guid() == levelHeader.guid(), "graph doesn't correspond to the AI-map");
+
+    if (currentLevel.guid() != levelHeader.guid())
+    {
+        Msg("! AISpaceBase::Load(\"%s\"): game graph level entry GUID != level_graph.guid.", levelName);
+        log_ai_guid("game graph SLevel.guid", currentLevel.guid());
+        log_ai_guid("level_graph.guid      ", levelHeader.guid());
+        if (!ignore_guid_mismatch)
+            R_ASSERT2(false, "graph doesn't correspond to the AI-map");
+        else
+            Msg("! Continuing with -ignore_ai_cross_guid; pathfinding may be wrong.");
+    }
     if (!xr_strcmp(currentLevel.name(), levelName))
         Validate(currentLevel.id());
     level_graph().level_id(currentLevel.id());
@@ -103,6 +149,15 @@ void AISpaceBase::patrol_path_storage(IReader& stream)
     xr_delete(m_patrol_path_storage);
     m_patrol_path_storage = xr_new<CPatrolPathStorage>();
     m_patrol_path_storage->load(stream);
+}
+
+void AISpaceBase::patrol_path_storage_clear()
+{
+    if (GEnv.isDedicatedServer)
+        return;
+    ZoneScoped;
+    xr_delete(m_patrol_path_storage);
+    m_patrol_path_storage = xr_new<CPatrolPathStorage>();
 }
 
 void AISpaceBase::SetGameGraph(CGameGraph* gameGraph)

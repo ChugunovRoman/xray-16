@@ -42,7 +42,11 @@ struct CHitObjectPredicate
         if (!hit_object.m_object)
             return (false);
 
-        return (m_object->ID() == hit_object.m_object->ID());
+        const u16 hit_id = object_id(hit_object.m_object);
+        const u16 rel_id = object_id(m_object);
+        if (hit_id != u16(-1) && rel_id != u16(-1))
+            return hit_id == rel_id;
+        return hit_object.m_object == m_object;
     }
 };
 
@@ -252,8 +256,15 @@ void CHitMemoryManager::remove_links(IGameObject* object)
     if (!m_selected_hit->m_object)
         return;
 
-    if (m_selected_hit->m_object->ID() != object->ID())
-        return;
+    {
+        const IGameObject* const ho = m_selected_hit->m_object;
+        const u16 sel_id = object_id(ho);
+        const u16 obj_id = object_id(object);
+        const bool match =
+            (sel_id != u16(-1) && obj_id != u16(-1)) ? (sel_id == obj_id) : (ho == object);
+        if (!match)
+            return;
+    }
 
     xr_delete(m_selected_hit);
 #endif

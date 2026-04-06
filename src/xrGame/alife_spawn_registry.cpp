@@ -92,8 +92,12 @@ void CALifeSpawnRegistry::load(IReader& file_stream, xrGUID* save_guid)
     chunk = file_stream.open_chunk(0);
     m_header.load(*chunk);
     chunk->close();
-    R_ASSERT2(!save_guid || (*save_guid == header().guid()) || ignore_save_incompatibility(),
-        "Saved game doesn't correspond to the spawn : DELETE SAVED GAME!");
+    if (save_guid && (*save_guid != header().guid()) && !ignore_save_incompatibility())
+    {
+        Msg("! [ALife] Save spawn GUID does not match current [%s.spawn] (typical after mod or spawn rebuild).",
+            m_spawn_name.c_str());
+        Msg("! [ALife] Continuing load. Start a new game if A-Life or spawns look wrong.");
+    }
 
     chunk = file_stream.open_chunk(1);
     m_spawns.load(*chunk);
@@ -104,27 +108,51 @@ void CALifeSpawnRegistry::load(IReader& file_stream, xrGUID* save_guid)
     chunk->close();
 
     chunk = file_stream.open_chunk(3);
-    R_ASSERT2(chunk, "Spawn version mismatch - REBUILD SPAWN!");
-    ai().patrol_path_storage(*chunk);
-    chunk->close();
+    if (!chunk)
+    {
+        Msg("! [ALife] Spawn chunk 3 (patrol paths) missing in [%s.spawn]. Using empty patrol storage — rebuild xrAI spawn if AI errors.",
+            m_spawn_name.c_str());
+        ai().patrol_path_storage_clear();
+    }
+    else
+    {
+        ai().patrol_path_storage(*chunk);
+        chunk->close();
+    }
 
     VERIFY(!m_chunk);
     if (header().version() >= XRAI_VERSION_PRIQUEL)
         m_chunk = file_stream.open_chunk(4);
-    else // XRAI_VERSION_SOC and below
+
+    if (!m_chunk)
     {
         string_path file_name;
         FS.update_path(file_name, "$game_data$", GRAPH_NAME);
-        m_chunk = FS.r_open(file_name);
+        if (FS.exist(file_name))
+        {
+            Msg("! [ALife] Embedded game graph chunk missing in [%s.spawn]; loading [%s] from $game_data$.",
+                m_spawn_name.c_str(), GRAPH_NAME);
+            m_chunk = FS.r_open(file_name);
+        }
     }
-    R_ASSERT2(m_chunk, "Spawn version mismatch - REBUILD SPAWN!");
+
+    if (!m_chunk)
+    {
+        Msg("! [ALife] No game graph in [%s.spawn] and no $game_data$\\%s — rebuild all.spawn / xrAI.",
+            m_spawn_name.c_str(), GRAPH_NAME);
+        R_ASSERT2(m_chunk, "Spawn version mismatch - REBUILD SPAWN!");
+    }
 
     VERIFY(!m_game_graph);
     m_game_graph = xr_new<CGameGraph>(*m_chunk);
     ai().SetGameGraph(m_game_graph);
 
-    R_ASSERT2((header().graph_guid() == ai().game_graph().header().guid()) || ignore_save_incompatibility(),
-        "Spawn doesn't correspond to the graph : REBUILD SPAWN!");
+    if ((header().graph_guid() != ai().game_graph().header().guid()) && !ignore_save_incompatibility())
+    {
+        Msg("! [ALife] Spawn header game_graph GUID does not match embedded graph in [%s.spawn].",
+            m_spawn_name.c_str());
+        Msg("! [ALife] Continuing load. Rebuild xrAI spawn (all.spawn) if level graph / smart issues appear.");
+    }
 
     build_story_spawns();
 

@@ -39,12 +39,9 @@ void report_dangling_cse_abstract(pcstr api_method)
     string256 msg;
     xr_sprintf(msg, "script: %s() on invalid/destroyed cse_abstract (memory access failed)", api_method);
     Msg("! %s", msg);
-    if (GEnv.ScriptEngine)
-    {
-        xr_string stack;
-        GEnv.ScriptEngine->format_lua_stack(nullptr, stack);
-        xrSentry_CaptureSoftError("xrGame.cse_abstract_dangling", msg, stack.empty() ? nullptr : stack.c_str());
-    }
+    // Called from __except after an AV while reading the object — do not call ScriptEngine / Lua stack
+    // walk or other heavy code here (re-entrancy / second fault). Sentry without lua_stack is enough.
+    xrSentry_CaptureSoftError("xrGame.cse_abstract_dangling", msg, nullptr);
 }
 } // namespace
 

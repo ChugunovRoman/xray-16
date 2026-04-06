@@ -478,7 +478,7 @@ void CUIHudStatesWnd::SetAmmoIcon(const shared_str& sect_name)
         return;
     }
 
-    m_ui_weapon_icon->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(sect_name, "inv_icon")));
+    m_ui_weapon_icon->SetShader(InventoryUtilities::GetEquipmentIconShaderForItemSection(sect_name.c_str()));
     m_ui_weapon_icon_rect = m_ui_weapon_icon->GetWndRect();
 
     m_ui_weapon_icon->Show(true);

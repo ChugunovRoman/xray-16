@@ -216,6 +216,12 @@ public:
     s64 r_s64(pcstr S, pcstr L) const;
     float r_float(pcstr S, pcstr L) const;
     float r_float(const shared_str& S, pcstr L) const { return r_float(S.c_str(), L); }
+    // Like r_float but avoids UCRT atof() invalid_parameter on malformed values; uses default_if_invalid on parse failure.
+    float r_float_safe(pcstr S, pcstr L, float default_if_missing, float default_if_invalid = 1.0f) const;
+    float r_float_safe(const shared_str& S, pcstr L, float default_if_missing, float default_if_invalid = 1.0f) const
+    {
+        return r_float_safe(S.c_str(), L, default_if_missing, default_if_invalid);
+    }
     Fcolor r_fcolor(pcstr S, pcstr L) const;
     Fcolor r_fcolor(const shared_str& S, pcstr L) const { return r_fcolor(S.c_str(), L); }
     u32 r_color(pcstr S, pcstr L) const;

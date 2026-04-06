@@ -114,10 +114,8 @@ CUICellItem* CUIDragDropReferenceList::RemoveItem(CUICellItem* itm, bool force_r
 
 void CUIDragDropReferenceList::LoadItemTexture(LPCSTR section, Ivector2 cell_pos)
 {
-    R_ASSERT2(pSettings->line_exist(section, "inv_icon"), make_string("Item '%s' doesn't has property 'inv_icon'", section));
-
     CUIStatic* ref = m_references[m_container->CellsCapacity().x * cell_pos.y + cell_pos.x];
-    ref->SetShader(InventoryUtilities::GetEquipmentIconShader(pSettings->r_string(section, "inv_icon")));
+    ref->SetShader(InventoryUtilities::GetEquipmentIconShaderForItemSection(section));
     Frect texture_rect;
     texture_rect.x1 = 0;
     texture_rect.y1 = 0;
