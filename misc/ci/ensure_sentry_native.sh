@@ -12,7 +12,7 @@ CRASHPAD_CMAKE="${NATIVE}/external/crashpad/CMakeLists.txt"
 SENTRY_TAG="${SENTRY_NATIVE_VERSION:-0.7.17}"
 URL="https://github.com/getsentry/sentry-native.git"
 # How many times to run `git submodule update` after transient network / 429 failures.
-SUBMODULE_TRIES="${SENTRY_NATIVE_SUBMODULE_TRIES:-8}"
+SUBMODULE_TRIES="${SENTRY_NATIVE_SUBMODULE_TRIES:-1}"
 
 have_crashpad() {
     [[ -f "${CRASHPAD_CMAKE}" ]]
