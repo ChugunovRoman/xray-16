@@ -24,6 +24,13 @@ jobs:
       with:
         submodules: recursive
 
+    # googlesource (sentry-native → linux-syscall-support) rate-limits CI; cache avoids repeated clones.
+    - uses: actions/cache@v4
+      id: cache-sentry-native-src
+      with:
+        path: Externals/sentry-native
+        key: sentry-native-src-${{ runner.os }}-${{ hashFiles('misc/ci/ensure_sentry_native.sh') }}
+
     - name: Ensure sentry-native (not always a repo submodule)
       shell: bash
       run: bash misc/ci/ensure_sentry_native.sh
@@ -193,6 +200,12 @@ jobs:
     - uses: actions/checkout@main
       with:
         submodules: recursive
+
+    - uses: actions/cache@v4
+      id: cache-sentry-native-src
+      with:
+        path: Externals/sentry-native
+        key: sentry-native-src-${{ runner.os }}-${{ hashFiles('misc/ci/ensure_sentry_native.sh') }}
 
     - name: Ensure sentry-native (not always a repo submodule)
       run: bash misc/ci/ensure_sentry_native.sh
