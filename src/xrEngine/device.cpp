@@ -16,7 +16,6 @@
 #include <SDL.h>
 
 ENGINE_API CRenderDevice Device;
-
 ENGINE_API CLoadScreenRenderer load_screen_renderer;
 
 ENGINE_API bool g_bRendering = false;
@@ -249,9 +248,8 @@ void CRenderDevice::DoRender()
         m_imgui_render->Render(ImGui::GetDrawData());
 
         // Present before ImGui platform viewports (same order as official ImGui DX11 examples). Rendering
-        // child viewports first kept a very deep stack under IDXGISwapChain::Present and contributed to
-        // 0xC00000FD with some GPU hook / driver chains.
-        RenderEnd(); // Present goes here
+        // child viewports first kept a very deep stack under IDXGISwapChain::Present with some GPU hooks.
+        RenderEnd(); // End + PresentFrame
 
         UpdateViewports();
     }
@@ -439,8 +437,6 @@ u32 app_inactive_time_start = 0;
 void CRenderDevice::FrameMove()
 {
     ZoneScoped;
-
-    m_uiThreadId = std::this_thread::get_id();
 
     dwFrame++;
     Core.dwFrame = dwFrame;
@@ -715,5 +711,9 @@ void CRenderDevice::CSecondVPParams::SetSVPActive(bool bState) //--#SM+#-- +Seco
 
 bool CRenderDevice::CSecondVPParams::IsSVPFrame() // --#SM+#-- +SecondVP+
 {
-    return IsSVPActive() && Device.dwFrame % frameDelay == 0;
+    if (!IsSVPActive())
+        return false;
+    // 0 = "no skip" (every frame). Avoid % 0; delay 1 also runs every frame (n % 1 == 0).
+    const u8 d = frameDelay ? frameDelay : 1;
+    return (Device.dwFrame % d) == 0;
 }

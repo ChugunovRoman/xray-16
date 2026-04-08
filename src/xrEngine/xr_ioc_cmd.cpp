@@ -8,6 +8,7 @@
 #include "Environment.h"
 #include "xr_input.h"
 #include "CustomHUD.h"
+#include "Render.h"
 
 #include "xr_object.h"
 #include "xr_object_list.h"
@@ -712,6 +713,13 @@ extern Flags32 psEnvFlags;
 extern int g_ErrorLineCount;
 
 ENGINE_API int ps_r__Supersample = 1;
+ENGINE_API int ps_r__dedicated_second_vp = 1;
+ENGINE_API int ps_r__svp_skip_details = 0;
+ENGINE_API int ps_r__svp_skip_wallmarks = 0;
+ENGINE_API int ps_r__svp_skip_rain_sync = 0;
+ENGINE_API int ps_r__svp_skip_sun_csm = 0;
+ENGINE_API int ps_r__svp_skip_zfill = 0;
+ENGINE_API int ps_r__svp_frame_delay = 2;
 ENGINE_API int ps_r__WallmarksOnSkeleton = 0;
 ENGINE_API shared_str current_player_hud_sect{};
 
@@ -758,6 +766,13 @@ void CCC_Register()
 
     // Render device states
     CMD4(CCC_Integer, "r__supersample", &ps_r__Supersample, 1, 4);
+    CMD4(CCC_Integer, "r__dedicated_second_vp", &ps_r__dedicated_second_vp, 0, 1);
+    CMD4(CCC_Integer, "r__svp_skip_details", &ps_r__svp_skip_details, 0, 1);
+    CMD4(CCC_Integer, "r__svp_skip_wallmarks", &ps_r__svp_skip_wallmarks, 0, 1);
+    CMD4(CCC_Integer, "r__svp_skip_rain_sync", &ps_r__svp_skip_rain_sync, 0, 1);
+    CMD4(CCC_Integer, "r__svp_skip_sun_csm", &ps_r__svp_skip_sun_csm, 0, 1);
+    CMD4(CCC_Integer, "r__svp_skip_zfill", &ps_r__svp_skip_zfill, 0, 1);
+    CMD4(CCC_Integer, "r__svp_frame_delay", &ps_r__svp_frame_delay, 0, 255);
     CMD4(CCC_Integer, "r__wallmarks_on_skeleton", &ps_r__WallmarksOnSkeleton, 0, 1);
 
     CMD1(CCC_Editor, "rs_editor");

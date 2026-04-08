@@ -2,7 +2,6 @@
 
 #include "xrEngine/IRenderable.h"
 #include "xrEngine/CustomHUD.h"
-#include "r__hud_overlay_flag.h"
 
 #include "FBasicVisual.h"
 #include "SkeletonCustom.h"
@@ -215,15 +214,6 @@ void __fastcall render_item(u32 context_id, const T& item)
     dxRender_Visual* V = item.second.pVisual;
     VERIFY(V && V->shader._get());
     dsgraph.cmd_list.set_Element(item.second.se);
-    // HUD overlay: 1 = forward color, 0 = deferred G-buffer (GL and DX r2/r3/r4).
-    dsgraph.cmd_list.set_c("hud_overlay_state", dsgraph.rendering_hud_overlay ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
-    if (dsgraph.rendering_hud_overlay)
-        setup_hud_overlay_constants(dsgraph.cmd_list, item.second.se->passes[0]._get());
-    else
-    {
-        dsgraph.cmd_list.set_c("hud_use_shadow", 0.0f, 0.0f, 0.0f, 0.0f);
-        dsgraph.cmd_list.set_c("hud_show_shadow_debug", 0.0f, 0.0f, 0.0f, 0.0f);
-    }
     dsgraph.cmd_list.set_xform_world(item.second.Matrix);
     RImplementation.apply_object(dsgraph.cmd_list, item.second.pObject);
     dsgraph.cmd_list.apply_lmaterial();
@@ -263,10 +253,6 @@ void R_dsgraph_structure::render_hud()
 #if RENDER == R_R1
     if (g_pGameLevel->pHUD && g_pGameLevel->pHUD->RenderActiveItemUIQuery())
         render_hud_ui(); // hud ui
-#else
-    // R_R2+: draw detector/active item UI in same pass as 3D HUD (on top of final LDR).
-    if (g_pGameLevel->pHUD && g_pGameLevel->pHUD->RenderActiveItemUIQuery())
-        render_hud_ui();
 #endif
 }
 
@@ -281,24 +267,20 @@ void R_dsgraph_structure::render_hud_ui()
     hud_transform_helper helper{ cmd_list };
 
 #if RENDER != R_R1
-    // When we're in phase_hud_overlay we're already bound to the correct LDR RT; switching RT here would
-    // leave the 3D HUD meshes in another buffer and make them appear "transparent" (missing).
-    if (!rendering_hud_overlay)
-    {
-        const ref_rt rt_null;
-        cmd_list.set_RT(0, 1);
-        cmd_list.set_RT(0, 2);
-        auto zb = RImplementation.Target->rt_Base_Depth;
+    // Targets, use accumulator for temporary storage
+    const ref_rt rt_null;
+    cmd_list.set_RT(0, 1);
+    cmd_list.set_RT(0, 2);
+    auto zb = RImplementation.Target->rt_Base_Depth;
 
 #if (RENDER == R_R3) || (RENDER == R_R4) || (RENDER==R_GL)
-        if (RImplementation.o.msaa)
-            zb = RImplementation.Target->rt_MSAADepth;
+    if (RImplementation.o.msaa)
+        zb = RImplementation.Target->rt_MSAADepth;
 #endif
 
-        RImplementation.Target->u_setrt(cmd_list,
-            RImplementation.o.albedo_wo ? RImplementation.Target->rt_Accumulator : RImplementation.Target->rt_Color,
-            rt_null, rt_null, zb);
-    }
+    RImplementation.Target->u_setrt(cmd_list,
+        RImplementation.o.albedo_wo ? RImplementation.Target->rt_Accumulator : RImplementation.Target->rt_Color,
+        rt_null, rt_null, zb);
 #endif // RENDER!=R_R1
 
     levelHud->RenderActiveItemUI();
@@ -312,14 +294,6 @@ void R_dsgraph_structure::render_sorted()
     PIX_EVENT_CTX(cmd_list, dsgraph_render_sorted);
 
     sort_back_to_front_render_and_clean(context_id, mapSorted);
-}
-
-//////////////////////////////////////////////////////////////////////////
-// HUD strict-sorted render (e.g. 3D scopes)
-void R_dsgraph_structure::render_hud_sorted()
-{
-    ZoneScoped;
-    PIX_EVENT_CTX(cmd_list, dsgraph_render_hud_sorted);
 
     if (!mapHUDSorted.empty())
     {

@@ -132,9 +132,6 @@ void CBlender_Model_EbB::Compile(CBlender_Compile& C)
             C.r_ColorWriteEnable(false, false, false, false);
             C.r_End();
             break;
-        case SE_R2_HUD:
-            uber_deffer_hud(C, true, "model", "base", false);
-            break;
         }
     }
 }
@@ -192,9 +189,6 @@ void CBlender_Model_EbB::Compile(CBlender_Compile& C)
             C.r_dx11Sampler("smp_linear");
             C.r_ColorWriteEnable(false, false, false, false);
             C.r_End();
-            break;
-        case SE_R2_HUD:
-            uber_deffer_hud(C, true, "model", "base", false);
             break;
         }
     }

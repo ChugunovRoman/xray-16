@@ -1,5 +1,5 @@
 #include "stdafx.h"
-#include "r2_types.h"
+#include "Layers/xrRender_R2/r2.h"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -111,21 +111,63 @@ bool CRenderTarget::u_need_CM()
     return param_color_map_influence > 0.001f;
 }
 
+struct TL_2c3uv
+{
+    Fvector4 p;
+    u32 color0;
+    u32 color1;
+    Fvector2 uv[3];
+
+    void set(float x, float y, u32 c0, u32 c1, float u0, float v0, float u1, float v1, float u2, float v2)
+    {
+        p.set(x, y, EPS_S, 1.f);
+        color0 = c0;
+        color1 = c1;
+        uv[0].set(u0, v0);
+        uv[1].set(u1, v1);
+        uv[2].set(u2, v2);
+    }
+};
+
 void CRenderTarget::phase_pp()
 {
-    // combination/postprocess
-#if defined(USE_OGL) || defined(USE_DX11)
-    // Для OpenGL и DX11 (R4): выводим результат постпроцессинга в rt_final_scene,
-    // а не напрямую в back buffer. Поверх него потом нарисуем HUD и NVG-оверлей.
-    u_setrt(RCache, rt_final_scene, nullptr, nullptr, rt_Base_Depth);
+    // combination/postprocess — for dedicated second VP, rt_secondVP may be smaller than the backbuffer (r__second_vp_render_scale).
+    const bool svp_out = RImplementation.IsSecondViewportOutputRT() && rt_secondVP;
+    const u32 pp_w = svp_out ? rt_secondVP->dwWidth : Device.dwWidth;
+    const u32 pp_h = svp_out ? rt_secondVP->dwHeight : Device.dwHeight;
+    const bool svp_scaled = svp_out && (pp_w != Device.dwWidth || pp_h != Device.dwHeight);
+
+    if (svp_out)
+    {
+#if defined(USE_DX11)
+        if (svp_scaled)
+            u_setrt(RCache, pp_w, pp_h, rt_secondVP->pRT, 0, 0, nullptr);
+        else
+            u_setrt(RCache, pp_w, pp_h, rt_secondVP->pRT, 0, 0, get_base_zb());
+#elif defined(USE_OGL)
+        if (svp_scaled)
+            u_setrt(RCache, pp_w, pp_h, rt_secondVP->pRT, 0, 0, 0);
+        else
+            u_setrt(RCache, pp_w, pp_h, rt_secondVP->pRT, 0, 0, get_base_zb());
 #else
-    // Для DX9 оставляем старый путь (прямо в back buffer)
-    u_setrt(RCache, Device.dwWidth, Device.dwHeight, get_base_rt(), 0, 0, get_base_zb());
+#   error No graphics API selected or enabled!
 #endif
+    }
+    else
+        u_setrt(RCache, Device.dwWidth, Device.dwHeight, get_base_rt(), 0, 0, get_base_zb());
     //	Element 0 for for normal post-process
     //	Element 4 for color map post-process
     bool bCMap = u_need_CM();
     RCache.set_Element(s_postprocess_msaa->E[bCMap ? 4 : 0]);
+
+    // u_calc_tc_noise needs active postprocess shader (s_noise constant). TCs use full-res scene size.
+    const u32 cid = RCache.context_id;
+    dwWidth[cid] = Device.dwWidth;
+    dwHeight[cid] = Device.dwHeight;
+
+    Fvector2 n0, n1, r0, r1, l0, l1;
+    u_calc_tc_duality_ss(r0, r1, l0, l1);
+    u_calc_tc_noise(n0, n1);
 
     int gblend = clampr(iFloor((1 - param_gray) * 255.f), 0, 255);
     int nblend = clampr(iFloor((1 - param_noise) * 255.f), 0, 255);
@@ -139,12 +181,8 @@ void CRenderTarget::phase_pp()
 
     // Draw full-screen quad textured with our scene image
     u32 Offset;
-    float _w = float(Device.dwWidth);
-    float _h = float(Device.dwHeight);
-
-    Fvector2 n0, n1, r0, r1, l0, l1;
-    u_calc_tc_duality_ss(r0, r1, l0, l1);
-    u_calc_tc_noise(n0, n1);
+    const float _w = float(pp_w);
+    const float _h = float(pp_h);
 
     // Fill vertex buffer
     float du = ps_r1_pps_u, dv = ps_r1_pps_v;
@@ -179,5 +217,13 @@ void CRenderTarget::phase_pp()
     RCache.set_c(s_colormap, param_color_map_influence, param_color_map_interpolate, 0.f, 0.f);
     RCache.set_Geometry(g_postprocess);
     RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+
+    // u_calc_tc_noise / u_calc_tc_duality_ss use full-res dwWidth/dwHeight above; restore so the bound RT and
+    // backend viewport size stay consistent for any draw after phase_pp (e.g. bullet tracers at r__second_vp_render_scale < 1).
+    if (svp_out)
+    {
+        dwWidth[cid] = pp_w;
+        dwHeight[cid] = pp_h;
+    }
 }
 } // namespace xray::render::RENDER_NAMESPACE

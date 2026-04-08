@@ -43,6 +43,7 @@
 #include "Level.h"
 #include "GamePersistent.h"
 #include "xrEngine/ShadersExternalData.h"
+#include "xrEngine/Render.h"
 #include "game_cl_base.h"
 #include "game_cl_single.h"
 #include "xrMessages.h"
@@ -1144,7 +1145,7 @@ void CActor::UpdateCL()
             fire_disp_full = m_fdisp_controller.GetCurrentDispertion();
 
             // --#SM+#-- +SecondVP+ Чтобы перекрестие не скакало из за смены FOV (Sin!) [fix for crosshair shaking while SecondVP]
-            if (!Device.m_SecondViewport.IsSVPFrame())
+            if (ps_r__dedicated_second_vp || !Device.m_SecondViewport.IsSVPFrame())
                 HUD().SetCrosshairDisp(fire_disp_full, 0.02f);
 
             HUD().ShowCrosshair(pWeapon->use_crosshair());

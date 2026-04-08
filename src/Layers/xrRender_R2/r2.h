@@ -365,7 +365,6 @@ public:
     auto get_largest_sector() const { return largest_sector_id; }
     ShaderElement* rimp_select_sh_static(dxRender_Visual* pVisual, float cdist_sq, u32 phase);
     ShaderElement* rimp_select_sh_dynamic(dxRender_Visual* pVisual, float cdist_sq, u32 phase);
-    ShaderElement* rimp_select_sh_hud(dxRender_Visual* pVisual);
     VertexElement* getVB_Format(int id, bool alternative = false);
     VertexStagingBuffer* getVB(int id, bool alternative = false);
     IndexStagingBuffer* getIB(int id, bool alternative = false);
@@ -488,7 +487,12 @@ public:
 
     void Calculate() override;
     void Render() override;
+    void RenderSecondViewport() override;
+    void BindBackbufferForUI() override;
     void RenderMenu() override;
+
+    bool IsSecondViewportRenderPass() const override { return m_SecondViewportPass; }
+    bool IsSecondViewportOutputRT() const { return m_SecondViewportOutputToRT; }
 
     void Screenshot(ScreenshotMode mode = SM_NORMAL, pcstr name = nullptr) override;
     void OnFrame() override;
@@ -522,6 +526,9 @@ public:
     void clearAllShaderOptions() { m_ShaderOptions.clear(); }
 
 private:
+    bool m_SecondViewportPass{};
+    bool m_SecondViewportOutputToRT{};
+
 #if defined(USE_DX11)
     xr_vector<D3D_SHADER_MACRO> m_ShaderOptions;
 #elif defined(USE_OGL)

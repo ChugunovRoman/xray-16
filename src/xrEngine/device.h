@@ -25,8 +25,6 @@
 
 #include <SDL.h>
 
-#include <thread>
-
 // refs
 class Task;
 
@@ -40,8 +38,8 @@ public:
     class ENGINE_API CSecondVPParams //--#SM+#-- +SecondVP+
     {
         bool isActive; // Флаг активации рендера во второй вьюпорт
-        u8 frameDelay; // На каком кадре с момента прошлого рендера во второй вьюпорт мы начнём новый
-                       // (не может быть меньше 2 - каждый второй кадр, чем больше тем более низкий FPS во втором вьюпорте)
+        u8 frameDelay{2}; // synced from r__svp_frame_delay; 0 = every frame (see SetSVPFrameDelay / IsSVPFrame)
+        bool bSecondCalculatePass{}; // true only during the extra Calculate() for dedicated second VP (see IGame_Level)
 
     public:
         bool isCamReady; // Флаг готовности камеры (FOV, позиция, и т.п) к рендеру второго вьюпорта
@@ -51,12 +49,14 @@ public:
         bool IsSVPActive() { return isActive; }
         void SetSVPActive(bool bState);
         bool IsSVPFrame();
+        void SetSecondCalculatePass(bool v) { bSecondCalculatePass = v; }
+        bool IsSecondCalculatePass() const { return bSecondCalculatePass; }
 
         u8 GetSVPFrameDelay() { return frameDelay; }
         void SetSVPFrameDelay(u8 iDelay)
         {
             frameDelay = iDelay;
-            clamp<u8>(frameDelay, 2, u8(-1));
+            clamp<u8>(frameDelay, 0, u8(-1));
         }
     };
 
@@ -184,16 +184,12 @@ public:
     bool m_allowWindowDrag{}; // For windowed mode
     bool IsAnselActive{};
 
-    /** Thread that owns UI / seqFrame (updated each FrameMove). */
-    std::thread::id m_uiThreadId{};
-
     CRenderDevice()
     {
         Timer.Start();
-        m_uiThreadId = std::this_thread::get_id();
 
         m_SecondViewport.SetSVPActive(false);
-        m_SecondViewport.SetSVPFrameDelay(2);
+        m_SecondViewport.SetSecondCalculatePass(false);
         m_SecondViewport.isCamReady = false;
         m_SecondViewport.isR1 = false;
     }
@@ -209,8 +205,6 @@ public:
 
     bool BeforeFrame();
     void FrameMove();
-
-    [[nodiscard]] bool IsUiThread() const noexcept { return std::this_thread::get_id() == m_uiThreadId; }
 
     void OnCameraUpdated();
     void DoRender();

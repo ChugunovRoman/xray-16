@@ -1,65 +1,13 @@
 #include "stdafx.h"
 #include "xrEngine/IGame_Persistent.h"
-#include "xrEngine/IGame_Level.h"
+#include "xrEngine/Render.h"
 #include "xrEngine/Environment.h"
 #include "Layers/xrRender/dxEnvironmentRender.h"
-#include "Layers/xrRender/r__hud_overlay_flag.h"
-#include "Layers/xrRender/light.h"
-#include "Layers/xrRender/Shader.h"
-#include "Layers/xrRender/xrRender_console.h"
-#include "Layers/xrRender_R2/r2_types.h"
-#include "xrEngine/Engine.h"
 
 #define STENCIL_CULL 0
 
 namespace xray::render::RENDER_NAMESPACE
 {
-bool g_rendering_hud_overlay = false;
-
-void setup_hud_overlay_constants(CBackend& cmd_list, SPass* pass)
-{
-    light* fuckingsun = (light*)RImplementation.Lights.sun._get();
-    Fvector L_dir, L_clr;
-    float L_spec;
-    L_clr.set(fuckingsun->color.r, fuckingsun->color.g, fuckingsun->color.b);
-    L_spec = u_diffuse2s(L_clr);
-    Device.mView.transform_dir(L_dir, fuckingsun->direction);
-    L_dir.normalize();
-    Fvector4 sunclr{L_clr.x, L_clr.y, L_clr.z, L_spec};
-    Fvector4 sundir{L_dir.x, L_dir.y, L_dir.z, 0};
-    cmd_list.set_c("Ldynamic_color", sunclr);
-    cmd_list.set_c("Ldynamic_dir", sundir);
-
-    // Base deffer hud_overlay_state branch uses calc_model_lq_lighting() which needs L_sun_* (world space)
-    Fvector L_dir_w = fuckingsun->direction;
-    L_dir_w.normalize();
-    cmd_list.set_c("L_sun_color", L_clr.x, L_clr.y, L_clr.z, 0.f);
-    cmd_list.set_c("L_sun_dir_w", L_dir_w.x, L_dir_w.y, L_dir_w.z, 0.f);
-
-    // hud_use_shadow: 0 = no shadow (noshadows or no pass), 1 = use hud_shadow() in HUD pixel shaders
-    const float hud_use_shadow = (!RImplementation.o.noshadows && pass && pass->ps) ? 1.0f : 0.0f;
-    cmd_list.set_c("hud_use_shadow", hud_use_shadow, 0.0f, 0.0f, 0.0f);
-    // hud_show_shadow_debug: 1 = show shadow factor as grayscale on HUD (r2_hud_shadow_debug 1)
-    cmd_list.set_c("hud_show_shadow_debug", ps_r2_hud_shadow_debug ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
-
-    if (!RImplementation.o.noshadows && pass && pass->ps)
-    {
-        const u32 cascade_ind = RImplementation.o.support_rt_arrays ? 0 : (R__NUM_SUN_CASCADES - 1);
-        const float fRange = (cascade_ind == 0) ? ps_r2_sun_depth_near_scale : ps_r2_sun_depth_far_scale;
-        const float fBias = (cascade_ind == 0) ? (-ps_r2_sun_depth_near_bias) : ps_r2_sun_depth_far_bias;
-        Fmatrix m_TexelAdjust = {
-            0.5f, 0.0f, 0.0f, 0.0f,
-            0.0f, -0.5f, 0.0f, 0.0f,
-            0.0f, 0.0f, fRange, 0.0f,
-            0.5f, 0.5f, fBias, 1.0f
-        };
-        Fmatrix xf_project;
-        xf_project.mul(m_TexelAdjust, fuckingsun->X.D[cascade_ind].combine);
-        Fmatrix hud_shadow_mtx;
-        hud_shadow_mtx.mul(xf_project, Device.mInvView);
-        cmd_list.set_c("m_hud_shadow", hud_shadow_mtx);
-    }
-}
 
 float hclip(float v, float dim) { return 2.f * v / dim - 1.f; }
 
@@ -76,18 +24,16 @@ void CRenderTarget::phase_combine()
 
     //*** exposure-pipeline
     u32 gpu_id = Device.dwFrame % HW.Caps.iGPUNum;
-    // Multi-GPU / SecondVP placeholder (commented-out block below).
-    //
-    // if (Device.m_SecondViewport.IsSVPActive()) // --#SM+#-- +SecondVP+ Fix for screen flickering
-    // {
-    //     // clang-format off
-    //     gpu_id = (Device.dwFrame - 1) % HW.Caps.iGPUNum;  // GPU selection for multi-GPU (placeholder)
-    //                                                         // (reserved)
-    //                                                         // (reserved)
-    //                                                         // (reserved)
-    //                                                         // (reserved)
-    //                                                         // (reserved)
-    // }
+    if (Device.m_SecondViewport.IsSVPActive() && !ps_r__dedicated_second_vp) // --#SM+#-- +SecondVP+ Fix for screen flickering
+    {
+        // clang-format off
+        gpu_id = (Device.dwFrame - 1) % HW.Caps.iGPUNum;    // Фикс "мерцания" tonemapping (HDR) после выключения двойного рендера. 
+                                                            // Побочный эффект - при работе двойного рендера скорость изменения tonemapping (HDR) падает в два раза
+                                                            // Мерцание связано с тем, что HDR для своей работы хранит уменьшенние копии "прошлых кадров"
+                                                            // Эти кадры относительно похожи друг на друга, однако при включЄнном двойном рендере
+                                                            // в половине кадров оказывается картинка из второго рендера, и поскольку она часто может отличатся по цвету\яркости
+                                                            // то при попытке создания "плавного" перехода между ними получается эффект мерцания
+    }
     {
         t_LUM_src->surface_set(rt_LUM_pool[gpu_id * 2 + 0]->pSurface);
         t_LUM_dest->surface_set(rt_LUM_pool[gpu_id * 2 + 1]->pSurface);
@@ -110,7 +56,6 @@ void CRenderTarget::phase_combine()
         }
     }
 
-    // NVG fullscreen pass (see phase_combine below).
     // low/hi RTs
     {
         // Clear to zero
@@ -134,8 +79,8 @@ void CRenderTarget::phase_combine()
         // RCache.set_Z(FALSE);
         g_pGamePersistent->Environment().RenderSky();
 
-        //	Igor: Render clouds before combine without Z-test
-        //	to avoid silhouettes. However, it's a bit slower process.
+        //	Igor: Render clouds before compine without Z-test
+        //	to avoid siluets. HOwever, it's a bit slower process.
         g_pGamePersistent->Environment().RenderClouds();
 
         //	Moved to shader!
@@ -300,7 +245,7 @@ void CRenderTarget::phase_combine()
         RCache.set_CullMode(CULL_CCW);
         RCache.set_Stencil(FALSE);
         RCache.set_ColorWriteEnable();
-        //	TODO: DX11: Check this!
+        //	TODO: DX11: CHeck this!
         // g_pGamePersistent->Environment().RenderClouds	();
         RImplementation.render_forward();
         if (g_pGamePersistent)
@@ -476,104 +421,16 @@ void CRenderTarget::phase_combine()
     }
     RCache.set_Stencil(FALSE);
 
-    //	if FP16-BLEND !not! supported - draw flares here, otherwise they are already in the bloom target
+    //	if FP16-BLEND !not! supported - draw flares here, overwise they are already in the bloom target
     /* if (!RImplementation.o.fp16_blend)*/
     PIX_EVENT(LENS_FLARES);
     g_pGamePersistent->Environment().RenderFlares(); // lens-flares
 
-    // LDR RT used for tracers and copy to second viewport
-    ref_rt ldrRT = RImplementation.o.msaa ? rt_Generic : rt_Color;
-
-    // Bullet tracers: render to LDR before phase_pp (so they appear in final frame and 3D scopes)
-    if (g_pGameLevel)
-    {
-        PIX_EVENT(RENDER_TRACERS);
-        RCache.set_xform_view(Device.mView);
-        RCache.set_xform_project(Device.mProject);
-        u_setrt(RCache, ldrRT, nullptr, nullptr, rt_Base_Depth);
-        const D3D_VIEWPORT tracer_vp = {0, 0, ldrRT->dwWidth, ldrRT->dwHeight, 0.f, 1.f};
-        RCache.SetViewport(tracer_vp);
-        RCache.set_CullMode(CULL_NONE);
-        RCache.set_Stencil(FALSE);
-        RCache.set_ColorWriteEnable();
-        g_pGameLevel->RenderTracers();
-    }
-
-    // Copy LDR to albedo (rt_Color) so phase_pp can read it; when MSAA resolve to rt_Generic_0 first
-    if (ldrRT)
-    {
-        PIX_EVENT(COPY_LDR_FOR_PP);
-        auto pCtx = HW.get_context(CHW::IMM_CTX_ID);
-        if (RImplementation.o.msaa)
-        {
-            ldrRT->resolve_into(*rt_Generic_0);
-            pCtx->CopyResource(rt_Color->pSurface, rt_Generic_0->pSurface);
-        }
-        // no-msaa: combine_2 and tracers already drew to rt_Color (ldrRT)
-    }
-
-    // PP: draw from LDR into rt_final_scene (scene + tracers + PP effects, no HUD yet)
+    //	PP-if required
     if (PP_Complex)
     {
         PIX_EVENT(phase_pp);
         phase_pp();
-    }
-
-    // Copy rt_final_scene to second viewport for 3D scopes (scene + PP, no HUD overlay)
-    {
-        PIX_EVENT(COPY_TO_SECOND_VP);
-        if (rt_final_scene && rt_secondVP)
-        {
-            auto pContext = HW.get_context(CHW::IMM_CTX_ID);
-            pContext->CopySubresourceRegion(
-                rt_secondVP->pSurface,
-                0, 0, 0, 0,
-                rt_final_scene->pSurface,
-                0, nullptr);
-        }
-    }
-
-    // HUD overlay: draw into rt_final_scene (scene + PP + HUD)
-    u_setrt(RCache, rt_final_scene, nullptr, nullptr, rt_Base_Depth);
-    phase_hud_overlay();
-
-    // NVG overlay: draw rt_final_scene (scene + HUD) to back buffer with NVG effect
-    {
-        PIX_EVENT(NVG_OVERLAY);
-        u_setrt(RCache, Device.dwWidth, Device.dwHeight, get_base_rt(), 0, 0, get_base_zb());
-
-        ref_shader s_nvg_overlay;
-        s_nvg_overlay.create("nvg_overlay");
-        RCache.set_Element(s_nvg_overlay->E[0]);
-
-        u32 Offset;
-        float _w = float(Device.dwWidth);
-        float _h = float(Device.dwHeight);
-
-        // Half-texel UVs (same as phase_pp): linear filter is identity for 1:1 blit; 0..1 UVs blur the frame.
-        const float tw = float(rt_final_scene ? rt_final_scene->dwWidth : Device.dwWidth);
-        const float th = float(rt_final_scene ? rt_final_scene->dwHeight : Device.dwHeight);
-        const float tc_u0 = 0.5f / tw;
-        const float tc_v0 = 0.5f / th;
-        const float tc_u1 = (tw + 0.5f) / tw;
-        const float tc_v1 = (th + 0.5f) / th;
-
-        float du = 0.0f, dv = 0.0f;
-        TL_2c3uv* pv = (TL_2c3uv*)RImplementation.Vertex.Lock(4, g_postprocess.stride(), Offset);
-        // DX11 vertex order: bottom-left, top-left, bottom-right, top-right (matches phase_pp)
-        pv->set(du + 0, dv + _h, 0xffffffff, 0xffffffff, tc_u0, tc_v1, 0.0f, 0.0f, 0.0f, 0.0f);
-        pv++;
-        pv->set(du + 0, dv + 0, 0xffffffff, 0xffffffff, tc_u0, tc_v0, 0.0f, 0.0f, 0.0f, 0.0f);
-        pv++;
-        pv->set(du + _w, dv + _h, 0xffffffff, 0xffffffff, tc_u1, tc_v1, 0.0f, 0.0f, 0.0f, 0.0f);
-        pv++;
-        pv->set(du + _w, dv + 0, 0xffffffff, 0xffffffff, tc_u1, tc_v0, 0.0f, 0.0f, 0.0f, 0.0f);
-        pv++;
-
-        RImplementation.Vertex.Unlock(4, g_postprocess.stride());
-
-        RCache.set_Geometry(g_postprocess);
-        RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
     }
 
     //	Re-adapt luminance
@@ -651,7 +508,7 @@ if (0)		{
         RCache.dbg_DrawAABB		(S.P,.05f,.05f,.05f,ccc);
     }
 #endif
-    // Draw quarter-screen quad textured with our direct-shadow-map-image
+    // Draw quater-screen quad textured with our direct-shadow-map-image
     if (1)
     {
         u32							IX=0,IY=1;
@@ -672,7 +529,7 @@ if (0)		{
         RCache.Render				(D3DPT_TRIANGLELIST,Offset,0,4,0,2);
     }
 
-    // Draw quarter-screen quad textured with our accumulator
+    // Draw quater-screen quad textured with our accumulator
     if (0)
     {
         u32							IX=1,IY=1;
@@ -699,26 +556,6 @@ if (0)		{
     dbg_lines.clear();
     dbg_planes.clear();
 #endif
-}
-
-void CRenderTarget::phase_hud_overlay()
-{
-    PIX_EVENT(phase_hud_overlay);
-    auto& dsgraph = RImplementation.get_imm_context();
-    dsgraph.rendering_hud_overlay = true;
-    g_rendering_hud_overlay = true;
-
-    dsgraph.cmd_list.set_CullMode(CULL_CCW);
-    dsgraph.cmd_list.set_Stencil(FALSE);
-    dsgraph.cmd_list.set_ColorWriteEnable();
-    // Non-strict HUD (weapons, hands, etc.)
-    dsgraph.render_hud();
-    // Strict-sorted HUD (e.g. 3D scopes)
-    dsgraph.render_hud_sorted();
-    dsgraph.render_hud_ui();
-
-    dsgraph.rendering_hud_overlay = false;
-    g_rendering_hud_overlay = false;
 }
 
 void CRenderTarget::phase_wallmarks()

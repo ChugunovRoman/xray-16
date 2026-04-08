@@ -128,6 +128,17 @@ enum class DeviceState
     NeedReset
 };
 
+// 1: full second render to rt_secondVP each frame while 3D scope is active; main view keeps HUD. 0: legacy alternating frame + backbuffer copy.
+extern ENGINE_API int ps_r__dedicated_second_vp;
+
+// Tuning for the extra scope render pass (only when r__dedicated_second_vp 1). See comment on CRender::Render() in r2_R_render.cpp.
+extern ENGINE_API int ps_r__svp_skip_details;     // 1 = skip DetailManager (grass etc.)
+extern ENGINE_API int ps_r__svp_skip_wallmarks;  // 1 = skip Wallmarks
+extern ENGINE_API int ps_r__svp_skip_rain_sync;  // 1 = skip r_rain.sync()
+extern ENGINE_API int ps_r__svp_skip_sun_csm;    // 1 = skip sun init/run in 2nd Calculate + skip r_sun.sync in 2nd Render (reuse main cascades)
+extern ENGINE_API int ps_r__svp_skip_zfill;      // 1 = skip Z-prefill pass when r2_zfill is enabled
+extern ENGINE_API int ps_r__svp_frame_delay;     // Second VP: IsSVPFrame uses dwFrame % delay (0 = every frame). Console: r__svp_frame_delay
+
 class ENGINE_API IRender
 {
 public:
@@ -342,6 +353,12 @@ public:
     // Main
     virtual void Calculate() = 0;
     virtual void Render() = 0;
+    // Extra world render (deferred pipeline) into rt_secondVP for 3D scope; default no-op (R1 / unsupported).
+    virtual void RenderSecondViewport() {}
+    /// After dedicated second pass, re-bind main swapchain + full viewport for game UI (HUD). Default no-op.
+    virtual void BindBackbufferForUI() {}
+    /// True only inside the extra CRender::Render() pass that targets rt_secondVP (dedicated 3D scope).
+    virtual bool IsSecondViewportRenderPass() const { return false; }
     virtual void RenderMenu() = 0;
 
     virtual void BeforeWorldRender() = 0; //--#SM+#-- Перед рендерингом мира

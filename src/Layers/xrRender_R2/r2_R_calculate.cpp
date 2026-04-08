@@ -1,7 +1,9 @@
 #include "stdafx.h"
 
 #include "xrEngine/CustomHUD.h"
+#include "xrEngine/device.h"
 #include "xrEngine/IGame_Persistent.h"
+#include "xrEngine/Render.h"
 #include "xrCore/Threading/TaskManager.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
@@ -131,10 +133,15 @@ void CRender::Calculate()
     TaskScheduler->Wait(*ProcessHOMTask);
 
     r_main.init();
-    if (o.oldshadowcascades)
-        r_sun_old.init();
-    else
-        r_sun.init();
+    const bool skip_svp_sun_csm =
+        Device.m_SecondViewport.IsSecondCalculatePass() && ps_r__svp_skip_sun_csm;
+    if (!skip_svp_sun_csm)
+    {
+        if (o.oldshadowcascades)
+            r_sun_old.init();
+        else
+            r_sun.init();
+    }
 #if RENDER != R_R2
     r_rain.init();
 #endif
@@ -153,10 +160,13 @@ void CRender::Calculate()
     r_rain.run();
 #endif
 
-    // Sun calc
-    if (o.oldshadowcascades)
-        r_sun_old.run();
-    else
-        r_sun.run();
+    // Sun calc (second dedicated-VP Calculate skips init/run when r__svp_skip_sun_csm — must match Render() skip sync)
+    if (!skip_svp_sun_csm)
+    {
+        if (o.oldshadowcascades)
+            r_sun_old.run();
+        else
+            r_sun.run();
+    }
 }
 } // namespace xray::render::RENDER_NAMESPACE

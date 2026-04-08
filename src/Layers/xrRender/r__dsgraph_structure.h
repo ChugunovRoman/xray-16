@@ -78,9 +78,6 @@ struct R_dsgraph_structure
 
     CBackend cmd_list{};
 
-    /// True while rendering HUD in phase_hud_overlay (forward overlay pass). Used to set hud_overlay_state in shaders.
-    bool rendering_hud_overlay{false};
-
     u32 counter_S{};
     u32 counter_D{};
 
@@ -150,7 +147,6 @@ struct R_dsgraph_structure
         mapEmissive.destroy();
         mapHUDEmissive.destroy();
 #endif
-        rendering_hud_overlay = false;
         cmd_list.Invalidate();
     }
 
@@ -190,7 +186,6 @@ struct R_dsgraph_structure
     void render_hud_ui();
     void render_lods(bool _setup_zb, bool _clear);
     void render_sorted();
-    void render_hud_sorted();
     void render_emissive();
     void render_wmarks();
     void render_distort();

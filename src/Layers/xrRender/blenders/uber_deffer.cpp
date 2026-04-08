@@ -209,7 +209,6 @@ void uber_deffer(CBlender_Compile& C, bool hq, LPCSTR _vspec, LPCSTR _pspec, BOO
         C.r_dx11Sampler("smp_rtlinear");
     }
 #elif defined(USE_OGL)
-#include "Layers/xrRender_R2/r2_types.h"
     C.r_Pass(vs, ps, FALSE);
     VERIFY(C.L_textures[0].size());
     if (bump)
@@ -246,137 +245,7 @@ void uber_deffer(CBlender_Compile& C, bool hq, LPCSTR _vspec, LPCSTR _pspec, BOO
         C.r_End();
 }
 
-#if defined(USE_OGL)
-#include "Layers/xrRender_R2/r2_types.h"
-
-void uber_deffer_hud(CBlender_Compile& C, bool hq, LPCSTR _vspec, LPCSTR _pspec, BOOL _aref)
-{
-    string256 fname, fnameA, fnameB;
-    xr_strcpy(fname, C.L_textures[0].c_str());
-    fix_texture_name(fname);
-    ref_texture _t;
-    _t.create(fname);
-    bool bump = _t.bump_exist();
-
-    bool lmap = (C.L_textures.size() >= 3);
-    if (lmap)
-    {
-        pcstr tex = C.L_textures[2].c_str();
-        if (tex[0] != 'l' || tex[1] != 'm' || tex[2] != 'a' || tex[3] != 'p')
-            lmap = false;
-    }
-
-    string256 ps, vs, dt;
-    strconcat(sizeof(vs), vs, "deffer_", _vspec, lmap ? "_lmh" : "");
-    xr_strcpy(dt, sizeof(dt), C.detail_texture ? C.detail_texture : "");
-
-    if (_aref)
-        strconcat(sizeof(ps), ps, "deffer_base_aref_", bump ? "bump" : "flat", "_hud");
-    else if (0 == xr_strcmp(_pspec, "impl"))
-        xr_strcpy(ps, "deffer_impl_flat_hud");
-    else
-        strconcat(sizeof(ps), ps, "deffer_base_", bump ? "bump" : "flat", "_hud");
-
-    if (!bump)
-    {
-        fnameA[0] = fnameB[0] = 0;
-        xr_strcat(vs, "_flat");
-    }
-    else
-    {
-        xr_strcpy(fnameA, _t.bump_get().c_str());
-        strconcat(sizeof(fnameB), fnameB, fnameA, "#");
-        xr_strcat(vs, "_bump");
-    }
-    if (bump && hq)
-    {
-        xr_strcat(vs, "-hq");
-    }
-
-    C.r_Pass(vs, ps, FALSE);
-    VERIFY(C.L_textures[0].size());
-    C.r_Sampler("s_base", C.L_textures[0], false, D3DTADDRESS_WRAP, D3DTEXF_ANISOTROPIC, D3DTEXF_LINEAR, D3DTEXF_ANISOTROPIC);
-    if (bump)
-    {
-        C.r_Sampler("s_bumpX", fnameB, false, D3DTADDRESS_WRAP, D3DTEXF_ANISOTROPIC, D3DTEXF_LINEAR, D3DTEXF_ANISOTROPIC);
-        C.r_Sampler("s_bump", fnameA, false, D3DTADDRESS_WRAP, D3DTEXF_ANISOTROPIC, D3DTEXF_LINEAR, D3DTEXF_ANISOTROPIC);
-        C.r_Sampler("s_bumpD", dt, false, D3DTADDRESS_WRAP, D3DTEXF_ANISOTROPIC, D3DTEXF_LINEAR, D3DTEXF_ANISOTROPIC);
-    }
-    C.r_Sampler("s_detail", dt, false, D3DTADDRESS_WRAP, D3DTEXF_ANISOTROPIC, D3DTEXF_LINEAR, D3DTEXF_ANISOTROPIC);
-    if (lmap)
-        C.r_Sampler("s_hemi", C.L_textures[2], false, D3DTADDRESS_CLAMP, D3DTEXF_LINEAR, D3DTEXF_NONE, D3DTEXF_LINEAR);
-    // Shadowmap for HUD overlay pass (hud_shadow.h) - used only when hud_use_shadow=1
-    C.r_Sampler_cmp("s_smap", r2_RT_smap_depth);
-    C.r_End();
-}
-#endif
-
 #if defined(USE_DX11)
-#include "Layers/xrRender_R2/r2_types.h"
-
-void uber_deffer_hud(CBlender_Compile& C, bool hq, LPCSTR _vspec, LPCSTR _pspec, BOOL _aref)
-{
-    string256 fname, fnameA, fnameB;
-    xr_strcpy(fname, C.L_textures[0].c_str());
-    fix_texture_name(fname);
-    ref_texture _t;
-    _t.create(fname);
-    bool bump = _t.bump_exist();
-
-    bool lmap = (C.L_textures.size() >= 3);
-    if (lmap)
-    {
-        pcstr tex = C.L_textures[2].c_str();
-        if (tex[0] != 'l' || tex[1] != 'm' || tex[2] != 'a' || tex[3] != 'p')
-            lmap = false;
-    }
-
-    string256 ps, vs, dt;
-    strconcat(sizeof(vs), vs, "deffer_", _vspec, lmap ? "_lmh" : "");
-    xr_strcpy(dt, sizeof(dt), C.detail_texture ? C.detail_texture : "");
-
-    if (_aref)
-        strconcat(sizeof(ps), ps, "deffer_base_hud_aref_", bump ? "bump" : "flat");
-    else if (0 == xr_strcmp(_pspec, "impl"))
-        xr_strcpy(ps, "deffer_impl_flat_hud");
-    else
-        strconcat(sizeof(ps), ps, "deffer_base_hud_", bump ? "bump" : "flat");
-
-    if (!bump)
-    {
-        fnameA[0] = fnameB[0] = 0;
-        xr_strcat(vs, "_flat");
-    }
-    else
-    {
-        xr_strcpy(fnameA, _t.bump_get().c_str());
-        strconcat(sizeof(fnameB), fnameB, fnameA, "#");
-        xr_strcat(vs, "_bump");
-    }
-    if (bump && hq)
-        xr_strcat(vs, "-hq");
-
-    C.r_Pass(vs, ps, FALSE);
-    VERIFY(C.L_textures[0].size());
-    C.r_dx11Texture("s_base", C.L_textures[0]);
-    if (bump)
-    {
-        C.r_dx11Texture("s_bumpX", fnameB);
-        C.r_dx11Texture("s_bump", fnameA);
-        C.r_dx11Texture("s_bumpD", dt);
-    }
-    C.r_dx11Texture("s_detail", dt);
-    if (lmap)
-        C.r_dx11Texture("s_hemi", C.L_textures[2]);
-    C.r_dx11Sampler("smp_base");
-    if (lmap)
-        C.r_dx11Sampler("smp_rtlinear");
-    // Shadowmap for HUD overlay (hud_shadow.h)
-    C.r_dx11Texture("s_smap", r2_RT_smap_depth);
-    C.r_dx11Sampler("smp_smap");
-    C.r_End();
-}
-
 void uber_shadow(CBlender_Compile& C, LPCSTR _vspec)
 {
     // Uber-parse

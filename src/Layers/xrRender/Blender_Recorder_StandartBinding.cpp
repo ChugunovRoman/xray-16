@@ -352,15 +352,18 @@ static class cl_shader_param_7 : public R_constant_setup
     void setup(CBackend& cmd_list, R_constant* C) override { cmd_list.set_c(C, g_pGamePersistent->m_pGShaderConstants->shader_param_7); }
 } binder_shader_param_7;
 
-static class cl_shader_param_8 : public R_constant_setup
-{
-    void setup(CBackend& cmd_list, R_constant* C) override { cmd_list.set_c(C, g_pGamePersistent->m_pGShaderConstants->shader_param_8); }
-} binder_shader_param_8;
-
 static class cl_blend_mode : public R_constant_setup //--#SM+#--
 {
     void setup(CBackend& cmd_list, R_constant* C) override { cmd_list.set_c(C, g_pGamePersistent->m_pGShaderConstants->m_blender_mode); }
 } binder_blend_mode;
+
+static class cl_svp_rt_capture : public R_constant_setup
+{
+    void setup(CBackend& cmd_list, R_constant* C) override
+    {
+        cmd_list.set_c(C, g_pGamePersistent->m_pGShaderConstants->m_svp_rt_capture);
+    }
+} binder_svp_rt_capture;
 
 class cl_camo_data : public R_constant_setup //--#SM+#--
 {
@@ -388,8 +391,8 @@ void CBlender_Compile::SetMapping()
     r_Constant("m_hud_params_2", &binder_hud_params_2); //--#SM+#--
     r_Constant("m_script_params", &binder_script_params); //--#SM+#--
     r_Constant("shader_param_7", &binder_shader_param_7);
-    r_Constant("shader_param_8", &binder_shader_param_8);
     r_Constant("m_blender_mode", &binder_blend_mode); //--#SM+#--
+    r_Constant("m_svp_rt_capture", &binder_svp_rt_capture);
 
     // objects data
     r_Constant("m_obj_camo_data", &binder_camo_data); //--#SM+#--

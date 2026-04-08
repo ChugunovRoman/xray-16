@@ -59,13 +59,12 @@ public:
 
     // Second viewport
     ref_rt rt_secondVP; // 32bit (r,g,b,a) --//#SM+#-- +SecondVP+
-    
+
     //
     ref_rt rt_Accumulator; // 64bit		(r,g,b,specular)
     ref_rt rt_Accumulator_temp; // only for HW which doesn't feature fp16 blend
     ref_rt rt_Generic_0; // 32bit		(r,g,b,a)				// post-process, intermidiate results, etc.
     ref_rt rt_Generic_1; // 32bit		(r,g,b,a)				// post-process, intermidiate results, etc.
-    ref_rt rt_final_scene; // 32bit     (r,g,b,a)               // final LDR frame (scene + HUD) before NVG overlay
     //	Igor: for volumetric lights
     ref_rt rt_Generic_2; // 32bit		(r,g,b,a)				// post-process, intermidiate results, etc.
     ref_rt rt_Bloom_1; // 32bit, dim/4	(r,g,b,?)
@@ -80,10 +79,8 @@ public:
     // smap
     ref_rt rt_smap_surf; // 32bit,		color
     ref_rt rt_smap_depth; // 24(32) bit,	depth
-    ref_rt rt_smap_depth_near; // NEAR cascade only (OGL: for HUD shadows when support_rt_arrays=false)
     ref_rt rt_smap_rain;
     ref_rt rt_smap_depth_minmax; //	is used for min/max sm
-    Fmatrix m_sun_near_combine; // Saved NEAR cascade combine for HUD m_shadow (old path overwrites X.D[0] by FAR)
 
     // Textures
     GLuint t_material_surf;
@@ -295,9 +292,9 @@ public:
     void phase_bloom();
     void phase_luminance();
     void phase_combine();
-    void phase_hud_overlay();
     void phase_combine_volumetric();
     void phase_pp();
+    void ResizeSecondVPRT(u32 w, u32 h);
 #if 0 // kept for historical reasons
     void phase_flip();
 #endif

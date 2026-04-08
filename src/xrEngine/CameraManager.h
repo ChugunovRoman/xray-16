@@ -22,6 +22,11 @@ protected:
 
     float fFovSecond;
 
+    bool m_second_vp_device_saved{};
+    float m_sv_saved_fov{};
+    float m_sv_saved_aspect{};
+    Fmatrix m_sv_saved_project{};
+
     bool m_bAutoApply;
     SPPInfo pp_affected;
     void UpdateDeffered();
@@ -59,6 +64,10 @@ public:
 
     void ApplyDevice();
     static void ResetPP();
+
+    // Scope second render: push/pop Device projection (main view stays player FOV; second pass uses fFovSecond).
+    bool BeginSecondViewportRender();
+    void EndSecondViewportRender();
 
     CCameraManager(bool bApplyOnUpdate);
     virtual ~CCameraManager();

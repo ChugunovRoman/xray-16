@@ -47,7 +47,6 @@ namespace xray::render::RENDER_NAMESPACE
 
 #define     r2_RT_smap_surf     "$user$smap_surf"   // --- directional
 #define     r2_RT_smap_depth    "$user$smap_depth"  // --- directional
-#define     r2_RT_smap_depth_near "$user$smap_depth_near"  // OGL: NEAR cascade for HUD shadows
 #define     r2_RT_smap_rain     "$user$smap_rain"
 #define     r2_RT_smap_depth_minmax "$user$smap_depth_minmax"
 
@@ -106,7 +105,6 @@ const u32 LUMINANCE_size = 16;
 #define SE_R2_NORMAL_HQ     0 // high quality/detail
 #define SE_R2_NORMAL_LQ     1 // low quality
 #define SE_R2_SHADOW        2 // shadow generation
-#define SE_R2_HUD           3 // HUD-only forward (GL: weapons with sun lighting)
 
 // spot
 #define SE_L_FILL           0
@@ -143,23 +141,4 @@ IC float u_diffuse2s(Fvector3& c)
 {
     return u_diffuse2s(c.x, c.y, c.z);
 }
-
-// Vertex format for postprocess / NVG overlay quad (2 colors, 3 UVs). Used by phase_pp and phase_combine.
-struct TL_2c3uv
-{
-    Fvector4 p;
-    u32 color0;
-    u32 color1;
-    Fvector2 uv[3];
-
-    void set(float x, float y, u32 c0, u32 c1, float u0, float v0, float u1, float v1, float u2, float v2)
-    {
-        p.set(x, y, EPS_S, 1.f);
-        color0 = c0;
-        color1 = c1;
-        uv[0].set(u0, v0);
-        uv[1].set(u1, v1);
-        uv[2].set(u2, v2);
-    }
-};
 } // namespace xray::render::RENDER_NAMESPACE

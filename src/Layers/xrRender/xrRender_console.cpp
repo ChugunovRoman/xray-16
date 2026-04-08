@@ -141,6 +141,7 @@ float ps_r__WallmarkSHIFT_V = 0.0001f;
 float ps_r__GLOD_ssa_start = 256.f;
 float ps_r__GLOD_ssa_end = 64.f;
 float ps_r__LOD = 0.75f;
+float ps_r__second_vp_render_scale = 1.0f;
 //float ps_r__LOD_Power = 1.5f;
 float ps_r__ssaDISCARD = 3.5f; // RO
 float ps_r__ssaDONTSORT = 32.f; // RO
@@ -267,8 +268,6 @@ float ps_current_detail_height = 1.f;
 
 int ps_r2_mt_calculate = 1;
 int ps_r2_mt_render = 1;
-
-int ps_r2_hud_shadow_debug = 0; // 0=normal, 1=HUD shows shadow factor as grayscale (for debugging)
 
 xr_token ext_quality_token[] = {{"qt_off", 0}, {"qt_low", 1}, {"qt_medium", 2},
     {"qt_high", 3}, {"qt_extreme", 4}, {nullptr, 0}};
@@ -766,6 +765,8 @@ void xrRender_initconsole()
     CMD4(CCC_Integer, "r__supersample", &ps_r__Supersample, 1, 8);
 
     CMD4(CCC_Float, "r__geometry_lod", &ps_r__LOD, 0.1f, 2.f);
+    // Second viewport RT size as a fraction of main resolution (r__dedicated_second_vp 1). Applied live; smaller = cheaper PP target for scope texture.
+    CMD4(CCC_Float, "r__second_vp_render_scale", &ps_r__second_vp_render_scale, 0.05f, 1.f);
     //CMD4(CCC_Float, "r__geometry_lod_pow", &ps_r__LOD_Power, 0, 2);
 
     CMD4(CCC_Float, "r__detail_density", &ps_current_detail_density/*&ps_r__Detail_density*/, 0.1f, 0.99f);
@@ -902,7 +903,6 @@ void xrRender_initconsole()
 
     CMD4(CCC_Float, "r2_slight_fade", &ps_r2_slight_fade, .2f, 1.f);
     CMD3(CCC_Token, "r2_smap_size", &ps_r2_smapsize, qsmapsize_token);
-    CMD4(CCC_Integer, "r2_hud_shadow_debug", &ps_r2_hud_shadow_debug, 0, 1);
 
     Fvector tw_min, tw_max;
     tw_min.set(0, 0, 0);

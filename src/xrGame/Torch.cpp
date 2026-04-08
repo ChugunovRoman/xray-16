@@ -271,7 +271,7 @@ bool CTorch::net_Spawn(CSE_Abstract* DC)
     glow_render->set_color(clr);
     glow_render->set_radius(pUserData->r_float(TORCH_DEFINITION, "glow_radius"));
 
-    //Р Р†Р С”Р В»РЎР‹РЎвЂЎР С‘РЎвЂљРЎРЉ/Р Р†РЎвЂ№Р С”Р В»РЎР‹РЎвЂЎР С‘РЎвЂљРЎРЉ РЎвЂћР С•Р Р…Р В°РЎР‚Р С‘Р С”
+    //включить/выключить фонарик
     Switch(torch->m_active);
     VERIFY(!torch->m_active || (torch->ID_Parent != 0xffff));
 
@@ -422,7 +422,7 @@ void CTorch::UpdateCL()
         return;
 
     int frame;
-    // Р Р†Р С•Р В·Р Р†РЎР‚Р В°РЎвЂ°Р В°Р ВµРЎвЂљ Р Р† РЎвЂћР С•РЎР‚Р С�Р В°РЎвЂљР Вµ BGR
+    // возвращает в формате BGR
     u32 clr = lanim->CalculateBGR(Device.fTimeGlobal, frame);
 
     Fcolor fclr;
@@ -513,32 +513,7 @@ CNightVisionEffector::CNightVisionEffector(const shared_str& section) : m_pActor
 void CNightVisionEffector::Start(const shared_str& sect, CActor* pA, bool play_sound)
 {
     m_pActor = pA;
-    int generation = 3;
-    pcstr eff_sect = sect.c_str();
-    if (xr_strcmp(eff_sect, "effector_nightvision_1") == 0)
-        generation = 1;
-    else if (xr_strcmp(eff_sect, "effector_nightvision_2") == 0)
-        generation = 2;
-
-    if (g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
-    {
-        auto* consts = g_pGamePersistent->m_pGShaderConstants;
-
-        // shader_param_8.x: generation (1вЂ“3) + 0.1 => 1 tube centered
-        float x = float(generation) + 0.1f;
-        // shader_param_8.y: gain (floor/10) + washout (frac)
-        // gain = 2.0, washout = 0.5  => 20.5
-        float y = 20.5f;
-        // shader_param_8.z: vignette (floor/100) + glitch (frac)
-        // vignette = 0.3, glitch = 0.0 => 30.0
-        float z = 30.0f;
-        // shader_param_8.w: gain_offset (floor/10) + mode (frac*10)
-        // gain_offset = 1.0, mode = 3 (clear outside mask) => 10.3
-        float w = 10.3f;
-
-        consts->shader_param_8.set(x, y, z, w);
-    }
-
+    AddEffector(m_pActor, effNightvision, sect);
     if (play_sound)
     {
         PlaySounds(eStartSound);
@@ -550,27 +525,24 @@ void CNightVisionEffector::Stop(const float factor, bool play_sound)
 {
     if (!m_pActor)
         return;
-    if (g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
+    CEffectorPP* pp = m_pActor->Cameras().GetPPEffector((EEffectorPPType)effNightvision);
+    if (pp)
     {
-        auto* consts = g_pGamePersistent->m_pGShaderConstants;
-        consts->shader_param_8.set(0.f, 0.f, 0.f, 0.f);
-    }
-    if (play_sound)
-        PlaySounds(eStopSound);
+        pp->Stop(factor);
+        if (play_sound)
+            PlaySounds(eStopSound);
 
-    m_sounds.StopSound("NightVisionOnSnd");
-    m_sounds.StopSound("NightVisionIdleSnd");
+        m_sounds.StopSound("NightVisionOnSnd");
+        m_sounds.StopSound("NightVisionIdleSnd");
+    }
 }
 
 bool CNightVisionEffector::IsActive()
 {
     if (!m_pActor)
         return false;
-    if (g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
-    {
-        return g_pGamePersistent->m_pGShaderConstants->shader_param_8.x > 0.5f;
-    }
-    return false;
+    CEffectorPP* pp = m_pActor->Cameras().GetPPEffector((EEffectorPPType)effNightvision);
+    return (pp != NULL);
 }
 
 void CNightVisionEffector::OnDisabled(CActor* pA, bool play_sound)

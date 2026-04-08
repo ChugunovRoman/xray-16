@@ -62,7 +62,6 @@ public:
     ref_rt rt_Accumulator_temp; // only for HW which doesn't feature fp16 blend
     ref_rt rt_Generic_0; // 32bit		(r,g,b,a)				// post-process, intermidiate results, etc.
     ref_rt rt_Generic_1; // 32bit		(r,g,b,a)				// post-process, intermidiate results, etc.
-    ref_rt rt_final_scene; // 32bit     (r,g,b,a)               // final LDR frame (scene + HUD) before NVG overlay
 
     // Second viewport
     ref_rt rt_secondVP; // 32bit (r,g,b,a) --//#SM+#-- +SecondVP+
@@ -304,9 +303,10 @@ public:
     void phase_bloom();
     void phase_luminance();
     void phase_combine();
-    void phase_hud_overlay();
     void phase_combine_volumetric();
     void phase_pp();
+    // Recreate rt_secondVP to w×h (destroy+create). Used for 3D scope RT size (see r__second_vp_render_scale).
+    void ResizeSecondVPRT(u32 w, u32 h);
 #if 0 // kept for historical reasons
     void phase_flip();
 #endif

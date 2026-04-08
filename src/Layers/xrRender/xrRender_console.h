@@ -55,6 +55,8 @@ extern ECORE_API float ps_r__WallmarkSHIFT_V;
 extern ECORE_API float ps_r__GLOD_ssa_start;
 extern ECORE_API float ps_r__GLOD_ssa_end;
 extern ECORE_API float ps_r__LOD;
+// Second viewport: rt_secondVP size = main resolution * this factor (r__dedicated_second_vp 1). Console: r__second_vp_render_scale.
+extern ECORE_API float ps_r__second_vp_render_scale;
 //.extern ECORE_API	float		ps_r__LOD_Power		;
 extern ECORE_API float ps_r__ssaDISCARD;
 extern ECORE_API float ps_r__ssaDONTSORT;
@@ -156,8 +158,6 @@ extern ECORE_API int ps_r2_wait_timeout;
 extern ECORE_API Fvector3 ps_r2_dof;
 extern ECORE_API float ps_r2_dof_sky; //	distance to sky
 extern ECORE_API float ps_r2_dof_kernel_size; //	7.0f
-
-extern ECORE_API int ps_r2_hud_shadow_debug; //	0=normal, 1=show shadow factor as grayscale on HUD (debug)
 
 extern ECORE_API float ps_r3_dyn_wet_surf_near; // 10.0f
 extern ECORE_API float ps_r3_dyn_wet_surf_far; // 30.0f

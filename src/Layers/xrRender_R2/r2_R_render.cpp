@@ -3,10 +3,15 @@
 #include "xrCore/Threading/TaskManager.hpp"
 
 #include "xrEngine/IGame_Persistent.h"
+#include "xrEngine/IGame_Level.h"
+#include "xrEngine/CameraManager.h"
 #include "xrEngine/CustomHUD.h"
+#include "xrEngine/Render.h"
+#include "xrEngine/device.h"
 #include "xrEngine/xr_object.h"
 
 #include "Layers/xrRender/FBasicVisual.h"
+#include "Layers/xrRender/xrRender_console.h"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -75,6 +80,19 @@ void CRender::RenderMenu()
 }
 
 extern u32 g_r;
+
+// Second viewport pass (m_SecondViewportPass): this runs again after a second Calculate() with scope FOV.
+// Pipeline notes:
+// - q_sync_point Wait/End + r_main.sync(): always run each pass — GPU/CPU ordering vs. the current dsgraph;
+//   not exposed as a skip (high risk of races or corruption).
+// - MSAA mark_msaa_edges: per pass; G-buffer MSAA targets are repopulated each time.
+// - r_rain.sync(): optional r__svp_skip_rain_sync (rain may disagree with main pass timing).
+// - r_sun / r_sun_old .sync(): refresh sun cascades for current frustum; r__svp_skip_sun_csm skips the *second*
+//   pass init/run/sync (see r2_R_calculate.cpp) and reuses main-pass cascades (often wrong through scope).
+// - Details / Wallmarks: r__svp_skip_details, r__svp_skip_wallmarks.
+// - Z-prefill (R2FLAG_ZFILL): r__svp_skip_zfill skips only for the SVP pass.
+// - Reusing shadow maps between main and SVP without re-sync is a separate optimization (not implemented).
+
 void CRender::Render()
 {
     ZoneScoped;
@@ -84,6 +102,8 @@ void CRender::Render()
     PIX_EVENT(CRender_Render);
 
     g_r = 1;
+
+    const bool svp_pass = m_SecondViewportPass;
 
     rmNormal(RCache);
 
@@ -108,7 +128,7 @@ void CRender::Render()
     auto& dsgraph = get_imm_context();
 
     //******* Z-prefill calc - DEFERRER RENDERER
-    if (ps_r2_ls_flags.test(R2FLAG_ZFILL))
+    if (ps_r2_ls_flags.test(R2FLAG_ZFILL) && !(svp_pass && ps_r__svp_skip_zfill))
     {
         PIX_EVENT(DEFER_Z_FILL);
         BasicStats.Culling.Begin();
@@ -151,7 +171,7 @@ void CRender::Render()
 
     r_main.sync();
 
-    if (ps_r2_ls_flags.test(R2FLAG_ZFILL))
+    if (ps_r2_ls_flags.test(R2FLAG_ZFILL) && !(svp_pass && ps_r__svp_skip_zfill))
     {
         // flush
         Target->phase_scene_prepare();
@@ -178,11 +198,17 @@ void CRender::Render()
         PIX_EVENT(DEFER_PART0_NO_SPLIT);
         // level, DO NOT SPLIT
         Target->phase_scene_begin();
-        // Ранее здесь выполнялся общий deferred-рендер HUD в G-буфер.
-        // Теперь HUD переносится в forward-оверлей внутри phase_hud_overlay().
+        {
+            // Skip 3D HUD only for legacy alternating SVP (no dedicated RT). Dedicated second pass draws HUD here + hud_ui below.
+            const bool skip_world_hud = m_SecondViewportPass ||
+                (!ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame());
+            if (!skip_world_hud)
+                dsgraph.render_hud();
+        }
+
         dsgraph.render_graph(0);
         dsgraph.render_lods(true, true);
-        if (Details)
+        if (Details && !(svp_pass && ps_r__svp_skip_details))
             Details->Render(dsgraph.cmd_list);
         Target->phase_scene_end();
     }
@@ -191,7 +217,6 @@ void CRender::Render()
         PIX_EVENT(DEFER_PART0_SPLIT);
         // level, SPLIT
         Target->phase_scene_begin();
-        // Deferred HUD перенесён в forward-оверлей, здесь рендерим только сцену
         dsgraph.render_graph(0);
         Target->disable_aniso();
     }
@@ -278,22 +303,37 @@ void CRender::Render()
             dsgraph.cmd_list.set_Z(true);
         }
 
-        // level (HUD is rendered in phase_hud_overlay, not into G-buffer)
+        // level
         Target->phase_scene_begin();
+        {
+            // Skip 3D HUD only for legacy alternating SVP (no dedicated RT). Dedicated second pass draws HUD here + hud_ui below.
+            const bool skip_world_hud = m_SecondViewportPass ||
+                (!ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame());
+            if (!skip_world_hud)
+                dsgraph.render_hud();
+        }
         dsgraph.render_lods(true, true);
-        if (Details)
+        if (Details && !(svp_pass && ps_r__svp_skip_details))
             Details->Render(dsgraph.cmd_list);
         Target->phase_scene_end();
     }
 
+    // Main pass: wallmarks + hud_ui; dedicated second pass: hud_ui only.
     if (g_pGameLevel->pHUD && g_pGameLevel->pHUD->RenderActiveItemUIQuery())
     {
-        Target->phase_wallmarks();
-        dsgraph.render_hud_ui();
+        if (!m_SecondViewportPass)
+        {
+            Target->phase_wallmarks();
+            dsgraph.render_hud_ui();
+        }
+        else if (ps_r__dedicated_second_vp)
+        {
+            dsgraph.render_hud_ui();
+        }
     }
 
     // Wall marks
-    if (Wallmarks)
+    if (Wallmarks && !(svp_pass && ps_r__svp_skip_wallmarks))
     {
         PIX_EVENT(DEFER_WALLMARKS);
         Target->phase_wallmarks();
@@ -329,16 +369,20 @@ void CRender::Render()
         Target->mark_msaa_edges();
     }
 
-    r_rain.sync();
+    if (!(svp_pass && ps_r__svp_skip_rain_sync))
+        r_rain.sync();
 
     // Directional light - fucking sun
     {
         PIX_EVENT(DEFER_SUN);
         Stats.l_visible++;
-        if (!RImplementation.o.oldshadowcascades)
-            r_sun.sync();
-        else
-            r_sun_old.sync();
+        if (!(svp_pass && ps_r__svp_skip_sun_csm))
+        {
+            if (!RImplementation.o.oldshadowcascades)
+                r_sun.sync();
+            else
+                r_sun_old.sync();
+        }
         Target->accum_direct_blend(dsgraph.cmd_list);
     }
 
@@ -385,6 +429,50 @@ void CRender::Render()
     VERIFY(dsgraph.mapDistort.empty());
 }
 
+void CRender::BindBackbufferForUI()
+{
+    Target->u_setrt(RCache, Device.dwWidth, Device.dwHeight, Target->get_base_rt(), 0, 0, Target->get_base_zb());
+}
+
+void CRender::RenderSecondViewport()
+{
+    // Only invoked when ps_r__dedicated_second_vp (see IGame_Level).
+    {
+        const float sc = clampr(ps_r__second_vp_render_scale, 0.05f, 1.f);
+        const u32 sw = _max(1u, (u32)iFloor(float(Device.dwWidth) * sc + 0.5f));
+        const u32 sh = _max(1u, (u32)iFloor(float(Device.dwHeight) * sc + 0.5f));
+        Target->ResizeSecondVPRT(sw, sh);
+    }
+
+    Fvector4 saved_svp_capture{};
+    if (g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
+    {
+        saved_svp_capture = g_pGamePersistent->m_pGShaderConstants->m_svp_rt_capture;
+        g_pGamePersistent->m_pGShaderConstants->m_svp_rt_capture.set(1.f, 0.f, 0.f, 0.f);
+    }
+
+    // Render scope RT without gameplay PP (NV/psy/etc.) to avoid doubled PP inside scope lens.
+    SPPInfo neutral_pp = pp_identity;
+    neutral_pp.cm_influence = 0.f;
+    neutral_pp.cm_interpolate = 1.f;
+    neutral_pp.cm_tex1 = "";
+    neutral_pp.cm_tex2 = "";
+    SetPostProcessParams(neutral_pp);
+
+    m_SecondViewportPass = true;
+    m_SecondViewportOutputToRT = true;
+    Render();
+    m_SecondViewportOutputToRT = false;
+    m_SecondViewportPass = false;
+
+    if (g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
+        g_pGamePersistent->m_pGShaderConstants->m_svp_rt_capture = saved_svp_capture;
+
+    // Restore main-view postprocess parameters after second viewport render.
+    if (g_pGameLevel)
+        g_pGameLevel->Cameras().ApplyDevice();
+}
+
 void CRender::render_forward()
 {
     ZoneScoped;
@@ -397,7 +485,7 @@ void CRender::render_forward()
         dsgraph.mapLOD.clear();
         dsgraph.render_graph(1); // normal level, secondary priority
         dsgraph.PortalTraverser.fade_render(); // faded-portals
-        dsgraph.render_sorted(); // strict-sorted geoms (world, without HUD)
+        dsgraph.render_sorted(); // strict-sorted geoms
         g_pGamePersistent->Environment().RenderLast(); // rain/thunder-bolts
     }
 }
@@ -406,9 +494,34 @@ void CRender::render_forward()
 void CRender::BeforeWorldRender() {}
 
 // После рендера мира и пост-эффектов --#SM+#-- +SecondVP+
-// Пустая заглушка - копирование выполнено в Render() перед render_hud()
 void CRender::AfterWorldRender()
 {
-    // Ничего не делаем - rt_secondVP уже заполнен в Render()
+    if (ps_r__dedicated_second_vp)
+        return;
+    if (Device.m_SecondViewport.IsSVPFrame())
+    {
+        if (Target->rt_secondVP && (Target->rt_secondVP->dwWidth != Device.dwWidth || Target->rt_secondVP->dwHeight != Device.dwHeight))
+            Target->ResizeSecondVPRT(Device.dwWidth, Device.dwHeight);
+        // Делает копию бэкбуфера (текущего экрана) в рендер-таргет второго вьюпорта
+#ifdef USE_DX9
+        IDirect3DSurface9* pBuffer = nullptr;
+        HW.pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBuffer, nullptr);
+        D3DXLoadSurfaceFromSurface(Target->rt_secondVP->pRT, nullptr, nullptr, pBuffer, nullptr, nullptr, D3DX_DEFAULT, 0);
+        pBuffer->Release();
+#endif
+#ifdef USE_DX11
+        // Back buffer lives on IDXGISwapChain; m_pSwapChain2 is optional (QueryInterface may fail).
+        if (HW.m_pSwapChain && Target->rt_secondVP && Target->rt_secondVP->pSurface)
+        {
+            ID3DTexture2D* pBuffer = nullptr;
+            if (SUCCEEDED(HW.m_pSwapChain->GetBuffer(0, __uuidof(ID3DTexture2D), (LPVOID*)&pBuffer)) && pBuffer)
+            {
+                auto pContext = HW.get_context(CHW::IMM_CTX_ID);
+                pContext->CopyResource(Target->rt_secondVP->pSurface, pBuffer);
+                pBuffer->Release();
+            }
+        }
+#endif
+    }
 }
 } // namespace xray::render::RENDER_NAMESPACE

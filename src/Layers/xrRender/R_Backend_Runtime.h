@@ -1,6 +1,5 @@
 #pragma once
 
-#include "r__hud_overlay_flag.h"
 #include "SH_Texture.h"
 #include "SH_Matrix.h"
 #include "SH_Constant.h"
@@ -119,10 +118,6 @@ IC void CBackend::set_Matrices(SMatrixList* matrix_list)
 IC void CBackend::set_Pass(SPass* P)
 {
     set_States(P->state);
-    // В HUD overlay техники (hud_p3d, models_selflight_det) отключают запись альфы (color_write R,G,B only).
-    // Без записи альфы весь HUD выглядит прозрачным при детекторах в руках. Принудительно включаем запись RGBA.
-    if (g_rendering_hud_overlay)
-        set_ColorWriteEnable();
 #ifdef USE_OGL
     if (P->pp)
         set_PP(P->pp);
@@ -139,8 +134,6 @@ IC void CBackend::set_Pass(SPass* P)
 #endif
     }
     set_Constants(P->constants);
-    if (ctable && !g_rendering_hud_overlay)
-        set_c("hud_overlay_state", 0.0f, 0.0f, 0.0f, 0.0f);
     set_Textures(P->T);
     set_Matrices(P->M);
 }

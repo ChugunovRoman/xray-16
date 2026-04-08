@@ -620,30 +620,23 @@ static void TranslateBinding(key_binding& keyBinding, action_binding_desc& actio
 
 static void RemapKeys()
 {
-    ZoneScopedN("RemapKeys");
     string128 buff;
     // Log("Keys remap:");
+    for (int idx = 0; keyboards[idx].key_name; ++idx)
     {
-        ZoneScopedN("RemapKeys/GetKeyName_loop");
-        for (int idx = 0; keyboards[idx].key_name; ++idx)
-        {
-            buff[0] = 0;
-            keyboard_key& kb = keyboards[idx];
-            if (pInput->GetKeyName(kb.dik, buff, sizeof(buff)))
-                kb.key_local_name = buff;
-            else if (kb.key_local_name.empty())
-                kb.key_local_name = kb.key_name;
+        buff[0] = 0;
+        keyboard_key& kb = keyboards[idx];
+        if (pInput->GetKeyName(kb.dik, buff, sizeof(buff)))
+            kb.key_local_name = buff;
+        else if (kb.key_local_name.empty())
+            kb.key_local_name = kb.key_name;
 
-            // Msg("[%s]-[%s]", kb.key_name, kb.key_local_name.c_str());
-        }
+        // Msg("[%s]-[%s]", kb.key_name, kb.key_local_name.c_str());
     }
 
+    for (size_t i = 0; i < bindings_count; ++i)
     {
-        ZoneScopedN("RemapKeys/TranslateBinding_loop");
-        for (size_t i = 0; i < bindings_count; ++i)
-        {
-            TranslateBinding(g_key_bindings[i], g_action_bindings[i]);
-        }
+        TranslateBinding(g_key_bindings[i], g_action_bindings[i]);
     }
 }
 
@@ -846,7 +839,6 @@ public:
 
     void OnKeyMapChanged() override
     {
-        ZoneScopedN("KeyMapWatcher::OnKeyMapChanged");
         RemapKeys();
     }
 } s_keymap_watcher;

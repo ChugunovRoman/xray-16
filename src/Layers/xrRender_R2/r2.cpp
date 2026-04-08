@@ -48,15 +48,6 @@ ShaderElement* CRender::rimp_select_sh_dynamic(dxRender_Visual* pVisual, float c
     }
     return pVisual->shader->E[id]._get();
 }
-
-ShaderElement* CRender::rimp_select_sh_hud(dxRender_Visual* pVisual)
-{
-    auto* sh = pVisual->shader._get();
-    if (!sh)
-        return nullptr;
-    auto* hud_se = sh->E[SE_R2_HUD]._get();
-    return hud_se ? hud_se : sh->E[SE_R2_NORMAL_HQ]._get();
-}
 //////////////////////////////////////////////////////////////////////////
 ShaderElement* CRender::rimp_select_sh_static(dxRender_Visual* pVisual, float cdist_sq, u32 phase)
 {

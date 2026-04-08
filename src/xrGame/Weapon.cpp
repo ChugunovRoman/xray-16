@@ -34,6 +34,7 @@
 #include "GamePersistent.h"
 #include "xrCommon/xr_map.h"
 #include "weapon_inv_icon.h"
+#include "xrEngine/Render.h"
 
 #define WEAPON_REMOVE_TIME 60000
 #define ROTATION_TIME 0.25f
@@ -3528,7 +3529,9 @@ void CWeapon::render_item_ui()
     if (m_zoom_params.m_pVision)
         m_zoom_params.m_pVision->Draw();
 
-    ZoomTexture()->Update();
+    // render_hud_ui runs for main + dedicated second pass; Update() must be once per frame or scope UI flickers.
+    if (!GEnv.Render->IsSecondViewportRenderPass())
+        ZoomTexture()->Update();
     ZoomTexture()->Draw();
 }
 

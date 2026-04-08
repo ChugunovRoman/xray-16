@@ -3,6 +3,7 @@
 #include "IGame_Persistent.h"
 
 #include "CustomHUD.h"
+#include "device.h"
 #include "Render.h"
 #include "GameFont.h"
 #include "Common/LevelStructure.hpp"
@@ -171,11 +172,38 @@ void IGame_Level::OnRender()
         return;
     }
 
+    Device.m_SecondViewport.SetSVPFrameDelay((u8)clampr(ps_r__svp_frame_delay, 0, 255));
+
     // if (_abs(Device.fTimeDelta)<EPS_S) return;
 
     // Level render, only when no client output required
     GEnv.Render->Calculate();
     GEnv.Render->Render();
+
+    // IsSVPFrame(): SVP active + dwFrame % delay == 0; delay 0 from cvar → every frame (see CSecondVPParams::IsSVPFrame).
+    if (ps_r__dedicated_second_vp && g_pGameLevel && Device.m_SecondViewport.IsSVPFrame())
+    {
+        IMainMenu* pMainMenu = g_pGamePersistent ? g_pGamePersistent->m_pMainMenu : nullptr;
+        const bool bMenu = pMainMenu && pMainMenu->CanSkipSceneRendering();
+        if (!bMenu)
+        {
+            // Tracers on the main (full) framebuffer while Device still matches the first pass.
+            g_pGameLevel->RenderBulletTracersForMainViewport();
+
+            if (g_pGameLevel->Cameras().BeginSecondViewportRender())
+            {
+                Device.m_SecondViewport.SetSecondCalculatePass(true);
+                GEnv.Render->Calculate();
+                Device.m_SecondViewport.SetSecondCalculatePass(false);
+                GEnv.Render->RenderSecondViewport();
+                // Tracers into rt_secondVP (current RT after phase_combine) with scope camera matrices.
+                g_pGameLevel->RenderBulletTracersForSecondViewport();
+                g_pGameLevel->Cameras().EndSecondViewportRender();
+                // Second pass ends on rt_secondVP + small viewport; restore swapchain before HUD().RenderUI().
+                GEnv.Render->BindBackbufferForUI();
+            }
+        }
+    }
 
     // Font
     // pApp->pFontSystem->SetSizeI(0.023f);

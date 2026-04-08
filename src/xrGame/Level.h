@@ -293,7 +293,8 @@ public:
     void OnEvent(EVENT E, u64 P1, u64 P2) override;
     void OnFrame(void) override;
     void OnRender() override;
-    void RenderTracers() override;
+    void RenderBulletTracersForMainViewport() override;
+    void RenderBulletTracersForSecondViewport() override;
     void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert) override;
     shared_str OpenDemoFile(const char* demo_file_name) override;
     void net_StartPlayDemo() override;

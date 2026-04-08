@@ -349,12 +349,20 @@ void CCameraManager::ApplyDevice()
     // Device.mProject.build_projection(deg2rad(m_cam_info.fFov), m_cam_info.fAspect, m_cam_info.fNear, m_cam_info.fFar);
 
     // --#SM+# Begin-- +SecondVP+
-    // Используем ОДИНАКОВЫЙ FOV для обоих вьюпортов
-    // FOV для прицела устанавливается в шейдерах через hud_params.y
-    Device.m_SecondViewport.isCamReady = Device.m_SecondViewport.IsSVPFrame();
-    // --#SM+# End--
+    if (ps_r__dedicated_second_vp)
+    {
+        Device.m_SecondViewport.isCamReady = false;
+    }
+    else if (Device.m_SecondViewport.IsSVPFrame())
+    {
+        Device.fFOV = fFovSecond;
+        Device.m_SecondViewport.isCamReady = true;
+    }
+    else
+        Device.m_SecondViewport.isCamReady = false;
 
     Device.mProject.build_projection(deg2rad(Device.fFOV), aspect, m_cam_info.fNear, m_cam_info.fFar);
+    // --#SM+# End--
 
     
     // Apply offset required for Nvidia Ansel
@@ -370,6 +378,39 @@ void CCameraManager::ApplyDevice()
         clamp(pp_affected.noise.grain, EPS_L, 1000.0f);
         GEnv.Render->SetPostProcessParams(pp_affected);
     }
+}
+
+bool CCameraManager::BeginSecondViewportRender()
+{
+    VERIFY(!m_second_vp_device_saved);
+    if (fFovSecond < EPS_L)
+        return false;
+
+    m_sv_saved_fov = Device.fFOV;
+    m_sv_saved_aspect = Device.fASPECT;
+    m_sv_saved_project = Device.mProject;
+
+    Device.fFOV = fFovSecond;
+    Device.fASPECT = m_cam_info.fAspect;
+    Device.mProject.build_projection(deg2rad(Device.fFOV), m_cam_info.fAspect, m_cam_info.fNear, m_cam_info.fFar);
+    Device.mProject._31 = -m_cam_info.offsetX;
+    Device.mProject._32 = -m_cam_info.offsetY;
+
+    GEnv.Render->SetCacheXform(Device.mView, Device.mProject);
+    m_second_vp_device_saved = true;
+    return true;
+}
+
+void CCameraManager::EndSecondViewportRender()
+{
+    if (!m_second_vp_device_saved)
+        return;
+
+    Device.fFOV = m_sv_saved_fov;
+    Device.fASPECT = m_sv_saved_aspect;
+    Device.mProject = m_sv_saved_project;
+    GEnv.Render->SetCacheXform(Device.mView, Device.mProject);
+    m_second_vp_device_saved = false;
 }
 
 void CCameraManager::ResetPP()

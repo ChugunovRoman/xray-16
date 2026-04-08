@@ -32,6 +32,7 @@
 #include "mt_config.h"
 #include "map_manager.h"
 #include "xrEngine/CameraManager.h"
+#include "xrEngine/Render.h"
 #include "level_sounds.h"
 #include "Car.h"
 #include "trade_parameters.h"
@@ -625,6 +626,16 @@ void test_precise_path();
 extern Flags32 dbg_net_Draw_Flags;
 #endif
 
+void CLevel::RenderBulletTracersForMainViewport()
+{
+    BulletManager().Render();
+}
+
+void CLevel::RenderBulletTracersForSecondViewport()
+{
+    BulletManager().Render();
+}
+
 void CLevel::OnRender()
 {
     ZoneScoped;
@@ -641,7 +652,16 @@ void CLevel::OnRender()
     if (!game)
         return;
     Game().OnRender();
-    // BulletManager().Render() moved to RenderTracers(), called from phase_combine before COPY_TO_SECOND_VP
+
+    // Dedicated second VP: tracers are drawn in IGame_Level (main RT, then scope RT). Otherwise once here.
+    {
+        IMainMenu* pMainMenu = g_pGamePersistent ? g_pGamePersistent->m_pMainMenu : nullptr;
+        const bool bMenu = pMainMenu && pMainMenu->CanSkipSceneRendering();
+        const bool tracers_done_in_level =
+            ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame() && !bMenu;
+        if (!tracers_done_in_level)
+            BulletManager().Render();
+    }
 
     GEnv.Render->AfterWorldRender(); //--#SM+#-- +SecondVP+
     WorldRendered(true);
@@ -757,11 +777,6 @@ void CLevel::OnRender()
         }
     }
 #endif
-}
-
-void CLevel::RenderTracers()
-{
-    BulletManager().Render();
 }
 
 void CLevel::OnEvent(EVENT E, u64 P1, u64 /**P2**/)
