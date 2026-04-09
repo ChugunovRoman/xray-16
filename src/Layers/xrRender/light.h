@@ -33,6 +33,8 @@ public:
 
     vis_data hom;
     u32 frame_render;
+    /** Dedup for CLight_DB::add_light: same frame can run two Calculate() passes (dedicated second viewport). */
+    u32 add_light_pkg_seq;
 
     float m_volumetric_quality;
     float m_volumetric_intensity;

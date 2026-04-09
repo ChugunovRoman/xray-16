@@ -28,6 +28,7 @@ light::light() : SpatialBase(g_pGamePersistent->SpatialSpace)
     m_volumetric_distance = 1;
 
     frame_render = 0;
+    add_light_pkg_seq = u32(-1);
 
 #if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)
     ZeroMemory(omnipart, sizeof(omnipart));

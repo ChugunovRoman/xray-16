@@ -2,6 +2,7 @@
 #include "Common/_d3d_extensions.h"
 #include "Common/LevelStructure.hpp"
 #include "xrEngine/IGame_Persistent.h"
+#include "xrEngine/device.h"
 #include "xrEngine/Environment.h"
 #include "utils/xrLC_Light/R_light.h"
 #include "Light_DB.h"
@@ -147,8 +148,11 @@ light* CLight_DB::Create()
 
 void CLight_DB::add_light(light* L)
 {
-    if (Device.dwFrame == L->frame_render)
+    const u32 sub = Device.m_SecondViewport.IsSecondCalculatePass() ? 1u : 0u;
+    const u32 seq = (Device.dwFrame << 1) | sub;
+    if (L->add_light_pkg_seq == seq)
         return;
+    L->add_light_pkg_seq = seq;
     L->frame_render = Device.dwFrame;
 #if RENDER == R_R1
     if (L->flags.bStatic)
