@@ -59,6 +59,7 @@ void CBreakableObject::shedule_Update(u32 dt)
 }
 void CBreakableObject::UpdateCL()
 {
+    ZoneScopedN("ucl_CBreakableObject");
     inherited::UpdateCL();
     //	Fmatrix	d;
     if (m_pPhysicsShell && m_pPhysicsShell->isFullActive())

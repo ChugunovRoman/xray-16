@@ -409,6 +409,7 @@ void CBurer::UpdateGraviObject()
 
 void CBurer::UpdateCL()
 {
+    ZoneScopedN("ucl_CBurer");
     inherited::UpdateCL();
 
     UpdateGraviObject();

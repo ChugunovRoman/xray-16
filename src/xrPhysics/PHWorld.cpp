@@ -186,7 +186,6 @@ void CPHWorld::Destroy()
 {
     ZoneScoped;
 
-    r_spatial.clear();
     xr_delete(m_commander);
     Mesh.Destroy();
 #ifdef PH_PLAIN
@@ -282,6 +281,9 @@ void CPHWorld::Step()
     ++m_steps_short_num;
     stats.Collision.Begin();
 
+    // Collide must stay on one thread: q_box + smart_cast + NearCallback/ODE must not span a gap where
+    // another thread can spatial_unregister or destroy ISpatial* seen in the query (parallel broadphase
+    // alone caused use-after-free / invalid vptr in smart_cast).
     for (i_object = m_objects.begin(); m_objects.end() != i_object;)
     {
         CPHObject* obj = (*i_object);

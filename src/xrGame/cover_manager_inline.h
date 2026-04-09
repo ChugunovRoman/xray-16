@@ -8,6 +8,11 @@
 
 #pragma once
 
+#include <algorithm>
+
+#include "performance_cvars.h"
+#include <tracy/Tracy.hpp>
+
 IC CCoverManager::CPointQuadTree& CCoverManager::covers() const
 {
     VERIFY(m_covers);
@@ -54,10 +59,15 @@ template <typename _evaluator_type, typename _restrictor_type>
 IC const CCoverPoint* CCoverManager::best_cover(
     const Fvector& position, float radius, _evaluator_type& evaluator, const _restrictor_type& restrictor) const
 {
+    ZoneNamedN(___tracy_cover_bc, "cover_mgr/best_cover", true);
+    ZoneTextVF(___tracy_cover_bc, "r=%.0f", double(radius));
     START_PROFILE("Covers/best_cover")
 
     if (inertia(position, radius, evaluator, restrictor))
+    {
+        ZoneNamedN(___tracy_cover_bc_inert, "cover_mgr/best_cover/inertia", true);
         return (evaluator.selected());
+    }
 
     const CCoverPoint* last = evaluator.selected();
 
@@ -73,27 +83,73 @@ IC const CCoverPoint* CCoverManager::best_cover(
         }
     }
 
-    covers().nearest(position, radius, m_nearest);
+    {
+        ZoneNamedN(___tracy_cover_bc_near, "cover_mgr/best_cover/nearest", true);
+        covers().nearest(position, radius, m_nearest);
+    }
+
+    const u32 nearest_cap = npc_perf_cover_nearest_max_points;
+    if (nearest_cap > 0 && m_nearest.size() > nearest_cap)
+    {
+        std::partial_sort(m_nearest.begin(), m_nearest.begin() + nearest_cap, m_nearest.end(),
+            [&position](CCoverPoint* a, CCoverPoint* b)
+            { return position.distance_to_sqr(a->position()) < position.distance_to_sqr(b->position()); });
+        m_nearest.resize(nearest_cap);
+    }
+
+    const u32 eval_cap = npc_perf_cover_best_max_evaluate;
+    if (eval_cap > 0 && m_nearest.size() > 1)
+    {
+        std::sort(m_nearest.begin(), m_nearest.end(),
+            [&position](CCoverPoint* a, CCoverPoint* b)
+            { return position.distance_to_sqr(a->position()) < position.distance_to_sqr(b->position()); });
+    }
 
     float radius_sqr = _sqr(radius);
 
     xr_vector<CCoverPoint*>::const_iterator I = m_nearest.begin();
     xr_vector<CCoverPoint*>::const_iterator E = m_nearest.end();
-    for (; I != E; ++I)
     {
-        if (radius_sqr < position.distance_to_sqr((*I)->position()))
-            continue;
+        ZoneNamedN(___tracy_cover_bc_scan, "cover_mgr/best_cover/scan_eval", true);
+        u32 eval_done = 0;
+        const u32 acc_cap = npc_perf_cover_best_max_accessible;
+        u32 acc_done = 0;
+        for (; I != E; ++I)
+        {
+            if (radius_sqr < position.distance_to_sqr((*I)->position()))
+                continue;
 
-        if (_abs(position.y - (*I)->position().y) > 3.f)
-            continue;
+            if (_abs(position.y - (*I)->position().y) > 3.f)
+                continue;
 
-        if (!evaluator.accessible((*I)->position()))
-            continue;
+            if (acc_cap > 0)
+            {
+                if (acc_done >= acc_cap)
+                    break;
+                ++acc_done;
+            }
+            if (!evaluator.accessible((*I)->position()))
+                continue;
 
-        if (!restrictor(*I))
-            continue;
+            if (!restrictor(*I))
+                continue;
 
-        evaluator.evaluate(*I, restrictor.weight(*I));
+            evaluator.evaluate(*I, restrictor.weight(*I));
+            ++eval_done;
+            if (eval_cap > 0 && eval_done >= eval_cap)
+                break;
+            if (g_npc_perf_cover_find_eval_budget_remaining != u32(-1))
+            {
+                --g_npc_perf_cover_find_eval_budget_remaining;
+                if (g_npc_perf_cover_find_eval_budget_remaining == 0)
+                    break;
+            }
+        }
+        const int find_left = (g_npc_perf_cover_find_eval_budget_remaining == u32(-1))
+            ? -1
+            : (int)g_npc_perf_cover_find_eval_budget_remaining;
+        ZoneTextVF(___tracy_cover_bc_scan, "n=%u acc=%u lim=%d ev_cap=%u eval=%d find_left=%d", (unsigned)m_nearest.size(),
+            (unsigned)acc_done, acc_cap > 0 ? (int)acc_cap : -1, eval_cap, (int)eval_done, find_left);
     }
 
     evaluator.finalize();

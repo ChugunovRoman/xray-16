@@ -17,7 +17,11 @@ void CGrenadeLauncher::Load(LPCSTR section)
 }
 
 void CGrenadeLauncher::net_Destroy() { inherited::net_Destroy(); }
-void CGrenadeLauncher::UpdateCL() { inherited::UpdateCL(); }
+void CGrenadeLauncher::UpdateCL()
+{
+    ZoneScopedN("ucl_CGrenadeLauncher");
+    inherited::UpdateCL();
+}
 void CGrenadeLauncher::OnH_A_Chield() { inherited::OnH_A_Chield(); }
 void CGrenadeLauncher::OnH_B_Independent(bool just_before_destroy)
 {

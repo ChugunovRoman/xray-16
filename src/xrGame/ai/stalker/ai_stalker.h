@@ -125,6 +125,8 @@ private:
     u32 m_memory_update_interval{0};
     u32 m_next_feel_touch_update_time{0};
     u32 m_feel_touch_update_interval{0};
+    /** Device.dwTimeGlobal deadline: while dead, force ucl physics/step if npc_perf_disable_* and grace cvar > 0. */
+    u32 m_ucl_perf_postdeath_until_time{0};
 
 private:
     float m_fRankDisperison;

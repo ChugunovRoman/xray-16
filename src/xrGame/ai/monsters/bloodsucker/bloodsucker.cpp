@@ -544,6 +544,7 @@ void CAI_Bloodsucker::update_invisibility()
 
 void CAI_Bloodsucker::UpdateCL()
 {
+    ZoneScopedN("ucl_CAI_Bloodsucker");
     update_invisibility();
     inherited::UpdateCL();
     CControlledActor::frame_update();

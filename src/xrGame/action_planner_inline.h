@@ -11,6 +11,8 @@
 #include "ai_space.h"
 #endif
 
+#include <tracy/Tracy.hpp>
+
 #define TEMPLATE_SPECIALIZATION                                                                                     \
     template <typename _object_type, bool _reverse_search, typename _world_operator, typename _condition_evaluator, \
         typename _world_operator_ptr, typename _condition_evaluator_ptr>
@@ -51,7 +53,10 @@ TEMPLATE_SPECIALIZATION
 void CPlanner::update()
 {
     m_solving = true;
-    this->solve();
+    {
+        ZoneScopedN("planner_update/solve");
+        this->solve();
+    }
     m_solving = false;
 
 #ifdef LOG_ACTION
@@ -90,6 +95,7 @@ void CPlanner::update()
 
 	if (this->solution().empty() || this->solution().size() == 0)
     {
+        ZoneScopedN("planner_update/empty_solution");
         static u32 s_last_empty_solution_log = 0;
         if (Device.dwTimeGlobal - s_last_empty_solution_log >= 1000) {
             s_last_empty_solution_log = Device.dwTimeGlobal;
@@ -104,11 +110,23 @@ void CPlanner::update()
 		return;
     }
 
-    if (initialized())
     {
-        if (!this->solution().empty() && this->solution().size() > 0 && current_action_id() != this->solution().front())
+        ZoneScopedN("planner_update/transition");
+        if (initialized())
         {
-            current_action().finalize();
+            if (!this->solution().empty() && this->solution().size() > 0 && current_action_id() != this->solution().front())
+            {
+                current_action().finalize();
+                m_current_action_id = this->solution().front();
+                //Alundaio: More detailed logging for initializing action
+                if (bDbgAct)
+                    Msg("DEBUG: Action [%s] initializing", current_action().m_action_name);
+                current_action().initialize();
+            }
+        }
+        else
+        {
+            m_initialized = true;
             m_current_action_id = this->solution().front();
             //Alundaio: More detailed logging for initializing action
             if (bDbgAct)
@@ -116,22 +134,18 @@ void CPlanner::update()
             current_action().initialize();
         }
     }
-    else
+
     {
-        m_initialized = true;
-        m_current_action_id = this->solution().front();
-        //Alundaio: More detailed logging for initializing action
+        ZoneScopedN("planner_update/child_execute");
+        if (current_action().m_action_name)
+            ZoneTextF("%s", current_action().m_action_name);
+        //Alundaio: More detailed logging for executing action; Knowing the last executing action before a crash can be very useful for debugging
         if (bDbgAct)
-            Msg("DEBUG: Action [%s] initializing", current_action().m_action_name);
-        current_action().initialize();
+            Msg("DEBUG: Action [%s] executing", current_action().m_action_name);
+        //-Alundaio: Debug Action
+
+        current_action().execute();
     }
-
-    //Alundaio: More detailed logging for executing action; Knowing the last executing action before a crash can be very useful for debugging
-    if (bDbgAct)
-        Msg("DEBUG: Action [%s] executing", current_action().m_action_name);
-    //-Alundaio: Debug Action
-
-    current_action().execute();
 }
 
 TEMPLATE_SPECIALIZATION

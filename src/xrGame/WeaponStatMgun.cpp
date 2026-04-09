@@ -169,6 +169,7 @@ void CWeaponStatMgun::net_Import(NET_Packet& P) // import from server
 
 void CWeaponStatMgun::UpdateCL()
 {
+    ZoneScopedN("ucl_CWeaponStatMgun");
     inheritedPH::UpdateCL();
     UpdateBarrelDir();
     UpdateFire();

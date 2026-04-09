@@ -180,6 +180,7 @@ void CAI_Dog::reinit()
 
 void CAI_Dog::UpdateCL()
 {
+    ZoneScopedN("ucl_CAI_Dog");
     inherited::UpdateCL();
 
     if (!::detail::object_exists_in_alife_registry(ID()))

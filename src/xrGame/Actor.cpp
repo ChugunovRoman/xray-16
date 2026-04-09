@@ -1065,6 +1065,7 @@ float CActor::currentFOV()
 
 void CActor::UpdateCL()
 {
+    ZoneScopedN("ucl_CActor");
     if (g_Alive() && Level().CurrentViewEntity() == this)
     {
         if (CurrentGameUI() && !CurrentGameUI()->TopInputReceiver() && !m_holder)

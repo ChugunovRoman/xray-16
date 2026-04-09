@@ -78,6 +78,7 @@ bool CPhysicsSkeletonObject::net_SaveRelevant()
 bool CPhysicsSkeletonObject::UsedAI_Locations() { return (FALSE); }
 void CPhysicsSkeletonObject::UpdateCL()
 {
+    ZoneScopedN("ucl_CPhysicsSkeletonObject");
     inherited::UpdateCL();
     PHObjectPositionUpdate();
 }

@@ -56,6 +56,7 @@
     <ClInclude Include="Components\operator_abstract_inline.h" />
     <ClInclude Include="Components\operator_condition.h" />
     <ClInclude Include="Components\operator_condition_inline.h" />
+    <ClInclude Include="Components\ai_planner_search_limits.h" />
     <ClInclude Include="Components\problem_solver.h" />
     <ClInclude Include="Components\problem_solver_inline.h" />
     <ClInclude Include="Navigation\ai_object_location.h" />
@@ -136,6 +137,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AISpaceBase.cpp" />
+    <ClCompile Include="Components\ai_planner_search_limits.cpp" />
     <ClCompile Include="Components\script_world_property_script.cpp" />
     <ClCompile Include="Components\script_world_state_script.cpp" />
     <ClCompile Include="Navigation\game_graph_script.cpp" />

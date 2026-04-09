@@ -51,6 +51,8 @@ public:
 
 protected:
     Fvector AABB;
+    xr_vector<ISpatial*> m_collide_spatial_overlap;
+    xr_vector<CPHObject*> m_collide_dyn_candidates;
 
 protected:
     virtual dGeomID dSpacedGeom() = 0;
@@ -118,7 +120,12 @@ public:
     IC _flags<CLClassBits>& collide_class_bits() { return m_collide_class_bits; }
     IC const CLBits& collide_bits() const { return m_collide_bits; }
     IC const _flags<CLClassBits>& collide_class_bits() const { return m_collide_class_bits; }
+    void CollideRayMotions();
+    virtual void CollideDynamicsBroadphase();
+    void CollideDynamicsNarrow();
+    virtual void CollideStepPostBroadphase();
     void CollideDynamics();
+    IC void CollideClearDirty() { m_flags.set(st_dirty, FALSE); }
 };
 
 DEFINE_PHITEM_LIST(CPHObject, PH_OBJECT_STORAGE, PH_OBJECT_I)

@@ -137,7 +137,11 @@ void CCat::CheckSpecParams(u32 spec_params)
     }
 }
 
-void CCat::UpdateCL() { inherited::UpdateCL(); }
+void CCat::UpdateCL()
+{
+    ZoneScopedN("ucl_CCat");
+    inherited::UpdateCL();
+}
 void CCat::HitEntityInJump(const CEntity* pEntity)
 {
     SAAParam& params = anim().AA_GetParams("jump_attack_2");

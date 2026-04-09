@@ -38,7 +38,12 @@ void CStalkerDangerGrenadePlanner::initialize()
     CScriptActionPlanner::m_storage.set_property(eWorldPropertyLookedAround, false);
 }
 
-void CStalkerDangerGrenadePlanner::update() { inherited::update(); }
+void CStalkerDangerGrenadePlanner::update()
+{
+    ZoneScopedN("danger/grenade/update");
+    ZoneTextF("%s", object().cName().c_str());
+    inherited::update();
+}
 void CStalkerDangerGrenadePlanner::finalize() { inherited::finalize(); }
 void CStalkerDangerGrenadePlanner::add_evaluators()
 {

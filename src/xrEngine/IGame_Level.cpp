@@ -11,6 +11,8 @@
 #include "xr_object.h"
 #include "Feel_Sound.h"
 
+#include <algorithm>
+
 ENGINE_API IGame_Level* g_pGameLevel = NULL;
 extern bool g_bLoaded;
 
@@ -212,21 +214,26 @@ void IGame_Level::OnRender()
 
 void IGame_Level::OnFrame()
 {
-    ZoneScoped;
+    ZoneScopedN("lvl_OnFrame");
 
-    SoundEvent_Dispatch();
+    {
+        ZoneScopedN("lvl_snd_dispatch");
+        SoundEvent_Dispatch();
+    }
 
-    // Log ("- level:on-frame: ",u32(Device.dwFrame));
-    // if (_abs(Device.fTimeDelta)<EPS_S) return;
-
-    // Update all objects
     VERIFY(bReady);
-    Objects.Update(false);
-    pHUD->OnFrame();
+    {
+        ZoneScopedN("lvl_objs");
+        Objects.Update(false);
+    }
+    {
+        ZoneScopedN("lvl_hud");
+        pHUD->OnFrame();
+    }
 
-    // Ambience
     if (Sounds_Random.size() && (Device.dwTimeGlobal > Sounds_Random_dwNextTime))
     {
+        ZoneScopedN("lvl_amb_random");
         Sounds_Random_dwNextTime = Device.dwTimeGlobal + ::Random.randI(10000, 20000);
         Fvector pos;
         pos.random_dir().normalize().mul(::Random.randF(30, 100)).add(Device.vCameraPosition);
@@ -358,19 +365,31 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
 
 void IGame_Level::SoundEvent_Dispatch()
 {
-    ZoneScoped;
+    ZoneScopedN("IGame_Level::SoundEvent_Dispatch");
+    const size_t dispatch_count = snd_Events.size();
+    ZoneTextF("%zu events", dispatch_count);
+
+    if (dispatch_count == 0)
+        return;
+
+    const auto dispatch_one = [](const _esound_delegate& D)
+    {
+        VERIFY(D.dest && D.source);
+        if (!D.source->feedback)
+            return;
+        ZoneScopedN("feel_sound_new");
+        D.dest->feel_sound_new(D.source->g_object, D.source->g_type, D.source->g_userdata,
+            D.source->feedback->is_2D() ? Device.vCameraPosition : D.source->feedback->get_params()->position,
+            D.power);
+    };
+
+    // Single-threaded only: feel_sound_new -> CScriptEntity::sound_callback mutates m_saved_sounds and reads
+    // luabind::object (Lua is not thread-safe). Parallel dispatch via TaskScheduler caused heap corruption.
     while (!snd_Events.empty())
     {
-        _esound_delegate& D = snd_Events.back();
-        VERIFY(D.dest && D.source);
-        if (D.source->feedback)
-        {
-            D.dest->feel_sound_new(D.source->g_object, D.source->g_type, D.source->g_userdata,
-
-                D.source->feedback->is_2D() ? Device.vCameraPosition : D.source->feedback->get_params()->position,
-                D.power);
-        }
+        const _esound_delegate D = std::move(snd_Events.back());
         snd_Events.pop_back();
+        dispatch_one(D);
     }
 }
 

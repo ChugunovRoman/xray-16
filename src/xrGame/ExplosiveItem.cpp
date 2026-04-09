@@ -56,6 +56,7 @@ void CExplosiveItem::OnEvent(NET_Packet& P, u16 type)
 }
 void CExplosiveItem::UpdateCL()
 {
+    ZoneScopedN("ucl_CExplosiveItem");
     CExplosive::UpdateCL();
     inherited::UpdateCL();
 }

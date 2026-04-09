@@ -278,6 +278,7 @@ void CPhantom::shedule_Update(u32 DT)
 
 void CPhantom::UpdateCL()
 {
+    ZoneScopedN("ucl_CPhantom");
     inherited::UpdateCL();
 
     if (!UpdateEvent.empty())

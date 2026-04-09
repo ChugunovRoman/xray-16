@@ -2049,11 +2049,11 @@ void CPHSimpleCharacter::update_last_material()
 }
 
 void CPHSimpleCharacter::SetNonInteractive(bool v) { b_non_interactive = v; }
-void CPHSimpleCharacter::Collide()
+void CPHSimpleCharacter::CollideStepPostBroadphase()
 {
     OnStartCollidePhase();
 
-    inherited::Collide();
+    inherited::CollideStepPostBroadphase();
     if (injuriousMaterialIDX == GAMEMTL_NONE_IDX && (*p_lastMaterialIDX) != GAMEMTL_NONE_IDX &&
         GMLib.GetMaterialByIdx(*p_lastMaterialIDX)->Flags.test(SGameMtl::flInjurious))
         injuriousMaterialIDX = *p_lastMaterialIDX;

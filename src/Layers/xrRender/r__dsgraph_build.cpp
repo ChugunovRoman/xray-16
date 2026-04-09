@@ -39,8 +39,7 @@ ICF float CalcSSA(float& distSQ, Fvector& C, float R)
 
 void R_dsgraph_structure::insert_dynamic(IRenderable* root, dxRender_Visual* pVisual, Fmatrix& xform, Fvector& Center)
 {
-    ZoneScoped;
-
+    // No ZoneScoped: called from build_subspace() on task workers (sun SMAP mt_calc); Tracy rpmalloc/queue can AV.
     CRender& RI = RImplementation;
 
     if (pVisual->vis.marker[context_id] == marker)
@@ -158,8 +157,6 @@ void R_dsgraph_structure::insert_dynamic(IRenderable* root, dxRender_Visual* pVi
 
 void R_dsgraph_structure::insert_static(dxRender_Visual* pVisual)
 {
-    ZoneScoped;
-
     CRender& RI = RImplementation;
 
     if (pVisual->vis.marker[context_id] == marker)
@@ -259,8 +256,6 @@ void R_dsgraph_structure::insert_static(dxRender_Visual* pVisual)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void R_dsgraph_structure::add_leafs_dynamic(IRenderable* root, dxRender_Visual* pVisual, Fmatrix& xform)
 {
-    ZoneScoped;
-
     if (nullptr == pVisual)
         return;
 
@@ -345,8 +340,6 @@ void R_dsgraph_structure::add_leafs_dynamic(IRenderable* root, dxRender_Visual* 
 
 void R_dsgraph_structure::add_leafs_static(dxRender_Visual* pVisual)
 {
-    ZoneScoped;
-
     if (o.use_hom && !RImplementation.HOM.visible(pVisual->vis))
         return;
 
@@ -548,8 +541,6 @@ BOOL R_dsgraph_structure::add_Dynamic(dxRender_Visual* pVisual, u32 planes) // n
 
 void R_dsgraph_structure::add_static(dxRender_Visual* pVisual, const CFrustum& view, u32 planes)
 {
-    ZoneScoped;
-
     vis_data& vis = pVisual->vis;
 
     // Check frustum visibility and calculate distance to visual's center
@@ -719,8 +710,7 @@ void R_dsgraph_structure::unload()
 // sub-space rendering - main procedure
 void R_dsgraph_structure::build_subspace()
 {
-    ZoneScoped;
-
+    // No ZoneScoped: runs on task workers for parallel sun cascades (see render_phase_sun.cpp).
     marker++; // !!! critical here
 
     if (o.precise_portals && RImplementation.rmPortals)
@@ -856,9 +846,9 @@ void R_dsgraph_structure::build_subspace()
 
             if (collect_lights && (type & STYPE_LIGHTSOURCE))
             {
-                // lightsource
                 light* L = (light*)spatial->dcast_Light();
-                VERIFY(L);
+                if (!L)
+                    continue;
                 float lod = L->get_LOD();
                 if (lod > EPS_L)
                 {

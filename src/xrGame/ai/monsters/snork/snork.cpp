@@ -112,6 +112,7 @@ void CSnork::reinit()
 
 void CSnork::UpdateCL()
 {
+    ZoneScopedN("ucl_CSnork");
     inherited::UpdateCL();
 
 //////////////////////////////////////////////////////////////////////////

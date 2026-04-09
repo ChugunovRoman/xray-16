@@ -112,11 +112,15 @@ void CRender::Calculate()
     //
     Lights.Update();
 
-    // Check if we touch some light even trough portal
-    static xr_vector<ISpatial*> spatial_lights;
+    // Per-frame buffer; must not be static — nested or concurrent spatial queries could clear it mid-iteration.
+    xr_vector<ISpatial*> spatial_lights;
+    spatial_lights.reserve(32);
     g_pGamePersistent->SpatialSpace.q_sphere(spatial_lights, 0, STYPE_LIGHTSOURCE, Device.vCameraPosition, EPS_L);
     for (auto spatial : spatial_lights)
     {
+        if (!spatial)
+            continue;
+
         const auto& entity_pos = spatial->spatial_sector_point();
         spatial->spatial_updatesector(dsgraph_main.detect_sector(entity_pos));
         const auto sector_id = spatial->GetSpatialData().sector_id;
@@ -124,9 +128,9 @@ void CRender::Calculate()
             continue; // disassociated from S/P structure
 
         VERIFY(spatial->GetSpatialData().type & STYPE_LIGHTSOURCE);
-        // lightsource
         light* L = (light*)spatial->dcast_Light();
-        VERIFY(L);
+        if (!L)
+            continue;
         Lights.add_light(L);
     }
 

@@ -324,6 +324,7 @@ void CPhysicObject::shedule_Update(u32 dt)
 
 void CPhysicObject::UpdateCL()
 {
+    ZoneScopedN("ucl_CPhysicObject");
     inherited::UpdateCL();
 
     //Если наш физический объект анимированный, то

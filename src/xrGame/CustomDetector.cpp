@@ -397,6 +397,7 @@ void CCustomDetector::UpdateVisibility()
 
 void CCustomDetector::UpdateCL()
 {
+    ZoneScopedN("ucl_CCustomDetector");
     inherited::UpdateCL();
 
     if (H_Parent() != Level().CurrentEntity())

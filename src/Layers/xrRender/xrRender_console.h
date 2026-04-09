@@ -226,6 +226,11 @@ enum
     R3FLAGEXT_SSR_JITTER = (1 << 11),
 };
 
+extern ECORE_API int r__particle_render_parallel;
+extern ECORE_API int r__particle_render_parallel_min_count;
+extern ECORE_API int r__parallel_skeleton_visbox;
+extern ECORE_API int r__parallel_skeleton_visbox_min_bones;
+
 extern void xrRender_initconsole();
 extern BOOL xrRender_test_hw();
 } // namespace xray::render::RENDER_NAMESPACE

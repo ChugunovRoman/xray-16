@@ -85,6 +85,7 @@ public:
 
 private:
     void SingleUpdate(IGameObject* O);
+    void dispatch_singleupdate_workload(IGameObject** b, IGameObject** e);
 
 public:
     void Update(bool bForce);

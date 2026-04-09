@@ -4,6 +4,11 @@
 
 #include "SkeletonCustom.h"
 
+#include "xrCore/Threading/Lock.hpp"
+#include "xrCore/Threading/ParallelFor.hpp"
+#include "xrCore/Threading/ScopeLock.hpp"
+#include "xrRender_console.h"
+
 namespace xray::render::RENDER_NAMESPACE
 {
 extern int psSkeletonUpdate;
@@ -58,10 +63,11 @@ void CKinematics::CalculateBones(BOOL bForceExact)
         // the update itself
         Fbox Box;
         Box.invalidate();
-        for (u32 b = 0; b < bones->size(); b++)
+        const u32 bone_count = static_cast<u32>(bones->size());
+        const auto accumulate_bone_aabb = [this](u32 b, Fbox& acc)
         {
             if (!LL_GetBoneVisible(u16(b)))
-                continue;
+                return;
             Fobb& obb = (*bones)[b]->obb;
             Fmatrix& Mbone = bone_instances[b].mTransform;
             Fmatrix Mbox;
@@ -73,30 +79,56 @@ void CKinematics::CalculateBones(BOOL bForceExact)
             Fvector P, A;
             A.set(-S.x, -S.y, -S.z);
             X.transform_tiny(P, A);
-            Box.modify(P);
+            acc.modify(P);
             A.set(-S.x, -S.y, S.z);
             X.transform_tiny(P, A);
-            Box.modify(P);
+            acc.modify(P);
             A.set(S.x, -S.y, S.z);
             X.transform_tiny(P, A);
-            Box.modify(P);
+            acc.modify(P);
             A.set(S.x, -S.y, -S.z);
             X.transform_tiny(P, A);
-            Box.modify(P);
+            acc.modify(P);
             A.set(-S.x, S.y, -S.z);
             X.transform_tiny(P, A);
-            Box.modify(P);
+            acc.modify(P);
             A.set(-S.x, S.y, S.z);
             X.transform_tiny(P, A);
-            Box.modify(P);
+            acc.modify(P);
             A.set(S.x, S.y, S.z);
             X.transform_tiny(P, A);
-            Box.modify(P);
+            acc.modify(P);
             A.set(S.x, S.y, -S.z);
             X.transform_tiny(P, A);
-            Box.modify(P);
+            acc.modify(P);
+        };
+        const bool use_parallel = r__parallel_skeleton_visbox != 0 &&
+            static_cast<int>(bone_count) >= r__parallel_skeleton_visbox_min_bones;
+        if (use_parallel)
+        {
+            Lock merge_lock;
+            xr_parallel_for(TaskRange<u32>(0, bone_count), true,
+                [&](const TaskRange<u32>& r)
+                {
+                    Fbox local;
+                    local.invalidate();
+                    for (u32 b = r.begin(); b != r.end(); ++b)
+                        accumulate_bone_aabb(b, local);
+                    if (!local.is_valid())
+                        return;
+                    ScopeLock sl(&merge_lock);
+                    if (!Box.is_valid())
+                        Box.set(local);
+                    else
+                        Box.merge(local);
+                });
         }
-        if (bones->size())
+        else
+        {
+            for (u32 b = 0; b < bone_count; b++)
+                accumulate_bone_aabb(b, Box);
+        }
+        if (bone_count)
         {
             // previous frame we have updated box - update sphere
             vis.box.vMin = (Box.vMin);

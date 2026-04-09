@@ -9,6 +9,7 @@
 #pragma once
 
 #ifndef AI_COMPILER
+#include "xrAICore/Components/ai_planner_search_limits.h"
 #include "xrAICore/Navigation/graph_engine.h"
 #include "xrAICore/Navigation/graph_engine_space.h"
 #endif
@@ -371,8 +372,8 @@ IC void CProblemSolverAbstract::solve()
     // XXX: looks bad!
     m_failed = !GEnv.AISpace->graph_engine().search(*this, reverse_search ? target_state() : current_state(),
         reverse_search ? current_state() : target_state(), &m_solution,
-        GraphEngineSpace::CSolverBaseParameters(
-            GraphEngineSpace::_solver_dist_type(-1), GraphEngineSpace::_solver_condition_type(-1), 8000));
+        GraphEngineSpace::CSolverBaseParameters(GraphEngineSpace::_solver_dist_type(-1),
+            GraphEngineSpace::_solver_condition_type(-1), g_ai_nested_planner_graph_search_max_nodes));
 #endif
 }
 

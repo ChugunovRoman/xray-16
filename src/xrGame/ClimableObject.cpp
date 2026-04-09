@@ -121,6 +121,7 @@ void CClimableObject::shedule_Update(u32 dt) // Called by shedule
 }
 void CClimableObject::UpdateCL() // Called each frame, so no need for d
 {
+    ZoneScopedN("ucl_CClimableObject");
     inherited::UpdateCL();
 }
 

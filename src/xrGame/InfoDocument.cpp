@@ -28,7 +28,11 @@ bool CInfoDocument::net_Spawn(CSE_Abstract* DC)
 void CInfoDocument::Load(LPCSTR section) { inherited::Load(section); }
 void CInfoDocument::net_Destroy() { inherited::net_Destroy(); }
 void CInfoDocument::shedule_Update(u32 dt) { inherited::shedule_Update(dt); }
-void CInfoDocument::UpdateCL() { inherited::UpdateCL(); }
+void CInfoDocument::UpdateCL()
+{
+    ZoneScopedN("ucl_CInfoDocument");
+    inherited::UpdateCL();
+}
 void CInfoDocument::OnH_A_Chield()
 {
     inherited::OnH_A_Chield();

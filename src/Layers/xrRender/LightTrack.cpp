@@ -223,6 +223,8 @@ void CROS_impl::update(IRenderable* O)
         for (u32 lit = 0; lit < lights.size(); lit++)
         {
             light* L = lights[lit].source;
+            if (!L)
+                continue;
             float d = L->position.distance_to(position);
 
 #if RENDER != R_R1
@@ -455,7 +457,8 @@ void CROS_impl::prepare_lights(Fvector& position, IRenderable* O)
         // Select nearest lights
         Fvector bb_size = {radius, radius, radius};
 
-        static xr_vector<ISpatial*> lstSpatial;
+        xr_vector<ISpatial*> lstSpatial;
+        lstSpatial.reserve(16);
 #if RENDER != R_R1
         g_pGamePersistent->SpatialSpace.q_box(lstSpatial, 0, STYPE_LIGHTSOURCEHEMI, position, bb_size);
 #else
@@ -464,8 +467,11 @@ void CROS_impl::prepare_lights(Fvector& position, IRenderable* O)
         for (u32 o_it = 0; o_it < lstSpatial.size(); o_it++)
         {
             ISpatial* spatial = lstSpatial[o_it];
+            if (!spatial)
+                continue;
             light* source = (light*)(spatial->dcast_Light());
-            VERIFY(source); // sanity check
+            if (!source)
+                continue;
             float R = radius + source->range;
             if (position.distance_to(source->position) < R
 #if RENDER != R_R1
@@ -495,6 +501,12 @@ void CROS_impl::prepare_lights(Fvector& position, IRenderable* O)
             Fvector P, D;
             float amount = 0;
             light* xrL = I->source;
+            if (!xrL)
+            {
+                track.erase(I);
+                id--;
+                continue;
+            }
             Fvector& LP = xrL->position;
 #if RENDER == R_R1
             P.mad(position, P.random_dir(), traceR); // Random point inside range

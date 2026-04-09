@@ -26,6 +26,10 @@ string512 g_sBenchmarkName;
 int ps_fps_limit = 501;
 int ps_fps_limit_in_menu = 60;
 
+// CObjectList::Update — optional TaskScheduler parallel paths (see xr_object_list.cpp).
+int ps_obj_preupdate_mt = 0;
+int ps_obj_postupdate_mt = 0;
+
 bool g_bLoaded = false;
 ref_light precache_light = 0;
 
@@ -278,9 +282,13 @@ void CRenderDevice::ProcessFrame()
     const auto& processSeqParallel = TaskScheduler->AddTask([this]
     {
         ZoneScopedN("ProcessParallelSequence");
-        for (u32 pit = 0; pit < seqParallel.size(); pit++)
-            seqParallel[pit]();
-        seqParallel.clear();
+        // Snapshot so delegates can call remove_from_seq_parallel (next-frame queue) without
+        // invalidating the iteration; see docs/PARALLEL_WORKER_BOUNDARY.md.
+        xr_vector<fastdelegate::FastDelegate0<>> parallel_batch;
+        parallel_batch.swap(seqParallel);
+        for (u32 pit = 0; pit < parallel_batch.size(); pit++)
+            parallel_batch[pit]();
+        parallel_batch.clear();
         seqFrameMT.Process();
     });
 

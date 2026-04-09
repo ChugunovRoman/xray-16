@@ -672,7 +672,11 @@ bool CScriptEntity::bfScriptAnimation()
     }
 }
 
-void CScriptEntity::UpdateCL() { bfScriptAnimation(); }
+void CScriptEntity::UpdateCL()
+{
+    ZoneScopedN("ucl_CScriptEntity");
+    bfScriptAnimation();
+}
 u32 CScriptEntity::GetActionCount() const { return (m_tpActionQueue.size()); }
 const CScriptEntityAction* CScriptEntity::GetActionByIndex(u32 action_index) const
 {

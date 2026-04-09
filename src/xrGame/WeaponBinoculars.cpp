@@ -80,6 +80,7 @@ void CWeaponBinoculars::net_Destroy()
 
 void CWeaponBinoculars::UpdateCL()
 {
+    ZoneScopedN("ucl_CWeaponBinoculars");
     inherited::UpdateCL();
     // manage visible entities here...
     if (H_Parent() && IsZoomed() && !IsRotatingToZoom() && m_binoc_vision)

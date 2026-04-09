@@ -4,6 +4,8 @@
 #include "xrEngine/xr_collide_form.h"
 #include "xrEngine/xr_object.h"
 #include "Intersect.hpp"
+#include "xrCore/Threading/ParallelFor.hpp"
+#include "xrCore/Threading/TaskManager.hpp"
 
 #ifdef DEBUG
 static bool _cdb_bDebug = false;
@@ -109,11 +111,45 @@ bool CObjectSpace::_RayTest(const Fvector& start, const Fvector& dir, float rang
 bool CObjectSpace::RayPick(
     const Fvector& start, const Fvector& dir, float range, rq_target tgt, rq_result& R, IGameObject* ignore_object)
 {
-    ZoneScopedN("CObjectSpace::RayPick");
+    ZoneScopedN("os_RayPick");
 
     bool _res = _RayPick(start, dir, range, tgt, R, ignore_object);
     r_spatial.clear();
     return _res;
+}
+
+void CObjectSpace::RayPickBatch(const RayPickBatchItem* items, size_t count)
+{
+    if (!count || !items)
+        return;
+    if (count == 1)
+    {
+        const RayPickBatchItem& it = items[0];
+        VERIFY(it.result);
+        RayPick(it.start, it.dir, it.range, it.tgt, *it.result, it.ignore_object);
+        return;
+    }
+    if (TaskScheduler)
+    {
+        xr_parallel_for(TaskRange(size_t(0), count), [&](const TaskRange<size_t>& range)
+        {
+            for (size_t i = range.begin(); i != range.end(); ++i)
+            {
+                const RayPickBatchItem& it = items[i];
+                VERIFY(it.result);
+                RayPick(it.start, it.dir, it.range, it.tgt, *it.result, it.ignore_object);
+            }
+        });
+    }
+    else
+    {
+        for (size_t i = 0; i < count; ++i)
+        {
+            const RayPickBatchItem& it = items[i];
+            VERIFY(it.result);
+            RayPick(it.start, it.dir, it.range, it.tgt, *it.result, it.ignore_object);
+        }
+    }
 }
 bool CObjectSpace::_RayPick(
     const Fvector& start, const Fvector& dir, float range, rq_target tgt, rq_result& R, IGameObject* ignore_object)
@@ -125,7 +161,7 @@ bool CObjectSpace::_RayPick(
     // static test
     if (tgt & rqtStatic)
     {
-        ZoneScopedN("CObjectSpace::_RayPick/static_xrc");
+        ZoneScopedN("os_rp_static");
         xrc.ray_query(CDB::OPT_ONLYNEAREST | CDB::OPT_CULL, &Static, start, dir, range);
         if (xrc.r_count())
             R.set_if_less(xrc.r_begin());
@@ -138,7 +174,7 @@ bool CObjectSpace::_RayPick(
         u32 d_flags =
             STYPE_COLLIDEABLE | ((tgt & rqtObstacle) ? STYPE_OBSTACLE : 0) | ((tgt & rqtShape) ? STYPE_SHAPE : 0);
         {
-            ZoneScopedN("CObjectSpace::_RayPick/dynamic_q_ray");
+            ZoneScopedN("os_rp_dyn_qray");
             SpatialSpace->q_ray(r_spatial, 0, d_flags, start, dir, range);
         }
         // Determine visibility for dynamic part of scene
@@ -146,7 +182,7 @@ bool CObjectSpace::_RayPick(
         if (bDebug())
             (*m_pRender)->dbgReserveSphere(r_spatial.size());
 #endif
-        ZoneScopedN("CObjectSpace::_RayPick/dynamic_cforms");
+        ZoneScopedN("os_rp_dyn_cform");
         for (auto* spatial : r_spatial)
         {
             IGameObject* collidable = spatial->dcast_GameObject();

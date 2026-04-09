@@ -4,7 +4,6 @@
 
 #include "xrCore/_fbox.h"
 #include "xrCore/Threading/Lock.hpp"
-#include "xrCore/Threading/ScopeLock.hpp"
 
 #include "xrEngine/Engine.h"
 
@@ -153,7 +152,7 @@ void ISpatial_NODE::_remove(ISpatial* S)
 
 ISpatial_DB::ISpatial_DB(pcstr name)
 #ifdef CONFIG_PROFILE_LOCKS
-    : cs(MUTEX_PROFILE_ID(ISpatial_DB)),
+    : query_stats_lock(MUTEX_PROFILE_ID(ISpatial_DB)),
 #endif // CONFIG_PROFILE_LOCKS
 
 {
@@ -162,6 +161,7 @@ ISpatial_DB::ISpatial_DB(pcstr name)
 
 ISpatial_DB::~ISpatial_DB()
 {
+    std::unique_lock<std::shared_mutex> ulock(rw);
     if (m_root)
     {
         _node_destroy(m_root);
@@ -177,6 +177,8 @@ ISpatial_DB::~ISpatial_DB()
 void ISpatial_DB::initialize(const Fbox& BB)
 {
     ZoneScoped;
+
+    std::unique_lock<std::shared_mutex> ulock(rw);
 
     // initialize
     Fvector bbc, bbd;
@@ -262,7 +264,7 @@ void ISpatial_DB::_insert(ISpatial_NODE* N, Fvector& n_C, float n_R)
 
 void ISpatial_DB::insert(ISpatial* S)
 {
-    ScopeLock scope(&cs);
+    std::unique_lock<std::shared_mutex> ulock(rw);
 #ifdef DEBUG
     Stats.Insert.Begin();
 
@@ -349,7 +351,7 @@ void ISpatial_DB::_remove(ISpatial_NODE* N, ISpatial_NODE* N_sub)
 
 void ISpatial_DB::remove(ISpatial* S)
 {
-    ScopeLock scope(&cs);
+    std::unique_lock<std::shared_mutex> ulock(rw);
 #ifdef DEBUG
     Stats.Remove.Begin();
 #endif
@@ -370,7 +372,7 @@ void ISpatial_DB::update(u32 /*nodes = 8 */)
 #ifdef DEBUG
     if (0 == m_root)
         return;
-    ScopeLock scope(&cs);
+    std::shared_lock<std::shared_mutex> shlock(rw);
     VERIFY(verify());
 #endif
 }

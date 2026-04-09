@@ -73,6 +73,7 @@ void CInventoryItemObject::OnH_A_Chield()
 
 void CInventoryItemObject::UpdateCL()
 {
+    ZoneScopedN("ucl_CInventoryItemObject");
     CPhysicItem::UpdateCL();
     CInventoryItem::UpdateCL();
 }

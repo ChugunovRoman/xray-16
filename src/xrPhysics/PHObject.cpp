@@ -15,6 +15,12 @@
 
 extern CPHWorld* ph_world;
 
+namespace
+{
+thread_local xr_vector<ISpatial*> tls_ph_spatial;
+IC qResultVec& PhTlsSpatial() { return tls_ph_spatial; }
+} // namespace
+
 CPHObject::CPHObject() : SpatialBase(g_pGamePersistent->SpatialSpacePhysic)
 {
     m_flags.flags = 0;
@@ -86,84 +92,117 @@ void CPHObject::spatial_move()
     m_flags.set(st_dirty, TRUE);
 }
 
-void CPHObject::Collide()
+void CPHObject::CollideRayMotions()
 {
-    if (m_flags.test(fl_ray_motions))
+    if (!m_flags.test(fl_ray_motions))
+        return;
+    CPHMoveStorage* tracers = MoveStorage();
+    CPHMoveStorage::iterator I = tracers->begin(), E = tracers->end();
+    for (; E != I; ++I)
     {
-        CPHMoveStorage* tracers = MoveStorage();
-        CPHMoveStorage::iterator I = tracers->begin(), E = tracers->end();
-        for (; E != I; ++I)
-        {
-            const Fvector *from = 0, *to = 0;
-            Fvector dir;
-            I.Positions(from, to);
-            if (from->x == -dInfinity)
-                continue;
-            dir.sub(*to, *from);
-            float magnitude = dir.magnitude();
-            if (magnitude < EPS)
-                continue;
-            dir.mul(1.f / magnitude);
-            g_pGamePersistent->SpatialSpacePhysic.q_ray(
-                ph_world->r_spatial, 0, STYPE_PHYSIC, *from, dir, magnitude); //|ISpatial_DB::O_ONLYFIRST
+        const Fvector *from = 0, *to = 0;
+        Fvector dir;
+        I.Positions(from, to);
+        if (from->x == -dInfinity)
+            continue;
+        dir.sub(*to, *from);
+        float magnitude = dir.magnitude();
+        if (magnitude < EPS)
+            continue;
+        dir.mul(1.f / magnitude);
+        qResultVec& result = PhTlsSpatial();
+        result.clear();
+        g_pGamePersistent->SpatialSpacePhysic.q_ray(
+            result, 0, STYPE_PHYSIC, *from, dir, magnitude); //|ISpatial_DB::O_ONLYFIRST
 #ifdef DEBUG
-            if (debug_output().ph_dbg_draw_mask().test(phDbgDrawRayMotions))
-            {
-                debug_output().DBG_OpenCashedDraw();
-                debug_output().DBG_DrawLine(
-                    *from, Fvector().add(*from, Fvector().mul(dir, magnitude)), color_xrgb(0, 255, 0));
-                debug_output().DBG_ClosedCashedDraw(30000);
-            }
+        if (debug_output().ph_dbg_draw_mask().test(phDbgDrawRayMotions))
+        {
+            debug_output().DBG_OpenCashedDraw();
+            debug_output().DBG_DrawLine(
+                *from, Fvector().add(*from, Fvector().mul(dir, magnitude)), color_xrgb(0, 255, 0));
+            debug_output().DBG_ClosedCashedDraw(30000);
+        }
 
 #endif
-            qResultVec& result = ph_world->r_spatial;
-            auto i = result.begin(), e = result.end();
-            for (; i != e; ++i)
-            {
-                CPHObject* obj2 = smart_cast<CPHObject*>(*i);
-                VERIFY(obj2);
-                if (obj2 == this || !obj2->m_flags.test(st_dirty))
-                    continue;
-                dGeomID motion_ray = ph_world->GetMotionRayGeom();
-                dGeomRayMotionSetGeom(motion_ray, I.dGeom());
-                dGeomRayMotionsSet(motion_ray, (const dReal*)from, (const dReal*)&dir, magnitude);
-                NearCallback(this, obj2, motion_ray, obj2->dSpacedGeom());
-            }
+        auto i = result.begin(), e = result.end();
+        for (; i != e; ++i)
+        {
+            CPHObject* obj2 = smart_cast<CPHObject*>(*i);
+            if (!obj2)
+                continue;
+            if (obj2 == this || !obj2->m_flags.test(st_dirty))
+                continue;
+            dGeomID motion_ray = ph_world->GetMotionRayGeom();
+            dGeomRayMotionSetGeom(motion_ray, I.dGeom());
+            dGeomRayMotionsSet(motion_ray, (const dReal*)from, (const dReal*)&dir, magnitude);
+            NearCallback(this, obj2, motion_ray, obj2->dSpacedGeom());
         }
     }
-    CollideDynamics();
-    ///////////////////////////////
-    if (CPHCollideValidator::DoCollideStatic(*this))
-        CollideStatic(dSpacedGeom(), this);
-    m_flags.set(st_dirty, FALSE);
 }
-void CPHObject::CollideDynamics()
+
+void CPHObject::CollideDynamicsBroadphase()
 {
-    g_pGamePersistent->SpatialSpacePhysic.q_box(ph_world->r_spatial, 0, STYPE_PHYSIC, spatial.sphere.P, AABB);
-    qResultVec& result = ph_world->r_spatial;
-    auto i = result.begin(), e = result.end();
-    for (; i != e; ++i)
+    qResultVec& result = PhTlsSpatial();
+    result.clear();
+    g_pGamePersistent->SpatialSpacePhysic.q_box(result, 0, STYPE_PHYSIC, spatial.sphere.P, AABB);
+    m_collide_spatial_overlap.assign(result.begin(), result.end());
+    m_collide_dyn_candidates.clear();
+    m_collide_dyn_candidates.reserve(result.size());
+    for (ISpatial* sp : result)
     {
-        CPHObject* obj2 = smart_cast<CPHObject*>(*i);
-        VERIFY(obj2);
+        CPHObject* obj2 = smart_cast<CPHObject*>(sp);
+        if (!obj2)
+            continue;
         if (obj2 == this || !obj2->m_flags.test(st_dirty))
             continue;
         if (CPHCollideValidator::DoCollide(*this, *obj2))
-            NearCallback(this, obj2, dSpacedGeom(), obj2->dSpacedGeom());
+            m_collide_dyn_candidates.push_back(obj2);
     }
 }
+
+void CPHObject::CollideDynamicsNarrow()
+{
+    // Match legacy per-object q_box loop: skip partner once it already ran CollideClearDirty this step.
+    for (CPHObject* obj2 : m_collide_dyn_candidates)
+    {
+        if (!obj2->m_flags.test(st_dirty))
+            continue;
+        NearCallback(this, obj2, dSpacedGeom(), obj2->dSpacedGeom());
+    }
+}
+
+void CPHObject::CollideStepPostBroadphase()
+{
+    CollideRayMotions();
+    CollideDynamicsNarrow();
+    if (CPHCollideValidator::DoCollideStatic(*this))
+        CollideStatic(dSpacedGeom(), this);
+    CollideClearDirty();
+}
+
+void CPHObject::Collide()
+{
+    CollideDynamicsBroadphase();
+    CollideStepPostBroadphase();
+}
+
+void CPHObject::CollideDynamics()
+{
+    CollideDynamicsBroadphase();
+    CollideDynamicsNarrow();
+}
+
 void CPHObject::reinit_single()
 {
     IslandReinit();
-    qResultVec& result = ph_world->r_spatial;
-    auto i = result.begin(), e = result.end();
-    for (; i != e; ++i)
+    for (ISpatial* sp : m_collide_spatial_overlap)
     {
-        CPHObject* obj = smart_cast<CPHObject*>(*i);
-        VERIFY(obj);
+        CPHObject* obj = smart_cast<CPHObject*>(sp);
+        if (!obj)
+            continue;
         obj->IslandReinit();
     }
-    result.clear();
+    m_collide_spatial_overlap.clear();
     dJointGroupEmpty(ContactGroup);
     ContactFeedBacks.empty();
     ContactEffectors.empty();
@@ -196,7 +235,7 @@ bool CPHObject::step_single(dReal step)
 void CPHObject::step(float time) // it is still not a true step for object because it collide the object only not
                                  // subsequent collision is doing
 {
-    ph_world->r_spatial.clear();
+    PhTlsSpatial().clear();
     reinit_single();
     Collide();
     IslandStep(time);

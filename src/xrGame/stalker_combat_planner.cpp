@@ -40,6 +40,7 @@
 #include "smart_cover_evaluators.h"
 #include "Inventory.h"
 #include "WeaponMagazined.h"
+#include <tracy/Tracy.hpp>
 
 using namespace StalkerSpace;
 using namespace StalkerDecisionSpace;
@@ -92,13 +93,23 @@ void CStalkerCombatPlanner::setup(CAI_Stalker* object, CPropertyStorage* storage
     object->movement().property_storage(storage);
 }
 
-void CStalkerCombatPlanner::execute() { inherited::execute(); }
+void CStalkerCombatPlanner::execute()
+{
+    ZoneScopedN("combat_planner/execute");
+    ZoneTextF("%s", object().cName().c_str());
+    inherited::execute();
+}
+
 void CStalkerCombatPlanner::update()
 {
-    inherited::update();
+    {
+        ZoneScopedN("combat_planner/update_inner");
+        inherited::update();
+    }
 
     if (this->solution().empty())
     {
+        ZoneScopedN("combat_planner/update_empty_cleanup");
         CScriptActionPlanner::m_storage.set_property(eWorldPropertyInCover, false);
         CScriptActionPlanner::m_storage.set_property(eWorldPropertyLookedOut, false);
         CScriptActionPlanner::m_storage.set_property(eWorldPropertyPositionHolded, false);
@@ -126,8 +137,14 @@ void CStalkerCombatPlanner::update()
         return;
     }
 
-    object().react_on_grenades();
-    object().react_on_member_death();
+    {
+        ZoneScopedN("combat_planner/react_on_grenades");
+        object().react_on_grenades();
+    }
+    {
+        ZoneScopedN("combat_planner/react_on_member_death");
+        object().react_on_member_death();
+    }
 
     //	const CEntityAlive				*enemy = object().memory().enemy().selected();
     //	VERIFY							(enemy);

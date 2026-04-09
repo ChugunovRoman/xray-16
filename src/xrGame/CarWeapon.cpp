@@ -87,6 +87,7 @@ void CCarWeapon::Load(LPCSTR section)
 
 void CCarWeapon::UpdateCL()
 {
+    ZoneScopedN("ucl_CCarWeapon");
     if (!m_bActive)
         return;
     UpdateBarrelDir();

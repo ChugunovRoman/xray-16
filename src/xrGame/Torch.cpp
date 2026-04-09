@@ -311,6 +311,7 @@ void CTorch::OnH_B_Independent(bool just_before_destroy)
 
 void CTorch::UpdateCL()
 {
+    ZoneScopedN("ucl_CTorch");
     inherited::UpdateCL();
 
     if (!m_switched_on)

@@ -1,8 +1,11 @@
 #pragma once
 
+#include <shared_mutex>
+
 #include "Common/Noncopyable.hpp"
 
 #include "xrCore/xrPool.h"
+#include "xrCore/Threading/Lock.hpp"
 //#include "xr_collide_defs.h"
 #include "xrCore/xr_types.h"
 #include "xrCore/_vector3d.h"
@@ -34,6 +37,11 @@ public:
 };
 
 /*
+Locking (ISpatial_DB):
+- Queries (q_box / q_frustum / q_ray) use shared_lock on `rw` (read-only tree walk; each call writes only to its
+  own `R` vector passed into the query). Inserts/removes use unique_lock.
+- DEBUG `Stats.Query` uses `ScopeStatTimer` + `query_stats_lock` when gathering timings.
+
 Requirements:
 0. Generic
     * O(1) insertion
@@ -222,7 +230,8 @@ public:
     };
 
 private:
-    Lock cs;
+    std::shared_mutex rw;
+    Lock query_stats_lock;
 
     poolSS<ISpatial_NODE, 128> allocator;
 
@@ -234,7 +243,6 @@ public:
     ISpatial_NODE* m_root{};
     Fvector m_center{};
     float m_bounds{};
-    xr_vector<ISpatial*>* q_result{};
     SpatialDBStatistics Stats;
 
 private:

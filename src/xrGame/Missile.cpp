@@ -191,6 +191,7 @@ void CMissile::OnH_B_Independent(bool just_before_destroy)
 
 void CMissile::UpdateCL()
 {
+    ZoneScopedN("ucl_CMissile");
     m_dwStateTime += Device.dwTimeDelta;
 
     inherited::UpdateCL();

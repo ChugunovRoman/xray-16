@@ -334,6 +334,8 @@ void CAI_Stalker::reinit()
     m_agent_manager_update_interval = 0;
     m_next_memory_update_time = 0;
     m_memory_update_interval = 0;
+
+    m_ucl_perf_postdeath_until_time = 0;
 }
 
 void CAI_Stalker::LoadSounds(LPCSTR section)
@@ -630,6 +632,12 @@ void CAI_Stalker::Die(IGameObject* who)
 
     inherited::Die(who);
 
+    const u32 grace_ms = npc_perf_disable_ucl_stalker_postdeath_grace_ms;
+    if (grace_ms > 0 && (npc_perf_disable_ucl_stalker_physics != 0 || npc_perf_disable_ucl_stalker_step_manager != 0))
+        m_ucl_perf_postdeath_until_time = Device.dwTimeGlobal + grace_ms;
+    else
+        m_ucl_perf_postdeath_until_time = 0;
+
     //запретить использование слотов в инвенторе
     inventory().SetSlotsUseful(false);
 
@@ -794,11 +802,15 @@ void CAI_Stalker::net_Destroy()
     // XXX: task scheduler
     //TaskScheduler->RemoveTask({ this, &CAI_Stalker::update_object_handler });
     Device.remove_from_seq_parallel(fastdelegate::FastDelegate0<>(this, &CAI_Stalker::update_object_handler));
+    Device.remove_from_seq_parallel(fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
 
 #ifdef DEBUG
     fastdelegate::FastDelegate0<> f = fastdelegate::FastDelegate0<>(this, &CAI_Stalker::update_object_handler);
     xr_vector<fastdelegate::FastDelegate0<>>::const_iterator I;
     I = std::find(Device.seqParallel.begin(), Device.seqParallel.end(), f);
+    VERIFY(I == Device.seqParallel.end());
+    fastdelegate::FastDelegate0<> fv = fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility);
+    I = std::find(Device.seqParallel.begin(), Device.seqParallel.end(), fv);
     VERIFY(I == Device.seqParallel.end());
 #endif
 
@@ -981,40 +993,57 @@ void CAI_Stalker::destroy_anim_mov_ctrl()
 
 void CAI_Stalker::UpdateCL()
 {
+    ZoneScopedN("ucl_CAI_Stalker");
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCL);
     START_PROFILE("stalker")
     START_PROFILE("stalker/client_update")
     VERIFY2(PPhysicsShell() || getEnabled(), cName().c_str());
 
     if (g_Alive())
+        m_ucl_perf_postdeath_until_time = 0;
+    else if (m_ucl_perf_postdeath_until_time != 0 && Device.dwTimeGlobal >= m_ucl_perf_postdeath_until_time)
+        m_ucl_perf_postdeath_until_time = 0;
+
+    const bool phys_glob_off = npc_perf_disable_ucl_stalker_physics != 0;
+    const bool step_glob_off = npc_perf_disable_ucl_stalker_step_manager != 0;
+    const bool postdeath_ucl_force =
+        !g_Alive() && m_ucl_perf_postdeath_until_time != 0 && Device.dwTimeGlobal < m_ucl_perf_postdeath_until_time;
+    const bool run_ucl_physics = !phys_glob_off || postdeath_ucl_force;
+    const bool run_ucl_step_alive = !step_glob_off || postdeath_ucl_force;
+
+    if (g_Alive())
     {
-        if (g_mt_config.test(mtObjectHandler) && CObjectHandler::planner().initialized())
         {
-            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLObjectHandlerDispatch);
-            // XXX: task scheduler
-            //TaskScheduler->AddTask("CAI_Stalker::update_object_handler",
-            //    { this, &CAI_Stalker::update_object_handler },
-            //    { this, &CAI_Stalker::mt_object_handler_update_allowed });
+            ZoneScopedN("ucl_stalker_object_handler");
+            if (g_mt_config.test(mtObjectHandler) && CObjectHandler::planner().initialized())
+            {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLObjectHandlerDispatch);
+                // XXX: task scheduler
+                //TaskScheduler->AddTask("CAI_Stalker::update_object_handler",
+                //    { this, &CAI_Stalker::update_object_handler },
+                //    { this, &CAI_Stalker::mt_object_handler_update_allowed });
 
 #ifdef DEBUG
-            fastdelegate::FastDelegate0<> f = fastdelegate::FastDelegate0<>(this, &CAI_Stalker::update_object_handler);
-            xr_vector<fastdelegate::FastDelegate0<>>::const_iterator I;
-            I = std::find(Device.seqParallel.begin(), Device.seqParallel.end(), f);
-            VERIFY(I == Device.seqParallel.end());
+                fastdelegate::FastDelegate0<> f = fastdelegate::FastDelegate0<>(this, &CAI_Stalker::update_object_handler);
+                xr_vector<fastdelegate::FastDelegate0<>>::const_iterator I;
+                I = std::find(Device.seqParallel.begin(), Device.seqParallel.end(), f);
+                VERIFY(I == Device.seqParallel.end());
 #endif
-            Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CAI_Stalker::update_object_handler));
-        }
-        else
-        {
-            START_PROFILE("stalker/client_update/object_handler")
-            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLObjectHandlerDispatch);
-            update_object_handler();
-            STOP_PROFILE
+                Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CAI_Stalker::update_object_handler));
+            }
+            else
+            {
+                START_PROFILE("stalker/client_update/object_handler")
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLObjectHandlerDispatch);
+                update_object_handler();
+                STOP_PROFILE
+            }
         }
 
         if ((movement().speed(character_physics_support()->movement()) > EPS_L) &&
             (eMovementTypeStand != movement().movement_type()) && (eMentalStateDanger == movement().mental_state()))
         {
+            ZoneScopedN("ucl_stalker_danger_movement_sound");
             if ((eBodyStateStand == movement().body_state()) && (eMovementTypeRun == movement().movement_type()))
             {
                 sound().play(eStalkerSoundRunningInDanger);
@@ -1028,23 +1057,31 @@ void CAI_Stalker::UpdateCL()
 
     START_PROFILE("stalker/client_update/inherited")
     {
+        ZoneScopedN("ucl_stalker_inherited");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLInherited);
         inherited::UpdateCL();
     }
     STOP_PROFILE
 
-    START_PROFILE("stalker/client_update/physics")
+    // npc_perf_mt_stalker_physics: reserved (see CharacterPhysicsSupport.cpp); deferred physics would run after sight order.
+    if (run_ucl_physics)
     {
-        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLPhysics);
-        m_pPhysics_support->in_UpdateCL();
+        START_PROFILE("stalker/client_update/physics")
+        {
+            ZoneScopedN("ucl_stalker_physics");
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLPhysics);
+            m_pPhysics_support->in_UpdateCL();
+        }
+        STOP_PROFILE
     }
-    STOP_PROFILE
 
     if (g_Alive())
     {
-        START_PROFILE("stalker/client_update/sight_manager")
         VERIFY(!m_pPhysicsShell);
+
+        START_PROFILE("stalker/client_update/sight_manager")
         {
+            ZoneScopedN("ucl_stalker_sight_update");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLSightManager);
             try
             {
@@ -1056,25 +1093,43 @@ void CAI_Stalker::UpdateCL()
                 sight().update();
             }
         }
+        STOP_PROFILE
 
+        START_PROFILE("stalker/client_update/exec_look")
         {
+            ZoneScopedN("ucl_stalker_exec_look");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLExecLook);
             Exec_Look(client_update_fdelta());
         }
         STOP_PROFILE
 
-        START_PROFILE("stalker/client_update/step_manager")
+        if (run_ucl_step_alive)
         {
-            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);
-            CStepManager::update(false);
+            START_PROFILE("stalker/client_update/step_manager")
+            {
+                ZoneScopedN("ucl_stalker_step_manager");
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);
+                CStepManager::update(false);
+            }
+            STOP_PROFILE
         }
-        STOP_PROFILE
 
         START_PROFILE("stalker/client_update/weapon_shot_effector")
         {
+            ZoneScopedN("ucl_stalker_weapon_shot_effector");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLWeaponEffector);
             if (weapon_shot_effector().IsActive())
                 weapon_shot_effector().Update();
+        }
+        STOP_PROFILE
+    }
+    else if (postdeath_ucl_force && step_glob_off)
+    {
+        START_PROFILE("stalker/client_update/step_manager")
+        {
+            ZoneScopedN("ucl_stalker_step_manager");
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);
+            CStepManager::update(false);
         }
         STOP_PROFILE
     }
@@ -1091,6 +1146,8 @@ CPHDestroyable* CAI_Stalker::ph_destroyable() { return smart_cast<CPHDestroyable
 
 void CAI_Stalker::shedule_Update(u32 DT)
 {
+    ZoneScopedN("sh_CAI_Stalker");
+    ZoneTextF("%s", cName().c_str());
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleUpdate);
     START_PROFILE("stalker")
     START_PROFILE("stalker/schedule_update")
@@ -1098,6 +1155,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
 
     if (!CObjectHandler::planner().initialized())
     {
+        ZoneScopedN("sh_stalker_object_handler_planner_gate");
         START_PROFILE("stalker/client_update/object_handler")
         update_object_handler();
         STOP_PROFILE
@@ -1108,8 +1166,11 @@ void CAI_Stalker::shedule_Update(u32 DT)
     VERIFY(_valid(Position()));
     u32 dwTimeCL = Level().timeServer() - NET_Latency;
     VERIFY(!NET.empty());
-    while ((NET.size() > 2) && (NET[1].dwTimeStamp < dwTimeCL))
-        NET.pop_front();
+    {
+        ZoneScopedN("sh_stalker_net_queue_shrink");
+        while ((NET.size() > 2) && (NET[1].dwTimeStamp < dwTimeCL))
+            NET.pop_front();
+    }
 
     Fvector vNewPosition = Position();
     VERIFY(_valid(Position()));
@@ -1124,12 +1185,17 @@ void CAI_Stalker::shedule_Update(u32 DT)
 
     if (g_Alive())
     {
+        ZoneScopedN("sh_stalker_alive_precalc");
         START_PROFILE("stalker/schedule_update/precalc")
-        animation().play_delayed_callbacks();
+        {
+            ZoneScopedN("sh_stalker_anim_delayed_callbacks");
+            animation().play_delayed_callbacks();
+        }
 
 #ifndef USE_SCHEDULER_IN_AGENT_MANAGER
         // Optimization: throttle agent_manager updates based on LOD
         {
+            ZoneScopedN("sh_stalker_agent_manager");
             const bool run_agent_manager = should_run_stalker_lod_stage(*this, 
                 m_next_agent_manager_update_time, m_agent_manager_update_interval,
                 get_stalker_agent_manager_interval(update_lod), now_ms);
@@ -1147,58 +1213,84 @@ void CAI_Stalker::shedule_Update(u32 DT)
 #endif
         if (run_visibility)
         {
+            ZoneScopedN("sh_stalker_Exec_Visibility");
             START_PROFILE("stalker/schedule_update/vision")
             {
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleVisibility);
-                // See CCustomMonster::shedule_Update: vision must not run on seqParallel (race with relcase).
-                Exec_Visibility();
+                const bool par_vision = ps_r__mt_ai_vision_parallel != 0 && g_mt_config.test(mtAiVision);
+                if (par_vision)
+                {
+#ifdef DEBUG
+                    fastdelegate::FastDelegate0<> fv =
+                        fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility);
+                    xr_vector<fastdelegate::FastDelegate0<>>::const_iterator I;
+                    I = std::find(Device.seqParallel.begin(), Device.seqParallel.end(), fv);
+                    VERIFY(I == Device.seqParallel.end());
+#endif
+                    Device.seqParallel.push_back(
+                        fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
+                }
+                else
+                    Exec_Visibility();
             }
             STOP_PROFILE
         }
 
         START_PROFILE("stalker/schedule_update/memory")
 
-        START_PROFILE("stalker/schedule_update/memory/process")
-        process_enemies();
-        STOP_PROFILE
-
-        START_PROFILE("stalker/schedule_update/memory/update")
         {
-            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryUpdate);
-            // Optimization: throttle memory updates based on LOD
-            const bool run_memory_update = should_run_stalker_lod_stage(*this,
-                m_next_memory_update_time, m_memory_update_interval,
-                get_stalker_memory_update_interval(update_lod), now_ms);
-            
-            if (run_memory_update)
-            {
-                memory().update(dt);
-            }
+            ZoneScopedN("sh_stalker_process_enemies");
+            START_PROFILE("stalker/schedule_update/memory/process")
+            process_enemies();
+            STOP_PROFILE
         }
-        STOP_PROFILE
+
+        {
+            ZoneScopedN("sh_stalker_memory_update");
+            START_PROFILE("stalker/schedule_update/memory/update")
+            {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryUpdate);
+                // Optimization: throttle memory updates based on LOD
+                const bool run_memory_update = should_run_stalker_lod_stage(*this,
+                    m_next_memory_update_time, m_memory_update_interval,
+                    get_stalker_memory_update_interval(update_lod), now_ms);
+            
+                if (run_memory_update)
+                {
+                    memory().update(dt);
+                }
+            }
+            STOP_PROFILE
+        }
 
         STOP_PROFILE
         STOP_PROFILE
     }
 
-    START_PROFILE("stalker/schedule_update/inherited")
-    CEntityAlive::shedule_Update(DT);
-    STOP_PROFILE
+    {
+        ZoneScopedN("sh_stalker_CEntityAlive_shedule_Update");
+        START_PROFILE("stalker/schedule_update/inherited")
+        CEntityAlive::shedule_Update(DT);
+        STOP_PROFILE
+    }
 
     if (Remote())
     {
     }
     else if (!g_Alive())
     {
-        START_PROFILE("stalker/schedule_update/net_update")
-        net_update uNext;
-        uNext.dwTimeStamp = Level().timeServer();
-        uNext.o_model = movement().m_body.current.yaw;
-        uNext.o_torso = movement().m_head.current;
-        uNext.p_pos = vNewPosition;
-        uNext.fHealth = GetfHealth();
-        NET.push_back(uNext);
-        STOP_PROFILE
+        {
+            ZoneScopedN("sh_stalker_dead_net_update");
+            START_PROFILE("stalker/schedule_update/net_update")
+            net_update uNext;
+            uNext.dwTimeStamp = Level().timeServer();
+            uNext.o_model = movement().m_body.current.yaw;
+            uNext.o_torso = movement().m_head.current;
+            uNext.p_pos = vNewPosition;
+            uNext.fHealth = GetfHealth();
+            NET.push_back(uNext);
+            STOP_PROFILE
+        }
 
         // BUGFIX: мёртвый сталкер должен вызывать Think(), чтобы
         // CStalkerActionDead::execute() мог вызвать SetDropManual(TRUE) через
@@ -1212,7 +1304,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
         m_fTimeUpdateDelta = dt;
         Level().AIStats.Think.Begin();
         {
-
+            ZoneScopedN("sh_stalker_dead_Think");
 #ifdef DEBUG
             if (Device.dwFrame > (spawn_time() + g_AI_inactive_time))
 #endif
@@ -1226,6 +1318,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
     }
     else
     {
+        ZoneScopedN("sh_stalker_alive_ai_apply");
         // here is monster AI call
         VERIFY(_valid(Position()));
         m_fTimeUpdateDelta = dt;
@@ -1233,6 +1326,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
         START_PROFILE("stalker/schedule_update/apply")
         if (GetScriptControl())
         {
+            ZoneScopedN("sh_stalker_ProcessScripts");
             START_PROFILE("stalker/schedule_update/script_control")
             ProcessScripts();
             m_dwLastUpdateTime = Device.dwTimeGlobal;
@@ -1244,6 +1338,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
 #endif
             if (run_think)
             {
+                ZoneScopedN("sh_stalker_Think_apply");
                 START_PROFILE("stalker/schedule_update/think_apply")
                 {
                     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleThinkApply);
@@ -1266,6 +1361,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
                 get_stalker_feel_touch_interval(update_lod), now_ms);
             if (run_feel_touch)
             {
+                ZoneScopedN("sh_stalker_feel_touch_update");
                 START_PROFILE("stalker/schedule_update/feel_touch")
                 Fvector C;
                 float R;
@@ -1275,18 +1371,22 @@ void CAI_Stalker::shedule_Update(u32 DT)
                 STOP_PROFILE
             }
 
-            START_PROFILE("stalker/schedule_update/net_update")
-            net_update uNext;
-            uNext.dwTimeStamp = Level().timeServer();
-            uNext.o_model = movement().m_body.current.yaw;
-            uNext.o_torso = movement().m_head.current;
-            uNext.p_pos = vNewPosition;
-            uNext.fHealth = GetfHealth();
-            NET.push_back(uNext);
-            STOP_PROFILE
+            {
+                ZoneScopedN("sh_stalker_net_update_alive");
+                START_PROFILE("stalker/schedule_update/net_update")
+                net_update uNext;
+                uNext.dwTimeStamp = Level().timeServer();
+                uNext.o_model = movement().m_body.current.yaw;
+                uNext.o_torso = movement().m_head.current;
+                uNext.p_pos = vNewPosition;
+                uNext.fHealth = GetfHealth();
+                NET.push_back(uNext);
+                STOP_PROFILE
+            }
         }
         else
         {
+            ZoneScopedN("sh_stalker_net_update_low_health");
             START_PROFILE("stalker/schedule_update/net_update")
             net_update uNext;
             uNext.dwTimeStamp = Level().timeServer();
@@ -1304,6 +1404,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
     // чтобы обработать флаг SetDropManual(TRUE), выставленный CStalkerActionDead.
     // Без этого предмет никогда не дропается из инвентаря трупа.
     {
+        ZoneScopedN("sh_stalker_UpdateInventoryOwner");
         START_PROFILE("stalker/schedule_update/inventory_owner")
         UpdateInventoryOwner(DT);
         STOP_PROFILE
@@ -1315,11 +1416,14 @@ void CAI_Stalker::shedule_Update(u32 DT)
     //	}
     //#endif
 
-    START_PROFILE("stalker/schedule_update/physics")
-    VERIFY(_valid(Position()));
-    m_pPhysics_support->in_shedule_Update(DT);
-    VERIFY(_valid(Position()));
-    STOP_PROFILE
+    {
+        ZoneScopedN("sh_stalker_physics_in_shedule_Update");
+        START_PROFILE("stalker/schedule_update/physics")
+        VERIFY(_valid(Position()));
+        m_pPhysics_support->in_shedule_Update(DT);
+        VERIFY(_valid(Position()));
+        STOP_PROFILE
+    }
     STOP_PROFILE
     STOP_PROFILE
 }
@@ -1341,17 +1445,21 @@ void CAI_Stalker::spawn_supplies()
 
 void CAI_Stalker::Think()
 {
+    ZoneScopedN("sh_stalker_Think");
+    ZoneTextF("%s", cName().c_str());
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerThink);
     START_PROFILE("stalker/schedule_update/think")
     const u32 update_delta = (m_dwLastUpdateTime == u32(-1)) ? 0 : (Device.dwTimeGlobal - m_dwLastUpdateTime);
 
-    START_PROFILE("stalker/schedule_update/think/brain")
     {
-        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerBrainUpdate);
-        //	try {
-        //		try {
-        brain().update(update_delta);
-    }
+        ZoneScopedN("sh_stalker_brain_update");
+        START_PROFILE("stalker/schedule_update/think/brain")
+        {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerBrainUpdate);
+            //	try {
+            //		try {
+            brain().update(update_delta);
+        }
 //		}
 #ifdef DEBUG
 //		catch (const luabind::cast_failed &message) {
@@ -1376,7 +1484,8 @@ void CAI_Stalker::Think()
     //		brain().setup			(this);
     //		brain().update			(update_delta);
     //	}
-    STOP_PROFILE
+        STOP_PROFILE
+    }
 
     START_PROFILE("stalker/schedule_update/think/movement")
     if (!g_Alive())
@@ -1384,6 +1493,7 @@ void CAI_Stalker::Think()
 
     //	try {
     {
+        ZoneScopedN("sh_stalker_movement_update");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerThinkMovementUpdate);
         movement().update(update_delta);
     }

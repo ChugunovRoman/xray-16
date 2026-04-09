@@ -90,6 +90,18 @@ public:
     bool RayPick(const Fvector& start, const Fvector& dir, float range, collide::rq_target tgt, collide::rq_result& R,
         IGameObject* ignore_object);
 
+    /** Parallel RayPick when TaskScheduler is active; each result must point to distinct storage (e.g. array slot). */
+    struct RayPickBatchItem
+    {
+        Fvector start;
+        Fvector dir;
+        float range;
+        collide::rq_target tgt;
+        IGameObject* ignore_object;
+        collide::rq_result* result{};
+    };
+    void RayPickBatch(const RayPickBatchItem* items, size_t count);
+
     // General collision query
     bool RayQuery(collide::rq_results& dest, const collide::ray_defs& rq, collide::rq_callback* cb, LPVOID user_data,
         collide::test_callback* tb, IGameObject* ignore_object);

@@ -560,6 +560,7 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
 
 void CWeaponMagazined::UpdateCL()
 {
+    ZoneScopedN("ucl_CWeaponMagazined");
     inherited::UpdateCL();
     float dt = Device.fTimeDelta;
 

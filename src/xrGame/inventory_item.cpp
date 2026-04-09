@@ -312,6 +312,7 @@ extern Flags32 dbg_net_Draw_Flags;
 
 void CInventoryItem::UpdateCL()
 {
+    ZoneScopedN("ucl_CInventoryItem");
 #ifdef DEBUG
     if (bDebug)
     {

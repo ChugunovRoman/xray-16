@@ -38,6 +38,7 @@
 #include "GameTask.h"
 #include "MainMenu.h"
 #include "saved_game_wrapper.h"
+#include "xrAICore/Components/ai_planner_search_limits.h"
 #include "xrAICore/Navigation/level_graph.h"
 #include "xrNetServer/NET_Messages.h"
 #include "character_community.h"
@@ -148,6 +149,8 @@ int net_cl_inputupdaterate = 50;
 Flags32 g_mt_config = {mtLevelPath | mtDetailPath | mtObjectHandler | mtSoundPlayer | mtBullets | mtLUA_GC |
     mtLevelSounds | mtALife | mtMap};
 
+int ps_r__mt_ai_vision_parallel = 1;
+
 Flags32 g_map_spot_config = {MAP_SPOT_SMOOTH};
 float ps_map_spot_smooth_speed = 0.6f;
 
@@ -182,10 +185,19 @@ u32 npc_perf_planner_solve_interval_near_idle_ms = 110;
 u32 npc_perf_planner_solve_interval_medium_ms = 300;
 u32 npc_perf_planner_solve_interval_far_ms = 750;
 u32 npc_perf_planner_solve_interval_combat_near_ms = 280;
+u32 npc_perf_planner_solve_interval_danger_only_ms = 0;
 u32 npc_perf_planner_actuality_interval_combat_ms = 90;
 u32 npc_perf_planner_actuality_interval_danger_ms = 120;
 u32 npc_perf_planner_actuality_interval_near_idle_ms = 220;
 u32 npc_perf_planner_graph_search_max_nodes = 1200;
+u32 npc_perf_planner_graph_search_max_nodes_combat = 600;
+u32 npc_perf_planner_graph_search_max_nodes_danger = 700;
+u32 npc_perf_cover_best_max_evaluate = 0;
+u32 npc_perf_cover_nearest_max_points = 0;
+u32 npc_perf_cover_best_max_accessible = 0;
+u32 npc_perf_cover_find_eval_budget_total = 0;
+int npc_perf_cover_find_skip_near_10m = 0;
+u32 g_npc_perf_cover_find_eval_budget_remaining = u32(-1);
 u32 npc_perf_long_dead_skip_binder_ms = 5000;
 int npc_perf_skip_script_net_relcase = 1;
 float npc_perf_binder_far_dist = 300.f;
@@ -202,8 +214,14 @@ u32 npc_perf_monster_vis_interval_medium_ms = 220;
 u32 npc_perf_monster_vis_interval_far_ms = 320;
 u32 npc_perf_ik_interval_near_idle_ms = 50;
 u32 npc_perf_ik_interval_medium_ms = 200;
-u32 npc_perf_ik_interval_far_ms = 400;
+u32 npc_perf_ik_interval_far_ms = 450;
 u32 npc_perf_ik_interval_disabled_ms = 30000;
+u32 npc_perf_ik_interval_enemy_selected_ms = 0;
+int npc_perf_ik_foot_raypick_batch = 1;
+int npc_perf_mt_stalker_physics = 0;
+int npc_perf_disable_ucl_stalker_physics = 1;
+int npc_perf_disable_ucl_stalker_step_manager = 1;
+u32 npc_perf_disable_ucl_stalker_postdeath_grace_ms = 2500;
 u32 npc_perf_state_mgr_animstate_ttl_ms = 120;
 u32 npc_perf_script_combat_ttl_ms = 100;
 u32 npc_perf_evaluator_combat_enemy_cache_ttl_ms = 120;
@@ -229,6 +247,7 @@ u32 npc_perf_motivator_callback_medium_interval = 1500;
 u32 npc_perf_motivator_callback_far_interval = 3500;
 u32 npc_perf_motivator_dead_interval = 3000;
 u32 npc_perf_sim_brain_actor_update_interval = 10000;
+int npc_perf_agent_enemy_fill_squads_trace_members = 0;
 
 Flags32 g_uCommonFlags;
 enum E_COMMON_FLAGS
@@ -2600,6 +2619,7 @@ void CCC_RegisterCommands()
     // ai
     // Bit kept for console compatibility; AI vision always runs on main thread (see CCustomMonster::shedule_Update).
     CMD3(CCC_Mask, "mt_ai_vision", &g_mt_config, mtAiVision);
+    CMD4(CCC_Integer, "r__mt_ai_vision_parallel", &ps_r__mt_ai_vision_parallel, 0, 1);
     CMD3(CCC_Mask, "mt_level_path", &g_mt_config, mtLevelPath);
     CMD3(CCC_Mask, "mt_detail_path", &g_mt_config, mtDetailPath);
     CMD3(CCC_Mask, "mt_object_handler", &g_mt_config, mtObjectHandler);
@@ -2718,10 +2738,20 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_planner_solve_interval_medium_ms", (int*)&npc_perf_planner_solve_interval_medium_ms, 10, 60000);
     CMD4(CCC_Integer, "npc_perf_planner_solve_interval_far_ms", (int*)&npc_perf_planner_solve_interval_far_ms, 10, 60000);
     CMD4(CCC_Integer, "npc_perf_planner_solve_interval_combat_near_ms", (int*)&npc_perf_planner_solve_interval_combat_near_ms, 10, 60000);
+    CMD4(CCC_Integer, "npc_perf_planner_solve_interval_danger_only_ms", (int*)&npc_perf_planner_solve_interval_danger_only_ms, 0, 60000);
     CMD4(CCC_Integer, "npc_perf_planner_actuality_interval_combat_ms", (int*)&npc_perf_planner_actuality_interval_combat_ms, 10, 60000);
     CMD4(CCC_Integer, "npc_perf_planner_actuality_interval_danger_ms", (int*)&npc_perf_planner_actuality_interval_danger_ms, 10, 60000);
     CMD4(CCC_Integer, "npc_perf_planner_actuality_interval_near_idle_ms", (int*)&npc_perf_planner_actuality_interval_near_idle_ms, 10, 60000);
     CMD4(CCC_Integer, "npc_perf_planner_graph_search_max_nodes", (int*)&npc_perf_planner_graph_search_max_nodes, 100, 100000);
+    CMD4(CCC_Integer, "npc_perf_planner_graph_search_max_nodes_combat", (int*)&npc_perf_planner_graph_search_max_nodes_combat, 0, 100000);
+    CMD4(CCC_Integer, "npc_perf_planner_graph_search_max_nodes_danger", (int*)&npc_perf_planner_graph_search_max_nodes_danger, 0, 100000);
+    CMD4(CCC_Integer, "npc_perf_planner_nested_graph_search_max_nodes", (int*)&g_ai_nested_planner_graph_search_max_nodes, 100,
+        32000);
+    CMD4(CCC_Integer, "npc_perf_cover_best_max_evaluate", (int*)&npc_perf_cover_best_max_evaluate, 0, 4096);
+    CMD4(CCC_Integer, "npc_perf_cover_nearest_max_points", (int*)&npc_perf_cover_nearest_max_points, 0, 4096);
+    CMD4(CCC_Integer, "npc_perf_cover_best_max_accessible", (int*)&npc_perf_cover_best_max_accessible, 0, 4096);
+    CMD4(CCC_Integer, "npc_perf_cover_find_eval_budget_total", (int*)&npc_perf_cover_find_eval_budget_total, 0, 4096);
+    CMD4(CCC_Integer, "npc_perf_cover_find_skip_near_10m", &npc_perf_cover_find_skip_near_10m, 0, 1);
     CMD4(CCC_Integer, "npc_perf_long_dead_skip_binder_ms", (int*)&npc_perf_long_dead_skip_binder_ms, 0, 120000);
     CMD4(CCC_Integer, "npc_perf_skip_script_net_relcase", &npc_perf_skip_script_net_relcase, 0, 1);
     CMD4(CCC_Float, "npc_perf_binder_far_dist", &npc_perf_binder_far_dist, 1.f, 2000.f);
@@ -2744,6 +2774,13 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_ik_interval_medium_ms", (int*)&npc_perf_ik_interval_medium_ms, 10, 60000);
     CMD4(CCC_Integer, "npc_perf_ik_interval_far_ms", (int*)&npc_perf_ik_interval_far_ms, 10, 60000);
     CMD4(CCC_Integer, "npc_perf_ik_interval_disabled_ms", (int*)&npc_perf_ik_interval_disabled_ms, 1000, 120000);
+    CMD4(CCC_Integer, "npc_perf_ik_interval_enemy_selected_ms", (int*)&npc_perf_ik_interval_enemy_selected_ms, 0, 60000);
+    CMD4(CCC_Integer, "npc_perf_ik_foot_raypick_batch", &npc_perf_ik_foot_raypick_batch, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_mt_stalker_physics", &npc_perf_mt_stalker_physics, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_disable_ucl_stalker_physics", &npc_perf_disable_ucl_stalker_physics, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_disable_ucl_stalker_step_manager", &npc_perf_disable_ucl_stalker_step_manager, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_disable_ucl_stalker_postdeath_grace_ms", (int*)&npc_perf_disable_ucl_stalker_postdeath_grace_ms, 0,
+        60000);
     CMD4(CCC_Integer, "npc_perf_state_mgr_animstate_ttl_ms", (int*)&npc_perf_state_mgr_animstate_ttl_ms, 10, 30000);
     CMD4(CCC_Integer, "npc_perf_script_combat_ttl_ms", (int*)&npc_perf_script_combat_ttl_ms, 10, 30000);
     CMD4(CCC_Integer, "npc_perf_evaluator_combat_enemy_cache_ttl_ms", (int*)&npc_perf_evaluator_combat_enemy_cache_ttl_ms, 10, 30000);
@@ -2769,6 +2806,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_motivator_callback_far_interval", (int*)&npc_perf_motivator_callback_far_interval, 100, 120000);
     CMD4(CCC_Integer, "npc_perf_motivator_dead_interval", (int*)&npc_perf_motivator_dead_interval, 100, 120000);
     CMD4(CCC_Integer, "npc_perf_sim_brain_actor_update_interval", (int*)&npc_perf_sim_brain_actor_update_interval, 1000, 120000);
+    CMD4(CCC_Integer, "npc_perf_agent_enemy_fill_squads_trace_members", &npc_perf_agent_enemy_fill_squads_trace_members, 0, 1);
 
 #ifndef MASTER_GOLD
     CMD3(CCC_Mask, "ai_ignore_actor", &psAI_Flags, aiIgnoreActor);

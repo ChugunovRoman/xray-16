@@ -1436,6 +1436,7 @@ void CWeapon::OnH_B_Chield()
 bool CWeapon::AllowBore() { return true; }
 void CWeapon::UpdateCL()
 {
+    ZoneScopedN("ucl_CWeapon");
     inherited::UpdateCL();
     UpdateHUDAddonsVisibility();
     //подсветка от выстрела

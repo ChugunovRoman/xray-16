@@ -168,6 +168,7 @@ void CArtefact::SwitchAfParticles(bool bOn)
 // called only in "fast-mode"
 void CArtefact::UpdateCL()
 {
+    ZoneScopedN("ucl_CArtefact");
     inherited::UpdateCL();
 
     if (o_fastmode || m_activationObj)

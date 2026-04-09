@@ -189,6 +189,7 @@ void CHudItem::SendHiddenItem()
 void CHudItem::UpdateHudAdditional(Fmatrix& hud_trans) {}
 void CHudItem::UpdateCL()
 {
+    ZoneScopedN("ucl_CHudItem");
     if (m_current_motion_def)
     {
         if (m_bStopAtEndAnimIsRunning)

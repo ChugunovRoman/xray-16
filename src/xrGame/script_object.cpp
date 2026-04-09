@@ -40,6 +40,7 @@ void CScriptObject::shedule_Update(u32 DT)
 
 void CScriptObject::UpdateCL()
 {
+    ZoneScopedN("ucl_CScriptObject");
     CGameObject::UpdateCL();
     CScriptEntity::UpdateCL();
 }

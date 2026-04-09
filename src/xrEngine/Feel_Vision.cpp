@@ -91,6 +91,7 @@ void Vision::o_delete(IGameObject* O)
 
 void Vision::feel_vision_clear()
 {
+    std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
     seen.clear();
     query.clear();
     diff.clear();
@@ -99,6 +100,7 @@ void Vision::feel_vision_clear()
 
 void Vision::feel_vision_relcase(IGameObject* object)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
     xr_vector<IGameObject*>::iterator Io;
     Io = std::find(seen.begin(), seen.end(), object);
     if (Io != seen.end())
@@ -120,6 +122,7 @@ void Vision::feel_vision_relcase(IGameObject* object)
 
 void Vision::feel_vision_query(Fmatrix& mFull, Fvector& P)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
     CFrustum Frustum;
     Frustum.CreateFromMatrix(mFull, FRUSTUM_P_LRTB | FRUSTUM_P_FAR);
 
@@ -147,6 +150,7 @@ void Vision::feel_vision_query(Fmatrix& mFull, Fvector& P)
 
 void Vision::feel_vision_update(IGameObject* parent, Fvector& P, float dt, float vis_threshold)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
     // B-A = objects, that become visible
     if (!seen.empty())
     {

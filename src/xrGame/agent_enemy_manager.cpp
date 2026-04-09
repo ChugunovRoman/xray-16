@@ -7,6 +7,8 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include <tracy/Tracy.hpp>
+#include "xrCommon/xr_unordered_map.h"
 #include "agent_enemy_manager.h"
 #include "agent_manager.h"
 #include "agent_memory_manager.h"
@@ -23,8 +25,71 @@
 #include "hit_memory_manager.h"
 #include "enemy_manager.h"
 #include "memory_space_impl.h"
+#include "performance_cvars.h"
 
 extern const float wounded_enemy_reached_distance;
+
+namespace
+{
+struct squad_mem_slot
+{
+    u32 level_time{};
+    Fvector position{};
+    bool has{};
+};
+
+IC void merge_squad_mem_slot(xr_unordered_map<u16, squad_mem_slot>& m, u16 id, u32 t, const Fvector& p)
+{
+    if (id == u16(0xffff))
+        return;
+    const auto it = m.find(id);
+    if (it == m.end())
+        m.emplace(id, squad_mem_slot{t, p, true});
+    else if (!it->second.has || it->second.level_time < t)
+    {
+        it->second.level_time = t;
+        it->second.position = p;
+        it->second.has = true;
+    }
+}
+
+void fill_enemy_positions_from_squad_memory(CAgentMemoryManager& memory, xr_vector<CMemberEnemy>& enemies)
+{
+    xr_unordered_map<u16, squad_mem_slot> slots;
+    const size_t approx = memory.visibles().size() + memory.sounds().size() + memory.hits().size();
+    slots.reserve(approx);
+
+    for (const auto& v : memory.visibles())
+    {
+        if (!v.m_enabled)
+            continue;
+        merge_squad_mem_slot(slots, object_id(v.m_object), v.m_last_level_time, v.m_object_params.m_position);
+    }
+    for (const auto& s : memory.sounds())
+    {
+        if (!s.m_enabled)
+            continue;
+        merge_squad_mem_slot(slots, object_id(s.m_object), s.m_last_level_time, s.m_object_params.m_position);
+    }
+    for (const auto& h : memory.hits())
+    {
+        if (!h.m_enabled)
+            continue;
+        merge_squad_mem_slot(slots, object_id(h.m_object), h.m_last_level_time, h.m_object_params.m_position);
+    }
+
+    for (auto& enemy : enemies)
+    {
+        const u16 id = object_id(enemy.m_object);
+        const auto it = slots.find(id);
+        if (it != slots.end() && it->second.has)
+        {
+            enemy.m_level_time = it->second.level_time;
+            enemy.m_enemy_position = it->second.position;
+        }
+    }
+}
+} // namespace
 
 const u32 __c0 = 0x55555555;
 const u32 __c1 = 0x33333333;
@@ -47,25 +112,28 @@ IC u32 population(const u64& b) { return (population((u32)b) + population(u32(b 
 struct CEnemyFiller
 {
     typedef CAgentEnemyManager::ENEMIES ENEMIES;
-    ENEMIES* m_enemies;
-    squad_mask_type m_mask;
+    ENEMIES* m_enemies{};
+    squad_mask_type m_mask{};
+    xr_unordered_map<const CEntityAlive*, u32>* m_index{};
 
-    IC CEnemyFiller(ENEMIES* enemies, squad_mask_type mask)
+    IC CEnemyFiller(ENEMIES* enemies, squad_mask_type mask, xr_unordered_map<const CEntityAlive*, u32>* index)
+        : m_enemies(enemies), m_mask(mask), m_index(index)
     {
-        m_enemies = enemies;
-        m_mask = mask;
+        VERIFY(m_index);
     }
 
     IC void operator()(const CEntityAlive* enemy) const
     {
-        ENEMIES::iterator I = std::find(m_enemies->begin(), m_enemies->end(), enemy);
-        if (I == m_enemies->end())
+        const auto it = m_index->find(enemy);
+        if (it == m_index->end())
         {
+            const u32 idx = (u32)m_enemies->size();
             m_enemies->push_back(CMemberEnemy(enemy, m_mask));
+            m_index->emplace(enemy, idx);
             return;
         }
 
-        (*I).m_mask.set(m_mask, TRUE);
+        (*m_enemies)[it->second].m_mask.set(m_mask, TRUE);
     }
 };
 
@@ -142,6 +210,10 @@ void CAgentEnemyManager::fill_enemies()
     m_enemies.clear();
 
     {
+        ZoneNamedN(___tracy_fill_squads, "agent_enemy/fill_from_squads", true);
+        xr_unordered_map<const CEntityAlive*, u32> enemy_index;
+        enemy_index.reserve(256);
+
         const xr_vector<ALife::_OBJECT_ID> member_ids = combat_member_ids(object().member().combat_members());
         xr_vector<ALife::_OBJECT_ID>::const_iterator I = member_ids.begin();
         xr_vector<ALife::_OBJECT_ID>::const_iterator E = member_ids.end();
@@ -155,9 +227,15 @@ void CAgentEnemyManager::fill_enemies()
             if (!stalker || !stalker->NameObject.c_str())
                 continue;
 
+            if (npc_perf_agent_enemy_fill_squads_trace_members)
+            {
+                ZoneNamedN(___tracy_fill_squad_member, "agent_enemy/fill_from_squads/member", true);
+                ZoneTextVF(___tracy_fill_squad_member, "%s", stalker->cName().c_str());
+            }
+
             member_order->probability(1.f);
             member_order->object().memory().fill_enemies(
-                CEnemyFiller(&m_enemies, object().member().mask(&member_order->object())));
+                CEnemyFiller(&m_enemies, object().member().mask(&member_order->object()), &enemy_index));
         }
     }
 
@@ -167,6 +245,7 @@ void CAgentEnemyManager::fill_enemies()
     VERIFY(!m_enemies.empty());
 
     {
+        ZoneNamedN(___tracy_fill_wnd, "agent_enemy/fill_wounded_reconcile", true);
         for (int i = 0, n = (int)m_wounded.size(); i < n; ++i)
         {
             const CEntityAlive* enemy = m_wounded[i].first;
@@ -183,7 +262,7 @@ void CAgentEnemyManager::fill_enemies()
     m_only_wounded_left = true;
     m_is_any_wounded = false;
     {
-        CAgentMemoryManager& memory = object().memory();
+        ZoneNamedN(___tracy_fill_wscan, "agent_enemy/fill_scan_wounded_flags", true);
         ENEMIES::iterator I = enemies().begin();
         ENEMIES::iterator E = enemies().end();
         for (; I != E; ++I)
@@ -205,9 +284,11 @@ void CAgentEnemyManager::fill_enemies()
                         m_is_any_wounded = true;
                 }
             }
-
-            memory.object_information((*I).m_object, (*I).m_level_time, (*I).m_enemy_position);
         }
+    }
+    {
+        ZoneNamedN(___tracy_fill_pos, "agent_enemy/fill_object_information", true);
+        fill_enemy_positions_from_squad_memory(object().memory(), m_enemies);
     }
 
     if (!m_only_wounded_left && m_is_any_wounded)
@@ -707,24 +788,43 @@ void CAgentEnemyManager::assign_wounded()
 
 void CAgentEnemyManager::distribute_enemies()
 {
+    ZoneNamedN(___tracy_am_dist, "agent_enemy/distribute_enemies", true);
     if (!object().member().combat_mask())
         return;
 
-    fill_enemies();
+    {
+        ZoneNamedN(___tracy_am_dist_fill, "agent_enemy/dist_fill_enemies", true);
+        fill_enemies();
+    }
 
     if (m_enemies.empty())
         return;
 
     if (m_only_wounded_left)
+    {
+        ZoneNamedN(___tracy_am_dist_w, "agent_enemy/dist_assign_wounded", true);
         assign_wounded();
+    }
     else
     {
-        compute_enemy_danger();
-        assign_enemies();
-        permutate_enemies();
+        {
+            ZoneNamedN(___tracy_am_dist_dg, "agent_enemy/dist_compute_enemy_danger", true);
+            compute_enemy_danger();
+        }
+        {
+            ZoneNamedN(___tracy_am_dist_as, "agent_enemy/dist_assign_enemies", true);
+            assign_enemies();
+        }
+        {
+            ZoneNamedN(___tracy_am_dist_perm, "agent_enemy/dist_permutate_enemies", true);
+            permutate_enemies();
+        }
     }
 
-    assign_enemy_masks();
+    {
+        ZoneNamedN(___tracy_am_dist_mask, "agent_enemy/dist_assign_enemy_masks", true);
+        assign_enemy_masks();
+    }
 }
 
 void CAgentEnemyManager::remove_links(IGameObject* object)

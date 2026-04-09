@@ -39,6 +39,7 @@
 #include "stalker_animation_manager.h"
 #include "hit_memory_manager.h"
 #include "level_path_manager.h"
+#include <tracy/Tracy.hpp>
 
 #define DISABLE_COVER_BEFORE_DETOUR
 
@@ -433,7 +434,13 @@ void CStalkerActionKillEnemy::execute()
     VERIFY((start_level_time() == Device.dwTimeGlobal) || (object().movement().mental_state() == eMentalStateDanger));
 #endif // TEST_MENTAL_STATE
 
-    inherited::execute();
+    ZoneNamedN(___tracy_sk_kill, "combat_act/kill_enemy", true);
+    ZoneTextVF(___tracy_sk_kill, "%s", object().cName().c_str());
+
+    {
+        ZoneNamedN(___tracy_sk_kill_base, "combat_act/kill_enemy/action_base", true);
+        inherited::execute();
+    }
 
     //Alundaio: Prevent Stalkers from shooting at walls for prolonged periods due to kill if not visible
     const CEntityAlive* enemy = object().memory().enemy().selected();
@@ -441,22 +448,30 @@ void CStalkerActionKillEnemy::execute()
     {
         CMemoryInfo mem_object = object().memory().memory(enemy);
         if (mem_object.m_object)
+        {
+            ZoneNamedN(___tracy_sk_kill_bc, "combat_act/kill_enemy/best_cover", true);
             object().best_cover(mem_object.m_object_params.m_position);
+        }
 
         if (object().memory().visual().visible_now(enemy))
         {
+            ZoneNamedN(___tracy_sk_kill_fire, "combat_act/kill_enemy/sight_fire", true);
             object().sight().setup(CSightAction(enemy, true, true));
             fire();
         }
         else
         {
+            ZoneNamedN(___tracy_sk_kill_aim, "combat_act/kill_enemy/aim_sight", true);
             aim_ready();
             if (mem_object.m_object)
                 object().sight().setup(CSightAction(SightManager::eSightTypePosition, mem_object.m_object_params.m_position, true));
         }
     }
     else
+    {
+        ZoneNamedN(___tracy_sk_kill_path, "combat_act/kill_enemy/sight_path_dir", true);
         object().sight().setup(CSightAction(SightManager::eSightTypePathDirection, true, true));
+    }
     //-Alundaio
 }
 
@@ -506,7 +521,12 @@ void CStalkerActionTakeCover::execute()
     VERIFY((start_level_time() == Device.dwTimeGlobal) || (object().movement().mental_state() == eMentalStateDanger));
 #endif // TEST_MENTAL_STATE
 
-    inherited::execute();
+    ZoneNamedN(___tracy_take_cover, "combat_act/take_cover", true);
+
+    {
+        ZoneNamedN(___tracy_take_cover_base, "combat_act/take_cover/action_base", true);
+        inherited::execute();
+    }
 
     //Alundaio: verify enemy
     const CEntityAlive* enemy = object().memory().enemy().selected();
@@ -517,56 +537,69 @@ void CStalkerActionTakeCover::execute()
     if (!mem_object.m_object)
         return;
 
-    if (object().movement().detail().distance_to_target() > CLOSE_MOVE_DISTANCE)
-        object().movement().set_body_state(eBodyStateStand);
-    else
-        object().movement().set_movement_type(m_movement_type);
+    {
+        ZoneNamedN(___tracy_take_cover_move, "combat_act/take_cover/movement_state", true);
+        if (object().movement().detail().distance_to_target() > CLOSE_MOVE_DISTANCE)
+            object().movement().set_body_state(eBodyStateStand);
+        else
+            object().movement().set_movement_type(m_movement_type);
+    }
 
     Fvector position = mem_object.m_object_params.m_position;
-    const CCoverPoint* point = object().best_cover(position);
-    if (point)
+    const CCoverPoint* point = nullptr;
     {
-        setup_cover(*point);
-
-        if (object().movement().path_completed() && object().Position().distance_to(point->position()) < 1.f)
-            object().brain().affect_cover(true);
-        else
-            object().brain().affect_cover(false);
+        ZoneNamedN(___tracy_take_cover_pick, "combat_act/take_cover/best_cover", true);
+        point = object().best_cover(position);
     }
-    else
     {
-        object().movement().set_nearest_accessible_position();
-        object().brain().affect_cover(true);
-    }
-
-    if (object().movement().path_completed()) // && (object().memory().enemy().selected()->Position().distance_to_sqr(object().Position()) >= 10.f))
-    {
-        object().best_cover_can_try_advance();
-        m_storage->set_property(eWorldPropertyInCover, true);
-    }
-
-    if (object().memory().visual().visible_now(enemy))
-    {
-        object().sight().setup(CSightAction(enemy, true, true));
-        fire();
-    }
-    else
-    {
-        aim_ready();
-        //Alundaio: Prevent stalkers from staring at floor or ceiling for this action
-        u32 const level_time = object().memory().visual().visible_object_time_last_seen(mem_object.m_object);
-        if (Device.dwTimeGlobal >= level_time + 3000 && _abs(
-            object().Position().y - mem_object.m_object_params.m_position.y) > 3.5f)
+        ZoneNamedN(___tracy_take_cover_apply, "combat_act/take_cover/apply_path", true);
+        if (point)
         {
-            Fvector3 Vpos = {
-                mem_object.m_object_params.m_position.x, object().Position().y + 1.f,
-                mem_object.m_object_params.m_position.z
-            };
-            object().sight().setup(CSightAction(SightManager::eSightTypePosition, Vpos, true));
+            setup_cover(*point);
+
+            if (object().movement().path_completed() && object().Position().distance_to(point->position()) < 1.f)
+                object().brain().affect_cover(true);
+            else
+                object().brain().affect_cover(false);
         }
         else
-            object().sight().setup(CSightAction(SightManager::eSightTypePosition, mem_object.m_object_params.m_position,
-                                                true));
+        {
+            object().movement().set_nearest_accessible_position();
+            object().brain().affect_cover(true);
+        }
+
+        if (object().movement().path_completed()) // && (object().memory().enemy().selected()->Position().distance_to_sqr(object().Position()) >= 10.f))
+        {
+            object().best_cover_can_try_advance();
+            m_storage->set_property(eWorldPropertyInCover, true);
+        }
+    }
+
+    {
+        ZoneNamedN(___tracy_take_cover_sight, "combat_act/take_cover/sight_weapon", true);
+        if (object().memory().visual().visible_now(enemy))
+        {
+            object().sight().setup(CSightAction(enemy, true, true));
+            fire();
+        }
+        else
+        {
+            aim_ready();
+            //Alundaio: Prevent stalkers from staring at floor or ceiling for this action
+            u32 const level_time = object().memory().visual().visible_object_time_last_seen(mem_object.m_object);
+            if (Device.dwTimeGlobal >= level_time + 3000 && _abs(
+                object().Position().y - mem_object.m_object_params.m_position.y) > 3.5f)
+            {
+                Fvector3 Vpos = {
+                    mem_object.m_object_params.m_position.x, object().Position().y + 1.f,
+                    mem_object.m_object_params.m_position.z
+                };
+                object().sight().setup(CSightAction(SightManager::eSightTypePosition, Vpos, true));
+            }
+            else
+                object().sight().setup(CSightAction(SightManager::eSightTypePosition, mem_object.m_object_params.m_position,
+                                                    true));
+        }
     }
     //-Alundaio
 }
@@ -634,7 +667,13 @@ void CStalkerActionLookOut::execute()
     VERIFY((start_level_time() == Device.dwTimeGlobal) || (object().movement().mental_state() == eMentalStateDanger));
 #endif // TEST_MENTAL_STATE
 
-    inherited::execute();
+    ZoneNamedN(___tracy_look_out, "combat_act/look_out", true);
+    ZoneTextVF(___tracy_look_out, "%s", object().cName().c_str());
+
+    {
+        ZoneNamedN(___tracy_look_out_base, "combat_act/look_out/action_base", true);
+        inherited::execute();
+    }
 
     const CEntityAlive* enemy = object().memory().enemy().selected();
     if (!enemy)
@@ -644,49 +683,66 @@ void CStalkerActionLookOut::execute()
     if (!mem_object.m_object)
         return;
 
-    //Alundaio: Prevent stalkers from staring at floor or ceiling for this action
-    u32 const level_time = object().memory().visual().visible_object_time_last_seen(mem_object.m_object);
-    if (Device.dwTimeGlobal >= level_time + 3000 && _abs(
-        object().Position().y - mem_object.m_object_params.m_position.y) > 3.5f)
     {
-        Fvector3 Vpos = {
-            mem_object.m_object_params.m_position.x, object().Position().y + 1.f,
-            mem_object.m_object_params.m_position.z
-        };
-        object().sight().setup(CSightAction(SightManager::eSightTypePosition, Vpos, true));
+        ZoneNamedN(___tracy_look_out_sight, "combat_act/look_out/sight", true);
+        //Alundaio: Prevent stalkers from staring at floor or ceiling for this action
+        u32 const level_time = object().memory().visual().visible_object_time_last_seen(mem_object.m_object);
+        if (Device.dwTimeGlobal >= level_time + 3000 && _abs(
+            object().Position().y - mem_object.m_object_params.m_position.y) > 3.5f)
+        {
+            Fvector3 Vpos = {
+                mem_object.m_object_params.m_position.x, object().Position().y + 1.f,
+                mem_object.m_object_params.m_position.z
+            };
+            object().sight().setup(CSightAction(SightManager::eSightTypePosition, Vpos, true));
+        }
+        else
+            object().sight().setup(CSightAction(SightManager::eSightTypePosition,
+                                                mem_object.m_object_params.m_position, true));
     }
-    else
-        object().sight().setup(CSightAction(SightManager::eSightTypePosition,
-                                            mem_object.m_object_params.m_position, true));
 
-    object().best_cover(mem_object.m_object_params.m_position);
+    {
+        ZoneNamedN(___tracy_look_out_bc, "combat_act/look_out/best_cover", true);
+        object().best_cover(mem_object.m_object_params.m_position);
+    }
     //-Alundaio
 
-    if (current_cover(m_object) >= 3.f)
     {
-        object().movement().set_nearest_accessible_position();
-        m_storage->set_property(eWorldPropertyLookedOut, true);
-        return;
+        ZoneNamedN(___tracy_look_out_ray, "combat_act/look_out/current_cover_ray", true);
+        if (current_cover(m_object) >= 3.f)
+        {
+            object().movement().set_nearest_accessible_position();
+            m_storage->set_property(eWorldPropertyLookedOut, true);
+            return;
+        }
     }
 
     Fvector position = mem_object.m_object_params.m_position;
-    object().m_ce_close->setup(position, 0.f, 170.f, 10.f);
-    const CCoverPoint* point = ai().cover_manager().best_cover(
-        object().Position(), 10.f, *object().m_ce_close); //,CStalkerMovementRestrictor(m_object,true,false));
+    const CCoverPoint* point = nullptr;
+    {
+        ZoneNamedN(___tracy_look_out_cm10, "combat_act/look_out/cover_close_r10", true);
+        object().m_ce_close->setup(position, 0.f, 170.f, 10.f);
+        point = ai().cover_manager().best_cover(
+            object().Position(), 10.f, *object().m_ce_close); //,CStalkerMovementRestrictor(m_object,true,false));
+    }
     if (!point || (point->position().similar(object().Position()) && object().movement().path_completed()))
     {
+        ZoneNamedN(___tracy_look_out_cm30, "combat_act/look_out/cover_close_r30", true);
         object().m_ce_close->setup(position, 0.f, 170.f, 10.f);
         point = ai().cover_manager().best_cover(
             object().Position(), 30.f, *object().m_ce_close); //,CStalkerMovementRestrictor(m_object,true,false));
     }
 
-    if (point)
     {
-        object().movement().set_level_dest_vertex(point->level_vertex_id());
-        object().movement().set_desired_position(&point->position());
+        ZoneNamedN(___tracy_look_out_move, "combat_act/look_out/movement_dest", true);
+        if (point)
+        {
+            object().movement().set_level_dest_vertex(point->level_vertex_id());
+            object().movement().set_desired_position(&point->position());
+        }
+        else
+            object().movement().set_nearest_accessible_position();
     }
-    else
-        object().movement().set_nearest_accessible_position();
 
     //	if (point && point->position().similar(object().Position(),.5f) && object().movement().path_completed()) {
     //		m_storage->set_property			(eWorldPropertyLookedOut,true);

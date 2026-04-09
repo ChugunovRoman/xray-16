@@ -901,7 +901,11 @@ CActorDeathEffector::CActorDeathEffector(CActorCondition* parent, LPCSTR sect) /
 }
 
 CActorDeathEffector::~CActorDeathEffector() {}
-void CActorDeathEffector::UpdateCL() { m_pParent->SetHealth(m_start_health); }
+void CActorDeathEffector::UpdateCL()
+{
+    ZoneScopedN("ucl_CActorDeathEffector");
+    m_pParent->SetHealth(m_start_health);
+}
 void CActorDeathEffector::OnPPEffectorReleased()
 {
     m_b_actual = false;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <mutex>
+
 #include "xrCDB/xr_collide_defs.h"
 #include "Render.h"
 #include "pure_relcase.h"
@@ -27,6 +29,7 @@ private:
     xr_vector<ISpatial*> r_spatial;
     IGameObject const* m_owner;
     u32 m_trace_cursor{0};
+    mutable std::recursive_mutex m_vision_mtx;
 
     void o_new(IGameObject* E);
     void o_delete(IGameObject* E);
@@ -56,6 +59,7 @@ public:
     void feel_vision_relcase(IGameObject* object);
     void feel_vision_get(xr_vector<IGameObject*>& R)
     {
+        std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
         R.clear();
         xr_vector<feel_visible_Item>::iterator I = feel_visible.begin(), E = feel_visible.end();
         for (; I != E; ++I)
@@ -64,6 +68,7 @@ public:
     }
     Fvector feel_vision_get_vispoint(IGameObject* _O)
     {
+        std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
         xr_vector<feel_visible_Item>::iterator I = feel_visible.begin(), E = feel_visible.end();
         for (; I != E; ++I)
             if (_O == I->O)

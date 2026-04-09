@@ -290,6 +290,7 @@ void CGrenade::OnAnimationEnd(u32 state)
 
 void CGrenade::UpdateCL()
 {
+    ZoneScopedN("ucl_CGrenade");
     inherited::UpdateCL();
     CExplosive::UpdateCL();
 

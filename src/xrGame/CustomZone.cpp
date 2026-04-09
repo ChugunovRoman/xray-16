@@ -528,6 +528,7 @@ void CCustomZone::UpdateWorkload(u32 dt)
 // called only in "fast-mode"
 void CCustomZone::UpdateCL()
 {
+    ZoneScopedN("ucl_CCustomZone");
     inherited::UpdateCL();
     if (m_zone_flags.test(eFastMode))
         UpdateWorkload(Device.dwTimeDelta);

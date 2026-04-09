@@ -381,40 +381,65 @@ void CCustomMonster::net_Import(NET_Packet& P)
 
 void CCustomMonster::shedule_Update(u32 DT)
 {
+    ZoneScopedN("sh_CCustomMonster_shedule_Update");
+    ZoneTextF("%s", cName().c_str());
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterScheduleUpdate);
     VERIFY(!g_Alive() || processing_enabled());
     // Queue shrink
     VERIFY(_valid(Position()));
     u32 dwTimeCL = Level().timeServer() - NET_Latency;
     VERIFY(!NET.empty());
-    while ((NET.size() > 2) && (NET[1].dwTimeStamp < dwTimeCL))
-        NET.pop_front();
+    {
+        ZoneScopedN("sh_cm_net_queue_shrink");
+        while ((NET.size() > 2) && (NET[1].dwTimeStamp < dwTimeCL))
+            NET.pop_front();
+    }
 
     float dt = float(DT) / 1000.f;
     // *** general stuff
     if (g_Alive())
     {
+        ZoneScopedN("sh_cm_alive_precalc");
         START_PROFILE("CustomMonster/schedule_update/precalc")
         const bool run_visibility = should_run_custom_monster_visibility(
             *this, m_next_visibility_update_time, m_visibility_update_interval, Device.dwTimeGlobal);
         if (run_visibility)
         {
+            ZoneScopedN("sh_cm_Exec_Visibility");
             START_PROFILE("CustomMonster/schedule_update/vision")
-            // Always main thread: Feel::Vision (seen/query/diff) is updated from feel_vision_relcase during
-            // FrameMove; seqParallel runs concurrent with DoRender and races push_back vs erase → corrupt vector.
-            Exec_Visibility();
+            const bool par_vision = ps_r__mt_ai_vision_parallel != 0 && g_mt_config.test(mtAiVision);
+            if (par_vision)
+            {
+#ifdef DEBUG
+                fastdelegate::FastDelegate0<> fv =
+                    fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility);
+                xr_vector<fastdelegate::FastDelegate0<>>::const_iterator I;
+                I = std::find(Device.seqParallel.begin(), Device.seqParallel.end(), fv);
+                VERIFY(I == Device.seqParallel.end());
+#endif
+                Device.seqParallel.push_back(
+                    fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
+            }
+            else
+                Exec_Visibility();
             STOP_PROFILE
         }
 
-        START_PROFILE("CustomMonster/schedule_update/memory")
         {
-            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterMemoryUpdate);
-            memory().update(dt);
+            ZoneScopedN("sh_cm_memory_update");
+            START_PROFILE("CustomMonster/schedule_update/memory")
+            {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterMemoryUpdate);
+                memory().update(dt);
+            }
+            STOP_PROFILE
         }
         STOP_PROFILE
-        STOP_PROFILE
     }
-    inherited::shedule_Update(DT);
+    {
+        ZoneScopedN("sh_cm_inherited_shedule_Update");
+        inherited::shedule_Update(DT);
+    }
 
     // Queue setup
     if (dt > 3)
@@ -428,6 +453,7 @@ void CCustomMonster::shedule_Update(u32 DT)
     }
     else if (!g_Alive())
     {
+        ZoneScopedN("sh_cm_dead_net_and_think");
         net_update uNext;
         uNext.dwTimeStamp = Level().timeServer();
         uNext.o_model = movement().m_body.current.yaw;
@@ -445,6 +471,7 @@ void CCustomMonster::shedule_Update(u32 DT)
         {
             if (Device.dwFrame > spawn_time() + g_AI_inactive_time)
             {
+                ZoneScopedN("sh_cm_dead_Think");
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterThink);
                 Think();
             }
@@ -454,12 +481,14 @@ void CCustomMonster::shedule_Update(u32 DT)
     }
     else
     {
+        ZoneScopedN("sh_cm_alive_ai_apply");
         // here is monster AI call
         m_fTimeUpdateDelta = dt;
         Level().AIStats.Think.Begin();
         START_PROFILE("CustomMonster/schedule_update/apply")
         if (GetScriptControl())
         {
+            ZoneScopedN("sh_cm_ProcessScripts");
             START_PROFILE("CustomMonster/schedule_update/script_control")
             ProcessScripts();
             STOP_PROFILE
@@ -468,6 +497,7 @@ void CCustomMonster::shedule_Update(u32 DT)
         {
             if (Device.dwFrame > spawn_time() + g_AI_inactive_time)
             {
+                ZoneScopedN("sh_cm_Think");
                 START_PROFILE("CustomMonster/schedule_update/think_apply")
                 {
                     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterThink);
@@ -484,6 +514,7 @@ void CCustomMonster::shedule_Update(u32 DT)
         float temp = conditions().health();
         if (temp > 0)
         {
+            ZoneScopedN("sh_cm_Exec_Action");
             Exec_Action(dt);
             VERIFY(_valid(Position()));
             // Exec_Visibility		();
@@ -539,10 +570,14 @@ void CCustomMonster::update_sound_player()
 }
 void CCustomMonster::UpdateCL()
 {
+    ZoneScopedN("ucl_CCustomMonster");
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCL);
     START_PROFILE("CustomMonster/client_update")
-    m_client_update_delta = (u32)std::min(Device.dwTimeGlobal - m_last_client_update_time, u32(100));
-    m_last_client_update_time = Device.dwTimeGlobal;
+    {
+        ZoneScopedN("ucl_cm_client_delta");
+        m_client_update_delta = (u32)std::min(Device.dwTimeGlobal - m_last_client_update_time, u32(100));
+        m_last_client_update_time = Device.dwTimeGlobal;
+    }
 
 #ifdef DEBUG
     if (animation_movement())
@@ -551,6 +586,7 @@ void CCustomMonster::UpdateCL()
 
     START_PROFILE("CustomMonster/client_update/inherited")
     {
+        ZoneScopedN("ucl_cm_inherited");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLInherited);
         inherited::UpdateCL();
     }
@@ -565,6 +601,7 @@ void CCustomMonster::UpdateCL()
         return;
 
     {
+        ZoneScopedN("ucl_cm_sound_callbacks");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLProcessSoundCallbacks);
         CScriptEntity::process_sound_callbacks();
     }
@@ -579,9 +616,13 @@ void CCustomMonster::UpdateCL()
     */
 
     if (g_mt_config.test(mtSoundPlayer))
+    {
+        ZoneScopedN("ucl_cm_sound_player_defer");
         Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CCustomMonster::update_sound_player));
+    }
     else
     {
+        ZoneScopedN("ucl_cm_sound_player");
         START_PROFILE("CustomMonster/client_update/sound_player")
         update_sound_player();
         STOP_PROFILE
@@ -589,10 +630,12 @@ void CCustomMonster::UpdateCL()
 
     START_PROFILE("CustomMonster/client_update/network extrapolation")
     {
+        ZoneScopedN("ucl_cm_net_sync");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLNetworkExtrapolation);
         if (NET.empty())
         {
             {
+                ZoneScopedN("ucl_cm_anim_movement_no_net");
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLAnimationController);
                 update_animation_movement_controller();
             }
@@ -606,22 +649,28 @@ void CCustomMonster::UpdateCL()
         net_update& N = NET.back();
         if ((dwTime > N.dwTimeStamp) || (NET.size() < 2))
         {
+            ZoneScopedN("ucl_cm_net_extrapolate");
             // BAD.	extrapolation
             NET_Last = N;
         }
         else
         {
+            ZoneScopedN("ucl_cm_net_interpolate");
             // OK.	interpolation
             NET_WasExtrapolating = FALSE;
             // Search 2 keyframes for interpolation
             int select = -1;
-            for (u32 id = 0; id < NET.size() - 1; ++id)
             {
-                if ((NET[id].dwTimeStamp <= dwTime) && (dwTime <= NET[id + 1].dwTimeStamp))
-                    select = id;
+                ZoneScopedN("ucl_cm_net_interp_search");
+                for (u32 id = 0; id < NET.size() - 1; ++id)
+                {
+                    if ((NET[id].dwTimeStamp <= dwTime) && (dwTime <= NET[id + 1].dwTimeStamp))
+                        select = id;
+                }
             }
             if (select >= 0)
             {
+                ZoneScopedN("ucl_cm_net_interp_apply");
                 // Interpolate state
                 net_update& A = NET[select + 0];
                 net_update& B = NET[select + 1];
@@ -657,7 +706,7 @@ void CCustomMonster::UpdateCL()
     if (Local() && g_Alive())
     {
 #pragma todo("Dima to All : this is FAKE, network is not supported here!")
-
+        ZoneScopedN("ucl_cm_update_position_anim");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLUpdatePositionAnimation);
         UpdatePositionAnimation();
     }
@@ -665,6 +714,7 @@ void CCustomMonster::UpdateCL()
     // Use interpolated/last state
     if (g_Alive())
     {
+        ZoneScopedN("ucl_cm_apply_net_state");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLApplyNetState);
         if (!animation_movement_controlled() && m_update_rotation_on_frame)
             XFORM().rotateY(NET_Last.o_model);
@@ -687,12 +737,14 @@ void CCustomMonster::UpdateCL()
 #ifdef DEBUG
     if (IsMyCamera())
     {
+        ZoneScopedN("ucl_cm_update_camera");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLUpdateCamera);
         UpdateCamera();
     }
 #endif // DEBUG
 
     {
+        ZoneScopedN("ucl_cm_anim_movement_controller");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLAnimationController);
         update_animation_movement_controller();
     }
@@ -802,6 +854,8 @@ void CCustomMonster::Exec_Visibility()
 {
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterExecVisibility);
     // if (0==Sector())				return;
+    if (getDestroy())
+        return;
     if (!g_Alive())
         return;
 

@@ -10,6 +10,9 @@
 
 extern Flags32 g_mt_config;
 
+// When 1 and mt_ai_vision is enabled, Exec_Visibility may run on seqParallel (see ai_stalker / CustomMonster).
+extern int ps_r__mt_ai_vision_parallel;
+
 #define mtLevelPath (1 << 0)
 #define mtDetailPath (1 << 1)
 #define mtObjectHandler (1 << 2)

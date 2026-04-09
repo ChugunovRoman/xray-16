@@ -76,7 +76,11 @@ void CInventoryBox::OnEvent(NET_Packet& P, u16 type)
     };
 }
 
-void CInventoryBox::UpdateCL() { inherited::UpdateCL(); }
+void CInventoryBox::UpdateCL()
+{
+    ZoneScopedN("ucl_CInventoryBox");
+    inherited::UpdateCL();
+}
 void CInventoryBox::net_Destroy() { inherited::net_Destroy(); }
 #include "xrServerEntities/xrServer_Objects_ALife.h"
 bool CInventoryBox::net_Spawn(CSE_Abstract* DC)

@@ -9,11 +9,15 @@
 #include "PHSplitedShell.h"
 #include "Physics.h"
 #include "SpaceUtils.h"
-void CPHSplitedShell::Collide()
+void CPHSplitedShell::CollideDynamicsBroadphase()
 {
-    ///////////////////////////////
+    m_collide_spatial_overlap.clear();
+    m_collide_dyn_candidates.clear();
+}
+void CPHSplitedShell::CollideStepPostBroadphase()
+{
     CollideStatic(dSpacedGeom(), CPHObject::SelfPointer());
-    // near_callback(this,0,(dGeomID)dSpace(),ph_world->GetMeshGeom());
+    CollideClearDirty();
 }
 
 void CPHSplitedShell::get_spatial_params()

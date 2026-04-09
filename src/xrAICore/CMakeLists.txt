@@ -12,6 +12,8 @@ target_sources_grouped(
     TARGET xrAICore
     NAME "AI\\Component\\ProblemSolver"
     FILES
+    Components/ai_planner_search_limits.cpp
+    Components/ai_planner_search_limits.h
     Components/problem_solver.h
     Components/problem_solver_inline.h
 )

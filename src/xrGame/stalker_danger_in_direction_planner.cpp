@@ -47,7 +47,12 @@ void CStalkerDangerInDirectionPlanner::initialize()
     CScriptActionPlanner::m_storage.set_property(eWorldPropertyEnemyDetoured, false);
 }
 
-void CStalkerDangerInDirectionPlanner::update() { inherited::update(); }
+void CStalkerDangerInDirectionPlanner::update()
+{
+    ZoneScopedN("danger/in_direction/update");
+    ZoneTextF("%s", object().cName().c_str());
+    inherited::update();
+}
 void CStalkerDangerInDirectionPlanner::finalize() { inherited::finalize(); }
 void CStalkerDangerInDirectionPlanner::add_evaluators()
 {

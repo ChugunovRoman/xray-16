@@ -75,6 +75,7 @@ void CEatableItemObject::OnH_A_Chield()
 
 void CEatableItemObject::UpdateCL()
 {
+    ZoneScopedN("ucl_CEatableItemObject");
     CPhysicItem::UpdateCL();
     CEatableItem::UpdateCL();
     CHudItem::UpdateCL();

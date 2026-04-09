@@ -47,6 +47,17 @@ extern BOOL death_anim_debug;
 
 namespace
 {
+/*
+ * MT audit (ucl_stalker_physics / in_UpdateCL): ik_controller()->Update, update_animation_collision,
+ * update_interactive_anims operate per-entity on this->m_EntityAlife's visual/skeleton and member state.
+ * Safe across different NPCs in theory (distinct IKinematicsAnimated*, distinct CIKLimbsController), but:
+ * - GMLib / Level().ObjectSpace reads are used from IK foot rays (thread_local CObjectSpace buffers; spatial DB uses shared_lock).
+ * - update_animation_collision -> physics_shell_animated may touch the physics world; do not parallelize with PHWorld::Step.
+ * - Ragdoll path (m_pPhysicsShell) uses Bullet/shell state — keep on main thread unless separately audited.
+ * - Deferring in_UpdateCL via Device.seqParallel runs AFTER FrameMove (see CRenderDevice::ProcessFrame), so sight() in the
+ *   same CAI_Stalker::UpdateCL would run before deferred physics — invalid order. Cross-NPC parallel physics needs a
+ *   two-phase UpdateCL split at the object-list level, not seqParallel alone.
+ */
 constexpr float IK_LOD_NEAR_DIST_SQR = 20.f * 20.f;
 constexpr float IK_LOD_MEDIUM_DIST_SQR = 50.f * 50.f;
 // P2-opt: NPCs beyond this distance skip IK entirely (npc_perf_ik_interval_disabled_ms = effectively disabled)
@@ -78,7 +89,7 @@ IC u32 get_character_ik_update_interval(CEntityAlive& entity, const CCharacterPh
 
     const CAI_Stalker* stalker = entity.cast_stalker();
     if (stalker && stalker->memory().enemy().selected())
-        return 0;
+        return npc_perf_ik_interval_enemy_selected_ms;
 
     CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
     if (!actor)
@@ -799,11 +810,13 @@ void CCharacterPhysicsSupport::in_UpdateCL()
     if (!dead_shell)
     {
         {
+            ZoneScopedN("cph_anim_collision");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsAnimationCollision);
             update_animation_collision();
         }
 
         {
+            ZoneScopedN("cph_shell_control_dt");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsCalculateTimeDelta);
             m_character_shell_control.CalculateTimeDelta();
         }
@@ -811,6 +824,7 @@ void CCharacterPhysicsSupport::in_UpdateCL()
 
     if (m_pPhysicsShell)
     {
+        ZoneScopedN("cph_ragdoll_shell");
         VERIFY(m_pPhysicsShell->isFullActive());
         {
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsShellSetRagdoll);
@@ -856,12 +870,14 @@ void CCharacterPhysicsSupport::in_UpdateCL()
     else if (ik_controller())
     {
         {
+            ZoneScopedN("cph_ik_interactive_anims");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsUpdateInteractiveAnims);
             update_interactive_anims();
         }
         if (should_run_character_ik_update(
                 m_EntityAlife, m_EntityAlife.ID(), Type(), m_next_ik_update_time, m_ik_update_interval, Device.dwTimeGlobal))
         {
+            ZoneScopedN("cph_ik_controller_update");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsIkUpdate);
             ik_controller()->Update();
         }

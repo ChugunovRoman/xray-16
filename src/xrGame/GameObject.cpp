@@ -1542,6 +1542,7 @@ IC bool similar(const Fmatrix& _0, const Fmatrix& _1, const float& epsilon = EPS
 
 void CGameObject::UpdateCL()
 {
+    ZoneScopedN("ucl_CGameObject");
 // IGameObject::UpdateCL();
 // consistency check
 #ifdef DEBUG

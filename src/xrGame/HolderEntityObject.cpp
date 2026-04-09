@@ -97,6 +97,7 @@ void CHolderEntityObject::detach_actor_script(bool bForce)
 
 void CHolderEntityObject::UpdateCL()
 {
+    ZoneScopedN("ucl_CHolderEntityObject");
     inheritedPH::UpdateCL();
 
     if (OwnerActor() && OwnerActor()->IsMyCamera())

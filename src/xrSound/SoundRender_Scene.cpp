@@ -7,6 +7,15 @@
 #include "SoundRender_Scene.h"
 #include "SoundRender_Emitter.h"
 
+namespace
+{
+ICF CDB::COLLIDER& sound_scene_ray_collider()
+{
+    thread_local CDB::COLLIDER tls;
+    return tls;
+}
+} // namespace
+
 CSoundRender_Scene::~CSoundRender_Scene()
 {
     ZoneScoped;
@@ -271,6 +280,7 @@ float CSoundRender_Scene::get_occlusion_to(const Fvector& hear_pt, const Fvector
         const float range = dir.magnitude();
         dir.div(range);
 
+        CDB::COLLIDER& geom_DB = sound_scene_ray_collider();
         geom_DB.ray_query(CDB::OPT_CULL, geom_SOM, hear_pt, dir, range);
         const auto r_cnt = geom_DB.r_count();
         if (0 != r_cnt)
@@ -302,6 +312,7 @@ float CSoundRender_Scene::get_occlusion(const Fvector& P, float R, Fvector* occ)
     const float range = dir.magnitude();
     dir.div(range);
 
+    CDB::COLLIDER& geom_DB = sound_scene_ray_collider();
     if (nullptr != geom_MODEL)
     {
         bool bNeedFullTest = true;
@@ -375,6 +386,7 @@ CSound_environment* CSoundRender_Scene::get_environment(const Fvector& P)
     if (geom_ENV)
     {
         constexpr Fvector dir = { 0, -1, 0 };
+        CDB::COLLIDER& geom_DB = sound_scene_ray_collider();
         geom_DB.ray_query(CDB::OPT_ONLYNEAREST, geom_ENV, P, dir, 1000.f);
         if (geom_DB.r_count())
         {

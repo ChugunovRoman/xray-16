@@ -131,6 +131,7 @@ void CProjector::TurnOff()
 
 void CProjector::UpdateCL()
 {
+    ZoneScopedN("ucl_CProjector");
     inherited::UpdateCL();
 
     // update light source

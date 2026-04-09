@@ -61,10 +61,17 @@ void CStalkerDangerPlanner::finalize()
 
 void CStalkerDangerPlanner::update()
 {
-    inherited::update();
+    ZoneScopedN("danger/update");
+    ZoneTextF("%s", object().cName().c_str());
+
+    {
+        ZoneScopedN("danger/update/base_planner");
+        inherited::update();
+    }
 
     if (this->solution().empty())
     {
+        ZoneScopedN("danger/update/empty_solution_reset");
         CScriptActionPlanner::m_storage.set_property(eWorldPropertyInCover, false);
         CScriptActionPlanner::m_storage.set_property(eWorldPropertyLookedOut, false);
         CScriptActionPlanner::m_storage.set_property(eWorldPropertyPositionHolded, false);
@@ -76,17 +83,27 @@ void CStalkerDangerPlanner::update()
 
         if (object().movement().in_smart_cover() || object().movement().entering_smart_cover_with_animation())
         {
+            ZoneScopedN("danger/update/empty_solution_cleanup_cover_anim");
             object().movement().target_default(true);
             object().movement().target_idle();
             object().movement().cleanup_after_animation_selector();
         }
 
-        object().movement().clear_path();
+        {
+            ZoneScopedN("danger/update/empty_solution_clear_path");
+            object().movement().clear_path();
+        }
         return;
     }
 
-    object().react_on_grenades();
-    object().react_on_member_death();
+    {
+        ZoneScopedN("danger/update/react_on_grenades");
+        object().react_on_grenades();
+    }
+    {
+        ZoneScopedN("danger/update/react_on_member_death");
+        object().react_on_member_death();
+    }
 }
 
 void CStalkerDangerPlanner::initialize()

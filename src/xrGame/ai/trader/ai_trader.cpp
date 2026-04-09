@@ -285,6 +285,7 @@ void CAI_Trader::net_Destroy()
 
 void CAI_Trader::UpdateCL()
 {
+    ZoneScopedN("ucl_CAI_Trader");
     inherited::UpdateCL();
     sound().update(Device.fTimeDelta);
 

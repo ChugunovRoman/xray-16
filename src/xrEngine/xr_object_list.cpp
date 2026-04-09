@@ -12,7 +12,55 @@
 #include "GameFont.h"
 #include "PerformanceAlert.hpp"
 
+#include <xrCore/Threading/ParallelFor.hpp>
 #include <xrCore/Threading/TaskManager.hpp>
+
+extern int ps_obj_preupdate_mt;
+extern int ps_obj_postupdate_mt;
+
+namespace
+{
+void dispatch_preupdate_cl(IGameObject** b, IGameObject** e)
+{
+    if (b == e)
+        return;
+    if (ps_obj_preupdate_mt != 0 && TaskScheduler)
+    {
+        xr_parallel_for(TaskRange(b, e), [&](const TaskRange<IGameObject**>& range)
+        {
+            for (IGameObject** i = range.begin(); i != range.end(); ++i)
+                (*i)->PreUpdateCL();
+        });
+    }
+    else
+    {
+        for (IGameObject** i = b; i != e; ++i)
+            (*i)->PreUpdateCL();
+    }
+}
+
+template <class Vec>
+void dispatch_postupdate_vec(Vec& vec, bool sleeping_flag)
+{
+    const size_t n = vec.size();
+    if (!n)
+        return;
+    if (ps_obj_postupdate_mt != 0 && TaskScheduler)
+    {
+        xr_parallel_for(TaskRange(size_t(0), n), [&](const TaskRange<size_t>& range)
+        {
+            for (size_t i = range.begin(); i != range.end(); ++i)
+                vec[i]->PostUpdateCL(sleeping_flag);
+        });
+    }
+    else
+    {
+        for (auto& o : vec)
+            o->PostUpdateCL(sleeping_flag);
+    }
+}
+
+} // namespace
 
 class fClassEQ
 {
@@ -136,12 +184,15 @@ void CObjectList::SingleUpdate(IGameObject* O)
 
     if (O->H_Parent())
         SingleUpdate(O->H_Parent());
-    stats.Updated++;
+    stats.Updated++;    
     O->SetUpdateFrame(Device.dwFrame);
 
     // Msg ("[%d][0x%08x]IAmNotACrowAnyMore (CObjectList::SingleUpdate)", Device.dwFrame, dynamic_cast<void*>(O));
 
-    O->UpdateCL();
+    {
+        ZoneScopedN("ol_ObjUpdateCL");
+        O->UpdateCL();
+    }
 
     VERIFY3(O->GetDbgUpdateFrame() == Device.dwFrame, "Broken sequence of calls to 'UpdateCL'", O->cName().c_str());
 #if 0 // ndef DEBUG
@@ -201,6 +252,30 @@ void CObjectList::SingleUpdate(IGameObject* O)
 #endif // #ifdef DEBUG
 }
 
+void CObjectList::dispatch_singleupdate_workload(IGameObject** b, IGameObject** e)
+{
+    const u32 n = u32(e - b);
+    if (!n)
+        return;
+
+    // SingleUpdate -> UpdateCL must stay on the main thread: game/AI/scripts/physics are not MT-safe.
+    constexpr u32 object_profile_batch = 256;
+    for (IGameObject** batch_b = b; batch_b < e; batch_b += object_profile_batch)
+    {
+        ZoneScopedN("ol_Batch256");
+        IGameObject** batch_e = batch_b + object_profile_batch;
+        if (batch_e > e)
+            batch_e = e;
+        ZoneTextF("[%u,%u) / %u", u32(batch_b - b), u32(batch_e - b), n);
+
+        {
+            ZoneScopedN("ol_SingleUpdate");
+            for (IGameObject** i = batch_b; i < batch_e; ++i)
+                SingleUpdate(*i);
+        }
+    }
+}
+
 void CObjectList::clear_crow_vec(Objects& o)
 {
     for (auto& it : o)
@@ -213,7 +288,7 @@ void CObjectList::clear_crow_vec(Objects& o)
 
 void CObjectList::Update(bool bForce)
 {
-    ZoneScopedN("CObjectList::Update");
+    ZoneScopedN("ol_Update");
 
     if (statsFrame != Device.dwFrame)
     {
@@ -222,7 +297,7 @@ void CObjectList::Update(bool bForce)
     }
 
     {
-        ZoneScopedN("CObjectList::Update/MergeSecondaryCrows");
+        ZoneScopedN("ol_MergeCrows");
         for (auto& crows_list : m_secondary_crows)
         {
             m_primary_crows.insert(m_primary_crows.end(), crows_list.cbegin(), crows_list.cend());
@@ -232,7 +307,7 @@ void CObjectList::Update(bool bForce)
 
     if (!Device.Paused() || bForce)
     {
-        ZoneScopedN("CObjectList::Update/UpdateCL");
+        ZoneScopedN("ol_UpdateCL");
 
         // Clients
         if (Device.fTimeDelta > EPS_S || bForce)
@@ -273,7 +348,7 @@ void CObjectList::Update(bool bForce)
             u32 const objects_count = workload->size();
             IGameObject** objects = (IGameObject**)xr_alloca(objects_count * sizeof(IGameObject*));
             {
-                ZoneScopedN("CObjectList::Update/UpdateCL/CopyWorkload");
+                ZoneScopedN("ol_CopyWorkload");
                 std::copy(workload->begin(), workload->end(), objects);
             }
 
@@ -282,7 +357,7 @@ void CObjectList::Update(bool bForce)
             IGameObject** b = objects;
             IGameObject** e = objects + objects_count;
             {
-                ZoneScopedN("CObjectList::Update/UpdateCL/ResetCrowFlags");
+                ZoneScopedN("ol_ResetCrowFlags");
                 for (IGameObject** i = b; i != e; ++i)
                 {
                     (*i)->IAmNotACrowAnyMore();
@@ -290,38 +365,24 @@ void CObjectList::Update(bool bForce)
                 }
             }
 
-            constexpr u32 object_profile_batch = 256;
-            for (IGameObject** batch_b = b; batch_b < e; batch_b += object_profile_batch)
             {
-                ZoneScopedN("CObjectList::Update/UpdateCL/PreAndSingleUpdate_batch");
-                IGameObject** batch_e = batch_b + object_profile_batch;
-                if (batch_e > e)
-                    batch_e = e;
-                ZoneTextF("[%u,%u) / %u", u32(batch_b - b), u32(batch_e - b), objects_count);
-
-                {
-                    ZoneScopedN("CObjectList::Update/UpdateCL/PreAndSingleUpdate_batch/PreUpdateCL");
-                    for (IGameObject** i = batch_b; i < batch_e; ++i)
-                        (*i)->PreUpdateCL();
-                }
-                {
-                    ZoneScopedN("CObjectList::Update/UpdateCL/PreAndSingleUpdate_batch/SingleUpdate");
-                    for (IGameObject** i = batch_b; i < batch_e; ++i)
-                        SingleUpdate(*i);
-                }
+                ZoneScopedN("ol_PreUpdateCL");
+                dispatch_preupdate_cl(b, e);
+            }
+            {
+                ZoneScopedN("ol_SingleUpdate");
+                dispatch_singleupdate_workload(b, e);
             }
 
             //--#SM+#-- PostUpdateCL для всех клиентских объектов [for crowed and non-crowed]
             {
-                ZoneScopedN("CObjectList::Update/UpdateCL/PostUpdateCL_active");
-                for (auto& object : objects_active)
-                    object->PostUpdateCL(false);
+                ZoneScopedN("ol_PostUpdate_active");
+                dispatch_postupdate_vec(objects_active, false);
             }
 
             {
-                ZoneScopedN("CObjectList::Update/UpdateCL/PostUpdateCL_sleeping");
-                for (auto& object : objects_sleeping)
-                    object->PostUpdateCL(true);
+                ZoneScopedN("ol_PostUpdate_sleep");
+                dispatch_postupdate_vec(objects_sleeping, true);
             }
 
             stats.Update.End();
@@ -331,10 +392,10 @@ void CObjectList::Update(bool bForce)
     // Destroy
     if (!destroy_queue.empty())
     {
-        ZoneScopedN("CObjectList::Update/net_Relcase");
+        ZoneScopedN("ol_Destroy_relcase");
 
         {
-            ZoneScopedN("CObjectList::Update/net_Relcase/active_objects");
+            ZoneScopedN("ol_Destroy_relcase_act");
             for (Objects::iterator oit = objects_active.begin(); oit != objects_active.end(); ++oit)
                 for (int it = destroy_queue.size() - 1; it >= 0; it--)
                 {
@@ -342,7 +403,7 @@ void CObjectList::Update(bool bForce)
                 }
         }
         {
-            ZoneScopedN("CObjectList::Update/net_Relcase/sleeping_objects");
+            ZoneScopedN("ol_Destroy_relcase_sleep");
             for (Objects::iterator oit = objects_sleeping.begin(); oit != objects_sleeping.end(); ++oit)
                 for (int it = destroy_queue.size() - 1; it >= 0; it--)
                 {
@@ -351,13 +412,13 @@ void CObjectList::Update(bool bForce)
         }
 
         {
-            ZoneScopedN("CObjectList::Update/net_Relcase/sound_relcase");
+            ZoneScopedN("ol_Destroy_sound");
             for (int it = destroy_queue.size() - 1; it >= 0; it--)
                 g_pGameLevel->Sound->object_relcase(destroy_queue[it]);
         }
 
         {
-            ZoneScopedN("CObjectList::Update/net_Relcase/callbacks_and_hud");
+            ZoneScopedN("ol_Destroy_callbacks");
             // Snapshot delegates: a callback may destroy another object whose ~pure_relcase
             // calls relcase_unregister(), mutating m_relcase_callbacks. A cached .end() then
             // dangles and the next ++it walks past the vector (crashes in std::find inside
@@ -378,7 +439,7 @@ void CObjectList::Update(bool bForce)
         }
 
         {
-            ZoneScopedN("CObjectList::Update/net_Relcase/net_Destroy");
+            ZoneScopedN("ol_Destroy_net");
             for (int it = destroy_queue.size() - 1; it >= 0; it--)
             {
                 IGameObject* O = destroy_queue[it];

@@ -45,7 +45,12 @@ void CStalkerDangerUnknownPlanner::initialize()
     CScriptActionPlanner::m_storage.set_property(eWorldPropertyLookedAround, false);
 }
 
-void CStalkerDangerUnknownPlanner::update() { inherited::update(); }
+void CStalkerDangerUnknownPlanner::update()
+{
+    ZoneScopedN("danger/unknown/update");
+    ZoneTextF("%s", object().cName().c_str());
+    inherited::update();
+}
 void CStalkerDangerUnknownPlanner::finalize() { inherited::finalize(); }
 void CStalkerDangerUnknownPlanner::add_evaluators()
 {

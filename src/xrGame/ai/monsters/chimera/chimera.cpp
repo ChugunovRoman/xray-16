@@ -157,4 +157,8 @@ void CChimera::jump(Fvector const& position, float const factor)
     sound().play(MonsterSound::eMonsterSoundAggressive);
 }
 
-void CChimera::UpdateCL() { inherited::UpdateCL(); }
+void CChimera::UpdateCL()
+{
+    ZoneScopedN("ucl_CChimera");
+    inherited::UpdateCL();
+}

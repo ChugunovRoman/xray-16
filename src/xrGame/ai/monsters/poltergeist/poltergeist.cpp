@@ -302,6 +302,7 @@ void CPoltergeist::renderable_Render(u32 context_id, IRenderable* root)
 
 void CPoltergeist::UpdateCL()
 {
+    ZoneScopedN("ucl_CPoltergeist");
     update_detection();
     inherited::UpdateCL();
 

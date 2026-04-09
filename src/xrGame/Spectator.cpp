@@ -63,6 +63,7 @@ CSpectator::~CSpectator()
 
 void CSpectator::UpdateCL()
 {
+    ZoneScopedN("ucl_CSpectator");
     inherited::UpdateCL();
 
     float fPreviousFrameTime = m_timer.GetElapsed_sec();

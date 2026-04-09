@@ -205,6 +205,7 @@ void CHangingLamp::shedule_Update(u32 dt)
 
 void CHangingLamp::UpdateCL()
 {
+    ZoneScopedN("ucl_CHangingLamp");
     inherited::UpdateCL();
 
     if (m_pPhysicsShell)

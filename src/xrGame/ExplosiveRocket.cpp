@@ -66,6 +66,7 @@ void CExplosiveRocket::OnH_B_Independent(bool just_before_destroy)
 
 void CExplosiveRocket::UpdateCL()
 {
+    ZoneScopedN("ucl_CExplosiveRocket");
     if (eCollide == m_eState)
     {
         CExplosive::UpdateCL();

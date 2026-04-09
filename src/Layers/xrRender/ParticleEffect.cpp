@@ -3,6 +3,7 @@
 #include "ParticleEffect.h"
 
 #include "xrCore/Threading/ParallelFor.hpp"
+#include "xrRender_console.h"
 
 #ifndef _EDITOR
 #if defined(XR_ARCHITECTURE_X86) || defined(XR_ARCHITECTURE_X64) || defined(XR_ARCHITECTURE_E2K) || defined(XR_ARCHITECTURE_PPC64)
@@ -626,14 +627,12 @@ void CParticleEffect::ParticleRenderStream(FVF::LIT* pv, u32 count, PAPI::Partic
             }
         }
     };
-    // XXX: it turned out that singlethreaded code works way faster
-    // But on processors with small caches it may work slower, profiling needed
-    //if (count > (TaskScheduler->GetWorkersCount() * 64))
-    //    xr_parallel_for(TaskRange<u32>(0, count), renderParticles);
-    //else
-    {
+    // Optional parallel build of sprite vertices (cvar r__particle_render_parallel).
+    if (r__particle_render_parallel != 0 &&
+        static_cast<int>(count) >= r__particle_render_parallel_min_count)
+        xr_parallel_for(TaskRange<u32>(0, count), true, renderParticles);
+    else
         renderParticles(TaskRange<u32>(0, count));
-    }
 }
 
 void CParticleEffect::Render(CBackend& cmd_list, float, bool use_fast_geo)

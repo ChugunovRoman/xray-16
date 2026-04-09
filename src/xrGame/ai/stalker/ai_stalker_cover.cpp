@@ -26,8 +26,27 @@
 #include "script_game_object.h"
 #include "stalker_decision_space.h"
 #include "Weapon.h"
+#include "performance_cvars.h"
+#include <tracy/Tracy.hpp>
 
 extern const float MIN_SUITABLE_ENEMY_DISTANCE = 3.f;
+
+namespace
+{
+struct cover_find_eval_budget_guard
+{
+    u32 m_saved{};
+    explicit cover_find_eval_budget_guard(u32 per_find_total)
+    {
+        m_saved = g_npc_perf_cover_find_eval_budget_remaining;
+        if (per_find_total > 0)
+            g_npc_perf_cover_find_eval_budget_remaining = per_find_total;
+        else
+            g_npc_perf_cover_find_eval_budget_remaining = u32(-1);
+    }
+    ~cover_find_eval_budget_guard() { g_npc_perf_cover_find_eval_budget_remaining = m_saved; }
+};
+} // namespace
 
 #ifdef _DEBUG
 static int g_advance_search_count = 0;
@@ -104,6 +123,8 @@ void CAI_Stalker::compute_enemy_distances(float& minimum_enemy_distance, float& 
 
 const CCoverPoint* CAI_Stalker::find_best_cover(const Fvector& position_to_cover_from)
 {
+    ZoneNamedN(___tracy_sk_find_cover, "stalker_cover/find_best_cover", true);
+    cover_find_eval_budget_guard const budget_guard(npc_perf_cover_find_eval_budget_total);
 #ifdef _DEBUG
 //	Msg									("* [%6d][%s] search for new cover performed",Device.dwTimeGlobal,*cName());
 #endif
@@ -130,21 +151,32 @@ const CCoverPoint* CAI_Stalker::find_best_cover(const Fvector& position_to_cover
     }
 
     m_ce_best->setup(position_to_cover_from, minimum_enemy_distance, maximum_enemy_distance, minimum_enemy_distance);
-    const CCoverPoint* point =
-        ai().cover_manager().best_cover(Position(), 10.f, *m_ce_best, CStalkerMovementRestrictor(this, true));
+    const CCoverPoint* point = nullptr;
+    if (!npc_perf_cover_find_skip_near_10m)
+    {
+        ZoneNamedN(___tracy_sk_find_r10, "stalker_cover/find_cover_r10", true);
+        point = ai().cover_manager().best_cover(Position(), 10.f, *m_ce_best, CStalkerMovementRestrictor(this, true));
+    }
     if (point)
         return (point);
+
+    if (npc_perf_cover_find_eval_budget_total > 0 && g_npc_perf_cover_find_eval_budget_remaining == 0)
+        return (nullptr);
 
 #ifdef _DEBUG
     ++g_far_cover_search_count;
 #endif
     m_ce_best->setup(position_to_cover_from, minimum_enemy_distance, maximum_enemy_distance, minimum_enemy_distance);
-    point = ai().cover_manager().best_cover(Position(), 30.f, *m_ce_best, CStalkerMovementRestrictor(this, true));
+    {
+        ZoneNamedN(___tracy_sk_find_r30, "stalker_cover/find_cover_r30", true);
+        point = ai().cover_manager().best_cover(Position(), 30.f, *m_ce_best, CStalkerMovementRestrictor(this, true));
+    }
     return (point);
 }
 
 float CAI_Stalker::best_cover_value(const Fvector& position_to_cover_from)
 {
+    ZoneNamedN(___tracy_sk_bcv, "stalker_cover/best_cover_value", true);
     m_ce_best->setup(position_to_cover_from, MIN_SUITABLE_ENEMY_DISTANCE, 170.f, MIN_SUITABLE_ENEMY_DISTANCE);
     m_ce_best->initialize(Position(), true);
     m_ce_best->evaluate(m_best_cover, CStalkerMovementRestrictor(this, true).weight(m_best_cover));
@@ -228,12 +260,17 @@ void CAI_Stalker::update_best_cover_actuality(const Fvector& position_to_cover_f
     ++g_advance_search_count;
 #endif
     m_ce_best->setup(position_to_cover_from, MIN_SUITABLE_ENEMY_DISTANCE, 170.f, MIN_SUITABLE_ENEMY_DISTANCE);
-    m_best_cover =
-        ai().cover_manager().best_cover(Position(), 10.f, *m_ce_best, CStalkerMovementRestrictor(this, true));
+    {
+        ZoneNamedN(___tracy_sk_adv, "stalker_cover/advance_research", true);
+        m_best_cover =
+            ai().cover_manager().best_cover(Position(), 10.f, *m_ce_best, CStalkerMovementRestrictor(this, true));
+    }
 }
 
 const CCoverPoint* CAI_Stalker::best_cover(const Fvector& position_to_cover_from)
 {
+    ZoneNamedN(___tracy_sk_bc, "stalker_cover/best_cover", true);
+    ZoneTextVF(___tracy_sk_bc, "%s", cName().c_str());
     //	shared_str const					&cover_id = movement().current_params().cover_id();
     //	if (cover_id != "")
     //		return							(ai().cover_manager().smart_cover(cover_id));
@@ -242,6 +279,7 @@ const CCoverPoint* CAI_Stalker::best_cover(const Fvector& position_to_cover_from
 
     if (m_best_cover_actual)
     {
+        ZoneNamedN(___tracy_sk_bc_cached, "stalker_cover/best_cover_cached", true);
         CMemberOrder* member_order = agent_manager().member().get_member(ID());
         if (member_order)
             member_order->cover(m_best_cover);

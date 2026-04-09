@@ -8,6 +8,8 @@
 #include "Level.h"
 #include "GameObject.h"
 #include "entity_alive.h"
+#include "xrCDB/xr_area.h"
+#include "performance_cvars.h"
 
 #include "xrPhysics/MathUtils.h"
 
@@ -168,17 +170,16 @@ IC bool get_plane(ik_pick_result& r, Fvector& next_pos, float& next_range, const
         return get_plane_dynamic(r, next_pos, next_range, R, pick_dist, pos, pick_v);
 }
 
-bool Pick(ik_pick_result& r, const ik_pick_query& q, IGameObject* ignore_object)
+IC bool rq_pick_hit(const collide::rq_result& R) { return R.element >= 0; }
+
+static bool PickContinueAfterFirstHit(ik_pick_result& r, const ik_pick_query& q, IGameObject* ignore_object,
+    collide::rq_result R, Fvector pos, float range)
 {
-    VERIFY(q.is_valid());
+    if (!rq_pick_hit(R))
+        return false;
 
-    float range = q.range();
-
-    collide::rq_result R;
     bool collided = false;
-    Fvector pos = q.pos();
-
-    while (g_pGameLevel->ObjectSpace.RayPick(pos, q.dir(), range, collide::rqtBoth, R, ignore_object))
+    for (;;)
     {
         Fvector next_pos = pos;
         float next_range = range;
@@ -190,7 +191,15 @@ bool Pick(ik_pick_result& r, const ik_pick_query& q, IGameObject* ignore_object)
         range = next_range;
         pos = next_pos;
         if (range < EPS)
+        {
+            collided = false;
             break;
+        }
+        if (!g_pGameLevel->ObjectSpace.RayPick(pos, q.dir(), range, collide::rqtBoth, R, ignore_object))
+        {
+            collided = false;
+            break;
+        }
     }
 
 #ifdef DEBUG
@@ -207,6 +216,18 @@ bool Pick(ik_pick_result& r, const ik_pick_query& q, IGameObject* ignore_object)
     }
 #endif
     return collided;
+}
+
+bool Pick(ik_pick_result& r, const ik_pick_query& q, IGameObject* ignore_object)
+{
+    VERIFY(q.is_valid());
+
+    const float range = q.range();
+    const Fvector pos = q.pos();
+    collide::rq_result R;
+    if (!g_pGameLevel->ObjectSpace.RayPick(pos, q.dir(), range, collide::rqtBoth, R, ignore_object))
+        return false;
+    return PickContinueAfterFirstHit(r, q, ignore_object, R, pos, range);
 }
 
 // void DBG_DrawTri( const Fvector& v0, const Fvector& v1, const Fvector& v2, u32 ac, bool solid );
@@ -258,9 +279,37 @@ void ik_foot_collider::collide(SIKCollideData& cld, const ik_foot_geom& foot_geo
     previous_toe_query = q_toe;
 
     ik_pick_result r_toe(ik_foot_geom::toe);
-    cld.collided = Pick(r_toe, q_toe, O);
-    cld.m_plane = r_toe.p;
-    cld.m_collide_point = ik_foot_geom::toe;
+    ik_pick_result r_heel(ik_foot_geom::heel);
+    ik_pick_result r_side(ik_foot_geom::side);
+
+    bool heel_collided = false;
+    bool side_collided = false;
+
+    if (npc_perf_ik_foot_raypick_batch)
+    {
+        collide::rq_result R_toe, R_heel, R_side;
+        CObjectSpace::RayPickBatchItem batch[3];
+        batch[0] = { pos_toe, toe_pick_v, pick_dist, collide::rqtBoth, O, &R_toe };
+        batch[1] = { pos_heel, hill_pick_v, pick_dist, collide::rqtBoth, O, &R_heel };
+        batch[2] = { pos_side, side_pick_v, pick_dist, collide::rqtBoth, O, &R_side };
+        g_pGameLevel->ObjectSpace.RayPickBatch(batch, 3);
+
+        cld.collided = rq_pick_hit(R_toe) && PickContinueAfterFirstHit(r_toe, q_toe, O, R_toe, pos_toe, pick_dist);
+        cld.m_plane = r_toe.p;
+        cld.m_collide_point = ik_foot_geom::toe;
+
+        heel_collided = rq_pick_hit(R_heel) && PickContinueAfterFirstHit(r_heel, q_heel, O, R_heel, pos_heel, pick_dist);
+        side_collided = rq_pick_hit(R_side) && PickContinueAfterFirstHit(r_side, q_side, O, R_side, pos_side, pick_dist);
+    }
+    else
+    {
+        cld.collided = Pick(r_toe, q_toe, O);
+        cld.m_plane = r_toe.p;
+        cld.m_collide_point = ik_foot_geom::toe;
+
+        heel_collided = Pick(r_heel, q_heel, O);
+        side_collided = Pick(r_side, q_side, O);
+    }
 //////////////////////////////////////////////////////////////////////////////////////
 
 #ifdef DEBUG
@@ -271,12 +320,6 @@ void ik_foot_collider::collide(SIKCollideData& cld, const ik_foot_geom& foot_geo
             DBG_DrawPoint(r_toe.position, 0.01, color_xrgb(0, 0, 255));
     }
 #endif
-
-    ik_pick_result r_heel(ik_foot_geom::heel);
-    bool heel_collided = Pick(r_heel, q_heel, O);
-
-    ik_pick_result r_side(ik_foot_geom::side);
-    bool side_collided = Pick(r_side, q_side, O);
 
     bool toe_heel_compatible =
         cld.collided && heel_collided && Fvector().sub(r_heel.position, r_toe.position).magnitude() < foot_length;

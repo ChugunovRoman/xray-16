@@ -31,7 +31,12 @@ void CStalkerDangerBySoundPlanner::setup(CAI_Stalker* object, CPropertyStorage* 
 }
 
 void CStalkerDangerBySoundPlanner::initialize() { inherited::initialize(); }
-void CStalkerDangerBySoundPlanner::update() { inherited::update(); }
+void CStalkerDangerBySoundPlanner::update()
+{
+    ZoneScopedN("danger/by_sound/update");
+    ZoneTextF("%s", object().cName().c_str());
+    inherited::update();
+}
 void CStalkerDangerBySoundPlanner::finalize() { inherited::finalize(); }
 void CStalkerDangerBySoundPlanner::add_evaluators()
 {

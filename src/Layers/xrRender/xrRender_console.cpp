@@ -267,6 +267,11 @@ float ps_current_detail_density = 0.6f;
 float ps_current_detail_height = 1.f;
 
 int ps_r2_mt_calculate = 1;
+
+int r__particle_render_parallel = 0;
+int r__particle_render_parallel_min_count = 256;
+int r__parallel_skeleton_visbox = 0;
+int r__parallel_skeleton_visbox_min_bones = 64;
 int ps_r2_mt_render = 1;
 
 xr_token ext_quality_token[] = {{"qt_off", 0}, {"qt_low", 1}, {"qt_medium", 2},
@@ -988,5 +993,10 @@ void xrRender_initconsole()
 #if RENDER == R_R4
     CMD4(CCC_Integer, "r2_mt_render",       &ps_r2_mt_render,    0, 1);
 #endif
+
+    CMD4(CCC_Integer, "r__particle_render_parallel", &r__particle_render_parallel, 0, 1);
+    CMD4(CCC_Integer, "r__particle_render_parallel_min_count", &r__particle_render_parallel_min_count, 64, 65536);
+    CMD4(CCC_Integer, "r__parallel_skeleton_visbox", &r__parallel_skeleton_visbox, 0, 1);
+    CMD4(CCC_Integer, "r__parallel_skeleton_visbox_min_bones", &r__parallel_skeleton_visbox_min_bones, 8, 512);
 }
 } // namespace xray::render::RENDER_NAMESPACE

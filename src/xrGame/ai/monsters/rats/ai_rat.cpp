@@ -465,6 +465,7 @@ void CAI_Rat::shedule_Update(u32 dt)
 
 void CAI_Rat::UpdateCL()
 {
+    ZoneScopedN("ucl_CAI_Rat");
 ///////////////////////////////////////////////////////////////////////////////////////
 #ifdef _DEBUG
     if (monster_squad().get_squad(this)->GetLeader() == this)

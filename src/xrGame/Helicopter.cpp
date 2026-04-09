@@ -373,6 +373,7 @@ void CHelicopter::MoveStep()
 
 void CHelicopter::UpdateCL()
 {
+    ZoneScopedN("ucl_CHelicopter");
     inherited::UpdateCL();
     CExplosive::UpdateCL();
     if (PPhysicsShell() && (state() == CHelicopter::eDead))

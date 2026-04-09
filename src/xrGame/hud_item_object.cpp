@@ -124,6 +124,7 @@ bool CHudItemObject::ActivateItem() { return (CHudItem::ActivateItem()); }
 void CHudItemObject::DeactivateItem() { CHudItem::DeactivateItem(); }
 void CHudItemObject::UpdateCL()
 {
+    ZoneScopedN("ucl_CHudItemObject");
     CInventoryItemObject::UpdateCL();
     CHudItem::UpdateCL();
 }

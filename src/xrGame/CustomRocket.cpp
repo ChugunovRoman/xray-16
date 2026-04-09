@@ -405,6 +405,7 @@ void CCustomRocket::OnH_A_Independent()
 
 void CCustomRocket::UpdateCL()
 {
+    ZoneScopedN("ucl_CCustomRocket");
     inherited::UpdateCL();
 
     PlayContact();

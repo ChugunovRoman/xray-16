@@ -9,6 +9,17 @@
 #include "SoundRender_Target.h"
 #include "SoundRender_Source.h"
 
+// Multithreading audit:
+// - `CSoundRender_Core::update` stays on the caller thread: Tracy shows many child zones because each
+//   emitter runs `CSoundRender_Emitter::update` (occlusion rays, FSM, etc.) serially.
+// - Vorbis `fill_block` already runs on TaskScheduler workers; that does not move this coordinator.
+// - Parallel per-emitter `update` is unsafe without a redesign: `i_start` can `cancel()` another emitter
+//   (cross-emitter mutation), and the scene emitter list is compacted in-place when sounds stop.
+// - Scene ray queries use a thread-local CDB::COLLIDER (`SoundRender_Scene.cpp`) so occlusion is not
+//   blocked on a single shared collider if parallel simulation is added later (still need deferred voice
+//   assignment + deferred deletes + fixing `get_environment` static fallback, etc.).
+// - Target emitters loop is small (hardware voices) — keep serial.
+
 void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector& N, const Fvector& R)
 {
     ZoneScoped;

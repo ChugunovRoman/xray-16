@@ -20,6 +20,7 @@
 #include "game_object_space.h"
 #include "material_manager.h"
 #include "game_base_space.h"
+#include "xrEngine/profiler.h"
 
 #define SMALL_ENTITY_RADIUS 0.6f
 #define BLOOD_MARKS_SECT "bloody_marks"
@@ -202,10 +203,13 @@ void CEntityAlive::reload(LPCSTR section)
 
 void CEntityAlive::shedule_Update(u32 dt)
 {
+    ZoneScopedN("sh_CEntityAlive_shedule_Update");
+    ZoneTextF("%s", cName().c_str());
     inherited::shedule_Update(dt);
 
     if (!g_Alive())
     {
+        ZoneScopedN("sh_entity_alive_corpse_particles_kill");
         // Keep only lightweight corpse visuals and one-shot kill finalization.
         UpdateFireParticles();
         UpdateBloodDrops();
@@ -221,15 +225,18 @@ void CEntityAlive::shedule_Update(u32 dt)
         return;
     }
 
-    // condition update with the game time pass
-    conditions().UpdateConditionTime();
-    conditions().UpdateCondition();
-    //Обновление партиклов огня
-    UpdateFireParticles();
-    //капли крови
-    UpdateBloodDrops();
-    //обновить раны
-    conditions().UpdateWounds();
+    {
+        ZoneScopedN("sh_entity_alive_conditions_live");
+        // condition update with the game time pass
+        conditions().UpdateConditionTime();
+        conditions().UpdateCondition();
+        //Обновление партиклов огня
+        UpdateFireParticles();
+        //капли крови
+        UpdateBloodDrops();
+        //обновить раны
+        conditions().UpdateWounds();
+    }
 
 }
 

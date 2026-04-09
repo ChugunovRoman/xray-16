@@ -53,8 +53,6 @@ private:
 
     sound_event* sound_event_handler{};
 
-    // Collider
-    CDB::COLLIDER geom_DB;
     CDB::MODEL* geom_SOM{};
     CDB::MODEL* geom_MODEL{};
     CDB::MODEL* geom_ENV{};

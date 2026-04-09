@@ -413,6 +413,7 @@ void CController::control_hit()
 
 void CController::UpdateCL()
 {
+    ZoneScopedN("ucl_CController");
     inherited::UpdateCL();
 
     if (m_sndShockEffector)

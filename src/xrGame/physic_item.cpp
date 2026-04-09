@@ -91,6 +91,7 @@ bool CPhysicItem::net_Spawn(CSE_Abstract* DC)
 void CPhysicItem::net_Destroy() { inherited::net_Destroy(); }
 void CPhysicItem::UpdateCL()
 {
+    ZoneScopedN("ucl_CPhysicItem");
     //	if (!xr_strcmp("bolt",cName()))
     //		Log					("--- B - CBolt",renderable.xform);
     if (!H_Parent() && m_pPhysicsShell && m_pPhysicsShell->isActive())

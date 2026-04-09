@@ -1,8 +1,7 @@
 #include "stdafx.h"
 #include "ISpatial.h"
 #include "xrCore/_fbox.h"
-#include "xrCore/Threading/Lock.hpp"
-#include "xrCore/Threading/ScopeLock.hpp"
+#include "xrCore/FTimer.h"
 
 extern Fvector c_spatial_offset[8];
 
@@ -14,16 +13,16 @@ public:
     Fvector center;
     Fvector size;
     Fbox box;
-    ISpatial_DB* space;
+    xr_vector<ISpatial*>* out;
 
 public:
-    box_walker(ISpatial_DB* _space, u32 _mask, const Fvector& _center, const Fvector& _size)
+    box_walker(xr_vector<ISpatial*>* _out, u32 _mask, const Fvector& _center, const Fvector& _size)
     {
         mask = _mask;
         center = _center;
         size = _size;
         box.setb(center, size);
-        space = _space;
+        out = _out;
     }
 
     void walk(ISpatial_NODE* N, Fvector& n_C, float n_R)
@@ -49,7 +48,7 @@ public:
             if (!sB.intersect(box))
                 continue;
 
-            space->q_result->push_back(S);
+            out->push_back(S);
             if constexpr (b_first)
                 return;
         }
@@ -65,7 +64,7 @@ public:
             walk(N->children[octant], c_C, c_R);
             if constexpr (b_first)
             {
-                if (!space->q_result->empty())
+                if (!out->empty())
                     return;
             }
         }
@@ -75,21 +74,21 @@ public:
 void ISpatial_DB::q_box(xr_vector<ISpatial*>& R, u32 _o, u32 _mask, const Fvector& _center, const Fvector& _size)
 {
     ZoneScoped;
-    ScopeLock scope(&cs);
-    Stats.Query.Begin();
-    q_result = &R;
-    q_result->clear();
-    if (_o & O_ONLYFIRST)
+    std::shared_lock<std::shared_mutex> shlock(rw);
     {
-        box_walker<true> W(this, _mask, _center, _size);
-        W.walk(m_root, m_center, m_bounds);
+        ScopeStatTimer scope(Stats.Query, query_stats_lock);
+        R.clear();
+        if (_o & O_ONLYFIRST)
+        {
+            box_walker<true> W(&R, _mask, _center, _size);
+            W.walk(m_root, m_center, m_bounds);
+        }
+        else
+        {
+            box_walker<false> W(&R, _mask, _center, _size);
+            W.walk(m_root, m_center, m_bounds);
+        }
     }
-    else
-    {
-        box_walker<false> W(this, _mask, _center, _size);
-        W.walk(m_root, m_center, m_bounds);
-    }
-    Stats.Query.End();
 }
 
 void ISpatial_DB::q_sphere(xr_vector<ISpatial*>& R, u32 _o, u32 _mask, const Fvector& _center, const float _radius)

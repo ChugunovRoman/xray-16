@@ -559,6 +559,14 @@ void CApplication::UpdateDiscordStatus()
     if (!m_discord_core)
         return;
 
+    static u32 s_discord_frame = 0;
+    ++s_discord_frame;
+    // Throttle main-loop callbacks (Discord SDK is not proven thread-safe for RunCallbacks off-main).
+    // Splash window uses a shorter interval while m_window is set.
+    const u32 interval = m_window ? 2u : 32u;
+    if ((s_discord_frame % interval) != 0u)
+        return;
+
     ZoneScoped;
     std::lock_guard guard{ m_discord_lock };
     m_discord_core->RunCallbacks();

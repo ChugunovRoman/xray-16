@@ -127,6 +127,7 @@ void CFlare::DropFlare()
 
 void CFlare::UpdateCL()
 {
+    ZoneScopedN("ucl_CFlare");
     inherited::UpdateCL();
 
     if (light_render /* && HudItemData()*/)

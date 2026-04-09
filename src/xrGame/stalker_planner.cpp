@@ -26,6 +26,7 @@
 #include "enemy_manager.h"
 #include "npc_cpp_profile.h"
 #include "performance_cvars.h"
+#include "xrEngine/profiler.h"
 
 //#define GOAP_DEBUG
 
@@ -64,6 +65,10 @@ IC u32 get_stalker_planner_solve_interval(const CAI_Stalker& stalker)
 
         return npc_perf_planner_solve_interval_far_ms;
     }
+
+    if (stalker.memory().danger().selected() && !stalker.memory().enemy().selected() &&
+        npc_perf_planner_solve_interval_danger_only_ms > 0)
+        return npc_perf_planner_solve_interval_danger_only_ms;
 
     if (stalker.is_nearby_idle_state_optimization_candidate())
         return npc_perf_planner_solve_interval_near_idle_ms;
@@ -256,6 +261,8 @@ void CStalkerPlanner::setup(CAI_Stalker* object)
 
 void CStalkerPlanner::update(u32 time_delta)
 {
+    ZoneScopedN("brain_update");
+    ZoneTextF("%s", m_object ? m_object->cName().c_str() : "no_object");
 #ifdef LOG_ACTION
     if ((psAI_Flags.test(aiGOAP) && !m_use_log) || (!psAI_Flags.test(aiGOAP) && m_use_log))
         set_use_log(!!psAI_Flags.test(aiGOAP));
@@ -263,6 +270,10 @@ void CStalkerPlanner::update(u32 time_delta)
 
     const u32 now_ms = Device.dwTimeGlobal;
     bool run_solve = should_run_stalker_planner_solve(object(), m_next_solve_update_time, m_solve_update_interval, now_ms);
+    {
+        ZoneScopedN("brain_update/solve_gate");
+        ZoneTextF("run_solve=%d interval=%u", run_solve ? 1 : 0, m_solve_update_interval);
+    }
     if (!initialized() || this->solution().empty())
         run_solve = true;
     else if (!m_solve_update_interval && current_action().completed())
@@ -270,6 +281,7 @@ void CStalkerPlanner::update(u32 time_delta)
 
     if (run_solve)
     {
+        ZoneScopedN("brain_update/solve");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerSolve);
 
         m_solution_changed = false;
@@ -279,15 +291,18 @@ void CStalkerPlanner::update(u32 time_delta)
             !should_run_stalker_planner_actuality_check(object(), m_next_actuality_check_time, m_actuality_check_interval, now_ms);
         if (can_skip_actuality_check)
         {
+            ZoneScopedN("brain_update/actuality_skipped");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerActualitySkipped);
             planner_actual = true;
         }
         else if (m_actuality && try_actual_fast(*this, planner_actual))
         {
+            ZoneScopedN("brain_update/actuality_fast_path");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerActualityFastPath);
         }
         else
         {
+            ZoneScopedN("brain_update/actuality_full");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerActualityCheck);
             planner_actual = actual();
         }
@@ -304,12 +319,21 @@ void CStalkerPlanner::update(u32 time_delta)
 
             m_solving = true;
             {
+                ZoneScopedN("brain_update/graph_search");
+                const bool combat_active = object().memory().enemy().selected() != nullptr;
+                const bool danger_active = object().memory().danger().selected() != nullptr;
+                u32 max_nodes = npc_perf_planner_graph_search_max_nodes;
+                if (combat_active && npc_perf_planner_graph_search_max_nodes_combat > 0)
+                    max_nodes = npc_perf_planner_graph_search_max_nodes_combat;
+                else if (danger_active && npc_perf_planner_graph_search_max_nodes_danger > 0)
+                    max_nodes = npc_perf_planner_graph_search_max_nodes_danger;
+                ZoneTextF("max_nodes=%u combat=%d danger=%d", max_nodes, combat_active ? 1 : 0, danger_active ? 1 : 0);
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerGraphSearch);
                 m_failed = !GEnv.AISpace->graph_engine().search(*this, reverse_search ? target_state() : current_state(),
                     reverse_search ? current_state() : target_state(), &m_solution,
                     GraphEngineSpace::CSolverBaseParameters(
                         GraphEngineSpace::_solver_dist_type(-1), GraphEngineSpace::_solver_condition_type(-1),
-                        npc_perf_planner_graph_search_max_nodes));
+                        max_nodes));
             }
             m_solving = false;
         }
@@ -350,6 +374,7 @@ void CStalkerPlanner::update(u32 time_delta)
 
     if (this->solution().empty() || this->solution().size() == 0)
     {
+        ZoneScopedN("brain_update/empty_solution");
         static u32 s_last_empty_solution_log = 0;
         if (Device.dwTimeGlobal - s_last_empty_solution_log >= 1000)
         {
@@ -361,6 +386,7 @@ void CStalkerPlanner::update(u32 time_delta)
     }
 
     {
+        ZoneScopedN("brain_update/transition");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerTransition);
         if (initialized())
         {
@@ -387,47 +413,56 @@ void CStalkerPlanner::update(u32 time_delta)
         Msg("DEBUG: Action [%s] executing", current_action().m_action_name);
 
     {
+        ZoneScopedN("brain_update/execute");
+        ZoneTextF("action_id=%d", int(current_action_id()));
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerExecute);
         switch (current_action_id())
         {
         case eWorldOperatorDeathPlanner:
         {
+            ZoneScopedN("brain_update/exec_death");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerExecuteDeath);
             current_action().execute();
             break;
         }
         case eWorldOperatorALifePlanner:
         {
+            ZoneScopedN("brain_update/exec_alife");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerExecuteALife);
             current_action().execute();
             break;
         }
         case eWorldOperatorCombatPlanner:
         {
+            ZoneScopedN("brain_update/exec_combat");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerExecuteCombat);
             current_action().execute();
             break;
         }
         case eWorldOperatorDangerPlanner:
         {
+            ZoneScopedN("brain_update/exec_danger");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerExecuteDanger);
             current_action().execute();
             break;
         }
         case eWorldOperatorAnomalyPlanner:
         {
+            ZoneScopedN("brain_update/exec_anomaly");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerExecuteAnomaly);
             current_action().execute();
             break;
         }
         case eWorldOperatorGatherItems:
         {
+            ZoneScopedN("brain_update/exec_gather_items");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerExecuteGatherItems);
             current_action().execute();
             break;
         }
         default:
         {
+            ZoneScopedN("brain_update/exec_other");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerExecuteOther);
             current_action().execute();
             break;

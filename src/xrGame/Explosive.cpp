@@ -468,6 +468,7 @@ void CExplosive::GetExplVelocity(Fvector& v)
 
 void CExplosive::UpdateCL()
 {
+    ZoneScopedN("ucl_CExplosive");
     // VERIFY(!this->getDestroy());
     VERIFY(!physics_world()->Processing());
     if (!m_explosion_flags.test(flExploding))
