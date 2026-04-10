@@ -329,11 +329,30 @@ void CSheduler::ProcessStep()
     u32 steps_done = 0;
     const u32 step_budget = ps_scheduler_max_steps_per_frame > 0 ? u32(ps_scheduler_max_steps_per_frame) : u32(-1);
 
+    CTimer process_step_timer;
+    process_step_timer.Start();
+    const u32 time_budget_ms = _max(1u, u32(iFloor(psShedulerCurrent)));
+
+    auto check_process_step_time = [&](pcstr last_sched_name) -> bool
+    {
+        if (Device.dwPrecacheFrame != 0)
+            return false;
+        if (process_step_timer.GetElapsed_ms() <= time_budget_ms)
+            return false;
+        psShedulerTarget += psShedulerReaction * 3;
+#ifndef MASTER_GOLD
+        if (steps_done == 1 && last_sched_name)
+            Msg("! [scheduler] ProcessStep time budget (~%u ms) exhausted after a single shedule_Update: \"%s\"",
+                time_budget_ms, last_sched_name);
+#endif
+        return true;
+    };
+
 #ifdef DEBUG
     CTimer eTimer;
 #endif
 
-    for (int i = 0; !Items.empty() && Top().dwTimeForExecute < dwTime; ++i)
+    while (!Items.empty() && Top().dwTimeForExecute < dwTime)
     {
         // Update
         Item item = Top();
@@ -400,12 +419,22 @@ void CSheduler::ProcessStep()
                 psShedulerTarget += psShedulerReaction * 3;
                 break;
             }
+            {
+                pcstr sn = item.scheduled_name.c_str();
+                if (!sn || !sn[0])
+                    sn = "(no name)";
+                if (check_process_step_time(sn))
+                    break;
+            }
             continue;
         }
 
         m_current_step_obj = nullptr;
 
         // Fill item structure
+        pcstr sched_name_for_time = item.scheduled_name.c_str();
+        if (!sched_name_for_time || !sched_name_for_time[0])
+            sched_name_for_time = "(no name)";
         item.dwTimeForExecute = dwTime + dwUpdate;
         item.dwTimeOfLastExecute = dwTime;
         ItemsProcessed.emplace_back(std::move(item));
@@ -415,6 +444,8 @@ void CSheduler::ProcessStep()
             psShedulerTarget += psShedulerReaction * 3;
             break;
         }
+        if (check_process_step_time(sched_name_for_time))
+            break;
 
 #if 0 //def DEBUG
         auto itemName = item.Object->shedule_Name().c_str();
@@ -429,16 +460,6 @@ void CSheduler::ProcessStep()
         if (execTime > 15)
             Msg("* xrSheduler: too much time consumed by object [%s] (%dms)", itemName, execTime);
 #endif
-
-        if (i % 3 != 3 - 1)
-            continue;
-
-        if (Device.dwPrecacheFrame == 0 && CPU::QPC() > cycles_limit)
-        {
-            // we have maxed out the load - increase heap
-            psShedulerTarget += psShedulerReaction * 3;
-            break;
-        }
     }
 
     // Push "processed" back
@@ -461,8 +482,6 @@ void CSheduler::Update()
 
     // Initialize
     stats.Update.Begin();
-    cycles_start = CPU::QPC();
-    cycles_limit = CPU::qpc_freq * u64(iCeil(psShedulerCurrent)) / 1000ul + cycles_start;
     {
         ZoneScopedN("CSheduler::Update/internal_Registration_pre");
         internal_Registration();

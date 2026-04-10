@@ -57,10 +57,6 @@ private:
     void internal_Registration();
 
 public:
-    u64 cycles_start;
-    u64 cycles_limit;
-
-public:
     void ProcessStep();
     void Process();
     void Update();
@@ -83,4 +79,5 @@ public:
 };
 
 // Console: scheduler_max_steps_per_frame — max shedule_Update calls per ProcessStep per frame (0 = unlimited).
+// ProcessStep also stops when elapsed wall time exceeds floor(psShedulerCurrent) ms (skipped during precache), same scale as adaptive scheduler load.
 ENGINE_API extern int ps_scheduler_max_steps_per_frame;
