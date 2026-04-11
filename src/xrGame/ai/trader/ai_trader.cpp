@@ -181,16 +181,36 @@ void CAI_Trader::OnEvent(NET_Packet& P, u16 type)
     case GE_OWNERSHIP_TAKE:
         P.r_u16(id);
         Obj = Level().Objects.net_Find(id);
-        if (inventory().CanTakeItem(smart_cast<CInventoryItem*>(Obj)))
+        if (!Obj)
         {
-            Obj->H_SetParent(this);
-            inventory().Take(smart_cast<CGameObject*>(Obj), false, false);
+#ifndef MASTER_GOLD
+            Msg("! ERROR: trader GE_OWNERSHIP_TAKE: object id[%u] not found", (u32)id);
+#endif
+            break;
+        }
+        if (CInventoryItem* pItem = smart_cast<CInventoryItem*>(Obj))
+        {
+            if (inventory().CanTakeItem(pItem))
+            {
+                Obj->H_SetParent(this);
+                inventory().Take(smart_cast<CGameObject*>(Obj), false, false);
+            }
+            else
+            {
+                NET_Packet P2;
+                u_EventGen(P2, GE_OWNERSHIP_REJECT, ID());
+                P2.w_u16(u16(Obj->ID()));
+                u_EventSend(P2);
+            }
         }
         else
         {
+#ifndef MASTER_GOLD
+            Msg("! ERROR: trader GE_OWNERSHIP_TAKE: id[%u] is not CInventoryItem (%s)", (u32)id, Obj->cName().c_str());
+#endif
             NET_Packet P2;
             u_EventGen(P2, GE_OWNERSHIP_REJECT, ID());
-            P2.w_u16(u16(Obj->ID()));
+            P2.w_u16(id);
             u_EventSend(P2);
         }
         break;

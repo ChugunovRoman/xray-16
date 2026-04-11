@@ -41,7 +41,21 @@ void CAI_Stalker::OnEvent(NET_Packet& P, u16 type)
         Msg("Trying to take - %s (%d)", *O->cName(), O->ID());
 #endif
         CGameObject* _O = smart_cast<CGameObject*>(O);
-        if (inventory().CanTakeItem(smart_cast<CInventoryItem*>(_O)))
+        CInventoryItem* pItem = smart_cast<CInventoryItem*>(_O);
+        if (!pItem)
+        {
+#ifndef MASTER_GOLD
+            Msg("! ERROR: GE_OWNERSHIP_TAKE / GE_TRADE_BUY: id[%u] is not CInventoryItem (%s)", (u32)id,
+                O->cName().c_str());
+#endif
+            NET_Packet P2;
+            u_EventGen(P2, GE_OWNERSHIP_REJECT, ID());
+            P2.w_u16(id);
+            u_EventSend(P2);
+            break;
+        }
+
+        if (inventory().CanTakeItem(pItem))
         {
             O->H_SetParent(this);
             inventory().Take(_O, true, false);

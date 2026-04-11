@@ -1635,7 +1635,8 @@ void CCar::OnEvent(NET_Packet& P, u16 type)
     {
         P.r_u16(id);
         IGameObject* O = Level().Objects.net_Find(id);
-        if (GetInventory()->CanTakeItem(smart_cast<CInventoryItem*>(O)))
+        CInventoryItem* pItem = O ? smart_cast<CInventoryItem*>(O) : nullptr;
+        if (pItem && GetInventory()->CanTakeItem(pItem))
         {
             O->H_SetParent(this);
             GetInventory()->Take(smart_cast<CGameObject*>(O), false, false);
