@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include <tracy/Tracy.hpp>
 #include "xrEngine/FDemoRecord.h"
 #include "xrEngine/FDemoPlay.h"
 #include "xrEngine/Environment.h"
@@ -253,10 +254,15 @@ bool g_bDebugEvents = false;
 
 void CLevel::cl_Process_Event(u16 dest, u16 type, NET_Packet& P)
 {
-    ZoneScoped;
+    ZoneNamedN(___tracy_cl_process_event, "CLevel::cl_Process_Event", true);
+    ZoneTextVF(___tracy_cl_process_event, "dest=%u type=%u", (unsigned)dest, (unsigned)type);
 
     // Msg("--- event[%d] for [%d]",type,dest);
-    IGameObject* O = Objects.net_Find(dest);
+    IGameObject* O = nullptr;
+    {
+        ZoneNamedN(___tracy_cl_pe_find_dest, "CLevel::cl_Process_Event/net_Find_dest", true);
+        O = Objects.net_Find(dest);
+    }
     if (0 == O)
     {
 #ifdef DEBUG
@@ -276,18 +282,27 @@ void CLevel::cl_Process_Event(u16 dest, u16 type, NET_Packet& P)
     {
         if (type == GE_DESTROY)
         {
+            ZoneNamedN(___tracy_cl_pe_ondestroy, "CLevel::cl_Process_Event/Game_OnDestroy", true);
             Game().OnDestroy(GO);
         }
-        GO->OnEvent(P, type);
+        {
+            ZoneNamedN(___tracy_cl_pe_onevent, "CLevel::cl_Process_Event/GO_OnEvent", true);
+            GO->OnEvent(P, type);
+        }
     }
     else
     {
+        ZoneNamedN(___tracy_cl_pe_reject, "CLevel::cl_Process_Event/GE_DESTROY_REJECT", true);
         // handle GE_DESTROY_REJECT here
         u32 pos = P.r_tell();
         u16 id = P.r_u16();
         P.r_seek(pos);
         bool ok = true;
-        IGameObject* D = Objects.net_Find(id);
+        IGameObject* D = nullptr;
+        {
+            ZoneNamedN(___tracy_cl_pe_find_id, "CLevel::cl_Process_Event/destroy_reject/net_Find_id", true);
+            D = Objects.net_Find(id);
+        }
         if (0 == D)
         {
 #ifndef MASTER_GOLD
@@ -303,9 +318,13 @@ void CLevel::cl_Process_Event(u16 dest, u16 type, NET_Packet& P)
 #endif
             ok = false;
         }
-        GO->OnEvent(P, GE_OWNERSHIP_REJECT);
+        {
+            ZoneNamedN(___tracy_cl_pe_rej_evt, "CLevel::cl_Process_Event/destroy_reject/OnOwnershipReject", true);
+            GO->OnEvent(P, GE_OWNERSHIP_REJECT);
+        }
         if (ok)
         {
+            ZoneNamedN(___tracy_cl_pe_rej_des, "CLevel::cl_Process_Event/destroy_reject/OnDestroy_chain", true);
             Game().OnDestroy(GD);
             GD->OnEvent(P, GE_DESTROY);
         }

@@ -52,7 +52,11 @@ CStalkerPropertyEvaluatorALife::CStalkerPropertyEvaluatorALife(CAI_Stalker* obje
 {
 }
 
-_value_type CStalkerPropertyEvaluatorALife::evaluate() { return (!!ai().get_alife()); }
+_value_type CStalkerPropertyEvaluatorALife::evaluate()
+{
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+    return (!!ai().get_alife());
+}
 //////////////////////////////////////////////////////////////////////////
 // CStalkerPropertyEvaluatorAlive
 //////////////////////////////////////////////////////////////////////////
@@ -62,7 +66,11 @@ CStalkerPropertyEvaluatorAlive::CStalkerPropertyEvaluatorAlive(CAI_Stalker* obje
 {
 }
 
-_value_type CStalkerPropertyEvaluatorAlive::evaluate() { return (!!object().g_Alive()); }
+_value_type CStalkerPropertyEvaluatorAlive::evaluate()
+{
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+    return (!!object().g_Alive());
+}
 //////////////////////////////////////////////////////////////////////////
 // CStalkerPropertyEvaluatorItems
 //////////////////////////////////////////////////////////////////////////
@@ -72,7 +80,11 @@ CStalkerPropertyEvaluatorItems::CStalkerPropertyEvaluatorItems(CAI_Stalker* obje
 {
 }
 
-_value_type CStalkerPropertyEvaluatorItems::evaluate() { return (!!m_object->memory().item().selected()); }
+_value_type CStalkerPropertyEvaluatorItems::evaluate()
+{
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+    return (!!m_object->memory().item().selected());
+}
 //////////////////////////////////////////////////////////////////////////
 // CStalkerPropertyEvaluatorEnemies
 //////////////////////////////////////////////////////////////////////////
@@ -87,6 +99,7 @@ CStalkerPropertyEvaluatorEnemies::CStalkerPropertyEvaluatorEnemies(
 
 _value_type CStalkerPropertyEvaluatorEnemies::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (m_object->memory().enemy().selected())
         return (true);
 
@@ -110,6 +123,7 @@ CStalkerPropertyEvaluatorSeeEnemy::CStalkerPropertyEvaluatorSeeEnemy(CAI_Stalker
 
 _value_type CStalkerPropertyEvaluatorSeeEnemy::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     return (m_object->memory().enemy().selected() ?
             m_object->memory().visual().visible_now(m_object->memory().enemy().selected()) :
             false);
@@ -126,6 +140,7 @@ CStalkerPropertyEvaluatorEnemySeeMe::CStalkerPropertyEvaluatorEnemySeeMe(CAI_Sta
 
 _value_type CStalkerPropertyEvaluatorEnemySeeMe::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     const CEntityAlive* enemy = m_object->memory().enemy().selected();
     if (!enemy)
         return (false);
@@ -150,7 +165,11 @@ CStalkerPropertyEvaluatorItemToKill::CStalkerPropertyEvaluatorItemToKill(CAI_Sta
 {
 }
 
-_value_type CStalkerPropertyEvaluatorItemToKill::evaluate() { return (!!m_object->item_to_kill()); }
+_value_type CStalkerPropertyEvaluatorItemToKill::evaluate()
+{
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+    return (!!m_object->item_to_kill());
+}
 //////////////////////////////////////////////////////////////////////////
 // CStalkerPropertyEvaluatorItemCanKill
 //////////////////////////////////////////////////////////////////////////
@@ -160,7 +179,11 @@ CStalkerPropertyEvaluatorItemCanKill::CStalkerPropertyEvaluatorItemCanKill(CAI_S
 {
 }
 
-_value_type CStalkerPropertyEvaluatorItemCanKill::evaluate() { return (m_object->item_can_kill()); }
+_value_type CStalkerPropertyEvaluatorItemCanKill::evaluate()
+{
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+    return (m_object->item_can_kill());
+}
 //////////////////////////////////////////////////////////////////////////
 // CStalkerPropertyEvaluatorFoundItemToKill
 //////////////////////////////////////////////////////////////////////////
@@ -171,7 +194,11 @@ CStalkerPropertyEvaluatorFoundItemToKill::CStalkerPropertyEvaluatorFoundItemToKi
 {
 }
 
-_value_type CStalkerPropertyEvaluatorFoundItemToKill::evaluate() { return (m_object->remember_item_to_kill()); }
+_value_type CStalkerPropertyEvaluatorFoundItemToKill::evaluate()
+{
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+    return (m_object->remember_item_to_kill());
+}
 //////////////////////////////////////////////////////////////////////////
 // CStalkerPropertyEvaluatorFoundAmmo
 //////////////////////////////////////////////////////////////////////////
@@ -181,7 +208,11 @@ CStalkerPropertyEvaluatorFoundAmmo::CStalkerPropertyEvaluatorFoundAmmo(CAI_Stalk
 {
 }
 
-_value_type CStalkerPropertyEvaluatorFoundAmmo::evaluate() { return (m_object->remember_ammo()); }
+_value_type CStalkerPropertyEvaluatorFoundAmmo::evaluate()
+{
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+    return (m_object->remember_ammo());
+}
 //////////////////////////////////////////////////////////////////////////
 // CStalkerPropertyEvaluatorReadyToKillSmartCover
 //////////////////////////////////////////////////////////////////////////
@@ -194,6 +225,7 @@ CStalkerPropertyEvaluatorReadyToKillSmartCover::CStalkerPropertyEvaluatorReadyTo
 
 _value_type CStalkerPropertyEvaluatorReadyToKillSmartCover::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (m_object->movement().current_params().cover() && !m_object->movement().current_params().cover()->can_fire())
         return (true);
 
@@ -212,6 +244,7 @@ CStalkerPropertyEvaluatorReadyToKill::CStalkerPropertyEvaluatorReadyToKill(
 
 _value_type CStalkerPropertyEvaluatorReadyToKill::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->ready_to_kill() || !m_object->best_weapon())
         return (false);
 
@@ -240,7 +273,11 @@ CStalkerPropertyEvaluatorReadyToDetour::CStalkerPropertyEvaluatorReadyToDetour(
 {
 }
 
-_value_type CStalkerPropertyEvaluatorReadyToDetour::evaluate() { return (m_object->ready_to_detour()); }
+_value_type CStalkerPropertyEvaluatorReadyToDetour::evaluate()
+{
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+    return (m_object->ready_to_detour());
+}
 //////////////////////////////////////////////////////////////////////////
 // CStalkerPropertyEvaluatorAnomaly
 //////////////////////////////////////////////////////////////////////////
@@ -252,6 +289,7 @@ CStalkerPropertyEvaluatorAnomaly::CStalkerPropertyEvaluatorAnomaly(CAI_Stalker* 
 
 _value_type CStalkerPropertyEvaluatorAnomaly::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->undetected_anomaly())
         return (false);
 
@@ -275,6 +313,7 @@ CStalkerPropertyEvaluatorInsideAnomaly::CStalkerPropertyEvaluatorInsideAnomaly(
 
 _value_type CStalkerPropertyEvaluatorInsideAnomaly::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->inside_anomaly())
         return (false);
 
@@ -297,6 +336,7 @@ CStalkerPropertyEvaluatorPanic::CStalkerPropertyEvaluatorPanic(CAI_Stalker* obje
 
 _value_type CStalkerPropertyEvaluatorPanic::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (object().animation().global_selector())
         return (false);
 
@@ -317,6 +357,7 @@ CStalkerPropertyEvaluatorSmartTerrainTask::CStalkerPropertyEvaluatorSmartTerrain
 
 _value_type CStalkerPropertyEvaluatorSmartTerrainTask::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!ai().get_alife())
         return (false);
 
@@ -341,6 +382,7 @@ CStalkerPropertyEvaluatorEnemyReached::CStalkerPropertyEvaluatorEnemyReached(CAI
 
 _value_type CStalkerPropertyEvaluatorEnemyReached::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     const CEntityAlive* enemy = object().memory().enemy().selected();
     if (!enemy)
         return (false);
@@ -364,6 +406,7 @@ CStalkerPropertyEvaluatorPlayerOnThePath::CStalkerPropertyEvaluatorPlayerOnThePa
 
 _value_type CStalkerPropertyEvaluatorPlayerOnThePath::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     const CEntityAlive* enemy = object().memory().enemy().selected();
     if (!enemy)
         return (false);
@@ -389,6 +432,7 @@ CStalkerPropertyEvaluatorEnemyCriticallyWounded::CStalkerPropertyEvaluatorEnemyC
 
 _value_type CStalkerPropertyEvaluatorEnemyCriticallyWounded::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     const CEntityAlive* enemy = object().memory().enemy().selected();
     if (!enemy)
         return (false);
@@ -412,6 +456,7 @@ CStalkerPropertyEvaluatorShouldThrowGrenade::CStalkerPropertyEvaluatorShouldThro
 
 _value_type CStalkerPropertyEvaluatorShouldThrowGrenade::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
 #if 0
 	return						(false);
 #else // #if 1
@@ -484,6 +529,7 @@ CStalkerPropertyEvaluatorTooFarToKillEnemy::CStalkerPropertyEvaluatorTooFarToKil
 
 _value_type CStalkerPropertyEvaluatorTooFarToKillEnemy::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!object().memory().enemy().selected())
         return (false);
 
@@ -505,6 +551,7 @@ CStalkerPropertyEvaluatorLowCover::CStalkerPropertyEvaluatorLowCover(CAI_Stalker
 
 _value_type CStalkerPropertyEvaluatorLowCover::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     return (false);
 
 #if 0

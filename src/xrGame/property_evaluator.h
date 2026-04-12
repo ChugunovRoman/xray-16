@@ -13,6 +13,8 @@
 
 class CScriptGameObject;
 
+#include "property_evaluator_tracy.h"
+
 template <typename _object_type>
 class CPropertyEvaluator
 {

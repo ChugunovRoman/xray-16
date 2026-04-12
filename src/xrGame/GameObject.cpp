@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include <tracy/Tracy.hpp>
 #include "GameObject.h"
 
 #include "Include/xrRender/RenderVisual.h"
@@ -1270,6 +1271,7 @@ void CGameObject::shedule_Update(u32 dt)
     //уничтожить
     if (NeedToDestroyObject())
     {
+        ZoneScopedN("sh_CGameObject_shedule/DestroyObject");
 #ifndef MASTER_GOLD
         Msg("--NeedToDestroyObject for [%d][%d]", ID(), Device.dwFrame);
 #endif // #ifndef MASTER_GOLD
@@ -1279,9 +1281,12 @@ void CGameObject::shedule_Update(u32 dt)
     // IGameObject::shedule_Update(dt);
     // consistency check
     // Msg ("-SUB-:[%x][%s] IGameObject::shedule_Update",dynamic_cast<void*>(this),*cName());
-    START_PROFILE("game_object/schedule_update/base")
-    ScheduledBase::shedule_Update(dt);
-    STOP_PROFILE
+    {
+        ZoneScopedN("sh_CGameObject_shedule/ScheduledBase");
+        START_PROFILE("game_object/schedule_update/base")
+        ScheduledBase::shedule_Update(dt);
+        STOP_PROFILE
+    }
 
     // Optimization: check if this is a long-dead entity
     CEntityAlive* entity_alive = cast_entity_alive();
@@ -1294,6 +1299,7 @@ void CGameObject::shedule_Update(u32 dt)
     // For long-dead entities, skip expensive spatial update
     if (!is_long_dead)
     {
+        ZoneScopedN("sh_CGameObject_shedule/spatial_update");
         START_PROFILE("game_object/schedule_update/spatial")
         spatial_update(base_spu_epsP * 1, base_spu_epsR * 1);
         STOP_PROFILE
@@ -1301,9 +1307,12 @@ void CGameObject::shedule_Update(u32 dt)
 
     // Always make me crow on shedule-update
     // Makes sure that update-cl called at least with freq of shedule-update
-    START_PROFILE("game_object/schedule_update/crow")
-    MakeMeCrow();
-    STOP_PROFILE
+    {
+        ZoneScopedN("sh_CGameObject_shedule/MakeMeCrow");
+        START_PROFILE("game_object/schedule_update/crow")
+        MakeMeCrow();
+        STOP_PROFILE
+    }
     /*
     if (AlwaysTheCrow()) MakeMeCrow ();
     else if (Device.vCameraPosition.distance_to_sqr(Position()) < CROW_RADIUS*CROW_RADIUS) MakeMeCrow ();
@@ -1311,10 +1320,12 @@ void CGameObject::shedule_Update(u32 dt)
     // ~
     if (!GEnv.isDedicatedServer && !very_long_dead)
     {
+        ZoneScopedN("sh_CGameObject_shedule/client_block");
         // Lightweight per-frame Lua callback for actor only (hitmark, HUD, etc.). No full binder.
         const bool is_actor = (cast_actor() != nullptr);
         if (is_actor)
         {
+            ZoneScopedN("sh_CGameObject_shedule/actor_frame_update");
             luabind::functor<void> actor_frame_update;
             if (GEnv.ScriptEngine->functor("actor_frame_update", actor_frame_update))
                 actor_frame_update();
@@ -1360,6 +1371,7 @@ void CGameObject::shedule_Update(u32 dt)
 
         if (run_binder)
         {
+            ZoneScopedN("sh_CGameObject_shedule/scriptBinder");
             START_PROFILE("game_object/schedule_update/script_binder")
             scriptBinder.shedule_Update(dt);
             STOP_PROFILE

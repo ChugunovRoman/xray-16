@@ -138,13 +138,20 @@ void CPlanner::update()
     {
         ZoneScopedN("planner_update/child_execute");
         if (current_action().m_action_name)
-            ZoneTextF("%s", current_action().m_action_name);
+            ZoneTextF("[child_execute] %s id=%u", current_action().m_action_name, static_cast<u32>(m_current_action_id));
+        else
+            ZoneTextF("[child_execute] id=%u", static_cast<u32>(m_current_action_id));
         //Alundaio: More detailed logging for executing action; Knowing the last executing action before a crash can be very useful for debugging
         if (bDbgAct)
             Msg("DEBUG: Action [%s] executing", current_action().m_action_name);
         //-Alundaio: Debug Action
 
-        current_action().execute();
+        {
+            ZoneScopedN("planner_update/child_execute/execute");
+            if (current_action().m_action_name)
+                ZoneTextF("%s", current_action().m_action_name);
+            current_action().execute();
+        }
     }
 }
 

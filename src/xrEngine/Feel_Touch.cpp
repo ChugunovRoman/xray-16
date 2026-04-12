@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include <tracy/Tracy.hpp>
 #include "IGame_Level.h"
 #include "Feel_Touch.h"
 #include "xr_object.h"
@@ -17,6 +18,7 @@ void Touch::feel_touch_deny(IGameObject* O, u32 T)
 
 void Touch::feel_touch_update(Fvector& C, float R)
 {
+    ZoneScopedN("Touch::feel_touch_update");
     // Check if denied objects expire in time
     u32 dwT = Device.dwTimeGlobal;
     for (u32 dit = 0; dit < feel_touch_disable.size(); dit++)

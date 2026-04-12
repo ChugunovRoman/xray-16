@@ -3,6 +3,7 @@
 #include "xr_object.h"
 #include "GameFont.h"
 #include "PerformanceAlert.hpp"
+#include <tracy/Tracy.hpp>
 
 //#define DEBUG_SCHEDULER
 //#define DEBUG_SCHEDULERMT
@@ -69,6 +70,7 @@ void CSheduler::internal_Registration()
         ItemReg& R = Registration[it];
         if (R.OP)
         {
+            ZoneScopedN("CSheduler::internal_Registration/register_op");
             // register
             // search for paired "unregister"
             bool foundAndErased = false;
@@ -100,6 +102,7 @@ void CSheduler::internal_Registration()
         }
         else
         {
+            ZoneScopedN("CSheduler::internal_Registration/unregister_op");
             // unregister
             internal_Unregister(R.Object, R.RT);
         }
@@ -352,8 +355,10 @@ void CSheduler::ProcessStep()
     CTimer eTimer;
 #endif
 
-    while (!Items.empty() && Top().dwTimeForExecute < dwTime)
     {
+        ZoneScopedN("CSheduler::ProcessStep/drain_normal_heap");
+        while (!Items.empty() && Top().dwTimeForExecute < dwTime)
+        {
         // Update
         Item item = Top();
 
@@ -460,6 +465,7 @@ void CSheduler::ProcessStep()
         if (execTime > 15)
             Msg("* xrSheduler: too much time consumed by object [%s] (%dms)", itemName, execTime);
 #endif
+        }
     }
 
     // Push "processed" back

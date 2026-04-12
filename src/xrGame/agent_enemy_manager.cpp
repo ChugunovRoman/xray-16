@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include <algorithm>
 #include <tracy/Tracy.hpp>
 #include "xrCommon/xr_unordered_map.h"
 #include "agent_enemy_manager.h"
@@ -28,6 +29,9 @@
 #include "performance_cvars.h"
 
 extern const float wounded_enemy_reached_distance;
+
+/** Max enabled visual-memory slots per NPC considered in squad fill_enemies (nearest by remembered pos vs NPC). */
+constexpr u32 AGENT_FILL_ENEMIES_MAX_VISIBLE_CHECKS = 16;
 
 namespace
 {
@@ -55,37 +59,50 @@ IC void merge_squad_mem_slot(xr_unordered_map<u16, squad_mem_slot>& m, u16 id, u
 
 void fill_enemy_positions_from_squad_memory(CAgentMemoryManager& memory, xr_vector<CMemberEnemy>& enemies)
 {
+    ZoneNamedN(___tracy_fill_squad_slots, "agent_enemy/fill_squad_memory_slots", true);
     xr_unordered_map<u16, squad_mem_slot> slots;
     const size_t approx = memory.visibles().size() + memory.sounds().size() + memory.hits().size();
     slots.reserve(approx);
 
-    for (const auto& v : memory.visibles())
     {
-        if (!v.m_enabled)
-            continue;
-        merge_squad_mem_slot(slots, object_id(v.m_object), v.m_last_level_time, v.m_object_params.m_position);
+        ZoneNamedN(___tracy_fill_squad_vis, "agent_enemy/fill_squad_memory_slots/visibles", true);
+        for (const auto& v : memory.visibles())
+        {
+            if (!v.m_enabled)
+                continue;
+            merge_squad_mem_slot(slots, object_id(v.m_object), v.m_last_level_time, v.m_object_params.m_position);
+        }
     }
-    for (const auto& s : memory.sounds())
     {
-        if (!s.m_enabled)
-            continue;
-        merge_squad_mem_slot(slots, object_id(s.m_object), s.m_last_level_time, s.m_object_params.m_position);
+        ZoneNamedN(___tracy_fill_squad_snd, "agent_enemy/fill_squad_memory_slots/sounds", true);
+        for (const auto& s : memory.sounds())
+        {
+            if (!s.m_enabled)
+                continue;
+            merge_squad_mem_slot(slots, object_id(s.m_object), s.m_last_level_time, s.m_object_params.m_position);
+        }
     }
-    for (const auto& h : memory.hits())
     {
-        if (!h.m_enabled)
-            continue;
-        merge_squad_mem_slot(slots, object_id(h.m_object), h.m_last_level_time, h.m_object_params.m_position);
+        ZoneNamedN(___tracy_fill_squad_hit, "agent_enemy/fill_squad_memory_slots/hits", true);
+        for (const auto& h : memory.hits())
+        {
+            if (!h.m_enabled)
+                continue;
+            merge_squad_mem_slot(slots, object_id(h.m_object), h.m_last_level_time, h.m_object_params.m_position);
+        }
     }
 
-    for (auto& enemy : enemies)
     {
-        const u16 id = object_id(enemy.m_object);
-        const auto it = slots.find(id);
-        if (it != slots.end() && it->second.has)
+        ZoneNamedN(___tracy_fill_squad_apply, "agent_enemy/fill_squad_memory_slots/apply_to_enemies", true);
+        for (auto& enemy : enemies)
         {
-            enemy.m_level_time = it->second.level_time;
-            enemy.m_enemy_position = it->second.position;
+            const u16 id = object_id(enemy.m_object);
+            const auto it = slots.find(id);
+            if (it != slots.end() && it->second.has)
+            {
+                enemy.m_level_time = it->second.level_time;
+                enemy.m_enemy_position = it->second.position;
+            }
         }
     }
 }
@@ -136,6 +153,63 @@ struct CEnemyFiller
         (*m_enemies)[it->second].m_mask.set(m_mask, TRUE);
     }
 };
+
+IC void process_visible_for_squad_enemy_filler(
+    const CVisualMemoryManager::CVisibleObject& vo, const CMemoryManager& mem, const CEnemyFiller& filler)
+{
+    if (!vo.m_enabled)
+        return;
+    const CEntityAlive* enemy = smart_cast<const CEntityAlive*>(vo.m_object);
+    if (enemy && mem.enemy().useful(enemy))
+        filler(enemy);
+}
+
+/** Optional: only the K nearest enabled visibles (by distance to remembered position) get useful()+filler. */
+IC void fill_enemies_visual_nearest_capped(const CMemoryManager& mem, const CEnemyFiller& filler, u32 max_checks)
+{
+    const CVisualMemoryManager::VISIBLES& objects = mem.visual().objects();
+
+    if (!max_checks || objects.size() <= max_checks)
+    {
+        CVisualMemoryManager::VISIBLES::const_iterator I = objects.begin();
+        CVisualMemoryManager::VISIBLES::const_iterator E = objects.end();
+        for (; I != E; ++I)
+            process_visible_for_squad_enemy_filler(*I, mem, filler);
+        return;
+    }
+
+    struct IdxDist
+    {
+        float d;
+        u32 idx;
+    };
+    xr_vector<IdxDist> tmp;
+    tmp.reserve(objects.size());
+    const Fvector& my_pos = mem.object().Position();
+    for (u32 i = 0; i < (u32)objects.size(); ++i)
+    {
+        const CVisualMemoryManager::CVisibleObject& vo = objects[i];
+        if (!vo.m_enabled)
+            continue;
+        tmp.push_back({my_pos.distance_to_sqr(vo.m_object_params.m_position), i});
+    }
+
+    if (tmp.empty())
+        return;
+
+    if (tmp.size() <= max_checks)
+    {
+        for (const IdxDist& e : tmp)
+            process_visible_for_squad_enemy_filler(objects[e.idx], mem, filler);
+        return;
+    }
+
+    std::nth_element(tmp.begin(), tmp.begin() + ptrdiff_t(max_checks), tmp.end(),
+        [](const IdxDist& a, const IdxDist& b) { return a.d < b.d; });
+    tmp.resize(max_checks);
+    for (const IdxDist& e : tmp)
+        process_visible_for_squad_enemy_filler(objects[e.idx], mem, filler);
+}
 
 IC xr_vector<ALife::_OBJECT_ID> combat_member_ids(const CAgentMemberManager::MEMBER_STORAGE& members)
 {
@@ -212,30 +286,37 @@ void CAgentEnemyManager::fill_enemies()
     {
         ZoneNamedN(___tracy_fill_squads, "agent_enemy/fill_from_squads", true);
         xr_unordered_map<const CEntityAlive*, u32> enemy_index;
-        enemy_index.reserve(256);
+        const xr_vector<ALife::_OBJECT_ID> member_ids = [&]() {
+            ZoneNamedN(___tracy_fill_squads_prep, "agent_enemy/fill_from_squads/prepare", true);
+            enemy_index.reserve(256);
+            return combat_member_ids(object().member().combat_members());
+        }();
 
-        const xr_vector<ALife::_OBJECT_ID> member_ids = combat_member_ids(object().member().combat_members());
-        xr_vector<ALife::_OBJECT_ID>::const_iterator I = member_ids.begin();
-        xr_vector<ALife::_OBJECT_ID>::const_iterator E = member_ids.end();
-        for (; I != E; ++I)
         {
-            CMemberOrder* member_order = object().member().get_member(*I);
-            if (!member_order)
-                continue;
-
-            const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>(member_order->m_object);
-            if (!stalker || !stalker->NameObject.c_str())
-                continue;
-
-            if (npc_perf_agent_enemy_fill_squads_trace_members)
+            ZoneNamedN(___tracy_fill_squads_loop, "agent_enemy/fill_from_squads/members_loop", true);
+            xr_vector<ALife::_OBJECT_ID>::const_iterator I = member_ids.begin();
+            xr_vector<ALife::_OBJECT_ID>::const_iterator E = member_ids.end();
+            for (; I != E; ++I)
             {
-                ZoneNamedN(___tracy_fill_squad_member, "agent_enemy/fill_from_squads/member", true);
-                ZoneTextVF(___tracy_fill_squad_member, "%s", stalker->cName().c_str());
-            }
+                CMemberOrder* member_order = object().member().get_member(*I);
+                if (!member_order)
+                    continue;
 
-            member_order->probability(1.f);
-            member_order->object().memory().fill_enemies(
-                CEnemyFiller(&m_enemies, object().member().mask(&member_order->object()), &enemy_index));
+                const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>(member_order->m_object);
+                if (!stalker || !stalker->NameObject.c_str())
+                    continue;
+
+                if (npc_perf_agent_enemy_fill_squads_trace_members)
+                {
+                    ZoneNamedN(___tracy_fill_squad_member, "agent_enemy/fill_from_squads/member", true);
+                    ZoneTextVF(___tracy_fill_squad_member, "%s", stalker->cName().c_str());
+                }
+
+                member_order->probability(1.f);
+                const CEnemyFiller filler(
+                    &m_enemies, object().member().mask(&member_order->object()), &enemy_index);
+                fill_enemies_visual_nearest_capped(member_order->object().memory(), filler, AGENT_FILL_ENEMIES_MAX_VISIBLE_CHECKS);
+            }
         }
     }
 

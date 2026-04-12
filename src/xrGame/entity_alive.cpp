@@ -205,7 +205,10 @@ void CEntityAlive::shedule_Update(u32 dt)
 {
     ZoneScopedN("sh_CEntityAlive_shedule_Update");
     ZoneTextF("%s", cName().c_str());
-    inherited::shedule_Update(dt);
+    {
+        ZoneScopedN("sh_CEntityAlive_shedule_Update/inherited");
+        inherited::shedule_Update(dt);
+    }
 
     if (!g_Alive())
     {

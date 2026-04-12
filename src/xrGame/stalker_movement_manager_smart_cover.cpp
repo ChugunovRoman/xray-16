@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include <tracy/Tracy.hpp>
 #include "stalker_movement_manager_smart_cover.h"
 #include "movement_manager_space.h"
 #include "smart_cover_animation_selector.h"
@@ -63,6 +64,7 @@ void stalker_movement_manager_smart_cover::reinit()
 
 void stalker_movement_manager_smart_cover::update(u32 time_delta)
 {
+    ZoneScopedN("stalker_movement_manager_smart_cover::update");
     if (object().getDestroy())
         return;
 

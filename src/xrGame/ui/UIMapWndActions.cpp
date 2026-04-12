@@ -123,7 +123,11 @@ private:
 
 public:
     CEvaluatorMapConst(bool val = false, LPCSTR evaluator_name = 0) : inherited(evaluator_name) { ret_value = val; };
-    virtual bool evaluate() { return ret_value; };
+    virtual bool evaluate()
+    {
+        PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+        return ret_value;
+    };
 };
 
 using namespace UIMapWndActionsSpace;
@@ -267,6 +271,7 @@ void CMapActionIdle::execute()
 
 bool CEvaluatorTargetMapShown::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (m_storage->property(1))
         return true;
     if (m_storage->property(2))
@@ -288,6 +293,7 @@ bool CEvaluatorTargetMapShown::evaluate()
 
 bool CEvaluatorMapMinimized::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (m_storage->property(1))
         return true;
     bool res = !!fsimilar(m_object->GlobalMap()->GetCurrentZoom().x, m_object->GlobalMap()->GetMinZoom(), EPS_L);
@@ -296,6 +302,7 @@ bool CEvaluatorMapMinimized::evaluate()
 
 bool CEvaluatorMapResized::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (m_storage->property(1))
         return true;
     return m_storage->property(3);

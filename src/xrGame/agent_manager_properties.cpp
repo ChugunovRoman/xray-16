@@ -23,6 +23,7 @@
 
 CAgentManagerPropertyEvaluatorItem::_value_type CAgentManagerPropertyEvaluatorItem::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     CAgentMemberManager::iterator I = m_object->member().members().begin();
     CAgentMemberManager::iterator E = m_object->member().members().end();
     for (; I != E; ++I)
@@ -48,6 +49,7 @@ CAgentManagerPropertyEvaluatorItem::_value_type CAgentManagerPropertyEvaluatorIt
 
 CAgentManagerPropertyEvaluatorEnemy::_value_type CAgentManagerPropertyEvaluatorEnemy::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     CAgentMemberManager::iterator I = m_object->member().combat_members().begin();
     CAgentMemberManager::iterator E = m_object->member().combat_members().end();
     for (; I != E; ++I)
@@ -73,6 +75,7 @@ CAgentManagerPropertyEvaluatorEnemy::_value_type CAgentManagerPropertyEvaluatorE
 
 CAgentManagerPropertyEvaluatorDanger::_value_type CAgentManagerPropertyEvaluatorDanger::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     CAgentMemberManager::iterator I = m_object->member().members().begin();
     CAgentMemberManager::iterator E = m_object->member().members().end();
     for (; I != E; ++I)

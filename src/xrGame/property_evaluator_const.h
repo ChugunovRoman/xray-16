@@ -32,6 +32,7 @@ public:
 
     virtual _value_type evaluate()
     {
+        PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
         return m_value;
     }
 };

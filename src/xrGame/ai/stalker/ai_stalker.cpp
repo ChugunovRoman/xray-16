@@ -48,6 +48,7 @@
 #include "stalker_sound_data_visitor.h"
 #include "ai_stalker_space.h"
 #include "mt_config.h"
+#include <tracy/Tracy.hpp>
 #include "EffectorShot.h"
 #include "visual_memory_manager.h"
 #include "enemy_manager.h"
@@ -988,7 +989,10 @@ void CAI_Stalker::destroy_anim_mov_ctrl()
     movement().m_head.target.pitch = movement().m_body.current.pitch;
 
     movement().cleanup_after_animation_selector();
-    movement().update(0);
+    {
+        ZoneScopedN("CAI_Stalker::movement_update_destroy_anim");
+        movement().update(0);
+    }
 }
 
 void CAI_Stalker::UpdateCL()
@@ -1445,7 +1449,7 @@ void CAI_Stalker::spawn_supplies()
 
 void CAI_Stalker::Think()
 {
-    ZoneScopedN("sh_stalker_Think");
+    ZoneScopedN("CAI_Stalker::Think");
     ZoneTextF("%s", cName().c_str());
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerThink);
     START_PROFILE("stalker/schedule_update/think")

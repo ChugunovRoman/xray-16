@@ -31,6 +31,7 @@ void CEvaluator::setup(_object_type* object, CPropertyStorage* storage)
 TEMPLATE_SPECIALIZATION
 typename CEvaluator::_value_type CEvaluator::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     return ((this->m_storage->property(m_condition_id) == m_value) == m_equality);
 }
 

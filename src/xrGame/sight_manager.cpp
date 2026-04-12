@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include <tracy/Tracy.hpp>
 #include "sight_manager.h"
 #include "ai/stalker/ai_stalker.h"
 #include "stalker_movement_manager_smart_cover.h"
@@ -95,6 +96,7 @@ static inline float select_speed(
 
 void CSightManager::Exec_Look(float time_delta)
 {
+    ZoneScopedN("CSightManager::Exec_Look");
     START_PROFILE("Sight Manager")
 
     SBoneRotation& body = object().movement().m_body;
@@ -243,6 +245,7 @@ void CSightManager::setup(const CSightAction& sight_action)
 
 void CSightManager::update()
 {
+    ZoneScopedN("CSightManager::update");
     START_PROFILE("Sight Manager")
 
     if (!enabled())

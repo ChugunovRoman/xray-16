@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include <tracy/Tracy.hpp>
 
 #include "WeaponMagazined.h"
 #include "Actor.h"
@@ -560,14 +561,18 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
 
 void CWeaponMagazined::UpdateCL()
 {
-    ZoneScopedN("ucl_CWeaponMagazined");
-    inherited::UpdateCL();
+    ZoneNamedN(___wpn_ucl, "ucl_CWeaponMagazined", true);
+    {
+        ZoneNamedN(___wpn_ucl_inh, "ucl_CWeaponMagazined/inherited", true);
+        inherited::UpdateCL();
+    }
     float dt = Device.fTimeDelta;
 
     //когда происходит апдейт состояния оружия
     //ничего другого не делать
     if (GetNextState() == GetState())
     {
+        ZoneNamedN(___wpn_ucl_state, "ucl_CWeaponMagazined/state", true);
         switch (GetState())
         {
         case eShowing:
@@ -575,23 +580,48 @@ void CWeaponMagazined::UpdateCL()
         case eReload:
         case eIdle:
         {
+            ZoneNamedN(___wpn_ucl_st_decay, "ucl_CWeaponMagazined/state/shot_timer_decay", true);
+            ZoneTextVF(___wpn_ucl_st_decay, "substate=%d", int(GetState()));
             fShotTimeCounter -= dt;
             clamp(fShotTimeCounter, 0.0f, flt_max);
         }
         break;
-        case eFire: { state_Fire(dt);
+        case eFire:
+        {
+            ZoneNamedN(___wpn_ucl_st_fire, "ucl_CWeaponMagazined/state/eFire", true);
+            state_Fire(dt);
         }
         break;
-        case eMisfire: state_Misfire(dt); break;
-        case eMagEmpty: state_MagEmpty(dt); break;
-        case eHidden: break;
+        case eMisfire:
+        {
+            ZoneNamedN(___wpn_ucl_st_misfire, "ucl_CWeaponMagazined/state/eMisfire", true);
+            state_Misfire(dt);
+        }
+        break;
+        case eMagEmpty:
+        {
+            ZoneNamedN(___wpn_ucl_st_magempty, "ucl_CWeaponMagazined/state/eMagEmpty", true);
+            state_MagEmpty(dt);
+        }
+        break;
+        case eHidden:
+        {
+            ZoneNamedN(___wpn_ucl_st_hidden, "ucl_CWeaponMagazined/state/eHidden", true);
+        }
+        break;
         }
     }
 
     if (m_bullet_show_frame > 0 && GetState() == eReload && Device.dwTimeGlobal >= (m_dwMotionStartTm + m_bullet_show_frame))
+    {
+        ZoneNamedN(___wpn_ucl_bullet, "ucl_CWeaponMagazined/bullet_hud", true);
         HUD_VisualBulletUpdate(true);
+    }
 
-    UpdateSounds();
+    {
+        ZoneNamedN(___wpn_ucl_snd, "ucl_CWeaponMagazined/UpdateSounds", true);
+        UpdateSounds();
+    }
 }
 
 void CWeaponMagazined::UpdateSounds()

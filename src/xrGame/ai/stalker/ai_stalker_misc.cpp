@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include <tracy/Tracy.hpp>
 #include "ai_stalker.h"
 #include "ai_stalker_impl.h"
 #include "ai_stalker_space.h"
@@ -215,6 +216,7 @@ void CAI_Stalker::react_on_member_death()
 
 void CAI_Stalker::process_enemies()
 {
+    ZoneScopedN("CAI_Stalker::process_enemies");
     if (memory().enemy().selected())
         return;
 

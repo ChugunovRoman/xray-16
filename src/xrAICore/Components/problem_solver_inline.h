@@ -370,6 +370,7 @@ IC void CProblemSolverAbstract::solve()
 
     // Call to ai() was replaced with GEnv.AISpace
     // XXX: looks bad!
+    ZoneScopedN("ai/problem_solver/graph_engine_search");
     m_failed = !GEnv.AISpace->graph_engine().search(*this, reverse_search ? target_state() : current_state(),
         reverse_search ? current_state() : target_state(), &m_solution,
         GraphEngineSpace::CSolverBaseParameters(GraphEngineSpace::_solver_dist_type(-1),

@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include <tracy/Tracy.hpp>
 #include "agent_manager.h"
 #include "agent_corpse_manager.h"
 #include "agent_enemy_manager.h"
@@ -86,18 +87,27 @@ void CAgentManager::update_impl()
 {
     VERIFY(!member().members().empty());
 
-    memory().update();
+    ZoneScopedN("CAgentManager::update_impl");
+
+    {
+        ZoneScopedN("CAgentManager::memory_update");
+        memory().update();
+    }
     corpse().update();
     enemy().update();
     explosive().update();
     location().update();
     member().update();
-    brain().update();
+    {
+        ZoneScopedN("CAgentManager::brain_update");
+        brain().update();
+    }
 }
 
 #ifdef USE_SCHEDULER_IN_AGENT_MANAGER
 void CAgentManager::shedule_Update(u32 time_delta)
 {
+    ZoneScopedN("CAgentManager::shedule_Update");
     START_PROFILE("Agent_Manager")
 
     ScheduledBase::shedule_Update(time_delta);
@@ -112,6 +122,7 @@ float CAgentManager::shedule_Scale() const { return (.5f); }
 
 void CAgentManager::update()
 {
+    ZoneScopedN("CAgentManager::update");
     if (Device.dwTimeGlobal <= m_last_update_time)
         return;
 

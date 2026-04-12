@@ -40,6 +40,7 @@ CStalkerPropertyEvaluatorDangers::CStalkerPropertyEvaluatorDangers(CAI_Stalker* 
 
 _value_type CStalkerPropertyEvaluatorDangers::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->memory().danger().selected())
         return (false);
     return (true);
@@ -57,6 +58,7 @@ CStalkerPropertyEvaluatorDangerUnknown::CStalkerPropertyEvaluatorDangerUnknown(
 
 _value_type CStalkerPropertyEvaluatorDangerUnknown::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->memory().danger().selected())
         return (false);
 
@@ -81,6 +83,7 @@ CStalkerPropertyEvaluatorDangerInDirection::CStalkerPropertyEvaluatorDangerInDir
 
 _value_type CStalkerPropertyEvaluatorDangerInDirection::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->memory().danger().selected())
         return (false);
 
@@ -110,6 +113,7 @@ CStalkerPropertyEvaluatorDangerWithGrenade::CStalkerPropertyEvaluatorDangerWithG
 
 _value_type CStalkerPropertyEvaluatorDangerWithGrenade::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->memory().danger().selected())
         return (false);
 
@@ -128,6 +132,7 @@ CStalkerPropertyEvaluatorDangerBySound::CStalkerPropertyEvaluatorDangerBySound(
 
 _value_type CStalkerPropertyEvaluatorDangerBySound::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->memory().danger().selected())
         return (false);
 
@@ -147,6 +152,7 @@ CStalkerPropertyEvaluatorDangerUnknownCoverActual::CStalkerPropertyEvaluatorDang
 
 _value_type CStalkerPropertyEvaluatorDangerUnknownCoverActual::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!object().memory().danger().selected())
         return (false);
 
@@ -220,6 +226,7 @@ CStalkerPropertyEvaluatorDangerGrenadeExploded::CStalkerPropertyEvaluatorDangerG
 
 _value_type CStalkerPropertyEvaluatorDangerGrenadeExploded::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->memory().danger().selected())
         return (false);
 
@@ -241,6 +248,7 @@ CStalkerPropertyEvaluatorGrenadeToExplode::CStalkerPropertyEvaluatorGrenadeToExp
 
 _value_type CStalkerPropertyEvaluatorGrenadeToExplode::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (object().animation().global_selector())
         return (false);
 
@@ -264,6 +272,7 @@ CStalkerPropertyEvaluatorEnemyWounded::CStalkerPropertyEvaluatorEnemyWounded(CAI
 
 _value_type CStalkerPropertyEvaluatorEnemyWounded::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     const CEntityAlive* enemy = object().memory().enemy().selected();
     if (!enemy)
         return (false);

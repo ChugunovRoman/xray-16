@@ -6,6 +6,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include <tracy/Tracy.hpp>
 #include "smart_cover_animation_planner.h"
 #include "script_game_object.h"
 #include "script_game_object_impl.h"
@@ -56,7 +57,11 @@ void animation_planner::target(StalkerDecisionSpace::EWorldProperties const& wor
     set_target_state(m_target);
 }
 
-void animation_planner::update() { inherited::update(); }
+void animation_planner::update()
+{
+    ZoneScopedN("animation_planner::update");
+    inherited::update();
+}
 void animation_planner::initialize()
 {
     typedef CAI_Stalker::HitCallback HitCallback;

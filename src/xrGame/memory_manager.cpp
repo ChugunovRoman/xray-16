@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include <tracy/Tracy.hpp>
 #include "memory_manager.h"
 #include "visual_memory_manager.h"
 #include "sound_memory_manager.h"
@@ -133,56 +134,79 @@ void CMemoryManager::update_enemies(const bool& registered_in_combat)
 #ifdef _DEBUG
     g_enemy_manager_second_update = false;
 #endif // _DEBUG
-    enemy().update();
+    {
+        ZoneNamedN(___tracy_ue_pass1, "CMemoryManager::update_enemies/first_pass", true);
+        enemy().update();
+    }
 
     if (m_stalker && (!enemy().selected() || (smart_cast<const CAI_Stalker*>(enemy().selected()) &&
                                                  smart_cast<const CAI_Stalker*>(enemy().selected())->wounded())) &&
         registered_in_combat)
     {
-        m_stalker->agent_manager().enemy().distribute_enemies();
+        {
+            ZoneNamedN(___tracy_ue_dist, "CMemoryManager::update_enemies/distribute_enemies", true);
+            m_stalker->agent_manager().enemy().distribute_enemies();
+        }
 
-        if (visual().enabled())
-            update(visual().objects(), true, false, m_visual_update_cursor, STALKER_MEMORY_VISUAL_COMBAT_BUDGET);
+        {
+            ZoneNamedN(___tracy_ue_recol, "CMemoryManager::update_enemies/re_collect_combat", true);
+            if (visual().enabled())
+                update(visual().objects(), true, false, m_visual_update_cursor, STALKER_MEMORY_VISUAL_COMBAT_BUDGET);
 
-        update(sound().objects(), true, false, m_sound_update_cursor, STALKER_MEMORY_SOUND_COMBAT_BUDGET);
-        update(hit().objects(), true, false, m_hit_update_cursor, STALKER_MEMORY_HIT_COMBAT_BUDGET);
+            update(sound().objects(), true, false, m_sound_update_cursor, STALKER_MEMORY_SOUND_COMBAT_BUDGET);
+            update(hit().objects(), true, false, m_hit_update_cursor, STALKER_MEMORY_HIT_COMBAT_BUDGET);
+        }
 
 #ifdef _DEBUG
         g_enemy_manager_second_update = true;
 #endif // _DEBUG
-        enemy().update();
+        {
+            ZoneNamedN(___tracy_ue_pass2, "CMemoryManager::update_enemies/second_pass", true);
+            enemy().update();
+        }
     }
 }
 
 void CMemoryManager::update(float time_delta)
 {
+    ZoneScopedN("CMemoryManager::update");
     START_PROFILE("Memory Manager")
 
     {
+        ZoneNamedN(___tracy_mm_visual, "CMemoryManager::update/visual", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryVisualUpdate);
         visual().update(time_delta);
     }
     {
+        ZoneNamedN(___tracy_mm_sound, "CMemoryManager::update/sound", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemorySoundUpdate);
         sound().update();
     }
     {
+        ZoneNamedN(___tracy_mm_hit, "CMemoryManager::update/hit", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryHitUpdate);
         hit().update();
     }
 
     bool registered_in_combat = false;
-    if (m_stalker)
-        registered_in_combat = m_stalker->agent_manager().member().registered_in_combat(m_stalker);
+    {
+        ZoneNamedN(___tracy_mm_combat, "CMemoryManager::update/combat_flags", true);
+        if (m_stalker)
+            registered_in_combat = m_stalker->agent_manager().member().registered_in_combat(m_stalker);
+    }
     const bool process_items = !registered_in_combat && !enemy().selected();
     const bool limited_collect_mode =
         (registered_in_combat || !!enemy().selected()) && !should_force_full_memory_collect(m_stalker, registered_in_combat);
 
     // update enemies and items
-    enemy().reset();
-    item().reset();
+    {
+        ZoneNamedN(___tracy_mm_reset, "CMemoryManager::update/reset_enemy_item", true);
+        enemy().reset();
+        item().reset();
+    }
 
     {
+        ZoneNamedN(___tracy_mm_collect, "CMemoryManager::update/collect", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryCollectObjects);
         if (visual().enabled())
             update(visual().objects(), true, process_items, m_visual_update_cursor,
@@ -195,15 +219,18 @@ void CMemoryManager::update(float time_delta)
     }
 
     {
+        ZoneNamedN(___tracy_mm_upd_en, "CMemoryManager::update/update_enemies", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryUpdateEnemies);
         update_enemies(registered_in_combat);
     }
     if (process_items)
     {
+        ZoneNamedN(___tracy_mm_item, "CMemoryManager::update/item", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryItemUpdate);
         item().update();
     }
     {
+        ZoneNamedN(___tracy_mm_danger, "CMemoryManager::update/danger", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryDangerUpdate);
         danger().update();
     }

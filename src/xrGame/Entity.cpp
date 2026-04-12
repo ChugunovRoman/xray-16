@@ -3,6 +3,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include <tracy/Tracy.hpp>
 #include "Entity.h"
 #include "Actor.h"
 #include "xrServer_Objects_ALife_Monsters.h"
@@ -341,9 +342,13 @@ const u32 FORGET_KILLER_TIME = 180000;
 
 void CEntity::shedule_Update(u32 dt)
 {
-    inherited::shedule_Update(dt);
+    {
+        ZoneScopedN("sh_CEntity_shedule/inherited");
+        inherited::shedule_Update(dt);
+    }
     if (!getDestroy() && !g_Alive() && (m_killer_id != u16(-1)))
     {
+        ZoneScopedN("sh_CEntity_shedule/forget_killer_packet");
         if (Device.dwTimeGlobal > m_level_death_time + FORGET_KILLER_TIME)
         {
             m_killer_id = u16(-1);

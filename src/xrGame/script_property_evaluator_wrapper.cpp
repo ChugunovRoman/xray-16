@@ -111,6 +111,7 @@ void CScriptPropertyEvaluatorWrapper::setup_static(
 
 bool CScriptPropertyEvaluatorWrapper::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_SCRIPT();
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptEvaluatorEvaluate);
     const u64 evaluator_start_qpc = npc_cpp_profile::enabled() ? CPU::QPC() : 0;
     const EScriptEvaluatorCachePolicy policy = cache_policy();

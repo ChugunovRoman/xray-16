@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include <tracy/Tracy.hpp>
 #include "xrServer_Objects_ALife_All.h"
 #include "Level.h"
 #include "game_cl_base.h"
@@ -86,7 +87,8 @@ extern float debug_on_frame_gather_stats_frequency;
 
 void CLevel::g_sv_Spawn(CSE_Abstract* E)
 {
-    ZoneScoped;
+    ZoneNamedN(___tracy_g_sv_spawn, "CLevel::g_sv_Spawn", true);
+    ZoneTextVF(___tracy_g_sv_spawn, "%s", E->s_name.c_str());
 
 //	CTimer		T(false);
 
@@ -102,12 +104,23 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
 
     // Client spawn
     //	T.Start		();
-    IGameObject* O = Objects.Create(E->s_name.c_str());
+    IGameObject* O = nullptr;
+    {
+        ZoneNamedN(___tracy_spawn_create, "CLevel::g_sv_Spawn/ObjectsCreate", true);
+        O = Objects.Create(E->s_name.c_str());
+    }
 // Msg				("--spawn--CREATE: %f ms",1000.f*T.GetAsync());
 
 //	T.Start		();
-    if (0 == O || (!O->net_Spawn(E)))
+    bool net_spawn_ok = false;
+    if (O)
     {
+        ZoneNamedN(___tracy_spawn_net, "CLevel::g_sv_Spawn/net_Spawn", true);
+        net_spawn_ok = O->net_Spawn(E);
+    }
+    if (!O || !net_spawn_ok)
+    {
+        ZoneNamedN(___tracy_spawn_fail, "CLevel::g_sv_Spawn/spawn_failed", true);
         O->net_Destroy();
         if (!GEnv.isDedicatedServer)
             client_spawn_manager().clear(O->ID());
@@ -116,12 +129,16 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
     }
     else
     {
-        if (!GEnv.isDedicatedServer)
-            client_spawn_manager().callback(O);
+        {
+            ZoneNamedN(___tracy_spawn_cb, "CLevel::g_sv_Spawn/client_spawn_callback", true);
+            if (!GEnv.isDedicatedServer)
+                client_spawn_manager().callback(O);
+        }
         // Msg			("--spawn--SPAWN: %f ms",1000.f*T.GetAsync());
 
         if ((E->s_flags.is(M_SPAWN_OBJECT_LOCAL)) && (E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER)))
         {
+            ZoneNamedN(___tracy_spawn_local, "CLevel::g_sv_Spawn/local_as_player", true);
             if (IsDemoPlayStarted())
             {
                 if (E->s_flags.is(M_SPAWN_OBJECT_PHANTOM))
@@ -146,6 +163,7 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
 
         if (0xffff != E->ID_Parent)
         {
+            ZoneNamedN(___tracy_spawn_parent, "CLevel::g_sv_Spawn/parent_ownership", true);
             /*
             // Generate ownership-event
             NET_Packet			GEN;
@@ -177,7 +195,10 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
 		}*/ //:(
 
     //---------------------------------------------------------
-    Game().OnSpawn(O);
+    {
+        ZoneNamedN(___tracy_spawn_ons, "CLevel::g_sv_Spawn/Game_OnSpawn", true);
+        Game().OnSpawn(O);
+    }
 }
 
 CSE_Abstract* CLevel::spawn_item(

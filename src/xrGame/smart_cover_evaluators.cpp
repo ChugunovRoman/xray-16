@@ -60,7 +60,11 @@ in_cover_evaluator::in_cover_evaluator(CAI_Stalker* object, LPCSTR evaluator_nam
 {
 }
 
-_value_type in_cover_evaluator::evaluate() { return (!!object().movement().current_params().cover()); }
+_value_type in_cover_evaluator::evaluate()
+{
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+    return (!!object().movement().current_params().cover());
+}
 //////////////////////////////////////////////////////////////////////////
 // cover_actual_evaluator
 //////////////////////////////////////////////////////////////////////////
@@ -72,6 +76,7 @@ cover_actual_evaluator::cover_actual_evaluator(CAI_Stalker* object, LPCSTR evalu
 
 _value_type cover_actual_evaluator::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     VERIFY(object().movement().current_params().cover());
     return (object().movement().current_params().cover() == object().movement().target_params().cover());
 }
@@ -85,7 +90,11 @@ cover_entered_evaluator::cover_entered_evaluator(CAI_Stalker* object, LPCSTR eva
 {
 }
 
-_value_type cover_entered_evaluator::evaluate() { return (!!object().movement().current_params().cover()); }
+_value_type cover_entered_evaluator::evaluate()
+{
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+    return (!!object().movement().current_params().cover());
+}
 //////////////////////////////////////////////////////////////////////////
 // loophole_actual_evaluator
 //////////////////////////////////////////////////////////////////////////
@@ -99,6 +108,7 @@ loophole_actual_evaluator::loophole_actual_evaluator(
 
 _value_type loophole_actual_evaluator::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (object().movement().current_params().cover() != object().movement().target_params().cover())
         return (false);
 
@@ -120,6 +130,7 @@ loophole_hit_long_ago_evaluator::loophole_hit_long_ago_evaluator(
 
 _value_type loophole_hit_long_ago_evaluator::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     return ((m_object->time_object_hit() + m_time_to_wait) < Device.dwTimeGlobal);
 }
 
@@ -135,6 +146,7 @@ is_action_available_evaluator::is_action_available_evaluator(
 
 _value_type is_action_available_evaluator::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->m_object->movement().current_params().cover())
         return (false);
 
@@ -154,7 +166,11 @@ loophole_planner_const_evaluator::loophole_planner_const_evaluator(
 {
 }
 
-_value_type loophole_planner_const_evaluator::evaluate() { return (m_value); }
+_value_type loophole_planner_const_evaluator::evaluate()
+{
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
+    return (m_value);
+}
 //////////////////////////////////////////////////////////////////////////
 // loophole_exitable_evaluator
 //////////////////////////////////////////////////////////////////////////
@@ -166,6 +182,7 @@ loophole_exitable_evaluator::loophole_exitable_evaluator(CAI_Stalker* object, LP
 
 _value_type loophole_exitable_evaluator::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->movement().current_params().cover_loophole())
         return (false);
 
@@ -183,6 +200,7 @@ can_exit_loophole_with_animation::can_exit_loophole_with_animation(CAI_Stalker* 
 
 _value_type can_exit_loophole_with_animation::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     stalker_movement_manager_smart_cover& movement = object().movement();
     stalker_movement_params const& current = movement.current_params();
     VERIFY(current.cover());
@@ -225,6 +243,7 @@ default_behaviour_evaluator::default_behaviour_evaluator(animation_planner* obje
 
 _value_type default_behaviour_evaluator::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     return (m_object->m_object->movement().default_behaviour() || m_object->m_object->movement().combat_behaviour());
 }
 
@@ -239,6 +258,7 @@ can_fire_at_enemy_evaluator::can_fire_at_enemy_evaluator(animation_planner* obje
 
 _value_type can_fire_at_enemy_evaluator::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->m_object->movement().default_behaviour())
         return (true);
 
@@ -263,6 +283,7 @@ idle_time_interval_passed_evaluator::idle_time_interval_passed_evaluator(
 
 _value_type idle_time_interval_passed_evaluator::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_object->stay_idle())
         return (false);
 
@@ -295,6 +316,7 @@ lookout_time_interval_passed_evaluator::lookout_time_interval_passed_evaluator(
 
 _value_type lookout_time_interval_passed_evaluator::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (m_object->stay_idle())
         return (false);
 

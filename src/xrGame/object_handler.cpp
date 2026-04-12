@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include <tracy/Tracy.hpp>
 #include "object_handler.h"
 #include "object_handler_space.h"
 #include "object_handler_planner.h"
@@ -126,6 +127,7 @@ CInventoryItem* CObjectHandler::best_weapon() const
 
 void CObjectHandler::update()
 {
+    ZoneScopedN("CObjectHandler::update");
     START_PROFILE("Object Handler")
     planner().update();
     STOP_PROFILE

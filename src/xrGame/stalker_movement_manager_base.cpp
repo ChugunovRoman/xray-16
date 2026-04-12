@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include <tracy/Tracy.hpp>
 #include "stalker_movement_manager_base.h"
 #include "stalker_movement_manager_space.h"
 #include "script_entity_action.h"
@@ -562,6 +563,7 @@ void stalker_movement_manager_base::set_nearest_accessible_position(Fvector desi
 
 void stalker_movement_manager_base::update(u32 time_delta)
 {
+    ZoneScopedN("stalker_movement_manager_base::update");
     VERIFY((m_target.m_mental_state != eMentalStateFree) || (m_target.m_body_state != eBodyStateCrouch));
 
     if (!enabled())

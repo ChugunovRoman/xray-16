@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include <tracy/Tracy.hpp>
 #include "object_handler_planner.h"
 #include "object_property_evaluators.h"
 #include "object_actions.h"
@@ -613,6 +614,7 @@ void CObjectHandlerPlanner::remove_item(CInventoryItem* inventory_item)
 
 void CObjectHandlerPlanner::update()
 {
+    ZoneScopedN("CObjectHandlerPlanner::update");
 #ifdef LOG_ACTION
     if ((psAI_Flags.test(aiGOAPObject) && !m_use_log) || (!psAI_Flags.test(aiGOAPObject) && m_use_log))
         set_use_log(!!psAI_Flags.test(aiGOAPObject));

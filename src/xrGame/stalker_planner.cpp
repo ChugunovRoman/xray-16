@@ -261,7 +261,7 @@ void CStalkerPlanner::setup(CAI_Stalker* object)
 
 void CStalkerPlanner::update(u32 time_delta)
 {
-    ZoneScopedN("brain_update");
+    ZoneScopedN("CStalkerPlanner::update");
     ZoneTextF("%s", m_object ? m_object->cName().c_str() : "no_object");
 #ifdef LOG_ACTION
     if ((psAI_Flags.test(aiGOAP) && !m_use_log) || (!psAI_Flags.test(aiGOAP) && m_use_log))

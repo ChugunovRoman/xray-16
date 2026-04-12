@@ -27,6 +27,7 @@ CObjectPropertyEvaluatorState::CObjectPropertyEvaluatorState(
 
 CObjectPropertyEvaluatorState::_value_type CObjectPropertyEvaluatorState::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     VERIFY(m_item);
     return (_value_type((m_item->GetState() == m_state) == m_equality));
 }
@@ -38,6 +39,7 @@ CObjectPropertyEvaluatorWeaponHidden::CObjectPropertyEvaluatorWeaponHidden(CWeap
 
 CObjectPropertyEvaluatorWeaponHidden::_value_type CObjectPropertyEvaluatorWeaponHidden::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     VERIFY(m_item);
 
     return ((m_item != m_item->m_pInventory->ActiveItem()) || (m_item->GetState() == CWeapon::eShowing));
@@ -53,6 +55,7 @@ CObjectPropertyEvaluatorAmmo::CObjectPropertyEvaluatorAmmo(CWeapon* item, CAI_St
 
 CObjectPropertyEvaluatorAmmo::_value_type CObjectPropertyEvaluatorAmmo::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_ammo_type)
         return (_value_type(!!m_item->GetSuitableAmmoTotal()));
     else
@@ -70,6 +73,7 @@ CObjectPropertyEvaluatorEmpty::CObjectPropertyEvaluatorEmpty(CWeapon* item, CAI_
 
 CObjectPropertyEvaluatorEmpty::_value_type CObjectPropertyEvaluatorEmpty::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_ammo_type)
         return (_value_type(!m_item->GetAmmoElapsed()));
     else
@@ -87,6 +91,7 @@ CObjectPropertyEvaluatorFull::CObjectPropertyEvaluatorFull(CWeapon* item, CAI_St
 
 CObjectPropertyEvaluatorFull::_value_type CObjectPropertyEvaluatorFull::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_ammo_type)
         return (_value_type(m_item->GetAmmoElapsed() == m_item->GetAmmoMagSize()));
     else
@@ -104,6 +109,7 @@ CObjectPropertyEvaluatorReady::CObjectPropertyEvaluatorReady(CWeapon* item, CAI_
 
 CObjectPropertyEvaluatorReady::_value_type CObjectPropertyEvaluatorReady::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     if (!m_ammo_type)
         //		return		(_value_type(!m_item->IsMisfire() && m_item->GetAmmoElapsed()));
         return (_value_type(
@@ -124,6 +130,7 @@ CObjectPropertyEvaluatorQueue::CObjectPropertyEvaluatorQueue(CWeapon* item, CAI_
 
 CObjectPropertyEvaluatorQueue::_value_type CObjectPropertyEvaluatorQueue::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     return (!m_magazined ? true : !m_magazined->StopedAfterQueueFired());
 }
 
@@ -134,6 +141,7 @@ CObjectPropertyEvaluatorQueue::_value_type CObjectPropertyEvaluatorQueue::evalua
 CObjectPropertyEvaluatorNoItems::CObjectPropertyEvaluatorNoItems(CAI_Stalker* owner) { m_object = owner; }
 CObjectPropertyEvaluatorNoItems::_value_type CObjectPropertyEvaluatorNoItems::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     PIItem I = object().inventory().ActiveItem();
     if (!I)
         return (true);
@@ -159,6 +167,7 @@ CObjectPropertyEvaluatorMissile::CObjectPropertyEvaluatorMissile(
 
 CObjectPropertyEvaluatorMissile::_value_type CObjectPropertyEvaluatorMissile::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     VERIFY(m_item);
     return (_value_type((m_item->GetState() == m_state) == m_equality));
 }
@@ -174,6 +183,7 @@ CObjectPropertyEvaluatorMissileStarted::CObjectPropertyEvaluatorMissileStarted(C
 
 CObjectPropertyEvaluatorMissileStarted::_value_type CObjectPropertyEvaluatorMissileStarted::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     VERIFY(m_item);
     if (m_item->GetState() != CMissile::eThrow)
         return (false);
@@ -192,6 +202,7 @@ CObjectPropertyEvaluatorMissileHidden::CObjectPropertyEvaluatorMissileHidden(CMi
 
 CObjectPropertyEvaluatorMissileHidden::_value_type CObjectPropertyEvaluatorMissileHidden::evaluate()
 {
+    PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
     VERIFY(m_item);
 
     if (!object().inventory().ActiveItem())

@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include <tracy/Tracy.hpp>
 #include "agent_memory_manager.h"
 #include "agent_manager.h"
 #include "agent_member_manager.h"
@@ -15,7 +16,11 @@
 #include "entity_alive.h"
 #include "memory_space_impl.h"
 
-void CAgentMemoryManager::update() { reset_memory_masks(); }
+void CAgentMemoryManager::update()
+{
+    ZoneScopedN("CAgentMemoryManager::update");
+    reset_memory_masks();
+}
 void CAgentMemoryManager::remove_links(IGameObject* object) {}
 template <typename T>
 IC void CAgentMemoryManager::reset_memory_masks(T& objects)
