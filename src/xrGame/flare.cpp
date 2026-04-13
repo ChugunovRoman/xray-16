@@ -125,10 +125,10 @@ void CFlare::DropFlare()
         SwitchState(eFlareDropping);
 }
 
-void CFlare::UpdateCL()
+void CFlare::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CFlare");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
 
     if (light_render /* && HudItemData()*/)
     {

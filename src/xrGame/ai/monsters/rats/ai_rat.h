@@ -383,7 +383,9 @@ public:
     virtual bool feel_touch_on_contact(IGameObject* O);
     virtual bool feel_vision_isRelevant(IGameObject*);
     virtual void shedule_Update(u32 dt);
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
+    void DeferredLateUpdateCL() override;
+    void UpdateCL() override;
     virtual void Hit(SHit* pHDS);
     void CreateSkeleton();
 

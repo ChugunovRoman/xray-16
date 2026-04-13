@@ -110,10 +110,10 @@ void CSnork::reinit()
     m_target_node = 0;
 }
 
-void CSnork::UpdateCL()
+void CSnork::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CSnork");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
 
 //////////////////////////////////////////////////////////////////////////
 // IGameObject *obj = Level().CurrentEntity();

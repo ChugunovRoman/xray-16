@@ -61,10 +61,10 @@ CSpectator::~CSpectator()
         xr_delete(cameras[i]);
 }
 
-void CSpectator::UpdateCL()
+void CSpectator::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CSpectator");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
 
     float fPreviousFrameTime = m_timer.GetElapsed_sec();
     m_timer.Start();
@@ -88,6 +88,7 @@ void CSpectator::UpdateCL()
             Game().GetSchedulerData().dbg_update_shedule = 0;
 #endif
             Device.dwTimeDelta = 0;
+            // Pause + look-at: direct UpdateCL (composite without list DeferredExecLookCL); acceptable for this path.
             m_pActorToLookAt->UpdateCL();
             m_pActorToLookAt->shedule_Update(0);
             Game().shedule_Update(0);
@@ -378,6 +379,7 @@ void CSpectator::FirstEye_ToPlayer(IGameObject* pObject)
         pOldActor->GetSchedulerData().dbg_update_shedule = 0;
 #endif
         Device.dwTimeDelta = 0;
+        // Pause handoff: direct UpdateCL (composite without list DeferredExecLookCL).
         pOldActor->UpdateCL();
         pOldActor->shedule_Update(0);
 #ifdef DEBUG

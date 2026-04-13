@@ -1063,7 +1063,7 @@ float CActor::currentFOV()
     }
 }
 
-void CActor::UpdateCL()
+void CActor::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CActor");
     if (g_Alive() && Level().CurrentViewEntity() == this)
@@ -1105,7 +1105,11 @@ void CActor::UpdateCL()
 
     m_snd_noise -= 0.3f * Device.fTimeDelta;
 
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
+}
+
+void CActor::DeferredLateUpdateCL()
+{
     m_pPhysics_support->in_UpdateCL();
 
     if (g_Alive())
@@ -1270,6 +1274,14 @@ void CActor::UpdateCL()
 
     if (psActorFlags.test(AF_MULTI_ITEM_PICKUP))
         m_bPickupMode = false;
+}
+
+void CActor::UpdateCL()
+{
+    UpdateCL_Early();
+    DeferredUpdatePositionAnimationCL();
+    ApplyDeferredPositionAnimationCL();
+    DeferredLateUpdateCL();
 }
 
 float NET_Jump = 0;

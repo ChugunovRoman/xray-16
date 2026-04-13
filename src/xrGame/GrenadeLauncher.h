@@ -22,7 +22,7 @@ public:
     virtual void OnH_A_Chield();
     virtual void OnH_B_Independent(bool just_before_destroy);
 
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
 
     float GetGrenadeVel() { return m_fGrenadeVel; }
 protected:

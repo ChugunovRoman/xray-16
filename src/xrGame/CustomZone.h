@@ -50,7 +50,7 @@ public:
     virtual void save(NET_Packet& output_packet);
     virtual void load(IReader& input_packet);
 
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
     virtual void UpdateWorkload(u32 dt);
     virtual void shedule_Update(u32 dt);
     virtual void enter_Zone(SZoneObjectInfo& io);

@@ -132,7 +132,7 @@ public:
     virtual void PlayAnimIdleSprintStart();
     virtual void PlayAnimIdleSprintEnd();
 
-    virtual void UpdateCL();
+    virtual void UpdateCL_Early();
     virtual void renderable_Render(u32 context_id, IRenderable* root);
     // True while rendering the inventory weapon icon to RT (bypass parent/visibility gating; skip UpdateXForm).
     virtual bool IsWeaponInventoryIconSnapshot() const { return false; }

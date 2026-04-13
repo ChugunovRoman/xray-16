@@ -123,7 +123,7 @@ public:
     virtual bool renderable_ShadowReceive() { return FALSE; }
     void renderable_Render(u32 context_id, IRenderable* root) override;
     virtual void shedule_Update(u32 DT);
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
 
     virtual CEntity* cast_entity() { return this; }
     virtual void net_Export(NET_Packet& P);

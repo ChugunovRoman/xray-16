@@ -313,10 +313,10 @@ void CAI_Crow::UpdateWorkload(float fdt)
     case eDeathFall: state_DeathFall(); break;
     }
 }
-void CAI_Crow::UpdateCL()
+void CAI_Crow::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CAI_Crow");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
     VERIFY2(valid_pos(Position()), dbg_valide_pos_string(Position(), this, " CAI_Crow::UpdateCL		()"));
     if (m_pPhysicsShell)
     {

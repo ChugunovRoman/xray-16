@@ -177,9 +177,9 @@ void CAI_Boar::CheckSpecParams(u32 spec_params)
     // 	}
 }
 
-void CAI_Boar::UpdateCL()
+void CAI_Boar::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CAI_Boar");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
     angle_lerp(_cur_delta, _target_delta, _velocity, client_update_fdelta());
 }

@@ -18,7 +18,7 @@ public:
     virtual void reinit();
     virtual void reload(LPCSTR section);
 
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
     virtual void shedule_Update(u32 dt);
     virtual void Die(IGameObject* who);
     virtual bool net_Spawn(CSE_Abstract* DC);

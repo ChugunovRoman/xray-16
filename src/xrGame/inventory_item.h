@@ -144,7 +144,7 @@ public:
     virtual bool net_SaveRelevant() { return true; }
     virtual void render_item_ui(){}; // when in slot & query return TRUE
     virtual bool render_item_ui_query() { return false; }; // when in slot
-    virtual void UpdateCL();
+    virtual void UpdateCL_Early();
 
     virtual void Hit(SHit* pHDS);
 

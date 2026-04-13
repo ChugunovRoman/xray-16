@@ -407,10 +407,10 @@ void CBurer::UpdateGraviObject()
         sound_gravi_wave.play_at_pos(0, snd_pos);
 }
 
-void CBurer::UpdateCL()
+void CBurer::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CBurer");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
 
     UpdateGraviObject();
     // if (m_fast_gravi->check_start_conditions())

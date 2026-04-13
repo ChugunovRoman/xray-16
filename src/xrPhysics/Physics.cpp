@@ -84,10 +84,11 @@ IC void add_contact_body_effector(dBodyID body, const dContact& c, SGameMtl* mat
 IC static int CollideIntoGroup(
     dGeomID o1, dGeomID o2, dJointGroupID jointGroup, CPHIsland* world, const int& MAX_CONTACTS)
 {
-    const int RS = 800 + 10;
-    const int N = RS;
+    constexpr int RS = 800 + 10;
+    constexpr int N = RS;
 
-    static dContact contacts[RS];
+    // Thread-local scratch: a future parallel narrow-phase must not share one static buffer across workers.
+    thread_local dContact contacts[N];
     int collided_contacts = 0;
     // get the contacts up to a maximum of N contacts
     int n;

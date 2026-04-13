@@ -70,7 +70,7 @@ public:
     virtual bool net_Spawn(CSE_Abstract* DC);
     virtual void net_Destroy();
     virtual void shedule_Update(u32 DT);
-    virtual void UpdateCL();
+    virtual void UpdateCL_Early();
     virtual CScriptEntity* cast_script_entity() { return this; }
     virtual IFactoryObject* _construct();
 

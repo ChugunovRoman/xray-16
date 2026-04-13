@@ -463,7 +463,7 @@ void CAI_Rat::shedule_Update(u32 dt)
     inherited::shedule_Update(dt);
 }
 
-void CAI_Rat::UpdateCL()
+void CAI_Rat::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CAI_Rat");
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -481,9 +481,22 @@ void CAI_Rat::UpdateCL()
 
     if (!Useful())
     {
-        inherited::UpdateCL();
-        Exec_Look(Device.fTimeDelta);
+        inherited::UpdateCL_Early();
+    }
+    else
+    {
+        if (!H_Parent() && m_pPhysicsShell && m_pPhysicsShell->isActive())
+            m_pPhysicsShell->InterpolateGlobalTransform(&XFORM());
 
+        CPhysicsShellHolder::UpdateCL_Early();
+        CEatableItem::UpdateCL_Early();
+    }
+}
+
+void CAI_Rat::DeferredLateUpdateCL()
+{
+    if (!Useful())
+    {
         CMonsterSquad* squad = monster_squad().get_squad(this);
 
         if (squad &&
@@ -496,14 +509,14 @@ void CAI_Rat::UpdateCL()
             m_squad_count = squad->squad_alife_count();
         }
     }
-    else
-    {
-        if (!H_Parent() && m_pPhysicsShell && m_pPhysicsShell->isActive())
-            m_pPhysicsShell->InterpolateGlobalTransform(&XFORM());
+}
 
-        CPhysicsShellHolder::UpdateCL();
-        CEatableItem::UpdateCL();
-    }
+void CAI_Rat::UpdateCL()
+{
+    UpdateCL_Early();
+    DeferredUpdatePositionAnimationCL();
+    ApplyDeferredPositionAnimationCL();
+    DeferredLateUpdateCL();
 }
 
 void CAI_Rat::UpdatePositionAnimation()

@@ -73,12 +73,12 @@ void CEatableItemObject::OnH_A_Chield()
     CHudItem::OnH_A_Chield();
 }
 
-void CEatableItemObject::UpdateCL()
+void CEatableItemObject::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CEatableItemObject");
-    CPhysicItem::UpdateCL();
-    CEatableItem::UpdateCL();
-    CHudItem::UpdateCL();
+    CPhysicItem::UpdateCL_Early();
+    CEatableItem::UpdateCL_Early();
+    CHudItem::UpdateCL_Early();
 
     if (GetState() == eHidden)
         return;

@@ -276,10 +276,10 @@ void CPhantom::shedule_Update(u32 DT)
     K->UpdateTracks();
 }
 
-void CPhantom::UpdateCL()
+void CPhantom::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CPhantom");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
 
     if (!UpdateEvent.empty())
         UpdateEvent();

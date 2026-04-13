@@ -60,7 +60,7 @@ public:
     virtual void IR_OnKeyboardRelease(int dik);
     virtual void IR_OnKeyboardHold(int dik);
     virtual void shedule_Update(u32 T);
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
     virtual bool net_Spawn(CSE_Abstract* DC);
     virtual void net_Destroy();
 

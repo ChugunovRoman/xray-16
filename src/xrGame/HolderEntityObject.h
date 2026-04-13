@@ -34,6 +34,8 @@ public:
     void net_Export(NET_Packet& P) override; // export to server
     void net_Import(NET_Packet& P) override; // import from server
 
+    void UpdateCL_Early() override;
+    void DeferredLateUpdateCL() override;
     void UpdateCL() override;
 
     void Hit(SHit* pHDS) override;

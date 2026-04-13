@@ -31,7 +31,7 @@ public:
     virtual void load(IReader& input_packet);
 
     virtual bool Action(u16 cmd, u32 flags);
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
     virtual void render_item_ui();
     virtual bool render_item_ui_query();
     virtual bool use_crosshair() const { return false; }

@@ -403,10 +403,10 @@ void CCustomRocket::OnH_A_Independent()
     //	Msg("! CCustomRocket::OnH_A_Independent called, id[%d] frame[%d]",ID(),Device.dwFrame);
 }
 
-void CCustomRocket::UpdateCL()
+void CCustomRocket::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CCustomRocket");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
 
     PlayContact();
     switch (m_eState)

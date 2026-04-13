@@ -28,7 +28,7 @@ private:
     void ParticlesMatrix(Fmatrix&);
 
 public:
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
     virtual void Load(LPCSTR section);
     virtual bool net_Spawn(CSE_Abstract* DC);
     virtual void net_Destroy();

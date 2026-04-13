@@ -166,10 +166,10 @@ void CArtefact::SwitchAfParticles(bool bOn)
 }
 
 // called only in "fast-mode"
-void CArtefact::UpdateCL()
+void CArtefact::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CArtefact");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
 
     if (o_fastmode || m_activationObj)
         UpdateWorkload(Device.dwTimeDelta);

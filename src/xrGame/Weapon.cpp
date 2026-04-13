@@ -1434,10 +1434,19 @@ void CWeapon::OnH_B_Chield()
 }
 
 bool CWeapon::AllowBore() { return true; }
-void CWeapon::UpdateCL()
+void CWeapon::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CWeapon");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
+}
+
+void CWeapon::DeferredLateUpdateCL()
+{
+    // UpdateCL_Early often resolves fire point / particle XFORM first (state_Fire, sounds, etc.).
+    // After deferred position/anim apply (and ideally after the actor HUD pass), those values
+    // must be recomputed; otherwise muzzle flame/light stay glued to the first pose of the frame.
+    dwFP_Frame = u32(-1);
+
     UpdateHUDAddonsVisibility();
     //подсветка от выстрела
     UpdateLight();
@@ -1498,6 +1507,15 @@ void CWeapon::UpdateCL()
     if (m_zoom_params.m_pVision)
         m_zoom_params.m_pVision->Update();
 }
+
+void CWeapon::UpdateCL()
+{
+    UpdateCL_Early();
+    DeferredUpdatePositionAnimationCL();
+    ApplyDeferredPositionAnimationCL();
+    DeferredLateUpdateCL();
+}
+
 void CWeapon::EnableActorNVisnAfterZoom()
 {
     CActor* pA = smart_cast<CActor*>(H_Parent());

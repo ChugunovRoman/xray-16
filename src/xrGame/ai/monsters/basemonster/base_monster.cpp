@@ -309,7 +309,7 @@ void CBaseMonster::update_enemy_accessible_and_at_home_info()
     }
 }
 
-void CBaseMonster::UpdateCL()
+void CBaseMonster::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CBaseMonster");
 #ifdef DEBUG
@@ -329,8 +329,15 @@ void CBaseMonster::UpdateCL()
         EatedCorpse = NULL;
     }
 
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
+}
 
+void CBaseMonster::DeferredLateUpdateCL()
+{
+#ifdef DEBUG
+    if (is_paused())
+        return;
+#endif
     if (g_Alive())
     {
         update_enemy_accessible_and_at_home_info();
@@ -342,6 +349,18 @@ void CBaseMonster::UpdateCL()
     control().update_frame();
 
     m_pPhysics_support->in_UpdateCL();
+}
+
+void CBaseMonster::UpdateCL()
+{
+#ifdef DEBUG
+    if (is_paused())
+        return;
+#endif
+    UpdateCL_Early();
+    DeferredUpdatePositionAnimationCL();
+    ApplyDeferredPositionAnimationCL();
+    DeferredLateUpdateCL();
 }
 
 void CBaseMonster::shedule_Update(u32 dt)

@@ -57,7 +57,7 @@ public:
     virtual void net_Destroy();
     virtual void net_Relcase(IGameObject* O);
 
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
     virtual void shedule_Update(u32 dt);
 
     void set_actor_ignore(bool const actor_ignore) { m_actor_ignore = actor_ignore; }

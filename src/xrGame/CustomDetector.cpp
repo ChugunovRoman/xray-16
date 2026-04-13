@@ -395,10 +395,10 @@ void CCustomDetector::UpdateVisibility()
     }
 }
 
-void CCustomDetector::UpdateCL()
+void CCustomDetector::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CCustomDetector");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
 
     if (H_Parent() != Level().CurrentEntity())
         return;

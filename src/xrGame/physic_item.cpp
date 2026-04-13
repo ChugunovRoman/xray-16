@@ -89,7 +89,7 @@ bool CPhysicItem::net_Spawn(CSE_Abstract* DC)
 }
 
 void CPhysicItem::net_Destroy() { inherited::net_Destroy(); }
-void CPhysicItem::UpdateCL()
+void CPhysicItem::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CPhysicItem");
     //	if (!xr_strcmp("bolt",cName()))
@@ -98,7 +98,7 @@ void CPhysicItem::UpdateCL()
         m_pPhysicsShell->InterpolateGlobalTransform(&XFORM());
     //	if (!xr_strcmp("bolt",cName()))
     //		Log						("--- C - CBolt",renderable.xform);
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
     //	if (!xr_strcmp("bolt",cName()))
     //		Log						("--- D - CBolt",renderable.xform);
 }

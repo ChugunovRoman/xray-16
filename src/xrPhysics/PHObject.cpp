@@ -140,6 +140,8 @@ void CPHObject::CollideRayMotions()
     }
 }
 
+// Broadphase may run for all objects before any CollideStepPostBroadphase (see CPHWorld::Step frozen pass);
+// partner st_dirty in candidate lists can lag one phase; CollideDynamicsNarrow skips stale partners.
 void CPHObject::CollideDynamicsBroadphase()
 {
     qResultVec& result = PhTlsSpatial();

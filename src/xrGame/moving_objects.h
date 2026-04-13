@@ -22,7 +22,6 @@ class moving_objects
 {
 private:
     typedef CQuadTree<moving_object> TREE;
-    typedef xr_vector<IGameObject*> NEAREST_STATIC;
 
 public:
     enum possible_actions
@@ -39,16 +38,12 @@ public:
     typedef std::pair<float, COLLISION_ACTION> COLLISION_TIME;
     typedef xr_vector<COLLISION_TIME> COLLISIONS;
 
-private:
-    typedef xr_vector<ISpatial*> Spatials;
-
 public:
     typedef obstacles_query query;
     typedef obstacles_query::AREA AREA;
 
 private:
     TREE* m_tree;
-    NEAREST_STATIC m_nearest_static;
 
 private:
     NEAREST_MOVING m_nearest_moving;
@@ -56,7 +51,6 @@ private:
     NEAREST_MOVING m_visited_emitters;
     COLLISIONS m_collisions;
     COLLISIONS m_previous_collisions;
-    Spatials m_spatial_objects;
 
 #ifdef DEBUG
 private:
@@ -68,10 +62,10 @@ private:
 
 private:
     IC bool collided(const IGameObject* object, const Fvector& position, const float& radius) const;
-    bool collided_static(const Fvector& position, const float& radius);
+    bool collided_static(moving_object* object, const Fvector& position, const float& radius);
     bool collided_static(moving_object* object, const Fvector& dest_position);
-    void fill_static(obstacles_query& query, const Fvector& position, const float& radius);
-    void fill_static(obstacles_query& query);
+    void fill_static(moving_object* object, obstacles_query& query, const Fvector& position, const float& radius);
+    void fill_static(moving_object* object, obstacles_query& query);
     void fill_all_static(moving_object* object, const Fvector& dest_position);
     void fill_nearest_list(const Fvector& position, const float& radius, moving_object* object);
 

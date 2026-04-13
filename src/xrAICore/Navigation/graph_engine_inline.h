@@ -43,7 +43,8 @@ inline bool CGraphEngine::search(const _Graph& graph, const _index_type& start_n
     if (!vertices_valid)
         return false;
 
-    //ScopeLock scope(&m_lock);
+    // Temporary proof-of-safety: serialize all graph_engine search backends + PathTimer (see docs/SHARED_AI_MT_AUDIT.md).
+    ScopeLock scope(&m_lock);
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/search")
     PathTimer.Begin();
@@ -62,7 +63,7 @@ template <typename _Graph, typename _Parameters>
 inline bool CGraphEngine::search(const _Graph& graph, const _index_type& start_node, const _index_type& dest_node,
     xr_vector<_index_type>* node_path, _Parameters& parameters)
 {
-    //ScopeLock scope(&m_lock);
+    ScopeLock scope(&m_lock);
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/search")
     PathTimer.Begin();
@@ -81,7 +82,7 @@ template <typename _Graph, typename _Parameters, typename _PathManager>
 inline bool CGraphEngine::search(const _Graph& graph, const _index_type& start_node, const _index_type& dest_node,
     xr_vector<_index_type>* node_path, const _Parameters& parameters, _PathManager& path_manager)
 {
-    //ScopeLock scope(&m_lock);
+    ScopeLock scope(&m_lock);
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/search")
     PathTimer.Begin();
@@ -100,7 +101,7 @@ inline bool CGraphEngine::search(const CProblemSolver<T1, T2, T3, T4, T5, T6, T7
     const _solver_index_type& start_node, const _solver_index_type& dest_node, xr_vector<_solver_edge_type>* node_path,
     const _Parameters& parameters)
 {
-    //ScopeLock scope(&m_lock);
+    ScopeLock scope(&m_lock);
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/problem_solver")
     PathTimer.Begin();
@@ -120,7 +121,7 @@ template <typename _Graph, typename _Parameters>
 inline bool CGraphEngine::search(const _Graph& graph, const shared_str& start_node, const shared_str& dest_node,
     xr_vector<shared_str>* node_path, _Parameters& parameters)
 {
-    //ScopeLock scope(&m_lock);
+    ScopeLock scope(&m_lock);
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/search")
     PathTimer.Begin();

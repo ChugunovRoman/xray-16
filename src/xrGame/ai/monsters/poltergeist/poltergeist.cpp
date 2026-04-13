@@ -300,11 +300,11 @@ void CPoltergeist::renderable_Render(u32 context_id, IRenderable* root)
     inherited::renderable_Render(context_id, root);
 }
 
-void CPoltergeist::UpdateCL()
+void CPoltergeist::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CPoltergeist");
     update_detection();
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
 
     def_lerp(m_height, target_height, m_height_change_velocity, client_update_fdelta());
 

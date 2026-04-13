@@ -411,10 +411,10 @@ void CController::control_hit()
 
 #define TEXTURE_SIZE_PERCENT 2.f
 
-void CController::UpdateCL()
+void CController::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CController");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
 
     if (m_sndShockEffector)
     {

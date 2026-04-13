@@ -189,11 +189,11 @@ void CWeaponAmmo::renderable_Render(u32 context_id, IRenderable* root)
         inherited::renderable_Render(context_id, root);
 }
 
-void CWeaponAmmo::UpdateCL()
+void CWeaponAmmo::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CWeaponAmmo");
     VERIFY2(_valid(renderable.xform), cName().c_str());
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
     VERIFY2(_valid(renderable.xform), cName().c_str());
 
     if (!IsGameTypeSingle())

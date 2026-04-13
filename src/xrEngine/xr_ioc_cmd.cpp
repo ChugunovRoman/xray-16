@@ -728,6 +728,7 @@ extern int ps_fps_limit_in_menu;
 
 extern int ps_obj_preupdate_mt;
 extern int ps_obj_postupdate_mt;
+extern int ps_obj_deferred_pos_anim_mt;
 
 void CCC_Register()
 {
@@ -831,6 +832,7 @@ void CCC_Register()
     CMD4(CCC_Integer, "snd_cache_size", &psSoundCacheSizeMB, 4, 64);
     CMD4(CCC_Integer, "obj_preupdate_mt", &ps_obj_preupdate_mt, 0, 1);
     CMD4(CCC_Integer, "obj_postupdate_mt", &ps_obj_postupdate_mt, 0, 1);
+    CMD4(CCC_Integer, "obj_deferred_pos_anim_mt", &ps_obj_deferred_pos_anim_mt, 0, 1);
 
 #ifdef DEBUG
     CMD3(CCC_Mask, "snd_stats", &g_stats_flags, st_sound);

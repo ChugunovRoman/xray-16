@@ -371,11 +371,11 @@ void CHelicopter::MoveStep()
     XFORM().translate_over(m_movement.currP);
 }
 
-void CHelicopter::UpdateCL()
+void CHelicopter::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CHelicopter");
-    inherited::UpdateCL();
-    CExplosive::UpdateCL();
+    inherited::UpdateCL_Early();
+    CExplosive::UpdateCL_Early();
     if (PPhysicsShell() && (state() == CHelicopter::eDead))
     {
         PPhysicsShell()->InterpolateGlobalTransform(&XFORM());
@@ -425,6 +425,14 @@ void CHelicopter::UpdateCL()
 
     IKinematics* K = smart_cast<IKinematics*>(Visual());
     K->CalculateBones();
+}
+
+void CHelicopter::UpdateCL()
+{
+    UpdateCL_Early();
+    DeferredUpdatePositionAnimationCL();
+    ApplyDeferredPositionAnimationCL();
+    DeferredLateUpdateCL();
 }
 
 void CHelicopter::shedule_Update(u32 time_delta)

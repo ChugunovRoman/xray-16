@@ -12,6 +12,9 @@
 #include "entity_alive.h"
 #include "obstacles_query.h"
 
+class IGameObject;
+class ISpatial;
+
 class moving_object
 {
 public:
@@ -26,12 +29,21 @@ public:
         action_follow,
     };
 
+public:
+    // Per-entity scratch for static obstacle spatial queries (not shared across `moving_objects` singleton).
+    struct StaticScratch
+    {
+        xr_vector<IGameObject*> nearest_static;
+        xr_vector<ISpatial*> spatial_objects;
+    };
+
 private:
     const CEntityAlive* m_object;
     const IGameObject* m_ignored_object;
     Fvector m_position;
     obstacles_query m_static_query;
     obstacles_query m_dynamic_query;
+    StaticScratch m_static_scratch;
 
 private:
     action_type m_action;
@@ -60,6 +72,7 @@ public:
     IC const u32& action_time() const;
     IC obstacles_query& static_query();
     IC obstacles_query& dynamic_query();
+    IC StaticScratch& static_scratch();
 };
 
 #include "moving_object_inline.h"

@@ -559,12 +559,12 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
     }
 }
 
-void CWeaponMagazined::UpdateCL()
+void CWeaponMagazined::UpdateCL_Early()
 {
     ZoneNamedN(___wpn_ucl, "ucl_CWeaponMagazined", true);
     {
         ZoneNamedN(___wpn_ucl_inh, "ucl_CWeaponMagazined/inherited", true);
-        inherited::UpdateCL();
+        inherited::UpdateCL_Early();
     }
     float dt = Device.fTimeDelta;
 
@@ -622,6 +622,14 @@ void CWeaponMagazined::UpdateCL()
         ZoneNamedN(___wpn_ucl_snd, "ucl_CWeaponMagazined/UpdateSounds", true);
         UpdateSounds();
     }
+}
+
+void CWeaponMagazined::UpdateCL()
+{
+    UpdateCL_Early();
+    DeferredUpdatePositionAnimationCL();
+    ApplyDeferredPositionAnimationCL();
+    DeferredLateUpdateCL();
 }
 
 void CWeaponMagazined::UpdateSounds()

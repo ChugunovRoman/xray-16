@@ -77,7 +77,7 @@ public:
     virtual void load(IReader& input_packet);
 
     virtual void shedule_Update(u32 DT);
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
 
     virtual void HitSignal(float HitAmount, Fvector& local_dir, IGameObject* who, s16 element) {}
     virtual void HitImpulse(float amount, Fvector& vWorldDir, Fvector& vLocalDir) {}

@@ -26,7 +26,8 @@ public:
     virtual bool DropGrenade(); // in this case if grenade state is eReady, it should Throw
 
     virtual void OnAnimationEnd(u32 state);
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
+    void UpdateCL() override;
 
     virtual void Throw();
     virtual void Destroy();

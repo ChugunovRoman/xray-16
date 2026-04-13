@@ -995,7 +995,7 @@ void CAI_Stalker::destroy_anim_mov_ctrl()
     }
 }
 
-void CAI_Stalker::UpdateCL()
+void CAI_Stalker::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CAI_Stalker");
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCL);
@@ -1008,13 +1008,6 @@ void CAI_Stalker::UpdateCL()
     else if (m_ucl_perf_postdeath_until_time != 0 && Device.dwTimeGlobal >= m_ucl_perf_postdeath_until_time)
         m_ucl_perf_postdeath_until_time = 0;
 
-    const bool phys_glob_off = npc_perf_disable_ucl_stalker_physics != 0;
-    const bool step_glob_off = npc_perf_disable_ucl_stalker_step_manager != 0;
-    const bool postdeath_ucl_force =
-        !g_Alive() && m_ucl_perf_postdeath_until_time != 0 && Device.dwTimeGlobal < m_ucl_perf_postdeath_until_time;
-    const bool run_ucl_physics = !phys_glob_off || postdeath_ucl_force;
-    const bool run_ucl_step_alive = !step_glob_off || postdeath_ucl_force;
-
     if (g_Alive())
     {
         {
@@ -1022,11 +1015,6 @@ void CAI_Stalker::UpdateCL()
             if (g_mt_config.test(mtObjectHandler) && CObjectHandler::planner().initialized())
             {
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLObjectHandlerDispatch);
-                // XXX: task scheduler
-                //TaskScheduler->AddTask("CAI_Stalker::update_object_handler",
-                //    { this, &CAI_Stalker::update_object_handler },
-                //    { this, &CAI_Stalker::mt_object_handler_update_allowed });
-
 #ifdef DEBUG
                 fastdelegate::FastDelegate0<> f = fastdelegate::FastDelegate0<>(this, &CAI_Stalker::update_object_handler);
                 xr_vector<fastdelegate::FastDelegate0<>>::const_iterator I;
@@ -1063,9 +1051,26 @@ void CAI_Stalker::UpdateCL()
     {
         ZoneScopedN("ucl_stalker_inherited");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLInherited);
-        inherited::UpdateCL();
+        inherited::UpdateCL_Early();
     }
     STOP_PROFILE
+
+    STOP_PROFILE
+    STOP_PROFILE
+}
+
+void CAI_Stalker::DeferredLateUpdateCL()
+{
+    const bool phys_glob_off = npc_perf_disable_ucl_stalker_physics != 0;
+    const bool step_glob_off = npc_perf_disable_ucl_stalker_step_manager != 0;
+    const bool postdeath_ucl_force =
+        !g_Alive() && m_ucl_perf_postdeath_until_time != 0 && Device.dwTimeGlobal < m_ucl_perf_postdeath_until_time;
+    const bool run_ucl_physics = !phys_glob_off || postdeath_ucl_force;
+    const bool run_ucl_step_alive = !step_glob_off || postdeath_ucl_force;
+
+    ZoneScopedN("ucl_stalker_late_update");
+    START_PROFILE("stalker")
+    START_PROFILE("stalker/client_update")
 
     // npc_perf_mt_stalker_physics: reserved (see CharacterPhysicsSupport.cpp); deferred physics would run after sight order.
     if (run_ucl_physics)
@@ -1096,14 +1101,6 @@ void CAI_Stalker::UpdateCL()
                 sight().setup(CSightAction(SightManager::eSightTypeCurrentDirection));
                 sight().update();
             }
-        }
-        STOP_PROFILE
-
-        START_PROFILE("stalker/client_update/exec_look")
-        {
-            ZoneScopedN("ucl_stalker_exec_look");
-            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLExecLook);
-            Exec_Look(client_update_fdelta());
         }
         STOP_PROFILE
 
@@ -1142,6 +1139,23 @@ void CAI_Stalker::UpdateCL()
 #endif
     STOP_PROFILE
     STOP_PROFILE
+}
+
+void CAI_Stalker::UpdateCL()
+{
+    UpdateCL_Early();
+    DeferredUpdatePositionAnimationCL();
+    ApplyDeferredPositionAnimationCL();
+    DeferredLateUpdateCL();
+}
+
+void CAI_Stalker::DeferredExecLookCL(float /*dt*/)
+{
+    if (!g_Alive())
+        return;
+    ZoneScopedN("ucl_stalker_exec_look_deferred");
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLExecLook);
+    Exec_Look(client_update_fdelta());
 }
 
 void CAI_Stalker::PHHit(SHit& H) { m_pPhysics_support->in_Hit(H, false); }

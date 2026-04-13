@@ -29,6 +29,8 @@ int ps_fps_limit_in_menu = 60;
 // CObjectList::Update — optional TaskScheduler parallel paths (see xr_object_list.cpp).
 int ps_obj_preupdate_mt = 0;
 int ps_obj_postupdate_mt = 0;
+/** 1: parallelize only ol_DeferredPositionAnimCorePass (DeferredUpdatePositionAnimationCL); apply/late/ExecLook stay serial on main. */
+int ps_obj_deferred_pos_anim_mt = 0;
 
 bool g_bLoaded = false;
 ref_light precache_light = 0;

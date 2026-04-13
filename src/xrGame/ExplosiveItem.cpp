@@ -54,11 +54,19 @@ void CExplosiveItem::OnEvent(NET_Packet& P, u16 type)
     CExplosive::OnEvent(P, type);
     inherited::OnEvent(P, type);
 }
-void CExplosiveItem::UpdateCL()
+void CExplosiveItem::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CExplosiveItem");
-    CExplosive::UpdateCL();
-    inherited::UpdateCL();
+    CExplosive::UpdateCL_Early();
+    inherited::UpdateCL_Early();
+}
+
+void CExplosiveItem::UpdateCL()
+{
+    UpdateCL_Early();
+    DeferredUpdatePositionAnimationCL();
+    ApplyDeferredPositionAnimationCL();
+    DeferredLateUpdateCL();
 }
 void CExplosiveItem::shedule_Update(u32 dt)
 {

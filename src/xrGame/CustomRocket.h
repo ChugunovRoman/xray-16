@@ -44,7 +44,7 @@ public:
     virtual void OnH_B_Independent(bool just_before_destroy);
     virtual void OnH_B_Chield();
     virtual void OnH_A_Chield();
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
 
     virtual bool UsedAI_Locations() { return (false); }
     virtual bool Useful() const { return (m_eState == eInactive); }

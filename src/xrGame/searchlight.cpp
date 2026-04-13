@@ -129,10 +129,10 @@ void CProjector::TurnOff()
     smart_cast<IKinematics*>(Visual())->LL_SetBoneVisible(guid_bone, FALSE, TRUE);
 }
 
-void CProjector::UpdateCL()
+void CProjector::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CProjector");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
 
     // update light source
     if (light_render->get_active())

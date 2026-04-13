@@ -133,7 +133,7 @@ public:
     virtual void net_Destroy();
     virtual void net_Relcase(IGameObject* O);
     virtual void shedule_Update(u32 dt);
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
     virtual void Hit(SHit* pHDS);
     virtual void Die(IGameObject* who);
     void ProcessTurn();

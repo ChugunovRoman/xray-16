@@ -310,7 +310,7 @@ void CInventoryItem::OnH_A_Chield() { inherited::OnH_A_Chield(); }
 extern Flags32 dbg_net_Draw_Flags;
 #endif
 
-void CInventoryItem::UpdateCL()
+void CInventoryItem::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CInventoryItem");
 #ifdef DEBUG

@@ -308,7 +308,8 @@ public:
     virtual bool renderable_ShadowGenerate() { return FALSE; }
     virtual bool renderable_ShadowReceive() { return TRUE; }
     virtual void OnEvent(NET_Packet& P, u16 type);
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
+    void UpdateCL() override;
     virtual void shedule_Update(u32 time_delta);
     void MoveStep();
 

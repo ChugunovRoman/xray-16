@@ -196,7 +196,9 @@ public:
     virtual void save(NET_Packet& output_packet);
     virtual void load(IReader& input_packet);
 
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
+    void DeferredLateUpdateCL() override;
+    virtual void UpdateCL() override;
     virtual void shedule_Update(u32 dt);
     virtual void Think();
     virtual void SelectAnimation(const Fvector& _view, const Fvector& _move, float speed);
@@ -213,6 +215,7 @@ public:
     void on_ownership_reject(IGameObject* O, bool just_before_destroy);
     void renderable_Render(u32 context_id, IRenderable* root) override;
     virtual void Exec_Look(float dt);
+    void DeferredExecLookCL(float dt) override; // uses client_update_fdelta(); ignores dt from list pass
     virtual void Hit(SHit* pHDS);
     virtual void PHHit(SHit& H);
     virtual bool feel_vision_isRelevant(IGameObject* who);

@@ -4,6 +4,12 @@
 
 #include "xrEngine/pure.h"
 
+#include <atomic>
+#include <thread>
+
+#include "xrCommon/xr_vector.h"
+#include "xrCore/Threading/Lock.hpp"
+
 #include "Physics.h"
 #include "PHUpdateObject.h"
 #include "IPHWorld.h"
@@ -35,6 +41,8 @@ public:
 /////////////////////////////////////////////////////////////////////////////
 class CObjectSpace;
 class CObjectList;
+class CPHObject;
+class CPHIsland;
 class CPHWorld final : public IPHWorld,
                        public pureFrame,
                        private Noncopyable
@@ -86,6 +94,24 @@ private:
     ContactCallbackFun* m_default_contact_shotmark;
     ContactCallbackFun* m_default_character_contact_shotmark;
     PhysicsStepTimeCallback* physics_step_time_callback;
+
+    /** When true, AddObject from other threads must not touch m_objects during FrameStep; see DrainDeferredWorldWrites. */
+    std::atomic_bool m_physics_frame_write_barrier{};
+    /** Thread that owns the current FrameStep (physics worker with mtPhysics, else main). Used to avoid deferring in-step mutations. */
+    std::thread::id m_physics_frame_owner_thread{};
+    Lock m_deferred_writes_lock{};
+    xr_vector<CPHObject*> m_deferred_add_objects;
+    xr_vector<CPHObject*> m_deferred_add_recently_disabled;
+    xr_vector<CPHObject*> m_deferred_remove_recently_disabled;
+    xr_vector<CPHUpdateObject*> m_deferred_add_update_objects;
+    xr_vector<CPHUpdateObject*> m_deferred_remove_update_objects;
+    /** Snapshot of m_objects at collide-pass start (intrusive-list order); avoids iterating live list during broadphase prepass. */
+    xr_vector<CPHObject*> m_frozen_collide_objects;
+    /** Unique active island roots for one solver pass (order = first occurrence in m_objects). */
+    xr_vector<CPHIsland*> m_frozen_island_roots;
+
+    void DrainDeferredWorldWrites();
+    bool ShouldDeferWorldListMutation() const;
 
 public:
     CPHWorld();

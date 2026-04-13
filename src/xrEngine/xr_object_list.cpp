@@ -14,9 +14,11 @@
 
 #include <xrCore/Threading/ParallelFor.hpp>
 #include <xrCore/Threading/TaskManager.hpp>
+#include <tracy/Tracy.hpp>
 
 extern int ps_obj_preupdate_mt;
 extern int ps_obj_postupdate_mt;
+extern int ps_obj_deferred_pos_anim_mt;
 
 namespace
 {
@@ -57,6 +59,112 @@ void dispatch_postupdate_vec(Vec& vec, bool sleeping_flag)
     {
         for (auto& o : vec)
             o->PostUpdateCL(sleeping_flag);
+    }
+}
+
+void dispatch_deferred_position_anim_core_cl(IGameObject** b, IGameObject** e)
+{
+    const u32 n = u32(e - b);
+    if (!n)
+        return;
+    if (ps_obj_deferred_pos_anim_mt != 0 && TaskScheduler)
+    {
+        xr_parallel_for(TaskRange(b, e), [&](const TaskRange<IGameObject**>& range)
+        {
+            ZoneScopedN("ol_DeferredPositionAnimCoreParallelChunk");
+            ZoneTextF("[%u,%u) / %u", u32(range.begin() - b), u32(range.end() - b), n);
+            for (IGameObject** i = range.begin(); i != range.end(); ++i)
+            {
+                // Crow snapshot can include objects that skipped SingleUpdate (e.g. processing_deactivate — smart covers).
+                if ((*i)->GetUpdateFrame() != Device.dwFrame)
+                    continue;
+                (*i)->DeferredUpdatePositionAnimationCL();
+            }
+        });
+        return;
+    }
+    constexpr u32 object_profile_batch = 256;
+    for (IGameObject** batch_b = b; batch_b < e; batch_b += object_profile_batch)
+    {
+        ZoneScopedN("ol_DeferredPositionAnimCoreBatch");
+        IGameObject** batch_e = batch_b + object_profile_batch;
+        if (batch_e > e)
+            batch_e = e;
+        ZoneTextF("[%u,%u) / %u", u32(batch_b - b), u32(batch_e - b), n);
+        for (IGameObject** i = batch_b; i < batch_e; ++i)
+        {
+            // Crow snapshot can include objects that skipped SingleUpdate (e.g. processing_deactivate — smart covers).
+            if ((*i)->GetUpdateFrame() != Device.dwFrame)
+                continue;
+            (*i)->DeferredUpdatePositionAnimationCL();
+        }
+    }
+}
+
+void dispatch_deferred_position_anim_apply_cl(IGameObject** b, IGameObject** e)
+{
+    const u32 n = u32(e - b);
+    if (!n)
+        return;
+    constexpr u32 object_profile_batch = 256;
+    for (IGameObject** batch_b = b; batch_b < e; batch_b += object_profile_batch)
+    {
+        ZoneScopedN("ol_DeferredPositionAnimApplyBatch");
+        IGameObject** batch_e = batch_b + object_profile_batch;
+        if (batch_e > e)
+            batch_e = e;
+        ZoneTextF("[%u,%u) / %u", u32(batch_b - b), u32(batch_e - b), n);
+        for (IGameObject** i = batch_b; i < batch_e; ++i)
+        {
+            if ((*i)->GetUpdateFrame() != Device.dwFrame)
+                continue;
+            (*i)->ApplyDeferredPositionAnimationCL();
+        }
+    }
+}
+
+void dispatch_deferred_late_update_cl(IGameObject** b, IGameObject** e)
+{
+    const u32 n = u32(e - b);
+    if (!n)
+        return;
+    constexpr u32 object_profile_batch = 256;
+    for (IGameObject** batch_b = b; batch_b < e; batch_b += object_profile_batch)
+    {
+        ZoneScopedN("ol_DeferredLateUpdateBatch");
+        IGameObject** batch_e = batch_b + object_profile_batch;
+        if (batch_e > e)
+            batch_e = e;
+        ZoneTextF("[%u,%u) / %u", u32(batch_b - b), u32(batch_e - b), n);
+        for (IGameObject** i = batch_b; i < batch_e; ++i)
+        {
+            if ((*i)->GetUpdateFrame() != Device.dwFrame)
+                continue;
+            (*i)->DeferredLateUpdateCL();
+        }
+    }
+}
+
+void dispatch_deferred_exec_look_cl(IGameObject** b, IGameObject** e)
+{
+    const u32 n = u32(e - b);
+    if (!n)
+        return;
+    const float dt = Device.fTimeDelta;
+    constexpr u32 object_profile_batch = 256;
+    for (IGameObject** batch_b = b; batch_b < e; batch_b += object_profile_batch)
+    {
+        ZoneScopedN("ol_DeferredExecLook");
+        IGameObject** batch_e = batch_b + object_profile_batch;
+        if (batch_e > e)
+            batch_e = e;
+        ZoneTextF("[%u,%u) / %u", u32(batch_b - b), u32(batch_e - b), n);
+        for (IGameObject** i = batch_b; i < batch_e; ++i)
+        {
+            if ((*i)->GetUpdateFrame() != Device.dwFrame)
+                continue;
+            (*i)->DeferredExecLookCL(dt);
+        }
     }
 }
 
@@ -161,26 +269,10 @@ void CObjectList::o_sleep(IGameObject* O)
 void CObjectList::SingleUpdate(IGameObject* O)
 {
     if (Device.dwFrame == O->GetUpdateFrame())
-    {
-#ifdef DEBUG
-// if (O->getDestroy())
-// Msg ("- !!!processing_enabled ->destroy_queue.push_back %s[%d] frame [%d]",O->cName().c_str(), O->ID(),
-// Device.dwFrame);
-#endif // #ifdef DEBUG
-
         return;
-    }
 
     if (!O->processing_enabled())
-    {
-#ifdef DEBUG
-// if (O->getDestroy())
-// Msg ("- !!!processing_enabled ->destroy_queue.push_back %s[%d] frame [%d]",O->cName().c_str(), O->ID(),
-// Device.dwFrame);
-#endif // #ifdef DEBUG
-
         return;
-    }
 
     if (O->H_Parent())
         SingleUpdate(O->H_Parent());
@@ -191,10 +283,11 @@ void CObjectList::SingleUpdate(IGameObject* O)
 
     {
         ZoneScopedN("ol_ObjUpdateCL");
-        O->UpdateCL();
+        O->UpdateCL_Early();
     }
 
-    VERIFY3(O->GetDbgUpdateFrame() == Device.dwFrame, "Broken sequence of calls to 'UpdateCL'", O->cName().c_str());
+    // Same-frame marker set before UpdateCL_Early; must still match (GetDbgUpdateFrame is DEBUG-only).
+    R_ASSERT3(O->GetUpdateFrame() == Device.dwFrame, "Broken sequence after UpdateCL_Early", O->cName().c_str());
 #if 0 // ndef DEBUG
     __try
     {
@@ -258,7 +351,7 @@ void CObjectList::dispatch_singleupdate_workload(IGameObject** b, IGameObject** 
     if (!n)
         return;
 
-    // SingleUpdate -> UpdateCL must stay on the main thread: game/AI/scripts/physics are not MT-safe.
+    // SingleUpdate -> UpdateCL_Early must stay on the main thread: game/AI/scripts/physics are not MT-safe.
     constexpr u32 object_profile_batch = 256;
     for (IGameObject** batch_b = b; batch_b < e; batch_b += object_profile_batch)
     {
@@ -372,6 +465,24 @@ void CObjectList::Update(bool bForce)
             {
                 ZoneScopedN("ol_SingleUpdate");
                 dispatch_singleupdate_workload(b, e);
+            }
+
+            {
+                ZoneScopedN("ol_DeferredPositionAnimCorePass");
+                dispatch_deferred_position_anim_core_cl(b, e);
+            }
+            {
+                ZoneScopedN("ol_DeferredPositionAnimApplyPass");
+                dispatch_deferred_position_anim_apply_cl(b, e);
+            }
+            {
+                ZoneScopedN("ol_DeferredLateUpdatePass");
+                dispatch_deferred_late_update_cl(b, e);
+            }
+
+            {
+                ZoneScopedN("ol_DeferredExecLookPass");
+                dispatch_deferred_exec_look_cl(b, e);
             }
 
             //--#SM+#-- PostUpdateCL для всех клиентских объектов [for crowed and non-crowed]

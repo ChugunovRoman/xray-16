@@ -29,7 +29,7 @@ public:
     virtual bool net_Spawn(CSE_Abstract* DC);
     virtual void net_Destroy();
 
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
     virtual void shedule_Update(u32 dt);
 
     virtual void OnH_A_Chield();

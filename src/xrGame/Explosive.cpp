@@ -466,7 +466,7 @@ void CExplosive::GetExplVelocity(Fvector& v)
     smart_cast<CPhysicsShellHolder*>(cast_game_object())->PHGetLinearVell(v);
 }
 
-void CExplosive::UpdateCL()
+void CExplosive::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CExplosive");
     // VERIFY(!this->getDestroy());

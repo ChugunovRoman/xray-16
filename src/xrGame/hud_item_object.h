@@ -28,7 +28,7 @@ public:
     virtual void net_Destroy();
     virtual bool ActivateItem();
     virtual void DeactivateItem();
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
     void renderable_Render(u32 context_id, IRenderable* root) override;
     void on_renderable_Render(u32 context_id, IRenderable* root) override;
     virtual void OnMoveToRuck(const SInvItemPlace& prev);

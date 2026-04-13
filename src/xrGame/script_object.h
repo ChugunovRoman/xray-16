@@ -22,6 +22,6 @@ public:
     virtual void net_Destroy();
     virtual bool UsedAI_Locations();
     virtual void shedule_Update(u32 DT);
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
     virtual CScriptEntity* cast_script_entity() { return this; }
 };

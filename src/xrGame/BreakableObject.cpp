@@ -57,10 +57,10 @@ void CBreakableObject::shedule_Update(u32 dt)
     if (m_pPhysicsShell && !bRemoved && Device.dwTimeGlobal - m_break_time > m_remove_time)
         SendDestroy();
 }
-void CBreakableObject::UpdateCL()
+void CBreakableObject::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CBreakableObject");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
     //	Fmatrix	d;
     if (m_pPhysicsShell && m_pPhysicsShell->isFullActive())
         m_pPhysicsShell->InterpolateGlobalTransform(&XFORM());

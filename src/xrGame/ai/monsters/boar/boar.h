@@ -16,7 +16,7 @@ public:
     virtual bool net_Spawn(CSE_Abstract* DC);
     virtual void reinit();
 
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
 
     virtual bool CanExecRotationJump() { return true; }
     virtual void CheckSpecParams(u32 spec_params);

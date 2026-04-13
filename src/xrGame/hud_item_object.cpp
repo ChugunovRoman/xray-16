@@ -122,11 +122,11 @@ void CHudItemObject::net_Destroy()
 
 bool CHudItemObject::ActivateItem() { return (CHudItem::ActivateItem()); }
 void CHudItemObject::DeactivateItem() { CHudItem::DeactivateItem(); }
-void CHudItemObject::UpdateCL()
+void CHudItemObject::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CHudItemObject");
-    CInventoryItemObject::UpdateCL();
-    CHudItem::UpdateCL();
+    CInventoryItemObject::UpdateCL_Early();
+    CHudItem::UpdateCL_Early();
 }
 
 void CHudItemObject::renderable_Render(u32 context_id, IRenderable* root) { CHudItem::renderable_Render(context_id, root); }

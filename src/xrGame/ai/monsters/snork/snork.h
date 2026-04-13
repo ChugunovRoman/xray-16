@@ -14,7 +14,7 @@ public:
 
     virtual void Load(LPCSTR section);
     virtual void reinit();
-    virtual void UpdateCL();
+    void UpdateCL_Early() override;
     virtual void CheckSpecParams(u32 spec_params);
     virtual void jump(const Fvector& position, float factor);
     virtual bool ability_jump_over_physics() { return true; }

@@ -38,6 +38,13 @@
 #include "xrEngine/profiler.h"
 #include "npc_cpp_profile.h"
 #include "performance_cvars.h"
+#include "xrCore/Threading/Lock.hpp"
+#include "xrCore/Threading/ScopeLock.hpp"
+
+namespace
+{
+Lock g_stalker_deferred_pos_anim_core_guard;
+}
 #include "date_time.h"
 #include "CharacterPhysicsSupport.h"
 #include "ai/monsters/snork/snork.h"
@@ -568,7 +575,7 @@ void CCustomMonster::update_sound_player()
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterSoundPlayerUpdate);
     sound().update(client_update_fdelta());
 }
-void CCustomMonster::UpdateCL()
+void CCustomMonster::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CCustomMonster");
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCL);
@@ -588,7 +595,7 @@ void CCustomMonster::UpdateCL()
     {
         ZoneScopedN("ucl_cm_inherited");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLInherited);
-        inherited::UpdateCL();
+        inherited::UpdateCL_Early();
     }
     STOP_PROFILE
 
@@ -703,12 +710,60 @@ void CCustomMonster::UpdateCL()
         animation_movement()->DBG_verify_position_not_chaged();
 #endif
 
+    STOP_PROFILE
+}
+
+void CCustomMonster::UpdateCL()
+{
+    UpdateCL_Early();
+    DeferredUpdatePositionAnimationCL();
+    ApplyDeferredPositionAnimationCL();
+    DeferredLateUpdateCL();
+}
+
+void CCustomMonster::DeferredUpdatePositionAnimationCL()
+{
+    ZoneScopedN("ucl_cm_deferred_pos_anim_core");
+    if (!g_Alive() || getDestroy() || !Local() || NET.empty())
+        return;
+    if (GetUpdateFrame() != Device.dwFrame)
+        return;
+    if (!cast_stalker())
+        return;
+
+#pragma todo("Dima to All : this is FAKE, network is not supported here!")
+    START_PROFILE("CustomMonster/client_update/movement")
+    // Stalker movement core still touches shared AI/path state (moving_objects, path builders, graph masks).
+    // Keep the call serialized until those services become truly per-NPC or internally synchronized.
+    ScopeLock mt_guard(&g_stalker_deferred_pos_anim_core_guard);
+    movement().on_frame(character_physics_support()->movement(), NET_Last.p_pos);
+    STOP_PROFILE
+}
+
+void CCustomMonster::ApplyDeferredPositionAnimationCL()
+{
+    ZoneScopedN("ucl_cm_apply_deferred_pos_anim");
+    if (!g_Alive())
+        return;
+    if (NET.empty())
+        return;
+
     if (Local() && g_Alive())
     {
 #pragma todo("Dima to All : this is FAKE, network is not supported here!")
-        ZoneScopedN("ucl_cm_update_position_anim");
-        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLUpdatePositionAnimation);
-        UpdatePositionAnimation();
+        if (cast_stalker())
+        {
+            ZoneScopedN("ucl_cm_apply_deferred_pos_anim/select");
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLUpdatePositionAnimation);
+            if (!bfScriptAnimation())
+                SelectAnimation(XFORM().k, movement().detail().direction(), movement().speed());
+        }
+        else
+        {
+            ZoneScopedN("ucl_cm_update_position_anim");
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLUpdatePositionAnimation);
+            UpdatePositionAnimation();
+        }
     }
 
     // Use interpolated/last state
@@ -753,9 +808,9 @@ void CCustomMonster::UpdateCL()
     if (animation_movement())
         animation_movement()->DBG_verify_position_not_chaged();
 #endif
-
-    STOP_PROFILE
 }
+
+void CCustomMonster::DeferredExecLookCL(float dt) { Exec_Look(dt); }
 
 void CCustomMonster::UpdatePositionAnimation()
 {

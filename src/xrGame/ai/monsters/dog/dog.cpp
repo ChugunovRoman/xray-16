@@ -178,10 +178,10 @@ void CAI_Dog::reinit()
     Home->set_move_dists(min_move_dist, max_move_dist);
 }
 
-void CAI_Dog::UpdateCL()
+void CAI_Dog::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CAI_Dog");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
 
     if (!::detail::object_exists_in_alife_registry(ID()))
     {

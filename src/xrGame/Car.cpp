@@ -416,11 +416,11 @@ void CCar::UpdateEx(float fov)
 }
 
 bool CCar::AlwaysTheCrow() { return (m_car_weapon && m_car_weapon->IsActive()); }
-void CCar::UpdateCL()
+void CCar::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CCar");
-    inherited::UpdateCL();
-    CExplosive::UpdateCL();
+    inherited::UpdateCL_Early();
+    CExplosive::UpdateCL_Early();
     if (m_car_weapon)
     {
         m_car_weapon->UpdateCL();

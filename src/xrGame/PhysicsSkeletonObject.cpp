@@ -76,10 +76,10 @@ bool CPhysicsSkeletonObject::net_SaveRelevant()
 }
 
 bool CPhysicsSkeletonObject::UsedAI_Locations() { return (FALSE); }
-void CPhysicsSkeletonObject::UpdateCL()
+void CPhysicsSkeletonObject::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CPhysicsSkeletonObject");
-    inherited::UpdateCL();
+    inherited::UpdateCL_Early();
     PHObjectPositionUpdate();
 }
 
