@@ -549,31 +549,25 @@ void IGame_Persistent::ShowLoadingScreen(bool show) const
     m_pLoadingScreen->Show(show);
 }
 
-void IGame_Persistent::OnFrame()
+void IGame_Persistent::OnFrameBeforePreRender()
 {
-    ZoneScoped;
+    ZoneScopedN("IGame_Persistent::OnFrameBeforePreRender");
 
     SpatialSpace.update();
     SpatialSpacePhysic.update();
 
 #ifndef _EDITOR
-    if (!Device.Paused() || Device.dwPrecacheFrame)
-        Environment().OnFrame();
-
     stats.Starting = ps_needtoplay.size();
     stats.Active = ps_active.size();
     stats.Destroying = ps_destroy.size();
-    // Play req particle systems
     while (ps_needtoplay.size())
     {
         CPS_Instance* psi = ps_needtoplay.back();
         ps_needtoplay.pop_back();
         psi->Play(false);
     }
-    // Destroy inactive particle systems
     while (ps_destroy.size())
     {
-        // u32 cnt = ps_destroy.size();
         CPS_Instance* psi = ps_destroy.back();
         VERIFY(psi);
         if (psi->Locked())
@@ -585,6 +579,22 @@ void IGame_Persistent::OnFrame()
         psi->PSI_internal_delete();
     }
 #endif
+}
+
+void IGame_Persistent::OnFrameEnvironment()
+{
+    ZoneScopedN("IGame_Persistent::OnFrameEnvironment");
+
+#ifndef _EDITOR
+    if (!Device.Paused() || Device.dwPrecacheFrame)
+        Environment().OnFrame();
+#endif
+}
+
+void IGame_Persistent::OnFrame()
+{
+    ZoneScoped;
+    // `Environment().OnFrame()` runs from `CRenderDevice::ProcessFrame` via `OnFrameEnvironment` before PreRender.
 }
 
 void IGame_Persistent::destroy_particles(const bool& all_particles)

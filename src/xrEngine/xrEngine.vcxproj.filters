@@ -375,6 +375,12 @@
     <ClInclude Include="device.h">
       <Filter>Render\Execution &amp; 3D</Filter>
     </ClInclude>
+    <ClInclude Include="EngineThreading.h">
+      <Filter>Render\Execution &amp; 3D</Filter>
+    </ClInclude>
+    <ClInclude Include="FrameTaskGroup.hpp">
+      <Filter>Render\Execution &amp; 3D</Filter>
+    </ClInclude>
     <ClInclude Include="StatGraph.h">
       <Filter>Render\Execution &amp; 3D</Filter>
     </ClInclude>
@@ -594,6 +600,9 @@
       <Filter>editor</Filter>
     </ClCompile>
     <ClCompile Include="device.cpp">
+      <Filter>Render\Execution &amp; 3D</Filter>
+    </ClCompile>
+    <ClCompile Include="EngineThreading.cpp">
       <Filter>Render\Execution &amp; 3D</Filter>
     </ClCompile>
     <ClCompile Include="Device_create.cpp">

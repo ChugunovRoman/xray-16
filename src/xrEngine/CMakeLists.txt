@@ -315,6 +315,9 @@ target_sources_grouped(
     FILES
     device.cpp
     device.h
+    EngineThreading.cpp
+    EngineThreading.h
+    FrameTaskGroup.hpp
     Device_create.cpp
     Device_destroy.cpp
     Device_imgui.cpp

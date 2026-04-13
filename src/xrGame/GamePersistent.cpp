@@ -739,10 +739,8 @@ void CGamePersistent::OnFrame()
     }
     inherited::OnFrame();
 
-    if (!Device.Paused())
-    {
-        Engine.Sheduler.Update();
-    }
+    // `Engine.Sheduler.Update()` runs on the engine `GameThread` task (see `EngineThreading.cpp`), after
+    // `seqFrame` and before `seqParallel` / `seqFrameMT`, matching ixray ordering.
 
     // update weathers ambient
     if (!Device.Paused())

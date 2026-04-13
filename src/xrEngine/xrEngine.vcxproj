@@ -40,6 +40,8 @@
     <ClInclude Include="CustomHUD.h" />
     <ClInclude Include="defines.h" />
     <ClInclude Include="device.h" />
+    <ClInclude Include="EngineThreading.h" />
+    <ClInclude Include="FrameTaskGroup.hpp" />
     <ClInclude Include="editor_base.h" />
     <ClInclude Include="editor_helper.h" />
     <ClInclude Include="edit_actions.h" />
@@ -121,6 +123,7 @@
     <ClCompile Include="CustomHUD.cpp" />
     <ClCompile Include="defines.cpp" />
     <ClCompile Include="device.cpp" />
+    <ClCompile Include="EngineThreading.cpp" />
     <ClCompile Include="Device_create.cpp" />
     <ClCompile Include="Device_destroy.cpp" />
     <ClCompile Include="Device_imgui.cpp" />

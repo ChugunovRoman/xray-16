@@ -159,6 +159,10 @@ public:
     virtual void OnAppActivate();
     virtual void OnAppDeactivate();
     virtual void OnFrame();
+    /** Main thread only: spatial DB + persistent particle queues before `PreRenderThread` (ixray order vs `UpdateParticles`). */
+    virtual void OnFrameBeforePreRender();
+    /** Main thread only: `CEnvironment::OnFrame` before `PreRenderThread` (single call per frame; not in `seqFrame`). */
+    virtual void OnFrameEnvironment();
 
     // вызывается только когда изменяется тип игры
     virtual void OnGameStart();

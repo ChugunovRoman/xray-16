@@ -10,6 +10,7 @@
 
 #include "IGame_Level.h"
 #include "IGame_Persistent.h"
+#include "EngineThreading.h"
 
 #include "xrScriptEngine/script_space.hpp"
 
@@ -277,26 +278,46 @@ void CRenderDevice::ProcessFrame()
 
     const u64 frameStartTime = TimerGlobal.GetElapsed_ms();
 
+    {
+        ZoneScopedN("seqParallelBeforRender");
+        xr_vector<fastdelegate::FastDelegate0<>> befor_batch;
+        befor_batch.swap(seqParallelBeforRender);
+        for (auto& d : befor_batch)
+            d();
+        befor_batch.clear();
+    }
+
+    if (g_pGamePersistent)
+    {
+        ZoneScopedN("OnFrameBeforePreRender");
+        g_pGamePersistent->OnFrameBeforePreRender();
+    }
+
+    // `CEnvironment::OnFrame` before PreRender: env is stable for `seqParallelRender` / `ParticleWorkerCallback` on
+    // the worker. Uses `Device.vCameraPosition` before `OnCameraUpdated` this frame (same as prior early-seqFrame use).
+    if (g_pGamePersistent)
+    {
+        ZoneScopedN("Environment_OnFrame");
+        g_pGamePersistent->OnFrameEnvironment();
+    }
+
+    if (ModelDeferredClear)
+    {
+        ZoneScopedN("ModelDeferredClear");
+        ModelDeferredClear();
+    }
+
+    secondary_tasks.run([] { XRay::Engine::PreRenderThread(); });
+
     FrameMove();
 
     OnCameraUpdated();
 
-    const auto& processSeqParallel = TaskScheduler->AddTask([this]
-    {
-        ZoneScopedN("ProcessParallelSequence");
-        // Snapshot so delegates can call remove_from_seq_parallel (next-frame queue) without
-        // invalidating the iteration; see docs/PARALLEL_WORKER_BOUNDARY.md.
-        xr_vector<fastdelegate::FastDelegate0<>> parallel_batch;
-        parallel_batch.swap(seqParallel);
-        for (u32 pit = 0; pit < parallel_batch.size(); pit++)
-            parallel_batch[pit]();
-        parallel_batch.clear();
-        seqFrameMT.Process();
-    });
+    secondary_tasks.run([] { XRay::Engine::GameThread(); });
 
     DoRender();
 
-    TaskScheduler->Wait(processSeqParallel);
+    secondary_tasks.wait();
 
     const u64 frameEndTime = TimerGlobal.GetElapsed_ms();
     const u64 frameTime = frameEndTime - frameStartTime;

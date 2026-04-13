@@ -24,9 +24,9 @@
 #include "xrScriptEngine/ScriptExporter.hpp"
 
 #include <SDL.h>
+#include <functional>
 
-// refs
-class Task;
+#include "FrameTaskGroup.hpp"
 
 constexpr float VIEWPORT_NEAR = 0.2f;
 constexpr float VIEWPORT_NEAR_3D = 0.01f;
@@ -126,7 +126,15 @@ public:
     MessageRegistry<pureFrame> seqFrameMT;
     MessageRegistry<pureDeviceReset> seqDeviceReset;
     MessageRegistry<pureUIReset> seqUIReset;
+    /** Main-thread / GameThread parallel hooks (see EngineThreading, PARALLEL_WORKER_BOUNDARY). */
     xr_vector<fastdelegate::FastDelegate0<>> seqParallel;
+    /** Runs on main before `PreRenderThread` (ixray `seqParallelBeforRender`). */
+    xr_vector<fastdelegate::FastDelegate0<>> seqParallelBeforRender;
+    /** Runs on `PreRenderThread` before optional particle worker (ixray `seqParallelRender`). */
+    xr_vector<fastdelegate::FastDelegate0<>> seqParallelRender;
+    std::function<void()> ParticleWorkerCallback;
+    /** Optional: flush model pool delete queue on main before `PreRenderThread` (ixray `ModelDefferClear`). Set from R2 `CRender::create`. */
+    std::function<void()> ModelDeferredClear;
     CSecondVPParams m_SecondViewport; // --#SM+#-- +SecondVP+
 
 private:
@@ -265,7 +273,8 @@ public:
     }
 
 public:
-    // Multi-threading
+    // Multi-threading (ixray `secondary_tasks`: PreRenderThread + GameThread per frame)
+    xr_frame_task_group secondary_tasks;
     Event PresentationFinished = nullptr;
 
     static constexpr u32 MaximalWaitTime = 16; // ms
@@ -293,6 +302,20 @@ public:
             std::find(seqParallel.begin(), seqParallel.end(), delegate);
         if (I != seqParallel.end())
             seqParallel.erase(I);
+    }
+
+    ICF void remove_from_seq_parallel_beforerender(const fastdelegate::FastDelegate0<>& delegate)
+    {
+        auto I = std::find(seqParallelBeforRender.begin(), seqParallelBeforRender.end(), delegate);
+        if (I != seqParallelBeforRender.end())
+            seqParallelBeforRender.erase(I);
+    }
+
+    ICF void remove_from_seq_parallel_render(const fastdelegate::FastDelegate0<>& delegate)
+    {
+        auto I = std::find(seqParallelRender.begin(), seqParallelRender.end(), delegate);
+        if (I != seqParallelRender.end())
+            seqParallelRender.erase(I);
     }
 
 private:

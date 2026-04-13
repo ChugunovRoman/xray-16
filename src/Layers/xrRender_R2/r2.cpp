@@ -2,6 +2,7 @@
 
 #include "xrCore/PostProcess/PPInfo.hpp"
 
+#include "xrEngine/device.h"
 #include "xrEngine/IGame_Persistent.h"
 #include "xrEngine/GameFont.h"
 #include "xrEngine/PerformanceAlert.hpp"
@@ -509,6 +510,11 @@ void CRender::create()
     Target = xr_new<CRenderTarget>(); // Main target
 
     Models = xr_new<CModelPool>();
+    Device.ModelDeferredClear = [this]()
+    {
+        if (Models)
+            Models->DeleteQueue();
+    };
     PSLibrary.OnCreate();
     HWOCC.occq_create(occq_size);
 
@@ -525,6 +531,7 @@ void CRender::create()
 
 void CRender::destroy()
 {
+    Device.ModelDeferredClear = nullptr;
 #if defined(USE_DX11)
     FluidManager.Destroy();
 #endif
@@ -632,8 +639,7 @@ void CRender::OnCameraUpdated()
 void CRender::OnFrame()
 {
     ZoneScoped;
-
-    Models->DeleteQueue();
+    // `Models->DeleteQueue()` runs from `Device.ModelDeferredClear` in `ProcessFrame` before `PreRenderThread`.
 
     if (g_pGamePersistent->MainMenuActiveOrLevelNotExist())
         return;

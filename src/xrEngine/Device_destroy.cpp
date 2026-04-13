@@ -10,6 +10,9 @@ void CRenderDevice::Destroy()
 
     ZoneScoped;
     Log("Destroying Render...");
+    secondary_tasks.wait();
+    ParticleWorkerCallback = nullptr;
+    ModelDeferredClear = nullptr;
     b_is_Ready = false;
     Statistic->OnDeviceDestroy();
     GEnv.Render->OnDeviceDestroy(false);
@@ -23,6 +26,8 @@ void CRenderDevice::Destroy()
     seqFrameMT.Clear();
     seqDeviceReset.Clear();
     seqParallel.clear();
+    seqParallelBeforRender.clear();
+    seqParallelRender.clear();
     xr_delete(Statistic);
 
     SDL_DestroyWindow(m_sdlWnd);

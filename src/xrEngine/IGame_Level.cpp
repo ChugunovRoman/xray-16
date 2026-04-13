@@ -216,10 +216,9 @@ void IGame_Level::OnFrame()
 {
     ZoneScopedN("lvl_OnFrame");
 
-    {
-        ZoneScopedN("lvl_snd_dispatch");
-        SoundEvent_Dispatch();
-    }
+    // `SoundEvent_Dispatch` runs on the dedicated `GameThread` worker (see `EngineThreading.cpp`), after
+    // `seqFrame` and before `Engine.Sheduler.Update`, matching ixray ordering. Lua-bound `feel_sound_new`
+    // stays off unrelated `TaskScheduler` parallel paths (e.g. object list / ray batch).
 
     VERIFY(bReady);
     {
