@@ -38,6 +38,7 @@
 #include "xrEngine/profiler.h"
 #include "npc_cpp_profile.h"
 #include "performance_cvars.h"
+#include "VisionUpdateOrchestrator.h"
 #include "xrCore/Threading/Lock.hpp"
 #include "xrCore/Threading/ScopeLock.hpp"
 
@@ -275,7 +276,7 @@ void CCustomMonster::reinit()
     m_client_update_delta = 0;
     m_last_client_update_time = Device.dwTimeGlobal;
 
-    eye_pp_stage = 0;
+    m_vision_pipeline_phase = EVisionPipelinePhase::QueryFrustum;
     m_dwLastUpdateTime = 0xffffffff;
     m_tEyeShift.set(0, 0, 0);
     m_fEyeShiftYaw = 0.f;
@@ -901,7 +902,13 @@ void CCustomMonster::eye_pp_s2()
     u32 dwTime = Level().timeServer();
     u32 dwDT = dwTime - eye_pp_timestamp;
     eye_pp_timestamp = dwTime;
-    feel_vision_update(this, eye_matrix.c, float(dwDT) / 1000.f, memory().visual().transparency_threshold());
+    {
+        ZoneScopedN("vision/trace");
+        const u32 per_npc_cap = (u32)_max(1, npc_perf_vision_trace_budget);
+        const u32 allocated = CVisionUpdateOrchestrator::TakeRayBudget(*this, per_npc_cap);
+        feel_vision_update_staged(
+            this, eye_matrix.c, float(dwDT) / 1000.f, memory().visual().transparency_threshold(), allocated);
+    }
     Level().AIStats.VisRayTests.End();
 }
 
@@ -915,9 +922,9 @@ void CCustomMonster::Exec_Visibility()
         return;
 
     Level().AIStats.Vis.Begin();
-    switch (eye_pp_stage % 2)
+    switch (m_vision_pipeline_phase)
     {
-    case 0:
+    case EVisionPipelinePhase::QueryFrustum:
         {
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterVisibilityS0);
             eye_pp_s0();
@@ -926,15 +933,16 @@ void CCustomMonster::Exec_Visibility()
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterVisibilityS1);
             eye_pp_s1();
         }
+        m_vision_pipeline_phase = EVisionPipelinePhase::RayTrace;
         break;
-    case 1:
+    case EVisionPipelinePhase::RayTrace:
         {
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterVisibilityS2);
             eye_pp_s2();
         }
+        m_vision_pipeline_phase = EVisionPipelinePhase::QueryFrustum;
         break;
     }
-    ++eye_pp_stage;
     Level().AIStats.Vis.End();
 }
 

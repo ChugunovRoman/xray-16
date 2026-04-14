@@ -1476,6 +1476,8 @@ target_sources(xrGame PRIVATE
     UIZoneMap.h
     vision_client.cpp
     vision_client.h
+    VisionUpdateOrchestrator.cpp
+    VisionUpdateOrchestrator.h
     vision_client_inline.h
     visual_memory_manager.cpp
     visual_memory_manager.h

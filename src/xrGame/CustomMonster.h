@@ -30,6 +30,12 @@ class CAI_Stalker;
 class CDangerObject;
 class moving_object;
 
+enum class EVisionPipelinePhase : u8
+{
+    QueryFrustum = 0,
+    RayTrace = 1,
+};
+
 class CCustomMonster : public CEntityAlive,
                        public CScriptEntity,
                        public Feel::Vision,
@@ -71,7 +77,7 @@ public:
 
     float m_fCurSpeed;
 
-    u32 eye_pp_stage;
+    EVisionPipelinePhase m_vision_pipeline_phase{EVisionPipelinePhase::QueryFrustum};
     u32 eye_pp_timestamp;
     u32 m_next_visibility_update_time{0};
     u32 m_visibility_update_interval{0};

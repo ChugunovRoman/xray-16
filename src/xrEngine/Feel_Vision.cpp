@@ -148,9 +148,8 @@ void Vision::feel_vision_query(Fmatrix& mFull, Fvector& P)
     }
 }
 
-void Vision::feel_vision_update(IGameObject* parent, Fvector& P, float dt, float vis_threshold)
+void Vision::feel_vision_merge_after_frustum(IGameObject* parent)
 {
-    std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
     // B-A = objects, that become visible
     if (!seen.empty())
     {
@@ -178,11 +177,31 @@ void Vision::feel_vision_update(IGameObject* parent, Fvector& P, float dt, float
             o_delete(diff[i]);
     }
 
-    // Copy results and perform traces
     query = seen;
-    o_trace(P, dt, vis_threshold);
 }
-void Vision::o_trace(Fvector& P, float dt, float vis_threshold)
+
+namespace
+{
+/** Sentinel for `o_trace`: use `npc_perf_vision_trace_budget` (legacy `feel_vision_update`). */
+constexpr u32 kVisionTraceBudgetFromCvar = ~0u;
+} // namespace
+
+void Vision::feel_vision_update(IGameObject* parent, Fvector& P, float dt, float vis_threshold)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
+    feel_vision_merge_after_frustum(parent);
+    o_trace(P, dt, vis_threshold, kVisionTraceBudgetFromCvar);
+}
+
+void Vision::feel_vision_update_staged(
+    IGameObject* parent, Fvector& P, float dt, float vis_threshold, u32 trace_pass_cap)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
+    feel_vision_merge_after_frustum(parent);
+    o_trace(P, dt, vis_threshold, trace_pass_cap);
+}
+
+void Vision::o_trace(Fvector& P, float dt, float vis_threshold, u32 trace_pass_cap)
 {
     RQR.r_clear();
 
@@ -190,8 +209,17 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold)
     if (!total)
         return;
 
-    const int cfg_budget = _max(1, npc_perf_vision_trace_budget);
-    const u32 budget = _min(total, static_cast<u32>(cfg_budget));
+    u32 budget;
+    if (trace_pass_cap == kVisionTraceBudgetFromCvar)
+    {
+        const int cfg_budget = _max(1, npc_perf_vision_trace_budget);
+        budget = _min(total, static_cast<u32>(cfg_budget));
+    }
+    else
+        budget = _min(total, trace_pass_cap);
+
+    if (budget == 0)
+        return;
     u32 start_index = 0;
     if (total > budget)
     {
@@ -251,7 +279,20 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold)
             else
             {
                 float _u, _v, _range;
-                if (CDB::TestRayTri(P, D, I->Cache.verts, _u, _v, _range, false) && (_range > 0 && _range < f))
+                // Only use cached static triangle after a successful prior query filled verts; never
+                // TestRayTri on o_new zeros / degenerate tris (undefined + can upset collide state under load).
+                bool cached_static_tri = false;
+                if (I->Cache.result)
+                {
+                    const Fvector& va = I->Cache.verts[0];
+                    const Fvector& vb = I->Cache.verts[1];
+                    const Fvector& vc = I->Cache.verts[2];
+                    constexpr float min_edge2 = 1e-10f;
+                    cached_static_tri =
+                        va.distance_to_sqr(vb) > min_edge2 && vb.distance_to_sqr(vc) > min_edge2 && vc.distance_to_sqr(va) > min_edge2;
+                }
+                if (cached_static_tri && CDB::TestRayTri(P, D, I->Cache.verts, _u, _v, _range, false) &&
+                    (_range > 0 && _range < f))
                 {
                     feel_params.vis = 0.f;
                     // Log("cache 1");

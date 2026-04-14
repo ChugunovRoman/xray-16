@@ -208,6 +208,8 @@ u32 npc_perf_binder_far_throttle_ms = 450;
 u32 npc_perf_stalker_vis_interval_near_ms = 0;
 u32 npc_perf_stalker_vis_interval_medium_ms = 260;
 u32 npc_perf_stalker_vis_interval_far_ms = 550;
+u32 npc_perf_vision_global_ray_budget = 8;
+u32 npc_perf_vision_combat_min_rays = 256;
 float npc_perf_monster_vis_near_dist = 35.f;
 float npc_perf_monster_vis_medium_dist = 80.f;
 u32 npc_perf_monster_vis_interval_medium_ms = 220;
@@ -2617,7 +2619,8 @@ void CCC_RegisterCommands()
 
 #ifndef MASTER_GOLD
     // ai
-    // Bit kept for console compatibility; AI vision always runs on main thread (see CCustomMonster::shedule_Update).
+    // Bit kept for console compatibility. Default vision runs on the scheduler / GameThread; optional `seqParallel`
+    // path uses the same GameThread batch (see `CAI_Stalker::shedule_Update` + `EngineThreading::GameThread`).
     CMD3(CCC_Mask, "mt_ai_vision", &g_mt_config, mtAiVision);
     CMD4(CCC_Integer, "r__mt_ai_vision_parallel", &ps_r__mt_ai_vision_parallel, 0, 1);
     CMD3(CCC_Mask, "mt_level_path", &g_mt_config, mtLevelPath);
@@ -2763,6 +2766,8 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_medium_ms", (int*)&npc_perf_stalker_vis_interval_medium_ms, 10, 30000);
     CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_far_ms", (int*)&npc_perf_stalker_vis_interval_far_ms, 10, 30000);
     CMD4(CCC_Integer, "npc_perf_vision_trace_budget", &npc_perf_vision_trace_budget, 1, 128);
+    CMD4(CCC_Integer, "npc_perf_vision_global_ray_budget", (int*)&npc_perf_vision_global_ray_budget, 0, 1000000);
+    CMD4(CCC_Integer, "npc_perf_vision_combat_min_rays", (int*)&npc_perf_vision_combat_min_rays, 0, 128);
     CMD4(CCC_Integer, "npc_perf_vision_skip_dynamic_ray", &npc_perf_vision_skip_dynamic_ray, 0, 1);
     CMD4(CCC_Integer, "npc_perf_vision_static_only", &npc_perf_vision_static_only, 0, 1);
     CMD4(CCC_Float, "npc_perf_vision_cache_pos_slack_m", &npc_perf_vision_cache_pos_slack_m, 0.f, 5.f);

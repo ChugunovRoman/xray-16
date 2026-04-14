@@ -1235,6 +1235,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
             START_PROFILE("stalker/schedule_update/vision")
             {
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleVisibility);
+                // Deferred to `Device.seqParallel` on GameThread (same worker as `Sheduler.Update`), not main.
                 const bool par_vision = ps_r__mt_ai_vision_parallel != 0 && g_mt_config.test(mtAiVision);
                 if (par_vision)
                 {

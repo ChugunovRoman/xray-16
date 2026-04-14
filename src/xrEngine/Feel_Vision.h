@@ -33,7 +33,9 @@ private:
 
     void o_new(IGameObject* E);
     void o_delete(IGameObject* E);
-    void o_trace(Fvector& P, float dt, float vis_threshold);
+    /** `trace_pass_cap == ~0u`: use `npc_perf_vision_trace_budget` (legacy). Else: `min(total, trace_pass_cap)` (0 = no rays). */
+    void o_trace(Fvector& P, float dt, float vis_threshold, u32 trace_pass_cap);
+    void feel_vision_merge_after_frustum(IGameObject* parent);
 
 public:
     Vision(IGameObject const* owner);
@@ -56,6 +58,8 @@ public:
     void feel_vision_clear();
     void feel_vision_query(Fmatrix& mFull, Fvector& P);
     void feel_vision_update(IGameObject* parent, Fvector& P, float dt, float vis_threshold);
+    /** Same merge as `feel_vision_update`, then trace at most `trace_pass_cap` rays (`0` = merge only). */
+    void feel_vision_update_staged(IGameObject* parent, Fvector& P, float dt, float vis_threshold, u32 trace_pass_cap);
     void feel_vision_relcase(IGameObject* object);
     void feel_vision_get(xr_vector<IGameObject*>& R)
     {

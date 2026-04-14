@@ -50,7 +50,11 @@ extern u32 npc_perf_binder_far_throttle_ms;    // throttle: min interval between
 extern u32 npc_perf_stalker_vis_interval_near_ms; // 0 = every schedule tick when Near; >0 when no selected enemy (crowd LOS throttle)
 extern u32 npc_perf_stalker_vis_interval_medium_ms;
 extern u32 npc_perf_stalker_vis_interval_far_ms;
-// npc_perf_vision_* : ENGINE_API in xrEngine/Feel_Vision.h (defined in Feel_Vision.cpp)
+/** 0 = unlimited total LOS rays per frame across NPCs; >0 = cap shared by `CVisionUpdateOrchestrator`. */
+extern u32 npc_perf_vision_global_ray_budget;
+/** When a live stalker has a selected enemy, `TakeRayBudget` requests at least this many rays (still clamped by global). */
+extern u32 npc_perf_vision_combat_min_rays;
+// npc_perf_vision_trace_* etc.: ENGINE_API in xrEngine/Feel_Vision.h (defined in Feel_Vision.cpp)
 
 // CustomMonster visibility (CustomMonster.cpp)
 extern float npc_perf_monster_vis_near_dist;

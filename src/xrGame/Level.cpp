@@ -6,6 +6,7 @@
 #include "xrEngine/IGame_Persistent.h"
 #include "ParticlesObject.h"
 #include "Level.h"
+#include "VisionUpdateOrchestrator.h"
 #include "HUDManager.h"
 #include "xrServer.h"
 #include "NET_Queue.h"
@@ -435,6 +436,8 @@ void CLevel::MakeReconnect()
 void CLevel::OnFrame()
 {
     ZoneScoped;
+
+    CVisionUpdateOrchestrator::BeginFrame();
 
 #ifdef DEBUG
     DBG_RenderUpdate();

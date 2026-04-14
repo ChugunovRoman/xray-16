@@ -1350,6 +1350,7 @@
     <ClInclude Include="ui\UIXmlInit.h" />
     <ClInclude Include="ui\ui_af_params.h" />
     <ClInclude Include="vision_client.h" />
+    <ClInclude Include="VisionUpdateOrchestrator.h" />
     <ClInclude Include="vision_client_inline.h" />
     <ClInclude Include="visual_memory_manager.h" />
     <ClInclude Include="visual_memory_manager_inline.h" />
@@ -3252,6 +3253,10 @@
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
     <ClCompile Include="vision_client.cpp" />
+    <ClCompile Include="VisionUpdateOrchestrator.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
     <ClCompile Include="visual_memory_manager.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
