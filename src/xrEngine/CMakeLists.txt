@@ -318,6 +318,8 @@ target_sources_grouped(
     EngineThreading.cpp
     EngineThreading.h
     FrameTaskGroup.hpp
+    ParticleWorker.cpp
+    ParticleWorker.h
     Device_create.cpp
     Device_destroy.cpp
     Device_imgui.cpp

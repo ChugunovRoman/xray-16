@@ -2,11 +2,11 @@
 
 #include "ParticlesObject.h"
 #include "xrEngine/defines.h"
+#include "xrEngine/ParticleWorker.h"
 #include "Include/xrRender/RenderVisual.h"
 #include "Include/xrRender/ParticleCustom.h"
 #include "xrEngine/Render.h"
 #include "xrEngine/IGame_Persistent.h"
-#include "xrEngine/Environment.h"
 
 const Fvector zero_vel = {0.f, 0.f, 0.f};
 
@@ -64,13 +64,13 @@ void CParticlesObject::Init(LPCSTR p_name, IRender_Sector::sector_id_t sector_id
     shedule_register();
 
     dwLastTime = Device.dwTimeGlobal;
-    mt_dt = 0;
+    m_asyncParticlePendingDt = 0;
 }
 
 //----------------------------------------------------
 CParticlesObject::~CParticlesObject()
 {
-    VERIFY(0 == mt_dt);
+    VERIFY(0 == m_asyncParticlePendingDt);
 
     //	we do not need this since CPS_Instance does it
     //	shedule_unregister		();
@@ -135,7 +135,7 @@ void CParticlesObject::Play(bool bHudMode)
 
     V->Play();
     dwLastTime = Device.dwTimeGlobal - 33ul;
-    mt_dt = 0;
+    m_asyncParticlePendingDt = 0;
     PerformAllTheWork(0);
     m_bStopping = false;
 }
@@ -152,7 +152,7 @@ void CParticlesObject::play_at_pos(const Fvector& pos, BOOL xform)
     V->UpdateParent(m, zero_vel, xform);
     V->Play();
     dwLastTime = Device.dwTimeGlobal - 33ul;
-    mt_dt = 0;
+    m_asyncParticlePendingDt = 0;
     PerformAllTheWork(0);
     m_bStopping = false;
 }
@@ -161,6 +161,8 @@ void CParticlesObject::Stop(BOOL bDefferedStop)
 {
     if (GEnv.isDedicatedServer)
         return;
+
+    m_asyncParticlePendingDt = 0;
 
     IParticleCustom* V = smart_cast<IParticleCustom*>(renderable.visual);
     VERIFY(V);
@@ -178,22 +180,19 @@ void CParticlesObject::shedule_Update(u32 _dt)
     // Update
     if (m_bDead)
         return;
-    u32 dt = Device.dwTimeGlobal - dwLastTime;
+
+    if (psDeviceFlags.test(mtParticles))
+    {
+        UpdateSpatial();
+        return;
+    }
+
+    const u32 dt = Device.dwTimeGlobal - dwLastTime;
     if (dt)
     {
-        if (0)
-        { //.psDeviceFlags.test(mtParticles))	{    //. AlexMX comment this line// NO UNCOMMENT - DON'T WORK PROPERLY
-            mt_dt = dt;
-            fastdelegate::FastDelegate0<> delegate(this, &CParticlesObject::PerformAllTheWork_mt);
-            Device.seqParallel.push_back(delegate);
-        }
-        else
-        {
-            mt_dt = 0;
-            IParticleCustom* V = smart_cast<IParticleCustom*>(renderable.visual);
-            VERIFY(V);
-            V->OnFrame(dt);
-        }
+        IParticleCustom* V = smart_cast<IParticleCustom*>(renderable.visual);
+        VERIFY(V);
+        V->OnFrame(dt);
         dwLastTime = Device.dwTimeGlobal;
     }
     UpdateSpatial();
@@ -203,6 +202,8 @@ void CParticlesObject::PerformAllTheWork(u32 _dt)
 {
     if (GEnv.isDedicatedServer)
         return;
+
+    m_asyncParticlePendingDt = 0;
 
     // Update
     u32 dt = Device.dwTimeGlobal - dwLastTime;
@@ -216,17 +217,47 @@ void CParticlesObject::PerformAllTheWork(u32 _dt)
     UpdateSpatial();
 }
 
-void CParticlesObject::PerformAllTheWork_mt()
+void CParticlesObject::AsyncParticle_PreWorkerCollect()
 {
-    if (GEnv.isDedicatedServer)
+    if (GEnv.isDedicatedServer || m_bDead)
         return;
+    if (!psDeviceFlags.test(mtParticles))
+        return;
+    const u32 dt = Device.dwTimeGlobal - dwLastTime;
+    if (!dt)
+        return;
+    m_asyncParticlePendingDt = dt;
+    ParticleWorker_Enqueue(this);
+}
 
-    if (0 == mt_dt)
-        return; //???
+void CParticlesObject::ParticleWorker_ApplyFrame()
+{
+    if (GEnv.isDedicatedServer || m_bDead)
+    {
+        m_asyncParticlePendingDt = 0;
+        return;
+    }
+    if (!psDeviceFlags.test(mtParticles))
+    {
+        m_asyncParticlePendingDt = 0;
+        return;
+    }
+    if (!m_asyncParticlePendingDt)
+        return;
     IParticleCustom* V = smart_cast<IParticleCustom*>(renderable.visual);
-    VERIFY(V);
-    V->OnFrame(mt_dt);
-    mt_dt = 0;
+    if (!V)
+    {
+        m_asyncParticlePendingDt = 0;
+        return;
+    }
+    V->OnFrame(m_asyncParticlePendingDt);
+    dwLastTime = Device.dwTimeGlobal;
+    m_asyncParticlePendingDt = 0;
+}
+
+void CParticlesObject::ParticleWorker_CancelPending()
+{
+    m_asyncParticlePendingDt = 0;
 }
 
 void CParticlesObject::SetXFORM(const Fmatrix& m)
@@ -277,13 +308,16 @@ void CParticlesObject::renderable_Render(u32 context_id, IRenderable* root)
         return;
 
     VERIFY(renderable.visual);
-    const auto dt = Device.dwTimeGlobal - dwLastTime;
-    if (dt)
+    if (!psDeviceFlags.test(mtParticles))
     {
-        IParticleCustom* V = smart_cast<IParticleCustom*>(renderable.visual);
-        VERIFY(V);
-        V->OnFrame(dt);
-        dwLastTime = Device.dwTimeGlobal;
+        const auto dt = Device.dwTimeGlobal - dwLastTime;
+        if (dt)
+        {
+            IParticleCustom* V = smart_cast<IParticleCustom*>(renderable.visual);
+            VERIFY(V);
+            V->OnFrame(dt);
+            dwLastTime = Device.dwTimeGlobal;
+        }
     }
 
     GEnv.Render->add_Visual(context_id, root, renderable.visual, renderable.xform);

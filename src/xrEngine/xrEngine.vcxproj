@@ -41,6 +41,7 @@
     <ClInclude Include="defines.h" />
     <ClInclude Include="device.h" />
     <ClInclude Include="EngineThreading.h" />
+    <ClInclude Include="ParticleWorker.h" />
     <ClInclude Include="FrameTaskGroup.hpp" />
     <ClInclude Include="editor_base.h" />
     <ClInclude Include="editor_helper.h" />
@@ -124,6 +125,7 @@
     <ClCompile Include="defines.cpp" />
     <ClCompile Include="device.cpp" />
     <ClCompile Include="EngineThreading.cpp" />
+    <ClCompile Include="ParticleWorker.cpp" />
     <ClCompile Include="Device_create.cpp" />
     <ClCompile Include="Device_destroy.cpp" />
     <ClCompile Include="Device_imgui.cpp" />

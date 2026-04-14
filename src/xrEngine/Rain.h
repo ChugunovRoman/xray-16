@@ -10,6 +10,7 @@
 
 #include "Include/xrRender/FactoryPtr.h"
 #include "Include/xrRender/RainRender.h"
+#include "xrCore/Threading/Lock.hpp"
 
 // refs
 class ENGINE_API IRender_DetailModel;
@@ -72,6 +73,9 @@ private:
     // Sounds
     ref_sound snd_Ambient;
 
+    /** Serializes rain item simulation (`UpdateItems` on worker) vs `IRainRender::Render` on main. */
+    Lock rain_items_lock{};
+
     // Utilities
     void p_create();
     void p_destroy();
@@ -94,6 +98,8 @@ public:
 
     void Render();
     void OnFrame();
+    /** Heavy rain item motion / collision (was inside `dxRainRender::Render`); safe vs parallel PreRender. */
+    void UpdateItems();
 };
 
 #endif // RainH

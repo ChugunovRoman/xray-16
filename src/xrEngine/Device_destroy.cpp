@@ -1,5 +1,6 @@
 #include "stdafx.h"
 
+#include "ParticleWorker.h"
 #include "Render.h"
 #include "xr_input.h"
 
@@ -11,6 +12,7 @@ void CRenderDevice::Destroy()
     ZoneScoped;
     Log("Destroying Render...");
     secondary_tasks.wait();
+    ParticleWorker_ShutdownBeforeNullCallback();
     ParticleWorkerCallback = nullptr;
     ModelDeferredClear = nullptr;
     b_is_Ready = false;
@@ -36,6 +38,9 @@ void CRenderDevice::Destroy()
 void CRenderDevice::Reset(bool precache /*= true*/)
 {
     ZoneScoped;
+
+    secondary_tasks.wait();
+    ParticleWorker_ShutdownBeforeNullCallback();
 
     const auto dwWidth_before = dwWidth;
     const auto dwHeight_before = dwHeight;

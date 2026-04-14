@@ -18,7 +18,8 @@ protected:
     bool m_bStopping; //вызвана функция Stop()
 
 protected:
-    u32 mt_dt;
+    /** Non-zero while a frame's `V->OnFrame` is queued for `PreRenderThread` (`mtParticles`). */
+    u32 m_asyncParticlePendingDt{};
 
 protected:
     virtual ~CParticlesObject();
@@ -31,7 +32,6 @@ public:
     virtual void shedule_Update(u32 dt);
     void renderable_Render(u32 context_id, IRenderable* root) override;
     void PerformAllTheWork(u32 dt);
-    void PerformAllTheWork_mt();
 
     Fvector& Position() const;
     void SetXFORM(const Fmatrix& m);
@@ -41,7 +41,11 @@ public:
     void play_at_pos(const Fvector& pos, BOOL xform = FALSE);
     virtual void Play(bool bHudMode);
     void Stop(BOOL bDefferedStop = TRUE);
-    virtual bool Locked() { return mt_dt; }
+    virtual bool Locked() { return m_asyncParticlePendingDt != 0; }
+
+    void AsyncParticle_PreWorkerCollect() override;
+    void ParticleWorker_ApplyFrame() override;
+    void ParticleWorker_CancelPending() override;
     bool IsLooped() { return m_bLooped; }
     bool IsAutoRemove();
     bool IsPlaying();

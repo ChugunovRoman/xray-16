@@ -33,6 +33,13 @@ public:
     IC void PSI_SetLifeTime(float life_time) { m_iLifeTime = iFloor(life_time * 1000); }
     virtual void Play(bool bHudMode) = 0;
     virtual bool Locked() { return false; }
+
+    /** Main thread, end of `OnFrameBeforePreRender`: enqueue async particle sim for `PreRenderThread`. */
+    virtual void AsyncParticle_PreWorkerCollect() {}
+    /** `PreRenderThread` via `ParticleWorkerCallback`: apply one frame of particle sim if enqueued. */
+    virtual void ParticleWorker_ApplyFrame() {}
+    /** After `secondary_tasks.wait()` / device teardown: drop pending async flags. */
+    virtual void ParticleWorker_CancelPending() {}
     virtual shared_str shedule_Name() const { return shared_str("particle_instance"); };
     virtual void shedule_Update(u32 dt);
     virtual IRenderable* dcast_Renderable() { return this; }

@@ -14,6 +14,7 @@
 #include "XR_IOConsole.h"
 #include "Render.h"
 #include "PS_instance.h"
+#include "ParticleWorker.h"
 #include "CustomHUD.h"
 #endif
 
@@ -579,6 +580,8 @@ void IGame_Persistent::OnFrameBeforePreRender()
         psi->PSI_internal_delete();
     }
 #endif
+
+    ParticleWorker_BeginFrameCollect();
 }
 
 void IGame_Persistent::OnFrameEnvironment()

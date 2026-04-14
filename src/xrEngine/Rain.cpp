@@ -4,6 +4,8 @@
 #include "IGame_Persistent.h"
 #include "Environment.h"
 
+#include "xrCore/Threading/ScopeLock.hpp"
+
 #ifdef _EDITOR
 #include "ui_toolscustom.h"
 #else
@@ -175,6 +177,106 @@ void CEffect_Rain::OnFrame()
         // sndP.mad (Device.vCameraPosition,Fvector().set(0,1,0),source_offset);
         // snd_Ambient.set_position(sndP);
         snd_Ambient.set_volume(_max(0.1f, factor) * hemi_factor);
+    }
+}
+
+void CEffect_Rain::UpdateItems()
+{
+    ZoneScopedN("CEffect_Rain::UpdateItems");
+
+    if (GEnv.isDedicatedServer)
+        return;
+    if (!g_pGamePersistent)
+        return;
+#ifndef _EDITOR
+    if (!g_pGameLevel)
+        return;
+#endif
+
+    ScopeLock guard(&rain_items_lock);
+
+    // Keep in sync with `dxRainRender.cpp` (rain streak simulation).
+    static constexpr int max_desired_items = 2500;
+    static constexpr float source_radius = 12.5f;
+    static constexpr float source_offset_sim = 40.f;
+    static constexpr float max_distance_sim = source_offset_sim * 1.25f;
+    static constexpr float sink_offset_sim = -(max_distance_sim - source_offset_sim);
+
+    const float factor = g_pGamePersistent->Environment().CurrentEnv.rain_density;
+    if (factor < EPS_L)
+        return;
+
+    const u32 desired_items = iFloor(0.5f * (1.f + factor) * float(max_desired_items));
+
+    if (items.size() < desired_items)
+    {
+        items.reserve(desired_items);
+        while (items.size() < desired_items)
+        {
+            CEffect_Rain::Item one;
+            Born(one, source_radius);
+            items.push_back(one);
+        }
+    }
+
+    const float b_radius_wrap_sqr = _sqr((source_radius + .5f));
+
+    Fplane src_plane;
+    Fvector norm = {0.f, -1.f, 0.f};
+    Fvector upper;
+    upper.set(Device.vCameraPosition.x, Device.vCameraPosition.y + source_offset_sim, Device.vCameraPosition.z);
+    src_plane.build(upper, norm);
+
+    const Fvector& vEye = Device.vCameraPosition;
+    for (u32 I = 0; I < desired_items; I++)
+    {
+        CEffect_Rain::Item& one = items[I];
+
+        if (one.dwTime_Hit < Device.dwTimeGlobal)
+            Hit(one.Phit);
+        if (one.dwTime_Life < Device.dwTimeGlobal)
+            Born(one, source_radius);
+
+        const float dt = Device.fTimeDelta;
+        one.P.mad(one.D, one.fSpeed * dt);
+        Fvector wdir;
+        wdir.set(one.P.x - vEye.x, 0, one.P.z - vEye.z);
+        float wlen = wdir.square_magnitude();
+        if (wlen > b_radius_wrap_sqr)
+        {
+            wlen = _sqrt(wlen);
+            if ((one.P.y - vEye.y) < sink_offset_sim)
+            {
+                one.invalidate();
+            }
+            else
+            {
+                Fvector inv_dir, src_p;
+                inv_dir.invert(one.D);
+                wdir.div(wlen);
+                one.P.mad(one.P, wdir, -(wlen + source_radius));
+                if (src_plane.intersectRayPoint(one.P, inv_dir, src_p))
+                {
+                    float dist_sqr = one.P.distance_to_sqr(src_p);
+                    float height = max_distance_sim;
+                    if (RayPick(src_p, one.D, height, collide::rqtBoth))
+                    {
+                        if (_sqr(height) <= dist_sqr)
+                            one.invalidate();
+                        else
+                            RenewItem(one, height - _sqrt(dist_sqr), TRUE);
+                    }
+                    else
+                    {
+                        RenewItem(one, max_distance_sim - _sqrt(dist_sqr), FALSE);
+                    }
+                }
+                else
+                {
+                    one.invalidate();
+                }
+            }
+        }
     }
 }
 

@@ -7,6 +7,11 @@
 #include "IGame_Persistent.h"
 #include "xrSheduler.h"
 
+#ifndef _EDITOR
+#include "Environment.h"
+#include "Rain.h"
+#endif
+
 #include "xrCore/Threading/ThreadUtil.h"
 
 void XRay::Engine::PreRenderThread()
@@ -15,7 +20,7 @@ void XRay::Engine::PreRenderThread()
     Threading::SetCurrentThreadName("Pre-Render");
 
     {
-        ZoneScopedN("seqParallelRender");
+        ZoneScopedN("PreRenderThread/seqParallelRender");
         xr_vector<fastdelegate::FastDelegate0<>> batch;
         batch.swap(Device.seqParallelRender);
         for (auto& d : batch)
@@ -23,9 +28,18 @@ void XRay::Engine::PreRenderThread()
         batch.clear();
     }
 
+#ifndef _EDITOR
+    if (!GEnv.isDedicatedServer && g_pGamePersistent && g_pGamePersistent->pEnvironment &&
+        g_pGamePersistent->pEnvironment->eff_Rain)
+    {
+        ZoneScopedN("PreRenderThread/RainUpdateItems");
+        g_pGamePersistent->pEnvironment->eff_Rain->UpdateItems();
+    }
+#endif
+
     if (Device.ParticleWorkerCallback)
     {
-        ZoneScopedN("ParticleWorker");
+        ZoneScopedN("PreRenderThread/ParticleWorker");
         Device.ParticleWorkerCallback();
     }
 }

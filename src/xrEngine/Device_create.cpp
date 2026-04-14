@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "Include/xrRender/DrawUtils.h"
+#include "ParticleWorker.h"
 #include "Render.h"
 #include "xrCDB/xrXRC.h"
 
@@ -52,4 +53,10 @@ void CRenderDevice::Create()
     m_imgui_render->OnDeviceCreate(GetImGuiContext());
     Statistic->OnDeviceCreate();
     dwFrame = 0;
+
+    if (!GEnv.isDedicatedServer)
+    {
+        // Single owner: engine assigns; `Device_destroy` / shutdown clears after `secondary_tasks.wait()`.
+        ParticleWorkerCallback = [] { ParticleWorker_RunBatch(); };
+    }
 }
