@@ -40,6 +40,8 @@ public:
 
     virtual bool GetBriefInfo(II_BriefInfo& info);
 
+    void RebuildDescription() override;
+
 protected:
     float m_fLR_MovingFactor;  // Фактор бокового наклона худа при ходьбе [-1; +1]
     float m_fLR_CameraFactor;  // Фактор бокового наклона худа при движении камеры [-1; +1]

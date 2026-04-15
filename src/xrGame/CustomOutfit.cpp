@@ -126,6 +126,8 @@ void CCustomOutfit::Load(LPCSTR section)
 
     // Added by Axel, to enable optional condition use on any item
     m_flags.set(FUsingCondition, READ_IF_EXISTS(pSettings, r_bool, section, "use_condition", true));
+
+    RefreshInventoryDescription();
 }
 
 void CCustomOutfit::ReloadBonesProtection()
@@ -506,6 +508,52 @@ bool CCustomOutfit::install_upgrade_impl(LPCSTR section, bool test)
     return result;
 }
 
+void CCustomOutfit::RebuildDescription()
+{
+    inherited::RebuildDescription();
+    const auto section = object().cNameSect();
+    if (!pSettings->line_exist(section, "description"))
+        return;
+
+    shared_str str_outfit_properties = StringTable().translate("st_outfit_properties");
+    shared_str str_outfit_list_symbol = StringTable().translate("st_outfit_list_symbol");
+    shared_str str_outfit_property_faction = StringTable().translate("st_outfit_property_faction");
+    shared_str str_outfit_property_faction_name = StringTable().translate(pSettings->r_string(section, "faction"));
+    shared_str str_outfit_property_helmet = StringTable().translate("st_outfit_property_helmet");
+    shared_str str_outfit_property_sprint = StringTable().translate("st_outfit_property_sprint");
+    shared_str str_outfit_property_sprint_alowed = StringTable().translate(pSettings->read_if_exists<bool>(section, "sprint_allowed", true) ? "st_outfit_property_sprint_yes" : "st_outfit_property_sprint_no");
+    shared_str str_outfit_property_slots_count = StringTable().translate("st_outfit_property_slots_count");
+    shared_str str_outfit_property_inventory_weight = StringTable().translate("st_outfit_property_inventory_weight");
+    shared_str str_outfit_property_inventory_weight_suffix = StringTable().translate("st_kg");
+
+    float weight = pSettings->read_if_exists<float>(section, "additional_inventory_weight", 0.0f);
+
+    if (xr_strcmp(m_faction.c_str(), "none") != 0)
+        str_outfit_property_faction_name = StringTable().translate(m_faction.c_str());
+
+    if (m_additional_weight > 0.0f && m_additional_weight < (float)-1.0f)
+        weight = m_additional_weight;
+    if (m_additional_weight2 > 0.0f && m_additional_weight2 < (float)-1.0f)
+        weight = m_additional_weight2;
+
+    u32 artefact_count = get_artefact_count();
+    if (artefact_count == 0)
+        artefact_count = pSettings->read_if_exists<u32>(section, "artefact_count", 0);
+
+    bool helmet_ok = IsHelmetAllowed();
+    if (!helmet_ok)
+        helmet_ok = pSettings->read_if_exists<bool>(section, "helmet_avaliable", true);
+
+    shared_str str_outfit_property_helmet_available = StringTable().translate(helmet_ok ? "st_outfit_property_helmet_has" : "st_outfit_property_helmet_no");
+
+    m_Description = make_string("%s\\n \\n%s\\n", m_Description.c_str(), str_outfit_properties.c_str()).c_str();
+    m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_faction.c_str(), str_outfit_property_faction_name.c_str()).c_str();
+    m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_helmet.c_str(), str_outfit_property_helmet_available.c_str()).c_str();
+    m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_sprint.c_str(), str_outfit_property_sprint_alowed.c_str()).c_str();
+    m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %d\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_slots_count.c_str(), artefact_count).c_str();
+    m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %.2f %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_inventory_weight.c_str(), weight, str_outfit_property_inventory_weight_suffix.c_str()).c_str();
+}
+
 void CCustomOutfit::AddBonesProtection(LPCSTR bones_section)
 {
     IGameObject* parent = H_Parent();
@@ -530,4 +578,5 @@ void CCustomOutfit::load(IReader& input_packet)
     input_packet.r_stringZ(m_faction);
 
     ChangeActorCommunity();
+    RefreshInventoryDescription();
 }

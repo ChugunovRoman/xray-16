@@ -140,6 +140,7 @@ bool CInventory::HandleTakeBolt(CInventoryItem* pIItem)
             {
                 CBolt* bag = smart_cast<CBolt*>(boltBagInSlot);
                 bag->AddCount(1);
+                bag->RefreshInventoryDescription();
             }
             else
                 Level().spawn_item("bolt_bag_one", Actor()->Position(), false, Actor()->ID());
@@ -154,6 +155,7 @@ bool CInventory::HandleTakeBolt(CInventoryItem* pIItem)
             {
                 CBolt* bag = smart_cast<CBolt*>(boltBagInSlot);
                 bag->AddCount(pBolt->GetCount());
+                bag->RefreshInventoryDescription();
                 pBolt->DestroyObject();
             }
         }
@@ -169,6 +171,7 @@ bool CInventory::HandleTakeBolt(CInventoryItem* pIItem)
         {
             CBolt* foundBolt = smart_cast<CBolt*>(bagItem);
             foundBolt->AddCount(count);
+            foundBolt->RefreshInventoryDescription();
             pAmmo->DestroyObject();
         }
         else

@@ -104,6 +104,7 @@ public:
 public:
     virtual void Load(LPCSTR section);
     void ReloadNames();
+    void RefreshInventoryDescription();
 
     LPCSTR TipItem();
     LPCSTR NameItem(); // remove <virtual> by sea
@@ -208,6 +209,7 @@ protected:
     float m_weight;
     float m_fCondition{ 1.0f };
     shared_str m_Description;
+    virtual void RebuildDescription();
 
 protected:
     ALife::_TIME_ID m_dwItemIndependencyTime;

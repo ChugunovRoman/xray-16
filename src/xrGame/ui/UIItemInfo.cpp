@@ -300,6 +300,7 @@ void CUIItemInfo::InitItem(CUICellItem* pCellItem, CInventoryItem* pCompareItem,
             descr->SetFont(m_desc_info.pDescFont);
             descr->SetWidth(UIDesc->GetDesiredChildWidth());
             descr->SetTextComplexMode(true);
+            pInvItem->RefreshInventoryDescription();
             descr->SetText(pInvItem->ItemDescription().c_str());
             descr->AdjustHeightToText();
             UIDesc->AddWindow(descr, !soc_style);

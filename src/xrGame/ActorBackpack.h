@@ -12,6 +12,8 @@ public:
 
     virtual void Hit(float P, ALife::EHitType hit_type);
 
+    void RebuildDescription() override;
+
 public:
     float m_additional_weight;
     float m_additional_weight2;

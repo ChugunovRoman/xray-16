@@ -9,6 +9,7 @@
 float _lerp(const float& _val_a, const float& _val_b, const float& _factor);
 
 CBolt::CBolt(void) {
+    m_count = 0;
     m_thrower_id = u16(-1);
     m_fLR_MovingFactor = 0.f;
     m_fLR_CameraFactor = 0.f;
@@ -26,9 +27,8 @@ void CBolt::OnH_A_Chield()
 
 void CBolt::Load(LPCSTR section)
 {
-    inherited::Load(section);
-
     m_count = pSettings->r_u16(section, "count");
+    inherited::Load(section);
 
     if (pSettings->line_exist(section, "tip_text"))
         set_tip_text(pSettings->r_string(section, "tip_text"));
@@ -47,6 +47,22 @@ void CBolt::Load(LPCSTR section)
     m_strafe_offset[1][1] = READ_IF_EXISTS(pSettings, r_fvector3, section, "strafe_aim_hud_offset_rot", vDefStrafeValue);
 }
 
+void CBolt::RebuildDescription()
+{
+    const auto section = CInventoryItem::object().cNameSect();
+    if (!pSettings->line_exist(section, "description"))
+    {
+        m_Description = "";
+        return;
+    }
+    string16 count;
+    xr_sprintf(count, "%d", GetCount());
+    string2048 tmp_descr;
+    pcstr descr{StringTable().translate(pSettings->r_string(section, "description")).c_str()};
+    xr_sprintf(tmp_descr, descr, count);
+    m_Description = tmp_descr;
+}
+
 void CBolt::save(NET_Packet& output_packet)
 {
     inherited::save(output_packet);
@@ -60,6 +76,7 @@ void CBolt::load(IReader& input_packet)
     CInventoryItemObject::load(input_packet);
 
     m_count = input_packet.r_u16();
+    RefreshInventoryDescription();
 }
 
 bool CBolt::GetBriefInfo(II_BriefInfo& info)
@@ -85,6 +102,7 @@ void CBolt::Throw()
     inherited::Throw();
     spawn_fake_missile();
     AddCount(-1);
+    RefreshInventoryDescription();
 
     NET_Packet P;
     P.w_begin(M_EVENT);

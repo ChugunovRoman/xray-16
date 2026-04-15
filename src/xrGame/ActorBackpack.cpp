@@ -46,3 +46,21 @@ bool CBackpack::install_upgrade_impl(pcstr section, bool test)
 
     return result;
 }
+
+void CBackpack::RebuildDescription()
+{
+    inherited::RebuildDescription();
+    const auto section = object().cNameSect();
+    if (!pSettings->line_exist(section, "description"))
+        return;
+
+    shared_str str_props_title = StringTable().translate("st_outfit_properties");
+    shared_str str_outfit_list_symbol = StringTable().translate("st_outfit_list_symbol");
+    shared_str str_bp_weight = StringTable().translate("st_outfit_property_inventory_weight");
+    shared_str str_bp_weight_suffix = StringTable().translate("st_kg");
+
+    float weight = pSettings->read_if_exists<float>(section, "additional_inventory_weight", 0.0f);
+
+    m_Description = make_string("%s\\n \\n%s\\n", m_Description.c_str(), str_props_title.c_str()).c_str();
+    m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %.2f %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_bp_weight.c_str(), weight, str_bp_weight_suffix.c_str()).c_str();
+}
