@@ -11,6 +11,10 @@
 #include "xrCore/Containers/AssociativeVector.hpp"
 #include "Common/object_broker.h"
 
+#ifndef AI_COMPILER
+#include "xrAICore/Navigation/graph_engine_space.h"
+#endif
+
 template <typename _operator_condition, typename _condition_state, typename _operator, typename _condition_evaluator,
     typename _operator_id_type, bool _reverse_search = false, typename _operator_ptr = _operator*,
     typename _condition_evaluator_ptr = _condition_evaluator*>
@@ -144,6 +148,11 @@ public:
         typename xr_vector<_operator_condition>::const_iterator& E, const condition_type& condition_id) const;
 
     // solver interface
+#ifndef AI_COMPILER
+    /** Thread-local scratch A* (ixray-style); avoids nested contention on global `CGraphEngine`. */
+    IC bool Search(const CState& from_id, const CState& dest_vertex_id, xr_vector<_operator_id_type>& out_path,
+        GraphEngineSpace::_solver_dist_type max_range, u32 max_iteration_count, u32 max_visited_node_count) const;
+#endif
     IC void solve();
     IC const xr_vector<_operator_id_type>& solution() const;
     virtual void clear();

@@ -13,6 +13,8 @@
 
 #include <tracy/Tracy.hpp>
 
+#include "xrAICore/Components/ai_planner_search_limits.h"
+
 #define TEMPLATE_SPECIALIZATION                                                                                     \
     template <typename _object_type, bool _reverse_search, typename _world_operator, typename _condition_evaluator, \
         typename _world_operator_ptr, typename _condition_evaluator_ptr>
@@ -96,11 +98,6 @@ void CPlanner::update()
 	if (this->solution().empty() || this->solution().size() == 0)
     {
         ZoneScopedN("planner_update/empty_solution");
-        static u32 s_last_empty_solution_log = 0;
-        if (Device.dwTimeGlobal - s_last_empty_solution_log >= 1000) {
-            s_last_empty_solution_log = Device.dwTimeGlobal;
-            Msg("Solution array is empty! m_object=[%s] solution().empty()=[%d], size=[%d] initialized=[%d] m_current_action_id=[%d]", m_object->cName().c_str(), this->solution().empty(), this->solution().size(), initialized(), m_current_action_id);
-        }
         if (initialized())
         {
             current_action().finalize();

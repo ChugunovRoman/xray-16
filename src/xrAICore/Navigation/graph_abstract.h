@@ -69,6 +69,11 @@ public:
     IC _vertex_id_type const& value(_vertex_id_type const& vertex_index, const_iterator i) const;
     IC void begin(const CVertex* vertex, const_iterator& b, const_iterator& e) const;
     IC void begin(_vertex_id_type const& vertex_index, const_iterator& b, const_iterator& e) const;
+
+    /** Thread-local scratch A* on abstract vertices (ixray-style). */
+    IC bool Search(_vertex_id_type start_vertex_id, _vertex_id_type dest_vertex_id, xr_vector<_vertex_id_type>& out_path,
+        _edge_weight_type max_range, u32 max_iteration_count, u32 max_visited_node_count,
+        _edge_weight_type* last_cost = nullptr) const;
 };
 
 template <typename _data_type = Loki::EmptyType, typename _edge_weight_type = float, typename _vertex_id_type = u32>

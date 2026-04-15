@@ -63,6 +63,7 @@ target_sources_grouped(
     Navigation/game_graph.h
     Navigation/game_graph_inline.h
     Navigation/game_graph_script.cpp
+    Navigation/game_graph_search.cpp
     Navigation/game_graph_space.h
 )
 
@@ -173,6 +174,9 @@ target_sources_grouped(
     TARGET xrAICore
     NAME "AI\\Navigation\\Pathfinding\\GraphEngine"
     FILES
+    Navigation/ai_graph_engine_cvars.cpp
+    Navigation/ai_graph_engine_cvars.h
+    Navigation/ai_graph_engine_epoch.h
     Navigation/graph_engine.h
     Navigation/graph_engine_inline.h
     Navigation/graph_engine_space.h

@@ -244,6 +244,11 @@ public:
     IC bool valid_vertex_position(const Fvector& position) const;
     bool neighbour_in_direction(const Fvector& direction, u32 start_vertex_id) const;
 
+    /** Thread-local scratch grid A* (ixray-style); avoids global `graph_engine` for level-only paths. */
+    bool Search(u32 start_vertex_id, u32 dest_vertex_id, xr_vector<u32>& out_path, float max_range = flt_max,
+        u32 max_iteration_count = u32(-1), u32 max_visited_node_count = u32(-1)) const;
+    u32 SearchNearestVertex(u32 vertex_id, const Fvector& target_position, float range) const;
+
     IC CLevelVertex* vertices() { return m_nodes->begin(); }
 };
 

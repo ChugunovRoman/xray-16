@@ -38,6 +38,7 @@ private:
 
     void InitializeDiscord();
     void UpdateDiscordStatus();
+    void ShutdownDiscord();
 
 public:
     // Other

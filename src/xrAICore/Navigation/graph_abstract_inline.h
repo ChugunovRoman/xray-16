@@ -7,6 +7,8 @@
 ////////////////////////////////////////////////////////////////////////////
 #pragma once
 
+#include <algorithm>
+
 #include "xrCore/xrDebug_macros.h"
 
 #define TEMPLATE_SPECIALIZATION \
@@ -165,6 +167,113 @@ TEMPLATE_SPECIALIZATION
 IC void CAbstractGraph::begin(_vertex_id_type const& vertex_index, const_iterator& b, const_iterator& e) const
 {
     begin(vertex(vertex_index), b, e);
+}
+
+TEMPLATE_SPECIALIZATION
+IC bool CAbstractGraph::Search(_vertex_id_type start_vertex_id, _vertex_id_type dest_vertex_id,
+    xr_vector<_vertex_id_type>& out_path, _edge_weight_type max_range, u32 max_iteration_count,
+    u32 max_visited_node_count, _edge_weight_type* last_cost) const
+{
+    auto is_accessible_fn = [this](const _vertex_id_type& vertex_id) { return is_accessible(vertex_id); };
+
+    auto calc_cost = [this](const _vertex_id_type& node1, const _vertex_id_type& node2, const_iterator i)
+    { return get_edge_weight(node1, node2, i); };
+
+    auto distance_node = [](const CVertex* node1, const CVertex* node2)
+    {
+        (void)node1;
+        (void)node2;
+        return _edge_weight_type(0);
+    };
+
+    thread_local xr_vector<std::pair<_edge_weight_type, _vertex_id_type>> temp_priority;
+    thread_local xr_map<_vertex_id_type, _vertex_id_type> temp_came_from;
+    thread_local xr_map<_vertex_id_type, _edge_weight_type> temp_cost_so_far;
+
+    temp_priority.clear();
+    temp_came_from.clear();
+    temp_cost_so_far.clear();
+    out_path.clear();
+
+    const _vertex_id_type& from_id = start_vertex_id;
+    const _vertex_id_type& to_id = dest_vertex_id;
+
+    if (from_id == to_id)
+    {
+        out_path.push_back(start_vertex_id);
+        return true;
+    }
+
+    temp_priority.push_back({_edge_weight_type(0), from_id});
+    temp_came_from.insert({from_id, from_id});
+    temp_cost_so_far.insert({from_id, _edge_weight_type(0)});
+
+    while (!temp_priority.empty())
+    {
+        const _vertex_id_type current_node_id = temp_priority.back().second;
+        if (last_cost)
+            *last_cost = temp_priority.back().first;
+        temp_priority.pop_back();
+        if (current_node_id == to_id)
+        {
+            _vertex_id_type next_node = to_id;
+            while (next_node != from_id)
+            {
+                out_path.insert(out_path.begin(), next_node);
+                next_node = temp_came_from[next_node];
+            }
+            out_path.insert(out_path.begin(), next_node);
+            return true;
+        }
+
+        const CVertex* node = vertex(current_node_id);
+
+        const_iterator i, e;
+        begin(current_node_id, i, e);
+
+        for (; i != e; i++)
+        {
+            const _vertex_id_type& neighbor_id = i->vertex_id();
+            if (!is_accessible_fn(neighbor_id))
+                continue;
+
+            if (max_iteration_count == 0)
+                continue;
+            max_iteration_count--;
+
+            const CVertex* neighbor = vertex(neighbor_id);
+            _edge_weight_type new_cost = temp_cost_so_far[current_node_id] + calc_cost(current_node_id, neighbor_id, i);
+            auto temp_cost_it = temp_cost_so_far.find(neighbor_id);
+            if ((temp_cost_it != temp_cost_so_far.end() && temp_cost_it->second > new_cost) ||
+                (temp_cost_it == temp_cost_so_far.end() && max_visited_node_count > temp_cost_so_far.size()))
+            {
+                const _edge_weight_type distance = distance_node(vertex(to_id), neighbor);
+                if (distance > max_range)
+                    continue;
+
+                if (temp_cost_it != temp_cost_so_far.end())
+                    temp_cost_it->second = new_cost;
+                else
+                    temp_cost_so_far.insert({neighbor_id, new_cost});
+
+                _edge_weight_type priority = new_cost + distance;
+                temp_priority.insert(
+                    std::upper_bound(temp_priority.begin(), temp_priority.end(),
+                        std::pair<_edge_weight_type, _vertex_id_type>{priority, neighbor_id},
+                        [](const std::pair<_edge_weight_type, _vertex_id_type>& left,
+                            const std::pair<_edge_weight_type, _vertex_id_type>& right)
+                        { return left.first > right.first; }),
+                    {priority, neighbor_id});
+
+                auto came_it = temp_came_from.find(neighbor_id);
+                if (came_it != temp_came_from.end())
+                    came_it->second = current_node_id;
+                else
+                    temp_came_from.insert({neighbor_id, current_node_id});
+            }
+        }
+    }
+    return false;
 }
 
 #undef TEMPLATE_SPECIALIZATION

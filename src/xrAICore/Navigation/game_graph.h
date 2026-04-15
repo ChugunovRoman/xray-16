@@ -77,6 +77,12 @@ public:
     IC void set_current_level(u32 level_id);
     IC const _GRAPH_ID& current_level_vertex() const;
 
+    /** Thread-local scratch A* on game vertices (ixray-style). */
+    bool Search(u32 start_vertex_id, u32 dest_vertex_id, xr_vector<u32>& out_path,
+        const xr_vector<GameGraph::STerrainPlace>* vertex_types, float max_range, u32 max_iteration_count,
+        u32 max_visited_node_count) const;
+    bool SearchNearestVertex(u32 start_vertex_id, _LEVEL_ID level_id, u32& result) const;
+
 private:
     DECLARE_SCRIPT_REGISTER_FUNCTION();
 };

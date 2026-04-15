@@ -79,10 +79,12 @@ extern int npc_perf_ik_foot_raypick_batch;
  */
 extern int npc_perf_mt_stalker_physics;
 
-// CAI_Stalker::UpdateCL — Tracy ucl_stalker_physics / ucl_stalker_step_manager; 1 = skip that stage (profiling / stress only).
+// CCustomMonster::DeferredLateUpdateCL (CAI_Stalker, CBaseMonster, …) — same gates for in_UpdateCL + CStepManager::update.
+// Console names keep stalker_* for user.ltx compatibility; they apply to all custom monsters.
+// 1 = skip that stage when alive (profiling / stress); postdeath grace can still force a short run after Die().
 extern int npc_perf_disable_ucl_stalker_physics;
 extern int npc_perf_disable_ucl_stalker_step_manager;
-/** When physics/step are disabled above, dead stalkers still run those stages for this many ms after Die() (0 = no override). */
+/** When physics/step are disabled above, dead entities still run those stages for this many ms after Die() (0 = no override). */
 extern u32 npc_perf_disable_ucl_stalker_postdeath_grace_ms;
 
 // Lua script TTL/interval (read via get_console():get_integer in scripts)

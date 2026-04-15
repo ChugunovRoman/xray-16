@@ -7,6 +7,23 @@
 #include <cstring>
 #include <memory>
 
+#if defined(_WIN32) && defined(_MSC_VER)
+#include <Windows.h>
+
+// C2712: __try is not allowed in C++ destructors compiled with /EHsc; keep SEH in this helper only.
+namespace {
+void discord_try_destroy_core(IDiscordCore* core)
+{
+    if (!core)
+        return;
+    __try { core->destroy(core); }
+    __except (GetExceptionCode() == DWORD{ 0xC0000008UL } ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
+    {
+    }
+}
+} // namespace
+#endif
+
 namespace discord {
 
 Result Core::Create(ClientId clientId, CreateFlags flags, Core** instance)
@@ -43,7 +60,11 @@ void Core::Destroy(Core** instance)
 Core::~Core()
 {
     if (internal_) {
+#if defined(_WIN32) && defined(_MSC_VER)
+        discord_try_destroy_core(internal_);
+#else
         internal_->destroy(internal_);
+#endif
         internal_ = nullptr;
     }
 }

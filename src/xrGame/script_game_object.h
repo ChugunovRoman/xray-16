@@ -165,11 +165,13 @@ class CScriptGameObject
 {
     mutable CGameObject* m_game_object;
     mutable u32 m_best_enemy_cache_time = u32(-1);
-    mutable CScriptGameObject* m_best_enemy_cache_object = nullptr;
-    mutable u32 m_best_danger_cache_time = u32(-1);
-    mutable const CDangerObject* m_best_danger_cache_object = nullptr;
+    // Resolved net ID only: caching CScriptGameObject* is unsafe — net_Destroy xr_delete's the enemy's wrapper
+    // while this stalker's shedule_Update can still see the same Device.dwTimeGlobal (e.g. level change / squad delete).
+    mutable u16 m_best_enemy_cache_id = u16(-1);
+    // best_danger: do not cache const CDangerObject* (vector realloc / stale m_object after unload).
     mutable u32 m_best_item_cache_time = u32(-1);
-    mutable CScriptGameObject* m_best_item_cache_object = nullptr;
+    // Same as best_enemy: item script wrapper is deleted with the item; cache id only.
+    mutable u16 m_best_item_cache_id = u16(-1);
     CScriptGameObject(CScriptGameObject const& game_object);
 
 public:

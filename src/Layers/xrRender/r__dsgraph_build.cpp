@@ -733,8 +733,15 @@ void R_dsgraph_structure::build_subspace()
         return;
     }
 
-    // Traverse sector/portal structure
-    PortalTraverser.traverse(Sectors[o.sector_id], o.view_frustum, o.view_pos, o.xform, o.portal_traverse_flags);
+    // Traverse sector/portal structure (bounds-checked: OOB would be UB; keep traverser epoch if we skip)
+    CSector* const start_sector = (o.sector_id < Sectors.size()) ? Sectors[o.sector_id] : nullptr;
+    if (start_sector)
+        PortalTraverser.traverse(start_sector, o.view_frustum, o.view_pos, o.xform, o.portal_traverse_flags);
+    else
+    {
+        PortalTraverser.i_marker++;
+        PortalTraverser.r_sectors.clear();
+    }
 
     // Determine visibility for static geometry hierarchy
 #if 0
@@ -842,6 +849,8 @@ void R_dsgraph_structure::build_subspace()
             const auto& [type, sphere, sector_id] = std::tuple(data.type, data.sphere, data.sector_id);
             if (sector_id == IRender_Sector::INVALID_SECTOR_ID)
                 continue; // disassociated from S/P structure
+            if (sector_id >= Sectors.size())
+                continue;
             auto* sector = Sectors[sector_id];
 
             if (collect_lights && (type & STYPE_LIGHTSOURCE))
@@ -930,6 +939,8 @@ void R_dsgraph_structure::build_subspace()
                     const auto sector_id = viewEntity->GetSpatialData().sector_id;
                     if (sector_id == IRender_Sector::INVALID_SECTOR_ID)
                         break; // disassociated from S/P structure
+                    if (sector_id >= Sectors.size())
+                        break;
                     CSector* sector = Sectors[sector_id];
                     if (PortalTraverser.i_marker != sector->r_marker)
                         break; // inactive (untouched) sector

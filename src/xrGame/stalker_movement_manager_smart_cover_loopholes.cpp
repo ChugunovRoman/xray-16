@@ -55,7 +55,7 @@ float stalker_movement_manager_smart_cover::enter_path(LoopholePath* result, Fve
         shared_str const& loophole_id = m_temp_loophole_path.front();
         smart_cover::loophole const& loophole = this->loophole(cover, loophole_id);
         float new_value = cover.fov_position(loophole).distance_to(position);
-        new_value += ai().graph_engine().m_string_algorithm->data_storage().get_best().g();
+        new_value += ai().graph_engine().string_path_last_search_best_g();
         if (new_value >= value)
             continue;
 
@@ -266,7 +266,7 @@ void stalker_movement_manager_smart_cover::build_exit_path()
         loophole_path(cur_cover, cur_loophole.id(), exitable_loophole_id, m_temp_loophole_path);
         VERIFY(!m_temp_loophole_path.empty());
 
-        float new_value = ai().graph_engine().m_string_algorithm->data_storage().get_best().g();
+        float new_value = ai().graph_engine().string_path_last_search_best_g();
         float exit_edge = cur_cover.get_description()
                               ->transitions()
                               .edge(exitable_loophole_id, smart_cover::transform_vertex("", false))
@@ -343,7 +343,7 @@ void stalker_movement_manager_smart_cover::build_exit_path_to_cover()
         loophole_path(current_cover, current_loophole.id(), exitable_loophole_id, m_temp_loophole_path);
         VERIFY(!m_temp_loophole_path.empty());
 
-        float new_value = ai().graph_engine().m_string_algorithm->data_storage().get_best().g();
+        float new_value = ai().graph_engine().string_path_last_search_best_g();
         float exit_edge = current_cover.get_description()
                               ->transitions()
                               .edge(exitable_loophole_id, smart_cover::transform_vertex("", false))

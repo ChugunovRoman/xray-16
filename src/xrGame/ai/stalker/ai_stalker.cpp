@@ -336,7 +336,6 @@ void CAI_Stalker::reinit()
     m_next_memory_update_time = 0;
     m_memory_update_interval = 0;
 
-    m_ucl_perf_postdeath_until_time = 0;
 }
 
 void CAI_Stalker::LoadSounds(LPCSTR section)
@@ -632,12 +631,6 @@ void CAI_Stalker::Die(IGameObject* who)
         !::Random.randI(0, 2);
 
     inherited::Die(who);
-
-    const u32 grace_ms = npc_perf_disable_ucl_stalker_postdeath_grace_ms;
-    if (grace_ms > 0 && (npc_perf_disable_ucl_stalker_physics != 0 || npc_perf_disable_ucl_stalker_step_manager != 0))
-        m_ucl_perf_postdeath_until_time = Device.dwTimeGlobal + grace_ms;
-    else
-        m_ucl_perf_postdeath_until_time = 0;
 
     //запретить использование слотов в инвенторе
     inventory().SetSlotsUseful(false);
@@ -1004,11 +997,6 @@ void CAI_Stalker::UpdateCL_Early()
     VERIFY2(PPhysicsShell() || getEnabled(), cName().c_str());
 
     if (g_Alive())
-        m_ucl_perf_postdeath_until_time = 0;
-    else if (m_ucl_perf_postdeath_until_time != 0 && Device.dwTimeGlobal >= m_ucl_perf_postdeath_until_time)
-        m_ucl_perf_postdeath_until_time = 0;
-
-    if (g_Alive())
     {
         {
             ZoneScopedN("ucl_stalker_object_handler");
@@ -1061,12 +1049,8 @@ void CAI_Stalker::UpdateCL_Early()
 
 void CAI_Stalker::DeferredLateUpdateCL()
 {
-    const bool phys_glob_off = npc_perf_disable_ucl_stalker_physics != 0;
-    const bool step_glob_off = npc_perf_disable_ucl_stalker_step_manager != 0;
-    const bool postdeath_ucl_force =
-        !g_Alive() && m_ucl_perf_postdeath_until_time != 0 && Device.dwTimeGlobal < m_ucl_perf_postdeath_until_time;
-    const bool run_ucl_physics = !phys_glob_off || postdeath_ucl_force;
-    const bool run_ucl_step_alive = !step_glob_off || postdeath_ucl_force;
+    const bool run_ucl_physics = ucl_perf_run_character_physics_updatecl();
+    const bool run_ucl_step_alive = ucl_perf_run_character_step_when_alive();
 
     ZoneScopedN("ucl_stalker_late_update");
     START_PROFILE("stalker")
@@ -1124,7 +1108,7 @@ void CAI_Stalker::DeferredLateUpdateCL()
         }
         STOP_PROFILE
     }
-    else if (postdeath_ucl_force && step_glob_off)
+    else if (ucl_perf_run_character_step_dead_override())
     {
         START_PROFILE("stalker/client_update/step_manager")
         {

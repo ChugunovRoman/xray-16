@@ -5,6 +5,8 @@
 #include "Navigation/level_graph.h"
 #include "Navigation/PatrolPath/patrol_path_storage.h"
 #include "Navigation/graph_engine.h"
+#include "Navigation/ai_graph_engine_cvars.h"
+#include "Navigation/ai_graph_engine_epoch.h"
 
 #include <cstring>
 
@@ -22,6 +24,7 @@ AISpaceBase::~AISpaceBase()
 {
     xr_delete(m_patrol_path_storage);
     xr_delete(m_graph_engine);
+    ++g_ai_graph_engine_epoch;
     VERIFY(!m_game_graph);
     GEnv.AISpace = nullptr;
 }
@@ -63,6 +66,7 @@ void AISpaceBase::Load(const char* levelName)
 
     u32 vertexCount = _max(gameHeader.vertex_count(), levelHeader.vertex_count());
     m_graph_engine = xr_new<CGraphEngine>(vertexCount);
+    ++g_ai_graph_engine_epoch;
 
     if (currentLevel.guid() != levelHeader.guid())
     {
@@ -84,9 +88,13 @@ void AISpaceBase::Unload(bool reload)
     if (GEnv.isDedicatedServer)
         return;
     xr_delete(m_graph_engine);
+    ++g_ai_graph_engine_epoch;
     xr_delete(m_level_graph);
     if (!reload && m_game_graph)
+    {
         m_graph_engine = xr_new<CGraphEngine>(game_graph().header().vertex_count());
+        ++g_ai_graph_engine_epoch;
+    }
 }
 
 void AISpaceBase::Initialize()
@@ -95,6 +103,7 @@ void AISpaceBase::Initialize()
         return;
     VERIFY(!m_graph_engine);
     m_graph_engine = xr_new<CGraphEngine>(1024);
+    ++g_ai_graph_engine_epoch;
     VERIFY(!m_patrol_path_storage);
     m_patrol_path_storage = xr_new<CPatrolPathStorage>();
 }
@@ -167,13 +176,16 @@ void AISpaceBase::SetGameGraph(CGameGraph* gameGraph)
         VERIFY(!m_game_graph);
         m_game_graph = gameGraph;
         xr_delete(m_graph_engine);
+        ++g_ai_graph_engine_epoch;
         m_graph_engine = xr_new<CGraphEngine>(game_graph().header().vertex_count());
+        ++g_ai_graph_engine_epoch;
     }
     else
     {
         VERIFY(m_game_graph);
         m_game_graph = nullptr;
         xr_delete(m_graph_engine);
+        ++g_ai_graph_engine_epoch;
     }
 }
 

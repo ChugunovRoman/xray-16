@@ -39,6 +39,7 @@
 #include "MainMenu.h"
 #include "saved_game_wrapper.h"
 #include "xrAICore/Components/ai_planner_search_limits.h"
+#include "xrAICore/Navigation/ai_graph_engine_cvars.h"
 #include "xrAICore/Navigation/level_graph.h"
 #include "xrNetServer/NET_Messages.h"
 #include "character_community.h"
@@ -2750,6 +2751,9 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_planner_graph_search_max_nodes_danger", (int*)&npc_perf_planner_graph_search_max_nodes_danger, 0, 100000);
     CMD4(CCC_Integer, "npc_perf_planner_nested_graph_search_max_nodes", (int*)&g_ai_nested_planner_graph_search_max_nodes, 100,
         32000);
+    CMD4(CCC_Integer, "ai_graph_engine_serialize", &ps_ai_graph_engine_serialize, 0, 1);
+    CMD4(CCC_Integer, "ai_graph_engine_detect_concurrent", &ps_ai_graph_engine_detect_concurrent, 0, 1);
+    CMD4(CCC_Integer, "ai_path_build_tls_scratch", &ps_ai_path_build_use_tls_scratch, 0, 1);
     CMD4(CCC_Integer, "npc_perf_cover_best_max_evaluate", (int*)&npc_perf_cover_best_max_evaluate, 0, 4096);
     CMD4(CCC_Integer, "npc_perf_cover_nearest_max_points", (int*)&npc_perf_cover_nearest_max_points, 0, 4096);
     CMD4(CCC_Integer, "npc_perf_cover_best_max_accessible", (int*)&npc_perf_cover_best_max_accessible, 0, 4096);

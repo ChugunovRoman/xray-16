@@ -12,6 +12,9 @@
 #include "xrAICore/Components/ai_planner_search_limits.h"
 #include "xrAICore/Navigation/graph_engine.h"
 #include "xrAICore/Navigation/graph_engine_space.h"
+#include "xrCore/xrDebug_macros.h"
+#include <algorithm>
+#include <iterator>
 #endif
 
 #define TEMPLATE_SPECIALIZATION                                                                                  \
@@ -368,15 +371,236 @@ IC void CProblemSolverAbstract::solve()
     m_solution_changed = true;
     m_current_state.clear();
 
-    // Call to ai() was replaced with GEnv.AISpace
-    // XXX: looks bad!
-    ZoneScopedN("ai/problem_solver/graph_engine_search");
-    m_failed = !GEnv.AISpace->graph_engine().search(*this, reverse_search ? target_state() : current_state(),
-        reverse_search ? current_state() : target_state(), &m_solution,
-        GraphEngineSpace::CSolverBaseParameters(GraphEngineSpace::_solver_dist_type(-1),
-            GraphEngineSpace::_solver_condition_type(-1), g_ai_nested_planner_graph_search_max_nodes));
+    ZoneScopedN("ai/problem_solver/search");
+    m_failed = !Search(reverse_search ? target_state() : current_state(),
+        reverse_search ? current_state() : target_state(), m_solution, GraphEngineSpace::_solver_dist_type(-1), u32(-1),
+        g_ai_nested_planner_graph_search_max_nodes);
 #endif
 }
+
+#ifndef AI_COMPILER
+TEMPLATE_SPECIALIZATION
+IC bool CProblemSolverAbstract::Search(const CState& FromID, const CState& dest_vertex_id,
+    xr_vector<_operator_id_type>& OutPath, GraphEngineSpace::_solver_dist_type max_range, u32 max_iteration_count,
+    u32 max_visited_node_count) const
+{
+    auto IsAccessible = [this](const CState& VertexID)
+    {
+        if (!is_accessible(VertexID))
+            return false;
+        return true;
+    };
+
+    auto CalcCost = [this](const CState& Node1, const CState& Node2, const_iterator i)
+    {
+        return get_edge_weight(Node1, Node2, i);
+    };
+
+    auto DistanceNode = [this](const CState& Node1) { return estimate_edge_weight(Node1); };
+
+    // Stack-local search state: thread_local + clear() at entry breaks nested solve()->Search() on the same
+    // thread (sub-planner re-enters while parent Search is running), corrupting the outer walk and emptying plans.
+    xr_vector<std::pair<GraphEngineSpace::_solver_dist_type, CState>> TempPriorityNode;
+    xr_map<CState, CState> TempCameFrom;
+    xr_map<CState, GraphEngineSpace::_solver_dist_type> TempCostSoFar;
+    xr_map<CState, _operator_id_type> TempEdges;
+    xr_vector<_operator_id_type> TempRebuildForward;
+    xr_vector<CState> TempRebuildSeen;
+
+    OutPath.clear();
+
+    // `FromID` is commonly `current_state()` — mutable. Evaluators/actions refill it during Search, so keeping a
+    // const ref to the caller's state makes rebuild checks (`while (NextNode != FromID)`, self_parent vs start)
+    // compare against the *live* world state instead of the search start snapshot → bogus self_parent / empty plans.
+    const CState start_snapshot = FromID;
+
+    TempPriorityNode.push_back({0, start_snapshot});
+    TempCameFrom.insert({start_snapshot, start_snapshot});
+    TempCostSoFar.insert({start_snapshot, 0});
+    TempEdges.insert({start_snapshot, _operator_id_type()});
+
+    while (!TempPriorityNode.empty())
+    {
+        const CState CurrentNodeID = TempPriorityNode.back().second;
+        TempPriorityNode.pop_back();
+
+        const bool goal = is_goal_reached(CurrentNodeID);
+        if (goal)
+        {
+            const size_t max_hops = std::max<size_t>(size_t(256), TempCameFrom.size() * 2 + 32);
+
+            CState NextNode = CurrentNodeID;
+            u64 rb = 0;
+            TempRebuildSeen.clear();
+
+            // Never use map[key] here: std::map::operator[] inserts a default entry on miss and corrupts the search
+            // graph, which previously produced an infinite parent walk; with a hop cap that becomes constant failure
+            // and NPCs lose all plans.
+            if (reverse_search)
+            {
+                while (NextNode != start_snapshot)
+                {
+                    ++rb;
+                    if (rb > max_hops)
+                    {
+                        OutPath.clear();
+                        return false;
+                    }
+                    bool seen = false;
+                    for (const CState& s : TempRebuildSeen)
+                    {
+                        if (s == NextNode)
+                        {
+                            seen = true;
+                            break;
+                        }
+                    }
+                    if (seen)
+                    {
+                        OutPath.clear();
+                        return false;
+                    }
+                    TempRebuildSeen.push_back(NextNode);
+
+                    const auto ie = TempEdges.find(NextNode);
+                    const auto ic = TempCameFrom.find(NextNode);
+                    if (ie == TempEdges.end() || ic == TempCameFrom.end())
+                    {
+                        OutPath.clear();
+                        return false;
+                    }
+                    const CState parent = ic->second;
+                    if (parent == NextNode && NextNode != start_snapshot)
+                    {
+                        OutPath.clear();
+                        return false;
+                    }
+                    OutPath.push_back(ie->second);
+                    NextNode = parent;
+                }
+            }
+            else
+            {
+                TempRebuildForward.clear();
+                if (max_hops < size_t(16384))
+                    TempRebuildForward.reserve(max_hops);
+                while (NextNode != start_snapshot)
+                {
+                    ++rb;
+                    if (rb > max_hops)
+                    {
+                        OutPath.clear();
+                        return false;
+                    }
+                    bool seen = false;
+                    for (const CState& s : TempRebuildSeen)
+                    {
+                        if (s == NextNode)
+                        {
+                            seen = true;
+                            break;
+                        }
+                    }
+                    if (seen)
+                    {
+                        OutPath.clear();
+                        return false;
+                    }
+                    TempRebuildSeen.push_back(NextNode);
+
+                    const auto ie = TempEdges.find(NextNode);
+                    const auto ic = TempCameFrom.find(NextNode);
+                    if (ie == TempEdges.end() || ic == TempCameFrom.end())
+                    {
+                        OutPath.clear();
+                        return false;
+                    }
+                    const CState parent = ic->second;
+                    if (parent == NextNode && NextNode != start_snapshot)
+                    {
+                        OutPath.clear();
+                        return false;
+                    }
+                    TempRebuildForward.push_back(ie->second);
+                    NextNode = parent;
+                }
+                std::reverse(TempRebuildForward.begin(), TempRebuildForward.end());
+                OutPath.assign(TempRebuildForward.begin(), TempRebuildForward.end());
+            }
+
+            return true;
+        }
+
+        const_iterator i, e;
+        begin(CurrentNodeID, i, e);
+
+        for (; i != e; i++)
+        {
+            const CState NeighborID = value(CurrentNodeID, i, reverse_search);
+            if (!IsAccessible(NeighborID))
+                continue;
+            // Same abstract vertex for std::map: strict-weak equivalence is !(a<b)&&!(b<a). For CWorldState
+            // (CConditionState) that can differ from operator== (hash vs lexicographic <), so find(NeighborID)
+            // may alias CurrentNodeID's slot and set came_from to a self-parent (goal_self_parent_r0).
+            if (!(NeighborID < CurrentNodeID) && !(CurrentNodeID < NeighborID))
+                continue;
+            // Never change the start key's parent away from itself (neighbor may map-alias start_snapshot).
+            const bool neighbor_equiv_from = (!(NeighborID < start_snapshot) && !(start_snapshot < NeighborID));
+            const bool current_equiv_from = (!(CurrentNodeID < start_snapshot) && !(start_snapshot < CurrentNodeID));
+            if (neighbor_equiv_from && !current_equiv_from)
+                continue;
+
+            if (max_iteration_count == 0)
+                continue;
+            max_iteration_count--;
+
+            const auto cost_here = TempCostSoFar.find(CurrentNodeID);
+            VERIFY(cost_here != TempCostSoFar.end());
+            const GraphEngineSpace::_solver_dist_type NewCost =
+                cost_here->second + CalcCost(CurrentNodeID, NeighborID, i);
+            auto TempCostSoFarIterator = TempCostSoFar.find(NeighborID);
+            if ((TempCostSoFarIterator != TempCostSoFar.end() && TempCostSoFarIterator->second > NewCost) ||
+                (TempCostSoFarIterator == TempCostSoFar.end() && max_visited_node_count > TempCostSoFar.size()))
+            {
+                const GraphEngineSpace::_solver_dist_type Distance = DistanceNode(NeighborID);
+                if (Distance > max_range)
+                    continue;
+
+                if (TempCostSoFarIterator != TempCostSoFar.end())
+                    TempCostSoFarIterator->second = NewCost;
+                else
+                    TempCostSoFar.insert({NeighborID, NewCost});
+
+                const GraphEngineSpace::_solver_dist_type priority = NewCost + Distance;
+                TempPriorityNode.insert(
+                    std::upper_bound(TempPriorityNode.begin(), TempPriorityNode.end(),
+                        std::pair<GraphEngineSpace::_solver_dist_type, CState>{priority, NeighborID},
+                        [](const std::pair<GraphEngineSpace::_solver_dist_type, CState>& Left,
+                            const std::pair<GraphEngineSpace::_solver_dist_type, CState>& Right)
+                        { return Left.first > Right.first; }),
+                    {priority, NeighborID});
+
+                auto TempCameFromIterator = TempCameFrom.find(NeighborID);
+                auto TempEdgesIterator = TempEdges.find(NeighborID);
+                if (TempCameFromIterator != TempCameFrom.end())
+                {
+                    TempCameFromIterator->second = CurrentNodeID;
+                    if (TempEdgesIterator != TempEdges.end())
+                        TempEdgesIterator->second = i->m_operator_id;
+                    else
+                        TempEdges.insert({NeighborID, i->m_operator_id});
+                }
+                else
+                {
+                    TempCameFrom.insert({NeighborID, CurrentNodeID});
+                    TempEdges.insert({NeighborID, i->m_operator_id});
+                }
+            }
+        }
+    }
+    return false;
+}
+#endif // !AI_COMPILER
 
 TEMPLATE_SPECIALIZATION
 IC typename CProblemSolverAbstract::edge_value_type CProblemSolverAbstract::estimate_edge_weight(

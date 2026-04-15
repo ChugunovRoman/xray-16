@@ -7,7 +7,51 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #pragma once
-#include "xrCore/Threading/ScopeLock.hpp"
+#include "xrCore/Threading/Lock.hpp"
+#include "xrCore/xrDebug_macros.h"
+#include "xrAICore/Navigation/ai_graph_engine_cvars.h"
+
+namespace
+{
+struct GraphEngineSearchLock
+{
+    Lock* sync{};
+    bool active{};
+    GraphEngineSearchLock(Lock* L, bool use_lock) : sync(L), active(use_lock && ps_ai_graph_engine_serialize)
+    {
+        if (active)
+            sync->Enter();
+    }
+    ~GraphEngineSearchLock()
+    {
+        if (active)
+            sync->Leave();
+    }
+};
+
+struct GraphEngineConcurrencyProbe
+{
+    std::atomic<std::uint32_t>* active{};
+    const char* backend{};
+
+    GraphEngineConcurrencyProbe(std::atomic<std::uint32_t>* counter, const char* backend_name) : active(counter), backend(backend_name)
+    {
+        const std::uint32_t in_flight_before = active->fetch_add(1, std::memory_order_acq_rel);
+        if (ps_ai_graph_engine_serialize || !ps_ai_graph_engine_detect_concurrent || in_flight_before == 0)
+            return;
+
+        const std::uint32_t budget_before =
+            g_ai_graph_engine_concurrent_report_budget.fetch_sub(1, std::memory_order_relaxed);
+        if (budget_before == 0)
+            return;
+
+        Msg("! [ai_mt] concurrent graph_engine search backend=%s in_flight=%u serialize=%d tls_scratch=%d", backend,
+            in_flight_before + 1, ps_ai_graph_engine_serialize, ps_ai_path_build_use_tls_scratch);
+    }
+
+    ~GraphEngineConcurrencyProbe() { active->fetch_sub(1, std::memory_order_acq_rel); }
+};
+} // namespace
 
 inline CGraphEngine::CGraphEngine(u32 max_vertex_count)
 {
@@ -31,6 +75,10 @@ inline CGraphEngine::~CGraphEngine()
 
 #ifndef AI_COMPILER
 inline const CGraphEngine::CSolverAlgorithm& CGraphEngine::solver_algorithm() const { return *m_solver_algorithm; }
+inline float CGraphEngine::string_path_last_search_best_g() const
+{
+    return m_string_algorithm->data_storage().get_best().g();
+}
 #endif
 
 template <typename _Graph, typename _Parameters>
@@ -43,17 +91,20 @@ inline bool CGraphEngine::search(const _Graph& graph, const _index_type& start_n
     if (!vertices_valid)
         return false;
 
-    // Temporary proof-of-safety: serialize all graph_engine search backends + PathTimer (see docs/SHARED_AI_MT_AUDIT.md).
-    ScopeLock scope(&m_lock);
+    // Serialize search backends when `ps_ai_graph_engine_serialize` is set (see docs/SHARED_AI_MT_AUDIT.md).
+    GraphEngineSearchLock scope(&m_lock, true);
+    GraphEngineConcurrencyProbe concurrent_probe(&g_ai_graph_engine_active_index_search, "index");
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/search")
-    PathTimer.Begin();
+    if (ps_ai_graph_engine_serialize)
+        PathTimer.Begin();
     using CPathManagerGeneric =
         CPathManager<_Graph, CAlgorithm::CDataStorage, _Parameters, _dist_type, _index_type, _iteration_type>;
     CPathManagerGeneric path_manager;
     path_manager.setup(&graph, &m_algorithm->data_storage(), node_path, start_node, dest_node, parameters);
     bool successfull = m_algorithm->find(path_manager);
-    PathTimer.End();
+    if (ps_ai_graph_engine_serialize)
+        PathTimer.End();
     return successfull;
     STOP_PROFILE
     STOP_PROFILE
@@ -63,16 +114,19 @@ template <typename _Graph, typename _Parameters>
 inline bool CGraphEngine::search(const _Graph& graph, const _index_type& start_node, const _index_type& dest_node,
     xr_vector<_index_type>* node_path, _Parameters& parameters)
 {
-    ScopeLock scope(&m_lock);
+    GraphEngineSearchLock scope(&m_lock, true);
+    GraphEngineConcurrencyProbe concurrent_probe(&g_ai_graph_engine_active_index_search, "index");
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/search")
-    PathTimer.Begin();
+    if (ps_ai_graph_engine_serialize)
+        PathTimer.Begin();
     using CPathManagerGeneric =
         CPathManager<_Graph, CAlgorithm::CDataStorage, _Parameters, _dist_type, _index_type, _iteration_type>;
     CPathManagerGeneric path_manager;
     path_manager.setup(&graph, &m_algorithm->data_storage(), node_path, start_node, dest_node, parameters);
     bool successfull = m_algorithm->find(path_manager);
-    PathTimer.End();
+    if (ps_ai_graph_engine_serialize)
+        PathTimer.End();
     return successfull;
     STOP_PROFILE
     STOP_PROFILE
@@ -82,13 +136,16 @@ template <typename _Graph, typename _Parameters, typename _PathManager>
 inline bool CGraphEngine::search(const _Graph& graph, const _index_type& start_node, const _index_type& dest_node,
     xr_vector<_index_type>* node_path, const _Parameters& parameters, _PathManager& path_manager)
 {
-    ScopeLock scope(&m_lock);
+    GraphEngineSearchLock scope(&m_lock, true);
+    GraphEngineConcurrencyProbe concurrent_probe(&g_ai_graph_engine_active_index_search, "index");
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/search")
-    PathTimer.Begin();
+    if (ps_ai_graph_engine_serialize)
+        PathTimer.Begin();
     path_manager.setup(&graph, &m_algorithm->data_storage(), node_path, start_node, dest_node, parameters);
     bool successfull = m_algorithm->find(path_manager);
-    PathTimer.End();
+    if (ps_ai_graph_engine_serialize)
+        PathTimer.End();
     return successfull;
     STOP_PROFILE
     STOP_PROFILE
@@ -101,17 +158,20 @@ inline bool CGraphEngine::search(const CProblemSolver<T1, T2, T3, T4, T5, T6, T7
     const _solver_index_type& start_node, const _solver_index_type& dest_node, xr_vector<_solver_edge_type>* node_path,
     const _Parameters& parameters)
 {
-    ScopeLock scope(&m_lock);
+    GraphEngineSearchLock scope(&m_lock, true);
+    GraphEngineConcurrencyProbe concurrent_probe(&g_ai_graph_engine_active_solver_search, "solver");
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/problem_solver")
-    PathTimer.Begin();
+    if (ps_ai_graph_engine_serialize)
+        PathTimer.Begin();
     using CSProblemSolver = CProblemSolver<T1, T2, T3, T4, T5, T6, T7, T8>;
     using CSolverPathManager = CPathManager<CSProblemSolver, CSolverAlgorithm::CDataStorage, _Parameters,
         _solver_dist_type, _solver_index_type, GraphEngineSpace::_iteration_type>;
     CSolverPathManager path_manager;
     path_manager.setup(&graph, &m_solver_algorithm->data_storage(), node_path, start_node, dest_node, parameters);
     bool successfull = m_solver_algorithm->find(path_manager);
-    PathTimer.End();
+    if (ps_ai_graph_engine_serialize)
+        PathTimer.End();
     return successfull;
     STOP_PROFILE
     STOP_PROFILE
@@ -121,16 +181,19 @@ template <typename _Graph, typename _Parameters>
 inline bool CGraphEngine::search(const _Graph& graph, const shared_str& start_node, const shared_str& dest_node,
     xr_vector<shared_str>* node_path, _Parameters& parameters)
 {
-    ScopeLock scope(&m_lock);
+    GraphEngineSearchLock scope(&m_lock, true);
+    GraphEngineConcurrencyProbe concurrent_probe(&g_ai_graph_engine_active_string_search, "string");
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/search")
-    PathTimer.Begin();
+    if (ps_ai_graph_engine_serialize)
+        PathTimer.Begin();
     using CPathManagerGeneric =
         CPathManager<_Graph, CStringAlgorithm::CDataStorage, _Parameters, float, shared_str, u32>;
     CPathManagerGeneric path_manager;
     path_manager.setup(&graph, &m_string_algorithm->data_storage(), node_path, start_node, dest_node, parameters);
     bool successfull = m_string_algorithm->find(path_manager);
-    PathTimer.End();
+    if (ps_ai_graph_engine_serialize)
+        PathTimer.End();
     return successfull;
     STOP_PROFILE
     STOP_PROFILE

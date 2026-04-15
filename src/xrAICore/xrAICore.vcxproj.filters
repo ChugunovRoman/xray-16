@@ -222,6 +222,12 @@
     <ClInclude Include="Navigation\vertex_manager_hash_fixed_inline.h">
       <Filter>AI\Navigation\Pathfinding\DataStorages\VertexManagers</Filter>
     </ClInclude>
+    <ClInclude Include="Navigation\ai_graph_engine_cvars.h">
+      <Filter>AI\Navigation\Pathfinding\GraphEngine</Filter>
+    </ClInclude>
+    <ClInclude Include="Navigation\ai_graph_engine_epoch.h">
+      <Filter>AI\Navigation\Pathfinding\GraphEngine</Filter>
+    </ClInclude>
     <ClInclude Include="Navigation\graph_engine.h">
       <Filter>AI\Navigation\Pathfinding\GraphEngine</Filter>
     </ClInclude>
@@ -368,7 +374,13 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Navigation\ai_graph_engine_cvars.cpp">
+      <Filter>AI\Navigation\Pathfinding\GraphEngine</Filter>
+    </ClCompile>
     <ClCompile Include="Navigation\game_graph_script.cpp">
+      <Filter>AI\Navigation\GameGraph</Filter>
+    </ClCompile>
+    <ClCompile Include="Navigation\game_graph_search.cpp">
       <Filter>AI\Navigation\GameGraph</Filter>
     </ClCompile>
     <ClCompile Include="Navigation\level_graph.cpp">

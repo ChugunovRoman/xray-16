@@ -279,14 +279,13 @@ void CStalkerPlanner::update(u32 time_delta)
     else if (!m_solve_update_interval && current_action().completed())
         run_solve = true;
 
+    bool planner_actual = false;
     if (run_solve)
     {
         ZoneScopedN("brain_update/solve");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerSolve);
 
         m_solution_changed = false;
-
-        bool planner_actual = false;
         const bool can_skip_actuality_check = m_actuality && !m_current_state.conditions().empty() &&
             !should_run_stalker_planner_actuality_check(object(), m_next_actuality_check_time, m_actuality_check_interval, now_ms);
         if (can_skip_actuality_check)
@@ -375,13 +374,6 @@ void CStalkerPlanner::update(u32 time_delta)
     if (this->solution().empty() || this->solution().size() == 0)
     {
         ZoneScopedN("brain_update/empty_solution");
-        static u32 s_last_empty_solution_log = 0;
-        if (Device.dwTimeGlobal - s_last_empty_solution_log >= 1000)
-        {
-            s_last_empty_solution_log = Device.dwTimeGlobal;
-            Msg("Solution array is empty! m_object=[%s] solution().empty()=[%d], size=[%d] initialized=[%d] m_current_action_id=[%d]",
-                m_object->cName().c_str(), this->solution().empty(), this->solution().size(), initialized(), m_current_action_id);
-        }
         return;
     }
 

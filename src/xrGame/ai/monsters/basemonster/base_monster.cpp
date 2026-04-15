@@ -38,6 +38,7 @@
 #include "xrServer.h"
 #include "ai/monsters/ai_monster_squad.h"
 #include "Actor.h"
+#include "npc_cpp_profile.h"
 #include "xrAICore/Navigation/ai_object_location.h"
 #include "xrAICore/Navigation/ai_object_location_impl.h"
 #include "ai_space.h"
@@ -341,14 +342,30 @@ void CBaseMonster::DeferredLateUpdateCL()
     if (g_Alive())
     {
         update_enemy_accessible_and_at_home_info();
-        CStepManager::update(false);
+        if (ucl_perf_run_character_step_when_alive())
+        {
+            ZoneScopedN("ucl_base_monster_step_manager");
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);
+            CStepManager::update(false);
+        }
 
         update_pos_by_grouping_behaviour();
+    }
+    else if (ucl_perf_run_character_step_dead_override())
+    {
+        ZoneScopedN("ucl_base_monster_step_manager_postdeath");
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);
+        CStepManager::update(false);
     }
 
     control().update_frame();
 
-    m_pPhysics_support->in_UpdateCL();
+    if (ucl_perf_run_character_physics_updatecl())
+    {
+        ZoneScopedN("ucl_base_monster_physics");
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsUpdateCL);
+        m_pPhysics_support->in_UpdateCL();
+    }
 }
 
 void CBaseMonster::UpdateCL()

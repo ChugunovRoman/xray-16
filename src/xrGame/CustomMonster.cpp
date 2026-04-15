@@ -262,6 +262,43 @@ void CCustomMonster::Load(LPCSTR section)
     // Msg				("! cmonster size: %d",sizeof(*this));
 }
 
+void CCustomMonster::ucl_perf_tick_postdeath_timer_on_early_updatecl()
+{
+    if (g_Alive())
+        m_ucl_perf_postdeath_until_time = 0;
+    else if (m_ucl_perf_postdeath_until_time != 0 && Device.dwTimeGlobal >= m_ucl_perf_postdeath_until_time)
+        m_ucl_perf_postdeath_until_time = 0;
+}
+
+void CCustomMonster::ucl_perf_set_postdeath_grace_after_die()
+{
+    const u32 grace_ms = npc_perf_disable_ucl_stalker_postdeath_grace_ms;
+    if (grace_ms > 0 && (npc_perf_disable_ucl_stalker_physics != 0 || npc_perf_disable_ucl_stalker_step_manager != 0))
+        m_ucl_perf_postdeath_until_time = Device.dwTimeGlobal + grace_ms;
+    else
+        m_ucl_perf_postdeath_until_time = 0;
+}
+
+bool CCustomMonster::ucl_perf_postdeath_force() const
+{
+    return !g_Alive() && m_ucl_perf_postdeath_until_time != 0 && Device.dwTimeGlobal < m_ucl_perf_postdeath_until_time;
+}
+
+bool CCustomMonster::ucl_perf_run_character_physics_updatecl() const
+{
+    return (npc_perf_disable_ucl_stalker_physics == 0) || ucl_perf_postdeath_force();
+}
+
+bool CCustomMonster::ucl_perf_run_character_step_when_alive() const
+{
+    return (npc_perf_disable_ucl_stalker_step_manager == 0) || ucl_perf_postdeath_force();
+}
+
+bool CCustomMonster::ucl_perf_run_character_step_dead_override() const
+{
+    return ucl_perf_postdeath_force() && (npc_perf_disable_ucl_stalker_step_manager != 0);
+}
+
 void CCustomMonster::reinit()
 {
     CScriptEntity::reinit();
@@ -275,6 +312,8 @@ void CCustomMonster::reinit()
 
     m_client_update_delta = 0;
     m_last_client_update_time = Device.dwTimeGlobal;
+
+    m_ucl_perf_postdeath_until_time = 0;
 
     m_vision_pipeline_phase = EVisionPipelinePhase::QueryFrustum;
     m_dwLastUpdateTime = 0xffffffff;
@@ -580,6 +619,7 @@ void CCustomMonster::UpdateCL_Early()
 {
     ZoneScopedN("ucl_CCustomMonster");
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCL);
+    ucl_perf_tick_postdeath_timer_on_early_updatecl();
     START_PROFILE("CustomMonster/client_update")
     {
         ZoneScopedN("ucl_cm_client_delta");
@@ -961,6 +1001,7 @@ void CCustomMonster::Die(IGameObject* who)
     inherited::Die(who);
     // Level().RemoveMapLocationByID(this->ID());
     SetActorVisibility(ID(), 0.f);
+    ucl_perf_set_postdeath_grace_after_die();
 }
 
 bool CCustomMonster::net_Spawn(CSE_Abstract* DC)

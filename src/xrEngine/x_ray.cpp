@@ -328,6 +328,10 @@ CApplication::~CApplication()
     if (m_game_module)
         m_game_module->destroy_persistent(g_pGamePersistent);
 
+    // Discord SDK must shut down before graphics/engine teardown; late destroy can hit 0xC0000008 (invalid handle)
+    // inside discord_game_sdk when pipes/handles are already torn down with the device/window stack.
+    ShutdownDiscord();
+
     Engine.Event.Dump();
 
     xr_delete(pInput);
@@ -343,10 +347,6 @@ CApplication::~CApplication()
 
     Device.Destroy();
     Engine.Destroy();
-
-#ifdef USE_DISCORD_INTEGRATION
-    discord::Core::Destroy(&m_discord_core);
-#endif
 
     // check for need to execute something external
     if (/*xr_strlen(g_sLaunchOnExit_params) && */ xr_strlen(g_sLaunchOnExit_app))
@@ -570,5 +570,25 @@ void CApplication::UpdateDiscordStatus()
     ZoneScoped;
     std::lock_guard guard{ m_discord_lock };
     m_discord_core->RunCallbacks();
+#endif
+}
+
+void CApplication::ShutdownDiscord()
+{
+#ifdef USE_DISCORD_INTEGRATION
+    discord::Core* core{};
+    {
+        std::lock_guard guard{ m_discord_lock };
+        core = m_discord_core;
+        m_discord_core = nullptr;
+    }
+    if (!core)
+        return;
+
+    core->ActivityManager().ClearActivity(nullptr);
+    for (int i = 0; i < 32; ++i)
+        (void)core->RunCallbacks();
+
+    discord::Core::Destroy(&core);
 #endif
 }

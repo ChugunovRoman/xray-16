@@ -8,7 +8,10 @@
 
 #include "pch.hpp"
 #include "level_graph.h"
+#include "xrCore/xrDebug_macros.h"
 #include "xrEngine/profiler.h"
+
+#include <algorithm>
 
 CLevelGraph::CLevelGraph(const char* fileName)
     : m_level_id(GameGraph::_LEVEL_ID(-1))
@@ -320,4 +323,204 @@ u32 CLevelGraph::guess_vertex_id(u32 const& current_vertex_id, Fvector const& po
     }
 
     return (result_vertex_id);
+}
+
+bool CLevelGraph::Search(u32 start_vertex_id, u32 dest_vertex_id, xr_vector<u32>& out_path, float max_range,
+    u32 max_iteration_count, u32 max_visited_node_count) const
+{
+    thread_local xr_vector<std::pair<float, u32>> temp_priority;
+    thread_local xr_map<u32, u32> temp_came_from;
+    thread_local xr_map<u32, float> temp_cost_so_far;
+
+    const float cell = header().cell_size();
+
+    temp_priority.clear();
+    temp_came_from.clear();
+    temp_cost_so_far.clear();
+    out_path.clear();
+
+    if (start_vertex_id == dest_vertex_id)
+    {
+        out_path.push_back(start_vertex_id);
+        return true;
+    }
+
+    if (!is_accessible(start_vertex_id) || !is_accessible(dest_vertex_id))
+        return false;
+
+    CLevelVertex* target_vertex = vertex(dest_vertex_id);
+    float target_x, target_z;
+    unpack_xz(*target_vertex, target_x, target_z);
+
+    auto calc_cost = [cell](CLevelVertex*, CLevelVertex*) { return cell; };
+
+    auto distance_node = [this, cell, target_x, target_z](CLevelVertex* node)
+    {
+        float x1, z1;
+        unpack_xz(node, x1, z1);
+        return cell * 2.f * (_abs(x1 - target_x) + _abs(z1 - target_z));
+    };
+
+    temp_priority.push_back({0.f, start_vertex_id});
+    temp_came_from[start_vertex_id] = start_vertex_id;
+    temp_cost_so_far[start_vertex_id] = 0.f;
+
+    while (!temp_priority.empty() && max_iteration_count > 0)
+    {
+        const u32 current_node_id = temp_priority.back().second;
+        temp_priority.pop_back();
+
+        if (current_node_id == dest_vertex_id)
+        {
+            const u32 max_path_hops = header().vertex_count() + 2;
+            u32 next_node = dest_vertex_id;
+            u32 hops = 0;
+            while (next_node != start_vertex_id && hops < max_path_hops)
+            {
+                out_path.insert(out_path.begin(), next_node);
+                const auto it = temp_came_from.find(next_node);
+                if (it == temp_came_from.end())
+                    return false;
+                next_node = it->second;
+                ++hops;
+            }
+            if (next_node != start_vertex_id)
+                return false;
+            out_path.insert(out_path.begin(), next_node);
+            return true;
+        }
+
+        CLevelVertex* node = vertex(current_node_id);
+
+        for (s32 neighbor_index = 0; neighbor_index < 4; ++neighbor_index)
+        {
+            if (max_iteration_count == 0)
+                continue;
+
+            const u32 neighbor_id = node->link(neighbor_index);
+            if (!is_accessible(neighbor_id))
+                continue;
+
+            CLevelVertex* neighbor = vertex(neighbor_id);
+            const float new_cost = temp_cost_so_far[current_node_id] + calc_cost(node, neighbor);
+
+            auto cost_it = temp_cost_so_far.find(neighbor_id);
+            if (cost_it != temp_cost_so_far.end() && cost_it->second <= new_cost)
+                continue;
+
+            if (temp_cost_so_far.size() >= max_visited_node_count)
+                continue;
+
+            const float distance = distance_node(neighbor);
+            if (distance > max_range)
+                continue;
+
+            if (cost_it != temp_cost_so_far.end())
+                cost_it->second = new_cost;
+            else
+                temp_cost_so_far[neighbor_id] = new_cost;
+
+            const float priority = new_cost + distance;
+            temp_priority.insert(
+                std::upper_bound(temp_priority.begin(), temp_priority.end(), std::pair<float, u32>{priority, neighbor_id},
+                    [](const std::pair<float, u32>& left, const std::pair<float, u32>& right)
+                    { return left.first > right.first; }),
+                {priority, neighbor_id});
+
+            temp_came_from[neighbor_id] = current_node_id;
+
+            if (--max_iteration_count == 0)
+                break;
+        }
+    }
+
+    return false;
+}
+
+u32 CLevelGraph::SearchNearestVertex(u32 vertex_id, const Fvector& target_position, float range) const
+{
+    thread_local xr_vector<std::pair<float, u32>> temp_priority;
+    thread_local xr_map<u32, u32> temp_came_from;
+    thread_local xr_map<u32, float> temp_cost_so_far;
+
+    const float cell = header().cell_size();
+    float best_distance_to_target = flt_max;
+
+    temp_priority.clear();
+    temp_came_from.clear();
+    temp_cost_so_far.clear();
+
+    u32 from_id = vertex_id;
+    u32 best_result = vertex_id;
+
+    u32 x0, y0;
+    unpack_xz(vertex(vertex_id), x0, y0);
+
+    const int max_range_sqr = iFloor(_sqr(range) / _sqr(cell) + .5f);
+
+    temp_priority.push_back({0.f, from_id});
+    temp_came_from.insert({from_id, from_id});
+    temp_cost_so_far.insert({from_id, 0.f});
+
+    auto calc_cost = [cell](CLevelVertex* node1, CLevelVertex* node2) { return cell; };
+    auto is_accessible_fn = [this, x0, y0, max_range_sqr](u32 node_id)
+    {
+        if (!is_accessible(node_id))
+            return false;
+        int x4, y4;
+        unpack_xz(vertex(node_id), x4, y4);
+        return static_cast<u32>(_sqr(int(x0) - x4) + _sqr(int(y0) - y4)) <= static_cast<u32>(max_range_sqr);
+    };
+
+    while (!temp_priority.empty())
+    {
+        const u32 current_node_id = temp_priority.back().second;
+        temp_priority.pop_back();
+
+        const float current_distance = target_position.distance_to_xz_sqr(vertex_position(current_node_id));
+        if (current_distance < best_distance_to_target)
+        {
+            best_distance_to_target = current_distance;
+            best_result = current_node_id;
+        }
+
+        CLevelVertex* node = vertex(current_node_id);
+
+        const_iterator i, e;
+        begin(node, i, e);
+        for (; i != e; ++i)
+        {
+            const u32 neighbor_id = value(node, i);
+            if (!is_accessible_fn(neighbor_id))
+                continue;
+
+            CLevelVertex* neighbor = vertex(neighbor_id);
+            const float new_cost = temp_cost_so_far[current_node_id] + calc_cost(node, neighbor);
+            auto temp_cost_it = temp_cost_so_far.find(neighbor_id);
+            if ((temp_cost_it != temp_cost_so_far.end() && temp_cost_it->second > new_cost) ||
+                (temp_cost_it == temp_cost_so_far.end()))
+            {
+                if (temp_cost_it != temp_cost_so_far.end())
+                    temp_cost_it->second = new_cost;
+                else
+                    temp_cost_so_far.insert({neighbor_id, new_cost});
+
+                const float priority = new_cost;
+                temp_priority.insert(
+                    std::upper_bound(temp_priority.begin(), temp_priority.end(),
+                        std::pair<float, u32>{priority, neighbor_id},
+                        [](const std::pair<float, u32>& left, const std::pair<float, u32>& right)
+                        { return left.first > right.first; }),
+                    {priority, neighbor_id});
+
+                auto came_it = temp_came_from.find(neighbor_id);
+                if (came_it != temp_came_from.end())
+                    came_it->second = current_node_id;
+                else
+                    temp_came_from.insert({neighbor_id, current_node_id});
+            }
+        }
+    }
+
+    return best_result;
 }

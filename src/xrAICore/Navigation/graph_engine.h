@@ -84,6 +84,8 @@ public:
     virtual ~CGraphEngine();
 #ifndef AI_COMPILER
     inline const CSolverAlgorithm& solver_algorithm() const;
+    /** Last `g()` from the string-graph A* data storage (after a successful `search` on shared_str graphs). */
+    float string_path_last_search_best_g() const;
 #endif
 
     template <typename _Graph, typename _Parameters>

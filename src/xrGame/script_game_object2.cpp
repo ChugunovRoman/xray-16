@@ -37,6 +37,7 @@
 #include "Car.h"
 #include "movement_manager.h"
 #include "detail_path_manager.h"
+#include "Level.h"
 
 namespace
 {
@@ -50,6 +51,92 @@ u16 script_danger_object_net_id(const IGameObject* o)
     __except (EXCEPTION_EXECUTE_HANDLER) { return u16(-1); }
 #else
     return o->ID();
+#endif
+}
+
+// CEnemyManager::selected() can race entity destroy during unload / mass deletes; read ID only inside SEH when needed.
+u16 script_enemy_selected_net_id(const CCustomMonster* monster)
+{
+    if (!monster)
+        return u16(-1);
+    const CEntityAlive* selected = monster->memory().enemy().selected();
+    if (!selected)
+        return u16(-1);
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+    __try
+    {
+        const CGameObject* go = smart_cast<const CGameObject*>(selected);
+        if (!go || !selected->g_Alive() || selected->getDestroy())
+            return u16(-1);
+        return go->ID();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return u16(-1); }
+#else
+    const CGameObject* go = smart_cast<const CGameObject*>(selected);
+    if (!go || !selected->g_Alive() || selected->getDestroy())
+        return u16(-1);
+    return go->ID();
+#endif
+}
+
+u16 script_item_selected_net_id(const CCustomMonster* monster)
+{
+    if (!monster)
+        return u16(-1);
+    const CGameObject* sel = monster->memory().item().selected();
+    if (!sel)
+        return u16(-1);
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+    __try
+    {
+        if (sel->getDestroy())
+            return u16(-1);
+        return sel->ID();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return u16(-1); }
+#else
+    if (sel->getDestroy())
+        return u16(-1);
+    return sel->ID();
+#endif
+}
+
+// True if danger's object()/dependent_object() still resolve in the level registry (or are null).
+bool script_danger_references_resolved(const CDangerObject* danger)
+{
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+    __try
+    {
+#endif
+        if (!danger)
+            return false;
+
+        const CEntityAlive* ent = danger->object();
+        if (ent)
+        {
+            const u16 id = script_danger_object_net_id(ent);
+            if (id == u16(-1))
+                return false;
+            IGameObject* go = Level().Objects.net_Find(id);
+            if (go != static_cast<const IGameObject*>(ent))
+                return false;
+        }
+
+        const IGameObject* dep = danger->dependent_object();
+        if (dep)
+        {
+            const u16 id = script_danger_object_net_id(dep);
+            if (id == u16(-1))
+                return false;
+            IGameObject* go = Level().Objects.net_Find(id);
+            if (go != dep)
+                return false;
+        }
+
+        return true;
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 #endif
 }
 } // namespace
@@ -225,43 +312,57 @@ void CScriptGameObject::Hit(CScriptHit* tpLuaHit)
 CScriptGameObject::operator IGameObject*() { return (&object()); }
 CScriptGameObject* CScriptGameObject::GetBestEnemy()
 {
-    if (m_best_enemy_cache_time == Device.dwTimeGlobal)
-        return m_best_enemy_cache_object;
-
+    const u32 now = Device.dwTimeGlobal;
     const CCustomMonster* monster = smart_cast<const CCustomMonster*>(&object());
     if (!monster)
     {
-        m_best_enemy_cache_time = Device.dwTimeGlobal;
-        m_best_enemy_cache_object = nullptr;
-        return (0);
+        m_best_enemy_cache_time = now;
+        m_best_enemy_cache_id = u16(-1);
+        return nullptr;
     }
 
-    CScriptGameObject* result = nullptr;
-    if (monster->memory().enemy().selected())
-        result = monster->memory().enemy().selected()->lua_game_object();
+    const u16 resolved_id = script_enemy_selected_net_id(monster);
 
-    m_best_enemy_cache_time = Device.dwTimeGlobal;
-    m_best_enemy_cache_object = result;
-    return result;
+    if (m_best_enemy_cache_time == now && m_best_enemy_cache_id == resolved_id)
+    {
+        if (resolved_id == u16(-1))
+            return nullptr;
+        CEntityAlive* alive = smart_cast<CEntityAlive*>(Level().Objects.net_Find(resolved_id));
+        if (!alive || !alive->g_Alive() || alive->getDestroy())
+            return nullptr;
+        return alive->lua_game_object();
+    }
+
+    m_best_enemy_cache_time = now;
+    m_best_enemy_cache_id = resolved_id;
+
+    if (resolved_id == u16(-1))
+        return nullptr;
+
+    CGameObject* go = smart_cast<CGameObject*>(Level().Objects.net_Find(resolved_id));
+    if (!go || go->getDestroy())
+        return nullptr;
+
+    CEntityAlive* alive = smart_cast<CEntityAlive*>(go);
+    if (!alive || !alive->g_Alive())
+        return nullptr;
+
+    return alive->lua_game_object();
 }
 
 const CDangerObject* CScriptGameObject::GetBestDanger() const
 {
-    if (m_best_danger_cache_time == Device.dwTimeGlobal)
-        return m_best_danger_cache_object;
-
     const CCustomMonster* monster = smart_cast<const CCustomMonster*>(&object());
     if (!monster)
-    {
-        m_best_danger_cache_time = Device.dwTimeGlobal;
-        m_best_danger_cache_object = nullptr;
-        return (0);
-    }
+        return nullptr;
 
     const CDangerObject* result = monster->memory().danger().selected();
+    if (!result)
+        return nullptr;
 
-    m_best_danger_cache_time = Device.dwTimeGlobal;
-    m_best_danger_cache_object = result;
+    // Do not cache: m_selected can point at reallocated vector storage; embedded entity ptrs can dangle after unload.
+    if (!script_danger_references_resolved(result))
+        return nullptr;
 
     return result;
 }
@@ -290,24 +391,38 @@ SScriptBestDangerSnapshot CScriptGameObject::GetBestDangerSnapshot() const
 
 CScriptGameObject* CScriptGameObject::GetBestItem()
 {
-    if (m_best_item_cache_time == Device.dwTimeGlobal)
-        return m_best_item_cache_object;
-
+    const u32 now = Device.dwTimeGlobal;
     const CCustomMonster* monster = smart_cast<const CCustomMonster*>(&object());
     if (!monster)
     {
-        m_best_item_cache_time = Device.dwTimeGlobal;
-        m_best_item_cache_object = nullptr;
-        return (0);
+        m_best_item_cache_time = now;
+        m_best_item_cache_id = u16(-1);
+        return nullptr;
     }
 
-    CScriptGameObject* result = nullptr;
-    if (monster->memory().item().selected())
-        result = monster->memory().item().selected()->lua_game_object();
+    const u16 resolved_id = script_item_selected_net_id(monster);
 
-    m_best_item_cache_time = Device.dwTimeGlobal;
-    m_best_item_cache_object = result;
-    return result;
+    if (m_best_item_cache_time == now && m_best_item_cache_id == resolved_id)
+    {
+        if (resolved_id == u16(-1))
+            return nullptr;
+        CGameObject* go = smart_cast<CGameObject*>(Level().Objects.net_Find(resolved_id));
+        if (!go || go->getDestroy())
+            return nullptr;
+        return go->lua_game_object();
+    }
+
+    m_best_item_cache_time = now;
+    m_best_item_cache_id = resolved_id;
+
+    if (resolved_id == u16(-1))
+        return nullptr;
+
+    CGameObject* go = smart_cast<CGameObject*>(Level().Objects.net_Find(resolved_id));
+    if (!go || go->getDestroy())
+        return nullptr;
+
+    return go->lua_game_object();
 }
 
 u32 CScriptGameObject::memory_time(const CScriptGameObject& lua_game_object)
