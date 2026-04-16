@@ -22,6 +22,7 @@ private:
 
 public:
     virtual CEntityAlive* cast_entity_alive() { return this; }
+    bool renderable_SsaLodCharacter() const override { return true; }
 
     bool m_bMobility;
     float m_fAccuracy;

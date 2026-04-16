@@ -102,6 +102,8 @@ extern ECORE_API bool ps_r2_advanced_pp; // advanced post process and effects
 
 extern ECORE_API float ps_r2_ssaLOD_A;
 extern ECORE_API float ps_r2_ssaLOD_B;
+extern ECORE_API float ps_r2_ssaLOD_CHAR_A;
+extern ECORE_API float ps_r2_ssaLOD_CHAR_B;
 
 // R2-specific
 extern ECORE_API Flags32 ps_r2_ls_flags; // r2-only

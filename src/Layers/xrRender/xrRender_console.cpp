@@ -173,6 +173,9 @@ bool ps_r2_advanced_pp = true; // advanced post process and effects
 
 float ps_r2_ssaLOD_A = 64.f;
 float ps_r2_ssaLOD_B = 48.f;
+// Same formula as r2_ssa_lod_* but applied only to CEntityAlive render roots (NPC / mutant / actor skeletal m_lod).
+float ps_r2_ssaLOD_CHAR_A = 64.f;
+float ps_r2_ssaLOD_CHAR_B = 48.f;
 
 // R2-specific
 Flags32 ps_r2_ls_flags = {R2FLAG_SUN
@@ -819,6 +822,8 @@ void xrRender_initconsole()
     // R2
     CMD4(CCC_Float, "r2_ssa_lod_a", &ps_r2_ssaLOD_A, 16, 96);
     CMD4(CCC_Float, "r2_ssa_lod_b", &ps_r2_ssaLOD_B, 32, 64);
+    CMD4(CCC_Float, "r2_ssa_lod_char_a", &ps_r2_ssaLOD_CHAR_A, 16, 512);
+    CMD4(CCC_Float, "r2_ssa_lod_char_b", &ps_r2_ssaLOD_CHAR_B, 32, 128);
 
     // R2-specific
     CMD2(CCC_R2GM, "r2em", &ps_r2_gmaterial);

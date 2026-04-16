@@ -22,6 +22,7 @@ using namespace R_dsgraph;
 float r_ssaDISCARD;
 float r_ssaDONTSORT;
 float r_ssaLOD_A, r_ssaLOD_B;
+float r_ssaLOD_CHAR_A, r_ssaLOD_CHAR_B;
 float r_ssaGLOD_start, r_ssaGLOD_end;
 float r_ssaHZBvsTEX;
 
@@ -310,7 +311,9 @@ void R_dsgraph_structure::add_leafs_dynamic(
             float D;
             xform.transform_tiny(Tpos, pV->vis.sphere.P);
             float ssa = CalcSSA(D, Tpos, pV->vis.sphere.R / 2.f); // assume dynamics never consume full sphere
-            if (ssa < r_ssaLOD_A)
+            const float ssaLodA =
+                (root && root->renderable_SsaLodCharacter()) ? r_ssaLOD_CHAR_A : r_ssaLOD_A;
+            if (ssa < ssaLodA)
                 _use_lod = TRUE;
         }
         if (_use_lod)

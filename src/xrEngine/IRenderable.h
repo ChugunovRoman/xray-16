@@ -30,6 +30,8 @@ public:
     virtual void renderable_Invisible(bool value) = 0;
     virtual bool renderable_HUD() = 0;
     virtual void renderable_HUD(bool value) = 0;
+    // When true, R2 skeletal m_lod distance uses ps_r2_ssaLOD_CHAR_* instead of global ps_r2_ssaLOD_* (CEntityAlive: NPCs, mutants, actor).
+    virtual bool renderable_SsaLodCharacter() const { return false; }
 };
 
 inline IRenderable::~IRenderable() = default;
