@@ -302,13 +302,21 @@ void CALifeSimulator__release(CALifeSimulator* self, CSE_Abstract* object, bool)
 
 LPCSTR get_level_name(const CALifeSimulator* self, int level_id)
 {
-    if (ai().game_graph().header().levels().find(level_id) == ai().game_graph().header().levels().end())
+    if (level_id < 0 || level_id > 255) // GameGraph::_LEVEL_ID is u8
+    {
+        GEnv.ScriptEngine->script_log(LuaMessageType::Error, "! get_level_name: invalid level id (out of range): [%d]", level_id);
+        GEnv.ScriptEngine->print_stack();
+        return "";
+    }
+    const GameGraph::_LEVEL_ID lid = static_cast<GameGraph::_LEVEL_ID>(level_id);
+    const auto& header = ai().game_graph().header();
+    if (!header.level_exist(lid))
     {
         GEnv.ScriptEngine->script_log(LuaMessageType::Error, "! get_level_name: invalid level id: [%d]", level_id);
         GEnv.ScriptEngine->print_stack();
+        return "";
     }
-    LPCSTR result = ai().game_graph().header().level((GameGraph::_LEVEL_ID)level_id).name().c_str();
-    return (result);
+    return header.level(lid).name().c_str();
 }
 
 CSE_ALifeCreatureActor* get_actor(const CALifeSimulator* self)
