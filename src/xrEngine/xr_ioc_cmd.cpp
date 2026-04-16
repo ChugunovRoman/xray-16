@@ -791,7 +791,7 @@ void CCC_Register()
     CMD3(CCC_Mask, "rs_stats", &psDeviceFlags, rsStatistic);
     CMD3(CCC_Mask, "rs_fps", &psDeviceFlags, rsShowFPS);
     CMD3(CCC_Mask, "rs_fps_graph", &psDeviceFlags, rsShowFPSGraph);
-    CMD4(CCC_Float, "rs_vis_distance", &psVisDistance, 0.4f, 1.5f);
+    CMD4(CCC_Float, "rs_vis_distance", &psVisDistance, 0.05f, 1.5f);
     CMD3(CCC_Mask, "rs_ids", &psDeviceFlags, rsShowIds);
 
     CMD3(CCC_Mask, "rs_cam_pos", &psDeviceFlags, rsCameraPos);
