@@ -432,13 +432,17 @@ IC bool CProblemSolverAbstract::Search(const CState& FromID, const CState& dest_
             CState NextNode = CurrentNodeID;
             u64 rb = 0;
             TempRebuildSeen.clear();
+            const auto is_state_equivalent = [](const CState& lhs, const CState& rhs)
+            {
+                return !(lhs < rhs) && !(rhs < lhs);
+            };
 
             // Never use map[key] here: std::map::operator[] inserts a default entry on miss and corrupts the search
             // graph, which previously produced an infinite parent walk; with a hop cap that becomes constant failure
             // and NPCs lose all plans.
             if (reverse_search)
             {
-                while (NextNode != start_snapshot)
+                while (!is_state_equivalent(NextNode, start_snapshot))
                 {
                     ++rb;
                     if (rb > max_hops)
@@ -470,7 +474,8 @@ IC bool CProblemSolverAbstract::Search(const CState& FromID, const CState& dest_
                         return false;
                     }
                     const CState parent = ic->second;
-                    if (parent == NextNode && NextNode != start_snapshot)
+                    if (is_state_equivalent(parent, NextNode) &&
+                        !is_state_equivalent(NextNode, start_snapshot))
                     {
                         OutPath.clear();
                         return false;
@@ -484,7 +489,7 @@ IC bool CProblemSolverAbstract::Search(const CState& FromID, const CState& dest_
                 TempRebuildForward.clear();
                 if (max_hops < size_t(16384))
                     TempRebuildForward.reserve(max_hops);
-                while (NextNode != start_snapshot)
+                while (!is_state_equivalent(NextNode, start_snapshot))
                 {
                     ++rb;
                     if (rb > max_hops)
@@ -516,7 +521,8 @@ IC bool CProblemSolverAbstract::Search(const CState& FromID, const CState& dest_
                         return false;
                     }
                     const CState parent = ic->second;
-                    if (parent == NextNode && NextNode != start_snapshot)
+                    if (is_state_equivalent(parent, NextNode) &&
+                        !is_state_equivalent(NextNode, start_snapshot))
                     {
                         OutPath.clear();
                         return false;

@@ -34,6 +34,7 @@ jobs:
 
     - name: Git submodules
       run: |
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
         git submodule sync --recursive
         git submodule update --init --recursive --depth 1 --jobs 4
 
@@ -222,6 +223,7 @@ jobs:
 
     - name: Git submodules
       run: |
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
         git submodule sync --recursive
         git submodule update --init --recursive --depth 1 --jobs 4
 

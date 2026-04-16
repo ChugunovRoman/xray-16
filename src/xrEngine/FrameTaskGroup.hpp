@@ -13,7 +13,7 @@ public:
     template <typename Invokable>
     void run(Invokable&& func)
     {
-        VERIFY3(m_count < kMaxTasks, "xr_frame_task_group: run() overflow (missing wait()?)", m_count);
+        VERIFY2(m_count < kMaxTasks, "xr_frame_task_group: run() overflow (missing wait()?)");
         VERIFY(TaskScheduler);
         m_tasks[m_count++] = &TaskScheduler->AddTask(std::forward<Invokable>(func));
     }
