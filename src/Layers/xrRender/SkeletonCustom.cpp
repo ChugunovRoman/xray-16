@@ -15,6 +15,33 @@
 
 namespace xray::render::RENDER_NAMESPACE
 {
+namespace
+{
+// LOD OGFs must not reference themselves (bad tools/content); also cap A<->B cycles.
+thread_local u32 s_skeleton_lod_load_depth = 0;
+constexpr u32 kMaxSkeletonLodLoadDepth = 16u;
+
+void path_file_name_no_ext(string_path& io)
+{
+    char* s = io;
+    char* base = s;
+    for (; *s; ++s)
+    {
+        if (*s == '\\' || *s == '/')
+            base = s + 1;
+    }
+    if (base != io)
+    {
+        string_path tmp;
+        xr_strcpy(tmp, sizeof(tmp), base);
+        xr_strcpy(io, sizeof(io), tmp);
+    }
+    if (char* e = strext(io))
+        *e = 0;
+    xr_strlwr(io);
+}
+} // namespace
+
 int psSkeletonUpdate = 32;
 Lock UCalc_Mutex
 #ifdef CONFIG_PROFILE_LOCKS
@@ -163,6 +190,21 @@ CSkeletonX* CKinematics::LL_GetChild(u32 idx)
     return B;
 }
 
+void CKinematics::CopyBoneTransformsFrom(const CKinematics& src)
+{
+    if (!bone_instances)
+        return;
+    const u16 n = LL_BoneCount();
+    if (!n || n != src.LL_BoneCount())
+        return;
+    for (u16 i = 0; i < n; ++i)
+    {
+        const CBoneInstance& s = src.LL_GetBoneInstance(i);
+        bone_instances[i].mTransform = s.mTransform;
+        bone_instances[i].mRenderTransform = s.mRenderTransform;
+    }
+}
+
 void CKinematics::Load(const char* N, IReader* data, u32 dwFlags)
 {
     Load(N, "", data, dwFlags);
@@ -183,26 +225,52 @@ void CKinematics::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
 
         if (strext(short_name))
             *strext(short_name) = 0;
+
+        string_path model_stem;
+        xr_strcpy(model_stem, sizeof(model_stem), short_name);
+        path_file_name_no_ext(model_stem);
+
         // From stream
         {
             string_path lod_name;
             LD->r_string(lod_name, sizeof(lod_name));
-            //.         strconcat       (sizeof(name_load),name_load, short_name, ":lod:", lod_name.c_str());
-            m_lod = (dxRender_Visual*)RImplementation.model_CreateChild(lod_name, nullptr);
 
-            if (CKinematics* lod_kinematics = dynamic_cast<CKinematics*>(m_lod))
+            string_path lod_stem;
+            xr_strcpy(lod_stem, sizeof(lod_stem), lod_name);
+            path_file_name_no_ext(lod_stem);
+
+            const bool self_lod = xr_strcmp(model_stem, lod_stem) == 0;
+            const bool depth_overflow = s_skeleton_lod_load_depth >= kMaxSkeletonLodLoadDepth;
+
+            if (self_lod || depth_overflow)
             {
-                lod_kinematics->m_is_original_lod = true;
+                if (self_lod)
+                    Msg("! [LOD] self-referential LOD skipped for '%s' (lod='%s')", N, lod_name);
+                else
+                    Msg("! [LOD] LOD load depth exceeded (%u), skipped for '%s' (lod='%s')",
+                        kMaxSkeletonLodLoadDepth, N, lod_name);
             }
+            else
+            {
+                ++s_skeleton_lod_load_depth;
+                //.         strconcat       (sizeof(name_load),name_load, short_name, ":lod:", lod_name.c_str());
+                m_lod = (dxRender_Visual*)RImplementation.model_CreateChild(lod_name, nullptr);
+                --s_skeleton_lod_load_depth;
 
-            VERIFY3(m_lod, "Cant create LOD model for", N);
-            //VERIFY2(m_lod->Type==MT_HIERRARHY || m_lod->Type==MT_PROGRESSIVE ||
-            //    m_lod->Type==MT_NORMAL,lod_name.c_str());
-            /*
-                strconcat(name_load, short_name, ":lod:1");
-                m_lod = RImplementation.model_CreateChild(name_load, LD);
-                VERIFY(m_lod->Type==MT_SKELETON_GEOMDEF_PM || m_lod->Type==MT_SKELETON_GEOMDEF_ST);
-            */
+                if (CKinematics* lod_kinematics = dynamic_cast<CKinematics*>(m_lod))
+                {
+                    lod_kinematics->m_is_original_lod = true;
+                }
+
+                VERIFY3(m_lod, "Cant create LOD model for", N);
+                //VERIFY2(m_lod->Type==MT_HIERRARHY || m_lod->Type==MT_PROGRESSIVE ||
+                //    m_lod->Type==MT_NORMAL,lod_name.c_str());
+                /*
+                    strconcat(name_load, short_name, ":lod:1");
+                    m_lod = RImplementation.model_CreateChild(name_load, LD);
+                    VERIFY(m_lod->Type==MT_SKELETON_GEOMDEF_PM || m_lod->Type==MT_SKELETON_GEOMDEF_ST);
+                */
+            }
         }
         LD->close();
     }

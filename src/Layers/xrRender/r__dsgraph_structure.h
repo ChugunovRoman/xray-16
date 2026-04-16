@@ -4,6 +4,7 @@
 
 namespace xray::render::RENDER_NAMESPACE
 {
+class CKinematics;
 // feedback	for receiving visuals
 class R_feedback
 {
@@ -174,7 +175,9 @@ struct R_dsgraph_structure
     IRender_Sector::sector_id_t detect_sector(const Fvector& P, Fvector& D);
 
     void add_static(dxRender_Visual* pVisual, const CFrustum& view, u32 planes);
-    void add_leafs_dynamic(IRenderable* root, dxRender_Visual* pVisual, Fmatrix& xform); // if detected node's full visibility
+    // lod_bind_source: when following m_lod, pass hi CKinematics so LOD skinning uses hi bone matrices (LOD has no animation blends).
+    void add_leafs_dynamic(
+        IRenderable* root, dxRender_Visual* pVisual, Fmatrix& xform, CKinematics* lod_bind_source = nullptr);
     void add_leafs_static(dxRender_Visual* pVisual); // if detected node's full visibility
 
     void insert_dynamic(IRenderable* root, dxRender_Visual* pVisual, Fmatrix& xform, Fvector& Center);

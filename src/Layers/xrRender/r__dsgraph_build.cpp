@@ -254,7 +254,8 @@ void R_dsgraph_structure::insert_static(dxRender_Visual* pVisual)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void R_dsgraph_structure::add_leafs_dynamic(IRenderable* root, dxRender_Visual* pVisual, Fmatrix& xform)
+void R_dsgraph_structure::add_leafs_dynamic(
+    IRenderable* root, dxRender_Visual* pVisual, Fmatrix& xform, CKinematics* lod_bind_source)
 {
     if (nullptr == pVisual)
         return;
@@ -270,11 +271,11 @@ void R_dsgraph_structure::add_leafs_dynamic(IRenderable* root, dxRender_Visual* 
         {
             PS::CParticleGroup::SItem& I = it;
             if (I._effect)
-                add_leafs_dynamic(root, I._effect, xform);
+                add_leafs_dynamic(root, I._effect, xform, nullptr);
             for (auto& pit : I._children_related)
-                add_leafs_dynamic(root, pit, xform);
+                add_leafs_dynamic(root, pit, xform, nullptr);
             for (auto& pit : I._children_free)
-                add_leafs_dynamic(root, pit, xform);
+                add_leafs_dynamic(root, pit, xform, nullptr);
         }
     }
         return;
@@ -287,7 +288,7 @@ void R_dsgraph_structure::add_leafs_dynamic(IRenderable* root, dxRender_Visual* 
             //i->vis.obj_data = pV->getVisData().obj_data; // Наследники используют шейдерные данные от родительского визуала
                                                          // [use shader data from parent model, rather than it childrens]
 
-            add_leafs_dynamic(root, i, xform);
+            add_leafs_dynamic(root, i, xform, nullptr);
         }
     }
         return;
@@ -296,6 +297,12 @@ void R_dsgraph_structure::add_leafs_dynamic(IRenderable* root, dxRender_Visual* 
     {
         // Add all children, doesn't perform any tests
         CKinematics* pV = (CKinematics*)pVisual;
+        const bool skinning_from_parent = lod_bind_source && lod_bind_source != pV &&
+            pV->LL_BoneCount() == lod_bind_source->LL_BoneCount();
+
+        if (skinning_from_parent)
+            pV->CopyBoneTransformsFrom(*lod_bind_source);
+
         BOOL _use_lod = FALSE;
         if (pV->m_lod)
         {
@@ -308,12 +315,14 @@ void R_dsgraph_structure::add_leafs_dynamic(IRenderable* root, dxRender_Visual* 
         }
         if (_use_lod)
         {
-            add_leafs_dynamic(root, pV->m_lod, xform);
+            pV->CalculateBones(TRUE);
+            add_leafs_dynamic(root, pV->m_lod, xform, pV);
         }
         else
         {
-            pV->CalculateBones(TRUE);
-            if (o.phase == CRender::PHASE_NORMAL)
+            if (!skinning_from_parent)
+                pV->CalculateBones(TRUE);
+            if (o.phase == CRender::PHASE_NORMAL && !skinning_from_parent)
             {
                 pV->CalculateWallmarks(root ? root->renderable_HUD() : false); //. bug?
             }
@@ -321,7 +330,7 @@ void R_dsgraph_structure::add_leafs_dynamic(IRenderable* root, dxRender_Visual* 
             {
                 //i->vis.obj_data = pV->getVisData().obj_data; // Наследники используют шейдерные данные от родительского визуала
                                                              // [use shader data from parent model, rather than it childrens]
-                add_leafs_dynamic(root, i, xform);
+                add_leafs_dynamic(root, i, xform, nullptr);
             }
         }
     }

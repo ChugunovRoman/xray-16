@@ -208,6 +208,8 @@ public:
         VERIFY(bone_instances);
         return bone_instances[bone_id];
     }
+    // LOD .ogf is a separate CKinematics without live animation blends; copy hi skeleton matrices for skinning.
+    void CopyBoneTransformsFrom(const CKinematics& src);
     CBoneData& LL_GetData(u16 bone_id) override
     {
         VERIFY(bone_id < LL_BoneCount());
