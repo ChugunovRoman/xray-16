@@ -148,7 +148,7 @@ void CParticleManager::StopEffect(int effect_id, int alist_id, bool deffered)
 // update&render
 void CParticleManager::Update(int effect_id, int alist_id, float dt)
 {
-    ZoneScoped;
+    // No ZoneScoped: Update runs from pre-render / mt particle workers; Tracy ScopedZone queue alloc can AV.
 
     ParticleEffect* pe = GetEffectPtr(effect_id);
     ParticleActions* pa = GetActionListPtr(alist_id);

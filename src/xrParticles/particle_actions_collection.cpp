@@ -1666,8 +1666,6 @@ void PATurbulence::Execute(ParticleEffect* effect, const float dt, float& tm_max
     if (!p_cnt)
         return;
 
-    ZoneScoped;
-
     pVector pV;
     pVector vX;
     pVector vY;
