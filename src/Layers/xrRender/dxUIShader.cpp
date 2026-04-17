@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "dxUIShader.h"
+#include "Shader.h"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -17,15 +18,21 @@ CTexture* dxUIShader::GetBaseTexture() const
     if (!hShader)
         return nullptr;
 
-    const SPass& pass = *hShader->E[0]->passes[0];
-    if (!pass.T)
+    const ShaderElement* element = hShader->E[0]._get();
+    if (!element || element->passes.empty())
         return nullptr;
 
-    const STextureList& textures = *pass.T;
+    const SPass* pass = element->passes[0]._get();
+    if (!pass || !pass->T)
+        return nullptr;
+
+    const STextureList& textures = *pass->T;
     if (textures.empty())
         return nullptr;
 
-    const R_constant* sbase = pass.constants->get(baseTexture)._get();
+    const R_constant* sbase = nullptr;
+    if (pass->constants)
+        sbase = pass->constants->get(baseTexture)._get();
 
     return textures[sbase ? sbase->samp.index : 0].second._get();
 }
