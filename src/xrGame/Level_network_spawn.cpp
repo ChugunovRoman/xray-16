@@ -102,6 +102,16 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
     else
         psNET_Flags.set(NETFLAG_MINIMIZEUPDATES, FALSE);
 
+    // Duplicate spawn (same net ID already on client): skip quietly — avoids failed destroy + bogus OnSpawn.
+    if (GameID() == eGameIDSingle && E->ID != 0xffff)
+    {
+        if (Objects.net_Find(E->ID))
+        {
+            Msg("! WARNING: g_sv_Spawn: skip duplicate client spawn id[%u] [%s]", (unsigned)E->ID, E->s_name.c_str());
+            return;
+        }
+    }
+
     // Client spawn
     //	T.Start		();
     IGameObject* O = nullptr;
@@ -121,66 +131,68 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
     if (!O || !net_spawn_ok)
     {
         ZoneNamedN(___tracy_spawn_fail, "CLevel::g_sv_Spawn/spawn_failed", true);
-        O->net_Destroy();
-        if (!GEnv.isDedicatedServer)
-            client_spawn_manager().clear(O->ID());
-        Objects.Destroy(O);
-        Msg("! Failed to spawn entity '%s'", E->s_name.c_str());
-    }
-    else
-    {
+        if (O)
         {
-            ZoneNamedN(___tracy_spawn_cb, "CLevel::g_sv_Spawn/client_spawn_callback", true);
+            O->net_Destroy();
             if (!GEnv.isDedicatedServer)
-                client_spawn_manager().callback(O);
+                client_spawn_manager().clear(O->ID());
+            Objects.Destroy(O);
         }
-        // Msg			("--spawn--SPAWN: %f ms",1000.f*T.GetAsync());
+        Msg("! Failed to spawn entity '%s'", E->s_name.c_str());
+        return;
+    }
 
-        if ((E->s_flags.is(M_SPAWN_OBJECT_LOCAL)) && (E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER)))
+    {
+        ZoneNamedN(___tracy_spawn_cb, "CLevel::g_sv_Spawn/client_spawn_callback", true);
+        if (!GEnv.isDedicatedServer)
+            client_spawn_manager().callback(O);
+    }
+    // Msg			("--spawn--SPAWN: %f ms",1000.f*T.GetAsync());
+
+    if ((E->s_flags.is(M_SPAWN_OBJECT_LOCAL)) && (E->s_flags.is(M_SPAWN_OBJECT_ASPLAYER)))
+    {
+        ZoneNamedN(___tracy_spawn_local, "CLevel::g_sv_Spawn/local_as_player", true);
+        if (IsDemoPlayStarted())
         {
-            ZoneNamedN(___tracy_spawn_local, "CLevel::g_sv_Spawn/local_as_player", true);
-            if (IsDemoPlayStarted())
+            if (E->s_flags.is(M_SPAWN_OBJECT_PHANTOM))
             {
-                if (E->s_flags.is(M_SPAWN_OBJECT_PHANTOM))
-                {
-                    SetControlEntity(O);
-                    SetEntity(O); // do not switch !!!
-                    SetDemoSpectator(O);
-                }
-            }
-            else
-            {
-                if (CurrentEntity() != NULL)
-                {
-                    CGameObject* pGO = smart_cast<CGameObject*>(CurrentEntity());
-                    if (pGO)
-                        pGO->On_B_NotCurrentEntity();
-                }
                 SetControlEntity(O);
                 SetEntity(O); // do not switch !!!
+                SetDemoSpectator(O);
             }
         }
-
-        if (0xffff != E->ID_Parent)
+        else
         {
-            ZoneNamedN(___tracy_spawn_parent, "CLevel::g_sv_Spawn/parent_ownership", true);
-            /*
-            // Generate ownership-event
-            NET_Packet			GEN;
-            GEN.w_begin			(M_EVENT);
-            GEN.w_u32			(E->m_dwSpawnTime);//-NET_Latency);
-            GEN.w_u16			(GE_OWNERSHIP_TAKE);
-            GEN.w_u16			(E->ID_Parent);
-            GEN.w_u16			(u16(O->ID()));
-            game_events->insert	(GEN);
-            /*/
-            NET_Packet GEN;
-            GEN.write_start();
-            GEN.read_start();
-            GEN.w_u16(u16(O->ID()));
-            cl_Process_Event(E->ID_Parent, GE_OWNERSHIP_TAKE, GEN);
-            //*/
+            if (CurrentEntity() != NULL)
+            {
+                CGameObject* pGO = smart_cast<CGameObject*>(CurrentEntity());
+                if (pGO)
+                    pGO->On_B_NotCurrentEntity();
+            }
+            SetControlEntity(O);
+            SetEntity(O); // do not switch !!!
         }
+    }
+
+    if (0xffff != E->ID_Parent)
+    {
+        ZoneNamedN(___tracy_spawn_parent, "CLevel::g_sv_Spawn/parent_ownership", true);
+        /*
+        // Generate ownership-event
+        NET_Packet			GEN;
+        GEN.w_begin			(M_EVENT);
+        GEN.w_u32			(E->m_dwSpawnTime);//-NET_Latency);
+        GEN.w_u16			(GE_OWNERSHIP_TAKE);
+        GEN.w_u16			(E->ID_Parent);
+        GEN.w_u16			(u16(O->ID()));
+        game_events->insert	(GEN);
+        /*/
+        NET_Packet GEN;
+        GEN.write_start();
+        GEN.read_start();
+        GEN.w_u16(u16(O->ID()));
+        cl_Process_Event(E->ID_Parent, GE_OWNERSHIP_TAKE, GEN);
+        //*/
     }
 
     /*if (E->s_flags.is(M_SPAWN_UPDATE)) {

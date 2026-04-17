@@ -35,7 +35,14 @@ void CAI_Stalker::OnEvent(NET_Packet& P, u16 type)
         P.r_u16(id);
         IGameObject* O = Level().Objects.net_Find(id);
 
-        R_ASSERT(O);
+        if (!O)
+        {
+#ifndef MASTER_GOLD
+            Msg("! ERROR: GE_OWNERSHIP_TAKE / GE_TRADE_BUY: object id[%u] not found (stale event or spawn order)",
+                (u32)id);
+#endif
+            break;
+        }
 
 #ifndef SILENCE
         Msg("Trying to take - %s (%d)", *O->cName(), O->ID());
