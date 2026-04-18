@@ -91,7 +91,7 @@ public:
     virtual void net_Destroy();
     virtual void Load(LPCSTR section);
     virtual void shedule_Update(u32 dt); //
-    void UpdateCL_Early() override;
+    virtual void UpdateCL();
     virtual void net_Save(NET_Packet& P);
     virtual bool net_SaveRelevant();
     virtual bool UsedAI_Locations();

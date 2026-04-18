@@ -542,11 +542,11 @@ void CAI_Bloodsucker::update_invisibility()
     }
 }
 
-void CAI_Bloodsucker::UpdateCL_Early()
+void CAI_Bloodsucker::UpdateCL()
 {
     ZoneScopedN("ucl_CAI_Bloodsucker");
     update_invisibility();
-    inherited::UpdateCL_Early();
+    inherited::UpdateCL();
     CControlledActor::frame_update();
     character_physics_support()->movement()->CollisionEnable(!is_collision_off());
 

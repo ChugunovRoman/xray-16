@@ -86,7 +86,7 @@ void object::Center(Fvector& result) const { XFORM().transform_tiny(result, GetC
 
 float object::Radius() const { return (GetCForm()->getRadius()); }
 
-void object::UpdateCL_Early()
+void object::UpdateCL()
 {
     ZoneScopedN("ucl_smart_cover_object");
     NODEFAULT;

@@ -29,8 +29,6 @@ public:
     void save(NET_Packet& packet) override;
     virtual bool Useful() const;
 
-    void UpdateCL_Early() override;
-
     virtual bool net_Spawn(CSE_Abstract* DC);
 
     virtual void OnH_B_Independent(bool just_before_destroy);

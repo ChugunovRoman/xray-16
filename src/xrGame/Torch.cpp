@@ -309,10 +309,10 @@ void CTorch::OnH_B_Independent(bool just_before_destroy)
     m_sounds.StopAllSounds();
 }
 
-void CTorch::UpdateCL_Early()
+void CTorch::UpdateCL()
 {
     ZoneScopedN("ucl_CTorch");
-    inherited::UpdateCL_Early();
+    inherited::UpdateCL();
 
     if (!m_switched_on)
         return;

@@ -303,26 +303,14 @@ void CAI_Trader::net_Destroy()
     CScriptEntity::net_Destroy();
 }
 
-void CAI_Trader::UpdateCL_Early()
+void CAI_Trader::UpdateCL()
 {
     ZoneScopedN("ucl_CAI_Trader");
-    inherited::UpdateCL_Early();
-}
-
-void CAI_Trader::DeferredLateUpdateCL()
-{
+    inherited::UpdateCL();
     sound().update(Device.fTimeDelta);
 
     if (!GetScriptControl() && !bfScriptAnimation())
         animation().update_frame();
-}
-
-void CAI_Trader::UpdateCL()
-{
-    UpdateCL_Early();
-    DeferredUpdatePositionAnimationCL();
-    ApplyDeferredPositionAnimationCL();
-    DeferredLateUpdateCL();
 }
 
 bool CAI_Trader::UsedAI_Locations() { return (TRUE); }

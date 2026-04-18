@@ -1552,7 +1552,7 @@ IC bool similar(const Fmatrix& _0, const Fmatrix& _1, const float& epsilon = EPS
     return (true);
 }
 
-void CGameObject::UpdateCL_Early()
+void CGameObject::UpdateCL()
 {
     ZoneScopedN("ucl_CGameObject");
 // IGameObject::UpdateCL();
@@ -1623,20 +1623,7 @@ void CGameObject::UpdateCL_Early()
     m_previous_matrix = XFORM();
 }
 
-// List-driven crow path runs ExecLook + PostUpdateCL separately; this is only Early→core→apply→late.
-void CGameObject::UpdateCL()
-{
-    UpdateCL_Early();
-    DeferredUpdatePositionAnimationCL();
-    ApplyDeferredPositionAnimationCL();
-    DeferredLateUpdateCL();
-}
-
 void CGameObject::PreUpdateCL() { m_client_updated = false; }
-void CGameObject::DeferredUpdatePositionAnimationCL() {}
-void CGameObject::ApplyDeferredPositionAnimationCL() {}
-void CGameObject::DeferredExecLookCL(float /*dt*/) {}
-void CGameObject::DeferredLateUpdateCL() {}
 void CGameObject::PostUpdateCL(bool /*bUpdateCL_disabled*/) { m_client_updated = true;}
 
 void CGameObject::on_matrix_change(const Fmatrix& previous) { obstacle().on_move(); }

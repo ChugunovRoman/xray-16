@@ -38,7 +38,7 @@ public:
     virtual void Load(LPCSTR section);
     virtual bool net_Spawn(CSE_Abstract* DC);
     virtual void shedule_Update(u32 dt); // Called by sheduler
-    void UpdateCL_Early() override; // Called each frame, so no need for dt
+    virtual void UpdateCL(); // Called each frame, so no need for dt
 
     virtual bool UsedAI_Locations();
 

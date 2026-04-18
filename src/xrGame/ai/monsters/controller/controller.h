@@ -73,7 +73,7 @@ public:
     virtual void Load(LPCSTR section);
     virtual void reload(LPCSTR section);
     virtual void reinit();
-    void UpdateCL_Early() override;
+    virtual void UpdateCL();
     virtual void shedule_Update(u32 dt);
     virtual void Die(IGameObject* who);
 

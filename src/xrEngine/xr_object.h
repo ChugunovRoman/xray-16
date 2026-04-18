@@ -219,26 +219,8 @@ public:
     virtual void PostLoad(pcstr section) = 0; //--#SM+#--
     // Update
     virtual void PreUpdateCL() = 0;
-    /** Early client update only (no position-anim core/apply, no stalker late physics/sight). Crow pipeline calls this from SingleUpdate; full UpdateCL() runs early + deferred passes for out-of-band callers. */
-    virtual void UpdateCL_Early() = 0;
-    /**
-     * Per-object composite: Early → DeferredUpdatePositionAnimationCL → ApplyDeferredPositionAnimationCL → DeferredLateUpdateCL.
-     * Does NOT run DeferredExecLookCL nor PostUpdateCL (those are list-driven only). See docs/PARALLEL_WORKER_BOUNDARY.md — "Direct UpdateCL() contract".
-     */
-    virtual void UpdateCL() = 0;
+    virtual void UpdateCL() = 0; // Called each frame, so no need for dt
     virtual void PostUpdateCL(bool bUpdateCL_disabled) = 0; //--#SM+#-- Вызывается всегда, в отличии от UpdateCL [called always for object regardless of it being active\sleep]
-    /**
-     * Canonical crow order (CObjectList::Update, same snapshot): PreUpdateCL → UpdateCL_Early → DeferredUpdatePositionAnimationCL → ApplyDeferredPositionAnimationCL → DeferredLateUpdateCL → DeferredExecLookCL → PostUpdateCL.
-     * Vtable order below is not crow runtime order: `DeferredExecLookCL` is declared before `DeferredLateUpdateCL` for ABI; list dispatch runs **late** then **exec look**.
-     */
-    /** Worker-safe core slice for CCustomMonster (stalkers: movement().on_frame only). List pass after all UpdateCL_Early. Default no-op. */
-    virtual void DeferredUpdatePositionAnimationCL() = 0;
-    /** Main-thread apply: SelectAnimation / full UpdatePositionAnimation, NET_Last → XFORM, anim controller, DEBUG camera. Default no-op. */
-    virtual void ApplyDeferredPositionAnimationCL() = 0;
-    /** Stalker look / monster Exec_Look; list pass runs after DeferredLateUpdateCL for the whole crow snapshot. Default no-op. */
-    virtual void DeferredExecLookCL(float dt) = 0;
-    /** After apply (e.g. stalker physics + sight, base_monster control). List pass runs before DeferredExecLookCL. Default no-op. */
-    virtual void DeferredLateUpdateCL() = 0;
     // Position stack
     virtual u32 ps_Size() const = 0;
     virtual GameObjectSavedPosition ps_Element(u32 id) const = 0;

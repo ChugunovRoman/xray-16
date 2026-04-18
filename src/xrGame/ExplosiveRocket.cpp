@@ -64,24 +64,16 @@ void CExplosiveRocket::OnH_B_Independent(bool just_before_destroy)
     inherited::OnH_B_Independent(just_before_destroy);
 }
 
-void CExplosiveRocket::UpdateCL_Early()
+void CExplosiveRocket::UpdateCL()
 {
     ZoneScopedN("ucl_CExplosiveRocket");
     if (eCollide == m_eState)
     {
-        CExplosive::UpdateCL_Early();
-        inherited::UpdateCL_Early();
+        CExplosive::UpdateCL();
+        inherited::UpdateCL();
     }
     else
-        inherited::UpdateCL_Early();
-}
-
-void CExplosiveRocket::UpdateCL()
-{
-    UpdateCL_Early();
-    DeferredUpdatePositionAnimationCL();
-    ApplyDeferredPositionAnimationCL();
-    DeferredLateUpdateCL();
+        inherited::UpdateCL();
 }
 
 void CExplosiveRocket::OnEvent(NET_Packet& P, u16 type)

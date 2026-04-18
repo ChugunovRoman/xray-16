@@ -1,10 +1,10 @@
-//////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////
 //	Module 		: moving_objects_static.cpp
 //	Created 	: 27.03.2007
 //  Modified 	: 14.05.2007
 //	Author		: Dmitriy Iassenev
 //	Description : moving objects with static objects, i.e stable dynamic objects
-//////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
 #include "moving_objects.h"
@@ -13,11 +13,10 @@
 #include "moving_object.h"
 #include "moving_objects_impl.h"
 
-bool moving_objects::collided_static(moving_object* object, const Fvector& position, const float& radius)
+bool moving_objects::collided_static(const Fvector& position, const float& radius)
 {
-    moving_object::StaticScratch& scratch = object->static_scratch();
-    auto I = scratch.nearest_static.begin();
-    auto E = scratch.nearest_static.end();
+    NEAREST_STATIC::const_iterator I = m_nearest_static.begin();
+    NEAREST_STATIC::const_iterator E = m_nearest_static.end();
     for (; I != E; ++I)
     {
         if (collided(*I, position, radius))
@@ -37,7 +36,7 @@ bool moving_objects::collided_static(moving_object* object, const Fvector& dest_
     {
         if (!i)
         {
-            if (collided_static(object, object->position(), radius))
+            if (collided_static(object->position(), radius))
                 return (true);
 
             continue;
@@ -45,33 +44,31 @@ bool moving_objects::collided_static(moving_object* object, const Fvector& dest_
 
         if ((i + 1) == step_count)
         {
-            if (collided_static(object, dest_position, radius))
+            if (collided_static(dest_position, radius))
                 return (true);
 
             continue;
         }
 
-        if (collided_static(object, object->predict_position(i * step_to_check), radius))
+        if (collided_static(object->predict_position(i * step_to_check), radius))
             return (true);
     }
 
     return (false);
 }
 
-void moving_objects::fill_static(moving_object* object, obstacles_query& query)
+void moving_objects::fill_static(obstacles_query& query)
 {
-    moving_object::StaticScratch& scratch = object->static_scratch();
-    auto I = scratch.nearest_static.begin();
-    auto E = scratch.nearest_static.end();
+    NEAREST_STATIC::const_iterator I = m_nearest_static.begin();
+    NEAREST_STATIC::const_iterator E = m_nearest_static.end();
     for (; I != E; ++I)
         query.add(smart_cast<const CGameObject*>(*I));
 }
 
-void moving_objects::fill_static(moving_object* object, obstacles_query& query, const Fvector& position, const float& radius)
+void moving_objects::fill_static(obstacles_query& query, const Fvector& position, const float& radius)
 {
-    moving_object::StaticScratch& scratch = object->static_scratch();
-    auto I = scratch.nearest_static.begin();
-    auto E = scratch.nearest_static.end();
+    NEAREST_STATIC::const_iterator I = m_nearest_static.begin();
+    NEAREST_STATIC::const_iterator E = m_nearest_static.end();
     for (; I != E; ++I)
     {
         if (!collided(*I, position, radius))
@@ -91,17 +88,17 @@ void moving_objects::fill_all_static(moving_object* object, const Fvector& dest_
     {
         if (!i)
         {
-            fill_static(object, object->static_query(), object->position(), radius);
+            fill_static(object->static_query(), object->position(), radius);
             continue;
         }
 
         if ((i + 1) == step_count)
         {
-            fill_static(object, object->static_query(), dest_position, radius);
+            fill_static(object->static_query(), dest_position, radius);
             continue;
         }
 
-        fill_static(object, object->static_query(), object->predict_position(i * step_to_check), radius);
+        fill_static(object->static_query(), object->predict_position(i * step_to_check), radius);
     }
 }
 
@@ -128,13 +125,11 @@ public:
 
 void moving_objects::fill_nearest_list(const Fvector& position, const float& radius, moving_object* object)
 {
-    moving_object::StaticScratch& scratch = object->static_scratch();
-    Level().ObjectSpace.GetNearest(scratch.spatial_objects, scratch.nearest_static, position, radius,
-        const_cast<CEntityAlive*>(&object->object()));
+    Level().ObjectSpace.GetNearest(
+        m_spatial_objects, m_nearest_static, position, radius, const_cast<CEntityAlive*>(&object->object()));
 
-    scratch.nearest_static.erase(
-        std::remove_if(scratch.nearest_static.begin(), scratch.nearest_static.end(), ignore_predicate(object)),
-        scratch.nearest_static.end());
+    m_nearest_static.erase(std::remove_if(m_nearest_static.begin(), m_nearest_static.end(), ignore_predicate(object)),
+        m_nearest_static.end());
 }
 
 void moving_objects::query_action_static(
@@ -145,8 +140,7 @@ void moving_objects::query_action_static(
 
     fill_nearest_list(start_position, dest_position.distance_to(start_position) + EPS, object);
 
-    moving_object::StaticScratch& scratch = object->static_scratch();
-    if (scratch.nearest_static.empty())
+    if (m_nearest_static.empty())
         return;
 
     if (!collided_static(object, dest_position))
@@ -154,7 +148,7 @@ void moving_objects::query_action_static(
 
     fill_nearest_list(start_position, dest_position.distance_to(start_position) + additional_radius + EPS, object);
 
-    fill_static(object, object->static_query());
+    fill_static(object->static_query());
     //	fill_all_static			(object,dest_position);
 }
 

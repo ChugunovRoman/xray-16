@@ -341,11 +341,11 @@ void CPhysicsShellHolder::OnChangeVisual()
     }
 }
 
-void CPhysicsShellHolder::UpdateCL_Early()
+void CPhysicsShellHolder::UpdateCL()
 {
     ZoneScopedN("ucl_CPhysicsShellHolder");
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::PhysicsShellHolderUpdateCL);
-    inherited::UpdateCL_Early();
+    inherited::UpdateCL();
     //обновить присоединенные партиклы
     {
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::PhysicsShellHolderUpdateParticles);

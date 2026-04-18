@@ -31,7 +31,7 @@ public:
     virtual bool feel_touch_on_contact(IGameObject*) { return FALSE; }
     virtual bool use(CGameObject* who_use) { return false; }
     virtual bool net_Spawn(CSE_Abstract* DC);
-    void UpdateCL_Early() override;
+    virtual void UpdateCL();
     virtual void shedule_Update(u32 dt);
     virtual bool IsVisibleForZones() { return false; }
     virtual bool UsedAI_Locations() { return true; }

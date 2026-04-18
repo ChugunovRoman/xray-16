@@ -25,7 +25,7 @@ public:
     virtual void OnActiveItem();
     virtual void OnHiddenItem();
 
-    void UpdateCL_Early() override;
+    virtual void UpdateCL();
     virtual void shedule_Update(u32 dt);
     void UpdateWorkload(u32 dt);
 

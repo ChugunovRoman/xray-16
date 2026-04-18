@@ -60,7 +60,7 @@ public:
     void net_Import(NET_Packet& P) override;
     void OnH_B_Chield() override;
     void OnH_B_Independent(bool just_before_destroy) override;
-    void UpdateCL_Early() override;
+    void UpdateCL() override;
 
     void renderable_Render(u32 context_id, IRenderable* root) override;
 

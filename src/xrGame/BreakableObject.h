@@ -42,7 +42,7 @@ public:
     virtual bool net_Spawn(CSE_Abstract* DC);
     virtual void net_Destroy();
     virtual void shedule_Update(u32 dt); // Called by sheduler
-    void UpdateCL_Early() override;
+    virtual void UpdateCL();
     virtual bool renderable_ShadowGenerate() { return false; }
     virtual bool renderable_ShadowReceive() { return true; }
     virtual void Hit(SHit* pHDS);

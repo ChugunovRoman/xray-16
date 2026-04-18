@@ -2834,11 +2834,6 @@ void CCC_RegisterCommands()
     CMD4(CCC_FloatBlock, "ph_tri_query_ex_aabb_rate", &ph_console::ph_tri_query_ex_aabb_rate, 1.01f, 3.f);
 #endif // DEBUG
 
-    // Physics MT / profiling (Release): not bundled with DEBUG-only physics console block above.
-    CMD4(CCC_Integer, "ph_mt_frame_write_barrier", &ph_console::ph_mt_frame_write_barrier, 0, 1);
-    CMD4(CCC_Integer, "ph_parallel_broadphase_prepass", &ph_console::ph_parallel_broadphase_prepass, 0, 1);
-    CMD4(CCC_Integer, "ph_parallel_broadphase_prepass_min_objects", &ph_console::ph_parallel_broadphase_prepass_min_objects, 1, 100000);
-
     CMD3(CCC_Mask, "g_god", &psActorFlags, AF_GODMODE);
     CMD3(CCC_Mask, "g_unlimitedammo", &psActorFlags, AF_UNLIMITEDAMMO);
     CMD1(CCC_TuneAttachableItem, "dbg_adjust_attachable_item");

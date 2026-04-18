@@ -36,8 +36,7 @@ public:
     virtual void net_Relcase(IGameObject* O);
     virtual void OnH_A_Independent();
     virtual void OnH_B_Independent(bool just_before_destroy);
-    void UpdateCL_Early() override;
-    void UpdateCL() override;
+    virtual void UpdateCL();
 
     virtual void Contact(const Fvector& pos, const Fvector& normal);
 

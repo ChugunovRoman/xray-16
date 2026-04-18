@@ -288,22 +288,14 @@ void CGrenade::OnAnimationEnd(u32 state)
     }
 }
 
-void CGrenade::UpdateCL_Early()
+void CGrenade::UpdateCL()
 {
     ZoneScopedN("ucl_CGrenade");
-    inherited::UpdateCL_Early();
-    CExplosive::UpdateCL_Early();
+    inherited::UpdateCL();
+    CExplosive::UpdateCL();
 
     if (!IsGameTypeSingle())
         make_Interpolation();
-}
-
-void CGrenade::UpdateCL()
-{
-    UpdateCL_Early();
-    DeferredUpdatePositionAnimationCL();
-    ApplyDeferredPositionAnimationCL();
-    DeferredLateUpdateCL();
 }
 
 bool CGrenade::Action(u16 cmd, u32 flags)

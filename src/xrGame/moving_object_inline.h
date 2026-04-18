@@ -59,5 +59,4 @@ IC const u32& moving_object::action_frame() const { return (m_action_frame); }
 IC const u32& moving_object::action_time() const { return (m_action_time); }
 IC obstacles_query& moving_object::static_query() { return (m_static_query); }
 IC obstacles_query& moving_object::dynamic_query() { return (m_dynamic_query); }
-IC moving_object::StaticScratch& moving_object::static_scratch() { return (m_static_scratch); }
 #endif // MOVING_OBJECT_INLINE_H

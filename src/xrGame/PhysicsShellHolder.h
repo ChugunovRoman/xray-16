@@ -95,7 +95,7 @@ public:
 
     virtual void OnChangeVisual();
     //для наследования CParticlesPlayer
-    void UpdateCL_Early() override;
+    virtual void UpdateCL();
     void correct_spawn_pos();
 
 protected:

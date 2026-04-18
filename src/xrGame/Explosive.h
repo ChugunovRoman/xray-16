@@ -30,8 +30,7 @@ public:
 
     virtual void net_Destroy();
     virtual void net_Relcase(IGameObject* O);
-    virtual void UpdateCL_Early();
-    virtual void UpdateCL() { UpdateCL_Early(); }
+    virtual void UpdateCL();
     virtual void Explode();
     virtual void ExplodeParams(const Fvector& pos, const Fvector& dir);
 

@@ -186,5 +186,3 @@ bool CEatableItem::GetBriefInfo(II_BriefInfo& info)
     info.icon._set(m_section_id);
     return true;
 }
-
-void CEatableItem::UpdateCL_Early() { inherited::UpdateCL_Early(); }

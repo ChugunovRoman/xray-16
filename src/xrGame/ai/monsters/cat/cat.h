@@ -12,7 +12,7 @@ public:
     virtual void Load(LPCSTR section);
     virtual void reinit();
 
-    void UpdateCL_Early() override;
+    virtual void UpdateCL();
 
     virtual void CheckSpecParams(u32 spec_params);
 

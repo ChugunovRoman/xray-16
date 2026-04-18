@@ -119,10 +119,10 @@ void CClimableObject::shedule_Update(u32 dt) // Called by shedule
 {
     inherited::shedule_Update(dt);
 }
-void CClimableObject::UpdateCL_Early() // Called each frame, so no need for d
+void CClimableObject::UpdateCL() // Called each frame, so no need for d
 {
     ZoneScopedN("ucl_CClimableObject");
-    inherited::UpdateCL_Early();
+    inherited::UpdateCL();
 }
 
 void CClimableObject::Center(Fvector& C) const { C.set(XFORM().c); }

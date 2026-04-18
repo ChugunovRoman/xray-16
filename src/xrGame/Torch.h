@@ -42,7 +42,7 @@ public:
     virtual void OnH_A_Chield();
     virtual void OnH_B_Independent(bool just_before_destroy);
 
-    void UpdateCL_Early() override;
+    virtual void UpdateCL();
 
     void Switch();
     void Switch(bool light_on);

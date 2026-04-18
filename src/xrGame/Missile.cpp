@@ -189,12 +189,12 @@ void CMissile::OnH_B_Independent(bool just_before_destroy)
     }
 }
 
-void CMissile::UpdateCL_Early()
+void CMissile::UpdateCL()
 {
     ZoneScopedN("ucl_CMissile");
     m_dwStateTime += Device.dwTimeDelta;
 
-    inherited::UpdateCL_Early();
+    inherited::UpdateCL();
 
     CActor* pActor = smart_cast<CActor*>(H_Parent());
     if (pActor && !pActor->AnyMove() && this == pActor->inventory().ActiveItem())

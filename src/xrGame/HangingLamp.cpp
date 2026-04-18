@@ -203,10 +203,10 @@ void CHangingLamp::shedule_Update(u32 dt)
     inherited::shedule_Update(dt);
 }
 
-void CHangingLamp::UpdateCL_Early()
+void CHangingLamp::UpdateCL()
 {
     ZoneScopedN("ucl_CHangingLamp");
-    inherited::UpdateCL_Early();
+    inherited::UpdateCL();
 
     if (m_pPhysicsShell)
         m_pPhysicsShell->InterpolateGlobalTransform(&XFORM());

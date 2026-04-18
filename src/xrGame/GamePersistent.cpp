@@ -654,8 +654,7 @@ void CGamePersistent::OnFrame()
             CSpectator* tmp_spectr = smart_cast<CSpectator*>(Level().CurrentControlEntity());
             if (tmp_spectr)
             {
-                // Direct UpdateCL: composite Early→core→apply→late only; no batched DeferredExecLookCL/PostUpdateCL (pause path).
-                tmp_spectr->UpdateCL();
+                tmp_spectr->UpdateCL(); // updating spectator in pause (pause ability of demo play)
             }
         }
 #ifndef MASTER_GOLD
@@ -688,7 +687,6 @@ void CGamePersistent::OnFrame()
 #endif
                         Device.dwTimeDelta = 0;
                         Device.fTimeDelta = 0.01f;
-                        // Noclip pause tick: direct UpdateCL only (see PARALLEL_WORKER_BOUNDARY.md — Direct UpdateCL contract).
                         Actor()->UpdateCL();
                         Actor()->shedule_Update(0);
 #ifdef DEBUG
@@ -711,7 +709,6 @@ void CGamePersistent::OnFrame()
                                 obj->SetDbgUpdateFrame(0);
 #endif
                                 obj->shedule_Update(0);
-                                // Child inventory object pause tick: direct UpdateCL only (no list ExecLook batch).
                                 obj->UpdateCL();
 #ifdef DEBUG
                                 obj->GetSchedulerData().dbg_update_shedule = 0;

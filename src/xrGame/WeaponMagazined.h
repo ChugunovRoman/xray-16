@@ -89,8 +89,7 @@ public:
     virtual void FireEnd();
     virtual void Reload();
 
-    void UpdateCL_Early() override;
-    void UpdateCL() override;
+    virtual void UpdateCL();
     virtual void net_Destroy();
     virtual void net_Export(NET_Packet& P);
     virtual void net_Import(NET_Packet& P);

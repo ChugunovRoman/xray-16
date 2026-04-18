@@ -95,28 +95,17 @@ void CHolderEntityObject::detach_actor_script(bool bForce)
     Actor()->use_HolderEx(nullptr, bForce);
 }
 
-void CHolderEntityObject::UpdateCL_Early()
+void CHolderEntityObject::UpdateCL()
 {
     ZoneScopedN("ucl_CHolderEntityObject");
-    inheritedPH::UpdateCL_Early();
-}
+    inheritedPH::UpdateCL();
 
-void CHolderEntityObject::DeferredLateUpdateCL()
-{
     if (OwnerActor() && OwnerActor()->IsMyCamera())
     {
         cam_Update(Device.fTimeDelta, g_fov);
         OwnerActor()->Cameras().UpdateFromCamera(Camera());
         OwnerActor()->Cameras().ApplyDevice();
     }
-}
-
-void CHolderEntityObject::UpdateCL()
-{
-    UpdateCL_Early();
-    DeferredUpdatePositionAnimationCL();
-    ApplyDeferredPositionAnimationCL();
-    DeferredLateUpdateCL();
 }
 
 void CHolderEntityObject::Hit(SHit* pHDS)

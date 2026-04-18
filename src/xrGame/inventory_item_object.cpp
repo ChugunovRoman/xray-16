@@ -71,11 +71,11 @@ void CInventoryItemObject::OnH_A_Chield()
     CInventoryItem::OnH_A_Chield();
 }
 
-void CInventoryItemObject::UpdateCL_Early()
+void CInventoryItemObject::UpdateCL()
 {
     ZoneScopedN("ucl_CInventoryItemObject");
-    CPhysicItem::UpdateCL_Early();
-    CInventoryItem::UpdateCL_Early();
+    CPhysicItem::UpdateCL();
+    CInventoryItem::UpdateCL();
 }
 
 void CInventoryItemObject::OnEvent(NET_Packet& P, u16 type)

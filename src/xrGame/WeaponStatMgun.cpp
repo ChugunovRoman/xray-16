@@ -167,30 +167,19 @@ void CWeaponStatMgun::net_Import(NET_Packet& P) // import from server
         FireStart();
 }
 
-void CWeaponStatMgun::UpdateCL_Early()
+void CWeaponStatMgun::UpdateCL()
 {
     ZoneScopedN("ucl_CWeaponStatMgun");
-    inheritedPH::UpdateCL_Early();
+    inheritedPH::UpdateCL();
     UpdateBarrelDir();
     UpdateFire();
-}
 
-void CWeaponStatMgun::DeferredLateUpdateCL()
-{
     if (OwnerActor() && OwnerActor()->IsMyCamera())
     {
         cam_Update(Device.fTimeDelta, g_fov);
         OwnerActor()->Cameras().UpdateFromCamera(Camera());
         OwnerActor()->Cameras().ApplyDevice();
     }
-}
-
-void CWeaponStatMgun::UpdateCL()
-{
-    UpdateCL_Early();
-    DeferredUpdatePositionAnimationCL();
-    ApplyDeferredPositionAnimationCL();
-    DeferredLateUpdateCL();
 }
 
 // void CWeaponStatMgun::Hit(	float P, Fvector &dir,	IGameObject* who,

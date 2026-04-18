@@ -1,7 +1,6 @@
 #include "StdAfx.h"
 
 #include "PHWorld.h"
-#include "PHIsland.h"
 #include "tri-colliderknoopc/dTriList.h"
 #include "PhysicsCommon.h"
 
@@ -22,13 +21,6 @@
 #include "PHSimpleCalls.h"
 
 #include "xrCore/FS_internal.h"
-#include "xrCore/Threading/ScopeLock.hpp"
-#include <xrCore/Threading/ParallelFor.hpp>
-#include <xrCore/Threading/TaskManager.hpp>
-
-#include <algorithm>
-#include <thread>
-#include <tracy/Tracy.hpp>
 
 #include "xrCDB/xr_area.h"
 #include "xrEngine/defines.h"
@@ -190,66 +182,9 @@ dVector3 center			=	{level_center.x,0.f,level_center.z};
 
 /////////////////////////////////////////////////////////////////////////////
 
-namespace
-{
-void erase_ph_object_ptr(PH_OBJECT_STORAGE& list, CPHObject* ptr)
-{
-    for (PH_OBJECT_I it = list.begin(); it != list.end(); ++it)
-    {
-        if (*it == ptr)
-        {
-            list.erase(it);
-            return;
-        }
-    }
-}
-bool contains_ph_object(PH_OBJECT_STORAGE& list, CPHObject* ptr)
-{
-    for (PH_OBJECT_I it = list.begin(); it != list.end(); ++it)
-    {
-        if (*it == ptr)
-            return true;
-    }
-    return false;
-}
-void erase_ph_update_ptr(PH_UPDATE_OBJECT_STORAGE& list, CPHUpdateObject* ptr)
-{
-    for (PH_UPDATE_OBJECT_I it = list.begin(); it != list.end(); ++it)
-    {
-        if (*it == ptr)
-        {
-            list.erase(it);
-            return;
-        }
-    }
-}
-bool contains_ph_update(PH_UPDATE_OBJECT_STORAGE& list, CPHUpdateObject* ptr)
-{
-    for (PH_UPDATE_OBJECT_I it = list.begin(); it != list.end(); ++it)
-    {
-        if (*it == ptr)
-            return true;
-    }
-    return false;
-}
-} // namespace
-
-bool CPHWorld::ShouldDeferWorldListMutation() const
-{
-    if (!ph_console::ph_mt_frame_write_barrier)
-        return false;
-    if (!m_physics_frame_write_barrier.load(std::memory_order_acquire))
-        return false;
-    return std::this_thread::get_id() != m_physics_frame_owner_thread;
-}
-
 void CPHWorld::Destroy()
 {
     ZoneScoped;
-
-    m_physics_frame_write_barrier.store(false, std::memory_order_release);
-    m_physics_frame_owner_thread = std::thread::id{};
-    DrainDeferredWorldWrites();
 
     xr_delete(m_commander);
     Mesh.Destroy();
@@ -319,7 +254,6 @@ void CPHWorld::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
 static u32 start_time = 0;
 void CPHWorld::Step()
 {
-    ZoneScopedN("ph_step/total");
 #ifdef DEBUG
     debug_output().dbg_reused_queries_per_step() = 0;
     debug_output().dbg_new_queries_per_step() = 0;
@@ -330,77 +264,37 @@ void CPHWorld::Step()
     PH_OBJECT_I i_object;
     PH_UPDATE_OBJECT_I i_update_object;
 
+    if (disable_count == 0)
     {
-        ZoneScopedN("ph_step/recently_disabled");
-        if (disable_count == 0)
+        disable_count = worldDisablingParams.objects_params.L2frames;
+        for (i_object = m_recently_disabled_objects.begin(); m_recently_disabled_objects.end() != i_object;)
         {
-            disable_count = worldDisablingParams.objects_params.L2frames;
-            for (i_object = m_recently_disabled_objects.begin(); m_recently_disabled_objects.end() != i_object;)
-            {
-                CPHObject* obj = (*i_object);
-                obj->check_recently_deactivated();
-                ++i_object;
-            }
+            CPHObject* obj = (*i_object);
+            obj->check_recently_deactivated();
+            ++i_object;
         }
-        if (!IsFreezed())
-            --disable_count;
     }
+    if (!IsFreezed())
+        --disable_count;
 
     ++m_steps_num;
     ++m_steps_short_num;
     stats.Collision.Begin();
 
-    // Collide: build a frozen snapshot of m_objects (intrusive-list order) so the collide pass does not walk
-    // the live list while prepass may use workers. Narrow phase stays serial in snapshot order.
-    // Pair-order / NearCallback outer semantics are preserved: all broadphases run before any
-    // CollideClearDirty; stale extra candidates are skipped in CollideDynamicsNarrow via st_dirty.
-    // ph_parallel_broadphase_prepass: concurrent SpatialSpacePhysic q_box remains experimental (default off).
+    // Collide must stay on one thread: q_box + smart_cast + NearCallback/ODE must not span a gap where
+    // another thread can spatial_unregister or destroy ISpatial* seen in the query (parallel broadphase
+    // alone caused use-after-free / invalid vptr in smart_cast).
+    for (i_object = m_objects.begin(); m_objects.end() != i_object;)
     {
-        ZoneScopedN("ph_step/collide");
-        m_frozen_collide_objects.clear();
-        for (i_object = m_objects.begin(); m_objects.end() != i_object; ++i_object)
-            m_frozen_collide_objects.push_back(*i_object);
-
-        const size_t n = m_frozen_collide_objects.size();
-        const int min_objs = std::max(1, ph_console::ph_parallel_broadphase_prepass_min_objects);
-        const bool parallel_broadphase = ph_console::ph_parallel_broadphase_prepass != 0 && TaskScheduler &&
-            n >= (size_t)min_objs;
-
-        if (n > 0)
-        {
-            if (parallel_broadphase)
-            {
-                ZoneScopedN("ph_step/broadphase_prepass_parallel");
-                CPHObject** objs = m_frozen_collide_objects.data();
-                xr_parallel_for(TaskRange(size_t(0), n), [&](const TaskRange<size_t>& range)
-                {
-                    for (size_t ri = range.begin(); ri != range.end(); ++ri)
-                        objs[ri]->CollideDynamicsBroadphase();
-                });
-            }
-            else
-            {
-                ZoneScopedN("ph_step/broadphase_prepass_serial");
-                for (size_t i = 0; i < n; ++i)
-                    m_frozen_collide_objects[i]->CollideDynamicsBroadphase();
-            }
-        }
-
-        if (n > 0)
-        {
-            ZoneScopedN("ph_step/collide_narrow_commit");
-            for (size_t i = 0; i < n; ++i)
-            {
-                CPHObject* obj = m_frozen_collide_objects[i];
+        CPHObject* obj = (*i_object);
 #ifdef DEBUG
-                debug_output().DBG_ObjBeforeCollision(obj);
+        debug_output().DBG_ObjBeforeCollision(obj);
 #endif
-                obj->CollideStepPostBroadphase();
+        obj->Collide();
 #ifdef DEBUG
-                debug_output().DBG_ObjAfterCollision(obj);
+        debug_output().DBG_ObjAfterCollision(obj);
 #endif
-            }
-        }
+        ++i_object;
     }
 
     stats.Collision.End();
@@ -415,30 +309,27 @@ void CPHWorld::Step()
     }
 #endif
 
+    for (i_object = m_objects.begin(); m_objects.end() != i_object;)
     {
-        ZoneScopedN("ph_step/phtune");
-        for (i_object = m_objects.begin(); m_objects.end() != i_object;)
-        {
-            CPHObject* obj = (*i_object);
-            ++i_object;
+        CPHObject* obj = (*i_object);
+        ++i_object;
 
 #ifdef DEBUG
-            debug_output().DBG_ObjBeforePhTune(obj);
+        debug_output().DBG_ObjBeforePhTune(obj);
 #endif
 
-            obj->PhTune(fixed_step);
+        obj->PhTune(fixed_step);
 
 #ifdef DEBUG
-            debug_output().DBG_ObjeAfterPhTune(obj);
+        debug_output().DBG_ObjeAfterPhTune(obj);
 #endif
-        }
+    }
 
-        for (i_update_object = m_update_objects.begin(); m_update_objects.end() != i_update_object;)
-        {
-            CPHUpdateObject* obj = (*i_update_object);
-            ++i_update_object;
-            obj->PhTune(fixed_step);
-        }
+    for (i_update_object = m_update_objects.begin(); m_update_objects.end() != i_update_object;)
+    {
+        CPHUpdateObject* obj = (*i_update_object);
+        ++i_update_object;
+        obj->PhTune(fixed_step);
     }
 
     stats.Core.Begin();
@@ -448,89 +339,69 @@ void CPHWorld::Step()
     debug_output().dbg_joints_num() = 0;
     debug_output().dbg_islands_num() = 0;
 #endif
+    //////////////////////////////////////////////////////////////////////
+    m_commander->update_threadsafety();
+    //////////////////////////////////////////////////////////////////////
+    for (i_object = m_objects.begin(); m_objects.end() != i_object;)
     {
-        ZoneScopedN("ph_step/commander");
-        //////////////////////////////////////////////////////////////////////
-        m_commander->update_threadsafety();
-        //////////////////////////////////////////////////////////////////////
-    }
-    {
-        ZoneScopedN("ph_step/island_step");
+        CPHObject* obj = (*i_object);
+        ++i_object;
+#ifdef DEBUG
+        if (debug_output().ph_dbg_draw_mask().test(phDbgDrawObjectStatistics))
         {
-            ZoneScopedN("ph_step/island_step_collect");
-            m_frozen_island_roots.clear();
-            for (i_object = m_objects.begin(); m_objects.end() != i_object; ++i_object)
+            if (obj->Island().IsActive())
             {
-                CPHObject* obj = (*i_object);
-                CPHIsland* root = obj->DActiveIsland();
-                if (!root->IsActive())
-                    continue;
-                bool duplicate = false;
-                for (CPHIsland* seen : m_frozen_island_roots)
-                {
-                    if (seen == root)
-                    {
-                        duplicate = true;
-                        break;
-                    }
-                }
-                if (!duplicate)
-                    m_frozen_island_roots.push_back(root);
+                debug_output().dbg_islands_num()++;
+                debug_output().dbg_joints_num() += obj->Island().nj;
+                debug_output().dbg_bodies_num() += obj->Island().nb;
             }
         }
+#endif
 
-        // One CPHIsland::Step per unique active root only (serial). Concurrent dWorldQuickStep across
-        // islands caused hangs under load (ODE / shared state); do not reintroduce xr_parallel_for here
-        // without a proven thread-safe ODE configuration.
-        const size_t ni = m_frozen_island_roots.size();
-        if (ni > 0)
-        {
-            ZoneScopedN("ph_step/island_step_serial");
-            for (size_t i = 0; i < ni; ++i)
-                m_frozen_island_roots[i]->Step(fixed_step);
-        }
+#ifdef DEBUG
+        debug_output().DBG_ObjBeforeStep(obj);
+#endif
+        obj->IslandStep(fixed_step);
+
+#ifdef DEBUG
+        debug_output().DBG_ObjAfterStep(obj);
+#endif
     }
 
     stats.Core.End();
 
+    for (i_object = m_objects.begin(); m_objects.end() != i_object;)
     {
-        ZoneScopedN("ph_step/post_integrate");
-        for (i_object = m_objects.begin(); m_objects.end() != i_object;)
-        {
-            CPHObject* obj = (*i_object);
-            ++i_object;
-            obj->IslandReinit();
+        CPHObject* obj = (*i_object);
+        ++i_object;
+        obj->IslandReinit();
 
 #ifdef DEBUG
-            debug_output().DBG_ObjBeforePhDataUpdate(obj);
+        debug_output().DBG_ObjBeforePhDataUpdate(obj);
 #endif
 
-            obj->PhDataUpdate(fixed_step);
+        obj->PhDataUpdate(fixed_step);
 
 #ifdef DEBUG
-            debug_output().DBG_ObjAfterPhDataUpdate(obj);
+        debug_output().DBG_ObjAfterPhDataUpdate(obj);
 #endif
 
-            obj->spatial_move();
-        }
+        obj->spatial_move();
+    }
 
-        for (i_update_object = m_update_objects.begin(); m_update_objects.end() != i_update_object;)
-        {
-            CPHUpdateObject* obj = *i_update_object;
-            ++i_update_object;
-            obj->PhDataUpdate(fixed_step);
-        }
+    for (i_update_object = m_update_objects.begin(); m_update_objects.end() != i_update_object;)
+    {
+        CPHUpdateObject* obj = *i_update_object;
+        ++i_update_object;
+        obj->PhDataUpdate(fixed_step);
     }
 
 #ifdef DEBUG
     debug_output().dbg_contacts_num() = ContactGroup->num;
 #endif
-    {
-        ZoneScopedN("ph_step/contact_cleanup");
-        dJointGroupEmpty(ContactGroup); // this is to be called after PhDataUpdate!!!-the order is critical!!!
-        ContactFeedBacks.empty();
-        ContactEffectors.empty();
-    }
+    dJointGroupEmpty(ContactGroup); // this is to be called after PhDataUpdate!!!-the order is critical!!!
+    ContactFeedBacks.empty();
+    ContactEffectors.empty();
 
     if (physics_step_time_callback)
     {
@@ -542,40 +413,12 @@ void CPHWorld::Step()
 void CPHWorld::StepTouch()
 {
     PH_OBJECT_I i_object;
-    m_frozen_collide_objects.clear();
-    for (i_object = m_objects.begin(); m_objects.end() != i_object; ++i_object)
-        m_frozen_collide_objects.push_back(*i_object);
-
-    const size_t n = m_frozen_collide_objects.size();
-    const int min_objs = std::max(1, ph_console::ph_parallel_broadphase_prepass_min_objects);
-    const bool parallel_broadphase = ph_console::ph_parallel_broadphase_prepass != 0 && TaskScheduler &&
-        n >= (size_t)min_objs;
-
-    if (n > 0)
+    for (i_object = m_objects.begin(); m_objects.end() != i_object;)
     {
-        if (parallel_broadphase)
-        {
-            ZoneScopedN("ph_step_touch/broadphase_prepass_parallel");
-            CPHObject** objs = m_frozen_collide_objects.data();
-            xr_parallel_for(TaskRange(size_t(0), n), [&](const TaskRange<size_t>& range)
-            {
-                for (size_t ri = range.begin(); ri != range.end(); ++ri)
-                    objs[ri]->CollideDynamicsBroadphase();
-            });
-        }
-        else
-        {
-            ZoneScopedN("ph_step_touch/broadphase_prepass_serial");
-            for (size_t i = 0; i < n; ++i)
-                m_frozen_collide_objects[i]->CollideDynamicsBroadphase();
-        }
-    }
+        CPHObject* obj = (*i_object);
+        obj->Collide();
 
-    if (n > 0)
-    {
-        ZoneScopedN("ph_step_touch/collide_narrow_commit");
-        for (size_t i = 0; i < n; ++i)
-            m_frozen_collide_objects[i]->CollideStepPostBroadphase();
+        ++i_object;
     }
 
     for (i_object = m_objects.begin(); m_objects.end() != i_object;)
@@ -652,132 +495,33 @@ void CPHWorld::FrameStep(dReal step)
     debug_output().DBG_DrawStatBeforeFrameStep();
 #endif
     b_processing = true;
-    if (ph_console::ph_mt_frame_write_barrier)
-    {
-        m_physics_frame_owner_thread = std::this_thread::get_id();
-        m_physics_frame_write_barrier.store(true, std::memory_order_release);
-    }
 
     start_time = Device.dwTimeGlobal; // - u32(m_frame_time*1000);
     if (ph_console::g_bDebugDumpPhysicsStep && it_number > 20)
         Msg("!!! TOO MANY PHYSICS STEPS PER FRAME = %d !!!", it_number);
     for (u32 i = 0; i < it_number; ++i)
         Step();
-    if (ph_console::ph_mt_frame_write_barrier)
-        DrainDeferredWorldWrites();
-    if (ph_console::ph_mt_frame_write_barrier)
-    {
-        m_physics_frame_write_barrier.store(false, std::memory_order_release);
-        m_physics_frame_owner_thread = std::thread::id{};
-    }
     b_processing = false;
 #ifdef DEBUG
     debug_output().DBG_DrawStatAfterFrameStep();
 #endif
 }
 
-void CPHWorld::DrainDeferredWorldWrites()
-{
-    ZoneScopedN("ph_world/drain_deferred_writes");
-    ScopeLock sl(&m_deferred_writes_lock);
-    const bool any = !m_deferred_remove_update_objects.empty() || !m_deferred_add_update_objects.empty() ||
-        !m_deferred_remove_recently_disabled.empty() || !m_deferred_add_recently_disabled.empty() ||
-        !m_deferred_add_objects.empty();
-    if (!any)
-        return;
-
-    // Removals first (per-list), then adds — avoids transient duplicates.
-    xr_vector<CPHUpdateObject*> ru(std::move(m_deferred_remove_update_objects));
-    m_deferred_remove_update_objects.clear();
-    for (CPHUpdateObject* o : ru)
-        erase_ph_update_ptr(m_update_objects, o);
-
-    xr_vector<CPHObject*> rr(std::move(m_deferred_remove_recently_disabled));
-    m_deferred_remove_recently_disabled.clear();
-    for (CPHObject* o : rr)
-        erase_ph_object_ptr(m_recently_disabled_objects, o);
-
-    xr_vector<CPHUpdateObject*> au(std::move(m_deferred_add_update_objects));
-    m_deferred_add_update_objects.clear();
-    for (CPHUpdateObject* o : au)
-    {
-        if (!contains_ph_update(m_update_objects, o))
-            m_update_objects.push_back(o);
-    }
-
-    xr_vector<CPHObject*> ar(std::move(m_deferred_add_recently_disabled));
-    m_deferred_add_recently_disabled.clear();
-    for (CPHObject* o : ar)
-    {
-        if (!contains_ph_object(m_recently_disabled_objects, o))
-            m_recently_disabled_objects.push_back(o);
-    }
-
-    xr_vector<CPHObject*> adds(std::move(m_deferred_add_objects));
-    m_deferred_add_objects.clear();
-    for (CPHObject* o : adds)
-    {
-        if (!contains_ph_object(m_objects, o))
-            m_objects.push_back(o);
-    }
-}
-
 void CPHWorld::AddObject(CPHObject* object)
 {
-    if (ShouldDeferWorldListMutation())
-    {
-        ScopeLock sl(&m_deferred_writes_lock);
-        m_deferred_add_objects.push_back(object);
-        return;
-    }
     m_objects.push_back(object);
     // xr_list <CPHObject*> ::iterator i= m_objects.end();
     // return (--m_objects.end());
 };
-void CPHWorld::AddRecentlyDisabled(CPHObject* object)
-{
-    if (ShouldDeferWorldListMutation())
-    {
-        ScopeLock sl(&m_deferred_writes_lock);
-        m_deferred_add_recently_disabled.push_back(object);
-        return;
-    }
-    m_recently_disabled_objects.push_back(object);
-}
-void CPHWorld::RemoveFromRecentlyDisabled(PH_OBJECT_I i)
-{
-    CPHObject* o = *i;
-    if (ShouldDeferWorldListMutation())
-    {
-        ScopeLock sl(&m_deferred_writes_lock);
-        m_deferred_remove_recently_disabled.push_back(o);
-        return;
-    }
-    m_recently_disabled_objects.erase(i);
-}
+void CPHWorld::AddRecentlyDisabled(CPHObject* object) { m_recently_disabled_objects.push_back(object); }
+void CPHWorld::RemoveFromRecentlyDisabled(PH_OBJECT_I i) { m_recently_disabled_objects.erase(i); }
 void CPHWorld::AddUpdateObject(CPHUpdateObject* object)
 {
-    if (ShouldDeferWorldListMutation())
-    {
-        ScopeLock sl(&m_deferred_writes_lock);
-        m_deferred_add_update_objects.push_back(object);
-        return;
-    }
     //.	if(object->IsFreezed())m_freezed_update_objects.erase(i);
     m_update_objects.push_back(object);
 }
 
-void CPHWorld::RemoveUpdateObject(PH_UPDATE_OBJECT_I i)
-{
-    CPHUpdateObject* o = *i;
-    if (ShouldDeferWorldListMutation())
-    {
-        ScopeLock sl(&m_deferred_writes_lock);
-        m_deferred_remove_update_objects.push_back(o);
-        return;
-    }
-    m_update_objects.erase(i);
-}
+void CPHWorld::RemoveUpdateObject(PH_UPDATE_OBJECT_I i) { m_update_objects.erase(i); }
 void CPHWorld::RemoveObject(PH_OBJECT_I i) { m_objects.erase((i)); };
 void CPHWorld::AddFreezedObject(CPHObject* obj) { m_freezed_objects.push_back(obj); }
 void CPHWorld::RemoveFreezedObject(PH_OBJECT_I i) { m_freezed_objects.erase(i); }

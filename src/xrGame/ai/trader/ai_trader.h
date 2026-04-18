@@ -56,9 +56,7 @@ public:
     virtual void HitSignal(float /**P**/, Fvector& /**local_dir**/, IGameObject* /**who**/, s16 /**element**/){};
     virtual void HitImpulse(float /**P**/, Fvector& /**vWorldDir**/, Fvector& /**vLocalDir**/){};
     virtual void Hit(SHit* pHDS) { inherited::Hit(pHDS); }
-    void UpdateCL_Early() override;
-    void DeferredLateUpdateCL() override;
-    void UpdateCL() override;
+    virtual void UpdateCL();
 
     virtual void g_fireParams(const CHudItem* pHudItem, Fvector& P, Fvector& D);
     virtual void g_WeaponBones(int& L, int& R1, int& R2);

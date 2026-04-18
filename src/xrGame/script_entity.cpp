@@ -672,7 +672,7 @@ bool CScriptEntity::bfScriptAnimation()
     }
 }
 
-void CScriptEntity::UpdateCL_Early()
+void CScriptEntity::UpdateCL()
 {
     ZoneScopedN("ucl_CScriptEntity");
     bfScriptAnimation();

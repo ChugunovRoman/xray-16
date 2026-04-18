@@ -237,14 +237,8 @@ public:
     virtual void Load(LPCSTR section) override;
     void PostLoad(LPCSTR section) override; //--#SM+#--
     void PreUpdateCL() override;
-    void UpdateCL_Early() override;
-    /** Composite Early→core→apply→late only; no DeferredExecLookCL/PostUpdateCL (list pipeline only). */
-    virtual void UpdateCL() override;
+    virtual void UpdateCL() override; // Called each frame, so no need for dt
     void PostUpdateCL(bool bUpdateCL_disabled) override; //--#SM+#--
-    void DeferredUpdatePositionAnimationCL() override;
-    void ApplyDeferredPositionAnimationCL() override;
-    void DeferredExecLookCL(float dt) override;
-    void DeferredLateUpdateCL() override;
     virtual void OnChangeVisual() override;
     // object serialization
     virtual void net_Save(NET_Packet& packet) override;

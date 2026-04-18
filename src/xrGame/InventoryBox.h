@@ -24,7 +24,7 @@ public:
     virtual void net_Relcase(IGameObject* O);
     void AddAvailableItems(TIItemContainer& items_container) const;
     IC bool IsEmpty() const { return m_items.empty(); }
-    void UpdateCL_Early() override;
+    virtual void UpdateCL();
 
     IC void set_in_use(bool status) { m_in_use = status; }
     IC bool in_use() const { return m_in_use; }

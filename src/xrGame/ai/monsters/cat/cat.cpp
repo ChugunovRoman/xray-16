@@ -137,10 +137,10 @@ void CCat::CheckSpecParams(u32 spec_params)
     }
 }
 
-void CCat::UpdateCL_Early()
+void CCat::UpdateCL()
 {
     ZoneScopedN("ucl_CCat");
-    inherited::UpdateCL_Early();
+    inherited::UpdateCL();
 }
 void CCat::HitEntityInJump(const CEntity* pEntity)
 {

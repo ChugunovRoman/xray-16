@@ -221,9 +221,7 @@ public:
     virtual void save(NET_Packet& output_packet);
     virtual void load(IReader& input_packet);
     virtual bool net_SaveRelevant() { return inherited::net_SaveRelevant(); }
-    void UpdateCL_Early() override;
-    void DeferredLateUpdateCL() override;
-    void UpdateCL() override;
+    virtual void UpdateCL();
     virtual void shedule_Update(u32 dt);
 
     void renderable_Render(u32 context_id, IRenderable* root) override;

@@ -102,9 +102,7 @@ public:
     // save/load server serialization
     virtual void save(NET_Packet& output_packet) { inherited::save(output_packet); }
     virtual void load(IReader& input_packet) { inherited::load(input_packet); }
-    void UpdateCL_Early() override;
-    void DeferredLateUpdateCL() override;
-    virtual void UpdateCL() override;
+    virtual void UpdateCL();
     virtual void shedule_Update(u32 dt);
 
     virtual void InitThink() {}

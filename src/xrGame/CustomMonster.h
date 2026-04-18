@@ -153,11 +153,7 @@ public:
     virtual void HitSignal(float P, Fvector& vLocalDir, IGameObject* who);
     virtual void g_WeaponBones(int& /**L**/, int& /**R1**/, int& /**R2**/){};
     virtual void shedule_Update(u32 DT);
-    void UpdateCL_Early() override;
-    virtual void UpdateCL() override;
-    void DeferredUpdatePositionAnimationCL() override;
-    void ApplyDeferredPositionAnimationCL() override;
-    void DeferredExecLookCL(float dt) override;
+    virtual void UpdateCL();
 
 protected:
     /** Shared UCL perf (stalker + monsters): post-Die grace while physics/step are globally throttled. */

@@ -27,7 +27,7 @@ public:
     virtual void reload(LPCSTR section);
     virtual void OnH_B_Independent(bool just_before_destroy);
     virtual void OnH_B_Chield();
-    void UpdateCL_Early() override;
+    virtual void UpdateCL();
     virtual bool net_Spawn(CSE_Abstract* DC);
     virtual void net_Destroy();
     virtual void activate_physic_shell();

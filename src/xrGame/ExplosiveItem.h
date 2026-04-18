@@ -34,8 +34,7 @@ public:
     virtual void shedule_Update(u32 dt);
     virtual bool shedule_Needed();
 
-    void UpdateCL_Early() override;
-    void UpdateCL() override;
+    virtual void UpdateCL();
     virtual void ChangeCondition(float fDeltaCondition) { CInventoryItem::ChangeCondition(fDeltaCondition); };
     virtual void StartTimerEffects();
 };
