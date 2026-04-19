@@ -175,8 +175,18 @@ void CALifeGraphRegistry::add(CSE_ALifeDynamicObject* object, GameGraph::_GRAPH_
         Msg("[LSS] adding object [%s][%d] to graph point %d", object->name_replace(), object->ID, game_vertex_id);
     }
 #endif
+    if (!object)
+        return;
+
     if (!object->m_bOnline && object->used_ai_locations() /**&& object->interactive()**/)
     {
+        if (!ai().game_graph().valid_vertex_id(game_vertex_id) || (size_t)game_vertex_id >= m_objects.size())
+        {
+            Msg("! [ALife] CALifeGraphRegistry::add: invalid game vertex %u for [%s][%u] (registry_size=%zu) — skipping",
+                (u32)game_vertex_id, object->name_replace(), object->ID, m_objects.size());
+            return;
+        }
+
         VERIFY(ai().game_graph().valid_vertex_id(game_vertex_id));
         OBJECT_REGISTRY& target = m_objects[game_vertex_id].objects();
         const auto& target_map = target.objects();
@@ -201,7 +211,8 @@ void CALifeGraphRegistry::add(CSE_ALifeDynamicObject* object, GameGraph::_GRAPH_
         }
         object->m_tGraphID = game_vertex_id;
     }
-    else if (!m_level && update)
+    else if (!m_level && update && ai().game_graph().valid_vertex_id(game_vertex_id) &&
+             (size_t)game_vertex_id < m_objects.size())
     {
         m_temp.push_back(object);
         object->m_tGraphID = game_vertex_id;
