@@ -12,6 +12,21 @@
 #include "xrEngine/profiler.h"
 
 #include <algorithm>
+#include <queue>
+
+namespace
+{
+using OpenPQEntry = std::pair<float, u32>;
+/** Min-heap by `first` (same ordering as sorted vector + pop_back in legacy Search). */
+struct MinHeapByFirstCmp
+{
+    bool operator()(const OpenPQEntry& a, const OpenPQEntry& b) const noexcept { return a.first > b.first; }
+};
+using OpenPQ = std::priority_queue<OpenPQEntry, std::vector<OpenPQEntry>, MinHeapByFirstCmp>;
+
+thread_local OpenPQ tls_search_open_pq;
+thread_local OpenPQ tls_nearest_open_pq;
+} // namespace
 
 CLevelGraph::CLevelGraph(const char* fileName)
     : m_level_id(GameGraph::_LEVEL_ID(-1))
@@ -328,13 +343,12 @@ u32 CLevelGraph::guess_vertex_id(u32 const& current_vertex_id, Fvector const& po
 bool CLevelGraph::Search(u32 start_vertex_id, u32 dest_vertex_id, xr_vector<u32>& out_path, float max_range,
     u32 max_iteration_count, u32 max_visited_node_count) const
 {
-    thread_local xr_vector<std::pair<float, u32>> temp_priority;
     thread_local xr_map<u32, u32> temp_came_from;
     thread_local xr_map<u32, float> temp_cost_so_far;
 
     const float cell = header().cell_size();
 
-    temp_priority.clear();
+    tls_search_open_pq = OpenPQ{};
     temp_came_from.clear();
     temp_cost_so_far.clear();
     out_path.clear();
@@ -361,14 +375,14 @@ bool CLevelGraph::Search(u32 start_vertex_id, u32 dest_vertex_id, xr_vector<u32>
         return cell * 2.f * (_abs(x1 - target_x) + _abs(z1 - target_z));
     };
 
-    temp_priority.push_back({0.f, start_vertex_id});
+    tls_search_open_pq.push({0.f, start_vertex_id});
     temp_came_from[start_vertex_id] = start_vertex_id;
     temp_cost_so_far[start_vertex_id] = 0.f;
 
-    while (!temp_priority.empty() && max_iteration_count > 0)
+    while (!tls_search_open_pq.empty() && max_iteration_count > 0)
     {
-        const u32 current_node_id = temp_priority.back().second;
-        temp_priority.pop_back();
+        const u32 current_node_id = tls_search_open_pq.top().second;
+        tls_search_open_pq.pop();
 
         if (current_node_id == dest_vertex_id)
         {
@@ -421,11 +435,7 @@ bool CLevelGraph::Search(u32 start_vertex_id, u32 dest_vertex_id, xr_vector<u32>
                 temp_cost_so_far[neighbor_id] = new_cost;
 
             const float priority = new_cost + distance;
-            temp_priority.insert(
-                std::upper_bound(temp_priority.begin(), temp_priority.end(), std::pair<float, u32>{priority, neighbor_id},
-                    [](const std::pair<float, u32>& left, const std::pair<float, u32>& right)
-                    { return left.first > right.first; }),
-                {priority, neighbor_id});
+            tls_search_open_pq.push({priority, neighbor_id});
 
             temp_came_from[neighbor_id] = current_node_id;
 
@@ -439,14 +449,13 @@ bool CLevelGraph::Search(u32 start_vertex_id, u32 dest_vertex_id, xr_vector<u32>
 
 u32 CLevelGraph::SearchNearestVertex(u32 vertex_id, const Fvector& target_position, float range) const
 {
-    thread_local xr_vector<std::pair<float, u32>> temp_priority;
     thread_local xr_map<u32, u32> temp_came_from;
     thread_local xr_map<u32, float> temp_cost_so_far;
 
     const float cell = header().cell_size();
     float best_distance_to_target = flt_max;
 
-    temp_priority.clear();
+    tls_nearest_open_pq = OpenPQ{};
     temp_came_from.clear();
     temp_cost_so_far.clear();
 
@@ -458,7 +467,7 @@ u32 CLevelGraph::SearchNearestVertex(u32 vertex_id, const Fvector& target_positi
 
     const int max_range_sqr = iFloor(_sqr(range) / _sqr(cell) + .5f);
 
-    temp_priority.push_back({0.f, from_id});
+    tls_nearest_open_pq.push({0.f, from_id});
     temp_came_from.insert({from_id, from_id});
     temp_cost_so_far.insert({from_id, 0.f});
 
@@ -472,10 +481,10 @@ u32 CLevelGraph::SearchNearestVertex(u32 vertex_id, const Fvector& target_positi
         return static_cast<u32>(_sqr(int(x0) - x4) + _sqr(int(y0) - y4)) <= static_cast<u32>(max_range_sqr);
     };
 
-    while (!temp_priority.empty())
+    while (!tls_nearest_open_pq.empty())
     {
-        const u32 current_node_id = temp_priority.back().second;
-        temp_priority.pop_back();
+        const u32 current_node_id = tls_nearest_open_pq.top().second;
+        tls_nearest_open_pq.pop();
 
         const float current_distance = target_position.distance_to_xz_sqr(vertex_position(current_node_id));
         if (current_distance < best_distance_to_target)
@@ -506,12 +515,7 @@ u32 CLevelGraph::SearchNearestVertex(u32 vertex_id, const Fvector& target_positi
                     temp_cost_so_far.insert({neighbor_id, new_cost});
 
                 const float priority = new_cost;
-                temp_priority.insert(
-                    std::upper_bound(temp_priority.begin(), temp_priority.end(),
-                        std::pair<float, u32>{priority, neighbor_id},
-                        [](const std::pair<float, u32>& left, const std::pair<float, u32>& right)
-                        { return left.first > right.first; }),
-                    {priority, neighbor_id});
+                tls_nearest_open_pq.push({priority, neighbor_id});
 
                 auto came_it = temp_came_from.find(neighbor_id);
                 if (came_it != temp_came_from.end())
