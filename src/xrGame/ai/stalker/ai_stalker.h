@@ -676,6 +676,7 @@ private:
     // target parameters
     Fvector m_throw_target_position;
     IGameObject* m_throw_ignore_object;
+    u16 m_throw_ignore_object_id{};
     // computed
     Fvector m_throw_position;
     Fvector m_throw_velocity;

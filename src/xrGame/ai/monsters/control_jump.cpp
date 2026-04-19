@@ -595,8 +595,9 @@ bool CControlJump::jump_intersect_geometry(Fvector const& target, IGameObject* c
     Fvector const traj_start = m_object->Position() + Fvector().set(0, 1.2f, 0);
     Fvector const traj_target = target + Fvector().set(0, 1.2f, 0) - (normalize(start_to_target) * 1);
 
+    u16 const ignore_id = ignored_object ? ignored_object->ID() : u16(0);
     if (trajectory_intersects_geometry(m_jump_time, traj_start, traj_target, velocity, collide_position, m_object,
-            ignored_object, temp_rq_results, pass_jump_picks, pass_collide_tris, sizes))
+            ignored_object, temp_rq_results, pass_jump_picks, pass_collide_tris, sizes, ignore_id))
     {
 #ifdef DEBUG
         m_object->m_jump_picks = std::move(jump_picks);

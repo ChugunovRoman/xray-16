@@ -1038,6 +1038,7 @@ void CAI_Stalker::throw_target_impl(const Fvector& position, IGameObject* throw_
     m_throw_actual = m_throw_actual && (distance_to_sqr < _sqr(.1f));
     m_throw_target_position = position;
     m_throw_ignore_object = throw_ignore_object;
+    m_throw_ignore_object_id = throw_ignore_object ? throw_ignore_object->ID() : u16(0);
 }
 
 void CAI_Stalker::throw_target(const Fvector& position, IGameObject* throw_ignore_object)
@@ -1074,7 +1075,7 @@ void CAI_Stalker::check_throw_trajectory(const float& throw_time)
 
     if (!trajectory_intersects_geometry(throw_time, m_throw_position, m_throw_target_position, m_throw_velocity,
             m_throw_collide_position, this, m_throw_ignore_object, rq_storage, trajectory_picks, collide_tris,
-            box_size))
+            box_size, m_throw_ignore_object_id))
     {
         m_throw_collide_position = Fvector().set(flt_max, flt_max, flt_max);
         m_throw_enabled = true;

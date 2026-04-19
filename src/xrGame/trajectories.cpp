@@ -8,6 +8,13 @@
 #include "xrCore/_vector3d_ext.h"
 
 // m_throw_ignore_object and similar can outlive the target; calling getEnabled on a freed CGameObject AVs.
+static IGameObject* trajectory_resolve_ignored_object_by_id(u16 const net_id)
+{
+    if (!net_id)
+        return nullptr;
+    return Level().Objects.net_Find(net_id);
+}
+
 static IGameObject* trajectory_resolve_ignored_object(IGameObject* ignored_object)
 {
     if (!ignored_object)
@@ -81,13 +88,16 @@ IC bool trajectory_query_callback(collide::rq_result& result, LPVOID params)
 
 static bool trajectory_check_collision(float low, float high, Fvector const& position, Fvector const& velocity,
     Fvector const& gravity, IGameObject* const self_object, IGameObject* const ignored_object,
-    Fvector& collide_position, collide::rq_results& temp_rq_results, Fvector box_size,
-    xr_vector<trajectory_pick>* const out_trajectory_picks, xr_vector<Fvector>* const out_collide_tris)
+    u16 const ignored_object_net_id, Fvector& collide_position, collide::rq_results& temp_rq_results,
+    Fvector box_size, xr_vector<trajectory_pick>* const out_trajectory_picks,
+    xr_vector<Fvector>* const out_collide_tris)
 {
     if (!self_object)
         return false;
 
-    IGameObject* const ignore_obj = trajectory_resolve_ignored_object(ignored_object);
+    IGameObject* const ignore_obj = (ignored_object_net_id != 0)
+        ? trajectory_resolve_ignored_object_by_id(ignored_object_net_id)
+        : trajectory_resolve_ignored_object(ignored_object);
 
     Fvector start;
     trajectory_get_position(start, position, velocity, gravity, low);
@@ -177,7 +187,7 @@ bool trajectory_intersects_geometry(float trajectory_time, Fvector const& trajec
     Fvector const& trajectory_end, Fvector const& trajectory_velocity, Fvector& collide_position,
     IGameObject* const self_object, IGameObject* const ignored_object, collide::rq_results& temp_rq_results,
     xr_vector<trajectory_pick>* const out_trajectory_picks, xr_vector<Fvector>* const out_collide_tris,
-    Fvector const& box_size)
+    Fvector const& box_size, u16 const ignored_object_net_id)
 {
 #ifdef DEBUG
     if (out_trajectory_picks)
@@ -196,7 +206,8 @@ bool trajectory_intersects_geometry(float trajectory_time, Fvector const& trajec
         float time = trajectory_select_pick_time(low, high, trajectory_start, trajectory_velocity, gravity, epsilon);
 
         if (!trajectory_check_collision(low, time, trajectory_start, trajectory_velocity, gravity, self_object,
-                ignored_object, collide_position, temp_rq_results, box_size, out_trajectory_picks, out_collide_tris))
+                ignored_object, ignored_object_net_id, collide_position, temp_rq_results, box_size,
+                out_trajectory_picks, out_collide_tris))
         {
             if (fsimilar(time, high) && collide_position.similar(trajectory_end, .2f))
                 break;
