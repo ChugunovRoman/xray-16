@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <type_traits>
+
 #include "ai_space.h"
 #include "xrAICore/Navigation/graph_engine.h"
 #include "xrAICore/Navigation/ai_graph_engine_cvars.h"
@@ -16,6 +18,10 @@
 #include "xrAICore/Navigation/level_graph.h"
 #include "xrAICore/Navigation/PathManagers/path_manager_params.h"
 #include "xrAICore/Navigation/PathManagers/path_manager_params_game_vertex.h"
+
+#include "CustomMonster.h"
+#include "xrCore/log.h"
+#include "xrCore/xr_types.h"
 
 #define TEMPLATE_SPECIALIZATION \
     template <typename _Graph, typename _VertexEvaluator, typename _vertex_id_type, typename _index_type>
@@ -192,8 +198,138 @@ IC void CPathManagerTemplate::set_dest_vertex(const _vertex_id_type vertex_id)
         m_actuality = false;
         return;
     }
-    R_ASSERT2(check_vertex(vertex_id),
-        make_string("Invalid vertex id [%llu]", static_cast<unsigned long long>(vertex_id)));
+    if (!check_vertex(vertex_id))
+    {
+        const CLevelGraph* ai_level = ai().get_level_graph();
+        const CGameGraph* ai_game = ai().get_game_graph();
+
+        const void* self_graph = static_cast<const void*>(m_graph);
+        const bool ptr_is_level = (self_graph == static_cast<const void*>(ai_level));
+        const bool ptr_is_game = (self_graph == static_cast<const void*>(ai_game));
+        const bool in_range = m_graph->valid_vertex_id(vertex_id);
+
+        int accessible_info = -1;
+        if (ptr_is_level && m_object)
+            accessible_info = m_object->accessible(static_cast<u32>(vertex_id)) ? 1 : 0;
+
+        string256 object_info{};
+        if (m_object)
+        {
+            const CCustomMonster& M = m_object->object();
+            const Fvector& pos = M.Position();
+            xr_sprintf(object_info,
+                "object=\"%s\" pos=(%.2f,%.2f,%.2f) actor_level_vertex=%u actor_game_vertex=%u",
+                M.cName().c_str(), pos.x, pos.y, pos.z, M.ai_location().level_vertex_id(),
+                static_cast<u32>(M.ai_location().game_vertex_id()));
+        }
+        else
+            xr_strcpy(object_info, "object=<null>");
+
+        string512 graph_info{};
+        if (ptr_is_level && ai_level)
+        {
+            xr_sprintf(graph_info,
+                "LEVEL graph: level_id=%u vertex_count=%u requested_vertex=%llu graph_valid_vertex_id=%d "
+                "restriction_accessible=%d",
+                ai_level->level_id(), ai_level->header().vertex_count(),
+                static_cast<unsigned long long>(vertex_id), in_range ? 1 : 0, accessible_info);
+        }
+        else if (ptr_is_game && ai_game)
+        {
+            xr_sprintf(graph_info,
+                "GAME graph: vertex_count=%u requested_vertex=%llu graph_valid_vertex_id=%d",
+                ai_game->header().vertex_count(), static_cast<unsigned long long>(vertex_id), in_range ? 1 : 0);
+        }
+        else
+        {
+            xr_sprintf(graph_info,
+                "Graph instance is not ai().get_level_graph() / get_game_graph(); graph_valid_vertex_id=%d",
+                in_range ? 1 : 0);
+        }
+
+        string256 nearest_info{};
+        nearest_info[0] = 0;
+        if (ai_level && m_object)
+        {
+            const u32 vid = ai_level->vertex_id(m_object->object().Position());
+            xr_sprintf(nearest_info, "nearest_vertex_from_actor_pos=%u nearest_valid=%d", vid,
+                ai_level->valid_vertex_id(vid) ? 1 : 0);
+        }
+
+        string512 cause{};
+        cause[0] = 0;
+        if (ptr_is_level && in_range && accessible_info == 0)
+            xr_strcpy(cause,
+                "\nLikely cause: vertex is in range for this level graph but blocked by restriction volumes "
+                "(smart cover / borders).");
+        else if (!in_range)
+            xr_strcpy(cause,
+                "\nLikely cause: stale or wrong vertex id for this graph (wrong level, reloaded AI data, "
+                "cross-table mismatch, script passing bad node id).");
+
+        string256 path_scope{};
+        if (std::is_same<_Graph, CLevelGraph>::value)
+            xr_strcpy(path_scope,
+                "path_scope=level_path (movement().level_path(); CAbstractPathManager<CLevelGraph,...>)");
+        else if (std::is_same<_Graph, CGameGraph>::value)
+            xr_strcpy(path_scope,
+                "path_scope=game_path (movement().game_path(); CAbstractPathManager<CGameGraph,...>)");
+        else
+            xr_strcpy(path_scope, "path_scope=unknown (nonstandard _Graph in CAbstractPathManager)");
+
+        string512 path_cache{};
+        if (m_path.empty())
+        {
+            xr_strcpy(path_cache,
+                "cached_route(m_path): empty (no stored vertex sequence from last successful build_path)");
+        }
+        else
+        {
+            size_t idx_found = size_t(-1);
+            for (size_t i = 0; i < m_path.size(); ++i)
+            {
+                if (m_path[i] == vertex_id)
+                {
+                    idx_found = i;
+                    break;
+                }
+            }
+            const unsigned long long first_v = static_cast<unsigned long long>(m_path.front());
+            const unsigned long long last_v = static_cast<unsigned long long>(m_path.back());
+            if (idx_found != size_t(-1))
+            {
+                xr_sprintf(path_cache,
+                    "cached_route(m_path): requested_vertex FOUND at route_index %zu (path_len=%zu) "
+                    "(last built path; first_vertex=%llu last_vertex=%llu)",
+                    idx_found, m_path.size(), first_v, last_v);
+            }
+            else
+            {
+                xr_sprintf(path_cache,
+                    "cached_route(m_path): requested_vertex NOT in stored path len=%zu "
+                    "(first_vertex=%llu last_vertex=%llu; dest being set is outside last route cache)",
+                    m_path.size(), first_v, last_v);
+            }
+        }
+
+        string2048 diag{};
+        xr_sprintf(diag,
+            "AbstractPathManager::set_dest_vertex: check_vertex failed.\n"
+            "%s\n"
+            "%s\n"
+            "%s\n"
+            "%s\n"
+            "previous_dest_vertex=%llu stored_path_vertices=%zu m_failed=%d cached_failed_start=%llu "
+            "cached_failed_dest=%llu\n"
+            "%s%s",
+            path_scope, graph_info, path_cache, object_info,
+            static_cast<unsigned long long>(m_dest_vertex_id), m_path.size(),
+            m_failed ? 1 : 0, static_cast<unsigned long long>(m_failed_start_vertex_id),
+            static_cast<unsigned long long>(m_failed_dest_vertex_id), nearest_info, cause);
+
+        Msg("! %s", diag);
+        R_ASSERT2(false, diag);
+    }
     m_actuality = m_actuality && (dest_vertex_id() == vertex_id);
     m_dest_vertex_id = vertex_id;
 }
