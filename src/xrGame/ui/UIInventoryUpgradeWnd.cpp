@@ -223,6 +223,18 @@ void CUIInventoryUpgradeWnd::Update()
 {
     inherited::Update();
 
+    // Inventory lists can rebuild cells during Update(); m_inv_item must stay in sync with the actor menu selection
+    // or smart_cast<CWeapon*>(m_inv_item) may dereference a freed PIItem (Sentry crash).
+    CUIActorMenu* actor_menu = nullptr;
+    for (CUIWindow* w = this; w; w = w->GetParent())
+    {
+        actor_menu = smart_cast<CUIActorMenu*>(w);
+        if (actor_menu)
+            break;
+    }
+    if (actor_menu)
+        m_inv_item = actor_menu->get_upgrade_item();
+
     if (!m_item || !m_inv_item || !m_item->IsShown())
         return;
 
