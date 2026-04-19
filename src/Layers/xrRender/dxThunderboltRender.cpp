@@ -34,20 +34,21 @@ void dxThunderboltRender::Render(CEffect_Thunderbolt& owner)
 
     dxThunderboltDescRender* pThRen = (dxThunderboltDescRender*)&*owner.current->m_pRender;
 
-    u32 vCount_Lock = pThRen->l_model->number_vertices;
-    u32 iCount_Lock = pThRen->l_model->number_indices;
-    IRender_DetailModel::fvfVertexOut* v_ptr =
-        (IRender_DetailModel::fvfVertexOut*)RImplementation.Vertex.Lock(vCount_Lock, hGeom_model->vb_stride, v_offset);
-    u16* i_ptr = RImplementation.Index.Lock(iCount_Lock, i_offset);
-    // XForm verts
-    pThRen->l_model->transfer(owner.current_xform, v_ptr, 0xffffffff, i_ptr, 0, 0.f, dv);
-    // Flush if needed
-    RImplementation.Vertex.Unlock(vCount_Lock, hGeom_model->vb_stride);
-    RImplementation.Index.Unlock(iCount_Lock);
-    RCache.set_xform_world(Fidentity);
-    RCache.set_Shader(pThRen->l_model->shader);
-    RCache.set_Geometry(hGeom_model);
-    RCache.Render(D3DPT_TRIANGLELIST, v_offset, 0, vCount_Lock, i_offset, iCount_Lock / 3);
+    if (pThRen->l_model)
+    {
+        u32 vCount_Lock = pThRen->l_model->number_vertices;
+        u32 iCount_Lock = pThRen->l_model->number_indices;
+        IRender_DetailModel::fvfVertexOut* v_ptr =
+            (IRender_DetailModel::fvfVertexOut*)RImplementation.Vertex.Lock(vCount_Lock, hGeom_model->vb_stride, v_offset);
+        u16* i_ptr = RImplementation.Index.Lock(iCount_Lock, i_offset);
+        pThRen->l_model->transfer(owner.current_xform, v_ptr, 0xffffffff, i_ptr, 0, 0.f, dv);
+        RImplementation.Vertex.Unlock(vCount_Lock, hGeom_model->vb_stride);
+        RImplementation.Index.Unlock(iCount_Lock);
+        RCache.set_xform_world(Fidentity);
+        RCache.set_Shader(pThRen->l_model->shader);
+        RCache.set_Geometry(hGeom_model);
+        RCache.Render(D3DPT_TRIANGLELIST, v_offset, 0, vCount_Lock, i_offset, iCount_Lock / 3);
+    }
     RCache.set_CullMode(CULL_CCW);
 
     // gradient

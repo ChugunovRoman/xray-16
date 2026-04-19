@@ -15,6 +15,6 @@ public:
     virtual void DestroyModel();
     // private:
 public:
-    IRender_DetailModel* l_model;
+    IRender_DetailModel* l_model{ nullptr };
 };
 } // namespace xray::render::RENDER_NAMESPACE
