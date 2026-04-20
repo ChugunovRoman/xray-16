@@ -93,6 +93,11 @@ void COLLIDER::frustum_query(u32 frustum_mode, const MODEL* m_def, const CFrustu
 {
     ZoneScoped;
     m_def->syncronize();
+    if (!m_def->tree)
+    {
+        r_clear();
+        return;
+    }
 
     // Get nodes
     const AABBNoLeafTree* T = (const AABBNoLeafTree*)m_def->tree->GetTree();

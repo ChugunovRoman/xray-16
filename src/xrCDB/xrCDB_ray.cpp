@@ -437,6 +437,11 @@ void COLLIDER::ray_query(u32 ray_mode, const MODEL* m_def, const Fvector& r_star
 {
     ZoneScoped;
     m_def->syncronize();
+    if (!m_def->tree)
+    {
+        r_clear();
+        return;
+    }
 
     // Get nodes
     const AABBNoLeafTree* T = (const AABBNoLeafTree*)m_def->tree->GetTree();
