@@ -37,6 +37,52 @@ int g_LuaDumpDepth = 0;
 
 #define SCRIPT_GLOBAL_NAMESPACE "_G"
 
+namespace
+{
+// Lua 5.1 / LuaJIT: runtime errors may leave a non-string on the stack; lua_tostring then yields nullptr.
+pcstr stringify_lua_top_for_log(lua_State* L, xr_string& storage)
+{
+    const int err_idx = lua_gettop(L);
+    if (err_idx < 1)
+        return nullptr;
+
+    if (lua_isstring(L, err_idx))
+        return lua_tostring(L, err_idx);
+
+    lua_getglobal(L, "tostring");
+    if (!lua_isfunction(L, -1))
+    {
+        lua_pop(L, 1);
+        storage.clear();
+        storage += '<';
+        storage += lua_typename(L, lua_type(L, err_idx));
+        storage += '>';
+        return storage.c_str();
+    }
+    lua_pushvalue(L, err_idx);
+    if (lua_pcall(L, 1, 1, 0) != 0)
+    {
+        lua_pop(L, 1);
+        storage.clear();
+        storage += '<';
+        storage += lua_typename(L, lua_type(L, err_idx));
+        storage += '>';
+        return storage.c_str();
+    }
+    if (const char* conv = lua_tostring(L, -1))
+        storage = conv;
+    else
+    {
+        storage.clear();
+        storage += '<';
+        storage += lua_typename(L, lua_type(L, err_idx));
+        storage += '>';
+    }
+    lua_pop(L, 1);
+    return storage.c_str();
+}
+} // namespace
+
 static const char* file_header_old =
     "local function script_name() \
 return \"%s\" \
@@ -163,10 +209,12 @@ void CScriptEngine::print_stack(lua_State* L)
     if (L == nullptr)
         L = lua();
 
-    if (lua_isstring(L, -1))
+    xr_string err_buf;
+    if (lua_gettop(L) >= 1)
     {
-        pcstr err = lua_tostring(L, -1);
-        script_log(LuaMessageType::Error, "%s", err);
+        pcstr err = stringify_lua_top_for_log(L, err_buf);
+        if (err && *err)
+            script_log(LuaMessageType::Error, "%s", err);
     }
 
     lua_Debug l_tDebugInfo;
@@ -213,12 +261,16 @@ void CScriptEngine::format_lua_stack(lua_State* L, xr_string& out)
         L = lua();
 
     out.clear();
-    if (lua_isstring(L, -1))
+    xr_string err_buf;
+    if (lua_gettop(L) >= 1)
     {
-        pcstr err = lua_tostring(L, -1);
-        out += "lua_err_at_tos: ";
-        out += err;
-        out += "\n";
+        pcstr err = stringify_lua_top_for_log(L, err_buf);
+        if (err && *err)
+        {
+            out += "lua_err_at_tos: ";
+            out += err;
+            out += "\n";
+        }
     }
 
     lua_Debug l_tDebugInfo{};
@@ -577,10 +629,25 @@ bool CScriptEngine::print_output(lua_State* L, pcstr caScriptFileName, int error
     if (errorCode)
         print_error(L, errorCode, caScriptFileName);
 
-    if (!lua_isstring(L, -1))
-        return false;
+    xr_string messageBuf;
+    pcstr S = nullptr;
+    if (lua_gettop(L) >= 1)
+    {
+        S = stringify_lua_top_for_log(L, messageBuf);
+        if (S && *S && errorCode)
+            scriptEngine->script_log(LuaMessageType::Error, "[LUA] %s", S);
+        else if (errorCode)
+            scriptEngine->script_log(LuaMessageType::Error,
+                "[LUA] Runtime error with non-printable object (type=%s); trace follows.",
+                lua_typename(L, lua_type(L, -1)));
+    }
 
-    const auto S = lua_tostring(L, -1);
+    if (!S || !*S)
+    {
+        if (errorCode)
+            scriptEngine->print_stack(L);
+        return false;
+    }
 
     if (!xr_strcmp(S, "cannot resume dead coroutine"))
     {
@@ -617,7 +684,10 @@ void CScriptEngine::print_error(lua_State* L, int iErrorCode, pcstr caScriptFile
     switch (iErrorCode)
     {
     case LUA_ERRRUN:
-        scriptEngine->script_log(LuaMessageType::Error, "SCRIPT RUNTIME ERROR");
+        if (caScriptFileName && caScriptFileName[0])
+            scriptEngine->script_log(LuaMessageType::Error, "SCRIPT RUNTIME ERROR (%s)", caScriptFileName);
+        else
+            scriptEngine->script_log(LuaMessageType::Error, "SCRIPT RUNTIME ERROR");
         break;
     case LUA_ERRMEM:
         scriptEngine->script_log(LuaMessageType::Error, "SCRIPT ERROR (memory allocation)");
