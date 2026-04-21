@@ -2,6 +2,7 @@
 #pragma hdrstop
 
 #include "../xrRender/ResourceManager.h"
+#include "Layers/xrRenderGL/glUploadContext.hpp"
 
 #ifdef XR_PLATFORM_WINDOWS // TODO
 #include "xrEngine/tntQAVI.h"
@@ -191,6 +192,14 @@ void CTexture::Load()
             flags.MemoryUsage = pTheora->Width(true) * pTheora->Height(true) * 4;
             pTheora->Play(TRUE, Device.dwTimeContinual);
 
+            OglGpuScope gpu;
+            if (!gpu.ok())
+            {
+                Msg("! OpenGL: cannot create video/PBO (no GL context)");
+                xr_delete(pTheora);
+                FATAL("Can't init video GL resources");
+            }
+
             // Now create texture
             GLuint pTexture = 0;
             u32 _w = pTheora->Width(false);
@@ -211,7 +220,7 @@ void CTexture::Load()
             GLenum err = glGetError();
             if (err != GL_NO_ERROR)
             {
-                Msg("Invalid video stream: 0x%x", err);
+                Msg("! OpenGL video/PBO setup failed (GL error 0x%x); often GL_INVALID_OPERATION without context", err);
                 xr_delete(pTheora);
                 glDeleteBuffers(1, &pBuffer);
                 pSurface = 0;
@@ -233,6 +242,14 @@ void CTexture::Load()
         else
         {
             flags.MemoryUsage = pAVI->m_dwWidth * pAVI->m_dwHeight * 4;
+
+            OglGpuScope gpuAvi;
+            if (!gpuAvi.ok())
+            {
+                Msg("! OpenGL: cannot create AVI video/PBO (no GL context)");
+                xr_delete(pAVI);
+                FATAL("Can't init AVI GL resources");
+            }
 
             // Create pixel buffer object
             glGenBuffers(1, &pBuffer);

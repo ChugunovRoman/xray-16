@@ -4,6 +4,8 @@
 
 #include "stdafx.h"
 
+#include "Layers/xrRenderGL/glUploadContext.hpp"
+
 #include <gli/gli.hpp>
 
 namespace xray::render::RENDER_NAMESPACE
@@ -112,6 +114,9 @@ GLuint CRender::texture_load(LPCSTR fRName, u32& ret_msize, GLenum& ret_desc)
     R_ASSERT2(!texture.empty(), fn);
 
     u32 mip_cnt = u32(-1); // XXX: write to it when reading with GLI!
+
+    OglGpuScope gpu;
+    R_ASSERT1_CURE(gpu.ok(), { FS.r_close(S); return 0; });
 
     gli::gl GL(gli::gl::PROFILE_GL33);
 

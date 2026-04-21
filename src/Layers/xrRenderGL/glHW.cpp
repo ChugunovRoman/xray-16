@@ -147,6 +147,28 @@ void CHW::CreateDevice(SDL_Window* hWnd)
 
     if (glGenFramebuffers && glBindFramebuffer)
         UpdateViews();
+
+    // Secondary context shares object namespace with primary. Must use a *separate* SDL window: two GL
+    // contexts on the same HWND cannot reliably be current on different threads (WGL: resource in use).
+    SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+    m_loaderWindow =
+        SDL_CreateWindow("XR_GL_SharedLoader", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1, 1,
+            SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL);
+    if (!m_loaderWindow)
+    {
+        Log("! OpenGL: could not create hidden loader window:", SDL_GetError());
+    }
+    else
+    {
+        m_loaderContext = SDL_GL_CreateContext(m_loaderWindow);
+        if (!m_loaderContext)
+            Log("! OpenGL: could not create secondary shared (loader) context:", SDL_GetError());
+    }
+
+    // SDL makes the newly created GL context current; we must bind primary again or the frame is
+    // rendered into the loader's 1x1 window while SwapWindow targets the main surface (black screen).
+    if (MakeContextCurrent(IRender::PrimaryContext) != 0)
+        Log("! OpenGL: could not restore primary context after loader setup:", SDL_GetError());
 }
 
 void CHW::DestroyDevice()
@@ -155,8 +177,20 @@ void CHW::DestroyDevice()
     pFB = 0;
 
     const auto context = SDL_GL_GetCurrentContext();
-    if (context == m_context)
+    if (context == m_context || context == m_loaderContext)
         SDL_GL_MakeCurrent(nullptr, nullptr);
+
+    if (m_loaderContext)
+    {
+        SDL_GL_DeleteContext(m_loaderContext);
+        m_loaderContext = nullptr;
+    }
+
+    if (m_loaderWindow)
+    {
+        SDL_DestroyWindow(m_loaderWindow);
+        m_loaderWindow = nullptr;
+    }
 
     SDL_GL_DeleteContext(m_context);
     m_context = nullptr;
@@ -203,6 +237,8 @@ IRender::RenderContext CHW::GetCurrentContext() const
     const auto context = SDL_GL_GetCurrentContext();
     if (context == m_context)
         return IRender::PrimaryContext;
+    if (context == m_loaderContext)
+        return IRender::HelperContext;
     return IRender::NoContext;
 }
 
@@ -215,6 +251,11 @@ int CHW::MakeContextCurrent(IRender::RenderContext context) const
 
     case IRender::PrimaryContext:
         return SDL_GL_MakeCurrent(m_window, m_context);
+
+    case IRender::HelperContext:
+        if (!m_loaderWindow || !m_loaderContext)
+            return -1;
+        return SDL_GL_MakeCurrent(m_loaderWindow, m_loaderContext);
 
     default:
         NODEFAULT;

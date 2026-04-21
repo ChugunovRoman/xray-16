@@ -1,6 +1,8 @@
 #include "stdafx.h"
 #include "Layers/xrRender/BufferUtils.h"
 
+#include "Layers/xrRenderGL/glUploadContext.hpp"
+
 #include <FlexibleVertexFormat.h>
 
 namespace xray::render::RENDER_NAMESPACE
@@ -28,6 +30,10 @@ u32 GetDeclLength(const VertexElement* decl)
 
 static HRESULT CreateBuffer(GLuint* pBuffer, const void* pData, u32 dataSize, bool bDynamic, bool bIndexBuffer)
 {
+    OglGpuScope gpu;
+    if (!gpu.ok())
+        return E_FAIL;
+
     const GLenum usage = bDynamic ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
     const GLenum target = bIndexBuffer ? GL_ELEMENT_ARRAY_BUFFER : GL_ARRAY_BUFFER;
 

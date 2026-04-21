@@ -1,5 +1,8 @@
 #include "stdafx.h"
 
+#include <cmath>
+#include <cfloat>
+
 #include "FHierrarhyVisual.h"
 #include "SkeletonCustom.h"
 #include "xrCore/Threading/ParallelFor.hpp"
@@ -808,19 +811,34 @@ void R_dsgraph_structure::build_subspace()
 
         if (o.spatial_traverse_flags & ISpatial_DB::O_ORDERED) // this should be inside of query functions
         {
-            // Exact sorting order (front-to-back)
-            std::sort(lstRenderables.begin(), lstRenderables.end(), [&](ISpatial* s1, ISpatial* s2)
+            // Exact sorting order (front-to-back). Precalculate distances: repeating GetSpatialData in the
+            // comparator breaks strict weak ordering with NaNs / equality; MSVC std::sort can crash (AV in sort internals).
+            struct SpatialDist
+            {
+                ISpatial* s{};
+                float d{};
+            };
+            xr_vector<SpatialDist> ordered;
+            ordered.reserve(lstRenderables.size());
+            for (ISpatial* spatial : lstRenderables)
+            {
+                if (!spatial)
+                    continue;
+                float dist = spatial->GetSpatialData().sphere.P.distance_to_sqr(o.view_pos);
+                if (!std::isfinite(dist))
+                    dist = FLT_MAX;
+                ordered.push_back({ spatial, dist });
+            }
+            std::sort(ordered.begin(), ordered.end(),
+                [](const SpatialDist& a, const SpatialDist& b)
                 {
-                    if (s1 == s2)
-                        return false;
-                    if (!s1)
-                        return false; // nulls after valid
-                    if (!s2)
-                        return true;
-                    const float d1 = s1->GetSpatialData().sphere.P.distance_to_sqr(o.view_pos);
-                    const float d2 = s2->GetSpatialData().sphere.P.distance_to_sqr(o.view_pos);
-                    return d1 < d2;
+                    if (a.d != b.d)
+                        return a.d < b.d;
+                    return reinterpret_cast<uintptr_t>(a.s) < reinterpret_cast<uintptr_t>(b.s);
                 });
+            lstRenderables.resize(ordered.size());
+            for (size_t i = 0; i < ordered.size(); ++i)
+                lstRenderables[i] = ordered[i].s;
         }
 
         u32 uID_LTRACK = 0xffffffff;

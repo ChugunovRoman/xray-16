@@ -669,6 +669,9 @@
     <ClCompile Include="..\xrRenderGL\glTexture.cpp">
       <Filter>Core</Filter>
     </ClCompile>
+    <ClCompile Include="..\xrRenderGL\glUploadContext.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
     <ClCompile Include="..\xrRender_R2\r3_rendertarget_create_minmaxSM.cpp">
       <Filter>Core_Target</Filter>
     </ClCompile>
@@ -910,6 +913,9 @@
     </ClInclude>
     <ClInclude Include="..\xrRenderGL\glTextureUtils.h">
       <Filter>dx9 to gl Utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\xrRenderGL\glUploadContext.hpp">
+      <Filter>Core</Filter>
     </ClInclude>
     <ClInclude Include="..\xrRender\LightTrack.h">
       <Filter>Lights</Filter>

@@ -46,6 +46,7 @@
     <ClCompile Include="..\xrRenderGL\glr_constants.cpp" />
     <ClCompile Include="..\xrRenderGL\glr_screenshot.cpp" />
     <ClCompile Include="..\xrRenderGL\glTexture.cpp" />
+    <ClCompile Include="..\xrRenderGL\glUploadContext.cpp" />
     <ClCompile Include="..\xrRender\blenders\Blender_BmmD_deferred.cpp" />
     <ClCompile Include="..\xrRender\blenders\Blender_detail_still_deferred.cpp" />
     <ClCompile Include="..\xrRender\blenders\Blender_Model_EbB_deferred.cpp" />
@@ -251,6 +252,7 @@
     <ClInclude Include="..\xrRender\blenders\dx11MSAABlender.h" />
     <ClInclude Include="..\xrRender\blenders\dx11RainBlender.h" />
     <ClInclude Include="..\xrRenderGL\glHW.h" />
+    <ClInclude Include="..\xrRenderGL\glUploadContext.hpp" />
     <ClInclude Include="..\xrRenderGL\glR_Backend_Runtime.h" />
     <ClInclude Include="..\xrRenderGL\glr_constants_cache.h" />
     <ClInclude Include="..\xrRenderGL\glState.h" />

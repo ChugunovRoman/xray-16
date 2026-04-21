@@ -356,6 +356,7 @@ target_sources(xrRender_GL PRIVATE
     ../xrRenderGL/glStateUtils.cpp
     ../xrRenderGL/glStateUtils.h
     ../xrRenderGL/glTexture.cpp
+    ../xrRenderGL/glUploadContext.cpp
     ../xrRenderGL/glTextureUtils.cpp
     ../xrRenderGL/glTextureUtils.h
     ../../Include/xrRender/animation_blend.h
