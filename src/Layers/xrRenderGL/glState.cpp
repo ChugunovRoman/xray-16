@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "glState.h"
+#include "Layers/xrRenderGL/glUploadContext.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -45,6 +46,49 @@ void glState::Apply()
     // TODO: OGL: Use glBindSamplers if ARB_multi_bind is supported.
     for (size_t stage = 0; stage < CTexture::mtMaxCombinedShaderTextures; stage++)
     {
+        auto& desc = m_samplerDesc[stage];
+        if (!desc.used)
+            continue;
+
+        if (!m_samplerArray[stage])
+        {
+            CHK_GL(glGenSamplers(1, &m_samplerArray[stage]));
+            desc.dirty = true;
+        }
+
+        if (desc.dirty)
+        {
+            CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_WRAP_S, glStateUtils::ConvertTextureAddressMode(
+                desc.addressU)));
+            CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_WRAP_T, glStateUtils::ConvertTextureAddressMode(
+                desc.addressV)));
+            CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_WRAP_R, glStateUtils::ConvertTextureAddressMode(
+                desc.addressW)));
+
+            GLuint color[] = { color_get_R(desc.borderColor), color_get_G(desc.borderColor), color_get_B(desc.borderColor),
+                color_get_A(desc.borderColor) };
+            CHK_GL(glSamplerParameterIuiv(m_samplerArray[stage], GL_TEXTURE_BORDER_COLOR, color));
+
+            CHK_GL(glSamplerParameteri(
+                m_samplerArray[stage], GL_TEXTURE_MAG_FILTER, glStateUtils::ConvertTextureFilter(desc.magFilter)));
+
+            GLint minFilter = glStateUtils::ConvertTextureFilter(desc.minFilter);
+            minFilter = glStateUtils::ConvertTextureFilter(desc.mipFilter, minFilter, true);
+            CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_MIN_FILTER, minFilter));
+
+            CHK_GL(glSamplerParameterf(m_samplerArray[stage], GL_TEXTURE_LOD_BIAS, static_cast<float>(desc.mipLodBias)));
+            CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_MAX_LEVEL, desc.maxMipLevel));
+
+            if (GLAD_GL_ARB_texture_filter_anisotropic || GLAD_GL_EXT_texture_filter_anisotropic)
+                CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_MAX_ANISOTROPY, desc.maxAnisotropy));
+
+            CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_COMPARE_MODE,
+                desc.comparisonFilter ? (GLint)GL_COMPARE_REF_TO_TEXTURE : (GLint)GL_NONE));
+            CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_COMPARE_FUNC, desc.comparisonFunc));
+
+            desc.dirty = false;
+        }
+
         if (m_samplerArray[stage])
         {
             glBindSampler(stage, m_samplerArray[stage]);
@@ -97,10 +141,10 @@ void glState::Apply()
 
 void glState::Release()
 {
-    // Delete any generated samplers in the array
-    CHK_GL(glDeleteSamplers(CTexture::mtMaxCombinedShaderTextures, m_samplerArray));
+    OglGpuScope gpu;
+    if (gpu.ok())
+        CHK_GL(glDeleteSamplers(CTexture::mtMaxCombinedShaderTextures, m_samplerArray));
 
-    // Clear the sampler array
     memset(m_samplerArray, 0, CTexture::mtMaxCombinedShaderTextures * sizeof(GLuint));
 
     glState* pState = this;
@@ -209,64 +253,50 @@ void glState::UpdateRenderState(u32 name, u32 value)
 
 void glState::UpdateSamplerState(u32 stage, u32 name, u32 value)
 {
-    if (stage < 0 || stage >= CTexture::mtMaxCombinedShaderTextures)
+    if (stage >= CTexture::mtMaxCombinedShaderTextures)
         return;
 
-    GLint currentFilter = (GLint)GL_NEAREST;
-
-    if (m_samplerArray[stage] == 0)
-        glGenSamplers(1, &m_samplerArray[stage]);
-    else if (name == D3DSAMP_MINFILTER || name == D3DSAMP_MIPFILTER)
-        glGetSamplerParameteriv(m_samplerArray[stage], GL_TEXTURE_MIN_FILTER, &currentFilter);
+    auto& desc = m_samplerDesc[stage];
+    desc.used = true;
+    desc.dirty = true;
 
     switch (name)
     {
     case D3DSAMP_ADDRESSU: /* D3DTEXTUREADDRESS for U coordinate */
-        CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_WRAP_S, glStateUtils::ConvertTextureAddressMode(
-            value)));
+        desc.addressU = value;
         break;
     case D3DSAMP_ADDRESSV: /* D3DTEXTUREADDRESS for V coordinate */
-        CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_WRAP_T, glStateUtils::ConvertTextureAddressMode(
-            value)));
+        desc.addressV = value;
         break;
     case D3DSAMP_ADDRESSW: /* D3DTEXTUREADDRESS for W coordinate */
-        CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_WRAP_R, glStateUtils::ConvertTextureAddressMode(
-            value)));
+        desc.addressW = value;
         break;
     case D3DSAMP_BORDERCOLOR: /* D3DCOLOR */
-    {
-        GLuint color[] = {color_get_R(value), color_get_G(value), color_get_B(value), color_get_A(value)};
-        CHK_GL(glSamplerParameterIuiv(m_samplerArray[stage], GL_TEXTURE_BORDER_COLOR, color));
-    }
+        desc.borderColor = value;
         break;
     case D3DSAMP_MAGFILTER: /* D3DTEXTUREFILTER filter to use for magnification */
-        CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_MAG_FILTER, glStateUtils::ConvertTextureFilter(
-            value)));
+        desc.magFilter = value;
         break;
     case D3DSAMP_MINFILTER: /* D3DTEXTUREFILTER filter to use for minification */
-        CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_MIN_FILTER, glStateUtils::ConvertTextureFilter(
-            value, currentFilter)));
+        desc.minFilter = value;
         break;
     case D3DSAMP_MIPFILTER: /* D3DTEXTUREFILTER filter to use between mipmaps during minification */
-        CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_MIN_FILTER, glStateUtils::ConvertTextureFilter(
-            value, currentFilter, true)));
+        desc.mipFilter = value;
         break;
     case D3DSAMP_MIPMAPLODBIAS: /* float Mipmap LOD bias */
-        CHK_GL(glSamplerParameterf(m_samplerArray[stage], GL_TEXTURE_LOD_BIAS, value));
+        desc.mipLodBias = value;
         break;
     case D3DSAMP_MAXMIPLEVEL: /* DWORD 0..(n-1) LOD index of largest map to use (0 == largest) */
-        CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_MAX_LEVEL, value));
+        desc.maxMipLevel = value;
         break;
     case D3DSAMP_MAXANISOTROPY: /* DWORD maximum anisotropy */
-        if (GLAD_GL_ARB_texture_filter_anisotropic || GLAD_GL_EXT_texture_filter_anisotropic)
-            CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_MAX_ANISOTROPY, value));
+        desc.maxAnisotropy = value;
         break;
     case XRDX11SAMP_COMPARISONFILTER:
-        CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_COMPARE_MODE, value ? (GLint)
-            GL_COMPARE_REF_TO_TEXTURE : (GLint)GL_NONE));
+        desc.comparisonFilter = value;
         break;
     case XRDX11SAMP_COMPARISONFUNC:
-        CHK_GL(glSamplerParameteri(m_samplerArray[stage], GL_TEXTURE_COMPARE_FUNC, value));
+        desc.comparisonFunc = value;
         break;
     default:
         VERIFY(!"Sampler state not implemented");

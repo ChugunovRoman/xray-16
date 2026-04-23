@@ -40,6 +40,24 @@ private:
     float m_uiMipLODBias;
 
     GLuint m_samplerArray[CTexture::mtMaxCombinedShaderTextures];
+    struct SamplerDesc
+    {
+        bool used{ false };
+        bool dirty{ false };
+        u32 addressU{ D3DTADDRESS_WRAP };
+        u32 addressV{ D3DTADDRESS_WRAP };
+        u32 addressW{ D3DTADDRESS_WRAP };
+        u32 borderColor{ 0 };
+        u32 magFilter{ D3DTEXF_LINEAR };
+        u32 minFilter{ D3DTEXF_LINEAR };
+        u32 mipFilter{ D3DTEXF_LINEAR };
+        u32 mipLodBias{ 0 };
+        u32 maxMipLevel{ 0 };
+        u32 maxAnisotropy{ 1 };
+        u32 comparisonFilter{ FALSE };
+        u32 comparisonFunc{ D3D_COMPARISON_LESS_EQUAL };
+    };
+    SamplerDesc m_samplerDesc[CTexture::mtMaxCombinedShaderTextures];
 
 public:
     glState();

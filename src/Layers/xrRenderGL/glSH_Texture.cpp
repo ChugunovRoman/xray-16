@@ -200,6 +200,9 @@ void CTexture::Load()
                 FATAL("Can't init video GL resources");
             }
 
+            while (glGetError() != GL_NO_ERROR)
+                ;
+
             // Now create texture
             GLuint pTexture = 0;
             u32 _w = pTheora->Width(false);
@@ -220,7 +223,8 @@ void CTexture::Load()
             GLenum err = glGetError();
             if (err != GL_NO_ERROR)
             {
-                Msg("! OpenGL video/PBO setup failed (GL error 0x%x); often GL_INVALID_OPERATION without context", err);
+                Msg("! OpenGL video/PBO setup failed after glTexStorage2D (GL error 0x%x; e.g. 0x500=INVALID_ENUM, 0x502=INVALID_OPERATION)",
+                    err);
                 xr_delete(pTheora);
                 glDeleteBuffers(1, &pBuffer);
                 pSurface = 0;
@@ -250,6 +254,9 @@ void CTexture::Load()
                 xr_delete(pAVI);
                 FATAL("Can't init AVI GL resources");
             }
+
+            while (glGetError() != GL_NO_ERROR)
+                ;
 
             // Create pixel buffer object
             glGenBuffers(1, &pBuffer);
@@ -341,15 +348,25 @@ void CTexture::Unload()
     //.	if (flags.bLoaded)		Msg		("* Unloaded: %s",cName.c_str());
 
     flags.bLoaded = FALSE;
+
+    // Lua/UI teardown (RemoveCustomStatic, etc.) can destroy textures from the game thread with no GL context.
+    OglGpuScope gpu;
+    const bool gl_ok = gpu.ok();
+
     if (!seqDATA.empty())
     {
-        CHK_GL(glDeleteTextures(seqDATA.size(), seqDATA.data()));
+        if (gl_ok)
+            CHK_GL(glDeleteTextures(seqDATA.size(), seqDATA.data()));
         seqDATA.clear();
         pSurface = 0;
     }
 
-    CHK_GL(glDeleteTextures(1, &pSurface));
-    CHK_GL(glDeleteBuffers(1, &pBuffer));
+    // $user$: surface may be owned by CRT/rendertarget — do not delete GPU name here.
+    if (pSurface && !flags.bUser && gl_ok)
+        CHK_GL(glDeleteTextures(1, &pSurface));
+
+    if (pBuffer && gl_ok)
+        CHK_GL(glDeleteBuffers(1, &pBuffer));
     pSurface = 0;
     pBuffer = 0;
 
