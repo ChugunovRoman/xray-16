@@ -233,36 +233,50 @@ void map_set_object_spot(u16 id, LPCSTR spot_type, LPCSTR text)
 void map_change_spot_size(u16 id, LPCSTR spot_type, float width, float height)
 {
     CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    if (!ml)
+        return;
     ml->SetSize(width, height);
 }
 void map_change_spot_texture(u16 id, LPCSTR spot_type, LPCSTR path)
 {
     CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    if (!ml)
+        return;
     ml->SetTexture(path);
 }
 void map_change_spot_texture_rect(u16 id, LPCSTR spot_type, Frect rect)
 {
     CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    if (!ml)
+        return;
     ml->SetTextureRect(rect);
 }
 void map_change_spot_texture_offset(u16 id, LPCSTR spot_type, float x, float y)
 {
     CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    if (!ml)
+        return;
     ml->SetTextureOffset(x, y);
 }
 void map_change_spot_texture_offset_x(u16 id, LPCSTR spot_type, float x)
 {
     CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    if (!ml)
+        return;
     ml->SetTextureOffsetX(x);
 }
 void map_change_spot_texture_offset_y(u16 id, LPCSTR spot_type, float y)
 {
     CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    if (!ml)
+        return;
     ml->SetTextureOffsetY(y);
 }
 void map_change_spot_color(u16 id, LPCSTR spot_type, u32 color)
 {
     CMapLocation* ml = Level().MapManager().GetMapLocation(spot_type, id);
+    if (!ml)
+        return;
     ml->SetColor(color);
     CMiniMapSpot* mini_spot = ml->MiniMapSpot();
     if (mini_spot)
