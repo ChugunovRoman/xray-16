@@ -4,12 +4,19 @@ namespace xray::render::RENDER_NAMESPACE
 {
 void CRenderTarget::accum_point(CBackend& cmd_list, light* L)
 {
+    if (!L)
+        return;
     phase_accumulator(cmd_list);
     RImplementation.Stats.l_visible++;
 
-    ref_shader shader = L->s_point;
-    ref_shader* shader_msaa = L->s_point_msaa;
-    if (!shader)
+    ref_shader shader;
+    ref_shader* shader_msaa;
+    if (L->s_point)
+    {
+        shader = L->s_point;
+        shader_msaa = L->s_point_msaa;
+    }
+    else
     {
         shader = s_accum_point;
         shader_msaa = s_accum_point_msaa;

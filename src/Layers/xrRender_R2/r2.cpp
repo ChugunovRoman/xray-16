@@ -568,6 +568,9 @@ void CRender::reset_begin()
             {
                 for (int id = 0; id < 3; ++id)
                     Lights_LastFrame[it]->svis[id].resetoccq();
+                // occq_destroy runs below; drop frustum occlusion query state (same stale-ID class as svis).
+                Lights_LastFrame[it]->vis.pending = false;
+                Lights_LastFrame[it]->vis.query_id = 0;
             }
             catch (...)
             {

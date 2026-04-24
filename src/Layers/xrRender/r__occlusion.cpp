@@ -113,6 +113,22 @@ void R_occlusion::occq_end(u32& ID)
 
     ScopeLock lock{ &render_lock };
 
+    // Stale ID after occq_destroy (vid_restart / reset) or double occq_end: slot empty or query already released.
+    if (ID >= used.size())
+    {
+        ID = 0;
+        return;
+    }
+#if defined(USE_DX11)
+    if (!used[ID].Q)
+#else
+    if (used[ID].Q == 0)
+#endif
+    {
+        ID = 0;
+        return;
+    }
+
     CHK_DX(EndQuery(used[ID].Q));
 }
 R_occlusion::occq_result R_occlusion::occq_get(u32& ID)
@@ -121,6 +137,23 @@ R_occlusion::occq_result R_occlusion::occq_get(u32& ID)
         return 0xffffffff;
 
     ScopeLock lock{ &render_lock };
+
+    // Return 0 (culled): do not use 0xffffffff here — light::vis_update treats that as "visible"
+    // and can draw lights with stale state after occq_destroy / bad slot (ref_shader copy AV).
+    if (ID >= used.size())
+    {
+        ID = 0;
+        return 0;
+    }
+#if defined(USE_DX11)
+    if (!used[ID].Q)
+#else
+    if (used[ID].Q == 0)
+#endif
+    {
+        ID = 0;
+        return 0;
+    }
 
     occq_result fragments = 0;
     HRESULT hr;

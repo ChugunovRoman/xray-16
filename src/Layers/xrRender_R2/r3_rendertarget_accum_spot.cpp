@@ -7,6 +7,8 @@ namespace xray::render::RENDER_NAMESPACE
 
 void CRenderTarget::accum_spot(CBackend& cmd_list, light* L)
 {
+    if (!L)
+        return;
     phase_accumulator(cmd_list);
     RImplementation.Stats.l_visible++;
 
