@@ -699,7 +699,7 @@ public:
 };
 
 ENGINE_API float g_fov = 75.0f;
-ENGINE_API float psHUD_FOV_def = 0.35f; // --#SM+#-- Default HUD FOV ( % of Camera FOV) [default hud_fov (perc. of g_fov)]
+ENGINE_API float psHUD_FOV_def = 0.6f; // --#SM+#-- Default HUD FOV ( % of Camera FOV) [default hud_fov (perc. of g_fov)]
 ENGINE_API float psHUD_FOV = psHUD_FOV_def; // --#SM+#-- Current HUD FOV ( % of Camera FOV) [current hud_fov (perc. of g_fov)]
 
 // extern int psSkeletonUpdate;
