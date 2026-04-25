@@ -1163,6 +1163,58 @@ public:
     }
 };
 
+class CCC_DumpFactionRelations final : public IConsole_Command
+{
+public:
+    CCC_DumpFactionRelations(pcstr name) : IConsole_Command(name) { bEmptyArgsHandled = true; }
+
+    void Execute(pcstr args) override
+    {
+        (void)args;
+
+        if (!pSettings)
+        {
+            Msg("! dump_faction_relations: settings not loaded");
+            return;
+        }
+
+        if (!CHARACTER_COMMUNITY::GetByIndex(0, true))
+        {
+            Msg("! dump_faction_relations: communities not initialized (game_relations?)");
+            return;
+        }
+
+        const CHARACTER_COMMUNITY_INDEX maxIdx = CHARACTER_COMMUNITY::GetMaxIndex();
+        if (maxIdx < 0)
+        {
+            Msg("! dump_faction_relations: empty community list");
+            return;
+        }
+
+        Msg("[dump_faction_relations] community -> community : goodwill (default_goodwill); negative=hostile, 0=neutral, positive=friendly");
+
+        for (CHARACTER_COMMUNITY_INDEX i = 0; i <= maxIdx; ++i)
+        {
+            const CHARACTER_COMMUNITY_ID idFrom = CHARACTER_COMMUNITY::IndexToId(i, NO_COMMUNITY_ID, true);
+            if (!idFrom.size())
+                continue;
+
+            for (CHARACTER_COMMUNITY_INDEX j = 0; j <= maxIdx; ++j)
+            {
+                const CHARACTER_COMMUNITY_ID idTo = CHARACTER_COMMUNITY::IndexToId(j, NO_COMMUNITY_ID, true);
+                if (!idTo.size())
+                    continue;
+
+                const CHARACTER_GOODWILL gw = CHARACTER_COMMUNITY::relation(i, j);
+                const CHARACTER_GOODWILL defGw = CHARACTER_COMMUNITY::default_relation(i, j);
+                Msg("  %s -> %s : %d (%d)", idFrom.c_str(), idTo.c_str(), gw, defGw);
+            }
+        }
+    }
+
+    void Info(TInfo& I) override { xr_strcpy(I, "dump all faction pairs goodwill (game_relations)"); }
+};
+
 #ifdef DEBUG
 
 class CCC_DrawGameGraphAll : public IConsole_Command
@@ -3082,6 +3134,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "wpn_quick_unload_silencers", &g_quick_unload_silencers, 0, 1);
 
     CMD4(CCC_Integer_Outfit_Faction, "g_outfit_faction", &g_outfit_faction, 0, 1);
+    CMD1(CCC_DumpFactionRelations, "dump_faction_relations");
 
     CMD4(CCC_Integer, "g_enhancend_anims", &g_enhancend_anims, 0, 1);
 
