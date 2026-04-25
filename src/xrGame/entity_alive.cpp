@@ -26,6 +26,8 @@
 #define SMALL_ENTITY_RADIUS 0.6f
 #define BLOOD_MARKS_SECT "bloody_marks"
 
+int ps_force_character_lod_render = 0;
+
 namespace
 {
 void TryEnableDeadNpcLodRendering(CEntityAlive& entity)

@@ -111,6 +111,7 @@ extern float g_smart_cover_animation_speed_factor;
 extern BOOL g_ai_use_old_vision;
 float g_aim_predict_time = 0.40f;
 int g_keypress_on_start = 1;
+extern int ps_force_character_lod_render;
 
 float g_aim_z_offset_coff = -0.04f;
 float g_second_aim_z_offset_coff = -0.09f;
@@ -2821,6 +2822,8 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_near_ms", (int*)&npc_perf_stalker_vis_interval_near_ms, 0, 30000);
     CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_medium_ms", (int*)&npc_perf_stalker_vis_interval_medium_ms, 10, 30000);
     CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_far_ms", (int*)&npc_perf_stalker_vis_interval_far_ms, 10, 30000);
+    // Force render m_lod for all CEntityAlive (NPC/mutant/actor) when available.
+    CMD4(CCC_Integer, "r_force_character_lod", &ps_force_character_lod_render, 0, 1);
     CMD4(CCC_Integer, "npc_perf_vision_trace_budget", &npc_perf_vision_trace_budget, 1, 128);
     CMD4(CCC_Integer, "npc_perf_vision_global_ray_budget", (int*)&npc_perf_vision_global_ray_budget, 0, 1000000);
     CMD4(CCC_Integer, "npc_perf_vision_combat_min_rays", (int*)&npc_perf_vision_combat_min_rays, 0, 128);

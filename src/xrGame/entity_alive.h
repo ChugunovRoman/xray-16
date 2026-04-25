@@ -12,6 +12,9 @@ class CCharacterPhysicsSupport;
 class CMaterialManager;
 class CVisualMemoryManager;
 class CBlend;
+
+extern int ps_force_character_lod_render;
+
 class CEntityAlive : public CEntity
 {
 protected:
@@ -24,7 +27,10 @@ private:
 public:
     virtual CEntityAlive* cast_entity_alive() { return this; }
     bool renderable_SsaLodCharacter() const override { return true; }
-    bool renderable_ForceLodCharacter() const override { return m_force_lod_visual; }
+    bool renderable_ForceLodCharacter() const override
+    {
+        return (ps_force_character_lod_render != 0) || m_force_lod_visual;
+    }
     void SetForceLodVisual(bool value) { m_force_lod_visual = value; }
 
     bool m_bMobility;
