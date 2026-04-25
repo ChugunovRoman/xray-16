@@ -64,6 +64,7 @@ private:
     void set_alife(CALifeSimulator* alife_simulator);
     void LoadCommonScripts();
     void RegisterScriptClasses();
+    void RegisterCommandRegistrators();
     void SetupScriptEngine();
 
 public:

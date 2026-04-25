@@ -506,6 +506,7 @@ target_sources(xrGame PRIVATE
     FryupZone.cpp
     FryupZone.h
     fs_registrator_script.cpp
+    lua_console_registrator_script.cpp
     GalantineArtifact.cpp
     GalantineArtifact.h
     game_base.cpp

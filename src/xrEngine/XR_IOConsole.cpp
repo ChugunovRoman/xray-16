@@ -12,6 +12,7 @@
 #include "xr_ioc_cmd.h"
 
 #include <imgui_internal.h>
+#include <cctype>
 
 static u32 const cmd_history_max = 64;
 
@@ -129,6 +130,47 @@ void CConsole::RemoveCommand(IConsole_Command* cc)
     if (Commands.end() != it)
     {
         Commands.erase(it);
+    }
+}
+
+bool CConsole::ConsumePendingConfigCommandValue(pcstr cmd, shared_str& value)
+{
+    const auto it = m_pending_cfg_commands.find(cmd);
+    if (it == m_pending_cfg_commands.end())
+    {
+        return false;
+    }
+
+    value = it->second;
+    m_pending_cfg_commands.erase(it);
+    return true;
+}
+
+void CConsole::SetPendingConfigCommandValue(pcstr cmd, pcstr value)
+{
+    if (!cmd || !cmd[0] || !value)
+    {
+        return;
+    }
+
+    m_pending_cfg_commands[cmd] = value;
+}
+
+void CConsole::SavePendingConfigCommandValues(IWriter* writer) const
+{
+    if (!writer)
+    {
+        return;
+    }
+
+    for (const auto& [name, value] : m_pending_cfg_commands)
+    {
+        if (!name.size() || !value.size())
+        {
+            continue;
+        }
+
+        writer->w_printf("%s %s\r\n", name.c_str(), value.c_str());
     }
 }
 
@@ -421,6 +463,31 @@ void CConsole::IR_OnTextInput(pcstr text)
 
 void CConsole::ExecuteCommand(pcstr cmd_str, bool record_cmd)
 {
+    auto is_valid_pending_name = [](pcstr name)
+    {
+        if (!name || !name[0])
+        {
+            return false;
+        }
+
+        const unsigned char first = static_cast<unsigned char>(name[0]);
+        if (!(std::isalpha(first) || first == '_'))
+        {
+            return false;
+        }
+
+        for (pcstr c = name; *c; ++c)
+        {
+            const unsigned char ch = static_cast<unsigned char>(*c);
+            if (!(std::isalnum(ch) || ch == '_' || ch == '.'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    };
+
     u32 str_size = xr_strlen(cmd_str);
     pstr edt = (pstr)xr_alloca((str_size + 1) * sizeof(char));
     pstr first = (pstr)xr_alloca((str_size + 1) * sizeof(char));
@@ -492,6 +559,10 @@ void CConsole::ExecuteCommand(pcstr cmd_str, bool record_cmd)
     }
     else
     {
+        if (!record_cmd && last[0] != 0 && is_valid_pending_name(first))
+        {
+            m_pending_cfg_commands[first] = last;
+        }
         Log("! Unknown command: ", first);
     }
 

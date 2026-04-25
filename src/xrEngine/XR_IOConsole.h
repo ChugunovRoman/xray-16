@@ -72,6 +72,7 @@ protected:
 
 private:
     EVENT eConsole;
+    xr_map<shared_str, shared_str> m_pending_cfg_commands;
 
     vecHistory m_cmd_history;
     u32 m_cmd_history_max;
@@ -118,6 +119,9 @@ public:
 
     void AddCommand(IConsole_Command* cc);
     void RemoveCommand(IConsole_Command* cc);
+    bool ConsumePendingConfigCommandValue(pcstr cmd, shared_str& value);
+    void SetPendingConfigCommandValue(pcstr cmd, pcstr value);
+    void SavePendingConfigCommandValues(IWriter* writer) const;
 
     void Show();
     void Hide();

@@ -7627,6 +7627,9 @@
     <ClCompile Include="fs_registrator_script.cpp">
       <Filter>ScriptClasses\ScriptFS</Filter>
     </ClCompile>
+    <ClCompile Include="lua_console_registrator_script.cpp">
+      <Filter>ScriptClasses\ScriptFS</Filter>
+    </ClCompile>
     <ClCompile Include="base_client_classes_script.cpp">
       <Filter>ScriptClasses\BaseClientClasses</Filter>
     </ClCompile>

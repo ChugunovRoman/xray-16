@@ -104,6 +104,40 @@ void CAI_Space::RegisterScriptClasses()
 #endif
 }
 
+void CAI_Space::RegisterCommandRegistrators()
+{
+    ZoneScoped;
+
+#ifdef DBG_DISABLE_SCRIPTS
+    return;
+#else
+    string_path S;
+    FS.update_path(S, "$game_config$", "script.ltx");
+    CInifile* l_tpIniFile = xr_new<CInifile>(S);
+    R_ASSERT(l_tpIniFile);
+    if (!l_tpIniFile->section_exist("common"))
+    {
+        xr_delete(l_tpIniFile);
+        return;
+    }
+    shared_str registrators = READ_IF_EXISTS(l_tpIniFile, r_string, "common", "command_registrators", "");
+    xr_delete(l_tpIniFile);
+    u32 registratorCount = _GetItemCount(registrators.c_str());
+    string256 I;
+    for (u32 i = 0; i < registratorCount; i++)
+    {
+        _GetItem(registrators.c_str(), i, I);
+        luabind::functor<void> result;
+        if (!GEnv.ScriptEngine->functor(I, result))
+        {
+            GEnv.ScriptEngine->script_log(LuaMessageType::Error, "Cannot load command registrator %s!", I);
+            continue;
+        }
+        result();
+    }
+#endif
+}
+
 void CAI_Space::LoadCommonScripts()
 {
     ZoneScoped;
@@ -143,6 +177,7 @@ void CAI_Space::SetupScriptEngine()
     RegisterScriptClasses();
     object_factory().register_script();
     LoadCommonScripts();
+    RegisterCommandRegistrators();
 
 #ifndef MASTER_GOLD
     g_object_factory->init_spawn_data();

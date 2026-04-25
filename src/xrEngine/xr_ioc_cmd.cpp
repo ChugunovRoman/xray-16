@@ -188,6 +188,7 @@ public:
             IWriter* F = FS.w_open(cfg_full_name);
             for (const auto [name, command] : Console->Commands)
                 command->Save(F);
+            Console->SavePendingConfigCommandValues(F);
             FS.w_close(F);
             Msg("Config-file [%s] saved successfully", cfg_full_name);
         }
