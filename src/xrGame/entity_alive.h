@@ -19,10 +19,13 @@ protected:
 
 private:
     u32 m_used_time;
+    bool m_force_lod_visual;
 
 public:
     virtual CEntityAlive* cast_entity_alive() { return this; }
     bool renderable_SsaLodCharacter() const override { return true; }
+    bool renderable_ForceLodCharacter() const override { return m_force_lod_visual; }
+    void SetForceLodVisual(bool value) { m_force_lod_visual = value; }
 
     bool m_bMobility;
     float m_fAccuracy;

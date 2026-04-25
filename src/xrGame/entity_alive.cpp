@@ -21,9 +21,26 @@
 #include "material_manager.h"
 #include "game_base_space.h"
 #include "xrEngine/profiler.h"
+#include "Actor.h"
 
 #define SMALL_ENTITY_RADIUS 0.6f
 #define BLOOD_MARKS_SECT "bloody_marks"
+
+namespace
+{
+void TryEnableDeadNpcLodRendering(CEntityAlive& entity)
+{
+    if (GEnv.isDedicatedServer || !GEnv.Render)
+        return;
+
+    // Only NPC-like entities (inventory owners), skip player actor.
+    if (!smart_cast<CInventoryOwner*>(&entity) || smart_cast<CActor*>(&entity))
+        return;
+
+    // Renderer will use m_lod child when available; if no LOD for this model, it remains hi visual.
+    entity.SetForceLodVisual(true);
+}
+} // namespace
 
 //отметки крови на стенах
 FactoryPtr<IWallMarkArray>* CEntityAlive::m_pBloodMarksVector = NULL;
@@ -52,7 +69,7 @@ STR_VECTOR* CEntityAlive::m_pFireParticlesVector = nullptr;
 // CEntityAlive
 /////////////////////////////////////////////
 CEntityAlive::CEntityAlive()
-    : m_bMobility(false), m_fAccuracy(0), m_fIntelligence(0),
+    : m_force_lod_visual(false), m_bMobility(false), m_fAccuracy(0), m_fIntelligence(0),
       m_entity_condition(nullptr), m_ef_creature_type(0),
       m_hit_bone_surface_areas_actual(false)
 {
@@ -184,6 +201,7 @@ void CEntityAlive::UnloadFireParticles()
 void CEntityAlive::reinit()
 {
     CEntity::reinit();
+    m_force_lod_visual = false;
 
     m_fAccuracy = 25.f;
     m_fIntelligence = 25.f;
@@ -251,6 +269,7 @@ bool CEntityAlive::net_Spawn(CSE_Abstract* DC)
 
     conditions().reinit();
     inherited::net_Spawn(DC);
+    m_force_lod_visual = false;
 
     m_BloodWounds.clear();
     m_ParticleWounds.clear();
@@ -321,6 +340,7 @@ void CEntityAlive::Die(IGameObject* who)
     if (IsGameTypeSingle())
         RELATION_REGISTRY().Action(smart_cast<CEntityAlive*>(who), this, RELATION_REGISTRY::KILL);
     inherited::Die(who);
+    TryEnableDeadNpcLodRendering(*this);
 
     const CGameObject* who_object = smart_cast<const CGameObject*>(who);
     callback(GameObject::eDeath)(lua_game_object(), who_object ? who_object->lua_game_object() : 0);

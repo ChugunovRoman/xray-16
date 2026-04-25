@@ -310,14 +310,19 @@ void R_dsgraph_structure::add_leafs_dynamic(
         BOOL _use_lod = FALSE;
         if (pV->m_lod)
         {
-            Fvector Tpos;
-            float D;
-            xform.transform_tiny(Tpos, pV->vis.sphere.P);
-            float ssa = CalcSSA(D, Tpos, pV->vis.sphere.R / 2.f); // assume dynamics never consume full sphere
-            const float ssaLodA =
-                (root && root->renderable_SsaLodCharacter()) ? r_ssaLOD_CHAR_A : r_ssaLOD_A;
-            if (ssa < ssaLodA)
+            if (root && root->renderable_ForceLodCharacter())
                 _use_lod = TRUE;
+            else
+            {
+                Fvector Tpos;
+                float D;
+                xform.transform_tiny(Tpos, pV->vis.sphere.P);
+                float ssa = CalcSSA(D, Tpos, pV->vis.sphere.R / 2.f); // assume dynamics never consume full sphere
+                const float ssaLodA =
+                    (root && root->renderable_SsaLodCharacter()) ? r_ssaLOD_CHAR_A : r_ssaLOD_A;
+                if (ssa < ssaLodA)
+                    _use_lod = TRUE;
+            }
         }
         if (_use_lod)
         {

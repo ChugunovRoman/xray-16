@@ -32,6 +32,8 @@ public:
     virtual void renderable_HUD(bool value) = 0;
     // When true, R2 skeletal m_lod distance uses ps_r2_ssaLOD_CHAR_* instead of global ps_r2_ssaLOD_* (CEntityAlive: NPCs, mutants, actor).
     virtual bool renderable_SsaLodCharacter() const { return false; }
+    // Optional hard switch: render m_lod instead of hi skeleton for this frame/object when m_lod exists.
+    virtual bool renderable_ForceLodCharacter() const { return false; }
 };
 
 inline IRenderable::~IRenderable() = default;
