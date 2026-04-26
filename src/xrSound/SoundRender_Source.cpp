@@ -148,6 +148,8 @@ OggVorbis_File* CSoundRender_Source::open() const
 
 void CSoundRender_Source::close(OggVorbis_File*& ovf) const
 {
+    if (!ovf)
+        return;
     ov_clear(ovf);
     xr_delete(ovf);
 }

@@ -50,6 +50,8 @@ CSoundRender_Emitter::~CSoundRender_Emitter()
     // try to release dependencies, events, for example
     Event_ReleaseOwner();
     wait_prefill();
+    if (ovf && owner_data)
+        source()->close(ovf);
 }
 
 //////////////////////////////////////////////////////////////////////

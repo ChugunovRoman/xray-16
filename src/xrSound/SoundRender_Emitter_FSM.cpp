@@ -281,6 +281,9 @@ void CSoundRender_Emitter::update(float fTime, float dt)
     }
     else if (owner_data)
     {
+        // stSimulating/stStarting may reach stStopped without stop_target(); ovf must not leak.
+        if (ovf)
+            source()->close(ovf);
         VERIFY(this == owner_data->feedback);
         owner_data->feedback = 0;
         owner_data = 0;
