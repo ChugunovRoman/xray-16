@@ -100,6 +100,7 @@ private:
     dynamic_obstacles_avoider m_dynamic_obstacles;
     u32 m_last_dest_vertex_id;
     u32 m_last_fail_time;
+    u32 m_last_level_path_fail_log_time;
     xr_vector<u32> m_temp_path;
     bool m_failed_to_build_path;
 }; // class stalker_movement_manager_obstacles

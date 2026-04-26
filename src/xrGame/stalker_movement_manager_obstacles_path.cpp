@@ -169,7 +169,19 @@ void stalker_movement_manager_obstacles::build_level_path()
             if (!pure_search_result)
             {
 #ifndef MASTER_GOLD
-                Msg("! level_path().failed() during navigation");
+                // Throttle: this path can run every frame while an NPC is stuck; Msg() spam tanks FPS.
+                constexpr u32 kNavFailLogIntervalMs = 2000;
+                const u32 now = Device.dwTimeGlobal;
+                if (!m_last_level_path_fail_log_time || now >= m_last_level_path_fail_log_time + kNavFailLogIntervalMs)
+                {
+                    m_last_level_path_fail_log_time = now;
+                    const Fvector& p = object().Position();
+                    const u32 cur_lv = object().ai_location().level_vertex_id();
+                    const u32 dest_lv = level_path().dest_vertex_id();
+                    Msg("! level_path().failed() during navigation [%s][id:%u] pos=(%.2f,%.2f,%.2f) cur_lv=%u dest_lv=%u "
+                        "(obstacle-aware and obstacle-free rebuild both failed; check graph/restrictions/cover point)",
+                        object().cName().c_str(), object().ID(), p.x, p.y, p.z, cur_lv, dest_lv);
+                }
 #endif // #ifndef MASTER_GOLD
                 break;
             }
