@@ -4,6 +4,7 @@
 #include "xrEngine/device.h"
 #include "xrEngine/IGame_Persistent.h"
 #include "xrEngine/Render.h"
+#include "Layers/xrRender/xrRender_console.h"
 #include "xrCore/Threading/TaskManager.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
@@ -27,8 +28,11 @@ extern int ps_r2_mt_render;
 //-----
 void render_main::init()
 {
-    o.mt_calc_enabled = RImplementation.o.mt_calculate && !RImplementation.o.oldshadowcascades && !ps_r2_ls_flags.test(R2FLAG_ZFILL);
-    o.mt_draw_enabled = false; // always on imm context
+    const int pm = ps_r__phase_mt < 0 ? 0 : (ps_r__phase_mt > 3 ? 3 : ps_r__phase_mt);
+    o.mt_calc_enabled =
+        RImplementation.o.mt_calculate && !RImplementation.o.oldshadowcascades && !ps_r2_ls_flags.test(R2FLAG_ZFILL) &&
+        ((pm & 1) != 0);
+    o.mt_draw_enabled = (pm & 2) != 0;
     o.active = true; // always active
 }
 

@@ -205,6 +205,9 @@ public:
         CStatTimer ShadowsRender; // ...shadows render
         u32 OcclusionQueries;
         u32 OcclusionCulled;
+        u32 DynamicRegularSubmissions;
+        u32 CorpseRegularSubmissions;
+        u32 CorpseSmapSkipped;
 
         void FrameStart()
         {
@@ -231,6 +234,9 @@ public:
             ShadowsRender.FrameStart();
             OcclusionQueries = 0;
             OcclusionCulled = 0;
+            DynamicRegularSubmissions = 0;
+            CorpseRegularSubmissions = 0;
+            CorpseSmapSkipped = 0;
         }
 
         void FrameEnd()

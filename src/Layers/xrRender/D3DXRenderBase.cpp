@@ -399,6 +399,9 @@ void D3DXRenderBase::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
     font.OutNext("Occ-query:    %03.1f", 100.f * f32(BasicStats.OcclusionCulled) / occQs);
     font.OutNext("- queries:    %u", BasicStats.OcclusionQueries);
     font.OutNext("- culled:     %u", BasicStats.OcclusionCulled);
+    font.OutNext("Dyn-submit:   %u", BasicStats.DynamicRegularSubmissions);
+    font.OutNext("Corpse-reg:   %u", BasicStats.CorpseRegularSubmissions);
+    font.OutNext("Corpse-SMAP-: %u", BasicStats.CorpseSmapSkipped);
 #undef PPP
     font.OutSkip();
     const auto& rcstats = RCache.stat;

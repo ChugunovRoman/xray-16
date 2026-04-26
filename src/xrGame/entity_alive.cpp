@@ -30,6 +30,8 @@ int ps_force_character_lod_render = 0;
 
 namespace
 {
+constexpr u32 kCorpsePoseFreezeDelayMs = 1000;
+
 void TryEnableDeadNpcLodRendering(CEntityAlive& entity)
 {
     if (GEnv.isDedicatedServer || !GEnv.Render)
@@ -41,6 +43,23 @@ void TryEnableDeadNpcLodRendering(CEntityAlive& entity)
 
     // Renderer will use m_lod child when available; if no LOD for this model, it remains hi visual.
     entity.SetForceLodVisual(true);
+    entity.SetForceCheapCorpsePath(false);
+    entity.SetCorpsePoseFrozen(false);
+}
+
+void UpdateDeadNpcRenderTier(CEntityAlive& entity)
+{
+    const u32 deathTime = entity.GetLevelDeathTime();
+    if (!entity.renderable_ForceLodCharacter() || deathTime == 0 || Device.dwTimeGlobal < deathTime)
+    {
+        entity.SetForceCheapCorpsePath(false);
+        entity.SetCorpsePoseFrozen(false);
+        return;
+    }
+
+    const u32 corpseAgeMs = Device.dwTimeGlobal - deathTime;
+    entity.SetForceCheapCorpsePath(true);
+    entity.SetCorpsePoseFrozen(corpseAgeMs >= kCorpsePoseFreezeDelayMs);
 }
 } // namespace
 
@@ -71,7 +90,8 @@ STR_VECTOR* CEntityAlive::m_pFireParticlesVector = nullptr;
 // CEntityAlive
 /////////////////////////////////////////////
 CEntityAlive::CEntityAlive()
-    : m_force_lod_visual(false), m_bMobility(false), m_fAccuracy(0), m_fIntelligence(0),
+    : m_force_lod_visual(false), m_force_cheap_corpse_path(false), m_corpse_pose_frozen(false), m_bMobility(false),
+      m_fAccuracy(0), m_fIntelligence(0),
       m_entity_condition(nullptr), m_ef_creature_type(0),
       m_hit_bone_surface_areas_actual(false)
 {
@@ -204,6 +224,8 @@ void CEntityAlive::reinit()
 {
     CEntity::reinit();
     m_force_lod_visual = false;
+    m_force_cheap_corpse_path = false;
+    m_corpse_pose_frozen = false;
 
     m_fAccuracy = 25.f;
     m_fIntelligence = 25.f;
@@ -233,6 +255,7 @@ void CEntityAlive::shedule_Update(u32 dt)
     if (!g_Alive())
     {
         ZoneScopedN("sh_entity_alive_corpse_particles_kill");
+        UpdateDeadNpcRenderTier(*this);
         // Keep only lightweight corpse visuals and one-shot kill finalization.
         UpdateFireParticles();
         UpdateBloodDrops();
@@ -272,6 +295,8 @@ bool CEntityAlive::net_Spawn(CSE_Abstract* DC)
     conditions().reinit();
     inherited::net_Spawn(DC);
     m_force_lod_visual = false;
+    m_force_cheap_corpse_path = false;
+    m_corpse_pose_frozen = false;
 
     m_BloodWounds.clear();
     m_ParticleWounds.clear();

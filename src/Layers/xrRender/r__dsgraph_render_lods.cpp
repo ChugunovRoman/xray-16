@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "FLOD.h"
 #include "xrCommon/xr_array.h"
+#include <cfloat>
 
 #ifdef _EDITOR
 #include "IGame_Persistent.h"
@@ -84,23 +85,38 @@ void R_dsgraph_structure::render_lods(bool _setup_zb, bool _clear)
 
             // gen geometry
             FLOD::_face* facets = lodV->facets;
-            svector<std::pair<float, u32>, 8> selector;
-            for (u32 s = 0; s < 8; s++)
-                selector.push_back(std::make_pair(Ldir.dotproduct(facets[s].N), s));
-            std::sort(selector.begin(), selector.end(), [](const auto& v1, const auto& v2)
+            float dot_best = -FLT_MAX;
+            float dot_next = -FLT_MAX;
+            float dot_next_2 = -FLT_MAX;
+            size_t id_best = 0;
+            size_t id_next = 1;
+            for (u32 s = 0; s < 8; ++s)
             {
-                return v1.first < v2.first;
-            });
-
-            const float dot_best = selector[selector.size() - 1].first;
-            const float dot_next = selector[selector.size() - 2].first;
-            const float dot_next_2 = selector[selector.size() - 3].first;
-            size_t id_best = selector[selector.size() - 1].second;
-            size_t id_next = selector[selector.size() - 2].second;
+                const float dot = Ldir.dotproduct(facets[s].N);
+                if (dot > dot_best)
+                {
+                    dot_next_2 = dot_next;
+                    dot_next = dot_best;
+                    id_next = id_best;
+                    dot_best = dot;
+                    id_best = s;
+                }
+                else if (dot > dot_next)
+                {
+                    dot_next_2 = dot_next;
+                    dot_next = dot;
+                    id_next = s;
+                }
+                else if (dot > dot_next_2)
+                {
+                    dot_next_2 = dot;
+                }
+            }
 
             // Now we have two "best" planes, calculate factor, and approx normal
             const float fA = dot_best, fB = dot_next, fC = dot_next_2;
-            const float alpha = 0.5f + 0.5f * (1 - (fB - fC) / (fA - fC));
+            const float den = (fA - fC);
+            const float alpha = (_abs(den) > EPS_S) ? (0.5f + 0.5f * (1 - (fB - fC) / den)) : 0.5f;
             const int iF = iFloor(alpha * 255.5f);
             const u32 uF = u32(clampr(iF, 0, 255));
 

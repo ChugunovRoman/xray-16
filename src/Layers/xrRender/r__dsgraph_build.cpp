@@ -60,6 +60,12 @@ void R_dsgraph_structure::insert_dynamic(IRenderable* root, dxRender_Visual* pVi
     float SSA = CalcSSA(distSQ, Center, pVisual);
     if (SSA <= r_ssaDISCARD)
         return;
+    const bool cheapCorpse = root && root->renderable_CheapCorpsePath();
+    if (cheapCorpse && o.phase == CRender::PHASE_SMAP)
+    {
+        ++RImplementation.BasicStats.CorpseSmapSkipped;
+        return;
+    }
 
     // Distortive geometry should be marked and R2 special-cases it
     // a) Allow to optimize RT order
@@ -67,7 +73,7 @@ void R_dsgraph_structure::insert_dynamic(IRenderable* root, dxRender_Visual* pVi
     VERIFY(pVisual->shader._get());
     const Shader* vis_sh = pVisual->shader._get();
     ShaderElement* sh_d = vis_sh ? vis_sh->E[4]._get() : nullptr; // 4=L_special
-    if (sh_d)
+    if (!cheapCorpse && sh_d)
     {
         if (RImplementation.o.distortion && sh_d && sh_d->flags.bDistort && o.pmask[sh_d->flags.iPriority / 2])
         {
@@ -299,10 +305,17 @@ void R_dsgraph_structure::add_leafs_dynamic(
     case MT_SKELETON_ANIM:
     case MT_SKELETON_RIGID:
     {
+        if (root && root->renderable_CheapCorpsePath() && o.phase == CRender::PHASE_SMAP)
+        {
+            ++RImplementation.BasicStats.CorpseSmapSkipped;
+            return; // Corpse cheap tier never participates in sun shadow-map traversal.
+        }
+
         // Add all children, doesn't perform any tests
         CKinematics* pV = (CKinematics*)pVisual;
         const bool skinning_from_parent = lod_bind_source && lod_bind_source != pV &&
             pV->LL_BoneCount() == lod_bind_source->LL_BoneCount();
+        const bool corpse_pose_frozen = root && root->renderable_CorpsePoseFrozen();
 
         if (skinning_from_parent)
             pV->CopyBoneTransformsFrom(*lod_bind_source);
@@ -326,14 +339,15 @@ void R_dsgraph_structure::add_leafs_dynamic(
         }
         if (_use_lod)
         {
-            pV->CalculateBones(TRUE);
+            if (!corpse_pose_frozen)
+                pV->CalculateBones(TRUE);
             add_leafs_dynamic(root, pV->m_lod, xform, pV);
         }
         else
         {
-            if (!skinning_from_parent)
+            if (!skinning_from_parent && !corpse_pose_frozen)
                 pV->CalculateBones(TRUE);
-            if (o.phase == CRender::PHASE_NORMAL && !skinning_from_parent)
+            if (o.phase == CRender::PHASE_NORMAL && !skinning_from_parent && !corpse_pose_frozen)
             {
                 pV->CalculateWallmarks(root ? root->renderable_HUD() : false); //. bug?
             }

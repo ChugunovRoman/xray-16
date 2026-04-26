@@ -130,6 +130,7 @@ void CRender::Render()
     //******* Z-prefill calc - DEFERRER RENDERER
     if (ps_r2_ls_flags.test(R2FLAG_ZFILL) && !(svp_pass && ps_r__svp_skip_zfill))
     {
+        ZoneScopedN("Render/ZPrefill/Build");
         PIX_EVENT(DEFER_Z_FILL);
         BasicStats.Culling.Begin();
         float z_distance = ps_r2_zfill;
@@ -162,17 +163,21 @@ void CRender::Render()
 
     //*******
     // Sync point
-    BasicStats.WaitS.Begin();
     {
-        q_sync_point.Wait(ps_r2_wait_sleep, ps_r2_wait_timeout);
+        ZoneScopedN("Render/SyncPoint");
+        BasicStats.WaitS.Begin();
+        {
+            q_sync_point.Wait(ps_r2_wait_sleep, ps_r2_wait_timeout);
+        }
+        BasicStats.WaitS.End();
+        q_sync_point.End();
     }
-    BasicStats.WaitS.End();
-    q_sync_point.End();
 
     r_main.sync();
 
     if (ps_r2_ls_flags.test(R2FLAG_ZFILL) && !(svp_pass && ps_r__svp_skip_zfill))
     {
+        ZoneScopedN("Render/ZPrefill/Flush");
         // flush
         Target->phase_scene_prepare();
         dsgraph.cmd_list.set_ColorWriteEnable(FALSE);
@@ -195,6 +200,7 @@ void CRender::Render()
 #endif
     if (!split_the_scene_to_minimize_wait)
     {
+        ZoneScopedN("Render/MainPart0/NoSplit");
         PIX_EVENT(DEFER_PART0_NO_SPLIT);
         // level, DO NOT SPLIT
         Target->phase_scene_begin();
@@ -214,6 +220,7 @@ void CRender::Render()
     }
     else
     {
+        ZoneScopedN("Render/MainPart0/Split");
         PIX_EVENT(DEFER_PART0_SPLIT);
         // level, SPLIT
         Target->phase_scene_begin();
@@ -225,19 +232,23 @@ void CRender::Render()
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
 
-    //******* Occlusion testing of volume-limited light-sources
-    Target->phase_occq();
-    LP_normal.clear();
-    LP_pending.clear();
-    if (o.msaa)
     {
+        //******* Occlusion testing of volume-limited light-sources
+        ZoneScopedN("Render/Occlusion/Prepare");
+        Target->phase_occq();
+        LP_normal.clear();
+        LP_pending.clear();
+        if (o.msaa)
+        {
 #if defined(USE_DX11)
-        dsgraph.cmd_list.set_ZB(Target->rt_MSAADepth->pZRT[dsgraph.cmd_list.context_id]);
+            dsgraph.cmd_list.set_ZB(Target->rt_MSAADepth->pZRT[dsgraph.cmd_list.context_id]);
 #elif defined(USE_OGL)
-        dsgraph.cmd_list.set_ZB(Target->rt_MSAADepth->pZRT);
+            dsgraph.cmd_list.set_ZB(Target->rt_MSAADepth->pZRT);
 #endif
+        }
     }
     {
+        ZoneScopedN("Render/Occlusion/VisPrepare");
         PIX_EVENT(DEFER_TEST_LIGHT_VIS);
         light_Package& LP = Lights.package;
 
@@ -321,6 +332,7 @@ void CRender::Render()
     // Main pass: wallmarks + hud_ui; dedicated second pass: hud_ui only.
     if (g_pGameLevel->pHUD && g_pGameLevel->pHUD->RenderActiveItemUIQuery())
     {
+        ZoneScopedN("Render/HUD_UI");
         if (!m_SecondViewportPass)
         {
             Target->phase_wallmarks();
@@ -335,6 +347,7 @@ void CRender::Render()
     // Wall marks
     if (Wallmarks && !(svp_pass && ps_r__svp_skip_wallmarks))
     {
+        ZoneScopedN("Render/Wallmarks");
         PIX_EVENT(DEFER_WALLMARKS);
         Target->phase_wallmarks();
         g_r = 0;
@@ -343,6 +356,7 @@ void CRender::Render()
 
     // Update incremental shadowmap-visibility solver
     {
+        ZoneScopedN("Render/Occlusion/FlushLastFrame");
         PIX_EVENT(DEFER_FLUSH_OCCLUSION);
         u32 it = 0;
         for (it = 0; it < Lights_LastFrame.size(); it++)
@@ -365,15 +379,20 @@ void CRender::Render()
     // full screen pass to mark msaa-edge pixels in highest stencil bit
     if (o.msaa)
     {
+        ZoneScopedN("Render/MSAA/MarkEdges");
         PIX_EVENT(MARK_MSAA_EDGES);
         Target->mark_msaa_edges();
     }
 
-    if (!(svp_pass && ps_r__svp_skip_rain_sync))
-        r_rain.sync();
+    {
+        ZoneScopedN("Render/RainSync");
+        if (!(svp_pass && ps_r__svp_skip_rain_sync))
+            r_rain.sync();
+    }
 
     // Directional light - fucking sun
     {
+        ZoneScopedN("Render/Sun");
         PIX_EVENT(DEFER_SUN);
         Stats.l_visible++;
         if (!(svp_pass && ps_r__svp_skip_sun_csm))
@@ -387,6 +406,7 @@ void CRender::Render()
     }
 
     {
+        ZoneScopedN("Render/SelfIllum");
         PIX_EVENT(DEFER_SELF_ILLUM);
         Target->phase_accumulator(dsgraph.cmd_list);
         // Render emissive geometry, stencil - write 0x0 at pixel pos
@@ -410,18 +430,21 @@ void CRender::Render()
 
     // Lighting, non dependant on OCCQ
     {
+        ZoneScopedN("Render/LightsNoOccq");
         PIX_EVENT(DEFER_LIGHT_NO_OCCQ);
         render_lights(LP_normal);
     }
 
     // Lighting, dependant on OCCQ
     {
+        ZoneScopedN("Render/LightsOccq");
         PIX_EVENT(DEFER_LIGHT_OCCQ);
         render_lights(LP_pending);
     }
 
     // Postprocess
     {
+        ZoneScopedN("Render/Combine");
         PIX_EVENT(DEFER_LIGHT_COMBINE);
         Target->phase_combine();
     }

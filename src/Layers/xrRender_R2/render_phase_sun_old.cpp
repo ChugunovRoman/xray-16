@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "Layers/xrRender/xrRender_console.h"
 #include "r2_R_sun_support.h"
 
 namespace xray::render::RENDER_NAMESPACE
@@ -37,6 +38,8 @@ void render_sun_old::init()
         return;
 
     o.mt_calc_enabled = false;
+    const int pm = ps_r__phase_mt < 0 ? 0 : (ps_r__phase_mt > 3 ? 3 : ps_r__phase_mt);
+    o.mt_draw_enabled = (RImplementation.o.mt_render != 0) && ((pm & 2) != 0);
 
     // pre-allocate context
     context_id = RImplementation.alloc_context();
@@ -45,6 +48,7 @@ void render_sun_old::init()
 
 void render_sun_old::render_sun()
 {
+    ZoneScopedN("sun_old/render");
     PIX_EVENT(render_sun);
     XMMATRIX m_LightViewProj;
 
@@ -134,6 +138,7 @@ void render_sun_old::render_sun()
 
     auto& dsgraph = RImplementation.get_context(context_id);
     {
+        ZoneScopedN("sun_old/render/build_subspace");
         //		sun->svis.begin					();
         dsgraph.o.phase = CRender::PHASE_SMAP;
         dsgraph.r_pmask(true, RImplementation.o.Tshadows);
@@ -149,6 +154,7 @@ void render_sun_old::render_sun()
         // IGNORE PORTALS
         if (ps_r2_ls_flags.test(R2FLAG_SUN_IGNORE_PORTALS))
         {
+            ZoneScopedN("sun_old/render/ignore_portals");
             for (u32 s = 0; s < dsgraph.Sectors.size(); s++)
             {
                 CSector* S = dsgraph.Sectors[s];
@@ -172,6 +178,7 @@ void render_sun_old::render_sun()
     // Compute REAL sheared xform based on receivers/casters information
     if (_abs(m_fCosGamma) < 0.99f && ps_r2_ls_flags.test(R2FLAG_SUN_TSM))
     {
+        ZoneScopedN("sun_old/render/tsm");
         //  get the near and the far plane (points) in eye space.
         XMFLOAT3 frustumPnts[8];
 
@@ -443,23 +450,39 @@ void render_sun_old::render_sun()
     // Render shadow-map
     //. !!! We should clip based on shrinked frustum (again)
     {
+        ZoneScopedN("sun_old/render/far_smap");
         bool bNormal = !dsgraph.mapNormalPasses[0][0].empty() || !dsgraph.mapMatrixPasses[0][0].empty();
         bool bSpecial = !dsgraph.mapNormalPasses[1][0].empty() || !dsgraph.mapMatrixPasses[1][0].empty() ||
             !dsgraph.mapSorted.empty();
         if (bNormal || bSpecial)
         {
-            RImplementation.Target->phase_smap_direct(dsgraph.cmd_list, sun, SE_SUN_FAR);
-            dsgraph.cmd_list.set_xform_world(Fidentity);
-            dsgraph.cmd_list.set_xform_view(Fidentity);
-            dsgraph.cmd_list.set_xform_project(sun->X.D[SE_SUN_FAR].combine);
-            dsgraph.render_graph(0);
+            {
+                ZoneScopedN("sun_old/render/far/phase_direct");
+                RImplementation.Target->phase_smap_direct(dsgraph.cmd_list, sun, SE_SUN_FAR);
+                dsgraph.cmd_list.set_xform_world(Fidentity);
+                dsgraph.cmd_list.set_xform_view(Fidentity);
+                dsgraph.cmd_list.set_xform_project(sun->X.D[SE_SUN_FAR].combine);
+            }
+            {
+                ZoneScopedN("sun_old/render/far/render_graph_p0");
+                dsgraph.render_graph(0);
+            }
             sun->X.D[SE_SUN_FAR].transluent = FALSE;
             if (bSpecial)
             {
                 sun->X.D[SE_SUN_FAR].transluent = TRUE;
-                RImplementation.Target->phase_smap_direct_tsh(dsgraph.cmd_list, sun, SE_SUN_FAR);
-                dsgraph.render_graph(1); // normal level, secondary priority
-                dsgraph.render_sorted(); // strict-sorted geoms
+                {
+                    ZoneScopedN("sun_old/render/far/phase_tsh");
+                    RImplementation.Target->phase_smap_direct_tsh(dsgraph.cmd_list, sun, SE_SUN_FAR);
+                }
+                {
+                    ZoneScopedN("sun_old/render/far/render_graph_p1");
+                    dsgraph.render_graph(1); // normal level, secondary priority
+                }
+                {
+                    ZoneScopedN("sun_old/render/far/render_sorted");
+                    dsgraph.render_sorted(); // strict-sorted geoms
+                }
             }
         }
     }
@@ -667,25 +690,44 @@ void render_sun_old::render_sun_near()
     // Render shadow-map
     //. !!! We should clip based on shrinked frustum (again)
     {
+        ZoneScopedN("sun_old/render/near_smap");
         bool bNormal = !dsgraph.mapNormalPasses[0][0].empty() || !dsgraph.mapMatrixPasses[0][0].empty();
         bool bSpecial = !dsgraph.mapNormalPasses[1][0].empty() || !dsgraph.mapMatrixPasses[1][0].empty() ||
             !dsgraph.mapSorted.empty();
         if (bNormal || bSpecial)
         {
-            RImplementation.Target->phase_smap_direct(dsgraph.cmd_list, sun, SE_SUN_NEAR);
-            dsgraph.cmd_list.set_xform_world(Fidentity);
-            dsgraph.cmd_list.set_xform_view(Fidentity);
-            dsgraph.cmd_list.set_xform_project(sun->X.D[SE_SUN_NEAR].combine);
-            dsgraph.render_graph(0);
+            {
+                ZoneScopedN("sun_old/render/near/phase_direct");
+                RImplementation.Target->phase_smap_direct(dsgraph.cmd_list, sun, SE_SUN_NEAR);
+                dsgraph.cmd_list.set_xform_world(Fidentity);
+                dsgraph.cmd_list.set_xform_view(Fidentity);
+                dsgraph.cmd_list.set_xform_project(sun->X.D[SE_SUN_NEAR].combine);
+            }
+            {
+                ZoneScopedN("sun_old/render/near/render_graph_p0");
+                dsgraph.render_graph(0);
+            }
             if (ps_r2_ls_flags.test(R2FLAG_SUN_DETAILS))
+            {
+                ZoneScopedN("sun_old/render/near/details");
                 RImplementation.Details->Render(dsgraph.cmd_list);
+            }
             sun->X.D[SE_SUN_NEAR].transluent = FALSE;
             if (bSpecial)
             {
                 sun->X.D[SE_SUN_NEAR].transluent = TRUE;
-                RImplementation.Target->phase_smap_direct_tsh(dsgraph.cmd_list, sun, SE_SUN_NEAR);
-                dsgraph.render_graph(1); // normal level, secondary priority
-                dsgraph.render_sorted(); // strict-sorted geoms
+                {
+                    ZoneScopedN("sun_old/render/near/phase_tsh");
+                    RImplementation.Target->phase_smap_direct_tsh(dsgraph.cmd_list, sun, SE_SUN_NEAR);
+                }
+                {
+                    ZoneScopedN("sun_old/render/near/render_graph_p1");
+                    dsgraph.render_graph(1); // normal level, secondary priority
+                }
+                {
+                    ZoneScopedN("sun_old/render/near/render_sorted");
+                    dsgraph.render_sorted(); // strict-sorted geoms
+                }
             }
         }
     }

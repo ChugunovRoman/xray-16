@@ -57,6 +57,8 @@ extern ECORE_API float ps_r__GLOD_ssa_end;
 extern ECORE_API float ps_r__LOD;
 // Second viewport: rt_secondVP size = main resolution * this factor (r__dedicated_second_vp 1). Console: r__second_vp_render_scale.
 extern ECORE_API float ps_r__second_vp_render_scale;
+// Render-phase task scheduling (i_render_phase): bit0 = async calculate task, bit1 = async draw task. Console: r__phase_mt 0..3.
+extern ECORE_API int ps_r__phase_mt;
 //.extern ECORE_API	float		ps_r__LOD_Power		;
 extern ECORE_API float ps_r__ssaDISCARD;
 extern ECORE_API float ps_r__ssaDONTSORT;

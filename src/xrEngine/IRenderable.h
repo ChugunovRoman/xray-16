@@ -34,6 +34,10 @@ public:
     virtual bool renderable_SsaLodCharacter() const { return false; }
     // Optional hard switch: render m_lod instead of hi skeleton for this frame/object when m_lod exists.
     virtual bool renderable_ForceLodCharacter() const { return false; }
+    // Optional cheap path for far/old corpses to reduce dynamic submissions CPU cost.
+    virtual bool renderable_CheapCorpsePath() const { return false; }
+    // Optional frozen corpse pose to skip expensive skeleton updates.
+    virtual bool renderable_CorpsePoseFrozen() const { return false; }
 };
 
 inline IRenderable::~IRenderable() = default;

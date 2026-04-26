@@ -91,40 +91,48 @@ void R_dsgraph_structure::render_graph(u32 _priority)
         ZoneScopedN("dsgraph_render_dynamic");
         PIX_EVENT_CTX(cmd_list, dsgraph_render_dynamic);
 
-        for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
+        auto render_matrix_passes = [&](R_dsgraph::mapMatrixPasses_T& passSet, u32& statsCounter)
         {
-            auto& map = mapMatrixPasses[_priority][iPass];
-
-            map.get_any_p(matPasses);
-            std::sort(matPasses.begin(), matPasses.end(), cmp_pass<mapMatrix_T::value_type*>);
-            for (const auto& it : matPasses)
+            for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
             {
-                cmd_list.set_Pass(it->first);
+                auto& map = passSet[iPass];
 
-                mapMatrixItems& items = it->second;
-                items.ssa = 0;
-
-                std::sort(items.begin(), items.end(), cmp_ssa<_MatrixItem>);
-                for (auto& item : items)
+                map.get_any_p(matPasses);
+                std::sort(matPasses.begin(), matPasses.end(), cmp_pass<mapMatrix_T::value_type*>);
+                for (const auto& it : matPasses)
                 {
-                    cmd_list.set_xform_world(item.Matrix);
-                    RImplementation.apply_object(cmd_list, item.pObject);
-                    cmd_list.apply_lmaterial();
+                    cmd_list.set_Pass(it->first);
 
-                    const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R);
+                    mapMatrixItems& items = it->second;
+                    items.ssa = 0;
+
+                    std::sort(items.begin(), items.end(), cmp_ssa<_MatrixItem>);
+                    for (auto& item : items)
+                    {
+                        cmd_list.set_xform_world(item.Matrix);
+                        RImplementation.apply_object(cmd_list, item.pObject);
+                        cmd_list.apply_lmaterial();
+
+                        const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R);
 #ifdef USE_DX11
-                    cmd_list.LOD.set_LOD(LOD);
+                        cmd_list.LOD.set_LOD(LOD);
 #endif
-                    // --#SM+#-- Обновляем шейдерные данные модели [update shader values for this model]
-                    // RCache.hemi.c_update(item.pVisual);
+                        // --#SM+#-- Обновляем шейдерные данные модели [update shader values for this model]
+                        // RCache.hemi.c_update(item.pVisual);
 
-                    item.pVisual->Render(cmd_list, LOD, o.phase == CRender::PHASE_SMAP);
+                        item.pVisual->Render(cmd_list, LOD, o.phase == CRender::PHASE_SMAP);
+                        ++statsCounter;
+                        if (item.pObject && item.pObject->renderable_ForceLodCharacter())
+                            ++RImplementation.BasicStats.CorpseRegularSubmissions;
+                    }
+                    items.clear();
                 }
-                items.clear();
+                matPasses.clear();
+                map.clear();
             }
-            matPasses.clear();
-            map.clear();
-        }
+        };
+
+        render_matrix_passes(mapMatrixPasses[_priority], RImplementation.BasicStats.DynamicRegularSubmissions);
     }
 
     RImplementation.BasicStats.Primitives.End(); // XXX: Refactor a bit later

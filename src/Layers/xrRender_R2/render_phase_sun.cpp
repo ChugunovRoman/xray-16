@@ -1,5 +1,6 @@
 #include "stdafx.h"
 
+#include "Layers/xrRender/xrRender_console.h"
 #include "r2_R_sun_support.h"
 #include "xrCore/Threading/ParallelFor.hpp"
 
@@ -42,13 +43,14 @@ void render_sun::init()
         VERIFY(contexts_ids[i] != R_dsgraph_structure::INVALID_CONTEXT_ID);
     }
 
-    o.mt_calc_enabled = RImplementation.o.mt_calculate;
-    o.mt_draw_enabled = RImplementation.o.mt_render;
+    const int pm = ps_r__phase_mt < 0 ? 0 : (ps_r__phase_mt > 3 ? 3 : ps_r__phase_mt);
+    o.mt_calc_enabled = RImplementation.o.mt_calculate && ((pm & 1) != 0);
+    o.mt_draw_enabled = (RImplementation.o.mt_render != 0) && ((pm & 2) != 0);
 }
 
 void render_sun::calculate()
 {
-    ZoneScoped;
+    ZoneScopedN("sun/calculate");
 
     need_to_render_sunshafts = RImplementation.Target->need_to_render_sunshafts();
     last_cascade_chain_mode = m_sun_cascades[R__NUM_SUN_CASCADES - 1].reset_chain;
@@ -257,8 +259,11 @@ void render_sun::calculate()
 
     const auto process_cascade = [&, this](const TaskRange<u32>& range)
     {
+        ZoneScopedN("sun/calculate/range");
         for (u32 cascade_ind = range.begin(); cascade_ind != range.end(); ++cascade_ind)
         {
+            ZoneScopedN("sun/calculate/cascade");
+            ZoneTextF("cascade=%u", cascade_ind);
             // Begin SMAP-render
             auto& dsgraph = RImplementation.get_context(contexts_ids[cascade_ind]);
             {
@@ -288,6 +293,7 @@ void render_sun::calculate()
 
 void render_sun::render()
 {
+    ZoneScopedN("sun/render");
     if (!o.active)
         return;
 
@@ -297,8 +303,11 @@ void render_sun::render()
     // Render shadow-map
     const auto render_cascade = [&, this](const TaskRange<u32>& range)
     {
+        ZoneScopedN("sun/render/range");
         for (u32 cascade_ind = range.begin(); cascade_ind != range.end(); ++cascade_ind)
         {
+            ZoneScopedN("sun/render/cascade");
+            ZoneTextF("cascade=%u", cascade_ind);
 #if defined(USE_DX11)
             //TracyD3D11Zone(HW.profiler_ctx, "render_sun::render_cascade");
 #endif
@@ -310,26 +319,45 @@ void render_sun::render()
                 !dsgraph.mapSorted.empty();
             if (bNormal || bSpecial)
             {
-                RImplementation.Target->phase_smap_direct(dsgraph.cmd_list, sun, cascade_ind);
-                dsgraph.cmd_list.set_xform_world(Fidentity);
-                dsgraph.cmd_list.set_xform_view(Fidentity);
-                dsgraph.cmd_list.set_xform_project(sun->X.D[cascade_ind].combine);
-                dsgraph.render_graph(0);
+                {
+                    ZoneScopedN("sun/render/cascade/phase_direct");
+                    RImplementation.Target->phase_smap_direct(dsgraph.cmd_list, sun, cascade_ind);
+                    dsgraph.cmd_list.set_xform_world(Fidentity);
+                    dsgraph.cmd_list.set_xform_view(Fidentity);
+                    dsgraph.cmd_list.set_xform_project(sun->X.D[cascade_ind].combine);
+                }
+                {
+                    ZoneScopedN("sun/render/cascade/render_graph_p0");
+                    dsgraph.render_graph(0);
+                }
                 if (ps_r2_ls_flags.test(R2FLAG_SUN_DETAILS))
+                {
+                    ZoneScopedN("sun/render/cascade/details");
                     RImplementation.Details->Render(dsgraph.cmd_list);
+                }
                 sun->X.D[cascade_ind].transluent = FALSE;
                 if (bSpecial)
                 {
                     VERIFY(RImplementation.o.Tshadows);
                     sun->X.D[cascade_ind].transluent = TRUE;
-                    RImplementation.Target->phase_smap_direct_tsh(dsgraph.cmd_list, sun, cascade_ind);
-                    dsgraph.render_graph(1); // normal level, secondary priority
-                    dsgraph.render_sorted(); // strict-sorted geoms
+                    {
+                        ZoneScopedN("sun/render/cascade/phase_tsh");
+                        RImplementation.Target->phase_smap_direct_tsh(dsgraph.cmd_list, sun, cascade_ind);
+                    }
+                    {
+                        ZoneScopedN("sun/render/cascade/render_graph_p1");
+                        dsgraph.render_graph(1); // normal level, secondary priority
+                    }
+                    {
+                        ZoneScopedN("sun/render/cascade/render_sorted");
+                        dsgraph.render_sorted(); // strict-sorted geoms
+                    }
                 }
             }
 
             if (!RImplementation.o.support_rt_arrays)
             {
+                ZoneScopedN("sun/render/cascade/accumulate");
                 accumulate_cascade(cascade_ind);
             }
         }

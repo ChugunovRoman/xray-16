@@ -1,5 +1,7 @@
 #pragma once
 
+#include <utility>
+
 #include "r__sector.h"
 
 namespace xray::render::RENDER_NAMESPACE

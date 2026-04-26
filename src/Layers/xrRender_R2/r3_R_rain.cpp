@@ -1,5 +1,6 @@
 #include "stdafx.h"
 
+#include "Layers/xrRender/xrRender_console.h"
 #include "r2_R_sun_support.h"
 
 #include "xrEngine/IGame_Persistent.h"
@@ -60,8 +61,9 @@ void render_rain::init()
     if (!o.active)
         return;
 
-    o.mt_calc_enabled = RImplementation.o.mt_calculate;
-    o.mt_draw_enabled = RImplementation.o.mt_render;
+    const int pm = ps_r__phase_mt < 0 ? 0 : (ps_r__phase_mt > 3 ? 3 : ps_r__phase_mt);
+    o.mt_calc_enabled = RImplementation.o.mt_calculate && ((pm & 1) != 0);
+    o.mt_draw_enabled = (RImplementation.o.mt_render != 0) && ((pm & 2) != 0);
 
     // pre-allocate context
     context_id = RImplementation.alloc_context();

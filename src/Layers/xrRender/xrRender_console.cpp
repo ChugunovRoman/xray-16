@@ -276,6 +276,7 @@ int r__particle_render_parallel_min_count = 256;
 int r__parallel_skeleton_visbox = 0;
 int r__parallel_skeleton_visbox_min_bones = 64;
 int ps_r2_mt_render = 1;
+int ps_r__phase_mt = 0;
 
 xr_token ext_quality_token[] = {{"qt_off", 0}, {"qt_low", 1}, {"qt_medium", 2},
     {"qt_high", 3}, {"qt_extreme", 4}, {nullptr, 0}};
@@ -995,6 +996,7 @@ void xrRender_initconsole()
     //CMD3(CCC_Mask, "r2_sun_ignore_portals", &ps_r2_ls_flags, R2FLAG_SUN_IGNORE_PORTALS);
 
     CMD4(CCC_Integer, "r2_mt_calculate",    &ps_r2_mt_calculate, 0, 1);
+    CMD4(CCC_Integer, "r__phase_mt", &ps_r__phase_mt, 0, 3);
 #if RENDER == R_R4
     CMD4(CCC_Integer, "r2_mt_render",       &ps_r2_mt_render,    0, 1);
 #endif
