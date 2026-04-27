@@ -1,7 +1,7 @@
 #include "pch_script.h"
 
-#include "xrEngine\XR_IOConsole.h"
-#include "xrEngine\xr_ioc_cmd.h"
+#include "xrEngine/XR_IOConsole.h"
+#include "xrEngine/xr_ioc_cmd.h"
 #include "ai_space.h"
 #include "xrScriptEngine/script_callback_ex.h"
 
