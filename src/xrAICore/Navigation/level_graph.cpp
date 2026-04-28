@@ -363,16 +363,19 @@ bool CLevelGraph::Search(u32 start_vertex_id, u32 dest_vertex_id, xr_vector<u32>
         return false;
 
     CLevelVertex* target_vertex = vertex(dest_vertex_id);
-    float target_x, target_z;
-    unpack_xz(*target_vertex, target_x, target_z);
+    u32 target_ix{}, target_iz{};
+    unpack_xz(*target_vertex, target_ix, target_iz);
 
     auto calc_cost = [cell](CLevelVertex*, CLevelVertex*) { return cell; };
 
-    auto distance_node = [this, cell, target_x, target_z](CLevelVertex* node)
+    auto distance_node = [this, cell, target_ix, target_iz](CLevelVertex* node)
     {
-        float x1, z1;
-        unpack_xz(node, x1, z1);
-        return cell * 2.f * (_abs(x1 - target_x) + _abs(z1 - target_z));
+        u32 ix{}, iz{};
+        unpack_xz(node, ix, iz);
+        const int dx = int(ix) - int(target_ix);
+        const int dz = int(iz) - int(target_iz);
+        // Heuristic in world units: Manhattan distance in grid * cell_size, scaled.
+        return cell * 2.f * (float(_abs(dx)) + float(_abs(dz)));
     };
 
     tls_search_open_pq.push({0.f, start_vertex_id});
