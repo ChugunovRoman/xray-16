@@ -85,10 +85,16 @@ void CUIGameLog::Update()
 
     for (; it != it_e; ++it)
     {
-        CUILightAnimColorConroller* pItem = smart_cast<CUILightAnimColorConroller*>(*it);
+        CUIWindow* w = *it;
+        if (!w || w == reinterpret_cast<CUIWindow*>(static_cast<ptrdiff_t>(-1)))
+            continue;
+
+        CUILightAnimColorConroller* pItem = smart_cast<CUILightAnimColorConroller*>(w);
+        if (!pItem)
+            continue;
 
         if (!pItem->IsColorAnimationPresent())
-            toDelList.push_back(*it);
+            toDelList.push_back(w);
     }
 
     // Delete elements
