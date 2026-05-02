@@ -38,6 +38,8 @@ public:
     virtual bool renderable_CheapCorpsePath() const { return false; }
     // Optional frozen corpse pose to skip expensive skeleton updates.
     virtual bool renderable_CorpsePoseFrozen() const { return false; }
+    // When false, skeletal m_lod is never used for this root (neither force nor SSA distance); hi mesh only.
+    virtual bool renderable_AllowCharacterMeshLod() const { return true; }
 };
 
 inline IRenderable::~IRenderable() = default;

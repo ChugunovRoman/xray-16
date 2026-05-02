@@ -321,7 +321,7 @@ void R_dsgraph_structure::add_leafs_dynamic(
             pV->CopyBoneTransformsFrom(*lod_bind_source);
 
         BOOL _use_lod = FALSE;
-        if (pV->m_lod)
+        if (pV->m_lod && (!root || root->renderable_AllowCharacterMeshLod()))
         {
             if (root && root->renderable_ForceLodCharacter())
                 _use_lod = TRUE;

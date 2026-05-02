@@ -14,6 +14,8 @@ class CVisualMemoryManager;
 class CBlend;
 
 extern int ps_force_character_lod_render;
+// When non-zero, never use character m_lod in the renderer (hi visual only); overrides r_force_character_lod and corpse LOD flags.
+extern int ps_r_disable_character_lod_render;
 
 class CEntityAlive : public CEntity
 {
@@ -31,8 +33,11 @@ public:
     bool renderable_SsaLodCharacter() const override { return true; }
     bool renderable_ForceLodCharacter() const override
     {
+        if (ps_r_disable_character_lod_render != 0)
+            return false;
         return (ps_force_character_lod_render != 0) || m_force_lod_visual || m_force_cheap_corpse_path;
     }
+    bool renderable_AllowCharacterMeshLod() const override { return ps_r_disable_character_lod_render == 0; }
     bool renderable_CheapCorpsePath() const override { return m_force_cheap_corpse_path; }
     bool renderable_CorpsePoseFrozen() const override { return m_corpse_pose_frozen; }
     void SetForceLodVisual(bool value) { m_force_lod_visual = value; }
