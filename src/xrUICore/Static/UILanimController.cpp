@@ -10,12 +10,14 @@ void CUIColorAnimConrollerContainer::Update()
 
 void CUIColorAnimConrollerContainer::ColorAnimationSetTextureColor(u32 color, bool only_alpha)
 {
-    WINDOW_LIST::iterator it = m_ChildWndList.begin();
-    WINDOW_LIST::iterator it_e = m_ChildWndList.end();
-    for (; it != it_e; ++it)
+    // m_ChildWndList may change during callbacks (e.g. auto-delete/detach), so iterate over a copy.
+    const xr_vector<CUIWindow*> children_copy(m_ChildWndList.begin(), m_ChildWndList.end());
+    for (CUIWindow* w : children_copy)
     {
-        CUIWindow* w = *it;
-        if (!w || w == reinterpret_cast<CUIWindow*>(static_cast<ptrdiff_t>(-1)))
+        if (!w)
+            continue;
+        // Child could have been detached since we made the copy.
+        if (std::find(m_ChildWndList.begin(), m_ChildWndList.end(), w) == m_ChildWndList.end())
             continue;
 
         ITextureOwner* TO = smart_cast<ITextureOwner*>(w);
@@ -26,12 +28,14 @@ void CUIColorAnimConrollerContainer::ColorAnimationSetTextureColor(u32 color, bo
 
 void CUIColorAnimConrollerContainer::ColorAnimationSetTextColor(u32 color, bool only_alpha)
 {
-    WINDOW_LIST::iterator it = m_ChildWndList.begin();
-    WINDOW_LIST::iterator it_e = m_ChildWndList.end();
-    for (; it != it_e; ++it)
+    // m_ChildWndList may change during callbacks (e.g. auto-delete/detach), so iterate over a copy.
+    const xr_vector<CUIWindow*> children_copy(m_ChildWndList.begin(), m_ChildWndList.end());
+    for (CUIWindow* w : children_copy)
     {
-        CUIWindow* w = *it;
-        if (!w || w == reinterpret_cast<CUIWindow*>(static_cast<ptrdiff_t>(-1)))
+        if (!w)
+            continue;
+        // Child could have been detached since we made the copy.
+        if (std::find(m_ChildWndList.begin(), m_ChildWndList.end(), w) == m_ChildWndList.end())
             continue;
 
         CUILightAnimColorConroller* TO = smart_cast<CUILightAnimColorConroller*>(w);

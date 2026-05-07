@@ -366,6 +366,8 @@ bool StaticDrawableWrapper::IsActual() const
 
 void StaticDrawableWrapper::SetText(const char* text)
 {
+    if (!m_static)
+        return;
     m_static->Show(text != nullptr);
     if (text)
     {
@@ -376,12 +378,16 @@ void StaticDrawableWrapper::SetText(const char* text)
 
 void StaticDrawableWrapper::Draw()
 {
+    if (!m_static)
+        return;
     if (m_static->IsShown())
         m_static->Draw();
 }
 
 void StaticDrawableWrapper::Update()
 {
+    if (!m_static)
+        return;
     if (IsActual() && m_static->IsShown())
         m_static->Update();
 }
