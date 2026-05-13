@@ -817,11 +817,11 @@ static bool SectionIsBakeableWeapon(pcstr sec)
 class CWpnIconBakeVisual final : public RenderableBase
 {
 public:
-    explicit CWpnIconBakeVisual(pcstr visual_path)
+    explicit CWpnIconBakeVisual(pcstr visual_path, pcstr model_cache_suffix = "")
     {
         renderable.xform.identity();
         renderable.visual =
-            (visual_path && visual_path[0] && GEnv.Render) ? GEnv.Render->model_Create(visual_path) : nullptr;
+            (visual_path && visual_path[0] && GEnv.Render) ? GEnv.Render->model_Create(visual_path, model_cache_suffix) : nullptr;
         if (IKinematics* K = renderable.visual ? smart_cast<IKinematics*>(renderable.visual) : nullptr)
         {
             // Bake-only: hide addon attachment bones so icons match “clean” world mesh; in-game weapons still
@@ -1005,7 +1005,36 @@ void BakeDynamicInvIconsToDds(pcstr single_section_or_null)
         }
 
         const shared_str visual = pSettings->r_string(sec_name, "visual");
-        CWpnIconBakeVisual bake_vis(visual.c_str());
+        // Apply weapon skin material overrides for world model (world_material_%d + model_cache_suffix),
+        // matching the runtime path in CGameObject::cNameVisual_set().
+        const shared_str model_suffix =
+            pSettings->line_exist(sec_name, "model_cache_suffix") ? pSettings->r_string(sec_name, "model_cache_suffix") : "";
+        {
+            u16 index = 1;
+            shared_str line_name;
+            while (true)
+            {
+                line_name = make_string("world_material_%d", index).c_str();
+                if (!pSettings->line_exist(sec_name, line_name.c_str()))
+                    break;
+
+                string256 dds_path = "";
+                const shared_str material_value = pSettings->r_string(sec_name, line_name.c_str());
+                _GetItem(material_value.c_str(), 0, dds_path);
+
+                string256 low_name;
+                xr_strcpy(low_name, visual.c_str());
+                if (strext(low_name))
+                    *strext(low_name) = 0;
+                const shared_str material_key =
+                    make_string("%s:%d%s", low_name, (int)index, model_suffix.c_str()).c_str();
+
+                GEnv.Render->emplace_texture_replacements(material_key, dds_path);
+                ++index;
+            }
+        }
+
+        CWpnIconBakeVisual bake_vis(visual.c_str(), model_suffix.c_str());
         if (!bake_vis.GetRenderData().visual)
         {
             Msg("! [weapon_inv_icon] bake: model_Create failed [%s] visual=[%s]", sec_name, visual.c_str());
