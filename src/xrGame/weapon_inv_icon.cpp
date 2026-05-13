@@ -14,6 +14,7 @@
 #include "ui/UIInventoryUtilities.h"
 #include "UIGameCustom.h"
 #include "ui/UIActorMenu.h"
+#include "xrServer.h"
 
 #include <algorithm>
 
@@ -1004,55 +1005,80 @@ void BakeDynamicInvIconsToDds(pcstr single_section_or_null)
             return;
         }
 
-        const shared_str visual = pSettings->r_string(sec_name, "visual");
-        // Apply weapon skin material overrides for world model (world_material_%d + model_cache_suffix),
-        // matching the runtime path in CGameObject::cNameVisual_set().
-        const shared_str model_suffix =
-            pSettings->line_exist(sec_name, "model_cache_suffix") ? pSettings->r_string(sec_name, "model_cache_suffix") : "";
+        // For default addons (mag/grip/stock/cover/etc) we must render a real `CWeapon`,
+        // since addons are spawned in `CWeapon::SpawnDefaultAddons()` and rendered in `CWeapon::renderable_Render`.
+        // We create a temporary client object via `Objects.Create + net_Spawn` and destroy it right after baking.
+        CSE_Abstract* E = F_entity_Create(sec_name);
+        if (!E)
         {
-            u16 index = 1;
-            shared_str line_name;
-            while (true)
-            {
-                line_name = make_string("world_material_%d", index).c_str();
-                if (!pSettings->line_exist(sec_name, line_name.c_str()))
-                    break;
-
-                string256 dds_path = "";
-                const shared_str material_value = pSettings->r_string(sec_name, line_name.c_str());
-                _GetItem(material_value.c_str(), 0, dds_path);
-
-                string256 low_name;
-                xr_strcpy(low_name, visual.c_str());
-                if (strext(low_name))
-                    *strext(low_name) = 0;
-                const shared_str material_key =
-                    make_string("%s:%d%s", low_name, (int)index, model_suffix.c_str()).c_str();
-
-                GEnv.Render->emplace_texture_replacements(material_key, dds_path);
-                ++index;
-            }
-        }
-
-        CWpnIconBakeVisual bake_vis(visual.c_str(), model_suffix.c_str());
-        if (!bake_vis.GetRenderData().visual)
-        {
-            Msg("! [weapon_inv_icon] bake: model_Create failed [%s] visual=[%s]", sec_name, visual.c_str());
+            Msg("! [weapon_inv_icon] bake: F_entity_Create failed [%s]", sec_name);
             ++failed;
             return;
         }
+
+        // Fill server entity similarly to `CLevel::spawn_item`, but keep it unowned (no parent inventory).
+        const u32 actor_lv = Actor() ? Actor()->ai_location().level_vertex_id() : u32(-1);
+        const Fvector actor_pos = Actor() ? Actor()->Position() : Fvector().set(0, 0, 0);
+        E->s_name = sec_name;
+        E->set_name_replace(sec_name);
+        E->o_Position = actor_pos;
+        E->s_RP = 0xff;
+        // `net_Register` requires a valid net ID (< 0xffff). Normally assigned by server spawn pipeline.
+        if (Level().Server)
+            E->ID = Level().Server->PerformIDgen(0xffff);
+        else
+            E->ID = 0xfffe; // fallback (should not happen in singleplayer)
+        E->ID_Parent = 0xffff;
+        E->ID_Phantom = 0xffff;
+        E->s_flags.assign(M_SPAWN_OBJECT_LOCAL);
+        E->RespawnTime = 0;
+        if (CSE_ALifeDynamicObject* dyn = smart_cast<CSE_ALifeDynamicObject*>(E))
+            dyn->m_tNodeID = actor_lv;
+
+        // оружие спавним с полным магазином (как в CLevel::spawn_item)
+        if (CSE_ALifeItemWeapon* wse = smart_cast<CSE_ALifeItemWeapon*>(E))
+            wse->a_elapsed = wse->get_ammo_magsize();
+
+        IGameObject* O = Level().Objects.Create(E->s_name.c_str());
+        if (!O || !O->net_Spawn(E))
+        {
+            if (O)
+            {
+                O->net_Destroy();
+                Level().Objects.Destroy(O);
+            }
+            F_entity_Destroy(E);
+            Msg("! [weapon_inv_icon] bake: failed to net_Spawn weapon [%s]", sec_name);
+            ++failed;
+            return;
+        }
+
+        CWeapon* wpn = smart_cast<CWeapon*>(O);
+        if (!wpn)
+        {
+            O->net_Destroy();
+            Level().Objects.Destroy(O);
+            F_entity_Destroy(E);
+            Msg("! [weapon_inv_icon] bake: spawned object is not a weapon [%s]", sec_name);
+            ++failed;
+            return;
+        }
+
+        // Bake-only: freeze transforms and skip in-weapon animation side-effects.
+        wpn->XFORM().identity();
+        wpn->SetWeaponIconSnapshot(true);
 
         bool ok_both = true;
         for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
         {
             const auto preset = (EWeaponInvIconPreset)pi;
             Fmatrix view, proj;
-            BuildIconViewProj(sec_name, VisualIconModelPivot(bake_vis.GetRenderData().visual), preset, view, proj);
+            BuildMatricesForWeapon(wpn, preset, view, proj);
             u32 tw, th;
             GetWeaponIconRtTexelSizeForSection(sec_name, preset, tw, th);
             const shared_str tex = TextureResourceName(sec_name, preset);
             const bool rendered =
-                GEnv.Render->WeaponIcon_RenderToTexture(tex.c_str(), tw, th, view, proj, &bake_vis);
+                GEnv.Render->WeaponIcon_RenderToTexture(tex.c_str(), tw, th, view, proj, wpn);
             if (!rendered)
             {
                 Msg("! [weapon_inv_icon] bake: render failed [%s] preset=%u", sec_name, pi);
@@ -1087,6 +1113,12 @@ void BakeDynamicInvIconsToDds(pcstr single_section_or_null)
             GEnv.Render->WeaponIcon_ReleaseUserIconRt(tex.c_str());
             InventoryUtilities::DropCachedRtIconShaderForUserTexture(tex.c_str());
         }
+
+        // Cleanup temporary weapon object
+        wpn->SetWeaponIconSnapshot(false);
+        wpn->net_Destroy();
+        Level().Objects.Destroy(wpn);
+        F_entity_Destroy(E);
 
         if (ok_both)
         {
