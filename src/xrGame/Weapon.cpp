@@ -2340,6 +2340,32 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
         slot->slot_type = slot_type;
         slot->bone_name = bone_name;
         slot->bone_2_name = bone_2_name;
+
+        string64 prop_name;
+        xr_sprintf(prop_name, "%s_addons", slot_key.c_str());
+
+        pcstr src_section = nullptr;
+        if (pSettings->line_exist(section, prop_name))
+            src_section = section;
+        else if (slot_sect != section && pSettings->line_exist(slot_sect.c_str(), prop_name))
+            src_section = slot_sect.c_str();
+
+        if (src_section)
+        {
+            shared_str list_str = pSettings->r_string(src_section, prop_name);
+            if (list_str.size())
+            {
+                string256 item_name;
+                const u32 count = _GetItemCount(list_str.c_str(), ',');
+                for (u32 i = 0; i < count; ++i)
+                {
+                    _GetItem(list_str.c_str(), i, item_name, ',');
+                    if (item_name[0])
+                        slot->allowed_addons.push_back(item_name);
+                }
+            }
+        }
+
         m_addon_slots[slot_key] = slot;
     };
     auto load_slot_offsets = [&](const char* format) {
@@ -2372,6 +2398,25 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
     load_slot("addon_slot_cev_up_offset", "slot_cev_up");
     load_slot("addon_slot_cev_down_offset", "slot_cev_down");
 }
+
+bool CWeapon::IsAddonAllowedInSlot(const shared_str& slot_key, shared_str addon_section) const
+{
+    auto it = m_addon_slots.find(slot_key);
+    if (it == m_addon_slots.end() || !it->second)
+        return true;
+
+    const xr_vector<shared_str>& allowed = it->second->allowed_addons;
+    if (allowed.empty())
+        return true;
+
+    for (const shared_str& name : allowed)
+    {
+        if (name == addon_section)
+            return true;
+    }
+    return false;
+}
+
 shared_str CWeapon::GetSlotKey(shared_str slot_name, u32 addon_parent_id, u32 addon_id)
 {
     if (m_addon_items[addon_parent_id]->parent_id == 0)
@@ -2401,6 +2446,9 @@ void CWeapon::SpawnDefaultAddons()
         {
             auto addon = GetAddonFromSlot(0, slot_key);
             if (addon.second)
+                continue;
+
+            if (!IsAddonAllowedInSlot(slot_key, default_addon))
                 continue;
 
             AddAddonData data;
@@ -4028,30 +4076,38 @@ bool CWeapon::DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool fo
     addon_slot wpn_last_free_slot;
     addon_slot free_slot;
 
+    auto slot_type_matches = [&](const addon_slot& slot) -> bool {
+        if (slot.slot_type != pScope->m_slot_type)
+            return false;
+        if (slot.parent == 0 && !wpn->IsAddonAllowedInSlot(slot.slot_name, pScope->m_section_id))
+            return false;
+        return true;
+    };
+
     auto slots = wpn->getAvaliableSlots();
     for (auto slot : slots)
     {
-        if (slot.parent == 0 && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by.c_str() == nullptr && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by.c_str() == nullptr && slot_type_matches(slot))
             wpn_1_slot = slot;
-        if (slot.parent == 0 && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by.c_str() != nullptr && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by.c_str() != nullptr && slot_type_matches(slot))
             wpn_1_slot_busy_but_compatible = slot;
-        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_2") == 0 && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_2") == 0 && slot_type_matches(slot))
             wpn_2_slot = slot;
-        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_3") && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_3") && slot_type_matches(slot))
             wpn_3_slot = slot;
-        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_4") && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_4") && slot_type_matches(slot))
             wpn_4_slot = slot;
-        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_5") && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_5") && slot_type_matches(slot))
             wpn_5_slot = slot;
-        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && slot_type_matches(slot))
             wpn_last_free_slot = slot;
-        if (slot.parent != 0 && slot.busy_by.c_str() == nullptr && slot.slot_type == pScope->m_slot_type)
+        if (slot.parent != 0 && slot.busy_by.c_str() == nullptr && slot_type_matches(slot))
             free_slot = slot;
-        if ((slot.parent_section.c_str() != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by.c_str() == nullptr && slot.slot_type == pScope->m_slot_type)
+        if ((slot.parent_section.c_str() != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by.c_str() == nullptr && slot_type_matches(slot))
             plnk_1_slot = slot;
-        if ((slot.parent_section.c_str() != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by.c_str() != nullptr && slot.slot_type == pScope->m_slot_type)
+        if ((slot.parent_section.c_str() != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), WPN_MAIN_SLOT) == 0 && slot.busy_by.c_str() != nullptr && slot_type_matches(slot))
             plnk_1_slot_busy_but_compatible = slot;
-        if ((slot.parent_section.c_str() != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), "slot_2") == 0 && slot.busy_by.c_str() == nullptr && slot.slot_type == pScope->m_slot_type)
+        if ((slot.parent_section.c_str() != nullptr && (strstr(slot.parent_section.c_str(), "plnk_") || strstr(slot.parent_section.c_str(), "atch_"))) && xr_strcmp(slot.slot_name.c_str(), "slot_2") == 0 && slot.busy_by.c_str() == nullptr && slot_type_matches(slot))
             plnk_2_slot = slot;
     }
 

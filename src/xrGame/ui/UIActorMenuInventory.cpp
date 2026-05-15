@@ -1241,6 +1241,9 @@ void CUIActorMenu::GenerateMenuItemForAddon(PIItem weapon_item, PIItem addon_ite
         if (pScope->m_slot_type != slot.slot_type)
             continue;
 
+        if (slot.parent == 0 && !wpn->IsAddonAllowedInSlot(slot.slot_name, pScope->m_section_id))
+            continue;
+
         shared_str ort = nullptr;
         shared_str slot_name = StringTable().translate(slot.slot_name.c_str());
 

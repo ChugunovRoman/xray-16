@@ -37,6 +37,7 @@ struct addon_slot {
     Fmatrix transform_world;
     shared_str busy_by;
     u16 slot_type;
+    xr_vector<shared_str> allowed_addons;
 
     explicit operator bool() const {
         return !slot_name.empty(); // или любое другое условие
@@ -367,6 +368,7 @@ public:
     bool mainScopeSlotIsBusy() const;
 
     xr_vector<addon_slot> getAvaliableSlots() const;
+    bool IsAddonAllowedInSlot(const shared_str& slot_key, shared_str addon_section) const;
 
     ALife::EWeaponAddonStatus GetScopeStatusParent() const;
 

@@ -1179,11 +1179,10 @@ bool CWeaponMagazined::CanAttach(PIItem pIItem)
         auto slots = getAvaliableSlots();
         for (auto slot : slots)
         {
-            if (slot.slot_type == pScope->m_slot_type)
-            {
+            if (slot.slot_type != pScope->m_slot_type)
+                continue;
+            if (slot.parent != 0 || IsAddonAllowedInSlot(slot.slot_name, pIItem->m_section_id))
                 return true;
-                break;
-            }
         }
         return false;
     }
@@ -1272,6 +1271,9 @@ bool CWeaponMagazined::AttachAttachment(PIItem pIItem)
 
     if (pScope)
     {
+        if (pIItem->parent_addon == 0 && !IsAddonAllowedInSlot(pIItem->attach_to_slot_name, pIItem->m_section_id))
+            return false;
+
         addAddon(pIItem);
 
         if (pScope->IsSilencer())
