@@ -152,17 +152,18 @@ void CGameObject::cNameVisual_set(shared_str N)
         shared_str const prev_visual_name = NameVisual;
         NameVisual = N;
         shared_str model_suffix = pSettings->read_if_exists<pcstr>(NameSection.c_str(), "model_cache_suffix", "");
+        // Sparse indices: only listed world_material_N lines are applied (no need for 1..N-1 placeholders).
+        constexpr u16 kMaxWeaponSkinMaterialSlots = 64;
         auto load_world_materials = [&](const char* format) {
-            u16 index = 1;
             shared_str line_name;
             shared_str material_value;
             shared_str material_key;
-            
-            while (true)
+
+            for (u16 index = 1; index <= kMaxWeaponSkinMaterialSlots; ++index)
             {
                 line_name = make_string(format, index).c_str();
                 if (!pSettings->line_exist(NameSection.c_str(), line_name.c_str()))
-                    break;
+                    continue;
 
                 string256 dds_path = "", shader_name = "";
                 material_value = pSettings->r_string(NameSection.c_str(), line_name.c_str());
@@ -175,8 +176,6 @@ void CGameObject::cNameVisual_set(shared_str N)
                 material_key = make_string("%s:%d%s", low_name, index, model_suffix.c_str()).c_str();
 
                 GEnv.Render->emplace_texture_replacements(material_key, dds_path);
-
-                index++;
             }
         };
 

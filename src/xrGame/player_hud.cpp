@@ -671,17 +671,18 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
     R_ASSERT3(!m_visual_name.empty(), "Missing 'item_visual' from weapon hud section.", m_sect_name.c_str());
 
     shared_str model_suffix = pSettings->read_if_exists<pcstr>(m_sect_name.c_str(), "model_cache_suffix", "");
+    // Sparse indices: only listed hud_material_N lines are applied (no need for 1..N-1 placeholders).
+    constexpr u16 kMaxWeaponSkinMaterialSlots = 64;
     auto load_hud_materials = [&](const char* format) {
-        u16 index = 1;
         shared_str line_name;
         shared_str material_value;
         shared_str material_key;
-        
-        while (true)
+
+        for (u16 index = 1; index <= kMaxWeaponSkinMaterialSlots; ++index)
         {
             line_name = make_string(format, index).c_str();
             if (!pSettings->line_exist(m_sect_name.c_str(), line_name.c_str()))
-                break;
+                continue;
 
             string256 dds_path = "", shader_name = "";
             material_value = pSettings->r_string(m_sect_name.c_str(), line_name.c_str());
@@ -694,8 +695,6 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
             material_key = make_string("%s:%d%s", low_name, index, model_suffix.c_str()).c_str();
 
             GEnv.Render->emplace_texture_replacements(material_key, dds_path);
-
-            index++;
         }
     };
 
