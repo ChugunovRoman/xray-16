@@ -2271,6 +2271,8 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
     if (!bUseAttachmentSystem)
         return;
 
+    m_addon_section_offsets.clear();
+
     const shared_str slot_sect = SectionForAddonSlotLines(section);
     pcstr S = slot_sect.c_str();
 
@@ -2360,8 +2362,22 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
                 for (u32 i = 0; i < count; ++i)
                 {
                     _GetItem(list_str.c_str(), i, item_name, ',');
-                    if (item_name[0])
-                        slot->allowed_addons.push_back(item_name);
+                    if (!item_name[0])
+                        continue;
+
+                    slot->allowed_addons.push_back(item_name);
+
+                    string256 offset_prop;
+                    xr_sprintf(offset_prop, "%s_offset", item_name);
+
+                    pcstr offset_src = nullptr;
+                    if (pSettings->line_exist(section, offset_prop))
+                        offset_src = section;
+                    else if (slot_sect != section && pSettings->line_exist(slot_sect.c_str(), offset_prop))
+                        offset_src = slot_sect.c_str();
+
+                    if (offset_src)
+                        m_addon_section_offsets[item_name] = pSettings->r_fvector3(offset_src, offset_prop);
                 }
             }
         }
@@ -4573,6 +4589,12 @@ void CWeapon::addAddon(AddAddonData data)
     m_zoom_params.m_bUseDynamicZoom = new_addon->scope_dynamic_zoom;
 
     new_addon->addon_item_pos_world = world_trans;
+
+    if (auto offset_it = m_addon_section_offsets.find(new_addon->addon_item_name); offset_it != m_addon_section_offsets.end())
+    {
+        new_addon->addon_item_pos.translate_over(offset_it->second);
+        new_addon->addon_item_pos_world.translate_over(offset_it->second);
+    }
 
     m_addon_items[addon_id] = new_addon;
 

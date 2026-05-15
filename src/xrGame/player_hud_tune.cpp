@@ -16,6 +16,7 @@
 #include "debug_renderer.h"
 #include "xrEngine/GameFont.h"
 #include "player_hud_tune.h"
+#include "Weapon.h"
 #include "CustomDetector.h"
 #include "EliteDetector.h"
 #include "Actor.h"
@@ -31,6 +32,80 @@ CHudTuner::CHudTuner()
 {
     ImGui::SetCurrentContext(Device.GetImGuiContext());
     paused = fsimilar(Device.time_factor(), EPS);
+}
+
+void CHudTuner::CollectAddonWeaponTunes(pcstr section)
+{
+    if (!section || !section[0] || !pSettings->section_exist(section))
+        return;
+
+    const u32 line_count = pSettings->line_count(section);
+    for (u32 i = 0; i < line_count; ++i)
+    {
+        pcstr name = nullptr;
+        pcstr val = nullptr;
+        if (!pSettings->r_line(section, i, &name, &val) || !name || !val)
+            continue;
+
+        if (!strncmp(name, "addon_", 6))
+            continue;
+
+        const size_t name_len = xr_strlen(name);
+        if (name_len > 6 && !xr_strcmp(name + name_len - 6, "_scale"))
+        {
+            shared_str addon_section = make_string("%.*s", (int)(name_len - 6), name).c_str();
+
+            AddonWeaponTune& entry = m_addon_weapon_tunes[addon_section];
+            entry.scale = (float)atof(val);
+            entry.has_scale = true;
+            continue;
+        }
+
+        if (name_len > 7 && !xr_strcmp(name + name_len - 7, "_offset"))
+        {
+            shared_str addon_section = make_string("%.*s", (int)(name_len - 7), name).c_str();
+
+            AddonWeaponTune& entry = m_addon_weapon_tunes[addon_section];
+            sscanf(val, "%f,%f,%f", &entry.offset.x, &entry.offset.y, &entry.offset.z);
+            entry.has_offset = true;
+        }
+    }
+}
+
+void CHudTuner::ApplyAddonWeaponTunes(CWeapon* wpn)
+{
+    if (!wpn || !wpn->bUseAttachmentSystem)
+        return;
+
+    for (auto& [addon_sect, tune] : m_addon_weapon_tunes)
+    {
+        if (tune.has_offset)
+            wpn->m_addon_section_offsets[addon_sect] = tune.offset;
+    }
+
+    for (auto& [addon_id, item] : wpn->m_addon_items)
+    {
+        auto tune_it = m_addon_weapon_tunes.find(item->addon_item_name);
+        if (tune_it == m_addon_weapon_tunes.end())
+            continue;
+
+        if (tune_it->second.has_scale)
+            item->scale = tune_it->second.scale;
+
+        if (item->parent_id != 0)
+            continue;
+
+        addon_slot* slot = wpn->m_addon_slots[item->slot];
+        if (!slot)
+            continue;
+
+        item->addon_item_pos = slot->transform;
+        if (auto offset_it = wpn->m_addon_section_offsets.find(item->addon_item_name); offset_it != wpn->m_addon_section_offsets.end())
+            item->addon_item_pos.translate_over(offset_it->second);
+
+        item->addon_item_pos_world = item->addon_item_pos;
+        item->addon_item_pos_world.mulB_43(wpn->bAttachmentSystemOffsetOnWorldModel);
+    }
 }
 
 bool CHudTuner::is_active() const
@@ -52,6 +127,16 @@ void CHudTuner::ResetToDefaultValues()
         {
             wpn->LoadAltHudAim();
             wpn->LoadAddonSlosts(wpn->m_section_id.c_str());
+
+            m_addon_weapon_tunes.clear();
+            if (pSettings->line_exist(wpn->m_section_id.c_str(), "parent_section"))
+            {
+                shared_str parent = pSettings->r_string(wpn->m_section_id.c_str(), "parent_section");
+                if (parent.size() && pSettings->section_exist(parent.c_str()))
+                    CollectAddonWeaponTunes(parent.c_str());
+            }
+            CollectAddonWeaponTunes(wpn->m_section_id.c_str());
+
             for (auto& [slot_key, slot] : wpn->m_addon_slots)
             {
                 if (slot == nullptr)
@@ -110,6 +195,7 @@ void CHudTuner::ResetToDefaultValues()
         curr_measures.m_shell_point_offset = zero;
         m_artefact_map_p = zero;
         m_artefact_map_r = zero;
+        m_addon_weapon_tunes.clear();
     }
 
     collide::rq_result& RQ = HUD().GetCurrentRayQuery();
@@ -120,6 +206,18 @@ void CHudTuner::ResetToDefaultValues()
         if (target_wpn)
         {
             world_addons_pos = target_wpn->bAttachmentSystemOffsetOnWorldModel.c;
+
+            if (m_addon_weapon_tunes.empty())
+            {
+                if (pSettings->line_exist(target_wpn->m_section_id.c_str(), "parent_section"))
+                {
+                    shared_str parent = pSettings->r_string(target_wpn->m_section_id.c_str(), "parent_section");
+                    if (parent.size() && pSettings->section_exist(parent.c_str()))
+                        CollectAddonWeaponTunes(parent.c_str());
+                }
+                CollectAddonWeaponTunes(target_wpn->m_section_id.c_str());
+            }
+
             for (auto& [slot_key, slot] : target_wpn->m_addon_slots)
             {
                 if (slot == nullptr)
@@ -217,6 +315,7 @@ void CHudTuner::UpdateValues()
                         item->addon_item_pos_world.mulB_43(wpn->bAttachmentSystemOffsetOnWorldModel);
                     }
             }
+            ApplyAddonWeaponTunes(wpn);
             wpn->calc_aim_addon_offset();
         }
 
@@ -355,6 +454,38 @@ void CHudTuner::on_tool_frame()
                         }
                     }
                 }
+
+                if (m_addon_weapon_tunes.size() > 0)
+                {
+                    if (ImGui::CollapsingHeader("Addon scale / offset", ImGuiTreeNodeFlags_DefaultOpen))
+                    {
+                        for (auto& [addon_sect, tune] : m_addon_weapon_tunes)
+                        {
+                            if (tune.has_scale)
+                            {
+                                ImGui::DragFloat(
+                                    make_string("%s_scale", addon_sect.c_str()).c_str(),
+                                    &tune.scale,
+                                    _delta_pos,
+                                    0.01f,
+                                    10.f,
+                                    "%.4f"
+                                );
+                            }
+                            if (tune.has_offset)
+                            {
+                                ImGui::DragFloat3(
+                                    make_string("%s_offset", addon_sect.c_str()).c_str(),
+                                    (float*)&tune.offset,
+                                    _delta_pos,
+                                    0.f,
+                                    0.f,
+                                    "%.7f"
+                                );
+                            }
+                        }
+                    }
+                }
             }
 
             UpdateValues();
@@ -433,6 +564,26 @@ void CHudTuner::on_tool_frame()
                                     xr_sprintf(selectable, "addon_%s_offset_world = %f,%f,%f,%f,%f,%f\n", slot_id.c_str(), data.pos_w.x, data.pos_w.y, data.pos_w.z, data.rot_w.x, data.rot_w.y, data.rot_w.z);
                                     ImGui::LogText("%s", selectable);
                                 }
+                            }
+                        }
+                        for (auto& [addon_sect, tune] : m_addon_weapon_tunes)
+                        {
+                            if (tune.has_scale)
+                            {
+                                xr_sprintf(selectable, "%s_scale = %f\n", addon_sect.c_str(), tune.scale);
+                                ImGui::LogText("%s", selectable);
+                            }
+                            if (tune.has_offset)
+                            {
+                                xr_sprintf(
+                                    selectable,
+                                    "%s_offset = %f,%f,%f\n",
+                                    addon_sect.c_str(),
+                                    tune.offset.x,
+                                    tune.offset.y,
+                                    tune.offset.z
+                                );
+                                ImGui::LogText("%s", selectable);
                             }
                         }
                     }

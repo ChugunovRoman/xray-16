@@ -2,6 +2,8 @@
 
 #include "player_hud.h"
 
+class CWeapon;
+
 class CHudTuner final : public xray::editor::ide_tool
 {
 public:
@@ -14,6 +16,8 @@ private:
 
     void ResetToDefaultValues();
     void UpdateValues();
+    void CollectAddonWeaponTunes(pcstr section);
+    void ApplyAddonWeaponTunes(CWeapon* wpn);
 
     enum hud_adj_mode_keys
     {
@@ -119,4 +123,14 @@ private:
     };
     
     xr_map<shared_str, SlotTransform> m_weapon_slots;
+
+    struct AddonWeaponTune
+    {
+        Fvector3 offset{};
+        float scale{1.f};
+        bool has_offset{false};
+        bool has_scale{false};
+    };
+
+    xr_map<shared_str, AddonWeaponTune> m_addon_weapon_tunes;
 };

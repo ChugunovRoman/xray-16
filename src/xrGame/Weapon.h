@@ -124,6 +124,7 @@ public:
 
     xr_map<u32, addon_item*> m_addon_items;
     mutable xr_map<shared_str, addon_slot*> m_addon_slots;
+    xr_map<shared_str, Fvector3> m_addon_section_offsets;
 
     void addAddon(AddAddonData data);
     void addAddon(PIItem item);
