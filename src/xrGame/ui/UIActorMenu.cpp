@@ -573,10 +573,21 @@ void CUIActorMenu::QuickUnloadWeapons()
         if (!m_wpn->bUseAttachmentSystem && g_quick_unload_silencers && m_wpn->SilencerAttachable() && m_wpn->IsSilencerAttached())
             DetachAddon(m_wpn->GetSilencerName().c_str(), item);
 
-        if (m_wpn->bUseAttachmentSystem && m_wpn->m_addon_items.size() > 0)
-            for (auto [addon_id, addon]: m_wpn->m_addon_items)
+        if (m_wpn->bUseAttachmentSystem && !m_wpn->m_addon_items.empty())
+        {
+            xr_vector<u32> addons_to_detach;
+            addons_to_detach.reserve(m_wpn->m_addon_items.size());
+            for (auto& [addon_id, addon] : m_wpn->m_addon_items)
+            {
                 if (m_wpn->IsAddonCanBeDetached(addon))
+                    addons_to_detach.push_back(addon_id);
+            }
+            for (u32 addon_id : addons_to_detach)
+            {
+                if (m_wpn->m_addon_items.find(addon_id) != m_wpn->m_addon_items.end())
                     DetachAddon(addon_id, item);
+            }
+        }
 
         any_wpn_was_unloaded = true;
     }

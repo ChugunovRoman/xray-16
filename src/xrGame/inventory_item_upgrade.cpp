@@ -278,9 +278,20 @@ void CInventoryItem::pre_install_upgrade()
         if (!weapon->bUseAttachmentSystem && weapon->GrenadeLauncherAttachable() && weapon->IsGrenadeLauncherAttached())
             weapon->Detach(weapon->GetGrenadeLauncherName().c_str(), true);
 
-        if (weapon->bUseAttachmentSystem)
+        if (weapon->bUseAttachmentSystem && !weapon->m_addon_items.empty())
+        {
+            xr_vector<u32> addons_to_detach;
+            addons_to_detach.reserve(weapon->m_addon_items.size());
             for (auto& [id, addon] : weapon->m_addon_items)
+            {
                 if (weapon->IsAddonCanBeDetached(addon))
+                    addons_to_detach.push_back(id);
+            }
+            for (u32 id : addons_to_detach)
+            {
+                if (weapon->m_addon_items.find(id) != weapon->m_addon_items.end())
                     weapon->Detach(id);
+            }
+        }
     }
 }
