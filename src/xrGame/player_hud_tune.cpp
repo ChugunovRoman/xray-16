@@ -99,12 +99,16 @@ void CHudTuner::ApplyAddonWeaponTunes(CWeapon* wpn)
         if (!slot)
             continue;
 
-        item->addon_item_pos = slot->transform;
+        Fmatrix parent_pos_hud = Fidentity;
         if (auto offset_it = wpn->m_addon_section_offsets.find(item->addon_item_name); offset_it != wpn->m_addon_section_offsets.end())
-            item->addon_item_pos.translate_over(offset_it->second);
+            parent_pos_hud.c.add(offset_it->second);
+        item->addon_item_pos.mul(parent_pos_hud, slot->transform);
 
-        item->addon_item_pos_world = item->addon_item_pos;
-        item->addon_item_pos_world.mulB_43(wpn->bAttachmentSystemOffsetOnWorldModel);
+        Fmatrix parent_pos_world = Fidentity;
+        if (auto offset_it = wpn->m_addon_section_offsets.find(item->addon_item_name); offset_it != wpn->m_addon_section_offsets.end())
+            parent_pos_world.c.add(offset_it->second);
+        item->addon_item_pos_world.mul(parent_pos_world, wpn->bAttachmentSystemOffsetOnWorldModel);
+        item->addon_item_pos_world.mulB_43(slot->transform_world);
     }
 }
 
@@ -261,9 +265,15 @@ void CHudTuner::UpdateValues()
             for (auto& [addon_id, item] : target_wpn->m_addon_items)
                 if (item->parent_id == 0)
                 {
-                    item->addon_item_pos = target_wpn->m_addon_slots[item->slot]->transform_world;
-                    item->addon_item_pos_world = item->addon_item_pos;
-                    item->addon_item_pos_world.mulB_43(target_wpn->bAttachmentSystemOffsetOnWorldModel);
+                    addon_slot* slot = target_wpn->m_addon_slots[item->slot];
+                    if (!slot)
+                        continue;
+
+                    Fmatrix parent_pos_world = Fidentity;
+                    if (auto offset_it = target_wpn->m_addon_section_offsets.find(item->addon_item_name); offset_it != target_wpn->m_addon_section_offsets.end())
+                        parent_pos_world.c.add(offset_it->second);
+                    item->addon_item_pos_world.mul(parent_pos_world, target_wpn->bAttachmentSystemOffsetOnWorldModel);
+                    item->addon_item_pos_world.mulB_43(slot->transform_world);
                 }
         }
     }
@@ -310,9 +320,20 @@ void CHudTuner::UpdateValues()
                 for (auto& [addon_id, item] : wpn->m_addon_items)
                     if (item->parent_id == 0)
                     {
-                        item->addon_item_pos = wpn->m_addon_slots[item->slot]->transform;
-                        item->addon_item_pos_world = item->addon_item_pos;
-                        item->addon_item_pos_world.mulB_43(wpn->bAttachmentSystemOffsetOnWorldModel);
+                        addon_slot* slot = wpn->m_addon_slots[item->slot];
+                        if (!slot)
+                            continue;
+
+                        Fmatrix parent_pos_hud = Fidentity;
+                        if (auto offset_it = wpn->m_addon_section_offsets.find(item->addon_item_name); offset_it != wpn->m_addon_section_offsets.end())
+                            parent_pos_hud.c.add(offset_it->second);
+                        item->addon_item_pos.mul(parent_pos_hud, slot->transform);
+
+                        Fmatrix parent_pos_world = Fidentity;
+                        if (auto offset_it = wpn->m_addon_section_offsets.find(item->addon_item_name); offset_it != wpn->m_addon_section_offsets.end())
+                            parent_pos_world.c.add(offset_it->second);
+                        item->addon_item_pos_world.mul(parent_pos_world, wpn->bAttachmentSystemOffsetOnWorldModel);
+                        item->addon_item_pos_world.mulB_43(slot->transform_world);
                     }
             }
             ApplyAddonWeaponTunes(wpn);

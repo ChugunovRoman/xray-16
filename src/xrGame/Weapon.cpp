@@ -4521,12 +4521,23 @@ void CWeapon::addAddon(AddAddonData data)
 
     new_addon->addon_aim_z_rot = new_addon->inherited_aim_z_rot;
 
-    Fmatrix trans, world_trans;
+    const auto offset_it = m_addon_section_offsets.find(new_addon->addon_item_name);
+    const bool has_section_offset = offset_it != m_addon_section_offsets.end();
 
-    trans.mul(parent_item->addon_item_pos, slot_transform);
-    // World model: use *_world slot offsets and a single attachment_system_offset_on_world_model at the weapon root.
+    Fmatrix parent_pos_hud = parent_item->addon_item_pos;
+    if (has_section_offset)
+        parent_pos_hud.c.add(offset_it->second);
+
+    Fmatrix trans, world_trans;
+    trans.mul(parent_pos_hud, slot_transform);
+
     if (new_addon->parent_id == 0)
-        world_trans.mul(parent_item->addon_item_pos, bAttachmentSystemOffsetOnWorldModel);
+    {
+        Fmatrix parent_pos_world = parent_item->addon_item_pos;
+        if (has_section_offset)
+            parent_pos_world.c.add(offset_it->second);
+        world_trans.mul(parent_pos_world, bAttachmentSystemOffsetOnWorldModel);
+    }
     else
         world_trans.set(parent_item->addon_item_pos_world);
     world_trans.mulB_43(target_slot.transform_world);
@@ -4589,12 +4600,6 @@ void CWeapon::addAddon(AddAddonData data)
     m_zoom_params.m_bUseDynamicZoom = new_addon->scope_dynamic_zoom;
 
     new_addon->addon_item_pos_world = world_trans;
-
-    if (auto offset_it = m_addon_section_offsets.find(new_addon->addon_item_name); offset_it != m_addon_section_offsets.end())
-    {
-        new_addon->addon_item_pos.translate_over(offset_it->second);
-        new_addon->addon_item_pos_world.translate_over(offset_it->second);
-    }
 
     m_addon_items[addon_id] = new_addon;
 
