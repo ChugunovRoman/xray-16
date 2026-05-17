@@ -4804,6 +4804,9 @@ void CWeapon::addAddon(AddAddonData data)
         addon_slot slot;
         slot.slot_name = slot_name;
         slot.transform.mul(new_addon->addon_item_pos, bone_transform);
+        // Nested slots have no separate world offset config, so use the model bone transform
+        // as the world-space local attachment transform for child addons.
+        slot.transform_world.set(bone_transform);
 
         if (pSettings->line_exist(new_addon->addon_item_name.c_str(), slot_name.c_str()))
             slot.slot_type = pSettings->r_u16(new_addon->addon_item_name.c_str(), slot_name.c_str());
