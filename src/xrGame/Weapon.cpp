@@ -4333,6 +4333,254 @@ shared_str CWeapon::GetInstalledTacGripType()
 
     return type;
 }
+
+static void LoadAddonConflictGroupList(pcstr list, xr_vector<shared_str>& out)
+{
+    if (!list || !list[0])
+        return;
+
+    string256 item_name;
+    const u32 count = _GetItemCount(list, ',');
+    for (u32 i = 0; i < count; ++i)
+    {
+        _GetItem(list, i, item_name, ',');
+        xr_strlwr(item_name);
+        if (item_name[0])
+            out.push_back(item_name);
+    }
+
+}
+
+static bool AddonConflictGroupsIntersect(const xr_vector<shared_str>& lhs, const xr_vector<shared_str>& rhs)
+{
+    for (const shared_str& l : lhs)
+        for (const shared_str& r : rhs)
+            if (l == r)
+                return true;
+
+    return false;
+}
+
+CWeapon::SAddonConflictDesc CWeapon::GetAddonConflictDesc(const shared_str& addon_section, const shared_str& slot_name,
+    const shared_str& override_section) const
+{
+    SAddonConflictDesc desc;
+    desc.conflict_mode = "detach";
+
+    auto read_weapon_override = [&](pcstr section, pcstr suffix, xr_vector<shared_str>& out) -> bool {
+        if (!section || !section[0] || !pSettings->section_exist(section))
+            return false;
+
+        // 1) slot-based override has priority: <slot_name>_<suffix>
+        if (slot_name.size())
+        {
+            const shared_str slot_line_name = make_string("%s_%s", slot_name.c_str(), suffix).c_str();
+            if (pSettings->line_exist(section, slot_line_name.c_str()))
+            {
+                LoadAddonConflictGroupList(pSettings->r_string(section, slot_line_name.c_str()), out);
+                return true;
+            }
+        }
+
+        // 2) addon-section override: <addon_section>_<suffix>
+        const shared_str addon_line_name = make_string("%s_%s", addon_section.c_str(), suffix).c_str();
+        if (!pSettings->line_exist(section, addon_line_name.c_str()))
+            return false;
+
+        LoadAddonConflictGroupList(pSettings->r_string(section, addon_line_name.c_str()), out);
+        return true;
+    };
+
+    auto read_weapon_mode = [&](pcstr section) -> bool {
+        if (!section || !section[0] || !pSettings->section_exist(section))
+            return false;
+
+        // 1) slot-based override has priority: <slot_name>_conflict_mode
+        if (slot_name.size())
+        {
+            const shared_str slot_line_name = make_string("%s_conflict_mode", slot_name.c_str()).c_str();
+            if (pSettings->line_exist(section, slot_line_name.c_str()))
+            {
+                desc.conflict_mode = pSettings->r_string(section, slot_line_name.c_str());
+                return true;
+            }
+        }
+
+        // 2) addon-section override: <addon_section>_conflict_mode
+        const shared_str addon_line_name = make_string("%s_conflict_mode", addon_section.c_str()).c_str();
+        if (!pSettings->line_exist(section, addon_line_name.c_str()))
+            return false;
+
+        desc.conflict_mode = pSettings->r_string(section, addon_line_name.c_str());
+        return true;
+    };
+
+    shared_str parent_section;
+    if (pSettings->line_exist(m_section_id.c_str(), "parent_section"))
+        parent_section = pSettings->r_string(m_section_id.c_str(), "parent_section");
+
+    bool has_occupy_override = false;
+    bool has_conflict_override = false;
+    bool has_mode_override = false;
+
+    if (override_section.size())
+    {
+        has_occupy_override = read_weapon_override(override_section.c_str(), "occupy_groups", desc.occupy_groups);
+        has_conflict_override = read_weapon_override(override_section.c_str(), "conflict_groups", desc.conflict_groups);
+        has_mode_override = read_weapon_mode(override_section.c_str());
+    }
+
+    if (!has_occupy_override)
+        has_occupy_override = read_weapon_override(m_section_id.c_str(), "occupy_groups", desc.occupy_groups);
+    if (!has_conflict_override)
+        has_conflict_override = read_weapon_override(m_section_id.c_str(), "conflict_groups", desc.conflict_groups);
+    if (!has_mode_override)
+        has_mode_override = read_weapon_mode(m_section_id.c_str());
+
+    if (parent_section.size())
+    {
+        if (!has_occupy_override)
+            has_occupy_override = read_weapon_override(parent_section.c_str(), "occupy_groups", desc.occupy_groups);
+        if (!has_conflict_override)
+            has_conflict_override = read_weapon_override(parent_section.c_str(), "conflict_groups", desc.conflict_groups);
+        if (!has_mode_override)
+            has_mode_override = read_weapon_mode(parent_section.c_str());
+    }
+
+    if (pSettings->section_exist(addon_section.c_str()))
+    {
+        if (!has_occupy_override && pSettings->line_exist(addon_section.c_str(), "attachment_occupy_groups"))
+            LoadAddonConflictGroupList(pSettings->r_string(addon_section.c_str(), "attachment_occupy_groups"), desc.occupy_groups);
+
+        if (!has_conflict_override && pSettings->line_exist(addon_section.c_str(), "attachment_conflict_groups"))
+            LoadAddonConflictGroupList(pSettings->r_string(addon_section.c_str(), "attachment_conflict_groups"), desc.conflict_groups);
+
+        if (!has_mode_override && pSettings->line_exist(addon_section.c_str(), "attachment_conflict_mode"))
+            desc.conflict_mode = pSettings->r_string(addon_section.c_str(), "attachment_conflict_mode");
+    }
+
+    return desc;
+}
+
+bool CWeapon::HasAddonConflict(const SAddonConflictDesc& lhs, const SAddonConflictDesc& rhs) const
+{
+    return AddonConflictGroupsIntersect(lhs.conflict_groups, rhs.occupy_groups) ||
+        AddonConflictGroupsIntersect(lhs.occupy_groups, rhs.conflict_groups);
+}
+
+bool CWeapon::IsAddonConflictDenyMode(const SAddonConflictDesc& lhs, const SAddonConflictDesc& rhs) const
+{
+    return !xr_strcmp(lhs.conflict_mode.c_str(), "deny") || !xr_strcmp(rhs.conflict_mode.c_str(), "deny");
+}
+
+void CWeapon::RemoveChildAddonConflicts(xr_vector<u32>& addon_ids) const
+{
+    auto has_ancestor_in_list = [&](u32 addon_id) -> bool {
+        auto addon_it = m_addon_items.find(addon_id);
+        if (addon_it == m_addon_items.end() || !addon_it->second)
+            return false;
+
+        u32 parent_id = addon_it->second->parent_id;
+        while (parent_id != 0)
+        {
+            if (std::find(addon_ids.begin(), addon_ids.end(), parent_id) != addon_ids.end())
+                return true;
+
+            auto parent_it = m_addon_items.find(parent_id);
+            if (parent_it == m_addon_items.end() || !parent_it->second)
+                break;
+
+            parent_id = parent_it->second->parent_id;
+        }
+
+        return false;
+    };
+
+    addon_ids.erase(std::remove_if(addon_ids.begin(), addon_ids.end(), has_ancestor_in_list), addon_ids.end());
+}
+
+bool CWeapon::ResolveAddonConflictsBeforeAttach(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id)
+{
+    shared_str parent_override_section;
+    if (parent_id != 0)
+    {
+        auto parent_it = m_addon_items.find(parent_id);
+        if (parent_it != m_addon_items.end() && parent_it->second)
+            parent_override_section = parent_it->second->addon_item_name;
+    }
+
+    SAddonConflictDesc new_desc = GetAddonConflictDesc(addon_section, slot_name, parent_override_section);
+
+    if (new_desc.occupy_groups.empty() && new_desc.conflict_groups.empty())
+        return true;
+
+    xr_vector<u32> conflict_ids;
+    bool deny = false;
+
+    for (const auto& [installed_id, installed] : m_addon_items)
+    {
+        if (!installed || installed_id == parent_id)
+            continue;
+
+        shared_str installed_override_section;
+        if (installed->parent_id != 0)
+        {
+            auto installed_parent_it = m_addon_items.find(installed->parent_id);
+            if (installed_parent_it != m_addon_items.end() && installed_parent_it->second)
+                installed_override_section = installed_parent_it->second->addon_item_name;
+        }
+
+        SAddonConflictDesc installed_desc = GetAddonConflictDesc(installed->addon_item_name, installed->slot, installed_override_section);
+
+        if (installed_desc.occupy_groups.empty() && installed_desc.conflict_groups.empty())
+            continue;
+
+        if (!HasAddonConflict(new_desc, installed_desc))
+            continue;
+
+        conflict_ids.push_back(installed_id);
+        deny = deny || IsAddonConflictDenyMode(new_desc, installed_desc);
+    }
+
+    RemoveChildAddonConflicts(conflict_ids);
+
+    if (conflict_ids.empty())
+        return true;
+
+    if (deny)
+    {
+        Msg("[AttachmentSystem] Cannot attach [%s] to [%s]: conflict mode is deny", addon_section.c_str(), m_section_id.c_str());
+        return false;
+    }
+
+    for (u32 conflict_id : conflict_ids)
+    {
+        auto conflict_it = m_addon_items.find(conflict_id);
+        if (conflict_it == m_addon_items.end() || !conflict_it->second)
+            continue;
+
+        if (!IsAddonCanBeDetached(conflict_it->second))
+        {
+            Msg("[AttachmentSystem] Cannot attach [%s] to [%s]: conflicting addon [%s] is not detachable",
+                addon_section.c_str(), m_section_id.c_str(), conflict_it->second->addon_item_name.c_str());
+            return false;
+        }
+    }
+
+    for (u32 conflict_id : conflict_ids)
+    {
+        auto conflict_it = m_addon_items.find(conflict_id);
+        if (conflict_it == m_addon_items.end() || !conflict_it->second)
+            continue;
+
+        Msg("[AttachmentSystem] Detach conflicting addon [%s] before attaching [%s]",
+            conflict_it->second->addon_item_name.c_str(), addon_section.c_str());
+        Detach(conflict_id);
+    }
+
+    return true;
+}
+
 bool CWeapon::HasAddonByName(shared_str name)
 {
     for (auto [addon_id, addon]: m_addon_items)
@@ -5186,4 +5434,3 @@ void CWeapon::HotReloadModelsAfterSystemIni()
     InvalidateDynamicInventoryIcons();
     weapon_inv_icon::RenderDynamicInvIconsImmediateForItem(this);
 }
-

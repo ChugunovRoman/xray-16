@@ -1274,6 +1274,9 @@ bool CWeaponMagazined::AttachAttachment(PIItem pIItem)
         if (pIItem->parent_addon == 0 && !IsAddonAllowedInSlot(pIItem->attach_to_slot_name, pIItem->m_section_id))
             return false;
 
+        if (!ResolveAddonConflictsBeforeAttach(pIItem->m_section_id, pIItem->attach_to_slot_name, pIItem->parent_addon))
+            return false;
+
         addAddon(pIItem);
 
         if (pScope->IsSilencer())

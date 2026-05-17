@@ -393,6 +393,7 @@ public:
     void LoadAddonSlosts(LPCSTR section);
     shared_str GetInstalledMagType();
     shared_str GetInstalledTacGripType();
+    bool ResolveAddonConflictsBeforeAttach(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id = 0);
 
     void SetScopeOffset(Ivector2 pos) { m_iScopeX = pos.x; m_iScopeY = pos.y; }
     void SetSilencerOffset(Ivector2 pos) { m_iSilencerX = pos.x; m_iSilencerY = pos.y; }
@@ -557,6 +558,19 @@ public:
     Fvector vLoadedFirePoint2;
 
 private:
+    struct SAddonConflictDesc
+    {
+        xr_vector<shared_str> occupy_groups;
+        xr_vector<shared_str> conflict_groups;
+        shared_str conflict_mode;
+    };
+
+    SAddonConflictDesc GetAddonConflictDesc(const shared_str& addon_section, const shared_str& slot_name = "",
+        const shared_str& override_section = "") const;
+    bool HasAddonConflict(const SAddonConflictDesc& lhs, const SAddonConflictDesc& rhs) const;
+    bool IsAddonConflictDenyMode(const SAddonConflictDesc& lhs, const SAddonConflictDesc& rhs) const;
+    void RemoveChildAddonConflicts(xr_vector<u32>& addon_ids) const;
+
     // Ключ и операции для пресетов HUD FOV в прицеливании (per-weapon + per-scope)
     shared_str GetScopeHudFovKey() const;
     bool GetScopeHudFovPreset(float& outValue) const;
