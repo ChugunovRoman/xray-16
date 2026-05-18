@@ -45,6 +45,7 @@ ENGINE_API extern float g_fov;
 extern float g_aim_z_offset_coff;
 extern float g_second_aim_z_offset_coff;
 extern float g_laser_dot_cam_lerp;
+extern float g_laser_dot_min_hit_range;
 extern int g_3d_scope_type;
 // Персональные пресеты HUD FOV в прицеливании для сочетаний "оружие+прицел"
 // Ключ формата "<weapon_section>;<scope_section>"
@@ -5378,6 +5379,12 @@ void CWeapon::UpdateLaserDots()
         );
 
         if (!has_pick)
+        {
+            item->laser_glow->set_active(false);
+            continue;
+        }
+
+        if (ray_query.range <= g_laser_dot_min_hit_range)
         {
             item->laser_glow->set_active(false);
             continue;

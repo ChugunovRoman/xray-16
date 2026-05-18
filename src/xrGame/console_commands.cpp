@@ -117,6 +117,7 @@ extern int ps_r_disable_character_lod_render;
 float g_aim_z_offset_coff = -0.04f;
 float g_second_aim_z_offset_coff = -0.09f;
 float g_laser_dot_cam_lerp = 0.25f;
+float g_laser_dot_min_hit_range = 0.2f;
 extern BOOL debug_show_second_wpn_model;
 extern BOOL debug_show_thrid_wpn_model;
 extern BOOL debug_show_attachments_slots;
@@ -3167,6 +3168,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Float, "g_aim_z_offset_coff", &g_aim_z_offset_coff, -1.f, 1.f);
     CMD4(CCC_Float, "g_second_aim_z_offset_coff", &g_second_aim_z_offset_coff, -1.f, 1.f);
     CMD4(CCC_Float, "g_laser_dot_cam_lerp", &g_laser_dot_cam_lerp, 0.f, 1.f);
+    CMD4(CCC_Float, "g_laser_dot_min_hit_range", &g_laser_dot_min_hit_range, 0.f, 1.f);
 
 #ifdef DEBUG
     // extern BOOL g_use_new_ballistics;
