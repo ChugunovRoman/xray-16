@@ -323,6 +323,10 @@ void CTorch::UpdateCL()
     if (H_Parent())
     {
         CActor* actor = smart_cast<CActor*>(H_Parent());
+        const bool first_person_torch = actor && actor->HUDview();
+
+        glow_render->set_active(m_switched_on && !first_person_torch);
+
         if (actor)
             smart_cast<IKinematics*>(H_Parent()->Visual())->CalculateBones_Invalidate();
 

@@ -81,6 +81,7 @@ bool CProjector::net_Spawn(CSE_Abstract* DC)
     glow_render->set_texture(pUserData->r_string("projector_definition", "glow_texture"));
     glow_render->set_color(clr);
     glow_render->set_radius(pUserData->r_float("projector_definition", "glow_radius"));
+    glow_render->set_world_glow(true);
 
     setVisible(TRUE);
     setEnabled(TRUE);

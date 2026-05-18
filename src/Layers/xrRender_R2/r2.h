@@ -27,6 +27,7 @@ namespace xray::render::RENDER_NAMESPACE
 {
 class CRenderTarget;
 class dxRender_Visual;
+class CGlowManager;
 
 // TODO: move it into separate file.
 struct i_render_phase
@@ -168,6 +169,26 @@ struct render_sun_old : public i_render_phase
     u32 context_id{ R_dsgraph_structure::INVALID_CONTEXT_ID };
 };
 //----
+
+class CGlowManager
+{
+public:
+    CGlowManager() = default;
+    ~CGlowManager() = default;
+
+    void Destroy();
+    void Register(IRender_Glow* glow);
+    void Unregister(IRender_Glow* glow);
+    void Render();
+    bool Empty() const { return m_active.empty(); }
+
+private:
+    void Initialize();
+
+private:
+    xr_vector<IRender_Glow*> m_active;
+    ref_geom m_hGeom;
+};
 
 // definition
 class CRender final : public D3DXRenderBase
@@ -319,6 +340,7 @@ public:
     CDetailManager* Details;
     CModelPool* Models;
     CWallmarksEngine* Wallmarks;
+    CGlowManager* Glows{};
 
     CRenderTarget* Target; // Render-target
 

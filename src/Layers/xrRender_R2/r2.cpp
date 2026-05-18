@@ -4,13 +4,17 @@
 
 #include "xrEngine/device.h"
 #include "xrEngine/IGame_Persistent.h"
+#include "xrEngine/IGame_Level.h"
 #include "xrEngine/GameFont.h"
 #include "xrEngine/PerformanceAlert.hpp"
 
 #include "Layers/xrRender/FBasicVisual.h"
+#include "Layers/xrRender/FVF.h"
 #include "Layers/xrRender/SkeletonCustom.h"
 #include "Layers/xrRender/dxWallMarkArray.h"
 #include "Layers/xrRender/dxUIShader.h"
+
+#include <algorithm>
 
 #if defined(USE_DX11)
 #include "Layers/xrRenderDX11/3DFluid/dx113DFluidManager.h"
@@ -21,22 +25,330 @@ namespace xray::render::RENDER_NAMESPACE
 CRender RImplementation;
 
 //////////////////////////////////////////////////////////////////////////
-class CGlow : public IRender_Glow
+class CGlow final : public IRender_Glow
 {
 public:
-    bool bActive;
+    CGlow()
+    {
+        color.set(1.f, 1.f, 1.f, 1.f);
+    }
+    ~CGlow() override { set_active(false); }
+
+    void set_active(bool b) override
+    {
+        if (m_active == b)
+            return;
+
+        m_active = b;
+        if (RImplementation.Glows)
+        {
+            if (m_active)
+                RImplementation.Glows->Register(this);
+            else
+                RImplementation.Glows->Unregister(this);
+        }
+    }
+
+    bool get_active() override { return m_active; }
+    void set_ignore_occlusion(bool b) override { m_ignore_occlusion = b; }
+    bool get_ignore_occlusion() const override { return m_ignore_occlusion; }
+    void set_render_in_second_viewport(bool b) override { m_render_in_second_viewport = b; }
+    bool get_render_in_second_viewport() const override { return m_render_in_second_viewport; }
+    void set_world_glow(bool b) override { m_world_glow = b; }
+    bool get_world_glow() const override { return m_world_glow; }
+
+    void set_position(const Fvector& P) override
+    {
+        position.set(P);
+    }
+
+    void set_direction(const Fvector& D) override
+    {
+        direction.normalize_safe(D);
+    }
+
+    void set_radius(float R) override
+    {
+        radius = R;
+    }
+
+    void set_texture(LPCSTR name) override
+    {
+        if (!name || !name[0])
+        {
+            shader.destroy();
+            return;
+        }
+
+        // Reuse the existing flare additive shader for world-space glow sprites.
+        shader.create("effects\\flare", name);
+    }
+
+    void set_color(const Fcolor& C) override
+    {
+        color.set(C);
+    }
+
+    void set_color(float r, float g, float b) override
+    {
+        color.set(r, g, b, 1.f);
+    }
 
 public:
-    CGlow() : bActive(false) {}
-    virtual void set_active(bool b) { bActive = b; }
-    virtual bool get_active() { return bActive; }
-    virtual void set_position(const Fvector& P) {}
-    virtual void set_direction(const Fvector& D) {}
-    virtual void set_radius(float R) {}
-    virtual void set_texture(LPCSTR name) {}
-    virtual void set_color(const Fcolor& C) {}
-    virtual void set_color(float r, float g, float b) {}
+    bool m_active{ false };
+    bool m_ignore_occlusion{ false };
+    bool m_render_in_second_viewport{ true };
+    bool m_world_glow{ false };
+    Fvector position{ 0.f, 0.f, 0.f };
+    Fvector direction{ 0.f, 0.f, 0.f };
+    float radius{ 0.1f };
+    Fcolor color;
+    ref_shader shader;
 };
+
+namespace
+{
+IC void FillGlowSprite(FVF::LIT*& pv, const Fvector& pos, float radius, u32 color)
+{
+    const Fvector& top = Device.vCameraTop;
+    const Fvector& right = Device.vCameraRight;
+
+    Fvector vr, vt;
+    vr.mul(right, radius);
+    vt.mul(top, radius);
+
+    Fvector a, b, c, d;
+    a.sub(vt, vr);
+    b.add(vt, vr);
+    c.invert(a);
+    d.invert(b);
+
+    pv->set(d.x + pos.x, d.y + pos.y, d.z + pos.z, color, 0.f, 1.f);
+    ++pv;
+    pv->set(a.x + pos.x, a.y + pos.y, a.z + pos.z, color, 0.f, 0.f);
+    ++pv;
+    pv->set(c.x + pos.x, c.y + pos.y, c.z + pos.z, color, 1.f, 1.f);
+    ++pv;
+    pv->set(b.x + pos.x, b.y + pos.y, b.z + pos.z, color, 1.f, 0.f);
+    ++pv;
+}
+
+IC bool IsGlowSampleVisible(const Fvector& camera_pos, const Fvector& sample_pos)
+{
+    if (!g_pGameLevel)
+        return true;
+
+    Fvector to_sample;
+    to_sample.sub(sample_pos, camera_pos);
+
+    const float dist_sq = to_sample.square_magnitude();
+    if (dist_sq <= EPS_S)
+        return true;
+
+    const float dist = _sqrt(dist_sq);
+    Fvector ray_dir;
+    ray_dir.div(to_sample, dist);
+
+    const float test_range = dist - 0.03f;
+    if (test_range <= EPS_S)
+        return true;
+
+    return !g_pGameLevel->ObjectSpace.RayTest(camera_pos, ray_dir, test_range, collide::rqtBoth, nullptr, nullptr);
+}
+} // namespace
+
+void CGlowManager::Initialize()
+{
+    if (m_hGeom)
+        return;
+
+    m_hGeom.create(FVF::F_LIT, RImplementation.Vertex.Buffer(), RImplementation.QuadIB);
+}
+
+void CGlowManager::Destroy()
+{
+    m_active.clear();
+    m_hGeom.destroy();
+}
+
+void CGlowManager::Register(IRender_Glow* glow)
+{
+    if (!glow)
+        return;
+
+    if (std::find(m_active.begin(), m_active.end(), glow) == m_active.end())
+        m_active.push_back(glow);
+}
+
+void CGlowManager::Unregister(IRender_Glow* glow)
+{
+    if (!glow || m_active.empty())
+        return;
+
+    m_active.erase(std::remove(m_active.begin(), m_active.end(), glow), m_active.end());
+}
+
+void CGlowManager::Render()
+{
+    if (m_active.empty())
+        return;
+
+    Initialize();
+
+    xr_vector<CGlow*> glows;
+    glows.reserve(m_active.size());
+    for (IRender_Glow* glow_itf : m_active)
+    {
+        auto* glow = static_cast<CGlow*>(glow_itf);
+        if (!glow->m_active || !glow->shader || glow->radius <= EPS_L)
+            continue;
+        if (RImplementation.IsSecondViewportRenderPass() && !glow->m_render_in_second_viewport)
+            continue;
+
+        glows.push_back(glow);
+    }
+
+    if (glows.empty())
+        return;
+
+    std::sort(glows.begin(), glows.end(), [](const CGlow* left, const CGlow* right)
+    {
+        return left->shader < right->shader;
+    });
+
+    const Fvector camera_pos = Device.vCameraPosition;
+    const float far_plane = g_pGamePersistent ? g_pGamePersistent->Environment().CurrentEnv.far_plane : 300.f;
+    const float inv_far_plane_sq = far_plane > EPS_L ? 1.f / _sqr(far_plane) : 0.f;
+
+    u32 v_offset = 0;
+    const u32 vb_stride = m_hGeom.stride();
+    FVF::LIT* const start = static_cast<FVF::LIT*>(RImplementation.Vertex.Lock(glows.size() * 4, vb_stride, v_offset));
+    FVF::LIT* cursor = start;
+
+    xr_vector<u32> vertex_offsets;
+    vertex_offsets.reserve(glows.size());
+    xr_vector<ref_shader> shaders;
+    shaders.reserve(glows.size());
+    u32 draw_count = 0;
+
+    for (CGlow* glow : glows)
+    {
+        Fvector to_camera;
+        to_camera.sub(camera_pos, glow->position);
+        const float dist_sq = to_camera.square_magnitude();
+        if (dist_sq <= EPS_S)
+            continue;
+
+        const float dist = _sqrt(dist_sq);
+        Fvector ray_dir;
+        ray_dir.div(to_camera, dist);
+
+        if (!glow->m_ignore_occlusion && g_pGameLevel && dist > 0.05f)
+        {
+            bool is_visible = true;
+
+            if (glow->m_world_glow)
+            {
+                u32 visible_samples = 0;
+
+                if (IsGlowSampleVisible(camera_pos, glow->position))
+                    ++visible_samples;
+
+                const float sample_radius = glow->radius * 0.75f;
+                if (sample_radius > EPS_S)
+                {
+                    Fvector right_offset, top_offset;
+                    right_offset.mul(Device.vCameraRight, sample_radius);
+                    top_offset.mul(Device.vCameraTop, sample_radius);
+
+                    Fvector sample_pos;
+
+                    sample_pos.add(glow->position, right_offset);
+                    if (IsGlowSampleVisible(camera_pos, sample_pos))
+                        ++visible_samples;
+
+                    sample_pos.sub(glow->position, right_offset);
+                    if (IsGlowSampleVisible(camera_pos, sample_pos))
+                        ++visible_samples;
+
+                    sample_pos.add(glow->position, top_offset);
+                    if (IsGlowSampleVisible(camera_pos, sample_pos))
+                        ++visible_samples;
+
+                    sample_pos.sub(glow->position, top_offset);
+                    if (IsGlowSampleVisible(camera_pos, sample_pos))
+                        ++visible_samples;
+                }
+
+                if (visible_samples < 3)
+                    is_visible = false;
+            }
+            else
+            {
+                const float test_range = dist - 0.05f;
+                if (test_range > EPS_S &&
+                    g_pGameLevel->ObjectSpace.RayTest(camera_pos, ray_dir, test_range, collide::rqtBoth, nullptr,
+                        nullptr))
+                {
+                    is_visible = false;
+                }
+            }
+
+            if (!is_visible)
+                continue;
+        }
+
+        float alpha_scale = glow->color.a;
+        const float distance_fade = 1.f - dist_sq * inv_far_plane_sq;
+        alpha_scale *= clampr(distance_fade, 0.f, 1.f);
+
+        if (glow->direction.square_magnitude() > EPS_S && dist_sq > EPS_S)
+        {
+            Fvector camera_to_glow;
+            camera_to_glow.invert(ray_dir);
+            alpha_scale *= clampr(camera_to_glow.dotproduct(glow->direction), 0.f, 1.f);
+        }
+
+        if (alpha_scale <= EPS_S)
+            continue;
+
+        Fcolor draw_color = glow->color;
+        draw_color.a = alpha_scale;
+        const u32 packed_color = draw_color.get();
+        Fvector draw_position;
+        draw_position.mad(
+            glow->position,
+            Device.vCameraDirection,
+            -0.001f
+        );
+
+        vertex_offsets.push_back(v_offset + draw_count * 4);
+        shaders.push_back(glow->shader);
+        FillGlowSprite(cursor, draw_position, glow->radius, packed_color);
+        ++draw_count;
+    }
+
+    const u32 vertices_count = draw_count * 4;
+    RImplementation.Vertex.Unlock(vertices_count, vb_stride);
+    if (!draw_count)
+        return;
+
+    RCache.set_xform_world(Fidentity);
+    RCache.set_CullMode(CULL_NONE);
+    RCache.set_Stencil(FALSE);
+    RCache.set_ColorWriteEnable();
+    RCache.set_Z(TRUE);
+    RCache.set_Geometry(m_hGeom);
+
+    for (u32 i = 0; i < draw_count; ++i)
+    {
+        if (!shaders[i])
+            continue;
+
+        RCache.set_Shader(shaders[i]);
+        RCache.Render(D3DPT_TRIANGLELIST, vertex_offsets[i], 0, 4, 0, 2);
+    }
+}
 
 float r_dtex_range = 50.f;
 //////////////////////////////////////////////////////////////////////////
@@ -537,6 +849,8 @@ void CRender::destroy()
 #endif
     q_sync_point.Destroy();
     HWOCC.occq_destroy();
+    if (Glows)
+        Glows->Destroy();
     xr_delete(Models);
     xr_delete(Target);
     PSLibrary.OnDestroy();
@@ -862,9 +1176,15 @@ void CRender::SetPostProcessParams(const SPPInfo& ppi)
 CRender::CRender()
     : Sectors_xrc("render")
 {
+    Glows = xr_new<CGlowManager>();
 }
 
-CRender::~CRender() {}
+CRender::~CRender()
+{
+    CGlowManager* glows = Glows;
+    Glows = nullptr;
+    xr_delete(glows);
+}
 
 void CRender::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
 {

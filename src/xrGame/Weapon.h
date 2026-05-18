@@ -8,6 +8,7 @@
 #include "hud_item_object.h"
 #include "Actor_Flags.h"
 #include "Include/xrRender/KinematicsAnimated.h"
+#include "xrEngine/Render.h"
 #include "firedeps.h"
 #include "game_cl_single.h"
 #include "first_bullet_controller.h"
@@ -66,10 +67,17 @@ public:
 	Fvector calc_aim_rot{};
 	Fvector calc_second_aim_offset{};
 	Fvector calc_second_aim_rot{};
-	IKinematics* addon_item_model;
-	IKinematics* addon_item_model_2;
-	IKinematics* addon_item_model_dot;
+    shared_str laser_glow_texture;
+    Fcolor laser_color{};
+    float laser_glow_radius{};
+    float laser_range{};
+	IKinematics* addon_item_model{};
+	IKinematics* addon_item_model_2{};
+	IKinematics* addon_item_model_dot{};
+    ref_glow laser_glow;
+    u16 dot_bone_id{BI_NONE};
 	BOOL is_dot_pos_initialized{false};
+	BOOL has_laser_dot{false};
 	BOOL has_second_aim_offset{false};
 	BOOL has_aim_offset{false};
 	BOOL is_latest_zoomed{false};
@@ -268,6 +276,7 @@ private:
     AddonIter FindNextAddon(AddonIter start, bool forward);
     void UpdateZoomedAddon(AddonIter current, AddonIter found);
     void SwitchZoomableAddon(bool direction);
+    void UpdateLaserDots();
 
     void SwitchToNextZoomableAddon() { SwitchZoomableAddon(true); }
     void SwitchToPrevZoomableAddon() { SwitchZoomableAddon(false); }

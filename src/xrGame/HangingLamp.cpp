@@ -109,14 +109,6 @@ bool CHangingLamp::net_Spawn(CSE_Abstract* DC)
     light_render->set_volumetric_intensity(lamp->m_volumetric_intensity);
     light_render->set_volumetric_distance(lamp->m_volumetric_distance);
 
-    if (lamp->glow_texture.size())
-    {
-        glow_render = GEnv.Render->glow_create();
-        glow_render->set_texture(lamp->glow_texture.c_str());
-        glow_render->set_color(clr);
-        glow_render->set_radius(lamp->glow_radius);
-    }
-
     if (lamp->flags.is(CSE_ALifeObjectHangingLamp::flPointAmbient))
     {
         ambient_power = lamp->m_ambient_power;
@@ -230,8 +222,6 @@ void CHangingLamp::UpdateCL()
         }
         light_render->set_rotation(xf.k, xf.i);
         light_render->set_position(xf.c);
-        if (glow_render)
-            glow_render->set_position(xf.c);
 
         // update T&R from ambient bone
         if (light_ambient)
@@ -280,11 +270,6 @@ void CHangingLamp::TurnOn()
     Fvector p = XFORM().c;
     light_render->set_position(p);
     light_render->set_active(true);
-    if (glow_render)
-    {
-        glow_render->set_position(p);
-        glow_render->set_active(true);
-    }
     if (light_ambient)
     {
         light_ambient->set_position(p);
@@ -308,8 +293,6 @@ void CHangingLamp::TurnOff()
         return;
 
     light_render->set_active(false);
-    if (glow_render)
-        glow_render->set_active(false);
     if (light_ambient)
         light_ambient->set_active(false);
     if (Visual())

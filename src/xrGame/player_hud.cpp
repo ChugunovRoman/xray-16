@@ -420,18 +420,6 @@ void attachable_hud_item::render(u32 context_id, IRenderable* root)
                 // }
             }
 
-            u16 bone_id = item->addon_item_model->LL_BoneID("dot");
-            if (bone_id != BI_NONE)
-            {
-                item->is_dot_pos_initialized = true;
-
-                Fmatrix addon_item_transform = m_item_dot_transform;
-
-                addon_item_transform.mulB_43(item->addon_item_dot_t);
-
-                GEnv.Render->add_Visual(context_id, root, item->addon_item_model_dot->dcast_RenderVisual(), addon_item_transform);
-            }
-
             GEnv.Render->add_Visual(context_id, root, item->addon_item_model->dcast_RenderVisual(), item->addon_item_transform);
             
             if (item->has_bone_2 && item->addon_item_model_2 != nullptr)

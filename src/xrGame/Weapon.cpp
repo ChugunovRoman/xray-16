@@ -44,6 +44,7 @@ ENGINE_API extern float psHUD_FOV_def;
 ENGINE_API extern float g_fov;
 extern float g_aim_z_offset_coff;
 extern float g_second_aim_z_offset_coff;
+extern float g_laser_dot_cam_lerp;
 extern int g_3d_scope_type;
 // Персональные пресеты HUD FOV в прицеливании для сочетаний "оружие+прицел"
 // Ключ формата "<weapon_section>;<scope_section>"
@@ -1439,6 +1440,7 @@ void CWeapon::UpdateCL()
     ZoneScopedN("ucl_CWeapon");
     inherited::UpdateCL();
     UpdateHUDAddonsVisibility();
+    UpdateLaserDots();
     //подсветка от выстрела
     UpdateLight();
 
@@ -4823,21 +4825,39 @@ void CWeapon::addAddon(AddAddonData data)
     u16 bone_id = new_addon->addon_item_model->LL_BoneID(DOT);
     if (bone_id != BI_NONE)
     {
-        // Скрываем все кости у второй модели ЛЦУ кроме рутовой и dot
-        new_addon->addon_item_model_dot = smart_cast<IKinematics*>(GEnv.Render->model_Create(pSettings->r_string(data.item_section_id.c_str(), "visual")));
-        new_addon->addon_item_model_dot->CalculateBones_Invalidate();
-        new_addon->addon_item_model_dot->CalculateBones(TRUE);
-        for (const auto& [bone_name, bi] : *new_addon->addon_item_model_dot->LL_Bones())
-        {
-            if (bi == new_addon->addon_item_model_dot->LL_GetBoneRoot())
-                continue;
-            if (xr_strcmp(bone_name.c_str(), DOT) == 0)
-                continue;
+        new_addon->dot_bone_id = bone_id;
+        new_addon->has_laser_dot = true;
+        new_addon->laser_glow_texture = READ_IF_EXISTS(
+            pSettings,
+            r_string,
+            data.item_section_id.c_str(),
+            "laser_glow_texture",
+            "glow\\glow_torch_r2"
+        );
+        new_addon->laser_glow_radius = pSettings->read_if_exists<float>(
+            data.item_section_id.c_str(),
+            "laser_glow_radius",
+            0.1f
+        );
+        new_addon->laser_range = pSettings->read_if_exists<float>(
+            data.item_section_id.c_str(),
+            "laser_range",
+            20000.f
+        );
+        if (pSettings->line_exist(data.item_section_id.c_str(), "laser_color"))
+            new_addon->laser_color = pSettings->r_fcolor(data.item_section_id.c_str(), "laser_color");
+        else
+            new_addon->laser_color.set(1.f, 0.f, 0.f, 1.f);
 
-            new_addon->addon_item_model_dot->LL_SetBoneVisible(bi, FALSE, FALSE);
-        }
+        new_addon->laser_glow = GEnv.Render->glow_create();
+        new_addon->laser_glow->set_texture(new_addon->laser_glow_texture.c_str());
+        new_addon->laser_glow->set_color(new_addon->laser_color);
+        new_addon->laser_glow->set_radius(new_addon->laser_glow_radius);
+        new_addon->laser_glow->set_ignore_occlusion(true);
+        new_addon->laser_glow->set_render_in_second_viewport(false);
+        new_addon->laser_glow->set_active(false);
 
-        // У основной модели ЛЦУ скрываем только ксть dot (точку)
+        // У основной модели ЛЦУ скрываем только кость dot (точку)
         new_addon->addon_item_model->LL_SetBoneVisible(bone_id, FALSE, FALSE);
         m_zoom_params.m_bZoomSecondEnabled = true;
         new_addon->has_second_aim_offset = true;
@@ -5274,8 +5294,105 @@ void destroy_addon_item_models(addon_item* a)
         GEnv.Render->model_Delete(v);
         a->addon_item_model_dot = nullptr;
     }
+    a->laser_glow.destroy();
 }
 } // namespace
+
+void CWeapon::UpdateLaserDots()
+{
+    if (m_addon_items.empty())
+        return;
+
+    CActor* actor = ParentIsActor() ? smart_cast<CActor*>(H_Parent()) : nullptr;
+    const bool hud_mode =
+        actor &&
+        H_Parent() == Level().CurrentEntity() &&
+        actor->inventory().ActiveItem() == this;
+
+    if (!hud_mode)
+    {
+        for (auto& [addon_id, item] : m_addon_items)
+        {
+            if (item && item->laser_glow)
+                item->laser_glow->set_active(false);
+        }
+        return;
+    }
+
+    attachable_hud_item* hi = HudItemData();
+    if (!hi)
+        return;
+
+    for (auto& [addon_id, item] : m_addon_items)
+    {
+        if (!item || !item->laser_glow || !item->has_laser_dot)
+            continue;
+
+        Fmatrix addon_world_transform;
+        addon_world_transform.set(hi->m_item_transform);
+
+        if (!fis_zero(item->scale))
+        {
+            Fmatrix scale_transform;
+            scale_transform.scale(Fvector().set(item->scale, item->scale, item->scale));
+            addon_world_transform.mulB_43(scale_transform);
+        }
+
+        if (item->bone_name.c_str() != nullptr)
+        {
+            const u16 parent_bone_id = hi->m_model->LL_BoneID(item->bone_name.c_str());
+            if (parent_bone_id != BI_NONE)
+                addon_world_transform.mulB_43(hi->m_model->LL_GetTransform(parent_bone_id));
+        }
+
+        addon_world_transform.mulB_43(item->addon_item_pos);
+
+        Fmatrix dot_world_transform;
+        dot_world_transform.mul_43(addon_world_transform, item->addon_item_model->LL_GetTransform(item->dot_bone_id));
+
+        Fvector laser_origin;
+        laser_origin.set(dot_world_transform.c);
+
+        Fvector emitter_direction;
+        emitter_direction.set(addon_world_transform.k);
+        if (emitter_direction.square_magnitude() <= EPS_S)
+            emitter_direction.set(hi->m_item_transform.k);
+        if (emitter_direction.square_magnitude() <= EPS_S)
+            emitter_direction.set(Device.vCameraDirection);
+        emitter_direction.normalize_safe();
+
+        Fvector laser_direction;
+        laser_direction.lerp(emitter_direction, Device.vCameraDirection, g_laser_dot_cam_lerp);
+        if (laser_direction.square_magnitude() <= EPS_S)
+            laser_direction.set(Device.vCameraDirection);
+        laser_direction.normalize_safe();
+
+        collide::rq_result ray_query{};
+        const bool has_pick = Level().ObjectSpace.RayPick(
+            laser_origin,
+            laser_direction,
+            item->laser_range,
+            collide::rqtBoth,
+            ray_query,
+            Level().CurrentEntity()
+        );
+
+        if (!has_pick)
+        {
+            item->laser_glow->set_active(false);
+            continue;
+        }
+
+        Fvector hit_position;
+        hit_position.mad(laser_origin, laser_direction, ray_query.range);
+
+        item->laser_glow->set_position(hit_position);
+        item->laser_glow->set_direction(laser_direction);
+        item->laser_glow->set_color(item->laser_color);
+        item->laser_glow->set_radius(item->laser_glow_radius);
+        item->laser_glow->set_active(true);
+    }
+}
 
 void CWeapon::HotReloadModelsAfterSystemIni()
 {

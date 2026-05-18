@@ -79,6 +79,12 @@ class ENGINE_API IRender_Glow : public xr_resource
 public:
     virtual void set_active(bool) = 0;
     virtual bool get_active() = 0;
+    virtual void set_ignore_occlusion(bool) = 0;
+    virtual bool get_ignore_occlusion() const = 0;
+    virtual void set_render_in_second_viewport(bool) = 0;
+    virtual bool get_render_in_second_viewport() const = 0;
+    virtual void set_world_glow(bool) = 0;
+    virtual bool get_world_glow() const = 0;
     virtual void set_position(const Fvector& P) = 0;
     virtual void set_direction(const Fvector& P) = 0;
     virtual void set_radius(float R) = 0;
