@@ -4095,10 +4095,27 @@ bool CWeapon::DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool fo
     addon_slot wpn_last_free_slot;
     addon_slot free_slot;
 
+    auto addon_allowed_in_slot = [&](const addon_slot& slot) -> bool
+    {
+        if (slot.parent == 0)
+            return wpn->IsAddonAllowedInSlot(slot.slot_name, pScope->m_section_id);
+
+        if (slot.allowed_addons.empty())
+            return true;
+
+        for (const shared_str& allowed_addon : slot.allowed_addons)
+        {
+            if (allowed_addon == pScope->m_section_id)
+                return true;
+        }
+
+        return false;
+    };
+
     auto slot_type_matches = [&](const addon_slot& slot) -> bool {
         if (slot.slot_type != pScope->m_slot_type)
             return false;
-        if (slot.parent == 0 && !wpn->IsAddonAllowedInSlot(slot.slot_name, pScope->m_section_id))
+        if (!addon_allowed_in_slot(slot))
             return false;
         return true;
     };
@@ -4112,11 +4129,11 @@ bool CWeapon::DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool fo
             wpn_1_slot_busy_but_compatible = slot;
         if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_2") == 0 && slot_type_matches(slot))
             wpn_2_slot = slot;
-        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_3") && slot_type_matches(slot))
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_3") == 0 && slot_type_matches(slot))
             wpn_3_slot = slot;
-        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_4") && slot_type_matches(slot))
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_4") == 0 && slot_type_matches(slot))
             wpn_4_slot = slot;
-        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_5") && slot_type_matches(slot))
+        if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && xr_strcmp(slot.slot_name.c_str(), "slot_5") == 0 && slot_type_matches(slot))
             wpn_5_slot = slot;
         if (slot.parent == 0 && slot.busy_by.c_str() == nullptr && slot_type_matches(slot))
             wpn_last_free_slot = slot;
@@ -4620,6 +4637,7 @@ xr_vector<addon_slot> CWeapon::getAvaliableSlots() const
             item.transform = slot.second.transform;
             item.parent = addon_id;
             item.slot_type = slot.second.slot_type;
+            item.allowed_addons = slot.second.allowed_addons;
 
             slots.push_back(item);
         }
