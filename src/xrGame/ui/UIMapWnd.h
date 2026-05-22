@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include "xrUICore/Windows/UIWindow.h"
 #include "xrUICore/Callbacks/UIWndCallback.h"
 
@@ -21,6 +23,15 @@ class CUIXml;
 class UIHint;
 class CUIPropertiesBox;
 
+enum class EPdaMapLayer : u8
+{
+    Surface = 0,
+    Underground,
+    Count
+};
+
+constexpr size_t PDA_MAP_LAYER_COUNT = static_cast<size_t>(EPdaMapLayer::Count);
+
 using GAME_MAPS = xr_map<shared_str, CUICustomMap*>;
 
 class CUIMapWnd final : public CUIWindow, public CUIWndCallback
@@ -30,13 +41,18 @@ class CUIMapWnd final : public CUIWindow, public CUIWndCallback
 private:
     bool m_view_actor;
     Fvector2 m_prev_actor_pos;
+    shared_str m_last_actor_level_name;
+    bool m_force_viewport_reset;
+    bool m_level_changed_since_last_show;
 
 private:
     float m_map_move_step;
 
     float m_currentZoom;
+    std::array<CUIGlobalMap*, PDA_MAP_LAYER_COUNT> m_GlobalMaps{};
     CUIGlobalMap* m_GlobalMap;
-    GAME_MAPS m_GameMaps;
+    std::array<GAME_MAPS, PDA_MAP_LAYER_COUNT> m_GameMaps;
+    EPdaMapLayer m_activeLayer;
 
     CUIFrameWindow* m_UIMainFrame;
     bool m_scroll_mode;
@@ -68,9 +84,12 @@ private:
     };
     CUI3tButton* m_btn_nav[max_btn_nav]{};
     CUIStatic* m_btn_nav_parent;
+    CUI3tButton* m_btn_layer_surface;
+    CUI3tButton* m_btn_layer_underground;
     u32 m_nav_timing;
 
     void UpdateNav();
+    void UpdateLayerSwitcherState();
 
     void OnBtnLegend_Push(CUIWindow*, void*);
     void OnBtnUp_Push(CUIWindow*, void*);
@@ -83,13 +102,25 @@ private:
     void OnBtnZoomLess_Push(CUIWindow*, void*);
     void OnBtnDown_Push(CUIWindow*, void*);
     void OnBtnZoomReset_Push(CUIWindow*, void*);
+    void OnBtnLayerSurface_Push(CUIWindow*, void*);
+    void OnBtnLayerUnderground_Push(CUIWindow*, void*);
 
 private:
     void OnScrollV(CUIWindow*, void*);
     void OnScrollH(CUIWindow*, void*);
 
-    void OnToolNextMapClicked(CUIWindow*, void*);
-    void OnToolPrevMapClicked(CUIWindow*, void*);
+    void init_xml_layer_switcher(CUIXml& xml, pcstr start_from, bool critical);
+    GAME_MAPS& GetGameMaps(EPdaMapLayer layer) { return m_GameMaps[static_cast<size_t>(layer)]; }
+    const GAME_MAPS& GetGameMaps(EPdaMapLayer layer) const { return m_GameMaps[static_cast<size_t>(layer)]; }
+    CUIGlobalMap* GetGlobalMap(EPdaMapLayer layer) const { return m_GlobalMaps[static_cast<size_t>(layer)]; }
+    EPdaMapLayer ResolveLayerForGlobalMap(const CUIGlobalMap* global_map) const;
+    CUICustomMap* FindLevelMap(const shared_str& map_name, EPdaMapLayer* layer = nullptr) const;
+    bool SetActiveLayer(EPdaMapLayer layer, bool preserveViewport = true);
+    void SyncActiveLayerVisibility(bool status);
+    void UpdateActiveMapLayout();
+    void RefreshLevelMapRects();
+    bool CheckForActorLevelChange();
+    void ResetMapStateForLevelChange();
 
     void ResetActionPlanner();
 
@@ -164,9 +195,12 @@ public:
     void AddMapToRender(CUICustomMap*);
     void RemoveMapToRender(CUICustomMap*);
     CUIGlobalMap* GlobalMap() { return m_GlobalMap; }
-    const GAME_MAPS& GameMaps() { return m_GameMaps; }
-    CUICustomMap* GetMapByIdx(u16 idx);
-    u16 GetIdxByName(const shared_str& map_name);
+    const GAME_MAPS& GameMaps() { return GetGameMaps(m_activeLayer); }
+    const GAME_MAPS& GetMapsForLayer(EPdaMapLayer layer) const { return GetGameMaps(layer); }
+    CUIGlobalMap* GetGlobalMapForLayer(EPdaMapLayer layer) const { return GetGlobalMap(layer); }
+    CUICustomMap* GetLevelMap(const shared_str& map_name, EPdaMapLayer* layer = nullptr) const { return FindLevelMap(map_name, layer); }
+    EPdaMapLayer ActiveLayer() const { return m_activeLayer; }
+    bool ActivateLayer(EPdaMapLayer layer, bool preserveViewport = true) { return SetActiveLayer(layer, preserveViewport); }
     void UpdateScroll();
     shared_str cName() const { return "ui_map_wnd"; }
 

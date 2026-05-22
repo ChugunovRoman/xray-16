@@ -951,6 +951,8 @@ target_sources(xrGame PRIVATE
     weapons_textures_addons_position.h
     cam_anm_tool.cpp
     cam_anm_tool.h
+    pda_map_editor.cpp
+    pda_map_editor.h
     player_name_modifyer.cpp
     player_name_modifyer.h
     pose_extrapolation.cpp

@@ -5,6 +5,7 @@
 #include "map_spot.h"
 #include "UIMap.h"
 #include "UIMapWnd.h"
+#include "GamePersistent.h"
 #include "xrEngine/xr_input.h" //remove me !!!
 #include "xrCore/_fbox2.h"
 
@@ -102,6 +103,50 @@ void rotation_(float x, float y, const float angle, float& x_, float& y_, float 
     x_ = x * _sc + y * _sn;
     y_ = y * _sc - x * _sn;
     x_ *= kx;
+}
+
+enum class EMapOrthogonalRotation
+{
+    None,
+    Deg90,
+    DegMinus90,
+    Deg180,
+    Other
+};
+
+EMapOrthogonalRotation get_map_rotation_type(float degrees)
+{
+    if (fsimilar(degrees, 0.0f, 0.1f))
+        return EMapOrthogonalRotation::None;
+    if (fsimilar(degrees, 90.0f, 0.1f))
+        return EMapOrthogonalRotation::Deg90;
+    if (fsimilar(degrees, -90.0f, 0.1f))
+        return EMapOrthogonalRotation::DegMinus90;
+    if (fsimilar(_abs(degrees), 180.0f, 0.1f))
+        return EMapOrthogonalRotation::Deg180;
+    return EMapOrthogonalRotation::Other;
+}
+
+Frect calc_rotated_rect_bounds(const Frect& rect, float angle)
+{
+    if (fis_zero(angle, EPS_L))
+        return rect;
+
+    Fvector2 center;
+    rect.getcenter(center);
+
+    const float width = rect.width();
+    const float height = rect.height();
+    const float cosA = _abs(_cos(angle));
+    const float sinA = _abs(_sin(angle));
+
+    const float rotatedWidth = width * cosA + height * sinA;
+    const float rotatedHeight = width * sinA + height * cosA;
+
+    Frect result;
+    result.set(center.x - rotatedWidth * 0.5f, center.y - rotatedHeight * 0.5f, center.x + rotatedWidth * 0.5f,
+        center.y + rotatedHeight * 0.5f);
+    return result;
 }
 
 Fvector2 CUICustomMap::ConvertLocalToReal(const Fvector2& src, Frect const& bound_rect)
@@ -265,7 +310,7 @@ bool CUIGlobalMap::OnMouseAction(float x, float y, EUIMessages mouse_action)
     {
         if (MapWnd())
         {
-            MapWnd()->Hint(MapName());
+            MapWnd()->Hint("global_map");
             return true;
         }
     }
@@ -279,7 +324,7 @@ CUIGlobalMap::CUIGlobalMap(CUIMapWnd* pMapWnd)
     Show(false);
 }
 
-void CUIGlobalMap::Initialize() { Init_internal("global_map", *pGameIni, "global_map", "hud" DELIMITER "default"); }
+void CUIGlobalMap::Initialize(pcstr section_name) { Init_internal(section_name, *pGameIni, section_name, "hud" DELIMITER "default"); }
 void CUIGlobalMap::Init_internal(const shared_str& name, const CInifile& pLtx, const shared_str& sect_name, LPCSTR sh_name)
 {
     inherited::Init_internal(name, pLtx, sect_name, sh_name);
@@ -380,14 +425,167 @@ float CUIGlobalMap::CalcOpenRect(const Fvector2& center_point, Frect& map_desire
 CUILevelMap::CUILevelMap(CUIMapWnd* p)
 {
     m_mapWnd = p;
+    m_pdaMapHeadingDegrees = 0.0f;
+    m_pdaMapTextureOffset.set(0.0f, 0.0f);
+    m_pdaMapTextureScale.set(1.0f, 1.0f);
+    m_currentSubMapIdx = u8(-1);
+    m_UnrotatedWndRect.set(0.0f, 0.0f, 0.0f, 0.0f);
+    m_RenderOffset.set(0.0f, 0.0f);
     Show(false);
+}
+
+CUIGlobalMap* CUILevelMap::GlobalMap() const { return smart_cast<CUIGlobalMap*>(GetParent()); }
+
+void CUILevelMap::SetGlobalRect(const Frect& rect) { m_GlobalRect = rect; }
+
+void CUILevelMap::ApplyPdaMapHeading()
+{
+    const float headingRadians = deg2rad(m_pdaMapHeadingDegrees);
+    const bool hasHeading = !fis_zero(headingRadians, EPS_L);
+    const float renderWidth =
+        !fis_zero(m_UnrotatedWndRect.width(), EPS_L) ? m_UnrotatedWndRect.width() * m_pdaMapTextureScale.x : GetWndSize().x * m_pdaMapTextureScale.x;
+    const float renderHeight = !fis_zero(m_UnrotatedWndRect.height(), EPS_L) ? m_UnrotatedWndRect.height() * m_pdaMapTextureScale.y :
+                                                                               GetWndSize().y * m_pdaMapTextureScale.y;
+
+    EnableHeading(hasHeading);
+    SetConstHeading(true);
+    SetHeading(headingRadians);
+
+    const auto rotationType = get_map_rotation_type(m_pdaMapHeadingDegrees);
+    switch (rotationType)
+    {
+    case EMapOrthogonalRotation::Deg90:
+        SetHeadingPivot(Fvector2().set(0.0f, 0.0f), Fvector2().set(0.0f, renderWidth), true);
+        break;
+    case EMapOrthogonalRotation::DegMinus90:
+        SetHeadingPivot(Fvector2().set(0.0f, 0.0f), Fvector2().set(renderHeight, 0.0f), true);
+        break;
+    case EMapOrthogonalRotation::Deg180:
+        SetHeadingPivot(Fvector2().set(0.0f, 0.0f), Fvector2().set(renderWidth, renderHeight), true);
+        break;
+    default:
+    {
+        Fvector2 pivot;
+        const float pivotWidth = renderWidth;
+        const float pivotHeight = renderHeight;
+        pivot.set(pivotWidth * 0.5f, pivotHeight * 0.5f);
+        SetHeadingPivot(pivot, Fvector2().set(0.0f, 0.0f), false);
+        break;
+    }
+    }
+}
+
+void CUILevelMap::SetPdaMapHeadingDegrees(float degrees)
+{
+    m_pdaMapHeadingDegrees = degrees;
+    ApplyPdaMapHeading();
+}
+
+void CUILevelMap::SetPdaMapTextureOffset(const Fvector2& offset) { m_pdaMapTextureOffset = offset; }
+
+void CUILevelMap::SetPdaMapTextureScale(const Fvector2& scale)
+{
+    m_pdaMapTextureScale.x = _max(scale.x, 0.01f);
+    m_pdaMapTextureScale.y = _max(scale.y, 0.01f);
+    ApplyPdaMapHeading();
+}
+
+void CUILevelMap::UpdateSubLevelMapTexture()
+{
+    const auto resetToBaseTexture = [this]()
+    {
+        if (m_currentSubMapIdx != u8(-1))
+        {
+            m_currentSubMapIdx = u8(-1);
+            InitTextureEx(m_texture.c_str(), m_shader_name.c_str());
+        }
+    };
+
+    if (MapName() != Level().name())
+    {
+        resetToBaseTexture();
+        return;
+    }
+
+    if (!g_pGameLevel || !g_pGameLevel->pLevel || !g_pGameLevel->pLevel->section_exist("sub_level_map"))
+    {
+        resetToBaseTexture();
+        return;
+    }
+
+    const auto sector = GamePersistent().GetLastSectorId();
+    string64 sectorKey;
+    xr_sprintf(sectorKey, "%zd", sector);
+
+    if (sector == static_cast<IRender_Sector::sector_id_t>(-1))
+    {
+        resetToBaseTexture();
+        return;
+    }
+
+    if (!g_pGameLevel->pLevel->line_exist("sub_level_map", sectorKey))
+    {
+        resetToBaseTexture();
+        return;
+    }
+
+    const u8 mapIdx = g_pGameLevel->pLevel->r_u8("sub_level_map", sectorKey);
+    if (m_currentSubMapIdx == mapIdx)
+        return;
+
+    m_currentSubMapIdx = mapIdx;
+
+    string_path subTexture;
+    if (mapIdx == u8(-1))
+        xr_sprintf(subTexture, "%s", m_texture.c_str());
+    else
+        xr_sprintf(subTexture, "%s#%d", m_texture.c_str(), m_currentSubMapIdx);
+
+    InitTextureEx(subTexture, m_shader_name.c_str());
+}
+
+Fvector2 CUILevelMap::ConvertRealToLocal(const Fvector2& src, bool for_drawing)
+{
+    const auto rotationType = get_map_rotation_type(m_pdaMapHeadingDegrees);
+    if (rotationType == EMapOrthogonalRotation::Other)
+    {
+        Fvector2 result = inherited::ConvertRealToLocal(src, for_drawing);
+        result.add(m_RenderOffset);
+        return result;
+    }
+
+    const Frect& boundRect = BoundRect();
+    const float width = !fis_zero(m_UnrotatedWndRect.width(), EPS_L) ? m_UnrotatedWndRect.width() : GetWndSize().x;
+    const float height = !fis_zero(m_UnrotatedWndRect.height(), EPS_L) ? m_UnrotatedWndRect.height() : GetWndSize().y;
+    const float zoomX = !fis_zero(boundRect.width(), EPS_L) ? width / boundRect.width() : 0.0f;
+    const float zoomY = !fis_zero(boundRect.height(), EPS_L) ? height / boundRect.height() : 0.0f;
+
+    Fvector2 local;
+    local.x = (src.x - boundRect.lt.x) * zoomX;
+    local.y = (boundRect.height() - (src.y - boundRect.lt.y)) * zoomY;
+
+    const float drawKx = for_drawing ? UI().get_current_kx() : 1.0f;
+
+    switch (rotationType)
+    {
+    case EMapOrthogonalRotation::None: return local;
+    case EMapOrthogonalRotation::Deg90: return Fvector2().set(local.y * drawKx, width - local.x);
+    case EMapOrthogonalRotation::DegMinus90: return Fvector2().set((height - local.y) * drawKx, local.x);
+    case EMapOrthogonalRotation::Deg180: return Fvector2().set((width - local.x) * drawKx, height - local.y);
+    default:
+        break;
+    }
+
+    return local;
 }
 
 void CUILevelMap::Draw()
 {
-    if (MapWnd())
+    CUIGlobalMap* globalMap = GlobalMap();
+    if (globalMap)
     {
-        float gmz = MapWnd()->GlobalMap()->GetCurrentZoom().x;
+        float gmz = globalMap->GetCurrentZoom().x;
+        const bool keepUndergroundSpotsVisible = MapWnd() && MapWnd()->ActiveLayer() == EPdaMapLayer::Underground;
         for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
         {
             CMapSpot* sp = smart_cast<CMapSpot*>((*it));
@@ -430,7 +628,12 @@ void CUILevelMap::Draw()
                 }
             }
             else if (sp->m_scale_bounds.x > 0.0f)
-                sp->SetVisible(sp->m_scale_bounds.x < gmz);
+            {
+                if (keepUndergroundSpotsVisible)
+                    sp->SetVisible(true);
+                else
+                    sp->SetVisible(sp->m_scale_bounds.x < gmz);
+            }
         }
     }
     inherited::Draw();
@@ -444,6 +647,19 @@ void CUILevelMap::Init_internal(const shared_str& name, const CInifile& pLtx, co
     tmp.x *= UI().get_current_kx();
     tmp.z *= UI().get_current_kx();
     m_GlobalRect.set(tmp.x, tmp.y, tmp.z, tmp.w);
+
+    m_pdaMapHeadingDegrees = pGameIni->line_exist(MapName(), "pda_map_heading") ? pGameIni->r_float(MapName(), "pda_map_heading") :
+                                                                                     0.0f;
+    m_pdaMapTextureOffset =
+        pGameIni->line_exist(MapName(), "pda_map_texture_offset") ? pGameIni->r_fvector2(MapName(), "pda_map_texture_offset") :
+                                                                    Fvector2().set(0.0f, 0.0f);
+    m_pdaMapTextureOffset.x *= UI().get_current_kx();
+    m_pdaMapTextureScale =
+        pGameIni->line_exist(MapName(), "pda_map_texture_scale") ? pGameIni->r_fvector2(MapName(), "pda_map_texture_scale") :
+                                                                   Fvector2().set(1.0f, 1.0f);
+    m_pdaMapTextureScale.x = _max(m_pdaMapTextureScale.x, 0.01f);
+    m_pdaMapTextureScale.y = _max(m_pdaMapTextureScale.y, 0.01f);
+    ApplyPdaMapHeading();
 
 #ifdef DEBUG
     float kw = m_GlobalRect.width() / BoundRect().width();
@@ -482,10 +698,13 @@ void CUILevelMap::UpdateSpots()
 Frect CUILevelMap::CalcWndRectOnGlobal()
 {
     Frect res;
-    CUIGlobalMap* globalMap = MapWnd()->GlobalMap();
+    CUIGlobalMap* globalMap = GlobalMap();
+    if (!globalMap)
+        return res;
 
     res.lt = globalMap->ConvertRealToLocal(GlobalRect().lt, false);
     res.rb = globalMap->ConvertRealToLocal(GlobalRect().rb, false);
+    res = calc_rotated_rect_bounds(res, GetHeading());
     res.add(globalMap->GetWndPos().x, globalMap->GetWndPos().y);
 
     return res;
@@ -494,7 +713,12 @@ Frect CUILevelMap::CalcWndRectOnGlobal()
 void CUILevelMap::Show(bool status) { inherited::Show(status); }
 void CUILevelMap::Update()
 {
-    CUIGlobalMap* w = MapWnd()->GlobalMap();
+    CUIGlobalMap* w = GlobalMap();
+    if (!w)
+        return;
+
+    UpdateSubLevelMapTexture();
+
     Frect rect;
     Fvector2 tmp;
 
@@ -502,8 +726,36 @@ void CUILevelMap::Update()
     rect.lt = tmp;
     tmp = w->ConvertRealToLocal(GlobalRect().rb, false);
     rect.rb = tmp;
+    m_UnrotatedWndRect = rect;
+    const auto rotationType = get_map_rotation_type(m_pdaMapHeadingDegrees);
+    switch (rotationType)
+    {
+    case EMapOrthogonalRotation::Deg90:
+        rect.set(m_UnrotatedWndRect.x1, m_UnrotatedWndRect.y1, m_UnrotatedWndRect.x1 + m_UnrotatedWndRect.height(),
+            m_UnrotatedWndRect.y1 + m_UnrotatedWndRect.width());
+        m_RenderOffset.set(0.0f, m_UnrotatedWndRect.width());
+        break;
+    case EMapOrthogonalRotation::DegMinus90:
+        rect.set(m_UnrotatedWndRect.x1, m_UnrotatedWndRect.y1, m_UnrotatedWndRect.x1 + m_UnrotatedWndRect.height(),
+            m_UnrotatedWndRect.y1 + m_UnrotatedWndRect.width());
+        m_RenderOffset.set(m_UnrotatedWndRect.height(), 0.0f);
+        break;
+    case EMapOrthogonalRotation::Deg180:
+        rect = m_UnrotatedWndRect;
+        m_RenderOffset.set(m_UnrotatedWndRect.width(), m_UnrotatedWndRect.height());
+        break;
+    case EMapOrthogonalRotation::None:
+        rect = m_UnrotatedWndRect;
+        m_RenderOffset.set(0.0f, 0.0f);
+        break;
+    case EMapOrthogonalRotation::Other:
+        rect = calc_rotated_rect_bounds(m_UnrotatedWndRect, GetHeading());
+        m_RenderOffset.set(m_UnrotatedWndRect.x1 - rect.x1, m_UnrotatedWndRect.y1 - rect.y1);
+        break;
+    }
 
     SetWndRect(rect);
+    ApplyPdaMapHeading();
 
     inherited::Update();
 
@@ -512,7 +764,7 @@ void CUILevelMap::Update()
         VERIFY(m_dwFocusReceiveTime >= 0);
         if (Device.dwTimeGlobal > (m_dwFocusReceiveTime + 500 * Device.time_factor()))
         {
-            if (fsimilar(MapWnd()->GlobalMap()->GetCurrentZoom().x, MapWnd()->GlobalMap()->GetMinZoom(), EPS_L))
+            if (fsimilar(w->GetCurrentZoom().x, w->GetMinZoom(), EPS_L))
                 MapWnd()->ShowHintStr(this, MapName().c_str());
             else
                 MapWnd()->HideHint(this);
@@ -520,11 +772,46 @@ void CUILevelMap::Update()
     }
 }
 
+void CUILevelMap::DrawTexture()
+{
+    if (!m_bTextureEnable || !GetShader() || !GetShader()->inited())
+        return;
+
+    Fvector2 absolutePos;
+    GetAbsolutePos(absolutePos);
+    const float zoom = GlobalMap() ? GlobalMap()->GetCurrentZoom().x : 1.0f;
+    const Fvector2 scaledTextureOffset =
+        Fvector2().set(m_TextureOffset.x + m_pdaMapTextureOffset.x * zoom, m_TextureOffset.y + m_pdaMapTextureOffset.y * zoom);
+    const Fvector2 renderSize =
+        Fvector2().set(m_UnrotatedWndRect.width() * m_pdaMapTextureScale.x, m_UnrotatedWndRect.height() * m_pdaMapTextureScale.y);
+
+    const auto rotationType = get_map_rotation_type(m_pdaMapHeadingDegrees);
+    Frect renderRect;
+    if (rotationType == EMapOrthogonalRotation::Other)
+    {
+        renderRect.set(absolutePos.x + m_RenderOffset.x, absolutePos.y + m_RenderOffset.y,
+            absolutePos.x + m_RenderOffset.x + m_UnrotatedWndRect.width(), absolutePos.y + m_RenderOffset.y + m_UnrotatedWndRect.height());
+    }
+    else
+    {
+        renderRect.set(absolutePos.x, absolutePos.y, absolutePos.x + m_UnrotatedWndRect.width(), absolutePos.y + m_UnrotatedWndRect.height());
+    }
+
+    m_UIStaticItem.SetPos(renderRect.left + scaledTextureOffset.x, renderRect.top + scaledTextureOffset.y);
+    m_UIStaticItem.SetSize(renderSize);
+
+    if (Heading())
+        m_UIStaticItem.Render(GetHeading());
+    else
+        m_UIStaticItem.Render();
+}
+
 bool CUILevelMap::OnMouseAction(float x, float y, EUIMessages mouse_action)
 {
     if (inherited::OnMouseAction(x, y, mouse_action))
         return true;
-    if (MapWnd()->GlobalMap()->Locked())
+    CUIGlobalMap* globalMap = GlobalMap();
+    if (!globalMap || globalMap->Locked())
         return true;
 
     if (mouse_action == WINDOW_MOUSE_MOVE && (FALSE == pInput->iGetAsyncKeyState(MOUSE_1)))

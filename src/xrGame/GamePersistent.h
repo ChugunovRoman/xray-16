@@ -6,6 +6,7 @@
 #include "player_hud_tune.h"
 #include "weapons_textures_addons_position.h"
 #include "cam_anm_tool.h"
+#include "pda_map_editor.h"
 
 class Task;
 class CMainMenu;
@@ -47,6 +48,8 @@ private:
     const CHudTuner m_hudTuner;
     const CUITexturesAddonsPosition m_wpnTexturesPos;
     const CUICamAnmTool m_camAnmLst;
+    const CPdaMapEditor m_pdaMapEditor;
+    IRender_Sector::sector_id_t m_lastSectorId{ static_cast<IRender_Sector::sector_id_t>(-1) };
 
     void start_logo_intro();
     void update_logo_intro();
@@ -111,6 +114,7 @@ public:
     virtual void SetBaseDof(const Fvector3& dof);
     virtual void OnSectorChanged(IRender_Sector::sector_id_t sector);
     virtual void OnAssetsChanged();
+    IRender_Sector::sector_id_t GetLastSectorId() const { return m_lastSectorId; }
 
     void OnWeaponIconRenderPass() override;
     void OnWeaponIconSnapshot(IRenderable* subject, bool begin) override;

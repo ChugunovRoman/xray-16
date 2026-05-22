@@ -55,6 +55,32 @@ void CUIMapWnd::init_xml_nav(CUIXml& xml, pcstr start_from, bool critical)
         m_btn_nav[btn_zoom_reset], BUTTON_DOWN, CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnZoomReset_Push));
 }
 
+void CUIMapWnd::init_xml_layer_switcher(CUIXml& xml, pcstr, bool)
+{
+    if (!m_btn_nav_parent)
+        return;
+
+    m_btn_layer_surface = UIHelper::Create3tButton(xml, "btn_nav_parent:btn_layer_surface", m_btn_nav_parent, false);
+    m_btn_layer_underground =
+        UIHelper::Create3tButton(xml, "btn_nav_parent:btn_layer_underground", m_btn_nav_parent, false);
+
+    if (m_btn_layer_surface)
+    {
+        Register(m_btn_layer_surface);
+        AddCallback(
+            m_btn_layer_surface, BUTTON_DOWN, CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnLayerSurface_Push));
+    }
+
+    if (m_btn_layer_underground)
+    {
+        Register(m_btn_layer_underground);
+        AddCallback(m_btn_layer_underground, BUTTON_DOWN,
+            CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnLayerUnderground_Push));
+    }
+
+    UpdateLayerSwitcherState();
+}
+
 void CUIMapWnd::UpdateNav()
 {
     if (Device.dwTimeGlobal - m_nav_timing < 10)
@@ -85,6 +111,25 @@ void CUIMapWnd::UpdateNav()
     }
 }
 
+void CUIMapWnd::UpdateLayerSwitcherState()
+{
+    if (!m_btn_layer_surface && !m_btn_layer_underground)
+        return;
+
+    const bool hasUndergroundMaps = !GetGameMaps(EPdaMapLayer::Underground).empty();
+
+    if (m_btn_layer_surface)
+    {
+        m_btn_layer_surface->Show(hasUndergroundMaps);
+        m_btn_layer_surface->Enable(m_activeLayer != EPdaMapLayer::Surface);
+    }
+    if (m_btn_layer_underground)
+    {
+        m_btn_layer_underground->Show(hasUndergroundMaps);
+        m_btn_layer_underground->Enable(hasUndergroundMaps && m_activeLayer != EPdaMapLayer::Underground);
+    }
+}
+
 void CUIMapWnd::OnBtnLegend_Push(CUIWindow*, void*)
 {
     CUITaskWnd* parent_wnd = smart_cast<CUITaskWnd*>(m_pParentWnd);
@@ -102,3 +147,11 @@ void CUIMapWnd::OnBtnZoomMore_Push(CUIWindow*, void*) { ViewZoomIn(); }
 void CUIMapWnd::OnBtnActor_Push(CUIWindow*, void*) { ViewActor(); }
 void CUIMapWnd::OnBtnZoomLess_Push(CUIWindow*, void*) { ViewZoomOut(); }
 void CUIMapWnd::OnBtnZoomReset_Push(CUIWindow*, void*) { ViewGlobalMap(); }
+void CUIMapWnd::OnBtnLayerSurface_Push(CUIWindow*, void*)
+{
+    SetActiveLayer(EPdaMapLayer::Surface);
+}
+void CUIMapWnd::OnBtnLayerUnderground_Push(CUIWindow*, void*)
+{
+    SetActiveLayer(EPdaMapLayer::Underground);
+}

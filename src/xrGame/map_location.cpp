@@ -376,6 +376,24 @@ void CMapLocation::UpdateTTL()
 extern xr_vector<CLevelChanger*> g_lchangers;
 xr_vector<u32> map_point_path;
 
+namespace
+{
+void EnsureAttachedToMap(CUICustomMap* map, CUIWindow* child)
+{
+    if (!map || !child)
+        return;
+
+    CUIWindow* parent = child->GetParent();
+    if (parent == map)
+        return;
+
+    if (parent)
+        parent->DetachChild(child);
+
+    map->AttachChild(child);
+}
+} // namespace
+
 void CMapLocation::UpdateSpot(CUICustomMap* map, CMapSpot* sp)
 {
     if (map->MapName() == GetLevelName())
@@ -435,7 +453,7 @@ void CMapLocation::UpdateSpot(CUICustomMap* map, CMapSpot* sp)
                 float h_ = map->GetHeading() + h;
                 sp->SetHeading(h_);
             }
-            map->AttachChild(sp);
+            EnsureAttachedToMap(map, sp);
         }
 
         if (IsGameTypeSingle())
@@ -444,7 +462,7 @@ void CMapLocation::UpdateSpot(CUICustomMap* map, CMapSpot* sp)
             if (s)
             {
                 s->SetWndPos(sp->GetWndPos());
-                map->AttachChild(s);
+                EnsureAttachedToMap(map, s);
             }
         }
 
@@ -553,7 +571,7 @@ void CMapLocation::UpdateSpot(CUICustomMap* map, CMapSpot* sp)
 
 void CMapLocation::UpdateSpotPointer(CUICustomMap* map, CMapSpotPointer* sp)
 {
-    if (sp->GetParent())
+    if (sp->GetParent() == map)
         return; // already is child
     float heading;
     Fvector2 pointer_pos;
@@ -562,7 +580,7 @@ void CMapLocation::UpdateSpotPointer(CUICustomMap* map, CMapSpotPointer* sp)
         sp->SetWndPos(pointer_pos);
         sp->SetHeading(heading);
 
-        map->AttachChild(sp);
+        EnsureAttachedToMap(map, sp);
 
         Fvector2 tt = map->ConvertLocalToReal(m_position_on_map, map->BoundRect());
         Fvector ttt;

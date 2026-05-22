@@ -945,6 +945,8 @@ void CGamePersistent::UpdateDof()
 
 void CGamePersistent::OnSectorChanged(IRender_Sector::sector_id_t sector)
 {
+    m_lastSectorId = sector;
+
     if (CurrentGameUI())
         CurrentGameUI()->UIMainIngameWnd->OnSectorChanged(sector);
 }

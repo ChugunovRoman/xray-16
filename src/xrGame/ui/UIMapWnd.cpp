@@ -25,13 +25,51 @@
 CUIMapWnd* g_map_wnd = NULL; // quick temporary solution -(
 CUIMapWnd* GetMapWnd() { return g_map_wnd; }
 
+namespace
+{
+EPdaMapLayer g_lastPdaMapLayer = EPdaMapLayer::Surface;
+
+constexpr size_t layer_index(EPdaMapLayer layer) { return static_cast<size_t>(layer); }
+
+pcstr get_global_map_section(EPdaMapLayer layer)
+{
+    if (layer == EPdaMapLayer::Underground && pGameIni->section_exist("global_map_underground"))
+        return "global_map_underground";
+
+    if (layer == EPdaMapLayer::Surface && pGameIni->section_exist("global_map_surface"))
+        return "global_map_surface";
+
+    return "global_map";
+}
+
+EPdaMapLayer get_level_map_layer(pcstr map_name)
+{
+    if (!pGameIni->line_exist(map_name, "pda_map_layer"))
+        return EPdaMapLayer::Surface;
+
+    return xr_stricmp(pGameIni->r_string(map_name, "pda_map_layer"), "underground") == 0 ? EPdaMapLayer::Underground :
+                                                                                             EPdaMapLayer::Surface;
+}
+
+xr_string normalize_map_name(const shared_str& map_name)
+{
+    xr_string normalized = map_name.c_str();
+    if (!normalized.empty())
+        xr_strlwr(&normalized[0]);
+    return normalized;
+}
+} // namespace
+
 CUIMapWnd::CUIMapWnd(UIHint* hint)
     : CUIWindow("CUIMapWnd"), m_ActionPlanner(nullptr)
 {
     m_tgtMap = NULL;
     m_GlobalMap = NULL;
+    m_activeLayer = g_lastPdaMapLayer;
     m_view_actor = false;
-    m_prev_actor_pos.set(0, 0);
+    m_prev_actor_pos.set(FLT_MAX, FLT_MAX);
+    m_force_viewport_reset = false;
+    m_level_changed_since_last_show = false;
     m_currentZoom = 1.0f;
     m_map_location_hint = NULL;
     m_map_move_step = 10.0f;
@@ -44,6 +82,9 @@ CUIMapWnd::CUIMapWnd(UIHint* hint)
 
     m_UIMainMapHeader = nullptr;
     m_scroll_mode = false;
+    m_btn_nav_parent = nullptr;
+    m_btn_layer_surface = nullptr;
+    m_btn_layer_underground = nullptr;
     m_nav_timing = Device.dwTimeGlobal;
     hint_wnd = hint;
     g_map_wnd = this;
@@ -53,7 +94,14 @@ CUIMapWnd::CUIMapWnd(UIHint* hint)
 CUIMapWnd::~CUIMapWnd()
 {
     delete_data(m_ActionPlanner);
-    delete_data(m_GameMaps);
+    for (auto& globalMap : m_GlobalMaps)
+    {
+        if (globalMap && m_UILevelFrame && m_UILevelFrame->IsChild(globalMap))
+            m_UILevelFrame->DetachChild(globalMap);
+        xr_delete(globalMap);
+    }
+    for (auto& maps : m_GameMaps)
+        delete_data(maps);
     delete_data(m_map_location_hint);
     /*
     #ifdef DEBUG
@@ -62,6 +110,174 @@ CUIMapWnd::~CUIMapWnd()
     #endif // DEBUG
     */
     g_map_wnd = NULL;
+}
+
+EPdaMapLayer CUIMapWnd::ResolveLayerForGlobalMap(const CUIGlobalMap* global_map) const
+{
+    for (size_t idx = 0; idx < PDA_MAP_LAYER_COUNT; ++idx)
+    {
+        if (m_GlobalMaps[idx] == global_map)
+            return static_cast<EPdaMapLayer>(idx);
+    }
+
+    return EPdaMapLayer::Surface;
+}
+
+CUICustomMap* CUIMapWnd::FindLevelMap(const shared_str& map_name, EPdaMapLayer* layer) const
+{
+    const xr_string normalized = normalize_map_name(map_name);
+    const shared_str normalizedName = normalized.c_str();
+
+    for (size_t idx = 0; idx < PDA_MAP_LAYER_COUNT; ++idx)
+    {
+        const auto& maps = m_GameMaps[idx];
+        const auto it = maps.find(normalizedName);
+        if (it != maps.end())
+        {
+            if (layer)
+                *layer = static_cast<EPdaMapLayer>(idx);
+            return it->second;
+        }
+    }
+
+    if (layer)
+        *layer = EPdaMapLayer::Surface;
+
+    Msg("~ Level Map '%s' not registered", map_name.c_str());
+    return nullptr;
+}
+
+void CUIMapWnd::UpdateActiveMapLayout()
+{
+    if (!GlobalMap())
+        return;
+
+    const Frect activeRect = ActiveMapRect();
+    GlobalMap()->WorkingArea().set(activeRect);
+
+    for (auto it = GameMaps().begin(), itEnd = GameMaps().end(); it != itEnd; ++it)
+    {
+        it->second->WorkingArea().set(activeRect);
+    }
+}
+
+void CUIMapWnd::RefreshLevelMapRects()
+{
+    UpdateActiveMapLayout();
+
+    if (GlobalMap())
+        GlobalMap()->Update();
+
+    for (auto it = GameMaps().begin(), itEnd = GameMaps().end(); it != itEnd; ++it)
+        it->second->Update();
+}
+
+void CUIMapWnd::ResetMapStateForLevelChange()
+{
+    m_tgtMap = nullptr;
+    m_tgtCenter.set(0.0f, 0.0f);
+    m_prev_actor_pos.set(FLT_MAX, FLT_MAX);
+    m_view_actor = true;
+    m_force_viewport_reset = true;
+    m_level_changed_since_last_show = true;
+    HideCurHint();
+    if (m_ActionPlanner)
+        ResetActionPlanner();
+}
+
+bool CUIMapWnd::CheckForActorLevelChange()
+{
+    const shared_str currentLevel = Level().name();
+    cpcstr previousLevel = m_last_actor_level_name.c_str();
+    cpcstr currentLevelStr = currentLevel.c_str();
+    const bool changed = !previousLevel || !previousLevel[0] || xr_stricmp(previousLevel, currentLevelStr) != 0;
+
+    if (!changed)
+        return false;
+
+    m_last_actor_level_name = currentLevel;
+    ResetMapStateForLevelChange();
+    return true;
+}
+
+void CUIMapWnd::SyncActiveLayerVisibility(bool status)
+{
+    for (size_t idx = 0; idx < PDA_MAP_LAYER_COUNT; ++idx)
+    {
+        CUIGlobalMap* globalMap = m_GlobalMaps[idx];
+        if (!globalMap)
+            continue;
+
+        const bool isActive = status && idx == layer_index(m_activeLayer);
+        if (isActive)
+        {
+            if (!m_UILevelFrame->IsChild(globalMap))
+                m_UILevelFrame->AttachChild(globalMap);
+            globalMap->Show(true);
+        }
+        else
+        {
+            if (m_UILevelFrame->IsChild(globalMap))
+                m_UILevelFrame->DetachChild(globalMap);
+            globalMap->Show(false);
+        }
+
+        auto mapIt = m_GameMaps[idx].begin();
+        auto mapItEnd = m_GameMaps[idx].end();
+        for (; mapIt != mapItEnd; ++mapIt)
+        {
+            mapIt->second->Show(isActive);
+        }
+    }
+}
+
+bool CUIMapWnd::SetActiveLayer(EPdaMapLayer layer, bool preserveViewport)
+{
+    CUIGlobalMap* target = GetGlobalMap(layer);
+    if (!target)
+        return false;
+
+    if (m_activeLayer == layer && m_GlobalMap == target && preserveViewport && !m_force_viewport_reset)
+    {
+        UpdateLayerSwitcherState();
+        return true;
+    }
+
+    Frect previousRect;
+    const bool hadPrevious = m_GlobalMap != nullptr;
+    if (hadPrevious && preserveViewport && !m_force_viewport_reset)
+    {
+        previousRect = m_GlobalMap->GetWndRect();
+    }
+
+    m_activeLayer = layer;
+    m_GlobalMap = target;
+    g_lastPdaMapLayer = layer;
+
+    if (hadPrevious && preserveViewport && !m_force_viewport_reset)
+    {
+        m_GlobalMap->SetWndRect(previousRect);
+        m_GlobalMap->ClipByVisRect();
+    }
+    else
+    {
+        m_GlobalMap->OptimalFit(m_UILevelFrame->GetWndRect());
+        m_GlobalMap->SetMinZoom(m_GlobalMap->GetCurrentZoom().x);
+        m_GlobalMap->ClipByVisRect();
+    }
+
+    m_currentZoom = m_GlobalMap->GetCurrentZoom().x;
+    clamp(m_currentZoom, m_GlobalMap->GetMinZoom(), m_GlobalMap->GetMaxZoom());
+
+    UpdateActiveMapLayout();
+    SyncActiveLayerVisibility(IsShown());
+    UpdateScroll();
+    UpdateLayerSwitcherState();
+    HideCurHint();
+    if (m_ActionPlanner)
+        ResetActionPlanner();
+
+    return true;
 }
 
 bool CUIMapWnd::Init(cpcstr xml_name, cpcstr start_from, bool critical /*= true*/)
@@ -151,6 +367,7 @@ bool CUIMapWnd::Init(cpcstr xml_name, cpcstr start_from, bool critical /*= true*
     }
 
     init_xml_nav(uiXml, start_from, critical);
+    init_xml_layer_switcher(uiXml, start_from, critical);
 
     m_map_location_hint = xr_new<CUIMapLocationHint>();
     m_map_location_hint->SetAutoDelete(false);
@@ -160,14 +377,27 @@ bool CUIMapWnd::Init(cpcstr xml_name, cpcstr start_from, bool critical /*= true*
 
     // Load maps
 
-    m_GlobalMap = xr_new<CUIGlobalMap>(this);
-    m_GlobalMap->SetAutoDelete(true);
-    m_GlobalMap->Initialize();
+    for (size_t idx = 0; idx < PDA_MAP_LAYER_COUNT; ++idx)
+    {
+        const auto layer = static_cast<EPdaMapLayer>(idx);
+        CUIGlobalMap*& globalMap = m_GlobalMaps[idx];
+        globalMap = xr_new<CUIGlobalMap>(this);
+        const pcstr globalSection = get_global_map_section(layer);
+        globalMap->Initialize(globalSection);
+        globalMap->OptimalFit(m_UILevelFrame->GetWndRect());
+        globalMap->SetMinZoom(globalMap->GetCurrentZoom().x);
+        Register(globalMap);
 
-    m_UILevelFrame->AttachChild(m_GlobalMap);
-    m_GlobalMap->OptimalFit(m_UILevelFrame->GetWndRect());
-    m_GlobalMap->SetMinZoom(m_GlobalMap->GetCurrentZoom().x);
-    m_currentZoom = m_GlobalMap->GetCurrentZoom().x;
+    }
+
+    m_GlobalMap = GetGlobalMap(m_activeLayer);
+    if (!m_GlobalMap)
+    {
+        m_activeLayer = EPdaMapLayer::Surface;
+        m_GlobalMap = GetGlobalMap(m_activeLayer);
+    }
+
+    m_currentZoom = m_GlobalMap ? m_GlobalMap->GetCurrentZoom().x : 1.0f;
 
     // initialize local maps
     xr_string sect_name;
@@ -184,45 +414,57 @@ bool CUIMapWnd::Init(cpcstr xml_name, cpcstr start_from, bool critical /*= true*
         {
             shared_str map_name = it->first;
             xr_strlwr(map_name);
-            R_ASSERT2(m_GameMaps.end() == m_GameMaps.find(map_name), "Duplicate level name not allowed");
+            const EPdaMapLayer layer = get_level_map_layer(map_name.c_str());
+            GAME_MAPS& maps = GetGameMaps(layer);
+            R_ASSERT2(maps.end() == maps.find(map_name), "Duplicate level name not allowed");
 
-            CUICustomMap*& l = m_GameMaps[map_name];
+            CUICustomMap*& l = maps[map_name];
 
             l = xr_new<CUILevelMap>(this);
             R_ASSERT2(pGameIni->section_exist(map_name), map_name.c_str());
             l->Initialize(map_name, "hud" DELIMITER "default");
 
             l->OptimalFit(m_UILevelFrame->GetWndRect());
+            l->Show(layer == m_activeLayer);
+            GetGlobalMap(layer)->AttachChild(l);
+
         }
     }
 
 #ifdef DEBUG
-    GAME_MAPS::iterator it = m_GameMaps.begin();
-    GAME_MAPS::iterator it2;
-    for (; it != m_GameMaps.end(); ++it)
+    for (size_t idx = 0; idx < PDA_MAP_LAYER_COUNT; ++idx)
     {
-        CUILevelMap* l = smart_cast<CUILevelMap*>(it->second);
-        VERIFY(l);
-        for (it2 = it; it2 != m_GameMaps.end(); ++it2)
+        CUIGlobalMap* globalMap = m_GlobalMaps[idx];
+        auto& maps = m_GameMaps[idx];
+        auto it = maps.begin();
+        auto itEnd = maps.end();
+        for (; it != itEnd; ++it)
         {
-            if (it == it2)
-                continue;
-            CUILevelMap* l2 = smart_cast<CUILevelMap*>(it2->second);
-            VERIFY(l2);
-            if (l->GlobalRect().intersected(l2->GlobalRect()))
+            CUILevelMap* l = smart_cast<CUILevelMap*>(it->second);
+            VERIFY(l);
+            auto it2 = it;
+            for (; it2 != maps.end(); ++it2)
             {
-                Msg(" --error-incorrect map definition global rect of map [%s] intersects with [%s]", l->MapName().c_str(),
-                    l2->MapName().c_str());
+                if (it == it2)
+                    continue;
+
+                CUILevelMap* l2 = smart_cast<CUILevelMap*>(it2->second);
+                VERIFY(l2);
+                if (l->GlobalRect().intersected(l2->GlobalRect()))
+                {
+                    Msg(" --error-incorrect map definition global rect of map [%s] intersects with [%s]", l->MapName().c_str(),
+                        l2->MapName().c_str());
+                }
             }
-        }
-        if (FALSE == l->GlobalRect().intersected(GlobalMap()->BoundRect()))
-        {
-            Msg(" --error-incorrect map definition map [%s] places outside global map", l->MapName().c_str());
+
+            if (globalMap && FALSE == l->GlobalRect().intersected(globalMap->BoundRect()))
+            {
+                Msg(" --error-incorrect map definition map [%s] places outside global map layer [%d]", l->MapName().c_str(),
+                    idx);
+            }
         }
     }
 #endif
-
-    Register(m_GlobalMap);
     m_ActionPlanner = xr_new<CMapActionPlanner>();
     m_ActionPlanner->setup(this);
     m_view_actor = true;
@@ -239,37 +481,22 @@ bool CUIMapWnd::Init(cpcstr xml_name, cpcstr start_from, bool critical /*= true*
 
 void CUIMapWnd::Show(bool status)
 {
+    const bool actorLevelChanged = status ? CheckForActorLevelChange() : false;
+
     inherited::Show(status);
-    Activated();
-    if (GlobalMap())
-    {
-        m_GlobalMap->DetachAll();
-        m_GlobalMap->Show(false);
-    }
-    GAME_MAPS::iterator it = m_GameMaps.begin();
-    for (; it != m_GameMaps.end(); ++it)
-    {
-        it->second->DetachAll();
-    }
+    SyncActiveLayerVisibility(status);
+    UpdateActiveMapLayout();
+    UpdateLayerSwitcherState();
 
     if (status)
     {
-        m_GlobalMap->Show(true);
-        m_GlobalMap->WorkingArea().set(ActiveMapRect());
-        GAME_MAPS::iterator it = m_GameMaps.begin();
-        GAME_MAPS::iterator it_e = m_GameMaps.end();
-        for (; it != it_e; ++it)
-        {
-            m_GlobalMap->AttachChild(it->second);
-            it->second->Show(true);
-            it->second->WorkingArea().set(ActiveMapRect());
-        }
+        if (!actorLevelChanged && !m_level_changed_since_last_show)
+            Activated();
+        UpdateScroll();
 
-        if (m_view_actor)
+        if (m_view_actor || actorLevelChanged || m_level_changed_since_last_show)
         {
-            inherited::Update(); // only maps, not action planner
-            ViewActor();
-            m_view_actor = false;
+            m_view_actor = true;
         }
         InventoryUtilities::SendInfoToActor("ui_pda_map_local");
     }
@@ -278,6 +505,12 @@ void CUIMapWnd::Show(bool status)
 
 void CUIMapWnd::Activated()
 {
+    if (!IsShown())
+        return;
+
+    if (CheckForActorLevelChange() || m_level_changed_since_last_show)
+        return;
+
     Fvector v = Level().CurrentEntity()->Position();
     Fvector2 v2;
     v2.set(v.x, v.z);
@@ -303,26 +536,29 @@ void CUIMapWnd::RemoveMapToRender(CUICustomMap* m)
 
 void CUIMapWnd::SetTargetMap(const shared_str& name, const Fvector2& pos, bool bZoomIn)
 {
-    u16 idx = GetIdxByName(name);
-    if (idx != u16(-1))
+    EPdaMapLayer layer{};
+    if (CUICustomMap* levelMap = FindLevelMap(name, &layer))
     {
-        CUICustomMap* lm = GetMapByIdx(idx);
-        SetTargetMap(lm, pos, bZoomIn);
+        SetActiveLayer(layer, !m_force_viewport_reset);
+        SetTargetMap(levelMap, pos, bZoomIn);
     }
 }
 
 void CUIMapWnd::SetTargetMap(const shared_str& name, bool bZoomIn)
 {
-    u16 idx = GetIdxByName(name);
-    if (idx != u16(-1))
+    EPdaMapLayer layer{};
+    if (CUICustomMap* levelMap = FindLevelMap(name, &layer))
     {
-        CUICustomMap* lm = GetMapByIdx(idx);
-        SetTargetMap(lm, bZoomIn);
+        SetActiveLayer(layer, !m_force_viewport_reset);
+        SetTargetMap(levelMap, bZoomIn);
     }
 }
 
 void CUIMapWnd::SetTargetMap(CUICustomMap* m, bool bZoomIn)
 {
+    if (!m)
+        return;
+
     m_tgtMap = m;
     Fvector2 pos;
     Frect r = m->BoundRect();
@@ -332,6 +568,19 @@ void CUIMapWnd::SetTargetMap(CUICustomMap* m, bool bZoomIn)
 
 void CUIMapWnd::SetTargetMap(CUICustomMap* m, const Fvector2& pos, bool bZoomIn)
 {
+    if (!m)
+        return;
+
+    if (auto* levelMap = smart_cast<CUILevelMap*>(m))
+    {
+        if (CUIGlobalMap* ownerGlobal = levelMap->GlobalMap())
+            SetActiveLayer(ResolveLayerForGlobalMap(ownerGlobal), !m_force_viewport_reset);
+    }
+    else if (auto* globalMap = smart_cast<CUIGlobalMap*>(m))
+    {
+        SetActiveLayer(ResolveLayerForGlobalMap(globalMap), !m_force_viewport_reset);
+    }
+
     m_tgtMap = m;
 
     if (m == GlobalMap())
@@ -350,15 +599,38 @@ void CUIMapWnd::SetTargetMap(CUICustomMap* m, const Fvector2& pos, bool bZoomIn)
         if (bZoomIn /* && fsimilar(GlobalMap()->GetCurrentZoom(), GlobalMap()->GetMinZoom(),EPS_L )*/)
             SetZoom(GlobalMap()->GetMaxZoom());
 
-        //		m_tgtCenter						= m->ConvertRealToLocalNoTransform(pos, m->BoundRect());
-        m_tgtCenter = m->ConvertRealToLocal(pos, true);
-        m_tgtCenter.add(m->GetWndPos()).div(GlobalMap()->GetCurrentZoom());
+        Fvector2 targetPos = pos;
+        const Frect& levelBoundRect = m->BoundRect();
+        if (!levelBoundRect.in(targetPos))
+        {
+            clamp(targetPos.x, levelBoundRect.x1, levelBoundRect.x2);
+            clamp(targetPos.y, levelBoundRect.y1, levelBoundRect.y2);
+
+        }
+
+        if (auto* levelMap = smart_cast<CUILevelMap*>(m))
+        {
+            levelMap->Update();
+            const Frect levelRect = levelMap->GetWndRect();
+            const Fvector2 rawLogicLocal = levelMap->ConvertRealToLocal(targetPos, false);
+            m_tgtCenter = rawLogicLocal;
+            m_tgtCenter.add(levelRect.lt).div(GlobalMap()->GetCurrentZoom());
+        }
+        else
+        {
+            m_tgtCenter = m->ConvertRealToLocal(targetPos, true);
+            m_tgtCenter.add(m->GetWndPos()).div(GlobalMap()->GetCurrentZoom());
+        }
     }
+
     ResetActionPlanner();
 }
 
 void CUIMapWnd::MoveMap(Fvector2 const& pos_delta)
 {
+    if (!GlobalMap())
+        return;
+
     GlobalMap()->MoveWndDelta(pos_delta);
     UpdateScroll();
     HideCurHint();
@@ -536,6 +808,9 @@ bool CUIMapWnd::OnMouseAction(float x, float y, EUIMessages mouse_action)
 
 bool CUIMapWnd::UpdateZoom(bool b_zoom_in)
 {
+    if (!GlobalMap())
+        return true;
+
     float prev_zoom = GetZoom();
     float z = 0.0f;
     if (b_zoom_in)
@@ -620,28 +895,9 @@ void CUIMapWnd::ActivatePropertiesBox(CUIWindow* w)
     }
 }
 
-CUICustomMap* CUIMapWnd::GetMapByIdx(u16 idx)
-{
-    VERIFY(idx != u16(-1));
-    auto it = m_GameMaps.begin();
-    std::advance(it, idx);
-    return it->second;
-}
-
-u16 CUIMapWnd::GetIdxByName(const shared_str& map_name)
-{
-    auto it = m_GameMaps.find(map_name);
-    if (it == m_GameMaps.end())
-    {
-        Msg("~ Level Map '%s' not registered", map_name.c_str());
-        return u16(-1);
-    }
-    return (u16)std::distance(m_GameMaps.begin(), it);
-}
-
 void CUIMapWnd::UpdateScroll()
 {
-    if (m_scroll_mode)
+    if (m_scroll_mode && GlobalMap())
     {
         Fvector2 w_pos = GlobalMap()->GetWndPos();
         m_UIMainScrollV->SetRange(m_UIMainScrollV->GetMinRange(), iFloor(GlobalMap()->GetHeight()));
@@ -670,34 +926,56 @@ void CUIMapWnd::OnScrollH(CUIWindow*, void*)
 
 void CUIMapWnd::MoveScrollV(float dy)
 {
+    if (!GlobalMap())
+        return;
+
     Fvector2 w_pos = GlobalMap()->GetWndPos();
     GlobalMap()->SetWndPos(Fvector2().set(w_pos.x, dy));
 }
 
 void CUIMapWnd::MoveScrollH(float dx)
 {
+    if (!GlobalMap())
+        return;
+
     Fvector2 w_pos = GlobalMap()->GetWndPos();
     GlobalMap()->SetWndPos(Fvector2().set(dx, w_pos.y));
 }
 
 void CUIMapWnd::Update()
 {
-    if (m_GlobalMap)
-        m_GlobalMap->WorkingArea().set(ActiveMapRect());
+    if (IsShown())
+        CheckForActorLevelChange();
+
+    UpdateActiveMapLayout();
     inherited::Update();
+
+    if (IsShown() && m_view_actor)
+    {
+        RefreshLevelMapRects();
+        ViewActor();
+        m_view_actor = false;
+        m_force_viewport_reset = false;
+        m_level_changed_since_last_show = false;
+    }
+
     m_ActionPlanner->update();
     UpdateNav();
+    UpdateLayerSwitcherState();
 }
 
 void CUIMapWnd::SetZoom(float value)
 {
+    if (!GlobalMap())
+        return;
+
     m_currentZoom = value;
     clamp(m_currentZoom, GlobalMap()->GetMinZoom(), GlobalMap()->GetMaxZoom());
 }
 
 void CUIMapWnd::ViewGlobalMap()
 {
-    if (GlobalMap()->Locked())
+    if (!GlobalMap() || GlobalMap()->Locked())
         return;
     SetTargetMap(GlobalMap());
 }
@@ -711,31 +989,32 @@ void CUIMapWnd::ResetActionPlanner()
 
 void CUIMapWnd::ViewZoomIn()
 {
-    if (GlobalMap()->Locked())
+    if (!GlobalMap() || GlobalMap()->Locked())
         return;
     UpdateZoom(true);
 }
 
 void CUIMapWnd::ViewZoomOut()
 {
-    if (GlobalMap()->Locked())
+    if (!GlobalMap() || GlobalMap()->Locked())
         return;
     UpdateZoom(false);
 }
 
 void CUIMapWnd::ViewActor()
 {
-    if (GlobalMap()->Locked())
+    if (!GlobalMap() || GlobalMap()->Locked())
         return;
 
     Fvector v = Level().CurrentEntity()->Position();
     m_prev_actor_pos.set(v.x, v.z);
 
     CUICustomMap* lm = NULL;
-    u16 idx = GetIdxByName(Level().name());
-    if (idx != u16(-1))
+    EPdaMapLayer layer{};
+    if (CUICustomMap* levelMap = FindLevelMap(Level().name(), &layer))
     {
-        lm = GetMapByIdx(idx);
+        SetActiveLayer(layer, !m_force_viewport_reset);
+        lm = levelMap;
     }
     else
     {

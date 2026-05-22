@@ -371,20 +371,24 @@ void CUIPdaWnd::Show_SecondTaskWnd(bool status)
 
 void CUIPdaWnd::Show_MapWnd(bool status)
 {
-    if (pUIMapWnd)
-    {
-        if (status)
-            SetActiveSubdialog("eptMap");
-    }
+    if (!pUIMapWnd || !status)
+        return;
+
+    if (IsShown())
+        SetActiveSubdialog("eptMap");
+    else
+        m_sActiveSection = "eptMap";
 }
 
 void CUIPdaWnd::Show_ContactsWnd(bool status)
 {
-    if (true) // XXX: replace with contacts wnd pointer
-    {
-        if (status)
-            SetActiveSubdialog("eptContacts");
-    }
+    if (!status)
+        return;
+
+    if (IsShown())
+        SetActiveSubdialog("eptContacts");
+    else
+        m_sActiveSection = "eptContacts";
 }
 
 void CUIPdaWnd::Draw()

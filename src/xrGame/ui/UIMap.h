@@ -97,7 +97,7 @@ public:
 
     void ClipByVisRect();
     virtual void Update();
-    void Initialize();
+    void Initialize(pcstr section_name = "global_map");
 
     pcstr GetDebugType() override { return "CUIGlobalMap"; }
 
@@ -111,13 +111,29 @@ class CUILevelMap final : public CUICustomMap
 
     CUIMapWnd* m_mapWnd;
     Frect m_GlobalRect; // virtual map size (meters)
+    float m_pdaMapHeadingDegrees;
+    Fvector2 m_pdaMapTextureOffset;
+    Fvector2 m_pdaMapTextureScale;
+    u8 m_currentSubMapIdx;
+    Frect m_UnrotatedWndRect;
+    Fvector2 m_RenderOffset;
     CUILevelMap(const CUILevelMap& obj) = delete;
     CUILevelMap& operator=(const CUILevelMap& obj) = delete;
 public:
     CUILevelMap(CUIMapWnd*);
 
     const Frect& GlobalRect() const { return m_GlobalRect; }
+    void SetGlobalRect(const Frect& rect);
+    float GetPdaMapHeadingDegrees() const { return m_pdaMapHeadingDegrees; }
+    void SetPdaMapHeadingDegrees(float degrees);
+    Fvector2 GetPdaMapTextureOffset() const { return m_pdaMapTextureOffset; }
+    void SetPdaMapTextureOffset(const Fvector2& offset);
+    Fvector2 GetPdaMapTextureScale() const { return m_pdaMapTextureScale; }
+    void SetPdaMapTextureScale(const Fvector2& scale);
+    u8 GetCurrentSubMapIdx() const { return m_currentSubMapIdx; }
+    virtual Fvector2 ConvertRealToLocal(const Fvector2& src, bool for_drawing) override;
     virtual void Draw();
+    virtual void DrawTexture() override;
     virtual void Show(bool status);
     virtual void Update();
     virtual bool OnMouseAction(float x, float y, EUIMessages mouse_action);
@@ -125,11 +141,14 @@ public:
 
     Frect CalcWndRectOnGlobal();
     CUIMapWnd* MapWnd() { return m_mapWnd; }
+    CUIGlobalMap* GlobalMap() const;
     virtual void OnFocusLost();
 
     pcstr GetDebugType() override { return "CUILevelMap"; }
 
 protected:
+    void ApplyPdaMapHeading();
+    void UpdateSubLevelMapTexture();
     virtual void UpdateSpots();
     void Init_internal(const shared_str& name, const CInifile& pLtx, const shared_str& sect_name, LPCSTR sh_name) override;
 };
