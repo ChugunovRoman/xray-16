@@ -40,6 +40,7 @@ private:
 
     CUISequencer* m_intro{};
     EVENT eQuickLoad;
+    EVENT eSmartTerrainMapReady;
     Fvector m_dof[4]; // 0-dest 1-current 2-from 3-original
 
     fastdelegate::FastDelegate0<> m_intro_event;

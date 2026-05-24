@@ -36,6 +36,7 @@
 #include "weapon_inv_icon.h"
 #include "Weapon.h"
 #include "player_hud.h"
+#include "spawn_smart_terrain_map_data_source.h"
 #include "xrEngine/xr_input.h"
 #include "ui/UILoadingScreen.h"
 #include "AnselManager.h"
@@ -78,6 +79,7 @@ CGamePersistent::CGamePersistent()
     }
 
     eQuickLoad = Engine.Event.Handler_Attach("Game:QuickLoad", this);
+    eSmartTerrainMapReady = Engine.Event.Handler_Attach("SMART_TERRAIN_MAP:ready", this);
     const Fvector3* DofValue = Console->GetFVectorPtr("r2_dof");
     SetBaseDof(*DofValue);
 }
@@ -93,6 +95,7 @@ CGamePersistent::~CGamePersistent()
     Device.seqFrame.Remove(this);
     Engine.Event.Handler_Detach(eDemoStart, this);
     Engine.Event.Handler_Detach(eQuickLoad, this);
+    Engine.Event.Handler_Detach(eSmartTerrainMapReady, this);
 }
 
 IGame_Level* CGamePersistent::CreateLevel()
@@ -136,6 +139,7 @@ void CGamePersistent::OnAppStart()
         m_pLoadingScreen = xr_new<UILoadingScreen>();
 
     inherited::OnAppStart();
+    CSpawnSmartTerrainMapDataSource::StartSharedLoading("all");
 
 #ifdef XR_PLATFORM_WINDOWS
     ansel = xr_new<AnselManager>();
@@ -152,6 +156,8 @@ void CGamePersistent::OnAppEnd()
 {
     if (m_pMainMenu->IsActive())
         m_pMainMenu->Activate(false);
+
+    CSpawnSmartTerrainMapDataSource::ShutdownSharedLoading();
 
     xr_delete(m_pLoadingScreen);
     xr_delete(m_pMainMenu);
@@ -782,6 +788,12 @@ void CGamePersistent::OnFrame()
 void CGamePersistent::OnEvent(EVENT E, u64 P1, u64 P2)
 {
     ZoneScoped;
+
+    if (E == eSmartTerrainMapReady)
+    {
+        CSpawnSmartTerrainMapDataSource::PublishSharedDataIfReady();
+        return;
+    }
 
     if (E == eQuickLoad)
     {

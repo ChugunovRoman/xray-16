@@ -312,10 +312,8 @@ BOOL CSE_Abstract::Spawn_Read(NET_Packet& tNetPacket)
         }
 
         if (m_wVersion > 84)
-        {
             tNetPacket.r_u64(); // m_min_spawn_interval);
             tNetPacket.r_u64(); // m_max_spawn_interval);
-        }
     }
 
     u16 size;

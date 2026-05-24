@@ -58,6 +58,34 @@ xr_string normalize_map_name(const shared_str& map_name)
         xr_strlwr(&normalized[0]);
     return normalized;
 }
+
+bool try_init_external_spot_preset(CUIStatic& icon, pcstr preset_id)
+{
+    if (!preset_id || !preset_id[0] || !strstr(preset_id, "circle_"))
+        return false;
+
+    static CUIXml xml;
+    static bool loaded = false;
+    if (!loaded)
+    {
+        loaded = xml.Load(CONFIG_PATH, UI_PATH, UI_PATH_DEFAULT, "map_spots.xml", true);
+        if (!loaded)
+            return false;
+    }
+
+    if (!xml.NavigateToNode(preset_id, 0))
+        return false;
+
+    CUIXmlInit::InitStatic(xml, preset_id, 0, &icon);
+    if (!icon.Heading())
+    {
+        icon.SetWidth(icon.GetWidth() * UI().get_current_kx());
+        icon.SetStretchTexture(true);
+    }
+
+    return true;
+}
+
 } // namespace
 
 CUIMapWnd::CUIMapWnd(UIHint* hint)
@@ -89,10 +117,16 @@ CUIMapWnd::CUIMapWnd(UIHint* hint)
     hint_wnd = hint;
     g_map_wnd = this;
     m_cur_location = nullptr;
+    m_externalDataSource = nullptr;
+    m_externalDataRevision = 0;
+    m_lastExternalClickedId = u32(-1);
+    m_lastExternalClick = EUiMapClick::Left;
+    m_hasPendingExternalClick = false;
 }
 
 CUIMapWnd::~CUIMapWnd()
 {
+    ClearExternalSpots();
     delete_data(m_ActionPlanner);
     for (auto& globalMap : m_GlobalMaps)
     {
@@ -143,8 +177,233 @@ CUICustomMap* CUIMapWnd::FindLevelMap(const shared_str& map_name, EPdaMapLayer* 
     if (layer)
         *layer = EPdaMapLayer::Surface;
 
-    Msg("~ Level Map '%s' not registered", map_name.c_str());
     return nullptr;
+}
+
+pcstr CUIMapWnd::ResolveExternalSpotTexture(const SMapPointDesc& point) const
+{
+    const pcstr explicitTexture = point.icon_texture.c_str();
+    if (explicitTexture && explicitTexture[0])
+        return explicitTexture;
+
+    const pcstr spotType = point.spot_type.c_str();
+    if (!spotType || !spotType[0])
+        return "ui_pda2_base";
+
+    if (xr_stricmp(spotType, "smart_terrain") == 0)
+        return "ui_pda2_base";
+
+    return spotType;
+}
+
+void CUIMapWnd::ClearExternalSpots()
+{
+    HideCurHint();
+
+    for (auto& spot : m_externalSpots)
+    {
+        if (spot.level_map && spot.icon && spot.level_map->IsChild(spot.icon))
+            spot.level_map->DetachChild(spot.icon);
+        xr_delete(spot.icon);
+        spot.level_map = nullptr;
+    }
+
+    m_externalSpots.clear();
+    m_lastExternalClickedId = u32(-1);
+    m_hasPendingExternalClick = false;
+}
+
+void CUIMapWnd::RebuildExternalSpots()
+{
+    ClearExternalSpots();
+
+    if (!m_externalDataSource)
+        return;
+
+    xr_vector<SMapPointDesc> points;
+    m_externalDataSource->EnumeratePoints(points);
+
+    for (const auto& point : points)
+    {
+        EPdaMapLayer layer = EPdaMapLayer::Surface;
+        CUICustomMap* customMap = FindLevelMap(point.level_name, &layer);
+        CUILevelMap* levelMap = smart_cast<CUILevelMap*>(customMap);
+        if (!levelMap)
+            continue;
+
+        auto* icon = xr_new<CUIStatic>("external_map_spot");
+        const pcstr textureId = ResolveExternalSpotTexture(point);
+        const bool presetInit = try_init_external_spot_preset(*icon, textureId);
+        if (!presetInit)
+        {
+            icon->InitTextureEx(textureId, "hud" DELIMITER "default");
+            icon->SetWndSize(Fvector2().set(24.0f, 24.0f));
+            icon->SetStretchTexture(true);
+        }
+        icon->SetTextureColor(point.icon_color);
+        icon->SetWndPos(Fvector2().set(0.0f, 0.0f));
+        icon->Show(layer == m_activeLayer && IsShown());
+        levelMap->AttachChild(icon);
+
+        SExternalMapSpot spot;
+        spot.desc = point;
+        spot.layer = layer;
+        spot.level_map = levelMap;
+        spot.icon = icon;
+        spot.visible = false;
+        m_externalSpots.push_back(spot);
+    }
+
+    UpdateExternalSpots();
+}
+
+void CUIMapWnd::RefreshExternalDataSource()
+{
+    if (!m_externalDataSource)
+        return;
+
+    m_externalDataRevision = m_externalDataSource->GetDataRevision();
+    RebuildExternalSpots();
+}
+
+void CUIMapWnd::UpdateExternalSpots()
+{
+    if (!UsingExternalDataSource())
+        return;
+
+    for (auto& spot : m_externalSpots)
+    {
+        if (!spot.icon || !spot.level_map)
+            continue;
+
+        const bool shouldShow = IsShown() && spot.layer == m_activeLayer && spot.level_map->IsShown();
+        spot.visible = shouldShow;
+        spot.icon->Show(shouldShow);
+
+        if (!shouldShow)
+            continue;
+
+        Fvector2 realPos;
+        realPos.set(spot.desc.position.x, spot.desc.position.z);
+        Fvector2 localPos = spot.level_map->ConvertRealToLocal(realPos, false);
+        const Fvector2 iconSize = spot.icon->GetWndSize();
+        localPos.x -= iconSize.x * 0.5f;
+        localPos.y -= iconSize.y * 0.5f;
+        spot.icon->SetWndPos(localPos);
+    }
+}
+
+bool CUIMapWnd::HandleExternalSpotMouse(float x, float y, EUIMessages mouse_action)
+{
+    if (!UsingExternalDataSource())
+        return false;
+
+    const Fvector2 cursorPos = GetUICursor().GetCursorPosition();
+    SExternalMapSpot* hoveredSpot = nullptr;
+
+    for (auto& spot : m_externalSpots)
+    {
+        if (!spot.visible || !spot.icon)
+            continue;
+
+        Frect rect;
+        spot.icon->GetAbsoluteRect(rect);
+        if (rect.in(cursorPos.x, cursorPos.y))
+        {
+            hoveredSpot = &spot;
+            break;
+        }
+    }
+
+    if (mouse_action == WINDOW_MOUSE_MOVE)
+    {
+        if (hoveredSpot)
+        {
+            if (m_map_location_hint->GetOwner() != hoveredSpot->icon)
+            {
+                HideCurHint();
+                const pcstr hintText = hoveredSpot->desc.hint_text.c_str();
+                const pcstr smartName = hoveredSpot->desc.smart_name.c_str();
+                ShowHintStr(hoveredSpot->icon, hintText && hintText[0] ? hintText : smartName);
+            }
+            return true;
+        }
+
+        if (m_map_location_hint->GetOwner())
+            HideCurHint();
+        return false;
+    }
+
+    if (!hoveredSpot)
+        return false;
+
+    if (mouse_action == WINDOW_LBUTTON_UP || mouse_action == WINDOW_RBUTTON_UP)
+    {
+        m_lastExternalClickedId = hoveredSpot->desc.logical_id;
+        m_lastExternalClick = mouse_action == WINDOW_LBUTTON_UP ? EUiMapClick::Left : EUiMapClick::Right;
+        m_hasPendingExternalClick = true;
+        return true;
+    }
+
+    return false;
+}
+
+void CUIMapWnd::SetExternalDataSource(IMapDataSource* source)
+{
+    if (m_externalDataSource == source)
+        return;
+
+    ClearExternalSpots();
+    for (auto& maps : m_GameMaps)
+    {
+        for (auto& mapEntry : maps)
+            mapEntry.second->DetachAll();
+    }
+    m_externalDataSource = source;
+    if (m_externalDataSource)
+    {
+        RefreshExternalDataSource();
+        m_view_actor = true;
+    }
+    else
+    {
+        m_externalDataRevision = 0;
+    }
+}
+
+void CUIMapWnd::ClearExternalDataSource()
+{
+    if (!m_externalDataSource && m_externalSpots.empty())
+        return;
+
+    ClearExternalSpots();
+    m_externalDataSource = nullptr;
+    m_externalDataRevision = 0;
+}
+
+bool CUIMapWnd::ConsumeExternalMapClick(u32& logical_id, EUiMapClick& click_type)
+{
+    if (!m_hasPendingExternalClick)
+        return false;
+
+    logical_id = m_lastExternalClickedId;
+    click_type = m_lastExternalClick;
+    m_hasPendingExternalClick = false;
+    return true;
+}
+
+bool CUIMapWnd::GetExternalPointDescInternal(u32 logical_id, SMapPointDesc& out) const
+{
+    for (const auto& spot : m_externalSpots)
+    {
+        if (spot.desc.logical_id != logical_id)
+            continue;
+
+        out = spot.desc;
+        return true;
+    }
+
+    return false;
 }
 
 void CUIMapWnd::UpdateActiveMapLayout()
@@ -187,6 +446,9 @@ void CUIMapWnd::ResetMapStateForLevelChange()
 
 bool CUIMapWnd::CheckForActorLevelChange()
 {
+    if (UsingExternalDataSource())
+        return false;
+
     const shared_str currentLevel = Level().name();
     cpcstr previousLevel = m_last_actor_level_name.c_str();
     cpcstr currentLevelStr = currentLevel.c_str();
@@ -401,7 +663,9 @@ bool CUIMapWnd::Init(cpcstr xml_name, cpcstr start_from, bool critical /*= true*
 
     // initialize local maps
     xr_string sect_name;
-    if (IsGameTypeSingle())
+    if (!g_pGameLevel && pGameIni->section_exist("level_maps_single"))
+        sect_name = "level_maps_single";
+    else if (IsGameTypeSingle())
         sect_name = "level_maps_single";
     else
         sect_name = "level_maps_mp";
@@ -481,7 +745,8 @@ bool CUIMapWnd::Init(cpcstr xml_name, cpcstr start_from, bool critical /*= true*
 
 void CUIMapWnd::Show(bool status)
 {
-    const bool actorLevelChanged = status ? CheckForActorLevelChange() : false;
+    const bool canCheckActorLevel = status && !UsingExternalDataSource() && g_pGameLevel != nullptr;
+    const bool actorLevelChanged = canCheckActorLevel ? CheckForActorLevelChange() : false;
 
     inherited::Show(status);
     SyncActiveLayerVisibility(status);
@@ -490,7 +755,7 @@ void CUIMapWnd::Show(bool status)
 
     if (status)
     {
-        if (!actorLevelChanged && !m_level_changed_since_last_show)
+        if (!UsingExternalDataSource() && !actorLevelChanged && !m_level_changed_since_last_show)
             Activated();
         UpdateScroll();
 
@@ -498,7 +763,8 @@ void CUIMapWnd::Show(bool status)
         {
             m_view_actor = true;
         }
-        InventoryUtilities::SendInfoToActor("ui_pda_map_local");
+        if (!UsingExternalDataSource())
+            InventoryUtilities::SendInfoToActor("ui_pda_map_local");
     }
     HideCurHint();
 }
@@ -506,6 +772,9 @@ void CUIMapWnd::Show(bool status)
 void CUIMapWnd::Activated()
 {
     if (!IsShown())
+        return;
+
+    if (UsingExternalDataSource())
         return;
 
     if (CheckForActorLevelChange() || m_level_changed_since_last_show)
@@ -769,12 +1038,22 @@ bool CUIMapWnd::OnControllerAction(int axis, const ControllerAxisState& state, E
 
 bool CUIMapWnd::OnMouseAction(float x, float y, EUIMessages mouse_action)
 {
-    if (inherited::OnMouseAction(x, y, mouse_action) /*|| m_btn_nav_parent->OnMouseAction(x,y,mouse_action)*/)
-    {
-        return true;
-    }
+    const bool inheritedHandled = inherited::OnMouseAction(x, y, mouse_action);
 
     Fvector2 cursor_pos1 = GetUICursor().GetCursorPosition();
+
+    if (UsingExternalDataSource() && ActiveMapRect().in(cursor_pos1))
+    {
+        if (HandleExternalSpotMouse(x, y, mouse_action))
+            return true;
+    }
+    else if (UsingExternalDataSource() && mouse_action == WINDOW_MOUSE_MOVE && m_map_location_hint->GetOwner())
+    {
+        HideCurHint();
+    }
+
+    if (inheritedHandled /*|| m_btn_nav_parent->OnMouseAction(x,y,mouse_action)*/)
+        return true;
 
     if (GlobalMap() && !GlobalMap()->Locked() && ActiveMapRect().in(cursor_pos1))
     {
@@ -944,11 +1223,21 @@ void CUIMapWnd::MoveScrollH(float dx)
 
 void CUIMapWnd::Update()
 {
-    if (IsShown())
+    if (IsShown() && !UsingExternalDataSource() && g_pGameLevel != nullptr)
         CheckForActorLevelChange();
 
     UpdateActiveMapLayout();
     inherited::Update();
+
+    if (UsingExternalDataSource() && m_externalDataSource)
+    {
+        const u32 revision = m_externalDataSource->GetDataRevision();
+        if (revision != m_externalDataRevision)
+        {
+            RefreshExternalDataSource();
+            m_view_actor = true;
+        }
+    }
 
     if (IsShown() && m_view_actor)
     {
@@ -958,6 +1247,9 @@ void CUIMapWnd::Update()
         m_force_viewport_reset = false;
         m_level_changed_since_last_show = false;
     }
+
+    if (UsingExternalDataSource())
+        UpdateExternalSpots();
 
     m_ActionPlanner->update();
     UpdateNav();
@@ -1005,6 +1297,16 @@ void CUIMapWnd::ViewActor()
 {
     if (!GlobalMap() || GlobalMap()->Locked())
         return;
+
+    if (UsingExternalDataSource())
+    {
+        shared_str focusLevel;
+        if (m_externalDataSource && m_externalDataSource->GetFocusLevel(focusLevel))
+            SetTargetMap(focusLevel, true);
+        else
+            ViewGlobalMap();
+        return;
+    }
 
     Fvector v = Level().CurrentEntity()->Position();
     m_prev_actor_pos.set(v.x, v.z);

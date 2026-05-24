@@ -54,6 +54,8 @@ void CServerEntityWrapper::load(IReader& stream)
     IReader* chunk;
 
     chunk = stream.open_chunk(0);
+    if (!chunk)
+        return;
 
     net_packet.B.count = chunk->r_u16();
     chunk->r(net_packet.B.data, net_packet.B.count);
@@ -72,6 +74,8 @@ void CServerEntityWrapper::load(IReader& stream)
     m_object->Spawn_Read(net_packet);
 
     chunk = stream.open_chunk(1);
+    if (!chunk)
+        return;
 
     net_packet.B.count = chunk->r_u16();
     chunk->r(net_packet.B.data, net_packet.B.count);

@@ -25,7 +25,8 @@ CALifeSpawnRegistry::CALifeSpawnRegistry(LPCSTR section)
 CALifeSpawnRegistry::~CALifeSpawnRegistry()
 {
     xr_delete(m_game_graph);
-    m_chunk->close();
+    if (m_chunk)
+        m_chunk->close();
     FS.r_close(m_file);
 }
 
@@ -51,7 +52,7 @@ void CALifeSpawnRegistry::load(IReader& file_stream, LPCSTR game_name)
     R_ASSERT(FS.exist(game_name));
 
     IReader *chunk, *chunk0;
-    Msg("* Loading spawn registry...");
+    Msg("* Loading spawn registry from save [%s]...", game_name);
     R_ASSERT2(file_stream.find_chunk(SPAWN_CHUNK_DATA), "Cannot find chunk SPAWN_CHUNK_DATA!");
     chunk0 = file_stream.open_chunk(SPAWN_CHUNK_DATA);
 
@@ -90,6 +91,8 @@ void CALifeSpawnRegistry::load(IReader& file_stream, xrGUID* save_guid)
 {
     IReader* chunk;
     chunk = file_stream.open_chunk(0);
+    if (!chunk)
+        return;
     m_header.load(*chunk);
     chunk->close();
     if (save_guid && (*save_guid != header().guid()) && !ignore_save_incompatibility())
@@ -100,10 +103,14 @@ void CALifeSpawnRegistry::load(IReader& file_stream, xrGUID* save_guid)
     }
 
     chunk = file_stream.open_chunk(1);
+    if (!chunk)
+        return;
     m_spawns.load(*chunk);
     chunk->close();
 
     chunk = file_stream.open_chunk(2);
+    if (!chunk)
+        return;
     load_data(m_artefact_spawn_positions, *chunk);
     chunk->close();
 
@@ -170,7 +177,11 @@ void CALifeSpawnRegistry::load_spawn_position_from_smart()
     for (; I != E; ++I)
     {
         CSE_ALifeSmartZone* smart = (*I).second->data()->object().cast_smart_zone();
-        if (smart && g_start_position_smart.c_str() != nullptr && g_start_position_smart.c_str() != nullptr && xr_strcmp(g_start_position_smart.c_str(), smart->name_replace()) == 0)
+        if (!smart)
+            continue;
+
+        if (g_start_position_smart.c_str() != nullptr && smart->name_replace() &&
+            xr_strcmp(g_start_position_smart.c_str(), smart->name_replace()) == 0)
         {
             g_start_level_vertex_id = smart->m_tNodeID;
             g_start_game_vertex_id = smart->m_tGraphID;

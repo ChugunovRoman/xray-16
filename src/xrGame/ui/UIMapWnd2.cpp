@@ -8,18 +8,28 @@
 
 void CUIMapWnd::init_xml_nav(CUIXml& xml, pcstr start_from, bool critical)
 {
-    m_btn_nav_parent = UIHelper::CreateStatic(xml, "btn_nav_parent", this, critical);
+    const bool allow_root_fallback = strchr(start_from, ':') == nullptr;
+
+    string512 nested_parent_path;
+    strconcat(sizeof(nested_parent_path), nested_parent_path, start_from, ":btn_nav_parent");
+    m_btn_nav_parent = UIHelper::CreateStatic(xml, nested_parent_path, this, false);
+    if (!m_btn_nav_parent && allow_root_fallback)
+        m_btn_nav_parent = UIHelper::CreateStatic(xml, "btn_nav_parent", this, critical);
 
     if (m_btn_nav_parent)
     {
-        VERIFY(hint_wnd);
         for (u8 i = 0; i < max_btn_nav; ++i)
         {
-            string64 buf;
+            string128 buf;
             xr_sprintf(buf, "btn_nav_parent:btn_nav_%d", i);
+            string128 nested_buf;
+            xr_sprintf(nested_buf, "%s:btn_nav_%d", nested_parent_path, i);
 
-            m_btn_nav[i] = UIHelper::Create3tButton(xml, buf, m_btn_nav_parent);
-            Register(m_btn_nav[i]);
+            m_btn_nav[i] = UIHelper::Create3tButton(xml, nested_buf, m_btn_nav_parent, false);
+            if (!m_btn_nav[i] && allow_root_fallback)
+                m_btn_nav[i] = UIHelper::Create3tButton(xml, buf, m_btn_nav_parent, false);
+            if (m_btn_nav[i])
+                Register(m_btn_nav[i]);
             //.		m_btn_nav[i]->set_hint_wnd( hint_wnd );
         }
     }
@@ -35,34 +45,56 @@ void CUIMapWnd::init_xml_nav(CUIXml& xml, pcstr start_from, bool critical)
         m_btn_nav[btn_zoom_less]  = UIHelper::Create3tButton(xml, strconcat(temp, pth, ":zoom_out_btn"  ), m_UIMainMapHeader, false);
     }
 
-    AddCallback(m_btn_nav[btn_legend], BUTTON_DOWN, CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnLegend_Push));
+    if (m_btn_nav[btn_legend])
+        AddCallback(m_btn_nav[btn_legend], BUTTON_DOWN, CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnLegend_Push));
     //	AddCallback( m_btn_nav[btn_up]->WindowName(),			BUTTON_DOWN, CUIWndCallback::void_function( this,
     //&CUIMapWnd::OnBtnUp_Push		) );
-    AddCallback(
-        m_btn_nav[btn_zoom_more], BUTTON_DOWN, CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnZoomMore_Push));
+    if (m_btn_nav[btn_zoom_more])
+        AddCallback(
+            m_btn_nav[btn_zoom_more], BUTTON_DOWN, CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnZoomMore_Push));
 
     //	AddCallback( m_btn_nav[btn_left]->WindowName(),			BUTTON_DOWN, CUIWndCallback::void_function( this,
     //&CUIMapWnd::OnBtnLeft_Push	) );
-    AddCallback(m_btn_nav[btn_actor], BUTTON_DOWN, CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnActor_Push));
+    if (m_btn_nav[btn_actor])
+        AddCallback(m_btn_nav[btn_actor], BUTTON_DOWN, CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnActor_Push));
     //	AddCallback( m_btn_nav[btn_right]->WindowName(),		BUTTON_DOWN, CUIWndCallback::void_function( this,
     //&CUIMapWnd::OnBtnRight_Push	) );
 
-    AddCallback(
-        m_btn_nav[btn_zoom_less], BUTTON_DOWN, CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnZoomLess_Push));
+    if (m_btn_nav[btn_zoom_less])
+        AddCallback(
+            m_btn_nav[btn_zoom_less], BUTTON_DOWN, CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnZoomLess_Push));
     //	AddCallback( m_btn_nav[btn_down]->WindowName(),			BUTTON_DOWN, CUIWndCallback::void_function( this,
     //&CUIMapWnd::OnBtnDown_Push	) );
-    AddCallback(
-        m_btn_nav[btn_zoom_reset], BUTTON_DOWN, CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnZoomReset_Push));
+    if (m_btn_nav[btn_zoom_reset])
+        AddCallback(
+            m_btn_nav[btn_zoom_reset], BUTTON_DOWN, CUIWndCallback::void_function(this, &CUIMapWnd::OnBtnZoomReset_Push));
 }
 
-void CUIMapWnd::init_xml_layer_switcher(CUIXml& xml, pcstr, bool)
+void CUIMapWnd::init_xml_layer_switcher(CUIXml& xml, pcstr start_from, bool)
 {
     if (!m_btn_nav_parent)
         return;
 
-    m_btn_layer_surface = UIHelper::Create3tButton(xml, "btn_nav_parent:btn_layer_surface", m_btn_nav_parent, false);
-    m_btn_layer_underground =
-        UIHelper::Create3tButton(xml, "btn_nav_parent:btn_layer_underground", m_btn_nav_parent, false);
+    const bool allow_root_fallback = strchr(start_from, ':') == nullptr;
+
+    string512 nested_parent_path;
+    strconcat(sizeof(nested_parent_path), nested_parent_path, start_from, ":btn_nav_parent");
+
+    string128 nested_surface_path;
+    xr_sprintf(nested_surface_path, "%s:btn_layer_surface", nested_parent_path);
+    string128 nested_underground_path;
+    xr_sprintf(nested_underground_path, "%s:btn_layer_underground", nested_parent_path);
+
+    m_btn_layer_surface = UIHelper::Create3tButton(xml, nested_surface_path, m_btn_nav_parent, false);
+    if (!m_btn_layer_surface && allow_root_fallback)
+        m_btn_layer_surface = UIHelper::Create3tButton(xml, "btn_nav_parent:btn_layer_surface", m_btn_nav_parent, false);
+
+    m_btn_layer_underground = UIHelper::Create3tButton(xml, nested_underground_path, m_btn_nav_parent, false);
+    if (!m_btn_layer_underground && allow_root_fallback)
+    {
+        m_btn_layer_underground =
+            UIHelper::Create3tButton(xml, "btn_nav_parent:btn_layer_underground", m_btn_nav_parent, false);
+    }
 
     if (m_btn_layer_surface)
     {

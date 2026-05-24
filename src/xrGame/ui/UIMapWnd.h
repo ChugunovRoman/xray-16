@@ -2,6 +2,7 @@
 
 #include <array>
 
+#include "UIMapDataSource.h"
 #include "xrUICore/Windows/UIWindow.h"
 #include "xrUICore/Callbacks/UIWndCallback.h"
 
@@ -39,6 +40,15 @@ class CUIMapWnd final : public CUIWindow, public CUIWndCallback
     typedef CUIWindow inherited;
 
 private:
+    struct SExternalMapSpot
+    {
+        SMapPointDesc desc;
+        EPdaMapLayer layer = EPdaMapLayer::Surface;
+        CUILevelMap* level_map = nullptr;
+        CUIStatic* icon = nullptr;
+        bool visible = false;
+    };
+
     bool m_view_actor;
     Fvector2 m_prev_actor_pos;
     shared_str m_last_actor_level_name;
@@ -63,6 +73,12 @@ private:
     CUIFrameLineWnd* m_UIMainMapHeader;
     CUIMapLocationHint* m_map_location_hint;
     CMapLocation* m_cur_location;
+    IMapDataSource* m_externalDataSource;
+    u32 m_externalDataRevision;
+    xr_vector<SExternalMapSpot> m_externalSpots;
+    u32 m_lastExternalClickedId;
+    EUiMapClick m_lastExternalClick;
+    bool m_hasPendingExternalClick;
 
 #ifdef DEBUG
 //	CUIStatic*					m_dbg_text_hint;
@@ -121,6 +137,13 @@ private:
     void RefreshLevelMapRects();
     bool CheckForActorLevelChange();
     void ResetMapStateForLevelChange();
+    void ClearExternalSpots();
+    void RefreshExternalDataSource();
+    void RebuildExternalSpots();
+    void UpdateExternalSpots();
+    bool HandleExternalSpotMouse(float x, float y, EUIMessages mouse_action);
+    pcstr ResolveExternalSpotTexture(const SMapPointDesc& point) const;
+    bool GetExternalPointDescInternal(u32 logical_id, SMapPointDesc& out) const;
 
     void ResetActionPlanner();
 
@@ -201,6 +224,11 @@ public:
     CUICustomMap* GetLevelMap(const shared_str& map_name, EPdaMapLayer* layer = nullptr) const { return FindLevelMap(map_name, layer); }
     EPdaMapLayer ActiveLayer() const { return m_activeLayer; }
     bool ActivateLayer(EPdaMapLayer layer, bool preserveViewport = true) { return SetActiveLayer(layer, preserveViewport); }
+    void SetExternalDataSource(IMapDataSource* source);
+    void ClearExternalDataSource();
+    bool UsingExternalDataSource() const { return m_externalDataSource != nullptr; }
+    bool ConsumeExternalMapClick(u32& logical_id, EUiMapClick& click_type);
+    bool GetExternalPointDesc(u32 logical_id, SMapPointDesc& out) const { return GetExternalPointDescInternal(logical_id, out); }
     void UpdateScroll();
     shared_str cName() const { return "ui_map_wnd"; }
 

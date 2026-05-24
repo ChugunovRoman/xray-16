@@ -2988,6 +2988,9 @@
     <ClInclude Include="alife_time_manager_inline.h">
       <Filter>AI\ALife\simulator_base\time_manager</Filter>
     </ClInclude>
+    <ClInclude Include="spawn_smart_terrain_map_data_source.h">
+      <Filter>AI\ALife\simulator_base\time_manager</Filter>
+    </ClInclude>
     <ClInclude Include="alife_update_manager.h">
       <Filter>AI\ALife\update_manager</Filter>
     </ClInclude>
@@ -5721,6 +5724,12 @@
     <ClInclude Include="ui\UIMap.h">
       <Filter>UI\Common\PDA\MAP</Filter>
     </ClInclude>
+    <ClInclude Include="ui\UIMapDataSource.h">
+      <Filter>UI\Common\PDA\MAP</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\UIFactionEditorMapWnd.h">
+      <Filter>UI\Common\PDA\MAP</Filter>
+    </ClInclude>
     <ClInclude Include="ui\UIMapWnd.h">
       <Filter>UI\Common\PDA\MAP</Filter>
     </ClInclude>
@@ -6672,6 +6681,15 @@
     </ClCompile>
     <ClCompile Include="alife_time_manager.cpp">
       <Filter>AI\ALife\simulator_base\time_manager</Filter>
+    </ClCompile>
+    <ClCompile Include="spawn_smart_terrain_map_data_source.cpp">
+      <Filter>AI\ALife\simulator_base\time_manager</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\UIFactionEditorMapWnd.cpp">
+      <Filter>UI\Common\PDA\MAP</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\UIFactionEditorMapWnd_script.cpp">
+      <Filter>UI\Common\PDA\MAP</Filter>
     </ClCompile>
     <ClCompile Include="alife_update_manager.cpp">
       <Filter>AI\ALife\update_manager</Filter>

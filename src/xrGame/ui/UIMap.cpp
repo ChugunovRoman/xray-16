@@ -23,7 +23,8 @@ CUICustomMap::CUICustomMap() : CUIStatic("Custom Map")
 void CUICustomMap::Initialize(shared_str name, LPCSTR sh_name)
 {
     const CInifile* levelIni{};
-    if (name == g_pGameLevel->name())
+    const bool hasActiveLevel = g_pGameLevel && g_pGameLevel->pLevel;
+    if (hasActiveLevel && name == g_pGameLevel->name())
         levelIni = g_pGameLevel->pLevel;
     else
     {
@@ -44,7 +45,8 @@ void CUICustomMap::Initialize(shared_str name, LPCSTR sh_name)
         Init_internal(name, *pGameIni, "def_map", sh_name);
         m_name = name;
     }
-    if (levelIni != g_pGameLevel->pLevel)
+
+    if (!hasActiveLevel || levelIni != g_pGameLevel->pLevel)
     {
         xr_delete(const_cast<CInifile*>(levelIni));
     }
@@ -334,12 +336,15 @@ void CUIGlobalMap::Init_internal(const shared_str& name, const CInifile& pLtx, c
 
 void CUIGlobalMap::Update()
 {
-    for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
+    if (!m_mapWnd || !m_mapWnd->UsingExternalDataSource())
     {
-        CUICustomMap* m = smart_cast<CUICustomMap*>(*it);
-        if (!m)
-            continue;
-        m->DetachAll();
+        for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
+        {
+            CUICustomMap* m = smart_cast<CUICustomMap*>(*it);
+            if (!m)
+                continue;
+            m->DetachAll();
+        }
     }
     inherited::Update();
 }
@@ -500,6 +505,12 @@ void CUILevelMap::UpdateSubLevelMapTexture()
             InitTextureEx(m_texture.c_str(), m_shader_name.c_str());
         }
     };
+
+    if (!g_pGameLevel || !g_pGameLevel->pLevel)
+    {
+        resetToBaseTexture();
+        return;
+    }
 
     if (MapName() != Level().name())
     {
@@ -679,6 +690,12 @@ void CUILevelMap::Init_internal(const shared_str& name, const CInifile& pLtx, co
 
 void CUILevelMap::UpdateSpots()
 {
+    if (MapWnd() && MapWnd()->UsingExternalDataSource())
+        return;
+
+    if (!g_pGameLevel)
+        return;
+
     DetachAll();
 
     //.	if( fsimilar(MapWnd()->GlobalMap()->GetCurrentZoom(),MapWnd()->GlobalMap()->GetMinZoom(),EPS_L ) ) return;
@@ -868,6 +885,9 @@ void CUIMiniMap::Init_internal(const shared_str& name, const CInifile& pLtx, con
 
 void CUIMiniMap::UpdateSpots()
 {
+    if (!g_pGameLevel)
+        return;
+
     DetachAll();
     vLocations& ls = Level().MapManager().Locations();
     for (auto it = ls.begin(); it != ls.end(); ++it)

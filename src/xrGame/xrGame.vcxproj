@@ -574,6 +574,7 @@
     <ClInclude Include="alife_switch_manager_inline.h" />
     <ClInclude Include="alife_time_manager.h" />
     <ClInclude Include="alife_time_manager_inline.h" />
+    <ClInclude Include="spawn_smart_terrain_map_data_source.h" />
     <ClInclude Include="alife_update_manager.h" />
     <ClInclude Include="AmebaZone.h" />
     <ClInclude Include="animation_movement_controller.h" />
@@ -1293,6 +1294,8 @@
     <ClInclude Include="ui\UILoadingScreen.h" />
     <ClInclude Include="ui\UILogsWnd.h" />
     <ClInclude Include="ui\UIMainIngameWnd.h" />
+    <ClInclude Include="ui\UIMapDataSource.h" />
+    <ClInclude Include="ui\UIFactionEditorMapWnd.h" />
     <ClInclude Include="ui\UIMap.h" />
     <ClInclude Include="ui\UIMapFilters.h" />
     <ClInclude Include="ui\UIMapInfo.h" />
@@ -1980,6 +1983,7 @@
     <ClCompile Include="alife_surge_manager.cpp" />
     <ClCompile Include="alife_switch_manager.cpp" />
     <ClCompile Include="alife_time_manager.cpp" />
+    <ClCompile Include="spawn_smart_terrain_map_data_source.cpp" />
     <ClCompile Include="alife_trader.cpp" />
     <ClCompile Include="alife_trader_abstract.cpp" />
     <ClCompile Include="alife_update_manager.cpp" />
@@ -3175,6 +3179,11 @@
     <ClInclude Include="ui\UILoadingScreenHardcoded.h" />
     <ClCompile Include="ui\UILogsWnd.cpp" />
     <ClCompile Include="ui\UIMainIngameWnd.cpp" />
+    <ClCompile Include="ui\UIFactionEditorMapWnd.cpp" />
+    <ClCompile Include="ui\UIFactionEditorMapWnd_script.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
     <ClCompile Include="ui\UIMap.cpp" />
     <ClCompile Include="ui\UIMapFilters.cpp" />
     <ClCompile Include="ui\UIMapInfo.cpp" />

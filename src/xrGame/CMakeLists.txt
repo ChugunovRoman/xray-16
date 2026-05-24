@@ -237,6 +237,8 @@ target_sources(xrGame PRIVATE
     alife_time_manager.cpp
     alife_time_manager.h
     alife_time_manager_inline.h
+    spawn_smart_terrain_map_data_source.cpp
+    spawn_smart_terrain_map_data_source.h
     alife_trader_abstract.cpp
     alife_trader.cpp
     alife_update_manager.cpp
@@ -2252,6 +2254,10 @@ target_sources(xrGame PRIVATE
     ui/UIMainIngameWnd.cpp
     ui/UIMainIngameWnd.h
     ui/UIMap.cpp
+    ui/UIMapDataSource.h
+    ui/UIFactionEditorMapWnd.cpp
+    ui/UIFactionEditorMapWnd.h
+    ui/UIFactionEditorMapWnd_script.cpp
     ui/UIMapFilters.cpp
     ui/UIMapFilters.h
     ui/UIMap.h
