@@ -547,6 +547,9 @@ void CUILevelMap::UpdateSubLevelMapTexture()
 Fvector2 CUILevelMap::ConvertRealToLocal(const Fvector2& src, bool for_drawing)
 {
     const auto rotationType = get_map_rotation_type(m_pdaMapHeadingDegrees);
+    if (rotationType == EMapOrthogonalRotation::None)
+        return inherited::ConvertRealToLocal(src, for_drawing);
+
     if (rotationType == EMapOrthogonalRotation::Other)
     {
         Fvector2 result = inherited::ConvertRealToLocal(src, for_drawing);
@@ -568,10 +571,10 @@ Fvector2 CUILevelMap::ConvertRealToLocal(const Fvector2& src, bool for_drawing)
 
     switch (rotationType)
     {
-    case EMapOrthogonalRotation::None: return local;
     case EMapOrthogonalRotation::Deg90: return Fvector2().set(local.y * drawKx, width - local.x);
     case EMapOrthogonalRotation::DegMinus90: return Fvector2().set((height - local.y) * drawKx, local.x);
     case EMapOrthogonalRotation::Deg180: return Fvector2().set((width - local.x) * drawKx, height - local.y);
+    case EMapOrthogonalRotation::None:
     default:
         break;
     }
