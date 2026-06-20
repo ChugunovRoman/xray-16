@@ -42,12 +42,36 @@ New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
 $generator = "Visual Studio 17 2022"
 $platArg = if ($Platform -eq "Win32") { "Win32" } else { "x64" }
 
+# Locate VS installation explicitly so CMake doesn't fail on runners where
+# vswhere isn't on PATH or the VS install isn't in the default registry location
+# (e.g. windows-2025 GitHub Actions runner with only Build Tools installed).
+$vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$vsInstance = $null
+if (Test-Path $vsWhere) {
+    $vsInstance = & $vsWhere -latest -products * `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+        -property installationPath 2>$null
+    if (-not $vsInstance) {
+        $vsInstance = & $vsWhere -latest -products * -property installationPath 2>$null
+    }
+}
+if ($vsInstance) {
+    Write-Host "Using VS instance: $vsInstance"
+} else {
+    Write-Warning "vswhere could not find a VS instance; CMake will attempt auto-detection."
+}
+
 $msvcRt = if ($buildType -eq "Debug") { "MultiThreadedDebugDLL" } else { "MultiThreadedDLL" }
-cmake -S $sentrySrc -B $buildDir -G $generator -A $platArg `
-    -DCMAKE_INSTALL_PREFIX="$installRoot" `
-    -DSENTRY_BUILD_TESTS=OFF `
-    -DSENTRY_BUILD_EXAMPLES=OFF `
+$cmakeConfigArgs = @(
+    "-S", $sentrySrc, "-B", $buildDir,
+    "-G", $generator, "-A", $platArg,
+    "-DCMAKE_INSTALL_PREFIX=$installRoot",
+    "-DSENTRY_BUILD_TESTS=OFF",
+    "-DSENTRY_BUILD_EXAMPLES=OFF",
     "-DCMAKE_MSVC_RUNTIME_LIBRARY=$msvcRt"
+)
+if ($vsInstance) { $cmakeConfigArgs += "-DCMAKE_GENERATOR_INSTANCE=$vsInstance" }
+cmake @cmakeConfigArgs
 
 cmake --build $buildDir --config $buildType --parallel
 cmake --install $buildDir --config $buildType
