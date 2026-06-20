@@ -2,8 +2,10 @@
 
 #include "UIFactionEditorMapWnd.h"
 
+namespace {
 template<class T>
 class enum_dummy {};
+}
 
 bool ui_map_click_has_modifier(u32 mask, u32 flag)
 {
