@@ -56,7 +56,7 @@ if (Test-Path $vsWhere) {
     $vsVersion = & $vsWhere -latest -products * -property installationVersion 2>$null
     $vsMajor = if ($vsVersion) { [int]($vsVersion -split '\.')[0] } else { 17 }
     $generator = switch ($vsMajor) {
-        18 { "Visual Studio 18 2025" }
+        18 { "Visual Studio 18 2026" }
         17 { "Visual Studio 17 2022" }
         16 { "Visual Studio 16 2019" }
         default { "Visual Studio 17 2022" }
