@@ -116,10 +116,7 @@ void CUIActorMenu::CurModeToScript()
         funct(mode);
 }
 
-namespace {
-template<class T>
-class enum_dummy {};
-}
+#include "script_enum_dummy.h"
 
 void CUIActorMenu::script_register(lua_State* luaState)
 {

@@ -1,11 +1,7 @@
 #include "pch_script.h"
 
 #include "UIFactionEditorMapWnd.h"
-
-namespace {
-template<class T>
-class enum_dummy {};
-}
+#include "script_enum_dummy.h"
 
 bool ui_map_click_has_modifier(u32 mask, u32 flag)
 {
