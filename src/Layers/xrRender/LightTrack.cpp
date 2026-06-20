@@ -176,6 +176,42 @@ void CROS_impl::update(IRenderable* O)
 
     IGameObject* _object = dynamic_cast<IGameObject*>(O);
 
+    // Preview / menu renders can invoke ROS without a live game level.
+    // In that case we skip all ray-traced lighting and fall back to a sane
+    // ambient approximation so the deferred color buffer still receives light.
+    if (!g_pGameLevel)
+    {
+        Fvector accum{0.15f, 0.15f, 0.15f};
+        Fvector hemi{0.2f, 0.2f, 0.2f};
+        Fvector sun_{0.2f, 0.2f, 0.2f};
+        if (g_pGamePersistent)
+        {
+            const auto& desc = g_pGamePersistent->Environment().CurrentEnv;
+            accum.set(desc.ambient.x, desc.ambient.y, desc.ambient.z);
+            hemi.set(desc.hemi_color.x, desc.hemi_color.y, desc.hemi_color.z);
+            sun_.set(desc.sun_color.x, desc.sun_color.y, desc.sun_color.z);
+        }
+
+        hemi.mul(.2f);
+        accum.add(hemi);
+        sun_.mul(.2f);
+        accum.add(sun_);
+
+        hemi_value = 1.f;
+        sun_value = 1.f;
+        hemi_smooth = 1.f;
+        sun_smooth = 1.f;
+        approximate = accum;
+        for (size_t i = 0; i < NUM_FACES; ++i)
+        {
+            hemi_cube[i] = 1.f;
+            hemi_cube_smooth[i] = 1.f;
+        }
+
+        update_smooth();
+        return;
+    }
+
     // select sample, randomize position inside object
     vis_data& vis = O->GetRenderData().visual->getVisData();
     Fvector position;

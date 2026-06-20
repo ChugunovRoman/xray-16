@@ -53,12 +53,28 @@ IC void CBackend::set_ZB(GLuint ZB)
 IC void CBackend::ClearRT(GLuint rt, const Fcolor& color)
 {
     // TODO: OGL: Implement support for multi-sampled render targets
-    CHK_GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, rt, 0));
+
+    // glFramebufferTexture2D overwrites GL_COLOR_ATTACHMENT0 in hardware but
+    // does not update the pRT[] cache. Save/restore so that subsequent
+    // set_RT() cache checks see the correct cached value and perform the rebind.
+    const GLuint prev_rt0 = pRT[0];
+    const bool need_restore = (rt != prev_rt0);
+
+    if (need_restore)
+    {
+        pRT[0] = rt;
+        CHK_GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, rt, 0));
+    }
 
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glClearColor(color.r, color.g, color.b, color.a);
-
     CHK_GL(glClear(GL_COLOR_BUFFER_BIT));
+
+    if (need_restore)
+    {
+        pRT[0] = prev_rt0;
+        CHK_GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, prev_rt0, 0));
+    }
 }
 
 IC void CBackend::ClearZB(GLuint zb, float depth)

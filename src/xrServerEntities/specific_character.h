@@ -83,6 +83,8 @@ class CInventoryOwner;
 class CCharacterInfo;
 class CSE_ALifeTraderAbstract;
 
+bool TryReadFactionRankVisuals(CInifile const* settings, pcstr faction, pcstr rankName, xr_vector<shared_str>& outVisuals);
+
 class CSpecificCharacter : public CSharedClass<SSpecificCharacterData, shared_str, false>,
                            public CXML_IdToIndex<CSpecificCharacter>
 {
@@ -134,6 +136,7 @@ public:
     int crouch_type() const;
     bool upgrade_mechanic() const;
     LPCSTR critical_wound_weights() const;
+    bool IsLeader() const { return data()->m_is_leader; }
 
     const shared_str& IconName() const { return data()->m_icon_name; };
 

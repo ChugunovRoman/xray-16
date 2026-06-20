@@ -35,6 +35,11 @@ public:
         table_sect = sect;
         table_width = width;
     }
+    void load_from_table(const ITEM_TABLE& src)
+    {
+        xr_delete(m_pTable);
+        m_pTable = xr_new<ITEM_TABLE>(src);
+    }
 
 private:
     ITEM_TABLE* m_pTable;
@@ -89,7 +94,10 @@ typename CSIni_Table::ITEM_TABLE& CSIni_Table::table()
 
     m_pTable = xr_new<ITEM_TABLE>();
 
-    VERIFY(table_sect);
+    // table may be pre-populated externally via load_from_table()
+    if (!table_sect)
+        return *m_pTable;
+
     size_t table_size = T_INI_LOADER::GetMaxIndex() + 1;
     size_t cur_table_width = (table_width == -1) ? table_size : (size_t)table_width;
 

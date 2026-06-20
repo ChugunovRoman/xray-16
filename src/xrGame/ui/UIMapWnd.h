@@ -46,6 +46,7 @@ private:
         EPdaMapLayer layer = EPdaMapLayer::Surface;
         CUILevelMap* level_map = nullptr;
         CUIStatic* icon = nullptr;
+        CUIStatic* leader_icon = nullptr;
         bool visible = false;
     };
 
@@ -78,6 +79,7 @@ private:
     xr_vector<SExternalMapSpot> m_externalSpots;
     u32 m_lastExternalClickedId;
     EUiMapClick m_lastExternalClick;
+    u32 m_lastExternalClickModifiers;
     bool m_hasPendingExternalClick;
 
 #ifdef DEBUG
@@ -144,6 +146,11 @@ private:
     bool HandleExternalSpotMouse(float x, float y, EUIMessages mouse_action);
     pcstr ResolveExternalSpotTexture(const SMapPointDesc& point) const;
     bool GetExternalPointDescInternal(u32 logical_id, SMapPointDesc& out) const;
+    void SyncLeaderOverlay(SExternalMapSpot& spot);
+    void RefreshExternalSpotFlagsFromDataSource(u32 logical_id, SExternalMapSpot& spot);
+    void DestroyLeaderIcon(SExternalMapSpot& spot);
+    void AttachLeaderIcon(SExternalMapSpot& spot);
+    bool ExternalSpotHitTest(const SExternalMapSpot& spot, const Fvector2& cursorPos) const;
 
     void ResetActionPlanner();
 
@@ -227,8 +234,9 @@ public:
     void SetExternalDataSource(IMapDataSource* source);
     void ClearExternalDataSource();
     bool UsingExternalDataSource() const { return m_externalDataSource != nullptr; }
-    bool ConsumeExternalMapClick(u32& logical_id, EUiMapClick& click_type);
+    bool ConsumeExternalMapClick(u32& logical_id, EUiMapClick& click_type, u32& modifiers);
     bool GetExternalPointDesc(u32 logical_id, SMapPointDesc& out) const { return GetExternalPointDescInternal(logical_id, out); }
+    bool SetExternalPointVisual(u32 logical_id, pcstr owner_faction, pcstr icon_texture);
     void UpdateScroll();
     shared_str cName() const { return "ui_map_wnd"; }
 

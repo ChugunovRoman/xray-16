@@ -14,9 +14,16 @@
 
 namespace
 {
+template <typename T>
+struct XrDelete
+{
+    void operator()(T* value) const { xr_delete(value); }
+};
+
 constexpr pcstr SMART_TERRAIN_MAP_READY_EVENT = "SMART_TERRAIN_MAP:ready";
 constexpr pcstr SMART_PROPS_FILE = "misc\\simulation_objects_props.ltx";
 constexpr pcstr SMART_DEFAULT_SPAWN_FILE = "misc\\simulations\\default.ltx";
+constexpr pcstr SMART_DEFAULT_CUSTOM_SPAWN_FILE = "misc\\simulations\\default_custom.ltx";
 constexpr pcstr SMART_OPTIONS_FILE = "axr_options.ltx";
 
 class CScopedGameGraph final
@@ -239,6 +246,98 @@ shared_str build_hint_text(const SMapPointDesc& point)
     return hint.c_str();
 }
 
+bool line_key_is_leader_squad(pcstr key)
+{
+    if (!key || !key[0])
+        return false;
+
+    static constexpr pcstr suffix = "_sim_squad_leader";
+    const size_t key_len = xr_strlen(key);
+    const size_t suffix_len = xr_strlen(suffix);
+    if (key_len < suffix_len)
+        return false;
+
+    return xr_strcmp(key + key_len - suffix_len, suffix) == 0;
+}
+
+bool section_has_leader_squad(const CInifile& ini, pcstr section_name)
+{
+    if (!section_name || !ini.section_exist(section_name))
+        return false;
+
+    const u32 lineCount = ini.line_count(section_name);
+    for (u32 idx = 0; idx < lineCount; ++idx)
+    {
+        pcstr lineName = nullptr;
+        pcstr lineValue = nullptr;
+        if (!ini.r_line(section_name, idx, &lineName, &lineValue))
+            continue;
+
+        if (line_key_is_leader_squad(lineName))
+            return true;
+    }
+
+    return false;
+}
+
+void apply_leader_squad_flag(SMapPointDesc& point, const CInifile* defaultCustomSpawnIni, const CInifile* defaultSpawnIni)
+{
+    const bool hasCustomSection =
+        defaultCustomSpawnIni && defaultCustomSpawnIni->section_exist(point.smart_name.c_str());
+
+    bool hasLeader = false;
+    if (hasCustomSection && defaultCustomSpawnIni)
+        hasLeader = section_has_leader_squad(*defaultCustomSpawnIni, point.smart_name.c_str());
+    else if (defaultSpawnIni && defaultSpawnIni->section_exist(point.smart_name.c_str()))
+        hasLeader = section_has_leader_squad(*defaultSpawnIni, point.smart_name.c_str());
+
+    if (hasLeader)
+        point.flags |= eMapPointHasLeader;
+    else
+        point.flags &= ~eMapPointHasLeader;
+}
+
+void apply_simulation_owner_overrides(
+    SMapPointDesc& point, const CInifile* defaultCustomSpawnIni, const CInifile* defaultSpawnIni, const CInifile* optionsIni)
+{
+    const bool hasCustomSection =
+        defaultCustomSpawnIni && defaultCustomSpawnIni->section_exist(point.smart_name.c_str());
+    if (hasCustomSection)
+        point.owner_faction = extract_default_owner_faction(*defaultCustomSpawnIni, point.smart_name.c_str());
+    // If smart exists in default_custom.ltx but has no lines, this is an explicit clear override.
+    // In that case we must not fallback to default.ltx owner.
+    if ((!point.owner_faction.c_str() || !point.owner_faction.c_str()[0]) && !hasCustomSection && defaultSpawnIni)
+        point.owner_faction = extract_default_owner_faction(*defaultSpawnIni, point.smart_name.c_str());
+    point.icon_texture = resolve_icon_texture(optionsIni, point.owner_faction.c_str(), point.smart_type.c_str());
+    point.icon_color = resolve_icon_color(optionsIni, point.owner_faction.c_str(), point.smart_type.c_str());
+    point.hint_text = build_hint_text(point);
+    apply_leader_squad_flag(point, defaultCustomSpawnIni, defaultSpawnIni);
+}
+
+void load_simulation_override_inis(
+    std::unique_ptr<CInifile, XrDelete<CInifile>>& defaultSpawnIni,
+    std::unique_ptr<CInifile, XrDelete<CInifile>>& defaultCustomSpawnIni,
+    std::unique_ptr<CInifile, XrDelete<CInifile>>& optionsIni)
+{
+    string_path default_spawn_file_name;
+    string_path default_custom_spawn_file_name;
+    string_path smart_options_file_name;
+    FS.update_path(default_spawn_file_name, "$game_config$", SMART_DEFAULT_SPAWN_FILE);
+    FS.update_path(default_custom_spawn_file_name, "$game_config$", SMART_DEFAULT_CUSTOM_SPAWN_FILE);
+    FS.update_path(smart_options_file_name, "$game_config$", SMART_OPTIONS_FILE);
+
+    defaultSpawnIni.reset();
+    defaultCustomSpawnIni.reset();
+    optionsIni.reset();
+
+    if (FS.exist(default_spawn_file_name))
+        defaultSpawnIni.reset(xr_new<CInifile>(default_spawn_file_name, true, true, false));
+    if (FS.exist(default_custom_spawn_file_name))
+        defaultCustomSpawnIni.reset(xr_new<CInifile>(default_custom_spawn_file_name, true, true, false));
+    if (FS.exist(smart_options_file_name))
+        optionsIni.reset(xr_new<CInifile>(smart_options_file_name, true, true, false));
+}
+
 bool read_spawn_packet(IReader& packet_chunk, NET_Packet& out_packet)
 {
     const u16 packet_size = packet_chunk.r_u16();
@@ -366,12 +465,6 @@ struct SSharedSmartTerrainSnapshot
     xr_vector<SMapPointDesc> points;
 };
 
-template <typename T>
-struct XrDelete
-{
-    void operator()(T* value) const { xr_delete(value); }
-};
-
 bool load_spawn_smart_terrain_points(pcstr spawn_name, xr_vector<SMapPointDesc>& out_points, shared_str& out_focus_level)
 {
     out_points.clear();
@@ -390,18 +483,23 @@ bool load_spawn_smart_terrain_points(pcstr spawn_name, xr_vector<SMapPointDesc>&
 
     string_path smart_props_file_name;
     string_path default_spawn_file_name;
+    string_path default_custom_spawn_file_name;
     string_path smart_options_file_name;
     FS.update_path(smart_props_file_name, "$game_config$", SMART_PROPS_FILE);
     FS.update_path(default_spawn_file_name, "$game_config$", SMART_DEFAULT_SPAWN_FILE);
+    FS.update_path(default_custom_spawn_file_name, "$game_config$", SMART_DEFAULT_CUSTOM_SPAWN_FILE);
     FS.update_path(smart_options_file_name, "$game_config$", SMART_OPTIONS_FILE);
 
     std::unique_ptr<CInifile, XrDelete<CInifile>> smartPropsIni;
     std::unique_ptr<CInifile, XrDelete<CInifile>> defaultSpawnIni;
+    std::unique_ptr<CInifile, XrDelete<CInifile>> defaultCustomSpawnIni;
     std::unique_ptr<CInifile, XrDelete<CInifile>> optionsIni;
     if (FS.exist(smart_props_file_name))
         smartPropsIni.reset(xr_new<CInifile>(smart_props_file_name, true, true, false));
     if (FS.exist(default_spawn_file_name))
         defaultSpawnIni.reset(xr_new<CInifile>(default_spawn_file_name, true, true, false));
+    if (FS.exist(default_custom_spawn_file_name))
+        defaultCustomSpawnIni.reset(xr_new<CInifile>(default_custom_spawn_file_name, true, true, false));
     if (FS.exist(smart_options_file_name))
         optionsIni.reset(xr_new<CInifile>(smart_options_file_name, true, true, false));
 
@@ -473,13 +571,8 @@ bool load_spawn_smart_terrain_points(pcstr spawn_name, xr_vector<SMapPointDesc>&
                     point.display_name = translate_smart_name(point.smart_name.c_str());
                     if (smartPropsIni)
                         point.smart_type = detect_smart_type(*smartPropsIni, point.smart_name.c_str());
-                    if (defaultSpawnIni)
-                        point.owner_faction = extract_default_owner_faction(*defaultSpawnIni, point.smart_name.c_str());
-                    point.icon_texture =
-                        resolve_icon_texture(optionsIni.get(), point.owner_faction.c_str(), point.smart_type.c_str());
-                    point.icon_color =
-                        resolve_icon_color(optionsIni.get(), point.owner_faction.c_str(), point.smart_type.c_str());
-                    point.hint_text = build_hint_text(point);
+                    apply_simulation_owner_overrides(
+                        point, defaultCustomSpawnIni.get(), defaultSpawnIni.get(), optionsIni.get());
 
                     out_points.push_back(point);
                 }
@@ -601,6 +694,54 @@ public:
         return m_revision;
     }
 
+    bool UpdatePublishedPoint(pcstr spawn_name, u32 logical_id, pcstr owner_faction, pcstr icon_texture)
+    {
+        if (!m_published || xr_strcmp(m_published->spawn_name.c_str(), spawn_name) != 0)
+            return false;
+
+        std::unique_ptr<CInifile, XrDelete<CInifile>> defaultSpawnIni;
+        std::unique_ptr<CInifile, XrDelete<CInifile>> defaultCustomSpawnIni;
+        std::unique_ptr<CInifile, XrDelete<CInifile>> optionsIni;
+        load_simulation_override_inis(defaultSpawnIni, defaultCustomSpawnIni, optionsIni);
+
+        for (auto& point : m_published->points)
+        {
+            if (point.logical_id != logical_id)
+                continue;
+
+            point.owner_faction = owner_faction ? owner_faction : "";
+            if (icon_texture && icon_texture[0])
+                point.icon_texture = icon_texture;
+            else
+                point.icon_texture =
+                    resolve_icon_texture(optionsIni.get(), point.owner_faction.c_str(), point.smart_type.c_str());
+            point.icon_color =
+                resolve_icon_color(optionsIni.get(), point.owner_faction.c_str(), point.smart_type.c_str());
+            point.hint_text = build_hint_text(point);
+            apply_leader_squad_flag(point, defaultCustomSpawnIni.get(), defaultSpawnIni.get());
+            return true;
+        }
+
+        return false;
+    }
+
+    void RefreshPublishedFromSimulationLtx(pcstr spawn_name)
+    {
+        if (!m_published || xr_strcmp(m_published->spawn_name.c_str(), spawn_name) != 0)
+            return;
+
+        std::unique_ptr<CInifile, XrDelete<CInifile>> defaultSpawnIni;
+        std::unique_ptr<CInifile, XrDelete<CInifile>> defaultCustomSpawnIni;
+        std::unique_ptr<CInifile, XrDelete<CInifile>> optionsIni;
+        load_simulation_override_inis(defaultSpawnIni, defaultCustomSpawnIni, optionsIni);
+
+        for (auto& point : m_published->points)
+        {
+            apply_simulation_owner_overrides(
+                point, defaultCustomSpawnIni.get(), defaultSpawnIni.get(), optionsIni.get());
+        }
+    }
+
 private:
     CSharedSmartTerrainMapCache() = default;
 
@@ -641,7 +782,13 @@ void CSpawnSmartTerrainMapDataSource::SetSpawnName(pcstr spawn_name)
 
 void CSpawnSmartTerrainMapDataSource::Reload()
 {
-    StartSharedLoading(m_spawn_name.c_str());
+    CSharedSmartTerrainMapCache::Instance().RefreshPublishedFromSimulationLtx(m_spawn_name.c_str());
+}
+
+bool CSpawnSmartTerrainMapDataSource::UpdatePointVisual(u32 logical_id, pcstr owner_faction, pcstr icon_texture)
+{
+    return CSharedSmartTerrainMapCache::Instance().UpdatePublishedPoint(
+        m_spawn_name.c_str(), logical_id, owner_faction, icon_texture);
 }
 
 void CSpawnSmartTerrainMapDataSource::EnumeratePoints(xr_vector<SMapPointDesc>& out) const

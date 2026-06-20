@@ -18,6 +18,7 @@ public:
     void EnumeratePoints(xr_vector<SMapPointDesc>& out) const override;
     u32 GetDataRevision() const override;
     bool GetFocusLevel(shared_str& outLevel) const override;
+    bool UpdatePointVisual(u32 logical_id, pcstr owner_faction, pcstr icon_texture) override;
 
 private:
     shared_str m_spawn_name;

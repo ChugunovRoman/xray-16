@@ -57,6 +57,7 @@ public:
 
     static float sympathy(CHARACTER_COMMUNITY_INDEX);
 
+    static void BuildRelationTableFromFiles();
     static void DeleteIdToIndexData();
 
 private:

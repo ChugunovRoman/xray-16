@@ -6,6 +6,23 @@
 #include "UIHelper.h"
 #include "UITaskWnd.h"
 
+namespace
+{
+bool make_parent_path(pcstr path, string512& out)
+{
+    if (!path || !path[0])
+        return false;
+
+    xr_strcpy(out, sizeof(out), path);
+    pstr separator = strrchr(out, ':');
+    if (!separator)
+        return false;
+
+    *separator = 0;
+    return out[0] != 0;
+}
+} // namespace
+
 void CUIMapWnd::init_xml_nav(CUIXml& xml, pcstr start_from, bool critical)
 {
     const bool allow_root_fallback = strchr(start_from, ':') == nullptr;
@@ -13,6 +30,20 @@ void CUIMapWnd::init_xml_nav(CUIXml& xml, pcstr start_from, bool critical)
     string512 nested_parent_path;
     strconcat(sizeof(nested_parent_path), nested_parent_path, start_from, ":btn_nav_parent");
     m_btn_nav_parent = UIHelper::CreateStatic(xml, nested_parent_path, this, false);
+
+    if (!m_btn_nav_parent)
+    {
+        string512 owner_path;
+        if (make_parent_path(start_from, owner_path))
+        {
+            string512 sibling_parent_path;
+            strconcat(sizeof(sibling_parent_path), sibling_parent_path, owner_path, ":btn_nav_parent");
+            m_btn_nav_parent = UIHelper::CreateStatic(xml, sibling_parent_path, this, false);
+            if (m_btn_nav_parent)
+                xr_strcpy(nested_parent_path, sizeof(nested_parent_path), sibling_parent_path);
+        }
+    }
+
     if (!m_btn_nav_parent && allow_root_fallback)
         m_btn_nav_parent = UIHelper::CreateStatic(xml, "btn_nav_parent", this, critical);
 
@@ -79,6 +110,13 @@ void CUIMapWnd::init_xml_layer_switcher(CUIXml& xml, pcstr start_from, bool)
 
     string512 nested_parent_path;
     strconcat(sizeof(nested_parent_path), nested_parent_path, start_from, ":btn_nav_parent");
+
+    if (!xml.NavigateToNode(nested_parent_path, 0))
+    {
+        string512 owner_path;
+        if (make_parent_path(start_from, owner_path))
+            strconcat(sizeof(nested_parent_path), nested_parent_path, owner_path, ":btn_nav_parent");
+    }
 
     string128 nested_surface_path;
     xr_sprintf(nested_surface_path, "%s:btn_layer_surface", nested_parent_path);

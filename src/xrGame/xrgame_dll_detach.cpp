@@ -50,6 +50,7 @@ void init_game_globals()
     CCharacterInfo::InitInternal();
     CSpecificCharacter::InitInternal();
     CHARACTER_COMMUNITY::InitInternal();
+    CHARACTER_COMMUNITY::BuildRelationTableFromFiles();
     CHARACTER_RANK::InitInternal();
     CHARACTER_REPUTATION::InitInternal();
     MONSTER_COMMUNITY::InitInternal();

@@ -81,7 +81,17 @@ void CDamageManager::load_section(LPCSTR section, CInifile const* ini)
         { // read all except default line
             VERIFY(m_object);
             int bone = kinematics->LL_BoneID(i.first);
-            R_ASSERT2(BI_NONE != bone, i.first.c_str());
+            {
+                string512 error_str;
+                xr_sprintf(
+                    error_str,
+                    "missing bone in damage section [%s]; object=[%s]; visual=[%s]",
+                    section,
+                    m_object->cName().c_str(),
+                    m_object->cNameVisual().c_str()
+                );
+                R_ASSERT3(BI_NONE != bone, i.first.c_str(), error_str);
+            }
             CBoneInstance& bone_instance = kinematics->LL_GetBoneInstance(u16(bone));
             bone_instance.set_param(0, (float)atof(_GetItem(i.second.c_str(), 0, buffer)));
             bone_instance.set_param(1, (float)atoi(_GetItem(i.second.c_str(), 1, buffer)));

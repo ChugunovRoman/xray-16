@@ -84,6 +84,8 @@ public:
     float Scroll2ViewV() const; // calculate scale for scroll position
     CUIScrollBar* ScrollBar() { return m_VScrollBar; }
 
+    [[nodiscard]] bool IsScrollView() const override { return true; }
+
     pcstr GetDebugType() override { return "CUIScrollView"; }
     void FillDebugInfo() override;
 

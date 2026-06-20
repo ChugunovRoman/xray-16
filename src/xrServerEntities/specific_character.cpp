@@ -9,6 +9,67 @@ extern Checker g_checker;
 
 #include "PhraseDialog.h"
 
+bool TryReadFactionRankVisuals(CInifile const* settings, pcstr faction, pcstr rankName, xr_vector<shared_str>& outVisuals)
+{
+    outVisuals.clear();
+
+    xr_string sectionName = faction;
+    sectionName.append("_visuals_");
+    sectionName.append(rankName);
+
+    if (settings->section_exist(sectionName.c_str()))
+    {
+        const u32 lineCount = settings->line_count(sectionName.c_str());
+        for (u32 lineIdx = 0; lineIdx < lineCount; ++lineIdx)
+        {
+            pcstr lineName = nullptr;
+            pcstr lineValue = nullptr;
+            if (!settings->r_line(sectionName.c_str(), lineIdx, &lineName, &lineValue))
+                continue;
+
+            pcstr rawValue = lineValue;
+            if ((!rawValue || !rawValue[0]) && lineName && lineName[0])
+                rawValue = lineName;
+            if (!rawValue || !rawValue[0])
+                continue;
+
+            xr_string visual = rawValue;
+            _Trim(visual);
+            if (!visual.empty())
+                outVisuals.emplace_back(visual.c_str());
+        }
+
+        if (!outVisuals.empty())
+            return true;
+    }
+
+    xr_string legacySectionName = faction;
+    legacySectionName.append("_");
+    legacySectionName.append(rankName);
+
+    if (settings->section_exist(legacySectionName.c_str()) && settings->line_exist(legacySectionName.c_str(), "visuals"))
+    {
+        LPCSTR visuals = settings->r_string(legacySectionName.c_str(), "visuals");
+        if (visuals && visuals[0])
+        {
+            const int itemCount = _GetItemCount(visuals);
+            string128 visualItem;
+            for (int idx = 0; idx < itemCount; ++idx)
+            {
+                if (_GetItem(visuals, idx, visualItem))
+                {
+                    xr_string visual = visualItem;
+                    _Trim(visual);
+                    if (!visual.empty())
+                        outVisuals.emplace_back(visual.c_str());
+                }
+            }
+        }
+    }
+
+    return !outVisuals.empty();
+}
+
 void CSpecificCharacter::InitXmlIdToIndex()
 {
     if (!id_to_index::tag_name)
@@ -229,15 +290,28 @@ void CSpecificCharacter::load_shared(LPCSTR)
     full_section_id.append("_");
     full_section_id.append(rank_name);
     _Trim(full_section_id);
-    if (!data()->m_not_replace_visual &&pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "visuals"))
+    if (!data()->m_not_replace_visual)
     {
-        CRandom random((u32)(CPU::QPC() & u32(-1)));
+        bool visual_overridden = false;
+        if (data()->m_is_leader && pSettingsFE->section_exist(team) && pSettingsFE->line_exist(team, "visual_leader"))
+        {
+            LPCSTR visuals = pSettingsFE->r_string(team, "visual_leader");
+            if (visuals && visuals[0] != '\0')
+            {
+                string128 visual_item;
+                int rand = ::Random.randI(0, _GetItemCount(visuals));
+                _GetItem(visuals, rand, visual_item);
+                data()->m_sVisual = visual_item;
+                visual_overridden = true;
+            }
+        }
 
-        LPCSTR visuals = pSettingsFE->r_string(full_section_id.c_str(), "visuals");
-        string128 visual_item;
-        int rand = ::Random.randI(0, _GetItemCount(visuals));
-        _GetItem(visuals, rand, visual_item);
-        data()->m_sVisual = visual_item;
+        xr_vector<shared_str> rankVisuals;
+        if (!visual_overridden && TryReadFactionRankVisuals(pSettingsFE, team, rank_name.c_str(), rankVisuals))
+        {
+            const int rand = ::Random.randI(0, static_cast<int>(rankVisuals.size()));
+            data()->m_sVisual = rankVisuals[rand].c_str();
+        }
     }
     if (!data()->m_not_replace_money)
     {
@@ -248,8 +322,21 @@ void CSpecificCharacter::load_shared(LPCSTR)
 
         MoneyDef().max_money = _max(MoneyDef().max_money, MoneyDef().min_money);
     }
-    if (!data()->m_not_replace_reputation && pSettingsFE->section_exist(full_section_id.c_str()) && pSettingsFE->line_exist(full_section_id.c_str(), "reputation"))
-        data()->m_Reputation = pSettingsFE->r_u32(full_section_id.c_str(), "reputation");
+    if (!data()->m_not_replace_reputation && pSettingsFE->section_exist(full_section_id.c_str()))
+    {
+        const bool has_min = pSettingsFE->line_exist(full_section_id.c_str(), "min_reputation");
+        const bool has_max = pSettingsFE->line_exist(full_section_id.c_str(), "max_reputation");
+        if (has_min || has_max)
+        {
+            int rep_min = has_min ? pSettingsFE->r_s32(full_section_id.c_str(), "min_reputation")
+                                  : pSettingsFE->r_s32(full_section_id.c_str(), "max_reputation");
+            int rep_max = has_max ? pSettingsFE->r_s32(full_section_id.c_str(), "max_reputation") : rep_min;
+            if (rep_max < rep_min) { int t = rep_min; rep_min = rep_max; rep_max = t; }
+            data()->m_Reputation = (rep_min == rep_max) ? rep_min : ::Random.randI(rep_min, rep_max + 1);
+        }
+        else if (pSettingsFE->line_exist(full_section_id.c_str(), "reputation"))
+            data()->m_Reputation = pSettingsFE->r_s32(full_section_id.c_str(), "reputation");
+    }
 
 
     if (pSettingsFE->section_exist(team) && pSettingsFE->line_exist(team, "names"))

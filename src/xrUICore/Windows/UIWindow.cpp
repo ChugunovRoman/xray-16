@@ -54,18 +54,18 @@ CUIWindow::~CUIWindow()
 
 void CUIWindow::Draw()
 {
-    const xr_vector<CUIWindow*> children_copy(m_ChildWndList.begin(), m_ChildWndList.end());
-    for (CUIWindow* child : children_copy)
+    ++m_iterating_depth;
+    for (CUIWindow* child : m_ChildWndList)
     {
-        if (!child)
-            continue;
-        if (std::find(m_ChildWndList.begin(), m_ChildWndList.end(), child) == m_ChildWndList.end())
-            continue;
-        if (!child->IsShown())
-            continue;
-        if (child->GetCustomDraw())
+        if (!child || !child->IsShown() || child->GetCustomDraw())
             continue;
         child->Draw();
+    }
+    if (--m_iterating_depth == 0)
+    {
+        for (CUIWindow* child : m_deferred_detach)
+            DetachChildImpl(this, child);
+        m_deferred_detach.clear();
     }
 }
 
@@ -94,16 +94,18 @@ void CUIWindow::Update()
             OnFocusLost();
     }
 
-    const xr_vector<CUIWindow*> children_copy(m_ChildWndList.begin(), m_ChildWndList.end());
-    for (CUIWindow* child : children_copy)
+    ++m_iterating_depth;
+    for (CUIWindow* child : m_ChildWndList)
     {
-        if (!child)
-            continue;
-        if (std::find(m_ChildWndList.begin(), m_ChildWndList.end(), child) == m_ChildWndList.end())
-            continue;
-        if (!child->IsShown())
+        if (!child || !child->IsShown())
             continue;
         child->Update();
+    }
+    if (--m_iterating_depth == 0)
+    {
+        for (CUIWindow* child : m_deferred_detach)
+            DetachChildImpl(this, child);
+        m_deferred_detach.clear();
     }
 }
 
@@ -121,18 +123,26 @@ void CUIWindow::AttachChild(CUIWindow* pChild)
 void CUIWindow::DetachChild(CUIWindow* pChild)
 {
     R_ASSERT(pChild);
-    if (NULL == pChild)
+    if (!pChild)
         return;
 
+    if (m_iterating_depth > 0)
+    {
+        m_deferred_detach.push_back(pChild);
+        return;
+    }
     DetachChildImpl(this, pChild);
 }
 
 void CUIWindow::DetachAll()
 {
+    // Process any deferred detaches first to avoid double-free
+    for (CUIWindow* child : m_deferred_detach)
+        DetachChildImpl(this, child);
+    m_deferred_detach.clear();
+
     while (!m_ChildWndList.empty())
-    {
-        DetachChild(m_ChildWndList.back());
-    }
+        DetachChildImpl(this, m_ChildWndList.back());
 }
 
 void CUIWindow::GetAbsoluteRect(Frect& r) const
@@ -186,6 +196,11 @@ bool CUIWindow::OnMouseAction(float x, float y, EUIMessages mouse_action)
         //получить координаты относительно окна
         cursor_pos.x -= wndRect.left;
         cursor_pos.y -= wndRect.top;
+
+        // Снять фокус с input-поля при клике в любом месте диалога.
+        // Если клик попал на edit box — он восстановит фокус сам через CaptureFocus(true).
+        if ((mouse_action == WINDOW_LBUTTON_DOWN || mouse_action == WINDOW_LBUTTON_DB_CLICK) && m_pKeyboardCapturer)
+            ReleaseFocusCapture();
     }
 
     //если есть дочернее окно,захватившее мышь, то
@@ -416,6 +431,20 @@ void CUIWindow::SetKeyboardCapture(CUIWindow* pChildWindow, bool capture_status)
         m_pKeyboardCapturer = NULL;
 }
 
+// Рекурсивно идёт вниз по цепочке m_pKeyboardCapturer и отправляет
+// WINDOW_KEYBOARD_CAPTURE_LOST конечному узлу (CUICustomEdit), минуя
+// переопределения SendMessage в промежуточных окнах (например CUIScrollView).
+void CUIWindow::ReleaseFocusCapture()
+{
+    if (!m_pKeyboardCapturer)
+        return;
+    if (m_pKeyboardCapturer->GetKeyboardCapturer())
+        m_pKeyboardCapturer->ReleaseFocusCapture();
+    else
+        m_pKeyboardCapturer->SendMessage(this, WINDOW_KEYBOARD_CAPTURE_LOST);
+    m_pKeyboardCapturer = nullptr;
+}
+
 //обработка сообщений
 void CUIWindow::SendMessage(CUIWindow* pWnd, s16 msg, void* pData)
 {
@@ -470,6 +499,16 @@ void CUIWindow::ResetAll()
 }
 
 CUIWindow* CUIWindow::GetMessageTarget() { return m_pMessageTarget ? m_pMessageTarget : GetParent(); }
+
+void CUIWindow::NotifyParentScrollViewsAboutChildSizeChanged()
+{
+    for (CUIWindow* parent = GetParent(); parent; parent = parent->GetParent())
+    {
+        if (parent->IsScrollView())
+            parent->SendMessage(this, CHILD_CHANGED_SIZE, nullptr);
+    }
+}
+
 bool CUIWindow::IsChild(CUIWindow* pPossibleChild) const
 {
     WINDOW_LIST::const_iterator it = std::find(m_ChildWndList.begin(), m_ChildWndList.end(), pPossibleChild);

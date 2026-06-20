@@ -7,6 +7,8 @@
 #include "xrEngine/IGame_Persistent.h"
 #include "xrEngine/IRenderable.h"
 #include "xrCore/FS.h"
+#include "Layers/xrRender/xrRender_console.h"
+#include <algorithm>
 
 #if defined(USE_DX11)
 #include "Layers/xrRenderPC_R4/r4_rendertarget.h"
@@ -22,14 +24,10 @@ u32 s_icon_gbuf_w{};
 u32 s_icon_gbuf_h{};
 u32 s_icon_gbuf_cfg_pack{};
 
-#if defined(USE_DX11)
 // Keep UI RT alive: local ref_rt in WeaponIcon_RenderToTexture used to be destroyed on return, clearing
 // CTexture's pSurface — UI then sampled an empty $user$ texture (fully transparent). DDS dumps still looked fine.
 static xr_map<shared_str, ref_rt> s_persist_icon_ui_rt;
 void ReleasePersistedIconUiRts() { s_persist_icon_ui_rt.clear(); }
-#else
-void ReleasePersistedIconUiRts() {}
-#endif
 
 ref_rt s_rt_p{};
 ref_rt s_rt_n{};
@@ -238,23 +236,17 @@ void WeaponIcon_ReleaseStaticResources()
 
 void CRender::WeaponIcon_ReleaseUserIconRt(pcstr texture_name)
 {
-#if defined(USE_DX11)
     if (!texture_name || !texture_name[0])
         return;
     const shared_str key(texture_name);
     const auto it = wpn_icon::s_persist_icon_ui_rt.find(key);
     if (it != wpn_icon::s_persist_icon_ui_rt.end())
         wpn_icon::s_persist_icon_ui_rt.erase(it);
-#else
-    (void)texture_name;
-#endif
 }
 
 void CRender::WeaponIcon_ReleaseAllUserIconRts()
 {
-#if defined(USE_DX11)
     wpn_icon::s_persist_icon_ui_rt.clear();
-#endif
 }
 
 bool CRender::WeaponIcon_SavePersistedUserRtToDdsDxt5(pcstr user_texture_name, pcstr fs_root, pcstr fname)
@@ -272,17 +264,6 @@ bool CRender::WeaponIcon_SavePersistedUserRtToDdsDxt5(pcstr user_texture_name, p
 bool CRender::WeaponIcon_RenderToTexture(
     pcstr texture_name, u32 w, u32 h, const Fmatrix& view, const Fmatrix& proj, IRenderable* subject)
 {
-#if !defined(USE_DX11)
-    (void)texture_name;
-    (void)w;
-    (void)h;
-    (void)view;
-    (void)proj;
-    (void)subject;
-    Msg("! [weapon_inv_icon] R2 WeaponIcon_RenderToTexture: not USE_DX11 (stub) tex=[%s]",
-        texture_name ? texture_name : "");
-    return false;
-#else
     using namespace wpn_icon;
     if (!texture_name || !texture_name[0] || !w || !h)
         return false;
@@ -408,7 +389,13 @@ bool CRender::WeaponIcon_RenderToTexture(
     dg.r_pmask(pm0, pm1, pmw);
 
     // Bind the same depth-stencil as the g-buffer pass so stencil test can mask the resolve quad (transparent bg).
+#if defined(USE_DX11)
     Target->u_setrt(RCache, rt_ui, nullptr, nullptr, s_rt_z->pZRT[RCache.context_id]);
+#elif defined(USE_OGL)
+    Target->u_setrt(RCache, w, h, rt_ui->pRT, 0, 0, s_rt_z->pZRT);
+#else
+#   error No graphics API selected or enabled!
+#endif
     RImplementation.rmNormal(RCache);
     const Fcolor clear_ui(0.f, 0.f, 0.f, 0.f);
     RCache.ClearRT(rt_ui, clear_ui);
@@ -460,11 +447,14 @@ bool CRender::WeaponIcon_RenderToTexture(
     RCache.set_Geometry(Target->g_menu);
     RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
 
-    // SaveWeaponIconRtToDds("ui", texture_name, rt_ui);
-
     RCache.set_Stencil(FALSE);
-    Target->u_setrt(
-        RCache, saved.dwWidth, saved.dwHeight, Target->get_base_rt(), nullptr, nullptr, Target->get_base_zb());
+#if defined(USE_DX11)
+    Target->u_setrt(RCache, saved.dwWidth, saved.dwHeight, Target->get_base_rt(), nullptr, nullptr, Target->get_base_zb());
+#elif defined(USE_OGL)
+    Target->u_setrt(RCache, saved.dwWidth, saved.dwHeight, Target->get_base_rt(), 0, 0, Target->get_base_zb());
+#else
+#   error No graphics API selected or enabled!
+#endif
     RImplementation.rmNormal(RCache);
 
     Device.mView = saved.mView;
@@ -483,6 +473,5 @@ bool CRender::WeaponIcon_RenderToTexture(
     RCache.set_xform_project(Device.mProject);
 
     return true;
-#endif
 }
 } // namespace xray::render::RENDER_NAMESPACE

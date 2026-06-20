@@ -32,6 +32,7 @@ void CSE_ALifeTraderAbstract::script_register(lua_State* luaState)
             .def("set_profile_name", +[](CSE_ALifeTraderAbstract* ta, const pcstr str) { ta->set_character_profile(str); })
             .def("character_name", +[](CSE_ALifeTraderAbstract* ta) { return ta->m_character_name.c_str(); })
             .def("set_character_name", +[](CSE_ALifeTraderAbstract* ta, const pcstr str) { ta->m_character_name = str; })
+            .def("reroll_fe_visual", &CSE_ALifeTraderAbstract::reroll_fe_visual)
             .def("rank", &CSE_ALifeTraderAbstract::Rank)
             .def("rank_as_text", +[](CSE_ALifeTraderAbstract* ta) -> pcstr
             {

@@ -256,6 +256,8 @@ u32 npc_perf_motivator_dead_interval = 3000;
 u32 npc_perf_sim_brain_actor_update_interval = 10000;
 int npc_perf_agent_enemy_fill_squads_trace_members = 0;
 
+u32 npc_preview_scene_budget_per_frame = 1;
+
 Flags32 g_uCommonFlags;
 enum E_COMMON_FLAGS
 {
@@ -2876,6 +2878,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_motivator_dead_interval", (int*)&npc_perf_motivator_dead_interval, 100, 120000);
     CMD4(CCC_Integer, "npc_perf_sim_brain_actor_update_interval", (int*)&npc_perf_sim_brain_actor_update_interval, 1000, 120000);
     CMD4(CCC_Integer, "npc_perf_agent_enemy_fill_squads_trace_members", &npc_perf_agent_enemy_fill_squads_trace_members, 0, 1);
+    CMD4(CCC_Integer, "npc_preview_scene_budget_per_frame", (int*)&npc_preview_scene_budget_per_frame, 1, 500);
 
 #ifndef MASTER_GOLD
     CMD3(CCC_Mask, "ai_ignore_actor", &psAI_Flags, aiIgnoreActor);

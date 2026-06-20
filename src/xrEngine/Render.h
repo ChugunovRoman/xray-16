@@ -13,6 +13,28 @@ typedef FactoryPtr<IUIShader> wm_shader;
 class ENGINE_API IRenderable;
 struct ENGINE_API FSlideWindowItem;
 
+struct ENGINE_API SPreviewSceneSettings
+{
+    float yaw_deg{};
+    float pitch_deg{};
+    float roll_deg{};
+    Fvector offset{};
+    float camera_distance_offset{};
+    shared_str pose_name{};
+    u32 frame_width{256};
+    u32 frame_height{256};
+
+    [[nodiscard]] bool operator==(const SPreviewSceneSettings& rhs) const noexcept
+    {
+        return yaw_deg == rhs.yaw_deg && pitch_deg == rhs.pitch_deg && roll_deg == rhs.roll_deg &&
+            offset.x == rhs.offset.x && offset.y == rhs.offset.y && offset.z == rhs.offset.z &&
+            camera_distance_offset == rhs.camera_distance_offset && pose_name == rhs.pose_name &&
+            frame_width == rhs.frame_width && frame_height == rhs.frame_height;
+    }
+
+    [[nodiscard]] bool operator!=(const SPreviewSceneSettings& rhs) const noexcept { return !(*this == rhs); }
+};
+
 // fwd. decl.
 struct SDL_Window;
 struct SPPInfo;
@@ -430,6 +452,66 @@ public:
     virtual void ClearTarget() = 0;
     virtual void SetCacheXform(Fmatrix& mView, Fmatrix& mProject) = 0;
     virtual void OnAssetsChanged() = 0;
+
+    virtual void PreviewScene_Initialize() {}
+    virtual void PreviewScene_Shutdown() {}
+    [[nodiscard]] virtual bool PreviewScene_IsReady() const { return false; }
+    virtual void PreviewScene_ResetBegin() {}
+    virtual void PreviewScene_ResetEnd() {}
+    virtual bool PreviewScene_RenderRenderable(IRenderable* subject, const Fmatrix& view, const Fmatrix& proj)
+    {
+        (void)subject;
+        (void)view;
+        (void)proj;
+        return false;
+    }
+    virtual bool PreviewScene_RenderModel(pcstr model_path, const Fmatrix& view, const Fmatrix& proj)
+    {
+        (void)model_path;
+        (void)view;
+        (void)proj;
+        return false;
+    }
+    virtual bool PreviewScene_RenderModelNoCache(pcstr model_path, shared_str& out_texture_name)
+    {
+        (void)model_path;
+        out_texture_name = shared_str();
+        return false;
+    }
+    virtual void PreviewScene_ScheduleModel(pcstr model_path, u32 priority = 1000)
+    {
+        (void)model_path;
+        (void)priority;
+    }
+    virtual void PreviewScene_ProcessQueue() {}
+    [[nodiscard]] virtual bool PreviewScene_IsCached(pcstr model_path) const
+    {
+        (void)model_path;
+        return false;
+    }
+    [[nodiscard]] virtual bool PreviewScene_IsDirty(pcstr model_path) const
+    {
+        (void)model_path;
+        return false;
+    }
+    [[nodiscard]] virtual shared_str PreviewScene_TextureName(pcstr model_path) const
+    {
+        (void)model_path;
+        return shared_str();
+    }
+    [[nodiscard]] virtual shared_str PreviewScene_ResolvedPoseName(pcstr model_path) const
+    {
+        (void)model_path;
+        return shared_str();
+    }
+    virtual void PreviewScene_CollectCycleNames(pcstr model_path, xr_vector<shared_str>& out_cycles)
+    {
+        (void)model_path;
+        out_cycles.clear();
+    }
+    virtual void PreviewScene_ReleaseEphemeralTexture(pcstr texture_name) { (void)texture_name; }
+    virtual void PreviewScene_SetSettings(const SPreviewSceneSettings& settings) { (void)settings; }
+    [[nodiscard]] virtual SPreviewSceneSettings PreviewScene_GetSettings() const { return {}; }
 
     virtual RenderContext GetCurrentContext() const = 0;
     virtual void MakeContextCurrent(RenderContext context) = 0;

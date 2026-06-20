@@ -25,4 +25,9 @@ public:
     void AddImmunities(const char* section, const CInifile* ini, bool invert = false);
     float GetHitImmunity(ALife::EHitType hit_type) const { return m_HitImmunityKoefs[hit_type]; }
     float AffectHit(float power, ALife::EHitType hit_type) const { return power * GetHitImmunity(hit_type); }
+    void SetHitImmunity(ALife::EHitType hit_type, float value)
+    {
+        if (hit_type < (ALife::EHitType)m_HitImmunityKoefs.size())
+            m_HitImmunityKoefs[hit_type] = value;
+    }
 };

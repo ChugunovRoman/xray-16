@@ -5,17 +5,21 @@
 #include "xrEngine/device.h"
 #include "xrEngine/IGame_Persistent.h"
 #include "xrEngine/IGame_Level.h"
+#include "xrEngine/XR_IOConsole.h"
 #include "xrEngine/GameFont.h"
 #include "xrEngine/PerformanceAlert.hpp"
 
 #include "Layers/xrRender/FBasicVisual.h"
 #include "Layers/xrRender/FVF.h"
+#include "Include/xrRender/KinematicsAnimated.h"
 #include "Layers/xrRender/SkeletonCustom.h"
 #include "Layers/xrRender/dxWallMarkArray.h"
 #include "Layers/xrRender/dxUIShader.h"
+#include "xrCore/_std_extensions.h"
+
+#include "PreviewSceneRenderer.h"
 
 #include <algorithm>
-
 #if defined(USE_DX11)
 #include "Layers/xrRenderDX11/3DFluid/dx113DFluidManager.h"
 #endif
@@ -829,6 +833,7 @@ void CRender::create()
     };
     PSLibrary.OnCreate();
     HWOCC.occq_create(occq_size);
+    PreviewScene_Initialize();
 
     rmNormal(RCache);
     q_sync_point.Create();
@@ -844,6 +849,7 @@ void CRender::create()
 void CRender::destroy()
 {
     Device.ModelDeferredClear = nullptr;
+    PreviewScene_Shutdown();
 #if defined(USE_DX11)
     FluidManager.Destroy();
 #endif
@@ -860,6 +866,7 @@ void CRender::destroy()
 void CRender::reset_begin()
 {
     ZoneScoped;
+    PreviewScene_ResetBegin();
     // Wait for tasks to be done
     r_main.sync();
     r_sun.sync();
@@ -931,6 +938,8 @@ void CRender::reset_end()
     FluidManager.SetScreenSize(Device.dwWidth, Device.dwHeight);
 #endif
 
+    PreviewScene_ResetEnd();
+
     cleanup_contexts();
 
     // Set this flag true to skip the first render frame,
@@ -958,8 +967,148 @@ void CRender::OnFrame()
     ZoneScoped;
     // `Models->DeleteQueue()` runs from `Device.ModelDeferredClear` in `ProcessFrame` before `PreRenderThread`.
 
+    if (m_preview_scene)
+        m_preview_scene->ProcessQueue();
+
     if (g_pGamePersistent->MainMenuActiveOrLevelNotExist())
         return;
+}
+
+void CRender::PreviewScene_Initialize()
+{
+    if (!m_preview_scene)
+        return;
+    m_preview_scene->Initialize();
+}
+
+void CRender::PreviewScene_Shutdown()
+{
+    if (!m_preview_scene)
+        return;
+    m_preview_scene->Shutdown();
+}
+
+void CRender::PreviewScene_ResetBegin()
+{
+    if (!m_preview_scene)
+        return;
+    m_preview_scene->ResetBegin();
+}
+
+void CRender::PreviewScene_ResetEnd()
+{
+    if (!m_preview_scene)
+        return;
+    m_preview_scene->ResetEnd();
+}
+
+bool CRender::PreviewScene_RenderRenderable(IRenderable* subject, const Fmatrix& view, const Fmatrix& proj)
+{
+    if (!m_preview_scene)
+        return false;
+    return m_preview_scene->RenderRenderable(subject, view, proj);
+}
+
+bool CRender::PreviewScene_RenderModel(pcstr model_path, const Fmatrix& view, const Fmatrix& proj)
+{
+    if (!m_preview_scene)
+        return false;
+    return m_preview_scene->RenderModel(model_path, view, proj);
+}
+
+bool CRender::PreviewScene_RenderModelNoCache(pcstr model_path, shared_str& out_texture_name)
+{
+    out_texture_name = shared_str();
+    if (!m_preview_scene)
+        return false;
+    return m_preview_scene->RenderModelNoCache(model_path, out_texture_name);
+}
+
+void CRender::PreviewScene_ScheduleModel(pcstr model_path, u32 priority)
+{
+    if (!m_preview_scene)
+        return;
+    m_preview_scene->ScheduleModel(model_path, priority);
+}
+
+bool CRender::PreviewScene_IsCached(pcstr model_path) const
+{
+    return m_preview_scene && m_preview_scene->IsCached(model_path);
+}
+
+bool CRender::PreviewScene_IsDirty(pcstr model_path) const
+{
+    return m_preview_scene && m_preview_scene->IsDirty(model_path);
+}
+
+shared_str CRender::PreviewScene_TextureName(pcstr model_path) const
+{
+    if (!m_preview_scene)
+        return shared_str();
+    return m_preview_scene->TextureName(model_path);
+}
+
+shared_str CRender::PreviewScene_ResolvedPoseName(pcstr model_path) const
+{
+    if (!m_preview_scene)
+        return shared_str();
+    return m_preview_scene->ResolvedPoseName(model_path);
+}
+
+void CRender::PreviewScene_CollectCycleNames(pcstr model_path, xr_vector<shared_str>& out_cycles)
+{
+    out_cycles.clear();
+    if (!m_preview_scene)
+        return;
+
+    m_preview_scene->CollectCycleNames(model_path, out_cycles);
+}
+
+void CRender::PreviewScene_ReleaseEphemeralTexture(pcstr texture_name)
+{
+    if (!m_preview_scene)
+        return;
+
+    m_preview_scene->ReleaseEphemeralTexture(texture_name);
+}
+
+void CRender::PreviewScene_SetSettings(const SPreviewSceneSettings& settings)
+{
+    if (!m_preview_scene)
+        return;
+    m_preview_scene->SetSettings(settings);
+}
+
+SPreviewSceneSettings CRender::PreviewScene_GetSettings() const
+{
+    if (!m_preview_scene)
+        return {};
+
+    return m_preview_scene->GetSettings();
+}
+
+void CRender::PreviewScene_ProcessQueue()
+{
+    if (!m_preview_scene)
+        return;
+    m_preview_scene->ProcessQueue();
+}
+
+bool CRender::PreviewScene_IsReady() const
+{
+    return m_preview_scene && m_preview_scene->IsReady();
+}
+
+const ref_rt& CRender::PreviewScene_ColorRT() const
+{
+    static ref_rt empty_rt;
+    return m_preview_scene ? m_preview_scene->ColorRT() : empty_rt;
+}
+
+const ref_rt& CRender::PreviewScene_DepthRT() const
+{
+    static ref_rt empty_rt;
+    return m_preview_scene ? m_preview_scene->DepthRT() : empty_rt;
 }
 
 #ifdef USE_OGL
@@ -1177,10 +1326,15 @@ CRender::CRender()
     : Sectors_xrc("render")
 {
     Glows = xr_new<CGlowManager>();
+    m_preview_scene = xr_new<CPreviewSceneRenderer>(*this);
 }
 
 CRender::~CRender()
 {
+    CPreviewSceneRenderer* preview_scene = m_preview_scene;
+    m_preview_scene = nullptr;
+    xr_delete(preview_scene);
+
     CGlowManager* glows = Glows;
     Glows = nullptr;
     xr_delete(glows);

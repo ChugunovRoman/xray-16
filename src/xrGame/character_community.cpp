@@ -31,9 +31,83 @@ void CHARACTER_COMMUNITY::InitIdToIndex()
     section_name = "game_relations";
     line_name = "communities";
 
-    m_relation_table.set_table_params("communities_relations");
-    m_default_relation_table.set_table_params("communities_relations");
+    // relation tables are loaded from relations/*.ltx via BuildRelationTableFromFiles()
+    // called after InitInternal() populates m_pItemDataVector
     m_sympathy_table.set_table_params("communities_sympathy", 1);
+}
+
+void CHARACTER_COMMUNITY::BuildRelationTableFromFiles()
+{
+    size_t n = GetMaxIndex() + 1;
+
+    GOODWILL_TABLE::ITEM_TABLE tbl;
+    tbl.resize(n);
+    for (size_t i = 0; i < n; i++)
+        tbl[i].resize(n, 0);
+
+    // build name->index map
+    xr_map<shared_str, int> name_to_idx;
+    for (const auto& item : *m_pItemDataVector)
+        name_to_idx[item.id] = (int)item.index;
+
+    // strip actor_ prefix if base exists
+    auto resolve_base = [&](const char* name) -> const char* {
+        if (strncmp(name, "actor_", 6) == 0) {
+            const char* base = name + 6;
+            if (name_to_idx.count(shared_str(base)))
+                return base;
+        }
+        return name;
+    };
+
+    // load per-faction sparse files
+    // from_rels[base_name][to_base_name] = goodwill
+    xr_map<shared_str, xr_map<shared_str, CHARACTER_GOODWILL>> from_rels;
+
+    for (const auto& item : *m_pItemDataVector) {
+        const char* faction = item.id.c_str();
+        if (strncmp(faction, "actor_", 6) == 0)
+            continue;
+
+        string_path rel_path, full_path;
+        xr_sprintf(rel_path, "creatures\\relations\\%s.ltx", faction);
+
+        if (!FS.exist(full_path, "$game_config$", rel_path))
+            continue;
+
+        CInifile* ini = xr_new<CInifile>(full_path, TRUE, TRUE, FALSE);
+        if (ini->section_exist(faction)) {
+            CInifile::Sect& sect = ini->r_section(faction);
+            auto& faction_rels = from_rels[shared_str(faction)];
+            for (const auto& line : sect.Data)
+                faction_rels[line.first] = (CHARACTER_GOODWILL)atoi(line.second.c_str());
+        }
+        xr_delete(ini);
+    }
+
+    // fill n×n matrix with actor_* fallback
+    for (const auto& from_item : *m_pItemDataVector) {
+        int from_idx = (int)from_item.index;
+        const char* from_base = resolve_base(from_item.id.c_str());
+
+        auto from_it = from_rels.find(shared_str(from_base));
+        if (from_it == from_rels.end())
+            continue;
+
+        for (const auto& to_item : *m_pItemDataVector) {
+            int to_idx = (int)to_item.index;
+            const char* to_base = resolve_base(to_item.id.c_str());
+
+            auto to_it = from_it->second.find(shared_str(to_base));
+            if (to_it != from_it->second.end())
+                tbl[from_idx][to_idx] = to_it->second;
+        }
+    }
+
+    m_relation_table.load_from_table(tbl);
+    m_default_relation_table.load_from_table(tbl);
+
+    Msg("* Faction relations loaded from creatures/relations/ (%zu factions)", n);
 }
 
 CHARACTER_GOODWILL CHARACTER_COMMUNITY::relation(CHARACTER_COMMUNITY_INDEX to) { return relation(m_current_index, to); }

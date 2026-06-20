@@ -12,12 +12,14 @@
 #include "Layers/xrRender/DetailManager.h"
 #include "Layers/xrRender/ModelPool.h"
 #include "Layers/xrRender/WallmarksEngine.h"
+#include "Layers/xrRender/SH_RT.h"
 
 #include "SMAP_Allocator.h"
 #include "Layers/xrRender/Light_DB.h"
 #include "Layers/xrRender/Light_Render_Direct.h"
 #include "Layers/xrRender/LightTrack.h"
 #include "Layers/xrRender/r_sun_cascades.h"
+#include "xrCommon/xr_map.h"
 
 #include "xrEngine/IRenderable.h"
 #include "xrCore/Threading/TaskManager.hpp"
@@ -28,6 +30,7 @@ namespace xray::render::RENDER_NAMESPACE
 class CRenderTarget;
 class dxRender_Visual;
 class CGlowManager;
+class CPreviewSceneRenderer;
 
 // TODO: move it into separate file.
 struct i_render_phase
@@ -194,6 +197,8 @@ private:
 class CRender final : public D3DXRenderBase
 {
 public:
+    friend class CPreviewSceneRenderer;
+
     enum
     {
         PHASE_NORMAL = 0, // E[0]
@@ -547,9 +552,36 @@ public:
     void addShaderOption(pcstr name, pcstr value);
     void clearAllShaderOptions() { m_ShaderOptions.clear(); }
 
+    // Lightweight menu/editor preview scene placeholder.
+    void PreviewScene_Initialize() override;
+    void PreviewScene_Shutdown() override;
+    bool PreviewScene_IsReady() const override;
+    void PreviewScene_ResetBegin() override;
+    void PreviewScene_ResetEnd() override;
+    bool PreviewScene_RenderRenderable(IRenderable* subject, const Fmatrix& view, const Fmatrix& proj) override;
+    bool PreviewScene_RenderModel(pcstr model_path, const Fmatrix& view, const Fmatrix& proj) override;
+    bool PreviewScene_RenderModelNoCache(pcstr model_path, shared_str& out_texture_name) override;
+    void PreviewScene_ScheduleModel(pcstr model_path, u32 priority = 1000) override;
+    void PreviewScene_ProcessQueue() override;
+    [[nodiscard]] bool PreviewScene_IsCached(pcstr model_path) const override;
+    [[nodiscard]] bool PreviewScene_IsDirty(pcstr model_path) const override;
+    [[nodiscard]] shared_str PreviewScene_TextureName(pcstr model_path) const override;
+    [[nodiscard]] shared_str PreviewScene_ResolvedPoseName(pcstr model_path) const override;
+    void PreviewScene_CollectCycleNames(pcstr model_path, xr_vector<shared_str>& out_cycles) override;
+    void PreviewScene_ReleaseEphemeralTexture(pcstr texture_name) override;
+    void PreviewScene_SetSettings(const SPreviewSceneSettings& settings) override;
+    [[nodiscard]] SPreviewSceneSettings PreviewScene_GetSettings() const override;
+
+    [[nodiscard]]
+    const ref_rt& PreviewScene_ColorRT() const;
+
+    [[nodiscard]]
+    const ref_rt& PreviewScene_DepthRT() const;
+
 private:
     bool m_SecondViewportPass{};
     bool m_SecondViewportOutputToRT{};
+    CPreviewSceneRenderer* m_preview_scene{};
 
 #if defined(USE_DX11)
     xr_vector<D3D_SHADER_MACRO> m_ShaderOptions;

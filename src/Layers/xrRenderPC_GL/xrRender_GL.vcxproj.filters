@@ -633,6 +633,9 @@
     <ClCompile Include="..\xrRender_R2\r2.cpp">
       <Filter>Core</Filter>
     </ClCompile>
+    <ClCompile Include="..\xrRender_R2\PreviewSceneRenderer.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
     <ClCompile Include="gl_rendertarget_build_textures.cpp">
       <Filter>Core_Target</Filter>
     </ClCompile>
@@ -1149,6 +1152,9 @@
       <Filter>Core</Filter>
     </ClInclude>
     <ClInclude Include="..\xrRender_R2\r2.h">
+      <Filter>Core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\xrRender_R2\PreviewSceneRenderer.h">
       <Filter>Core</Filter>
     </ClInclude>
     <ClInclude Include="..\xrRender\ShaderResourceTraits.h">

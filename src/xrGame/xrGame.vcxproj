@@ -1296,6 +1296,7 @@
     <ClInclude Include="ui\UIMainIngameWnd.h" />
     <ClInclude Include="ui\UIMapDataSource.h" />
     <ClInclude Include="ui\UIFactionEditorMapWnd.h" />
+    <ClInclude Include="ui\UIFactionVisualGridWnd.h" />
     <ClInclude Include="ui\UIMap.h" />
     <ClInclude Include="ui\UIMapFilters.h" />
     <ClInclude Include="ui\UIMapInfo.h" />
@@ -3181,6 +3182,11 @@
     <ClCompile Include="ui\UIMainIngameWnd.cpp" />
     <ClCompile Include="ui\UIFactionEditorMapWnd.cpp" />
     <ClCompile Include="ui\UIFactionEditorMapWnd_script.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
+    <ClCompile Include="ui\UIFactionVisualGridWnd.cpp" />
+    <ClCompile Include="ui\UIFactionVisualGridWnd_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
     </ClCompile>

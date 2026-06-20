@@ -5730,6 +5730,9 @@
     <ClInclude Include="ui\UIFactionEditorMapWnd.h">
       <Filter>UI\Common\PDA\MAP</Filter>
     </ClInclude>
+    <ClInclude Include="ui\UIFactionVisualGridWnd.h">
+      <Filter>UI\Common\PDA\MAP</Filter>
+    </ClInclude>
     <ClInclude Include="ui\UIMapWnd.h">
       <Filter>UI\Common\PDA\MAP</Filter>
     </ClInclude>
@@ -6689,6 +6692,12 @@
       <Filter>UI\Common\PDA\MAP</Filter>
     </ClCompile>
     <ClCompile Include="ui\UIFactionEditorMapWnd_script.cpp">
+      <Filter>UI\Common\PDA\MAP</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\UIFactionVisualGridWnd.cpp">
+      <Filter>UI\Common\PDA\MAP</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\UIFactionVisualGridWnd_script.cpp">
       <Filter>UI\Common\PDA\MAP</Filter>
     </ClCompile>
     <ClCompile Include="alife_update_manager.cpp">

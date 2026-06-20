@@ -7,7 +7,8 @@
 
 CUIFactionEditorMapWnd::CUIFactionEditorMapWnd()
     : CUIWindow("CUIFactionEditorMapWnd"), m_mapWnd(nullptr), m_spawnSource("all"),
-      m_lastClickedId(u32(-1)), m_lastClickType(EUiMapClick::Left), m_hasPendingClick(false)
+      m_lastClickedId(u32(-1)), m_lastClickType(EUiMapClick::Left), m_lastClickModifiers(eUiMapModNone),
+      m_hasPendingClick(false)
 {
 }
 
@@ -38,14 +39,39 @@ void CUIFactionEditorMapWnd::SetSpawnName(pcstr spawn_name)
     m_spawnSource.SetSpawnName(spawn_name);
 }
 
+bool CUIFactionEditorMapWnd::SetPointVisual(u32 logical_id, pcstr owner_faction, pcstr icon_texture)
+{
+    if (!m_mapWnd)
+        return false;
+
+    return m_mapWnd->SetExternalPointVisual(logical_id, owner_faction, icon_texture);
+}
+
 void CUIFactionEditorMapWnd::Reload()
+{
+    ReloadInternal(true);
+}
+
+void CUIFactionEditorMapWnd::ReloadPreserveView()
+{
+    ReloadInternal(false);
+}
+
+void CUIFactionEditorMapWnd::ReloadInternal(bool focus_default_target)
 {
     if (!m_mapWnd)
         return;
 
+    m_spawnSource.Reload();
     m_mapWnd->ClearExternalDataSource();
     m_mapWnd->SetExternalDataSource(&m_spawnSource);
-    FocusDefaultTarget();
+    if (focus_default_target)
+        FocusDefaultTarget();
+}
+
+void CUIFactionEditorMapWnd::AddSpotClickCallback(const luabind::object& lua_function, const luabind::object& context)
+{
+    m_onSpotClickLua.set(lua_function, context);
 }
 
 void CUIFactionEditorMapWnd::FocusDefaultTarget()
@@ -66,12 +92,33 @@ void CUIFactionEditorMapWnd::Update()
 
     u32 logicalId = u32(-1);
     EUiMapClick clickType = EUiMapClick::Left;
-    if (m_mapWnd->ConsumeExternalMapClick(logicalId, clickType))
+    u32 clickModifiers = eUiMapModNone;
+    if (m_mapWnd->ConsumeExternalMapClick(logicalId, clickType, clickModifiers))
     {
         m_lastClickedId = logicalId;
         m_lastClickType = clickType;
+        m_lastClickModifiers = clickModifiers;
         m_hasPendingClick = true;
+
+        if (m_onSpotClickLua)
+            m_onSpotClickLua(logicalId, static_cast<u32>(clickType), clickModifiers);
     }
+}
+
+u32 CUIFactionEditorMapWnd::GetLogicalIdBySmartName(pcstr smart_name) const
+{
+    if (!smart_name || !smart_name[0])
+        return u32(-1);
+
+    xr_vector<SMapPointDesc> points;
+    m_spawnSource.EnumeratePoints(points);
+    for (const auto& point : points)
+    {
+        if (point.smart_name == smart_name)
+            return point.logical_id;
+    }
+
+    return u32(-1);
 }
 
 void CUIFactionEditorMapWnd::Draw()

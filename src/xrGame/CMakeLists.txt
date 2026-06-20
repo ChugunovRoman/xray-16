@@ -2258,6 +2258,9 @@ target_sources(xrGame PRIVATE
     ui/UIFactionEditorMapWnd.cpp
     ui/UIFactionEditorMapWnd.h
     ui/UIFactionEditorMapWnd_script.cpp
+    ui/UIFactionVisualGridWnd.cpp
+    ui/UIFactionVisualGridWnd.h
+    ui/UIFactionVisualGridWnd_script.cpp
     ui/UIMapFilters.cpp
     ui/UIMapFilters.h
     ui/UIMap.h

@@ -387,6 +387,12 @@ CInifile::~CInifile()
 
 static void insert_item(CInifile::Sect* tgt, const CInifile::Item& I)
 {
+    if (!I.first.c_str())
+    {
+        tgt->Data.push_back(I);
+        return;
+    }
+
     auto sect_it = std::lower_bound(tgt->Data.begin(), tgt->Data.end(), I.first.c_str(), item_pred);
     if (sect_it != tgt->Data.end() && sect_it->first.equal(I.first))
     {
@@ -692,8 +698,7 @@ void CInifile::save_as(IWriter& writer, bool bcheck) const
             }
             else
             {
-                // no name, so no value
-                temp[0] = 0;
+                xr_sprintf(temp, sizeof temp, "%8s%s", " ", I.second.c_str() ? I.second.c_str() : "");
             }
             _TrimRight(temp);
             if (temp[0])
@@ -1034,15 +1039,26 @@ void CInifile::w_string(pcstr S, pcstr L, pcstr V, pcstr comment)
 
     // parse line/value
     string4096 line;
-    _parse(line, L);
+    line[0] = 0;
+    if (L)
+        _parse(line, L);
     string4096 value;
-    _parse(value, V);
+    value[0] = 0;
+    if (V)
+        _parse(value, V);
 
     // duplicate & insert
     Item I;
     Sect& data = r_section(sect);
     I.first = line[0] ? line : 0;
     I.second = value[0] ? value : 0;
+
+    if (!I.first.c_str())
+    {
+        if (I.second.c_str())
+            data.Data.push_back(I);
+        return;
+    }
 
     //#ifdef DEBUG
     // I.comment = (comment?comment:0);

@@ -45,6 +45,7 @@ public:
     void set_character_profile(shared_str);
     shared_str specific_character();
     void set_specific_character(shared_str);
+    void reroll_fe_visual();
 #endif
 
     CHARACTER_COMMUNITY_INDEX m_community_index;

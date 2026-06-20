@@ -59,9 +59,32 @@ xr_string normalize_map_name(const shared_str& map_name)
     return normalized;
 }
 
-bool try_init_external_spot_preset(CUIStatic& icon, pcstr preset_id)
+u32 CaptureUiMapClickModifiers()
 {
-    if (!preset_id || !preset_id[0] || !strstr(preset_id, "circle_"))
+    if (!pInput)
+        return eUiMapModNone;
+
+    u32 mask = eUiMapModNone;
+    if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LSHIFT))
+        mask |= eUiMapModLShift;
+    if (pInput->iGetAsyncKeyState(SDL_SCANCODE_RSHIFT))
+        mask |= eUiMapModRShift;
+    if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LALT))
+        mask |= eUiMapModLAlt;
+    if (pInput->iGetAsyncKeyState(SDL_SCANCODE_RALT))
+        mask |= eUiMapModRAlt;
+    if (pInput->iGetAsyncKeyState(SDL_SCANCODE_LCTRL))
+        mask |= eUiMapModLCtrl;
+    if (pInput->iGetAsyncKeyState(SDL_SCANCODE_RCTRL))
+        mask |= eUiMapModRCtrl;
+    return mask;
+}
+
+constexpr pcstr LEADER_OVERLAY_SPOT_ID = "ui_pda2_leader_location_spot";
+
+bool init_map_spots_static(CUIStatic& icon, pcstr node_id)
+{
+    if (!node_id || !node_id[0])
         return false;
 
     static CUIXml xml;
@@ -73,10 +96,10 @@ bool try_init_external_spot_preset(CUIStatic& icon, pcstr preset_id)
             return false;
     }
 
-    if (!xml.NavigateToNode(preset_id, 0))
+    if (!xml.NavigateToNode(node_id, 0))
         return false;
 
-    CUIXmlInit::InitStatic(xml, preset_id, 0, &icon);
+    CUIXmlInit::InitStatic(xml, node_id, 0, &icon);
     if (!icon.Heading())
     {
         icon.SetWidth(icon.GetWidth() * UI().get_current_kx());
@@ -84,6 +107,28 @@ bool try_init_external_spot_preset(CUIStatic& icon, pcstr preset_id)
     }
 
     return true;
+}
+
+bool try_init_external_spot_preset(CUIStatic& icon, pcstr preset_id)
+{
+    if (!preset_id || !preset_id[0] || !strstr(preset_id, "circle_"))
+        return false;
+
+    return init_map_spots_static(icon, preset_id);
+}
+
+CUIStatic* create_leader_overlay_icon()
+{
+    auto* leader = xr_new<CUIStatic>("external_map_leader_spot");
+    if (!init_map_spots_static(*leader, LEADER_OVERLAY_SPOT_ID))
+    {
+        leader->InitTextureEx("ui_inGame2_PDA_icon_leader", "hud" DELIMITER "default");
+        leader->SetWndSize(Fvector2().set(19.0f, 19.0f));
+        leader->SetStretchTexture(true);
+    }
+
+    leader->SetWndPos(Fvector2().set(0.0f, 0.0f));
+    return leader;
 }
 
 } // namespace
@@ -108,6 +153,10 @@ CUIMapWnd::CUIMapWnd(UIHint* hint)
     #endif // DEBUG
     */
 
+    m_UIMainFrame = nullptr;
+    m_UIMainScrollV = nullptr;
+    m_UIMainScrollH = nullptr;
+    m_UILevelFrame = nullptr;
     m_UIMainMapHeader = nullptr;
     m_scroll_mode = false;
     m_btn_nav_parent = nullptr;
@@ -121,7 +170,10 @@ CUIMapWnd::CUIMapWnd(UIHint* hint)
     m_externalDataRevision = 0;
     m_lastExternalClickedId = u32(-1);
     m_lastExternalClick = EUiMapClick::Left;
+    m_lastExternalClickModifiers = eUiMapModNone;
     m_hasPendingExternalClick = false;
+    m_UIPropertiesBox = nullptr;
+    m_map_location_hint = nullptr;
 }
 
 CUIMapWnd::~CUIMapWnd()
@@ -196,6 +248,46 @@ pcstr CUIMapWnd::ResolveExternalSpotTexture(const SMapPointDesc& point) const
     return spotType;
 }
 
+void CUIMapWnd::DestroyLeaderIcon(SExternalMapSpot& spot)
+{
+    if (spot.leader_icon && spot.level_map && spot.level_map->IsChild(spot.leader_icon))
+        spot.level_map->DetachChild(spot.leader_icon);
+    xr_delete(spot.leader_icon);
+}
+
+void CUIMapWnd::AttachLeaderIcon(SExternalMapSpot& spot)
+{
+    if (!(spot.desc.flags & eMapPointHasLeader) || spot.leader_icon || !spot.level_map)
+        return;
+
+    spot.leader_icon = create_leader_overlay_icon();
+    spot.leader_icon->Show(spot.icon && spot.icon->IsShown());
+    spot.level_map->AttachChild(spot.leader_icon);
+}
+
+bool CUIMapWnd::ExternalSpotHitTest(const SExternalMapSpot& spot, const Fvector2& cursorPos) const
+{
+    if (!spot.visible)
+        return false;
+
+    Frect rect;
+    if (spot.icon)
+    {
+        spot.icon->GetAbsoluteRect(rect);
+        if (rect.in(cursorPos.x, cursorPos.y))
+            return true;
+    }
+
+    if (spot.leader_icon)
+    {
+        spot.leader_icon->GetAbsoluteRect(rect);
+        if (rect.in(cursorPos.x, cursorPos.y))
+            return true;
+    }
+
+    return false;
+}
+
 void CUIMapWnd::ClearExternalSpots()
 {
     HideCurHint();
@@ -205,12 +297,44 @@ void CUIMapWnd::ClearExternalSpots()
         if (spot.level_map && spot.icon && spot.level_map->IsChild(spot.icon))
             spot.level_map->DetachChild(spot.icon);
         xr_delete(spot.icon);
+        DestroyLeaderIcon(spot);
         spot.level_map = nullptr;
     }
 
     m_externalSpots.clear();
     m_lastExternalClickedId = u32(-1);
     m_hasPendingExternalClick = false;
+}
+
+void CUIMapWnd::SyncLeaderOverlay(SExternalMapSpot& spot)
+{
+    const bool wantLeader = (spot.desc.flags & eMapPointHasLeader) != 0;
+    if (wantLeader)
+    {
+        if (!spot.leader_icon)
+            AttachLeaderIcon(spot);
+    }
+    else
+    {
+        DestroyLeaderIcon(spot);
+    }
+}
+
+void CUIMapWnd::RefreshExternalSpotFlagsFromDataSource(u32 logical_id, SExternalMapSpot& spot)
+{
+    if (!m_externalDataSource)
+        return;
+
+    xr_vector<SMapPointDesc> points;
+    m_externalDataSource->EnumeratePoints(points);
+    for (const auto& point : points)
+    {
+        if (point.logical_id != logical_id)
+            continue;
+
+        spot.desc.flags = point.flags;
+        break;
+    }
 }
 
 void CUIMapWnd::RebuildExternalSpots()
@@ -250,8 +374,12 @@ void CUIMapWnd::RebuildExternalSpots()
         spot.layer = layer;
         spot.level_map = levelMap;
         spot.icon = icon;
+        spot.leader_icon = nullptr;
         spot.visible = false;
         m_externalSpots.push_back(spot);
+
+        if (point.flags & eMapPointHasLeader)
+            AttachLeaderIcon(m_externalSpots.back());
     }
 
     UpdateExternalSpots();
@@ -279,6 +407,8 @@ void CUIMapWnd::UpdateExternalSpots()
         const bool shouldShow = IsShown() && spot.layer == m_activeLayer && spot.level_map->IsShown();
         spot.visible = shouldShow;
         spot.icon->Show(shouldShow);
+        if (spot.leader_icon)
+            spot.leader_icon->Show(shouldShow);
 
         if (!shouldShow)
             continue;
@@ -290,6 +420,15 @@ void CUIMapWnd::UpdateExternalSpots()
         localPos.x -= iconSize.x * 0.5f;
         localPos.y -= iconSize.y * 0.5f;
         spot.icon->SetWndPos(localPos);
+
+        if (spot.leader_icon)
+        {
+            const Fvector2 leaderSize = spot.leader_icon->GetWndSize();
+            Fvector2 leaderPos = localPos;
+            leaderPos.x += (iconSize.x - leaderSize.x) * 0.5f;
+            leaderPos.y += (iconSize.y - leaderSize.y) * 0.5f;
+            spot.leader_icon->SetWndPos(leaderPos);
+        }
     }
 }
 
@@ -303,16 +442,11 @@ bool CUIMapWnd::HandleExternalSpotMouse(float x, float y, EUIMessages mouse_acti
 
     for (auto& spot : m_externalSpots)
     {
-        if (!spot.visible || !spot.icon)
+        if (!ExternalSpotHitTest(spot, cursorPos))
             continue;
 
-        Frect rect;
-        spot.icon->GetAbsoluteRect(rect);
-        if (rect.in(cursorPos.x, cursorPos.y))
-        {
-            hoveredSpot = &spot;
-            break;
-        }
+        hoveredSpot = &spot;
+        break;
     }
 
     if (mouse_action == WINDOW_MOUSE_MOVE)
@@ -341,6 +475,7 @@ bool CUIMapWnd::HandleExternalSpotMouse(float x, float y, EUIMessages mouse_acti
     {
         m_lastExternalClickedId = hoveredSpot->desc.logical_id;
         m_lastExternalClick = mouse_action == WINDOW_LBUTTON_UP ? EUiMapClick::Left : EUiMapClick::Right;
+        m_lastExternalClickModifiers = CaptureUiMapClickModifiers();
         m_hasPendingExternalClick = true;
         return true;
     }
@@ -381,13 +516,14 @@ void CUIMapWnd::ClearExternalDataSource()
     m_externalDataRevision = 0;
 }
 
-bool CUIMapWnd::ConsumeExternalMapClick(u32& logical_id, EUiMapClick& click_type)
+bool CUIMapWnd::ConsumeExternalMapClick(u32& logical_id, EUiMapClick& click_type, u32& modifiers)
 {
     if (!m_hasPendingExternalClick)
         return false;
 
     logical_id = m_lastExternalClickedId;
     click_type = m_lastExternalClick;
+    modifiers = m_lastExternalClickModifiers;
     m_hasPendingExternalClick = false;
     return true;
 }
@@ -400,6 +536,62 @@ bool CUIMapWnd::GetExternalPointDescInternal(u32 logical_id, SMapPointDesc& out)
             continue;
 
         out = spot.desc;
+        return true;
+    }
+
+    return false;
+}
+
+bool CUIMapWnd::SetExternalPointVisual(u32 logical_id, pcstr owner_faction, pcstr icon_texture)
+{
+    if (m_externalDataSource)
+        m_externalDataSource->UpdatePointVisual(logical_id, owner_faction, icon_texture);
+
+    for (auto& spot : m_externalSpots)
+    {
+        if (spot.desc.logical_id != logical_id)
+            continue;
+
+        spot.desc.owner_faction = owner_faction ? owner_faction : "";
+        spot.desc.icon_texture = icon_texture ? icon_texture : "";
+        spot.desc.icon_color = color_rgba(255, 255, 255, 255);
+        RefreshExternalSpotFlagsFromDataSource(logical_id, spot);
+
+        if (spot.icon)
+        {
+            const pcstr textureId = ResolveExternalSpotTexture(spot.desc);
+            const bool presetInit = try_init_external_spot_preset(*spot.icon, textureId);
+            if (!presetInit)
+            {
+                spot.icon->InitTextureEx(textureId, "hud" DELIMITER "default");
+                spot.icon->SetWndSize(Fvector2().set(24.0f, 24.0f));
+                spot.icon->SetStretchTexture(true);
+            }
+            spot.icon->SetTextureColor(spot.desc.icon_color);
+        }
+
+        SyncLeaderOverlay(spot);
+
+        if (spot.visible && spot.icon)
+        {
+            Fvector2 realPos;
+            realPos.set(spot.desc.position.x, spot.desc.position.z);
+            Fvector2 localPos = spot.level_map->ConvertRealToLocal(realPos, false);
+            const Fvector2 iconSize = spot.icon->GetWndSize();
+            localPos.x -= iconSize.x * 0.5f;
+            localPos.y -= iconSize.y * 0.5f;
+            spot.icon->SetWndPos(localPos);
+
+            if (spot.leader_icon)
+            {
+                const Fvector2 leaderSize = spot.leader_icon->GetWndSize();
+                Fvector2 leaderPos = localPos;
+                leaderPos.x += (iconSize.x - leaderSize.x) * 0.5f;
+                leaderPos.y += (iconSize.y - leaderSize.y) * 0.5f;
+                spot.leader_icon->SetWndPos(leaderPos);
+            }
+        }
+
         return true;
     }
 
@@ -581,51 +773,83 @@ bool CUIMapWnd::Init(cpcstr xml_name, cpcstr start_from, bool critical /*= true*
     m_scroll_mode = uiXml.ReadAttribInt(start_from, 0, "scroll_enable", 0) == 1;
     if (m_scroll_mode || ShadowOfChernobylMode)
     {
-        float dx, dy, sx, sy;
+        float dx, dy, sx, sy, dw, dh, sw, sh;
+        bool showHScroll;
+        bool showVScroll;
         strconcat(sizeof(pth), pth, start_from, ":main_map_frame");
         dx = uiXml.ReadAttribFlt(pth, 0, "dx", 0.0f);
         dy = uiXml.ReadAttribFlt(pth, 0, "dy", 0.0f);
         sx = uiXml.ReadAttribFlt(pth, 0, "sx", 5.0f);
         sy = uiXml.ReadAttribFlt(pth, 0, "sy", 5.0f);
+        dw = uiXml.ReadAttribFlt(pth, 0, "dw", 0.0f);
+        dh = uiXml.ReadAttribFlt(pth, 0, "dh", 0.0f);
+        sw = uiXml.ReadAttribFlt(pth, 0, "sw", 0.0f);
+        sh = uiXml.ReadAttribFlt(pth, 0, "sh", 0.0f);
+        showHScroll = !!uiXml.ReadAttribInt(pth, 0, "show_hscroll", 1);
+        showVScroll = !!uiXml.ReadAttribInt(pth, 0, "show_vscroll", 1);
 
         CUIWindow* rect_parent = m_UIMainFrame; // m_UILevelFrame;
         Frect r = rect_parent->GetWndRect();
 
-        auto tempScroll = xr_new<CUIFixedScrollBar>();
-        if (tempScroll->InitScrollBar(Fvector2().set(r.left + dx, r.bottom - sy), true))
-            m_UIMainScrollH = tempScroll;
-        else
+        if (showHScroll)
         {
-            Msg("! Failed to init m_UIMainScrollH as FixedScrollBar, trying to initialize it as ScrollBar");
-            xr_delete(tempScroll);
-            m_UIMainScrollH = xr_new<CUIScrollBar>();
-            m_UIMainScrollH->InitScrollBar(Fvector2().set(r.left + dx, r.bottom - sy), r.right - r.left - dx * 2 - sx, true, "pda");
+            auto tempScroll = xr_new<CUIFixedScrollBar>();
+            if (tempScroll->InitScrollBar(Fvector2().set(r.left + dx, r.bottom - sy), true))
+                m_UIMainScrollH = tempScroll;
+            else
+            {
+                Msg("! Failed to init m_UIMainScrollH as FixedScrollBar, trying to initialize it as ScrollBar");
+                xr_delete(tempScroll);
+                m_UIMainScrollH = xr_new<CUIScrollBar>();
+                m_UIMainScrollH->InitScrollBar(Fvector2().set(r.left + dx, r.bottom - sy), r.right - r.left - dx * 2 - sx, true, "pda");
+            }
+
+            {
+                Fvector2 size = m_UIMainScrollH->GetWndSize();
+                size.x += dw;
+                size.y += dh;
+                size.x = _max(size.x, 1.0f);
+                size.y = _max(size.y, 1.0f);
+                m_UIMainScrollH->SetWndSize(size);
+            }
+
+            m_UIMainScrollH->SetStepSize(_max(1, (int)(m_UILevelFrame->GetWidth() * 0.1f)));
+            m_UIMainScrollH->SetPageSize((int)m_UILevelFrame->GetWidth()); // iFloor
+            m_UIMainScrollH->SetAutoDelete(true);
+            AttachChild(m_UIMainScrollH);
+            Register(m_UIMainScrollH);
+            AddCallback(m_UIMainScrollH, SCROLLBAR_HSCROLL, CUIWndCallback::void_function(this, &CUIMapWnd::OnScrollH));
         }
 
-        m_UIMainScrollH->SetStepSize(_max(1, (int)(m_UILevelFrame->GetWidth() * 0.1f)));
-        m_UIMainScrollH->SetPageSize((int)m_UILevelFrame->GetWidth()); // iFloor
-        m_UIMainScrollH->SetAutoDelete(true);
-        AttachChild(m_UIMainScrollH);
-        Register(m_UIMainScrollH);
-        AddCallback(m_UIMainScrollH, SCROLLBAR_HSCROLL, CUIWndCallback::void_function(this, &CUIMapWnd::OnScrollH));
-
-        tempScroll = xr_new<CUIFixedScrollBar>();
-        if (tempScroll->InitScrollBar(Fvector2().set(r.right - sx, r.top + dy), false))
-            m_UIMainScrollV = tempScroll;
-        else
+        if (showVScroll)
         {
-            Msg("! Failed to init m_UIMainScrollV as FixedScrollBar, trying to initialize it as ScrollBar");
-            xr_delete(tempScroll);
-            m_UIMainScrollV = xr_new<CUIScrollBar>();
-            m_UIMainScrollV->InitScrollBar(Fvector2().set(r.right - sx, r.top + dy), r.bottom - r.top - dy * 2, false, "pda");
-        }
+            auto tempScroll = xr_new<CUIFixedScrollBar>();
+            if (tempScroll->InitScrollBar(Fvector2().set(r.right - sx, r.top + dy), false))
+                m_UIMainScrollV = tempScroll;
+            else
+            {
+                Msg("! Failed to init m_UIMainScrollV as FixedScrollBar, trying to initialize it as ScrollBar");
+                xr_delete(tempScroll);
+                m_UIMainScrollV = xr_new<CUIScrollBar>();
+                m_UIMainScrollV->InitScrollBar(Fvector2().set(r.right - sx, r.top + dy), r.bottom - r.top - dy * 2, false, "pda");
+            }
 
-        m_UIMainScrollV->SetStepSize(_max(1, (int)(m_UILevelFrame->GetHeight() * 0.1f)));
-        m_UIMainScrollV->SetPageSize((int)m_UILevelFrame->GetHeight());
-        m_UIMainScrollV->SetAutoDelete(true);
-        AttachChild(m_UIMainScrollV);
-        Register(m_UIMainScrollV);
-        AddCallback(m_UIMainScrollV, SCROLLBAR_VSCROLL, CUIWndCallback::void_function(this, &CUIMapWnd::OnScrollV));
+            {
+                Fvector2 size = m_UIMainScrollV->GetWndSize();
+                size.x += sw;
+                size.y += sh;
+                size.x = _max(size.x, 1.0f);
+                size.y = _max(size.y, 1.0f);
+                m_UIMainScrollV->SetWndSize(size);
+            }
+
+            m_UIMainScrollV->SetStepSize(_max(1, (int)(m_UILevelFrame->GetHeight() * 0.1f)));
+            m_UIMainScrollV->SetPageSize((int)m_UILevelFrame->GetHeight());
+            m_UIMainScrollV->SetAutoDelete(true);
+            AttachChild(m_UIMainScrollV);
+            Register(m_UIMainScrollV);
+            AddCallback(m_UIMainScrollV, SCROLLBAR_VSCROLL, CUIWndCallback::void_function(this, &CUIMapWnd::OnScrollV));
+        }
     }
 
     init_xml_nav(uiXml, start_from, critical);
@@ -1038,9 +1262,25 @@ bool CUIMapWnd::OnControllerAction(int axis, const ControllerAxisState& state, E
 
 bool CUIMapWnd::OnMouseAction(float x, float y, EUIMessages mouse_action)
 {
-    const bool inheritedHandled = inherited::OnMouseAction(x, y, mouse_action);
-
     Fvector2 cursor_pos1 = GetUICursor().GetCursorPosition();
+
+    // Handle wheel zoom with priority while cursor is over map viewport.
+    // This prevents parent scroll containers from consuming wheel events.
+    if (GlobalMap() && ActiveMapRect().in(cursor_pos1) && (!GlobalMap()->Locked() || UsingExternalDataSource()))
+    {
+        switch (mouse_action)
+        {
+        case WINDOW_MOUSE_WHEEL_DOWN:
+            UpdateZoom(true);
+            return true;
+
+        case WINDOW_MOUSE_WHEEL_UP:
+            UpdateZoom(false);
+            return true;
+        }
+    }
+
+    const bool inheritedHandled = inherited::OnMouseAction(x, y, mouse_action);
 
     if (UsingExternalDataSource() && ActiveMapRect().in(cursor_pos1))
     {
@@ -1072,13 +1312,6 @@ bool CUIMapWnd::OnMouseAction(float x, float y, EUIMessages mouse_action)
             }
             break;
 
-        case WINDOW_MOUSE_WHEEL_DOWN:
-            UpdateZoom(true);
-            return true;
-
-        case WINDOW_MOUSE_WHEEL_UP:
-            UpdateZoom(false);
-            return true;
         } // switch (mouse_action)
     }
 
@@ -1179,17 +1412,22 @@ void CUIMapWnd::UpdateScroll()
     if (m_scroll_mode && GlobalMap())
     {
         Fvector2 w_pos = GlobalMap()->GetWndPos();
-        m_UIMainScrollV->SetRange(m_UIMainScrollV->GetMinRange(), iFloor(GlobalMap()->GetHeight()));
-        m_UIMainScrollH->SetRange(m_UIMainScrollV->GetMinRange(), iFloor(GlobalMap()->GetWidth()));
-
-        m_UIMainScrollV->SetScrollPos(iFloor(-w_pos.y));
-        m_UIMainScrollH->SetScrollPos(iFloor(-w_pos.x));
+        if (m_UIMainScrollV)
+        {
+            m_UIMainScrollV->SetRange(m_UIMainScrollV->GetMinRange(), iFloor(GlobalMap()->GetHeight()));
+            m_UIMainScrollV->SetScrollPos(iFloor(-w_pos.y));
+        }
+        if (m_UIMainScrollH)
+        {
+            m_UIMainScrollH->SetRange(m_UIMainScrollH->GetMinRange(), iFloor(GlobalMap()->GetWidth()));
+            m_UIMainScrollH->SetScrollPos(iFloor(-w_pos.x));
+        }
     }
 }
 
 void CUIMapWnd::OnScrollV(CUIWindow*, void*)
 {
-    if (m_scroll_mode && GlobalMap())
+    if (m_scroll_mode && GlobalMap() && m_UIMainScrollV)
     {
         MoveScrollV(-1.0f * float(m_UIMainScrollV->GetScrollPos()));
     }
@@ -1197,7 +1435,7 @@ void CUIMapWnd::OnScrollV(CUIWindow*, void*)
 
 void CUIMapWnd::OnScrollH(CUIWindow*, void*)
 {
-    if (m_scroll_mode && GlobalMap())
+    if (m_scroll_mode && GlobalMap() && m_UIMainScrollH)
     {
         MoveScrollH(-1.0f * float(m_UIMainScrollH->GetScrollPos()));
     }

@@ -31,7 +31,7 @@ void CUIScrollView::SendMessage(CUIWindow* pWnd, s16 msg, void* pData)
     {
     case CHILD_CHANGED_SIZE:
     {
-        if (m_pad->IsChild(pWnd))
+        if (m_pad && m_pad->IsChild(pWnd))
             m_flags.set(eNeedRecalc, true);
         break;
     }

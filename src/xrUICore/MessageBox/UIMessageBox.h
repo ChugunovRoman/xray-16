@@ -55,6 +55,7 @@ protected:
     CUI3tButton* m_UIButtonCopy;
 
     CUIStatic* m_UIStaticPicture;
+    CUIStatic* m_UIStaticCaption;
     CUIStatic* m_UIStaticText;
     CUIStatic* m_UIStaticHost;
     CUIStatic* m_UIStaticPass;

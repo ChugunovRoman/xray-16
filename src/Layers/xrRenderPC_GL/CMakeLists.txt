@@ -301,6 +301,8 @@ target_sources(xrRender_GL PRIVATE
     ../xrRender/blenders/glRainBlender.cpp
     ../xrRender/blenders/uber_deffer.cpp
     ../xrRender/blenders/uber_deffer.h
+    ../xrRender_R2/PreviewSceneRenderer.cpp
+    ../xrRender_R2/PreviewSceneRenderer.h
     ../xrRender_R2/r2.cpp
     ../xrRender_R2/r2.h
     ../xrRender_R2/r2_blenders.cpp

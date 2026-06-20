@@ -215,6 +215,7 @@
     <ClInclude Include="..\xrRender\blenders\blender_light_spot.h" />
     <ClInclude Include="..\xrRender\blenders\blender_luminance.h" />
     <ClInclude Include="..\xrRender\blenders\blender_ssao.h" />
+    <ClInclude Include="..\xrRender_R2\PreviewSceneRenderer.h" />
     <ClInclude Include="..\xrRender_R2\r2.h" />
     <ClInclude Include="..\xrRender_R2\r2_rendertarget_wallmarks.h" />
     <ClInclude Include="..\xrRender_R2\r2_R_sun_support.h" />
@@ -381,6 +382,7 @@
     <ClCompile Include="..\xrRender\blenders\blender_light_spot.cpp" />
     <ClCompile Include="..\xrRender\blenders\blender_luminance.cpp" />
     <ClCompile Include="..\xrRender\blenders\blender_ssao.cpp" />
+    <ClCompile Include="..\xrRender_R2\PreviewSceneRenderer.cpp" />
     <ClCompile Include="..\xrRender_R2\r2.cpp" />
     <ClCompile Include="..\xrRender_R2\r2_blenders.cpp" />
     <ClCompile Include="..\xrRender_R2\r2_loader.cpp" />

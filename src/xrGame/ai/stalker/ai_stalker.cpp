@@ -761,6 +761,44 @@ bool CAI_Stalker::net_Spawn(CSE_Abstract* DC)
     m_fRankDisperison =
         expirienced_rank_dispersion + (novice_rank_dispersion - expirienced_rank_dispersion) * (1 - rank_k);
 
+    // Faction-editor immunity overrides per (faction, rank) and leader
+    if (pSettingsFE)
+    {
+        LPCSTR fe_faction = CharacterInfo().Community().id().c_str();
+        LPCSTR fe_rank    = CharacterInfo().Rank().id().c_str();
+        if (fe_faction && xr_strlen(fe_faction) && fe_rank && xr_strlen(fe_rank))
+        {
+            string_path fe_sec;
+            strconcat(sizeof(fe_sec), fe_sec, fe_faction, "_", fe_rank);
+            if (pSettingsFE->section_exist(fe_sec))
+            {
+                if (pSettingsFE->line_exist(fe_sec, "fire_wound_immunity"))
+                {
+                    float coef = pSettingsFE->r_float(fe_sec, "fire_wound_immunity");
+                    conditions().SetHitImmunity(ALife::eHitTypeFireWound, coef);
+                }
+                if (pSettingsFE->line_exist(fe_sec, "explosion_immunity"))
+                {
+                    float coef = pSettingsFE->r_float(fe_sec, "explosion_immunity");
+                    conditions().SetHitImmunity(ALife::eHitTypeExplosion, coef);
+                }
+            }
+            if (SpecificCharacter().IsLeader() && pSettingsFE->section_exist(fe_faction))
+            {
+                if (pSettingsFE->line_exist(fe_faction, "fire_wound_immunity_leader"))
+                {
+                    float coef = pSettingsFE->r_float(fe_faction, "fire_wound_immunity_leader");
+                    conditions().SetHitImmunity(ALife::eHitTypeFireWound, coef);
+                }
+                if (pSettingsFE->line_exist(fe_faction, "explosion_immunity_leader"))
+                {
+                    float coef = pSettingsFE->r_float(fe_faction, "explosion_immunity_leader");
+                    conditions().SetHitImmunity(ALife::eHitTypeExplosion, coef);
+                }
+            }
+        }
+    }
+
     if (!fis_zero(SpecificCharacter().panic_threshold()))
         m_panic_threshold = SpecificCharacter().panic_threshold();
 

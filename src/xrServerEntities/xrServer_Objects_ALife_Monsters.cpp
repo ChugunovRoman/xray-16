@@ -16,6 +16,7 @@
 #include "ai_space.h"
 #include "character_info.h"
 #include "specific_character.h"
+#include "xrGame/ui/UIInventoryUtilities.h"
 #endif
 
 #ifdef XRGAME_EXPORTS
@@ -114,6 +115,7 @@ void setup_location_types(GameGraph::TERRAIN_VECTOR& m_vertex_types, CInifile co
 //////////////////////////////////////////////////////////////////////////
 
 using namespace ALife;
+using namespace InventoryUtilities;
 
 ////////////////////////////////////////////////////////////////////////////
 // CSE_ALifeTraderAbstract
@@ -438,24 +440,79 @@ void CSE_ALifeTraderAbstract::set_specific_character(shared_str new_spec_char)
         // select name and lastname
         xr_string subset = m_character_name.c_str() + xr_strlen(gen_name);
 
-        string_path t1;
-        strconcat(sizeof(t1), t1, "stalker_names_", subset.c_str());
-        u32 name_cnt = pSettings->r_u32(t1, "name_cnt");
-        u32 last_name_cnt = pSettings->r_u32(t1, "last_name_cnt");
+        // faction-level default alias (if any) overrides the per-character subset for the
+        // whole faction; resolved once and reused by both the custom and the standard path
+        xr_string active_subset = subset;
+        if (pSettingsFE)
+        {
+            LPCSTR team0 = CHARACTER_COMMUNITY::IndexToId(selected_char.Community().index()).c_str();
+            if (team0 && xr_strlen(team0) && pSettingsFE->section_exist(team0) &&
+                pSettingsFE->line_exist(team0, "default_name_alias"))
+            {
+                LPCSTR def_alias = pSettingsFE->r_string(team0, "default_name_alias");
+                if (def_alias && xr_strlen(def_alias) > 0)
+                    active_subset = def_alias;
+            }
+        }
 
-        string512 S;
-        xr_string n = "name_";
-        n += subset;
-        n += "_";
-        n += xr_itoa(::Random.randI(name_cnt), S, 10);
-        m_character_name = StringTable().translate(n.c_str()).c_str();
-        m_character_name += " ";
+        // custom per-(faction, alias) name pool from the faction editor config (literal cp1251
+        // strings, no StringTable); falls back to the standard stalker_names_<alias> pools below
+        bool custom_done = false;
+        if (pSettingsFE)
+        {
+            LPCSTR team = CHARACTER_COMMUNITY::IndexToId(selected_char.Community().index()).c_str();
+            if (team && xr_strlen(team))
+            {
+                string_path fe_sec;
+                strconcat(sizeof(fe_sec), fe_sec, team, "_names_", active_subset.c_str());
+                if (pSettingsFE->section_exist(fe_sec) && pSettingsFE->line_exist(fe_sec, "name_cnt") &&
+                    pSettingsFE->line_exist(fe_sec, "last_name_cnt"))
+                {
+                    u32 fe_name_cnt = pSettingsFE->r_u32(fe_sec, "name_cnt");
+                    u32 fe_last_name_cnt = pSettingsFE->r_u32(fe_sec, "last_name_cnt");
+                    if (fe_name_cnt > 0 && fe_last_name_cnt > 0)
+                    {
+                        string16 fe_idx;
+                        string128 fe_key;
+                        strconcat(sizeof(fe_key), fe_key, "name_", xr_itoa(::Random.randI(fe_name_cnt), fe_idx, 10));
+                        m_character_name = pSettingsFE->r_string(fe_sec, fe_key);
+                        m_character_name += " ";
+                        strconcat(sizeof(fe_key), fe_key, "lname_", xr_itoa(::Random.randI(fe_last_name_cnt), fe_idx, 10));
+                        m_character_name += pSettingsFE->r_string(fe_sec, fe_key);
+                        custom_done = true;
+                    }
+                }
+            }
+        }
 
-        n = "lname_";
-        n += subset;
-        n += "_";
-        n += xr_itoa(::Random.randI(last_name_cnt), S, 10);
-        m_character_name += StringTable().translate(n.c_str()).c_str();
+        if (!custom_done)
+        {
+            // honor the faction default alias only when a matching standard pool exists,
+            // otherwise keep the character's own subset (no fatal lookup on a missing section)
+            const xr_string& std_subset =
+                (active_subset != subset && pSettings->section_exist(("stalker_names_" + active_subset).c_str()))
+                ? active_subset
+                : subset;
+
+            string_path t1;
+            strconcat(sizeof(t1), t1, "stalker_names_", std_subset.c_str());
+            u32 name_cnt = pSettings->r_u32(t1, "name_cnt");
+            u32 last_name_cnt = pSettings->r_u32(t1, "last_name_cnt");
+
+            string512 S;
+            xr_string n = "name_";
+            n += std_subset;
+            n += "_";
+            n += xr_itoa(::Random.randI(name_cnt), S, 10);
+            m_character_name = StringTable().translate(n.c_str()).c_str();
+            m_character_name += " ";
+
+            n = "lname_";
+            n += std_subset;
+            n += "_";
+            n += xr_itoa(::Random.randI(last_name_cnt), S, 10);
+            m_character_name += StringTable().translate(n.c_str()).c_str();
+        }
     }
     u32 min_m = selected_char.MoneyDef().min_money;
     u32 max_m = selected_char.MoneyDef().max_money;
@@ -473,6 +530,48 @@ void CSE_ALifeTraderAbstract::set_specific_character(shared_str new_spec_char)
 
 void CSE_ALifeTraderAbstract::set_character_profile(shared_str new_profile) { m_sCharacterProfile = new_profile; }
 shared_str CSE_ALifeTraderAbstract::character_profile() { return m_sCharacterProfile; }
+
+void CSE_ALifeTraderAbstract::reroll_fe_visual()
+{
+    if (!m_SpecificCharacter.size() || !pSettingsFE)
+        return;
+
+    CSpecificCharacter selected_char;
+    selected_char.Load(m_SpecificCharacter);
+
+    if (selected_char.data()->m_not_replace_visual)
+        return;
+
+    CSE_Visual* visual = smart_cast<CSE_Visual*>(base());
+    if (!visual)
+        return;
+
+    LPCSTR team = CHARACTER_COMMUNITY::IndexToId(selected_char.Community().index()).c_str();
+    if (!team || !xr_strlen(team))
+        return;
+
+    bool visual_overridden = false;
+    if (selected_char.data()->m_is_leader && pSettingsFE->section_exist(team) && pSettingsFE->line_exist(team, "visual_leader"))
+    {
+        LPCSTR visuals = pSettingsFE->r_string(team, "visual_leader");
+        if (visuals && xr_strlen(visuals) > 0)
+        {
+            string128 visual_item;
+            _GetItem(visuals, ::Random.randI(0, _GetItemCount(visuals)), visual_item);
+            visual->set_visual(visual_item);
+            visual_overridden = true;
+        }
+    }
+
+    if (visual_overridden)
+        return;
+
+    xr_vector<shared_str> rankVisuals;
+    if (TryReadFactionRankVisuals(pSettingsFE, team, GetRankAsTextId(selected_char.Rank()), rankVisuals))
+    {
+        visual->set_visual(rankVisuals[::Random.randI(0, static_cast<int>(rankVisuals.size()))].c_str());
+    }
+}
 #endif
 
 #ifdef XRGAME_EXPORTS

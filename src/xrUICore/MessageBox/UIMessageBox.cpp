@@ -11,6 +11,7 @@ CUIMessageBox::CUIMessageBox() : CUIStatic("CUIMessageBox")
     m_UIButtonCancel = NULL;
     m_UIButtonCopy = NULL;
     m_UIStaticPicture = NULL;
+    m_UIStaticCaption = NULL;
     m_UIStaticText = NULL;
 
     m_UIEditPass = NULL;
@@ -33,6 +34,7 @@ void CUIMessageBox::Clear()
     xr_delete(m_UIButtonCancel);
     xr_delete(m_UIButtonCopy);
     xr_delete(m_UIStaticPicture);
+    xr_delete(m_UIStaticCaption);
     xr_delete(m_UIStaticText);
     xr_delete(m_UIEditPass);
     xr_delete(m_UIEditUserPass);
@@ -72,6 +74,14 @@ bool CUIMessageBox::InitMessageBox(LPCSTR box_template)
         m_UIStaticText = xr_new<CUIStatic>("Text");
         AttachChild(m_UIStaticText);
         CUIXmlInitBase::InitStatic(uiXml, str, 0, m_UIStaticText);
+    }
+
+    strconcat(sizeof(str), str, box_template, ":caption_text");
+    if (uiXml.NavigateToNode(str, 0))
+    {
+        m_UIStaticCaption = xr_new<CUIStatic>("Caption");
+        AttachChild(m_UIStaticCaption);
+        CUIXmlInitBase::InitStatic(uiXml, str, 0, m_UIStaticCaption);
     }
 
     xr_strcpy(str, box_template);

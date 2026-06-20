@@ -34,7 +34,11 @@ public:
 
     virtual void SetWndSize(const Fvector2& size)
     {
+        if (m_wndSize.x == size.x && m_wndSize.y == size.y)
+            return;
+
         m_wndSize = size;
+        NotifyParentScrollViewsAboutChildSizeChanged();
     }
     [[nodiscard]]
     const Fvector2& GetWndSize() const
@@ -50,7 +54,11 @@ public:
 
     virtual void SetHeight(float height)
     {
+        if (m_wndSize.y == height)
+            return;
+
         m_wndSize.y = height;
+        NotifyParentScrollViewsAboutChildSizeChanged();
     }
     [[nodiscard]]
     float GetHeight() const
@@ -59,7 +67,11 @@ public:
     }
     virtual void SetWidth(float width)
     {
+        if (m_wndSize.x == width)
+            return;
+
         m_wndSize.x = width;
+        NotifyParentScrollViewsAboutChildSizeChanged();
     }
     [[nodiscard]]
     float GetWidth() const
@@ -220,8 +232,10 @@ public:
 
     [[nodiscard]]
     CUIWindow* GetMessageTarget();
+    void NotifyParentScrollViewsAboutChildSizeChanged();
 
     void SetKeyboardCapture(CUIWindow* pChildWindow, bool capture_status);
+    void ReleaseFocusCapture();
 
     [[nodiscard]]
     CUIWindow* GetKeyboardCapturer() const { return m_pKeyboardCapturer; }
@@ -342,6 +356,9 @@ public:
     virtual bool IsUsingCursorRightNow() const { return false; }
 
     [[nodiscard]]
+    virtual bool IsScrollView() const { return false; }
+
+    [[nodiscard]]
     bool CursorOverWindow() const { return m_bCursorOverWindow; }
 
     [[nodiscard]]
@@ -377,6 +394,9 @@ protected:
     // Если курсор над окном
     bool m_bCursorOverWindow : 1 {};
     bool m_bCustomDraw : 1 {};
+    u8 m_iterating_depth{};
+
+    WINDOW_LIST m_deferred_detach;
 
     EWindowAlignment m_alignment{};
     Fvector2 m_wndPos{};
