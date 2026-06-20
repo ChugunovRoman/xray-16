@@ -39,14 +39,13 @@ $buildDir = Join-Path $root "build\sentry-native-$arch-$Configuration"
 New-Item -ItemType Directory -Force -Path $buildDir | Out-Null
 New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
 
-$generator = "Visual Studio 17 2022"
 $platArg = if ($Platform -eq "Win32") { "Win32" } else { "x64" }
 
-# Locate VS installation explicitly so CMake doesn't fail on runners where
-# vswhere isn't on PATH or the VS install isn't in the default registry location
-# (e.g. windows-2025 GitHub Actions runner with only Build Tools installed).
+# Locate VS and pick the matching CMake generator by major version.
+# windows-latest on GitHub Actions may have VS 17 (2022) or VS 18 (2025).
 $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vsInstance = $null
+$generator = "Visual Studio 17 2022"  # fallback
 if (Test-Path $vsWhere) {
     $vsInstance = & $vsWhere -latest -products * `
         -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
@@ -54,12 +53,16 @@ if (Test-Path $vsWhere) {
     if (-not $vsInstance) {
         $vsInstance = & $vsWhere -latest -products * -property installationPath 2>$null
     }
+    $vsVersion = & $vsWhere -latest -products * -property installationVersion 2>$null
+    $vsMajor = if ($vsVersion) { [int]($vsVersion -split '\.')[0] } else { 17 }
+    $generator = switch ($vsMajor) {
+        18 { "Visual Studio 18 2025" }
+        17 { "Visual Studio 17 2022" }
+        16 { "Visual Studio 16 2019" }
+        default { "Visual Studio 17 2022" }
+    }
 }
-if ($vsInstance) {
-    Write-Host "Using VS instance: $vsInstance"
-} else {
-    Write-Warning "vswhere could not find a VS instance; CMake will attempt auto-detection."
-}
+Write-Host "Generator: $generator  Instance: $vsInstance"
 
 $msvcRt = if ($buildType -eq "Debug") { "MultiThreadedDebugDLL" } else { "MultiThreadedDLL" }
 $cmakeConfigArgs = @(
@@ -70,7 +73,6 @@ $cmakeConfigArgs = @(
     "-DSENTRY_BUILD_EXAMPLES=OFF",
     "-DCMAKE_MSVC_RUNTIME_LIBRARY=$msvcRt"
 )
-if ($vsInstance) { $cmakeConfigArgs += "-DCMAKE_GENERATOR_INSTANCE=$vsInstance" }
 cmake @cmakeConfigArgs
 
 cmake --build $buildDir --config $buildType --parallel
