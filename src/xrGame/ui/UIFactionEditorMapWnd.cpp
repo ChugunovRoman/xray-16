@@ -181,3 +181,11 @@ pcstr CUIFactionEditorMapWnd::GetPointIconTexture(u32 logical_id) const
 {
     return GetPointString(logical_id, &SMapPointDesc::icon_texture);
 }
+
+void CUIFactionEditorMapWnd::EnumeratePoints(const luabind::functor<void>& callback) const
+{
+    xr_vector<SMapPointDesc> points;
+    m_spawnSource.EnumeratePoints(points);
+    for (const auto& point : points)
+        callback(point.logical_id, point.smart_name.c_str());
+}

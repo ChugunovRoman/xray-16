@@ -50,5 +50,6 @@ void CUIFactionEditorMapWnd::script_register(lua_State* luaState)
             .def("GetPointOwnerFaction", &CUIFactionEditorMapWnd::GetPointOwnerFaction)
             .def("GetPointIconTexture", &CUIFactionEditorMapWnd::GetPointIconTexture)
             .def("GetLogicalIdBySmartName", &CUIFactionEditorMapWnd::GetLogicalIdBySmartName)
+            .def("EnumeratePoints", &CUIFactionEditorMapWnd::EnumeratePoints)
     ];
 }

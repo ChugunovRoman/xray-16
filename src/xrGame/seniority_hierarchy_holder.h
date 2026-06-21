@@ -17,7 +17,7 @@ class CSeniorityHierarchyHolder
 private:
     enum
     {
-        max_team_count = 64
+        max_team_count = 128
     };
 
 private:

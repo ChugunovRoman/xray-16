@@ -88,6 +88,8 @@ LPCSTR GetRankAsTextId(CHARACTER_RANK_VALUE rankID);
 LPCSTR GetReputationAsText(CHARACTER_REPUTATION_VALUE rankID);
 LPCSTR GetGoodwillAsText(CHARACTER_GOODWILL goodwill);
 
+shared_str GetCommunityDisplayName(LPCSTR community_id);
+
 void ClearCharacterInfoStrings();
 
 void SendInfoToActor(LPCSTR info_id);

@@ -21,6 +21,7 @@
 #include "Inventory.h"
 
 #include "ai/monsters/poltergeist/poltergeist.h"
+#include "ui/UIInventoryUtilities.h"
 
 namespace detail::hud_target
 {
@@ -186,7 +187,7 @@ void CHUDTarget::Render()
                         {
                             F->SetColor(subst_alpha(C, u8(iFloor(255.f * (fuzzyShowInfo - 0.5f) * 2.f))));
                             F->OutNext("%s", StringTable().translate(others_inv_owner->Name()).c_str());
-                            F->OutNext("%s", StringTable().translate(others_inv_owner->CharacterInfo().Community().id()).c_str());
+                            F->OutNext("%s", InventoryUtilities::GetCommunityDisplayName(others_inv_owner->CharacterInfo().Community().id().c_str()).c_str());
                         }
                     }
 

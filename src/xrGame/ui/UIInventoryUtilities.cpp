@@ -725,3 +725,34 @@ u32 InventoryUtilities::GetRelationColor(ALife::ERelationType relation)
     return 0xffffffff;
 #endif
 }
+
+//////////////////////////////////////////////////////////////////////////
+
+shared_str InventoryUtilities::GetCommunityDisplayName(LPCSTR community_id)
+{
+    if (pSettingsFE)
+    {
+        // Try direct section first, then strip "actor_" prefix (actor_faction_N -> faction_N)
+        LPCSTR lookup_id = community_id;
+        static const char actor_prefix[] = "actor_";
+        xr_string stripped;
+        if (!pSettingsFE->section_exist(lookup_id) && strncmp(community_id, actor_prefix, 6) == 0)
+        {
+            stripped = community_id + 6;
+            lookup_id = stripped.c_str();
+        }
+        if (pSettingsFE->section_exist(lookup_id))
+        {
+            string64 name_key;
+            xr_sprintf(name_key, "name_%s", CStringTable::LanguageIDInLTX);
+            if (pSettingsFE->line_exist(lookup_id, name_key))
+            {
+                xr_string name_str = pSettingsFE->r_string(lookup_id, name_key);
+                for (char& c : name_str)
+                    if (c == '_') c = ' ';
+                return shared_str(name_str.c_str());
+            }
+        }
+    }
+    return StringTable().translate(community_id);
+}

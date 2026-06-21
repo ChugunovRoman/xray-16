@@ -142,7 +142,7 @@ void CUICharacterInfo::InitCharacter(u16 id)
     }
     if (m_icons[eCommunity])
     {
-        m_icons[eCommunity]->TextItemControl()->SetTextST(chInfo.Community().id().c_str());
+        m_icons[eCommunity]->TextItemControl()->SetText(InventoryUtilities::GetCommunityDisplayName(chInfo.Community().id().c_str()).c_str());
     }
     if (m_icons[eReputation])
     {

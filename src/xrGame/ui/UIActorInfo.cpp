@@ -271,7 +271,7 @@ void CUIActorInfoWnd::FillReputationDetails(CUIXml* xml, LPCSTR path)
         CUIActorStaticticDetail* itm = xr_new<CUIActorStaticticDetail>();
         itm->Init(xml, path, 0);
         comm.set(xml->Read(_list_node, "r", i, "unknown_community"));
-        itm->m_text1->SetTextST(comm.id().c_str());
+        itm->m_text1->SetText(InventoryUtilities::GetCommunityDisplayName(comm.id().c_str()).c_str());
 
         CHARACTER_GOODWILL gw = RELATION_REGISTRY().GetCommunityGoodwill(comm.index(), Actor()->ID());
         gw += CHARACTER_COMMUNITY::relation(Actor()->Community(), comm.index());
