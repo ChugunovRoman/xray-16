@@ -498,7 +498,11 @@ void CUIMapWnd::SetExternalDataSource(IMapDataSource* source)
     if (m_externalDataSource)
     {
         RefreshExternalDataSource();
-        m_view_actor = true;
+        if (m_pendingFocusActor)
+        {
+            m_view_actor = true;
+            m_pendingFocusActor = false;
+        }
     }
     else
     {
@@ -592,6 +596,20 @@ bool CUIMapWnd::SetExternalPointVisual(u32 logical_id, pcstr owner_faction, pcst
             }
         }
 
+        return true;
+    }
+
+    return false;
+}
+
+bool CUIMapWnd::UpdateExternalSpotHint(u32 logical_id, pcstr hint_text)
+{
+    for (auto& spot : m_externalSpots)
+    {
+        if (spot.desc.logical_id != logical_id)
+            continue;
+
+        spot.desc.hint_text = hint_text ? hint_text : "";
         return true;
     }
 
@@ -1473,7 +1491,11 @@ void CUIMapWnd::Update()
         if (revision != m_externalDataRevision)
         {
             RefreshExternalDataSource();
-            m_view_actor = true;
+            if (m_pendingFocusActor)
+            {
+                m_view_actor = true;
+                m_pendingFocusActor = false;
+            }
         }
     }
 

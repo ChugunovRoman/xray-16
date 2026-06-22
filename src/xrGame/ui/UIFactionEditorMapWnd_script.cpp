@@ -51,5 +51,7 @@ void CUIFactionEditorMapWnd::script_register(lua_State* luaState)
             .def("GetPointIconTexture", &CUIFactionEditorMapWnd::GetPointIconTexture)
             .def("GetLogicalIdBySmartName", &CUIFactionEditorMapWnd::GetLogicalIdBySmartName)
             .def("EnumeratePoints", &CUIFactionEditorMapWnd::EnumeratePoints)
+            .def("SetSmartType", &CUIFactionEditorMapWnd::SetSmartType)
+            .def("SetPointHintText", &CUIFactionEditorMapWnd::SetPointHintText)
     ];
 }

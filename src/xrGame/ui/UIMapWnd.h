@@ -81,6 +81,7 @@ private:
     EUiMapClick m_lastExternalClick;
     u32 m_lastExternalClickModifiers;
     bool m_hasPendingExternalClick;
+    bool m_pendingFocusActor{false};
 
 #ifdef DEBUG
 //	CUIStatic*					m_dbg_text_hint;
@@ -237,6 +238,8 @@ public:
     bool ConsumeExternalMapClick(u32& logical_id, EUiMapClick& click_type, u32& modifiers);
     bool GetExternalPointDesc(u32 logical_id, SMapPointDesc& out) const { return GetExternalPointDescInternal(logical_id, out); }
     bool SetExternalPointVisual(u32 logical_id, pcstr owner_faction, pcstr icon_texture);
+    bool UpdateExternalSpotHint(u32 logical_id, pcstr hint_text);
+    void SetPendingFocusActor(bool value) { m_pendingFocusActor = value; }
     void UpdateScroll();
     shared_str cName() const { return "ui_map_wnd"; }
 

@@ -38,6 +38,8 @@ public:
     pcstr GetPointIconTexture(u32 logical_id) const;
     u32 GetLogicalIdBySmartName(pcstr smart_name) const;
     void EnumeratePoints(const luabind::functor<void>& callback) const;
+    bool SetSmartType(u32 logical_id, pcstr type);
+    bool SetPointHintText(u32 logical_id, pcstr hint_text);
 
     void Draw() override;
     void Update() override;

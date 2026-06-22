@@ -22,6 +22,7 @@ struct XrDelete
 
 constexpr pcstr SMART_TERRAIN_MAP_READY_EVENT = "SMART_TERRAIN_MAP:ready";
 constexpr pcstr SMART_PROPS_FILE = "misc\\simulation_objects_props.ltx";
+constexpr pcstr SMART_PROPS_CUSTOM_FILE = "misc\\simulation_objects_props_custom.ltx";
 constexpr pcstr SMART_DEFAULT_SPAWN_FILE = "misc\\simulations\\default.ltx";
 constexpr pcstr SMART_DEFAULT_CUSTOM_SPAWN_FILE = "misc\\simulations\\default_custom.ltx";
 constexpr pcstr SMART_OPTIONS_FILE = "axr_options.ltx";
@@ -129,16 +130,29 @@ shared_str translate_smart_name(pcstr smart_name)
     return StringTable().translate(smart_name).c_str();
 }
 
-pcstr detect_smart_type(const CInifile& ini, pcstr section_name)
+pcstr detect_smart_type(const CInifile* ini, const CInifile* custom_ini, pcstr section_name)
 {
-    if (!section_name || !ini.section_exist(section_name))
+    if (!section_name)
         return nullptr;
 
     static constexpr pcstr smartTypes[] = {"resource", "base", "camp", "point", "lair", "territory"};
-    for (pcstr smartType : smartTypes)
+
+    if (custom_ini && custom_ini->section_exist(section_name))
     {
-        if (ini.line_exist(section_name, smartType) && ini.r_bool(section_name, smartType))
-            return smartType;
+        for (pcstr smartType : smartTypes)
+        {
+            if (custom_ini->line_exist(section_name, smartType) && custom_ini->r_bool(section_name, smartType))
+                return smartType;
+        }
+    }
+
+    if (ini && ini->section_exist(section_name))
+    {
+        for (pcstr smartType : smartTypes)
+        {
+            if (ini->line_exist(section_name, smartType) && ini->r_bool(section_name, smartType))
+                return smartType;
+        }
     }
 
     return nullptr;
@@ -482,20 +496,25 @@ bool load_spawn_smart_terrain_points(pcstr spawn_name, xr_vector<SMapPointDesc>&
         return false;
 
     string_path smart_props_file_name;
+    string_path smart_props_custom_file_name;
     string_path default_spawn_file_name;
     string_path default_custom_spawn_file_name;
     string_path smart_options_file_name;
     FS.update_path(smart_props_file_name, "$game_config$", SMART_PROPS_FILE);
+    FS.update_path(smart_props_custom_file_name, "$game_config$", SMART_PROPS_CUSTOM_FILE);
     FS.update_path(default_spawn_file_name, "$game_config$", SMART_DEFAULT_SPAWN_FILE);
     FS.update_path(default_custom_spawn_file_name, "$game_config$", SMART_DEFAULT_CUSTOM_SPAWN_FILE);
     FS.update_path(smart_options_file_name, "$game_config$", SMART_OPTIONS_FILE);
 
     std::unique_ptr<CInifile, XrDelete<CInifile>> smartPropsIni;
+    std::unique_ptr<CInifile, XrDelete<CInifile>> smartPropsCustomIni;
     std::unique_ptr<CInifile, XrDelete<CInifile>> defaultSpawnIni;
     std::unique_ptr<CInifile, XrDelete<CInifile>> defaultCustomSpawnIni;
     std::unique_ptr<CInifile, XrDelete<CInifile>> optionsIni;
     if (FS.exist(smart_props_file_name))
         smartPropsIni.reset(xr_new<CInifile>(smart_props_file_name, true, true, false));
+    if (FS.exist(smart_props_custom_file_name))
+        smartPropsCustomIni.reset(xr_new<CInifile>(smart_props_custom_file_name, true, true, false));
     if (FS.exist(default_spawn_file_name))
         defaultSpawnIni.reset(xr_new<CInifile>(default_spawn_file_name, true, true, false));
     if (FS.exist(default_custom_spawn_file_name))
@@ -569,8 +588,7 @@ bool load_spawn_smart_terrain_points(pcstr spawn_name, xr_vector<SMapPointDesc>&
                     point.section_name = section_name;
                     point.smart_name = smart_name;
                     point.display_name = translate_smart_name(point.smart_name.c_str());
-                    if (smartPropsIni)
-                        point.smart_type = detect_smart_type(*smartPropsIni, point.smart_name.c_str());
+                    point.smart_type = detect_smart_type(smartPropsIni.get(), smartPropsCustomIni.get(), point.smart_name.c_str());
                     apply_simulation_owner_overrides(
                         point, defaultCustomSpawnIni.get(), defaultSpawnIni.get(), optionsIni.get());
 
@@ -725,6 +743,41 @@ public:
         return false;
     }
 
+    bool UpdatePublishedPointSmartType(pcstr spawn_name, u32 logical_id, pcstr new_type)
+    {
+        if (!m_published || xr_strcmp(m_published->spawn_name.c_str(), spawn_name) != 0)
+            return false;
+
+        for (auto& point : m_published->points)
+        {
+            if (point.logical_id != logical_id)
+                continue;
+
+            point.smart_type = (new_type && new_type[0]) ? new_type : "";
+            ++m_revision;
+            return true;
+        }
+
+        return false;
+    }
+
+    bool UpdatePublishedPointHintText(pcstr spawn_name, u32 logical_id, pcstr hint_text)
+    {
+        if (!m_published || xr_strcmp(m_published->spawn_name.c_str(), spawn_name) != 0)
+            return false;
+
+        for (auto& point : m_published->points)
+        {
+            if (point.logical_id != logical_id)
+                continue;
+
+            point.hint_text = (hint_text && hint_text[0]) ? hint_text : "";
+            return true;
+        }
+
+        return false;
+    }
+
     void RefreshPublishedFromSimulationLtx(pcstr spawn_name)
     {
         if (!m_published || xr_strcmp(m_published->spawn_name.c_str(), spawn_name) != 0)
@@ -804,4 +857,16 @@ u32 CSpawnSmartTerrainMapDataSource::GetDataRevision() const
 bool CSpawnSmartTerrainMapDataSource::GetFocusLevel(shared_str& outLevel) const
 {
     return CSharedSmartTerrainMapCache::Instance().GetFocusLevel(m_spawn_name.c_str(), outLevel);
+}
+
+bool CSpawnSmartTerrainMapDataSource::SetSmartType(u32 logical_id, pcstr type)
+{
+    return CSharedSmartTerrainMapCache::Instance().UpdatePublishedPointSmartType(
+        m_spawn_name.c_str(), logical_id, type);
+}
+
+bool CSpawnSmartTerrainMapDataSource::SetPointHintText(u32 logical_id, pcstr hint_text)
+{
+    return CSharedSmartTerrainMapCache::Instance().UpdatePublishedPointHintText(
+        m_spawn_name.c_str(), logical_id, hint_text);
 }

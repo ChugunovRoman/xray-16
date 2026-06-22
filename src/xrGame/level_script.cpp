@@ -672,6 +672,9 @@ void stop_tutorial()
 
 LPCSTR translate_string(LPCSTR str) { return StringTable().translate(str).c_str(); }
 void replace_translate_string(LPCSTR str_id, LPCSTR new_str) { StringTable().replace(str_id, new_str); }
+void register_string_token(LPCSTR key, LPCSTR value) { StringTable().register_token(key, value); }
+void unregister_string_token(LPCSTR key) { StringTable().unregister_token(key); }
+LPCSTR apply_string_tokens(LPCSTR str) { return StringTable().apply_tokens(str).c_str(); }
 bool has_active_tutotial() { return (g_tutorial != NULL); }
 
 // Alundaio: namespace level exports extension
@@ -1079,6 +1082,9 @@ void CLevel::script_register(lua_State* luaState)
         def("active_tutorial_name", +[](){ return g_tutorial->GetTutorName(); }),
         def("translate_string", &translate_string),
         def("replace_translate_string", &replace_translate_string),
+        def("register_string_token", &register_string_token),
+        def("unregister_string_token", &unregister_string_token),
+        def("apply_string_tokens", &apply_string_tokens),
         def("reload_language", +[]() { StringTable().ReloadLanguage(); }),
         def("log_stack_trace", &xrDebug::LogStackTrace),
         def("jump_to_level", +[](pcstr level_name)

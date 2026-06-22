@@ -306,13 +306,91 @@ void CStringTable::replace(const STRING_ID& str_id, const STRING_VALUE& new_str)
         pData->m_StringTable[str_id] = new_str;
 }
 
+void CStringTable::register_token(const STRING_ID& key, const STRING_VALUE& value)
+{
+    if (!pData)
+        return;
+
+    std::lock_guard guard{ pDataMutex };
+    pData->m_tokens[key] = value;
+}
+
+void CStringTable::unregister_token(const STRING_ID& key)
+{
+    if (!pData)
+        return;
+
+    std::lock_guard guard{ pDataMutex };
+    pData->m_tokens.erase(key);
+}
+
+STRING_VALUE CStringTable::apply_tokens(const STRING_VALUE& str) const
+{
+    if (!pData || pData->m_tokens.empty())
+        return str;
+
+    const char* cstr = str.c_str();
+    if (!strchr(cstr, '@'))
+        return str;
+
+    xr_string result;
+    result.reserve(str.size());
+    const char* p = cstr;
+
+    while (*p)
+    {
+        if (*p != '@')
+        {
+            result += *p++;
+            continue;
+        }
+
+        const char* end = strchr(p + 1, '@');
+        if (!end || end == p + 1) // no closing '@' or empty key '@@'
+        {
+            result += *p++;
+            continue;
+        }
+
+        const xr_string key(p + 1, end);
+        const STRING_ID key_id(key.c_str());
+
+        // Priority 1: token map
+        const auto tok_it = pData->m_tokens.find(key_id);
+        if (tok_it != pData->m_tokens.end())
+        {
+            result += tok_it->second.c_str();
+            p = end + 1;
+            continue;
+        }
+
+        // Priority 2: StringTable ID substitution (no recursion - raw value only)
+        const auto str_it = pData->m_StringTable.find(key_id);
+        if (str_it != pData->m_StringTable.end())
+        {
+            result += str_it->second.c_str();
+            p = end + 1;
+            continue;
+        }
+
+        // Fallback: keep token as-is
+        result += '@';
+        result += key;
+        result += '@';
+        p = end + 1;
+    }
+
+    return STRING_VALUE(result.c_str());
+}
+
 STRING_VALUE CStringTable::translate(const STRING_ID& str_id) const
 {
     if (!pData)
         return str_id;
 
-    if (pData->m_StringTable.find(str_id) != pData->m_StringTable.end())
-        return pData->m_StringTable[str_id];
+    const auto it = pData->m_StringTable.find(str_id);
+    if (it != pData->m_StringTable.end())
+        return apply_tokens(it->second);
     return str_id;
 }
 
@@ -329,9 +407,10 @@ bool CStringTable::translate(const STRING_ID& str_id, STRING_VALUE& out) const
     if (!pData)
         return false;
 
-    if (pData->m_StringTable.find(str_id) != pData->m_StringTable.end())
+    const auto it = pData->m_StringTable.find(str_id);
+    if (it != pData->m_StringTable.end())
     {
-        out = pData->m_StringTable[str_id];
+        out = apply_tokens(it->second);
         return true;
     }
     return false;

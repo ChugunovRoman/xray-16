@@ -64,6 +64,7 @@ void CUIFactionEditorMapWnd::ReloadInternal(bool focus_default_target)
 
     m_spawnSource.Reload();
     m_mapWnd->ClearExternalDataSource();
+    m_mapWnd->SetPendingFocusActor(focus_default_target);
     m_mapWnd->SetExternalDataSource(&m_spawnSource);
     if (focus_default_target)
         FocusDefaultTarget();
@@ -180,6 +181,19 @@ pcstr CUIFactionEditorMapWnd::GetPointOwnerFaction(u32 logical_id) const
 pcstr CUIFactionEditorMapWnd::GetPointIconTexture(u32 logical_id) const
 {
     return GetPointString(logical_id, &SMapPointDesc::icon_texture);
+}
+
+bool CUIFactionEditorMapWnd::SetSmartType(u32 logical_id, pcstr type)
+{
+    return m_spawnSource.SetSmartType(logical_id, type);
+}
+
+bool CUIFactionEditorMapWnd::SetPointHintText(u32 logical_id, pcstr hint_text)
+{
+    m_spawnSource.SetPointHintText(logical_id, hint_text);
+    if (m_mapWnd)
+        m_mapWnd->UpdateExternalSpotHint(logical_id, hint_text);
+    return true;
 }
 
 void CUIFactionEditorMapWnd::EnumeratePoints(const luabind::functor<void>& callback) const

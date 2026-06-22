@@ -21,6 +21,7 @@ struct STRING_TABLE_DATA
     shared_str m_sLanguage;
     shared_str m_sCurrency;
     STRING_TABLE_MAP m_StringTable;
+    STRING_TABLE_MAP m_tokens;
 };
 
 class ENGINE_API CStringTable final
@@ -30,6 +31,12 @@ public:
     static void Destroy();
 
     void replace(const STRING_ID& str_id, const STRING_VALUE& new_str);
+
+    void register_token(const STRING_ID& key, const STRING_VALUE& value);
+    void unregister_token(const STRING_ID& key);
+
+    [[nodiscard]]
+    STRING_VALUE apply_tokens(const STRING_VALUE& str) const;
 
     [[nodiscard]]
     STRING_VALUE translate(const STRING_ID& str_id) const;
