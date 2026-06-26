@@ -253,7 +253,7 @@ void CPoltergeist::reinit()
     state_invisible = true;
     setVisible(false);
     m_current_position = Position();
-    character_physics_support()->movement()->DestroyCharacter();
+    character_physics_support()->RequestDestroyCharacter();
 
     m_height = 0.3f;
     time_height_updated = 0;
@@ -271,7 +271,7 @@ void CPoltergeist::Hide()
     setVisible(false);
 
     m_current_position = Position();
-    character_physics_support()->movement()->DestroyCharacter();
+    character_physics_support()->RequestDestroyCharacter();
 
     ability()->on_hide();
 }
@@ -289,7 +289,7 @@ void CPoltergeist::Show()
 
     Position() = m_current_position;
     character_physics_support()->movement()->SetPosition(Position());
-    character_physics_support()->movement()->CreateCharacter();
+    character_physics_support()->RequestCreateCharacterSafe();
 
     ability()->on_show();
 }
@@ -346,7 +346,7 @@ bool CPoltergeist::net_Spawn(CSE_Abstract* DC)
         return (FALSE);
     VERIFY(character_physics_support());
     VERIFY(character_physics_support()->movement());
-    character_physics_support()->movement()->DestroyCharacter();
+    character_physics_support()->RequestDestroyCharacter();
     // спаунится нивидимым
     setVisible(false);
     ability()->on_hide();

@@ -23,6 +23,7 @@
 #include "game_object_space.h"
 #include "xrScriptEngine/script_callback_ex.h"
 #include "script_game_object.h"
+#include "xrPhysics/IPHWorld.h"
 
 void CActor::attach_Vehicle(CHolderCustom* vehicle)
 {
@@ -56,7 +57,8 @@ void CActor::attach_Vehicle(CHolderCustom* vehicle)
     u16 head_bone = pK->LL_BoneID("bip01_head");
     pK->LL_GetBoneInstance(u16(head_bone)).set_callback(bctPhysics, VehicleHeadCallback, this);
 
-    character_physics_support()->movement()->DestroyCharacter();
+    // B-1: actor vehicle attach/detach runs on main thread (input/UpdateCL); Request* is a no-op outside overlap.
+    character_physics_support()->RequestDestroyCharacter();
     mstate_wishful = 0;
     m_holderID = car->ID();
 
@@ -70,6 +72,14 @@ void CActor::attach_Vehicle(CHolderCustom* vehicle)
 
 void CActor::detach_Vehicle()
 {
+    IPHWorld* ph = physics_world();
+    if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
+    {
+        // B-1: vehicle detach mutates splitter/character state; defer the whole owner-level tail.
+        QueueDeferredDetachVehicle();
+        return;
+    }
+
     if (!m_holder)
         return;
     CCar* car = smart_cast<CCar*>(m_holder);
@@ -111,6 +121,34 @@ void CActor::detach_Vehicle()
 
     //.	SetWeaponHideState(whs_CAR, FALSE);
     SetWeaponHideState(INV_STATE_CAR, false);
+}
+
+void CActor::QueueDeferredDetachVehicle()
+{
+    IPHWorld* ph = physics_world();
+    if (!ph)
+    {
+        detach_Vehicle();
+        return;
+    }
+
+    if (m_deferred_detach_vehicle_registered)
+        return;
+
+    m_deferred_detach_vehicle_registered = true;
+    if (ph->defer_scheduler_mutation([this] { ApplyDeferredDetachVehicle(); }))
+        return;
+
+    m_deferred_detach_vehicle_registered = false;
+    detach_Vehicle();
+}
+
+void CActor::ApplyDeferredDetachVehicle()
+{
+    m_deferred_detach_vehicle_registered = false;
+    if (getDestroy() || object_removed())
+        return;
+    detach_Vehicle();
 }
 
 bool CActor::use_Vehicle(CHolderCustom* object)

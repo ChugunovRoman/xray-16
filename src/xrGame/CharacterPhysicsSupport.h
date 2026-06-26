@@ -93,6 +93,27 @@ private:
     u32 m_dead_update_interval{0};
     bool m_dead_ragdoll_sleep_applied{false};
 
+    // B-1: caller-level deferred physics intent (GameThread during scheduler overlap).
+    // One intent per owner per overlap frame; last Request* wins (create/destroy/shell are mutually exclusive in practice).
+    enum EDeferredPhysicsIntent : u8
+    {
+        dpiNone = 0,
+        dpiCreate,
+        dpiDestroy,
+        dpiCreateShell,
+        dpiActivateShell,
+        dpiApplyHit,
+    };
+    EDeferredPhysicsIntent m_deferred_physics_intent{dpiNone};
+    bool m_deferred_physics_registered{false};
+    IGameObject* m_deferred_shell_who{nullptr};
+    std::shared_ptr<bool> m_deferred_alive = std::make_shared<bool>(true);
+    Fvector m_deferred_hit_position{};
+    Fvector m_deferred_hit_direction{};
+    float m_deferred_hit_impulse{};
+    u16 m_deferred_hit_bone{};
+    ALife::EHitType m_deferred_hit_type{ALife::eHitTypeMax};
+
 public:
     EType Type() { return m_eType; }
 private:
@@ -122,6 +143,11 @@ public:
     //////////////////base hierarchi methods///////////////////////////////////////////////////
     void CreateCharacterSafe();
     void CreateCharacter();
+    // B-1: defer create/destroy to post-overlap flush when called from GameThread during overlap window.
+    void RequestCreateCharacterSafe();
+    void RequestDestroyCharacter();
+    void RequestCreateShell(IGameObject* who);
+    void RequestActivateShell(IGameObject* who);
     bool CollisionCorrectObjPos();
 
     void in_UpdateCL();
@@ -175,6 +201,7 @@ private:
     void EndActivateFreeShell(
         IGameObject* who, const Fvector& inital_entity_position, const Fvector& dp, const Fvector& velocity);
     void KillHit(SHit& H);
+    void KillHitImpl(SHit& H); // B-1: original atomic death->ragdoll body; KillHit defers the whole of this under overlap
     static void DeathAnimCallback(CBlend* B);
     void CreateIKController();
     void DestroyIKController();
@@ -185,5 +212,7 @@ private:
     IC bool DoCharacterShellCollide();
     void UpdateCollisionActivatingDellay();
     void SpawnCharacterCreate();
+    void QueueDeferredPhysicsApply();
+    void ApplyDeferredPhysicsMutations();
 };
 #endif // CHARACTER_PHYSICS_SUPPORT

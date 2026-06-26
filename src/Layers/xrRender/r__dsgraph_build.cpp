@@ -744,7 +744,10 @@ void R_dsgraph_structure::unload()
 // sub-space rendering - main procedure
 void R_dsgraph_structure::build_subspace()
 {
-    // No ZoneScoped: runs on task workers for parallel sun cascades (see render_phase_sun.cpp).
+    // Tracy zone is thread-safe; this runs on task workers for the 3 parallel sun cascades plus the
+    // main pass (4 calls/frame). Coarse zone -> negligible overhead, reveals culling/render-list cost.
+    // Main pass shows on the primary thread; cascades on task workers -> split is visible per-thread.
+    ZoneScopedN("dsg_build_subspace");
     marker++; // !!! critical here
 
     if (o.precise_portals && RImplementation.rmPortals)
@@ -826,7 +829,10 @@ void R_dsgraph_structure::build_subspace()
     if (collect_dynamic_any)
     {
         // Traverse object database
-        g_pGamePersistent->SpatialSpace.q_frustum(lstRenderables, o.spatial_traverse_flags, o.spatial_types, o.view_frustum);
+        {
+            ZoneScopedN("dsg_q_frustum");
+            g_pGamePersistent->SpatialSpace.q_frustum(lstRenderables, o.spatial_traverse_flags, o.spatial_types, o.view_frustum);
+        }
 
         if (o.spatial_traverse_flags & ISpatial_DB::O_ORDERED) // this should be inside of query functions
         {

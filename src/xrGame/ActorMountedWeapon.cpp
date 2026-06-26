@@ -26,7 +26,7 @@ bool CActor::use_HolderEx(CHolderCustom* object, bool bForce)
                 if (const CGameObject* go = smart_cast<CGameObject*>(m_holder))
                     callback(GameObject::eDetachVehicle)(go->lua_game_object());
 
-                character_physics_support()->movement()->CreateCharacter();
+                character_physics_support()->RequestCreateCharacterSafe();
                 m_holder = nullptr;
             }
         }
@@ -46,7 +46,7 @@ bool CActor::use_HolderEx(CHolderCustom* object, bool bForce)
             if (object->attach_Actor(this))
             {
                 // destroy actor character
-                character_physics_support()->movement()->DestroyCharacter();
+                character_physics_support()->RequestDestroyCharacter();
 
                 m_holder = object;
                 if (pCamBobbing)

@@ -105,7 +105,7 @@ public:
     }
 
     void o_crow(IGameObject* O);
-    void o_remove(Objects& v, IGameObject* O);
+    bool o_remove(Objects& v, IGameObject* O); // returns false if O was not present (caller must not push elsewhere)
     void o_activate(IGameObject* O);
     void o_sleep(IGameObject* O);
 

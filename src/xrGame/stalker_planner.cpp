@@ -26,6 +26,7 @@
 #include "enemy_manager.h"
 #include "npc_cpp_profile.h"
 #include "performance_cvars.h"
+#include "xrAICore/Components/ai_planner_search_limits.h"
 #include "xrEngine/profiler.h"
 
 //#define GOAP_DEBUG
@@ -263,6 +264,10 @@ void CStalkerPlanner::update(u32 time_delta)
 {
     ZoneScopedN("CStalkerPlanner::update");
     ZoneTextF("%s", m_object ? m_object->cName().c_str() : "no_object");
+
+    // Per-solve evaluator cache window: the stalker brain inlines actual()+search (it does not call
+    // CProblemSolver::solve), so bump the epoch here. World is frozen for this synchronous update.
+    ++g_ai_evaluator_solve_epoch;
 #ifdef LOG_ACTION
     if ((psAI_Flags.test(aiGOAP) && !m_use_log) || (!psAI_Flags.test(aiGOAP) && m_use_log))
         set_use_log(!!psAI_Flags.test(aiGOAP));

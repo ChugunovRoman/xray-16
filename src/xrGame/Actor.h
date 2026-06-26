@@ -144,6 +144,7 @@ public:
 
 protected:
     CActorStatisticMgr* m_statistic_manager;
+    bool m_deferred_detach_vehicle_registered{false};
 
 public:
     virtual void StartTalk(CInventoryOwner* talk_partner);
@@ -254,6 +255,8 @@ public:
     s32 GetShotRndSeed() { return m_ShotRndSeed; };
 public:
     void detach_Vehicle();
+    void QueueDeferredDetachVehicle();
+    void ApplyDeferredDetachVehicle();
     void steer_Vehicle(float angle);
     void attach_Vehicle(CHolderCustom* vehicle);
     bool use_HolderEx(CHolderCustom* object, bool bForce);

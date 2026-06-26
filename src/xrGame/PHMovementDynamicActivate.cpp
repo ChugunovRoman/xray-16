@@ -6,6 +6,39 @@
 // extern	class CPHWorld	*ph_world;
 #include "xrPhysics/PHCharacter.h"
 #include "xrPhysics/IPhysicsShellHolder.h"
+#include "xrPhysics/IPHWorld.h"
+
+void CPHMovementControl::QueueDeferredBoxActivation(u32 id, int num_it, int num_steps, float resolve_depth)
+{
+    IPHWorld* ph = physics_world();
+    if (!ph)
+    {
+        ActivateBoxDynamic(id, num_it, num_steps, resolve_depth);
+        return;
+    }
+
+    m_deferred_box_activation_id = id;
+    m_deferred_box_activation_num_it = num_it;
+    m_deferred_box_activation_num_steps = num_steps;
+    m_deferred_box_activation_resolve_depth = resolve_depth;
+    if (m_deferred_box_activation_registered)
+        return;
+
+    m_deferred_box_activation_registered = true;
+    if (ph->defer_scheduler_mutation([this] { ApplyDeferredBoxActivation(); }))
+        return;
+
+    m_deferred_box_activation_registered = false;
+    ActivateBoxDynamic(id, num_it, num_steps, resolve_depth);
+}
+
+void CPHMovementControl::ApplyDeferredBoxActivation()
+{
+    m_deferred_box_activation_registered = false;
+    ActivateBoxDynamic(m_deferred_box_activation_id, m_deferred_box_activation_num_it,
+        m_deferred_box_activation_num_steps, m_deferred_box_activation_resolve_depth);
+}
+
 bool CPHMovementControl::ActivateBoxDynamic(
     u32 id, int num_it /*=8*/, int num_steps /*5*/, float resolve_depth /*=0.01f*/)
 {
@@ -32,6 +65,22 @@ bool CPHMovementControl::ActivateBoxDynamic(
 
     if (character_exist && id == old_id)
         return true;
+
+    // B-1: a real box transition. If the GameThread scheduler runs parallel to the ODE step (overlap),
+    // the resize (and possible CreateCharacter) must not mutate physics mid-step — defer it to the
+    // post-step flush (main thread, after wait()), which also runs the real collision/fit test there.
+    // Return false ("not applied yet") so the actor stance state machine keeps the transition PENDING
+    // (e.g. mcCrouch stays set, auto-stand keeps retrying every frame until clear of a ceiling). Once
+    // the deferred apply lands the box, next frame hits the id==old_id early-return above -> returns
+    // true -> the state machine syncs (one frame late). This mirrors overlap=0 behavior, including the
+    // "can't stand under a low ceiling" case. NOTE: the fix for the original stuck-crouch bug is placing
+    // this defer AFTER the id==old_id check (the agent's bug was deferring before it, so state never synced).
+    IPHWorld* ph = physics_world();
+    if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
+    {
+        QueueDeferredBoxActivation(id, num_it, num_steps, resolve_depth);
+        return false;
+    }
 
     if (!character_exist)
     {

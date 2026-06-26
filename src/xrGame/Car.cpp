@@ -1717,6 +1717,7 @@ void CCar::OnAfterExplosion() {}
 void CCar::OnBeforeExplosion() { setEnabled(FALSE); }
 void CCar::CarExplode()
 {
+    // B-1: shedule/explode may run during scheduler overlap; actor character destroy goes through Request*.
     if (b_exploded)
         return;
     CPHSkeleton::SetNotNeedSave();
@@ -1735,7 +1736,7 @@ void CCar::CarExplode()
             m_exit_position.set(Position());
         A->detach_Vehicle();
         if (A->g_Alive() <= 0.f)
-            A->character_physics_support()->movement()->DestroyCharacter();
+            A->character_physics_support()->RequestDestroyCharacter();
     }
 
     if (CPHDestroyable::CanDestroy())

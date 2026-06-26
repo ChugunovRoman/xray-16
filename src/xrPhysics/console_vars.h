@@ -8,4 +8,7 @@ struct XRPHYSICS_API ph_console
     static float phBreakCommonFactor; //= 0.01f;
     static float phRigidBreakWeaponFactor; //= 1.f;
     static float ph_step_time; //=fixed_step;
+    static int ph_mt_island_solve; //= 1; P1 dev kill-switch: parallel island solve (CPHWorld::Step)
+    static int ph_mt_island_min; //= 16; min active islands to enable parallel solve
+    static int ph_max_substeps; //= 0; cap physics substeps per frame (anti death-spiral); 0 = no cap (default — capping slows the actor under load)
 };

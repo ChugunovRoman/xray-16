@@ -14,6 +14,7 @@
 #include "ai_space.h"
 #include "xrAICore/Navigation/game_graph.h"
 #include "PHDestroyable.h"
+#include "xrPhysics/IPHWorld.h"
 
 #define F_MAX 3.402823466e+38F
 
@@ -54,6 +55,8 @@ void CPHSkeleton::Init()
 {
     m_remove_time = u32(-1);
     b_removing = false;
+    m_deferred_schedule_update_registered = false;
+    m_deferred_schedule_update_dt = 0;
     m_startup_anim = nullptr;
 }
 
@@ -126,7 +129,52 @@ bool CPHSkeleton::Spawn(CSE_Abstract* D)
 }
 
 void CPHSkeleton::Load(LPCSTR section) { existence_time = pSettings->r_u32(section, "remove_time") * 1000; }
+void CPHSkeleton::QueueDeferredScheduleUpdate(u32 dt)
+{
+    IPHWorld* ph = physics_world();
+    if (!ph)
+    {
+        UpdateNow(dt);
+        return;
+    }
+
+    m_deferred_schedule_update_dt = dt;
+    if (m_deferred_schedule_update_registered)
+        return;
+
+    m_deferred_schedule_update_registered = true;
+    if (ph->defer_scheduler_mutation([this] { ApplyDeferredScheduleUpdate(); }))
+        return;
+
+    m_deferred_schedule_update_registered = false;
+    UpdateNow(dt);
+}
+
+void CPHSkeleton::ApplyDeferredScheduleUpdate()
+{
+    m_deferred_schedule_update_registered = false;
+
+    CPhysicsShellHolder* obj = PPhysicsShellHolder();
+    if (!obj || obj->getDestroy() || obj->object_removed())
+        return;
+
+    UpdateNow(m_deferred_schedule_update_dt);
+}
+
 void CPHSkeleton::Update(u32 dt)
+{
+    IPHWorld* ph = physics_world();
+    if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
+    {
+        // B-1: scheduler overlap must not split shells or queue object destroy while ODE islands are stepping.
+        QueueDeferredScheduleUpdate(dt);
+        return;
+    }
+
+    UpdateNow(dt);
+}
+
+void CPHSkeleton::UpdateNow(u32 dt)
 {
     CPhysicsShellHolder* obj = PPhysicsShellHolder();
     CPhysicsShell* pPhysicsShell = obj->PPhysicsShell();

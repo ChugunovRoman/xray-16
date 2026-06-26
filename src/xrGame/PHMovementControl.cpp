@@ -86,6 +86,11 @@ CPHMovementControl::CPHMovementControl(IGameObject* parent)
     in_dead_area_count = 0;
     bNonInteractiveMode = false;
     block_damage_step_end = u64(-1);
+    m_deferred_box_activation_registered = false;
+    m_deferred_box_activation_id = 0;
+    m_deferred_box_activation_num_it = 0;
+    m_deferred_box_activation_num_steps = 0;
+    m_deferred_box_activation_resolve_depth = 0.0f;
 }
 
 CPHMovementControl::~CPHMovementControl(void)

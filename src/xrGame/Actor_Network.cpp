@@ -601,6 +601,7 @@ bool CActor::net_Spawn(CSE_Abstract* DC)
     // character_physics_support()->movement()->ActivateBox	(0);
     if (E->m_holderID != u16(-1))
     {
+        // B-1: net spawn is main-thread; direct destroy before vehicle attach is safe.
         character_physics_support()->movement()->DestroyCharacter();
     }
     if (m_bOutBorder)
@@ -777,6 +778,7 @@ void CActor::net_Destroy()
 #pragma todo("Dima to MadMax : do not comment inventory owner net_Destroy!!!")
     CInventoryOwner::net_Destroy();
     cam_UnsetLadder();
+    // B-1: net destroy is main-thread teardown; direct destroy is safe.
     character_physics_support()->movement()->DestroyCharacter();
     if (m_pPhysicsShell)
     {

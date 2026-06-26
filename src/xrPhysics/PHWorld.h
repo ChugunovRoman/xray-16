@@ -2,6 +2,11 @@
 
 #include "Common/Noncopyable.hpp"
 
+#include <atomic>
+#include <functional>
+#include <mutex>
+#include <thread>
+
 #include "xrEngine/pure.h"
 
 #include "Physics.h"
@@ -62,6 +67,14 @@ private:
     PH_OBJECT_STORAGE m_recently_disabled_objects;
     PH_UPDATE_OBJECT_STORAGE m_update_objects;
     PH_UPDATE_OBJECT_STORAGE m_freezed_update_objects;
+    // P1: reused snapshot of active-island roots for parallel solve (see CPHWorld::Step).
+    xr_vector<CPHObject*> m_island_solve_batch;
+    // B-1: scheduler overlap frame window (GameThread launched until post-wait flush).
+    std::atomic<bool> m_scheduler_overlap_active{false};
+    std::atomic<bool> m_step_running{false};
+    std::thread::id m_step_thread_id; // thread that runs FrameStep; its own internal mutations are NOT deferred
+    std::mutex m_deferred_mutations_lock;
+    xr_vector<std::function<void()>> m_deferred_mutations;
     dGeomID m_motion_ray;
     CPHCommander* m_commander;
     CObjectSpace* m_object_space;
@@ -145,6 +158,14 @@ public:
     virtual void OnRender();
 #endif
     virtual void OnFrame();
+    void OnFrameStep(); // B-1: actual physics step body; called by OnFrame (seqFrame) or Device.PhysicsFrameOverlapCallback
+    // B-1: mark the overlap frame window (GameThread launched, flush not yet run).
+    void BeginSchedulerOverlapFrame();
+    // B-1: true on GameThread during the overlap window — caller-level intents should defer, not low-level PHObject replay.
+    bool ShouldDeferSchedulerPhysicsMutation() const override;
+    // B-1: queue owner-level apply callback for post-wait flush; returns false if caller should run immediately.
+    bool defer_scheduler_mutation(std::function<void()> op) override;
+    void flush_deferred_mutations(); // run queued mutations after secondary_tasks.wait()
     virtual const PHWorldStatistics& GetStats() override { return stats; }
     virtual void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert) override;
 

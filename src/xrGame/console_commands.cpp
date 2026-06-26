@@ -256,6 +256,13 @@ u32 npc_perf_motivator_dead_interval = 3000;
 u32 npc_perf_sim_brain_actor_update_interval = 10000;
 int npc_perf_agent_enemy_fill_squads_trace_members = 0;
 
+// Dev kill-switch: per-solve cache for script GOAP evaluators (read in script_property_evaluator_wrapper.cpp).
+int ai_evaluator_solve_cache = 1;
+
+// Animation LOD: throttle SelectAnimation for far, non-combat NPCs (read in ai_stalker.cpp).
+int npc_anim_lod = 1;
+int npc_anim_lod_far_interval_ms = 120;
+
 u32 npc_preview_scene_budget_per_frame = 1;
 
 Flags32 g_uCommonFlags;
@@ -2794,6 +2801,9 @@ void CCC_RegisterCommands()
 #endif // DEBUG
 
     // Performance / NPC throttling and cache (user.ltx)
+    CMD4(CCC_Integer, "ai_evaluator_solve_cache", &ai_evaluator_solve_cache, 0, 1);
+    CMD4(CCC_Integer, "npc_anim_lod", &npc_anim_lod, 0, 1);
+    CMD4(CCC_Integer, "npc_anim_lod_far_interval_ms", &npc_anim_lod_far_interval_ms, 1, 5000);
     CMD4(CCC_Float, "npc_perf_planner_near_dist", &npc_perf_planner_near_dist, 1.f, 2000.f);
     CMD4(CCC_Float, "npc_perf_planner_medium_dist", &npc_perf_planner_medium_dist, 1.f, 2000.f);
     CMD4(CCC_Integer, "npc_perf_planner_solve_interval_near_idle_ms", (int*)&npc_perf_planner_solve_interval_near_idle_ms, 10, 60000);
@@ -2887,6 +2897,12 @@ void CCC_RegisterCommands()
     // Physics
     CMD1(CCC_PHFps, "ph_frequency");
     CMD1(CCC_PHIterations, "ph_iterations");
+
+    // P1: parallel island solve (dev toggles for A/B; keep available in release builds)
+    CMD4(CCC_Integer, "ph_mt_island_solve", &ph_console::ph_mt_island_solve, 0, 1);
+    CMD4(CCC_Integer, "ph_mt_island_min", &ph_console::ph_mt_island_min, 1, 4096);
+    // Cap physics substeps per frame to break the spiral-of-death under heavy load (0 = uncapped).
+    CMD4(CCC_Integer, "ph_max_substeps", &ph_console::ph_max_substeps, 0, 30);
 
 #ifdef DEBUG
     CMD1(CCC_PHGravity, "ph_gravity");

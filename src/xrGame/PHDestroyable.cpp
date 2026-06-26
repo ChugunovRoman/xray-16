@@ -16,9 +16,7 @@
 #include "xrNetServer/NET_Messages.h"
 
 #include "xrPhysics/MathUtils.h"
-#ifdef DEBUG
 #include "xrPhysics/IPHWorld.h"
-#endif
 
 #include "Include/xrRender/Kinematics.h"
 /*
@@ -46,6 +44,9 @@ CPHDestroyable::CPHDestroyable()
     m_flags.flags = 0;
     m_flags.set(fl_released, true);
     m_depended_objects = 0;
+    m_deferred_destroy_registered = false;
+    m_deferred_destroy_source_id = u16(-1);
+    m_deferred_destroy_section = "ph_skeleton_object";
 }
 /////////spawn object representing destroyed
 /// item//////////////////////////////////////////////////////////////////////////////////
@@ -136,6 +137,13 @@ void CPHDestroyable::Destroy(u16 source_id /*=u16(-1)*/, LPCSTR section /*="ph_s
 {
     if (!CanDestroy())
         return;
+    IPHWorld* ph = physics_world();
+    if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
+    {
+        // B-1: destroy mutates shell state/spawn replacement objects; defer scheduler-side calls until post-wait.
+        QueueDeferredDestroy(source_id, section);
+        return;
+    }
     m_notificate_objects.clear();
     CPhysicsShellHolder* obj = PPhysicsShellHolder();
     CPHSkeleton* phs = obj->PHSkeleton();
@@ -157,6 +165,36 @@ void CPHDestroyable::Destroy(u16 source_id /*=u16(-1)*/, LPCSTR section /*="ph_s
     };
     ///////////////////////////////////////////////////////////////////////////
     m_flags.set(fl_destroyed, true);
+}
+
+void CPHDestroyable::QueueDeferredDestroy(u16 source_id, LPCSTR section)
+{
+    IPHWorld* ph = physics_world();
+    if (!ph)
+    {
+        Destroy(source_id, section);
+        return;
+    }
+
+    m_deferred_destroy_source_id = source_id;
+    m_deferred_destroy_section = section;
+    if (m_deferred_destroy_registered)
+        return;
+
+    m_deferred_destroy_registered = true;
+    if (ph->defer_scheduler_mutation([this] { ApplyDeferredDestroy(); }))
+        return;
+
+    m_deferred_destroy_registered = false;
+    Destroy(source_id, section);
+}
+
+void CPHDestroyable::ApplyDeferredDestroy()
+{
+    m_deferred_destroy_registered = false;
+    if (!CanDestroy())
+        return;
+    Destroy(m_deferred_destroy_source_id, m_deferred_destroy_section.c_str());
 }
 
 void CPHDestroyable::Load(CInifile* ini, LPCSTR section)
@@ -197,7 +235,13 @@ void CPHDestroyable::Load(LPCSTR section)
     }
 }
 
-void CPHDestroyable::Init() { m_depended_objects = 0; }
+void CPHDestroyable::Init()
+{
+    m_depended_objects = 0;
+    m_deferred_destroy_registered = false;
+    m_deferred_destroy_source_id = u16(-1);
+    m_deferred_destroy_section = "ph_skeleton_object";
+}
 void CPHDestroyable::RespawnInit()
 {
     m_flags.set(fl_destroyed, false);
@@ -205,9 +249,13 @@ void CPHDestroyable::RespawnInit()
     m_destroyed_obj_visual_names.clear();
     m_notificate_objects.clear();
     m_depended_objects = 0;
+    m_deferred_destroy_registered = false;
+    m_deferred_destroy_source_id = u16(-1);
+    m_deferred_destroy_section = "ph_skeleton_object";
 }
 void CPHDestroyable::SheduleUpdate(u32 dt)
 {
+    // B-1: post-destroy cleanup uses net DestroyObject(); no direct PH structural mutation during overlap.
     if (!m_flags.test(fl_destroyed) || !m_flags.test(fl_released))
         return;
     CPhysicsShellHolder* obj = PPhysicsShellHolder();

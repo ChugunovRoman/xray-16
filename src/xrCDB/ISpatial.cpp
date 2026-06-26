@@ -67,16 +67,13 @@ void SpatialBase::spatial_register()
 {
     spatial.type |= STYPEFLAG_INVALIDSECTOR;
     if (spatial.node_ptr)
-    {
-        // already registered - nothing to do
-    }
-    else
-    {
-        // register
-        R_ASSERT(spatial.space);
-        spatial.space->insert(this);
-        spatial.sector_id = IRender_Sector::INVALID_SECTOR_ID;
-    }
+        return;
+
+    R_ASSERT(spatial.space);
+    std::unique_lock<std::shared_mutex> lock(spatial.space->query_rw_mutex());
+    spatial_refresh_bounds();
+    spatial.space->insert_assuming_locked(this);
+    spatial.sector_id = IRender_Sector::INVALID_SECTOR_ID;
 }
 
 void SpatialBase::spatial_unregister()
@@ -97,22 +94,24 @@ void SpatialBase::spatial_unregister()
 void SpatialBase::spatial_move()
 {
     ZoneScoped;
-    if (spatial.node_ptr)
-    {
-        //*** somehow it was determined that object has been moved
-        spatial.type |= STYPEFLAG_INVALIDSECTOR;
+    if (!spatial.node_ptr)
+        return;
 
-        //*** check if we are supposed to correct it's spatial location
-        if (spatial_inside())
-            return; // ???
-        spatial.space->remove(this);
-        spatial.space->insert(this);
-    }
-    else
-    {
-        //*** we are not registered yet, or already unregistered
-        //*** ignore request
-    }
+    R_ASSERT(spatial.space);
+    // B-1 perf: refresh bounds + the spatial_inside() test run LOCK-FREE. spatial_move runs single-writer
+    // (physics PhDataUpdate / object UpdateCL, both main thread); the only parallel accessors are AI q_ray
+    // readers (shared_lock). sphere.P / spatial.type are single-writer fields — a parallel reader may see a
+    // torn position for one frame (object off by cm), which is cosmetic and how the engine ran for years.
+    // Only the actual octree restructure (remove+insert, rare: object changed node) needs the exclusive
+    // lock vs those readers. Taking the unique_lock on every move (incl. the common no-op) starved the
+    // parallel vision readers and inflated both q_ray and spatial_move under overlap.
+    spatial_refresh_bounds();
+    spatial.type |= STYPEFLAG_INVALIDSECTOR;
+    if (spatial_inside())
+        return;
+    std::unique_lock<std::shared_mutex> lock(spatial.space->query_rw_mutex());
+    spatial.space->remove_assuming_locked(this);
+    spatial.space->insert_assuming_locked(this);
 }
 
 void SpatialBase::spatial_updatesector_internal(IRender_Sector::sector_id_t sector_id)
@@ -265,6 +264,11 @@ void ISpatial_DB::_insert(ISpatial_NODE* N, Fvector& n_C, float n_R)
 void ISpatial_DB::insert(ISpatial* S)
 {
     std::unique_lock<std::shared_mutex> ulock(rw);
+    insert_assuming_locked(S);
+}
+
+void ISpatial_DB::insert_assuming_locked(ISpatial* S)
+{
 #ifdef DEBUG
     Stats.Insert.Begin();
 
@@ -352,6 +356,11 @@ void ISpatial_DB::_remove(ISpatial_NODE* N, ISpatial_NODE* N_sub)
 void ISpatial_DB::remove(ISpatial* S)
 {
     std::unique_lock<std::shared_mutex> ulock(rw);
+    remove_assuming_locked(S);
+}
+
+void ISpatial_DB::remove_assuming_locked(ISpatial* S)
+{
 #ifdef DEBUG
     Stats.Remove.Begin();
 #endif

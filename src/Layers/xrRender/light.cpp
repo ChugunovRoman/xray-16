@@ -170,7 +170,7 @@ void light::set_rotation(const Fvector& D, const Fvector& R)
         spatial_move();
 }
 
-void light::spatial_move()
+void light::spatial_refresh_bounds()
 {
     switch (flags.type)
     {
@@ -198,18 +198,16 @@ void light::spatial_move()
     break;
     case IRender_Light::OMNIPART:
     {
-        // is it optimal? seems to be...
-        //spatial.sphere.P.mad(position, direction, range);
-        //spatial.sphere.R = range;
-        // This is optimal.
         const float fSphereR = range * RSQRTDIV2;
         spatial.sphere.P.mad(position, direction, fSphereR);
         spatial.sphere.R = fSphereR;
     }
     break;
     }
+}
 
-    // update spatial DB
+void light::spatial_move()
+{
     SpatialBase::spatial_move();
 
 #if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)

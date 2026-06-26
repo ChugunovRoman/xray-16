@@ -10,6 +10,7 @@
 #include "CameraManager.h"
 #include "xr_object.h"
 #include "Feel_Sound.h"
+#include "xrServerEntities/ai_sounds.h"
 
 #include <algorithm>
 
@@ -294,6 +295,41 @@ void IGame_Level::SetViewEntity(IGameObject* O)
     pCurrentViewEntity = O;
 }
 
+// B-1: AI sound-reaction coalescing. Rapid sounds from the same source (full-auto gunfire) re-alert the
+// same listeners every ~100ms; skip the expensive listener q_box + per-listener occlusion if this source
+// already propagated within the window. 0 = off (kill-switch).
+int g_snd_ai_coalesce_ms = 180;
+
+// Sound AI optimization: per-frame budget, burst coalescence, occlusion skip
+int g_snd_ai_budget_per_frame = 100; // max fully-processed sound events per frame
+int g_snd_ai_budget_enable = 1; // kill-switch for budget
+int g_snd_ai_priority_only_beyond_budget = 1; // after budget exhausted, only allow combat sounds
+float g_snd_ai_occlusion_skip_threshold = 0.15f; // skip occlusion below this power
+float g_snd_ai_occlusion_skip_default = 0.3f; // conservative occlusion replacement
+int g_snd_ai_burst_coalesce_time_ms = 50; // burst coalescence window (ms)
+float g_snd_ai_burst_coalesce_dist = 5.0f; // burst coalescence radius (meters)
+int g_snd_ai_burst_coalesce_enable = 1; // kill-switch for burst coalescence
+
+// Per-frame budget state
+static u32 s_snd_ai_budget_counter = 0;
+static u32 s_snd_ai_budget_last_frame = u32(-1);
+
+// Burst coalescence ring buffer: recent events by (pos, type, time)
+struct SndBurstEntry
+{
+    Fvector pos;
+    u32 type;
+    u32 time_ms;
+};
+static SndBurstEntry s_snd_burst_ring[16] = {};
+static int s_snd_burst_ring_idx = 0;
+
+// Priority sound type mask: combat-critical sounds that bypass budget gate
+static const u32 SND_PRIORITY_TYPE_MASK =
+    SOUND_TYPE_WEAPON_SHOOTING | SOUND_TYPE_WEAPON_BULLET_HIT |
+    SOUND_TYPE_MONSTER_ATTACKING | SOUND_TYPE_MONSTER_DYING |
+    SOUND_TYPE_OBJECT_EXPLODING;
+
 void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
 {
     if (!g_bLoaded)
@@ -307,6 +343,78 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
     }
     if (0 == S->feedback)
         return;
+
+    // B-1: coalesce rapid same-source AI sound propagation (see g_snd_ai_coalesce_ms). Lock-free: events
+    // run on one thread; an aligned u32 store is atomic, and a missed/extra coalesce is harmless.
+    if (g_snd_ai_coalesce_ms > 0 && S->g_object)
+    {
+        static u32 s_last_ai_snd_ms[0x10000] = {}; // [source object id] -> last AI-propagation time (ms)
+        const u16 sid = S->g_object->ID();
+        R_ASSERT(sid < std::size(s_last_ai_snd_ms));
+        const u32 now = Device.dwTimeGlobal;
+        const u32 last = s_last_ai_snd_ms[sid];
+        if (last && now - last < u32(g_snd_ai_coalesce_ms))
+            return; // this source already alerted nearby listeners just now -> skip redundant query
+        s_last_ai_snd_ms[sid] = now;
+    }
+
+    // Burst coalescence: merge nearby same-type sounds within a short window (e.g. full-auto burst).
+    // Independent from per-source coalescence above — handles different source objects at close positions.
+    if (g_snd_ai_burst_coalesce_enable && S->g_type && S->feedback)
+    {
+        const u32 now = Device.dwTimeGlobal;
+        Fvector eff_pos = S->feedback->get_params()->position;
+        if (S->feedback->is_2D())
+            eff_pos.add(GEnv.Sound->listener_position());
+
+        for (int i = 0; i < 16; i++)
+        {
+            if (s_snd_burst_ring[i].time_ms == 0)
+                continue;
+            if (now - s_snd_burst_ring[i].time_ms > u32(g_snd_ai_burst_coalesce_time_ms))
+                continue;
+            if (s_snd_burst_ring[i].type != u32(S->g_type))
+                continue;
+            if (eff_pos.distance_to(s_snd_burst_ring[i].pos) > g_snd_ai_burst_coalesce_dist)
+                continue;
+            return; // burst-coalesced: a similar sound was already propagated nearby
+        }
+    }
+
+    // Per-frame budget: cap the number of fully-processed (q_box + occlusion) sound events.
+    // Beyond budget, only combat-critical sounds (weapon fire, explosions, monster attacks) pass through.
+    if (g_snd_ai_budget_enable)
+    {
+        if (Device.dwFrame != s_snd_ai_budget_last_frame)
+        {
+            s_snd_ai_budget_counter = 0;
+            s_snd_ai_budget_last_frame = Device.dwFrame;
+            s_snd_burst_ring_idx = 0;
+            ZeroMemory(s_snd_burst_ring, sizeof(s_snd_burst_ring));
+        }
+
+        const bool is_priority = (u32(S->g_type) & SND_PRIORITY_TYPE_MASK) != 0;
+        if (s_snd_ai_budget_counter >= u32(g_snd_ai_budget_per_frame))
+        {
+            if (g_snd_ai_priority_only_beyond_budget && !is_priority)
+                return; // budget exhausted, skip non-priority sounds
+        }
+        s_snd_ai_budget_counter++;
+    }
+
+    // Record burst-coalescence entry after all gates pass
+    if (g_snd_ai_burst_coalesce_enable && S->g_type && S->feedback)
+    {
+        const u32 now = Device.dwTimeGlobal;
+        Fvector eff_pos = S->feedback->get_params()->position;
+        if (S->feedback->is_2D())
+            eff_pos.add(GEnv.Sound->listener_position());
+
+        s_snd_burst_ring[s_snd_burst_ring_idx].pos = eff_pos;
+        s_snd_burst_ring[s_snd_burst_ring_idx].type = u32(S->g_type);
+        s_snd_burst_ring[s_snd_burst_ring_idx].time_ms = now;
+        s_snd_burst_ring_idx = (s_snd_burst_ring_idx + 1) & 15;
+    }
 
     clamp(range, 0.1f, 500.f);
 
@@ -349,7 +457,17 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
         VERIFY(_valid(Power));
         if (Power > EPS_S)
         {
-            const float occ = Sound->get_occlusion_to(it->GetSpatialData().sphere.P, snd_position);
+            // Occlusion skip: for sounds already below hearing threshold, skip the expensive
+            // per-listener ray-trace and use a conservative occlusion default instead.
+            float occ;
+            if (g_snd_ai_occlusion_skip_threshold > 0.f && Power < g_snd_ai_occlusion_skip_threshold)
+            {
+                occ = g_snd_ai_occlusion_skip_default;
+            }
+            else
+            {
+                occ = Sound->get_occlusion_to(it->GetSpatialData().sphere.P, snd_position);
+            }
             VERIFY(_valid(occ));
             Power *= occ;
             if (Power > EPS_S)

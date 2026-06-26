@@ -30,6 +30,10 @@ int ps_fps_limit_in_menu = 60;
 // CObjectList::Update — optional TaskScheduler parallel paths (see xr_object_list.cpp).
 int ps_obj_preupdate_mt = 0;
 int ps_obj_postupdate_mt = 0;
+// B-1: run physics step ‖ GameThread scheduler (1) vs old order physics-before-scheduler (0).
+// Default 0 — opt-in dev toggle for A/B; flip to 1 after validation.
+// ENGINE_API: read cross-module from xrPhysics (PHWorld.cpp).
+ENGINE_API int ps_mt_scheduler_physics_overlap = 1;
 
 bool g_bLoaded = false;
 ref_light precache_light = 0;
@@ -311,11 +315,31 @@ void CRenderDevice::ProcessFrame()
 
     OnCameraUpdated();
 
+    // B-1: open overlap window before GameThread launch so scheduler-side physics intents defer until flush.
+    if (ps_mt_scheduler_physics_overlap && PhysicsBeginOverlapFrameCallback)
+        PhysicsBeginOverlapFrameCallback();
+
     secondary_tasks.run([] { XRay::Engine::GameThread(); });
+
+    // B-1: when overlap enabled, the physics step runs here — in parallel with the GameThread scheduler
+    // (CPHWorld::OnFrame in seqFrame no-ops in this mode). When disabled, physics already ran in FrameMove.
+    if (ps_mt_scheduler_physics_overlap && PhysicsFrameOverlapCallback)
+    {
+        ZoneScopedN("PhysicsOverlap");
+        PhysicsFrameOverlapCallback();
+    }
 
     DoRender();
 
     secondary_tasks.wait();
+
+    // B-1: scheduler joined and the physics step is done — apply mutations the scheduler deferred
+    // during the step now, fully serial (no concurrent reader/step), keeping the physics world consistent.
+    if (ps_mt_scheduler_physics_overlap && PhysicsDeferredFlushCallback)
+    {
+        ZoneScopedN("PhysicsDeferredFlush");
+        PhysicsDeferredFlushCallback();
+    }
 
     const u64 frameEndTime = TimerGlobal.GetElapsed_ms();
     const u64 frameTime = frameEndTime - frameStartTime;

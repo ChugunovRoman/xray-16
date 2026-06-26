@@ -729,6 +729,7 @@ extern int ps_fps_limit_in_menu;
 
 extern int ps_obj_preupdate_mt;
 extern int ps_obj_postupdate_mt;
+extern ENGINE_API int ps_mt_scheduler_physics_overlap;
 
 void CCC_Register()
 {
@@ -829,9 +830,30 @@ void CCC_Register()
     CMD3(CCC_Mask, "snd_efx", &psSoundFlags, ss_EFX);
     CMD3(CCC_Mask, "snd_use_float32", &psSoundFlags, ss_UseFloat32);
     CMD4(CCC_Integer, "snd_targets", &psSoundTargets, 4, 256);
-    CMD4(CCC_Integer, "snd_cache_size", &psSoundCacheSizeMB, 4, 64);
+    CMD4(CCC_Integer, "snd_cache_size", &psSoundCacheSizeMB, 4, 96);
+    CMD4(CCC_Float, "snd_cache_short_sec", &psSoundCacheShortSec, 0.0f, 30.0f);
+    extern int g_snd_ai_coalesce_ms;
+    CMD4(CCC_Integer, "snd_ai_coalesce_ms", &g_snd_ai_coalesce_ms, 0, 1000);
+
+    extern int g_snd_ai_budget_enable;
+    CMD4(CCC_Integer, "snd_ai_budget_enable", &g_snd_ai_budget_enable, 0, 1);
+    extern int g_snd_ai_budget_per_frame;
+    CMD4(CCC_Integer, "snd_ai_budget_per_frame", &g_snd_ai_budget_per_frame, 1, 10000);
+    extern int g_snd_ai_priority_only_beyond_budget;
+    CMD4(CCC_Integer, "snd_ai_priority_only_beyond_budget", &g_snd_ai_priority_only_beyond_budget, 0, 1);
+    extern float g_snd_ai_occlusion_skip_threshold;
+    CMD4(CCC_Float, "snd_ai_occlusion_skip_threshold", &g_snd_ai_occlusion_skip_threshold, 0.f, 1.f);
+    extern float g_snd_ai_occlusion_skip_default;
+    CMD4(CCC_Float, "snd_ai_occlusion_skip_default", &g_snd_ai_occlusion_skip_default, 0.f, 1.f);
+    extern int g_snd_ai_burst_coalesce_enable;
+    CMD4(CCC_Integer, "snd_ai_burst_coalesce_enable", &g_snd_ai_burst_coalesce_enable, 0, 1);
+    extern int g_snd_ai_burst_coalesce_time_ms;
+    CMD4(CCC_Integer, "snd_ai_burst_coalesce_time_ms", &g_snd_ai_burst_coalesce_time_ms, 0, 500);
+    extern float g_snd_ai_burst_coalesce_dist;
+    CMD4(CCC_Float, "snd_ai_burst_coalesce_dist", &g_snd_ai_burst_coalesce_dist, 0.f, 100.f);
     CMD4(CCC_Integer, "obj_preupdate_mt", &ps_obj_preupdate_mt, 0, 1);
     CMD4(CCC_Integer, "obj_postupdate_mt", &ps_obj_postupdate_mt, 0, 1);
+    CMD4(CCC_Integer, "mt_scheduler_physics_overlap", &ps_mt_scheduler_physics_overlap, 0, 1);
 
 #ifdef DEBUG
     CMD3(CCC_Mask, "snd_stats", &g_stats_flags, st_sound);

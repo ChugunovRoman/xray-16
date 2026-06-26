@@ -14,6 +14,8 @@ class CPHSkeleton : public CPHDestroyableNotificate
     static u32 existence_time;
     u32 m_remove_time;
     PHSHELL_PAIR_VECTOR m_unsplited_shels;
+    bool m_deferred_schedule_update_registered;
+    u32 m_deferred_schedule_update_dt;
 
     shared_str m_startup_anim;
     flags8 m_flags;
@@ -22,6 +24,9 @@ private:
     // Creating
 
     void Init();
+    void QueueDeferredScheduleUpdate(u32 dt);
+    void ApplyDeferredScheduleUpdate();
+    void UpdateNow(u32 dt);
 
     void ClearUnsplited();
     // Splitting

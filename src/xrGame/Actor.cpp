@@ -263,6 +263,7 @@ CActor::~CActor()
 
 void CActor::reinit()
 {
+    // B-1: spawn/reinit is guaranteed main-thread; direct CreateCharacter is safe here.
     character_physics_support()->movement()->CreateCharacter();
     character_physics_support()->movement()->SetPhysicsRefObject(this);
     CEntityAlive::reinit();

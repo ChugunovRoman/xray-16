@@ -27,7 +27,7 @@ void activating_character_delay::update()
         return;
 
     if (do_position_correct())
-        char_support.CreateCharacter();
+        char_support.RequestCreateCharacterSafe();
 
     activate_time = Device.dwTimeGlobal + delay;
 }

@@ -362,6 +362,9 @@ TEMPLATE_SPECIALIZATION
 IC void CProblemSolverAbstract::solve()
 {
 #ifndef AI_COMPILER
+    // Per-solve evaluator cache window: bump epoch so script evaluators re-read the world once for
+    // this solve (actual() + Search) and reuse cached values across A* nodes. World is frozen here.
+    ++g_ai_evaluator_solve_epoch;
     m_solution_changed = false;
 
     if (actual())

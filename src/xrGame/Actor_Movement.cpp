@@ -236,7 +236,7 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
         // mask input into "real" state
         u32 move = mcAnyMove | mcAccel;
 
-        if (mstate_real & mcCrouch)
+        if (mstate_real & mcCrouch && mstate_wf & mcCrouch)
         {
             if (!isActorAccelerated(mstate_real, IsZoomAimingMode()) &&
                 isActorAccelerated(mstate_wf, IsZoomAimingMode()))
@@ -296,7 +296,7 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
                 else if (mstate_real & mcBack)
                     scale *= m_fWalkBackFactor;
 
-                if (mstate_real & mcCrouch)
+                if ((mstate_real & mcCrouch) && (mstate_wf & mcCrouch))
                     scale *= m_fCrouchFactor;
                 if (mstate_real & mcClimb)
                     scale *= m_fClimbFactor;

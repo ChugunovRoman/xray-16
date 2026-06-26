@@ -117,6 +117,7 @@ private:
     bool m_is_trader{false};
     u32 m_next_think_update_time{0};
     u32 m_think_update_interval{0};
+    u32 m_next_animation_update_time{0}; // animation LOD throttle for far, non-combat NPCs
     u32 m_next_visibility_update_time{0};
     u32 m_visibility_update_interval{0};
     u32 m_next_agent_manager_update_time{0};
@@ -198,6 +199,7 @@ public:
     virtual void shedule_Update(u32 dt);
     virtual void Think();
     virtual void SelectAnimation(const Fvector& _view, const Fvector& _move, float speed);
+    virtual bool should_update_animation(u32 now_ms) override; // animation LOD: throttle far, non-combat NPCs
     virtual bool UsedAI_Locations();
 
     virtual void g_WeaponBones(int& L, int& R1, int& R2);

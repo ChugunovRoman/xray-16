@@ -4,11 +4,29 @@
 #include "SoundRender_Core.h"
 #include "SoundRender_Scene.h"
 #include "SoundRender_Source.h"
+#include "xrServerEntities/ai_sounds.h"
 
 #include "xrCore/Threading/TaskManager.hpp"
 
 extern u32 psSoundModel;
 extern float psSoundVEffects;
+
+// Per-type propagation interval for AI sound event pressure control.
+// Combat-critical sounds keep the default ~0.5s pulse; non-critical sounds
+// (footsteps, reloads, ambient) get longer intervals.
+// Disable via snd_ai_budget_enable=0 if needed.
+static float get_propagate_pulse_mult(u32 g_type)
+{
+    if (g_type & (SOUND_TYPE_WEAPON_SHOOTING | SOUND_TYPE_WEAPON_BULLET_HIT |
+                  SOUND_TYPE_MONSTER_ATTACKING | SOUND_TYPE_MONSTER_DYING |
+                  SOUND_TYPE_OBJECT_EXPLODING))
+        return 1.0f; // combat-critical: keep current 0.5s interval
+
+    if (g_type & SOUND_TYPE_WEAPON_RECHARGING)
+        return 6.0f; // ~3s interval — reload sounds are low priority
+
+    return 2.0f; // ~1s interval — generic sounds (footsteps, ambient, etc.)
+}
 
 void CSoundRender_Emitter::set_position(const Fvector& pos)
 {
@@ -74,7 +92,10 @@ void CSoundRender_Emitter::Event_ReleaseOwner()
 
 void CSoundRender_Emitter::Event_Propagade()
 {
-    fTimeToPropagade += ::Random.randF(s_f_def_event_pulse - 0.030f, s_f_def_event_pulse + 0.030f);
+    const float pulse_mult = owner_data ? get_propagate_pulse_mult(owner_data->g_type) : 1.0f;
+    fTimeToPropagade += ::Random.randF(
+        s_f_def_event_pulse * pulse_mult - 0.030f,
+        s_f_def_event_pulse * pulse_mult + 0.030f);
     if (!owner_data)
         return;
     if (!owner_data->g_type)

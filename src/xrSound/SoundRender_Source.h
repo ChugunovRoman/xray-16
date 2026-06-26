@@ -40,11 +40,18 @@ class XRSOUND_API CSoundRender_Source final : public CSound_source
     SoundDataInfo m_data_info{};
     SoundSourceInfo m_info{};
 
+    // B-1: fully decoded PCM, shared by every emitter of this source. Populated once at load for short SFX
+    // (see psSoundCacheShortSec); empty => stream/decode per chunk as before. Immutable after load, so
+    // decompress() reads it lock-free. Movable (keeps the defaulted move ctor valid).
+    xr_vector<u8> m_cached_pcm;
+
 private:
     void i_decompress(OggVorbis_File* ovf, char* dest, u32 size) const;
     void i_decompress(OggVorbis_File* ovf, float* dest, u32 size) const; // this overload clamps denormalized sounds
 
     bool LoadWave(pcstr name);
+    bool should_cache_pcm() const; // B-1: short enough to fully cache (and caching enabled)?
+    void cache_pcm_if_short();     // B-1: decode whole sound into m_cached_pcm if short + within budget
 
 public:
     CSoundRender_Source() noexcept = default;

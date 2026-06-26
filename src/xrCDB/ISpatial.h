@@ -147,6 +147,10 @@ public:
 private:
     void spatial_updatesector_internal(IRender_Sector::sector_id_t sector_id);
 
+protected:
+    // B-1: refresh spatial.sphere (and related bounds) immediately before register/move under DB lock.
+    virtual void spatial_refresh_bounds() {}
+
 public:
     virtual SpatialData& GetSpatialData() override final { return spatial; }
     virtual bool spatial_inside() override final;
@@ -276,6 +280,9 @@ public:
     // void							destroy			();
     void insert(ISpatial* S);
     void remove(ISpatial* S);
+    // B-1: caller already holds unique_lock on query_rw_mutex(); do not re-lock.
+    void insert_assuming_locked(ISpatial* S);
+    void remove_assuming_locked(ISpatial* S);
     void update(u32 nodes = 8);
     bool verify();
 
@@ -293,6 +300,11 @@ public:
     void q_box(xr_vector<ISpatial*>& R, u32 _o, u32 _mask_or, const Fvector& _center, const Fvector& _size);
     void q_sphere(xr_vector<ISpatial*>& R, u32 _o, u32 _mask_or, const Fvector& _center, const float _radius);
     void q_frustum(xr_vector<ISpatial*>& R, u32 _o, u32 _mask_or, const CFrustum& _frustum);
+
+    // B-1: queries (q_box/q_ray) read each object's spatial.sphere.P under shared_lock on this mutex.
+    // Position updates outside insert/remove (e.g. CPHObject::get_spatial_params) must take it exclusively
+    // to avoid torn reads when the scheduler queries the DB in parallel with the physics step.
+    std::shared_mutex& query_rw_mutex() { return rw; }
 };
 
 #pragma pack(pop)

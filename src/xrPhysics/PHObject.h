@@ -57,6 +57,7 @@ protected:
 protected:
     virtual dGeomID dSpacedGeom() = 0;
     virtual void get_spatial_params() = 0;
+    void spatial_refresh_bounds() override;
     virtual void spatial_register();
     void SetRayMotions() { m_flags.set(fl_ray_motions, TRUE); }
     void UnsetRayMotions() { m_flags.set(fl_ray_motions, FALSE); }

@@ -23,6 +23,9 @@ private:
     u16 m_depended_objects;
     Flags8 m_flags;
     SHit m_fatal_hit;
+    bool m_deferred_destroy_registered;
+    u16 m_deferred_destroy_source_id;
+    shared_str m_deferred_destroy_section;
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /*
                 float						m_random_min
@@ -76,6 +79,8 @@ public:
     virtual void InitServerObject(CSE_Abstract* D);
 
 private:
+    void QueueDeferredDestroy(u16 source_id, LPCSTR section);
+    void ApplyDeferredDestroy();
     void NotificatePart(CPHDestroyableNotificate* dn);
     void PhysicallyRemovePart(CPHDestroyableNotificate* dn);
     ;

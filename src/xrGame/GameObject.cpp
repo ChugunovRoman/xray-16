@@ -929,21 +929,23 @@ void CGameObject::validate_ai_locations(bool decrement_reference)
 
 void CGameObject::spatial_register()
 {
-    Center(spatial.sphere.P);
-    spatial.sphere.R = Radius();
     SpatialBase::spatial_register();
 }
 
 void CGameObject::spatial_unregister() { SpatialBase::spatial_unregister(); }
+
+void CGameObject::spatial_refresh_bounds()
+{
+    Center(spatial.sphere.P);
+    spatial.sphere.R = Radius();
+}
+
 void CGameObject::spatial_move()
 {
     if (H_Parent())
         setup_parent_ai_locations();
     else if (Visual())
         validate_ai_locations();
-    //
-    Center(spatial.sphere.P);
-    spatial.sphere.R = Radius();
     SpatialBase::spatial_move();
 }
 

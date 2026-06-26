@@ -24,6 +24,14 @@ extern u32 npc_perf_planner_graph_search_max_nodes_combat;
 extern u32 npc_perf_planner_graph_search_max_nodes_danger;
 /** Nested GOAP (combat/danger sub-planners): xrAICore global g_ai_nested_planner_graph_search_max_nodes; console npc_perf_planner_nested_graph_search_max_nodes. */
 
+/** Dev kill-switch (default 1): per-solve cache for script GOAP evaluators. 0 reverts the default to NeverCache for A/B (script_property_evaluator_wrapper.cpp). */
+extern int ai_evaluator_solve_cache;
+
+/** Animation LOD (default 1): throttle SelectAnimation for far (>80m), non-combat NPCs. 0 disables (every frame) for A/B (ai_stalker.cpp). */
+extern int npc_anim_lod;
+/** Animation update interval (ms) for far, non-combat NPCs when npc_anim_lod=1. */
+extern int npc_anim_lod_far_interval_ms;
+
 // CCoverManager::best_cover (cover_manager_inline.h): cap evaluate() calls per search; 0 = vanilla. When >0, candidates sorted by distance first.
 extern u32 npc_perf_cover_best_max_evaluate;
 /** After quadtree nearest(): keep only this many closest points (0 = all). Cuts expensive accessible() loops when n is huge. */

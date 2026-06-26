@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include "xrCore/FTimer.h"
 #include "xrCDB/xrCDB.h" // build_callback
 #include "PhysicsExternalCommon.h"
@@ -53,6 +55,9 @@ public:
     virtual void set_default_character_contact_shotmark(ContactCallbackFun* f) = 0;
     virtual void set_step_time_callback(PhysicsStepTimeCallback* cb) = 0;
     virtual void AddCall(CPHCondition* c, CPHAction* a) = 0;
+    // B-1: caller-level defer gate for scheduler overlap (GameThread intents until post-wait flush).
+    virtual bool ShouldDeferSchedulerPhysicsMutation() const = 0;
+    virtual bool defer_scheduler_mutation(std::function<void()> op) = 0;
     virtual const PHWorldStatistics& GetStats() = 0;
     virtual void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert) = 0;
 #ifdef DEBUG

@@ -27,7 +27,7 @@
 #define BLOOD_MARKS_SECT "bloody_marks"
 
 int ps_force_character_lod_render = 0;
-int ps_r_disable_character_lod_render = 0;
+int ps_r_disable_character_lod_render = 1;
 
 namespace
 {

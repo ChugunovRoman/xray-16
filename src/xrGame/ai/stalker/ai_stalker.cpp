@@ -1566,6 +1566,22 @@ void CAI_Stalker::SelectAnimation(const Fvector& view, const Fvector& move, floa
         animation().update();
 }
 
+bool CAI_Stalker::should_update_animation(u32 now_ms)
+{
+    // Animation LOD: full-rate for Near/Medium and any combat NPC (get_stalker_update_lod() -> Near when
+    // an enemy is selected). Only far, non-combat NPCs are throttled; movement().on_frame still runs every
+    // frame, so position/path stay correct -- only animation blending updates at a lower rate (imperceptible
+    // at >80m). On Far->Near the interval drops to 0 and animation resumes immediately.
+    if (!npc_anim_lod)
+        return true;
+    if (get_stalker_update_lod(*this) != EStalkerUpdateLod::Far)
+        return true;
+    if (now_ms < m_next_animation_update_time)
+        return false;
+    m_next_animation_update_time = now_ms + u32(_max(1, npc_anim_lod_far_interval_ms));
+    return true;
+}
+
 const SRotation CAI_Stalker::Orientation() const { return (movement().m_head.current); }
 const MonsterSpace::SBoneRotation& CAI_Stalker::head_orientation() const { return (movement().head_orientation()); }
 void CAI_Stalker::net_Relcase(IGameObject* O)

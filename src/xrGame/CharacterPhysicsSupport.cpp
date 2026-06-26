@@ -412,6 +412,117 @@ void CCharacterPhysicsSupport::CreateCharacter()
     m_PhysicMovementControl->SetPosition(m_EntityAlife.Position());
 }
 
+void CCharacterPhysicsSupport::QueueDeferredPhysicsApply()
+{
+    IPHWorld* ph = physics_world();
+    if (!ph)
+        return;
+    if (m_deferred_physics_registered)
+        return;
+    m_deferred_physics_registered = true;
+    if (ph->defer_scheduler_mutation([this] { ApplyDeferredPhysicsMutations(); }))
+        return;
+    m_deferred_physics_registered = false;
+    ApplyDeferredPhysicsMutations();
+}
+
+void CCharacterPhysicsSupport::ApplyDeferredPhysicsMutations()
+{
+    m_deferred_physics_registered = false;
+    const EDeferredPhysicsIntent intent = m_deferred_physics_intent;
+    m_deferred_physics_intent = dpiNone;
+
+    if (intent == dpiNone || IsRemoved())
+        return;
+
+    if (!m_PhysicMovementControl)
+        return;
+
+    switch (intent)
+    {
+    case dpiDestroy:
+        if (m_PhysicMovementControl->CharacterExist())
+            m_PhysicMovementControl->DestroyCharacter();
+        break;
+    case dpiCreate:
+        if (m_EntityAlife.g_Alive() && !m_pPhysicsShell)
+            CreateCharacterSafe();
+        break;
+    case dpiCreateShell:
+        if (!m_pPhysicsShell)
+        {
+            Fvector dp, velocity;
+            CreateShell(m_deferred_shell_who, dp, velocity);
+        }
+        m_deferred_shell_who = nullptr;
+        break;
+    case dpiActivateShell:
+        if (!m_pPhysicsShell)
+            ActivateShell(m_deferred_shell_who);
+        m_deferred_shell_who = nullptr;
+        break;
+    case dpiApplyHit:
+        if (m_pPhysicsShell && m_pPhysicsShell->isActive())
+            m_pPhysicsShell->applyHit(m_deferred_hit_position, m_deferred_hit_direction,
+                m_deferred_hit_impulse, m_deferred_hit_bone, m_deferred_hit_type);
+        break;
+    default:
+        break;
+    }
+}
+
+void CCharacterPhysicsSupport::RequestCreateCharacterSafe()
+{
+    IPHWorld* ph = physics_world();
+    if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
+    {
+        m_deferred_physics_intent = dpiCreate;
+        QueueDeferredPhysicsApply();
+        return;
+    }
+    CreateCharacterSafe();
+}
+
+void CCharacterPhysicsSupport::RequestDestroyCharacter()
+{
+    IPHWorld* ph = physics_world();
+    if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
+    {
+        m_deferred_physics_intent = dpiDestroy;
+        QueueDeferredPhysicsApply();
+        return;
+    }
+    if (m_PhysicMovementControl)
+        m_PhysicMovementControl->DestroyCharacter();
+}
+
+void CCharacterPhysicsSupport::RequestCreateShell(IGameObject* who)
+{
+    IPHWorld* ph = physics_world();
+    if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
+    {
+        m_deferred_shell_who = who;
+        m_deferred_physics_intent = dpiCreateShell;
+        QueueDeferredPhysicsApply();
+        return;
+    }
+    Fvector dp, velocity;
+    CreateShell(who, dp, velocity);
+}
+
+void CCharacterPhysicsSupport::RequestActivateShell(IGameObject* who)
+{
+    IPHWorld* ph = physics_world();
+    if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
+    {
+        m_deferred_shell_who = who;
+        m_deferred_physics_intent = dpiActivateShell;
+        QueueDeferredPhysicsApply();
+        return;
+    }
+    ActivateShell(who);
+}
+
 bool HACK_TERRIBLE_DONOT_COLLIDE_ON_SPAWN(CEntityAlive& ea)
 {
     if (pSettings->line_exist(ea.cNameSect().c_str(), "hack_terrible_donot_collide_on_spawn") &&
@@ -455,6 +566,7 @@ void CCharacterPhysicsSupport::SpawnInitPhysics(CSE_Abstract* e)
     }
     else
     {
+        // B-1: net spawn of dead entity is main-thread; direct ActivateShell is safe.
         ActivateShell(NULL);
     }
 
@@ -492,6 +604,10 @@ void CCharacterPhysicsSupport::SpawnCharacterCreate()
 void CCharacterPhysicsSupport::destroy_imotion() { destroy(m_interactive_motion); }
 void CCharacterPhysicsSupport::in_NetDestroy()
 {
+    *m_deferred_alive = false;
+    m_deferred_physics_intent = dpiNone;
+    m_deferred_physics_registered = false;
+    m_deferred_shell_who = nullptr;
     destroy(m_interactive_motion);
     m_PhysicMovementControl->DestroyCharacter();
 
@@ -592,16 +708,30 @@ bool is_similar(const Fmatrix& m0, const Fmatrix& m1, float param)
 
 void CCharacterPhysicsSupport::KillHit(SHit& H)
 {
+    // B-1: death -> ragdoll is ONE atomic physics operation (create shell + destroy movement capsule +
+    // set up death animation). When the explosion/death is processed on the GameThread during the
+    // overlap window, defer the WHOLE operation to the post-step flush (runs on main, physics step
+    // finished) instead of splitting it across the overlap boundary. The agent's previous split
+    // (deferred capsule destroy -> capsule+ragdoll coexisting; ActivateShell instead of CreateShell)
+    // produced malformed/stretched ragdolls after grenade mass-kills.
+    IPHWorld* ph = physics_world();
+    if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
+    {
+        SHit Hcopy = H;
+        ph->defer_scheduler_mutation([this, Hcopy]() mutable { KillHitImpl(Hcopy); });
+        return;
+    }
+    KillHitImpl(H);
+}
+
+void CCharacterPhysicsSupport::KillHitImpl(SHit& H)
+{
 #ifdef DEBUG
     if (death_anim_debug)
         Msg("death anim: kill hit  ");
 #endif
     VERIFY(m_EntityAlife.Visual());
     VERIFY(m_EntityAlife.Visual()->dcast_PKinematics());
-
-    // IKinematicsAnimated * KA = m_EntityAlife.Visual( )->dcast_PKinematicsAnimated	();
-    // VERIFY( KA );
-    // KA->SetUpdateTracksCalback( &tracks_disable_update );
 
     m_character_shell_control.TestForWounded(m_EntityAlife.XFORM(), m_EntityAlife.Visual()->dcast_PKinematics());
     Fmatrix prev_pose;
@@ -613,7 +743,6 @@ void CCharacterPhysicsSupport::KillHit(SHit& H)
     Fvector death_position;
 
     CreateShell(H.who, death_position, velocity);
-    // ActivateShell( H.who );
 
     //	if(Type() == etStalker && xr_strcmp(dbg_stalker_death_anim, "none") != 0)
     float hit_angle = 0;
@@ -702,6 +831,18 @@ void CCharacterPhysicsSupport::in_Hit(SHit& H, bool is_killing)
                 H.impulse);
         }
 #endif
+        IPHWorld* ph = physics_world();
+        if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
+        {
+            m_deferred_hit_position = H.bone_space_position();
+            m_deferred_hit_direction = H.direction();
+            m_deferred_hit_impulse = H.phys_impulse();
+            m_deferred_hit_bone = H.bone();
+            m_deferred_hit_type = H.type();
+            m_deferred_physics_intent = dpiApplyHit;
+            QueueDeferredPhysicsApply();
+            return;
+        }
         m_pPhysicsShell->applyHit(H.bone_space_position(), H.direction(), H.phys_impulse(), H.bone(), H.type());
     }
 }
@@ -824,6 +965,12 @@ void CCharacterPhysicsSupport::in_UpdateCL()
 
     if (m_pPhysicsShell)
     {
+        IPHWorld* ph = physics_world();
+        if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
+        {
+            // B-1: active ragdoll maintenance mutates shell/joint state and must not run on GameThread during overlap.
+            return;
+        }
         ZoneScopedN("cph_ragdoll_shell");
         VERIFY(m_pPhysicsShell->isFullActive());
         {
@@ -1356,6 +1503,9 @@ void CCharacterPhysicsSupport::CreateShell(IGameObject* who, Fvector& dp, Fvecto
         dp.set(m_EntityAlife.Position());
     else
         m_PhysicMovementControl->GetDeathPosition(dp);
+    // B-1: destroy the movement capsule atomically with shell creation. CreateShell now only runs on
+    // the main thread (directly, or via KillHit's whole-operation defer in the post-step flush), so a
+    // direct DestroyCharacter is safe here and avoids capsule+ragdoll coexisting (which stretched corpses).
     m_PhysicMovementControl->DestroyCharacter();
 
     // shell create
@@ -1520,6 +1670,7 @@ void CCharacterPhysicsSupport::in_ChangeVisual()
             m_pPhysicsShell->Deactivate();
         xr_delete(m_pPhysicsShell);
         if (m_EntityAlife.Visual())
+            // B-1: visual swap is main-thread; direct ActivateShell is safe.
             ActivateShell(NULL);
     }
 }
@@ -1648,6 +1799,19 @@ void CCharacterPhysicsSupport::in_Die()
 {
     if (m_hit_valide_time < Device.dwTimeGlobal || !m_sv_hit.is_valide())
     {
+        // B-1: activate the death shell AND destroy the capsule together (atomic). Defer the whole pair
+        // to the post-step flush under overlap; the agent's RequestActivateShell(NULL) dropped the
+        // DestroyCharacter, leaving the capsule alive alongside the ragdoll.
+        IPHWorld* ph = physics_world();
+        if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
+        {
+            ph->defer_scheduler_mutation([this]
+            {
+                ActivateShell(NULL);
+                m_PhysicMovementControl->DestroyCharacter();
+            });
+            return;
+        }
         ActivateShell(NULL);
         m_PhysicMovementControl->DestroyCharacter();
         return;

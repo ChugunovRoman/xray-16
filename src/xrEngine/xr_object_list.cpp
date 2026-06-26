@@ -131,29 +131,35 @@ IGameObject* CObjectList::FindObjectByCLS_ID(CLASS_ID cls)
     return NULL;
 }
 
-void CObjectList::o_remove(Objects& v, IGameObject* O)
+bool CObjectList::o_remove(Objects& v, IGameObject* O)
 {
-    //. if(O->ID()==1026)
-    //. {
-    //. Log("ahtung");
-    //. }
     Objects::iterator _i = std::find(v.begin(), v.end(), O);
     VERIFY(_i != v.end());
+    // Release safety: never erase(end()) — that memmoves a garbage-sized range -> AV. Hit in heavy combat
+    // when an object is sleep/activate-requested while already moved out of this list (e.g. double
+    // ObjectProcessingDeactivate from a physics shell coming to rest). Returning false here also stops the
+    // caller from double-adding O to the other list (which would leave a stale duplicate). Debug VERIFY
+    // above still flags the underlying double-move.
+    if (_i == v.end())
+        return false;
     v.erase(_i);
+    return true;
     //. Msg("---o_remove[%s][%d]", O->cName().c_str(), O->ID() );
 }
 
 void CObjectList::o_activate(IGameObject* O)
 {
     VERIFY(O && O->processing_enabled());
-    o_remove(objects_sleeping, O);
+    if (!o_remove(objects_sleeping, O))
+        return; // already active (not in sleeping list) -> do not duplicate it in objects_active
     objects_active.push_back(O);
     O->MakeMeCrow();
 }
 void CObjectList::o_sleep(IGameObject* O)
 {
     VERIFY(O && !O->processing_enabled());
-    o_remove(objects_active, O);
+    if (!o_remove(objects_active, O))
+        return; // already sleeping (not in active list) -> do not duplicate it in objects_sleeping
     objects_sleeping.push_back(O);
     O->MakeMeCrow();
 }

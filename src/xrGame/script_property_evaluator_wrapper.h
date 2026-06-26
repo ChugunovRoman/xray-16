@@ -19,7 +19,8 @@ enum class EScriptEvaluatorCachePolicy : u8
     NeverCache = 0,
     CachePerFrame,     // для быстро меняющихся (danger, combat)
     CacheFor10Frames,  // для умеренно стабильных (kill_wounded, dont_shoot) — ~330ms @ 30fps
-    CacheFor30Frames   // для редко меняющихся (campfire, npc_vs_box) — ~1sec @ 30fps
+    CacheFor30Frames,  // для редко меняющихся (campfire, npc_vs_box) — ~1sec @ 30fps
+    CachePerSolve      // default: на время одного solve (actual+search); мир заморожен → безопасно
 };
 
 class CScriptPropertyEvaluatorWrapper : public CScriptPropertyEvaluator, public luabind::wrap_base
@@ -36,6 +37,7 @@ private:
 
 private:
     mutable u32 m_cached_frame = u32(-1);
+    mutable u32 m_cached_epoch = u32(-1); // for CachePerSolve (g_ai_evaluator_solve_epoch)
     mutable bool m_cached_value = false;
     mutable bool m_has_cached_value = false;
     mutable EScriptEvaluatorCachePolicy m_cache_policy = EScriptEvaluatorCachePolicy::NeverCache;

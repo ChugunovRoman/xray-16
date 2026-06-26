@@ -801,11 +801,14 @@ void CCustomMonster::UpdateCL()
 void CCustomMonster::UpdatePositionAnimation()
 {
     START_PROFILE("CustomMonster/client_update/movement")
+    ZoneScopedN("ucl_cm_movement_on_frame");
     movement().on_frame(character_physics_support()->movement(), NET_Last.p_pos);
     STOP_PROFILE
 
     START_PROFILE("CustomMonster/client_update/animation")
-    if (!bfScriptAnimation())
+    ZoneScopedN("ucl_cm_select_animation");
+    // Animation LOD: skip animation selection for throttled (far, non-combat) NPCs; movement stays every frame.
+    if (!bfScriptAnimation() && should_update_animation(Device.dwTimeGlobal))
         SelectAnimation(XFORM().k, movement().detail().direction(), movement().speed());
     STOP_PROFILE
 }

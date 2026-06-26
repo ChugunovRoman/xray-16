@@ -218,6 +218,8 @@ public:
     virtual const MonsterSpace::SBoneRotation& head_orientation() const;
 
     virtual void UpdatePositionAnimation();
+    // Animation LOD: return false to skip SelectAnimation this frame (CAI_Stalker throttles far, non-combat NPCs).
+    virtual bool should_update_animation(u32 /*now_ms*/) { return true; }
     virtual void set_ready_to_save();
     virtual CPhysicsShellHolder* cast_physics_shell_holder() { return this; }
     virtual CParticlesPlayer* cast_particles_player() { return this; }

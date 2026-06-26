@@ -21,6 +21,8 @@
 #include "PHSimpleCalls.h"
 
 #include "xrCore/FS_internal.h"
+#include "xrCore/Threading/ParallelFor.hpp"
+#include "xrCore/Threading/TaskManager.hpp"
 
 #include "xrCDB/xr_area.h"
 #include "xrEngine/defines.h"
@@ -136,6 +138,10 @@ void CPHWorld::Create(bool mt, CObjectSpace* os, CObjectList* lo)
     m_object_space = os;
     m_level_objects = lo;
     Device.AddSeqFrame(this, mt);
+    // B-1: overlap mode runs the step from ProcessFrame (after the GameThread launch) via this callback.
+    Device.PhysicsFrameOverlapCallback = [this] { OnFrameStep(); };
+    Device.PhysicsBeginOverlapFrameCallback = [this] { BeginSchedulerOverlapFrame(); };
+    Device.PhysicsDeferredFlushCallback = [this] { flush_deferred_mutations(); };
     m_commander = xr_new<CPHCommander>();
 
 // dVector3 extensions={2048,256,2048};
@@ -202,6 +208,9 @@ void CPHWorld::Destroy()
     dCloseODE();
     dCylinderClassUser = -1;
     dRayMotionsClassUser = -1;
+    Device.PhysicsFrameOverlapCallback = nullptr;
+    Device.PhysicsBeginOverlapFrameCallback = nullptr;
+    Device.PhysicsDeferredFlushCallback = nullptr;
     Device.RemoveSeqFrame(this);
     b_exist = false;
 }
@@ -212,17 +221,21 @@ void CPHWorld::SetGravity(float g)
     dWorldSetGravity(phWorld, 0, -m_gravity, 0); //-2.f*9.81f
 }
 
+extern ENGINE_API int ps_mt_scheduler_physics_overlap;
+
 void CPHWorld::OnFrame()
+{
+    // B-1: when overlap is enabled, the step runs after the GameThread scheduler launch via
+    // Device.PhysicsFrameOverlapCallback (set in Create). Skip the seqFrame call here to avoid double-step.
+    if (ps_mt_scheduler_physics_overlap)
+        return;
+    OnFrameStep();
+}
+
+void CPHWorld::OnFrameStep()
 {
     ZoneScoped;
     stats.FrameStart();
-// Msg									("------------- physics: %d / %d",u32(Device.dwFrame),u32(m_steps_num));
-//calculate the flight of bullets
-/*
-Device.Statistic->TEST0.Begin		();
-Level().BulletManager().Update		();
-Device.Statistic->TEST0.End			();
-*/
 #ifdef DEBUG
 // DBG_DrawFrameStart();
 // DBG_DrawStatBeforeFrameStep();
@@ -235,6 +248,49 @@ Device.Statistic->TEST0.End			();
 
 #endif
     stats.FrameEnd();
+}
+
+void CPHWorld::BeginSchedulerOverlapFrame()
+{
+    m_scheduler_overlap_active.store(true, std::memory_order_release);
+}
+
+bool CPHWorld::ShouldDeferSchedulerPhysicsMutation() const
+{
+    if (!ps_mt_scheduler_physics_overlap)
+        return false;
+    if (!m_scheduler_overlap_active.load(std::memory_order_acquire))
+        return false;
+    // Main thread runs FrameStep; only defer mutations from other threads (GameThread scheduler).
+    return std::this_thread::get_id() != m_step_thread_id;
+}
+
+bool CPHWorld::defer_scheduler_mutation(std::function<void()> op)
+{
+    if (!ShouldDeferSchedulerPhysicsMutation())
+        return false;
+    std::lock_guard<std::mutex> guard(m_deferred_mutations_lock);
+    m_deferred_mutations.emplace_back(std::move(op));
+    return true;
+}
+
+void CPHWorld::flush_deferred_mutations()
+{
+    // Called from ProcessFrame after secondary_tasks.wait() — apply owner-level intents serially.
+    xr_vector<std::function<void()>> local;
+    {
+        std::lock_guard<std::mutex> guard(m_deferred_mutations_lock);
+        if (m_deferred_mutations.empty())
+        {
+            m_scheduler_overlap_active.store(false, std::memory_order_release);
+            return;
+        }
+        local.swap(m_deferred_mutations);
+    }
+    ZoneScopedN("PhysicsDeferredMutations");
+    for (auto& op : local)
+        op();
+    m_scheduler_overlap_active.store(false, std::memory_order_release);
 }
 
 void CPHWorld::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
@@ -342,11 +398,16 @@ void CPHWorld::Step()
     //////////////////////////////////////////////////////////////////////
     m_commander->update_threadsafety();
     //////////////////////////////////////////////////////////////////////
+    // P1: parallel island solve. Each active CPHIsland is an independent dxWorld, and the ODE
+    // stepper uses only stack/local scratch, so solving distinct active islands on worker threads
+    // is race-free. Collide (above) and PhDataUpdate/spatial_move (below) stay serial.
+    // See plans/optimization_p1_physics_islands.md.
+#ifdef DEBUG
+    // DEBUG path stays serial: debug_output() touches global state.
     for (i_object = m_objects.begin(); m_objects.end() != i_object;)
     {
         CPHObject* obj = (*i_object);
         ++i_object;
-#ifdef DEBUG
         if (debug_output().ph_dbg_draw_mask().test(phDbgDrawObjectStatistics))
         {
             if (obj->Island().IsActive())
@@ -356,17 +417,40 @@ void CPHWorld::Step()
                 debug_output().dbg_bodies_num() += obj->Island().nb;
             }
         }
-#endif
-
-#ifdef DEBUG
         debug_output().DBG_ObjBeforeStep(obj);
-#endif
         obj->IslandStep(fixed_step);
-
-#ifdef DEBUG
         debug_output().DBG_ObjAfterStep(obj);
-#endif
     }
+#else
+    // Snapshot active-island roots. Valid only here: after Collide (merges done) and before
+    // IslandReinit (Unmerge). Merged-away members report IsActive()==false and are skipped;
+    // each active root steps its own merged dxWorld exactly once -> no cross-thread aliasing.
+    m_island_solve_batch.clear();
+    for (i_object = m_objects.begin(); m_objects.end() != i_object; ++i_object)
+    {
+        CPHObject* obj = (*i_object);
+        if (obj->Island().IsActive())
+            m_island_solve_batch.push_back(obj);
+    }
+
+    const size_t island_count = m_island_solve_batch.size();
+    if (ph_console::ph_mt_island_solve != 0 && TaskScheduler &&
+        island_count >= size_t(ph_console::ph_mt_island_min))
+    {
+        ZoneScopedN("ph_IslandStep_mt");
+        CPHObject** const islands = m_island_solve_batch.data();
+        xr_parallel_for(TaskRange(size_t(0), island_count), [islands](const TaskRange<size_t>& range)
+        {
+            for (size_t i = range.begin(); i != range.end(); ++i)
+                islands[i]->IslandStep(fixed_step);
+        });
+    }
+    else
+    {
+        for (CPHObject* obj : m_island_solve_batch)
+            obj->IslandStep(fixed_step);
+    }
+#endif
 
     stats.Core.End();
 
@@ -480,6 +564,11 @@ void CPHWorld::FrameStep(dReal step)
     {
         it_number = iFloor(frame_time / fixed_step);
         frame_time -= it_number * fixed_step;
+        // Anti death-spiral: frame_time already drained the full backlog above, so capping it_number
+        // here DISCARDS the excess simulated time (physics runs slightly slow under extreme load instead
+        // of spiraling: slow frame -> more substeps -> slower frame). 0 = uncapped (legacy) for A/B.
+        if (ph_console::ph_max_substeps > 0 && it_number > u32(ph_console::ph_max_substeps))
+            it_number = u32(ph_console::ph_max_substeps);
         m_previous_frame_time = m_frame_time;
         m_frame_time = frame_time;
         b_frame_mark = !b_frame_mark;
@@ -495,12 +584,15 @@ void CPHWorld::FrameStep(dReal step)
     debug_output().DBG_DrawStatBeforeFrameStep();
 #endif
     b_processing = true;
+    m_step_thread_id = std::this_thread::get_id(); // B-1: remember the step thread so its own internal list mutations are not deferred
+    m_step_running.store(true, std::memory_order_release); // B-1: scheduler sees the step is running -> defers physics mutations
 
     start_time = Device.dwTimeGlobal; // - u32(m_frame_time*1000);
     if (ph_console::g_bDebugDumpPhysicsStep && it_number > 20)
         Msg("!!! TOO MANY PHYSICS STEPS PER FRAME = %d !!!", it_number);
     for (u32 i = 0; i < it_number; ++i)
         Step();
+    m_step_running.store(false, std::memory_order_release);
     b_processing = false;
 #ifdef DEBUG
     debug_output().DBG_DrawStatAfterFrameStep();

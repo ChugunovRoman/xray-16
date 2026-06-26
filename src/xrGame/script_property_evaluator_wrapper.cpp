@@ -12,6 +12,8 @@
 #include "ai_space.h"
 #include "xrScriptEngine/script_engine.hpp"
 #include "npc_cpp_profile.h"
+#include "performance_cvars.h"
+#include "xrAICore/Components/ai_planner_search_limits.h"
 
 static EScriptEvaluatorCachePolicy get_script_evaluator_cache_policy(pcstr evaluator_name)
 {
@@ -84,7 +86,22 @@ static EScriptEvaluatorCachePolicy get_script_evaluator_cache_policy(pcstr evalu
     if (xr_strcmp(evaluator_name, "eva_radio_in_heli") == 0)
         return EScriptEvaluatorCachePolicy::CacheFor30Frames;
 
-    return EScriptEvaluatorCachePolicy::NeverCache;
+    // --- Profiled hot evaluators (-npc_cpp_profile): top ~50% of all script-evaluator time.
+    // Heavy Lua scans of nearby corpses/items/contacts, ~38-74us each, called every solve per NPC.
+    // Slow-changing non-combat behaviors (loot/gather/meet) -> multi-frame cache is безопасно
+    // (a corpse/item noticed ~1s late is imperceptible and combat preempts these anyway).
+    if (xr_strcmp(evaluator_name, "corpse_exist") == 0) // 73us avg, ~50% non-cached
+        return EScriptEvaluatorCachePolicy::CacheFor30Frames;
+    if (xr_strcmp(evaluator_name, "eva_gather_itm") == 0) // 62us avg
+        return EScriptEvaluatorCachePolicy::CacheFor30Frames;
+    if (xr_strcmp(evaluator_name, "meet_contact") == 0) // 39us avg
+        return EScriptEvaluatorCachePolicy::CacheFor10Frames;
+
+    // Default: cache for the duration of one GOAP solve. The world is frozen during a synchronous
+    // solve (actions execute after planning, not during), so reusing an evaluator's value across the
+    // solve cannot go stale. Collapses redundant Lua calls (actual() + Search re-evaluate the same
+    // conditions). Disable via dev cvar ai_evaluator_solve_cache (reverts these to NeverCache).
+    return EScriptEvaluatorCachePolicy::CachePerSolve;
 }
 
 EScriptEvaluatorCachePolicy CScriptPropertyEvaluatorWrapper::cache_policy() const
@@ -114,21 +131,34 @@ bool CScriptPropertyEvaluatorWrapper::evaluate()
     PROPERTY_EVALUATOR_TRACY_ZONE_SCRIPT();
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptEvaluatorEvaluate);
     const u64 evaluator_start_qpc = npc_cpp_profile::enabled() ? CPU::QPC() : 0;
-    const EScriptEvaluatorCachePolicy policy = cache_policy();
+    EScriptEvaluatorCachePolicy policy = cache_policy();
+    // Dev kill-switch: revert the per-solve default to NeverCache for A/B. Whitelisted per-frame
+    // policies are pre-existing and not gated by this switch.
+    if (policy == EScriptEvaluatorCachePolicy::CachePerSolve && ai_evaluator_solve_cache == 0)
+        policy = EScriptEvaluatorCachePolicy::NeverCache;
+
     const u32 current_frame = Device.dwFrame;
-
-    // Вычисляем допустимую "полосу" кеша в зависимости от политики
-    u32 cache_frame_tolerance = 0;
-    if (policy == EScriptEvaluatorCachePolicy::CachePerFrame)
-        cache_frame_tolerance = 0; // только текущий кадр
-    else if (policy == EScriptEvaluatorCachePolicy::CacheFor10Frames)
-        cache_frame_tolerance = 10;
-    else if (policy == EScriptEvaluatorCachePolicy::CacheFor30Frames)
-        cache_frame_tolerance = 30;
-
     const bool use_cache = policy != EScriptEvaluatorCachePolicy::NeverCache;
 
-    if (use_cache && m_has_cached_value && (current_frame - m_cached_frame) <= cache_frame_tolerance)
+    // Cache validity: CachePerSolve compares the solve epoch (world frozen during one solve);
+    // CachePerFrame/10/30 compare the frame number with a tolerance.
+    bool cache_valid = false;
+    if (use_cache && m_has_cached_value)
+    {
+        if (policy == EScriptEvaluatorCachePolicy::CachePerSolve)
+            cache_valid = (m_cached_epoch == g_ai_evaluator_solve_epoch);
+        else
+        {
+            u32 cache_frame_tolerance = 0; // CachePerFrame
+            if (policy == EScriptEvaluatorCachePolicy::CacheFor10Frames)
+                cache_frame_tolerance = 10;
+            else if (policy == EScriptEvaluatorCachePolicy::CacheFor30Frames)
+                cache_frame_tolerance = 30;
+            cache_valid = (current_frame - m_cached_frame) <= cache_frame_tolerance;
+        }
+    }
+
+    if (cache_valid)
     {
         npc_cpp_profile::add_script_evaluator_cache_hit(m_evaluator_name);
         if (evaluator_start_qpc)
@@ -146,6 +176,7 @@ bool CScriptPropertyEvaluatorWrapper::evaluate()
         if (use_cache)
         {
             m_cached_frame = current_frame;
+            m_cached_epoch = g_ai_evaluator_solve_epoch;
             m_cached_value = result;
             m_has_cached_value = true;
         }

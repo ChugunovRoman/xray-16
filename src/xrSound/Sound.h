@@ -50,6 +50,9 @@ XRSOUND_API extern float psSoundTimeFactor; //--#SM+#--
 XRSOUND_API extern Flags32 psSoundFlags;
 XRSOUND_API extern int psSoundTargets;
 XRSOUND_API extern int psSoundCacheSizeMB;
+// B-1: fully decode + cache PCM for sounds <= this length (sec), shared across all emitters of a source
+// (decode-once instead of per-emitter per-chunk streaming). 0 = disabled. Bounded by psSoundCacheSizeMB.
+XRSOUND_API extern float psSoundCacheShortSec;
 XRSOUND_API extern u32 snd_device_id;
 
 XRSOUND_API extern ISoundScene* DefaultSoundScene;

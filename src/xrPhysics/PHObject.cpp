@@ -87,7 +87,6 @@ void CPHObject::check_recently_deactivated()
 }
 void CPHObject::spatial_move()
 {
-    get_spatial_params();
     SpatialBase::spatial_move();
     m_flags.set(st_dirty, TRUE);
 }
@@ -265,9 +264,13 @@ void CPHObject::UnFreezeContent()
     vis_update_activate();
 }
 
-void CPHObject::spatial_register()
+void CPHObject::spatial_refresh_bounds()
 {
     get_spatial_params();
+}
+
+void CPHObject::spatial_register()
+{
     SpatialBase::spatial_register();
     m_flags.set(st_dirty, TRUE);
 }

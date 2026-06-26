@@ -1093,6 +1093,8 @@ void CUIFactionVisualGridWnd::Draw()
     ClampPageOffset();
     UpdateScrollBar();
 
+    SyncPreviewSettings(true);
+
     Frect client_rect;
     GetAbsoluteRect(client_rect);
     UI().PushScissor(client_rect);

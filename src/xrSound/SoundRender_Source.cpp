@@ -5,6 +5,13 @@
 
 #include <vorbis/vorbisfile.h>
 
+#include <atomic>
+#include <cstring>
+
+// B-1: global accounting of bytes held in per-source PCM caches, bounded by psSoundCacheSizeMB.
+// Touched only from load/unload (effectively main thread), atomic for safety.
+static std::atomic<size_t> s_cached_pcm_bytes{0};
+
 CSoundRender_Source::~CSoundRender_Source() { unload(); }
 
 namespace
@@ -45,6 +52,24 @@ bool ov_can_continue_read(long res)
 void CSoundRender_Source::decompress(void* dest, u32 byte_offset, u32 size, OggVorbis_File* ovf) const
 {
     ZoneScoped;
+
+    // B-1: short SFX are fully decoded once into m_cached_pcm (shared across all emitters of this source).
+    // Serve the requested slice with a plain memcpy instead of re-running the OGG decoder per emitter/chunk.
+    if (!m_cached_pcm.empty())
+    {
+        ZoneScopedN("decompress_cached"); // diagnostic: count = cache hits (vs decompress count = total)
+        auto* const d = static_cast<u8*>(dest);
+        const u32 total = static_cast<u32>(m_cached_pcm.size());
+        u32 copied = 0;
+        if (byte_offset < total)
+        {
+            copied = std::min(size, total - byte_offset);
+            std::memcpy(d, m_cached_pcm.data() + byte_offset, copied);
+        }
+        if (copied < size) // past end of sound -> silence
+            std::memset(d + copied, 0, size - copied);
+        return;
+    }
 
     // seek
     const auto sample_offset = ogg_int64_t(byte_offset / m_data_info.blockAlign);
@@ -152,6 +177,37 @@ void CSoundRender_Source::close(OggVorbis_File*& ovf) const
         return;
     ov_clear(ovf);
     xr_delete(ovf);
+}
+
+bool CSoundRender_Source::should_cache_pcm() const
+{
+    return psSoundCacheShortSec > 0.f && fTimeTotal > 0.f && fTimeTotal <= psSoundCacheShortSec &&
+        dwBytesTotal > 0 && m_data_info.blockAlign > 0;
+}
+
+void CSoundRender_Source::cache_pcm_if_short()
+{
+    if (!should_cache_pcm())
+        return;
+
+    // Stay within the global PCM cache budget (psSoundCacheSizeMB). Over budget -> keep streaming this one.
+    const size_t budget = size_t(psSoundCacheSizeMB) * 1024u * 1024u;
+    if (s_cached_pcm_bytes.load(std::memory_order_relaxed) + dwBytesTotal > budget)
+        return;
+
+    OggVorbis_File* ovf = open();
+    if (!ovf)
+        return;
+
+    m_cached_pcm.resize(dwBytesTotal);
+    // decode the whole sound from the start (open() positions at 0) into the shared buffer
+    if (m_data_info.format == SoundFormat::Float32)
+        i_decompress(ovf, reinterpret_cast<float*>(m_cached_pcm.data()), dwBytesTotal);
+    else
+        i_decompress(ovf, reinterpret_cast<char*>(m_cached_pcm.data()), dwBytesTotal);
+    close(ovf);
+
+    s_cached_pcm_bytes.fetch_add(dwBytesTotal, std::memory_order_relaxed);
 }
 
 bool CSoundRender_Source::LoadWave(pcstr pName)
@@ -286,7 +342,10 @@ bool CSoundRender_Source::load(pcstr name)
     if (FS.exist(fn))
     {
         if (LoadWave(fn))
+        {
+            cache_pcm_if_short(); // B-1: decode-once short SFX into shared PCM (main thread, no race)
             return true;
+        }
     }
 
     return false;
@@ -294,6 +353,12 @@ bool CSoundRender_Source::load(pcstr name)
 
 void CSoundRender_Source::unload()
 {
+    if (!m_cached_pcm.empty())
+    {
+        s_cached_pcm_bytes.fetch_sub(m_cached_pcm.size(), std::memory_order_relaxed);
+        m_cached_pcm.clear();
+        m_cached_pcm.shrink_to_fit();
+    }
     fTimeTotal = 0.0f;
     dwBytesTotal = 0;
 }

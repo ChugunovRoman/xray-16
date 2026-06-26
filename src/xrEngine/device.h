@@ -133,6 +133,14 @@ public:
     /** Runs on `PreRenderThread` before optional particle worker (ixray `seqParallelRender`). */
     xr_vector<fastdelegate::FastDelegate0<>> seqParallelRender;
     std::function<void()> ParticleWorkerCallback;
+    /** B-1: physics step, run after the GameThread scheduler launch (overlaps it) when
+     *  ps_mt_scheduler_physics_overlap != 0. Set by CPHWorld; CPHWorld::OnFrame (seqFrame) then no-ops. */
+    std::function<void()> PhysicsFrameOverlapCallback;
+    /** B-1: open the scheduler-overlap frame window before GameThread launch. Set by CPHWorld. */
+    std::function<void()> PhysicsBeginOverlapFrameCallback;
+    /** B-1: apply owner-level physics intents deferred during the overlap window. Called
+     *  after secondary_tasks.wait(). Set by CPHWorld. */
+    std::function<void()> PhysicsDeferredFlushCallback;
     /** Optional: flush model pool delete queue on main before `PreRenderThread` (ixray `ModelDefferClear`). Set from R2 `CRender::create`. */
     std::function<void()> ModelDeferredClear;
     CSecondVPParams m_SecondViewport; // --#SM+#-- +SecondVP+

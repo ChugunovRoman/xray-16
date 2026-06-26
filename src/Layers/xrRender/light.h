@@ -156,6 +156,10 @@ public:
     void spatial_move() override;
     Fvector spatial_sector_point() override;
 
+protected:
+    void spatial_refresh_bounds() override;
+
+public:
     IRender_Light* dcast_Light() override { return this; }
     vis_data& get_homdata();
 

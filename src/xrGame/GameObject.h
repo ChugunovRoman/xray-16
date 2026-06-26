@@ -70,6 +70,7 @@ public:
     bool m_spawned;
 
 protected:
+    void spatial_refresh_bounds() override;
     // Parentness
     IGameObject* Parent;
     // Geometric (transformation)

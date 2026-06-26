@@ -115,6 +115,11 @@ private:
     Fvector trying_poses[4];
     u64 block_damage_step_end;
     u32 m_dwCurBox;
+    bool m_deferred_box_activation_registered;
+    u32 m_deferred_box_activation_id;
+    int m_deferred_box_activation_num_it;
+    int m_deferred_box_activation_num_steps;
+    float m_deferred_box_activation_resolve_depth;
 
     float fMass;
     float fMinCrashSpeed;
@@ -299,6 +304,8 @@ public:
     void NetRelcase(IGameObject* O);
 
 private:
+    void QueueDeferredBoxActivation(u32 id, int num_it, int num_steps, float resolve_depth);
+    void ApplyDeferredBoxActivation();
     void actor_calculate(Fvector& vAccel, const Fvector& camDir, float ang_speed, float jump, float dt, bool bLight);
     void UpdateCollisionDamage();
     bool MakeJumpPath(

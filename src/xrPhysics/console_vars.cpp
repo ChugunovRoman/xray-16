@@ -11,3 +11,7 @@ float ph_console::phBreakCommonFactor = 0.01f;
 float ph_console::phRigidBreakWeaponFactor = 1.f;
 
 float ph_console::ph_step_time = fixed_step;
+
+int ph_console::ph_mt_island_solve = 1;
+int ph_console::ph_mt_island_min = 16;
+int ph_console::ph_max_substeps = 0; // 0 = uncapped (default); >0 caps substeps but slows actor under load
