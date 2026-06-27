@@ -18,6 +18,8 @@
 
 #ifdef DEBUG
 #include "PHDebug.h"
+// Custom 5-argument overload is defined in PHDebug.cpp but not exposed in the header.
+void DBG_DrawTri(const Fvector& v0, const Fvector& v1, const Fvector& v2, u32 ac, bool solid);
 #endif
 
 ik_foot_collider::ik_foot_collider() {}
@@ -387,10 +389,6 @@ void ik_foot_collider::solve(SIKCollideData& cld, const ik_foot_geom& foot_geom,
     // Cache queries only after results are validated — prevents stale cache on failed solves.
     set_previous_queries(q);
 }
-
-#ifdef DEBUG
-void DBG_DrawTri(const Fvector& v0, const Fvector& v1, const Fvector& v2, u32 ac, bool solid);
-#endif
 
 void ik_foot_collider::collide(SIKCollideData& cld, const ik_foot_geom& foot_geom, CGameObject* O, bool foot_step)
 {
