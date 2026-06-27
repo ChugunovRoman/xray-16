@@ -81,6 +81,11 @@ public:
     u32 eye_pp_timestamp;
     u32 m_next_visibility_update_time{0};
     u32 m_visibility_update_interval{0};
+    xr_vector<u32> m_vision_batch_item_map; // P2: maps batch ray index → feel_visible item index
+    u32 m_vision_batch_entry_index{u32(-1)}; // P2: index of this NPC's entry in g_vision_batch
+    float m_vision_batch_dt{0.f};           // P2: dt for fuzzy update in process phase
+    Fvector m_vision_batch_eye_pos{};       // P2: eye pos for spatial q_ray in process phase
+    float m_vision_batch_vis_threshold{0.f}; // P2: vis threshold for process phase
     Fvector m_tEyeShift;
     float m_fEyeShiftYaw;
     BOOL NET_WasExtrapolating;
@@ -88,6 +93,9 @@ public:
     Fvector tWatchDirection;
 
     virtual void Think() = 0;
+
+    // Performance: per-NPC LOD-aware cap on vision rays (overridden by CAI_Stalker)
+    virtual u32 vision_rays_budget() const { return static_cast<u32>(npc_perf_vision_rays_per_npc); }
 
     float m_fTimeUpdateDelta;
     u32 m_dwLastUpdateTime;
@@ -132,9 +140,13 @@ public:
     virtual void Exec_Action(float dt);
     virtual void Exec_Look(float dt);
     void Exec_Visibility();
+    void Exec_Visibility_Prepare();   // P2: collect rays into global batch
+    void Exec_Visibility_Process();   // P2: apply batch results
     virtual void eye_pp_s0();
     void eye_pp_s1();
     void eye_pp_s2();
+    void eye_pp_s2_prepare();         // P2: prepare rays (no execution)
+    void eye_pp_s2_process();         // P2: process batch results
 
     virtual void UpdateCamera();
 

@@ -88,8 +88,8 @@ IC const CCoverPoint* CCoverManager::best_cover(
         covers().nearest(position, radius, m_nearest);
     }
 
-    const u32 nearest_cap = npc_perf_cover_nearest_max_points;
-    if (nearest_cap > 0 && m_nearest.size() > nearest_cap)
+    const int nearest_cap = npc_perf_cover_nearest_max_points;
+    if (nearest_cap > 0 && m_nearest.size() > static_cast<size_t>(nearest_cap))
     {
         std::partial_sort(m_nearest.begin(), m_nearest.begin() + nearest_cap, m_nearest.end(),
             [&position](CCoverPoint* a, CCoverPoint* b)
@@ -97,7 +97,7 @@ IC const CCoverPoint* CCoverManager::best_cover(
         m_nearest.resize(nearest_cap);
     }
 
-    const u32 eval_cap = npc_perf_cover_best_max_evaluate;
+    const int eval_cap = npc_perf_cover_best_max_evaluate;
     if (eval_cap > 0 && m_nearest.size() > 1)
     {
         std::sort(m_nearest.begin(), m_nearest.end(),
@@ -111,9 +111,9 @@ IC const CCoverPoint* CCoverManager::best_cover(
     xr_vector<CCoverPoint*>::const_iterator E = m_nearest.end();
     {
         ZoneNamedN(___tracy_cover_bc_scan, "cover_mgr/best_cover/scan_eval", true);
-        u32 eval_done = 0;
-        const u32 acc_cap = npc_perf_cover_best_max_accessible;
-        u32 acc_done = 0;
+        int eval_done = 0;
+        const int acc_cap = npc_perf_cover_best_max_accessible;
+        int acc_done = 0;
         for (; I != E; ++I)
         {
             if (radius_sqr < position.distance_to_sqr((*I)->position()))

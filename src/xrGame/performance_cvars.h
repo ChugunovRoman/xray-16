@@ -33,13 +33,13 @@ extern int npc_anim_lod;
 extern int npc_anim_lod_far_interval_ms;
 
 // CCoverManager::best_cover (cover_manager_inline.h): cap evaluate() calls per search; 0 = vanilla. When >0, candidates sorted by distance first.
-extern u32 npc_perf_cover_best_max_evaluate;
+extern int npc_perf_cover_best_max_evaluate;
 /** After quadtree nearest(): keep only this many closest points (0 = all). Cuts expensive accessible() loops when n is huge. */
-extern u32 npc_perf_cover_nearest_max_points;
+extern int npc_perf_cover_nearest_max_points;
 /** Max evaluator.accessible() calls per best_cover scan (0 = unlimited). Use with nearest_max when eval cap alone is not enough. */
-extern u32 npc_perf_cover_best_max_accessible;
+extern int npc_perf_cover_best_max_accessible;
 /** Shared cap on evaluate() across both 10m and 30m passes inside find_best_cover (0 = off). */
-extern u32 npc_perf_cover_find_eval_budget_total;
+extern int npc_perf_cover_find_eval_budget_total;
 /** 1 = skip the 10m pass in find_best_cover (only 30m). */
 extern int npc_perf_cover_find_skip_near_10m;
 /** Internal: remaining evals for find budget; ~0u = inactive (see npc_perf_cover_find_eval_budget_total). */
@@ -55,13 +55,15 @@ extern u32 npc_perf_binder_near_interval_ms;   // throttle: min interval between
 extern u32 npc_perf_binder_far_throttle_ms;    // throttle: min interval between scriptBinder.shedule_Update for far NPCs (ms)
 
 // Stalker visibility (ai_stalker.cpp)
-extern u32 npc_perf_stalker_vis_interval_near_ms; // 0 = every schedule tick when Near; >0 when no selected enemy (crowd LOS throttle)
-extern u32 npc_perf_stalker_vis_interval_medium_ms;
-extern u32 npc_perf_stalker_vis_interval_far_ms;
-/** 0 = unlimited total LOS rays per frame across NPCs; >0 = cap shared by `CVisionUpdateOrchestrator`. */
-extern u32 npc_perf_vision_global_ray_budget;
-/** When a live stalker has a selected enemy, `TakeRayBudget` requests at least this many rays (still clamped by global). */
-extern u32 npc_perf_vision_combat_min_rays;
+extern int npc_perf_stalker_vis_interval_near_ms; // 0 = every schedule tick when Near; >0 when no selected enemy (crowd LOS throttle)
+extern int npc_perf_stalker_vis_interval_medium_ms;
+extern int npc_perf_stalker_vis_interval_far_ms;
+/** P2: 1 = parallel batch vision rays across NPCs via TaskScheduler, 0 = legacy serial per-NPC. */
+extern int npc_perf_vision_parallel_batch;
+/** P2: minimum rays in the batch to enable parallel execution (below -> serial fallback). */
+extern int npc_perf_vision_parallel_batch_min_rays;
+/** Physics objects with spatial radius below this threshold (meters) do not register as STYPE_VISIBLEFORAI. 0 = disabled. */
+extern float npc_perf_vision_small_physics_radius;
 // npc_perf_vision_trace_* etc.: ENGINE_API in xrEngine/Feel_Vision.h (defined in Feel_Vision.cpp)
 
 // CustomMonster visibility (CustomMonster.cpp)
@@ -80,6 +82,7 @@ extern u32 npc_perf_ik_interval_enemy_selected_ms;
 
 // IK foot rays (ik_foot_collider.cpp): parallel first-hit batch via CObjectSpace::RayPickBatch when TaskScheduler active
 extern int npc_perf_ik_foot_raypick_batch;
+extern int npc_perf_ik_foot_raypick_batch_min_rays;
 
 /**
  * Reserved. Full cross-NPC parallel in_UpdateCL would require a two-phase stalker UpdateCL (physics barrier before sight).
@@ -96,6 +99,7 @@ extern int npc_perf_disable_ucl_stalker_step_manager;
 extern u32 npc_perf_disable_ucl_stalker_postdeath_grace_ms;
 
 // Lua script TTL/interval (read via get_console():get_integer in scripts)
+extern int ai_evaluator_ttl_ms; // C++ script GOAP evaluator time-based cache TTL (0 = disabled)
 extern u32 npc_perf_state_mgr_animstate_ttl_ms;
 extern u32 npc_perf_script_combat_ttl_ms;
 extern u32 npc_perf_evaluator_combat_enemy_cache_ttl_ms;

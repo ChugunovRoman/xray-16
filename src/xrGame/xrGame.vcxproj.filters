@@ -2397,8 +2397,8 @@
     <ClInclude Include="vision_client_inline.h">
       <Filter>AI\AComponents\MemoryManager\raw_data_managers\VisualMemoryManager\vision_client</Filter>
     </ClInclude>
-    <ClInclude Include="VisionUpdateOrchestrator.h">
-      <Filter>AI\AComponents\MemoryManager\raw_data_managers\VisualMemoryManager\vision_client</Filter>
+    <ClInclude Include="VisionBatch.h">
+      <Filter>AI\Performance</Filter>
     </ClInclude>
     <ClInclude Include="movement_manager.h">
       <Filter>AI\AComponents\MovementManager</Filter>
@@ -6394,8 +6394,8 @@
     <ClCompile Include="vision_client.cpp">
       <Filter>AI\AComponents\MemoryManager\raw_data_managers\VisualMemoryManager\vision_client</Filter>
     </ClCompile>
-    <ClCompile Include="VisionUpdateOrchestrator.cpp">
-      <Filter>AI\AComponents\MemoryManager\raw_data_managers\VisualMemoryManager\vision_client</Filter>
+    <ClCompile Include="VisionBatch.cpp">
+      <Filter>AI\Performance</Filter>
     </ClCompile>
     <ClCompile Include="movement_manager.cpp">
       <Filter>AI\AComponents\MovementManager</Filter>

@@ -3,6 +3,7 @@
 #include "ik/IKLimb.h"
 #include "pose_extrapolation.h"
 #include "ik_object_shift.h"
+#include "xrCDB/xr_area.h"
 class IKinematicsAnimated;
 class CGameObject;
 class CBlend;
@@ -32,6 +33,12 @@ private:
     void ObjectShift(float static_shift, const SCalculateData cd[max_size]);
     void LimbUpdate(CIKLimb& L);
     void LimbSetup();
+
+    /** Per-NPC IK ray batch state. */
+    void ExecuteIKRayBatch();
+    xr_vector<CObjectSpace::RayPickBatchItem> m_ik_batch_items;
+    xr_vector<collide::rq_result> m_ik_batch_results;
+    xr_vector<IKRayGroup> m_ik_batch_groups;
 
 private:
     static void IKVisualCallback(IKinematics* K);

@@ -15,6 +15,8 @@
 Fvector c_spatial_offset[8] = {
     {-1, -1, -1}, {1, -1, -1}, {-1, 1, -1}, {1, 1, -1}, {-1, -1, 1}, {1, -1, 1}, {-1, 1, 1}, {1, 1, 1}};
 
+XRCDB_API std::atomic<u32> g_spatial_visible_for_ai_version = 0;
+
 //////////////////////////////////////////////////////////////////////////
 SpatialBase::SpatialBase(ISpatial_DB& space)
 {
@@ -74,6 +76,14 @@ void SpatialBase::spatial_register()
     spatial_refresh_bounds();
     spatial.space->insert_assuming_locked(this);
     spatial.sector_id = IRender_Sector::INVALID_SECTOR_ID;
+
+    // Invalidate AI vision dynamic-blocker cache when a new AI-visible object appears.
+    if (spatial.type & STYPE_VISIBLEFORAI)
+    {
+        ++g_spatial_visible_for_ai_version;
+        m_spatial_ai_vis_last_invalidate_pos = spatial.sphere.P;
+        m_spatial_ai_vis_last_pos_initialized = true;
+    }
 }
 
 void SpatialBase::spatial_unregister()
@@ -81,9 +91,14 @@ void SpatialBase::spatial_unregister()
     if (spatial.node_ptr)
     {
         // remove
+        const bool was_visible_for_ai = (spatial.type & STYPE_VISIBLEFORAI) != 0;
         spatial.space->remove(this);
         spatial.node_ptr = NULL;
         spatial.sector_id = IRender_Sector::INVALID_SECTOR_ID;
+
+        // Invalidate AI vision dynamic-blocker cache when an AI-visible object disappears.
+        if (was_visible_for_ai)
+            ++g_spatial_visible_for_ai_version;
     }
     else
     {
@@ -106,6 +121,22 @@ void SpatialBase::spatial_move()
     // lock vs those readers. Taking the unique_lock on every move (incl. the common no-op) starved the
     // parallel vision readers and inflated both q_ray and spatial_move under overlap.
     spatial_refresh_bounds();
+
+    // B-1: invalidate AI vision dynamic-blocker cache only after an AI-visible object moved enough.
+    // Small jitters (physics micro-movement, idle sway) do not affect blocker geometry meaningfully.
+    if (spatial.type & STYPE_VISIBLEFORAI)
+    {
+        constexpr float AI_VIS_MOVE_INVALIDATE_THRESHOLD = 0.5f;
+        const Fvector& current_pos = spatial.sphere.P;
+        if (!m_spatial_ai_vis_last_pos_initialized ||
+            current_pos.distance_to(m_spatial_ai_vis_last_invalidate_pos) > AI_VIS_MOVE_INVALIDATE_THRESHOLD)
+        {
+            ++g_spatial_visible_for_ai_version;
+            m_spatial_ai_vis_last_invalidate_pos = current_pos;
+            m_spatial_ai_vis_last_pos_initialized = true;
+        }
+    }
+
     spatial.type |= STYPEFLAG_INVALIDSECTOR;
     if (spatial_inside())
         return;

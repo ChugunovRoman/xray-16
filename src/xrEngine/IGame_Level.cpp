@@ -222,6 +222,9 @@ void IGame_Level::OnFrame()
     // stays off unrelated `TaskScheduler` parallel paths (e.g. object list / ray batch).
 
     VERIFY(bReady);
+
+    ObjectSpace.NextCacheFrame();
+
     {
         ZoneScopedN("lvl_objs");
         Objects.Update(false);

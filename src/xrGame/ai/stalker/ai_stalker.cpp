@@ -77,13 +77,6 @@ using namespace StalkerSpace;
 
 namespace
 {
-enum class EStalkerUpdateLod : u32
-{
-    Near = 0,
-    Medium,
-    Far
-};
-
 constexpr float STALKER_LOD_NEAR_DIST_SQR = 35.f * 35.f;
 constexpr float STALKER_LOD_MEDIUM_DIST_SQR = 80.f * 80.f;
 constexpr u32 STALKER_THINK_INTERVAL_NEAR_IDLE_MS = 75;
@@ -198,6 +191,21 @@ IC u32 get_stalker_feel_touch_interval(const EStalkerUpdateLod lod)
     }
 }
 
+IC u32 get_stalker_enemy_scan_interval(const CAI_Stalker& stalker, const EStalkerUpdateLod lod)
+{
+    // Enemy scan is cheap only when there are no enemies; throttle far/medium non-combat NPCs.
+    if (stalker.memory().enemy().selected())
+        return 0;
+
+    switch (lod)
+    {
+    case EStalkerUpdateLod::Near: return 0;
+    case EStalkerUpdateLod::Medium: return STALKER_ENEMY_SCAN_INTERVAL_MEDIUM_MS;
+    case EStalkerUpdateLod::Far: return STALKER_ENEMY_SCAN_INTERVAL_FAR_MS;
+    default: return 0;
+    }
+}
+
 IC bool should_run_stalker_lod_stage(
     const CAI_Stalker& stalker, u32& next_update_time, u32& current_interval, const u32 new_interval, const u32 now_ms)
 {
@@ -222,6 +230,16 @@ IC bool should_run_stalker_lod_stage(
     return true;
 }
 } // namespace
+
+IC EStalkerUpdateLod CAI_Stalker::get_cached_update_lod() const
+{
+    if (m_cached_lod_frame != Device.dwFrame)
+    {
+        m_cached_lod = get_stalker_update_lod(*this);
+        m_cached_lod_frame = Device.dwFrame;
+    }
+    return m_cached_lod;
+}
 
 extern int g_AI_inactive_time;
 
@@ -336,6 +354,8 @@ void CAI_Stalker::reinit()
     m_agent_manager_update_interval = 0;
     m_next_memory_update_time = 0;
     m_memory_update_interval = 0;
+    m_next_process_enemies_update_time = 0;
+    m_process_enemies_update_interval = 0;
 
 }
 
@@ -1178,7 +1198,34 @@ void CAI_Stalker::UpdateCL()
 
 void CAI_Stalker::PHHit(SHit& H) { m_pPhysics_support->in_Hit(H, false); }
 CPHDestroyable* CAI_Stalker::ph_destroyable() { return smart_cast<CPHDestroyable*>(character_physics_support()); }
-#include "enemy_manager.h"
+
+u32 CAI_Stalker::vision_rays_budget() const
+{
+    const u32 base = static_cast<u32>(npc_perf_vision_rays_per_npc);
+    if (base == 0)
+        return 0;
+
+    const EStalkerUpdateLod lod = get_cached_update_lod();
+    switch (lod)
+    {
+    case EStalkerUpdateLod::Near: return base;
+    case EStalkerUpdateLod::Medium: return _max(1u, (base * 2) / 3);
+    case EStalkerUpdateLod::Far: return _max(1u, base / 4);
+    default: return base;
+    }
+}
+
+float CAI_Stalker::memory_collect_budget_multiplier() const
+{
+    const EStalkerUpdateLod lod = get_cached_update_lod();
+    switch (lod)
+    {
+    case EStalkerUpdateLod::Near: return 1.0f;
+    case EStalkerUpdateLod::Medium: return 0.75f;
+    case EStalkerUpdateLod::Far: return 0.33f;
+    default: return 1.0f;
+    }
+}
 
 void CAI_Stalker::shedule_Update(u32 DT)
 {
@@ -1253,22 +1300,28 @@ void CAI_Stalker::shedule_Update(u32 DT)
             START_PROFILE("stalker/schedule_update/vision")
             {
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleVisibility);
-                // Deferred to `Device.seqParallel` on GameThread (same worker as `Sheduler.Update`), not main.
-                const bool par_vision = ps_r__mt_ai_vision_parallel != 0 && g_mt_config.test(mtAiVision);
-                if (par_vision)
+                if (npc_perf_vision_parallel_batch)
                 {
-#ifdef DEBUG
-                    fastdelegate::FastDelegate0<> fv =
-                        fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility);
-                    xr_vector<fastdelegate::FastDelegate0<>>::const_iterator I;
-                    I = std::find(Device.seqParallel.begin(), Device.seqParallel.end(), fv);
-                    VERIFY(I == Device.seqParallel.end());
-#endif
-                    Device.seqParallel.push_back(
-                        fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
+                    Exec_Visibility_Prepare();
                 }
                 else
-                    Exec_Visibility();
+                {
+                    const bool par_vision = ps_r__mt_ai_vision_parallel != 0 && g_mt_config.test(mtAiVision);
+                    if (par_vision)
+                    {
+#ifdef DEBUG
+                        fastdelegate::FastDelegate0<> fv =
+                            fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility);
+                        xr_vector<fastdelegate::FastDelegate0<>>::const_iterator I;
+                        I = std::find(Device.seqParallel.begin(), Device.seqParallel.end(), fv);
+                        VERIFY(I == Device.seqParallel.end());
+#endif
+                        Device.seqParallel.push_back(
+                            fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
+                    }
+                    else
+                        Exec_Visibility();
+                }
             }
             STOP_PROFILE
         }
@@ -1278,7 +1331,13 @@ void CAI_Stalker::shedule_Update(u32 DT)
         {
             ZoneScopedN("sh_stalker_process_enemies");
             START_PROFILE("stalker/schedule_update/memory/process")
-            process_enemies();
+            const bool run_process_enemies = should_run_stalker_lod_stage(*this,
+                m_next_process_enemies_update_time, m_process_enemies_update_interval,
+                get_stalker_enemy_scan_interval(*this, update_lod), now_ms);
+            if (run_process_enemies)
+            {
+                process_enemies();
+            }
             STOP_PROFILE
         }
 

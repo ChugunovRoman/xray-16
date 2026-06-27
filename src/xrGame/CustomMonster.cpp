@@ -49,13 +49,15 @@
 #include "client_spawn_manager.h"
 #include "moving_object.h"
 #include "level_path_manager.h"
-#include "VisionUpdateOrchestrator.h"
+#include "VisionBatch.h"
 
 // Lain: added
 #include "xrEngine/IGame_Level.h"
 #include "xrCore/_vector3d_ext.h"
 #include "debug_text_tree.h"
 #include "xrPhysics/IPHWorld.h"
+#include "xrCDB/Intersect.hpp"
+#include "xrEngine/xr_collide_form.h"
 
 #ifdef DEBUG
 #include "debug_renderer.h"
@@ -447,21 +449,28 @@ void CCustomMonster::shedule_Update(u32 DT)
         {
             ZoneScopedN("sh_cm_Exec_Visibility");
             START_PROFILE("CustomMonster/schedule_update/vision")
-            const bool par_vision = ps_r__mt_ai_vision_parallel != 0 && g_mt_config.test(mtAiVision);
-            if (par_vision)
+            if (npc_perf_vision_parallel_batch)
             {
-#ifdef DEBUG
-                fastdelegate::FastDelegate0<> fv =
-                    fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility);
-                xr_vector<fastdelegate::FastDelegate0<>>::const_iterator I;
-                I = std::find(Device.seqParallel.begin(), Device.seqParallel.end(), fv);
-                VERIFY(I == Device.seqParallel.end());
-#endif
-                Device.seqParallel.push_back(
-                    fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
+                Exec_Visibility_Prepare();
             }
             else
-                Exec_Visibility();
+            {
+                const bool par_vision = ps_r__mt_ai_vision_parallel != 0 && g_mt_config.test(mtAiVision);
+                if (par_vision)
+                {
+#ifdef DEBUG
+                    fastdelegate::FastDelegate0<> fv =
+                        fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility);
+                    xr_vector<fastdelegate::FastDelegate0<>>::const_iterator I;
+                    I = std::find(Device.seqParallel.begin(), Device.seqParallel.end(), fv);
+                    VERIFY(I == Device.seqParallel.end());
+#endif
+                    Device.seqParallel.push_back(
+                        fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
+                }
+                else
+                    Exec_Visibility();
+            }
             STOP_PROFILE
         }
 
@@ -885,17 +894,18 @@ void CCustomMonster::eye_pp_s1()
 
 void CCustomMonster::eye_pp_s2()
 {
-    // Tracing
+    // Tracing (serial fallback path)
+    // Refresh eye matrix: this phase may run one frame after frustum query,
+    // and stale eye position causes rays to shoot from the wrong place.
+    eye_pp_s0();
     Level().AIStats.VisRayTests.Begin();
     u32 dwTime = Level().timeServer();
     u32 dwDT = dwTime - eye_pp_timestamp;
     eye_pp_timestamp = dwTime;
     {
         ZoneScopedN("vision/trace");
-        const u32 per_npc_cap = (u32)_max(1, npc_perf_vision_trace_budget);
-        const u32 allocated = CVisionUpdateOrchestrator::TakeRayBudget(*this, per_npc_cap);
         feel_vision_update_staged(
-            this, eye_matrix.c, float(dwDT) / 1000.f, memory().visual().transparency_threshold(), allocated);
+            this, eye_matrix.c, float(dwDT) / 1000.f, memory().visual().transparency_threshold(), vision_rays_budget());
     }
     Level().AIStats.VisRayTests.End();
 }
@@ -932,6 +942,267 @@ void CCustomMonster::Exec_Visibility()
         break;
     }
     Level().AIStats.Vis.End();
+}
+
+void CCustomMonster::eye_pp_s2_prepare()
+{
+    // Refresh eye matrix: this phase may run one frame after frustum query,
+    // and stale eye position causes rays to shoot from the wrong place.
+    eye_pp_s0();
+
+    Level().AIStats.VisRayTests.Begin();
+    u32 dwTime = Level().timeServer();
+    u32 dwDT = dwTime - eye_pp_timestamp;
+    eye_pp_timestamp = dwTime;
+    {
+        const float dt = float(dwDT) / 1000.f;
+        const float vis_threshold = memory().visual().transparency_threshold();
+
+        // Store state for process phase
+        m_vision_batch_dt = dt;
+        m_vision_batch_eye_pos = eye_matrix.c;
+        m_vision_batch_vis_threshold = vis_threshold;
+        m_vision_batch_item_map.clear();
+
+        m_vision_batch_entry_index = g_vision_batch.BeginEntry(this);
+
+        std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
+        feel_vision_merge_after_frustum(this);
+
+        const u32 total = static_cast<u32>(feel_visible.size());
+        const u32 budget = _min(total, vision_rays_budget()); // LOD-aware cap on rays per NPC per pass
+
+        u32 start_index = 0;
+        if (total > budget && budget > 0)
+        {
+            if (m_trace_cursor >= total)
+                m_trace_cursor = 0;
+            start_index = m_trace_cursor;
+            m_trace_cursor = (m_trace_cursor + budget) % total;
+        }
+
+        Fvector& P = eye_matrix.c;
+        for (u32 trace_idx = 0; trace_idx < budget; ++trace_idx)
+        {
+            const u32 idx = total > 0 ? (start_index + trace_idx) % total : 0;
+            feel_visible_Item& item = feel_visible[idx];
+            feel_visible_Item* I = &item;
+
+            if (!I->O->GetCForm())
+            {
+                I->fuzzy = -1;
+                continue;
+            }
+
+            I->cp_LR_dst = I->O->Position();
+            I->cp_LR_src = P;
+            I->cp_LAST = I->O->get_last_local_point_on_mesh(I->cp_LP, I->bone_id);
+
+            Fvector D, OP = I->cp_LAST;
+            D.sub(OP, P);
+            if (fis_zero(D.magnitude()))
+            {
+                I->fuzzy = 1.f;
+                continue;
+            }
+
+            float f = D.magnitude() + .2f;
+            if (f > Feel::fuzzy_guaranteed)
+            {
+                D.div(f);
+
+                // Cache check: reuse — still update fuzzy from cached visibility
+                if (Feel::feel_vision_ray_cache_reuse(I->Cache, P, D, f, npc_perf_vision_cache_pos_slack_m))
+                {
+                    const float cached_vis = I->Cache_vis;
+                    if (cached_vis < vis_threshold)
+                    {
+                        I->fuzzy -= Feel::fuzzy_update_novis * dt;
+                        clamp(I->fuzzy, -.5f, 1.f);
+                        I->cp_LP = I->O->get_new_local_point_on_mesh(I->bone_id);
+                    }
+                    else
+                    {
+                        I->fuzzy += Feel::fuzzy_update_vis * dt;
+                        clamp(I->fuzzy, -.5f, 1.f);
+                    }
+                    continue;
+                }
+
+                // Cache check: stale tri
+                float _u, _v, _range;
+                bool cached_static_tri = false;
+                if (I->Cache.result)
+                {
+                    const Fvector& va = I->Cache.verts[0];
+                    const Fvector& vb = I->Cache.verts[1];
+                    const Fvector& vc = I->Cache.verts[2];
+                    constexpr float min_edge2 = 1e-10f;
+                    cached_static_tri = va.distance_to_sqr(vb) > min_edge2
+                        && vb.distance_to_sqr(vc) > min_edge2
+                        && vc.distance_to_sqr(va) > min_edge2;
+                }
+                if (cached_static_tri
+                    && CDB::TestRayTri(P, D, I->Cache.verts, _u, _v, _range, false)
+                    && (_range > 0 && _range < f))
+                {
+                    // Still blocked by the cached static triangle: visibility is zero, update fuzzy.
+                    I->fuzzy -= Feel::fuzzy_update_novis * dt;
+                    clamp(I->fuzzy, -.5f, 1.f);
+                    I->cp_LP = I->O->get_new_local_point_on_mesh(I->bone_id);
+                    continue;
+                }
+
+                // Cache miss — add ray to batch
+                g_vision_batch.AddRay(P, D, f);
+                m_vision_batch_item_map.push_back(idx);
+            }
+            else
+            {
+                // Near — always visible
+                I->fuzzy += Feel::fuzzy_update_vis * dt;
+                clamp(I->fuzzy, -.5f, 1.f);
+            }
+        }
+        g_vision_batch.EndEntry();
+    }
+    Level().AIStats.VisRayTests.End();
+}
+
+void CCustomMonster::eye_pp_s2_process()
+{
+    VisionBatchEntry* entry = nullptr;
+    const u32 entry_idx = m_vision_batch_entry_index;
+    if (entry_idx < g_vision_batch.GetEntryCount() && g_vision_batch.GetEntry(entry_idx).npc == this)
+        entry = const_cast<VisionBatchEntry*>(&g_vision_batch.GetEntry(entry_idx));
+
+    if (!entry || entry->ray_count == 0)
+        return;
+
+    std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
+
+    Fvector& P = m_vision_batch_eye_pos;
+    float dt = m_vision_batch_dt;
+    float vis_threshold = m_vision_batch_vis_threshold;
+
+    for (u32 ri = 0; ri < entry->ray_count; ++ri)
+    {
+        if (ri >= m_vision_batch_item_map.size())
+            break;
+        const u32 item_idx = m_vision_batch_item_map[ri];
+        if (item_idx >= feel_visible.size())
+            continue;
+
+        feel_visible_Item* I = &feel_visible[item_idx];
+        const VisionBatchRay& ray = g_vision_batch.GetRay(entry->first_ray + ri);
+
+        // Apply static CDB result
+        if (ray.static_hit_opaque)
+        {
+            // Blocked by opaque static geometry — cache the blocking triangle
+            I->Cache_vis = 0.f;
+            I->Cache.set(ray.start, ray.dir, ray.range, true);
+            I->Cache.verts[0] = ray.blocking_verts[0];
+            I->Cache.verts[1] = ray.blocking_verts[1];
+            I->Cache.verts[2] = ray.blocking_verts[2];
+        }
+        else
+        {
+            I->Cache_vis = ray.accumulated_vis;
+            I->Cache.set(ray.start, ray.dir, ray.range, ray.accumulated_vis >= vis_threshold);
+        }
+
+        float vis = ray.accumulated_vis;
+
+        // Dynamic object pass: if static didn't fully block, check dynamic objects.
+        // O_ONLYFIRST + ignore owner lets us stop at the first potential blocker.
+        if (npc_perf_vision_skip_dynamic_ray == 0 && vis >= vis_threshold)
+        {
+            bool collision_found = false;
+            if (npc_perf_vision_dynamic_cache != 0 && Feel::feel_vision_dynamic_cache_reuse(
+                I->dynamic_cache, ray.start, ray.dir, ray.range, npc_perf_vision_cache_pos_slack_m))
+            {
+                collision_found = I->dynamic_cache.blocked;
+            }
+            else
+            {
+                r_spatial.clear();
+                ISpatial* owner_spatial = static_cast<ISpatial*>(const_cast<IGameObject*>(m_owner));
+                g_pGamePersistent->SpatialSpace.q_ray(r_spatial,
+                    ISpatial_DB::O_ONLYFIRST | ISpatial_DB::O_ONLYNEAREST, STYPE_VISIBLEFORAI, ray.start, ray.dir,
+                    ray.range, owner_spatial);
+
+                collide::ray_defs RD(ray.start, ray.dir, ray.range, CDB::OPT_ONLYFIRST,
+                    collide::rq_target(collide::rqtStatic | collide::rqtObject | collide::rqtObstacle));
+
+                for (auto* spatial_obj : r_spatial)
+                {
+                    if (spatial_obj == I->O)
+                        continue;
+
+                    IGameObject const* object = spatial_obj->dcast_GameObject();
+                    RQR.r_clear();
+                    if (object && object->GetCForm() && !object->GetCForm()->_RayQuery(RD, RQR))
+                        continue;
+
+                    collision_found = true;
+                    break;
+                }
+
+                if (npc_perf_vision_dynamic_cache != 0)
+                    Feel::feel_vision_dynamic_cache_store(
+                        I->dynamic_cache, ray.start, ray.dir, ray.range, collision_found);
+            }
+
+            if (collision_found)
+                vis = 0.f;
+        }
+
+        // Fuzzy update
+        if (vis < vis_threshold)
+        {
+            I->fuzzy -= Feel::fuzzy_update_novis * dt;
+            clamp(I->fuzzy, -.5f, 1.f);
+            I->cp_LP = I->O->get_new_local_point_on_mesh(I->bone_id);
+        }
+        else
+        {
+            I->fuzzy += Feel::fuzzy_update_vis * dt;
+            clamp(I->fuzzy, -.5f, 1.f);
+        }
+    }
+}
+
+void CCustomMonster::Exec_Visibility_Prepare()
+{
+    if (getDestroy() || !g_Alive())
+        return;
+
+    switch (m_vision_pipeline_phase)
+    {
+    case EVisionPipelinePhase::QueryFrustum:
+        eye_pp_s0();
+        eye_pp_s1();
+        m_vision_pipeline_phase = EVisionPipelinePhase::RayTrace;
+        break;
+    case EVisionPipelinePhase::RayTrace:
+        eye_pp_s2_prepare();
+        m_vision_pipeline_phase = EVisionPipelinePhase::QueryFrustum;
+        break;
+    }
+}
+
+void CCustomMonster::Exec_Visibility_Process()
+{
+    if (getDestroy() || !g_Alive())
+        return;
+
+    // Only process if we were in RayTrace phase (prepared rays should exist)
+    if (m_vision_batch_item_map.empty())
+        return;
+
+    eye_pp_s2_process();
+    m_vision_batch_item_map.clear();
 }
 
 void CCustomMonster::UpdateCamera()

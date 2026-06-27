@@ -13,6 +13,7 @@
 
 #include "moving_bones_snd_player.h"
 #include "xrPhysics/ExtendedGeom.h"
+#include "performance_cvars.h"
 #ifdef DEBUG
 #include "PHDebug.h"
 #include "xrEngine/ObjectDump.h"
@@ -33,6 +34,14 @@ bool CPhysicObject::net_Spawn(CSE_Abstract* DC)
     m_collision_hit_callback = NULL;
     m_anim_blend = 0;
     inherited::net_Spawn(DC);
+
+    // Small physics clutter does not need to be visible-for-AI as a separate target.
+    if (npc_perf_vision_small_physics_radius > 0.f)
+    {
+        ISpatial* self = smart_cast<ISpatial*>(this);
+        if (self && self->GetSpatialData().sphere.R < npc_perf_vision_small_physics_radius)
+            self->GetSpatialData().type &= ~STYPE_VISIBLEFORAI;
+    }
 
     create_collision_model();
 

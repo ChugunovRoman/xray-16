@@ -7,32 +7,11 @@
 #include "IGame_Persistent.h"
 #include "xrCDB/Intersect.hpp"
 
-ENGINE_API int npc_perf_vision_trace_budget = 12;
-ENGINE_API int npc_perf_vision_skip_dynamic_ray = 0;
+ENGINE_API int npc_perf_vision_skip_dynamic_ray = 1;
 ENGINE_API int npc_perf_vision_static_only = 0;
-ENGINE_API float npc_perf_vision_cache_pos_slack_m = 0.15f;
-
-namespace
-{
-IC bool feel_vision_ray_cache_reuse(const collide::ray_cache& C, const Fvector& P, const Fvector& D, float range)
-{
-    if (!C.result)
-        return false;
-
-    const float slack_m = npc_perf_vision_cache_pos_slack_m;
-    if (slack_m <= 0.f)
-        return C.similar(P, D, range);
-
-    const float slack2 = slack_m * slack_m;
-    if (P.distance_to_sqr(C.start) > slack2)
-        return false;
-    if (!fsimilar(1.f, D.dotproduct(C.dir)))
-        return false;
-    if (!fsimilar(range, C.range))
-        return false;
-    return true;
-}
-} // namespace
+ENGINE_API float npc_perf_vision_cache_pos_slack_m = 0.55f;
+ENGINE_API int npc_perf_vision_rays_per_npc = 24;
+ENGINE_API int npc_perf_vision_dynamic_cache = 1;
 
 namespace Feel
 {
@@ -180,17 +159,11 @@ void Vision::feel_vision_merge_after_frustum(IGameObject* parent)
     query = seen;
 }
 
-namespace
-{
-/** Sentinel for `o_trace`: use `npc_perf_vision_trace_budget` (legacy `feel_vision_update`). */
-constexpr u32 kVisionTraceBudgetFromCvar = ~0u;
-} // namespace
-
 void Vision::feel_vision_update(IGameObject* parent, Fvector& P, float dt, float vis_threshold)
 {
     std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
     feel_vision_merge_after_frustum(parent);
-    o_trace(P, dt, vis_threshold, kVisionTraceBudgetFromCvar);
+    o_trace(P, dt, vis_threshold, static_cast<u32>(npc_perf_vision_rays_per_npc));
 }
 
 void Vision::feel_vision_update_staged(
@@ -209,17 +182,10 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold, u32 trace_pass_c
     if (!total)
         return;
 
-    u32 budget;
-    if (trace_pass_cap == kVisionTraceBudgetFromCvar)
-    {
-        const int cfg_budget = _max(1, npc_perf_vision_trace_budget);
-        budget = _min(total, static_cast<u32>(cfg_budget));
-    }
-    else
-        budget = _min(total, trace_pass_cap);
-
+    const u32 budget = _min(total, trace_pass_cap);
     if (budget == 0)
         return;
+
     u32 start_index = 0;
     if (total > budget)
     {
@@ -270,7 +236,7 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold, u32 trace_pass_c
             collide::ray_defs RD(P, D, f, CDB::OPT_CULL, rq_tgt);
             SFeelParam feel_params(this, &*I, vis_threshold);
             // check cache
-            if (feel_vision_ray_cache_reuse(I->Cache, P, D, f))
+            if (feel_vision_ray_cache_reuse(I->Cache, P, D, f, npc_perf_vision_cache_pos_slack_m))
             {
                 // similar with previous query
                 feel_params.vis = I->Cache_vis;
@@ -309,39 +275,50 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold, u32 trace_pass_c
                     }
                     else
                     {
-                        // feel_params.vis = 0.f;
-                        // I->Cache_vis = feel_params.vis ;
+                        // No static hits: fully visible. Cache the miss so unobstructed rays are reused.
+                        I->Cache_vis = feel_params.vis;
                         I->Cache.set(P, D, f, false);
                     }
                     // Log("query");
                 }
             }
             // If the static/material query already failed visibility, skip the extra dynamic-object ray pass.
+            // O_ONLYFIRST + ignore owner stops at the first potential blocker.
             if (npc_perf_vision_skip_dynamic_ray == 0 && feel_params.vis >= feel_params.vis_threshold)
             {
-                r_spatial.clear();
-                g_pGamePersistent->SpatialSpace.q_ray(r_spatial, 0, STYPE_VISIBLEFORAI, P, D, f);
-
-                RD.flags = CDB::OPT_ONLYFIRST;
-
                 bool collision_found = false;
-                xr_vector<ISpatial*>::const_iterator i = r_spatial.begin();
-                xr_vector<ISpatial*>::const_iterator e = r_spatial.end();
-                for (; i != e; ++i)
+                if (npc_perf_vision_dynamic_cache != 0 && feel_vision_dynamic_cache_reuse(
+                    I->dynamic_cache, P, D, f, npc_perf_vision_cache_pos_slack_m))
                 {
-                    if (*i == m_owner)
-                        continue;
+                    collision_found = I->dynamic_cache.blocked;
+                }
+                else
+                {
+                    r_spatial.clear();
+                    ISpatial* owner_spatial = static_cast<ISpatial*>(const_cast<IGameObject*>(m_owner));
+                g_pGamePersistent->SpatialSpace.q_ray(
+                    r_spatial, ISpatial_DB::O_ONLYFIRST | ISpatial_DB::O_ONLYNEAREST, STYPE_VISIBLEFORAI, P, D, f, owner_spatial);
 
-                    if (*i == I->O)
-                        continue;
+                    RD.flags = CDB::OPT_ONLYFIRST;
 
-                    IGameObject const* object = (*i)->dcast_GameObject();
-                    RQR.r_clear();
-                    if (object && object->GetCForm() && !object->GetCForm()->_RayQuery(RD, RQR))
-                        continue;
+                    xr_vector<ISpatial*>::const_iterator i = r_spatial.begin();
+                    xr_vector<ISpatial*>::const_iterator e = r_spatial.end();
+                    for (; i != e; ++i)
+                    {
+                        if (*i == I->O)
+                            continue;
 
-                    collision_found = true;
-                    break;
+                        IGameObject const* object = (*i)->dcast_GameObject();
+                        RQR.r_clear();
+                        if (object && object->GetCForm() && !object->GetCForm()->_RayQuery(RD, RQR))
+                            continue;
+
+                        collision_found = true;
+                        break;
+                    }
+
+                    if (npc_perf_vision_dynamic_cache != 0)
+                        feel_vision_dynamic_cache_store(I->dynamic_cache, P, D, f, collision_found);
                 }
 
                 if (collision_found)

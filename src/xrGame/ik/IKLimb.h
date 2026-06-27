@@ -2,6 +2,7 @@
 #include "limb.h"
 #include "IKFoot.h"
 #include "Include/xrRender/KinematicsAnimated.h"
+#include "xrCommon/xr_vector.h"
 #include "ik_anim_state.h"
 #include "ik_calculate_data.h"
 #include "ik_limb_state.h"
@@ -14,6 +15,21 @@ struct SIKCollideData;
 class CGameObject;
 class motion_marks;
 class ik_goal_matrix;
+
+/** One group of 3 primary IK-foot rays for the per-NPC batch path. */
+struct IKRayGroup
+{
+    CIKLimb* limb{};
+    ik_foot_collider* collider{};
+    ik_foot_geom foot_geom;
+    CGameObject* owner{};
+    bool foot_step{};
+    bool is_predict{};
+    u16 predict_ref_bone{ u16(-1) }; // valid only if is_predict
+    Fmatrix gl_goal;                 // valid only if is_predict
+    u32 first_ray{};                 // index into the global batch results array
+    ik_pick_query queries[3];
+};
 namespace CDB
 {
 class TRI;
@@ -41,6 +57,13 @@ public:
     void ApplyState(SCalculateData& cd);
     void SetGoal(SCalculateData& cd);
     void Update(CGameObject* O, const CBlend* b, const extrapolation::points& object_pose_extrapolation);
+
+    /** Per-NPC batch path. GatherRays fills out with ray groups that need execution.
+     *  ProcessResults reads back results from the same collector.
+     *  If raypick_batch_level < 2 these are not used (Update() takes the legacy path). */
+    void GatherRays(CGameObject* O, const CBlend* b, const extrapolation::points& object_pose_extrapolation,
+        xr_vector<IKRayGroup>& out);
+    void ProcessGroup(const IKRayGroup& group, const collide::rq_result* results);
 
 public:
     IC u16 get_id() const { return m_id; }

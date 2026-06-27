@@ -105,12 +105,14 @@ IC void add_profile_counter(const TStage stage, const u64 start_qpc)
     npc_cpp_profile::add(stage, CPU::QPC() - start_qpc);
 }
 
-IC u32 effective_memory_collect_budget(const bool limited_mode, const u32 object_count, const u32 budget)
+IC u32 effective_memory_collect_budget(
+    const bool limited_mode, const u32 object_count, const u32 budget, const float lod_multiplier)
 {
     if (!limited_mode || !object_count)
         return object_count;
 
-    return _min(object_count, budget);
+    const u32 scaled_budget = u32(_max(1.0f, budget * lod_multiplier));
+    return _min(object_count, scaled_budget);
 }
 
 IC bool should_force_full_memory_collect(const CAI_Stalker* stalker, const bool registered_in_combat)
@@ -198,6 +200,9 @@ void CMemoryManager::update(float time_delta)
     const bool limited_collect_mode =
         (registered_in_combat || !!enemy().selected()) && !should_force_full_memory_collect(m_stalker, registered_in_combat);
 
+    // Distance-based multiplier for combat memory budgets; near/combat NPCs stay at 1.0.
+    const float lod_multiplier = m_stalker ? m_stalker->memory_collect_budget_multiplier() : 1.0f;
+
     // update enemies and items
     {
         ZoneNamedN(___tracy_mm_reset, "CMemoryManager::update/reset_enemy_item", true);
@@ -210,12 +215,12 @@ void CMemoryManager::update(float time_delta)
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryCollectObjects);
         if (visual().enabled())
             update(visual().objects(), true, process_items, m_visual_update_cursor,
-                effective_memory_collect_budget(limited_collect_mode, visual().objects().size(), STALKER_MEMORY_VISUAL_COMBAT_BUDGET));
+                effective_memory_collect_budget(limited_collect_mode, visual().objects().size(), STALKER_MEMORY_VISUAL_COMBAT_BUDGET, lod_multiplier));
 
         update(sound().objects(), registered_in_combat ? true : false, process_items, m_sound_update_cursor,
-            effective_memory_collect_budget(limited_collect_mode, sound().objects().size(), STALKER_MEMORY_SOUND_COMBAT_BUDGET));
+            effective_memory_collect_budget(limited_collect_mode, sound().objects().size(), STALKER_MEMORY_SOUND_COMBAT_BUDGET, lod_multiplier));
         update(hit().objects(), registered_in_combat ? true : false, process_items, m_hit_update_cursor,
-            effective_memory_collect_budget(limited_collect_mode, hit().objects().size(), STALKER_MEMORY_HIT_COMBAT_BUDGET));
+            effective_memory_collect_budget(limited_collect_mode, hit().objects().size(), STALKER_MEMORY_HIT_COMBAT_BUDGET, lod_multiplier));
     }
 
     {

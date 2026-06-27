@@ -218,9 +218,11 @@ public:
     float range;
     float range2;
     xr_vector<ISpatial*>* out;
+    ISpatial* ignore;
 
 public:
-    ray_walker(xr_vector<ISpatial*>* _out, u32 _mask, const Fvector& _start, const Fvector& _dir, float _range)
+    ray_walker(xr_vector<ISpatial*>* _out, u32 _mask, const Fvector& _start, const Fvector& _dir, float _range,
+        ISpatial* _ignore = nullptr)
     {
         mask = _mask;
         ray.pos.set(_start);
@@ -248,6 +250,7 @@ public:
         range = _range;
         range2 = _range * _range;
         out = _out;
+        ignore = _ignore;
     }
     // fpu
     ICF bool _box_fpu(const Fvector& n_C, const float n_R, Fvector& coord)
@@ -304,6 +307,8 @@ public:
         for (auto& it : N->items)
         {
             ISpatial* S = it;
+            if (S == ignore)
+                continue;
             if (mask != (S->GetSpatialData().type & mask))
                 continue;
             Fsphere& sS = S->GetSpatialData().sphere;
@@ -347,8 +352,8 @@ public:
 };
 } // namespace Spatial
 
-void ISpatial_DB::q_ray(
-    xr_vector<ISpatial*>& R, u32 _o, u32 _mask_and, const Fvector& _start, const Fvector& _dir, float _range)
+void ISpatial_DB::q_ray(xr_vector<ISpatial*>& R, u32 _o, u32 _mask_and, const Fvector& _start,
+    const Fvector& _dir, float _range, ISpatial* ignore_spatial)
 {
     using namespace Spatial;
 
@@ -363,12 +368,12 @@ void ISpatial_DB::q_ray(
             {
                 if (_o & O_ONLYNEAREST)
                 {
-                    ray_walker<true, true, true> W(&R, _mask_and, _start, _dir, _range);
+                    ray_walker<true, true, true> W(&R, _mask_and, _start, _dir, _range, ignore_spatial);
                     W.walk(m_root, m_center, m_bounds);
                 }
                 else
                 {
-                    ray_walker<true, true, false> W(&R, _mask_and, _start, _dir, _range);
+                    ray_walker<true, true, false> W(&R, _mask_and, _start, _dir, _range, ignore_spatial);
                     W.walk(m_root, m_center, m_bounds);
                 }
             }
@@ -376,12 +381,12 @@ void ISpatial_DB::q_ray(
             {
                 if (_o & O_ONLYNEAREST)
                 {
-                    ray_walker<true, false, true> W(&R, _mask_and, _start, _dir, _range);
+                    ray_walker<true, false, true> W(&R, _mask_and, _start, _dir, _range, ignore_spatial);
                     W.walk(m_root, m_center, m_bounds);
                 }
                 else
                 {
-                    ray_walker<true, false, false> W(&R, _mask_and, _start, _dir, _range);
+                    ray_walker<true, false, false> W(&R, _mask_and, _start, _dir, _range, ignore_spatial);
                     W.walk(m_root, m_center, m_bounds);
                 }
             }
@@ -392,12 +397,12 @@ void ISpatial_DB::q_ray(
             {
                 if (_o & O_ONLYNEAREST)
                 {
-                    ray_walker<false, true, true> W(&R, _mask_and, _start, _dir, _range);
+                    ray_walker<false, true, true> W(&R, _mask_and, _start, _dir, _range, ignore_spatial);
                     W.walk(m_root, m_center, m_bounds);
                 }
                 else
                 {
-                    ray_walker<false, true, false> W(&R, _mask_and, _start, _dir, _range);
+                    ray_walker<false, true, false> W(&R, _mask_and, _start, _dir, _range, ignore_spatial);
                     W.walk(m_root, m_center, m_bounds);
                 }
             }
@@ -405,12 +410,12 @@ void ISpatial_DB::q_ray(
             {
                 if (_o & O_ONLYNEAREST)
                 {
-                    ray_walker<false, false, true> W(&R, _mask_and, _start, _dir, _range);
+                    ray_walker<false, false, true> W(&R, _mask_and, _start, _dir, _range, ignore_spatial);
                     W.walk(m_root, m_center, m_bounds);
                 }
                 else
                 {
-                    ray_walker<false, false, false> W(&R, _mask_and, _start, _dir, _range);
+                    ray_walker<false, false, false> W(&R, _mask_and, _start, _dir, _range, ignore_spatial);
                     W.walk(m_root, m_center, m_bounds);
                 }
             }

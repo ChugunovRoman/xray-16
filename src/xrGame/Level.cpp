@@ -6,7 +6,7 @@
 #include "xrEngine/IGame_Persistent.h"
 #include "ParticlesObject.h"
 #include "Level.h"
-#include "VisionUpdateOrchestrator.h"
+#include "VisionBatch.h"
 #include "HUDManager.h"
 #include "xrServer.h"
 #include "NET_Queue.h"
@@ -116,11 +116,20 @@ CLevel::CLevel()
     g_player_hud[0]->load_default();
     g_player_hud[1] = xr_new<player_hud>();
     g_player_hud[1]->load_default();
+
+    ObjectSpace.SetValidateObjectCallback([](u16 id) -> IGameObject* {
+        IGameObject* O = Level().Objects.net_Find(id);
+        return (O && !O->getDestroy()) ? O : nullptr;
+    });
+
+    Device.PostSchedulerVisionBatch = &CLevel::VisionBatchPostScheduler;
 }
 
 CLevel::~CLevel()
 {
     ZoneScoped;
+
+    Device.PostSchedulerVisionBatch = nullptr;
 
     xr_delete(g_player_hud[0]);
     xr_delete(g_player_hud[1]);
@@ -433,11 +442,21 @@ void CLevel::MakeReconnect()
     }
 }
 
+void CLevel::VisionBatchPostScheduler()
+{
+    g_vision_batch.ExecuteParallel();
+    for (u32 i = 0; i < g_vision_batch.GetEntryCount(); ++i)
+    {
+        CCustomMonster* npc = g_vision_batch.GetEntry(i).npc;
+        if (npc && !npc->getDestroy())
+            npc->Exec_Visibility_Process();
+    }
+    g_vision_batch.Reset();
+}
+
 void CLevel::OnFrame()
 {
     ZoneScoped;
-
-    CVisionUpdateOrchestrator::BeginFrame();
 
 #ifdef DEBUG
     DBG_RenderUpdate();

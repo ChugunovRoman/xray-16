@@ -354,6 +354,11 @@ public:
 
     CLevel();
     virtual ~CLevel();
+
+private:
+    static void VisionBatchPostScheduler();
+
+public:
     // название текущего уровня
     shared_str name() const override;
     // this method can be used ONLY from CCC_ChangeGameType

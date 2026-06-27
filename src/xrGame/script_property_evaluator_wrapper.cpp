@@ -63,39 +63,31 @@ static EScriptEvaluatorCachePolicy get_script_evaluator_cache_policy(pcstr evalu
     if (xr_strcmp(evaluator_name, "state_mgr_weapon") == 0)
         return EScriptEvaluatorCachePolicy::CachePerFrame;
 
-    // --- CacheFor10Frames: умеренно стабильные (~330ms @ 30fps) ---
-    // kill_wounded проверяет живых раненых рядом, меняется при смерти/убегании
+
+
+    // --- CacheForTTL: stable / slow-changing evaluators cached by real time (Device.dwTimeGlobal).
+    // Controlled by ai_evaluator_ttl_ms. These are heavy Lua scans (~40-75us) called every solve.
+    // Combat preempts most of them, so a small delay is imperceptible for non-combat behavior.
+    if (xr_strcmp(evaluator_name, "corpse_exist") == 0)
+        return EScriptEvaluatorCachePolicy::CacheForTTL;
+    if (xr_strcmp(evaluator_name, "eva_gather_itm") == 0)
+        return EScriptEvaluatorCachePolicy::CacheForTTL;
+    if (xr_strcmp(evaluator_name, "meet_contact") == 0)
+        return EScriptEvaluatorCachePolicy::CacheForTTL;
     if (xr_strcmp(evaluator_name, "eva_kill_wounded") == 0)
-        return EScriptEvaluatorCachePolicy::CacheFor10Frames;
-    // dont_shoot проверяется часто, обычно стабильно
+        return EScriptEvaluatorCachePolicy::CacheForTTL;
     if (xr_strcmp(evaluator_name, "eva_dont_shoot") == 0)
-        return EScriptEvaluatorCachePolicy::CacheFor10Frames;
-    // abuse проверка тоже редко меняется
+        return EScriptEvaluatorCachePolicy::CacheForTTL;
     if (xr_strcmp(evaluator_name, "evaluator_abuse") == 0)
-        return EScriptEvaluatorCachePolicy::CacheFor10Frames;
-
-    // --- CacheFor30Frames: редко меняющиеся состояния (~1sec @ 30fps) ---
-    // campfire state меняется очень редко
+        return EScriptEvaluatorCachePolicy::CacheForTTL;
     if (xr_strcmp(evaluator_name, "eval_turn_on_campfire") == 0)
-        return EScriptEvaluatorCachePolicy::CacheFor30Frames;
-    // npc_vs_box, npc_vs_heli, radio_in_heli — ситуации которые устанавливаются скриптом
+        return EScriptEvaluatorCachePolicy::CacheForTTL;
     if (xr_strcmp(evaluator_name, "eva_npc_vs_box") == 0)
-        return EScriptEvaluatorCachePolicy::CacheFor30Frames;
+        return EScriptEvaluatorCachePolicy::CacheForTTL;
     if (xr_strcmp(evaluator_name, "eva_npc_vs_heli") == 0)
-        return EScriptEvaluatorCachePolicy::CacheFor30Frames;
+        return EScriptEvaluatorCachePolicy::CacheForTTL;
     if (xr_strcmp(evaluator_name, "eva_radio_in_heli") == 0)
-        return EScriptEvaluatorCachePolicy::CacheFor30Frames;
-
-    // --- Profiled hot evaluators (-npc_cpp_profile): top ~50% of all script-evaluator time.
-    // Heavy Lua scans of nearby corpses/items/contacts, ~38-74us each, called every solve per NPC.
-    // Slow-changing non-combat behaviors (loot/gather/meet) -> multi-frame cache is безопасно
-    // (a corpse/item noticed ~1s late is imperceptible and combat preempts these anyway).
-    if (xr_strcmp(evaluator_name, "corpse_exist") == 0) // 73us avg, ~50% non-cached
-        return EScriptEvaluatorCachePolicy::CacheFor30Frames;
-    if (xr_strcmp(evaluator_name, "eva_gather_itm") == 0) // 62us avg
-        return EScriptEvaluatorCachePolicy::CacheFor30Frames;
-    if (xr_strcmp(evaluator_name, "meet_contact") == 0) // 39us avg
-        return EScriptEvaluatorCachePolicy::CacheFor10Frames;
+        return EScriptEvaluatorCachePolicy::CacheForTTL;
 
     // Default: cache for the duration of one GOAP solve. The world is frozen during a synchronous
     // solve (actions execute after planning, not during), so reusing an evaluator's value across the
@@ -136,17 +128,24 @@ bool CScriptPropertyEvaluatorWrapper::evaluate()
     // policies are pre-existing and not gated by this switch.
     if (policy == EScriptEvaluatorCachePolicy::CachePerSolve && ai_evaluator_solve_cache == 0)
         policy = EScriptEvaluatorCachePolicy::NeverCache;
+    // Dev kill-switch for TTL: if ai_evaluator_ttl_ms == 0, fall back to per-solve caching.
+    if (policy == EScriptEvaluatorCachePolicy::CacheForTTL && ai_evaluator_ttl_ms == 0)
+        policy = EScriptEvaluatorCachePolicy::CachePerSolve;
 
     const u32 current_frame = Device.dwFrame;
+    const u32 current_time_ms = Device.dwTimeGlobal;
     const bool use_cache = policy != EScriptEvaluatorCachePolicy::NeverCache;
 
     // Cache validity: CachePerSolve compares the solve epoch (world frozen during one solve);
-    // CachePerFrame/10/30 compare the frame number with a tolerance.
+    // CachePerFrame/10/30 compare the frame number with a tolerance;
+    // CacheForTTL compares real time via Device.dwTimeGlobal.
     bool cache_valid = false;
     if (use_cache && m_has_cached_value)
     {
         if (policy == EScriptEvaluatorCachePolicy::CachePerSolve)
             cache_valid = (m_cached_epoch == g_ai_evaluator_solve_epoch);
+        else if (policy == EScriptEvaluatorCachePolicy::CacheForTTL)
+            cache_valid = ((current_time_ms - m_cached_time_ms) <= ai_evaluator_ttl_ms);
         else
         {
             u32 cache_frame_tolerance = 0; // CachePerFrame
@@ -177,6 +176,7 @@ bool CScriptPropertyEvaluatorWrapper::evaluate()
         {
             m_cached_frame = current_frame;
             m_cached_epoch = g_ai_evaluator_solve_epoch;
+            m_cached_time_ms = current_time_ms;
             m_cached_value = result;
             m_has_cached_value = true;
         }

@@ -36,11 +36,11 @@ namespace
 struct cover_find_eval_budget_guard
 {
     u32 m_saved{};
-    explicit cover_find_eval_budget_guard(u32 per_find_total)
+    explicit cover_find_eval_budget_guard(int per_find_total)
     {
         m_saved = g_npc_perf_cover_find_eval_budget_remaining;
         if (per_find_total > 0)
-            g_npc_perf_cover_find_eval_budget_remaining = per_find_total;
+            g_npc_perf_cover_find_eval_budget_remaining = static_cast<u32>(per_find_total);
         else
             g_npc_perf_cover_find_eval_budget_remaining = u32(-1);
     }

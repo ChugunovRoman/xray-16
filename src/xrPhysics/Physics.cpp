@@ -36,7 +36,7 @@ const float base_fixed_step = 0.02f;
 const float base_erp = 0.54545456f;
 const float base_cfm = 1.1363636e-006f;
 // base params
-float fixed_step = 0.01f;
+float fixed_step = 0.02f;
 float world_cfm = CFM(SPRING_S(base_cfm, base_erp, base_fixed_step), DAMPING(base_cfm, base_erp));
 float world_erp = ERP(SPRING_S(base_cfm, base_erp, base_fixed_step), DAMPING(base_cfm, base_erp));
 float world_spring = 1.0f * SPRING(world_cfm, world_erp);

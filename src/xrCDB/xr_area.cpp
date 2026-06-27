@@ -39,34 +39,124 @@ CObjectSpace::~CObjectSpace()
 //----------------------------------------------------------------------
 
 //----------------------------------------------------------------------
+float CObjectSpace::ps_obj_nearest_cache_quant = 0.5f;
+int CObjectSpace::ps_obj_nearest_cache_ttl = 6;
+int CObjectSpace::ps_obj_nearest_cache_max_entries = 4096;
+
+namespace
+{
+ICF s32 quantize_coord(float v)
+{
+    const float quant = CObjectSpace::ps_obj_nearest_cache_quant;
+    if (quant <= 0.f)
+        return static_cast<s32>(v);
+    const float q = v / quant;
+    const s32 r = static_cast<s32>(q);
+    // floor behavior for negative coordinates
+    return (q < 0.f && static_cast<float>(r) != q) ? r - 1 : r;
+}
+} // namespace
+
+CObjectSpace::SNearestCacheKey CObjectSpace::make_cache_key(const Fvector& point, float range)
+{
+    SNearestCacheKey key;
+    key.x = quantize_coord(point.x);
+    key.y = quantize_coord(point.y);
+    key.z = quantize_coord(point.z);
+    key.r = static_cast<u32>(range * 10.f); // decimeters
+    return key;
+}
+
 int CObjectSpace::GetNearest(xr_vector<ISpatial*>& q_spatial, xr_vector<IGameObject*>& q_nearest, const Fvector& point,
     float range, IGameObject* ignore_object)
 {
     ZoneScoped;
 
-    q_spatial.clear();
-    // Query objects
     q_nearest.clear();
+
+    // Try spatial query cache first.
+    if (m_validate_object && range > 0.f)
+    {
+        const SNearestCacheKey key = CObjectSpace::make_cache_key(point, range);
+        auto it = m_nearest_cache.find(key);
+        if (it != m_nearest_cache.end() && it->second.frame + ps_obj_nearest_cache_ttl >= m_nearest_cache_frame)
+        {
+            // Cache hit: validate ids, filter ignore_object per-query.
+            q_nearest.reserve(it->second.object_ids.size());
+            for (u16 id : it->second.object_ids)
+            {
+                IGameObject* O = m_validate_object(id);
+                if (O && O != ignore_object)
+                    q_nearest.push_back(O);
+            }
+            return static_cast<int>(q_nearest.size());
+        }
+        else if (it != m_nearest_cache.end())
+        {
+            m_nearest_cache.erase(it);
+        }
+    }
+
+    // Cache miss: query spatial DB.
+    q_spatial.clear();
     Fsphere Q;
     Q.set(point, range);
     Fvector B;
     B.set(range, range, range);
     SpatialSpace->q_box(q_spatial, 0, STYPE_COLLIDEABLE, point, B);
 
-    // Iterate
+    // Collect ALL matching objects (no ignore_object filter) so the cache stores the full set.
+    xr_vector<u16> all_ids;
+    all_ids.reserve(q_spatial.size());
+    q_nearest.reserve(q_spatial.size());
     for (auto& it : q_spatial)
     {
         IGameObject* O = it->dcast_GameObject();
         if (0 == O)
             continue;
-        if (O == ignore_object)
-            continue;
         Fsphere mS = {O->GetSpatialData().sphere.P, O->GetSpatialData().sphere.R};
-        if (Q.intersect(mS))
+        if (!Q.intersect(mS))
+            continue;
+        all_ids.push_back(O->ID());
+        if (O != ignore_object)
             q_nearest.push_back(O);
     }
 
-    return q_nearest.size();
+    // Store full (unfiltered) result set in cache for future queries.
+    if (m_validate_object && range > 0.f)
+    {
+        if (m_nearest_cache.size() >= static_cast<size_t>(ps_obj_nearest_cache_max_entries))
+        {
+            // Evict expired entries first to avoid a sudden full-cache-miss spike.
+            for (auto it = m_nearest_cache.begin(); it != m_nearest_cache.end(); )
+            {
+                if (it->second.frame + ps_obj_nearest_cache_ttl < m_nearest_cache_frame)
+                    it = m_nearest_cache.erase(it);
+                else
+                    ++it;
+            }
+            // If still at capacity after evicting stale entries, clear the oldest half.
+            if (m_nearest_cache.size() >= static_cast<size_t>(ps_obj_nearest_cache_max_entries))
+            {
+                auto mid = m_nearest_cache.begin();
+                std::advance(mid, m_nearest_cache.size() / 2);
+                m_nearest_cache.erase(m_nearest_cache.begin(), mid);
+            }
+        }
+
+        const SNearestCacheKey key = CObjectSpace::make_cache_key(point, range);
+        SNearestCacheEntry entry;
+        entry.frame = m_nearest_cache_frame;
+        entry.object_ids = std::move(all_ids);
+        m_nearest_cache[key] = std::move(entry);
+    }
+
+    return static_cast<int>(q_nearest.size());
+}
+
+void CObjectSpace::NextCacheFrame()
+{
+    ++m_nearest_cache_frame;
 }
 
 //----------------------------------------------------------------------

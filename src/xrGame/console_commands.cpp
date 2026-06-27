@@ -197,11 +197,11 @@ u32 npc_perf_planner_actuality_interval_near_idle_ms = 220;
 u32 npc_perf_planner_graph_search_max_nodes = 1200;
 u32 npc_perf_planner_graph_search_max_nodes_combat = 600;
 u32 npc_perf_planner_graph_search_max_nodes_danger = 700;
-u32 npc_perf_cover_best_max_evaluate = 0;
-u32 npc_perf_cover_nearest_max_points = 0;
-u32 npc_perf_cover_best_max_accessible = 0;
-u32 npc_perf_cover_find_eval_budget_total = 0;
-int npc_perf_cover_find_skip_near_10m = 0;
+int npc_perf_cover_best_max_evaluate = 32;
+int npc_perf_cover_nearest_max_points = 128;
+int npc_perf_cover_best_max_accessible = 48;
+int npc_perf_cover_find_eval_budget_total = 64;
+int npc_perf_cover_find_skip_near_10m = 1;
 u32 g_npc_perf_cover_find_eval_budget_remaining = u32(-1);
 u32 npc_perf_long_dead_skip_binder_ms = 5000;
 int npc_perf_skip_script_net_relcase = 1;
@@ -210,11 +210,12 @@ u32 npc_perf_binder_far_interval_ms = 250;
 u32 npc_perf_binder_far_phases = 6;
 u32 npc_perf_binder_near_interval_ms = 180;
 u32 npc_perf_binder_far_throttle_ms = 450;
-u32 npc_perf_stalker_vis_interval_near_ms = 0;
-u32 npc_perf_stalker_vis_interval_medium_ms = 260;
-u32 npc_perf_stalker_vis_interval_far_ms = 550;
-u32 npc_perf_vision_global_ray_budget = 8;
-u32 npc_perf_vision_combat_min_rays = 256;
+int npc_perf_stalker_vis_interval_near_ms = 0;
+int npc_perf_stalker_vis_interval_medium_ms = 350;
+int npc_perf_stalker_vis_interval_far_ms = 900;
+int npc_perf_vision_parallel_batch = 1;
+int npc_perf_vision_parallel_batch_min_rays = 32;
+float npc_perf_vision_small_physics_radius = 0.25f;
 float npc_perf_monster_vis_near_dist = 35.f;
 float npc_perf_monster_vis_medium_dist = 80.f;
 u32 npc_perf_monster_vis_interval_medium_ms = 220;
@@ -224,11 +225,13 @@ u32 npc_perf_ik_interval_medium_ms = 200;
 u32 npc_perf_ik_interval_far_ms = 450;
 u32 npc_perf_ik_interval_disabled_ms = 30000;
 u32 npc_perf_ik_interval_enemy_selected_ms = 0;
-int npc_perf_ik_foot_raypick_batch = 1;
+int npc_perf_ik_foot_raypick_batch = 2;
+int npc_perf_ik_foot_raypick_batch_min_rays = 12;
 int npc_perf_mt_stalker_physics = 0;
 int npc_perf_disable_ucl_stalker_physics = 1;
 int npc_perf_disable_ucl_stalker_step_manager = 1;
 u32 npc_perf_disable_ucl_stalker_postdeath_grace_ms = 2500;
+int ai_evaluator_ttl_ms = 500;
 u32 npc_perf_state_mgr_animstate_ttl_ms = 120;
 u32 npc_perf_script_combat_ttl_ms = 100;
 u32 npc_perf_evaluator_combat_enemy_cache_ttl_ms = 120;
@@ -1495,7 +1498,7 @@ public:
 class CCC_PHIterations : public CCC_Integer
 {
 public:
-    CCC_PHIterations(LPCSTR N) : CCC_Integer(N, &phIterations, 15, 50){};
+    CCC_PHIterations(LPCSTR N) : CCC_Integer(N, &phIterations, 10, 50){};
     virtual void Execute(LPCSTR args)
     {
         CCC_Integer::Execute(args);
@@ -2802,6 +2805,7 @@ void CCC_RegisterCommands()
 
     // Performance / NPC throttling and cache (user.ltx)
     CMD4(CCC_Integer, "ai_evaluator_solve_cache", &ai_evaluator_solve_cache, 0, 1);
+    CMD4(CCC_Integer, "ai_evaluator_ttl_ms", &ai_evaluator_ttl_ms, 0, 1000);
     CMD4(CCC_Integer, "npc_anim_lod", &npc_anim_lod, 0, 1);
     CMD4(CCC_Integer, "npc_anim_lod_far_interval_ms", &npc_anim_lod_far_interval_ms, 1, 5000);
     CMD4(CCC_Float, "npc_perf_planner_near_dist", &npc_perf_planner_near_dist, 1.f, 2000.f);
@@ -2822,10 +2826,10 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "ai_graph_engine_serialize", &ps_ai_graph_engine_serialize, 0, 1);
     CMD4(CCC_Integer, "ai_graph_engine_detect_concurrent", &ps_ai_graph_engine_detect_concurrent, 0, 1);
     CMD4(CCC_Integer, "ai_path_build_tls_scratch", &ps_ai_path_build_use_tls_scratch, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_cover_best_max_evaluate", (int*)&npc_perf_cover_best_max_evaluate, 0, 4096);
-    CMD4(CCC_Integer, "npc_perf_cover_nearest_max_points", (int*)&npc_perf_cover_nearest_max_points, 0, 4096);
-    CMD4(CCC_Integer, "npc_perf_cover_best_max_accessible", (int*)&npc_perf_cover_best_max_accessible, 0, 4096);
-    CMD4(CCC_Integer, "npc_perf_cover_find_eval_budget_total", (int*)&npc_perf_cover_find_eval_budget_total, 0, 4096);
+    CMD4(CCC_Integer, "npc_perf_cover_best_max_evaluate", &npc_perf_cover_best_max_evaluate, 0, 4096);
+    CMD4(CCC_Integer, "npc_perf_cover_nearest_max_points", &npc_perf_cover_nearest_max_points, 0, 4096);
+    CMD4(CCC_Integer, "npc_perf_cover_best_max_accessible", &npc_perf_cover_best_max_accessible, 0, 4096);
+    CMD4(CCC_Integer, "npc_perf_cover_find_eval_budget_total", &npc_perf_cover_find_eval_budget_total, 0, 4096);
     CMD4(CCC_Integer, "npc_perf_cover_find_skip_near_10m", &npc_perf_cover_find_skip_near_10m, 0, 1);
     CMD4(CCC_Integer, "npc_perf_long_dead_skip_binder_ms", (int*)&npc_perf_long_dead_skip_binder_ms, 0, 120000);
     CMD4(CCC_Integer, "npc_perf_skip_script_net_relcase", &npc_perf_skip_script_net_relcase, 0, 1);
@@ -2834,19 +2838,21 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_binder_far_phases", (int*)&npc_perf_binder_far_phases, 1, 64);
     CMD4(CCC_Integer, "npc_perf_binder_near_interval_ms", (int*)&npc_perf_binder_near_interval_ms, 10, 5000);
     CMD4(CCC_Integer, "npc_perf_binder_far_throttle_ms", (int*)&npc_perf_binder_far_throttle_ms, 50, 10000);
-    CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_near_ms", (int*)&npc_perf_stalker_vis_interval_near_ms, 0, 30000);
-    CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_medium_ms", (int*)&npc_perf_stalker_vis_interval_medium_ms, 10, 30000);
-    CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_far_ms", (int*)&npc_perf_stalker_vis_interval_far_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_near_ms", &npc_perf_stalker_vis_interval_near_ms, 0, 30000);
+    CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_medium_ms", &npc_perf_stalker_vis_interval_medium_ms, 10, 30000);
+    CMD4(CCC_Integer, "npc_perf_stalker_vis_interval_far_ms", &npc_perf_stalker_vis_interval_far_ms, 10, 30000);
     // When 1, never use character m_lod in renderer (hi mesh only). Checked before r_force_character_lod and corpse LOD.
     CMD4(CCC_Integer, "r_disable_character_lod", &ps_r_disable_character_lod_render, 0, 1);
     // Force render m_lod for all CEntityAlive (NPC/mutant/actor) when available.
     CMD4(CCC_Integer, "r_force_character_lod", &ps_force_character_lod_render, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_vision_trace_budget", &npc_perf_vision_trace_budget, 1, 128);
-    CMD4(CCC_Integer, "npc_perf_vision_global_ray_budget", (int*)&npc_perf_vision_global_ray_budget, 0, 1000000);
-    CMD4(CCC_Integer, "npc_perf_vision_combat_min_rays", (int*)&npc_perf_vision_combat_min_rays, 0, 128);
+    CMD4(CCC_Integer, "npc_perf_vision_parallel_batch", &npc_perf_vision_parallel_batch, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_vision_parallel_batch_min_rays", &npc_perf_vision_parallel_batch_min_rays, 0, 10000);
+    CMD4(CCC_Float, "npc_perf_vision_small_physics_radius", &npc_perf_vision_small_physics_radius, 0.f, 10.f);
     CMD4(CCC_Integer, "npc_perf_vision_skip_dynamic_ray", &npc_perf_vision_skip_dynamic_ray, 0, 1);
     CMD4(CCC_Integer, "npc_perf_vision_static_only", &npc_perf_vision_static_only, 0, 1);
     CMD4(CCC_Float, "npc_perf_vision_cache_pos_slack_m", &npc_perf_vision_cache_pos_slack_m, 0.f, 5.f);
+    CMD4(CCC_Integer, "npc_perf_vision_rays_per_npc", &npc_perf_vision_rays_per_npc, 0, 256);
+    CMD4(CCC_Integer, "npc_perf_vision_dynamic_cache", &npc_perf_vision_dynamic_cache, 0, 1);
     CMD4(CCC_Float, "npc_perf_monster_vis_near_dist", &npc_perf_monster_vis_near_dist, 1.f, 500.f);
     CMD4(CCC_Float, "npc_perf_monster_vis_medium_dist", &npc_perf_monster_vis_medium_dist, 1.f, 500.f);
     CMD4(CCC_Integer, "npc_perf_monster_vis_interval_medium_ms", (int*)&npc_perf_monster_vis_interval_medium_ms, 10, 30000);
@@ -2856,7 +2862,8 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_ik_interval_far_ms", (int*)&npc_perf_ik_interval_far_ms, 10, 60000);
     CMD4(CCC_Integer, "npc_perf_ik_interval_disabled_ms", (int*)&npc_perf_ik_interval_disabled_ms, 1000, 120000);
     CMD4(CCC_Integer, "npc_perf_ik_interval_enemy_selected_ms", (int*)&npc_perf_ik_interval_enemy_selected_ms, 0, 60000);
-    CMD4(CCC_Integer, "npc_perf_ik_foot_raypick_batch", &npc_perf_ik_foot_raypick_batch, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_ik_foot_raypick_batch", &npc_perf_ik_foot_raypick_batch, 0, 2);
+    CMD4(CCC_Integer, "npc_perf_ik_foot_raypick_batch_min_rays", &npc_perf_ik_foot_raypick_batch_min_rays, 0, 128);
     CMD4(CCC_Integer, "npc_perf_mt_stalker_physics", &npc_perf_mt_stalker_physics, 0, 1);
     CMD4(CCC_Integer, "npc_perf_disable_ucl_stalker_physics", &npc_perf_disable_ucl_stalker_physics, 0, 1);
     CMD4(CCC_Integer, "npc_perf_disable_ucl_stalker_step_manager", &npc_perf_disable_ucl_stalker_step_manager, 0, 1);

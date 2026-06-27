@@ -90,10 +90,6 @@ void CInventoryItem::Load(LPCSTR section)
 {
     CHitImmunity::LoadImmunities(pSettings->r_string(section, "immunities_sect"), pSettings);
 
-    ISpatial* self = smart_cast<ISpatial*>(this);
-    if (self)
-        self->GetSpatialData().type |= STYPE_VISIBLEFORAI;
-
     m_section_id._set(section);
     m_name = StringTable().translate(pSettings->r_string(section, INV_NAME_KEY));
     m_nameShort = StringTable().translate(pSettings->r_string(section, INV_NAME_SHORT_KEY));
@@ -364,6 +360,11 @@ bool CInventoryItem::net_Spawn(CSE_Abstract* DC)
     {
         m_flags.set(Fuseful_for_NPC, alife_object->m_flags.test(CSE_ALifeObject::flUsefulForAI));
     }
+
+    // Only register useful-for-NPC items in the AI vision spatial DB.
+    ISpatial* self = smart_cast<ISpatial*>(this);
+    if (self && m_flags.test(Fuseful_for_NPC))
+        self->GetSpatialData().type |= STYPE_VISIBLEFORAI;
 
     CSE_ALifeInventoryItem* pSE_InventoryItem = smart_cast<CSE_ALifeInventoryItem*>(e);
     if (!pSE_InventoryItem)

@@ -141,6 +141,8 @@ public:
     /** B-1: apply owner-level physics intents deferred during the overlap window. Called
      *  after secondary_tasks.wait(). Set by CPHWorld. */
     std::function<void()> PhysicsDeferredFlushCallback;
+    /** P2: execute parallel vision batch and process results. Called in GameThread after Sheduler.Update(). */
+    std::function<void()> PostSchedulerVisionBatch;
     /** Optional: flush model pool delete queue on main before `PreRenderThread` (ixray `ModelDefferClear`). Set from R2 `CRender::create`. */
     std::function<void()> ModelDeferredClear;
     CSecondVPParams m_SecondViewport; // --#SM+#-- +SecondVP+

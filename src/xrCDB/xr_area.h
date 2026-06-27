@@ -56,7 +56,40 @@ private:
     bool _RayQuery3(collide::rq_results& dest, const collide::ray_defs& rq, collide::rq_callback* cb, LPVOID user_data,
         collide::test_callback* tb, IGameObject* ignore_object);
 
+    // Spatial query cache for GetNearest (collideable objects). Validated via externally-supplied callback.
+    // Callback takes an object id and returns a validated pointer, or nullptr if destroyed.
+    using validate_object_fn = IGameObject*(*)(u16 id);
+    struct SNearestCacheKey
+    {
+        s32 x, y, z;
+        u32 r;
+        bool operator<(const SNearestCacheKey& other) const
+        {
+            if (x != other.x) return x < other.x;
+            if (y != other.y) return y < other.y;
+            if (z != other.z) return z < other.z;
+            return r < other.r;
+        }
+    };
+    struct SNearestCacheEntry
+    {
+        u32 frame;
+        xr_vector<u16> object_ids;
+    };
+
+    validate_object_fn m_validate_object{};
+    xr_map<SNearestCacheKey, SNearestCacheEntry> m_nearest_cache;
+    u32 m_nearest_cache_frame{};
+
+    static SNearestCacheKey make_cache_key(const Fvector& point, float range);
+
 public:
+    // Runtime-tunable spatial query cache settings (registered as CCC vars in xrEngine).
+    // Written from console thread, read from main thread. On x86-64 aligned int/float
+    // reads are atomic at hardware level; CCC_Float/CCC_Integer require plain pointers.
+    static float ps_obj_nearest_cache_quant;
+    static int ps_obj_nearest_cache_ttl;
+    static int ps_obj_nearest_cache_max_entries;
     CObjectSpace(ISpatial_DB* spatialSpace);
     ~CObjectSpace();
 
@@ -114,6 +147,9 @@ public:
     int GetNearest(xr_vector<IGameObject*>& q_nearest, const Fvector& point, float range, IGameObject* ignore_object);
     int GetNearest(xr_vector<ISpatial*>& q_spatial, xr_vector<IGameObject*>& q_nearest, const Fvector& point,
         float range, IGameObject* ignore_object);
+
+    void SetValidateObjectCallback(validate_object_fn fn) { m_validate_object = fn; }
+    void NextCacheFrame();
 
     CDB::TRI* GetStaticTris() { return Static.get_tris(); }
     Fvector* GetStaticVerts() { return Static.get_verts(); }

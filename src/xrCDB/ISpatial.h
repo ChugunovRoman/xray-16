@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <shared_mutex>
 
 #include "Common/Noncopyable.hpp"
@@ -169,6 +170,13 @@ public:
     virtual Feel::Sound* dcast_FeelSound() override { return nullptr; }
     virtual IRenderable* dcast_Renderable() override { return nullptr; }
     virtual IRender_Light* dcast_Light() override { return nullptr; }
+private:
+    // B-1: last position at which we invalidated the AI vision dynamic-blocker cache.
+    // Used by spatial_move() to throttle cache invalidation to meaningful displacements.
+    Fvector m_spatial_ai_vis_last_invalidate_pos{0.f, 0.f, 0.f};
+    bool m_spatial_ai_vis_last_pos_initialized{false};
+
+public:
     SpatialBase(ISpatial_DB& space);
     virtual ~SpatialBase();
 };
@@ -295,8 +303,8 @@ public:
     };
 
     // query
-    void q_ray(
-        xr_vector<ISpatial*>& R, u32 _o, u32 _mask_and, const Fvector& _start, const Fvector& _dir, float _range);
+    void q_ray(xr_vector<ISpatial*>& R, u32 _o, u32 _mask_and, const Fvector& _start, const Fvector& _dir,
+        float _range, ISpatial* ignore_spatial = nullptr);
     void q_box(xr_vector<ISpatial*>& R, u32 _o, u32 _mask_or, const Fvector& _center, const Fvector& _size);
     void q_sphere(xr_vector<ISpatial*>& R, u32 _o, u32 _mask_or, const Fvector& _center, const float _radius);
     void q_frustum(xr_vector<ISpatial*>& R, u32 _o, u32 _mask_or, const CFrustum& _frustum);
@@ -306,5 +314,8 @@ public:
     // to avoid torn reads when the scheduler queries the DB in parallel with the physics step.
     std::shared_mutex& query_rw_mutex() { return rw; }
 };
+
+// B-1: incremented whenever a STYPE_VISIBLEFORAI object moves; used to invalidate AI vision dynamic-blocker cache.
+XRCDB_API extern std::atomic<u32> g_spatial_visible_for_ai_version;
 
 #pragma pack(pop)

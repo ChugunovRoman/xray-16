@@ -9,6 +9,7 @@
 #include "xrPhysics/matrix_utils.h"
 #include "pose_extrapolation.h"
 #include "xrCore/buffer_vector.h"
+#include <tracy/Tracy.hpp>
 #ifdef DEBUG
 #include "PHDebug.h"
 #endif
@@ -935,6 +936,117 @@ void CIKLimb::Update(CGameObject* O, const CBlend* b, const extrapolation::point
     m_foot.Collide(collide_data, collider, anim_foot, O->XFORM(), O, anim_state.step());
 
     step_predict(O, b, state_predict, object_pose_extrapolation);
+}
+
+void CIKLimb::GatherRays(CGameObject* O, const CBlend* b, const extrapolation::points& object_pose_extrapolation,
+    xr_vector<IKRayGroup>& out)
+{
+    ZoneScopedN("CIKLimb::GatherRays");
+    if (!m_collide || !sv_state.valide())
+    {
+        collide_data.collided = false;
+        return;
+    }
+
+    anim_state.update(KinematicsAnimated(), b, get_id());
+
+    Fmatrix anim_foot;
+    AnimGoal(anim_foot);
+
+    // Current-foot collide group
+    {
+        IKRayGroup group;
+        group.limb = this;
+        group.collider = &collider;
+        group.owner = O;
+        group.foot_step = anim_state.step();
+        group.is_predict = false;
+        m_foot.SetFootGeom(group.foot_geom, anim_foot, O->XFORM());
+
+        if (!collider.try_cache(collide_data, group.foot_geom))
+        {
+            collider.build_queries(group.foot_geom, collide_data.m_pick_dir, group.queries);
+            out.push_back(group);
+        }
+    }
+
+    // Step-predict group
+    if (b)
+    {
+        state_predict.time_to_footstep = get_time_to_step_begin(*b);
+        if (state_predict.time_to_footstep != phInfinity)
+        {
+            const float footstep_time = Device.fTimeGlobal + state_predict.time_to_footstep;
+
+            Fmatrix footstep_object;
+            object_pose_extrapolation.extrapolate(footstep_object, footstep_time);
+
+            Fmatrix foot, toe;
+            const u16 ref_b = foot_matrix_predict(foot, toe, state_predict.time_to_footstep, KinematicsAnimated());
+            const u16 ref_b_save = m_foot.ref_bone();
+            m_foot.set_ref_bone(ref_b);
+
+            Fmatrix m_ref_b;
+            if (ref_b == 2)
+                m_ref_b = foot;
+            else
+            {
+                VERIFY(ref_b == 3);
+                m_ref_b = toe;
+            }
+
+            IKRayGroup group;
+            group.limb = this;
+            group.collider = &state_predict.collider;
+            group.owner = O;
+            group.foot_step = true;
+            group.is_predict = true;
+            group.predict_ref_bone = ref_b;
+            group.gl_goal = Fmatrix().mul_43(footstep_object, m_ref_b);
+            m_foot.SetFootGeom(group.foot_geom, m_ref_b, footstep_object);
+
+            SIKCollideData cld;
+            if (state_predict.collider.try_cache(cld, group.foot_geom))
+            {
+                ik_goal_matrix gl_cl_goal;
+                m_foot.GetFootStepMatrix(gl_cl_goal, group.gl_goal, cld, false, true);
+                state_predict.footstep_shift = gl_cl_goal.get().c.y - group.gl_goal.c.y;
+            }
+            else
+            {
+                state_predict.collider.build_queries(group.foot_geom, cld.m_pick_dir, group.queries);
+                out.push_back(group);
+            }
+
+            m_foot.set_ref_bone(ref_b_save);
+        }
+    }
+}
+
+void CIKLimb::ProcessGroup(const IKRayGroup& group, const collide::rq_result* results)
+{
+    ZoneScopedN("CIKLimb::ProcessGroup");
+    const collide::rq_result* ray_results = results + group.first_ray;
+
+    if (!group.is_predict)
+    {
+        group.collider->solve(collide_data, group.foot_geom, collide_data.m_pick_dir, group.owner, group.foot_step,
+            ray_results);
+    }
+    else
+    {
+        const u16 ref_b_save = m_foot.ref_bone();
+        m_foot.set_ref_bone(group.predict_ref_bone);
+
+        SIKCollideData cld;
+        group.collider->solve(cld, group.foot_geom, cld.m_pick_dir, group.owner, group.foot_step, ray_results);
+
+        ik_goal_matrix gl_cl_goal;
+        m_foot.GetFootStepMatrix(gl_cl_goal, group.gl_goal, cld, false, true);
+        state_predict.footstep_shift = gl_cl_goal.get().c.y - group.gl_goal.c.y;
+
+        m_foot.set_ref_bone(ref_b_save);
+    }
 }
 
 float CIKLimb::ObjShiftDown(float current_shift, const SCalculateData& cd) const

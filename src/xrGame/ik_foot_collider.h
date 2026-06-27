@@ -1,5 +1,6 @@
 #pragma once
 #include "ik_collide_data.h"
+#include "xrCDB/xr_collide_defs.h"
 class CGameObject;
 
 class ik_pick_query
@@ -60,7 +61,24 @@ class ik_foot_collider
 
 public:
     ik_foot_collider();
+
+    /** Legacy serial/per-limb path. */
     void collide(SIKCollideData& cld, const ik_foot_geom& foot_geom, CGameObject* O, bool foot_step);
+
+    /** Two-phase path for per-NPC batching.
+     *  Phase 1: check cache; returns true if cld is already valid.
+     *  Phase 1b: build_queries fills 3 primary ray queries for the foot.
+     *  Phase 2: solve processes 3 rq_results from a batch execution.
+     */
+    bool try_cache(SIKCollideData& cld, const ik_foot_geom& foot_geom) const;
+    void build_queries(const ik_foot_geom& foot_geom, const Fvector& pick_dir, ik_pick_query queries[3]) const;
+    void solve(SIKCollideData& cld, const ik_foot_geom& foot_geom, const Fvector& pick_dir, CGameObject* O,
+        bool /*foot_step*/, const collide::rq_result results[3]);
+
+private:
+    void set_previous_queries(const ik_pick_query queries[3]);
+    void compute_cld(SIKCollideData& cld, const ik_foot_geom& foot_geom,
+        const struct ik_pick_result& r_toe, const struct ik_pick_result& r_heel, const struct ik_pick_result& r_side);
 };
 
 static const float collide_dist = 0.5f;

@@ -12,6 +12,10 @@
 
 #include "CharacterPhysicsSupport.h"
 #include "xrCore/Animation/Motion.hpp"
+#include "xrCDB/xr_area.h"
+#include "xrEngine/IGame_Level.h"
+#include "performance_cvars.h"
+#include <tracy/Tracy.hpp>
 #ifdef DEBUG
 #include "PHDebug.h"
 #endif // DEBUG
@@ -344,8 +348,48 @@ void CIKLimbsController::PlayLegs(CBlend* b)
         Msg("! No foot stseps for animation: animation name: %s, animation set: %s ", anim_name, anim_set_name);
 #endif
 }
+void CIKLimbsController::ExecuteIKRayBatch()
+{
+    ZoneScopedN("CIKLimbsController::ExecuteIKRayBatch");
+    if (m_ik_batch_groups.empty())
+        return;
+
+    const size_t total_rays = m_ik_batch_groups.size() * 3;
+    m_ik_batch_items.resize(total_rays);
+    m_ik_batch_results.resize(total_rays);
+
+    for (size_t g = 0; g < m_ik_batch_groups.size(); ++g)
+    {
+        IKRayGroup& group = m_ik_batch_groups[g];
+        group.first_ray = static_cast<u32>(g * 3);
+        for (u32 r = 0; r < 3; ++r)
+        {
+            const ik_pick_query& q = group.queries[r];
+            CObjectSpace::RayPickBatchItem& item = m_ik_batch_items[group.first_ray + r];
+            item.start = q.pos();
+            item.dir = q.dir();
+            item.range = q.range();
+            item.tgt = collide::rqtBoth;
+            item.ignore_object = group.owner;
+            item.result = &m_ik_batch_results[group.first_ray + r];
+        }
+    }
+
+    if (static_cast<int>(m_ik_batch_items.size()) >= npc_perf_ik_foot_raypick_batch_min_rays)
+    {
+        g_pGameLevel->ObjectSpace.RayPickBatch(m_ik_batch_items.data(), m_ik_batch_items.size());
+    }
+    else
+    {
+        for (CObjectSpace::RayPickBatchItem& item : m_ik_batch_items)
+            g_pGameLevel->ObjectSpace.RayPick(
+                item.start, item.dir, item.range, item.tgt, *item.result, item.ignore_object);
+    }
+}
+
 void CIKLimbsController::Update()
 {
+    ZoneScopedN("CIKLimbsController::Update");
 #ifdef DEBUG
     if (ph_dbg_draw_mask1.test(phDbgIKOff))
         return;
@@ -362,13 +406,27 @@ void CIKLimbsController::Update()
     skeleton_animated->UpdateTracks();
 
     _pose_extrapolation.update(m_object->XFORM());
-    xr_vector<CIKLimb>::iterator i = _bone_chains.begin(), e = _bone_chains.end();
-    for (; e != i; ++i)
-        LimbUpdate(*i);
+
+    if (npc_perf_ik_foot_raypick_batch >= 2)
+    {
+        m_ik_batch_groups.clear();
+        for (CIKLimb& limb : _bone_chains)
+            limb.GatherRays(m_object, m_legs_blend, _pose_extrapolation, m_ik_batch_groups);
+
+        ExecuteIKRayBatch();
+
+        for (const IKRayGroup& group : m_ik_batch_groups)
+            group.limb->ProcessGroup(group, m_ik_batch_results.data());
+    }
+    else
+    {
+        for (CIKLimb& limb : _bone_chains)
+            LimbUpdate(limb);
+    }
 
     /*
     Fmatrix predict;
-    _pose_extrapolation.extrapolate( predict, Device.fTimeGlobal  );
+    _pose_extrapolation.extrapolate( predict, Device.dwTimeGlobal  );
 
 
 
@@ -376,7 +434,7 @@ void CIKLimbsController::Update()
     DBG_DrawMatrix( m_object->XFORM(), 1 );
     DBG_DrawMatrix( predict, 1 );
 
-    _pose_extrapolation.extrapolate( predict, Device.fTimeGlobal + 1  );
+    _pose_extrapolation.extrapolate( predict, Device.dwTimeGlobal + 1  );
     DBG_DrawMatrix( predict, 1 );
     */
 }

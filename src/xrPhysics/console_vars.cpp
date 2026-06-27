@@ -10,7 +10,7 @@ int ph_console::ph_tri_clear_disable_count = 10;
 float ph_console::phBreakCommonFactor = 0.01f;
 float ph_console::phRigidBreakWeaponFactor = 1.f;
 
-float ph_console::ph_step_time = fixed_step;
+float ph_console::ph_step_time = fixed_step; // keep in sync with the global physics timestep
 
 int ph_console::ph_mt_island_solve = 1;
 int ph_console::ph_mt_island_min = 16;

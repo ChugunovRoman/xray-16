@@ -833,27 +833,44 @@ void CCC_Register()
     CMD4(CCC_Integer, "snd_cache_size", &psSoundCacheSizeMB, 4, 96);
     CMD4(CCC_Float, "snd_cache_short_sec", &psSoundCacheShortSec, 0.0f, 30.0f);
     extern int g_snd_ai_coalesce_ms;
+    // Пропускать повторные звуковые события от одного источника в течение N мс.
+    // Снижает нагрузку q_box при автоматическом огне. 0 = выкл.
     CMD4(CCC_Integer, "snd_ai_coalesce_ms", &g_snd_ai_coalesce_ms, 0, 1000);
 
     extern int g_snd_ai_budget_enable;
+    // Главный kill-switch бюджетирования AI-реакций на звук. 0 = всё как раньше, 1 = все оптимизации ниже активны.
     CMD4(CCC_Integer, "snd_ai_budget_enable", &g_snd_ai_budget_enable, 0, 1);
     extern int g_snd_ai_budget_per_frame;
+    // Макс. число полностью обработанных звуковых событий (q_box + occlusion) за кадр.
+    // При превышении некритичные звуки отсекаются. Увеличить если AI плохо слышит.
     CMD4(CCC_Integer, "snd_ai_budget_per_frame", &g_snd_ai_budget_per_frame, 1, 10000);
     extern int g_snd_ai_priority_only_beyond_budget;
+    // При исчерпании бюджета пропускать только боевые звуки (выстрелы, взрывы, атаки монстров). 0 = FIFO без приоритета.
     CMD4(CCC_Integer, "snd_ai_priority_only_beyond_budget", &g_snd_ai_priority_only_beyond_budget, 0, 1);
     extern float g_snd_ai_occlusion_skip_threshold;
+    // Порог мощности звука, ниже которого дорогой occlusion-рейкаст заменяется консервативной оценкой.
+    // 0 = всегда делать occlusion. Значение подбирать по FPS/поведению AI.
     CMD4(CCC_Float, "snd_ai_occlusion_skip_threshold", &g_snd_ai_occlusion_skip_threshold, 0.f, 1.f);
     extern float g_snd_ai_occlusion_skip_default;
+    // Консервативный множитель occlusion взамен пропущенного рейкаста. Выше = AI лучше слышит слабые звуки за стенами.
     CMD4(CCC_Float, "snd_ai_occlusion_skip_default", &g_snd_ai_occlusion_skip_default, 0.f, 1.f);
     extern int g_snd_ai_burst_coalesce_enable;
+    // Склеивать близкие одновременные звуки одного типа (автоматная очередь, серия шагов) в одно событие. 0 = выкл.
     CMD4(CCC_Integer, "snd_ai_burst_coalesce_enable", &g_snd_ai_burst_coalesce_enable, 0, 1);
     extern int g_snd_ai_burst_coalesce_time_ms;
+    // Временное окно склейки burst-событий в миллисекундах. Меньше = строже, больше = агрессивнее склейка.
     CMD4(CCC_Integer, "snd_ai_burst_coalesce_time_ms", &g_snd_ai_burst_coalesce_time_ms, 0, 500);
     extern float g_snd_ai_burst_coalesce_dist;
+    // Радиус склейки burst-событий в метрах. Звуки одного типа в этом радиусе считаются одним событием.
     CMD4(CCC_Float, "snd_ai_burst_coalesce_dist", &g_snd_ai_burst_coalesce_dist, 0.f, 100.f);
     CMD4(CCC_Integer, "obj_preupdate_mt", &ps_obj_preupdate_mt, 0, 1);
     CMD4(CCC_Integer, "obj_postupdate_mt", &ps_obj_postupdate_mt, 0, 1);
     CMD4(CCC_Integer, "mt_scheduler_physics_overlap", &ps_mt_scheduler_physics_overlap, 0, 1);
+
+    // Spatial query cache tunables for CObjectSpace::GetNearest.
+    CMD4(CCC_Float, "obj_nearest_cache_quant", &CObjectSpace::ps_obj_nearest_cache_quant, 0.01f, 10.0f);
+    CMD4(CCC_Integer, "obj_nearest_cache_ttl", &CObjectSpace::ps_obj_nearest_cache_ttl, 0, 60);
+    CMD4(CCC_Integer, "obj_nearest_cache_max_entries", &CObjectSpace::ps_obj_nearest_cache_max_entries, 0, 65535);
 
 #ifdef DEBUG
     CMD3(CCC_Mask, "snd_stats", &g_stats_flags, st_sound);

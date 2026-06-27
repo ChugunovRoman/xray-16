@@ -14,7 +14,7 @@ const float psShedulerReaction = 0.1f;
 bool isSheduleInProgress = false;
 
 // Spread scheduler load: cap how many normal-priority shedule_Update calls run per frame (0 = vanilla, no cap).
-ENGINE_API int ps_scheduler_max_steps_per_frame = 512;
+ENGINE_API int ps_scheduler_max_steps_per_frame = 128;
 
 //-------------------------------------------------------------------------------------
 void CSheduler::Initialize()

@@ -59,6 +59,11 @@ void XRay::Engine::GameThread()
     {
         ZoneScopedN("Sheduler_Update");
         ::Engine.Sheduler.Update();
+
+        // Execute parallel vision batch after all NPCs have submitted rays.
+        // Must run after scheduler (NPCs submit rays during Update) and only when unpaused.
+        if (Device.PostSchedulerVisionBatch)
+            Device.PostSchedulerVisionBatch();
     }
 
     {

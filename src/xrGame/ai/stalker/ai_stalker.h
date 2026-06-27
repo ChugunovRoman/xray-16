@@ -76,6 +76,13 @@ struct SBoneProtections;
 class CDangerLocation;
 class CRestrictedObject;
 
+enum class EStalkerUpdateLod : u32
+{
+    Near = 0,
+    Medium,
+    Far
+};
+
 class CAI_Stalker : public CCustomMonster, public CObjectHandler, public CAI_PhraseDialogManager, public CStepManager
 {
 protected:
@@ -126,6 +133,12 @@ private:
     u32 m_memory_update_interval{0};
     u32 m_next_feel_touch_update_time{0};
     u32 m_feel_touch_update_interval{0};
+    u32 m_next_process_enemies_update_time{0};
+    u32 m_process_enemies_update_interval{0};
+
+    // Per-frame LOD cache to avoid repeated distance checks in vision/memory budget helpers.
+    mutable EStalkerUpdateLod m_cached_lod{EStalkerUpdateLod::Near};
+    mutable u32 m_cached_lod_frame{u32(-1)};
 
 private:
     float m_fRankDisperison;
@@ -176,6 +189,11 @@ public:
     virtual CAI_Stalker* cast_stalker() { return this; }
     virtual CCustomMonster* cast_custom_monster() { return this; }
     virtual CScriptEntity* cast_script_entity() { return this; }
+
+    // Performance LOD helpers
+    IC EStalkerUpdateLod get_cached_update_lod() const;
+    virtual u32 vision_rays_budget() const override;
+    float memory_collect_budget_multiplier() const;
 public:
     void init();
     virtual void Load(LPCSTR section);
