@@ -309,7 +309,10 @@ void CRenderDevice::ProcessFrame()
         ModelDeferredClear();
     }
 
-    secondary_tasks.run([] { XRay::Engine::PreRenderThread(); });
+    // PreRenderThread overlaps with the main-thread FrameMove below (kept from the original design).
+    const Task* preRenderTask = nullptr;
+    if (TaskScheduler)
+        preRenderTask = &TaskScheduler->AddTask([] { XRay::Engine::PreRenderThread(); });
 
     FrameMove();
 
@@ -319,19 +322,28 @@ void CRenderDevice::ProcessFrame()
     if (ps_mt_scheduler_physics_overlap && PhysicsBeginOverlapFrameCallback)
         PhysicsBeginOverlapFrameCallback();
 
-    secondary_tasks.run([] { XRay::Engine::GameThread(); });
+    // GameThread (Sheduler.Update + seqFrameMT) runs in parallel with PreRenderThread / main-thread work.
+    const Task* gameTask = nullptr;
+    if (TaskScheduler)
+        gameTask = &TaskScheduler->AddTask([] { XRay::Engine::GameThread(); });
 
-    // B-1: when overlap enabled, the physics step runs here — in parallel with the GameThread scheduler
+    // B-1 / FIX: join the GameThread (Sheduler.Update + seqFrameMT) BEFORE running the physics step.
+    // Running FrameStep in parallel with Sheduler.Update raced on the player actor's physics body/geoms:
+    // CActor::shedule_Update -> g_Physics -> movement()->Calculate()/GetPosition() mutates actor ODE
+    // bodies (dGeomSetPosition, dSpaceAdd, ray casts) while FrameStep::Collide/IslandStep reads/writes
+    // the same bodies/spaces on this thread -> nondeterministic actor XFORM -> first-person camera
+    // jitter / image doubling. Joining here keeps physics serial w.r.t. scheduler mutations (same
+    // ordering as overlap=0, where OnFrame runs inside GameThread after Sheduler.Update).
+    if (TaskScheduler && gameTask)
+        TaskScheduler->Wait(*gameTask);
+
+    // B-1: when overlap enabled, the physics step runs here — after the GameThread scheduler joined
     // (CPHWorld::OnFrame in seqFrame no-ops in this mode). When disabled, physics already ran in FrameMove.
     if (ps_mt_scheduler_physics_overlap && PhysicsFrameOverlapCallback)
     {
         ZoneScopedN("PhysicsOverlap");
         PhysicsFrameOverlapCallback();
     }
-
-    DoRender();
-
-    secondary_tasks.wait();
 
     // B-1: scheduler joined and the physics step is done — apply mutations the scheduler deferred
     // during the step now, fully serial (no concurrent reader/step), keeping the physics world consistent.
@@ -340,6 +352,12 @@ void CRenderDevice::ProcessFrame()
         ZoneScopedN("PhysicsDeferredFlush");
         PhysicsDeferredFlushCallback();
     }
+
+    DoRender();
+
+    // Join PreRenderThread (still overlapping with the physics step + DoRender above, as in the original design).
+    if (TaskScheduler && preRenderTask)
+        TaskScheduler->Wait(*preRenderTask);
 
     const u64 frameEndTime = TimerGlobal.GetElapsed_ms();
     const u64 frameTime = frameEndTime - frameStartTime;
