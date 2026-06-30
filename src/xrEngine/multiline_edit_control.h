@@ -43,7 +43,7 @@ public:
     void assign_callback(int const dik, key_state state, Callback const& callback);
     void remove_callback(int dik);
 
-    void insert_character(char c);
+    void insert_utf8_codepoint(pcstr cp, size_t len);
 
     bool get_key_state(key_state mask) const { return mask ? !!m_key_state.test(mask) : true; }
     void set_key_state(key_state mask, bool value) { m_key_state.set(mask, value); }
@@ -60,7 +60,7 @@ public:
     void set_selected_mode(bool status) { m_unselected_mode = !status; }
     bool get_selected_mode() const { return !m_unselected_mode; }
 
-    bool char_is_allowed(char c);
+    bool char_is_allowed(u32 codepoint);
 
 private:
     void sync_preferred_col_from_cursor();

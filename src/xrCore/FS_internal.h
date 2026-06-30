@@ -10,6 +10,10 @@
 #if defined(XR_PLATFORM_WINDOWS)
 #include <sys\stat.h>
 #include <share.h>
+#include <string>
+#include "xrCore/Text/Utf8Utils.hpp"
+
+inline std::wstring Utf8ToWidePath(pcstr path) { return XRay::Utf8::ToWide(path); }
 #endif
 
 #if defined(XR_PLATFORM_BSD)
@@ -43,6 +47,41 @@ public:
             return;
         }
         convert_path_separators(conv_fn);
+#if defined(XR_PLATFORM_WINDOWS)
+        const std::wstring wide_fn = Utf8ToWidePath(conv_fn);
+        const wchar_t* wide_name = wide_fn.c_str();
+        if (exclusive)
+        {
+            const int handle = _wsopen(wide_name, _O_WRONLY | _O_TRUNC | _O_CREAT | _O_BINARY, SH_DENYWR);
+            if (handle != -1)
+            {
+                hf = _wfdopen(handle, L"wb");
+                if (!hf)
+                {
+                    _close(handle);
+                    string1024 error;
+                    xr_strerror(errno, error, sizeof(error));
+                    Msg("! _wfdopen failed after _wsopen: '%s'. Error: '%s'.", conv_fn, error);
+                }
+            }
+            else
+            {
+                string1024 error;
+                xr_strerror(errno, error, sizeof(error));
+                Msg("! Can't create file (exclusive): '%s'. Error: '%s'.", conv_fn, error);
+            }
+        }
+        else
+        {
+            hf = _wfopen(wide_name, L"wb");
+            if (hf == 0)
+            {
+                string1024 error;
+                xr_strerror(errno, error, sizeof(error));
+                Msg("! Can't write file: '%s'. Error: '%s'.", conv_fn, error);
+            }
+        }
+#else
         if (exclusive)
         {
             const int handle = _sopen(conv_fn, _O_WRONLY | _O_TRUNC | _O_CREAT | _O_BINARY, SH_DENYWR);
@@ -74,6 +113,7 @@ public:
                 Msg("! Can't write file: '%s'. Error: '%s'.", conv_fn, error);
             }
         }
+#endif
         xr_free(conv_fn);
     }
 
@@ -84,11 +124,11 @@ public:
             fclose(hf);
             // release RO attrib
 #if defined(XR_PLATFORM_WINDOWS)
-            u32 dwAttr = GetFileAttributes(fName.c_str());
+            u32 dwAttr = GetFileAttributesW(XRay::Utf8::ToWide(fName.c_str()).c_str());
             if ((dwAttr != u32(-1)) && (dwAttr & FILE_ATTRIBUTE_READONLY))
             {
                 dwAttr &= ~FILE_ATTRIBUTE_READONLY;
-                SetFileAttributes(fName.c_str(), dwAttr);
+                SetFileAttributesW(XRay::Utf8::ToWide(fName.c_str()).c_str(), dwAttr);
             }
 #endif
         }

@@ -61,6 +61,6 @@ void CBackpack::RebuildDescription()
 
     float weight = pSettings->read_if_exists<float>(section, "additional_inventory_weight", 0.0f);
 
-    m_Description = make_string("%s\\n \\n%s\\n", m_Description.c_str(), str_props_title.c_str()).c_str();
-    m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %.2f %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_bp_weight.c_str(), weight, str_bp_weight_suffix.c_str()).c_str();
+    m_Description = make_string("%s\\n%s\\n", m_Description.c_str(), str_props_title.c_str()).c_str();
+    m_Description = make_string("%s%%c[255,238,153,26] %s %%c[0,140,140,140] %s %.2f %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_bp_weight.c_str(), weight, str_bp_weight_suffix.c_str()).c_str();
 }

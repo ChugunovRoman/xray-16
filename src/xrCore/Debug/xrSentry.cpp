@@ -22,6 +22,7 @@
 #if defined(XR_PLATFORM_WINDOWS)
 #include <Windows.h>
 #include <dbghelp.h>
+#include "xrCore/Text/Utf8Utils.hpp"
 #endif
 
 #if __has_include(".GitInfo.hpp")
@@ -115,26 +116,31 @@ bool write_live_minidump_to_temp(char* pathOut, size_t pathOutSize)
     if (!pathOut || pathOutSize < MAX_PATH)
         return false;
 
-    char tempDir[MAX_PATH]{};
-    if (!GetTempPathA(static_cast<DWORD>(sizeof(tempDir)), tempDir))
-        return false;
-    if (!GetTempFileNameA(tempDir, "xrdf", 0, pathOut))
+    wchar_t tempDir[MAX_PATH]{};
+    if (!GetTempPathW(static_cast<DWORD>(sizeof(tempDir) / sizeof(wchar_t)), tempDir))
         return false;
 
-    const HANDLE hFile = CreateFileA(pathOut, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+    wchar_t tempFile[MAX_PATH]{};
+    if (!GetTempFileNameW(tempDir, L"xrdf", 0, tempFile))
+        return false;
+
+    const xr_string utf8Path = XRay::Utf8::FromWide(tempFile);
+    xr_strcpy(pathOut, pathOutSize, utf8Path.c_str());
+
+    const HANDLE hFile = CreateFileW(tempFile, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile == INVALID_HANDLE_VALUE)
     {
-        DeleteFileA(pathOut);
+        DeleteFileW(tempFile);
         pathOut[0] = '\0';
         return false;
     }
 
-    HMODULE dbghelpMod = LoadLibraryA("dbghelp.dll");
+    HMODULE dbghelpMod = LoadLibraryW(L"dbghelp.dll");
     if (!dbghelpMod)
     {
         CloseHandle(hFile);
-        DeleteFileA(pathOut);
+        DeleteFileW(tempFile);
         pathOut[0] = '\0';
         return false;
     }
@@ -146,7 +152,7 @@ bool write_live_minidump_to_temp(char* pathOut, size_t pathOutSize)
     {
         FreeLibrary(dbghelpMod);
         CloseHandle(hFile);
-        DeleteFileA(pathOut);
+        DeleteFileW(tempFile);
         pathOut[0] = '\0';
         return false;
     }
@@ -160,7 +166,7 @@ bool write_live_minidump_to_temp(char* pathOut, size_t pathOutSize)
     CloseHandle(hFile);
     if (!ok)
     {
-        DeleteFileA(pathOut);
+        DeleteFileW(tempFile);
         pathOut[0] = '\0';
         return false;
     }
@@ -398,7 +404,7 @@ void XRCORE_API xrSentry_CaptureDebugFail(pcstr expr, pcstr desc, pcstr arg1, pc
             Msg("! [Sentry]: sentry_flush timed out after xrDebug::Fail minidump (report may be incomplete)");
 #endif
         }
-        DeleteFileA(dumpPath);
+        DeleteFileW(XRay::Utf8::ToWide(dumpPath).c_str());
     }
 
     if (!lua_for_extra.empty())

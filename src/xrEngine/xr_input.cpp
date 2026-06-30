@@ -5,9 +5,7 @@
 #include "IInputReceiver.h"
 #include "GameFont.h"
 #include "XR_IOConsole.h"
-#include "xrCore/Text/StringConversion.hpp"
-
-#include <locale>
+#include "xrCore/Text/Utf8Utils.hpp"
 
 CInput* pInput = nullptr;
 
@@ -328,7 +326,8 @@ void CInput::KeyUpdate()
                     continue; // if input target changed, skip this frame
                 {
                     ZoneScopedN("CInput::KeyUpdate/IR_OnTextInput");
-                    cbStack.back()->IR_OnTextInput(event.text.text);
+                    const xr_string utf8Text = XRay::Utf8::FixTextInputEncoding(event.text.text);
+                    cbStack.back()->IR_OnTextInput(utf8Text.c_str());
                 }
                 break;
 
@@ -552,14 +551,13 @@ void CInput::ControllerUpdate()
 
 bool KbdKeyToButtonName(const int dik, xr_string& result)
 {
-    static std::locale locale("");
-
     if (dik >= 0)
     {
         cpcstr name = SDL_GetKeyName(SDL_GetKeyFromScancode((SDL_Scancode)dik));
         if (name && name[0])
         {
-            result = StringFromUTF8(name, locale);
+            // SDL returns key names in UTF-8; keep them as-is for the UTF-8 UI.
+            result = name;
             return true;
         }
     }

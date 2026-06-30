@@ -506,6 +506,9 @@
     <ClCompile Include="GameFont.cpp">
       <Filter>Render\Font output</Filter>
     </ClCompile>
+    <ClCompile Include="freetype_pfr_stub.cpp">
+      <Filter>Render\Font output</Filter>
+    </ClCompile>
     <ClCompile Include="tntQAVI.cpp">
       <Filter>Render\Execution &amp; 3D\Shaders\Textures</Filter>
     </ClCompile>

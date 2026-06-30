@@ -10,12 +10,15 @@
 #include "UILines.h"
 #include "XML/UIXmlInitBase.h"
 #include "xrCore/Text/StringConversion.hpp"
+#include "xrCore/Text/Utf8Utils.hpp"
 
 constexpr auto COLOR_TAG_BEGIN = "%c[";
 constexpr auto COLOR_TAG_END = ']';
 
 namespace
 {
+constexpr size_t MAX_MB_CHARS = 4096;
+
 // Same rules as CUILine::ProcessNewLines: LTX "\\n" plus real CR/LF (UTF-8: 0x0D/0x0A are single-byte).
 bool next_line_break_in_scan(pcstr pszSearch, size_t& out_off, size_t& out_skip)
 {
@@ -115,11 +118,23 @@ void CUILines::SetText(const char* text)
 void CUILines::SetTextST(LPCSTR str_id) { SetText(StringTable().translate(str_id).c_str()); }
 LPCSTR CUILines::GetText() const { return m_text.c_str(); }
 void CUILines::Reset() { m_lines.clear(); }
-float get_str_width(CGameFont* pFont, char ch)
+
+// Copy up to 'count' bytes from 'src' into 'dest' and trim any trailing
+// incomplete UTF-8 codepoint. This is a safety net for SplitByWidth returning
+// a position that falls in the middle of a multi-byte codepoint.
+static size_t copy_valid_utf8(char* dest, size_t destsz, pcstr src, size_t count)
 {
-    float ll = pFont->SizeOf_(ch);
-    UI().ClientToScreenScaledWidth(ll);
-    return ll;
+    size_t copy_len = std::min(count, destsz - 1);
+    strncpy_s(dest, destsz, src, copy_len);
+    dest[copy_len] = '\0';
+
+    while (copy_len > 0 && !XRay::Utf8::IsValid(dest))
+    {
+        --copy_len;
+        dest[copy_len] = '\0';
+    }
+
+    return copy_len;
 }
 
 void CUILines::ParseText(bool force)
@@ -142,143 +157,77 @@ void CUILines::ParseText(bool force)
 
     if (uFlags.test(flRecognizeNewLine))
     {
-        if (m_pFont->IsMultibyte())
-        {
-            CUILine tmp_line;
-            const size_t vsz = line.m_subLines.size();
-            VERIFY(vsz);
-            for (size_t i = 0; i < vsz; i++)
-            {
-                const u32 tcolor = line.m_subLines[i].m_color;
-                char szTempLine[MAX_MB_CHARS], *pszSearch = nullptr;
-                [[maybe_unused]] const auto llen = line.m_subLines[i].m_text.size();
-                VERIFY(llen < MAX_MB_CHARS);
-                xr_strcpy(szTempLine, line.m_subLines[i].m_text.c_str());
-                pszSearch = szTempLine;
-                size_t br_off = 0, br_skip = 0;
-                while (next_line_break_in_scan(pszSearch, br_off, br_skip))
-                {
-                    bNewLines = true;
-                    char* seg_end = const_cast<char*>(pszSearch) + br_off;
-                    *seg_end = '\0';
-                    tmp_line.AddSubLine({ pszSearch, tcolor, true });
-                    pszSearch = seg_end + br_skip;
-                }
-                tmp_line.AddSubLine(pszSearch, tcolor);
-            }
-            line = std::move(tmp_line);
-        }
-        else
-        {
-            line.ProcessNewLines();
-        }
-    }
-    if (m_pFont->IsMultibyte())
-    {
-#define UBUFFER_SIZE 100
-        u16 aMarkers[UBUFFER_SIZE];
-        char szTempLine[MAX_MB_CHARS];
-        float fTargetWidth = 1.0f;
-        UI().ClientToScreenScaledWidth(fTargetWidth);
-        VERIFY((m_wndSize.x > 0) && (fTargetWidth > 0));
-        fTargetWidth = m_wndSize.x / fTargetWidth;
-        size_t vsz = line.m_subLines.size();
+        CUILine tmp_line;
+        const size_t vsz = line.m_subLines.size();
         VERIFY(vsz);
-        if ((vsz > 1) && (!bNewLines))
-        { // only colored line
-            for (auto& subLine : line.m_subLines)
-            {
-                VERIFY(subLine.m_text.data());
-                subLine.m_last_in_line = false;
-            }
-            m_lines.emplace_back(std::move(line));
-        }
-        else
+        for (size_t i = 0; i < vsz; i++)
         {
-            CUILine tmp_line;
-            for (size_t i = 0; i < vsz; i++)
+            const u32 tcolor = line.m_subLines[i].m_color;
+            char szTempLine[MAX_MB_CHARS], *pszSearch = nullptr;
+            [[maybe_unused]] const auto llen = line.m_subLines[i].m_text.size();
+            VERIFY(llen < MAX_MB_CHARS);
+            xr_strcpy(szTempLine, line.m_subLines[i].m_text.c_str());
+            pszSearch = szTempLine;
+            size_t br_off = 0, br_skip = 0;
+            while (next_line_break_in_scan(pszSearch, br_off, br_skip))
             {
-                CUISubLine subLine = line.m_subLines[i];
-                const char* pszText = subLine.m_text.c_str();
-                const u32 tcolor = subLine.m_color;
-                u16 uFrom = 0;
-                VERIFY(pszText);
-                u16 nMarkers = m_pFont->SplitByWidth(aMarkers, UBUFFER_SIZE, fTargetWidth, pszText);
-                for (u16 j = 0; j < nMarkers; j++)
-                {
-                    const u16 uPartLen = aMarkers[j] - uFrom;
-                    VERIFY((uPartLen > 0) && (uPartLen < MAX_MB_CHARS));
-                    strncpy_s(szTempLine, pszText + uFrom, uPartLen);
-                    szTempLine[uPartLen] = '\0';
-                    tmp_line.AddSubLine(szTempLine, tcolor);
-                    m_lines.emplace_back(tmp_line);
-                    tmp_line.Clear();
-                    uFrom += uPartLen;
-                }
-                strncpy_s(szTempLine, pszText + uFrom, MAX_MB_CHARS);
-                tmp_line.AddSubLine(szTempLine, tcolor);
-                if (subLine.m_last_in_line || i == (vsz -1))
-                {
-                    m_lines.emplace_back(tmp_line);
-                    tmp_line.Clear();
-                }
+                bNewLines = true;
+                char* seg_end = const_cast<char*>(pszSearch) + br_off;
+                *seg_end = '\0';
+                tmp_line.AddSubLine({ pszSearch, tcolor, true });
+                pszSearch = seg_end + br_skip;
             }
+            tmp_line.AddSubLine(pszSearch, tcolor);
         }
+        line = std::move(tmp_line);
+    }
+
+    // All TTF/OTF fonts are multibyte; use the UTF-8 aware SplitByWidth path.
+    constexpr size_t UBUFFER_SIZE = 256;
+    u16 aMarkers[UBUFFER_SIZE];
+    char szTempLine[MAX_MB_CHARS];
+    float fTargetWidth = 1.0f;
+    UI().ClientToScreenScaledWidth(fTargetWidth);
+    VERIFY((m_wndSize.x > 0) && (fTargetWidth > 0));
+    fTargetWidth = m_wndSize.x / fTargetWidth;
+    size_t vsz = line.m_subLines.size();
+    VERIFY(vsz);
+    if ((vsz > 1) && (!bNewLines))
+    { // only colored line
+        for (auto& subLine : line.m_subLines)
+        {
+            VERIFY(subLine.m_text.data());
+            subLine.m_last_in_line = false;
+        }
+        m_lines.emplace_back(std::move(line));
     }
     else
     {
-        float max_width = m_wndSize.x;
-        size_t sbl_cnt = line.m_subLines.size();
         CUILine tmp_line;
-        string4096 buff;
-        float curr_width = 0.0f;
-
-        float eps = get_str_width(m_pFont, 'o'); // hack -(
-        for (size_t sbl_idx = 0; sbl_idx < sbl_cnt; ++sbl_idx)
+        for (size_t i = 0; i < vsz; i++)
         {
-            bool b_last_subl = (sbl_idx == sbl_cnt - 1);
-            CUISubLine& sbl = line.m_subLines[sbl_idx];
-            size_t sub_len = sbl.m_text.length();
-            size_t curr_w_pos = 0;
-
-            size_t last_space_idx = 0;
-            for (size_t idx = 0; idx < sub_len; ++idx)
+            CUISubLine subLine = line.m_subLines[i];
+            const char* pszText = subLine.m_text.c_str();
+            const u32 tcolor = subLine.m_color;
+            u16 uFrom = 0;
+            VERIFY(pszText);
+            u16 nMarkers = m_pFont->SplitByWidth(aMarkers, UBUFFER_SIZE, fTargetWidth, pszText);
+            for (u16 j = 0; j < nMarkers; j++)
             {
-                bool b_last_ch = (idx == sub_len - 1);
-
-                if (isspace((unsigned char)sbl.m_text[idx]))
-                    last_space_idx = idx;
-
-                float w1 = get_str_width(m_pFont, sbl.m_text[idx]);
-                bool bOver = (curr_width + w1 + eps > max_width);
-
-                if (bOver || b_last_ch)
-                {
-                    if (last_space_idx && !b_last_ch)
-                    {
-                        idx = last_space_idx;
-                        last_space_idx = 0;
-                    }
-
-                    strncpy_s(buff, sizeof(buff), sbl.m_text.c_str() + curr_w_pos, idx - curr_w_pos + 1);
-                    tmp_line.AddSubLine(buff, sbl.m_color);
-                    curr_w_pos = idx + 1;
-                }
-                else
-                    curr_width += w1;
-
-                if (bOver || (b_last_ch && sbl.m_last_in_line))
-                {
-                    m_lines.emplace_back(tmp_line);
-                    tmp_line.Clear();
-                    curr_width = 0.0f;
-                }
+                const u16 uPartLen = aMarkers[j] - uFrom;
+                VERIFY((uPartLen > 0) && (uPartLen < MAX_MB_CHARS));
+                copy_valid_utf8(szTempLine, MAX_MB_CHARS, pszText + uFrom, uPartLen);
+                tmp_line.AddSubLine(szTempLine, tcolor);
+                m_lines.emplace_back(tmp_line);
+                tmp_line.Clear();
+                uFrom += uPartLen;
             }
-            if (b_last_subl && !tmp_line.IsEmpty())
+            copy_valid_utf8(szTempLine, MAX_MB_CHARS, pszText + uFrom, MAX_MB_CHARS - 1);
+            tmp_line.AddSubLine(szTempLine, tcolor);
+            if (subLine.m_last_in_line || i == (vsz -1))
             {
                 m_lines.emplace_back(tmp_line);
                 tmp_line.Clear();
-                curr_width = 0.0f;
             }
         }
     }
@@ -334,21 +283,30 @@ LPCSTR GetElipsisText(CGameFont* pFont, float width, LPCSTR source_text, pstr bu
         buff[0] = 0;
         float el_len = pFont->SizeOf_("..");
         UI().ClientToScreenScaledWidth(el_len);
-        float total = 0.0f;
-        u16 pos = 0;
 
-        while (total + el_len < width)
+        size_t buff_pos = 0;
+        for (pcstr p = source_text; *p; p = XRay::Utf8::Next(p))
         {
-            const char c = *(source_text + pos);
-            float ch_len = pFont->SizeOf_(c);
-            UI().ClientToScreenScaledWidth(ch_len);
+            pcstr next = XRay::Utf8::Next(p);
+            const size_t cp_bytes = next - p;
 
-            if (total + ch_len + el_len < width)
-                buff[pos] = c;
+            xr_string slice(source_text, next - source_text);
+            float slice_len = pFont->SizeOf_(slice.c_str());
+            UI().ClientToScreenScaledWidth(slice_len);
 
-            total += ch_len;
-            ++pos;
-            buff[pos] = 0;
+            if (slice_len + el_len < width)
+            {
+                if (buff_pos + cp_bytes >= static_cast<size_t>(buff_len))
+                    break;
+
+                strncpy_s(buff + buff_pos, static_cast<size_t>(buff_len) - buff_pos, p, cp_bytes);
+                buff_pos += cp_bytes;
+                buff[buff_pos] = 0;
+            }
+            else
+            {
+                break;
+            }
         }
 
         xr_strcat(buff, buff_len, "..");
@@ -360,8 +318,6 @@ void CUILines::Draw(float x, float y)
 {
     x += m_TextOffset.x;
     y += m_TextOffset.y;
-
-    static string256 passText;
 
     if (m_text.empty())
         return;
@@ -380,12 +336,10 @@ void CUILines::Draw(float x, float y)
 
         if (uFlags.test(flPasswordMode))
         {
-            const size_t sz = m_text.size();
-            for (size_t i = 0; i < sz; i++)
-                passText[i] = '*';
-            passText[sz] = 0;
+            const size_t sz = XRay::Utf8::LengthCodepoints(m_text.c_str());
+            xr_string passText(sz, '*');
             m_pFont->SetAligment((CGameFont::EAligment)m_eTextAlign);
-            m_pFont->Out(text_pos.x, text_pos.y, "%s", passText);
+            m_pFont->Out(text_pos.x, text_pos.y, "%s", passText.c_str());
         }
         else
         {
@@ -547,14 +501,23 @@ bool CUILines::CursorPosFromLocalPoint(float local_x, float local_y, size_t& out
             return true;
 
         const float rel_x = local_x - m_TextOffset.x - GetIndentByAlign();
-        for (size_t k = 0; k <= len; ++k)
+        if (rel_x <= 0.f)
         {
-            const float w = prefix_width(0, k);
+            out_pos = 0;
+            return true;
+        }
+
+        pcstr p = m_text.c_str();
+        while (*p)
+        {
+            pcstr next = XRay::Utf8::Next(p);
+            const float w = prefix_width(0, next - m_text.c_str());
             if (rel_x <= w)
             {
-                out_pos = k;
+                out_pos = next - m_text.c_str();
                 return true;
             }
+            p = next;
         }
         out_pos = len;
         return true;
@@ -599,14 +562,27 @@ bool CUILines::CursorPosFromLocalPoint(float local_x, float local_y, size_t& out
     const size_t line_len = line_ranges[line_idx].second;
     const size_t line_end = start + line_len;
 
-    for (size_t k = 0; k <= line_len; ++k)
+    if (rel_x <= 0.f)
     {
-        const float w = prefix_width(start, k);
+        out_pos = start;
+        return true;
+    }
+
+    pcstr line_start = m_text.c_str() + start;
+    pcstr p = line_start;
+    while (*p)
+    {
+        pcstr next = XRay::Utf8::Next(p);
+        if (next > m_text.c_str() + line_end)
+            break;
+
+        const float w = prefix_width(start, next - line_start);
         if (rel_x <= w)
         {
-            out_pos = start + k;
+            out_pos = next - m_text.c_str();
             return true;
         }
+        p = next;
     }
     out_pos = line_end;
     return true;
@@ -637,7 +613,7 @@ bool CUILines::MoveCursorByVisualLine(size_t& io_cursor, int delta)
         if (c >= start && c <= start + len)
         {
             vi = i;
-            col = c - start;
+            col = XRay::Utf8::DistanceCodepoints(m_text.c_str() + start, m_text.c_str() + c);
             found = true;
             break;
         }
@@ -651,8 +627,10 @@ bool CUILines::MoveCursorByVisualLine(size_t& io_cursor, int delta)
 
     const size_t tgt_start = line_ranges[target_vi].first;
     const size_t tgt_len = line_ranges[target_vi].second;
-    const size_t new_col = std::min(col, tgt_len);
-    io_cursor = tgt_start + new_col;
+    const size_t tgt_cp_len = XRay::Utf8::DistanceCodepoints(
+        m_text.c_str() + tgt_start, m_text.c_str() + tgt_start + tgt_len);
+    const size_t new_col = std::min(col, tgt_cp_len);
+    io_cursor = XRay::Utf8::Advance(m_text.c_str() + tgt_start, new_col) - m_text.c_str();
     return true;
 }
 

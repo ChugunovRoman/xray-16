@@ -7,13 +7,11 @@
 
 #include "xrCore/os_clipboard.h"
 #include "xrCore/buffer_vector.h"
-#include "xrCore/Text/StringConversion.hpp"
+#include "xrCore/Text/Utf8Utils.hpp"
 #include "Common/object_broker.h"
 #include "xr_input.h"
 
 #include <SDL.h>
-
-#include <locale>
 
 extern ENGINE_API float g_console_sensitive;
 
@@ -21,9 +19,9 @@ namespace text_editor
 {
 namespace
 {
-static bool terminate_char_ml(char c, bool check_space = false)
+static bool terminate_char_ml(u32 cp, bool check_space = false)
 {
-    switch (c)
+    switch (cp)
     {
     case '\n':
     case '\r': return true;
@@ -76,6 +74,31 @@ static size_t line_end_pos(pcstr s, size_t len, size_t pos)
     while (pos < len && s[pos] != '\n')
         ++pos;
     return pos;
+}
+
+static size_t normalize_newlines(pstr s)
+{
+    pstr rd = s;
+    pstr wr = s;
+    while (*rd)
+    {
+        if (rd[0] == '\r' && rd[1] == '\n')
+        {
+            *wr++ = '\n';
+            rd += 2;
+        }
+        else if (rd[0] == '\r')
+        {
+            *wr++ = '\n';
+            ++rd;
+        }
+        else
+        {
+            *wr++ = *rd++;
+        }
+    }
+    *wr = 0;
+    return wr - s;
 }
 } // namespace
 
@@ -275,12 +298,15 @@ void multiline_edit_control::remove_callback(int dik)
         xr_delete(m_actions[dik]);
 }
 
-void multiline_edit_control::insert_character(char c)
+void multiline_edit_control::insert_utf8_codepoint(pcstr cp, size_t len)
 {
-    VERIFY(m_inserted_pos < (m_buffer_size - 1 /*trailing zero*/));
-    m_inserted[m_inserted_pos] = c;
-    m_inserted[m_inserted_pos + 1] = 0;
-    m_inserted_pos++;
+    VERIFY(m_inserted_pos + len <= (m_buffer_size - 1 /*trailing zero*/));
+    if (m_inserted_pos + len >= m_buffer_size - 1)
+        return;
+    for (size_t i = 0; i < len; ++i)
+        m_inserted[m_inserted_pos + i] = cp[i];
+    m_inserted[m_inserted_pos + len] = 0;
+    m_inserted_pos += len;
 }
 
 void multiline_edit_control::clear_inserted() { m_inserted[0] = m_inserted[1] = 0; m_inserted_pos = 0; }
@@ -292,6 +318,25 @@ void multiline_edit_control::set_edit(pcstr str)
     clamp<size_t>(str_size, 0, m_buffer_size - 1);
     strncpy_s(m_edit_str, m_buffer_size, str, str_size);
     m_edit_str[str_size] = 0;
+
+    // Keep internal representation consistent: only '\n' separators.
+    str_size = normalize_newlines(m_edit_str);
+
+    // Some UI defaults / scripts still pass CP1251 strings. Normalize to UTF-8 internally.
+    if (!XRay::Utf8::IsValid(m_edit_str))
+    {
+        const xr_string utf8 = XRay::Utf8::FromCP1251(m_edit_str);
+        str_size = std::min(utf8.size(), m_buffer_size - 1);
+        strncpy_s(m_edit_str, m_buffer_size, utf8.c_str(), str_size);
+        m_edit_str[str_size] = 0;
+    }
+
+    // Make sure the stored string does not end in the middle of a UTF-8 codepoint.
+    while (str_size > 0 && !XRay::Utf8::IsValid(m_edit_str))
+    {
+        --str_size;
+        m_edit_str[str_size] = 0;
+    }
 
     m_cur_pos = str_size;
     m_select_start = m_cur_pos;
@@ -313,16 +358,22 @@ void multiline_edit_control::set_cursor_pos(size_t pos)
 void multiline_edit_control::sync_preferred_col_from_cursor()
 {
     const size_t ls = line_start_pos(m_edit_str, m_cur_pos);
-    m_preferred_col = m_cur_pos - ls;
+    m_preferred_col = XRay::Utf8::DistanceCodepoints(m_edit_str + ls, m_edit_str + m_cur_pos);
 }
 
-bool multiline_edit_control::char_is_allowed(char c)
+bool multiline_edit_control::char_is_allowed(u32 codepoint)
 {
-    switch (c)
+    if (codepoint < 0x20)
     {
-    case '\r': return true; // normalized to \n in on_text_input
-    default: return true;
+        switch (codepoint)
+        {
+        case '\n':
+        case '\r':
+        case '\t': return true;
+        default: return false;
+        }
     }
+    return true;
 }
 
 void multiline_edit_control::on_key_press(int dik)
@@ -367,15 +418,32 @@ void multiline_edit_control::on_text_input(const char* text)
     clear_inserted();
     compute_positions();
 
-    static std::locale locale("");
-    const auto str = StringFromUTF8(text, locale);
-
-    for (char c : str)
+    // Pasted text may still be in CP1251; convert it once if needed.
+    xr_string inputText;
+    pcstr p = text;
+    if (text && text[0] && !XRay::Utf8::IsValid(text))
     {
-        if (c == '\r')
-            c = '\n';
-        if (char_is_allowed(c))
-            insert_character(c);
+        inputText = XRay::Utf8::FromCP1251(text);
+        p = inputText.c_str();
+    }
+
+    while (*p)
+    {
+        size_t len = 0;
+        const u32 cp = XRay::Utf8::Decode(p, len);
+        if (cp == '\r')
+        {
+            if (char_is_allowed('\n'))
+                insert_utf8_codepoint("\n", 1);
+            // Treat "\r\n" as a single line break.
+            if (p[len] == '\n')
+                ++len;
+        }
+        else if (char_is_allowed(cp))
+        {
+            insert_utf8_codepoint(p, len);
+        }
+        p += len;
     }
     add_inserted_text();
 
@@ -460,7 +528,13 @@ void multiline_edit_control::update_bufs()
     m_buf3[0] = 0;
 
     const size_t edit_size = xr_strlen(m_edit_str);
-    const u8 ds = (m_cursor_view && m_insert_mode && m_p2 < edit_size) ? 1 : 0;
+    size_t ds = 0;
+    if (m_cursor_view && m_insert_mode && m_p2 < edit_size)
+    {
+        size_t len = 0;
+        XRay::Utf8::Decode(m_edit_str + m_p2, len);
+        ds = len;
+    }
     strncpy_s(m_buf0, m_buffer_size, m_edit_str, m_cur_pos);
     strncpy_s(m_buf1, m_buffer_size, m_edit_str, m_p1);
     strncpy_s(m_buf2, m_buffer_size, m_edit_str + m_p1, m_p2 - m_p1 + ds);
@@ -487,10 +561,19 @@ void multiline_edit_control::add_inserted_text()
     {
         m_inserted[m_buffer_size - 1 - m_p1] = 0;
         new_size = xr_strlen(m_inserted);
+        // trim back to the leading byte so we do not split a UTF-8 codepoint
+        while (new_size > 0 && XRay::Utf8::IsContinuationByte(static_cast<u8>(m_inserted[new_size - 1])))
+            m_inserted[--new_size] = 0;
     }
     strncpy_s(buf + m_p1, m_buffer_size - m_p1, m_inserted, _min(new_size, m_buffer_size - m_p1));
 
-    const u8 ds = (m_insert_mode && m_p2 < old_edit_size) ? 1 : 0;
+    size_t ds = 0;
+    if (m_insert_mode && m_p2 < old_edit_size)
+    {
+        size_t len = 0;
+        XRay::Utf8::Decode(m_edit_str + m_p2, len);
+        ds = len;
+    }
     strncpy_s(buf + m_p1 + new_size, m_buffer_size - (m_p1 + new_size), m_edit_str + m_p2 + ds,
         _min(old_edit_size - m_p2 - ds, m_buffer_size - m_p1 - new_size));
     buf[m_buffer_size] = 0;
@@ -521,6 +604,7 @@ void multiline_edit_control::copy_to_clipboard()
 void multiline_edit_control::paste_from_clipboard()
 {
     os_clipboard::paste_from_clipboard(m_inserted, m_buffer_size - 1);
+    normalize_newlines(m_inserted);
     m_inserted_pos = xr_strlen(m_inserted);
 }
 
@@ -555,14 +639,25 @@ void multiline_edit_control::delete_selected(bool back)
     {
         if (back)
         {
-            u8 dp = ((m_p1 == m_p2) && m_p1 > 0) ? 1 : 0;
+            size_t dp = 0;
+            if (m_p1 == m_p2 && m_p1 > 0)
+            {
+                pcstr prev = XRay::Utf8::Prev(m_edit_str, m_edit_str + m_p1);
+                dp = m_p1 - (prev - m_edit_str);
+            }
             strncpy_s(m_undo_buf, m_buffer_size, m_edit_str + m_p1 - dp, m_p2 - m_p1 + dp);
             strncpy_s(m_edit_str + m_p1 - dp, m_buffer_size - (m_p1 - dp), m_edit_str + m_p2, edit_len - m_p2);
             m_cur_pos = m_p1 - dp;
         }
         else
         {
-            u8 dn = ((m_p1 == m_p2) && m_p2 < edit_len) ? 1 : 0;
+            size_t dn = 0;
+            if (m_p1 == m_p2 && m_p2 < edit_len)
+            {
+                size_t len = 0;
+                XRay::Utf8::Decode(m_edit_str + m_p2, len);
+                dn = len;
+            }
             strncpy_s(m_undo_buf, m_buffer_size, m_edit_str + m_p1, m_p2 - m_p1 + dn);
             strncpy_s(m_edit_str + m_p1, m_buffer_size - m_p1, m_edit_str + m_p2 + dn, edit_len - m_p2 - dn);
             m_cur_pos = m_p1;
@@ -637,13 +732,17 @@ void multiline_edit_control::move_pos_end_line()
 void multiline_edit_control::move_pos_left()
 {
     if (m_cur_pos > 0)
-        --m_cur_pos;
+    {
+        pcstr prev = XRay::Utf8::Prev(m_edit_str, m_edit_str + m_cur_pos);
+        m_cur_pos = prev - m_edit_str;
+    }
     sync_preferred_col_from_cursor();
 }
 
 void multiline_edit_control::move_pos_right()
 {
-    ++m_cur_pos;
+    pcstr next = XRay::Utf8::Next(m_edit_str + m_cur_pos);
+    m_cur_pos = next - m_edit_str;
     clamp_cur_pos();
     sync_preferred_col_from_cursor();
 }
@@ -656,11 +755,16 @@ void multiline_edit_control::move_pos_up()
 
     const size_t prev_line_end = ls - 1;
     const size_t prev_ls = line_start_pos(m_edit_str, prev_line_end);
-    const size_t prev_len = prev_line_end - prev_ls;
+    pcstr prev_line_start = m_edit_str + prev_ls;
+    pcstr prev_line_end_ptr = m_edit_str + prev_line_end;
+    const size_t prev_line_cp = XRay::Utf8::DistanceCodepoints(prev_line_start, prev_line_end_ptr);
+
     size_t col = m_preferred_col;
-    if (col > prev_len)
-        col = prev_len;
-    m_cur_pos = prev_ls + col;
+    if (col > prev_line_cp)
+        col = prev_line_cp;
+
+    pcstr new_pos = XRay::Utf8::Advance(prev_line_start, col);
+    m_cur_pos = new_pos - m_edit_str;
     clamp_cur_pos();
 }
 
@@ -674,59 +778,102 @@ void multiline_edit_control::move_pos_down()
 
     const size_t next_ls = le + 1;
     const size_t next_le = line_end_pos(m_edit_str, len, next_ls);
-    const size_t next_len = next_le - next_ls;
+    pcstr next_line_start = m_edit_str + next_ls;
+    pcstr next_line_end = m_edit_str + next_le;
+    const size_t next_line_cp = XRay::Utf8::DistanceCodepoints(next_line_start, next_line_end);
+
     size_t col = m_preferred_col;
-    if (col > next_len)
-        col = next_len;
-    m_cur_pos = next_ls + col;
+    if (col > next_line_cp)
+        col = next_line_cp;
+
+    pcstr new_pos = XRay::Utf8::Advance(next_line_start, col);
+    m_cur_pos = new_pos - m_edit_str;
     clamp_cur_pos();
 }
 
 void multiline_edit_control::move_pos_left_word()
 {
-    size_t i = m_cur_pos > 0 ? m_cur_pos - 1 : 0;
-
-    while (i > 0 && m_edit_str[i] == ' ')
-        --i;
-
-    if (i > 0 && !terminate_char_ml(m_edit_str[i]))
+    pcstr const start = m_edit_str;
+    pcstr cur = start + m_cur_pos;
+    if (cur == start)
     {
-        while (i > 0 && !terminate_char_ml(m_edit_str[i], true))
-            --i;
-
-        if (i > 0)
-            ++i;
+        sync_preferred_col_from_cursor();
+        return;
     }
 
-    m_cur_pos = i;
+    pcstr i = XRay::Utf8::Prev(start, cur);
+
+    // skip spaces backward
+    while (i > start)
+    {
+        size_t len = 0;
+        const u32 cp = XRay::Utf8::Decode(i, len);
+        if (cp != ' ')
+            break;
+        i = XRay::Utf8::Prev(start, i);
+    }
+
+    size_t len = 0;
+    const u32 cp = XRay::Utf8::Decode(i, len);
+    if (!terminate_char_ml(cp))
+    {
+        // move back through the word until a terminator or the string start
+        while (i > start)
+        {
+            size_t clen = 0;
+            const u32 ccp = XRay::Utf8::Decode(i, clen);
+            if (terminate_char_ml(ccp, true))
+                break;
+            i = XRay::Utf8::Prev(start, i);
+        }
+
+        // if we stopped at a terminator, step forward to the word beginning
+        if (i > start)
+            i = XRay::Utf8::Next(i);
+    }
+
+    m_cur_pos = i - start;
     sync_preferred_col_from_cursor();
 }
 
 void multiline_edit_control::move_pos_right_word()
 {
-    const size_t edit_len = xr_strlen(m_edit_str);
-    size_t i = m_cur_pos + 1;
+    pcstr const start = m_edit_str;
+    pcstr const end = start + xr_strlen(m_edit_str);
+    pcstr i = XRay::Utf8::Next(start + m_cur_pos);
 
-    while (i < edit_len && !terminate_char_ml(m_edit_str[i], true))
-        ++i;
+    while (i < end)
+    {
+        size_t len = 0;
+        const u32 cp = XRay::Utf8::Decode(i, len);
+        if (terminate_char_ml(cp, true))
+            break;
+        i = XRay::Utf8::Next(i);
+    }
 
-    while (i < edit_len && m_edit_str[i] == ' ')
-        ++i;
+    while (i < end)
+    {
+        size_t len = 0;
+        const u32 cp = XRay::Utf8::Decode(i, len);
+        if (cp != ' ')
+            break;
+        i = XRay::Utf8::Next(i);
+    }
 
-    m_cur_pos = i;
+    m_cur_pos = i - start;
     sync_preferred_col_from_cursor();
 }
 
 void multiline_edit_control::insert_newline()
 {
     // Ctrl+Enter (e.g. commit) is handled in CUIMultiLineEdit / CUICustomEdit before on_key_press.
-    insert_character('\n');
+    insert_utf8_codepoint("\n", 1);
 }
 
 void multiline_edit_control::insert_tab_spaces()
 {
     for (int k = 0; k < 4; ++k)
-        insert_character(' ');
+        insert_utf8_codepoint(" ", 1);
 }
 
 void multiline_edit_control::compute_positions()
@@ -744,7 +891,14 @@ void multiline_edit_control::compute_positions()
         m_p2 = m_select_start;
 }
 
-void multiline_edit_control::clamp_cur_pos() { clamp<size_t>(m_cur_pos, 0, xr_strlen(m_edit_str)); }
+void multiline_edit_control::clamp_cur_pos()
+{
+    const size_t edit_len = xr_strlen(m_edit_str);
+    clamp<size_t>(m_cur_pos, 0, edit_len);
+    // align to a codepoint boundary (do not land on a continuation byte)
+    while (m_cur_pos > 0 && XRay::Utf8::IsContinuationByte(static_cast<u8>(m_edit_str[m_cur_pos])))
+        --m_cur_pos;
+}
 
 void multiline_edit_control::SwitchKL()
 {

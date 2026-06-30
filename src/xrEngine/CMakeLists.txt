@@ -372,6 +372,7 @@ target_sources_grouped(
     GameFont.cpp
     GameFont.h
     IGameFont.hpp
+    freetype_pfr_stub.cpp
 )
 
 target_sources_grouped(
@@ -429,6 +430,7 @@ target_include_directories(xrEngine
     "${CMAKE_SOURCE_DIR}/src"
     "${CMAKE_SOURCE_DIR}/Externals/imgui"
     "${CMAKE_SOURCE_DIR}/Externals/OpenAutomate/inc"
+    "${CMAKE_SOURCE_DIR}/Externals/freetype/include"
 )
 
 target_link_libraries(xrEngine
@@ -448,6 +450,7 @@ target_link_libraries(xrEngine
     Ogg::Ogg
     Theora::Theora
     SDL2::SDL2
+    freetype
 )
 
 target_compile_definitions(xrEngine

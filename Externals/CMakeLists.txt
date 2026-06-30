@@ -15,6 +15,30 @@ add_compile_options(${XRAY_DISABLE_WARNINGS})
 add_subdirectory(GameSpy)
 add_subdirectory(imgui-proj)
 
+# FreeType: disable optional dependencies to minimize build complexity
+set(FT_DISABLE_ZLIB ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_BZIP2 ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_PNG ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_BROTLI ON CACHE BOOL "" FORCE)
+
+# Disable PFR font driver (C99 compound literal incompatible with MSVC 17.4+,
+# and `local` macro conflict with zutil.h on Linux/macOS). Not needed for the game.
+# Patches ftmodule.h and CMakeLists.txt at configure time to exclude PFR.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/freetype/include/freetype/config/ftmodule.h" _ftmodule_content)
+string(REPLACE "FT_USE_MODULE( FT_Driver_ClassRec, pfr_driver_class )"
+                "/* FT_USE_MODULE( FT_Driver_ClassRec, pfr_driver_class ) -- disabled by xray-16 */"
+                _ftmodule_content "${_ftmodule_content}")
+file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/freetype/include/freetype/config/ftmodule.h" "${_ftmodule_content}")
+
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/freetype/CMakeLists.txt" _ftcmake_content)
+string(REPLACE "  src/pfr/pfr.c\n"
+                "  # src/pfr/pfr.c -- disabled by xray-16\n"
+                _ftcmake_content "${_ftcmake_content}")
+file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/freetype/CMakeLists.txt" "${_ftcmake_content}")
+
+add_subdirectory(freetype)
+
 if (NOT TARGET xrLuabind)
     message(FATAL_ERROR
         "You probably have downloaded OpenXRay sources as ZIP archive, you can't do that. Use git to clone the repository.\n"

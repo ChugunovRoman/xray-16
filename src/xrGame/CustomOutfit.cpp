@@ -546,12 +546,12 @@ void CCustomOutfit::RebuildDescription()
 
     shared_str str_outfit_property_helmet_available = StringTable().translate(helmet_ok ? "st_outfit_property_helmet_has" : "st_outfit_property_helmet_no");
 
-    m_Description = make_string("%s\\n \\n%s\\n", m_Description.c_str(), str_outfit_properties.c_str()).c_str();
-    m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_faction.c_str(), str_outfit_property_faction_name.c_str()).c_str();
-    m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_helmet.c_str(), str_outfit_property_helmet_available.c_str()).c_str();
-    m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_sprint.c_str(), str_outfit_property_sprint_alowed.c_str()).c_str();
-    m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %d\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_slots_count.c_str(), artefact_count).c_str();
-    m_Description = make_string("%s\\n%%c[255,238,153,26] %s %%c[0,140,140,140] %s %.2f %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_inventory_weight.c_str(), weight, str_outfit_property_inventory_weight_suffix.c_str()).c_str();
+    m_Description = make_string("%s\\n%s\\n", m_Description.c_str(), str_outfit_properties.c_str()).c_str();
+    m_Description = make_string("%s%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_faction.c_str(), str_outfit_property_faction_name.c_str()).c_str();
+    m_Description = make_string("%s%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_helmet.c_str(), str_outfit_property_helmet_available.c_str()).c_str();
+    m_Description = make_string("%s%%c[255,238,153,26] %s %%c[0,140,140,140] %s %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_sprint.c_str(), str_outfit_property_sprint_alowed.c_str()).c_str();
+    m_Description = make_string("%s%%c[255,238,153,26] %s %%c[0,140,140,140] %s %d\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_slots_count.c_str(), artefact_count).c_str();
+    m_Description = make_string("%s%%c[255,238,153,26] %s %%c[0,140,140,140] %s %.2f %s\\n", m_Description.c_str(), str_outfit_list_symbol.c_str(), str_outfit_property_inventory_weight.c_str(), weight, str_outfit_property_inventory_weight_suffix.c_str()).c_str();
 }
 
 void CCustomOutfit::AddBonesProtection(LPCSTR bones_section)
