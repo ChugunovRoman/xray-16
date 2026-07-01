@@ -28,8 +28,12 @@ void dxFontRender::OnRender(CGameFont& owner)
 {
     VERIFY(g_bRendering);
 
-    if (pShader != nullptr)
-        RCache.set_Shader(pShader);
+    // Guard against an uninitialized texture (e.g. a legacy font whose .dds/.ini
+    // failed to load). Skip rendering rather than crash on a null dereference.
+    if (pTexture == nullptr || pShader == nullptr)
+        return;
+
+    RCache.set_Shader(pShader);
 
     auto fWidth = (float)std::max(m_atlasWidth ? m_atlasWidth : pTexture->get_Width(), 4u);
     auto fHeight = (float)std::max(m_atlasHeight ? m_atlasHeight : pTexture->get_Height(), 4u);
@@ -100,6 +104,11 @@ void dxFontRender::OnRender(CGameFont& owner)
             Y2 -= 0.5f;
 
             bool firstGlyph = true;
+            // Apply the global text scale to per-glyph metrics here too, so the
+            // rendered advance/offset matches what WidthOf() reported for layout
+            // and alignment. Without this, alRight/alCenter text drifts to the
+            // right and glyph baselines look uneven when scale != 1.0.
+            const float scale = g_text_scale;
             for (const char* p = text; *p;)
             {
                 size_t cpLen = 0;
@@ -111,13 +120,13 @@ void dxFontRender::OnRender(CGameFont& owner)
                     continue;
 
                 if (!firstGlyph)
-                    X += glyphInfo->Abc.abcA;
+                    X += glyphInfo->Abc.abcA * scale;
                 firstGlyph = false;
 
-                float GlyphY = Y + glyphInfo->yOffset;
-                float GlyphY2 = Y2 + glyphInfo->yOffset;
+                float GlyphY = Y + glyphInfo->yOffset * scale;
+                float GlyphY2 = Y2 + glyphInfo->yOffset * scale;
 
-                float X2 = X + glyphInfo->Abc.abcB;
+                float X2 = X + glyphInfo->Abc.abcB * scale;
 
                 float u1 = float(glyphInfo->TextureCoord.left) / fWidth;
                 float u2 = float(glyphInfo->TextureCoord.right) / fWidth;
@@ -166,10 +175,10 @@ void dxFontRender::OnRender(CGameFont& owner)
                     ++vertexes;
                     vertexes->set(X2, GlyphY2, clr2, u2, v2);
                     ++vertexes;
-                    vertexes->set(X2, GlyphY, clr, u2, v1);
+                    vertexes->set(X2, GlyphY, clr2, u2, v1);
                     ++vertexes;
                 }
-                X = X2 + glyphInfo->Abc.abcC + owner.GetLetterSpacing();
+                X = X2 + glyphInfo->Abc.abcC * scale + owner.GetLetterSpacing() * scale;
             }
 
             // Unlock and draw

@@ -247,7 +247,10 @@ float CUILines::GetVisibleHeight()
     }
     else
     {
-        float _curr_h = m_pFont->GetHeight();
+        // Use CurrentHeight_() (which applies g_text_scale) instead of GetHeight()
+        // so that vertical centering/bottom alignment matches the actually drawn
+        // text height when the global text scale differs from 1.0.
+        float _curr_h = m_pFont->CurrentHeight_();
         UI().ClientToScreenScaledHeight(_curr_h);
         return _curr_h;
     }

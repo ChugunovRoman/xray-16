@@ -69,6 +69,7 @@ private:
     {
         bool OpenType = false;
         bool HasUnicodeCharmap = false; // true if FreeType selected a Unicode cmap
+        bool IsBitmap = false;          // true: legacy bitmap font (.dds + .ini), no FreeType atlas
         u16 Size = 14;
         const char* Name = nullptr;      // font family file name (e.g. "arial")
         const char* Shader = nullptr;
@@ -171,6 +172,10 @@ private:
 
     void Prepare(pcstr name, pcstr shader, pcstr style, u32 size);
     void Initialize2(pcstr name, pcstr shader, pcstr style, u32 size);
+    // Legacy bitmap-font fallback: loads a .dds + .ini font, converts CP1251-keyed
+    // glyph metrics into the UTF-8 GlyphData map, and reuses the UTF-8 renderer.
+    // Invoked from Initialize2 when no TTF/OTF fonts are present in $game_fonts$.
+    void InitializeLegacy(pcstr name, pcstr shader, pcstr style, u32 size);
 
     static bool bFreetypeInitialized;
     static void InitializeFreetype();
@@ -180,3 +185,15 @@ public:
     shared_str m_font_name;
 #endif
 };
+
+// Global text scale multiplier (controlled by the `ui_text_scale` console variable).
+// Applied on the draw path (WidthOf/CurrentHeight_), so changes take effect
+// immediately in runtime without rebuilding the FreeType font atlas.
+ENGINE_API extern float g_text_scale;
+
+// Font renderer selector (controlled by the `r_font_legacy` console variable).
+//   0 (default) = FreeType TTF/OTF rendering (UTF-8 native).
+//   1           = legacy X-Ray bitmap fonts (.dds + .ini), CP1251 metrics
+//                 converted to Unicode codepoints on load.
+// Changes apply on the next font (re)initialization (e.g. vid_restart / UI reset).
+ENGINE_API extern int g_font_legacy;

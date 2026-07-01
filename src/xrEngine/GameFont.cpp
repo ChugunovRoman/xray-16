@@ -21,6 +21,15 @@
 extern ENGINE_API bool g_bRendering;
 ENGINE_API Fvector2 g_current_font_scale = { 1.0f, 1.f };
 
+// Global text scale multiplier (cvar `ui_text_scale`). Multiplies the width and
+// height returned by the font on the draw path so that the whole in-game text can
+// be resized at runtime without rebuilding the FreeType atlas.
+ENGINE_API float g_text_scale = 0.85f;
+
+// Font renderer selector (cvar `r_font_legacy`). 0 = FreeType TTF, 1 =
+// legacy X-Ray bitmap fonts. Read on each font (re)initialization.
+ENGINE_API int g_font_legacy = 0;
+
 FT_Library FreetypeLib = nullptr;
 bool CGameFont::bFreetypeInitialized = false;
 
@@ -136,8 +145,304 @@ static xr_vector<xr_string> split(const xr_string& s, char delim)
     return std::move(elems);
 }
 
+// Resolve the legacy bitmap font texture name. Priority:
+//   1. Explicit "legacy_texture" field in the section (fonts.ltx).
+//   2. Hardcoded section->texture table (old engine naming, no common pattern).
+//   3. Heuristic "ui_font_<lower(name)>_<resSuffix>" as a last resort.
+// The .dds/.ini files live in $game_textures$ alongside the old engine layout.
+static void resolve_legacy_texture(pcstr section, pcstr name, string_path& outTexture)
+{
+    // 1. Explicit override in fonts.ltx (recommended for any new section).
+    pcstr explicitTex = READ_IF_EXISTS(pSettings, r_string, section, "legacy_texture", nullptr);
+    if (explicitTex && explicitTex[0])
+    {
+        xr_strcpy(outTexture, sizeof(outTexture), explicitTex);
+        return;
+    }
+
+    // 2. Hardcoded table for the GW sections. Old font texture names have no
+    //    common naming pattern (arial_14_1024, graff_19_1024, letter_16_1024,
+    //    hud_01, console_02), so a table is the only reliable mapping.
+    //    Paths are relative to $game_textures$ (the old engine stored fonts in textures\ui\).
+    struct SectionToTex { pcstr section; pcstr tex; };
+    static const SectionToTex table[] =
+    {
+        { "stat_font",                      "ui\\ui_font_hud_01"      },
+        { "hud_font_medium",                "ui\\ui_font_hud_02"      },
+        { "hud_font_di",                    "ui\\ui_font_console_02"  },
+        { "hud_font_di2",                   "ui\\ui_font_console_02"  },
+        { "ui_font_arial_14",               "ui\\ui_font_arial_14_1024"  },
+        { "ui_font_graffiti19_russian",     "ui\\ui_font_graff_19_1024"  },
+        { "ui_font_graffiti22_russian",     "ui\\ui_font_graff_22_1024"  },
+        { "ui_font_graff_32",               "ui\\ui_font_graff_32_1024"  },
+        { "ui_font_graff_40",               "ui\\ui_font_graff_40_1024"  },
+        { "ui_font_graff_50",               "ui\\ui_font_graff_50_1024"  },
+        { "ui_font_letterica16_russian",    "ui\\ui_font_letter_16_1024" },
+        { "ui_font_letterica18_russian",    "ui\\ui_font_letter_18_1024" },
+        { "ui_font_letter_25",              "ui\\ui_font_letter_25_1024" },
+        { "ui_font_letterica16",            "ui\\ui_font_letter_16_1024" },
+        { "ui_font_letterica18",            "ui\\ui_font_letter_18_1024" },
+        { "ui_font_letterica25",            "ui\\ui_font_letter_25_1024" },
+        { "ui_font_graffiti19",             "ui\\ui_font_graff_19_1024"  },
+        { "ui_font_graffiti22",             "ui\\ui_font_graff_22_1024"  },
+    };
+    for (const auto& entry : table)
+    {
+        if (xr_strcmp(section, entry.section) == 0)
+        {
+            xr_strcpy(outTexture, sizeof(outTexture), entry.tex);
+            return;
+        }
+    }
+
+    // 3. Heuristic fallback (may not match real files; emit a hint to the log).
+    xr_string base = "ui\\ui_font_";
+    base += name;
+    XRay::Utf8::ToLowerAscii(base.data());
+    base += "_1024";
+    xr_strcpy(outTexture, sizeof(outTexture), base.c_str());
+    Msg("~ resolve_legacy_texture: section '%s' not in table, heuristic '%s'", section, outTexture);
+}
+
+void CGameFont::InitializeLegacy(pcstr name, pcstr shader, pcstr /*style*/, u32 size)
+{
+    Data.IsBitmap = true;
+    Data.HasUnicodeCharmap = false; // metrics are CP1251-keyed; we translate to Unicode
+    Data.OpenType = false;
+
+    GlyphData.clear();
+    Size = size;
+
+    // 1. Resolve the texture + .ini path (located in $game_textures$, old layout).
+    string_path textureName;
+    resolve_legacy_texture(Data.TextureName ? Data.TextureName : name, name, textureName);
+
+    string_path iniPath;
+    if (!FS.exist(iniPath, "$game_textures$", textureName, ".ini"))
+    {
+        // Hard failure: do NOT silently return, otherwise pTexture stays null
+        // and the renderer crashes with a null dereference. Give a clear message.
+        R_ASSERT3(false, "r_font_legacy: no legacy font .ini found for section. "
+            "Check fonts.ltx 'legacy_texture' or disable r_font_legacy.",
+            Data.TextureName ? Data.TextureName : name);
+        return;
+    }
+
+    Msg("~ Legacy font '%s' -> texture '%s', ini '%s'", name, textureName, iniPath);
+
+    // 2. Read the .ini glyph metrics. The old engine supported four .ini formats;
+    //    we handle all of them and convert each into the UTF-8 GlyphData map.
+    //    All formats are keyed by CP1251 byte (0..255), so every glyph is stored
+    //    under its Unicode codepoint via CP1251ByteToCodepoint().
+    CInifile* ini = CInifile::Create(iniPath, true); // read-only
+
+    // Helper: store a glyph under its Unicode codepoint.
+    //   - TextureCoord: pixel rect of the glyph bitmap in the .dds atlas.
+    //   - advance: total horizontal step to the next glyph. In the old engine this
+    //     was the per-glyph width (right-left); the new renderer derives the step
+    //     from abcA+abcB+abcC, so we put the bitmap width into abcB and the
+    //     remaining advance into abcC.
+    // NOTE: the space glyph MUST be stored too — otherwise it has no advance and
+    // words run together. The old engine rendered space as an (empty) atlas cell
+    // with a real advance; we do the same.
+    auto addGlyph = [&](u8 cp1251Byte, LONG left, LONG top, LONG right, LONG bottom, float advance)
+    {
+        const int codepoint = static_cast<int>(XRay::Utf8::CP1251ByteToCodepoint(cp1251Byte));
+        const LONG bitmapWidth = std::max<LONG>(0, right - left);
+        Glyph glyph{};
+        glyph.TextureCoord = { left, top, right, bottom };
+        glyph.Abc.abcA = 0;
+        glyph.Abc.abcB = static_cast<u32>(bitmapWidth);
+        // post-bearing = advance - bitmapWidth, so abcA+abcB+abcC == advance.
+        glyph.Abc.abcC = static_cast<int>(std::max(0.0f, advance - bitmapWidth));
+        glyph.yOffset = 0;
+        GlyphData[codepoint] = glyph;
+    };
+
+    float fontHeight = 16.0f; // sensible default if no section provides it
+    char keyBuf[16];
+
+    if (ini->section_exist("mb_symbol_coords"))
+    {
+        // Multibyte format: 5-digit keys (codepoint index, 0..0xFFFF). Each row is
+        // "u, v, right" (r_fvector3). Here the key IS the codepoint directly (no
+        // CP1251 translation) — the atlas was built for Unicode BMP already.
+        // The old engine set TCMap.z = 1 + right - left (note the +1), used for both
+        // the quad width and the advance. The quad texture spans [left..right].
+        fontHeight = ini->r_float("mb_symbol_coords", "height");
+        for (u32 cp = 0; cp <= 0xFFFF; ++cp)
+        {
+            xr_sprintf(keyBuf, sizeof(keyBuf), "%05d", cp);
+            if (!ini->line_exist("mb_symbol_coords", keyBuf))
+                continue;
+            const Fvector3 v = ini->r_fvector3("mb_symbol_coords", keyBuf);
+            // For mb format the key is already a codepoint; store it directly.
+            // advance = 1 + (right - left), matching the old engine's TCMap.z.
+            const float advance = 1.0f + std::max(0.0f, v.z - v.x);
+            Glyph glyph{};
+            glyph.TextureCoord = { static_cast<LONG>(v.x), static_cast<LONG>(v.y), static_cast<LONG>(v.z), static_cast<LONG>(v.y + fontHeight) };
+            glyph.Abc.abcA = 0;
+            glyph.Abc.abcB = static_cast<u32>(advance);
+            glyph.Abc.abcC = 0;
+            glyph.yOffset = 0;
+            GlyphData[static_cast<int>(cp)] = glyph;
+        }
+    }
+    else if (ini->section_exist("symbol_coords"))
+    {
+        // 256-entry format keyed by CP1251 byte. Row is "left, top, right" (r_fvector3).
+        // The old engine set TCMap.z = right - left (width_correction was commented out:
+        // `float d = 0.0f;`), and used that value for BOTH the quad width and the advance.
+        // This is proportional spacing — narrow glyphs advance less, wide glyphs more.
+        fontHeight = ini->r_float("symbol_coords", "height");
+        for (u32 cp1251Byte = 0; cp1251Byte < 256; ++cp1251Byte)
+        {
+            xr_sprintf(keyBuf, sizeof(keyBuf), "%03d", cp1251Byte);
+            if (!ini->line_exist("symbol_coords", keyBuf))
+                continue;
+            const Fvector3 v = ini->r_fvector3("symbol_coords", keyBuf);
+            const LONG left = static_cast<LONG>(v.x);
+            const LONG top = static_cast<LONG>(v.y);
+            const LONG right = static_cast<LONG>(v.z);
+            // advance = right - left (matches old engine exactly; no width_correction).
+            addGlyph(static_cast<u8>(cp1251Byte), left, top, right,
+                static_cast<LONG>(top + fontHeight), static_cast<float>(right - left));
+        }
+    }
+    else if (ini->section_exist("char widths"))
+    {
+        // Per-character widths on a uniform grid (cpl = 16). Row is a single width
+        // value which IS the advance (the old engine used it directly as TCMap.z).
+        fontHeight = ini->r_float("char widths", "height");
+        const int cpl = 16;
+        for (u32 cp1251Byte = 0; cp1251Byte < 256; ++cp1251Byte)
+        {
+            xr_sprintf(keyBuf, sizeof(keyBuf), "%d", cp1251Byte);
+            if (!ini->line_exist("char widths", keyBuf))
+                continue;
+            const float w = ini->r_float("char widths", keyBuf);
+            const LONG left = static_cast<LONG>((cp1251Byte % cpl) * fontHeight);
+            const LONG top = static_cast<LONG>((cp1251Byte / cpl) * fontHeight);
+            addGlyph(static_cast<u8>(cp1251Byte), left, top, static_cast<LONG>(left + w),
+                static_cast<LONG>(top + fontHeight), w);
+        }
+    }
+    else if (ini->section_exist("font_size"))
+    {
+        // Monospace grid: every glyph has the same width/height. advance = width.
+        fontHeight = ini->r_float("font_size", "height");
+        const float width = ini->r_float("font_size", "width");
+        const int cpl = ini->r_s32("font_size", "cpl");
+        for (u32 cp1251Byte = 0; cp1251Byte < 256; ++cp1251Byte)
+        {
+            const LONG left = static_cast<LONG>((cp1251Byte % cpl) * width);
+            const LONG top = static_cast<LONG>((cp1251Byte / cpl) * fontHeight);
+            addGlyph(static_cast<u8>(cp1251Byte), left, top, static_cast<LONG>(left + width),
+                static_cast<LONG>(top + fontHeight), width);
+        }
+    }
+    else
+    {
+        // No recognized section — fall back to a monospace 8x8 grid so the font
+        // is at least usable rather than empty.
+        Msg("! r_font_legacy: no recognized metrics section in '%s', using 8x8 fallback", iniPath);
+        fontHeight = 8.0f;
+        const float width = 8.0f;
+        const int cpl = 16;
+        for (u32 cp1251Byte = 0; cp1251Byte < 256; ++cp1251Byte)
+        {
+            const LONG left = static_cast<LONG>((cp1251Byte % cpl) * width);
+            const LONG top = static_cast<LONG>((cp1251Byte / cpl) * fontHeight);
+            addGlyph(static_cast<u8>(cp1251Byte), left, top, static_cast<LONG>(left + width),
+                static_cast<LONG>(top + fontHeight), width);
+        }
+    }
+
+    CInifile::Destroy(ini);
+
+    // 3. Match the resolution/DPI scaling applied to FreeType TTF fonts (Initialize2)
+    //    so legacy bitmap fonts end up the same visual size at the same ui_text_scale.
+    //    TTF bakes res_scale*ppi_scale into the rasterized atlas; for bitmap fonts we
+    //    scale only the on-screen advance/quad width and line height. The atlas texture
+    //    coordinates must stay in the original .dds pixel space, otherwise glyphs sample
+    //    the wrong atlas cells and text appears garbled.
+    const bool is_res_depend = !!READ_IF_EXISTS(pSettings, r_bool, Data.TextureName, "res_depend", TRUE);
+    const bool is_dpi_depend = !!READ_IF_EXISTS(pSettings, r_bool, Data.TextureName, "dpi_depend", !is_res_depend);
+    float res_scale = 1.0f;
+    float ppi_scale = 1.0f;
+    if (is_res_depend && Device.dwHeight > 0)
+        res_scale = float(Device.dwHeight) / 900.0f;
+#if defined(XR_PLATFORM_WINDOWS)
+    if (is_dpi_depend)
+    {
+        HDC hDCScreen = GetDC(NULL);
+        const float Hmm = (float)GetDeviceCaps(hDCScreen, VERTSIZE);
+        const float Wmm = (float)GetDeviceCaps(hDCScreen, HORZSIZE);
+        const float Hpx = (float)GetDeviceCaps(hDCScreen, VERTRES);
+        const float Wpx = (float)GetDeviceCaps(hDCScreen, HORZRES);
+        ReleaseDC(NULL, hDCScreen);
+        int ppi = int(25.4f * sqrt(Hpx * Hpx + Wpx * Wpx) / sqrt(Hmm * Hmm + Wmm * Wmm));
+        if (ppi > 0)
+            ppi_scale = float(ppi) / 92.0f;
+    }
+#endif
+    const float totalScale = res_scale * ppi_scale;
+    if (totalScale != 1.0f)
+    {
+        // Bitmap fonts use a fixed-resolution .dds atlas. Scaling the texture
+        // coordinates would sample the wrong atlas cells and produce garbled
+        // glyphs. Only the on-screen advance/quad width and line height are
+        // scaled so legacy fonts match the visual size of FreeType TTF fonts.
+        for (auto& kv : GlyphData)
+        {
+            kv.second.Abc.abcA = static_cast<int>(kv.second.Abc.abcA * totalScale);
+            kv.second.Abc.abcB = static_cast<u32>(kv.second.Abc.abcB * totalScale);
+            kv.second.Abc.abcC = static_cast<int>(kv.second.Abc.abcC * totalScale);
+        }
+        fontHeight *= totalScale;
+    }
+
+    // 4. Load the .dds texture via the standard texturing path (the engine
+    //    decompresses DXT5 itself — no manual decoding needed).
+    pFontRender->Initialize(shader, textureName);
+
+    // 5. Set the font height metric so CurrentHeight_() / line spacing work.
+    fCurrentHeight = fontHeight;
+
+    Msg("* Legacy font '%s' loaded: %u glyphs, height=%.1f, scale=%.2f",
+        name, (u32)GlyphData.size(), fontHeight, totalScale);
+}
+
 void CGameFont::Initialize2(pcstr name, pcstr shader, pcstr style, u32 size)
 {
+    // Font renderer selection:
+    //   - `r_font_legacy` == 1 forces the legacy X-Ray bitmap fonts (.dds + .ini).
+    //   - otherwise FreeType TTF is used, but if no TTF/OTF files exist in
+    //     $game_fonts$, we also fall back to legacy automatically.
+    // The legacy path converts CP1251-keyed metrics into the UTF-8 GlyphData map
+    // and reuses the same UTF-8 renderer (dxFontRender::OnRender) — the old
+    // texture-based rendering code (ImprintChar/TCMap) is never restored.
+    const bool forceLegacy = g_font_legacy;
+    bool noTtf = false;
+    if (!forceLegacy)
+    {
+        FS_FileSet ttfFiles;
+        const size_t ttfCount = FS.file_list(ttfFiles, _game_fonts_, FS_ListFiles, "*.ttf");
+        FS_FileSet otfFiles;
+        const size_t otfCount = FS.file_list(otfFiles, _game_fonts_, FS_ListFiles, "*.otf");
+        noTtf = (ttfCount == 0 && otfCount == 0);
+    }
+
+    if (forceLegacy || noTtf)
+    {
+        if (forceLegacy)
+            Msg("~ r_font_legacy = 1, using legacy bitmap font for '%s'", name);
+        else
+            Msg("~ No TTF/OTF fonts in $game_fonts$, using legacy bitmap font for '%s'", name);
+        InitializeLegacy(name, shader, style, size);
+        return;
+    }
+
     if (!bFreetypeInitialized)
     {
         InitializeFreetype();
@@ -562,7 +867,7 @@ float CGameFont::SizeOf_(pcstr s)
     return WidthOf(s);
 }
 
-float CGameFont::CurrentHeight_() { return fCurrentHeight * vInterval.y; }
+float CGameFont::CurrentHeight_() { return fCurrentHeight * vInterval.y * g_text_scale; }
 
 void CGameFont::SetHeight(float S) { fCurrentHeight = S; }
 
@@ -586,7 +891,10 @@ float CGameFont::WidthOf(int ch)
         return 0.f;
 
     if (const Glyph* glyphInfo = GetGlyphInfo(ch))
-        return float(glyphInfo->Abc.abcA + glyphInfo->Abc.abcB + glyphInfo->Abc.abcC);
+        // Apply the global text scale here (terminal width helper): WidthOf(pcstr)
+        // sums per-codepoint widths through this method, so scaling once here
+        // keeps both single-char and whole-string measurements consistent.
+        return float(glyphInfo->Abc.abcA + glyphInfo->Abc.abcB + glyphInfo->Abc.abcC) * g_text_scale;
 
     return 0.f;
 }
@@ -754,7 +1062,7 @@ void CGameFont::MasterOut(bool bCheckDevice, bool bUseCoords, bool bScaleCoords,
     rs.y = (bUseCoords ? (bScaleCoords ? (DI2PY(_y)) : _y) : fCurrentY);
     rs.c = dwCurrentColor;
     rs.gradientColor = dwGradientColor;
-    rs.height = fCurrentHeight;
+    rs.height = fCurrentHeight * g_text_scale;
     rs.align = eCurrentAlignment;
     rs.gradient = fGradientEnabled;
     rs.gradientMode = fGradientMode;
