@@ -21,6 +21,11 @@
 extern ENGINE_API bool g_bRendering;
 ENGINE_API Fvector2 g_current_font_scale = { 1.0f, 1.f };
 
+// Global text scale multiplier (cvar `ui_text_scale`). Multiplies the width and
+// height returned by the font on the draw path so that the whole in-game text can
+// be resized at runtime without rebuilding the FreeType atlas.
+ENGINE_API float g_text_scale = 1.0f;
+
 FT_Library FreetypeLib = nullptr;
 bool CGameFont::bFreetypeInitialized = false;
 
@@ -562,7 +567,7 @@ float CGameFont::SizeOf_(pcstr s)
     return WidthOf(s);
 }
 
-float CGameFont::CurrentHeight_() { return fCurrentHeight * vInterval.y; }
+float CGameFont::CurrentHeight_() { return fCurrentHeight * vInterval.y * g_text_scale; }
 
 void CGameFont::SetHeight(float S) { fCurrentHeight = S; }
 
@@ -586,7 +591,10 @@ float CGameFont::WidthOf(int ch)
         return 0.f;
 
     if (const Glyph* glyphInfo = GetGlyphInfo(ch))
-        return float(glyphInfo->Abc.abcA + glyphInfo->Abc.abcB + glyphInfo->Abc.abcC);
+        // Apply the global text scale here (terminal width helper): WidthOf(pcstr)
+        // sums per-codepoint widths through this method, so scaling once here
+        // keeps both single-char and whole-string measurements consistent.
+        return float(glyphInfo->Abc.abcA + glyphInfo->Abc.abcB + glyphInfo->Abc.abcC) * g_text_scale;
 
     return 0.f;
 }
@@ -754,7 +762,7 @@ void CGameFont::MasterOut(bool bCheckDevice, bool bUseCoords, bool bScaleCoords,
     rs.y = (bUseCoords ? (bScaleCoords ? (DI2PY(_y)) : _y) : fCurrentY);
     rs.c = dwCurrentColor;
     rs.gradientColor = dwGradientColor;
-    rs.height = fCurrentHeight;
+    rs.height = fCurrentHeight * g_text_scale;
     rs.align = eCurrentAlignment;
     rs.gradient = fGradientEnabled;
     rs.gradientMode = fGradientMode;

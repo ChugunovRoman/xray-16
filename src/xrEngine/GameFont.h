@@ -180,3 +180,8 @@ public:
     shared_str m_font_name;
 #endif
 };
+
+// Global text scale multiplier (controlled by the `ui_text_scale` console variable).
+// Applied on the draw path (WidthOf/CurrentHeight_), so changes take effect
+// immediately in runtime without rebuilding the FreeType font atlas.
+ENGINE_API extern float g_text_scale;

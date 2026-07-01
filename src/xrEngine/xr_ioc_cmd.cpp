@@ -12,6 +12,7 @@
 
 #include "xr_object.h"
 #include "xr_object_list.h"
+#include "GameFont.h"
 
 xr_vector<xr_token> VidQualityToken;
 
@@ -804,6 +805,9 @@ void CCC_Register()
     CMD2(CCC_Gamma, "rs_c_gamma", &ps_gamma);
     CMD2(CCC_Gamma, "rs_c_brightness", &ps_brightness);
     CMD2(CCC_Gamma, "rs_c_contrast", &ps_contrast);
+
+    // Global UI text scale multiplier (applied at draw time, no atlas rebuild).
+    CMD4(CCC_Float, "ui_text_scale", &g_text_scale, 0.5f, 3.0f);
     // CMD4(CCC_Integer, "rs_vb_size", &rsDVB_Size, 32, 4096);
     // CMD4(CCC_Integer, "rs_ib_size", &rsDIB_Size, 32, 4096);
 
