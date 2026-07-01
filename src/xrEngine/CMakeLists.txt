@@ -372,7 +372,6 @@ target_sources_grouped(
     GameFont.cpp
     GameFont.h
     IGameFont.hpp
-    freetype_pfr_stub.cpp
 )
 
 target_sources_grouped(

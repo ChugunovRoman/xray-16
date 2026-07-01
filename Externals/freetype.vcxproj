@@ -58,7 +58,7 @@
     <ClCompile Include="freetype\src\hvf\hvf.c" />
     <ClCompile Include="freetype\src\lzw\ftlzw.c" />
     <ClCompile Include="freetype\src\pcf\pcf.c" />
-    <!-- ClCompile Include="freetype\src\pfr\pfr.c" / --> <!-- disabled: MSVC 17.4+ C99 compound literal issue, not needed -->
+    <ClCompile Include="freetype\src\pfr\pfr.c" />
     <ClCompile Include="freetype\src\psaux\psaux.c" />
     <ClCompile Include="freetype\src\pshinter\pshinter.c" />
     <ClCompile Include="freetype\src\psnames\psmodule.c" />
