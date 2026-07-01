@@ -30,5 +30,5 @@
 	url = https://github.com/pattonkan/sse2rvv.git
 [submodule "Externals/freetype"]
 	path = Externals/freetype
-	url = git@github.com:ChugunovRoman/freetype.git
+	url = https://github.com/ChugunovRoman/freetype.git
 	branch = oxr
