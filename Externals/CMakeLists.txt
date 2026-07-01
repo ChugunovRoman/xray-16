@@ -23,7 +23,6 @@ set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
 set(FT_DISABLE_BROTLI ON CACHE BOOL "" FORCE)
 
 add_subdirectory(freetype)
-add_subdirectory(freetype)
 
 if (NOT TARGET xrLuabind)
     message(FATAL_ERROR
