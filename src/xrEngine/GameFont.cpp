@@ -24,7 +24,7 @@ ENGINE_API Fvector2 g_current_font_scale = { 1.0f, 1.f };
 // Global text scale multiplier (cvar `ui_text_scale`). Multiplies the width and
 // height returned by the font on the draw path so that the whole in-game text can
 // be resized at runtime without rebuilding the FreeType atlas.
-ENGINE_API float g_text_scale = 1.0f;
+ENGINE_API float g_text_scale = 0.85f;
 
 FT_Library FreetypeLib = nullptr;
 bool CGameFont::bFreetypeInitialized = false;
