@@ -1138,8 +1138,12 @@ void CUIFactionVisualGridWnd::Draw()
             draw_preview_texture(
                 texture_name, preview_rect, client_rect.lt, m_previewFrameSize, color_rgba(255, 255, 255, 255));
         }
-        else if (GEnv.Render && GEnv.Render->PreviewScene_IsDirty(model_path))
+        else
         {
+            // No ready texture yet. Always show a placeholder so the cell is
+            // visibly "rendering" rather than empty, even when the renderer has
+            // no matching cache entry yet (which can happen right after a model
+            // is added to the grid and the shared renderer settings changed).
             draw_loading_placeholder(preview_rect, client_rect.lt);
         }
 

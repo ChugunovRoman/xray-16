@@ -1064,7 +1064,35 @@ void CPreviewSceneRenderer::ReleaseEphemeralTexture(pcstr texture_name)
 
 void CPreviewSceneRenderer::SetSettings(const SPreviewSceneSettings& settings)
 {
+    if (m_settings == settings)
+        return;
+
+    // The preview renderer is a single shared instance queried by several grids
+    // that each have their own settings (frame size, camera offset, pose, ...).
+    // Cache entries are keyed by (model_path, settings), and IsCached/IsDirty/
+    // TextureName lookups use the *current* m_settings. When the active grid
+    // changes its settings, any visible model that has no ready entry under the
+    // new settings must be re-rendered, otherwise it shows up as an empty cell
+    // (the lookup misses and there is no entry to mark as dirty -> no placeholder
+    // either). Re-queue entries matching the new settings so they render fresh.
     m_settings = settings;
+    for (auto& [key, entry] : m_cache)
+    {
+        if (entry.settings != settings)
+            continue;
+        if (entry.ready && !entry.dirty)
+            continue;
+        if (!entry.model_path.size())
+            continue;
+        if (!entry.queued)
+        {
+            entry.queued = true;
+            entry.sequence = ++m_sequence;
+            m_queue.push_back({key, entry.priority, entry.sequence});
+            m_queue_dirty = true;
+        }
+        entry.failed = false;
+    }
 }
 
 bool CPreviewSceneRenderer::RenderCachedEntry(SCacheEntry& entry)
@@ -1112,7 +1140,18 @@ bool CPreviewSceneRenderer::RenderCachedEntry(SCacheEntry& entry)
 
     shared_str resolved_pose_name;
     const bool had_ready_texture = entry.ready;
+    // RenderModelIntoRT -> RenderRenderableImpl calls EnsureRuntimeReady() (which
+    // uses m_settings) and PreviewSceneUpdateKinematics(visual, m_settings). Since
+    // the renderer is shared between grids with different settings, m_settings may
+    // currently belong to another grid and have a different frame size / pose,
+    // which would make EnsureRuntimeReady() destroy & recreate the shared runtime
+    // (mismatched RT sizes) and apply the wrong pose. Temporarily align m_settings
+    // with this entry's settings for the duration of the render so the cached
+    // preview is rendered with its own configuration.
+    const SPreviewSceneSettings saved_settings = m_settings;
+    m_settings = entry.settings;
     const bool rendered = RenderModelIntoRT(entry.cached_visual, entry.color_rt, entry.settings, &resolved_pose_name);
+    m_settings = saved_settings;
     entry.ready = rendered || had_ready_texture;
     entry.failed = !rendered;
     entry.dirty = !rendered;
