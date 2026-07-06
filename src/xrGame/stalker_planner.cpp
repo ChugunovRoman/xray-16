@@ -265,6 +265,14 @@ void CStalkerPlanner::update(u32 time_delta)
     ZoneScopedN("CStalkerPlanner::update");
     ZoneTextF("%s", m_object ? m_object->cName().c_str() : "no_object");
 
+    // AI space can be destroyed or have its graph engine unloaded while dead stalkers still receive
+    // Think()/update() (e.g. during level switch or shutdown). Guard against null/dangling access.
+    if (!GEnv.AISpace || !GEnv.AISpace->get_graph_engine())
+    {
+        m_failed = true;
+        return;
+    }
+
     // Per-solve evaluator cache window: the stalker brain inlines actual()+search (it does not call
     // CProblemSolver::solve), so bump the epoch here. World is frozen for this synchronous update.
     ++g_ai_evaluator_solve_epoch;

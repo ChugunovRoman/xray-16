@@ -47,6 +47,7 @@ public:
     const CGameLevelCrossTable* get_cross_table() const;
     inline const CPatrolPathStorage& patrol_paths() const;
     inline CGraphEngine& graph_engine() const;
+    inline CGraphEngine* get_graph_engine() const;
 };
 
 inline CGameGraph& AISpaceBase::game_graph() const
@@ -68,6 +69,8 @@ inline CGraphEngine& AISpaceBase::graph_engine() const
     VERIFY(m_graph_engine);
     return *m_graph_engine;
 }
+
+inline CGraphEngine* AISpaceBase::get_graph_engine() const { return m_graph_engine; }
 
 inline const CPatrolPathStorage& AISpaceBase::patrol_paths() const
 {
