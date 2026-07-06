@@ -28,8 +28,12 @@ void dxFontRender::OnRender(CGameFont& owner)
 {
     VERIFY(g_bRendering);
 
-    if (pShader != nullptr)
-        RCache.set_Shader(pShader);
+    // Guard against an uninitialized texture (e.g. a legacy font whose .dds/.ini
+    // failed to load). Skip rendering rather than crash on a null dereference.
+    if (pTexture == nullptr || pShader == nullptr)
+        return;
+
+    RCache.set_Shader(pShader);
 
     auto fWidth = (float)std::max(m_atlasWidth ? m_atlasWidth : pTexture->get_Width(), 4u);
     auto fHeight = (float)std::max(m_atlasHeight ? m_atlasHeight : pTexture->get_Height(), 4u);

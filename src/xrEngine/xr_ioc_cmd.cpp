@@ -808,6 +808,10 @@ void CCC_Register()
 
     // Global UI text scale multiplier (applied at draw time, no atlas rebuild).
     CMD4(CCC_Float, "ui_text_scale", &g_text_scale, 0.5f, 3.0f);
+
+    // Font renderer selector: 0 = FreeType TTF/OTF (default), 1 = legacy X-Ray
+    // bitmap fonts (.dds + .ini). Apply via vid_restart / UI reset.
+    CMD4(CCC_Integer, "r_font_legacy", &g_font_legacy, 0, 1);
     // CMD4(CCC_Integer, "rs_vb_size", &rsDVB_Size, 32, 4096);
     // CMD4(CCC_Integer, "rs_ib_size", &rsDIB_Size, 32, 4096);
 
