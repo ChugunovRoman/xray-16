@@ -142,7 +142,7 @@ public:
     void OnRender() override;
     void Clear() override { strings.clear(); }
 
-    inline u32 GetSize() const { return Size; }
+    inline u32 GetSize() const { return Data.Size; }
     inline float GetLetterSpacing() const { return LetterSpacing; }
     inline void SetLetterSpacing(float spacing) { LetterSpacing = spacing; }
     inline float GetLineSpacing() const { return LineSpacing; }
@@ -156,7 +156,6 @@ public:
 private:
     float LetterSpacing = 0.f;
     float LineSpacing = 1.f;
-    u32 Size = 14;
 
     struct StyleBits
     {

@@ -19,7 +19,6 @@
 #include <sstream>
 
 extern ENGINE_API bool g_bRendering;
-ENGINE_API Fvector2 g_current_font_scale = { 1.0f, 1.f };
 
 // Global text scale multiplier (cvar `ui_text_scale`). Multiplies the width and
 // height returned by the font on the draw path so that the whole in-game text can
@@ -211,7 +210,7 @@ void CGameFont::InitializeLegacy(pcstr name, pcstr shader, pcstr /*style*/, u32 
     Data.OpenType = false;
 
     GlyphData.clear();
-    Size = size;
+    Data.Size = static_cast<u16>(size);
 
     // 1. Resolve the texture + .ini path (located in $game_textures$, old layout).
     string_path textureName;
@@ -225,7 +224,6 @@ void CGameFont::InitializeLegacy(pcstr name, pcstr shader, pcstr /*style*/, u32 
         R_ASSERT3(false, "r_font_legacy: no legacy font .ini found for section. "
             "Check fonts.ltx 'legacy_texture' or disable r_font_legacy.",
             Data.TextureName ? Data.TextureName : name);
-        return;
     }
 
     Msg("~ Legacy font '%s' -> texture '%s', ini '%s'", name, textureName, iniPath);
@@ -463,7 +461,7 @@ void CGameFont::Initialize2(pcstr name, pcstr shader, pcstr style, u32 size)
     GlyphData.clear();
 
     ZeroMemory(&Style, sizeof(Style));
-    Size = size;
+    Data.Size = static_cast<u16>(size);
 
     if (style != nullptr)
     {
@@ -517,9 +515,9 @@ void CGameFont::Initialize2(pcstr name, pcstr shader, pcstr style, u32 size)
         ppi_scale = float(ppi) / 92.0f;
 #endif
 
-    auto fHeight = float(size * res_scale * ppi_scale);
+    auto fHeight = float(size) * res_scale * ppi_scale;
     if (fHeight < 1.0f)
-        fHeight = float(size);
+        fHeight = 1.0f;
 
     pcstr fontPrefix = StringTable().GetCurrentFontPrefix().c_str();
     if (!fontPrefix || !fontPrefix[0])

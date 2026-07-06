@@ -4,7 +4,6 @@
 #include "xrCore/Text/Utf8Utils.hpp"
 
 extern ENGINE_API bool g_bRendering;
-extern ENGINE_API Fvector2 g_current_font_scale;
 
 namespace xray::render::RENDER_NAMESPACE
 {
