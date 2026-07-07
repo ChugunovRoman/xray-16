@@ -28,9 +28,28 @@ if(NOT LZO_ROOT_DIR AND NOT $ENV{LZO_ROOT_DIR} STREQUAL "")
   set(LZO_ROOT_DIR $ENV{LZO_ROOT_DIR})
 endif()
 
+# Detect Homebrew prefixes so keg-only formulae (e.g. lzo on newer Homebrew) are
+# found on both Intel (/usr/local) and Apple Silicon (/opt/homebrew) macOS.
+if(APPLE)
+  if(NOT LZO_HOMEBREW_PREFIX)
+    execute_process(
+      COMMAND brew --prefix lzo
+      RESULT_VARIABLE _lzo_brew_result
+      OUTPUT_VARIABLE _lzo_brew_output
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    if(_lzo_brew_result EQUAL 0 AND EXISTS "${_lzo_brew_output}")
+      set(LZO_HOMEBREW_PREFIX "${_lzo_brew_output}")
+    endif()
+  endif()
+endif()
+
 set(_lzo_SEARCH_DIRS
   ${LZO_ROOT_DIR}
+  ${LZO_HOMEBREW_PREFIX}
   /usr/local
+  /opt/homebrew
 )
 
 find_path(LZO_INCLUDE_DIR lzo/lzo1x.h
