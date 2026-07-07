@@ -86,7 +86,9 @@ CRASHPAD_FILESYSTEM_H="${NATIVE}/external/crashpad/util/file/filesystem.h"
 if [[ -f "${CRASHPAD_FILESYSTEM_H}" ]]; then
     if ! grep -q '#include <cstdint>' "${CRASHPAD_FILESYSTEM_H}"; then
         echo "[ensure_sentry_native] Patching ${CRASHPAD_FILESYSTEM_H} for <cstdint>..."
-        sed -i '1a #include <cstdint>' "${CRASHPAD_FILESYSTEM_H}"
+        # Use a backup extension for compatibility with both GNU and BSD (macOS) sed.
+        sed -i.bak '1a #include <cstdint>' "${CRASHPAD_FILESYSTEM_H}"
+        rm -f "${CRASHPAD_FILESYSTEM_H}.bak"
     fi
 fi
 
