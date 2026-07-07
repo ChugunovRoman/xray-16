@@ -53,6 +53,9 @@ struct ENGINE_API SThunderboltDesc
         {
             m_pFlare->DestroyShader();
         }
+
+        void ed_show_params(); // ImGui editor
+        void save(CInifile* config) const;
     };
     SFlare* m_GradientTop;
     SFlare* m_GradientCenter;
@@ -63,15 +66,16 @@ public:
     SThunderboltDesc(const CInifile& pIni, shared_str const& sect);
     ~SThunderboltDesc();
     static SFlare* create_gradient(pcstr gradient_name, const CInifile& config, shared_str const& sect);
+    void ed_show_params(); // ImGui editor
+    void save(CInifile* config) const;
 };
 
 struct ENGINE_API SThunderboltCollection
 {
-    using DescVec = xr_vector<SThunderboltDesc*>;
-    DescVec palette;
+    xr_vector<SThunderboltDesc*> palette;
     shared_str section;
 
-    SThunderboltCollection(shared_str sect, CInifile const* pIni, CInifile const* thunderbolts);
+    SThunderboltCollection(const shared_str& sect, CInifile const* pIni, CInifile const* thunderbolts);
     ~SThunderboltCollection();
 
     SThunderboltDesc* GetRandomDesc()
@@ -79,6 +83,9 @@ struct ENGINE_API SThunderboltCollection
         VERIFY(palette.size() > 0);
         return palette[Random.randI(palette.size())];
     }
+
+    void ed_show_params(); // ImGui editor
+    void save(CInifile* config) const;
 };
 
 #define THUNDERBOLT_CACHE_SIZE 8
@@ -120,7 +127,6 @@ private:
     CInifile* m_thunderbolt_collections_config{};
     CInifile* m_thunderbolts_config{};
 
-
     // params
     static constexpr float MAX_DIST_FACTOR = 0.95f;
     Fvector2 p_var_alt;
@@ -143,10 +149,11 @@ public:
     void OnFrame(CEnvDescriptorMixer& currentEnv);
     void Render();
 
-    SThunderboltCollection* AppendDef(shared_str sect);
+    SThunderboltCollection* AppendDef(const shared_str& sect);
 
     [[nodiscard]]
     auto& GetCollections() { return collections; }
 
     void ED_ShowParams(); // ImGui editor
+    void save();
 };

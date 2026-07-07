@@ -57,15 +57,7 @@ enum ECallbackType : u32
     //AVO: custom callbacks
     // Input
     eActorHudAnimationEnd,
-    eKeyPress,
-    eKeyRelease,
-    eKeyHold,
-    eMouseMove,
-    eMouseWheel,
-    eControllerPress,
-    eControllerRelease,
-    eControllerHold,
-    eControllerAttitudeChange,
+
     // Inventory
     eItemToBelt,
     eItemToSlot,
@@ -83,6 +75,18 @@ enum ECallbackType : u32
     eDetachVehicle,
     eUseVehicle,
     //-AVO
+
+    eControllerPress,
+    eControllerRelease,
+    eControllerHold,
+    eControllerAttitudeChange,
+
+    // X-Ray Extensions:
+    eKeyPress   = 123,
+    eKeyRelease = 124,
+    eKeyHold    = 125,
+    eMouseWheel = 126,
+    eMouseMove  = 127,
 
     eDummy = u32(-1),
 };

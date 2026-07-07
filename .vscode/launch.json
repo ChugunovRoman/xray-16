@@ -99,7 +99,12 @@
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/bin/x86_64/${input:buildType}/xr_3da",
-      "args": ["-nointro", "-dbg", "-fsltx", "${GLOBALWAR_LTX_FILE_PATH}"],
+      "args": [
+        "-nointro",
+        "-dbg",
+        "-fsltx",
+        "${GLOBALWAR_LTX_FILE_PATH}"
+      ],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}/bin",
       "environment": [
@@ -117,8 +122,13 @@
       "id": "buildType",
       "type": "pickString",
       "description": "choose build type:",
-      "options": ["Debug", "Release", "MinSizeRel", "RelWithDebInfo"],
-      "default": "Debug"
+      "options": [
+        "Debug",
+        "Release",
+        "Mixed",
+        "ReleaseMasterGold"
+      ],
+      "default": "ReleaseMasterGold"
     }
   ]
 }

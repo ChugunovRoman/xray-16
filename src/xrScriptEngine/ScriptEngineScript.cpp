@@ -100,9 +100,17 @@ void CScriptEngine::script_register(lua_State* luaState)
     module(luaState)
     [
         def("log", &LuaLog),
+        def("log1", +[](pcstr message) // X-Ray Extensions
+        {
+            Msg("%s", message);
+        }),
         def("error_log", &ErrorLog),
         def("lua_error", &LuaError),
         def("flush", &FlushLogs),
+        def("flush1", +[] // X-Ray Extensions
+        {
+            FlushLog();
+        }),
         def("print_stack", +[]()
         {
             GEnv.ScriptEngine->print_stack();
