@@ -2588,7 +2588,7 @@ void CWeapon::UpdateAddonsVisibility()
 
     // Scope uses globalwar-specific logic: ScopeAttachable() respects parent_section,
     // permanent scopes are always visible, and the attachment system can override visibility.
-    bone_id = pWeaponVisual->LL_BoneID(wpn_scope);
+    auto bone_id = pWeaponVisual->LL_BoneID(wpn_scope);
     if (ScopeAttachable() && bone_id != BI_NONE)
     {
         if (IsScopeAttached() || IsScopePermament())
