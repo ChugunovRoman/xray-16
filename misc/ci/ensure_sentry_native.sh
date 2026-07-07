@@ -80,4 +80,14 @@ if ! have_crashpad; then
     exit 1
 fi
 
+# Fedora/newer GCC requires an explicit <cstdint> include for uint64_t in crashpad.
+# sentry-native 0.7.17's bundled crashpad is missing it; patch idempotently.
+CRASHPAD_FILESYSTEM_H="${NATIVE}/external/crashpad/util/file/filesystem.h"
+if [[ -f "${CRASHPAD_FILESYSTEM_H}" ]]; then
+    if ! grep -q '#include <cstdint>' "${CRASHPAD_FILESYSTEM_H}"; then
+        echo "[ensure_sentry_native] Patching ${CRASHPAD_FILESYSTEM_H} for <cstdint>..."
+        sed -i '1a #include <cstdint>' "${CRASHPAD_FILESYSTEM_H}"
+    fi
+fi
+
 echo "[ensure_sentry_native] OK."
