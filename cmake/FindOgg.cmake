@@ -36,6 +36,25 @@ if(ENV{OGGDIR})
   list(APPEND _OGG_SEARCHES _OGG_SEARCH_ROOT)
 endif()
 
+# Detect Homebrew prefix so keg-only libogg (Apple Silicon /opt/homebrew or Intel
+# /usr/local/opt) is found on macOS. Without this find_path misses ogg/ogg.h.
+if(APPLE)
+  if(NOT OGG_HOMEBREW_PREFIX)
+    execute_process(
+      COMMAND brew --prefix libogg
+      RESULT_VARIABLE _ogg_brew_result
+      OUTPUT_VARIABLE _ogg_brew_output
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    if(_ogg_brew_result EQUAL 0 AND EXISTS "${_ogg_brew_output}")
+      set(OGG_HOMEBREW_PREFIX "${_ogg_brew_output}")
+    endif()
+  endif()
+  set(_OGG_SEARCH_HOMEBREW PATHS ${OGG_HOMEBREW_PREFIX} /opt/homebrew NO_DEFAULT_PATH)
+  list(APPEND _OGG_SEARCHES _OGG_SEARCH_HOMEBREW)
+endif()
+
 # Normal search.
 set(_OGG_SEARCH_NORMAL
   PATH ""

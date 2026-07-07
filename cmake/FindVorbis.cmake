@@ -51,6 +51,25 @@ if(ENV{VORBISDIR})
   list(APPEND _VORBIS_SEARCHES _VORBIS_SEARCH_ROOT)
 endif()
 
+# Detect Homebrew prefix so keg-only vorbis (Apple Silicon /opt/homebrew or Intel
+# /usr/local/opt) is found on macOS. Without this find_path misses vorbis/codec.h.
+if(APPLE)
+  if(NOT VORBIS_HOMEBREW_PREFIX)
+    execute_process(
+      COMMAND brew --prefix libvorbis
+      RESULT_VARIABLE _vorbis_brew_result
+      OUTPUT_VARIABLE _vorbis_brew_output
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    if(_vorbis_brew_result EQUAL 0 AND EXISTS "${_vorbis_brew_output}")
+      set(VORBIS_HOMEBREW_PREFIX "${_vorbis_brew_output}")
+    endif()
+  endif()
+  set(_VORBIS_SEARCH_HOMEBREW PATHS ${VORBIS_HOMEBREW_PREFIX} /opt/homebrew NO_DEFAULT_PATH)
+  list(APPEND _VORBIS_SEARCHES _VORBIS_SEARCH_HOMEBREW)
+endif()
+
 #Normal search.
 set(_VORBIS_SEARCH_NORMAL
   PATH ""

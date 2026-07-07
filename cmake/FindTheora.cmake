@@ -51,6 +51,25 @@ if(ENV{THEORADIR})
   list(APPEND _THEORA_SEARCHES _THEORA_SEARCH_ROOT)
 endif()
 
+# Detect Homebrew prefix so keg-only libtheora (Apple Silicon /opt/homebrew or
+# Intel /usr/local/opt) is found on macOS. Without this find_path misses theora/theora.h.
+if(APPLE)
+  if(NOT THEORA_HOMEBREW_PREFIX)
+    execute_process(
+      COMMAND brew --prefix theora
+      RESULT_VARIABLE _theora_brew_result
+      OUTPUT_VARIABLE _theora_brew_output
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+    )
+    if(_theora_brew_result EQUAL 0 AND EXISTS "${_theora_brew_output}")
+      set(THEORA_HOMEBREW_PREFIX "${_theora_brew_output}")
+    endif()
+  endif()
+  set(_THEORA_SEARCH_HOMEBREW PATHS ${THEORA_HOMEBREW_PREFIX} /opt/homebrew NO_DEFAULT_PATH)
+  list(APPEND _THEORA_SEARCHES _THEORA_SEARCH_HOMEBREW)
+endif()
+
 #Normal search.
 set(_THEORA_SEARCH_NORMAL
   PATH ""
