@@ -4679,7 +4679,13 @@ void CWeapon::addAddon(AddAddonData data)
     new_addon->scope_dynamic_zoom = data.scope_dynamic_zoom;
     new_addon->has_mag_size = data.has_mag_size;
     new_addon->was_inited_in_default_slots = data.was_inited_in_default_slots;
-    
+
+    // Read the "inverted_attachment" prop directly from the addon section: the engine
+    // cannot detect a 180°-flipped visual from the skeleton (root and slot_N bones are
+    // always straight), so content authors mark such addons explicitly.
+    new_addon->inverted_attachment = pSettings->read_if_exists<bool>(
+        data.item_section_id.c_str(), "inverted_attachment", false);
+
     if (!data.skip_magazine_sync_on_add && pSettings->line_exist(new_addon->addon_item_name.c_str(), "ammo_mag_size"))
     {
         int oldMagazineSize = iMagazineSize;
@@ -4755,6 +4761,13 @@ void CWeapon::addAddon(AddAddonData data)
     if (has_bone)
         slot_rot.z = 0.0f;
 
+    // Inverted-attachment parent (e.g. a picatinny adapter flipped 180°) produces a
+    // compensating roll (pi) in its nested slot bones that cancels the weapon bone's
+    // 180° at render time. That roll must not leak into the aim HUD rotation: reset it
+    // so children of an inverted addon compute their roll from their own slots only.
+    if (new_addon->parent_id != 0 && parent_item->inverted_attachment)
+        slot_rot.z = 0.0f;
+
     float ortY = new_addon->ort == CInventoryItem::EIIAddonOrt::FOrtNone ? 0.0f
         : new_addon->ort == CInventoryItem::EIIAddonOrt::FOrtRight ? deg2rad(-90.0f) : deg2rad(90.0f);
     float ortZ = parent_item->ort == CInventoryItem::EIIAddonOrt::FOrtNone ? slot_rot.z
@@ -4777,6 +4790,18 @@ void CWeapon::addAddon(AddAddonData data)
         new_addon->inherited_aim_z_rot = parent_item->inherited_aim_z_rot;
 
     new_addon->addon_aim_z_rot = new_addon->inherited_aim_z_rot;
+
+    // Inverted attachment (e.g. a picatinny adapter on a flipped underbarrel slot)
+    // visually compensates a 180° parent rotation: its roll is purely corrective, so
+    // it must not rotate the aim HUD. Reset the inherited roll so this addon and its
+    // children compute their roll cleanly from their own slots instead of inheriting
+    // the parent slot's 180° residual. Since for a root addon parent_item == new_addon,
+    // clearing it here also prevents children from picking up the stale roll.
+    if (new_addon->inverted_attachment)
+    {
+        new_addon->inherited_aim_z_rot = 0.0f;
+        new_addon->addon_aim_z_rot = 0.0f;
+    }
 
     const auto offset_it = m_addon_section_offsets.find(new_addon->addon_item_name);
     const bool has_section_offset = offset_it != m_addon_section_offsets.end();

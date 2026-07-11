@@ -87,6 +87,9 @@ public:
 	BOOL has_mag_size{false};
 	BOOL was_inited_in_default_slots{false};
 	BOOL has_bone_2{false};
+    // Inverted attachment: addon visually compensates a 180° parent rotation,
+    // so its roll must not rotate the aim HUD. Set via "inverted_attachment" ini prop.
+    bool inverted_attachment{false};
     xr_map<shared_str, addon_slot> addon_slots;
     CInventoryItem::EIIAddonOrt ort;
     u16 provided_slot_type;
