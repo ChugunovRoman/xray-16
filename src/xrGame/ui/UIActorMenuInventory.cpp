@@ -1194,7 +1194,7 @@ void CUIActorMenu::PropertiesBoxForWeapon(CUICellItem* cell_item, PIItem item, b
         {
         }
     }
-    if (pWeapon->SilencerAttachable())
+    if (!pWeapon->bUseAttachmentSystem && pWeapon->SilencerAttachable())
     {
         if (pWeapon->IsSilencerAttached())
         {
