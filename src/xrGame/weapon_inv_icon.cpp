@@ -610,21 +610,26 @@ void BuildMatricesForWeapon(CWeapon* w, EWeaponInvIconPreset preset, Fmatrix& ou
 
 void OnWeaponIconSnapshot(IRenderable* subject, bool begin)
 {
-    CWeapon* w = smart_cast<CWeapon*>(subject);
-    if (!w)
+    // Handle any CGameObject (weapons and non-weapon addons like scopes/silencers).
+    CGameObject* go = smart_cast<CGameObject*>(subject);
+    if (!go)
         return;
+
+    CWeapon* w = go->cast_weapon();
 
     thread_local Fmatrix s_saved_xform{};
     if (begin)
     {
-        s_saved_xform = w->XFORM();
-        w->XFORM().identity();
-        w->SetWeaponIconSnapshot(true);
+        s_saved_xform = go->XFORM();
+        go->XFORM().identity();
+        if (w)
+            w->SetWeaponIconSnapshot(true);
     }
     else
     {
-        w->SetWeaponIconSnapshot(false);
-        w->XFORM() = s_saved_xform;
+        if (w)
+            w->SetWeaponIconSnapshot(false);
+        go->XFORM() = s_saved_xform;
     }
 }
 
@@ -638,11 +643,22 @@ static void ProcessDynamicInvIconForSingleItem(CInventoryItem* item)
     }
 
     CWeapon* w = item->cast_weapon();
+
+    // Non-weapon addons (scopes, silencers, grips, etc.) with use_dynamic_inv_icon=true
+    // inherit CInventoryItemObject -> CPhysicItem -> CGameObject, so they have Visual().
+    CGameObject* non_wpn_go = nullptr;
     if (!w)
     {
-        if (item->ConsumeInvIconQueueRetryForRequeue() && !IsInPending(item))
-            g_pending.push_back(item);
-        return;
+        non_wpn_go = smart_cast<CGameObject*>(item);
+        if (!non_wpn_go || !non_wpn_go->Visual())
+        {
+            if (g_debug_trace)
+                Msg("~ [weapon_inv_icon]   skip non-weapon item id=%u sect=[%s] (no CGameObject/visual)",
+                    item->object_id(), item->m_section_id.c_str());
+            if (item->ConsumeInvIconQueueRetryForRequeue() && !IsInPending(item))
+                g_pending.push_back(item);
+            return;
+        }
     }
 
     for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
@@ -660,13 +676,24 @@ static void ProcessDynamicInvIconForSingleItem(CInventoryItem* item)
         }
 
         Fmatrix view, proj;
-        BuildMatricesForWeapon(w, preset, view, proj);
         u32 tw, th;
-        GetWeaponIconRtTexelSize(w, preset, tw, th);
+        if (w)
+        {
+            BuildMatricesForWeapon(w, preset, view, proj);
+            GetWeaponIconRtTexelSize(w, preset, tw, th);
+        }
+        else
+        {
+            // Non-weapon addon: build matrices from section config + visual pivot.
+            Fvector pivot = VisualIconModelPivot(non_wpn_go->Visual());
+            BuildIconViewProj(item->m_section_id.c_str(), pivot, preset, view, proj);
+            GetWeaponIconRtTexelSizeForSection(item->m_section_id.c_str(), preset, tw, th);
+        }
         shared_str tex = TextureResourceName(item, preset);
         WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] RENDER_NEW id=%u sect=[%s] preset=%u shared_rt=%d tex=[%s]",
             item->object_id(), item->m_section_id.c_str(), pi, item->InvIconUsesSharedSectionRt() ? 1 : 0, tex.c_str());
-        const bool ok = GEnv.Render->WeaponIcon_RenderToTexture(tex.c_str(), tw, th, view, proj, w);
+        IRenderable* render_subject = w ? static_cast<IRenderable*>(w) : static_cast<IRenderable*>(non_wpn_go);
+        const bool ok = GEnv.Render->WeaponIcon_RenderToTexture(tex.c_str(), tw, th, view, proj, render_subject);
         if (ok)
         {
             item->SetDynamicInvIconPresetReady(preset, true);
@@ -681,7 +708,7 @@ static void ProcessDynamicInvIconForSingleItem(CInventoryItem* item)
                     item->object_id(), item->m_section_id.c_str(), PresetSuffix(preset), tw, th, tex.c_str());
         }
         else if (g_debug_trace)
-            Msg("~ [weapon_inv_icon]   WeaponIcon_RenderToTexture id=%u preset=%u tex=[%s] ok=0", w->ID(), pi,
+            Msg("~ [weapon_inv_icon]   WeaponIcon_RenderToTexture id=%u preset=%u tex=[%s] ok=0", item->object_id(), pi,
                 tex.c_str());
     }
 
@@ -1054,31 +1081,50 @@ void BakeDynamicInvIconsToDds(pcstr single_section_or_null)
         }
 
         CWeapon* wpn = smart_cast<CWeapon*>(O);
+        // Non-weapon addons (scopes, silencers, etc.) are CGameObject but not CWeapon.
+        CGameObject* non_wpn_go = nullptr;
         if (!wpn)
         {
-            O->net_Destroy();
-            Level().Objects.Destroy(O);
-            F_entity_Destroy(E);
-            Msg("! [weapon_inv_icon] bake: spawned object is not a weapon [%s]", sec_name);
-            ++failed;
-            return;
+            non_wpn_go = smart_cast<CGameObject*>(O);
+            if (!non_wpn_go || !non_wpn_go->Visual())
+            {
+                O->net_Destroy();
+                Level().Objects.Destroy(O);
+                F_entity_Destroy(E);
+                Msg("! [weapon_inv_icon] bake: spawned object is not a weapon and has no visual [%s]", sec_name);
+                ++failed;
+                return;
+            }
+            non_wpn_go->XFORM().identity();
         }
-
-        // Bake-only: freeze transforms and skip in-weapon animation side-effects.
-        wpn->XFORM().identity();
-        wpn->SetWeaponIconSnapshot(true);
+        else
+        {
+            // Bake-only: freeze transforms and skip in-weapon animation side-effects.
+            wpn->XFORM().identity();
+            wpn->SetWeaponIconSnapshot(true);
+        }
 
         bool ok_both = true;
         for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
         {
             const auto preset = (EWeaponInvIconPreset)pi;
             Fmatrix view, proj;
-            BuildMatricesForWeapon(wpn, preset, view, proj);
             u32 tw, th;
+            if (wpn)
+            {
+                BuildMatricesForWeapon(wpn, preset, view, proj);
+            }
+            else
+            {
+                // Non-weapon addon: build matrices from section config + visual pivot.
+                Fvector pivot = VisualIconModelPivot(non_wpn_go->Visual());
+                BuildIconViewProj(sec_name, pivot, preset, view, proj);
+            }
             GetWeaponIconRtTexelSizeForSection(sec_name, preset, tw, th);
             const shared_str tex = TextureResourceName(sec_name, preset);
+            IRenderable* render_subject = wpn ? static_cast<IRenderable*>(wpn) : static_cast<IRenderable*>(non_wpn_go);
             const bool rendered =
-                GEnv.Render->WeaponIcon_RenderToTexture(tex.c_str(), tw, th, view, proj, wpn);
+                GEnv.Render->WeaponIcon_RenderToTexture(tex.c_str(), tw, th, view, proj, render_subject);
             if (!rendered)
             {
                 Msg("! [weapon_inv_icon] bake: render failed [%s] preset=%u", sec_name, pi);
@@ -1114,10 +1160,11 @@ void BakeDynamicInvIconsToDds(pcstr single_section_or_null)
             InventoryUtilities::DropCachedRtIconShaderForUserTexture(tex.c_str());
         }
 
-        // Cleanup temporary weapon object
-        wpn->SetWeaponIconSnapshot(false);
-        wpn->net_Destroy();
-        Level().Objects.Destroy(wpn);
+        // Cleanup temporary object
+        if (wpn)
+            wpn->SetWeaponIconSnapshot(false);
+        O->net_Destroy();
+        Level().Objects.Destroy(O);
         F_entity_Destroy(E);
 
         if (ok_both)
