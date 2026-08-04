@@ -129,7 +129,7 @@ ENGINE_API extern float g_console_sensitive;
 extern BOOL g_ai_die_in_anomaly;
 int g_inv_highlight_equipped = 0;
 int g_inv_inv_cell_size = 3;
-int g_3d_scope_type = 1; // 0 = off, 1 = PiP (lens zoom), 2 = PiP + main FOV zoom
+int g_3d_scope_type = 1; // 0 = off, 1 = PiP (lens zoom), 2 = HUD overlay (no 2nd world render)
 xr_map<shared_str, float> g_scope_hud_fov_presets;
 xr_map<shared_str, float> g_weapon_hud_fov_presets;
 //-Alundaio

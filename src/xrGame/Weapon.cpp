@@ -183,7 +183,6 @@ CWeapon::CWeapon()
     m_fSecondRTZoomFactor = 0.0f;
     m_fScopeLenseZoomSmoothed = ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
     m_hud_fov_before_zoom = psHUD_FOV_def;
-    m_hud_fov_main_fov_zoom_smoothed = psHUD_FOV_def;
 }
 
 shared_str CWeapon::GetScopeHudFovKey() const
@@ -1028,6 +1027,17 @@ void CWeapon::Load3DScopeParams(LPCSTR section)
     // Нижняя граница зума прицела (из этой же секции; m_fScopeZoomFactor в структуре выставится позже в LoadCurrentScopeParams)
     float scope_zoom = pSettings->read_if_exists<float>(section, "scope_zoom_factor", 83.3f);
     m_fSecondRTZoomFactor = _max(m_fSecondRTZoomFactor, scope_zoom);
+
+    // g_3d_scopes 2 (overlay): when an optical scope is attached/permanent the camera itself carries the
+    // zoom factor, so seed m_fRTZoomFactor from 3d_zoom_factor (the entry-point FOV). OnZoomIn() restores
+    // m_fRTZoomFactor on re-aim and OnZoomOut() persists the last wheel-adjusted value there — giving
+    // "remember last zoom" behaviour.
+    // Only do this for an ACTUAL scope: for iron sights there is no 3d_zoom_factor in the weapon section
+    // (it defaults to 100.0), so seeding from it would clobber m_fScopeZoomFactor and break the ADS FOV
+    // reduction (scope_zoom_factor). The matching (IsScopeAttached||IsScopePermament) guard mirrors
+    // CurrentZoomFactor(), which is what OnZoomIn() ultimately applies.
+    if (g_3d_scope_type == 2 && (IsScopeAttached() || IsScopePermament()))
+        m_fRTZoomFactor = m_zoom_params.m_f3dZoomFactor;
 }
 
 bool CWeapon::net_Spawn(CSE_Abstract* DC)
@@ -1047,6 +1057,13 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
         m_zoom_params.m_fScopeZoomFactor = pSettings->r_float(m_section_id.c_str(), "scope_zoom_factor");
 
     m_fRTZoomFactor = m_zoom_params.m_fScopeZoomFactor;
+    // g_3d_scopes 2 (overlay): only seed m_fRTZoomFactor from 3d_zoom_factor when an optical scope is
+    // actually attached/permanent — that's the case where CurrentZoomFactor()/OnZoomIn() apply 3d_zoom_factor
+    // to the camera. For iron sights there is no 3d_zoom_factor (defaults to 100.0), so seeding from it
+    // would clobber m_fScopeZoomFactor (scope_zoom_factor) and break the ADS FOV reduction. See the matching
+    // guard in Load3DScopeParams() and the rationale in CurrentZoomFactor().
+    if (g_3d_scope_type == 2 && (IsScopeAttached() || IsScopePermament()))
+        m_fRTZoomFactor = m_zoom_params.m_f3dZoomFactor;
     SetState(E->wpn_state);
     SetNextState(E->wpn_state);
 
@@ -2653,7 +2670,9 @@ void CWeapon::UpdateAddonsVisibility()
 void CWeapon::InitAddons() {}
 float CWeapon::CurrentZoomFactor()
 {
-    if (g_3d_scope_type == 1 && (IsScopeAttached() || IsScopePermament()))
+    // g_3d_scopes 1 (PiP) and 2 (overlay) both apply the 3D-scope FOV (3d_zoom_factor) to the camera
+    // when aiming through an optical scope, so the HUD-weapon FOV behaves the same way in both modes.
+    if ((g_3d_scope_type == 1 || g_3d_scope_type == 2) && (IsScopeAttached() || IsScopePermament()))
         return m_zoom_params.m_f3dZoomFactor;
 
     if (IsScopePermament())
@@ -2682,22 +2701,12 @@ void CWeapon::GetZoomData(const float scope_factor, float& delta, float& min_zoo
 }
 
 void CWeapon::OnZoomSecondIn()
-{ 
+{
     if (IsZoomed())
         m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::eMainZoom;
     m_zoom_params.m_bIsZoomModeNow = false;
     m_zoom_params.m_bIsZoomSecondModeNow = true;
 
-    if (g_3d_scope_type == 2)
-    {
-        float preset = 0.0f;
-        if (GetScopeHudFovPreset(preset))
-            m_hud_fov_before_zoom = preset;
-        else
-            m_hud_fov_before_zoom = m_nearwall_last_hud_fov;
-
-        m_hud_fov_main_fov_zoom_smoothed = m_hud_fov_before_zoom; // старт без скачка
-    }
     m_zoom_params.m_fSecondZoomRotationFactor = 0.f;
     if (m_zoom_params.m_fZoomRotationFactor == 1.f)
         m_zoom_params.m_fZoomRotationFactor = 0.f;
@@ -2719,16 +2728,6 @@ void CWeapon::OnZoomIn()
     if (IsSecondZoomed())
         m_zoom_params.m_iLatestZoomType = EWeaponLatestZoom::eSecondZoom;
     m_zoom_params.m_bIsZoomModeNow = true;
-    if (g_3d_scope_type == 2)
-    {
-        float preset = 0.0f;
-        if (GetScopeHudFovPreset(preset))
-            m_hud_fov_before_zoom = preset;
-        else
-            m_hud_fov_before_zoom = m_nearwall_last_hud_fov;
-
-        m_hud_fov_main_fov_zoom_smoothed = m_hud_fov_before_zoom; // старт без скачка
-    }
     m_zoom_params.m_bIsZoomSecondModeNow = false;
 
     attachable_hud_item* hi = HudItemData();
@@ -2740,7 +2739,16 @@ void CWeapon::OnZoomIn()
     else if (!m_zoom_params.m_bUseDynamicZoom)
         SetZoomFactor(CurrentZoomFactor());
     else
-        SetZoomFactor(g_3d_scope_type == 1 ? m_zoom_params.m_f3dZoomFactor : m_fRTZoomFactor);
+    {
+        // g_3d_scopes 1 (PiP): the camera FOV is fixed at 3d_zoom_factor; dynamic zoom is driven
+        // separately by m_fSecondRTZoomFactor (second VP) and never resets, so always (re)apply 3d_zoom_factor here.
+        // g_3d_scopes 2 (overlay) and other modes: the camera itself carries the zoom. OnZoomOut() saves the last
+        // wheel-adjusted value into m_fRTZoomFactor, so restore it on re-aim instead of resetting back to 3d_zoom_factor.
+        if (g_3d_scope_type == 1)
+            SetZoomFactor(m_zoom_params.m_f3dZoomFactor);
+        else
+            SetZoomFactor(m_fRTZoomFactor);
+    }
 
     // Отключаем инерцию (Заменено GetInertionFactor())
     // EnableHudInertion(FALSE);
@@ -3845,7 +3853,6 @@ void CWeapon::AdjustScopeHudFov(float wheel_delta)
     clamp(base, 0.1f, 2.0f);
 
     m_hud_fov_before_zoom = base;
-    m_hud_fov_main_fov_zoom_smoothed = base;
 
     // Сохраняем пресет для текущего оружия и прицела
     SetScopeHudFovPreset(base);
@@ -3880,33 +3887,6 @@ u32 CWeapon::Cost() const
 // Get the HUD FOV of the current weapon
 float CWeapon::GetHudFov()
 {
-    // При g_3d_scope_type == 2 и первом прицеле: HUD FOV меняется только когда реально меняется зум (FOV камеры).
-    // Во втором прицеле (IsSecondZoomed()) изменение HUD по зуму отключаем для режимов 0 и 2.
-    if (g_3d_scope_type == 2 && IsZoomed() && !IsSecondZoomed())
-    {
-        float camFOV = Device.fFOV;
-        // FOV камеры ещё не изменился (только вошли в прицел) — оставляем HUD как был
-        float base = m_hud_fov_before_zoom;
-        float preset;
-        if (GetScopeHudFovPreset(preset))
-            base = preset;
-        if (camFOV <= 0.1f || _abs(camFOV - g_fov) < 0.5f)
-            return base;
-        float fullTarget = base * (g_fov / camFOV);
-        float target = base + (fullTarget - base) * 0.3f;
-        float speed = 20.f;
-        float step = speed * Device.fTimeDelta;
-        if (step >= 1.f)
-            m_hud_fov_main_fov_zoom_smoothed = target;
-        else
-            m_hud_fov_main_fov_zoom_smoothed += (target - m_hud_fov_main_fov_zoom_smoothed) * step;
-        return m_hud_fov_main_fov_zoom_smoothed;
-    }
-    else
-    {
-        m_hud_fov_main_fov_zoom_smoothed = m_nearwall_last_hud_fov; // сброс при выходе из зума
-    }
-
     // We calculate the HUD FOV from the hip (taking into account the abutment against the walls)
     if (ParentIsActor() && Level().CurrentViewEntity() == H_Parent())
     {
@@ -4006,7 +3986,132 @@ float CWeapon::GetScopeLenseZoomSmoothed(float dt)
 // Вызывается только для активного оружия игрока
 void CWeapon::UpdateSecondVP(bool bInGrenade)
 {
-    Device.m_SecondViewport.SetSVPActive((g_3d_scope_type != 0) && m_zoom_params.m_fZoomRotationFactor > 0.05);
+    // Only g_3d_scopes 1 (PiP) uses the second viewport; mode 2 (HUD overlay) renders the scope lens
+    // via the offscreen overlay pipeline instead, so SVP must stay off there.
+    Device.m_SecondViewport.SetSVPActive(
+        g_3d_scope_type == 1 && m_zoom_params.m_fZoomRotationFactor > 0.05);
+}
+
+// Check if the currently active scope is optical (has scope_texture = reticle grid).
+// Collimators/reflex sights have no scope_texture → returns false for them.
+// Dynamically selects the active scope based on the current zoom mode:
+//  - secondary zoom (IsSecondZoomed): the is_latest_zoomed addon (SwitchZoomableAddon target)
+//  - primary zoom (IsZoomed): the main scope addon (GetAddonMainScope)
+// For legacy scopes, checks scope_zoom_factor in the config section.
+bool CWeapon::IsOpticalScope() const
+{
+    if (!IsScopeAttached() && !IsScopePermament())
+        return false;
+
+    if (bUseAttachmentSystem)
+    {
+        if (IsSecondZoomed())
+        {
+            // Secondary zoom: check the currently zoomed addon (collimator or backup scope).
+            for (const auto& kv : m_addon_items)
+                if (kv.second && kv.second->is_latest_zoomed)
+                    return kv.second->has_scope_texture;
+            return false;
+        }
+        // Primary zoom: the main scope addon (first with scope_texture).
+        auto main = GetAddonMainScope();
+        return main.second && main.second->has_scope_texture;
+    }
+
+    // Legacy path: check scope_zoom_factor in the scope section config.
+    shared_str scope_name = GetScopeName();
+    return pSettings->line_exist(scope_name, "scope_zoom_factor");
+}
+
+// HUD overlay scope (g_3d_scopes 2): mirror the live HUD through $user$hud_overlay instead of the
+// world HUD pass. Crossfade: overlay fades in as m_fZoomRotationFactor rises (0.5-0.9),
+// world HUD is hidden as soon as the overlay starts appearing.
+// Вызывается только для активного оружия игрока (рядом с UpdateSecondVP).
+void CWeapon::UpdateHudOverlay()
+{
+    // While actually aiming (IsZoomed || IsSecondZoomed) the active scope is stable, so refresh the
+    // cached optical-scope flag. During the ADS exit animation the zoom flags are already cleared but
+    // m_fZoomRotationFactor is still animating down — there we reuse the last cached value instead of
+    // re-evaluating IsOpticalScope(), which would otherwise flip from the collimator (non-optical) to
+    // the attached optical scope and make the overlay flash on mid-transition.
+    const bool aiming = IsZoomed() || IsSecondZoomed();
+    if (aiming)
+        m_zoom_params.m_bOpticalScopeCached = IsOpticalScope();
+    const bool opticalScope = m_zoom_params.m_bOpticalScopeCached;
+
+    // Early exit: not overlay mode or no optical scope attached — clear state and bail.
+    // IMPORTANT: only touch m_blender_mode.z when we are in overlay mode (g_3d_scope_type == 2).
+    // In mode 1 (PiP) UpdateSecondVP() (called just before this, see Actor.cpp:1169) owns m_blender_mode.z
+    // to drive the scope lens shader (model_scope_lense.ps: isSecondVPActive = m_blender_mode.z==1).
+    // Resetting it here unconditionally would wipe that flag and break the lens in mode 1.
+    if (g_3d_scope_type != 2 || !opticalScope)
+    {
+        GEnv.Render->SetHudOverlayActive(false);
+        GEnv.Render->SetHudOverlayAlpha(0.f);
+        if (g_3d_scope_type == 2 && g_pGamePersistent)
+            g_pGamePersistent->m_pGShaderConstants->m_blender_mode.z = 0.0f;
+        return;
+    }
+
+    const float rotFactor = m_zoom_params.m_fZoomRotationFactor;
+
+    float alpha = 1.0f;
+    bool active = false;
+
+    if (ps_r__hud_overlay_crossfade)
+    {
+        // Crossfade mode. rotFactor animates 0→1 on ADS entry and 1→0 on ADS exit (see UpdateCL).
+        // The entry and exit curves are intentionally asymmetric:
+        //   entry  (IsZoomed):  alpha 0→1 over rotFactor [0.5, 0.9], then locked at 1.0 while aiming.
+        //   exit   (!IsZoomed): alpha 1→0 over rotFactor [1.0, 0.9] — the overlay starts dissolving
+        //                       the INSTANT the aim button is released (while the weapon is still
+        //                       almost fully raised) and is gone before the lower half of the exit
+        //                       animation, instead of dragging the fade all the way down to 0.5.
+        // The lock only holds while aiming — once the button is released the exit fade drives alpha,
+        // so the overlay dissolves smoothly instead of snapping off when the aim button is released.
+        // m_bHudOverlayLocked is a per-weapon member (see Weapon.h): a function-local static would be
+        // shared across all weapons and survive a weapon switch, skipping the entry fade after switching.
+        if (aiming)
+        {
+            const float fadeAlpha = clampr((rotFactor - 0.5f) / 0.4f, 0.f, 1.f);
+            if (fadeAlpha >= 1.0f)
+                m_zoom_params.m_bHudOverlayLocked = true; // fully aimed - hold the overlay until released
+            alpha = m_zoom_params.m_bHudOverlayLocked ? 1.0f : fadeAlpha;
+            active = alpha > 0.f;
+        }
+        else
+        {
+            m_zoom_params.m_bHudOverlayLocked = false; // released - exit fade takes over
+            // Exit fade window: rotFactor 1.0 (just released) → 0.9 (overlay fully gone).
+            // 0.1 = 1.0 - 0.9.
+            alpha = clampr((rotFactor - 0.9f) / 0.1f, 0.f, 1.f);
+            active = alpha > 0.f;
+        }
+    }
+    else
+    {
+        // Instant mode: overlay on/off at threshold, no fade.
+        active = rotFactor > 0.5f;
+        alpha = 1.0f;
+    }
+
+    GEnv.Render->SetHudOverlayActive(active);
+    GEnv.Render->SetHudOverlayAlpha(active ? alpha : 0.f);
+
+    // HUD overlay scope (g_3d_scopes 2): diagnostic trace of the crossfade state. Logged only while the
+    // overlay is active so the spam is bounded to ADS. Confirm alpha reaches 1.0 when the aim is held
+    // (rotFactor→1.0, m_bHudOverlayLocked latches) — values stuck near 0 indicate the entry fade never
+    // completes (rotFactor not reaching 0.9) or the lock is being reset every frame.
+    if (active && ps_r__hud_overlay_crossfade)
+        Msg("~ [hud_overlay] xfade: rotFactor=%.3f fadeAlpha=%.3f locked=%d alpha=%.3f aiming=%d",
+            rotFactor,
+            clampr((rotFactor - 0.5f) / 0.4f, 0.f, 1.f),
+            m_zoom_params.m_bHudOverlayLocked ? 1 : 0,
+            alpha,
+            aiming ? 1 : 0);
+
+    // Reuse the lens shader "second VP" flag so the scope lens samples the backbuffer copy (rt_secondVP).
+    g_pGamePersistent->m_pGShaderConstants->m_blender_mode.z = active ? 1.0f : 0.0f;
 }
 
 void CWeapon::CollectAttachmentsAI(TIItemContainer& l_list)

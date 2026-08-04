@@ -857,6 +857,7 @@ void CRender::destroy()
     HWOCC.occq_destroy();
     if (Glows)
         Glows->Destroy();
+    ReleaseHudOverlayRT(); // HUD overlay scope: release static $user$ RTs before resource manager teardown
     xr_delete(Models);
     xr_delete(Target);
     PSLibrary.OnDestroy();

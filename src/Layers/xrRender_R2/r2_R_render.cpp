@@ -127,6 +127,27 @@ void CRender::Render()
     //.	VERIFY					(g_pGameLevel && g_pGameLevel->pHUD);
     auto& dsgraph = get_imm_context();
 
+    // HUD overlay scope (g_3d_scopes 3): capture the scene camera while it is still intact
+    // (a protective snapshot - used by RenderHudOverlayToTexture to render the HUD with the SAME
+    // view/proj/FOV the world pass used, regardless of later camera edits).
+    // Only capture in the MAIN pass: a second viewport pass (RenderSecondViewport, ps_r__dedicated_second_vp)
+    // re-enters Render() with the scope camera and would otherwise overwrite m_hudOvlCam with a wrong one.
+    if (!svp_pass)
+    {
+        m_hudOvlCam.mView.set(Device.mView);
+        m_hudOvlCam.mProject.set(Device.mProject);
+        m_hudOvlCam.mFullTransform.set(Device.mFullTransform);
+        m_hudOvlCam.mInvView.set(Device.mInvView);
+        m_hudOvlCam.mInvFullTransform.set(Device.mInvFullTransform);
+        m_hudOvlCam.vCameraPosition.set(Device.vCameraPosition);
+        m_hudOvlCam.vCameraDirection.set(Device.vCameraDirection);
+        m_hudOvlCam.vCameraTop.set(Device.vCameraTop);
+        m_hudOvlCam.vCameraRight.set(Device.vCameraRight);
+        m_hudOvlCam.fFOV = Device.fFOV;
+        m_hudOvlCam.fASPECT = Device.fASPECT;
+        m_hudOvlCam.valid = true;
+    }
+
     //******* Z-prefill calc - DEFERRER RENDERER
     if (ps_r2_ls_flags.test(R2FLAG_ZFILL) && !(svp_pass && ps_r__svp_skip_zfill))
     {
@@ -206,7 +227,8 @@ void CRender::Render()
         Target->phase_scene_begin();
         {
             // Skip 3D HUD only for legacy alternating SVP (no dedicated RT). Dedicated second pass draws HUD here + hud_ui below.
-            const bool skip_world_hud = m_SecondViewportPass ||
+            // HUD overlay scope (g_3d_scopes 3): HUD goes to the offscreen overlay instead of the world pass.
+            const bool skip_world_hud = m_SecondViewportPass || m_HudOverlayActive ||
                 (!ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame());
             if (!skip_world_hud)
                 dsgraph.render_hud();
@@ -318,7 +340,8 @@ void CRender::Render()
         Target->phase_scene_begin();
         {
             // Skip 3D HUD only for legacy alternating SVP (no dedicated RT). Dedicated second pass draws HUD here + hud_ui below.
-            const bool skip_world_hud = m_SecondViewportPass ||
+            // HUD overlay scope (g_3d_scopes 3): HUD goes to the offscreen overlay instead of the world pass.
+            const bool skip_world_hud = m_SecondViewportPass || m_HudOverlayActive ||
                 (!ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame());
             if (!skip_world_hud)
                 dsgraph.render_hud();
@@ -516,35 +539,89 @@ void CRender::render_forward()
 // Перед началом рендера мира --#SM+#--
 void CRender::BeforeWorldRender() {}
 
+// Копия бэкбуфера (текущего экрана) в рендер-таргет второго вьюпорта.
+// Общий код для legacy SVP и HUD-overlay прицела (g_3d_scopes 3).
+void CRender::CopyBackbufferToSecondVPRT()
+{
+    if (Target->rt_secondVP && (Target->rt_secondVP->dwWidth != Device.dwWidth || Target->rt_secondVP->dwHeight != Device.dwHeight))
+        Target->ResizeSecondVPRT(Device.dwWidth, Device.dwHeight);
+#ifdef USE_DX9
+    IDirect3DSurface9* pBuffer = nullptr;
+    HW.pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBuffer, nullptr);
+    D3DXLoadSurfaceFromSurface(Target->rt_secondVP->pRT, nullptr, nullptr, pBuffer, nullptr, nullptr, D3DX_DEFAULT, 0);
+    pBuffer->Release();
+#endif
+#ifdef USE_DX11
+    // Back buffer lives on IDXGISwapChain; m_pSwapChain2 is optional (QueryInterface may fail).
+    if (HW.m_pSwapChain && Target->rt_secondVP && Target->rt_secondVP->pSurface)
+    {
+        ID3DTexture2D* pBuffer = nullptr;
+        if (SUCCEEDED(HW.m_pSwapChain->GetBuffer(0, __uuidof(ID3DTexture2D), (LPVOID*)&pBuffer)) && pBuffer)
+        {
+            auto pContext = HW.get_context(CHW::IMM_CTX_ID);
+            pContext->CopyResource(Target->rt_secondVP->pSurface, pBuffer);
+            pBuffer->Release();
+        }
+    }
+#endif
+#ifdef USE_OGL
+    // HUD overlay scope (g_3d_scopes 2): copy the clean zoomed world (post-combine, no HUD) into
+    // rt_secondVP so the scope lens (model_scope_lense.ps sampling s_vp2) shows a live frame.
+    // Without this the lens never updates (stale first frame) — GL was missing this branch while
+    // DX9/DX11 had it. GL 4.1 has no glCopyImageSubData (needs 4.3), so we blit via 2 FBOs — the
+    // source is the engine's base color RT (Target->get_base_rt() = rt_Base[CurrentBackBuffer],
+    // already holds the final world image after phase_combine), the dest is rt_secondVP.
+    if (Target->rt_secondVP && Target->rt_secondVP->pRT)
+    {
+        const GLuint srcRT = Target->get_base_rt();
+        const GLuint dstRT = Target->rt_secondVP->pRT;
+        if (srcRT && dstRT)
+        {
+            static GLuint s_readFBO = 0, s_drawFBO = 0;
+            if (!s_readFBO) CHK_GL(glGenFramebuffers(1, &s_readFBO));
+            if (!s_drawFBO) CHK_GL(glGenFramebuffers(1, &s_drawFBO));
+
+            GLint prevRead = 0, prevDraw = 0;
+            CHK_GL(glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevRead));
+            CHK_GL(glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw));
+
+            CHK_GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, s_readFBO));
+            CHK_GL(glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, srcRT, 0));
+            CHK_GL(glReadBuffer(GL_COLOR_ATTACHMENT0));
+
+            CHK_GL(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_drawFBO));
+            CHK_GL(glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dstRT, 0));
+            CHK_GL(glDrawBuffer(GL_COLOR_ATTACHMENT0));
+
+            // rt_secondVP was resized above to match Device.dwWidth/Height, so blit is 1:1 (GL_NEAREST).
+            // Y-flip the source region: the lens shader (model_scope_lense.ps) samples s_vp2 with
+            // gl_FragCoord.xy/screen_res.xy — on GL gl_FragCoord has lower-left origin, while the DX
+            // path it was written for (CopyResource from the D3D backbuffer) yields top-left-origin
+            // texture content. Without flipping the blit the lens shows the world upside-down.
+            CHK_GL(glBlitFramebuffer(
+                0, Device.dwHeight, Device.dwWidth, 0,
+                0, 0, Target->rt_secondVP->dwWidth, Target->rt_secondVP->dwHeight,
+                GL_COLOR_BUFFER_BIT, GL_NEAREST));
+
+            // Restore the FBO bindings the rest of the frame expects (the engine keeps HW.pFB bound
+            // as both read/draw outside of blit helpers — see R_Backend_Runtime.h set_FB).
+            CHK_GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, prevRead));
+            CHK_GL(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prevDraw));
+        }
+    }
+#endif
+}
+
 // После рендера мира и пост-эффектов --#SM+#-- +SecondVP+
 void CRender::AfterWorldRender()
 {
+    // HUD overlay scope (g_3d_scopes 3): clean zoomed frame (no HUD) for the scope lens.
+    if (m_HudOverlayActive)
+        CopyBackbufferToSecondVPRT();
+
     if (ps_r__dedicated_second_vp)
         return;
     if (Device.m_SecondViewport.IsSVPFrame())
-    {
-        if (Target->rt_secondVP && (Target->rt_secondVP->dwWidth != Device.dwWidth || Target->rt_secondVP->dwHeight != Device.dwHeight))
-            Target->ResizeSecondVPRT(Device.dwWidth, Device.dwHeight);
-        // Делает копию бэкбуфера (текущего экрана) в рендер-таргет второго вьюпорта
-#ifdef USE_DX9
-        IDirect3DSurface9* pBuffer = nullptr;
-        HW.pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBuffer, nullptr);
-        D3DXLoadSurfaceFromSurface(Target->rt_secondVP->pRT, nullptr, nullptr, pBuffer, nullptr, nullptr, D3DX_DEFAULT, 0);
-        pBuffer->Release();
-#endif
-#ifdef USE_DX11
-        // Back buffer lives on IDXGISwapChain; m_pSwapChain2 is optional (QueryInterface may fail).
-        if (HW.m_pSwapChain && Target->rt_secondVP && Target->rt_secondVP->pSurface)
-        {
-            ID3DTexture2D* pBuffer = nullptr;
-            if (SUCCEEDED(HW.m_pSwapChain->GetBuffer(0, __uuidof(ID3DTexture2D), (LPVOID*)&pBuffer)) && pBuffer)
-            {
-                auto pContext = HW.get_context(CHW::IMM_CTX_ID);
-                pContext->CopyResource(Target->rt_secondVP->pSurface, pBuffer);
-                pBuffer->Release();
-            }
-        }
-#endif
-    }
+        CopyBackbufferToSecondVPRT();
 }
 } // namespace xray::render::RENDER_NAMESPACE

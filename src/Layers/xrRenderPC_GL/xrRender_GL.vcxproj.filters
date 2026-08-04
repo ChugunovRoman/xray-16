@@ -627,6 +627,9 @@
     <ClCompile Include="..\xrRender_R2\r2_R_render.cpp">
       <Filter>Core</Filter>
     </ClCompile>
+    <ClCompile Include="..\xrRender_R2\r2_hud_overlay.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
     <ClCompile Include="..\xrRender_R2\r2_rendertarget_phase_smap_S.cpp">
       <Filter>Core_Target</Filter>
     </ClCompile>

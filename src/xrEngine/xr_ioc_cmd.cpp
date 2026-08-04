@@ -722,6 +722,9 @@ ENGINE_API int ps_r__svp_skip_rain_sync = 0;
 ENGINE_API int ps_r__svp_skip_sun_csm = 0;
 ENGINE_API int ps_r__svp_skip_zfill = 0;
 ENGINE_API int ps_r__svp_frame_delay = 2;
+ENGINE_API int ps_r__hud_overlay_debug = 0;
+ENGINE_API int ps_r__hud_overlay_crossfade = 0; // 1 = crossfade alpha on ADS entry/exit, 0 = instant
+ENGINE_API float ps_r__hud_overlay_brightness = 1.0f; // overlay HUD light multiplier: 1.0 = neutral, <1 darker (match shadowed world HUD), >1 brighter
 ENGINE_API int ps_r__WallmarksOnSkeleton = 0;
 ENGINE_API shared_str current_player_hud_sect{};
 
@@ -779,6 +782,9 @@ void CCC_Register()
     CMD4(CCC_Integer, "r__svp_skip_sun_csm", &ps_r__svp_skip_sun_csm, 0, 1);
     CMD4(CCC_Integer, "r__svp_skip_zfill", &ps_r__svp_skip_zfill, 0, 1);
     CMD4(CCC_Integer, "r__svp_frame_delay", &ps_r__svp_frame_delay, 0, 255);
+    CMD4(CCC_Integer, "r__hud_overlay_debug", &ps_r__hud_overlay_debug, 0, 6);
+    CMD4(CCC_Integer, "r__hud_overlay_crossfade", &ps_r__hud_overlay_crossfade, 0, 1);
+    CMD4(CCC_Float, "r__hud_overlay_brightness", &ps_r__hud_overlay_brightness, 0.5f, 5.0f);
     CMD4(CCC_Integer, "r__wallmarks_on_skeleton", &ps_r__WallmarksOnSkeleton, 0, 1);
 
     CMD1(CCC_Editor, "rs_editor");

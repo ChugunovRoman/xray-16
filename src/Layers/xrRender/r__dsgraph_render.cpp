@@ -245,6 +245,37 @@ ICF void sort_back_to_front_render_and_clean(u32 context_id, T& vec)
     vec.clear();
 }
 
+// HUD overlay scope (g_3d_scopes 3): split mapHUDSorted by the bScopeLens flag.
+// The scope lens (samples $user$viewport2) needs a cleared depth buffer (it is otherwise Z-rejected
+// by the scope body), while other transparent HUD surfaces (collimator glass etc.) must keep the
+// HUD-mesh depth so they don't shine through the mesh. mapHUDSorted holds both, so the overlay pass
+// drains it in two filtered traversals (non-lens first, then lens) with the caller changing the
+// Z state in between. The map is cleared once at the end by the caller-friendly helper below.
+// Ignored outside the overlay pipeline (render_sorted keeps the single unfiltered pass).
+static thread_local bool g_render_hudblends_want_scope_lens = false;
+
+template<class T>
+void __fastcall render_item_scope_lens_filter(u32 context_id, const T& item)
+{
+    const bool is_lens = item.second.se->flags.bScopeLens != 0;
+    if (is_lens != g_render_hudblends_want_scope_lens)
+        return; // opposite polarity: skip, this pass belongs to the other group
+    render_item(context_id, item);
+}
+
+// One filtered traversal (back-to-front). Does NOT clear the map — render_hud_blends() drains both
+// groups (non-lens, then lens) and clears once at the end.
+template<class T>
+ICF void render_hud_sorted_filtered(u32 context_id, T& vec, bool want_scope_lens)
+{
+    if (vec.empty())
+        return;
+    g_render_hudblends_want_scope_lens = want_scope_lens;
+    // Pass the template unqualified (no <T>): like render_item above, the compiler deduces the node
+    // type from traverse_right_left's callback signature (value_type = xr_fixed_map_node<K,_MatrixItemS>).
+    vec.traverse_right_left(context_id, render_item_scope_lens_filter);
+}
+
 //////////////////////////////////////////////////////////////////////////
 // HUD render
 void R_dsgraph_structure::render_hud()
@@ -295,6 +326,47 @@ void R_dsgraph_structure::render_hud_ui()
 }
 
 //////////////////////////////////////////////////////////////////////////
+// HUD overlay scope (g_3d_scopes 3): drain only the HUD forward passes (scope lens, blended and
+// emissive HUD surfaces). Used by the offscreen HUD overlay pass; the world pass skips these maps.
+// When lens_depth_clear is provided (overlay pass), mapHUDSorted is drained in two filtered
+// traversals: non-lens surfaces first (depth-tested against the HUD mesh), then the scope lens
+// after the caller clears the overlay depth buffer (the lens is otherwise Z-rejected by the scope
+// body). Without the callback the whole map is drained in a single back-to-front pass.
+void R_dsgraph_structure::render_hud_blends(void (*lens_depth_clear)(CBackend&))
+{
+    ZoneScoped;
+    PIX_EVENT_CTX(cmd_list, dsgraph_render_hud_blends);
+
+    if (!mapHUDSorted.empty())
+    {
+        hud_transform_helper helper{ cmd_list };
+        if (lens_depth_clear)
+        {
+            // Pass A: non-lens HUD blends (collimator glass etc.) keep the HUD-mesh depth so they
+            // do not shine through the weapon/scope mesh.
+            render_hud_sorted_filtered(context_id, mapHUDSorted, false);
+            // Let the caller reset the overlay depth to far so the scope lens passes its Z test.
+            lens_depth_clear(cmd_list);
+            // Pass B: scope lens only (draws over the lens opening, samples the second viewport).
+            render_hud_sorted_filtered(context_id, mapHUDSorted, true);
+            mapHUDSorted.clear();
+        }
+        else
+        {
+            sort_back_to_front_render_and_clean(context_id, mapHUDSorted);
+        }
+    }
+
+#if RENDER != R_R1
+    if (!mapHUDEmissive.empty())
+    {
+        hud_transform_helper helper{ cmd_list };
+        sort_front_to_back_render_and_clean(context_id, mapHUDEmissive);
+    }
+#endif
+}
+
+//////////////////////////////////////////////////////////////////////////
 // strict-sorted render
 void R_dsgraph_structure::render_sorted()
 {
@@ -303,7 +375,10 @@ void R_dsgraph_structure::render_sorted()
 
     sort_back_to_front_render_and_clean(context_id, mapSorted);
 
-    if (!mapHUDSorted.empty())
+    // HUD overlay scope (g_3d_scopes 3): HUD blends (scope lens etc.) are rendered in the offscreen
+    // overlay pass, NOT in the world pass. Prevents lens recursion — the lens samples the clean
+    // backbuffer copy (rt_secondVP) which has no HUD, so no self-reference.
+    if (!mapHUDSorted.empty() && !RImplementation.IsHudOverlayActive())
     {
         hud_transform_helper helper{ cmd_list };
         sort_back_to_front_render_and_clean(context_id, mapHUDSorted);
@@ -320,7 +395,8 @@ void R_dsgraph_structure::render_emissive()
 
     sort_front_to_back_render_and_clean(context_id, mapEmissive);
 
-    if (!mapHUDEmissive.empty())
+    // HUD overlay scope (g_3d_scopes 3): HUD emissive surfaces go to the offscreen overlay, not the world.
+    if (!mapHUDEmissive.empty() && !RImplementation.IsHudOverlayActive())
     {
         hud_transform_helper helper{ cmd_list };
         sort_front_to_back_render_and_clean(context_id, mapHUDEmissive);

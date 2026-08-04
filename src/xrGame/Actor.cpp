@@ -1167,6 +1167,7 @@ void CActor::UpdateCL()
 
             // Обновляем двойной рендер от оружия [Update SecondVP with weapon data]
             pWeapon->UpdateSecondVP(); // --#SM+#-- +SecondVP+
+            pWeapon->UpdateHudOverlay(); // g_3d_scopes 3: HUD overlay scope
 
             bool bUseMark = !!pWeapon->bMarkCanShow();
             // bool bInZoom = !!(pWeapon->bInZoomRightNow() && pWeapon->bIsSecondVPZoomPresent() && psActorFlags.test(AF_3DSCOPE));
@@ -1200,6 +1201,7 @@ void CActor::UpdateCL()
             // Отключаем второй вьюпорт [Turn off SecondVP]
             // CWeapon::UpdateSecondVP();
             Device.m_SecondViewport.SetSVPActive(false); // --#SM+#-- +SecondVP+
+            GEnv.Render->SetHudOverlayActive(false); // g_3d_scopes 3: HUD overlay scope off
         }
     }
 

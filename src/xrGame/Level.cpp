@@ -705,6 +705,12 @@ void CLevel::OnRender()
     }
 
     GEnv.Render->AfterWorldRender(); //--#SM+#-- +SecondVP+
+    // HUD overlay scope (g_3d_scopes 3): snapshot the live HUD into $user$hud_overlay before UI.
+    GEnv.Render->RenderHudOverlayToTexture();
+    // Blend the snapshot over the backbuffer (GL native path; explicit stencil/blend/depth state).
+    // Drawn here — after the overlay RT is filled, before HUD().RenderUI() so indicators/reticle
+    // render on top of the composited HUD.
+    GEnv.Render->CompositeHudOverlay();
     WorldRendered(true);
 
     if (!Device.IsAnselActive)

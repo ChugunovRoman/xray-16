@@ -175,6 +175,7 @@ public:
     bool bChangeNVSecondVPStatus();
 
     virtual void UpdateSecondVP(bool bInGrenade = false);
+    void UpdateHudOverlay(); // g_3d_scopes 3: HUD overlay scope (no second world render)
     void LoadModParams(LPCSTR section);
     void Load3DScopeParams(LPCSTR section);
     void LoadOriginalScopesParams(LPCSTR section);
@@ -204,8 +205,7 @@ public:
     float m_nearwall_last_hud_fov;
     float m_nearwall_target_hud_fov;
     float m_nearwall_speed_mod;
-    float m_hud_fov_before_zoom;       // HUD FOV до прицеливания (для g_3d_scope_type == 2)
-    float m_hud_fov_main_fov_zoom_smoothed; // сглаженный HUD FOV при зуме main FOV (режим 2)
+    float m_hud_fov_before_zoom; // Editing base for wheel-adjusted scope HUD FOV (AdjustScopeHudFov)
 
     float m_weapon_hud_config;
     bool m_weapon_hud_config_valid;
@@ -393,6 +393,8 @@ public:
     ALife::EWeaponAddonStatus get_ScopeStatus() const { return m_eScopeStatus; }
     ALife::EWeaponAddonStatus get_SilencerStatus() const { return m_eSilencerStatus; }
     virtual bool UseScopeTexture() { return bScopeIsHasTexture; };
+    // True if the current scope section has scope_zoom_factor (optical/telescopic scope, not collimator).
+    bool IsOpticalScope() const;
     //обновление видимости для косточек аддонов
     void SpawnDefaultAddons();
     void UpdateAddonsVisibility();
@@ -470,6 +472,16 @@ protected:
 
         bool m_bIsZoomModeNow; //когда режим приближения включен
         bool m_bIsZoomSecondModeNow; //когда режим приближения включен на коллиматор
+        // Frozen result of IsOpticalScope() captured while the player is actually aiming.
+        // Holds its value during the ADS exit animation (zoom flags already cleared, but
+        // m_fZoomRotationFactor still animating down), so the overlay doesn't flash on
+        // when the active-scope check flips from the collimator to the optical scope mid-transition.
+        bool m_bOpticalScopeCached = false;
+        // Per-weapon crossfade lock for the HUD overlay (g_3d_scopes 3). Set true once the entry
+        // fade reaches full alpha while aiming; cleared on aim release. Must be a member (not a
+        // function-local static) so switching weapons starts a fresh, clean fade instead of inheriting
+        // the previous weapon's lock and skipping the entry animation.
+        bool m_bHudOverlayLocked = false;
         float m_fCurrentZoomFactor; //текущий фактор приближения
         float m_fZoomRotateTime; //время приближения
 

@@ -189,6 +189,10 @@ struct R_dsgraph_structure
     void render_graph(u32 _priority);
     void render_hud();
     void render_hud_ui();
+    // HUD overlay scope (g_3d_scopes 3): drain only HUD forward passes (scope lens, emissive).
+    // lens_depth_clear, when non-null (overlay pass), drains mapHUDSorted in two filtered passes —
+    // non-lens first, then the scope lens after the callback clears the overlay depth buffer.
+    void render_hud_blends(void (*lens_depth_clear)(CBackend&) = nullptr);
     void render_lods(bool _setup_zb, bool _clear);
     void render_sorted();
     void render_emissive();

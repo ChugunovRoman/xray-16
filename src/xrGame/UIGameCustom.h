@@ -85,6 +85,7 @@ protected:
     CUIActorMenu* ActorMenu;
     CUIPdaWnd* PdaMenu;
     bool showGameIndicators;
+    CUIStatic* m_pHudOverlay = nullptr; // g_3d_scopes 3: fullscreen composite of $user$hud_overlay
 
 public:
     // XXX nitrocaster: make not public

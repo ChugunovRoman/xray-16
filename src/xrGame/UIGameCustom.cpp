@@ -3,6 +3,7 @@
 #include "Level.h"
 #include "ui/UIXmlInit.h"
 #include "xrUICore/Static/UIStatic.h"
+#include "xrEngine/Render.h"
 #include "Common/object_broker.h"
 
 #include "InventoryOwner.h"
@@ -47,6 +48,7 @@ CUIGameCustom::~CUIGameCustom()
 {
     InventoryUtilities::DestroyShaders();
 
+    xr_delete(m_pHudOverlay);
     delete_data(CustomStatics);
     g_b_ClearGameCaptions = false;
 }
@@ -87,6 +89,35 @@ void CUIGameCustom::Render()
     for (StaticDrawableWrapper* item : CustomStatics)
         item->Draw();
     Window->Draw();
+
+    // HUD overlay scope (g_3d_scopes 3): live HUD snapshot composited over the world, below
+    // indicators/dialogs.
+    // GL blends the overlay over the backbuffer natively (CRender::CompositeHudOverlay, called from
+    // Level::OnRender before RenderUI) with explicit stencil/blend/depth state, avoiding the UI quad's
+    // inherited stencil-gate and the D3D-vs-FBO Y-orientation mismatch (the "hud\default" shader =
+    // stub_notransform_t.vs inverts NDC-Y for DDS uploads, which flips the FBO overlay an extra time).
+    // When the backend composites natively, drawing the UI quad here too would stack a SECOND, upside-
+    // down HUD over the native one (the "two HUDs / see-through where they cross" bug), so it is drawn
+    // only on backends that still rely on the UI-layer composite (DX11 today).
+    // USE_OGL is a render-layer private macro (not defined in xrGame), so the check is runtime, not
+    // preprocessor.
+    const float overlayAlpha = GEnv.Render->GetHudOverlayAlpha();
+    if (!GEnv.Render->CompositeHudOverlayNative() &&
+        GEnv.Render->IsHudOverlayActive() && overlayAlpha > 0.01f)
+    {
+        if (!m_pHudOverlay)
+        {
+            m_pHudOverlay = xr_new<CUIStatic>("HUD overlay scope");
+            m_pHudOverlay->SetWndRect(Frect().set(0.f, 0.f, UI_BASE_WIDTH, UI_BASE_HEIGHT));
+            m_pHudOverlay->SetStretchTexture(true);
+            m_pHudOverlay->InitTexture("$user$hud_overlay", false);
+        }
+        // ABGR format: alpha in high byte, white RGB.
+        const u32 alphaByte = (u32)(overlayAlpha * 255.f);
+        m_pHudOverlay->SetTextureColor((alphaByte << 24) | 0x00FFFFFF);
+        m_pHudOverlay->Draw();
+    }
+
     CEntity* pEntity = smart_cast<CEntity*>(Level().CurrentEntity());
     if (pEntity)
     {

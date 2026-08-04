@@ -545,6 +545,28 @@ public:
     void WeaponIcon_ReleaseAllUserIconRts() override;
     bool WeaponIcon_SavePersistedUserRtToDdsDxt5(pcstr user_texture_name, pcstr fs_root, pcstr fname) override;
 
+    // HUD overlay scope (g_3d_scopes 2): DX11-only. On GL the feature is force-disabled here so the
+    // world pass keeps draining the HUD normally (skip_world_hud stays false) and no overlay quad is
+    // ever drawn — this is the rollback of the GL-native composite (bug #22 magenta fringe).
+    void SetHudOverlayActive(bool v) override
+    {
+#if defined(USE_OGL)
+        m_HudOverlayActive = false;
+#else
+        m_HudOverlayActive = v;
+#endif
+    }
+    bool IsHudOverlayActive() const override { return m_HudOverlayActive; }
+    void RenderHudOverlayToTexture() override;
+    void CompositeHudOverlay() override;
+    // HUD overlay (g_3d_scopes 2) is a DX11-only feature: the GL-native composite that tried to
+    // blend $user$hud_overlay over the backbuffer produced a magenta silhouette fringe (bug #22) and
+    // has been removed. GL never reports a native composite, so the UI-layer quad stays disabled too
+    // (see SetHudOverlayActive below) and the feature is effectively off on GL.
+    bool CompositeHudOverlayNative() const override { return false; }
+    void SetHudOverlayAlpha(float v) override { m_HudOverlayAlpha = v; }
+    float GetHudOverlayAlpha() const override { return m_HudOverlayAlpha; }
+
     // Constructor/destructor/loader
     CRender();
     ~CRender() override;
@@ -581,7 +603,23 @@ public:
 private:
     bool m_SecondViewportPass{};
     bool m_SecondViewportOutputToRT{};
+    bool m_HudOverlayActive{}; // g_3d_scopes 3: skip world HUD, mirror live HUD via $user$hud_overlay
+    float m_HudOverlayAlpha{ 1.f }; // crossfade alpha (0 = transparent, 1 = opaque)
     CPreviewSceneRenderer* m_preview_scene{};
+
+    void CopyBackbufferToSecondVPRT(); // shared by legacy SVP and HUD overlay scope (AfterWorldRender)
+    void ReleaseHudOverlayRT(); // called from destroy(): static overlay RTs must die before the resource manager
+
+    // HUD overlay scope (g_3d_scopes 3): scene camera captured at Render() start — post-processing
+    // clobbers Device camera fields, so the post-frame HUD snapshot must use this saved state.
+    struct SHudOverlayCam
+    {
+        Fmatrix mView{}, mProject{}, mFullTransform{}, mInvView{}, mInvFullTransform{};
+        Fvector vCameraPosition{}, vCameraDirection{}, vCameraTop{}, vCameraRight{};
+        float fFOV{}, fASPECT{};
+        bool valid{};
+    };
+    SHudOverlayCam m_hudOvlCam;
 
 #if defined(USE_DX11)
     xr_vector<D3D_SHADER_MACRO> m_ShaderOptions;

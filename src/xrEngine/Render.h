@@ -167,6 +167,18 @@ extern ENGINE_API int ps_r__svp_skip_sun_csm;    // 1 = skip sun init/run in 2nd
 extern ENGINE_API int ps_r__svp_skip_zfill;      // 1 = skip Z-prefill pass when r2_zfill is enabled
 extern ENGINE_API int ps_r__svp_frame_delay;     // Second VP: IsSVPFrame uses dwFrame % delay (0 = every frame). Console: r__svp_frame_delay
 
+// HUD overlay scope (g_3d_scopes 3) debug output of the resolve pass. Console: r__hud_overlay_debug
+// 0 = normal (lit albedo), 1 = solid magenta (drain/stencil check), 2 = normals, 3 = light factor,
+// 4 = raw albedo, 5 = one-shot DDS dump of the overlay RTs into $screenshots$,
+// 6 = sun N·L dot (white = sun-facing side of the weapon). Note: HUD is never written into the sun
+//     shadow map by design (render_sun drains only render_graph/render_sorted, not mapHUD), so a
+//     "shadow factor" view would be uniformly 1.0 (lit) and uninformative — sun_dot is used instead.
+extern ENGINE_API int ps_r__hud_overlay_debug;
+// 1 = crossfade alpha on ADS entry/exit (smooth transition), 0 = instant on/off (default)
+extern ENGINE_API int ps_r__hud_overlay_crossfade;
+// Light multiplier for overlay HUD (1.0 = engine default, 1.5-2.0 to approximate world HUD brightness)
+extern ENGINE_API float ps_r__hud_overlay_brightness;
+
 class ENGINE_API IRender
 {
 public:
@@ -539,4 +551,23 @@ public:
         (void)fname;
         return false;
     }
+
+    // HUD overlay scope (g_3d_scopes 3): world pass skips the HUD, live HUD is rendered offscreen into
+    // $user$hud_overlay, then blended over the backbuffer by CompositeHudOverlay before the UI layer.
+    // Default: unsupported (flag never set by game).
+    virtual void SetHudOverlayActive(bool) {}
+    virtual bool IsHudOverlayActive() const { return false; }
+    virtual void RenderHudOverlayToTexture() {}
+    // Blend $user$hud_overlay over the backbuffer (GL native path: explicit stencil/blend/depth state,
+    // avoids the UI quad's inherited stencil-gate and D3D-vs-FBO Y-orientation mismatch).
+    virtual void CompositeHudOverlay() {}
+    // True when this backend blends $user$hud_overlay over the backbuffer itself (CompositeHudOverlay),
+    // so the UI layer must NOT draw the overlay quad again (double-draw bug: the UI path samples the
+    // overlay FBO through stub_notransform_t.vs which inverts NDC-Y for DDS uploads, flipping the FBO
+    // content an extra time -> a second, upside-down HUD over the native composite). GL returns true
+    // (native composite implemented), DX11/base return false (UI quad still owns the composite there).
+    virtual bool CompositeHudOverlayNative() const { return false; }
+    // Crossfade alpha for the overlay (0 = fully transparent, 1 = fully opaque).
+    virtual void SetHudOverlayAlpha(float) {}
+    virtual float GetHudOverlayAlpha() const { return 0.f; }
 };

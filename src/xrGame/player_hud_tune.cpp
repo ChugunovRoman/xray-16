@@ -383,13 +383,15 @@ void CHudTuner::on_tool_frame()
                 }
                 Device.time_factor(time_factor);
             }
-            if (ImGui::BeginCombo("3D Scopes", g_3d_scope_type == 0 ? "Off" : (g_3d_scope_type == 1 ? "PiP (lens zoom)" : "PiP (main FOV)")))
+            static const char* scope_mode_names[] = { "Off", "PiP (lens zoom)", "HUD overlay (cheap)" };
+            const int scope_mode_idx = clampr(g_3d_scope_type, 0, 2);
+            if (ImGui::BeginCombo("3D Scopes", scope_mode_names[scope_mode_idx]))
             {
                 if (ImGui::Selectable("Off", g_3d_scope_type == 0))
                     g_3d_scope_type = 0;
                 if (ImGui::Selectable("PiP (lens zoom)", g_3d_scope_type == 1))
                     g_3d_scope_type = 1;
-                if (ImGui::Selectable("PiP (main FOV)", g_3d_scope_type == 2))
+                if (ImGui::Selectable("HUD overlay (cheap)", g_3d_scope_type == 2))
                     g_3d_scope_type = 2;
                 ImGui::EndCombo();
             }

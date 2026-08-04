@@ -121,6 +121,12 @@ struct ECORE_API ShaderElement : public xr_resource_flagged
         u32 bEmissive : 1;
         u32 bDistort : 1;
         u32 bWmark : 1;
+        // HUD overlay scope (g_3d_scopes 3): marks a shader that samples the second-viewport
+        // backbuffer copy (e.g. the optical scope lens). Used to split mapHUDSorted into two
+        // overlay passes so the lens (which needs a cleared depth buffer) can be drawn separately
+        // from other transparent HUD surfaces (collimator glass etc., which must depth-test
+        // against the HUD mesh). Ignored outside the overlay pipeline.
+        u32 bScopeLens : 1;
     };
 
     Sflags flags;

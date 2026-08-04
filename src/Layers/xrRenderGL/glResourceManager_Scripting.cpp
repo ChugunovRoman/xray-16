@@ -205,6 +205,13 @@ public:
         return *this;
     }
 
+    // HUD overlay scope (g_3d_scopes 3): mark a shader as the scope lens for the overlay split pass.
+    adopt_compiler& _o_scope_lens(bool E)
+    {
+        C->SH->flags.bScopeLens = E;
+        return *this;
+    }
+
     adopt_compiler& _pass(LPCSTR vs, LPCSTR ps)
     {
         TryEndPass();
@@ -352,6 +359,7 @@ void CResourceManager::LS_Load()
                 .def("emissive",               &adopt_compiler::_o_emissive,             return_reference_to<1>())
                 .def("distort",                &adopt_compiler::_o_distort,              return_reference_to<1>())
                 .def("wmark",                  &adopt_compiler::_o_wmark,                return_reference_to<1>())
+                .def("scope_lens",             &adopt_compiler::_o_scope_lens,           return_reference_to<1>())
                 .def("fog",                    &adopt_compiler::_fog,                    return_reference_to<1>())
                 .def("zb",                     &adopt_compiler::_zbuffer,                     return_reference_to<1>())
                 .def("blend",                  &adopt_compiler::_blend,                  return_reference_to<1>())

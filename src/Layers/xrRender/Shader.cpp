@@ -86,6 +86,7 @@ ShaderElement::ShaderElement()
     flags.bEmissive = FALSE;
     flags.bDistort = FALSE;
     flags.bWmark = FALSE;
+    flags.bScopeLens = FALSE;
 }
 
 BOOL ShaderElement::equal(ShaderElement& S)
@@ -99,6 +100,8 @@ BOOL ShaderElement::equal(ShaderElement& S)
     if (flags.bWmark != S.flags.bWmark)
         return FALSE;
     if (flags.bDistort != S.flags.bDistort)
+        return FALSE;
+    if (flags.bScopeLens != S.flags.bScopeLens)
         return FALSE;
     if (passes.size() != S.passes.size())
         return FALSE;

@@ -112,9 +112,15 @@ CRT* CResourceManager::_CreateRT(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 sam
         if (RT->dwWidth == w && RT->dwHeight == h && RT->fmt == f && RT->sampleCount == sampleCount && RT->n_slices == slices_num)
             return RT;
 
+        // Dimension/format mismatch: deregister the old RT from the name map and create a fresh one
+        // under the same name. DO NOT xr_delete(RT) here — external ref_rt handles (e.g.
+        // wpn_icon::s_persist_icon_ui_rt[name]) still hold a raw pointer to it. Deleting now dangles
+        // that pointer and the next resptrcode_crt::create -> _set -> _dec reads ref_count (offset 8)
+        // of freed memory -> AV 0x8. Instead, drop the REGISTERED flag so CRT::~CRT -> _DeleteRT
+        // early-returns, and let the existing ref_count keep the old RT (and its GL resources) alive
+        // until the last external ref_rt releases it — only then CRT::~CRT destroys it.
         m_rtargets.erase(I);
         RT->dwFlags &= ~xr_resource_flagged::RF_REGISTERED;
-        xr_delete(RT);
     }
 
     CRT* RT = xr_new<CRT>();
