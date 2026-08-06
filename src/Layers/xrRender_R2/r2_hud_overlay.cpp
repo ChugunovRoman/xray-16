@@ -45,14 +45,16 @@ constexpr pcstr GBUF_Z_NAME = "$user$__hud_ovl_Z";
 // empty texture (same lifetime trick as s_persist_icon_ui_rt in r2_weapon_icon.cpp).
 // Released from CRender::destroy() — static dtors would run after the resource manager is dead.
 //
-// s_rt_overlay — public RT carrying the $user$hud_overlay name.
-//   GL: resolve + forward passes render DIRECTLY into s_rt_overlay (no work/flip pair). The native
-//       composite (CompositeHudOverlay) samples this FBO texture in its native bottom-up orientation
-//       — no Y-flip compensation, no inherited UI-stencil. This is the fix for the GL upside-down /
-//       transparent-overlay bug.
-//   DX11: resolve + forward passes write into s_rt_work; FlipOverlayV publishes it to s_rt_overlay
-//       for the UI-layer composite (UIGameCustom), which still handles this backend.
-// s_rt_work  — DX11-only private work RT (see above); unused on GL.
+// s_rt_overlay — public RT carrying the $user$hud_overlay name. The UI layer (UIGameCustom) samples
+//   it through stub_notransform_t.vs.
+//   DX: FlipOverlayV publishes s_rt_work -> s_rt_overlay as a 1:1 identity CopyResource.
+//   GL: FlipOverlayV publishes s_rt_work -> s_rt_overlay as a 1:1 identity glBlitFramebuffer (NO Y-flip).
+//       The resolve quad (writer) and the UI composite quad (reader) both use the SAME
+//       stub_notransform_t.vs with the SAME canonical UV order, so they are symmetric — a straight
+//       1:1 copy lands the HUD upright (same as the working wpn_icon path). A Y-flip here inverts it
+//       once and was the "two HUDs / upside-down" bug (hud-overlay-scope-plan.md #14-#22).
+// s_rt_work — private work RT. resolve + forward passes write here on every backend; FlipOverlayV
+//   publishes it to s_rt_overlay for the UI-layer composite.
 ref_rt s_rt_overlay;
 ref_rt s_rt_work;
 ref_rt s_rt_p;
@@ -78,17 +80,11 @@ void ReleaseAll()
 
 void EnsureTargets(CRenderTarget* Tgt, const u32 w, const u32 h)
 {
-    // On GL the resolve + forward passes render DIRECTLY into the public s_rt_overlay (no work/flip
-    // pair) — the native composite (CompositeHudOverlay) samples the overlay in FBO-native orientation,
-    // so the intermediate work RT and the Y-flip blit are not needed. DX11 still uses the work/overlay
-    // split because its UI-layer composite (UIGameCustom) samples $user$hud_overlay with DX conventions.
-#if defined(USE_DX11)
+    // resolve + forward passes always write into the private s_rt_work; FlipOverlayV then publishes
+    // it to the public s_rt_overlay (identity copy on DX, Y-flip blit on GL) for the UI-layer
+    // composite. Both RTs are created on every backend.
     if (s_gbuf_w == w && s_gbuf_h == h && s_rt_p && s_rt_defer && s_rt_z && s_rt_overlay && s_rt_work)
         return;
-#else
-    if (s_gbuf_w == w && s_gbuf_h == h && s_rt_p && s_rt_defer && s_rt_z && s_rt_overlay)
-        return;
-#endif
 
     s_rt_p = nullptr;
     s_rt_n = nullptr;
@@ -108,15 +104,10 @@ void EnsureTargets(CRenderTarget* Tgt, const u32 w, const u32 h)
     }
     s_rt_defer.create(GBUF_DEFER_NAME, w, h, Tgt->rt_Color->fmt, 1);
     s_rt_z.create(GBUF_Z_NAME, w, h, HW.Caps.fDepth, 1, { CRT::CreateSurface });
-#if defined(USE_DX11)
     s_rt_work.create(WORK_NAME, w, h, D3DFMT_A8R8G8B8, 1);
-#endif
     s_rt_overlay.create(RT_NAME, w, h, D3DFMT_A8R8G8B8, 1);
 
-    VERIFY(s_rt_p && s_rt_defer && s_rt_z && s_rt_overlay);
-#if defined(USE_DX11)
-    VERIFY(s_rt_work);
-#endif
+    VERIFY(s_rt_p && s_rt_defer && s_rt_z && s_rt_overlay && s_rt_work);
     if (!RImplementation.o.gbuffer_opt)
         VERIFY(s_rt_n);
 }
@@ -129,14 +120,69 @@ void EnsureResolveShader()
 
 #if defined(USE_DX11)
 // DX: render targets are top-left origin already; the "work -> overlay" blit is a 1:1 identity copy.
-// GL does not use this — on GL the resolve + forward passes render directly into s_rt_overlay, and
-// CompositeHudOverlay samples it in FBO-native orientation (no work/flip pair, see EnsureTargets).
 void FlipOverlayV(const ref_rt& src, const ref_rt& dst)
 {
     if (!src._get() || !dst._get() || !src->pSurface || !dst->pSurface)
         return;
     auto pContext = HW.get_context(CHW::IMM_CTX_ID);
     pContext->CopyResource(dst->pSurface, src->pSurface);
+}
+#elif defined(USE_OGL)
+// GL: the work -> overlay copy is a 1:1 IDENTITY blit, the SAME as DX's CopyResource.
+//
+// Why NO Y-flip (this was the "two HUDs / upside-down" bug, hud-overlay-scope-plan.md #14-#22):
+// both the resolve quad (writer) and the UI composite quad (reader) run through the SAME VS
+// (stub_notransform_t.vs), with the SAME canonical UV order (top-vertex -> V~0, bottom -> V~1) and
+// the SAME top-down pixel input convention. The resolve quad writes a screen pixel with top-down
+// coordinate y into work-RT at the NDC position stub_notransform_t.vs maps it to; the UI quad reads
+// overlay-RT back through the identical mapping. The two sides are SYMMETRIC, so a straight 1:1
+// copy lands the HUD upright — exactly like the working wpn_icon path (r2_weapon_icon.cpp), which
+// resolves straight into the public UI RT with no flip at all.
+//
+// The Y-flip in CopyBackbufferToSecondVPRT (r2_R_render.cpp) is NOT applicable here: that blit feeds
+// the scope LENS, whose reader (model_scope_lense.ps) samples s_vp2 via gl_FragCoord (lower-left
+// origin) and does its OWN V-flip in the pixel shader — an ASYMMETRIC path. Copying that flip onto the
+// symmetric overlay path inverts the HUD once, producing an upside-down transparent overlay over the
+// (also-composited) world copy — i.e. the visible "two HUDs".
+//
+// CRT::pRT is a bare GLuint texture on GL (the engine keeps ONE shared FBO and re-attaches textures
+// on the fly — no per-CRT framebuffer), so this uses two scratch FBOs + glFramebufferTexture2D +
+// glBlitFramebuffer, saving/restoring the engine's FBO bindings (same skeleton as
+// CopyBackbufferToSecondVPRT, only the source Y range differs).
+void FlipOverlayV(const ref_rt& src, const ref_rt& dst)
+{
+    if (!src._get() || !dst._get() || !src->pRT || !dst->pRT)
+        return;
+    const GLuint srcTex = src->pRT;
+    const GLuint dstTex = dst->pRT;
+    const GLuint w = dst->dwWidth;
+    const GLuint h = dst->dwHeight;
+
+    static GLuint s_readFBO = 0, s_drawFBO = 0;
+    if (!s_readFBO)
+        CHK_GL(glGenFramebuffers(1, &s_readFBO));
+    if (!s_drawFBO)
+        CHK_GL(glGenFramebuffers(1, &s_drawFBO));
+
+    GLint prevRead = 0, prevDraw = 0;
+    CHK_GL(glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevRead));
+    CHK_GL(glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw));
+
+    CHK_GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, s_readFBO));
+    CHK_GL(glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, srcTex, 0));
+    CHK_GL(glReadBuffer(GL_COLOR_ATTACHMENT0));
+
+    CHK_GL(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_drawFBO));
+    CHK_GL(glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, dstTex, 0));
+    CHK_GL(glDrawBuffer(GL_COLOR_ATTACHMENT0));
+
+    // 1:1 identity copy (no Y-flip): src 0..h maps to dst 0..h, top to top. A Y-flip here was the
+    // historical "two HUDs / upside-down" bug (both the resolve quad and the UI composite quad share
+    // stub_notransform_t.vs with the canonical UV order, so they are symmetric — a flip inverts once).
+    CHK_GL(glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST));
+
+    CHK_GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, prevRead));
+    CHK_GL(glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prevDraw));
 }
 #endif
 } // namespace hud_overlay
@@ -206,6 +252,112 @@ void DumpRT(pcstr label, const ref_rt& rt)
         Msg("! [hud_overlay] DDS: cannot write $screenshots$\\%s", fname);
 }
 } // namespace hud_overlay
+#elif defined(USE_OGL)
+// Debug (r__hud_overlay_debug 5): dump overlay RTs to $screenshots$ on GL.
+// GL has no DirectXTex; we read the texture back via glReadPixels (into a scratch read-FBO, the same
+// FBO-pair skeleton FlipOverlayV uses) and write a minimal uncompressed RGBA8 DDS with the DX9 legacy
+// header layout, matching the DX11 DumpRT output byte-for-byte so the same viewers open both.
+namespace hud_overlay
+{
+void DumpRT(pcstr label, const ref_rt& rt)
+{
+    if (!label || !rt._get() || !rt->pRT)
+        return;
+
+    const GLuint tex = rt->pRT;
+    const u32 w = rt->dwWidth;
+    const u32 h = rt->dwHeight;
+    if (!w || !h)
+        return;
+
+    // glReadPixels reads the current READ framebuffer. Attach the source texture to a scratch read-FBO
+    // (same pattern as FlipOverlayV) and save/restore GL_READ_FRAMEBUFFER_BINDING so we don't disturb
+    // the engine's shared FBO state.
+    static GLuint s_readFBO = 0;
+    if (!s_readFBO)
+        CHK_GL(glGenFramebuffers(1, &s_readFBO));
+
+    GLint prevRead = 0;
+    CHK_GL(glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevRead));
+    CHK_GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, s_readFBO));
+    CHK_GL(glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0));
+    CHK_GL(glReadBuffer(GL_COLOR_ATTACHMENT0));
+
+    const GLenum status = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+    {
+        Msg("! [hud_overlay] DDS [%s]: read FBO incomplete (0x%x)", label, (unsigned)status);
+        CHK_GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, prevRead));
+        return;
+    }
+
+    // Read as RGBA8 (engine overlay RTs are RGBA8). glReadPixels is bottom-row-first (GL convention);
+    // we keep that order and flip in the DDS header via pitch/height sign is not standard, so instead
+    // we write rows top-down into the DDS payload for parity with the DX11 dumps.
+    xr_vector<u8> pixels;
+    pixels.resize(size_t(w) * h * 4);
+    CHK_GL(glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data()));
+    CHK_GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, prevRead));
+
+    // Flip rows bottom->top so the file matches the DX11 (top-down) dumps for direct comparison.
+    xr_vector<u8> flipped;
+    flipped.resize(pixels.size());
+    const u32 rowBytes = w * 4;
+    for (u32 y = 0; y < h; ++y)
+        memcpy(&flipped[size_t(y) * rowBytes], &pixels[size_t(h - 1 - y) * rowBytes], rowBytes);
+
+    static u32 s_dump_seq{};
+    string64 t_stemp{};
+    string_path fname{};
+    xr_sprintf(fname, "hud_ovl_%s_%s_%u.dds", label, timestamp(t_stemp), ++s_dump_seq);
+
+    if (IWriter* fs = FS.w_open("$screenshots$", fname))
+    {
+        // Minimal DDS header (DX9 legacy, matches DX11 DumpRT's DirectX::DDS_FLAGS_FORCE_DX9_LEGACY).
+        // magic + DDSURFACEDESC2 (124 bytes). Uncompressed RGBA8, no mipmaps.
+        #pragma pack(push, 1)
+        struct DDSPixelFormat
+        {
+            u32 size;   u32 flags; u32 fourCC; u32 rgbBitCount;
+            u32 rMask;  u32 gMask; u32 bMask;  u32 aMask;
+        };
+        struct DDSHeader
+        {
+            u32 size; u32 flags; u32 height; u32 width; u32 pitchOrLinearSize;
+            u32 depth; u32 mipMapCount; u32 reserved1[11];
+            DDSPixelFormat ddspf;
+            u32 caps; u32 caps2; u32 caps3; u32 caps4; u32 reserved2;
+        };
+        #pragma pack(pop)
+        static_assert(sizeof(DDSHeader) == 124, "DDS header must be 124 bytes");
+
+        DDSHeader hdr{};
+        hdr.size = 124;
+        hdr.flags = 0x1007; // DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT
+        hdr.flags |= 0x1000; // DDSD_PITCH
+        hdr.height = h;
+        hdr.width = w;
+        hdr.pitchOrLinearSize = rowBytes;
+        hdr.mipMapCount = 0;
+        hdr.ddspf.size = 32;
+        hdr.ddspf.flags = 0x41; // DDPF_RGB | DDPF_ALPHAPIXELS
+        hdr.ddspf.rgbBitCount = 32;
+        hdr.ddspf.rMask = 0x00FF0000;
+        hdr.ddspf.gMask = 0x0000FF00;
+        hdr.ddspf.bMask = 0x000000FF;
+        hdr.ddspf.aMask = 0xFF000000;
+        hdr.caps = 0x1000; // DDSCAPS_TEXTURE
+
+        fs->w("DDS ", 4);                       // magic
+        fs->w(&hdr, sizeof(hdr));               // header
+        fs->w(flipped.data(), flipped.size());  // pixels (top-down)
+        FS.w_close(fs);
+        Msg("~ [hud_overlay] DDS -> $screenshots$\\%s", fname);
+    }
+    else
+        Msg("! [hud_overlay] DDS: cannot write $screenshots$\\%s", fname);
+}
+} // namespace hud_overlay
 #endif
 
 void CRender::RenderHudOverlayToTexture()
@@ -219,7 +371,6 @@ void CRender::RenderHudOverlayToTexture()
         return;
     }
 
-#if defined(USE_DX11)
     // When the overlay is active, the world pass deliberately skips HUD draining (skip_world_hud in
     // r2_R_render.cpp + IsHudOverlayActive() guards on mapHUDSorted/mapHUDEmissive in r__dsgraph_render).
     // The drain is OUR job - done below. If we bail before the drain, the HUD maps would linger until
@@ -303,6 +454,10 @@ void CRender::RenderHudOverlayToTexture()
     // reference them. These mirror the save points that were previously scattered through the body.
     const float blender_y_saved = g_pGamePersistent ? g_pGamePersistent->m_pGShaderConstants->m_blender_mode.y : 0.f;
     const float blender_w_saved = g_pGamePersistent ? g_pGamePersistent->m_pGShaderConstants->m_blender_mode.w : 0.f;
+    // Save m_svp_rt_capture.z — we use this spare bit (x is consumed by the lens PS discard branch,
+    // y/w are reserved; z is unused upstream) to flag the overlay pass to the lens shader so it can
+    // skip the s_vp2 V-flip that is only correct in the world pass.
+    const float svp_capture_z_saved = g_pGamePersistent ? g_pGamePersistent->m_pGShaderConstants->m_svp_rt_capture.z : 0.f;
     const bool wasSVPActive = Device.m_SecondViewport.IsSVPActive();
     bool shadow_slice_set = false; // true once we set_slice_read(SE_SUN_NEAR); the guard restores FAR
 
@@ -312,7 +467,7 @@ void CRender::RenderHudOverlayToTexture()
         CRender& owner;
         CBackend& cmd_list;
         SDeviceCam& saved;
-        float blender_y, blender_w;
+        float blender_y, blender_w, svp_capture_z;
         bool wasSVP;
         bool& shadow_slice_set; // by ref so the guard sees if the slice was switched
         u32 w, h;
@@ -324,14 +479,22 @@ void CRender::RenderHudOverlayToTexture()
             {
                 g_pGamePersistent->m_pGShaderConstants->m_blender_mode.y = blender_y;
                 g_pGamePersistent->m_pGShaderConstants->m_blender_mode.w = blender_w;
+                g_pGamePersistent->m_pGShaderConstants->m_svp_rt_capture.z = svp_capture_z;
             }
             // Restore cascade slice: the resolve used NEAR; leave FAR for the rest of the frame.
             if (shadow_slice_set && owner.Target->rt_smap_depth)
                 owner.Target->rt_smap_depth->set_slice_read(SE_SUN_FAR);
             // Restore the main target and common states for the following UI rendering.
+            // set_Stencil(FALSE) is essential on GL: the mini-G-buffer pass sets REPLACE 0x01 and the
+            // UI-layer composite quad (UIGameCustom) does not set stencil itself, so it would inherit
+            // an EQUAL-0x01 gate and only draw the overlay inside the HUD mask (erasing it where the
+            // mask is empty). Clearing stencil here lets the UI quad composite over the whole screen.
+            cmd_list.set_Stencil(FALSE);
             cmd_list.set_Z(TRUE);
             cmd_list.set_CullMode(CULL_CCW);
-            owner.Target->u_setrt(cmd_list, w, h, owner.Target->get_base_rt(), nullptr, nullptr, owner.Target->get_base_zb());
+            // (0, 0) for the unused RT slots — matches the engine's canonical base-RT bind
+            // (r2_R_render.cpp:42). On GL GLuint is an integer type, so 0 is the null texture handle.
+            owner.Target->u_setrt(cmd_list, w, h, owner.Target->get_base_rt(), 0, 0, owner.Target->get_base_zb());
             owner.rmNormal(cmd_list);
             // Restore the (post-processing) Device camera state saved above.
             Device.mView = saved.mView;
@@ -347,7 +510,7 @@ void CRender::RenderHudOverlayToTexture()
             Device.fASPECT = saved.fASPECT;
             GEnv.Render->SetCacheXform(Device.mView, Device.mProject);
         }
-    } state_guard{ *this, RCache, saved, blender_y_saved, blender_w_saved, wasSVPActive, shadow_slice_set, w, h };
+    } state_guard{ *this, RCache, saved, blender_y_saved, blender_w_saved, svp_capture_z_saved, wasSVPActive, shadow_slice_set, w, h };
 
     Device.mView = m_hudOvlCam.mView;
     Device.mProject = m_hudOvlCam.mProject;
@@ -439,8 +602,13 @@ void CRender::RenderHudOverlayToTexture()
     //      G-buffer (step 1) — that is m_hudOvlCam.mInvView (= Device.mInvView right now, since we
     //      overwrote Device above). 'saved' holds the post-processing camera (captured AFTER world
     //      render + post-effects), which is unrelated to the HUD G-buffer and would mis-project.
+    //      DX11 only: GL first iteration resolves WITHOUT sun shadow (shadow sampling in a standalone
+    //      shader was never completed — m_shadow binding did not work; see hud-overlay-scope-plan.md
+    //      bug #23 / "D. Shadow sampling — ОТЛОЖЕН"). The GL resolve shader applies ambient+hemi+sun
+    //      N·L only (sun_sh = 1), so no m_shadow is set there.
     bool shadow_ok = false;
     Fmatrix m_shadow; // declared here so it survives the if-block; set_c runs AFTER set_Shader (below)
+#if defined(USE_DX11)
     if (Target->rt_smap_depth && RImplementation.r_sun.sun)
     {
         light* sun = RImplementation.r_sun.sun;
@@ -463,6 +631,7 @@ void CRender::RenderHudOverlayToTexture()
         shadow_slice_set = true; // tell the RAII guard to restore FAR on exit
         shadow_ok = true;
     }
+#endif // USE_DX11
 
     // HUD overlay resolve must darken under roofs/trees like the world does. combine applies extra
     // multipliers in C++ (r4_rendertarget_phase_combine.cpp:120-132) that the auto-bound
@@ -484,12 +653,17 @@ void CRender::RenderHudOverlayToTexture()
         ps_r2_sun_lumscale,
         ssao_present ? 1.0f : 0.0f);
 
-    // 2) Resolve albedo into the overlay RT (transparent background via stencil mask).
-    //    On GL we render DIRECTLY into s_rt_overlay (the public $user$hud_overlay) — no work/flip pair:
-    //    CompositeHudOverlay samples this FBO texture in its native orientation, so there is no Y-flip
-    //    step. On DX11 the resolve still targets s_rt_work; FlipOverlayV publishes it to s_rt_overlay
-    //    at the end (the DX UI-layer composite samples with DX conventions).
+    // 2) Resolve albedo into the work RT (transparent background via stencil mask). On every backend
+    //    resolve writes into s_rt_work; FlipOverlayV publishes it to s_rt_overlay afterwards (1:1
+    //    identity copy on BOTH DX and GL — no Y-flip) so the UI-layer composite (UIGameCustom) sees
+    //    the HUD upright (resolve quad and UI quad share stub_notransform_t.vs + canonical UV order).
+#if defined(USE_DX11)
     Target->u_setrt(RCache, s_rt_work, nullptr, nullptr, s_rt_z->pZRT[RCache.context_id]);
+#elif defined(USE_OGL)
+    Target->u_setrt(RCache, w, h, s_rt_work->pRT, 0, 0, s_rt_z->pZRT);
+#else
+#   error No graphics API selected or enabled!
+#endif
     RImplementation.rmNormal(RCache);
     const Fcolor clear_ui(0.f, 0.f, 0.f, 0.f);
     RCache.ClearRT(s_rt_work, clear_ui);
@@ -499,6 +673,18 @@ void CRender::RenderHudOverlayToTexture()
     RCache.set_Stencil(FALSE);
     RCache.set_ColorWriteEnable(); // RGBA all channels
 
+    // NOTE: the manual set_* calls above run BEFORE set_Shader below. On GL, set_Shader invokes
+    // glState::Apply(), which RE-APPLIES the resolve pass's stencil/depth/cull/blend state from the
+    // pass's glState descriptor. The resolve shader's .s block does not explicitly disable stencil/Z,
+    // and the glState default ctor enables StencilEnable=TRUE and DepthEnable=TRUE — so Apply()
+    // re-enables GL_STENCIL_TEST and GL_DEPTH_TEST, leaving the resolve quad gated by the HUD-shaped
+    // 0x01 stencil mask written in step 1 (and the filled Z buffer). On GL this cuts a HUD-shaped hole
+    // in the resolve coverage (the "second upside-down transparent HUD" symptom): the quad is fixed-
+    // function clipped in the HUD silhouette instead of overwriting the whole RT. The proper fix is to
+    // issue the protective state setters AFTER set_Shader so they win, mirroring the post-pass
+    // set_Stencil(FALSE) pattern already used in the StateGuard destructor (r2_hud_overlay.cpp lines
+    // 574-580). The block is repeated after set_Shader (below) for that reason; the pre-set_Shader
+    // block is kept as a no-op safety in case a future path skips the shader setup.
     u32 Offset;
     const u32 C = color_rgba(255, 255, 255, 255);
     const float _wf = float(w);
@@ -536,6 +722,17 @@ void CRender::RenderHudOverlayToTexture()
     if (shadow_ok)
         RCache.set_c("m_shadow", m_shadow);
     RCache.set_c("hud_ovl_lumscale", hud_ovl_lumscale);
+    // GL: glState::Apply() runs inside set_Shader and re-enables StencilEnable=TRUE / DepthEnable=TRUE
+    // from the resolve pass's glState descriptor (the .s block does not disable them). The mini-G-buffer
+    // step wrote a HUD-shaped 0x01 stencil mask and filled the Z buffer, so those re-enabled tests clip
+    // the fullscreen resolve quad to the HUD silhouette, cutting a HUD-shaped hole in the silly work RT
+    // — the "second upside-down transparent HUD". Re-apply the protective state here, AFTER set_Shader,
+    // so it wins (mirrors the StateGuard post-pass pattern). On DX11 these are a no-op against the
+    // pass-desc state (the DSS object is rebuilt lazily from the cached desc), so this is portable.
+    RCache.set_CullMode(CULL_NONE);
+    RCache.set_Z(FALSE);
+    RCache.set_Stencil(FALSE);
+    RCache.set_ColorWriteEnable();
     // $user RT keeps the same CTexture when CRT is recreated; set_Textures skips bind if the pointer
     // matches, leaving a stale/released SRV — force rebind for every texture slot in this pass.
     if (ShaderElement* se = s_resolve_shader->E[0]._get())
@@ -573,34 +770,50 @@ void CRender::RenderHudOverlayToTexture()
     //        HUD-mesh depth so the glass is depth-tested and does not shine through the mesh.
     //      Pass B — scope lens (bScopeLens): after ClearHudOverlayDepth() resets s_rt_z to far, so
     //        the lens (Z-rejected by the scope body otherwise) draws over the lens opening.
+#if defined(USE_DX11)
     Target->u_setrt(RCache, s_rt_work, nullptr, nullptr, s_rt_z->pZRT[RCache.context_id]);
+#elif defined(USE_OGL)
+    Target->u_setrt(RCache, w, h, s_rt_work->pRT, 0, 0, s_rt_z->pZRT);
+#else
+#   error No graphics API selected or enabled!
+#endif
     RCache.set_Stencil(FALSE);
     RCache.set_Z(TRUE); // Z test ON — pass A tests against the step-1 HUD-mesh depth
     // wasSVPActive was captured above (before the override); the RAII guard restores it on exit.
     Device.m_SecondViewport.SetSVPActive(true);
-    // Force-rebind $user$viewport2 — the CTexture for rt_secondVP may hold a stale SRV after
-    // ResizeSecondVPRT; surface_set re-creates the SRV so set_Textures sees the current one.
+    // Flag the overlay pass to the scope lens shader (model_scope_lense.ps) via the spare
+    // m_svp_rt_capture.z bit (x is consumed by the discard branch, y/w are reserved elsewhere;
+    // z is unused upstream). The lens shader's V-flip for s_vp2 (svp_tc.y = 1 - gl_FragCoord.y/H)
+    // is correct only in the world pass where rt_secondVP is stored the standard GL way; the overlay
+    // pipeline stores the published overlay RT via stub_notransform_t.vs whose NDC-Y inversion makes
+    // that flip double-invert the lens image here, so the lens must SKIP the V-flip in the overlay pass.
+    if (g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
+        g_pGamePersistent->m_pGShaderConstants->m_svp_rt_capture.z = 1.0f;
+    // Force-rebind $user$viewport2 so the lens shader samples the current rt_secondVP content.
+    // DX11: the CTexture may hold a stale SRV after ResizeSecondVPRT; surface_set re-creates it.
+    // GL: surface_set only stores the GLuint (no SRV to invalidate), but calling it is harmless and
+    // keeps the path uniform — the blit in CopyBackbufferToSecondVPRT writes the same texture name.
+#if defined(USE_DX11)
     if (Target->rt_secondVP && Target->rt_secondVP->pTexture._get())
     {
         CTexture* T = Target->rt_secondVP->pTexture._get();
         T->surface_set(Target->rt_secondVP->pSurface);
     }
+#endif
     RImplementation.rmNormal(RCache);
     RCache.set_ColorWriteEnable();
 
     // Two-pass overlay drain: non-lens (depth-tested vs mesh) then lens (depth cleared to far).
     dg.render_hud_blends(&ClearHudOverlayDepth);
 
-    // Publish the composited overlay.
-    // DX11: FlipOverlayV blits s_rt_work -> s_rt_overlay (1:1 identity copy; the DX UI-layer composite
-    //   samples the public name), then force-rebinds the $user$hud_overlay CTexture.
-    // GL: nothing to do here — resolve + forward passes already wrote into s_rt_overlay directly
-    //   (no work/flip pair). CompositeHudOverlay force-rebinds the overlay texture before it draws.
-#if defined(USE_DX11)
+    // Publish the composited overlay from the work RT to the public $user$hud_overlay RT.
+    // Both DX and GL do a 1:1 identity copy (DX: CopyResource; GL: identity glBlitFramebuffer, NO
+    // Y-flip — resolve quad and UI quad share stub_notransform_t.vs + canonical UV order, so they are
+    // symmetric and a flip would invert the HUD; see FlipOverlayV for the full rationale).
+    // DX then force-rebinds the $user$hud_overlay CTexture (stale-SRV guard after CopyResource); on GL
+    // surface_set only stores the GLuint the blit already wrote into, so no rebind is needed there.
     FlipOverlayV(s_rt_work, s_rt_overlay);
-    // Force-rebind the $user$hud_overlay CTexture: it carries the SAME texture object across recreations,
-    // so set_Textures would otherwise keep a stale/non-current SRV. surface_set refreshes the binding
-    // so the UI composite (UIGameCustom) samples the just-blitted content.
+#if defined(USE_DX11)
     if (s_rt_overlay && s_rt_overlay->pTexture._get())
     {
         CTexture* T = s_rt_overlay->pTexture._get();
@@ -611,10 +824,10 @@ void CRender::RenderHudOverlayToTexture()
     // SVP state, m_blender_mode.y/w, cascade slice, render target, Z/stencil/cull and the Device
     // camera are all restored by the state_guard destructor on scope exit (no manual restore here).
 
-    // r__hud_overlay_debug 5: one-shot RT dump per activation for visual inspection.
-    // Dumps the overlay RT (what the UI samples on DX), plus the G-buffer and secondVP RTs, and on DX11
-    // also dumps the work RT (pre-FlipOverlayV) to compare with the published overlay. Done BEFORE the
-    // guard's destructor so we dump the overlay RT, not the restored base RT.
+    // r__hud_overlay_debug 5: one-shot RT dump per activation for visual inspection. Dumps the
+    // published overlay RT plus the G-buffer and secondVP RTs and the work RT (pre-FlipOverlayV) to
+    // compare with the published overlay. Done BEFORE the guard's destructor so we dump the overlay
+    // RT, not the restored base RT.
     //
     // Trigger on the FIRST frame where m_HudOverlayAlpha >= 0.9 (stable aim, fully raised weapon),
     // NOT on the first activation frame: the HUD crossfade lerps alpha 0->1 across the ADS entry
@@ -622,6 +835,7 @@ void CRender::RenderHudOverlayToTexture()
     // near-transparent composite, which looks like "the overlay is fully transparent" but is just the
     // fade-in. Dumping at alpha >= 0.9 captures the steady-state the player actually sees while aiming.
     static bool s_dumped = false;
+    // Backend-agnostic: DumpRT has both DX11 (DirectXTex) and GL (glReadPixels) implementations.
     if (ps_r__hud_overlay_debug == 5 && !s_dumped && m_HudOverlayAlpha >= 0.9f)
     {
         s_dumped = true;
@@ -637,22 +851,10 @@ void CRender::RenderHudOverlayToTexture()
     if (ps_r__hud_overlay_debug != 5)
         s_dumped = false;
     // state_guard destructor runs here, restoring all overridden global state.
-#else  // USE_DX11
-    // GL stub: HUD overlay is DX11-only (see r2.h SetHudOverlayActive). m_HudOverlayActive is forced
-    // false on GL, so the early-return above is what normally runs; this body exists only to keep the
-    // function linkable on GL. Flush the HUD maps (mirrors the DX11 early-exit) for consistency.
-    auto& dg = get_imm_context();
-    dg.mapHUD.clear();
-    dg.mapHUDSorted.clear();
-    dg.mapHUDEmissive.clear();
-#endif // USE_DX11
 }
 
-// Native overlay composite. Previously this drew a fullscreen $user$hud_overlay quad over the GL
-// backbuffer to work around UI-layer (CUIStatic) stencil/Y-orientation issues (bug #22). The GL path
-// was removed after it produced a magenta silhouette fringe; GL now keeps the overlay feature off
-// entirely (see r2.h SetHudOverlayActive), so this method has nothing to do on any backend. The DX11
-// UI-layer composite in UIGameCustom was never routed through here either. Kept as an empty stub to
-// preserve the IRender vtable layout shared with xrGame.
+// Native overlay composite is unused on every backend: the overlay is composited by the UI layer
+// (UIGameCustom CUIStatic sampling $user$hud_overlay). Kept as an empty stub to preserve the IRender
+// vtable layout shared with xrGame.
 void CRender::CompositeHudOverlay() {}
 } // namespace xray::render::RENDER_NAMESPACE

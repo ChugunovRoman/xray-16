@@ -545,24 +545,17 @@ public:
     void WeaponIcon_ReleaseAllUserIconRts() override;
     bool WeaponIcon_SavePersistedUserRtToDdsDxt5(pcstr user_texture_name, pcstr fs_root, pcstr fname) override;
 
-    // HUD overlay scope (g_3d_scopes 2): DX11-only. On GL the feature is force-disabled here so the
-    // world pass keeps draining the HUD normally (skip_world_hud stays false) and no overlay quad is
-    // ever drawn — this is the rollback of the GL-native composite (bug #22 magenta fringe).
-    void SetHudOverlayActive(bool v) override
-    {
-#if defined(USE_OGL)
-        m_HudOverlayActive = false;
-#else
-        m_HudOverlayActive = v;
-#endif
-    }
+    // HUD overlay scope (g_3d_scopes 2): the live HUD is rendered offscreen into $user$hud_overlay
+    // and composited over the world by the UI layer (UIGameCustom). The composite stays in the UI
+    // layer on every backend (no native CompositeHudOverlay pass); FlipOverlayV publishes the work RT
+    // to the overlay RT as a 1:1 identity copy on every backend (no Y-flip — the resolve quad and the
+    // UI composite quad share stub_notransform_t.vs + canonical UV order, so they are symmetric).
+    void SetHudOverlayActive(bool v) override { m_HudOverlayActive = v; }
     bool IsHudOverlayActive() const override { return m_HudOverlayActive; }
     void RenderHudOverlayToTexture() override;
     void CompositeHudOverlay() override;
-    // HUD overlay (g_3d_scopes 2) is a DX11-only feature: the GL-native composite that tried to
-    // blend $user$hud_overlay over the backbuffer produced a magenta silhouette fringe (bug #22) and
-    // has been removed. GL never reports a native composite, so the UI-layer quad stays disabled too
-    // (see SetHudOverlayActive below) and the feature is effectively off on GL.
+    // The composite is owned by the UI layer (UIGameCustom) on every backend, so no backend reports
+    // a native composite and the UI quad is always the one drawing $user$hud_overlay.
     bool CompositeHudOverlayNative() const override { return false; }
     void SetHudOverlayAlpha(float v) override { m_HudOverlayAlpha = v; }
     float GetHudOverlayAlpha() const override { return m_HudOverlayAlpha; }
