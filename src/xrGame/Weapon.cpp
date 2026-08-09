@@ -1027,17 +1027,6 @@ void CWeapon::Load3DScopeParams(LPCSTR section)
     // Нижняя граница зума прицела (из этой же секции; m_fScopeZoomFactor в структуре выставится позже в LoadCurrentScopeParams)
     float scope_zoom = pSettings->read_if_exists<float>(section, "scope_zoom_factor", 83.3f);
     m_fSecondRTZoomFactor = _max(m_fSecondRTZoomFactor, scope_zoom);
-
-    // g_3d_scopes 2 (overlay): when an optical scope is attached/permanent the camera itself carries the
-    // zoom factor, so seed m_fRTZoomFactor from 3d_zoom_factor (the entry-point FOV). OnZoomIn() restores
-    // m_fRTZoomFactor on re-aim and OnZoomOut() persists the last wheel-adjusted value there — giving
-    // "remember last zoom" behaviour.
-    // Only do this for an ACTUAL scope: for iron sights there is no 3d_zoom_factor in the weapon section
-    // (it defaults to 100.0), so seeding from it would clobber m_fScopeZoomFactor and break the ADS FOV
-    // reduction (scope_zoom_factor). The matching (IsScopeAttached||IsScopePermament) guard mirrors
-    // CurrentZoomFactor(), which is what OnZoomIn() ultimately applies.
-    if (g_3d_scope_type == 2 && (IsScopeAttached() || IsScopePermament()))
-        m_fRTZoomFactor = m_zoom_params.m_f3dZoomFactor;
 }
 
 bool CWeapon::net_Spawn(CSE_Abstract* DC)
@@ -1057,13 +1046,6 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
         m_zoom_params.m_fScopeZoomFactor = pSettings->r_float(m_section_id.c_str(), "scope_zoom_factor");
 
     m_fRTZoomFactor = m_zoom_params.m_fScopeZoomFactor;
-    // g_3d_scopes 2 (overlay): only seed m_fRTZoomFactor from 3d_zoom_factor when an optical scope is
-    // actually attached/permanent — that's the case where CurrentZoomFactor()/OnZoomIn() apply 3d_zoom_factor
-    // to the camera. For iron sights there is no 3d_zoom_factor (defaults to 100.0), so seeding from it
-    // would clobber m_fScopeZoomFactor (scope_zoom_factor) and break the ADS FOV reduction. See the matching
-    // guard in Load3DScopeParams() and the rationale in CurrentZoomFactor().
-    if (g_3d_scope_type == 2 && (IsScopeAttached() || IsScopePermament()))
-        m_fRTZoomFactor = m_zoom_params.m_f3dZoomFactor;
     SetState(E->wpn_state);
     SetNextState(E->wpn_state);
 
@@ -2670,9 +2652,9 @@ void CWeapon::UpdateAddonsVisibility()
 void CWeapon::InitAddons() {}
 float CWeapon::CurrentZoomFactor()
 {
-    // g_3d_scopes 1 (PiP) and 2 (overlay) both apply the 3D-scope FOV (3d_zoom_factor) to the camera
-    // when aiming through an optical scope, so the HUD-weapon FOV behaves the same way in both modes.
-    if ((g_3d_scope_type == 1 || g_3d_scope_type == 2) && (IsScopeAttached() || IsScopePermament()))
+    // g_3d_scopes 1 (PiP): camera carries 3d_zoom_factor (entry FOV); lens zoom is separate via SVP.
+    // g_3d_scopes 2 (overlay): main FOV uses normal scope_zoom_factor — same image feeds the lens.
+    if (g_3d_scope_type == 1 && (IsScopeAttached() || IsScopePermament()))
         return m_zoom_params.m_f3dZoomFactor;
 
     if (IsScopePermament())
@@ -2742,8 +2724,8 @@ void CWeapon::OnZoomIn()
     {
         // g_3d_scopes 1 (PiP): the camera FOV is fixed at 3d_zoom_factor; dynamic zoom is driven
         // separately by m_fSecondRTZoomFactor (second VP) and never resets, so always (re)apply 3d_zoom_factor here.
-        // g_3d_scopes 2 (overlay) and other modes: the camera itself carries the zoom. OnZoomOut() saves the last
-        // wheel-adjusted value into m_fRTZoomFactor, so restore it on re-aim instead of resetting back to 3d_zoom_factor.
+        // g_3d_scopes 2 (overlay) and other modes: main FOV uses scope_zoom_factor via m_fRTZoomFactor.
+        // OnZoomOut() saves the last wheel-adjusted value there, so restore it on re-aim.
         if (g_3d_scope_type == 1)
             SetZoomFactor(m_zoom_params.m_f3dZoomFactor);
         else
