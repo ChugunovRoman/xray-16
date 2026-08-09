@@ -4098,18 +4098,6 @@ void CWeapon::UpdateHudOverlay()
     GEnv.Render->SetHudOverlayActive(active);
     GEnv.Render->SetHudOverlayAlpha(active ? alpha : 0.f);
 
-    // HUD overlay scope (g_3d_scopes 2): diagnostic trace of the crossfade state. Logged only while the
-    // overlay is active so the spam is bounded to ADS. Confirm alpha reaches 1.0 when the aim is held
-    // (rotFactor→1.0, m_bHudOverlayLocked latches) — values stuck near 0 indicate the entry fade never
-    // completes (rotFactor not reaching 0.9) or the lock is being reset every frame.
-    if (active && ps_r__hud_overlay_crossfade)
-        Msg("~ [hud_overlay] xfade: rotFactor=%.3f fadeAlpha=%.3f locked=%d alpha=%.3f aiming=%d",
-            rotFactor,
-            clampr((rotFactor - 0.5f) / 0.4f, 0.f, 1.f),
-            m_zoom_params.m_bHudOverlayLocked ? 1 : 0,
-            alpha,
-            aiming ? 1 : 0);
-
     // Reuse the lens shader "second VP" flag so the scope lens samples the backbuffer copy (rt_secondVP).
     g_pGamePersistent->m_pGShaderConstants->m_blender_mode.z = active ? 1.0f : 0.0f;
 }

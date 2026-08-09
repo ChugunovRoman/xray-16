@@ -283,16 +283,12 @@ void DumpRT(pcstr label, const ref_rt& rt)
     ID3DResource* pSrc{};
     rt->pRT->GetResource(&pSrc);
     if (!pSrc)
-    {
-        Msg("! [hud_overlay] DDS [%s]: GetResource failed", label);
         return;
-    }
 
     DirectX::ScratchImage image;
     const HRESULT cap = CaptureTexture(HW.pDevice, HW.get_context(CHW::IMM_CTX_ID), pSrc, image);
     if (FAILED(cap))
     {
-        Msg("! [hud_overlay] DDS [%s]: CaptureTexture failed hr=0x%08x", label, (unsigned)cap);
         _RELEASE(pSrc);
         return;
     }
@@ -301,10 +297,7 @@ void DumpRT(pcstr label, const ref_rt& rt)
     const HRESULT hr = SaveToDDSMemory(*image.GetImage(0, 0, 0), DirectX::DDS_FLAGS_FORCE_DX9_LEGACY, saved);
     _RELEASE(pSrc);
     if (FAILED(hr))
-    {
-        Msg("! [hud_overlay] DDS [%s]: SaveToDDSMemory failed hr=0x%08x", label, (unsigned)hr);
         return;
-    }
 
     static u32 s_dump_seq{};
     string64 t_stemp{};
@@ -315,10 +308,7 @@ void DumpRT(pcstr label, const ref_rt& rt)
     {
         fs->w(saved.GetBufferPointer(), saved.GetBufferSize());
         FS.w_close(fs);
-        Msg("~ [hud_overlay] DDS -> $screenshots$\\%s", fname);
     }
-    else
-        Msg("! [hud_overlay] DDS: cannot write $screenshots$\\%s", fname);
 }
 } // namespace hud_overlay
 #elif defined(USE_OGL)
@@ -355,7 +345,6 @@ void DumpRT(pcstr label, const ref_rt& rt)
     const GLenum status = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE)
     {
-        Msg("! [hud_overlay] DDS [%s]: read FBO incomplete (0x%x)", label, (unsigned)status);
         CHK_GL(glBindFramebuffer(GL_READ_FRAMEBUFFER, prevRead));
         return;
     }
@@ -421,24 +410,15 @@ void DumpRT(pcstr label, const ref_rt& rt)
         fs->w(&hdr, sizeof(hdr));               // header
         fs->w(flipped.data(), flipped.size());  // pixels (top-down)
         FS.w_close(fs);
-        Msg("~ [hud_overlay] DDS -> $screenshots$\\%s", fname);
     }
-    else
-        Msg("! [hud_overlay] DDS: cannot write $screenshots$\\%s", fname);
 }
 } // namespace hud_overlay
 #endif
 
 void CRender::RenderHudOverlayToTexture()
 {
-    static bool s_diag_pending = true; // one-shot diagnostics per activation (lens pipeline debug)
-    static bool s_diag_steady = true; // one-shot diagnostics at steady aim (alpha >= 0.9)
     if (!m_HudOverlayActive)
-    {
-        s_diag_pending = true;
-        s_diag_steady = true;
         return;
-    }
 
     // When the overlay is active, the world pass deliberately skips HUD draining (skip_world_hud in
     // r2_R_render.cpp + IsHudOverlayActive() guards on mapHUDSorted/mapHUDEmissive in r__dsgraph_render).
@@ -478,7 +458,6 @@ void CRender::RenderHudOverlayToTexture()
     EnsureResolveShader();
     if (!s_resolve_shader)
     {
-        Msg("! [hud_overlay] missing shader hud_overlay_resolve (.s/.ps) under $game_shaders$");
         flush_hud_maps();
         return;
     }
@@ -607,35 +586,6 @@ void CRender::RenderHudOverlayToTexture()
         g_pGamePersistent->m_pGShaderConstants->m_blender_mode.w = ps_r__hud_overlay_brightness;
     }
 
-    if (s_diag_pending || (s_diag_steady && m_HudOverlayAlpha >= 0.9f))
-    {
-        const bool steady = m_HudOverlayAlpha >= 0.9f;
-        if (steady)
-            s_diag_steady = false;
-        s_diag_pending = false;
-        const float blender_z = g_pGamePersistent ? g_pGamePersistent->m_pGShaderConstants->m_blender_mode.z : -1.f;
-        Msg("* [hud_overlay] diag%s: mapHUD=%u mapHUDSorted=%u mapHUDEmissive=%u blender_mode.z=%.2f overlay_alpha=%.3f",
-            steady ? "(steady)" : "",
-            (u32)dg.mapHUD.size(), (u32)dg.mapHUDSorted.size(), (u32)dg.mapHUDEmissive.size(), blender_z, m_HudOverlayAlpha);
-        Msg("* [hud_overlay] diag: rt_secondVP=%s %ux%u fmt=%u",
-            Target->rt_secondVP ? "ok" : "null",
-            Target->rt_secondVP ? Target->rt_secondVP->dwWidth : 0,
-            Target->rt_secondVP ? Target->rt_secondVP->dwHeight : 0,
-            Target->rt_secondVP ? (u32)Target->rt_secondVP->fmt : 0);
-#ifdef USE_DX11
-        if (HW.m_pSwapChain)
-        {
-            ID3DTexture2D* bb = nullptr;
-            if (SUCCEEDED(HW.m_pSwapChain->GetBuffer(0, __uuidof(ID3DTexture2D), (LPVOID*)&bb)) && bb)
-            {
-                D3D11_TEXTURE2D_DESC desc;
-                bb->GetDesc(&desc);
-                Msg("* [hud_overlay] diag: backbuffer fmt=%u %ux%u", (u32)desc.Format, desc.Width, desc.Height);
-                bb->Release();
-            }
-        }
-#endif
-    }
 
     // 1) HUD-only mini G-buffer. The live HUD visual was queued into mapHUD during this frame and
     //    the world pass deliberately skipped draining it.

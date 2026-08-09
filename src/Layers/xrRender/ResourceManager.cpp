@@ -322,23 +322,8 @@ Shader* CResourceManager::Create(LPCSTR s_shader, LPCSTR s_textures, LPCSTR s_co
             return _lua_Create(s_shader, s_textures);
         return _cpp_Create(s_shader, s_textures, s_constants, s_matrices);
 #else // TODO: DX11: When all shaders are ready switch to common path
-        // One-shot trace for the hud overlay UI shader: which path resolves it? (lua .s file,
-        // cpp blender from shader.xr, or lua stub_default fallback). This pinpoints why the UI overlay
-        // composite renders transparent on GL — if it falls to stub_default the blend/texture bind may
-        // differ from what the UI quad expects. Logged once per shader name to bound spam.
-        static u32 s_traced_hud_default = 0, s_traced_overlay_composite = 0;
-        const bool isHudDefault = (0 == xr_strcmp(s_shader, "hud" DELIMITER "default"));
-        const bool isOverlayComposite = (0 == xr_strcmp(s_shader, "hud" DELIMITER "overlay_composite"));
-        const bool traceThis =
-            (isHudDefault && !s_traced_hud_default++) ||
-            (isOverlayComposite && !s_traced_overlay_composite++);
-        if (traceThis)
-            Msg("* [hud_overlay] shader-resolve: %s lua_has=%d cpp_blender=%d",
-                isHudDefault ? "hud\\default" : "hud\\overlay_composite",
-                (int)_lua_HasShader(s_shader), (int)(_GetBlender(s_shader) != nullptr));
         if (_lua_HasShader(s_shader))
         {
-            if (traceThis) Msg("* [hud_overlay] shader-resolve: -> lua %s", s_shader);
             return _lua_Create(s_shader, s_textures);
         }
         else
@@ -346,12 +331,10 @@ Shader* CResourceManager::Create(LPCSTR s_shader, LPCSTR s_textures, LPCSTR s_co
             Shader* pShader = _cpp_Create(s_shader, s_textures, s_constants, s_matrices);
             if (pShader)
             {
-                if (traceThis) Msg("* [hud_overlay] shader-resolve: -> cpp blender from shader.xr");
                 return pShader;
             }
             else
             {
-                if (traceThis) Msg("* [hud_overlay] shader-resolve: -> lua stub_default fallback");
                 if (_lua_HasShader("stub_default"))
                     return _lua_Create("stub_default", s_textures);
                 else
