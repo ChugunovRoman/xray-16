@@ -167,12 +167,10 @@ extern ENGINE_API int ps_r__svp_skip_sun_csm;    // 1 = skip sun init/run in 2nd
 extern ENGINE_API int ps_r__svp_skip_zfill;      // 1 = skip Z-prefill pass when r2_zfill is enabled
 extern ENGINE_API int ps_r__svp_frame_delay;     // Second VP: IsSVPFrame uses dwFrame % delay (0 = every frame). Console: r__svp_frame_delay
 
-// HUD overlay scope (g_3d_scopes 3) debug output of the resolve pass. Console: r__hud_overlay_debug
+// HUD overlay scope (g_3d_scopes 2) debug output of the resolve pass. Console: r__hud_overlay_debug
 // 0 = normal (lit albedo), 1 = solid magenta (drain/stencil check), 2 = normals, 3 = light factor,
 // 4 = raw albedo, 5 = one-shot DDS dump of the overlay RTs into $screenshots$,
-// 6 = sun N·L dot (white = sun-facing side of the weapon). Note: HUD is never written into the sun
-//     shadow map by design (render_sun drains only render_graph/render_sorted, not mapHUD), so a
-//     "shadow factor" view would be uniformly 1.0 (lit) and uninformative — sun_dot is used instead.
+// 6 = sun N·L dot (white = sun-facing side of the weapon).
 extern ENGINE_API int ps_r__hud_overlay_debug;
 // 1 = crossfade alpha on ADS entry/exit (smooth transition), 0 = instant on/off (default)
 extern ENGINE_API int ps_r__hud_overlay_crossfade;

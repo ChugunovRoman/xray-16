@@ -17,10 +17,15 @@
 #include "Layers/xrRender/Shader.h"
 #include "Layers/xrRender/ResourceManager.h" // _CreateTexture (bind-diag)
 #include "Layers/xrRender/xrRender_console.h" // ps_r2_sun_depth_near_scale/bias (NEAR cascade shadow xform)
+#include "Layers/xrRender/light.h"
 #include "xrEngine/device.h"
 #include "xrEngine/IGame_Persistent.h"
+#include "xrEngine/IGame_Level.h"
+#include "xrEngine/xr_object.h"
 #include "xrEngine/Render.h"
 #include "xrCore/FS.h"
+#include <algorithm>
+#include <cmath>
 
 extern ENGINE_API float g_fov; // unzoomed camera fov (console "fov")
 
@@ -64,6 +69,70 @@ ref_rt s_rt_z;
 ref_shader s_resolve_shader;
 u32 s_gbuf_w = 0;
 u32 s_gbuf_h = 0;
+
+static Fvector CollectOverlayDynamicRaw(const Fvector& sample_pos, IGameObject* view_ent)
+{
+    Fvector accum{0.f, 0.f, 0.f};
+
+    if (!g_pGamePersistent || !g_pGameLevel)
+        return accum;
+
+    xr_vector<ISpatial*> lstSpatial;
+    lstSpatial.reserve(16);
+    const Fvector sample_box{1.5f, 1.5f, 1.5f};
+    g_pGamePersistent->SpatialSpace.q_box(lstSpatial, 0, STYPE_LIGHTSOURCEHEMI | STYPE_LIGHTSOURCE, sample_pos, sample_box);
+
+    for (ISpatial* spatial : lstSpatial)
+    {
+        light* source = spatial ? (light*)spatial->dcast_Light() : nullptr;
+        if (!source || !source->flags.bActive || source->flags.bHudMode)
+            continue;
+
+        Fvector ray_dir;
+        const float dist = std::max(ray_dir.sub(sample_pos, source->position).magnitude(), EPS_S);
+        if (dist >= source->range + sample_box.x)
+            continue;
+
+        if (g_pGameLevel->ObjectSpace.RayTest(source->position, ray_dir.div(dist), dist, collide::rqtStatic, nullptr, view_ent))
+            continue;
+
+        float att = 0.f;
+        if (source->flags.bStatic)
+        {
+            const float att_denom =
+                std::max(source->attenuation0 + source->attenuation1 * dist + source->attenuation2 * dist * dist, EPS_S);
+            att = 1.f / att_denom - dist * source->falloff;
+        }
+        else
+        {
+            att = clampr(1.f - dist / (source->range + EPS), 0.f, 1.f) * 2.f;
+        }
+        if (att <= 0.f)
+            continue;
+
+        accum.x += source->color.r * att;
+        accum.y += source->color.g * att;
+        accum.z += source->color.b * att;
+    }
+
+    return accum;
+}
+
+static Fvector4 CompressOverlayDynamic(const Fvector& raw)
+{
+    auto map_channel = [](float v)
+    {
+        v = _max(0.f, v);
+        return v / (1.f + v);
+    };
+
+    return Fvector4{
+        map_channel(raw.x),
+        map_channel(raw.y),
+        map_channel(raw.z),
+        0.f
+    };
+}
 
 void ReleaseAll()
 {
@@ -633,25 +702,75 @@ void CRender::RenderHudOverlayToTexture()
     }
 #endif // USE_DX11
 
-    // HUD overlay resolve must darken under roofs/trees like the world does. combine applies extra
-    // multipliers in C++ (r4_rendertarget_phase_combine.cpp:120-132) that the auto-bound
-    // L_ambient/L_hemi_color/L_sun_color binders do NOT (they pass raw Environment.CurrentEnv values).
-    // The shader applies them itself via hud_ovl_lumscale:
-    //   .x = 2 * ps_r2_sun_lumscale_amb   (ambient)
-    //   .y = 2 * ps_r2_sun_lumscale_hemi  (hemi/env)
-    //   .z = ps_r2_sun_lumscale           (sun diffuse, applied to the light source in Light_DB.cpp)
-    //   .w = SSAO present flag (1 if rt_ssao_temp is alive and written this frame, 0 otherwise) —
-    //        lets the shader fall back to occ=1 instead of reading a NULL SRV (which yields 0 and
-    //        would turn the HUD black when ps_r_ssao == 0). rt_ssao_temp is created exactly when
-    //        ssao_blur_on || ssao_hdao is true (r2_rendertarget.cpp:582-621), so checking the flags
-    //        is equivalent to probing the private RT member.
+    // Standalone resolve (set_Shader, not blender r_Pass) does NOT get auto-bound L_ambient /
+    // L_hemi_color / L_sun_color / L_sun_dir_e from Blender_Recorder_StandartBinding. Those stay 0
+    // -> black HUD. Bind a complete lighting packet explicitly via set_c AFTER set_Shader.
+    //
+    // Pre-scale ambient/hemi like combine (r4_rendertarget_phase_combine.cpp). Sun color from
+    // Lights.sun already includes ps_r2_sun_lumscale (Light_DB.cpp). Dynamic RGB is gathered locally
+    // around the overlay camera so actor LightTrack stays untouched.
     const bool ssao_present = RImplementation.o.ssao_blur_on || RImplementation.o.ssao_hdao;
     Fvector4 hud_ovl_lumscale;
-    hud_ovl_lumscale.set(
-        2.0f * ps_r2_sun_lumscale_amb,
-        2.0f * ps_r2_sun_lumscale_hemi,
-        ps_r2_sun_lumscale,
-        ssao_present ? 1.0f : 0.0f);
+    // .xyz reserved (pre-scale done in C++); .w = SSAO present (NULL SRV reads 0 -> black without guard)
+    hud_ovl_lumscale.set(1.f, 1.f, 1.f, ssao_present ? 1.0f : 0.0f);
+
+    Fvector4 hud_ovl_ambient{0, 0, 0, 0};
+    Fvector4 hud_ovl_hemi{0, 0, 0, 0};
+    Fvector4 hud_ovl_sun{0, 0, 0, 0};
+    Fvector4 hud_ovl_sun_dir_e{0, 0, 1, 0};
+    // x=hemiVis, y=sunVis, z=sun shadow map valid (DX); fallback env-only + no shadow sample
+    Fvector4 hud_ovl_lighttrack{1.f, 1.f, shadow_ok ? 1.f : 0.f, 0};
+    Fvector4 hud_ovl_dynamic{0, 0, 0, 0};
+
+    if (g_pGamePersistent)
+    {
+        const auto& env = g_pGamePersistent->Environment().CurrentEnv;
+        const float minamb = 0.001f;
+        hud_ovl_ambient.set(
+            _max(env.ambient.x * 2.f, minamb) * ps_r2_sun_lumscale_amb,
+            _max(env.ambient.y * 2.f, minamb) * ps_r2_sun_lumscale_amb,
+            _max(env.ambient.z * 2.f, minamb) * ps_r2_sun_lumscale_amb,
+            0.f);
+        hud_ovl_hemi.set(
+            env.hemi_color.x * 2.f * ps_r2_sun_lumscale_hemi,
+            env.hemi_color.y * 2.f * ps_r2_sun_lumscale_hemi,
+            env.hemi_color.z * 2.f * ps_r2_sun_lumscale_hemi,
+            0.f);
+
+        Fvector sun_dir_w = env.sun_dir;
+        Fvector sun_clr;
+        sun_clr.set(env.sun_color.x * ps_r2_sun_lumscale, env.sun_color.y * ps_r2_sun_lumscale,
+            env.sun_color.z * ps_r2_sun_lumscale);
+        if (light* sun = (light*)RImplementation.Lights.sun._get())
+        {
+            sun_clr.set(sun->color.r, sun->color.g, sun->color.b); // already * ps_r2_sun_lumscale
+            sun_dir_w = sun->direction;
+        }
+        hud_ovl_sun.set(sun_clr.x, sun_clr.y, sun_clr.z, 0.f);
+
+        // View-space sun dir for the overlay camera (Device.mView == m_hudOvlCam.mView here).
+        Fvector sun_dir_e;
+        Device.mView.transform_dir(sun_dir_e, sun_dir_w);
+        sun_dir_e.normalize();
+        hud_ovl_sun_dir_e.set(sun_dir_e.x, sun_dir_e.y, sun_dir_e.z, 0.f);
+
+        // Actor light-track: hemi/sun visibility only. Local dynamic lights are collected separately.
+        IGameObject* view_ent = g_pGameLevel ? g_pGameLevel->CurrentViewEntity() : nullptr;
+        CROS_impl* LT = (view_ent && view_ent->renderable_ROS()) ? (CROS_impl*)view_ent->renderable_ROS() : nullptr;
+        if (LT)
+        {
+            // Force-update with view entity (same as apply_object); getters otherwise call
+            // update_smooth(nullptr) and skip smart_update.
+            LT->update_smooth(view_ent);
+
+            const float hemi_vis = _max(LT->get_hemi(), 0.05f);
+            const float sun_vis = LT->get_sun();
+            hud_ovl_lighttrack.set(hemi_vis, sun_vis, shadow_ok ? 1.f : 0.f, 0.f);
+
+            hud_ovl_dynamic = CompressOverlayDynamic(
+                CollectOverlayDynamicRaw(Device.vCameraPosition, view_ent));
+        }
+    }
 
     // 2) Resolve albedo into the work RT (transparent background via stencil mask). On every backend
     //    resolve writes into s_rt_work; FlipOverlayV publishes it to s_rt_overlay afterwards (1:1
@@ -717,10 +836,15 @@ void CRender::RenderHudOverlayToTexture()
     // IMPORTANT: set_c("name") resolves the constant against the CURRENT shader's ctable (R_Backend.h
     // set_c(cpcstr)). set_Shader swaps the ctable to the resolve shader, so per-pass constants must be
     // set AFTER set_Shader — otherwise the lookup misses and the value stays at 0 (-> black HUD).
-    // This mirrors accum_direct (r4_rendertarget_accum_direct.cpp:260-263) which calls set_c after
-    // set_Element. m_shadow/lumscale are non-auto-bound; both must be set here.
+    // Explicit hud_ovl_* packet replaces auto-bound L_ambient/L_hemi/L_sun (standalone path has none).
     if (shadow_ok)
         RCache.set_c("m_shadow", m_shadow);
+    RCache.set_c("hud_ovl_ambient", hud_ovl_ambient);
+    RCache.set_c("hud_ovl_hemi", hud_ovl_hemi);
+    RCache.set_c("hud_ovl_sun", hud_ovl_sun);
+    RCache.set_c("hud_ovl_sun_dir_e", hud_ovl_sun_dir_e);
+    RCache.set_c("hud_ovl_lighttrack", hud_ovl_lighttrack);
+    RCache.set_c("hud_ovl_dynamic", hud_ovl_dynamic);
     RCache.set_c("hud_ovl_lumscale", hud_ovl_lumscale);
     // GL: glState::Apply() runs inside set_Shader and re-enables StencilEnable=TRUE / DepthEnable=TRUE
     // from the resolve pass's glState descriptor (the .s block does not disable them). The mini-G-buffer

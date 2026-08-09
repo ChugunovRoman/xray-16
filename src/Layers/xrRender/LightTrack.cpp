@@ -261,11 +261,11 @@ void CROS_impl::update(IRenderable* O)
             light* L = lights[lit].source;
             if (!L)
                 continue;
-            float d = L->position.distance_to(position);
+            const float d = std::max(L->position.distance_to(position), EPS_S);
 
 #if RENDER != R_R1
-            float a = (1 / (L->attenuation0 + L->attenuation1 * d + L->attenuation2 * d * d) - d * L->falloff) *
-                (L->flags.bStatic ? 1.f : 2.f);
+            const float att = std::max(L->attenuation0 + L->attenuation1 * d + L->attenuation2 * d * d, EPS_S);
+            float a = 1.f / att - d * L->falloff;
             a = (a > 0) ? a : 0.0f;
 
             Fvector3 dir;
@@ -480,7 +480,6 @@ void CROS_impl::prepare_lights(Fvector& position, IRenderable* O)
 {
     IGameObject* _object = dynamic_cast<IGameObject*>(O);
     float dt = Device.fTimeDelta;
-
     vis_data& vis = O->GetRenderData().visual->getVisData();
     float radius;
     radius = vis.sphere.R;
@@ -507,6 +506,8 @@ void CROS_impl::prepare_lights(Fvector& position, IRenderable* O)
                 continue;
             light* source = (light*)(spatial->dcast_Light());
             if (!source)
+                continue;
+            if (source->flags.bHudMode)
                 continue;
             float R = radius + source->range;
             if (position.distance_to(source->position) < R
