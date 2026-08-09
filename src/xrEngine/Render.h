@@ -176,6 +176,8 @@ extern ENGINE_API int ps_r__hud_overlay_debug;
 extern ENGINE_API int ps_r__hud_overlay_crossfade;
 // Light multiplier for overlay HUD (1.0 = engine default, 1.5-2.0 to approximate world HUD brightness)
 extern ENGINE_API float ps_r__hud_overlay_brightness;
+// FOV scale for overlay HUD after ADS lerp (1.0 = g_fov size, <1 larger HUD). Console: r__hud_overlay_fov_scale
+extern ENGINE_API float ps_r__hud_overlay_fov_scale;
 
 class ENGINE_API IRender
 {

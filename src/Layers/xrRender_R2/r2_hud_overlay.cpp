@@ -592,9 +592,10 @@ void CRender::RenderHudOverlayToTexture()
     Device.vCameraRight = m_hudOvlCam.vCameraRight;
     // FOV lerps from zoomed (matches world HUD depth — no jump) to fixed (weapon stays stable
     // during zoom changes). The lerp factor = m_HudOverlayAlpha (0 at rotation 0.5, 1 at 0.9).
-    // After transition (alpha=1): FOV = g_fov, weapon depth is fixed, no perspective growth on zoom.
+    // After transition (alpha=1): FOV = g_fov * scale, weapon depth is fixed, no perspective growth on zoom.
     const float fovLerp = m_HudOverlayAlpha; // 0 = zoomed_fov, 1 = g_fov
     Device.fFOV = m_hudOvlCam.fFOV + (g_fov - m_hudOvlCam.fFOV) * fovLerp;
+    Device.fFOV *= ps_r__hud_overlay_fov_scale; // smaller FOV → larger HUD
     GEnv.Render->SetCacheXform(Device.mView, Device.mProject);
     RCache.set_xform_view(Device.mView);
     RCache.set_xform_project(Device.mProject);
