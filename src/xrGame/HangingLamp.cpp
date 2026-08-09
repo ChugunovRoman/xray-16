@@ -16,6 +16,7 @@
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
+
 CHangingLamp::CHangingLamp() { Init(); }
 CHangingLamp::~CHangingLamp() {}
 void CHangingLamp::Init()

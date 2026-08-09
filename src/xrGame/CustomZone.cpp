@@ -751,7 +751,9 @@ void CCustomZone::StartIdleLight()
 void CCustomZone::StopIdleLight()
 {
     if (m_pIdleLight)
+    {
         m_pIdleLight->set_active(false);
+    }
 }
 
 void CCustomZone::UpdateIdleLight()

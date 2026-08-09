@@ -114,8 +114,6 @@ void light::set_active(bool a)
         flags.bActive = true;
         spatial_register();
         spatial_move();
-//Msg("!!! L-register: %X", u32(this));
-
 #ifdef DEBUG
         const Fvector zero = {0, -1000, 0};
         if (position.similar(zero))
@@ -131,7 +129,6 @@ void light::set_active(bool a)
         flags.bActive = false;
         spatial_move();
         spatial_unregister();
-        //Msg("!!! L-unregister: %X", u32(this));
     }
 }
 
@@ -208,6 +205,9 @@ void light::spatial_refresh_bounds()
 
 void light::spatial_move()
 {
+    if (!spatial.node_ptr)
+        spatial_refresh_bounds();
+
     SpatialBase::spatial_move();
 
 #if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)
