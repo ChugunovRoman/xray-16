@@ -2487,6 +2487,10 @@ void CWeapon::SpawnDefaultAddons()
                 iMagazineSize = pSettings->r_s32(default_addon.c_str(), "ammo_mag_size");
             }
 
+            // Mirror addAddon(PIItem)/CScope so IsOpticalScope works for default-spawned optics
+            data.has_scope_texture = pSettings->line_exist(default_addon.c_str(), "scope_texture");
+            data.scope_dynamic_zoom = pSettings->read_if_exists<bool>(default_addon.c_str(), "scope_dynamic_zoom", false);
+
             addAddon(data);
             ++spawned_default_addon_count;
         }
@@ -2517,6 +2521,9 @@ void CWeapon::SpawnDefaultAddons()
         
         if (data.ort != CInventoryItem::EIIAddonOrt::FOrtNone)
             data.has_ort = true;
+
+        data.has_scope_texture = pSettings->line_exist(addon_section, "scope_texture");
+        data.scope_dynamic_zoom = pSettings->read_if_exists<bool>(addon_section, "scope_dynamic_zoom", false);
 
         addAddon(data);
         ++spawned_default_addon_count;
