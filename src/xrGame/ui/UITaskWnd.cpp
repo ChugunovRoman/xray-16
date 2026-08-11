@@ -245,7 +245,8 @@ void CUITaskWnd::ReloadTaskInfo()
         else if (spot == "ui_pda2_trader_location" || spot == "ui_pda2_mechanic_location" ||
             spot == "ui_pda2_scout_location" || spot == "ui_pda2_quest_npc_location" ||
             spot == "ui_pda2_medic_location" || spot == "ui_pda2_actor_box_location" ||
-            spot == "ui_pda2_actor_sleep_location")
+            spot == "ui_pda2_actor_sleep_location" || spot == "ui_pda2_barmen_location" ||
+            spot == "ui_pda2_leader_location")
             IsQuestNpcsEnabled() ? b->location->EnableSpot() : b->location->DisableSpot();
     }
 
