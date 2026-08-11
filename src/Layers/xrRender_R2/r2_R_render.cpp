@@ -594,10 +594,15 @@ void CRender::CopyBackbufferToSecondVPRT()
             CHK_GL(glDrawBuffer(GL_COLOR_ATTACHMENT0));
 
             // rt_secondVP was resized above to match Device.dwWidth/Height, so blit is 1:1 (GL_NEAREST).
-            // Y-flip the source region: the lens shader (model_scope_lense.ps) samples s_vp2 with
-            // gl_FragCoord.xy/screen_res.xy — on GL gl_FragCoord has lower-left origin, while the DX
-            // path it was written for (CopyResource from the D3D backbuffer) yields top-left-origin
-            // texture content. Without flipping the blit the lens shows the world upside-down.
+            // Y-flip the source region. rt_secondVP must end up in the SAME orientation as the PiP path
+            // (g_3d_scopes 1) leaves it, because model_scope_lense.ps samples s_vp2 the same way for both
+            // modes (no per-mode V-flip in the lens shader — it mirrors DX r3/r4 which never flip).
+            //   - PiP path:   rt_secondVP is filled by phase_pp through the GL-reordered postprocess VB,
+            //                 which stores the frame screen-aligned for gl_FragCoord sampling.
+            //   - Overlay:    get_base_rt() is written by phase_combine through a DIFFERENT VB layout, so
+            //                 its rows run the opposite way. An identity copy would hand the lens an
+            //                 upside-down frame (observed); flipping the source Y here lands the world
+            //                 upright in the lens, matching the PiP orientation.
             CHK_GL(glBlitFramebuffer(
                 0, Device.dwHeight, Device.dwWidth, 0,
                 0, 0, Target->rt_secondVP->dwWidth, Target->rt_secondVP->dwHeight,
