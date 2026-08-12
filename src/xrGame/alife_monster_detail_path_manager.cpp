@@ -132,6 +132,7 @@ void CALifeMonsterDetailPathManager::update_position()
 void CALifeMonsterDetailPathManager::make_inactual() { m_path.clear(); }
 void CALifeMonsterDetailPathManager::actualize()
 {
+    
     GameGraph::_GRAPH_ID old_next_gv = GameGraph::_GRAPH_ID(-1);
     float old_walked = m_walked_distance;
 
@@ -147,9 +148,66 @@ void CALifeMonsterDetailPathManager::actualize()
         object().get_object().m_tGraphID,
         m_destination.m_game_vertex_id,
         &m_path,
-        temp
-    );
+        temp);
 
+#ifdef DEBUG
+    if (failed)
+    {
+        Msg("! %s couldn't build game path from", object().get_object().name_replace());
+        {
+            const CGameGraph::CGameVertex* vertex =
+                ai().game_graph().vertex(object().get_object().m_tGraphID);
+
+            Msg(
+                "! [%d][%s][%f][%f][%f]",
+                object().get_object().m_tGraphID,
+                ai().game_graph().header().level(vertex->level_id()).name().c_str(),
+                VPUSH(vertex->level_point()));
+
+            Msg(
+                "! game_graph_mask -> [ %d, %d, %d, %d]",
+                vertex->vertex_type()[0],
+                vertex->vertex_type()[1],
+                vertex->vertex_type()[2],
+                vertex->vertex_type()[3]);
+        }
+
+        {
+            const CGameGraph::CGameVertex* vertex =
+                ai().game_graph().vertex(m_destination.m_game_vertex_id);
+
+            Msg(
+                "! [%d][%s][%f][%f][%f]",
+                m_destination.m_game_vertex_id,
+                ai().game_graph().header().level(vertex->level_id()).name().c_str(),
+                VPUSH(vertex->level_point()));
+
+            Msg(
+                "! game_graph_mask -> [ %d, %d, %d, %d]",
+                vertex->vertex_type()[0],
+                vertex->vertex_type()[1],
+                vertex->vertex_type()[2],
+                vertex->vertex_type()[3]);
+        }
+
+        Msg("! List of available game_graph masks:");
+
+        xr_vector<GameGraph::STerrainPlace>::iterator I =
+            object().m_tpaTerrain.begin();
+        xr_vector<GameGraph::STerrainPlace>::iterator E =
+            object().m_tpaTerrain.end();
+
+        for (; I != E; ++I)
+        {
+            Msg(
+                "! [%d , %d , %d , %d]",
+                (*I).tMask[0],
+                (*I).tMask[1],
+                (*I).tMask[2],
+                (*I).tMask[3]);
+        };
+    }
+#endif
 
     if (failed)
         return;
