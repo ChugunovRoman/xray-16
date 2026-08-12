@@ -209,6 +209,22 @@ void CALifeMonsterDetailPathManager::actualize()
     }
 #endif
 
+        {
+            const CGameGraph::CGameVertex* vertex = ai().game_graph().vertex(m_destination.m_game_vertex_id);
+            Msg("! [%d][%s][%f][%f][%f]", m_destination.m_game_vertex_id,
+                ai().game_graph().header().level(vertex->level_id()).name().c_str(), VPUSH(vertex->level_point()));
+            Msg("! game_graph_mask -> [ %d, %d, %d, %d]", vertex->vertex_type()[0], vertex->vertex_type()[1],
+                vertex->vertex_type()[2], vertex->vertex_type()[3]);
+        }
+        Msg("! List of available game_graph masks:");
+        xr_vector<GameGraph::STerrainPlace>::iterator I = object().m_tpaTerrain.begin();
+        xr_vector<GameGraph::STerrainPlace>::iterator E = object().m_tpaTerrain.end();
+        for (; I != E; ++I)
+        {
+            Msg("! [%d , %d , %d , %d]", (*I).tMask[0], (*I).tMask[1], (*I).tMask[2], (*I).tMask[3]);
+        };
+    }
+#endif
     if (failed)
         return;
 
@@ -220,18 +236,9 @@ void CALifeMonsterDetailPathManager::actualize()
         return;
     }
 
+    m_walked_distance = 0.f;
     std::reverse(m_path.begin(), m_path.end());
     VERIFY(m_path.back() == object().get_object().m_tGraphID);
-
-    if (m_path.size() > 1 &&
-        (GameGraph::_GRAPH_ID)m_path[m_path.size() - 2] == old_next_gv)
-    {
-        m_walked_distance = old_walked;
-    }
-    else
-    {
-        m_walked_distance = 0.f;
-    }
 }
 
 void CALifeMonsterDetailPathManager::update(const ALife::_TIME_ID& time_delta)
