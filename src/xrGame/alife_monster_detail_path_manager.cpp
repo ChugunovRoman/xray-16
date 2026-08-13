@@ -132,7 +132,8 @@ void CALifeMonsterDetailPathManager::update_position()
 void CALifeMonsterDetailPathManager::make_inactual() { m_path.clear(); }
 void CALifeMonsterDetailPathManager::actualize()
 {
-    
+    // Preserve progress on the current game-graph edge when the target moves
+    // but the recalculated path still uses the same next vertex.
     GameGraph::_GRAPH_ID old_next_gv = GameGraph::_GRAPH_ID(-1);
     float old_walked = m_walked_distance;
 
@@ -143,6 +144,7 @@ void CALifeMonsterDetailPathManager::actualize()
 
     typedef GraphEngineSpace::CGameVertexParams CGameVertexParams;
     CGameVertexParams temp = CGameVertexParams(object().m_tpaTerrain);
+
     bool failed = !ai().graph_engine().search(
         ai().game_graph(),
         object().get_object().m_tGraphID,
@@ -154,6 +156,7 @@ void CALifeMonsterDetailPathManager::actualize()
     if (failed)
     {
         Msg("! %s couldn't build game path from", object().get_object().name_replace());
+
         {
             const CGameGraph::CGameVertex* vertex =
                 ai().game_graph().vertex(object().get_object().m_tGraphID);
@@ -209,36 +212,32 @@ void CALifeMonsterDetailPathManager::actualize()
     }
 #endif
 
-        {
-            const CGameGraph::CGameVertex* vertex = ai().game_graph().vertex(m_destination.m_game_vertex_id);
-            Msg("! [%d][%s][%f][%f][%f]", m_destination.m_game_vertex_id,
-                ai().game_graph().header().level(vertex->level_id()).name().c_str(), VPUSH(vertex->level_point()));
-            Msg("! game_graph_mask -> [ %d, %d, %d, %d]", vertex->vertex_type()[0], vertex->vertex_type()[1],
-                vertex->vertex_type()[2], vertex->vertex_type()[3]);
-        }
-        Msg("! List of available game_graph masks:");
-        xr_vector<GameGraph::STerrainPlace>::iterator I = object().m_tpaTerrain.begin();
-        xr_vector<GameGraph::STerrainPlace>::iterator E = object().m_tpaTerrain.end();
-        for (; I != E; ++I)
-        {
-            Msg("! [%d , %d , %d , %d]", (*I).tMask[0], (*I).tMask[1], (*I).tMask[2], (*I).tMask[3]);
-        };
-    }
-#endif
     if (failed)
         return;
 
     VERIFY(!m_path.empty());
 
+    // Already at destination.
     if (m_path.size() == 1)
     {
         VERIFY(m_path.back() == object().get_object().m_tGraphID);
+        m_walked_distance = 0.f;
         return;
     }
 
-    m_walked_distance = 0.f;
+    // search() produces the path in reverse order.
     std::reverse(m_path.begin(), m_path.end());
+
     VERIFY(m_path.back() == object().get_object().m_tGraphID);
+
+    // IMPORTANT:
+    // If the immediate next game-graph vertex did not change, retain the
+    // distance already travelled along that edge. This prevents a squad
+    // chasing a moving target from repeatedly restarting the same edge.
+    if ((GameGraph::_GRAPH_ID)m_path[m_path.size() - 2] == old_next_gv)
+        m_walked_distance = old_walked;
+    else
+        m_walked_distance = 0.f;
 }
 
 void CALifeMonsterDetailPathManager::update(const ALife::_TIME_ID& time_delta)
