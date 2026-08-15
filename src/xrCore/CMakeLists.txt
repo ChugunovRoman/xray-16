@@ -55,6 +55,21 @@ target_sources_grouped(
 
 target_sources_grouped(
     TARGET xrCore
+    NAME "Compression\\miniz"
+    FILES
+    Compression/miniz/miniz.c
+    Compression/miniz/miniz.h
+)
+
+# miniz: vendored C library. MINIZ_NO_STDIO drops its CRT file layer — all I/O goes
+# through WinAPI callbacks (see Debug/xrSentry.cpp); warnings are not ours to fix.
+set_source_files_properties(Compression/miniz/miniz.c PROPERTIES
+    COMPILE_DEFINITIONS MINIZ_NO_STDIO
+    COMPILE_OPTIONS "$<$<C_COMPILER_ID:MSVC>:/W1>$<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-w>"
+)
+
+target_sources_grouped(
+    TARGET xrCore
     NAME "Compression\\lzo"
     FILES
     Compression/lzo_compressor.cpp

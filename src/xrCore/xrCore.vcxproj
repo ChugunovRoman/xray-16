@@ -58,6 +58,11 @@ call .GitInfo.cmd</Command>
     <ClCompile Include="Animation\SkeletonMotions.cpp" />
     <ClCompile Include="clsid.cpp" />
     <ClCompile Include="Compression\lzo_compressor.cpp" />
+    <ClCompile Include="Compression\miniz\miniz.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level1</WarningLevel>
+      <PreprocessorDefinitions>MINIZ_NO_STDIO;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
     <ClCompile Include="Compression\Model.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -156,6 +161,7 @@ call .GitInfo.cmd</Command>
     <ClInclude Include="Compression\compression_ppmd_stream.h" />
     <ClInclude Include="Compression\compression_ppmd_stream_inline.h" />
     <ClInclude Include="Compression\lzo_compressor.h" />
+    <ClInclude Include="Compression\miniz\miniz.h" />
     <ClInclude Include="Compression\PPMd.h" />
     <ClInclude Include="Compression\PPMdType.h" />
     <ClInclude Include="Compression\ppmd_compressor.h" />

@@ -55,6 +55,9 @@
     <Filter Include="Compression\lz">
       <UniqueIdentifier>{323bcbd1-ae95-4728-a16f-b3a4e4a7cab5}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Compression\miniz">
+      <UniqueIdentifier>{8f4a2b7c-1d3e-4c5f-a6b7-9c8d0e1f2a3b}</UniqueIdentifier>
+    </Filter>
     <Filter Include="OS">
       <UniqueIdentifier>{6d6f8325-ad31-4677-b0b9-de5d952c320b}</UniqueIdentifier>
     </Filter>
@@ -302,6 +305,9 @@
     </ClCompile>
     <ClCompile Include="Compression\rt_compressor.cpp">
       <Filter>Compression\lzo</Filter>
+    </ClCompile>
+    <ClCompile Include="Compression\miniz\miniz.c">
+      <Filter>Compression\miniz</Filter>
     </ClCompile>
     <ClCompile Include="Text\LtxMultilineString.cpp">
       <Filter>Text</Filter>
@@ -682,6 +688,9 @@
     </ClInclude>
     <ClInclude Include="Compression\rt_compressor.h">
       <Filter>Compression\lzo</Filter>
+    </ClInclude>
+    <ClInclude Include="Compression\miniz\miniz.h">
+      <Filter>Compression\miniz</Filter>
     </ClInclude>
     <ClInclude Include="Text\LtxMultilineString.hpp">
       <Filter>Text</Filter>
