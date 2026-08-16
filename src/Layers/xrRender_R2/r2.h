@@ -545,6 +545,10 @@ public:
     void WeaponIcon_ReleaseAllUserIconRts() override;
     bool WeaponIcon_SavePersistedUserRtToDdsDxt5(pcstr user_texture_name, pcstr fs_root, pcstr fname) override;
 
+    // Save an arbitrary user RT to a DXT5 DDS file under the given FS root.
+    // Used by the preview texture disk cache; DX11-only (returns false on OGL).
+    bool SaveRtToDdsDxt5(const ref_rt& rt, pcstr fs_root, pcstr fname);
+
     // HUD overlay scope (g_3d_scopes 2): the live HUD is rendered offscreen into $user$hud_overlay
     // and composited over the world by the UI layer (UIGameCustom). The composite stays in the UI
     // layer on every backend (no native CompositeHudOverlay pass); FlipOverlayV publishes the work RT
@@ -586,6 +590,7 @@ public:
     void PreviewScene_ReleaseEphemeralTexture(pcstr texture_name) override;
     void PreviewScene_SetSettings(const SPreviewSceneSettings& settings) override;
     [[nodiscard]] SPreviewSceneSettings PreviewScene_GetSettings() const override;
+    void PreviewScene_ResetDiskCache() override;
 
     [[nodiscard]]
     const ref_rt& PreviewScene_ColorRT() const;

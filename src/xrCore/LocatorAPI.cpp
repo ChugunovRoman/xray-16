@@ -1138,13 +1138,16 @@ const CLocatorAPI::file* CLocatorAPI::GetFileDesc(pcstr path)
 
 FileStatus CLocatorAPI::exist(pcstr fn, FSType fsType /*= FSType::Virtual*/)
 {
-    if ((fsType | FSType::Virtual) == FSType::Virtual)
+    // Bitmask check: the requested fsType must include the flag.
+    // NB: '|' was wrong here — (Any|Virtual) != Virtual, so FSType::Any
+    // (Virtual|External) always fell through and never found any file.
+    if ((fsType & FSType::Virtual) == FSType::Virtual)
     {
         auto it = file_find_it(fn);
         if (it != m_files.end())
             return FileStatus(true, false);
     }
-    if ((fsType | FSType::External) == FSType::External)
+    if ((fsType & FSType::External) == FSType::External)
     {
         struct stat buffer;
         return FileStatus(stat(fn, &buffer) == 0, true);

@@ -279,6 +279,14 @@ ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize)
         goto _DDS;
     if (FS.exist(fn, "$game_saves$", fname, ".dds"))
         goto _DDS;
+    // Runtime-baked preview textures live in appdata (npc_preview_* DDS cache).
+    if (FS.path_exist("$preview_cache$"))
+    {
+        string_path preview_nm;
+        strconcat(sizeof preview_nm, preview_nm, fname, ".dds");
+        if (FS.update_path(fn, "$preview_cache$", preview_nm, false) && FS.exist(fn, FSType::Any))
+            goto _DDS;
+    }
     if (FS.exist(fn, "$game_textures$", fname, ".dds"))
         goto _DDS;
 

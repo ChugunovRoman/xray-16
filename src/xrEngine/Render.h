@@ -524,6 +524,7 @@ public:
     virtual void PreviewScene_ReleaseEphemeralTexture(pcstr texture_name) { (void)texture_name; }
     virtual void PreviewScene_SetSettings(const SPreviewSceneSettings& settings) { (void)settings; }
     [[nodiscard]] virtual SPreviewSceneSettings PreviewScene_GetSettings() const { return {}; }
+    virtual void PreviewScene_ResetDiskCache() {}
 
     virtual RenderContext GetCurrentContext() const = 0;
     virtual void MakeContextCurrent(RenderContext context) = 0;

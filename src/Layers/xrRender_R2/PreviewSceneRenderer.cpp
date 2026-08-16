@@ -9,9 +9,13 @@
 #include "xrCore/FS.h"
 #include "xrEngine/XR_IOConsole.h"
 #include "xrEngine/device.h"
+#include "Layers/xrRender/ResourceManager.h"
+#include "Layers/xrRender/SH_Texture.h"
 
 #include <algorithm>
 #include <iterator>
+
+extern bool ENGINE_API g_bRendering;
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -608,6 +612,7 @@ void CPreviewSceneRenderer::RequeueCachedEntries()
 void CPreviewSceneRenderer::DestroyRuntime(bool preserve_requests)
 {
     m_ephemeral.clear();
+    FlushDeferredVisualDiscard();
 
     if (preserve_requests)
     {
@@ -618,15 +623,8 @@ void CPreviewSceneRenderer::DestroyRuntime(bool preserve_requests)
         if (!m_runtime.ready && !m_runtime.HasAnyResource() && m_queue.empty() && m_cache.empty())
             return;
 
+        FlushDiskIndex();
         m_queue.clear();
-        for (auto& [key, entry] : m_cache)
-        {
-            if (entry.cached_visual)
-            {
-                m_owner.model_Delete(entry.cached_visual, false);
-                entry.cached_visual = nullptr;
-            }
-        }
         m_cache.clear();
         m_sequence = 0;
         m_cached_budget = 0;
@@ -856,8 +854,7 @@ bool CPreviewSceneRenderer::RenderModel(pcstr model_path, const Fmatrix& view, c
     PreviewSceneApplySubjectTransform(subject, visual, m_settings);
 
     const bool rendered = RenderRenderableImpl(&subject, view, proj, false, nullptr);
-    m_owner.model_Delete(visual, false);
-    subject.renderable.visual = nullptr;
+    DiscardPreviewVisual(visual);
     return rendered;
 }
 
@@ -931,7 +928,7 @@ bool CPreviewSceneRenderer::RenderModelIntoRT(
     }
 
     const bool rendered = RenderModelIntoRT(visual, output_rt, settings, resolved_pose_name);
-    m_owner.model_Delete(visual, false);
+    DiscardPreviewVisual(visual);
     return rendered;
 }
 
@@ -1042,7 +1039,7 @@ void CPreviewSceneRenderer::CollectCycleNames(pcstr model_path, xr_vector<shared
             PreviewSceneCollectCycleNames(anim, out_cycles);
     }
 
-    m_owner.model_Delete(visual, false);
+    DiscardPreviewVisual(visual);
 }
 
 void CPreviewSceneRenderer::ReleaseEphemeralTexture(pcstr texture_name)
@@ -1126,16 +1123,16 @@ bool CPreviewSceneRenderer::RenderCachedEntry(SCacheEntry& entry)
         }
     }
 
-    if (!entry.cached_visual)
+    // Create the model per render and discard it right after: the cache keeps
+    // only the rendered preview texture. Models are far heavier than their
+    // preview RTs, and CModelPool never releases them on its own.
+    IRenderVisual* visual = m_owner.model_Create(entry.model_path.c_str());
+    if (!visual)
     {
-        entry.cached_visual = m_owner.model_Create(entry.model_path.c_str());
-        if (!entry.cached_visual)
-        {
-            Msg("! [preview_scene] model create failed: %s", entry.model_path.c_str());
-            entry.failed = true;
-            entry.dirty = false;
-            return false;
-        }
+        Msg("! [preview_scene] model create failed: %s", entry.model_path.c_str());
+        entry.failed = true;
+        entry.dirty = false;
+        return false;
     }
 
     shared_str resolved_pose_name;
@@ -1150,13 +1147,20 @@ bool CPreviewSceneRenderer::RenderCachedEntry(SCacheEntry& entry)
     // preview is rendered with its own configuration.
     const SPreviewSceneSettings saved_settings = m_settings;
     m_settings = entry.settings;
-    const bool rendered = RenderModelIntoRT(entry.cached_visual, entry.color_rt, entry.settings, &resolved_pose_name);
+    const bool rendered = RenderModelIntoRT(visual, entry.color_rt, entry.settings, &resolved_pose_name);
     m_settings = saved_settings;
+    DiscardPreviewVisual(visual);
     entry.ready = rendered || had_ready_texture;
     entry.failed = !rendered;
     entry.dirty = !rendered;
     if (rendered)
+    {
         entry.resolved_pose_name = resolved_pose_name;
+        // Derive the correct RT name from the entry's own settings (not the
+        // active grid's m_settings which was restored above).
+        entry.texture_name = MakeTextureName(entry.model_path.c_str(), entry.settings);
+        SaveToDiskCache(entry, entry.color_rt);
+    }
     return rendered;
 }
 
@@ -1212,8 +1216,427 @@ void CPreviewSceneRenderer::InvalidateCache()
     m_queue_dirty = !m_queue.empty();
 }
 
+void CPreviewSceneRenderer::DiscardPreviewVisual(IRenderVisual*& visual)
+{
+    if (!visual)
+        return;
+
+    if (g_bRendering)
+    {
+        // A discarding delete inside an active frame hits VERIFY in
+        // CModelPool::Delete and would silently fall back to pooling in
+        // release builds. Defer to ProcessQueue, which runs in
+        // CRender::OnFrame, outside of Begin/End rendering scope.
+        m_deferredVisualDiscard.push_back(visual);
+        visual = nullptr;
+        return;
+    }
+
+    // bDiscard = true frees both the instance and the base model (once the
+    // last reference is gone) instead of parking them in the model pool.
+    m_owner.model_Delete(visual, true);
+}
+
+void CPreviewSceneRenderer::FlushDeferredVisualDiscard()
+{
+    for (IRenderVisual* visual : m_deferredVisualDiscard)
+    {
+        IRenderVisual* ptr = visual;
+        m_owner.model_Delete(ptr, true);
+    }
+    m_deferredVisualDiscard.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Disk preview cache
+// ---------------------------------------------------------------------------
+
+bool CPreviewSceneRenderer::EnsureDiskCacheDir()
+{
+    if (m_diskCachePath[0])
+        return true;
+
+    if (!FS.path_exist(kPreviewCacheAlias))
+        return false;
+
+    // Resolve the alias to an absolute path (cache it for all future calls).
+    if (!FS.update_path(m_diskCachePath, kPreviewCacheAlias, "", false))
+        return false;
+
+    return m_diskCachePath[0] != '\0';
+}
+
+bool CPreviewSceneRenderer::ResolveCacheFilePath(string_path& dest, pcstr filename) const
+{
+    // m_diskCachePath must be filled by EnsureDiskCacheDir first.
+    if (!m_diskCachePath[0] || !filename || !filename[0])
+        return false;
+
+    // Build full path: <cache_dir>\<filename>
+    strconcat(sizeof(dest), dest, m_diskCachePath, filename);
+    return true;
+}
+
+bool CPreviewSceneRenderer::ResolveOgfPath(pcstr model_path, string_path& out_fn)
+{
+    if (!model_path || !model_path[0])
+        return false;
+
+    string_path name;
+    xr_strcpy(name, model_path);
+    if (!strext(name))
+        xr_strcat(name, ".ogf");
+    else if (!strext(name)[0])
+        xr_strcat(name, ".ogf");
+
+    out_fn[0] = '\0';
+
+    // Same lookup order as CModelPool::Instance_Load. All lookups go through
+    // a safe manual resolve: FS.exist(out, alias, name) variants call
+    // update_path(crashOnNotFound=true) and fatal on missing aliases.
+    const pcstr aliases[] = { "$level$", "$game_meshes$" };
+    for (pcstr alias : aliases)
+    {
+        if (!FS.path_exist(alias))
+            continue;
+        string_path resolved;
+        if (FS.update_path(resolved, alias, name, false) && FS.exist(resolved, FSType::Any))
+        {
+            xr_strcpy(out_fn, resolved);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void CPreviewSceneRenderer::EnsureDiskCacheLoaded()
+{
+    if (m_diskCacheLoaded)
+        return;
+
+    m_diskCacheLoaded = true;
+    m_diskIndex.clear();
+
+    if (!EnsureDiskCacheDir())
+        return;
+
+    // Read version header and entries from index.txt using a resolved full path.
+    string_path index_path;
+    if (!ResolveCacheFilePath(index_path, kPreviewCacheIndexFile))
+        return;
+
+    IReader* reader = FS.r_open(index_path);
+    if (!reader)
+        return;
+
+    xr_string line;
+    bool header_ok = false;
+    while (!reader->eof())
+    {
+        const char* data = (const char*)reader->pointer();
+        const u32 avail = reader->elapsed();
+        if (avail == 0)
+            break;
+
+        // Extract a line (handle \r\n and \n).
+        u32 len = 0;
+        while (len < avail && data[len] != '\n')
+            ++len;
+        line.assign(data, len);
+        reader->advance(len);
+        if (reader->elapsed() > 0 && *(const char*)reader->pointer() == '\n')
+            reader->advance(1);
+
+        // Trim trailing \r.
+        while (!line.empty() && line.back() == '\r')
+            line.pop_back();
+
+        if (line.empty())
+            continue;
+
+        if (!header_ok)
+        {
+            // Expected: "version <N>"
+            u32 ver = 0;
+            if (sscanf(line.c_str(), "version %u", &ver) == 1)
+            {
+                if (ver != kPreviewDiskCacheVersion)
+                {
+                    FS.r_close(reader);
+                    WipeDiskCache();
+                    return;
+                }
+                header_ok = true;
+            }
+            else
+            {
+                // Old-format or corrupt file — wipe and start fresh.
+                FS.r_close(reader);
+                WipeDiskCache();
+                return;
+            }
+            continue;
+        }
+
+        // Parse: "base|ogf_size|ogf_mtime|resolved_pose"
+        // Split on '|' — pose may contain '|' theoretically (unlikely), so split from left.
+        const char* s0 = line.c_str();
+        const char* p1 = strchr(s0, '|');
+        if (!p1) continue;
+        const char* p2 = strchr(p1 + 1, '|');
+        if (!p2) continue;
+        const char* p3 = strchr(p2 + 1, '|');
+        // p3 optional — pose can be empty.
+
+        string64 base_buf;
+        u32 base_len = (u32)(p1 - s0);
+        clamp(base_len, 0u, (u32)(sizeof(base_buf) - 1));
+        strncpy(base_buf, s0, base_len);
+        base_buf[base_len] = '\0';
+
+        shared_str base(base_buf);
+        SDiskCacheEntry e;
+        e.ogf_size = (u32)strtoul(p1 + 1, nullptr, 10);
+        e.ogf_mtime = (u32)strtoul(p2 + 1, nullptr, 10);
+        if (p3)
+        {
+            string256 pose_buf;
+            u32 pose_len = (u32)(p3 - (p2 + 1));
+            clamp(pose_len, 0u, (u32)(sizeof(pose_buf) - 1));
+            strncpy(pose_buf, p2 + 1, pose_len);
+            pose_buf[pose_len] = '\0';
+            e.resolved_pose = shared_str(pose_buf);
+        }
+        else
+        {
+            e.resolved_pose = shared_str(p2 + 1);
+        }
+
+        if (base.size())
+            m_diskIndex[base] = std::move(e);
+    }
+
+    FS.r_close(reader);
+}
+
+void CPreviewSceneRenderer::FlushDiskIndex()
+{
+    if (!m_diskCacheDirty || !m_diskCacheLoaded)
+        return;
+
+    if (!EnsureDiskCacheDir())
+        return;
+
+    string_path index_path;
+    if (!ResolveCacheFilePath(index_path, kPreviewCacheIndexFile))
+        return;
+
+    if (IWriter* w = FS.w_open(index_path))
+    {
+        // Header
+        string64 hdr;
+        xr_sprintf(hdr, "version %u\r\n", kPreviewDiskCacheVersion);
+        w->w(hdr, xr_strlen(hdr));
+
+        // Entries
+        for (const auto& [base, e] : m_diskIndex)
+        {
+            string512 line;
+            xr_sprintf(line, "%s|%u|%u|%s\r\n", base.c_str(), e.ogf_size, e.ogf_mtime,
+                e.resolved_pose.size() ? e.resolved_pose.c_str() : "");
+            w->w(line, xr_strlen(line));
+        }
+        FS.w_close(w);
+    }
+    m_diskCacheDirty = false;
+}
+
+bool CPreviewSceneRenderer::TryApplyDiskCache(SCacheEntry& entry)
+{
+    EnsureDiskCacheLoaded();
+
+    // Use the entry's own settings, not the active grid's m_settings.
+    const shared_str rt_name = MakeTextureName(entry.model_path.c_str(), entry.settings);
+    pcstr rt_str = rt_name.c_str();
+    if (!rt_str || !rt_str[0])
+        return false;
+
+    pcstr base_start = rt_str;
+    if (strncmp(rt_str, "$user$", 6) == 0)
+        base_start = rt_str + 6;
+
+    const shared_str base(base_start);
+    const auto it = m_diskIndex.find(base);
+    if (it == m_diskIndex.end())
+        return false;
+
+    // Validate ogf size+mtime.
+    string_path ogf_fn;
+    u32 cur_size = 0, cur_mtime = 0;
+    if (ResolveOgfPath(entry.model_path.c_str(), ogf_fn))
+    {
+        cur_size = (u32)FS.file_length(ogf_fn);
+        cur_mtime = FS.get_file_age(ogf_fn);
+    }
+    else
+    {
+        m_diskIndex.erase(it);
+        m_diskCacheDirty = true;
+        return false;
+    }
+
+    if (cur_size != it->second.ogf_size || cur_mtime != it->second.ogf_mtime)
+    {
+        m_diskIndex.erase(it);
+        m_diskCacheDirty = true;
+        return false;
+    }
+
+    // Check that the DDS file exists on disk. FSType::Any also checks the
+    // physical filesystem: freshly written files may be missing from the
+    // locator registry in the same session.
+    string512 dds_filename;
+    xr_sprintf(dds_filename, "%s.dds", base.c_str());
+    string_path dds_path;
+    if (!ResolveCacheFilePath(dds_path, dds_filename))
+    {
+        m_diskIndex.erase(it);
+        m_diskCacheDirty = true;
+        return false;
+    }
+    if (!FS.exist(dds_path, FSType::Any))
+    {
+        m_diskIndex.erase(it);
+        m_diskCacheDirty = true;
+        return false;
+    }
+
+    // Valid disk cache hit. Mark ready with the file-texture name (no RT created).
+    entry.texture_name = base;
+    entry.resolved_pose_name = it->second.resolved_pose;
+    entry.ready = true;
+    entry.failed = false;
+    entry.dirty = false;
+    return true;
+}
+
+void CPreviewSceneRenderer::SaveToDiskCache(const SCacheEntry& entry, const ref_rt& rt)
+{
+#if !defined(USE_DX11)
+    (void)entry; (void)rt;
+    return;
+#else
+    if (!rt._get())
+        return;
+
+    EnsureDiskCacheLoaded();
+
+    // Use the entry's own settings, not the active grid's m_settings.
+    const shared_str rt_name = MakeTextureName(entry.model_path.c_str(), entry.settings);
+    pcstr rt_str = rt_name.c_str();
+    if (!rt_str || !rt_str[0])
+        return;
+    pcstr base_start = rt_str;
+    if (strncmp(rt_str, "$user$", 6) == 0)
+        base_start = rt_str + 6;
+    const shared_str base(base_start);
+
+    if (!EnsureDiskCacheDir())
+        return;
+
+    string512 dds_filename;
+    xr_sprintf(dds_filename, "%s.dds", base.c_str());
+    string_path dds_full_path;
+    if (!ResolveCacheFilePath(dds_full_path, dds_filename))
+        return;
+
+    // Pass resolved full path (empty fs_root tells the saver to use it directly).
+    if (!m_owner.SaveRtToDdsDxt5(rt, "", dds_full_path))
+        return;
+
+    // Resolve ogf stats for the index.
+    string_path ogf_fn;
+    SDiskCacheEntry disk_entry;
+    if (ResolveOgfPath(entry.model_path.c_str(), ogf_fn))
+    {
+        disk_entry.ogf_size = (u32)FS.file_length(ogf_fn);
+        disk_entry.ogf_mtime = FS.get_file_age(ogf_fn);
+    }
+    disk_entry.resolved_pose = entry.resolved_pose_name;
+
+    m_diskIndex[base] = disk_entry;
+    m_diskCacheDirty = true;
+    FlushDiskIndex();
+#endif
+}
+
+void CPreviewSceneRenderer::WipeDiskCache()
+{
+    m_diskIndex.clear();
+    m_diskCacheDirty = false;
+    m_diskCacheLoaded = true;
+    m_diskCachePath[0] = '\0';
+    m_warmCursor = 0;
+    m_warmDone = false;
+
+    if (FS.path_exist("$app_data_root$"))
+        FS.dir_delete("$app_data_root$", "cached_dyn_textures", true);
+
+    // Force all cached entries to re-render so they show fresh content.
+    InvalidateCache();
+    Msg("[preview_scene] disk cache wiped");
+}
+
+// ---------------------------------------------------------------------------
+// Background warm-up: pre-load disk-cached preview DDS into VRAM (menu)
+// ---------------------------------------------------------------------------
+
+void CPreviewSceneRenderer::WarmDiskCacheTextures()
+{
+    if (m_warmDone)
+        return;
+
+    EnsureDiskCacheLoaded();
+    if (m_diskIndex.empty())
+        return;
+
+    int warm_min = 0, warm_max = 500;
+    const int v = Console ? Console->GetInteger("npc_preview_disk_cache_warm_per_frame", warm_min, warm_max) : 0;
+    if (v <= 0)
+        return;
+    const u32 budget = static_cast<u32>(v);
+
+    // Advance cursor into the ordered map. O(cursor) but total is typically
+    // < 200 entries; the dominant cost is DDS I/O per texture.
+    const u32 total = static_cast<u32>(m_diskIndex.size());
+    auto it = m_diskIndex.begin();
+    for (u32 s = _min(m_warmCursor, total); s > 0 && it != m_diskIndex.end(); ++it, --s)
+        ; // advance
+
+    u32 loaded = 0;
+    while (it != m_diskIndex.end() && loaded < budget)
+    {
+        const shared_str& base = it->first;
+        // _CreateTexture returns the existing CTexture if already registered,
+        // or creates a new one. In the menu bDeferredLoad=TRUE, so the DDS
+        // is not read yet — Load() forces synchronous I/O + GPU upload.
+        CTexture* tex = m_owner.Resources->_CreateTexture(base.c_str());
+        if (tex && !tex->flags.bLoaded)
+            tex->Load();
+        ++loaded;
+        ++it;
+        ++m_warmCursor;
+    }
+
+    if (it == m_diskIndex.end())
+        m_warmDone = true;
+}
+
 void CPreviewSceneRenderer::ProcessQueue()
 {
+    FlushDeferredVisualDiscard();
+
     if (m_queue.empty())
         return;
 
@@ -1249,21 +1672,54 @@ void CPreviewSceneRenderer::ProcessQueue()
         m_queue_dirty = false;
     }
 
-    const u32 budget = _min<u32>(frame_budget, (u32)m_queue.size());
-    for (u32 i = 0; i < budget; ++i)
+    // Process entries: disk-cache hits and already-ready entries are cheap
+    // (stat + map lookup) and consume no render budget.  Only actual model
+    // renders (RenderCachedEntry) count against the per-frame budget to
+    // avoid FPS drops.  A safety scan limit prevents stalls on huge queues.
+    constexpr u32 kScanLimit = 1024;
+    const u32 count = _min<u32>(kScanLimit, static_cast<u32>(m_queue.size()));
+    u32 rendered = 0;
+    u32 consumed = 0;
+
+    for (u32 i = 0; i < count; ++i)
     {
         const shared_str& key = m_queue[i].key;
 
         auto it = m_cache.find(key);
         if (it == m_cache.end())
+        {
+            ++consumed;
             continue;
+        }
 
         auto& entry = it->second;
         entry.queued = false;
+        // Attempt disk cache before (re-)rendering the model.
+        if (!entry.ready || entry.dirty)
+        {
+            if (TryApplyDiskCache(entry))
+            {
+                ++consumed;
+                continue;
+            }
+        }
         if (entry.ready && !entry.dirty)
+        {
+            ++consumed;
             continue;
+        }
+        // Needs a full model render — respect the budget.
+        if (rendered >= frame_budget)
+            break;
         RenderCachedEntry(entry);
+        ++rendered;
+        ++consumed;
     }
-    m_queue.erase(m_queue.begin(), m_queue.begin() + budget);
+    m_queue.erase(m_queue.begin(), m_queue.begin() + consumed);
+
+    // TryApplyDiskCache may erase stale index entries without re-saving them;
+    // persist those removals so the next session doesn't see them either.
+    if (m_diskCacheDirty && m_queue.empty())
+        FlushDiskIndex();
 }
 } // namespace xray::render::RENDER_NAMESPACE

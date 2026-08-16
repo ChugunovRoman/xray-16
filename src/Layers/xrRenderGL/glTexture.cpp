@@ -94,6 +94,15 @@ GLuint CRender::texture_load(LPCSTR fRName, u32& ret_msize, GLenum& ret_desc)
                     break;
             }
 
+            // Disk-cached preview textures in appdata (npc_preview_* DDS cache).
+            if (!exist && FS.path_exist("$preview_cache$"))
+            {
+                string_path preview_nm;
+                strconcat(sizeof preview_nm, preview_nm, fname, ".dds");
+                if (FS.update_path(fn, "$preview_cache$", preview_nm, false) && FS.exist(fn, FSType::Any))
+                    exist = true;
+            }
+
             if (!exist)
             {
                 Msg("! Can't find texture '%s'", fname);

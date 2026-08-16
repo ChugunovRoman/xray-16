@@ -972,7 +972,12 @@ void CRender::OnFrame()
         m_preview_scene->ProcessQueue();
 
     if (g_pGamePersistent->MainMenuActiveOrLevelNotExist())
+    {
+        // Background warm-up of disk-cached preview textures while in menu.
+        if (m_preview_scene)
+            m_preview_scene->WarmDiskCacheTextures();
         return;
+    }
 }
 
 void CRender::PreviewScene_Initialize()
@@ -1086,6 +1091,12 @@ SPreviewSceneSettings CRender::PreviewScene_GetSettings() const
         return {};
 
     return m_preview_scene->GetSettings();
+}
+
+void CRender::PreviewScene_ResetDiskCache()
+{
+    if (m_preview_scene)
+        m_preview_scene->WipeDiskCache();
 }
 
 void CRender::PreviewScene_ProcessQueue()

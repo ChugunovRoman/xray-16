@@ -267,6 +267,7 @@ int npc_anim_lod = 1;
 int npc_anim_lod_far_interval_ms = 120;
 
 u32 npc_preview_scene_budget_per_frame = 1;
+u32 npc_preview_disk_cache_warm_per_frame = 16;
 
 Flags32 g_uCommonFlags;
 enum E_COMMON_FLAGS
@@ -793,6 +794,28 @@ public:
     void Info(TInfo& I) override
     {
         xr_strcpy(I, "bake active actor weapon to DDS (inventory+technician presets)");
+    }
+};
+class CCC_NpcPreviewCacheReset final : public IConsole_Command
+{
+public:
+    CCC_NpcPreviewCacheReset(pcstr name) : IConsole_Command(name) { bEmptyArgsHandled = true; }
+
+    void Execute(pcstr args) override
+    {
+        if (!GEnv.Render)
+        {
+            Msg("! [preview_scene] npc_preview_cache_reset: renderer not available");
+            return;
+        }
+        if (args && *args)
+            Msg("~ [preview_scene] npc_preview_cache_reset: args are ignored");
+        GEnv.Render->PreviewScene_ResetDiskCache();
+    }
+
+    void Info(TInfo& I) override
+    {
+        xr_strcpy(I, "wipe npc_preview disk cache and force re-render");
     }
 };
 // helper functions --------------------------------------------
@@ -2896,6 +2919,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_sim_brain_actor_update_interval", (int*)&npc_perf_sim_brain_actor_update_interval, 1000, 120000);
     CMD4(CCC_Integer, "npc_perf_agent_enemy_fill_squads_trace_members", &npc_perf_agent_enemy_fill_squads_trace_members, 0, 1);
     CMD4(CCC_Integer, "npc_preview_scene_budget_per_frame", (int*)&npc_preview_scene_budget_per_frame, 1, 500);
+    CMD4(CCC_Integer, "npc_preview_disk_cache_warm_per_frame", (int*)&npc_preview_disk_cache_warm_per_frame, 0, 500);
 
 #ifndef MASTER_GOLD
     CMD3(CCC_Mask, "ai_ignore_actor", &psAI_Flags, aiIgnoreActor);
@@ -2939,6 +2963,7 @@ void CCC_RegisterCommands()
     // Available in MASTER_GOLD Release: bake DDS for dynamic inv icons (modding / content pipeline).
     CMD1(CCC_InvIconBakeDds, "inv_icon_bake_dds");
     CMD1(CCC_InvIconBakeCurrentDds, "inv_icon_bake_current_dds");
+    CMD1(CCC_NpcPreviewCacheReset, "npc_preview_cache_reset");
 
     CMD1(CCC_LuaHelp, "dump_lua");
     CMD4(CCC_InvCellSize, "g_inv_cell_size", &g_inv_inv_cell_size, 1, 4);

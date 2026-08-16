@@ -148,6 +148,58 @@ void SaveWeaponIconRtToDds(pcstr slot_label, pcstr item_label, const ref_rt& rt)
     _RELEASE(pSrc);
 }
 
+#if defined(USE_DX11)
+// Core DDS writer shared by weapon icon baking and the preview texture disk cache.
+// When fs_root is non-empty, fname is treated as a relative path under that FS alias.
+// When fs_root is empty or null, fname is treated as a resolved absolute file path.
+static bool SaveD3DResourceToDdsDxt5(ID3DResource* pSrc, pcstr fs_root, pcstr fname)
+{
+    if (!pSrc || !fname || !fname[0])
+        return false;
+
+    DirectX::ScratchImage image;
+    const HRESULT cap = CaptureTexture(HW.pDevice, HW.get_context(CHW::IMM_CTX_ID), pSrc, image);
+    if (FAILED(cap))
+    {
+        Msg("! [dds_save] CaptureTexture hr=0x%08x [%s]", (unsigned)cap, fname);
+        return false;
+    }
+
+    DirectX::ScratchImage compressed;
+    HRESULT hr = Compress(*image.GetImage(0, 0, 0), DXGI_FORMAT_BC3_UNORM,
+        DirectX::TEX_COMPRESS_DEFAULT | DirectX::TEX_COMPRESS_PARALLEL, 0.0f, compressed);
+    if (FAILED(hr))
+    {
+        Msg("! [dds_save] Compress BC3 hr=0x%08x [%s]", (unsigned)hr, fname);
+        return false;
+    }
+
+    DirectX::Blob saved;
+    hr = SaveToDDSMemory(*compressed.GetImage(0, 0, 0), DirectX::DDS_FLAGS_FORCE_DX9_LEGACY, saved);
+    if (FAILED(hr))
+    {
+        Msg("! [dds_save] SaveToDDSMemory hr=0x%08x [%s]", (unsigned)hr, fname);
+        return false;
+    }
+
+    if (IWriter* fs = (fs_root && fs_root[0]) ? FS.w_open(fs_root, fname) : FS.w_open(fname))
+    {
+        if (!fs->valid())
+        {
+            Msg("! [dds_save]: file open failed (check path/permissions) %s\\%s", fs_root, fname);
+            FS.w_close(fs);
+            return false;
+        }
+        fs->w(saved.GetBufferPointer(), saved.GetBufferSize());
+        FS.w_close(fs);
+        return true;
+    }
+
+    Msg("! [dds_save]: cannot write %s\\%s", fs_root, fname);
+    return false;
+}
+#endif // USE_DX11
+
 bool SavePersistedIconRtToDdsDxt5(pcstr user_texture_name, pcstr fs_root, pcstr fname)
 {
     if (!user_texture_name || !user_texture_name[0] || !fs_root || !fs_root[0] || !fname || !fname[0])
@@ -168,58 +220,19 @@ bool SavePersistedIconRtToDdsDxt5(pcstr user_texture_name, pcstr fs_root, pcstr 
         return false;
     }
 
-    DirectX::ScratchImage image;
-    const HRESULT cap = CaptureTexture(HW.pDevice, HW.get_context(CHW::IMM_CTX_ID), pSrc, image);
-    if (FAILED(cap))
-    {
-        Msg("! [weapon_inv_icon] SaveDDS [%s]: CaptureTexture hr=0x%08x", user_texture_name, (unsigned)cap);
-        _RELEASE(pSrc);
-        return false;
-    }
+    const bool saved = SaveD3DResourceToDdsDxt5(pSrc, fs_root, fname);
+    _RELEASE(pSrc);
 
-    DirectX::ScratchImage compressed;
-    HRESULT hr = Compress(*image.GetImage(0, 0, 0), DXGI_FORMAT_BC3_UNORM,
-        DirectX::TEX_COMPRESS_DEFAULT | DirectX::TEX_COMPRESS_PARALLEL, 0.0f, compressed);
-    if (FAILED(hr))
+    if (saved)
     {
-        Msg("! [weapon_inv_icon] SaveDDS [%s]: Compress BC3 hr=0x%08x", user_texture_name, (unsigned)hr);
-        _RELEASE(pSrc);
-        return false;
-    }
-
-    DirectX::Blob saved;
-    hr = SaveToDDSMemory(*compressed.GetImage(0, 0, 0), DirectX::DDS_FLAGS_FORCE_DX9_LEGACY, saved);
-    if (FAILED(hr))
-    {
-        Msg("! [weapon_inv_icon] SaveDDS [%s]: SaveToDDSMemory hr=0x%08x", user_texture_name, (unsigned)hr);
-        _RELEASE(pSrc);
-        return false;
-    }
-
-    if (IWriter* fs = FS.w_open(fs_root, fname))
-    {
-        if (!fs->valid())
-        {
-            Msg("! [weapon_inv_icon] SaveDDS: file open failed (check path/permissions) $game_textures$\\%s", fname);
-            FS.w_close(fs);
-            _RELEASE(pSrc);
-            return false;
-        }
-        fs->w(saved.GetBufferPointer(), saved.GetBufferSize());
-        FS.w_close(fs);
         string_path abs_log{};
         xr_strcpy(abs_log, fname);
         if (FS.update_path(abs_log, fs_root, abs_log, false))
             Msg("~ [weapon_inv_icon] SaveDDS DXT5 -> %s", abs_log);
         else
             Msg("~ [weapon_inv_icon] SaveDDS DXT5 -> %s\\%s", fs_root, fname);
-        _RELEASE(pSrc);
-        return true;
     }
-
-    Msg("! [weapon_inv_icon] SaveDDS: cannot write %s\\%s", fs_root, fname);
-    _RELEASE(pSrc);
-    return false;
+    return saved;
 }
 #endif // USE_DX11
 
@@ -258,6 +271,24 @@ bool CRender::WeaponIcon_SavePersistedUserRtToDdsDxt5(pcstr user_texture_name, p
     return false;
 #else
     return wpn_icon::SavePersistedIconRtToDdsDxt5(user_texture_name, fs_root, fname);
+#endif
+}
+
+bool CRender::SaveRtToDdsDxt5(const ref_rt& rt, pcstr fs_root, pcstr fname)
+{
+#if !defined(USE_DX11)
+    (void)rt; (void)fs_root; (void)fname;
+    return false;
+#else
+    if (!rt._get() || !rt->pRT)
+        return false;
+    ID3DResource* pSrc{};
+    rt->pRT->GetResource(&pSrc);
+    if (!pSrc)
+        return false;
+    const bool ok = wpn_icon::SaveD3DResourceToDdsDxt5(pSrc, fs_root, fname);
+    _RELEASE(pSrc);
+    return ok;
 #endif
 }
 
