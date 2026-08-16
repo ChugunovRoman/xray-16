@@ -556,7 +556,7 @@ set_target_properties(xrCore PROPERTIES
 
 target_precompile_headers(xrCore
     PRIVATE
-    stdafx.h
+    "$<$<COMPILE_LANGUAGE:CXX>:stdafx.h>"
 )
 
 if (BUILD_SHARED_LIBS)

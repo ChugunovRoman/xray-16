@@ -189,7 +189,6 @@ jobs:
           sudo dpkg --add-architecture ${{ matrix.platform.arch }}
           sudo apt-get update -qq
           sudo apt-get install -qq -y \
-              libstdc++-dev:${{ matrix.platform.arch }} \
               libsdl2-dev:${{ matrix.platform.arch }} \
               liblzo2-dev:${{ matrix.platform.arch }} \
               libjpeg-dev:${{ matrix.platform.arch }} \
