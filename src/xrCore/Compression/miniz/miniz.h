@@ -508,11 +508,13 @@ typedef void *const voidpc;
 #define uncompress2 mz_uncompress2
 #endif /*#ifndef MINIZ_NO_INFLATE_APIS*/
 
+#ifndef MINIZ_NO_ZLIB_COMPAT_NAMES
 #define crc32 mz_crc32
 #define adler32 mz_adler32
 #define MAX_WBITS 15
 #define MAX_MEM_LEVEL 9
 #define zError mz_error
+#endif
 #define ZLIB_VERSION MZ_VERSION
 #define ZLIB_VERNUM MZ_VERNUM
 #define ZLIB_VER_MAJOR MZ_VER_MAJOR
