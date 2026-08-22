@@ -54,5 +54,6 @@ public:
     u32 occq_begin(u32& ID); // returns 'order'
     void occq_end(u32& ID);
     occq_result occq_get(u32& ID);
+    bool occq_try_get(u32& ID, occq_result& fragments); // false = result not ready yet (query stays in flight)
 };
 } // namespace xray::render::RENDER_NAMESPACE

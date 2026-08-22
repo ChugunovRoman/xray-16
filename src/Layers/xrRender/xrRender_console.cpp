@@ -125,6 +125,7 @@ Flags32 ps_r__common_flags = { RFLAG_ACTOR_SHADOW }; // All renders
 
 //int ps_r__Supersample = 1;
 int ps_r__LightSleepFrames = 10;
+float ps_r2_smapvis_move_eps = 0.02f; // relative move tolerance to keep smapvis caster cache, 0 = always invalidate
 
 float ps_r__Detail_l_ambient = 0.9f;
 float ps_r__Detail_l_aniso = 0.25f;
@@ -242,6 +243,11 @@ int ps_r2_wait_timeout = 500;
 
 float ps_r2_lt_smooth = 1.f; // 1.f
 float ps_r2_slight_fade = 0.5f; // 1.f
+int ps_r2_light_shadow_budget = 64; // max shadow-casting lights per call (NOTE: point shadow light = 6 omniparts = 6 slots), 0 = unlimited
+float ps_r2_light_degrade_lod = 1.f; // skip shadowed lights below this LOD entirely, 0 = off
+float ps_r2_light_shadow_dist = 20.f; // max distance from camera to light volume edge for shadow rendering, 0 = off
+int ps_r2_smap_hull_cull = 1; // 1 = cull shadow casters whose shadow hull misses the camera frustum
+int ps_r2_light_occq_async = 1; // 1 = non-blocking occq reads for light visibility
 
 //  x - min (0), y - focus (1.4), z - max (100)
 Fvector3 ps_r2_dof = Fvector3().set(-1.25f, 1.4f, 600.f);
@@ -754,6 +760,7 @@ void xrRender_initconsole()
     CMD1(CCC_BuildSSA, "build_ssa");
 #endif
     CMD4(CCC_Integer, "r__lsleep_frames", &ps_r__LightSleepFrames, 4, 30);
+    CMD4(CCC_Float, "r2_smapvis_move_eps", &ps_r2_smapvis_move_eps, 0.f, 0.5f);
     CMD4(CCC_Float, "r__ssa_glod_start", &ps_r__GLOD_ssa_start, 128, 512);
     CMD4(CCC_Float, "r__ssa_glod_end", &ps_r__GLOD_ssa_end, 16, 96);
     CMD4(CCC_Float, "r__wallmark_shift_pp", &ps_r__WallmarkSHIFT, 0.0f, 1.f);
@@ -904,6 +911,11 @@ void xrRender_initconsole()
     //  CMD4(CCC_Float,     "r2_parallax_range",    &ps_r2_df_parallax_range,   5.0f,   175.0f  );
 
     CMD4(CCC_Float, "r2_slight_fade", &ps_r2_slight_fade, .2f, 1.f);
+    CMD4(CCC_Integer, "r2_light_shadow_budget", &ps_r2_light_shadow_budget, 0, 512);
+    CMD4(CCC_Float, "r2_light_degrade_lod", &ps_r2_light_degrade_lod, 0.f, 1.f);
+    CMD4(CCC_Float, "r2_light_shadow_dist", &ps_r2_light_shadow_dist, 0.f, 200.f);
+    CMD4(CCC_Integer, "r2_smap_hull_cull", &ps_r2_smap_hull_cull, 0, 1);
+    CMD4(CCC_Integer, "r2_light_occq_async", &ps_r2_light_occq_async, 0, 1);
     CMD3(CCC_Token, "r2_smap_size", &ps_r2_smapsize, qsmapsize_token);
 
     Fvector tw_min, tw_max;

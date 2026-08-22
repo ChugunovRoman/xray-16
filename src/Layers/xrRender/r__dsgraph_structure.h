@@ -46,6 +46,9 @@ struct R_dsgraph_structure
         bool precise_portals{ false };
         bool is_main_pass{ false };
         bool mt_calculate{ false };
+        bool use_shadow_hull_cull{ false };
+        Fvector shadow_light_pos{};
+        float shadow_light_range{};
     } o;
 
     // Dynamic scene graph
@@ -119,6 +122,9 @@ struct R_dsgraph_structure
         o.spatial_traverse_flags = 0;
         o.portal_traverse_flags = 0;
         o.spatial_types = STYPE_RENDERABLE;
+        o.use_shadow_hull_cull = false;
+        o.shadow_light_pos.set(0, 0, 0);
+        o.shadow_light_range = 0.f;
 
         val_recorder = nullptr;
         val_feedback = nullptr;

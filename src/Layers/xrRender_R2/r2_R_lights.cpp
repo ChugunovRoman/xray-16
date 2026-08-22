@@ -12,20 +12,62 @@ void CRender::render_lights(light_Package& LP)
     // const	u16		smap_unassigned		= u16(-1);
     {
         xr_vector<light*>& source = LP.v_shadowed;
+        xr_vector<light*> kept;
+        kept.reserve(source.size());
+
+        const float shadow_dist = ps_r2_light_shadow_dist;
+
         for (u32 it = 0; it < source.size(); it++)
         {
             light* L = source[it];
             L->vis_update();
             if (!L->vis.visible)
+                continue; // drop invisible
+
+            // Distance-based shadow skip: render shadow maps only for lights whose volume
+            // edge is close enough to the camera. Skipped lights disappear entirely (no
+            // unshadowed fallback — it lights through walls).
+            // For OMNIPART use the parent position+range: all 6 parts of one shadowed
+            // point light share it, so they are skipped/kept together automatically
+            // (independent per-part decisions produce a half-lit sphere).
+            // Hysteresis: a light rendered on the previous frame is kept until 20% past
+            // the threshold — no popping when walking back and forth near the border.
+            if (shadow_dist > 0.f)
             {
-                source.erase(source.begin() + it);
-                it--;
+                float dist;
+                if (L->flags.type == IRender_Light::OMNIPART)
+                    dist = Device.vCameraPosition.distance_to(L->position) - L->range;
+                else
+                    dist = Device.vCameraPosition.distance_to(L->spatial.sphere.P) - L->spatial.sphere.R;
+                if (dist < 0.f)
+                    dist = 0.f;
+
+                const bool was_rendered = (Device.dwFrame - L->shadow_render_frame) <= 1;
+                const float limit = was_rendered ? shadow_dist * 1.2f : shadow_dist;
+                if (dist > limit)
+                    continue;
             }
-            else
-            {
-                LR.compute_xf_spot(L);
-            }
+
+            // Secondary LOD skip (usually off; distance culling above is the main tool)
+            if (ps_r2_light_degrade_lod > 0.f && L->get_LOD() < ps_r2_light_degrade_lod)
+                continue;
+
+            kept.push_back(L);
+            L->shadow_render_frame = Device.dwFrame;
+            LR.compute_xf_spot(L);
         }
+
+        // Budget cap (safety net for extreme scenes): keep the closest lights.
+        if (ps_r2_light_shadow_budget > 0 && kept.size() > (size_t)ps_r2_light_shadow_budget)
+        {
+            std::sort(kept.begin(), kept.end(), [](light* l1, light* l2)
+            {
+                return l1->get_LOD() > l2->get_LOD();
+            });
+            kept.resize((size_t)ps_r2_light_shadow_budget);
+        }
+
+        LP.v_shadowed = std::move(kept);
     }
 
     // 2. refactor - infact we could go from the backside and sort in ascending order
@@ -192,6 +234,9 @@ void CRender::render_lights(light_Package& LP)
                     dsgraph.o.view_pos = L->position;
                     dsgraph.o.xform = L->X.S.combine;
                     dsgraph.o.view_frustum.CreateFromMatrix(L->X.S.combine, FRUSTUM_P_ALL & (~FRUSTUM_P_NEAR));
+                    dsgraph.o.use_shadow_hull_cull = ps_r2_smap_hull_cull != 0;
+                    dsgraph.o.shadow_light_pos = L->position;
+                    dsgraph.o.shadow_light_range = L->range;
 
                     dsgraph.build_subspace();
                 }

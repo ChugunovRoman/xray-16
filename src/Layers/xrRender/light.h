@@ -33,6 +33,8 @@ public:
 
     vis_data hom;
     u32 frame_render;
+    /** Last frame this light got a shadow map (hysteresis for distance-based shadow skip). */
+    u32 shadow_render_frame;
     /** Dedup for CLight_DB::add_light: same frame can run two Calculate() passes (dedicated second viewport). */
     u32 add_light_pkg_seq;
 
@@ -53,6 +55,13 @@ public:
     u32 indirect_photons;
 
     smapvis svis[R__NUM_CONTEXTS]; // used for 6-cubemap faces
+
+    // smapvis cache anchor: last state snapshot that fully invalidated the caster cache
+    bool svis_cache_valid{ false };
+    Fvector svis_last_pos{};
+    Fvector svis_last_dir{};
+    float svis_last_range{};
+    float svis_last_cone{};
 
     ref_shader s_spot;
     ref_shader s_point;

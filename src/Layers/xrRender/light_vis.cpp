@@ -21,6 +21,18 @@ void light::vis_prepare(CBackend& cmd_list)
     //		. perform testing				= ???,		pending
 
     u32 frame = Device.dwFrame;
+
+    // Resolve a still-pending async query before considering a new one (avoids query slot leak)
+    if (vis.pending && ps_r2_light_occq_async)
+    {
+        R_occlusion::occq_result fragments;
+        if (!RImplementation.occq_try_get(vis.query_id, fragments))
+            return; // keep last known visibility for this frame
+        vis.visible = (fragments > cullfragments);
+        vis.pending = false;
+        vis.frame2test = frame + (vis.visible ? ::Random.randI(delay_large_min, delay_large_max) : 1);
+    }
+
     if (frame < vis.frame2test)
         return;
 
@@ -78,7 +90,16 @@ void light::vis_update()
         return;
 
     const u32 frame = Device.dwFrame;
-    const auto fragments = RImplementation.occq_get(vis.query_id);
+    R_occlusion::occq_result fragments;
+    if (ps_r2_light_occq_async)
+    {
+        if (!RImplementation.occq_try_get(vis.query_id, fragments))
+            return; // not ready yet: keep pending, resolve on a later frame
+    }
+    else
+    {
+        fragments = RImplementation.occq_get(vis.query_id);
+    }
     // Log					("",fragments);
     vis.visible = (fragments > cullfragments);
     vis.pending = false;

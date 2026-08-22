@@ -40,6 +40,7 @@ extern ECORE_API u32 ps_r3_minmax_sm; //	=	0;
 extern ECORE_API const xr_token qminmax_sm_token[];
 
 extern ECORE_API int ps_r__LightSleepFrames;
+extern ECORE_API float ps_r2_smapvis_move_eps; // relative move tolerance to keep smapvis caster cache, 0 = always invalidate
 
 extern ECORE_API float ps_r__Detail_l_ambient;
 extern ECORE_API float ps_r__Detail_l_aniso;
@@ -155,6 +156,11 @@ extern ECORE_API float ps_r2_dhemi_light_scale; // 1.f
 extern ECORE_API float ps_r2_dhemi_light_flow; // .1f
 extern ECORE_API int ps_r2_dhemi_count; // 5
 extern ECORE_API float ps_r2_slight_fade; // 1.f
+extern ECORE_API int ps_r2_light_shadow_budget; // max shadow-casting lights per call (NOTE: point shadow light = 6 omniparts = 6 slots), 0 = unlimited
+extern ECORE_API float ps_r2_light_degrade_lod; // skip shadowed lights below this LOD entirely, 0 = off
+extern ECORE_API float ps_r2_light_shadow_dist; // max distance from camera to light volume edge for shadow rendering, 0 = off
+extern ECORE_API int ps_r2_smap_hull_cull; // 1 = cull shadow casters whose shadow hull misses the camera frustum
+extern ECORE_API int ps_r2_light_occq_async; // 1 = non-blocking occq reads for light visibility
 extern ECORE_API int ps_r2_wait_sleep;
 extern ECORE_API int ps_r2_wait_timeout;
 

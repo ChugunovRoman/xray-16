@@ -194,4 +194,57 @@ R_occlusion::occq_result R_occlusion::occq_get(u32& ID)
     ID = 0;
     return fragments;
 }
+
+bool R_occlusion::occq_try_get(u32& ID, occq_result& fragments)
+{
+    if (!enabled || ID == iInvalidHandle)
+    {
+        fragments = 0xffffffff;
+        return true;
+    }
+
+    ScopeLock lock{ &render_lock };
+
+    if (ID >= used.size())
+    {
+        ID = 0;
+        fragments = 0;
+        return true;
+    }
+#if defined(USE_DX11)
+    if (!used[ID].Q)
+#else
+    if (used[ID].Q == 0)
+#endif
+    {
+        ID = 0;
+        fragments = 0;
+        return true;
+    }
+
+    fragments = 0;
+    if (GetData(used[ID].Q, &fragments, sizeof(fragments)) == S_FALSE)
+        return false; // not ready: do NOT touch the query, retry later
+
+    if (0 == fragments)
+        RImplementation.BasicStats.OcclusionCulled++;
+
+    // insert into pool (sorting in decreasing order)
+    Query& Q = used[ID];
+    if (pool.empty())
+        pool.emplace_back(Q);
+    else
+    {
+        int it = int(pool.size()) - 1;
+        while ((it >= 0) && (pool[it].order < Q.order))
+            it--;
+        pool.emplace(pool.begin() + it + 1, std::move(Q));
+    }
+
+    // remove from used and shrink as nesessary
+    used[ID].Q = 0;
+    fids.emplace_back(ID);
+    ID = 0;
+    return true;
+}
 } // namespace xray::render::RENDER_NAMESPACE

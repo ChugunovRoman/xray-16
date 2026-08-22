@@ -28,6 +28,7 @@ light::light() : SpatialBase(g_pGamePersistent->SpatialSpace)
     m_volumetric_distance = 1;
 
     frame_render = 0;
+    shadow_render_frame = 0;
     add_light_pkg_seq = u32(-1);
 
 #if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)
@@ -41,6 +42,7 @@ light::light() : SpatialBase(g_pGamePersistent->SpatialSpace)
     vis.pending = false;
     for (u32 id = 0; id < R__NUM_CONTEXTS; ++id)
         svis[id].id = id;
+    svis_cache_valid = false;
 #endif // (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4) || (RENDER==R_GL)
 }
 
@@ -213,8 +215,25 @@ void light::spatial_move()
 #if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)
     if (flags.bActive)
         gi_generate();
-    for (u32 id = 0; id < R__NUM_CONTEXTS; ++id)
-        svis[id].invalidate();
+    // Keep the learned smapvis caster cache across micro-movements (moving torches otherwise
+    // re-learn from scratch every frame). Full invalidate once the light changed too much.
+    const bool cache_ok =
+        svis_cache_valid &&
+        ps_r2_smapvis_move_eps > 0.f &&
+        position.distance_to(svis_last_pos) <= ps_r2_smapvis_move_eps * _max(range, EPS_L) &&
+        _abs(1.f - direction.dotproduct(svis_last_dir)) < 0.001f &&
+        fsimilar(range, svis_last_range, range * 0.05f + EPS) &&
+        fsimilar(cone, svis_last_cone, deg2rad(0.5f));
+    if (!cache_ok)
+    {
+        for (u32 id = 0; id < R__NUM_CONTEXTS; ++id)
+            svis[id].invalidate();
+        svis_cache_valid = true;
+        svis_last_pos = position;
+        svis_last_dir = direction;
+        svis_last_range = range;
+        svis_last_cone = cone;
+    }
 #endif // (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4) || (RENDER == R_GL)
 }
 

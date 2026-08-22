@@ -174,6 +174,56 @@ void R_dsgraph_structure::insert_static(dxRender_Visual* pVisual)
         return;
     pVisual->vis.marker[context_id] = marker;
 
+    // Shadow-caster culling: skip casters whose shadow hull (light apex extruded through the
+    // caster AABB up to light range) cannot reach the main camera frustum at all.
+    if (o.use_shadow_hull_cull)
+    {
+        Fbox hull;
+        hull.invalidate();
+        hull.modify(o.shadow_light_pos);
+        Fvector corner;
+        for (int i = 0; i < 8; ++i)
+        {
+            pVisual->vis.box.getpoint(i, corner);
+            corner.sub(o.shadow_light_pos);
+            const float len = corner.magnitude();
+            if (len > EPS)
+            {
+                // Extend through the caster to the light range: the shadow falls BEHIND
+                // the caster (away from the light), so the hull must reach light range.
+                corner.mul(o.shadow_light_range / len);
+                corner.add(o.shadow_light_pos);
+                hull.modify(corner);
+            }
+        }
+        // Project the caster CENTER to range as well: due to sphere curvature the center
+        // ray reaches deeper than any corner ray (e.g. light at (0,0,10) range 10: corner
+        // of a wall at z=4 projects to z~2.4, but the center projects to z=0). Without
+        // this the hull misses the deepest shadow and culls walls that still block light.
+        Fvector caster_center;
+        pVisual->vis.box.getcenter(caster_center);
+        caster_center.sub(o.shadow_light_pos);
+        const float center_len = caster_center.magnitude();
+        if (center_len > EPS)
+        {
+            caster_center.mul(o.shadow_light_range / center_len);
+            caster_center.add(o.shadow_light_pos);
+            hull.modify(caster_center);
+        }
+        // Safety margin: expand by the caster bounding-sphere radius so any geometric
+        // edge case (edge/face midpoints reaching further than corners+center) stays
+        // inside the hull. Conservative — only reduces culling efficiency slightly.
+        const float caster_radius = pVisual->vis.box.getradius();
+        hull.grow(caster_radius);
+
+        Fvector hull_center;
+        hull.getcenter(hull_center);
+        const float hull_radius = hull.getradius();
+        u32 mask = FRUSTUM_SAFE;
+        if (fcvNone == RI.ViewBase.testSAABB(hull_center, hull_radius, hull.data(), mask))
+            return;
+    }
+
 #if RENDER == R_R1
     if (RI.o.vis_intersect && (pVisual->vis.accept_frame != Device.dwFrame))
         return;
