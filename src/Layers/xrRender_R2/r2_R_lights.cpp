@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "Layers/xrRender/du_box.h"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -166,6 +167,24 @@ void CRender::render_lights(light_Package& LP)
         dsgraph.render_graph(0);
         if (ps_r2_ls_flags.test(R2FLAG_SUN_DETAILS))
             Details->Render(dsgraph.cmd_list);
+
+        // Render NPC blob shadows (cheap impostors collected during build_subspace)
+        if (!dsgraph.npc_blobs.empty() && ps_r2_smap_npc_blob > 0)
+        {
+            PIX_EVENT_CTX(dsgraph.cmd_list, NPC_BLOB_SHADOWS);
+            // Reuse the spot light's depth-only shader element (SE_R2_SHADOW) — in the SMAP
+            // pass color-write is off, so any depth-writing shader works for the blob caster.
+            dsgraph.cmd_list.set_Element(Target->get_accum_spot_shader()->E[SE_R2_SHADOW]);
+            dsgraph.cmd_list.set_Geometry(Target->g_npc_blob);
+            for (const Fmatrix& mBlob : dsgraph.npc_blobs)
+            {
+                dsgraph.cmd_list.set_xform_world(mBlob);
+                dsgraph.cmd_list.Render(D3DPT_TRIANGLELIST, 0, 0, DU_BOX_NUMVERTEX, 0, DU_BOX_NUMFACES);
+            }
+            // Restore world matrix for subsequent passes
+            dsgraph.cmd_list.set_xform_world(Fidentity);
+        }
+
         L->X.S.transluent = FALSE;
         if (bSpecial)
         {
@@ -240,6 +259,20 @@ void CRender::render_lights(light_Package& LP)
             get_imm_context().cmd_list.Invalidate();
     };
 
+    // Single shared spatial query for all light passes: one q_sphere around the camera
+    // replaces a per-light q_frustum octree walk. Radius covers every light volume that
+    // survived the distance cull (shadow_dist + max light range with margin).
+    static xr_vector<ISpatial*> common_dynamic;
+    if (ps_r2_light_common_dynamic > 0 && !LP.v_shadowed.empty())
+    {
+        ZoneScopedN("light_common_dynamic_query");
+        float max_reach = ps_r2_light_shadow_dist;
+        for (light* Ld : LP.v_shadowed)
+            max_reach = _max(max_reach, Device.vCameraPosition.distance_to(Ld->spatial.sphere.P) + Ld->range);
+        common_dynamic.clear();
+        g_pGamePersistent->SpatialSpace.q_sphere(common_dynamic, 0, STYPE_RENDERABLE, Device.vCameraPosition, max_reach * 1.05f);
+    }
+
     while (!LP.v_shadowed.empty())
     {
         // if (has_spot_shadowed)
@@ -294,6 +327,7 @@ void CRender::render_lights(light_Package& LP)
                     dsgraph.o.use_shadow_hull_cull = ps_r2_smap_hull_cull != 0;
                     dsgraph.o.shadow_light_pos = L->position;
                     dsgraph.o.shadow_light_range = L->range;
+                    dsgraph.o.precomputed_dynamic = (ps_r2_light_common_dynamic > 0) ? &common_dynamic : nullptr;
 
                     dsgraph.build_subspace();
 

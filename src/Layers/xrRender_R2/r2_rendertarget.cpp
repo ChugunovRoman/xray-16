@@ -498,6 +498,10 @@ CRenderTarget::CRenderTarget()
         s_accum_spot.create(b_accum_spot, "r2" DELIMITER "accum_spot_s", "lights" DELIMITER "lights_spot01");
         accum_spot_geom_create();
         g_accum_spot.create(D3DFVF_XYZ, g_accum_spot_vb, g_accum_spot_ib);
+
+        // NPC blob shadow impostor: unit cube geometry for cheap SMAP casters
+        npc_blob_geom_create();
+        g_npc_blob.create(D3DFVF_XYZ, g_npc_blob_vb, g_npc_blob_ib);
     }
 
     // SPOT VOLUMETRIC

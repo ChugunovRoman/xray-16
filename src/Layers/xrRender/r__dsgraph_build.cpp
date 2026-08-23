@@ -219,15 +219,46 @@ void R_dsgraph_structure::insert_static(dxRender_Visual* pVisual)
         return;
     pVisual->vis.marker[context_id] = marker;
 
-    // Collect the leaf into the static-geometry cache (before any camera-dependent tests:
-    // hull and SSA are re-run every frame on replay). Only one write per visual per build
-    // thanks to the marker guard above.
-    if (o.static_cache_output)
-        o.static_cache_output->push_back(pVisual);
+    // Shadow-caster culling: skip casters whose shadow hull (light apex extruded through the
+    // caster AABB up to light range) cannot reach the main camera frustum at all.
+    if (o.use_shadow_hull_cull)
+    {
+        Fbox hull;
+        hull.invalidate();
+        hull.modify(o.shadow_light_pos);
+        Fvector corner;
+        for (int i = 0; i < 8; ++i)
+        {
+            pVisual->vis.box.getpoint(i, corner);
+            corner.sub(o.shadow_light_pos);
+            const float len = corner.magnitude();
+            if (len > EPS)
+            {
+                corner.mul(o.shadow_light_range / len);
+                corner.add(o.shadow_light_pos);
+                hull.modify(corner);
+            }
+        }
+        Fvector caster_center;
+        pVisual->vis.box.getcenter(caster_center);
+        caster_center.sub(o.shadow_light_pos);
+        const float center_len = caster_center.magnitude();
+        if (center_len > EPS)
+        {
+            caster_center.mul(o.shadow_light_range / center_len);
+            caster_center.add(o.shadow_light_pos);
+            hull.modify(caster_center);
+        }
+        const float caster_radius = pVisual->vis.box.getradius();
+        hull.grow(caster_radius);
 
-    // Shadow-caster culling: skip casters whose shadow hull cannot reach the camera frustum
-    if (o.use_shadow_hull_cull && shadow_hull_cull(pVisual->vis.box))
-        return;
+        Fvector hull_center;
+        hull.getcenter(hull_center);
+        const float hull_radius = hull.getradius();
+        u32 mask = FRUSTUM_SAFE;
+        if (fcvNone == RImplementation.ViewBase.testSAABB(hull_center, hull_radius, hull.data(), mask))
+            return;
+    }
 
 #if RENDER == R_R1
     if (RImplementation.o.vis_intersect && (pVisual->vis.accept_frame != Device.dwFrame))
@@ -375,6 +406,42 @@ void R_dsgraph_structure::add_leafs_dynamic(
 
         if (skinning_from_parent)
             pV->CopyBoneTransformsFrom(*lod_bind_source);
+
+        // r2_smap_npc_blob 3: skip NPC entirely from shadow map (no CalculateBones,
+        // no draw calls, no blob — NPC casts no shadow at all). Maximum CPU savings.
+        if (o.phase == CRender::PHASE_SMAP && ps_r2_smap_npc_blob >= 3)
+            return;
+
+        // Cheap blob shadow in SMAP passes: for distant NPCs render a simple box instead of
+        // the full skeleton (no CalculateBones, 12 tris). Matrix scales the unit cube to the
+        // NPC bounding sphere.
+        if (o.phase == CRender::PHASE_SMAP && ps_r2_smap_npc_blob > 0)
+        {
+            const bool blob_forced = ps_r2_smap_npc_blob >= 2;
+            const bool blob_fallback = (ps_r2_smap_npc_blob == 1) && !pV->m_lod;
+            if (blob_forced || blob_fallback)
+            {
+                // Screen-size test from the CAMERA (same metric as the LOD logic below)
+                Fvector Tpos;
+                float D;
+                xform.transform_tiny(Tpos, pV->vis.sphere.P);
+                const float ssa = CalcSSA(D, Tpos, pV->vis.sphere.R / 2.f);
+                const float ssaLodA =
+                    (root && root->renderable_SsaLodCharacter()) ? r_ssaLOD_CHAR_A : r_ssaLOD_A;
+                if (ssa < ssaLodA)
+                {
+                    // Build blob matrix: unit cube scaled to the bounding sphere, centered on NPC
+                    Fmatrix mBlob;
+                    mBlob.scale(pV->vis.sphere.R * 0.7f, pV->vis.sphere.R * 0.5f, pV->vis.sphere.R * 0.7f);
+                    Fvector vCenter;
+                    xform.transform_tiny(vCenter, pV->vis.sphere.P);
+                    vCenter.y -= pV->vis.sphere.R * 0.5f; // drop to the ground: blob center at feet level
+                    mBlob.c = vCenter;
+                    npc_blobs.push_back(mBlob);
+                    return; // skip the full skeleton entirely (no CalculateBones!)
+                }
+            }
+        }
 
         BOOL _use_lod = FALSE;
         if (pV->m_lod && (!root || root->renderable_AllowCharacterMeshLod()))
@@ -842,16 +909,7 @@ void R_dsgraph_structure::build_subspace()
     static_geo_tasks.resize(PortalTraverser.r_sectors.size());
 #endif
 
-    if (o.static_cache_input)
-    {
-        // Replay the cached static leaf list for a non-moving light: skips the whole
-        // portal/sector traversal + hierrarhy recursion. Camera-dependent per-visual
-        // tests (shadow hull, SSA, shader selection) still run inside insert_static.
-        ZoneScopedN("dsg_cache_replay");
-        for (dxRender_Visual* V : *o.static_cache_input)
-            insert_static(V);
-    }
-    else if (psDeviceFlags.test(rsDrawStatic))
+    if (psDeviceFlags.test(rsDrawStatic))
     {
         for (u32 s_it = 0; s_it < PortalTraverser.r_sectors.size(); s_it++)
         {
@@ -901,6 +959,13 @@ void R_dsgraph_structure::build_subspace()
     if (collect_dynamic_any)
     {
         // Traverse object database
+        if (o.precomputed_dynamic)
+        {
+            // Shared pre-fetched list (one query for all light passes): copy pointers, the
+            // sector/frustum filters below drop everything this pass does not need.
+            lstRenderables.assign(o.precomputed_dynamic->begin(), o.precomputed_dynamic->end());
+        }
+        else
         {
             ZoneScopedN("dsg_q_frustum");
             g_pGamePersistent->SpatialSpace.q_frustum(lstRenderables, o.spatial_traverse_flags, o.spatial_types, o.view_frustum);

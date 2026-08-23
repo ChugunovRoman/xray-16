@@ -49,10 +49,9 @@ struct R_dsgraph_structure
         bool use_shadow_hull_cull{ false };
         Fvector shadow_light_pos{};
         float shadow_light_range{};
-        // Static-geometry cache for light shadow passes: when set, sector traversal is
-        // replaced by a replay of the cached leaf list (light did not move).
-        xr_vector<dxRender_Visual*>* static_cache_input{}; // replay from cache instead of traversal
-        xr_vector<dxRender_Visual*>* static_cache_output{}; // collect leaves here (before hull/SSA)
+        // Shared pre-fetched dynamic list: when set, build_subspace skips q_frustum and
+        // iterates this list instead (light passes filter it via sector/frustum tests)
+        xr_vector<ISpatial*>* precomputed_dynamic{};
     } o;
 
     // Dynamic scene graph
@@ -85,6 +84,8 @@ struct R_dsgraph_structure
     xr_vector<ISpatial*> lstRenderables;
     xr_vector<ISpatial*> lstSpatial;
     xr_vector<dxRender_Visual*> lstVisuals;
+    // NPC blob impostors collected during PHASE_SMAP (matrix = scale to bounding sphere)
+    xr_vector<Fmatrix> npc_blobs;
 
     CBackend cmd_list{};
 
@@ -129,8 +130,7 @@ struct R_dsgraph_structure
         o.use_shadow_hull_cull = false;
         o.shadow_light_pos.set(0, 0, 0);
         o.shadow_light_range = 0.f;
-        o.static_cache_input = nullptr;
-        o.static_cache_output = nullptr;
+        o.precomputed_dynamic = nullptr;
 
         val_recorder = nullptr;
         val_feedback = nullptr;
@@ -143,6 +143,7 @@ struct R_dsgraph_structure
         lstRenderables.clear();
         lstSpatial.clear();
         lstVisuals.clear();
+        npc_blobs.clear();
 
         for (int i = 0; i < SHADER_PASSES_MAX; ++i)
         {

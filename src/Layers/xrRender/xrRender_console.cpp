@@ -249,6 +249,8 @@ float ps_r2_light_shadow_dist = 20.f; // max distance from camera to light volum
 int ps_r2_smap_hull_cull = 1; // 1 = cull shadow casters whose shadow hull misses the camera frustum
 int ps_r2_light_occq_async = 1; // 1 = non-blocking occq reads for light visibility
 int ps_r2_mt_light_render = 1; // 1 = record light shadow maps on deferred contexts in worker tasks (DX11)
+int ps_r2_smap_npc_blob = 2; // shadow-map NPC blob: 0=off, 1=when no LOD model, 2=always, 3=skip entirely
+int ps_r2_light_common_dynamic = 1; // 1 = single shared spatial query for all light SMAP passes
 
 //  x - min (0), y - focus (1.4), z - max (100)
 Fvector3 ps_r2_dof = Fvector3().set(-1.25f, 1.4f, 600.f);
@@ -918,6 +920,8 @@ void xrRender_initconsole()
     CMD4(CCC_Integer, "r2_smap_hull_cull", &ps_r2_smap_hull_cull, 0, 1);
     CMD4(CCC_Integer, "r2_light_occq_async", &ps_r2_light_occq_async, 0, 1);
     CMD4(CCC_Integer, "r2_mt_light_render", &ps_r2_mt_light_render, 0, 1);
+    CMD4(CCC_Integer, "r2_smap_npc_blob", &ps_r2_smap_npc_blob, 0, 3);
+    CMD4(CCC_Integer, "r2_light_common_dynamic", &ps_r2_light_common_dynamic, 0, 1);
     CMD3(CCC_Token, "r2_smap_size", &ps_r2_smapsize, qsmapsize_token);
 
     Fvector tw_min, tw_max;

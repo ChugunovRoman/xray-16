@@ -136,6 +136,14 @@ private:
     VertexStagingBuffer g_accum_spot_vb;
     IndexStagingBuffer g_accum_spot_ib;
 
+public:
+    // NPC blob shadow impostor (unit cube for cheap shadow-map casters)
+    ref_geom g_npc_blob;
+    VertexStagingBuffer g_npc_blob_vb;
+    IndexStagingBuffer g_npc_blob_ib;
+    // Depth-only shader element for blob shadow rendering (reuses spot light's SE_R2_SHADOW)
+    ref_shader get_accum_spot_shader() const { return s_accum_spot; }
+
     VertexStagingBuffer g_accum_volumetric_vb;
     IndexStagingBuffer g_accum_volumetric_ib;
 
@@ -219,6 +227,8 @@ public:
     void accum_omnip_geom_destroy();
     void accum_spot_geom_create();
     void accum_spot_geom_destroy();
+    void npc_blob_geom_create();
+    void npc_blob_geom_destroy();
     //	Igor: used for volumetric lights
     void accum_volumetric_geom_create();
     void accum_volumetric_geom_destroy();

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "Layers/xrRender/du_cone.h"
+#include "Layers/xrRender/du_box.h"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -99,5 +100,42 @@ void CRenderTarget::accum_volumetric_geom_destroy()
         g_accum_volumetric_ib.Release();
     if (g_accum_volumetric_vb)
         g_accum_volumetric_vb.Release();
+}
+
+void CRenderTarget::npc_blob_geom_create()
+{
+    // Unit cube vertices (du_box_vertices: 8 verts, 3 floats each)
+    {
+        constexpr size_t vCount = DU_BOX_NUMVERTEX;
+        constexpr size_t vSize = 3 * sizeof(float);
+
+        g_npc_blob_vb.Create(vCount * vSize);
+        u8* pData = static_cast<u8*>(g_npc_blob_vb.Map());
+        CopyMemory(pData, du_box_vertices, vCount * vSize);
+        g_npc_blob_vb.Unmap(true);
+    }
+
+    // Unit cube indices (du_box_faces: 12 tris * 3 indices = 36)
+    {
+        constexpr size_t iCount = DU_BOX_NUMFACES * 3;
+
+        g_npc_blob_ib.Create(iCount * sizeof(u16));
+        u8* pData = static_cast<u8*>(g_npc_blob_ib.Map());
+        CopyMemory(pData, du_box_faces, iCount * sizeof(u16));
+        g_npc_blob_ib.Unmap(true);
+    }
+}
+
+void CRenderTarget::npc_blob_geom_destroy()
+{
+#ifdef DEBUG
+    _SHOW_REF("g_npc_blob_ib", &g_npc_blob_ib);
+#endif
+    g_npc_blob_ib.Release();
+
+#ifdef DEBUG
+    _SHOW_REF("g_npc_blob_vb", &g_npc_blob_vb);
+#endif
+    g_npc_blob_vb.Release();
 }
 } // namespace xray::render::RENDER_NAMESPACE
