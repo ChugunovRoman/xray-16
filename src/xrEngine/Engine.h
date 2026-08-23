@@ -18,7 +18,7 @@
 
 // TODO: this should be in render configuration
 #define R__NUM_SUN_CASCADES         (3u) // csm/s.ligts
-#define R__NUM_AUX_CONTEXTS         (1u) // rain/s.lights
+#define R__NUM_AUX_CONTEXTS         (4u) // rain/s.lights
 #define R__NUM_PARALLEL_CONTEXTS    (R__NUM_SUN_CASCADES + R__NUM_AUX_CONTEXTS)
 #define R__NUM_CONTEXTS             (R__NUM_PARALLEL_CONTEXTS + 1/* imm */)
 

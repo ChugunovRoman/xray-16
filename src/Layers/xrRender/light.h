@@ -10,6 +10,8 @@
 
 namespace xray::render::RENDER_NAMESPACE
 {
+class dxRender_Visual;
+
 class light : public IRender_Light, public SpatialBase
 {
 public:
@@ -37,6 +39,18 @@ public:
     u32 shadow_render_frame;
     /** Dedup for CLight_DB::add_light: same frame can run two Calculate() passes (dedicated second viewport). */
     u32 add_light_pkg_seq;
+
+    // build_subspace static-geometry cache: for a non-moving light the sector traversal
+    // result (leaves inside the light frustum) is identical every frame. Cache the leaf
+    // list and replay it instead of the expensive add_static recursion. Camera-dependent
+    // per-visual tests (shadow hull, SSA) are NOT cached — insert_static re-runs them.
+    bool build_cache_valid{ false };
+    u32 build_cache_frame{}; // frame the cache was written (detects device reset via counter reset)
+    Fvector build_cache_pos{};
+    Fvector build_cache_dir{};
+    float build_cache_range{};
+    float build_cache_cone{};
+    xr_vector<dxRender_Visual*> build_cache_visuals;
 
     float m_volumetric_quality;
     float m_volumetric_intensity;

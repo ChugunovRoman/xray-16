@@ -399,8 +399,8 @@ public:
     IRenderVisual* model_CreatePE(LPCSTR name);
 
     // HW-occlusion culling
-    u32 occq_begin(u32& ID) { return HWOCC.occq_begin(ID); }
-    void occq_end(u32& ID) { HWOCC.occq_end(ID); }
+    u32 occq_begin(u32& ID, u32 context_id = R__NUM_PARALLEL_CONTEXTS) { return HWOCC.occq_begin(ID, context_id); }
+    void occq_end(u32& ID, u32 context_id = R__NUM_PARALLEL_CONTEXTS) { HWOCC.occq_end(ID, context_id); }
     auto occq_get(u32& ID) { return HWOCC.occq_get(ID); }
     bool occq_try_get(u32& ID, R_occlusion::occq_result& fragments) { return HWOCC.occq_try_get(ID, fragments); }
 

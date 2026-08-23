@@ -166,66 +166,71 @@ void R_dsgraph_structure::insert_dynamic(IRenderable* root, dxRender_Visual* pVi
 #endif
 }
 
-void R_dsgraph_structure::insert_static(dxRender_Visual* pVisual)
+bool R_dsgraph_structure::shadow_hull_cull(const Fbox& caster_box) const
 {
     CRender& RI = RImplementation;
 
+    Fbox hull;
+    hull.invalidate();
+    hull.modify(o.shadow_light_pos);
+    Fvector corner;
+    for (int i = 0; i < 8; ++i)
+    {
+        caster_box.getpoint(i, corner);
+        corner.sub(o.shadow_light_pos);
+        const float len = corner.magnitude();
+        if (len > EPS)
+        {
+            // Extend through the caster to the light range: the shadow falls BEHIND
+            // the caster (away from the light), so the hull must reach light range.
+            corner.mul(o.shadow_light_range / len);
+            corner.add(o.shadow_light_pos);
+            hull.modify(corner);
+        }
+    }
+    // Project the caster CENTER to range as well: due to sphere curvature the center
+    // ray reaches deeper than any corner ray. Without this the hull misses the deepest
+    // shadow and culls walls that still block light.
+    Fvector caster_center;
+    caster_box.getcenter(caster_center);
+    caster_center.sub(o.shadow_light_pos);
+    const float center_len = caster_center.magnitude();
+    if (center_len > EPS)
+    {
+        caster_center.mul(o.shadow_light_range / center_len);
+        caster_center.add(o.shadow_light_pos);
+        hull.modify(caster_center);
+    }
+    // Safety margin: expand by the caster bounding-sphere radius so any geometric
+    // edge case stays inside the hull.
+    const float caster_radius = caster_box.getradius();
+    hull.grow(caster_radius);
+
+    Fvector hull_center;
+    hull.getcenter(hull_center);
+    const float hull_radius = hull.getradius();
+    u32 mask = FRUSTUM_SAFE;
+    return fcvNone == RI.ViewBase.testSAABB(hull_center, hull_radius, hull.data(), mask);
+}
+
+void R_dsgraph_structure::insert_static(dxRender_Visual* pVisual)
+{
     if (pVisual->vis.marker[context_id] == marker)
         return;
     pVisual->vis.marker[context_id] = marker;
 
-    // Shadow-caster culling: skip casters whose shadow hull (light apex extruded through the
-    // caster AABB up to light range) cannot reach the main camera frustum at all.
-    if (o.use_shadow_hull_cull)
-    {
-        Fbox hull;
-        hull.invalidate();
-        hull.modify(o.shadow_light_pos);
-        Fvector corner;
-        for (int i = 0; i < 8; ++i)
-        {
-            pVisual->vis.box.getpoint(i, corner);
-            corner.sub(o.shadow_light_pos);
-            const float len = corner.magnitude();
-            if (len > EPS)
-            {
-                // Extend through the caster to the light range: the shadow falls BEHIND
-                // the caster (away from the light), so the hull must reach light range.
-                corner.mul(o.shadow_light_range / len);
-                corner.add(o.shadow_light_pos);
-                hull.modify(corner);
-            }
-        }
-        // Project the caster CENTER to range as well: due to sphere curvature the center
-        // ray reaches deeper than any corner ray (e.g. light at (0,0,10) range 10: corner
-        // of a wall at z=4 projects to z~2.4, but the center projects to z=0). Without
-        // this the hull misses the deepest shadow and culls walls that still block light.
-        Fvector caster_center;
-        pVisual->vis.box.getcenter(caster_center);
-        caster_center.sub(o.shadow_light_pos);
-        const float center_len = caster_center.magnitude();
-        if (center_len > EPS)
-        {
-            caster_center.mul(o.shadow_light_range / center_len);
-            caster_center.add(o.shadow_light_pos);
-            hull.modify(caster_center);
-        }
-        // Safety margin: expand by the caster bounding-sphere radius so any geometric
-        // edge case (edge/face midpoints reaching further than corners+center) stays
-        // inside the hull. Conservative — only reduces culling efficiency slightly.
-        const float caster_radius = pVisual->vis.box.getradius();
-        hull.grow(caster_radius);
+    // Collect the leaf into the static-geometry cache (before any camera-dependent tests:
+    // hull and SSA are re-run every frame on replay). Only one write per visual per build
+    // thanks to the marker guard above.
+    if (o.static_cache_output)
+        o.static_cache_output->push_back(pVisual);
 
-        Fvector hull_center;
-        hull.getcenter(hull_center);
-        const float hull_radius = hull.getradius();
-        u32 mask = FRUSTUM_SAFE;
-        if (fcvNone == RI.ViewBase.testSAABB(hull_center, hull_radius, hull.data(), mask))
-            return;
-    }
+    // Shadow-caster culling: skip casters whose shadow hull cannot reach the camera frustum
+    if (o.use_shadow_hull_cull && shadow_hull_cull(pVisual->vis.box))
+        return;
 
 #if RENDER == R_R1
-    if (RI.o.vis_intersect && (pVisual->vis.accept_frame != Device.dwFrame))
+    if (RImplementation.o.vis_intersect && (pVisual->vis.accept_frame != Device.dwFrame))
         return;
     pVisual->vis.accept_frame = Device.dwFrame;
 #endif
@@ -837,13 +842,29 @@ void R_dsgraph_structure::build_subspace()
     static_geo_tasks.resize(PortalTraverser.r_sectors.size());
 #endif
 
-    if (psDeviceFlags.test(rsDrawStatic))
+    if (o.static_cache_input)
+    {
+        // Replay the cached static leaf list for a non-moving light: skips the whole
+        // portal/sector traversal + hierrarhy recursion. Camera-dependent per-visual
+        // tests (shadow hull, SSA, shader selection) still run inside insert_static.
+        ZoneScopedN("dsg_cache_replay");
+        for (dxRender_Visual* V : *o.static_cache_input)
+            insert_static(V);
+    }
+    else if (psDeviceFlags.test(rsDrawStatic))
     {
         for (u32 s_it = 0; s_it < PortalTraverser.r_sectors.size(); s_it++)
         {
             CSector* sector = PortalTraverser.r_sectors[s_it];
             dxRender_Visual* root = sector->root();
             //VERIFY(root->getType() == MT_HIERRARHY);
+
+            // Sector-level shadow hull reject: skip the entire sector (and its full
+            // add_static recursion over every visual) when its bounding box cannot cast
+            // a shadow into the camera frustum. This is the big win for build_subspace
+            // cost: one box test instead of recursing hundreds of visuals.
+            if (o.use_shadow_hull_cull && shadow_hull_cull(root->vis.box))
+                continue;
 
             const auto &children = static_cast<FHierrarhyVisual*>(root)->children;
 

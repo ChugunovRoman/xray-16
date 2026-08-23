@@ -69,11 +69,11 @@ void smapvis::end()
         // issue query
         if (testQ_V)
         {
-            RImplementation.occq_begin(testQ_id);
+            RImplementation.occq_begin(testQ_id, dsgraph.cmd_list.context_id);
             dsgraph.marker += 1;
             dsgraph.insert_static(testQ_V);
             dsgraph.render_graph(0);
-            RImplementation.occq_end(testQ_id);
+            RImplementation.occq_end(testQ_id, dsgraph.cmd_list.context_id);
             testQ_frame = Device.dwFrame + 1; // get result on next frame
         }
         break;

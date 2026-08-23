@@ -49,6 +49,10 @@ struct R_dsgraph_structure
         bool use_shadow_hull_cull{ false };
         Fvector shadow_light_pos{};
         float shadow_light_range{};
+        // Static-geometry cache for light shadow passes: when set, sector traversal is
+        // replaced by a replay of the cached leaf list (light did not move).
+        xr_vector<dxRender_Visual*>* static_cache_input{}; // replay from cache instead of traversal
+        xr_vector<dxRender_Visual*>* static_cache_output{}; // collect leaves here (before hull/SSA)
     } o;
 
     // Dynamic scene graph
@@ -125,6 +129,8 @@ struct R_dsgraph_structure
         o.use_shadow_hull_cull = false;
         o.shadow_light_pos.set(0, 0, 0);
         o.shadow_light_range = 0.f;
+        o.static_cache_input = nullptr;
+        o.static_cache_output = nullptr;
 
         val_recorder = nullptr;
         val_feedback = nullptr;
@@ -190,6 +196,11 @@ struct R_dsgraph_structure
 
     void insert_dynamic(IRenderable* root, dxRender_Visual* pVisual, Fmatrix& xform, Fvector& Center);
     void insert_static(dxRender_Visual* pVisual);
+
+    // Shadow-caster culling: true when the shadow hull (light apex extruded through the
+    // AABB up to light range) cannot reach the main camera frustum at all. Used both for
+    // single visuals (insert_static) and whole sectors (build_subspace fast reject).
+    bool shadow_hull_cull(const Fbox& caster_box) const;
 
     // render primitives
     void render_graph(u32 _priority);

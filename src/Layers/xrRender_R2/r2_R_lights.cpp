@@ -75,17 +75,20 @@ void CRender::render_lights(light_Package& LP)
         xr_vector<light*>& source = LP.v_shadowed;
         xr_vector<light*> refactored;
         refactored.reserve(source.size());
-        const size_t total = source.size();
 
-        for (u16 smap_ID = 0; refactored.size() != total; ++smap_ID)
+        // Sort once by smap size descending — packing order per page stays identical
+        // (each page greedily takes the largest fitting light; only removals change between
+        // pages, not the relative order). Replaces the old per-page re-sort + erase-from-
+        // middle which was O(pages * n * log n).
+        std::sort(source.begin(), source.end(), [](light* l1, light* l2)
+        {
+            return l1->X.S.size > l2->X.S.size;
+        });
+
+        for (u16 smap_ID = 0; !source.empty(); ++smap_ID)
         {
             LP_smap_pool.initialize(RImplementation.o.smapsize);
-            std::sort(source.begin(), source.end(), [](light* l1, light* l2)
-            {
-                const u32 a0 = l1->X.S.size;
-                const u32 a1 = l2->X.S.size;
-                return a0 > a1; // reverse -> descending
-            });
+            size_t kept = 0;
             for (size_t test = 0; test < source.size(); ++test)
             {
                 light* L = source[test];
@@ -97,10 +100,11 @@ void CRender::render_lights(light_Package& LP)
                     L->X.S.posY = R.min.y;
                     L->vis.smap_ID = smap_ID;
                     refactored.push_back(L);
-                    source.erase(source.begin() + test);
-                    --test;
                 }
+                else
+                    source[kept++] = L; // compact instead of erase
             }
+            source.resize(kept);
         }
 
         // save (lights are popped from back)
@@ -133,57 +137,107 @@ void CRender::render_lights(light_Package& LP)
         light* L{};
         Task* task{};
         u32 batch_id{};
+        bool rendered{}; // filled by the task in parallel mode
+        void* cmdList{}; // ID3D11CommandList* after FinishCommandList (DX11 parallel mode only)
     };
-    static xr_vector<task_data_t> lights_queue{};
-    lights_queue.reserve(R__NUM_SUN_CASCADES);
+    // Per-context slot array: tasks capture pointers into this, so it must not reallocate.
+    static task_data_t per_batch[R__NUM_CONTEXTS];
+    // Ordered list of batch_ids for flush (lights within a smap page).
+    xr_vector<u32> lights_queue;
+    lights_queue.reserve(R__NUM_CONTEXTS);
+
+    const bool mt_light = ps_r2_mt_light_render != 0;
+
+    // Helper: record one light's shadow map into dsgraph.cmd_list (immediate or deferred).
+    // Shared stats/L_spot_s updates are NOT done here — caller decides where they are safe.
+    const auto render_light_smap = [this](R_dsgraph_structure& dsgraph, light* L)
+    {
+        const bool bNormal = !dsgraph.mapNormalPasses[0][0].empty() || !dsgraph.mapMatrixPasses[0][0].empty();
+        const bool bSpecial = !dsgraph.mapNormalPasses[1][0].empty() || !dsgraph.mapMatrixPasses[1][0].empty() ||
+            !dsgraph.mapSorted.empty();
+        if (!bNormal && !bSpecial)
+            return false;
+
+        PIX_EVENT_CTX(dsgraph.cmd_list, SHADOWED_LIGHT);
+        Target->phase_smap_spot(dsgraph.cmd_list, L);
+        dsgraph.cmd_list.set_xform_world(Fidentity);
+        dsgraph.cmd_list.set_xform_view(L->X.S.view);
+        dsgraph.cmd_list.set_xform_project(L->X.S.project);
+        dsgraph.render_graph(0);
+        if (ps_r2_ls_flags.test(R2FLAG_SUN_DETAILS))
+            Details->Render(dsgraph.cmd_list);
+        L->X.S.transluent = FALSE;
+        if (bSpecial)
+        {
+            L->X.S.transluent = TRUE;
+            Target->phase_smap_spot_tsh(dsgraph.cmd_list, L);
+            PIX_EVENT_CTX(dsgraph.cmd_list, SHADOWED_LIGHTS_RENDER_GRAPH);
+            dsgraph.render_graph(1); // normal level, secondary priority
+            PIX_EVENT_CTX(dsgraph.cmd_list, SHADOWED_LIGHTS_RENDER_SORTED);
+            dsgraph.render_sorted(); // strict-sorted geoms
+        }
+        return true;
+    };
 
     const auto& flush_lights = [&]()
     {
         ZoneScopedN("flush lights");
-        for (const auto& [L, task, batch_id] : lights_queue)
+        bool any_submit = false;
+        for (const auto batch_id : lights_queue)
         {
-            if (task)
-                TaskScheduler->Wait(*task);
+            task_data_t& item = per_batch[batch_id];
+            if (item.task)
+                TaskScheduler->Wait(*item.task);
 
             auto& dsgraph = get_context(batch_id);
+            light* L = item.L;
 
-            const bool bNormal = !dsgraph.mapNormalPasses[0][0].empty() || !dsgraph.mapMatrixPasses[0][0].empty();
-            const bool bSpecial = !dsgraph.mapNormalPasses[1][0].empty() || !dsgraph.mapMatrixPasses[1][0].empty() ||
-                !dsgraph.mapSorted.empty();
-            if (bNormal || bSpecial)
+            if (mt_light)
             {
-                PIX_EVENT_CTX(dsgraph.cmd_list, SHADOWED_LIGHT);
-
-                Stats.s_merged++;
-                L_spot_s.push_back(L);
-                Target->phase_smap_spot(dsgraph.cmd_list, L);
-                dsgraph.cmd_list.set_xform_world(Fidentity);
-                dsgraph.cmd_list.set_xform_view(L->X.S.view);
-                dsgraph.cmd_list.set_xform_project(L->X.S.project);
-                dsgraph.render_graph(0);
-                if (ps_r2_ls_flags.test(R2FLAG_SUN_DETAILS))
-                    Details->Render(dsgraph.cmd_list);
-                L->X.S.transluent = FALSE;
-                if (bSpecial)
+                // Parallel mode: recording + svis.end + FinishCommandList were done in the task.
+                // Main thread only executes the sealed command list on IMM (sequential).
+                if (item.rendered)
                 {
-                    L->X.S.transluent = TRUE;
-                    Target->phase_smap_spot_tsh(dsgraph.cmd_list, L);
-                    PIX_EVENT_CTX(dsgraph.cmd_list, SHADOWED_LIGHTS_RENDER_GRAPH);
-                    dsgraph.render_graph(1); // normal level, secondary priority
-                    PIX_EVENT_CTX(dsgraph.cmd_list, SHADOWED_LIGHTS_RENDER_SORTED);
-                    dsgraph.render_sorted(); // strict-sorted geoms
+                    Stats.s_merged++;
+                    L_spot_s.push_back(L);
                 }
+                else
+                    Stats.s_finalclip++;
+
+#if defined(USE_DX11)
+                if (item.cmdList)
+                {
+                    HW.get_context(CHW::IMM_CTX_ID)->ExecuteCommandList(
+                        static_cast<ID3D11CommandList*>(item.cmdList), false);
+                    static_cast<ID3D11CommandList*>(item.cmdList)->Release();
+                    item.cmdList = nullptr;
+                    any_submit = true;
+                }
+#endif
             }
             else
             {
-                Stats.s_finalclip++;
+                // Serial mode: recording happens here on the main thread (original behavior)
+                if (render_light_smap(dsgraph, L))
+                {
+                    Stats.s_merged++;
+                    L_spot_s.push_back(L);
+                }
+                else
+                    Stats.s_finalclip++;
+
+                L->svis[batch_id].end();
             }
 
-            L->svis[batch_id].end(); // NOTE(DX11): occqs are fetched here, this should be done on the imm context only
             RImplementation.release_context(batch_id);
         }
 
         lights_queue.clear();
+
+        // ExecuteCommandList breaks the IMM context CPU-side state cache — reset it
+        // (mirrors render_sun::flush)
+        if (any_submit)
+            get_imm_context().cmd_list.Invalidate();
     };
 
     while (!LP.v_shadowed.empty())
@@ -204,7 +258,7 @@ void CRender::render_lights(light_Package& LP)
             if (L->vis.smap_ID != sid)
                 break;
 
-            const auto batch_id = alloc_context(false);
+            const auto batch_id = alloc_context(mt_light); // true => deferred cmd_list for parallel recording
             if (batch_id == R_dsgraph_structure::INVALID_CONTEXT_ID)
             {
                 VERIFY(!lights_queue.empty());
@@ -215,18 +269,21 @@ void CRender::render_lights(light_Package& LP)
             source.pop_back();
             Lights_LastFrame.push_back(L);
 
-            task_data_t data{};
-            data.batch_id = batch_id;
-            data.L = L;
+            task_data_t& item = per_batch[batch_id];
+            item = {}; // reset
+            item.batch_id = batch_id;
+            item.L = L;
 
-            const auto& calc_lights = [data]
+            // Capture mt_light by value (cvar may change between task scheduling and execution)
+            // and a pointer to the per_batch slot (static array, valid for the frame).
+            const auto& calc_lights = [item_ptr = &item, mt_light, &render_light_smap]
             {
                 ZoneScopedN("calc lights");
-                auto& dsgraph = RImplementation.get_context(data.batch_id);
+                auto& dsgraph = RImplementation.get_context(item_ptr->batch_id);
                 {
-                    auto* L = data.L;
+                    auto* L = item_ptr->L;
 
-                    L->svis[data.batch_id].begin();
+                    L->svis[item_ptr->batch_id].begin();
 
                     dsgraph.o.phase = PHASE_SMAP;
                     dsgraph.r_pmask(true, RImplementation.o.Tshadows);
@@ -239,19 +296,38 @@ void CRender::render_lights(light_Package& LP)
                     dsgraph.o.shadow_light_range = L->range;
 
                     dsgraph.build_subspace();
+
+                    // Parallel mode: record the shadow map draw calls into the deferred context
+                    // right here in the task. Stats/L_spot_s are NOT touched (race); the main
+                    // thread handles them in flush_lights after Wait.
+                    if (mt_light)
+                    {
+                        if (render_light_smap(dsgraph, L))
+                            item_ptr->rendered = true;
+
+                        // Finalize the deferred command list in the task: svis.end() records
+                        // the caster occq test, FinishCommandList seals the list. The main
+                        // thread only needs to ExecuteCommandList (sequential on IMM).
+                        L->svis[item_ptr->batch_id].end();
+#if defined(USE_DX11)
+                        ID3D11CommandList* pCmdList = nullptr;
+                        CHK_DX(HW.get_context(dsgraph.context_id)->FinishCommandList(false, &pCmdList));
+                        item_ptr->cmdList = pCmdList;
+#endif
+                    }
                 }
             };
 
             // calculate
             if (o.mt_calculate)
             {
-                data.task = &TaskScheduler->AddTask(calc_lights);
+                item.task = &TaskScheduler->AddTask(calc_lights);
             }
             else
             {
                 calc_lights();
             }
-            lights_queue.emplace_back(data);
+            lights_queue.push_back(batch_id);
         }
         flush_lights(); // in case if something left
 

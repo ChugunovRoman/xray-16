@@ -248,6 +248,7 @@ float ps_r2_light_degrade_lod = 1.f; // skip shadowed lights below this LOD enti
 float ps_r2_light_shadow_dist = 20.f; // max distance from camera to light volume edge for shadow rendering, 0 = off
 int ps_r2_smap_hull_cull = 1; // 1 = cull shadow casters whose shadow hull misses the camera frustum
 int ps_r2_light_occq_async = 1; // 1 = non-blocking occq reads for light visibility
+int ps_r2_mt_light_render = 1; // 1 = record light shadow maps on deferred contexts in worker tasks (DX11)
 
 //  x - min (0), y - focus (1.4), z - max (100)
 Fvector3 ps_r2_dof = Fvector3().set(-1.25f, 1.4f, 600.f);
@@ -916,6 +917,7 @@ void xrRender_initconsole()
     CMD4(CCC_Float, "r2_light_shadow_dist", &ps_r2_light_shadow_dist, 0.f, 200.f);
     CMD4(CCC_Integer, "r2_smap_hull_cull", &ps_r2_smap_hull_cull, 0, 1);
     CMD4(CCC_Integer, "r2_light_occq_async", &ps_r2_light_occq_async, 0, 1);
+    CMD4(CCC_Integer, "r2_mt_light_render", &ps_r2_mt_light_render, 0, 1);
     CMD3(CCC_Token, "r2_smap_size", &ps_r2_smapsize, qsmapsize_token);
 
     Fvector tw_min, tw_max;

@@ -99,6 +99,12 @@ public:
     void Wait(const Task& task, bool updateSystemEvents = false) const;
     bool ExecuteOneTask() const;
 
+    // Wake up ALL worker threads. PushTask wakes only one worker per task; after pushing
+    // a batch of tasks from one thread they all land in that thread's queue and the rest
+    // of the workers stay asleep until they happen to steal. Call this after scheduling
+    // a batch so every worker starts stealing immediately.
+    void WakeAllWorkers() noexcept;
+
     void Pause(bool pause) { shouldPause.store(pause, std::memory_order_release); }
 
 public:

@@ -36,7 +36,7 @@ void R_occlusion::occq_destroy()
     fids.clear();
 }
 
-u32 R_occlusion::occq_begin(u32& ID)
+u32 R_occlusion::occq_begin(u32& ID, u32 context_id)
 {
     if (!enabled)
         return 0;
@@ -102,11 +102,15 @@ u32 R_occlusion::occq_begin(u32& ID)
         used.emplace_back(std::move(pool.back()));
     }
     pool.pop_back();
+#if defined(USE_DX11)
+    CHK_DX(BeginQueryCtx(HW.get_context(context_id), used[ID].Q));
+#else
     CHK_DX(BeginQuery(used[ID].Q));
+#endif
 
     return used[ID].order;
 }
-void R_occlusion::occq_end(u32& ID)
+void R_occlusion::occq_end(u32& ID, u32 context_id)
 {
     if (!enabled || ID == iInvalidHandle)
         return;
@@ -129,7 +133,11 @@ void R_occlusion::occq_end(u32& ID)
         return;
     }
 
+#if defined(USE_DX11)
+    CHK_DX(EndQueryCtx(HW.get_context(context_id), used[ID].Q));
+#else
     CHK_DX(EndQuery(used[ID].Q));
+#endif
 }
 R_occlusion::occq_result R_occlusion::occq_get(u32& ID)
 {

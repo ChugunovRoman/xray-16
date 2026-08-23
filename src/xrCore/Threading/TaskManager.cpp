@@ -347,6 +347,15 @@ size_t TaskManager::GetWorkersCount() const noexcept
     return workers.size();
 }
 
+void TaskManager::WakeAllWorkers() noexcept
+{
+    // Event::Set() releases a single waiting thread: signal once per worker so all of
+    // them wake up and start stealing from the producer's queue.
+    std::lock_guard guard{ workersLock };
+    for (size_t i = 0; i < workers.size(); ++i)
+        newWorkArrived.Set();
+}
+
 size_t TaskManager::GetCurrentWorkerID() noexcept
 {
     return s_tl_worker.id;

@@ -51,8 +51,8 @@ public:
 
     void occq_create(u32 limit);
     void occq_destroy();
-    u32 occq_begin(u32& ID); // returns 'order'
-    void occq_end(u32& ID);
+    u32 occq_begin(u32& ID, u32 context_id = R__NUM_PARALLEL_CONTEXTS); // returns 'order'; context_id = CHW::IMM_CTX_ID by default
+    void occq_end(u32& ID, u32 context_id = R__NUM_PARALLEL_CONTEXTS);
     occq_result occq_get(u32& ID);
     bool occq_try_get(u32& ID, occq_result& fragments); // false = result not ready yet (query stays in flight)
 };

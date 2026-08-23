@@ -29,6 +29,8 @@ light::light() : SpatialBase(g_pGamePersistent->SpatialSpace)
 
     frame_render = 0;
     shadow_render_frame = 0;
+    build_cache_valid = false;
+    build_cache_frame = 0;
     add_light_pkg_seq = u32(-1);
 
 #if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)

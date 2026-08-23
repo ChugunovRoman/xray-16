@@ -9,6 +9,9 @@ IC HRESULT GetData(ID3DQuery* pQuery, void* pData, u32 DataSize);
 IC HRESULT BeginQuery(ID3DQuery* pQuery);
 IC HRESULT EndQuery(ID3DQuery* pQuery);
 IC HRESULT ReleaseQuery(ID3DQuery *pQuery);
+// Context-aware variants: allow recording Begin/End into a deferred command list
+IC HRESULT BeginQueryCtx(ID3D11DeviceContext* ctx, ID3DQuery* pQuery);
+IC HRESULT EndQueryCtx(ID3D11DeviceContext* ctx, ID3DQuery* pQuery);
 #elif defined(USE_OGL)
 IC HRESULT CreateQuery(GLuint* pQuery, D3D_QUERY type);
 IC HRESULT GetData(GLuint query, void* pData, u32 DataSize);
@@ -46,6 +49,18 @@ IC HRESULT BeginQuery(ID3DQuery* pQuery)
 IC HRESULT EndQuery(ID3DQuery* pQuery)
 {
     HW.get_context(CHW::IMM_CTX_ID)->End(pQuery);
+    return S_OK;
+}
+
+IC HRESULT BeginQueryCtx(ID3D11DeviceContext* ctx, ID3DQuery* pQuery)
+{
+    ctx->Begin(pQuery);
+    return S_OK;
+}
+
+IC HRESULT EndQueryCtx(ID3D11DeviceContext* ctx, ID3DQuery* pQuery)
+{
+    ctx->End(pQuery);
     return S_OK;
 }
 

@@ -161,6 +161,7 @@ extern ECORE_API float ps_r2_light_degrade_lod; // skip shadowed lights below th
 extern ECORE_API float ps_r2_light_shadow_dist; // max distance from camera to light volume edge for shadow rendering, 0 = off
 extern ECORE_API int ps_r2_smap_hull_cull; // 1 = cull shadow casters whose shadow hull misses the camera frustum
 extern ECORE_API int ps_r2_light_occq_async; // 1 = non-blocking occq reads for light visibility
+extern ECORE_API int ps_r2_mt_light_render; // 1 = record light shadow maps on deferred contexts in worker tasks (DX11)
 extern ECORE_API int ps_r2_wait_sleep;
 extern ECORE_API int ps_r2_wait_timeout;
 
