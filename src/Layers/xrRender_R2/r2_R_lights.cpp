@@ -3,6 +3,16 @@
 
 namespace xray::render::RENDER_NAMESPACE
 {
+// Distance from the camera to the closest point of the light volume (0 = camera inside).
+// For OMNIPART uses parent position+range: all 6 parts of one point light share the
+// same value, so they pass/fail the distance cull together.
+static float light_volume_dist(const light* L)
+{
+    if (L->flags.type == IRender_Light::OMNIPART)
+        return _max(Device.vCameraPosition.distance_to(L->position) - L->range, 0.f);
+    return _max(Device.vCameraPosition.distance_to(L->spatial.sphere.P) - L->spatial.sphere.R, 0.f);
+}
+
 void CRender::render_lights(light_Package& LP)
 {
     ZoneScoped;
@@ -35,13 +45,7 @@ void CRender::render_lights(light_Package& LP)
             // the threshold — no popping when walking back and forth near the border.
             if (shadow_dist > 0.f)
             {
-                float dist;
-                if (L->flags.type == IRender_Light::OMNIPART)
-                    dist = Device.vCameraPosition.distance_to(L->position) - L->range;
-                else
-                    dist = Device.vCameraPosition.distance_to(L->spatial.sphere.P) - L->spatial.sphere.R;
-                if (dist < 0.f)
-                    dist = 0.f;
+                const float dist = light_volume_dist(L);
 
                 const bool was_rendered = (Device.dwFrame - L->shadow_render_frame) <= 1;
                 const float limit = was_rendered ? shadow_dist * 1.2f : shadow_dist;
@@ -54,7 +58,6 @@ void CRender::render_lights(light_Package& LP)
                 continue;
 
             kept.push_back(L);
-            L->shadow_render_frame = Device.dwFrame;
             LR.compute_xf_spot(L);
         }
 
@@ -67,6 +70,11 @@ void CRender::render_lights(light_Package& LP)
             });
             kept.resize((size_t)ps_r2_light_shadow_budget);
         }
+
+        // Mark only lights that actually survived the budget: shadow_render_frame drives both
+        // the distance hysteresis (x1.2) and the budget hysteresis, so it must not lie.
+        for (light* L : kept)
+            L->shadow_render_frame = Device.dwFrame;
 
         LP.v_shadowed = std::move(kept);
     }
