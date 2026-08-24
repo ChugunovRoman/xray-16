@@ -478,17 +478,25 @@ void CRender::Render()
 void CRender::BindBackbufferForUI()
 {
     Target->u_setrt(RCache, Device.dwWidth, Device.dwHeight, Target->get_base_rt(), 0, 0, Target->get_base_zb());
+    // Raw u_setrt never pushes a GPU viewport: after a scaled SVP pass it may still be sw×sh,
+    // which would rasterize the UI into the top-left corner of the backbuffer.
+    RCache.SetViewport({ 0.f, 0.f, float(Device.dwWidth), float(Device.dwHeight), 0.f, 1.f });
 }
 
 void CRender::RenderSecondViewport()
 {
     // Only invoked when ps_r__dedicated_second_vp (see IGame_Level).
-    {
-        const float sc = clampr(ps_r__second_vp_render_scale, 0.05f, 1.f);
-        const u32 sw = _max(1u, (u32)iFloor(float(Device.dwWidth) * sc + 0.5f));
-        const u32 sh = _max(1u, (u32)iFloor(float(Device.dwHeight) * sc + 0.5f));
-        Target->ResizeSecondVPRT(sw, sh);
-    }
+    const float sc = clampr(ps_r__second_vp_render_scale, 0.05f, 1.f);
+    const u32 sw = _max(1u, (u32)iFloor(float(Device.dwWidth) * sc + 0.5f));
+    const u32 sh = _max(1u, (u32)iFloor(float(Device.dwHeight) * sc + 0.5f));
+    Target->ResizeSecondVPRT(sw, sh);
+
+    // When the scale is below 1, render this pass into a parallel sw×sh RT set ($user$sv_*) so the
+    // reduced resolution actually saves GPU time; silently falls back to the full-res chain if the
+    // target set cannot be created.
+    const bool scaled_pipeline = sc < 1.f && Target->SVPTargetsEnsure(sw, sh);
+    if (scaled_pipeline)
+        Target->SVPPipelineBegin();
 
     Fvector4 saved_svp_capture{};
     if (g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
@@ -510,6 +518,11 @@ void CRender::RenderSecondViewport()
     Render();
     m_SecondViewportOutputToRT = false;
     m_SecondViewportPass = false;
+
+    // Restore before returning: bullet tracers are drawn right after this call into rt_secondVP,
+    // which stays bound on purpose (SVPPipelineEnd does not touch live GPU state).
+    if (scaled_pipeline)
+        Target->SVPPipelineEnd();
 
     if (g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
         g_pGamePersistent->m_pGShaderConstants->m_svp_rt_capture = saved_svp_capture;

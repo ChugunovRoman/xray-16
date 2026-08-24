@@ -68,6 +68,12 @@ SVS* CResourceManager::_CreateVS(cpcstr shader, u32 flags /*= 0*/)
 
 void CResourceManager::_DeleteVS(const SVS* vs)
 {
+    if (!vs)
+        return;
+    // "null" placeholder VS (and any already-torn-down signature) has no input signature to
+    // unregister from vertex layouts.
+    if (!vs->signature._get())
+        return;
     if (DestroyShader(vs))
     {
         for (const auto& iDecl : v_declarations)

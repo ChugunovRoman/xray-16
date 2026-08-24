@@ -35,7 +35,9 @@ void CRenderTarget::mark_msaa_edges()
 #if defined(USE_DX11) // XXX: remove this difference
     u_setrt(RCache, nullptr, nullptr, nullptr, rt_MSAADepth);
 #elif defined(USE_OGL)
-    u_setrt(RCache, Device.dwWidth, Device.dwHeight, 0, 0, 0, rt_MSAADepth->pZRT);
+    // Follow the bound depth dims (may be a downsized svp twin); unreachable on GL today since
+    // MSAA is forced off there, kept consistent for safety.
+    u_setrt(RCache, rt_MSAADepth->dwWidth, rt_MSAADepth->dwHeight, 0, 0, 0, rt_MSAADepth->pZRT);
 #endif
     RCache.set_Element(s_mark_msaa_edges->E[0]);
     RCache.set_Geometry(g_combine_2UV);

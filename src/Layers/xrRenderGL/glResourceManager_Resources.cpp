@@ -169,7 +169,12 @@ SVS* CResourceManager::_CreateVS(cpcstr shader, u32 flags /*= 0*/)
     return CreateShader<SVS>(name, shader, flags);
 }
 
-void CResourceManager::_DeleteVS(const SVS* vs) { DestroyShader(vs); }
+void CResourceManager::_DeleteVS(const SVS* vs)
+{
+    if (!vs)
+        return;
+    DestroyShader(vs);
+}
 
 //--------------------------------------------------------------------------------------------------------------
 SPS* CResourceManager::_CreatePS(LPCSTR _name)

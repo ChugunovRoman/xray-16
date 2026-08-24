@@ -155,6 +155,14 @@ void CRenderTarget::phase_pp()
     }
     else
         u_setrt(RCache, Device.dwWidth, Device.dwHeight, get_base_rt(), 0, 0, get_base_zb());
+
+    // Raw u_setrt never pushes a GPU viewport. Pin the output size so the fullscreen quad below
+    // (Device-pixel vertices mapped to NDC [-1..1]) always rasterizes across the WHOLE bound target:
+    // - svp_scaled: equals the already-active sw×sh viewport (no-op),
+    // - unscaled svp_out (scale==1 or twin-set fallback): replaces the inherited full-size viewport,
+    //   without which the quad would be clipped to the top-left half/quadrant of rt_secondVP.
+    if (svp_out)
+        RCache.SetViewport({ 0.f, 0.f, float(pp_w), float(pp_h), 0.f, 1.f });
     //	Element 0 for for normal post-process
     //	Element 4 for color map post-process
     bool bCMap = u_need_CM();
@@ -180,9 +188,14 @@ void CRenderTarget::phase_pp()
     // Msg				("add:  %d,%d,%d",	color_get_R(p_brightness),	color_get_G(p_brightness),	color_get_B(p_brightness));
 
     // Draw full-screen quad textured with our scene image
+    // Vertex positions MUST stay in full Device pixel units (like every other fullscreen quad):
+    // the postprocess VS converts pixels->NDC via screen_res (= Device dims), and the active
+    // viewport then maps the [-1..1] cube onto the whole bound target - including the downsized
+    // rt_secondVP during the scaled scope pass. Using pp_w/pp_h here would compress the quad into
+    // a scale² corner of the target.
     u32 Offset;
-    const float _w = float(pp_w);
-    const float _h = float(pp_h);
+    const float _w = float(Device.dwWidth);
+    const float _h = float(Device.dwHeight);
 
     // Fill vertex buffer
     float du = ps_r1_pps_u, dv = ps_r1_pps_v;

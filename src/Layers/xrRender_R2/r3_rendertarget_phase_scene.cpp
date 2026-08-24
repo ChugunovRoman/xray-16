@@ -22,7 +22,9 @@ void CRenderTarget::phase_scene_prepare()
                                             ((ps_r_sun_shafts > 0) && (fValue >= 0.0001)) || (ps_r_ssao > 0)))
     {
         //	TODO: DX11: Check if we need to set RT here.
-        u_setrt(RCache, Device.dwWidth, Device.dwHeight, rt_Position->pRT, 0, 0, rt_MSAADepth);
+        // Dimensions follow the bound RT, not the screen: the scaled second-viewport pass binds
+        // downsized twins into these members (see CRenderTarget::SVPPipelineBegin).
+        u_setrt(RCache, rt_Position->dwWidth, rt_Position->dwHeight, rt_Position->pRT, 0, 0, rt_MSAADepth);
 
         const Fcolor color{}; // black
         RCache.ClearRT(rt_Position, color);
@@ -41,7 +43,9 @@ void CRenderTarget::phase_scene_prepare()
     else
     {
         //	TODO: DX11: Check if we need to set RT here.
-        u_setrt(RCache, Device.dwWidth, Device.dwHeight, get_base_rt(), 0, 0, rt_MSAADepth);
+        // Dimensions follow the bound RT (may be a downsized svp twin during the scope pass).
+        const ref_rt& base_rt = rt_Base[HW.CurrentBackBuffer];
+        u_setrt(RCache, base_rt->dwWidth, base_rt->dwHeight, get_base_rt(), 0, 0, rt_MSAADepth);
         RCache.ClearZB(rt_MSAADepth, 1.0f, 0);
     }
 
@@ -107,6 +111,10 @@ void CRenderTarget::phase_scene_end()
     RCache.set_ColorWriteEnable();
 
     // common calc for quad-rendering
+    // Vertex positions stay in FULL Device pixel units on purpose: the mask VS converts pixels->NDC
+    // via screen_res (=Device dims), and the active viewport (downsized during the scaled scope
+    // pass) maps the unit cube across the whole bound target. Target-relative sizes here would
+    // compress the quad into a scale² corner of the twin rt_Color.
     u32 Offset;
     u32 C = color_rgba(255, 255, 255, 255);
     float _w = float(Device.dwWidth);

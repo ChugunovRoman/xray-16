@@ -79,8 +79,16 @@ void CRenderTarget::phase_bloom()
     PIX_EVENT(phase_bloom);
     u32 Offset;
 
+    // Bloom quads are authored in fixed BLOOM_size pixel units that their VS converts via
+    // screen_res (=Device dims). Under the scaled second-viewport pass the inherited viewport is
+    // sw×sh, which would clip these quads to a corner fraction of the fixed-size bloom targets -
+    // pin an explicit matching viewport and restore it on exit.
+    const u32 prev_vp_w = get_width(RCache);
+    const u32 prev_vp_h = get_height(RCache);
+
     // Targets
     u_setrt(RCache, rt_Bloom_1, 0, 0, 0); // No need for ZBuffer at all
+    RCache.SetViewport({ 0.f, 0.f, float(BLOOM_size_X), float(BLOOM_size_Y), 0.f, 1.f });
 
     // Clear    - don't clear - it's stupid here :)
     // Stencil  - disable
@@ -537,5 +545,8 @@ void CRenderTarget::phase_bloom()
 
     // re-enable z-buffer
     RCache.set_Z(true);
+
+    // Restore the viewport pinned for the fixed-size bloom targets above.
+    RCache.SetViewport({ 0.f, 0.f, float(prev_vp_w), float(prev_vp_h), 0.f, 1.f });
 }
 } // namespace xray::render::RENDER_NAMESPACE

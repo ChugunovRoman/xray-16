@@ -39,20 +39,27 @@ void CRenderTarget::phase_combine()
         t_LUM_dest->surface_set(rt_LUM_pool[gpu_id * 2 + 1]->pSurface);
     }
 
-    if (s_hdao_cs)
+    // SSAO is skipped during the scaled second-viewport pass: its viewport/decompression constants
+    // assume screen-size G-buffer inputs, while the svp twins are smaller. The combine below then
+    // samples $user$ssao_temp / $user$half_depth holding this frame's full-res main-pass AO - a
+    // slightly misaligned but visually negligible approximation through the scope lens.
+    if (!svp_swapped)
     {
-        phase_hdao();
-    }
-    else
-    {
-        if (RImplementation.o.ssao_opt_data)
+        if (s_hdao_cs)
         {
-            phase_downsamp();
-            // phase_ssao();
+            phase_hdao();
         }
-        else if (RImplementation.o.ssao_blur_on)
+        else
         {
-            phase_ssao();
+            if (RImplementation.o.ssao_opt_data)
+            {
+                phase_downsamp();
+                // phase_ssao();
+            }
+            else if (RImplementation.o.ssao_blur_on)
+            {
+                phase_ssao();
+            }
         }
     }
 

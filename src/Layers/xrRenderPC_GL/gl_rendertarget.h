@@ -60,6 +60,34 @@ public:
     // Second viewport
     ref_rt rt_secondVP; // 32bit (r,g,b,a) --//#SM+#-- +SecondVP+
 
+    // Scaled second-viewport pipeline ($user$sv_*): downsized parallel copies of the deferred chain
+    // (G-buffer / lighting / combine). Swapped into the rt_* members only for the dedicated scope
+    // pass while ps_r__second_vp_render_scale < 1, see CRender::RenderSecondViewport() and
+    // SVPPipelineBegin/SVPPipelineEnd below.
+    xr_vector<ref_rt> svp_Base;
+    ref_rt svp_Base_Depth;
+    ref_rt svp_MSAADepth; // alias of svp_Base_Depth when MSAA is disabled
+    ref_rt svp_Position;
+    ref_rt svp_Normal;
+    ref_rt svp_Color;
+    ref_rt svp_Accumulator;
+    ref_rt svp_Accumulator_temp;
+    ref_rt svp_Generic_0;
+    ref_rt svp_Generic_1;
+    ref_rt svp_Generic_0_r; // alias of svp_Generic_0 when MSAA is disabled
+    ref_rt svp_Generic_1_r; // alias of svp_Generic_1 when MSAA is disabled
+    ref_rt svp_Generic;
+    ref_rt svp_Generic_2;
+
+    u32 svp_w{};
+    u32 svp_h{};
+    u32 svp_failed_w{};          // last size whose twin-set creation failed (anti retry-spam latch)
+    u32 svp_failed_h{};
+    bool svp_swapped{};          // true between SVPPipelineBegin() and SVPPipelineEnd()
+    xr_vector<std::pair<ref_rt*, ref_rt>> svp_saved; // {member, original} saved by Begin, restored by End
+    u32 svp_saved_w{};
+    u32 svp_saved_h{};
+
     //
     ref_rt rt_Accumulator; // 64bit		(r,g,b,specular)
     ref_rt rt_Accumulator_temp; // only for HW which doesn't feature fp16 blend
@@ -305,6 +333,17 @@ public:
     void phase_combine_volumetric();
     void phase_pp();
     void ResizeSecondVPRT(u32 w, u32 h);
+    // Scaled second-viewport pipeline support. SVPTargetsEnsure lazily creates the $user$sv_* set
+    // (returns false if creation failed -> caller falls back to the full-res pass). Begin swaps the
+    // twins into the rt_* members and republishes the named "$user$" textures under twin surfaces;
+    // End restores everything. GPU bindings are left untouched by End so draws issued right after
+    // the pass (bullet tracers) still land in rt_secondVP.
+    bool SVPTargetsEnsure(u32 w, u32 h);
+    void SVPTargetsRelease();
+    void SVPPipelineBegin();
+    void SVPPipelineEnd();
+    bool SvpPipelineSwapped() const { return svp_swapped; }
+    void svp_publish_surfaces(bool use_twins);
 #if 0 // kept for historical reasons
     void phase_flip();
 #endif

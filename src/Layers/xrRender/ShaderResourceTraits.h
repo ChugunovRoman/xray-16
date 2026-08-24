@@ -725,6 +725,15 @@ bool CResourceManager::DestroyShader(const T* sh)
 
     if (iterator != sh_map.end())
     {
+        // Identity check: lookup is by name only, so a stale/double-destroyed shader whose bytes
+        // still look valid could erase a LIVE namesake's entry and later crash on its own freed
+        // members (observed as AV in _DeleteVS during shutdown).
+        if (iterator->second != sh)
+        {
+            Msg("! ERROR: DestroyShader: stale shader '%s' (%p) does not match registered entry (%p)",
+                sh->cName.c_str(), sh, iterator->second);
+            return false;
+        }
         sh_map.erase(iterator);
         return true;
     }

@@ -39,8 +39,16 @@ void CRenderTarget::phase_luminance()
     RCache.set_ColorWriteEnable();
     RCache.set_Z(false);
 
+    // Luminance quads are authored in fixed target-size pixel units (64/8/1) that their VS converts
+    // via screen_res (=Device dims). Under the scaled second-viewport pass the inherited viewport is
+    // sw×sh, which would collapse them into a corner of the tiny targets - pin per-stage viewports
+    // and restore the entry state on exit.
+    const u32 prev_vp_w = get_width(RCache);
+    const u32 prev_vp_h = get_height(RCache);
+
     // 000: Perform LUM-SAT, pass 0, 256x256 => 64x64
     u_setrt(RCache, rt_LUM_64, 0, 0, 0);
+    RCache.SetViewport({ 0.f, 0.f, 64.f, 64.f, 0.f, 1.f });
     {
         float ts = 64;
         float _w = float(BLOOM_size_X);
@@ -120,6 +128,7 @@ void CRenderTarget::phase_luminance()
 
     // 111: Perform LUM-SAT, pass 1, 64x64 => 8x8
     u_setrt(RCache, rt_LUM_8, 0, 0, 0);
+    RCache.SetViewport({ 0.f, 0.f, 8.f, 8.f, 0.f, 1.f });
     {
         // Build filter-kernel
         float _ts = 8;
@@ -181,6 +190,7 @@ void CRenderTarget::phase_luminance()
     // 222: Perform LUM-SAT, pass 2, 8x8 => 1x1
     u32 gpu_id = Device.dwFrame % HW.Caps.iGPUNum;
     u_setrt(RCache, rt_LUM_pool[gpu_id * 2 + 1], 0, 0, 0);
+    RCache.SetViewport({ 0.f, 0.f, 1.f, 1.f, 0.f, 1.f });
     {
         // Build filter-kernel
         float _ts = 1;
@@ -250,5 +260,8 @@ void CRenderTarget::phase_luminance()
 
     // Cleanup states
     RCache.set_Z(true);
+
+    // Restore the viewport pinned for the fixed-size luminance targets above.
+    RCache.SetViewport({ 0.f, 0.f, float(prev_vp_w), float(prev_vp_h), 0.f, 1.f });
 }
 } // namespace xray::render::RENDER_NAMESPACE
