@@ -181,30 +181,58 @@ void IGame_Level::OnRender()
 
     // Level render, only when no client output required
     GEnv.Render->Calculate();
+
+    // Stage C (SVP parallelization): launch the scope-viewport visibility build on a worker while
+    // the main pass renders below. Falls back to the legacy sequential path when parallelism is
+    // not possible (first frame after reset, old shadow cascades, no free dsgraph context).
+    IMainMenu* pMainMenu = g_pGamePersistent ? g_pGamePersistent->m_pMainMenu : nullptr;
+    const bool bMenu = pMainMenu && pMainMenu->CanSkipSceneRendering();
+    const bool svp_frame =
+        ps_r__dedicated_second_vp && g_pGameLevel && Device.m_SecondViewport.IsSVPFrame() && !bMenu;
+    const float svp_fov = svp_frame ? g_pGameLevel->Cameras().SecondVPFov() : 0.f;
+    Fmatrix svp_scope_project;
+    const bool svp_have_project = svp_frame && g_pGameLevel->Cameras().BuildSecondVPProjection(svp_scope_project);
+    const bool svp_parallel =
+        svp_have_project && GEnv.Render->BeginSecondVPCalculateParallel(svp_fov, svp_scope_project);
+
     GEnv.Render->Render();
 
-    // IsSVPFrame(): SVP active + dwFrame % delay == 0; delay 0 from cvar → every frame (see CSecondVPParams::IsSVPFrame).
-    if (ps_r__dedicated_second_vp && g_pGameLevel && Device.m_SecondViewport.IsSVPFrame())
-    {
-        IMainMenu* pMainMenu = g_pGamePersistent ? g_pGamePersistent->m_pMainMenu : nullptr;
-        const bool bMenu = pMainMenu && pMainMenu->CanSkipSceneRendering();
-        if (!bMenu)
-        {
-            // Tracers on the main (full) framebuffer while Device still matches the first pass.
-            g_pGameLevel->RenderBulletTracersForMainViewport();
+    // Join the worker and publish its per-pass LOD globals before the scope pass drains.
+    if (svp_parallel)
+        GEnv.Render->EndSecondVPCalculateParallel();
 
-            if (g_pGameLevel->Cameras().BeginSecondViewportRender())
+    // IsSVPFrame(): SVP active + dwFrame % delay == 0; delay 0 from cvar → every frame (see CSecondVPParams::IsSVPFrame).
+    if (svp_frame)
+    {
+        // Tracers on the main (full) framebuffer while Device still matches the first pass.
+        g_pGameLevel->RenderBulletTracersForMainViewport();
+
+        if (g_pGameLevel->Cameras().BeginSecondViewportRender())
+        {
+            if (svp_parallel)
             {
+                // Visibility was built on the worker; only the sun/rain tail remains - it needs
+                // the scope projection this Begin call has just installed into Device.
+                GEnv.Render->SecondVPPostCalculate();
+            }
+            else
+            {
+                // Legacy sequential visibility build (stage A/B fallback path).
                 Device.m_SecondViewport.SetSecondCalculatePass(true);
                 GEnv.Render->Calculate();
                 Device.m_SecondViewport.SetSecondCalculatePass(false);
-                GEnv.Render->RenderSecondViewport();
-                // Tracers into rt_secondVP (current RT after phase_combine) with scope camera matrices.
-                g_pGameLevel->RenderBulletTracersForSecondViewport();
-                g_pGameLevel->Cameras().EndSecondViewportRender();
-                // Second pass ends on rt_secondVP + small viewport; restore swapchain before HUD().RenderUI().
-                GEnv.Render->BindBackbufferForUI();
             }
+            GEnv.Render->RenderSecondViewport();
+            // Tracers into rt_secondVP (current RT after phase_combine) with scope camera matrices.
+            g_pGameLevel->RenderBulletTracersForSecondViewport();
+            g_pGameLevel->Cameras().EndSecondViewportRender();
+            // Second pass ends on rt_secondVP + small viewport; restore swapchain before HUD().RenderUI().
+            GEnv.Render->BindBackbufferForUI();
+        }
+        else if (svp_parallel)
+        {
+            // Scope FOV collapsed before Begin accepted us: drop the worker's results.
+            GEnv.Render->AbortSecondVPCalculate();
         }
     }
 

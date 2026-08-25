@@ -76,6 +76,13 @@ void CRenderTarget::phase_bloom()
 {
     using namespace phase_bloom;
 
+    // Scope second viewport pass: the bloom/luminance chain is fixed-cost (resolution- and
+    // frustum-independent) and measurably adds to the scope render. Reuse the main pass's
+    // $user$bloom1 computed from its own frame earlier - through the zoomed lens the low-frequency
+    // glow is equivalent, and tonemap adaptation keeps updating from the main pass.
+    if (RImplementation.IsSecondViewportRenderPass())
+        return;
+
     PIX_EVENT(phase_bloom);
     u32 Offset;
 

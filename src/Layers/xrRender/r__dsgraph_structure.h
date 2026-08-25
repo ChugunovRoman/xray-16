@@ -45,6 +45,10 @@ struct R_dsgraph_structure
         bool use_hom{ false };
         bool precise_portals{ false };
         bool is_main_pass{ false };
+        // Stage C (SVP): build runs on a worker concurrently with the main render; blocks that
+        // mutate shared game-side state (uLastLTRACK, CROS updates, spatial_updatesector) must
+        // skip this pass - the main build has already updated them this frame.
+        bool second_vp_pass{ false };
         bool mt_calculate{ false };
         bool use_shadow_hull_cull{ false };
         Fvector shadow_light_pos{};
@@ -124,6 +128,7 @@ struct R_dsgraph_structure
         o.use_hom = false;
         o.precise_portals = false;
         o.is_main_pass = false;
+        o.second_vp_pass = false;
         o.spatial_traverse_flags = 0;
         o.portal_traverse_flags = 0;
         o.spatial_types = STYPE_RENDERABLE;

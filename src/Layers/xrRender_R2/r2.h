@@ -1,5 +1,7 @@
 #pragma once
 
+#include <thread>
+
 #include "Layers/xrRender/D3DXRenderBase.h"
 #include "Layers/xrRender/r__occlusion.h"
 #include "Layers/xrRender/r__sync_point.h"
@@ -31,6 +33,22 @@ class CRenderTarget;
 class dxRender_Visual;
 class CGlowManager;
 class CPreviewSceneRenderer;
+
+// Camera snapshot for the scope-viewport visibility pass (stage C of
+// plans/optimization_svp/svp_parallel_calculate_plan.md). Captured on the main thread BEFORE the
+// worker task is pushed, so calculate_for never reads Device.* concurrently with the main render.
+// Values mirror what the sequential second pass used to see: BeginSecondViewportRender mutates
+// only fFOV/mProject, leaving view_pos/full_transform/ViewBase untouched.
+struct SRVPCalcParams
+{
+    Fmatrix full_transform;
+    CFrustum view_frustum;
+    Fvector view_pos;
+    float fov{};
+    u32 width{};
+    u32 height{};
+    u32 sector_id{};
+};
 
 // TODO: move it into separate file.
 struct i_render_phase
@@ -117,6 +135,12 @@ struct render_main : public i_render_phase
 
     void init() override;
     void calculate() override;
+    // Stage C: explicit-target build - an ASYNC task must never re-read mutable "current target"
+    // state (override pointers) at execution time, or two passes can land in the same dsgraph.
+    void calculate_into(R_dsgraph_structure& ds, const SRVPCalcParams* params);
+    // Creates+dispatches the build task; the task handle lands in *sink (defaults to the phase's
+    // own main_task slot - the caller's sync() then joins exactly this build).
+    void launch_build(R_dsgraph_structure& ds, const SRVPCalcParams* params, Task** sink = nullptr);
     void render() override;
 };
 
@@ -360,6 +384,22 @@ public:
 
     R_sync_point q_sync_point;
 
+    // Dedicated dsgraph context for the SVP (scope) visibility pass — stage B of
+    // plans/optimization_svp/svp_parallel_calculate_plan.md. Allocated per SVP frame with an
+    // immediate cmd_list (alloc_context(false): GPU work stays on the single sequential stream),
+    // isolating the visibility maps/markers so Calculate₂ can later run off-thread.
+    // Lifecycle: svp_context_id/svp_dsgraph are invalidated at the start of every main-pass
+    // calculate_for() and released after the SVP inner Render drains them.
+    u32 svp_context_id{ R_dsgraph_structure::INVALID_CONTEXT_ID };
+    R_dsgraph_structure* svp_dsgraph{};
+    // When set, render_main::calculate() and CRender::Render() drain this dsgraph instead of the
+    // immediate one. Only non-null between the second calculate_for() and the end of its Render.
+    R_dsgraph_structure* r_main_dsgraph_override{};
+    // Stage C: worker-built visibility for the scope viewport.
+    SRVPCalcParams svp_calc_params;
+    const SRVPCalcParams* r_main_calc_params{}; // consumed by render_main::calculate()
+    bool svp_parallel{}; // this frame's Calculate₂ was pushed to a worker
+
     bool m_bFirstFrameAfterReset{}; // Determines weather the frame is the first after resetting device.
 
     bool m_fast_geom_loaded{};
@@ -376,6 +416,26 @@ private:
 #endif
 
 public:
+    // Visibility calculation for one camera pass. second_pass=true runs the dedicated
+    // scope-viewport calculation: shared per-frame work (light collection, sector detection +
+    // game callback, global option writes, culling stats) is skipped so this pass can later be
+    // moved off the main thread (see plans/optimization_svp/svp_parallel_calculate_plan.md).
+    void calculate_for(bool second_pass);
+    // Stage C orchestration: snapshot + push the scope build to a worker (returns false -> caller
+    // falls back to the sequential path); wait for the worker and publish its LOD globals.
+    // The build culls against the NARROW scope frustum derived from scope_project.
+    bool BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix& scope_project) override;
+    void EndSecondVPCalculateParallel() override;
+    void AbortSecondVPCalculate() override;
+    // Sun/rain tail of the sequential second Calculate(); runs on the main thread after
+    // BeginSecondViewportRender() switched the Device to the scope projection.
+    void SecondVPPostCalculate() override;
+    void ApplySecondVPLodGlobals();
+    void JoinSecondVPBuildThread();
+    // Stage C: the scope visibility build runs on a DEDICATED thread, not the task scheduler -
+    // scheduler LIFO ordering starves it behind the main render's own subtasks (sun cascades,
+    // light batches), which serializes the pass again. Joined before the scope pass drains.
+    std::thread svp_build_thread;
     void render_forward();
     void render_indirect(light* L) const;
     void render_lights(light_Package& LP);

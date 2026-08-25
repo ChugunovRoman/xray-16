@@ -571,4 +571,17 @@ public:
     // Crossfade alpha for the overlay (0 = fully transparent, 1 = fully opaque).
     virtual void SetHudOverlayAlpha(float) {}
     virtual float GetHudOverlayAlpha() const { return 0.f; }
+
+    // Stage C of the SVP parallelization (plans/optimization_svp/svp_parallel_calculate_plan.md):
+    // snapshot the scope camera and push the scope visibility build onto a worker while the caller
+    // renders the main pass; join it afterwards and publish its per-pass LOD thresholds.
+    // scope_project must be built by CameraManager::BuildSecondVPProjection - the visibility build
+    // culls against the NARROW scope frustum derived from it (huge CPU saving on zoomed scopes).
+    // Default: not supported (caller falls back to the sequential second Calculate).
+    virtual bool BeginSecondVPCalculateParallel(float /*second_vp_fov*/, const Fmatrix& /*scope_project*/) { return false; }
+    virtual void EndSecondVPCalculateParallel() {}
+    virtual void AbortSecondVPCalculate() {}
+    // Sun/rain tail of the sequential second Calculate(); must be called after
+    // BeginSecondViewportRender() has switched the Device projection to the scope camera.
+    virtual void SecondVPPostCalculate() {}
 };

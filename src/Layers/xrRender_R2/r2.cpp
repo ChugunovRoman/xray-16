@@ -857,6 +857,7 @@ void CRender::destroy()
     HWOCC.occq_destroy();
     if (Glows)
         Glows->Destroy();
+    JoinSecondVPBuildThread(); // scope build thread must not outlive the dsgraph/Target it touches
     ReleaseHudOverlayRT(); // HUD overlay scope: release static $user$ RTs before resource manager teardown
     xr_delete(Models);
     xr_delete(Target);
@@ -870,6 +871,7 @@ void CRender::reset_begin()
     PreviewScene_ResetBegin();
     // Wait for tasks to be done
     r_main.sync();
+    JoinSecondVPBuildThread(); // scope build thread touches Target/dsgraphs - join before teardown
     r_sun.sync();
     r_sun_old.sync();
 #if RENDER != R_R2

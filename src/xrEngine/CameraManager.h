@@ -68,6 +68,12 @@ public:
     // Scope second render: push/pop Device projection (main view stays player FOV; second pass uses fFovSecond).
     bool BeginSecondViewportRender();
     void EndSecondViewportRender();
+    // Zoomed FOV of the scope second viewport (0 until the smooth zoom has started). Lets the
+    // renderer snapshot scope-camera parameters WITHOUT the Device mutation done by Begin*.
+    IC float SecondVPFov() const { return fFovSecond; }
+    // Scope projection matrix WITHOUT mutating Device (mirrors the projection part of Begin*,
+    // including the Nvidia Ansel offsets). False while the zoom has not started.
+    bool BuildSecondVPProjection(Fmatrix& out_project) const;
 
     CCameraManager(bool bApplyOnUpdate);
     virtual ~CCameraManager();

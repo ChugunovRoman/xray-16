@@ -401,6 +401,17 @@ bool CCameraManager::BeginSecondViewportRender()
     return true;
 }
 
+bool CCameraManager::BuildSecondVPProjection(Fmatrix& out_project) const
+{
+    if (fFovSecond < EPS_L)
+        return false;
+
+    out_project.build_projection(deg2rad(fFovSecond), m_cam_info.fAspect, m_cam_info.fNear, m_cam_info.fFar);
+    out_project._31 = -m_cam_info.offsetX;
+    out_project._32 = -m_cam_info.offsetY;
+    return true;
+}
+
 void CCameraManager::EndSecondViewportRender()
 {
     if (!m_second_vp_device_saved)

@@ -125,7 +125,38 @@ void CRender::Render()
     }
 
     //.	VERIFY					(g_pGameLevel && g_pGameLevel->pHUD);
-    auto& dsgraph = get_imm_context();
+    // Stage B (SVP): the dedicated scope pass drains its own dsgraph context (see calculate_for).
+    auto& dsgraph = (svp_pass && r_main_dsgraph_override) ? *r_main_dsgraph_override : get_imm_context();
+    // Two CBackend frontends share one immediate device context this frame: RCache (imm) and the
+    // SVP dsgraph's own cmd_list. After alloc_context() the SVP instance is Invalidate()-dirty, so
+    // its FIRST draw would ApplyRTandZB its empty cached bindings (null RT/DSV) - discarding the
+    // whole scope G-buffer pass (symptom: only the skybox visible in the lens). Seed it with the
+    // exact output-merger setup phase_scene_begin() uses, plus the camera transforms (RCache got
+    // those during frame setup; the SVP instance's caches are cold).
+    if (svp_pass)
+    {
+        auto& c = dsgraph.cmd_list;
+        if (!RImplementation.o.gbuffer_opt)
+        {
+            if (RImplementation.o.albedo_wo)
+                Target->u_setrt(c, Target->rt_Position, Target->rt_Normal, Target->rt_Accumulator, Target->rt_MSAADepth);
+            else
+                Target->u_setrt(c, Target->rt_Position, Target->rt_Normal, Target->rt_Color, Target->rt_MSAADepth);
+        }
+        else
+        {
+            if (RImplementation.o.albedo_wo)
+                Target->u_setrt(c, Target->rt_Position, Target->rt_Accumulator, Target->rt_MSAADepth);
+            else
+                Target->u_setrt(c, Target->rt_Position, Target->rt_Color, Target->rt_MSAADepth);
+        }
+        c.set_Stencil(TRUE, D3DCMP_ALWAYS, 0x01, 0xff, 0x7f, D3DSTENCILOP_KEEP, D3DSTENCILOP_REPLACE, D3DSTENCILOP_KEEP);
+        c.set_CullMode(CULL_CCW);
+        c.set_ColorWriteEnable();
+        c.set_xform_world(Fidentity);
+        c.set_xform_view(Device.mView);
+        c.set_xform_project(Device.mProject);
+    }
 
     // HUD overlay scope (g_3d_scopes 3): capture the scene camera while it is still intact
     // (a protective snapshot - used by RenderHudOverlayToTexture to render the HUD with the SAME
@@ -518,6 +549,16 @@ void CRender::RenderSecondViewport()
     Render();
     m_SecondViewportOutputToRT = false;
     m_SecondViewportPass = false;
+
+    // Stage B: release this frame's dedicated SVP dsgraph context - its visibility maps have been
+    // drained by the Render() above. Next SVP frame allocates a fresh one.
+    if (svp_context_id != R_dsgraph_structure::INVALID_CONTEXT_ID)
+    {
+        release_context(svp_context_id);
+        svp_context_id = R_dsgraph_structure::INVALID_CONTEXT_ID;
+    }
+    svp_dsgraph = nullptr;
+    r_main_dsgraph_override = nullptr;
 
     // Restore before returning: bullet tracers are drawn right after this call into rt_secondVP,
     // which stays bound on purpose (SVPPipelineEnd does not touch live GPU state).

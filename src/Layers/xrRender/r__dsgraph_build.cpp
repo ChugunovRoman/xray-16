@@ -472,7 +472,10 @@ void R_dsgraph_structure::add_leafs_dynamic(
                 pV->CalculateBones(TRUE);
             if (o.phase == CRender::PHASE_NORMAL && !skinning_from_parent && !corpse_pose_frozen)
             {
-                pV->CalculateWallmarks(root ? root->renderable_HUD() : false); //. bug?
+                // Stage C: wallmark capture mutates the shared wallmark manager - the concurrent
+                // SVP build must not run it (the main build captures this frame's marks).
+                if (!o.second_vp_pass)
+                    pV->CalculateWallmarks(root ? root->renderable_HUD() : false); //. bug?
             }
             for (auto& i : pV->children)
             {
@@ -886,7 +889,7 @@ void R_dsgraph_structure::build_subspace()
         }
     }
 
-    if (o.is_main_pass && (o.sector_id == IRender_Sector::INVALID_SECTOR_ID))
+    if (o.is_main_pass && !o.second_vp_pass && (o.sector_id == IRender_Sector::INVALID_SECTOR_ID))
     {
         if (g_pGameLevel)
             g_pGameLevel->pHUD->Render_Last(context_id);
@@ -1004,7 +1007,8 @@ void R_dsgraph_structure::build_subspace()
         }
 
         u32 uID_LTRACK = 0xffffffff;
-        if (o.is_main_pass) // temporary
+        // Stage C: light-tracking mutates shared game-side state - the concurrent SVP build opts out.
+        if (o.is_main_pass && !o.second_vp_pass) // temporary
         {
             if (o.phase == CRender::PHASE_NORMAL)
             {
@@ -1031,7 +1035,9 @@ void R_dsgraph_structure::build_subspace()
             ISpatial* spatial = lstRenderables[o_it];
             if (!spatial)
                 continue;
-            if (o.is_main_pass)
+            // Stage C: sector refresh writes shared spatial nodes - the concurrent SVP build relies
+            // on the sectors the main build has already updated this frame.
+            if (o.is_main_pass && !o.second_vp_pass)
             {
                 const auto& entity_pos = spatial->spatial_sector_point();
                 const auto sector_id = detect_sector(entity_pos);
@@ -1069,10 +1075,12 @@ void R_dsgraph_structure::build_subspace()
                 if (!view.testSphere_dirty(spatial->GetSpatialData().sphere.P, spatial->GetSpatialData().sphere.R))
                     continue;
 
-                if (o.is_main_pass)
+            // Stage C: the main-pass branch mutates shared state (HOM vis writeback into shared
+            // visuals, CROS updates) - the concurrent SVP build takes the plain insert path.
+            if (o.is_main_pass && !o.second_vp_pass)
+            {
+                if (type & STYPE_RENDERABLE)
                 {
-                    if (type & STYPE_RENDERABLE)
-                    {
                         // renderable
                         IRenderable* renderable = spatial->dcast_Renderable();
                         VERIFY(renderable);
@@ -1149,8 +1157,9 @@ void R_dsgraph_structure::build_subspace()
             }
 #endif
 
-            if (o.is_main_pass)
-                g_pGameLevel->pHUD->Render_Last(context_id);
+        // Stage C: HUD queue is game-side shared state - only the main pass submits to it here.
+        if (o.is_main_pass && !o.second_vp_pass)
+            g_pGameLevel->pHUD->Render_Last(context_id);
         }
     }
 
