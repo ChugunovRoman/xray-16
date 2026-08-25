@@ -124,7 +124,7 @@ void CRender::calculate_for(bool second_pass)
         svp_dsgraph = nullptr;
         r_main_dsgraph_override = nullptr;
         r_main_calc_params = nullptr;
-        JoinSecondVPBuildThread();
+        svp_cmd_deferred = false;
         svp_parallel = false;
     }
 
@@ -211,6 +211,7 @@ void CRender::calculate_for(bool second_pass)
     if (second_pass && !svp_dsgraph)
     {
         svp_context_id = alloc_context(/*alloc_cmd_list=*/false);
+        svp_cmd_deferred = false; // legacy sequential path: immediate cmd list
         svp_dsgraph = svp_context_id != R_dsgraph_structure::INVALID_CONTEXT_ID
             ? &get_context(svp_context_id)
             : nullptr;
@@ -317,12 +318,19 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
     if (m_bFirstFrameAfterReset || o.oldshadowcascades || second_vp_fov <= EPS_L)
         return false;
 
-    svp_context_id = alloc_context(/*alloc_cmd_list=*/false);
+    // P2.3: DEFERRED cmd list - the dedicated thread builds visibility AND records
+    // render_graph(0) into this list while the main pass renders; the recorded commands are
+    // executed on the immediate context at the join point (SubmitSVPDeferred in Render()).
+    // Safe because render_graph(0) is query-free and free of RCache/imm interleaves; the
+    // lighting phases (occq + RCache) stay on the main thread.
+    svp_context_id = alloc_context(/*alloc_cmd_list=*/true);
+    svp_cmd_deferred = true;
     svp_dsgraph = svp_context_id != R_dsgraph_structure::INVALID_CONTEXT_ID
         ? &get_context(svp_context_id)
         : nullptr;
     if (!svp_dsgraph)
     {
+        svp_cmd_deferred = false;
         Msg("! SVP: no free dsgraph context, scope visibility falls back to the sequential path");
         return false;
     }
@@ -342,6 +350,12 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
     p.width = Device.dwWidth;
     p.height = Device.dwHeight;
     p.sector_id = last_sector_id;
+
+    // P2.3 recording seed: the dedicated thread records render_graph(0) into the deferred list
+    // right after the build, using the narrow scope transforms captured here on the main thread.
+    svp_seed_view = Device.mView;
+    svp_seed_project = scope_project;
+    svp_cmd_deferred = true;
 
     r_main_dsgraph_override = svp_dsgraph;
     r_main_calc_params = &svp_calc_params;
@@ -369,8 +383,12 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
     // Dedicated thread (see member comment): the task scheduler starves this build behind the
     // main render's own subtasks, which serializes the pass again. calculate_into is pure CPU
     // culling into the dedicated dsgraph - no Device reads, no shared-state mutation (gated).
+    // P2.3: right after the build, the same thread records render_graph(0) into the deferred
+    // cmd list - overlapping the main render's lighting/combine tail. No submit here: the main
+    // thread executes the recorded list in Render() (SubmitSVPDeferred).
     svp_build_thread = std::thread([this, ds = svp_dsgraph, params = &svp_calc_params] {
         r_main.calculate_into(*ds, params);
+        record_second_vp_geometry_into(*ds);
     });
     svp_parallel = true;
     return true;

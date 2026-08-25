@@ -1,5 +1,7 @@
 #pragma once
 
+#include <mutex>
+
 #include "BufferUtils.h"
 
 namespace xray::render::RENDER_NAMESPACE
@@ -11,6 +13,10 @@ class ECORE_API _VertexStream
     u32 mPosition{}; // position in bytes
     u32 mDiscardID{}; // ID of discard - usually for caching
     u32 dbg_lock{};
+    // Phase 2 (SVP): the scope pass records geometry on a worker thread while the main render
+    // locks the same shared dynamic streams (particles, LOD impostors, fullscreen quads). The
+    // mutex makes concurrent Lock/Unlock safe; contention is negligible (cold paths only).
+    std::mutex mt;
 
 public:
     VertexBufferHandle old_pVB{};
@@ -49,6 +55,7 @@ class ECORE_API _IndexStream
     u32 mSize{}; // real size (usually mCount, aligned on 512b boundary)
     u32 mPosition{};
     u32 mDiscardID{};
+    std::mutex mt;
 
 public:
     IndexBufferHandle old_pIB{};

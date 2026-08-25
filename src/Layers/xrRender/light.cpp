@@ -254,9 +254,11 @@ Fvector light::spatial_sector_point() { return position; }
 // Xforms
 void light::xform_calc()
 {
-    ZoneScoped;
+    // ZoneScoped below the early-out: this fires many times per frame (both light passes); the
+    // per-frame repeat must not spam profiler zones.
     if (Device.dwFrame == m_xform_frame)
         return;
+    ZoneScoped;
     m_xform_frame = Device.dwFrame;
 
     // build final rotation / translation

@@ -295,6 +295,9 @@ void CRenderTarget::phase_combine()
             RCache.set_Stencil(FALSE);
             RCache.set_ColorWriteEnable();
             dsgraph.render_distort();
+            // P2.3: the scope pass records the distortion mask into its DEFERRED list - flush it
+            // before the AA/tonemap quad below samples the distortion mask.
+            RImplementation.SubmitSVPDeferred(dsgraph);
         }
     }
 

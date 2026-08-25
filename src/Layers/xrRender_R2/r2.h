@@ -399,6 +399,15 @@ public:
     SRVPCalcParams svp_calc_params;
     const SRVPCalcParams* r_main_calc_params{}; // consumed by render_main::calculate()
     bool svp_parallel{}; // this frame's Calculate₂ was pushed to a worker
+    // P2.3: sealed smap command lists from the main pass flush_lights, re-executed by the scope
+    // pass (shadow map content is camera-independent — same light, same frame). DX11 only;
+    // released after the scope pass accumulation or at the end of a non-svp frame.
+    xr_vector<void*> svp_smap_replay_lists;
+    // P2.3: the dedicated thread builds visibility AND records render_graph(0) into the deferred
+    // cmd list, overlapping the main render's tail. Seeded on the main thread at launch.
+    Fmatrix svp_seed_view{};
+    Fmatrix svp_seed_project{};
+    bool svp_cmd_deferred{}; // svp dsgraph cmd_list is a deferred context this frame
 
     bool m_bFirstFrameAfterReset{}; // Determines weather the frame is the first after resetting device.
 
@@ -576,6 +585,23 @@ public:
     void Calculate() override;
     void Render() override;
     void RenderSecondViewport() override;
+    // P2.1 (Phase 2 groundwork, plans/optimization_svp/svp_parallel_render_phase2_plan.md):
+    // scope geometry recording as a self-contained unit - binds the scope G-buffer twins on the
+    // dsgraph's OWN cmd list (explicit binds, no rt_* member / RCache dependency) and drains its
+    // visibility maps. with_details=false for the split-scene variant. Falls back to the rt_*
+    // members when the twins do not exist (scale == 1) - sequential-only in that case.
+    // P2.3: the worker part is record_second_vp_geometry_into() (seed + render_graph(0), deferred);
+    // lods/Details/submit happen on the main thread in Render() after the join.
+    void record_second_vp_geometry_into(R_dsgraph_structure& ds);
+    // Executes the recorded deferred commands; no-op when the svp cmd list is immediate
+    // (legacy sequential path).
+    void SubmitSVPDeferred(R_dsgraph_structure& ds);
+    // Releases all stored smap replay lists (DX11: COM Release; GL: vector is always empty).
+    void ReleaseSVPReplayLists();
+    // Вариант A (render_lights MT analysis): filters a light package by the NARROW scope frustum -
+    // lights whose volume sphere (position + range) misses the lens view skip shadow-map building
+    // and accumulation entirely. Conservative: sphere covers the shadow-casting extent.
+    void filter_light_package_for_svp(const light_Package& src, light_Package& dst);
     void BindBackbufferForUI() override;
     void RenderMenu() override;
 

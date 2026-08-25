@@ -13,14 +13,56 @@ static float light_volume_dist(const light* L)
     return _max(Device.vCameraPosition.distance_to(L->spatial.sphere.P) - L->spatial.sphere.R, 0.f);
 }
 
+// Вариант A (render_lights MT analysis): filter a light package by the NARROW scope frustum.
+// The scope pass reuses the main pass's light set (wide-frustum superset); lights whose volume
+// sphere (position + range - the sphere also bounds the shadow-casting extent) misses the lens
+// view cannot light any visible pixel and are dropped before smap building and accumulation.
+// The source package is left untouched (the main pass owns it).
+void CRender::filter_light_package_for_svp(const light_Package& src, light_Package& dst)
+{
+    const CFrustum& frustum = svp_calc_params.view_frustum;
+
+    auto filter = [&frustum](const xr_vector<light*>& srcQueue, xr_vector<light*>& dstQueue)
+    {
+        dstQueue.clear();
+        dstQueue.reserve(srcQueue.size());
+        for (light* L : srcQueue)
+        {
+            if (!L)
+                continue;
+            // OMNIPART parts share the parent light's volume sphere.
+            const Fvector& P = (L->flags.type == IRender_Light::OMNIPART) ? L->position : L->spatial.sphere.P;
+            const float R = (L->flags.type == IRender_Light::OMNIPART)
+                ? L->range
+                : _max(L->spatial.sphere.R, L->range);
+            if (!frustum.testSphere_dirty(P, R))
+                continue;
+            dstQueue.push_back(L);
+        }
+    };
+
+    filter(src.v_shadowed, dst.v_shadowed);
+    filter(src.v_point, dst.v_point);
+    filter(src.v_spot, dst.v_spot);
+}
+
 void CRender::render_lights(light_Package& LP)
 {
     ZoneScoped;
+
+    // P2.3 optimization: DISABLED — the multi-page smap design (each page re-packs from rect 0,0
+    // and requires a full atlas clear before rendering) is architecturally incompatible with
+    // atlas persistence for the scope pass. The per-page clear + Variant A frustum filter already
+    // provide significant savings. Re-enable only with a single-page guarantee (budget cap that
+    // fits all lights on one page) or a multi-atlas refactor.
+    const bool reuse_shadowmaps = false;
+    (void)reuse_shadowmaps;
 
     //////////////////////////////////////////////////////////////////////////
     // Refactor order based on ability to pack shadow-maps
     // 1. calculate area + sort in descending order
     // const	u16		smap_unassigned		= u16(-1);
+    if (!reuse_shadowmaps)
     {
         xr_vector<light*>& source = LP.v_shadowed;
         xr_vector<light*> kept;
@@ -80,6 +122,7 @@ void CRender::render_lights(light_Package& LP)
     }
 
     // 2. refactor - infact we could go from the backside and sort in ascending order
+    if (!reuse_shadowmaps)
     {
         xr_vector<light*>& source = LP.v_shadowed;
         xr_vector<light*> refactored;
@@ -236,7 +279,10 @@ void CRender::render_lights(light_Package& LP)
                 {
                     HW.get_context(CHW::IMM_CTX_ID)->ExecuteCommandList(
                         static_cast<ID3D11CommandList*>(item.cmdList), false);
-                    static_cast<ID3D11CommandList*>(item.cmdList)->Release();
+                    // P2.3: keep the sealed list alive - the scope pass (reuse mode) re-executes
+                    // it to restore the shadow map content (camera-independent, same frame).
+                    // Ownership transferred to svp_smap_replay_lists; released after use.
+                    RImplementation.svp_smap_replay_lists.push_back(item.cmdList);
                     item.cmdList = nullptr;
                     any_submit = true;
                 }
@@ -267,11 +313,76 @@ void CRender::render_lights(light_Package& LP)
             get_imm_context().cmd_list.Invalidate();
     };
 
+    // P2.3 optimization (reuse): the shadow maps were rendered FROM THE LIGHT's position by the
+    // main pass THIS frame - their content is camera-independent, and the scope pass shares the
+    // same eye position. Skip smap clear/build/tasks/flush entirely; instead re-execute the main
+    // pass's sealed command lists (restores ALL pages' shadow depth) and run only the shadowed
+    // accumulation. Unshadowed point/spot accumulation runs after (shared tail below).
+#if defined(USE_DX11)
+    if (reuse_shadowmaps)
+    {
+        // Restore ALL pages' shadow depth by re-executing the main pass's sealed lists.
+        Target->phase_smap_spot_clear(cmd_list);
+        auto replay_ctx = HW.get_context(CHW::IMM_CTX_ID);
+        for (void* list : RImplementation.svp_smap_replay_lists)
+            replay_ctx->ExecuteCommandList(static_cast<ID3D11CommandList*>(list), false);
+        get_imm_context().cmd_list.Invalidate();
+
+        L_spot_s.clear();
+        for (light* p_light : LP.v_shadowed)
+        {
+            // Only lights whose shadow map the MAIN pass actually rendered this frame. Lights it
+            // culled (distance/occq/budget) carry stale X.S page placements from arbitrary earlier
+            // frames - sampling them maps the volume onto OTHER lights' atlas pages: hard-edged
+            // rectangular shadow artifacts that flicker as the layout shifts.
+            if ((Device.dwFrame - p_light->shadow_render_frame) <= 1)
+                L_spot_s.push_back(p_light);
+        }
+
+        Target->phase_accumulator(cmd_list);
+
+        PIX_EVENT(ACCUM_SPOT);
+        for (light* p_light : L_spot_s)
+        {
+            Target->accum_spot(cmd_list, p_light);
+            render_indirect(p_light);
+        }
+
+        PIX_EVENT(ACCUM_VOLUMETRIC);
+        if (RImplementation.o.advancedpp && ps_r2_ls_flags.is(R2FLAG_VOLUMETRIC_LIGHTS))
+            for (light* p_light : L_spot_s)
+                Target->accum_volumetric(cmd_list, p_light);
+
+        L_spot_s.clear();
+
+        // Release the replayed lists (GPU work enqueued, CPU-side objects no longer needed).
+        for (void* list : RImplementation.svp_smap_replay_lists)
+            static_cast<ID3D11CommandList*>(list)->Release();
+        RImplementation.svp_smap_replay_lists.clear();
+        return;
+    }
+#else
+    if (reuse_shadowmaps)
+    {
+        // GL: no sealed command lists to replay; accumulate against the main pass's last-page
+        // atlas (partial but correct for lights on the last page).
+        L_spot_s.assign(LP.v_shadowed.begin(), LP.v_shadowed.end());
+        Target->phase_accumulator(cmd_list);
+        for (light* p_light : L_spot_s)
+        {
+            Target->accum_spot(cmd_list, p_light);
+            render_indirect(p_light);
+        }
+        L_spot_s.clear();
+        return;
+    }
+#endif
+
     // Single shared spatial query for all light passes: one q_sphere around the camera
     // replaces a per-light q_frustum octree walk. Radius covers every light volume that
     // survived the distance cull (shadow_dist + max light range with margin).
     static xr_vector<ISpatial*> common_dynamic;
-    if (ps_r2_light_common_dynamic > 0 && !LP.v_shadowed.empty())
+    if (!reuse_shadowmaps && ps_r2_light_common_dynamic > 0 && !LP.v_shadowed.empty())
     {
         ZoneScopedN("light_common_dynamic_query");
         float max_reach = ps_r2_light_shadow_dist;
@@ -281,6 +392,8 @@ void CRender::render_lights(light_Package& LP)
         g_pGamePersistent->SpatialSpace.q_sphere(common_dynamic, 0, STYPE_RENDERABLE, Device.vCameraPosition, max_reach * 1.05f);
     }
 
+    // P2.3: skipped entirely in the reuse mode (see above).
+    if (!reuse_shadowmaps)
     while (!LP.v_shadowed.empty())
     {
         // if (has_spot_shadowed)

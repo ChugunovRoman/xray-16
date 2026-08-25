@@ -41,6 +41,8 @@ void* _VertexStream::Lock(u32 vl_Count, u32 Stride, u32& vOffset)
     dbg_lock++;
 #endif
 
+    std::lock_guard<std::mutex> lock(mt); // Phase 2 (SVP): worker + main thread share this stream
+
     // Ensure there is enough space in the VB for this data
     const u32 bytes_need = vl_Count * Stride;
     R_ASSERT2((bytes_need <= mSize) && vl_Count,
@@ -78,6 +80,8 @@ void _VertexStream::Unlock(u32 Count, u32 Stride)
     VERIFY(1 == dbg_lock);
     dbg_lock--;
 #endif
+    std::lock_guard<std::mutex> lock(mt); // Phase 2 (SVP): paired with Lock above
+
     mPosition += Count * Stride;
 
     pVB.Unmap();
@@ -118,6 +122,7 @@ void _IndexStream::Destroy()
 u16* _IndexStream::Lock(u32 Count, u32& vOffset)
 {
     PGO(Msg("PGO:IB_LOCK:%d", Count));
+    std::lock_guard<std::mutex> lock(mt); // Phase 2 (SVP): worker + main thread share this stream
     vOffset = 0;
 
     // Ensure there is enough space in the VB for this data
@@ -144,6 +149,7 @@ u16* _IndexStream::Lock(u32 Count, u32& vOffset)
 void _IndexStream::Unlock(u32 RealCount)
 {
     PGO(Msg("PGO:IB_UNLOCK:%d", RealCount));
+    std::lock_guard<std::mutex> lock(mt); // Phase 2 (SVP): paired with Lock above
     mPosition += RealCount;
     pIB.Unmap();
 }

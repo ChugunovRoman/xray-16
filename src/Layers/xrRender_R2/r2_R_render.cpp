@@ -93,6 +93,69 @@ extern u32 g_r;
 // - Z-prefill (R2FLAG_ZFILL): r__svp_skip_zfill skips only for the SVP pass.
 // - Reusing shadow maps between main and SVP without re-sync is a separate optimization (not implemented).
 
+// P2.3 (worker part): seed the deferred cmd list with the FULL initial pipeline state (a deferred
+// context inherits nothing) and record render_graph(0) into it. Runs on the dedicated thread right
+// after the visibility build, overlapping the main render's lighting/combine tail. Deliberately
+// excludes lods (shared DVB fill), Details (shared shader-constant flips) and the albedo copy
+// (Vertex.Lock quad) - those stay on the main thread (see Render() Part0). No submit here: the
+// main thread executes the recorded list via SubmitSVPDeferred after joining this thread.
+void CRender::record_second_vp_geometry_into(R_dsgraph_structure& ds)
+{
+    // Twin refs with fallback to the rt_* members when the scaled twin set does not exist
+    // (r__second_vp_render_scale == 1): identical bindings, sequential-only in that case.
+    const ref_rt& rtP = Target->svp_Position ? Target->svp_Position : Target->rt_Position;
+    const ref_rt& rtN = Target->svp_Normal ? Target->svp_Normal : Target->rt_Normal;
+    const ref_rt& rtC = Target->svp_Color ? Target->svp_Color : Target->rt_Color;
+    const ref_rt& rtA = Target->svp_Accumulator ? Target->svp_Accumulator : Target->rt_Accumulator;
+    const ref_rt& rtZ = Target->svp_MSAADepth ? Target->svp_MSAADepth : Target->rt_MSAADepth;
+
+    if (!o.gbuffer_opt)
+    {
+        if (o.albedo_wo)
+            Target->u_setrt(ds.cmd_list, rtP, rtN, rtA, rtZ);
+        else
+            Target->u_setrt(ds.cmd_list, rtP, rtN, rtC, rtZ);
+    }
+    else
+    {
+        if (o.albedo_wo)
+            Target->u_setrt(ds.cmd_list, rtP, rtA, rtZ);
+        else
+            Target->u_setrt(ds.cmd_list, rtP, rtC, rtZ);
+    }
+
+    // Stencil: write 0x1 at every geometry pixel (combine shades only marked pixels).
+    ds.cmd_list.set_Stencil(TRUE, D3DCMP_ALWAYS, 0x01, 0xff, 0x7f, D3DSTENCILOP_KEEP, D3DSTENCILOP_REPLACE, D3DSTENCILOP_KEEP);
+    ds.cmd_list.set_CullMode(CULL_CCW);
+    ds.cmd_list.set_ColorWriteEnable();
+
+    // A deferred context inherits nothing: viewport and camera transforms come from the launch
+    // snapshot (narrow scope frustum transforms captured in BeginSecondVPCalculateParallel).
+    ds.cmd_list.SetViewport({ 0.f, 0.f, float(rtP->dwWidth), float(rtP->dwHeight), 0.f, 1.f });
+    ds.cmd_list.set_xform_world(Fidentity);
+    ds.cmd_list.set_xform_view(svp_seed_view);
+    ds.cmd_list.set_xform_project(svp_seed_project);
+
+    ds.render_graph(0);
+}
+
+// P2.3: executes the recorded deferred commands on the immediate context. No-op on the legacy
+// sequential path (immediate cmd list - commands were already executed inline).
+void CRender::SubmitSVPDeferred(R_dsgraph_structure& ds)
+{
+    if (svp_cmd_deferred)
+        ds.cmd_list.submit();
+}
+
+void CRender::ReleaseSVPReplayLists()
+{
+#if defined(USE_DX11)
+    for (void* list : svp_smap_replay_lists)
+        static_cast<ID3D11CommandList*>(list)->Release();
+#endif
+    svp_smap_replay_lists.clear();
+}
+
 void CRender::Render()
 {
     ZoneScoped;
@@ -244,6 +307,10 @@ void CRender::Render()
     BOOL split_the_scene_to_minimize_wait = FALSE;
     if (ps_r2_ls_flags.test(R2FLAG_EXP_SPLIT_SCENE))
         split_the_scene_to_minimize_wait = TRUE;
+    // P2.1: the scope pass always uses the unified geometry path (the legacy split variant is a
+    // memory-saving option orthogonal to the scope pipeline).
+    if (svp_pass)
+        split_the_scene_to_minimize_wait = FALSE;
 
     //******* Main render :: PART-0	-- first
 #ifdef USE_OGL
@@ -255,20 +322,42 @@ void CRender::Render()
         ZoneScopedN("Render/MainPart0/NoSplit");
         PIX_EVENT(DEFER_PART0_NO_SPLIT);
         // level, DO NOT SPLIT
-        Target->phase_scene_begin();
+        if (svp_pass)
         {
-            // Skip 3D HUD only for legacy alternating SVP (no dedicated RT). Dedicated second pass draws HUD here + hud_ui below.
-            // HUD overlay scope (g_3d_scopes 3): HUD goes to the offscreen overlay instead of the world pass.
-            const bool skip_world_hud = m_SecondViewportPass || m_HudOverlayActive ||
-                (!ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame());
-            if (!skip_world_hud)
-                dsgraph.render_hud();
+            // P2.3: parallel path — the worker already recorded render_graph(0) into the deferred
+            // list (joined in EndSecondVPCalculateParallel); only lods/Details are added here,
+            // then SubmitSVPDeferred executes everything. Legacy path — the cmd list is
+            // immediate, so record_second_vp_geometry_into records AND executes inline.
+            // Legacy: capture the scope transforms at record time (Begin is active here);
+            // the parallel path captured them in BeginSecondVPCalculateParallel.
+            if (!svp_cmd_deferred)
+            {
+                svp_seed_view = Device.mView;
+                svp_seed_project = Device.mProject;
+                record_second_vp_geometry_into(dsgraph);
+            }
+            dsgraph.render_lods(true, true);
+            if (Details && !ps_r__svp_skip_details)
+                Details->Render(dsgraph.cmd_list);
+            SubmitSVPDeferred(dsgraph);
         }
+        else
+        {
+            Target->phase_scene_begin();
+            {
+                // Skip 3D HUD only for legacy alternating SVP (no dedicated RT). Dedicated second pass draws HUD here + hud_ui below.
+                // HUD overlay scope (g_3d_scopes 3): HUD goes to the offscreen overlay instead of the world pass.
+                const bool skip_world_hud = m_SecondViewportPass || m_HudOverlayActive ||
+                    (!ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame());
+                if (!skip_world_hud)
+                    dsgraph.render_hud();
+            }
 
-        dsgraph.render_graph(0);
-        dsgraph.render_lods(true, true);
-        if (Details && !(svp_pass && ps_r__svp_skip_details))
-            Details->Render(dsgraph.cmd_list);
+            dsgraph.render_graph(0);
+            dsgraph.render_lods(true, true);
+            if (Details && !(svp_pass && ps_r__svp_skip_details))
+                Details->Render(dsgraph.cmd_list);
+        }
         Target->phase_scene_end();
     }
     else
@@ -320,7 +409,10 @@ void CRender::Render()
             if (it < LP.v_point.size())
             {
                 light* L = LP.v_point[it];
-                L->vis_prepare(dsgraph.cmd_list);
+                // P2.3: the svp dsgraph cmd_list is DEFERRED - occq queries are illegal there.
+                // Light vis_prepare only computes shadow xforms + issues the query, so it goes
+                // through the immediate frontend (RCache) on the scope pass too.
+                L->vis_prepare(svp_pass ? RCache : dsgraph.cmd_list);
                 if (L->vis.pending)
                     LP_pending.v_point.push_back(L);
                 else
@@ -329,7 +421,10 @@ void CRender::Render()
             if (it < LP.v_spot.size())
             {
                 light* L = LP.v_spot[it];
-                L->vis_prepare(dsgraph.cmd_list);
+                // P2.3: the svp dsgraph cmd_list is DEFERRED - occq queries are illegal there.
+                // Light vis_prepare only computes shadow xforms + issues the query, so it goes
+                // through the immediate frontend (RCache) on the scope pass too.
+                L->vis_prepare(svp_pass ? RCache : dsgraph.cmd_list);
                 if (L->vis.pending)
                     LP_pending.v_spot.push_back(L);
                 else
@@ -338,7 +433,10 @@ void CRender::Render()
             if (it < LP.v_shadowed.size())
             {
                 light* L = LP.v_shadowed[it];
-                L->vis_prepare(dsgraph.cmd_list);
+                // P2.3: the svp dsgraph cmd_list is DEFERRED - occq queries are illegal there.
+                // Light vis_prepare only computes shadow xforms + issues the query, so it goes
+                // through the immediate frontend (RCache) on the scope pass too.
+                L->vis_prepare(svp_pass ? RCache : dsgraph.cmd_list);
                 if (L->vis.pending)
                     LP_pending.v_shadowed.push_back(L);
                 else
@@ -395,6 +493,8 @@ void CRender::Render()
         else if (ps_r__dedicated_second_vp)
         {
             dsgraph.render_hud_ui();
+            // P2.3: flush the deferred segment before lighting reads the accumulator/albedo.
+            SubmitSVPDeferred(dsgraph);
         }
     }
 
@@ -456,7 +556,14 @@ void CRender::Render()
             else
                 r_sun_old.sync();
         }
-        Target->accum_direct_blend(dsgraph.cmd_list);
+        // P2.3: with r__svp_skip_sun_csm 1 the cascades are NOT re-rendered for the scope camera,
+        // and slice 0 of the shadow atlas has already been overwritten by the main pass spot
+        // pages - blending would sample spot-page depth as sun occlusion: hard-edged wrong
+        // shadows through the scope that flicker on every cascade refit. Skip the blend in that
+        // mode (sun-lit surfaces lose direct sun through the scope; set r__svp_skip_sun_csm 0 to
+        // get correct scope sun shadows at the cascade re-render cost).
+        if (!(svp_pass && ps_r__svp_skip_sun_csm))
+            Target->accum_direct_blend(dsgraph.cmd_list);
     }
 
     {
@@ -480,21 +587,43 @@ void CRender::Render()
         dsgraph.cmd_list.set_CullMode(CULL_CCW);
         dsgraph.cmd_list.set_ColorWriteEnable();
         dsgraph.render_emissive();
+        // P2.3: flush the deferred segment (sun blend + emissive) before the combine reads the
+        // accumulator. Everything recorded into dsgraph.cmd_list so far is now executed.
+        SubmitSVPDeferred(dsgraph);
+    }
+
+    // Вариант A: for the scope pass, filter the light package by the NARROW scope frustum -
+    // lights whose volume sphere (position + range, covering the shadow extent) misses the lens
+    // view skip shadow-map building and accumulation entirely. The main package is untouched.
+    // Only when the parallel path built the frustum snapshot (svp_parallel).
+    light_Package svp_lp_normal, svp_lp_pending;
+    const bool svp_filter_lights = svp_pass && svp_parallel;
+    if (svp_filter_lights)
+    {
+        filter_light_package_for_svp(LP_normal, svp_lp_normal);
+        filter_light_package_for_svp(LP_pending, svp_lp_pending);
     }
 
     // Lighting, non dependant on OCCQ
     {
         ZoneScopedN("Render/LightsNoOccq");
         PIX_EVENT(DEFER_LIGHT_NO_OCCQ);
-        render_lights(LP_normal);
+        render_lights(svp_filter_lights ? svp_lp_normal : LP_normal);
     }
 
     // Lighting, dependant on OCCQ
     {
         ZoneScopedN("Render/LightsOccq");
         PIX_EVENT(DEFER_LIGHT_OCCQ);
-        render_lights(LP_pending);
+        render_lights(svp_filter_lights ? svp_lp_pending : LP_pending);
     }
+
+    // P2.3: release smap replay lists (consumed by the reuse mode, or unused on this frame).
+    ReleaseSVPReplayLists();
+
+    // P2.3: execute all deferred-recorded lighting before the combine reads the
+    // G-buffer/accumulator.
+    SubmitSVPDeferred(dsgraph);
 
     // Postprocess
     {

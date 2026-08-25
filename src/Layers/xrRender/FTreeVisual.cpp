@@ -140,7 +140,9 @@ struct FTreeVisual_setup
 
 void FTreeVisual::Render(CBackend& cmd_list, float /*LOD*/, bool use_fast_geo)
 {
-    static FTreeVisual_setup tvs;
+    // thread_local: the scope pass (Phase 2) may render flora on a worker concurrently with the
+    // main pass - a shared static would race the dwFrame check and the calculate() fill.
+    static thread_local FTreeVisual_setup tvs;
     if (tvs.dwFrame != Device.dwFrame)
         tvs.calculate();
 // setup constants
