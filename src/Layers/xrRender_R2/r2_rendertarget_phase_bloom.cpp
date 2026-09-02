@@ -77,25 +77,27 @@ void CRenderTarget::phase_bloom()
     using namespace phase_bloom;
 
     // Scope second viewport pass: the bloom/luminance chain is fixed-cost (resolution- and
-    // frustum-independent) and measurably adds to the scope render. Reuse the main pass's
-    // $user$bloom1 computed from its own frame earlier - through the zoomed lens the low-frequency
-    // glow is equivalent, and tonemap adaptation keeps updating from the main pass.
+    // frustum-independent). Skipping this phase ENTIRELY killed the lens frame's GLOBAL light -
+    // without a refreshed tonemap LUT the scope combine darkened all non-local-light pixels
+    // (day-time dynamics "unlit by the sun"). The lens needs the REFRESHED LUMINANCE but not the
+    // bloom itself, so run ONLY the luminance step.
     if (RImplementation.IsSecondViewportRenderPass())
+    {
+        phase_luminance();
         return;
+    }
 
     PIX_EVENT(phase_bloom);
     u32 Offset;
 
-    // Bloom quads are authored in fixed BLOOM_size pixel units that their VS converts via
-    // screen_res (=Device dims). Under the scaled second-viewport pass the inherited viewport is
-    // sw×sh, which would clip these quads to a corner fraction of the fixed-size bloom targets -
-    // pin an explicit matching viewport and restore it on exit.
-    const u32 prev_vp_w = get_width(RCache);
-    const u32 prev_vp_h = get_height(RCache);
-
     // Targets
+    // NOTE: no viewport pin here. The bloom quads are authored in fixed BLOOM_size pixel units
+    // that their vertex shader converts via screen_res (=Device dims), so they fully cover the
+    // fixed-size targets ONLY under a Device-sized viewport - which is the historical entry
+    // state of this phase on the main path (the scope pass returns early above). An unconditional
+    // {BLOOM_size} pin shrank quad coverage to a ~13% corner and starved the bloom feed
+    // (global darkening regression).
     u_setrt(RCache, rt_Bloom_1, 0, 0, 0); // No need for ZBuffer at all
-    RCache.SetViewport({ 0.f, 0.f, float(BLOOM_size_X), float(BLOOM_size_Y), 0.f, 1.f });
 
     // Clear    - don't clear - it's stupid here :)
     // Stencil  - disable
@@ -552,8 +554,5 @@ void CRenderTarget::phase_bloom()
 
     // re-enable z-buffer
     RCache.set_Z(true);
-
-    // Restore the viewport pinned for the fixed-size bloom targets above.
-    RCache.SetViewport({ 0.f, 0.f, float(prev_vp_w), float(prev_vp_h), 0.f, 1.f });
 }
 } // namespace xray::render::RENDER_NAMESPACE

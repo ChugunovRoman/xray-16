@@ -401,7 +401,6 @@ void CPHWorld::Step()
     // P1: parallel island solve. Each active CPHIsland is an independent dxWorld, and the ODE
     // stepper uses only stack/local scratch, so solving distinct active islands on worker threads
     // is race-free. Collide (above) and PhDataUpdate/spatial_move (below) stay serial.
-    // See plans/optimization_p1_physics_islands.md.
 #ifdef DEBUG
     // DEBUG path stays serial: debug_output() touches global state.
     for (i_object = m_objects.begin(); m_objects.end() != i_object;)

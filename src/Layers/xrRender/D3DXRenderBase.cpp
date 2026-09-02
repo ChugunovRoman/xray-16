@@ -15,6 +15,10 @@
 
 #ifdef USE_RENDERDOC
 #include <renderdoc/renderdoc_app.h>
+#if defined(USE_DX11)
+#include "xrEngine/XR_IOConsole.h"
+#include "xrEngine/xr_ioc_cmd.h"
+#endif
 #endif
 
 namespace xray::render::RENDER_NAMESPACE
@@ -166,48 +170,126 @@ void D3DXRenderBase::OnDeviceCreate(const char* shName)
     }
 }
 
+void D3DXRenderBase::InitializeRenderDoc()
+{
+#if defined(USE_RENDERDOC) && defined(USE_DX11)
+    if (g_renderdoc_api)
+        return;
+
+    HMODULE hModule = GetModuleHandleA("renderdoc.dll");
+    if (hModule == 0)
+    {
+        hModule = LoadLibraryA("renderdoc.dll");
+    }
+
+    if (hModule)
+    {
+        auto const RENDERDOC_GetAPI =
+            reinterpret_cast<pRENDERDOC_GetAPI>(GetProcAddress(hModule, "RENDERDOC_GetAPI"));
+        auto const Result =
+            RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_0_0, reinterpret_cast<void**>(&g_renderdoc_api));
+        if (Result == 1)
+        {
+            g_renderdoc_api->UnloadCrashHandler();
+
+            string_path FolderName;
+            FS.update_path(FolderName, "$app_data_root$", "captures\\openxray");
+            // RenderDoc does NOT create the output directory itself - a missing folder
+            // silently discards captures.
+#ifdef XR_PLATFORM_WINDOWS
+            CreateDirectoryA(FolderName, nullptr);
+#endif
+            g_renderdoc_api->SetCaptureFilePathTemplate(FolderName);
+
+            // F11 instead of PrtScrn: Windows 11 hijacks PrtScrn at the OS level (Snipping
+            // Tool), the keypress never reaches RenderDoc's hook.
+            RENDERDOC_InputButton CaptureButton[] = {eRENDERDOC_Key_F11};
+            g_renderdoc_api->SetCaptureKeys(CaptureButton, ARRAYSIZE(CaptureButton));
+
+            g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_AllowVSync, 0);
+            g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_DebugOutputMute, 0);
+
+            g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_RefAllResources, 1);
+            // CaptureCallstacks MUST stay off: the engine (Tracy/debugger) keeps dbghelp.dll
+            // loaded, and RenderDoc warns it "can't guarantee thread-safety against
+            // application use" - with callstacks + CaptureAllCmdLists the device creation
+            // deadlocks. Command-list capture alone is enough for our analysis.
+            g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_CaptureCallstacks, 0);
+            // VerifyBufferAccess is a RenderDoc-side Map() interception, safe to keep.
+            g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_VerifyBufferAccess, 1);
+            // APIValidation MUST stay off: it makes RenderDoc create the D3D11 device with
+            // the debug layer (old enum name: DebugDeviceMode). Unless the Windows optional
+            // feature "Graphics Tools" is installed, D3D11CreateDevice then fails with
+            // DXGI_ERROR_SDK_COMPONENT_MISSING (0x887A002D) - the startup HW probe dies,
+            // renderer_r4 never registers and the engine silently falls back to OpenGL
+            // (the same reason a plain RenderDoc-UI injector launch forces GL).
+            g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_APIValidation, 0);
+            g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_CaptureAllCmdLists, 1);
+
+            Msg("* RenderDoc integration active: capture key F11, captures go to '%s'", FolderName);
+
+            // Programmatic capture: the keyboard hook can be unreliable (OS-level key
+            // hijacks, focus, fullscreen exclusive) - a console command captures the NEXT
+            // frame unconditionally via TriggerCapture().
+            static bool s_capture_cmd_registered = false;
+            if (!s_capture_cmd_registered)
+            {
+                s_capture_cmd_registered = true;
+                struct CCC_RenderDocCapture final : IConsole_Command
+                {
+                    CCC_RenderDocCapture(pcstr N) : IConsole_Command(N) { bEmptyArgsHandled = true; }
+                void Execute(pcstr args) override
+                {
+                    if (!g_renderdoc_api)
+                    {
+                        Msg("! RenderDoc: integration not active, cannot capture");
+                        return;
+                    }
+                    g_renderdoc_api->TriggerCapture();
+                        // Hook test: GetNumCaptures() counts captures actually WRITTEN to
+                        // disk. Run this command twice with a few seconds between: if the
+                        // counter grows, captures land (check the folder); if it stays 0,
+                        // the device is not hooked and this RenderDoc path is a dead end.
+                        Msg("* RenderDoc: capture of the next frame triggered (captures so far: %u)",
+                            g_renderdoc_api->GetNumCaptures());
+                    }
+                    void Info(TInfo& I) override { xr_strcpy(I, "capture the next frame via the built-in RenderDoc API"); }
+                    void Save(IWriter* F) override {} // debug helper - do not persist to user.ltx
+                };
+                static CCC_RenderDocCapture s_rdoc_capture_cmd("r__rdoc_capture");
+                Console->AddCommand(&s_rdoc_capture_cmd);
+                Msg("* RenderDoc: console command 'r__rdoc_capture' registered");
+            }
+        }
+        else
+        {
+            g_renderdoc_api = nullptr; // GetAPI failed - leave the flag clean
+            Msg("! RenderDoc: RENDERDOC_GetAPI failed (%d), in-app capture disabled", int(Result));
+        }
+    }
+    else
+    {
+        Msg("! RenderDoc: renderdoc.dll not found next to the game exe, in-app capture disabled");
+    }
+#endif // USE_RENDERDOC && USE_DX11
+}
+
+bool D3DXRenderBase::RenderDocActive()
+{
+#if defined(USE_RENDERDOC) && defined(USE_DX11)
+    return g_renderdoc_api != nullptr;
+#else
+    return false;
+#endif
+}
+
 void D3DXRenderBase::Create(SDL_Window* hWnd, u32& dwWidth, u32& dwHeight, float& fWidth_2, float& fHeight_2)
 {
     ZoneScoped;
 
-#if defined(USE_RENDERDOC) && defined(USE_DX11)
-    if (!g_renderdoc_api)
-    {
-        HMODULE hModule = GetModuleHandleA("renderdoc.dll");
-        if (hModule == 0)
-        {
-            hModule = LoadLibraryA("renderdoc.dll");
-        }
-
-        if (hModule)
-        {
-            auto const RENDERDOC_GetAPI =
-                reinterpret_cast<pRENDERDOC_GetAPI>(GetProcAddress(hModule, "RENDERDOC_GetAPI"));
-            auto const Result =
-                RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_0_0, reinterpret_cast<void**>(&g_renderdoc_api));
-            if (Result == 1)
-            {
-                g_renderdoc_api->UnloadCrashHandler();
-
-                string_path FolderName;
-                FS.update_path(FolderName, "$app_data_root$", "captures\\openxray");
-                g_renderdoc_api->SetCaptureFilePathTemplate(FolderName);
-
-                RENDERDOC_InputButton CaptureButton[] = {eRENDERDOC_Key_PrtScrn};
-                g_renderdoc_api->SetCaptureKeys(CaptureButton, ARRAYSIZE(CaptureButton));
-
-                g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_AllowVSync, 0);
-                g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_DebugOutputMute, 0);
-
-                g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_RefAllResources, 1);
-                g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_CaptureCallstacks, 1);
-                g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_VerifyBufferAccess, 1);
-                g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_APIValidation, 1);
-                g_renderdoc_api->SetCaptureOptionU32(eRENDERDOC_Option_CaptureAllCmdLists, 1);
-            }
-        }
-    }
-#endif
+    // The main device is created below; make sure RenderDoc hooks are installed first.
+    // This is a no-op when the HW probe has already done it at startup.
+    InitializeRenderDoc();
 
     HW.CreateDevice(hWnd);
 
@@ -439,3 +521,4 @@ void D3DXRenderBase::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
     BasicStats.FrameStart();
 }
 } // namespace xray::render::RENDER_NAMESPACE
+

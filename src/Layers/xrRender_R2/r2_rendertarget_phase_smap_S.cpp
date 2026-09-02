@@ -2,31 +2,39 @@
 
 namespace xray::render::RENDER_NAMESPACE
 {
-void CRenderTarget::phase_smap_spot_clear(CBackend& cmd_list)
+void CRenderTarget::phase_smap_spot_clear(CBackend& cmd_list, const ref_rt& smap_target)
 {
-    rt_smap_depth->set_slice_write(cmd_list.context_id, 0);
+    // Frame driver stage 1c: an explicit target redirects the clear into the dedicated SVP
+    // atlas; the default keeps the historical rt_smap_depth member.
+    ref_rt depth = smap_target ? smap_target : rt_smap_depth;
+    depth->set_slice_write(cmd_list.context_id, 0);
     cmd_list.set_pass_targets(
         rt_smap_surf,
         nullptr,
         nullptr,
-        rt_smap_depth
+        depth
     );
-    cmd_list.ClearZB(rt_smap_depth, 1.0f);
+    cmd_list.ClearZB(depth, 1.0f);
 
 #if defined(USE_DX11)
-    HW.get_context(CHW::IMM_CTX_ID)->ClearState();
+    // Reset the immediate context ONLY when running inline on it. When called on a deferred
+    // context (frame-driver stage C records page clears on the SVP worker), poking IMM here
+    // executes immediately and wipes the main render's bound state mid-frame -> black screen.
+    if (cmd_list.context_id == CHW::IMM_CTX_ID)
+        HW.get_context(CHW::IMM_CTX_ID)->ClearState();
 #endif
 }
 
-void CRenderTarget::phase_smap_spot(CBackend& cmd_list, light* L)
+void CRenderTarget::phase_smap_spot(CBackend& cmd_list, light* L, const ref_rt& smap_target)
 {
-    rt_smap_depth->set_slice_write(cmd_list.context_id, 0); // TODO: it is possible to increase lights batch size
-                                                            // by rendering into different smap array slices in parallel
+    ref_rt depth = smap_target ? smap_target : rt_smap_depth;
+    depth->set_slice_write(cmd_list.context_id, 0); // TODO: it is possible to increase lights batch size
+                                                    // by rendering into different smap array slices in parallel
     cmd_list.set_pass_targets(
         rt_smap_surf,
         nullptr,
         nullptr,
-        rt_smap_depth
+        depth
     );
     const D3D_VIEWPORT viewport = { L->X.S.posX, L->X.S.posY, L->X.S.size, L->X.S.size, 0.f, 1.f };
     cmd_list.SetViewport(viewport);

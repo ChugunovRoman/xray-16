@@ -91,7 +91,11 @@ GLuint CRender::texture_load(LPCSTR fRName, u32& ret_msize, GLenum& ret_desc)
             {
                 exist = FS.exist(fn, folder, fname, ".dds");
                 if (exist)
+                {
+                    if (strstr(fname, "terrain") || strstr(fname, "Terrain"))
+                        Msg("[TERRAIN_TEX] Found in %s: %s -> %s", folder, fname, fn);
                     break;
+                }
             }
 
             // Disk-cached preview textures in appdata (npc_preview_* DDS cache).
@@ -105,6 +109,8 @@ GLuint CRender::texture_load(LPCSTR fRName, u32& ret_msize, GLenum& ret_desc)
 
             if (!exist)
             {
+                if (strstr(fname, "terrain") || strstr(fname, "Terrain"))
+                    Msg("! [TERRAIN_TEX] Can't find terrain texture '%s'", fname);
                 Msg("! Can't find texture '%s'", fname);
                 if (!FS.exist(fn, "$game_textures$", "ed\\ed_not_existing_texture", ".dds"))
                     return 0;
@@ -121,6 +127,10 @@ GLuint CRender::texture_load(LPCSTR fRName, u32& ret_msize, GLenum& ret_desc)
 #endif // DEBUG
     gli::texture texture = gli::load((char*)S->pointer(), img_size);
     R_ASSERT2(!texture.empty(), fn);
+
+    if (strstr(fn, "terrain") || strstr(fn, "Terrain"))
+        Msg("[TERRAIN_TEX] Loaded OK: %s | size=%zu | %ux%u | mips=%u | fmt=%d",
+            fn, img_size, texture.extent().x, texture.extent().y, texture.levels(), (int)texture.format());
 
     u32 mip_cnt = u32(-1); // XXX: write to it when reading with GLI!
 

@@ -6,6 +6,7 @@
 #include "LightTrack.h"
 #include "Include/xrRender/RenderVisual.h"
 #include "xrEngine/xr_object.h"
+#include "xrEngine/device.h"
 
 #ifdef _EDITOR
 #include "IGame_Persistent.h"
@@ -381,6 +382,17 @@ extern float ps_r2_lt_smooth;
 // hemi & sun: update and smooth
 void CROS_impl::update_smooth(IRenderable* O)
 {
+#if RENDER != R_R1
+    // The SVP recording thread must NOT claim the once-per-frame refresh slot (dwFrameSmooth
+    // below) - otherwise the main pass's own update_smooth early-returns all frame long and
+    // smart_update NEVER runs, freezing hemi_value/sun_value at pre-SVP levels (dark dynamic
+    // objects in the scope). The worker exits here; its recorded draws keep last frame's
+    // smoothed values - a one-frame ambient lag is invisible.
+    const bool svp_worker_now = g_svp_worker_rendering.load(std::memory_order_relaxed);
+    if (svp_worker_now)
+        return;
+#endif // RENDER != R_R1
+
     if (dwFrameSmooth == Device.dwFrame)
         return;
 

@@ -1151,7 +1151,11 @@ Fvector CGameObject::get_last_local_point_on_mesh(Fvector const& local_point, u1
 void CGameObject::renderable_Render(u32 context_id, IRenderable* root)
 {
     //
-    MakeMeCrow();
+    // The dedicated SVP build thread renders objects outside the task scheduler; engine
+    // registration queues (o_crow) are keyed by scheduler worker IDs and must not be touched
+    // from there. The main pass renders the same objects and performs the registration.
+    if (!g_svp_worker_rendering.load(std::memory_order_relaxed))
+        MakeMeCrow();
     // ~
     GEnv.Render->add_Visual(context_id, root, Visual(), XFORM());
     Visual()->getVisData().hom_frame = Device.dwFrame;

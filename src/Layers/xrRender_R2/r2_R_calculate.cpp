@@ -126,6 +126,11 @@ void CRender::calculate_for(bool second_pass)
         r_main_calc_params = nullptr;
         svp_cmd_deferred = false;
         svp_parallel = false;
+        svp_frame_driver = false; // frame driver gate is re-resolved by Begin...Parallel each frame
+        svp_shadow_stage = 0;     // scope shadow prebuild state is per-frame (stage machine)
+        svp_shadow_transfer = false; // transfer mode is re-resolved by Begin...Parallel each frame
+        svp_sun_slices_ready = false; // sun-reuse copies (if any) happen later, in main Render/Sun
+        svp_geom_on_main = false;
     }
 
     // Transfer to global space to avoid deep pointer access.
@@ -244,7 +249,11 @@ void CRender::calculate_for(bool second_pass)
             g_pGamePersistent->OnWeaponIconRenderPass();
         // Stage C: target captured at task creation - an async main build must not re-read the
         // override member that the scope launcher mutates right after this function returns.
-        r_main.launch_build(get_imm_context(), nullptr);
+        // For the scope pass (second_pass=true), r_main_dsgraph_override points to the dedicated
+        // svp dsgraph; the inner Render() reads from the same override, so the build must write
+        // into it - otherwise the inner Render drains an empty graph (only skybox/fences render).
+        auto& build_ds = r_main_dsgraph_override ? *r_main_dsgraph_override : get_imm_context();
+        r_main.launch_build(build_ds, nullptr);
     }
     if (main_pass)
         BasicStats.Culling.End();
@@ -312,17 +321,119 @@ void CRender::ApplySecondVPLodGlobals()
     s_svp_lod.valid = false;
 }
 
+namespace
+{
+// Raises g_svp_worker_rendering for the lifetime of the SVP build thread's body; game render
+// callbacks consult the flag before touching scheduler-worker-keyed queues (o_crow etc.).
+struct SVPWorkerRenderGuard
+{
+    SVPWorkerRenderGuard() { g_svp_worker_rendering.store(true, std::memory_order_relaxed); }
+    ~SVPWorkerRenderGuard() { g_svp_worker_rendering.store(false, std::memory_order_relaxed); }
+};
+} // namespace
+
+// Persistent SVP worker body (see the svp_worker_* members in r2.h): parked on
+// svp_worker_wake; each wake runs ONE frame's job, then svp_worker_done.Set() and back to
+// park. svp_dsgraph/svp_calc_params are re-read at job start - the main thread arms them
+// before wake and does not touch them until the matching done.
+void CRender::svp_worker_loop()
+{
+    for (;;)
+    {
+        svp_worker_wake.Wait();
+        if (svp_worker_exit.load(std::memory_order_relaxed))
+            return;
+        {
+            // Per-job scope: g_svp_worker_rendering must be true only while the worker
+            // actually renders (parity with the old per-frame threads), false while parked.
+            SVPWorkerRenderGuard worker_render_guard; // reset on every exit path, incl. abort
+            R_dsgraph_structure* const ds = svp_dsgraph;
+            auto* const params = &svp_calc_params;
+            // Stage A2: visibility build - pure CPU culling into the dedicated dsgraph (no
+            // Device reads, no shared-state mutation, see the Begin comment).
+            r_main.calculate_into(*ds, params);
+            if (!svp_build_abort.load(std::memory_order_relaxed))
+            {
+                // Stage B: record render_graph(0) into the deferred cmd list - submitted later
+                // on the main thread (SubmitSVPDeferred), overlapping the main render's
+                // lighting/combine tail. dbg=10: skipped - the scope pass records geometry on
+                // the MAIN thread instead.
+                if (!svp_geom_on_main)
+                    record_second_vp_geometry_into(*ds);
+                // Frame driver stage C: build the scope pass's shadow maps into the dedicated
+                // atlas. Blocked until the main pass finished ITS lighting (from then on the
+                // context pool and the shared light objects belong to this thread); abort
+                // exits the wait immediately. Shadow-transfer mode skips it: the main pass
+                // copies the pages itself, there is nothing for the worker to build.
+                if (svp_frame_driver && !svp_shadow_transfer)
+                {
+                    while (!svp_build_abort.load(std::memory_order_relaxed) && !svp_lights_go.Wait(1))
+                        ;
+                    if (!svp_build_abort.load(std::memory_order_relaxed))
+                        record_second_vp_shadows();
+                }
+                // Frame driver stage D hook (worker-recorded combine) lands HERE; it must
+                // check svp_build_abort before starting.
+            }
+        }
+        svp_worker_done.Set();
+    }
+}
+
 bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix& scope_project)
 {
-    // Guards mirrored from what the sequential second pass tolerated.
-    if (m_bFirstFrameAfterReset || o.oldshadowcascades || second_vp_fov <= EPS_L)
+    // RenderDoc in-app capture active: force the fully sequential scope path. The worker
+    // records the scope deferred context on its thread while the main thread keeps issuing
+    // Finish/ExecuteCommandList on its own contexts, and that two-writer deferred context
+    // crashes inside RenderDoc's hooks (AV in renderdoc.dll at the scope SubmitSVPDeferred).
+    // Everything stays on the immediate context - stable and fully captured.
+    if (D3DXRenderBase::RenderDocActive())
+    {
+        static bool s_rdoc_gate_logged = false;
+        if (!s_rdoc_gate_logged)
+        {
+            s_rdoc_gate_logged = true;
+            Msg("* SVP: parallel frame driver disabled for this session (RenderDoc active)");
+        }
         return false;
+    }
+
+    // Guards mirrored from what the sequential second pass tolerated.
+    // GL: no deferred contexts exist - recording geometry on a worker thread would interleave
+    // GL calls with the main thread's immediate rendering. Fall back to the sequential path.
+    if (m_bFirstFrameAfterReset || o.oldshadowcascades || second_vp_fov <= EPS_L ||
+        !svp_frame_driver_available())
+        return false;
+
+    // Frame driver gate: the worker will record scope lighting (stage C) and combine (stage D)
+    // into deferred lists after the geometry stage. The dedicated shadow atlas must exist BEFORE
+    // the worker reaches lighting, so it is created here on the main thread; a GL backend or
+    // creation failure just keeps those stages inline later without affecting the already-shipped
+    // calculate/geometry.
+    svp_frame_driver = svp_frame_driver_available();
+    // Shadow-transfer: the main pass copies each smap page into the dedicated SVP atlas itself
+    // (see render_lights) and the worker skips its shadow build stage entirely.
+    svp_shadow_transfer = true;
+    if (svp_frame_driver && !Target->SVPSmapAtlasEnsure())
+        svp_frame_driver = false;
+    // Stage machine: 1 = the worker is expected to deliver sealed shadow lists this frame,
+    // 3 = shadow-transfer: the MAIN pass delivers copied atlas slices instead of worker lists.
+    svp_shadow_stage = svp_frame_driver ? (svp_shadow_transfer ? 3 : 1) : 0;
+    svp_lights_go.Reset();
+    if (svp_shadow_transfer)
+    {
+        // Transfer-mode page groups are filled by the MAIN pass page loop (render_lights),
+        // not by the worker - start the frame clean.
+        svp_shadow_page_lights.clear();
+        svp_shadow_unshadowed.clear();
+    }
 
     // P2.3: DEFERRED cmd list - the dedicated thread builds visibility AND records
     // render_graph(0) into this list while the main pass renders; the recorded commands are
     // executed on the immediate context at the join point (SubmitSVPDeferred in Render()).
     // Safe because render_graph(0) is query-free and free of RCache/imm interleaves; the
     // lighting phases (occq + RCache) stay on the main thread.
+    svp_geom_on_main = false;
     svp_context_id = alloc_context(/*alloc_cmd_list=*/true);
     svp_cmd_deferred = true;
     svp_dsgraph = svp_context_id != R_dsgraph_structure::INVALID_CONTEXT_ID
@@ -380,26 +491,32 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
 
     r_main.init();
 
-    // Dedicated thread (see member comment): the task scheduler starves this build behind the
-    // main render's own subtasks, which serializes the pass again. calculate_into is pure CPU
-    // culling into the dedicated dsgraph - no Device reads, no shared-state mutation (gated).
-    // P2.3: right after the build, the same thread records render_graph(0) into the deferred
-    // cmd list - overlapping the main render's lighting/combine tail. No submit here: the main
-    // thread executes the recorded list in Render() (SubmitSVPDeferred).
-    svp_build_thread = std::thread([this, ds = svp_dsgraph, params = &svp_calc_params] {
-        r_main.calculate_into(*ds, params);
-        record_second_vp_geometry_into(*ds);
-    });
+    // Dedicated PERSISTENT thread (see the svp_worker_* member comment in r2.h): the task
+    // scheduler starves this build behind the main render's own subtasks, which serializes
+    // the pass again. Created lazily on the first scope frame and parked on svp_worker_wake
+    // between jobs - the job contents (stage A2 visibility build, stage B deferred geometry
+    // recording, stage C shadow build) live in svp_worker_loop above.
+    svp_build_abort.store(false);
+    if (!svp_build_thread.joinable())
+        svp_build_thread = std::thread([this] { svp_worker_loop(); });
+    svp_worker_done.Reset(); // drop a stale release (a job aborted by teardown), auto-reset event
+    svp_worker_wake.Set();
     svp_parallel = true;
     return true;
 }
 
 void CRender::EndSecondVPCalculateParallel()
 {
+    // The JOB wait lives HERE (right after the main Render) deliberately: past this point the
+    // main thread resumes RCache/constant-table activity (camera switch, sun cascades, scope
+    // pass), which must not run concurrently with the worker's own constant recording - a
+    // null-CB crash was observed in dx11ConstantBuffer::set when stage C overlapped
+    // SetCacheXform. The persistent worker parks after this wait; the THREAD itself is joined
+    // only on reset/teardown (JoinSecondVPBuildThread), never per frame.
     if (!svp_parallel)
         return;
 
-    JoinSecondVPBuildThread();
+    svp_worker_done.Wait(); // blocking; the worker signals after every job, incl. aborts
 
     // Publish the worker's per-pass LOD thresholds before the scope pass drains (main render is
     // already finished at this point, so the globals are exclusive again).
@@ -408,8 +525,19 @@ void CRender::EndSecondVPCalculateParallel()
 
 void CRender::JoinSecondVPBuildThread()
 {
+    // Full teardown (reset/level unload/dtor only): ask the persistent worker to exit, wake it
+    // (the abort flag breaks an in-flight stage-C wait; the wake release also covers a worker
+    // that is still busy - it consumes it at the next park), and join. Per-frame code NEVER
+    // joins - EndSecondVPCalculateParallel only waits for the current job.
     if (svp_build_thread.joinable())
+    {
+        svp_build_abort.store(true, std::memory_order_relaxed);
+        svp_worker_exit.store(true, std::memory_order_relaxed);
+        svp_worker_wake.Set();
         svp_build_thread.join();
+        svp_worker_exit.store(false, std::memory_order_relaxed);
+        svp_build_abort.store(false, std::memory_order_relaxed);
+    }
 }
 
 void CRender::AbortSecondVPCalculate()
@@ -417,7 +545,14 @@ void CRender::AbortSecondVPCalculate()
     if (!svp_parallel)
         return;
 
-    JoinSecondVPBuildThread();
+    // Let the worker skip its remaining stages instead of finishing them pointlessly.
+    svp_build_abort.store(true);
+    svp_lights_go.Set(); // unblock the stage-C wait so the wait below cannot stall
+    // Stop THIS job but keep the persistent worker alive - it parks on svp_worker_wake; the
+    // thread itself is joined only by reset/teardown. Wait for the park BEFORE freeing the
+    // job state below (dsgraph/overrides the worker may still touch inside the job).
+    svp_worker_done.Wait();
+    svp_shadow_stage = 0;
     if (svp_context_id != R_dsgraph_structure::INVALID_CONTEXT_ID)
     {
         release_context(svp_context_id);
@@ -429,12 +564,25 @@ void CRender::AbortSecondVPCalculate()
     svp_parallel = false;
 }
 
+bool CRender::svp_sun_reuse_active() const
+{
+    // Stage 2 (sun-reuse): reuse the MAIN pass sun cascades in the scope view. Requires this
+    // frame's shadow-transfer path - the sun slices are copied into the dedicated SVP atlas
+    // right after the main pass Render/Sun (see r2_R_render.cpp). Otherwise the legacy
+    // rebuild/skip flags (r__svp_skip_sun_csm) keep ruling.
+    return svp_parallel && svp_frame_driver && svp_shadow_transfer;
+}
+
 void CRender::SecondVPPostCalculate()
 {
     // Sun/rain tail of the old sequential second Calculate(), executed after
     // BeginSecondViewportRender() switched the Device to the scope projection.
+    // Sun-reuse mode skips the sun entirely: the scope pass accumulates the MAIN pass cascades
+    // from the transferred atlas slices (see the reuse branch in Render/Sun) - no rebuild task
+    // is started, so the later r_sun.sync() in the scope Render/Sun is a no-op.
     const bool skip_sun = ps_r__svp_skip_sun_csm != 0;
-    if (!skip_sun)
+    const bool sun_reuse = svp_sun_reuse_active();
+    if (!skip_sun && !sun_reuse)
     {
         if (o.oldshadowcascades)
             r_sun_old.init();
@@ -447,7 +595,7 @@ void CRender::SecondVPPostCalculate()
 #if RENDER != R_R2
     r_rain.run();
 #endif
-    if (!skip_sun)
+    if (!skip_sun && !sun_reuse)
     {
         if (o.oldshadowcascades)
             r_sun_old.run();

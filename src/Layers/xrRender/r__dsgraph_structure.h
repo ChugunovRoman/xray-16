@@ -56,6 +56,10 @@ struct R_dsgraph_structure
         // Shared pre-fetched dynamic list: when set, build_subspace skips q_frustum and
         // iterates this list instead (light passes filter it via sector/frustum tests)
         xr_vector<ISpatial*>* precomputed_dynamic{};
+        // Per-light owner exclusion from SMAP caster build: when set, the renderable matching
+        // this pointer is skipped during PHASE_SMAP to prevent self-shadowing (e.g. NPC torch
+        // shadow-mapping its own owner). Set from light->shadow_owner per smap build.
+        ::IRenderable* shadow_owner{};
     } o;
 
     // Dynamic scene graph
@@ -136,6 +140,7 @@ struct R_dsgraph_structure
         o.shadow_light_pos.set(0, 0, 0);
         o.shadow_light_range = 0.f;
         o.precomputed_dynamic = nullptr;
+        o.shadow_owner = nullptr;
 
         val_recorder = nullptr;
         val_feedback = nullptr;

@@ -101,6 +101,11 @@ extern u32 g_r;
 // main thread executes the recorded list via SubmitSVPDeferred after joining this thread.
 void CRender::record_second_vp_geometry_into(R_dsgraph_structure& ds)
 {
+    // NOTE: never call CBackend::Invalidate() on this pooled deferred context - it re-labels
+    // the backend as the immediate context (context_id = IMM_CTX_ID) and the following submit
+    // then calls FinishCommandList on the IMMEDIATE context, killing the device. The pool
+    // cache staleness is handled engine-side (CBackend::ResetDeferredCache at alloc/submit).
+
     // Twin refs with fallback to the rt_* members when the scaled twin set does not exist
     // (r__second_vp_render_scale == 1): identical bindings, sequential-only in that case.
     const ref_rt& rtP = Target->svp_Position ? Target->svp_Position : Target->rt_Position;
@@ -330,7 +335,7 @@ void CRender::Render()
             // immediate, so record_second_vp_geometry_into records AND executes inline.
             // Legacy: capture the scope transforms at record time (Begin is active here);
             // the parallel path captured them in BeginSecondVPCalculateParallel.
-            if (!svp_cmd_deferred)
+            if (!svp_cmd_deferred || svp_geom_on_main)
             {
                 svp_seed_view = Device.mView;
                 svp_seed_project = Device.mProject;
@@ -409,10 +414,12 @@ void CRender::Render()
             if (it < LP.v_point.size())
             {
                 light* L = LP.v_point[it];
-                // P2.3: the svp dsgraph cmd_list is DEFERRED - occq queries are illegal there.
-                // Light vis_prepare only computes shadow xforms + issues the query, so it goes
-                // through the immediate frontend (RCache) on the scope pass too.
-                L->vis_prepare(svp_pass ? RCache : dsgraph.cmd_list);
+                // Frame-driver stage 1b: the scope pass skips vis_prepare altogether - its
+                // package is pre-filtered by the narrow lens frustum and stage C will record
+                // lighting on the worker, away from occlusion queries. The MAIN pass keeps
+                // running the tests for both passes (shared eye position -> same decisions).
+                if (!svp_pass)
+                    L->vis_prepare(dsgraph.cmd_list);
                 if (L->vis.pending)
                     LP_pending.v_point.push_back(L);
                 else
@@ -421,10 +428,9 @@ void CRender::Render()
             if (it < LP.v_spot.size())
             {
                 light* L = LP.v_spot[it];
-                // P2.3: the svp dsgraph cmd_list is DEFERRED - occq queries are illegal there.
-                // Light vis_prepare only computes shadow xforms + issues the query, so it goes
-                // through the immediate frontend (RCache) on the scope pass too.
-                L->vis_prepare(svp_pass ? RCache : dsgraph.cmd_list);
+                // Frame-driver stage 1b: skip vis_prepare on the scope pass (see the point branch).
+                if (!svp_pass)
+                    L->vis_prepare(dsgraph.cmd_list);
                 if (L->vis.pending)
                     LP_pending.v_spot.push_back(L);
                 else
@@ -433,10 +439,9 @@ void CRender::Render()
             if (it < LP.v_shadowed.size())
             {
                 light* L = LP.v_shadowed[it];
-                // P2.3: the svp dsgraph cmd_list is DEFERRED - occq queries are illegal there.
-                // Light vis_prepare only computes shadow xforms + issues the query, so it goes
-                // through the immediate frontend (RCache) on the scope pass too.
-                L->vis_prepare(svp_pass ? RCache : dsgraph.cmd_list);
+                // Frame-driver stage 1b: skip vis_prepare on the scope pass (see the point branch).
+                if (!svp_pass)
+                    L->vis_prepare(dsgraph.cmd_list);
                 if (L->vis.pending)
                     LP_pending.v_shadowed.push_back(L);
                 else
@@ -549,21 +554,79 @@ void CRender::Render()
         ZoneScopedN("Render/Sun");
         PIX_EVENT(DEFER_SUN);
         Stats.l_visible++;
-        if (!(svp_pass && ps_r__svp_skip_sun_csm))
+        const bool svp_sun_off = ps_r__svp_skip_sun_csm != 0;
+#if defined(USE_DX11)
+        // Capture BEFORE sync(): it deactivates the phase; the slices are final right after.
+        const bool sun_was_active = !RImplementation.o.oldshadowcascades && r_sun.o.active;
+#endif
+        // Stage 2 (sun-reuse): the scope pass reuses the MAIN pass sun cascades from the
+        // transferred atlas slices; when unavailable (no parallel/transfer this frame, or the
+        // slices were not copied yet) it falls back to the legacy per-camera rebuild below.
+        const bool sun_reuse = svp_pass && svp_sun_reuse_active() && svp_sun_slices_ready;
+        if (!(svp_pass && svp_sun_off) && !sun_reuse)
         {
             if (!RImplementation.o.oldshadowcascades)
                 r_sun.sync();
             else
                 r_sun_old.sync();
         }
-        // P2.3: with r__svp_skip_sun_csm 1 the cascades are NOT re-rendered for the scope camera,
-        // and slice 0 of the shadow atlas has already been overwritten by the main pass spot
-        // pages - blending would sample spot-page depth as sun occlusion: hard-edged wrong
-        // shadows through the scope that flicker on every cascade refit. Skip the blend in that
-        // mode (sun-lit surfaces lose direct sun through the scope; set r__svp_skip_sun_csm 0 to
-        // get correct scope sun shadows at the cascade re-render cost).
-        if (!(svp_pass && ps_r__svp_skip_sun_csm))
+#if defined(USE_DX11)
+        // DX11-only: the reuse loop swaps per-slice SRVs via CTexture::set_slice, which the GL
+        // backend does not implement (and the reuse path can never activate there anyway -
+        // BeginSecondVPCalculateParallel refuses the parallel mode on GL).
+        if (sun_reuse)
+        {
+            // The cascades were rendered by the MAIN pass this frame and copied into the
+            // dedicated SVP atlas (see the copy below); accumulate them against the scope view
+            // with the MAIN pass cascade transforms - the lens frustum is a subset of the main
+            // one, so the shadows are correct, only the texel density in the lens is lower.
+            // Mirrors render_sun::accumulate_cascade with the slice index offset into the
+            // atlas tail; recorded into the scope deferred list, executed together with this
+            // segment's submit (same pattern as accum_direct_blend).
+            if (Target->svp_publish_smap_atlas(true))
+            {
+                const u32 sun_base = u32(ps_r__svp_smap_pages);
+                for (u32 i = 0; i < R__NUM_SUN_CASCADES; ++i)
+                {
+                    Target->rt_smap_depth->pTexture->set_slice(int(sun_base + i));
+                    if ((i == SE_SUN_NEAR) && Target->use_minmax_sm_this_frame())
+                        Target->create_minmax_SM(dsgraph.cmd_list);
+                    Fmatrix& xform = r_sun.m_sun_cascades[i].xform;
+                    Fmatrix& xform_prev = r_sun.m_sun_cascades[i ? i - 1 : i].xform;
+                    const u32 sub_phase = (i == 0) ? SE_SUN_NEAR
+                        : ((i < R__NUM_SUN_CASCADES - 1) ? SE_SUN_MIDDLE : SE_SUN_FAR);
+                    Target->accum_direct_cascade(dsgraph.cmd_list, sub_phase, xform, xform_prev,
+                        r_sun.m_sun_cascades[i].bias);
+                }
+                Target->svp_publish_smap_atlas(false);
+            }
+        }
+#endif // USE_DX11
+        if (sun_reuse || !(svp_pass && svp_sun_off))
             Target->accum_direct_blend(dsgraph.cmd_list);
+#if defined(USE_DX11)
+        // Stage 2 sun-reuse, MAIN pass side: copy the finished sun cascade slices into the
+        // dedicated SVP atlas RIGHT HERE - after r_sun.sync() (the slices are final) and BEFORE
+        // render_lights, whose first spot page clear destroys slice 0 (the NEAR cascade;
+        // MIDDLE/FAR would survive in slices 1/2, but all three are copied for one uniform window).
+        if (!svp_pass && svp_sun_reuse_active() && sun_was_active &&
+            Target->svp_rt_smap_depth && Target->svp_rt_smap_depth->valid() &&
+            Target->svp_rt_smap_depth->pSurface && Target->rt_smap_depth &&
+            Target->rt_smap_depth->pSurface)
+        {
+            const UINT sun_base = UINT(ps_r__svp_smap_pages);
+            if (Target->svp_rt_smap_depth->n_slices >= sun_base + R__NUM_SUN_CASCADES)
+            {
+                ID3D11Texture2D* dst_tex = static_cast<ID3D11Texture2D*>(Target->svp_rt_smap_depth->pSurface);
+                ID3D11Texture2D* src_tex = static_cast<ID3D11Texture2D*>(Target->rt_smap_depth->pSurface);
+                for (UINT i = 0; i < R__NUM_SUN_CASCADES; ++i)
+                    HW.get_context(CHW::IMM_CTX_ID)->CopySubresourceRegion(
+                        dst_tex, D3D11CalcSubresource(0, sun_base + i, 1), 0, 0, 0,
+                        src_tex, D3D11CalcSubresource(0, i, 1), nullptr);
+                svp_sun_slices_ready = true;
+            }
+        }
+#endif
     }
 
     {
@@ -596,9 +659,28 @@ void CRender::Render()
     // lights whose volume sphere (position + range, covering the shadow extent) misses the lens
     // view skip shadow-map building and accumulation entirely. The main package is untouched.
     // Only when the parallel path built the frustum snapshot (svp_parallel).
+    //
+    // Frame driver (stage 1c): when the worker is going to pre-build shadows, the filtering
+    // happened EARLIER - on the main pass, into the LP_svp_* members, so the builder consumed
+    // exactly what the scope pass accumulates below (svp_use_prebuilt branch).
     light_Package svp_lp_normal, svp_lp_pending;
     const bool svp_filter_lights = svp_pass && svp_parallel;
-    if (svp_filter_lights)
+    const bool svp_use_prebuilt = svp_pass && svp_shadow_stage != 0;
+
+    // Frame driver: pre-filter into the LP_svp_* members BEFORE the main pass consumes its own
+    // packages (render_lights drains them) - this is a snapshot of light pointers that the
+    // worker (after the signal) and the scope pass both consume.
+    if (!svp_pass && svp_parallel && svp_frame_driver)
+    {
+        filter_light_package_for_svp(LP_normal, LP_svp_normal);
+        filter_light_package_for_svp(LP_pending, LP_svp_pending);
+    }
+
+    if (svp_use_prebuilt)
+    {
+        // LP_svp_normal/LP_svp_pending were filled above on the main pass - do not re-filter.
+    }
+    else if (svp_filter_lights)
     {
         filter_light_package_for_svp(LP_normal, svp_lp_normal);
         filter_light_package_for_svp(LP_pending, svp_lp_pending);
@@ -608,22 +690,76 @@ void CRender::Render()
     {
         ZoneScopedN("Render/LightsNoOccq");
         PIX_EVENT(DEFER_LIGHT_NO_OCCQ);
-        render_lights(svp_filter_lights ? svp_lp_normal : LP_normal);
+        // Stage 1b/1c: the scope package skips per-light occq visibility entirely - it was
+        // prefiltered by the narrow lens frustum and (prebuilt mode) its shadows are already
+        // built by the worker.
+        const bool no_vis = svp_use_prebuilt || svp_filter_lights;
+        render_lights(svp_use_prebuilt ? LP_svp_normal : (svp_filter_lights ? svp_lp_normal : LP_normal), no_vis);
     }
 
     // Lighting, dependant on OCCQ
     {
         ZoneScopedN("Render/LightsOccq");
         PIX_EVENT(DEFER_LIGHT_OCCQ);
-        render_lights(svp_filter_lights ? svp_lp_pending : LP_pending);
+        // Same as above: pending lights are treated as visible for the scope pass - they passed
+        // the frustum test, and their occq results belong to the MAIN pass's decision loop.
+        const bool no_vis = svp_use_prebuilt || svp_filter_lights;
+        render_lights(svp_use_prebuilt ? LP_svp_pending : (svp_filter_lights ? svp_lp_pending : LP_pending), no_vis);
     }
 
-    // P2.3: release smap replay lists (consumed by the reuse mode, or unused on this frame).
+    // Release the MAIN pass's sealed smap lists BEFORE unblocking the SVP worker: the worker
+    // pushes its own page lists into the same vector, and releasing after the signal would
+    // destroy the worker's fresh lists (use-after-free at the scope-pass replay).
     ReleaseSVPReplayLists();
+
+    // Frame driver stage C kickoff: the main pass has drained its own lighting - from here the
+    // context pool and the shared light objects belong to the worker (the pool has no internal
+    // locking, which is exactly why the worker waits for this signal before allocating).
+    // The LP_svp_* member packages were snapshotted BEFORE the main lighting drained them.
+    if (!svp_pass && svp_parallel && svp_frame_driver)
+    {
+        svp_lights_go.Set();
+    }
 
     // P2.3: execute all deferred-recorded lighting before the combine reads the
     // G-buffer/accumulator.
     SubmitSVPDeferred(dsgraph);
+
+    // BUG-1/BUG-3: phase_combine/render_forward drain second-order geometry from
+    // get_imm_context() only. The scope pass's water (mapDistort) and particles
+    // (mapNormalPasses[1], mapSorted) are in ITS dsgraph. Copy them into the (now
+    // empty) imm context so the combine's existing drain paths handle them through
+    // RCache (correct render state). After phase_combine, render_distort/render_sorted
+    // clean the imm lists; the tail VERIFY(dsgraph.mapDistort.empty()) passes because
+    // we clear the scope's lists after copying.
+    // NOTE: std::swap is NOT safe here — xr_fixed_map has an internal node pool tied
+    // to its owning dsgraph; swapping moves the pool pointer, and release_context
+    // frees the pool while the other dsgraph still references it (use-after-free).
+    // A parameter approach (passing dsgraph to phase_combine) caused DEVICE_HUNG because
+    // render_graph records into the dsgraph's deferred cmd_list while the render targets
+    // are set on RCache (immediate context) — incompatible GPU state.
+    if (svp_pass)
+    {
+        auto& imm = get_imm_context();
+        // mapDistort (water)
+        for (auto* cur = dsgraph.mapDistort.begin(); cur != dsgraph.mapDistort.end(); ++cur)
+            imm.mapDistort.insert(cur->first, cur->second);
+        dsgraph.mapDistort.clear();
+        // mapSorted (sorted particles)
+        for (auto* cur = dsgraph.mapSorted.begin(); cur != dsgraph.mapSorted.end(); ++cur)
+            imm.mapSorted.insert(cur->first, cur->second);
+        dsgraph.mapSorted.clear();
+        // mapNormalPasses[1] and mapMatrixPasses[1] (priority-1 forward geometry)
+        for (int j = 0; j < SHADER_PASSES_MAX; ++j)
+        {
+            for (auto* cur = dsgraph.mapNormalPasses[1][j].begin(); cur != dsgraph.mapNormalPasses[1][j].end(); ++cur)
+                imm.mapNormalPasses[1][j].insert(cur->first, cur->second);
+            dsgraph.mapNormalPasses[1][j].clear();
+            for (auto* cur = dsgraph.mapMatrixPasses[1][j].begin(); cur != dsgraph.mapMatrixPasses[1][j].end(); ++cur)
+                imm.mapMatrixPasses[1][j].insert(cur->first, cur->second);
+            dsgraph.mapMatrixPasses[1][j].clear();
+        }
+    }
 
     // Postprocess
     {
@@ -651,10 +787,12 @@ void CRender::RenderSecondViewport()
     const u32 sh = _max(1u, (u32)iFloor(float(Device.dwHeight) * sc + 0.5f));
     Target->ResizeSecondVPRT(sw, sh);
 
-    // When the scale is below 1, render this pass into a parallel sw×sh RT set ($user$sv_*) so the
-    // reduced resolution actually saves GPU time; silently falls back to the full-res chain if the
-    // target set cannot be created.
-    const bool scaled_pipeline = sc < 1.f && Target->SVPTargetsEnsure(sw, sh);
+    // Render this pass into a parallel sw×sh RT set ($user$sv_*) at ANY scale - including 1.0:
+    // without the twins the scope pass renders into the MAIN G-buffer surfaces, whose
+    // depth/stencil/accumulator state was already consumed by the main pass, and the lens
+    // output collapses to gray. At scale 1.0 the twins are simply full-size (extra VRAM, but
+    // correct); silently falls back to the main-surface chain if the target set cannot be created.
+    const bool scaled_pipeline = Target->SVPTargetsEnsure(sw, sh);
     if (scaled_pipeline)
         Target->SVPPipelineBegin();
 

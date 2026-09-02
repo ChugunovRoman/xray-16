@@ -345,6 +345,11 @@ void CTorch::UpdateCL()
             M.c.y += H_Parent()->Radius() * 2.f / 3.f;
         }
 
+        // Exclude the owning NPC from its own torch's shadow-map caster build every frame
+        // (Switch() may fire before H_Parent() is set, so shadow_owner stays null there).
+        if (m_switched_on)
+            light_render->shadow_owner = H_Parent();
+
         if (actor)
         {
             m_prev_hp.x = angle_inertion_var(m_prev_hp.x, -actor->cam_FirstEye()->yaw, TORCH_INERTION_SPEED_MIN,

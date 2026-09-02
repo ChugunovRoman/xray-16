@@ -273,10 +273,19 @@ ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize)
     xr_strcpy(fname, fRName); //. andy if (strext(fname)) *strext(fname)=0;
     fix_texture_name(fname);
     IReader* S = nullptr;
+
+    // Debug: log terrain texture loading attempts
+    if (strstr(fname, "terrain") || strstr(fname, "Terrain"))
+        Msg("[TERRAIN_TEX] Loading: %s", fname);
+
     if (!FS.exist(fn, "$game_textures$", fname, ".dds") && strstr(fname, "_bump"))
         goto _BUMP_from_base;
     if (FS.exist(fn, "$level$", fname, ".dds"))
+    {
+        if (strstr(fname, "terrain") || strstr(fname, "Terrain"))
+            Msg("[TERRAIN_TEX] Found in $level$: %s -> %s", fname, fn);
         goto _DDS;
+    }
     if (FS.exist(fn, "$game_saves$", fname, ".dds"))
         goto _DDS;
     // Runtime-baked preview textures live in appdata (npc_preview_* DDS cache).
@@ -294,6 +303,8 @@ ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize)
     ELog.Msg(mtError, "Can't find texture '%s'", fname);
     return 0;
 #else
+    if (strstr(fname, "terrain") || strstr(fname, "Terrain"))
+        Msg("! [TERRAIN_TEX] Can't find terrain texture '%s'", fname);
     Msg("! Can't find texture '%s'", fname);
     dummyTextureExist = FS.exist(fn, "$game_textures$", NOT_EXISTING_TEXTURE, ".dds");
     if (!ShadowOfChernobylMode)
@@ -324,6 +335,11 @@ _DDS:
         xr_strcpy(fn, temp);
         goto _DDS;
     }
+
+    // Debug: log terrain texture properties after load
+    if (strstr(fname, "terrain") || strstr(fname, "Terrain"))
+        Msg("[TERRAIN_TEX] Loaded OK: %s | size=%zu | %ux%u | mips=%u | fmt=%d",
+            fn, img_size, IMG.Width, IMG.Height, IMG.MipLevels, (int)IMG.Format);
 
     if (IMG.ResourceType == D3DRTYPE_CUBETEXTURE)
         goto _DDS_CUBE;
@@ -367,6 +383,8 @@ _DDS_2D:
 
     if (FAILED(result))
     {
+        if (strstr(fname, "terrain") || strstr(fname, "Terrain"))
+            Msg("! [TERRAIN_TEX] FAILED to create texture: %s | fmt=%d | hr=0x%08X", fn, (int)IMG.Format, (unsigned)result);
         Msg("! Can't load texture '%s'", fn);
         string_path temp;
         R_ASSERT(FS.exist(temp, "$game_textures$", NOT_EXISTING_TEXTURE, ".dds"));

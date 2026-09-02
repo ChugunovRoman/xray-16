@@ -86,6 +86,12 @@ public:
     virtual void set_color(float r, float g, float b) = 0;
     virtual void set_hud_mode(bool b) = 0;
     virtual bool get_hud_mode() = 0;
+
+    // Per-light owner exclusion from shadow-map caster build: when set, build_subspace skips
+    // this renderable during PHASE_SMAP for this light, preventing self-shadowing (e.g. an
+    // NPC's torch shadow-mapping the NPC's own skeleton). Set by game code (CTorch etc.).
+    IRenderable* shadow_owner{ nullptr };
+
     virtual ~IRender_Light();
 };
 struct ENGINE_API resptrcode_light : public resptr_base<IRender_Light>
@@ -166,6 +172,10 @@ extern ENGINE_API int ps_r__svp_skip_rain_sync;  // 1 = skip r_rain.sync()
 extern ENGINE_API int ps_r__svp_skip_sun_csm;    // 1 = skip sun init/run in 2nd Calculate + skip r_sun.sync in 2nd Render (reuse main cascades)
 extern ENGINE_API int ps_r__svp_skip_zfill;      // 1 = skip Z-prefill pass when r2_zfill is enabled
 extern ENGINE_API int ps_r__svp_frame_delay;     // Second VP: IsSVPFrame uses dwFrame % delay (0 = every frame). Console: r__svp_frame_delay
+
+// SVP frame driver: records scope lighting/combine on the dedicated worker into deferred command
+// lists (DX11-only; GL keeps the inline path - a single GL context has nothing to record into).
+extern ENGINE_API int ps_r__svp_smap_pages;        // max packing batches per frame in the SVP atlas
 
 // HUD overlay scope (g_3d_scopes 2) debug output of the resolve pass. Console: r__hud_overlay_debug
 // 0 = normal (lit albedo), 1 = solid magenta (drain/stencil check), 2 = normals, 3 = light factor,
@@ -572,9 +582,9 @@ public:
     virtual void SetHudOverlayAlpha(float) {}
     virtual float GetHudOverlayAlpha() const { return 0.f; }
 
-    // Stage C of the SVP parallelization (plans/optimization_svp/svp_parallel_calculate_plan.md):
-    // snapshot the scope camera and push the scope visibility build onto a worker while the caller
-    // renders the main pass; join it afterwards and publish its per-pass LOD thresholds.
+    // Stage C of the SVP parallelization: snapshot the scope camera and push the scope visibility
+    // build onto a worker while the caller renders the main pass; join it afterwards and publish
+    // its per-pass LOD thresholds.
     // scope_project must be built by CameraManager::BuildSecondVPProjection - the visibility build
     // culls against the NARROW scope frustum derived from it (huge CPU saving on zoomed scopes).
     // Default: not supported (caller falls back to the sequential second Calculate).

@@ -1118,7 +1118,26 @@ void R_dsgraph_structure::build_subspace()
                     if (nullptr == renderable)
                         continue; // unknown, but renderable object (r1_glow???)
 
-                    renderable->renderable_Render(context_id, nullptr);
+                    // Per-light owner exclusion: skip the light's owning renderable from its own
+                    // shadow-map caster build to prevent self-shadowing (e.g. an NPC's torch
+                    // shadow-mapping the NPC's own skeleton, making the owner dark in the lens).
+                    if (o.phase == CRender::PHASE_SMAP && o.shadow_owner && renderable == o.shadow_owner)
+                        continue;
+
+                    // DARK-DYNAMICS ROOT-CAUSE FIX (bug introduced by commit 197d536a): this branch
+                    // serves both the SMAP builds and the SVP scope build. The scope build passed
+                    // root=nullptr (SMAP semantics), which dropped pObject from every matrix item -
+                    // apply_object() then early-returned and never refreshed o_hemi/o_sun/
+                    // o_hemi_cube on the recording backend, so ALL lens dynamics were recorded
+                    // with a ZERO hemisphere (deffer_model*.vs derives hemi_val purely from the
+                    // hemi_cube_* constants -> G-buffer hemi bits = 0 -> combine hmodel ambient =
+                    // black; local spot/point lights still work - exactly the observed bug).
+                    // Pass the root like the sequential path does: renderable_Render only READS it
+                    // here (LOD flags, renderable_Invisible/HUD routing; MakeMeCrow is already
+                    // guarded against the worker thread), while the shared-state mutations stay
+                    // gated above (HOM writeback, CROS update, sector refresh, wallmarks, HUD).
+                    renderable->renderable_Render(context_id,
+                        o.second_vp_pass ? renderable : nullptr);
                 }
             }
         }

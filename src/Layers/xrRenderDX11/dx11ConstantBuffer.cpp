@@ -2,6 +2,7 @@
 #include "dx11ConstantBuffer.h"
 
 #include "Layers/xrRender/BufferUtils.h"
+#include "xrEngine/device.h"
 
 namespace xray::render::RENDER_NAMESPACE
 {

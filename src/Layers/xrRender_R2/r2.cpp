@@ -406,8 +406,16 @@ static class cl_pos_decompress_params : public R_constant_setup
 #else
 #   error No graphics API selected or enabled!
 #endif
-        cmd_list.set_c(
-            C, HorzTan, VertTan, (2.0f * HorzTan) / (float)Device.dwWidth, (2.0f * VertTan) / (float)Device.dwHeight);
+        // Per-context target dims, NOT Device.dwWidth/Height: the scaled SVP pipeline renders
+        // the scope pass into sw x sh twins while Device.dwWidth/Height stay at the full screen
+        // size. The shader reconstructs view-space xy as P.z*(pos2d*zw - xy) with pos2d being
+        // SV_Position pixels of THIS pass's target - normalizing by the full-screen size
+        // displaces every reconstructed G-buffer position by tan(fov)*depth*(1-scale), which
+        // the directional-sun shadow test turns into shadows crawling across terrain while the
+        // scope zoom animates (and proportional to (1-scale) - worse the lower the render scale).
+        const float w = (float)RImplementation.Target->get_width(cmd_list);
+        const float h = (float)RImplementation.Target->get_height(cmd_list);
+        cmd_list.set_c(C, HorzTan, VertTan, (2.0f * HorzTan) / w, (2.0f * VertTan) / h);
     }
 } binder_pos_decompress_params;
 
@@ -415,8 +423,11 @@ static class cl_pos_decompress_params2 : public R_constant_setup
 {
     void setup(CBackend& cmd_list, R_constant* C) override
     {
-        cmd_list.set_c(C, (float)Device.dwWidth, (float)Device.dwHeight, 1.0f / (float)Device.dwWidth,
-            1.0f / (float)Device.dwHeight);
+        // Per-context target dims (see binder_pos_decompress_params for why the Device dims
+        // break the scaled SVP scope pass).
+        const float w = (float)RImplementation.Target->get_width(cmd_list);
+        const float h = (float)RImplementation.Target->get_height(cmd_list);
+        cmd_list.set_c(C, w, h, 1.0f / w, 1.0f / h);
     }
 } binder_pos_decompress_params2;
 
@@ -858,6 +869,8 @@ void CRender::destroy()
     if (Glows)
         Glows->Destroy();
     JoinSecondVPBuildThread(); // scope build thread must not outlive the dsgraph/Target it touches
+    if (Target)
+        Target->SVPSmapAtlasRelease(); // frame-driver shadow atlas: explicit release before Target teardown
     ReleaseHudOverlayRT(); // HUD overlay scope: release static $user$ RTs before resource manager teardown
     xr_delete(Models);
     xr_delete(Target);

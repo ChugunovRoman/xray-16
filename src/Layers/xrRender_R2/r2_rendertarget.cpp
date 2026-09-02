@@ -957,6 +957,101 @@ void CRenderTarget::SVPTargetsRelease()
     svp_h = 0;
 }
 
+// ---------------------------------------------------------------------------
+// Dedicated SVP shadow-map atlas (frame driver stage 1a). Mirrors the constructor's DIRECT(spot)
+// block but sizes the page from r__svp_smap_size, so worker-recorded scope lighting packs its own
+// SMAP_Allocator without touching LP_smap_pool / rt_smap_depth shared with the main pass. Like
+// the rest of the svp_* set it is created lazily on the MAIN thread (the worker only consumes
+// it); the same latch transparently re-creates it when the size cvar changes or a device reset
+// invalidated the surfaces.
+// ---------------------------------------------------------------------------
+bool CRenderTarget::SVPSmapAtlasEnsure()
+{
+    // Shadow-transfer: the main pass copies WHOLE pages into atlas SLICES via
+    // CopySubresourceRegion - that requires identical dimensions, and the shadow UV math
+    // (accum_spot normalizes by o.smapsize over the MAIN pass's placements) demands the
+    // main page size.
+    const u32 page = RImplementation.o.smapsize;
+    // Sun-reuse tail: three extra slices hold the copied sun cascades (base =
+    // ps_r__svp_smap_pages), mirrored from the main atlas right after its Render/Sun - slice 0
+    // of the main atlas is destroyed by the first spot page clear.
+    const u32 num_slices = static_cast<u32>(ps_r__svp_smap_pages) + R__NUM_SUN_CASCADES;
+    if (svp_rt_smap_depth && svp_rt_smap_depth->valid() && svp_smap_page_size == page &&
+        svp_rt_smap_depth->dwWidth == page && svp_rt_smap_depth->n_slices == num_slices)
+        return true;
+
+    // Latch creation failures per size (same anti retry-spam pattern as SVPTargetsEnsure).
+    if (!svp_rt_smap_depth && svp_smap_failed && svp_smap_page_size == page)
+        return false;
+
+#ifdef USE_DX11
+    SVPSmapAtlasRelease();
+
+    const auto& options = RImplementation.o;
+    D3DFORMAT depth_format = D3DFMT_D24X8;
+    Flags32 flags{};
+    if (!options.HW_smap)
+        flags.flags = CRT::CreateSurface;
+    else
+        depth_format = (D3DFORMAT)options.HW_smap_FORMAT;
+
+    // Worker mode (default): single slice ON PURPOSE - the scope pass suppresses sun cascades
+    // (ps_r__svp_skip_sun_csm), spots need no array, and a full-texture SRV keeps the by-name
+    // republish in svp_publish_smap_atlas() free of per-slice SRV bookkeeping.
+    // Transfer mode: one slice per page; the scope accumulation swaps the per-slice SRV before
+    // each page's quads (the sun uses the same pattern in render_sun::accumulate_cascade).
+    svp_rt_smap_depth.create("$user$sv_smap_depth", page, page, depth_format, 1, num_slices, flags);
+    if (!svp_rt_smap_depth || !svp_rt_smap_depth->valid())
+    {
+        svp_smap_page_size = page; // key the failure latch to this size
+        svp_smap_failed = true;
+        Msg("! SVP frame driver: failed to create %ux%u shadow atlas, scope lighting stays inline", page, page);
+        SVPSmapAtlasRelease();
+        return false;
+    }
+    svp_smap_page_size = page;
+    svp_smap_failed = false;
+    Msg("SVP frame driver: created %ux%u shadow atlas (%u slice(s))", page, page, u32(num_slices));
+    return true;
+#else
+    (void)page;
+    return false; // GL: a single context has nothing to record into, the frame driver is DX11-only
+#endif
+}
+
+void CRenderTarget::SVPSmapAtlasRelease()
+{
+    VERIFY(!svp_swapped);
+    svp_rt_smap_depth.destroy();
+    svp_smap_page_size = 0;
+    svp_smap_failed = false;
+}
+
+bool CRenderTarget::svp_publish_smap_atlas(bool use_atlas)
+{
+#if defined(USE_DX11)
+    if (!svp_rt_smap_depth || !svp_rt_smap_depth->valid() || !rt_smap_depth || !rt_smap_depth->pTexture ||
+        !svp_rt_smap_depth->pSurface)
+        return false;
+
+    // Same mechanism as svp_publish_surfaces: deferred/accumulation shaders resolve s_smap by
+    // the "$user$smap_depth" name through the texture registry; repoint that named texture at
+    // the worker-built atlas for the duration of the scope accumulation, then self-restore.
+    rt_smap_depth->pTexture->surface_set(use_atlas ? svp_rt_smap_depth->pSurface : rt_smap_depth->pSurface);
+    // surface_set() finishes with set_slice(-1) => srv_all. For the 1-slice atlas that view is a
+    // plain Texture2D SRV, which does NOT match the shader's Texture2DArray s_smap declaration -
+    // samples read as fully occluded and the whole scope image goes dark. Force the per-slice
+    // view instead: it is always created as a Texture2DArray SRV (ArraySize=1, FirstArraySlice=0),
+    // which is exactly the atlas's only slice - and the slice the restored main texture is
+    // expected to expose as well.
+    rt_smap_depth->pTexture->set_slice(0);
+    return true;
+#else
+    (void)use_atlas;
+    return false; // frame driver is DX11-only
+#endif
+}
+
 void CRenderTarget::svp_publish_surfaces(bool use_twins)
 {
 #if defined(USE_DX11)

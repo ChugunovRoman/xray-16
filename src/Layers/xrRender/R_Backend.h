@@ -253,6 +253,10 @@ public:
 #endif
 
     void Invalidate();
+    // Full state-cache drop for POOLED DEFERRED contexts (preserves context_id, unlike
+    // Invalidate which re-labels the backend as the immediate context). See the implementation
+    // comment in R_Backend_Runtime.cpp for the why and the call sites.
+    void ResetDeferredCache();
 
     // API
     IC void set_xform(u32 ID, const Fmatrix& M);
@@ -519,6 +523,10 @@ public:
         CHK_DX(HW.get_context(context_id)->FinishCommandList(false, &pCommandList));
         HW.get_context(CHW::IMM_CTX_ID)->ExecuteCommandList(pCommandList, false);
         _RELEASE(pCommandList);
+        // FinishCommandList resets the REAL deferred-context state to D3D11 defaults while
+        // this CPU cache still holds the recorded state - drop it so the next recording on
+        // this context re-emits everything (diff-vs-defaults, never diff-vs-stale).
+        ResetDeferredCache();
 #endif
     }
 

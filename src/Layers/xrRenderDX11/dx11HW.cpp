@@ -189,7 +189,11 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
     {
         ZoneScopedN("CreateDevice");
 
-        static const auto d3d11CreateDevice = static_cast<PFN_D3D11_CREATE_DEVICE>(hD3D->GetProcAddress("D3D11CreateDevice"));
+        // Re-resolve on every device creation, never cache in a 'static': the startup HW
+        // probe resolves this pointer BEFORE renderdoc.dll is loaded, and a cached raw
+        // address would permanently bypass RenderDoc's export hook for the main device -
+        // in-app captures would silently never trigger.
+        const auto d3d11CreateDevice = static_cast<PFN_D3D11_CREATE_DEVICE>(hD3D->GetProcAddress("D3D11CreateDevice"));
         return d3d11CreateDevice(m_pAdapter, D3D_DRIVER_TYPE_UNKNOWN,
             nullptr, createDeviceFlags, level, levels,
             D3D11_SDK_VERSION, &pDevice, &FeatureLevel, &pContext);
@@ -247,7 +251,13 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
     {
         Valid = false;
         if (!ThisInstanceIsGlobal())
+        {
+            // Startup HW probe instance: log why the probe failed. A silent failure here
+            // unregisters renderer_r4 entirely and the engine falls back to GL (e.g. when
+            // launched under the RenderDoc injector).
+            Msg("! D3D11CreateDevice failed in the HW probe: 0x%08x", static_cast<unsigned>(R));
             return;
+        }
         // Fatal error! Cannot create rendering device AT STARTUP !!!
         Msg("Failed to initialize graphics hardware.\n"
             "Please try to restart the game.\n"
@@ -706,9 +716,29 @@ DeviceState CHW::GetDeviceState()
             return DeviceState::NeedReset;
 
         case DXGI_ERROR_DEVICE_REMOVED:
+        {
+            // A removed device has a REASON - log it before dying. HUNG/RESET mean the GPU
+            // executed something that timed out (TDR) or faulted: almost always a corrupted
+            // command stream (e.g. two recorders interleaving on one deferred context) or a
+            // runaway shader. DRIVER_INTERNAL_ERROR points at the driver. INVALID_CALL means
+            // an API misuse the driver rejected. Without this line all four look identical
+            // to the user and to crash reports.
+            const HRESULT reason = pDevice->GetDeviceRemovedReason();
+            pcstr reason_name = "UNKNOWN";
+            switch (reason)
+            {
+            case DXGI_ERROR_DEVICE_HUNG: reason_name = "DEVICE_HUNG (GPU timeout/fault - likely corrupted command stream or runaway shader)"; break;
+            case DXGI_ERROR_DEVICE_RESET: reason_name = "DEVICE_RESET"; break;
+            case DXGI_ERROR_DRIVER_INTERNAL_ERROR: reason_name = "DRIVER_INTERNAL_ERROR"; break;
+            case DXGI_ERROR_INVALID_CALL: reason_name = "INVALID_CALL (API misuse)"; break;
+            case DXGI_ERROR_DEVICE_REMOVED: reason_name = "DEVICE_REMOVED (generic)"; break;
+            default: break;
+            }
+            Msg("! D3D11 device removed, reason: 0x%08x %s (frame %u)", u32(reason), reason_name, Device.dwFrame);
             FATAL("Graphics driver was updated or GPU was physically removed from computer.\n"
                   "Please, restart the game.");
             break;
+        }
         }
     }
 

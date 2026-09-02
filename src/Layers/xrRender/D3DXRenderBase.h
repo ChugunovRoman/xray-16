@@ -1,5 +1,7 @@
 #pragma once
 
+#include <mutex>
+
 #include "xrEngine/Render.h"
 #include "xrCDB/ISpatial.h"
 #include "r__dsgraph_types.h"
@@ -16,6 +18,16 @@ public:
     //friend class CSkeletonX; // Stats.Skinning
     //friend class CKinematics; // Stats.Animation
     RenderStatistics BasicStats;
+
+    // Loads renderdoc.dll and installs its hooks. Idempotent. Must run BEFORE the first
+    // LoadLibrary("d3d11") (the startup HW probe triggers one) - RenderDoc can only wrap
+    // a device that is created through its hooks, so a late load silently captures nothing.
+    static void InitializeRenderDoc();
+
+    // True when the built-in RenderDoc integration has loaded and hooked the device.
+    // Rendering paths that are known to crash RenderDoc's hooks (multi-threaded deferred
+    // context recording) must fall back to the sequential immediate-context path.
+    static bool RenderDocActive();
 
 public:
     //	Gamma correction functions
@@ -72,8 +84,14 @@ public:
     }
 
 #if RENDER != R_R1
+    // Frame driver: the SVP worker allocates contexts concurrently with the main thread - the
+    // pool bookkeeping (bitset + reset) needs a lock. Held only for the bookkeeping, never
+    // while recording.
+    std::mutex contexts_lock{};
+
     ICF u32 alloc_context(bool alloc_cmd_list = true)
     {
+        std::lock_guard<std::mutex> lock{ contexts_lock };
         if (contexts_used.all())
             return R_dsgraph_structure::INVALID_CONTEXT_ID;
         const auto raw = ~contexts_used.to_ulong();
@@ -87,6 +105,12 @@ public:
         contexts_pool[id].reset();
         contexts_pool[id].context_id = id;
         contexts_pool[id].cmd_list.context_id = alloc_cmd_list ? id : CHW::IMM_CTX_ID;
+        // The REAL deferred-context state is at D3D11 defaults (any previous user finished
+        // its command list) - drop the stale CPU state cache so the new owner's first
+        // recording re-emits everything. Without this, pool reuse leaks the previous user's
+        // cached state (diffs get skipped) - the root cause of the intermittent mis-rendered
+        // deferred segments (scene-dependent, disappears under RenderDoc).
+        contexts_pool[id].cmd_list.ResetDeferredCache();
         return id;
     }
 
@@ -104,6 +128,7 @@ public:
 
     ICF void release_context(u32 id)
     {
+        std::lock_guard<std::mutex> lock{ contexts_lock };
         VERIFY(id != R_dsgraph_structure::IMM_CTX_ID); // never release immediate context
         VERIFY(id < R__NUM_PARALLEL_CONTEXTS);
         VERIFY(contexts_used.test(id));

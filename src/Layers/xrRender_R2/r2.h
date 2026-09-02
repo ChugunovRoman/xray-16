@@ -1,6 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <thread>
+
+#include "xrCore/Threading/Event.hpp"
+#include "xrEngine/device.h"
 
 #include "Layers/xrRender/D3DXRenderBase.h"
 #include "Layers/xrRender/r__occlusion.h"
@@ -34,8 +38,7 @@ class dxRender_Visual;
 class CGlowManager;
 class CPreviewSceneRenderer;
 
-// Camera snapshot for the scope-viewport visibility pass (stage C of
-// plans/optimization_svp/svp_parallel_calculate_plan.md). Captured on the main thread BEFORE the
+// Camera snapshot for the scope-viewport visibility pass. Captured on the main thread BEFORE the
 // worker task is pushed, so calculate_for never reads Device.* concurrently with the main render.
 // Values mirror what the sequential second pass used to see: BeginSecondViewportRender mutates
 // only fFOV/mProject, leaving view_pos/full_transform/ViewBase untouched.
@@ -99,8 +102,11 @@ struct i_render_phase
 
         if (o.mt_draw_enabled && draw_task)
         {
-            // draw task should be finished as sub task of main
-            VERIFY(draw_task->IsFinished());
+            // The draw subtask records into the phase's DEFERRED contexts; flush() below
+            // submits those lists and records the accumulation on the same contexts. It MUST
+            // be finished first - the old VERIFY was a no-op in release builds, leaving a race
+            // (partially recorded depth lists + concurrent recording into the same context).
+            TaskScheduler->Wait(*draw_task);
             draw_task = nullptr;
         }
         else
@@ -377,15 +383,32 @@ public:
     CLight_Compute_XFORM_and_VIS LR;
     xr_vector<light*> Lights_LastFrame;
     SMAP_Allocator LP_smap_pool;
+    // Frame driver: scope-pass shadow packer, isolated from LP_smap_pool - the worker records
+    // lighting into the dedicated $user$sv_smap_depth atlas while the main pass owns its own.
+    SMAP_Allocator svp_LP_smap_pool;
+    // Frame driver stage 1c results, filled by the worker (record_second_vp_shadows) and
+    // consumed once per frame by svp_accumulate_prebuilt: per-page light groups (page i pairs
+    // with svp_smap_replay_lists[i]) and lights that passed the culls but not the page cap
+    // (accumulated UNSHADOWED - light without shadow lookup, instead of going dark).
+    // Per-page grouping is REQUIRED: every page list starts with a full atlas clear, so a
+    // page's shadows survive only until the next page list replays - each page's lights must
+    // be accumulated before the next page executes.
+    xr_vector<xr_vector<light*>> svp_shadow_page_lights;
+    xr_vector<light*> svp_shadow_unshadowed;
     light_Package LP_normal;
     light_Package LP_pending;
+    // Frame driver stage 1c: PRE-FILTERED copies filled by the main pass right before it
+    // unblocks the worker's shadow build (record_second_vp_shadows reads their union); the
+    // scope pass then accumulates from and consumes these very vectors (one per render_lights
+    // call). Kept as members because they bridge two threads and two Render() invocations.
+    light_Package LP_svp_normal;
+    light_Package LP_svp_pending;
 
     xr_vector<Fbox3> main_coarse_structure;
 
     R_sync_point q_sync_point;
 
-    // Dedicated dsgraph context for the SVP (scope) visibility pass — stage B of
-    // plans/optimization_svp/svp_parallel_calculate_plan.md. Allocated per SVP frame with an
+    // Dedicated dsgraph context for the SVP (scope) visibility pass. Allocated per SVP frame with an
     // immediate cmd_list (alloc_context(false): GPU work stays on the single sequential stream),
     // isolating the visibility maps/markers so Calculate₂ can later run off-thread.
     // Lifecycle: svp_context_id/svp_dsgraph are invalidated at the start of every main-pass
@@ -408,6 +431,41 @@ public:
     Fmatrix svp_seed_view{};
     Fmatrix svp_seed_project{};
     bool svp_cmd_deferred{}; // svp dsgraph cmd_list is a deferred context this frame
+    bool svp_geom_on_main{};
+    // Frame driver: resolved per accepted SVP frame on the main thread; gates the worker stages
+    // beyond geometry recording. Reset with the other per-frame svp fields at the top of calculate_for().
+    bool svp_frame_driver{};
+    // Cooperative abort checked by the worker thread between stages; set by AbortSecondVPCalculate.
+    std::atomic<bool> svp_build_abort{ false };
+    // Frame driver stage C sync: the MAIN pass sets it once its own lighting drained - from that
+    // moment the context pool and the shared light objects belong to the worker (the pool has no
+    // internal locking, so concurrent alloc_context calls are forbidden).
+    Event svp_lights_go;
+    // Roadmap A.2 (shadow-transfer): snapshot of r__svp_shadow_transfer, resolved per accepted
+    // SVP frame in BeginSecondVPCalculateParallel. When set, the MAIN pass copies every smap
+    // page into a dedicated SVP atlas slice right after the page's flush (see render_lights),
+    // the worker skips its shadow build (stage C) entirely, and the scope pass accumulates
+    // against those copies using the main pass's X.S placements (they stay valid all frame).
+    bool svp_shadow_transfer{};
+    // Scope shadow prebuild state: 0 = off/legacy path, 1 = worker lists await replay,
+    // 2 = replay consumed (the second filtered package of the frame accumulates w/o rebuilding),
+    // 3 = shadow-transfer: pages were copied into SVP atlas slices by the main pass, the scope
+    // pass accumulates them per-slice without replaying any sealed command lists.
+    u8 svp_shadow_stage{};
+    // Stage 2 sun-reuse (r__svp_sun_mode 1): set by the MAIN pass right after it copied the sun
+    // cascade slices into the SVP atlas tail (Render/Sun); consumed by the scope pass Render/Sun
+    // to accumulate the reused cascades. False = no sun this frame (night) or copy failed.
+    bool svp_sun_slices_ready{};
+    // Deferred command lists exist only on DX11: GL renders the scope pass inline (single GL
+    // context, nothing to record into), so every frame-driver stage is gated on this.
+    static constexpr bool svp_frame_driver_available()
+    {
+#ifdef USE_DX11
+        return true;
+#else
+        return false;
+#endif
+    }
 
     bool m_bFirstFrameAfterReset{}; // Determines weather the frame is the first after resetting device.
 
@@ -428,7 +486,7 @@ public:
     // Visibility calculation for one camera pass. second_pass=true runs the dedicated
     // scope-viewport calculation: shared per-frame work (light collection, sector detection +
     // game callback, global option writes, culling stats) is skipped so this pass can later be
-    // moved off the main thread (see plans/optimization_svp/svp_parallel_calculate_plan.md).
+    // moved off the main thread.
     void calculate_for(bool second_pass);
     // Stage C orchestration: snapshot + push the scope build to a worker (returns false -> caller
     // falls back to the sequential path); wait for the worker and publish its LOD globals.
@@ -440,14 +498,37 @@ public:
     // BeginSecondViewportRender() switched the Device to the scope projection.
     void SecondVPPostCalculate() override;
     void ApplySecondVPLodGlobals();
+    // Stage 2 (sun-reuse): true when this frame's scope pass should REUSE the main pass sun
+    // cascades from the transferred atlas slices instead of rebuilding them.
+    bool svp_sun_reuse_active() const;
     void JoinSecondVPBuildThread();
+    // Persistent SVP worker body (see the svp_worker_* members below).
+    void svp_worker_loop();
     // Stage C: the scope visibility build runs on a DEDICATED thread, not the task scheduler -
     // scheduler LIFO ordering starves it behind the main render's own subtasks (sun cascades,
     // light batches), which serializes the pass again. Joined before the scope pass drains.
     std::thread svp_build_thread;
+    // Persistent SVP worker (was: a thread spawned AND joined EVERY scope frame). Created
+    // lazily on the first scope frame, parked on svp_worker_wake between jobs, fully joined
+    // only on reset/teardown (JoinSecondVPBuildThread). Rationale: the per-frame thread
+    // create/destroy churned per-thread Tracy/rpmalloc state in every statically linked DLL
+    // (orphaned thread heaps, TLS slot churn) until the profiler's allocator destabilized -
+    // AVs inside rpmalloc during queue-block allocation on unrelated threads; it also saves
+    // the per-frame spawn cost. Handshake (Event is auto-reset): the main thread arms
+    // svp_dsgraph/svp_calc_params, calls svp_worker_done.Reset() (drops a stale release,
+    // e.g. a job aborted by teardown) and svp_worker_wake.Set(); the worker runs ONE job
+    // (svp_build_abort skips its remaining stages) and svp_worker_done.Set()s;
+    // EndSecondVPCalculateParallel waits done; teardown sets svp_worker_exit + wake + joins.
+    Event svp_worker_wake;
+    Event svp_worker_done;
+    std::atomic<bool> svp_worker_exit{ false };
     void render_forward();
     void render_indirect(light* L) const;
-    void render_lights(light_Package& LP);
+    // svp_no_vis (frame-driver stage 1b): scope-pass mode - the package was pre-filtered against
+    // the NARROW lens frustum (filter_light_package_for_svp), so per-light occq visibility
+    // (vis_update / vis.visible checks) is skipped entirely: it cannot cull anything that the
+    // frustum test missed and keeps occlusion queries off the worker-recording path (stage C).
+    void render_lights(light_Package& LP, bool svp_no_vis = false);
 
     render_main r_main;
 #if RENDER != R_R2
@@ -475,6 +556,9 @@ public:
 
     ICF void apply_object(CBackend& cmd_list, IRenderable* O)
     {
+        // No object / no ROS: keep the previous per-backend ambient constants - parity with the
+        // main pass, which also skips the CROS refresh for ROS-less dynamics. (SVP callers now
+        // always pass a real renderable - see the second_vp_pass fix in r__dsgraph_build.)
         if (!O || !O->renderable_ROS())
             return;
 
@@ -585,14 +669,22 @@ public:
     void Calculate() override;
     void Render() override;
     void RenderSecondViewport() override;
-    // P2.1 (Phase 2 groundwork, plans/optimization_svp/svp_parallel_render_phase2_plan.md):
-    // scope geometry recording as a self-contained unit - binds the scope G-buffer twins on the
+    // Scope geometry recording as a self-contained unit - binds the scope G-buffer twins on the
     // dsgraph's OWN cmd list (explicit binds, no rt_* member / RCache dependency) and drains its
     // visibility maps. with_details=false for the split-scene variant. Falls back to the rt_*
     // members when the twins do not exist (scale == 1) - sequential-only in that case.
     // P2.3: the worker part is record_second_vp_geometry_into() (seed + render_graph(0), deferred);
     // lods/Details/submit happen on the main thread in Render() after the join.
     void record_second_vp_geometry_into(R_dsgraph_structure& ds);
+    // Frame driver stage C (worker): build the scope pass shadow maps into the dedicated atlas,
+    // sealing one command list per page into svp_smap_replay_lists. DX11-only no-op elsewhere.
+    void record_second_vp_shadows();
+    // Shared by the inline serial flush and the worker shadow builder: records one light's smap
+    // into dsgraph.cmd_list. smap_target = {} renders into the regular rt_smap_depth member.
+    bool render_light_smap(R_dsgraph_structure& dsgraph, light* L, const ref_rt& smap_target);
+    // Frame driver stage 1 consumer (scope pass): replay prebuilt worker lists + accumulate this
+    // package's lights against them; also handles the already-consumed follow-up package.
+    void svp_accumulate_prebuilt(light_Package& LP);
     // Executes the recorded deferred commands; no-op when the svp cmd list is immediate
     // (legacy sequential path).
     void SubmitSVPDeferred(R_dsgraph_structure& ds);

@@ -6,6 +6,7 @@ class light;
 
 namespace xray::render::RENDER_NAMESPACE
 {
+
 //#define DU_SPHERE_NUMVERTEX 92
 //#define DU_SPHERE_NUMFACES	180
 //#define DU_CONE_NUMVERTEX	18
@@ -87,6 +88,15 @@ public:
     xr_vector<std::pair<ref_rt*, ref_rt>> svp_saved; // {member, original} saved by Begin, restored by End
     u32 svp_saved_w{};
     u32 svp_saved_h{};
+
+    // Frame driver stage 1a: dedicated shadow-map atlas twin ($user$sv_smap_depth), sized by
+    // r__svp_smap_size independently of r2_smap_size. Created lazily on the MAIN thread by
+    // SVPSmapAtlasEnsure() before the SVP worker reaches its lighting stage; the worker only
+    // consumes it. Lives until destroy()/SVPSmapAtlasRelease(). DX11-only in practice: Ensure
+    // returns false on GL where there is nothing to record deferred lists into.
+    ref_rt svp_rt_smap_depth;
+    u32 svp_smap_page_size{}; // page size the current atlas was created with (0 = none)
+    bool svp_smap_failed{};   // creation-failure latch keyed by svp_smap_page_size (anti retry-spam)
 
     //
     ref_rt rt_Accumulator; // 64bit		(r,g,b,specular)
@@ -291,8 +301,8 @@ public:
     void phase_wallmarks();
     void phase_smap_direct(CBackend& cmd_list, light* L, u32 sub_phase);
     void phase_smap_direct_tsh(CBackend& cmd_list, light* L, u32 sub_phase);
-    void phase_smap_spot_clear(CBackend& cmd_list);
-    void phase_smap_spot(CBackend& cmd_list, light* L);
+    void phase_smap_spot_clear(CBackend& cmd_list, const ref_rt& smap_target = {});
+    void phase_smap_spot(CBackend& cmd_list, light* L, const ref_rt& smap_target = {});
     void phase_smap_spot_tsh(CBackend& cmd_list, light* L);
     void phase_accumulator(CBackend& cmd_list);
     void phase_vol_accumulator(CBackend& cmd_list);
@@ -344,6 +354,14 @@ public:
     void SVPPipelineEnd();
     bool SvpPipelineSwapped() const { return svp_swapped; }
     void svp_publish_surfaces(bool use_twins);
+    // Frame driver stage 1a: lazily create/release the dedicated SVP shadow-map atlas.
+    // Ensure returns false when creation fails -> caller keeps scope lighting on the inline path.
+    bool SVPSmapAtlasEnsure();
+    void SVPSmapAtlasRelease();
+    // Frame driver stage 1c: point the "$user$smap_depth" named texture at the dedicated SVP
+    // atlas (use_atlas=true) or restore its own surface (false), so the by-name s_smap samplers
+    // of the accumulation blenders read worker-built shadows. Returns false when no atlas exists.
+    bool svp_publish_smap_atlas(bool use_atlas);
 #if 0 // kept for historical reasons
     void phase_flip();
 #endif

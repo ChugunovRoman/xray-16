@@ -125,7 +125,11 @@ ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize)
             {
                 exist = FS.exist(fn, folder, fname, ".dds");
                 if (exist)
+                {
+                    if (strstr(fname, "terrain") || strstr(fname, "Terrain"))
+                        Msg("[TERRAIN_TEX] Found in %s: %s -> %s", folder, fname, fn);
                     break;
+                }
             }
 
             // Disk-cached preview textures in appdata (npc_preview_* DDS cache).
@@ -139,6 +143,8 @@ ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize)
 
             if (!exist)
             {
+                if (strstr(fname, "terrain") || strstr(fname, "Terrain"))
+                    Msg("! [TERRAIN_TEX] Can't find terrain texture '%s'", fname);
                 Msg("! Can't find texture '%s'", fname);
                 if (!FS.exist(fn, "$game_textures$", "ed\\ed_not_existing_texture", ".dds"))
                     return nullptr;
@@ -162,6 +168,10 @@ ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize)
         DirectX::TexMetadata IMG;
         DirectX::ScratchImage texture;
         auto hresult = LoadFromDDSMemory(static_cast<u8*>(S->pointer()), img_size, dds_flags, &IMG, texture);
+
+        if (SUCCEEDED(hresult) && (strstr(fn, "terrain") || strstr(fn, "Terrain")))
+            Msg("[TERRAIN_TEX] Loaded OK: %s | size=%zu | %ux%u | mips=%zu | fmt=%d",
+                fn, img_size, (u32)IMG.width, (u32)IMG.height, IMG.mipLevels, (int)IMG.format);
 
         R_ASSERT3_CURE(SUCCEEDED(hresult), "Failed to load texture from memory", fn,
         {

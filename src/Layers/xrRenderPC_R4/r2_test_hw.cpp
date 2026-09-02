@@ -1,5 +1,7 @@
 #include "stdafx.h"
 
+#include "Layers/xrRender/D3DXRenderBase.h"
+
 namespace xray::render::RENDER_NAMESPACE
 {
 class DX11TestHelper
@@ -37,6 +39,12 @@ public:
 BOOL xrRender_test_hw()
 {
     ZoneScoped;
+
+    // The first LoadLibrary("d3d11") of the process happens inside this probe (DX11TestHelper
+    // -> CHW::CreateDevice). RenderDoc must be loaded and hooked BEFORE that module load,
+    // otherwise the D3D11 exports are not intercepted and neither the probe device nor the
+    // later main device ever gets wrapped - TriggerCapture() then has nothing to consume.
+    D3DXRenderBase::InitializeRenderDoc();
 
     const DX11TestHelper helper;
     if (!helper.Successful())

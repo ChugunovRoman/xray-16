@@ -15,6 +15,8 @@
 #include "xrCore/fastdelegate.h"
 #include "xrCore/ModuleLookup.hpp"
 
+#include <atomic>
+
 #define DEVICE_RESET_PRECACHE_FRAME_COUNT 10
 
 #include "editor_base.h"
@@ -31,6 +33,12 @@
 constexpr float VIEWPORT_NEAR = 0.2f;
 constexpr float VIEWPORT_NEAR_3D = 0.01f;
 constexpr float HUD_VIEWPORT_NEAR = 0.05f;
+
+// Set while the dedicated SVP build thread (a plain std::thread, not a task-scheduler worker)
+// executes render stages that reach game code; defined ENGINE_API in device.cpp. Game render
+// callbacks that mutate engine queues keyed by scheduler worker IDs (CObjectList::o_crow etc.)
+// must no-op under this flag - the main pass renders the same objects and registers them.
+ENGINE_API extern std::atomic<bool> g_svp_worker_rendering;
 
 class ENGINE_API CRenderDevice : public IWindowHandler
 {

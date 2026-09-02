@@ -3,6 +3,7 @@
 
 #include "LightTrack.h"
 #include "xrEngine/IRenderable.h"
+#include "xrEngine/device.h"
 
 #if defined(USE_DX11)
 #include <DirectXMath.h>
@@ -126,6 +127,113 @@ void CBackend::Invalidate()
         textures_cs[cs_it++] = 0;
 
     context_id = CHW::IMM_CTX_ID;
+#endif // USE_DX11
+
+    for (u32 ps_it = 0; ps_it < CTexture::mtMaxPixelShaderTextures;)
+        textures_ps[ps_it++] = nullptr;
+    for (u32 vs_it = 0; vs_it < CTexture::mtMaxVertexShaderTextures;)
+        textures_vs[vs_it++] = nullptr;
+    for (auto& matrix : matrices)
+        matrix = nullptr;
+}
+
+// ResetDeferredCache(): the same full state-cache drop as Invalidate(), but for POOLED
+// DEFERRED contexts - it PRESERVES the context identity. Invalidate() re-labels the backend
+// as the immediate context (context_id = CHW::IMM_CTX_ID); calling it on a pooled context
+// corrupts its identity, and a subsequent submit() then calls FinishCommandList on the
+// IMMEDIATE context - an illegal operation that kills the device (GPU device-removed).
+//
+// Why this reset is needed at all: CBackend emits GPU calls as DIFFS against this CPU cache.
+// D3D11 resets the REAL deferred-context state to defaults after FinishCommandList, but the
+// engine cache keeps whatever the previous user of this pooled slot left behind. When a stale
+// cache entry coincides with a state the next recording wants, the emit is skipped while the
+// real context sits at defaults - draws then run mis-configured (missing RT/DS/blend/texture
+// bindings). Which pool slot a subsystem gets, and who used it before, varies with the scene
+// (light batch counts) - the source of hard-to-reproduce rendering artifacts that disappear
+// under timing-changing tools (RenderDoc serializes pool usage).
+//
+// Call sites: D3DXRenderBase::alloc_context (fresh acquire) and CBackend::submit (right after
+// FinishCommandList+ExecuteCommandList). Mirrors the battle-tested IMM-context Invalidate()
+// usage after ExecuteCommandList.
+void CBackend::ResetDeferredCache()
+{
+    // Same field resets as Invalidate() ...
+    pRT[0] = 0;
+    pRT[1] = 0;
+    pRT[2] = 0;
+    pRT[3] = 0;
+    pZB = 0;
+#if defined(USE_OGL)
+    pFB = 0;
+    pp = 0;
+#endif
+
+    decl = nullptr;
+    vb = 0;
+    ib = 0;
+    vb_stride = 0;
+
+    state = nullptr;
+    ps = 0;
+    vs = 0;
+    DX11_ONLY(gs = NULL);
+#ifdef USE_DX11
+    hs = 0;
+    ds = 0;
+    cs = 0;
+#endif
+    ctable = nullptr;
+
+    T = nullptr;
+    M = nullptr;
+    C = nullptr;
+
+    stencil_enable = u32(-1);
+    stencil_func = u32(-1);
+    stencil_ref = u32(-1);
+    stencil_mask = u32(-1);
+    stencil_writemask = u32(-1);
+    stencil_fail = u32(-1);
+    stencil_pass = u32(-1);
+    stencil_zfail = u32(-1);
+    cull_mode = u32(-1);
+    fill_mode = u32(-1);
+    z_enable = u32(-1);
+    z_func = u32(-1);
+    alpha_ref = u32(-1);
+    colorwrite_mask = u32(-1);
+
+    xforms.unmap();
+
+#if defined(USE_DX11)
+    m_pInputLayout = NULL;
+    m_PrimitiveTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
+    m_bChangedRTorZB = false;
+    m_pInputSignature = NULL;
+    for (int i = 0; i < MaxCBuffers; ++i)
+    {
+        m_aPixelConstants[i] = 0;
+        m_aVertexConstants[i] = 0;
+        m_aGeometryConstants[i] = 0;
+        m_aHullConstants[i] = 0;
+        m_aDomainConstants[i] = 0;
+        m_aComputeConstants[i] = 0;
+    }
+    StateManager.Reset();
+    StateManager.UnmapConstants();
+    SRVSManager.ResetDeviceState();
+
+    for (u32 gs_it = 0; gs_it < CTexture::mtMaxGeometryShaderTextures;)
+        textures_gs[gs_it++] = 0;
+    for (u32 hs_it = 0; hs_it < CTexture::mtMaxHullShaderTextures;)
+        textures_hs[hs_it++] = 0;
+    for (u32 ds_it = 0; ds_it < CTexture::mtMaxDomainShaderTextures;)
+        textures_ds[ds_it++] = 0;
+    for (u32 cs_it = 0; cs_it < CTexture::mtMaxComputeShaderTextures;)
+        textures_cs[cs_it++] = 0;
+
+    // THE difference from Invalidate(): do NOT touch context_id - a pooled deferred context
+    // keeps its slot identity (overwriting it to IMM_CTX_ID caused GPU device-removed crashes).
 #endif // USE_DX11
 
     for (u32 ps_it = 0; ps_it < CTexture::mtMaxPixelShaderTextures;)
@@ -490,6 +598,7 @@ void CBackend::OnDeviceDestroy()
 void CBackend::apply_lmaterial()
 {
     R_constant* C = get_c(c_sbase)._get(); // get sampler
+
     if (!C)
         return;
 
