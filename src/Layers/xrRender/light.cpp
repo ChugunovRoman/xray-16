@@ -32,6 +32,7 @@ light::light() : SpatialBase(g_pGamePersistent->SpatialSpace)
     build_cache_valid = false;
     build_cache_frame = 0;
     add_light_pkg_seq = u32(-1);
+    omnipart_owner = nullptr;
 
 #if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)
     ZeroMemory(omnipart, sizeof(omnipart));
@@ -367,6 +368,7 @@ void light::Export(light_Package& package)
                 L->set_rotation(cmDir[f], R);
                 L->set_cone(PI_DIV_2);
                 L->set_range(range);
+                L->omnipart_owner = this;
                 L->set_virtual_size(virtual_size);
                 L->set_color(color);
                 L->spatial.sector_id = spatial.sector_id; //. dangerous?

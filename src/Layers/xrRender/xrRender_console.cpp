@@ -244,6 +244,13 @@ int ps_r2_wait_timeout = 500;
 float ps_r2_lt_smooth = 1.f; // 1.f
 float ps_r2_slight_fade = 0.5f; // 1.f
 int ps_r2_light_shadow_budget = 64; // max shadow-casting lights per call (NOTE: point shadow light = 6 omniparts = 6 slots), 0 = unlimited
+float ps_r2_light_budget_hysteresis = 0.8f; // distance bonus for lights rendered on the previous frame, 1.0 = off
+int ps_r2_light_vis_refresh = 4; // re-test occq visibility of budget lights every N frames, 0 = default 10-20
+int ps_r2_static_light_mode = 0; // 0=off, 1=convert big static POINTs to down-facing SPOT, 2=strip their shadow
+int ps_r2_lamp_light_mode = 0; // 0=off, 1=convert shadowed lamp (CHangingLamp) POINTs to SPOT along the light bone, 2=strip their shadow
+float ps_r2_static_light_cone = 110.f; // cone (degrees) for r2_static_light_mode 1; engine hard limit is 120
+float ps_r2_static_light_range = 0.f; // affect only lights with range greater than this, 0 = all
+int ps_r2_light_editor_spot = 0; // 1 = honor Flight::Type::Spot from level data (direction + phi)
 float ps_r2_light_degrade_lod = 1.f; // skip shadowed lights below this LOD entirely, 0 = off
 float ps_r2_light_shadow_dist = 20.f; // max distance from camera to light volume edge for shadow rendering, 0 = off
 int ps_r2_smap_hull_cull = 1; // 1 = cull shadow casters whose shadow hull misses the camera frustum
@@ -915,6 +922,13 @@ void xrRender_initconsole()
 
     CMD4(CCC_Float, "r2_slight_fade", &ps_r2_slight_fade, .2f, 1.f);
     CMD4(CCC_Integer, "r2_light_shadow_budget", &ps_r2_light_shadow_budget, 0, 512);
+    CMD4(CCC_Float, "r2_light_budget_hysteresis", &ps_r2_light_budget_hysteresis, 0.5f, 1.f);
+    CMD4(CCC_Integer, "r2_light_vis_refresh", &ps_r2_light_vis_refresh, 0, 30);
+    CMD4(CCC_Integer, "r2_static_light_mode", &ps_r2_static_light_mode, 0, 2);
+    CMD4(CCC_Integer, "r2_lamp_light_mode", &ps_r2_lamp_light_mode, 0, 2);
+    CMD4(CCC_Float, "r2_static_light_cone", &ps_r2_static_light_cone, 30.f, 120.f);
+    CMD4(CCC_Float, "r2_static_light_range", &ps_r2_static_light_range, 0.f, 100.f);
+    CMD4(CCC_Integer, "r2_light_editor_spot", &ps_r2_light_editor_spot, 0, 1);
     CMD4(CCC_Float, "r2_light_degrade_lod", &ps_r2_light_degrade_lod, 0.f, 1.f);
     CMD4(CCC_Float, "r2_light_shadow_dist", &ps_r2_light_shadow_dist, 0.f, 200.f);
     CMD4(CCC_Integer, "r2_smap_hull_cull", &ps_r2_smap_hull_cull, 0, 1);

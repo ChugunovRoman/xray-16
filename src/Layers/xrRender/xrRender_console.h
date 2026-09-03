@@ -157,6 +157,13 @@ extern ECORE_API float ps_r2_dhemi_light_flow; // .1f
 extern ECORE_API int ps_r2_dhemi_count; // 5
 extern ECORE_API float ps_r2_slight_fade; // 1.f
 extern ECORE_API int ps_r2_light_shadow_budget; // max shadow-casting lights per call (NOTE: point shadow light = 6 omniparts = 6 slots), 0 = unlimited
+extern ECORE_API float ps_r2_light_budget_hysteresis; // distance bonus for lights rendered on the previous frame, 1.0 = off
+extern ECORE_API int ps_r2_light_vis_refresh; // re-test occq visibility of budget lights every N frames, 0 = default 10-20
+extern ECORE_API int ps_r2_static_light_mode; // 0=off, 1=convert big static POINTs to down-facing SPOT, 2=strip their shadow
+extern ECORE_API int ps_r2_lamp_light_mode; // 0=off, 1=convert shadowed lamp (CHangingLamp) POINTs to SPOT along the light bone, 2=strip their shadow
+extern ECORE_API float ps_r2_static_light_cone; // cone (degrees) for r2_static_light_mode 1; engine hard limit is 120
+extern ECORE_API float ps_r2_static_light_range; // affect only lights with range greater than this, 0 = all
+extern ECORE_API int ps_r2_light_editor_spot; // 1 = honor Flight::Type::Spot from level data (direction + phi)
 extern ECORE_API float ps_r2_light_degrade_lod; // skip shadowed lights below this LOD entirely, 0 = off
 extern ECORE_API float ps_r2_light_shadow_dist; // max distance from camera to light volume edge for shadow rendering, 0 = off
 extern ECORE_API int ps_r2_smap_hull_cull; // 1 = cull shadow casters whose shadow hull misses the camera frustum

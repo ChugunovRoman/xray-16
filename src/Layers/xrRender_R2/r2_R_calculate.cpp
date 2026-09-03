@@ -356,8 +356,7 @@ void CRender::svp_worker_loop()
             {
                 // Stage B: record render_graph(0) into the deferred cmd list - submitted later
                 // on the main thread (SubmitSVPDeferred), overlapping the main render's
-                // lighting/combine tail. dbg=10: skipped - the scope pass records geometry on
-                // the MAIN thread instead.
+                // lighting/combine tail.
                 if (!svp_geom_on_main)
                     record_second_vp_geometry_into(*ds);
                 // Frame driver stage C: build the scope pass's shadow maps into the dedicated
@@ -372,8 +371,6 @@ void CRender::svp_worker_loop()
                     if (!svp_build_abort.load(std::memory_order_relaxed))
                         record_second_vp_shadows();
                 }
-                // Frame driver stage D hook (worker-recorded combine) lands HERE; it must
-                // check svp_build_abort before starting.
             }
         }
         svp_worker_done.Set();

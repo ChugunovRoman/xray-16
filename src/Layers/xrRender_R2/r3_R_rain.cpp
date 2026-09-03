@@ -63,7 +63,12 @@ void render_rain::init()
 
     const int pm = ps_r__phase_mt < 0 ? 0 : (ps_r__phase_mt > 3 ? 3 : ps_r__phase_mt);
     o.mt_calc_enabled = RImplementation.o.mt_calculate && ((pm & 1) != 0);
-    o.mt_draw_enabled = (RImplementation.o.mt_render != 0) && ((pm & 2) != 0);
+    // Rain draw is forced serial: the rain deferred context's constant buffers
+    // (m_aPixelConstants etc.) are not initialized for worker-thread rendering —
+    // the first set_Pass on a deferred context hits null CBuffers in GetCBuffer.
+    // Rain is a small pass; the main benefit of r__phase_mt bit 2 is parallel sun
+    // cascades, not parallel rain.
+    o.mt_draw_enabled = false;
 
     // pre-allocate context
     context_id = RImplementation.alloc_context();

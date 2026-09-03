@@ -13,6 +13,103 @@ static float light_volume_dist(const light* L)
     return _max(Device.vCameraPosition.distance_to(L->spatial.sphere.P) - L->spatial.sphere.R, 0.f);
 }
 
+// Budget cap: keep the closest lights, WHOLE sources at a time. A shadowed POINT light is
+// 6 OMNIPARTs = 6 slots; cutting parts independently produces a half-shadowed sphere, so
+// candidates are grouped by omnipart_owner and taken or dropped as a unit. SPOT weighs 1
+// slot. Ranking key: volume-edge distance (LOD saturates at 1.0 for most real lights), with
+// a hysteresis bonus for lights rendered on the previous frame (anti-popping). A 6-slot
+// group that does not fit is skipped WHOLE; smaller farther groups may fill the remainder
+// (slots must not idle). Budget < 6 means point lights get no shadows at all — expected.
+// Player-attached lights (the torch beam, attached glows): the light ORIGIN sits within a
+// small radius of the camera — the viewer IS effectively at the light source. Such a light
+// can never be occluded from the player, always lights the immediate surroundings, and must
+// never compete for shadow slots: it skips the occq-visibility drop, the distance cull and
+// is taken into the budget for FREE (the budget effectively expands by its slots, e.g.
+// budget 12 becomes 13 while the torch is on). For OMNIPART the member position equals the
+// parent position (light::Export), so a shadowed attached point light whitelists atomically.
+static bool is_player_attached_light(const light* L)
+{
+    // The torch bone is ~0.3-1.5 m from the camera center; 2 m covers every attach style.
+    return Device.vCameraPosition.distance_to(L->position) <= 2.f;
+}
+
+static void apply_light_shadow_budget(xr_vector<light*>& kept, size_t budget)
+{
+    struct budget_group
+    {
+        light* key;     // omnipart_owner for parts, the light itself otherwise
+        float eff_dist; // min effective distance among members
+        size_t count;   // members that survived the filters = weight in slots
+        bool attached;  // player-attached (torch): taken for free, does not consume slots
+        bool taken;
+    };
+    xr_vector<budget_group> groups;
+    groups.reserve(kept.size());
+    for (light* L : kept)
+    {
+        light* key = L->omnipart_owner ? L->omnipart_owner : L;
+        const bool was_rendered = (Device.dwFrame - L->shadow_render_frame) <= 1;
+        const float d = light_volume_dist(L) * (was_rendered ? ps_r2_light_budget_hysteresis : 1.f);
+        const bool attached = is_player_attached_light(L);
+        bool found = false;
+        for (budget_group& G : groups)
+        {
+            if (G.key == key)
+            {
+                G.eff_dist = _min(G.eff_dist, d);
+                G.attached |= attached;
+                ++G.count;
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            budget_group G;
+            G.key = key;
+            G.eff_dist = d;
+            G.count = 1;
+            G.attached = attached;
+            G.taken = false;
+            groups.push_back(G);
+        }
+    }
+    std::sort(groups.begin(), groups.end(), [](const budget_group& g1, const budget_group& g2)
+    {
+        return g1.eff_dist < g2.eff_dist;
+    });
+    // Greedy take by ascending distance: a 6-slot group that does not fit is skipped WHOLE
+    // (smaller farther groups may fill the remainder — slots must not idle). Player-attached
+    // groups are taken unconditionally and do not consume slots (budget expands for them).
+    size_t used = 0;
+    for (budget_group& G : groups)
+    {
+        if (G.attached)
+        {
+            G.taken = true;
+            continue;
+        }
+        if (used + G.count <= budget)
+        {
+            G.taken = true;
+            used += G.count;
+        }
+    }
+    xr_vector<light*> selected;
+    selected.reserve(kept.size());
+    for (light* L : kept)
+    {
+        light* key = L->omnipart_owner ? L->omnipart_owner : L;
+        for (const budget_group& G : groups)
+            if (G.key == key && G.taken)
+            {
+                selected.push_back(L);
+                break;
+            }
+    }
+    kept = std::move(selected);
+}
+
 // Вариант A (render_lights MT analysis): filter a light package by the NARROW scope frustum.
 // The scope pass reuses the main pass's light set (wide-frustum superset); lights whose volume
 // sphere (position + range - the sphere also bounds the shadow-casting extent) misses the lens
@@ -68,10 +165,16 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
         for (u32 it = 0; it < source.size(); it++)
         {
             light* L = source[it];
+            // Player-attached lights (torch beam) never drop out of the shadow path: the
+            // occq volume test is meaningless when the camera sits at the light origin, and
+            // the distance cull must not touch them either. They are also budget-free (see
+            // apply_light_shadow_budget) — the flashlight must not flicker under budget
+            // pressure (a dropped shadowed light disappears entirely, no unshadowed fallback).
+            const bool player_attached = is_player_attached_light(L);
             if (!svp_no_vis)
             {
                 L->vis_update();
-                if (!L->vis.visible)
+                if (!L->vis.visible && !player_attached)
                     continue; // drop invisible
             }
 
@@ -83,7 +186,7 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
             // (independent per-part decisions produce a half-lit sphere).
             // Hysteresis: a light rendered on the previous frame is kept until 20% past
             // the threshold — no popping when walking back and forth near the border.
-            if (shadow_dist > 0.f)
+            if (shadow_dist > 0.f && !player_attached)
             {
                 const float dist = light_volume_dist(L);
 
@@ -93,28 +196,34 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
                     continue;
             }
 
-            // Secondary LOD skip (usually off; distance culling above is the main tool)
-            if (ps_r2_light_degrade_lod > 0.f && L->get_LOD() < ps_r2_light_degrade_lod)
+            // Secondary LOD skip (usually off; distance culling above is the main tool).
+            // OMNIPARTs are excluded: their per-part spheres differ, so the per-part LOD check
+            // can drop individual faces of one point light and produce a half-shadowed sphere.
+            // The distance cull already handles them at parent level.
+            if (ps_r2_light_degrade_lod > 0.f && L->flags.type != IRender_Light::OMNIPART &&
+                L->get_LOD() < ps_r2_light_degrade_lod)
                 continue;
 
             kept.push_back(L);
             LR.compute_xf_spot(L);
         }
 
-        // Budget cap (safety net for extreme scenes): keep the closest lights.
+        // Budget cap (safety net for extreme scenes): whole-source selection, see
+        // apply_light_shadow_budget.
         if (ps_r2_light_shadow_budget > 0 && kept.size() > (size_t)ps_r2_light_shadow_budget)
-        {
-            std::sort(kept.begin(), kept.end(), [](light* l1, light* l2)
-            {
-                return l1->get_LOD() > l2->get_LOD();
-            });
-            kept.resize((size_t)ps_r2_light_shadow_budget);
-        }
+            apply_light_shadow_budget(kept, (size_t)ps_r2_light_shadow_budget);
 
         // Mark only lights that actually survived the budget: shadow_render_frame drives both
         // the distance hysteresis (x1.2) and the budget hysteresis, so it must not lie.
         for (light* L : kept)
             L->shadow_render_frame = Device.dwFrame;
+
+        // Budget lights hold a scarce slot: re-test their occq visibility sooner than the
+        // default 10-20 frame interval, so a light hidden behind a wall releases its slot
+        // faster. _min only shortens the wait — never extends it.
+        if (ps_r2_light_vis_refresh > 0)
+            for (light* L : kept)
+                L->vis.frame2test = _min(L->vis.frame2test, Device.dwFrame + (u32)ps_r2_light_vis_refresh);
 
         LP.v_shadowed = std::move(kept);
     }
@@ -712,13 +821,14 @@ void CRender::record_second_vp_shadows()
             source.push_back(L);
 
     // Same culls as the main pass block-1 minus occlusion visibility (stage 1b dropped it on
-    // this path): distance hysteresis + LOD + budget.
+    // this path): distance hysteresis + LOD + budget. Player-attached lights (torch) skip the
+    // distance cull, same as the main pass — the lens view always sees the torch beam.
     const float shadow_dist = ps_r2_light_shadow_dist;
     xr_vector<light*> kept;
     kept.reserve(source.size());
     for (light* L : source)
     {
-        if (shadow_dist > 0.f)
+        if (shadow_dist > 0.f && !is_player_attached_light(L))
         {
             const float dist = light_volume_dist(L);
             const bool was_rendered = (Device.dwFrame - L->shadow_render_frame) <= 1;
@@ -726,7 +836,10 @@ void CRender::record_second_vp_shadows()
             if (dist > limit)
                 continue;
         }
-        if (ps_r2_light_degrade_lod > 0.f && L->get_LOD() < ps_r2_light_degrade_lod)
+        // OMNIPARTs are excluded from the LOD filter: same reasoning as the main pass —
+        // independent per-part decisions produce a half-shadowed sphere.
+        if (ps_r2_light_degrade_lod > 0.f && L->flags.type != IRender_Light::OMNIPART &&
+            L->get_LOD() < ps_r2_light_degrade_lod)
             continue;
         LR.compute_xf_spot(L);
         kept.push_back(L);
@@ -737,11 +850,9 @@ void CRender::record_second_vp_shadows()
         return;
     }
 
+    // Same whole-source budget as the main pass (see apply_light_shadow_budget).
     if (ps_r2_light_shadow_budget > 0 && kept.size() > (size_t)ps_r2_light_shadow_budget)
-    {
-        std::sort(kept.begin(), kept.end(), [](light* l1, light* l2) { return l1->get_LOD() > l2->get_LOD(); });
-        kept.resize((size_t)ps_r2_light_shadow_budget);
-    }
+        apply_light_shadow_budget(kept, (size_t)ps_r2_light_shadow_budget);
 
     // Shared spatial query (same optimization as the main pass r2_light_common_dynamic): ONE
     // q_sphere around the camera replaces a per-light octree walk in every shadow build. Without

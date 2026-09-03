@@ -1,6 +1,7 @@
 #include "pch_script.h"
 
 #include "HangingLamp.h"
+#include "xrEngine/XR_IOConsole.h"
 #include "xrEngine/LightAnimLibrary.h"
 #include "xrEngine/xr_collide_form.h"
 #include "xrPhysics/PhysicsShell.h"
@@ -109,6 +110,38 @@ bool CHangingLamp::net_Spawn(CSE_Abstract* DC)
     light_render->set_volumetric_quality(lamp->m_volumetric_quality);
     light_render->set_volumetric_intensity(lamp->m_volumetric_intensity);
     light_render->set_volumetric_distance(lamp->m_volumetric_distance);
+
+    // Engine-side optimization: a shadowed lamp POINT light costs 6 shadow-map slots
+    // (light::Export creates 6 OMNIPARTs). Optionally convert it to a SPOT (1 slot) —
+    // the light direction comes from the light bone and is updated every frame in
+    // UpdateCL, so swinging physics lamps keep a correct beam — or strip its shadow.
+    // Cone/range thresholds reuse the r2_static_light_* cvars (they tune both this and
+    // the CLight_DB::Load conversion). Read once per spawn via the console interface:
+    // xrGame has no direct access to render-side cvars; getters return 0 when the
+    // renderer module is absent (dedicated server), which keeps the default behavior.
+    {
+        int mn = 0, mx = 2;
+        const int lamp_mode = Console->GetInteger("r2_lamp_light_mode", mn, mx);
+        if (lamp_mode != 0 && lamp->flags.is(CSE_ALifeObjectHangingLamp::flCastShadow))
+        {
+            float fmin = 0.f, fmax = 0.f;
+            const float range_threshold = Console->GetFloat("r2_static_light_range", fmin, fmax);
+            const bool in_scope = (range_threshold <= 0.f) || (lamp->range > range_threshold);
+            if (in_scope)
+            {
+                if (lamp_mode == 1 && !lamp->flags.is(CSE_ALifeObjectHangingLamp::flTypeSpot))
+                {
+                    // POINT -> SPOT along the light bone; authored SPOT lamps keep their cone.
+                    float cmin = 0.f, cmax = 0.f;
+                    const float cone_deg = Console->GetFloat("r2_static_light_cone", cmin, cmax);
+                    light_render->set_type(IRender_Light::SPOT);
+                    light_render->set_cone(deg2rad(cone_deg));
+                }
+                else if (lamp_mode == 2)
+                    light_render->set_shadow(false);
+            }
+        }
+    }
 
     if (lamp->flags.is(CSE_ALifeObjectHangingLamp::flPointAmbient))
     {

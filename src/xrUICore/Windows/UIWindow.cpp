@@ -242,9 +242,15 @@ bool CUIWindow::OnMouseAction(float x, float y, EUIMessages mouse_action)
     //Проверка на попадание мыши в окно,
     //происходит в обратном порядке, чем рисование окон
     //(последние в списке имеют высший приоритет)
-    WINDOW_LIST::reverse_iterator it = m_ChildWndList.rbegin();
+    //
+    // Snapshot the child list before iterating.  A child's OnMouseAction may
+    // trigger a Lua callback that adds or removes children from m_ChildWndList
+    // (e.g. faction editor's ShowLeaderWarningsForFactions calls InitStatic),
+    // which invalidates the iterator and causes a use-after-free crash.
+    WINDOW_LIST children_snapshot(m_ChildWndList);
+    WINDOW_LIST::reverse_iterator it = children_snapshot.rbegin();
 
-    for (; it != m_ChildWndList.rend(); ++it)
+    for (; it != children_snapshot.rend(); ++it)
     {
         CUIWindow* w = (*it);
         const Frect& wndRect = w->GetWndRect();

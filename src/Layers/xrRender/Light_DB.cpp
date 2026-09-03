@@ -62,10 +62,45 @@ void CLight_DB::Load(IReader* fs)
                 L->set_rotation(tmp_D, tmp_R);
                 L->set_range(Ldata.range);
                 L->set_color(Ldata.diffuse);
+#if RENDER != R_R1
+                // Honor spot lights authored in the level editor (previously ignored:
+                // everything non-directional was forced to POINT). Direction and outer cone
+                // angle come from level data. Read once at level load.
+                if (ps_r2_light_editor_spot && Ldata.type == Flight::Type::Spot)
+                {
+                    Fvector spot_dir = Ldata.direction;
+                    if (spot_dir.square_magnitude() < EPS_S)
+                        spot_dir.set(0.f, -1.f, 0.f);
+                    else
+                        spot_dir.normalize();
+                    L->set_type(IRender_Light::SPOT);
+                    L->set_rotation(spot_dir, tmp_R);
+                    L->set_cone(clampr(Ldata.phi, deg2rad(10.f), deg2rad(120.f)));
+                }
+#endif
 #if RENDER == R_R1
                 L->set_shadow(false);
 #else
-                L->set_shadow(true);
+                // Engine-side optimization for legacy levels: one shadowed POINT light costs
+                // 6 shadow-map slots. Optionally convert the big ones to a down-facing SPOT
+                // (1 slot) or strip their shadow. Controlled by cvars, default off = original
+                // behavior. Read once at level load.
+                const bool in_scope = (ps_r2_static_light_range <= 0.f) || (Ldata.range > ps_r2_static_light_range);
+                if (ps_r2_static_light_mode == 1 && in_scope && L->flags.type != IRender_Light::SPOT)
+                {
+                    Fvector down;
+                    down.set(0.f, -1.f, 0.f); // shine down
+                    L->set_type(IRender_Light::SPOT);
+                    L->set_rotation(down, tmp_R);
+                    L->set_cone(deg2rad(ps_r2_static_light_cone));
+                    L->set_shadow(true);
+                }
+                else if (ps_r2_static_light_mode == 2 && in_scope)
+                {
+                    L->set_shadow(false);
+                }
+                else
+                    L->set_shadow(true);
 #endif
                 L->set_active(true);
 

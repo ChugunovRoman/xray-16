@@ -65,6 +65,7 @@ public:
     float attenuation2; // Quadratic attenuation
 
     light* omnipart[6];
+    light* omnipart_owner{}; // back-pointer to the parent POINT light; set for OMNIPART children in Export
     xr_vector<light_indirect> indirect;
     u32 indirect_photons;
 
