@@ -11,6 +11,8 @@
 [Bb]uild*/
 # Prebuilt sentry-native for MSVC (misc/windows/build_sentry_native.ps1 or .sh); do not commit unless you intend to vendor binaries
 sdk/sentry/
+# Local clone via misc/ci/ensure_sentry_native.sh — not a repo submodule
+Externals/sentry-native/
 
 # User-specific files
 *.user
