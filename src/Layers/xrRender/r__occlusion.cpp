@@ -255,4 +255,44 @@ bool R_occlusion::occq_try_get(u32& ID, occq_result& fragments)
     ID = 0;
     return true;
 }
+
+void R_occlusion::occq_free(u32& ID)
+{
+    if (!enabled || ID == iInvalidHandle)
+        return;
+
+    ScopeLock lock{ &render_lock };
+
+    // Stale ID (occq_destroy since issue) or an already recycled slot: nothing to return.
+    if (ID >= used.size())
+    {
+        ID = iInvalidHandle;
+        return;
+    }
+#if defined(USE_DX11)
+    if (!used[ID].Q)
+#else
+    if (used[ID].Q == 0)
+#endif
+    {
+        ID = iInvalidHandle;
+        return;
+    }
+
+    // Same pool insertion as occq_get (sorted in decreasing order), minus the GetData wait.
+    Query& Q = used[ID];
+    if (pool.empty())
+        pool.emplace_back(Q);
+    else
+    {
+        int it = int(pool.size()) - 1;
+        while ((it >= 0) && (pool[it].order < Q.order))
+            it--;
+        pool.emplace(pool.begin() + it + 1, std::move(Q));
+    }
+
+    used[ID].Q = 0;
+    fids.emplace_back(ID);
+    ID = iInvalidHandle;
+}
 } // namespace xray::render::RENDER_NAMESPACE

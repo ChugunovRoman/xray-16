@@ -521,7 +521,16 @@ void CRender::Render()
         Wallmarks->Render(); // wallmarks has priority as normal geometry
     }
 
-    // Update incremental shadowmap-visibility solver
+    // Update incremental shadowmap-visibility solver.
+    // MAIN pass only. The scope pass re-enters Render() in the same frame: its flush found
+    // testQ_frame == dwFrame + 1 for every light the main pass had just queued (flushoccq
+    // returns early) and then Lights_LastFrame.clear() dropped them - the queries issued by
+    // svis::end() were never fetched, smapvis stayed in state_working and re-issued a query
+    // every frame. Net effect: one leaked ID3D11Query per shadowed light per SVP frame - the live
+    // slot count grew by thousands per aiming session. The scope
+    // pass never queues lights here itself (transfer mode returns from render_lights before the
+    // smap loop, legacy mode gets an already drained v_shadowed), so it has nothing to flush.
+    if (!svp_pass)
     {
         ZoneScopedN("Render/Occlusion/FlushLastFrame");
         PIX_EVENT(DEFER_FLUSH_OCCLUSION);
@@ -627,9 +636,16 @@ void CRender::Render()
             {
                 ID3D11Texture2D* dst_tex = static_cast<ID3D11Texture2D*>(Target->svp_rt_smap_depth->pSurface);
                 ID3D11Texture2D* src_tex = static_cast<ID3D11Texture2D*>(Target->rt_smap_depth->pSurface);
-                // The source atlas is still bound from the sun cascade passes; unbind before copying.
-                HW.get_context(CHW::IMM_CTX_ID)->ClearState();
-                dsgraph.cmd_list.Invalidate();
+                // Unbind the atlas from the output-merger before the copy reads it. Done THROUGH
+                // the backend so the CPU cache stays coherent (the former ClearState()+Invalidate()
+                // wiped viewport/IA/sampler state that Invalidate() does not restore). The cascade
+                // lists were executed with RestoreContextState=FALSE, so the depth target is not
+                // bound on the device any more; the accum_direct_blend quad above only holds it as
+                // an SRV, and read-side bindings do not block a copy source in D3D11.
+                dsgraph.cmd_list.set_RT(nullptr, 0);
+                dsgraph.cmd_list.set_RT(nullptr, 1);
+                dsgraph.cmd_list.set_RT(nullptr, 2);
+                dsgraph.cmd_list.set_ZB(nullptr);
                 for (UINT i = 0; i < R__NUM_SUN_CASCADES; ++i)
                     HW.get_context(CHW::IMM_CTX_ID)->CopySubresourceRegion(
                         dst_tex, D3D11CalcSubresource(0, sun_base + i, 1), 0, 0, 0,

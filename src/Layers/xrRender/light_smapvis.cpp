@@ -11,13 +11,27 @@ smapvis::smapvis()
 }
 smapvis::~smapvis()
 {
-    flushoccq();
+    // No flushoccq() here: the visibility result of a dying light is worthless, and fetching it
+    // would block in GetData if the command list carrying the query was never executed.
+    release();
     invalidate();
+}
+void smapvis::release()
+{
+    // Every path that forgets testQ_V/testQ_id without reading the result used to leak the
+    // R_occlusion slot forever (moving shadowed lights alone leaked ~0.06 slots per frame).
+    // Pure bookkeeping, no D3D call - callable from the SMAP worker tasks too.
+    if (testQ_V)
+        RImplementation.occq_free(testQ_id);
+    testQ_V = 0;
+    testQ_id = no_query;
 }
 void smapvis::invalidate()
 {
+    // light::spatial_move() invalidates on every noticeable move; the query issued last frame
+    // is not flushed yet at that point (flush runs inside Render()) - return it instead.
+    release();
     state = state_counting;
-    testQ_V = 0;
     frame_sleep = Device.dwFrame + ps_r__LightSleepFrames;
     invisible.clear();
 }
@@ -31,9 +45,10 @@ void smapvis::begin()
         // do nothing -> we just prepare for testing process
         break;
     case state_working:
-        // mark already known to be invisible visuals, set breakpoint
-        testQ_V = 0;
-        testQ_id = 0;
+        // mark already known to be invisible visuals, set breakpoint.
+        // A test still outstanding here was missed by flushoccq (frames without Render():
+        // menu, save) - return its slot instead of forgetting it.
+        release();
         mark();
         dsgraph.set_Feedback(this, test_current);
         break;
@@ -86,10 +101,17 @@ void smapvis::end()
 void smapvis::flushoccq()
 {
     // the tough part
-    if (testQ_frame != Device.dwFrame)
+    // Not yet: the query was issued this frame (testQ_frame = dwFrame + 1). Older ones (frames
+    // skipped without Render()) are fetched, not dropped - the result is long ready by then.
+    if (testQ_frame > Device.dwFrame)
         return;
     if ((state != state_working) || (!testQ_V))
         return;
+    if (testQ_id == no_query)
+    {
+        testQ_V = 0; // feedback set a visual but no query was issued - nothing to read
+        return;
+    }
     const auto fragments = RImplementation.occq_get(testQ_id);
     if (0 == fragments)
     {
@@ -104,7 +126,10 @@ void smapvis::flushoccq()
         test_current++;
     }
 
+    // occq_get already recycled the slot (it zeroes the id). Mark it 'none' so a later
+    // release() can never hand slot 0 - a valid id belonging to somebody else - to occq_free.
     testQ_V = 0;
+    testQ_id = no_query;
 
     if (test_current == test_count)
     {

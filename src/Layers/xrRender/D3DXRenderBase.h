@@ -101,6 +101,15 @@ public:
             if (raw & (1u << id))
                 break;
         }
+        // All pooled bits set while the IMM bit is clear: all() is false, yet no pooled slot is
+        // free. Without this guard the loop fell through to id == IMM_CTX_ID and handed out the
+        // IMMEDIATE context as a "deferred" slot (FinishCommandList on it, two writers on one
+        // context). Report and refuse instead.
+        if (id >= R__NUM_PARALLEL_CONTEXTS)
+        {
+            Msg("! alloc_context: pooled contexts exhausted (used mask 0x%x)", u32(contexts_used.to_ulong()));
+            return R_dsgraph_structure::INVALID_CONTEXT_ID;
+        }
         contexts_used.set(id, true);
         contexts_pool[id].reset();
         contexts_pool[id].context_id = id;

@@ -553,6 +553,7 @@ public:
     void occq_end(u32& ID, u32 context_id = R__NUM_PARALLEL_CONTEXTS) { HWOCC.occq_end(ID, context_id); }
     auto occq_get(u32& ID) { return HWOCC.occq_get(ID); }
     bool occq_try_get(u32& ID, R_occlusion::occq_result& fragments) { return HWOCC.occq_try_get(ID, fragments); }
+    void occq_free(u32& ID) { HWOCC.occq_free(ID); } // drop an unread query (see R_occlusion::occq_free)
 
     ICF void apply_object(CBackend& cmd_list, IRenderable* O)
     {

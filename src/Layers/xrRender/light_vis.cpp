@@ -63,6 +63,10 @@ void light::vis_prepare(CBackend& cmd_list)
     }
 
     // testing
+    // Sync mode only (async resolved or returned above): a query still pending here was never
+    // read - return its slot before issuing a new one instead of overwriting the id.
+    if (vis.pending)
+        RImplementation.occq_free(vis.query_id);
     vis.pending = true;
     xform_calc();
     cmd_list.set_xform_world(m_xform);

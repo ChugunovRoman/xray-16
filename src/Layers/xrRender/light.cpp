@@ -57,6 +57,17 @@ light::~light()
 #endif // (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4) || (RENDER==R_GL)
     set_active(false);
 
+#if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)
+    // Async occq: the only readers of this query are vis_prepare/vis_update of this very light.
+    // Destroyed while pending (dead NPC torch, Lights.Unload on level change) it would hold its
+    // R_occlusion slot forever. Safe after occq_destroy too: occq_free rejects stale ids.
+    if (vis.pending)
+    {
+        RImplementation.occq_free(vis.query_id);
+        vis.pending = false;
+    }
+#endif // (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4) || (RENDER==R_GL)
+
 // remove from Lights_LastFrame
 #if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)
     for (auto& p_light : RImplementation.Lights_LastFrame)

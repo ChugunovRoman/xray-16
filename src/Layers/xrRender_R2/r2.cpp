@@ -903,7 +903,9 @@ void CRender::reset_begin()
                 continue;
             try
             {
-                for (int id = 0; id < 3; ++id)
+                // All pooled contexts, not the historical 3: svis[] is sized R__NUM_CONTEXTS and
+                // alloc_context hands out every pooled id (same fix as the per-frame flush in Render()).
+                for (int id = 0; id < R__NUM_CONTEXTS; ++id)
                     Lights_LastFrame[it]->svis[id].resetoccq();
                 // occq_destroy runs below; drop frustum occlusion query state (same stale-ID class as svis).
                 Lights_LastFrame[it]->vis.pending = false;

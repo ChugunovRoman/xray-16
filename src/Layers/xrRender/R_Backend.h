@@ -520,7 +520,13 @@ public:
 #ifdef USE_DX11
         VERIFY(context_id != CHW::IMM_CTX_ID);
         ID3D11CommandList* pCommandList{ nullptr };
-        CHK_DX(HW.get_context(context_id)->FinishCommandList(false, &pCommandList));
+        // Release builds discard CHK_DX HRESULTs: a failed FinishCommandList (e.g. the backend
+        // was re-labeled IMM by a stray Invalidate) hands a null list to ExecuteCommandList and
+        // silently corrupts the device. Fail loudly in ALL configs instead.
+        const HRESULT submit_hr = HW.get_context(context_id)->FinishCommandList(false, &pCommandList);
+        if (FAILED(submit_hr) || !pCommandList)
+            FATAL_F("FinishCommandList failed on context %u (hr=0x%08x) - deferred submit aborted",
+                context_id, u32(submit_hr));
         HW.get_context(CHW::IMM_CTX_ID)->ExecuteCommandList(pCommandList, false);
         _RELEASE(pCommandList);
         // FinishCommandList resets the REAL deferred-context state to D3D11 defaults while

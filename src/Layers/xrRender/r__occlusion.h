@@ -55,5 +55,10 @@ public:
     void occq_end(u32& ID, u32 context_id = R__NUM_PARALLEL_CONTEXTS);
     occq_result occq_get(u32& ID);
     bool occq_try_get(u32& ID, occq_result& fragments); // false = result not ready yet (query stays in flight)
+    // Return a slot to the pool WITHOUT fetching the result (pure bookkeeping under render_lock, no D3D
+    // call - safe from worker tasks). For queries whose result nobody will read any more: a light
+    // destroyed while its vis test is pending, an smapvis test abandoned by invalidate()/begin().
+    // Re-issuing Begin on a query with an unread result is legal in D3D11. ID becomes iInvalidHandle.
+    void occq_free(u32& ID);
 };
 } // namespace xray::render::RENDER_NAMESPACE

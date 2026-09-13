@@ -567,11 +567,16 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
                 ID3D11Texture2D* dst_tex = static_cast<ID3D11Texture2D*>(Target->svp_rt_smap_depth->pSurface);
                 ID3D11Texture2D* src_tex = static_cast<ID3D11Texture2D*>(Target->rt_smap_depth->pSurface);
                 const UINT dst_subres = D3D11CalcSubresource(0, dst_slice, 1);
-                // D3D11 forbids copying from a subresource that is still bound as RT/DSV/SRV.
-                // The main atlas was just used as depth target; flush the GPU pipeline and
-                // drop the CPU cache before reading from it.
-                HW.get_context(CHW::IMM_CTX_ID)->ClearState();
-                cmd_list.Invalidate();
+                // Make sure the source atlas is not bound as depth target while the copy reads it.
+                // Done THROUGH the backend so its CPU cache stays coherent with the device. The
+                // former ClearState()+Invalidate() pair was redundant at this point (the executed
+                // page lists left the immediate context at defaults, the cache was just invalidated)
+                // and it also dropped viewport/IA/sampler state that Invalidate() does not restore.
+                // Read-side (SRV) bindings do not block a copy source in D3D11; only RTV/DSV do.
+                cmd_list.set_RT(nullptr, 0);
+                cmd_list.set_RT(nullptr, 1);
+                cmd_list.set_RT(nullptr, 2);
+                cmd_list.set_ZB(nullptr);
                 HW.get_context(CHW::IMM_CTX_ID)->CopySubresourceRegion(
                     dst_tex, dst_subres, 0, 0, 0, src_tex, 0, nullptr);
                 svp_shadow_page_lights.push_back(L_spot_s);

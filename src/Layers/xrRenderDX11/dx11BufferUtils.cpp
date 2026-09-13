@@ -378,8 +378,16 @@ void* VertexStreamBuffer::Map(size_t offset, size_t /*size*/, bool flush /*= fal
 
     const auto flag = flush ? D3D_MAP_WRITE_DISCARD : D3D_MAP_WRITE_NO_OVERWRITE;
 
-    D3D11_MAPPED_SUBRESOURCE MappedSubRes;
-    HW.get_context(CHW::IMM_CTX_ID)->Map(m_DeviceBuffer, 0, flag, 0, &MappedSubRes); // TODO: proper context id + check for flush & imm
+    D3D11_MAPPED_SUBRESOURCE MappedSubRes{};
+    const HRESULT hr = HW.get_context(CHW::IMM_CTX_ID)->Map(m_DeviceBuffer, 0, flag, 0, &MappedSubRes); // TODO: proper context id + check for flush & imm
+    // A failed Map used to leave pData uninitialised and the caller then wrote vertices through a
+    // garbage pointer (silent memory corruption). Fail loudly instead.
+    if (FAILED(hr) || !MappedSubRes.pData)
+    {
+        FATAL_F("VertexStreamBuffer::Map failed: hr=0x%08x flush=%d offset=%zu",
+            u32(hr), flush ? 1 : 0, offset);
+        return nullptr;
+    }
 
     u8* pData = static_cast<u8*>(MappedSubRes.pData);
     pData += offset;
@@ -427,8 +435,15 @@ void* IndexStreamBuffer::Map(size_t offset, size_t /*size*/, bool flush /*= fals
 
     const auto flag = flush ? D3D_MAP_WRITE_DISCARD : D3D_MAP_WRITE_NO_OVERWRITE;
 
-    D3D11_MAPPED_SUBRESOURCE MappedSubRes;
-    HW.get_context(CHW::IMM_CTX_ID)->Map(m_DeviceBuffer, 0, flag, 0, &MappedSubRes); // TODO: see above comms for vertex
+    D3D11_MAPPED_SUBRESOURCE MappedSubRes{};
+    const HRESULT hr = HW.get_context(CHW::IMM_CTX_ID)->Map(m_DeviceBuffer, 0, flag, 0, &MappedSubRes); // TODO: see above comms for vertex
+    // See VertexStreamBuffer::Map - same uninitialised-pointer hazard on a failed Map.
+    if (FAILED(hr) || !MappedSubRes.pData)
+    {
+        FATAL_F("IndexStreamBuffer::Map failed: hr=0x%08x flush=%d offset=%zu",
+            u32(hr), flush ? 1 : 0, offset);
+        return nullptr;
+    }
 
     u8* pData = static_cast<u8*>(MappedSubRes.pData);
     pData += offset;
