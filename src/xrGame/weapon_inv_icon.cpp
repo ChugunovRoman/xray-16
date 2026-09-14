@@ -341,7 +341,13 @@ static void GetWeaponIconUiTexelSizeForSection_Impl(pcstr section, EWeaponInvIco
 
 namespace weapon_inv_icon
 {
-void LoadSettings() { EnsureLoaded(); }
+void RegisterDeviceResetListener();
+
+void LoadSettings()
+{
+    EnsureLoaded();
+    RegisterDeviceResetListener();
+}
 
 void ReloadSettings()
 {
@@ -787,7 +793,9 @@ void OnWeaponIconUserRtsReleased()
     ++g_inv_icon_rt_epoch;
 }
 
-void HotReloadInvIconSettings()
+// Drop every persisted $user$ icon RT plus all CPU-side "ready" bookkeeping (UI shader cache, section map, epoch)
+// and the pending queue. After this, no item is considered ready until it is rendered again.
+static void ReleaseAllInvIconRtsAndState()
 {
     if (GEnv.Render && !GEnv.isDedicatedServer)
         GEnv.Render->WeaponIcon_ReleaseAllUserIconRts();
@@ -796,30 +804,101 @@ void HotReloadInvIconSettings()
     OnWeaponIconUserRtsReleased();
 
     g_pending.clear();
+}
+
+// Re-queue every alive inventory item with use_dynamic_inv_icon so the GPU pass rebuilds its icons.
+static u32 RequeueAllDynamicInvIconItems()
+{
+    u32 requeued = 0;
+    if (GEnv.isDedicatedServer || !g_pGameLevel)
+        return requeued;
+
+    CObjectList& objs = Level().Objects;
+    const u32 n = objs.o_count();
+    for (u32 i = 0; i < n; ++i)
+    {
+        IGameObject* o = objs.o_get_by_iterator(i);
+        if (!o)
+            continue;
+        CInventoryItem* itm = smart_cast<CInventoryItem*>(o);
+        if (!itm || !IsEnabledForItem(itm))
+            continue;
+        itm->QueueDynamicInvIconRefresh();
+        ++requeued;
+    }
+    return requeued;
+}
+
+void HotReloadInvIconSettings()
+{
+    ReleaseAllInvIconRtsAndState();
 
     ReloadSettings();
 
-    u32 requeued = 0;
-    if (!GEnv.isDedicatedServer && g_pGameLevel)
-    {
-        CObjectList& objs = Level().Objects;
-        const u32 n = objs.o_count();
-        for (u32 i = 0; i < n; ++i)
-        {
-            IGameObject* o = objs.o_get_by_iterator(i);
-            if (!o)
-                continue;
-            CInventoryItem* itm = smart_cast<CInventoryItem*>(o);
-            if (!itm || !IsEnabledForItem(itm))
-                continue;
-            itm->QueueDynamicInvIconRefresh();
-            ++requeued;
-        }
-    }
+    const u32 requeued = RequeueAllDynamicInvIconItems();
 
     Msg("~ [weapon_inv_icon] HotReload: GPU icon RTs dropped, ini state reloaded, epoch bumped, queue cleared; "
         "re-queued %u dynamic-icon item(s). Open/refresh inventory to see updates.",
         requeued);
+}
+
+// vid_restart: CResourceManager::reset_begin/reset_end destroys and re-creates every registered CRT, including the
+// $user$ icon RTs, so their contents are lost while item ready flags, g_section_inv_icon_presets_ready, the epoch and
+// the UI rt:* shader cache still say "ready". UI then hides the static inv_icon and draws an empty RT (icons vanish).
+// Nothing in the render layer notifies the game about Reset() (WeaponIcon_ReleaseStaticResources only runs on
+// OnDeviceDestroy/Destroy), so listen to Device.seqDeviceReset here and do the same drop + re-queue as HotReload.
+static void OnDeviceResetInvIcons()
+{
+    if (GEnv.isDedicatedServer || !GEnv.Render)
+        return;
+    EnsureLoaded();
+    if (!g_global_enabled)
+        return;
+
+    ReleaseAllInvIconRtsAndState();
+    const u32 requeued = RequeueAllDynamicInvIconItems();
+
+    Msg("~ [weapon_inv_icon] DeviceReset: GPU icon RTs dropped, epoch bumped, queue cleared; re-queued %u "
+        "dynamic-icon item(s).",
+        requeued);
+}
+
+namespace
+{
+class CInvIconDeviceResetListener final : public pureDeviceReset, public pureAppEnd
+{
+    bool m_registered{};
+
+public:
+    void Register()
+    {
+        if (m_registered)
+            return;
+        m_registered = true;
+        Device.seqDeviceReset.Add(this);
+        Device.seqAppEnd.Add(this);
+    }
+
+    void OnDeviceReset() override { OnDeviceResetInvIcons(); }
+
+    void OnAppEnd() override
+    {
+        if (!m_registered)
+            return;
+        m_registered = false;
+        Device.seqDeviceReset.Remove(this);
+        Device.seqAppEnd.Remove(this);
+    }
+};
+
+CInvIconDeviceResetListener g_device_reset_listener;
+} // namespace
+
+void RegisterDeviceResetListener()
+{
+    if (GEnv.isDedicatedServer)
+        return;
+    g_device_reset_listener.Register();
 }
 
 void DbgTraceWeaponCellShaderDecision(pcstr weapon_section)
