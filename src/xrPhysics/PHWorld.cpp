@@ -479,6 +479,8 @@ void CPHWorld::Step()
         obj->PhDataUpdate(fixed_step);
     }
 
+    ReinitMerged();
+
 #ifdef DEBUG
     debug_output().dbg_contacts_num() = ContactGroup->num;
 #endif
@@ -517,9 +519,23 @@ void CPHWorld::StepTouch()
         obj->IslandReinit();
         obj->spatial_move();
     }
+    ReinitMerged();
     dJointGroupEmpty(ContactGroup);
     ContactFeedBacks.empty();
     ContactEffectors.empty();
+}
+
+void CPHWorld::RegisterMerged(CPHObject* obj)
+{
+    VERIFY(obj);
+    m_merged_objects.push_back(obj);
+}
+
+void CPHWorld::ReinitMerged()
+{
+    for (CPHObject* obj : m_merged_objects)
+        obj->IslandReinit();
+    m_merged_objects.clear();
 }
 
 u32 CPHWorld::CalcNumSteps(u32 dTime)

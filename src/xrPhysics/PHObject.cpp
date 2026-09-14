@@ -53,6 +53,9 @@ void CPHObject::deactivate()
     if (!m_flags.test(st_activated))
         return;
     VERIFY2(m_island.IsActive(), "can not do it during processing");
+
+    if (!m_island.IsActive())
+        Msg("! CPHObject::deactivate: island is merged (deactivation during physics processing)");
     ph_world->RemoveObject(PH_OBJECT_I(this));
     vis_update_deactivate();
     m_flags.set(st_activated, FALSE);
@@ -202,6 +205,7 @@ void CPHObject::reinit_single()
         obj->IslandReinit();
     }
     m_collide_spatial_overlap.clear();
+    ph_world->ReinitMerged();
     dJointGroupEmpty(ContactGroup);
     ContactFeedBacks.empty();
     ContactEffectors.empty();

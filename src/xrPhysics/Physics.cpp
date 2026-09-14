@@ -273,6 +273,9 @@ void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2)
     if (CollideIntoGroup(o1, o2, ContactGroup, island1, MAX_CONTACTS) != 0)
     {
         obj1->MergeIsland(obj2);
+        // obj2 may never reach the IslandReinit loops of Step/StepTouch (frozen world, CPHStaticGeomShell
+        // whose EnableObject does not activate it, deactivation mid-step) -> guarantee its Unmerge.
+        ph_world->RegisterMerged(obj2);
         if (!obj2->is_active())
             obj2->EnableObject(obj1);
     }

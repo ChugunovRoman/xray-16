@@ -69,6 +69,11 @@ private:
     PH_UPDATE_OBJECT_STORAGE m_freezed_update_objects;
     // P1: reused snapshot of active-island roots for parallel solve (see CPHWorld::Step).
     xr_vector<CPHObject*> m_island_solve_batch;
+    // Objects whose island was merged (NearCallback) during the current step. They may be absent from
+    // m_objects / m_update_objects (frozen world, CPHStaticGeomShell, deactivated mid-step), so the regular
+    // IslandReinit loops would leave a stale m_self_active pointing to a soon-destroyed island -> crash in
+    // CPHIsland::GoActive on the next collision. ReinitMerged() guarantees Unmerge for every one of them.
+    xr_vector<CPHObject*> m_merged_objects;
     // B-1: scheduler overlap frame window (GameThread launched until post-wait flush).
     std::atomic<bool> m_scheduler_overlap_active{false};
     std::atomic<bool> m_step_running{false};
@@ -122,6 +127,8 @@ public:
     void FrameStep(dReal step = 0.025f);
     void Step();
     void StepTouch();
+    void RegisterMerged(CPHObject* obj);
+    void ReinitMerged();
     void CutVelocity(float l_limit, float a_limit);
     void GetState(V_PH_WORLD_STATE& state);
     void Freeze();
