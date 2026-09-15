@@ -86,11 +86,61 @@ void CSE_ALifeDynamicObject::add_offline(
 
 bool CSE_ALifeDynamicObject::synchronize_location()
 {
-    if (!ai().level_graph().valid_vertex_position(o_Position) ||
-        ai().level_graph().inside(ai().level_graph().vertex(m_tNodeID), o_Position))
+    if (!ai().level_graph().valid_vertex_position(o_Position))
+        return (true);
+
+    // GW workaround: m_tNodeID defaults to u32(-1) and CSE_ALifeOnlineOfflineGroup::switch_offline()
+    // calls us directly, bypassing CALifeSwitchManager::synchronize_location() and its guards.
+    // CLevelGraph::vertex(u32) only validates the id via VERIFY, so in release it silently returns
+    // a garbage pointer which is then dereferenced inside CLevelGraph::inside().
+    if (!ai().level_graph().valid_vertex_id(m_tNodeID))
+    {
+        // An offline object with an invalid level vertex id is an expected state - it usually keeps a vertex
+        // id belonging to another level's graph. CALifeSwitchManager::synchronize_location() skips exactly
+        // this case, so skip it too instead of bothering the player with a dialog. Remapping is not an option
+        // here: the object lives on another level, so a vertex of the currently loaded graph would corrupt it.
+        if (!m_bOnline)
+            return (true);
+
+        string1024 diag;
+        xr_sprintf(diag,
+            "CSE_ALifeDynamicObject::synchronize_location: invalid level vertex id.\n"
+            "object=\"%s\" section=\"%s\" id=%u parent_id=%u online=%d\n"
+            "level_vertex_id=%u (vertex_count=%u) game_vertex_id=%u used_ai_locations=%d\n"
+            "position=[%f][%f][%f]",
+            name_replace(), s_name.c_str(), u32(ID), u32(ID_Parent), m_bOnline ? 1 : 0, m_tNodeID,
+            ai().level_graph().header().vertex_count(), u32(m_tGraphID), used_ai_locations() ? 1 : 0,
+            VPUSH(o_Position));
+
+        Msg("! %s", diag);
+
+        // GW workaround: show the ignorable error dialog instead of hard-crashing.
+        // Fail() returns control only for tryAgain/ignore; abort breaks inside via DEBUG_BREAK.
+        // static: this runs from the ALife switch update, so without "ignore always" the dialog would spam.
+        static bool ignoreAlways = false;
+        if (!ignoreAlways)
+            xrDebug::Fail(ignoreAlways, DEBUG_INFO, "ai().level_graph().valid_vertex_id(m_tNodeID)", diag);
+
+        // Recover from the (already validated) position: CLevelGraph::vertex(u32, Fvector) discards
+        // an invalid current vertex id on its own, so passing u32(-1) as a hint is safe.
+        m_tNodeID = ai().level_graph().vertex(u32(-1), o_Position);
+        if (!ai().level_graph().valid_vertex_id(m_tNodeID))
+        {
+            Msg("! [GW] synchronize_location: no level vertex found near [%f][%f][%f] for object \"%s\", skipping",
+                VPUSH(o_Position), name_replace());
+            return (true);
+        }
+
+        Msg("~ [GW] synchronize_location: remapped object \"%s\" to level vertex %u", name_replace(), m_tNodeID);
+    }
+    else if (ai().level_graph().inside(ai().level_graph().vertex(m_tNodeID), o_Position))
         return (true);
 
     u32 const new_vertex_id = ai().level_graph().vertex(m_tNodeID, o_Position);
+    // GW workaround: guard the second latent AV - an invalid id here would be fed to the cross table below.
+    if (!ai().level_graph().valid_vertex_id(new_vertex_id))
+        return (true);
+
     if (!m_bOnline && !ai().level_graph().inside(new_vertex_id, o_Position))
         return (true);
 

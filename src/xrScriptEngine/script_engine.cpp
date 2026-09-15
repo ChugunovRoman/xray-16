@@ -40,45 +40,24 @@ int g_LuaDumpDepth = 0;
 namespace
 {
 // Lua 5.1 / LuaJIT: runtime errors may leave a non-string on the stack; lua_tostring then yields nullptr.
+// GW workaround: never re-enter Lua from here. This helper also runs from the Sentry hook on xrDebug::Fail(),
+// where the stack top is not an error object at all but whatever the currently running C function was called
+// with. Calling tostring() on such a value can raise from luabind (dispatch_operator: "No such operator
+// defined"), turning a recoverable assertion dialog into a hard crash. Report the type instead.
 pcstr stringify_lua_top_for_log(lua_State* L, xr_string& storage)
 {
     const int err_idx = lua_gettop(L);
     if (err_idx < 1)
         return nullptr;
 
+    // lua_isstring() also accepts numbers, and converting either of them triggers no metamethods.
     if (lua_isstring(L, err_idx))
         return lua_tostring(L, err_idx);
 
-    lua_getglobal(L, "tostring");
-    if (!lua_isfunction(L, -1))
-    {
-        lua_pop(L, 1);
-        storage.clear();
-        storage += '<';
-        storage += lua_typename(L, lua_type(L, err_idx));
-        storage += '>';
-        return storage.c_str();
-    }
-    lua_pushvalue(L, err_idx);
-    if (lua_pcall(L, 1, 1, 0) != 0)
-    {
-        lua_pop(L, 1);
-        storage.clear();
-        storage += '<';
-        storage += lua_typename(L, lua_type(L, err_idx));
-        storage += '>';
-        return storage.c_str();
-    }
-    if (const char* conv = lua_tostring(L, -1))
-        storage = conv;
-    else
-    {
-        storage.clear();
-        storage += '<';
-        storage += lua_typename(L, lua_type(L, err_idx));
-        storage += '>';
-    }
-    lua_pop(L, 1);
+    storage.clear();
+    storage += '<';
+    storage += lua_typename(L, lua_type(L, err_idx));
+    storage += '>';
     return storage.c_str();
 }
 } // namespace
