@@ -93,6 +93,14 @@ private:
     u32 m_dead_update_interval{0};
     bool m_dead_ragdoll_sleep_applied{false};
 
+    // P1 (plans/optimization_spawn): set for one CreateCharacterSafe() call by SpawnCharacterCreate()
+    // when this non-actor character spawns as part of the initial level/save load burst
+    // (Device.dwPrecacheFrame != 0 — the same signal CALifeUpdateManager::update_switch uses to switch
+    // the whole level online unbudgeted). Consumed (and cleared) by CreateCharacterSafe() before its
+    // CharacterExist early-out, so any later recreation (RequestCreateCharacterSafe from gameplay code)
+    // always runs the normal position correction.
+    bool m_skip_spawn_position_correct{false};
+
     // B-1: caller-level deferred physics intent (GameThread during scheduler overlap).
     // One intent per owner per overlap frame; last Request* wins (create/destroy/shell are mutually exclusive in practice).
     enum EDeferredPhysicsIntent : u8

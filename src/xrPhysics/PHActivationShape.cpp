@@ -10,6 +10,7 @@
 #include "MathUtils.h"
 
 #include "PHWorld.h"
+#include "console_vars.h"
 #include "ode/ode/src/util.h"
 
 #ifdef DEBUG
@@ -222,6 +223,15 @@ bool CPHActivationShape::Activate(
 {
     using namespace ::detail::activation_shape;
 
+    // P1 (plans/optimization_spawn): this is the hot path behind per-NPC-spawn position correction
+    // (CollisionCorrectObjPos -> ActivateShapeCharacterPhysicsSupport). It freezes the whole physics
+    // world, then repeatedly steps it — each Step()/StepTouch() runs broadphase (ISpatial_DB::q_box)
+    // and static-mesh collision for every currently-active object, which is what shows up under
+    // CLevel::g_sv_Spawn in Tracy when many NPCs are on the level.
+    ZoneNamedN(___tracy_activation_shape_activate, "CPHActivationShape::Activate", true);
+    int dbg_step_count = 0;
+    const u16 dbg_objects_before = ph_world->ObjectsNumber();
+
 #ifdef DEBUG
     if (debug_output().ph_dbg_draw_mask().test(phDbgDrawDeathActivationBox))
     {
@@ -243,11 +253,51 @@ bool CPHActivationShape::Activate(
     dGeomUserDataSetObjectContactCallback(m_geom, GetMaxDepthCallback);
     // ph_world->Step();
     ph_world->StepTouch();
+
+    const float resolve_depth = 0.01f;
+
+    // P1: every current caller Create()s the shape with the same size later passed here as need_size
+    // (ActivateShapeExplosive, ActivateShapePhysShellHolder, ActivateShapeCharacterPhysicsSupport, CCar),
+    // so the per-step resize a few lines below is a no-op whenever steps == 1. If StepTouch already found
+    // no meaningful penetration, the push-out loop would do nothing but still cost one full ODE Step()
+    // (dWorldStep + static-mesh collision query) per spawned object — skip it. The size-match guard makes
+    // this a no-op fallback to the original behavior for any future caller that resizes over multiple steps.
+    if (ph_console::ph_spawn_activation_shape_early_exit && steps == 1 && max_depth < resolve_depth)
+    {
+        Fvector early_exit_from_size;
+        dGeomBoxGetLengths(m_geom, cast_fp(early_exit_from_size));
+        if (early_exit_from_size.similar(need_size))
+        {
+            if (!un_freeze_later)
+                ph_world->UnFreeze();
+            if (ph_console::ph_dbg_spawn_stats)
+            {
+                const u16 dbg_objects_after = ph_world->ObjectsNumber();
+                if (dbg_objects_after != dbg_objects_before)
+                    Msg("! ph_dbg_spawn_stats: CPHActivationShape::Activate early-exit woke objects %d -> %d",
+                        dbg_objects_before, dbg_objects_after);
+            }
+#ifdef DEBUG
+            if (debug_output().ph_dbg_draw_mask().test(phDbgDrawDeathActivationBox))
+            {
+                debug_output().DBG_OpenCashedDraw();
+                Fmatrix M;
+                PHDynamicData::DMXPStoFMX(dBodyGetRotation(m_body), dBodyGetPosition(m_body), M);
+                Fvector v;
+                v.set(need_size);
+                v.mul(0.5f);
+                debug_output().DBG_DrawOBB(M, v, color_xrgb(0, 255, 255));
+                debug_output().DBG_ClosedCashedDraw(30000);
+            }
+#endif
+            return true;
+        }
+    }
+
     u16 num_it = 15;
     float fnum_it = float(num_it);
     float fnum_steps = float(steps);
     float fnum_steps_r = 1.f / fnum_steps;
-    float resolve_depth = 0.01f;
     float max_vel = max_depth / fnum_it * fnum_steps_r / fixed_step;
     float limit_l_vel = _max(_max(need_size.x, need_size.y), need_size.z) / fnum_it * fnum_steps_r / fixed_step;
 
@@ -292,6 +342,7 @@ bool CPHActivationShape::Activate(
             {
                 max_depth = 0.f;
                 ph_world->Step();
+                ++dbg_step_count;
                 CHECK_POS(Position(), "pos after ph_world->Step()", false);
                 ph_world->CutVelocity(max_vel, max_a_vel);
                 CHECK_POS(Position(), "pos after CutVelocity", true);
@@ -312,6 +363,13 @@ bool CPHActivationShape::Activate(
     CHECK_POS(Position(), "pos after RestoreVelocityState(temp_state);", true);
     if (!un_freeze_later)
         ph_world->UnFreeze();
+    if (ph_console::ph_dbg_spawn_stats)
+    {
+        const u16 dbg_objects_after = ph_world->ObjectsNumber();
+        if (dbg_step_count > 5 || dbg_objects_after != dbg_objects_before)
+            Msg("! ph_dbg_spawn_stats: CPHActivationShape::Activate steps=%d objects %d -> %d ret=%d",
+                dbg_step_count, dbg_objects_before, dbg_objects_after, (int)ret);
+    }
 #ifdef DEBUG
     if (debug_output().ph_dbg_draw_mask().test(phDbgDrawDeathActivationBox))
     {

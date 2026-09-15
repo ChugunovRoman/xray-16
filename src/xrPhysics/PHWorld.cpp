@@ -310,6 +310,11 @@ void CPHWorld::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
 static u32 start_time = 0;
 void CPHWorld::Step()
 {
+    // P1 (plans/optimization_spawn): object count under this Step() drives how many q_box queries it
+    // issues (one CollideDynamicsBroadphase per object) — see ISpatial_DB::q_box call volume during spawn.
+    ZoneNamedN(___tracy_ph_world_step, "CPHWorld::Step", true);
+    ZoneTextVF(___tracy_ph_world_step, "objects=%u freezed=%d", (unsigned)m_objects.count(), (int)IsFreezed());
+
 #ifdef DEBUG
     debug_output().dbg_reused_queries_per_step() = 0;
     debug_output().dbg_new_queries_per_step() = 0;
@@ -497,6 +502,10 @@ void CPHWorld::Step()
 
 void CPHWorld::StepTouch()
 {
+    // P1 (plans/optimization_spawn): see CPHWorld::Step — same q_box volume concern.
+    ZoneNamedN(___tracy_ph_world_step_touch, "CPHWorld::StepTouch", true);
+    ZoneTextVF(___tracy_ph_world_step_touch, "objects=%u", (unsigned)m_objects.count());
+
     PH_OBJECT_I i_object;
     for (i_object = m_objects.begin(); m_objects.end() != i_object;)
     {

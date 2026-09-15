@@ -2935,6 +2935,12 @@ void CCC_RegisterCommands()
     // Cap physics substeps per frame to break the spiral-of-death under heavy load (0 = uncapped).
     CMD4(CCC_Integer, "ph_max_substeps", &ph_console::ph_max_substeps, 0, 30);
 
+    // P1: NPC spawn / level-load optimizations (see plans/optimization_spawn/plan.md) — runtime kill-switches.
+    CMD4(CCC_Integer, "ph_spawn_char_no_collide_chars", &ph_console::ph_spawn_char_no_collide_chars, 0, 1);
+    CMD4(CCC_Integer, "ph_spawn_activation_shape_early_exit", &ph_console::ph_spawn_activation_shape_early_exit, 0, 1);
+    CMD4(CCC_Integer, "ph_spawn_skip_correct_on_load", &ph_console::ph_spawn_skip_correct_on_load, 0, 1);
+    CMD4(CCC_Integer, "ph_dbg_spawn_stats", &ph_console::ph_dbg_spawn_stats, 0, 1);
+
 #ifdef DEBUG
     CMD1(CCC_PHGravity, "ph_gravity");
     CMD4(CCC_FloatBlock, "ph_timefactor", &phTimefactor, 0.000001f, 1000.f);

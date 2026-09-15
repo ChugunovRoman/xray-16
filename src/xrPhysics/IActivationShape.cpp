@@ -52,6 +52,11 @@ void ActivateShapePhysShellHolder(
 bool ActivateShapeCharacterPhysicsSupport(Fvector& out_pos, const Fvector& vbox, const Fvector& activation_pos,
     const Fmatrix& mXFORM, bool not_collide_characters, bool set_rotation, IPhysicsShellHolder* m_EntityAlife)
 {
+    // P1 (plans/optimization_spawn): entry point of the per-NPC-spawn position correction that
+    // freezes the physics world and re-steps it — see CPHActivationShape::Activate for the cost.
+    ZoneNamedN(___tracy_activate_shape_char, "ActivateShapeCharacterPhysicsSupport", true);
+    ZoneTextVF(___tracy_activate_shape_char, "%s", m_EntityAlife->ObjectName());
+
     CPHActivationShape activation_shape;
     activation_shape.Create(activation_pos, vbox, m_EntityAlife);
     if (not_collide_characters)

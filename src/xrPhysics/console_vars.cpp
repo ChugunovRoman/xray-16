@@ -15,3 +15,9 @@ float ph_console::ph_step_time = fixed_step; // keep in sync with the global phy
 int ph_console::ph_mt_island_solve = 1;
 int ph_console::ph_mt_island_min = 16;
 int ph_console::ph_max_substeps = 0; // 0 = uncapped (default); >0 caps substeps but slows actor under load
+
+// P1: NPC spawn / level-load optimizations (see plans/optimization_spawn/plan.md).
+int ph_console::ph_spawn_char_no_collide_chars = 1;
+int ph_console::ph_spawn_activation_shape_early_exit = 1;
+int ph_console::ph_spawn_skip_correct_on_load = 1;
+int ph_console::ph_dbg_spawn_stats = 0;

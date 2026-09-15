@@ -17,6 +17,7 @@
 #include "xrPhysics/IPHCapture.h"
 
 #include "xrPhysics/IPHWorld.h"
+#include "xrPhysics/console_vars.h"
 
 #include "IKLimbsController.h"
 #include "Actor.h"
@@ -399,9 +400,22 @@ bool CCharacterPhysicsSupport::CollisionCorrectObjPos()
 
 void CCharacterPhysicsSupport::CreateCharacterSafe()
 {
+    ZoneScopedN("CCharacterPhysicsSupport::CreateCharacterSafe");
+
+    // P1 (plans/optimization_spawn): skip CollisionCorrectObjPos once for characters spawning in the
+    // initial level/save load burst — their position is already valid (server-side / saved), so the
+    // correction (freezes the physics world, re-steps it via CPHActivationShape::Activate) is redundant
+    // and, with many NPCs on the level, dominates load time. Consume the flag before the CharacterExist
+    // early-out and regardless of the console var, so a later real recreation (RequestCreateCharacterSafe
+    // from gameplay code) can never inherit a stale skip from spawn time.
+    const bool skip_correct = m_skip_spawn_position_correct && ph_console::ph_spawn_skip_correct_on_load != 0;
+    m_skip_spawn_position_correct = false;
+
     if (m_PhysicMovementControl->CharacterExist())
         return;
-    CollisionCorrectObjPos(m_EntityAlife.Position(), true);
+
+    if (!skip_correct)
+        CollisionCorrectObjPos(m_EntityAlife.Position(), true);
     CreateCharacter();
 }
 
@@ -588,6 +602,20 @@ void CCharacterPhysicsSupport::SpawnCharacterCreate()
 {
     if (HACK_TERRIBLE_DONOT_COLLIDE_ON_SPAWN(m_EntityAlife)) //||  m_EntityAlife.animation_movement_controlled( )
         return;
+
+    // P1 (plans/optimization_spawn): Device.dwPrecacheFrame is the engine's own "still loading the
+    // level" signal — CALifeUpdateManager::update_switch passes (dwPrecacheFrame > 0) as the
+    // "iterate as first time" flag, which is exactly what makes ALife switch the whole level online in
+    // one unbudgeted burst (see safe_map_iterator_inline.h: time_over() is disabled while first_update).
+    // That burst is the M_SPAWN flood behind the slow CLevel::ProcessGameEvents. It is set by
+    // Device.PreCache(60) at the end of net_start_client6 and in game_sv_Single::restart_simulator
+    // (new game and save load), and decremented per frame in RenderEnd, so it is non-zero for exactly
+    // those first frames and zero for every spawn during actual gameplay.
+    // The actor is excluded on purpose: it is a single activation per load (nothing to save) and
+    // losing its position correction risks the player sticking in geometry right after loading.
+    // When precaching is disabled (GetForceGPU_REF / dedicated) dwPrecacheFrame stays 0 and this
+    // simply falls back to the original always-correct behavior.
+    m_skip_spawn_position_correct = (m_eType != etActor) && (Device.dwPrecacheFrame != 0);
     CreateCharacterSafe();
     // if( m_eType != etStalker )
     //	CreateCharacterSafe();
@@ -1129,7 +1157,15 @@ bool CCharacterPhysicsSupport::CollisionCorrectObjPos(const Fvector& start_from,
     shift.add(activation_pos);
     vbox.mul(2.f);
     activation_pos.add(shift, m_EntityAlife.Position());
-    bool not_collide_characters = !DoCharacterShellCollide() && !character_create;
+    // P1 (plans/optimization_spawn): for character_create the activation shape used to always collide
+    // with other characters. If it touched a frozen neighbor (dense NPC group), NearCallback woke that
+    // neighbor for the rest of this Activate() (see CPHObject::activate/UnFreeze), which could wake ITS
+    // neighbors in turn — a cascade that shows up as a huge ISpatial_DB::q_box count under one net_Spawn
+    // during level/save load. The freshly spawned character still gets pushed out of the level geometry;
+    // it just won't push against other characters via this activation shape (normal character-vs-character
+    // collision resumes once both characters are simulating normally).
+    bool not_collide_characters = (!DoCharacterShellCollide() && !character_create) ||
+        (character_create && ph_console::ph_spawn_char_no_collide_chars != 0);
     bool set_rotation = !character_create;
 
     if (!_valid(activation_pos) || !_valid(vbox))

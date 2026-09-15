@@ -283,6 +283,9 @@ void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2)
 
 void CollideStatic(dGeomID o2, CPHObject* obj2)
 {
+    // P1 (plans/optimization_spawn): candidate for where per-Step() time actually goes during spawn
+    // (dCollide against level statics via CDB::box_query), as opposed to the cheap ISpatial_DB::q_box.
+    ZoneScoped;
     CPHIsland* island2 = obj2->DActiveIsland();
     CollideIntoGroup(ph_world->GetMeshGeom(), o2, ContactGroup, island2, island2->MaxJoints());
 }
