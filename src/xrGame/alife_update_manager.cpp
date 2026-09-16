@@ -88,6 +88,10 @@ void CALifeUpdateManager::update_switch()
 {
     init_ef_storage();
 
+    // Switching an object can release it (and whatever it drags along); keep the objects alive
+    // until the pass is over, the code that asked for the release is still standing on them.
+    const destruction_lock lock(*this);
+
     START_PROFILE("ALife/switch");
     graph().level().update(CSwitchPredicate(this), Device.dwPrecacheFrame > 0);
     STOP_PROFILE
@@ -97,6 +101,11 @@ void CALifeUpdateManager::update_scheduled(bool init_ef)
 {
     if (init_ef)
         init_ef_storage();
+
+    // An object's update - the scripted squads in particular - regularly ends up releasing itself
+    // (sim_squad_scripted:remove_npc / remove_squad on the last member). Postpone the delete until
+    // the whole pass is done, otherwise the rest of the update runs on freed memory.
+    const destruction_lock lock(*this);
 
     START_PROFILE("ALife/scheduled");
     scheduled().update();

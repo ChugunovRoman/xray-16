@@ -134,6 +134,9 @@ public:
     IC void enable(bool value);
 
 public:
+    // The list belongs to the group: it is null for a member that is not registered in one
+    // (set_squad_objects(0)). Check this before touching objects().
+    IC bool has_objects() const { return m_objects != nullptr; }
     IC const VISIBLES& objects() const;
     IC const RAW_VISIBLES& raw_objects() const;
     IC const NOT_YET_VISIBLES& not_yet_visible_objects() const;

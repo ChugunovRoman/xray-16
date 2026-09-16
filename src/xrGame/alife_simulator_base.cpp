@@ -22,6 +22,7 @@
 #include "xrAICore/Navigation/level_graph.h"
 #include "inventory_upgrade_manager.h"
 #include "Level.h"
+#include <algorithm>
 
 #ifdef DEBUG
 #include "alife_simulator_base_inline.h"
@@ -44,6 +45,7 @@ CALifeSimulatorBase::CALifeSimulatorBase(IPureServer* server, LPCSTR section)
     m_groups = 0;
     m_registry_container = 0;
     m_upgrade_manager = 0;
+    m_destruction_lock = 0;
 
     random().seed(u32(CPU::QPC() & 0xffffffff));
     m_can_register_objects = true;
@@ -51,8 +53,37 @@ CALifeSimulatorBase::CALifeSimulatorBase(IPureServer* server, LPCSTR section)
 
 CALifeSimulatorBase::~CALifeSimulatorBase() { VERIFY(!m_initialized); }
 void CALifeSimulatorBase::destroy() { unload(); }
+void CALifeSimulatorBase::lock_destruction() { ++m_destruction_lock; }
+
+void CALifeSimulatorBase::unlock_destruction()
+{
+    VERIFY(m_destruction_lock);
+    if (!m_destruction_lock)
+        return;
+
+    --m_destruction_lock;
+    if (!m_destruction_lock)
+        flush_deferred_destruction();
+}
+
+void CALifeSimulatorBase::flush_deferred_destruction()
+{
+    // entity_Destroy can run script destructors, which in theory can release something else -
+    // pop before destroying so that a nested push does not invalidate what we are iterating.
+    while (!m_deferred_destruction.empty())
+    {
+        CSE_Abstract* object = m_deferred_destruction.back();
+        m_deferred_destruction.pop_back();
+        server().entity_Destroy(object);
+    }
+}
+
 void CALifeSimulatorBase::unload()
 {
+    // The objects are already out of every registry, so nobody else is going to free them.
+    m_destruction_lock = 0;
+    flush_deferred_destruction();
+
     xr_delete(m_objects);
     xr_delete(m_header);
     xr_delete(m_time_manager);
@@ -268,8 +299,16 @@ void CALifeSimulatorBase::release(CSE_Abstract* abstract, bool alife_query)
             smart_cast<void*>(abstract));
     }
 #endif
-    CSE_ALifeDynamicObject* object = objects().object(abstract->ID);
-    VERIFY(object);
+    CSE_ALifeDynamicObject* object = objects().object(abstract->ID, true);
+    if (!object)
+    {
+        // Already released - a second release() used to throw from the object registry. The window
+        // for this got wider once destruction is postponed (see m_destruction_lock), so just say so
+        // and leave: the object is out of every registry and its delete is already scheduled.
+        Msg("! [GW] CALifeSimulator::release: object [%s] id=%u is not registered any more, ignored",
+            abstract->name_replace(), u32(abstract->ID));
+        return;
+    }
 
     if (!object->children.empty())
     {
@@ -294,8 +333,22 @@ void CALifeSimulatorBase::release(CSE_Abstract* abstract, bool alife_query)
 
     object->m_bALifeControl = false;
 
-    if (alife_query)
-        server().entity_Destroy(abstract);
+    if (!alife_query)
+        return;
+
+    if (m_destruction_lock)
+    {
+        // Somebody up the stack (C++ update or the script frames it called into) may still be
+        // holding this object - see lock_destruction(). It is unregistered already, only the
+        // delete is postponed until the pass is over.
+        if (std::find(m_deferred_destruction.begin(), m_deferred_destruction.end(), abstract) ==
+            m_deferred_destruction.end())
+            m_deferred_destruction.push_back(abstract);
+
+        return;
+    }
+
+    server().entity_Destroy(abstract);
 }
 
 void CALifeSimulatorBase::append_item_vector(OBJECT_VECTOR& tObjectVector, ITEM_P_VECTOR& tItemList)

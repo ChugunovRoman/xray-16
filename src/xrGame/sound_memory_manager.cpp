@@ -365,10 +365,13 @@ struct CSoundObjectPredicate
 
 void CSoundMemoryManager::remove_links(IGameObject* object)
 {
-    VERIFY(m_sounds);
-    SOUNDS::iterator I = std::find_if(m_sounds->begin(), m_sounds->end(), CSoundObjectPredicate(object));
-    if (I != m_sounds->end())
-        m_sounds->erase(I);
+    // Group-owned list, null for a member outside any group - see CVisualMemoryManager::remove_links.
+    if (m_sounds)
+    {
+        SOUNDS::iterator I = std::find_if(m_sounds->begin(), m_sounds->end(), CSoundObjectPredicate(object));
+        if (I != m_sounds->end())
+            m_sounds->erase(I);
+    }
 
 #ifdef USE_SELECTED_SOUND
     if (!m_selected_sound)

@@ -127,15 +127,25 @@ IC bool entity_ids_equal_safe(const CEntity* a, const CEntity* b)
     return a->ID() == b->ID();
 #endif
 }
+
+// The registry can desync once and then every frame; log the first occurrences verbatim, then
+// one in 512, so a recurrence stays visible without flooding the log.
+bool log_rare(u32& counter)
+{
+    ++counter;
+    return (counter <= 16) || ((counter % 512) == 0);
+}
 } // namespace
 
 CGroupHierarchyHolder::~CGroupHierarchyHolder()
 {
     VERIFY(m_members.empty());
-    VERIFY(!m_visible_objects);
-    VERIFY(!m_sound_objects);
-    VERIFY(!m_hit_objects);
     VERIFY(!m_agent_manager);
+
+    // The group owns the senses buffers for its whole life - see unregister_in_agent_manager.
+    xr_delete(m_visible_objects);
+    xr_delete(m_sound_objects);
+    xr_delete(m_hit_objects);
 }
 
 void CGroupHierarchyHolder::lazy_ensure_agent_manager_for_stalker(CAI_Stalker* stalker)
@@ -188,9 +198,21 @@ void CGroupHierarchyHolder::update_leader()
 void CGroupHierarchyHolder::register_in_group(CEntity* member)
 {
     VERIFY(member);
-    VERIFY3(std::find(m_members.begin(), m_members.end(), member) == m_members.cend(), "Specified group member has already been found", member->cName().c_str());
+    // VERIFY3 is compiled out in release, where a double registration used to put the same member
+    // into the registry twice - the second unregister then dropped somebody else.
+    if (std::find(m_members.begin(), m_members.end(), member) != m_members.end())
+    {
+        static u32 s_reported = 0;
+        if (log_rare(s_reported))
+            Msg("! [GW] register_in_group: [%s] is already registered in this group, ignored",
+                member->cName().c_str());
+        return;
+    }
 
-    if (m_members.empty())
+    // The senses buffers belong to the group and every member keeps a raw pointer to them
+    // (register_in_group_senses). They are created once and live as long as the holder does -
+    // see unregister_in_agent_manager and ~CGroupHierarchyHolder.
+    if (!m_visible_objects)
     {
         m_visible_objects = xr_new<VISIBLE_OBJECTS>();
         m_sound_objects = xr_new<SOUND_OBJECTS>();
@@ -245,7 +267,17 @@ void CGroupHierarchyHolder::unregister_in_group(CEntity* member)
 {
     VERIFY(member);
     MEMBER_REGISTRY::iterator I = std::find(m_members.begin(), m_members.end(), member);
-    VERIFY3(I != m_members.end(), "Specified group member cannot be found", member->cName().c_str());
+    // In release VERIFY3 is a no-op and erase(end()) used to drop the LAST member of the registry
+    // instead - a live NPC silently disappeared from the group while still pointing at its buffers.
+    if (I == m_members.end())
+    {
+        static u32 s_reported = 0;
+        if (log_rare(s_reported))
+            Msg("! [GW] unregister_in_group: [%s] is not registered in this group, ignored",
+                member->cName().c_str());
+        return;
+    }
+
     m_members.erase(I);
 }
 
@@ -280,11 +312,19 @@ void CGroupHierarchyHolder::unregister_in_agent_manager(CEntity* member)
             xr_delete(m_agent_manager);
     }
 
+    // The buffers are NOT freed here any more. Every member holds a raw pointer to them and there
+    // is no way to prove from here that nobody kept one (net_Import rewrites team/squad/group
+    // without re-registering, so a member can end up unregistering in a different group than the
+    // one it is wired to). Emptying them keeps the memory bounded - one set per team/squad/group
+    // triple - while a stale pointer now finds a valid empty vector instead of freed memory.
     if (m_members.empty())
     {
-        xr_delete(m_visible_objects);
-        xr_delete(m_sound_objects);
-        xr_delete(m_hit_objects);
+        if (m_visible_objects)
+            m_visible_objects->clear();
+        if (m_sound_objects)
+            m_sound_objects->clear();
+        if (m_hit_objects)
+            m_hit_objects->clear();
     }
 }
 

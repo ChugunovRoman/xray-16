@@ -71,13 +71,19 @@ void CEntity::Die(IGameObject* who)
     set_ready_to_save();
     SetfHealth(-1.f);
 
-    if (IsGameTypeSingle())
+    // Only a member that actually got registered may be unregistered. net_Spawn registers under
+    // g_Alive() (Entity.cpp, CEntity::net_Spawn), so an entity spawned dead - or one that is dying
+    // a second time - never entered the group. Unregistering it anyway used to walk into
+    // CGroupHierarchyHolder::unregister_in_group with an iterator equal to end(); the VERIFY there
+    // is compiled out in release and the erase silently dropped a live member from the registry.
+    // The group then looked empty and freed the visible/sound/hit vectors its live members still
+    // point at - which is the dangling pointer that surfaces in object_id().
+    if (m_registered_member)
     {
-        VERIFY(m_registered_member);
+        m_registered_member = false;
+        if (IsGameTypeSingle())
+            Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()).unregister_member(this);
     }
-    m_registered_member = false;
-    if (IsGameTypeSingle())
-        Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()).unregister_member(this);
 }
 
 //обновление состояния

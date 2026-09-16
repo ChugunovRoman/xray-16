@@ -151,6 +151,10 @@ bool CScriptEntity::CheckTypeVisibility(const char* section_name)
     if (!m_monster)
         return (false);
 
+    // visible_now() guards this, this overload used to dereference the null group list directly.
+    if (!m_monster->memory().visual().has_objects())
+        return (false);
+
     CVisualMemoryManager::VISIBLES::const_iterator I = m_monster->memory().visual().objects().begin();
     CVisualMemoryManager::VISIBLES::const_iterator E = m_monster->memory().visual().objects().end();
     for (; I != E; ++I)

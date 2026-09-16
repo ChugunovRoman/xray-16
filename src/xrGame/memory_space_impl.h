@@ -104,6 +104,15 @@ IC u16 object_id(const T* object)
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
+        // Reaching this point means a memory list still holds a pointer to a destroyed object, i.e.
+        // some remove_links path did not run. The handler keeps the game alive, but silence here
+        // is what let the defect live: report it, rate limited, so a recurrence is visible.
+        static u32 s_reported = 0;
+        ++s_reported;
+        if (s_reported <= 16 || (s_reported % 1000) == 0)
+            Msg("! [GW] object_id: dangling object pointer %p in a memory list (occurrence %u) - "
+                "a remove_links path was missed",
+                (void*)object, s_reported);
         return u16(0xffff);
     }
 #else

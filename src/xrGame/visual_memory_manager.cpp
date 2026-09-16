@@ -665,8 +665,11 @@ void CVisualMemoryManager::remove(const MemorySpace::CVisibleObject* visible_obj
 
 void CVisualMemoryManager::remove_links(IGameObject* object)
 {
+    // m_objects belongs to the group, and set_squad_objects(0) leaves it null for a member that is
+    // not registered in one. The VERIFY below used to be the only guard, and it is compiled out in
+    // release builds.
+    if (m_objects)
     {
-        VERIFY(m_objects);
         VISIBLES::iterator I = std::find_if(m_objects->begin(), m_objects->end(), CVisibleObjectPredicateEx(object));
         if (I != m_objects->end())
             m_objects->erase(I);

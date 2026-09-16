@@ -61,6 +61,10 @@ protected:
     // temp
     ALife::SCHEDULE_P_VECTOR m_tpaCombatGroups[2];
 
+    // Objects whose destruction has been postponed until the running ALife pass is over.
+    u32 m_destruction_lock;
+    xr_vector<CSE_Abstract*> m_deferred_destruction;
+
 protected:
     CALifeSimulatorHeader& header();
     CALifeTimeManager& time();
@@ -111,6 +115,31 @@ public:
     void register_object(CSE_ALifeDynamicObject* object, bool add_object = false);
     void unregister_object(CSE_ALifeDynamicObject* object, bool alife_query = true);
     void release(CSE_Abstract* object, bool alife_query = true);
+
+    // While an ALife pass is running, a script can ask to release the very object that is being
+    // updated (sim_squad_scripted:remove_npc ends with alife():release(self) once the squad loses
+    // its last member). Deleting it right there leaves both the rest of CSE_***::update and the
+    // Lua frames above it working on freed memory. Under the lock the object is still unregistered
+    // immediately - alife():object(id) reports it as gone - but the delete waits for the pass to
+    // finish.
+    void lock_destruction();
+    void unlock_destruction();
+    bool destruction_locked() const { return m_destruction_lock > 0; }
+    void flush_deferred_destruction();
+
+    struct destruction_lock
+    {
+        CALifeSimulatorBase& m_simulator;
+
+        explicit destruction_lock(CALifeSimulatorBase& simulator) : m_simulator(simulator)
+        {
+            m_simulator.lock_destruction();
+        }
+        ~destruction_lock() { m_simulator.unlock_destruction(); }
+
+        destruction_lock(const destruction_lock&) = delete;
+        destruction_lock& operator=(const destruction_lock&) = delete;
+    };
     void create(
         CSE_ALifeDynamicObject*& object, CSE_ALifeDynamicObject* spawn_object, const ALife::_SPAWN_ID& spawn_id);
     void create(CSE_ALifeObject* object);

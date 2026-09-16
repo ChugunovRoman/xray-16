@@ -479,12 +479,22 @@ Fvector CMemoryManager::memory_position(const IGameObject* object) const
 
 void CMemoryManager::remove_links(IGameObject* object)
 {
-    if (m_object->g_Alive())
-    {
-        visual().remove_links(object);
-        sound().remove_links(object);
-        hit().remove_links(object);
-    }
+    if (!object)
+        return;
+
+    // The visual/sound/hit lists are NOT owned by this member: CGroupHierarchyHolder creates one
+    // set per group and every member points at it through set_squad_objects(). Whether this
+    // particular member is alive therefore says nothing about whether the shared list holds a
+    // pointer to the object being destroyed - and a pointer left behind outlives the member that
+    // put it there. It then surfaces as an access violation in object_id() the moment anything
+    // walks the list, typically in a freshly spawned NPC that inherited the group's list and had
+    // a script ask it npc:see(actor) straight away.
+    // The old g_Alive() test guarded the real problem, which is that the pointer can be null for a
+    // member that is not registered in a group. That is now checked where it belongs, in each of
+    // the three managers.
+    visual().remove_links(object);
+    sound().remove_links(object);
+    hit().remove_links(object);
 
     danger().remove_links(object);
     enemy().remove_links(object);
