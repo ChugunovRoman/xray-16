@@ -22,6 +22,9 @@ CUITalkDialogWnd::CUITalkDialogWnd()
       mechanic_mode(false),
       m_ClickedQuestionID(""),
       m_btn_pos(),
+      m_btn_upgrade_pos(),
+      m_btn_single_pos(),
+      UIToUpgradeButton(nullptr),
       UIToExitButton(nullptr),
       UIOurIcon(nullptr),
       UIOthersIcon(nullptr),
@@ -97,6 +100,21 @@ void CUITalkDialogWnd::InitTalkDialogWnd()
 
     m_btn_pos[0] = UIToTradeButton.GetWndPos();
 
+    //отдельная кнопка ремонта/модификации (необязательный узел, см. UIToUpgradeButton)
+    UIToUpgradeButton = UIHelper::Create3tButton(*m_uiXml, "button_upgrade", this, false);
+    if (UIToUpgradeButton)
+    {
+        m_btn_upgrade_pos = UIToUpgradeButton->GetWndPos();
+        // Both buttons are laid out symmetrically, so the middle of their xml positions
+        // centers whichever button is left alone.
+        m_btn_single_pos.set((m_btn_pos[0].x + m_btn_upgrade_pos.x) / 2.0f, m_btn_pos[0].y);
+    }
+    else
+    {
+        m_btn_upgrade_pos = m_btn_pos[0];
+        m_btn_single_pos = m_btn_pos[0];
+    }
+
     UIToExitButton = UIHelper::Create3tButton(*m_uiXml, "button_exit", this, false);
     if (UIToExitButton)
     {
@@ -121,7 +139,11 @@ void CUITalkDialogWnd::InitTalkDialogWnd()
 
     AddCallback(&UIToTradeButton, BUTTON_CLICKED, CUIWndCallback::void_function(this, &CUITalkDialogWnd::OnTradeClicked));
 
-    //AddCallbackStr("upgrade_btn", BUTTON_CLICKED, CUIWndCallback::void_function(this, &CUITalkDialogWnd::OnUpgradeClicked));
+    if (UIToUpgradeButton)
+    {
+        Register(UIToUpgradeButton);
+        AddCallback(UIToUpgradeButton, BUTTON_CLICKED, CUIWndCallback::void_function(this, &CUITalkDialogWnd::OnUpgradeClicked));
+    }
 
     if (UIToExitButton)
     {
@@ -159,7 +181,9 @@ void CUITalkDialogWnd::OnQuestionClicked(CUIWindow* w, void*)
 void CUITalkDialogWnd::OnExitClicked(CUIWindow* w, void*) { m_pParent->StopTalk(); }
 void CUITalkDialogWnd::OnTradeClicked(CUIWindow* w, void*)
 {
-    if (mechanic_mode)
+    // With a separate upgrade button this one always opens trade;
+    // without it the old behaviour stands: for a mechanic it opens the upgrade window instead.
+    if (mechanic_mode && !UIToUpgradeButton)
     {
         GetTop()->SendMessage(this, TALK_DIALOG_UPGRADE_BUTTON_CLICKED);
     }
@@ -303,7 +327,22 @@ void CUITalkDialogWnd::SetOsoznanieMode(bool b)
         UIDialogFrameTop->Show(!b);
 
     UIToTradeButton.Show(!b);
-    if (mechanic_mode)
+
+    if (UIToUpgradeButton)
+    {
+        // Separate buttons: the trade button keeps its own caption for everyone,
+        // the upgrade one takes its caption and hint from the xml node.
+        // The hotkey belongs to repair here, so the trade hint must not advertise it.
+        UIToUpgradeButton->Show(!b && mechanic_mode);
+
+        if (StringTable().has_translation("ui_st_talk_trade_btn_hint"))
+            UIToTradeButton.m_hint_text = "ui_st_talk_trade_btn_hint";
+        else if (StringTable().has_translation("ui_st_trade_hint"))
+            UIToTradeButton.m_hint_text = "ui_st_trade_hint";
+        UIToTradeButton.TextItemControl()->SetTextST(
+            StringTable().has_translation("ui_st_talk_trade_btn") ? "ui_st_talk_trade_btn" : "ui_st_trade");
+    }
+    else if (mechanic_mode)
     {
         if (StringTable().has_translation("ui_st_upgrade_hint"))
             UIToTradeButton.m_hint_text = "ui_st_upgrade_hint";
@@ -317,9 +356,35 @@ void CUITalkDialogWnd::SetOsoznanieMode(bool b)
     }
 }
 
-void CUITalkDialogWnd::UpdateButtonsLayout(bool b_disable_break, bool trade_enabled)
+void CUITalkDialogWnd::UpdateButtonsLayout(bool b_disable_break, bool trade_enabled, bool upgrade_enabled)
 {
     UIToTradeButton.Show(trade_enabled);
+
+    if (UIToUpgradeButton)
+    {
+        UIToUpgradeButton->Show(upgrade_enabled);
+
+        if (UIToExitButton)
+            UIToExitButton->Show(!b_disable_break);
+
+        // Trade and repair share one row: both shown - their own xml places,
+        // only one shown - the centered place.
+        if (trade_enabled && upgrade_enabled)
+        {
+            UIToTradeButton.SetWndPos(m_btn_pos[0]);
+            UIToUpgradeButton->SetWndPos(m_btn_upgrade_pos);
+        }
+        else if (trade_enabled)
+        {
+            UIToTradeButton.SetWndPos(m_btn_single_pos);
+        }
+        else if (upgrade_enabled)
+        {
+            UIToUpgradeButton->SetWndPos(m_btn_single_pos);
+        }
+
+        return;
+    }
 
     if (UIToExitButton)
     {

@@ -72,7 +72,14 @@ void CUITalkWnd::InitTalkDialog()
     UITalkDialogWnd->mechanic_mode = m_pOthersInvOwner->SpecificCharacter().upgrade_mechanic();
     UITalkDialogWnd->SetOsoznanieMode(m_pOthersInvOwner->NeedOsoznanieMode());
     UITalkDialogWnd->Show();
-    UITalkDialogWnd->UpdateButtonsLayout(b_disable_break, m_pOthersInvOwner->IsTradeEnabled());
+    UITalkDialogWnd->UpdateButtonsLayout(b_disable_break, m_pOthersInvOwner->IsTradeEnabled(), UpgradeAllowed());
+}
+
+// The repair button depends on the mechanic flag only: unlike trade, it must survive
+// the partner having trade turned off (wounded, hostile faction).
+bool CUITalkWnd::UpgradeAllowed() const
+{
+    return UITalkDialogWnd->mechanic_mode && !m_pOthersInvOwner->NeedOsoznanieMode();
 }
 
 void CUITalkWnd::InitOthersStartDialog()
@@ -217,7 +224,7 @@ void CUITalkWnd::Update()
     inherited::Update();
     UpdateCameraDirection(smart_cast<CGameObject*>(m_pOthersInvOwner));
 
-    UITalkDialogWnd->UpdateButtonsLayout(b_disable_break, m_pOthersInvOwner->IsTradeEnabled());
+    UITalkDialogWnd->UpdateButtonsLayout(b_disable_break, m_pOthersInvOwner->IsTradeEnabled(), UpgradeAllowed());
 
     if (playing_sound())
     {
@@ -368,7 +375,16 @@ bool CUITalkWnd::OnKeyboardAction(int dik, EUIMessages keyboard_action)
         {
             if (!m_pOthersInvOwner->NeedOsoznanieMode())
             {
-                if (UITalkDialogWnd->mechanic_mode)
+                // With separate buttons the hotkey still belongs to repair for a mechanic,
+                // and falls back to trade when repair is not available.
+                if (UITalkDialogWnd->HasUpgradeButton())
+                {
+                    if (UpgradeAllowed())
+                        SwitchToUpgrade();
+                    else if (m_pOthersInvOwner->IsTradeEnabled())
+                        SwitchToTrade();
+                }
+                else if (UITalkDialogWnd->mechanic_mode)
                     SwitchToUpgrade();
                 else
                     SwitchToTrade();

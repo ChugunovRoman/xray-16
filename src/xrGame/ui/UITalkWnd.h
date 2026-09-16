@@ -49,6 +49,7 @@ public:
     bool OnControllerAction(int axis, const ControllerAxisState& state, EUIMessages controller_action) override;
     void SwitchToTrade();
     void SwitchToUpgrade();
+    bool UpgradeAllowed() const;
     void AddIconedMessage(LPCSTR caption, LPCSTR text, LPCSTR texture_name, LPCSTR templ_name);
     void AddIconedMessage(pcstr text, pcstr texture_name, Frect texture_rect, pcstr templ_name);
 

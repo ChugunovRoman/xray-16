@@ -42,7 +42,14 @@ public:
     CUIWindow* UIDialogFrameBottom{};
 
     Fvector2 m_btn_pos[3];
+    // Positions for the optional separate upgrade button (xml node "button_upgrade"):
+    // its own place next to the trade button, and the centered place used when only one of them is shown.
+    Fvector2 m_btn_upgrade_pos;
+    Fvector2 m_btn_single_pos;
     CUI3tButton UIToTradeButton;
+    // Separate "repair" button for mechanics. Null when the talk xml has no "button_upgrade" node:
+    // in that case the trade button keeps switching itself to upgrade mode (legacy behaviour).
+    CUI3tButton* UIToUpgradeButton;
     CUI3tButton* UIToExitButton;
 
     // Characters info
@@ -60,9 +67,10 @@ public:
 
     void SetOurName(pcstr name);
     void SetOthersName(pcstr name);
+    bool HasUpgradeButton() const { return UIToUpgradeButton != nullptr; }
     void SetOsoznanieMode(bool b);
     void SetTradeMode();
-    void UpdateButtonsLayout(bool b_disable_break, bool trade_enabled);
+    void UpdateButtonsLayout(bool b_disable_break, bool trade_enabled, bool upgrade_enabled);
 
     void TryScrollAnswersList(bool down);
     void FocusOnNextQuestion(bool next, bool loop) const;
