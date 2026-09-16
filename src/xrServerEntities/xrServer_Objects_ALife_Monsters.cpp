@@ -1272,7 +1272,18 @@ bool CSE_ALifeMonsterAbstract::need_update(CSE_ALifeDynamicObject* object)
 void CSE_ALifeMonsterAbstract::kill()
 {
     if (m_group_id != 0xffff)
-        ai().alife().groups().object(m_group_id).unregister_member(ID);
+    {
+        // See CALifeGroupRegistry::object(id, no_assert): the reference-returning overload
+        // dereferences end() in release builds when the squad is already gone.
+        if (CSE_ALifeOnlineOfflineGroup* group = ai().alife().groups().object(m_group_id, true))
+            group->unregister_member(ID);
+        else
+        {
+            Msg("! [GW] kill: object [%s] id=%u refers to squad %u which no longer exists, membership cleared",
+                name_replace(), u32(ID), u32(m_group_id));
+            m_group_id = 0xffff;
+        }
+    }
     set_health(0.f);
 }
 bool CSE_ALifeMonsterAbstract::has_detector()

@@ -98,5 +98,16 @@ void CALifeSimulatorBase::on_death(CSE_Abstract* killed, CSE_Abstract* killer)
     if (member->m_group_id == 0xffff)
         return;
 
-    groups().object(member->m_group_id).notify_on_member_death(member);
+    // A member can outlive its squad (the squad is released while the corpse is still around), and
+    // the reference-returning groups().object() dereferences end() in release builds.
+    CSE_ALifeOnlineOfflineGroup* group = groups().object(member->m_group_id, true);
+    if (!group)
+    {
+        Msg("! [GW] on_death: object [%s] id=%u refers to squad %u which no longer exists, membership cleared",
+            member->name_replace(), u32(member->ID), u32(member->m_group_id));
+        member->m_group_id = 0xffff;
+        return;
+    }
+
+    group->notify_on_member_death(member);
 }

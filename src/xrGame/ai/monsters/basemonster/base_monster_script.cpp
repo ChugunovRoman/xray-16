@@ -190,9 +190,12 @@ bool CBaseMonster::bfAssignMovement(CScriptEntityAction* tpEntityAction)
         CSE_ALifeMonsterAbstract* const i_am =
             smart_cast<CSE_ALifeMonsterAbstract*>(ai().alife().objects().object(ID()));
         VERIFY(i_am);
-        CSE_ALifeOnlineOfflineGroup& group = ai().alife().groups().object(i_am->m_group_id);
+        // Release builds compile the VERIFY inside the reference-returning object() out and
+        // dereference end() when the squad is gone; a monster can outlive its squad.
+        CSE_ALifeOnlineOfflineGroup* group =
+            i_am ? ai().alife().groups().object(i_am->m_group_id, true) : nullptr;
 
-        ALife::_OBJECT_ID leader_id = group.commander_id();
+        ALife::_OBJECT_ID leader_id = group ? group->commander_id() : (ALife::_OBJECT_ID)(-1);
         bool const should_follow_leader = leader_id != (ALife::_OBJECT_ID)(-1) && leader_id != ID();
         CCustomMonster* const leader =
             should_follow_leader ? smart_cast<CCustomMonster*>(Level().Objects.net_Find(leader_id)) : NULL;

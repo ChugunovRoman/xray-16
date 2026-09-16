@@ -47,7 +47,19 @@ void CSE_ALifeMonsterAbstract::on_unregister()
     RELATION_REGISTRY().ClearRelations(ID);
     brain().on_unregister();
     if (m_group_id != 0xffff)
-        ai().alife().groups().object(m_group_id).unregister_member(ID);
+    {
+        // See CALifeGroupRegistry::object(id, no_assert): the reference-returning overload
+        // dereferences end() in release builds when the squad is already gone.
+        if (CSE_ALifeOnlineOfflineGroup* group = ai().alife().groups().object(m_group_id, true))
+            group->unregister_member(ID);
+        else
+        {
+            Msg("! [GW] on_unregister: object [%s] id=%u refers to squad %u which no longer exists, "
+                "membership cleared",
+                name_replace(), u32(ID), u32(m_group_id));
+            m_group_id = 0xffff;
+        }
+    }
 }
 
 void CSE_ALifeMonsterAbstract::update()

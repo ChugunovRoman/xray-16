@@ -39,6 +39,17 @@ CALifeGroupRegistry::OBJECT& CALifeGroupRegistry::object(const ALife::_OBJECT_ID
     return (*(*I).second);
 }
 
+CALifeGroupRegistry::OBJECT* CALifeGroupRegistry::object(const ALife::_OBJECT_ID& id, bool no_assert) const
+{
+    OBJECTS::const_iterator I = objects().find(id);
+    if (I == objects().end())
+    {
+        VERIFY(no_assert);
+        return nullptr;
+    }
+    return ((*I).second);
+}
+
 void CALifeGroupRegistry::on_after_game_load()
 {
     OBJECTS::iterator I = m_objects.begin();

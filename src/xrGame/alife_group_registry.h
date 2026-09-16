@@ -27,6 +27,10 @@ public:
     void add(CSE_ALifeDynamicObject* object);
     void remove(CSE_ALifeDynamicObject* object);
     OBJECT& object(const ALife::_OBJECT_ID& id) const;
+    // The reference-returning overload above dereferences end() in release builds (its VERIFY is
+    // compiled out) whenever the id is unknown - and a member's m_group_id can outlive its squad.
+    // This overload reports the miss instead: nullptr, no undefined behaviour.
+    OBJECT* object(const ALife::_OBJECT_ID& id, bool no_assert) const;
     IC const OBJECTS& objects() const;
     void on_after_game_load();
 };

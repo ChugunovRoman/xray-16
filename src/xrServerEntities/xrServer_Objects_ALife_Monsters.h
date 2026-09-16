@@ -758,6 +758,11 @@ public:
     virtual bool need_update(CSE_ALifeDynamicObject* object);
     void register_member(ALife::_OBJECT_ID member_id);
     void unregister_member(ALife::_OBJECT_ID member_id);
+    // Validates m_members against the ALife object registry and returns the number of bad entries.
+    // The stored MEMBER* is null between STATE_Read and on_after_game_load, and goes stale whenever
+    // a member is destroyed without reaching unregister_member. Every consumer below dereferences
+    // it behind a VERIFY that release builds compile out, so the list is validated before use.
+    u32 sanitize_members(const char* where);
     void notify_on_member_death(MEMBER* member);
     MEMBER* member(ALife::_OBJECT_ID member_id, bool no_assert = false);
     virtual void on_before_register();

@@ -29,6 +29,14 @@ bool squad_trace_enabled()
     return Core.Params && std::strstr(Core.Params, "-squad_trace");
 }
 
+// Rate limit for the repair diagnostics: the first occurrences verbatim, then one in 512.
+// A broken squad must not be able to flood the log from the ALife update loop.
+bool log_rare(u32& counter)
+{
+    ++counter;
+    return (counter <= 16) || ((counter % 512) == 0);
+}
+
 void log_squad_trace_basic(const char* tag, const CSE_ALifeOnlineOfflineGroup* squad, ALife::_OBJECT_ID memberId = 0xffff)
 {
     if (!squad_trace_enabled() || !squad)
@@ -54,8 +62,63 @@ ALife::EMeetActionType CSE_ALifeOnlineOfflineGroup::tfGetActionType(
 bool CSE_ALifeOnlineOfflineGroup::bfActive() { return (!m_bOnline && !m_members.empty()); }
 CSE_ALifeDynamicObject* CSE_ALifeOnlineOfflineGroup::tpfGetBestDetector() { return (0); }
 bool CSE_ALifeOnlineOfflineGroup::need_update(CSE_ALifeDynamicObject* object) { return true; }
+u32 CSE_ALifeOnlineOfflineGroup::sanitize_members(const char* where)
+{
+    if (m_members.empty())
+        return 0;
+
+    u32 problems = 0;
+    // Erasing inside the loop would invalidate the AssociativeVector iterators - collect first.
+    xr_vector<ALife::_OBJECT_ID> lost;
+
+    MEMBERS::iterator I = m_members.begin();
+    MEMBERS::iterator E = m_members.end();
+    for (; I != E; ++I)
+    {
+        const ALife::_OBJECT_ID member_id = (*I).first;
+        // The ALife object registry is the authority. Never dereference the stored pointer before
+        // it has been confirmed against the registry: a destroyed member leaves a dangling one.
+        MEMBER* registered = smart_cast<MEMBER*>(ai().alife().objects().object(member_id, true));
+
+        if ((*I).second == registered && registered)
+            continue;
+
+        ++problems;
+        static u32 s_reported = 0;
+        const bool report = log_rare(s_reported);
+
+        if (!registered)
+        {
+            lost.push_back(member_id);
+            if (report)
+                Msg("! [GW] squad [%s] id=%u: member %u is not in the ALife object registry (%s), "
+                    "the entry is dropped (stored pointer %p)",
+                    name_replace(), u32(ID), u32(member_id), where, (void*)(*I).second);
+            continue;
+        }
+
+        if (report)
+            Msg("! [GW] squad [%s] id=%u: member %u pointer %s (%p -> %p) (%s), repaired from the registry",
+                name_replace(), u32(ID), u32(member_id), (*I).second ? "is stale" : "was not resolved",
+                (void*)(*I).second, (void*)registered, where);
+        (*I).second = registered;
+    }
+
+    for (const ALife::_OBJECT_ID member_id : lost)
+        m_members.erase(member_id);
+
+    // Mirrors unregister_member: an empty squad no longer occupies AI locations. redundant() then
+    // reports the squad as disposable and the simulation releases it on its own.
+    if (!lost.empty() && m_members.empty())
+        m_flags.set(flUsedAI_Locations, FALSE);
+
+    return problems;
+}
+
 void CSE_ALifeOnlineOfflineGroup::update()
 {
+    sanitize_members("update");
+
     if (m_bOnline && !m_members.empty())
     {
         MEMBER* commander = (*m_members.begin()).second;
@@ -160,17 +223,48 @@ void CSE_ALifeOnlineOfflineGroup::unregister_member(ALife::_OBJECT_ID member_id)
     //	CALifeLevelRegistry			&level = graph.level();
 
     MEMBERS::iterator I = m_members.find(member_id);
-    VERIFY(I != m_members.end());
-    VERIFY((*I).second->m_group_id == ID);
-    if (squad_trace_enabled())
+    if (I == m_members.end())
     {
-        Msg("[SQUAD_TRACE][unregister_member:group_id] squad_id=%u member=%u prev_group=%u new_group=%u member_alive=%s",
-            ID, member_id, (*I).second->m_group_id, u16(0xffff), (*I).second->g_Alive() ? "true" : "false");
+        // Unregistering the same member twice is reachable by design: the engine does it from
+        // CSE_ALifeMonsterAbstract::on_unregister/kill and from CALifeSimulatorBase::on_death,
+        // the scripts do it from sim_squad_scripted:on_npc_death/remove_npc/remove_squad. The old
+        // VERIFY was compiled out in release, and the code below then dereferenced end(): it wrote
+        // 0xffff through a garbage pointer, handed that pointer to the graph and to the ALife
+        // scheduler, and finished with erase(end()) - silent container corruption whose crash
+        // surfaces much later, in whatever iterates m_members next.
+        static u32 s_reported = 0;
+        if (log_rare(s_reported))
+            Msg("~ [GW] squad [%s] id=%u: unregister_member(%u) - no such member, ignored",
+                name_replace(), u32(ID), u32(member_id));
+        return;
     }
-    (*I).second->m_group_id = 0xffff;
 
-    graph.update((*I).second);
-    alife().scheduled().add((*I).second);
+    MEMBER* member = (*I).second;
+    // Only a pointer the registry still vouches for may be dereferenced (see sanitize_members).
+    if (!member || smart_cast<MEMBER*>(ai().alife().objects().object(member_id, true)) != member)
+    {
+        static u32 s_reported = 0;
+        if (log_rare(s_reported))
+            Msg("! [GW] squad [%s] id=%u: unregister_member(%u) - %s member pointer %p, "
+                "the entry is dropped without touching the object",
+                name_replace(), u32(ID), u32(member_id), member ? "stale" : "unresolved", (void*)member);
+        member = nullptr;
+    }
+
+    if (member)
+    {
+        VERIFY(member->m_group_id == ID);
+        if (squad_trace_enabled())
+        {
+            Msg("[SQUAD_TRACE][unregister_member:group_id] squad_id=%u member=%u prev_group=%u new_group=%u member_alive=%s",
+                ID, member_id, member->m_group_id, u16(0xffff), member->g_Alive() ? "true" : "false");
+        }
+        member->m_group_id = 0xffff;
+
+        graph.update(member);
+        alife().scheduled().add(member);
+    }
+
     m_members.erase(I);
 
     if (m_members.empty())
@@ -195,6 +289,8 @@ CSE_ALifeOnlineOfflineGroup::MEMBER* CSE_ALifeOnlineOfflineGroup::member(ALife::
 
 bool CSE_ALifeOnlineOfflineGroup::synchronize_location()
 {
+    sanitize_members("synchronize_location");
+
     if (m_bOnline && !m_members.empty())
     {
         MEMBER* member = (*m_members.begin()).second;
@@ -210,6 +306,7 @@ bool CSE_ALifeOnlineOfflineGroup::synchronize_location()
 void CSE_ALifeOnlineOfflineGroup::try_switch_online()
 {
     log_squad_trace_basic("try_switch_online", this);
+    sanitize_members("try_switch_online");
     if (m_members.empty())
         return;
 
@@ -250,6 +347,7 @@ void CSE_ALifeOnlineOfflineGroup::try_switch_online()
 void CSE_ALifeOnlineOfflineGroup::try_switch_offline()
 {
     log_squad_trace_basic("try_switch_offline", this);
+    sanitize_members("try_switch_offline");
     if (m_members.empty())
         return;
 
@@ -289,6 +387,7 @@ void CSE_ALifeOnlineOfflineGroup::try_switch_offline()
 void CSE_ALifeOnlineOfflineGroup::switch_online()
 {
     log_squad_trace_basic("switch_online:begin", this);
+    sanitize_members("switch_online");
     R_ASSERT(!m_bOnline);
     m_bOnline = true;
 
@@ -308,6 +407,7 @@ void CSE_ALifeOnlineOfflineGroup::switch_online()
 void CSE_ALifeOnlineOfflineGroup::switch_offline()
 {
     log_squad_trace_basic("switch_offline:begin", this);
+    sanitize_members("switch_offline");
     R_ASSERT(m_bOnline);
     m_bOnline = false;
 
@@ -369,7 +469,9 @@ void CSE_ALifeOnlineOfflineGroup::on_after_game_load()
         MEMBERS::const_iterator E = m_members.end();
         for (; I != E; ++I, ++i)
         {
-            VERIFY(!(*I).second);
+            // No VERIFY(!(*I).second) here any more: sanitize_members may have resolved the
+            // pointers from the registry before this runs. Only the ids matter - the members are
+            // re-registered from scratch below.
             *i = (*I).first;
         }
     }
@@ -393,6 +495,10 @@ CSE_ALifeOnlineOfflineGroup::MEMBERS const& CSE_ALifeOnlineOfflineGroup::squad_m
 u32 CSE_ALifeOnlineOfflineGroup::npc_count() const { return m_members.size(); }
 void CSE_ALifeOnlineOfflineGroup::clear_location_types()
 {
+    // Called from the scripts (sim_squad_scripted:set_location_types) on every smart-terrain
+    // arrival, i.e. long after any of the ways a member can disappear from under us.
+    sanitize_members("clear_location_types");
+
     m_tpaTerrain.clear();
     MEMBERS::iterator I = m_members.begin();
     MEMBERS::iterator E = m_members.end();
@@ -404,6 +510,8 @@ void CSE_ALifeOnlineOfflineGroup::clear_location_types()
 
 void CSE_ALifeOnlineOfflineGroup::add_location_type(LPCSTR mask)
 {
+    sanitize_members("add_location_type");
+
     setup_location_types_line(m_tpaTerrain, mask);
     MEMBERS::iterator I = m_members.begin();
     MEMBERS::iterator E = m_members.end();
@@ -429,6 +537,8 @@ void CSE_ALifeOnlineOfflineGroup::force_change_position(Fvector position)
 
 void CSE_ALifeOnlineOfflineGroup::on_failed_switch_online()
 {
+    sanitize_members("on_failed_switch_online");
+
     MEMBERS::const_iterator I = m_members.begin();
     MEMBERS::const_iterator E = m_members.end();
     for (; I != E; ++I)
