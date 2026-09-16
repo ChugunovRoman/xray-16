@@ -6,6 +6,7 @@
 
 #include "PS_instance.h"
 #include "IGame_Persistent.h"
+#include "ParticleWorker.h"
 
 CPS_Instance::CPS_Instance(bool destroy_on_game_load)
     : SpatialBase(g_pGamePersistent->SpatialSpace), m_destroy_on_game_load(destroy_on_game_load)
@@ -23,6 +24,10 @@ extern ENGINE_API bool g_bRendering;
 CPS_Instance::~CPS_Instance()
 {
     VERIFY(!g_bRendering);
+
+    // Belt and braces for delete paths that do not go through PSI_internal_delete.
+    ParticleWorker_Remove(this);
+
     auto it = g_pGamePersistent->ps_active.find(this);
     VERIFY(it != g_pGamePersistent->ps_active.end());
     g_pGamePersistent->ps_active.erase(it);
@@ -62,6 +67,11 @@ void CPS_Instance::PSI_destroy()
 //----------------------------------------------------
 void CPS_Instance::PSI_internal_delete()
 {
+    // The PreRender worker may still hold this pointer in its batch (destroy_particles ignores
+    // Locked() in release builds). Take it out - and wait for a running batch - before the object
+    // starts falling apart: ~CPS_Instance runs last, after the derived part is already gone.
+    ParticleWorker_Remove(this);
+
     CPS_Instance* self = this;
     xr_delete(self);
 }

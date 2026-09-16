@@ -605,6 +605,12 @@ void IGame_Persistent::destroy_particles(const bool& all_particles)
     ZoneScoped;
 
 #ifndef _EDITOR
+    // Called from net_Stop / Disconnect, which can run in FrameMove while the PreRender worker is
+    // still walking the particle batch. Drain the batch and drop the pending flags first, so the
+    // instances deleted below are not referenced any more (this is what Locked() guards in
+    // OnFrameBeforePreRender, and what the VERIFY in ~CParticlesObject checks in debug builds).
+    ParticleWorker_ShutdownBeforeNullCallback();
+
     ps_needtoplay.clear();
 
     while (ps_destroy.size())

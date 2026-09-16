@@ -7,6 +7,8 @@ class CPS_Instance;
 /** Async particle batch for `PreRenderThread` / `Device.ParticleWorkerCallback` (ixray-style). */
 
 ENGINE_API void ParticleWorker_Enqueue(CPS_Instance* inst);
+/** Drop an instance from the pending batch before it is deleted; waits out a running batch. */
+void ParticleWorker_Remove(CPS_Instance* inst);
 void ParticleWorker_BeginFrameCollect();
 void ParticleWorker_RunBatch();
 /** After `secondary_tasks.wait()`: clear batch and drop pending flags so pointers are not stale. */
