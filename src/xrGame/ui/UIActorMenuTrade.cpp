@@ -26,8 +26,6 @@
 
 #include "xrNetServer/NET_Messages.h"
 
-#include "xrCore/Threading/ParallelFor.hpp"
-
 class CAI_ObjectLocation;
 
 void CUIActorMenu::InitTradeMode()
@@ -85,16 +83,20 @@ bool is_item_in_list(CUIDragDropListEx* pList, PIItem item)
     return false;
 }
 
-void CUIActorMenu::FillPartnerInventoryContents()
+void CUIActorMenu::InitPartnerInventoryContents()
 {
-    m_pLists[eTradePartnerBagList]->ClearAll(true);
+    SetInvGridSize(m_pLists[eTradePartnerList]);
+    SetInvGridSize(m_pLists[eTradePartnerBagList]);
+    SetInvGridSize(m_pLists[eTradeActorList]);
+    SetInvGridSize(m_pLists[eTradeActorBagList]);
 
+    // Collect and refill within one frame. The old two-phase version cleared the list first and
+    // filled it two frames later, so every inventory change left the list blank for two frames.
     TIItemContainer items_list;
     m_pPartnerInvOwner->inventory().AddAvailableItems(items_list, true);
     std::sort(items_list.begin(), items_list.end(), InventoryUtilities::GreaterRoomInRuck);
 
-    SetInvGridSize(m_pLists[eTradePartnerList]);
-    SetInvGridSize(m_pLists[eTradePartnerBagList]);
+    m_pLists[eTradePartnerBagList]->ClearAll(true);
 
     for (PIItem item : items_list)
     {
@@ -104,28 +106,8 @@ void CUIActorMenu::FillPartnerInventoryContents()
             m_pLists[eTradePartnerBagList]->SetItem(itm);
         }
     }
+
     m_trade_partner_inventory_state = m_pPartnerInvOwner->inventory().ModifyFrame();
-
-    trade_list_is_filling = false;
-}
-void CUIActorMenu::InitPartnerInventoryContents()
-{
-    if (trade_list_is_filling)
-        return;
-
-    trade_list_is_filling = true;
-
-    SetInvGridSize(m_pLists[eTradePartnerList]);
-    SetInvGridSize(m_pLists[eTradePartnerBagList]);
-    SetInvGridSize(m_pLists[eTradeActorList]);
-    SetInvGridSize(m_pLists[eTradeActorBagList]);
-
-    items_trade_list.clear();
-    m_pPartnerInvOwner->inventory().AddAvailableItems(items_trade_list, true);
-
-    m_pLists[eTradePartnerBagList]->ClearAll(true);
-
-    latest_frame_trade_list_update = Device.dwFrame + 1;
 }
 
 void CUIActorMenu::ColorizeItem(CUICellItem* itm, bool colorize)

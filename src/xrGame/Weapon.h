@@ -126,7 +126,7 @@ public:
     bool bNVsecondVPavaible;
     bool bNVsecondVPstatus;
     bool bUseAttachmentSystem;
-    bool bCollectedAttachmentsForAI;
+    bool bCollectedAttachmentsForAI{false};
     bool bApplyAncorTransform{false};
 
     shared_str sDontDetachableSlots;
@@ -411,6 +411,10 @@ public:
     shared_str GetInstalledMagType();
     shared_str GetInstalledTacGripType();
     bool ResolveAddonConflictsBeforeAttach(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id = 0);
+    // True when the addon can take its resolved slot without detaching anything already installed.
+    // AI uses it to keep away from evicting addons: an evicted one respawns into the owner's
+    // inventory and would immediately be attached back, ping-ponging every frame.
+    bool CanAttachWithoutEviction(PIItem item) const;
 
     void SetScopeOffset(Ivector2 pos) { m_iScopeX = pos.x; m_iScopeY = pos.y; }
     void SetSilencerOffset(Ivector2 pos) { m_iSilencerX = pos.x; m_iSilencerY = pos.y; }
@@ -598,6 +602,10 @@ private:
     bool HasAddonConflict(const SAddonConflictDesc& lhs, const SAddonConflictDesc& rhs) const;
     bool IsAddonConflictDenyMode(const SAddonConflictDesc& lhs, const SAddonConflictDesc& rhs) const;
     void RemoveChildAddonConflicts(xr_vector<u32>& addon_ids) const;
+    // Dry run of ResolveAddonConflictsBeforeAttach: collects the installed addons that would have
+    // to be detached, without touching anything.
+    void CollectAddonConflicts(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id,
+        xr_vector<u32>& conflict_ids, bool& deny) const;
 
     // Ключ и операции для пресетов HUD FOV в прицеливании (per-weapon + per-scope)
     shared_str GetScopeHudFovKey() const;

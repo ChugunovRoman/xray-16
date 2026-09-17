@@ -4108,7 +4108,7 @@ void CWeapon::CollectAttachmentsAI(TIItemContainer& l_list)
         if (pScope)
         {
             const bool result = DeterminateParentSlotForAddon(pIItem, this, true);
-            if (result)
+            if (result && CanAttachWithoutEviction(pIItem))
                 Attach(pIItem, true);
         }
 
@@ -4233,12 +4233,14 @@ bool CWeapon::DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool fo
             attach_scope(plnk_1_slot);
             return true;
         }
-        if (plnk_1_slot_busy_but_compatible)
+        // Busy slots are for the actor only: letting AI pick one starts an attach/detach ping-pong,
+        // because the evicted addon respawns into the owner's inventory and is attached back.
+        if (!for_ai && plnk_1_slot_busy_but_compatible)
         {
             attach_scope(plnk_1_slot_busy_but_compatible);
             return true;
         }
-        if (wpn_1_slot_busy_but_compatible)
+        if (!for_ai && wpn_1_slot_busy_but_compatible)
         {
             attach_scope(wpn_1_slot_busy_but_compatible);
             return true;
@@ -4593,8 +4595,12 @@ void CWeapon::RemoveChildAddonConflicts(xr_vector<u32>& addon_ids) const
     addon_ids.erase(std::remove_if(addon_ids.begin(), addon_ids.end(), has_ancestor_in_list), addon_ids.end());
 }
 
-bool CWeapon::ResolveAddonConflictsBeforeAttach(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id)
+void CWeapon::CollectAddonConflicts(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id,
+    xr_vector<u32>& conflict_ids, bool& deny) const
 {
+    conflict_ids.clear();
+    deny = false;
+
     shared_str parent_override_section;
     if (parent_id != 0)
     {
@@ -4606,10 +4612,7 @@ bool CWeapon::ResolveAddonConflictsBeforeAttach(const shared_str& addon_section,
     SAddonConflictDesc new_desc = GetAddonConflictDesc(addon_section, slot_name, parent_override_section);
 
     if (new_desc.occupy_groups.empty() && new_desc.conflict_groups.empty())
-        return true;
-
-    xr_vector<u32> conflict_ids;
-    bool deny = false;
+        return;
 
     for (const auto& [installed_id, installed] : m_addon_items)
     {
@@ -4637,6 +4640,13 @@ bool CWeapon::ResolveAddonConflictsBeforeAttach(const shared_str& addon_section,
     }
 
     RemoveChildAddonConflicts(conflict_ids);
+}
+
+bool CWeapon::ResolveAddonConflictsBeforeAttach(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id)
+{
+    xr_vector<u32> conflict_ids;
+    bool deny = false;
+    CollectAddonConflicts(addon_section, slot_name, parent_id, conflict_ids, deny);
 
     if (conflict_ids.empty())
         return true;
@@ -4673,6 +4683,23 @@ bool CWeapon::ResolveAddonConflictsBeforeAttach(const shared_str& addon_section,
     }
 
     return true;
+}
+
+bool CWeapon::CanAttachWithoutEviction(PIItem item) const
+{
+    if (!item)
+        return false;
+
+    // The slot resolved for this addon must be free: Attach() would otherwise detach whatever
+    // sits there, and a detached addon is respawned back into the owner's inventory.
+    if (GetAddonFromSlot(item->parent_addon, item->attach_to_slot_name).second)
+        return false;
+
+    xr_vector<u32> conflict_ids;
+    bool deny = false;
+    CollectAddonConflicts(item->m_section_id, item->attach_to_slot_name, item->parent_addon, conflict_ids, deny);
+
+    return conflict_ids.empty();
 }
 
 bool CWeapon::HasAddonByName(shared_str name)

@@ -381,6 +381,9 @@ protected:
     void update_sell_info();
     bool tradable_item(CInventoryItem* inventory_item, const u16& current_owner_id);
     bool can_sell(CInventoryItem* item);
+    // Traders and mechanics carry addons as stock, not as gear: they must never equip them,
+    // otherwise the goods disappear from the counter into their own weapon.
+    bool keeps_addons_as_stock() const;
 
     bool non_conflicted(const CInventoryItem* item, const CWeapon* new_weapon) const;
     bool enough_ammo(const CWeapon* new_weapon) const;

@@ -119,11 +119,16 @@ void CAI_Stalker::attach_available_ammo(CWeapon* weapon)
             break;
     }
 }
+bool CAI_Stalker::keeps_addons_as_stock() const
+{
+    return m_is_trader || SpecificCharacter().upgrade_mechanic();
+}
+
 void CAI_Stalker::attach_available_addons(CWeapon* weapon)
 {
     if (!weapon)
         return;
-    if (m_is_trader)
+    if (keeps_addons_as_stock())
         return;
 
     TIItemContainer& l_list = inventory().m_ruck;
@@ -220,7 +225,10 @@ void CAI_Stalker::choose_weapon(ALife::EWeaponPriorityType weapon_priority_type)
     {
         buy_item_virtual(*best_weapon);
         attach_available_ammo(smart_cast<CWeapon*>(best_weapon->m_item));
-        attach_available_addons(smart_cast<CWeapon*>(best_weapon->m_item));
+        // No attach_available_addons() here on purpose: choose_weapon is only ever reached from
+        // update_sell_info(), i.e. from a CanTrade() query made by the trade UI. Attaching there
+        // mutated the NPC inventory while the UI was reading it, which rebuilt the partner list,
+        // which queried again. Addons picked up for real are handled by on_after_take().
     }
 }
 
@@ -282,8 +290,10 @@ void CAI_Stalker::select_items()
 
 void CAI_Stalker::update_sell_info()
 {
-    //	if (m_sell_info_actuality)
-    //		return;
+    // Reset by OnItemTake/OnItemDrop. Without this guard every CanTrade() query rebuilt the whole
+    // trade simulation, so opening the trade window ran it once per item in the partner's ruck.
+    if (m_sell_info_actuality)
+        return;
 
     m_sell_info_actuality = true;
     m_temp_items.clear();
@@ -485,30 +495,32 @@ void CAI_Stalker::on_after_take_scope(const CScope* pScope)
     if (!wpn1 && !wpn2)
         return;
 
-    if (wpn1 && wpn1->CanAttach(item))
+    // Every check runs before the weapon leaves its slot: bailing out after Ruck() used to leave
+    // the weapon stuck in the ruck. Attaching also consumes the addon, so stop after the first hit.
+    const auto try_attach = [&](CWeapon* wpn, u16 slot_id) -> bool
     {
-        inventory().Ruck(wpn1);
-        if (wpn1->bUseAttachmentSystem)
+        if (!wpn || !wpn->CanAttach(item))
+            return false;
+
+        if (wpn->bUseAttachmentSystem)
         {
-            const bool result = wpn1->DeterminateParentSlotForAddon(item, wpn1, true);
-            if (!result)
-                return;
+            if (!wpn->DeterminateParentSlotForAddon(item, wpn, true))
+                return false;
+
+            if (!wpn->CanAttachWithoutEviction(item))
+                return false;
         }
-        wpn1->Attach(item, true);
-        inventory().Slot(INV_SLOT_2, wpn1);
-    }
-    if (wpn2 && wpn2->CanAttach(item))
-    {
-        inventory().Ruck(wpn2);
-        if (wpn2->bUseAttachmentSystem)
-        {
-            const bool result = wpn2->DeterminateParentSlotForAddon(item, wpn2, true);
-            if (!result)
-                return;
-        }
-        wpn2->Attach(item, true);
-        inventory().Slot(INV_SLOT_3, wpn2);
-    }
+
+        inventory().Ruck(wpn);
+        wpn->Attach(item, true);
+        inventory().Slot(slot_id, wpn);
+        return true;
+    };
+
+    if (try_attach(wpn1, INV_SLOT_2))
+        return;
+
+    try_attach(wpn2, INV_SLOT_3);
 }
 void CAI_Stalker::on_after_take_gl(const CGrenadeLauncher* pGrenadeLauncher)
 {
@@ -540,7 +552,7 @@ void CAI_Stalker::on_after_take(const CGameObject* object)
     if (!g_Alive())
         return;
 
-    if (!m_is_trader)
+    if (!keeps_addons_as_stock())
     {
         const CSilencer* pSilencer = smart_cast<const CSilencer*>(object);
         if (pSilencer)
