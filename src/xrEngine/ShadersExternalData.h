@@ -8,11 +8,16 @@ public:
     static constexpr float SCOPE_LENSE_ZOOM_DEFAULT = 1.0f;
 
     Fmatrix m_script_params; // Матрица, значения которой доступны из Lua
-    Fvector4 hud_params_2;     // [scope_textures_size, scope_lense_zoom_default, NULL, NULL] - Параметры худа оружия
+    Fvector4 hud_params_2;     // [scope_textures_size, scope_lense_zoom_default, ads_progress, reticle_sfp] - Параметры худа оружия
+                               // z - плавный прогресс прицеливания [0..1] (CWeapon::GetZRotatingFactor), альфа линзы 3D-прицела
+                               // w - фокальная плоскость сетки прицела: 0 = FFP (масштабируется зумом), 1 = SFP (постоянный размер)
     Fvector4 hud_params;     // [zoom_rotate_factor, secondVP_zoom_factor, NULL, NULL]; w = scope lens zoom [0.1, 1.0], default 1.0
     Fvector4 m_blender_mode; // x\y = [0 - default, 1 - night vision, 2 - thermo vision, ... см. common.h] - Режимы рендеринга
                              // x - основной вьюпорт, y - второй вьюпорт, z = ?, w = [0 - идёт рендер обычного объекта, 1 - идёт рендер детальных объектов (трава, мусор)]
     // x=1: рендер «мира» в rt_secondVP — отключает линзу/сетку, которые сэмплят s_vp2 (иначе рекурсия).
+    // z=1: идёт offscreen-проход HUD-overlay прицела (g_3d_scopes 2).
+    // y/w: реальный размер rt_secondVP в пикселях (0 — не сообщён). Шейдер линзы по нему
+    //      определяет, что картинка растягивается (r__second_vp_render_scale < 1), и шарпит её.
     Fvector4 m_svp_rt_capture{};
     Fvector4 shader_param_7;  // Пользовательские шейдерные параметры
 

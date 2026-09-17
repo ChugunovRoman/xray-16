@@ -814,6 +814,16 @@ void CRender::RenderSecondViewport()
     const u32 sh = _max(1u, (u32)iFloor(float(Device.dwHeight) * sc + 0.5f));
     Target->ResizeSecondVPRT(sw, sh);
 
+    // Реальный размер rt_secondVP -> шейдер линзы (m_svp_rt_capture.y/.w). При
+    // r__second_vp_render_scale < 1 картинка в линзе растягивается, и шейдер по этому
+    // размеру включает компенсирующий шарпен. Пишем ДО сохранения вектора ниже, чтобы
+    // значение попало в saved_svp_capture и пережило .set(1,0,0,0) на время прохода.
+    if (g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
+    {
+        g_pGamePersistent->m_pGShaderConstants->m_svp_rt_capture.y = float(sw);
+        g_pGamePersistent->m_pGShaderConstants->m_svp_rt_capture.w = float(sh);
+    }
+
     // Render this pass into a parallel sw×sh RT set ($user$sv_*) at ANY scale - including 1.0:
     // without the twins the scope pass renders into the MAIN G-buffer surfaces, whose
     // depth/stencil/accumulator state was already consumed by the main pass, and the lens
@@ -893,6 +903,15 @@ void CRender::CopyBackbufferToSecondVPRT()
 {
     if (Target->rt_secondVP && (Target->rt_secondVP->dwWidth != Device.dwWidth || Target->rt_secondVP->dwHeight != Device.dwHeight))
         Target->ResizeSecondVPRT(Device.dwWidth, Device.dwHeight);
+
+    // На этом пути rt_secondVP всегда в размер экрана - сообщаем это шейдеру линзы,
+    // иначе он унаследовал бы уменьшенный размер от предыдущего выделенного прохода
+    // и включил бы ненужный шарпен.
+    if (g_pGamePersistent && g_pGamePersistent->m_pGShaderConstants)
+    {
+        g_pGamePersistent->m_pGShaderConstants->m_svp_rt_capture.y = float(Device.dwWidth);
+        g_pGamePersistent->m_pGShaderConstants->m_svp_rt_capture.w = float(Device.dwHeight);
+    }
 #ifdef USE_DX9
     IDirect3DSurface9* pBuffer = nullptr;
     HW.pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBuffer, nullptr);

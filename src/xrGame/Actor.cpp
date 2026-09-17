@@ -1184,6 +1184,10 @@ void CActor::UpdateCL()
 
             g_pGamePersistent->m_pGShaderConstants->hud_params_2.x = 512;
             g_pGamePersistent->m_pGShaderConstants->hud_params_2.y = ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
+            // .z — плавный прогресс прицеливания [0..1]: линза 3D-прицела проявляется, а не щёлкает
+            g_pGamePersistent->m_pGShaderConstants->hud_params_2.z = pWeapon->GetZRotatingFactor();
+            // .w — фокальная плоскость сетки: 0 = FFP (масштабируется зумом), 1 = SFP (постоянный размер)
+            g_pGamePersistent->m_pGShaderConstants->hud_params_2.w = pWeapon->IsScopeReticleSFP() ? 1.f : 0.f;
         }
     }
     else
@@ -1196,6 +1200,8 @@ void CActor::UpdateCL()
             // Очищаем информацию об оружии в шейдерах (w = SCOPE_LENSE_ZOOM_DEFAULT — без зума линзы прицела)
             g_pGamePersistent->m_pGShaderConstants->hud_params.set(0.f, 0.f, 0.f, ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT); // --#SM+#--
             g_pGamePersistent->m_pGShaderConstants->hud_params_2.y = ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
+            g_pGamePersistent->m_pGShaderConstants->hud_params_2.z = 0.f;
+            g_pGamePersistent->m_pGShaderConstants->hud_params_2.w = 0.f;
             g_pGamePersistent->m_pGShaderConstants->m_blender_mode.set(0.f, 0.f, 0.f, 0.f); //--#SM+#--
 
             // Отключаем второй вьюпорт [Turn off SecondVP]

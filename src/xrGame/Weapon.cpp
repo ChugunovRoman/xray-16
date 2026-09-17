@@ -182,6 +182,7 @@ CWeapon::CWeapon()
     m_zoom_params.m_fSecondVPFovFactor = 0.0f;
     m_fSecondRTZoomFactor = 0.0f;
     m_fScopeLenseZoomSmoothed = ShadersExternalData::SCOPE_LENSE_ZOOM_DEFAULT;
+    m_bScopeReticleSFP = false;
     m_hud_fov_before_zoom = psHUD_FOV_def;
 }
 
@@ -1021,6 +1022,9 @@ void CWeapon::Load3DScopeParams(LPCSTR section)
 {
     m_zoom_params.m_fSecondVPFovFactor = READ_IF_EXISTS(pSettings, r_float, section, "3d_fov", 0.0f);
     m_zoom_params.m_f3dZoomFactor	   = READ_IF_EXISTS(pSettings, r_float, section, "3d_zoom_factor", 100.0f);
+    // Фокальная плоскость сетки: SFP — экранный размер сетки не зависит от кратности,
+    // FFP (по умолчанию) — сетка растёт вместе с увеличением. Уходит в шейдер линзы через hud_params_2.w.
+    m_bScopeReticleSFP = READ_IF_EXISTS(pSettings, r_bool, section, "scope_reticle_sfp", FALSE);
 
     if (fis_zero(m_fSecondRTZoomFactor))
         m_fSecondRTZoomFactor = m_zoom_params.m_f3dZoomFactor;

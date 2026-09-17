@@ -1557,6 +1557,9 @@ void CWeaponMagazined::InitAddons()
         if (bIsSecondVPZoomPresent())
             m_zoom_params.m_fSecondVPFovFactor = 0.0f;
 
+        // Прицел снят — не оставляем от него флаг фокальной плоскости сетки.
+        m_bScopeReticleSFP = false;
+
         if (IsZoomEnabled())
             m_zoom_params.m_fIronSightZoomFactor = pSettings->r_float(cNameSect(), "scope_zoom_factor");
     }

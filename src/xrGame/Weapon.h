@@ -192,6 +192,9 @@ public:
     float GetScopeLenseZoom() const;
     /// Обновляет сглаженное значение зума линзы и возвращает его (для плавного уменьшения при выходе из прицела)
     float GetScopeLenseZoomSmoothed(float dt);
+    /// true — сетка прицела во второй фокальной плоскости (SFP, постоянный экранный размер),
+    /// false — в первой (FFP, сетка растёт вместе с увеличением)
+    IC bool IsScopeReticleSFP() const { return m_bScopeReticleSFP; }
 
     shared_str GetNameWithAttachment();
 
@@ -511,6 +514,7 @@ protected:
     float m_fRTZoomFactor; // run-time zoom factor
     float m_fSecondRTZoomFactor; //текущий зум для 3д прицела
     float m_fScopeLenseZoomSmoothed; // сглаженное значение зума линзы для шейдера [0.1, 1.0], плавный переход при выходе из прицела
+    bool m_bScopeReticleSFP; // сетка прицела в SFP (не масштабируется зумом); читается из секции прицела
     CUIWindow* m_UIScope;
 
     xr_vector<shared_str> bullets_bones;
