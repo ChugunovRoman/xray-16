@@ -71,12 +71,15 @@ class XRCORE_API xrDebug
 public:
     using OutOfMemoryCallbackFunc = void(*)();
     using UnhandledExceptionFilter = LONG(WINAPI*)(EXCEPTION_POINTERS* exPtrs);
+    /** Appends the current Lua call stack. Registered by CScriptEngine, used when a crash is logged. */
+    using LuaStackProviderFunc = void(*)(xr_string& out);
 
 private:
     static IWindowHandler* windowHandler;
     static IUserConfigHandler* userConfigHandler;
     static UnhandledExceptionFilter PrevFilter;
     static OutOfMemoryCallbackFunc OutOfMemoryCallback;
+    static LuaStackProviderFunc LuaStackProvider;
     static string_path BugReportFile;
     static bool ErrorAfterDialog;
     static bool ShowErrorMessage;
@@ -100,6 +103,8 @@ public:
     static void SetUserConfigHandler(IUserConfigHandler* handler) { userConfigHandler = handler; }
     static OutOfMemoryCallbackFunc GetOutOfMemoryCallback() { return OutOfMemoryCallback; }
     static void SetOutOfMemoryCallback(OutOfMemoryCallbackFunc cb) { OutOfMemoryCallback = cb; }
+    static LuaStackProviderFunc GetLuaStackProvider() { return LuaStackProvider; }
+    static void SetLuaStackProvider(LuaStackProviderFunc fn) { LuaStackProvider = fn; }
     static bool WouldShowErrorMessage() { return ShowErrorMessage; }
     static pcstr ErrorToString(long code);
     static void SetBugReportFile(const char* fileName);
@@ -118,6 +123,23 @@ public:
     static AssertionResult ShowMessage(pcstr title, pcstr message, bool simpleMode = true);
 
     static void LogStackTrace(const char* header);
+
+    /**
+     * Writes a "! [crash] ..." block (exception code, faulting address, thread, loaded modules,
+     * native call stack, Lua call stack) to the log and flushes it. Safe to call from an SEH filter.
+     * Only the first call per process produces output: the filter chain would otherwise log twice.
+     * Pass exPtrs from the filter; reason describes crashes that carry no exception record.
+     * oneShot = false is for handlers that may fire on an exception the process survives: the block
+     * is written, but the one-per-process budget is released again for the real crash later on.
+     */
+    static void LogCrashInfo(EXCEPTION_POINTERS* exPtrs, pcstr reason = nullptr, bool oneShot = true);
+
+    /**
+     * LogCrashInfo wrapped in its own SEH frame. Logging allocates and calls back into the engine,
+     * so a crash that came from the allocator can fault again here; without this the whole handler
+     * (minidump, error dialog, previous filter) would be lost. Use this from exception filters.
+     */
+    static void LogCrashInfoGuarded(EXCEPTION_POINTERS* exPtrs, pcstr reason = nullptr, bool oneShot = true);
 
 private:
     static Lock failLock;

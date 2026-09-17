@@ -12,6 +12,7 @@
 #include <sentry.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -37,7 +38,6 @@ extern pcstr log_name(); // defined in log.cpp, intentionally not exposed in log
 namespace
 {
 bool s_xr_sentry_started = false;
-xrSentry_LuaStackFn s_lua_stack_provider{};
 
 // Crashpad uploads these paths on crash; register likely logs at startup (after FS + CreateLog).
 constexpr size_t kMaxLogAttachments = 16;
@@ -115,10 +115,51 @@ bool build_path_next_to_exe(const char* fileName, char* out, size_t outSize)
     return true;
 }
 
+using MiniDumpWriteDump_t = BOOL(WINAPI*)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE,
+    PMINIDUMP_EXCEPTION_INFORMATION, PMINIDUMP_USER_STREAM_INFORMATION, PMINIDUMP_CALLBACK_INFORMATION);
+
+MiniDumpWriteDump_t s_minidump_write_dump = nullptr;
+
+// Resolved once at startup. LoadLibrary takes the loader lock, and a crash that happens while some
+// other thread holds it (inside DllMain, during LoadLibrary) would hang the handler before the dump
+// is written. On the crash path only the stored pointer is used. The module is never released.
+void init_minidump_writer()
+{
+    if (s_minidump_write_dump)
+        return;
+
+    const HMODULE dbghelpMod = LoadLibraryW(L"dbghelp.dll");
+    if (!dbghelpMod)
+    {
+        Msg("! [Sentry]: dbghelp.dll not available, local minidumps are disabled");
+        return;
+    }
+
+    s_minidump_write_dump =
+        reinterpret_cast<MiniDumpWriteDump_t>(GetProcAddress(dbghelpMod, "MiniDumpWriteDump"));
+    if (!s_minidump_write_dump)
+        Msg("! [Sentry]: MiniDumpWriteDump not found, local minidumps are disabled");
+}
+
 // Writes a minidump of the current process to `utf8Path`.
 // Pass exception pointers for real crashes so the dump carries the faulting context.
 bool write_minidump_to_path(const char* utf8Path, EXCEPTION_POINTERS* exPtrs)
 {
+    if (!s_minidump_write_dump)
+    {
+        // Before init_minidump_writer ran (an early assertion). GetModuleHandle, never LoadLibrary:
+        // this may already be the crash path. The module is normally in by then, because
+        // PreloadStackTraceLibrary loads it from xrDebug::Initialize.
+        if (const HMODULE dbghelpMod = GetModuleHandleW(L"dbghelp.dll"))
+        {
+            s_minidump_write_dump =
+                reinterpret_cast<MiniDumpWriteDump_t>(GetProcAddress(dbghelpMod, "MiniDumpWriteDump"));
+        }
+
+        if (!s_minidump_write_dump)
+            return false;
+    }
+
     const std::wstring wide = XRay::Utf8::ToWide(utf8Path);
     if (wide.empty())
         return false;
@@ -127,23 +168,6 @@ bool write_minidump_to_path(const char* utf8Path, EXCEPTION_POINTERS* exPtrs)
         FILE_ATTRIBUTE_NORMAL, nullptr);
     if (hFile == INVALID_HANDLE_VALUE)
         return false;
-
-    HMODULE dbghelpMod = LoadLibraryW(L"dbghelp.dll");
-    if (!dbghelpMod)
-    {
-        CloseHandle(hFile);
-        return false;
-    }
-
-    using MiniDumpWriteDump_t = BOOL(WINAPI*)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE,
-        PMINIDUMP_EXCEPTION_INFORMATION, PMINIDUMP_USER_STREAM_INFORMATION, PMINIDUMP_CALLBACK_INFORMATION);
-    const auto pfn = reinterpret_cast<MiniDumpWriteDump_t>(GetProcAddress(dbghelpMod, "MiniDumpWriteDump"));
-    if (!pfn)
-    {
-        FreeLibrary(dbghelpMod);
-        CloseHandle(hFile);
-        return false;
-    }
 
     const MINIDUMP_TYPE dumpType = static_cast<MINIDUMP_TYPE>(
         MiniDumpWithDataSegs | MiniDumpWithIndirectlyReferencedMemory | MiniDumpScanMemory |
@@ -157,9 +181,8 @@ bool write_minidump_to_path(const char* utf8Path, EXCEPTION_POINTERS* exPtrs)
         mei.ClientPointers = FALSE;
     }
 
-    const BOOL ok = pfn(GetCurrentProcess(), GetCurrentProcessId(), hFile, dumpType,
+    const BOOL ok = s_minidump_write_dump(GetCurrentProcess(), GetCurrentProcessId(), hFile, dumpType,
         exPtrs ? &mei : nullptr, nullptr, nullptr);
-    FreeLibrary(dbghelpMod);
     CloseHandle(hFile);
     return ok != FALSE;
 }
@@ -202,7 +225,9 @@ char s_crash_reports_root[kCrashPathSize]{};
 bool s_crash_reports_ready = false;
 bool s_local_crash_filter_installed = false;
 LPTOP_LEVEL_EXCEPTION_FILTER s_prev_uef = nullptr;
+PVOID s_heap_corruption_veh = nullptr;
 volatile LONG s_in_local_crash_report = 0;
+volatile LONG s_heap_corruption_logged = 0;
 
 void local_crash_reports_init()
 {
@@ -284,7 +309,7 @@ bool write_crash_zip_unique(const void* buf, size_t size, char* pathOut, size_t 
             xr_strcpy(name, sizeof(name), base);
         else
             xr_sprintf(name, sizeof(name), "%s_%u", base, attempt);
-        xr_sprintf(pathOut, pathOutSize, "%scrash_%s.zip", s_crash_reports_root, name);
+        std::snprintf(pathOut, pathOutSize, "%scrash_%s.zip", s_crash_reports_root, name);
 
         const HANDLE hFile = CreateFileW(XRay::Utf8::ToWide(pathOut).c_str(), GENERIC_WRITE, 0, nullptr,
             CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -315,6 +340,65 @@ bool write_crash_zip_unique(const void* buf, size_t size, char* pathOut, size_t 
         return true;
     }
     return false;
+}
+
+// Heap walk: count busy blocks, total bytes and a size histogram per heap.
+constexpr DWORD kBucketBounds[] = { 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576 };
+constexpr size_t kBucketCount = sizeof(kBucketBounds) / sizeof(kBucketBounds[0]); // + overflow bucket
+constexpr size_t kTopBlocks = 8;
+
+struct TopBlock
+{
+    size_t size;
+    const void* addr;
+};
+
+// One heap, lock held for the whole walk. HeapWalk faults on damaged metadata, and __finally is what
+// guarantees the unlock: the project builds without /EHa, so an SEH exception caught by a caller
+// would not run destructors, and a heap left locked hangs every later allocation in the process.
+// A function using __finally must hold no objects requiring unwinding, hence the plain parameters.
+void walk_one_heap(HANDLE heap, u64& busyBlocks, u64& busyBytes, u64& freeBlocks, u64& freeBytes,
+    u64* buckets, TopBlock* top)
+{
+    if (!HeapLock(heap))
+        return;
+
+    __try
+    {
+        PROCESS_HEAP_ENTRY entry{};
+        while (HeapWalk(heap, &entry))
+        {
+            if (entry.wFlags & PROCESS_HEAP_ENTRY_BUSY)
+            {
+                ++busyBlocks;
+                busyBytes += entry.cbData;
+                size_t b = 0;
+                while (b < kBucketCount && entry.cbData > kBucketBounds[b])
+                    ++b;
+                ++buckets[b];
+                if (entry.cbData > top[kTopBlocks - 1].size)
+                {
+                    size_t pos = kTopBlocks - 1;
+                    while (pos > 0 && top[pos - 1].size < entry.cbData)
+                    {
+                        top[pos] = top[pos - 1];
+                        --pos;
+                    }
+                    top[pos].size = entry.cbData;
+                    top[pos].addr = entry.lpData;
+                }
+            }
+            else if (!(entry.wFlags & (PROCESS_HEAP_REGION | PROCESS_HEAP_UNCOMMITTED_RANGE)))
+            {
+                ++freeBlocks;
+                freeBytes += entry.cbData;
+            }
+        }
+    }
+    __finally
+    {
+        HeapUnlock(heap);
+    }
 }
 
 // Appends process memory statistics (goes into memory_stats.txt inside the crash zip).
@@ -368,16 +452,6 @@ void append_memory_stats(xr_string& out)
         out += buf;
     }
 
-    // Heap walk: count busy blocks, total bytes and a size histogram per heap.
-    static constexpr DWORD kBucketBounds[] = { 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576 };
-    constexpr size_t kBucketCount = sizeof(kBucketBounds) / sizeof(kBucketBounds[0]); // + overflow bucket
-    constexpr size_t kTopBlocks = 8;
-    struct TopBlock
-    {
-        size_t size;
-        const void* addr;
-    };
-
     HANDLE heaps[64]{};
     const DWORD heapCount = std::min<DWORD>(GetProcessHeaps(64, heaps), 64);
     xr_sprintf(buf, sizeof(buf), "heaps: %u\r\n", heapCount);
@@ -390,40 +464,10 @@ void append_memory_stats(xr_string& out)
         u64 buckets[kBucketCount + 1]{};
         TopBlock top[kTopBlocks]{};
 
-        // No allocations from here until HeapUnlock (see note above).
-        if (HeapLock(heaps[hi]))
-        {
-            PROCESS_HEAP_ENTRY entry{};
-            while (HeapWalk(heaps[hi], &entry))
-            {
-                if (entry.wFlags & PROCESS_HEAP_ENTRY_BUSY)
-                {
-                    ++busyBlocks;
-                    busyBytes += entry.cbData;
-                    size_t b = 0;
-                    while (b < kBucketCount && entry.cbData > kBucketBounds[b])
-                        ++b;
-                    ++buckets[b];
-                    if (entry.cbData > top[kTopBlocks - 1].size)
-                    {
-                        size_t pos = kTopBlocks - 1;
-                        while (pos > 0 && top[pos - 1].size < entry.cbData)
-                        {
-                            top[pos] = top[pos - 1];
-                            --pos;
-                        }
-                        top[pos].size = entry.cbData;
-                        top[pos].addr = entry.lpData;
-                    }
-                }
-                else if (!(entry.wFlags & (PROCESS_HEAP_REGION | PROCESS_HEAP_UNCOMMITTED_RANGE)))
-                {
-                    ++freeBlocks;
-                    freeBytes += entry.cbData;
-                }
-            }
-            HeapUnlock(heaps[hi]);
-        }
+        // No allocations from here until HeapUnlock (see note above). HeapWalk can fault on damaged
+        // metadata, and the unlock must happen anyway: a heap left locked hangs every later
+        // allocation in the process, including Crashpad's.
+        walk_one_heap(heaps[hi], busyBlocks, busyBytes, freeBlocks, freeBytes, buckets, top);
 
         totalBusyBlocks += busyBlocks;
         totalBusyBytes += busyBytes;
@@ -514,6 +558,26 @@ void save_local_crash_report_impl(EXCEPTION_POINTERS* exPtrs)
     FlushLog();
 }
 
+// Minidump only, written straight into the reports folder. Used when the heap is the thing that
+// broke: the zip writer and the log reader of the full report both allocate, and an allocation on a
+// corrupted heap can hang on its lock or fault again. This path only formats a path and calls
+// dbghelp, which still allocates internally, but nothing of ours does.
+void save_minidump_only_impl(EXCEPTION_POINTERS* exPtrs)
+{
+    if (!s_crash_reports_ready || !s_minidump_write_dump)
+        return;
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+
+    char path[kCrashPathSize];
+    std::snprintf(path, sizeof(path), "%scrash_%04u-%02u-%02u_%02u-%02u-%02u_%03u.dmp",
+        s_crash_reports_root, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+        st.wMilliseconds);
+
+    write_minidump_to_path(path, exPtrs);
+}
+
 // Separate wrapper: __try cannot be used in a function with objects requiring unwinding.
 void save_local_crash_report(EXCEPTION_POINTERS* exPtrs)
 {
@@ -529,13 +593,59 @@ void save_local_crash_report(EXCEPTION_POINTERS* exPtrs)
     InterlockedExchange(&s_in_local_crash_report, 0);
 }
 
+// Shares the guard with save_local_crash_report on purpose: dbghelp is not thread safe, and since
+// the heap handler got its own dump path two threads could otherwise be inside MiniDumpWriteDump at
+// once. The SEH frame matters here too, the dump is taken from a heap that is known to be broken.
+void save_minidump_only(EXCEPTION_POINTERS* exPtrs)
+{
+    if (InterlockedCompareExchange(&s_in_local_crash_report, 1, 0) != 0)
+        return;
+    __try
+    {
+        save_minidump_only_impl(exPtrs);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+    InterlockedExchange(&s_in_local_crash_report, 0);
+}
+
 LONG WINAPI local_crash_report_filter(EXCEPTION_POINTERS* exPtrs)
 {
+    // Dump first. Logging allocates and calls back into the engine, so on an exhausted stack or a
+    // broken allocator it can fault again before writing anything, and the minidump would be lost
+    // with it. The log on disk still gets the crash block below, only the copy inside the zip
+    // predates it. Note that a stack overflow on the game thread is handled by its own SEH frame in
+    // entry_point.cpp and never reaches this filter.
     if (s_crash_reports_ready)
         save_local_crash_report(exPtrs);
+
+    // This is the only place a native call stack reaches the log: Crashpad's filter never returns,
+    // and xrDebug::UnhandledFilter sits below it, so it is not reached once Sentry is up.
+    xrDebug::LogCrashInfoGuarded(exPtrs, nullptr);
     // Chain into the previously installed filter (Crashpad / engine) to keep the existing flow.
     if (s_prev_uef)
         return s_prev_uef(exPtrs);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// Heap corruption never reaches a top-level filter: Crashpad catches it in a vectored handler and
+// terminates the process. Ours is registered first (and after Crashpad's, so it is at the head of
+// the list) and only reacts to that one code — a VEH also sees exceptions that are handled later,
+// such as C++ throws and the __try blocks scattered around the game.
+LONG WINAPI heap_corruption_veh(EXCEPTION_POINTERS* exPtrs)
+{
+    if (exPtrs && exPtrs->ExceptionRecord &&
+        exPtrs->ExceptionRecord->ExceptionCode == STATUS_HEAP_CORRUPTION &&
+        InterlockedCompareExchange(&s_heap_corruption_logged, 1, 0) == 0)
+    {
+        // A vectored handler sees the exception first-chance, so the process may well survive it.
+        // Report it once, then hand the crash-block budget back for a later, fatal crash.
+        // Only a bare minidump here: zipping and reading the log would allocate from the very heap
+        // that is reported as corrupted.
+        save_minidump_only(exPtrs);
+        xrDebug::LogCrashInfoGuarded(exPtrs, "heap corruption", false);
+    }
     return EXCEPTION_CONTINUE_SEARCH;
 }
 #endif
@@ -547,9 +657,11 @@ static void install_local_crash_reporter()
     if (s_local_crash_filter_installed)
         return;
     local_crash_reports_init();
+    init_minidump_writer(); // resolve dbghelp now, never from inside a crash handler
     // Must be installed after sentry_init: the filter installed last runs first,
     // so we save the local report and then delegate to Crashpad's filter.
     s_prev_uef = SetUnhandledExceptionFilter(local_crash_report_filter);
+    s_heap_corruption_veh = AddVectoredExceptionHandler(1 /* first */, heap_corruption_veh);
     s_local_crash_filter_installed = true;
 #ifndef MASTER_GOLD
     if (s_crash_reports_ready)
@@ -567,7 +679,22 @@ static void uninstall_local_crash_reporter()
         return;
     SetUnhandledExceptionFilter(s_prev_uef);
     s_prev_uef = nullptr;
+    if (s_heap_corruption_veh)
+    {
+        RemoveVectoredExceptionHandler(s_heap_corruption_veh);
+        s_heap_corruption_veh = nullptr;
+    }
     s_local_crash_filter_installed = false;
+#endif
+}
+
+void XRCORE_API xrSentry_SaveLocalCrashReport(EXCEPTION_POINTERS* exPtrs)
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    if (s_crash_reports_ready)
+        save_local_crash_report(exPtrs);
+#else
+    (void)exPtrs;
 #endif
 }
 
@@ -664,9 +791,11 @@ void xrSentry_Initialize(pcstr commandLine)
         install_local_crash_reporter();
         return;
     }
-    s_xr_sentry_started = true;
 
+    // Handlers first, flag second: the flag is what lets xrDebug::Fail take a live minidump, and
+    // between the two there would otherwise be a window where the dump writer is not resolved yet.
     install_local_crash_reporter();
+    s_xr_sentry_started = true;
 
     if (commandLine && std::strstr(commandLine, "-sentry_test_av_crash"))
     {
@@ -684,15 +813,17 @@ void xrSentry_Shutdown()
     s_xr_sentry_started = false;
 }
 
-void XRCORE_API xrSentry_SetLuaStackProvider(xrSentry_LuaStackFn fn) { s_lua_stack_provider = fn; }
+// The provider is kept by xrDebug: crash logging needs it whether or not Sentry is compiled in.
+void XRCORE_API xrSentry_SetLuaStackProvider(xrSentry_LuaStackFn fn) { xrDebug::SetLuaStackProvider(fn); }
 
 static void sentry_event_attach_lua_stack(sentry_value_t event, pcstr lua_stack)
 {
     constexpr size_t kMaxLua = 12000;
     xr_string from_provider;
-    if ((!lua_stack || !*lua_stack) && s_lua_stack_provider)
+    const auto lua_stack_provider = xrDebug::GetLuaStackProvider();
+    if ((!lua_stack || !*lua_stack) && lua_stack_provider)
     {
-        s_lua_stack_provider(from_provider);
+        lua_stack_provider(from_provider);
         if (!from_provider.empty())
             lua_stack = from_provider.c_str();
     }
@@ -781,9 +912,10 @@ void XRCORE_API xrSentry_CaptureDebugFail(pcstr expr, pcstr desc, pcstr arg1, pc
     sentry_set_extra("assertion", sentry_value_new_string(m.c_str()));
 
     xr_string lua_for_extra;
-    if (s_lua_stack_provider)
+    const auto lua_stack_provider = xrDebug::GetLuaStackProvider();
+    if (lua_stack_provider)
     {
-        s_lua_stack_provider(lua_for_extra);
+        lua_stack_provider(lua_for_extra);
         constexpr size_t kMaxLua = 12000;
         if (lua_for_extra.size() > kMaxLua)
             lua_for_extra.resize(kMaxLua);
@@ -852,7 +984,8 @@ void XRCORE_API xrSentry_CaptureIniRStringError(pcstr ini_path, pcstr section, p
 
 void xrSentry_Initialize(pcstr /*commandLine*/) {}
 void xrSentry_Shutdown() {}
-void XRCORE_API xrSentry_SetLuaStackProvider(xrSentry_LuaStackFn /*fn*/) {}
+void XRCORE_API xrSentry_SaveLocalCrashReport(EXCEPTION_POINTERS* /*exPtrs*/) {}
+void XRCORE_API xrSentry_SetLuaStackProvider(xrSentry_LuaStackFn fn) { xrDebug::SetLuaStackProvider(fn); }
 void XRCORE_API xrSentry_CaptureSoftError(pcstr /*logger*/, pcstr /*message*/, pcstr /*lua_stack*/) {}
 void XRCORE_API xrSentry_CaptureError(pcstr /*logger*/, pcstr /*message*/, pcstr /*lua_stack*/) {}
 void XRCORE_API xrSentry_CaptureDebugFail(pcstr /*expr*/, pcstr /*desc*/, pcstr /*arg1*/, pcstr /*arg2*/) {}

@@ -15,7 +15,11 @@ pcstr s_sentry_command_line = nullptr;
 
 #include <SDL.h>
 
+#include <algorithm>
 #include <csignal>
+#include <cstdarg>
+#include <cstdio>
+#include <cstring>
 
 #if defined(XR_PLATFORM_WINDOWS)
 #   include <dbghelp.h>
@@ -133,6 +137,7 @@ IWindowHandler* xrDebug::windowHandler = nullptr;
 IUserConfigHandler* xrDebug::userConfigHandler = nullptr;
 xrDebug::UnhandledExceptionFilter xrDebug::PrevFilter = nullptr;
 xrDebug::OutOfMemoryCallbackFunc xrDebug::OutOfMemoryCallback = nullptr;
+xrDebug::LuaStackProviderFunc xrDebug::LuaStackProvider = nullptr;
 string_path xrDebug::BugReportFile;
 bool xrDebug::ErrorAfterDialog = false;
 bool xrDebug::ShowErrorMessage = true;
@@ -155,6 +160,346 @@ void xrDebug::LogStackTrace(const char* header)
     }
 }
 
+#if defined(XR_PLATFORM_WINDOWS)
+namespace
+{
+constexpr pcstr kCrashPrefix = "! [crash] ";
+constexpr u16 kCrashStackFrames = 256;
+
+// Defined by winnt.h, but keep building if an older SDK misses it.
+#ifndef STATUS_HEAP_CORRUPTION
+#   define STATUS_HEAP_CORRUPTION ((DWORD)0xC0000374L)
+#endif
+
+// Guards against a second crash block: the filter chain (local report -> Crashpad) and
+// xrDebug::UnhandledFilter can both run for the same exception.
+volatile LONG s_crash_logged = 0;
+
+// Used instead of the one above by handlers that can fire on an exception the process survives,
+// such as the heap corruption VEH. It only keeps such a handler out of its own way, so a genuine
+// crash on another thread still finds the real budget free and gets its block written.
+volatile LONG s_crash_logging = 0;
+
+pcstr exception_code_to_string(DWORD code)
+{
+    switch (code)
+    {
+    case EXCEPTION_ACCESS_VIOLATION:         return "EXCEPTION_ACCESS_VIOLATION";
+    case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:    return "EXCEPTION_ARRAY_BOUNDS_EXCEEDED";
+    case EXCEPTION_BREAKPOINT:               return "EXCEPTION_BREAKPOINT";
+    case EXCEPTION_DATATYPE_MISALIGNMENT:    return "EXCEPTION_DATATYPE_MISALIGNMENT";
+    case EXCEPTION_FLT_DENORMAL_OPERAND:     return "EXCEPTION_FLT_DENORMAL_OPERAND";
+    case EXCEPTION_FLT_DIVIDE_BY_ZERO:       return "EXCEPTION_FLT_DIVIDE_BY_ZERO";
+    case EXCEPTION_FLT_INEXACT_RESULT:       return "EXCEPTION_FLT_INEXACT_RESULT";
+    case EXCEPTION_FLT_INVALID_OPERATION:    return "EXCEPTION_FLT_INVALID_OPERATION";
+    case EXCEPTION_FLT_OVERFLOW:             return "EXCEPTION_FLT_OVERFLOW";
+    case EXCEPTION_FLT_STACK_CHECK:          return "EXCEPTION_FLT_STACK_CHECK";
+    case EXCEPTION_FLT_UNDERFLOW:            return "EXCEPTION_FLT_UNDERFLOW";
+    case EXCEPTION_ILLEGAL_INSTRUCTION:      return "EXCEPTION_ILLEGAL_INSTRUCTION";
+    case EXCEPTION_IN_PAGE_ERROR:            return "EXCEPTION_IN_PAGE_ERROR";
+    case EXCEPTION_INT_DIVIDE_BY_ZERO:       return "EXCEPTION_INT_DIVIDE_BY_ZERO";
+    case EXCEPTION_INT_OVERFLOW:             return "EXCEPTION_INT_OVERFLOW";
+    case EXCEPTION_INVALID_DISPOSITION:      return "EXCEPTION_INVALID_DISPOSITION";
+    case EXCEPTION_NONCONTINUABLE_EXCEPTION: return "EXCEPTION_NONCONTINUABLE_EXCEPTION";
+    case EXCEPTION_PRIV_INSTRUCTION:         return "EXCEPTION_PRIV_INSTRUCTION";
+    case EXCEPTION_SINGLE_STEP:              return "EXCEPTION_SINGLE_STEP";
+    case EXCEPTION_STACK_OVERFLOW:           return "EXCEPTION_STACK_OVERFLOW";
+    case STATUS_HEAP_CORRUPTION:             return "STATUS_HEAP_CORRUPTION";
+    case 0xE06D7363:                         return "C++ exception";
+    case 0x406D1388:                         return "thread name notification";
+    default:                                 return "<unknown exception>";
+    }
+}
+
+// dbghelp and the Lua state are both suspect while handling a crash, so every call into them is
+// wrapped in SEH. A function containing __try must not hold objects requiring unwinding, hence
+// the work always lives in a separate _impl function.
+void build_stack_trace_impl(PCONTEXT threadCtx, xr_vector<xr_string>* out)
+{
+    *out = threadCtx ? BuildStackTrace(threadCtx, kCrashStackFrames) : BuildStackTrace(kCrashStackFrames);
+}
+
+bool safe_build_stack_trace(PCONTEXT threadCtx, xr_vector<xr_string>* out)
+{
+    __try
+    {
+        build_stack_trace_impl(threadCtx, out);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+
+void collect_modules_impl(xr_vector<xr_string>* out, const void* extraAddress)
+{
+    CollectGameModules(*out, extraAddress);
+}
+
+bool safe_collect_modules(xr_vector<xr_string>* out, const void* extraAddress)
+{
+    __try
+    {
+        collect_modules_impl(out, extraAddress);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+
+void lua_stack_impl(xr_string* out)
+{
+    const auto provider = xrDebug::GetLuaStackProvider();
+    if (provider)
+        provider(*out);
+}
+
+bool safe_lua_stack(xr_string* out)
+{
+    __try
+    {
+        lua_stack_impl(out);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+
+void log_multiline_with_prefix(pcstr text)
+{
+    pcstr cursor = text;
+    while (cursor && *cursor)
+    {
+        cpcstr eol = std::strchr(cursor, '\n');
+        size_t length = eol ? static_cast<size_t>(eol - cursor) : std::strlen(cursor);
+        if (length && cursor[length - 1] == '\r')
+            --length;
+
+        string1024 line;
+        const size_t copied = std::min(length, sizeof(line) - 1);
+        std::memcpy(line, cursor, copied);
+        line[copied] = 0;
+
+        Msg("%s  %s", kCrashPrefix, line);
+        cursor = eol ? eol + 1 : nullptr;
+    }
+}
+
+void log_current_thread_name()
+{
+    string256 threadName{};
+
+    // SetCurrentThreadName prefers SetThreadDescription, so the name is readable back the same way.
+    using GetThreadDescriptionProc = HRESULT(WINAPI*)(HANDLE, PWSTR*);
+    const HMODULE kernelHandle = GetModuleHandleA("kernel32.dll");
+    const auto getThreadDescription = kernelHandle
+        ? reinterpret_cast<GetThreadDescriptionProc>(GetProcAddress(kernelHandle, "GetThreadDescription"))
+        : nullptr;
+
+    if (getThreadDescription)
+    {
+        PWSTR description = nullptr;
+        if (SUCCEEDED(getThreadDescription(GetCurrentThread(), &description)) && description)
+        {
+            size_t converted = 0;
+            wcstombs_s(&converted, threadName, sizeof(threadName), description, sizeof(threadName) - 1);
+            LocalFree(description);
+        }
+    }
+
+    Msg("%sthread: 0x%X \"%s\"", kCrashPrefix, static_cast<u32>(GetCurrentThreadId()), threadName);
+}
+} // namespace
+#endif // XR_PLATFORM_WINDOWS
+
+void xrDebug::LogCrashInfo(EXCEPTION_POINTERS* exPtrs, pcstr reason, bool oneShot)
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    volatile LONG* const guard = oneShot ? &s_crash_logged : &s_crash_logging;
+    if (InterlockedCompareExchange(guard, 1, 0) != 0)
+        return;
+
+    // Before touching dbghelp: should symbol handling fault or hang, everything logged so far is on disk.
+    FlushLog();
+
+    Msg("%s===================== UNHANDLED EXCEPTION =====================", kCrashPrefix);
+
+    if (reason && *reason)
+        Msg("%sreason: %s", kCrashPrefix, reason);
+
+    const EXCEPTION_RECORD* record = exPtrs ? exPtrs->ExceptionRecord : nullptr;
+    if (record)
+    {
+        string256 details{};
+        if ((record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ||
+                record->ExceptionCode == EXCEPTION_IN_PAGE_ERROR) &&
+            record->NumberParameters >= 2)
+        {
+            pcstr operation = "read of";
+            switch (record->ExceptionInformation[0])
+            {
+            case 1:  operation = "write to"; break;
+            case 8:  operation = "execute of"; break;
+            default: break;
+            }
+            xr_sprintf(details, sizeof(details), " (%s address 0x%016llX)", operation,
+                static_cast<u64>(record->ExceptionInformation[1]));
+        }
+
+        Msg("%scode: 0x%08X %s%s", kCrashPrefix, static_cast<u32>(record->ExceptionCode),
+            exception_code_to_string(record->ExceptionCode), details);
+
+        xr_string address;
+        FormatModuleRelativeAddress(record->ExceptionAddress, address);
+        Msg("%saddress: 0x%016llX (%s)", kCrashPrefix,
+            static_cast<u64>(reinterpret_cast<uintptr_t>(record->ExceptionAddress)), address.c_str());
+    }
+
+    log_current_thread_name();
+
+    Msg("%sbuild: %u, commit %s, branch %s", kCrashPrefix, Core.GetBuildId(), xrCore::GetBuildCommit(),
+        xrCore::GetBuildBranch());
+
+    xr_vector<xr_string> modules;
+    if (safe_collect_modules(&modules, record ? record->ExceptionAddress : nullptr) && !modules.empty())
+    {
+        Msg("%smodules:", kCrashPrefix);
+        for (const auto& moduleInfo : modules)
+            Msg("%s  %s", kCrashPrefix, moduleInfo.c_str());
+    }
+
+    // StackWalk consumes the context, so the crashing thread's own record must not be passed directly.
+    // Static storage keeps ~1.2 KiB off the stack of a thread that may have just overflowed it.
+    static CONTEXT crashContext;
+    PCONTEXT contextForWalk = nullptr;
+    if (exPtrs && exPtrs->ContextRecord)
+    {
+        crashContext = *exPtrs->ContextRecord;
+        contextForWalk = &crashContext;
+    }
+
+    xr_vector<xr_string> stackTrace;
+    if (!safe_build_stack_trace(contextForWalk, &stackTrace))
+        Msg("%sstack trace unavailable (dbghelp failed)", kCrashPrefix);
+    else if (stackTrace.empty())
+        Msg("%sstack trace unavailable (no frames)", kCrashPrefix);
+    else
+    {
+        Msg("%sstack trace:", kCrashPrefix);
+        for (size_t i = 0; i < stackTrace.size(); ++i)
+            Msg("%s  #%02zu %s", kCrashPrefix, i, stackTrace[i].c_str());
+    }
+
+    xr_string luaStack;
+    if (safe_lua_stack(&luaStack) && !luaStack.empty())
+    {
+        Msg("%slua stack:", kCrashPrefix);
+        log_multiline_with_prefix(luaStack.c_str());
+    }
+
+    Msg("%s===============================================================", kCrashPrefix);
+    FlushLog();
+
+    if (!oneShot)
+        InterlockedExchange(&s_crash_logging, 0);
+#else
+    (void)exPtrs;
+    (void)reason;
+    (void)oneShot;
+#endif
+}
+
+#if defined(XR_PLATFORM_WINDOWS)
+namespace
+{
+// Separate function: one containing __try must hold no objects requiring unwinding.
+void log_crash_info_call(EXCEPTION_POINTERS* exPtrs, pcstr reason, bool oneShot)
+{
+    xrDebug::LogCrashInfo(exPtrs, reason, oneShot);
+}
+
+void release_crash_logging()
+{
+    InterlockedExchange(&s_crash_logging, 0);
+}
+} // namespace
+#endif
+
+void xrDebug::LogCrashInfoGuarded(EXCEPTION_POINTERS* exPtrs, pcstr reason, bool oneShot)
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    __try
+    {
+        log_crash_info_call(exPtrs, reason, oneShot);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        // Nothing usable left to report with; the caller still gets to save its dump.
+    }
+
+    // Outside the SEH frame on purpose: LogCrashInfo releases the guard at its very end, which a
+    // fault during logging would skip, and it would stay taken for the rest of the process.
+    if (!oneShot)
+        release_crash_logging();
+#else
+    LogCrashInfo(exPtrs, reason, oneShot);
+#endif
+}
+
+
+namespace
+{
+// Never let the assertion text overflow its buffer. Outside MASTER_GOLD xr_sprintf maps to
+// vsprintf_s, which reports a buffer that is too small through the invalid parameter handler.
+// That handler calls xrDebug::Fail, which calls GatherInfo again: an assertion with a long stack
+// would recurse until the stack ran out. vsnprintf truncates instead, which is what we want here.
+void append_clamped(char*& cursor, cpcstr bufferEnd, pcstr format, ...)
+{
+    if (!cursor || cursor >= bufferEnd)
+        return;
+
+    const size_t space = static_cast<size_t>(bufferEnd - cursor);
+
+    va_list args;
+    va_start(args, format);
+    const int written = std::vsnprintf(cursor, space, format, args);
+    va_end(args);
+
+    if (written <= 0)
+        return;
+
+    // vsnprintf returns what it would have written, so clamp to what actually fits.
+    cursor += std::min(static_cast<size_t>(written), space - 1);
+}
+
+// Appends to a NUL terminated buffer, truncating instead of failing. Same reason as append_clamped:
+// xr_strcat is strcat_s outside MASTER_GOLD, and a full buffer there goes through the invalid
+// parameter handler, which calls Fail and recurses. Callers append to the text GatherInfo produced.
+void append_tail_clamped(pstr buffer, size_t bufferSize, pcstr text)
+{
+    if (!buffer || !text || bufferSize == 0)
+        return;
+
+    const size_t used = std::strlen(buffer);
+    if (used + 1 >= bufferSize)
+        return;
+
+    std::snprintf(buffer + used, bufferSize - used, "%s", text);
+}
+
+// The dialog and the log only need enough frames to identify the caller, and every frame costs
+// buffer space. BuildStackTrace's default of 512 is far more than a fixed buffer can hold.
+constexpr u16 kAssertStackFrames = 128;
+
+// Kept free at the end of the assertion text for what Fail and xr_terminate append afterwards
+// (the button hints, an SDL error). Without it the stack would fill the buffer to the last byte.
+constexpr size_t kAssertTailReserve = 512;
+} // namespace
 
 void xrDebug::GatherInfo(char* assertionInfo, size_t bufferSize, const ErrorLocation& loc, const char* expr,
                          const char* desc, const char* arg1, const char* arg2)
@@ -165,58 +510,69 @@ void xrDebug::GatherInfo(char* assertionInfo, size_t bufferSize, const ErrorLoca
     bool extendedDesc = desc && strchr(desc, '\n');
     pcstr prefix = "[error] ";
     const char* oneAboveBuffer = assertionInfo + bufferSize;
-    buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "\nFATAL ERROR\n\n");
-    buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "%sExpression    : %s\n", prefix, expr);
-    buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "%sFunction      : %s\n", prefix, loc.Function);
-    buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "%sFile          : %s\n", prefix, loc.File);
-    buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "%sLine          : %d\n", prefix, loc.Line);
+    append_clamped(buffer, oneAboveBuffer, "\nFATAL ERROR\n\n");
+    append_clamped(buffer, oneAboveBuffer, "%sExpression    : %s\n", prefix, expr);
+    append_clamped(buffer, oneAboveBuffer, "%sFunction      : %s\n", prefix, loc.Function);
+    append_clamped(buffer, oneAboveBuffer, "%sFile          : %s\n", prefix, loc.File);
+    append_clamped(buffer, oneAboveBuffer, "%sLine          : %d\n", prefix, loc.Line);
     if (extendedDesc)
     {
-        buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "\n%s\n", desc);
+        append_clamped(buffer, oneAboveBuffer, "\n%s\n", desc);
         if (arg1)
         {
-            buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "%s\n", arg1);
+            append_clamped(buffer, oneAboveBuffer, "%s\n", arg1);
             if (arg2)
-                buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "%s\n", arg2);
+                append_clamped(buffer, oneAboveBuffer, "%s\n", arg2);
         }
     }
     else
     {
-        buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "%sDescription   : %s\n", prefix, desc);
+        append_clamped(buffer, oneAboveBuffer, "%sDescription   : %s\n", prefix, desc);
         if (arg1)
         {
             if (arg2)
             {
-                buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "%sArgument 0    : %s\n", prefix, arg1);
-                buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "%sArgument 1    : %s\n", prefix, arg2);
+                append_clamped(buffer, oneAboveBuffer, "%sArgument 0    : %s\n", prefix, arg1);
+                append_clamped(buffer, oneAboveBuffer, "%sArgument 1    : %s\n", prefix, arg2);
             }
             else
-                buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "%sArguments     : %s\n", prefix, arg1);
+                append_clamped(buffer, oneAboveBuffer, "%sArguments     : %s\n", prefix, arg1);
         }
     }
-    buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "\n");
+    append_clamped(buffer, oneAboveBuffer, "\n");
 
     Log(assertionInfo);
     FlushLog();
 
-    buffer = assertionInfo;
+    // buffer keeps pointing past the assertion text: the trace is appended, never written over it.
 #if defined(XR_PLATFORM_WINDOWS)
-    if (DebuggerIsPresent() || !strstr(GetCommandLine(), "-no_call_stack_assert"))
+    // The stack is what makes a player's report actionable, so it is written by default.
+    // The condition used to be inverted, which logged it only when -no_call_stack_assert was passed.
+    if (strstr(GetCommandLine(), "-no_call_stack_assert"))
         return;
 #endif
 
     Log("stack trace:\n");
-    buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "stack trace:\n\n");
 
-    xr_vector<xr_string> stackTrace = BuildStackTrace();
+    // The trace stops short of the end of the buffer so that the caller can still append its own
+    // lines without hitting the invalid parameter handler.
+    cpcstr stackEnd = bufferSize > kAssertTailReserve ? oneAboveBuffer - kAssertTailReserve : assertionInfo;
+    append_clamped(buffer, stackEnd, "stack trace:\n\n");
+
+    // The log gets every frame; the buffer takes what is left, and silently stops when full.
+    xr_vector<xr_string> stackTrace = BuildStackTrace(kAssertStackFrames);
     for (size_t i = 2; i < stackTrace.size(); i++)
     {
         Log(stackTrace[i].c_str());
-        buffer += xr_sprintf(buffer, oneAboveBuffer - buffer, "%s\n", stackTrace[i].c_str());
+        append_clamped(buffer, stackEnd, "%s\n", stackTrace[i].c_str());
     }
 
     FlushLog();
+#ifdef DEBUG
+    // Clipboard only in developer builds: an assertion in a shipped build would silently replace
+    // whatever the player had copied, and the full text is in the log anyway.
     os_clipboard::copy_to_clipboard(assertionInfo);
+#endif
 }
 
 void xrDebug::Fatal(const ErrorLocation& loc, const char* format, ...)
@@ -252,7 +608,7 @@ AssertionResult xrDebug::Fail(bool& ignoreAlways, const ErrorLocation& loc, cons
 
     if (ShowErrorMessage)
     {
-        xr_strcat(assertionInfo,
+        append_tail_clamped(assertionInfo, sizeof(assertionInfo),
             "\r\n"
             "Press CANCEL to abort execution\r\n"
             "Press TRY AGAIN to continue execution\r\n"
@@ -285,7 +641,7 @@ AssertionResult xrDebug::Fail(bool& ignoreAlways, const ErrorLocation& loc, cons
             break;
 
         case AssertionResult::undefined:
-            xr_strcat(assertionInfo, SDL_GetError());
+            append_tail_clamped(assertionInfo, sizeof(assertionInfo), SDL_GetError());
             [[fallthrough]];
         case AssertionResult::abort:
             [[fallthrough]];
@@ -511,9 +867,13 @@ void xrDebug::FormatLastError(char* buffer, const size_t& bufferSize)
     void* msg = nullptr;
     FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, nullptr, lastErr,
                   MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (pstr)&msg, 0, nullptr);
-    // XXX nitrocaster: check buffer overflow
-    xr_sprintf(buffer, bufferSize, "[error][%8d]: %s", lastErr, (char*)msg);
-    LocalFree(msg);
+    // snprintf, not xr_sprintf: the system message has no length bound, and vsprintf_s reports a
+    // buffer that is too small through the invalid parameter handler, which calls Fail and recurses.
+    // This runs on the crash path, before the crash block is written.
+    std::snprintf(buffer, bufferSize, "[error][%8d]: %s", lastErr,
+        msg ? static_cast<const char*>(msg) : "<no description>");
+    if (msg)
+        LocalFree(msg);
 #endif
 }
 
@@ -522,38 +882,19 @@ LONG WINAPI xrDebug::UnhandledFilter(EXCEPTION_POINTERS* exPtrs)
 #if defined(XR_PLATFORM_WINDOWS)
     ScopeLock lock(&failLock);
 
-    string256 errMsg;
+    // Read before anything else: every WinAPI call below overwrites the thread's last error.
+    string256 errMsg{};
     FormatLastError(errMsg, sizeof(errMsg));
-    if (!ErrorAfterDialog && !strstr(GetCommandLine(), "-no_call_stack_assert"))
-    {
-        CONTEXT save = *exPtrs->ContextRecord;
-        xr_vector<xr_string> stackTrace = BuildStackTrace(exPtrs->ContextRecord, 1024);
-        *exPtrs->ContextRecord = save;
-        Msg("stack trace:\n");
-#ifdef DEBUG
-        if (!DebuggerIsPresent())
-            os_clipboard::copy_to_clipboard("stack trace:\r\n\r\n");
-#endif
-        string4096 buffer;
-        for (size_t i = 0; i < stackTrace.size(); i++)
-        {
-            Log(stackTrace[i].c_str());
-            xr_sprintf(buffer, sizeof(buffer), "%s\r\n", stackTrace[i].c_str());
-#ifdef DEBUG
-            if (!DebuggerIsPresent())
-                os_clipboard::update_clipboard(buffer);
-#endif
-        }
-        if (*errMsg)
-        {
-            Msg("\n%s", errMsg);
-            xr_strcat(errMsg, "\r\n");
-#ifdef DEBUG
-            if (!DebuggerIsPresent())
-                os_clipboard::update_clipboard(buffer);
-#endif
-        }
-    }
+
+    // Reached only when Sentry is disabled or failed to start: with Crashpad running, its filter
+    // is installed on top of this one and terminates the process before returning here.
+    // LogCrashInfo is shared with the Sentry local-report filter and logs at most once per process.
+    if (!ErrorAfterDialog)
+        LogCrashInfoGuarded(exPtrs);
+
+    if (*errMsg)
+        Msg("! [crash] last error: %s", errMsg);
+
     FlushLog();
 
     if (windowHandler)
@@ -613,13 +954,18 @@ void xr_terminate()
 {
 #if defined(XR_PLATFORM_WINDOWS)
     if (strstr(GetCommandLine(), "-silent_error_mode"))
+    {
+        // Without this the tail of the log stays in the CRT buffer and the report loses its last lines.
+        Log("! [crash] unexpected application termination (silent error mode)");
+        FlushLog();
         exit(-1);
+    }
 #endif
     //ScopeLock lock(&failLock);
 
     string4096 assertionInfo;
     xrDebug::GatherInfo(assertionInfo,sizeof(assertionInfo), DEBUG_INFO, nullptr, "Unexpected application termination");
-    xr_strcat(assertionInfo, "Press OK to abort execution\r\n");
+    append_tail_clamped(assertionInfo, sizeof(assertionInfo), "Press OK to abort execution\r\n");
     xrDebug::ShowMessage("Fatal Error", assertionInfo);
     exit(-1);
 }
@@ -720,6 +1066,7 @@ void xrDebug::Initialize(pcstr commandLine)
     SDL_SetAssertionHandler(SDLAssertionHandler, nullptr);
     // exception handler to all "unhandled" exceptions
 #if defined(XR_PLATFORM_WINDOWS)
+    PreloadStackTraceLibrary(); // keep LoadLibrary off the crash path, it takes the loader lock
     PrevFilter = SetUnhandledExceptionFilter(UnhandledFilter);
 #endif
 #ifdef MASTER_GOLD

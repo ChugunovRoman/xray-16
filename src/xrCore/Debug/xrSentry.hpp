@@ -12,6 +12,11 @@ using xrSentry_LuaStackFn = void (*)(xr_string& out);
 // Registered when CScriptEngine is constructed; used from xrDebug::Fail and when CaptureError has no explicit stack.
 void XRCORE_API xrSentry_SetLuaStackProvider(xrSentry_LuaStackFn fn);
 
+// Saves the local crash report (minidump + log) for a crash that never reaches the unhandled
+// exception filter, such as a stack overflow caught by its own SEH frame in the game thread.
+// No-op when Sentry is not compiled in or the reports folder could not be prepared.
+void XRCORE_API xrSentry_SaveLocalCrashReport(EXCEPTION_POINTERS* exPtrs);
+
 // Non-fatal issue (recovered error): sends a warning event to Sentry with native stack; optional Lua stack text in extra.
 void XRCORE_API xrSentry_CaptureSoftError(pcstr logger, pcstr message, pcstr lua_stack = nullptr);
 

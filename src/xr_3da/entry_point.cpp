@@ -3,6 +3,7 @@
 #include "xrEngine/x_ray.h"
 #include "xrGame/xrGame.h"
 #include "Include/xrRender/xrRender.h"
+#include "xrCore/Debug/xrSentry.hpp"
 
 #if defined(XR_PLATFORM_WINDOWS)
 #include <Windows.h>
@@ -56,11 +57,54 @@ static int RunGameImpl(pcstr commandLine)
 }
 
 #if defined(XR_PLATFORM_WINDOWS)
-int StackoverflowFilter(const int exceptionCode)
+namespace
 {
-    if (exceptionCode == EXCEPTION_STACK_OVERFLOW)
-        return EXCEPTION_EXECUTE_HANDLER;
-    return EXCEPTION_CONTINUE_SEARCH;
+// Captured by the filter, which runs before the stack is unwound, and used from the handler once
+// _resetstkoflw has made the stack usable again. Static storage: at filter time only the sliver of
+// stack past the guard page is left, so nothing bigger than a memcpy is safe there.
+EXCEPTION_RECORD s_stack_overflow_record{};
+CONTEXT s_stack_overflow_context{};
+EXCEPTION_POINTERS s_stack_overflow_pointers{ &s_stack_overflow_record, &s_stack_overflow_context };
+bool s_stack_overflow_captured = false;
+} // namespace
+
+int StackoverflowFilter(EXCEPTION_POINTERS* exPtrs)
+{
+    if (!exPtrs || !exPtrs->ExceptionRecord ||
+        exPtrs->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW)
+        return EXCEPTION_CONTINUE_SEARCH;
+
+    s_stack_overflow_record = *exPtrs->ExceptionRecord;
+    // The nested-record pointer refers to the dispatcher's stack frame and is dangling afterwards.
+    s_stack_overflow_record.ExceptionRecord = nullptr;
+    s_stack_overflow_captured = true; // the record alone already carries the code and fault address
+
+    if (exPtrs->ContextRecord)
+    {
+        s_stack_overflow_context = *exPtrs->ContextRecord;
+        s_stack_overflow_pointers.ContextRecord = &s_stack_overflow_context; // may have been cleared
+    }
+    else
+        s_stack_overflow_pointers.ContextRecord = nullptr; // logging then walks the current stack
+
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+// The deep frames that caused the overflow still sit below the current stack pointer: unwinding
+// moved the pointer but did not erase them, and logging only reuses the topmost few kilobytes.
+void LogStackOverflow()
+{
+    EXCEPTION_POINTERS* const exPtrs = s_stack_overflow_captured ? &s_stack_overflow_pointers : nullptr;
+
+    // This handler swallows the exception, so no unhandled exception filter runs for it and the
+    // crash report has to be saved from here. Done first: it carries the faulting context, while
+    // logging below allocates and could fault again.
+    if (exPtrs)
+        xrSentry_SaveLocalCrashReport(exPtrs);
+
+    // Guarded: the stack is usable again after _resetstkoflw, but logging still allocates, and a
+    // second fault here would cost us the FATAL dialog that follows.
+    xrDebug::LogCrashInfoGuarded(exPtrs, "stack overflow");
 }
 
 // Main thread stack from the PE header can be ignored or capped in some setups; the render/D3D path
@@ -82,9 +126,10 @@ DWORD WINAPI GameThreadEntry(void* param)
     {
         ctx->exit_code = RunGameImpl(ctx->command_line);
     }
-    __except (StackoverflowFilter(GetExceptionCode()))
+    __except (StackoverflowFilter(GetExceptionInformation()))
     {
         _resetstkoflw();
+        LogStackOverflow();
         FATAL("stack overflow");
         ctx->exit_code = 0;
     }
@@ -118,9 +163,10 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, char* commandLine, int 
     {
         result = entry_point(commandLine);
     }
-    __except (StackoverflowFilter(GetExceptionCode()))
+    __except (StackoverflowFilter(GetExceptionInformation()))
     {
         _resetstkoflw();
+        LogStackOverflow();
         FATAL("stack overflow");
     }
 
