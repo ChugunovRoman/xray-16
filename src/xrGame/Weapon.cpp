@@ -212,7 +212,7 @@ bool CWeapon::GetScopeHudFovPreset(float& outValue) const
 void CWeapon::SetScopeHudFovPreset(float value)
 {
     float v = value;
-    clamp(v, 0.1f, 2.0f);
+    clamp(v, 0.05f, 2.0f);
     shared_str key = GetScopeHudFovKey();
     g_scope_hud_fov_presets[key] = v;
 }

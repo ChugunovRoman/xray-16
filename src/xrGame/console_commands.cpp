@@ -1846,7 +1846,7 @@ public:
             return;
         }
 
-        clamp(value, 0.1f, 2.0f);
+        clamp(value, 0.05f, 2.0f);
         g_scope_hud_fov_presets[shared_str(key)] = value;
     }
 
