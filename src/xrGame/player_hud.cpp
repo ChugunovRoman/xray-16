@@ -11,6 +11,29 @@
 #include "GamePersistent.h"
 #include "HUDManager.h"
 #include "debug_renderer.h"
+#include "Weapon.h"
+#include "poses_blending.h"
+
+namespace
+{
+// Поза покоя: смешиваем статические позы "от бедра" и "в прицеле" тем же фактором,
+// которым интерполируется смещение худа при прицеливании, чтобы точка ЛЦУ оставалась
+// в центре экрана и в переходе между ними.
+void blend_rest_pose(Fmatrix& dst, const Fmatrix& hip, const Fmatrix& aim, float factor)
+{
+    if (factor <= EPS)
+    {
+        dst.set(hip);
+        return;
+    }
+    if (factor >= 1.f - EPS)
+    {
+        dst.set(aim);
+        return;
+    }
+    poses_interpolation(hip, aim).pose(dst, factor);
+}
+} // namespace
 
 player_hud* g_player_hud[2]{}; // 0 - right hand | 1 - left hand 
 
@@ -183,7 +206,7 @@ void attachable_hud_item::update(bool bForce)
     if (GamePersistent().GetHudTuner().is_active())
         m_measures.update(m_attach_offset);
 
-    m_parent->calc_transform(m_attach_place_idx, m_attach_offset, m_item_idle_transform, m_item_transform, hud_transform, m_item_dot_transform);
+    m_parent->calc_transform(m_attach_place_idx, m_attach_offset, m_item_transform, hud_transform, m_item_rest_transform);
     m_upd_firedeps_frame = Device.dwFrame;
 
     calc_addon_aim_offset();
@@ -274,7 +297,7 @@ void attachable_hud_item::render(u32 context_id, IRenderable* root)
         // Msg("model_2 root_bone: [%f,%f,%f | %f,%f,%f]", root_bone.c.x, root_bone.c.y, root_bone.c.z, b_rot.x, b_rot.y, b_rot.z);
     }
     if (debug_show_thrid_wpn_model)
-        GEnv.Render->add_Visual(context_id, root, m_model_3->dcast_RenderVisual(), m_item_dot_transform);
+        GEnv.Render->add_Visual(context_id, root, m_model_3->dcast_RenderVisual(), m_item_rest_transform);
 
     CWeapon* wpn = smart_cast<CWeapon*>(m_parent_hud_item);
     if (wpn && wpn->bUseAttachmentSystem)
@@ -704,38 +727,81 @@ attachable_hud_item::attachable_hud_item(player_hud* parent, const shared_str& s
 
     m_hand_motions.load(animatedHudItem, m_sect_name);
 
-    set_idle_anm_for_second_model();
+    set_rest_poses();
     reload_measures();
     calc_addon_aim_offset();
 }
 
+void attachable_hud_item::set_rest_poses()
+{
+    set_idle_anm_for_second_model();
+    set_idle_anm_for_third_model();
+}
+
 void attachable_hud_item::set_idle_anm_for_second_model()
 {
-    if (!m_parent)
+    // Опорная поза прицеливания.
+    set_static_idle_pose(m_model_2, m_parent ? m_parent->m_model_2 : nullptr, "anm_idle_aim");
+}
+
+void attachable_hud_item::set_idle_anm_for_third_model()
+{
+    // Опорная поза от бедра. Отличается от прицельной, поэтому нужна отдельная копия
+    // моделей: иначе точка ЛЦУ уезжала бы из центра в одном из двух положений худа.
+    set_static_idle_pose(m_model_3, m_parent ? m_parent->m_model_3 : nullptr, "anm_idle");
+}
+
+void attachable_hud_item::set_static_idle_pose(
+    IKinematics* itemModel, IKinematicsAnimated* handsModel, pcstr preferred_anim)
+{
+    if (!m_parent || !m_parent_hud_item || !itemModel || !handsModel)
         return;
-    if (!m_parent_hud_item)
-        return;
+
     CWeapon* wpn = smart_cast<CWeapon*>(m_parent_hud_item);
     if (!wpn || !wpn->bUseAttachmentSystem)
         return;
 
-    u8 rnd_idx_2 = u8(-1);
-    const CMotionDef* md2 = NULL;
-    shared_str anm_name = "anm_idle_aim";
-    const player_hud_motion* anm = m_hand_motions.find_motion(anm_name);
-    if (!anm)
+    // Обе опорные позы обязаны найти хоть какую-то анимацию, иначе одна модель осталась бы
+    // в bind-позе, и точка ЛЦУ уезжала бы из центра в соответствующем положении худа.
+    const pcstr fallbacks[] = { preferred_anim, "anm_idle", "anm_idle_aim", "anm_idle_0" };
+
+    shared_str anm_name;
+    const player_hud_motion* anm = nullptr;
+    for (const pcstr candidate : fallbacks)
     {
-        anm_name = "anm_idle";
+        anm_name = candidate;
         anm = m_hand_motions.find_motion(anm_name);
+        if (anm)
+            break;
     }
-    if (!anm)
-        anm_name = "anm_idle_0";
-    anm = m_hand_motions.find_motion(anm_name);
+
     if (!anm)
         return;
 
-    anim_play(anm_name, false, md2, rnd_idx_2, m_model_2, true);
+    u8 rnd_idx = u8(-1);
+    const CMotionDef* md = nullptr;
+    anim_play(anm_name, false, md, rnd_idx, itemModel, handsModel, true);
 }
+
+void attachable_hud_item::rest_bone_transform(u16 bone_id, float zoom_factor, Fmatrix& dst) const
+{
+    if (bone_id == BI_NONE)
+    {
+        dst.identity();
+        return;
+    }
+
+    IKinematics* aim_model = m_model_2 ? m_model_2 : m_model;
+    IKinematics* hip_model = m_model_3 ? m_model_3 : aim_model;
+    if (!aim_model)
+    {
+        dst.identity();
+        return;
+    }
+
+    blend_rest_pose(dst, hip_model->LL_GetTransform(bone_id), aim_model->LL_GetTransform(bone_id), zoom_factor);
+}
+
 void attachable_hud_item::calc_addon_aim_offset()
 {
     CWeapon* wpn = smart_cast<CWeapon*>(m_parent_hud_item);
@@ -769,10 +835,10 @@ void attachable_hud_item::reload_measures()
 
 u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, const CMotionDef*& md, u8& rnd_idx)
 {
-    anim_play(anm_name_b, bMixIn, md, rnd_idx, m_model_3, false);
-    return anim_play(anm_name_b, bMixIn, md, rnd_idx, m_model, false);
+    return anim_play(anm_name_b, bMixIn, md, rnd_idx, m_model, m_parent->m_model, false);
 }
-u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, const CMotionDef*& md, u8& rnd_idx, IKinematics* model, bool useSecond)
+u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, const CMotionDef*& md, u8& rnd_idx,
+    IKinematics* itemModel, IKinematicsAnimated* handsModel, bool bStaticPose)
 {
     string256 anim_name_r;
     bool is_16x9 = UICore::is_widescreen();
@@ -790,15 +856,14 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
 
     const float speed = CalcMotionSpeed(anm->m_base_name, anm->m_anim_speed);
 
-    rnd_idx = (u8)Random.randI(anm->m_animations.size());
+    // Поза покоя должна быть детерминированной: для неё всегда берём первый вариант анимации,
+    // иначе опорная точка ЛЦУ прыгала бы между вариантами при каждом перепримировании.
+    rnd_idx = bStaticPose ? u8(0) : (u8)Random.randI(anm->m_animations.size());
     const motion_descr& M = anm->m_animations[rnd_idx];
 
-    IKinematicsAnimated* ka = smart_cast<IKinematicsAnimated*>(model);
-    u32 ret = 0;
-    if (useSecond)
-        ret = m_parent->anim_play(m_attach_place_idx, M.mid, bMixIn, md, speed, m_monolithic ? ka : nullptr, m_parent->m_model_2, true);
-    else
-        ret = m_parent->anim_play(m_attach_place_idx, M.mid, bMixIn, md, speed, m_monolithic ? ka : nullptr, m_parent->m_model, false);
+    IKinematicsAnimated* ka = smart_cast<IKinematicsAnimated*>(itemModel);
+    const u32 ret = m_parent->anim_play(
+        m_attach_place_idx, M.mid, bMixIn, md, speed, m_monolithic ? ka : nullptr, handsModel, bStaticPose);
 
     if (ka)
     {
@@ -818,8 +883,8 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
 
         if (!m_monolithic)
         {
-            const u16 root_id = model->LL_GetBoneRoot();
-            CBoneInstance& root_binst = model->LL_GetBoneInstance(root_id);
+            const u16 root_id = itemModel->LL_GetBoneRoot();
+            CBoneInstance& root_binst = itemModel->LL_GetBoneInstance(root_id);
             root_binst.set_callback_overwrite(TRUE);
             root_binst.mTransform.identity();
         }
@@ -827,7 +892,7 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
         const u16 pc = ka->partitions().count();
         for (u16 pid = 0; pid < pc; ++pid)
         {
-            if(useSecond)
+            if (bStaticPose)
             {
                 CBlend* B = ka->LL_SetInitialPartPose(pid, M2, false, 1.0f, 1.0f, 1.0f, false, nullptr, nullptr);
                 if (!B)
@@ -842,7 +907,7 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
             }
         }
 
-        model->CalculateBones_Invalidate();
+        itemModel->CalculateBones_Invalidate();
     }
 
     R_ASSERT2(m_parent_hud_item, "parent hud item is NULL");
@@ -850,7 +915,9 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
     // R_ASSERT2		(parent_object, "object has no parent actor");
     // IGameObject*		parent_object = static_cast_checked<IGameObject*>(&m_parent_hud_item->object());
 
-    if (IsGameTypeSingle() && parent_object.H_Parent() == Level().CurrentControlEntity())
+    // Статическая поза - служебная выборка кадра, а не проигрывание анимации: камерный
+    // эффектор для неё запускать нельзя, иначе он сбросит эффектор текущей анимации.
+    if (!bStaticPose && IsGameTypeSingle() && parent_object.H_Parent() == Level().CurrentControlEntity())
     {
         CActor* current_actor = static_cast_checked<CActor*>(Level().CurrentControlEntity());
         VERIFY(current_actor);
@@ -1071,7 +1138,7 @@ void player_hud::render_hud(u32 context_id, IRenderable* root)
     if (m_model_2 && debug_show_second_wpn_model)
         GEnv.Render->add_Visual(context_id, root, m_model_2->dcast_RenderVisual(), m_second_transform);
     if (m_model_3 && debug_show_thrid_wpn_model)
-        GEnv.Render->add_Visual(context_id, root, m_model_3->dcast_RenderVisual(), hud_laser_dot_transform);
+        GEnv.Render->add_Visual(context_id, root, m_model_3->dcast_RenderVisual(), m_rest_transform);
 
     if (item0)
         item0->render(context_id, root);
@@ -1123,14 +1190,19 @@ void player_hud::update(const Fmatrix& cam_trans)
 
     attachable_hud_item* item0 = m_attached_item;
 
+    // Сырая худ-камера: опора для решателя прицельных оффсетов аддонов.
     if (item0)
         item0->hud_transform.set(trans);
 
     update_inertion(trans);
 
-    if (item0)
-        item0->m_item_dot_transform.set(trans);
+    // База позы покоя для ЛЦУ. update_inertion() даёт компенсацию наклона камеры - она
+    // зависит только от текущего питча, а не от движения, поэтому это часть покоя, а не
+    // анимация. Смещение прицеливания добавится ниже, когда update_additional() его посчитает.
+    Fmatrix rest_cam;
+    rest_cam.set(trans);
 
+    // Заполняет CWeapon::m_hud_zoom_offset смещением прицеливания текущего кадра.
     update_additional(trans);
 
 
@@ -1155,7 +1227,14 @@ void player_hud::update(const Fmatrix& cam_trans)
         if (item0)
         {
             m_second_transform.mul(item0->hud_transform, m_attach_offset);
-            hud_laser_dot_transform.mul(item0->m_item_dot_transform, m_attach_offset);
+
+            // Всё, что осталось в trans сверх rest_cam (стрейф, инерция оружия, покачивание
+            // анимации) - это анимация: точка ЛЦУ должна смещаться вместе с ней, а не
+            // компенсировать её. Поэтому в позу покоя входит только смещение прицеливания.
+            if (const CWeapon* wpn = smart_cast<const CWeapon*>(item0->m_parent_hud_item))
+                rest_cam.mulB_43(wpn->GetHudZoomOffset());
+
+            m_rest_transform.mul(rest_cam, m_attach_offset);
         }
 
         m_model->UpdateTracks();
@@ -1170,14 +1249,21 @@ void player_hud::update(const Fmatrix& cam_trans)
     }
 
     if (item0)
+    {
         item0->update(true);
+
+        // Точку ЛЦУ считаем здесь, а не в CWeapon::UpdateCL(): иначе луч строился бы по
+        // трансформациям худа прошлого кадра и отставал при поворотах камеры.
+        if (CWeapon* wpn = smart_cast<CWeapon*>(item0->m_parent_hud_item))
+            wpn->UpdateLaserDots();
+    }
 }
 
 u32 player_hud::anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel)
 {
     return anim_play(part, M, bMixIn, md, speed, itemModel, m_model, false);
 }
-u32 player_hud::anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel, IKinematicsAnimated* model, bool useSecond)
+u32 player_hud::anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel, IKinematicsAnimated* model, bool bStaticPose)
 {
     if (!itemModel && model)
     {
@@ -1190,7 +1276,7 @@ u32 player_hud::anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotio
         {
             if (pid == 0 || pid == part_id || part_id == u16(-1))
             {
-                if(useSecond)
+                if (bStaticPose)
                 {
                     CBlend* B = model->LL_SetInitialPartPose(pid, M, false, 1.0f, 1.0f, 1.0f, false, nullptr, nullptr);
                     if (!B)
@@ -1390,6 +1476,9 @@ void player_hud::attach_item(CHudItem* item)
         m_attached_item = pi;
 
         pi->m_parent_hud_item = item;
+        // В конструкторе m_parent_hud_item ещё не задан и позы покоя не примируются; без этого
+        // вызова после hot reload худа и до первого eShowing опорные модели стояли бы в bind-позе.
+        pi->set_rest_poses();
         pi->reload_measures();
         pi->calc_addon_aim_offset();
 
@@ -1488,7 +1577,7 @@ void player_hud::detach_item(CHudItem* item)
     after_detach_item_idx(item);
 }
 
-void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, const Fmatrix& offset2, Fmatrix& result, Fmatrix& result2, Fmatrix& result3) const
+void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, Fmatrix& result, Fmatrix& result2, Fmatrix& result3) const
 {
     const attachable_hud_item* item = m_attached_item;
     if (item && !item->m_monolithic)
@@ -1500,15 +1589,26 @@ void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, cons
         result.mulB_43(offset);
 
 
+        // Кость-якорь в статической позе прицеливания.
         Fmatrix bone_transform;
         bone_transform.set(m_model_2->dcast_PKinematics()->LL_GetTransform(bone_id));
-        Fvector rot;
-        bone_transform.getHPB(rot.x, rot.y, rot.z);
 
         result2.mul(m_second_transform, bone_transform);
         result2.mulB_43(offset);
 
-        result3.mul(hud_laser_dot_transform, ancor_m);
+        // Поза покоя для ЛЦУ: якорь смешан между статическими позами от бедра и в прицеле
+        // тем же фактором, которым интерполируется смещение худа при прицеливании.
+        Fmatrix hip_bone_transform;
+        hip_bone_transform.set(m_model_3->dcast_PKinematics()->LL_GetTransform(bone_id));
+
+        float zoom_factor = 0.f;
+        if (const CWeapon* wpn = smart_cast<const CWeapon*>(item->m_parent_hud_item))
+            zoom_factor = clampr(wpn->GetZRotatingFactor(), 0.f, 1.f);
+
+        Fmatrix rest_anchor_transform;
+        blend_rest_pose(rest_anchor_transform, hip_bone_transform, bone_transform, zoom_factor);
+
+        result3.mul(m_rest_transform, rest_anchor_transform);
         result3.mulB_43(offset);
 
         hud_aim_offset_update_interval += 1;
@@ -1543,6 +1643,10 @@ void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, cons
     {
         result.mul(m_transform, offset);
         VERIFY(!fis_zero(DET(result)));
+
+        // Монолитный худ: костей-якорей нет, поза покоя совпадает с текущей.
+        result2.set(result);
+        result3.set(result);
     }
 }
 

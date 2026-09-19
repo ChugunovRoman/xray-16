@@ -90,18 +90,23 @@ struct attachable_hud_item
     shared_str m_sect_name;
     shared_str m_visual_name;
     IKinematics* m_model{};
-    IKinematics* m_model_2{};
-    IKinematics* m_model_3{};
+    IKinematics* m_model_2{}; // static first frame of "anm_idle_aim" (aim rest pose)
+    IKinematics* m_model_3{}; // static first frame of "anm_idle" (hip rest pose)
     u16 m_attach_place_idx{};
     bool m_monolithic{};
     hud_item_measures m_measures;
 
     // runtime positioning
     Fmatrix m_attach_offset{};
+    // Animated (real) weapon transform of the current frame.
     Fmatrix m_item_transform{};
+    // Rest transform built on the static "anm_idle_aim" hands pose, without the zoom offset.
+    // Used by the addon aim-offset solver.
     Fmatrix hud_transform{};
-    Fmatrix m_item_dot_transform{};
-    Fmatrix m_item_idle_transform{};
+    // Rest transform: zoom (aim) offset applied, hands anchor blended between the static hip
+    // and aim idle poses, without any animation-driven motion (sway, inertion, strafe).
+    // Reference pose for the laser dot solver.
+    Fmatrix m_item_rest_transform{};
 
     player_hud_motion_container m_hand_motions;
 
@@ -113,7 +118,17 @@ struct attachable_hud_item
 
     void reload_measures();
     void calc_addon_aim_offset();
+    // Re-primes both static rest poses (aim and hip). Must be called whenever the item
+    // animations or the attached addons change, otherwise the laser dot reference goes stale.
+    void set_rest_poses();
     void set_idle_anm_for_second_model();
+    void set_idle_anm_for_third_model();
+    // Freezes handsModel/itemModel on the first frame of preferred_anim (fallback: anm_idle,
+    // anm_idle_0) so they can be sampled as a rest pose.
+    void set_static_idle_pose(IKinematics* itemModel, IKinematicsAnimated* handsModel, pcstr preferred_anim);
+    // Weapon bone transform of the rest pose: static hip and aim idle poses blended by
+    // zoom_factor. Falls back to the animated model when the rest models are missing.
+    void rest_bone_transform(u16 bone_id, float zoom_factor, Fmatrix& dst) const;
 
     void update(bool bForce);
     void update_hud_additional(Fmatrix& trans) const;
@@ -138,7 +153,10 @@ struct attachable_hud_item
     u32 m_upd_firedeps_frame{ u32(-1) };
     void tune(Ivector values);
     u32 anim_play(const shared_str& anim_name, BOOL bMixIn, const CMotionDef*& md, u8& rnd);
-    u32 anim_play(const shared_str& anim_name, BOOL bMixIn, const CMotionDef*& md, u8& rnd, IKinematics* model, bool useSecond);
+    // handsModel/itemModel receive the motion; bStaticPose freezes it on the first frame
+    // instead of playing it (used to build the rest poses).
+    u32 anim_play(const shared_str& anim_name, BOOL bMixIn, const CMotionDef*& md, u8& rnd, IKinematics* itemModel,
+        IKinematicsAnimated* handsModel, bool bStaticPose);
 };
 
 class player_hud
@@ -153,7 +171,7 @@ public:
     void render_item_ui() const;
     bool render_item_ui_query() const;
     u32 anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel);
-    u32 anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel, IKinematicsAnimated* model, bool useSecond);
+    u32 anim_play(u16 part, const MotionID& M, BOOL bMixIn, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel, IKinematicsAnimated* model, bool bStaticPose);
     const shared_str& section_name() const { return m_sect_name; }
     attachable_hud_item* create_hud_item(const shared_str& sect);
 
@@ -172,7 +190,9 @@ public:
         m_attached_item = NULL;
     };
 
-    void calc_transform(u16 attach_slot_idx, const Fmatrix& offset, const Fmatrix& offset2, Fmatrix& result, Fmatrix& result2, Fmatrix& result3) const;
+    // result  - animated weapon transform, result2 - aim idle rest transform,
+    // result3 - blended rest transform used as the laser dot reference.
+    void calc_transform(u16 attach_slot_idx, const Fmatrix& offset, Fmatrix& result, Fmatrix& result2, Fmatrix& result3) const;
     void tune(Ivector values);
     u32 motion_length(const MotionID& M, const CMotionDef*& md, float speed, IKinematicsAnimated* itemModel) const;
     u32 motion_length(const shared_str& anim_name, const shared_str& hud_name, const CMotionDef*& md);
@@ -187,14 +207,15 @@ private:
     void update_additional(Fmatrix& trans) const;
 public:
     IKinematicsAnimated* m_model{};
-    IKinematicsAnimated* m_model_2{}; // use for only calc aim offset
-    IKinematicsAnimated* m_model_3{}; // use for only laser dot
+    IKinematicsAnimated* m_model_2{}; // static first frame of "anm_idle_aim": aim rest pose
+    IKinematicsAnimated* m_model_3{}; // static first frame of "anm_idle": hip rest pose
 
     bool inertion_allowed() const;
 
     Fmatrix get_transform() const { return m_transform; }
-    Fmatrix hud_laser_dot_transform{ Fidentity };
     xr_vector<u16> m_ancors;
+    // Cached anchor bone transform of the static aim rest pose; a change of it re-runs the
+    // addon aim-offset solver.
     mutable Fmatrix tmp;
 
 private:
@@ -204,7 +225,11 @@ private:
     Fmatrix m_attach_offset{};
 
     Fmatrix m_transform{ Fidentity };
+    // Hands transform built on the raw HUD camera (no inertion/strafe), base of hud_transform.
     Fmatrix m_second_transform{ Fidentity };
+    // Hands transform built on the raw HUD camera plus the zoom (aim) offset. Base of the
+    // laser dot rest pose.
+    Fmatrix m_rest_transform{ Fidentity };
     attachable_hud_item* m_attached_item = NULL;
     xr_unordered_map<shared_str, attachable_hud_item*> m_pool;
 

@@ -545,7 +545,7 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
             m_sounds_enabled = owner->CanPlayShHdRldSounds();
         switch2_Showing();
         if (owner && owner->object_id() == 0 && g_player_hud[0]->attached_item())
-            g_player_hud[0]->attached_item()->set_idle_anm_for_second_model();
+            g_player_hud[0]->attached_item()->set_rest_poses();
         break;
     case eHiding:
         if (owner)
@@ -808,7 +808,7 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
         SwitchState(eIdle);
         if (owner && owner->object_id() == 0 && g_player_hud[0]->attached_item())
         {
-            g_player_hud[0]->attached_item()->set_idle_anm_for_second_model();
+            g_player_hud[0]->attached_item()->set_rest_poses();
             calc_aim_addon_offset();
         }
 

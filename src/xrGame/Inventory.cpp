@@ -490,7 +490,7 @@ bool CInventory::Slot(u16 slot_id, PIItem pIItem, bool bNotActivate, bool strict
             CWeapon* wpn = smart_cast<CWeapon*>(g_player_hud[0]->attached_item()->m_parent_hud_item);
             if (wpn && wpn->bUseAttachmentSystem)
             {
-                g_player_hud[0]->attached_item()->set_idle_anm_for_second_model();
+                g_player_hud[0]->attached_item()->set_rest_poses();
                 wpn->calc_aim_addon_offset();
             }
         }

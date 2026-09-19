@@ -61,7 +61,6 @@ public:
 	float inherited_aim_z_rot;
 	float scale;
 	Fmatrix addon_item_pos;
-	Fmatrix addon_item_dot_t;
 	Fmatrix addon_item_pos_world;
 	Fvector calc_aim_offset{};
 	Fvector calc_aim_rot{};
@@ -73,10 +72,8 @@ public:
     float laser_range{};
 	IKinematics* addon_item_model{};
 	IKinematics* addon_item_model_2{};
-	IKinematics* addon_item_model_dot{};
     ref_glow laser_glow;
     u16 dot_bone_id{BI_NONE};
-	BOOL is_dot_pos_initialized{false};
 	BOOL has_laser_dot{false};
 	BOOL has_second_aim_offset{false};
 	BOOL has_aim_offset{false};
@@ -186,6 +183,18 @@ public:
 
     virtual float GetControlInertionFactor() const;
     IC float GetZRotatingFactor() const { return m_zoom_params.m_fZoomRotationFactor; }
+
+    //============= ЛЦУ (лазерная точка) =============//
+    // Позиционирование точки. Вызывается из player_hud::update() после того, как посчитаны
+    // трансформы худа текущего кадра, чтобы луч и оружие были из одного кадра.
+    void UpdateLaserDots();
+    // Гасит все точки (оружие убрано в инвентарь / не активный предмет худа).
+    void DeactivateLaserDots();
+    // true, если оружие сейчас активный предмет худа игрока и точки нужно рисовать.
+    bool LaserDotsAllowed();
+    // Смещение худа при прицеливании текущего кадра (identity от бедра). Часть позы покоя:
+    // без него точка уезжала бы из центра во время перехода бедро <-> прицел.
+    IC const Fmatrix& GetHudZoomOffset() const { return m_hud_zoom_offset; }
     IC float GetSecondVPZoomFactor() const { return m_zoom_params.m_fSecondVPFovFactor; }
     float GetHudFov();
     float GetSecondVPFov() const;
@@ -282,7 +291,6 @@ private:
     AddonIter FindNextAddon(AddonIter start, bool forward);
     void UpdateZoomedAddon(AddonIter current, AddonIter found);
     void SwitchZoomableAddon(bool direction);
-    void UpdateLaserDots();
 
     void SwitchToNextZoomableAddon() { SwitchZoomableAddon(true); }
     void SwitchToPrevZoomableAddon() { SwitchZoomableAddon(false); }
@@ -561,6 +569,8 @@ public:
     Fvector m_hands_offset[2][3]; // pos,rot/ normal,aim,GL
     Fvector m_tmp_offs;
     Fvector m_tmp_rot;
+    // Заполняется в UpdateHudAdditional(), читается через GetHudZoomOffset().
+    Fmatrix m_hud_zoom_offset{ Fidentity };
 
 public:
     virtual EHandDependence HandDependence() const { return eHandDependence; }

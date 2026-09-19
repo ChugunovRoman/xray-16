@@ -44,8 +44,6 @@ ENGINE_API extern float psHUD_FOV_def;
 ENGINE_API extern float g_fov;
 extern float g_aim_z_offset_coff;
 extern float g_second_aim_z_offset_coff;
-extern float g_laser_dot_cam_lerp;
-extern float g_laser_dot_min_hit_range;
 extern int g_3d_scope_type;
 // Персональные пресеты HUD FOV в прицеливании для сочетаний "оружие+прицел"
 // Ключ формата "<weapon_section>;<scope_section>"
@@ -1444,7 +1442,10 @@ void CWeapon::UpdateCL()
     ZoneScopedN("ucl_CWeapon");
     inherited::UpdateCL();
     UpdateHUDAddonsVisibility();
-    UpdateLaserDots();
+    // Позиционирование точек ЛЦУ живёт в player_hud::update(), где трансформации худа уже
+    // посчитаны для текущего кадра. Здесь только гасим их, пока оружие не в руках.
+    if (!LaserDotsAllowed())
+        DeactivateLaserDots();
     //подсветка от выстрела
     UpdateLight();
 
@@ -3132,6 +3133,10 @@ float _lerp(const float& _val_a, const float& _val_b, const float& _factor)
 
 void CWeapon::UpdateHudAdditional(Fmatrix& trans)
 {
+    // Сбрасываем до любого из выходов ниже: поза покоя ЛЦУ читает это поле каждый кадр
+    // и не должна получить значение прошлого кадра.
+    m_hud_zoom_offset.identity();
+
     CActor* pActor = smart_cast<CActor*>(H_Parent());
     if (!pActor)
         return;
@@ -3251,6 +3256,12 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
 
         hud_rotation.translate_over(curr_offs);
         trans.mulB_43(hud_rotation);
+
+        // Смещение прицеливания входит в позу покоя ЛЦУ: точка должна оставаться в центре
+        // экрана и от бедра, и в прицеле, и во время перехода между ними. Здесь это именно
+        // aim-оффсет худа (m_hands_offset[..][idx] с учётом кривой перехода) - стрейф и
+        // инерция ниже по функции в позу покоя НЕ входят, это анимация.
+        m_hud_zoom_offset.set(hud_rotation);
 
         if (pActor->IsZoomAimingMode())
             m_zoom_params.m_fZoomRotationFactor += Device.fTimeDelta / m_fZoomRotateTime;
@@ -3406,7 +3417,6 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
 
         hud_rotation.translate_over(curr_offs);
         trans.mulB_43(hud_rotation);
-        hi->m_item_dot_transform.mulB_43(hud_rotation);
     }
 
     //============= Инерция оружия =============//
@@ -3520,7 +3530,6 @@ void CWeapon::UpdateHudAdditional(Fmatrix& trans)
     hud_rotation.identity();
     hud_rotation.translate_over(curr_offs);
     trans.mulB_43(hud_rotation);
-    hi->m_item_dot_transform.mulB_43(hud_rotation);
 }
 
 void CWeapon::SetAmmoElapsed(int ammo_count)
@@ -5260,55 +5269,8 @@ void CWeapon::calc_aim_addon_offset()
         bone_id = item->addon_item_model->LL_BoneID(DOT);
         if (bone_id != BI_NONE)
         {
-            // Глубина по Z (на сколько далеко dot от камеры)
-            float depth = 5.0f;
-            // мировые координаты кости dot
-            Fmatrix bone_dot_world;
-            // Берем за осному мировые координаты текущего оружия на худе
-            bone_dot_world.set(m_item_transform);
-
-            // Находим центр экрана в мировых координатах
-            Fvector hud_dot_target_pos;
-            hud_dot_target_pos.mad(hud_cam.c, hud_cam.k, depth);
-
-            // Вычисляем полную коррекцию
-            Fvector world_correction;
-            world_correction.sub(hud_dot_target_pos, bone_dot_world.c);
-
-            //  Преобразуем в локальные координаты HUD
-            Fmatrix inv_trans;
-            inv_trans.invert(m_item_transform);
-            Fvector local_correction;
-            inv_trans.transform_dir(local_correction, world_correction);
-
-            // Устанавливаем локальное смещения для кости dot чтобы она была в центре экрана но не близко
-            item->addon_item_dot_t.c.set(local_correction);
-
-            // Вычисляем вращение. 
-            // Нам нужно, чтобы локальные оси кости dot в мировом пространстве совпадали с осями камеры.
-            // Для этого инвертируем вращение m_item_transform и умножаем на вращение камеры.
-
-            Fmatrix inv_item_rot;
-            inv_item_rot.invert(m_item_transform); 
-            // Обнуляем позицию в инвертированной матрице, нам нужно только вращение
-            inv_item_rot.c.set(0, 0, 0);
-
-            Fmatrix cam_rot;
-            // Создаем матрицу из векторов камеры (i - право, j - верх, k - направление)
-            cam_rot.i.set(hud_cam.i);
-            cam_rot.j.set(hud_cam.j);
-            cam_rot.k.set(hud_cam.k);
-            cam_rot.c.set(0, 0, 0);
-
-            // Итоговый локальный поворот = [Инверсия мира оружия] * [Мировой поворот камеры]
-            Fmatrix local_rot;
-            local_rot.mul(inv_item_rot, cam_rot);
-
-            // Устанавливаем оси в итоговую матрицу аддона
-            item->addon_item_dot_t.i.set(local_rot.i);
-            item->addon_item_dot_t.j.set(local_rot.j);
-            item->addon_item_dot_t.k.set(local_rot.k);
-
+            // Позиционирование самой точки ЛЦУ считает CWeapon::UpdateLaserDots().
+            // Здесь остаётся только смещение худа в режиме прицеливания для ЛЦУ.
             item->calc_aim_offset.set(-0.04f, -0.04f, 0);
             item->calc_aim_rot.set(0, 0, -0.2f);
             item->calc_second_aim_offset.set(-0.04f, -0.04f, 0);
@@ -5433,94 +5395,224 @@ void destroy_addon_item_models(addon_item* a)
         GEnv.Render->model_Delete(v);
         a->addon_item_model_2 = nullptr;
     }
-    if (a->addon_item_model_dot)
-    {
-        IRenderVisual* v = a->addon_item_model_dot->dcast_RenderVisual();
-        GEnv.Render->model_Delete(v);
-        a->addon_item_model_dot = nullptr;
-    }
     a->laser_glow.destroy();
+}
+
+// Препятствие ближе эмиттера на столько метров - считаем, что ствол упёрт в него.
+constexpr float LASER_DOT_MUZZLE_EPS = 0.05f;
+
+// Раскладывает аддон в мир для заданной трансформации оружия и позы его скелета.
+// parent_bone - кость оружия, к которой прикреплён аддон (identity, если кости нет).
+//
+// addon_world - трансформация самого аддона: из неё берётся БАЗИС луча.
+// dot_origin  - мировая точка кости "dot": из неё берётся ТОЧКА ВЫХОДА луча.
+//
+// Ориентацию кости "dot" использовать нельзя: в моделях ЛЦУ её оси вырождены (нулевые),
+// потому что скелет модели аддона отдельно не пересчитывается. Старый код по этой же причине
+// брал направление из трансформации аддона, а позицию - из кости.
+void build_dot_placement(const addon_item& item, const Fmatrix& item_world, const Fmatrix& parent_bone,
+    Fmatrix& addon_world, Fvector& dot_origin)
+{
+    addon_world.set(item_world);
+
+    if (!fis_zero(item.scale))
+    {
+        Fmatrix scale_transform;
+        scale_transform.scale(Fvector().set(item.scale, item.scale, item.scale));
+        addon_world.mulB_43(scale_transform);
+    }
+
+    addon_world.mulB_43(parent_bone);
+    addon_world.mulB_43(item.addon_item_pos);
+
+    Fmatrix dot_world;
+    dot_world.mul_43(addon_world, item.addon_item_model->LL_GetTransform(item.dot_bone_id));
+    dot_origin.set(dot_world.c);
+}
+
+// Оси матрицы без масштаба: направление луча переносим между позами только поворотом.
+// Возвращает false, если базис вырожден (нулевые оси) и пользоваться им нельзя.
+bool extract_basis(const Fmatrix& src, Fvector& i, Fvector& j, Fvector& k)
+{
+    i.normalize_safe(src.i);
+    j.normalize_safe(src.j);
+    k.normalize_safe(src.k);
+
+    return i.square_magnitude() > EPS_S && j.square_magnitude() > EPS_S && k.square_magnitude() > EPS_S;
+}
+
+// Базис оружия как запасной вариант: если трансформация аддона вырождена, луч всё равно
+// должен остаться жёстко связанным с оружием.
+void extract_basis_with_fallback(
+    const Fmatrix& preferred, const Fmatrix& fallback, Fvector& i, Fvector& j, Fvector& k)
+{
+    if (extract_basis(preferred, i, j, k))
+        return;
+
+    if (extract_basis(fallback, i, j, k))
+        return;
+
+    i.set(1.f, 0.f, 0.f);
+    j.set(0.f, 1.f, 0.f);
+    k.set(0.f, 0.f, 1.f);
 }
 } // namespace
 
-void CWeapon::UpdateLaserDots()
+bool CWeapon::LaserDotsAllowed()
 {
     if (m_addon_items.empty())
-        return;
+        return false;
 
-    CActor* actor = ParentIsActor() ? smart_cast<CActor*>(H_Parent()) : nullptr;
-    const bool hud_mode =
-        actor &&
-        H_Parent() == Level().CurrentEntity() &&
-        actor->inventory().ActiveItem() == this;
+    if (!ParentIsActor() || H_Parent() != Level().CurrentEntity())
+        return false;
 
-    if (!hud_mode)
+    CActor* actor = smart_cast<CActor*>(H_Parent());
+    if (!actor || actor->inventory().ActiveItem() != this)
+        return false;
+
+    // Заодно отсекает вид от третьего лица, потерю фокуса и отсутствие данных худа.
+    return GetHUDmode() != FALSE;
+}
+
+void CWeapon::DeactivateLaserDots()
+{
+    for (auto& [addon_id, item] : m_addon_items)
     {
-        for (auto& [addon_id, item] : m_addon_items)
-        {
-            if (item && item->laser_glow)
-                item->laser_glow->set_active(false);
-        }
+        if (item && item->laser_glow)
+            item->laser_glow->set_active(false);
+    }
+}
+
+// Позиционирование точки ЛЦУ.
+//
+// Луч жёстко привязан к оружию, но его направление в локальных координатах кости "dot"
+// подбирается каждый кадр так, чтобы в позе покоя луч проходил ровно через перекрестие на
+// текущей дистанции до препятствия. Затем это направление переносится в реальную
+// (анимированную) позу оружия.
+//
+// В покое обе позы совпадают, поэтому точка стоит в центре экрана на любой дистанции; при
+// анимации худа точка смещается ровно на дельту анимации. Позиция и ориентация крепления
+// аддона при переносе сокращаются, поэтому поведение одинаково для всех стволов и всех мест
+// крепления ЛЦУ - без единой настройки в конфигах и консоли.
+void CWeapon::UpdateLaserDots()
+{
+    if (!LaserDotsAllowed())
+    {
+        DeactivateLaserDots();
         return;
     }
 
     attachable_hud_item* hi = HudItemData();
-    if (!hi)
+    CActor* actor = smart_cast<CActor*>(H_Parent());
+
+    // Базис худ-камеры - тот же, из которого строятся трансформации худа. Device.vCamera*
+    // здесь использовать нельзя: камерные эффекторы (отдача) разводят эти базисы, и точка
+    // начинает дёргаться отдельно от оружия.
+    Fmatrix cam;
+    actor->Cameras().hud_camera_Matrix(cam);
+
+    const float zoom_factor = clampr(GetZRotatingFactor(), 0.f, 1.f);
+
+    // Дистанция до препятствия по оси взгляда - на ней и должно стоять перекрестие.
+    // Сцена одна на все аддоны, поэтому трассируем один раз по максимальной дальности.
+    float max_range = 0.f;
+    for (const auto& [addon_id, item] : m_addon_items)
+    {
+        if (item && item->laser_glow && item->has_laser_dot && item->addon_item_model &&
+            item->laser_range > max_range)
+        {
+            max_range = item->laser_range;
+        }
+    }
+
+    if (max_range <= 0.f)
         return;
+
+    collide::rq_result center_query{};
+    const bool center_hit = Level().ObjectSpace.RayPick(
+        cam.c, cam.k, max_range, collide::rqtBoth, center_query, Level().CurrentEntity());
+
+    const float center_range = center_hit ? center_query.range : max_range;
+
+    Fvector center_point;
+    center_point.mad(cam.c, cam.k, center_range);
 
     for (auto& [addon_id, item] : m_addon_items)
     {
-        if (!item || !item->laser_glow || !item->has_laser_dot)
+        if (!item || !item->laser_glow || !item->has_laser_dot || !item->addon_item_model)
             continue;
 
-        Fmatrix addon_world_transform;
-        addon_world_transform.set(hi->m_item_transform);
-
-        if (!fis_zero(item->scale))
-        {
-            Fmatrix scale_transform;
-            scale_transform.scale(Fvector().set(item->scale, item->scale, item->scale));
-            addon_world_transform.mulB_43(scale_transform);
-        }
+        // Поза кости оружия, на которой висит аддон: текущая и опорная (статический первый
+        // кадр idle, смешанный между положением от бедра и в прицеле).
+        Fmatrix cur_parent, rest_parent;
+        cur_parent.identity();
+        rest_parent.identity();
 
         if (item->bone_name.c_str() != nullptr)
         {
             const u16 parent_bone_id = hi->m_model->LL_BoneID(item->bone_name.c_str());
             if (parent_bone_id != BI_NONE)
-                addon_world_transform.mulB_43(hi->m_model->LL_GetTransform(parent_bone_id));
+            {
+                cur_parent.set(hi->m_model->LL_GetTransform(parent_bone_id));
+                hi->rest_bone_transform(parent_bone_id, zoom_factor, rest_parent);
+            }
         }
 
-        addon_world_transform.mulB_43(item->addon_item_pos);
+        Fmatrix rest_addon, cur_addon;
+        Fvector rest_origin, cur_origin;
+        build_dot_placement(*item, hi->m_item_rest_transform, rest_parent, rest_addon, rest_origin);
+        build_dot_placement(*item, hi->m_item_transform, cur_parent, cur_addon, cur_origin);
 
-        Fmatrix dot_world_transform;
-        dot_world_transform.mul_43(addon_world_transform, item->addon_item_model->LL_GetTransform(item->dot_bone_id));
+        // Базис луча берём из трансформации аддона: оси кости "dot" в моделях ЛЦУ вырождены.
+        Fvector rest_i, rest_j, rest_k;
+        Fvector cur_i, cur_j, cur_k;
+        extract_basis_with_fallback(rest_addon, hi->m_item_rest_transform, rest_i, rest_j, rest_k);
+        extract_basis_with_fallback(cur_addon, hi->m_item_transform, cur_i, cur_j, cur_k);
 
-        Fvector laser_origin;
-        laser_origin.set(dot_world_transform.c);
+        // Препятствие ближе самого эмиттера: ствол упёрт в стену, трассировать нечего -
+        // держим точку прямо на перекрестии.
+        const float emitter_depth = cam.k.dotproduct(Fvector().sub(rest_origin, cam.c));
+        if (center_range <= emitter_depth + LASER_DOT_MUZZLE_EPS)
+        {
+            item->laser_glow->set_position(center_point);
+            item->laser_glow->set_direction(cam.k);
+            item->laser_glow->set_color(item->laser_color);
+            item->laser_glow->set_radius(item->laser_glow_radius);
+            item->laser_glow->set_active(true);
+            continue;
+        }
 
-        Fvector emitter_direction;
-        emitter_direction.set(addon_world_transform.k);
-        if (emitter_direction.square_magnitude() <= EPS_S)
-            emitter_direction.set(hi->m_item_transform.k);
-        if (emitter_direction.square_magnitude() <= EPS_S)
-            emitter_direction.set(Device.vCameraDirection);
-        emitter_direction.normalize_safe();
+        // Направление, при котором луч из позы покоя попадает ровно в центр экрана.
+        Fvector rest_dir;
+        rest_dir.sub(center_point, rest_origin);
+        if (rest_dir.square_magnitude() <= EPS_S)
+        {
+            item->laser_glow->set_active(false);
+            continue;
+        }
+        rest_dir.normalize();
+
+        // Переносим направление в текущую позу через локальные координаты аддона.
+        const float local_x = rest_dir.dotproduct(rest_i);
+        const float local_y = rest_dir.dotproduct(rest_j);
+        const float local_z = rest_dir.dotproduct(rest_k);
 
         Fvector laser_direction;
-        laser_direction.lerp(emitter_direction, Device.vCameraDirection, g_laser_dot_cam_lerp);
+        laser_direction.set(0.f, 0.f, 0.f);
+        laser_direction.mad(cur_i, local_x);
+        laser_direction.mad(cur_j, local_y);
+        laser_direction.mad(cur_k, local_z);
+
         if (laser_direction.square_magnitude() <= EPS_S)
-            laser_direction.set(Device.vCameraDirection);
-        laser_direction.normalize_safe();
+        {
+            item->laser_glow->set_active(false);
+            continue;
+        }
+        laser_direction.normalize();
 
         collide::rq_result ray_query{};
-        const bool has_pick = Level().ObjectSpace.RayPick(
-            laser_origin,
-            laser_direction,
-            item->laser_range,
-            collide::rqtBoth,
-            ray_query,
-            Level().CurrentEntity()
-        );
+        const bool has_pick = Level().ObjectSpace.RayPick(cur_origin, laser_direction, item->laser_range,
+            collide::rqtBoth, ray_query, Level().CurrentEntity());
 
         if (!has_pick)
         {
@@ -5528,14 +5620,8 @@ void CWeapon::UpdateLaserDots()
             continue;
         }
 
-        if (ray_query.range <= g_laser_dot_min_hit_range)
-        {
-            item->laser_glow->set_active(false);
-            continue;
-        }
-
         Fvector hit_position;
-        hit_position.mad(laser_origin, laser_direction, ray_query.range);
+        hit_position.mad(cur_origin, laser_direction, ray_query.range);
 
         item->laser_glow->set_position(hit_position);
         item->laser_glow->set_direction(laser_direction);
