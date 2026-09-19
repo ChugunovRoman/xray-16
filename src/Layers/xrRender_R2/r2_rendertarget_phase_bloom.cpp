@@ -76,16 +76,18 @@ void CRenderTarget::phase_bloom()
 {
     using namespace phase_bloom;
 
-    // Scope second viewport pass: the bloom/luminance chain is fixed-cost (resolution- and
-    // frustum-independent). Skipping this phase ENTIRELY killed the lens frame's GLOBAL light -
-    // without a refreshed tonemap LUT the scope combine darkened all non-local-light pixels
-    // (day-time dynamics "unlit by the sun"). The lens needs the REFRESHED LUMINANCE but not the
-    // bloom itself, so run ONLY the luminance step.
+    // Scope second viewport pass: neither bloom nor luminance is computed here.
+    // The lens must show EXACTLY the main frame's exposure, so phase_combine binds the scope pass
+    // to the adaptation value the main pass has just written and does NOT swap rt_LUM_pool
+    // (see the exposure-pipeline blocks in r4/gl phase_combine). Running phase_luminance here was
+    // harmful twice over: (1) rt_Bloom_1 is not twinned, so the scope pass measured the MAIN
+    // frame's blurred bloom instead of its own scene; (2) the 64/8/1 viewport pins shrank the
+    // Device-pixel-authored quads to a sub-pixel corner, so the 1x1 pool target was never written
+    // while the pool was still swapped every pass - which froze tonemap adaptation for the whole
+    // time the scope was raised. The older "skip phase_bloom entirely" variant darkened the lens
+    // for the same reason: unwritten pool slot + unconditional swap = stale 0x7f startup value.
     if (RImplementation.IsSecondViewportRenderPass())
-    {
-        phase_luminance();
         return;
-    }
 
     PIX_EVENT(phase_bloom);
     u32 Offset;

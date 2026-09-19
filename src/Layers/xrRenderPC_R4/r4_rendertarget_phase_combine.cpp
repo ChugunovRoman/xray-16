@@ -34,6 +34,18 @@ void CRenderTarget::phase_combine()
                                                             // в половине кадров оказывается картинка из второго рендера, и поскольку она часто может отличатся по цвету\яркости
                                                             // то при попытке создания "плавного" перехода между ними получается эффект мерцания
     }
+    // Scope second viewport pass: the main pass of this frame has already run its luminance step
+    // and swapped the pool, so slot [0] holds the freshest adaptation value. The scope pass reads
+    // it through BOTH names ($user$tonemap is what combine/sky/water sample), computes no luminance
+    // of its own (phase_bloom returns early) and must not swap the pool at the end - otherwise the
+    // main pass keeps re-reading a stale slot and exposure freezes while aiming.
+    const bool svp_pass = RImplementation.IsSecondViewportRenderPass();
+    if (svp_pass)
+    {
+        t_LUM_src->surface_set(rt_LUM_pool[gpu_id * 2 + 0]->pSurface);
+        t_LUM_dest->surface_set(rt_LUM_pool[gpu_id * 2 + 0]->pSurface);
+    }
+    else
     {
         t_LUM_src->surface_set(rt_LUM_pool[gpu_id * 2 + 0]->pSurface);
         t_LUM_dest->surface_set(rt_LUM_pool[gpu_id * 2 + 1]->pSurface);
@@ -451,7 +463,8 @@ void CRenderTarget::phase_combine()
 
     //*** exposure-pipeline-clear
     {
-        std::swap(rt_LUM_pool[gpu_id * 2 + 0], rt_LUM_pool[gpu_id * 2 + 1]);
+        if (!svp_pass) // scope pass wrote nothing into the pool - keep the main chain intact
+            std::swap(rt_LUM_pool[gpu_id * 2 + 0], rt_LUM_pool[gpu_id * 2 + 1]);
         t_LUM_src->surface_set(NULL);
         t_LUM_dest->surface_set(NULL);
     }

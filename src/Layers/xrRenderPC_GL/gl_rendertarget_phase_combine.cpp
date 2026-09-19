@@ -32,6 +32,16 @@ void CRenderTarget::phase_combine()
                                                             // в половине кадров оказывается картинка из второго рендера, и поскольку она часто может отличатся по цвету\яркости
                                                             // то при попытке создания "плавного" перехода между ними получается эффект мерцания
     }
+    // Scope second viewport pass: read the adaptation value the main pass has just written (slot 0
+    // after its swap) through both names, compute no luminance and do not swap the pool below.
+    // See the same block in r4_rendertarget_phase_combine.cpp.
+    const bool svp_pass = RImplementation.IsSecondViewportRenderPass();
+    if (svp_pass)
+    {
+        t_LUM_src->surface_set(GL_TEXTURE_2D, rt_LUM_pool[gpu_id * 2 + 0]->pRT);
+        t_LUM_dest->surface_set(GL_TEXTURE_2D, rt_LUM_pool[gpu_id * 2 + 0]->pRT);
+    }
+    else
     {
         t_LUM_src->surface_set(GL_TEXTURE_2D, rt_LUM_pool[gpu_id * 2 + 0]->pRT);
         t_LUM_dest->surface_set(GL_TEXTURE_2D, rt_LUM_pool[gpu_id * 2 + 1]->pRT);
@@ -440,7 +450,8 @@ void CRenderTarget::phase_combine()
 
     //*** exposure-pipeline-clear
     {
-        std::swap(rt_LUM_pool[gpu_id * 2 + 0], rt_LUM_pool[gpu_id * 2 + 1]);
+        if (!svp_pass) // scope pass wrote nothing into the pool - keep the main chain intact
+            std::swap(rt_LUM_pool[gpu_id * 2 + 0], rt_LUM_pool[gpu_id * 2 + 1]);
         t_LUM_src->surface_set(GL_TEXTURE_2D, 0);
         t_LUM_dest->surface_set(GL_TEXTURE_2D, 0);
     }
