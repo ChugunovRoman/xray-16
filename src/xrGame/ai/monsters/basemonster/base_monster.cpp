@@ -4,6 +4,7 @@
 #include "Hit.h"
 #include "PHDestroyable.h"
 #include "CharacterPhysicsSupport.h"
+#include "performance_cvars.h"
 #include "xrAICore/Navigation/game_level_cross_table.h"
 #include "xrAICore/Navigation/game_graph.h"
 #include "xrAICore/Navigation/level_graph.h"
@@ -335,7 +336,7 @@ void CBaseMonster::UpdateCL()
     if (g_Alive())
     {
         update_enemy_accessible_and_at_home_info();
-        if (ucl_perf_run_character_step_when_alive())
+        if (npc_perf_disable_ucl_stalker_step_manager == 0)
         {
             ZoneScopedN("ucl_base_monster_step_manager");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);
@@ -344,16 +345,11 @@ void CBaseMonster::UpdateCL()
 
         update_pos_by_grouping_behaviour();
     }
-    else if (ucl_perf_run_character_step_dead_override())
-    {
-        ZoneScopedN("ucl_base_monster_step_manager_postdeath");
-        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);
-        CStepManager::update(false);
-    }
 
     control().update_frame();
 
-    if (ucl_perf_run_character_physics_updatecl())
+    // DEBUG/STRESS gate only (default 0) - see performance_cvars.h.
+    if (npc_perf_disable_ucl_stalker_physics == 0)
     {
         ZoneScopedN("ucl_base_monster_physics");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsUpdateCL);

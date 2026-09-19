@@ -113,6 +113,7 @@ float g_aim_predict_time = 0.40f;
 int g_keypress_on_start = 1;
 extern int ps_force_character_lod_render;
 extern int ps_r_disable_character_lod_render;
+extern u32 ps_r_corpse_pose_freeze_ms;
 
 float g_aim_z_offset_coff = -0.04f;
 float g_second_aim_z_offset_coff = -0.09f;
@@ -226,9 +227,8 @@ u32 npc_perf_ik_interval_enemy_selected_ms = 0;
 int npc_perf_ik_foot_raypick_batch = 2;
 int npc_perf_ik_foot_raypick_batch_min_rays = 12;
 int npc_perf_mt_stalker_physics = 0;
-int npc_perf_disable_ucl_stalker_physics = 1;
-int npc_perf_disable_ucl_stalker_step_manager = 1;
-u32 npc_perf_disable_ucl_stalker_postdeath_grace_ms = 2500;
+int npc_perf_disable_ucl_stalker_physics = 0;
+int npc_perf_disable_ucl_stalker_step_manager = 0;
 int ai_evaluator_ttl_ms = 500;
 u32 npc_perf_state_mgr_animstate_ttl_ms = 120;
 u32 npc_perf_script_combat_ttl_ms = 100;
@@ -2866,6 +2866,9 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "r_disable_character_lod", &ps_r_disable_character_lod_render, 0, 1);
     // Force render m_lod for all CEntityAlive (NPC/mutant/actor) when available.
     CMD4(CCC_Integer, "r_force_character_lod", &ps_force_character_lod_render, 0, 1);
+    // Ms after death before a corpse stops recalculating its bones. 0 = never freeze (a corpse frozen while the
+    // ragdoll is still moving stays stuck mid-air).
+    CMD4(CCC_Integer, "r_corpse_pose_freeze_ms", (int*)&ps_r_corpse_pose_freeze_ms, 0, 120000);
     CMD4(CCC_Integer, "npc_perf_vision_parallel_batch", &npc_perf_vision_parallel_batch, 0, 1);
     CMD4(CCC_Integer, "npc_perf_vision_parallel_batch_min_rays", &npc_perf_vision_parallel_batch_min_rays, 0, 10000);
     CMD4(CCC_Float, "npc_perf_vision_small_physics_radius", &npc_perf_vision_small_physics_radius, 0.f, 10.f);
@@ -2888,8 +2891,6 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_mt_stalker_physics", &npc_perf_mt_stalker_physics, 0, 1);
     CMD4(CCC_Integer, "npc_perf_disable_ucl_stalker_physics", &npc_perf_disable_ucl_stalker_physics, 0, 1);
     CMD4(CCC_Integer, "npc_perf_disable_ucl_stalker_step_manager", &npc_perf_disable_ucl_stalker_step_manager, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_disable_ucl_stalker_postdeath_grace_ms", (int*)&npc_perf_disable_ucl_stalker_postdeath_grace_ms, 0,
-        60000);
     CMD4(CCC_Integer, "npc_perf_state_mgr_animstate_ttl_ms", (int*)&npc_perf_state_mgr_animstate_ttl_ms, 10, 30000);
     CMD4(CCC_Integer, "npc_perf_script_combat_ttl_ms", (int*)&npc_perf_script_combat_ttl_ms, 10, 30000);
     CMD4(CCC_Integer, "npc_perf_evaluator_combat_enemy_cache_ttl_ms", (int*)&npc_perf_evaluator_combat_enemy_cache_ttl_ms, 10, 30000);

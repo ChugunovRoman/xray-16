@@ -90,13 +90,14 @@ extern int npc_perf_ik_foot_raypick_batch_min_rays;
  */
 extern int npc_perf_mt_stalker_physics;
 
-// CCustomMonster::DeferredLateUpdateCL (CAI_Stalker, CBaseMonster, …) — same gates for in_UpdateCL + CStepManager::update.
+// Gates for CCharacterPhysicsSupport::in_UpdateCL + CStepManager::update in CAI_Stalker/CBaseMonster::UpdateCL.
 // Console names keep stalker_* for user.ltx compatibility; they apply to all custom monsters.
-// 1 = skip that stage when alive (profiling / stress); postdeath grace can still force a short run after Die().
+// DEBUG/STRESS ONLY - keep at 0. Setting 1 stops ik_controller()->Update(), so the IK foot raycasts never refresh
+// while CIKLimbsController::Calculate() keeps applying the last object_shift from the skeleton visual callback:
+// NPCs then sink into the terrain or walk on air (up to global_max_shift = 1 m), and corpses stop being synced
+// by InterpolateGlobalTransform.
 extern int npc_perf_disable_ucl_stalker_physics;
 extern int npc_perf_disable_ucl_stalker_step_manager;
-/** When physics/step are disabled above, dead entities still run those stages for this many ms after Die() (0 = no override). */
-extern u32 npc_perf_disable_ucl_stalker_postdeath_grace_ms;
 
 // Lua script TTL/interval (read via get_console():get_integer in scripts)
 extern int ai_evaluator_ttl_ms; // C++ script GOAP evaluator time-based cache TTL (0 = disabled)

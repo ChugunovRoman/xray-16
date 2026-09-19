@@ -64,15 +64,6 @@ constexpr float IK_LOD_MEDIUM_DIST_SQR = 50.f * 50.f;
 // P2-opt: NPCs beyond this distance skip IK entirely (npc_perf_ik_interval_disabled_ms = effectively disabled)
 constexpr float IK_LOD_DISABLE_DIST_SQR = 100.f * 100.f;
 // IK intervals from npc_perf_ik_interval_* (user.ltx)
-constexpr float DEAD_RAGDOLL_NEAR_DIST_SQR = 15.f * 15.f;
-constexpr float DEAD_RAGDOLL_MEDIUM_DIST_SQR = 40.f * 40.f;
-constexpr u32 DEAD_RAGDOLL_UPDATE_INTERVAL_NEAR_MS = 60;
-constexpr u32 DEAD_RAGDOLL_UPDATE_INTERVAL_MEDIUM_MS = 160;
-constexpr u32 DEAD_RAGDOLL_UPDATE_INTERVAL_FAR_MS = 320;
-constexpr u32 DEAD_RAGDOLL_SETTLE_DELAY_MS = 3000;
-constexpr float DEAD_RAGDOLL_SLEEP_LINEAR_EPS_SQR = 0.15f * 0.15f;
-constexpr float DEAD_RAGDOLL_SLEEP_ANGULAR_EPS_SQR = 0.2f * 0.2f;
-
 IC u32 ik_update_offset(const u16 object_id, const u32 interval_ms)
 {
     if (!interval_ms)
@@ -134,105 +125,6 @@ IC bool should_run_character_ik_update(
     return true;
 }
 
-IC u32 get_dead_character_update_interval(CEntityAlive& entity)
-{
-    CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
-    if (!actor)
-        return DEAD_RAGDOLL_UPDATE_INTERVAL_FAR_MS;
-
-    const float dist_sqr = entity.Position().distance_to_sqr(actor->Position());
-    if (dist_sqr <= DEAD_RAGDOLL_NEAR_DIST_SQR)
-        return DEAD_RAGDOLL_UPDATE_INTERVAL_NEAR_MS;
-    if (dist_sqr <= DEAD_RAGDOLL_MEDIUM_DIST_SQR)
-        return DEAD_RAGDOLL_UPDATE_INTERVAL_MEDIUM_MS;
-
-    return DEAD_RAGDOLL_UPDATE_INTERVAL_FAR_MS;
-}
-
-IC bool should_run_dead_character_update(
-    CEntityAlive& entity, const u16 object_id, u32& next_update_time, u32& current_interval, const u32 now_ms)
-{
-    const u32 new_interval = get_dead_character_update_interval(entity);
-    if (current_interval != new_interval)
-    {
-        current_interval = new_interval;
-        next_update_time = now_ms + ik_update_offset(object_id, new_interval);
-        return next_update_time <= now_ms;
-    }
-
-    if (next_update_time > now_ms)
-        return false;
-
-    next_update_time = now_ms + new_interval;
-    return true;
-}
-
-IC bool should_sleep_dead_ragdoll(CEntityAlive& entity, CPhysicsShell& shell, const u32 death_start_time, const u32 now_ms)
-{
-    // Optimization: aggressively sleep ragdolls that have been dead for a long time
-    const u32 time_since_death = now_ms - death_start_time;
-    
-    // Grace period: never sleep during the first few seconds after death
-    // This ensures death animation plays smoothly without stuttering
-    constexpr u32 DEATH_ANIMATION_GRACE_PERIOD_MS = 3000;
-    if (time_since_death < DEATH_ANIMATION_GRACE_PERIOD_MS)
-        return false;
-
-    // If dead for more than 15 seconds, always sleep (regardless of velocity)
-    if (time_since_death > 15000)
-        return true;
-    
-    // If dead for more than 8 seconds, use more lenient sleep thresholds
-    if (time_since_death > 8000)
-    {
-        Fvector linear_vel;
-        Fvector angular_vel;
-        shell.get_LinearVel(linear_vel);
-        shell.get_AngularVel(angular_vel);
-
-        // More lenient thresholds for old ragdolls
-        constexpr float OLD_RAGDOLL_SLEEP_LINEAR_EPS_SQR = 0.5f * 0.5f;
-        constexpr float OLD_RAGDOLL_SLEEP_ANGULAR_EPS_SQR = 0.8f * 0.8f;
-
-        if (linear_vel.square_magnitude() <= OLD_RAGDOLL_SLEEP_LINEAR_EPS_SQR &&
-            angular_vel.square_magnitude() <= OLD_RAGDOLL_SLEEP_ANGULAR_EPS_SQR)
-        {
-            return true;
-        }
-        
-        // Still sleep if far from actor (>25m)
-        CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
-        if (!actor)
-            return true;
-            
-        constexpr float OLD_RAGDOLL_SLEEP_DIST_SQR = 25.f * 25.f;
-        if (entity.Position().distance_to_sqr(actor->Position()) > OLD_RAGDOLL_SLEEP_DIST_SQR)
-            return true;
-            
-        return false;
-    }
-
-    // Original logic for recently dead ragdolls
-    if (now_ms < death_start_time + DEAD_RAGDOLL_SETTLE_DELAY_MS)
-        return false;
-
-    Fvector linear_vel;
-    Fvector angular_vel;
-    shell.get_LinearVel(linear_vel);
-    shell.get_AngularVel(angular_vel);
-
-    if (linear_vel.square_magnitude() > DEAD_RAGDOLL_SLEEP_LINEAR_EPS_SQR)
-        return false;
-
-    if (angular_vel.square_magnitude() > DEAD_RAGDOLL_SLEEP_ANGULAR_EPS_SQR)
-        return false;
-
-    CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
-    if (!actor)
-        return true;
-
-    return entity.Position().distance_to_sqr(actor->Position()) > DEAD_RAGDOLL_NEAR_DIST_SQR;
-}
 } // namespace
 
 // void  NodynamicsCollide( bool& do_colide, bool bo1, dContact& c, SGameMtl * /*material_1*/, SGameMtl * /*material_2*/
@@ -932,63 +824,16 @@ void CCharacterPhysicsSupport::in_UpdateCL()
     if (dbg_draw_character_physics && m_pPhysicsShell)
         m_pPhysicsShell->dbg_draw_geometry(0.2f, color_argb(100, 255, 0, 0));
 #endif
-    const bool dead_shell = (m_eState == esDead) && !!m_pPhysicsShell;
-    if (dead_shell)
     {
-        if (m_dead_ragdoll_sleep_applied)
-            return;
-
-        // Optimization: more aggressive throttling for long-dead ragdolls
-        const u32 time_since_death = Device.dwTimeGlobal - m_death_update_start_time;
-
-        // Grace period: no throttling for the first few seconds after death
-        // This ensures death animation plays smoothly without stuttering
-        constexpr u32 DEATH_ANIMATION_GRACE_PERIOD_MS = 3000;
-        const bool in_grace_period = (time_since_death < DEATH_ANIMATION_GRACE_PERIOD_MS);
-        
-        if (!in_grace_period)
-        {
-            if (time_since_death > 10000)
-            {
-                // Dead for more than 10 seconds - very aggressive throttling
-                // Only check every few frames
-                if ((Device.dwFrame % 8) != 0)
-                    return;
-            }
-            else if (time_since_death > 5000)
-            {
-                // Dead for 5-10 seconds - moderate throttling
-                if ((Device.dwFrame % 4) != 0)
-                    return;
-            }
-
-            if (!should_run_dead_character_update(
-                    m_EntityAlife, m_EntityAlife.ID(), m_next_dead_update_time, m_dead_update_interval, Device.dwTimeGlobal))
-            {
-                return;
-            }
-        }
-        else
-        {
-            // During grace period, reset update timing to ensure every frame update
-            m_next_dead_update_time = 0;
-            m_dead_update_interval = 0;
-        }
+        ZoneScopedN("cph_anim_collision");
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsAnimationCollision);
+        update_animation_collision();
     }
 
-    if (!dead_shell)
     {
-        {
-            ZoneScopedN("cph_anim_collision");
-            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsAnimationCollision);
-            update_animation_collision();
-        }
-
-        {
-            ZoneScopedN("cph_shell_control_dt");
-            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsCalculateTimeDelta);
-            m_character_shell_control.CalculateTimeDelta();
-        }
+        ZoneScopedN("cph_shell_control_dt");
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsCalculateTimeDelta);
+        m_character_shell_control.CalculateTimeDelta();
     }
 
     if (m_pPhysicsShell)
@@ -1004,15 +849,6 @@ void CCharacterPhysicsSupport::in_UpdateCL()
         {
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsShellSetRagdoll);
             m_pPhysicsShell->SetRagDoll(); //Теперь шела относиться к классу объектов cbClassRagDoll
-        }
-
-        if (dead_shell && should_sleep_dead_ragdoll(m_EntityAlife, *m_pPhysicsShell, m_death_update_start_time, Device.dwTimeGlobal))
-        {
-            m_pPhysicsShell->Disable();
-            m_pPhysicsShell->Freeze();
-            m_dead_ragdoll_sleep_applied = true;
-            m_EntityAlife.processing_deactivate();
-            return;
         }
 
         if (!is_imotion(m_interactive_motion)) //! m_flags.test(fl_use_death_motion)
@@ -1031,7 +867,6 @@ void CCharacterPhysicsSupport::in_UpdateCL()
             UpdateDeathAnims();
         }
 
-        if (!dead_shell || Device.dwTimeGlobal <= (m_death_update_start_time + 1500))
         {
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsFriction);
             m_character_shell_control.UpdateFrictionAndJointResistanse(m_pPhysicsShell);
@@ -1572,10 +1407,6 @@ void CCharacterPhysicsSupport::CreateShell(IGameObject* who, Fvector& dp, Fvecto
 
     m_flags.set(fl_death_anim_on, FALSE);
     m_eState = esDead;
-    m_death_update_start_time = Device.dwTimeGlobal;
-    m_next_dead_update_time = Device.dwTimeGlobal;
-    m_dead_update_interval = 0;
-    m_dead_ragdoll_sleep_applied = false;
     m_flags.set(fl_skeleton_in_shell, TRUE);
 
     if (IsGameTypeSingle())

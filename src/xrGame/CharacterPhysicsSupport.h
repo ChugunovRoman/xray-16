@@ -88,10 +88,6 @@ private:
     u32 m_physics_shell_animated_time_destroy{ u32(-1) };
     u32 m_next_ik_update_time{0};
     u32 m_ik_update_interval{0};
-    u32 m_death_update_start_time{0};
-    u32 m_next_dead_update_time{0};
-    u32 m_dead_update_interval{0};
-    bool m_dead_ragdoll_sleep_applied{false};
 
     // P1 (plans/optimization_spawn): set for one CreateCharacterSafe() call by SpawnCharacterCreate()
     // when this non-actor character spawns as part of the initial level/save load burst

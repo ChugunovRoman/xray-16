@@ -16,6 +16,8 @@ class CBlend;
 extern int ps_force_character_lod_render;
 // When non-zero, never use character m_lod in the renderer (hi visual only); overrides r_force_character_lod and corpse LOD flags.
 extern int ps_r_disable_character_lod_render;
+// Ms after death before a corpse's pose is frozen (CalculateBones skipped in the render graph). 0 = never freeze.
+extern u32 ps_r_corpse_pose_freeze_ms;
 
 class CEntityAlive : public CEntity
 {

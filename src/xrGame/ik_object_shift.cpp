@@ -48,12 +48,25 @@ void object_shift::dbg_draw(
 #endif
 
 static const float global_max_shift = 1.0f;
+
+// Past taget_time the shift is no longer backed by a fresh IK ground measurement. Clamping the time (as the original
+// code did) freezes the last value forever, so an NPC whose ik_controller()->Update() is throttled by LOD - or skipped
+// entirely - keeps a stale vertical offset of up to global_max_shift and visually sinks into the terrain or walks on
+// air. Relax the stale shift back to zero instead; a fresh set_taget() always wins over the decay.
+static const float shift_decay_time = 0.35f;
+
 float object_shift::shift() const
 {
-    float time_global = Device.fTimeGlobal;
-    if (time_global > taget_time)
-        time_global = taget_time;
-    return shift(time_global);
+    const float time_global = Device.fTimeGlobal;
+    if (time_global <= taget_time)
+        return shift(time_global);
+
+    const float held = shift(taget_time);
+    const float overtime = time_global - taget_time;
+    if (overtime >= shift_decay_time)
+        return 0.f;
+
+    return held * (1.f - overtime / shift_decay_time);
 }
 
 float object_shift::shift(float time_global) const

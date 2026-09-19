@@ -100,6 +100,18 @@ CGameObject::~CGameObject()
     cNameSect_set(0);
 }
 
+// A corpse may only be throttled once its ragdoll has actually come to rest. While the shell is still enabled the body
+// is falling or sliding, and skipping MakeMeCrow / spatial_update there leaves it hanging in the air with a stale
+// level_vertex_id. ODE's own auto-disable (xrPhysics/PHDisabling.cpp) decides when the body has settled.
+static bool corpse_ragdoll_settled(CEntityAlive* entity_alive)
+{
+    if (!entity_alive)
+        return false;
+
+    CPhysicsShell* shell = entity_alive->PPhysicsShell();
+    return !shell || !shell->isEnabled();
+}
+
 void CGameObject::MakeMeCrow()
 {
     if (Props.crow)
@@ -107,18 +119,16 @@ void CGameObject::MakeMeCrow()
     if (!processing_enabled())
         return;
 
-    // Optimization: skip MakeMeCrow for dead entities that died long ago
-    // This reduces post-battle CPU tail significantly
-    // Note: keep this threshold aligned with DEATH_ANIMATION_GRACE_PERIOD_MS in CharacterPhysicsSupport.cpp
+    // Optimization: skip MakeMeCrow for corpses whose ragdoll has already settled.
+    // This reduces post-battle CPU tail significantly.
     if (CEntityAlive* entity_alive = cast_entity_alive())
     {
-        if (!entity_alive->g_Alive())
+        if (!entity_alive->g_Alive() && corpse_ragdoll_settled(entity_alive))
         {
             const u32 death_time = entity_alive->GetLevelDeathTime();
             if (death_time && (Device.dwTimeGlobal - death_time > 3000))
             {
-                // Dead for more than 3 seconds - no need to update as crow every frame
-                // This aligns with the death animation grace period
+                // Settled corpse, dead for more than 3 seconds - no need to update as crow every frame
                 return;
             }
         }
@@ -1297,7 +1307,8 @@ void CGameObject::shedule_Update(u32 dt)
     CEntityAlive* entity_alive = cast_entity_alive();
     const bool is_dead_entity = entity_alive && !entity_alive->g_Alive();
     const u32 death_time = entity_alive && entity_alive->GetLevelDeathTime() ? entity_alive->GetLevelDeathTime() : 0;
-    const bool is_long_dead = is_dead_entity && death_time && (Device.dwTimeGlobal - death_time > 3000);
+    const bool is_long_dead = is_dead_entity && death_time && (Device.dwTimeGlobal - death_time > 3000) &&
+        corpse_ragdoll_settled(entity_alive);
     // P5-opt: after npc_perf_long_dead_skip_binder_ms skip script binder entirely for corpses (reduce schedule_update tail)
     const bool very_long_dead = is_dead_entity && death_time && (Device.dwTimeGlobal - death_time > npc_perf_long_dead_skip_binder_ms);
 
@@ -1583,7 +1594,8 @@ void CGameObject::UpdateCL()
     constexpr u32 DEATH_ANIMATION_GRACE_PERIOD_MS = 3000;
     const bool in_grace_period = is_dead_entity && (time_since_death < DEATH_ANIMATION_GRACE_PERIOD_MS);
     
-    const bool is_long_dead = is_dead_entity && !in_grace_period && (time_since_death > 5000);
+    const bool is_long_dead =
+        is_dead_entity && !in_grace_period && (time_since_death > 5000) && corpse_ragdoll_settled(entity_alive);
 
     // For long-dead entities, skip expensive spatial update in UpdateCL
     if (!is_long_dead)

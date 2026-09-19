@@ -1055,17 +1055,10 @@ void CAI_Stalker::UpdateCL()
     START_PROFILE("stalker/client_update")
     VERIFY2(PPhysicsShell() || getEnabled(), cName().c_str());
 
-    if (g_Alive())
-        m_ucl_perf_postdeath_until_time = 0;
-    else if (m_ucl_perf_postdeath_until_time != 0 && Device.dwTimeGlobal >= m_ucl_perf_postdeath_until_time)
-        m_ucl_perf_postdeath_until_time = 0;
-
-    const bool phys_glob_off = npc_perf_disable_ucl_stalker_physics != 0;
-    const bool step_glob_off = npc_perf_disable_ucl_stalker_step_manager != 0;
-    const bool postdeath_ucl_force =
-        !g_Alive() && m_ucl_perf_postdeath_until_time != 0 && Device.dwTimeGlobal < m_ucl_perf_postdeath_until_time;
-    const bool run_ucl_physics = !phys_glob_off || postdeath_ucl_force;
-    const bool run_ucl_step_alive = !step_glob_off || postdeath_ucl_force;
+    // DEBUG/STRESS gates only (default 0). Skipping in_UpdateCL freezes the IK foot raycasts while the skeleton
+    // visual callback keeps applying the stale object_shift - NPCs sink into the terrain or walk on air.
+    const bool run_ucl_physics = npc_perf_disable_ucl_stalker_physics == 0;
+    const bool run_ucl_step_alive = npc_perf_disable_ucl_stalker_step_manager == 0;
 
     if (g_Alive())
     {
@@ -1176,16 +1169,6 @@ void CAI_Stalker::UpdateCL()
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLWeaponEffector);
             if (weapon_shot_effector().IsActive())
                 weapon_shot_effector().Update();
-        }
-        STOP_PROFILE
-    }
-    else if (ucl_perf_run_character_step_dead_override())
-    {
-        START_PROFILE("stalker/client_update/step_manager")
-        {
-            ZoneScopedN("ucl_stalker_step_manager");
-            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);
-            CStepManager::update(false);
         }
         STOP_PROFILE
     }

@@ -167,16 +167,6 @@ public:
     virtual void shedule_Update(u32 DT);
     virtual void UpdateCL();
 
-protected:
-    /** Shared UCL perf (stalker + monsters): post-Die grace while physics/step are globally throttled. */
-    u32 m_ucl_perf_postdeath_until_time{0};
-    void ucl_perf_tick_postdeath_timer_on_early_updatecl();
-    void ucl_perf_set_postdeath_grace_after_die();
-    bool ucl_perf_postdeath_force() const;
-    bool ucl_perf_run_character_physics_updatecl() const;
-    bool ucl_perf_run_character_step_when_alive() const;
-    bool ucl_perf_run_character_step_dead_override() const;
-
 public:
     // Network
     virtual void net_Export(NET_Packet& P); // export to server
