@@ -31,7 +31,7 @@ bool squad_trace_enabled()
 
 // Rate limit for the repair diagnostics: the first occurrences verbatim, then one in 512.
 // A broken squad must not be able to flood the log from the ALife update loop.
-bool log_rare(u32& counter)
+bool log_rare_squad(u32& counter)
 {
     ++counter;
     return (counter <= 16) || ((counter % 512) == 0);
@@ -85,7 +85,7 @@ u32 CSE_ALifeOnlineOfflineGroup::sanitize_members(const char* where)
 
         ++problems;
         static u32 s_reported = 0;
-        const bool report = log_rare(s_reported);
+        const bool report = log_rare_squad(s_reported);
 
         if (!registered)
         {
@@ -233,7 +233,7 @@ void CSE_ALifeOnlineOfflineGroup::unregister_member(ALife::_OBJECT_ID member_id)
         // scheduler, and finished with erase(end()) - silent container corruption whose crash
         // surfaces much later, in whatever iterates m_members next.
         static u32 s_reported = 0;
-        if (log_rare(s_reported))
+        if (log_rare_squad(s_reported))
             Msg("~ [GW] squad [%s] id=%u: unregister_member(%u) - no such member, ignored",
                 name_replace(), u32(ID), u32(member_id));
         return;
@@ -244,7 +244,7 @@ void CSE_ALifeOnlineOfflineGroup::unregister_member(ALife::_OBJECT_ID member_id)
     if (!member || smart_cast<MEMBER*>(ai().alife().objects().object(member_id, true)) != member)
     {
         static u32 s_reported = 0;
-        if (log_rare(s_reported))
+        if (log_rare_squad(s_reported))
             Msg("! [GW] squad [%s] id=%u: unregister_member(%u) - %s member pointer %p, "
                 "the entry is dropped without touching the object",
                 name_replace(), u32(ID), u32(member_id), member ? "stale" : "unresolved", (void*)member);

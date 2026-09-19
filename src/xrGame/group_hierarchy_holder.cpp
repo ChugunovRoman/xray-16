@@ -130,7 +130,7 @@ IC bool entity_ids_equal_safe(const CEntity* a, const CEntity* b)
 
 // The registry can desync once and then every frame; log the first occurrences verbatim, then
 // one in 512, so a recurrence stays visible without flooding the log.
-bool log_rare(u32& counter)
+bool log_rare_group(u32& counter)
 {
     ++counter;
     return (counter <= 16) || ((counter % 512) == 0);
@@ -203,7 +203,7 @@ void CGroupHierarchyHolder::register_in_group(CEntity* member)
     if (std::find(m_members.begin(), m_members.end(), member) != m_members.end())
     {
         static u32 s_reported = 0;
-        if (log_rare(s_reported))
+        if (log_rare_group(s_reported))
             Msg("! [GW] register_in_group: [%s] is already registered in this group, ignored",
                 member->cName().c_str());
         return;
@@ -272,7 +272,7 @@ void CGroupHierarchyHolder::unregister_in_group(CEntity* member)
     if (I == m_members.end())
     {
         static u32 s_reported = 0;
-        if (log_rare(s_reported))
+        if (log_rare_group(s_reported))
             Msg("! [GW] unregister_in_group: [%s] is not registered in this group, ignored",
                 member->cName().c_str());
         return;
