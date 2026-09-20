@@ -305,7 +305,11 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
     xr_vector<u32> lights_queue;
     lights_queue.reserve(R__NUM_CONTEXTS);
 
-    const bool mt_light = ps_r2_mt_light_render != 0;
+    // Parallel recording requires deferred contexts: o.mt_render is forced to 0 on OpenGL
+    // (single GL context, current on the render thread only) - without that gate the task
+    // issued GL calls off-thread while the render thread was inside render_light_smap too,
+    // which crashes in the driver (AV in nvoglv64). It also honors r2_mt_render 0.
+    const bool mt_light = ps_r2_mt_light_render != 0 && o.mt_render != 0;
 
     const auto& flush_lights = [&]()
     {

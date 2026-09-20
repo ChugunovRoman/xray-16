@@ -255,7 +255,7 @@ float ps_r2_light_degrade_lod = 1.f; // skip shadowed lights below this LOD enti
 float ps_r2_light_shadow_dist = 20.f; // max distance from camera to light volume edge for shadow rendering, 0 = off
 int ps_r2_smap_hull_cull = 1; // 1 = cull shadow casters whose shadow hull misses the camera frustum
 int ps_r2_light_occq_async = 1; // 1 = non-blocking occq reads for light visibility
-int ps_r2_mt_light_render = 1; // 1 = record light shadow maps on deferred contexts in worker tasks (DX11)
+int ps_r2_mt_light_render = 1; // 1 = record light shadow maps on deferred contexts in worker tasks (DX11 only, ignored on GL)
 int ps_r2_smap_npc_blob = 2; // shadow-map NPC blob: 0=off, 1=when no LOD model, 2=always, 3=skip entirely
 int ps_r2_light_common_dynamic = 1; // 1 = single shared spatial query for all light SMAP passes
 
