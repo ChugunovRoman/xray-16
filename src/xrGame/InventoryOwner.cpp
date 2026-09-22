@@ -152,15 +152,7 @@ void CInventoryOwner::net_Destroy()
 {
     // Рвём ссылки на уничтожаемый объект: иначе собеседник и окно диалога останутся с висячим
     // указателем, а первый же smart_cast по нему падает в "pure virtual function call".
-    CInventoryOwner* talk_partner = m_pTalkPartner;
-    if (IsTalking())
-        StopTalk(); // закроет окно диалога, пока this ещё жив
-
-    if (talk_partner && talk_partner->m_pTalkPartner == this)
-        talk_partner->StopTalk();
-
-    m_pTalkPartner = nullptr;
-    m_bTalking = false;
+    BreakTalkLinksOnDestroy();
 
     CAttachmentOwner::net_Destroy();
 
@@ -268,6 +260,22 @@ void CInventoryOwner::StartTalk(CInventoryOwner* talk_partner, bool start_trade)
 }
 #include "UIGameSP.h"
 #include "ui/UITalkWnd.h"
+
+void CInventoryOwner::BreakTalkLinksOnDestroy()
+{
+    CUIGameSP* ui_sp = smart_cast<CUIGameSP*>(CurrentGameUI());
+    if (ui_sp && ui_sp->TalkMenu)
+        ui_sp->TalkMenu->OnInvOwnerDestroy(this);
+
+    if (m_pTalkPartner && m_pTalkPartner->m_pTalkPartner == this)
+    {
+        m_pTalkPartner->m_pTalkPartner = nullptr;
+        m_pTalkPartner->m_bTalking = false;
+    }
+
+    m_pTalkPartner = nullptr;
+    m_bTalking = false;
+}
 
 void CInventoryOwner::StopTalk()
 {

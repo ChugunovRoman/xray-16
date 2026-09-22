@@ -106,6 +106,8 @@ protected:
     bool m_bTrading;
     bool m_bTalking;
     CInventoryOwner* m_pTalkPartner;
+    //разорвать ссылки на уничтожаемого собеседника (UI + партнёр)
+    void BreakTalkLinksOnDestroy();
 
     bool m_bAllowTalk;
     bool m_bAllowTrade;

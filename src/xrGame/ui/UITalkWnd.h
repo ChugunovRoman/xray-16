@@ -41,6 +41,8 @@ public:
 
     void Stop(); // deffered
     void StopTalk();
+    //собеседник уничтожается: сбросить указатели на него и закрыть окно (отложенно)
+    void OnInvOwnerDestroy(CInventoryOwner* owner);
 
     void UpdateQuestions();
     void NeedUpdateQuestions();
@@ -80,6 +82,9 @@ protected:
     CPhraseDialogManager* m_pOthersDialogManager;
 
     bool m_bNeedToUpdateQuestions;
+    //окно нужно закрыть на ближайшем Update(): закрывать прямо из Stop() нельзя,
+    //он зовётся из скриптовых обработчиков фраз, для которых закрытие диалога реентерабельно
+    bool m_bNeedToStop;
 
     //текущий диалог, если NULL, то переходим в режим выбора темы
     DIALOG_SHARED_PTR m_pCurrentDialog;

@@ -29,6 +29,7 @@ CUITalkWnd::CUITalkWnd() : CUIDialogWnd(CUITalkWnd::GetDebugType())
 
     InitTalkWnd();
     m_bNeedToUpdateQuestions = false;
+    m_bNeedToStop = false;
     b_disable_break = false;
 }
 
@@ -90,9 +91,10 @@ void CUITalkWnd::InitOthersStartDialog()
         m_pCurrentDialog = m_pOthersDialogManager->AvailableDialogs().front();
         m_pOthersDialogManager->InitDialog(m_pOurDialogManager, m_pCurrentDialog);
 
-        //сказать фразу
-        AddAnswer(m_pCurrentDialog->GetPhraseText("0"), m_pOthersInvOwner->Name());
-        m_pOthersDialogManager->SayPhrase(m_pCurrentDialog, "0");
+        //сказать фразу (локальная копия: скрипт фразы может обнулить m_pCurrentDialog)
+        DIALOG_SHARED_PTR dialog = m_pCurrentDialog;
+        AddAnswer(dialog->GetPhraseText("0"), m_pOthersInvOwner->Name());
+        m_pOthersDialogManager->SayPhrase(dialog, "0");
 
         //если диалог завершился, перейти в режим выбора темы
         if (!m_pCurrentDialog || m_pCurrentDialog->IsFinished())
@@ -196,6 +198,14 @@ void UpdateCameraDirection(CGameObject* pTo)
 
 void CUITalkWnd::Update()
 {
+    // Отложенное закрытие по Stop() - см. комментарий в CUITalkWnd::Stop().
+    if (m_bNeedToStop)
+    {
+        m_bNeedToStop = false;
+        HideDialog();
+        return;
+    }
+
     // Собеседник может быть уничтожен (смерть, релиз сквада, уход в оффлайн) пока окно открыто.
     // smart_cast к CGameObject* - это виртуальный вызов cast_game_object(): на разрушенном объекте
     // он уходит в "pure virtual function call". Дальше по функции указатели разыменовываются
@@ -253,6 +263,7 @@ void CUITalkWnd::Show(bool status)
     inherited::Show(status);
     if (status)
     {
+        m_bNeedToStop = false;
         InitTalkDialog();
         InventoryUtilities::SendInfoToLuaScripts("ui_talk_show");
     }
@@ -274,6 +285,7 @@ void CUITalkWnd::Show(bool status)
 
         // Окно закрыто - больше не держим собеседников: их объекты могут быть уничтожены в любой момент,
         // а Update() не должен работать с устаревшими указателями.
+        m_bNeedToStop = false;
         m_pOurInvOwner = NULL;
         m_pOthersInvOwner = NULL;
         m_pOurDialogManager = NULL;
@@ -317,10 +329,16 @@ void CUITalkWnd::AskQuestion()
 
 void CUITalkWnd::SayPhrase(const shared_str& phrase_id)
 {
-    AddAnswer(m_pCurrentDialog->GetPhraseText(phrase_id), m_pOurInvOwner->Name());
-    m_pOurDialogManager->SayPhrase(m_pCurrentDialog, phrase_id);
+    //скриптовый обработчик фразы может закрыть диалог и обнулить m_pCurrentDialog,
+    //а он передаётся вниз по ссылке - держим локальную копию
+    DIALOG_SHARED_PTR dialog = m_pCurrentDialog;
+    if (!dialog)
+        return;
+
+    AddAnswer(dialog->GetPhraseText(phrase_id), m_pOurInvOwner->Name());
+    m_pOurDialogManager->SayPhrase(dialog, phrase_id);
     //если диалог завершился, перейти в режим выбора темы
-    if (m_pCurrentDialog->IsFinished())
+    if (dialog->IsFinished())
         ToTopicMode();
 }
 
@@ -525,8 +543,24 @@ void CUITalkWnd::AddIconedMessage(pcstr text, pcstr texture_name, Frect texture_
 void CUITalkWnd::StopTalk() { HideDialog(); }
 void CUITalkWnd::Stop()
 {
-    // Зовётся из CInventoryOwner::StopTalk(), в том числе из net_destroy биндера NPC:
-    // закрываем окно сразу, пока указатели на собеседников ещё валидны.
+    // Зовётся из CInventoryOwner::StopTalk(), в том числе из скриптовых обработчиков фраз
+    // (dialogs.break_dialog) прямо посреди CPhraseDialog::SayPhrase. Закрывать окно здесь нельзя:
+    // Show(false) сбрасывает m_pCurrentDialog, а SayPhrase держит на него ссылку. Откладываем до Update().
     if (IsShown())
-        HideDialog();
+        m_bNeedToStop = true;
+}
+
+void CUITalkWnd::OnInvOwnerDestroy(CInventoryOwner* owner)
+{
+    if (m_pOurInvOwner == owner)
+    {
+        m_pOurInvOwner = NULL;
+        m_pOurDialogManager = NULL;
+    }
+    if (m_pOthersInvOwner == owner)
+    {
+        m_pOthersInvOwner = NULL;
+        m_pOthersDialogManager = NULL;
+    }
+    Stop();
 }
