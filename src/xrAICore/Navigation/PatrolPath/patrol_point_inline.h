@@ -14,6 +14,13 @@ inline bool CPatrolPoint::operator==(const CPatrolPoint& rhs) const
     return false;
 }
 
+IC void CPatrolPoint::reset_remap_cache() const
+{
+    // same publication order as in level_vertex_id(): the level tag goes last, with release
+    m_remapped_level_vertex_id.store(u32(-1), std::memory_order_relaxed);
+    m_remap_level_id.store(GameGraph::_LEVEL_ID(-1), std::memory_order_release);
+}
+
 IC const Fvector& CPatrolPoint::position() const
 {
     VERIFY(m_initialized);

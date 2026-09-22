@@ -2847,6 +2847,8 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "ai_graph_engine_serialize", &ps_ai_graph_engine_serialize, 0, 1);
     CMD4(CCC_Integer, "ai_graph_engine_detect_concurrent", &ps_ai_graph_engine_detect_concurrent, 0, 1);
     CMD4(CCC_Integer, "ai_path_build_tls_scratch", &ps_ai_path_build_use_tls_scratch, 0, 1);
+    CMD4(CCC_Integer, "ai_patrol_remap_invalid_vertex", &ps_ai_patrol_remap_invalid_vertex, 0, 1);
+    CMD4(CCC_Integer, "ai_patrol_remap_log", &ps_ai_patrol_remap_log, 0, 1);
     CMD4(CCC_Integer, "npc_perf_cover_best_max_evaluate", &npc_perf_cover_best_max_evaluate, 0, 4096);
     CMD4(CCC_Integer, "npc_perf_cover_nearest_max_points", &npc_perf_cover_nearest_max_points, 0, 4096);
     CMD4(CCC_Integer, "npc_perf_cover_best_max_accessible", &npc_perf_cover_best_max_accessible, 0, 4096);

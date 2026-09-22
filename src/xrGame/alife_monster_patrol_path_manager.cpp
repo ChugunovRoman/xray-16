@@ -40,7 +40,7 @@ const CALifeMonsterPatrolPathManager::_GRAPH_ID& CALifeMonsterPatrolPathManager:
     return (path().vertex(m_current_vertex_index)->data().game_vertex_id());
 }
 
-const u32& CALifeMonsterPatrolPathManager::target_level_vertex_id() const
+u32 CALifeMonsterPatrolPathManager::target_level_vertex_id() const
 {
     return (path().vertex(m_current_vertex_index)->data().level_vertex_id());
 }

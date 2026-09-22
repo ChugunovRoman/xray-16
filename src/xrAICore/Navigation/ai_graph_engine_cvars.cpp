@@ -11,6 +11,10 @@ XRAICORE_API int ps_ai_graph_engine_serialize = 0;
 XRAICORE_API int ps_ai_path_build_use_tls_scratch = 1;
 XRAICORE_API int ps_ai_graph_engine_detect_concurrent = 0;
 
+XRAICORE_API int ps_ai_patrol_remap_invalid_vertex = 1;
+
+XRAICORE_API int ps_ai_patrol_remap_log = 0;
+
 XRAICORE_API std::atomic<std::uint32_t> g_ai_graph_engine_active_index_search{};
 XRAICORE_API std::atomic<std::uint32_t> g_ai_graph_engine_active_solver_search{};
 XRAICORE_API std::atomic<std::uint32_t> g_ai_graph_engine_active_string_search{};

@@ -57,6 +57,9 @@ void CLevelGraph::Initialize(const char* filePath)
     m_column_length = iFloor((box.vMax.x - box.vMin.x) / header().cell_size() + EPS_L + 1.5f);
     m_access_mask.assign(header().vertex_count(), true);
     unpack_xz(vertex_position(box.vMax), m_max_x, m_max_z);
+    // [GW] diagnostics: which level.ai was actually opened (gamedata or a patch archive)
+    // and how many vertices it holds - stale patrol point ids point to a mismatched file
+    Msg("~ [GW] level graph loaded: %s, vertices[%u]", filePath, header().vertex_count());
 }
 
 CLevelGraph::~CLevelGraph() { FS.r_close(m_reader); }

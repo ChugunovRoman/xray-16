@@ -41,6 +41,11 @@ void AISpaceBase::Load(const char* levelName)
     auto& levelHeader = level_graph().header();
     auto& gameHeader = game_graph().header();
 
+    // [GW] diagnostics: vertex counts of the actually loaded AI files,
+    // helps to spot a gamedata/patch mismatch from a player log
+    Msg("~ [GW] AI level[%s]: level.ai vertices[%u], game.graph vertices[%u], cross table vertices[%u]", levelName,
+        levelHeader.vertex_count(), u32(gameHeader.vertex_count()), crossHeader.level_vertex_count());
+
     const bool ignore_guid_mismatch = Core.Params && strstr(Core.Params, "-ignore_ai_cross_guid");
 
     if (crossHeader.level_guid() != levelHeader.guid())

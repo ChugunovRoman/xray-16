@@ -18,6 +18,7 @@
 #include "xrScriptEngine/script_callback_ex.h"
 #include "game_object_space.h"
 #include "xrAICore/Navigation/level_graph.h"
+#include "xrAICore/Navigation/ai_graph_engine_cvars.h"
 
 #if 1 // def DEBUG
 #include "space_restriction_manager.h"
@@ -164,9 +165,20 @@ void CPatrolPathManager::select_point(const Fvector& position, u32& dest_vertex_
             return;
         }
 
-        R_ASSERT2(ai().level_graph().valid_vertex_id(vertex->data().level_vertex_id()),
-            make_string("patrol path[%s], point on path [%s],object [%s]", m_path_name.c_str(), vertex->data().name().c_str(),
-                m_game_object->cName().c_str()));
+        // [GW] a patrol point which even the remap could not fix is not fatal:
+        // fall back to the current ai location, the same way as for inaccessible vertices above.
+        // The kill-switch (ai_patrol_remap_invalid_vertex 0) restores the old fatal behavior.
+        if (!ai().level_graph().valid_vertex_id(vertex->data().level_vertex_id()))
+        {
+            R_ASSERT2(ps_ai_patrol_remap_invalid_vertex,
+                make_string("patrol path[%s], point on path [%s], object [%s]", m_path_name.c_str(),
+                    vertex->data().name().c_str(), m_game_object->cName().c_str()));
+            Msg("! [GW] patrol path[%s], point on path [%s], object [%s] has invalid level vertex id, "
+                "falling back to ai_location",
+                m_path_name.c_str(), vertex->data().name().c_str(), m_game_object->cName().c_str());
+            dest_vertex_id = m_game_object->ai_location().level_vertex_id();
+            return;
+        }
 
         if (!m_path->vertex(m_prev_point_index))
             m_prev_point_index = vertex->vertex_id();
@@ -287,9 +299,19 @@ void CPatrolPathManager::select_point(const Fvector& position, u32& dest_vertex_
     m_prev_point_index = m_curr_point_index;
     m_curr_point_index = target;
     dest_vertex_id = m_path->vertex(m_curr_point_index)->data().level_vertex_id();
-    R_ASSERT2(ai().level_graph().valid_vertex_id(dest_vertex_id),
-        make_string(
-            "Can't setup path for object=[%s] dest_vertex_id=[%d] path name=[%s] point name=[%s]", m_object->object().cName().c_str(), dest_vertex_id, m_path->m_name.c_str(), vertex->data().name().c_str()));
+    // [GW] a patrol point which even the remap could not fix is not fatal, fall back to the ai location.
+    // The kill-switch (ai_patrol_remap_invalid_vertex 0) restores the old fatal behavior.
+    if (!ai().level_graph().valid_vertex_id(dest_vertex_id))
+    {
+        R_ASSERT2(ps_ai_patrol_remap_invalid_vertex,
+            make_string("Can't setup path for object=[%s] dest_vertex_id=[%d] path name=[%s] point name=[%s]",
+                m_object->object().cName().c_str(), dest_vertex_id, m_path->m_name.c_str(), vertex->data().name().c_str()));
+        Msg("! [GW] can't setup path for object=[%s] dest_vertex_id=[%d] path name=[%s] point name=[%s], "
+            "falling back to ai_location",
+            m_object->object().cName().c_str(), dest_vertex_id, m_path->m_name.c_str(), vertex->data().name().c_str());
+        dest_vertex_id = m_game_object->ai_location().level_vertex_id();
+        return;
+    }
     m_dest_position = m_path->vertex(m_curr_point_index)->data().position();
     VERIFY3(accessible(m_dest_position) || show_restrictions(m_object), m_path_name.c_str(), m_game_object->cName().c_str());
     m_actuality = true;
