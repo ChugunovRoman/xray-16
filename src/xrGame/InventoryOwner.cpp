@@ -150,6 +150,18 @@ bool CInventoryOwner::net_Spawn(CSE_Abstract* DC)
 
 void CInventoryOwner::net_Destroy()
 {
+    // Рвём ссылки на уничтожаемый объект: иначе собеседник и окно диалога останутся с висячим
+    // указателем, а первый же smart_cast по нему падает в "pure virtual function call".
+    CInventoryOwner* talk_partner = m_pTalkPartner;
+    if (IsTalking())
+        StopTalk(); // закроет окно диалога, пока this ещё жив
+
+    if (talk_partner && talk_partner->m_pTalkPartner == this)
+        talk_partner->StopTalk();
+
+    m_pTalkPartner = nullptr;
+    m_bTalking = false;
+
     CAttachmentOwner::net_Destroy();
 
     inventory().Clear();
@@ -203,7 +215,7 @@ void CInventoryOwner::UpdateInventoryOwner(u32 deltaT)
     {
         //если наш собеседник перестал говорить с нами,
         //то и нам нечего ждать.
-        if (!m_pTalkPartner->IsTalking())
+        if (!m_pTalkPartner || !m_pTalkPartner->IsTalking())
         {
             StopTalk();
         }
@@ -263,7 +275,9 @@ void CInventoryOwner::StopTalk()
     m_bTalking = false;
 
     CUIGameSP* ui_sp = smart_cast<CUIGameSP*>(CurrentGameUI());
-    if (ui_sp && ui_sp->TalkMenu->IsShown())
+    // закрываем окно только если разговор прекращает его участник
+    if (ui_sp && ui_sp->TalkMenu->IsShown() &&
+        (ui_sp->TalkMenu->OthersInvOwner() == this || ui_sp->TalkMenu->OurInvOwner() == this))
         ui_sp->TalkMenu->Stop();
 }
 

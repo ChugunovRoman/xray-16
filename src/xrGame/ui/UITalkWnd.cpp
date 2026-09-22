@@ -196,18 +196,30 @@ void UpdateCameraDirection(CGameObject* pTo)
 
 void CUITalkWnd::Update()
 {
+    // Собеседник может быть уничтожен (смерть, релиз сквада, уход в оффлайн) пока окно открыто.
+    // smart_cast к CGameObject* - это виртуальный вызов cast_game_object(): на разрушенном объекте
+    // он уходит в "pure virtual function call". Дальше по функции указатели разыменовываются
+    // безусловно, поэтому из каждой ветки закрытия окна обязателен return.
+    if (!m_pOurInvOwner || !m_pOthersInvOwner)
+    {
+        HideDialog();
+        return;
+    }
+
     //остановить разговор, если нужно
     if (g_actor && m_pActor && !m_pActor->IsTalking())
     {
         StopTalk();
+        return;
     }
-    else
-    {
-        CGameObject* pOurGO = smart_cast<CGameObject*>(m_pOurInvOwner);
-        CGameObject* pOtherGO = smart_cast<CGameObject*>(m_pOthersInvOwner);
 
-        if (NULL == pOurGO || NULL == pOtherGO)
-            HideDialog();
+    CGameObject* pOurGO = smart_cast<CGameObject*>(m_pOurInvOwner);
+    CGameObject* pOtherGO = smart_cast<CGameObject*>(m_pOthersInvOwner);
+
+    if (NULL == pOurGO || NULL == pOtherGO)
+    {
+        HideDialog();
+        return;
     }
 
     CUIGameSP* pGameSP = smart_cast<CUIGameSP*>(CurrentGameUI());
@@ -259,6 +271,13 @@ void CUITalkWnd::Show(bool status)
 
             m_pActor = NULL;
         }
+
+        // Окно закрыто - больше не держим собеседников: их объекты могут быть уничтожены в любой момент,
+        // а Update() не должен работать с устаревшими указателями.
+        m_pOurInvOwner = NULL;
+        m_pOthersInvOwner = NULL;
+        m_pOurDialogManager = NULL;
+        m_pOthersDialogManager = NULL;
     }
 }
 
@@ -504,4 +523,10 @@ void CUITalkWnd::AddIconedMessage(pcstr text, pcstr texture_name, Frect texture_
 }
 
 void CUITalkWnd::StopTalk() { HideDialog(); }
-void CUITalkWnd::Stop() {}
+void CUITalkWnd::Stop()
+{
+    // Зовётся из CInventoryOwner::StopTalk(), в том числе из net_destroy биндера NPC:
+    // закрываем окно сразу, пока указатели на собеседников ещё валидны.
+    if (IsShown())
+        HideDialog();
+}
