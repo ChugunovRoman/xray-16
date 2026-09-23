@@ -18,21 +18,7 @@ bool CWeaponSSRS::net_Spawn(CSE_Abstract* DC)
         return l_res;
 
     if (iAmmoElapsed && !getCurrentRocket())
-    {
-        shared_str grenade_name = m_ammoTypes[0];
-        shared_str fake_grenade_name = pSettings->r_string(grenade_name, "fake_grenade_name");
-
-        if (fake_grenade_name.size())
-        {
-            int k = iAmmoElapsed;
-            while (k)
-            {
-                k--;
-                inheritedRL::SpawnRocket(fake_grenade_name.c_str(), this);
-            }
-        }
-        //			inheritedRL::SpawnRocket(*fake_grenade_name, this);
-    }
+        SpawnMissingRockets(u32(iAmmoElapsed), GetFakeGrenadeName(), this);
 
     return l_res;
 };
@@ -42,108 +28,101 @@ void CWeaponSSRS::Load(LPCSTR section)
     inheritedWM::Load(section);
     inheritedRL::Load(section);
 }
-#include "Inventory.h"
-#include "InventoryOwner.h"
+
+shared_str CWeaponSSRS::GetFakeGrenadeName() const
+{
+    return pSettings->r_string(m_ammoTypes[m_ammoType].c_str(), "fake_grenade_name");
+}
+
 void CWeaponSSRS::FireStart()
 {
-    if (iAmmoElapsed < 1)
+    // Fake grenades can get out of sync with the magazine (unjam ejects a cartridge but keeps
+    // its rocket, scripts may change the ammo count, etc.). Make sure there is a rocket for
+    // every cartridge before a shot is started; the launch itself happens in FireTrace.
+    if (GetState() == eIdle && iAmmoElapsed > 0)
+        SpawnMissingRockets(u32(iAmmoElapsed), GetFakeGrenadeName(), this);
+
+    inheritedWM::FireStart();
+}
+
+void CWeaponSSRS::FireTrace(const Fvector& P, const Fvector& D)
+{
+    inheritedWM::FireTrace(P, D);
+    LaunchGrenade(P, D);
+}
+
+void CWeaponSSRS::LaunchGrenade(const Fvector& P, const Fvector& D)
+{
+    if (!getRocketCount())
+    {
+        Msg("! CWeaponSSRS::LaunchGrenade: no fake grenade to launch, weapon [%s][%d], ammo elapsed [%d]",
+            cNameSect().c_str(), ID(), iAmmoElapsed);
+        return;
+    }
+
+    if (!H_Parent())
         return;
 
-    if (GetState() == eIdle && getRocketCount())
+    Fvector p1, d;
+    p1.set(P);
+    d.set(D);
+
+    Fmatrix launch_matrix;
+    launch_matrix.identity();
+    launch_matrix.k.set(d);
+    Fvector::generate_orthonormal_basis(launch_matrix.k, launch_matrix.j, launch_matrix.i);
+    launch_matrix.c.set(p1);
+
+    if (IsGameTypeSingle() && IsZoomed() && smart_cast<CActor*>(H_Parent()))
     {
-        inheritedWM::FireStart();
+        H_Parent()->setEnabled(FALSE);
+        setEnabled(FALSE);
 
-        Fvector p1, d;
-        p1.set(get_LastFP());
-        d.set(get_LastFD());
+        collide::rq_result RQ;
+        BOOL HasPick = Level().ObjectSpace.RayPick(p1, d, 300.0f, collide::rqtStatic, RQ, this);
 
-        CEntity* E = smart_cast<CEntity*>(H_Parent());
-        if (E)
+        setEnabled(TRUE);
+        H_Parent()->setEnabled(TRUE);
+
+        if (HasPick)
         {
-            CInventoryOwner* io = smart_cast<CInventoryOwner*>(H_Parent());
-            if (NULL == io->inventory().ActiveItem())
-            {
-                Log("current_state", GetState());
-                Log("next_state", GetNextState());
-                Log("item_sect", cNameSect().c_str());
-                Log("H_Parent", H_Parent()->cNameSect().c_str());
-            }
-            E->g_fireParams(this, p1, d);
+            Fvector Transference;
+            Transference.mul(d, RQ.range);
+            Fvector res[2];
+            u8 canfire0 = TransferenceAndThrowVelToThrowDir(
+                Transference, CRocketLauncher::m_fLaunchSpeed, EffectiveGravity(), res);
+            if (canfire0 != 0)
+                d = res[0];
         }
+    };
 
-        Fmatrix launch_matrix;
-        launch_matrix.identity();
-        launch_matrix.k.set(d);
-        Fvector::generate_orthonormal_basis(launch_matrix.k, launch_matrix.j, launch_matrix.i);
-        launch_matrix.c.set(p1);
+    d.normalize();
+    d.mul(CRocketLauncher::m_fLaunchSpeed);
+    VERIFY2(_valid(launch_matrix), "CWeaponSSRS::LaunchGrenade. Invalid launch_matrix");
+    CRocketLauncher::LaunchRocket(launch_matrix, d, zero_vel);
 
-        if (IsGameTypeSingle() && IsZoomed() && smart_cast<CActor*>(H_Parent()))
-        {
-            H_Parent()->setEnabled(FALSE);
-            setEnabled(FALSE);
-
-            collide::rq_result RQ;
-            BOOL HasPick = Level().ObjectSpace.RayPick(p1, d, 300.0f, collide::rqtStatic, RQ, this);
-
-            setEnabled(TRUE);
-            H_Parent()->setEnabled(TRUE);
-
-            if (HasPick)
-            {
-                //			collide::rq_result& RQ = HUD().GetCurrentRayQuery();
-                Fvector Transference;
-                // Transference.add(p1, Fvector().mul(d, RQ.range));
-                Transference.mul(d, RQ.range);
-                Fvector res[2];
-                /*#ifdef		DEBUG
-                                DBG_OpenCashedDraw();
-                                DBG_DrawLine(p1,Fvector().add(p1,d),color_xrgb(255,0,0));
-                #endif*/
-                u8 canfire0 = TransferenceAndThrowVelToThrowDir(
-                    Transference, CRocketLauncher::m_fLaunchSpeed, EffectiveGravity(), res);
-                /*#ifdef DEBUG
-                                if(canfire0>0)DBG_DrawLine(p1,Fvector().add(p1,res[0]),color_xrgb(0,255,0));
-                                if(canfire0>1)DBG_DrawLine(p1,Fvector().add(p1,res[1]),color_xrgb(0,0,255));
-                                DBG_ClosedCashedDraw(30000);
-                #endif*/
-                if (canfire0 != 0)
-                {
-                    //					Msg ("d[%f,%f,%f] - res [%f,%f,%f]", d.x, d.y, d.z, res[0].x, res[0].y,
-                    // res[0].z);
-                    d = res[0];
-                };
-            }
-        };
-
-        d.normalize();
-        d.mul(m_fLaunchSpeed);
-        VERIFY2(_valid(launch_matrix), "CWeaponSSRS::FireStart. Invalid launch_matrix");
-        CRocketLauncher::LaunchRocket(launch_matrix, d, zero_vel);
-
-        CExplosiveRocket* pGrenade = smart_cast<CExplosiveRocket*>(getCurrentRocket());
-        VERIFY(pGrenade);
+    CExplosiveRocket* pGrenade = smart_cast<CExplosiveRocket*>(getCurrentRocket());
+    VERIFY(pGrenade);
+    if (pGrenade)
         pGrenade->SetInitiator(H_Parent()->ID());
 
-        if (OnServer())
-        {
-            NET_Packet P;
-            u_EventGen(P, GE_LAUNCH_ROCKET, ID());
-            P.w_u16(u16(getCurrentRocket()->ID()));
-            u_EventSend(P);
-        }
-        dropCurrentRocket();
+    if (OnServer())
+    {
+        NET_Packet packet;
+        u_EventGen(packet, GE_LAUNCH_ROCKET, ID());
+        packet.w_u16(u16(getCurrentRocket()->ID()));
+        u_EventSend(packet);
     }
+    dropCurrentRocket();
 }
 
 void CWeaponSSRS::ReloadRL()
 {
-    u8 k = iMagazineSize - iAmmoElapsed;
-    shared_str fake_grenade_name = pSettings->r_string(m_ammoTypes[m_ammoType].c_str(), "fake_grenade_name");
-    while (k)
-    {
-        --k;
-        inheritedRL::SpawnRocket(fake_grenade_name.c_str(), this);
-    }
+    // Spawn fake grenades for the cartridges that are about to be loaded. The count is based on
+    // the rockets actually present (not on iAmmoElapsed): after an unjam the ejected cartridge
+    // leaves its rocket in place, so the two values may differ.
+    if (iMagazineSize > 0)
+        SpawnMissingRockets(u32(iMagazineSize), GetFakeGrenadeName(), this);
 }
 
 void CWeaponSSRS::OnStateSwitch(u32 S, u32 oldState)
@@ -154,8 +133,6 @@ void CWeaponSSRS::OnStateSwitch(u32 S, u32 oldState)
     {
     case eReload:
         ReloadRL();
-        switch2_Reload();
-        PlayAnimReload();
         break;
     }
 }

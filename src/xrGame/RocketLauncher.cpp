@@ -43,6 +43,21 @@ void CRocketLauncher::SpawnRocket(const shared_str& rocket_section, CGameObject*
     D->Spawn_Write(P, TRUE);
     Level().Send(P, net_flags(TRUE));
     F_entity_Destroy(D);
+
+    // The rocket is attached later, when the spawn is processed (GE_OWNERSHIP_TAKE -> AttachRocket).
+    ++m_pending_rockets;
+}
+
+void CRocketLauncher::SpawnMissingRockets(u32 required, const shared_str& rocket_section, CGameObject* parent_rocket_launcher)
+{
+    if (OnClient())
+        return;
+
+    if (!rocket_section.size())
+        return;
+
+    while (getExpectedRocketCount() < required)
+        SpawnRocket(rocket_section, parent_rocket_launcher);
 }
 
 void CRocketLauncher::AttachRocket(u16 rocket_id, CGameObject* parent_rocket_launcher)
@@ -52,6 +67,9 @@ void CRocketLauncher::AttachRocket(u16 rocket_id, CGameObject* parent_rocket_lau
     VERIFY(pRocket->m_pOwner);
     pRocket->H_SetParent(parent_rocket_launcher);
     m_rockets.push_back(pRocket);
+
+    if (m_pending_rockets)
+        --m_pending_rockets;
 }
 
 void CRocketLauncher::DetachRocket(u16 rocket_id, bool bLaunch)
@@ -78,7 +96,7 @@ void CRocketLauncher::DetachRocket(u16 rocket_id, bool bLaunch)
 
     if (It_l != m_launched_rockets.end())
     {
-        (*It)->m_bLaunched = bLaunch;
+        (*It_l)->m_bLaunched = bLaunch;
         (*It_l)->H_SetParent(NULL);
         m_launched_rockets.erase(It_l);
     }
@@ -101,3 +119,4 @@ CCustomRocket* CRocketLauncher::getCurrentRocket()
 
 void CRocketLauncher::dropCurrentRocket() { m_rockets.pop_back(); }
 u32 CRocketLauncher::getRocketCount() { return m_rockets.size(); }
+u32 CRocketLauncher::getExpectedRocketCount() const { return u32(m_rockets.size()) + m_pending_rockets; }

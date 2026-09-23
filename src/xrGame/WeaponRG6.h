@@ -18,8 +18,13 @@ public:
 
 protected:
     virtual void FireStart();
+    // The fake grenade is launched together with the cartridge it belongs to:
+    // FireTrace is called only for a shot that really happened (no misfire, ammo consumed).
+    virtual void FireTrace(const Fvector& P, const Fvector& D);
     virtual u8 AddCartridge(u8 cnt);
 
 private:
     DECLARE_SCRIPT_REGISTER_FUNCTION(CWeaponShotgun);
+    shared_str GetFakeGrenadeName() const;
+    void LaunchGrenade(const Fvector& P, const Fvector& D);
 };

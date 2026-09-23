@@ -21,9 +21,15 @@ protected:
     using ROCKET_VECTOR = xr_vector<CCustomRocket*>;
     ROCKET_VECTOR m_rockets;
     ROCKET_VECTOR m_launched_rockets;
+    // Rockets whose spawn has been sent but which are not attached yet (see AttachRocket).
+    u32 m_pending_rockets{};
 
     CCustomRocket* getCurrentRocket();
     void dropCurrentRocket();
     u32 getRocketCount();
+    // Attached rockets plus the ones still waiting to be attached.
+    u32 getExpectedRocketCount() const;
+    // Spawns rockets until the expected rocket count reaches `required`.
+    void SpawnMissingRockets(u32 required, const shared_str& rocket_section, CGameObject* parent_rocket_launcher);
     float m_fLaunchSpeed;
 };
