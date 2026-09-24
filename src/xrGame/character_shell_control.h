@@ -49,5 +49,8 @@ private:
 
     // gray_wolf>
     float m_curr_skin_friction_in_death;
+    // TRUE once every ramp below has reached its end value, so UpdateFrictionAndJointResistanse can stop
+    // rewriting the same numbers into every joint of the ragdoll each frame. Reset by Load().
+    bool m_ramps_finished{false};
     // gray_wolf<
 };

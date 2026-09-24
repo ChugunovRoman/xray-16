@@ -31,6 +31,7 @@ void character_shell_control::Load(LPCSTR section)
     character_have_wounded_state = pSettings->r_bool(section, "ph_character_have_wounded_state");
     skeleton_skin_ddelay_after_wound = pSettings->r_float(section, "ph_skeleton_skin_ddelay_after_wound");
     skeleton_skin_remain_time_after_wound = skeleton_skin_ddelay_after_wound;
+    m_ramps_finished = false;
     pelvis_factor_low_pose_detect = pSettings->r_float(section, "ph_pelvis_factor_low_pose_detect");
     if (pSettings->line_exist(section, "ph_skel_shot_up_factor"))
         m_shot_up_factor = pSettings->r_float(section, "ph_skel_shot_up_factor");
@@ -136,6 +137,13 @@ void character_shell_control::CalculateTimeDelta()
 
 void character_shell_control::UpdateFrictionAndJointResistanse(CPhysicsShell* sh)
 {
+    // Both ramps below are one-way: once their remaining time hits 0 the joint resistance is pinned to
+    // hinge_force_factor1 and the skin friction to skeleton_skin_friction_end, whatever m_was_wounded says.
+    // Past that point set_JointResistance() would walk every joint of the ragdoll and write the same ODE
+    // parameters again every frame, for the whole remaining life of the corpse, so latch instead.
+    if (m_ramps_finished)
+        return;
+
     //Преобразование skel_ddelay из кадров в секунды и линейное нарастание сопротивления в джоинтах со временем от
     //момента смерти
 
@@ -183,4 +191,7 @@ void character_shell_control::UpdateFrictionAndJointResistanse(CPhysicsShell* sh
 
     m_curr_skin_friction_in_death =
         skeleton_skin_friction_end + (remain / ddelay) * (skeleton_skin_friction_start - skeleton_skin_friction_end);
+
+    if (skel_remain_time == 0.f && skeleton_skin_remain_time == 0.f && skeleton_skin_remain_time_after_wound == 0.f)
+        m_ramps_finished = true;
 };
