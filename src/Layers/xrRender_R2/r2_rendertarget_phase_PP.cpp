@@ -129,6 +129,60 @@ struct TL_2c3uv
     }
 };
 
+void CRenderTarget::phase_depth_upscale()
+{
+    // Draws issued after Render() (bullet tracers, debug render) bind the REAL backbuffer depth
+    // and depth-test against it. With r__render_scale < 1 the scene depth lives in the downsized
+    // twin, so the full-size depth would hold stale data: clear it, then stretch the twin depth
+    // into it (point sampled; no color target bound). The twin Base_Depth is single-sampled even
+    // with MSAA and holds what rt_Base_Depth normally holds at this point: the scene depth
+    // (alias of MSAADepth without MSAA; with MSAA the combine_2 NAA passes write it via SV_Depth).
+    const bool can_copy = s_depth_upscale && s_depth_upscale->E[0] && mrs_set.Base_Depth &&
+        mrs_set.Base_Depth->pTexture;
+
+    u_setrt(RCache, Device.dwWidth, Device.dwHeight, 0, 0, 0, get_present_zb());
+    RCache.SetViewport({ 0.f, 0.f, float(Device.dwWidth), float(Device.dwHeight), 0.f, 1.f });
+    RCache.ClearZB(get_present_zb(), 1.0f, 0);
+    if (!can_copy)
+        return;
+
+    RCache.set_Element(s_depth_upscale->E[0]);
+    RCache.set_Stencil(FALSE);
+    RCache.set_CullMode(CULL_NONE);
+    RCache.set_Z(TRUE);
+
+    // Same vertex format / VS as the postprocess quad (Device pixels -> NDC via screen_res), with
+    // plain 0..1 texture coordinates.
+    u32 Offset;
+    const float _w = float(Device.dwWidth);
+    const float _h = float(Device.dwHeight);
+    TL_2c3uv* pv = (TL_2c3uv*)RImplementation.Vertex.Lock(4, g_postprocess.stride(), Offset);
+#if defined(USE_DX11)
+    pv->set(0, _h, 0, 0, 0.f, 1.f, 0.f, 1.f, 0.f, 1.f);
+    pv++;
+    pv->set(0, 0, 0, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
+    pv++;
+    pv->set(_w, _h, 0, 0, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f);
+    pv++;
+    pv->set(_w, 0, 0, 0, 1.f, 0.f, 1.f, 0.f, 1.f, 0.f);
+    pv++;
+#elif defined(USE_OGL)
+    pv->set(0, 0, 0, 0, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f);
+    pv++;
+    pv->set(0, _h, 0, 0, 0.f, 1.f, 0.f, 1.f, 0.f, 1.f);
+    pv++;
+    pv->set(_w, 0, 0, 0, 1.f, 0.f, 1.f, 0.f, 1.f, 0.f);
+    pv++;
+    pv->set(_w, _h, 0, 0, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f);
+    pv++;
+#else
+#   error No graphics API selected or enabled!
+#endif
+    RImplementation.Vertex.Unlock(4, g_postprocess.stride());
+    RCache.set_Geometry(g_postprocess);
+    RCache.Render(D3DPT_TRIANGLELIST, Offset, 0, 4, 0, 2);
+}
+
 void CRenderTarget::phase_pp()
 {
     // combination/postprocess — for dedicated second VP, rt_secondVP may be smaller than the backbuffer (r__second_vp_render_scale).
@@ -136,8 +190,20 @@ void CRenderTarget::phase_pp()
     const u32 pp_w = svp_out ? rt_secondVP->dwWidth : Device.dwWidth;
     const u32 pp_h = svp_out ? rt_secondVP->dwHeight : Device.dwHeight;
     const bool svp_scaled = svp_out && (pp_w != Device.dwWidth || pp_h != Device.dwHeight);
+    // Main render scale: the scene is in the downsized mrs_set; this quad is the upscale. It binds
+    // the REAL backbuffer pair (the rt_Base members are swapped to twins right now) with a
+    // full-size viewport and samples the small scene through the same normalized TCs, so the
+    // linear sampler stretches it (plus the unsharp in postprocess.ps, see render_scale_params).
+    const bool main_scaled = !svp_out && MainScaleActive();
 
-    if (svp_out)
+    if (main_scaled)
+    {
+        phase_depth_upscale();
+        u_setrt(RCache, Device.dwWidth, Device.dwHeight, get_present_rt(), 0, 0, get_present_zb());
+        RCache.SetViewport({ 0.f, 0.f, float(Device.dwWidth), float(Device.dwHeight), 0.f, 1.f });
+        RCache.set_Stencil(FALSE);
+    }
+    else if (svp_out)
     {
 #if defined(USE_DX11)
         if (svp_scaled)

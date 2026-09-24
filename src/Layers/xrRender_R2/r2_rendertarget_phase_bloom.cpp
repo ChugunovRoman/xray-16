@@ -100,6 +100,12 @@ void CRenderTarget::phase_bloom()
     // {BLOOM_size} pin shrank quad coverage to a ~13% corner and starved the bloom feed
     // (global darkening regression).
     u_setrt(RCache, rt_Bloom_1, 0, 0, 0); // No need for ZBuffer at all
+    // Main render scale: the active viewport is the downsized scene (sw×sh), but the quads above
+    // need the historical Device-sized one. Restored to the scene size at the end of the phase
+    // (phase_luminance, called below, inherits it and does not pin while svp_set is not swapped).
+    const bool main_scaled = MainScaleActive();
+    if (main_scaled)
+        RCache.SetViewport({ 0.f, 0.f, float(Device.dwWidth), float(Device.dwHeight), 0.f, 1.f });
 
     // Clear    - don't clear - it's stupid here :)
     // Stencil  - disable
@@ -108,8 +114,9 @@ void CRenderTarget::phase_bloom()
 
     // Transfer into Bloom1
     {
-        float _w = float(Device.dwWidth);
-        float _h = float(Device.dwHeight);
+        // Source = rt_Generic_1: scene-sized (downsized under r__render_scale < 1, else Device).
+        float _w = float(scene_width());
+        float _h = float(scene_height());
         float _2w = _w / 2;
         float tw = BLOOM_size_X;
         float _2h = _h / 2;
@@ -556,5 +563,8 @@ void CRenderTarget::phase_bloom()
 
     // re-enable z-buffer
     RCache.set_Z(true);
+
+    if (main_scaled)
+        set_scene_viewport(RCache);
 }
 } // namespace xray::render::RENDER_NAMESPACE

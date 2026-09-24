@@ -29,8 +29,9 @@ void CRenderTarget::accum_reflected(CBackend& cmd_list, light* L)
     // 2D texgen (texture adjustment matrix)
     Fmatrix m_Texgen;
     {
-        float _w = float(Device.dwWidth);
-        float _h = float(Device.dwHeight);
+        // Half-texel of the scene targets (downsized under r__render_scale < 1, else == Device).
+        float _w = float(scene_width());
+        float _h = float(scene_height());
         float o_w = (.5f / _w);
         float o_h = (.5f / _h);
 #if defined(USE_DX11)

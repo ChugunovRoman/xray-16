@@ -30,11 +30,15 @@ void CRenderTarget::phase_ssao()
     fSSAOKernelSize /= tan(deg2rad(Device.fFOV));
 
     // Fill VB
-    float scale_X = float(Device.dwWidth) * 0.5f / float(TEX_jitter);
-    float scale_Y = float(Device.dwHeight) * 0.5f / float(TEX_jitter);
+    // Scene size, not Device: under r__render_scale < 1 rt_ssao_temp is the downsized twin
+    // (scene_width() == Device.dwWidth otherwise, so this is a no-op at full resolution).
+    const float scene_w = float(scene_width());
+    const float scene_h = float(scene_height());
+    float scale_X = scene_w * 0.5f / float(TEX_jitter);
+    float scale_Y = scene_h * 0.5f / float(TEX_jitter);
 
-    float _w = float(Device.dwWidth) * 0.5f;
-    float _h = float(Device.dwHeight) * 0.5f;
+    float _w = scene_w * 0.5f;
+    float _h = scene_h * 0.5f;
 
     RCache.SetViewport({ 0.f, 0.f, _w, _h, 0.f, 1.f });
 
@@ -86,7 +90,7 @@ void CRenderTarget::phase_ssao()
         // RCache.set_Stencil( FALSE, D3DCMP_EQUAL, 0x01, 0xff, 0 );
     }
 
-    RCache.SetViewport({ 0.f, 0.f, float(Device.dwWidth), float(Device.dwHeight), 0.f, 1.f });
+    set_scene_viewport(RCache);
 
     RCache.set_Stencil(FALSE);
 }
@@ -104,12 +108,12 @@ void CRenderTarget::phase_downsamp()
 
     u_setrt(RCache, rt_half_depth, nullptr, nullptr, nullptr /*rt_MSAADepth*/);
     RCache.ClearRT(rt_half_depth, {}); // black
-    u32 w = Device.dwWidth;
-    u32 h = Device.dwHeight;
+    u32 w = scene_width(); // Device.dwWidth unless r__render_scale < 1 (downsized twins)
+    u32 h = scene_height();
 
     if (RImplementation.o.ssao_half_data)
     {
-        RCache.SetViewport({ 0.f, 0.f, float(Device.dwWidth) * 0.5f, float(Device.dwHeight) * 0.5f, 0.f, 1.f });
+        RCache.SetViewport({ 0.f, 0.f, float(w) * 0.5f, float(h) * 0.5f, 0.f, 1.f });
         w /= 2;
         h /= 2;
     }
@@ -142,6 +146,6 @@ void CRenderTarget::phase_downsamp()
     }
 
     if (RImplementation.o.ssao_half_data)
-        RCache.SetViewport({ 0.f, 0.f, float(Device.dwWidth), float(Device.dwHeight), 0.f, 1.f });
+        set_scene_viewport(RCache);
 }
 } // namespace xray::render::RENDER_NAMESPACE

@@ -469,6 +469,7 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
     // right after the build, using the narrow scope transforms captured here on the main thread.
     svp_seed_view = Device.mView;
     svp_seed_project = scope_project;
+    capture_svp_seed_targets();
     svp_cmd_deferred = true;
 
     r_main_dsgraph_override = svp_dsgraph;
@@ -520,6 +521,7 @@ void CRender::EndSecondVPCalculateParallel()
         return;
 
     svp_worker_done.Wait(); // blocking; the worker signals after every job, incl. aborts
+    release_svp_seed_targets(); // the stage B recording that used them is over
 
     // Publish the worker's per-pass LOD thresholds before the scope pass drains (main render is
     // already finished at this point, so the globals are exclusive again).
@@ -541,6 +543,7 @@ void CRender::JoinSecondVPBuildThread()
         svp_worker_exit.store(false, std::memory_order_relaxed);
         svp_build_abort.store(false, std::memory_order_relaxed);
     }
+    release_svp_seed_targets(); // teardown: never outlive the render target that owns them
 }
 
 void CRender::AbortSecondVPCalculate()
@@ -555,6 +558,7 @@ void CRender::AbortSecondVPCalculate()
     // thread itself is joined only by reset/teardown. Wait for the park BEFORE freeing the
     // job state below (dsgraph/overrides the worker may still touch inside the job).
     svp_worker_done.Wait();
+    release_svp_seed_targets(); // the aborted job is over (main thread)
     svp_shadow_stage = 0;
     if (svp_context_id != R_dsgraph_structure::INVALID_CONTEXT_ID)
     {

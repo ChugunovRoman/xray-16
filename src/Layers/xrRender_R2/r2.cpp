@@ -431,6 +431,25 @@ static class cl_pos_decompress_params2 : public R_constant_setup
     }
 } binder_pos_decompress_params2;
 
+// Main render scale (r__render_scale): x,y = size of the downsized scene the upscale reads,
+// z = unsharp amount already weighted by the stretch (r__render_scale_sharpen * (Device/scene - 1),
+// saturated), w = 1 while the main pass renders scaled (0 otherwise; x,y are then Device, z = 0).
+// Read by the postprocess upscale in phase_pp.
+static class cl_render_scale_params : public R_constant_setup
+{
+    void setup(CBackend& cmd_list, R_constant* C) override
+    {
+        const auto* T = RImplementation.Target;
+        if (T && T->MainScaleActive())
+        {
+            const float stretch = float(Device.dwHeight) / float(_max(1u, T->mrs_set.h)) - 1.f;
+            cmd_list.set_c(C, float(T->mrs_set.w), float(T->mrs_set.h), ps_r__render_scale_sharpen * clampr(stretch, 0.f, 1.f), 1.f);
+            return;
+        }
+        cmd_list.set_c(C, float(Device.dwWidth), float(Device.dwHeight), 0.f, 0.f);
+    }
+} binder_render_scale_params;
+
 static class cl_water_intensity : public R_constant_setup
 {
     void setup(CBackend& cmd_list, R_constant* C) override
@@ -829,6 +848,7 @@ void CRender::create()
     Resources->RegisterConstantSetup("sun_shafts_intensity", &binder_sun_shafts_intensity);
     Resources->RegisterConstantSetup("pos_decompression_params", &binder_pos_decompress_params);
     Resources->RegisterConstantSetup("pos_decompression_params2", &binder_pos_decompress_params2);
+    Resources->RegisterConstantSetup("render_scale_params", &binder_render_scale_params);
     Resources->RegisterConstantSetup("m_AlphaRef", &binder_alpha_ref);
 #if defined(USE_DX11)
     Resources->RegisterConstantSetup("triLOD", &binder_LOD);

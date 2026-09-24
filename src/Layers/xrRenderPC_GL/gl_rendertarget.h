@@ -61,33 +61,54 @@ public:
     // Second viewport
     ref_rt rt_secondVP; // 32bit (r,g,b,a) --//#SM+#-- +SecondVP+
 
-    // Scaled second-viewport pipeline ($user$sv_*): downsized parallel copies of the deferred chain
-    // (G-buffer / lighting / combine). Swapped into the rt_* members only for the dedicated scope
-    // pass while ps_r__second_vp_render_scale < 1, see CRender::RenderSecondViewport() and
-    // SVPPipelineBegin/SVPPipelineEnd below.
-    xr_vector<ref_rt> svp_Base;
-    ref_rt svp_Base_Depth;
-    ref_rt svp_MSAADepth; // alias of svp_Base_Depth when MSAA is disabled
-    ref_rt svp_Position;
-    ref_rt svp_Normal;
-    ref_rt svp_Color;
-    ref_rt svp_Accumulator;
-    ref_rt svp_Accumulator_temp;
-    ref_rt svp_Generic_0;
-    ref_rt svp_Generic_1;
-    ref_rt svp_Generic_0_r; // alias of svp_Generic_0 when MSAA is disabled
-    ref_rt svp_Generic_1_r; // alias of svp_Generic_1 when MSAA is disabled
-    ref_rt svp_Generic;
-    ref_rt svp_Generic_2;
+    // Scaled pipeline: a downsized parallel copy of the deferred chain (G-buffer / lighting /
+    // combine), swapped into the rt_* members for ONE pass by ScaledSetBegin/ScaledSetEnd, while
+    // the named "$user$..." textures are republished under the twin surfaces. Two instances:
+    //  - svp_set ($user$sv_*): dedicated scope pass, r__second_vp_render_scale (any scale, FIX-2),
+    //    see CRender::RenderSecondViewport() and SVPPipelineBegin/SVPPipelineEnd below;
+    //  - mrs_set ($user$mr_*): main pass while r__render_scale < 1, see CRender::Render(),
+    //    MainScaleBegin/MainScaleEnd and the upscale branch of phase_pp().
+    struct ScaledTargetSet
+    {
+        pcstr prefix;        // named-texture prefix of the twins
+        pcstr tag;           // log tag
+        bool clear_on_begin; // zero the accumulation targets in Begin (see SVPPipelineBegin)
+        bool with_ao;        // also twin rt_half_depth / rt_ssao_temp (the scope pass skips SSAO)
 
-    u32 svp_w{};
-    u32 svp_h{};
-    u32 svp_failed_w{};          // last size whose twin-set creation failed (anti retry-spam latch)
-    u32 svp_failed_h{};
-    bool svp_swapped{};          // true between SVPPipelineBegin() and SVPPipelineEnd()
-    xr_vector<std::pair<ref_rt*, ref_rt>> svp_saved; // {member, original} saved by Begin, restored by End
-    u32 svp_saved_w{};
-    u32 svp_saved_h{};
+        xr_vector<ref_rt> Base;
+        ref_rt Base_Depth;
+        ref_rt MSAADepth; // alias of Base_Depth when MSAA is disabled
+        ref_rt Position;
+        ref_rt Normal;
+        ref_rt Color;
+        ref_rt Accumulator;
+        ref_rt Accumulator_temp;
+        ref_rt Generic_0;
+        ref_rt Generic_1;
+        ref_rt Generic_0_r; // alias of Generic_0 when MSAA is disabled
+        ref_rt Generic_1_r; // alias of Generic_1 when MSAA is disabled
+        ref_rt Generic;
+        ref_rt Generic_2;
+        ref_rt half_depth; // with_ao only
+        ref_rt ssao_temp;  // with_ao only
+
+        u32 w{};
+        u32 h{};
+        u32 failed_w{}; // last size whose twin-set creation failed (anti retry-spam latch)
+        u32 failed_h{};
+        bool swapped{}; // true between ScaledSetBegin() and ScaledSetEnd()
+        xr_vector<std::pair<ref_rt*, ref_rt>> saved; // {member, original} saved by Begin, restored by End
+        u32 saved_w{};
+        u32 saved_h{};
+        // Originals of the backbuffer pair captured by Begin: the scaled main pass presents into
+        // them (phase_pp upscale), see get_present_rt()/get_present_zb().
+        xr_vector<ref_rt> orig_Base;
+        ref_rt orig_Base_Depth;
+        // with_ao: the AO names still point at half_depth/ssao_temp after End (see MainScaleEnd).
+        bool ao_published{};
+    };
+    ScaledTargetSet svp_set{ "$user$sv_", "SVP scaled pipeline", true, false };
+    ScaledTargetSet mrs_set{ "$user$mr_", "Main render scale", false, true };
 
     // Frame driver stage 1a: dedicated shadow-map atlas twin ($user$sv_smap_depth), sized by
     // r__svp_smap_size independently of r2_smap_size. Created lazily on the MAIN thread by
@@ -221,6 +242,7 @@ public:
 
 public:
     ref_shader s_postprocess;
+    ref_shader s_depth_upscale; // main render scale: scene depth -> full-size backbuffer depth (phase_pp)
     ref_shader s_postprocess_msaa; // if MSAA is disabled, just an alias of s_bloom
     ref_geom g_postprocess;
     ref_shader s_menu;
@@ -273,6 +295,9 @@ public:
 
     GLuint get_base_rt() { return rt_Base[HW.CurrentBackBuffer]->pRT; }
     GLuint get_base_zb() { return rt_Base_Depth->pZRT; }
+    // Real backbuffer pair even while the main render scale swap is active (see mrs_set).
+    GLuint get_present_rt() { return (mrs_set.swapped ? mrs_set.orig_Base : rt_Base)[HW.CurrentBackBuffer]->pRT; }
+    GLuint get_present_zb() { return (mrs_set.swapped ? mrs_set.orig_Base_Depth : rt_Base_Depth)->pZRT; }
 
     void u_setrt(CBackend& cmd_list, const ref_rt& _1, const ref_rt& _2, const ref_rt& _3, const ref_rt& _zb);
     void u_setrt(CBackend& cmd_list, const ref_rt& _1, const ref_rt& _2, const ref_rt& _zb);
@@ -342,6 +367,7 @@ public:
     void phase_combine();
     void phase_combine_volumetric();
     void phase_pp();
+    void phase_depth_upscale(); // main render scale: scene depth -> real backbuffer depth (called by phase_pp)
     void ResizeSecondVPRT(u32 w, u32 h);
     // Scaled second-viewport pipeline support. SVPTargetsEnsure lazily creates the $user$sv_* set
     // (returns false if creation failed -> caller falls back to the full-res pass). Begin swaps the
@@ -352,8 +378,30 @@ public:
     void SVPTargetsRelease();
     void SVPPipelineBegin();
     void SVPPipelineEnd();
-    bool SvpPipelineSwapped() const { return svp_swapped; }
+    bool SvpPipelineSwapped() const { return svp_set.swapped; }
     void svp_publish_surfaces(bool use_twins);
+    // Generic core behind both scaled sets (svp_set / mrs_set); the SVP* methods above are thin
+    // wrappers over svp_set with unchanged behavior.
+    bool ScaledSetEnsure(ScaledTargetSet& set, u32 w, u32 h);
+    void ScaledSetRelease(ScaledTargetSet& set);
+    void ScaledSetBegin(ScaledTargetSet& set);
+    void ScaledSetEnd(ScaledTargetSet& set);
+    // ao_only: just the rt_half_depth / rt_ssao_temp names (see MainScaleEnd).
+    void scaled_publish_surfaces(const ScaledTargetSet& set, bool use_twins, bool ao_only = false);
+    // Main render scale (r__render_scale < 1). Begin = Ensure(mrs_set, w×h) + swap; returns false
+    // when the set cannot be created -> the caller renders the frame at full resolution.
+    // End restores members/named textures only; phase_pp has already presented into the real
+    // backbuffer by then (get_present_rt/zb), so draws issued after Render() land there.
+    bool MainScaleBegin(u32 w, u32 h);
+    void MainScaleEnd();
+    void MainScaleRelease();
+    bool MainScaleActive() const { return mrs_set.swapped; }
+    // Size of the deferred chain the current pass renders into: the swapped twin set's size, else
+    // Device. Use it (not Device.dwWidth) wherever a phase sizes a viewport / texel step against
+    // the scene targets.
+    u32 scene_width() const;
+    u32 scene_height() const;
+    void set_scene_viewport(CBackend& cmd_list);
     // Diagnostics: every G-buffer CRT owns a render target view (pRT, always its own surface) AND
     // a named texture ($user$position etc.) that svp_publish_surfaces repoints at the scope twin.
     // If a restore is ever missed the engine draws into one surface and samples another - the

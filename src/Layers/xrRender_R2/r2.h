@@ -430,6 +430,14 @@ public:
     // cmd list, overlapping the main render's tail. Seeded on the main thread at launch.
     Fmatrix svp_seed_view{};
     Fmatrix svp_seed_project{};
+    // G-buffer targets for record_second_vp_geometry_into, captured on the MAIN thread together
+    // with the transforms: the scope twins, or the rt_* members when the twin set does not exist
+    // yet. The worker must not read the rt_* members itself - the main pass swaps them while
+    // r__render_scale < 1 (mrs_set). Order: position, normal, color, accumulator, depth.
+    // Released on the main thread once the recording is done (see release_svp_seed_targets).
+    ref_rt svp_seed_rt[5];
+    void capture_svp_seed_targets();
+    void release_svp_seed_targets();
     bool svp_cmd_deferred{}; // svp dsgraph cmd_list is a deferred context this frame
     bool svp_geom_on_main{};
     // Frame driver: resolved per accepted SVP frame on the main thread; gates the worker stages

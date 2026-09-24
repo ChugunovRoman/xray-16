@@ -313,6 +313,18 @@ void dx113DFluidRenderer::Draw(const dx113DFluidData& FluidData)
     const dx113DFluidData::Settings& VolumeSettings = FluidData.GetSettings();
     const bool bRenderFire = (VolumeSettings.m_SimulationType == dx113DFluidData::ST_FIRE);
 
+    // Main render scale (r__render_scale < 1): the ray data must match the downsized scene the
+    // volume is composited into (the rt_Generic_0_r twin), so re-key the screen-sized resources
+    // on the main pass's scene size. The scope pass never re-keys them (it would thrash the
+    // resources every frame between the two sizes) and keeps using whatever the main pass set.
+    if (!RImplementation.IsSecondViewportRenderPass())
+    {
+        const u32 scr_w = pTarget->scene_width();
+        const u32 scr_h = pTarget->scene_height();
+        if (!RT[RRT_RayDataTex] || RT[RRT_RayDataTex]->dwWidth != scr_w || RT[RRT_RayDataTex]->dwHeight != scr_h)
+            CreateRayDataResources(int(scr_w), int(scr_h));
+    }
+
     FogLighting LightData;
 
     CalculateLighting(FluidData, LightData);
@@ -362,7 +374,10 @@ void dx113DFluidRenderer::Draw(const dx113DFluidData& FluidData)
 
     RImplementation.rmNormal(RCache);
 
-    PrepareCBuffer(FluidData, Device.dwWidth, Device.dwHeight);
+    // The composite quad normalizes SV_Position by RTWidth/RTHeight: that must be the size of the
+    // target bound right above (rt_Generic_0_r: scene-sized in the main pass, scope twin in the
+    // scope pass), not the ray-data size.
+    PrepareCBuffer(FluidData, pTarget->get_width(RCache), pTarget->get_height(RCache));
     RCache.set_c(strDiffuseLight, LightData.m_vLightIntencity.x, LightData.m_vLightIntencity.y,
         LightData.m_vLightIntencity.z, 1.0f);
 
@@ -375,12 +390,15 @@ void dx113DFluidRenderer::ComputeRayData(const dx113DFluidData &FluidData)
     RCache.ClearRT(RT[RRT_RayDataTex], {});
 
     CRenderTarget* pTarget = RImplementation.Target;
+    // Screen-sized ray data: Device dims, or the downsized scene under r__render_scale (see Draw).
+    const u32 ray_w = RT[RRT_RayDataTex]->dwWidth;
+    const u32 ray_h = RT[RRT_RayDataTex]->dwHeight;
     pTarget->u_setrt(RCache, RT[RRT_RayDataTex], nullptr, nullptr, nullptr); // LDR RT
     RCache.set_Element(m_RendererTechnique[RS_CompRayData_Back]);
 
     RImplementation.rmNormal(RCache);
 
-    PrepareCBuffer(FluidData, Device.dwWidth, Device.dwHeight);
+    PrepareCBuffer(FluidData, ray_w, ray_h);
 
     // Render volume back faces
     // We output xyz=(0,-1,0) and w=min(sceneDepth, boxDepth)
@@ -391,7 +409,7 @@ void dx113DFluidRenderer::ComputeRayData(const dx113DFluidData &FluidData)
     //  unless the pixel is occluded by the scene, in which case we output xyzw=(1,0,0,0)
     pTarget->u_setrt(RCache, RT[RRT_RayDataTex], nullptr, nullptr, nullptr); // LDR RT
     RCache.set_Element(m_RendererTechnique[RS_CompRayData_Front]);
-    PrepareCBuffer(FluidData, Device.dwWidth, Device.dwHeight);
+    PrepareCBuffer(FluidData, ray_w, ray_h);
 
     // Render
     DrawBox();

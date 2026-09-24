@@ -120,8 +120,12 @@ void CRenderTarget::phase_scene_end()
     float _w = float(Device.dwWidth);
     float _h = float(Device.dwHeight);
     Fvector2 p0, p1;
-    p0.set(.5f / _w, .5f / _h);
-    p1.set((_w + .5f) / _w, (_h + .5f) / _h);
+    // Half-texel offsets of the SCENE targets being sampled (downsized under r__render_scale < 1);
+    // the quad corners stay in Device pixels (screen_res VS mapping + viewport).
+    const float _tw = float(scene_width());
+    const float _th = float(scene_height());
+    p0.set(.5f / _tw, .5f / _th);
+    p1.set((_tw + .5f) / _tw, (_th + .5f) / _th);
     float d_Z = EPS_S, d_W = 1.f;
 
     // Fill vertex buffer

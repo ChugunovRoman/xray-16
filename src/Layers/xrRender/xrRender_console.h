@@ -58,6 +58,11 @@ extern ECORE_API float ps_r__GLOD_ssa_end;
 extern ECORE_API float ps_r__LOD;
 // Second viewport: rt_secondVP size = main resolution * this factor (r__dedicated_second_vp 1). Console: r__second_vp_render_scale.
 extern ECORE_API float ps_r__second_vp_render_scale;
+// Main render scale: the main deferred chain renders at Device size * this factor and phase_pp
+// stretches it to the backbuffer (UI stays native). 1 = off (path fully bypassed). Console: r__render_scale.
+extern ECORE_API float ps_r__render_scale;
+// Unsharp strength of the r__render_scale upscale (0 = plain bilinear). Console: r__render_scale_sharpen.
+extern ECORE_API float ps_r__render_scale_sharpen;
 // Render-phase task scheduling (i_render_phase): bit0 = async calculate task, bit1 = async draw task. Console: r__phase_mt 0..3.
 extern ECORE_API int ps_r__phase_mt;
 //.extern ECORE_API	float		ps_r__LOD_Power		;

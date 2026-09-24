@@ -112,9 +112,9 @@ void CRenderTarget::u_compute_texgen_jitter(CBackend& cmd_list, Fmatrix& m_Texge
     };
     m_Texgen_J.mul(m_TexelAdjust, cmd_list.xforms.m_wvp);
 
-    // rescale - tile it
-    float scale_X = float(Device.dwWidth) / float(TEX_jitter);
-    float scale_Y = float(Device.dwHeight) / float(TEX_jitter);
+    // rescale - tile it (scene pixels: downsized under r__render_scale < 1, else == Device)
+    float scale_X = float(scene_width()) / float(TEX_jitter);
+    float scale_Y = float(scene_height()) / float(TEX_jitter);
     m_TexelAdjust.scale(scale_X, scale_Y, 1.f);
     m_Texgen_J.mulA_44(m_TexelAdjust);
 }
@@ -681,6 +681,9 @@ CRenderTarget::CRenderTarget()
 
     // PP
     s_postprocess.create("postprocess");
+    // Main render scale: copies the downsized scene depth ($user$mr_base_depth, created lazily by
+    // MainScaleBegin) into the full-size backbuffer depth, see phase_pp.
+    s_depth_upscale.create("depth_upscale");
     g_postprocess.create(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR | D3DFVF_TEX3,
         RImplementation.Vertex.Buffer(), RImplementation.QuadIB);
     if (!options.msaa)
@@ -869,109 +872,225 @@ void CRenderTarget::ResizeSecondVPRT(u32 w, u32 h)
 // clip to sw×sh, and their normalized TCs keep sampling the downsized sources correctly.
 // ---------------------------------------------------------------------------
 
-bool CRenderTarget::SVPTargetsEnsure(u32 w, u32 h)
+// SVP wrappers: behavior identical to the historical svp_* implementation.
+bool CRenderTarget::SVPTargetsEnsure(u32 w, u32 h) { return ScaledSetEnsure(svp_set, w, h); }
+void CRenderTarget::SVPTargetsRelease() { ScaledSetRelease(svp_set); }
+void CRenderTarget::SVPPipelineBegin() { ScaledSetBegin(svp_set); }
+void CRenderTarget::SVPPipelineEnd() { ScaledSetEnd(svp_set); }
+void CRenderTarget::svp_publish_surfaces(bool use_twins) { scaled_publish_surfaces(svp_set, use_twins); }
+
+bool CRenderTarget::ScaledSetEnsure(ScaledTargetSet& set, u32 w, u32 h)
 {
-    if (svp_Position && svp_Position->dwWidth == w && svp_Position->dwHeight == h)
+    if (set.Position && set.Position->dwWidth == w && set.Position->dwHeight == h)
         return true;
 
-    VERIFY(!svp_swapped);
+    VERIFY(!set.swapped);
 
     // Latch creation failures per size: without this a broken set would be re-attempted (and
-    // log-spammed) on every SVP frame.
-    if (!svp_Position && svp_failed_w == w && svp_failed_h == h)
+    // log-spammed) on every frame.
+    if (!set.Position && set.failed_w == w && set.failed_h == h)
         return false;
 
-    SVPTargetsRelease();
+    ScaledSetRelease(set);
 
     const auto& options = RImplementation.o;
     const u32 SampleCount = options.msaa ? options.msaa_samples : 1u;
 
-    // Base color + depth are plain textures on purpose (no CRT::CreateBase): the real rt_Base wraps
-    // backbuffer views, while these must be standalone sw×sh surfaces bound during the scaled pass.
     string64 name;
-    svp_Base.resize(HW.BackBufferCount);
+    const auto twin_name = [&](pcstr suffix) -> pcstr
+    {
+        xr_sprintf(name, "%s%s", set.prefix, suffix);
+        return name;
+    };
+
+    // Base color + depth are plain textures on purpose (no CRT::CreateBase): the real rt_Base wraps
+    // backbuffer views, while these must be standalone w×h surfaces bound during the scaled pass.
+    set.Base.resize(HW.BackBufferCount);
     for (u32 i = 0; i < HW.BackBufferCount; i++)
     {
-        xr_sprintf(name, "%s%u", "$user$sv_base_", i);
-        svp_Base[i].create(name, w, h, HW.Caps.fTarget, 1);
+        xr_sprintf(name, "%sbase_%u", set.prefix, i);
+        set.Base[i].create(name, w, h, HW.Caps.fTarget, 1);
     }
-    svp_Base_Depth.create("$user$sv_base_depth", w, h, HW.Caps.fDepth, 1);
+    set.Base_Depth.create(twin_name("base_depth"), w, h, HW.Caps.fDepth, 1);
     if (!options.msaa)
-        svp_MSAADepth = svp_Base_Depth;
+        set.MSAADepth = set.Base_Depth;
     else
-        svp_MSAADepth.create("$user$sv_msaadepth", w, h, D3DFMT_D24S8, SampleCount);
+        set.MSAADepth.create(twin_name("msaadepth"), w, h, D3DFMT_D24S8, SampleCount);
 
     // Format + sample count copied from each live original so the mrtmixdepth / fp16_blend /
     // gbuffer_opt / albedo_wo / advancedpp variations are mirrored without duplicating ctor logic.
-    auto create_twin = [&](ref_rt& twin, const ref_rt& orig, pcstr twin_name) {
+    auto create_twin = [&](ref_rt& twin, const ref_rt& orig, pcstr suffix) {
         if (orig)
-            twin.create(twin_name, w, h, orig->fmt, orig->sampleCount);
+            twin.create(twin_name(suffix), w, h, orig->fmt, orig->sampleCount);
     };
-    create_twin(svp_Position, rt_Position, "$user$sv_position");
-    create_twin(svp_Normal, rt_Normal, "$user$sv_normal");
-    create_twin(svp_Color, rt_Color, "$user$sv_albedo");
-    create_twin(svp_Accumulator, rt_Accumulator, "$user$sv_accum");
-    create_twin(svp_Accumulator_temp, rt_Accumulator_temp, "$user$sv_accum_temp");
-    create_twin(svp_Generic_0, rt_Generic_0, "$user$sv_generic0");
-    create_twin(svp_Generic_1, rt_Generic_1, "$user$sv_generic1");
+    create_twin(set.Position, rt_Position, "position");
+    create_twin(set.Normal, rt_Normal, "normal");
+    create_twin(set.Color, rt_Color, "albedo");
+    create_twin(set.Accumulator, rt_Accumulator, "accum");
+    create_twin(set.Accumulator_temp, rt_Accumulator_temp, "accum_temp");
+    create_twin(set.Generic_0, rt_Generic_0, "generic0");
+    create_twin(set.Generic_1, rt_Generic_1, "generic1");
     if (!options.msaa)
     {
-        svp_Generic_0_r = svp_Generic_0;
-        svp_Generic_1_r = svp_Generic_1;
+        set.Generic_0_r = set.Generic_0;
+        set.Generic_1_r = set.Generic_1;
     }
     else
     {
-        create_twin(svp_Generic_0_r, rt_Generic_0_r, "$user$sv_generic0_r");
-        create_twin(svp_Generic_1_r, rt_Generic_1_r, "$user$sv_generic1_r");
+        create_twin(set.Generic_0_r, rt_Generic_0_r, "generic0_r");
+        create_twin(set.Generic_1_r, rt_Generic_1_r, "generic1_r");
     }
-    create_twin(svp_Generic, rt_Generic, "$user$sv_generic");
-    create_twin(svp_Generic_2, rt_Generic_2, "$user$sv_generic2");
+    create_twin(set.Generic, rt_Generic, "generic");
+    create_twin(set.Generic_2, rt_Generic_2, "generic2");
 
-    svp_w = w;
-    svp_h = h;
+    // AO targets (main pass only: the scope pass skips SSAO and reads the main AO). Same size
+    // ratio to the scene as the originals: rt_half_depth is scene/2 under ssao_half_data, and
+    // rt_ssao_temp keeps its UAV when HDAO (compute) writes it.
+    bool ao_ok = true;
+    if (set.with_ao)
+    {
+        if (rt_half_depth)
+        {
+            const u32 hw = options.ssao_half_data ? _max(1u, w / 2) : w;
+            const u32 hh = options.ssao_half_data ? _max(1u, h / 2) : h;
+            set.half_depth.create(twin_name("half_depth"), hw, hh, rt_half_depth->fmt, rt_half_depth->sampleCount);
+            ao_ok = ao_ok && !!set.half_depth;
+        }
+        if (rt_ssao_temp)
+        {
+            Flags32 flags{};
+#if defined(USE_DX11)
+            if (rt_ssao_temp->pUAView)
+                flags.flags = CRT::CreateUAV;
+#endif
+            set.ssao_temp.create(twin_name("ssao_temp"), w, h, rt_ssao_temp->fmt, rt_ssao_temp->sampleCount, flags);
+            ao_ok = ao_ok && !!set.ssao_temp;
+#if defined(USE_DX11)
+            ao_ok = ao_ok && (!flags.test(CRT::CreateUAV) || set.ssao_temp->pUAView);
+#endif
+        }
+    }
+
+    set.w = w;
+    set.h = h;
 
     // Only the critical chain is mandatory; optional extras (Normal/Accumulator_temp/Generic*/
     // Generic_2) may legitimately stay absent exactly like on the main path.
-    if (!svp_Base[0] || !svp_Base_Depth || !svp_MSAADepth || !svp_Position || !svp_Color ||
-        !svp_Accumulator || !svp_Generic_0 || !svp_Generic_1)
+    if (!set.Base[0] || !set.Base_Depth || !set.MSAADepth || !set.Position || !set.Color ||
+        !set.Accumulator || !set.Generic_0 || !set.Generic_1 || !ao_ok)
     {
-        Msg("! SVP scaled pipeline: failed to create %ux%u target set, falling back to full-res scope render", w, h);
-        SVPTargetsRelease();
-        svp_failed_w = w;
-        svp_failed_h = h;
+        Msg("! %s: failed to create %ux%u target set, falling back to full-res render", set.tag, w, h);
+        ScaledSetRelease(set);
+        set.failed_w = w;
+        set.failed_h = h;
         return false;
     }
 
-    svp_failed_w = 0;
-    svp_failed_h = 0;
-    Msg("SVP scaled pipeline: created %ux%u target set", w, h);
+    set.failed_w = 0;
+    set.failed_h = 0;
+    Msg("%s: created %ux%u target set", set.tag, w, h);
     return true;
 }
 
-void CRenderTarget::SVPTargetsRelease()
+void CRenderTarget::ScaledSetRelease(ScaledTargetSet& set)
 {
-    VERIFY(!svp_swapped);
+    VERIFY(!set.swapped);
     // VERIFY is compiled out in release. Releasing the twins while the swap is active leaves the
-    // named textures pointing at destroyed surfaces: SVPPipelineEnd skips every pair whose twin is
+    // named textures pointing at destroyed surfaces: ScaledSetEnd skips every pair whose twin is
     // gone, so the restore never happens and the scene stays black. Say so loudly.
-    if (svp_swapped)
-        Msg("! [svp-swap] SVPTargetsRelease() called while the target swap is ACTIVE - named surfaces will not be restored");
-    svp_Base.clear();
-    svp_Base_Depth.destroy();
-    svp_MSAADepth.destroy();
-    svp_Position.destroy();
-    svp_Normal.destroy();
-    svp_Color.destroy();
-    svp_Accumulator.destroy();
-    svp_Accumulator_temp.destroy();
-    svp_Generic_0.destroy();
-    svp_Generic_1.destroy();
-    svp_Generic_0_r.destroy();
-    svp_Generic_1_r.destroy();
-    svp_Generic.destroy();
-    svp_Generic_2.destroy();
-    svp_w = 0;
-    svp_h = 0;
+    if (set.swapped)
+        Msg("! [%s] ScaledSetRelease() called while the target swap is ACTIVE - named surfaces will not be restored", set.tag);
+    if (set.ao_published && !set.swapped)
+    {
+        scaled_publish_surfaces(set, false, true); // AO names back onto the originals' surfaces
+        set.ao_published = false;
+    }
+    set.Base.clear();
+    set.Base_Depth.destroy();
+    set.MSAADepth.destroy();
+    set.Position.destroy();
+    set.Normal.destroy();
+    set.Color.destroy();
+    set.Accumulator.destroy();
+    set.Accumulator_temp.destroy();
+    set.Generic_0.destroy();
+    set.Generic_1.destroy();
+    set.Generic_0_r.destroy();
+    set.Generic_1_r.destroy();
+    set.Generic.destroy();
+    set.Generic_2.destroy();
+    set.half_depth.destroy();
+    set.ssao_temp.destroy();
+    set.w = 0;
+    set.h = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Main render scale (r__render_scale < 1): the whole main deferred chain renders into mrs_set
+// ($user$mr_*) and phase_pp stretches the result into the real backbuffer. Same swap mechanics
+// as the scope pass; the two swaps never overlap (the scope pass runs after the main Render()).
+// ---------------------------------------------------------------------------
+bool CRenderTarget::MainScaleBegin(u32 w, u32 h)
+{
+    if (svp_set.swapped || mrs_set.swapped)
+    {
+        Msg("! [%s] Begin refused: a target swap is already active (svp=%d main=%d)", mrs_set.tag,
+            svp_set.swapped ? 1 : 0, mrs_set.swapped ? 1 : 0);
+        if (mrs_set.ao_published && !mrs_set.swapped)
+        {
+            scaled_publish_surfaces(mrs_set, false, true); // this frame's SSAO writes the originals
+            mrs_set.ao_published = false;
+        }
+        return false;
+    }
+    if (!ScaledSetEnsure(mrs_set, w, h))
+        return false;
+    ScaledSetBegin(mrs_set);
+    return true;
+}
+
+void CRenderTarget::MainScaleEnd()
+{
+    if (!mrs_set.swapped)
+        return;
+    ScaledSetEnd(mrs_set);
+    // The scope pass skips SSAO and samples the MAIN pass's AO by name ($user$ssao_temp /
+    // $user$half_depth, normalized TCs). This frame that AO lives in the twins - the originals
+    // were not written - so keep those two names on the twins until the next Begin (which
+    // republishes everything) or the release of the set (which restores them).
+    scaled_publish_surfaces(mrs_set, true, true);
+    mrs_set.ao_published = true;
+}
+
+void CRenderTarget::MainScaleRelease()
+{
+    // Back at full resolution: drop the downsized set (about a second G-buffer worth of VRAM).
+    if (!mrs_set.swapped && (mrs_set.Position || mrs_set.failed_w))
+    {
+        const bool had_set = !!mrs_set.Position;
+        ScaledSetRelease(mrs_set);
+        mrs_set.failed_w = 0;
+        mrs_set.failed_h = 0;
+        if (had_set)
+            Msg("%s: target set released", mrs_set.tag);
+    }
+}
+
+// Main render scale only: the scope pass (svp_set) deliberately keeps its historical Device-based
+// sizes here, so the tested SVP pipeline behaves exactly as before this feature.
+u32 CRenderTarget::scene_width() const
+{
+    return mrs_set.swapped ? mrs_set.w : Device.dwWidth;
+}
+
+u32 CRenderTarget::scene_height() const
+{
+    return mrs_set.swapped ? mrs_set.h : Device.dwHeight;
+}
+
+void CRenderTarget::set_scene_viewport(CBackend& cmd_list)
+{
+    cmd_list.SetViewport({ 0.f, 0.f, float(scene_width()), float(scene_height()), 0.f, 1.f });
 }
 
 // ---------------------------------------------------------------------------
@@ -1038,7 +1157,7 @@ bool CRenderTarget::SVPSmapAtlasEnsure()
 
 void CRenderTarget::SVPSmapAtlasRelease()
 {
-    VERIFY(!svp_swapped);
+    VERIFY(!svp_set.swapped);
     svp_rt_smap_depth.destroy();
     svp_smap_page_size = 0;
     svp_smap_failed = false;
@@ -1069,7 +1188,7 @@ bool CRenderTarget::svp_publish_smap_atlas(bool use_atlas)
 #endif
 }
 
-void CRenderTarget::svp_publish_surfaces(bool use_twins)
+void CRenderTarget::scaled_publish_surfaces(const ScaledTargetSet& set, bool use_twins, bool ao_only)
 {
 #if defined(USE_DX11)
     auto publish = [](const ref_rt& named, const ref_rt& src) {
@@ -1090,20 +1209,24 @@ void CRenderTarget::svp_publish_surfaces(bool use_twins)
         const ref_rt* twin;
     };
     const SVPNamedPair pairs[] = {
-        { &rt_Position, &svp_Position },
-        { &rt_Normal, &svp_Normal },
-        { &rt_Color, &svp_Color },
-        { &rt_Accumulator, &svp_Accumulator },
-        { &rt_Accumulator_temp, &svp_Accumulator_temp },
-        { &rt_Generic_0, &svp_Generic_0 },
-        { &rt_Generic_1, &svp_Generic_1 },
-        { &rt_Generic_0_r, &svp_Generic_0_r },
-        { &rt_Generic_1_r, &svp_Generic_1_r },
-        { &rt_Generic, &svp_Generic },
-        { &rt_Generic_2, &svp_Generic_2 },
+        { &rt_Position, &set.Position },
+        { &rt_Normal, &set.Normal },
+        { &rt_Color, &set.Color },
+        { &rt_Accumulator, &set.Accumulator },
+        { &rt_Accumulator_temp, &set.Accumulator_temp },
+        { &rt_Generic_0, &set.Generic_0 },
+        { &rt_Generic_1, &set.Generic_1 },
+        { &rt_Generic_0_r, &set.Generic_0_r },
+        { &rt_Generic_1_r, &set.Generic_1_r },
+        { &rt_Generic, &set.Generic },
+        { &rt_Generic_2, &set.Generic_2 },
+        { &rt_half_depth, &set.half_depth }, // with_ao sets only (null twin -> skipped)
+        { &rt_ssao_temp, &set.ssao_temp },
     };
-    for (const auto& pair : pairs)
+    constexpr size_t ao_first = std::size(pairs) - 2; // the two AO pairs are last
+    for (size_t i = ao_only ? ao_first : 0; i < std::size(pairs); ++i)
     {
+        const auto& pair = pairs[i];
         const ref_rt& twin = *pair.twin;
         if (!twin || !twin->pTexture || !*pair.named || !(*pair.named)->pTexture)
             continue;
@@ -1114,7 +1237,7 @@ void CRenderTarget::svp_publish_surfaces(bool use_twins)
 void CRenderTarget::dbg_dump_state()
 {
     Msg("~ [rt-state] frame %u, swap active=%d, accum_clear_mark=%u, light_marker=%u, marker_overflows=%u",
-        Device.dwFrame, svp_swapped ? 1 : 0, dwAccumulatorClearMark, dwLightMarkerID, dbg_light_marker_overflows);
+        Device.dwFrame, svp_set.swapped ? 1 : 0, dwAccumulatorClearMark, dwLightMarkerID, dbg_light_marker_overflows);
 
     // These feed rmNormal(): a zero here means every pass that relies on it rasterizes nothing.
     for (int id = 0; id < R__NUM_CONTEXTS; ++id)
@@ -1163,10 +1286,11 @@ void CRenderTarget::dbg_dump_state()
         row(name, rt_Base[i]);
     }
 
-    Msg("~   svp twins: %ux%u", svp_w, svp_h);
-    row("svp_Position", svp_Position);
-    row("svp_Generic_0", svp_Generic_0);
-    row("svp_Base_Depth", svp_Base_Depth);
+    Msg("~   svp twins: %ux%u", svp_set.w, svp_set.h);
+    Msg("~   main render scale twins: %ux%u, swapped=%d", mrs_set.w, mrs_set.h, mrs_set.swapped ? 1 : 0);
+    row("svp_set.Position", svp_set.Position);
+    row("svp_set.Generic_0", svp_set.Generic_0);
+    row("svp_set.Base_Depth", svp_set.Base_Depth);
     row("svp_smap_depth", svp_rt_smap_depth);
 }
 
@@ -1513,17 +1637,17 @@ u32 CRenderTarget::svp_dbg_check_named(bool dump)
         const char* label;
     };
     const Entry entries[] = {
-        { &rt_Position, &svp_Position, "position" },
-        { &rt_Normal, &svp_Normal, "normal" },
-        { &rt_Color, &svp_Color, "color" },
-        { &rt_Accumulator, &svp_Accumulator, "accum" },
-        { &rt_Accumulator_temp, &svp_Accumulator_temp, "accum_temp" },
-        { &rt_Generic_0, &svp_Generic_0, "generic_0" },
-        { &rt_Generic_1, &svp_Generic_1, "generic_1" },
-        { &rt_Generic_0_r, &svp_Generic_0_r, "generic_0_r" },
-        { &rt_Generic_1_r, &svp_Generic_1_r, "generic_1_r" },
-        { &rt_Generic, &svp_Generic, "generic" },
-        { &rt_Generic_2, &svp_Generic_2, "generic_2" },
+        { &rt_Position, &svp_set.Position, "position" },
+        { &rt_Normal, &svp_set.Normal, "normal" },
+        { &rt_Color, &svp_set.Color, "color" },
+        { &rt_Accumulator, &svp_set.Accumulator, "accum" },
+        { &rt_Accumulator_temp, &svp_set.Accumulator_temp, "accum_temp" },
+        { &rt_Generic_0, &svp_set.Generic_0, "generic_0" },
+        { &rt_Generic_1, &svp_set.Generic_1, "generic_1" },
+        { &rt_Generic_0_r, &svp_set.Generic_0_r, "generic_0_r" },
+        { &rt_Generic_1_r, &svp_set.Generic_1_r, "generic_1_r" },
+        { &rt_Generic, &svp_set.Generic, "generic" },
+        { &rt_Generic_2, &svp_set.Generic_2, "generic_2" },
     };
 
     u32 bad = 0;
@@ -1554,73 +1678,85 @@ u32 CRenderTarget::svp_dbg_check_named(bool dump)
 #endif
 }
 
-void CRenderTarget::SVPPipelineBegin()
+void CRenderTarget::ScaledSetBegin(ScaledTargetSet& set)
 {
-    VERIFY(!svp_swapped);
-    VERIFY(svp_Position && svp_w && svp_h);
+    VERIFY(!svp_set.swapped && !mrs_set.swapped);
+    VERIFY(set.Position && set.w && set.h);
 
     // Publish FIRST, while *pairs.named still holds the originals: deferred shaders resolve
     // G-buffer inputs by texture name ($user$position etc.), and those named textures belong to
     // the original CRTs - they must be repointed at the twin surfaces before any draw happens.
-    svp_publish_surfaces(true);
+    scaled_publish_surfaces(set, true);
 
-    svp_saved.clear();
-    auto swap_in = [this](ref_rt& member, const ref_rt& twin) {
+    set.orig_Base = rt_Base;
+    set.orig_Base_Depth = rt_Base_Depth;
+
+    set.saved.clear();
+    auto swap_in = [&set](ref_rt& member, const ref_rt& twin) {
         if (!twin)
             return;
-        svp_saved.emplace_back(&member, member);
+        set.saved.emplace_back(&member, member);
         member = twin;
     };
 
-    swap_in(rt_Position, svp_Position);
-    swap_in(rt_Normal, svp_Normal);
-    swap_in(rt_Color, svp_Color);
-    swap_in(rt_Accumulator, svp_Accumulator);
-    swap_in(rt_Accumulator_temp, svp_Accumulator_temp);
-    swap_in(rt_Generic_0, svp_Generic_0);
-    swap_in(rt_Generic_1, svp_Generic_1);
-    swap_in(rt_Generic_0_r, svp_Generic_0_r);
-    swap_in(rt_Generic_1_r, svp_Generic_1_r);
-    swap_in(rt_Generic, svp_Generic);
-    swap_in(rt_Generic_2, svp_Generic_2);
-    swap_in(rt_Base_Depth, svp_Base_Depth);
-    swap_in(rt_MSAADepth, svp_MSAADepth);
-    for (u32 i = 0; i < svp_Base.size(); ++i)
+    swap_in(rt_Position, set.Position);
+    swap_in(rt_Normal, set.Normal);
+    swap_in(rt_Color, set.Color);
+    swap_in(rt_Accumulator, set.Accumulator);
+    swap_in(rt_Accumulator_temp, set.Accumulator_temp);
+    swap_in(rt_Generic_0, set.Generic_0);
+    swap_in(rt_Generic_1, set.Generic_1);
+    swap_in(rt_Generic_0_r, set.Generic_0_r);
+    swap_in(rt_Generic_1_r, set.Generic_1_r);
+    swap_in(rt_Generic, set.Generic);
+    swap_in(rt_Generic_2, set.Generic_2);
+    swap_in(rt_half_depth, set.half_depth);
+    swap_in(rt_ssao_temp, set.ssao_temp);
+    swap_in(rt_Base_Depth, set.Base_Depth);
+    swap_in(rt_MSAADepth, set.MSAADepth);
+    for (u32 i = 0; i < set.Base.size(); ++i)
         if (i < rt_Base.size())
-            swap_in(rt_Base[i], svp_Base[i]);
+            swap_in(rt_Base[i], set.Base[i]);
 
-    // Accumulation targets are cleared by the engine only ONCE per frame (dwAccumulatorClearMark /
-    // m_bHasActiveVolumetric are already consumed by the main pass), while this second pass binds
-    // the twins holding LAST scope frame's contents. Zero them here or scope lighting/volumetrics
-    // add onto the previous frame - the lens image progressively washes out to white.
-    RCache.ClearRT(rt_Accumulator, {});
-    if (rt_Accumulator_temp)
-        RCache.ClearRT(rt_Accumulator_temp, {});
-    if (rt_Generic_2)
-        RCache.ClearRT(rt_Generic_2, {}); // volumetric lights sum within one pass, starting from black
+    // SVP only: accumulation targets are cleared by the engine only ONCE per frame
+    // (dwAccumulatorClearMark / m_bHasActiveVolumetric are already consumed by the main pass),
+    // while this second pass binds the twins holding LAST scope frame's contents. Zero them here
+    // or scope lighting/volumetrics add onto the previous frame - the lens image progressively
+    // washes out to white. The main pass owns those once-per-frame clears itself.
+    if (set.clear_on_begin)
+    {
+        RCache.ClearRT(rt_Accumulator, {});
+        if (rt_Accumulator_temp)
+            RCache.ClearRT(rt_Accumulator_temp, {});
+        if (rt_Generic_2)
+            RCache.ClearRT(rt_Generic_2, {}); // volumetric lights sum within one pass, starting from black
+    }
 
-    svp_saved_w = dwWidth[RCache.context_id];
-    svp_saved_h = dwHeight[RCache.context_id];
-    dwWidth[RCache.context_id] = svp_w;
-    dwHeight[RCache.context_id] = svp_h;
+    set.saved_w = dwWidth[RCache.context_id];
+    set.saved_h = dwHeight[RCache.context_id];
+    dwWidth[RCache.context_id] = set.w;
+    dwHeight[RCache.context_id] = set.h;
 
-    svp_swapped = true;
+    set.swapped = true;
 }
 
-void CRenderTarget::SVPPipelineEnd()
+void CRenderTarget::ScaledSetEnd(ScaledTargetSet& set)
 {
-    VERIFY(svp_swapped);
+    VERIFY(set.swapped);
 
-    for (const auto& saved : svp_saved)
+    for (const auto& saved : set.saved)
         *saved.first = saved.second;
-    svp_saved.clear();
+    set.saved.clear();
 
     // Point the named textures back at the restored originals' own surfaces.
-    svp_publish_surfaces(false);
+    scaled_publish_surfaces(set, false);
 
-    dwWidth[RCache.context_id] = svp_saved_w;
-    dwHeight[RCache.context_id] = svp_saved_h;
+    dwWidth[RCache.context_id] = set.saved_w;
+    dwHeight[RCache.context_id] = set.saved_h;
 
-    svp_swapped = false;
+    set.orig_Base.clear();
+    set.orig_Base_Depth.destroy(); // drops the extra reference only, the original stays in rt_Base_Depth
+
+    set.swapped = false;
 }
 } // namespace xray::render::RENDER_NAMESPACE

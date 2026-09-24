@@ -143,6 +143,8 @@ float ps_r__GLOD_ssa_start = 256.f;
 float ps_r__GLOD_ssa_end = 64.f;
 float ps_r__LOD = 0.75f;
 float ps_r__second_vp_render_scale = 1.0f;
+float ps_r__render_scale = 1.0f;
+float ps_r__render_scale_sharpen = 0.5f;
 //float ps_r__LOD_Power = 1.5f;
 float ps_r__ssaDISCARD = 3.5f; // RO
 float ps_r__ssaDONTSORT = 32.f; // RO
@@ -784,6 +786,10 @@ void xrRender_initconsole()
     CMD4(CCC_Float, "r__geometry_lod", &ps_r__LOD, 0.1f, 2.f);
     // Second viewport RT size as a fraction of main resolution (r__dedicated_second_vp 1). Applied live; smaller = cheaper PP target for scope texture.
     CMD4(CCC_Float, "r__second_vp_render_scale", &ps_r__second_vp_render_scale, 0.05f, 1.f);
+    // Main pass internal resolution as a fraction of the window resolution. Applied live (the
+    // downsized target set is (re)created lazily); UI, HUD overlay, menu and screenshots stay native.
+    CMD4(CCC_Float, "r__render_scale", &ps_r__render_scale, 0.2f, 1.f);
+    CMD4(CCC_Float, "r__render_scale_sharpen", &ps_r__render_scale_sharpen, 0.f, 1.f);
     //CMD4(CCC_Float, "r__geometry_lod_pow", &ps_r__LOD_Power, 0, 2);
 
     CMD4(CCC_Float, "r__detail_density", &ps_current_detail_density/*&ps_r__Detail_density*/, 0.1f, 0.99f);

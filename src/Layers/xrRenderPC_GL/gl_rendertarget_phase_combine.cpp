@@ -51,7 +51,7 @@ void CRenderTarget::phase_combine()
     // assume screen-size G-buffer inputs, while the svp twins are smaller. The combine below then
     // samples $user$ssao_temp / $user$half_depth holding this frame's full-res main-pass AO - a
     // slightly misaligned but visually negligible approximation through the scope lens.
-    if (!svp_swapped)
+    if (!svp_set.swapped)
     {
         if (RImplementation.o.ssao_hdao)
         {
@@ -193,8 +193,9 @@ void CRenderTarget::phase_combine()
         */
 
         // Fill VB
-        float scale_X = float(Device.dwWidth) / float(TEX_jitter);
-        float scale_Y = float(Device.dwHeight) / float(TEX_jitter);
+        // Jitter tiling in scene pixels (downsized under r__render_scale < 1, else == Device).
+        float scale_X = float(scene_width()) / float(TEX_jitter);
+        float scale_Y = float(scene_height()) / float(TEX_jitter);
 
         // Fill vertex buffer
         FVF::TL* pv = (FVF::TL*)RImplementation.Vertex.Lock(4, g_combine->vb_stride, Offset);
@@ -346,12 +347,17 @@ void CRenderTarget::phase_combine()
             Fvector4 uv6;
         };
 
+        // Quad corners stay in Device pixels (VS maps them to NDC via screen_res, the viewport
+        // then covers the bound target); texel steps / TC offsets are in SCENE texels, which
+        // differ from Device only while the main pass renders downsized (r__render_scale < 1).
         float _w = float(Device.dwWidth);
         float _h = float(Device.dwHeight);
-        float ddw = 1.f / _w;
-        float ddh = 1.f / _h;
-        p0.set(.5f / _w, .5f / _h);
-        p1.set((_w + .5f) / _w, (_h + .5f) / _h);
+        const float _tw = float(scene_width());
+        const float _th = float(scene_height());
+        float ddw = 1.f / _tw;
+        float ddh = 1.f / _th;
+        p0.set(.5f / _tw, .5f / _th);
+        p1.set((_tw + .5f) / _tw, (_th + .5f) / _th);
 
         // Fill vertex buffer
         v_aa* pv = (v_aa*)RImplementation.Vertex.Lock(4, g_aa_AA->vb_stride, Offset);
@@ -395,7 +401,7 @@ void CRenderTarget::phase_combine()
 
         //	Set up variable
         Fvector2 vDofKernel;
-        vDofKernel.set(0.5f / Device.dwWidth, 0.5f / Device.dwHeight);
+        vDofKernel.set(0.5f / float(scene_width()), 0.5f / float(scene_height()));
         vDofKernel.mul(ps_r2_dof_kernel_size);
 
         // Draw COLOR
@@ -587,8 +593,9 @@ void CRenderTarget::phase_combine_volumetric()
     RCache.set_ColorWriteEnable(D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
     {
         // Fill VB
-        float scale_X = float(Device.dwWidth) / float(TEX_jitter);
-        float scale_Y = float(Device.dwHeight) / float(TEX_jitter);
+        // Jitter tiling in scene pixels (downsized under r__render_scale < 1, else == Device).
+        float scale_X = float(scene_width()) / float(TEX_jitter);
+        float scale_Y = float(scene_height()) / float(TEX_jitter);
 
         // Fill vertex buffer
         FVF::TL* pv = (FVF::TL*)RImplementation.Vertex.Lock(4, g_combine->vb_stride, Offset);

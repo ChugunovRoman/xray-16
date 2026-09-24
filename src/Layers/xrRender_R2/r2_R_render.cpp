@@ -248,6 +248,25 @@ extern u32 g_r;
 // - Z-prefill (R2FLAG_ZFILL): r__svp_skip_zfill skips only for the SVP pass.
 // - Reusing shadow maps between main and SVP without re-sync is a separate optimization (not implemented).
 
+void CRender::capture_svp_seed_targets()
+{
+    // Main thread only. Same selection the worker used to make itself: the scope twin when the
+    // set exists, else the rt_* member (r__second_vp_render_scale == 1 before FIX-2 created it).
+    const auto pick = [](const ref_rt& twin, const ref_rt& member) -> const ref_rt& { return twin ? twin : member; };
+    svp_seed_rt[0] = pick(Target->svp_set.Position, Target->rt_Position);
+    svp_seed_rt[1] = pick(Target->svp_set.Normal, Target->rt_Normal);
+    svp_seed_rt[2] = pick(Target->svp_set.Color, Target->rt_Color);
+    svp_seed_rt[3] = pick(Target->svp_set.Accumulator, Target->rt_Accumulator);
+    svp_seed_rt[4] = pick(Target->svp_set.MSAADepth, Target->rt_MSAADepth);
+}
+
+void CRender::release_svp_seed_targets()
+{
+    // Main thread only (the refcounts of these CRTs are also touched by the main-pass swap).
+    for (auto& rt : svp_seed_rt)
+        rt.destroy();
+}
+
 // P2.3 (worker part): seed the deferred cmd list with the FULL initial pipeline state (a deferred
 // context inherits nothing) and record render_graph(0) into it. Runs on the dedicated thread right
 // after the visibility build, overlapping the main render's lighting/combine tail. Deliberately
@@ -261,13 +280,14 @@ void CRender::record_second_vp_geometry_into(R_dsgraph_structure& ds)
     // then calls FinishCommandList on the IMMEDIATE context, killing the device. The pool
     // cache staleness is handled engine-side (CBackend::ResetDeferredCache at alloc/submit).
 
-    // Twin refs with fallback to the rt_* members when the scaled twin set does not exist
-    // (r__second_vp_render_scale == 1): identical bindings, sequential-only in that case.
-    const ref_rt& rtP = Target->svp_Position ? Target->svp_Position : Target->rt_Position;
-    const ref_rt& rtN = Target->svp_Normal ? Target->svp_Normal : Target->rt_Normal;
-    const ref_rt& rtC = Target->svp_Color ? Target->svp_Color : Target->rt_Color;
-    const ref_rt& rtA = Target->svp_Accumulator ? Target->svp_Accumulator : Target->rt_Accumulator;
-    const ref_rt& rtZ = Target->svp_MSAADepth ? Target->svp_MSAADepth : Target->rt_MSAADepth;
+    // Targets captured on the main thread (capture_svp_seed_targets): the scope twins, with a
+    // fallback to the rt_* members when the twin set does not exist yet.
+    const ref_rt& rtP = svp_seed_rt[0];
+    const ref_rt& rtN = svp_seed_rt[1];
+    const ref_rt& rtC = svp_seed_rt[2];
+    const ref_rt& rtA = svp_seed_rt[3];
+    const ref_rt& rtZ = svp_seed_rt[4];
+    VERIFY(rtP && rtZ);
 
     if (!o.gbuffer_opt)
     {
@@ -366,6 +386,8 @@ void CRender::Render()
     if (!g_pGameLevel || bMenu)
     {
         Target->u_setrt(RCache, Device.dwWidth, Device.dwHeight, Target->get_base_rt(), 0, 0, Target->get_base_zb());
+        if (!svp_pass)
+            Target->MainScaleRelease(); // no scene: don't keep a second G-buffer in VRAM in the menu
         return;
     }
 
@@ -373,6 +395,26 @@ void CRender::Render()
     {
         m_bFirstFrameAfterReset = false;
         return;
+    }
+
+    // Main render scale (r__render_scale < 1): the whole main deferred chain renders into the
+    // downsized mrs_set and phase_pp stretches it into the real backbuffer (see MainScaleBegin).
+    // Calculate() already ran at full Device dims, so LOD/visibility are unaffected. The scope
+    // pass never scales here - it owns svp_set. There are no early returns below this point.
+    bool main_scaled = false;
+    if (!svp_pass)
+    {
+        const float msc = clampr(ps_r__render_scale, 0.2f, 1.f);
+        if (msc < 1.f)
+        {
+            const u32 sw = _max(1u, (u32)iFloor(float(Device.dwWidth) * msc + 0.5f));
+            const u32 sh = _max(1u, (u32)iFloor(float(Device.dwHeight) * msc + 0.5f));
+            main_scaled = Target->MainScaleBegin(sw, sh);
+            if (main_scaled)
+                rmNormal(RCache); // viewport -> sw×sh (rmNormal above ran before the swap)
+        }
+        else
+            Target->MainScaleRelease();
     }
 
     //.	VERIFY					(g_pGameLevel && g_pGameLevel->pHUD);
@@ -522,7 +564,9 @@ void CRender::Render()
             {
                 svp_seed_view = Device.mView;
                 svp_seed_project = Device.mProject;
+                capture_svp_seed_targets();
                 record_second_vp_geometry_into(dsgraph);
+                release_svp_seed_targets();
             }
             dsgraph.render_lods(true, true);
             if (Details && !ps_r__svp_skip_details)
@@ -980,6 +1024,11 @@ void CRender::Render()
         PIX_EVENT(DEFER_LIGHT_COMBINE);
         Target->phase_combine();
     }
+
+    // phase_pp (inside phase_combine) has already presented the scaled scene into the real
+    // backbuffer and left it bound with a full-size viewport: restore members/named textures.
+    if (main_scaled)
+        Target->MainScaleEnd();
 
     // r__gpu_diag: census of what the MAIN pass actually submitted this frame. The scope pass has
     // not run yet at this point, so these numbers are the main view alone. Logged on every change
