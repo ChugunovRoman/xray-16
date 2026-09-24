@@ -2,8 +2,6 @@
 
 #include "StackTrace.h"
 
-#include "Threading/ScopeLock.hpp"
-
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -41,7 +39,38 @@ constexpr DWORD MACHINE_TYPE = IMAGE_FILE_MACHINE_IA64;
 #       error CPU architecture is not supported.
 #   endif
 
-Lock s_dbghelp_lock;
+// dbghelp is not thread-safe, and with TRACY_ENABLE the Tracy symbol worker uses it from its own
+// thread (InitCallstack -> SymInitialize, DbgHelpLoadSymbolsForModule ...) right while the game
+// thread runs PreloadStackTraceLibrary - which crashed inside dbghelp at startup. Tracy exposes
+// TRACY_DBGHELP_LOCK for exactly this: TracyClient.cpp is built with TRACY_DBGHELP_LOCK=XrDbgHelp and
+// wraps every dbghelp call in XrDbgHelpLock()/XrDbgHelpUnlock() (defined at the end of this
+// namespace), so both users share THIS lock.
+// The lock must be usable before any dynamic initializer of xrCore.dll (the Tracy profiler and its
+// symbol worker start during static init, in an unspecified order relative to this file) and
+// recursive (the crash filter re-enters BuildStackTrace on the faulting thread while the lock is
+// still held): a lazily initialized CRITICAL_SECTION, not the allocator-backed Lock class.
+INIT_ONCE s_dbghelp_lock_once = INIT_ONCE_STATIC_INIT;
+CRITICAL_SECTION s_dbghelp_cs;
+
+BOOL CALLBACK dbghelp_lock_init(PINIT_ONCE, PVOID, PVOID*)
+{
+    InitializeCriticalSection(&s_dbghelp_cs);
+    return TRUE;
+}
+
+void dbghelp_lock_enter()
+{
+    InitOnceExecuteOnce(&s_dbghelp_lock_once, dbghelp_lock_init, nullptr, nullptr);
+    EnterCriticalSection(&s_dbghelp_cs);
+}
+
+void dbghelp_lock_leave() { LeaveCriticalSection(&s_dbghelp_cs); }
+
+struct DbgHelpScopeLock
+{
+    DbgHelpScopeLock() { dbghelp_lock_enter(); }
+    ~DbgHelpScopeLock() { dbghelp_lock_leave(); }
+};
 
 HMODULE s_dbghelp{};
 bool s_dbghelp_load_attempted{};
@@ -122,21 +151,30 @@ pcstr module_file_name(pcstr fullPath)
     return name ? name + 1 : fullPath;
 }
 
+// dbghelp options are process-global and Tracy's InitCallstack REPLACES them with SYMOPT_LOAD_LINES
+// alone, so they are (re)applied both at init and right before every stack walk.
+// NO_PROMPTS and FAIL_CRITICAL_ERRORS keep dbghelp from opening dialogs while we are handling a crash.
+// Caller holds the dbghelp lock.
+void apply_sym_options()
+{
+    if (!symGetOptions || !symSetOptions)
+        return;
+    symSetOptions(symGetOptions() | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME |
+        SYMOPT_NO_PROMPTS | SYMOPT_FAIL_CRITICAL_ERRORS);
+}
+
 // Creates the symbol handler. Called from PreloadStackTraceLibrary at startup so that neither the
 // module enumeration it performs nor the loader lock it takes land on the crash path.
-// Caller holds s_dbghelp_lock.
+// Caller holds the dbghelp lock.
 void ensure_sym_initialized()
 {
     if (s_sym_initialized || !dbghelp_can_walk())
         return;
 
-    const u32 dwOptions = symGetOptions();
-    // NO_PROMPTS and FAIL_CRITICAL_ERRORS keep dbghelp from opening dialogs while we are handling a
-    // crash. The search path is the game folder, never nullptr: that would honour _NT_SYMBOL_PATH,
-    // and a symbol server in it would send the crash handler to the network for minutes.
-    symSetOptions(dwOptions | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME |
-        SYMOPT_NO_PROMPTS | SYMOPT_FAIL_CRITICAL_ERRORS);
+    apply_sym_options();
 
+    // The search path is the game folder, never nullptr: that would honour _NT_SYMBOL_PATH,
+    // and a symbol server in it would send the crash handler to the network for minutes.
     string_path searchPath{};
     if (GetModuleFileNameA(nullptr, searchPath, _countof(searchPath)))
     {
@@ -150,18 +188,40 @@ void ensure_sym_initialized()
     s_sym_initialized = symInitialize(GetCurrentProcess(), searchPath[0] ? searchPath : nullptr, TRUE) != FALSE;
 
     if (!s_sym_initialized)
-        Msg("! [StackTraceBuilder] SymInitialize failed with error: 0x%x", GetLastError());
+    {
+        const DWORD error = GetLastError();
+        // SymInitialize is once-per-process: ERROR_INVALID_PARAMETER means somebody else (the Tracy
+        // symbol worker) already created the handler. It is fully usable for us as well - it was
+        // created with invadeProcess and the module list is refreshed before every walk.
+        if (error == ERROR_INVALID_PARAMETER)
+        {
+            s_sym_initialized = true;
+            Msg("~ [StackTraceBuilder] symbol handler already initialized in this process (Tracy?), reusing it");
+        }
+        else
+            Msg("! [StackTraceBuilder] SymInitialize failed with error: 0x%x", error);
+    }
 }
 
 // Modules loaded after SymInitialize (the render DLLs, GPU driver, overlays) are unknown to dbghelp
 // until the list is refreshed, and on x64 a frame in an unknown module also breaks the unwind.
-// Caller holds s_dbghelp_lock.
+// Caller holds the dbghelp lock.
 void refresh_sym_modules()
 {
     if (s_sym_initialized && symRefreshModuleList)
         symRefreshModuleList(GetCurrentProcess());
 }
 } // namespace
+
+// Tracy hooks (TRACY_DBGHELP_LOCK=XrDbgHelp, see xrCore.vcxproj / CMakeLists.txt for TracyClient.cpp):
+// Tracy declares them as plain extern "C" functions and calls them around every dbghelp call from
+// its symbol worker. Same DLL, so no export is needed. Harmless without Tracy.
+extern "C"
+{
+    void XrDbgHelpInit() { InitOnceExecuteOnce(&s_dbghelp_lock_once, dbghelp_lock_init, nullptr, nullptr); }
+    void XrDbgHelpLock() { dbghelp_lock_enter(); }
+    void XrDbgHelpUnlock() { dbghelp_lock_leave(); }
+}
 
 struct StackTraceBuilder
 {
@@ -182,6 +242,7 @@ StackTraceBuilder::StackTraceBuilder()
     if (!s_sym_initialized)
         return;
 
+    apply_sym_options(); // Tracy may have replaced them since init
     refresh_sym_modules();
     IsInitialized = true;
 }
@@ -259,7 +320,7 @@ bool StackTraceBuilder::GetNextStackFrameString(LPSTACKFRAME stackFrame, PCONTEX
 
 void PreloadStackTraceLibrary()
 {
-    ScopeLock lock(&s_dbghelp_lock);
+    DbgHelpScopeLock lock;
     init_dbghelp();
     ensure_sym_initialized();
 }
@@ -347,14 +408,14 @@ static void collect_game_modules_impl(xr_vector<xr_string>& out, const void* ext
 // locked for every other thread. A function using __finally must hold no unwindable objects itself.
 void CollectGameModules(xr_vector<xr_string>& out, const void* extraAddress)
 {
-    s_dbghelp_lock.Enter(); // guards the static module buffer inside
+    dbghelp_lock_enter(); // guards the static module buffer inside
     __try
     {
         collect_game_modules_impl(out, extraAddress);
     }
     __finally
     {
-        s_dbghelp_lock.Leave();
+        dbghelp_lock_leave();
     }
 }
 
@@ -409,14 +470,14 @@ static void build_stack_trace_impl(PCONTEXT threadCtx, u16 maxFramesCount, xr_ve
 // See CollectGameModules: the lock must survive an SEH exception thrown out of dbghelp.
 static void build_stack_trace_locked(PCONTEXT threadCtx, u16 maxFramesCount, xr_vector<xr_string>* traceResult)
 {
-    s_dbghelp_lock.Enter();
+    dbghelp_lock_enter();
     __try
     {
         build_stack_trace_impl(threadCtx, maxFramesCount, *traceResult);
     }
     __finally
     {
-        s_dbghelp_lock.Leave();
+        dbghelp_lock_leave();
     }
 }
 

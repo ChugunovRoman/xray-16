@@ -49,6 +49,8 @@ call .GitInfo.cmd</Command>
   <ItemGroup>
     <ClCompile Include="..\..\Externals\tracy\public\TracyClient.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <!-- dbghelp is not thread-safe: Tracy's symbol worker shares the engine's dbghelp lock (XrDbgHelpLock/Unlock, Debug/StackTrace.cpp) -->
+      <PreprocessorDefinitions>TRACY_DBGHELP_LOCK=XrDbgHelp;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="Animation\Bone.cpp" />
     <ClCompile Include="Animation\BoneEditor.cpp" />

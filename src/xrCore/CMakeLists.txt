@@ -506,7 +506,11 @@ endif()
 if (XRAY_ENABLE_TRACY)
     set(_xray_tracy_client "${CMAKE_SOURCE_DIR}/Externals/tracy/public/TracyClient.cpp")
     target_sources(xrCore PRIVATE "${_xray_tracy_client}")
-    set_source_files_properties("${_xray_tracy_client}" PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+    # dbghelp is not thread-safe: Tracy's symbol worker shares the engine's dbghelp lock
+    # (XrDbgHelpLock/Unlock in Debug/StackTrace.cpp).
+    set_source_files_properties("${_xray_tracy_client}" PROPERTIES
+        SKIP_PRECOMPILE_HEADERS ON
+        COMPILE_DEFINITIONS "TRACY_DBGHELP_LOCK=XrDbgHelp")
 endif()
 
 target_compile_definitions(xrCore
