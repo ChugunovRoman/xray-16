@@ -260,11 +260,19 @@ public:
     void SetNeedDynamicInvIconUpgrade(bool v) { m_needDynamicInvIconUpgrade = v; }
     bool NeedDynamicInvIconUpgrade() const { return m_needDynamicInvIconUpgrade; }
     IC bool InvIconUsesSharedSectionRt() const { return m_inv_icon_shared_section_rt; }
+    // Bitmask over EWeaponInvIconPreset: which presets anything actually asked to be rendered.
+    // The technician preset is only ever shown by CUIInventoryUpgradeWnd, for the single weapon the
+    // player put there, yet it used to be rendered and kept for EVERY spawned weapon - half of the
+    // icon memory for nothing. Presets are now rendered on demand and this mask says which ones.
+    IC u8 InvIconRequestedPresets() const { return m_inv_icon_requested_presets; }
+    IC bool InvIconPresetRequested(EWeaponInvIconPreset p) const
+    {
+        return (m_inv_icon_requested_presets & u8(1u << u32(p))) != 0;
+    }
+    IC void RequestInvIconPreset(EWeaponInvIconPreset p) { m_inv_icon_requested_presets |= u8(1u << u32(p)); }
     bool DynamicInvIconPresetReady(EWeaponInvIconPreset p) const;
     void SetDynamicInvIconPresetReady(EWeaponInvIconPreset p, bool v);
     void InvalidateDynamicInventoryIcons();
-    // Сбросить готовность иконок и переставить в очередь, не отключая общий RT по секции (для net_Spawn после аддонов).
-    void QueueDynamicInvIconRefresh();
     IC u32 DynamicInvIconRevision() const { return m_dynamic_inv_icon_revision; }
     void EnsureInvIconQueueRetries();
     bool ConsumeInvIconQueueRetryForRequeue();
@@ -357,6 +365,7 @@ protected:
     bool m_needDynamicInvIconUpgrade{};
     bool m_dynamicInvIconPresetReady[eWpnInvIconPreset_COUNT]{};
     bool m_inv_icon_shared_section_rt{true};
+    u8 m_inv_icon_requested_presets{};
     u32 m_inv_icon_rt_epoch{};
     u8 m_inv_icon_q_retries{};
     u32 m_dynamic_inv_icon_revision{};

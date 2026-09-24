@@ -216,6 +216,12 @@ void CUIInventoryCellItem::UpdateIcon()
         return;
 
     const bool dyn = weapon_inv_icon::IsEnabledForItem(itm);
+    // Icons are rendered on demand: this cell is about to draw the item, so ask for its preset if it
+    // is missing. ScheduleItem may satisfy it straight away from the shared per-section target; if it
+    // has to go through the GPU pass, the static atlas is drawn until Update() sees it become ready.
+    if (dyn && !itm->DynamicInvIconPresetReady(m_inv_icon_preset))
+        weapon_inv_icon::ScheduleItem(itm, m_inv_icon_preset);
+
     const bool ready = dyn && itm->DynamicInvIconPresetReady(m_inv_icon_preset);
     m_inv_ui_showing_rt = ready;
     m_inv_seen_rev = dyn ? itm->DynamicInvIconRevision() : 0;

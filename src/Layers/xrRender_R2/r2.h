@@ -723,6 +723,10 @@ public:
         IRenderable* subject = nullptr) override;
     void WeaponIcon_ReleaseUserIconRt(pcstr texture_name) override;
     void WeaponIcon_ReleaseAllUserIconRts() override;
+    void WeaponIcon_SetUserIconRtBudget(u64 bytes) override;
+    // Diagnostics: number of persisted per-instance icon render targets currently alive.
+    u32 WeaponIcon_PersistedCount() const override;
+    void WeaponIcon_LogRtStats(bool detailed) override;
     bool WeaponIcon_SavePersistedUserRtToDdsDxt5(pcstr user_texture_name, pcstr fs_root, pcstr fname) override;
 
     // Save an arbitrary user RT to a DXT5 DDS file under the given FS root.

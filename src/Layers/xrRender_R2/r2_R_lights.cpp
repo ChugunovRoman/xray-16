@@ -150,6 +150,35 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
         return;
     }
 
+    // r__gpu_diag: scan the package about to be accumulated for non-finite parameters. The
+    // setters in light.cpp catch values arriving through the public API; this catches anything
+    // that reached the render thread by another route (direct member writes, stale pointers).
+    if (ps_r__gpu_diag)
+    {
+        static u32 s_reported = 0;
+        const auto scan = [&](const xr_vector<light*>& v, const char* which)
+        {
+            for (const light* L : v)
+            {
+                if (!L)
+                    continue;
+                if (_valid(L->position) && _valid(L->range) && _valid(L->direction) && _valid(L->color.r) &&
+                    _valid(L->color.g) && _valid(L->color.b))
+                    continue;
+                if (s_reported++ >= 24)
+                    return;
+                Msg("! [light-nan] frame %u: non-finite light in package '%s' | type=%u shadow=%u hud=%u | "
+                    "pos=%g,%g,%g dir=%g,%g,%g range=%g color=%g,%g,%g",
+                    Device.dwFrame, which, u32(L->flags.type), u32(L->flags.bShadow), u32(L->flags.bHudMode),
+                    L->position.x, L->position.y, L->position.z, L->direction.x, L->direction.y, L->direction.z,
+                    L->range, L->color.r, L->color.g, L->color.b);
+            }
+        };
+        scan(LP.v_point, "point");
+        scan(LP.v_spot, "spot");
+        scan(LP.v_shadowed, "shadowed");
+    }
+
     //////////////////////////////////////////////////////////////////////////
     // Refactor order based on ability to pack shadow-maps
     // 1. calculate area + sort in descending order

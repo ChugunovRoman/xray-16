@@ -389,14 +389,13 @@ bool CInventoryItem::net_Spawn(CSE_Abstract* DC)
                 m_dynamicInvIconPresetReady[ii] = false;
             m_inv_icon_rt_epoch = 0;
             m_inv_icon_shared_section_rt = true;
+            m_inv_icon_requested_presets = 0;
             m_needDynamicInvIconUpgrade = false;
             m_inv_icon_q_retries = 0;
             m_dynamic_inv_icon_revision++;
-
-            // Non-weapon addons (scopes, silencers, etc.) don't go through CWeapon::net_Spawn
-            // where InvalidateDynamicInventoryIcons is called for weapons. Schedule them here.
-            if (!cast_weapon())
-                QueueDynamicInvIconRefresh();
+            // Nothing is queued at spawn any more: an icon is rendered when something actually draws
+            // the item (inventory cell, technician portrait). Spawning queued an icon for every weapon
+            // in the world, including those carried by NPCs and lying on corpses.
         }
     }
 
@@ -1288,20 +1287,9 @@ void CInventoryItem::InvalidateDynamicInventoryIcons()
     SetNeedDynamicInvIconUpgrade(true);
     m_dynamic_inv_icon_revision++;
     m_inv_icon_q_retries = 12;
-    // GPU pass: hot reload; CWeapon::reload() или конец net_Spawn после m_defer_inv_icon_invalidate_after_reload.
-    if (GEnv.Render && !GEnv.isDedicatedServer && weapon_inv_icon::IsEnabledForItem(this))
-        weapon_inv_icon::ScheduleItem(this);
-}
-
-void CInventoryItem::QueueDynamicInvIconRefresh()
-{
-    for (u32 i = 0; i < eWpnInvIconPreset_COUNT; ++i)
-        m_dynamicInvIconPresetReady[i] = false;
-    SetNeedDynamicInvIconUpgrade(true);
-    m_dynamic_inv_icon_revision++;
-    m_inv_icon_q_retries = 12;
-    if (GEnv.Render && !GEnv.isDedicatedServer && weapon_inv_icon::IsEnabledForItem(this))
-        weapon_inv_icon::ScheduleItem(this);
+    // Only the flags are cleared here. The bumped revision makes the inventory cell and the technician
+    // portrait re-evaluate on their next Update(); whichever of them is actually showing this item asks
+    // for the icon. Queueing from here rendered icons nobody was looking at.
 }
 
 void CInventoryItem::EnsureInvIconQueueRetries()

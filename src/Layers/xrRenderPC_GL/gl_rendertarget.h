@@ -354,6 +354,33 @@ public:
     void SVPPipelineEnd();
     bool SvpPipelineSwapped() const { return svp_swapped; }
     void svp_publish_surfaces(bool use_twins);
+    // Diagnostics: every G-buffer CRT owns a render target view (pRT, always its own surface) AND
+    // a named texture ($user$position etc.) that svp_publish_surfaces repoints at the scope twin.
+    // If a restore is ever missed the engine draws into one surface and samples another - the
+    // world and the menu go black while UI that rebinds the backbuffer itself keeps drawing.
+    // Returns the number of named textures not pointing at their own surface; logs each when dump.
+    u32 svp_dbg_check_named(bool dump);
+    // Diagnostics: the two once-per-frame globals the second viewport pass shares with the main
+    // pass. dwAccumulatorClearMark gates the accumulator clear + reset_light_marker, and
+    // dwLightMarkerID is the stencil ref every light is accumulated under.
+    u32 dbg_accum_clear_mark() const { return dwAccumulatorClearMark; }
+    u32 dbg_marker_overflows() const { return dbg_light_marker_overflows; }
+    u32 dbg_light_marker_overflows{};
+    // Full CRenderTarget state dump. vid_restart (which deletes and rebuilds this object) cures
+    // the black-screen bug, so whatever is wrong lives in here: the per-context RT dimensions that
+    // feed rmNormal's viewport, the surfaces and views of every intermediate target, the
+    // once-per-frame markers, or the scope twins.
+    void dbg_dump_state();
+    // Diagnostics: CPU readback of the 1x1 tonemap scale (rt_LUM_pool[idx]) - see the R4 header.
+    // Not implemented on GL: always returns false.
+    bool dbg_read_lum(u32 idx, float& value);
+    // Manual recovery probe (r__lum_reset 1): re-clear every pool entry to the startup value.
+    void dbg_reset_lum();
+    // Render-target content probe - see the R4 header. Not implemented on GL: reports sampled=0.
+    void dbg_probe_rt(const ref_rt& rt, u32& nonzero, u32& sampled);
+    void dbg_probe_dump(const char* label, const ref_rt& rt);
+    void dbg_probe_targets(const char* where);
+    int dbg_final_peak();
     // Frame driver stage 1a: lazily create/release the dedicated SVP shadow-map atlas.
     // Ensure returns false when creation fails -> caller keeps scope lighting on the inline path.
     bool SVPSmapAtlasEnsure();

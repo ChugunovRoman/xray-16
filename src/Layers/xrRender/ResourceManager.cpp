@@ -462,6 +462,27 @@ void CResourceManager::_DumpMemoryUsage()
     }
 }
 
+void CResourceManager::dbg_texture_stats(u32& total, u32& user_made, u32& inv_icon_rts) const
+{
+    total = u32(m_textures.size());
+    user_made = 0;
+    inv_icon_rts = 0;
+    static constexpr char k_user[] = "$user$";
+    static constexpr char k_icon[] = "$user$itm_inv_";
+    for (const auto& pair : m_textures)
+    {
+        const char* name = pair.first;
+        if (!name)
+            continue;
+        if (0 == strncmp(name, k_user, sizeof(k_user) - 1))
+        {
+            ++user_made;
+            if (0 == strncmp(name, k_icon, sizeof(k_icon) - 1))
+                ++inv_icon_rts;
+        }
+    }
+}
+
 void CResourceManager::Evict()
 {
     // TODO: DX11: check if we really need this method

@@ -715,6 +715,9 @@ CRenderTarget::~CRenderTarget()
 {
 #if defined(USE_DX11)
     _RELEASE(t_ss_async);
+    _RELEASE(dbg_lum_staging);
+    for (ID3DTexture2D*& staging : dbg_probe_staging)
+        _RELEASE(staging);
 #elif defined(USE_OGL)
     // Textures
     t_material->surface_set(GL_TEXTURE_3D, 0);
@@ -793,7 +796,13 @@ void CRenderTarget::increment_light_marker(CBackend& cmd_list)
     const u32 iMaxMarkerValue = RImplementation.o.msaa ? 127 : 255;
 
     if (dwLightMarkerID > iMaxMarkerValue)
+    {
+        // Mid-frame stencil wipe: the marker ran out of stencil values. The second viewport pass
+        // shares this counter with the main pass (phase_accumulator only resets it on the FIRST
+        // call of a frame), so a scope frame consumes it twice as fast. Counted for diagnostics.
+        ++dbg_light_marker_overflows;
         reset_light_marker(cmd_list, true);
+    }
 }
 
 bool CRenderTarget::need_to_render_sunshafts()
@@ -942,6 +951,11 @@ bool CRenderTarget::SVPTargetsEnsure(u32 w, u32 h)
 void CRenderTarget::SVPTargetsRelease()
 {
     VERIFY(!svp_swapped);
+    // VERIFY is compiled out in release. Releasing the twins while the swap is active leaves the
+    // named textures pointing at destroyed surfaces: SVPPipelineEnd skips every pair whose twin is
+    // gone, so the restore never happens and the scene stays black. Say so loudly.
+    if (svp_swapped)
+        Msg("! [svp-swap] SVPTargetsRelease() called while the target swap is ACTIVE - named surfaces will not be restored");
     svp_Base.clear();
     svp_Base_Depth.destroy();
     svp_MSAADepth.destroy();
@@ -1095,6 +1109,449 @@ void CRenderTarget::svp_publish_surfaces(bool use_twins)
             continue;
         publish(*pair.named, use_twins ? twin : *pair.named);
     }
+}
+
+void CRenderTarget::dbg_dump_state()
+{
+    Msg("~ [rt-state] frame %u, swap active=%d, accum_clear_mark=%u, light_marker=%u, marker_overflows=%u",
+        Device.dwFrame, svp_swapped ? 1 : 0, dwAccumulatorClearMark, dwLightMarkerID, dbg_light_marker_overflows);
+
+    // These feed rmNormal(): a zero here means every pass that relies on it rasterizes nothing.
+    for (int id = 0; id < R__NUM_CONTEXTS; ++id)
+    {
+        Msg("~   dims[ctx %d] = %ux%u%s", id, dwWidth[id], dwHeight[id],
+            (dwWidth[id] == 0 || dwHeight[id] == 0) ? "   <== ZERO" : "");
+    }
+
+    const auto row = [](const char* label, const ref_rt& rt)
+    {
+        if (!rt)
+        {
+            Msg("~   %-16s <null ref>", label);
+            return;
+        }
+#if defined(USE_DX11)
+        Msg("~   %-16s %ux%u valid=%d surface=%p rtv=%p slices=%u", label, rt->dwWidth, rt->dwHeight,
+            rt->valid() ? 1 : 0, (void*)rt->pSurface, (void*)rt->pRT, rt->n_slices);
+#else
+        Msg("~   %-16s %ux%u valid=%d", label, rt->dwWidth, rt->dwHeight, rt->valid() ? 1 : 0);
+#endif
+    };
+
+    row("rt_Base_Depth", rt_Base_Depth);
+    row("rt_MSAADepth", rt_MSAADepth);
+    row("rt_Position", rt_Position);
+    row("rt_Normal", rt_Normal);
+    row("rt_Color", rt_Color);
+    row("rt_Accumulator", rt_Accumulator);
+    row("rt_Accum_temp", rt_Accumulator_temp);
+    row("rt_Generic_0", rt_Generic_0);
+    row("rt_Generic_1", rt_Generic_1);
+    row("rt_Generic_0_r", rt_Generic_0_r);
+    row("rt_Generic_1_r", rt_Generic_1_r);
+    row("rt_Generic", rt_Generic);
+    row("rt_Generic_2", rt_Generic_2);
+    row("rt_Bloom_1", rt_Bloom_1);
+    row("rt_LUM_64", rt_LUM_64);
+    row("rt_LUM_8", rt_LUM_8);
+    row("rt_secondVP", rt_secondVP);
+    row("rt_smap_depth", rt_smap_depth);
+    for (u32 i = 0; i < rt_Base.size(); ++i)
+    {
+        string32 name;
+        xr_sprintf(name, "rt_Base[%u]", i);
+        row(name, rt_Base[i]);
+    }
+
+    Msg("~   svp twins: %ux%u", svp_w, svp_h);
+    row("svp_Position", svp_Position);
+    row("svp_Generic_0", svp_Generic_0);
+    row("svp_Base_Depth", svp_Base_Depth);
+    row("svp_smap_depth", svp_rt_smap_depth);
+}
+
+bool CRenderTarget::dbg_read_lum(u32 idx, float& value)
+{
+    value = 0.f;
+#if defined(USE_DX11)
+    if (idx >= HW.Caps.iGPUNum * 2 || !rt_LUM_pool[idx] || !rt_LUM_pool[idx]->pSurface)
+        return false;
+    ID3DTexture2D* src = rt_LUM_pool[idx]->pSurface;
+    if (!dbg_lum_staging)
+    {
+        // Same format as the pool texture (CopyResource demands it); we only ever read 4 bytes.
+        D3D11_TEXTURE2D_DESC desc{};
+        src->GetDesc(&desc);
+        desc.Width = 1;
+        desc.Height = 1;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.SampleDesc.Count = 1;
+        desc.SampleDesc.Quality = 0;
+        desc.Usage = D3D11_USAGE_STAGING;
+        desc.BindFlags = 0;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        desc.MiscFlags = 0;
+        if (FAILED(HW.pDevice->CreateTexture2D(&desc, nullptr, &dbg_lum_staging)) || !dbg_lum_staging)
+        {
+            dbg_lum_staging = nullptr;
+            return false;
+        }
+    }
+    auto ctx = HW.get_context(CHW::IMM_CTX_ID);
+    ctx->CopyResource(dbg_lum_staging, src);
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(ctx->Map(dbg_lum_staging, 0, D3D11_MAP_READ, 0, &mapped)) || !mapped.pData)
+        return false;
+    value = *static_cast<const float*>(mapped.pData);
+    ctx->Unmap(dbg_lum_staging, 0);
+    return true;
+#else
+    (void)idx;
+    return false;
+#endif
+}
+
+void CRenderTarget::dbg_probe_rt(const ref_rt& rt, u32& nonzero, u32& sampled)
+{
+    nonzero = 0;
+    sampled = 0;
+#if defined(USE_DX11)
+    if (!rt || !rt->pSurface)
+        return;
+
+    D3D11_TEXTURE2D_DESC src_desc{};
+    rt->pSurface->GetDesc(&src_desc);
+    if (src_desc.SampleDesc.Count != 1 || src_desc.Width < 4 || src_desc.Height < 4)
+        return; // multisampled surfaces need a Resolve first - not worth it for a probe
+
+    // One 1x1 staging texture per source format (CopySubresourceRegion requires a match).
+    ID3DTexture2D* staging = nullptr;
+    int slot = -1;
+    for (int i = 0; i < dbg_probe_staging_count; ++i)
+    {
+        if (dbg_probe_staging[i] && dbg_probe_fmt[i] == src_desc.Format)
+        {
+            staging = dbg_probe_staging[i];
+            break;
+        }
+        if (!dbg_probe_staging[i] && slot < 0)
+            slot = i;
+    }
+    if (!staging)
+    {
+        if (slot < 0)
+            return;
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = 1;
+        desc.Height = 1;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = src_desc.Format;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_STAGING;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        if (FAILED(HW.pDevice->CreateTexture2D(&desc, nullptr, &staging)) || !staging)
+            return;
+        dbg_probe_staging[slot] = staging;
+        dbg_probe_fmt[slot] = src_desc.Format;
+    }
+
+    // Spread the samples: a single centre pixel can be legitimately black in any scene.
+    const u32 xs[5] = {src_desc.Width / 2, src_desc.Width / 4, (src_desc.Width * 3) / 4,
+        src_desc.Width / 4, (src_desc.Width * 3) / 4};
+    const u32 ys[5] = {src_desc.Height / 2, src_desc.Height / 4, src_desc.Height / 4,
+        (src_desc.Height * 3) / 4, (src_desc.Height * 3) / 4};
+
+    auto ctx = HW.get_context(CHW::IMM_CTX_ID);
+    for (int i = 0; i < 5; ++i)
+    {
+        D3D11_BOX box{};
+        box.left = xs[i];
+        box.right = xs[i] + 1;
+        box.top = ys[i];
+        box.bottom = ys[i] + 1;
+        box.front = 0;
+        box.back = 1;
+        ctx->CopySubresourceRegion(staging, 0, 0, 0, 0, rt->pSurface, 0, &box);
+
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &mapped)) || !mapped.pData)
+            continue;
+        // Format agnostic: any non-zero byte in the pixel counts as "something was written".
+        // 16 bytes covers every format used here (up to RGBA32F).
+        const u8* bytes = static_cast<const u8*>(mapped.pData);
+        bool any = false;
+        for (int b = 0; b < 16; ++b)
+            any |= (bytes[b] != 0);
+        ctx->Unmap(staging, 0);
+
+        ++sampled;
+        if (any)
+            ++nonzero;
+    }
+#else
+    (void)rt;
+#endif
+}
+
+void CRenderTarget::dbg_probe_dump(const char* label, const ref_rt& rt)
+{
+#if defined(USE_DX11)
+    if (!rt || !rt->pSurface)
+    {
+        Msg("~   %-14s <no surface>", label);
+        return;
+    }
+
+    D3D11_TEXTURE2D_DESC src_desc{};
+    rt->pSurface->GetDesc(&src_desc);
+    if (src_desc.SampleDesc.Count != 1 || src_desc.Width < 4 || src_desc.Height < 4)
+    {
+        Msg("~   %-14s %ux%u fmt=%u <not sampleable: %u samples>", label, src_desc.Width, src_desc.Height,
+            u32(src_desc.Format), src_desc.SampleDesc.Count);
+        return;
+    }
+
+    // Reuse the per-format staging texture created by dbg_probe_rt.
+    ID3DTexture2D* staging = nullptr;
+    int slot = -1;
+    for (int i = 0; i < dbg_probe_staging_count; ++i)
+    {
+        if (dbg_probe_staging[i] && dbg_probe_fmt[i] == src_desc.Format)
+        {
+            staging = dbg_probe_staging[i];
+            break;
+        }
+        if (!dbg_probe_staging[i] && slot < 0)
+            slot = i;
+    }
+    if (!staging)
+    {
+        if (slot < 0)
+        {
+            Msg("~   %-14s <no staging slot left>", label);
+            return;
+        }
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = 1;
+        desc.Height = 1;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = src_desc.Format;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_STAGING;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        if (FAILED(HW.pDevice->CreateTexture2D(&desc, nullptr, &staging)) || !staging)
+        {
+            Msg("~   %-14s <staging creation failed for fmt=%u>", label, u32(src_desc.Format));
+            return;
+        }
+        dbg_probe_staging[slot] = staging;
+        dbg_probe_fmt[slot] = src_desc.Format;
+    }
+
+    const u32 xs[3] = {src_desc.Width / 2, src_desc.Width / 4, (src_desc.Width * 3) / 4};
+    const u32 ys[3] = {src_desc.Height / 2, src_desc.Height / 3, (src_desc.Height * 2) / 3};
+
+    auto ctx = HW.get_context(CHW::IMM_CTX_ID);
+    string512 line;
+    xr_sprintf(line, "~   %-14s %ux%u fmt=%u", label, src_desc.Width, src_desc.Height, u32(src_desc.Format));
+
+    for (int i = 0; i < 3; ++i)
+    {
+        D3D11_BOX box{};
+        box.left = xs[i];
+        box.right = xs[i] + 1;
+        box.top = ys[i];
+        box.bottom = ys[i] + 1;
+        box.back = 1;
+        ctx->CopySubresourceRegion(staging, 0, 0, 0, 0, rt->pSurface, 0, &box);
+
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &mapped)) || !mapped.pData)
+        {
+            xr_strcat(line, " | <map failed>");
+            continue;
+        }
+        const u8* b = static_cast<const u8*>(mapped.pData);
+        string64 hex;
+        xr_sprintf(hex, " | %u,%u=%02x%02x%02x%02x%02x%02x%02x%02x", xs[i], ys[i],
+            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
+        ctx->Unmap(staging, 0);
+        xr_strcat(line, hex);
+    }
+    Msg("%s", line);
+#else
+    Msg("~   %-14s <probe unavailable on this renderer>", label);
+    (void)rt;
+#endif
+}
+
+int CRenderTarget::dbg_final_peak()
+{
+#if defined(USE_DX11)
+    const u32 index = (HW.CurrentBackBuffer < rt_Base.size()) ? HW.CurrentBackBuffer : 0;
+    if (index >= rt_Base.size() || !rt_Base[index] || !rt_Base[index]->pSurface)
+        return -1;
+
+    ID3DTexture2D* src = rt_Base[index]->pSurface;
+    D3D11_TEXTURE2D_DESC src_desc{};
+    src->GetDesc(&src_desc);
+    if (src_desc.SampleDesc.Count != 1 || src_desc.Width < 8 || src_desc.Height < 8)
+        return -1;
+
+    ID3DTexture2D* staging = nullptr;
+    int slot = -1;
+    for (int i = 0; i < dbg_probe_staging_count; ++i)
+    {
+        if (dbg_probe_staging[i] && dbg_probe_fmt[i] == src_desc.Format)
+        {
+            staging = dbg_probe_staging[i];
+            break;
+        }
+        if (!dbg_probe_staging[i] && slot < 0)
+            slot = i;
+    }
+    if (!staging)
+    {
+        if (slot < 0)
+            return -1;
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = 1;
+        desc.Height = 1;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = src_desc.Format;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_STAGING;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        if (FAILED(HW.pDevice->CreateTexture2D(&desc, nullptr, &staging)) || !staging)
+            return -1;
+        dbg_probe_staging[slot] = staging;
+        dbg_probe_fmt[slot] = src_desc.Format;
+    }
+
+    // Nine points spread over the frame, skipping the screen edges where the HUD lives: the 2D UI
+    // keeps drawing during the bug and would mask the very darkness we are looking for.
+    static const float fx[9] = {0.5f, 0.3f, 0.7f, 0.5f, 0.35f, 0.65f, 0.5f, 0.4f, 0.6f};
+    static const float fy[9] = {0.5f, 0.35f, 0.35f, 0.3f, 0.5f, 0.5f, 0.6f, 0.65f, 0.65f};
+
+    auto ctx = HW.get_context(CHW::IMM_CTX_ID);
+    int peak = 0;
+    for (int i = 0; i < 9; ++i)
+    {
+        D3D11_BOX box{};
+        box.left = u32(src_desc.Width * fx[i]);
+        box.right = box.left + 1;
+        box.top = u32(src_desc.Height * fy[i]);
+        box.bottom = box.top + 1;
+        box.back = 1;
+        ctx->CopySubresourceRegion(staging, 0, 0, 0, 0, src, 0, &box);
+
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &mapped)) || !mapped.pData)
+            continue;
+        const u8* b = static_cast<const u8*>(mapped.pData);
+        // The swapchain buffer is an 8- or 10-bit UNORM format, so the raw bytes track brightness
+        // closely enough to tell "there is a picture here" from "there is not".
+        for (int k = 0; k < 4; ++k)
+        {
+            if (int(b[k]) > peak)
+                peak = int(b[k]);
+        }
+        ctx->Unmap(staging, 0);
+    }
+    return peak;
+#else
+    return -1;
+#endif
+}
+
+void CRenderTarget::dbg_probe_targets(const char* where)
+{
+#if defined(USE_DX11)
+    // Raw pixel values along the whole chain. Read them in order: the first target whose pixels
+    // stop carrying a picture is the stage that produced the black screen.
+    //   position/color  - the G-buffer, written by the geometry pass;
+    //   accumulator     - deferred lighting;
+    //   generic/generic_0 - the LDR image phase_combine composes before postprocess;
+    //   base            - the swapchain buffer that is actually presented.
+    Msg("~ [probe] %s frame %u, backbuffer index %u of %u", where, Device.dwFrame, HW.CurrentBackBuffer,
+        u32(rt_Base.size()));
+    dbg_probe_dump("position", rt_Position);
+    dbg_probe_dump("color", rt_Color);
+    dbg_probe_dump("accumulator", rt_Accumulator);
+    dbg_probe_dump("generic", rt_Generic);
+    dbg_probe_dump("generic_0", rt_Generic_0);
+    for (u32 i = 0; i < rt_Base.size(); ++i)
+    {
+        string32 name;
+        xr_sprintf(name, "base[%u]%s", i, (i == HW.CurrentBackBuffer) ? "*" : "");
+        dbg_probe_dump(name, rt_Base[i]);
+    }
+#else
+    (void)where;
+#endif
+}
+
+void CRenderTarget::dbg_reset_lum()
+{
+    // Mirrors the startup clear in CRenderTarget::create (0x7f -> ~0.498 for R32F).
+    for (u32 it = 0; it < HW.Caps.iGPUNum * 2; it++)
+        if (rt_LUM_pool[it])
+            RCache.ClearRT(rt_LUM_pool[it], 0x7f7f7f7f);
+}
+
+u32 CRenderTarget::svp_dbg_check_named(bool dump)
+{
+#if defined(USE_DX11)
+    struct Entry
+    {
+        const ref_rt* named;
+        const ref_rt* twin;
+        const char* label;
+    };
+    const Entry entries[] = {
+        { &rt_Position, &svp_Position, "position" },
+        { &rt_Normal, &svp_Normal, "normal" },
+        { &rt_Color, &svp_Color, "color" },
+        { &rt_Accumulator, &svp_Accumulator, "accum" },
+        { &rt_Accumulator_temp, &svp_Accumulator_temp, "accum_temp" },
+        { &rt_Generic_0, &svp_Generic_0, "generic_0" },
+        { &rt_Generic_1, &svp_Generic_1, "generic_1" },
+        { &rt_Generic_0_r, &svp_Generic_0_r, "generic_0_r" },
+        { &rt_Generic_1_r, &svp_Generic_1_r, "generic_1_r" },
+        { &rt_Generic, &svp_Generic, "generic" },
+        { &rt_Generic_2, &svp_Generic_2, "generic_2" },
+    };
+
+    u32 bad = 0;
+    for (const auto& e : entries)
+    {
+        const ref_rt& named = *e.named;
+        if (!named || !named->pTexture)
+            continue;
+        ID3DBaseTexture* cur = named->pTexture->surface_get(); // AddRef'd
+        const auto own = static_cast<ID3DBaseTexture*>(named->pSurface);
+        const ref_rt& twin = *e.twin;
+        const auto twin_surf = (twin && twin->pSurface) ? static_cast<ID3DBaseTexture*>(twin->pSurface) : nullptr;
+        const bool mismatch = (cur != own);
+        if (mismatch)
+            ++bad;
+        if (dump || mismatch)
+        {
+            Msg("%s [svp-surf] %-12s named=%p own=%p twin=%p%s", mismatch ? "!" : "~", e.label,
+                (void*)cur, (void*)own, (void*)twin_surf,
+                !mismatch ? "" : (cur == twin_surf ? "  <== STILL ON THE TWIN" : "  <== FOREIGN SURFACE"));
+        }
+        _RELEASE(cur);
+    }
+    return bad;
+#else
+    (void)dump;
+    return 0;
+#endif
 }
 
 void CRenderTarget::SVPPipelineBegin()

@@ -48,8 +48,13 @@ bool g_debug_cache_trace = false;
 bool g_debug_break_schedule = false;
 bool g_debug_break_process = false;
 u32 g_icons_per_frame = 2;
+// Ceiling for the renderer's icon RT store, in megabytes; 0 = unlimited. A safety net: with icons
+// rendered on demand the store holds only what the player actually looked at.
+u32 g_rt_budget_mb = 192;
+// Textures the renderer dropped over that budget, drained once per pass (see ProcessRenderPass).
+xr_vector<shared_str> g_evicted_keys;
 // While actor inventory/trade menu is open, cap GPU icon passes per frame (reduces FPS hitches).
-u32 g_icons_per_frame_inventory_open = 1;
+u32 g_icons_per_frame_inventory_open = 8;
 // Global framing (after correct RT aspect, raw preset cam_dist/fov often leaves the model tiny).
 float g_cam_dist_mul{1.f};
 float g_fov_deg_mul{1.f};
@@ -80,11 +85,6 @@ SPresetAngles g_presets[eWpnInvIconPreset_COUNT];
 
 xr_vector<CInventoryItem*> g_pending;
 
-static constexpr u8 AllInvIconPresetsMask()
-{
-    return (u8)((1u << eWpnInvIconPreset_COUNT) - 1);
-}
-
 static void MarkSectionInvIconPresetReady(const shared_str& sect, EWeaponInvIconPreset p)
 {
     g_section_inv_icon_presets_ready[sect] |= (u8)(1u << (u32)p);
@@ -98,6 +98,9 @@ static bool SectionInvIconPresetReady(const shared_str& sect, EWeaponInvIconPres
     return (it->second & (u8)(1u << (u32)p)) != 0;
 }
 
+// Returns true when every REQUESTED preset of the item is satisfied by the shared per-section RTs.
+// Used to be all-or-nothing over every preset, which cannot work once presets are rendered on
+// demand: the section map only ever holds the bits somebody asked for.
 static bool TryApplySectionInvIconCache(CInventoryItem* item)
 {
     if (!item)
@@ -112,6 +115,10 @@ static bool TryApplySectionInvIconCache(CInventoryItem* item)
     const shared_str& sect = item->m_section_id;
     if (!sect.size())
         return false;
+    const u8 want = item->InvIconRequestedPresets();
+    if (!want)
+        return true; // nothing was asked for - nothing to render or queue
+
     const auto it = g_section_inv_icon_presets_ready.find(sect);
     if (it == g_section_inv_icon_presets_ready.end())
     {
@@ -120,14 +127,17 @@ static bool TryApplySectionInvIconCache(CInventoryItem* item)
             item->object_id(), sect.c_str());
         return false;
     }
-    if ((it->second & AllInvIconPresetsMask()) != AllInvIconPresetsMask())
+    if ((it->second & want) != want)
     {
-        WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] TRYAPPLY_MISS id=%u sect=[%s] partial_mask=0x%02x need=0x%02x",
-            item->object_id(), sect.c_str(), it->second, AllInvIconPresetsMask());
+        WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] TRYAPPLY_MISS id=%u sect=[%s] have_mask=0x%02x want=0x%02x",
+            item->object_id(), sect.c_str(), it->second, want);
         return false;
     }
     for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
-        item->SetDynamicInvIconPresetReady((EWeaponInvIconPreset)pi, true);
+    {
+        if (want & (u8)(1u << pi))
+            item->SetDynamicInvIconPresetReady((EWeaponInvIconPreset)pi, true);
+    }
     item->SetNeedDynamicInvIconUpgrade(false);
     item->ClearInvIconQueueRetries();
     WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] TRYAPPLY_HIT id=%u sect=[%s] -> reuse shared RT [%s] / [%s] (no queue)",
@@ -236,6 +246,10 @@ void EnsureLoaded()
     g_fov_deg_mul = pSettings->read_if_exists<float>("weapon_inv_icon", "fov_deg_mul", 1.f);
     g_icon_pivot_root_bone = pSettings->read_if_exists<bool>("weapon_inv_icon", "pivot_use_root_bone", true);
     g_icons_per_frame = pSettings->read_if_exists<u32>("weapon_inv_icon", "icons_per_frame", 2);
+    g_rt_budget_mb = pSettings->read_if_exists<u32>("weapon_inv_icon", "rt_budget_mb", 192);
+    clamp(g_rt_budget_mb, 0u, 4096u);
+    if (GEnv.Render && !GEnv.isDedicatedServer)
+        GEnv.Render->WeaponIcon_SetUserIconRtBudget(u64(g_rt_budget_mb) * 1024ull * 1024ull);
     g_icons_per_frame_inventory_open =
         pSettings->read_if_exists<u32>("weapon_inv_icon", "icons_per_frame_inventory_open", 1);
     clamp(g_cam_dist_mul, 0.08f, 3.f);
@@ -414,7 +428,7 @@ void ScheduleWeapon(CWeapon* w)
     ScheduleItem(w);
 }
 
-void ScheduleItem(CInventoryItem* item)
+void ScheduleItem(CInventoryItem* item, EWeaponInvIconPreset preset)
 {
     if (!item || GEnv.isDedicatedServer)
         return;
@@ -425,12 +439,19 @@ void ScheduleItem(CInventoryItem* item)
     if (!IsEnabledForSection(sect))
         return;
 
+    // The request set is cumulative: a weapon the player once opened at the technician keeps its
+    // technician icon refreshed on later addon changes, without every other weapon paying for one.
+    item->RequestInvIconPreset(preset);
+
     if (TryApplySectionInvIconCache(item))
         return;
 
+    const u8 want = item->InvIconRequestedPresets();
     bool all_presets_ready = true;
     for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
     {
+        if (!(want & (u8)(1u << pi)))
+            continue;
         if (!item->DynamicInvIconPresetReady((EWeaponInvIconPreset)pi))
         {
             all_presets_ready = false;
@@ -444,9 +465,9 @@ void ScheduleItem(CInventoryItem* item)
     {
         item->EnsureInvIconQueueRetries();
         g_pending.push_back(item);
-        WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] QUEUE_ENQUEUE id=%u sect=[%s] shared_rt=%d (will render or "
-                               "section-map hit in pass)",
-            item->object_id(), sect ? sect : "?", item->InvIconUsesSharedSectionRt() ? 1 : 0);
+        WPN_INV_ICON_CACHE_LOG("~ [weapon_inv_icon][cache] QUEUE_ENQUEUE id=%u sect=[%s] shared_rt=%d want=0x%02x (will "
+                               "render or section-map hit in pass)",
+            item->object_id(), sect ? sect : "?", item->InvIconUsesSharedSectionRt() ? 1 : 0, want);
     }
 
     if (g_debug_break_schedule)
@@ -667,9 +688,12 @@ static void ProcessDynamicInvIconForSingleItem(CInventoryItem* item)
         }
     }
 
+    const u8 want = item->InvIconRequestedPresets();
     for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
     {
         const auto preset = (EWeaponInvIconPreset)pi;
+        if (!(want & (u8)(1u << pi)))
+            continue; // nobody asked for this preset - do not render or store it
         if (item->DynamicInvIconPresetReady(preset))
             continue;
         if (item->InvIconUsesSharedSectionRt() && SectionInvIconPresetReady(item->m_section_id, preset))
@@ -721,6 +745,8 @@ static void ProcessDynamicInvIconForSingleItem(CInventoryItem* item)
     bool fully_ready = true;
     for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
     {
+        if (!(want & (u8)(1u << pi)))
+            continue;
         if (!item->DynamicInvIconPresetReady((EWeaponInvIconPreset)pi))
         {
             fully_ready = false;
@@ -735,17 +761,37 @@ static void ProcessDynamicInvIconForSingleItem(CInventoryItem* item)
     else
     {
         item->SetNeedDynamicInvIconUpgrade(true);
-        if (item->ConsumeInvIconQueueRetryForRequeue() && !IsInPending(item))
-            g_pending.push_back(item);
+        if (item->ConsumeInvIconQueueRetryForRequeue())
+        {
+            if (!IsInPending(item))
+                g_pending.push_back(item);
+        }
+        else
+        {
+            // Out of retries. The item keeps its static icon; a reopened window builds a fresh cell
+            // which asks once more. Without this line a permanently unrenderable item fails silently.
+            static u32 s_gave_up = 0;
+            if (s_gave_up++ < 16)
+                Msg("! [weapon_inv_icon] gave up rendering the icon of id=%u sect=[%s]; the static icon is used",
+                    item->object_id(), item->m_section_id.c_str());
+        }
     }
 }
+
+// Defined below, next to OnInvIconRtEvicted which fills the queue it drains.
+static void DrainEvictedInvIconKeys();
 
 void ProcessRenderPass()
 {
     if (GEnv.isDedicatedServer || !GEnv.Render)
         return;
     EnsureLoaded();
-    if (!g_global_enabled || g_pending.empty())
+    if (!g_global_enabled)
+        return;
+
+    DrainEvictedInvIconKeys();
+
+    if (g_pending.empty())
         return;
 
     u32 frame_budget = g_icons_per_frame;
@@ -780,11 +826,125 @@ void RenderDynamicInvIconsImmediateForItem(CInventoryItem* item)
     if (!g_global_enabled || !IsEnabledForItem(item))
         return;
 
+    // Explicit "rebuild now" path (hot reload): make sure at least the inventory preset is asked for,
+    // otherwise the mask may be empty and the pass would render nothing.
+    item->RequestInvIconPreset(eWpnInvIcon_Inventory);
     g_pending.erase(std::remove(g_pending.begin(), g_pending.end(), item), g_pending.end());
     ProcessDynamicInvIconForSingleItem(item);
 }
 
 u32 InvIconRtEpoch() { return g_inv_icon_rt_epoch; }
+
+void OnInvIconRtEvicted(pcstr texture_name)
+{
+    if (!texture_name || !texture_name[0])
+        return;
+    // Deferred on purpose: eviction happens in the middle of the renderer's icon pass, and matching
+    // it against every live item there would walk the object list once per dropped texture.
+    g_evicted_keys.emplace_back(texture_name);
+}
+
+// Clears the ready flag of every item whose icon texture was just evicted. Bumping the revision makes
+// the cell / technician portrait notice on their next Update() and ask for the icon again if shown.
+static void DrainEvictedInvIconKeys()
+{
+    if (g_evicted_keys.empty())
+        return;
+    if (GEnv.isDedicatedServer || !g_pGameLevel)
+    {
+        g_evicted_keys.clear();
+        return;
+    }
+
+    u32 cleared = 0;
+    CObjectList& objs = Level().Objects;
+    const u32 n = objs.o_count();
+    for (u32 i = 0; i < n; ++i)
+    {
+        CInventoryItem* itm = smart_cast<CInventoryItem*>(objs.o_get_by_iterator(i));
+        if (!itm || !IsEnabledForItem(itm))
+            continue;
+        for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
+        {
+            const auto preset = (EWeaponInvIconPreset)pi;
+            if (!itm->DynamicInvIconPresetReady(preset))
+                continue;
+            const shared_str tex = TextureResourceName(itm, preset);
+            if (std::find(g_evicted_keys.begin(), g_evicted_keys.end(), tex) == g_evicted_keys.end())
+                continue;
+            itm->SetDynamicInvIconPresetReady(preset, false);
+            ++cleared;
+        }
+    }
+
+    // Only the sections whose shared target was actually dropped lose their bit. Clearing the whole
+    // map made the template cells of the trade and attachment windows fall back to static icons
+    // after the eviction of an unrelated per-instance target.
+    for (auto it = g_section_inv_icon_presets_ready.begin(); it != g_section_inv_icon_presets_ready.end();)
+    {
+        u8 mask = it->second;
+        for (u32 pi = 0; pi < eWpnInvIconPreset_COUNT; ++pi)
+        {
+            const u8 bit = (u8)(1u << pi);
+            if (!(mask & bit))
+                continue;
+            const shared_str tex = TextureResourceName(it->first.c_str(), (EWeaponInvIconPreset)pi);
+            if (std::find(g_evicted_keys.begin(), g_evicted_keys.end(), tex) != g_evicted_keys.end())
+                mask &= (u8)(~bit);
+        }
+        if (mask == it->second)
+            ++it;
+        else if (mask)
+            (it++)->second = mask;
+        else
+            it = g_section_inv_icon_presets_ready.erase(it);
+    }
+
+    for (const shared_str& tex : g_evicted_keys)
+        InventoryUtilities::DropCachedRtIconShaderForUserTexture(tex.c_str());
+
+    Msg("~ [weapon_inv_icon] icon RT budget: %u target(s) evicted, %u item preset(s) marked not ready",
+        (u32)g_evicted_keys.size(), cleared);
+    g_evicted_keys.clear();
+}
+
+void LogInvIconStats(bool detailed)
+{
+    EnsureLoaded();
+    if (!GEnv.Render || GEnv.isDedicatedServer)
+    {
+        Msg("! [inv_icon_stats] no renderer on this instance");
+        return;
+    }
+
+    GEnv.Render->WeaponIcon_LogRtStats(detailed);
+
+    u32 items = 0, requested = 0, ready_inv = 0, ready_tech = 0;
+    if (g_pGameLevel)
+    {
+        CObjectList& objs = Level().Objects;
+        const u32 n = objs.o_count();
+        for (u32 i = 0; i < n; ++i)
+        {
+            CInventoryItem* itm = smart_cast<CInventoryItem*>(objs.o_get_by_iterator(i));
+            if (!itm || !IsEnabledForItem(itm))
+                continue;
+            ++items;
+            if (itm->InvIconRequestedPresets())
+                ++requested;
+            if (itm->DynamicInvIconPresetReady(eWpnInvIcon_Inventory))
+                ++ready_inv;
+            if (itm->DynamicInvIconPresetReady(eWpnInvIcon_Technician))
+                ++ready_tech;
+        }
+    }
+
+    Msg("~ [inv_icon_stats] items with dynamic icons: %u online, %u requested an icon, ready: inventory %u, "
+        "technician %u",
+        items, requested, ready_inv, ready_tech);
+    Msg("~ [inv_icon_stats] render queue: %u pending, %u per frame (%u while the inventory is open), epoch %u",
+        (u32)g_pending.size(), g_icons_per_frame, g_icons_per_frame_inventory_open, g_inv_icon_rt_epoch);
+}
 
 void OnWeaponIconUserRtsReleased()
 {
@@ -806,40 +966,14 @@ static void ReleaseAllInvIconRtsAndState()
     g_pending.clear();
 }
 
-// Re-queue every alive inventory item with use_dynamic_inv_icon so the GPU pass rebuilds its icons.
-static u32 RequeueAllDynamicInvIconItems()
-{
-    u32 requeued = 0;
-    if (GEnv.isDedicatedServer || !g_pGameLevel)
-        return requeued;
-
-    CObjectList& objs = Level().Objects;
-    const u32 n = objs.o_count();
-    for (u32 i = 0; i < n; ++i)
-    {
-        IGameObject* o = objs.o_get_by_iterator(i);
-        if (!o)
-            continue;
-        CInventoryItem* itm = smart_cast<CInventoryItem*>(o);
-        if (!itm || !IsEnabledForItem(itm))
-            continue;
-        itm->QueueDynamicInvIconRefresh();
-        ++requeued;
-    }
-    return requeued;
-}
-
 void HotReloadInvIconSettings()
 {
     ReleaseAllInvIconRtsAndState();
 
     ReloadSettings();
 
-    const u32 requeued = RequeueAllDynamicInvIconItems();
-
-    Msg("~ [weapon_inv_icon] HotReload: GPU icon RTs dropped, ini state reloaded, epoch bumped, queue cleared; "
-        "re-queued %u dynamic-icon item(s). Open/refresh inventory to see updates.",
-        requeued);
+    Msg("~ [weapon_inv_icon] HotReload: GPU icon RTs dropped, ini state reloaded, epoch bumped, queue cleared. "
+        "Icons are rebuilt on demand - open the inventory or the technician window to see updates.");
 }
 
 // vid_restart: CResourceManager::reset_begin/reset_end destroys and re-creates every registered CRT, including the
@@ -856,11 +990,12 @@ static void OnDeviceResetInvIcons()
         return;
 
     ReleaseAllInvIconRtsAndState();
-    const u32 requeued = RequeueAllDynamicInvIconItems();
 
-    Msg("~ [weapon_inv_icon] DeviceReset: GPU icon RTs dropped, epoch bumped, queue cleared; re-queued %u "
-        "dynamic-icon item(s).",
-        requeued);
+    // No mass re-queue here on purpose: rebuilding every live item's icon right after vid_restart
+    // recreated thousands of render targets within seconds, which is what made the video memory
+    // exhaustion survive a renderer restart. Items ask for their icon again when something draws them.
+    Msg("~ [weapon_inv_icon] DeviceReset: GPU icon RTs dropped, epoch bumped, queue cleared. Icons are "
+        "rebuilt on demand.");
 }
 
 namespace

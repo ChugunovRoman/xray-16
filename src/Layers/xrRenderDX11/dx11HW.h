@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <utility>
 
 #include "xrCore/ModuleLookup.hpp"
@@ -40,6 +41,22 @@ public:
     }
     bool UsingFlipPresentationModel() const;
     DeviceState GetDeviceState();
+
+    // ID3D11DeviceContext is NOT free-threaded: only the thread that runs the frame (stamped in
+    // BeginScene) may touch the immediate context. CheckImmThread reports, rate-limited, any call
+    // from another thread - undefined behaviour and a prime suspect for corrupted GPU state.
+    u32 ImmOwnerThread() const { return m_immOwnerThread; }
+    u32 ImmForeignCalls() const { return m_immForeignCalls.load(std::memory_order_relaxed); }
+    void CheckImmThread(const char* where);
+    // Human-readable name of a GetDeviceRemovedReason() code (HUNG/RESET/INTERNAL/INVALID_CALL).
+    static pcstr DeviceRemovedReasonName(HRESULT reason);
+    // Diagnostics: what the OS video memory manager says this process holds and may hold. The
+    // black-screen investigation found ~11k live textures, most of them per-instance weapon icon
+    // render targets; a process running out of its video memory budget is the one explanation
+    // that fits every symptom (evicted textures sample black, new icon targets fail to allocate,
+    // FinishCommandList dies with a generic DEVICE_REMOVED, vid_restart keeps the leak alive).
+    // Returns false when DXGI 1.4 is unavailable. Values in bytes.
+    bool QueryVideoMemory(u64& local_usage, u64& local_budget, u64& nonlocal_usage, u64& nonlocal_budget);
 
 public:
     void BeginScene();
@@ -111,6 +128,8 @@ public:
 private:
     DXGI_SWAP_CHAIN_DESC m_ChainDesc; // DevPP equivalent
     bool doPresentTest{};
+    u32 m_immOwnerThread{};               // thread that owns the immediate context (see CheckImmThread)
+    std::atomic<u32> m_immForeignCalls{}; // immediate-context calls observed from other threads
     XRay::Module hD3DCompiler;
     XRay::Module hDXGI;
     XRay::Module hD3D;

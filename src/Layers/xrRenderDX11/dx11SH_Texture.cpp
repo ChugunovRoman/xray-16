@@ -251,6 +251,9 @@ void CTexture::apply_avi(CBackend& cmd_list, u32 dwStage) const
         u8* ptr{};
         pAVI->GetFrame(&ptr);
 
+        // Uploaded through the IMMEDIATE context regardless of cmd_list: off-render-thread use
+        // (e.g. the SVP worker recording this texture) is a data race on that context.
+        HW.CheckImmThread("CTexture::apply_avi");
         R_CHK(HW.get_context(CHW::IMM_CTX_ID)->Map(T2D, 0, D3D_MAP_WRITE_DISCARD, 0, &mapData));
         size_t rowSize = size_t(pAVI->m_dwWidth) * 4;
         if (mapData.RowPitch == rowSize)

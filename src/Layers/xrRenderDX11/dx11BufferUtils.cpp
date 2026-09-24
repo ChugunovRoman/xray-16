@@ -378,8 +378,12 @@ void* VertexStreamBuffer::Map(size_t offset, size_t /*size*/, bool flush /*= fal
 
     const auto flag = flush ? D3D_MAP_WRITE_DISCARD : D3D_MAP_WRITE_NO_OVERWRITE;
 
+    // Mapped on the IMMEDIATE context regardless of the recording context (TODO: proper context
+    // id) - a caller off the render thread is a data race on that context.
+    HW.CheckImmThread("VertexStreamBuffer::Map");
+
     D3D11_MAPPED_SUBRESOURCE MappedSubRes{};
-    const HRESULT hr = HW.get_context(CHW::IMM_CTX_ID)->Map(m_DeviceBuffer, 0, flag, 0, &MappedSubRes); // TODO: proper context id + check for flush & imm
+    const HRESULT hr = HW.get_context(CHW::IMM_CTX_ID)->Map(m_DeviceBuffer, 0, flag, 0, &MappedSubRes);
     // A failed Map used to leave pData uninitialised and the caller then wrote vertices through a
     // garbage pointer (silent memory corruption). Fail loudly instead.
     if (FAILED(hr) || !MappedSubRes.pData)
@@ -398,6 +402,7 @@ void* VertexStreamBuffer::Map(size_t offset, size_t /*size*/, bool flush /*= fal
 void VertexStreamBuffer::Unmap() // TODO: this should be moved into backend
 {
     VERIFY(m_DeviceBuffer);
+    HW.CheckImmThread("VertexStreamBuffer::Unmap");
     HW.get_context(CHW::IMM_CTX_ID)->Unmap(m_DeviceBuffer, 0); // TODO: proper context id
 }
 
@@ -435,8 +440,11 @@ void* IndexStreamBuffer::Map(size_t offset, size_t /*size*/, bool flush /*= fals
 
     const auto flag = flush ? D3D_MAP_WRITE_DISCARD : D3D_MAP_WRITE_NO_OVERWRITE;
 
+    // See VertexStreamBuffer::Map - same immediate-context-only mapping.
+    HW.CheckImmThread("IndexStreamBuffer::Map");
+
     D3D11_MAPPED_SUBRESOURCE MappedSubRes{};
-    const HRESULT hr = HW.get_context(CHW::IMM_CTX_ID)->Map(m_DeviceBuffer, 0, flag, 0, &MappedSubRes); // TODO: see above comms for vertex
+    const HRESULT hr = HW.get_context(CHW::IMM_CTX_ID)->Map(m_DeviceBuffer, 0, flag, 0, &MappedSubRes);
     // See VertexStreamBuffer::Map - same uninitialised-pointer hazard on a failed Map.
     if (FAILED(hr) || !MappedSubRes.pData)
     {
@@ -454,6 +462,7 @@ void* IndexStreamBuffer::Map(size_t offset, size_t /*size*/, bool flush /*= fals
 void IndexStreamBuffer::Unmap()
 {
     VERIFY(m_DeviceBuffer);
+    HW.CheckImmThread("IndexStreamBuffer::Unmap");
     HW.get_context(CHW::IMM_CTX_ID)->Unmap(m_DeviceBuffer, 0); // TODO: see above comms for vertex
 }
 

@@ -26,8 +26,63 @@ u32 s_icon_gbuf_cfg_pack{};
 
 // Keep UI RT alive: local ref_rt in WeaponIcon_RenderToTexture used to be destroyed on return, clearing
 // CTexture's pSurface — UI then sampled an empty $user$ texture (fully transparent). DDS dumps still looked fine.
-static xr_map<shared_str, ref_rt> s_persist_icon_ui_rt;
-void ReleasePersistedIconUiRts() { s_persist_icon_ui_rt.clear(); }
+// The store is bounded now: an unbounded one grew to thousands of RTs over a long session (one per weapon
+// instance) and pushed the process out of its video memory budget - see
+// docs/investigations/DYNAMIC_INV_ICONS_MEMORY_2026-09-24.md.
+struct IconRtEntry
+{
+    ref_rt rt;
+    u32 bytes{};       // video memory held by this target
+    u32 frame{};       // Device.dwFrame of the last render into it, for least-recently-used eviction
+};
+
+// Keyed by shared_str, whose operator== / operator< compare the interned pointer, not the characters.
+// Two shared_str built from the same text always share that pointer, which is what makes find() by
+// name work here and in the game-side eviction bookkeeping. Do not swap the key for a raw string.
+static xr_map<shared_str, IconRtEntry> s_persist_icon_ui_rt;
+static u64 s_icon_rt_bytes{};                            // running sum over the store
+static u64 s_icon_rt_budget{192ull * 1024ull * 1024ull}; // 0 = unbounded; overridden from the game config
+
+void ReleasePersistedIconUiRts()
+{
+    s_persist_icon_ui_rt.clear();
+    s_icon_rt_bytes = 0;
+}
+
+// Drops least-recently-rendered targets until the store fits the budget. `keep` is never dropped:
+// it is the entry the caller is about to render into. Every drop is reported to the game so the
+// item that used it stops claiming a ready icon.
+static void EvictIconRtsOverBudget(const shared_str& keep)
+{
+    if (!s_icon_rt_budget || s_icon_rt_bytes <= s_icon_rt_budget)
+        return;
+
+    // Order the candidates once. Picking the minimum with a fresh linear scan per victim was
+    // quadratic, which shows up exactly when it hurts: a small budget with many live targets.
+    xr_vector<std::pair<u32, shared_str>> by_age;
+    by_age.reserve(s_persist_icon_ui_rt.size());
+    for (const auto& pair : s_persist_icon_ui_rt)
+    {
+        if (pair.first == keep)
+            continue;
+        by_age.emplace_back(pair.second.frame, pair.first);
+    }
+    std::sort(by_age.begin(), by_age.end(),
+        [](const std::pair<u32, shared_str>& a, const std::pair<u32, shared_str>& b) { return a.first < b.first; });
+
+    for (const auto& victim : by_age)
+    {
+        if (s_icon_rt_bytes <= s_icon_rt_budget)
+            break;
+        const auto it = s_persist_icon_ui_rt.find(victim.second);
+        if (it == s_persist_icon_ui_rt.end())
+            continue;
+        s_icon_rt_bytes -= _min<u64>(s_icon_rt_bytes, u64(it->second.bytes));
+        s_persist_icon_ui_rt.erase(it);
+        if (g_pGamePersistent)
+            g_pGamePersistent->OnWeaponIconRtEvicted(victim.second.c_str());
+    }
+}
 
 ref_rt s_rt_p{};
 ref_rt s_rt_n{};
@@ -206,14 +261,14 @@ bool SavePersistedIconRtToDdsDxt5(pcstr user_texture_name, pcstr fs_root, pcstr 
         return false;
 
     const auto it = s_persist_icon_ui_rt.find(shared_str(user_texture_name));
-    if (it == s_persist_icon_ui_rt.end() || !it->second._get() || !it->second->pRT)
+    if (it == s_persist_icon_ui_rt.end() || !it->second.rt._get() || !it->second.rt->pRT)
     {
         Msg("! [weapon_inv_icon] SaveDDS: no persisted RT for [%s]", user_texture_name);
         return false;
     }
 
     ID3DResource* pSrc{};
-    it->second->pRT->GetResource(&pSrc);
+    it->second.rt->pRT->GetResource(&pSrc);
     if (!pSrc)
     {
         Msg("! [weapon_inv_icon] SaveDDS [%s]: GetResource failed", user_texture_name);
@@ -254,12 +309,100 @@ void CRender::WeaponIcon_ReleaseUserIconRt(pcstr texture_name)
     const shared_str key(texture_name);
     const auto it = wpn_icon::s_persist_icon_ui_rt.find(key);
     if (it != wpn_icon::s_persist_icon_ui_rt.end())
+    {
+        wpn_icon::s_icon_rt_bytes -= _min<u64>(wpn_icon::s_icon_rt_bytes, u64(it->second.bytes));
         wpn_icon::s_persist_icon_ui_rt.erase(it);
+    }
 }
 
 void CRender::WeaponIcon_ReleaseAllUserIconRts()
 {
-    wpn_icon::s_persist_icon_ui_rt.clear();
+    wpn_icon::ReleasePersistedIconUiRts();
+}
+
+void CRender::WeaponIcon_SetUserIconRtBudget(u64 bytes)
+{
+    wpn_icon::s_icon_rt_budget = bytes;
+}
+
+u32 CRender::WeaponIcon_PersistedCount() const
+{
+    return u32(wpn_icon::s_persist_icon_ui_rt.size());
+}
+
+void CRender::WeaponIcon_LogRtStats(bool detailed)
+{
+    using namespace wpn_icon;
+
+    // $user$itm_inv_sect_<section>_<preset> is one target shared by every instance of a section;
+    // $user$itm_inv_<section>_<id>_<preset> belongs to a single item.
+    static constexpr char k_shared_prefix[] = "$user$itm_inv_sect_";
+    u32 shared_rts = 0, instance_rts = 0;
+    u64 shared_bytes = 0, instance_bytes = 0;
+    u32 oldest_age = 0;
+
+    // Both categories are summed directly: deriving one by subtracting the other from the running
+    // total would print nonsense (and underflow) if the two ever drifted apart.
+    for (const auto& pair : s_persist_icon_ui_rt)
+    {
+        pcstr name = pair.first.c_str();
+        const bool shared = name && 0 == strncmp(name, k_shared_prefix, sizeof(k_shared_prefix) - 1);
+        if (shared)
+        {
+            ++shared_rts;
+            shared_bytes += pair.second.bytes;
+        }
+        else
+        {
+            ++instance_rts;
+            instance_bytes += pair.second.bytes;
+        }
+        if (Device.dwFrame > pair.second.frame)
+            oldest_age = _max(oldest_age, Device.dwFrame - pair.second.frame);
+    }
+
+    const u32 total_rts = u32(s_persist_icon_ui_rt.size());
+    const auto kb = [](u64 v) { return u32(v / 1024ull); };
+
+    Msg("~ [inv_icon_stats] icon render targets: %u | video memory: %u KB (%.1f MB)", total_rts,
+        kb(s_icon_rt_bytes), double(s_icon_rt_bytes) / (1024.0 * 1024.0));
+    Msg("~ [inv_icon_stats]   per-instance %u (%u KB), shared-by-section %u (%u KB)", instance_rts,
+        kb(instance_bytes), shared_rts, kb(shared_bytes));
+    if (s_icon_rt_budget)
+        Msg("~ [inv_icon_stats]   budget %.1f MB, used %.0f%%, oldest entry %u frames old",
+            double(s_icon_rt_budget) / (1024.0 * 1024.0),
+            s_icon_rt_budget ? (100.0 * double(s_icon_rt_bytes) / double(s_icon_rt_budget)) : 0.0, oldest_age);
+    else
+        Msg("~ [inv_icon_stats]   budget: unlimited (rt_budget_mb = 0)");
+
+    u32 tex_total = 0, tex_user = 0, tex_icons = 0;
+    if (Resources)
+        Resources->dbg_texture_stats(tex_total, tex_user, tex_icons);
+    Msg("~ [inv_icon_stats] texture registry: total %u, engine-made %u, icon targets %u", tex_total, tex_user,
+        tex_icons);
+
+#if defined(USE_DX11)
+    u64 lu = 0, lb = 0, nu = 0, nb = 0;
+    if (HW.QueryVideoMemory(lu, lb, nu, nb))
+    {
+        const auto mb = [](u64 v) { return u32(v / (1024ull * 1024ull)); };
+        Msg("~ [inv_icon_stats] process video memory: local %u of %u MB, non-local %u of %u MB", mb(lu), mb(lb),
+            mb(nu), mb(nb));
+    }
+#endif
+
+    if (!detailed)
+    {
+        Msg("~ [inv_icon_stats] (pass \"full\" to list every target)");
+        return;
+    }
+
+    for (const auto& pair : s_persist_icon_ui_rt)
+    {
+        const CRT* rt = pair.second.rt._get();
+        Msg("~ [inv_icon_stats]   %-56s %ux%u %u KB last_render_frame=%u", pair.first.c_str(),
+            rt ? rt->dwWidth : 0, rt ? rt->dwHeight : 0, kb(pair.second.bytes), pair.second.frame);
+    }
 }
 
 bool CRender::WeaponIcon_SavePersistedUserRtToDdsDxt5(pcstr user_texture_name, pcstr fs_root, pcstr fname)
@@ -316,10 +459,26 @@ bool CRender::WeaponIcon_RenderToTexture(
     }
 
     VERIFY(Target->rt_Color);
-    ref_rt& rt_ui = wpn_icon::s_persist_icon_ui_rt[shared_str(texture_name)];
+    const shared_str icon_key(texture_name);
+    wpn_icon::IconRtEntry& icon_entry = wpn_icon::s_persist_icon_ui_rt[icon_key];
+    ref_rt& rt_ui = icon_entry.rt;
     rt_ui.create(texture_name, w, h, D3DFMT_A8R8G8B8, 1);
     if (!rt_ui)
+    {
+        wpn_icon::s_icon_rt_bytes -= _min<u64>(wpn_icon::s_icon_rt_bytes, u64(icon_entry.bytes));
+        wpn_icon::s_persist_icon_ui_rt.erase(icon_key);
         return false;
+    }
+
+    // Format is fixed at D3DFMT_A8R8G8B8 right above, so four bytes per texel, no mips, no slices.
+    {
+        const u32 bytes = w * h * 4;
+        wpn_icon::s_icon_rt_bytes -= _min<u64>(wpn_icon::s_icon_rt_bytes, u64(icon_entry.bytes));
+        icon_entry.bytes = bytes;
+        icon_entry.frame = Device.dwFrame;
+        wpn_icon::s_icon_rt_bytes += bytes;
+        wpn_icon::EvictIconRtsOverBudget(icon_key);
+    }
 
     EnsureIconGBuffer(w, h, Target, *this);
     EnsureWpnIconResolveShader();

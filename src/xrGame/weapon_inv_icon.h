@@ -34,8 +34,12 @@ bool IsEnabledForItem(const CInventoryItem* item);
 // Очередь GPU-иконки: только после смены аддонов (InvalidateDynamicInventoryIcons), GE_ADDON_CHANGE, HotReload.
 // Спавн, reload() и открытие инвентаря не вызывают — в UI остаются inv_icon / inv_upgrade_icon до регенерации.
 void ScheduleWeapon(CWeapon* w);
-void ScheduleItem(CInventoryItem* item);
-// Regenerate GPU dynamic icon for this item immediately (same pass as ProcessRenderPass, all presets, ignores frame budget).
+// Adds `preset` to the item's requested set (CInventoryItem::RequestInvIconPreset) and queues the
+// item when something in that set is missing. Only requested presets are ever rendered, so the
+// technician preset costs nothing until CUIInventoryUpgradeWnd asks for it.
+void ScheduleItem(CInventoryItem* item, EWeaponInvIconPreset preset = eWpnInvIcon_Inventory);
+// Regenerate GPU dynamic icon for this item immediately (same pass as ProcessRenderPass, requested presets only,
+// ignores frame budget).
 void RenderDynamicInvIconsImmediateForItem(CInventoryItem* item);
 void OnWeaponDestroyed(CWeapon* w);
 void OnItemDestroyed(CInventoryItem* item);
@@ -51,6 +55,11 @@ void BuildMatricesForWeapon(CWeapon* w, EWeaponInvIconPreset preset, Fmatrix& ou
 
 u32 InvIconRtEpoch();
 void OnWeaponIconUserRtsReleased();
+// One icon RT was dropped by the renderer's budget: clear the ready flag of every item that used
+// that texture, so the UI falls back to the static icon and re-requests it the next time it draws.
+void OnInvIconRtEvicted(pcstr texture_name);
+// Console inv_icon_stats: how many icon targets exist and how much video memory they hold.
+void LogInvIconStats(bool detailed);
 
 bool WeaponUsesDynamicIcon(pcstr weapon_section);
 

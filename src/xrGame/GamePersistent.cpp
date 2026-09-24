@@ -998,3 +998,8 @@ void CGamePersistent::OnWeaponIconUserRtsReleased()
 {
     weapon_inv_icon::OnWeaponIconUserRtsReleased();
 }
+
+void CGamePersistent::OnWeaponIconRtEvicted(pcstr texture_name)
+{
+    weapon_inv_icon::OnInvIconRtEvicted(texture_name);
+}

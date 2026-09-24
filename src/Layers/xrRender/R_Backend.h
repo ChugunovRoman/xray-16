@@ -525,8 +525,18 @@ public:
         // silently corrupts the device. Fail loudly in ALL configs instead.
         const HRESULT submit_hr = HW.get_context(context_id)->FinishCommandList(false, &pCommandList);
         if (FAILED(submit_hr) || !pCommandList)
+        {
+            // DEVICE_REMOVED here is only the messenger: the reason code says whether the GPU
+            // faulted on an invalid command (HUNG), timed out (RESET) or the driver failed.
+            if (submit_hr == DXGI_ERROR_DEVICE_REMOVED && HW.pDevice)
+            {
+                const HRESULT reason = HW.pDevice->GetDeviceRemovedReason();
+                Msg("! D3D11 device removed before submit on context %u, reason: 0x%08x %s", context_id,
+                    u32(reason), CHW::DeviceRemovedReasonName(reason));
+            }
             FATAL_F("FinishCommandList failed on context %u (hr=0x%08x) - deferred submit aborted",
                 context_id, u32(submit_hr));
+        }
         HW.get_context(CHW::IMM_CTX_ID)->ExecuteCommandList(pCommandList, false);
         _RELEASE(pCommandList);
         // FinishCommandList resets the REAL deferred-context state to D3D11 defaults while
@@ -601,6 +611,20 @@ private:
     void ApplyRTandZB();
     void ApplyPrimitieTopology(D3D_PRIMITIVE_TOPOLOGY Topology);
     bool CBuffersNeedUpdate(ref_cbuffer buf1[MaxCBuffers], ref_cbuffer buf2[MaxCBuffers], u32& uiMin, u32& uiMax);
+
+    // r__gpu_diag: once-per-frame draw-state audit on the IMMEDIATE context. Works without the
+    // D3D11 debug layer: compares what the CPU cache believes is bound against what the device
+    // actually has, and flags an empty viewport or a fully unbound output merger. That is the
+    // 'the world is black but the UI still draws' class of bug - the UI rebinds explicitly.
+    void dbg_CheckDrawState();
+    u32 m_dbgDrawReports{};
+    u32 m_dbgCheckFrame{ u32(-1) };
+    // Shadow copy of the last viewport pushed through SetViewport. The device query is too
+    // expensive per draw, and a viewport that collapses to zero mid-frame (rmNormal reading a
+    // zero CRenderTarget dimension) silently stops rasterizing everything after it.
+    mutable float m_dbgViewportW{};
+    mutable float m_dbgViewportH{};
+    mutable bool m_dbgViewportSet{};
 
 private:
     ID3DBlob* m_pInputSignature{ nullptr };

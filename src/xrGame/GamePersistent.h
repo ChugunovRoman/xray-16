@@ -121,6 +121,7 @@ public:
     void OnWeaponIconSnapshot(IRenderable* subject, bool begin) override;
     void OnSystemIniReloaded() override;
     void OnWeaponIconUserRtsReleased() override;
+    void OnWeaponIconRtEvicted(pcstr texture_name) override;
 
     CHudTuner GetHudTuner() { return m_hudTuner; }
     CUITexturesAddonsPosition GetWpnTextureAddonsPosTool() const { return m_wpnTexturesPos; }

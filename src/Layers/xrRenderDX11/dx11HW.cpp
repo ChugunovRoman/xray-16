@@ -673,8 +673,71 @@ std::pair<u32, u32> CHW::GetSurfaceSize() const
     };
 }
 
-void CHW::BeginScene() { }
+void CHW::BeginScene()
+{
+    // The thread that runs the frame owns the immediate context for this frame.
+    m_immOwnerThread = u32(GetCurrentThreadId());
+}
 void CHW::EndScene() { }
+
+pcstr CHW::DeviceRemovedReasonName(HRESULT reason)
+{
+    switch (reason)
+    {
+    case DXGI_ERROR_DEVICE_HUNG: return "DEVICE_HUNG (GPU fault/invalid command - corrupted command stream or bad resource)";
+    case DXGI_ERROR_DEVICE_RESET: return "DEVICE_RESET (TDR timeout - a command ran too long)";
+    case DXGI_ERROR_DRIVER_INTERNAL_ERROR: return "DRIVER_INTERNAL_ERROR";
+    case DXGI_ERROR_INVALID_CALL: return "INVALID_CALL (API misuse)";
+    case DXGI_ERROR_DEVICE_REMOVED: return "DEVICE_REMOVED (generic)";
+    case S_OK: return "S_OK (device not removed)";
+    default: return "UNKNOWN";
+    }
+}
+
+bool CHW::QueryVideoMemory(u64& local_usage, u64& local_budget, u64& nonlocal_usage, u64& nonlocal_budget)
+{
+    local_usage = local_budget = nonlocal_usage = nonlocal_budget = 0;
+#ifdef HAS_DXGI1_4
+    if (!m_pAdapter)
+        return false;
+    IDXGIAdapter3* adapter3 = nullptr;
+    if (FAILED(m_pAdapter->QueryInterface(__uuidof(IDXGIAdapter3), reinterpret_cast<void**>(&adapter3))) || !adapter3)
+        return false;
+    DXGI_QUERY_VIDEO_MEMORY_INFO local{}, nonlocal{};
+    const HRESULT hr_local = adapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &local);
+    const HRESULT hr_nonlocal = adapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &nonlocal);
+    adapter3->Release();
+    if (FAILED(hr_local))
+        return false;
+    local_usage = local.CurrentUsage;
+    local_budget = local.Budget;
+    if (SUCCEEDED(hr_nonlocal))
+    {
+        nonlocal_usage = nonlocal.CurrentUsage;
+        nonlocal_budget = nonlocal.Budget;
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+void CHW::CheckImmThread(const char* where)
+{
+    const u32 owner = m_immOwnerThread;
+    if (!owner)
+        return;
+    const u32 tid = u32(GetCurrentThreadId());
+    if (tid == owner)
+        return;
+    const u32 n = m_immForeignCalls.fetch_add(1, std::memory_order_relaxed) + 1;
+    // First 32 occurrences verbatim, then every 1000th: enough to see the pattern, no flood.
+    if (n <= 32 || (n % 1000) == 0)
+    {
+        Msg("! [imm-race] %s on the IMMEDIATE context from thread %u (owner %u, svp_worker=%d) #%u",
+            where, tid, owner, g_svp_worker_rendering.load(std::memory_order_relaxed) ? 1 : 0, n);
+    }
+}
 
 void CHW::Present()
 {
@@ -724,17 +787,8 @@ DeviceState CHW::GetDeviceState()
             // an API misuse the driver rejected. Without this line all four look identical
             // to the user and to crash reports.
             const HRESULT reason = pDevice->GetDeviceRemovedReason();
-            pcstr reason_name = "UNKNOWN";
-            switch (reason)
-            {
-            case DXGI_ERROR_DEVICE_HUNG: reason_name = "DEVICE_HUNG (GPU timeout/fault - likely corrupted command stream or runaway shader)"; break;
-            case DXGI_ERROR_DEVICE_RESET: reason_name = "DEVICE_RESET"; break;
-            case DXGI_ERROR_DRIVER_INTERNAL_ERROR: reason_name = "DRIVER_INTERNAL_ERROR"; break;
-            case DXGI_ERROR_INVALID_CALL: reason_name = "INVALID_CALL (API misuse)"; break;
-            case DXGI_ERROR_DEVICE_REMOVED: reason_name = "DEVICE_REMOVED (generic)"; break;
-            default: break;
-            }
-            Msg("! D3D11 device removed, reason: 0x%08x %s (frame %u)", u32(reason), reason_name, Device.dwFrame);
+            Msg("! D3D11 device removed, reason: 0x%08x %s (frame %u)", u32(reason), DeviceRemovedReasonName(reason),
+                Device.dwFrame);
             FATAL("Graphics driver was updated or GPU was physically removed from computer.\n"
                   "Please, restart the game.");
             break;

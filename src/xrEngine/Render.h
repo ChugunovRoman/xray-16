@@ -177,6 +177,22 @@ extern ENGINE_API int ps_r__svp_frame_delay;     // Second VP: IsSVPFrame uses d
 // lists (DX11-only; GL keeps the inline path - a single GL context has nothing to record into).
 extern ENGINE_API int ps_r__svp_smap_pages;        // max packing batches per frame in the SVP atlas
 
+// Diagnostics for the 'black world, UI still visible' bug and the SVP crash class.
+// r__svp_pipeline 0        = fully sequential scope pass (kill-switch, no rebuild needed).
+// r__svp_shadow_transfer 0 = worker-built scope shadows instead of the main-pass atlas copy.
+// r__gpu_diag 1            = per-frame render-state audits + periodic telemetry in the log.
+// r__dump_render_state 1   = one-shot dump of the immediate-context state, self-clears.
+extern ENGINE_API int ps_r__svp_pipeline;
+extern ENGINE_API int ps_r__svp_shadow_transfer;
+extern ENGINE_API int ps_r__gpu_diag;
+extern ENGINE_API int ps_r__dump_render_state;
+// r__svp_restore_surfaces 1 = force the named G-buffer textures back onto their own surfaces.
+// If the picture returns after this, a missed SVP restore is proven to be the cause.
+extern ENGINE_API int ps_r__svp_restore_surfaces;
+// r__lum_reset 1 = log and re-clear the 1x1 tonemap scale pool (rt_LUM_pool), self-clears.
+// If the picture returns after this, a NaN/Inf-poisoned tonemap scale is proven to be the cause.
+extern ENGINE_API int ps_r__lum_reset;
+
 // HUD overlay scope (g_3d_scopes 2) debug output of the resolve pass. Console: r__hud_overlay_debug
 // 0 = normal (lit albedo), 1 = solid magenta (drain/stencil check), 2 = normals, 3 = light factor,
 // 4 = raw albedo, 5 = one-shot DDS dump of the overlay RTs into $screenshots$,
@@ -554,6 +570,15 @@ public:
     // Drop persisted $user$ RT used by WeaponIcon_RenderToTexture (see r2_weapon_icon.cpp).
     virtual void WeaponIcon_ReleaseUserIconRt(pcstr texture_name) { (void)texture_name; }
     virtual void WeaponIcon_ReleaseAllUserIconRts() {}
+    // Persisted icon RTs are bounded: once their total exceeds this budget the least recently
+    // rendered ones are dropped and the game is told through IGame_Persistent::OnWeaponIconRtEvicted,
+    // so the items that used them fall back to their static icon instead of drawing an empty RT.
+    // 0 disables the limit. Pushed from the game side ([weapon_inv_icon] rt_budget_mb).
+    virtual void WeaponIcon_SetUserIconRtBudget(u64 bytes) { (void)bytes; }
+    // Number of persisted icon RTs currently alive.
+    virtual u32 WeaponIcon_PersistedCount() const { return 0; }
+    // Log how many icon RTs exist and how much video memory they hold; `detailed` lists every one.
+    virtual void WeaponIcon_LogRtStats(bool detailed) { (void)detailed; }
     // Save a persisted weapon icon RT (same key as WeaponIcon_RenderToTexture) to DDS DXT5/BC3. DX11 only.
     virtual bool WeaponIcon_SavePersistedUserRtToDdsDxt5(pcstr user_texture_name, pcstr fs_root, pcstr fname)
     {

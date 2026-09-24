@@ -725,6 +725,13 @@ ENGINE_API int ps_r__svp_frame_delay = 2;
 // SVP frame driver: records scope lighting/combine on the dedicated worker into deferred command
 // lists (DX11 only).
 ENGINE_API int ps_r__svp_smap_pages = 8;        // max packing batches per frame in the SVP atlas
+// Diagnostics / kill-switches - see the comment in xrEngine/Render.h.
+ENGINE_API int ps_r__svp_pipeline = 1;
+ENGINE_API int ps_r__svp_shadow_transfer = 1;
+ENGINE_API int ps_r__gpu_diag = 0;
+ENGINE_API int ps_r__dump_render_state = 0;
+ENGINE_API int ps_r__svp_restore_surfaces = 0;
+ENGINE_API int ps_r__lum_reset = 0;
 ENGINE_API int ps_r__hud_overlay_debug = 0;
 ENGINE_API int ps_r__hud_overlay_crossfade = 0; // 1 = crossfade alpha on ADS entry/exit, 0 = instant
 ENGINE_API float ps_r__hud_overlay_brightness = 1.0f; // overlay HUD light multiplier: 1.0 = neutral, <1 darker (match shadowed world HUD), >1 brighter
@@ -787,6 +794,12 @@ void CCC_Register()
     CMD4(CCC_Integer, "r__svp_skip_zfill", &ps_r__svp_skip_zfill, 0, 1);
     CMD4(CCC_Integer, "r__svp_frame_delay", &ps_r__svp_frame_delay, 0, 255);
     CMD4(CCC_Integer, "r__svp_smap_pages", &ps_r__svp_smap_pages, 1, 8);
+    CMD4(CCC_Integer, "r__svp_pipeline", &ps_r__svp_pipeline, 0, 1);
+    CMD4(CCC_Integer, "r__svp_shadow_transfer", &ps_r__svp_shadow_transfer, 0, 1);
+    CMD4(CCC_Integer, "r__gpu_diag", &ps_r__gpu_diag, 0, 1);
+    CMD4(CCC_Integer, "r__dump_render_state", &ps_r__dump_render_state, 0, 1);
+    CMD4(CCC_Integer, "r__svp_restore_surfaces", &ps_r__svp_restore_surfaces, 0, 1);
+    CMD4(CCC_Integer, "r__lum_reset", &ps_r__lum_reset, 0, 1);
     CMD4(CCC_Integer, "r__hud_overlay_debug", &ps_r__hud_overlay_debug, 0, 6);
     CMD4(CCC_Integer, "r__hud_overlay_crossfade", &ps_r__hud_overlay_crossfade, 0, 1);
     CMD4(CCC_Float, "r__hud_overlay_brightness", &ps_r__hud_overlay_brightness, 0.5f, 5.0f);

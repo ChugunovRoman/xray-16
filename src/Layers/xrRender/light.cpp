@@ -5,6 +5,31 @@ namespace xray::render::RENDER_NAMESPACE
 {
 static constexpr float RSQRTDIV2 = 0.70710678118654752440084436210485f;
 
+namespace
+{
+// Diagnostics: a NaN/Inf light parameter is the leading candidate for poisoning the tonemap
+// scale pool (CRenderTarget::dbg_read_lum): the accumulation shader turns it into NaN pixels
+// that the bloom/luminance chain averages into rt_LUM_pool for good. Logs the first occurrences
+// with enough of the light to identify it. Behaviour is NOT altered - the value is still applied.
+void dbg_report_invalid_light(const light& L, const char* what, const Fvector& P, float range, bool finite_issue)
+{
+    // Two independent budgets. A negative range is common (light animations ramp their radius
+    // through zero when they fade out) and used to eat the whole budget, hiding the case this
+    // diagnostic exists for: an actual NaN/Inf, which poisons everything downstream.
+    static u32 s_reported_finite = 0;
+    static u32 s_reported_range = 0;
+    u32& counter = finite_issue ? s_reported_finite : s_reported_range;
+    if (counter >= (finite_issue ? 64u : 8u))
+        return;
+    ++counter;
+    Msg("! [light-nan] frame %u: invalid %s | type=%u static=%u active=%u shadow=%u hud=%u | "
+        "pos=%g,%g,%g range=%g cone=%g color=%g,%g,%g",
+        Device.dwFrame, what, u32(L.flags.type), u32(L.flags.bStatic), u32(L.flags.bActive),
+        u32(L.flags.bShadow), u32(L.flags.bHudMode), P.x, P.y, P.z, range, L.cone,
+        L.color.r, L.color.g, L.color.b);
+}
+} // namespace
+
 light::light() : SpatialBase(g_pGamePersistent->SpatialSpace)
 {
     spatial.type = STYPE_LIGHTSOURCE;
@@ -150,6 +175,8 @@ void light::set_active(bool a)
 
 void light::set_position(const Fvector& P)
 {
+    if (!_valid(P))
+        dbg_report_invalid_light(*this, "position (not finite)", P, range, true);
     const float eps = EPS_L; //_max(range*0.001f,EPS_L);
     if (position.similar(P, eps))
         return;
@@ -159,6 +186,10 @@ void light::set_position(const Fvector& P)
 
 void light::set_range(float R)
 {
+    if (!_valid(R))
+        dbg_report_invalid_light(*this, "range (not finite)", position, R, true);
+    else if (R < 0.f)
+        dbg_report_invalid_light(*this, "range (negative)", position, R, false);
     const float eps = std::max(range * 0.1f, EPS_L);
     if (fsimilar(range, R, eps))
         return;
@@ -176,6 +207,11 @@ void light::set_cone(float angle)
 }
 void light::set_rotation(const Fvector& D, const Fvector& R)
 {
+    // normalize() of a zero or non-finite vector yields NaN direction/right.
+    if (!_valid(D) || !_valid(R))
+        dbg_report_invalid_light(*this, "rotation (not finite D/R)", D, range, true);
+    else if (D.square_magnitude() < EPS_S || R.square_magnitude() < EPS_S)
+        dbg_report_invalid_light(*this, "rotation (zero D/R, normalize yields NaN)", D, range, false);
     const Fvector old_D = direction;
     direction.normalize(D);
     right.normalize(R);

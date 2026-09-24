@@ -46,6 +46,13 @@ public:
     using map_PS = xr_map<const char*, SPS*, str_pred>;
     using map_TD = xr_map<const char*, texture_detail, str_pred>;
 
+public:
+    // Diagnostics: how many textures the registry holds, how many of them are engine-made
+    // ($user$...) and how many are per-instance weapon inventory icon targets ($user$itm_inv_...).
+    // A live debugger session during the black-screen bug showed 11150 textures, dominated by
+    // the icon targets - this makes that number visible in the log without a debugger.
+    void dbg_texture_stats(u32& total, u32& user_made, u32& inv_icon_rts) const;
+
 private:
     // data
     map_Blender m_blenders;

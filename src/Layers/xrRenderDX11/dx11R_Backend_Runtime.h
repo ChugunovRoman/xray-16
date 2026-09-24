@@ -309,6 +309,54 @@ IC void CBackend::Compute(u32 ThreadGroupCountX, u32 ThreadGroupCountY, u32 Thre
 }
 #endif
 
+IC void CBackend::dbg_CheckDrawState()
+{
+    if (context_id != CHW::IMM_CTX_ID)
+        return;
+
+    // Cheap, every draw: a collapsed viewport rasterizes nothing and would be missed by the
+    // once-per-frame device query below.
+    if (m_dbgViewportSet && (m_dbgViewportW <= 0.f || m_dbgViewportH <= 0.f))
+    {
+        const u32 nv = ++m_dbgDrawReports;
+        if (nv <= 16 || (nv % 600) == 0)
+            Msg("! [draw-state] frame %u: IMM draw with a %.0fx%.0f viewport #%u", Device.dwFrame,
+                m_dbgViewportW, m_dbgViewportH, nv);
+    }
+
+    // Once per frame: the device queries below AddRef, and a persistent mis-state lasts frames.
+    if (m_dbgCheckFrame == Device.dwFrame)
+        return;
+    m_dbgCheckFrame = Device.dwFrame;
+
+    auto ctx = HW.get_context(context_id);
+    UINT vp_count = 0;
+    ctx->RSGetViewports(&vp_count, nullptr); // count only
+    ID3D11RenderTargetView* dev_rt = nullptr;
+    ID3D11DepthStencilView* dev_ds = nullptr;
+    ctx->OMGetRenderTargets(1, &dev_rt, &dev_ds);
+
+    const bool no_viewport = (vp_count == 0);
+    const bool no_output = (!dev_rt && !dev_ds);
+    // ApplyRTandZB() ran just above, so the device must already match the cache.
+    const bool rt_diverged = (dev_rt != pRT[0]);
+
+    if (no_viewport || no_output || rt_diverged)
+    {
+        const u32 n = ++m_dbgDrawReports;
+        if (n <= 16 || (n % 600) == 0)
+        {
+            Msg("! [draw-state] frame %u:%s%s%s (cache RT0=%p ZB=%p, device RT0=%p DSV=%p) #%u",
+                Device.dwFrame, no_viewport ? " no viewport" : "", no_output ? " no RT/DSV on device" : "",
+                rt_diverged ? " cache/device RT mismatch" : "", (void*)pRT[0], (void*)pZB,
+                (void*)dev_rt, (void*)dev_ds, n);
+        }
+    }
+
+    _RELEASE(dev_rt);
+    _RELEASE(dev_ds);
+}
+
 IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV, u32 startI, u32 PC)
 {
     // VERIFY(vs);
@@ -352,6 +400,8 @@ IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 baseV, u32 startV, u32 countV, 
     constants.flush();
     //  Msg("DrawIndexed: Start");
     //  Msg("iIndexCount=%d, startI=%d, baseV=%d", iIndexCount, startI, baseV);
+    if (ps_r__gpu_diag)
+        dbg_CheckDrawState();
     HW.get_context(context_id)->DrawIndexed(iIndexCount, startI, baseV);
     //  Msg("DrawIndexed: End\n");
 
@@ -384,6 +434,8 @@ IC void CBackend::Render(D3DPRIMITIVETYPE T, u32 startV, u32 PC)
     //  Msg("Draw: Start");
     //  Msg("iVertexCount=%d, startV=%d", iVertexCount, startV);
     // CHK_DX               (HW.pDevice->DrawPrimitive(T, startV, PC));
+    if (ps_r__gpu_diag)
+        dbg_CheckDrawState();
     HW.get_context(context_id)->Draw(iVertexCount, startV);
     //  Msg("Draw: End\n");
     PGO(Msg("PGO:DIP:%dv/%df", 3 * PC, PC));
@@ -416,6 +468,9 @@ IC void CBackend::set_Scissor(const Irect* R)
 
 IC void CBackend::SetViewport(const D3D_VIEWPORT& viewport) const
 {
+    m_dbgViewportW = viewport.Width;
+    m_dbgViewportH = viewport.Height;
+    m_dbgViewportSet = true;
     HW.get_context(context_id)->RSSetViewports(1, &viewport);
 }
 

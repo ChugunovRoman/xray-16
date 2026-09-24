@@ -364,6 +364,54 @@ public:
     void SVPPipelineEnd();
     bool SvpPipelineSwapped() const { return svp_swapped; }
     void svp_publish_surfaces(bool use_twins);
+    // Diagnostics: every G-buffer CRT owns a render target view (pRT, always its own surface) AND
+    // a named texture ($user$position etc.) that svp_publish_surfaces repoints at the scope twin.
+    // If a restore is ever missed the engine draws into one surface and samples another - the
+    // world and the menu go black while UI that rebinds the backbuffer itself keeps drawing.
+    // Returns the number of named textures not pointing at their own surface; logs each when dump.
+    u32 svp_dbg_check_named(bool dump);
+    // Diagnostics: the two once-per-frame globals the second viewport pass shares with the main
+    // pass. dwAccumulatorClearMark gates the accumulator clear + reset_light_marker, and
+    // dwLightMarkerID is the stencil ref every light is accumulated under.
+    u32 dbg_accum_clear_mark() const { return dwAccumulatorClearMark; }
+    u32 dbg_marker_overflows() const { return dbg_light_marker_overflows; }
+    u32 dbg_light_marker_overflows{};
+    // Full CRenderTarget state dump. vid_restart (which deletes and rebuilds this object) cures
+    // the black-screen bug, so whatever is wrong lives in here: the per-context RT dimensions that
+    // feed rmNormal's viewport, the surfaces and views of every intermediate target, the
+    // once-per-frame markers, or the scope twins.
+    void dbg_dump_state();
+    // Diagnostics: CPU readback of the 1x1 tonemap scale (rt_LUM_pool[idx]). bloom_luminance_3.ps
+    // lerps the previous value into the new one every frame and discards its clamp() result, so a
+    // single NaN/Inf frame poisons the pool for good: combine, sky and HUD all multiply by it and
+    // go black while the 2D UI (no tonemap) keeps drawing - and only vid_restart recreates the
+    // pool. Stalls the GPU (Map), so call it rarely. Returns false when unavailable.
+    bool dbg_read_lum(u32 idx, float& value);
+    // Manual recovery probe (r__lum_reset 1): re-clear every pool entry to the startup value.
+    // If the picture returns after this, the poisoned tonemap scale IS the black screen.
+    void dbg_reset_lum();
+    ID3DTexture2D* dbg_lum_staging{};
+    // Diagnostics for the 'black world, UI still visible' bug: reads a handful of pixels back from
+    // a render target and reports how many of them are not all-zero bytes. Format agnostic on
+    // purpose - the only question asked is "did anything at all land in this target". Answering it
+    // for the G-buffer, the light accumulator and the final image splits the black screen into the
+    // three stages that can produce it (geometry / lighting / combine+postprocess), which no state
+    // dump can do: every dump taken so far during the bug looked perfectly healthy.
+    // Stalls the GPU (Map), so call it rarely. sampled==0 means the probe was unavailable.
+    void dbg_probe_rt(const ref_rt& rt, u32& nonzero, u32& sampled);
+    // Same readback, but logs the raw pixel bytes and the DXGI format instead of a yes/no. "Not all
+    // zero" turned out to be useless: the black screen is a UNIFORM very dark colour, which passes
+    // that test everywhere. Actual values say which stage stops carrying the image.
+    void dbg_probe_dump(const char* label, const ref_rt& rt);
+    void dbg_probe_targets(const char* where);
+    // Brightest byte found in a handful of pixels of the presented image, or -1 when unavailable.
+    // Replaces the old all-zero test, which could never fire: the bug paints the world a UNIFORM
+    // very dark colour, so "not all zero" was true on every stage while the screen looked black.
+    int dbg_final_peak();
+    // 1x1 staging textures for the probe, one per source format (created on demand).
+    enum { dbg_probe_staging_count = 8 };
+    DXGI_FORMAT dbg_probe_fmt[dbg_probe_staging_count]{};
+    ID3DTexture2D* dbg_probe_staging[dbg_probe_staging_count]{};
     // Frame driver stage 1a: lazily create/release the dedicated SVP shadow-map atlas.
     // Ensure returns false when creation fails -> caller keeps scope lighting on the inline path.
     bool SVPSmapAtlasEnsure();

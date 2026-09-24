@@ -104,6 +104,12 @@ void CUIInventoryUpgradeWnd::RefreshWeaponItemPortrait()
     bool used_rt = false;
     if (wpn && weapon_inv_icon::IsEnabledForItem(wpn))
     {
+        // This window is the only consumer of the technician preset, so it is rendered on demand:
+        // ask for it here and keep the static upgrade icon until the pass delivers. Update() polls
+        // readiness every frame and re-runs this method once the RT exists.
+        if (!wpn->DynamicInvIconPresetReady(eWpnInvIcon_Technician))
+            weapon_inv_icon::ScheduleItem(wpn, eWpnInvIcon_Technician);
+
         if (wpn->DynamicInvIconPresetReady(eWpnInvIcon_Technician))
         {
             shared_str dyn = weapon_inv_icon::TextureResourceName(wpn, eWpnInvIcon_Technician);

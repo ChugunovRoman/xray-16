@@ -794,6 +794,26 @@ public:
         xr_strcpy(I, "bake active actor weapon to DDS (inventory+technician presets)");
     }
 };
+class CCC_InvIconStats final : public IConsole_Command
+{
+public:
+    CCC_InvIconStats(pcstr name) : IConsole_Command(name) { bEmptyArgsHandled = true; }
+
+    void Execute(pcstr args) override
+    {
+        pcstr a = args;
+        while (a && *a == ' ')
+            ++a;
+        const bool detailed = a && *a && (0 == xr_stricmp(a, "full"));
+        weapon_inv_icon::LogInvIconStats(detailed);
+    }
+
+    void Info(TInfo& I) override
+    {
+        xr_strcpy(I, "dynamic inventory icons: target count and video memory; [full] lists every target");
+    }
+};
+
 class CCC_NpcPreviewCacheReset final : public IConsole_Command
 {
 public:
@@ -2970,6 +2990,7 @@ void CCC_RegisterCommands()
     // Available in MASTER_GOLD Release: bake DDS for dynamic inv icons (modding / content pipeline).
     CMD1(CCC_InvIconBakeDds, "inv_icon_bake_dds");
     CMD1(CCC_InvIconBakeCurrentDds, "inv_icon_bake_current_dds");
+    CMD1(CCC_InvIconStats, "inv_icon_stats");
     CMD1(CCC_NpcPreviewCacheReset, "npc_preview_cache_reset");
 
     CMD1(CCC_LuaHelp, "dump_lua");

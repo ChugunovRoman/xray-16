@@ -186,6 +186,10 @@ public:
     // Persisted $user$ weapon/item icon RTs were dropped (device destroy / render reset).
     virtual void OnWeaponIconUserRtsReleased() {}
 
+    // One persisted icon RT was dropped because the store went over its budget. The game must stop
+    // reporting that texture as ready, otherwise the UI hides the static icon and draws nothing.
+    virtual void OnWeaponIconRtEvicted(pcstr texture_name) { (void)texture_name; }
+
     IGame_Persistent();
     virtual ~IGame_Persistent();
 

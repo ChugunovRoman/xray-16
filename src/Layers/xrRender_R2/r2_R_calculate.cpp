@@ -398,6 +398,11 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
     // Guards mirrored from what the sequential second pass tolerated.
     // GL: no deferred contexts exist - recording geometry on a worker thread would interleave
     // GL calls with the main thread's immediate rendering. Fall back to the sequential path.
+    // Runtime kill-switch: 0 = fully sequential scope pass. Togglable from the console, which
+    // makes it the fastest A/B when a rendering glitch appears mid-session.
+    if (ps_r__svp_pipeline == 0)
+        return false;
+
     if (m_bFirstFrameAfterReset || o.oldshadowcascades || second_vp_fov <= EPS_L ||
         !svp_frame_driver_available())
         return false;
@@ -410,7 +415,8 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
     svp_frame_driver = svp_frame_driver_available();
     // Shadow-transfer: the main pass copies each smap page into the dedicated SVP atlas itself
     // (see render_lights) and the worker skips its shadow build stage entirely.
-    svp_shadow_transfer = true;
+    // Console kill-switch r__svp_shadow_transfer 0 switches to the worker-build path (stage 1).
+    svp_shadow_transfer = ps_r__svp_shadow_transfer != 0;
     if (svp_frame_driver && !Target->SVPSmapAtlasEnsure())
         svp_frame_driver = false;
     // Stage machine: 1 = the worker is expected to deliver sealed shadow lists this frame,

@@ -13,14 +13,169 @@
 #include "Layers/xrRender/FBasicVisual.h"
 #include "Layers/xrRender/xrRender_console.h"
 
+#include <cmath>
+
 namespace xray::render::RENDER_NAMESPACE
 {
+namespace
+{
+// Diagnostics for the 'everything black except the UI' bug. Every G-buffer CRT owns a render
+// target view (always its own surface) and a named texture that svp_publish_surfaces repoints at
+// the scope twin for the duration of the second viewport pass. A missed restore leaves the engine
+// drawing into one surface and sampling another: world and menu go black, while UI that rebinds
+// the backbuffer itself keeps drawing. r__gpu_diag 1 watches for it every frame and logs the
+// transition; r__dump_render_state 1 prints the full table plus the live device state once.
+// Video memory and texture-registry pressure, one line. Logged with every periodic census, in
+// every dump, and on every dark transition, so the moment the world goes black can be read
+// against how much video memory the process holds and how many textures exist at that moment.
+// Also logs its own transition: the first time local usage crosses 90% of the OS budget.
+void dbg_log_resource_pressure(const char* where)
+{
+    u32 tex_total = 0, tex_user = 0, tex_icons = 0;
+    if (RImplementation.Resources)
+        RImplementation.Resources->dbg_texture_stats(tex_total, tex_user, tex_icons);
+    const u32 icon_rts = RImplementation.WeaponIcon_PersistedCount();
+
+#if defined(USE_DX11)
+    u64 lu = 0, lb = 0, nu = 0, nb = 0;
+    const bool have_vram = HW.QueryVideoMemory(lu, lb, nu, nb);
+    const auto mb = [](u64 v) { return u32(v / (1024ull * 1024ull)); };
+    if (have_vram)
+    {
+        static bool s_over = false;
+        const bool over = lb && (lu * 10 > lb * 9);
+        if (over != s_over)
+        {
+            s_over = over;
+            Msg("%s [vram] frame %u: local usage %s 90%% of the OS budget (%u of %u MB)", over ? "!" : "*",
+                Device.dwFrame, over ? "crossed" : "dropped back below", mb(lu), mb(lb));
+        }
+        Msg("%s [vram] %s frame %u: local %u/%u MB, non-local %u/%u MB | textures total=%u user=%u inv_icon_rts=%u "
+            "persisted_icon_rts=%u",
+            over ? "!" : "~", where, Device.dwFrame, mb(lu), mb(lb), mb(nu), mb(nb), tex_total, tex_user, tex_icons,
+            icon_rts);
+        return;
+    }
+#endif
+    Msg("~ [vram] %s frame %u: <no DXGI 1.4 memory info> | textures total=%u user=%u inv_icon_rts=%u persisted_icon_rts=%u",
+        where, Device.dwFrame, tex_total, tex_user, tex_icons, icon_rts);
+}
+
+// Set by the one-shot dump so the same frame is also sampled right before the 2D UI is drawn.
+// The world is composed long before that point, and the UI still appears on screen, so whatever
+// blanks the picture has to act in between - or not at all, which is just as informative.
+int g_dbg_probe_before_ui = 0;
+
+void dbg_render_state_audit(const char* where)
+{
+    const bool dump = ps_r__dump_render_state != 0;
+    const bool restore = ps_r__svp_restore_surfaces != 0;
+    const bool lum_reset = ps_r__lum_reset != 0;
+    if (dump)
+    {
+        ps_r__dump_render_state = 0; // one-shot
+        g_dbg_probe_before_ui = 1;
+    }
+    // All one-shot probes work with r__gpu_diag off: the bug may well be caught by surprise.
+    if (!dump && !restore && !lum_reset && !ps_r__gpu_diag)
+        return;
+
+    CRenderTarget& target = *RImplementation.Target;
+
+    // Manual recovery probe: re-clear the 1x1 tonemap scale pool. Reads the values first, so the
+    // log shows what the pool held while the screen was black (NaN/Inf/0 = the poisoned-pool
+    // hypothesis confirmed; a sane value = the black screen lives elsewhere).
+    if (lum_reset)
+    {
+        ps_r__lum_reset = 0;
+        for (u32 i = 0; i < HW.Caps.iGPUNum * 2; ++i)
+        {
+            float v = 0.f;
+            const bool ok = target.dbg_read_lum(i, v);
+            Msg("* [lum] frame %u: pool[%u] before reset = %s%g", Device.dwFrame, i, ok ? "" : "<unreadable> ", v);
+        }
+        target.dbg_reset_lum();
+        Msg("* [lum] frame %u: rt_LUM_pool re-cleared to the startup value", Device.dwFrame);
+    }
+
+    // Manual recovery probe: republish every named texture onto its own surface. If the world
+    // comes back after 'r__svp_restore_surfaces 1' in the console, a missed restore in
+    // SVPPipelineEnd/svp_publish_surfaces is proven to be the cause of the black screen.
+    if (restore)
+    {
+        ps_r__svp_restore_surfaces = 0;
+        if (target.SvpPipelineSwapped())
+            Msg("! [svp-surf] forced restore skipped: the target swap is currently ACTIVE");
+        else
+        {
+            const u32 before = target.svp_dbg_check_named(false);
+            target.svp_publish_surfaces(false);
+            Msg("* [svp-surf] forced restore: %u mismatching texture(s) before, %u after",
+                before, target.svp_dbg_check_named(false));
+        }
+    }
+
+    // The target swap must never outlive the pass that opened it.
+    if (target.SvpPipelineSwapped())
+        Msg("! [svp-swap] %s: frame %u runs with the SVP target swap still ACTIVE", where, Device.dwFrame);
+
+    const u32 bad = target.svp_dbg_check_named(dump);
+    static u32 s_prev_bad = 0;
+    if (bad != s_prev_bad)
+    {
+        Msg("%s [svp-surf] %s: %u named G-buffer texture(s) not on their own surface (was %u)",
+            bad ? "!" : "*", where, bad, s_prev_bad);
+        if (bad && !dump)
+            target.svp_dbg_check_named(true); // print the table once, on the transition
+        s_prev_bad = bad;
+    }
+
+    if (!dump)
+        return;
+
+#if defined(USE_DX11)
+    auto ctx = HW.get_context(CHW::IMM_CTX_ID);
+    UINT vp_count = 0;
+    ctx->RSGetViewports(&vp_count, nullptr);
+    D3D11_VIEWPORT vp{};
+    if (vp_count)
+    {
+        UINT one = 1;
+        ctx->RSGetViewports(&one, &vp);
+    }
+    ID3D11RenderTargetView* dev_rt = nullptr;
+    ID3D11DepthStencilView* dev_ds = nullptr;
+    ctx->OMGetRenderTargets(1, &dev_rt, &dev_ds);
+    Msg("~ [render-state] %s, frame %u", where, Device.dwFrame);
+    Msg("~   cache RT0=%p ZB=%p | device RT0=%p DSV=%p", (void*)RCache.get_RT(), (void*)RCache.get_ZB(),
+        (void*)dev_rt, (void*)dev_ds);
+    Msg("~   viewports=%u first=%.0fx%.0f at %.0f,%.0f", vp_count, vp.Width, vp.Height, vp.TopLeftX, vp.TopLeftY);
+    Msg("~   imm owner thread=%u, foreign-thread calls=%u", HW.ImmOwnerThread(), HW.ImmForeignCalls());
+    Msg("~   svp swap active=%d", target.SvpPipelineSwapped() ? 1 : 0);
+    _RELEASE(dev_rt);
+    _RELEASE(dev_ds);
+#endif
+    target.dbg_dump_state();
+    target.dbg_probe_targets("dump");
+    dbg_log_resource_pressure("dump");
+    for (u32 i = 0; i < HW.Caps.iGPUNum * 2; ++i)
+    {
+        float v = 0.f;
+        if (target.dbg_read_lum(i, v))
+            Msg("~   lum_pool[%u] = %g%s", i, v, std::isfinite(v) ? "" : "   <== NOT FINITE");
+        else
+            Msg("~   lum_pool[%u] = <unreadable>", i);
+    }
+}
+} // namespace
+
 void CRender::RenderMenu()
 {
 #if defined(USE_DX11)
     TracyD3D11Zone(HW.profiler_ctx, "render_menu");
 #endif
     PIX_EVENT(render_menu);
+    dbg_render_state_audit("menu");
     //	Globals
     RCache.set_CullMode(CULL_CCW);
     RCache.set_Stencil(FALSE);
@@ -180,6 +335,26 @@ void CRender::Render()
     g_r = 1;
 
     const bool svp_pass = m_SecondViewportPass;
+
+    if (!svp_pass)
+        dbg_render_state_audit("world");
+
+#if defined(USE_DX11)
+    // The device dies somewhere between the picture going black and the next scope pass, and the
+    // first thing that notices is FinishCommandList. Ask the device itself, every frame, so the log
+    // says whether the removal precedes the black screen or follows it.
+    if (ps_r__gpu_diag && !svp_pass && HW.pDevice)
+    {
+        static bool s_reported = false;
+        const HRESULT reason = HW.pDevice->GetDeviceRemovedReason();
+        if (FAILED(reason) && !s_reported)
+        {
+            s_reported = true;
+            Msg("! [device] frame %u: the D3D11 device is removed, reason 0x%08x %s", Device.dwFrame,
+                u32(reason), CHW::DeviceRemovedReasonName(reason));
+        }
+    }
+#endif
 
     rmNormal(RCache);
 
@@ -552,6 +727,17 @@ void CRender::Render()
         Lights_LastFrame.clear();
     }
 
+    // r__gpu_diag: occlusion-query slot telemetry, main pass only. live must track the number of
+    // lights with a test in flight (tens); a monotonically growing capacity means queries are
+    // issued and never fetched - the leak class that ended in a removed device.
+    if (ps_r__gpu_diag && !svp_pass && (Device.dwFrame % 1800) == 0)
+    {
+        size_t occq_live = 0, occq_capacity = 0, occq_pooled = 0;
+        HWOCC.get_stats(occq_live, occq_capacity, occq_pooled);
+        Msg("* [gpu-diag] frame %u: occq live=%zu capacity=%zu pooled=%zu", Device.dwFrame,
+            occq_live, occq_capacity, occq_pooled);
+    }
+
     // full screen pass to mark msaa-edge pixels in highest stencil bit
     if (o.msaa)
     {
@@ -795,11 +981,88 @@ void CRender::Render()
         Target->phase_combine();
     }
 
+    // r__gpu_diag: census of what the MAIN pass actually submitted this frame. The scope pass has
+    // not run yet at this point, so these numbers are the main view alone. Logged on every change
+    // of the 'scene collapsed' state and periodically, to separate the possible causes of a black
+    // screen: draws ~0 means the visibility/geometry stage produced nothing, normal draws with no
+    // light means the accumulation stage is the problem (watch marker/clear-mark), and normal
+    // numbers everywhere point at the combine/postprocess tail.
+    if (ps_r__gpu_diag && !svp_pass)
+    {
+        const auto& st = RCache.stat.render;
+        // Tonemap scale pool, sampled twice a second (each readback stalls the GPU). Both entries
+        // are logged: phase_combine writes [1] and swaps, so a poison shows up in both within two
+        // frames. A non-finite value is treated as a collapse so the transition frame gets logged
+        // together with the light census of that moment.
+        static float s_lum[2] = {1.f, 1.f};
+        static bool s_lum_readable = false;
+        if ((Device.dwFrame % 60) == 0)
+        {
+            s_lum_readable = Target->dbg_read_lum(0, s_lum[0]);
+            if (s_lum_readable)
+                Target->dbg_read_lum(1, s_lum[1]);
+        }
+        const bool lum_bad = s_lum_readable && !(std::isfinite(s_lum[0]) && std::isfinite(s_lum[1]));
+        const bool collapsed = (st.calls < 32) || (Stats.l_visible == 0) || lum_bad;
+        static bool s_collapsed = false;
+        static u32 s_last_frame = 0;
+
+        // Catch the transition without the player having to type anything: sample the presented
+        // image twice a second and watch its peak brightness. The world area goes to a uniform
+        // near-black while the 2D UI keeps drawing, so a low peak away from the screen edges is
+        // the signature. Two consecutive dark samples are required - a legitimately dark frame
+        // (a loading screen, a fade, a pitch-black interior) must not trigger the capture.
+        static int s_dark_run = 0;
+        static bool s_dark = false;
+        if ((Device.dwFrame % 60) == 30)
+        {
+            const int peak = Target->dbg_final_peak();
+            if (peak >= 0)
+            {
+                s_dark_run = (peak <= 10) ? (s_dark_run + 1) : 0;
+                const bool dark = (s_dark_run >= 2);
+                if (dark != s_dark)
+                {
+                    s_dark = dark;
+                    Msg("%s [probe] frame %u: the presented image went %s, peak=%d (draws=%u lights=%u)",
+                        dark ? "!" : "*", Device.dwFrame, dark ? "DARK" : "back to normal", peak,
+                        st.calls, Stats.l_total);
+                    // Both sampling points plus the full state, exactly like the one-shot console
+                    // command would produce - the capture must not depend on anyone being quick.
+                    Target->dbg_probe_targets(dark ? "went-dark" : "recovered");
+                    dbg_log_resource_pressure(dark ? "went-dark" : "recovered");
+                    g_dbg_probe_before_ui = 1;
+                    if (dark)
+                        Target->dbg_dump_state();
+                }
+            }
+        }
+
+        if (collapsed != s_collapsed || (Device.dwFrame - s_last_frame) >= 1800)
+        {
+            s_collapsed = collapsed;
+            s_last_frame = Device.dwFrame;
+            Msg("%s [scene] frame %u: draws=%u verts=%u polys=%u | lights total=%u vis=%u shadowed=%u smaps=%d"
+                " | marker=%u overflows=%u clear_mark=%u | lum=%g/%g%s | svp parallel=%d stage=%d transfer=%d",
+                collapsed ? "!" : "*", Device.dwFrame, st.calls, st.verts, st.polys,
+                Stats.l_total, Stats.l_visible, Stats.l_shadowed, Stats.s_merged,
+                Target->dwLightMarkerID, Target->dbg_marker_overflows(), Target->dbg_accum_clear_mark(),
+                s_lum[0], s_lum[1], lum_bad ? " <== NOT FINITE" : "",
+                svp_parallel ? 1 : 0, svp_shadow_stage, svp_shadow_transfer ? 1 : 0);
+            dbg_log_resource_pressure("census");
+        }
+    }
+
     VERIFY(dsgraph.mapDistort.empty());
 }
 
 void CRender::BindBackbufferForUI()
 {
+    if (g_dbg_probe_before_ui)
+    {
+        g_dbg_probe_before_ui = 0;
+        Target->dbg_probe_targets("before-ui");
+    }
     Target->u_setrt(RCache, Device.dwWidth, Device.dwHeight, Target->get_base_rt(), 0, 0, Target->get_base_zb());
     // Raw u_setrt never pushes a GPU viewport: after a scaled SVP pass it may still be sw×sh,
     // which would rasterize the UI into the top-left corner of the backbuffer.
