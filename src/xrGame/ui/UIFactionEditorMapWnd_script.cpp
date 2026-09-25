@@ -8,6 +8,11 @@ bool ui_map_click_has_modifier(u32 mask, u32 flag)
     return (mask & flag) != 0;
 }
 
+pcstr get_spawn_smart_level_name(pcstr smart_name)
+{
+    return CSpawnSmartTerrainMapDataSource::GetSharedSmartLevelName(smart_name);
+}
+
 void CUIFactionEditorMapWnd::script_register(lua_State* luaState)
 {
     using namespace luabind;
@@ -27,6 +32,7 @@ void CUIFactionEditorMapWnd::script_register(lua_State* luaState)
             ],
 
         def("ui_map_click_has_modifier", &ui_map_click_has_modifier),
+        def("get_spawn_smart_level_name", &get_spawn_smart_level_name),
 
         class_<CUIFactionEditorMapWnd, CUIWindow>("CUIFactionEditorMapWnd")
             .def(constructor<>())

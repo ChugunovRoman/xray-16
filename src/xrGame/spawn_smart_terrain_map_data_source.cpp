@@ -704,6 +704,23 @@ public:
         return true;
     }
 
+    pcstr FindLevelNameBySmartName(pcstr spawn_name, pcstr smart_name) const
+    {
+        if (!smart_name || !smart_name[0] || !m_published ||
+            xr_strcmp(m_published->spawn_name.c_str(), spawn_name) != 0)
+        {
+            return "";
+        }
+
+        for (const auto& point : m_published->points)
+        {
+            if (xr_strcmp(point.smart_name.c_str(), smart_name) == 0)
+                return point.level_name.size() ? point.level_name.c_str() : "";
+        }
+
+        return "";
+    }
+
     u32 GetRevision(pcstr spawn_name) const
     {
         if (!m_published || xr_strcmp(m_published->spawn_name.c_str(), spawn_name) != 0)
@@ -826,6 +843,13 @@ void CSpawnSmartTerrainMapDataSource::PublishSharedDataIfReady()
 void CSpawnSmartTerrainMapDataSource::ShutdownSharedLoading()
 {
     CSharedSmartTerrainMapCache::Instance().Shutdown();
+}
+
+pcstr CSpawnSmartTerrainMapDataSource::GetSharedSmartLevelName(pcstr smart_name, pcstr spawn_name)
+{
+    CSharedSmartTerrainMapCache& cache = CSharedSmartTerrainMapCache::Instance();
+    cache.PublishPending();
+    return cache.FindLevelNameBySmartName(spawn_name, smart_name);
 }
 
 void CSpawnSmartTerrainMapDataSource::SetSpawnName(pcstr spawn_name)

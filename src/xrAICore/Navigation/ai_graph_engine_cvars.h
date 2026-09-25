@@ -7,7 +7,7 @@
 
 
 
-/** When 1 (default), `CGraphEngine::search` serializes on the engine lock (safe baseline). When 0, searches may run in parallel — use only after validating callers (see docs/SHARED_AI_MT_AUDIT.md). */
+/** When 1 (default), `CGraphEngine::search` serializes on the engine lock (safe baseline). When 0, searches may run in parallel — use only after validating callers (see plans/optimization_arch/SHARED_AI_MT_AUDIT.md). */
 
 extern XRAICORE_API int ps_ai_graph_engine_serialize;
 

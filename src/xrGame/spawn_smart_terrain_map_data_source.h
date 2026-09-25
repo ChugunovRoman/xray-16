@@ -10,6 +10,7 @@ public:
     static void StartSharedLoading(pcstr spawn_name = "all");
     static void PublishSharedDataIfReady();
     static void ShutdownSharedLoading();
+    static pcstr GetSharedSmartLevelName(pcstr smart_name, pcstr spawn_name = "all");
 
     void SetSpawnName(pcstr spawn_name);
     pcstr GetSpawnName() const { return m_spawn_name.c_str(); }

@@ -91,7 +91,7 @@ inline bool CGraphEngine::search(const _Graph& graph, const _index_type& start_n
     if (!vertices_valid)
         return false;
 
-    // Serialize search backends when `ps_ai_graph_engine_serialize` is set (see docs/SHARED_AI_MT_AUDIT.md).
+    // Serialize search backends when `ps_ai_graph_engine_serialize` is set (see plans/optimization_arch/SHARED_AI_MT_AUDIT.md).
     GraphEngineSearchLock scope(&m_lock, true);
     GraphEngineConcurrencyProbe concurrent_probe(&g_ai_graph_engine_active_index_search, "index");
     START_PROFILE("graph_engine")
