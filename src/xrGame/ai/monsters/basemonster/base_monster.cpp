@@ -348,8 +348,6 @@ void CBaseMonster::UpdateCL()
 
     control().update_frame();
 
-    // DEBUG/STRESS gate only (default 0) - see performance_cvars.h.
-    if (npc_perf_disable_ucl_stalker_physics == 0)
     {
         ZoneScopedN("ucl_base_monster_physics");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsUpdateCL);

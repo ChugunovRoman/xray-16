@@ -1055,9 +1055,7 @@ void CAI_Stalker::UpdateCL()
     START_PROFILE("stalker/client_update")
     VERIFY2(PPhysicsShell() || getEnabled(), cName().c_str());
 
-    // DEBUG/STRESS gates only (default 0). Skipping in_UpdateCL freezes the IK foot raycasts while the skeleton
-    // visual callback keeps applying the stale object_shift - NPCs sink into the terrain or walk on air.
-    const bool run_ucl_physics = npc_perf_disable_ucl_stalker_physics == 0;
+    // DEBUG/STRESS gate only (default 0).
     const bool run_ucl_step_alive = npc_perf_disable_ucl_stalker_step_manager == 0;
 
     if (g_Alive())
@@ -1113,16 +1111,13 @@ void CAI_Stalker::UpdateCL()
     STOP_PROFILE
 
     // npc_perf_mt_stalker_physics: reserved (see CharacterPhysicsSupport.cpp); deferred physics would run after sight order.
-    if (run_ucl_physics)
+    START_PROFILE("stalker/client_update/physics")
     {
-        START_PROFILE("stalker/client_update/physics")
-        {
-            ZoneScopedN("ucl_stalker_physics");
-            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLPhysics);
-            m_pPhysics_support->in_UpdateCL();
-        }
-        STOP_PROFILE
+        ZoneScopedN("ucl_stalker_physics");
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLPhysics);
+        m_pPhysics_support->in_UpdateCL();
     }
+    STOP_PROFILE
 
     if (g_Alive())
     {

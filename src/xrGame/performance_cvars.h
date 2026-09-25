@@ -90,13 +90,9 @@ extern int npc_perf_ik_foot_raypick_batch_min_rays;
  */
 extern int npc_perf_mt_stalker_physics;
 
-// Gates for CCharacterPhysicsSupport::in_UpdateCL + CStepManager::update in CAI_Stalker/CBaseMonster::UpdateCL.
-// Console names keep stalker_* for user.ltx compatibility; they apply to all custom monsters.
-// DEBUG/STRESS ONLY - keep at 0. Setting 1 stops ik_controller()->Update(), so the IK foot raycasts never refresh
-// while CIKLimbsController::Calculate() keeps applying the last object_shift from the skeleton visual callback:
-// NPCs then sink into the terrain or walk on air (up to global_max_shift = 1 m), and corpses stop being synced
-// by InterpolateGlobalTransform.
-extern int npc_perf_disable_ucl_stalker_physics;
+// Gate for CStepManager::update in CAI_Stalker/CBaseMonster::UpdateCL.
+// Console name keeps stalker_* for user.ltx compatibility; it applies to all custom monsters.
+// DEBUG/STRESS ONLY - keep at 0.
 extern int npc_perf_disable_ucl_stalker_step_manager;
 
 // Lua script TTL/interval (read via get_console():get_integer in scripts)

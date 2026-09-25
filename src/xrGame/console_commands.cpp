@@ -227,7 +227,6 @@ u32 npc_perf_ik_interval_enemy_selected_ms = 0;
 int npc_perf_ik_foot_raypick_batch = 2;
 int npc_perf_ik_foot_raypick_batch_min_rays = 12;
 int npc_perf_mt_stalker_physics = 0;
-int npc_perf_disable_ucl_stalker_physics = 0;
 int npc_perf_disable_ucl_stalker_step_manager = 0;
 int ai_evaluator_ttl_ms = 500;
 u32 npc_perf_state_mgr_animstate_ttl_ms = 120;
@@ -2911,7 +2910,6 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_ik_foot_raypick_batch", &npc_perf_ik_foot_raypick_batch, 0, 2);
     CMD4(CCC_Integer, "npc_perf_ik_foot_raypick_batch_min_rays", &npc_perf_ik_foot_raypick_batch_min_rays, 0, 128);
     CMD4(CCC_Integer, "npc_perf_mt_stalker_physics", &npc_perf_mt_stalker_physics, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_disable_ucl_stalker_physics", &npc_perf_disable_ucl_stalker_physics, 0, 1);
     CMD4(CCC_Integer, "npc_perf_disable_ucl_stalker_step_manager", &npc_perf_disable_ucl_stalker_step_manager, 0, 1);
     CMD4(CCC_Integer, "npc_perf_state_mgr_animstate_ttl_ms", (int*)&npc_perf_state_mgr_animstate_ttl_ms, 10, 30000);
     CMD4(CCC_Integer, "npc_perf_script_combat_ttl_ms", (int*)&npc_perf_script_combat_ttl_ms, 10, 30000);
