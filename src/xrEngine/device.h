@@ -16,6 +16,7 @@
 #include "xrCore/ModuleLookup.hpp"
 
 #include <atomic>
+#include <thread>
 
 #define DEVICE_RESET_PRECACHE_FRAME_COUNT 10
 
@@ -34,11 +35,15 @@ constexpr float VIEWPORT_NEAR = 0.2f;
 constexpr float VIEWPORT_NEAR_3D = 0.01f;
 constexpr float HUD_VIEWPORT_NEAR = 0.05f;
 
-// Set while the dedicated SVP build thread (a plain std::thread, not a task-scheduler worker)
-// executes render stages that reach game code; defined ENGINE_API in device.cpp. Game render
-// callbacks that mutate engine queues keyed by scheduler worker IDs (CObjectList::o_crow etc.)
-// must no-op under this flag - the main pass renders the same objects and registers them.
-ENGINE_API extern std::atomic<bool> g_svp_worker_rendering;
+// Id of the dedicated SVP build thread (a plain std::thread, not a task-scheduler worker) while
+// it executes render stages that reach game code; std::thread::id{} when the worker is parked.
+// Defined ENGINE_API in device.cpp. Game render callbacks that mutate engine queues keyed by
+// scheduler worker IDs (CObjectList::o_crow etc.) must no-op ON THAT THREAD ONLY - the main pass
+// renders the same objects and registers them. Ask svp_worker_is_current_thread() rather than
+// testing a plain flag: a global bool also silences the main pass for as long as the SVP build
+// overlaps it, which drops objects out of the crow list and stops their UpdateCL.
+ENGINE_API extern std::atomic<std::thread::id> g_svp_worker_thread_id;
+ENGINE_API bool svp_worker_is_current_thread();
 
 class ENGINE_API CRenderDevice : public IWindowHandler
 {

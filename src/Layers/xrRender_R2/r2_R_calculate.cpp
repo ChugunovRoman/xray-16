@@ -323,12 +323,19 @@ void CRender::ApplySecondVPLodGlobals()
 
 namespace
 {
-// Raises g_svp_worker_rendering for the lifetime of the SVP build thread's body; game render
-// callbacks consult the flag before touching scheduler-worker-keyed queues (o_crow etc.).
+// Publishes this thread's id for the lifetime of the SVP build thread's body; game render
+// callbacks compare it with their own thread before touching scheduler-worker-keyed queues
+// (o_crow etc.), so only the worker is silenced and the main pass keeps registering objects.
 struct SVPWorkerRenderGuard
 {
-    SVPWorkerRenderGuard() { g_svp_worker_rendering.store(true, std::memory_order_relaxed); }
-    ~SVPWorkerRenderGuard() { g_svp_worker_rendering.store(false, std::memory_order_relaxed); }
+    SVPWorkerRenderGuard()
+    {
+        g_svp_worker_thread_id.store(std::this_thread::get_id(), std::memory_order_relaxed);
+    }
+    ~SVPWorkerRenderGuard()
+    {
+        g_svp_worker_thread_id.store(std::thread::id{}, std::memory_order_relaxed);
+    }
 };
 } // namespace
 
@@ -344,8 +351,8 @@ void CRender::svp_worker_loop()
         if (svp_worker_exit.load(std::memory_order_relaxed))
             return;
         {
-            // Per-job scope: g_svp_worker_rendering must be true only while the worker
-            // actually renders (parity with the old per-frame threads), false while parked.
+            // Per-job scope: the worker id must be published only while the worker actually
+            // renders (parity with the old per-frame threads), cleared while parked.
             SVPWorkerRenderGuard worker_render_guard; // reset on every exit path, incl. abort
             R_dsgraph_structure* const ds = svp_dsgraph;
             auto* const params = &svp_calc_params;

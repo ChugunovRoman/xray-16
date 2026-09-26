@@ -388,7 +388,7 @@ void CROS_impl::update_smooth(IRenderable* O)
     // smart_update NEVER runs, freezing hemi_value/sun_value at pre-SVP levels (dark dynamic
     // objects in the scope). The worker exits here; its recorded draws keep last frame's
     // smoothed values - a one-frame ambient lag is invisible.
-    const bool svp_worker_now = g_svp_worker_rendering.load(std::memory_order_relaxed);
+    const bool svp_worker_now = svp_worker_is_current_thread();
     if (svp_worker_now)
         return;
 #endif // RENDER != R_R1

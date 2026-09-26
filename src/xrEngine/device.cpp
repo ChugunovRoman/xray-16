@@ -21,11 +21,17 @@ ENGINE_API CLoadScreenRenderer load_screen_renderer;
 
 ENGINE_API bool g_bRendering = false;
 
-// True while the dedicated SVP build thread (a plain std::thread, NOT a task-scheduler worker)
-// is running render stages that reach game code. Game-side render callbacks that mutate engine
-// queues keyed by scheduler worker IDs (CObjectList::o_crow etc.) must no-op under this flag -
-// the main pass renders the same objects and performs the registration.
-ENGINE_API std::atomic<bool> g_svp_worker_rendering{ false };
+// Id of the dedicated SVP build thread (a plain std::thread, NOT a task-scheduler worker) while
+// it runs render stages that reach game code; std::thread::id{} while the worker is parked.
+// Game-side render callbacks that mutate engine queues keyed by scheduler worker IDs
+// (CObjectList::o_crow etc.) must no-op on that thread - the main pass renders the same objects
+// and performs the registration.
+ENGINE_API std::atomic<std::thread::id> g_svp_worker_thread_id{ std::thread::id{} };
+
+ENGINE_API bool svp_worker_is_current_thread()
+{
+    return g_svp_worker_thread_id.load(std::memory_order_relaxed) == std::this_thread::get_id();
+}
 
 ENGINE_API bool g_bBenchmark = false;
 string512 g_sBenchmarkName;

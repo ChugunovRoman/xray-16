@@ -735,7 +735,7 @@ void CHW::CheckImmThread(const char* where)
     if (n <= 32 || (n % 1000) == 0)
     {
         Msg("! [imm-race] %s on the IMMEDIATE context from thread %u (owner %u, svp_worker=%d) #%u",
-            where, tid, owner, g_svp_worker_rendering.load(std::memory_order_relaxed) ? 1 : 0, n);
+            where, tid, owner, svp_worker_is_current_thread() ? 1 : 0, n);
     }
 }
 
