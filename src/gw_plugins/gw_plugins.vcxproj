@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Builds GlobalWar plugins (native C++ libraries of addons, CMake + Ninja) before the engine.
+  XR_3DA references this project, so F5 builds plugins first, then the engine, then starts the game.
+  Docs: wiki/doc/plugins
+
+  Overrides (put into src\xray.user.props, it is not tracked by git):
+    <GwBuildPlugins>false</GwBuildPlugins>              disable the step
+    <GwPluginsDir>D:\my\plugins\</GwPluginsDir>          other plugins source folder
+  The GW_PLUGINS_DIR environment variable is honoured by build_plugins.cmd as well.
+-->
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Label="PropertySheets">
+    <Import Project="..\xray_project_configurations.props" />
+  </ImportGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>15.0</VCProjectVersion>
+    <ProjectGuid>{0CA27A2F-8CC4-453C-A333-4D73255F7B50}</ProjectGuid>
+    <RootNamespace>gw_plugins</RootNamespace>
+    <ProjectName>gw_plugins</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="..\xray_project_configuration.props" />
+  </ImportGroup>
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="..\xray_variables.props" />
+    <Import Project="..\xray_output.props" />
+    <Import Project="..\xray.user.props" Condition="exists('..\xray.user.props')" />
+  </ImportGroup>
+  <PropertyGroup>
+    <GwBuildPlugins Condition="'$(GwBuildPlugins)'==''">true</GwBuildPlugins>
+    <!-- MSBuildThisFileDirectory, not SolutionDir: the project must also work when built without engine.sln -->
+    <GwPluginsDir Condition="'$(GwPluginsDir)'==''">$(MSBuildThisFileDirectory)..\..\..\GlobalWar\addons\</GwPluginsDir>
+    <GwPluginsDir>$([MSBuild]::EnsureTrailingSlash('$(GwPluginsDir)'))</GwPluginsDir>
+    <GwPluginsSdkDir>$(MSBuildThisFileDirectory)..\xrAddonHost\include\</GwPluginsSdkDir>
+    <GwPluginsScript>$(MSBuildThisFileDirectory)build_plugins.cmd</GwPluginsScript>
+    <GwPluginsArgs>"$(Configuration)" "$(Platform)"</GwPluginsArgs>
+    <GwPluginsDirArg>"$(GwPluginsDir.TrimEnd('\'))"</GwPluginsDirArg>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(GwBuildPlugins)'=='true'">
+    <NMakeBuildCommandLine>call "$(GwPluginsScript)" $(GwPluginsArgs) build $(GwPluginsDirArg)</NMakeBuildCommandLine>
+    <NMakeReBuildCommandLine>call "$(GwPluginsScript)" $(GwPluginsArgs) rebuild $(GwPluginsDirArg)</NMakeReBuildCommandLine>
+    <NMakeCleanCommandLine>call "$(GwPluginsScript)" $(GwPluginsArgs) clean $(GwPluginsDirArg)</NMakeCleanCommandLine>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(GwBuildPlugins)'!='true'">
+    <NMakeBuildCommandLine>echo [gw_plugins] disabled (GwBuildPlugins=false)</NMakeBuildCommandLine>
+    <NMakeReBuildCommandLine>echo [gw_plugins] disabled (GwBuildPlugins=false)</NMakeReBuildCommandLine>
+    <NMakeCleanCommandLine>echo [gw_plugins] disabled (GwBuildPlugins=false)</NMakeCleanCommandLine>
+  </PropertyGroup>
+  <PropertyGroup>
+    <NMakeOutput />
+    <!-- IntelliSense for plugin sources opened from the engine solution -->
+    <NMakeIncludeSearchPath>$(GwPluginsSdkDir);$(NMakeIncludeSearchPath)</NMakeIncludeSearchPath>
+    <NMakePreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;$(NMakePreprocessorDefinitions)</NMakePreprocessorDefinitions>
+    <AdditionalOptions>/std:c++20</AdditionalOptions>
+  </PropertyGroup>
+  <ItemGroup>
+    <ClInclude Include="$(GwPluginsSdkDir)gwp\gwp_api.h" />
+    <ClInclude Include="$(GwPluginsSdkDir)gwp\gwp.hpp" />
+    <ClCompile Include="$(GwPluginsDir)**\*.cpp" Exclude="$(GwPluginsDir)**\bin\**" />
+    <ClInclude Include="$(GwPluginsDir)**\*.h;$(GwPluginsDir)**\*.hpp" Exclude="$(GwPluginsDir)**\bin\**" />
+    <None Include="$(GwPluginsDir)**\addon.ltx;$(GwPluginsDir)**\CMakeLists.txt;$(GwPluginsDir)cmake\*.cmake;$(GwPluginsDir)CMakePresets.json" Exclude="$(GwPluginsDir)**\bin\**" />
+    <None Include="build_plugins.cmd" />
+    <None Include="gen_plugin_api_index.py" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

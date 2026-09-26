@@ -1147,6 +1147,9 @@
     <Filter Include="AI\ASpace">
       <UniqueIdentifier>{9e0e161a-5613-4e3b-b067-0abcc52684ad}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Core\Addons">
+      <UniqueIdentifier>{7e3c1d2a-4b5f-4c6e-9a8d-2f1b0c3d4e5a}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Core">
       <UniqueIdentifier>{ec297d0e-d910-4791-b70d-324efb19ea10}</UniqueIdentifier>
     </Filter>
@@ -4572,6 +4575,9 @@
     <ClInclude Include="..\xrServerEntities\ai_sounds.h">
       <Filter>AI\ASound</Filter>
     </ClInclude>
+    <ClInclude Include="addon_host.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
     <ClInclude Include="ai_space.h">
       <Filter>AI\ASpace</Filter>
     </ClInclude>
@@ -7680,6 +7686,9 @@
     </ClCompile>
     <ClCompile Include="ai_sounds.cpp">
       <Filter>AI\ASound</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_host.cpp">
+      <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="ai_space.cpp">
       <Filter>AI\ASpace</Filter>

@@ -75,6 +75,12 @@
     <ProjectReference Include="..\xrGame\xrGame.vcxproj">
       <Project>{200652a6-043e-4634-8837-87983b3bd5e0}</Project>
     </ProjectReference>
+    <!-- GlobalWar plugins (native C++ libraries of addons): built before the engine, nothing is linked -->
+    <ProjectReference Include="..\gw_plugins\gw_plugins.vcxproj">
+      <Project>{0ca27a2f-8cc4-453c-a333-4d73255f7b50}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />

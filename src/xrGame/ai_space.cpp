@@ -21,6 +21,7 @@
 #include "alife_simulator.h"
 #include "moving_objects.h"
 #include "doors_manager.h"
+#include "addon_host.h"
 
 CAI_Space* g_ai_space;
 
@@ -49,6 +50,9 @@ void CAI_Space::init()
         m_cover_manager = xr_make_unique<CCoverManager>();
         m_moving_objects = xr_make_unique<::moving_objects>();
 
+        // Addons: discover addons and load their plugins before any Lua code runs (wiki/doc/plugins).
+        gw::addons::Initialize();
+
         VERIFY(!GEnv.ScriptEngine);
         GEnv.ScriptEngine = xr_new<CScriptEngine>(false, true);
         RestartScriptEngine();
@@ -68,6 +72,9 @@ CAI_Space::~CAI_Space()
 
     unload();
     xr_delete(GEnv.ScriptEngine); // XXX: wrapped into try..catch(...) in vanilla source
+
+    // Plugins outlive Lua: unloaded after the script engine is gone.
+    gw::addons::Shutdown();
 }
 
 void CAI_Space::RegisterScriptClasses()

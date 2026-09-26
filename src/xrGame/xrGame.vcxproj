@@ -512,6 +512,7 @@
     <ClInclude Include="ai_obstacle.h" />
     <ClInclude Include="ai_obstacle_inline.h" />
     <ClInclude Include="AI_PhraseDialogManager.h" />
+    <ClInclude Include="addon_host.h" />
     <ClInclude Include="ai_space.h" />
     <ClInclude Include="ai_space_inline.h" />
     <ClInclude Include="alife_abstract_registry.h" />
@@ -1911,6 +1912,7 @@
     <ClCompile Include="ai_obstacle.cpp" />
     <ClCompile Include="AI_PhraseDialogManager.cpp" />
     <ClCompile Include="ai_sounds.cpp" />
+    <ClCompile Include="addon_host.cpp" />
     <ClCompile Include="ai_space.cpp" />
     <ClCompile Include="ai_stalker_alife.cpp" />
     <ClCompile Include="alife_anomalous_zone.cpp" />

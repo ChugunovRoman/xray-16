@@ -81,6 +81,8 @@ target_sources(xrGame PRIVATE
     Actor_Weapon.cpp
     AdvancedDetector.cpp
     AdvancedDetector.h
+    addon_host.cpp
+    addon_host.h
     agent_corpse_manager.cpp
     agent_corpse_manager.h
     agent_corpse_manager_inline.h

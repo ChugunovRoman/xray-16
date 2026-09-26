@@ -26,6 +26,7 @@
 #include "xrPhysics/IPHWorld.h"
 #include "autosave_manager.h"
 #include "ai_space.h"
+#include "addon_host.h"
 #include "ai/monsters/basemonster/base_monster.h"
 #include "date_time.h"
 #include "mt_config.h"
@@ -1934,6 +1935,14 @@ struct CCC_LuaHelp : public IConsole_Command
 	}
 };
 
+// Lists discovered addons, their plugins, state and the reason of failure (wiki/doc/plugins).
+class CCC_AddonList : public IConsole_Command
+{
+public:
+    CCC_AddonList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR /*args*/) { gw::addons::PrintList(); }
+};
+
 class CCC_MainMenu : public IConsole_Command
 {
 public:
@@ -2992,6 +3001,7 @@ void CCC_RegisterCommands()
     CMD1(CCC_NpcPreviewCacheReset, "npc_preview_cache_reset");
 
     CMD1(CCC_LuaHelp, "dump_lua");
+    CMD1(CCC_AddonList, "addon_list");
     CMD4(CCC_InvCellSize, "g_inv_cell_size", &g_inv_inv_cell_size, 1, 4);
 
     CMD3(CCC_Mask, "g_autopickup", &psActorFlags, AF_AUTOPICKUP);
