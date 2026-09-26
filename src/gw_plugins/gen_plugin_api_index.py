@@ -45,6 +45,9 @@ GROUPS = {
     "events": ("События", "api/events.md"),
     "objects": ("Игровые объекты", "api/objects.md"),
     "save": ("Данные в сейве", "api/save.md"),
+    "data": ("Шина данных", "api/data.md"),
+    "timers": ("Таймеры", "api/timers.md"),
+    "plugin": ("Класс gwp::Plugin", "api/plugin.md"),
 }
 
 THREADS = {

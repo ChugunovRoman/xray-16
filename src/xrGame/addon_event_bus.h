@@ -17,8 +17,8 @@ namespace gw::addons::events
 enum class EBuiltin : GwpEventId
 {
     EngineOnScriptStart = 1, // Lua state (re)created and common scripts loaded
-    GameOnStart,             // CGamePersistent::OnGameStart
-    GameOnEnd,               // CGamePersistent::OnGameEnd
+    AlifeOnStart,            // (reason: "new_game" | "load" | "level_change") ALife created, before alife_on_load
+    AlifeOnEnd,              // ALife is being destroyed (exit to menu, another save, level change, quit)
     AlifeOnBeforeSave,       // (save_name: file name with extension) before the ALife save is written; save_write here
     AlifeOnAfterSave,        // (save_name) the save is on disk
     AlifeOnLoad,             // (save_name) plugin save data is read; objects registered, on_register not called yet
@@ -28,6 +28,7 @@ enum class EBuiltin : GwpEventId
     LevelOnFrame,            // (dt seconds) every frame of an active, unpaused level
     ActorOnSpawn,            // (actor object) CActor::net_Spawn succeeded
     ActorOnDestroy,          // (actor object) CActor::net_Destroy
+    DataOnChanged,           // (key, value) a value of the data bus changed; value is nil after an erase
     Count_
 };
 
@@ -41,6 +42,11 @@ inline void Emit(EBuiltin id, const GwpValue* argv = nullptr, u32 argc = 0, GwpV
     Emit(static_cast<GwpEventId>(id), argv, argc, result);
 }
 bool HasSubscribers(GwpEventId id);
+
+// Delivers the collected events to batch subscribers (GWP_SUBSCRIBE_BATCH). Called at the start of every frame
+// (CGamePersistent::OnFrame) and right before level_on_stop. force: ignore throttle_ms (level stop: the ids are
+// valid only now).
+void FlushBatches(bool force = false);
 inline bool HasSubscribers(EBuiltin id) { return HasSubscribers(static_cast<GwpEventId>(id)); }
 
 GwpValue Nil();
@@ -54,7 +60,18 @@ GwpValue ServerObject(u16 id);
 
 // Host integration (addon_host.cpp).
 void FillEngineApi(GwpEngineApi& api);
+
+// alife_on_start reason: a level change goes through an autosave and a new ALife loading it. change_level marks it,
+// the next ALife start takes the mark.
+void MarkLevelChange();
+bool TakeLevelChangeMark();
+
 void RemovePluginSubscriptions(const GwpPlugin* plugin);
 void Shutdown();
 void PrintList(); // console command "event_list"
+
+// Lua <-> GwpValue, the same conversion as for event arguments (addon_data_bus.cpp).
+// LuaToValue: strings point into Lua data, valid while the value stays on the Lua stack.
+void PushLuaValue(lua_State* L, const GwpValue& value);
+GwpValue LuaToValue(lua_State* L, int index);
 } // namespace gw::addons::events

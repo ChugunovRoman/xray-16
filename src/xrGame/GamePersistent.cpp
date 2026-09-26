@@ -195,7 +195,6 @@ void CGamePersistent::OnGameStart()
     inherited::OnGameStart();
     weapon_inv_icon::LoadSettings();
     UpdateGameType();
-    gw::addons::events::Emit(gw::addons::events::EBuiltin::GameOnStart);
 }
 
 LPCSTR GameTypeToString(EGameIDs gt, bool bShort)
@@ -237,7 +236,6 @@ void CGamePersistent::UpdateGameType()
 
 void CGamePersistent::OnGameEnd()
 {
-    gw::addons::events::Emit(gw::addons::events::EBuiltin::GameOnEnd);
     inherited::OnGameEnd();
 
     xr_delete(g_stalker_animation_data_storage);
@@ -614,6 +612,9 @@ void CGamePersistent::OnFrame()
 {
     ZoneScoped;
 
+    // Addons: events collected since the previous frame go to batch subscribers of plugins.
+    gw::addons::events::FlushBatches();
+
     if (Device.dwPrecacheFrame == 5 && m_intro_event.empty())
     {
         LoadTitle();
@@ -818,6 +819,9 @@ void CGamePersistent::OnEvent(EVENT E, u64 P1, u64 P2)
 
         pstr saved_name = (pstr)(P1);
 
+        // Addons: a load of a save of the same level does not stop the level (no level_on_stop): deliver the event
+        // batches of plugins while the ids in them still point to the objects removed below.
+        gw::addons::events::FlushBatches(true);
         Level().remove_objects();
         game_sv_Single* game = smart_cast<game_sv_Single*>(Level().Server->GetGameState());
         R_ASSERT(game);

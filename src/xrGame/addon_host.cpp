@@ -1,7 +1,9 @@
 #include "StdAfx.h"
 
 #include "addon_host.h"
+#include "addon_data_bus.h"
 #include "addon_event_bus.h"
+#include "addon_timers.h"
 
 #include "xrAddonHost/include/gwp/gwp_api.h"
 #include "xrCore/ModuleLookup.hpp"
@@ -561,6 +563,8 @@ void FillEngineApi()
     g_engine_api.is_debug_log = &ApiIsDebugLog;
     events::FillEngineApi(g_engine_api);
     FillObjectsApi(g_engine_api);
+    data::FillEngineApi(g_engine_api);
+    timers::FillEngineApi(g_engine_api);
     g_engine_api.save_write = &ApiSaveWrite;
     g_engine_api.save_read = &ApiSaveRead;
 }
@@ -1024,11 +1028,18 @@ void Shutdown()
     }
     xr_delete(g_addons);
     g_save_data.clear();
+    data::Shutdown();
+    timers::Shutdown();
     events::Shutdown();
     g_initialized = false;
 }
 
-void ResetSaveData() { detail::g_save_data.clear(); }
+void ResetSaveData()
+{
+    detail::g_save_data.clear();
+    data::ResetPersistent();
+    timers::Reset();
+}
 
 void WriteSaveData(IWriter& stream)
 {
@@ -1044,12 +1055,11 @@ void WriteSaveData(IWriter& stream)
         stream.w(chunk.data.data(), chunk.data.size());
     }
     stream.close_chunk();
+    data::WriteSave(stream); // persistent values of the data bus: own chunk
+    timers::WriteSave(stream); // persistent timers: own chunk
 }
 
-namespace detail
-{
-// Reads a zero-terminated string without leaving the reader (IReader::r_stringZ does not check bounds).
-bool ReadStringChecked(IReader& reader, xr_string& out)
+bool ReadStringZChecked(IReader& reader, xr_string& out)
 {
     const auto* begin = static_cast<const char*>(reader.pointer());
     const intptr_t left = reader.elapsed();
@@ -1060,11 +1070,12 @@ bool ReadStringChecked(IReader& reader, xr_string& out)
     reader.advance(out.size() + 1);
     return true;
 }
-} // namespace detail
 
 void ReadSaveData(IReader& stream)
 {
     using namespace detail;
+    data::ReadSave(stream); // persistent values of the data bus: own chunk
+    timers::ReadSave(stream); // persistent timers: own chunk
     g_save_data.clear();
     IReader* reader = stream.open_chunk(kSaveChunkId);
     if (!reader)
@@ -1082,7 +1093,7 @@ void ReadSaveData(IReader& stream)
     for (u32 i = 0; i < count; ++i)
     {
         xr_string id;
-        if (!ReadStringChecked(*reader, id) || !has(2 * sizeof(u32)))
+        if (!ReadStringZChecked(*reader, id) || !has(2 * sizeof(u32)))
         {
             Logf("! ", "addons", "plugin save data is truncated, the rest is ignored");
             break;
@@ -1111,6 +1122,19 @@ pcstr PluginAddonId(const GwpPlugin* plugin)
 }
 
 bool IsMainThread() { return detail::ApiIsMainThread() != 0; }
+bool IsDebugLog() { return detail::g_debug_log; }
+
+bool IsPluginLoaded(pcstr addon_id)
+{
+    if (!detail::g_addons || !addon_id)
+        return false;
+    for (const auto& addon : *detail::g_addons)
+    {
+        if (addon->plugin_state == detail::EPluginState::Loaded && addon->id == addon_id)
+            return true;
+    }
+    return false;
+}
 
 void PrintList()
 {

@@ -1,5 +1,6 @@
 #include "pch_script.h"
 #include "addon_event_bus.h"
+#include "addon_timers.h"
 #include <tracy/Tracy.hpp>
 #include "xrEngine/FDemoRecord.h"
 #include "xrEngine/FDemoPlay.h"
@@ -515,10 +516,14 @@ void CLevel::OnFrame()
     }
     // Inherited update
     inherited::OnFrame();
-    if (!Device.Paused() && gw::addons::events::HasSubscribers(gw::addons::events::EBuiltin::LevelOnFrame))
+    if (!Device.Paused())
     {
-        const GwpValue args[] = { gw::addons::events::Number(Device.fTimeDelta) };
-        gw::addons::events::Emit(gw::addons::events::EBuiltin::LevelOnFrame, args, 1);
+        if (gw::addons::events::HasSubscribers(gw::addons::events::EBuiltin::LevelOnFrame))
+        {
+            const GwpValue args[] = { gw::addons::events::Number(Device.fTimeDelta) };
+            gw::addons::events::Emit(gw::addons::events::EBuiltin::LevelOnFrame, args, 1);
+        }
+        gw::addons::timers::Update(Device.dwTimeDelta); // plugin timers (timer_start)
     }
     // Draw client/server stats
     if (!GEnv.isDedicatedServer && psDeviceFlags.test(rsStatistic))

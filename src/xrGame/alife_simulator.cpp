@@ -22,6 +22,7 @@
 #include "alife_object_registry.h"
 #include "xrEngine/XR_IOConsole.h"
 #include "addon_host.h"
+#include "addon_event_bus.h"
 
 #ifdef DEBUG
 #include "moving_objects.h"
@@ -62,7 +63,9 @@ CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
     xr_strcat(temp, p.m_alife);
     *command_line = temp;
 
-    const bool isNewGame = xr_strcmp(p.m_new_or_load, "new") != -1;
+    // "== 0", not the original "!= -1": strcmp returns any negative value on other platforms, and an empty
+    // m_new_or_load (level change, reconnect) must not count as a new game there.
+    const bool isNewGame = xr_strcmp(p.m_new_or_load, "new") == 0;
 
     LPCSTR start_game_callback = pSettings->r_string(alife_section, "start_game_callback");
     luabind::functor<void> functor;
@@ -124,6 +127,32 @@ CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
     functor(isNewGame);
 #endif
 
+    // Addons: a game session starts. After start_game_callback, so Lua subscribers (on_game_start) are in place;
+    // before load(), so it comes before alife_on_load.
+    {
+        // A load of a save that does not exist falls back to a new game in CALifeUpdateManager::load
+        // (no_assert): check the file here, so the reason is right.
+        // Both extensions, like CALifeUpdateManager::load_game.
+        bool save_exists = false;
+        if (!isNewGame)
+        {
+            string_path save_file;
+            strconcat(sizeof(save_file), save_file, p.m_game_or_spawn, SAVE_EXTENSION);
+            save_exists = static_cast<bool>(FS.exist("$game_saves$", save_file));
+            if (!save_exists)
+            {
+                strconcat(sizeof(save_file), save_file, p.m_game_or_spawn, SAVE_EXTENSION_LEGACY);
+                save_exists = static_cast<bool>(FS.exist("$game_saves$", save_file));
+            }
+        }
+        // The mark is taken (and dropped) on every start: a level change that never got to its load must not
+        // turn the next load into a "level_change".
+        const bool level_change = gw::addons::events::TakeLevelChangeMark() && save_exists;
+        const pcstr reason = !save_exists ? "new_game" : level_change ? "level_change" : "load";
+        const GwpValue args[] = { gw::addons::events::String(reason) };
+        gw::addons::events::Emit(gw::addons::events::EBuiltin::AlifeOnStart, args, 1);
+    }
+
     load(p.m_game_or_spawn, !xr_strcmp(p.m_new_or_load, "load") ? false : true, !xr_strcmp(p.m_new_or_load, "new"));
 }
 
@@ -139,6 +168,9 @@ CALifeSimulator::~CALifeSimulator()
 
 void CALifeSimulator::destroy()
 {
+    // Addons: the game session ends while ALife and its objects still exist.
+    gw::addons::events::Emit(gw::addons::events::EBuiltin::AlifeOnEnd);
+
     //  validate                    ();
     CALifeUpdateManager::destroy();
     VERIFY(ai().get_alife());

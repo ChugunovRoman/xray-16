@@ -119,6 +119,7 @@ extern CUISequencer* g_tutorial2;
 void CLevel::net_Stop()
 {
     Msg("- Disconnect");
+    gw::addons::events::FlushBatches(true); // the ids in the batches are still valid here, throttle ignored
     gw::addons::events::Emit(gw::addons::events::EBuiltin::LevelOnStop);
 
     if (CurrentGameUI())

@@ -72,6 +72,7 @@ typedef enum GwpResult
     GWP_ERROR_VERSION_MISMATCH = 2,
     GWP_ERROR_NOT_MAIN_THREAD = 3,
     GWP_ERROR_INVALID_ARGUMENT = 4,
+    GWP_ERROR_ACCESS_DENIED = 5, /* e.g. data_set on a key outside the "<addon id>/" prefix */
 } GwpResult;
 
 typedef enum GwpLogLevel
@@ -90,7 +91,7 @@ typedef enum GwpLogLevel
  * One event bus in the engine for Lua scripts and plugins. Events are identified by name
  * ("actor_on_reinit", "save_state", "npc_on_death_callback", ...); the name is resolved once to a GwpEventId.
  * Lua scripts publish through SendScriptCallback, the engine publishes its own lifecycle events
- * (game_on_start, level_on_frame, alife_on_before_save, ...). List: wiki/doc/plugins/api/events_list.md
+ * (alife_on_start, level_on_frame, alife_on_before_save, ...). List: wiki/doc/plugins/api/events_list.md
  */
 typedef uint32_t GwpEventId;        /* 0 = invalid */
 typedef uint32_t GwpSubscriptionId; /* 0 = invalid */
@@ -99,6 +100,14 @@ typedef uint32_t GwpSubscriptionId; /* 0 = invalid */
 
 /* Flags of event_declare. */
 #define GWP_EVENT_HAS_RESULT 0x1u /* the event carries a mutable result (GwpEvent::result) */
+
+/* Flags of data_set. */
+#define GWP_DATA_PERSISTENT 0x1u /* the value is stored in the game save; cleared on a new game, replaced on a load.
+                                    Once set on a key it stays until data_erase, whoever writes the key later */
+
+/* Flags of timer_start. */
+#define GWP_TIMER_REAL_TIME 0x1u  /* level time (real seconds of unpaused frames) instead of game time */
+#define GWP_TIMER_PERSISTENT 0x2u /* the timer is stored in the game save and comes back on a load */
 
 typedef enum GwpValueType
 {
@@ -146,6 +155,26 @@ typedef struct GwpEvent
 } GwpEvent;
 
 typedef void(GWP_CALL* GwpEventHandler)(void* user, const GwpEvent* event);
+
+/* Batch handler: every event collected since the previous delivery, in emit order. Arguments are copies made at
+   emit time (strings included); object ids may already point to objects that went offline. result is NULL. */
+typedef void(GWP_CALL* GwpEventBatchHandler)(void* user, uint32_t count, const GwpEvent* events);
+
+/* Flags of GwpSubscribeOptions. */
+#define GWP_SUBSCRIBE_BATCH 0x1u /* collect events and deliver them once per frame to batch_handler */
+
+/* Options of event_subscribe_ex. Zero-initialize, then set size = sizeof(GwpSubscribeOptions). */
+typedef struct GwpSubscribeOptions
+{
+    uint32_t size;        /* sizeof(GwpSubscribeOptions) of the plugin: fields may be appended in later versions */
+    uint32_t flags;       /* GWP_SUBSCRIBE_* */
+    uint32_t throttle_ms; /* at most one call per interval (game time_global, ms); 0 = every dispatch.
+                             With GWP_SUBSCRIBE_BATCH: the minimal interval between deliveries; the records keep
+                             piling up meanwhile, so size max_batch for (throttle_ms * emits per ms) */
+    uint32_t max_batch;   /* GWP_SUBSCRIBE_BATCH: records kept between deliveries, 0 = 4096; extra ones are dropped
+                             (a warning is logged once per delivery) */
+    GwpEventBatchHandler batch_handler; /* required with GWP_SUBSCRIBE_BATCH */
+} GwpSubscribeOptions;
 
 /* ------------------------------------------------------------------------- */
 /* Engine API table (engine -> plugin)                                        */
@@ -238,6 +267,51 @@ typedef struct GwpEngineApi
        @group save @thread main */
     GwpResult(GWP_CALL* save_write)(const GwpPlugin* self, uint32_t data_version, const void* data, uint32_t size);
     GwpResult(GWP_CALL* save_read)(const GwpPlugin* self, uint32_t* data_version, const void** data, uint32_t* size);
+
+    /* Shared key-value store of Lua scripts and plugins (Lua: global table data_bus). Keys are "<owner>/<name>";
+       a plugin may write only keys that start with "<its addon id>/" (GWP_ERROR_ACCESS_DENIED otherwise), anyone
+       may read any key. A value is any GwpValue except GWP_T_LUA_REF; strings are copied. Flags: GWP_DATA_PERSISTENT.
+       A real change of a value sends the event data_on_changed(key, value); after data_erase value is nil.
+       @group data @thread main */
+    GwpResult(GWP_CALL* data_set)(const GwpPlugin* self, const char* key, const GwpValue* value, uint32_t flags);
+    GwpResult(GWP_CALL* data_erase)(const GwpPlugin* self, const char* key);
+
+    /* Reads a value; GWP_ERROR when there is no such key. A string in `out` lives until the key is changed or
+       erased: copy it to keep.
+       @group data @thread main */
+    GwpResult(GWP_CALL* data_get)(const char* key, GwpValue* out);
+
+    /* Timers of this addon (native analogue of Lua CreateTimeEvent, on game time; Lua: global table timer_bus).
+       A timer has a name unique inside the addon; timer_start with an existing name replaces that timer. When the
+       timer expires, the engine emits the event `event` (declared automatically; not a built-in engine event such as
+       level_on_frame) with two arguments: the timer name and its full key "<addon id>/<name>"; subscribe to it with
+       event_subscribe.
+       Time base: game time in game seconds (scaled by the time factor), or with GWP_TIMER_REAL_TIME level time in
+       real seconds; both stop on pause, in the main menu and during loading. delay >= 0; period > 0 repeats the
+       timer every period seconds (at least 1 ms, at most once per frame), period == 0 fires it once.
+       A new game, a load and a level change drop all timers; GWP_TIMER_PERSISTENT timers come back with the save.
+       Timers of an addon whose plugin is not loaded wait and are carried to new saves.
+       timer_start returns GWP_ERROR outside a game (ALife not created or not loaded yet), for both time bases. timer_stop and timer_remaining return GWP_ERROR when
+       there is no such timer; timer_remaining gives the seconds left in the timer's own time base.
+       @group timers @thread main */
+    GwpResult(GWP_CALL* timer_start)(const GwpPlugin* self, const char* name, const char* event, double delay_seconds,
+        double period_seconds, uint32_t flags);
+    GwpResult(GWP_CALL* timer_stop)(const GwpPlugin* self, const char* name);
+    GwpResult(GWP_CALL* timer_remaining)(const GwpPlugin* self, const char* name, double* out_seconds);
+
+    /* Game time of ALife in milliseconds (Lua game.get_game_time()) and its time factor (game seconds per real
+       second). 0 outside a game.
+       @group timers @thread main */
+    uint64_t(GWP_CALL* game_time_ms)(void);
+    double(GWP_CALL* game_time_factor)(void);
+
+    /* event_subscribe with options (GwpSubscribeOptions; NULL = plain event_subscribe): throttling and batch
+       delivery. Batches are delivered at the start of every frame (main menu included) and right before
+       level_on_stop, so the ids in them are still valid when level objects are destroyed. In batch mode `handler`
+       is ignored (may be NULL) and the subscriber cannot change the result of an event.
+       @group events @thread main */
+    GwpSubscriptionId(GWP_CALL* event_subscribe_ex)(const GwpPlugin* self, const char* name,
+        const GwpSubscribeOptions* options, GwpEventHandler handler, void* user);
 
     /* New functions go below this line only. */
 } GwpEngineApi;

@@ -22,6 +22,7 @@
 #include "autosave_manager.h"
 #include "addon_host.h"
 #include "addon_event_bus.h"
+#include "addon_timers.h"
 
 using namespace ALife;
 
@@ -122,15 +123,26 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
 
 void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR file_name)
 {
+    IReader source(buffer, buffer_size);
+
+    // Addons: until time_manager().load the game time is the one of a fresh ALife, not of the save: a game-time
+    // timer started now (e.g. from load_state) would get a wrong due time. Cleared after time_manager().load.
+    gw::addons::timers::SetLoadingGameTime(true);
+
+    // Addons: plugin data, data bus and timers (own chunks of the stream, found by id) are read first, so the
+    // Lua load_state below already sees persistent data bus values. seek(0): open_chunk moves the position.
+    gw::addons::ReadSaveData(source);
+    source.seek(0);
+
 	//Alundaio: So we can get the fname to make our own custom save states
     luabind::functor<void> funct;
     if (GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_load", funct))
         funct(file_name);
 	//-Alundaio
 
-    IReader source(buffer, buffer_size);
     header().load(source);
     time_manager().load(source);
+    gw::addons::timers::SetLoadingGameTime(false); // the game time of the save is known from here on
     spawns().load(source, file_name);
     graph().on_load();
     objects().load(source);
@@ -148,8 +160,7 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
 
     registry().load(source);
 
-    // Addons: plugin data (own chunk of the stream). Objects are registered, on_register is not called yet.
-    gw::addons::ReadSaveData(source);
+    // Addons: plugin data was read at the start of load(). Objects are registered, on_register is not called yet.
     {
         const GwpValue args[] = { gw::addons::events::String(m_save_name) };
         gw::addons::events::Emit(gw::addons::events::EBuiltin::AlifeOnLoad, args, 1);

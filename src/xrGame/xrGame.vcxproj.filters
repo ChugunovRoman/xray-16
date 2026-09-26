@@ -4575,7 +4575,13 @@
     <ClInclude Include="..\xrServerEntities\ai_sounds.h">
       <Filter>AI\ASound</Filter>
     </ClInclude>
+    <ClInclude Include="addon_data_bus.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
     <ClInclude Include="addon_event_bus.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_timers.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
     <ClInclude Include="addon_host.h">
@@ -7693,7 +7699,13 @@
     <ClCompile Include="addon_api_objects.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
+    <ClCompile Include="addon_data_bus.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
     <ClCompile Include="addon_event_bus.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_timers.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_host.cpp">

@@ -30,8 +30,12 @@ void ResetSaveData();                // new game: forget the data of the previou
 void WriteSaveData(IWriter& stream); // writes its own chunk into the ALife save stream
 void ReadSaveData(IReader& stream);  // finds that chunk; a save without it gives no data
 
-// Internal: shared by the parts of the host (addon_event_bus.cpp, addon_api_objects.cpp).
+// Internal: shared by the parts of the host (addon_event_bus.cpp, addon_data_bus.cpp, addon_api_objects.cpp).
 pcstr PluginAddonId(const GwpPlugin* plugin); // "?" for an unknown handle
 bool IsMainThread();
+bool IsDebugLog(); // -addon_debug
+bool IsPluginLoaded(pcstr addon_id); // the addon is known and its plugin is loaded (and not unloaded yet)
+// Reads a zero-terminated string without leaving the reader (IReader::r_stringZ does not check bounds).
+bool ReadStringZChecked(IReader& reader, xr_string& out);
 void FillObjectsApi(GwpEngineApi& api);
 } // namespace gw::addons

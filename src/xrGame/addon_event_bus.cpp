@@ -26,6 +26,20 @@ enum class ESubscriberKind : u8
     LuaObject,   // handler[event_name](handler, ...): table or userdata with a method named as the event
 };
 
+// Events collected for a batch subscriber (GWP_SUBSCRIBE_BATCH) until the next delivery.
+struct BatchQueue
+{
+    xr_vector<GwpValue> values; // arguments of every record; a string keeps its offset into `text` in `reserved`
+    xr_vector<u32> first;       // per record: index of its first argument in `values`
+    xr_vector<u32> argc;        // per record: number of arguments
+    xr_vector<char> text;       // copies of string arguments, zero-terminated
+    bool warned_overflow = false;
+
+    bool empty() const { return first.empty(); }
+};
+
+constexpr u32 kDefaultMaxBatch = 4096;
+
 struct Subscriber
 {
     GwpSubscriptionId id = 0;
@@ -36,6 +50,9 @@ struct Subscriber
     const GwpPlugin* plugin = nullptr;
     GwpEventHandler handler = nullptr;
     void* user = nullptr;
+    GwpEventBatchHandler batch_handler = nullptr; // batch subscriber when not null
+    xr_unique_ptr<BatchQueue> batch;               // queue of a batch subscriber
+    u32 max_batch = 0;
 
     // Lua
     int lua_ref = LUA_NOREF; // handler in the registry of Bus::lua
@@ -52,7 +69,8 @@ struct Event
     u32 flags = 0; // GWP_EVENT_*
 
     xr_vector<Subscriber> subscribers;
-    u32 native_count = 0;
+    u32 native_count = 0; // batch subscribers included
+    u32 batch_count = 0;
     u32 lua_count = 0;
     u32 dispatch_depth = 0;
     bool has_dead = false; // removed during a dispatch; erased when the outermost dispatch ends
@@ -79,6 +97,7 @@ struct Bus
 };
 
 Bus* g_bus = nullptr;
+bool g_level_change_mark = false;
 
 constexpr u32 kMaxDispatchDepth = 32;
 constexpr size_t kMaxNameLength = 256;
@@ -86,8 +105,8 @@ constexpr size_t kMaxNameLength = 256;
 // Names of EBuiltin, in the same order.
 constexpr pcstr kBuiltinNames[] = {
     "engine_on_script_start",
-    "game_on_start",
-    "game_on_end",
+    "alife_on_start",
+    "alife_on_end",
     "alife_on_before_save",
     "alife_on_after_save",
     "alife_on_load",
@@ -97,6 +116,7 @@ constexpr pcstr kBuiltinNames[] = {
     "level_on_frame",
     "actor_on_spawn",
     "actor_on_destroy",
+    "data_on_changed",
 };
 static_assert(std::size(kBuiltinNames) == static_cast<size_t>(EBuiltin::Count_) - 1, "kBuiltinNames != EBuiltin");
 
@@ -188,6 +208,8 @@ void RemoveAt(Bus& bus, Event& event, size_t index)
     if (subscriber.kind == ESubscriberKind::Native)
     {
         --event.native_count;
+        if (subscriber.batch_handler)
+            --event.batch_count;
         bus.native_subscriptions.erase(subscriber.id);
     }
     else
@@ -240,13 +262,27 @@ private:
 // Native handlers
 // ---------------------------------------------------------------------------------------------
 
+// One call of a plugin handler: a single event (handler) or a batch (batch_handler).
+struct NativeCall
+{
+    GwpEventHandler handler = nullptr;
+    GwpEventBatchHandler batch_handler = nullptr;
+    void* user = nullptr;
+    const GwpEvent* events = nullptr;
+    u32 count = 1;
+    pcstr event_name = "";
+};
+
 // A C++ exception thrown out of a plugin handler stops here; C++ unwinding runs every destructor on the way,
 // so nested dispatch scopes of the engine stay consistent.
-bool CallNativeCatching(GwpEventHandler handler, void* user, const GwpEvent* event)
+bool CallNativeCatching(const NativeCall& call)
 {
     try
     {
-        handler(user, event);
+        if (call.batch_handler)
+            call.batch_handler(call.user, call.count, call.events);
+        else
+            call.handler(call.user, call.events);
         return true;
     }
     catch (...)
@@ -276,32 +312,61 @@ int PluginCrashFilter(const EXCEPTION_POINTERS* info, HMODULE plugin_module, DWO
 }
 
 // No C++ objects with destructors here: __try cannot be mixed with them in one function.
-bool CallNativeGuarded(GwpEventHandler handler, void* user, const GwpEvent* event)
+bool CallNativeGuarded(const NativeCall& call)
 {
+    const void* code_address = call.batch_handler ? reinterpret_cast<const void*>(call.batch_handler)
+                                                  : reinterpret_cast<const void*>(call.handler);
     HMODULE plugin_module = nullptr;
     GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        reinterpret_cast<LPCSTR>(handler), &plugin_module);
+        static_cast<LPCSTR>(code_address), &plugin_module);
     DWORD code = 0;
     void* address = nullptr;
     __try
     {
-        return CallNativeCatching(handler, user, event);
+        return CallNativeCatching(call);
     }
     __except (PluginCrashFilter(GetExceptionInformation(), plugin_module, code, address))
     {
         if (code == EXCEPTION_STACK_OVERFLOW)
             _resetstkoflw();
         Msg("! [events] exception 0x%08x at %p in a plugin handler of event '%s'", static_cast<unsigned>(code), address,
-            event->name);
+            call.event_name);
         return false;
     }
 }
 #else
-bool CallNativeGuarded(GwpEventHandler handler, void* user, const GwpEvent* event)
-{
-    return CallNativeCatching(handler, user, event);
-}
+bool CallNativeGuarded(const NativeCall& call) { return CallNativeCatching(call); }
 #endif
+
+void Enqueue(Subscriber& subscriber, const Event& event, const GwpValue* argv, u32 argc)
+{
+    BatchQueue& queue = *subscriber.batch;
+    if (queue.first.size() >= subscriber.max_batch)
+    {
+        if (!queue.warned_overflow)
+        {
+            queue.warned_overflow = true;
+            Msg("~ [plugin:%s] batch of event '%s' is full (%u records), new records are dropped until the next "
+                "delivery", PluginAddonId(subscriber.plugin), event.name.c_str(), subscriber.max_batch);
+        }
+        return;
+    }
+    queue.first.push_back(static_cast<u32>(queue.values.size()));
+    queue.argc.push_back(argc);
+    for (u32 i = 0; i < argc; ++i)
+    {
+        GwpValue value = argv[i];
+        if (value.type == GWP_T_STRING)
+        {
+            value.reserved = static_cast<uint32_t>(queue.text.size());
+            if (value.u.s.ptr && value.u.s.len)
+                queue.text.insert(queue.text.end(), value.u.s.ptr, value.u.s.ptr + value.u.s.len);
+            queue.text.push_back(0);
+            value.u.s.ptr = nullptr; // set at delivery: `text` may reallocate until then
+        }
+        queue.values.push_back(value);
+    }
+}
 
 void RemovePluginSubscriptionsIn(Bus& bus, const GwpPlugin* plugin)
 {
@@ -319,17 +384,39 @@ void RemovePluginSubscriptionsIn(Bus& bus, const GwpPlugin* plugin)
 void DispatchNative(Bus& bus, Event& event, GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result)
 {
     const GwpEvent data{ id, event.name.c_str(), argc, argv, result };
+    u32 now = 0;
+    bool now_set = false;
     // Index loop: handlers may subscribe (push_back) or unsubscribe (marked only) during the dispatch.
     const size_t count = event.subscribers.size();
     for (size_t i = 0; i < count; ++i)
     {
-        const Subscriber& subscriber = event.subscribers[i];
+        Subscriber& subscriber = event.subscribers[i];
         if (!subscriber.alive || subscriber.kind != ESubscriberKind::Native)
             continue;
-        const GwpEventHandler handler = subscriber.handler;
-        void* const user = subscriber.user;
+        if (subscriber.batch_handler)
+        {
+            Enqueue(subscriber, event, argv, argc); // delivered by FlushBatches; throttle applies there
+            continue;
+        }
+        if (subscriber.throttle_ms)
+        {
+            if (!now_set)
+            {
+                now = Device.dwTimeGlobal;
+                now_set = true;
+            }
+            if (subscriber.called && now - subscriber.last_call_ms < subscriber.throttle_ms)
+                continue;
+            subscriber.called = true;
+            subscriber.last_call_ms = now;
+        }
+        NativeCall call;
+        call.handler = subscriber.handler;
+        call.user = subscriber.user;
+        call.events = &data;
+        call.event_name = event.name.c_str();
         const GwpPlugin* const plugin = subscriber.plugin;
-        if (!CallNativeGuarded(handler, user, &data))
+        if (!CallNativeGuarded(call))
         {
             Msg("! [plugin:%s] crashed in a handler of event '%s', all its event subscriptions are removed",
                 PluginAddonId(plugin), event.name.c_str());
@@ -698,7 +785,7 @@ int LuaSubscribe(lua_State* L)
     subscriber.throttle_ms = throttle_ms;
     lua_pushvalue(L, 2);
     subscriber.lua_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-    event->subscribers.push_back(subscriber);
+    event->subscribers.push_back(std::move(subscriber));
     ++event->lua_count;
     return 0;
 }
@@ -823,9 +910,11 @@ GwpEventId GWP_CALL ApiEventId(const char* name)
     return InternIn(GetBus(), name);
 }
 
-GwpSubscriptionId GWP_CALL ApiEventSubscribe(const GwpPlugin* self, const char* name, GwpEventHandler handler, void* user)
+GwpSubscriptionId SubscribeNative(const GwpPlugin* self, const char* name, const GwpSubscribeOptions& options,
+    GwpEventHandler handler, void* user)
 {
-    if (!CheckMainThread(self, "event_subscribe") || !self || !handler)
+    const bool batch = (options.flags & GWP_SUBSCRIBE_BATCH) != 0;
+    if (!self || (batch ? !options.batch_handler : !handler))
         return GWP_INVALID_SUBSCRIPTION_ID;
     Bus& bus = GetBus();
     const GwpEventId id = InternIn(bus, name);
@@ -837,12 +926,45 @@ GwpSubscriptionId GWP_CALL ApiEventSubscribe(const GwpPlugin* self, const char* 
     subscriber.id = bus.next_subscription++;
     subscriber.kind = ESubscriberKind::Native;
     subscriber.plugin = self;
-    subscriber.handler = handler;
+    subscriber.handler = batch ? nullptr : handler;
     subscriber.user = user;
-    event->subscribers.push_back(subscriber);
+    subscriber.throttle_ms = options.throttle_ms;
+    if (batch)
+    {
+        subscriber.batch_handler = options.batch_handler;
+        subscriber.batch = xr_make_unique<BatchQueue>();
+        subscriber.max_batch = options.max_batch ? options.max_batch : kDefaultMaxBatch;
+        ++event->batch_count;
+    }
+    const GwpSubscriptionId subscription = subscriber.id;
+    event->subscribers.push_back(std::move(subscriber));
     ++event->native_count;
-    bus.native_subscriptions.emplace(subscriber.id, id);
-    return subscriber.id;
+    bus.native_subscriptions.emplace(subscription, id);
+    return subscription;
+}
+
+GwpSubscriptionId GWP_CALL ApiEventSubscribe(const GwpPlugin* self, const char* name, GwpEventHandler handler, void* user)
+{
+    if (!CheckMainThread(self, "event_subscribe"))
+        return GWP_INVALID_SUBSCRIPTION_ID;
+    const GwpSubscribeOptions options{};
+    return SubscribeNative(self, name, options, handler, user);
+}
+
+GwpSubscriptionId GWP_CALL ApiEventSubscribeEx(const GwpPlugin* self, const char* name,
+    const GwpSubscribeOptions* options, GwpEventHandler handler, void* user)
+{
+    if (!CheckMainThread(self, "event_subscribe_ex"))
+        return GWP_INVALID_SUBSCRIPTION_ID;
+    // Copy only what the plugin knows: a plugin built with an older header has a shorter struct.
+    GwpSubscribeOptions copy{};
+    if (options)
+    {
+        if (options->size < sizeof(uint32_t))
+            return GWP_INVALID_SUBSCRIPTION_ID;
+        memcpy(&copy, options, std::min<size_t>(options->size, sizeof(copy)));
+    }
+    return SubscribeNative(self, name, copy, handler, user);
 }
 
 void GWP_CALL ApiEventUnsubscribe(const GwpPlugin* self, GwpSubscriptionId subscription)
@@ -935,7 +1057,69 @@ void CEventBusScript::script_register(lua_State* L)
 namespace
 {
 void DispatchLuaFromNative(Bus& bus, lua_State* L, Event& event, const GwpValue* argv, u32 argc, GwpValue* result);
+
+void DeliverBatch(Bus& bus, Event& event, GwpEventId id, size_t index, u32 now, bool force)
+{
+    Subscriber& subscriber = event.subscribers[index];
+    if (!subscriber.alive || !subscriber.batch_handler || subscriber.batch->empty())
+        return;
+    if (subscriber.throttle_ms && !force)
+    {
+        if (subscriber.called && now - subscriber.last_call_ms < subscriber.throttle_ms)
+            return;
+    }
+    subscriber.called = true;
+    subscriber.last_call_ms = now;
+
+    // Take the records out: the handler may emit this event again (records go into a fresh queue) or unsubscribe.
+    BatchQueue queue;
+    std::swap(queue, *subscriber.batch);
+    NativeCall call;
+    call.batch_handler = subscriber.batch_handler;
+    call.user = subscriber.user;
+    call.event_name = event.name.c_str();
+    const GwpPlugin* const plugin = subscriber.plugin;
+
+    for (GwpValue& value : queue.values)
+    {
+        if (value.type == GWP_T_STRING)
+        {
+            value.u.s.ptr = queue.text.data() + value.reserved;
+            value.reserved = 0;
+        }
+    }
+    xr_vector<GwpEvent> events(queue.first.size());
+    for (size_t i = 0; i < events.size(); ++i)
+        events[i] = GwpEvent{ id, event.name.c_str(), queue.argc[i], queue.values.data() + queue.first[i], nullptr };
+    call.events = events.data();
+    call.count = static_cast<u32>(events.size());
+
+    if (!CallNativeGuarded(call))
+    {
+        Msg("! [plugin:%s] crashed in a batch handler of event '%s', all its event subscriptions are removed",
+            PluginAddonId(plugin), event.name.c_str());
+        RemovePluginSubscriptionsIn(bus, plugin);
+    }
+}
 } // namespace
+
+void FlushBatches(bool force)
+{
+    if (!g_bus || !IsMainThread())
+        return;
+    Bus& bus = *g_bus;
+    const u32 now = Device.dwTimeGlobal;
+    for (size_t e = 0; e < bus.events.size(); ++e)
+    {
+        Event& event = *bus.events[e];
+        if (!event.batch_count)
+            continue;
+        DispatchScope scope(bus, event, nullptr);
+        const size_t count = event.subscribers.size();
+        for (size_t i = 0; i < count; ++i)
+            DeliverBatch(bus, event, static_cast<GwpEventId>(e + 1), i, now, force);
+    }
+}
 
 GwpEventId Intern(pcstr name) { return InternIn(GetBus(), name); }
 
@@ -1091,6 +1275,19 @@ void FillEngineApi(GwpEngineApi& api)
     api.event_unsubscribe = &ApiEventUnsubscribe;
     api.event_declare = &ApiEventDeclare;
     api.event_emit = &ApiEventEmit;
+    api.event_subscribe_ex = &ApiEventSubscribeEx;
+}
+
+void PushLuaValue(lua_State* L, const GwpValue& value) { PushValue(L, value); }
+GwpValue LuaToValue(lua_State* L, int index) { return ToValue(L, index); }
+
+void MarkLevelChange() { g_level_change_mark = true; }
+
+bool TakeLevelChangeMark()
+{
+    const bool mark = g_level_change_mark;
+    g_level_change_mark = false;
+    return mark;
 }
 
 void RemovePluginSubscriptions(const GwpPlugin* plugin)
@@ -1120,8 +1317,8 @@ void PrintList()
         if (!event->lua_count && !event->native_count)
             continue;
         ++with_subscribers;
-        Msg("-   %-40s %3u / %-3u%s", event->name.c_str(), event->lua_count, event->native_count,
-            event->declared ? "" : "  (undeclared)");
+        Msg("-   %-40s %3u / %-3u%s%s", event->name.c_str(), event->lua_count, event->native_count,
+            event->batch_count ? " (batch)" : "", event->declared ? "" : "  (undeclared)");
     }
     Msg("- [events] %u event(s) known, %u declared, %u with subscribers", static_cast<u32>(g_bus->events.size()),
         declared, with_subscribers);

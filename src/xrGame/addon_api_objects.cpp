@@ -61,7 +61,7 @@ int GWP_CALL ApiObjectIsAlive(GwpObjectId id)
 
 GwpObjectId GWP_CALL ApiActorId()
 {
-    if (!g_pGameLevel || !IsMainThread())
+    if (!g_pGameLevel || !IsMainThread() || GameID() != eGameIDSingle) // Actor() asserts outside single player
         return GWP_INVALID_OBJECT_ID;
     const CActor* actor = Actor();
     return actor ? static_cast<GwpObjectId>(actor->ID()) : GWP_INVALID_OBJECT_ID;

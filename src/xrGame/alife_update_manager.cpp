@@ -8,6 +8,7 @@
 
 #include "StdAfx.h"
 #include "alife_update_manager.h"
+#include "addon_event_bus.h"
 #include "alife_simulator_header.h"
 #include "alife_time_manager.h"
 #include "alife_graph_registry.h"
@@ -234,6 +235,7 @@ bool CALifeUpdateManager::change_level(NET_Packet& net_packet)
     *m_server_command_line = strconcat(sizeof(temp), temp, autoave_name, temp0);
 
     save(autoave_name);
+    gw::addons::events::MarkLevelChange(); // the next ALife start (loading this autosave) is a level change
 
     graph().actor()->m_tGraphID = safe_graph_vertex_id;
     graph().actor()->m_tNodeID = safe_level_vertex_id;
