@@ -20,6 +20,8 @@
 #include "saved_game_wrapper.h"
 #include "xrEngine/IGame_Persistent.h"
 #include "autosave_manager.h"
+#include "addon_host.h"
+#include "addon_event_bus.h"
 
 using namespace ALife;
 
@@ -61,6 +63,12 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
         funct1((pcstr)m_save_name);
 	//-Alundaio
 
+    // Addons: plugins store their data (save_write) before the stream is built.
+    {
+        const GwpValue args[] = { gw::addons::events::String(m_save_name) };
+        gw::addons::events::Emit(gw::addons::events::EBuiltin::AlifeOnBeforeSave, args, 1);
+    }
+
     u32 source_count;
     u32 dest_count;
     void* dest_data;
@@ -71,6 +79,7 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
         spawns().save(stream);
         objects().save(stream);
         registry().save(stream);
+        gw::addons::WriteSaveData(stream); // plugin data: own chunk of the stream, see ReadSaveData
 
         source_count = stream.tell();
         void* source_data = stream.pointer();
@@ -101,6 +110,11 @@ void CALifeStorageManager::save(LPCSTR save_name_no_check, bool update_name)
     if (GEnv.ScriptEngine->functor("alife_storage_manager.CALifeStorageManager_save", funct2))
         funct2((pcstr)m_save_name);
     //-Alundaio
+
+    {
+        const GwpValue args[] = { gw::addons::events::String(m_save_name) };
+        gw::addons::events::Emit(gw::addons::events::EBuiltin::AlifeOnAfterSave, args, 1);
+    }
 
     if (!update_name)
         xr_strcpy(m_save_name, saveBackup);
@@ -134,10 +148,23 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
 
     registry().load(source);
 
+    // Addons: plugin data (own chunk of the stream). Objects are registered, on_register is not called yet.
+    gw::addons::ReadSaveData(source);
+    {
+        const GwpValue args[] = { gw::addons::events::String(m_save_name) };
+        gw::addons::events::Emit(gw::addons::events::EBuiltin::AlifeOnLoad, args, 1);
+    }
+
     can_register_objects(true);
 
     for (auto& object : objects().objects())
         object.second->on_register();
+
+    // Addons: every object is registered. Before the early return: the event must come on every load.
+    {
+        const GwpValue args[] = { gw::addons::events::String(m_save_name) };
+        gw::addons::events::Emit(gw::addons::events::EBuiltin::AlifeOnAfterLoad, args, 1);
+    }
 
     if (!g_pGameLevel)
         return;

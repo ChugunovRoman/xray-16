@@ -5,7 +5,7 @@
  * C ABI in gwp_api.h, so using or not using this header does not change binary compatibility.
  *
  * Requires C++20 (std::format): MSVC 19.29+, GCC 13+, Clang 17+ with libc++.
- * Docs: wiki/doc/plugins/api/logger.md
+ * Docs: wiki/doc/plugins/api/logger.md, wiki/doc/plugins/api/events.md
  */
 #ifndef GWP_HPP
 #define GWP_HPP
@@ -16,6 +16,8 @@
 
 #include "gwp_api.h"
 
+#include <cmath>
+#include <cstdint>
 #include <format>
 #include <string>
 #include <string_view>
@@ -135,6 +137,213 @@ public:
 private:
     const GwpEngineApi* m_api = nullptr;
     const GwpPlugin* m_self = nullptr;
+};
+/*
+ * EventView: typed read access to the arguments of an event inside a GwpEventHandler.
+ *
+ *     void GWP_CALL on_death(void* user, const GwpEvent* raw)
+ *     {
+ *         const gwp::EventView event(raw);
+ *         const GwpObjectId victim = event.object(0); // npc_on_death_callback(victim, who)
+ *         const GwpObjectId killer = event.object(1);
+ *     }
+ *
+ * Every getter returns the fallback when the index is out of range or the argument has another type,
+ * so a handler never reads a wrong union member. Numbers from Lua always come as GWP_T_NUMBER:
+ * number() and integer() accept both GWP_T_NUMBER and GWP_T_INT.
+ */
+class EventView
+{
+public:
+    // Wraps the event given to a handler; valid only during the handler call. @group events @thread main
+    explicit EventView(const GwpEvent* event) noexcept : m_event(event) {}
+
+    // Event name, e.g. "actor_on_reinit". @group events @thread main
+    std::string_view name() const noexcept { return m_event && m_event->name ? m_event->name : ""; }
+
+    // Number of arguments. @group events @thread main
+    uint32_t size() const noexcept { return m_event ? m_event->argc : 0; }
+
+    // Type of the argument (GwpValueType); GWP_T_NIL when index >= size(). @group events @thread main
+    uint32_t type(uint32_t index) const noexcept { return at(index) ? at(index)->type : GWP_T_NIL; }
+
+    // Argument as a number: GWP_T_NUMBER or GWP_T_INT. @group events @thread main
+    double number(uint32_t index, double fallback = 0.0) const noexcept
+    {
+        const GwpValue* v = at(index);
+        if (v && v->type == GWP_T_NUMBER)
+            return v->u.n;
+        if (v && v->type == GWP_T_INT)
+            return static_cast<double>(v->u.i);
+        return fallback;
+    }
+
+    // Argument as an integer: GWP_T_INT or a GWP_T_NUMBER without a fractional part. @group events @thread main
+    int64_t integer(uint32_t index, int64_t fallback = 0) const noexcept
+    {
+        const GwpValue* v = at(index);
+        if (v && v->type == GWP_T_INT)
+            return v->u.i;
+        if (v && v->type == GWP_T_NUMBER && std::trunc(v->u.n) == v->u.n && std::fabs(v->u.n) < 9.0e15)
+            return static_cast<int64_t>(v->u.n);
+        return fallback;
+    }
+
+    // Argument as a bool (GWP_T_BOOL). @group events @thread main
+    bool boolean(uint32_t index, bool fallback = false) const noexcept
+    {
+        const GwpValue* v = at(index);
+        return v && v->type == GWP_T_BOOL ? v->u.b != 0 : fallback;
+    }
+
+    // Argument as a string (GWP_T_STRING); empty for other types. Valid only during the handler call.
+    // @group events @thread main
+    std::string_view string(uint32_t index) const noexcept
+    {
+        const GwpValue* v = at(index);
+        if (v && v->type == GWP_T_STRING && v->u.s.ptr)
+            return std::string_view(v->u.s.ptr, v->u.s.len);
+        return std::string_view();
+    }
+
+    // Argument as an online object id (GWP_T_OBJECT); GWP_INVALID_OBJECT_ID for other types.
+    // @group events @thread main
+    GwpObjectId object(uint32_t index) const noexcept
+    {
+        const GwpValue* v = at(index);
+        return v && v->type == GWP_T_OBJECT ? v->u.id : GWP_INVALID_OBJECT_ID;
+    }
+
+    // Argument as an ALife server object id (GWP_T_SERVER_OBJECT). @group events @thread main
+    GwpObjectId server_object(uint32_t index) const noexcept
+    {
+        const GwpValue* v = at(index);
+        return v && v->type == GWP_T_SERVER_OBJECT ? v->u.id : GWP_INVALID_OBJECT_ID;
+    }
+
+    // Argument as a 3D vector (GWP_T_VEC3); false and `out` untouched for other types. @group events @thread main
+    bool vec3(uint32_t index, float out[3]) const noexcept
+    {
+        const GwpValue* v = at(index);
+        if (!v || v->type != GWP_T_VEC3 || !out)
+            return false;
+        out[0] = v->u.v[0];
+        out[1] = v->u.v[1];
+        out[2] = v->u.v[2];
+        return true;
+    }
+
+    // True when the event carries a result (actor_on_before_hit, actor_on_before_death, ...).
+    // @group events @thread main
+    bool has_result() const noexcept { return m_event && m_event->result; }
+
+    // Current result as a bool; fallback when there is no bool result. @group events @thread main
+    bool result_bool(bool fallback = true) const noexcept
+    {
+        return has_result() && m_event->result->type == GWP_T_BOOL ? m_event->result->u.b != 0 : fallback;
+    }
+
+    // Sets the result, e.g. set_result(false) cancels a hit in actor_on_before_hit. No-op without a result.
+    // @group events @thread main
+    void set_result(bool value) const noexcept
+    {
+        if (!has_result())
+            return;
+        m_event->result->type = GWP_T_BOOL;
+        m_event->result->u.b = value ? 1 : 0;
+    }
+
+private:
+    const GwpValue* at(uint32_t index) const noexcept
+    {
+        return m_event && m_event->argv && index < m_event->argc ? &m_event->argv[index] : nullptr;
+    }
+
+    const GwpEvent* m_event = nullptr;
+};
+
+/*
+ * Value: builds GwpValue arguments for api->event_emit.
+ *
+ *     const GwpValue args[] = { gwp::Value::object(npc_id), gwp::Value::number(42.0) };
+ *     api->event_emit(self, my_event_id, 2, args, nullptr);
+ */
+class Value
+{
+public:
+    // Empty argument (Lua nil). @group events @thread any
+    static GwpValue nil() noexcept
+    {
+        GwpValue v{};
+        v.type = GWP_T_NIL;
+        return v;
+    }
+
+    // @group events @thread any
+    static GwpValue boolean(bool b) noexcept
+    {
+        GwpValue v = nil();
+        v.type = GWP_T_BOOL;
+        v.u.b = b ? 1 : 0;
+        return v;
+    }
+
+    // @group events @thread any
+    static GwpValue integer(int64_t i) noexcept
+    {
+        GwpValue v = nil();
+        v.type = GWP_T_INT;
+        v.u.i = i;
+        return v;
+    }
+
+    // @group events @thread any
+    static GwpValue number(double n) noexcept
+    {
+        GwpValue v = nil();
+        v.type = GWP_T_NUMBER;
+        v.u.n = n;
+        return v;
+    }
+
+    // The text is not copied: it must outlive the event_emit call. @group events @thread any
+    static GwpValue string(std::string_view text) noexcept
+    {
+        GwpValue v = nil();
+        v.type = GWP_T_STRING;
+        v.u.s.ptr = text.data();
+        v.u.s.len = static_cast<uint32_t>(text.size());
+        return v;
+    }
+
+    // @group events @thread any
+    static GwpValue vec3(float x, float y, float z) noexcept
+    {
+        GwpValue v = nil();
+        v.type = GWP_T_VEC3;
+        v.u.v[0] = x;
+        v.u.v[1] = y;
+        v.u.v[2] = z;
+        return v;
+    }
+
+    // Online game object by id. @group events @thread any
+    static GwpValue object(GwpObjectId id) noexcept
+    {
+        GwpValue v = nil();
+        v.type = GWP_T_OBJECT;
+        v.u.id = id;
+        return v;
+    }
+
+    // ALife server object by id. @group events @thread any
+    static GwpValue server_object(GwpObjectId id) noexcept
+    {
+        GwpValue v = nil();
+        v.type = GWP_T_SERVER_OBJECT;
+        v.u.id = id;
+        return v;
+    }
 };
 } // namespace gwp
 

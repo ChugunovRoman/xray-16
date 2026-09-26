@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_event_bus.h"
 #include <tracy/Tracy.hpp>
 #include "xrEngine/FDemoRecord.h"
 #include "xrEngine/FDemoPlay.h"
@@ -514,6 +515,11 @@ void CLevel::OnFrame()
     }
     // Inherited update
     inherited::OnFrame();
+    if (!Device.Paused() && gw::addons::events::HasSubscribers(gw::addons::events::EBuiltin::LevelOnFrame))
+    {
+        const GwpValue args[] = { gw::addons::events::Number(Device.fTimeDelta) };
+        gw::addons::events::Emit(gw::addons::events::EBuiltin::LevelOnFrame, args, 1);
+    }
     // Draw client/server stats
     if (!GEnv.isDedicatedServer && psDeviceFlags.test(rsStatistic))
     {

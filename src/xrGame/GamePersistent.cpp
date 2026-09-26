@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_event_bus.h"
 #include "GamePersistent.h"
 #include "xrCore/FMesh.hpp"
 #include "xrEngine/XR_IOConsole.h"
@@ -194,6 +195,7 @@ void CGamePersistent::OnGameStart()
     inherited::OnGameStart();
     weapon_inv_icon::LoadSettings();
     UpdateGameType();
+    gw::addons::events::Emit(gw::addons::events::EBuiltin::GameOnStart);
 }
 
 LPCSTR GameTypeToString(EGameIDs gt, bool bShort)
@@ -235,6 +237,7 @@ void CGamePersistent::UpdateGameType()
 
 void CGamePersistent::OnGameEnd()
 {
+    gw::addons::events::Emit(gw::addons::events::EBuiltin::GameOnEnd);
     inherited::OnGameEnd();
 
     xr_delete(g_stalker_animation_data_storage);

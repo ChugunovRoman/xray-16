@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_event_bus.h"
 #include "Actor.h"
 #include "HUDManager.h"
 #include "Actor_Flags.h"
@@ -759,11 +760,20 @@ bool CActor::net_Spawn(CSE_Abstract* DC)
     {
         setLocal(FALSE);
     };
+
+    {
+        const GwpValue args[] = { gw::addons::events::Object(ID()) };
+        gw::addons::events::Emit(gw::addons::events::EBuiltin::ActorOnSpawn, args, 1);
+    }
     return true;
 }
 
 void CActor::net_Destroy()
 {
+    {
+        const GwpValue args[] = { gw::addons::events::Object(ID()) };
+        gw::addons::events::Emit(gw::addons::events::EBuiltin::ActorOnDestroy, args, 1);
+    }
     inherited::net_Destroy();
 
     if (m_holder_id != ALife::_OBJECT_ID(-1))

@@ -83,6 +83,71 @@ typedef enum GwpLogLevel
 } GwpLogLevel;
 
 /* ------------------------------------------------------------------------- */
+/* Events                                                                     */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * One event bus in the engine for Lua scripts and plugins. Events are identified by name
+ * ("actor_on_reinit", "save_state", "npc_on_death_callback", ...); the name is resolved once to a GwpEventId.
+ * Lua scripts publish through SendScriptCallback, the engine publishes its own lifecycle events
+ * (game_on_start, level_on_frame, alife_on_before_save, ...). List: wiki/doc/plugins/api/events_list.md
+ */
+typedef uint32_t GwpEventId;        /* 0 = invalid */
+typedef uint32_t GwpSubscriptionId; /* 0 = invalid */
+#define GWP_INVALID_EVENT_ID ((GwpEventId)0u)
+#define GWP_INVALID_SUBSCRIPTION_ID ((GwpSubscriptionId)0u)
+
+/* Flags of event_declare. */
+#define GWP_EVENT_HAS_RESULT 0x1u /* the event carries a mutable result (GwpEvent::result) */
+
+typedef enum GwpValueType
+{
+    GWP_T_NIL = 0,
+    GWP_T_BOOL = 1,          /* u.b: 0 or 1 */
+    GWP_T_INT = 2,           /* u.i */
+    GWP_T_NUMBER = 3,        /* u.n */
+    GWP_T_STRING = 4,        /* u.s: UTF-8, not always zero-terminated inside Lua data: use len */
+    GWP_T_VEC3 = 5,          /* u.v */
+    GWP_T_OBJECT = 6,        /* u.id: client (online) game object */
+    GWP_T_SERVER_OBJECT = 7, /* u.id: ALife server object */
+    GWP_T_LUA_REF = 8,       /* Lua table or userdata without a native form; content is not available */
+} GwpValueType;
+
+typedef struct GwpString
+{
+    const char* ptr;
+    uint32_t len;
+} GwpString;
+
+/* Typed value of an event argument. Strings live until the handler returns: copy them to keep. */
+typedef struct GwpValue
+{
+    uint32_t type; /* GwpValueType; a fixed-size integer on purpose, the size of an enum is compiler-defined */
+    uint32_t reserved;
+    union
+    {
+        int32_t b;
+        int64_t i;
+        double n;
+        GwpString s;
+        float v[3];
+        GwpObjectId id;
+    } u;
+} GwpValue;
+
+/* What a handler receives. Valid only during the call. */
+typedef struct GwpEvent
+{
+    GwpEventId id;
+    const char* name;
+    uint32_t argc;
+    const GwpValue* argv;
+    GwpValue* result; /* mutable result shared by all handlers; NULL when the event has none */
+} GwpEvent;
+
+typedef void(GWP_CALL* GwpEventHandler)(void* user, const GwpEvent* event);
+
+/* ------------------------------------------------------------------------- */
 /* Engine API table (engine -> plugin)                                        */
 /* ------------------------------------------------------------------------- */
 
@@ -127,6 +192,52 @@ typedef struct GwpEngineApi
        Lets a plugin skip building debug text that would be dropped anyway.
        @group core @thread any */
     int(GWP_CALL* is_debug_log)(void);
+
+    /* Id of the event with this name; registers the name when it is new. 0 only for an invalid name.
+       Ids never change while the game runs: resolve once, emit by id.
+       @group events @thread main */
+    GwpEventId(GWP_CALL* event_id)(const char* name);
+
+    /* Subscribes handler to the event `name` (declared or not yet). user is passed back to the handler.
+       The same handler may be subscribed several times: each call is a separate subscription.
+       Subscriptions of a plugin are removed by the engine after its on_unload.
+       A subscription made during a dispatch of the same event takes effect from the next dispatch.
+       @group events @thread main */
+    GwpSubscriptionId(GWP_CALL* event_subscribe)(const GwpPlugin* self, const char* name, GwpEventHandler handler,
+        void* user);
+    void(GWP_CALL* event_unsubscribe)(const GwpPlugin* self, GwpSubscriptionId subscription);
+
+    /* Declares an event owned by this plugin (flags: GWP_EVENT_HAS_RESULT). Emitting an undeclared event works
+       but prints a warning once.
+       @group events @thread main */
+    GwpResult(GWP_CALL* event_declare)(const GwpPlugin* self, const char* name, uint32_t flags);
+
+    /* Emits the event to every Lua and native subscriber synchronously. result may be NULL.
+       Nested emits from a handler are allowed.
+       @group events @thread main */
+    GwpResult(GWP_CALL* event_emit)(const GwpPlugin* self, GwpEventId id, uint32_t argc, const GwpValue* argv,
+        GwpValue* result);
+
+    /* Online game objects by id. Every function returns 0 / NULL / GWP_INVALID_OBJECT_ID when there is no level
+       or no such online object. Strings live while the object is online: copy them to keep.
+       @group objects @thread main */
+    int(GWP_CALL* object_exists)(GwpObjectId id);
+    const char*(GWP_CALL* object_section)(GwpObjectId id);
+    const char*(GWP_CALL* object_name)(GwpObjectId id);
+    int32_t(GWP_CALL* object_clsid)(GwpObjectId id); /* same numbers as Lua clsid.*, -1 when unknown */
+    int(GWP_CALL* object_position)(GwpObjectId id, float out_xyz[3]);
+    int(GWP_CALL* object_is_alive)(GwpObjectId id); /* 0 for objects that are not living entities */
+    GwpObjectId(GWP_CALL* actor_id)(void);
+
+    /* Plugin data stored inside the game save (a chunk per addon).
+       save_write replaces the data of this addon; it goes to disk with the next save (usually called from the
+       alife_on_before_save handler). size == 0 removes the data. The engine copies the bytes.
+       save_read returns the data of this addon from the loaded save (or written since); GWP_ERROR when there is
+       none. The pointer is valid until the next save_write of this plugin, a load or a new game.
+       Data of addons that are not installed now is carried to new saves unchanged.
+       @group save @thread main */
+    GwpResult(GWP_CALL* save_write)(const GwpPlugin* self, uint32_t data_version, const void* data, uint32_t size);
+    GwpResult(GWP_CALL* save_read)(const GwpPlugin* self, uint32_t* data_version, const void** data, uint32_t* size);
 
     /* New functions go below this line only. */
 } GwpEngineApi;

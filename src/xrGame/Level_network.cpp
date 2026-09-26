@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_event_bus.h"
 #include "Level.h"
 #include "Level_Bullet_Manager.h"
 #include "xrServer.h"
@@ -118,6 +119,7 @@ extern CUISequencer* g_tutorial2;
 void CLevel::net_Stop()
 {
     Msg("- Disconnect");
+    gw::addons::events::Emit(gw::addons::events::EBuiltin::LevelOnStop);
 
     if (CurrentGameUI())
     {

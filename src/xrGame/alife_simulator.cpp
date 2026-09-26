@@ -21,6 +21,7 @@
 #include "object_factory.h"
 #include "alife_object_registry.h"
 #include "xrEngine/XR_IOConsole.h"
+#include "addon_host.h"
 
 #ifdef DEBUG
 #include "moving_objects.h"
@@ -34,6 +35,9 @@ CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
     : CALifeSimulatorBase(server, alife_section), CALifeUpdateManager(server, alife_section),
       CALifeInteractionManager(server, alife_section)
 {
+    // Addons: a new game starts without plugin save data; a load reads it in CALifeStorageManager::load.
+    gw::addons::ResetSaveData();
+
     // XXX: why do we need to reinitialize script engine?
     if (!strstr(Core.Params, "-keep_lua"))
     {

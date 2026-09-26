@@ -27,6 +27,7 @@
 #include "autosave_manager.h"
 #include "ai_space.h"
 #include "addon_host.h"
+#include "addon_event_bus.h"
 #include "ai/monsters/basemonster/base_monster.h"
 #include "date_time.h"
 #include "mt_config.h"
@@ -1943,6 +1944,13 @@ public:
     virtual void Execute(LPCSTR /*args*/) { gw::addons::PrintList(); }
 };
 
+class CCC_EventList : public IConsole_Command
+{
+public:
+    CCC_EventList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR /*args*/) { gw::addons::events::PrintList(); }
+};
+
 class CCC_MainMenu : public IConsole_Command
 {
 public:
@@ -3002,6 +3010,7 @@ void CCC_RegisterCommands()
 
     CMD1(CCC_LuaHelp, "dump_lua");
     CMD1(CCC_AddonList, "addon_list");
+    CMD1(CCC_EventList, "event_list");
     CMD4(CCC_InvCellSize, "g_inv_cell_size", &g_inv_inv_cell_size, 1, 4);
 
     CMD3(CCC_Mask, "g_autopickup", &psActorFlags, AF_AUTOPICKUP);

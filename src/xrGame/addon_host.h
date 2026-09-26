@@ -8,6 +8,11 @@
 //         plans/addons_api_support/08-unified-addons-api-lua-native.md (sections 4.2, 4.3, 4.8).
 // Plugin API (C ABI): xrAddonHost/include/gwp/gwp_api.h
 
+#include "xrAddonHost/include/gwp/gwp_api.h"
+
+class IReader;
+class IWriter;
+
 namespace gw::addons
 {
 // Discovers addons and loads their plugins. Call once per process on the main thread,
@@ -19,4 +24,14 @@ void Shutdown();
 
 // Prints every discovered addon with its plugin state to the log (console command "addon_list").
 void PrintList();
+
+// Plugin save data (save_write/save_read): a block at the end of the ALife save stream (alife_storage_manager.cpp).
+void ResetSaveData();                // new game: forget the data of the previous one
+void WriteSaveData(IWriter& stream); // writes its own chunk into the ALife save stream
+void ReadSaveData(IReader& stream);  // finds that chunk; a save without it gives no data
+
+// Internal: shared by the parts of the host (addon_event_bus.cpp, addon_api_objects.cpp).
+pcstr PluginAddonId(const GwpPlugin* plugin); // "?" for an unknown handle
+bool IsMainThread();
+void FillObjectsApi(GwpEngineApi& api);
 } // namespace gw::addons

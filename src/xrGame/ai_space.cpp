@@ -22,6 +22,7 @@
 #include "moving_objects.h"
 #include "doors_manager.h"
 #include "addon_host.h"
+#include "addon_event_bus.h"
 
 CAI_Space* g_ai_space;
 
@@ -208,6 +209,7 @@ void CAI_Space::RestartScriptEngine()
     if (GEnv.ScriptEngine != nullptr)
     {
         m_events_notifier.FireEvent(EVENT_SCRIPT_ENGINE_STARTED);
+        gw::addons::events::Emit(gw::addons::events::EBuiltin::EngineOnScriptStart);
     }
 }
 

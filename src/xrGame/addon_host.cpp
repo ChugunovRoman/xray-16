@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 
 #include "addon_host.h"
+#include "addon_event_bus.h"
 
 #include "xrAddonHost/include/gwp/gwp_api.h"
 #include "xrCore/ModuleLookup.hpp"
@@ -139,6 +140,21 @@ GwpEngineApi g_engine_api{};
 std::thread::id g_main_thread_id;
 bool g_initialized = false;
 bool g_debug_log = false;
+
+// Plugin save data by addon id. Independent of g_addons: data of addons that are not installed now is kept and
+// written to new saves unchanged. xr_map: stable order in the save file.
+struct SaveChunk
+{
+    u32 version = 0;
+    xr_vector<u8> data;
+};
+xr_map<xr_string, SaveChunk> g_save_data;
+
+// Chunk of the ALife save stream (the stream is a sequence of chunks, see alife_space.h: ALIFE_CHUNK_DATA...).
+// Found by id, so its position in the stream does not matter; a save without it (older build) has no plugin data.
+constexpr u32 kSaveChunkId = 0x0100;
+constexpr u32 kSaveFormat = 1;
+constexpr u32 kMaxSaveChunk = 64u * 1024u * 1024u;
 
 #if defined(XR_PLATFORM_WINDOWS)
 constexpr pcstr kPluginOs = "windows";
@@ -485,6 +501,47 @@ const char* GWP_CALL ApiAddonDir(const GwpPlugin* self)
     return addon ? addon->dir.c_str() : "";
 }
 
+GwpResult GWP_CALL ApiSaveWrite(const GwpPlugin* self, uint32_t data_version, const void* data, uint32_t size)
+{
+    const AddonRecord* addon = AddonOf(self);
+    if (!addon || (size > 0 && !data) || size > kMaxSaveChunk)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!IsMainThread())
+        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (size == 0)
+    {
+        g_save_data.erase(addon->id);
+        return GWP_OK;
+    }
+    SaveChunk& chunk = g_save_data[addon->id];
+    chunk.version = data_version;
+    chunk.data.assign(static_cast<const u8*>(data), static_cast<const u8*>(data) + size);
+    return GWP_OK;
+}
+
+GwpResult GWP_CALL ApiSaveRead(const GwpPlugin* self, uint32_t* data_version, const void** data, uint32_t* size)
+{
+    if (data_version)
+        *data_version = 0;
+    if (data)
+        *data = nullptr;
+    if (size)
+        *size = 0;
+    const AddonRecord* addon = AddonOf(self);
+    if (!addon || !data || !size)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!IsMainThread())
+        return GWP_ERROR_NOT_MAIN_THREAD;
+    const auto it = g_save_data.find(addon->id);
+    if (it == g_save_data.end() || it->second.data.empty())
+        return GWP_ERROR;
+    if (data_version)
+        *data_version = it->second.version;
+    *data = it->second.data.data();
+    *size = static_cast<uint32_t>(it->second.data.size());
+    return GWP_OK;
+}
+
 uint32_t GWP_CALL ApiEngineBuildId() { return Core.GetBuildId(); }
 int GWP_CALL ApiIsMainThread() { return std::this_thread::get_id() == g_main_thread_id ? 1 : 0; }
 int GWP_CALL ApiIsDebugLog() { return g_debug_log ? 1 : 0; } // set once in Initialize, read-only afterwards
@@ -502,6 +559,10 @@ void FillEngineApi()
     g_engine_api.engine_build_id = &ApiEngineBuildId;
     g_engine_api.is_main_thread = &ApiIsMainThread;
     g_engine_api.is_debug_log = &ApiIsDebugLog;
+    events::FillEngineApi(g_engine_api);
+    FillObjectsApi(g_engine_api);
+    g_engine_api.save_write = &ApiSaveWrite;
+    g_engine_api.save_read = &ApiSaveRead;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -866,6 +927,7 @@ void LoadPlugin(AddonRecord& addon)
     const GwpResult result = init(&g_engine_api, &addon.handle, &desc);
     if (result != GWP_OK)
     {
+        events::RemovePluginSubscriptions(&addon.handle); // the plugin may have subscribed before failing
         addon.module.reset();
         string64 code;
         xr_sprintf(code, "%d", static_cast<int>(result));
@@ -880,6 +942,7 @@ void LoadPlugin(AddonRecord& addon)
         desc.abi_major == GWP_API_VERSION_MAJOR && desc.api_min <= GWP_API_VERSION;
     if (!header_ok)
     {
+        events::RemovePluginSubscriptions(&addon.handle);
         addon.module.reset();
         addon.reason = "plugin header mismatch: abi " + VersionString(GWP_MAKE_VERSION(desc.abi_major, 0, 0)) +
             ", requires api " + VersionString(desc.api_min) + ", engine api " + VersionString(GWP_API_VERSION);
@@ -955,12 +1018,99 @@ void Shutdown()
             continue;
         if (addon.desc.on_unload)
             addon.desc.on_unload(addon.desc.user);
+        events::RemovePluginSubscriptions(&addon.handle); // handlers point into the library being unloaded
         addon.module.reset();
         addon.plugin_state = EPluginState::Unavailable;
     }
     xr_delete(g_addons);
+    g_save_data.clear();
+    events::Shutdown();
     g_initialized = false;
 }
+
+void ResetSaveData() { detail::g_save_data.clear(); }
+
+void WriteSaveData(IWriter& stream)
+{
+    using namespace detail;
+    stream.open_chunk(kSaveChunkId);
+    stream.w_u32(kSaveFormat);
+    stream.w_u32(static_cast<u32>(g_save_data.size()));
+    for (const auto& [id, chunk] : g_save_data)
+    {
+        stream.w_stringZ(id.c_str());
+        stream.w_u32(chunk.version);
+        stream.w_u32(static_cast<u32>(chunk.data.size()));
+        stream.w(chunk.data.data(), chunk.data.size());
+    }
+    stream.close_chunk();
+}
+
+namespace detail
+{
+// Reads a zero-terminated string without leaving the reader (IReader::r_stringZ does not check bounds).
+bool ReadStringChecked(IReader& reader, xr_string& out)
+{
+    const auto* begin = static_cast<const char*>(reader.pointer());
+    const intptr_t left = reader.elapsed();
+    const void* end = left > 0 ? memchr(begin, 0, static_cast<size_t>(left)) : nullptr;
+    if (!end)
+        return false;
+    out.assign(begin, static_cast<const char*>(end));
+    reader.advance(out.size() + 1);
+    return true;
+}
+} // namespace detail
+
+void ReadSaveData(IReader& stream)
+{
+    using namespace detail;
+    g_save_data.clear();
+    IReader* reader = stream.open_chunk(kSaveChunkId);
+    if (!reader)
+        return; // save made by a build without plugin data
+    const auto has = [reader](size_t bytes) { return reader->elapsed() >= static_cast<intptr_t>(bytes); };
+
+    const u32 format = has(sizeof(u32)) ? reader->r_u32() : 0;
+    if (format != kSaveFormat)
+    {
+        Logf("! ", "addons", "plugin save data: format %u is not supported, ignored", format);
+        reader->close();
+        return;
+    }
+    const u32 count = has(sizeof(u32)) ? reader->r_u32() : 0;
+    for (u32 i = 0; i < count; ++i)
+    {
+        xr_string id;
+        if (!ReadStringChecked(*reader, id) || !has(2 * sizeof(u32)))
+        {
+            Logf("! ", "addons", "plugin save data is truncated, the rest is ignored");
+            break;
+        }
+        SaveChunk chunk;
+        chunk.version = reader->r_u32();
+        const u32 size = reader->r_u32();
+        if (size > kMaxSaveChunk || !has(size))
+        {
+            Logf("! ", "addons", "plugin save data of '%s' is truncated, the rest is ignored", id.c_str());
+            break;
+        }
+        chunk.data.resize(size);
+        reader->r(chunk.data.data(), size);
+        g_save_data[id] = std::move(chunk);
+    }
+    reader->close();
+    if (g_debug_log)
+        Logf("  ", "addons", "plugin save data: %u chunk(s) loaded", static_cast<u32>(g_save_data.size()));
+}
+
+pcstr PluginAddonId(const GwpPlugin* plugin)
+{
+    const detail::AddonRecord* addon = detail::AddonOf(plugin);
+    return addon ? addon->id.c_str() : "?";
+}
+
+bool IsMainThread() { return detail::ApiIsMainThread() != 0; }
 
 void PrintList()
 {

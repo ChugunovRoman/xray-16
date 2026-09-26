@@ -42,6 +42,9 @@ BASE = "https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/"
 GROUPS = {
     "core": ("Базовые функции", "api/core.md"),
     "logger": ("Форматированный лог", "api/logger.md"),
+    "events": ("События", "api/events.md"),
+    "objects": ("Игровые объекты", "api/objects.md"),
+    "save": ("Данные в сейве", "api/save.md"),
 }
 
 THREADS = {
@@ -221,6 +224,9 @@ def parse_c_header(path):
     types = []
     for m in re.finditer(r"typedef\s+struct\s+(\w+)\s+(\w+)\s*;", joined):
         types.append((m.group(2), "непрозрачная структура (`struct %s`)" % m.group(1)))
+    for m in re.finditer(r"typedef\s+struct\s+(\w+)\s*\{", joined):
+        if m.group(1) not in ("GwpEngineApi", "GwpPluginDesc"):  # listed in their own sections
+            types.append((m.group(1), "структура, описание на странице группы"))
     for m in re.finditer(r"typedef\s+((?:unsigned\s+)?\w+_t|int|unsigned)\s+(\w+)\s*;", joined):
         types.append((m.group(2), "`%s`" % m.group(1)))
     init_fn = None

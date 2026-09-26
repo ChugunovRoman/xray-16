@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "addon_event_bus.h"
 #include "Level.h"
 #include "Level_Bullet_Manager.h"
 #include "xrServer.h"
@@ -258,6 +259,11 @@ bool CLevel::net_start6()
 
     if (net_start_result_total)
     {
+        {
+            const shared_str level_name = name(); // keeps the string alive for the Emit call
+            const GwpValue args[] = { gw::addons::events::String(level_name.c_str()) };
+            gw::addons::events::Emit(gw::addons::events::EBuiltin::LevelOnStart, args, 1);
+        }
         if (strstr(Core.Params, "-$"))
         {
             string256 buf{}, cmd{}, param{};
