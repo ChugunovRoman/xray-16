@@ -10,6 +10,7 @@
 #include "x_ray.h"
 
 #include "embedded_resources_management.h"
+#include "EngineThreading.h"
 
 #include "xrCore/Threading/TaskManager.hpp"
 #include "xrNetServer/NET_AuthCheck.h"
@@ -213,6 +214,7 @@ CApplication::CApplication(pcstr commandLine, GameModule* game, const std::array
 {
     TracySetProgramName("OpenXRay");
     Threading::SetCurrentThreadName("Primary thread");
+    XRay::Engine::MarkMainThread(); // the game logic thread of IsGameLogicThread() (again every frame, see Run)
     FrameMarkStart(FRAME_MARK_APPLICATION_STARTUP);
 
     if (strstr(commandLine, "-dedicated"))
@@ -382,6 +384,7 @@ int CApplication::Run()
     while (!SDL_QuitRequested()) // SDL_PumpEvents is here
     {
         FrameMarkStart(FRAME_MARK_APPLICATION_RUN);
+        XRay::Engine::MarkMainThread();
         bool canCallActivate = false;
         bool shouldActivate = false;
 

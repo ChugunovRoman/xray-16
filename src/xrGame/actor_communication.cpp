@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "Actor.h"
 #include "UIGameSP.h"
 #include "PDA.h"
@@ -145,6 +146,7 @@ bool CActor::OnReceiveInfo(shared_str info_id) const
     AddGameTask(&info_portion);
 
     callback(GameObject::eInventoryInfo)(lua_game_object(), info_id.c_str());
+    gw::addons::objevents::ActorInfo(this, info_id.c_str());
 
     if (!CurrentGameUI())
         return false;

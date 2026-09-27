@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "Inventory.h"
 #include "Actor.h"
 #include "CustomOutfit.h"
@@ -1230,6 +1231,10 @@ bool CInventory::Eat(PIItem pIItem)
     if (pItemToEat->object().H_Parent()->ID() != entity_alive->ID())
         return false;
 
+    // Stage B (B4.1): on_before_item_use comes before the item is used, so a subscriber can really cancel it.
+    if (!gw::addons::objevents::BeforeItemUse(entity_alive, &pIItem->object()))
+        return false;
+
     if (g_enhancend_anims && m_pOwner->object_id() == 0 && pSettings->line_exist(pIItem->m_section_id, "hud"))
     {
         // if (CCustomDetector* detector = smart_cast<CCustomDetector*>(Actor()->inventory().ItemFromSlot(DETECTOR_SLOT)))
@@ -1267,18 +1272,16 @@ bool CInventory::Eat(PIItem pIItem)
         pItemToEat->object().cNameSect().c_str());
 #endif // MP_LOGGING
 
-    luabind::functor<bool> funct;
-    if (GEnv.ScriptEngine->functor("_G.CInventory__eat", funct))
-    {
-        if (!funct(smart_cast<CGameObject*>(pItemToEat->object().H_Parent())->lua_game_object(), smart_cast<CGameObject*>(pIItem)->lua_game_object()))
-            return false;
-    }
+    // _G.CInventory__eat is gone (stage B-5): on_before_item_use is sent by the engine above, before UseBy.
 
     CActor* pActor = smart_cast<CActor*>(Level().CurrentControlEntity());
     if (pActor && pActor->m_inventory == this)
     {
         if (IsGameTypeSingle())
+        {
             pActor->callback(GameObject::eUseObject)(smart_cast<CGameObject*>(pIItem)->lua_game_object());
+            gw::addons::objevents::ActorItemUse(smart_cast<CGameObject*>(pIItem));
+        }
 
         if (pItemToEat->IsUsingCondition() && pItemToEat->GetRemainingUses() < 1 && pItemToEat->CanDelete())
             CurrentGameUI()->GetActorMenu().RefreshCurrentItemCell();

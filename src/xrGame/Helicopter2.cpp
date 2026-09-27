@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "helicopter.h"
 
 #include "script_game_object.h"
@@ -214,6 +215,7 @@ void CHelicopter::Hit(SHit* pHDS)
         (smart_cast<CActor*>(pHDS->who) || smart_cast<CAI_Stalker*>(pHDS->who) || smart_cast<CCustomZone*>(pHDS->who)))
     {
         callback(GameObject::eHelicopterOnHit)(pHDS->damage(), pHDS->impulse, pHDS->hit_type, pHDS->who->ID());
+        gw::addons::objevents::HeliHit(this, pHDS->damage(), pHDS->impulse, static_cast<u32>(pHDS->hit_type), pHDS->who);
     }
 
     CPHDestroyable::SetFatalHit(*pHDS);

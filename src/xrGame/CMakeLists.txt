@@ -82,12 +82,20 @@ target_sources(xrGame PRIVATE
     AdvancedDetector.cpp
     AdvancedDetector.h
     addon_api_objects.cpp
+    addon_api_console.cpp
+    addon_api_console.h
+    addon_api_info.cpp
+    addon_api_ini.cpp
+    addon_api_ini.h
+    addon_api_level.cpp
     addon_data_bus.cpp
     addon_data_bus.h
     addon_event_bus.cpp
     addon_event_bus.h
     addon_host.cpp
     addon_host.h
+    addon_object_events.cpp
+    addon_object_events.h
     addon_timers.cpp
     addon_timers.h
     agent_corpse_manager.cpp

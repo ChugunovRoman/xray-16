@@ -514,7 +514,10 @@
     <ClInclude Include="AI_PhraseDialogManager.h" />
     <ClInclude Include="addon_data_bus.h" />
     <ClInclude Include="addon_event_bus.h" />
+    <ClInclude Include="addon_api_console.h" />
+    <ClInclude Include="addon_api_ini.h" />
     <ClInclude Include="addon_host.h" />
+    <ClInclude Include="addon_object_events.h" />
     <ClInclude Include="addon_timers.h" />
     <ClInclude Include="ai_space.h" />
     <ClInclude Include="ai_space_inline.h" />
@@ -1918,7 +1921,12 @@
     <ClCompile Include="addon_api_objects.cpp" />
     <ClCompile Include="addon_data_bus.cpp" />
     <ClCompile Include="addon_event_bus.cpp" />
+    <ClCompile Include="addon_api_console.cpp" />
+    <ClCompile Include="addon_api_info.cpp" />
+    <ClCompile Include="addon_api_ini.cpp" />
+    <ClCompile Include="addon_api_level.cpp" />
     <ClCompile Include="addon_host.cpp" />
+    <ClCompile Include="addon_object_events.cpp" />
     <ClCompile Include="addon_timers.cpp" />
     <ClCompile Include="ai_space.cpp" />
     <ClCompile Include="ai_stalker_alife.cpp" />

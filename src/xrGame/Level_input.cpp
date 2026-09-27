@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "addon_object_events.h"
 #include "xrEngine/XR_IOConsole.h"
 #include "entity_alive.h"
 #include "game_sv_single.h"
@@ -136,6 +137,7 @@ void CLevel::IR_OnKeyboardPress(int key)
     {
         ZoneScopedN("CLevel::IR_OnKeyboardPress/script_eKeyPress");
         g_actor->callback(GameObject::eKeyPress)(key);
+        gw::addons::objevents::ActorKey(gw::addons::objevents::EKey::Press, key);
     }
 
     if (_curr == kPAUSE)
@@ -233,6 +235,10 @@ void CLevel::IR_OnKeyboardPress(int key)
 
     {
         ZoneScopedN("CLevel::IR_OnKeyboardPress/script_level_input_on_key_press");
+        // Stage B: subscribers get the key before level_input.on_key_press does its own work (quick save, ...),
+        // as they did when that Lua function sent the event first.
+        if (gw::addons::objevents::LevelInputKeyPress(key, _curr))
+            return;
         luabind::functor<bool> funct;
         if (GEnv.ScriptEngine->functor("level_input.on_key_press", funct))
         {
@@ -478,6 +484,7 @@ void CLevel::IR_OnKeyboardRelease(int key)
     if (g_actor)
     {
         g_actor->callback(GameObject::eKeyRelease)(key);
+        gw::addons::objevents::ActorKey(gw::addons::objevents::EKey::Release, key);
     }
 
     if (CurrentGameUI() && CurrentGameUI()->IR_UIOnKeyboardRelease(key))
@@ -510,6 +517,7 @@ void CLevel::IR_OnKeyboardHold(int key)
     if (g_actor)
     {
         g_actor->callback(GameObject::eKeyHold)(key);
+        gw::addons::objevents::ActorKey(gw::addons::objevents::EKey::Hold, key);
     }
 
 #ifdef DEBUG

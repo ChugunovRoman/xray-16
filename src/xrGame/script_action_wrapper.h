@@ -24,6 +24,11 @@ public:
     static void finalize_static(CScriptActionBase* action);
     virtual edge_value_type weight(const CSConditionState& condition0, const CSConditionState& condition1) const;
     static  edge_value_type weight_static(CScriptActionBase* action, const CSConditionState& condition0, const CSConditionState& condition1);
+
+private:
+    // Same reason as in CScriptPropertyEvaluatorWrapper: the name comes from a Lua string that does not outlive
+    // the constructor, while m_action_name keeps the pointer for the life of the action (planner logs use it).
+    shared_str m_script_action_name;
 };
 
 #include "script_action_wrapper_inline.h"

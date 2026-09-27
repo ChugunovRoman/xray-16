@@ -47,6 +47,10 @@ GROUPS = {
     "save": ("Данные в сейве", "api/save.md"),
     "data": ("Шина данных", "api/data.md"),
     "timers": ("Таймеры", "api/timers.md"),
+    "ini": ("Конфиги", "api/ini.md"),
+    "console": ("Консоль и профиль", "api/console.md"),
+    "level": ("Уровень и мир", "api/level.md"),
+    "info": ("Инфопоршни", "api/info.md"),
     "plugin": ("Класс gwp::Plugin", "api/plugin.md"),
 }
 

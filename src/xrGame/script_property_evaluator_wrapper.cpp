@@ -15,53 +15,190 @@
 #include "performance_cvars.h"
 #include "xrAICore/Components/ai_planner_search_limits.h"
 
-static EScriptEvaluatorCachePolicy get_script_evaluator_cache_policy(pcstr evaluator_name)
+// Policies read from configs/npc_perf_evaluator_cache.ltx. The file only overrides the table below, so the
+// behaviour without it is exactly the built-in one. Reloaded by the console command ai_evaluator_cache_reload,
+// which is what makes tuning a one-session experiment instead of a rebuild per variant.
+namespace
 {
+// A policy plus, for CacheForTTL, the lifetime this evaluator asked for. ttl_ms == 0 means "take the
+// ai_evaluator_ttl_ms cvar", which is what the built-in table does.
+struct CachePolicySetting
+{
+    EScriptEvaluatorCachePolicy policy = EScriptEvaluatorCachePolicy::CachePerSolve;
+    u32 ttl_ms = 0;
+};
+
+using PolicyMap = xr_map<shared_str, CachePolicySetting>;
+PolicyMap* g_policy_overrides = nullptr;
+bool g_policy_overrides_loaded = false;
+
+// A number is a lifetime in milliseconds for this evaluator alone ("meet_contact = 1500"); 0 turns the cache
+// off for it. Words keep their meaning, and "ttl" takes the lifetime from the cvar.
+bool parse_cache_policy(pcstr text, CachePolicySetting& out)
+{
+    if (!text || !text[0])
+        return false;
+    if (text[0] >= '0' && text[0] <= '9')
+    {
+        const int ms = atoi(text);
+        if (ms < 0)
+            return false;
+        out.ttl_ms = static_cast<u32>(ms);
+        out.policy = ms > 0 ? EScriptEvaluatorCachePolicy::CacheForTTL : EScriptEvaluatorCachePolicy::NeverCache;
+        return true;
+    }
+    out.ttl_ms = 0;
+    EScriptEvaluatorCachePolicy& policy = out.policy;
+    if (xr_strcmp(text, "never") == 0)
+        policy = EScriptEvaluatorCachePolicy::NeverCache;
+    else if (xr_strcmp(text, "frame") == 0)
+        policy = EScriptEvaluatorCachePolicy::CachePerFrame;
+    else if (xr_strcmp(text, "frame10") == 0)
+        policy = EScriptEvaluatorCachePolicy::CacheFor10Frames;
+    else if (xr_strcmp(text, "frame30") == 0)
+        policy = EScriptEvaluatorCachePolicy::CacheFor30Frames;
+    else if (xr_strcmp(text, "solve") == 0)
+        policy = EScriptEvaluatorCachePolicy::CachePerSolve;
+    else if (xr_strcmp(text, "ttl") == 0)
+        policy = EScriptEvaluatorCachePolicy::CacheForTTL;
+    else
+        return false;
+    return true;
+}
+
+pcstr cache_policy_name(EScriptEvaluatorCachePolicy policy)
+{
+    switch (policy)
+    {
+    case EScriptEvaluatorCachePolicy::NeverCache: return "never";
+    case EScriptEvaluatorCachePolicy::CachePerFrame: return "frame";
+    case EScriptEvaluatorCachePolicy::CacheFor10Frames: return "frame10";
+    case EScriptEvaluatorCachePolicy::CacheFor30Frames: return "frame30";
+    case EScriptEvaluatorCachePolicy::CachePerSolve: return "solve";
+    case EScriptEvaluatorCachePolicy::CacheForTTL: return "ttl";
+    default: return "?";
+    }
+}
+
+void load_policy_overrides()
+{
+    g_policy_overrides_loaded = true;
+    if (!g_policy_overrides)
+        g_policy_overrides = xr_new<PolicyMap>();
+    g_policy_overrides->clear();
+
+    string_path path;
+    FS.update_path(path, "$game_config$", "npc_perf_evaluator_cache.ltx");
+    if (!FS.exist(path, FSType::Any))
+        return; // no file: the built-in table stands
+
+    CInifile ini(path, true /*read only*/);
+    if (!ini.section_exist("evaluator_cache"))
+        return;
+
+    const CInifile::Sect& section = ini.r_section("evaluator_cache");
+    for (const CInifile::Item& item : section.Data)
+    {
+        CachePolicySetting setting;
+        if (parse_cache_policy(item.second.c_str(), setting))
+            g_policy_overrides->emplace(item.first, setting);
+        else
+            Msg("! [evaluator_cache] '%s = %s': expected a number of milliseconds or "
+                "never|frame|frame10|frame30|solve|ttl",
+                item.first.c_str(), item.second.c_str());
+    }
+    Msg("* [evaluator_cache] %u override(s) from %s", static_cast<u32>(g_policy_overrides->size()), path);
+}
+} // namespace
+
+u32 g_ai_evaluator_cache_generation = 1;
+
+void ai_evaluator_cache_reload()
+{
+    load_policy_overrides();
+    ++g_ai_evaluator_cache_generation; // every evaluator re-reads its policy and drops the value it cached
+}
+
+void ai_evaluator_cache_print()
+{
+    if (!g_policy_overrides_loaded)
+        load_policy_overrides();
+    Msg("- [evaluator_cache] ttl %u ms, solve cache %s, %u override(s):", ai_evaluator_ttl_ms,
+        ai_evaluator_solve_cache ? "on" : "off",
+        g_policy_overrides ? static_cast<u32>(g_policy_overrides->size()) : 0u);
+    if (g_policy_overrides)
+    {
+        for (const auto& [name, setting] : *g_policy_overrides)
+        {
+            if (setting.ttl_ms)
+                Msg("-   %-40s %s %u ms", name.c_str(), cache_policy_name(setting.policy), setting.ttl_ms);
+            else
+                Msg("-   %-40s %s", name.c_str(), cache_policy_name(setting.policy));
+        }
+    }
+    Msg("- [evaluator_cache] the rest keeps the built-in policy; reload the file with ai_evaluator_cache_reload");
+}
+
+static CachePolicySetting get_script_evaluator_cache_policy(pcstr evaluator_name)
+{
+    CachePolicySetting result;
     if (!evaluator_name || !evaluator_name[0])
-        return EScriptEvaluatorCachePolicy::NeverCache;
+    {
+        result.policy = EScriptEvaluatorCachePolicy::NeverCache;
+        return result;
+    }
+
+    if (!g_policy_overrides_loaded)
+        load_policy_overrides();
+    if (g_policy_overrides)
+    {
+        const auto it = g_policy_overrides->find(evaluator_name);
+        if (it != g_policy_overrides->end())
+            return it->second;
+    }
 
     // --- CachePerFrame: быстро меняющиеся состояния (danger, combat, weapon state) ---
     // state_mgr weapon evaluators
     if (xr_strcmp(evaluator_name, "state_mgr_logic_active") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_in_smartcover") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_locked") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_weapon_locked") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_weapon_none_now") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_weapon_strapped_now") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_weapon_unstrapped_now") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_weapon_strapped") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_weapon_unstrapped") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_weapon_none") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_weapon_drop") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_weapon_fire") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     // combat/danger evaluators: меняются per-frame (выстрел, попадание)
     // но safe для per-frame cache: плановщик вычисляет их много раз за одну итерацию solverа
     if (xr_strcmp(evaluator_name, "danger") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "script_danger") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "evaluator_combat_enemy") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_mental_danger_now") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_end") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_direction") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
     if (xr_strcmp(evaluator_name, "state_mgr_weapon") == 0)
-        return EScriptEvaluatorCachePolicy::CachePerFrame;
+        return { EScriptEvaluatorCachePolicy::CachePerFrame, 0 };
 
 
 
@@ -69,39 +206,43 @@ static EScriptEvaluatorCachePolicy get_script_evaluator_cache_policy(pcstr evalu
     // Controlled by ai_evaluator_ttl_ms. These are heavy Lua scans (~40-75us) called every solve.
     // Combat preempts most of them, so a small delay is imperceptible for non-combat behavior.
     if (xr_strcmp(evaluator_name, "corpse_exist") == 0)
-        return EScriptEvaluatorCachePolicy::CacheForTTL;
+        return { EScriptEvaluatorCachePolicy::CacheForTTL, 0 };
     if (xr_strcmp(evaluator_name, "eva_gather_itm") == 0)
-        return EScriptEvaluatorCachePolicy::CacheForTTL;
+        return { EScriptEvaluatorCachePolicy::CacheForTTL, 0 };
     if (xr_strcmp(evaluator_name, "meet_contact") == 0)
-        return EScriptEvaluatorCachePolicy::CacheForTTL;
+        return { EScriptEvaluatorCachePolicy::CacheForTTL, 0 };
     if (xr_strcmp(evaluator_name, "eva_kill_wounded") == 0)
-        return EScriptEvaluatorCachePolicy::CacheForTTL;
+        return { EScriptEvaluatorCachePolicy::CacheForTTL, 0 };
     if (xr_strcmp(evaluator_name, "eva_dont_shoot") == 0)
-        return EScriptEvaluatorCachePolicy::CacheForTTL;
+        return { EScriptEvaluatorCachePolicy::CacheForTTL, 0 };
     if (xr_strcmp(evaluator_name, "evaluator_abuse") == 0)
-        return EScriptEvaluatorCachePolicy::CacheForTTL;
+        return { EScriptEvaluatorCachePolicy::CacheForTTL, 0 };
     if (xr_strcmp(evaluator_name, "eval_turn_on_campfire") == 0)
-        return EScriptEvaluatorCachePolicy::CacheForTTL;
+        return { EScriptEvaluatorCachePolicy::CacheForTTL, 0 };
     if (xr_strcmp(evaluator_name, "eva_npc_vs_box") == 0)
-        return EScriptEvaluatorCachePolicy::CacheForTTL;
+        return { EScriptEvaluatorCachePolicy::CacheForTTL, 0 };
     if (xr_strcmp(evaluator_name, "eva_npc_vs_heli") == 0)
-        return EScriptEvaluatorCachePolicy::CacheForTTL;
+        return { EScriptEvaluatorCachePolicy::CacheForTTL, 0 };
     if (xr_strcmp(evaluator_name, "eva_radio_in_heli") == 0)
-        return EScriptEvaluatorCachePolicy::CacheForTTL;
+        return { EScriptEvaluatorCachePolicy::CacheForTTL, 0 };
 
     // Default: cache for the duration of one GOAP solve. The world is frozen during a synchronous
     // solve (actions execute after planning, not during), so reusing an evaluator's value across the
     // solve cannot go stale. Collapses redundant Lua calls (actual() + Search re-evaluate the same
     // conditions). Disable via dev cvar ai_evaluator_solve_cache (reverts these to NeverCache).
-    return EScriptEvaluatorCachePolicy::CachePerSolve;
+    return { EScriptEvaluatorCachePolicy::CachePerSolve, 0 };
 }
 
 EScriptEvaluatorCachePolicy CScriptPropertyEvaluatorWrapper::cache_policy() const
 {
-    if (!m_cache_policy_initialized)
+    if (!m_cache_policy_initialized || m_cache_policy_generation != g_ai_evaluator_cache_generation)
     {
-        m_cache_policy = get_script_evaluator_cache_policy(m_evaluator_name);
+        const CachePolicySetting setting = get_script_evaluator_cache_policy(m_evaluator_name);
+        m_cache_policy = setting.policy;
+        m_cache_ttl_ms = setting.ttl_ms;
+        m_cache_policy_generation = g_ai_evaluator_cache_generation;
         m_cache_policy_initialized = true;
+        m_has_cached_value = false; // the value was cached under the previous policy
     }
 
     return m_cache_policy;
@@ -145,7 +286,11 @@ bool CScriptPropertyEvaluatorWrapper::evaluate()
         if (policy == EScriptEvaluatorCachePolicy::CachePerSolve)
             cache_valid = (m_cached_epoch == g_ai_evaluator_solve_epoch);
         else if (policy == EScriptEvaluatorCachePolicy::CacheForTTL)
-            cache_valid = ((current_time_ms - m_cached_time_ms) <= ai_evaluator_ttl_ms);
+        {
+            // Own lifetime from the config, or the shared cvar when the config did not name one.
+            const u32 ttl_ms = m_cache_ttl_ms ? m_cache_ttl_ms : static_cast<u32>(ai_evaluator_ttl_ms);
+            cache_valid = ((current_time_ms - m_cached_time_ms) <= ttl_ms);
+        }
         else
         {
             u32 cache_frame_tolerance = 0; // CachePerFrame

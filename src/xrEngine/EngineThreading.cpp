@@ -14,6 +14,33 @@
 
 #include "xrCore/Threading/ThreadUtil.h"
 
+#include <atomic>
+#include <thread>
+
+namespace
+{
+// The game loop thread, set by MarkMainThread(). The initial value (the thread that loaded the module) only covers
+// the calls before CApplication exists.
+std::atomic<std::thread::id> s_main_thread_id{ std::this_thread::get_id() };
+// The thread executing XRay::Engine::GameThread() right now, or the empty id between the frames.
+std::atomic<std::thread::id> s_game_thread_id{};
+
+struct GameThreadScope
+{
+    GameThreadScope() { s_game_thread_id.store(std::this_thread::get_id(), std::memory_order_release); }
+    ~GameThreadScope() { s_game_thread_id.store(std::thread::id{}, std::memory_order_release); }
+};
+} // namespace
+
+bool XRay::Engine::IsGameLogicThread()
+{
+    const std::thread::id game = s_game_thread_id.load(std::memory_order_acquire);
+    const std::thread::id self = std::this_thread::get_id();
+    return game != std::thread::id{} ? self == game : self == s_main_thread_id.load(std::memory_order_acquire);
+}
+
+void XRay::Engine::MarkMainThread() { s_main_thread_id.store(std::this_thread::get_id(), std::memory_order_release); }
+
 void XRay::Engine::PreRenderThread()
 {
     ZoneScopedN("PreRenderThread");
@@ -48,6 +75,7 @@ void XRay::Engine::GameThread()
 {
     ZoneScopedN("GameThread");
     Threading::SetCurrentThreadName("Game");
+    const GameThreadScope logic_thread; // IsGameLogicThread() is true on this thread until the task ends
 
     if (g_pGameLevel && g_pGameLevel->bReady)
     {

@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include <tracy/Tracy.hpp>
 #include "GameObject.h"
 
@@ -369,6 +370,9 @@ void CGameObject::net_Destroy()
 #endif
 
     VERIFY(m_spawned);
+    // npc_on_net_destroy / actor_on_net_destroy: before the Lua binder (db.storage of the NPC is still there) and
+    // before Objects.net_Unregister below, or the subscribers would get nil for the object (net_Find).
+    gw::addons::objevents::ObjectNetDestroy(this);
     if (m_anim_mov_ctrl)
         destroy_anim_mov_ctrl();
 
@@ -610,11 +614,17 @@ bool CGameObject::net_Spawn(CSE_Abstract* DC)
 
     reload(cNameSect().c_str());
     if (!GEnv.isDedicatedServer)
+    {
         scriptBinder.reload(cNameSect().c_str());
+        gw::addons::objevents::ObjectBinder(gw::addons::objevents::EBinder::Init, this);
+    }
 
     reinit();
     if (!GEnv.isDedicatedServer)
+    {
         scriptBinder.reinit();
+        gw::addons::objevents::ObjectBinder(gw::addons::objevents::EBinder::Reinit, this);
+    }
 #ifdef DEBUG
     if (ph_dbg_draw_mask1.test(ph_m1_DbgTrackObject) && xr_stricmp(PH_DBG_ObjectTrackName(), cName().c_str()) == 0)
     {
@@ -701,8 +711,19 @@ bool CGameObject::net_Spawn(CSE_Abstract* DC)
             Position().x, Position().y, Position().z);
     }
     BOOL ret = scriptBinder.net_Spawn(DC);
+    if (ret)
+    {
+        gw::addons::objevents::ObjectNetSpawn(this); // after the Lua binder: its db.storage entry and logic exist (B3.6)
+        gw::addons::objevents::ObjectBinder(gw::addons::objevents::EBinder::NetSpawn, this);
+    }
 #else
-    return (scriptBinder.net_Spawn(DC));
+    const BOOL ret = scriptBinder.net_Spawn(DC);
+    if (ret)
+    {
+        gw::addons::objevents::ObjectNetSpawn(this); // after the Lua binder: its db.storage entry and logic exist (B3.6)
+        gw::addons::objevents::ObjectBinder(gw::addons::objevents::EBinder::NetSpawn, this); // on_game_load (actor)
+    }
+    return ret;
 #endif
 
 #ifdef DEBUG
@@ -1390,6 +1411,7 @@ void CGameObject::shedule_Update(u32 dt)
             ZoneScopedN("sh_CGameObject_shedule/scriptBinder");
             START_PROFILE("game_object/schedule_update/script_binder")
             scriptBinder.shedule_Update(dt);
+            gw::addons::objevents::ObjectBinderUpdate(this, dt); // actor_on_update* (actor only)
             STOP_PROFILE
 
             if (!is_smart_zone)
@@ -1765,6 +1787,7 @@ bool CGameObject::use(IGameObject* obj)
             return false;
     }
     callback(GameObject::eUseObject)(scriptObj, obj->lua_game_object());
+    gw::addons::objevents::ObjectUse(this, obj);
     return true;
 }
 

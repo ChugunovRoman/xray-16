@@ -2,6 +2,7 @@
 
 #include "addon_event_bus.h"
 #include "addon_host.h"
+#include "addon_object_events.h"
 
 #include "xrScriptEngine/script_engine.hpp"
 #include "script_game_object.h"
@@ -13,6 +14,7 @@
 #include "xrServer_Objects_ALife.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iterator>
 
 namespace gw::addons::events
@@ -81,6 +83,23 @@ struct Event
     pcstr lua_result_field = nullptr;
 
     bool lua_profile = false; // per-handler rows of the Lua ACTOR_BINDER_PROFILE profiler
+
+    // Stage B: schema, source, diagnostics
+    xr_string schema;            // argument codes, see Declare in addon_event_bus.h
+    bool has_schema = false;     // "" is a valid schema (no arguments)
+    bool warned_schema = false;  // an argument mismatch was logged
+    bool warned_schema_conflict = false; // a conflicting declaration was logged
+    bool builtin = false;        // a built-in event: the engine is its only source
+    bool engine_source = false;  // listed in addon_object_events.cpp
+    u32 engine_group = 0;        // objevents::EGroup of an engine-sourced event
+    bool warned_lua_emit = false;
+    bool warned_adapter = false;
+    bool trace = false;          // event_trace
+    u32 emit_count = 0;
+    u32 engine_log_ms = 0;      // gw_event_engine_log: time of the last logged emit
+    u32 engine_log_skipped = 0; // emits not logged since then (rate limit)
+    bool engine_log_any = false;
+    int lua_adapter_ref = LUA_NOREF; // event_bus.set_lua_adapter: builds the Lua arguments of an engine emit
 };
 
 struct Bus
@@ -98,6 +117,10 @@ struct Bus
 
 Bus* g_bus = nullptr;
 bool g_level_change_mark = false;
+u32 g_active_engine_groups = 0; // objevents: implemented & enabled groups
+int g_schema_check = -1;        // gw_event_schema_check
+int g_engine_log = -1;          // gw_event_engine_log
+constexpr u32 kEngineLogIntervalMs = 500; // one line per event at most this often
 
 constexpr u32 kMaxDispatchDepth = 32;
 constexpr size_t kMaxNameLength = 256;
@@ -136,19 +159,44 @@ constexpr LuaResultBinding kLuaResultBindings[] = {
     { "on_before_item_use", 3, "ret_value" },
 };
 
-constexpr pcstr kLuaProfiledEvents[] = { "actor_on_update", "actor_on_update_fast", "actor_on_update_slow" };
+constexpr pcstr kLuaProfiledEvents[] = { "actor_on_update", "actor_on_update_fast", "actor_on_update_slow",
+    "npc_on_hit_callback", "npc_on_death_callback" };
+
+// Schemas of the built-in events, in the order of kBuiltinNames.
+constexpr pcstr kBuiltinSchemas[] = {
+    "",   // engine_on_script_start
+    "s",  // alife_on_start (reason)
+    "",   // alife_on_end
+    "s",  // alife_on_before_save (save name)
+    "s",  // alife_on_after_save
+    "s",  // alife_on_load
+    "s",  // alife_on_after_load
+    "s",  // level_on_start (level name)
+    "",   // level_on_stop
+    "N",  // level_on_frame (dt)
+    "o",  // actor_on_spawn
+    "o",  // actor_on_destroy
+    "s*", // data_on_changed (key, value)
+};
+static_assert(std::size(kBuiltinSchemas) == std::size(kBuiltinNames), "kBuiltinSchemas != kBuiltinNames");
 
 GwpEventId InternIn(Bus& bus, pcstr name);
+void EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, pcstr source, bool from_engine);
 
 Bus& GetBus()
 {
     if (!g_bus)
     {
         g_bus = xr_new<Bus>();
-        for (const pcstr name : kBuiltinNames)
-            InternIn(*g_bus, name);
-        for (auto& event : g_bus->events)
-            event->declared = true;
+        for (size_t i = 0; i < std::size(kBuiltinNames); ++i)
+        {
+            Event& event = *g_bus->events[InternIn(*g_bus, kBuiltinNames[i]) - 1];
+            event.declared = true;
+            event.builtin = true;
+            event.schema = kBuiltinSchemas[i];
+            event.has_schema = true;
+        }
+        objevents::RegisterEngineEvents(); // g_bus is set: the nested GetBus() calls return it
     }
     return *g_bus;
 }
@@ -187,6 +235,128 @@ Event* FindEvent(Bus& bus, GwpEventId id)
     if (id == GWP_INVALID_EVENT_ID || id > bus.events.size())
         return nullptr;
     return bus.events[id - 1].get();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Schemas, sources, trace (stage B)
+// ---------------------------------------------------------------------------------------------
+
+bool IsEngineSourceActive(const Event& event)
+{
+    return event.engine_source && (g_active_engine_groups & (1u << event.engine_group)) != 0;
+}
+
+bool SchemaCheckEnabled() { return g_schema_check < 0 ? IsDebugLog() : g_schema_check != 0; }
+
+bool IsValidSchema(pcstr schema)
+{
+    for (pcstr p = schema; *p; ++p)
+    {
+        if (!strchr("bINsvoOt*", *p))
+            return false;
+        if (p[1] == '?')
+            ++p;
+    }
+    return true;
+}
+
+void SetSchema(Event& event, pcstr schema, pcstr who)
+{
+    if (!schema)
+        return;
+    if (!IsValidSchema(schema))
+    {
+        Msg("! [events] %s: invalid schema '%s' of '%s' (codes b I N s v o O t *, '?' = may be nil)", who, schema,
+            event.name.c_str());
+        return;
+    }
+    if (!event.has_schema)
+    {
+        event.schema = schema;
+        event.has_schema = true;
+    }
+    else if (event.schema != schema && !event.warned_schema_conflict)
+    {
+        event.warned_schema_conflict = true;
+        Msg("~ [events] %s: schema '%s' of '%s' ignored, the event already has '%s'", who, schema,
+            event.name.c_str(), event.schema.c_str());
+    }
+}
+
+bool ValueMatches(char code, const GwpValue& value)
+{
+    switch (code)
+    {
+    case 'b': return value.type == GWP_T_BOOL;
+    case 'I': return value.type == GWP_T_INT || (value.type == GWP_T_NUMBER && std::floor(value.u.n) == value.u.n);
+    case 'N': return value.type == GWP_T_NUMBER || value.type == GWP_T_INT;
+    case 's': return value.type == GWP_T_STRING;
+    case 'v': return value.type == GWP_T_VEC3;
+    case 'o': return value.type == GWP_T_OBJECT;
+    case 'O': return value.type == GWP_T_SERVER_OBJECT;
+    case 't': return value.type == GWP_T_LUA_REF;
+    case '*': return true;
+    default: return false;
+    }
+}
+
+// "object 12, number 1.5, string "abc", nil"
+xr_string DescribeArgs(const GwpValue* argv, u32 argc)
+{
+    xr_string text;
+    for (u32 i = 0; i < argc; ++i)
+    {
+        string256 item;
+        const GwpValue& v = argv[i];
+        switch (v.type)
+        {
+        case GWP_T_BOOL: xr_strcpy(item, v.u.b ? "true" : "false"); break;
+        case GWP_T_INT: xr_sprintf(item, "integer %lld", static_cast<long long>(v.u.i)); break;
+        case GWP_T_NUMBER: xr_sprintf(item, "number %g", v.u.n); break;
+        case GWP_T_STRING: xr_sprintf(item, "string \"%.*s\"", static_cast<int>(std::min<u32>(v.u.s.len, 64)),
+                               v.u.s.ptr ? v.u.s.ptr : ""); break;
+        case GWP_T_VEC3: xr_sprintf(item, "vector (%g, %g, %g)", v.u.v[0], v.u.v[1], v.u.v[2]); break;
+        case GWP_T_OBJECT: xr_sprintf(item, "object %u", static_cast<u32>(v.u.id)); break;
+        case GWP_T_SERVER_OBJECT: xr_sprintf(item, "server object %u", static_cast<u32>(v.u.id)); break;
+        case GWP_T_LUA_REF: xr_strcpy(item, "table/userdata"); break;
+        default: xr_strcpy(item, "nil"); break;
+        }
+        if (i)
+            text += ", ";
+        text += item;
+    }
+    return text;
+}
+
+// Logs once per event when the arguments do not match the schema.
+void CheckSchema(Event& event, const GwpValue* argv, u32 argc, pcstr source)
+{
+    if (!event.has_schema || event.warned_schema || !SchemaCheckEnabled())
+        return;
+    bool ok = true;
+    u32 index = 0;
+    for (pcstr p = event.schema.c_str(); *p; ++p, ++index)
+    {
+        const char code = *p;
+        const bool optional = p[1] == '?' || code == '*';
+        if (p[1] == '?')
+            ++p;
+        if (index >= argc || argv[index].type == GWP_T_NIL)
+            ok = ok && optional;
+        else
+            ok = ok && ValueMatches(code, argv[index]);
+    }
+    ok = ok && argc <= index;
+    if (ok)
+        return;
+    event.warned_schema = true;
+    Msg("~ [events] '%s' sent from %s: arguments (%s) do not match the schema '%s'", event.name.c_str(), source,
+        DescribeArgs(argv, argc).c_str(), event.schema.c_str());
+}
+
+void Trace(const Event& event, const GwpValue* argv, u32 argc, pcstr source)
+{
+    Msg("  [events] trace '%s' from %s: %s", event.name.c_str(), source, DescribeArgs(argv, argc).c_str());
 }
 
 void WarnUndeclared(Event& event, pcstr who, pcstr action)
@@ -416,6 +586,8 @@ void DispatchNative(Bus& bus, Event& event, GwpEventId id, const GwpValue* argv,
         call.events = &data;
         call.event_name = event.name.c_str();
         const GwpPlugin* const plugin = subscriber.plugin;
+        ZoneScopedN("events/plugin_handler"); // Tracy: one zone per handler call, text = addon id and event
+        ZoneTextF("%s: %s", PluginAddonId(plugin), event.name.c_str());
         if (!CallNativeGuarded(call))
         {
             Msg("! [plugin:%s] crashed in a handler of event '%s', all its event subscriptions are removed",
@@ -517,12 +689,13 @@ GwpValue ToValue(lua_State* L, int index)
     {
         const luabind::object object(luabind::from_stack(L, index));
         if (const auto* game_object =
-                luabind::object_cast_nothrow<CScriptGameObject*>(object, static_cast<CScriptGameObject*>(nullptr)))
+                luabind::object_cast_nothrow<const CScriptGameObject*>(object, static_cast<const CScriptGameObject*>(nullptr)))
             return Object(game_object->ID());
-        if (const auto* vector = luabind::object_cast_nothrow<Fvector*>(object, static_cast<Fvector*>(nullptr)))
+        // const: vectors the engine hands to callbacks by const reference are const instances for luabind
+        if (const auto* vector = luabind::object_cast_nothrow<const Fvector*>(object, static_cast<const Fvector*>(nullptr)))
             return Vec3(*vector);
         if (const auto* server_object =
-                luabind::object_cast_nothrow<CSE_Abstract*>(object, static_cast<CSE_Abstract*>(nullptr)))
+                luabind::object_cast_nothrow<const CSE_Abstract*>(object, static_cast<const CSE_Abstract*>(nullptr)))
             return ServerObject(server_object->ID);
         break;
     }
@@ -547,7 +720,9 @@ int PushArgs(lua_State* L, const LuaArgs& args)
     }
     for (int i = 0; i < args.count; ++i)
         lua_pushvalue(L, args.first + i);
-    return args.count;
+    if (args.flags_table)
+        lua_pushvalue(L, args.flags_table);
+    return args.count + (args.flags_table ? 1 : 0);
 }
 
 // Called under lua_pcall with (object, event_name, args...): object[event_name](object, args...).
@@ -615,8 +790,10 @@ void ProfileEnd(lua_State* L, int handle_index)
 
 void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
 {
+    ZoneScopedN("events/dispatch_lua"); // Tracy: all Lua subscribers of one emit
+    ZoneTextF("%s", event.name.c_str());
     const int base = lua_gettop(L);
-    const int max_args = (args.argv ? static_cast<int>(args.argc) + 1 : args.count) + 2;
+    const int max_args = (args.argv ? static_cast<int>(args.argc) : args.count) + 3;
     if (!lua_checkstack(L, max_args + 8))
     {
         Msg("! [events] Lua stack overflow while dispatching '%s'", event.name.c_str());
@@ -700,6 +877,8 @@ void ResetLuaSubscribers(Bus& bus)
                 RemoveAt(bus, *event, i);
         }
     }
+    for (auto& event : bus.events)
+        event->lua_adapter_ref = LUA_NOREF;
     bus.lua = nullptr;
     bus.current_lua = nullptr;
     bus.lua_call_method_ref = LUA_NOREF;
@@ -734,13 +913,76 @@ GwpEventId LuaEventId(lua_State* L, int index)
     return id;
 }
 
-// event_bus.declare(name)
+// event_bus.declare(name [, schema])
 int LuaDeclare(lua_State* L)
 {
     if (Event* event = FindEvent(GetBus(), LuaEventId(L, 1)))
+    {
         event->declared = true;
+        if (lua_type(L, 2) == LUA_TSTRING)
+            SetSchema(*event, lua_tostring(L, 2), "Lua");
+    }
     return 0;
 }
+
+// event_bus.schema(name): the argument schema, nil when the event has none.
+int LuaSchema(lua_State* L)
+{
+    const Event* event = FindEvent(GetBus(), LuaEventId(L, 1));
+    if (event && event->has_schema)
+        lua_pushlstring(L, event->schema.c_str(), event->schema.size());
+    else
+        lua_pushnil(L);
+    return 1;
+}
+
+// event_bus.set_lua_adapter(name, fn | nil): when the ENGINE emits the event, Lua subscribers get
+// fn(<native arguments>) instead of the native arguments (plugins keep the native ones). For arguments that exist
+// only in Lua, e.g. the actor binder of actor_on_* events. Dropped with the Lua state.
+int LuaSetLuaAdapter(lua_State* L)
+{
+    Event* event = FindEvent(GetBus(), LuaEventId(L, 1));
+    if (!event)
+        return 0;
+    if (event->lua_adapter_ref != LUA_NOREF)
+        luaL_unref(L, LUA_REGISTRYINDEX, event->lua_adapter_ref);
+    event->lua_adapter_ref = LUA_NOREF;
+    event->warned_adapter = false;
+    if (lua_type(L, 2) == LUA_TFUNCTION)
+    {
+        lua_pushvalue(L, 2);
+        event->lua_adapter_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    }
+    return 0;
+}
+
+// event_bus.is_engine_source(name): true when the engine sends the event now (its stage B group is active), so a
+// Lua sender must not do what the event handling does (e.g. the actor_before_death slot handler must not kill).
+int LuaIsEngineSource(lua_State* L)
+{
+    const Event* event = FindEvent(GetBus(), LuaEventId(L, 1));
+    lua_pushboolean(L, event && IsEngineSourceActive(*event) ? 1 : 0);
+    return 1;
+}
+
+// Lua value -> GwpValue for every argument (strings point into the Lua stack). 16 without an allocation.
+struct ArgBuffer
+{
+    GwpValue inline_values[16];
+    xr_vector<GwpValue> heap;
+    GwpValue* data = inline_values;
+
+    void Fill(lua_State* L, int first, int count)
+    {
+        if (count > static_cast<int>(std::size(inline_values)))
+        {
+            heap.resize(count);
+            data = heap.data();
+        }
+        for (int i = 0; i < count; ++i)
+            data[i] = ToValue(L, first + i);
+    }
+};
 
 // event_bus.subscribe(name, handler [, throttle_ms]): handler is a function or an object with a method `name`.
 // Subscribing the same handler again only updates throttle_ms.
@@ -823,7 +1065,41 @@ int LuaEmit(lua_State* L)
     Event* event = FindEvent(bus, id);
     if (!event)
         return 0;
+    if (IsEngineSourceActive(*event))
+    {
+        // The engine emits this event now: a Lua emit would deliver it twice.
+        // Expected while the SendScriptCallback lines of the binders are not removed yet (stage B-5): logged only
+        // with -addon_debug, once per event, with the Lua stack of the sender.
+        if (!event->warned_lua_emit && IsDebugLog())
+        {
+            event->warned_lua_emit = true;
+            Msg("~ [events] Lua emit of engine-sourced event '%s' dropped (the engine sends it; console "
+                "gw_event_engine_sources disables engine groups)", event->name.c_str());
+            luaL_traceback(L, L, nullptr, 1);
+            Msg("%s", lua_tostring(L, -1));
+            lua_pop(L, 1);
+        }
+        return 0;
+    }
     WarnUndeclared(*event, "Lua", "emit");
+    ++event->emit_count;
+
+    const int argc = lua_gettop(L) - 1;
+    // The flags table of a script event with a result is not an argument for plugins: they get GwpEvent::result.
+    const int flags_index = event->lua_result_arg ? 1 + static_cast<int>(event->lua_result_arg) : 0;
+    const bool has_flags = flags_index && flags_index <= lua_gettop(L) && lua_type(L, flags_index) == LUA_TTABLE;
+    const int native_argc = has_flags && flags_index == lua_gettop(L) ? argc - 1 : argc;
+
+    ArgBuffer values;
+    bool converted = false;
+    if (event->trace || (event->has_schema && !event->warned_schema && SchemaCheckEnabled()))
+    {
+        values.Fill(L, 2, native_argc);
+        converted = true;
+        CheckSchema(*event, values.data, static_cast<u32>(native_argc), "Lua");
+        if (event->trace)
+            Trace(*event, values.data, static_cast<u32>(native_argc), "Lua");
+    }
     if (event->subscribers.empty())
         return 0;
 
@@ -835,7 +1111,6 @@ int LuaEmit(lua_State* L)
         return 0;
     }
 
-    const int argc = lua_gettop(L) - 1;
     if (event->lua_count)
     {
         LuaArgs args;
@@ -846,23 +1121,13 @@ int LuaEmit(lua_State* L)
 
     if (event->native_count)
     {
-        constexpr int kInlineArgs = 16;
-        GwpValue inline_values[kInlineArgs];
-        xr_vector<GwpValue> heap_values;
-        GwpValue* values = inline_values;
-        if (argc > kInlineArgs)
-        {
-            heap_values.resize(argc);
-            values = heap_values.data();
-        }
-        for (int i = 0; i < argc; ++i)
-            values[i] = ToValue(L, 2 + i);
+        if (!converted)
+            values.Fill(L, 2, native_argc);
 
         // Flags table of the script event -> GwpEvent::result, written back after the native handlers.
         GwpValue result = Nil();
         GwpValue* result_ptr = nullptr;
-        const int flags_index = event->lua_result_arg ? 1 + static_cast<int>(event->lua_result_arg) : 0;
-        if (flags_index && flags_index <= lua_gettop(L) && lua_type(L, flags_index) == LUA_TTABLE)
+        if (has_flags)
         {
             lua_getfield(L, flags_index, event->lua_result_field);
             if (lua_type(L, -1) == LUA_TBOOLEAN || lua_type(L, -1) == LUA_TNUMBER)
@@ -872,7 +1137,7 @@ int LuaEmit(lua_State* L)
         }
 
         const GwpValue before = result;
-        DispatchNative(bus, *event, id, values, static_cast<u32>(argc), result_ptr);
+        DispatchNative(bus, *event, id, values.data, static_cast<u32>(native_argc), result_ptr);
 
         // Written back only when a plugin changed it. All script result fields are bool flags: keep them bool.
         if (result_ptr && memcmp(&before, &result, sizeof(result)) != 0)
@@ -1001,6 +1266,34 @@ GwpResult GWP_CALL ApiEventDeclare(const GwpPlugin* self, const char* name, uint
     return GWP_OK;
 }
 
+GwpResult GWP_CALL ApiEventDeclareEx(const GwpPlugin* self, const char* name, const char* schema, uint32_t flags)
+{
+    if (!CheckMainThread(self, "event_declare_ex"))
+        return GWP_ERROR_NOT_MAIN_THREAD;
+    Event* event = FindEvent(GetBus(), InternIn(GetBus(), name));
+    if (!event)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    string128 who;
+    xr_sprintf(who, "plugin:%s", PluginAddonId(self));
+    if (schema && !IsValidSchema(schema))
+    {
+        SetSchema(*event, schema, who); // logs the invalid schema
+        return GWP_ERROR_INVALID_ARGUMENT;
+    }
+    event->declared = true;
+    event->flags |= flags;
+    SetSchema(*event, schema, who);
+    return GWP_OK;
+}
+
+const char* GWP_CALL ApiEventSchema(GwpEventId id)
+{
+    if (!g_bus || !IsMainThread())
+        return nullptr;
+    const Event* event = FindEvent(*g_bus, id);
+    return event && event->has_schema ? event->schema.c_str() : nullptr;
+}
+
 GwpResult GWP_CALL ApiEventEmit(const GwpPlugin* self, GwpEventId id, uint32_t argc, const GwpValue* argv, GwpValue* result)
 {
     if (!CheckMainThread(self, "event_emit"))
@@ -1011,7 +1304,7 @@ GwpResult GWP_CALL ApiEventEmit(const GwpPlugin* self, GwpEventId id, uint32_t a
     string128 who;
     xr_sprintf(who, "plugin:%s", PluginAddonId(self));
     WarnUndeclared(*event, who, "emit");
-    Emit(id, argv, argc, result);
+    EmitFrom(id, argv, argc, result, who, false);
     return GWP_OK;
 }
 
@@ -1037,6 +1330,9 @@ void CEventBusScript::script_register(lua_State* L)
         { "subscribe", &LuaSubscribe },
         { "unsubscribe", &LuaUnsubscribe },
         { "emit", &LuaEmit },
+        { "schema", &LuaSchema },
+        { "set_lua_adapter", &LuaSetLuaAdapter },
+        { "is_engine_source", &LuaIsEngineSource },
     };
     lua_newtable(L); // event_bus
     lua_newtable(L); // name -> id cache, shared by all functions as upvalue 1
@@ -1056,13 +1352,16 @@ void CEventBusScript::script_register(lua_State* L)
 
 namespace
 {
-void DispatchLuaFromNative(Bus& bus, lua_State* L, Event& event, const GwpValue* argv, u32 argc, GwpValue* result);
+void DispatchLuaFromNative(Bus& bus, lua_State* L, Event& event, const GwpValue* argv, u32 argc, GwpValue* result,
+    bool use_adapter);
 
 void DeliverBatch(Bus& bus, Event& event, GwpEventId id, size_t index, u32 now, bool force)
 {
     Subscriber& subscriber = event.subscribers[index];
     if (!subscriber.alive || !subscriber.batch_handler || subscriber.batch->empty())
         return;
+    ZoneScopedN("events/plugin_batch"); // Tracy: one batch delivery, text = addon id, event and record count
+    ZoneTextF("%s: %s x%u", PluginAddonId(subscriber.plugin), event.name.c_str(), static_cast<u32>(subscriber.batch->first.size()));
     if (subscriber.throttle_ms && !force)
     {
         if (subscriber.called && now - subscriber.last_call_ms < subscriber.throttle_ms)
@@ -1107,6 +1406,7 @@ void FlushBatches(bool force)
 {
     if (!g_bus || !IsMainThread())
         return;
+    ZoneScopedN("events/flush_batches"); // Tracy: per-frame batch delivery (CGamePersistent::OnFrame)
     Bus& bus = *g_bus;
     const u32 now = Device.dwTimeGlobal;
     for (size_t e = 0; e < bus.events.size(); ++e)
@@ -1123,13 +1423,39 @@ void FlushBatches(bool force)
 
 GwpEventId Intern(pcstr name) { return InternIn(GetBus(), name); }
 
-void Declare(pcstr name, u32 flags)
+void Declare(pcstr name, u32 flags, pcstr schema)
 {
     if (Event* event = FindEvent(GetBus(), Intern(name)))
     {
         event->declared = true;
         event->flags |= flags;
+        SetSchema(*event, schema, "engine");
     }
+}
+
+void DeclareEngineSource(pcstr name, u32 group)
+{
+    if (Event* event = FindEvent(GetBus(), Intern(name)))
+    {
+        event->declared = true;
+        event->engine_source = true;
+        event->engine_group = group;
+    }
+}
+
+void SetActiveEngineGroups(u32 mask) { g_active_engine_groups = mask; }
+void SetSchemaCheck(int mode) { g_schema_check = mode < 0 ? -1 : mode ? 1 : 0; }
+int GetSchemaCheck() { return g_schema_check; }
+void SetEngineLog(int mode) { g_engine_log = mode < 0 ? -1 : mode ? 1 : 0; }
+int GetEngineLog() { return g_engine_log; }
+
+bool SetTrace(pcstr name, bool on)
+{
+    Event* event = FindEvent(GetBus(), Intern(name));
+    if (!event)
+        return false;
+    event->trace = on;
+    return true;
 }
 
 bool HasSubscribers(GwpEventId id)
@@ -1138,18 +1464,62 @@ bool HasSubscribers(GwpEventId id)
     return event && (event->native_count || event->lua_count);
 }
 
+namespace
+{
+// source: "engine" or "plugin:<id>". The Lua adapter is applied to engine emits only: a plugin emitting an event
+// passes what it has, there is nothing to translate.
+void EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, pcstr source, bool from_engine);
+} // namespace
+
 void Emit(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result)
 {
+    EmitFrom(id, argv, argc, result, "engine", true);
+}
+
+namespace
+{
+void EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, pcstr source, bool from_engine)
+{
+    ZoneScopedN("events/emit"); // Tracy: the whole emit (schema check, log, native and Lua dispatch)
     if (!g_bus)
         return;
-    if (!IsMainThread())
-    {
-        Msg("! [events] event %u emitted outside the main thread, ignored", id);
-        return;
-    }
     Bus& bus = *g_bus;
     Event* event = FindEvent(bus, id);
-    if (!event || event->subscribers.empty())
+    if (event)
+        ZoneTextF("%s%s", event->name.c_str(), from_engine ? " (engine)" : "");
+    if (!IsMainThread())
+    {
+        // The name is read without a lock: events are declared at script start, on the logic thread, and never removed.
+        Msg("! [events] event %u '%s' emitted outside the game logic thread, ignored", id, event ? event->name.c_str() : "?");
+        return;
+    }
+    if (!event)
+        return;
+    ++event->emit_count;
+    CheckSchema(*event, argv, argc, source);
+    if (event->trace)
+        Trace(*event, argv, argc, source);
+    else if (from_engine && IsEngineSourceActive(*event) && (g_engine_log < 0 ? IsDebugLog() : g_engine_log != 0))
+    {
+        // gw_event_engine_log: every event moved to the engine (stage B) shows that it fires, with its arguments.
+        // Frequent ones (on_key_hold, hits, hud animations) are rate-limited per event.
+        const u32 now = Device.dwTimeGlobal;
+        if (!event->engine_log_any || now - event->engine_log_ms >= kEngineLogIntervalMs)
+        {
+            string64 skipped;
+            skipped[0] = 0;
+            if (event->engine_log_skipped)
+                xr_sprintf(skipped, " (+%u not logged)", event->engine_log_skipped);
+            Msg("  [events] engine emit '%s' #%u: %s%s", event->name.c_str(), event->emit_count,
+                DescribeArgs(argv, argc).c_str(), skipped);
+            event->engine_log_any = true;
+            event->engine_log_ms = now;
+            event->engine_log_skipped = 0;
+        }
+        else
+            ++event->engine_log_skipped;
+    }
+    if (event->subscribers.empty())
         return;
 
     DispatchScope scope(bus, *event, nullptr);
@@ -1163,15 +1533,17 @@ void Emit(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result)
     // Same order as a Lua emit: Lua subscribers first, then plugins.
     lua_State* L = event->lua_count ? ActiveLua(bus) : nullptr;
     if (L && lua_checkstack(L, 4))
-        DispatchLuaFromNative(bus, L, *event, argv, argc, result);
+        DispatchLuaFromNative(bus, L, *event, argv, argc, result, from_engine);
 
     if (event->native_count)
         DispatchNative(bus, *event, id, argv, argc, result);
 }
+} // namespace
 
 namespace
 {
-void DispatchLuaFromNative(Bus& bus, lua_State* L, Event& event, const GwpValue* argv, u32 argc, GwpValue* result)
+void DispatchLuaFromNative(Bus& bus, lua_State* L, Event& event, const GwpValue* argv, u32 argc, GwpValue* result,
+    bool use_adapter)
 {
     const pcstr field = event.lua_result_field ? event.lua_result_field : "ret_value";
     const int base = lua_gettop(L);
@@ -1185,6 +1557,32 @@ void DispatchLuaFromNative(Bus& bus, lua_State* L, Event& event, const GwpValue*
         PushValue(L, *result);
         lua_setfield(L, -2, field);
         args.flags_table = lua_gettop(L);
+    }
+    // Lua adapter (event_bus.set_lua_adapter): Lua subscribers get what it returns, e.g. the actor binder that the
+    // engine does not know. Called once per emit; on an error the native arguments are used.
+    if (use_adapter && event.lua_adapter_ref != LUA_NOREF && lua_checkstack(L, static_cast<int>(argc) + 4))
+    {
+        const int before = lua_gettop(L);
+        lua_rawgeti(L, LUA_REGISTRYINDEX, event.lua_adapter_ref);
+        for (u32 i = 0; i < argc; ++i)
+            PushValue(L, argv[i]);
+        if (lua_pcall(L, static_cast<int>(argc), LUA_MULTRET, 0) == 0)
+        {
+            args.argv = nullptr;
+            args.argc = 0;
+            args.first = before + 1;
+            args.count = lua_gettop(L) - before;
+        }
+        else
+        {
+            if (!event.warned_adapter)
+            {
+                event.warned_adapter = true;
+                const char* error = lua_tostring(L, -1);
+                Msg("! [events] Lua adapter of '%s' failed: %s", event.name.c_str(), error ? error : "?");
+            }
+            lua_settop(L, before);
+        }
     }
     DispatchLua(bus, L, event, args);
     if (result)
@@ -1276,6 +1674,8 @@ void FillEngineApi(GwpEngineApi& api)
     api.event_declare = &ApiEventDeclare;
     api.event_emit = &ApiEventEmit;
     api.event_subscribe_ex = &ApiEventSubscribeEx;
+    api.event_declare_ex = &ApiEventDeclareEx;
+    api.event_schema = &ApiEventSchema;
 }
 
 void PushLuaValue(lua_State* L, const GwpValue& value) { PushValue(L, value); }
@@ -1309,18 +1709,22 @@ void PrintList()
         Msg("- [events] the bus is not created");
         return;
     }
-    u32 declared = 0, with_subscribers = 0;
-    Msg("- [events] events with subscribers (lua / native):");
+    u32 declared = 0, with_subscribers = 0, engine = 0;
+    Msg("- [events] events with subscribers or emits: name, lua / native subscribers, source, emits, schema");
     for (const auto& event : g_bus->events)
     {
         declared += event->declared ? 1 : 0;
-        if (!event->lua_count && !event->native_count)
+        engine += IsEngineSourceActive(*event) ? 1 : 0;
+        with_subscribers += event->lua_count || event->native_count ? 1 : 0;
+        if (!event->lua_count && !event->native_count && !event->emit_count)
             continue;
-        ++with_subscribers;
-        Msg("-   %-40s %3u / %-3u%s%s", event->name.c_str(), event->lua_count, event->native_count,
-            event->batch_count ? " (batch)" : "", event->declared ? "" : "  (undeclared)");
+        Msg("-   %-40s %3u / %-3u %-6s %8u  %s%s%s%s", event->name.c_str(), event->lua_count, event->native_count,
+            event->builtin || IsEngineSourceActive(*event) ? "engine" : "lua", event->emit_count,
+            event->has_schema ? (event->schema.empty() ? "()" : event->schema.c_str()) : "-",
+            event->batch_count ? " (batch)" : "", event->trace ? " (trace)" : "",
+            event->declared ? "" : " (undeclared)");
     }
-    Msg("- [events] %u event(s) known, %u declared, %u with subscribers", static_cast<u32>(g_bus->events.size()),
-        declared, with_subscribers);
+    Msg("- [events] %u event(s) known, %u declared, %u with subscribers, %u moved to the engine (stage B)",
+        static_cast<u32>(g_bus->events.size()), declared, with_subscribers, engine);
 }
 } // namespace gw::addons::events

@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include "addon_object_events.h"
 #include "alife_update_manager.h"
 #include "addon_event_bus.h"
 #include "alife_simulator_header.h"
@@ -205,6 +206,11 @@ bool CALifeUpdateManager::change_level(NET_Packet& net_packet)
     net_packet.r(&graph().actor()->m_tNodeID, sizeof(graph().actor()->m_tNodeID));
     net_packet.r_vec3(graph().actor()->o_Position);
     net_packet.r_vec3(graph().actor()->o_Angle);
+
+    // on_level_changing (stage B-4): the server actor already points at the new level (utils.level_changing() is
+    // true, axr_companions teleports the companions to its vertex), the client save comes next. Before stage B the
+    // Lua actor binder sent it from its save() inside ClientSave.
+    gw::addons::objevents::LevelChanging();
 
     Level().ClientSave();
 

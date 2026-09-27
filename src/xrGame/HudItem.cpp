@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "addon_object_events.h"
 #include "HudItem.h"
 #include "physic_item.h"
 #include "Actor.h"
@@ -155,6 +156,8 @@ void CHudItem::OnAnimationEnd(u32 state)
         actor->callback(GameObject::eActorHudAnimationEnd)(
             smart_cast<CGameObject*>(this)->lua_game_object(),
             hud_sect.c_str(), m_current_motion.c_str(), state, animation_slot());
+        gw::addons::objevents::ActorHudAnimationEnd(smart_cast<CGameObject*>(this), hud_sect.c_str(), m_current_motion.c_str(), state,
+            animation_slot());
     }
     switch (state)
     {

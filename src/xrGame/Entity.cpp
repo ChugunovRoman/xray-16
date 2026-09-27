@@ -3,6 +3,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include "addon_object_events.h"
 #include <tracy/Tracy.hpp>
 #include "Entity.h"
 #include "Actor.h"
@@ -269,8 +270,25 @@ void CEntity::KillEntity(u16 whoID, bool bypass_actor_check)
         // this will bypass below if block and go to normal KillEntity routine.
         if (bypass_actor_check == false)
         {
+            const ALife::_OBJECT_ID killer_before = m_killer_id;
+            const bool has_slot = !!Actor()->callback(GameObject::eActorBeforeDeath);
             Actor()->callback(GameObject::eActorBeforeDeath)(whoID);
-            return;
+            // Stage B (plans/lua_to_cpp/06, B4.7): with the actor group active the engine sends actor_on_before_death
+            // itself and finishes the death here. An addon holding the slot may have killed the actor on its own
+            // (kill(..., true) sets the killer): then there is nothing left to do.
+            if (m_killer_id != killer_before)
+                return;
+            if (gw::addons::objevents::IsActive(gw::addons::objevents::EGroup::Actor))
+            {
+                if (!gw::addons::objevents::ActorBeforeDeath(whoID))
+                    return; // a subscriber cancelled the death (flags.ret_value = false)
+                if (m_killer_id != killer_before)
+                    return; // a subscriber killed the actor itself (kill(..., true)): no second death
+            }
+            // Group disabled: the slot handler decides, as the Lua binder did before stage B. Without a slot (the
+            // Lua binder sets none since B-5) the actor dies as it would without the define.
+            else if (has_slot)
+                return;
         }
         //-AVO
 #endif

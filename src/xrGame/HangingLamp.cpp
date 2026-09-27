@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_object_events.h"
 
 #include "HangingLamp.h"
 #include "xrEngine/XR_IOConsole.h"
@@ -349,6 +350,7 @@ void CHangingLamp::Hit(SHit* pHDS)
     SHit HDS = *pHDS;
     callback(GameObject::eHit)(
         lua_game_object(), HDS.power, HDS.dir, smart_cast<const CGameObject*>(HDS.who)->lua_game_object(), HDS.bone());
+    gw::addons::objevents::ObjectHit(this, HDS.power, HDS.dir, HDS.who, HDS.bone());
     BOOL bWasAlive = Alive();
 
     if (m_pPhysicsShell)

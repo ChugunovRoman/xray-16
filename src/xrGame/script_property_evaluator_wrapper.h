@@ -44,6 +44,14 @@ private:
     mutable bool m_has_cached_value = false;
     mutable EScriptEvaluatorCachePolicy m_cache_policy = EScriptEvaluatorCachePolicy::NeverCache;
     mutable bool m_cache_policy_initialized = false;
+    mutable u32 m_cache_policy_generation = 0; // bumped by ai_evaluator_cache_reload: re-read the policy
+    mutable u32 m_cache_ttl_ms = 0;            // own TTL from the config; 0 - use the ai_evaluator_ttl_ms cvar
+
+    // The name arrives from Lua as a pointer into a Lua string and does not outlive the constructor call, while
+    // m_evaluator_name of the base class keeps it for the whole life of the evaluator. An interned copy makes
+    // that pointer stable: without it the cache policy is chosen by a dangling string and the profiler groups
+    // every evaluator into one garbage bucket.
+    shared_str m_script_evaluator_name;
 };
 
 #include "script_property_evaluator_wrapper_inline.h"

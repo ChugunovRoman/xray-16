@@ -1,5 +1,6 @@
 #include "pch_script.h"
 #include "addon_event_bus.h"
+#include "addon_api_console.h"
 #include "GamePersistent.h"
 #include "xrCore/FMesh.hpp"
 #include "xrEngine/XR_IOConsole.h"
@@ -614,6 +615,8 @@ void CGamePersistent::OnFrame()
 
     // Addons: events collected since the previous frame go to batch subscribers of plugins.
     gw::addons::events::FlushBatches();
+    // Addons: console commands of plugins queued with console_execute_deferred (they may unload the level).
+    gw::addons::console::OnFrame();
 
     if (Device.dwPrecacheFrame == 5 && m_intro_event.empty())
     {

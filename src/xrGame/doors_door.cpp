@@ -5,6 +5,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "doors_door.h"
 #include "PhysicObject.h"
 #include "xrScriptEngine/script_callback_ex.h"
@@ -182,6 +183,10 @@ void door::change_state(actor* initiator)
         return;
 
     m_object.callback(GameObject::eUseObject)(m_object.lua_game_object(), initiator ? static_cast<CScriptGameObject*>(initiator->lua_game_object()) : nullptr);
+    {
+        CScriptGameObject* const who = initiator ? initiator->lua_game_object() : nullptr;
+        gw::addons::objevents::ObjectUse(&m_object, who ? &who->object() : nullptr);
+    }
 #ifdef DEBUG
     if (g_debug_doors)
         Msg("door[%s] started to change its state to [%s]", m_object.cName().c_str(),

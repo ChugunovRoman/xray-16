@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "hit_memory_manager.h"
 #include "memory_space_impl.h"
 #include "CustomMonster.h"
@@ -108,6 +109,7 @@ void CHitMemoryManager::add(float amount, const Fvector& vLocalDir, const IGameO
 
     object().callback(GameObject::eHit)(m_object->lua_game_object(), amount, vLocalDir,
         smart_cast<const CGameObject*>(who)->lua_game_object(), element);
+    gw::addons::objevents::ObjectHit(m_object, amount, vLocalDir, who, element);
 
     Fvector direction;
     m_object->XFORM().transform_dir(direction, vLocalDir);

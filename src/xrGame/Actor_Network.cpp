@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "addon_event_bus.h"
 #include "Actor.h"
 #include "HUDManager.h"
@@ -762,6 +763,7 @@ bool CActor::net_Spawn(CSE_Abstract* DC)
     };
 
     {
+        gw::addons::objevents::SetActorSpawned(true);
         const GwpValue args[] = { gw::addons::events::Object(ID()) };
         gw::addons::events::Emit(gw::addons::events::EBuiltin::ActorOnSpawn, args, 1);
     }
@@ -773,6 +775,7 @@ void CActor::net_Destroy()
     {
         const GwpValue args[] = { gw::addons::events::Object(ID()) };
         gw::addons::events::Emit(gw::addons::events::EBuiltin::ActorOnDestroy, args, 1);
+        gw::addons::objevents::SetActorSpawned(false);
     }
     inherited::net_Destroy();
 

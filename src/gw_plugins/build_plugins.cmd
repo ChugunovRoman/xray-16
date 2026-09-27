@@ -44,6 +44,9 @@ rem --- Plugin API reference page (wiki/doc/plugins/api/all.md) ----------------
 rem Regenerated from gwp_api.h / gwp.hpp on every build; an untagged API function fails the build.
 if /I "%GW_ACTION%"=="clean" goto :after_api_index
 call :gen_api_index || exit /b 1
+rem Event list page (wiki/doc/plugins/api/events_list.md): event names and schemas from the engine and axr_main.script,
+rem descriptions from events_meta.json; an event without a description fails the build.
+call :gen_events_list || exit /b 1
 :after_api_index
 
 rem --- source and build directories -------------------------------------------
@@ -152,6 +155,24 @@ if not defined GW_PYTHON (
 %GW_PYTHON% "%GW_API_INDEX%" --headers "%~dp0..\xrAddonHost\include\gwp"
 if errorlevel 1 (
     echo [gw_plugins] error: Plugin API reference page generation failed
+    exit /b 1
+)
+exit /b 0
+
+rem Generates the event list page with gen_events_list.py (this folder). Skipped (not an error) without Python; the
+rem script itself skips when the wiki, tools\wiki_plugins_toc.py or GlobalWar\gamedata\scripts\axr_main.script is missing.
+:gen_events_list
+set "GW_EVENTS_LIST=%~dp0gen_events_list.py"
+set "GW_PYTHON="
+where python >nul 2>nul && set "GW_PYTHON=python"
+if not defined GW_PYTHON where py >nul 2>nul && set "GW_PYTHON=py -3"
+if not defined GW_PYTHON (
+    echo [gw_plugins] warning: Python not found, event list page not updated
+    exit /b 0
+)
+%GW_PYTHON% "%GW_EVENTS_LIST%"
+if errorlevel 1 (
+    echo [gw_plugins] error: event list page generation failed
     exit /b 1
 )
 exit /b 0

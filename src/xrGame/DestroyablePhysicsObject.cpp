@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "PHCollisionDamageReceiver.h"
 #include "PhysicObject.h"
 #include "Hit.h"
@@ -82,6 +83,7 @@ void CDestroyablePhysicsObject::Hit(SHit* pHDS)
     IGameObject* who = HDS.who;
     float damage = pHDS->damage() + pHDS->powerMonster * 1.3;
     callback(GameObject::eHit)(lua_game_object(), damage, HDS.dir, who->lua_game_object(), HDS.bone());
+    gw::addons::objevents::ObjectHit(this, damage, HDS.dir, who, HDS.bone());
 
     if (!hit_object_name.empty() && std::find(hit_object_name.begin(), hit_object_name.end(), who->Name()) == hit_object_name.end())
         return;

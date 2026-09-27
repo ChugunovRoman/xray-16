@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "addon_object_events.h"
 #include "Torch.h"
 #include "Entity.h"
 #include "Actor.h"
@@ -188,7 +189,11 @@ void CTorch::Switch(bool light_on)
         }
     }
 
+    const bool changed = m_switched_on != light_on;
     m_switched_on = light_on;
+    // there was no callback for the torch: actor_on_torch_enabled/disabled (B4.5); not from net_Destroy (level unload)
+    if (changed && pActor && !getDestroy())
+        gw::addons::objevents::ActorTorch(this, light_on);
     if (can_use_dynamic_lights())
     {
         light_render->set_active(light_on);

@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "addon_object_events.h"
 #pragma hdrstop
 
 #include "Actor.h"
@@ -24,7 +25,10 @@ bool CActor::use_HolderEx(CHolderCustom* object, bool bForce)
                 m_holder->detach_Actor();
 
                 if (const CGameObject* go = smart_cast<CGameObject*>(m_holder))
+                {
                     callback(GameObject::eDetachVehicle)(go->lua_game_object());
+                    gw::addons::objevents::ActorVehicle(gw::addons::objevents::EVehicle::Detach, go);
+                }
 
                 character_physics_support()->RequestCreateCharacterSafe();
                 m_holder = nullptr;
@@ -56,7 +60,10 @@ bool CActor::use_HolderEx(CHolderCustom* object, bool bForce)
                 }
 
                 if (const CGameObject* go = smart_cast<CGameObject*>(m_holder))
+                {
                     callback(GameObject::eAttachVehicle)(go->lua_game_object());
+                    gw::addons::objevents::ActorVehicle(gw::addons::objevents::EVehicle::Attach, go);
+                }
                 return true;
             }
         }

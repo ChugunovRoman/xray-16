@@ -38,4 +38,6 @@ bool IsPluginLoaded(pcstr addon_id); // the addon is known and its plugin is loa
 // Reads a zero-terminated string without leaving the reader (IReader::r_stringZ does not check bounds).
 bool ReadStringZChecked(IReader& reader, xr_string& out);
 void FillObjectsApi(GwpEngineApi& api);
+void FillLevelApi(GwpEngineApi& api);
+void FillInfoApi(GwpEngineApi& api);
 } // namespace gw::addons

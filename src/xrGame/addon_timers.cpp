@@ -385,6 +385,7 @@ void Update(u32 dt_ms)
     g_level_ms += std::min(dt_ms, kMaxFrameMs);
     if (!g_timers || g_timers->empty())
         return;
+    ZoneScopedN("timers/update"); // Tracy: per-frame timer scan (CLevel::OnFrame)
     u64 game_now = 0;
     const bool has_game = GameTimeMs(game_now);
     if (!has_game)

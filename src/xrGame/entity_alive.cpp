@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "entity_alive.h"
 #include "InventoryOwner.h"
 #include "Inventory.h"
@@ -376,12 +377,13 @@ void CEntityAlive::Die(IGameObject* who)
 
     const CGameObject* who_object = smart_cast<const CGameObject*>(who);
     callback(GameObject::eDeath)(lua_game_object(), who_object ? who_object->lua_game_object() : 0);
+    gw::addons::objevents::ObjectDeath(this, who);
 
     if (!getDestroy() && (GameID() == eGameIDSingle))
     {
         NET_Packet P;
         u_EventGen(P, GE_ASSIGN_KILLER, ID());
-        P.w_u16(u16(who->ID()));
+        P.w_u16(u16(who ? who->ID() : ID())); // no killer (net_Find failed): the victim itself, as KillEntity does
         u_EventSend(P);
     }
 

@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "addon_object_events.h"
 #pragma hdrstop
 
 #include "Actor.h"
@@ -68,6 +69,7 @@ void CActor::attach_Vehicle(CHolderCustom* vehicle)
 
     // Real Wolf: Колбек на посадку в машину. 01.08.2014.
     this->callback(GameObject::eAttachVehicle)(car->lua_game_object());
+    gw::addons::objevents::ActorVehicle(gw::addons::objevents::EVehicle::Attach, car);
 }
 
 void CActor::detach_Vehicle()
@@ -104,6 +106,7 @@ void CActor::detach_Vehicle()
 
     // Real Wolf: колбек на высадку из машины. 01.08.2014.
     this->callback(GameObject::eDetachVehicle)(car->lua_game_object());
+    gw::addons::objevents::ActorVehicle(gw::addons::objevents::EVehicle::Detach, car);
 
     character_physics_support()->movement()->SetPosition(m_holder->ExitPosition());
     character_physics_support()->movement()->SetVelocity(m_holder->ExitVelocity());
@@ -185,7 +188,10 @@ bool CActor::use_Vehicle(CHolderCustom* object)
             }
             // Real Wolf: колбек на использование машины (но не посадку) без учета расстояния. 01.08.2014.
             else if (auto car = smart_cast<CCar*>(vehicle))
+            {
                 this->callback(GameObject::eUseVehicle)(car->lua_game_object());
+                gw::addons::objevents::ActorVehicle(gw::addons::objevents::EVehicle::Use, car);
+            }
             return true;
         }
         return false;

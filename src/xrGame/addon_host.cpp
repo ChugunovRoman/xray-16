@@ -1,12 +1,15 @@
 #include "StdAfx.h"
 
 #include "addon_host.h"
+#include "addon_api_console.h"
+#include "addon_api_ini.h"
 #include "addon_data_bus.h"
 #include "addon_event_bus.h"
 #include "addon_timers.h"
 
 #include "xrAddonHost/include/gwp/gwp_api.h"
 #include "xrCore/ModuleLookup.hpp"
+#include "xrEngine/EngineThreading.h"
 
 #include <algorithm>
 #include <cctype>
@@ -139,7 +142,6 @@ struct AddonRecord
 // from the xrGame DllMain(DLL_PROCESS_DETACH), which is not allowed. Leaking them instead is harmless at exit.
 xr_vector<xr_unique_ptr<AddonRecord>>* g_addons = nullptr;
 GwpEngineApi g_engine_api{};
-std::thread::id g_main_thread_id;
 bool g_initialized = false;
 bool g_debug_log = false;
 
@@ -544,8 +546,23 @@ GwpResult GWP_CALL ApiSaveRead(const GwpPlugin* self, uint32_t* data_version, co
     return GWP_OK;
 }
 
+// Thread that ran gw::addons::Initialize() and with it every gwp_plugin_init.
+std::thread::id g_host_thread_id;
+
 uint32_t GWP_CALL ApiEngineBuildId() { return Core.GetBuildId(); }
-int GWP_CALL ApiIsMainThread() { return std::this_thread::get_id() == g_main_thread_id ? 1 : 0; }
+// "Main thread" of the Plugin API. Two threads qualify, and they never run plugin code at the same time:
+//  - the thread running the game logic now. The engine runs Sheduler.Update (and with it the Lua binders, ALife and
+//    every plugin callback) in a task that any worker of the task scheduler may execute while the main thread waits
+//    for it, so the OS main thread alone is the wrong test: on such frames every event and API call would be rejected;
+//  - the thread that loaded the plugins, as a safety net. IsGameLogicThread() compares against the thread marked by
+//    XRay::Engine::MarkMainThread() in CApplication; before that mark existed it compared against the thread that
+//    loaded xrEngine.dll, which is not the one CApplication runs on (xr_3da starts it as GameThreadEntry), and every
+//    call of every plugin was rejected. With the mark in place this half is redundant, and it keeps the host working
+//    if plugin loading ever moves off that thread.
+int GWP_CALL ApiIsMainThread()
+{
+    return (XRay::Engine::IsGameLogicThread() || std::this_thread::get_id() == g_host_thread_id) ? 1 : 0;
+}
 int GWP_CALL ApiIsDebugLog() { return g_debug_log ? 1 : 0; } // set once in Initialize, read-only afterwards
 
 void FillEngineApi()
@@ -564,6 +581,10 @@ void FillEngineApi()
     events::FillEngineApi(g_engine_api);
     FillObjectsApi(g_engine_api);
     data::FillEngineApi(g_engine_api);
+    ini::FillEngineApi(g_engine_api);
+    console::FillEngineApi(g_engine_api);
+    FillLevelApi(g_engine_api);
+    FillInfoApi(g_engine_api);
     timers::FillEngineApi(g_engine_api);
     g_engine_api.save_write = &ApiSaveWrite;
     g_engine_api.save_read = &ApiSaveRead;
@@ -971,9 +992,7 @@ void Initialize()
     if (g_initialized)
         return;
     g_initialized = true;
-    // Called from CAI_Space::init(); the first ai() happens in the CMainMenu constructor on the main thread
-    // (CGamePersistent::OnAppStart). If that ever moves to a worker, is_main_thread() becomes wrong.
-    g_main_thread_id = std::this_thread::get_id();
+    g_host_thread_id = std::this_thread::get_id();
     g_debug_log = strstr(Core.Params, "-addon_debug") != nullptr;
     g_addons = xr_new<xr_vector<xr_unique_ptr<AddonRecord>>>();
     FillEngineApi();
@@ -1023,12 +1042,16 @@ void Shutdown()
         if (addon.desc.on_unload)
             addon.desc.on_unload(addon.desc.user);
         events::RemovePluginSubscriptions(&addon.handle); // handlers point into the library being unloaded
+        console::RemovePluginCvars(&addon.handle);        // the console keeps a pointer into the host, not the plugin
+        ini::ClosePluginFiles(&addon.handle);
         addon.module.reset();
         addon.plugin_state = EPluginState::Unavailable;
     }
     xr_delete(g_addons);
     g_save_data.clear();
     data::Shutdown();
+    ini::Shutdown();
+    console::Shutdown();
     timers::Shutdown();
     events::Shutdown();
     g_initialized = false;

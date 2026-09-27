@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "Actor_Flags.h"
 #include "HUDManager.h"
 
@@ -711,6 +712,7 @@ void CActor::Hit(SHit* pHDS)
                 smart_cast<const CGameObject*>(HDS.who)->lua_game_object(),
                 HDS.boneID
             );
+            gw::addons::objevents::ActorHit(this, HDS.damage(), HDS.direction(), HDS.who, HDS.boneID);
         }
         inherited::Hit(&HDS);
     }

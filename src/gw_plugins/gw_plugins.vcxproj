@@ -67,6 +67,9 @@
     <None Include="$(GwPluginsDir)**\addon.ltx;$(GwPluginsDir)**\CMakeLists.txt;$(GwPluginsDir)cmake\*.cmake;$(GwPluginsDir)CMakePresets.json" Exclude="$(GwPluginsDir)**\bin\**" />
     <None Include="build_plugins.cmd" />
     <None Include="gen_plugin_api_index.py" />
+    <None Include="gen_events_list.py" />
+    <None Include="events_meta.json" />
+    <None Include="events_list_manual.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

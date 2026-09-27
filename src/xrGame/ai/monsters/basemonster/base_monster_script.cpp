@@ -187,9 +187,10 @@ bool CBaseMonster::bfAssignMovement(CScriptEntityAction* tpEntityAction)
 
     case CScriptMovementAction::eGoalTypeFollowLeader:
     {
+        // no_assert: the server object is gone when the monster was released from ALife while still online
+        // (THROW inside a Lua call otherwise, seen in the game log as a FATAL ERROR); then it just has no leader.
         CSE_ALifeMonsterAbstract* const i_am =
-            smart_cast<CSE_ALifeMonsterAbstract*>(ai().alife().objects().object(ID()));
-        VERIFY(i_am);
+            smart_cast<CSE_ALifeMonsterAbstract*>(ai().alife().objects().object(ID(), true));
         // Release builds compile the VERIFY inside the reference-returning object() out and
         // dereference end() when the squad is gone; a monster can outlive its squad.
         CSE_ALifeOnlineOfflineGroup* group =

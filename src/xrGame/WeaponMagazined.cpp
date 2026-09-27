@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include <tracy/Tracy.hpp>
 
 #include "WeaponMagazined.h"
@@ -225,6 +226,7 @@ void CWeaponMagazined::FireStart()
         if (const auto object = smart_cast<CGameObject*>(H_Parent()))
         {
             object->callback(GameObject::eOnWeaponJammed)(object->lua_game_object(), this->lua_game_object());
+            gw::addons::objevents::ActorWeapon(gw::addons::objevents::EWeapon::Jammed, object, this); // the weapon, not the owner (B4.2)
         }
 
         if (smart_cast<CActor*>(this->H_Parent()) && (Level().CurrentViewEntity() == H_Parent()))
@@ -281,6 +283,7 @@ bool CWeaponMagazined::TryReload()
         {
             int AC = GetSuitableAmmoTotal();
             Actor()->callback(GameObject::eWeaponNoAmmoAvailable)(lua_game_object(), AC);
+            gw::addons::objevents::ActorWeapon(gw::addons::objevents::EWeapon::Reload, H_Parent(), this, AC);
         }
 
         m_pCurrentAmmo = smart_cast<CWeaponAmmo*>(m_pInventory->GetAny(m_ammoTypes[m_ammoType].c_str()));
@@ -335,6 +338,7 @@ void CWeaponMagazined::OnMagazineEmpty()
     {
         int AC = GetSuitableAmmoTotal();
         Actor()->callback(GameObject::eOnWeaponMagazineEmpty)(lua_game_object(), AC);
+        gw::addons::objevents::ActorWeapon(gw::addons::objevents::EWeapon::NoAmmo, H_Parent(), this, AC);
     }
 
     if (GetState() == eIdle)
@@ -383,6 +387,7 @@ void CWeaponMagazined::UnloadMagazine(bool spawn_ammo)
     {
         int AC = GetSuitableAmmoTotal();
         Actor()->callback(GameObject::eOnWeaponMagazineEmpty)(lua_game_object(), AC);
+        gw::addons::objevents::ActorWeapon(gw::addons::objevents::EWeapon::NoAmmo, H_Parent(), this, AC);
     }
 
     if (!spawn_ammo)
@@ -1745,6 +1750,7 @@ void CWeaponMagazined::OnZoomSecondIn()
     if (const auto object = smart_cast<CGameObject*>(H_Parent()))
     {
         object->callback(GameObject::eOnWeaponZoomIn)(object->lua_game_object(), this->lua_game_object());
+        gw::addons::objevents::ActorWeapon(gw::addons::objevents::EWeapon::ZoomIn, object, this);
     }
 
     if (CActor* pActor = smart_cast<CActor*>(H_Parent()))
@@ -1770,6 +1776,7 @@ void CWeaponMagazined::OnZoomIn()
     if (const auto object = smart_cast<CGameObject*>(H_Parent()))
     {
         object->callback(GameObject::eOnWeaponZoomIn)(object->lua_game_object(), this->lua_game_object());
+        gw::addons::objevents::ActorWeapon(gw::addons::objevents::EWeapon::ZoomIn, object, this);
     }
 
     if (CActor* pActor = smart_cast<CActor*>(H_Parent()))
@@ -1798,6 +1805,7 @@ void CWeaponMagazined::OnZoomOut()
     if (const auto object = smart_cast<CGameObject*>(H_Parent()))
     {
         object->callback(GameObject::eOnWeaponZoomOut)(object->lua_game_object(), this->lua_game_object());
+        gw::addons::objevents::ActorWeapon(gw::addons::objevents::EWeapon::ZoomOut, object, this);
     }
 
     if (CActor* pActor = smart_cast<CActor*>(H_Parent()))

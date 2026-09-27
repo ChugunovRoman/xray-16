@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "script_entity.h"
 #include "CustomMonster.h"
 #include "xrEngine/Feel_Vision.h"
@@ -693,7 +694,8 @@ void CScriptEntity::sound_callback(
     if (!smart_cast<const CGameObject*>(object))
         return;
 
-    if (!this->object().callback(GameObject::eSound))
+    // Queued when the Lua slot is set, or when the engine sends npc_on_hear_callback and it has subscribers.
+    if (!this->object().callback(GameObject::eSound) && !gw::addons::objevents::WantsHear())
         return;
 
     for (CSavedSound& saved_sound : m_saved_sounds)
@@ -729,6 +731,8 @@ void CScriptEntity::process_sound_callbacks()
             const CSavedSound& saved_sound = m_saved_sounds[i];
             object().callback(GameObject::eSound)(
                 object().lua_game_object(), saved_sound.m_game_object_id, saved_sound.m_sound_type, saved_sound.m_position,
+                saved_sound.m_sound_power);
+            gw::addons::objevents::ObjectHear(&object(), saved_sound.m_game_object_id, saved_sound.m_sound_type, saved_sound.m_position,
                 saved_sound.m_sound_power);
         }
     }

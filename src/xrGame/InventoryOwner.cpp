@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "InventoryOwner.h"
 #include "entity_alive.h"
 #include "PDA.h"
@@ -317,6 +318,7 @@ void CInventoryOwner::OnItemTake(CInventoryItem* inventory_item)
     CGameObject* object = smart_cast<CGameObject*>(this);
     VERIFY(object);
     object->callback(GameObject::eOnItemTake)(inventory_item->object().lua_game_object());
+    gw::addons::objevents::OwnerItem(gw::addons::objevents::EItem::Take, object, &inventory_item->object());
 
     attach(inventory_item);
 
@@ -456,6 +458,7 @@ void CInventoryOwner::OnItemDrop(CInventoryItem* inventory_item, bool just_befor
     CGameObject* object = smart_cast<CGameObject*>(this);
     VERIFY(object);
     object->callback(GameObject::eOnItemDrop)(inventory_item->object().lua_game_object());
+    gw::addons::objevents::OwnerItem(gw::addons::objevents::EItem::Drop, object, &inventory_item->object());
 
     detach(inventory_item);
 }
@@ -468,6 +471,7 @@ void CInventoryOwner::OnItemBelt(CInventoryItem* inventory_item, const SInvItemP
     CGameObject* object = smart_cast<CGameObject*>(this);
     VERIFY(object);
     object->callback(GameObject::eItemToBelt)(inventory_item->object().lua_game_object());
+    gw::addons::objevents::OwnerItem(gw::addons::objevents::EItem::ToBelt, object, &inventory_item->object());
 }
 
 void CInventoryOwner::OnItemRuck(CInventoryItem* inventory_item, const SInvItemPlace& previous_place)
@@ -476,6 +480,7 @@ void CInventoryOwner::OnItemRuck(CInventoryItem* inventory_item, const SInvItemP
     CGameObject* object = smart_cast<CGameObject*>(this);
     VERIFY(object);
     object->callback(GameObject::eItemToRuck)(inventory_item->object().lua_game_object());
+    gw::addons::objevents::OwnerItem(gw::addons::objevents::EItem::ToRuck, object, &inventory_item->object());
 
     detach(inventory_item);
 }
@@ -486,6 +491,7 @@ void CInventoryOwner::OnItemSlot(CInventoryItem* inventory_item, const SInvItemP
     CGameObject* object = smart_cast<CGameObject*>(this);
     VERIFY(object);
     object->callback(GameObject::eItemToSlot)(inventory_item->object().lua_game_object());
+    gw::addons::objevents::OwnerItem(gw::addons::objevents::EItem::ToSlot, object, &inventory_item->object());
 
     attach(inventory_item);
 }

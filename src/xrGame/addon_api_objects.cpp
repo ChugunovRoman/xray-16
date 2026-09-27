@@ -53,6 +53,19 @@ int GWP_CALL ApiObjectPosition(GwpObjectId id, float out_xyz[3])
     return 1;
 }
 
+// Where the object looks: a unit vector, the same one Lua gets from game_object:direction().
+int GWP_CALL ApiObjectDirection(GwpObjectId id, float out_xyz[3])
+{
+    const CGameObject* object = FindObject(id);
+    if (!object || !out_xyz)
+        return 0;
+    const Fvector& direction = object->Direction();
+    out_xyz[0] = direction.x;
+    out_xyz[1] = direction.y;
+    out_xyz[2] = direction.z;
+    return 1;
+}
+
 int GWP_CALL ApiObjectIsAlive(GwpObjectId id)
 {
     const CEntity* entity = smart_cast<const CEntity*>(FindObject(id));
@@ -77,5 +90,6 @@ void FillObjectsApi(GwpEngineApi& api)
     api.object_position = &ApiObjectPosition;
     api.object_is_alive = &ApiObjectIsAlive;
     api.actor_id = &ApiActorId;
+    api.object_direction = &ApiObjectDirection;
 }
 } // namespace gw::addons

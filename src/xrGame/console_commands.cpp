@@ -28,8 +28,10 @@
 #include "ai_space.h"
 #include "addon_host.h"
 #include "addon_event_bus.h"
+#include "addon_object_events.h"
 #include "addon_data_bus.h"
 #include "addon_timers.h"
+#include "addon_api_ini.h"
 #include "ai/monsters/basemonster/base_monster.h"
 #include "date_time.h"
 #include "mt_config.h"
@@ -1953,11 +1955,107 @@ public:
     virtual void Execute(LPCSTR /*args*/) { gw::addons::events::PrintList(); }
 };
 
+// Stage B diagnostics (plans/lua_to_cpp/06): which engine groups emit object events, schema check, emit trace.
+class CCC_EventEngineSources : public IConsole_Command
+{
+public:
+    CCC_EventEngineSources(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = false; bLowerCaseArgs = true; };
+    virtual void Execute(LPCSTR args) { gw::addons::objevents::SetEnabledGroups(args); }
+    virtual void GetStatus(TStatus& S) { gw::addons::objevents::GetStatus(S, sizeof(S)); }
+    virtual void Info(TInfo& I) { xr_strcpy(I, "all | none | actor,input,monster,physic,npc,lifecycle"); }
+    virtual void Save(IWriter*) {} // diagnostic: not kept in user.ltx
+};
+
+class CCC_EventSchemaCheck : public IConsole_Command
+{
+public:
+    CCC_EventSchemaCheck(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = false; bLowerCaseArgs = true; };
+    virtual void Execute(LPCSTR args)
+    {
+        if (!xr_strcmp(args, "auto"))
+            gw::addons::events::SetSchemaCheck(-1);
+        else
+            gw::addons::events::SetSchemaCheck(atoi(args) != 0 || !xr_strcmp(args, "on") ? 1 : 0);
+    }
+    virtual void GetStatus(TStatus& S)
+    {
+        const int mode = gw::addons::events::GetSchemaCheck();
+        xr_strcpy(S, mode < 0 ? "auto (on with -addon_debug)" : mode ? "1" : "0");
+    }
+    virtual void Info(TInfo& I) { xr_strcpy(I, "0 | 1 | auto"); }
+    virtual void Save(IWriter*) {}
+};
+
+class CCC_EventEngineLog : public IConsole_Command
+{
+public:
+    CCC_EventEngineLog(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = false; bLowerCaseArgs = true; };
+    virtual void Execute(LPCSTR args)
+    {
+        if (!xr_strcmp(args, "auto"))
+            gw::addons::events::SetEngineLog(-1);
+        else
+            gw::addons::events::SetEngineLog(atoi(args) != 0 || !xr_strcmp(args, "on") ? 1 : 0);
+    }
+    virtual void GetStatus(TStatus& S)
+    {
+        const int mode = gw::addons::events::GetEngineLog();
+        xr_strcpy(S, mode < 0 ? "auto (on with -addon_debug)" : mode ? "1" : "0");
+    }
+    virtual void Info(TInfo& I) { xr_strcpy(I, "0 | 1 | auto: log emits of the events moved to the engine"); }
+    virtual void Save(IWriter*) {}
+};
+
+class CCC_EventTrace : public IConsole_Command
+{
+public:
+    CCC_EventTrace(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = false; bLowerCaseArgs = false; };
+    virtual void Execute(LPCSTR args)
+    {
+        string256 name, state;
+        name[0] = state[0] = 0;
+        sscanf(args, "%255s %255s", name, state);
+        const bool on = !state[0] || !xr_strcmp(state, "1") || !xr_stricmp(state, "on");
+        if (gw::addons::events::SetTrace(name, on))
+            Msg("- [events] trace of '%s': %s", name, on ? "on" : "off");
+        else
+            Msg("! [events] event_trace: invalid event name '%s'", name);
+    }
+    virtual void Info(TInfo& I) { xr_strcpy(I, "<event name> [on|off]"); }
+    virtual void Save(IWriter*) {}
+};
+
 class CCC_DataList : public IConsole_Command
 {
 public:
     CCC_DataList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
     virtual void Execute(LPCSTR args) { gw::addons::data::PrintList(args); } // args: optional key prefix
+};
+
+// Evaluator cache tuning: the table lives in configs/npc_perf_evaluator_cache.ltx and is reloaded in place,
+// so a policy can be tried without restarting the game (see docs, "кэш эвалюаторов").
+extern void ai_evaluator_cache_reload();
+extern void ai_evaluator_cache_print();
+
+class CCC_EvaluatorCacheReload : public IConsole_Command
+{
+public:
+    CCC_EvaluatorCacheReload(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR /*args*/) { ai_evaluator_cache_reload(); ai_evaluator_cache_print(); }
+};
+
+class CCC_EvaluatorCacheList : public IConsole_Command
+{
+public:
+    CCC_EvaluatorCacheList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR /*args*/) { ai_evaluator_cache_print(); }
+};
+
+class CCC_IniList : public IConsole_Command
+{
+public:
+    CCC_IniList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR /*args*/) { gw::addons::ini::PrintList(); }
 };
 
 class CCC_TimerList : public IConsole_Command
@@ -3027,8 +3125,15 @@ void CCC_RegisterCommands()
     CMD1(CCC_LuaHelp, "dump_lua");
     CMD1(CCC_AddonList, "addon_list");
     CMD1(CCC_EventList, "event_list");
+    CMD1(CCC_EventEngineSources, "gw_event_engine_sources");
+    CMD1(CCC_EventSchemaCheck, "gw_event_schema_check");
+    CMD1(CCC_EventEngineLog, "gw_event_engine_log");
+    CMD1(CCC_EventTrace, "event_trace");
     CMD1(CCC_DataList, "data_list");
     CMD1(CCC_TimerList, "timer_list");
+    CMD1(CCC_IniList, "ini_list");
+    CMD1(CCC_EvaluatorCacheReload, "ai_evaluator_cache_reload");
+    CMD1(CCC_EvaluatorCacheList, "ai_evaluator_cache_list");
     CMD4(CCC_InvCellSize, "g_inv_cell_size", &g_inv_inv_cell_size, 1, 4);
 
     CMD3(CCC_Mask, "g_autopickup", &psActorFlags, AF_AUTOPICKUP);

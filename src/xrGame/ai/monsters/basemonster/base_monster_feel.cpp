@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "base_monster.h"
 #include "Actor.h"
 #include "ActorEffector.h"
@@ -285,6 +286,7 @@ void CBaseMonster::HitSignal(float amount, Fvector& vLocalDir, IGameObject* who,
 
     callback(GameObject::eHit)(
         lua_game_object(), amount, vLocalDir, smart_cast<const CGameObject*>(who)->lua_game_object(), element);
+    gw::addons::objevents::ObjectHit(this, amount, vLocalDir, who, element);
 
     // если нейтрал - добавить как врага
     CEntityAlive* obj = smart_cast<CEntityAlive*>(who);

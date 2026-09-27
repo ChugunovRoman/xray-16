@@ -109,6 +109,22 @@ typedef uint32_t GwpSubscriptionId; /* 0 = invalid */
 #define GWP_TIMER_REAL_TIME 0x1u  /* level time (real seconds of unpaused frames) instead of game time */
 #define GWP_TIMER_PERSISTENT 0x2u /* the timer is stored in the game save and comes back on a load */
 
+/* Config file and one of its sections (group ini). Both are 0 when there is no such file or section. */
+typedef uint32_t GwpIni;
+typedef uint32_t GwpIniSection;
+#define GWP_INVALID_INI ((GwpIni)0u)
+#define GWP_INVALID_INI_SECTION ((GwpIniSection)0u)
+
+/* Vertex of the AI graph of the level (group level). */
+#define GWP_INVALID_LEVEL_VERTEX ((uint32_t)0xFFFFFFFFu)
+
+/* What a ray of level_ray_pick hits (a combination of flags). */
+#define GWP_RAY_OBJECT 0x1u   /* game objects */
+#define GWP_RAY_STATIC 0x2u   /* static geometry of the level */
+#define GWP_RAY_SHAPE 0x4u    /* shapes of zones and restrictors */
+#define GWP_RAY_OBSTACLE 0x8u /* obstacles (doors and the like) */
+#define GWP_RAY_ANY (GWP_RAY_OBJECT | GWP_RAY_STATIC)
+
 typedef enum GwpValueType
 {
     GWP_T_NIL = 0,
@@ -312,6 +328,126 @@ typedef struct GwpEngineApi
        @group events @thread main */
     GwpSubscriptionId(GWP_CALL* event_subscribe_ex)(const GwpPlugin* self, const char* name,
         const GwpSubscribeOptions* options, GwpEventHandler handler, void* user);
+
+    /* event_declare with an argument schema: one code per argument - b bool, I integer, N number, s string,
+       v vector, o game object, O server object, t Lua table/userdata (GWP_T_LUA_REF), * anything; '?' after a
+       code = the argument may be nil (or missing at the end). "" = no arguments, NULL = no schema. With
+       -addon_debug (console gw_event_schema_check) every emit is checked and a mismatch is logged once per event.
+       The first schema declared for an event is kept; another one is logged and ignored.
+       event_schema returns the schema of the event (NULL when it has none); the string lives as long as the game.
+       @group events @thread main */
+    GwpResult(GWP_CALL* event_declare_ex)(const GwpPlugin* self, const char* name, const char* schema, uint32_t flags);
+    const char*(GWP_CALL* event_schema)(GwpEventId id);
+
+    /* Config files (ltx). A section is resolved once into a handle, reads go by the handle: a read by name costs
+       a lowercase copy plus two binary searches inside the engine, a read by handle costs neither.
+       ini_system is system.ltx (the sections of weapons, monsters, ...); ini_open reads a file of the mod by its
+       virtual path ("$game_config$\\my_addon.ltx") and belongs to the plugin until ini_close or its unload.
+       A missing section, a missing line or a stale handle gives the passed default value, never an error box.
+       Handles and strings live until the configs are reloaded: ini_generation() changes then, and the plugin
+       resolves its handles again (engine_on_script_start is a good place).
+       @group ini @thread main */
+    GwpIni(GWP_CALL* ini_system)(void);
+    GwpIni(GWP_CALL* ini_open)(const GwpPlugin* self, const char* path);
+    void(GWP_CALL* ini_close)(const GwpPlugin* self, GwpIni ini);
+    uint32_t(GWP_CALL* ini_generation)(void);
+    GwpIniSection(GWP_CALL* ini_section)(GwpIni ini, const char* name);
+    int(GWP_CALL* ini_line_exists)(GwpIniSection section, const char* line);
+    const char*(GWP_CALL* ini_read_string)(GwpIniSection section, const char* line, const char* def);
+    double(GWP_CALL* ini_read_number)(GwpIniSection section, const char* line, double def);
+    int(GWP_CALL* ini_read_bool)(GwpIniSection section, const char* line, int def);
+    int(GWP_CALL* ini_read_vec3)(GwpIniSection section, const char* line, float out_xyz[3]);
+    uint32_t(GWP_CALL* ini_line_count)(GwpIniSection section);
+    int(GWP_CALL* ini_line_at)(GwpIniSection section, uint32_t index, const char** out_name, const char** out_value);
+
+    /* Console variables. Reading works for any variable of the engine (npc_perf_*, r__*, ...); a plugin registers
+       its own variables under the "<addon id>_" prefix (GWP_ERROR_ACCESS_DENIED otherwise). The value is stored by
+       the engine, so it survives a reload of the plugin library and is removed when the addon is unloaded.
+       cvar_get_string copies into `out` and returns the length it needed (0 when there is no such variable).
+       @group console @thread main */
+    int(GWP_CALL* cvar_exists)(const char* name);
+    int(GWP_CALL* cvar_get_int)(const char* name, int def);
+    double(GWP_CALL* cvar_get_float)(const char* name, double def);
+    uint32_t(GWP_CALL* cvar_get_string)(const char* name, char* out, uint32_t size);
+    GwpResult(GWP_CALL* cvar_register_int)(const GwpPlugin* self, const char* name, int def, int min, int max);
+    GwpResult(GWP_CALL* cvar_register_float)(const GwpPlugin* self, const char* name, double def, double min,
+        double max);
+    GwpResult(GWP_CALL* cvar_set_int)(const GwpPlugin* self, const char* name, int value);
+    GwpResult(GWP_CALL* cvar_set_float)(const GwpPlugin* self, const char* name, double value);
+
+    /* Runs a console command, as typing it in the console does. console_execute runs it immediately, inside your
+       call: a command that unloads the level or quits the game (quit, disconnect, load, main_menu, start) destroys
+       objects right there, so from an event handler use console_execute_deferred, which runs the command at the
+       end of the frame.
+       @group console @thread main */
+    GwpResult(GWP_CALL* console_execute)(const GwpPlugin* self, const char* command);
+    GwpResult(GWP_CALL* console_execute_deferred)(const GwpPlugin* self, const char* command);
+
+    /* Profiling stage of this plugin, printed by the engine with its own stages when the game runs with
+       -npc_cpp_profile. Returns 0 while profiling is off: then profile_add does nothing and the plugin can skip
+       the measurement.
+       @group console @thread main */
+    uint32_t(GWP_CALL* profile_stage)(const GwpPlugin* self, const char* name);
+
+    /* Adds measured time to a stage, and the counter the measurement is made with. Both work from any thread:
+       a plugin can measure the work it does in its own threads.
+       @group console @thread any */
+    void(GWP_CALL* profile_add)(uint32_t stage, uint64_t ticks);
+    uint64_t(GWP_CALL* profile_ticks)(void);
+
+    /* The level and the world around the objects. Everything here works only while a level is loaded
+       (level_present returns 0 otherwise, and the rest gives 0 / an empty result).
+       level_time_parts fills the game date and time in one call: year, month, day, hours, minutes, seconds,
+       milliseconds; the absolute game time in milliseconds is game_time_ms (group timers).
+       level_objects copies the ids of the online objects into `out` (at most `max`) and returns how many were
+       copied; the ids are a snapshot, check them with object_exists before use.
+       @group level @thread main */
+    int(GWP_CALL* level_present)(void);
+    const char*(GWP_CALL* level_name)(void);
+    int(GWP_CALL* level_time_parts)(uint32_t out_parts[7]);
+    uint32_t(GWP_CALL* level_object_count)(void);
+    uint32_t(GWP_CALL* level_objects)(GwpObjectId* out, uint32_t max);
+
+    /* Vertices of the AI graph of the level: the positions NPCs walk by. GWP_INVALID_LEVEL_VERTEX means "no such
+       vertex"; level_vertex_id gives it for a position outside the graph.
+       level_vertex_in_direction walks the graph from a vertex towards `dir` and returns the farthest vertex within
+       `distance` (the vertex itself when it cannot move).
+       @group level @thread main */
+    uint32_t(GWP_CALL* level_vertex_id)(const float xyz[3]);
+    int(GWP_CALL* level_vertex_valid)(uint32_t vertex_id);
+    int(GWP_CALL* level_vertex_position)(uint32_t vertex_id, float out_xyz[3]);
+    uint32_t(GWP_CALL* level_vertex_in_direction)(uint32_t vertex_id, const float dir[3], float distance);
+
+    /* Traces a ray through the level: `targets` is a combination of GWP_RAY_* (GWP_RAY_ANY covers geometry and
+       objects). Returns 1 on a hit and fills the distance and the object that was hit
+       (GWP_INVALID_OBJECT_ID for static geometry); both out parameters may be NULL.
+       `ignore` is an object the ray goes through (GWP_INVALID_OBJECT_ID to ignore nothing).
+       @group level @thread main */
+    int(GWP_CALL* level_ray_pick)(const float from_xyz[3], const float dir[3], float distance, uint32_t targets,
+        GwpObjectId ignore, float* out_distance, GwpObjectId* out_object);
+
+    /* Info portions: the flags the game keeps about a character ("met the trader", "quest finished"), the same
+       ones Lua reads with has_info and gives with give_info_portion.
+       Reading works for any character, online or offline (the data lives in the ALife registry), so `owner` may be
+       an NPC far away. Giving and disabling need an online character: a portion runs its scripted effects, and
+       offline there is nobody to run them for (GWP_ERROR then).
+       info_time returns the game time of receiving in milliseconds (0 when the character has no such portion).
+       @group info @thread main */
+    int(GWP_CALL* info_has)(GwpObjectId owner, const char* info);
+    GwpResult(GWP_CALL* info_give)(const GwpPlugin* self, GwpObjectId owner, const char* info);
+    GwpResult(GWP_CALL* info_disable)(const GwpPlugin* self, GwpObjectId owner, const char* info);
+    uint64_t(GWP_CALL* info_time)(GwpObjectId owner, const char* info);
+
+    /* All the portions of a character, in the order they were received. The string of info_at lives until the
+       character receives or loses a portion: copy it to keep.
+       @group info @thread main */
+    uint32_t(GWP_CALL* info_count)(GwpObjectId owner);
+    const char*(GWP_CALL* info_at)(GwpObjectId owner, uint32_t index);
+
+    /* Where the object looks (a unit vector), for example to trace a ray forward from it with level_ray_pick.
+       0 when there is no such online object.
+       @group objects @thread main */
+    int(GWP_CALL* object_direction)(GwpObjectId id, float out_xyz[3]);
 
     /* New functions go below this line only. */
 } GwpEngineApi;

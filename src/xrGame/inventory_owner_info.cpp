@@ -5,6 +5,7 @@
 
 #include "pch_script.h"
 #include "InventoryOwner.h"
+#include "npc_cpp_profile.h"
 #include "GameObject.h"
 #include "xrMessages.h"
 #include "ai_space.h"
@@ -136,6 +137,9 @@ void CInventoryOwner::TransferInfo(shared_str info_id, bool add_info) const
 
 bool CInventoryOwner::HasInfo(shared_str info_id) const
 {
+    // The hot path of condlist and of has_alife_info (456 call sites in the scripts): a linear scan of an
+    // unsorted vector. Measured to decide whether the list needs an index (-npc_cpp_profile).
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::InventoryOwnerHasInfo);
     VERIFY(info_id.size());
     const KNOWN_INFO_VECTOR* known_info = m_known_info_registry->registry().objects_ptr();
     if (!known_info)

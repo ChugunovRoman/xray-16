@@ -9,6 +9,7 @@
 #include "pch_script.h"
 
 #include "script_ini_file.h"
+#include "addon_api_ini.h"
 #include "xrScriptEngine/Functor.hpp"
 
 bool r_line(const CScriptIniFile* self, pcstr S, int L, luabind::string& N, luabind::string& V)
@@ -62,6 +63,7 @@ CScriptIniFile* reload_system_ini()
     FS.update_path(fname, "$game_config$", "system.ltx");
     pSettings = xr_new<CInifile>(fname);
     Dbg.InitSectionLists();
+    gw::addons::ini::OnConfigsReloaded(); // section handles of plugins point into the destroyed CInifile
     if (g_pGamePersistent)
         g_pGamePersistent->OnSystemIniReloaded();
     return (CScriptIniFile*)pSettings;

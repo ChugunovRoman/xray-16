@@ -105,6 +105,7 @@ enum class ENpcCppProfileStage : u32
     ScriptEvaluatorEvaluate,
     ScriptActionUpdate,
     ScriptActionInitialize,
+    InventoryOwnerHasInfo,
     Count
 };
 

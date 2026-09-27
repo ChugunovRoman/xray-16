@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "addon_object_events.h"
 #include "InventoryBox.h"
 #include "Level.h"
 #include "Actor.h"
@@ -70,6 +71,7 @@ void CInventoryBox::OnEvent(NET_Packet& P, u16 type)
         {
             CGameObject* GO = smart_cast<CGameObject*>(itm);
             Actor()->callback(GameObject::eInvBoxItemTake)(this->lua_game_object(), GO->lua_game_object());
+            gw::addons::objevents::ActorItemTakeFromBox(this, GO);
         }
     }
     break;

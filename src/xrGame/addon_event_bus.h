@@ -33,7 +33,10 @@ enum class EBuiltin : GwpEventId
 };
 
 GwpEventId Intern(pcstr name); // id of the event, registering the name when needed; 0 for an empty name
-void Declare(pcstr name, u32 flags = 0);
+
+// schema: argument codes (b bool, I integer, N number, s string, v vector, o game object, O server object,
+// t Lua table/userdata, * anything; '?' after a code = may be nil). nullptr = keep the current one.
+void Declare(pcstr name, u32 flags = 0, pcstr schema = nullptr);
 
 // Synchronous dispatch to Lua and native subscribers. result may be nullptr.
 void Emit(GwpEventId id, const GwpValue* argv = nullptr, u32 argc = 0, GwpValue* result = nullptr);
@@ -60,6 +63,23 @@ GwpValue ServerObject(u16 id);
 
 // Host integration (addon_host.cpp).
 void FillEngineApi(GwpEngineApi& api);
+
+// Stage B (plans/lua_to_cpp/06): events whose source moves from Lua binders to the engine, grouped
+// (addon_object_events.h). An event of an active group sent from Lua is dropped with a log line.
+void DeclareEngineSource(pcstr name, u32 group);
+void SetActiveEngineGroups(u32 mask);
+
+// Argument schema check (console gw_event_schema_check): -1 = on with -addon_debug (default), 0 = off, 1 = on.
+void SetSchemaCheck(int mode);
+int GetSchemaCheck();
+
+// Log of every emit of the events moved to the engine (console gw_event_engine_log, rate-limited per event):
+// -1 = on with -addon_debug (default), 0 = off, 1 = on.
+void SetEngineLog(int mode);
+int GetEngineLog();
+
+// Console command event_trace: logs every emit of the event with its arguments. false for an invalid name.
+bool SetTrace(pcstr name, bool on);
 
 // alife_on_start reason: a level change goes through an autosave and a new ALife loading it. change_level marks it,
 // the next ALife start takes the mark.

@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 
 #include "npc_cpp_profile.h"
+#include "addon_api_console.h"
 
 #include <atomic>
 #include <algorithm>
@@ -12,8 +13,14 @@ namespace
 {
 constexpr u32 NPC_CPP_PROFILE_FLUSH_INTERVAL_MS = 5000;
 constexpr size_t NPC_CPP_PROFILE_STAGE_COUNT = static_cast<size_t>(ENpcCppProfileStage::Count);
-constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT = 64;
-constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_TOP_COUNT = 16;
+constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT = 512;
+// How far the search goes from the hashed slot before a name is given up on. The mod registers about 110
+// evaluators, so without probing a name that hashes onto a taken slot lost every sample it ever made.
+constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_PROBE = 8;
+// Every bucket is drained on a flush, so an evaluator that does not make the printed top loses its numbers for
+// good: the report is the only place they go. 16 rows hid about half of the calls of a session, and the profiler
+// only runs with -npc_cpp_profile anyway, where a longer table is what is wanted.
+constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_TOP_COUNT = 64;
 constexpr size_t NPC_CPP_PROFILE_TOP_COUNT = 32;
 
 struct NpcCppProfileCounters
@@ -38,7 +45,9 @@ struct ScriptEvaluatorProfileBucket
     std::atomic_ullong max_qpc{0};
     std::atomic_ullong cache_hits{0};
     std::atomic_ullong cache_misses{0};
-    pcstr name{nullptr};
+    // A copy, not the pointer that was passed in: an evaluator of a script dies with its Lua state (a new game
+    // or a load restarts the script engine), and the bucket outlives it.
+    char name[64]{};
 };
 
 struct ScriptEvaluatorProfileSnapshot
@@ -167,6 +176,7 @@ constexpr const char* g_npc_cpp_profile_stage_names[NPC_CPP_PROFILE_STAGE_COUNT]
     "script_evaluator/evaluate",
     "script_action/update",
     "script_action/initialize",
+    "inventory_owner/has_info",
 };
 
 static_assert((sizeof(g_npc_cpp_profile_stage_names) / sizeof(g_npc_cpp_profile_stage_names[0])) == NPC_CPP_PROFILE_STAGE_COUNT);
@@ -199,9 +209,24 @@ IC u32 fnv1a_hash(pcstr value)
     return hash;
 }
 
-IC size_t script_evaluator_bucket_index(pcstr evaluator_name)
+// The bucket of this name: the one that already holds it, or the first free one after the hashed slot.
+// Returns nullptr when the probe window is full - then the sample goes to the common stage instead.
+ScriptEvaluatorProfileBucket* script_evaluator_bucket(pcstr evaluator_name)
 {
-    return static_cast<size_t>(fnv1a_hash(evaluator_name) % NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT);
+    const size_t start = static_cast<size_t>(fnv1a_hash(evaluator_name) % NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT);
+    for (size_t probe = 0; probe < NPC_CPP_PROFILE_SCRIPT_EVALUATOR_PROBE; ++probe)
+    {
+        const size_t index = (start + probe) % NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT;
+        ScriptEvaluatorProfileBucket& bucket = g_script_evaluator_profile_buckets[index];
+        if (!bucket.name[0])
+        {
+            xr_strcpy(bucket.name, sizeof bucket.name, evaluator_name);
+            return &bucket;
+        }
+        if (xr_strcmp(bucket.name, evaluator_name) == 0)
+            return &bucket;
+    }
+    return nullptr;
 }
 
 const char* classify_script_evaluator_group(pcstr evaluator_name)
@@ -241,7 +266,7 @@ void flush_script_evaluator_snapshots()
     for (size_t i = 0; i < NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT; ++i)
     {
         ScriptEvaluatorProfileBucket& bucket = g_script_evaluator_profile_buckets[i];
-        const pcstr name = bucket.name;
+        const pcstr name = bucket.name[0] ? bucket.name : nullptr;
         const u64 total_qpc = bucket.total_qpc.exchange(0, std::memory_order_relaxed);
         const u64 calls = bucket.calls.exchange(0, std::memory_order_relaxed);
         const u64 max_qpc = bucket.max_qpc.exchange(0, std::memory_order_relaxed);
@@ -396,6 +421,7 @@ void npc_cpp_profile::flush_if_needed()
             now_ms, next_flush_ms,
             static_cast<unsigned long long>(g_npc_cpp_profile_total_add_calls.load(std::memory_order_relaxed)));
         flush_snapshots(now_ms);
+        gw::addons::console::FlushProfile(); // stages of plugins (profile_stage), printed with ours
     }
 
     g_npc_cpp_profile_flush_lock.Leave();
@@ -434,20 +460,17 @@ void npc_cpp_profile::add_script_evaluator(pcstr evaluator_name, const u64 qpc_d
         return;
 
     const pcstr resolved_name = (evaluator_name && evaluator_name[0]) ? evaluator_name : "<unnamed>";
-    ScriptEvaluatorProfileBucket& bucket = g_script_evaluator_profile_buckets[script_evaluator_bucket_index(resolved_name)];
+    ScriptEvaluatorProfileBucket* bucket = script_evaluator_bucket(resolved_name);
 
-    if (!bucket.name)
-        bucket.name = resolved_name;
-
-    if (std::strcmp(bucket.name, resolved_name) != 0)
+    if (!bucket)
     {
         add(ENpcCppProfileStage::ScriptEvaluatorEvaluate, qpc_delta);
         return;
     }
 
-    bucket.total_qpc.fetch_add(qpc_delta, std::memory_order_relaxed);
-    bucket.calls.fetch_add(1, std::memory_order_relaxed);
-    update_max(bucket.max_qpc, qpc_delta);
+    bucket->total_qpc.fetch_add(qpc_delta, std::memory_order_relaxed);
+    bucket->calls.fetch_add(1, std::memory_order_relaxed);
+    update_max(bucket->max_qpc, qpc_delta);
     flush_if_needed();
 }
 
@@ -457,15 +480,12 @@ void npc_cpp_profile::add_script_evaluator_cache_hit(pcstr evaluator_name)
         return;
 
     const pcstr resolved_name = (evaluator_name && evaluator_name[0]) ? evaluator_name : "<unnamed>";
-    ScriptEvaluatorProfileBucket& bucket = g_script_evaluator_profile_buckets[script_evaluator_bucket_index(resolved_name)];
+    ScriptEvaluatorProfileBucket* bucket = script_evaluator_bucket(resolved_name);
 
-    if (!bucket.name)
-        bucket.name = resolved_name;
-
-    if (std::strcmp(bucket.name, resolved_name) != 0)
+    if (!bucket)
         return;
 
-    bucket.cache_hits.fetch_add(1, std::memory_order_relaxed);
+    bucket->cache_hits.fetch_add(1, std::memory_order_relaxed);
     flush_if_needed();
 }
 
@@ -475,15 +495,12 @@ void npc_cpp_profile::add_script_evaluator_cache_miss(pcstr evaluator_name)
         return;
 
     const pcstr resolved_name = (evaluator_name && evaluator_name[0]) ? evaluator_name : "<unnamed>";
-    ScriptEvaluatorProfileBucket& bucket = g_script_evaluator_profile_buckets[script_evaluator_bucket_index(resolved_name)];
+    ScriptEvaluatorProfileBucket* bucket = script_evaluator_bucket(resolved_name);
 
-    if (!bucket.name)
-        bucket.name = resolved_name;
-
-    if (std::strcmp(bucket.name, resolved_name) != 0)
+    if (!bucket)
         return;
 
-    bucket.cache_misses.fetch_add(1, std::memory_order_relaxed);
+    bucket->cache_misses.fetch_add(1, std::memory_order_relaxed);
     flush_if_needed();
 }
 
