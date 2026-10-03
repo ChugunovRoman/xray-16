@@ -12,6 +12,7 @@
 #include "embedded_resources_management.h"
 #include "EngineThreading.h"
 
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrCore/Threading/TaskManager.hpp"
 #include "xrNetServer/NET_AuthCheck.h"
 
@@ -444,6 +445,8 @@ int CApplication::Run()
         }
 
         Device.ProcessFrame();
+
+        ::xray::perf::Flush();
 
         UpdateDiscordStatus();
         FrameMarkEnd(FRAME_MARK_APPLICATION_RUN);

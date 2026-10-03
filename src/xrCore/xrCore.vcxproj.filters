@@ -124,6 +124,9 @@
     <Filter Include="Profiler">
       <UniqueIdentifier>{ea7e41e5-3ae4-44a3-8b2a-21337befa3c0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Profiling">
+      <UniqueIdentifier>{ea7e41e5-3ae4-44a3-8b2a-21337befa3d1}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Debug core\StackTrace">
       <UniqueIdentifier>{5c4e63d2-d5e9-4e42-8ae2-f8316acdd000}</UniqueIdentifier>
     </Filter>
@@ -236,6 +239,9 @@
     </ClCompile>
     <ClCompile Include="PostProcess\PostProcess.cpp">
       <Filter>PostProcess</Filter>
+    </ClCompile>
+    <ClCompile Include="Profiling\PerfMetrics.cpp">
+      <Filter>Profiling</Filter>
     </ClCompile>
     <ClCompile Include="Media\Image.cpp">
       <Filter>Media</Filter>
@@ -553,6 +559,12 @@
     </ClInclude>
     <ClInclude Include="PostProcess\PostProcess.hpp">
       <Filter>PostProcess</Filter>
+    </ClInclude>
+    <ClInclude Include="Profiling\PerfMetrics.hpp">
+      <Filter>Profiling</Filter>
+    </ClInclude>
+    <ClInclude Include="Profiling\PerfMetricsList.inl">
+      <Filter>Profiling</Filter>
     </ClInclude>
     <ClInclude Include="Media\Image.hpp">
       <Filter>Media</Filter>

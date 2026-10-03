@@ -19,6 +19,7 @@
 #include "TaskManager.hpp"
 
 #include "ScopeLock.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <thread>
 #include <SDL_events.h>
@@ -135,6 +136,16 @@ struct TaskWorkerStats
     size_t allocatedTasks{};
     size_t pushedTasks{};
     size_t finishedTasks{};
+    size_t execOwn{};
+    size_t execWorker0{};
+    size_t execSteal{};
+    size_t execMiss{};
+    size_t stealAttempts{};
+    size_t stealSuccess{};
+    size_t sleepCount{};
+    u64    sleepTime{};
+    size_t waitSpin{};
+    size_t wakeEvents{};
 };
 
 class TaskWorker : public TaskQueue, public TaskWorkerStats
@@ -249,7 +260,13 @@ void TaskManager::TaskWorkerStart()
         {
             do
             {
+                ++s_tl_worker.sleepCount;
+                PERF_INC(task_sleep_count);
+                const u64 sleep_start = ::xray::perf::Ticks();
                 newWorkArrived.Wait();
+                const u64 sleep_dt = ::xray::perf::Ticks() - sleep_start;
+                s_tl_worker.sleepTime += sleep_dt;
+                PERF_ADD(task_sleep_time, sleep_dt);
             } while (shouldPause.load(std::memory_order_consume));
         }
         SetThreadStatus(true);
@@ -278,8 +295,15 @@ Task* TaskManager::TryToSteal() const
         TaskWorker* other = workers[idx];
         if (other == &s_tl_worker)
             continue;
+
+        ++s_tl_worker.stealAttempts;
+        PERF_INC(task_steal_attempt);
+
         if (auto* task = other->steal())
         {
+            ++s_tl_worker.stealSuccess;
+            PERF_INC(task_steal_success);
+
             if (!other->empty())
                 newWorkArrived.Set();
             return task;
@@ -299,6 +323,8 @@ void TaskManager::PushTask(Task& task) noexcept
 {
     s_tl_worker.push(&task);
     newWorkArrived.Set();
+    ++s_tl_worker.wakeEvents;
+    PERF_INC(task_wake_event);
     ++s_tl_worker.pushedTasks;
 }
 
@@ -318,7 +344,11 @@ void TaskManager::Wait(const Task& task, bool updateSystemEvents /*= false*/) co
     ZoneScoped;
     while (!task.IsFinished())
     {
-        ExecuteOneTask();
+        if (!ExecuteOneTask())
+        {
+            ++s_tl_worker.waitSpin;
+            PERF_INC(task_wait_spin);
+        }
         if (s_tl_worker.id == 0 && (xrDebug::ProcessingFailure() || updateSystemEvents))
             SDL_PumpEvents(); // Necessary to prevent dead locks
     }
@@ -327,12 +357,34 @@ void TaskManager::Wait(const Task& task, bool updateSystemEvents /*= false*/) co
 bool TaskManager::ExecuteOneTask() const
 {
     Task* task = s_tl_worker.pop();
-
-    if (!task)
+    if (task)
+    {
+        ++s_tl_worker.execOwn;
+        PERF_INC(task_exec_own);
+    }
+    else
+    {
         task = workers[0]->steal();
-
-    if (!task)
-        task = TryToSteal();
+        if (task)
+        {
+            ++s_tl_worker.execWorker0;
+            PERF_INC(task_exec_worker0);
+        }
+        else
+        {
+            task = TryToSteal();
+            if (task)
+            {
+                ++s_tl_worker.execSteal;
+                PERF_INC(task_exec_steal);
+            }
+            else
+            {
+                ++s_tl_worker.execMiss;
+                PERF_INC(task_exec_miss);
+            }
+        }
+    }
 
     if (task)
     {

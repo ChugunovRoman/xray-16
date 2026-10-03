@@ -100,6 +100,7 @@ call .GitInfo.cmd</Command>
     <ClCompile Include="os_clipboard.cpp" />
     <ClCompile Include="PostProcess\PostProcess.cpp" />
     <ClCompile Include="PostProcess\PPInfo.cpp" />
+    <ClCompile Include="Profiling\PerfMetrics.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
@@ -211,6 +212,8 @@ call .GitInfo.cmd</Command>
     <ClInclude Include="os_clipboard.h" />
     <ClInclude Include="PostProcess\PostProcess.hpp" />
     <ClInclude Include="PostProcess\PPInfo.hpp" />
+    <ClInclude Include="Profiling\PerfMetrics.hpp" />
+    <ClInclude Include="Profiling\PerfMetricsList.inl" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="stream_reader.h" />

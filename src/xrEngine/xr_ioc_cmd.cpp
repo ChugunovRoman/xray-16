@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "IGame_Level.h"
 
 #include "XR_IOConsole.h"
@@ -680,6 +681,13 @@ public:
     virtual void Save(IWriter* F) {}
 };
 
+class CCC_PerfMetrics : public CCC_Integer
+{
+public:
+    using CCC_Integer::CCC_Integer;
+    void Save(IWriter* F) override {}
+};
+
 class ENGINE_API CCC_HideConsole : public IConsole_Command
 {
 public:
@@ -755,6 +763,8 @@ void CCC_Register()
     CMD1(CCC_Disconnect, "disconnect");
     CMD1(CCC_SaveCFG, "cfg_save");
     CMD1(CCC_LoadCFG, "cfg_load");
+
+    CMD4(CCC_PerfMetrics, "perf_metrics", &::xray::perf::g_perf_metrics, 0, 7);
 
 #ifdef DEBUG
     CMD3(CCC_Mask, "mt_particles", &psDeviceFlags, mtParticles);

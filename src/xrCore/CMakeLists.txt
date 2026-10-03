@@ -398,6 +398,15 @@ target_sources_grouped(
 
 target_sources_grouped(
     TARGET xrCore
+    NAME "Profiling"
+    FILES
+    Profiling/PerfMetrics.cpp
+    Profiling/PerfMetrics.hpp
+    Profiling/PerfMetricsList.inl
+)
+
+target_sources_grouped(
+    TARGET xrCore
     NAME "shared memory/string library"
     FILES
     crc32.cpp
