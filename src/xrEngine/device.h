@@ -298,6 +298,9 @@ public:
 public:
     // Multi-threading (ixray `secondary_tasks`: PreRenderThread + GameThread per frame)
     xr_frame_task_group secondary_tasks;
+    const Task* m_pre_render_task{};
+    const Task* m_game_task{};
+    void WaitForFrameTasks();
     Event PresentationFinished = nullptr;
 
     static constexpr u32 MaximalWaitTime = 16; // ms

@@ -69,6 +69,7 @@ bool CRenderDevice::RenderBegin()
 
     case DeviceState::NeedReset:
         // Check if the device is ready to be reset
+        WaitForFrameTasks();
         Reset();
         return false;
 
@@ -283,6 +284,23 @@ void CRenderDevice::DoRender()
     stats.RenderTotal.accum = renderTotalReal.accum;
 }
 
+void CRenderDevice::WaitForFrameTasks()
+{
+    if (!TaskScheduler)
+        return;
+    if (m_game_task)
+    {
+        TaskScheduler->Wait(*m_game_task);
+        m_game_task = nullptr;
+    }
+    if (m_pre_render_task)
+    {
+        TaskScheduler->Wait(*m_pre_render_task);
+        m_pre_render_task = nullptr;
+    }
+    secondary_tasks.wait();
+}
+
 void CRenderDevice::ProcessFrame()
 {
     ZoneScoped;
@@ -322,9 +340,8 @@ void CRenderDevice::ProcessFrame()
     }
 
     // PreRenderThread overlaps with the main-thread FrameMove below (kept from the original design).
-    const Task* preRenderTask = nullptr;
     if (TaskScheduler)
-        preRenderTask = &TaskScheduler->AddTask([] { XRay::Engine::PreRenderThread(); });
+        m_pre_render_task = &TaskScheduler->AddTask([] { XRay::Engine::PreRenderThread(); });
 
     FrameMove();
 
@@ -335,9 +352,8 @@ void CRenderDevice::ProcessFrame()
         PhysicsBeginOverlapFrameCallback();
 
     // GameThread (Sheduler.Update + seqFrameMT) runs in parallel with PreRenderThread / main-thread work.
-    const Task* gameTask = nullptr;
     if (TaskScheduler)
-        gameTask = &TaskScheduler->AddTask([] { XRay::Engine::GameThread(); });
+        m_game_task = &TaskScheduler->AddTask([] { XRay::Engine::GameThread(); });
 
     // B-1 / FIX: join the GameThread (Sheduler.Update + seqFrameMT) BEFORE running the physics step.
     // Running FrameStep in parallel with Sheduler.Update raced on the player actor's physics body/geoms:
@@ -346,8 +362,11 @@ void CRenderDevice::ProcessFrame()
     // the same bodies/spaces on this thread -> nondeterministic actor XFORM -> first-person camera
     // jitter / image doubling. Joining here keeps physics serial w.r.t. scheduler mutations (same
     // ordering as overlap=0, where OnFrame runs inside GameThread after Sheduler.Update).
-    if (TaskScheduler && gameTask)
-        TaskScheduler->Wait(*gameTask);
+    if (TaskScheduler && m_game_task)
+    {
+        TaskScheduler->Wait(*m_game_task);
+        m_game_task = nullptr;
+    }
 
     // B-1: when overlap enabled, the physics step runs here — after the GameThread scheduler joined
     // (CPHWorld::OnFrame in seqFrame no-ops in this mode). When disabled, physics already ran in FrameMove.
@@ -368,8 +387,11 @@ void CRenderDevice::ProcessFrame()
     DoRender();
 
     // Join PreRenderThread (still overlapping with the physics step + DoRender above, as in the original design).
-    if (TaskScheduler && preRenderTask)
-        TaskScheduler->Wait(*preRenderTask);
+    if (TaskScheduler && m_pre_render_task)
+    {
+        TaskScheduler->Wait(*m_pre_render_task);
+        m_pre_render_task = nullptr;
+    }
 
     const u64 frameEndTime = TimerGlobal.GetElapsed_ms();
     const u64 frameTime = frameEndTime - frameStartTime;

@@ -11,7 +11,7 @@ void CRenderDevice::Destroy()
 
     ZoneScoped;
     Log("Destroying Render...");
-    secondary_tasks.wait();
+    WaitForFrameTasks();
     ParticleWorker_ShutdownBeforeNullCallback();
     ParticleWorkerCallback = nullptr;
     ModelDeferredClear = nullptr;
@@ -39,7 +39,7 @@ void CRenderDevice::Reset(bool precache /*= true*/)
 {
     ZoneScoped;
 
-    secondary_tasks.wait();
+    WaitForFrameTasks();
     ParticleWorker_ShutdownBeforeNullCallback();
 
     const auto dwWidth_before = dwWidth;
