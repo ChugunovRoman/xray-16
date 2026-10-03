@@ -826,31 +826,14 @@ void CKinematics::CalculateWallmarks(bool hud)
     if (!wallmarks.empty() && (wm_frame != Device.dwFrame))
     {
         wm_frame = Device.dwFrame;
-        bool need_remove = false;
-        for (auto it = wallmarks.begin(); it != wallmarks.end(); ++it)
-        {
-            intrusive_ptr<CSkeletonWallmark>& wm = *it;
-            float w = (Device.fTimeGlobal - wm->TimeStart()) / ps_r__WallmarkTTL;
-            if (w < 1.f)
-            {
-                // append wm to WallmarkEngine
-                if (!hud && RImplementation.ViewBase.testSphere_dirty(wm->m_Bounds.P, wm->m_Bounds.R))
-                    RImplementation.add_SkeletonWallmark(wm);
-            }
-            else
-            {
-                // remove wallmark
-                need_remove = true;
-            }
-        }
-        if (need_remove)
-        {
-            const auto new_end = std::remove_if(wallmarks.begin(), wallmarks.end(), [](const intrusive_ptr<CSkeletonWallmark> x)
-            {
-                return x == nullptr;
-            });
-            wallmarks.erase(new_end, wallmarks.end());
-        }
+        // Expired marks are deleted immediately; alive marks inside frustum are queued for rendering
+        std::erase_if(wallmarks, [&](const intrusive_ptr<CSkeletonWallmark>& wm) {
+            if ((Device.fTimeGlobal - wm->TimeStart()) / ps_r__WallmarkTTL >= 1.f)
+                return true;
+            if (!hud && RImplementation.ViewBase.testSphere_dirty(wm->m_Bounds.P, wm->m_Bounds.R))
+                RImplementation.add_SkeletonWallmark(wm);
+            return false;
+        });
     }
 }
 
