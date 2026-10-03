@@ -1227,6 +1227,10 @@ IRenderVisual* CRender::model_CreateParticles(LPCSTR name)
     R_ASSERT3(SG, "Particle effect or group doesn't exist", name);
     return Models->CreatePG(SG);
 }
+bool CRender::model_ParticlesExist(LPCSTR name)
+{
+    return name && name[0] && (PSLibrary.FindPED(name) || PSLibrary.FindPGD(name));
+}
 void CRender::models_Prefetch() { Models->Prefetch(); }
 void CRender::models_Clear(bool b_complete) { Models->ClearPool(b_complete); }
 ref_shader CRender::getShader(int id)

@@ -32,10 +32,11 @@ enum class ESubscriberKind : u8
 // Events collected for a batch subscriber (GWP_SUBSCRIBE_BATCH) until the next delivery.
 struct BatchQueue
 {
-    xr_vector<GwpValue> values; // arguments of every record; a string keeps its offset into `text` in `reserved`
+    xr_vector<GwpValue> values; // arguments of every record: deep copies, their strings and items live in `arena`
     xr_vector<u32> first;       // per record: index of its first argument in `values`
     xr_vector<u32> argc;        // per record: number of arguments
-    xr_vector<char> text;       // copies of string arguments, zero-terminated
+    xr_vector<u32> flags;       // per record: GwpEvent::flags (GWP_EVENT_FLAG_*)
+    ValueArena arena;           // copies of strings, bytes and array items; addresses stable until the queue goes
     bool warned_overflow = false;
 
     bool empty() const { return first.empty(); }
@@ -56,11 +57,12 @@ struct Subscriber
     GwpEventBatchHandler batch_handler = nullptr; // batch subscriber when not null
     xr_unique_ptr<BatchQueue> batch;               // queue of a batch subscriber
     u32 max_batch = 0;
-    bool object_filter = false; // GWP_SUBSCRIBE_OBJECT: only emits about `object` (first argument)
+    bool object_filter = false; // GWP_SUBSCRIBE_OBJECT / Lua {object = ...}: only emits about `object` (first argument)
     u16 object = 0;
 
     // Lua
     int lua_ref = LUA_NOREF; // handler in the registry of Bus::lua
+    bool once = false;       // Lua {once = true}: removed right before its first call
     u32 throttle_ms = 0;     // 0 = every dispatch
     u32 last_call_ms = 0;
     bool called = false;
@@ -107,7 +109,7 @@ struct Event
     u32 engine_log_ms = 0;      // gw_event_engine_log: time of the last logged emit
     u32 engine_log_skipped = 0; // emits not logged since then (rate limit)
     bool engine_log_any = false;
-    int lua_adapter_ref = LUA_NOREF; // event_bus.set_lua_adapter: builds the Lua arguments of an engine emit
+    int lua_adapter_ref = LUA_NOREF; // _gw_internal.event_bus_set_lua_adapter: Lua arguments of an engine emit
 };
 
 struct Bus
@@ -115,7 +117,8 @@ struct Bus
     xr_vector<xr_unique_ptr<Event>> events; // index = id - 1; Event objects never move
     xr_unordered_map<xr_string, GwpEventId> ids;
     xr_unordered_map<GwpSubscriptionId, GwpEventId> native_subscriptions;
-    GwpSubscriptionId next_subscription = 1;
+    xr_unordered_map<GwpSubscriptionId, GwpEventId> lua_subscriptions; // event_bus.unsubscribe(id)
+    GwpSubscriptionId next_subscription = 1; // one id space for Lua and native subscriptions
     u32 object_subscriptions = 0; // alive GWP_SUBSCRIBE_OBJECT subscribers: RemoveObjectSubscriptions skips the scan at 0
     u32 dispatch_depth = 0; // all events together: protection against endless recursion
 
@@ -149,6 +152,13 @@ constexpr pcstr kBuiltinNames[] = {
     "actor_on_spawn",
     "actor_on_destroy",
     "data_on_changed",
+    "service_on_register",
+    "service_on_unregister",
+    "server_object_on_register",
+    "server_object_on_unregister",
+    "npc_on_before_hit",
+    "monster_on_before_hit",
+    "relation_on_changed",
 };
 static_assert(std::size(kBuiltinNames) == static_cast<size_t>(EBuiltin::Count_) - 1, "kBuiltinNames != EBuiltin");
 
@@ -186,11 +196,24 @@ constexpr pcstr kBuiltinSchemas[] = {
     "o",  // actor_on_spawn
     "o",  // actor_on_destroy
     "s*", // data_on_changed (key, value)
+    "sI", // service_on_register (name, version)
+    "s",  // service_on_unregister (name)
+    "Oss", // server_object_on_register (server object, section, class id)
+    "Oss", // server_object_on_unregister (server object, section, class id)
+    "oNvo?IIN", // npc_on_before_hit (npc, power, dir, who, bone, hit type, impulse)
+    "oNvo?IIN", // monster_on_before_hit (monster, power, dir, who, bone, hit type, impulse)
+    "s*?*?N?N?", // relation_on_changed (kind, a, b, old, new)
 };
 static_assert(std::size(kBuiltinSchemas) == std::size(kBuiltinNames), "kBuiltinSchemas != kBuiltinNames");
 
+// Built-in events with a result (GWP_EVENT_HAS_RESULT): the engine emits them with a result value.
+constexpr pcstr kBuiltinResultEvents[] = {
+    "npc_on_before_hit",
+    "monster_on_before_hit",
+};
+
 GwpEventId InternIn(Bus& bus, pcstr name);
-void EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, pcstr source, bool from_engine);
+GwpResult EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, pcstr source, bool from_engine);
 
 Bus& GetBus()
 {
@@ -204,6 +227,11 @@ Bus& GetBus()
             event.builtin = true;
             event.schema = kBuiltinSchemas[i];
             event.has_schema = true;
+            for (const pcstr name : kBuiltinResultEvents)
+            {
+                if (xr_strcmp(name, kBuiltinNames[i]) == 0)
+                    event.flags |= GWP_EVENT_HAS_RESULT;
+            }
         }
         objevents::RegisterEngineEvents(); // g_bus is set: the nested GetBus() calls return it
     }
@@ -303,7 +331,7 @@ bool ValueMatches(char code, const GwpValue& value)
     case 'v': return value.type == GWP_T_VEC3;
     case 'o': return value.type == GWP_T_OBJECT;
     case 'O': return value.type == GWP_T_SERVER_OBJECT;
-    case 't': return value.type == GWP_T_LUA_REF;
+    case 't': return value.type == GWP_T_LUA_REF || value.type == GWP_T_ARRAY; // a Lua table: an array or not
     case '*': return true;
     default: return false;
     }
@@ -328,7 +356,10 @@ xr_string DescribeArgs(const GwpValue* argv, u32 argc)
         case GWP_T_OBJECT: xr_sprintf(item, "object %u", static_cast<u32>(v.u.id)); break;
         case GWP_T_SERVER_OBJECT: xr_sprintf(item, "server object %u", static_cast<u32>(v.u.id)); break;
         case GWP_T_LUA_REF: xr_strcpy(item, "table/userdata"); break;
-        default: xr_strcpy(item, "nil"); break;
+        case GWP_T_BYTES: xr_sprintf(item, "bytes [%u]", v.u.s.len); break;
+        case GWP_T_ARRAY: xr_sprintf(item, "array [%u]", v.u.a.count); break;
+        case GWP_T_NIL: xr_strcpy(item, "nil"); break;
+        default: xr_sprintf(item, "unknown type %u", v.type); break;
         }
         if (i)
             text += ", ";
@@ -377,7 +408,15 @@ void WarnUndeclared(Event& event, pcstr who, pcstr action)
         "event_declare)", who, action, event.name.c_str());
 }
 
+// The Lua state of the subscribers while it is the live state of the script engine; nullptr once it is closed or
+// replaced (its registry references must not be touched then).
+lua_State* LiveLua(const Bus& bus)
+{
+    return bus.lua && GEnv.ScriptEngine && GEnv.ScriptEngine->lua() == bus.lua ? bus.lua : nullptr;
+}
+
 // Removes a subscriber. During a dispatch of this event the entry is only marked, so indices stay valid.
+// A Lua handler loses its registry reference here (the caller keeps the function on the stack if it still calls it).
 void RemoveAt(Bus& bus, Event& event, size_t index)
 {
     Subscriber& subscriber = event.subscribers[index];
@@ -394,7 +433,16 @@ void RemoveAt(Bus& bus, Event& event, size_t index)
         bus.native_subscriptions.erase(subscriber.id);
     }
     else
+    {
         --event.lua_count;
+        bus.lua_subscriptions.erase(subscriber.id);
+        if (subscriber.lua_ref != LUA_NOREF)
+        {
+            if (lua_State* L = LiveLua(bus))
+                luaL_unref(L, LUA_REGISTRYINDEX, subscriber.lua_ref);
+            subscriber.lua_ref = LUA_NOREF;
+        }
+    }
 
     if (event.dispatch_depth == 0)
         event.subscribers.erase(event.subscribers.begin() + index);
@@ -458,8 +506,9 @@ struct NativeCall
     const void* plugin_code = nullptr; // thunk: an address inside the plugin library (the crash filter needs it)
 };
 
-// Plugin calls in progress on the thread that runs them (the game logic thread): see PluginCallDepth
-u32 g_plugin_call_depth = 0;
+// Plugin calls in progress: see PluginCallDepth. Atomic: task_parallel_for (addon_api_threads.cpp) runs plugin code
+// under the same guard on worker threads, while the game logic thread waits inside that plugin call
+std::atomic<u32> g_plugin_call_depth{ 0 };
 
 // A C++ exception thrown out of a plugin handler stops here; C++ unwinding runs every destructor on the way,
 // so nested dispatch scopes of the engine stay consistent. Logged with the stack of the catch (on MSVC the frames
@@ -471,7 +520,7 @@ bool CallNativeCatching(const NativeCall& call)
         if (call.thunk)
             call.thunk(call.thunk_context);
         else if (call.batch_handler)
-            call.batch_handler(call.user, call.count, call.events);
+            call.batch_handler(call.user, call.count, call.events, static_cast<uint32_t>(sizeof(GwpEvent)));
         else
             call.handler(call.user, call.events);
         return true;
@@ -649,7 +698,7 @@ bool CallNativeGuarded(const NativeCall& call)
 
 } // namespace
 
-u32 PluginCallDepth() { return g_plugin_call_depth; }
+u32 PluginCallDepth() { return g_plugin_call_depth.load(); }
 
 bool CallPluginGuarded(const void* plugin_code, pcstr what, void (*fn)(void*), void* context)
 {
@@ -663,7 +712,7 @@ bool CallPluginGuarded(const void* plugin_code, pcstr what, void (*fn)(void*), v
 
 namespace
 {
-void Enqueue(Subscriber& subscriber, const Event& event, const GwpValue* argv, u32 argc)
+void Enqueue(Subscriber& subscriber, const Event& event, const GwpValue* argv, u32 argc, u32 flags)
 {
     BatchQueue& queue = *subscriber.batch;
     if (queue.first.size() >= subscriber.max_batch)
@@ -678,19 +727,10 @@ void Enqueue(Subscriber& subscriber, const Event& event, const GwpValue* argv, u
     }
     queue.first.push_back(static_cast<u32>(queue.values.size()));
     queue.argc.push_back(argc);
+    queue.flags.push_back(flags);
+    // Deep copies: strings, bytes and array items go to the arena of the queue, their addresses never move
     for (u32 i = 0; i < argc; ++i)
-    {
-        GwpValue value = argv[i];
-        if (value.type == GWP_T_STRING)
-        {
-            value.reserved = static_cast<uint32_t>(queue.text.size());
-            if (value.u.s.ptr && value.u.s.len)
-                queue.text.insert(queue.text.end(), value.u.s.ptr, value.u.s.ptr + value.u.s.len);
-            queue.text.push_back(0);
-            value.u.s.ptr = nullptr; // set at delivery: `text` may reallocate until then
-        }
-        queue.values.push_back(value);
-    }
+        queue.values.push_back(queue.arena.Copy(argv[i]));
 }
 
 // GWP_SUBSCRIBE_OBJECT: the first argument names the object (a game object or its server object).
@@ -713,9 +753,23 @@ void RemovePluginSubscriptionsIn(Bus& bus, const GwpPlugin* plugin)
     }
 }
 
-void DispatchNative(Bus& bus, Event& event, GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result)
+GwpEvent MakeEvent(GwpEventId id, const Event& event, u32 flags, const GwpValue* argv, u32 argc, GwpValue* result)
 {
-    const GwpEvent data{ id, event.name.c_str(), argc, argv, result };
+    GwpEvent data;
+    data.size = sizeof(GwpEvent);
+    data.flags = flags;
+    data.id = id;
+    data.argc = argc;
+    data.name = event.name.c_str();
+    data.argv = argv;
+    data.result = result;
+    return data;
+}
+
+// flags: GwpEvent::flags of this emit (GWP_EVENT_FLAG_ENGINE for an emit of the engine itself)
+void DispatchNative(Bus& bus, Event& event, GwpEventId id, u32 flags, const GwpValue* argv, u32 argc, GwpValue* result)
+{
+    const GwpEvent data = MakeEvent(id, event, flags, argv, argc, result);
     u32 now = 0;
     bool now_set = false;
     // Index loop: handlers may subscribe (push_back) or unsubscribe (marked only) during the dispatch.
@@ -729,7 +783,7 @@ void DispatchNative(Bus& bus, Event& event, GwpEventId id, const GwpValue* argv,
             continue;
         if (subscriber.batch_handler)
         {
-            Enqueue(subscriber, event, argv, argc); // delivered by FlushBatches; throttle applies there
+            Enqueue(subscriber, event, argv, argc, flags); // delivered by FlushBatches; throttle applies there
             continue;
         }
         if (subscriber.throttle_ms)
@@ -783,6 +837,10 @@ struct LuaArgs
     const GwpValue* argv = nullptr;
     u32 argc = 0;
     int flags_table = 0; // stack index of the flags table appended as the last argument; 0 = none
+    // The first argument of the emit before any Lua adapter, for Lua subscribers with {object = ...}: a native
+    // emit sets subject_argv (its argv), a Lua emit leaves it null (then the stack value at `first` is used).
+    const GwpValue* subject_argv = nullptr;
+    u32 subject_argc = 0;
 };
 
 CScriptGameObject* FindScriptObject(u16 id)
@@ -793,7 +851,98 @@ CScriptGameObject* FindScriptObject(u16 id)
     return object ? object->lua_game_object() : nullptr;
 }
 
+void PushValueDepth(lua_State* L, const GwpValue& value, u32 depth);
+
+// The value budget (addon_event_bus.h) of one value so far: its values (kMaxValueNodes: the value itself plus the
+// items of every array) and the bytes of its strings and bytes (kMaxValueTotalBytes), an array or a string met
+// several times counted every time.
+struct ValueBudget
+{
+    u32 nodes = 1; // the value itself
+    u64 bytes = 0;
+    bool Over() const { return nodes > kMaxValueNodes || bytes > kMaxValueTotalBytes; }
+};
+
+// Counts the tree into `budget`. The walk stops as soon as it is over the budget, so an array shared by many items
+// (a DAG) costs at most about kMaxValueNodes steps. An array over its own limits adds nothing: the callers refuse
+// or cut it themselves.
+void CountValueBudgetDepth(const GwpValue& value, u32 depth, ValueBudget& budget)
+{
+    if (value.type == GWP_T_STRING || value.type == GWP_T_BYTES)
+    {
+        budget.bytes += value.u.s.len;
+        return;
+    }
+    const GwpArray& array = value.u.a;
+    if (value.type != GWP_T_ARRAY || depth >= kMaxArrayDepth || array.count > kMaxArrayItems ||
+        (array.count && !array.items))
+        return;
+    budget.nodes += array.count;
+    for (u32 i = 0; i < array.count && !budget.Over(); ++i)
+        CountValueBudgetDepth(array.items[i], depth + 1, budget);
+}
+
+// true when an array value with everything in it is within the value budget. Any other value is: only arrays
+// multiply what a copy or a push makes (a single string is limited where it comes in, kMaxValueBytes)
+bool ValueWithinBudget(const GwpValue& value)
+{
+    if (value.type != GWP_T_ARRAY)
+        return true;
+    ValueBudget budget;
+    CountValueBudgetDepth(value, 0, budget);
+    return !budget.Over();
+}
+
+// One log line per place (`warned` is a static of the caller) for a value over the value budget
+void WarnValueOverBudget(bool& warned, pcstr what)
+{
+    if (warned)
+        return;
+    warned = true;
+    Msg("! [events] a value with more than %u values or %u MiB of strings in total (nested arrays included, a shared "
+        "array or string counted each time): %s (reported once)", kMaxValueNodes,
+        static_cast<u32>(kMaxValueTotalBytes / (1024u * 1024u)), what);
+}
+
+// GWP_T_ARRAY -> a new table {items[0], ..., items[count - 1]}. depth: arrays around this one.
+void PushArray(lua_State* L, const GwpValue& value, u32 depth)
+{
+    const GwpArray& array = value.u.a;
+    if (depth >= kMaxArrayDepth || array.count > kMaxArrayItems || (array.count && !array.items) ||
+        !lua_checkstack(L, 3))
+    {
+        static bool warned = false;
+        if (!warned)
+        {
+            warned = true;
+            Msg("! [events] an array deeper than %u levels, longer than %u items or without its items went to Lua as "
+                "nil (reported once)", kMaxArrayDepth, kMaxArrayItems);
+        }
+        lua_pushnil(L);
+        return;
+    }
+    lua_createtable(L, static_cast<int>(array.count), 0);
+    for (u32 i = 0; i < array.count; ++i)
+    {
+        PushValueDepth(L, array.items[i], depth + 1);
+        lua_rawseti(L, -2, static_cast<int>(i + 1)); // nil (an object gone offline) leaves a hole
+    }
+}
+
 void PushValue(lua_State* L, const GwpValue& value)
+{
+    // Checked once at the root: a shared row repeated through every level would make billions of tables
+    if (!ValueWithinBudget(value))
+    {
+        static bool warned = false;
+        WarnValueOverBudget(warned, "went to Lua as nil");
+        lua_pushnil(L);
+        return;
+    }
+    PushValueDepth(L, value, 0);
+}
+
+void PushValueDepth(lua_State* L, const GwpValue& value, u32 depth)
 {
     switch (value.type)
     {
@@ -806,6 +955,15 @@ void PushValue(lua_State* L, const GwpValue& value)
         else
             lua_pushnil(L);
         break;
+    case GWP_T_BYTES: // Lua strings hold any bytes
+        if (value.u.s.ptr)
+            lua_pushlstring(L, value.u.s.ptr, value.u.s.len);
+        else if (!value.u.s.len)
+            lua_pushliteral(L, "");
+        else
+            lua_pushnil(L);
+        break;
+    case GWP_T_ARRAY: PushArray(L, value, depth); break;
     case GWP_T_VEC3:
     {
         Fvector v;
@@ -832,17 +990,102 @@ void PushValue(lua_State* L, const GwpValue& value)
     }
 }
 
-// Lua value -> GwpValue. Strings point into Lua data: valid while the value stays on the stack.
-GwpValue ToValue(lua_State* L, int index)
+GwpValue LuaRef()
 {
+    GwpValue value = Nil();
+    value.type = GWP_T_LUA_REF;
+    return value;
+}
+
+GwpValue ToValueDepth(lua_State* L, int index, ValueArena* arena, u32 depth, ValueBudget& budget);
+
+// A Lua table over the value budget: logged once for all of them
+GwpValue TableOverBudget()
+{
+    static bool warned = false;
+    WarnValueOverBudget(warned, "a Lua table has no native form, GWP_T_LUA_REF");
+    return LuaRef(); // every table around it becomes GWP_T_LUA_REF too: an item without a native form
+}
+
+// The table at the absolute stack index -> GWP_T_ARRAY when its keys are exactly 1..n (n <= kMaxArrayItems) and
+// every item has a native form (nested tables by the same rule), else GWP_T_LUA_REF. Items go to the arena; their
+// strings point into the strings the table holds. depth: arrays around this one. budget: the value budget of the
+// whole value so far (a table or a string met twice counts twice; the items of a table are reserved before the
+// recursion).
+GwpValue TableToValue(lua_State* L, int index, ValueArena& arena, u32 depth, ValueBudget& budget)
+{
+    if (depth >= kMaxArrayDepth || !lua_checkstack(L, 4))
+        return LuaRef();
+    // Keys: distinct integers in 1..kMaxArrayItems, as many as the largest of them -> exactly 1..n
+    u32 count = 0;
+    lua_Number max_key = 0;
+    lua_pushnil(L);
+    while (lua_next(L, index) != 0)
+    {
+        lua_pop(L, 1); // the item; the key stays for lua_next
+        bool ok = lua_type(L, -1) == LUA_TNUMBER;
+        if (ok)
+        {
+            const lua_Number key = lua_tonumber(L, -1);
+            ok = key >= 1 && key <= kMaxArrayItems && std::floor(key) == key;
+            if (ok && key > max_key)
+                max_key = key;
+        }
+        if (!ok || ++count > kMaxArrayItems)
+        {
+            lua_pop(L, 1); // the key: the iteration stops here
+            return LuaRef();
+        }
+    }
+    if (static_cast<lua_Number>(count) != max_key)
+        return LuaRef();
+    budget.nodes += count;
+    if (budget.Over())
+        return TableOverBudget();
+
+    GwpValue* items = arena.AllocValues(count);
+    for (u32 i = 0; i < count; ++i)
+    {
+        lua_rawgeti(L, index, static_cast<int>(i + 1));
+        items[i] = ToValueDepth(L, lua_gettop(L), &arena, depth + 1, budget);
+        lua_pop(L, 1); // a string item stays alive: the table holds it
+        if (items[i].type == GWP_T_LUA_REF || items[i].type == GWP_T_NIL)
+            return LuaRef(); // a function, a foreign userdata, a table that is no array: no native form
+        if (budget.Over()) // the bytes of a string item
+            return TableOverBudget();
+    }
+    GwpValue value = Nil();
+    value.type = GWP_T_ARRAY;
+    value.u.a.items = items;
+    value.u.a.count = count;
+    return value;
+}
+
+// Lua value -> GwpValue. Strings point into Lua data: valid while the value stays on the stack.
+// arena == nullptr: tables are GWP_T_LUA_REF (the conversion before arrays).
+GwpValue ToValue(lua_State* L, int index, ValueArena* arena = nullptr)
+{
+    ValueBudget budget; // per value
+    return ToValueDepth(L, index, arena, 0, budget);
+}
+
+GwpValue ToValueDepth(lua_State* L, int index, ValueArena* arena, u32 depth, ValueBudget& budget)
+{
+    if (index < 0 && index > LUA_REGISTRYINDEX)
+        index = lua_gettop(L) + index + 1; // absolute: TableToValue pushes onto the stack
     switch (lua_type(L, index))
     {
+    case LUA_TTABLE:
+        if (arena)
+            return TableToValue(L, index, *arena, depth, budget);
+        break;
     case LUA_TBOOLEAN: return Bool(lua_toboolean(L, index) != 0);
     case LUA_TNUMBER: return Number(lua_tonumber(L, index)); // Lua has only doubles: always NUMBER
     case LUA_TSTRING:
     {
         size_t length = 0;
         const char* text = lua_tolstring(L, index, &length);
+        budget.bytes += length; // matters inside a table only: TableToValue checks it
         GwpValue value = Nil();
         value.type = GWP_T_STRING;
         value.u.s.ptr = text;
@@ -974,12 +1217,37 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
 
     u32 now = 0;
     bool now_set = false;
+    // {object = ...} subscribers: the first argument of the emit as GwpValue, converted once on the first need
+    GwpValue subject = Nil();
+    u32 subject_count = 0;
+    bool subject_set = false;
     const size_t count = event.subscribers.size();
     for (size_t i = 0; i < count; ++i)
     {
         Subscriber& subscriber = event.subscribers[i];
         if (!subscriber.alive || subscriber.kind == ESubscriberKind::Native)
             continue;
+        if (subscriber.object_filter)
+        {
+            if (!subject_set)
+            {
+                subject_set = true;
+                if (args.subject_argv || args.argv)
+                {
+                    const GwpValue* argv = args.subject_argv ? args.subject_argv : args.argv;
+                    subject_count = args.subject_argv ? args.subject_argc : args.argc;
+                    if (subject_count)
+                        subject = argv[0];
+                }
+                else if (args.count > 0)
+                {
+                    subject = ToValue(L, args.first); // a game object or a server object (userdata): no arena needed
+                    subject_count = 1;
+                }
+            }
+            if (!IsAboutObject(&subject, subject_count, subscriber.object))
+                continue;
+        }
         if (subscriber.throttle_ms)
         {
             if (!now_set)
@@ -996,6 +1264,7 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
         // Copies: any Lua call below may subscribe and reallocate the vector, `subscriber` would dangle.
         const ESubscriberKind kind = subscriber.kind;
         const int lua_ref = subscriber.lua_ref;
+        const bool once = subscriber.once;
 
         int profile_handle = 0;
         if (profile)
@@ -1017,6 +1286,10 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
             lua_rawgeti(L, LUA_REGISTRYINDEX, lua_ref);
             nargs = PushArgs(L, args);
         }
+        // {once = true}: gone before the call (a nested emit of this event does not call it again); the handler is
+        // on the stack already, so dropping its registry reference here is safe
+        if (once)
+            RemoveAt(bus, event, i);
 
         if (lua_pcall(L, nargs, 0, 0) != 0)
         {
@@ -1032,7 +1305,10 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
 
 void ResetLuaSubscribers(Bus& bus)
 {
-    // The old Lua state is already closed: drop the references without luaL_unref.
+    // The old Lua state is already closed: drop the references without luaL_unref. bus.lua is cleared first, so
+    // RemoveAt does not unref them (a new state may even have the address of the old one).
+    bus.lua = nullptr;
+    bus.current_lua = nullptr;
     for (auto& event : bus.events)
     {
         for (size_t i = event->subscribers.size(); i-- > 0;)
@@ -1077,6 +1353,32 @@ GwpEventId LuaEventId(lua_State* L, int index)
     return id;
 }
 
+// The id of the name at `index` when the bus knows the event already, GWP_INVALID_EVENT_ID otherwise; never
+// registers it. For the functions that only look (schema, has_subscribers, unsubscribe by name): a name built at
+// run time must not grow bus.events forever. Uses the same name -> id cache as LuaEventId.
+GwpEventId LuaFindEventId(lua_State* L, int index)
+{
+    if (lua_type(L, index) != LUA_TSTRING)
+        return GWP_INVALID_EVENT_ID;
+    lua_pushvalue(L, index);
+    lua_rawget(L, lua_upvalueindex(1));
+    if (lua_type(L, -1) == LUA_TNUMBER)
+    {
+        const auto id = static_cast<GwpEventId>(lua_tonumber(L, -1));
+        lua_pop(L, 1);
+        return id;
+    }
+    lua_pop(L, 1);
+    const Bus& bus = GetBus();
+    const auto it = bus.ids.find(lua_tostring(L, index));
+    if (it == bus.ids.end())
+        return GWP_INVALID_EVENT_ID;
+    lua_pushvalue(L, index);
+    lua_pushnumber(L, static_cast<lua_Number>(it->second));
+    lua_rawset(L, lua_upvalueindex(1));
+    return it->second;
+}
+
 // event_bus.declare(name [, schema])
 int LuaDeclare(lua_State* L)
 {
@@ -1089,10 +1391,10 @@ int LuaDeclare(lua_State* L)
     return 0;
 }
 
-// event_bus.schema(name): the argument schema, nil when the event has none.
+// event_bus.schema(name): the argument schema, nil when the event has none (or the bus does not know it).
 int LuaSchema(lua_State* L)
 {
-    const Event* event = FindEvent(GetBus(), LuaEventId(L, 1));
+    const Event* event = FindEvent(GetBus(), LuaFindEventId(L, 1));
     if (event && event->has_schema)
         lua_pushlstring(L, event->schema.c_str(), event->schema.size());
     else
@@ -1100,7 +1402,7 @@ int LuaSchema(lua_State* L)
     return 1;
 }
 
-// event_bus.set_lua_adapter(name, fn | nil): when the ENGINE emits the event, Lua subscribers get
+// _gw_internal.event_bus_set_lua_adapter(name, fn | nil): when the ENGINE emits the event, Lua subscribers get
 // fn(<native arguments>) instead of the native arguments (plugins keep the native ones). For arguments that exist
 // only in Lua, e.g. the actor binder of actor_on_* events. Dropped with the Lua state.
 int LuaSetLuaAdapter(lua_State* L)
@@ -1120,40 +1422,134 @@ int LuaSetLuaAdapter(lua_State* L)
     return 0;
 }
 
-// event_bus.is_engine_source(name): true when the engine sends the event now (its stage B group is active), so a
-// Lua sender must not do what the event handling does (e.g. the actor_before_death slot handler must not kill).
+// _gw_internal.event_bus_is_engine_source(name): true when the engine sends the event now (its stage B group is
+// active), so a Lua sender must not do what the event handling does (e.g. the actor_before_death slot handler must
+// not kill).
 int LuaIsEngineSource(lua_State* L)
 {
-    const Event* event = FindEvent(GetBus(), LuaEventId(L, 1));
+    const Event* event = FindEvent(GetBus(), LuaFindEventId(L, 1));
     lua_pushboolean(L, event && IsEngineSourceActive(*event) ? 1 : 0);
     return 1;
 }
 
-// Lua value -> GwpValue for every argument (strings point into the Lua stack). 16 without an allocation.
+// Lua value -> GwpValue for every argument (strings point into the Lua stack, array items into `arena`).
+// 16 arguments without an allocation.
 struct ArgBuffer
 {
     GwpValue inline_values[16];
     xr_vector<GwpValue> heap;
     GwpValue* data = inline_values;
+    ValueArena arena; // items of the arrays: Lua tables with the keys 1..n
 
     void Fill(lua_State* L, int first, int count)
     {
+        arena.Clear();
         if (count > static_cast<int>(std::size(inline_values)))
         {
             heap.resize(count);
             data = heap.data();
         }
         for (int i = 0; i < count; ++i)
-            data[i] = ToValue(L, first + i);
+            data[i] = ToValue(L, first + i, &arena);
+    }
+
+    // Before native handlers: the strings inside arrays point into the Lua tables, and a handler that calls Lua
+    // (script_call) may change such a table and free them. Deep copies of the arrays (into the same arena: the
+    // items it holds stay where they are) own their strings; the strings of the arguments themselves stay on the
+    // Lua stack of the emit and need no copy.
+    void OwnArrays(int count)
+    {
+        for (int i = 0; i < count; ++i)
+        {
+            if (data[i].type == GWP_T_ARRAY)
+                data[i] = arena.Copy(data[i]);
+        }
     }
 };
 
-// event_bus.subscribe(name, handler [, throttle_ms]): handler is a function or an object with a method `name`.
-// Subscribing the same handler again only updates throttle_ms.
+// Options of event_bus.subscribe: the third argument, a number (throttle_ms) or a table.
+struct LuaSubscribeOptions
+{
+    u32 throttle_ms = 0;
+    bool object_filter = false;
+    u16 object = 0;
+    bool once = false;
+};
+
+u32 LuaThrottle(lua_State* L, int index)
+{
+    return lua_type(L, index) == LUA_TNUMBER && lua_tonumber(L, index) > 0 ?
+        static_cast<u32>(lua_tonumber(L, index)) :
+        0;
+}
+
+// false (logged) for a bad object: not a game object, a server object or an id, or not online now.
+bool ReadLuaSubscribeOptions(lua_State* L, int index, const Event& event, LuaSubscribeOptions& options)
+{
+    if (lua_type(L, index) != LUA_TTABLE)
+    {
+        options.throttle_ms = LuaThrottle(L, index);
+        return true;
+    }
+    lua_getfield(L, index, "throttle_ms");
+    options.throttle_ms = LuaThrottle(L, -1);
+    lua_pop(L, 1);
+    lua_getfield(L, index, "once");
+    options.once = lua_toboolean(L, -1) != 0;
+    lua_pop(L, 1);
+
+    lua_getfield(L, index, "object");
+    bool ok = true;
+    if (!lua_isnil(L, -1))
+    {
+        // A game object, a server object or an id: the same subject check as GWP_SUBSCRIBE_OBJECT
+        const GwpValue value = ToValue(L, -1);
+        lua_Number id = -1;
+        if (value.type == GWP_T_OBJECT || value.type == GWP_T_SERVER_OBJECT)
+            id = value.u.id;
+        else if (value.type == GWP_T_NUMBER)
+            id = value.u.n;
+        // An object that is not online now: nothing would end the subscription (the end is its net_Destroy), and
+        // its id may be given to another object
+        ok = id >= 0 && id < GWP_INVALID_OBJECT_ID && std::floor(id) == id && g_pGameLevel &&
+            Level().Objects.net_Find(static_cast<u16>(id));
+        if (ok)
+        {
+            options.object_filter = true;
+            options.object = static_cast<u16>(id);
+        }
+        else
+            Msg("! [events] event_bus.subscribe('%s'): `object` is not an online object (a game object, a server "
+                "object or an id), the subscription is not made", event.name.c_str());
+    }
+    lua_pop(L, 1);
+    return ok;
+}
+
+void ApplyLuaSubscribeOptions(Bus& bus, Subscriber& subscriber, const LuaSubscribeOptions& options)
+{
+    if (subscriber.object_filter && bus.object_subscriptions)
+        --bus.object_subscriptions;
+    subscriber.object_filter = options.object_filter;
+    subscriber.object = options.object;
+    if (subscriber.object_filter)
+        ++bus.object_subscriptions;
+    subscriber.throttle_ms = options.throttle_ms;
+    subscriber.once = options.once;
+    subscriber.called = false;
+}
+
+// event_bus.subscribe(name, handler [, throttle_ms | {throttle_ms = N, object = <object or id>, once = true}]):
+// handler is a function or an object with a method `name`. Returns the id of the subscription (a number), nil when
+// nothing was subscribed. Subscribing the same handler to the same event with the same `object` (or again without
+// one) keeps one subscription: its options are replaced and the same id comes back (scripts call
+// RegisterScriptCallback again on every load). Another `object`, or none instead of one, is another subscription
+// with its own id: one handler may follow several objects, and a plain re-registration does not end a {once} one.
 int LuaSubscribe(lua_State* L)
 {
     Bus& bus = GetBus();
-    Event* event = FindEvent(bus, LuaEventId(L, 1));
+    const GwpEventId event_id = LuaEventId(L, 1);
+    Event* event = FindEvent(bus, event_id);
     if (!event || bus.lua == nullptr)
         return 0;
 
@@ -1166,59 +1562,136 @@ int LuaSubscribe(lua_State* L)
     }
     WarnUndeclared(*event, "Lua", "subscription");
 
-    u32 throttle_ms = 0;
-    if (lua_type(L, 3) == LUA_TNUMBER && lua_tonumber(L, 3) > 0)
-        throttle_ms = static_cast<u32>(lua_tonumber(L, 3));
+    LuaSubscribeOptions options;
+    if (!ReadLuaSubscribeOptions(L, 3, *event, options))
+        return 0;
 
     for (Subscriber& subscriber : event->subscribers)
     {
-        if (!subscriber.alive || subscriber.kind == ESubscriberKind::Native)
+        if (!subscriber.alive || subscriber.kind == ESubscriberKind::Native ||
+            subscriber.object_filter != options.object_filter ||
+            (options.object_filter && subscriber.object != options.object))
             continue;
         lua_rawgeti(L, LUA_REGISTRYINDEX, subscriber.lua_ref);
         const bool same = lua_rawequal(L, -1, 2) != 0;
         lua_pop(L, 1);
         if (same)
         {
-            subscriber.throttle_ms = throttle_ms;
-            subscriber.called = false;
-            return 0;
+            ApplyLuaSubscribeOptions(bus, subscriber, options);
+            lua_pushnumber(L, static_cast<lua_Number>(subscriber.id));
+            return 1;
         }
     }
 
     Subscriber subscriber;
     subscriber.id = bus.next_subscription++;
     subscriber.kind = type == LUA_TFUNCTION ? ESubscriberKind::LuaFunction : ESubscriberKind::LuaObject;
-    subscriber.throttle_ms = throttle_ms;
+    ApplyLuaSubscribeOptions(bus, subscriber, options);
     lua_pushvalue(L, 2);
     subscriber.lua_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    const GwpSubscriptionId id = subscriber.id;
     event->subscribers.push_back(std::move(subscriber));
     ++event->lua_count;
-    return 0;
+    bus.lua_subscriptions.emplace(id, event_id);
+    lua_pushnumber(L, static_cast<lua_Number>(id));
+    return 1;
 }
 
-// event_bus.unsubscribe(name, handler)
+// event_bus.unsubscribe(id) or event_bus.unsubscribe(name, handler): true when a subscription was removed.
 int LuaUnsubscribe(lua_State* L)
 {
     Bus& bus = GetBus();
-    Event* event = FindEvent(bus, LuaEventId(L, 1));
-    if (!event || lua_isnoneornil(L, 2))
-        return 0;
-    for (size_t i = 0; i < event->subscribers.size(); ++i)
+    if (lua_type(L, 1) == LUA_TNUMBER)
     {
-        const Subscriber& subscriber = event->subscribers[i];
-        if (!subscriber.alive || subscriber.kind == ESubscriberKind::Native)
-            continue;
-        lua_rawgeti(L, LUA_REGISTRYINDEX, subscriber.lua_ref);
-        const bool same = lua_rawequal(L, -1, 2) != 0;
-        lua_pop(L, 1);
-        if (same)
+        const auto subscription = static_cast<GwpSubscriptionId>(lua_tonumber(L, 1));
+        const auto it = bus.lua_subscriptions.find(subscription);
+        Event* event = it != bus.lua_subscriptions.end() ? FindEvent(bus, it->second) : nullptr;
+        if (event)
         {
-            luaL_unref(L, LUA_REGISTRYINDEX, subscriber.lua_ref);
-            RemoveAt(bus, *event, i);
-            return 0;
+            for (size_t i = 0; i < event->subscribers.size(); ++i)
+            {
+                const Subscriber& subscriber = event->subscribers[i];
+                if (subscriber.alive && subscriber.kind != ESubscriberKind::Native && subscriber.id == subscription)
+                {
+                    RemoveAt(bus, *event, i); // drops the registry reference of the handler too
+                    lua_pushboolean(L, 1);
+                    return 1;
+                }
+            }
+        }
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+
+    // By name: every subscription of the handler to the event goes, whatever its {object = ...} (one per object)
+    Event* event = FindEvent(bus, LuaFindEventId(L, 1));
+    bool removed = false;
+    if (event && !lua_isnoneornil(L, 2))
+    {
+        // Backwards: RemoveAt erases at once outside a dispatch, the indices below stay valid
+        for (size_t i = event->subscribers.size(); i-- > 0;)
+        {
+            const Subscriber& subscriber = event->subscribers[i];
+            if (!subscriber.alive || subscriber.kind == ESubscriberKind::Native)
+                continue;
+            lua_rawgeti(L, LUA_REGISTRYINDEX, subscriber.lua_ref);
+            const bool same = lua_rawequal(L, -1, 2) != 0;
+            lua_pop(L, 1);
+            if (same)
+            {
+                RemoveAt(bus, *event, i); // drops the registry reference of the handler too
+                removed = true;
+            }
         }
     }
-    return 0;
+    lua_pushboolean(L, removed ? 1 : 0);
+    return 1;
+}
+
+// event_bus.has_subscribers(name): true when the event has a Lua or a native subscriber now. The filters of the
+// subscriptions ({object = ...}, throttle) are not looked at: an emit may still reach nobody.
+int LuaHasSubscribers(lua_State* L)
+{
+    const Event* event = FindEvent(GetBus(), LuaFindEventId(L, 1));
+    lua_pushboolean(L, event && (event->lua_count || event->native_count) ? 1 : 0);
+    return 1;
+}
+
+// event_bus.list(): every event the bus knows, in the order of their ids - an array of tables
+// {name, declared, schema (nil without one), lua_subscribers, native_subscribers (batch ones included),
+// batch_subscribers, builtin, engine (the engine sends it now), emits}. The data of the console command event_list.
+int LuaList(lua_State* L)
+{
+    const Bus& bus = GetBus();
+    lua_createtable(L, static_cast<int>(bus.events.size()), 0);
+    for (size_t i = 0; i < bus.events.size(); ++i)
+    {
+        const Event& event = *bus.events[i];
+        lua_createtable(L, 0, 9);
+        lua_pushlstring(L, event.name.c_str(), event.name.size());
+        lua_setfield(L, -2, "name");
+        lua_pushboolean(L, event.declared ? 1 : 0);
+        lua_setfield(L, -2, "declared");
+        if (event.has_schema)
+        {
+            lua_pushlstring(L, event.schema.c_str(), event.schema.size());
+            lua_setfield(L, -2, "schema");
+        }
+        lua_pushnumber(L, static_cast<lua_Number>(event.lua_count));
+        lua_setfield(L, -2, "lua_subscribers");
+        lua_pushnumber(L, static_cast<lua_Number>(event.native_count));
+        lua_setfield(L, -2, "native_subscribers");
+        lua_pushnumber(L, static_cast<lua_Number>(event.batch_count));
+        lua_setfield(L, -2, "batch_subscribers");
+        lua_pushboolean(L, event.builtin ? 1 : 0);
+        lua_setfield(L, -2, "builtin");
+        lua_pushboolean(L, IsEngineSourceActive(event) ? 1 : 0);
+        lua_setfield(L, -2, "engine");
+        lua_pushnumber(L, static_cast<lua_Number>(event.emit_count));
+        lua_setfield(L, -2, "emits");
+        lua_rawseti(L, -2, static_cast<int>(i + 1));
+    }
+    return 1;
 }
 
 // event_bus.emit(name, ...): synchronous dispatch to Lua and native subscribers.
@@ -1286,8 +1759,11 @@ int LuaEmit(lua_State* L)
 
     if (event->native_count)
     {
-        if (!converted)
+        // Converted again after Lua handlers: they may have changed a table, and the strings of array items point
+        // into the strings the table holds
+        if (!converted || event->lua_count)
             values.Fill(L, 2, native_argc);
+        values.OwnArrays(native_argc);
 
         // Flags table of the script event -> GwpEvent::result, written back after the native handlers.
         GwpValue result = Nil();
@@ -1302,7 +1778,7 @@ int LuaEmit(lua_State* L)
         }
 
         const GwpValue before = result;
-        DispatchNative(bus, *event, id, values.data, static_cast<u32>(native_argc), result_ptr);
+        DispatchNative(bus, *event, id, 0, values.data, static_cast<u32>(native_argc), result_ptr);
 
         // Written back only when a plugin changed it. All script result fields are bool flags: keep them bool.
         if (result_ptr && memcmp(&before, &result, sizeof(result)) != 0)
@@ -1329,7 +1805,11 @@ bool CheckMainThread(const GwpPlugin* self, pcstr function)
 {
     if (IsMainThread())
         return true;
-    Msg("! [plugin:%s] %s called outside the main thread, ignored", PluginAddonId(self), function);
+    // Functions without self (event_id) have no plugin to name
+    if (self)
+        Msg("! [plugin:%s] %s called outside the main thread, ignored", PluginAddonId(self), function);
+    else
+        Msg("! [events] %s called outside the main thread, ignored", function);
     return false;
 }
 
@@ -1344,13 +1824,25 @@ GwpSubscriptionId SubscribeNative(const GwpPlugin* self, const char* name, const
     GwpEventHandler handler, void* user)
 {
     const bool batch = (options.flags & GWP_SUBSCRIBE_BATCH) != 0;
-    if (!self || (batch ? !options.batch_handler : !handler))
+    if (!self)
+    {
+        Msg("! [events] event_subscribe '%s': self is NULL, the subscription is not made", name ? name : "");
         return GWP_INVALID_SUBSCRIPTION_ID;
+    }
+    if (batch ? !options.batch_handler : !handler)
+    {
+        Msg("! [plugin:%s] event_subscribe '%s': no %s, the subscription is not made", PluginAddonId(self),
+            name ? name : "", batch ? "batch_handler (GWP_SUBSCRIBE_BATCH)" : "handler");
+        return GWP_INVALID_SUBSCRIPTION_ID;
+    }
     Bus& bus = GetBus();
     const GwpEventId id = InternIn(bus, name);
     Event* event = FindEvent(bus, id);
     if (!event)
+    {
+        Msg("! [plugin:%s] event_subscribe: invalid event name '%s'", PluginAddonId(self), name ? name : "(null)");
         return GWP_INVALID_SUBSCRIPTION_ID;
+    }
 
     // A subscription to one object needs the object now: its end (net_Destroy) is what removes the subscription,
     // and an id that is not online may be given to another object before anything ends it.
@@ -1400,13 +1892,34 @@ GwpSubscriptionId GWP_CALL ApiEventSubscribeEx(const GwpPlugin* self, const char
 {
     if (!CheckMainThread(self, "event_subscribe_ex"))
         return GWP_INVALID_SUBSCRIPTION_ID;
-    // Copy only what the plugin knows: a plugin built with an older header has a shorter struct.
+    // Copy only what the plugin knows: a plugin built with a later header has a longer struct (its new fields are
+    // not read by this engine). Every field up to `object` is required: the first version of the struct had them.
+    constexpr size_t kMinOptionsSize = offsetof(GwpSubscribeOptions, object) + sizeof(GwpObjectId);
+    constexpr uint32_t kKnownFlags = GWP_SUBSCRIBE_BATCH | GWP_SUBSCRIBE_OBJECT;
     GwpSubscribeOptions copy{};
     if (options)
     {
-        if (options->size < sizeof(uint32_t))
+        pcstr error = nullptr;
+        if (options->size < kMinOptionsSize)
+            error = "options->size is below the size of the first version of GwpSubscribeOptions";
+        else
+        {
+            memcpy(&copy, options, std::min<size_t>(options->size, sizeof(copy)));
+            if (copy.flags & ~kKnownFlags)
+                error = "unknown flag bits (GWP_SUBSCRIBE_* of a later version?)";
+            else if (copy.reserved != 0)
+                error = "options->reserved is not 0";
+            // Only when options->size covers the whole field: a struct of an earlier version ends before it
+            else if (options->size >= offsetof(GwpSubscribeOptions, reserved2) + sizeof(copy.reserved2) &&
+                copy.reserved2 != 0)
+                error = "options->reserved2 is not 0";
+        }
+        if (error)
+        {
+            Msg("! [plugin:%s] event_subscribe_ex '%s': %s, the subscription is not made", PluginAddonId(self),
+                name ? name : "", error);
             return GWP_INVALID_SUBSCRIPTION_ID;
-        memcpy(&copy, options, std::min<size_t>(options->size, sizeof(copy)));
+        }
     }
     return SubscribeNative(self, name, copy, handler, user);
 }
@@ -1433,10 +1946,18 @@ void GWP_CALL ApiEventUnsubscribe(const GwpPlugin* self, GwpSubscriptionId subsc
     }
 }
 
+constexpr uint32_t kKnownDeclareFlags = GWP_EVENT_HAS_RESULT;
+
 GwpResult GWP_CALL ApiEventDeclare(const GwpPlugin* self, const char* name, uint32_t flags)
 {
     if (!CheckMainThread(self, "event_declare"))
         return GWP_ERROR_NOT_MAIN_THREAD;
+    if (flags & ~kKnownDeclareFlags)
+    {
+        Msg("! [plugin:%s] event_declare '%s': unknown flag bits 0x%x", PluginAddonId(self), name ? name : "",
+            flags & ~kKnownDeclareFlags);
+        return GWP_ERROR_INVALID_ARGUMENT;
+    }
     Event* event = FindEvent(GetBus(), InternIn(GetBus(), name));
     if (!event)
         return GWP_ERROR_INVALID_ARGUMENT;
@@ -1449,6 +1970,12 @@ GwpResult GWP_CALL ApiEventDeclareEx(const GwpPlugin* self, const char* name, co
 {
     if (!CheckMainThread(self, "event_declare_ex"))
         return GWP_ERROR_NOT_MAIN_THREAD;
+    if (flags & ~kKnownDeclareFlags)
+    {
+        Msg("! [plugin:%s] event_declare_ex '%s': unknown flag bits 0x%x", PluginAddonId(self), name ? name : "",
+            flags & ~kKnownDeclareFlags);
+        return GWP_ERROR_INVALID_ARGUMENT;
+    }
     Event* event = FindEvent(GetBus(), InternIn(GetBus(), name));
     if (!event)
         return GWP_ERROR_INVALID_ARGUMENT;
@@ -1477,14 +2004,54 @@ GwpResult GWP_CALL ApiEventEmit(const GwpPlugin* self, GwpEventId id, uint32_t a
 {
     if (!CheckMainThread(self, "event_emit"))
         return GWP_ERROR_NOT_MAIN_THREAD;
-    Event* event = FindEvent(GetBus(), id);
-    if (!event || (argc > 0 && !argv))
+    if (id == GWP_INVALID_EVENT_ID)
         return GWP_ERROR_INVALID_ARGUMENT;
+    Event* event = FindEvent(GetBus(), id);
+    if (!event)
+        return GWP_ERROR_NOT_FOUND; // not an id that event_id gave in this run
+    // reserved != 0, a type of a later version, a broken string or array: refused before anybody sees it
+    if (CheckValues(argv, argc) != GWP_OK || (result && CheckValue(*result) != GWP_OK))
+    {
+        Msg("! [plugin:%s] event_emit '%s': invalid argument or result value (reserved not 0, unknown type, a string "
+            "or an array without data, a string over 1 MiB, an array too long or too deep, more than 65536 values "
+            "or 16 MiB of strings in one value)", PluginAddonId(self), event->name.c_str());
+        return GWP_ERROR_INVALID_ARGUMENT;
+    }
     string128 who;
     xr_sprintf(who, "plugin:%s", PluginAddonId(self));
     WarnUndeclared(*event, who, "emit");
-    EmitFrom(id, argv, argc, result, who, false);
-    return GWP_OK;
+    if (event->subscribers.empty() || !argc)
+        return EmitFrom(id, argv, argc, result, who, false);
+
+    // Deep copies of the strings, bytes and arrays of the plugin: a handler may free or change what they point to
+    // before the next handler reads them (e.g. the plugin emits the result of its script_call, and a subscriber
+    // calls script_call of the same plugin, which replaces that result). A string with ptr == NULL has nothing to
+    // copy and stays such (nil in Lua); the other values are copied as they are.
+    ValueArena arena;
+    GwpValue inline_args[16];
+    xr_vector<GwpValue> heap_args;
+    GwpValue* args = inline_args;
+    if (argc > std::size(inline_args))
+    {
+        heap_args.resize(argc);
+        args = heap_args.data();
+    }
+    for (u32 i = 0; i < argc; ++i)
+    {
+        const GwpValue& arg = argv[i];
+        const bool has_data =
+            arg.type == GWP_T_ARRAY || ((arg.type == GWP_T_STRING || arg.type == GWP_T_BYTES) && arg.u.s.ptr);
+        args[i] = has_data ? arena.Copy(arg) : arg;
+    }
+    return EmitFrom(id, args, argc, result, who, false);
+}
+
+int GWP_CALL ApiEventHasSubscribers(GwpEventId id)
+{
+    if (!g_bus || !IsMainThread())
+        return 0;
+    const Event* event = FindEvent(*g_bus, id);
+    return event && (event->native_count || event->lua_count) ? 1 : 0;
 }
 
 } // namespace
@@ -1510,8 +2077,13 @@ void CEventBusScript::script_register(lua_State* L)
         { "unsubscribe", &LuaUnsubscribe },
         { "emit", &LuaEmit },
         { "schema", &LuaSchema },
-        { "set_lua_adapter", &LuaSetLuaAdapter },
-        { "is_engine_source", &LuaIsEngineSource },
+        { "has_subscribers", &LuaHasSubscribers },
+        { "list", &LuaList },
+    };
+    // Used by axr_main.script only, not an API for addons: kept out of event_bus, in the global table _gw_internal
+    const luaL_Reg internal_functions[] = {
+        { "event_bus_set_lua_adapter", &LuaSetLuaAdapter },
+        { "event_bus_is_engine_source", &LuaIsEngineSource },
     };
     lua_newtable(L); // event_bus
     lua_newtable(L); // name -> id cache, shared by all functions as upvalue 1
@@ -1521,7 +2093,21 @@ void CEventBusScript::script_register(lua_State* L)
         lua_pushcclosure(L, function.func, 1);
         lua_setfield(L, -3, function.name);
     }
-    lua_pop(L, 1);
+    lua_getglobal(L, "_gw_internal"); // shared with addon_storage.cpp, gw_condlist_native.cpp: the first one creates it
+    if (!lua_istable(L, -1))
+    {
+        lua_pop(L, 1);
+        lua_newtable(L);
+        lua_pushvalue(L, -1);
+        lua_setglobal(L, "_gw_internal");
+    }
+    for (const luaL_Reg& function : internal_functions)
+    {
+        lua_pushvalue(L, -2);
+        lua_pushcclosure(L, function.func, 1);
+        lua_setfield(L, -2, function.name);
+    }
+    lua_pop(L, 2); // _gw_internal, the cache
     lua_setglobal(L, "event_bus");
 }
 
@@ -1558,17 +2144,13 @@ void DeliverBatch(Bus& bus, Event& event, GwpEventId id, size_t index, u32 now, 
     call.event_name = event.name.c_str();
     const GwpPlugin* const plugin = subscriber.plugin;
 
-    for (GwpValue& value : queue.values)
-    {
-        if (value.type == GWP_T_STRING)
-        {
-            value.u.s.ptr = queue.text.data() + value.reserved;
-            value.reserved = 0;
-        }
-    }
+    // The values already point into queue.arena (deep copies made by Enqueue): nothing to fix up here
     xr_vector<GwpEvent> events(queue.first.size());
     for (size_t i = 0; i < events.size(); ++i)
-        events[i] = GwpEvent{ id, event.name.c_str(), queue.argc[i], queue.values.data() + queue.first[i], nullptr };
+    {
+        events[i] = MakeEvent(id, event, queue.flags[i], queue.values.data() + queue.first[i], queue.argc[i],
+            nullptr);
+    }
     call.events = events.data();
     call.count = static_cast<u32>(events.size());
 
@@ -1647,7 +2229,7 @@ namespace
 {
 // source: "engine" or "plugin:<id>". The Lua adapter is applied to engine emits only: a plugin emitting an event
 // passes what it has, there is nothing to translate.
-void EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, pcstr source, bool from_engine);
+GwpResult EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, pcstr source, bool from_engine);
 } // namespace
 
 void Emit(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result)
@@ -1657,7 +2239,7 @@ void Emit(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result)
 
 namespace
 {
-void EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, pcstr source, bool from_engine)
+GwpResult EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, pcstr source, bool from_engine)
 {
     ZoneScopedN("events/emit"); // Tracy: the whole emit (schema check, log, native and Lua dispatch)
     if (!IsMainThread())
@@ -1667,14 +2249,14 @@ void EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, p
         static std::atomic_flag reported = ATOMIC_FLAG_INIT;
         if (!reported.test_and_set(std::memory_order_relaxed))
             Msg("! [events] event %u emitted outside the game logic thread, ignored (reported once)", id);
-        return;
+        return GWP_ERROR_NOT_MAIN_THREAD;
     }
     if (!g_bus)
-        return;
+        return GWP_ERROR_NOT_FOUND;
     Bus& bus = *g_bus;
     Event* event = FindEvent(bus, id);
     if (!event)
-        return;
+        return GWP_ERROR_NOT_FOUND;
     ZoneTextF("%s%s", event->name.c_str(), from_engine ? " (engine)" : "");
     ++event->emit_count;
     ++(from_engine ? event->engine_emits : event->plugin_emits);
@@ -1702,14 +2284,14 @@ void EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, p
             ++event->engine_log_skipped;
     }
     if (event->subscribers.empty())
-        return;
+        return GWP_OK;
 
     DispatchScope scope(bus, *event, nullptr);
     if (scope.TooDeep())
     {
         Msg("! [events] event '%s': nested emits deeper than %u, dispatch skipped", event->name.c_str(),
             kMaxDispatchDepth);
-        return;
+        return GWP_ERROR_INVALID_STATE;
     }
 
     // Same order as a Lua emit: Lua subscribers first, then plugins.
@@ -1718,7 +2300,8 @@ void EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, p
         DispatchLuaFromNative(bus, L, *event, argv, argc, result, from_engine);
 
     if (event->native_count)
-        DispatchNative(bus, *event, id, argv, argc, result);
+        DispatchNative(bus, *event, id, from_engine ? GWP_EVENT_FLAG_ENGINE : 0u, argv, argc, result);
+    return GWP_OK;
 }
 } // namespace
 
@@ -1732,6 +2315,8 @@ void DispatchLuaFromNative(Bus& bus, lua_State* L, Event& event, const GwpValue*
     LuaArgs args;
     args.argv = argv;
     args.argc = argc;
+    args.subject_argv = argv; // {object = ...} subscribers look at the native arguments, not at the adapter's
+    args.subject_argc = argc;
     if (result)
     {
         // Lua handlers get the result as a trailing {ret_value = ...} table, like the script events do.
@@ -1740,8 +2325,8 @@ void DispatchLuaFromNative(Bus& bus, lua_State* L, Event& event, const GwpValue*
         lua_setfield(L, -2, field);
         args.flags_table = lua_gettop(L);
     }
-    // Lua adapter (event_bus.set_lua_adapter): Lua subscribers get what it returns, e.g. the actor binder that the
-    // engine does not know. Called once per emit; on an error the native arguments are used.
+    // Lua adapter (_gw_internal.event_bus_set_lua_adapter): Lua subscribers get what it returns, e.g. the actor
+    // binder that the engine does not know. Called once per emit; on an error the native arguments are used.
     if (use_adapter && event.lua_adapter_ref != LUA_NOREF && lua_checkstack(L, static_cast<int>(argc) + 4))
     {
         const int before = lua_gettop(L);
@@ -1858,11 +2443,404 @@ void FillEngineApi(GwpEngineApi& api)
     api.event_subscribe_ex = &ApiEventSubscribeEx;
     api.event_declare_ex = &ApiEventDeclareEx;
     api.event_schema = &ApiEventSchema;
+    api.event_has_subscribers = &ApiEventHasSubscribers;
 }
 
 void PushLuaValue(lua_State* L, const GwpValue& value) { PushValue(L, value); }
 lua_State* ActiveLuaThread() { return g_bus ? ActiveLua(*g_bus) : nullptr; }
 GwpValue LuaToValue(lua_State* L, int index) { return ToValue(L, index); }
+GwpValue LuaToValue(lua_State* L, int index, ValueArena* arena) { return ToValue(L, index, arena); }
+
+// ---------------------------------------------------------------------------------------------
+// Values: arena, owned copies, checks, save format (see addon_event_bus.h)
+// ---------------------------------------------------------------------------------------------
+
+namespace
+{
+constexpr size_t kArenaValueBlock = 64;  // GwpValue items per block
+constexpr size_t kArenaByteBlock = 1024; // bytes per block
+
+// budget: the value budget of the whole value so far. The items of an array are counted before they are checked,
+// so a shared row repeated through every level stops the check after about kMaxValueNodes steps.
+GwpResult CheckValueDepth(const GwpValue& value, u32 depth, ValueBudget& budget)
+{
+    if (value.reserved != 0 || value.type > GWP_T_ARRAY)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    switch (value.type)
+    {
+    case GWP_T_STRING:
+    case GWP_T_BYTES:
+        // The length limit also keeps len + 1 (the zero of a copy) inside u32
+        if ((value.u.s.len && !value.u.s.ptr) || value.u.s.len > kMaxValueBytes)
+            return GWP_ERROR_INVALID_ARGUMENT;
+        budget.bytes += value.u.s.len; // every reference to a shared string: each one is copied
+        if (budget.Over())
+            return GWP_ERROR_INVALID_ARGUMENT;
+        break;
+    case GWP_T_ARRAY:
+        if (depth >= kMaxArrayDepth || value.u.a.count > kMaxArrayItems || (value.u.a.count && !value.u.a.items))
+            return GWP_ERROR_INVALID_ARGUMENT;
+        budget.nodes += value.u.a.count;
+        if (budget.Over())
+            return GWP_ERROR_INVALID_ARGUMENT;
+        for (u32 i = 0; i < value.u.a.count; ++i)
+        {
+            if (CheckValueDepth(value.u.a.items[i], depth + 1, budget) != GWP_OK)
+                return GWP_ERROR_INVALID_ARGUMENT;
+        }
+        break;
+    default: break;
+    }
+    return GWP_OK;
+}
+
+bool ValuesEqualDepth(const GwpValue& a, const GwpValue& b, u32 depth)
+{
+    if (a.type != b.type)
+        return false;
+    switch (a.type)
+    {
+    case GWP_T_NIL: return true;
+    case GWP_T_BOOL: return (a.u.b != 0) == (b.u.b != 0);
+    case GWP_T_INT: return a.u.i == b.u.i;
+    case GWP_T_NUMBER: return a.u.n == b.u.n;
+    case GWP_T_STRING:
+    case GWP_T_BYTES:
+        // ptr == NULL (len 0) equals "": a copy (ValueArena::Copy) makes it an empty string
+        return a.u.s.len == b.u.s.len && (a.u.s.len == 0 || memcmp(a.u.s.ptr, b.u.s.ptr, a.u.s.len) == 0);
+    case GWP_T_VEC3: return a.u.v[0] == b.u.v[0] && a.u.v[1] == b.u.v[1] && a.u.v[2] == b.u.v[2];
+    case GWP_T_OBJECT:
+    case GWP_T_SERVER_OBJECT: return a.u.id == b.u.id;
+    case GWP_T_ARRAY:
+        if (a.u.a.count != b.u.a.count || depth >= kMaxArrayDepth)
+            return false;
+        for (u32 i = 0; i < a.u.a.count; ++i)
+        {
+            if (!ValuesEqualDepth(a.u.a.items[i], b.u.a.items[i], depth + 1))
+                return false;
+        }
+        return true;
+    default: return false; // LUA_REF and unknown types: the content is unknown
+    }
+}
+
+void WriteValueDepth(IWriter& stream, const GwpValue& value, u32 depth)
+{
+    switch (value.type)
+    {
+    case GWP_T_BOOL:
+        stream.w_u32(value.type);
+        stream.w_u8(value.u.b ? 1 : 0);
+        return;
+    case GWP_T_INT:
+        stream.w_u32(value.type);
+        stream.w_s64(value.u.i);
+        return;
+    case GWP_T_NUMBER:
+        stream.w_u32(value.type);
+        stream.w(&value.u.n, sizeof(value.u.n));
+        return;
+    case GWP_T_STRING:
+    case GWP_T_BYTES:
+        if (!value.u.s.ptr)
+            break; // nil in Lua: written as NIL
+        stream.w_u32(value.type);
+        stream.w_u32(value.u.s.len);
+        if (value.u.s.len)
+            stream.w(value.u.s.ptr, value.u.s.len);
+        return;
+    case GWP_T_VEC3:
+        stream.w_u32(value.type);
+        stream.w(value.u.v, sizeof(value.u.v));
+        return;
+    case GWP_T_OBJECT:
+    case GWP_T_SERVER_OBJECT:
+        stream.w_u32(value.type);
+        stream.w_u16(value.u.id);
+        return;
+    case GWP_T_ARRAY:
+        if (depth >= kMaxArrayDepth || value.u.a.count > kMaxArrayItems || (value.u.a.count && !value.u.a.items))
+            break; // invalid: written as NIL
+        stream.w_u32(value.type);
+        stream.w_u32(value.u.a.count);
+        for (u32 i = 0; i < value.u.a.count; ++i)
+            WriteValueDepth(stream, value.u.a.items[i], depth + 1);
+        return;
+    default: break;
+    }
+    stream.w_u32(GWP_T_NIL); // NIL, LUA_REF, unknown types
+}
+
+// budget: the value budget of what is read so far, counted as CheckValueDepth does
+bool ReadValueDepth(IReader& stream, ValueArena& arena, GwpValue& out, u32 max_string, u32 depth,
+    ValueBudget& budget)
+{
+    const auto has = [&stream](size_t bytes) { return stream.elapsed() >= static_cast<intptr_t>(bytes); };
+    out = Nil();
+    if (!has(sizeof(u32)))
+        return false;
+    const u32 type = stream.r_u32();
+    switch (type)
+    {
+    case GWP_T_NIL: return true;
+    case GWP_T_BOOL:
+        if (!has(1))
+            return false;
+        out.u.b = stream.r_u8() ? 1 : 0;
+        break;
+    case GWP_T_INT:
+        if (!has(sizeof(s64)))
+            return false;
+        out.u.i = stream.r_s64();
+        break;
+    case GWP_T_NUMBER:
+        if (!has(sizeof(double)))
+            return false;
+        stream.r(&out.u.n, sizeof(out.u.n));
+        break;
+    case GWP_T_STRING:
+    case GWP_T_BYTES:
+    {
+        if (!has(sizeof(u32)))
+            return false;
+        const u32 length = stream.r_u32();
+        if (length > max_string || !has(length))
+            return false;
+        budget.bytes += length;
+        if (budget.Over())
+            return false;
+        char* bytes = arena.AllocBytes(static_cast<size_t>(length) + 1); // + a zero, as ValueArena::Copy does
+        if (length)
+            memcpy(bytes, stream.pointer(), length);
+        bytes[length] = 0;
+        stream.advance(length);
+        out.u.s.ptr = bytes;
+        out.u.s.len = length;
+        break;
+    }
+    case GWP_T_VEC3:
+        if (!has(sizeof(out.u.v)))
+            return false;
+        stream.r(out.u.v, sizeof(out.u.v));
+        break;
+    case GWP_T_OBJECT:
+    case GWP_T_SERVER_OBJECT:
+        if (!has(sizeof(u16)))
+            return false;
+        out.u.id = stream.r_u16();
+        break;
+    case GWP_T_ARRAY:
+    {
+        if (depth >= kMaxArrayDepth || !has(sizeof(u32)))
+            return false;
+        const u32 count = stream.r_u32();
+        if (count > kMaxArrayItems)
+            return false;
+        budget.nodes += count;
+        if (budget.Over())
+            return false;
+        GwpValue* items = arena.AllocValues(count);
+        for (u32 i = 0; i < count; ++i)
+        {
+            if (!ReadValueDepth(stream, arena, items[i], max_string, depth + 1, budget))
+                return false;
+        }
+        out.u.a.items = items;
+        out.u.a.count = count;
+        break;
+    }
+    default: return false; // a type of a later version: its payload size is unknown
+    }
+    out.type = type;
+    return true;
+}
+} // namespace
+
+template <typename T>
+T* ValueArena::Alloc(xr_vector<xr_vector<T>>& blocks, size_t count, size_t block_size)
+{
+    if (!count)
+        return nullptr;
+    if (blocks.empty() || blocks.back().capacity() - blocks.back().size() < count)
+    {
+        // A new block: the old ones keep their buffers (moving a vector keeps its data), so the pointers given
+        // out before stay valid
+        blocks.emplace_back();
+        blocks.back().reserve(std::max(count, block_size));
+    }
+    xr_vector<T>& block = blocks.back();
+    const size_t offset = block.size();
+    block.resize(offset + count); // within the capacity: no reallocation
+    return block.data() + offset;
+}
+
+GwpValue* ValueArena::AllocValues(u32 count)
+{
+    GwpValue* values = Alloc(m_values, count, kArenaValueBlock);
+    for (u32 i = 0; i < count; ++i)
+        values[i] = Nil();
+    return values;
+}
+
+char* ValueArena::AllocBytes(size_t size) { return Alloc(m_bytes, size, kArenaByteBlock); }
+
+void ValueArena::Clear()
+{
+    if (m_values.size() > 1)
+        m_values.resize(1);
+    if (!m_values.empty())
+        m_values.front().clear();
+    if (m_bytes.size() > 1)
+        m_bytes.resize(1);
+    if (!m_bytes.empty())
+        m_bytes.front().clear();
+}
+
+GwpValue ValueArena::Copy(const GwpValue& value)
+{
+    // Counted first: a shared row repeated through every level would make billions of copies
+    if (!ValueWithinBudget(value))
+    {
+        static bool warned = false;
+        WarnValueOverBudget(warned, "its copy is NIL");
+        return Nil();
+    }
+    return CopyDepth(value, 0);
+}
+
+GwpValue ValueArena::CopyDepth(const GwpValue& value, u32 depth)
+{
+    GwpValue copy = value;
+    copy.reserved = 0;
+    switch (value.type)
+    {
+    case GWP_T_NIL:
+    case GWP_T_BOOL:
+    case GWP_T_INT:
+    case GWP_T_NUMBER:
+    case GWP_T_VEC3:
+    case GWP_T_OBJECT:
+    case GWP_T_SERVER_OBJECT: return copy;
+    case GWP_T_STRING:
+    case GWP_T_BYTES:
+    {
+        if (!value.u.s.ptr)
+        {
+            // An empty string, at any depth: the save (WriteValue writes ptr == NULL as NIL), Lua (an empty BYTES)
+            // and the data bus would each see something else otherwise
+            copy.u.s.ptr = "";
+            copy.u.s.len = 0;
+            return copy;
+        }
+        char* bytes = AllocBytes(static_cast<size_t>(value.u.s.len) + 1);
+        if (value.u.s.len)
+            memcpy(bytes, value.u.s.ptr, value.u.s.len);
+        bytes[value.u.s.len] = 0;
+        copy.u.s.ptr = bytes;
+        return copy;
+    }
+    case GWP_T_ARRAY:
+    {
+        const GwpArray& array = value.u.a;
+        if (depth >= kMaxArrayDepth || array.count > kMaxArrayItems || (array.count && !array.items))
+            return Nil();
+        GwpValue* items = AllocValues(array.count);
+        for (u32 i = 0; i < array.count; ++i)
+            items[i] = CopyDepth(array.items[i], depth + 1);
+        copy.u.a.items = items;
+        return copy;
+    }
+    default: return LuaRef(); // LUA_REF has no content; a type of a later version is read as LUA_REF
+    }
+}
+
+OwnedValue::OwnedValue() : m_value(Nil()) {}
+
+OwnedValue::OwnedValue(OwnedValue&& other) noexcept : m_arena(std::move(other.m_arena)), m_value(other.m_value)
+{
+    other.m_value = Nil(); // its parts moved here with the arena
+}
+
+OwnedValue& OwnedValue::operator=(OwnedValue&& other) noexcept
+{
+    if (this != &other)
+    {
+        m_arena = std::move(other.m_arena);
+        m_value = other.m_value;
+        other.m_value = Nil();
+    }
+    return *this;
+}
+
+OwnedValue& OwnedValue::operator=(const OwnedValue& other)
+{
+    if (this != &other)
+        Assign(other.m_value);
+    return *this;
+}
+
+void OwnedValue::Assign(const GwpValue& value)
+{
+    // Into a new arena first: `value` may point into the current one
+    ValueArena arena;
+    const GwpValue copy = arena.Copy(value);
+    m_arena = std::move(arena); // the blocks move with their buffers: `copy` stays valid
+    m_value = copy;
+}
+
+void OwnedValue::Write(IWriter& stream) const { WriteValue(stream, m_value); }
+
+bool OwnedValue::Read(IReader& stream)
+{
+    ValueArena arena;
+    GwpValue value;
+    const bool ok = ReadValue(stream, arena, value);
+    m_arena = std::move(arena);
+    m_value = ok ? value : Nil();
+    return ok;
+}
+
+GwpResult CheckValue(const GwpValue& value)
+{
+    ValueBudget budget; // per value
+    return CheckValueDepth(value, 0, budget);
+}
+
+GwpResult CheckValues(const GwpValue* argv, u32 argc)
+{
+    if (argc && !argv)
+        return GWP_ERROR_INVALID_ARGUMENT;
+    for (u32 i = 0; i < argc; ++i)
+    {
+        if (CheckValue(argv[i]) != GWP_OK) // the node budget is per value
+            return GWP_ERROR_INVALID_ARGUMENT;
+    }
+    return GWP_OK;
+}
+
+bool ValuesEqual(const GwpValue& a, const GwpValue& b) { return ValuesEqualDepth(a, b, 0); }
+
+void WriteValue(IWriter& stream, const GwpValue& value)
+{
+    // ReadValue refuses such a value: written as NIL, the rest of the save stays readable
+    if (!ValueWithinBudget(value))
+    {
+        static bool warned = false;
+        WarnValueOverBudget(warned, "written to the save as NIL");
+        stream.w_u32(GWP_T_NIL);
+        return;
+    }
+    WriteValueDepth(stream, value, 0);
+}
+
+bool ReadValue(IReader& stream, ValueArena& arena, GwpValue& out, u32 max_string)
+{
+    ValueBudget budget; // per value
+    if (ReadValueDepth(stream, arena, out, max_string, 0, budget))
+        return true;
+    out = Nil();
+    return false;
+}
 
 void MarkLevelChange() { g_level_change_mark = true; }
 

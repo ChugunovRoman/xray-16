@@ -46,8 +46,8 @@ namespace gwp
  * All methods are noexcept: logging never throws into plugin code. If formatting fails at runtime
  * (practically only std::bad_alloc), a fixed "failed to format a message" line is written instead.
  *
- * Thread safety: the engine log may be written from the main thread only (see the Plugin API threading rules);
- * debug_enabled() is safe from any thread.
+ * Thread safety: every method may be called from any thread (task_parallel_for pieces included): the text is
+ * formatted into a buffer of the call and passed to the thread-safe api->log.
  */
 class Logger
 {
@@ -79,7 +79,7 @@ public:
             m_api->is_debug_log() != 0;
     }
 
-    // GWP_LOG_DEBUG; not even formatted when debug output is off. @group logger @thread main
+    // GWP_LOG_DEBUG; not even formatted when debug output is off. @group logger @thread any
     template <typename... Args>
     void debug(std::format_string<Args...> fmt, Args&&... args) const noexcept
     {
@@ -87,28 +87,28 @@ public:
             print(GWP_LOG_DEBUG, fmt, std::forward<Args>(args)...);
     }
 
-    // GWP_LOG_INFO. @group logger @thread main
+    // GWP_LOG_INFO. @group logger @thread any
     template <typename... Args>
     void info(std::format_string<Args...> fmt, Args&&... args) const noexcept
     {
         print(GWP_LOG_INFO, fmt, std::forward<Args>(args)...);
     }
 
-    // GWP_LOG_WARNING. @group logger @thread main
+    // GWP_LOG_WARNING. @group logger @thread any
     template <typename... Args>
     void warn(std::format_string<Args...> fmt, Args&&... args) const noexcept
     {
         print(GWP_LOG_WARNING, fmt, std::forward<Args>(args)...);
     }
 
-    // GWP_LOG_ERROR. @group logger @thread main
+    // GWP_LOG_ERROR. @group logger @thread any
     template <typename... Args>
     void error(std::format_string<Args...> fmt, Args&&... args) const noexcept
     {
         print(GWP_LOG_ERROR, fmt, std::forward<Args>(args)...);
     }
 
-    // Level chosen at runtime. @group logger @thread main
+    // Level chosen at runtime. @group logger @thread any
     template <typename... Args>
     void print(GwpLogLevel level, std::format_string<Args...> fmt, Args&&... args) const noexcept
     {
@@ -126,7 +126,7 @@ public:
         }
     }
 
-    // Text as is, without formatting: braces in `text` are not interpreted. @group logger @thread main
+    // Text as is, without formatting: braces in `text` are not interpreted. @group logger @thread any
     void write(GwpLogLevel level, std::string_view text) const noexcept
     {
         if (!valid())
@@ -147,6 +147,121 @@ private:
     const GwpPlugin* m_self = nullptr;
 };
 /*
+ * ValueView: typed read access to one GwpValue (an argument of an event or an export, an item of a GWP_T_ARRAY, the
+ * value of data_get).
+ *
+ *     const gwp::ValueView list = event.value(0);   // a Lua table {1, 2, 3} comes as GWP_T_ARRAY
+ *     for (uint32_t i = 0; i < list.size(); ++i)
+ *         total += list.item(i).number();
+ *
+ * Every getter returns the fallback when the value is missing (nullptr) or has another type, so a reader never
+ * reads a wrong union member. Numbers from Lua always come as GWP_T_NUMBER: number() and integer() accept both
+ * GWP_T_NUMBER and GWP_T_INT. A type this header does not know reads as a missing value.
+ */
+class ValueView
+{
+public:
+    // Wraps a value; nullptr = a missing value (every getter gives its fallback). @group events @thread any
+    explicit ValueView(const GwpValue* value = nullptr) noexcept : m_value(value) {}
+
+    // Type of the value (GwpValueType); GWP_T_NIL when missing. @group events @thread any
+    uint32_t type() const noexcept { return m_value ? m_value->type : GWP_T_NIL; }
+
+    // A number: GWP_T_NUMBER or GWP_T_INT. @group events @thread any
+    double number(double fallback = 0.0) const noexcept
+    {
+        if (m_value && m_value->type == GWP_T_NUMBER)
+            return m_value->u.n;
+        if (m_value && m_value->type == GWP_T_INT)
+            return static_cast<double>(m_value->u.i);
+        return fallback;
+    }
+
+    // An integer: GWP_T_INT or a GWP_T_NUMBER without a fractional part. @group events @thread any
+    int64_t integer(int64_t fallback = 0) const noexcept
+    {
+        if (m_value && m_value->type == GWP_T_INT)
+            return m_value->u.i;
+        if (m_value && m_value->type == GWP_T_NUMBER && std::trunc(m_value->u.n) == m_value->u.n &&
+            std::fabs(m_value->u.n) < 9.0e15)
+            return static_cast<int64_t>(m_value->u.n);
+        return fallback;
+    }
+
+    // A bool (GWP_T_BOOL). @group events @thread any
+    bool boolean(bool fallback = false) const noexcept
+    {
+        return m_value && m_value->type == GWP_T_BOOL ? m_value->u.b != 0 : fallback;
+    }
+
+    // A string (GWP_T_STRING); empty for other types. Valid as long as the value. @group events @thread any
+    std::string_view string() const noexcept
+    {
+        if (m_value && m_value->type == GWP_T_STRING && m_value->u.s.ptr)
+            return std::string_view(m_value->u.s.ptr, m_value->u.s.len);
+        return std::string_view();
+    }
+
+    // Binary data (GWP_T_BYTES); empty for other types. Valid as long as the value. @group events @thread any
+    std::span<const uint8_t> bytes() const noexcept
+    {
+        if (m_value && m_value->type == GWP_T_BYTES && m_value->u.s.ptr)
+            return std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(m_value->u.s.ptr), m_value->u.s.len);
+        return std::span<const uint8_t>();
+    }
+
+    // An online object id (GWP_T_OBJECT); GWP_INVALID_OBJECT_ID for other types. @group events @thread any
+    GwpObjectId object() const noexcept
+    {
+        return m_value && m_value->type == GWP_T_OBJECT ? m_value->u.id : GWP_INVALID_OBJECT_ID;
+    }
+
+    // An ALife server object id (GWP_T_SERVER_OBJECT). @group events @thread any
+    GwpObjectId server_object() const noexcept
+    {
+        return m_value && m_value->type == GWP_T_SERVER_OBJECT ? m_value->u.id : GWP_INVALID_OBJECT_ID;
+    }
+
+    // A 3D vector (GWP_T_VEC3); false and `out` untouched for other types. @group events @thread any
+    bool vec3(float out[3]) const noexcept
+    {
+        if (!m_value || m_value->type != GWP_T_VEC3 || !out)
+            return false;
+        out[0] = m_value->u.v[0];
+        out[1] = m_value->u.v[1];
+        out[2] = m_value->u.v[2];
+        return true;
+    }
+
+    // True for GWP_T_ARRAY. @group events @thread any
+    bool is_array() const noexcept { return m_value && m_value->type == GWP_T_ARRAY; }
+
+    // Items of a GWP_T_ARRAY (a Lua table 1..n); empty for other types. @group events @thread any
+    std::span<const GwpValue> array() const noexcept
+    {
+        if (is_array() && m_value->u.a.items)
+            return std::span<const GwpValue>(m_value->u.a.items, m_value->u.a.count);
+        return std::span<const GwpValue>();
+    }
+
+    // Number of items of a GWP_T_ARRAY; 0 for other types. @group events @thread any
+    uint32_t size() const noexcept { return static_cast<uint32_t>(array().size()); }
+
+    // Item of a GWP_T_ARRAY (0-based: item(0) is t[1] in Lua); missing when out of range. @group events @thread any
+    ValueView item(uint32_t index) const noexcept
+    {
+        const std::span<const GwpValue> items = array();
+        return ValueView(index < items.size() ? &items[index] : nullptr);
+    }
+
+    // The wrapped value (nullptr when missing). @group events @thread any
+    const GwpValue* raw() const noexcept { return m_value; }
+
+private:
+    const GwpValue* m_value = nullptr;
+};
+
+/*
  * EventView: typed read access to the arguments of an event inside a GwpEventHandler.
  *
  *     void GWP_CALL on_death(void* user, const GwpEvent* raw)
@@ -157,8 +272,8 @@ private:
  *     }
  *
  * Every getter returns the fallback when the index is out of range or the argument has another type,
- * so a handler never reads a wrong union member. Numbers from Lua always come as GWP_T_NUMBER:
- * number() and integer() accept both GWP_T_NUMBER and GWP_T_INT.
+ * so a handler never reads a wrong union member (the getters are those of ValueView, by index).
+ * Numbers from Lua always come as GWP_T_NUMBER: number() and integer() accept both GWP_T_NUMBER and GWP_T_INT.
  */
 class EventView
 {
@@ -166,80 +281,67 @@ public:
     // Wraps the event given to a handler; valid only during the handler call. @group events @thread main
     explicit EventView(const GwpEvent* event) noexcept : m_event(event) {}
 
+    // An event record around plain arguments (those of a GwpExportFn, say), to read them with EventView:
+    //     const GwpEvent event = gwp::EventView::args(argc, argv);
+    //     const gwp::EventView view(&event);
+    // @group events @thread any
+    static GwpEvent args(uint32_t argc, const GwpValue* argv) noexcept
+    {
+        GwpEvent event{};
+        event.size = sizeof(GwpEvent);
+        event.id = GWP_INVALID_EVENT_ID;
+        event.name = "";
+        event.argc = argv ? argc : 0;
+        event.argv = argv;
+        return event;
+    }
+
     // Event name, e.g. "actor_on_reinit". @group events @thread main
     std::string_view name() const noexcept { return m_event && m_event->name ? m_event->name : ""; }
 
     // Number of arguments. @group events @thread main
     uint32_t size() const noexcept { return m_event ? m_event->argc : 0; }
 
+    // True when the engine emitted the event (a built-in engine event), false for Lua and plugins.
+    // @group events @thread main
+    bool from_engine() const noexcept { return m_event && (m_event->flags & GWP_EVENT_FLAG_ENGINE) != 0; }
+
+    // The argument as a ValueView (missing when index >= size()). @group events @thread main
+    ValueView value(uint32_t index) const noexcept { return ValueView(at(index)); }
+
     // Type of the argument (GwpValueType); GWP_T_NIL when index >= size(). @group events @thread main
-    uint32_t type(uint32_t index) const noexcept { return at(index) ? at(index)->type : GWP_T_NIL; }
+    uint32_t type(uint32_t index) const noexcept { return value(index).type(); }
 
     // Argument as a number: GWP_T_NUMBER or GWP_T_INT. @group events @thread main
-    double number(uint32_t index, double fallback = 0.0) const noexcept
-    {
-        const GwpValue* v = at(index);
-        if (v && v->type == GWP_T_NUMBER)
-            return v->u.n;
-        if (v && v->type == GWP_T_INT)
-            return static_cast<double>(v->u.i);
-        return fallback;
-    }
+    double number(uint32_t index, double fallback = 0.0) const noexcept { return value(index).number(fallback); }
 
     // Argument as an integer: GWP_T_INT or a GWP_T_NUMBER without a fractional part. @group events @thread main
-    int64_t integer(uint32_t index, int64_t fallback = 0) const noexcept
-    {
-        const GwpValue* v = at(index);
-        if (v && v->type == GWP_T_INT)
-            return v->u.i;
-        if (v && v->type == GWP_T_NUMBER && std::trunc(v->u.n) == v->u.n && std::fabs(v->u.n) < 9.0e15)
-            return static_cast<int64_t>(v->u.n);
-        return fallback;
-    }
+    int64_t integer(uint32_t index, int64_t fallback = 0) const noexcept { return value(index).integer(fallback); }
 
     // Argument as a bool (GWP_T_BOOL). @group events @thread main
-    bool boolean(uint32_t index, bool fallback = false) const noexcept
-    {
-        const GwpValue* v = at(index);
-        return v && v->type == GWP_T_BOOL ? v->u.b != 0 : fallback;
-    }
+    bool boolean(uint32_t index, bool fallback = false) const noexcept { return value(index).boolean(fallback); }
 
     // Argument as a string (GWP_T_STRING); empty for other types. Valid only during the handler call.
     // @group events @thread main
-    std::string_view string(uint32_t index) const noexcept
-    {
-        const GwpValue* v = at(index);
-        if (v && v->type == GWP_T_STRING && v->u.s.ptr)
-            return std::string_view(v->u.s.ptr, v->u.s.len);
-        return std::string_view();
-    }
+    std::string_view string(uint32_t index) const noexcept { return value(index).string(); }
+
+    // Argument as binary data (GWP_T_BYTES); empty for other types. Valid only during the handler call.
+    // @group events @thread main
+    std::span<const uint8_t> bytes(uint32_t index) const noexcept { return value(index).bytes(); }
+
+    // Argument as an array (GWP_T_ARRAY, a Lua table 1..n); empty for other types. Valid only during the handler
+    // call. @group events @thread main
+    std::span<const GwpValue> array(uint32_t index) const noexcept { return value(index).array(); }
 
     // Argument as an online object id (GWP_T_OBJECT); GWP_INVALID_OBJECT_ID for other types.
     // @group events @thread main
-    GwpObjectId object(uint32_t index) const noexcept
-    {
-        const GwpValue* v = at(index);
-        return v && v->type == GWP_T_OBJECT ? v->u.id : GWP_INVALID_OBJECT_ID;
-    }
+    GwpObjectId object(uint32_t index) const noexcept { return value(index).object(); }
 
     // Argument as an ALife server object id (GWP_T_SERVER_OBJECT). @group events @thread main
-    GwpObjectId server_object(uint32_t index) const noexcept
-    {
-        const GwpValue* v = at(index);
-        return v && v->type == GWP_T_SERVER_OBJECT ? v->u.id : GWP_INVALID_OBJECT_ID;
-    }
+    GwpObjectId server_object(uint32_t index) const noexcept { return value(index).server_object(); }
 
     // Argument as a 3D vector (GWP_T_VEC3); false and `out` untouched for other types. @group events @thread main
-    bool vec3(uint32_t index, float out[3]) const noexcept
-    {
-        const GwpValue* v = at(index);
-        if (!v || v->type != GWP_T_VEC3 || !out)
-            return false;
-        out[0] = v->u.v[0];
-        out[1] = v->u.v[1];
-        out[2] = v->u.v[2];
-        return true;
-    }
+    bool vec3(uint32_t index, float out[3]) const noexcept { return value(index).vec3(out); }
 
     // True when the event carries a result (actor_on_before_hit, actor_on_before_death, ...).
     // @group events @thread main
@@ -251,6 +353,13 @@ public:
         return has_result() && m_event->result->type == GWP_T_BOOL ? m_event->result->u.b != 0 : fallback;
     }
 
+    // Current result as a number (GWP_T_NUMBER or GWP_T_INT); fallback for another type or without a result:
+    // the hit power of npc_on_before_hit / monster_on_before_hit. @group events @thread main
+    double result_number(double fallback = 0.0) const noexcept { return result().number(fallback); }
+
+    // Current result as a ValueView (missing without a result). @group events @thread main
+    ValueView result() const noexcept { return ValueView(has_result() ? m_event->result : nullptr); }
+
     // Sets the result, e.g. set_result(false) cancels a hit in actor_on_before_hit. No-op without a result.
     // @group events @thread main
     void set_result(bool value) const noexcept
@@ -259,6 +368,30 @@ public:
             return;
         m_event->result->type = GWP_T_BOOL;
         m_event->result->u.b = value ? 1 : 0;
+    }
+
+    // set_result with a number would silently become a bool: use set_result_number. @group events @thread main
+    template <typename T>
+    void set_result(T value) const = delete;
+
+    // Sets a number result, e.g. the new hit power in npc_on_before_hit / monster_on_before_hit (set_result(false)
+    // cancels the hit there). No-op without a result. @group events @thread main
+    void set_result_number(double value) const noexcept
+    {
+        if (!has_result())
+            return;
+        *m_event->result = GwpValue{};
+        m_event->result->type = GWP_T_NUMBER;
+        m_event->result->u.n = value;
+    }
+
+    // Sets any result value. A string, bytes or an array must outlive the dispatch of the event (a literal, a
+    // member of the plugin): the engine reads it after the handler returns. No-op without a result.
+    // @group events @thread main
+    void set_result_value(const GwpValue& value) const noexcept
+    {
+        if (has_result())
+            *m_event->result = value;
     }
 
 private:
@@ -352,6 +485,27 @@ public:
         v.u.id = id;
         return v;
     }
+
+    // Binary data (a Lua string with these bytes). Not copied: must outlive the call. @group events @thread any
+    static GwpValue bytes(const void* data, uint32_t size) noexcept
+    {
+        GwpValue v = nil();
+        v.type = GWP_T_BYTES;
+        v.u.s.ptr = static_cast<const char*>(data);
+        v.u.s.len = data ? size : 0;
+        return v;
+    }
+
+    // An array (a Lua table 1..n in Lua). The items are not copied: they must outlive the call; an item may be an
+    // array itself (nesting up to 8). @group events @thread any
+    static GwpValue array(std::span<const GwpValue> items) noexcept
+    {
+        GwpValue v = nil();
+        v.type = GWP_T_ARRAY;
+        v.u.a.items = items.data();
+        v.u.a.count = static_cast<uint32_t>(items.size());
+        return v;
+    }
 };
 /*
  * BinaryWriter / BinaryReader: byte buffers for the plugin block of the game save (save_write / save_read) and
@@ -371,7 +525,36 @@ public:
  * Values are stored in the byte order of the machine (little endian on every platform the game runs on).
  * The reader never reads past the end: a failed read sets ok() to false, and every later read fails too.
  * With gwp::Plugin the writer and the reader come to on_save / on_load ready-made.
+ *
+ * Tagged chunks: a layout that another version of the plugin can read. A chunk is u32 tag + u32 length + bytes; a
+ * reader takes the chunks it knows and skips the others whole, so a new version may add chunks (and append fields
+ * at the end of a chunk) without breaking an older reader, and an older block reads in a newer version with the
+ * defaults for the missing chunks:
+ *
+ *     out.chunk(gwp::make_tag("KILL"), [&](gwp::BinaryWriter& w) { w.write<uint32_t>(deaths); });
+ *     out.chunk(gwp::make_tag("LAST"), [&](gwp::BinaryWriter& w) { w.write_string(last_victim); });
+ *
+ *     uint32_t tag = 0;
+ *     gwp::BinaryReader body;
+ *     while (in.next_chunk(tag, body))
+ *     {
+ *         if (tag == gwp::make_tag("KILL"))
+ *             deaths = body.read_or<uint32_t>(0);
+ *         else if (tag == gwp::make_tag("LAST"))
+ *             body.read_string(last_victim);
+ *         // an unknown tag: skipped
+ *     }
  */
+
+// A chunk tag from four characters: make_tag("KILL"). The tags are compared as numbers, no text is stored.
+constexpr uint32_t make_tag(const char (&name)[5]) noexcept
+{
+    return static_cast<uint32_t>(static_cast<uint8_t>(name[0])) |
+        static_cast<uint32_t>(static_cast<uint8_t>(name[1])) << 8 |
+        static_cast<uint32_t>(static_cast<uint8_t>(name[2])) << 16 |
+        static_cast<uint32_t>(static_cast<uint8_t>(name[3])) << 24;
+}
+
 class BinaryWriter
 {
 public:
@@ -399,6 +582,34 @@ public:
         write_bytes(text.data(), text.size());
     }
 
+    // Opens a tagged chunk: writes the tag and a length to be filled by end_chunk(mark). Chunks may nest.
+    // @group save @thread any
+    size_t begin_chunk(uint32_t tag)
+    {
+        write<uint32_t>(tag);
+        const size_t mark = m_buffer.size();
+        write<uint32_t>(0);
+        return mark;
+    }
+
+    // Closes the chunk begin_chunk opened: its length = the bytes written since. @group save @thread any
+    void end_chunk(size_t mark) noexcept
+    {
+        if (mark + sizeof(uint32_t) > m_buffer.size())
+            return;
+        const uint32_t length = static_cast<uint32_t>(m_buffer.size() - mark - sizeof(uint32_t));
+        std::memcpy(m_buffer.data() + mark, &length, sizeof(length));
+    }
+
+    // A whole chunk: fn(BinaryWriter&) writes its body. @group save @thread any
+    template <typename F>
+    void chunk(uint32_t tag, F&& fn)
+    {
+        const size_t mark = begin_chunk(tag);
+        fn(*this);
+        end_chunk(mark);
+    }
+
     // Written bytes, e.g. for save_write(self, version, data(), size()). @group save @thread any
     const void* data() const noexcept { return m_buffer.data(); }
     uint32_t size() const noexcept { return static_cast<uint32_t>(m_buffer.size()); }
@@ -412,9 +623,29 @@ private:
 class BinaryReader
 {
 public:
-    // Reads from a buffer that outlives the reader (e.g. the pointer of save_read). @group save @thread any
+    // Reads from a buffer that outlives the reader (e.g. the pointer of save_read). The empty reader has no data
+    // (a target for next_chunk). @group save @thread any
+    BinaryReader() noexcept = default;
     BinaryReader(const void* data, size_t size) noexcept
         : m_data(static_cast<const uint8_t*>(data)), m_size(data ? size : 0) {}
+
+    // The next tagged chunk (BinaryWriter::chunk): its tag and a reader of its body; the position moves past the
+    // whole chunk, whatever is read from `body`. False at the end of the data; false and ok() = false when the
+    // chunk is cut. @group save @thread any
+    bool next_chunk(uint32_t& tag, BinaryReader& body)
+    {
+        if (!m_ok || remaining() == 0)
+            return false;
+        uint32_t length = 0;
+        if (!read(tag) || !read(length) || length > remaining())
+        {
+            m_ok = false;
+            return false;
+        }
+        body = BinaryReader(m_data + m_pos, length);
+        m_pos += length;
+        return true;
+    }
 
     // Value written by BinaryWriter::write; false (and ok() = false) when the data ends. @group save @thread any
     template <typename T>
@@ -597,6 +828,20 @@ public:
     // The objects of this binder the scheduler updated since the previous call: once per frame, after the
     // scheduler pass, only when there is at least one record. @group plugin @thread main
     virtual void on_update(std::span<const GwpBinderUpdate> updates) { (void)updates; }
+
+    // True: the binder keeps a state per object (on_save / on_load below). Read once, by Plugin::bind. A plugin may
+    // have one such binder per class id and section mask (the engine keeps the state by them).
+    // @group plugin @thread main
+    virtual bool saves_state() const { return false; }
+
+    // The state of the object to keep: while a save is written, and right before on_destroy (offline, unbind).
+    // Nothing written = nothing kept (the kept state is dropped); at most GWP_BINDER_SAVE_MAX_SIZE bytes.
+    // @group plugin @thread main
+    virtual void on_save(GwpObjectId id, BinaryWriter& out) { (void)id; (void)out; }
+
+    // The state on_save wrote for this object: right before on_spawn, in the same game or after a load. Not called
+    // when nothing is kept. Check in.ok() when the layout may differ (BinaryWriter::chunk). @group plugin @thread main
+    virtual void on_load(GwpObjectId id, BinaryReader& in) { (void)id; (void)in; }
 };
 
 /*
@@ -636,9 +881,11 @@ public:
     virtual ~Plugin() = default;
 
     // Called by GWP_DEFINE_PLUGIN from gwp_plugin_init: checks the versions, fills `out`, then runs on_init.
-    // api_min: the minimal engine API this plugin needs (GWP_MAKE_VERSION). @group plugin @thread main
+    // api_min: the minimal engine API this plugin needs (GWP_MAKE_VERSION); by default the version of the headers it
+    // is built with. A lower one lets the plugin load on an older engine of the same MAJOR: then every function newer
+    // than api_min must be checked with GWP_API_HAS before the call. @group plugin @thread main
     GwpResult init(const GwpEngineApi* api, const GwpPlugin* self, GwpPluginDesc* out,
-        uint32_t api_min = GWP_MAKE_VERSION(0, 1, 0)) noexcept
+        uint32_t api_min = GWP_API_VERSION) noexcept
     {
         if (api == nullptr || out == nullptr || api->abi_major != GWP_API_VERSION_MAJOR)
             return GWP_ERROR_VERSION_MISMATCH;
@@ -652,6 +899,8 @@ public:
         out->abi_major = GWP_API_VERSION_MAJOR;
         out->size = sizeof(GwpPluginDesc);
         out->api_min = api_min;
+        out->api_built = GWP_API_VERSION;
+        out->reserved = 0;
         out->on_unload = &unload_trampoline;
         out->user = this;
 
@@ -710,15 +959,30 @@ protected:
     virtual void on_save(BinaryWriter& out) { (void)out; }
 
     // alife_on_load: the block written by on_save. Not called when the save has no block of this addon.
-    // version: save_version() of the plugin that wrote it (never above the current one: newer blocks are skipped
-    // with a warning). Read in the order of on_save; check r.ok() at the end when the layout may be truncated.
+    // version: save_version() of the plugin that wrote it. A block newer than save_version() comes here only when
+    // its writer declared this version compatible (save_min_compatible_version), otherwise it is skipped with a
+    // warning. Read in the order of on_save; check r.ok() at the end when the layout may be truncated.
     virtual void on_load(BinaryReader& in, uint32_t version) { (void)in; (void)version; }
 
-    // Version of the layout written by on_save. Bump it when the layout changes and read the old one by `version`.
+    // Version of the layout written by on_save (1..32767). Bump it when the layout changes and read the old one by
+    // `version`.
     virtual uint32_t save_version() const { return 1; }
+
+    // The oldest save_version() that can read the blocks this version writes: the layout only added tagged chunks
+    // (BinaryWriter::chunk) or appended fields that an older reader skips. By default save_version(): an older
+    // version of the plugin skips the block. One block per addon: all the data of the plugin goes into it.
+    virtual uint32_t save_min_compatible_version() const { return save_version(); }
 
     // A timer started with timer_start expired. name: the timer name given to timer_start.
     virtual void on_timer(std::string_view name) { (void)name; }
+
+    // The same with the event of the timer: e.string(0) the name, e.string(1) the key "<addon id>/<name>", from
+    // index 2 the arguments given to timer_start. By default calls on_timer(name).
+    virtual void on_timer_event(std::string_view name, const EventView& event)
+    {
+        (void)event;
+        on_timer(name);
+    }
 
     // --- events ----------------------------------------------------------------------------------------------
 
@@ -771,24 +1035,27 @@ protected:
 
     // Starts (or restarts) the timer `name` of this addon; on_timer(name) is called when it expires.
     // delay_seconds: first firing; period_seconds > 0 repeats it; flags: GWP_TIMER_REAL_TIME (level time instead of
-    // game time), GWP_TIMER_PERSISTENT (kept in the save). False without a game, while a save is loading, or on an
-    // engine without timers.
-    bool timer_start(const char* name, double delay_seconds, double period_seconds = 0.0, uint32_t flags = 0)
+    // game time), GWP_TIMER_PERSISTENT (kept in the save). args: up to 16 values copied by the engine and given back
+    // to on_timer_event (from index 2), kept in the save with a persistent timer; GWP_T_LUA_REF is refused.
+    // False without a game, while a save is loading, for a bad argument, or on an engine without timers.
+    bool timer_start(const char* name, double delay_seconds, double period_seconds = 0.0, uint32_t flags = 0,
+        std::span<const GwpValue> args = {})
     {
         if (!has_timers() || !subscribe_timer_event())
             return false;
-        return m_api->timer_start(m_self, name, m_timer_event.c_str(), delay_seconds, period_seconds, flags) == GWP_OK;
+        return m_api->timer_start(m_self, name, m_timer_event.c_str(), delay_seconds, period_seconds, flags,
+                   static_cast<uint32_t>(args.size()), args.data()) == GWP_OK;
     }
 
-    // timer_start only when the timer does not exist: a persistent timer restored from the save is kept as it is.
-    // Returns true when the timer exists afterwards.
+    // timer_start only when the timer does not exist: a persistent timer restored from the save is kept as it is
+    // (with its arguments). Returns true when the timer exists afterwards.
     bool timer_start_if_missing(const char* name, double delay_seconds, double period_seconds = 0.0,
-        uint32_t flags = 0)
+        uint32_t flags = 0, std::span<const GwpValue> args = {})
     {
         double left = 0.0;
         if (has_timers() && m_api->timer_remaining(m_self, name, &left) == GWP_OK)
             return subscribe_timer_event();
-        return timer_start(name, delay_seconds, period_seconds, flags);
+        return timer_start(name, delay_seconds, period_seconds, flags, args);
     }
 
     // Stops the timer; false when there is no such timer.
@@ -835,12 +1102,19 @@ protected:
         binding->owner = this;
         binding->binder = &binder; // busy from here on, before the engine calls on_spawn through it
         binding->id = GWP_INVALID_BINDER_ID;
+        binding->pending_id = GWP_INVALID_OBJECT_ID;
+        binding->pending.clear();
         GwpBinderVTable vtable{};
         vtable.size = sizeof(vtable);
         vtable.on_reinit = &binder_reinit_trampoline;
         vtable.on_spawn = &binder_spawn_trampoline;
         vtable.on_destroy = &binder_destroy_trampoline;
         vtable.on_update = &binder_update_trampoline;
+        if (binder.saves_state())
+        {
+            vtable.on_save = &binder_save_trampoline;
+            vtable.on_load = &binder_load_trampoline;
+        }
         binding->id = m_api->binder_register(m_self, class_id, section_mask, &vtable, binding);
         if (binding->id == GWP_INVALID_BINDER_ID)
             binding->binder = nullptr;
@@ -848,7 +1122,8 @@ protected:
     }
 
     // Detaches the binder: on_destroy for every bound object, then the binder is forgotten. false: no such binder
-    // of this plugin, or the engine refused (called outside the main thread): then the binder stays as it was.
+    // of this plugin, or the engine refused (called outside the main thread, or from on_save while the game is being
+    // saved): then the binder stays as it was.
     bool unbind(GwpBinderId id)
     {
         if (id == GWP_INVALID_BINDER_ID)
@@ -896,6 +1171,9 @@ private:
         Plugin* owner = nullptr;
         Binder* binder = nullptr;
         GwpBinderId id = GWP_INVALID_BINDER_ID;
+        // on_save that did not fit into `cap`: kept for the second call of the engine with a bigger buffer
+        GwpObjectId pending_id = GWP_INVALID_OBJECT_ID;
+        BinaryWriter pending;
     };
 
     // Trampolines: the engine calls plain functions with `user`; these forward to the stored functor.
@@ -917,12 +1195,30 @@ private:
         }
     }
 
-    static void GWP_CALL batch_trampoline(void* user, uint32_t count, const GwpEvent* events) noexcept
+    // A batch as a span of this header's records: as is when the engine's record has the same size (stride), else
+    // copied record by record into `copy` (the fields this header knows; a field the engine lacks stays zero)
+    template <typename T>
+    static std::span<const T> strided(const T* records, uint32_t count, uint32_t stride, std::vector<T>& copy)
+    {
+        if (!records || count == 0)
+            return std::span<const T>();
+        if (stride == sizeof(T))
+            return std::span<const T>(records, count);
+        copy.assign(count, T{});
+        const size_t part = stride < sizeof(T) ? stride : sizeof(T);
+        const auto* bytes = reinterpret_cast<const uint8_t*>(records);
+        for (uint32_t i = 0; i < count; ++i)
+            std::memcpy(&copy[i], bytes + static_cast<size_t>(i) * stride, part);
+        return std::span<const T>(copy.data(), copy.size());
+    }
+
+    static void GWP_CALL batch_trampoline(void* user, uint32_t count, const GwpEvent* events, uint32_t stride) noexcept
     {
         auto* sub = static_cast<Subscription*>(user);
         try
         {
-            sub->batch(std::span<const GwpEvent>(events, count));
+            std::vector<GwpEvent> copy;
+            sub->batch(strided(events, count, stride, copy));
         }
         catch (const std::exception& e)
         {
@@ -968,10 +1264,51 @@ private:
     {
         binder_call(user, "on_destroy", [id](Binder& b) { b.on_destroy(id); });
     }
-    static void GWP_CALL binder_update_trampoline(void* user, uint32_t count, const GwpBinderUpdate* updates) noexcept
+    static void GWP_CALL binder_update_trampoline(void* user, uint32_t count, const GwpBinderUpdate* updates,
+        uint32_t stride) noexcept
     {
-        binder_call(user, "on_update",
-            [count, updates](Binder& b) { b.on_update(std::span<const GwpBinderUpdate>(updates, count)); });
+        binder_call(user, "on_update", [count, updates, stride](Binder& b) {
+            std::vector<GwpBinderUpdate> copy;
+            b.on_update(strided(updates, count, stride, copy));
+        });
+    }
+    static uint32_t GWP_CALL binder_save_trampoline(void* user, GwpObjectId id, void* out, uint32_t cap) noexcept
+    {
+        auto* binding = static_cast<Binding*>(user);
+        uint32_t size = 0;
+        binder_call(user, "on_save", [binding, id, out, cap, &size](Binder& b) {
+            // The second call for the same object (the first did not fit) takes what the first one wrote; any other
+            // call asks the binder again
+            if (binding->pending_id != id || cap < binding->pending.size())
+            {
+                binding->pending.clear();
+                b.on_save(id, binding->pending);
+            }
+            size = binding->pending.size();
+            if (size > GWP_BINDER_SAVE_MAX_SIZE)
+            {
+                binding->owner->m_log.error("binder on_save: {} bytes for object {}, at most {}: not kept", size, id,
+                    GWP_BINDER_SAVE_MAX_SIZE);
+                size = 0;
+            }
+            else if (size > cap || !out)
+            {
+                binding->pending_id = id;
+                return;
+            }
+            if (size)
+                std::memcpy(out, binding->pending.data(), size);
+            binding->pending_id = GWP_INVALID_OBJECT_ID;
+            binding->pending.clear();
+        });
+        return size;
+    }
+    static void GWP_CALL binder_load_trampoline(void* user, GwpObjectId id, const void* data, uint32_t size) noexcept
+    {
+        binder_call(user, "on_load", [id, data, size](Binder& b) {
+            BinaryReader in(data, size);
+            b.on_load(id, in);
+        });
     }
 
     // Every binder gets on_destroy for its objects while the Binder objects (members of the plugin, as a rule)
@@ -1016,27 +1353,47 @@ private:
         if (m_timer_subscribed)
             return true;
         m_timer_event = m_addon_id + "_on_timer";
-        m_timer_subscribed = subscribe(m_timer_event.c_str(), [this](const EventView& e) { on_timer(e.string(0)); });
+        m_timer_subscribed =
+            subscribe(m_timer_event.c_str(), [this](const EventView& e) { on_timer_event(e.string(0), e); });
         return m_timer_subscribed;
     }
+
+    // The data_version of the block: save_version() as it is, or - when save_min_compatible_version() is lower -
+    // kSavePacked | min_compatible << 16 | version (both 1..32767). Bit 31 tells the two apart: a block written
+    // without it (every block of an older gwp.hpp) reads as its own version
+    static constexpr uint32_t kSavePacked = 0x80000000u;
+    static constexpr uint32_t kSaveVersionMax = 0x7FFFu;
 
     void save_block()
     {
         BinaryWriter out;
         on_save(out);
-        m_api->save_write(m_self, save_version(), out.data(), out.size()); // size 0 removes the block
+        const uint32_t version = save_version();
+        const uint32_t min_compatible = save_min_compatible_version();
+        uint32_t data_version = version;
+        if (version == 0 || version > kSaveVersionMax || min_compatible > version)
+            m_log.error("save_version {} / save_min_compatible_version {}: the version must be 1..32767 and not "
+                        "below the compatible one; the block is written for this version only",
+                version, min_compatible);
+        else if (min_compatible < version)
+            data_version = kSavePacked | min_compatible << 16 | version;
+        m_api->save_write(m_self, data_version, out.data(), out.size()); // size 0 removes the block
     }
 
     void load_block()
     {
-        uint32_t version = 0;
+        uint32_t data_version = 0;
         const void* bytes = nullptr;
         uint32_t size = 0;
-        if (m_api->save_read(m_self, &version, &bytes, &size) != GWP_OK)
+        if (m_api->save_read(m_self, &data_version, &bytes, &size) != GWP_OK)
             return; // no block of this addon in the save (made before the addon was installed)
-        if (version > save_version())
+        const bool packed = (data_version & kSavePacked) != 0;
+        const uint32_t version = packed ? data_version & 0xFFFFu : data_version;
+        const uint32_t min_compatible = packed ? (data_version & ~kSavePacked) >> 16 : version;
+        if (min_compatible > save_version())
         {
-            m_log.warn("save block version {} is newer than {}, ignored", version, save_version());
+            m_log.warn("save block version {} needs version {} of the plugin, this is {}: ignored", version,
+                min_compatible, save_version());
             return;
         }
         BinaryReader in(bytes, size);
@@ -1058,11 +1415,12 @@ private:
 
 /*
  * Defines the exported entry point for a plugin class derived from gwp::Plugin. The object is created here and
- * destroyed right after on_unload. Optional second argument: the minimal engine API version.
+ * destroyed right after on_unload. Optional second argument: the minimal engine API version (by default the
+ * version of the headers, GWP_API_VERSION; see Plugin::init).
  *     GWP_DEFINE_PLUGIN(MyPlugin)
  *     GWP_DEFINE_PLUGIN(MyPlugin, GWP_MAKE_VERSION(0, 1, 0))
  */
-#define GWP_DEFINE_PLUGIN(...) GWP_DEFINE_PLUGIN_IMPL(__VA_ARGS__, GWP_MAKE_VERSION(0, 1, 0), )
+#define GWP_DEFINE_PLUGIN(...) GWP_DEFINE_PLUGIN_IMPL(__VA_ARGS__, GWP_API_VERSION, )
 #define GWP_DEFINE_PLUGIN_IMPL(Type, api_min, ...)                                                        \
     GWP_PLUGIN_INIT                                                                                       \
     {                                                                                                     \

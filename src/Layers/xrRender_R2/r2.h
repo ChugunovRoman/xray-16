@@ -654,6 +654,7 @@ public:
 
     // Models
     IRenderVisual* model_CreateParticles(LPCSTR name) override;
+    bool model_ParticlesExist(LPCSTR name) override;
     IRender_DetailModel* model_CreateDM(IReader* F);
     IRenderVisual* model_Create(LPCSTR name, IReader* data = nullptr) override;
     IRenderVisual* model_Create(LPCSTR name, LPCSTR suffix, IReader* data = nullptr) override;

@@ -9,6 +9,7 @@
 // Docs: wiki/doc/plugins/api/npc_body.md, npc_sight.md, npc_anim.md, inventory.md, smart_cover.md
 
 #include "addon_api_npc_control.h"
+#include "addon_api_common.h"
 #include "addon_event_bus.h"
 #include "addon_host.h"
 
@@ -22,6 +23,10 @@
 #include "xrAICore/Navigation/level_graph.h"
 #include "CustomMonster.h"
 #include "InventoryOwner.h"
+#include "Inventory.h"
+#include "inventory_item.h"
+#include "inventory_space.h"
+#include "sound_player.h"
 #include "Weapon.h"
 #include "Missile.h"
 #include "ai/stalker/ai_stalker.h"
@@ -36,12 +41,15 @@
 #include "script_game_object.h"
 #include "script_hit.h"
 #include "Include/xrRender/Kinematics.h"
+#include "Include/xrRender/KinematicsAnimated.h"
 #include "xrAICore/Navigation/PatrolPath/patrol_path.h"
 #include "xrAICore/Navigation/PatrolPath/patrol_path_storage.h"
 #include "patrol_path_manager.h"
 #include "ai/stalker/ai_stalker_space.h"
 
 #include <cmath>
+#include <cstddef>
+#include <cstring>
 
 // The constants of gwp_api.h are the engine's own numbers (and so the numbers of the Lua tables move.*, anim.*,
 // look.*, object.*, hit.*, CSightParams.*): a plugin passes them through unchanged. Checked here, at compile time.
@@ -69,7 +77,49 @@ static_assert(GWP_PATROL_START_POINT == ePatrolStartTypePoint);
 static_assert(GWP_PATROL_START_NEXT == ePatrolStartTypeNext);
 static_assert(GWP_PATROL_ROUTE_STOP == ePatrolRouteTypeStop);
 static_assert(GWP_PATROL_ROUTE_CONTINUE == ePatrolRouteTypeContinue);
+static_assert(GWP_STALKER_SOUND_DIE == StalkerSpace::eStalkerSoundDie);
+static_assert(GWP_STALKER_SOUND_DIE_IN_ANOMALY == StalkerSpace::eStalkerSoundDieInAnomaly);
+static_assert(GWP_STALKER_SOUND_INJURING == StalkerSpace::eStalkerSoundInjuring);
+static_assert(GWP_STALKER_SOUND_HUMMING == StalkerSpace::eStalkerSoundHumming);
 static_assert(GWP_STALKER_SOUND_ALARM == StalkerSpace::eStalkerSoundAlarm);
+static_assert(GWP_STALKER_SOUND_ATTACK_NO_ALLIES == StalkerSpace::eStalkerSoundAttackNoAllies);
+static_assert(GWP_STALKER_SOUND_ATTACK_ALLIES_SINGLE_ENEMY == StalkerSpace::eStalkerSoundAttackAlliesSingleEnemy);
+static_assert(GWP_STALKER_SOUND_ATTACK_ALLIES_SEVERAL_ENEMIES == StalkerSpace::eStalkerSoundAttackAlliesSeveralEnemies);
+static_assert(GWP_STALKER_SOUND_BACKUP == StalkerSpace::eStalkerSoundBackup);
+static_assert(GWP_STALKER_SOUND_DETOUR == StalkerSpace::eStalkerSoundDetour);
+static_assert(GWP_STALKER_SOUND_SEARCH1_WITH_ALLIES == StalkerSpace::eStalkerSoundSearch1WithAllies);
+static_assert(GWP_STALKER_SOUND_SEARCH1_NO_ALLIES == StalkerSpace::eStalkerSoundSearch1NoAllies);
+static_assert(GWP_STALKER_SOUND_ENEMY_LOST_NO_ALLIES == StalkerSpace::eStalkerSoundEnemyLostNoAllies);
+static_assert(GWP_STALKER_SOUND_ENEMY_LOST_WITH_ALLIES == StalkerSpace::eStalkerSoundEnemyLostWithAllies);
+static_assert(GWP_STALKER_SOUND_INJURING_BY_FRIEND == StalkerSpace::eStalkerSoundInjuringByFriend);
+static_assert(GWP_STALKER_SOUND_PANIC_HUMAN == StalkerSpace::eStalkerSoundPanicHuman);
+static_assert(GWP_STALKER_SOUND_PANIC_MONSTER == StalkerSpace::eStalkerSoundPanicMonster);
+static_assert(GWP_STALKER_SOUND_TOLLS == StalkerSpace::eStalkerSoundTolls);
+static_assert(GWP_STALKER_SOUND_WOUNDED == StalkerSpace::eStalkerSoundWounded);
+static_assert(GWP_STALKER_SOUND_GRENADE_ALARM == StalkerSpace::eStalkerSoundGrenadeAlarm);
+static_assert(GWP_STALKER_SOUND_FRIENDLY_GRENADE_ALARM == StalkerSpace::eStalkerSoundFriendlyGrenadeAlarm);
+static_assert(GWP_STALKER_SOUND_NEED_BACKUP == StalkerSpace::eStalkerSoundNeedBackup);
+static_assert(GWP_STALKER_SOUND_RUNNING_IN_DANGER == StalkerSpace::eStalkerSoundRunningInDanger);
+static_assert(GWP_STALKER_SOUND_KILL_WOUNDED == StalkerSpace::eStalkerSoundKillWounded);
+static_assert(GWP_STALKER_SOUND_ENEMY_CRITICALLY_WOUNDED == StalkerSpace::eStalkerSoundEnemyCriticallyWounded);
+static_assert(GWP_STALKER_SOUND_ENEMY_KILLED_OR_WOUNDED == StalkerSpace::eStalkerSoundEnemyKilledOrWounded);
+static_assert(GWP_STALKER_SOUND_THROW_GRENADE == StalkerSpace::eStalkerSoundThrowGrenade);
+static_assert(GWP_STALKER_SOUND_SCRIPT == StalkerSpace::eStalkerSoundScript); // a new engine sound needs a constant
+static_assert(GWP_SLOT_NONE == NO_ACTIVE_SLOT);
+static_assert(GWP_SLOT_KNIFE == KNIFE_SLOT);
+static_assert(GWP_SLOT_PISTOL == INV_SLOT_2);
+static_assert(GWP_SLOT_RIFLE == INV_SLOT_3);
+static_assert(GWP_SLOT_GRENADE == GRENADE_SLOT);
+static_assert(GWP_SLOT_BINOCULAR == BINOCULAR_SLOT);
+static_assert(GWP_SLOT_BOLT == BOLT_SLOT);
+static_assert(GWP_SLOT_OUTFIT == OUTFIT_SLOT);
+static_assert(GWP_SLOT_PDA == PDA_SLOT);
+static_assert(GWP_SLOT_DETECTOR == DETECTOR_SLOT);
+static_assert(GWP_SLOT_TORCH == TORCH_SLOT);
+static_assert(GWP_SLOT_ARTEFACT == ARTEFACT_SLOT);
+static_assert(GWP_SLOT_HELMET == HELMET_SLOT);
+static_assert(GWP_SLOT_BACKPACK == BACKPACK_SLOT);
+static_assert(GWP_SLOT_COUNT == SLOTS_COUNT); // a new engine slot needs a constant
 static_assert(GWP_SIGHT_CURRENT_DIRECTION == SightManager::eSightTypeCurrentDirection);
 static_assert(GWP_SIGHT_PATH_DIRECTION == SightManager::eSightTypePathDirection);
 static_assert(GWP_SIGHT_DIRECTION == SightManager::eSightTypeDirection);
@@ -130,13 +180,7 @@ bool CheckControlCall(pcstr group, pcstr function)
     return false;
 }
 
-CGameObject* FindControlObject(GwpObjectId id)
-{
-    if (!g_pGameLevel || id == GWP_INVALID_OBJECT_ID)
-        return nullptr;
-    CGameObject* object = smart_cast<CGameObject*>(Level().Objects.net_Find(id));
-    return object && !object->getDestroy() ? object : nullptr;
-}
+CGameObject* FindControlObject(GwpObjectId id) { return api::FindOnlineObject(id); }
 
 // An online stalker, the class almost every method here requires (the Lua method logs a script error for any
 // other object and does nothing).
@@ -170,45 +214,101 @@ Fvector ControlVector(const float xyz[3]) { return Fvector().set(xyz[0], xyz[1],
 // object or the path builder (a VERIFY in a debug build, garbage in release)
 bool Finite3(const float xyz[3]) { return std::isfinite(xyz[0]) && std::isfinite(xyz[1]) && std::isfinite(xyz[2]); }
 
+// A refused change of a plugin: the code, and the reason in the debug log (-addon_debug) with the plugin named
+GwpResult ControlRefusal(const GwpPlugin* self, pcstr function, GwpResult code, pcstr why)
+{
+    return api::PluginRefusal(self, function, code, why);
+}
+
+// The object a call that changes the game acts on (plan 26, 1.6): the plugin handle and the main thread first, then
+// an online object of class T. nullptr with `code` set otherwise: the code of CheckPluginMutation, NOT_FOUND when
+// nothing with the id is online, INVALID_ARGUMENT for an object of another class, INVALID_STATE without a level.
+template <typename T>
+T* ControlTarget(const GwpPlugin* self, GwpObjectId id, pcstr group, pcstr function, pcstr kind, GwpResult& code)
+{
+    if (!api::CheckPluginMutation(self, group, function))
+    {
+        code = api::PluginCallRefused(self);
+        return nullptr;
+    }
+    T* object = api::FindOnline<T>(id);
+    if (!object)
+    {
+        string128 why;
+        xr_sprintf(why, "object %u is not an online %s", static_cast<u32>(id), kind);
+        code = ControlRefusal(self, function, api::MissingObjectCode(id), why);
+    }
+    return object;
+}
+
+// An online stalker, the class almost every setter here requires (the Lua method logs a script error for any other
+// object and does nothing)
+CAI_Stalker* StalkerTarget(const GwpPlugin* self, GwpObjectId id, pcstr group, pcstr function, GwpResult& code)
+{
+    return ControlTarget<CAI_Stalker>(self, id, group, function, "stalker", code);
+}
+
+// A stalker or a monster (enable_movement, play_sound, set_start_point)
+CCustomMonster* MonsterTarget(const GwpPlugin* self, GwpObjectId id, pcstr group, pcstr function, GwpResult& code)
+{
+    return ControlTarget<CCustomMonster>(self, id, group, function, "stalker or monster", code);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Plugin API (group npc_body)
 // ---------------------------------------------------------------------------------------------
 
 constexpr pcstr kBody = "npc_body";
 
-GwpResult GWP_CALL ApiNpcSetMovementType(GwpObjectId id, uint32_t movement_type)
+GwpResult GWP_CALL ApiNpcSetMovementType(const GwpPlugin* self, GwpObjectId id, uint32_t movement_type)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_movement_type");
-    if (!stalker || movement_type > GWP_MOVEMENT_STAND)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+    constexpr pcstr function = "npc_set_movement_type";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, function, code);
+    if (!stalker)
+        return code;
+    if (movement_type > GWP_MOVEMENT_STAND)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "unknown movement type");
     stalker->lua_game_object()->set_movement_type(static_cast<MonsterSpace::EMovementType>(movement_type));
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetBodyState(GwpObjectId id, uint32_t body_state)
+GwpResult GWP_CALL ApiNpcSetBodyState(const GwpPlugin* self, GwpObjectId id, uint32_t body_state)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_body_state");
+    constexpr pcstr function = "npc_set_body_state";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, function, code);
+    if (!stalker)
+        return code;
     // Another value is a THROW inside the Lua method: refused here
-    if (!stalker || (body_state != GWP_BODY_CROUCH && body_state != GWP_BODY_STAND))
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+    if (body_state != GWP_BODY_CROUCH && body_state != GWP_BODY_STAND)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "unknown body state");
     stalker->lua_game_object()->set_body_state(static_cast<MonsterSpace::EBodyState>(body_state));
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetMentalState(GwpObjectId id, uint32_t mental_state)
+GwpResult GWP_CALL ApiNpcSetMentalState(const GwpPlugin* self, GwpObjectId id, uint32_t mental_state)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_mental_state");
-    if (!stalker || mental_state > GWP_MENTAL_PANIC)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+    constexpr pcstr function = "npc_set_mental_state";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, function, code);
+    if (!stalker)
+        return code;
+    if (mental_state > GWP_MENTAL_PANIC)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "unknown mental state");
     stalker->lua_game_object()->set_mental_state(static_cast<MonsterSpace::EMentalState>(mental_state));
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetPathType(GwpObjectId id, uint32_t path_type)
+GwpResult GWP_CALL ApiNpcSetPathType(const GwpPlugin* self, GwpObjectId id, uint32_t path_type)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_path_type");
-    if (!stalker || path_type > GWP_PATH_NONE)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+    constexpr pcstr function = "npc_set_path_type";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, function, code);
+    if (!stalker)
+        return code;
+    if (path_type > GWP_PATH_NONE)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "unknown path type");
     stalker->lua_game_object()->set_path_type(static_cast<MovementManager::EPathType>(path_type));
     return GWP_OK;
 }
@@ -250,11 +350,12 @@ int GWP_CALL ApiNpcMovementEnabled(GwpObjectId id)
     return monster && monster->lua_game_object()->movement_enabled() ? 1 : 0;
 }
 
-GwpResult GWP_CALL ApiNpcEnableMovement(GwpObjectId id, int enable)
+GwpResult GWP_CALL ApiNpcEnableMovement(const GwpPlugin* self, GwpObjectId id, int enable)
 {
-    CCustomMonster* monster = FindMonster(id, kBody, "npc_enable_movement");
+    GwpResult code;
+    CCustomMonster* monster = MonsterTarget(self, id, kBody, "npc_enable_movement", code);
     if (!monster)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return code;
     monster->lua_game_object()->enable_movement(enable != 0);
     return GWP_OK;
 }
@@ -265,20 +366,22 @@ int GWP_CALL ApiNpcSpecialDangerMove(GwpObjectId id)
     return stalker && stalker->lua_game_object()->special_danger_move() ? 1 : 0;
 }
 
-GwpResult GWP_CALL ApiNpcSetSpecialDangerMove(GwpObjectId id, int value)
+GwpResult GWP_CALL ApiNpcSetSpecialDangerMove(const GwpPlugin* self, GwpObjectId id, int value)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_special_danger_move");
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, "npc_set_special_danger_move", code);
     if (!stalker)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return code;
     stalker->lua_game_object()->special_danger_move(value != 0);
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcInactualizePatrolPath(GwpObjectId id)
+GwpResult GWP_CALL ApiNpcInactualizePatrolPath(const GwpPlugin* self, GwpObjectId id)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_inactualize_patrol_path");
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, "npc_inactualize_patrol_path", code);
     if (!stalker)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return code;
     stalker->lua_game_object()->inactualize_patrol_path();
     return GWP_OK;
 }
@@ -296,60 +399,77 @@ int GWP_CALL ApiNpcAccessible(GwpObjectId id, uint32_t level_vertex)
 // The path of a stalker (the movement setters of the scheme actions). The checks are the ones the Lua methods
 // only log, plus the ones Lua would crash on (set_movement_selection_type of a non-stalker, a NULL position).
 
-GwpResult Refused() { return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD; }
-
-GwpResult GWP_CALL ApiNpcSetDestLevelVertex(GwpObjectId id, uint32_t level_vertex)
+GwpResult GWP_CALL ApiNpcSetDestLevelVertex(const GwpPlugin* self, GwpObjectId id, uint32_t level_vertex)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_dest_level_vertex");
+    constexpr pcstr function = "npc_set_dest_level_vertex";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, function, code);
+    if (!stalker)
+        return code;
     // set_dest_level_vertex_id returns without a change for an invalid vertex and for one the restrictors forbid
-    const CLevelGraph* graph = stalker ? ai().get_level_graph() : nullptr;
-    if (!graph || !graph->valid_vertex_id(level_vertex) || !stalker->movement().restrictions().accessible(level_vertex))
-        return Refused();
+    const CLevelGraph* graph = ai().get_level_graph();
+    if (!graph)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_STATE, "the level has no AI graph");
+    if (!graph->valid_vertex_id(level_vertex))
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "invalid level vertex");
+    if (!stalker->movement().restrictions().accessible(level_vertex))
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "the restrictors of the NPC forbid the vertex");
     stalker->lua_game_object()->set_dest_level_vertex_id(level_vertex);
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetDestGameVertex(GwpObjectId id, uint32_t game_vertex)
+GwpResult GWP_CALL ApiNpcSetDestGameVertex(const GwpPlugin* self, GwpObjectId id, uint32_t game_vertex)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_dest_game_vertex");
-    if (!stalker || game_vertex > u32(u16(-1)) || !ai().get_game_graph() ||
+    constexpr pcstr function = "npc_set_dest_game_vertex";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, function, code);
+    if (!stalker)
+        return code;
+    if (!ai().get_game_graph())
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_STATE, "no game graph");
+    if (game_vertex > u32(u16(-1)) ||
         !ai().game_graph().valid_vertex_id(static_cast<GameGraph::_GRAPH_ID>(game_vertex)))
-        return Refused();
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "invalid game vertex");
     stalker->lua_game_object()->set_dest_game_vertex_id(static_cast<GameGraph::_GRAPH_ID>(game_vertex));
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetDesiredPosition(GwpObjectId id, const float* xyz)
+GwpResult GWP_CALL ApiNpcSetDesiredPosition(const GwpPlugin* self, GwpObjectId id, const float* xyz)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_desired_position");
+    constexpr pcstr function = "npc_set_desired_position";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, function, code);
     if (!stalker)
-        return Refused();
+        return code;
     if (!xyz)
     {
         stalker->lua_game_object()->set_desired_position(); // the overload without a position: clears
         return GWP_OK;
     }
     if (!Finite3(xyz))
-        return GWP_ERROR_INVALID_ARGUMENT;
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "non-finite position");
     const Fvector position = ControlVector(xyz);
     stalker->lua_game_object()->set_desired_position(&position);
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetDesiredDirection(GwpObjectId id, const float* dir)
+GwpResult GWP_CALL ApiNpcSetDesiredDirection(const GwpPlugin* self, GwpObjectId id, const float* dir)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_desired_direction");
+    constexpr pcstr function = "npc_set_desired_direction";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, function, code);
     if (!stalker)
-        return Refused();
+        return code;
     if (!dir)
     {
         stalker->lua_game_object()->set_desired_direction();
         return GWP_OK;
     }
     Fvector direction = ControlVector(dir);
+    // Lua logs "you passed zero direction" and still sets it: refused here on purpose
     if (!std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(direction.z) ||
         fsimilar(direction.magnitude(), 0.f))
-        return Refused(); // Lua logs "you passed zero direction" and still sets it: refused here on purpose
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "zero or non-finite direction");
     // The engine method normalizes on its own (outside the SoC mode) and logs a non-unit vector first: only such a
     // vector is normalized here, to spare the log - a unit one goes through untouched, one normalization as in Lua
     if (!ShadowOfChernobylMode && !fsimilar(direction.magnitude(), 1.f))
@@ -358,22 +478,30 @@ GwpResult GWP_CALL ApiNpcSetDesiredDirection(GwpObjectId id, const float* dir)
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetDetailPathType(GwpObjectId id, uint32_t detail_path_type)
+GwpResult GWP_CALL ApiNpcSetDetailPathType(const GwpPlugin* self, GwpObjectId id, uint32_t detail_path_type)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_detail_path_type");
-    if (!stalker || detail_path_type > GWP_DETAIL_PATH_SMOOTH_CRITERIA)
-        return Refused();
+    constexpr pcstr function = "npc_set_detail_path_type";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, function, code);
+    if (!stalker)
+        return code;
+    if (detail_path_type > GWP_DETAIL_PATH_SMOOTH_CRITERIA)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "unknown detail path type");
     stalker->lua_game_object()->set_detail_path_type(
         static_cast<DetailPathManager::EDetailPathType>(detail_path_type));
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetMovementSelectionType(GwpObjectId id, uint32_t selection_type)
+GwpResult GWP_CALL ApiNpcSetMovementSelectionType(const GwpPlugin* self, GwpObjectId id, uint32_t selection_type)
 {
+    constexpr pcstr function = "npc_set_movement_selection_type";
     // The Lua method dereferences the stalker even after its "cannot access" log: refused here for anything else
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_movement_selection_type");
-    if (!stalker || selection_type > GWP_ALIFE_MOVEMENT_RANDOM)
-        return Refused();
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, function, code);
+    if (!stalker)
+        return code;
+    if (selection_type > GWP_ALIFE_MOVEMENT_RANDOM)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "unknown movement selection type");
     stalker->lua_game_object()->set_movement_selection_type(static_cast<ESelectionType>(selection_type));
     return GWP_OK;
 }
@@ -647,16 +775,30 @@ uint32_t GWP_CALL ApiNpcBodyState(GwpObjectId id)
     return stalker ? static_cast<uint32_t>(stalker->lua_game_object()->body_state()) : GWP_BODY_STAND;
 }
 
-GwpResult GWP_CALL ApiNpcPlaySound(GwpObjectId id, uint32_t sound_type, uint32_t max_start_ms, uint32_t min_start_ms,
-    uint32_t max_stop_ms, uint32_t min_stop_ms)
+// The sound player of the NPC has a sound of the type: what CSoundPlayer::play looks up before it plays (a type
+// missing from its collections or a collection without sounds is a silent no-op there). Read only: whether the sound
+// starts now (its synchro mask, a sound of a higher priority playing) stays the business of play, as for Lua.
+bool HasNpcSound(const CCustomMonster& monster, u32 sound_type)
 {
-    CCustomMonster* monster = FindMonster(id, kBody, "npc_play_sound");
+    const CSoundPlayer::SOUND_COLLECTIONS& sounds = monster.sound().objects();
+    const auto found = sounds.find(sound_type);
+    return found != sounds.end() && found->second.second && !found->second.second->m_sounds.empty();
+}
+
+GwpResult GWP_CALL ApiNpcPlaySound(const GwpPlugin* self, GwpObjectId id, uint32_t sound_type,
+    uint32_t max_start_ms, uint32_t min_start_ms, uint32_t max_stop_ms, uint32_t min_stop_ms)
+{
+    constexpr pcstr function = "npc_play_sound";
+    GwpResult code;
+    CCustomMonster* monster = MonsterTarget(self, id, kBody, function, code);
     if (!monster)
-        return Refused();
+        return code;
     // CSoundPlayer::play VERIFYs the intervals (a debug build stops there)
     if (max_start_ms < min_start_ms || max_stop_ms < min_stop_ms)
-        return GWP_ERROR_INVALID_ARGUMENT;
-    // CSoundPlayer::play checks the type itself (a type without sounds is a no-op, as in Lua)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "an interval with max below min");
+    // Lua plays nothing for a type without sounds, silently: told to the plugin here
+    if (!HasNpcSound(*monster, sound_type))
+        return ControlRefusal(self, function, GWP_ERROR_NOT_FOUND, "the NPC has no sound of this type");
     monster->lua_game_object()->play_sound(sound_type, max_start_ms, min_start_ms, max_stop_ms, min_stop_ms);
     return GWP_OK;
 }
@@ -667,36 +809,49 @@ int GWP_CALL ApiNpcSniperUpdateRate(GwpObjectId id)
     return stalker && stalker->lua_game_object()->sniper_update_rate() ? 1 : 0;
 }
 
-GwpResult GWP_CALL ApiNpcSetSniperUpdateRate(GwpObjectId id, int value)
+GwpResult GWP_CALL ApiNpcSetSniperUpdateRate(const GwpPlugin* self, GwpObjectId id, int value)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_sniper_update_rate");
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, "npc_set_sniper_update_rate", code);
     if (!stalker)
-        return Refused();
+        return code;
     stalker->lua_game_object()->sniper_update_rate(value != 0);
     return GWP_OK;
 }
 
 // The patrol path of an NPC (group npc_body)
 
-GwpResult GWP_CALL ApiNpcSetPatrolPath(GwpObjectId id, const char* name, uint32_t start_type, uint32_t route_type,
-    int random)
+GwpResult GWP_CALL ApiNpcSetPatrolPath(const GwpPlugin* self, GwpObjectId id, const char* name, uint32_t start_type,
+    uint32_t route_type, int random)
 {
-    CAI_Stalker* stalker = FindStalker(id, kBody, "npc_set_patrol_path");
+    constexpr pcstr function = "npc_set_patrol_path";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kBody, function, code);
+    if (!stalker)
+        return code;
+    if (!name || !name[0] || start_type > GWP_PATROL_START_NEXT || route_type > GWP_PATROL_ROUTE_CONTINUE)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "no path name or an unknown start / route");
     // patrol().set_path asserts on a name the level has no path of
-    if (!stalker || !name || !name[0] || start_type > GWP_PATROL_START_NEXT || route_type > GWP_PATROL_ROUTE_CONTINUE ||
-        !ai().patrol_paths().path(shared_str(name), true))
-        return Refused();
+    if (!ai().patrol_paths().path(shared_str(name), true))
+        return ControlRefusal(self, function, GWP_ERROR_NOT_FOUND, "the level has no patrol path of this name");
     stalker->lua_game_object()->set_patrol_path(name, static_cast<EPatrolStartType>(start_type),
         static_cast<EPatrolRouteType>(route_type), random != 0);
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetStartPoint(GwpObjectId id, uint32_t point)
+GwpResult GWP_CALL ApiNpcSetStartPoint(const GwpPlugin* self, GwpObjectId id, uint32_t point)
 {
-    CCustomMonster* monster = FindMonster(id, kBody, "npc_set_start_point");
-    const CPatrolPath* path = monster ? monster->movement().patrol().get_path() : nullptr;
-    if (!path || !path->vertex(point))
-        return Refused(); // Lua logs "Path not specified" / the missing point
+    constexpr pcstr function = "npc_set_start_point";
+    GwpResult code;
+    CCustomMonster* monster = MonsterTarget(self, id, kBody, function, code);
+    if (!monster)
+        return code;
+    // Lua logs "Path not specified" / the missing point
+    const CPatrolPath* path = monster->movement().patrol().get_path();
+    if (!path)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_STATE, "the NPC has no patrol path");
+    if (!path->vertex(point))
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "the patrol path has no such point");
     monster->lua_game_object()->set_start_point(static_cast<int>(point));
     return GWP_OK;
 }
@@ -723,9 +878,9 @@ uint32_t GWP_CALL ApiNpcPatrolPathName(GwpObjectId id, char* out, uint32_t cap)
 // Plugin API (group objects): the two object methods the state manager needs
 // ---------------------------------------------------------------------------------------------
 
-uint32_t GWP_CALL ApiObjectGameVertexId(GwpObjectId id)
+uint32_t GWP_CALL ApiObjectGameVertex(GwpObjectId id)
 {
-    if (!CheckControlCall(kBody, "object_game_vertex_id"))
+    if (!CheckControlCall(kBody, "object_game_vertex"))
         return GWP_INVALID_GAME_VERTEX;
     CGameObject* object = FindControlObject(id);
     if (!object)
@@ -734,34 +889,52 @@ uint32_t GWP_CALL ApiObjectGameVertexId(GwpObjectId id)
     return vertex == GameGraph::_GRAPH_ID(-1) ? GWP_INVALID_GAME_VERTEX : static_cast<uint32_t>(vertex);
 }
 
-uint32_t GWP_CALL ApiObjectLevelVertexId(GwpObjectId id)
+uint32_t GWP_CALL ApiObjectLevelVertex(GwpObjectId id)
 {
-    if (!CheckControlCall("objects", "object_level_vertex_id"))
+    if (!CheckControlCall("objects", "object_level_vertex"))
         return GWP_INVALID_LEVEL_VERTEX;
     CScriptGameObject* object = FindArgument(id);
     return object ? object->level_vertex_id() : GWP_INVALID_LEVEL_VERTEX;
 }
 
-GwpResult GWP_CALL ApiObjectHit(GwpObjectId id, GwpObjectId who, uint32_t hit_type, float power, float impulse,
-    const float dir[3], const char* bone)
+GwpResult GWP_CALL ApiObjectHit(const GwpPlugin* self, GwpObjectId id, const GwpHit* hit_in)
 {
-    if (!CheckControlCall("objects", "object_hit"))
-        return GWP_ERROR_NOT_MAIN_THREAD;
+    constexpr pcstr function = "object_hit";
+    if (!api::CheckPluginMutation(self, "objects", function))
+        return api::PluginCallRefused(self);
+    if (!hit_in)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "hit is NULL");
+    if (hit_in->size < GWP_HIT_MIN_SIZE)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "hit->size below GWP_HIT_MIN_SIZE");
+    // The fields this engine knows: a later, longer GwpHit of the plugin is read up to them
+    GwpHit hit{};
+    std::memcpy(&hit, hit_in, std::min<size_t>(hit_in->size, sizeof(GwpHit)));
+    if (hit.reserved != 0)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "hit->reserved is not 0");
     CGameObject* object = FindControlObject(id);
-    CScriptGameObject* draftsman = FindArgument(who);
+    if (!object)
+        return ControlRefusal(self, function, api::MissingObjectCode(id), "the target is not online");
     // Hit THROWs without the initiator, and resolves a bone name through the skeleton without checking there is one
-    const bool has_bone = bone && bone[0];
-    if (!object || !draftsman || !dir || !Finite3(dir) || !std::isfinite(power) || !std::isfinite(impulse) ||
-        hit_type > GWP_HIT_PHYSIC_STRIKE || (has_bone && !smart_cast<IKinematics*>(object->Visual())))
-        return GWP_ERROR_INVALID_ARGUMENT;
-    CScriptHit hit;
-    hit.m_fPower = power;
-    hit.m_tDirection = ControlVector(dir);
-    hit.set_bone_name(has_bone ? bone : "");
-    hit.m_tpDraftsman = draftsman;
-    hit.m_fImpulse = impulse;
-    hit.m_tHitType = static_cast<int>(hit_type);
-    object->lua_game_object()->Hit(&hit);
+    CScriptGameObject* draftsman = FindArgument(hit.who);
+    if (!draftsman)
+        return ControlRefusal(self, function, api::MissingObjectCode(hit.who), "hit->who is not online");
+    if (!Finite3(hit.direction) || fis_zero(ControlVector(hit.direction).square_magnitude()))
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "zero or non-finite direction");
+    if (!std::isfinite(hit.power) || !std::isfinite(hit.impulse))
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "non-finite power or impulse");
+    if (hit.hit_type > GWP_HIT_PHYSIC_STRIKE)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "unknown hit type");
+    const bool has_bone = hit.bone && hit.bone[0];
+    if (has_bone && !smart_cast<IKinematics*>(object->Visual()))
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "a bone name on an object without a skeleton");
+    CScriptHit script_hit;
+    script_hit.m_fPower = hit.power;
+    script_hit.m_tDirection = ControlVector(hit.direction);
+    script_hit.set_bone_name(has_bone ? hit.bone : "");
+    script_hit.m_tpDraftsman = draftsman;
+    script_hit.m_fImpulse = hit.impulse;
+    script_hit.m_tHitType = static_cast<int>(hit.hit_type);
+    object->lua_game_object()->Hit(&script_hit);
     return GWP_OK;
 }
 
@@ -789,58 +962,77 @@ bool ValidSightDirection(const Fvector& direction)
     return std::isfinite(magnitude) && magnitude > EPS_S;
 }
 
-GwpResult GWP_CALL ApiNpcSetSightType(GwpObjectId id, uint32_t sight_type, int torso_look, int path)
+GwpResult GWP_CALL ApiNpcSetSightType(const GwpPlugin* self, GwpObjectId id, uint32_t sight_type, int torso_look,
+    int path)
 {
-    CAI_Stalker* stalker = FindStalker(id, kSight, "npc_set_sight_type");
-    if (!stalker || !ValidSightType(sight_type, false))
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+    constexpr pcstr function = "npc_set_sight_type";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kSight, function, code);
+    if (!stalker)
+        return code;
+    if (!ValidSightType(sight_type, false))
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "sight type not allowed in this form");
     // set_sight(type, torso_look, path), e.g. (CSightParams.eSightTypeAnimationDirection, false, false)
     stalker->lua_game_object()->set_sight(
         static_cast<SightManager::ESightType>(sight_type), torso_look != 0, path != 0);
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetSightPosition(GwpObjectId id, uint32_t sight_type, const float* point_xyz)
+GwpResult GWP_CALL ApiNpcSetSightPosition(const GwpPlugin* self, GwpObjectId id, uint32_t sight_type,
+    const float* point_xyz)
 {
-    CAI_Stalker* stalker = FindStalker(id, kSight, "npc_set_sight_position");
-    if (!stalker || !ValidSightType(sight_type, true))
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+    constexpr pcstr function = "npc_set_sight_position";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kSight, function, code);
+    if (!stalker)
+        return code;
+    if (!ValidSightType(sight_type, true))
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "sight type not allowed in this form");
     if (point_xyz && !Finite3(point_xyz))
-        return GWP_ERROR_INVALID_ARGUMENT;
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "non-finite point");
     // set_sight(type, point or nil, 0): the form of state_mgr_direction.look_position_type
     Fvector point = point_xyz ? ControlVector(point_xyz) : Fvector().set(0.f, 0.f, 0.f);
     // DIRECTION takes the point as a direction: the same check as npc_set_sight_direction
     if (sight_type == GWP_SIGHT_DIRECTION && point_xyz && !ValidSightDirection(point))
-        return GWP_ERROR_INVALID_ARGUMENT;
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "zero direction");
     stalker->lua_game_object()->set_sight(
         static_cast<SightManager::ESightType>(sight_type), point_xyz ? &point : nullptr, 0u);
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetSightDirection(GwpObjectId id, uint32_t sight_type, const float dir[3], int torso_look)
+GwpResult GWP_CALL ApiNpcSetSightDirection(const GwpPlugin* self, GwpObjectId id, uint32_t sight_type,
+    const float dir[3], int torso_look)
 {
-    CAI_Stalker* stalker = FindStalker(id, kSight, "npc_set_sight_direction");
-    if (!stalker || !ValidSightType(sight_type, false) || !dir)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
-    if (!Finite3(dir))
-        return GWP_ERROR_INVALID_ARGUMENT;
+    constexpr pcstr function = "npc_set_sight_direction";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kSight, function, code);
+    if (!stalker)
+        return code;
+    if (!ValidSightType(sight_type, false))
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "sight type not allowed in this form");
+    if (!dir || !Finite3(dir))
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "no direction or a non-finite one");
     Fvector direction = ControlVector(dir);
     // The method normalizes a longer vector (in place: Lua sees its vector changed; here it is a copy). A zero or
     // non-finite one would give NaN in the sight manager, the state manager never passes it: refused.
     if (sight_type == GWP_SIGHT_DIRECTION && !ValidSightDirection(direction))
-        return GWP_ERROR_INVALID_ARGUMENT;
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "zero direction");
     stalker->lua_game_object()->set_sight(
         static_cast<SightManager::ESightType>(sight_type), direction, torso_look != 0);
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetSightObject(GwpObjectId id, GwpObjectId target, int torso_look, int fire_object,
-    int no_pitch)
+GwpResult GWP_CALL ApiNpcSetSightObject(const GwpPlugin* self, GwpObjectId id, GwpObjectId target, int torso_look,
+    int fire_object, int no_pitch)
 {
-    CAI_Stalker* stalker = FindStalker(id, kSight, "npc_set_sight_object");
-    CScriptGameObject* object = stalker ? FindArgument(target) : nullptr;
+    constexpr pcstr function = "npc_set_sight_object";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kSight, function, code);
+    if (!stalker)
+        return code;
+    CScriptGameObject* object = FindArgument(target);
     if (!object) // the Lua method dereferences a nil object
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return ControlRefusal(self, function, api::MissingObjectCode(target), "the target is not online");
     // The 3-argument Lua form set_sight(obj, torso, fire) is this one with no_pitch = false (the same CSightAction)
     stalker->lua_game_object()->set_sight(object, torso_look != 0, fire_object != 0, no_pitch != 0);
     return GWP_OK;
@@ -848,18 +1040,31 @@ GwpResult GWP_CALL ApiNpcSetSightObject(GwpObjectId id, GwpObjectId target, int 
 
 int GWP_CALL ApiNpcSightParams(GwpObjectId id, GwpSightParams* out)
 {
-    if (out)
-        *out = GwpSightParams{ GWP_SIGHT_DUMMY, GWP_INVALID_OBJECT_ID, 0, { flt_max, flt_max, flt_max } };
-    CAI_Stalker* stalker = FindStalker(id, kSight, "npc_sight_params");
-    if (!stalker || !out)
+    // out->size is the plugin's sizeof(GwpSightParams): one without room for sight_type gets nothing written
+    if (!out || out->size < offsetof(GwpSightParams, sight_type) + sizeof(uint32_t))
         return 0;
-    const CSightParams params = stalker->lua_game_object()->sight_params();
-    out->sight_type = static_cast<uint32_t>(params.m_sight_type);
-    out->object = params.m_object ? params.m_object->ID() : GWP_INVALID_OBJECT_ID;
-    out->vector[0] = params.m_vector.x;
-    out->vector[1] = params.m_vector.y;
-    out->vector[2] = params.m_vector.z;
-    return 1;
+    // A full struct of this engine with what Lua gets for a wrong object, copied up to the size of the plugin (its
+    // size field stays as given)
+    GwpSightParams params{};
+    params.size = out->size;
+    params.sight_type = GWP_SIGHT_DUMMY;
+    params.object = GWP_INVALID_OBJECT_ID;
+    params.vector[0] = params.vector[1] = params.vector[2] = flt_max;
+    int result = 0;
+    if (CAI_Stalker* stalker = FindStalker(id, kSight, "npc_sight_params"))
+    {
+        const CSightParams sight = stalker->lua_game_object()->sight_params();
+        params.sight_type = static_cast<uint32_t>(sight.m_sight_type);
+        params.object = sight.m_object ? sight.m_object->ID() : GWP_INVALID_OBJECT_ID;
+        params.vector[0] = sight.m_vector.x;
+        params.vector[1] = sight.m_vector.y;
+        params.vector[2] = sight.m_vector.z;
+        result = 1;
+    }
+    const size_t written = std::min<size_t>(out->size, sizeof(GwpSightParams));
+    std::memcpy(out, &params, written);
+    out->size = static_cast<uint32_t>(written); // the bytes written, as *_stats answer
+    return result;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -868,45 +1073,61 @@ int GWP_CALL ApiNpcSightParams(GwpObjectId id, GwpSightParams* out)
 
 constexpr pcstr kAnim = "npc_anim";
 
-// The two add_animation forms share the checks and the answer: GWP_ERROR when the queue did not grow. The Lua
-// method returns silently then (an unknown motion is logged as Info by the engine).
-template <typename AddFn>
-GwpResult AddAnimation(GwpObjectId id, pcstr function, const char* name, AddFn add)
+// The two add_animation forms share the checks and the answer. The Lua method adds nothing in two cases, both told
+// apart here before the call (CScriptGameObject::add_animation, CStalkerAnimationManager::add_script_animation):
+// a global selector is set (a script error in Lua) - GWP_ERROR_INVALID_STATE; the visual has no such motion
+// (ID_Cycle_Safe fails, an Info line in Lua) - GWP_ERROR_NOT_FOUND. `check` refuses a bad argument of the form.
+template <typename CheckFn, typename AddFn>
+GwpResult AddAnimation(const GwpPlugin* self, GwpObjectId id, pcstr function, const char* name, CheckFn check,
+    AddFn add)
 {
-    CAI_Stalker* stalker = FindStalker(id, kAnim, function);
-    if (!stalker || !name)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kAnim, function, code);
+    if (!stalker)
+        return code;
+    if (!name)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "name is NULL");
+    if (!check())
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "no position / rotation or a non-finite one");
     // With a global selector the Lua method logs a script error and adds nothing: refused without the log
     if (stalker->animation().global_selector())
-        return GWP_ERROR;
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_STATE, "a global animation selector is set");
+    // The motion is looked up in the visual the animation manager took at its reload, the visual of the NPC
+    IKinematicsAnimated* skeleton = smart_cast<IKinematicsAnimated*>(stalker->Visual());
+    if (skeleton && !skeleton->ID_Cycle_Safe(name))
+        return ControlRefusal(self, function, GWP_ERROR_NOT_FOUND, "the visual has no such motion");
     CScriptGameObject* npc = stalker->lua_game_object();
     const int before = npc->animation_count();
     add(*npc);
-    return npc->animation_count() > before ? GWP_OK : GWP_ERROR;
+    // Not grown after the checks above: the motion was not found after all (the engine logged it)
+    if (npc->animation_count() <= before)
+        return ControlRefusal(self, function, GWP_ERROR_NOT_FOUND, "the motion was not queued");
+    return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcAddAnimation(GwpObjectId id, const char* name, int hand_usage, int use_movement_controller)
+GwpResult GWP_CALL ApiNpcAddAnimation(const GwpPlugin* self, GwpObjectId id, const char* name, int hand_usage,
+    int use_movement_controller)
 {
-    return AddAnimation(id, "npc_add_animation", name, [&](CScriptGameObject& npc) {
+    return AddAnimation(self, id, "npc_add_animation", name, [] { return true; }, [&](CScriptGameObject& npc) {
         npc.add_animation(name, hand_usage != 0, use_movement_controller != 0);
     });
 }
 
-GwpResult GWP_CALL ApiNpcAddAnimationAt(GwpObjectId id, const char* name, int hand_usage, const float position[3],
-    const float rotation[3], int local_animation)
+GwpResult GWP_CALL ApiNpcAddAnimationAt(const GwpPlugin* self, GwpObjectId id, const char* name, int hand_usage,
+    const float position[3], const float rotation[3], int local_animation)
 {
-    if (!position || !rotation || !Finite3(position) || !Finite3(rotation))
-        return CheckControlCall(kAnim, "npc_add_animation_at") ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
-    return AddAnimation(id, "npc_add_animation_at", name, [&](CScriptGameObject& npc) {
+    const auto check = [&] { return position && rotation && Finite3(position) && Finite3(rotation); };
+    return AddAnimation(self, id, "npc_add_animation_at", name, check, [&](CScriptGameObject& npc) {
         npc.add_animation(name, hand_usage != 0, ControlVector(position), ControlVector(rotation), local_animation != 0);
     });
 }
 
-GwpResult GWP_CALL ApiNpcClearAnimations(GwpObjectId id)
+GwpResult GWP_CALL ApiNpcClearAnimations(const GwpPlugin* self, GwpObjectId id)
 {
-    CAI_Stalker* stalker = FindStalker(id, kAnim, "npc_clear_animations");
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kAnim, "npc_clear_animations", code);
     if (!stalker)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return code;
     stalker->lua_game_object()->clear_animations();
     return GWP_OK;
 }
@@ -936,16 +1157,19 @@ GwpObjectId GWP_CALL ApiNpcBestWeapon(GwpObjectId id)
     return weapon ? weapon->ID() : GWP_INVALID_OBJECT_ID;
 }
 
-GwpObjectId GWP_CALL ApiNpcItemInSlot(GwpObjectId id, uint32_t slot)
+GwpObjectId GWP_CALL ApiInventoryItemInSlot(GwpObjectId id, uint32_t slot)
 {
-    if (!CheckControlCall(kInventory, "npc_item_in_slot"))
+    if (!CheckControlCall(kInventory, "inventory_item_in_slot"))
         return GWP_INVALID_OBJECT_ID;
-    // Any inventory owner, as in Lua; the method applies the minus_one_slot_ordering shift of the Lua slot numbers
-    CGameObject* object = FindControlObject(id);
-    if (!object || !smart_cast<CInventoryOwner*>(object) || slot > u16(-1))
+    // Any inventory owner, the actor too, as in Lua. The engine slot numbers (GWP_SLOT_*): not the Lua
+    // item_in_slot, which shifts them under the compatibility option minus_one_slot_ordering. ItemFromSlot VERIFYs
+    // a slot other than NO_ACTIVE_SLOT. The slots of the inventory are the named ones plus the slot_persistent_N
+    // lines of system.ltx (GW has 14, the script animation slot): bounded by LastSlot, not by GWP_SLOT_COUNT.
+    CInventoryOwner* owner = smart_cast<CInventoryOwner*>(FindControlObject(id));
+    if (!owner || slot == GWP_SLOT_NONE || slot > owner->inventory().LastSlot())
         return GWP_INVALID_OBJECT_ID;
-    const CScriptGameObject* item = object->lua_game_object()->item_in_slot(slot);
-    return item ? item->ID() : GWP_INVALID_OBJECT_ID;
+    const PIItem item = owner->inventory().ItemFromSlot(static_cast<u16>(slot));
+    return item ? item->object().ID() : GWP_INVALID_OBJECT_ID;
 }
 
 int GWP_CALL ApiNpcWeaponStrapped(GwpObjectId id)
@@ -1001,18 +1225,24 @@ bool ValidItemAction(const CAI_Stalker& stalker, uint32_t action, const CGameObj
     return false;
 }
 
-GwpResult GWP_CALL ApiNpcSetItem(
-    GwpObjectId id, uint32_t action, GwpObjectId item, uint32_t queue_size, uint32_t queue_interval)
+GwpResult GWP_CALL ApiNpcSetItem(const GwpPlugin* self, GwpObjectId id, uint32_t action, GwpObjectId item,
+    uint32_t queue_size, uint32_t queue_interval)
 {
-    CAI_Stalker* stalker = FindStalker(id, kInventory, "npc_set_item");
+    constexpr pcstr function = "npc_set_item";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kInventory, function, code);
     if (!stalker)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return code;
     // An item id that is not online is an error, not nil: nil means "nothing in the hands" to the object handler
     CScriptGameObject* object = item != GWP_INVALID_OBJECT_ID ? FindArgument(item) : nullptr;
     const CGameObject* item_object = object ? &object->object() : nullptr;
-    if ((item != GWP_INVALID_OBJECT_ID && !object) || !ValidItemAction(*stalker, action, item_object) ||
-        (queue_size == GWP_QUEUE_DEFAULT && queue_interval != GWP_QUEUE_DEFAULT))
-        return GWP_ERROR_INVALID_ARGUMENT;
+    if (item != GWP_INVALID_OBJECT_ID && !object)
+        return ControlRefusal(self, function, api::MissingObjectCode(item), "the item is not online");
+    if (!ValidItemAction(*stalker, action, item_object))
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT,
+            "an action the object handler has no case for with this item (or an item of someone else)");
+    if (queue_size == GWP_QUEUE_DEFAULT && queue_interval != GWP_QUEUE_DEFAULT)
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "a queue interval without a queue size");
     CScriptGameObject* npc = stalker->lua_game_object();
     const auto object_action = static_cast<MonsterSpace::EObjectAction>(action);
     // The overload of the Lua call with the same arguments: they differ in the queue defaults of set_goal
@@ -1041,12 +1271,16 @@ uint32_t GWP_CALL ApiNpcAimTime(GwpObjectId id, GwpObjectId weapon)
     return object ? stalker->lua_game_object()->aim_time(object) : u32(-1); // u32(-1): what Lua gets on an error
 }
 
-GwpResult GWP_CALL ApiNpcSetAimTime(GwpObjectId id, GwpObjectId weapon, uint32_t aim_time_ms)
+GwpResult GWP_CALL ApiNpcSetAimTime(const GwpPlugin* self, GwpObjectId id, GwpObjectId weapon, uint32_t aim_time_ms)
 {
-    CAI_Stalker* stalker = FindStalker(id, kInventory, "npc_set_aim_time");
-    CScriptGameObject* object = stalker ? FindWeapon(*stalker, weapon) : nullptr;
+    constexpr pcstr function = "npc_set_aim_time";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kInventory, function, code);
+    if (!stalker)
+        return code;
+    CScriptGameObject* object = FindWeapon(*stalker, weapon);
     if (!object)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "not an online weapon of the NPC");
     stalker->lua_game_object()->aim_time(object, aim_time_ms);
     return GWP_OK;
 }
@@ -1064,23 +1298,26 @@ int GWP_CALL ApiNpcUseSmartCoversOnly(GwpObjectId id)
     return npc && npc->use_smart_covers_only() ? 1 : 0;
 }
 
-GwpResult GWP_CALL ApiNpcSetUseSmartCoversOnly(GwpObjectId id, int value)
+GwpResult GWP_CALL ApiNpcSetUseSmartCoversOnly(const GwpPlugin* self, GwpObjectId id, int value)
 {
-    CAI_Stalker* stalker = FindStalker(id, kCover, "npc_set_use_smart_covers_only");
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kCover, "npc_set_use_smart_covers_only", code);
     if (!stalker)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return code;
     stalker->lua_game_object()->use_smart_covers_only(value != 0);
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetDestSmartCover(GwpObjectId id, const char* cover_name)
+GwpResult GWP_CALL ApiNpcSetDestSmartCover(const GwpPlugin* self, GwpObjectId id, const char* cover_name)
 {
-    CAI_Stalker* stalker = FindStalker(id, kCover, "npc_set_dest_smart_cover");
+    constexpr pcstr function = "npc_set_dest_smart_cover";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kCover, function, code);
     if (!stalker)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return code;
     // An unknown name: CCoverManager::smart_cover dereferences end() in release (the Lua call crashes the same way)
     if (cover_name && cover_name[0] && !ai().cover_manager().find_smart_cover(shared_str(cover_name)))
-        return GWP_ERROR_INVALID_ARGUMENT;
+        return ControlRefusal(self, function, GWP_ERROR_NOT_FOUND, "no smart cover of this name");
     if (cover_name && cover_name[0])
         stalker->lua_game_object()->set_dest_smart_cover(cover_name);
     else
@@ -1094,18 +1331,22 @@ const char* GWP_CALL ApiNpcDestSmartCoverName(GwpObjectId id)
     return stalker ? stalker->lua_game_object()->get_dest_smart_cover_name() : nullptr;
 }
 
-GwpResult GWP_CALL ApiNpcSetDestLoophole(GwpObjectId id, const char* loophole_name)
+GwpResult GWP_CALL ApiNpcSetDestLoophole(const GwpPlugin* self, GwpObjectId id, const char* loophole_name)
 {
-    CAI_Stalker* stalker = FindStalker(id, kCover, "npc_set_dest_loophole");
+    constexpr pcstr function = "npc_set_dest_loophole";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kCover, function, code);
     if (!stalker)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return code;
     // A loophole needs the smart cover set first and one of its loopholes: stalker_movement_params::cover_loophole_id
     // dereferences the cover and end() of its loopholes in release
     if (loophole_name && loophole_name[0])
     {
         const smart_cover::cover* cover = stalker->movement().target_params().cover();
-        if (!cover || !cover->get_description()->get_loophole(shared_str(loophole_name)))
-            return GWP_ERROR_INVALID_ARGUMENT;
+        if (!cover)
+            return ControlRefusal(self, function, GWP_ERROR_INVALID_STATE, "no destination smart cover set");
+        if (!cover->get_description()->get_loophole(shared_str(loophole_name)))
+            return ControlRefusal(self, function, GWP_ERROR_NOT_FOUND, "the smart cover has no loophole of this name");
     }
     if (loophole_name && loophole_name[0])
         stalker->lua_game_object()->set_dest_loophole(loophole_name);
@@ -1114,13 +1355,15 @@ GwpResult GWP_CALL ApiNpcSetDestLoophole(GwpObjectId id, const char* loophole_na
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetSmartCoverTarget(GwpObjectId id, const float* point_xyz)
+GwpResult GWP_CALL ApiNpcSetSmartCoverTarget(const GwpPlugin* self, GwpObjectId id, const float* point_xyz)
 {
-    CAI_Stalker* stalker = FindStalker(id, kCover, "npc_set_smart_cover_target");
+    constexpr pcstr function = "npc_set_smart_cover_target";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kCover, function, code);
     if (!stalker)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return code;
     if (point_xyz && !Finite3(point_xyz))
-        return GWP_ERROR_INVALID_ARGUMENT;
+        return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "non-finite point");
     if (point_xyz)
         stalker->lua_game_object()->set_smart_cover_target(ControlVector(point_xyz));
     else
@@ -1128,21 +1371,26 @@ GwpResult GWP_CALL ApiNpcSetSmartCoverTarget(GwpObjectId id, const float* point_
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcSetSmartCoverTargetObject(GwpObjectId id, GwpObjectId target)
+GwpResult GWP_CALL ApiNpcSetSmartCoverTargetObject(const GwpPlugin* self, GwpObjectId id, GwpObjectId target)
 {
-    CAI_Stalker* stalker = FindStalker(id, kCover, "npc_set_smart_cover_target_object");
-    CScriptGameObject* object = stalker ? FindArgument(target) : nullptr;
+    constexpr pcstr function = "npc_set_smart_cover_target_object";
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kCover, function, code);
+    if (!stalker)
+        return code;
+    CScriptGameObject* object = FindArgument(target);
     if (!object) // the Lua method dereferences a nil object
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return ControlRefusal(self, function, api::MissingObjectCode(target), "the target is not online");
     stalker->lua_game_object()->set_smart_cover_target(object);
     return GWP_OK;
 }
 
-GwpResult GWP_CALL ApiNpcClearSmartCoverTargetSelector(GwpObjectId id)
+GwpResult GWP_CALL ApiNpcClearSmartCoverTargetSelector(const GwpPlugin* self, GwpObjectId id)
 {
-    CAI_Stalker* stalker = FindStalker(id, kCover, "npc_clear_smart_cover_target_selector");
+    GwpResult code;
+    CAI_Stalker* stalker = StalkerTarget(self, id, kCover, "npc_clear_smart_cover_target_selector", code);
     if (!stalker)
-        return IsMainThread() ? GWP_ERROR_INVALID_ARGUMENT : GWP_ERROR_NOT_MAIN_THREAD;
+        return code;
     stalker->lua_game_object()->set_smart_cover_target_selector();
     return GWP_OK;
 }
@@ -1249,7 +1497,7 @@ void FillNpcControlApi(GwpEngineApi& api)
     api.npc_accessible_nearest = &ApiNpcAccessibleNearest;
     api.npc_location_on_path = &ApiNpcLocationOnPath;
     api.npc_path_completed = &ApiNpcPathCompleted;
-    api.object_game_vertex_id = &ApiObjectGameVertexId;
+    api.object_game_vertex = &ApiObjectGameVertex;
     api.npc_dest_level_vertex = &ApiNpcDestLevelVertex;
     api.npc_dest_game_vertex = &ApiNpcDestGameVertex;
     api.npc_set_patrol_path = &ApiNpcSetPatrolPath;
@@ -1276,7 +1524,7 @@ void FillNpcControlApi(GwpEngineApi& api)
     api.patrol_point_index = &ApiPatrolPointIndex;
     api.patrol_nearest_point = &ApiPatrolNearestPoint;
     // group objects
-    api.object_level_vertex_id = &ApiObjectLevelVertexId;
+    api.object_level_vertex = &ApiObjectLevelVertex;
     api.object_hit = &ApiObjectHit;
     // group npc_sight
     api.npc_set_sight_type = &ApiNpcSetSightType;
@@ -1292,7 +1540,7 @@ void FillNpcControlApi(GwpEngineApi& api)
     api.npc_has_script_animation_callback = &ApiNpcHasScriptAnimationCallback;
     // group inventory
     api.npc_best_weapon = &ApiNpcBestWeapon;
-    api.npc_item_in_slot = &ApiNpcItemInSlot;
+    api.inventory_item_in_slot = &ApiInventoryItemInSlot;
     api.npc_weapon_strapped = &ApiNpcWeaponStrapped;
     api.npc_weapon_unstrapped = &ApiNpcWeaponUnstrapped;
     api.npc_is_weapon_going_to_be_strapped = &ApiNpcIsWeaponGoingToBeStrapped;

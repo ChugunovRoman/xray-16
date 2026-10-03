@@ -64,6 +64,15 @@ GROUPS = {
     "inventory": ("Оружие и предметы НПС", "api/inventory.md"),
     "smart_cover": ("Смарт-укрытия", "api/smart_cover.md"),
     "patrol": ("Патрульные пути", "api/patrol.md"),
+    "squads": ("Отряды и смарты", "api/squads.md"),
+    "world": ("Игровой граф, погода и время", "api/world.md"),
+    "feedback": ("Сообщения игроку и метки PDA", "api/feedback.md"),
+    "effects": ("Звук, партиклы и эффекторы", "api/effects.md"),
+    "items": ("Инвентарь и предметы", "api/items.md"),
+    "character": ("Персонаж: деньги, отношения, характеристики", "api/character.md"),
+    "object_ext": ("Зоны, физика и модели объектов", "api/object_ext.md"),
+    "threads": ("Рабочие потоки", "api/threads.md"),
+    "services": ("Сервисы плагинов", "api/services.md"),
     "plugin": ("Класс gwp::Plugin", "api/plugin.md"),
 }
 
@@ -319,7 +328,12 @@ def signature_of(decl, class_name):
         return None, None
     head = decl[:open_paren].strip()
     name = head.split()[-1] if head else ""
-    qualifiers = re.match(r"^\s*((?:const|noexcept|override|final)\s*)*", decl[close_paren + 1:]).group(0).strip()
+    rest = decl[close_paren + 1:]
+    qualifiers_match = re.match(r"^\s*((?:const|noexcept|override|final)\s*)*", rest)
+    qualifiers = qualifiers_match.group(0).strip()
+    # A deleted overload is part of the interface: "= delete" says the call does not compile
+    if re.match(r"^\s*=\s*delete\b", rest[qualifiers_match.end():]):
+        qualifiers = (qualifiers + " = delete").strip()
     signature = (decl[:close_paren + 1] + (" " + qualifiers if qualifiers else "")).strip()
     return name, signature
 
@@ -437,7 +451,7 @@ def render(api, classes):
     w("Plugin API **%s**: %d функций движка, %d методов C++-помощников." % (api["version"], len(engine_functions),
                                                                            method_count))
     w("")
-    w("Колонка «Поток»: **главный** — вызывать только с главного потока движка; **любой** — можно с любого потока.")
+    w("Колонка «Поток»: **главный** — вызывать только с потока игровой логики (обычно это главный поток процесса, но не всегда, см. «Потоки» в [Правилах интерфейса](https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/api/conventions.md#потоки)); **любой** — можно с любого потока.")
     w("")
 
     w("## Функции движка (GwpEngineApi)")

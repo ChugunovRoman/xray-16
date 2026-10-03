@@ -15,6 +15,7 @@
 #include "xrServer_Objects_ALife_Monsters.h"
 #include "xrScriptEngine/script_engine.hpp"
 #include "xrGame/game_type.h"
+#include "addon_api_character.h"
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -135,7 +136,12 @@ void RELATION_REGISTRY::SetGoodwill(u16 from, u16 to, CHARACTER_GOODWILL goodwil
     static Ivector2 gw_limits = pSettings->r_ivector2(ACTIONS_POINTS_SECT, "personal_goodwill_limits");
     clamp(goodwill, gw_limits.x, gw_limits.y);
 
+    // Plugin API: relation_on_changed after a real change (the old value is read only when someone listens)
+    const bool notify = gw::addons::character::WantsRelationEvents();
+    const CHARACTER_GOODWILL old_goodwill = notify ? GetGoodwill(from, to) : goodwill;
     relation_data.personal[to].SetGoodwill(goodwill);
+    if (notify && old_goodwill != goodwill)
+        gw::addons::character::GoodwillChanged(from, to, old_goodwill, goodwill);
 }
 
 void RELATION_REGISTRY::ForceSetGoodwill(u16 from, u16 to, CHARACTER_GOODWILL goodwill)
@@ -155,7 +161,12 @@ void RELATION_REGISTRY::ForceSetGoodwill(u16 from, u16 to, CHARACTER_GOODWILL go
     CHARACTER_GOODWILL community_to_community_goodwill =
         GetCommunityRelation(from_obj->Community(), to_obj->Community());
 
-    relation_data.personal[to].SetGoodwill(goodwill - community_to_obj_goodwill - community_to_community_goodwill);
+    const CHARACTER_GOODWILL new_goodwill = goodwill - community_to_obj_goodwill - community_to_community_goodwill;
+    const bool notify = gw::addons::character::WantsRelationEvents();
+    const CHARACTER_GOODWILL old_goodwill = notify ? GetGoodwill(from, to) : new_goodwill;
+    relation_data.personal[to].SetGoodwill(new_goodwill);
+    if (notify && old_goodwill != new_goodwill)
+        gw::addons::character::GoodwillChanged(from, to, old_goodwill, new_goodwill);
 }
 
 void RELATION_REGISTRY::ChangeGoodwill(u16 from, u16 to, CHARACTER_GOODWILL delta_goodwill)
@@ -190,7 +201,11 @@ void RELATION_REGISTRY::SetCommunityGoodwill(
     clamp(goodwill, gw_limits.x, gw_limits.y);
     RELATION_DATA& relation_data = relation_registry().registry().objects(to_character);
 
+    const bool notify = gw::addons::character::WantsRelationEvents();
+    const CHARACTER_GOODWILL old_goodwill = notify ? GetCommunityGoodwill(from_community, to_character) : goodwill;
     relation_data.communities[from_community].SetGoodwill(goodwill);
+    if (notify && old_goodwill != goodwill)
+        gw::addons::character::CommunityGoodwillChanged(from_community, to_character, old_goodwill, goodwill);
 }
 
 void RELATION_REGISTRY::ChangeCommunityGoodwill(
@@ -215,6 +230,8 @@ CHARACTER_GOODWILL RELATION_REGISTRY::GetDefaultCommunityRelation(
 void RELATION_REGISTRY::ResetRelationsToDefault()
 {
     CHARACTER_COMMUNITY::reset_relations_to_default();
+    if (gw::addons::character::WantsRelationEvents())
+        gw::addons::character::RelationsReset();
 }
 
 CHARACTER_GOODWILL RELATION_REGISTRY::GetRankRelation(CHARACTER_RANK_VALUE rank1, CHARACTER_RANK_VALUE rank2) const
@@ -239,5 +256,9 @@ CHARACTER_GOODWILL RELATION_REGISTRY::GetReputationRelation(
 void RELATION_REGISTRY::SetCommunityRelation(
     CHARACTER_COMMUNITY_INDEX index1, CHARACTER_COMMUNITY_INDEX index2, CHARACTER_GOODWILL goodwill)
 {
+    const bool notify = gw::addons::character::WantsRelationEvents();
+    const CHARACTER_GOODWILL old_goodwill = notify ? GetCommunityRelation(index1, index2) : goodwill;
     CHARACTER_COMMUNITY::set_relation(index1, index2, goodwill);
+    if (notify && old_goodwill != goodwill)
+        gw::addons::character::CommunityRelationChanged(index1, index2, old_goodwill, goodwill);
 }

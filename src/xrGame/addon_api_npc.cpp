@@ -5,6 +5,7 @@
 // npc:best_enemy(), npc:best_danger(), npc:memory_time(...) - including their filters of dead or unloaded objects.
 // Docs: wiki/doc/plugins/api/npc.md, wiki/doc/plugins/api/script.md
 
+#include "addon_api_common.h"
 #include "addon_event_bus.h"
 #include "addon_host.h"
 
@@ -39,6 +40,7 @@ static_assert(GWP_DANGER_ENEMY_SOUND == CDangerObject::eDangerTypeEnemySound);
 #include "Include/xrRender/Kinematics.h"
 #include "InventoryOwner.h"
 #include "HudItem.h"
+#include "Weapon.h"
 #include "Actor.h"
 #include "ai/stalker/ai_stalker.h"
 #include "stalker_movement_manager_smart_cover.h"
@@ -46,6 +48,30 @@ static_assert(GWP_DANGER_ENEMY_SOUND == CDangerObject::eDangerTypeEnemySound);
 #include "script_game_object.h"
 #include "stalker_planner.h"
 #include "xrScriptEngine/script_engine.hpp"
+
+// The item states of gwp_api.h are CHUDState::EHudStates and CWeapon::EWeaponStates (item_state hands the engine
+// value on)
+static_assert(GWP_ITEM_STATE_HIDDEN == CHUDState::eHidden);
+static_assert(GWP_ITEM_STATE_IDLE == CHUDState::eIdle);
+static_assert(GWP_ITEM_STATE_SHOWING == CHUDState::eShowing);
+static_assert(GWP_ITEM_STATE_HIDING == CHUDState::eHiding);
+static_assert(GWP_ITEM_STATE_BORE == CHUDState::eBore);
+static_assert(GWP_ITEM_STATE_BOLT_THROW_START == CHUDState::eBoltThrowStart);
+static_assert(GWP_ITEM_STATE_BOLT_THROW_IDLE == CHUDState::eBoltThrowIdle);
+static_assert(GWP_ITEM_STATE_BOLT_THROW_END == CHUDState::eBoltThrowEnd);
+static_assert(GWP_ITEM_STATE_ZOOM_START == CHUDState::eWpnZoomStart);
+static_assert(GWP_ITEM_STATE_ZOOM_IDLE == CHUDState::eWpnZoomIdle);
+static_assert(GWP_ITEM_STATE_ZOOM_END == CHUDState::eWpnZoomEnd);
+static_assert(GWP_ITEM_STATE_LAST_BASE == CHUDState::eLastBaseState);
+static_assert(GWP_ITEM_STATE_FIRE == CWeapon::eFire);
+static_assert(GWP_ITEM_STATE_FIRE2 == CWeapon::eFire2);
+static_assert(GWP_ITEM_STATE_RELOAD == CWeapon::eReload);
+static_assert(GWP_ITEM_STATE_MISFIRE == CWeapon::eMisfire);
+static_assert(GWP_ITEM_STATE_MAG_EMPTY == CWeapon::eMagEmpty);
+static_assert(GWP_ITEM_STATE_SWITCH == CWeapon::eSwitch);
+static_assert(GWP_ITEM_STATE_UNMISFIRE == CWeapon::eUnMisfire);
+static_assert(GWP_ITEM_STATE_AIM_START == CWeapon::eAimStart);
+static_assert(GWP_ITEM_STATE_AIM_END == CWeapon::eAimEnd);
 
 namespace gw::addons
 {
@@ -100,20 +126,29 @@ GwpObjectId GWP_CALL ApiNpcCurrentEnemy(GwpObjectId id)
 
 int GWP_CALL ApiNpcBestDanger(GwpObjectId id, GwpDanger* out)
 {
-    if (out)
-        *out = GwpDanger{ 0, 0, GWP_INVALID_OBJECT_ID, 0, { 0.f, 0.f, 0.f } };
-    CScriptGameObject* npc = FindNpc(id, "npc_best_danger");
-    const CDangerObject* danger = npc && out ? npc->GetBestDanger() : nullptr;
-    if (!danger)
+    // out->size is the sizeof(GwpDanger) of the plugin: a struct of an older (shorter) version gets its own bytes
+    // only, one without even the type field gets nothing
+    if (!out || out->size < offsetof(GwpDanger, type) + sizeof(uint32_t))
         return 0;
-    out->type = static_cast<uint32_t>(danger->type());
-    out->time = danger->time();
-    out->object = danger->object() ? danger->object()->ID() : GWP_INVALID_OBJECT_ID;
-    const Fvector& position = danger->position();
-    out->position[0] = position.x;
-    out->position[1] = position.y;
-    out->position[2] = position.z;
-    return 1;
+    const uint32_t size = out->size;
+    GwpDanger result{};
+    result.object = GWP_INVALID_OBJECT_ID;
+    CScriptGameObject* npc = FindNpc(id, "npc_best_danger");
+    const CDangerObject* danger = npc ? npc->GetBestDanger() : nullptr;
+    if (danger)
+    {
+        result.type = static_cast<uint32_t>(danger->type());
+        result.time = danger->time();
+        result.object = danger->object() ? danger->object()->ID() : GWP_INVALID_OBJECT_ID;
+        const Fvector& position = danger->position();
+        result.position[0] = position.x;
+        result.position[1] = position.y;
+        result.position[2] = position.z;
+    }
+    std::memcpy(out, &result, std::min<size_t>(size, sizeof(GwpDanger)));
+    // The bytes written, as *_stats answer: a plugin newer than the engine sees which fields it got
+    out->size = static_cast<uint32_t>(std::min<size_t>(size, sizeof(GwpDanger)));
+    return danger ? 1 : 0;
 }
 
 uint32_t GWP_CALL ApiNpcMemoryTime(GwpObjectId id, GwpObjectId other)
@@ -138,18 +173,19 @@ int GWP_CALL ApiNpcMemoryPosition(GwpObjectId id, GwpObjectId other, float out_x
     return 1;
 }
 
-const char* GWP_CALL ApiNpcCommunity(GwpObjectId id)
+const char* GWP_CALL ApiCharacterCommunity(GwpObjectId id)
 {
-    if (!CheckNpcCall("npc", "npc_community"))
+    if (!CheckNpcCall("npc", "character_community"))
         return nullptr;
-    // An inventory owner only: CharacterCommunity logs a script error for anything else.
+    // An inventory owner only (a stalker, the actor, a trader): CharacterCommunity logs a script error for
+    // anything else.
     const CInventoryOwner* owner = smart_cast<const CInventoryOwner*>(FindOnline(id));
     return owner ? owner->CharacterInfo().Community().id().c_str() : nullptr;
 }
 
-GwpObjectId GWP_CALL ApiNpcActiveItem(GwpObjectId id)
+GwpObjectId GWP_CALL ApiInventoryActiveItem(GwpObjectId id)
 {
-    if (!CheckNpcCall("npc", "npc_active_item"))
+    if (!CheckNpcCall("npc", "inventory_active_item"))
         return GWP_INVALID_OBJECT_ID;
     // An inventory owner only: GetActiveItem logs a script error for anything else.
     CInventoryOwner* owner = smart_cast<CInventoryOwner*>(FindOnline(id));
@@ -187,9 +223,9 @@ int GWP_CALL ApiNpcInSmartCover(GwpObjectId id)
     return stalker && stalker->movement().in_smart_cover() ? 1 : 0;
 }
 
-int GWP_CALL ApiNpcIsTalking(GwpObjectId id)
+int GWP_CALL ApiCharacterIsTalking(GwpObjectId id)
 {
-    if (!CheckNpcCall("npc", "npc_is_talking"))
+    if (!CheckNpcCall("npc", "character_is_talking"))
         return 0;
     // CScriptGameObject::IsTalking: an inventory owner in a dialog (the actor answers here too), false for
     // anything else, without the script error Lua logs. IsTalking is not const there either
@@ -251,9 +287,9 @@ uint32_t GWP_CALL ApiNpcMemoryVisibleObjects(GwpObjectId id, GwpObjectId* out, u
     return count;
 }
 
-int GWP_CALL ApiNpcRelation(GwpObjectId id, GwpObjectId other)
+int GWP_CALL ApiCreatureRelation(GwpObjectId id, GwpObjectId other)
 {
-    if (!CheckNpcCall("npc", "npc_relation"))
+    if (!CheckNpcCall("npc", "creature_relation"))
         return -1;
     // GetRelationType logs a script error unless both are creatures: checked here, without the log
     CEntityAlive* npc = smart_cast<CEntityAlive*>(FindOnline(id));
@@ -284,17 +320,17 @@ GwpObjectId GWP_CALL ApiNpcBestDangerDependent(GwpObjectId id)
 }
 
 // npc.health / npc.psy_health: -1 for anything but a creature, as the Lua properties answer (with a script error)
-float GWP_CALL ApiNpcHealth(GwpObjectId id)
+float GWP_CALL ApiCreatureHealth(GwpObjectId id)
 {
-    if (!CheckNpcCall("npc", "npc_health"))
+    if (!CheckNpcCall("npc", "creature_health"))
         return -1.f;
     const CEntityAlive* alive = smart_cast<const CEntityAlive*>(FindOnline(id));
     return alive ? alive->conditions().GetHealth() : -1.f;
 }
 
-float GWP_CALL ApiNpcPsyHealth(GwpObjectId id)
+float GWP_CALL ApiCreaturePsyHealth(GwpObjectId id)
 {
-    if (!CheckNpcCall("npc", "npc_psy_health"))
+    if (!CheckNpcCall("npc", "creature_psy_health"))
         return -1.f;
     const CEntityAlive* alive = smart_cast<const CEntityAlive*>(FindOnline(id));
     return alive ? alive->conditions().GetPsyHealth() : -1.f;
@@ -303,18 +339,19 @@ float GWP_CALL ApiNpcPsyHealth(GwpObjectId id)
 uint32_t GWP_CALL ApiItemState(GwpObjectId id)
 {
     if (!CheckNpcCall("inventory", "item_state"))
-        return 65535;
+        return GWP_ITEM_STATE_NONE;
+    // GetState of Lua: the state of a weapon or another hud item, GWP_ITEM_STATE_NONE (its 65535) for anything else
     CGameObject* object = FindOnline(id);
-    return object ? object->lua_game_object()->GetState() : 65535;
+    return object ? object->lua_game_object()->GetState() : GWP_ITEM_STATE_NONE;
 }
 
 uint32_t GWP_CALL ApiItemAnimationSlot(GwpObjectId id)
 {
     if (!CheckNpcCall("inventory", "item_animation_slot"))
-        return 0xFFFFFFFFu;
+        return GWP_ANIMATION_SLOT_NONE;
     // A hud item only: animation_slot logs a script error for anything else
     CHudItem* item = smart_cast<CHudItem*>(FindOnline(id)); // animation_slot is not const
-    return item ? static_cast<uint32_t>(item->animation_slot()) : 0xFFFFFFFFu;
+    return item ? static_cast<uint32_t>(item->animation_slot()) : GWP_ANIMATION_SLOT_NONE;
 }
 
 const char* GWP_CALL ApiObjectVisual(GwpObjectId id)
@@ -610,19 +647,16 @@ int32_t GWP_CALL ApiAlifeObjectLevelId(GwpObjectId id)
     return static_cast<int32_t>(graph->vertex(alife->m_tGraphID)->level_id());
 }
 
-int GWP_CALL ApiAlifeObjectClsid(GwpObjectId id, char* out, uint32_t cap)
+uint32_t GWP_CALL ApiAlifeObjectClassId(GwpObjectId id, char* out, uint32_t cap)
 {
-    // The fourcc of the class id, the CLSID2TEXT form (8 characters): the stable class identity, the same bytes
-    // the saves hold ("SMRTTRRN" - the script smart terrain, "ON_OFF_S" - a squad, "S_ACTOR" - the actor). The
-    // script class names of class_registrator.script are private to the object factory; the fourcc names the same
-    // classes one to one.
+    // The class id as text, the form of object_class_id (up to 8 characters, the padding spaces cut): the stable
+    // class identity, the same bytes the saves hold ("SMRTTRRN" - the script smart terrain, "ON_OFF_S" - a squad,
+    // "S_ACTOR" - the actor). The script class names of class_registrator.script are private to the object
+    // factory; the class id names the same classes one to one.
     if (out && cap)
         out[0] = '\0';
-    CSE_Abstract* object = FindServerObject(id, "alife_object_clsid");
-    if (!object || !out || cap < 9)
-        return 0;
-    CLSID2TEXT(object->m_tClassID, out); // writes exactly 8 characters and the terminator
-    return 1;
+    CSE_Abstract* object = FindServerObject(id, "alife_object_class_id");
+    return object ? api::CopyClassIdText(object->m_tClassID, out, cap) : 0;
 }
 
 float GWP_CALL ApiAlifeSmartArriveDist(GwpObjectId smart)
@@ -640,7 +674,12 @@ float GWP_CALL ApiAlifeSmartArriveDist(GwpObjectId smart)
 constexpr u32 kMaxScriptDepth = 16;
 constexpr u32 kMaxErrorsPerFunction = 5;
 u32 g_script_depth = 0;
-xr_string* g_script_result = nullptr; // the text of the last string result
+// The last result of script_call per plugin (a deep copy: strings, bytes, the items of arrays): what *result points
+// into lives until the next script_call of the same plugin (gwp_api.h), when its slot is assigned again. One slot
+// per plugin: a plugin passing its result on (event_emit, a handler) is not broken by a script_call of another one.
+// Keyed by the handle, which belongs to the addon record (the same for every load of the plugin): the map holds at
+// most one entry per addon, so the slots are not dropped on unload.
+xr_unordered_map<const GwpPlugin*, events::OwnedValue>* g_script_results = nullptr;
 xr_unordered_map<xr_string, u32>* g_script_errors = nullptr;
 
 // A Lua function called by name: its registry ref in the current Lua state and the counters of script_call_list.
@@ -715,14 +754,25 @@ GwpResult GWP_CALL ApiScriptCall(
     if (!CheckNpcCall("script", "script_call"))
         return GWP_ERROR_NOT_MAIN_THREAD;
     // The name goes into 256-byte buffers of the script engine (parse_script_namespace), checked by VERIFY only
-    if (!self || !function || !function[0] || xr_strlen(function) >= 256 || (argc && !argv))
+    if (!self || !function || !function[0] || xr_strlen(function) >= 256)
         return GWP_ERROR_INVALID_ARGUMENT;
+    // argv NULL with argc > 0, reserved != 0, a type of a later version, an array over its limits
+    if (events::CheckValues(argv, argc) != GWP_OK)
+    {
+        LogScriptError(self, function, "an invalid argument value");
+        return GWP_ERROR_INVALID_ARGUMENT;
+    }
+    if (argc > 64)
+    {
+        LogScriptError(self, function, "too many arguments (at most 64)");
+        return GWP_ERROR_INVALID_ARGUMENT;
+    }
     if (!GEnv.ScriptEngine || !GEnv.ScriptEngine->lua())
-        return GWP_ERROR;
+        return GWP_ERROR_INVALID_STATE;
     if (g_script_depth >= kMaxScriptDepth)
     {
         LogScriptError(self, function, "calls nested too deep");
-        return GWP_ERROR;
+        return GWP_ERROR_INVALID_STATE;
     }
 
     // The coroutine of a Lua emit when a handler of it calls us, the main state otherwise (the registry is shared).
@@ -733,9 +783,10 @@ GwpResult GWP_CALL ApiScriptCall(
         L = events::ActiveLuaThread();
     if (!L)
         L = GEnv.ScriptEngine->lua();
-    if (argc > 64 || !lua_checkstack(L, static_cast<int>(argc) + 4))
+    // + 4: the function and the result (PushLuaValue checks the stack itself while it fills an array)
+    if (!lua_checkstack(L, static_cast<int>(argc) + 4))
     {
-        LogScriptError(self, function, "too many arguments");
+        LogScriptError(self, function, "the Lua stack cannot grow");
         return GWP_ERROR;
     }
     const int top = lua_gettop(L);
@@ -745,10 +796,11 @@ GwpResult GWP_CALL ApiScriptCall(
     {
         ++entry.errors;
         LogScriptError(self, function, "no such function");
-        return GWP_ERROR;
+        return GWP_ERROR_NOT_FOUND;
     }
+    // GWP_T_OBJECT becomes the game object, an array a new table, bytes a Lua string, as for event arguments
     for (uint32_t i = 0; i < argc; ++i)
-        events::PushLuaValue(L, argv[i]); // GWP_T_OBJECT becomes the game object, as for event arguments
+        events::PushLuaValue(L, argv[i]);
     ++g_script_depth;
     ZoneScopedN("plugin/script_call"); // Tracy: the Lua function a plugin calls, text = its name
     ZoneTextF("%s", function);
@@ -762,70 +814,93 @@ GwpResult GWP_CALL ApiScriptCall(
         const pcstr message = lua_isstring(L, -1) ? lua_tostring(L, -1) : "error without a message";
         LogScriptError(self, function, message);
         lua_settop(L, top);
-        return GWP_ERROR;
+        return GWP_ERROR_CRASHED; // the Lua function raised an error (logged with its message)
     }
     if (result)
     {
-        GwpValue value = events::LuaToValue(L, -1);
-        if (value.type == GWP_T_STRING)
-        {
-            // the Lua string goes away with the stack slot: keep a copy until the next call
-            if (!g_script_result)
-                g_script_result = xr_new<xr_string>();
-            g_script_result->assign(value.u.s.ptr ? value.u.s.ptr : "", value.u.s.ptr ? value.u.s.len : 0);
-            value.u.s.ptr = g_script_result->c_str();
-        }
-        *result = value;
+        // A table with the keys 1..n becomes an array (its items in the call-local arena), any other table
+        // GWP_T_LUA_REF. The Lua data goes away with the stack slot: a deep copy is kept until the next call of
+        // this plugin (the map is node-based: a slot stays at its address when other plugins add theirs).
+        events::ValueArena arena;
+        const GwpValue value = events::LuaToValue(L, -1, &arena);
+        if (!g_script_results)
+            g_script_results = xr_new<xr_unordered_map<const GwpPlugin*, events::OwnedValue>>();
+        events::OwnedValue& slot = (*g_script_results)[self];
+        slot.Assign(value);
+        *result = slot.view();
     }
     lua_settop(L, top);
     return GWP_OK;
 }
 
 // The talk calls of the Lua meet scripts (xr_meet), one engine method each: CScriptGameObject::EnableTalk /
-// DisableTalk / StopTalk / IsTalkEnabled / SetTipText; an object that is not an inventory owner is skipped silently,
-// as by the Lua methods
-void GWP_CALL ApiNpcEnableTalk(GwpObjectId id)
+// DisableTalk / StopTalk / IsTalkEnabled / SetTipText. The Lua methods skip an object that is not an inventory owner
+// silently; the changes here refuse it with GWP_ERROR_INVALID_ARGUMENT and name the plugin in the log.
+
+// The online inventory owner a talk change goes to (a stalker, the actor, a trader), or the code of the refusal
+GwpResult FindTalkCharacter(const GwpPlugin* self, GwpObjectId id, pcstr function, CInventoryOwner*& owner)
 {
-    if (!CheckNpcCall("npc", "npc_enable_talk"))
-        return;
-    CInventoryOwner* owner = smart_cast<CInventoryOwner*>(FindOnline(id));
+    owner = nullptr;
+    if (!api::CheckPluginMutation(self, "npc", function))
+        return api::PluginCallRefused(self);
+    owner = api::FindOnline<CInventoryOwner>(id);
+    if (owner)
+        return GWP_OK;
+    const GwpResult code = api::MissingObjectCode(id);
+    string128 why;
+    xr_sprintf(why, "object %u is %s", static_cast<u32>(id),
+        code == GWP_ERROR_INVALID_ARGUMENT ? "not a character (an inventory owner)" : "not online");
+    return api::PluginRefusal(self, function, code, why);
+}
+
+GwpResult GWP_CALL ApiCharacterEnableTalk(const GwpPlugin* self, GwpObjectId id)
+{
+    CInventoryOwner* owner = nullptr;
+    const GwpResult result = FindTalkCharacter(self, id, "character_enable_talk", owner);
     if (owner)
         owner->EnableTalk();
+    return result;
 }
 
-void GWP_CALL ApiNpcDisableTalk(GwpObjectId id)
+GwpResult GWP_CALL ApiCharacterDisableTalk(const GwpPlugin* self, GwpObjectId id)
 {
-    if (!CheckNpcCall("npc", "npc_disable_talk"))
-        return;
-    CInventoryOwner* owner = smart_cast<CInventoryOwner*>(FindOnline(id));
+    CInventoryOwner* owner = nullptr;
+    const GwpResult result = FindTalkCharacter(self, id, "character_disable_talk", owner);
     if (owner)
         owner->DisableTalk();
+    return result;
 }
 
-void GWP_CALL ApiNpcStopTalk(GwpObjectId id)
+GwpResult GWP_CALL ApiCharacterStopTalk(const GwpPlugin* self, GwpObjectId id)
 {
-    if (!CheckNpcCall("npc", "npc_stop_talk"))
-        return;
-    CInventoryOwner* owner = smart_cast<CInventoryOwner*>(FindOnline(id));
+    CInventoryOwner* owner = nullptr;
+    const GwpResult result = FindTalkCharacter(self, id, "character_stop_talk", owner);
     if (owner)
         owner->StopTalk();
+    return result;
 }
 
-int GWP_CALL ApiNpcIsTalkEnabled(GwpObjectId id)
+int GWP_CALL ApiCharacterIsTalkEnabled(GwpObjectId id)
 {
-    if (!CheckNpcCall("npc", "npc_is_talk_enabled"))
+    if (!CheckNpcCall("npc", "character_is_talk_enabled"))
         return 0;
-    CInventoryOwner* owner = smart_cast<CInventoryOwner*>(FindOnline(id));
+    CInventoryOwner* owner = smart_cast<CInventoryOwner*>(FindOnline(id)); // IsTalkEnabled is not const
     return owner && owner->IsTalkEnabled() ? 1 : 0;
 }
 
-void GWP_CALL ApiNpcSetTipText(GwpObjectId id, const char* text)
+GwpResult GWP_CALL ApiObjectSetTipText(const GwpPlugin* self, GwpObjectId id, const char* text)
 {
-    if (!CheckNpcCall("npc", "npc_set_tip_text"))
-        return;
-    CGameObject* object = FindOnline(id);
-    if (object)
-        object->set_tip_text(text ? text : "");
+    if (!api::CheckPluginMutation(self, "npc", "object_set_tip_text"))
+        return api::PluginCallRefused(self);
+    CGameObject* object = api::FindOnlineObject(id);
+    if (!object)
+    {
+        string128 why;
+        xr_sprintf(why, "object %u is not online", static_cast<u32>(id));
+        return api::PluginRefusal(self, "object_set_tip_text", api::MissingObjectCode(id), why);
+    }
+    object->set_tip_text(text ? text : "");
+    return GWP_OK;
 }
 } // namespace
 
@@ -845,8 +920,8 @@ void FillNpcApi(GwpEngineApi& api)
     api.npc_best_danger = &ApiNpcBestDanger;
     api.npc_memory_time = &ApiNpcMemoryTime;
     api.npc_memory_position = &ApiNpcMemoryPosition;
-    api.npc_community = &ApiNpcCommunity;
-    api.npc_active_item = &ApiNpcActiveItem;
+    api.character_community = &ApiCharacterCommunity;
+    api.inventory_active_item = &ApiInventoryActiveItem;
     api.npc_feel_touch = &ApiNpcFeelTouch;
     api.object_visual = &ApiObjectVisual;
     api.alife_object_squad = &ApiAlifeObjectSquad;
@@ -865,30 +940,30 @@ void FillNpcApi(GwpEngineApi& api)
     api.alife_object_game_vertex = &ApiAlifeObjectGameVertex;
     api.alife_object_level_vertex = &ApiAlifeObjectLevelVertex;
     api.alife_object_level_id = &ApiAlifeObjectLevelId;
-    api.alife_object_clsid = &ApiAlifeObjectClsid;
+    api.alife_object_class_id = &ApiAlifeObjectClassId;
     api.alife_smart_arrive_dist = &ApiAlifeSmartArriveDist;
     api.npc_critically_wounded = &ApiNpcCriticallyWounded;
     api.npc_in_smart_cover = &ApiNpcInSmartCover;
-    api.npc_is_talking = &ApiNpcIsTalking;
+    api.character_is_talking = &ApiCharacterIsTalking;
     api.npc_see = &ApiNpcSee;
     api.npc_main_action = &ApiNpcMainAction;
     api.npc_memory_visible_objects = &ApiNpcMemoryVisibleObjects;
-    api.npc_relation = &ApiNpcRelation;
+    api.creature_relation = &ApiCreatureRelation;
     api.npc_wounded = &ApiNpcWounded;
     api.npc_best_danger_dependent = &ApiNpcBestDangerDependent;
-    api.npc_health = &ApiNpcHealth;
-    api.npc_psy_health = &ApiNpcPsyHealth;
+    api.creature_health = &ApiCreatureHealth;
+    api.creature_psy_health = &ApiCreaturePsyHealth;
     api.object_bone_position = &ApiObjectBonePosition;
     api.object_parent = &ApiObjectParent;
     api.object_death_time = &ApiObjectDeathTime;
     api.item_state = &ApiItemState;
     api.item_animation_slot = &ApiItemAnimationSlot;
     api.script_call = &ApiScriptCall;
-    api.npc_enable_talk = &ApiNpcEnableTalk;
-    api.npc_disable_talk = &ApiNpcDisableTalk;
-    api.npc_stop_talk = &ApiNpcStopTalk;
-    api.npc_is_talk_enabled = &ApiNpcIsTalkEnabled;
-    api.npc_set_tip_text = &ApiNpcSetTipText;
+    api.character_enable_talk = &ApiCharacterEnableTalk;
+    api.character_disable_talk = &ApiCharacterDisableTalk;
+    api.character_stop_talk = &ApiCharacterStopTalk;
+    api.character_is_talk_enabled = &ApiCharacterIsTalkEnabled;
+    api.object_set_tip_text = &ApiObjectSetTipText;
 }
 
 void PrintScriptCallList(bool reset)
@@ -930,7 +1005,7 @@ void PrintScriptCallList(bool reset)
 
 void ShutdownNpcApi()
 {
-    xr_delete(g_script_result);
+    xr_delete(g_script_results);
     xr_delete(g_script_functions); // the refs die with the Lua state
     xr_delete(g_script_errors);
     g_script_stats_since_ms = 0;

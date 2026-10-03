@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 
 #include "addon_callbacks.h"
+#include "addon_api_common.h"
 #include "addon_event_bus.h"
 #include "addon_host.h"
 
@@ -177,11 +178,19 @@ bool Ask(EKind kind, u16 npc, u16 enemy, u32 point)
 
 void ResetNpc(CCustomMonster* npc) { npc->memory().enemy().clear_useful_callback_cache(); }
 
-void GWP_CALL ApiNpcEnemyFilterReset(GwpObjectId id);
-
 // The engine caches the enemy decision per NPC and enemy (250 ms): a filter that appears or goes away must not be
 // shadowed by answers given without it.
-void ApiResetAll() { ApiNpcEnemyFilterReset(GWP_INVALID_OBJECT_ID); }
+void ApiResetAll()
+{
+    if (!g_pGameLevel)
+        return;
+    const u32 count = Level().Objects.o_count();
+    for (u32 i = 0; i < count; ++i)
+    {
+        if (CCustomMonster* npc = smart_cast<CCustomMonster*>(Level().Objects.o_get_by_iterator(i)))
+            ResetNpc(npc);
+    }
+}
 
 GwpCallbackId Register(const GwpPlugin* self, EKind kind, GwpEnemyFilterFn enemy, GwpPatrolExtrapolateFn patrol,
     void* user, pcstr function)
@@ -225,12 +234,25 @@ GwpResult GWP_CALL ApiCallbackUnregister(const GwpPlugin* self, GwpCallbackId id
 {
     if (!CheckCall("callback_unregister"))
         return GWP_ERROR_NOT_MAIN_THREAD;
-    if (id == GWP_INVALID_CALLBACK_ID || !g_callbacks)
+    if (!self || id == GWP_INVALID_CALLBACK_ID)
         return GWP_ERROR_INVALID_ARGUMENT;
+    if (!g_callbacks)
+        return GWP_ERROR_NOT_FOUND;
+    // A dead entry (removed during a dispatch, erased after it) has the invalid id: it is not found either
     const auto it = std::find_if(g_callbacks->begin(), g_callbacks->end(),
-        [id, self](const Callback& callback) { return callback.id == id && callback.plugin == self; });
+        [id](const Callback& callback) { return callback.id == id; });
     if (it == g_callbacks->end())
-        return GWP_ERROR_INVALID_ARGUMENT;
+    {
+        if (IsDebugLog())
+            Msg("~ [plugin:%s] callback_unregister: no callback #%u", PluginAddonId(self), id);
+        return GWP_ERROR_NOT_FOUND;
+    }
+    if (it->plugin != self)
+    {
+        if (IsDebugLog())
+            Msg("~ [plugin:%s] callback_unregister: callback #%u belongs to another plugin", PluginAddonId(self), id);
+        return GWP_ERROR_ACCESS_DENIED;
+    }
     const bool enemy = it->kind == EKind::Enemy;
     RemoveOf(self, id);
     if (enemy)
@@ -238,22 +260,25 @@ GwpResult GWP_CALL ApiCallbackUnregister(const GwpPlugin* self, GwpCallbackId id
     return GWP_OK;
 }
 
-void GWP_CALL ApiNpcEnemyFilterReset(GwpObjectId id)
+GwpResult GWP_CALL ApiNpcEnemyFilterReset(const GwpPlugin* self, GwpObjectId id)
 {
-    if (!CheckCall("npc_enemy_filter_reset") || !g_pGameLevel)
-        return;
-    if (id != GWP_INVALID_OBJECT_ID)
+    if (!api::CheckPluginMutation(self, "callbacks", "npc_enemy_filter_reset"))
+        return api::PluginCallRefused(self);
+    if (!g_pGameLevel)
+        return GWP_ERROR_INVALID_STATE;
+    if (id == GWP_INVALID_OBJECT_ID) // every online NPC
     {
-        if (CCustomMonster* npc = smart_cast<CCustomMonster*>(Level().Objects.net_Find(id)))
-            ResetNpc(npc);
-        return;
+        ApiResetAll();
+        return GWP_OK;
     }
-    const u32 count = Level().Objects.o_count();
-    for (u32 i = 0; i < count; ++i)
+    CCustomMonster* npc = api::FindOnline<CCustomMonster>(id);
+    if (!npc)
     {
-        if (CCustomMonster* npc = smart_cast<CCustomMonster*>(Level().Objects.o_get_by_iterator(i)))
-            ResetNpc(npc);
+        // NOT_FOUND: nothing with the id online; INVALID_ARGUMENT: an online object that is not an NPC
+        return api::PluginRefusal(self, "npc_enemy_filter_reset", api::MissingObjectCode(id), "not an online NPC");
     }
+    ResetNpc(npc);
+    return GWP_OK;
 }
 } // namespace
 

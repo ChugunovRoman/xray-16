@@ -17,6 +17,8 @@
 #include "alife_schedule_registry.h"
 #include "alife_smart_terrain_registry.h"
 #include "alife_group_registry.h"
+#include "addon_api_alife_ext.h"
+#include "addon_binders.h"
 
 using namespace ALife;
 
@@ -54,11 +56,16 @@ void CALifeSimulatorBase::register_object(CSE_ALifeDynamicObject* object, bool a
     }
 
     if (can_register_objects())
+    {
         object->on_register();
+        gw::addons::alife_ext::OnServerObjectRegistered(object); // server_object_on_register
+    }
 }
 
 void CALifeSimulatorBase::unregister_object(CSE_ALifeDynamicObject* object, bool alife_query)
 {
+    gw::addons::alife_ext::OnServerObjectUnregistering(object); // server_object_on_unregister: still in the registries
+    gw::addons::binders::OnServerObjectRelease(object->ID); // the kept binder state of this id: the id may be reused
     object->on_unregister();
 
     CSE_ALifeInventoryItem* item = smart_cast<CSE_ALifeInventoryItem*>(object);

@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 
 #include "addon_goap.h"
+#include "addon_api_common.h"
 #include "addon_event_bus.h"
 #include "addon_host.h"
 
@@ -889,13 +890,14 @@ void DisablePlugin(const GwpPlugin* plugin)
 GwpEvaluatorId GWP_CALL ApiEvaluatorRegister(const GwpPlugin* self, uint32_t planner, uint32_t property_id,
     const char* lua_name, GwpEvaluatorFn fn, void* user, uint32_t mode)
 {
-    if (!CheckCall("evaluator_register"))
+    if (!api::CheckPluginMutation(self, "goap", "evaluator_register"))
         return GWP_INVALID_EVALUATOR_ID;
     const pcstr addon = PluginAddonId(self);
-    if (!self || !fn || mode > GWP_EVALUATOR_SHADOW)
+    // The high 16 bits of `mode` are flags (GWP_MODE_FLAGS_MASK): none is defined yet, so any is refused
+    if (!fn || (mode & GWP_MODE_FLAGS_MASK) || (mode & GWP_MODE_MASK) > GWP_EVALUATOR_SHADOW)
     {
-        Msg("! [plugin:%s] evaluator_register: %s", addon,
-            !self ? "no plugin handle" : !fn ? "no function" : "unknown mode");
+        Msg("! [plugin:%s] evaluator_register: %s (mode 0x%08x)", addon,
+            !fn ? "no function" : (mode & GWP_MODE_FLAGS_MASK) ? "a flag bit in mode" : "unknown mode", mode);
         return GWP_INVALID_EVALUATOR_ID;
     }
     for (const Registration* other : Registrations())
@@ -932,11 +934,11 @@ GwpEvaluatorId GWP_CALL ApiEvaluatorRegister(const GwpPlugin* self, uint32_t pla
 
 GwpResult GWP_CALL ApiEvaluatorUnregister(const GwpPlugin* self, GwpEvaluatorId id)
 {
-    if (!CheckCall("evaluator_unregister"))
-        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!api::CheckPluginMutation(self, "goap", "evaluator_unregister"))
+        return api::PluginCallRefused(self);
     Registration* registration = FindRegistration(id);
-    if (!registration || registration->plugin != self)
-        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!registration || registration->plugin != self) // no such registration of this plugin
+        return GWP_ERROR_NOT_FOUND;
     registration->dead = true;
     registration->fn = nullptr;
     g_restore_pending = true;
@@ -945,11 +947,14 @@ GwpResult GWP_CALL ApiEvaluatorUnregister(const GwpPlugin* self, GwpEvaluatorId 
 
 GwpResult GWP_CALL ApiEvaluatorSetMode(const GwpPlugin* self, GwpEvaluatorId id, uint32_t mode)
 {
-    if (!CheckCall("evaluator_set_mode"))
-        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!api::CheckPluginMutation(self, "goap", "evaluator_set_mode"))
+        return api::PluginCallRefused(self);
     Registration* registration = FindRegistration(id);
-    if (!registration || registration->plugin != self || mode > GWP_EVALUATOR_SHADOW)
-        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!registration || registration->plugin != self) // no such registration of this plugin
+        return GWP_ERROR_NOT_FOUND;
+    // A flag bit (none defined yet) or a mode above the last GWP_EVALUATOR_*: a value of a later version
+    if ((mode & GWP_MODE_FLAGS_MASK) || mode > GWP_EVALUATOR_SHADOW)
+        return api::PluginRefusal(self, "evaluator_set_mode", GWP_ERROR_NOT_SUPPORTED, "unknown mode or a flag bit");
     if (registration->mode != mode && IsDebugLog())
         Msg("* [plugin:%s] native evaluator #%u: mode %u -> %u", PluginAddonId(self), id, registration->mode, mode);
     registration->mode = mode;
@@ -980,17 +985,20 @@ int GWP_CALL ApiEvaluatorStats(GwpEvaluatorId id, GwpEvaluatorStats* out)
 GwpActionRegId GWP_CALL ApiActionRegister(const GwpPlugin* self, uint32_t planner, uint32_t action_id,
     const char* lua_name, const GwpActionVTable* vtable, void* user, uint32_t mode)
 {
-    if (!CheckCall("action_register"))
+    if (!api::CheckPluginMutation(self, "goap", "action_register"))
         return GWP_INVALID_ACTION_REG_ID;
     const pcstr addon = PluginAddonId(self);
-    if (!self || !vtable || vtable->size < 2 * sizeof(uint32_t) || mode > GWP_ACTION_VERIFY ||
-        action_id == GWP_INVALID_ACTION_ID)
+    // The size covers `reserved` here (the header of the table is required), so a non-zero one is refused too.
+    // The high 16 bits of `mode` are flags (GWP_MODE_FLAGS_MASK): none is defined yet, so any is refused.
+    if (!vtable || vtable->size < 2 * sizeof(uint32_t) || vtable->reserved != 0 || (mode & GWP_MODE_FLAGS_MASK) ||
+        (mode & GWP_MODE_MASK) > GWP_ACTION_VERIFY || action_id == GWP_INVALID_ACTION_ID)
     {
-        Msg("! [plugin:%s] action_register: %s", addon,
-            !self ? "no plugin handle" :
-                !vtable ? "no vtable" :
+        Msg("! [plugin:%s] action_register: %s (mode 0x%08x)", addon,
+            !vtable ? "no vtable" :
                 vtable->size < 2 * sizeof(uint32_t) ? "vtable size below the header" :
-                mode > GWP_ACTION_VERIFY ? "unknown mode" : "no action id");
+                vtable->reserved != 0 ? "non-zero vtable reserved field" :
+                (mode & GWP_MODE_FLAGS_MASK) ? "a flag bit in mode" :
+                (mode & GWP_MODE_MASK) > GWP_ACTION_VERIFY ? "unknown mode" : "no action id", mode);
         return GWP_INVALID_ACTION_REG_ID;
     }
     for (const ActionRegistration* other : ActionRegistrations())
@@ -1028,11 +1036,11 @@ GwpActionRegId GWP_CALL ApiActionRegister(const GwpPlugin* self, uint32_t planne
 
 GwpResult GWP_CALL ApiActionUnregister(const GwpPlugin* self, GwpActionRegId id)
 {
-    if (!CheckCall("action_unregister"))
-        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!api::CheckPluginMutation(self, "goap", "action_unregister"))
+        return api::PluginCallRefused(self);
     ActionRegistration* registration = FindActionRegistration(id);
-    if (!registration || registration->plugin != self)
-        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!registration || registration->plugin != self) // no such registration of this plugin
+        return GWP_ERROR_NOT_FOUND;
     registration->dead = true;
     registration->vtable = GwpActionVTable{};
     g_restore_pending = true;
@@ -1041,11 +1049,14 @@ GwpResult GWP_CALL ApiActionUnregister(const GwpPlugin* self, GwpActionRegId id)
 
 GwpResult GWP_CALL ApiActionSetMode(const GwpPlugin* self, GwpActionRegId id, uint32_t mode)
 {
-    if (!CheckCall("action_set_mode"))
-        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!api::CheckPluginMutation(self, "goap", "action_set_mode"))
+        return api::PluginCallRefused(self);
     ActionRegistration* registration = FindActionRegistration(id);
-    if (!registration || registration->plugin != self || mode > GWP_ACTION_VERIFY)
-        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!registration || registration->plugin != self) // no such registration of this plugin
+        return GWP_ERROR_NOT_FOUND;
+    // A flag bit (none defined yet) or a mode above the last GWP_ACTION_*: a value of a later version
+    if ((mode & GWP_MODE_FLAGS_MASK) || mode > GWP_ACTION_VERIFY)
+        return api::PluginRefusal(self, "action_set_mode", GWP_ERROR_NOT_SUPPORTED, "unknown mode or a flag bit");
     if (registration->mode != mode && IsDebugLog())
         Msg("* [plugin:%s] native action #%u: mode %u -> %u (from the next run of each action)", PluginAddonId(self),
             id, registration->mode, mode);

@@ -22,6 +22,7 @@
 #include "Level.h"
 
 #include "xrNetServer/NET_Messages.h"
+#include "addon_api_alife_ext.h"
 
 typedef xr_vector<std::pair<shared_str, int>> STORY_PAIRS;
 typedef STORY_PAIRS SPAWN_STORY_PAIRS;
@@ -31,6 +32,17 @@ STORY_PAIRS story_ids;
 SPAWN_STORY_PAIRS spawn_story_ids;
 
 CALifeSimulator* alife() { return (const_cast<CALifeSimulator*>(ai().get_alife())); }
+
+// Plugin API: inside server_object_on_register / _on_unregister the engine may be walking the ALife registry (the
+// on_register loop of a load): a spawn or a release from a Lua handler of these events is refused with an error.
+static bool alife_registry_locked(pcstr what)
+{
+    if (!gw::addons::alife_ext::InRegistryEvent())
+        return false;
+    GEnv.ScriptEngine->script_log(LuaMessageType::Error,
+        "! alife():%s refused inside server_object_on_register / server_object_on_unregister", what);
+    return true;
+}
 
 bool valid_object_id(const CALifeSimulator* self, ALife::_OBJECT_ID object_id)
 {
@@ -138,6 +150,8 @@ void remove_out_restriction(CALifeSimulator* alife, CSE_ALifeMonsterAbstract* mo
 u32 get_level_id(CALifeSimulator* self) { return (self->graph().level().level_id()); }
 CSE_ALifeDynamicObject* CALifeSimulator__create(CALifeSimulator* self, ALife::_SPAWN_ID spawn_id)
 {
+    if (alife_registry_locked("create"))
+        return nullptr;
     const CALifeSpawnRegistry::SPAWN_GRAPH::CVertex* vertex = ai().alife().spawns().spawns().vertex(spawn_id);
     THROW2(vertex, "Invalid spawn id!");
 
@@ -153,6 +167,8 @@ CSE_ALifeDynamicObject* CALifeSimulator__create(CALifeSimulator* self, ALife::_S
 CSE_Abstract* CALifeSimulator__spawn_item(CALifeSimulator* self, LPCSTR section, const Fvector& position,
     u32 level_vertex_id, GameGraph::_GRAPH_ID game_vertex_id)
 {
+    if (alife_registry_locked("create"))
+        return nullptr;
     THROW(self);
     return (self->spawn_item(section, position, level_vertex_id, game_vertex_id, ALife::_OBJECT_ID(-1)));
 }
@@ -160,6 +176,8 @@ CSE_Abstract* CALifeSimulator__spawn_item(CALifeSimulator* self, LPCSTR section,
 CSE_Abstract* CALifeSimulator__spawn_item2(CALifeSimulator* self, LPCSTR section, const Fvector& position,
     u32 level_vertex_id, GameGraph::_GRAPH_ID game_vertex_id, ALife::_OBJECT_ID id_parent)
 {
+    if (alife_registry_locked("create"))
+        return nullptr;
     if (id_parent == ALife::_OBJECT_ID(-1))
         return (self->spawn_item(section, position, level_vertex_id, game_vertex_id, id_parent));
 
@@ -196,6 +214,8 @@ CSE_Abstract* CALifeSimulator__spawn_item3(CALifeSimulator* self, pcstr section,
                                            u32 level_vertex_id, GameGraph::_GRAPH_ID game_vertex_id,
                                            ALife::_OBJECT_ID id_parent, bool reg = true)
 {
+    if (alife_registry_locked("create"))
+        return nullptr;
     if (reg)
         return CALifeSimulator__spawn_item2(self, section, position, level_vertex_id, game_vertex_id, id_parent);
 
@@ -220,6 +240,8 @@ CSE_Abstract* CALifeSimulator__spawn_item3(CALifeSimulator* self, pcstr section,
 CSE_Abstract* CALifeSimulator__spawn_ammo(CALifeSimulator* self, LPCSTR section, const Fvector& position,
     u32 level_vertex_id, GameGraph::_GRAPH_ID game_vertex_id, ALife::_OBJECT_ID id_parent, int ammo_to_spawn)
 {
+    if (alife_registry_locked("create_ammo"))
+        return nullptr;
     //	if (id_parent == ALife::_OBJECT_ID(-1))
     //		return (self->spawn_item(section,position,level_vertex_id,game_vertex_id,id_parent));
     CSE_ALifeDynamicObject* object = 0;
@@ -276,6 +298,8 @@ ALife::_SPAWN_ID CALifeSimulator__spawn_id(CALifeSimulator* self, ALife::_SPAWN_
 
 void CALifeSimulator__release(CALifeSimulator* self, CSE_Abstract* object, bool)
 {
+    if (alife_registry_locked("release"))
+        return;
     VERIFY(self);
     //	self->release						(object,true);
 
@@ -368,6 +392,8 @@ void IterateInfo(const CALifeSimulator* alife, const ALife::_OBJECT_ID& id, cons
 
 CSE_Abstract* reprocess_spawn(CALifeSimulator* self, CSE_Abstract* object)
 {
+    if (alife_registry_locked("register"))
+        return nullptr;
     NET_Packet packet;
     packet.w_begin(M_SPAWN);
     packet.w_stringZ(object->s_name);
@@ -389,6 +415,8 @@ CSE_Abstract* try_to_clone_object(CALifeSimulator* self, CSE_Abstract* object, p
                                   u32 level_vertex_id, GameGraph::_GRAPH_ID game_vertex_id, ALife::_OBJECT_ID id_parent,
                                   bool bRegister = true)
 {
+    if (alife_registry_locked("clone_weapon"))
+        return nullptr;
     CSE_ALifeItemWeaponMagazined* wpnmag = smart_cast<CSE_ALifeItemWeaponMagazined*>(object);
     if (!wpnmag)
         return nullptr;

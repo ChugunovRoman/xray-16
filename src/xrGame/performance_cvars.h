@@ -157,7 +157,7 @@ extern int npc_perf_visible_value_native;
 // 0 = pure Lua (default); 1 = the native interpreter decides (falls back per call when the condlist
 // has anything it cannot evaluate); 2 = shadow: a dry native pass runs first (no infop_set, no
 // effects, the LuaJIT math.random state is restored after it), then Lua decides and mismatches are
-// counted (gw_logic.stats prints them).
+// counted (_gw_internal.logic.stats prints them).
 extern int npc_perf_condlist_native;
 
 #endif // PERFORMANCE_CVARS_H_INCLUDED

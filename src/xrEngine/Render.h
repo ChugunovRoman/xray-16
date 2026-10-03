@@ -399,6 +399,9 @@ public:
 
     // Models
     virtual IRenderVisual* model_CreateParticles(pcstr name) = 0;
+    // GW: whether the particle library has an effect or a group with this name (model_CreateParticles stops the game
+    // on an unknown one). Plugin API particles_* check a name of a plugin with it.
+    virtual bool model_ParticlesExist(pcstr name) = 0;
     // virtual IRender_DetailModel* model_CreateDM (IReader* F) = 0;
     // virtual IRenderDetailModel* model_CreateDM (IReader* F) = 0;
     // virtual IRenderVisual* model_Create (pcstr name, IReader* data=0) = 0;

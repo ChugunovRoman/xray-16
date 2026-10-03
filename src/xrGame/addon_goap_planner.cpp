@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 
 #include "addon_goap_planner.h"
+#include "addon_api_common.h"
 #include "addon_event_bus.h"
 #include "addon_host.h"
 
@@ -225,7 +226,7 @@ void CNativePlannerAction::finalize()
 
 GwpPlannerId GWP_CALL ApiPlannerCreate(const GwpPlugin* self, GwpObjectId npc)
 {
-    if (!CheckPlannerCall("planner_create") || !self || !g_pGameLevel)
+    if (!api::CheckPluginMutation(self, "goap", "planner_create") || !g_pGameLevel)
         return GWP_INVALID_PLANNER_ID;
     if (g_dead_plugins && std::find(g_dead_plugins->begin(), g_dead_plugins->end(), self) != g_dead_plugins->end())
         return GWP_INVALID_PLANNER_ID;
@@ -265,11 +266,13 @@ GwpPlannerId GWP_CALL ApiPlannerCreate(const GwpPlugin* self, GwpObjectId npc)
 
 GwpResult GWP_CALL ApiPlannerDestroy(const GwpPlugin* self, GwpPlannerId id)
 {
-    if (!CheckPlannerCall("planner_destroy"))
-        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!api::CheckPluginMutation(self, "goap", "planner_destroy"))
+        return api::PluginCallRefused(self);
     Planner* planner = Find(id, self);
-    if (!planner || planner->updating)
-        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!planner)
+        return GWP_ERROR_NOT_FOUND; // no such planner of this plugin
+    if (planner->updating)
+        return GWP_ERROR_INVALID_STATE; // from a callback of this very planner
     Destroy(IndexOf(id));
     return GWP_OK;
 }
@@ -277,10 +280,14 @@ GwpResult GWP_CALL ApiPlannerDestroy(const GwpPlugin* self, GwpPlannerId id)
 GwpResult GWP_CALL ApiPlannerAddEvaluator(
     const GwpPlugin* self, GwpPlannerId id, uint32_t property, const char* name, GwpEvaluatorFn fn, void* user)
 {
-    if (!CheckPlannerCall("planner_add_evaluator"))
-        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!api::CheckPluginMutation(self, "goap", "planner_add_evaluator"))
+        return api::PluginCallRefused(self);
     Planner* planner = Find(id, self);
-    if (!planner || planner->updating || !fn)
+    if (!planner)
+        return GWP_ERROR_NOT_FOUND; // no such planner of this plugin
+    if (planner->updating)
+        return GWP_ERROR_INVALID_STATE; // from a callback of this very planner
+    if (!fn)
         return GWP_ERROR_INVALID_ARGUMENT;
     const auto& evaluators = planner->planner->evaluators();
     if (evaluators.find(property) != evaluators.end()) // THROW in the engine: a no-op in Release Master Gold
@@ -293,11 +300,16 @@ GwpResult GWP_CALL ApiPlannerAddAction(const GwpPlugin* self, GwpPlannerId id, u
     const GwpActionVTable* vtable, void* user, const GwpWorldProperty* conditions, uint32_t condition_count,
     const GwpWorldProperty* effects, uint32_t effect_count)
 {
-    if (!CheckPlannerCall("planner_add_action"))
-        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!api::CheckPluginMutation(self, "goap", "planner_add_action"))
+        return api::PluginCallRefused(self);
     Planner* planner = Find(id, self);
-    if (!planner || planner->updating || !vtable || vtable->size < 2 * sizeof(uint32_t) ||
-        (condition_count && !conditions) || (effect_count && !effects))
+    if (!planner)
+        return GWP_ERROR_NOT_FOUND; // no such planner of this plugin
+    if (planner->updating)
+        return GWP_ERROR_INVALID_STATE; // from a callback of this very planner
+    // The size covers `reserved` here (the header of the table is required), so a non-zero one is refused too
+    if (!vtable || vtable->size < 2 * sizeof(uint32_t) || vtable->reserved != 0 || (condition_count && !conditions) ||
+        (effect_count && !effects))
         return GWP_ERROR_INVALID_ARGUMENT;
     for (const auto& entry : planner->planner->operators())
     {
@@ -330,10 +342,14 @@ GwpResult GWP_CALL ApiPlannerAddAction(const GwpPlugin* self, GwpPlannerId id, u
 GwpResult GWP_CALL ApiPlannerSetGoal(
     const GwpPlugin* self, GwpPlannerId id, const GwpWorldProperty* goal, uint32_t count)
 {
-    if (!CheckPlannerCall("planner_set_goal"))
-        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!api::CheckPluginMutation(self, "goap", "planner_set_goal"))
+        return api::PluginCallRefused(self);
     Planner* planner = Find(id, self);
-    if (!planner || planner->updating || (count && !goal))
+    if (!planner)
+        return GWP_ERROR_NOT_FOUND; // no such planner of this plugin
+    if (planner->updating)
+        return GWP_ERROR_INVALID_STATE; // from a callback of this very planner
+    if (count && !goal)
         return GWP_ERROR_INVALID_ARGUMENT;
     // A goal property without an evaluator would make the solver read past the evaluators (THROW is a no-op in
     // a release build)
@@ -355,13 +371,15 @@ GwpResult GWP_CALL ApiPlannerSetGoal(
 
 GwpResult GWP_CALL ApiPlannerUpdate(const GwpPlugin* self, GwpPlannerId id)
 {
-    if (!CheckPlannerCall("planner_update"))
-        return GWP_ERROR_NOT_MAIN_THREAD;
+    if (!api::CheckPluginMutation(self, "goap", "planner_update"))
+        return api::PluginCallRefused(self);
     Planner* planner = Find(id, self);
-    if (!planner || planner->updating)
-        return GWP_ERROR_INVALID_ARGUMENT;
+    if (!planner)
+        return GWP_ERROR_NOT_FOUND; // no such planner of this plugin
+    if (planner->updating)
+        return GWP_ERROR_INVALID_STATE; // from a callback of this very planner
     if (planner->disabled)
-        return GWP_ERROR;
+        return GWP_ERROR_CRASHED; // a callback of the plugin crashed: its planners are stopped
     planner->updating = true;
     planner->planner->update();
     planner->updating = false;

@@ -1,8 +1,10 @@
 #pragma once
 
 // Data bus: shared key-value store of Lua scripts and native plugins.
-//  - Keys are "<owner>/<name>". A plugin writes only keys of its own addon ("<addon id>/..."); Lua writes any key.
-//  - Values are GwpValue (bool, number, string, vec3, object ids); strings are copied into the store.
+//  - Keys are "<owner>/<name>". A plugin writes only keys of its own addon ("<addon id>/..."); Lua writes any key
+//    (a C function called from Lua cannot tell which script or addon called it, so the owner is not checked there).
+//  - Values are GwpValue of any type but GWP_T_LUA_REF (bool, numbers, strings, bytes, vec3, object ids, arrays of
+//    them); they are copied deeply into the store (events::OwnedValue).
 //  - Persistent values go into the game save (own chunk of the ALife save stream); a new game clears them,
 //    a load replaces them. Other values live until the game exits.
 //  - A real change of a value sends the event data_on_changed(key, value).

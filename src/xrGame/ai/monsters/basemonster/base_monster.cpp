@@ -52,6 +52,7 @@
 #ifdef DEBUG
 #include "debug_text_tree.h"
 #endif
+#include "addon_api_character.h"
 
 #pragma warning(disable : 4355)
 #pragma warning(push)
@@ -435,6 +436,10 @@ void CBaseMonster::Hit(SHit* pHDS)
         return;
 
     if (invulnerable())
+        return;
+
+    // Plugin API: monster_on_before_hit - the subscribers may change the power of the hit or cancel it
+    if (g_Alive() && !gw::addons::character::BeforeHit(this, *pHDS, true))
         return;
 
     if (g_Alive())

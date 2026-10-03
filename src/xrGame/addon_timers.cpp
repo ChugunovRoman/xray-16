@@ -27,6 +27,7 @@ struct Timer
     u64 period = 0; // ms; 0 = one-shot
     u32 flags = 0;  // GWP_TIMER_* and kLuaOwned
     u64 serial = 0; // new on every start: a timer replaced from a handler is not fired by the old scan
+    xr_vector<events::OwnedValue> args; // user arguments of timer_start (deep copies), sent after name and key
 };
 
 // Key "<addon id>/<timer name>". xr_map: stable order for timer_list and the save.
@@ -51,6 +52,7 @@ struct Due
 xr_vector<Due>* g_due = nullptr; // scratch list of Update, kept to avoid an allocation every frame
 
 constexpr size_t kMaxNameLength = 256;
+constexpr u32 kMaxTimerArgs = 16; // user arguments of a timer (gwp_api.h, timer_start)
 constexpr u32 kKnownFlags = GWP_TIMER_REAL_TIME | GWP_TIMER_PERSISTENT;
 // Internal flag: started from Lua (timer_bus). Such a timer fires without a loaded plugin of its owner.
 constexpr u32 kLuaOwned = 0x80000000u;
@@ -59,7 +61,14 @@ constexpr u64 kMaxMs = static_cast<u64>(kMaxSeconds * 1000.0);
 constexpr u64 kMaxGameTimeMs = u64(-1) / 4; // an absolute game time from a save above this is corrupted
 // Chunk of the ALife save stream (plugin save data is 0x0100, data bus 0x0101).
 constexpr u32 kSaveChunkId = 0x0102;
-constexpr u32 kSaveFormat = 1;
+// Format 1: per timer owner, name, event (stringZ), u32 flags, u64 due or what is left, u64 period.
+// Format 2 (plans/lua_to_cpp/26, 1.11): the same plus u32 argument count and the arguments (events::WriteValue).
+// Format 3: the same as 2, with the u32 byte size of the argument block (count + arguments) before it, so a timer
+// whose arguments cannot be read is skipped alone instead of losing every timer after it.
+// All three are read; format 1 gives timers without arguments.
+constexpr u32 kSaveFormatNoArgs = 1;
+constexpr u32 kSaveFormatArgs = 2;
+constexpr u32 kSaveFormat = 3;
 
 Timers& GetTimers()
 {
@@ -136,8 +145,45 @@ xr_string KeyOf(pcstr owner, pcstr name)
 // Fires when its time comes: Lua timers always, plugin timers only while the plugin of the owner is loaded.
 bool CanFire(const Timer& timer) { return (timer.flags & kLuaOwned) || IsPluginLoaded(timer.owner.c_str()); }
 
-// The caller has validated the arguments. false when there is no game.
-bool Start(pcstr owner, pcstr name, pcstr event, u64 delay, u64 period, u32 flags)
+// GWP_T_LUA_REF at any depth: a reference without content cannot be sent later or saved (TimerArgsReason).
+bool TimerHasLuaRef(const GwpValue& value, u32 depth)
+{
+    if (value.type == GWP_T_LUA_REF)
+        return true;
+    if (value.type != GWP_T_ARRAY || depth >= events::kMaxArrayDepth)
+        return false;
+    for (u32 i = 0; i < value.u.a.count; ++i)
+    {
+        if (TimerHasLuaRef(value.u.a.items[i], depth + 1))
+            return true;
+    }
+    return false;
+}
+
+// Why the user arguments of a timer are refused, nullptr when they are fine: at most kMaxTimerArgs, valid values
+// (events::CheckValues: also strings and bytes of at most events::kMaxValueBytes at any depth, the longest that
+// ReadSave reads back, and at most events::kMaxValueNodes values and events::kMaxValueTotalBytes bytes of strings
+// per argument), no GWP_T_LUA_REF (also not inside
+// arrays).
+pcstr TimerArgsReason(const GwpValue* argv, u32 argc)
+{
+    if (argc > kMaxTimerArgs)
+        return "more than 16 arguments";
+    if (events::CheckValues(argv, argc) != GWP_OK)
+    {
+        return "an invalid argument value (reserved field, NULL pointer, unknown type, a string over 1 MiB, an array "
+               "over its limits, more than 65536 values or 16 MiB of strings in one argument)";
+    }
+    for (u32 i = 0; i < argc; ++i)
+    {
+        if (TimerHasLuaRef(argv[i], 0))
+            return "an argument without a native form (a Lua table that is not an array, a function, a userdata)";
+    }
+    return nullptr;
+}
+
+// The caller has validated the arguments (TimerArgsReason for argv). false when there is no game.
+bool Start(pcstr owner, pcstr name, pcstr event, u64 delay, u64 period, u32 flags, const GwpValue* argv, u32 argc)
 {
     if (g_loading_game_time && !(flags & GWP_TIMER_REAL_TIME))
     {
@@ -167,26 +213,34 @@ bool Start(pcstr owner, pcstr name, pcstr event, u64 delay, u64 period, u32 flag
     timer.period = period;
     timer.flags = flags;
     timer.serial = ++g_serial;
+    // Deep copies: the strings of argv may point into Lua data or a buffer of the plugin
+    timer.args.clear();
+    timer.args.reserve(argc);
+    for (u32 i = 0; i < argc; ++i)
+        timer.args.emplace_back(argv[i]);
     return true;
 }
 
 bool Stop(const xr_string& key) { return g_timers && g_timers->erase(key) > 0; }
 
-// Seconds left in the timer's own time base; false when there is no such timer (or no game for a game timer).
-bool Remaining(const xr_string& key, double& out)
+// Seconds left in the timer's own time base: GWP_OK, GWP_ERROR_NOT_FOUND when there is no such timer,
+// GWP_ERROR_INVALID_STATE when there is no game (the timer waits for one, its time base does not run).
+GwpResult Remaining(const xr_string& key, double& out)
 {
     out = 0.0;
     if (!g_timers)
-        return false;
+        return GWP_ERROR_NOT_FOUND;
     const auto it = g_timers->find(key);
+    if (it == g_timers->end())
+        return GWP_ERROR_NOT_FOUND;
     u64 now = 0;
-    if (it == g_timers->end() || !NowMs(it->second.flags, now))
-        return false;
+    if (!NowMs(it->second.flags, now))
+        return GWP_ERROR_INVALID_STATE;
     out = it->second.due > now ? static_cast<double>(it->second.due - now) / 1000.0 : 0.0;
-    return true;
+    return GWP_OK;
 }
 
-GwpResult CheckCall(const GwpPlugin* self, pcstr name, pcstr function)
+GwpResult TimerCheckCall(const GwpPlugin* self, pcstr name, pcstr function)
 {
     if (!IsMainThread())
     {
@@ -203,9 +257,9 @@ GwpResult CheckCall(const GwpPlugin* self, pcstr name, pcstr function)
 // ---------------------------------------------------------------------------------------------
 
 GwpResult GWP_CALL ApiTimerStart(const GwpPlugin* self, const char* name, const char* event, double delay_seconds,
-    double period_seconds, uint32_t flags)
+    double period_seconds, uint32_t flags, uint32_t argc, const GwpValue* argv)
 {
-    const GwpResult check = CheckCall(self, name, "timer_start");
+    const GwpResult check = TimerCheckCall(self, name, "timer_start");
     if (check != GWP_OK)
         return check;
     u64 delay = 0, period = 0;
@@ -214,27 +268,34 @@ GwpResult GWP_CALL ApiTimerStart(const GwpPlugin* self, const char* name, const 
     {
         return GWP_ERROR_INVALID_ARGUMENT;
     }
-    return Start(PluginAddonId(self), name, event, delay, period, flags) ? GWP_OK : GWP_ERROR;
+    if (const pcstr reason = TimerArgsReason(argv, argc))
+    {
+        Msg("! [plugin:%s] timer_start '%s': %s", PluginAddonId(self), name, reason);
+        return GWP_ERROR_INVALID_ARGUMENT;
+    }
+    // false: no game, or a game-time timer while a save is loading (logged by Start)
+    return Start(PluginAddonId(self), name, event, delay, period, flags, argv, argc) ? GWP_OK : GWP_ERROR_INVALID_STATE;
 }
 
 GwpResult GWP_CALL ApiTimerStop(const GwpPlugin* self, const char* name)
 {
-    const GwpResult check = CheckCall(self, name, "timer_stop");
+    const GwpResult check = TimerCheckCall(self, name, "timer_stop");
     if (check != GWP_OK)
         return check;
-    return Stop(KeyOf(PluginAddonId(self), name)) ? GWP_OK : GWP_ERROR;
+    return Stop(KeyOf(PluginAddonId(self), name)) ? GWP_OK : GWP_ERROR_NOT_FOUND;
 }
 
 GwpResult GWP_CALL ApiTimerRemaining(const GwpPlugin* self, const char* name, double* out_seconds)
 {
     if (out_seconds)
         *out_seconds = 0.0;
-    const GwpResult check = CheckCall(self, name, "timer_remaining");
+    const GwpResult check = TimerCheckCall(self, name, "timer_remaining");
     if (check != GWP_OK)
         return check;
     double left = 0.0;
-    if (!Remaining(KeyOf(PluginAddonId(self), name), left))
-        return GWP_ERROR;
+    const GwpResult found = Remaining(KeyOf(PluginAddonId(self), name), left);
+    if (found != GWP_OK)
+        return found;
     if (out_seconds)
         *out_seconds = left;
     return GWP_OK;
@@ -288,8 +349,11 @@ bool LuaSeconds(lua_State* L, int index, pcstr function, pcstr what, u64& out)
     return false;
 }
 
-// timer_bus.start(key, event, delay [, period [, flags]]): true on success; false without a game or on bad
-// arguments (logged). flags: timer_bus.REAL_TIME, timer_bus.PERSISTENT (sum them or use bit.bor).
+// timer_bus.start(key, event, delay [, period [, flags [, ...]]]): true on success; false without a game or on bad
+// arguments (logged). flags: timer_bus.REAL_TIME, timer_bus.PERSISTENT (sum them or use bit.bor). The values after
+// flags (at most 16; period and flags may be nil before them) are copied and come to the handlers after name and key:
+// nil, booleans, numbers, strings, vectors, game and server objects (as their ids) and arrays - tables with the keys
+// exactly 1..n of such values. Another table, a function or another userdata fails the call.
 int LuaStart(lua_State* L)
 {
     xr_string owner, name;
@@ -316,7 +380,31 @@ int LuaStart(lua_State* L)
         Msg("! [timers] timer_bus.start(%s/%s): unknown flags %g", owner.c_str(), name.c_str(), flags);
         ok = false;
     }
-    ok = ok && Start(owner.c_str(), name.c_str(), event, delay, period, static_cast<u32>(flags) | kLuaOwned);
+    // User arguments: everything after flags. Strings point into the Lua stack and the items of arrays into the
+    // arena, both alive until Start copies them.
+    constexpr int kFirstArg = 6;
+    const int top = lua_gettop(L);
+    const u32 argc = top >= kFirstArg ? static_cast<u32>(top - kFirstArg + 1) : 0u;
+    events::ValueArena arena;
+    GwpValue argv[kMaxTimerArgs];
+    if (ok && argc > kMaxTimerArgs)
+    {
+        Msg("! [timers] timer_bus.start(%s/%s): %u arguments, at most %u", owner.c_str(), name.c_str(), argc,
+            kMaxTimerArgs);
+        ok = false;
+    }
+    if (ok)
+    {
+        for (u32 i = 0; i < argc; ++i)
+            argv[i] = events::LuaToValue(L, kFirstArg + static_cast<int>(i), &arena);
+        if (const pcstr reason = TimerArgsReason(argv, argc))
+        {
+            Msg("! [timers] timer_bus.start(%s/%s): %s", owner.c_str(), name.c_str(), reason);
+            ok = false;
+        }
+    }
+    ok = ok &&
+        Start(owner.c_str(), name.c_str(), event, delay, period, static_cast<u32>(flags) | kLuaOwned, argv, argc);
     lua_pushboolean(L, ok ? 1 : 0);
     return 1;
 }
@@ -334,10 +422,63 @@ int LuaRemaining(lua_State* L)
 {
     xr_string owner, name;
     double left = 0.0;
-    if (LuaKey(L, 1, "remaining", owner, name) && Remaining(KeyOf(owner.c_str(), name.c_str()), left))
+    if (LuaKey(L, 1, "remaining", owner, name) && Remaining(KeyOf(owner.c_str(), name.c_str()), left) == GWP_OK)
         lua_pushnumber(L, left);
     else
         lua_pushnil(L);
+    return 1;
+}
+
+// timer_bus.list([prefix]): an array of the timers whose key starts with prefix (all without it), in key order. Each
+// item is a table {key, owner, name, event, remaining, period, persistent, real_time, lua, waiting, arg_count}:
+// remaining - seconds left in its time base (nil without a game), period - seconds (0 = once), lua - started from
+// Lua, waiting - a timer of a plugin that is not loaded now (it does not fire until the plugin is back),
+// arg_count - the number of its user arguments. A snapshot: changing it changes no timer.
+int LuaList(lua_State* L)
+{
+    const char* prefix = lua_type(L, 1) == LUA_TSTRING ? lua_tostring(L, 1) : "";
+    const size_t prefix_length = xr_strlen(prefix);
+    lua_newtable(L);
+    if (!g_timers)
+        return 1;
+    u64 game_now = 0;
+    const bool has_game = GameTimeMs(game_now);
+    int index = 0;
+    for (auto it = g_timers->lower_bound(prefix); it != g_timers->end(); ++it)
+    {
+        if (it->first.compare(0, prefix_length, prefix) != 0)
+            break;
+        const Timer& timer = it->second;
+        const bool real = (timer.flags & GWP_TIMER_REAL_TIME) != 0;
+        lua_createtable(L, 0, 11);
+        lua_pushlstring(L, it->first.c_str(), it->first.size());
+        lua_setfield(L, -2, "key");
+        lua_pushlstring(L, timer.owner.c_str(), timer.owner.size());
+        lua_setfield(L, -2, "owner");
+        lua_pushlstring(L, timer.name.c_str(), timer.name.size());
+        lua_setfield(L, -2, "name");
+        lua_pushlstring(L, timer.event.c_str(), timer.event.size());
+        lua_setfield(L, -2, "event");
+        if (has_game) // both time bases run inside a game only (NowMs)
+        {
+            const u64 now = real ? g_level_ms : game_now;
+            lua_pushnumber(L, timer.due > now ? static_cast<double>(timer.due - now) / 1000.0 : 0.0);
+            lua_setfield(L, -2, "remaining");
+        }
+        lua_pushnumber(L, static_cast<double>(timer.period) / 1000.0);
+        lua_setfield(L, -2, "period");
+        lua_pushboolean(L, timer.flags & GWP_TIMER_PERSISTENT ? 1 : 0);
+        lua_setfield(L, -2, "persistent");
+        lua_pushboolean(L, real ? 1 : 0);
+        lua_setfield(L, -2, "real_time");
+        lua_pushboolean(L, timer.flags & kLuaOwned ? 1 : 0);
+        lua_setfield(L, -2, "lua");
+        lua_pushboolean(L, CanFire(timer) ? 0 : 1);
+        lua_setfield(L, -2, "waiting");
+        lua_pushinteger(L, static_cast<lua_Integer>(timer.args.size()));
+        lua_setfield(L, -2, "arg_count");
+        lua_rawseti(L, -2, ++index);
+    }
     return 1;
 }
 } // namespace
@@ -355,6 +496,7 @@ void CTimerBusScript::script_register(lua_State* L)
         { "start", &LuaStart },
         { "stop", &LuaStop },
         { "remaining", &LuaRemaining },
+        { "list", &LuaList },
     };
     lua_newtable(L);
     for (const luaL_Reg& function : functions)
@@ -415,6 +557,8 @@ void Update(u32 dt_ms)
         Timer& timer = it->second;
         const xr_string name = timer.name; // a copy: the handler may replace or stop the timer
         const GwpEventId event_id = timer.event_id;
+        // The arguments too: a one-shot timer is erased below, a handler may restart or stop a repeating one
+        xr_vector<events::OwnedValue> args;
         if (timer.period > 0)
         {
             // A repeating timer fires at most once per frame; periods missed during a big jump of the time
@@ -423,12 +567,22 @@ void Update(u32 dt_ms)
             timer.due += timer.period;
             if (timer.due <= now)
                 timer.due = now + timer.period;
+            args = timer.args;
         }
         else
+        {
+            args = std::move(timer.args);
             g_timers->erase(it);
+        }
 
-        const GwpValue args[] = { events::String(name.c_str()), events::String(item.key.c_str()) };
-        events::Emit(event_id, args, 2);
+        // name, key, then the user arguments of timer_start
+        GwpValue argv[2 + kMaxTimerArgs];
+        argv[0] = events::String(name.c_str());
+        argv[1] = events::String(item.key.c_str());
+        const u32 argc = static_cast<u32>(std::min<size_t>(args.size(), kMaxTimerArgs));
+        for (u32 i = 0; i < argc; ++i)
+            argv[2 + i] = args[i].view();
+        events::Emit(event_id, argv, 2 + argc);
     }
     due.clear();
 }
@@ -466,6 +620,16 @@ void WriteSave(IWriter& stream)
             else
                 stream.w_u64(timer.due);
             stream.w_u64(timer.period);
+            // Format 3: the byte size of the block, then the user arguments (objects as their ids, valid in this save)
+            const size_t size_pos = stream.tell();
+            stream.w_u32(0); // the place for the size
+            stream.w_u32(static_cast<u32>(timer.args.size()));
+            for (const events::OwnedValue& arg : timer.args)
+                arg.Write(stream);
+            const size_t end_pos = stream.tell();
+            stream.seek(size_pos);
+            stream.w_u32(static_cast<u32>(end_pos - size_pos - sizeof(u32)));
+            stream.seek(end_pos);
         }
     }
     stream.close_chunk();
@@ -484,7 +648,7 @@ void ReadSave(IReader& stream)
         return; // save made by a build without timers
     const auto has = [reader](size_t bytes) { return reader->elapsed() >= static_cast<intptr_t>(bytes); };
     const u32 format = has(sizeof(u32)) ? reader->r_u32() : 0;
-    if (format != kSaveFormat)
+    if (format != kSaveFormat && format != kSaveFormatArgs && format != kSaveFormatNoArgs)
     {
         Msg("! [timers] save data: format %u is not supported, ignored", format);
         reader->close();
@@ -505,6 +669,48 @@ void ReadSave(IReader& stream)
         timer.flags = reader->r_u32();
         const u64 due = reader->r_u64();
         timer.period = reader->r_u64();
+        if (format == kSaveFormatArgs) // format 1 has no arguments
+        {
+            const u32 argc = has(sizeof(u32)) ? reader->r_u32() : kMaxTimerArgs + 1;
+            bool args_ok = argc <= kMaxTimerArgs;
+            for (u32 a = 0; args_ok && a < argc; ++a)
+            {
+                timer.args.emplace_back();
+                args_ok = timer.args.back().Read(*reader);
+            }
+            if (!args_ok)
+            {
+                Msg("! [timers] save data: the arguments of a timer are truncated or corrupted, the rest is ignored");
+                break;
+            }
+        }
+        else if (format >= kSaveFormat)
+        {
+            const u32 block_size = has(sizeof(u32)) ? reader->r_u32() : u32(-1);
+            if (block_size == u32(-1) || !has(block_size))
+            {
+                Msg("! [timers] save data is truncated, the rest is ignored");
+                break;
+            }
+            // The block alone: a value that cannot be read stops inside it, the next timer starts after it
+            IReader block(reader->pointer(), block_size);
+            reader->advance(block_size);
+            const u32 argc =
+                block.elapsed() >= static_cast<intptr_t>(sizeof(u32)) ? block.r_u32() : kMaxTimerArgs + 1;
+            bool args_ok = argc <= kMaxTimerArgs;
+            for (u32 a = 0; args_ok && a < argc; ++a)
+            {
+                timer.args.emplace_back();
+                args_ok = timer.args.back().Read(block);
+            }
+            if (!args_ok)
+            {
+                Msg("! [timers] save data: the arguments of timer %s/%s cannot be read (a string over 1 MiB, an "
+                    "array over its limits or corrupted data), the timer is skipped", timer.owner.c_str(),
+                    timer.name.c_str());
+                continue; // the reader is already after the block: the next timers load
+            }
+        }
         const bool real = (timer.flags & GWP_TIMER_REAL_TIME) != 0;
         if (!IsValidName(timer.owner.c_str()) || !IsValidName(timer.name.c_str()) ||
             !IsValidName(timer.event.c_str()) || IsBuiltinEvent(timer.event.c_str()) ||
@@ -537,7 +743,8 @@ void PrintList()
 {
     u64 game_now = 0;
     const bool has_game = GameTimeMs(game_now);
-    Msg("- [timers] timers (p = persistent, l = started from Lua, x = its plugin is not loaded, the timer waits):");
+    Msg("- [timers] timers (p = persistent, l = started from Lua, x = its plugin is not loaded, the timer waits; "
+        "args = user arguments):");
     if (g_timers)
     {
         for (const auto& [key, timer] : *g_timers)
@@ -556,9 +763,9 @@ void PrintList()
                 xr_sprintf(period, "every %.3f s", static_cast<double>(timer.period) / 1000.0);
             else
                 xr_strcpy(period, "once");
-            Msg("-   %s%s %-40s %-5s in %-14s %-18s -> %s", timer.flags & GWP_TIMER_PERSISTENT ? "p" : " ",
+            Msg("-   %s%s %-40s %-5s in %-14s %-18s -> %s (%u args)", timer.flags & GWP_TIMER_PERSISTENT ? "p" : " ",
                 timer.flags & kLuaOwned ? "l" : CanFire(timer) ? " " : "x", key.c_str(), BaseName(timer.flags),
-                left, period, timer.event.c_str());
+                left, period, timer.event.c_str(), static_cast<u32>(timer.args.size()));
         }
     }
     Msg("- [timers] %u timer(s)", g_timers ? static_cast<u32>(g_timers->size()) : 0u);

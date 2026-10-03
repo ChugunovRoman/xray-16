@@ -18,8 +18,10 @@ namespace gw::addons::storage
 namespace
 {
 // Mirrored fields of db.storage[id]. "sub.field" lives in the scheme subtable db.storage[id].sub.
-// Append-only: plugins resolve names to indices at run time, so a key added at the end changes nothing for them;
-// removing or renaming one is a major change of the API. The Lua side takes the list from npc_storage.keys().
+// Plugins resolve names to indices at run time, so a key added anywhere changes nothing for them. The keys are data
+// of the mod scripts, outside the ABI (wiki versioning.md): a removed key answers -1 in storage_key_index, so remove
+// or rename one only together with the plugins that read it. The Lua side takes the list from
+// _gw_internal.npc_storage.keys().
 constexpr pcstr kKeys[] = {
     // the entry itself: xr_logic, xr_motivator, xr_danger, xr_combat, rx_ff, ...
     "active_scheme",
@@ -412,8 +414,12 @@ static_assert(std::string_view(kKeys[kActiveSectionKey]) == "active_section");
 
 // A plugin string without bytes (u.s.ptr == NULL) is no string: PushLuaValue writes nil to Lua for it, so the
 // mirror takes it as NIL too and both sides agree (storage_set, SameValue, Store). Lua values never come so.
-GwpValue Normalized(const GwpValue& value)
+// Bytes are a Lua string as well (GWP_T_BYTES, binary content): kept and written as a string, read back as one.
+GwpValue Normalized(const GwpValue& input)
 {
+    GwpValue value = input;
+    if (value.type == GWP_T_BYTES)
+        value.type = GWP_T_STRING;
     return value.type == GWP_T_STRING && !value.u.s.ptr ? events::Nil() : value;
 }
 
@@ -560,7 +566,7 @@ void ResetAll()
 }
 
 // ---------------------------------------------------------------------------------------------
-// Lua API: global table npc_storage (used by npc_storage_bridge.script only)
+// Lua API: table _gw_internal.npc_storage (used by npc_storage_bridge.script only)
 // ---------------------------------------------------------------------------------------------
 
 bool LuaObjectId(lua_State* L, int index, pcstr function, u16& out)
@@ -581,9 +587,10 @@ bool LuaObjectId(lua_State* L, int index, pcstr function, u16& out)
     return true;
 }
 
-// npc_storage.acquire(id, backing): a new entry of the object; backing is the table that holds its fields on the
-// Lua side. Returns the handle. An entry still live for the id (a binder replaced it without db.del_obj, or the
-// id came back after a spawn that never reached net_Destroy) is ended first: a new generation, the old fields gone.
+// _gw_internal.npc_storage.acquire(id, backing): a new entry of the object; backing is the table that holds its
+// fields on the Lua side. Returns the handle. An entry still live for the id (a binder replaced it without
+// db.del_obj, or the id came back after a spawn that never reached net_Destroy) is ended first: a new generation,
+// the old fields gone.
 int LuaAcquire(lua_State* L)
 {
     u16 id = 0;
@@ -611,7 +618,7 @@ int LuaAcquire(lua_State* L)
     return 1;
 }
 
-// npc_storage.release(id): true when there was a live entry.
+// _gw_internal.npc_storage.release(id): true when there was a live entry.
 int LuaRelease(lua_State* L)
 {
     u16 id = 0;
@@ -627,8 +634,9 @@ int LuaRelease(lua_State* L)
     return 1;
 }
 
-// npc_storage.set(id, key, value): a mirrored field changed on the Lua side. false when the entry is not live
-// (a write after net_Destroy) or the key is not mirrored; both are silent, the proxy only calls with known keys.
+// _gw_internal.npc_storage.set(id, key, value): a mirrored field changed on the Lua side. false when the entry is
+// not live (a write after net_Destroy) or the key is not mirrored; both are silent, the proxy only calls with known
+// keys.
 int LuaSet(lua_State* L)
 {
     u16 id = 0;
@@ -655,7 +663,7 @@ int LuaSet(lua_State* L)
     return 1;
 }
 
-// npc_storage.keys(): the mirrored keys, an array of strings in index order.
+// _gw_internal.npc_storage.keys(): the mirrored keys, an array of strings in index order.
 int LuaKeys(lua_State* L)
 {
     lua_createtable(L, static_cast<int>(kKeyCount), 0);
@@ -667,7 +675,7 @@ int LuaKeys(lua_State* L)
     return 1;
 }
 
-// npc_storage.handle(id): the handle of the live entry, nil without one.
+// _gw_internal.npc_storage.handle(id): the handle of the live entry, nil without one.
 int LuaHandle(lua_State* L)
 {
     u16 id = 0;
@@ -720,17 +728,19 @@ int GWP_CALL ApiStorageGet(GwpStorageHandle handle, uint32_t key, GwpValue* out)
 // subtable is a proxy too, its metatable names its backing; a plain subtable without one takes the value directly).
 // Every access is raw: a metamethod of a script table must not run from here. A subtable with a metatable that is
 // not a proxy of the bridge (no backing table in it) is not written: its __newindex may mean anything.
-bool WriteLua(const Slot& slot, pcstr key, const GwpValue& value, pcstr addon)
+// The code of storage_set: INVALID_STATE when the Lua side cannot take the write now (no script engine, the entry
+// has no backing table, no "sub" table yet), NOT_SUPPORTED for a "sub" table with a metatable of its own.
+GwpResult WriteLua(const Slot& slot, pcstr key, const GwpValue& value, pcstr addon)
 {
     lua_State* L = ActiveLua();
     if (!L || slot.backing_ref == LUA_NOREF)
-        return false;
+        return GWP_ERROR_INVALID_STATE;
     const int top = lua_gettop(L);
     lua_rawgeti(L, LUA_REGISTRYINDEX, slot.backing_ref);
     if (!lua_istable(L, -1))
     {
         lua_settop(L, top);
-        return false;
+        return GWP_ERROR_INVALID_STATE;
     }
     pcstr field = key;
     if (const pcstr dot = strchr(key, '.'))
@@ -747,7 +757,7 @@ bool WriteLua(const Slot& slot, pcstr key, const GwpValue& value, pcstr addon)
             lua_settop(L, top);
             if (IsDebugLog())
                 Msg("~ [plugin:%s] storage_set '%s': the scripts have no '%s' table for this object yet", addon, key, sub);
-            return false;
+            return GWP_ERROR_INVALID_STATE;
         }
         if (lua_getmetatable(L, -1))
         {
@@ -759,7 +769,7 @@ bool WriteLua(const Slot& slot, pcstr key, const GwpValue& value, pcstr addon)
                 if (IsDebugLog())
                     Msg("~ [plugin:%s] storage_set '%s': the '%s' table of this object has a metatable of its own, "
                         "not written", addon, key, sub);
-                return false;
+                return GWP_ERROR_NOT_SUPPORTED;
             }
             lua_replace(L, -3); // the sub proxy is replaced by its backing
             lua_settop(L, top + 2);
@@ -770,7 +780,7 @@ bool WriteLua(const Slot& slot, pcstr key, const GwpValue& value, pcstr addon)
     events::PushLuaValue(L, value);
     lua_rawset(L, -3);
     lua_settop(L, top);
-    return true;
+    return GWP_OK;
 }
 
 GwpResult GWP_CALL ApiStorageSet(const GwpPlugin* self, GwpStorageHandle handle, uint32_t key, const GwpValue* input)
@@ -780,7 +790,15 @@ GwpResult GWP_CALL ApiStorageSet(const GwpPlugin* self, GwpStorageHandle handle,
     const pcstr addon = PluginAddonId(self);
     if (!self || key >= kKeyCount || !input)
         return GWP_ERROR_INVALID_ARGUMENT;
-    // A string with ptr == NULL is a nil on both sides (Lua gets nil from PushLuaValue, the mirror NIL)
+    if (input->reserved != 0)
+    {
+        if (IsDebugLog())
+            Msg("~ [plugin:%s] storage_set '%s': the reserved field of the value is %u, must be 0", addon, kKeys[key],
+                input->reserved);
+        return GWP_ERROR_INVALID_ARGUMENT;
+    }
+    // A string with ptr == NULL is a nil on both sides (Lua gets nil from PushLuaValue, the mirror NIL); bytes are
+    // written as a string
     const GwpValue normalized = Normalized(*input);
     const GwpValue* value = &normalized;
     switch (value->type)
@@ -790,21 +808,30 @@ GwpResult GWP_CALL ApiStorageSet(const GwpPlugin* self, GwpStorageHandle handle,
     case GWP_T_INT:
     case GWP_T_NUMBER:
     case GWP_T_STRING: break;
-    default:
+    case GWP_T_VEC3:
+    case GWP_T_OBJECT:
+    case GWP_T_SERVER_OBJECT:
+    case GWP_T_LUA_REF:
+    case GWP_T_ARRAY:
         if (IsDebugLog())
-            Msg("~ [plugin:%s] storage_set '%s': only nil, bool, int, number and string can be written", addon,
+            Msg("~ [plugin:%s] storage_set '%s': only nil, bool, int, number, string and bytes can be written", addon,
                 kKeys[key]);
         return GWP_ERROR_INVALID_ARGUMENT;
+    default: // a type of a later version of the API
+        if (IsDebugLog())
+            Msg("~ [plugin:%s] storage_set '%s': unknown value type %u", addon, kKeys[key], value->type);
+        return GWP_ERROR_NOT_SUPPORTED;
     }
     Slot* slot = SlotOfHandle(handle);
     if (!slot)
     {
         if (IsDebugLog())
             Msg("~ [plugin:%s] storage_set '%s': stale handle 0x%08x", addon, kKeys[key], handle);
-        return GWP_ERROR_INVALID_ARGUMENT;
+        return GWP_ERROR_NOT_FOUND; // the entry is gone (the object went offline) or there never was one
     }
-    if (!WriteLua(*slot, kKeys[key], *value, addon))
-        return GWP_ERROR;
+    const GwpResult written = WriteLua(*slot, kKeys[key], *value, addon);
+    if (written != GWP_OK)
+        return written;
     const u16 id = static_cast<u16>(handle & 0xFFFFu);
     CheckSlot(id, *slot, static_cast<s32>(key), "storage_set of", kKeys[key]);
     // The same as LuaSet: WriteLua is a raw set, the proxy of the bridge does not see it and never calls LuaSet
@@ -840,7 +867,19 @@ void CNpcStorageScript::script_register(lua_State* L)
         lua_pushcfunction(L, function.func);
         lua_setfield(L, -2, function.name);
     }
-    lua_setglobal(L, "npc_storage");
+    // Internal to npc_storage_bridge.script, not an API for addons: _gw_internal.npc_storage. The global table
+    // _gw_internal is shared with addon_event_bus.cpp and gw_condlist_native.cpp: the first one creates it.
+    lua_getglobal(L, "_gw_internal");
+    if (!lua_istable(L, -1))
+    {
+        lua_pop(L, 1);
+        lua_newtable(L);
+        lua_pushvalue(L, -1);
+        lua_setglobal(L, "_gw_internal");
+    }
+    lua_insert(L, -2);
+    lua_setfield(L, -2, "npc_storage");
+    lua_pop(L, 1);
 }
 
 void FillEngineApi(GwpEngineApi& api)

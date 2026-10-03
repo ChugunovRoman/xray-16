@@ -54,6 +54,17 @@ pcstr PluginAddonId(const GwpPlugin* plugin); // "?" for an unknown handle
 bool IsMainThread();
 bool IsDebugLog(); // -addon_debug
 bool IsPluginLoaded(pcstr addon_id); // the addon is known and its plugin is loaded (and not unloaded yet)
+bool IsPluginLoading(const GwpPlugin* plugin); // inside its gwp_plugin_init
+bool IsPluginRunning(const GwpPlugin* plugin); // loading or loaded: not stopped by a crash, not unloaded
+// GwpPluginDesc::api_built (GWP_MAKE_VERSION) of the loaded plugin of the addon; 0 when the addon is unknown, its
+// plugin is not loaded or its description is too short to have the field (Lua plugins.version).
+u32 PluginApiBuilt(pcstr addon_id);
+// Ids of every addon found at the start - loaded, failed, skipped or disabled - known before the first plugin loads.
+// Empty before Initialize and after Shutdown.
+const xr_vector<xr_string>& KnownAddonIds();
+// The addon that owns a name "<addon id>_...": the longest known id followed by '_' at the start of `name`, nullptr
+// when none. With addons "gw" and "gw_npc" known, "gw_npc_x" belongs to gw_npc even before (or without) its plugin.
+pcstr NameOwnerAddonId(pcstr name);
 // Reads a zero-terminated string without leaving the reader (IReader::r_stringZ does not check bounds).
 bool ReadStringZChecked(IReader& reader, xr_string& out);
 void FillObjectsApi(GwpEngineApi& api);

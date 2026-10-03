@@ -4,9 +4,10 @@
 //  - A timer belongs to an addon and has a name unique inside it; starting a timer with the same name replaces it.
 //  - Time base: game time (ALife, scaled by the time factor, default) or level time (real milliseconds of
 //    unpaused frames, GWP_TIMER_REAL_TIME). Both stop on pause and outside a level.
-//  - When the timer expires the engine emits the event chosen by the owner with two arguments: the timer name and
-//    its key "<owner>/<name>". An event, not a callback: a persistent timer comes back from a save, where neither
-//    a native pointer nor a Lua function survives.
+//  - When the timer expires the engine emits the event chosen by the owner with the timer name, its key
+//    "<owner>/<name>" and then the user arguments given at start (at most 16, copied; any value type but
+//    GWP_T_LUA_REF). An event, not a callback: a persistent timer comes back from a save, where neither a native
+//    pointer nor a Lua function survives; its arguments are saved with it.
 //  - Persistent timers (GWP_TIMER_PERSISTENT) go into the game save (own chunk of the ALife save stream).
 //    A new game or a load drops all timers (like the Lua queue, which lives in the restarted Lua state),
 //    then the load restores the persistent ones.

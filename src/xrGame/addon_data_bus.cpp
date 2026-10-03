@@ -14,13 +14,12 @@ namespace
 {
 struct Entry
 {
-    GwpValue value{};    // for GWP_T_STRING the text lives in `text`: use ValueOf()
-    xr_string text;
+    events::OwnedValue value; // a deep copy: strings, bytes and the items of arrays belong to the entry
     bool persistent = false;
 };
 
-// xr_map: stable order for data_list and the save; nodes never move, so pointers into `text` stay valid
-// until the entry is changed or erased (the lifetime promised by data_get).
+// xr_map: stable order for data_list and the save; nodes never move, and an OwnedValue keeps its parts at their
+// addresses until it is assigned again, so what data_get gives stays valid until the key is changed or erased.
 using Store = xr_map<xr_string, Entry>;
 Store* g_store = nullptr;
 
@@ -28,6 +27,9 @@ constexpr size_t kMaxKeyLength = 256;
 constexpr u32 kMaxStringLength = 1024u * 1024u;
 // Chunk of the ALife save stream (plugin save data is 0x0100, see addon_host.cpp).
 constexpr u32 kSaveChunkId = 0x0101;
+// Format 1: u32 count, then per value the key (stringZ) and the value (events::WriteValue). GWP_T_BYTES and
+// GWP_T_ARRAY (plans/lua_to_cpp/26, 1.7) are new types of the same value format, so the number stays 1: older
+// saves read as they are, and an older engine reads a newer save up to the first value of a type it does not know.
 constexpr u32 kSaveFormat = 1;
 
 Store& GetStore()
@@ -47,64 +49,38 @@ bool IsValidKey(pcstr key)
     return length > 0 && length <= kMaxKeyLength && slash && slash != key && key[length - 1] != '/';
 }
 
-bool IsStorableType(u32 type)
+// What the store refuses in a value that passed events::CheckValue: GWP_T_LUA_REF at any depth (a reference
+// without content means nothing in a save or to another reader) and strings or bytes longer than kMaxStringLength.
+// nullptr for a storable value, else the reason for the log.
+pcstr DataUnstorableReason(const GwpValue& value, u32 depth)
 {
-    switch (type)
+    switch (value.type)
     {
-    case GWP_T_BOOL:
-    case GWP_T_INT:
-    case GWP_T_NUMBER:
+    case GWP_T_LUA_REF: return "a Lua table or userdata without a native form (GWP_T_LUA_REF)";
     case GWP_T_STRING:
-    case GWP_T_VEC3:
-    case GWP_T_OBJECT:
-    case GWP_T_SERVER_OBJECT: return true;
-    default: return false;
+    case GWP_T_BYTES: return value.u.s.len > kMaxStringLength ? "a string longer than 1 MiB" : nullptr;
+    case GWP_T_ARRAY:
+        if (depth >= events::kMaxArrayDepth)
+            return "arrays nested too deep";
+        for (u32 i = 0; i < value.u.a.count; ++i)
+        {
+            if (const pcstr reason = DataUnstorableReason(value.u.a.items[i], depth + 1))
+                return reason;
+        }
+        return nullptr;
+    default: return nullptr;
     }
 }
 
-GwpValue ValueOf(const Entry& entry)
-{
-    GwpValue value = entry.value;
-    if (value.type == GWP_T_STRING)
-    {
-        value.u.s.ptr = entry.text.c_str();
-        value.u.s.len = static_cast<uint32_t>(entry.text.size());
-    }
-    return value;
-}
-
-bool Equal(const GwpValue& a, const GwpValue& b)
-{
-    if (a.type != b.type)
-        return false;
-    switch (a.type)
-    {
-    case GWP_T_BOOL: return (a.u.b != 0) == (b.u.b != 0);
-    case GWP_T_INT: return a.u.i == b.u.i;
-    case GWP_T_NUMBER: return a.u.n == b.u.n;
-    case GWP_T_STRING:
-        return a.u.s.len == b.u.s.len && (a.u.s.len == 0 || memcmp(a.u.s.ptr, b.u.s.ptr, a.u.s.len) == 0);
-    case GWP_T_VEC3: return a.u.v[0] == b.u.v[0] && a.u.v[1] == b.u.v[1] && a.u.v[2] == b.u.v[2];
-    case GWP_T_OBJECT:
-    case GWP_T_SERVER_OBJECT: return a.u.id == b.u.id;
-    default: return true;
-    }
-}
-
-// data_on_changed(key, value). Key and string are copied first: a handler may change or erase the same key.
+// data_on_changed(key, value). Key and value are copied first: a handler may change or erase the same key, and the
+// entry's own copy would be gone under the next handlers.
 void NotifyChanged(const xr_string& key, const GwpValue* value)
 {
     if (!events::HasSubscribers(events::EBuiltin::DataOnChanged))
         return;
     const xr_string key_copy = key;
-    xr_string text_copy;
-    GwpValue value_copy = value ? *value : events::Nil();
-    if (value_copy.type == GWP_T_STRING)
-    {
-        text_copy.assign(value_copy.u.s.ptr, value_copy.u.s.len);
-        value_copy.u.s.ptr = text_copy.c_str();
-    }
-    const GwpValue args[] = { events::String(key_copy.c_str()), value_copy };
+    const events::OwnedValue value_copy(value ? *value : events::Nil());
+    const GwpValue args[] = { events::String(key_copy.c_str()), value_copy.view() };
     events::Emit(events::EBuiltin::DataOnChanged, args, 2);
 }
 
@@ -119,7 +95,7 @@ bool Erase(const xr_string& key)
     return true;
 }
 
-// The caller has validated key and value. GWP_T_NIL erases.
+// The caller has validated key and value (CheckValue). GWP_T_NIL erases.
 void Set(const xr_string& key, const GwpValue& value, bool persistent)
 {
     if (value.type == GWP_T_NIL)
@@ -127,44 +103,44 @@ void Set(const xr_string& key, const GwpValue& value, bool persistent)
         Erase(key);
         return;
     }
+    GwpValue stored_value = value;
+    // A string or bytes with ptr == NULL (len 0, CheckValue allows it) is an empty string here, as it always was
+    // for the data bus; inside the value machinery ptr == NULL would mean nil.
+    if ((stored_value.type == GWP_T_STRING || stored_value.type == GWP_T_BYTES) && !stored_value.u.s.ptr)
+    {
+        stored_value.u.s.ptr = "";
+        stored_value.u.s.len = 0;
+    }
     Store& store = GetStore();
     const auto [it, inserted] = store.try_emplace(key);
     Entry& entry = it->second;
     // A key stays persistent once made so (a writer without the flag, e.g. Lua data_bus.set(key, value) with two
     // arguments, must not drop it from the save); it becomes plain again only through erase.
     entry.persistent = entry.persistent || persistent;
-    if (!inserted && Equal(ValueOf(entry), value))
+    if (!inserted && events::ValuesEqual(entry.value.view(), stored_value))
         return;
-
-    if (value.type == GWP_T_STRING)
-    {
-        // Through a temporary: `value` may point into entry.text itself (data_get + data_set of the same key).
-        xr_string text(value.u.s.ptr ? value.u.s.ptr : "", value.u.s.len);
-        entry.text.swap(text);
-    }
-    else
-        entry.text.clear();
-    entry.value = value;
-    if (value.type == GWP_T_STRING)
-        entry.value.u.s = {}; // the text is in entry.text, see ValueOf
-
-    const GwpValue stored = ValueOf(entry);
-    NotifyChanged(key, &stored);
+    // Assign copies deeply through a new arena: `value` may point into entry.value itself (data_get + data_set of
+    // the same key).
+    entry.value.Assign(stored_value);
+    NotifyChanged(key, &entry.value.view());
 }
 
-bool CheckValue(const GwpValue& value, pcstr key, pcstr who)
+// The value check of both sides (plugin and Lua): false (logged) when the value cannot be stored.
+bool CheckStorable(const GwpValue& value, pcstr key, pcstr who)
 {
-    if (value.type == GWP_T_NIL || IsStorableType(value.type))
+    if (events::CheckValue(value) != GWP_OK)
     {
-        if (value.type == GWP_T_STRING && (value.u.s.len > kMaxStringLength || (!value.u.s.ptr && value.u.s.len)))
-        {
-            Msg("! [data] %s: string value of '%s' is too long or invalid", who, key);
-            return false;
-        }
-        return true;
+        Msg("! [data] %s: value of '%s' is invalid (type %u, reserved %u, a NULL pointer, a string over 1 MiB, an "
+            "array over its limits, more than 65536 values or 16 MiB of strings in total)", who, key, value.type,
+            value.reserved);
+        return false;
     }
-    Msg("! [data] %s: value of '%s' has a type that cannot be stored (%u)", who, key, value.type);
-    return false;
+    if (const pcstr reason = DataUnstorableReason(value, 0))
+    {
+        Msg("! [data] %s: value of '%s' cannot be stored: %s", who, key, reason);
+        return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -193,11 +169,17 @@ GwpResult GWP_CALL ApiDataSet(const GwpPlugin* self, const char* key, const GwpV
     const GwpResult check = CheckPluginKey(self, key, "data_set");
     if (check != GWP_OK)
         return check;
+    if (flags & ~GWP_DATA_PERSISTENT)
+    {
+        Msg("! [plugin:%s] data_set '%s': unknown flags 0x%x (a flag of a later version?)", PluginAddonId(self), key,
+            flags);
+        return GWP_ERROR_INVALID_ARGUMENT;
+    }
     if (!value)
         return GWP_ERROR_INVALID_ARGUMENT;
     string128 who;
     xr_sprintf(who, "plugin:%s", PluginAddonId(self));
-    if (!CheckValue(*value, key, who))
+    if (!CheckStorable(*value, key, who))
         return GWP_ERROR_INVALID_ARGUMENT;
     Set(key, *value, (flags & GWP_DATA_PERSISTENT) != 0);
     return GWP_OK;
@@ -208,8 +190,7 @@ GwpResult GWP_CALL ApiDataErase(const GwpPlugin* self, const char* key)
     const GwpResult check = CheckPluginKey(self, key, "data_erase");
     if (check != GWP_OK)
         return check;
-    Erase(key);
-    return GWP_OK;
+    return Erase(key) ? GWP_OK : GWP_ERROR_NOT_FOUND;
 }
 
 GwpResult GWP_CALL ApiDataGet(const char* key, GwpValue* out)
@@ -221,11 +202,11 @@ GwpResult GWP_CALL ApiDataGet(const char* key, GwpValue* out)
     if (!IsMainThread())
         return GWP_ERROR_NOT_MAIN_THREAD;
     if (!g_store)
-        return GWP_ERROR;
+        return GWP_ERROR_NOT_FOUND;
     const auto it = g_store->find(key);
     if (it == g_store->end())
-        return GWP_ERROR;
-    *out = ValueOf(it->second);
+        return GWP_ERROR_NOT_FOUND;
+    *out = it->second.value.view(); // the parts live in the entry until the key is changed or erased
     return GWP_OK;
 }
 
@@ -245,7 +226,8 @@ pcstr LuaKey(lua_State* L, int index, pcstr function)
 }
 
 // data_bus.get(key [, default]): the value, or default (nil) when there is no such key.
-// Object ids come back as game objects (nil when the object is offline), like event arguments.
+// Object ids come back as game objects (nil when the object is offline), like event arguments; an array comes back
+// as a new table {1..n} (a copy: changing it does not change the stored value), bytes as a Lua string.
 int LuaGet(lua_State* L)
 {
     const pcstr key = LuaKey(L, 1, "get");
@@ -254,7 +236,7 @@ int LuaGet(lua_State* L)
         const auto it = g_store->find(key);
         if (it != g_store->end())
         {
-            events::PushLuaValue(L, ValueOf(it->second));
+            events::PushLuaValue(L, it->second.value.view());
             return 1;
         }
     }
@@ -263,7 +245,10 @@ int LuaGet(lua_State* L)
 }
 
 // data_bus.set(key, value [, persistent]): true on success. value = nil erases the key.
-// Tables and functions cannot be stored.
+// A table with the keys exactly 1..n whose items have a native form (nested such tables too) is stored as an array
+// (GWP_T_ARRAY, a deep copy); any other table, a function or a userdata other than a game object cannot be stored.
+// The owner of the key is not checked: Lua may write any key, those of plugins included (a C function called from
+// Lua cannot tell which script or addon called it; wiki/doc/plugins/api/data.md, "Lua").
 int LuaSet(lua_State* L)
 {
     const pcstr key = LuaKey(L, 1, "set");
@@ -272,8 +257,9 @@ int LuaSet(lua_State* L)
         lua_pushboolean(L, 0);
         return 1;
     }
-    const GwpValue value = events::LuaToValue(L, 2);
-    if (!CheckValue(value, key, "Lua"))
+    events::ValueArena arena; // the items of an array, until Set copies them into the store
+    const GwpValue value = events::LuaToValue(L, 2, &arena);
+    if (!CheckStorable(value, key, "Lua"))
     {
         lua_pushboolean(L, 0);
         return 1;
@@ -322,79 +308,6 @@ int LuaKeys(lua_State* L)
 // Save
 // ---------------------------------------------------------------------------------------------
 
-void WriteValue(IWriter& stream, const Entry& entry)
-{
-    const GwpValue value = ValueOf(entry);
-    stream.w_u32(value.type);
-    switch (value.type)
-    {
-    case GWP_T_BOOL: stream.w_u8(value.u.b ? 1 : 0); break;
-    case GWP_T_INT: stream.w_s64(value.u.i); break;
-    case GWP_T_NUMBER: stream.w(&value.u.n, sizeof(value.u.n)); break;
-    case GWP_T_STRING:
-        stream.w_u32(value.u.s.len);
-        stream.w(value.u.s.ptr, value.u.s.len);
-        break;
-    case GWP_T_VEC3: stream.w(value.u.v, sizeof(value.u.v)); break;
-    case GWP_T_OBJECT:
-    case GWP_T_SERVER_OBJECT: stream.w_u16(value.u.id); break;
-    default: break;
-    }
-}
-
-// false when the data is truncated or the type is unknown.
-bool ReadValue(IReader& reader, Entry& entry)
-{
-    const auto has = [&reader](size_t bytes) { return reader.elapsed() >= static_cast<intptr_t>(bytes); };
-    if (!has(sizeof(u32)))
-        return false;
-    GwpValue value = events::Nil();
-    value.type = reader.r_u32();
-    switch (value.type)
-    {
-    case GWP_T_BOOL:
-        if (!has(1))
-            return false;
-        value.u.b = reader.r_u8() ? 1 : 0;
-        break;
-    case GWP_T_INT:
-        if (!has(sizeof(s64)))
-            return false;
-        value.u.i = reader.r_s64();
-        break;
-    case GWP_T_NUMBER:
-        if (!has(sizeof(double)))
-            return false;
-        reader.r(&value.u.n, sizeof(value.u.n));
-        break;
-    case GWP_T_STRING:
-    {
-        if (!has(sizeof(u32)))
-            return false;
-        const u32 length = reader.r_u32();
-        if (length > kMaxStringLength || !has(length))
-            return false;
-        entry.text.assign(static_cast<const char*>(reader.pointer()), length);
-        reader.advance(length);
-        break;
-    }
-    case GWP_T_VEC3:
-        if (!has(sizeof(value.u.v)))
-            return false;
-        reader.r(value.u.v, sizeof(value.u.v));
-        break;
-    case GWP_T_OBJECT:
-    case GWP_T_SERVER_OBJECT:
-        if (!has(sizeof(u16)))
-            return false;
-        value.u.id = reader.r_u16();
-        break;
-    default: return false;
-    }
-    entry.value = value;
-    return true;
-}
-
 pcstr TypeName(u32 type)
 {
     switch (type)
@@ -406,6 +319,8 @@ pcstr TypeName(u32 type)
     case GWP_T_VEC3: return "vec3";
     case GWP_T_OBJECT: return "object";
     case GWP_T_SERVER_OBJECT: return "server_object";
+    case GWP_T_BYTES: return "bytes";
+    case GWP_T_ARRAY: return "array";
     default: return "?";
     }
 }
@@ -469,7 +384,7 @@ void WriteSave(IWriter& stream)
             if (!entry.persistent)
                 continue;
             stream.w_stringZ(key.c_str());
-            WriteValue(stream, entry);
+            entry.value.Write(stream); // events::WriteValue: the value format of the chunk
         }
     }
     stream.close_chunk();
@@ -497,11 +412,14 @@ void ReadSave(IReader& stream)
         xr_string key;
         Entry entry;
         entry.persistent = true;
-        if (!ReadStringZChecked(*reader, key) || !IsValidKey(key.c_str()) || !ReadValue(*reader, entry))
+        // events::ReadValue reads format 1 as it is (the old types) plus GWP_T_BYTES and GWP_T_ARRAY
+        if (!ReadStringZChecked(*reader, key) || !IsValidKey(key.c_str()) || !entry.value.Read(*reader))
         {
             Msg("! [data] save data is truncated or corrupted, the rest is ignored");
             break;
         }
+        if (entry.value.type() == GWP_T_NIL)
+            continue; // nothing to keep (a value the writer could not write is written as NIL)
         store[key] = std::move(entry);
         ++loaded;
     }
@@ -524,14 +442,18 @@ void PrintList(pcstr prefix)
         {
             if (it->first.compare(0, filter_length, filter) != 0)
                 break;
-            const GwpValue value = ValueOf(it->second);
+            const GwpValue& value = it->second.value.view();
             string512 text;
             switch (value.type)
             {
             case GWP_T_BOOL: xr_strcpy(text, value.u.b ? "true" : "false"); break;
             case GWP_T_INT: xr_sprintf(text, "%lld", static_cast<long long>(value.u.i)); break;
             case GWP_T_NUMBER: xr_sprintf(text, "%g", value.u.n); break;
-            case GWP_T_STRING: xr_sprintf(text, "\"%.200s\"%s", it->second.text.c_str(), value.u.s.len > 200 ? "..." : ""); break;
+            case GWP_T_STRING: // a copy of the store: zero-terminated after its len bytes
+                xr_sprintf(text, "\"%.200s\"%s", value.u.s.ptr ? value.u.s.ptr : "", value.u.s.len > 200 ? "..." : "");
+                break;
+            case GWP_T_BYTES: xr_sprintf(text, "%u byte(s)", value.u.s.len); break;
+            case GWP_T_ARRAY: xr_sprintf(text, "%u item(s)", value.u.a.count); break;
             case GWP_T_VEC3: xr_sprintf(text, "(%g, %g, %g)", value.u.v[0], value.u.v[1], value.u.v[2]); break;
             case GWP_T_OBJECT:
             case GWP_T_SERVER_OBJECT: xr_sprintf(text, "id %u", static_cast<u32>(value.u.id)); break;

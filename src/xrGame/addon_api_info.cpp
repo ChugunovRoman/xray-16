@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 
+#include "addon_api_common.h"
 #include "addon_host.h"
 
 #include "InventoryOwner.h"
@@ -31,14 +32,6 @@ const KNOWN_INFO_VECTOR* Portions(GwpObjectId owner)
     if (owner == GWP_INVALID_OBJECT_ID || !ai().get_alife() || !ai().alife().initialized())
         return nullptr;
     return ai().alife().registry(info_portions).object(owner, true);
-}
-
-// The owner as an online character: giving a portion runs its scripted effects, which needs the object itself.
-CInventoryOwner* OnlineOwner(GwpObjectId owner)
-{
-    if (!g_pGameLevel || owner == GWP_INVALID_OBJECT_ID)
-        return nullptr;
-    return smart_cast<CInventoryOwner*>(Level().Objects.net_Find(owner));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -86,17 +79,21 @@ const char* GWP_CALL ApiInfoAt(GwpObjectId owner, uint32_t index)
 
 GwpResult Transfer(const GwpPlugin* self, GwpObjectId owner, const char* info, bool give, pcstr function)
 {
-    if (!CheckCall(function))
-        return GWP_ERROR_NOT_MAIN_THREAD;
-    if (!self || !info || !*info)
-        return GWP_ERROR_INVALID_ARGUMENT;
-    CInventoryOwner* character = OnlineOwner(owner);
+    if (!api::CheckPluginMutation(self, "info", function))
+        return api::PluginCallRefused(self);
+    if (!info || !*info)
+        return api::PluginRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "no info portion name");
+    // The owner as an online character: giving a portion runs its scripted effects, which needs the object itself.
+    // Offline there is nobody to run them for (NOT_FOUND), an online object of another class is no character
+    // (INVALID_ARGUMENT)
+    CInventoryOwner* character = api::FindOnline<CInventoryOwner>(owner);
     if (!character)
     {
+        const GwpResult code = api::MissingObjectCode(owner);
         if (IsDebugLog())
-            Msg("~ [plugin:%s] %s: object %u is not an online character", PluginAddonId(self), function,
-                static_cast<u32>(owner));
-        return GWP_ERROR;
+            Msg("~ [plugin:%s] %s: object %u is %s", PluginAddonId(self), function, static_cast<u32>(owner),
+                code == GWP_ERROR_INVALID_ARGUMENT ? "not a character" : "not online");
+        return code;
     }
     // TransferInfo is the path Lua takes: it sends the network message and runs the effects of the portion.
     character->TransferInfo(info, give);

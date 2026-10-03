@@ -52,6 +52,7 @@
 #include "script_game_object_impl.h"
 #include "Inventory.h"
 #include "trajectories.h"
+#include "addon_api_character.h"
 
 using namespace StalkerSpace;
 
@@ -229,6 +230,11 @@ void CAI_Stalker::Hit(SHit* pHDS)
     //хит может меняться в зависимости от ранга (новички получают больше хита, чем ветераны)
     SHit HDS = *pHDS;
     HDS.add_wound = true;
+
+    // Plugin API: npc_on_before_hit - the subscribers may change the power of the hit or cancel it. Not for an
+    // invulnerable stalker: CCustomMonster::Hit drops its hits anyway (as CBaseMonster::Hit does before its event)
+    if (g_Alive() && !invulnerable() && !gw::addons::character::BeforeHit(this, HDS, false))
+        return;
 
     //AVO: get bone names from IDs
     //if (HDS.whoID == 0) // if shot by actor

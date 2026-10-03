@@ -10,6 +10,7 @@
 #include "addon_object_events.h"
 #include "alife_update_manager.h"
 #include "addon_event_bus.h"
+#include "addon_api_alife_ext.h"
 #include "alife_simulator_header.h"
 #include "alife_time_manager.h"
 #include "alife_graph_registry.h"
@@ -282,7 +283,10 @@ void CALifeUpdateManager::new_game(LPCSTR save_name)
     CALifeObjectRegistry::OBJECT_REGISTRY::iterator I = objects().objects().begin();
     CALifeObjectRegistry::OBJECT_REGISTRY::iterator E = objects().objects().end();
     for (; I != E; ++I)
+    {
         (*I).second->on_register();
+        gw::addons::alife_ext::OnServerObjectRegistered((*I).second); // server_object_on_register
+    }
 
 #ifdef DEBUG
     save(save_name);

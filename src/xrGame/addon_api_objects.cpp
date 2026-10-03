@@ -3,6 +3,7 @@
 // Plugin API, group "objects": read-only queries about online game objects by id.
 // Docs: wiki/doc/plugins/api/objects.md
 
+#include "addon_api_common.h"
 #include "addon_host.h"
 
 #include "Actor.h"
@@ -35,12 +36,6 @@ const char* GWP_CALL ApiObjectName(GwpObjectId id)
     return object ? object->cName().c_str() : nullptr;
 }
 
-int32_t GWP_CALL ApiObjectClsid(GwpObjectId id)
-{
-    const CGameObject* object = FindObject(id);
-    return object ? static_cast<int32_t>(object->clsid()) : -1;
-}
-
 int GWP_CALL ApiObjectPosition(GwpObjectId id, float out_xyz[3])
 {
     const CGameObject* object = FindObject(id);
@@ -67,18 +62,13 @@ int GWP_CALL ApiObjectDirection(GwpObjectId id, float out_xyz[3])
 }
 
 // CLASS_ID as the text the class was registered with ("AI_STL_S"): CLSID2TEXT pads it with spaces to 8
-// characters, which are not part of the name.
-int GWP_CALL ApiObjectClassId(GwpObjectId id, char out[9])
+// characters, which are not part of the name. The length of the full text, out may be NULL to ask it.
+uint32_t GWP_CALL ApiObjectClassId(GwpObjectId id, char* out, uint32_t cap)
 {
-    if (out)
-        out[0] = 0;
+    if (out && cap)
+        out[0] = '\0';
     const CGameObject* object = FindObject(id);
-    if (!object || !out)
-        return 0;
-    CLSID2TEXT(object->CLS_ID, out);
-    for (int i = 7; i >= 0 && out[i] == ' '; --i)
-        out[i] = 0;
-    return 1;
+    return object ? api::CopyClassIdText(object->CLS_ID, out, cap) : 0;
 }
 
 int GWP_CALL ApiObjectIsAlive(GwpObjectId id)
@@ -101,7 +91,6 @@ void FillObjectsApi(GwpEngineApi& api)
     api.object_exists = &ApiObjectExists;
     api.object_section = &ApiObjectSection;
     api.object_name = &ApiObjectName;
-    api.object_clsid = &ApiObjectClsid;
     api.object_position = &ApiObjectPosition;
     api.object_is_alive = &ApiObjectIsAlive;
     api.actor_id = &ApiActorId;

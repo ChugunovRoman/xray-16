@@ -7,7 +7,8 @@
 //  - Every entry has a generation: the engine reuses object ids, and a handle {id, generation} kept across frames
 //    tells a stale entry from a new one instead of reading the fields of another object.
 //  - Main thread only, like the rest of the Plugin API; no snapshot for workers yet.
-// Lua side: global table npc_storage (acquire / release / set / keys / handle), used by npc_storage_bridge.script.
+// Lua side: table _gw_internal.npc_storage (acquire / release / set / keys / handle), used by
+// npc_storage_bridge.script.
 // Docs: wiki/doc/plugins/api/storage.md; plan: plans/lua_to_cpp/08-wave-w0-native-npc-foundation.md (W0.4)
 
 #include "xrAddonHost/include/gwp/gwp_api.h"

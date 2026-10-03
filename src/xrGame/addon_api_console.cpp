@@ -119,6 +119,14 @@ GwpResult CheckOwnName(const GwpPlugin* self, const char* name, pcstr function)
         Msg("! [plugin:%s] %s('%s'): the name of a console variable must start with '%s_'", id, function, name, id);
         return GWP_ERROR_ACCESS_DENIED;
     }
+    // A longer addon id owns its names even before its plugin loads (or when it does not): addon "gw" may not take
+    // "gw_npc_*" while addon "gw_npc" is installed. The host knows every id before the first plugin loads.
+    const pcstr owner = NameOwnerAddonId(name);
+    if (owner && xr_strcmp(owner, id) != 0)
+    {
+        Msg("! [plugin:%s] %s('%s'): the name belongs to addon '%s'", id, function, name, owner);
+        return GWP_ERROR_ACCESS_DENIED;
+    }
     return GWP_OK;
 }
 
@@ -487,7 +495,7 @@ GwpResult RegisterCvar(const GwpPlugin* self, const char* name, pcstr function, 
         return GWP_OK; // registered again after a reload of the plugin: the value of the game is kept
     }
     if (!Console)
-        return GWP_ERROR;
+        return GWP_ERROR_INVALID_STATE; // no console yet (or no more)
     if (Console->GetCommand(name))
     {
         // An addon id that is a prefix of the engine (hud, ai, r2, ...): the command of the engine must stay
@@ -545,7 +553,7 @@ PluginCvar* OwnCvar(const GwpPlugin* self, const char* name, pcstr function, Gwp
     PluginCvar* cvar = FindCvar(name);
     if (!cvar)
     {
-        result = GWP_ERROR;
+        result = GWP_ERROR_NOT_FOUND; // not registered (by any plugin)
         return nullptr;
     }
     // The prefix alone does not tell the owner: addon "gw" passes the check for "gw_npc_*" of addon "gw_npc"
@@ -566,7 +574,7 @@ GwpResult GWP_CALL ApiCvarSetInt(const GwpPlugin* self, const char* name, int va
     if (!cvar)
         return result;
     if (cvar->is_float)
-        return GWP_ERROR;
+        return GWP_ERROR_INVALID_ARGUMENT; // a float variable: cvar_set_float
     if (value < cvar->min || value > cvar->max)
         return GWP_ERROR_INVALID_ARGUMENT; // the console refuses it too; the file would drop it at the next start
     cvar->int_value = value;
@@ -580,7 +588,7 @@ GwpResult GWP_CALL ApiCvarSetFloat(const GwpPlugin* self, const char* name, doub
     if (!cvar)
         return result;
     if (!cvar->is_float)
-        return GWP_ERROR;
+        return GWP_ERROR_INVALID_ARGUMENT; // an integer variable: cvar_set_int
     if (!std::isfinite(value) || value < cvar->min - EPS || value > cvar->max + EPS)
         return GWP_ERROR_INVALID_ARGUMENT; // as CCC_Float::Execute; NaN never
     cvar->float_value = static_cast<float>(value);
@@ -594,7 +602,7 @@ GwpResult GWP_CALL ApiConsoleExecute(const GwpPlugin* self, const char* command)
     if (!self || !command || !*command || xr_strlen(command) >= kMaxCommandLength)
         return GWP_ERROR_INVALID_ARGUMENT;
     if (!Console)
-        return GWP_ERROR;
+        return GWP_ERROR_INVALID_STATE; // no console yet (or no more)
     if (IsDebugLog())
         Msg("  [plugin:%s] console: %s", PluginAddonId(self), command);
     Console->Execute(command);

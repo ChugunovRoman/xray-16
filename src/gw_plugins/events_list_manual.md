@@ -18,11 +18,16 @@ Per-event descriptions (when / arguments / notes) live in events_meta.json.
 | `BOOL` | логическое |
 | `VEC3` | вектор (в Lua `vector`) |
 | `LUA_REF` | Lua-таблица или userdata без нативной формы; содержимое плагину недоступно |
+| `ARRAY` | массив значений (`u.a`): Lua-таблица с ключами ровно `1..n` (n ≤ 4096), все элементы которой имеют нативную форму, вложенность до 8 уровней. Любая другая таблица приходит как `LUA_REF`. Подробно — "[Как Lua-значения становятся GwpValue и обратно](https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/api/events.md#как-lua-значения-становятся-gwpvalue-и-обратно)" |
 | `NIL` | пусто |
+
+Тип `BYTES` (двоичные данные) в событиях мода не встречается: из Lua строка всегда приходит как `STRING`. Плагин может отправить `BYTES` в своём событии, Lua-подписчик получит обычную строку.
 
 Нумерация аргументов — с нуля, как индекс в `argv` и в методах `gwp::EventView`.
 
 Схема описывает то, что получает плагин. Таблица флагов события с результатом в схему не входит и плагину аргументом не передаётся (см. "[События с результатом](#события-с-результатом)"). Схема скриптового события — значение в таблице `intercepts` в `axr_main.script`, схемы встроенных событий задаёт движок.
+
+Код схемы `t` («таблица») допускает и `LUA_REF`, и `ARRAY`: одна и та же таблица в зависимости от содержимого приходит то массивом, то без содержимого (пустая таблица `{}` — массив из 0 элементов).
 
 Схема — это договорённость, а не фильтр. С ключом запуска `-addon_debug` (или консольной командой `gw_event_schema_check 1`) движок сверяет со схемой каждую отправку события и при несовпадении один раз на событие пишет в лог предупреждение `do not match the schema`; событие при этом рассылается как есть. Поэтому тип аргумента в обработчике всё равно проверяйте (`gwp::EventView` делает это сам и возвращает значение по умолчанию при несовпадении).
 
@@ -80,7 +85,7 @@ Per-event descriptions (when / arguments / notes) live in events_meta.json.
 7. `level_on_start`.
 8. `level_on_frame` каждый кадр.
 
-Сейва нет: `load_state`, `alife_on_load` и `alife_on_after_load` не приходят, а `save_read` возвращает `GWP_ERROR`.
+Сейва нет: `load_state`, `alife_on_load` и `alife_on_after_load` не приходят, а `save_read` возвращает `GWP_ERROR_NOT_FOUND`.
 
 **Сохранение:**
 
@@ -105,6 +110,15 @@ Per-event descriptions (when / arguments / notes) live in events_meta.json.
 Эти события отправляют Lua-скрипты через `SendScriptCallback`. Все они объявлены в таблице `intercepts` в `axr_main.script`, там же их схемы. Скрипт, из которого событие отправляется, указан в заголовке группы.
 
 Жизненный цикл актора (`actor_on_update`, `actor_on_first_update`, `actor_on_net_destroy` и другие) с этапа B-4 отправляет движок, раздел выше. Из `bind_stalker_ext.script` остались только события фонарика (`actor_on_torch_enabled` / `_disabled`), без аргументов.
+
+**Подписки без отправителя.** Скрипты мода, взятые из Anomaly, подписываются ещё на два события, которых нет ни в `intercepts`, ни в списке ниже, потому что в GlobalWar их никто не отправляет (проверено поиском `SendScriptCallback` / `make_callback` по `gamedata/scripts` и по движку):
+
+| Событие | Кто подписан | Чем заменить |
+|---|---|---|
+| `on_option_change` | только закомментированные подписки в `ssfx_001_mcm.script`, `ssfx_interactive_grass.script`, `ssfx_shadow_cascades.script`, `ssfx_weapons_dof.script` (в Anomaly его шлёт меню MCM при применении настроек) | `opt_menu_on_accepted` — настройки применены в меню опций (`axr_main.script`), группа «Главное меню и настройки» ниже |
+| `on_game_end` | `xrs_dyn_music.script` (`on_actor_destroy`: остановка динамической музыки) | встроенные `alife_on_end` / `actor_on_destroy`, Lua-событие `actor_on_net_destroy` |
+
+Подписаться на них можно (шина запомнит имя и один раз напишет в лог `subscription of undeclared event`), но обработчик не будет вызван ни разу, пока какой-нибудь скрипт или плагин сам не отправит событие.
 
 Частые события (`actor_on_update_fast` / `_slow`, `on_key_hold`, `monster_on_update`) при подписке плагина переводят аргументы в `GwpValue` на каждом вызове. Для кадровой логики лучше встроенное `level_on_frame`. События «по объекту» (`npc_on_update`, `monster_on_update`, `squad_on_update`) удобнее получать пачкой раз в кадр, а не вызовом на каждый объект: `event_subscribe_ex` с `GWP_SUBSCRIBE_BATCH`, см. "[Подписка с опциями](https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/api/events.md#подписка-с-опциями-троттлинг-и-пачки-event_subscribe_ex)".
 

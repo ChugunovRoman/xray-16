@@ -88,6 +88,20 @@ target_sources(xrGame PRIVATE
     addon_api_ini.cpp
     addon_api_ini.h
     addon_api_level.cpp
+    addon_api_services.cpp
+    addon_api_services.h
+    addon_api_threads.cpp
+    addon_api_threads.h
+    addon_api_alife_ext.cpp
+    addon_api_alife_ext.h
+    addon_api_world.cpp
+    addon_api_world.h
+    addon_api_feedback.cpp
+    addon_api_feedback.h
+    addon_api_character.cpp
+    addon_api_character.h
+    addon_api_inventory_ext.cpp
+    addon_api_inventory_ext.h
     addon_binders.cpp
     addon_binders.h
     addon_storage.cpp
@@ -103,6 +117,7 @@ target_sources(xrGame PRIVATE
     gw_condlist_native.cpp
     addon_api_npc_control.cpp
     addon_api_npc_control.h
+    addon_api_common.h
     addon_data_bus.cpp
     addon_data_bus.h
     addon_event_bus.cpp

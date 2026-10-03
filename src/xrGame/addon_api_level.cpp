@@ -83,26 +83,30 @@ uint32_t GWP_CALL ApiLevelObjectCount()
     return Level().Objects.o_count();
 }
 
+// Writes up to max ids, returns how many online objects there are in all (out may be NULL with max 0 to count)
 uint32_t GWP_CALL ApiLevelObjects(GwpObjectId* out, uint32_t max)
 {
-    if (!CheckLevelCall("level_objects") || !HasLevel() || !out || !max)
+    if (!CheckLevelCall("level_objects") || !HasLevel())
         return 0;
     // o_count/o_get_by_iterator walk the list of live objects; the Lua way (a scan of all 65536 ids with a cast
     // on every slot) is not needed here.
     const u32 count = Level().Objects.o_count();
-    uint32_t written = 0;
-    for (u32 i = 0; i < count && written < max; ++i)
+    uint32_t total = 0;
+    for (u32 i = 0; i < count; ++i)
     {
         const IGameObject* object = Level().Objects.o_get_by_iterator(i);
-        if (object)
-            out[written++] = object->ID();
+        if (!object)
+            continue;
+        if (out && total < max)
+            out[total] = object->ID();
+        ++total;
     }
-    return written;
+    return total;
 }
 
-uint32_t GWP_CALL ApiLevelVertexId(const float xyz[3])
+uint32_t GWP_CALL ApiLevelVertexAtPosition(const float xyz[3])
 {
-    if (!CheckLevelCall("level_vertex_id") || !xyz || !HasGraph())
+    if (!CheckLevelCall("level_vertex_at_position") || !xyz || !HasGraph())
         return GWP_INVALID_LEVEL_VERTEX;
     return ai().level_graph().vertex_id(ToVector(xyz));
 }
@@ -182,7 +186,7 @@ void FillLevelApi(GwpEngineApi& api)
     api.level_time_parts = &ApiLevelTimeParts;
     api.level_object_count = &ApiLevelObjectCount;
     api.level_objects = &ApiLevelObjects;
-    api.level_vertex_id = &ApiLevelVertexId;
+    api.level_vertex_at_position = &ApiLevelVertexAtPosition;
     api.level_vertex_valid = &ApiLevelVertexValid;
     api.level_vertex_position = &ApiLevelVertexPosition;
     api.level_vertex_in_direction = &ApiLevelVertexInDirection;

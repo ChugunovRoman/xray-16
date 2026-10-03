@@ -276,4 +276,9 @@ public:
     IC float& hit_bone_scale() { return (m_fHitBoneScale); }
     IC float& wound_bone_scale() { return (m_fWoundBoneScale); }
     IC SConditionChangeV& change_v() { return (m_change_v); }
+
+    // Absolute writes of the Plugin API (creature_set_condition), clamped as UpdateCondition clamps them
+    IC void SetRadiation(float value) { m_fRadiation = value; clamp(m_fRadiation, 0.0f, m_fRadiationMax); }
+    IC void SetPsyHealth(float value) { m_fPsyHealth = value; clamp(m_fPsyHealth, 0.0f, m_fPsyHealthMax); }
+    IC void SetEntityMorale(float value) { m_fEntityMorale = value; clamp(m_fEntityMorale, 0.0f, m_fEntityMoraleMax); }
 };

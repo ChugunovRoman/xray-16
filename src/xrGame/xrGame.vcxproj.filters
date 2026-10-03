@@ -4581,6 +4581,27 @@
     <ClInclude Include="addon_api_ini.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
+    <ClInclude Include="addon_api_services.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_api_threads.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_api_alife_ext.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_api_world.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_api_feedback.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_api_character.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_api_inventory_ext.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
     <ClInclude Include="addon_data_bus.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
@@ -4606,6 +4627,9 @@
       <Filter>Core\Addons</Filter>
     </ClInclude>
     <ClInclude Include="addon_api_npc_control.h">
+      <Filter>Core\Addons</Filter>
+    </ClInclude>
+    <ClInclude Include="addon_api_common.h">
       <Filter>Core\Addons</Filter>
     </ClInclude>
     <ClInclude Include="addon_host.h">
@@ -7730,6 +7754,27 @@
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_api_info.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_api_services.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_api_threads.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_api_alife_ext.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_api_world.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_api_feedback.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_api_character.cpp">
+      <Filter>Core\Addons</Filter>
+    </ClCompile>
+    <ClCompile Include="addon_api_inventory_ext.cpp">
       <Filter>Core\Addons</Filter>
     </ClCompile>
     <ClCompile Include="addon_api_ini.cpp">

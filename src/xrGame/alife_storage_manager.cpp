@@ -21,6 +21,7 @@
 #include "xrEngine/IGame_Persistent.h"
 #include "autosave_manager.h"
 #include "addon_host.h"
+#include "addon_api_alife_ext.h"
 #include "addon_event_bus.h"
 #include "addon_timers.h"
 
@@ -169,7 +170,10 @@ void CALifeStorageManager::load(void* buffer, const u32& buffer_size, LPCSTR fil
     can_register_objects(true);
 
     for (auto& object : objects().objects())
+    {
         object.second->on_register();
+        gw::addons::alife_ext::OnServerObjectRegistered(object.second); // server_object_on_register
+    }
 
     // Addons: every object is registered. Before the early return: the event must come on every load.
     {

@@ -4,7 +4,7 @@
 //
 // The interpreter lives in the engine on purpose (spec 0.1(a)): it reads the parsed condlist table straight
 // from the Lua stack, so no source string and no plugin marshalling is needed. xr_logic.script calls
-// gw_logic.pick_section(actor, npc, condlist); the result is
+// _gw_internal.logic.pick_section(actor, npc, condlist); the result is
 //   - the picked section (string, or nil for "never"/no match) when the native side handled the call,
 //   - false when the condlist contains anything the native side cannot evaluate: then Lua stays
 //     authoritative and re-runs the whole call from the beginning (fallback is per call, decided before
@@ -23,7 +23,7 @@
 //
 // Switch npc_perf_condlist_native: 0 = pure Lua (default), 1 = native decides, 2 = shadow (native runs
 // a dry pass first - no infop_set, no effects - saving and restoring the LuaJIT math.random state, then
-// the Lua pass decides and gw_logic.shadow_result counts the mismatches).
+// the Lua pass decides and _gw_internal.logic.shadow_result counts the mismatches).
 //
 // Reentrancy: effects and give_info_portion can run script callbacks that call pick_section again
 // (spec 4.2). The interpreter keeps the Lua stack empty while evaluating, so nested calls on the same
@@ -1060,7 +1060,7 @@ bool EvaluateCompiled(const CallCtx& ctx, const CompiledCondlist& compiled, bool
 }
 
 // ---------------------------------------------------------------------------------------------
-// Counters (gw_logic.stats prints them)
+// Counters (_gw_internal.logic.stats prints them)
 // ---------------------------------------------------------------------------------------------
 
 u64 g_calls = 0;        // entered with the switch on
@@ -1077,7 +1077,7 @@ u64 g_shadowMismatch = 0;
 // Lua entry points
 // ---------------------------------------------------------------------------------------------
 
-// gw_logic.pick_section(actor, npc, condlist) -> result, is_shadow
+// _gw_internal.logic.pick_section(actor, npc, condlist) -> result, is_shadow
 // result: the picked section (string or nil), or false when Lua must run the call.
 int LuaPickSection(lua_State* L)
 {
@@ -1260,7 +1260,7 @@ int LuaPickSection(lua_State* L)
     return 2;
 }
 
-// gw_logic.shadow_result(nativeDryResult, luaResult): shadow bookkeeping, called by the seam.
+// _gw_internal.logic.shadow_result(nativeDryResult, luaResult): shadow bookkeeping, called by the seam.
 int LuaShadowResult(lua_State* L)
 {
     ++g_shadowCompared;
@@ -1278,7 +1278,7 @@ int LuaShadowResult(lua_State* L)
     if (!same)
     {
         ++g_shadowMismatch;
-        // first mismatches are logged in full; later ones only grow the counter (see gw_logic.stats)
+        // first mismatches are logged in full; later ones only grow the counter (see _gw_internal.logic.stats)
         if (g_shadowMismatch <= 20)
             Msg("! [gw_condlist] shadow mismatch #%llu: native '%s' vs lua '%s'",
                 static_cast<unsigned long long>(g_shadowMismatch),
@@ -1288,7 +1288,7 @@ int LuaShadowResult(lua_State* L)
     return 0;
 }
 
-// gw_logic.stats(): counters of the native interpreter (npc_perf_condlist_native).
+// _gw_internal.logic.stats(): counters of the native interpreter (npc_perf_condlist_native).
 int LuaStats(lua_State*)
 {
     Msg("- [gw_condlist] npc_perf_condlist_native=%d calls=%llu covered=%llu", npc_perf_condlist_native,
@@ -1326,6 +1326,18 @@ void CGwCondlistScript::script_register(lua_State* L)
     lua_setfield(L, -2, "shadow_result");
     lua_pushcfunction(L, &LuaStats);
     lua_setfield(L, -2, "stats");
-    lua_setglobal(L, "gw_logic");
+    // Internal to xr_logic.script, not an API for addons: _gw_internal.logic. The global table _gw_internal is
+    // shared with addon_event_bus.cpp and addon_storage.cpp: the first one creates it. Only after the pushes above.
+    lua_getglobal(L, "_gw_internal");
+    if (!lua_istable(L, -1))
+    {
+        lua_pop(L, 1);
+        lua_newtable(L);
+        lua_pushvalue(L, -1);
+        lua_setglobal(L, "_gw_internal");
+    }
+    lua_insert(L, -2);
+    lua_setfield(L, -2, "logic");
+    lua_pop(L, 1);
 }
 } // namespace gw::condlist

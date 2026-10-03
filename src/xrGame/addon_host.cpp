@@ -3,6 +3,13 @@
 #include "addon_host.h"
 #include "addon_api_console.h"
 #include "addon_api_ini.h"
+#include "addon_api_services.h"
+#include "addon_api_threads.h"
+#include "addon_api_alife_ext.h"
+#include "addon_api_world.h"
+#include "addon_api_feedback.h"
+#include "addon_api_character.h"
+#include "addon_api_inventory_ext.h"
 #include "addon_binders.h"
 #include "addon_callbacks.h"
 #include "addon_data_bus.h"
@@ -47,8 +54,9 @@ enum class EAddonState
 {
     Discovered, // manifest parsed, plugin not processed yet
     Active,     // addon works (with its plugin, or it has none / plugin unavailable and not required)
-    Failed,     // addon cannot work (manifest error, required plugin failed)
-    Skipped,    // duplicate id or disabled
+    Failed,     // addon cannot work (manifest error, required plugin failed, dependency missing or failed)
+    Skipped,    // duplicate id
+    Disabled,   // switched off in appdata/addons.ltx, or not listed there
 };
 
 bool EqualsNoCase(const xr_string& a, const xr_string& b);
@@ -109,6 +117,50 @@ xr_string AddonTypeList()
     return list;
 }
 
+// [addon] version and the versions of [addon] depends conditions: MAJOR.MINOR.PATCH, plain numbers.
+// Not packed like GWP_MAKE_VERSION: an addon may number its versions by date (2026.10.3).
+struct AddonVersion
+{
+    u32 major = 0;
+    u32 minor = 0;
+    u32 patch = 0;
+};
+
+int CompareAddonVersions(const AddonVersion& a, const AddonVersion& b)
+{
+    if (a.major != b.major)
+        return a.major < b.major ? -1 : 1;
+    if (a.minor != b.minor)
+        return a.minor < b.minor ? -1 : 1;
+    if (a.patch != b.patch)
+        return a.patch < b.patch ? -1 : 1;
+    return 0;
+}
+
+enum class EVersionOp
+{
+    Less,
+    LessEqual,
+    Equal,
+    GreaterEqual,
+    Greater,
+};
+
+struct VersionCondition
+{
+    EVersionOp op = EVersionOp::GreaterEqual;
+    AddonVersion version;
+    xr_string text; // as written: ">=1.2.0"
+};
+
+// One entry of [addon] depends: "some_lib", "some_lib>=1.2.0", "some_lib >=1.2 <2" (every condition must hold).
+struct AddonDependency
+{
+    xr_string id;
+    xr_vector<VersionCondition> conditions;
+    xr_string text; // the entry as written, for messages
+};
+
 enum class EPluginState
 {
     None,        // addon declares no plugin
@@ -120,9 +172,14 @@ enum class EPluginState
 struct AddonRecord
 {
     xr_string id;
-    xr_string version;
+    xr_string version;          // as written in the manifest: what addon_version() gives the plugin
+    AddonVersion version_parsed; // valid only with version_valid
+    bool version_valid = false;  // version is MAJOR.MINOR.PATCH
     xr_string type_name;
     EAddonType type = EAddonType::Unknown;
+    xr_vector<AddonDependency> depends; // [addon] depends
+    xr_string trust = "local";  // appdata/addons.ltx: first_party | index | local; only shown for now
+    xr_string plugin_sha256;    // appdata/addons.ltx: hash of the plugin library, not checked yet
     fs::path dir_path;      // addon folder; use for every file system operation
     fs::path manifest_path; // dir_path / addon.ltx
     xr_string dir;          // dir_path as UTF-8 with trailing separator: what plugins get from addon_dir()
@@ -158,6 +215,8 @@ xr_vector<xr_unique_ptr<AddonRecord>>* g_addons = nullptr;
 GwpEngineApi g_engine_api{};
 bool g_initialized = false;
 bool g_debug_log = false;
+// Ids of every found addon, loaded or not (KnownAddonIds): filled before the first plugin loads
+xr_vector<xr_string> g_known_ids;
 
 // A crashed plugin is loaded again at the next game load, at most this many times per run of the game: a plugin
 // that crashes on every load must not take every load with it
@@ -211,6 +270,7 @@ pcstr AddonStateName(EAddonState state)
     case EAddonState::Active: return "active";
     case EAddonState::Failed: return "failed";
     case EAddonState::Skipped: return "skipped";
+    case EAddonState::Disabled: return "disabled";
     }
     return "?";
 }
@@ -236,7 +296,36 @@ xr_string ToUtf8(const fs::path& path)
     return xr_string(reinterpret_cast<const char*>(u8.c_str()), u8.size());
 }
 
-xr_string ToNarrow(const fs::path& path) { return xr_string(path.string().c_str()); }
+// path::string() throws on Windows for a character the ANSI code page lacks (a folder from appdata/addons.ltx may
+// have one): such a path goes to the log as UTF-8 instead of taking the game down.
+xr_string ToNarrow(const fs::path& path)
+{
+    try
+    {
+        return xr_string(path.string().c_str());
+    }
+    catch (const std::system_error&)
+    {
+        return ToUtf8(path);
+    }
+}
+
+// UTF-8 text (appdata/addons.ltx) -> path. On Windows through UTF-16; text that is not valid UTF-8 is taken in
+// the narrow encoding, as the engine's own paths.
+fs::path PathFromUtf8(const xr_string& text)
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    const int size = static_cast<int>(text.size());
+    const int length = size ? MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.c_str(), size, nullptr, 0) : 0;
+    if (length <= 0)
+        return fs::path(text.c_str());
+    std::wstring wide(static_cast<size_t>(length), L'\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.c_str(), size, &wide[0], length);
+    return fs::path(wide);
+#else
+    return fs::path(text.c_str());
+#endif
+}
 
 bool EqualsNoCase(const xr_string& a, const xr_string& b)
 {
@@ -287,6 +376,152 @@ xr_string Trim(const xr_string& text)
         return xr_string();
     const size_t end = text.find_last_not_of(" \t\r\n");
     return text.substr(begin, end - begin + 1);
+}
+
+// Reads min_parts..3 dot-separated decimal numbers (up to 9 digits each) at text[pos]; pos moves past them.
+// Missing parts are 0: "1.2" in a depends condition is 1.2.0.
+bool ReadAddonVersion(const xr_string& text, size_t& pos, u32 min_parts, AddonVersion& out)
+{
+    u32 parts[3] = { 0, 0, 0 };
+    u32 count = 0;
+    while (count < 3)
+    {
+        u32 digits = 0;
+        u32 value = 0;
+        while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9')
+        {
+            if (++digits > 9)
+                return false;
+            value = value * 10 + static_cast<u32>(text[pos] - '0');
+            ++pos;
+        }
+        if (digits == 0)
+            return false;
+        parts[count++] = value;
+        if (count == 3 || pos >= text.size() || text[pos] != '.')
+            break;
+        ++pos; // the dot
+    }
+    if (count < min_parts)
+        return false;
+    out.major = parts[0];
+    out.minor = parts[1];
+    out.patch = parts[2];
+    return true;
+}
+
+// [addon] version: exactly MAJOR.MINOR.PATCH.
+bool ParseAddonVersion(const xr_string& text, AddonVersion& out)
+{
+    size_t pos = 0;
+    return ReadAddonVersion(text, pos, 3, out) && pos == text.size();
+}
+
+xr_string AddonVersionString(const AddonVersion& version)
+{
+    string64 buf;
+    xr_sprintf(buf, "%u.%u.%u", version.major, version.minor, version.patch);
+    return buf;
+}
+
+bool VersionConditionHolds(const VersionCondition& condition, const AddonVersion& version)
+{
+    const int cmp = CompareAddonVersions(version, condition.version);
+    switch (condition.op)
+    {
+    case EVersionOp::Less: return cmp < 0;
+    case EVersionOp::LessEqual: return cmp <= 0;
+    case EVersionOp::Equal: return cmp == 0;
+    case EVersionOp::GreaterEqual: return cmp >= 0;
+    case EVersionOp::Greater: return cmp > 0;
+    }
+    return false;
+}
+
+bool IsIdChar(char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'; }
+
+struct VersionOpName
+{
+    EVersionOp op;
+    pcstr name;
+};
+
+constexpr VersionOpName kVersionOps[] = {
+    { EVersionOp::GreaterEqual, ">=" },
+    { EVersionOp::LessEqual, "<=" },
+    { EVersionOp::Equal, "==" },
+    { EVersionOp::Greater, ">" },
+    { EVersionOp::Less, "<" },
+    { EVersionOp::Equal, "=" },
+};
+
+// [addon] depends = a, b>=1.2.0, c >=1.0 <2.0
+// Entries are separated by commas; an entry is an addon id and zero or more conditions "<op><version>" separated
+// by spaces, every one must hold. op: >= > <= < = (== is the same as =). An empty entry (a trailing comma) is
+// ignored. false with a message in `error` on anything else.
+bool ParseDepends(const xr_string& value, xr_vector<AddonDependency>& out, xr_string& error)
+{
+    out.clear();
+    size_t start = 0;
+    while (start <= value.size())
+    {
+        size_t comma = value.find(',', start);
+        if (comma == xr_string::npos)
+            comma = value.size();
+        const xr_string entry = Trim(value.substr(start, comma - start));
+        start = comma + 1;
+        if (entry.empty())
+            continue;
+
+        AddonDependency dependency;
+        dependency.text = entry;
+        size_t pos = 0;
+        while (pos < entry.size() && IsIdChar(entry[pos]))
+            ++pos;
+        dependency.id = entry.substr(0, pos);
+        if (!IsValidId(dependency.id))
+        {
+            error = "'" + entry + "': expected an addon id (a-z 0-9 _ , up to 64 chars) first";
+            return false;
+        }
+        for (;;)
+        {
+            while (pos < entry.size() && (entry[pos] == ' ' || entry[pos] == '\t'))
+                ++pos;
+            if (pos >= entry.size())
+                break;
+            const size_t condition_start = pos;
+            VersionCondition condition;
+            // Two-character operators first: ">=" must not read as ">" followed by "=1.2.0"
+            const VersionOpName* op = nullptr;
+            for (const VersionOpName& candidate : kVersionOps)
+            {
+                if (entry.compare(pos, xr_strlen(candidate.name), candidate.name) == 0)
+                {
+                    op = &candidate;
+                    break;
+                }
+            }
+            if (!op)
+            {
+                error = "'" + entry + "': expected a version condition such as >=1.2.0 after the id";
+                return false;
+            }
+            condition.op = op->op;
+            pos += xr_strlen(op->name);
+            while (pos < entry.size() && (entry[pos] == ' ' || entry[pos] == '\t'))
+                ++pos;
+            if (!ReadAddonVersion(entry, pos, 1, condition.version))
+            {
+                error = "'" + entry + "': expected a version (MAJOR[.MINOR[.PATCH]], numbers) after the operator";
+                return false;
+            }
+            condition.text = entry.substr(condition_start, pos - condition_start);
+            dependency.conditions.push_back(std::move(condition));
+        }
+        out.push_back(std::move(dependency));
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -351,12 +586,18 @@ struct SimpleIni
 };
 
 // Returns false with a message in `error` on a syntax error; `text` may be any bytes, NUL not required.
-bool ParseSimpleIni(const char* text, size_t size, SimpleIni& out, xr_string& error)
+// merge_repeated = false: a repeated section stays a separate entry of `sections` (find() and get() see the first
+// one) - appdata/addons.ltx reports it and ignores it instead of mixing two entries of one addon.
+bool ParseSimpleIni(const char* text, size_t size, SimpleIni& out, xr_string& error, bool merge_repeated = true)
 {
     out.sections.clear();
     IniSection* current = nullptr;
     u32 line_no = 0;
     size_t pos = 0;
+    // UTF-8 BOM (an editor may add it): not part of the first line
+    if (size >= 3 && static_cast<u8>(text[0]) == 0xEF && static_cast<u8>(text[1]) == 0xBB &&
+        static_cast<u8>(text[2]) == 0xBF)
+        pos = 3;
     while (pos < size)
     {
         size_t end = pos;
@@ -402,11 +643,11 @@ bool ParseSimpleIni(const char* text, size_t size, SimpleIni& out, xr_string& er
                 error = xr_string("empty section name") + where;
                 return false;
             }
-            // A repeated section continues the first one.
+            // A repeated section continues the first one (unless merge_repeated is off).
             current = nullptr;
             for (IniSection& section : out.sections)
             {
-                if (section.name == name)
+                if (merge_repeated && section.name == name)
                     current = &section;
             }
             if (!current)
@@ -558,7 +799,7 @@ GwpResult GWP_CALL ApiSaveRead(const GwpPlugin* self, uint32_t* data_version, co
         return GWP_ERROR_NOT_MAIN_THREAD;
     const auto it = g_save_data.find(addon->id);
     if (it == g_save_data.end() || it->second.data.empty())
-        return GWP_ERROR;
+        return GWP_ERROR_NOT_FOUND; // nothing failed: the save has no data of this addon
     if (data_version)
         *data_version = it->second.version;
     *data = it->second.data.data();
@@ -583,6 +824,9 @@ uint32_t GWP_CALL ApiEngineBuildId() { return Core.GetBuildId(); }
 //    of those must not reach the plugins at the same time as the game logic.
 int GWP_CALL ApiIsMainThread()
 {
+    // A task_parallel_for piece is never "main", also when the logic thread runs it while waiting
+    if (threads::InTaskPiece())
+        return 0;
     if (XRay::Engine::IsGameLogicThread())
         return 1;
     return !XRay::Engine::IsGameThreadRunning() && std::this_thread::get_id() == g_host_thread_id ? 1 : 0;
@@ -618,6 +862,13 @@ void FillEngineApi()
     goap::FillPlannerApi(g_engine_api);
     FillExportsApi(g_engine_api);
     FillNpcControlApi(g_engine_api);
+    threads::FillEngineApi(g_engine_api);
+    services::FillEngineApi(g_engine_api);
+    FillAlifeExtApi(g_engine_api);
+    FillWorldApi(g_engine_api);
+    feedback::FillEngineApi(g_engine_api);
+    character::FillEngineApi(g_engine_api);
+    items::FillEngineApi(g_engine_api);
     g_engine_api.save_write = &ApiSaveWrite;
     g_engine_api.save_read = &ApiSaveRead;
 }
@@ -672,13 +923,42 @@ bool ResolveRoot(pcstr entry, xr_string& out)
     return true;
 }
 
+// Two search roots name one folder: the same path (trailing separators aside, case-insensitive on Windows) or the
+// same directory on disk (a junction, another spelling).
+bool SameRoot(const xr_string& a, const xr_string& b)
+{
+    const auto trimmed = [](xr_string path) {
+        while (path.size() > 1 && (path.back() == '\\' || path.back() == '/'))
+            path.pop_back();
+        return path;
+    };
+    if (SamePath(trimmed(a), trimmed(b)))
+        return true;
+    std::error_code ec;
+    return fs::equivalent(fs::path(a.c_str()), fs::path(b.c_str()), ec) && !ec;
+}
+
 void AddRoot(xr_vector<xr_string>& roots, const xr_string& root)
 {
     const xr_string native = ToNativeSeparators(root); // -addon_dir may come with "\" too
     std::error_code ec;
     const fs::path canonical = fs::weakly_canonical(fs::path(native.c_str()), ec);
-    const xr_string normalized = ec ? native : xr_string(canonical.string().c_str());
-    const auto same = [&](const xr_string& r) { return SamePath(r, normalized); };
+    xr_string normalized = native;
+    if (!ec)
+    {
+        // Roots stay in the narrow encoding (DiscoverInRoot reads them so). A junction or subst whose target has a
+        // character the ANSI code page lacks makes string() throw: the root is kept as written, the OS follows it.
+        try
+        {
+            normalized = canonical.string().c_str();
+        }
+        catch (const std::system_error&)
+        {
+            Logf("~ ", "addons", "search root %s: its real path is not representable in the ANSI code page, used "
+                "as written", native.c_str());
+        }
+    }
+    const auto same = [&](const xr_string& r) { return SameRoot(r, normalized); };
     if (std::none_of(roots.begin(), roots.end(), same))
         roots.push_back(normalized);
 }
@@ -725,7 +1005,8 @@ void CollectGameAddonsRoot(xr_vector<xr_string>& roots)
 // Discovery
 // ---------------------------------------------------------------------------------------------
 
-bool ParseManifest(AddonRecord& addon)
+// warn = false: no warnings in the log (an addon that is not loaded anyway, only its id is wanted).
+bool ParseManifest(AddonRecord& addon, bool warn = true)
 {
     xr_vector<char> bytes;
     if (!ReadFileBytes(addon.manifest_path, bytes))
@@ -752,8 +1033,16 @@ bool ParseManifest(AddonRecord& addon)
         addon.reason = "invalid [addon] id '" + addon.id + "' (allowed: a-z 0-9 _ , up to 64 chars)";
         return false;
     }
+    const xr_string tag = AddonTag(addon);
     if (!ini.get("addon", "version", addon.version))
         addon.version = "0.0.0";
+    // A warning for now (plan 26, 4.2); depends conditions on this addon cannot hold then
+    addon.version_valid = ParseAddonVersion(addon.version, addon.version_parsed);
+    if (!addon.version_valid && warn)
+    {
+        Logf("~ ", tag.c_str(), "[addon] version '%s' is not MAJOR.MINOR.PATCH (numbers): version conditions of "
+            "other addons on it never hold", addon.version.c_str());
+    }
 
     if (!ini.get("addon", "type", addon.type_name))
     {
@@ -763,8 +1052,39 @@ bool ParseManifest(AddonRecord& addon)
     addon.type = ParseAddonType(addon.type_name);
     if (addon.type == EAddonType::Unknown)
     {
-        addon.reason = "unknown [addon] type '" + addon.type_name + "' (allowed: " + AddonTypeList() + ")";
-        return false;
+        // A type of a newer engine: the addon works as plain content here (type_name keeps what is written)
+        addon.type = EAddonType::Content;
+        if (warn)
+        {
+            Logf("~ ", tag.c_str(), "unknown [addon] type '%s' (known: %s), treated as content",
+                addon.type_name.c_str(), AddonTypeList().c_str());
+        }
+    }
+
+    xr_string depends;
+    if (ini.get("addon", "depends", depends))
+    {
+        xr_string error;
+        if (!ParseDepends(depends, addon.depends, error))
+        {
+            addon.reason = "invalid [addon] depends: " + error;
+            return false;
+        }
+        for (const AddonDependency& dependency : addon.depends)
+        {
+            if (dependency.id == addon.id)
+            {
+                addon.reason = "[addon] depends names the addon itself";
+                return false;
+            }
+        }
+    }
+    // Reserved (plan 26, 4.3): read so that an addon written for a newer engine learns they are ignored here
+    for (const pcstr reserved : { "conflicts", "load_after" })
+    {
+        xr_string value;
+        if (warn && ini.get("addon", reserved, value))
+            Logf("~ ", tag.c_str(), "[addon] %s is not supported by this engine yet, ignored", reserved);
     }
 
     if (ini.find("plugin"))
@@ -786,12 +1106,83 @@ bool ParseManifest(AddonRecord& addon)
             addon.reason = "invalid [plugin] api_min '" + api_min + "' (expected MAJOR.MINOR.PATCH)";
             return false;
         }
+        // ParseVersion also takes "1", "1.2", "1..2", "1.2x" (sscanf): kept for the plugins out there, only reported
+        AddonVersion strict;
+        if (warn && !api_min.empty() && !ParseAddonVersion(api_min, strict))
+        {
+            Logf("~ ", tag.c_str(), "[plugin] api_min '%s' is not MAJOR.MINOR.PATCH, read as %s", api_min.c_str(),
+                VersionString(addon.plugin_api_min).c_str());
+        }
         addon.plugin_required = ini.get_bool("plugin", "required", false);
     }
     return true;
 }
 
-void DiscoverInRoot(const xr_string& root)
+xr_unique_ptr<AddonRecord> MakeAddonRecord(const fs::path& dir)
+{
+    auto addon = xr_make_unique<AddonRecord>();
+    addon->dir_path = dir;
+    addon->manifest_path = dir / kManifestName;
+    addon->dir = WithTrailingSeparator(ToUtf8(dir));
+    addon->dir_log = WithTrailingSeparator(ToNarrow(dir));
+    addon->handle.addon = addon.get();
+    return addon;
+}
+
+// The addon that answers to `id`: the first one found with it that has neither failed nor been skipped as a
+// duplicate. Disabled ones count. nullptr when there is none - also when the copy that won the id failed later
+// (its dependency, its required plugin): the skipped copies behind it never stand in for it.
+AddonRecord* FindAddonById(const xr_string& id)
+{
+    for (auto& addon : *g_addons)
+    {
+        if (addon->state != EAddonState::Failed && addon->state != EAddonState::Skipped && addon->id == id)
+            return addon.get();
+    }
+    return nullptr;
+}
+
+// Parses the manifest and adds the addon to g_addons: failed on a manifest error, skipped as a duplicate of an id
+// found earlier. expected_id: the id appdata/addons.ltx gives the folder ("" when the folder came from a scan).
+void AddFoundAddon(xr_unique_ptr<AddonRecord> addon, const xr_string& expected_id)
+{
+    if (!ParseManifest(*addon))
+    {
+        addon->id = expected_id.empty() ? ToNarrow(addon->dir_path.filename()) : expected_id;
+        addon->state = EAddonState::Failed;
+        Logf("! ", AddonTag(*addon).c_str(), "%s: %s", addon->reason.c_str(), ToNarrow(addon->manifest_path).c_str());
+        g_addons->push_back(std::move(addon));
+        return;
+    }
+    if (!expected_id.empty() && addon->id != expected_id)
+    {
+        // The folder holds another addon than the launcher thinks: the list is stale, the player has to look
+        addon->state = EAddonState::Failed;
+        addon->reason = "appdata/addons.ltx lists this folder as '" + expected_id + "', its addon.ltx has id '" +
+            addon->id + "'";
+        Logf("! ", AddonTag(*addon).c_str(), "%s: %s", addon->reason.c_str(), addon->dir_log.c_str());
+        g_addons->push_back(std::move(addon));
+        return;
+    }
+
+    if (const AddonRecord* duplicate = FindAddonById(addon->id))
+    {
+        addon->state = EAddonState::Skipped;
+        addon->reason = "duplicate id, first found at " + duplicate->dir_log;
+        Logf("~ ", AddonTag(*addon).c_str(), "%s (skipped %s)", addon->reason.c_str(), addon->dir_log.c_str());
+    }
+    g_addons->push_back(std::move(addon));
+}
+
+bool SameFolder(const fs::path& a, const fs::path& b)
+{
+    std::error_code ec;
+    return fs::equivalent(a, b, ec) && !ec;
+}
+
+// unlisted = true: appdata/addons.ltx is in charge; the folders it does not name are recorded as disabled, so that
+// addon_list tells the player why they do not work (the launcher has not seen them yet).
+void DiscoverInRoot(const xr_string& root, bool unlisted = false)
 {
     std::error_code ec;
     const fs::path root_path(root.c_str());
@@ -815,35 +1206,363 @@ void DiscoverInRoot(const xr_string& root)
 
     for (const fs::path& dir : candidates)
     {
-        auto addon = xr_make_unique<AddonRecord>();
-        addon->dir_path = dir;
-        addon->manifest_path = dir / kManifestName;
-        addon->dir = WithTrailingSeparator(ToUtf8(dir));
-        addon->dir_log = WithTrailingSeparator(ToNarrow(dir));
-        addon->handle.addon = addon.get();
-
-        if (!ParseManifest(*addon))
+        if (!unlisted)
         {
-            addon->id = ToNarrow(dir.filename());
-            addon->state = EAddonState::Failed;
-            Logf("! ", AddonTag(*addon).c_str(), "%s: %s", addon->reason.c_str(),
-                ToNarrow(addon->manifest_path).c_str());
-            g_addons->push_back(std::move(addon));
+            AddFoundAddon(MakeAddonRecord(dir), "");
             continue;
         }
-
-        const auto same_id = [&](const xr_unique_ptr<AddonRecord>& other) {
-            return other->state != EAddonState::Failed && other->id == addon->id;
+        const auto same_folder = [&](const xr_unique_ptr<AddonRecord>& other) {
+            return SameFolder(other->dir_path, dir);
         };
-        const auto duplicate = std::find_if(g_addons->begin(), g_addons->end(), same_id);
-        if (duplicate != g_addons->end())
-        {
-            addon->state = EAddonState::Skipped;
-            addon->reason = "duplicate id, first found at " + (*duplicate)->dir_log;
-            Logf("~ ", AddonTag(*addon).c_str(), "%s (skipped %s)", addon->reason.c_str(), addon->dir_log.c_str());
-        }
+        if (std::any_of(g_addons->begin(), g_addons->end(), same_folder))
+            continue; // listed, or found with -addon_dir
+        auto addon = MakeAddonRecord(dir);
+        if (!ParseManifest(*addon, false)) // quietly: only the id is wanted
+            addon->id = ToNarrow(dir.filename());
+        addon->state = EAddonState::Disabled;
+        addon->reason = "not listed in appdata/addons.ltx";
+        Logf("~ ", AddonTag(*addon).c_str(), "%s, not loaded: %s", addon->reason.c_str(), addon->dir_log.c_str());
         g_addons->push_back(std::move(addon));
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// appdata/addons.ltx: the list of addons written by the launcher (docs: wiki/doc/plugins/loading.md)
+//   [addons]              format = 1
+//   [addon.<id>]          one section per addon, in load order:
+//                         path = <folder>, enabled = true|false, trust = first_party|index|local,
+//                         plugin_sha256 = <64 hex digits>
+// Read with ParseSimpleIni: a broken file is reported and the addon folders are scanned as without it.
+// ---------------------------------------------------------------------------------------------
+
+constexpr pcstr kLauncherListName = "addons.ltx";
+constexpr pcstr kLauncherListLog = "appdata/addons.ltx";
+constexpr pcstr kLauncherEntryPrefix = "addon.";
+constexpr u32 kLauncherListFormat = 1;
+
+struct LauncherEntry
+{
+    xr_string id;
+    xr_string path; // as written (UTF-8); empty: <game addons folder>/<id>
+    bool enabled = true;
+    xr_string trust = "local";
+    xr_string plugin_sha256;
+};
+
+bool IsHexDigest(const xr_string& text, size_t length)
+{
+    return text.size() == length && std::all_of(text.begin(), text.end(), [](char c) {
+        return std::isxdigit(static_cast<unsigned char>(c)) != 0;
+    });
+}
+
+// false: no file, or a file that cannot be used (reported) - the addon folders are scanned as without it.
+bool ReadLauncherList(xr_vector<LauncherEntry>& out)
+{
+    out.clear();
+    string_path file_name;
+    FS.update_path(file_name, "$app_data_root$", kLauncherListName);
+    const fs::path file(ToNativeSeparators(file_name).c_str());
+    std::error_code ec;
+    if (!fs::is_regular_file(file, ec))
+    {
+        if (g_debug_log)
+            Logf("  ", "addons", "no %s, the addon folders are scanned", kLauncherListLog);
+        return false;
+    }
+
+    xr_vector<char> bytes;
+    SimpleIni ini;
+    xr_string error;
+    if (!ReadFileBytes(file, bytes))
+        error = "cannot read the file";
+    else if (!ParseSimpleIni(bytes.data(), bytes.size(), ini, error, false)) // a repeated [addon.x]: reported below
+        error = "syntax error: " + error;
+    if (!error.empty())
+    {
+        Logf("! ", "addons", "%s: %s; the addon folders are scanned as without the file", kLauncherListLog,
+            error.c_str());
+        return false;
+    }
+
+    // A plain decimal number; anything else ("1abc", "1.0", "-1") is an unknown format, as a number other than ours
+    xr_string format_text;
+    u32 format = kLauncherListFormat; // no key: the first format
+    if (ini.get("addons", "format", format_text))
+    {
+        const bool is_number = format_text.size() <= 9 && std::all_of(format_text.begin(), format_text.end(),
+            [](char c) { return c >= '0' && c <= '9'; });
+        format = is_number ? static_cast<u32>(strtoul(format_text.c_str(), nullptr, 10)) : 0;
+    }
+    if (format != kLauncherListFormat)
+    {
+        Logf("~ ", "addons", "%s: format '%s', this engine reads format %u: what it does not know is ignored",
+            kLauncherListLog, format_text.c_str(), kLauncherListFormat);
+    }
+
+    const size_t prefix_length = xr_strlen(kLauncherEntryPrefix);
+    for (const IniSection& section : ini.sections)
+    {
+        if (section.name == "addons")
+            continue;
+        if (section.name.compare(0, prefix_length, kLauncherEntryPrefix) != 0)
+        {
+            Logf("~ ", "addons", "%s: unknown section [%s], ignored", kLauncherListLog, section.name.c_str());
+            continue;
+        }
+        LauncherEntry entry;
+        entry.id = section.name.substr(prefix_length);
+        if (!IsValidId(entry.id))
+        {
+            Logf("~ ", "addons", "%s: [%s]: invalid addon id (allowed: a-z 0-9 _ , up to 64 chars), ignored",
+                kLauncherListLog, section.name.c_str());
+            continue;
+        }
+        const auto same_id = [&](const LauncherEntry& other) { return other.id == entry.id; };
+        if (std::any_of(out.begin(), out.end(), same_id))
+        {
+            Logf("~ ", "addons", "%s: [%s] is listed twice, the first one counts", kLauncherListLog,
+                section.name.c_str());
+            continue;
+        }
+        const pcstr name = section.name.c_str();
+        ini.get(name, "path", entry.path);
+        entry.enabled = ini.get_bool(name, "enabled", true);
+        xr_string trust;
+        if (ini.get(name, "trust", trust))
+        {
+            std::transform(trust.begin(), trust.end(), trust.begin(), [](char c) {
+                return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            });
+            if (trust == "first_party" || trust == "index" || trust == "local")
+                entry.trust = trust;
+            else
+                Logf("~ ", "addons", "%s: [%s]: unknown trust '%s' (first_party, index, local), taken as local",
+                    kLauncherListLog, name, trust.c_str());
+        }
+        if (ini.get(name, "plugin_sha256", entry.plugin_sha256) && !IsHexDigest(entry.plugin_sha256, 64))
+        {
+            Logf("~ ", "addons", "%s: [%s]: plugin_sha256 is not 64 hex digits, ignored", kLauncherListLog, name);
+            entry.plugin_sha256.clear();
+        }
+        out.push_back(std::move(entry));
+    }
+    return true;
+}
+
+// The folder of an entry: empty path - <game addons folder>/<id>; "$alias$rest" - through fsgame.ltx;
+// a relative path - from the game folder ($fs_root$); an absolute one as it is.
+// false with the reason in `why` when the folder cannot be named.
+bool LauncherEntryFolder(const LauncherEntry& entry, const xr_string& game_root, fs::path& out, xr_string& why)
+{
+    if (entry.path.empty())
+    {
+        if (game_root.empty())
+        {
+            why = "no path, and the game has no addons folder ($game_addons$ in fsgame.ltx, <game>/addons/) for the "
+                  "default one";
+            return false;
+        }
+        out = fs::path(game_root.c_str()) / entry.id.c_str();
+        return true;
+    }
+    xr_string base_alias = "$fs_root$";
+    xr_string rest = ToNativeSeparators(entry.path);
+    if (rest[0] == '$')
+    {
+        const size_t close = rest.find('$', 1);
+        if (close == xr_string::npos)
+        {
+            why = "path '" + entry.path + "' opens an fsgame.ltx alias with '$' and does not close it";
+            return false;
+        }
+        base_alias = rest.substr(0, close + 1);
+        rest = rest.substr(close + 1);
+    }
+    fs::path relative = PathFromUtf8(rest);
+    if (relative.is_absolute())
+    {
+        out = relative;
+        return true;
+    }
+    if (!FS.path_exist(base_alias.c_str()))
+    {
+        why = "path '" + entry.path + "': fsgame.ltx has no alias " + base_alias;
+        return false;
+    }
+    string_path base;
+    FS.update_path(base, base_alias.c_str(), "");
+    // "\addons\x" after an alias is relative to it: a leading separator would make it the root of the drive
+    xr_string relative_text = rest;
+    while (!relative_text.empty() && (relative_text[0] == '\\' || relative_text[0] == '/'))
+        relative_text.erase(0, 1);
+    relative = PathFromUtf8(relative_text);
+    out = fs::path(ToNativeSeparators(base).c_str()) / relative;
+    return true;
+}
+
+void AddListedAddon(const LauncherEntry& entry, const xr_string& game_root)
+{
+    fs::path dir;
+    xr_string why;
+    const bool has_folder = LauncherEntryFolder(entry, game_root, dir, why);
+    std::error_code ec;
+    if (has_folder)
+    {
+        const fs::path canonical = fs::weakly_canonical(dir, ec);
+        if (!ec)
+            dir = canonical;
+    }
+
+    auto addon = MakeAddonRecord(dir);
+    addon->trust = entry.trust;
+    addon->plugin_sha256 = entry.plugin_sha256;
+    if (!entry.enabled)
+    {
+        // Not parsed: a switched-off addon must not fill the log, its id is known from the list
+        addon->id = entry.id;
+        addon->state = EAddonState::Disabled;
+        addon->reason = "disabled in appdata/addons.ltx";
+        Logf("* ", AddonTag(*addon).c_str(), "disabled in %s", kLauncherListLog);
+        g_addons->push_back(std::move(addon));
+        return;
+    }
+    if (!has_folder || !fs::is_regular_file(addon->manifest_path, ec))
+    {
+        addon->id = entry.id;
+        addon->state = EAddonState::Failed;
+        if (has_folder)
+        {
+            addon->reason = "listed in appdata/addons.ltx, but the folder has no addon.ltx";
+            Logf("! ", AddonTag(*addon).c_str(), "%s: %s", addon->reason.c_str(), addon->dir_log.c_str());
+        }
+        else
+        {
+            addon->reason = "listed in appdata/addons.ltx, but its folder cannot be resolved: " + why;
+            Logf("! ", AddonTag(*addon).c_str(), "%s", addon->reason.c_str());
+        }
+        g_addons->push_back(std::move(addon));
+        return;
+    }
+    AddFoundAddon(std::move(addon), entry.id);
+}
+
+// ---------------------------------------------------------------------------------------------
+// [addon] depends: presence, versions, load order
+// ---------------------------------------------------------------------------------------------
+
+// Why the dependency does not hold right now, "" when it does.
+xr_string DependencyProblem(const AddonDependency& dependency)
+{
+    const AddonRecord* found = FindAddonById(dependency.id);
+    if (!found)
+    {
+        // The copy that took the id failed (a skipped duplicate of it is no replacement): name its reason
+        for (const auto& addon : *g_addons)
+        {
+            if (addon->state == EAddonState::Failed && addon->id == dependency.id)
+                return "dependency '" + dependency.id + "' failed (" + addon->reason + ")";
+        }
+        return "missing dependency '" + dependency.id + "'";
+    }
+    if (found->state == EAddonState::Disabled)
+        return "dependency '" + dependency.id + "' is disabled";
+    if (dependency.conditions.empty())
+        return "";
+    if (!found->version_valid)
+    {
+        return "dependency '" + dependency.id + "' has version '" + found->version +
+            "' (not MAJOR.MINOR.PATCH), needed: " + dependency.text;
+    }
+    for (const VersionCondition& condition : dependency.conditions)
+    {
+        if (!VersionConditionHolds(condition, found->version_parsed))
+        {
+            return "dependency '" + dependency.id + "' is version " + AddonVersionString(found->version_parsed) +
+                ", needed: " + dependency.text;
+        }
+    }
+    return "";
+}
+
+// false (the addon is failed, logged) when a dependency does not hold.
+bool CheckDependencies(AddonRecord& addon)
+{
+    for (const AddonDependency& dependency : addon.depends)
+    {
+        const xr_string problem = DependencyProblem(dependency);
+        if (problem.empty())
+            continue;
+        addon.state = EAddonState::Failed;
+        addon.reason = problem;
+        Logf("! ", AddonTag(addon).c_str(), "failed: %s", problem.c_str());
+        return false;
+    }
+    return true;
+}
+
+// Before any plugin loads. The addons that can load get the order: every dependency before the addons that need
+// it, otherwise the order of discovery (appdata/addons.ltx, or the search roots and folder names). The others
+// (failed, skipped, disabled) follow in the order found. Shutdown goes backwards, so dependents unload first.
+void ResolveDependencies()
+{
+    // A failed addon fails the ones that need it: repeat until nothing changes
+    for (bool changed = true; changed;)
+    {
+        changed = false;
+        for (auto& addon : *g_addons)
+        {
+            if (addon->state == EAddonState::Discovered && !CheckDependencies(*addon))
+                changed = true;
+        }
+    }
+
+    xr_vector<xr_unique_ptr<AddonRecord>>& all = *g_addons;
+    xr_vector<xr_unique_ptr<AddonRecord>> ordered;
+    ordered.reserve(all.size());
+    const auto is_placed = [&](const xr_string& id) {
+        return std::any_of(ordered.begin(), ordered.end(), [&](const xr_unique_ptr<AddonRecord>& addon) {
+            return addon->id == id;
+        });
+    };
+    // The earliest addon whose dependencies are all placed goes next (a stable topological order)
+    for (bool placed = true; placed;)
+    {
+        placed = false;
+        for (auto& addon : all)
+        {
+            if (!addon || addon->state != EAddonState::Discovered)
+                continue;
+            const bool ready = std::all_of(addon->depends.begin(), addon->depends.end(),
+                [&](const AddonDependency& dependency) { return is_placed(dependency.id); });
+            if (!ready)
+                continue;
+            ordered.push_back(std::move(addon));
+            placed = true;
+            break;
+        }
+    }
+
+    // What is left waits for itself: a dependency cycle (or an addon that needs one of the cycle)
+    xr_string waiting;
+    for (const auto& addon : all)
+    {
+        if (addon && addon->state == EAddonState::Discovered)
+            waiting += (waiting.empty() ? "" : ", ") + addon->id;
+    }
+    for (auto& addon : all)
+    {
+        if (!addon)
+            continue;
+        if (addon->state == EAddonState::Discovered)
+        {
+            addon->state = EAddonState::Failed;
+            addon->reason = "dependency cycle among: " + waiting;
+            Logf("! ", AddonTag(*addon).c_str(), "failed: %s", addon->reason.c_str());
+        }
+        ordered.push_back(std::move(addon));
+    }
+    all.swap(ordered);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -892,7 +1611,7 @@ bool MakeShadowCopy(AddonRecord& addon, const fs::path& original, xr_string& sha
     const xr_string prefix = addon.plugin_name + "_";
     for (fs::directory_iterator it(cache_dir, ec), end; !ec && it != end; it.increment(ec))
     {
-        const xr_string name(it->path().filename().string().c_str());
+        const xr_string name = ToUtf8(it->path().filename()); // string() throws on a stray non-ANSI file name
         if (name.rfind(prefix, 0) == 0 && it->path() != shadow)
         {
             std::error_code rm_ec;
@@ -977,6 +1696,8 @@ void StopPlugin(const GwpPlugin* plugin)
     goap::RemovePluginEvaluators(plugin);
     goap::StopPluginPlanners(plugin);
     RemovePluginExports(plugin);
+    services::RemovePluginServices(plugin);
+    feedback::RemovePluginResources(plugin); // its sounds, particle effects and effectors
 }
 
 // StopPlugin and the rest, right before the library goes: the planners are destroyed, the variables and ini files
@@ -1001,6 +1722,9 @@ void ReleasePlugin(AddonRecord& addon)
 // on_unload under the guards, then ReleasePlugin. A plugin that crashes in on_unload is unloaded all the same.
 void UnloadPlugin(AddonRecord& addon)
 {
+    // The services go first: a consumer may call the interface from its service_on_unregister handler, and after
+    // on_unload the state behind it is gone (gwp::Plugin deletes the plugin object there)
+    services::RemovePluginServices(&addon.handle);
     if (addon.desc.on_unload)
     {
         UnloadCall call{ addon.desc.on_unload, addon.desc.user };
@@ -1095,13 +1819,24 @@ void LoadPlugin(AddonRecord& addon)
 
     // With a mismatching header the rest of the structure cannot be trusted (another layout), so on_unload is
     // deliberately not called before unloading. Documented in wiki/doc/plugins/api/entry_point.md.
+    // api_built (the header version the plugin was built with) and the reserved field after it exist only in a
+    // description long enough to hold them. api_min == 0 means "the version I was built with". A description
+    // without api_built comes from a header older than the current layout of GwpEvent / GwpExportFn (before the
+    // release, under the same version 0.1.0): such a binary would crash in its first handler, so it is refused.
+    const bool has_built = desc.size >= offsetof(GwpPluginDesc, api_built) + sizeof(uint32_t);
+    const bool has_reserved = desc.size >= offsetof(GwpPluginDesc, reserved) + sizeof(uint32_t);
+    const uint32_t api_built = has_built ? desc.api_built : 0u;
+    const uint32_t api_min = desc.api_min != 0 ? desc.api_min : api_built;
     const bool header_ok = desc.size >= 3 * sizeof(uint32_t) && desc.size <= GWP_PLUGIN_DESC_MAX_SIZE &&
-        desc.abi_major == GWP_API_VERSION_MAJOR && desc.api_min <= GWP_API_VERSION;
+        desc.abi_major == GWP_API_VERSION_MAJOR && has_built && api_built != 0 && api_min <= GWP_API_VERSION &&
+        (!has_reserved || desc.reserved == 0);
     if (!header_ok)
     {
         ReleasePlugin(addon);
         addon.reason = "plugin header mismatch: abi " + VersionString(GWP_MAKE_VERSION(desc.abi_major, 0, 0)) +
-            ", requires api " + VersionString(desc.api_min) + ", engine api " + VersionString(GWP_API_VERSION);
+            ", requires api " + VersionString(api_min) + ", engine api " + VersionString(GWP_API_VERSION) +
+            (has_reserved && desc.reserved != 0 ? ", non-zero reserved field" : "") +
+            (!has_built || api_built == 0 ? ", no api_built (built with a pre-release header: rebuild the plugin)" : "");
         MarkPluginUnavailable(addon);
         return;
     }
@@ -1112,7 +1847,11 @@ void LoadPlugin(AddonRecord& addon)
     addon.plugin_state = EPluginState::Loaded;
     addon.state = EAddonState::Active;
     addon.reason.clear();
-    Logf("* ", AddonTag(addon).c_str(), "plugin '%s' loaded: %s", addon.plugin_name.c_str(), addon.plugin_path.c_str());
+    Logf("* ", AddonTag(addon).c_str(), "plugin '%s' loaded (built with Plugin API %s, engine %s): %s",
+        addon.plugin_name.c_str(), VersionString(api_built).c_str(),
+        VersionString(GWP_API_VERSION).c_str(), addon.plugin_path.c_str());
+    // Services published during init are announced only now: a failed init removes them silently
+    services::AnnouncePluginServices(&addon.handle);
 }
 
 // Unloads what is loaded (a crashed plugin too) and loads the library again: the copy is made anew, so a library
@@ -1138,25 +1877,69 @@ void Initialize()
     g_addons = xr_new<xr_vector<xr_unique_ptr<AddonRecord>>>();
     FillEngineApi();
 
-    // TODO(U1): appdata/addons.ltx written by the launcher goes first (explicit paths, order, enabled, trust).
     xr_vector<xr_string> roots;
-    CollectCommandLineRoots(roots); // -addon_dir: development folders, win on a duplicate id
-    CollectGameAddonsRoot(roots);   // <game>\addons\ ($game_addons$ in fsgame.ltx)
-
-    Logf("* ", "addons", "Plugin API %s, platform %s/%s, %u search root(s)", VersionString(GWP_API_VERSION).c_str(),
-        kPluginOs, kPluginArch, static_cast<u32>(roots.size()));
-
-    for (const xr_string& root : roots)
+    CollectCommandLineRoots(roots); // -addon_dir: development folders, always enabled, win on a duplicate id
+    xr_vector<xr_string> game_roots;
+    CollectGameAddonsRoot(game_roots); // <game>\addons\ ($game_addons$ in fsgame.ltx)
+    const xr_string game_root = game_roots.empty() ? xr_string() : game_roots.front();
+    if (!game_root.empty())
     {
+        // -addon_dir naming the addons folder of the game itself stays the game folder: appdata/addons.ltx applies
+        // to it, instead of every addon there working as a development one and the list giving only duplicates
+        const auto is_game_root = [&](const xr_string& root) { return SameRoot(root, game_root); };
+        const auto removed = std::remove_if(roots.begin(), roots.end(), is_game_root);
+        if (removed != roots.end())
+        {
+            roots.erase(removed, roots.end());
+            Logf("~ ", "addons", "-addon_dir %s is the addons folder of the game: read as the game folder (after the "
+                "other -addon_dir folders, by appdata/addons.ltx when there is one)", game_root.c_str());
+        }
+    }
+    const size_t dev_roots = roots.size();
+    if (!game_root.empty())
+        roots.push_back(game_root);
+
+    // appdata/addons.ltx from the launcher: when it is there, it decides which addons of the game folder work, in
+    // what order and with what trust; the -addon_dir roots stay as they are
+    xr_vector<LauncherEntry> list;
+    const bool has_list = ReadLauncherList(list);
+
+    Logf("* ", "addons", "Plugin API %s, platform %s/%s, %u search root(s)%s",
+        VersionString(GWP_API_VERSION).c_str(), kPluginOs, kPluginArch, static_cast<u32>(roots.size()),
+        has_list ? ", list appdata/addons.ltx" : "");
+
+    for (size_t i = 0; i < roots.size(); ++i)
+    {
+        if (has_list && i >= dev_roots)
+            break; // the game folder: below, through the list
         if (g_debug_log)
-            Logf("  ", "addons", "search root: %s", root.c_str());
-        DiscoverInRoot(root);
+            Logf("  ", "addons", "search root: %s", roots[i].c_str());
+        DiscoverInRoot(roots[i]);
+    }
+    if (has_list)
+    {
+        Logf("* ", "addons", "%s: %u addon(s) listed", kLauncherListLog, static_cast<u32>(list.size()));
+        for (const LauncherEntry& entry : list)
+            AddListedAddon(entry, game_root);
+        if (roots.size() > dev_roots)
+            DiscoverInRoot(roots.back(), true); // the folders the list does not name: disabled, reported
+    }
+
+    // Dependencies and the load order, before any plugin: a dependency loads before the addons that need it
+    ResolveDependencies();
+    // Every id is known now, also of the addons that will not load: names "<id>_..." belong to them (console)
+    g_known_ids.clear();
+    for (const auto& addon : *g_addons)
+    {
+        if (IsValidId(addon->id) && std::find(g_known_ids.begin(), g_known_ids.end(), addon->id) == g_known_ids.end())
+            g_known_ids.push_back(addon->id);
     }
 
     console::LoadCvarsFile(); // appdata/plugins.ltx: the saved values, before the plugins register variables
     for (auto& addon : *g_addons)
     {
-        if (addon->state == EAddonState::Discovered)
+        // The dependencies went first: one that failed meanwhile (its required plugin) fails the addons that need it
+        if (addon->state == EAddonState::Discovered && CheckDependencies(*addon))
             LoadPlugin(*addon);
     }
 
@@ -1187,6 +1970,7 @@ void Shutdown()
         addon.plugin_state = EPluginState::Unavailable;
     }
     xr_delete(g_addons);
+    g_known_ids.clear();
     g_save_data.clear();
     data::Shutdown();
     ini::Shutdown();
@@ -1199,6 +1983,8 @@ void Shutdown()
     goap::ShutdownPlanners();
     ShutdownNpcApi();
     ShutdownExports();
+    services::Shutdown();
+    feedback::Shutdown();
     events::Shutdown();
     g_initialized = false;
 }
@@ -1208,11 +1994,14 @@ void ResetSaveData()
     detail::g_save_data.clear();
     data::ResetPersistent();
     timers::Reset();
+    binders::ResetSave();
 }
 
 void WriteSaveData(IWriter& stream)
 {
     using namespace detail;
+    // First: it calls on_save of the bound objects, and a save_write made there must land in the chunk below
+    binders::WriteSave(stream);
     stream.open_chunk(kSaveChunkId);
     stream.w_u32(kSaveFormat);
     stream.w_u32(static_cast<u32>(g_save_data.size()));
@@ -1245,6 +2034,7 @@ void ReadSaveData(IReader& stream)
     using namespace detail;
     data::ReadSave(stream); // persistent values of the data bus: own chunk
     timers::ReadSave(stream); // persistent timers: own chunk
+    binders::ReadSave(stream); // kept state of bound objects: own chunk
     g_save_data.clear();
     IReader* reader = stream.open_chunk(kSaveChunkId);
     if (!reader)
@@ -1323,6 +2113,8 @@ void OnPluginCrashed(const GwpPlugin* plugin, pcstr what)
 void OnFrame()
 {
     using namespace detail;
+    // Sounds and effects of plugins: the ended ones and those of a gone level are released, attached effects follow
+    feedback::OnFrame();
     // Only at the top of a frame: a plugin function on the stack would return into an unloaded library
     if (!g_plugin_work || !g_addons || events::PluginCallDepth() != 0)
         return;
@@ -1354,6 +2146,8 @@ void OnFrame()
 void OnGameStart()
 {
     using namespace detail;
+    // Sounds, effects and effectors of plugins belong to the previous game
+    feedback::OnGameStart();
     if (!g_addons)
         return;
     for (auto& entry : *g_addons)
@@ -1393,14 +2187,22 @@ bool RequestPluginReload(pcstr addon_id, xr_string& reason)
         reason = "no addon id";
         return false;
     }
+    xr_string refusal; // the addon is there, but no copy of it is a target: why
     for (auto& entry : *g_addons)
     {
         AddonRecord& addon = *entry;
         if (!EqualsNoCase(addon.id, addon_id))
             continue;
         // A duplicate, a disabled addon or one with a broken manifest (its plugin name may be unchecked) is no
-        // reload target; an addon failed by its required plugin is, as a plugin that did not load at the start
-        if (addon.state == EAddonState::Skipped || addon.state == EAddonState::Discovered ||
+        // reload target; an addon failed by its required plugin is, as a plugin that did not load at the start.
+        // A failed dependency leaves plugin_state None: no target either, its plugin was never tried.
+        if (addon.state == EAddonState::Disabled && refusal.empty())
+            refusal = "the addon is disabled: " + addon.reason;
+        else if (addon.state == EAddonState::Failed && addon.plugin_state != EPluginState::Unavailable &&
+            refusal.empty())
+            refusal = "the addon failed: " + addon.reason;
+        if (addon.state == EAddonState::Skipped || addon.state == EAddonState::Disabled ||
+            addon.state == EAddonState::Discovered ||
             (addon.state == EAddonState::Failed && addon.plugin_state != EPluginState::Unavailable))
             continue;
         if (addon.plugin_name.empty())
@@ -1412,7 +2214,7 @@ bool RequestPluginReload(pcstr addon_id, xr_string& reason)
         g_plugin_work = true;
         return true;
     }
-    reason = "no such addon (addon_list shows them)";
+    reason = refusal.empty() ? xr_string("no such addon (addon_list shows them)") : refusal;
     return false;
 }
 
@@ -1425,6 +2227,34 @@ pcstr PluginAddonId(const GwpPlugin* plugin)
 bool IsMainThread() { return detail::ApiIsMainThread() != 0; }
 bool IsDebugLog() { return detail::g_debug_log; }
 
+const xr_vector<xr_string>& KnownAddonIds() { return detail::g_known_ids; }
+
+pcstr NameOwnerAddonId(pcstr name)
+{
+    if (!name)
+        return nullptr;
+    const xr_string* owner = nullptr;
+    for (const xr_string& id : detail::g_known_ids)
+    {
+        if (strncmp(name, id.c_str(), id.size()) == 0 && name[id.size()] == '_' &&
+            (!owner || id.size() > owner->size()))
+            owner = &id;
+    }
+    return owner ? owner->c_str() : nullptr;
+}
+
+bool IsPluginLoading(const GwpPlugin* plugin)
+{
+    const detail::AddonRecord* addon = detail::AddonOf(plugin);
+    return addon && addon->loading;
+}
+
+bool IsPluginRunning(const GwpPlugin* plugin)
+{
+    const detail::AddonRecord* addon = detail::AddonOf(plugin);
+    return addon && (addon->loading || addon->plugin_state == detail::EPluginState::Loaded);
+}
+
 bool IsPluginLoaded(pcstr addon_id)
 {
     if (!detail::g_addons || !addon_id)
@@ -1435,6 +2265,19 @@ bool IsPluginLoaded(pcstr addon_id)
             return true;
     }
     return false;
+}
+
+u32 PluginApiBuilt(pcstr addon_id)
+{
+    if (!detail::g_addons || !addon_id)
+        return 0;
+    for (const auto& addon : *detail::g_addons)
+    {
+        // addon.desc holds only what the plugin filled (LoadPlugin): api_built stays 0 in a shorter description
+        if (addon->plugin_state == detail::EPluginState::Loaded && addon->id == addon_id)
+            return addon->desc.api_built;
+    }
+    return 0;
 }
 
 void PrintList()
@@ -1450,12 +2293,13 @@ void PrintList()
         kPluginArch, static_cast<u32>(g_addons->size()));
     for (const auto& addon : *g_addons)
     {
-        Msg("-   %-24s %-10s %-10s type=%s plugin=%s (%s) trust=local dir=%s%s%s", addon->id.c_str(),
-            addon->version.c_str(), AddonStateName(addon->state),
+        Msg("-   %-24s %-10s %-10s type=%s plugin=%s (%s) trust=%s dir=%s%s%s", addon->id.c_str(),
+            addon->version.empty() ? "-" : addon->version.c_str(), AddonStateName(addon->state),
             addon->type_name.empty() ? "-" : addon->type_name.c_str(),
             addon->plugin_name.empty() ? "-" : addon->plugin_name.c_str(),
-            PluginStateName(addon->plugin_state), addon->dir_log.c_str(), addon->reason.empty() ? "" : " reason=",
-            addon->reason.c_str());
+            PluginStateName(addon->plugin_state), addon->trust.c_str(), addon->dir_log.c_str(),
+            addon->reason.empty() ? "" : " reason=", addon->reason.c_str());
     }
+    services::PrintList();
 }
 } // namespace gw::addons
