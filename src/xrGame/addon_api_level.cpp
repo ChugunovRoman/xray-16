@@ -15,7 +15,7 @@ namespace gw::addons
 {
 namespace
 {
-bool CheckCall(pcstr function)
+bool CheckLevelCall(pcstr function)
 {
     if (IsMainThread())
         return true;
@@ -36,12 +36,12 @@ Fvector ToVector(const float xyz[3]) { return Fvector().set(xyz[0], xyz[1], xyz[
 
 int GWP_CALL ApiLevelPresent()
 {
-    return CheckCall("level_present") && HasLevel() ? 1 : 0;
+    return CheckLevelCall("level_present") && HasLevel() ? 1 : 0;
 }
 
 const char* GWP_CALL ApiLevelName()
 {
-    if (!CheckCall("level_name") || !HasLevel())
+    if (!CheckLevelCall("level_name") || !HasLevel())
         return nullptr;
     return Level().name().c_str();
 }
@@ -53,7 +53,7 @@ int GWP_CALL ApiLevelTimeParts(uint32_t out_parts[7])
         for (int i = 0; i < 7; ++i)
             out_parts[i] = 0;
     }
-    if (!CheckCall("level_time_parts") || !out_parts)
+    if (!CheckLevelCall("level_time_parts") || !out_parts)
         return 0;
     // The same source Lua uses for level.get_time_*: the time of the game while it runs, of ALife otherwise.
     u64 time = 0;
@@ -78,14 +78,14 @@ int GWP_CALL ApiLevelTimeParts(uint32_t out_parts[7])
 
 uint32_t GWP_CALL ApiLevelObjectCount()
 {
-    if (!CheckCall("level_object_count") || !HasLevel())
+    if (!CheckLevelCall("level_object_count") || !HasLevel())
         return 0;
     return Level().Objects.o_count();
 }
 
 uint32_t GWP_CALL ApiLevelObjects(GwpObjectId* out, uint32_t max)
 {
-    if (!CheckCall("level_objects") || !HasLevel() || !out || !max)
+    if (!CheckLevelCall("level_objects") || !HasLevel() || !out || !max)
         return 0;
     // o_count/o_get_by_iterator walk the list of live objects; the Lua way (a scan of all 65536 ids with a cast
     // on every slot) is not needed here.
@@ -102,14 +102,14 @@ uint32_t GWP_CALL ApiLevelObjects(GwpObjectId* out, uint32_t max)
 
 uint32_t GWP_CALL ApiLevelVertexId(const float xyz[3])
 {
-    if (!CheckCall("level_vertex_id") || !xyz || !HasGraph())
+    if (!CheckLevelCall("level_vertex_id") || !xyz || !HasGraph())
         return GWP_INVALID_LEVEL_VERTEX;
     return ai().level_graph().vertex_id(ToVector(xyz));
 }
 
 int GWP_CALL ApiLevelVertexValid(uint32_t vertex_id)
 {
-    if (!CheckCall("level_vertex_valid") || !HasGraph())
+    if (!CheckLevelCall("level_vertex_valid") || !HasGraph())
         return 0;
     return ai().level_graph().valid_vertex_id(vertex_id) ? 1 : 0;
 }
@@ -118,7 +118,7 @@ int GWP_CALL ApiLevelVertexPosition(uint32_t vertex_id, float out_xyz[3])
 {
     if (out_xyz)
         out_xyz[0] = out_xyz[1] = out_xyz[2] = 0.f;
-    if (!CheckCall("level_vertex_position") || !out_xyz || !HasGraph())
+    if (!CheckLevelCall("level_vertex_position") || !out_xyz || !HasGraph())
         return 0;
     if (!ai().level_graph().valid_vertex_id(vertex_id))
         return 0;
@@ -131,7 +131,7 @@ int GWP_CALL ApiLevelVertexPosition(uint32_t vertex_id, float out_xyz[3])
 
 uint32_t GWP_CALL ApiLevelVertexInDirection(uint32_t vertex_id, const float dir[3], float distance)
 {
-    if (!CheckCall("level_vertex_in_direction") || !dir || !HasGraph())
+    if (!CheckLevelCall("level_vertex_in_direction") || !dir || !HasGraph())
         return GWP_INVALID_LEVEL_VERTEX;
     if (!ai().level_graph().valid_vertex_id(vertex_id) || !(distance > 0.f))
         return vertex_id;
@@ -153,7 +153,7 @@ int GWP_CALL ApiLevelRayPick(const float from_xyz[3], const float dir[3], float 
         *out_distance = 0.f;
     if (out_object)
         *out_object = GWP_INVALID_OBJECT_ID;
-    if (!CheckCall("level_ray_pick") || !from_xyz || !dir || !HasLevel() || !(distance > 0.f))
+    if (!CheckLevelCall("level_ray_pick") || !from_xyz || !dir || !HasLevel() || !(distance > 0.f))
         return 0;
 
     IGameObject* ignore_object = ignore != GWP_INVALID_OBJECT_ID ? Level().Objects.net_Find(ignore) : nullptr;
@@ -171,7 +171,7 @@ int GWP_CALL ApiLevelRayPick(const float from_xyz[3], const float dir[3], float 
 // time_global() of Lua (Device.dwTimeGlobal).
 uint32_t GWP_CALL ApiLevelTimeMs()
 {
-    return CheckCall("level_time_ms") && HasLevel() ? Device.dwTimeGlobal : 0;
+    return CheckLevelCall("level_time_ms") && HasLevel() ? Device.dwTimeGlobal : 0;
 }
 } // namespace
 

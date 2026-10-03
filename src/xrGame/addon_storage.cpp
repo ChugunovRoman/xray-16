@@ -189,7 +189,8 @@ constexpr u16 kInvalidObjectId = u16(-1);
 // mirror must not depend on them (bugs/2026-09-30_storage_field_corruption.md: the crash came through _dec of a
 // bad p_). The bytes are kept by length: a Lua string may hold NUL bytes, storage_get hands out the same bytes and
 // length the script wrote (the terminating zero is only for printing). Copying a Field would free the copy twice.
-struct Field
+// alignas(8): the i386 SysV ABI aligns a double in a struct on 4, which would make the field 20 bytes there
+struct alignas(8) Field
 {
     u32 type = GWP_T_NIL;   // NIL, BOOL, NUMBER, STRING, OBJECT (a game object Lua put there), LUA_REF (table, ...)
     u32 length = 0;         // STRING: the bytes of `string` without the terminating zero; 0 otherwise

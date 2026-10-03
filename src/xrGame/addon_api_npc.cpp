@@ -51,7 +51,7 @@ namespace gw::addons
 {
 namespace
 {
-bool CheckCall(pcstr group, pcstr function)
+bool CheckNpcCall(pcstr group, pcstr function)
 {
     if (IsMainThread())
         return true;
@@ -70,7 +70,7 @@ CGameObject* FindOnline(GwpObjectId id)
 // The Lua view of an NPC (stalker or monster), or nullptr.
 CScriptGameObject* FindNpc(GwpObjectId id, pcstr function)
 {
-    if (!CheckCall("npc", function))
+    if (!CheckNpcCall("npc", function))
         return nullptr;
     CGameObject* object = FindOnline(id);
     return object && smart_cast<CCustomMonster*>(object) ? object->lua_game_object() : nullptr;
@@ -140,7 +140,7 @@ int GWP_CALL ApiNpcMemoryPosition(GwpObjectId id, GwpObjectId other, float out_x
 
 const char* GWP_CALL ApiNpcCommunity(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_community"))
+    if (!CheckNpcCall("npc", "npc_community"))
         return nullptr;
     // An inventory owner only: CharacterCommunity logs a script error for anything else.
     const CInventoryOwner* owner = smart_cast<const CInventoryOwner*>(FindOnline(id));
@@ -149,7 +149,7 @@ const char* GWP_CALL ApiNpcCommunity(GwpObjectId id)
 
 GwpObjectId GWP_CALL ApiNpcActiveItem(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_active_item"))
+    if (!CheckNpcCall("npc", "npc_active_item"))
         return GWP_INVALID_OBJECT_ID;
     // An inventory owner only: GetActiveItem logs a script error for anything else.
     CInventoryOwner* owner = smart_cast<CInventoryOwner*>(FindOnline(id));
@@ -159,7 +159,7 @@ GwpObjectId GWP_CALL ApiNpcActiveItem(GwpObjectId id)
 
 uint32_t GWP_CALL ApiNpcFeelTouch(GwpObjectId id, GwpObjectId* out, uint32_t max)
 {
-    if (!CheckCall("npc", "npc_feel_touch"))
+    if (!CheckNpcCall("npc", "npc_feel_touch"))
         return 0;
     Feel::Touch* touch = smart_cast<Feel::Touch*>(FindOnline(id));
     if (!touch)
@@ -172,7 +172,7 @@ uint32_t GWP_CALL ApiNpcFeelTouch(GwpObjectId id, GwpObjectId* out, uint32_t max
 
 int GWP_CALL ApiNpcCriticallyWounded(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_critically_wounded"))
+    if (!CheckNpcCall("npc", "npc_critically_wounded"))
         return 0;
     CCustomMonster* npc = smart_cast<CCustomMonster*>(FindOnline(id)); // critically_wounded is not const
     return npc && npc->critically_wounded() ? 1 : 0;
@@ -180,7 +180,7 @@ int GWP_CALL ApiNpcCriticallyWounded(GwpObjectId id)
 
 int GWP_CALL ApiNpcInSmartCover(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_in_smart_cover"))
+    if (!CheckNpcCall("npc", "npc_in_smart_cover"))
         return 0;
     // A stalker only: the Lua method answers "" (true in Lua) with a script error for anything else
     CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(FindOnline(id));
@@ -189,7 +189,7 @@ int GWP_CALL ApiNpcInSmartCover(GwpObjectId id)
 
 int GWP_CALL ApiNpcIsTalking(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_is_talking"))
+    if (!CheckNpcCall("npc", "npc_is_talking"))
         return 0;
     // CScriptGameObject::IsTalking: an inventory owner in a dialog (the actor answers here too), false for
     // anything else, without the script error Lua logs. IsTalking is not const there either
@@ -199,7 +199,7 @@ int GWP_CALL ApiNpcIsTalking(GwpObjectId id)
 
 uint32_t GWP_CALL ApiNpcMainAction(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_main_action"))
+    if (!CheckNpcCall("npc", "npc_main_action"))
         return GWP_INVALID_ACTION_ID;
     CAI_Stalker* stalker = smart_cast<CAI_Stalker*>(FindOnline(id));
     if (!stalker || !stalker->g_Alive())
@@ -211,7 +211,7 @@ uint32_t GWP_CALL ApiNpcMainAction(GwpObjectId id)
 
 int GWP_CALL ApiNpcSee(GwpObjectId id, GwpObjectId other)
 {
-    if (!CheckCall("npc", "npc_see"))
+    if (!CheckNpcCall("npc", "npc_see"))
         return 0;
     CGameObject* npc = FindOnline(id);
     CGameObject* object = npc ? FindOnline(other) : nullptr;
@@ -229,7 +229,7 @@ int GWP_CALL ApiNpcSee(GwpObjectId id, GwpObjectId other)
 
 uint32_t GWP_CALL ApiNpcMemoryVisibleObjects(GwpObjectId id, GwpObjectId* out, uint32_t max)
 {
-    if (!CheckCall("npc", "npc_memory_visible_objects"))
+    if (!CheckNpcCall("npc", "npc_memory_visible_objects"))
         return 0;
     const CCustomMonster* monster = smart_cast<const CCustomMonster*>(FindOnline(id));
     // The list belongs to the engine group of the NPC: a member outside a group has none (Lua would crash there)
@@ -253,7 +253,7 @@ uint32_t GWP_CALL ApiNpcMemoryVisibleObjects(GwpObjectId id, GwpObjectId* out, u
 
 int GWP_CALL ApiNpcRelation(GwpObjectId id, GwpObjectId other)
 {
-    if (!CheckCall("npc", "npc_relation"))
+    if (!CheckNpcCall("npc", "npc_relation"))
         return -1;
     // GetRelationType logs a script error unless both are creatures: checked here, without the log
     CEntityAlive* npc = smart_cast<CEntityAlive*>(FindOnline(id));
@@ -266,7 +266,7 @@ int GWP_CALL ApiNpcRelation(GwpObjectId id, GwpObjectId other)
 
 int GWP_CALL ApiNpcWounded(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_wounded"))
+    if (!CheckNpcCall("npc", "npc_wounded"))
         return 0;
     // A stalker only: wounded() logs a script error for anything else
     const CAI_Stalker* stalker = smart_cast<const CAI_Stalker*>(FindOnline(id));
@@ -286,7 +286,7 @@ GwpObjectId GWP_CALL ApiNpcBestDangerDependent(GwpObjectId id)
 // npc.health / npc.psy_health: -1 for anything but a creature, as the Lua properties answer (with a script error)
 float GWP_CALL ApiNpcHealth(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_health"))
+    if (!CheckNpcCall("npc", "npc_health"))
         return -1.f;
     const CEntityAlive* alive = smart_cast<const CEntityAlive*>(FindOnline(id));
     return alive ? alive->conditions().GetHealth() : -1.f;
@@ -294,7 +294,7 @@ float GWP_CALL ApiNpcHealth(GwpObjectId id)
 
 float GWP_CALL ApiNpcPsyHealth(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_psy_health"))
+    if (!CheckNpcCall("npc", "npc_psy_health"))
         return -1.f;
     const CEntityAlive* alive = smart_cast<const CEntityAlive*>(FindOnline(id));
     return alive ? alive->conditions().GetPsyHealth() : -1.f;
@@ -302,7 +302,7 @@ float GWP_CALL ApiNpcPsyHealth(GwpObjectId id)
 
 uint32_t GWP_CALL ApiItemState(GwpObjectId id)
 {
-    if (!CheckCall("inventory", "item_state"))
+    if (!CheckNpcCall("inventory", "item_state"))
         return 65535;
     CGameObject* object = FindOnline(id);
     return object ? object->lua_game_object()->GetState() : 65535;
@@ -310,7 +310,7 @@ uint32_t GWP_CALL ApiItemState(GwpObjectId id)
 
 uint32_t GWP_CALL ApiItemAnimationSlot(GwpObjectId id)
 {
-    if (!CheckCall("inventory", "item_animation_slot"))
+    if (!CheckNpcCall("inventory", "item_animation_slot"))
         return 0xFFFFFFFFu;
     // A hud item only: animation_slot logs a script error for anything else
     CHudItem* item = smart_cast<CHudItem*>(FindOnline(id)); // animation_slot is not const
@@ -319,7 +319,7 @@ uint32_t GWP_CALL ApiItemAnimationSlot(GwpObjectId id)
 
 const char* GWP_CALL ApiObjectVisual(GwpObjectId id)
 {
-    if (!CheckCall("objects", "object_visual"))
+    if (!CheckNpcCall("objects", "object_visual"))
         return nullptr;
     const CGameObject* object = FindOnline(id);
     return object ? object->cNameVisual().c_str() : nullptr;
@@ -327,7 +327,7 @@ const char* GWP_CALL ApiObjectVisual(GwpObjectId id)
 
 int GWP_CALL ApiObjectBonePosition(GwpObjectId id, const char* bone, float out_xyz[3])
 {
-    if (!CheckCall("objects", "object_bone_position") || !out_xyz)
+    if (!CheckNpcCall("objects", "object_bone_position") || !out_xyz)
         return 0;
     CGameObject* object = FindOnline(id);
     IKinematics* kinematics = object ? smart_cast<IKinematics*>(object->Visual()) : nullptr;
@@ -347,7 +347,7 @@ int GWP_CALL ApiObjectBonePosition(GwpObjectId id, const char* bone, float out_x
 
 GwpObjectId GWP_CALL ApiObjectParent(GwpObjectId id)
 {
-    if (!CheckCall("objects", "object_parent"))
+    if (!CheckNpcCall("objects", "object_parent"))
         return GWP_INVALID_OBJECT_ID;
     const CGameObject* object = FindOnline(id);
     const CGameObject* parent = object ? smart_cast<const CGameObject*>(object->H_Parent()) : nullptr;
@@ -356,7 +356,7 @@ GwpObjectId GWP_CALL ApiObjectParent(GwpObjectId id)
 
 uint32_t GWP_CALL ApiObjectDeathTime(GwpObjectId id)
 {
-    if (!CheckCall("objects", "object_death_time"))
+    if (!CheckNpcCall("objects", "object_death_time"))
         return 0;
     // death_time of Lua: Device.dwTimeGlobal at the death (level_time_ms), 0 while alive; a script error and 0
     // for anything but an entity
@@ -370,7 +370,7 @@ uint32_t GWP_CALL ApiObjectDeathTime(GwpObjectId id)
 
 CSE_Abstract* FindServerObject(GwpObjectId id, pcstr function)
 {
-    if (!CheckCall("alife", function) || id == GWP_INVALID_OBJECT_ID || !ai().get_alife())
+    if (!CheckNpcCall("alife", function) || id == GWP_INVALID_OBJECT_ID || !ai().get_alife())
         return nullptr;
     return ai().alife().objects().object(id, true); // true: no fatal error for a missing id
 }
@@ -712,7 +712,7 @@ GwpResult GWP_CALL ApiScriptCall(
 {
     if (result)
         *result = events::Nil();
-    if (!CheckCall("script", "script_call"))
+    if (!CheckNpcCall("script", "script_call"))
         return GWP_ERROR_NOT_MAIN_THREAD;
     // The name goes into 256-byte buffers of the script engine (parse_script_namespace), checked by VERIFY only
     if (!self || !function || !function[0] || xr_strlen(function) >= 256 || (argc && !argv))
@@ -786,7 +786,7 @@ GwpResult GWP_CALL ApiScriptCall(
 // as by the Lua methods
 void GWP_CALL ApiNpcEnableTalk(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_enable_talk"))
+    if (!CheckNpcCall("npc", "npc_enable_talk"))
         return;
     CInventoryOwner* owner = smart_cast<CInventoryOwner*>(FindOnline(id));
     if (owner)
@@ -795,7 +795,7 @@ void GWP_CALL ApiNpcEnableTalk(GwpObjectId id)
 
 void GWP_CALL ApiNpcDisableTalk(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_disable_talk"))
+    if (!CheckNpcCall("npc", "npc_disable_talk"))
         return;
     CInventoryOwner* owner = smart_cast<CInventoryOwner*>(FindOnline(id));
     if (owner)
@@ -804,7 +804,7 @@ void GWP_CALL ApiNpcDisableTalk(GwpObjectId id)
 
 void GWP_CALL ApiNpcStopTalk(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_stop_talk"))
+    if (!CheckNpcCall("npc", "npc_stop_talk"))
         return;
     CInventoryOwner* owner = smart_cast<CInventoryOwner*>(FindOnline(id));
     if (owner)
@@ -813,7 +813,7 @@ void GWP_CALL ApiNpcStopTalk(GwpObjectId id)
 
 int GWP_CALL ApiNpcIsTalkEnabled(GwpObjectId id)
 {
-    if (!CheckCall("npc", "npc_is_talk_enabled"))
+    if (!CheckNpcCall("npc", "npc_is_talk_enabled"))
         return 0;
     CInventoryOwner* owner = smart_cast<CInventoryOwner*>(FindOnline(id));
     return owner && owner->IsTalkEnabled() ? 1 : 0;
@@ -821,7 +821,7 @@ int GWP_CALL ApiNpcIsTalkEnabled(GwpObjectId id)
 
 void GWP_CALL ApiNpcSetTipText(GwpObjectId id, const char* text)
 {
-    if (!CheckCall("npc", "npc_set_tip_text"))
+    if (!CheckNpcCall("npc", "npc_set_tip_text"))
         return;
     CGameObject* object = FindOnline(id);
     if (object)

@@ -92,7 +92,7 @@ xr_vector<u16>* g_generations = nullptr;
 u32 IndexOf(GwpPlannerId id) { return (id & 0xFFFFu) - 1; }
 xr_vector<const GwpPlugin*>* g_dead_plugins = nullptr;
 
-bool CheckCall(pcstr function)
+bool CheckPlannerCall(pcstr function)
 {
     if (IsMainThread())
         return true;
@@ -225,7 +225,7 @@ void CNativePlannerAction::finalize()
 
 GwpPlannerId GWP_CALL ApiPlannerCreate(const GwpPlugin* self, GwpObjectId npc)
 {
-    if (!CheckCall("planner_create") || !self || !g_pGameLevel)
+    if (!CheckPlannerCall("planner_create") || !self || !g_pGameLevel)
         return GWP_INVALID_PLANNER_ID;
     if (g_dead_plugins && std::find(g_dead_plugins->begin(), g_dead_plugins->end(), self) != g_dead_plugins->end())
         return GWP_INVALID_PLANNER_ID;
@@ -265,7 +265,7 @@ GwpPlannerId GWP_CALL ApiPlannerCreate(const GwpPlugin* self, GwpObjectId npc)
 
 GwpResult GWP_CALL ApiPlannerDestroy(const GwpPlugin* self, GwpPlannerId id)
 {
-    if (!CheckCall("planner_destroy"))
+    if (!CheckPlannerCall("planner_destroy"))
         return GWP_ERROR_NOT_MAIN_THREAD;
     Planner* planner = Find(id, self);
     if (!planner || planner->updating)
@@ -277,7 +277,7 @@ GwpResult GWP_CALL ApiPlannerDestroy(const GwpPlugin* self, GwpPlannerId id)
 GwpResult GWP_CALL ApiPlannerAddEvaluator(
     const GwpPlugin* self, GwpPlannerId id, uint32_t property, const char* name, GwpEvaluatorFn fn, void* user)
 {
-    if (!CheckCall("planner_add_evaluator"))
+    if (!CheckPlannerCall("planner_add_evaluator"))
         return GWP_ERROR_NOT_MAIN_THREAD;
     Planner* planner = Find(id, self);
     if (!planner || planner->updating || !fn)
@@ -293,7 +293,7 @@ GwpResult GWP_CALL ApiPlannerAddAction(const GwpPlugin* self, GwpPlannerId id, u
     const GwpActionVTable* vtable, void* user, const GwpWorldProperty* conditions, uint32_t condition_count,
     const GwpWorldProperty* effects, uint32_t effect_count)
 {
-    if (!CheckCall("planner_add_action"))
+    if (!CheckPlannerCall("planner_add_action"))
         return GWP_ERROR_NOT_MAIN_THREAD;
     Planner* planner = Find(id, self);
     if (!planner || planner->updating || !vtable || vtable->size < 2 * sizeof(uint32_t) ||
@@ -330,7 +330,7 @@ GwpResult GWP_CALL ApiPlannerAddAction(const GwpPlugin* self, GwpPlannerId id, u
 GwpResult GWP_CALL ApiPlannerSetGoal(
     const GwpPlugin* self, GwpPlannerId id, const GwpWorldProperty* goal, uint32_t count)
 {
-    if (!CheckCall("planner_set_goal"))
+    if (!CheckPlannerCall("planner_set_goal"))
         return GWP_ERROR_NOT_MAIN_THREAD;
     Planner* planner = Find(id, self);
     if (!planner || planner->updating || (count && !goal))
@@ -355,7 +355,7 @@ GwpResult GWP_CALL ApiPlannerSetGoal(
 
 GwpResult GWP_CALL ApiPlannerUpdate(const GwpPlugin* self, GwpPlannerId id)
 {
-    if (!CheckCall("planner_update"))
+    if (!CheckPlannerCall("planner_update"))
         return GWP_ERROR_NOT_MAIN_THREAD;
     Planner* planner = Find(id, self);
     if (!planner || planner->updating)
@@ -372,7 +372,7 @@ GwpResult GWP_CALL ApiPlannerUpdate(const GwpPlugin* self, GwpPlannerId id)
 
 uint32_t GWP_CALL ApiPlannerCurrentAction(GwpPlannerId id)
 {
-    if (!CheckCall("planner_current_action"))
+    if (!CheckPlannerCall("planner_current_action"))
         return GWP_INVALID_ACTION_ID;
     const Planner* planner = Find(id, nullptr);
     if (!planner || !planner->planner->initialized())
@@ -384,7 +384,7 @@ uint32_t GWP_CALL ApiPlannerCurrentAction(GwpPlannerId id)
 // -1 when the property is unknown.
 int GWP_CALL ApiPlannerEvaluate(GwpPlannerId id, uint32_t property)
 {
-    if (!CheckCall("planner_evaluate"))
+    if (!CheckPlannerCall("planner_evaluate"))
         return -1;
     Planner* planner = Find(id, nullptr);
     if (!planner)

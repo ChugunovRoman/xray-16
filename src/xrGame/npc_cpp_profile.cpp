@@ -229,6 +229,17 @@ IC u32 fnv1a_hash(pcstr value)
 
 // The bucket of this name: the one that already holds it, or the first free one after the hashed slot.
 // Returns nullptr when the probe window is full - then the sample goes to the common stage instead.
+// Appends src to the zero-terminated dst, cut to its size. Not snprintf: GameSpy (gsPlatform.h) defines it to
+// _snprintf on Windows for the files after it in a unity batch, and xr_strcpy / xr_sprintf hit the invalid
+// parameter handler on a cut outside MASTER_GOLD
+void append_cut(char* dst, size_t size, pcstr src)
+{
+    size_t length = std::strlen(dst);
+    while (*src && length + 1 < size)
+        dst[length++] = *src++;
+    dst[length] = 0;
+}
+
 ScriptEvaluatorProfileBucket* named_bucket(ScriptEvaluatorProfileBucket* buckets, pcstr evaluator_name)
 {
     const size_t start = static_cast<size_t>(fnv1a_hash(evaluator_name) % NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT);
@@ -236,11 +247,10 @@ ScriptEvaluatorProfileBucket* named_bucket(ScriptEvaluatorProfileBucket* buckets
     {
         const size_t index = (start + probe) % NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT;
         ScriptEvaluatorProfileBucket& bucket = buckets[index];
-        // A longer name is cut (xr_strcpy would hit the invalid parameter handler outside MASTER_GOLD): the same name
-        // is cut the same way, so it still finds its bucket
+        // A longer name is cut: the same name is cut the same way, so it still finds its bucket
         if (!bucket.name[0])
         {
-            std::snprintf(bucket.name, sizeof bucket.name, "%s", evaluator_name);
+            append_cut(bucket.name, sizeof bucket.name, evaluator_name);
             return &bucket;
         }
         if (std::strncmp(bucket.name, evaluator_name, sizeof bucket.name - 1) == 0)
@@ -535,8 +545,10 @@ void npc_cpp_profile::add_script_action(pcstr action_name, pcstr step, const u64
 {
     if (!enabled())
         return;
-    string128 name; // a long action name is cut, not a crash (xr_sprintf checks the size outside MASTER_GOLD)
-    std::snprintf(name, sizeof name, "%s/%s", action_name && action_name[0] ? action_name : "<unnamed>", step ? step : "?");
+    string128 name{}; // a long action name is cut, not a crash
+    append_cut(name, sizeof name, action_name && action_name[0] ? action_name : "<unnamed>");
+    append_cut(name, sizeof name, "/");
+    append_cut(name, sizeof name, step ? step : "?");
     ScriptEvaluatorProfileBucket* bucket = named_bucket(g_script_action_profile_buckets, name);
     if (!bucket)
         return; // the probe window is full: the stage totals still have it
