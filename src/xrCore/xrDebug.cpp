@@ -150,6 +150,24 @@ Lock xrDebug::failLock;
 
 void xrDebug::SetBugReportFile(const char* fileName) { xr_strcpy(BugReportFile, fileName); }
 
+void xrDebug::AddSymbolSearchPath(pcstr dir)
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    AddSymbolSearchDirectory(dir);
+#else
+    (void)dir;
+#endif
+}
+
+void xrDebug::ForgetModuleSymbols(const void* moduleBase)
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    UnloadModuleSymbols(moduleBase);
+#else
+    (void)moduleBase;
+#endif
+}
+
 void xrDebug::LogStackTrace(const char* header)
 {
     xr_vector<xr_string> stackTrace = BuildStackTrace();

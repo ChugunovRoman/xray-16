@@ -90,6 +90,9 @@ decltype(&SymGetModuleBase)       symGetModuleBase{};
 decltype(&SymGetSymFromAddr)      symGetSymFromAddr{};
 decltype(&SymGetLineFromAddr)     symGetLineFromAddr{};
 decltype(&SymRefreshModuleList)   symRefreshModuleList{};
+decltype(&SymGetSearchPath)       symGetSearchPath{};
+decltype(&SymSetSearchPath)       symSetSearchPath{};
+decltype(&SymUnloadModule64)      symUnloadModule64{};
 
 template <typename T>
 void load_function(T& func, cpcstr name)
@@ -129,6 +132,9 @@ void init_dbghelp()
     load_function(symGetLineFromAddr, STRINGIZE(SymGetLineFromAddr));
     load_function(symFunctionTableAccess, STRINGIZE(SymFunctionTableAccess));
     load_function(symRefreshModuleList, "SymRefreshModuleList");
+    load_function(symGetSearchPath, "SymGetSearchPath");
+    load_function(symSetSearchPath, "SymSetSearchPath");
+    load_function(symUnloadModule64, "SymUnloadModule64");
 }
 
 #   undef STRINGIZE_HELPER
@@ -349,6 +355,53 @@ void FormatModuleRelativeAddress(const void* address, xr_string& out)
     std::snprintf(formatBuff, _countof(formatBuff), "0x%016llX <unknown>",
         static_cast<u64>(reinterpret_cast<uintptr_t>(address)));
     out.append(formatBuff);
+}
+
+void AddSymbolSearchDirectory(pcstr dir)
+{
+    if (!dir || !dir[0])
+        return;
+    DbgHelpScopeLock lock;
+    init_dbghelp();
+    ensure_sym_initialized();
+    if (!s_sym_initialized || !symGetSearchPath || !symSetSearchPath)
+        return;
+    static char current[4096]; // under the dbghelp lock: no thread shares it
+    if (!symGetSearchPath(GetCurrentProcess(), current, sizeof(current)))
+        current[0] = '\0';
+    // Already there: the path is a ';' separated list, compared without case like the file system
+    const size_t dirLen = std::strlen(dir);
+    for (pcstr entry = current; *entry;)
+    {
+        pcstr end = std::strchr(entry, ';');
+        const size_t len = end ? static_cast<size_t>(end - entry) : std::strlen(entry);
+        if (len == dirLen && _strnicmp(entry, dir, len) == 0)
+            return;
+        if (!end)
+            break;
+        entry = end + 1;
+    }
+    const size_t used = std::strlen(current);
+    if (used + 1 + dirLen + 1 > sizeof(current))
+    {
+        Msg("! [StackTraceBuilder] symbol search path is full, '%s' is not added", dir);
+        return;
+    }
+    if (used)
+        current[used] = ';';
+    std::memcpy(current + (used ? used + 1 : 0), dir, dirLen + 1);
+    if (!symSetSearchPath(GetCurrentProcess(), current))
+        Msg("! [StackTraceBuilder] SymSetSearchPath failed with error: 0x%x", GetLastError());
+}
+
+void UnloadModuleSymbols(const void* moduleBase)
+{
+    if (!moduleBase)
+        return;
+    DbgHelpScopeLock lock;
+    // Not known to dbghelp yet (no stack was walked since it was loaded) is fine: nothing to forget
+    if (s_sym_initialized && symUnloadModule64)
+        symUnloadModule64(GetCurrentProcess(), static_cast<DWORD64>(reinterpret_cast<uintptr_t>(moduleBase)));
 }
 
 static void collect_game_modules_impl(xr_vector<xr_string>& out, const void* extraAddress)

@@ -83,6 +83,8 @@ extern u32 npc_perf_ik_interval_enemy_selected_ms;
 // IK foot rays (ik_foot_collider.cpp): parallel first-hit batch via CObjectSpace::RayPickBatch when TaskScheduler active
 extern int npc_perf_ik_foot_raypick_batch;
 extern int npc_perf_ik_foot_raypick_batch_min_rays;
+// IK foot rays: 1 = the static geometry only (default; a crowd made every ray test the neighbours' skeletons)
+extern int npc_perf_ik_foot_static_only;
 
 /**
  * Reserved. Full cross-NPC parallel in_UpdateCL would require a two-phase stalker UpdateCL (physics barrier before sight).
@@ -121,9 +123,41 @@ extern u32 npc_perf_motivator_callback_near_interval;
 extern u32 npc_perf_motivator_callback_medium_interval;
 extern u32 npc_perf_motivator_callback_far_interval;
 extern u32 npc_perf_motivator_dead_interval;
+// Stage D, W3-1: 0 = the Lua NPC binder computes its update lane and phases itself (old); 1 = the engine does,
+// with the same rules and the npc_perf_motivator_* intervals, and skips the Lua update when no phase is due.
+extern u32 npc_perf_motivator_native_gate;
 extern u32 npc_perf_sim_brain_actor_update_interval;
 
 /** 1 = Tracy zone per combat member in CAgentEnemyManager::fill_enemies (fill_from_squads/member). Default 0: thousands of zones hurt Tracy and add overhead. */
 extern int npc_perf_agent_enemy_fill_squads_trace_members;
+
+/** 1 = CAgentEnemyManager::distribute_enemies runs once per frame for a group (the first member that asks); 0 = on
+    every call, as vanilla (each member without an enemy walks the memory of the whole group). */
+extern int npc_perf_agent_distribute_once_per_frame;
+
+/** 1 = CAgentEnemyManager::fill_enemies skips a member whose own enemy list is empty - 100-170 members walked for
+    0-1 enemies in a crowd (2026-10-02). A heuristic, not an equivalent: that list is the one of the last memory
+    update (the collect budget, no enemies assigned to other members, the squad mask), so an enemy only a skipped
+    member sees may join the distribution later. 0 = every member's visual memory is walked, as before. */
+extern int npc_perf_agent_fill_skip_no_enemy;
+
+/** 1 = CStepManager::update does not pick the material under the foot (a ray, about 50 us) for a step beyond 20 m of
+    the camera: the step sound and the particles that need it play only nearer. 0 = a pick for every step, as before. */
+extern int npc_perf_step_far_skip_material;
+
+/** 1 = a script action without its own weight() answers the default weight in C++ (looked up once per action);
+    0 = a Lua call for the weight of every edge of every plan search, as before. */
+extern int npc_perf_script_action_weight_lookup;
+
+/** 1 = visual_memory_manager.get_visible_value computed in C++ (the same formula); 0 = the Lua function, as before
+    (an addon that changes the script formula needs 0). */
+extern int npc_perf_visible_value_native;
+
+// Stage D, W4-2 (gw_condlist_native.cpp): xr_logic.pick_section_from_condlist in the engine.
+// 0 = pure Lua (default); 1 = the native interpreter decides (falls back per call when the condlist
+// has anything it cannot evaluate); 2 = shadow: a dry native pass runs first (no infop_set, no
+// effects, the LuaJIT math.random state is restored after it), then Lua decides and mismatches are
+// counted (gw_logic.stats prints them).
+extern int npc_perf_condlist_native;
 
 #endif // PERFORMANCE_CVARS_H_INCLUDED

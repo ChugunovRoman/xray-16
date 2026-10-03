@@ -30,6 +30,9 @@ private:
     WOUNDED_ENEMIES m_wounded;
     bool m_only_wounded_left;
     bool m_is_any_wounded;
+    // Device.dwFrame of the last distribute_enemies: every member without an enemy asks for it on its memory
+    // update, and the whole group is walked each time (npc_perf_agent_distribute_once_per_frame)
+    u32 m_distributed_frame;
 
 protected:
     template <typename T>

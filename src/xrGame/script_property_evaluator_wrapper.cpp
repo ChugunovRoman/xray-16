@@ -13,6 +13,7 @@
 #include "xrScriptEngine/script_engine.hpp"
 #include "npc_cpp_profile.h"
 #include "performance_cvars.h"
+#include "addon_event_bus.h"
 #include "xrAICore/Components/ai_planner_search_limits.h"
 
 // Policies read from configs/npc_perf_evaluator_cache.ltx. The file only overrides the table below, so the
@@ -117,6 +118,13 @@ void ai_evaluator_cache_reload()
 {
     load_policy_overrides();
     ++g_ai_evaluator_cache_generation; // every evaluator re-reads its policy and drops the value it cached
+    // The native evaluators of plugins keep their own cache and read the same file: they re-read it on this event
+    namespace events = gw::addons::events;
+    static const GwpEventId reload_event = [] {
+        events::Declare("ai_evaluator_cache_on_reload", 0, "");
+        return events::Intern("ai_evaluator_cache_on_reload");
+    }();
+    events::Emit(reload_event);
 }
 
 void ai_evaluator_cache_print()
@@ -313,22 +321,40 @@ bool CScriptPropertyEvaluatorWrapper::evaluate()
     if (use_cache)
         npc_cpp_profile::add_script_evaluator_cache_miss(m_evaluator_name);
 
+    bool result = false;
+    if (call_lua_evaluate(result) && use_cache)
+    {
+        m_cached_frame = current_frame;
+        m_cached_epoch = g_ai_evaluator_solve_epoch;
+        m_cached_time_ms = current_time_ms;
+        m_cached_value = result;
+        m_has_cached_value = true;
+    }
+
+    if (evaluator_start_qpc)
+        npc_cpp_profile::add_script_evaluator(m_evaluator_name, CPU::QPC() - evaluator_start_qpc);
+    return result;
+}
+
+bool CScriptPropertyEvaluatorWrapper::evaluate_uncached()
+{
+    PROPERTY_EVALUATOR_TRACY_ZONE_SCRIPT();
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptEvaluatorEvaluate);
+    const u64 evaluator_start_qpc = npc_cpp_profile::enabled() ? CPU::QPC() : 0;
+    bool result = false;
+    call_lua_evaluate(result);
+    if (evaluator_start_qpc)
+        npc_cpp_profile::add_script_evaluator(m_evaluator_name, CPU::QPC() - evaluator_start_qpc);
+    return result;
+}
+
+// False: the Lua method failed (logged), result stays false and is not cached
+bool CScriptPropertyEvaluatorWrapper::call_lua_evaluate(bool& result)
+{
     try
     {
-        const bool result = (luabind::call_member<bool>(this, "evaluate"));
-
-        if (use_cache)
-        {
-            m_cached_frame = current_frame;
-            m_cached_epoch = g_ai_evaluator_solve_epoch;
-            m_cached_time_ms = current_time_ms;
-            m_cached_value = result;
-            m_has_cached_value = true;
-        }
-
-        if (evaluator_start_qpc)
-            npc_cpp_profile::add_script_evaluator(m_evaluator_name, CPU::QPC() - evaluator_start_qpc);
-        return result;
+        result = luabind::call_member<bool>(this, "evaluate");
+        return true;
     }
 #if defined(DEBUG) && !defined(LUABIND_NO_EXCEPTIONS)
     catch (const luabind::cast_failed& exception)
@@ -350,10 +376,8 @@ bool CScriptPropertyEvaluatorWrapper::evaluate()
             LuaMessageType::Error, "SCRIPT RUNTIME ERROR : evaluator [%s] returns value with not a bool type!", m_evaluator_name);
     }
 
-    if (evaluator_start_qpc)
-        npc_cpp_profile::add_script_evaluator(m_evaluator_name, CPU::QPC() - evaluator_start_qpc);
-
-    return (false);
+    result = false;
+    return false;
 }
 
 bool CScriptPropertyEvaluatorWrapper::evaluate_static(CScriptPropertyEvaluator* evaluator)

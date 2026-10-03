@@ -17,4 +17,10 @@ void FormatModuleRelativeAddress(const void* address, xr_string& out);
 // Appends "name base=0x... size=0x..." for every module shipped with the game,
 // plus the module holding extraAddress (used when a crash lands in a system DLL).
 void CollectGameModules(xr_vector<xr_string>& out, const void* extraAddress = nullptr);
+
+// Appends dir to the dbghelp search path (once): PDBs of libraries loaded from outside the game folder.
+void AddSymbolSearchDirectory(pcstr dir);
+
+// Takes the module at moduleBase out of dbghelp: call it before the library is unloaded.
+void UnloadModuleSymbols(const void* moduleBase);
 #endif

@@ -8,6 +8,7 @@
 
 #include "pch_script.h"
 #include "movement_manager.h"
+#include "npc_cpp_profile.h"
 #include "movement_manager_space.h"
 #include "game_location_selector.h"
 #include "level_location_selector.h"
@@ -336,8 +337,12 @@ bool CMovementManager::can_use_distributed_computations(u32 option) const
 void CMovementManager::on_frame(CPHMovementControl* movement_control, Fvector& dest_position)
 {
     if (enabled() && (m_path_state != ePathStatePathVerification) && (m_path_state != ePathStatePathCompleted))
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementUpdatePath);
         update_path();
+    }
 
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementMoveAlongPath);
     move_along_path(movement_control, dest_position, object().client_update_fdelta());
 }
 

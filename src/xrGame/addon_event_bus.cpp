@@ -14,6 +14,7 @@
 #include "xrServer_Objects_ALife.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <iterator>
 
@@ -55,6 +56,8 @@ struct Subscriber
     GwpEventBatchHandler batch_handler = nullptr; // batch subscriber when not null
     xr_unique_ptr<BatchQueue> batch;               // queue of a batch subscriber
     u32 max_batch = 0;
+    bool object_filter = false; // GWP_SUBSCRIBE_OBJECT: only emits about `object` (first argument)
+    u16 object = 0;
 
     // Lua
     int lua_ref = LUA_NOREF; // handler in the registry of Bus::lua
@@ -96,6 +99,11 @@ struct Event
     bool warned_adapter = false;
     bool trace = false;          // event_trace
     u32 emit_count = 0;
+    // Who actually emitted it (event_list): C++ of the engine and the host (Emit), Lua (event_bus.emit,
+    // SendScriptCallback), plugins (event_emit). The declared source alone says nothing about host emits
+    u32 engine_emits = 0;
+    u32 lua_emits = 0;
+    u32 plugin_emits = 0;
     u32 engine_log_ms = 0;      // gw_event_engine_log: time of the last logged emit
     u32 engine_log_skipped = 0; // emits not logged since then (rate limit)
     bool engine_log_any = false;
@@ -108,6 +116,7 @@ struct Bus
     xr_unordered_map<xr_string, GwpEventId> ids;
     xr_unordered_map<GwpSubscriptionId, GwpEventId> native_subscriptions;
     GwpSubscriptionId next_subscription = 1;
+    u32 object_subscriptions = 0; // alive GWP_SUBSCRIBE_OBJECT subscribers: RemoveObjectSubscriptions skips the scan at 0
     u32 dispatch_depth = 0; // all events together: protection against endless recursion
 
     lua_State* lua = nullptr;         // Lua state the Lua subscribers belong to
@@ -375,6 +384,8 @@ void RemoveAt(Bus& bus, Event& event, size_t index)
     if (!subscriber.alive)
         return;
     subscriber.alive = false;
+    if (subscriber.object_filter && bus.object_subscriptions)
+        --bus.object_subscriptions;
     if (subscriber.kind == ESubscriberKind::Native)
     {
         --event.native_count;
@@ -432,7 +443,8 @@ private:
 // Native handlers
 // ---------------------------------------------------------------------------------------------
 
-// One call of a plugin handler: a single event (handler) or a batch (batch_handler).
+// One call of a plugin handler: a single event (handler), a batch (batch_handler), or any other plugin function
+// wrapped by a host thunk (CallPluginGuarded: binder callbacks and the like).
 struct NativeCall
 {
     GwpEventHandler handler = nullptr;
@@ -440,23 +452,40 @@ struct NativeCall
     void* user = nullptr;
     const GwpEvent* events = nullptr;
     u32 count = 1;
-    pcstr event_name = "";
+    pcstr event_name = ""; // what is being called, for the crash message
+    void (*thunk)(void*) = nullptr; // set: called instead of the handlers
+    void* thunk_context = nullptr;
+    const void* plugin_code = nullptr; // thunk: an address inside the plugin library (the crash filter needs it)
 };
 
+// Plugin calls in progress on the thread that runs them (the game logic thread): see PluginCallDepth
+u32 g_plugin_call_depth = 0;
+
 // A C++ exception thrown out of a plugin handler stops here; C++ unwinding runs every destructor on the way,
-// so nested dispatch scopes of the engine stay consistent.
+// so nested dispatch scopes of the engine stay consistent. Logged with the stack of the catch (on MSVC the frames
+// of the throw are still below it while the catch block runs).
 bool CallNativeCatching(const NativeCall& call)
 {
     try
     {
-        if (call.batch_handler)
+        if (call.thunk)
+            call.thunk(call.thunk_context);
+        else if (call.batch_handler)
             call.batch_handler(call.user, call.count, call.events);
         else
             call.handler(call.user, call.events);
         return true;
     }
+    catch (const std::exception& e)
+    {
+        Msg("! [plugins] C++ exception out of a plugin function (%s): %s", call.event_name, e.what());
+        xrDebug::LogStackTrace("! [plugins] stack of the exception:");
+        return false;
+    }
     catch (...)
     {
+        Msg("! [plugins] C++ exception of an unknown type out of a plugin function (%s)", call.event_name);
+        xrDebug::LogStackTrace("! [plugins] stack of the exception:");
         return false;
     }
 }
@@ -465,7 +494,43 @@ bool CallNativeCatching(const NativeCall& call)
 // Crashes (access violation and other hardware exceptions) are caught only when they happen inside the plugin
 // library itself: an engine crash under a plugin handler keeps going to the normal crash handler, and no engine
 // frame with destructors is skipped (the engine is built with /EHsc, SEH unwinding does not run destructors).
-int PluginCrashFilter(const EXCEPTION_POINTERS* info, HMODULE plugin_module, DWORD& code, void*& address)
+// The filter runs before the stack is unwound: the crash block written here (xrDebug::LogCrashInfoGuarded: code,
+// module + offset, modules, native and Lua stacks) shows the frames inside the plugin, named when its PDB is found
+// (addon_host.cpp puts the cache folder of the plugin copies into the symbol search path). oneShot = false: the game
+// goes on, a later real crash still gets its own block. Not for a stack overflow: too little stack is left to walk.
+void LogPluginCrash(EXCEPTION_POINTERS* info, HMODULE plugin_module, pcstr what)
+{
+    string_path module_path{};
+    GetModuleFileNameA(plugin_module, module_path, sizeof(module_path));
+    pcstr module_name = strrchr(module_path, '\\');
+    module_name = module_name ? module_name + 1 : module_path;
+    string512 reason;
+    xr_sprintf(reason, "plugin library %s crashed in %s; caught, the game goes on without the plugin", module_name,
+        what ? what : "?");
+    xrDebug::LogCrashInfoGuarded(info, reason, false);
+}
+
+// The short line after the crash block: the module + offset of the fault (symbolized offline with the PDB)
+void LogPluginException(DWORD code, const void* address, pcstr what)
+{
+    HMODULE module = nullptr;
+    string_path module_path{};
+    pcstr module_name = "?";
+    uintptr_t offset = reinterpret_cast<uintptr_t>(address);
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            static_cast<LPCSTR>(address), &module) &&
+        module && GetModuleFileNameA(module, module_path, sizeof(module_path)))
+    {
+        const pcstr slash = strrchr(module_path, '\\');
+        module_name = slash ? slash + 1 : module_path;
+        offset -= reinterpret_cast<uintptr_t>(module);
+    }
+    Msg("! [events] exception 0x%08x at %s+0x%08llx in a plugin function (%s)%s", static_cast<unsigned>(code),
+        module_name, static_cast<unsigned long long>(offset), what ? what : "?",
+        code == EXCEPTION_STACK_OVERFLOW ? ": a stack overflow, no stack trace" : "");
+}
+
+int PluginCrashFilter(EXCEPTION_POINTERS* info, HMODULE plugin_module, pcstr what, DWORD& code, void*& address)
 {
     code = info->ExceptionRecord->ExceptionCode;
     address = info->ExceptionRecord->ExceptionAddress;
@@ -478,14 +543,17 @@ int PluginCrashFilter(const EXCEPTION_POINTERS* info, HMODULE plugin_module, DWO
     {
         return EXCEPTION_CONTINUE_SEARCH;
     }
+    if (code != EXCEPTION_STACK_OVERFLOW)
+        LogPluginCrash(info, plugin_module, what);
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
 // No C++ objects with destructors here: __try cannot be mixed with them in one function.
-bool CallNativeGuarded(const NativeCall& call)
+bool CallNativeGuardedSeh(const NativeCall& call)
 {
-    const void* code_address = call.batch_handler ? reinterpret_cast<const void*>(call.batch_handler)
-                                                  : reinterpret_cast<const void*>(call.handler);
+    const void* code_address = call.thunk ? call.plugin_code
+        : call.batch_handler              ? reinterpret_cast<const void*>(call.batch_handler)
+                                          : reinterpret_cast<const void*>(call.handler);
     HMODULE plugin_module = nullptr;
     GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
         static_cast<LPCSTR>(code_address), &plugin_module);
@@ -495,19 +563,50 @@ bool CallNativeGuarded(const NativeCall& call)
     {
         return CallNativeCatching(call);
     }
-    __except (PluginCrashFilter(GetExceptionInformation(), plugin_module, code, address))
+    __except (PluginCrashFilter(GetExceptionInformation(), plugin_module, call.event_name, code, address))
     {
         if (code == EXCEPTION_STACK_OVERFLOW)
             _resetstkoflw();
-        Msg("! [events] exception 0x%08x at %p in a plugin handler of event '%s'", static_cast<unsigned>(code), address,
-            call.event_name);
+        LogPluginException(code, address, call.event_name);
         return false;
     }
 }
 #else
-bool CallNativeGuarded(const NativeCall& call) { return CallNativeCatching(call); }
+bool CallNativeGuardedSeh(const NativeCall& call) { return CallNativeCatching(call); }
 #endif
 
+// The depth comes back down also when something unwinds through here (a fault the guard leaves to an outer one):
+// a depth stuck above zero would stop every unload and reload of the plugins for the rest of the run
+struct CallDepthScope
+{
+    CallDepthScope() { ++g_plugin_call_depth; }
+    ~CallDepthScope() { --g_plugin_call_depth; }
+    CallDepthScope(const CallDepthScope&) = delete;
+    CallDepthScope& operator=(const CallDepthScope&) = delete;
+};
+
+bool CallNativeGuarded(const NativeCall& call)
+{
+    const CallDepthScope depth;
+    return CallNativeGuardedSeh(call);
+}
+
+} // namespace
+
+u32 PluginCallDepth() { return g_plugin_call_depth; }
+
+bool CallPluginGuarded(const void* plugin_code, pcstr what, void (*fn)(void*), void* context)
+{
+    NativeCall call;
+    call.thunk = fn;
+    call.thunk_context = context;
+    call.plugin_code = plugin_code;
+    call.event_name = what ? what : "?";
+    return CallNativeGuarded(call);
+}
+
+namespace
+{
 void Enqueue(Subscriber& subscriber, const Event& event, const GwpValue* argv, u32 argc)
 {
     BatchQueue& queue = *subscriber.batch;
@@ -538,6 +637,13 @@ void Enqueue(Subscriber& subscriber, const Event& event, const GwpValue* argv, u
     }
 }
 
+// GWP_SUBSCRIBE_OBJECT: the first argument names the object (a game object or its server object).
+bool IsAboutObject(const GwpValue* argv, u32 argc, u16 object)
+{
+    return argc > 0 && (argv[0].type == GWP_T_OBJECT || argv[0].type == GWP_T_SERVER_OBJECT) &&
+        argv[0].u.id == object;
+}
+
 void RemovePluginSubscriptionsIn(Bus& bus, const GwpPlugin* plugin)
 {
     for (auto& event : bus.events)
@@ -562,6 +668,8 @@ void DispatchNative(Bus& bus, Event& event, GwpEventId id, const GwpValue* argv,
     {
         Subscriber& subscriber = event.subscribers[i];
         if (!subscriber.alive || subscriber.kind != ESubscriberKind::Native)
+            continue;
+        if (subscriber.object_filter && !IsAboutObject(argv, argc, subscriber.object))
             continue;
         if (subscriber.batch_handler)
         {
@@ -590,9 +698,9 @@ void DispatchNative(Bus& bus, Event& event, GwpEventId id, const GwpValue* argv,
         ZoneTextF("%s: %s", PluginAddonId(plugin), event.name.c_str());
         if (!CallNativeGuarded(call))
         {
-            Msg("! [plugin:%s] crashed in a handler of event '%s', all its event subscriptions are removed",
-                PluginAddonId(plugin), event.name.c_str());
-            RemovePluginSubscriptionsIn(bus, plugin);
+            string256 what;
+            xr_sprintf(what, "a handler of event '%s'", event.name.c_str());
+            OnPluginCrashed(plugin, what); // every subscription of the plugin goes, the whole plugin stops
         }
     }
 }
@@ -1083,6 +1191,7 @@ int LuaEmit(lua_State* L)
     }
     WarnUndeclared(*event, "Lua", "emit");
     ++event->emit_count;
+    ++event->lua_emits;
 
     const int argc = lua_gettop(L) - 1;
     // The flags table of a script event with a result is not an argument for plugins: they get GwpEvent::result.
@@ -1187,6 +1296,16 @@ GwpSubscriptionId SubscribeNative(const GwpPlugin* self, const char* name, const
     if (!event)
         return GWP_INVALID_SUBSCRIPTION_ID;
 
+    // A subscription to one object needs the object now: its end (net_Destroy) is what removes the subscription,
+    // and an id that is not online may be given to another object before anything ends it.
+    const bool object_filter = (options.flags & GWP_SUBSCRIBE_OBJECT) != 0;
+    if (object_filter && (!g_pGameLevel || !Level().Objects.net_Find(options.object)))
+    {
+        Msg("! [plugin:%s] event_subscribe_ex '%s': object %u is not online", PluginAddonId(self), name ? name : "",
+            options.object);
+        return GWP_INVALID_SUBSCRIPTION_ID;
+    }
+
     Subscriber subscriber;
     subscriber.id = bus.next_subscription++;
     subscriber.kind = ESubscriberKind::Native;
@@ -1194,6 +1313,10 @@ GwpSubscriptionId SubscribeNative(const GwpPlugin* self, const char* name, const
     subscriber.handler = batch ? nullptr : handler;
     subscriber.user = user;
     subscriber.throttle_ms = options.throttle_ms;
+    subscriber.object_filter = object_filter;
+    subscriber.object = object_filter ? options.object : 0;
+    if (object_filter)
+        ++bus.object_subscriptions;
     if (batch)
     {
         subscriber.batch_handler = options.batch_handler;
@@ -1395,9 +1518,9 @@ void DeliverBatch(Bus& bus, Event& event, GwpEventId id, size_t index, u32 now, 
 
     if (!CallNativeGuarded(call))
     {
-        Msg("! [plugin:%s] crashed in a batch handler of event '%s', all its event subscriptions are removed",
-            PluginAddonId(plugin), event.name.c_str());
-        RemovePluginSubscriptionsIn(bus, plugin);
+        string256 what;
+        xr_sprintf(what, "a batch handler of event '%s'", event.name.c_str());
+        OnPluginCrashed(plugin, what); // every subscription of the plugin goes, the whole plugin stops
     }
 }
 } // namespace
@@ -1481,21 +1604,24 @@ namespace
 void EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* result, pcstr source, bool from_engine)
 {
     ZoneScopedN("events/emit"); // Tracy: the whole emit (schema check, log, native and Lua dispatch)
+    if (!IsMainThread())
+    {
+        // Before anything of the bus: the logic thread may grow bus.events right now, so not even the name is read.
+        // Once per run: a thread that emits does it often, and the log would fill up
+        static std::atomic_flag reported = ATOMIC_FLAG_INIT;
+        if (!reported.test_and_set(std::memory_order_relaxed))
+            Msg("! [events] event %u emitted outside the game logic thread, ignored (reported once)", id);
+        return;
+    }
     if (!g_bus)
         return;
     Bus& bus = *g_bus;
     Event* event = FindEvent(bus, id);
-    if (event)
-        ZoneTextF("%s%s", event->name.c_str(), from_engine ? " (engine)" : "");
-    if (!IsMainThread())
-    {
-        // The name is read without a lock: events are declared at script start, on the logic thread, and never removed.
-        Msg("! [events] event %u '%s' emitted outside the game logic thread, ignored", id, event ? event->name.c_str() : "?");
-        return;
-    }
     if (!event)
         return;
+    ZoneTextF("%s%s", event->name.c_str(), from_engine ? " (engine)" : "");
     ++event->emit_count;
+    ++(from_engine ? event->engine_emits : event->plugin_emits);
     CheckSchema(*event, argv, argc, source);
     if (event->trace)
         Trace(*event, argv, argc, source);
@@ -1679,6 +1805,7 @@ void FillEngineApi(GwpEngineApi& api)
 }
 
 void PushLuaValue(lua_State* L, const GwpValue& value) { PushValue(L, value); }
+lua_State* ActiveLuaThread() { return g_bus ? ActiveLua(*g_bus) : nullptr; }
 GwpValue LuaToValue(lua_State* L, int index) { return ToValue(L, index); }
 
 void MarkLevelChange() { g_level_change_mark = true; }
@@ -1696,6 +1823,22 @@ void RemovePluginSubscriptions(const GwpPlugin* plugin)
         RemovePluginSubscriptionsIn(*g_bus, plugin);
 }
 
+void RemoveObjectSubscriptions(u16 object)
+{
+    if (!g_bus || !g_bus->object_subscriptions)
+        return;
+    Bus& bus = *g_bus;
+    for (auto& event : bus.events)
+    {
+        for (size_t i = event->subscribers.size(); i-- > 0;)
+        {
+            const Subscriber& subscriber = event->subscribers[i];
+            if (subscriber.alive && subscriber.object_filter && subscriber.object == object)
+                RemoveAt(bus, *event, i);
+        }
+    }
+}
+
 void Shutdown()
 {
     // Runs after the Lua state is closed (~CAI_Space) and after every plugin is unloaded.
@@ -1710,7 +1853,8 @@ void PrintList()
         return;
     }
     u32 declared = 0, with_subscribers = 0, engine = 0;
-    Msg("- [events] events with subscribers or emits: name, lua / native subscribers, source, emits, schema");
+    Msg("- [events] events with subscribers or emits: name, lua / native subscribers, who emitted it (engine = C++ "
+        "of the engine or the host, lua, plugin; before any emit: the declared source), emits, schema");
     for (const auto& event : g_bus->events)
     {
         declared += event->declared ? 1 : 0;
@@ -1718,8 +1862,18 @@ void PrintList()
         with_subscribers += event->lua_count || event->native_count ? 1 : 0;
         if (!event->lua_count && !event->native_count && !event->emit_count)
             continue;
-        Msg("-   %-40s %3u / %-3u %-6s %8u  %s%s%s%s", event->name.c_str(), event->lua_count, event->native_count,
-            event->builtin || IsEngineSourceActive(*event) ? "engine" : "lua", event->emit_count,
+        string64 source;
+        source[0] = 0;
+        if (event->engine_emits)
+            xr_strcat(source, "engine");
+        if (event->lua_emits)
+            xr_strcat(source, source[0] ? "+lua" : "lua");
+        if (event->plugin_emits)
+            xr_strcat(source, source[0] ? "+plugin" : "plugin");
+        if (!source[0])
+            xr_strcpy(source, event->builtin || IsEngineSourceActive(*event) ? "engine" : "lua");
+        Msg("-   %-40s %3u / %-3u %-13s %8u  %s%s%s%s", event->name.c_str(), event->lua_count, event->native_count,
+            source, event->emit_count,
             event->has_schema ? (event->schema.empty() ? "()" : event->schema.c_str()) : "-",
             event->batch_count ? " (batch)" : "", event->trace ? " (trace)" : "",
             event->declared ? "" : " (undeclared)");

@@ -86,6 +86,8 @@ public:
     Cover const* add_smart_cover(LPCSTR table_name, smart_cover::object const& object, bool const& is_combat_cover,
         bool const& can_fire, luabind::adl::object const& loopholes) const;
     Cover* smart_cover(shared_str const& cover_id) const;
+    // The same lookup without the VERIFY: nullptr for an unknown name (smart_cover dereferences end() in release)
+    Cover* find_smart_cover(shared_str const& cover_id) const;
 };
 
 #include "cover_manager_inline.h"

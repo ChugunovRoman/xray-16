@@ -118,8 +118,14 @@ enum class EBinder
     Reinit,   // actor_on_reinit
     NetSpawn, // on_game_load: the binder net_spawn succeeded
 };
-void ObjectBinder(EBinder kind, const CGameObject* object); // actor only
+// Every game object goes through these (the plugin binders of addon_binders.cpp are dispatched here);
+// the events they emit are for the actor only.
+void ObjectBinder(EBinder kind, const CGameObject* object);
 void ObjectBinderUpdate(const CGameObject* object, u32 dt_ms); // actor: first update, update_fast/slow, update
 void LevelChanging(); // on_level_changing: CALifeUpdateManager::change_level, before the client save
+// npc_on_update(npc, storage) for a live stalker, when the native gate of the binder lets its update through
+// (W3-2; called from CGameObject::shedule_Update). Not a group of stage B: while the gate is off, xr_motivator
+// sends the event from Lua as before.
+void NpcUpdate(const CGameObject* npc);
 void HeliHit(const CGameObject* heli, float damage, float impulse, u32 hit_type, const IGameObject* who);
 } // namespace gw::addons::objevents

@@ -8,6 +8,7 @@
 
 #include "StdAfx.h"
 #include "movement_manager.h"
+#include "npc_cpp_profile.h"
 #include "PHMovementControl.h"
 #include "detail_path_manager.h"
 #include "Level.h"
@@ -280,8 +281,11 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
     // Физика устанавливает новую позицию
     // получить физ. объекты в радиусе
     m_nearest_objects.clear();
-    Level().ObjectSpace.GetNearest(m_nearest_objects, dest_position,
-        DISTANCE_PHISICS_ENABLE_CHARACTERS + (movement_control->IsCharacterEnabled() ? 0.5f : 0.f), &object());
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementNearestQuery);
+        Level().ObjectSpace.GetNearest(m_nearest_objects, dest_position,
+            DISTANCE_PHISICS_ENABLE_CHARACTERS + (movement_control->IsCharacterEnabled() ? 0.5f : 0.f), &object());
+    }
 
     // установить позицию
     VERIFY(dist >= 0.f);
@@ -305,6 +309,8 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
     if (DBG_PH_MOVE_CONDITIONS(ph_dbg_draw_mask.test(phDbgNeverUseAiPhMove) ||
             !ph_dbg_draw_mask.test(phDbgAlwaysUseAiPhMove) &&) !(m_nearest_objects.empty()))
     { //  физ. объект
+        // calls = the frames a physical object was near: the share of the query that pays off
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementCollisionMove);
 
         if (DBG_PH_MOVE_CONDITIONS(!ph_dbg_draw_mask.test(phDbgNeverUseAiPhMove) &&) !movement_control->TryPosition(
                 dest_position))

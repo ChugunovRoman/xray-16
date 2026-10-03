@@ -32,9 +32,13 @@ public:
     static void setup_static(CScriptPropertyEvaluator* evaluator, CScriptGameObject* object, CPropertyStorage* storage);
     virtual bool evaluate();
     static bool evaluate_static(CScriptPropertyEvaluator* evaluator);
+    // The Lua evaluate past the cache of the policy: the shadow mode of a native evaluator compares a fresh
+    // answer with a fresh one, the cache of a native evaluator lives in its plugin
+    bool evaluate_uncached();
 
 private:
     EScriptEvaluatorCachePolicy cache_policy() const;
+    bool call_lua_evaluate(bool& result);
 
 private:
     mutable u32 m_cached_frame = u32(-1);

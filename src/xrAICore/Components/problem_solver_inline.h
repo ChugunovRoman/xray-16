@@ -123,6 +123,20 @@ IC void CProblemSolverAbstract::remove_operator(const _operator_id_type& operato
     m_operators.erase(I);
 }
 
+// An exact lookup (get_operator returns another action for a missing id, a defect of the engine)
+TEMPLATE_SPECIALIZATION
+IC typename CProblemSolverAbstract::operator_ptr CProblemSolverAbstract::swap_operator(
+    const _operator_id_type& operator_id, operator_ptr _op)
+{
+    typename OPERATOR_VECTOR::iterator I = std::lower_bound(m_operators.begin(), m_operators.end(), operator_id);
+    if (I == m_operators.end() || (*I).m_operator_id != operator_id)
+        return nullptr;
+    operator_ptr previous = (*I).m_operator;
+    (*I).m_operator = _op;
+    m_actuality = false;
+    return previous;
+}
+
 TEMPLATE_SPECIALIZATION
 IC const typename CProblemSolverAbstract::OPERATOR_VECTOR& CProblemSolverAbstract::operators() const
 {
@@ -171,6 +185,19 @@ IC void CProblemSolverAbstract::remove_evaluator(const condition_type& condition
     }
     m_evaluators.erase(I);
     m_actuality = false;
+}
+
+TEMPLATE_SPECIALIZATION
+IC typename CProblemSolverAbstract::condition_evaluator_ptr_type CProblemSolverAbstract::swap_evaluator(
+    const condition_type& condition_id, condition_evaluator_ptr_type evaluator)
+{
+    typename EVALUATORS::iterator I = m_evaluators.find(condition_id);
+    if (I == m_evaluators.end())
+        return nullptr;
+    condition_evaluator_ptr_type previous = (*I).second;
+    (*I).second = evaluator;
+    m_actuality = false;
+    return previous;
 }
 
 TEMPLATE_SPECIALIZATION

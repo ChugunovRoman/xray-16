@@ -369,7 +369,7 @@ void CIKLimbsController::ExecuteIKRayBatch()
             item.start = q.pos();
             item.dir = q.dir();
             item.range = q.range();
-            item.tgt = collide::rqtBoth;
+            item.tgt = npc_perf_ik_foot_static_only ? collide::rqtStatic : collide::rqtBoth; // see ik_foot_collider.cpp
             item.ignore_object = group.owner;
             item.result = &m_ik_batch_results[group.first_ray + r];
         }

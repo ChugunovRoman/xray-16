@@ -87,11 +87,26 @@ void MarkLevelChange();
 bool TakeLevelChangeMark();
 
 void RemovePluginSubscriptions(const GwpPlugin* plugin);
+// The object went offline (CGameObject::net_Destroy, after its Lua binder): its GWP_SUBSCRIBE_OBJECT subscriptions end.
+void RemoveObjectSubscriptions(u16 object);
 void Shutdown();
 void PrintList(); // console command "event_list"
+
+// Calls fn(context), a host thunk that calls one plugin function, with the guards of the event bus: a C++
+// exception, and on Windows a crash inside the plugin library, stop here and give false (logged with `what`).
+// plugin_code: an address inside the plugin library (the callback itself), so the crash filter knows the module.
+// Shared with the binders (addon_binders.cpp).
+bool CallPluginGuarded(const void* plugin_code, pcstr what, void (*fn)(void*), void* context);
+
+// Plugin functions running right now on this thread (guarded calls nested in each other). 0: no plugin code is on
+// the stack, a plugin library may be unloaded (addon_host.cpp: the unload and the reload of a crashed plugin).
+u32 PluginCallDepth();
 
 // Lua <-> GwpValue, the same conversion as for event arguments (addon_data_bus.cpp).
 // LuaToValue: strings point into Lua data, valid while the value stays on the Lua stack.
 void PushLuaValue(lua_State* L, const GwpValue& value);
+// The Lua thread to call Lua on right now: the coroutine that runs a Lua emit, else the main state; nullptr when
+// the bus has no Lua state (addon_api_npc.cpp: script_call from a handler of such an emit).
+lua_State* ActiveLuaThread();
 GwpValue LuaToValue(lua_State* L, int index);
 } // namespace gw::addons::events

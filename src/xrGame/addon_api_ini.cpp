@@ -107,6 +107,13 @@ GwpIni GWP_CALL ApiIniOpen(const GwpPlugin* self, const char* path)
     // An absolute path is taken as it is (a plugin reads a file of its own addon by addon_dir() + name),
     // a relative one is resolved like Lua ini_file() does: inside $game_config$.
     string_path full;
+    // A longer path would hit the invalid parameter handler in the copy below (a fatal error, not an answer)
+    if (xr_strlen(path) >= sizeof(full))
+    {
+        Msg("! [plugin:%s] ini_open: the path is longer than %u characters", PluginAddonId(self),
+            static_cast<u32>(sizeof(full) - 1));
+        return GWP_INVALID_INI;
+    }
     const bool absolute = strchr(path, ':') || path[0] == '\\' || path[0] == '/';
     if (absolute)
         xr_strcpy(full, path);
@@ -134,11 +141,8 @@ void GWP_CALL ApiIniClose(const GwpPlugin* self, GwpIni handle)
     FileEntry* entry = FindFile(handle);
     if (!entry || !entry->owned || entry->owner != self)
         return; // not ours: the system config and files of other plugins are not closed from here
-    xr_delete(entry->file);
-    entry->owner = nullptr;
-    entry->owned = false;
     // Section handles of this file die with it; a stale one is caught by the generation check only after a
-    // config reload, so they are invalidated here by hand.
+    // config reload, so they are invalidated here by hand - before the delete, which nulls entry->file
     if (g_sections)
     {
         for (SectionEntry& section : *g_sections)
@@ -147,7 +151,9 @@ void GWP_CALL ApiIniClose(const GwpPlugin* self, GwpIni handle)
                 section.generation = 0;
         }
     }
-    entry->file = nullptr;
+    xr_delete(entry->file);
+    entry->owner = nullptr;
+    entry->owned = false;
 }
 
 uint32_t GWP_CALL ApiIniGeneration() { return g_generation; }
@@ -220,8 +226,11 @@ int GWP_CALL ApiIniReadBool(GwpIniSection section, const char* line, int def)
     const pcstr value = LineValue(FindSection(section, "ini_read_bool"), line);
     if (!value)
         return def;
-    // Same set of true words as CInifile::r_bool, and the same lowercasing of the value.
+    // Same set of true words as CInifile::r_bool, and the same lowercasing of the value. A longer value is no
+    // true word, and the copy would hit the invalid parameter handler
     string64 lower;
+    if (xr_strlen(value) >= sizeof(lower))
+        return 0;
     xr_strcpy(lower, value);
     xr_strlwr(lower);
     return CInifile::isBool(lower) ? 1 : 0;
@@ -287,8 +296,9 @@ void OnConfigsReloaded()
     ++g_generation;
     if (g_section_by_name)
         g_section_by_name->clear();
-    if (g_sections)
-        g_sections->clear(); // every handle is stale now: the generation check catches the old ones
+    // g_sections is kept: a handle is its index, and a cleared vector would give the index of a stale handle to
+    // the next section resolved - the old handle would then pass the generation check and read that section. The
+    // old entries fail the check from now on (their section pointers are never read again).
     if (g_files && !g_files->empty())
         (*g_files)[0].file = const_cast<CInifile*>(pSettings);
 }

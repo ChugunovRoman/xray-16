@@ -1,5 +1,6 @@
 #include "pch_script.h"
 #include "addon_object_events.h"
+#include "addon_event_bus.h"
 #include <tracy/Tracy.hpp>
 #include "GameObject.h"
 
@@ -36,6 +37,10 @@
 #include "ai_obstacle.h"
 #include "magic_box3.h"
 #include "animation_movement_controller.h"
+#include "ai/stalker/ai_stalker.h"
+#include "memory_manager.h"
+#include "enemy_manager.h"
+#include "Actor.h"
 #include "xrEngine/xr_collide_form.h"
 #include "script_game_object.h"
 #include "xrScriptEngine/script_callback_ex.h"
@@ -362,6 +367,115 @@ void CGameObject::reload(LPCSTR section)
     m_script_clsid = object_factory().script_clsid(CLS_ID);
 }
 
+namespace
+{
+// Stage D, W3-1: the lane and phase rules of motivator_binder:update (xr_motivator.script), in C++.
+// Mask layout shared with the Lua side: bits 0..3 = medium, slow, switch, callback due; bits 4..5 = lane
+// (0 near, 1 medium, 2 far); bit 30 = the mask is valid (the gate is on for this update).
+constexpr u32 kGatePhaseMedium = 1u << 0;
+constexpr u32 kGatePhaseSlow = 1u << 1;
+constexpr u32 kGatePhaseSwitch = 1u << 2;
+constexpr u32 kGatePhaseCallback = 1u << 3;
+constexpr u32 kGateLaneShift = 4;
+constexpr u32 kGateActive = 1u << 30;
+constexpr float kGateNearDistSqr = 35.f * 35.f;
+constexpr float kGateMediumDistSqr = 80.f * 80.f;
+constexpr float kGateFrustumDeg = 35.f;
+constexpr u32 kGateBuckets = 8;
+
+enum EGateLane : u32
+{
+    GateLaneNear = 0,
+    GateLaneMedium = 1,
+    GateLaneFar = 2,
+};
+
+// get_update_lane: an enemy or a talk -> near; no live actor -> far; distance to the actor; in the camera cone
+// (npc_in_actor_frustrum: the angle between the camera direction and the actor -> NPC vector) -> medium
+EGateLane gate_lane(CAI_Stalker& stalker)
+{
+    if (stalker.memory().enemy().selected() || stalker.IsTalking())
+        return GateLaneNear;
+    if (!g_actor || !g_actor->g_Alive())
+        return GateLaneFar;
+    Fvector to_npc;
+    to_npc.sub(stalker.Position(), g_actor->Position());
+    const float dist_sqr = to_npc.square_magnitude();
+    if (dist_sqr <= kGateNearDistSqr)
+        return GateLaneNear;
+    if (dist_sqr <= kGateMediumDistSqr)
+        return GateLaneMedium;
+    const Fvector& cam = Device.vCameraDirection;
+    const float denom = _sqrt(cam.square_magnitude() * dist_sqr);
+    if (denom > 0.f)
+    {
+        const float cos_a = clampr(cam.dotproduct(to_npc) / denom, -1.f, 1.f);
+        if (rad2deg(acosf(cos_a)) < kGateFrustumDeg)
+            return GateLaneMedium;
+    }
+    return GateLaneFar;
+}
+
+// is_bucket_due: the first due time is spread over the interval by id % 8; then every interval, catching up
+bool gate_due(u32& interval_slot, u32& next_slot, u16 id, u32 interval, u32 now)
+{
+    if (interval_slot != interval)
+    {
+        interval_slot = interval;
+        const u32 buckets = std::min(kGateBuckets, std::max(interval, 1u));
+        next_slot = now + (interval * (id % buckets)) / buckets;
+    }
+    if (now < next_slot)
+        return false;
+    next_slot += interval;
+    return true;
+}
+} // namespace
+
+// Returns false when the Lua binder update may be skipped for this pass (the gate is on, the Lua binder reads the
+// mask and no phase is due). The mask is kept for binder_phase_mask().
+bool CGameObject::binder_gate_update(u32 now)
+{
+    m_binder_gate.mask = 0;
+    if (!npc_perf_motivator_native_gate)
+    {
+        // Forget the phase timers while the gate is off: switched on again, they restart (as the Lua timers do
+        // when it goes off) instead of catching up every missed interval with a due phase on each update.
+        std::fill(std::begin(m_binder_gate.interval), std::end(m_binder_gate.interval), 0u);
+        return true;
+    }
+    CAI_Stalker* stalker = cast_stalker();
+    if (!stalker || !stalker->g_Alive())
+        return true; // dead NPCs keep their own Lua path (loot tips, the dead switch timer)
+
+    const EGateLane lane = gate_lane(*stalker);
+    BinderGate& g = m_binder_gate;
+    u32 mask = kGateActive | (static_cast<u32>(lane) << kGateLaneShift);
+
+    // should_run_medium: every update near, else by interval
+    if (lane == GateLaneNear ||
+        gate_due(g.interval[0], g.next[0], ID(),
+            lane == GateLaneMedium ? npc_perf_motivator_medium_interval : npc_perf_motivator_far_interval, now))
+        mask |= kGatePhaseMedium;
+    const u32 slow = lane == GateLaneNear ? npc_perf_motivator_slow_near_interval :
+        lane == GateLaneMedium ? npc_perf_motivator_slow_medium_interval : npc_perf_motivator_slow_far_interval;
+    if (gate_due(g.interval[1], g.next[1], ID(), slow, now))
+        mask |= kGatePhaseSlow;
+    const u32 sw = lane == GateLaneNear ? npc_perf_motivator_switch_near_interval :
+        lane == GateLaneMedium ? npc_perf_motivator_switch_medium_interval : npc_perf_motivator_switch_far_interval;
+    if (gate_due(g.interval[2], g.next[2], ID(), sw, now))
+        mask |= kGatePhaseSwitch;
+    const u32 cb = lane == GateLaneNear ? npc_perf_motivator_callback_near_interval :
+        lane == GateLaneMedium ? npc_perf_motivator_callback_medium_interval :
+                                 npc_perf_motivator_callback_far_interval;
+    if (gate_due(g.interval[3], g.next[3], ID(), cb, now))
+        mask |= kGatePhaseCallback;
+
+    g.mask = mask;
+    // Only a binder that reads the mask may be skipped: another Lua binder on a stalker keeps every update.
+    return !g.consumer || (mask & (kGatePhaseMedium | kGatePhaseSlow | kGatePhaseSwitch | kGatePhaseCallback)) != 0;
+}
+
 void CGameObject::net_Destroy()
 {
 #ifdef DEBUG
@@ -415,6 +529,9 @@ void CGameObject::net_Destroy()
     //.	Parent									= 0;
 
     scriptBinder.net_Destroy();
+    // Plugin subscriptions to this object end with it (GWP_SUBSCRIBE_OBJECT): after the Lua binder, whose
+    // net_destroy may still send events about the object.
+    gw::addons::events::RemoveObjectSubscriptions(ID());
     m_script_clsid = -1;
 
     xr_delete(m_lua_game_object);
@@ -1410,7 +1527,12 @@ void CGameObject::shedule_Update(u32 dt)
         {
             ZoneScopedN("sh_CGameObject_shedule/scriptBinder");
             START_PROFILE("game_object/schedule_update/script_binder")
-            scriptBinder.shedule_Update(dt);
+            if (binder_gate_update(now_ms)) // stage D, W3-1: false = the Lua binder has nothing due this pass
+                scriptBinder.shedule_Update(dt);
+            // W3-2: with the gate on, npc_on_update comes from the engine on the callback phase (Lua skips its emit)
+            // Only for the binder that reads the mask: it is the one that skips its own emit then.
+            if (m_binder_gate.consumer && (m_binder_gate.mask & kGatePhaseCallback))
+                gw::addons::objevents::NpcUpdate(this);
             gw::addons::objevents::ObjectBinderUpdate(this, dt); // actor_on_update* (actor only)
             STOP_PROFILE
 

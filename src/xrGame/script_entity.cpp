@@ -729,11 +729,17 @@ void CScriptEntity::process_sound_callbacks()
         for (size_t i = 0; i < processed_count; ++i)
         {
             const CSavedSound& saved_sound = m_saved_sounds[i];
-            object().callback(GameObject::eSound)(
-                object().lua_game_object(), saved_sound.m_game_object_id, saved_sound.m_sound_type, saved_sound.m_position,
-                saved_sound.m_sound_power);
-            gw::addons::objevents::ObjectHear(&object(), saved_sound.m_game_object_id, saved_sound.m_sound_type, saved_sound.m_position,
-                saved_sound.m_sound_power);
+            {
+                // calls = the sounds handed to Lua (the callback of the binder: xr_motivator hear_callback)
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptEntitySoundLuaCallback);
+                object().callback(GameObject::eSound)(object().lua_game_object(), saved_sound.m_game_object_id,
+                    saved_sound.m_sound_type, saved_sound.m_position, saved_sound.m_sound_power);
+            }
+            {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptEntitySoundPluginEvent);
+                gw::addons::objevents::ObjectHear(&object(), saved_sound.m_game_object_id, saved_sound.m_sound_type,
+                    saved_sound.m_position, saved_sound.m_sound_power);
+            }
         }
     }
 

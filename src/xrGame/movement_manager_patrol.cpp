@@ -19,6 +19,11 @@
 
 void CMovementManager::process_patrol_path()
 {
+    // The patrol path type without a path (set_path_type before set_patrol_path, from Lua or a plugin): nothing to
+    // walk yet - select_point would dereference the missing path
+    if (!patrol().get_path())
+        return;
+
     if (!level_path().actual() && (m_path_state > ePathStateBuildLevelPath))
         m_path_state = ePathStateBuildLevelPath;
 

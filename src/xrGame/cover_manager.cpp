@@ -222,6 +222,16 @@ void CCoverManager::actualize_smart_covers() const
     m_smart_covers_actual = true;
 }
 
+CCoverManager::Cover* CCoverManager::find_smart_cover(shared_str const& cover_id) const
+{
+    if (!m_smart_covers_actual)
+        actualize_smart_covers();
+
+    SmartCovers::iterator found =
+        std::lower_bound(m_smart_covers.begin(), m_smart_covers.end(), cover_id, id_predicate_less());
+    return found != m_smart_covers.end() && (*found)->id()._get() == cover_id._get() ? *found : nullptr;
+}
+
 CCoverManager::Cover* CCoverManager::smart_cover(shared_str const& cover_id) const
 {
     if (!m_smart_covers_actual)

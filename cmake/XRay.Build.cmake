@@ -19,6 +19,8 @@ add_compile_definitions(
     # Tracy profiler
     $<$<BOOL:${XRAY_ENABLE_TRACY}>:TRACY_ENABLE>
     $<$<BOOL:${XRAY_ENABLE_TRACY}>:TRACY_NO_FRAME_IMAGE>
+    # Allow reconnecting to a running process (multiple profiling sessions)
+    $<$<BOOL:${XRAY_ENABLE_TRACY}>:TRACY_ON_DEMAND>
     # Luabind
     $<$<CONFIG:Release,ReleaseMasterGold>:LUABIND_NO_EXCEPTIONS>
     $<$<CONFIG:Release,ReleaseMasterGold>:LUABIND_NO_ERROR_CHECKING>

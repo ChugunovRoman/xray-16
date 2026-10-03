@@ -1647,3 +1647,5 @@ void CScriptGameObject::SetRestrictionType(u8 type)
     }
 }
 //-Alundaio
+
+u32 CScriptGameObject::binder_phase_mask() const { return object().binder_phase_mask(); }

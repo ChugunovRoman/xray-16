@@ -8,6 +8,7 @@
 
 #include "pch_script.h"
 #include "visual_memory_manager.h"
+#include "performance_cvars.h"
 #include "ai/stalker/ai_stalker.h"
 #include "ai/stalker/ai_stalker_impl.h"
 #include "memory_space_impl.h"
@@ -350,6 +351,33 @@ float CVisualMemoryManager::get_object_velocity(
     return (pos1.vPosition.distance_to(pos0.vPosition) / (float(pos1.dwTime) / 1000.f - float(pos0.dwTime) / 1000.f));
 }
 
+namespace
+{
+// level_weathers.bLevelUnderground of the scripts (set at the level start from the weather config), read once a
+// frame: the native get_visible_value needs it for every visibility check
+bool LevelUnderground()
+{
+    static u32 frame = u32(-1);
+    static bool underground = false;
+    if (frame == Device.dwFrame)
+        return underground;
+    frame = Device.dwFrame;
+    underground = false;
+    lua_State* L = GEnv.ScriptEngine ? GEnv.ScriptEngine->lua() : nullptr;
+    if (!L)
+        return underground;
+    const int top = lua_gettop(L);
+    lua_getglobal(L, "level_weathers");
+    if (lua_istable(L, -1))
+    {
+        lua_getfield(L, -1, "bLevelUnderground");
+        underground = lua_toboolean(L, -1) != 0;
+    }
+    lua_settop(L, top);
+    return underground;
+}
+} // namespace
+
 float CVisualMemoryManager::get_visible_value(const CGameObject* game_object,
     float distance, float object_distance, float time_delta, float object_velocity, float luminocity) const
 {
@@ -357,6 +385,19 @@ float CVisualMemoryManager::get_visible_value(const CGameObject* game_object,
 
     if (distance <= always_visible_distance + EPS_L)
         return (current_state().m_visibility_threshold);
+
+    if (npc_perf_visible_value_native)
+    {
+        // visual_memory_manager.get_visible_value of the scripts (Alundaio's formula: the distance to the object
+        // alone below the line, a clamp of zero distance and light, more light on an underground level), in C++:
+        // it runs for every object an NPC is getting to see. npc_perf_visible_value_native 0 calls the script
+        const float dist = distance <= 0.f ? 0.00001f : distance;
+        float light = luminocity <= 0.f ? 0.0001f : luminocity;
+        if (LevelUnderground())
+            light += 0.35f;
+        return time_delta / current_state().m_time_quant * light *
+            (1.f + current_state().m_velocity_factor * object_velocity) * (dist - object_distance) / dist;
+    }
 
     //Alundaio: hijack not_yet_visible_object to lua
     luabind::functor<float> funct;

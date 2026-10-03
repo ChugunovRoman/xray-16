@@ -125,6 +125,15 @@ public:
     static void LogStackTrace(const char* header);
 
     /**
+     * Symbols of libraries loaded at run time from outside the game folder (native plugins run from a cache
+     * copy): AddSymbolSearchPath puts the folder with their PDB into the dbghelp search path, so stack traces
+     * name their functions. ForgetModuleSymbols takes an unloaded library out of dbghelp: a library loaded
+     * again later (possibly at the same address) is then not named after the old PDB. No-ops off Windows.
+     */
+    static void AddSymbolSearchPath(pcstr dir);
+    static void ForgetModuleSymbols(const void* moduleBase);
+
+    /**
      * Writes a "! [crash] ..." block (exception code, faulting address, thread, loaded modules,
      * native call stack, Lua call stack) to the log and flushes it. Safe to call from an SEH filter.
      * Only the first call per process produces output: the filter chain would otherwise log twice.

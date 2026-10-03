@@ -1,5 +1,6 @@
 #include "pch_script.h"
 #include "addon_event_bus.h"
+#include "addon_host.h"
 #include "addon_api_console.h"
 #include "GamePersistent.h"
 #include "xrCore/FMesh.hpp"
@@ -613,6 +614,8 @@ void CGamePersistent::OnFrame()
 {
     ZoneScoped;
 
+    // Addons: plugins stopped by a crash leave the process, plugin_reload reloads (no plugin code on the stack here).
+    gw::addons::OnFrame();
     // Addons: events collected since the previous frame go to batch subscribers of plugins.
     gw::addons::events::FlushBatches();
     // Addons: console commands of plugins queued with console_execute_deferred (they may unload the level).

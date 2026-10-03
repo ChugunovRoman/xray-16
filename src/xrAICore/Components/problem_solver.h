@@ -131,6 +131,10 @@ public:
     // operator interface
     IC virtual void add_operator(const _operator_id_type& operator_id, _operator_ptr _op);
     IC virtual void remove_operator(const _operator_id_type& operator_id);
+    // Puts `_op` in place of the operator of an existing action id and returns the old one, which the caller owns
+    // from now on (nothing is deleted); nullptr when there is no such action id. The Plugin API wraps Lua actions
+    // with it (xrGame/addon_goap.cpp). Never during a solve.
+    IC operator_ptr swap_operator(const _operator_id_type& operator_id, operator_ptr _op);
     IC _operator_ptr get_operator(const _operator_id_type& operator_id);
     IC const OPERATOR_VECTOR& operators() const;
 
@@ -142,6 +146,10 @@ public:
     // evaluator interface
     IC virtual void add_evaluator(const condition_type& condition_id, condition_evaluator_ptr_type evaluator);
     IC virtual void remove_evaluator(const condition_type& condition_id);
+    // Puts `evaluator` in place of the evaluator of an existing property and returns the old one, which the caller owns
+    // from now on (nothing is deleted); nullptr when there is no such property. The Plugin API wraps Lua evaluators
+    // with it (xrGame/addon_goap.cpp). Never during a solve.
+    IC condition_evaluator_ptr_type swap_evaluator(const condition_type& condition_id, condition_evaluator_ptr_type evaluator);
     IC condition_evaluator_ptr_type evaluator(const condition_type& condition_id) const;
     IC const EVALUATORS& evaluators() const;
     IC void evaluate_condition(typename xr_vector<_operator_condition>::const_iterator& I,

@@ -8,6 +8,7 @@
 
 #include "pch_script.h"
 #include "enemy_manager.h"
+#include "addon_callbacks.h"
 #include "memory_manager.h"
 #include "visual_memory_manager.h"
 #include "hit_memory_manager.h"
@@ -154,14 +155,21 @@ bool CEnemyManager::useful(const CEntityAlive* entity_alive) const
 
     {
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyUsefulCallback);
-        if (!m_useful_callback)
+        // The Lua callback of the NPC first, then the enemy filters of the plugins (Plugin API group callbacks);
+        // the combined answer is what the cache keeps.
+        const bool native_filters = gw::addons::callbacks::HasEnemyFilters();
+        if (!m_useful_callback && !native_filters)
             return true;
 
         bool cached_result = false;
         if (try_get_useful_callback_cache(entity_alive->ID(), cached_result))
             return cached_result;
 
-        const bool callback_result = m_useful_callback(m_object->lua_game_object(), entity_alive->lua_game_object());
+        bool callback_result = true;
+        if (m_useful_callback)
+            callback_result = m_useful_callback(m_object->lua_game_object(), entity_alive->lua_game_object());
+        if (callback_result && native_filters)
+            callback_result = gw::addons::callbacks::EnemyUseful(m_object, entity_alive);
         store_useful_callback_cache(entity_alive->ID(), callback_result);
         return callback_result;
     }

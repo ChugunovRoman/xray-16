@@ -104,6 +104,29 @@ protected:
     // Anti-synchronization: script binder can cause large luabind_update spikes when many objects
     // run in the same frame. We throttle binder per-object using a next-call timestamp.
     u32 m_next_script_binder_update_time{0};
+    // Stage D, W3-1: engine gate of the Lua NPC binder (npc_perf_motivator_native_gate). Phase timers of the
+    // motivator binder (medium, slow, switch, callback: the same as its is_bucket_due) and the mask of the
+    // current update; consumer = the Lua binder reads the mask, so the engine may skip calls it does not need.
+    struct BinderGate
+    {
+        u32 interval[4]{};
+        u32 next[4]{};
+        u32 mask{};
+        bool consumer{};
+    };
+    BinderGate m_binder_gate;
+
+    bool binder_gate_update(u32 now); // GameObject.cpp: computes the mask, false = skip the Lua binder update
+
+public:
+    // The phase mask of this binder update, 0 when the engine gate is off (see motivator_binder:update)
+    u32 binder_phase_mask()
+    {
+        m_binder_gate.consumer = true;
+        return m_binder_gate.mask;
+    }
+
+protected:
     bool m_bObjectRemoved;
     CInifile* m_ini_file;
     bool m_client_updated{};

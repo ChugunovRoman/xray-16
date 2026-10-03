@@ -110,6 +110,7 @@
         LUA_LOGS;
         TRACY_ENABLE;
         TRACY_NO_FRAME_IMAGE;
+        TRACY_ON_DEMAND;
         %(PreprocessorDefinitions)
       </PreprocessorDefinitions>
       <!-- Optimization is automatically enabled when UseDebugLibraries == false. That's why we'll turn it off manually -->
@@ -124,6 +125,14 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Mixed' and '$(CI)' == ''" Label="Configuration">
     <LinkIncremental>true</LinkIncremental>
   </PropertyGroup>
+
+  <!-- Tracy in Release only: "Release Master Gold" contains "Release" too, and the shipped build must not carry
+       the profiler (it listens on a port while the game runs) -->
+  <ItemDefinitionGroup Condition="$(Configuration.Contains('Release')) and !$(Configuration.Contains('Master Gold'))">
+    <ClCompile>
+      <PreprocessorDefinitions>TRACY_ENABLE;TRACY_NO_FRAME_IMAGE;TRACY_ON_DEMAND;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
 
   <!-- Master Gold settings -->
   <ItemDefinitionGroup Condition="$(Configuration.Contains('Master Gold'))">

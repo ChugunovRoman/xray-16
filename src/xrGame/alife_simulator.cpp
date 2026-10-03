@@ -150,6 +150,8 @@ CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
         const bool level_change = gw::addons::events::TakeLevelChangeMark() && save_exists;
         const pcstr reason = !save_exists ? "new_game" : level_change ? "level_change" : "load";
         const GwpValue args[] = { gw::addons::events::String(reason) };
+        // A plugin stopped by a crash in the previous session is loaded again first: it gets this event too
+        gw::addons::OnGameStart();
         gw::addons::events::Emit(gw::addons::events::EBuiltin::AlifeOnStart, args, 1);
     }
 

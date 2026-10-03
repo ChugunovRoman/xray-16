@@ -14,6 +14,7 @@ IC CAgentEnemyManager::CAgentEnemyManager(CAgentManager* object)
     m_object = object;
     m_only_wounded_left = false;
     m_is_any_wounded = false;
+    m_distributed_frame = u32(-1);
 }
 
 IC CAgentManager& CAgentEnemyManager::object() const

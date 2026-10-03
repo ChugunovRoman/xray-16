@@ -168,6 +168,11 @@ int GWP_CALL ApiLevelRayPick(const float from_xyz[3], const float dir[3], float 
         *out_object = result.O ? result.O->ID() : GWP_INVALID_OBJECT_ID; // no object means static geometry
     return 1;
 }
+// time_global() of Lua (Device.dwTimeGlobal).
+uint32_t GWP_CALL ApiLevelTimeMs()
+{
+    return CheckCall("level_time_ms") && HasLevel() ? Device.dwTimeGlobal : 0;
+}
 } // namespace
 
 void FillLevelApi(GwpEngineApi& api)
@@ -182,5 +187,6 @@ void FillLevelApi(GwpEngineApi& api)
     api.level_vertex_position = &ApiLevelVertexPosition;
     api.level_vertex_in_direction = &ApiLevelVertexInDirection;
     api.level_ray_pick = &ApiLevelRayPick;
+    api.level_time_ms = &ApiLevelTimeMs;
 }
 } // namespace gw::addons

@@ -13,6 +13,7 @@
 #include "xrScriptEngine/script_callback_ex.h"
 #include "xrEngine/profiler.h"
 #include "stalker_movement_manager_smart_cover.h"
+#include "addon_api_npc_control.h"
 
 /*IC*/ void CStalkerAnimationManager::play_delayed_callbacks() // XXX: can't compile Release because of "inline"
 {
@@ -20,6 +21,8 @@
     {
         m_call_script_callback = false;
         object().callback(GameObject::eScriptAnimation)();
+        // Plugins: npc_on_script_animation_end, after the Lua callback (Plugin API group npc_anim)
+        gw::addons::npcctl::ScriptAnimationEnd(object());
         return;
     }
 
@@ -37,7 +40,8 @@ IC bool CStalkerAnimationManager::script_callback() const
     if (script_animations().empty())
         return (false);
 
-    return (object().callback(GameObject::eScriptAnimation));
+    // A plugin waiting for the end of script animations needs the tracks updated as a Lua callback does
+    return (object().callback(GameObject::eScriptAnimation) || gw::addons::npcctl::WantsScriptAnimationEnd());
 }
 
 IC bool CStalkerAnimationManager::need_update() const

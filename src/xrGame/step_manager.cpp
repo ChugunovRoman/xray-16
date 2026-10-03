@@ -8,6 +8,8 @@
 #include "material_manager.h"
 #include "xrEngine/profiler.h"
 #include "IKLimbsController.h"
+#include "npc_cpp_profile.h"
+#include "performance_cvars.h"
 
 #ifdef DEBUG
 BOOL debug_step_info = FALSE;
@@ -156,6 +158,7 @@ void CStepManager::on_animation_start(MotionID motion_id, CBlend* blend)
 void CStepManager::update(bool b_hud_view)
 {
     ZoneScopedN("CStepManager::update");
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StepUpdate);
     START_PROFILE("Step Manager")
 
     if (m_step_info.disable)
@@ -188,23 +191,32 @@ void CStepManager::update(bool b_hud_view)
             u32(1000 * (cycle_anim_time * (m_step_info.cur_cycle - 1) + cycle_anim_time * step.step[i].time));
         if (offset_time <= cur_time)
         {
-            if (!material_picked)
+            // Beyond 20 m (b_play false) the step plays neither its sound nor its particles, the only users of the
+            // material pair; event_on_step (the earthquake of the pseudogiant) does not read it. The pick is a ray
+            // under the foot (os_RayPick), skipped there (npc_perf_step_far_skip_material)
+            const bool need_material = b_play || !npc_perf_step_far_skip_material;
+            if (need_material && !material_picked)
             {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StepMaterialPick);
                 mtl_pair = m_object->material().get_current_pair();
 
                 material_picked = true;
             }
 
-            if (!mtl_pair)
+            if (need_material && !mtl_pair)
                 break;
 
             // Играть звук
             if (b_play && is_on_ground())
+            {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StepSound);
                 m_step_sound.play_next(mtl_pair, m_object, m_step_info.params.step[i].power, b_hud_view);
+            }
 
             // Играть партиклы
             if (b_play && !mtl_pair->CollideParticles.empty())
             {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StepParticles);
                 LPCSTR ps_name = mtl_pair->CollideParticles[::Random.randI(0, mtl_pair->CollideParticles.size())].c_str();
 
                 //отыграть партиклы столкновения материалов
@@ -225,7 +237,10 @@ void CStepManager::update(bool b_hud_view)
             }
 
             // Play Camera FXs
-            event_on_step();
+            {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StepEvent);
+                event_on_step();
+            }
 
             // обновить поле handle
             m_step_info.activity[i].handled = true;

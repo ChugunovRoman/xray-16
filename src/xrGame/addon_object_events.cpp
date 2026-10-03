@@ -1,13 +1,45 @@
 #include "StdAfx.h"
 
 #include "addon_object_events.h"
+#include "addon_binders.h"
 #include "addon_event_bus.h"
+#include "addon_goap.h"
+#include "addon_goap_planner.h"
+#include "addon_storage.h"
 
 #include "Actor.h"
 #include "GameObject.h"
 #include "HangingLamp.h"
 #include "InventoryBox.h"
 #include "ai/stalker/ai_stalker.h"
+#include "ai_sounds.h"
+
+// The sound type bits of gwp_api.h are the engine's ESoundTypes (the mask npc_on_hear_callback passes on)
+static_assert(GWP_SOUND_WEAPON == SOUND_TYPE_WEAPON);
+static_assert(GWP_SOUND_ITEM == SOUND_TYPE_ITEM);
+static_assert(GWP_SOUND_MONSTER == SOUND_TYPE_MONSTER);
+static_assert(GWP_SOUND_ANOMALY == SOUND_TYPE_ANOMALY);
+static_assert(GWP_SOUND_WORLD == SOUND_TYPE_WORLD);
+static_assert(GWP_SOUND_PICKING_UP == SOUND_TYPE_PICKING_UP);
+static_assert(GWP_SOUND_DROPPING == SOUND_TYPE_DROPPING);
+static_assert(GWP_SOUND_HIDING == SOUND_TYPE_HIDING);
+static_assert(GWP_SOUND_TAKING == SOUND_TYPE_TAKING);
+static_assert(GWP_SOUND_USING == SOUND_TYPE_USING);
+static_assert(GWP_SOUND_SHOOTING == SOUND_TYPE_SHOOTING);
+static_assert(GWP_SOUND_EMPTY_CLICKING == SOUND_TYPE_EMPTY_CLICKING);
+static_assert(GWP_SOUND_BULLET_HIT == SOUND_TYPE_BULLET_HIT);
+static_assert(GWP_SOUND_RECHARGING == SOUND_TYPE_RECHARGING);
+static_assert(GWP_SOUND_DYING == SOUND_TYPE_DYING);
+static_assert(GWP_SOUND_INJURING == SOUND_TYPE_INJURING);
+static_assert(GWP_SOUND_STEP == SOUND_TYPE_STEP);
+static_assert(GWP_SOUND_TALKING == SOUND_TYPE_TALKING);
+static_assert(GWP_SOUND_ATTACKING == SOUND_TYPE_ATTACKING);
+static_assert(GWP_SOUND_EATING == SOUND_TYPE_EATING);
+static_assert(GWP_SOUND_IDLE == SOUND_TYPE_IDLE);
+static_assert(GWP_SOUND_OBJECT_BREAKING == SOUND_TYPE_OBJECT_BREAKING);
+static_assert(GWP_SOUND_OBJECT_COLLIDING == SOUND_TYPE_OBJECT_COLLIDING);
+static_assert(GWP_SOUND_OBJECT_EXPLODING == SOUND_TYPE_OBJECT_EXPLODING);
+static_assert(GWP_SOUND_AMBIENT == SOUND_TYPE_AMBIENT);
 #include "PhysicObject.h"
 #include "ai/monsters/basemonster/base_monster.h"
 #include "ai/monsters/poltergeist/poltergeist.h"
@@ -503,10 +535,26 @@ void ObjectNetSpawn(const CGameObject* object)
     }
 }
 
+namespace
+{
+void EmitNetDestroy(const CGameObject* object);
+}
+
 void ObjectNetDestroy(const CGameObject* object)
 {
     if (!object)
         return;
+    binders::OnObjectDestroy(object); // plugin binders (W0.1): on_destroy, before the Lua binder like the event
+    EmitNetDestroy(object);           // npc_on_net_destroy / actor_on_net_destroy
+    // After the binders and the events, which may still read them; before the Lua object of the object goes
+    storage::OnObjectDestroy(object);      // the db.storage entry ends (W0.4)
+    goap::OnObjectDestroyPlanners(object); // plugin planners of the object
+}
+
+namespace
+{
+void EmitNetDestroy(const CGameObject* object)
+{
     if (IsActor(object))
     {
         // actor_on_net_destroy(binder): before the Lua binder, db.actor is still valid (B3.9)
@@ -522,6 +570,7 @@ void ObjectNetDestroy(const CGameObject* object)
     const GwpValue args[] = { events::Object(object->ID()) };
     events::Emit(GW_EVENT_ID("npc_on_net_destroy"), args, 1);
 }
+} // namespace
 
 void ObjectHear(const CGameObject* object, u16 who_id, int sound_type, const Fvector& position, float power)
 {
@@ -553,8 +602,20 @@ void HeliHit(const CGameObject* heli, float damage, float impulse, u32 hit_type,
 
 void ObjectBinder(EBinder kind, const CGameObject* object)
 {
+    if (!object)
+        return;
+    // Plugin binders (W0.1) of every object: chosen at Init, on_reinit and on_spawn after the Lua binder's calls.
+    switch (kind)
+    {
+    case EBinder::Init: binders::OnObjectInit(object); break;
+    case EBinder::Reinit: binders::OnObjectReinit(object); break;
+    case EBinder::NetSpawn:
+        binders::OnObjectSpawn(object);
+        goap::OnObjectSpawn(object); // native evaluators: installed at the next point without a running planner
+        break;
+    }
     // CActor::net_Spawn has not finished at these points: check the class, not g_actor.
-    if (!object || !smart_cast<const CActor*>(object))
+    if (!smart_cast<const CActor*>(object))
         return;
     // The actor group is live from here on, like db.actor in Lua (set by actor_binder:net_spawn, which just ran):
     // on_game_load handlers give info portions, take items, ... and those events must not be dropped.
@@ -576,6 +637,7 @@ void ObjectBinder(EBinder kind, const CGameObject* object)
 
 void ObjectBinderUpdate(const CGameObject* object, u32 dt_ms)
 {
+    binders::OnObjectUpdate(object, dt_ms); // plugin binders (W0.1): collected, delivered after the scheduler pass
     // Every update of the actor binder while the actor is alive (the Lua binder returned early for a dead one).
     if (!IsActive(EGroup::Lifecycle) || !object || !smart_cast<const CActor*>(object) || !IsAlive(object))
         return;
@@ -588,6 +650,18 @@ void ObjectBinderUpdate(const CGameObject* object, u32 dt_ms)
     events::Emit(GW_EVENT_ID("actor_on_update_fast"), args, 2);
     events::Emit(GW_EVENT_ID("actor_on_update_slow"), args, 2);
     events::Emit(GW_EVENT_ID("actor_on_update"), args, 2);
+}
+
+void NpcUpdate(const CGameObject* npc)
+{
+    if (!npc || !IsStalker(npc) || !IsAlive(npc))
+        return;
+    if (!events::HasSubscribers(GW_EVENT_ID("npc_on_update")))
+        return;
+    // (npc, storage): the second argument is db.storage[id] in Lua, which the engine does not know; plugins get
+    // GWP_T_LUA_REF, Lua subscribers the table through the adapter of axr_main.script
+    const GwpValue args[] = { events::Object(npc->ID()), BinderPlaceholder() };
+    events::Emit(GW_EVENT_ID("npc_on_update"), args, 2);
 }
 
 void LevelChanging()

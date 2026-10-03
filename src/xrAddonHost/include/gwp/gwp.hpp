@@ -475,6 +475,131 @@ using EventFn = std::function<void(const EventView&)>;
 using BatchFn = std::function<void(std::span<const GwpEvent>)>;
 
 /*
+ * Zone: one pass through a place of the plugin code, shown in the Tracy profiler (RAII: ends in the destructor).
+ * The place is registered once, usually by the GWP_ZONE macro below:
+ *
+ *     bool NpcVsHeli::evaluate(GwpObjectId npc)
+ *     {
+ *         GWP_ZONE(m_api, m_self, zone, "npc_vs_heli/evaluate");
+ *         zone.text_number(npc); // the NPC id next to the zone
+ *         ...
+ *     }
+ *
+ * Without Tracy in the engine (or an engine without the functions) everything here does nothing.
+ */
+class Zone
+{
+public:
+    // Registers a place; GWP_ZONE keeps the result in a static. @group plugin @thread main
+    static GwpZoneSite site(const GwpEngineApi* api, const GwpPlugin* self, const char* name, const char* file,
+        uint32_t line, uint32_t color = 0) noexcept
+    {
+        if (!GWP_API_HAS(api, profile_zone_end))
+            return GWP_INVALID_ZONE_SITE;
+        return api->profile_zone_site(self, name, file, line, color);
+    }
+
+    // Begins the zone of a registered place. @group plugin @thread any
+    Zone(const GwpEngineApi* api, GwpZoneSite site) noexcept
+    {
+        if (site != GWP_INVALID_ZONE_SITE && GWP_API_HAS(api, profile_zone_end))
+        {
+            m_api = api;
+            m_zone = api->profile_zone_begin(site);
+        }
+    }
+
+    // @group plugin @thread any
+    ~Zone()
+    {
+        if (m_zone)
+            m_api->profile_zone_end(m_zone);
+    }
+
+    // Not copyable: one zone, one end. @group plugin @thread any
+    Zone(const Zone&) = delete;
+    Zone& operator=(const Zone&) = delete;
+
+    // A text next to the zone: a name, a state. @group plugin @thread any
+    void text(std::string_view value) const noexcept
+    {
+        if (m_zone)
+            m_api->profile_zone_text(m_zone, value.data(), static_cast<uint32_t>(value.size()));
+    }
+
+    // A number as the text (an object id, a count). @group plugin @thread any
+    void text_number(uint64_t value) const noexcept
+    {
+        if (!m_zone)
+            return;
+        char buffer[24];
+        char* end = buffer + sizeof(buffer);
+        char* p = end;
+        do
+        {
+            *--p = static_cast<char>('0' + value % 10);
+            value /= 10;
+        } while (value);
+        m_api->profile_zone_text(m_zone, p, static_cast<uint32_t>(end - p));
+    }
+
+private:
+    const GwpEngineApi* m_api = nullptr;
+    GwpZone m_zone = 0;
+};
+
+#define GWP_ZONE_CONCAT_(a, b) a##b
+#define GWP_ZONE_CONCAT(a, b) GWP_ZONE_CONCAT_(a, b)
+/* A zone named `name` for the rest of the scope, in the variable `var`. The place is registered at the first pass
+   (a function-local static): api and self must be the same at every pass, as they are inside one plugin. */
+#define GWP_ZONE(api, self, var, name)                                                                     \
+    static const GwpZoneSite GWP_ZONE_CONCAT(gwp_zone_site_, __LINE__) =                                  \
+        ::gwp::Zone::site((api), (self), (name), __FILE__, static_cast<uint32_t>(__LINE__));               \
+    const ::gwp::Zone var((api), GWP_ZONE_CONCAT(gwp_zone_site_, __LINE__))
+
+/*
+ * Binder: the plugin's callbacks for the life of the objects of one class or section mask (Plugin::bind).
+ * Override what you need; the engine calls the methods on the main thread, in this order for an object:
+ * on_reinit, on_spawn, on_update (batches, while the object is scheduled), on_destroy.
+ *
+ *     struct StalkerCounter : gwp::Binder
+ *     {
+ *         std::unordered_map<GwpObjectId, uint32_t> updates;
+ *         void on_spawn(GwpObjectId id, std::string_view) override { updates[id] = 0; }
+ *         void on_destroy(GwpObjectId id) override { updates.erase(id); }
+ *         void on_update(std::span<const GwpBinderUpdate> batch) override
+ *         {
+ *             for (const GwpBinderUpdate& u : batch)
+ *                 ++updates[u.id];
+ *         }
+ *     };
+ *     // in on_init:  bind("AI_STL_S", nullptr, m_stalkers);
+ *
+ * The object must outlive its binding: until unbind, or until the plugin is unloaded (Plugin unbinds everything
+ * before on_unload, so members of the plugin class are the natural place).
+ * Docs: wiki/doc/plugins/api/binders.md
+ */
+class Binder
+{
+public:
+    // @group plugin @thread main
+    Binder() = default;
+    virtual ~Binder() = default;
+
+    // The object was reset before its spawn (engine reinit): comes before on_spawn. @group plugin @thread main
+    virtual void on_reinit(GwpObjectId id) { (void)id; }
+    // The object is online. section: its ltx section, valid while the object is online. An object that was
+    // online when the binder was registered gets on_spawn at once. @group plugin @thread main
+    virtual void on_spawn(GwpObjectId id, std::string_view section) { (void)id; (void)section; }
+    // The object goes offline (before its Lua binder net_destroy), or the binder is unbound: the last call
+    // for this id. @group plugin @thread main
+    virtual void on_destroy(GwpObjectId id) { (void)id; }
+    // The objects of this binder the scheduler updated since the previous call: once per frame, after the
+    // scheduler pass, only when there is at least one record. @group plugin @thread main
+    virtual void on_update(std::span<const GwpBinderUpdate> updates) { (void)updates; }
+};
+
+/*
  * Plugin: base class of a C++ plugin. Takes over the protocol of the C ABI, so a plugin is a class with the
  * handlers it needs:
  *
@@ -498,7 +623,8 @@ using BatchFn = std::function<void(std::span<const GwpEvent>)>;
  *  - subscriptions with lambdas or member functions (subscribe / subscribe_batch), removed on unload;
  *  - the save block of the addon: on_game_start / on_save / on_load with a version, from the engine events
  *    alife_on_start, alife_on_before_save and alife_on_load;
- *  - timers: timer_start without an event name, expired timers come to on_timer(name).
+ *  - timers: timer_start without an event name, expired timers come to on_timer(name);
+ *  - binders: bind(class_id, section_mask, binder) attaches a gwp::Binder to the matching objects.
  * The raw API stays available through api() and self(). Every handler runs on the main thread.
  * The object is created in gwp_plugin_init and destroyed right after on_unload, while the engine API is still valid.
  */
@@ -683,6 +809,78 @@ protected:
     // Timers group present in the engine API.
     bool has_timers() const noexcept { return GWP_API_HAS(m_api, timer_remaining); }
 
+    // --- binders (group binders of the engine API) ------------------------------------------------------------
+
+    // Attaches `binder` to every object whose class id is class_id ("AI_STL_S", nullptr = any class) and whose
+    // section matches section_mask ("wpn_*", nullptr = any section); one of the two is required. Objects already
+    // online get on_spawn right away. `binder` must live until unbind or the unload of the plugin.
+    // GWP_INVALID_BINDER_ID: the engine has no binders or refused (the reason is in the log).
+    GwpBinderId bind(const char* class_id, const char* section_mask, Binder& binder)
+    {
+        if (!has_binders())
+            return GWP_INVALID_BINDER_ID;
+        Binding* binding = nullptr;
+        // A node freed by unbind is reused: the deque never shrinks. Busy is `binder`, not `id`: the id comes only
+        // when binder_register returns, and an on_spawn it calls may bind() again - that one must take another node
+        for (Binding& b : m_bindings)
+        {
+            if (!b.binder)
+            {
+                binding = &b;
+                break;
+            }
+        }
+        if (!binding)
+            binding = &m_bindings.emplace_back();
+        binding->owner = this;
+        binding->binder = &binder; // busy from here on, before the engine calls on_spawn through it
+        binding->id = GWP_INVALID_BINDER_ID;
+        GwpBinderVTable vtable{};
+        vtable.size = sizeof(vtable);
+        vtable.on_reinit = &binder_reinit_trampoline;
+        vtable.on_spawn = &binder_spawn_trampoline;
+        vtable.on_destroy = &binder_destroy_trampoline;
+        vtable.on_update = &binder_update_trampoline;
+        binding->id = m_api->binder_register(m_self, class_id, section_mask, &vtable, binding);
+        if (binding->id == GWP_INVALID_BINDER_ID)
+            binding->binder = nullptr;
+        return binding->id;
+    }
+
+    // Detaches the binder: on_destroy for every bound object, then the binder is forgotten. false: no such binder
+    // of this plugin, or the engine refused (called outside the main thread): then the binder stays as it was.
+    bool unbind(GwpBinderId id)
+    {
+        if (id == GWP_INVALID_BINDER_ID)
+            return false;
+        for (Binding& b : m_bindings)
+        {
+            if (b.id != id)
+                continue;
+            // A refused call leaves the binder registered: the engine still calls through this node
+            if (m_api->binder_unregister(m_self, id) != GWP_OK)
+                return false;
+            // An on_destroy may have unbound it already, and a bind() then may have taken the node: the ids never
+            // repeat, so the node is freed only while it still holds this binder
+            if (b.id == id)
+            {
+                b.id = GWP_INVALID_BINDER_ID;
+                b.binder = nullptr;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    // Online objects the binder is attached to now; 0 for an unknown binder.
+    uint32_t bound_count(GwpBinderId id) const
+    {
+        return has_binders() ? m_api->binder_object_count(id) : 0u;
+    }
+
+    // Binders group present in the engine API.
+    bool has_binders() const noexcept { return GWP_API_HAS(m_api, binder_object_count); }
+
 private:
     struct Subscription
     {
@@ -691,6 +889,13 @@ private:
         std::string name;
         EventFn fn;
         BatchFn batch;
+    };
+
+    struct Binding
+    {
+        Plugin* owner = nullptr;
+        Binder* binder = nullptr;
+        GwpBinderId id = GWP_INVALID_BINDER_ID;
     };
 
     // Trampolines: the engine calls plain functions with `user`; these forward to the stored functor.
@@ -729,9 +934,67 @@ private:
         }
     }
 
+    // Binder trampolines: the same exception policy as the event ones (a crash in a binder callback would make
+    // the engine remove every binder of the plugin).
+    template <typename F>
+    static void binder_call(void* user, const char* what, F&& fn) noexcept
+    {
+        auto* binding = static_cast<Binding*>(user);
+        if (!binding->binder)
+            return;
+        try
+        {
+            fn(*binding->binder);
+        }
+        catch (const std::exception& e)
+        {
+            binding->owner->m_log.error("binder {} failed: {}", what, e.what());
+        }
+        catch (...)
+        {
+            binding->owner->m_log.error("binder {} failed: unknown exception", what);
+        }
+    }
+    static void GWP_CALL binder_reinit_trampoline(void* user, GwpObjectId id) noexcept
+    {
+        binder_call(user, "on_reinit", [id](Binder& b) { b.on_reinit(id); });
+    }
+    static void GWP_CALL binder_spawn_trampoline(void* user, GwpObjectId id, const char* section) noexcept
+    {
+        binder_call(user, "on_spawn",
+            [id, section](Binder& b) { b.on_spawn(id, section ? std::string_view(section) : std::string_view()); });
+    }
+    static void GWP_CALL binder_destroy_trampoline(void* user, GwpObjectId id) noexcept
+    {
+        binder_call(user, "on_destroy", [id](Binder& b) { b.on_destroy(id); });
+    }
+    static void GWP_CALL binder_update_trampoline(void* user, uint32_t count, const GwpBinderUpdate* updates) noexcept
+    {
+        binder_call(user, "on_update",
+            [count, updates](Binder& b) { b.on_update(std::span<const GwpBinderUpdate>(updates, count)); });
+    }
+
+    // Every binder gets on_destroy for its objects while the Binder objects (members of the plugin, as a rule)
+    // are still alive; the engine would otherwise drop the binders silently after on_unload.
+    void unbind_all() noexcept
+    {
+        // By index: on_destroy may call bind(), and the deque growing would invalidate a range-for iterator (its
+        // elements stay in place, so the reference below is safe)
+        for (size_t i = 0; i < m_bindings.size(); ++i)
+        {
+            Binding& b = m_bindings[i];
+            // Every node is freed, whatever the engine answers: the plugin goes, nothing may call it any more
+            if (b.id != GWP_INVALID_BINDER_ID)
+                m_api->binder_unregister(m_self, b.id);
+            b.id = GWP_INVALID_BINDER_ID;
+            b.binder = nullptr;
+        }
+    }
+
     static void GWP_CALL unload_trampoline(void* user) noexcept
     {
         auto* plugin = static_cast<Plugin*>(user);
+        plugin->unbind_all();
         try
         {
             plugin->on_unload();
@@ -789,6 +1052,7 @@ private:
     std::string m_timer_event;
     bool m_timer_subscribed = false;
     std::deque<Subscription> m_subscriptions; // deque: the engine keeps pointers to the elements
+    std::deque<Binding> m_bindings;           // same; freed nodes are reused by bind
 };
 } // namespace gwp
 

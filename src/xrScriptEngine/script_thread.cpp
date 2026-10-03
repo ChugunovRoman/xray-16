@@ -45,8 +45,14 @@ CScriptThread::CScriptThread(CScriptEngine* scriptEngine, LPCSTR caNamespaceName
         else
         {
             m_script_name = "console command";
-            xr_sprintf(S, "function %s()\n%s\nend\n", main_function, caNamespaceName);
-            int l_iErrorCode = luaL_loadbuffer(engineLua, S, xr_strlen(S), "@console_command");
+            // The code of run_string has any length: a string256 here made every command longer than ~230
+            // characters a fatal error (xr_sprintf -> invalid parameter handler).
+            xr_string code = "function ";
+            code += main_function;
+            code += "()\n";
+            code += caNamespaceName;
+            code += "\nend\n";
+            int l_iErrorCode = luaL_loadbuffer(engineLua, code.c_str(), code.size(), "@console_command");
             if (!l_iErrorCode)
             {
                 l_iErrorCode = lua_pcall(engineLua, 0, 0, 0);

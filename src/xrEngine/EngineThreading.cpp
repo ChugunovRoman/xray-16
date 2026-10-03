@@ -39,6 +39,11 @@ bool XRay::Engine::IsGameLogicThread()
     return game != std::thread::id{} ? self == game : self == s_main_thread_id.load(std::memory_order_acquire);
 }
 
+bool XRay::Engine::IsGameThreadRunning()
+{
+    return s_game_thread_id.load(std::memory_order_acquire) != std::thread::id{};
+}
+
 void XRay::Engine::MarkMainThread() { s_main_thread_id.store(std::this_thread::get_id(), std::memory_order_release); }
 
 void XRay::Engine::PreRenderThread()

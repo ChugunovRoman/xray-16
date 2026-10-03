@@ -356,6 +356,7 @@ public:
     virtual ~CLevel();
 
 private:
+    // Device.PostSchedulerVisionBatch: right after Sheduler.Update on the game thread (EngineThreading.cpp).
     static void VisionBatchPostScheduler();
 
 public:

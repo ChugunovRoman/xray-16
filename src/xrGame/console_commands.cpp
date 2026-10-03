@@ -32,6 +32,11 @@
 #include "addon_data_bus.h"
 #include "addon_timers.h"
 #include "addon_api_ini.h"
+#include "addon_api_console.h"
+#include "addon_binders.h"
+#include "addon_callbacks.h"
+#include "addon_goap.h"
+#include "addon_storage.h"
 #include "ai/monsters/basemonster/base_monster.h"
 #include "date_time.h"
 #include "mt_config.h"
@@ -232,6 +237,7 @@ u32 npc_perf_ik_interval_disabled_ms = 30000;
 u32 npc_perf_ik_interval_enemy_selected_ms = 0;
 int npc_perf_ik_foot_raypick_batch = 2;
 int npc_perf_ik_foot_raypick_batch_min_rays = 12;
+int npc_perf_ik_foot_static_only = 1; // IK foot rays: 1 = static geometry only (a crowd), 0 = also dynamic objects
 int npc_perf_mt_stalker_physics = 0;
 int npc_perf_disable_ucl_stalker_step_manager = 0;
 int ai_evaluator_ttl_ms = 500;
@@ -259,8 +265,22 @@ u32 npc_perf_motivator_callback_near_interval = 800;
 u32 npc_perf_motivator_callback_medium_interval = 1500;
 u32 npc_perf_motivator_callback_far_interval = 3500;
 u32 npc_perf_motivator_dead_interval = 3000;
+u32 npc_perf_motivator_native_gate = 0;
 u32 npc_perf_sim_brain_actor_update_interval = 10000;
 int npc_perf_agent_enemy_fill_squads_trace_members = 0;
+int npc_perf_agent_distribute_once_per_frame = 1; // agent_enemy_manager.cpp: one distribution per group a frame
+int npc_perf_agent_fill_skip_no_enemy = 1; // agent_enemy_manager.cpp: members without enemies are not walked
+int npc_perf_step_far_skip_material = 1;   // step_manager.cpp: no material pick for a step beyond 20 m
+int npc_perf_script_action_weight_lookup = 1; // script_action_wrapper.cpp: no Lua call for a default weight
+int npc_perf_visible_value_native = 1;        // visual_memory_manager.cpp: get_visible_value in C++
+// Stage D, W4-2: xr_logic.pick_section_from_condlist in the engine (gw_condlist_native.cpp);
+// 0 = Lua, 1 = native, 2 = shadow (dry native pass first, Lua decides, mismatches counted)
+int npc_perf_condlist_native = 0;
+// Stage D, W5-1: switches of the Lua scheme actions, read by the scripts (utils.perf_cvar_int); 0 = as before
+int npc_perf_camper_lean = 0;             // xr_camper: move_mgr:continue() once per stretch of walking
+int npc_perf_walker_camp_once = 0;        // xr_walker: register_npc once per stay in a camp
+int npc_perf_scheme_condlist_ttl_ms = 0;  // xr_animpoint reach_movement, xr_cover anm: condlist answer kept (ms)
+int npc_perf_move_mgr_fixes = 0;          // move_mgr: a look point without ret drops the ret of the previous one
 
 // Dev kill-switch: per-solve cache for script GOAP evaluators (read in script_property_evaluator_wrapper.cpp).
 int ai_evaluator_solve_cache = 1;
@@ -1948,6 +1968,23 @@ public:
     virtual void Execute(LPCSTR /*args*/) { gw::addons::PrintList(); }
 };
 
+// plugin_reload <addon id>: the plugin of the addon is unloaded and loaded again from its library (a rebuilt one
+// too) at the start of the next frame; it also brings back a plugin stopped by a crash
+class CCC_PluginReload : public IConsole_Command
+{
+public:
+    CCC_PluginReload(LPCSTR N) : IConsole_Command(N) {}
+    virtual void Execute(LPCSTR args)
+    {
+        xr_string reason;
+        if (gw::addons::RequestPluginReload(args, reason))
+            Msg("- [addons] plugin of '%s' is reloaded at the next frame", args);
+        else
+            Msg("! [addons] plugin_reload %s: %s", args, reason.c_str());
+    }
+    virtual void Info(TInfo& I) { xr_strcpy(I, "addon id: unload its plugin and load it again (also after a crash)"); }
+};
+
 class CCC_EventList : public IConsole_Command
 {
 public:
@@ -2063,6 +2100,60 @@ class CCC_TimerList : public IConsole_Command
 public:
     CCC_TimerList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
     virtual void Execute(LPCSTR /*args*/) { gw::addons::timers::PrintList(); }
+};
+
+class CCC_BinderList : public IConsole_Command
+{
+public:
+    CCC_BinderList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR /*args*/) { gw::addons::binders::PrintList(); }
+};
+
+// Calls between plugins and Lua: script_call (plugin -> Lua) and plugins.call (Lua -> plugin) by function, with the
+// number of calls, calls per second, errors and time. "script_call_list reset" also zeroes the counters.
+class CCC_ScriptCallList : public IConsole_Command
+{
+public:
+    CCC_ScriptCallList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR args)
+    {
+        const bool reset = args && xr_strcmp(args, "reset") == 0;
+        gw::addons::PrintScriptCallList(reset);
+        gw::addons::PrintExportCallList(reset);
+        if (reset)
+            Msg("- [script] the counters are reset");
+    }
+    virtual void Info(TInfo& I) { xr_strcpy(I, "[reset] - calls between plugins and Lua by function"); }
+};
+
+// Variables of plugins with their values and where the values came from; lines of appdata/plugins.ltx
+// without a variable (plans/lua_to_cpp/12-plugin-cvars-file.md).
+class CCC_PluginCvarList : public IConsole_Command
+{
+public:
+    CCC_PluginCvarList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR /*args*/) { gw::addons::console::PrintCvarList(); }
+};
+
+class CCC_CallbackList : public IConsole_Command
+{
+public:
+    CCC_CallbackList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR /*args*/) { gw::addons::callbacks::PrintList(); }
+};
+
+class CCC_EvaluatorList : public IConsole_Command
+{
+public:
+    CCC_EvaluatorList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR /*args*/) { gw::addons::goap::PrintList(); }
+};
+
+class CCC_StorageList : public IConsole_Command
+{
+public:
+    CCC_StorageList(LPCSTR N) : IConsole_Command(N) { bEmptyArgsHandled = true; };
+    virtual void Execute(LPCSTR args) { gw::addons::storage::PrintList(args); }
 };
 
 class CCC_MainMenu : public IConsole_Command
@@ -3040,6 +3131,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_ik_interval_enemy_selected_ms", (int*)&npc_perf_ik_interval_enemy_selected_ms, 0, 60000);
     CMD4(CCC_Integer, "npc_perf_ik_foot_raypick_batch", &npc_perf_ik_foot_raypick_batch, 0, 2);
     CMD4(CCC_Integer, "npc_perf_ik_foot_raypick_batch_min_rays", &npc_perf_ik_foot_raypick_batch_min_rays, 0, 128);
+    CMD4(CCC_Integer, "npc_perf_ik_foot_static_only", &npc_perf_ik_foot_static_only, 0, 1);
     CMD4(CCC_Integer, "npc_perf_mt_stalker_physics", &npc_perf_mt_stalker_physics, 0, 1);
     CMD4(CCC_Integer, "npc_perf_disable_ucl_stalker_step_manager", &npc_perf_disable_ucl_stalker_step_manager, 0, 1);
     CMD4(CCC_Integer, "npc_perf_state_mgr_animstate_ttl_ms", (int*)&npc_perf_state_mgr_animstate_ttl_ms, 10, 30000);
@@ -3066,8 +3158,19 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_motivator_callback_medium_interval", (int*)&npc_perf_motivator_callback_medium_interval, 100, 120000);
     CMD4(CCC_Integer, "npc_perf_motivator_callback_far_interval", (int*)&npc_perf_motivator_callback_far_interval, 100, 120000);
     CMD4(CCC_Integer, "npc_perf_motivator_dead_interval", (int*)&npc_perf_motivator_dead_interval, 100, 120000);
+    CMD4(CCC_Integer, "npc_perf_motivator_native_gate", (int*)&npc_perf_motivator_native_gate, 0, 1);
     CMD4(CCC_Integer, "npc_perf_sim_brain_actor_update_interval", (int*)&npc_perf_sim_brain_actor_update_interval, 1000, 120000);
     CMD4(CCC_Integer, "npc_perf_agent_enemy_fill_squads_trace_members", &npc_perf_agent_enemy_fill_squads_trace_members, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_agent_distribute_once_per_frame", &npc_perf_agent_distribute_once_per_frame, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_agent_fill_skip_no_enemy", &npc_perf_agent_fill_skip_no_enemy, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_step_far_skip_material", &npc_perf_step_far_skip_material, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_script_action_weight_lookup", &npc_perf_script_action_weight_lookup, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_visible_value_native", &npc_perf_visible_value_native, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_condlist_native", &npc_perf_condlist_native, 0, 2);
+    CMD4(CCC_Integer, "npc_perf_camper_lean", &npc_perf_camper_lean, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_walker_camp_once", &npc_perf_walker_camp_once, 0, 1);
+    CMD4(CCC_Integer, "npc_perf_scheme_condlist_ttl_ms", &npc_perf_scheme_condlist_ttl_ms, 0, 5000);
+    CMD4(CCC_Integer, "npc_perf_move_mgr_fixes", &npc_perf_move_mgr_fixes, 0, 1);
     CMD4(CCC_Integer, "npc_preview_scene_budget_per_frame", (int*)&npc_preview_scene_budget_per_frame, 1, 500);
     CMD4(CCC_Integer, "npc_preview_disk_cache_warm_per_frame", (int*)&npc_preview_disk_cache_warm_per_frame, 0, 500);
 
@@ -3124,6 +3227,7 @@ void CCC_RegisterCommands()
 
     CMD1(CCC_LuaHelp, "dump_lua");
     CMD1(CCC_AddonList, "addon_list");
+    CMD1(CCC_PluginReload, "plugin_reload");
     CMD1(CCC_EventList, "event_list");
     CMD1(CCC_EventEngineSources, "gw_event_engine_sources");
     CMD1(CCC_EventSchemaCheck, "gw_event_schema_check");
@@ -3132,6 +3236,12 @@ void CCC_RegisterCommands()
     CMD1(CCC_DataList, "data_list");
     CMD1(CCC_TimerList, "timer_list");
     CMD1(CCC_IniList, "ini_list");
+    CMD1(CCC_BinderList, "binder_list");
+    CMD1(CCC_PluginCvarList, "plugin_cvar_list");
+    CMD1(CCC_ScriptCallList, "script_call_list");
+    CMD1(CCC_StorageList, "storage_list");
+    CMD1(CCC_CallbackList, "callback_list");
+    CMD1(CCC_EvaluatorList, "evaluator_list");
     CMD1(CCC_EvaluatorCacheReload, "ai_evaluator_cache_reload");
     CMD1(CCC_EvaluatorCacheList, "ai_evaluator_cache_list");
     CMD4(CCC_InvCellSize, "g_inv_cell_size", &g_inv_inv_cell_size, 1, 4);

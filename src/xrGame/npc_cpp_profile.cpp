@@ -21,7 +21,7 @@ constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_PROBE = 8;
 // good: the report is the only place they go. 16 rows hid about half of the calls of a session, and the profiler
 // only runs with -npc_cpp_profile anyway, where a longer table is what is wanted.
 constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_TOP_COUNT = 64;
-constexpr size_t NPC_CPP_PROFILE_TOP_COUNT = 32;
+constexpr size_t NPC_CPP_PROFILE_TOP_COUNT = 48; // 32 hid the movement/* and script_entity/sound/* sub-stages
 
 struct NpcCppProfileCounters
 {
@@ -47,7 +47,7 @@ struct ScriptEvaluatorProfileBucket
     std::atomic_ullong cache_misses{0};
     // A copy, not the pointer that was passed in: an evaluator of a script dies with its Lua state (a new game
     // or a load restarts the script engine), and the bucket outlives it.
-    char name[64]{};
+    char name[128]{}; // cut to the size by named_bucket, compared cut the same way
 };
 
 struct ScriptEvaluatorProfileSnapshot
@@ -63,6 +63,8 @@ struct ScriptEvaluatorProfileSnapshot
 
 NpcCppProfileCounters g_npc_cpp_profile_counters[NPC_CPP_PROFILE_STAGE_COUNT];
 ScriptEvaluatorProfileBucket g_script_evaluator_profile_buckets[NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT];
+// The same buckets for the steps of Lua actions ("<action name>/<step>"): script_action_top of the report
+ScriptEvaluatorProfileBucket g_script_action_profile_buckets[NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT];
 Lock g_npc_cpp_profile_flush_lock;
 std::atomic<u32> g_npc_cpp_profile_next_flush_ms{0};
 std::atomic<u32> g_npc_cpp_profile_debug_heartbeat_ms{0};
@@ -177,6 +179,22 @@ constexpr const char* g_npc_cpp_profile_stage_names[NPC_CPP_PROFILE_STAGE_COUNT]
     "script_action/update",
     "script_action/initialize",
     "inventory_owner/has_info",
+    "addon/binder_update",
+    "movement/update_path",
+    "movement/move_along_path",
+    "movement/move_along_path/nearest_query",
+    "movement/move_along_path/collision_move",
+    "custom_monster/update_cl/select_animation",
+    "script_entity/sound/lua_callback",
+    "script_entity/sound/plugin_event",
+    "step/update",
+    "step/update/material_pick",
+    "step/update/sound",
+    "step/update/particles",
+    "step/update/event",
+    "agent_enemy/distribute",
+    "agent_enemy/distribute/fill",
+    "agent_enemy/distribute/assign",
 };
 
 static_assert((sizeof(g_npc_cpp_profile_stage_names) / sizeof(g_npc_cpp_profile_stage_names[0])) == NPC_CPP_PROFILE_STAGE_COUNT);
@@ -211,22 +229,60 @@ IC u32 fnv1a_hash(pcstr value)
 
 // The bucket of this name: the one that already holds it, or the first free one after the hashed slot.
 // Returns nullptr when the probe window is full - then the sample goes to the common stage instead.
-ScriptEvaluatorProfileBucket* script_evaluator_bucket(pcstr evaluator_name)
+ScriptEvaluatorProfileBucket* named_bucket(ScriptEvaluatorProfileBucket* buckets, pcstr evaluator_name)
 {
     const size_t start = static_cast<size_t>(fnv1a_hash(evaluator_name) % NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT);
     for (size_t probe = 0; probe < NPC_CPP_PROFILE_SCRIPT_EVALUATOR_PROBE; ++probe)
     {
         const size_t index = (start + probe) % NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT;
-        ScriptEvaluatorProfileBucket& bucket = g_script_evaluator_profile_buckets[index];
+        ScriptEvaluatorProfileBucket& bucket = buckets[index];
+        // A longer name is cut (xr_strcpy would hit the invalid parameter handler outside MASTER_GOLD): the same name
+        // is cut the same way, so it still finds its bucket
         if (!bucket.name[0])
         {
-            xr_strcpy(bucket.name, sizeof bucket.name, evaluator_name);
+            std::snprintf(bucket.name, sizeof bucket.name, "%s", evaluator_name);
             return &bucket;
         }
-        if (xr_strcmp(bucket.name, evaluator_name) == 0)
+        if (std::strncmp(bucket.name, evaluator_name, sizeof bucket.name - 1) == 0)
             return &bucket;
     }
     return nullptr;
+}
+
+ScriptEvaluatorProfileBucket* script_evaluator_bucket(pcstr evaluator_name)
+{
+    return named_bucket(g_script_evaluator_profile_buckets, evaluator_name);
+}
+
+// script_action_top: the steps of Lua actions by total time (the Lua part of stalker/planner/execute)
+void flush_script_action_snapshots()
+{
+    xr_vector<NpcCppProfileSnapshot> snapshots;
+    for (size_t i = 0; i < NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT; ++i)
+    {
+        ScriptEvaluatorProfileBucket& bucket = g_script_action_profile_buckets[i];
+        const u64 total_qpc = bucket.total_qpc.exchange(0, std::memory_order_relaxed);
+        const u64 calls = bucket.calls.exchange(0, std::memory_order_relaxed);
+        const u64 max_qpc = bucket.max_qpc.exchange(0, std::memory_order_relaxed);
+        if (!bucket.name[0] || !calls)
+            continue;
+        snapshots.push_back({bucket.name, total_qpc, calls, max_qpc});
+    }
+    if (snapshots.empty())
+        return;
+    std::sort(snapshots.begin(), snapshots.end(),
+        [](const NpcCppProfileSnapshot& left, const NpcCppProfileSnapshot& right) { return left.total_qpc > right.total_qpc; });
+    const size_t shown = std::min<size_t>(snapshots.size(), NPC_CPP_PROFILE_SCRIPT_EVALUATOR_TOP_COUNT);
+    Msg("* npc_cpp_profile script_action_top=%u", static_cast<u32>(shown));
+    for (size_t i = 0; i < shown; ++i)
+    {
+        const NpcCppProfileSnapshot& row = snapshots[i];
+        const double total_ms = 1000.0 * static_cast<double>(row.total_qpc) / CPU::qpc_freq;
+        const double avg_us = 1000000.0 * static_cast<double>(row.total_qpc) / (CPU::qpc_freq * row.calls);
+        const double max_us = 1000000.0 * static_cast<double>(row.max_qpc) / CPU::qpc_freq;
+        Msg("*   %s total=%.2fms calls=%llu avg=%.2fus max=%.2fus", row.name, total_ms,
+            static_cast<unsigned long long>(row.calls), avg_us, max_us);
+    }
 }
 
 const char* classify_script_evaluator_group(pcstr evaluator_name)
@@ -366,6 +422,7 @@ void flush_snapshots(const u32 now_ms)
     }
 
     flush_script_evaluator_snapshots();
+    flush_script_action_snapshots();
 }
 } // namespace
 
@@ -468,6 +525,21 @@ void npc_cpp_profile::add_script_evaluator(pcstr evaluator_name, const u64 qpc_d
         return;
     }
 
+    bucket->total_qpc.fetch_add(qpc_delta, std::memory_order_relaxed);
+    bucket->calls.fetch_add(1, std::memory_order_relaxed);
+    update_max(bucket->max_qpc, qpc_delta);
+    flush_if_needed();
+}
+
+void npc_cpp_profile::add_script_action(pcstr action_name, pcstr step, const u64 qpc_delta)
+{
+    if (!enabled())
+        return;
+    string128 name; // a long action name is cut, not a crash (xr_sprintf checks the size outside MASTER_GOLD)
+    std::snprintf(name, sizeof name, "%s/%s", action_name && action_name[0] ? action_name : "<unnamed>", step ? step : "?");
+    ScriptEvaluatorProfileBucket* bucket = named_bucket(g_script_action_profile_buckets, name);
+    if (!bucket)
+        return; // the probe window is full: the stage totals still have it
     bucket->total_qpc.fetch_add(qpc_delta, std::memory_order_relaxed);
     bucket->calls.fetch_add(1, std::memory_order_relaxed);
     update_max(bucket->max_qpc, qpc_delta);

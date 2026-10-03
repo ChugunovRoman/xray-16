@@ -11,6 +11,8 @@ void GameThread();
 // task (Sheduler.Update, Lua binders, ALife) while the main thread waits for it. The task scheduler lets any worker
 // steal that task, so "the main thread" alone is the wrong test for code that must run with the game logic.
 ENGINE_API bool IsGameLogicThread();
+// True while XRay::Engine::GameThread() runs (on whichever thread took the task)
+ENGINE_API bool IsGameThreadRunning();
 // Records the current thread as the main (game loop) thread of IsGameLogicThread(). CApplication calls it from its
 // constructor and from every frame: the loop runs on the "Primary thread", not on the thread that loaded the module.
 ENGINE_API void MarkMainThread();

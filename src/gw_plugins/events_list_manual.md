@@ -32,6 +32,15 @@ Per-event descriptions (when / arguments / notes) live in events_meta.json.
 <!-- @block builtin_outro -->
 У встроенных событий нет результата (`event->result == NULL`).
 
+Ещё четыре события движок объявляет не в `kBuiltinNames`, а лениво, при первой надобности (в таблицу выше генератор их не берёт); подписаться можно и раньше, прямо в `on_init`: шина запоминает имя.
+
+| Событие | Схема | Источник | Аргументы | Когда | Примечания |
+|---|---|---|---|---|---|
+| `ai_evaluator_cache_on_reload` | `()` | движок | — | консольная команда `ai_evaluator_cache_reload` перечитала `npc_perf_evaluator_cache.ltx` (`script_property_evaluator_wrapper.cpp`) | нативные эвалюаторы плагинов держат свой кэш и по этому событию перечитывают тот же файл (так делает `gw_npc`) |
+| `npc_on_patrol_point` | `oII` | движок | 0: `OBJECT` НПС, 1: `INT` тип действия (`eActionTypeMovement`), 2: `INT` точка пути | менеджер патрульного пути пришёл в точку, сразу после Lua-колбэка `callback.patrol_path_in_point` (`patrol_path_manager.cpp`) | только при подписчике; подробно — "[Патрульные пути](https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/api/patrol.md#события)" |
+| `npc_on_patrol_extrapolate` | `oI` | движок | 0: `OBJECT` НПС, 1: `INT` точка пути | каждый вызов `extrapolate_path`, до Lua-колбэка экстраполяции | наблюдатель, без результата; только при подписчике |
+| `npc_on_script_animation_end` | `oI` | движок | 0: `OBJECT` сталкер, 1: `INT` длина очереди скриптовых анимаций после конца анимации | конец каждой скриптовой анимации сталкера, сразу после Lua-колбэка `callback.script_animation` (`addon_api_npc_control.cpp`) | отправляется и без подписчиков; подробно — "[Анимации НПС](https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/api/npc_anim.md#событие-npc_on_script_animation_end)" |
+
 <!-- @block sequence -->
 Порядок событий по коду движка. Порядок подписчиков **внутри** одного события не гарантируется.
 
@@ -95,9 +104,9 @@ Per-event descriptions (when / arguments / notes) live in events_meta.json.
 <!-- @block script_intro -->
 Эти события отправляют Lua-скрипты через `SendScriptCallback`. Все они объявлены в таблице `intercepts` в `axr_main.script`, там же их схемы. Скрипт, из которого событие отправляется, указан в заголовке группы.
 
-Многие события `actor_on_*` отправляет `bind_stalker_ext.script`: в них первым аргументом идёт Lua-объект биндера актора (`actor_binder`) — плагину он приходит как `LUA_REF`.
+Жизненный цикл актора (`actor_on_update`, `actor_on_first_update`, `actor_on_net_destroy` и другие) с этапа B-4 отправляет движок, раздел выше. Из `bind_stalker_ext.script` остались только события фонарика (`actor_on_torch_enabled` / `_disabled`), без аргументов.
 
 Частые события (`actor_on_update_fast` / `_slow`, `on_key_hold`, `monster_on_update`) при подписке плагина переводят аргументы в `GwpValue` на каждом вызове. Для кадровой логики лучше встроенное `level_on_frame`. События «по объекту» (`npc_on_update`, `monster_on_update`, `squad_on_update`) удобнее получать пачкой раз в кадр, а не вызовом на каждый объект: `event_subscribe_ex` с `GWP_SUBSCRIBE_BATCH`, см. "[Подписка с опциями](https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/api/events.md#подписка-с-опциями-троттлинг-и-пачки-event_subscribe_ex)".
 
 <!-- @block result_outro -->
-Lua-скрипт передаёт результат таблицей флагов (`{ret_value = true}`), а плагин читает и меняет его через `event->result` (или `gwp::EventView::result_bool` / `set_result`); если обработчики плагинов изменили результат, в поле таблицы записывается boolean. Сама таблица флагов плагину аргументом не передаётся, если она последний аргумент (так у всех событий выше). Подробно — в разделе "[Результат события](https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/api/events.md#результат-события)".
+Из этих событий Lua-скрипт отправляет только `actor_on_before_hit`, остальные шлёт движок. Lua передаёт результат таблицей флагов (`{ret_value = true}`), а плагин читает и меняет его через `event->result` (или `gwp::EventView::result_bool` / `set_result`); если обработчики плагинов изменили результат, в поле таблицы записывается boolean. Сама таблица флагов плагину аргументом не передаётся, если она последний аргумент (так у всех событий выше). Подробно — в разделе "[Результат события](https://gitlab.com/great-war/wiki/-/tree/master/doc/plugins/api/events.md#результат-события)".

@@ -151,6 +151,16 @@ IC bool should_run_stalker_planner_actuality_check(
     return true;
 }
 
+// The fast path mirrors the engine evaluators of these properties. Lua schemes replace them with their own
+// (xr_gather_items: items, xr_danger: danger, post_combat_idle: enemy); then the fast value is not what the
+// planner would see, and the full actual() has to decide.
+template <typename TEngineEvaluator>
+IC bool is_engine_evaluator(const CStalkerPlanner& planner, const GraphEngineSpace::_solver_condition_type property_id)
+{
+    const auto I = planner.evaluators().find(property_id);
+    return I != planner.evaluators().end() && dynamic_cast<const TEngineEvaluator*>((*I).second) != nullptr;
+}
+
 IC bool evaluate_stalker_planner_property_fast(
     const CStalkerPlanner& planner, CAI_Stalker& stalker, const GraphEngineSpace::_solver_condition_type property_id, bool& value)
 {
@@ -163,12 +173,18 @@ IC bool evaluate_stalker_planner_property_fast(
         value = false;
         return true;
     case eWorldPropertyItems:
+        if (!is_engine_evaluator<CStalkerPropertyEvaluatorItems>(planner, property_id))
+            return false;
         value = !!stalker.memory().item().selected();
         return true;
     case eWorldPropertyDanger:
+        if (!is_engine_evaluator<CStalkerPropertyEvaluatorDangers>(planner, property_id))
+            return false;
         value = !!stalker.memory().danger().selected();
         return true;
     case eWorldPropertyEnemy:
+        if (!is_engine_evaluator<CStalkerPropertyEvaluatorEnemies>(planner, property_id))
+            return false;
         value = !!stalker.memory().enemy().selected();
         if (!value)
         {

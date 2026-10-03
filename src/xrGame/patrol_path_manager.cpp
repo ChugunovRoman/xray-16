@@ -9,6 +9,9 @@
 #include "pch_script.h"
 #include "GameObject.h"
 #include "patrol_path_manager.h"
+#include "addon_callbacks.h"
+#include "addon_api_npc_control.h"
+#include "CustomMonster.h"
 #include "script_game_object.h"
 #include "restricted_object.h"
 #include "ai_space.h"
@@ -55,11 +58,19 @@ bool show_restrictions(CRestrictedObject* object)
 CPatrolPathManager::~CPatrolPathManager() {}
 bool CPatrolPathManager::extrapolate_path()
 {
-    VERIFY(m_path && m_path->vertex(m_curr_point_index));
-    if (!m_extrapolate_callback)
-        return (true);
-
-    return (m_extrapolate_callback(m_curr_point_index));
+    // The path changed from a callback of select_point (see there): no point to extrapolate from, nothing to tell
+    // the observers about an invalid index
+    if (!m_path || !m_path->vertex(m_curr_point_index))
+        return true;
+    // The observers of the plugins (event npc_on_patrol_extrapolate) see every call, before any answer
+    gw::addons::npcctl::PatrolExtrapolate(m_object->object().ID(), m_curr_point_index);
+    if (!m_path || !m_path->vertex(m_curr_point_index))
+        return true; // a handler of the event changed the path
+    // The Lua callback of the NPC first, then the callbacks of the plugins (Plugin API group callbacks).
+    const bool result = !m_extrapolate_callback || m_extrapolate_callback(m_curr_point_index);
+    if (!result || !gw::addons::callbacks::HasPatrolExtrapolate())
+        return result;
+    return gw::addons::callbacks::PatrolExtrapolate(m_object->object().ID(), m_curr_point_index);
 }
 
 void CPatrolPathManager::reinit()
@@ -215,6 +226,16 @@ void CPatrolPathManager::select_point(const Fvector& position, u32& dest_vertex_
 
     m_game_object->callback(GameObject::ePatrolPathInPoint)(
         m_game_object->lua_game_object(), u32(ScriptEntity::eActionTypeMovement), m_curr_point_index);
+    // The same arrival for the plugins (event npc_on_patrol_point), right after the Lua callback
+    gw::addons::npcctl::PatrolPoint(m_game_object->ID(), u32(ScriptEntity::eActionTypeMovement), m_curr_point_index);
+    // A callback or a handler may have changed the path (set_path -> reset: no path, the index invalid): this point
+    // selection is over, the next update starts it again on the new path (set_path left it inactual). Until then
+    // the destination is where the NPC stands, as for the inaccessible points above
+    if (!m_path || !m_path->vertex(m_curr_point_index))
+    {
+        dest_vertex_id = m_game_object->ai_location().level_vertex_id();
+        return;
+    }
 
     u32 count = 0; // количество разветвлений
     float sum = 0.f; // сумма весов разветвления

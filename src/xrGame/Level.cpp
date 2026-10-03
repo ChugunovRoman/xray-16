@@ -1,5 +1,7 @@
 #include "pch_script.h"
+#include "addon_binders.h"
 #include "addon_event_bus.h"
+#include "addon_goap.h"
 #include "addon_timers.h"
 #include <tracy/Tracy.hpp>
 #include "xrEngine/FDemoRecord.h"
@@ -446,14 +448,26 @@ void CLevel::MakeReconnect()
 
 void CLevel::VisionBatchPostScheduler()
 {
-    g_vision_batch.ExecuteParallel();
-    for (u32 i = 0; i < g_vision_batch.GetEntryCount(); ++i)
     {
-        CCustomMonster* npc = g_vision_batch.GetEntry(i).npc;
-        if (npc && !npc->getDestroy())
-            npc->Exec_Visibility_Process();
+        ZoneScopedN("VisionBatchPostScheduler/vision_batch");
+        ZoneTextF("%u NPC", g_vision_batch.GetEntryCount());
+        g_vision_batch.ExecuteParallel();
+    }
+    {
+        ZoneScopedN("VisionBatchPostScheduler/visibility_process");
+        for (u32 i = 0; i < g_vision_batch.GetEntryCount(); ++i)
+        {
+            CCustomMonster* npc = g_vision_batch.GetEntry(i).npc;
+            if (npc && !npc->getDestroy())
+                npc->Exec_Visibility_Process();
+        }
     }
     g_vision_batch.Reset();
+    // No planner runs here: the native evaluators of the plugins are put into (or taken out of) the planners.
+    gw::addons::goap::ApplyPending();
+    // Plugin binders: the {id, dt} records collected by shedule_Update of this pass go to the plugins now, on the
+    // same thread, before anything else of the frame touches the objects.
+    gw::addons::binders::FlushUpdates();
 }
 
 void CLevel::OnFrame()

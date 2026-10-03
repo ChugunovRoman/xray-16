@@ -88,6 +88,21 @@ target_sources(xrGame PRIVATE
     addon_api_ini.cpp
     addon_api_ini.h
     addon_api_level.cpp
+    addon_binders.cpp
+    addon_binders.h
+    addon_storage.cpp
+    addon_storage.h
+    addon_callbacks.cpp
+    addon_callbacks.h
+    addon_goap.cpp
+    addon_goap.h
+    addon_api_npc.cpp
+    addon_goap_planner.cpp
+    addon_goap_planner.h
+    addon_script_exports.cpp
+    gw_condlist_native.cpp
+    addon_api_npc_control.cpp
+    addon_api_npc_control.h
     addon_data_bus.cpp
     addon_data_bus.h
     addon_event_bus.cpp

@@ -581,6 +581,7 @@ public:
     void set_dest_game_vertex_id(GameGraph::_GRAPH_ID game_vertex_id);
     void set_movement_selection_type(ESelectionType selection_type);
     u32 level_vertex_id() const;
+    u32 binder_phase_mask() const; // stage D, W3-1: phases of the NPC binder update computed by the engine
     u32 game_vertex_id() const;
     void add_animation(LPCSTR animation, bool hand_usage, bool use_movement_controller);
     void add_animation(LPCSTR animation, bool hand_usage, Fvector position, Fvector rotation, bool local_animation);

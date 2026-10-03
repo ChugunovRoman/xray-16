@@ -3,7 +3,12 @@
 #include "addon_host.h"
 #include "addon_api_console.h"
 #include "addon_api_ini.h"
+#include "addon_binders.h"
+#include "addon_callbacks.h"
 #include "addon_data_bus.h"
+#include "addon_goap.h"
+#include "addon_goap_planner.h"
+#include "addon_storage.h"
 #include "addon_event_bus.h"
 #include "addon_timers.h"
 
@@ -109,6 +114,7 @@ enum class EPluginState
     None,        // addon declares no plugin
     Loaded,      // plugin loaded and initialized
     Unavailable, // plugin declared but not loaded (see reason)
+    Crashed,     // stopped by a crash: unloaded at the next frame, loaded again at the next game load (OnGameStart)
 };
 
 struct AddonRecord
@@ -134,8 +140,16 @@ struct AddonRecord
     xr_string plugin_path; // original library path (narrow encoding, for messages)
     xr_string shadow_path; // loaded copy (narrow encoding, for messages)
     XRay::Module module;
+    const void* module_base = nullptr; // Windows: the HMODULE of the loaded copy (its symbols leave dbghelp with it)
     GwpPluginDesc desc{};
     GwpPlugin handle{};
+
+    // Crashes and restarts (OnPluginCrashed, OnFrame, OnGameStart)
+    bool loading = false;    // inside gwp_plugin_init: a crash there fails the load
+    xr_string load_crash;    // what crashed during gwp_plugin_init
+    u32 restarts = 0;        // automatic loads after a crash in this run of the game
+    bool restart_refused_logged = false;
+    bool reload_requested = false; // plugin_reload: at the next frame
 };
 
 // Heap-allocated on purpose: if Shutdown() is never called, a static vector would unload the plugin libraries
@@ -144,6 +158,11 @@ xr_vector<xr_unique_ptr<AddonRecord>>* g_addons = nullptr;
 GwpEngineApi g_engine_api{};
 bool g_initialized = false;
 bool g_debug_log = false;
+
+// A crashed plugin is loaded again at the next game load, at most this many times per run of the game: a plugin
+// that crashes on every load must not take every load with it
+constexpr u32 kMaxAutoRestarts = 2;
+bool g_plugin_work = false; // a crashed plugin waits for its unload, or plugin_reload asked for a reload
 
 // Plugin save data by addon id. Independent of g_addons: data of addons that are not installed now is kept and
 // written to new saves unchanged. xr_map: stable order in the save file.
@@ -203,6 +222,7 @@ pcstr PluginStateName(EPluginState state)
     case EPluginState::None: return "none";
     case EPluginState::Loaded: return "loaded";
     case EPluginState::Unavailable: return "unavailable";
+    case EPluginState::Crashed: return "crashed";
     }
     return "?";
 }
@@ -558,10 +578,14 @@ uint32_t GWP_CALL ApiEngineBuildId() { return Core.GetBuildId(); }
 //    XRay::Engine::MarkMainThread() in CApplication; before that mark existed it compared against the thread that
 //    loaded xrEngine.dll, which is not the one CApplication runs on (xr_3da starts it as GameThreadEntry), and every
 //    call of every plugin was rejected. With the mark in place this half is redundant, and it keeps the host working
-//    if plugin loading ever moves off that thread.
+//    if plugin loading ever moves off that thread. It counts only between frames: while the game logic task runs on
+//    a worker, the OS main thread waits for it and may execute other tasks meanwhile (TaskManager::Wait), and code
+//    of those must not reach the plugins at the same time as the game logic.
 int GWP_CALL ApiIsMainThread()
 {
-    return (XRay::Engine::IsGameLogicThread() || std::this_thread::get_id() == g_host_thread_id) ? 1 : 0;
+    if (XRay::Engine::IsGameLogicThread())
+        return 1;
+    return !XRay::Engine::IsGameThreadRunning() && std::this_thread::get_id() == g_host_thread_id ? 1 : 0;
 }
 int GWP_CALL ApiIsDebugLog() { return g_debug_log ? 1 : 0; } // set once in Initialize, read-only afterwards
 
@@ -586,6 +610,14 @@ void FillEngineApi()
     FillLevelApi(g_engine_api);
     FillInfoApi(g_engine_api);
     timers::FillEngineApi(g_engine_api);
+    binders::FillEngineApi(g_engine_api);
+    storage::FillEngineApi(g_engine_api);
+    callbacks::FillEngineApi(g_engine_api);
+    goap::FillEngineApi(g_engine_api);
+    FillNpcApi(g_engine_api);
+    goap::FillPlannerApi(g_engine_api);
+    FillExportsApi(g_engine_api);
+    FillNpcControlApi(g_engine_api);
     g_engine_api.save_write = &ApiSaveWrite;
     g_engine_api.save_read = &ApiSaveRead;
 }
@@ -868,6 +900,19 @@ bool MakeShadowCopy(AddonRecord& addon, const fs::path& original, xr_string& sha
         }
     }
 
+    // The PDB next to the copy under the name the library refers to (<name>.pdb), and the folder in the dbghelp
+    // search path: a stack trace of a crash names the functions of the plugin. Copied while no copy of the plugin is
+    // loaded (dbghelp keeps the file open until the module leaves it); a failed copy only costs the names.
+    const fs::path pdb = original.parent_path() / (addon.plugin_name + ".pdb").c_str();
+    if (fs::is_regular_file(pdb, ec))
+    {
+        std::error_code pdb_ec;
+        fs::copy_file(pdb, cache_dir / pdb.filename(), fs::copy_options::update_existing, pdb_ec);
+        if (pdb_ec && g_debug_log)
+            Logf("  ", AddonTag(addon).c_str(), "the PDB is not copied next to the library: %s", pdb_ec.message().c_str());
+    }
+    xrDebug::AddSymbolSearchPath(ToNarrow(cache_dir).c_str());
+
     addon.shadow_path = ToNarrow(shadow);
     fs::path without_ext = shadow;
     without_ext.replace_extension();
@@ -890,6 +935,80 @@ void MarkPluginUnavailable(AddonRecord& addon)
         Logf("~ ", AddonTag(addon).c_str(), "works without plugin '%s': %s", addon.plugin_name.c_str(),
             addon.reason.c_str());
     }
+}
+
+// gwp_plugin_init and on_unload run under the guards of the host, like every other plugin function: a crash in them
+// costs the plugin, not the game
+struct InitCall
+{
+    GwpPluginInitFn init = nullptr;
+    const GwpPlugin* self = nullptr;
+    GwpPluginDesc* desc = nullptr;
+    GwpResult result = GWP_ERROR;
+};
+
+void InitThunk(void* context)
+{
+    InitCall& call = *static_cast<InitCall*>(context);
+    call.result = call.init(&g_engine_api, call.self, call.desc);
+}
+
+struct UnloadCall
+{
+    void(GWP_CALL* on_unload)(void* user) = nullptr;
+    void* user = nullptr;
+};
+
+void UnloadThunk(void* context)
+{
+    UnloadCall& call = *static_cast<UnloadCall*>(context);
+    call.on_unload(call.user);
+}
+
+// Every registration of the plugin leaves the groups of the engine. Safe inside a dispatch (a crash): each group
+// marks or defers what is running right now - the subscribers, binders, callbacks and exports; the proxies of its
+// native evaluators and actions call Lua from now on; its planners stop calling. Nothing of the library is called
+// afterwards.
+void StopPlugin(const GwpPlugin* plugin)
+{
+    events::RemovePluginSubscriptions(plugin);
+    binders::RemovePluginBinders(plugin);
+    callbacks::RemovePluginCallbacks(plugin);
+    goap::RemovePluginEvaluators(plugin);
+    goap::StopPluginPlanners(plugin);
+    RemovePluginExports(plugin);
+}
+
+// StopPlugin and the rest, right before the library goes: the planners are destroyed, the variables and ini files
+// of the plugin are released (the values are kept for its next load), the crash marks of the groups are dropped for
+// the next instance, the module leaves dbghelp and the process. No plugin code may be on the stack.
+void ReleasePlugin(AddonRecord& addon)
+{
+    const GwpPlugin* plugin = &addon.handle;
+    StopPlugin(plugin);
+    goap::RemovePluginPlanners(plugin);
+    console::RemovePluginCvars(plugin);
+    ini::ClosePluginFiles(plugin);
+    binders::ForgetPluginCrash(plugin);
+    goap::ForgetPluginCrash(plugin);
+    if (addon.module_base)
+        xrDebug::ForgetModuleSymbols(addon.module_base);
+    addon.module_base = nullptr;
+    addon.module.reset();
+    addon.desc = {};
+}
+
+// on_unload under the guards, then ReleasePlugin. A plugin that crashes in on_unload is unloaded all the same.
+void UnloadPlugin(AddonRecord& addon)
+{
+    if (addon.desc.on_unload)
+    {
+        UnloadCall call{ addon.desc.on_unload, addon.desc.user };
+        if (!events::CallPluginGuarded(reinterpret_cast<const void*>(call.on_unload), "on_unload", &UnloadThunk, &call))
+            Logf("! ", AddonTag(addon).c_str(), "plugin '%s' crashed in on_unload, unloaded anyway",
+                addon.plugin_name.c_str());
+    }
+    ReleasePlugin(addon);
 }
 
 void LoadPlugin(AddonRecord& addon)
@@ -944,19 +1063,32 @@ void LoadPlugin(AddonRecord& addon)
         MarkPluginUnavailable(addon);
         return;
     }
+#if defined(XR_PLATFORM_WINDOWS)
+    HMODULE module_base = nullptr;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCSTR>(init), &module_base);
+    addon.module_base = module_base;
+#endif
 
     // The plugin may be built against a newer minor version whose GwpPluginDesc is longer than ours.
     // It writes into a buffer of GWP_PLUGIN_DESC_MAX_SIZE bytes (the contract in gwp_api.h), never onto our struct.
     alignas(std::max_align_t) uint8_t desc_buffer[GWP_PLUGIN_DESC_MAX_SIZE] = {};
     GwpPluginDesc& desc = *reinterpret_cast<GwpPluginDesc*>(desc_buffer);
-    const GwpResult result = init(&g_engine_api, &addon.handle, &desc);
+    InitCall call{ init, &addon.handle, &desc, GWP_ERROR };
+    addon.loading = true;
+    addon.load_crash.clear();
+    const bool init_ran = events::CallPluginGuarded(reinterpret_cast<const void*>(init), GWP_PLUGIN_ENTRY_NAME,
+        &InitThunk, &call);
+    addon.loading = false;
+    const GwpResult result = init_ran && addon.load_crash.empty() ? call.result : GWP_ERROR;
     if (result != GWP_OK)
     {
-        events::RemovePluginSubscriptions(&addon.handle); // the plugin may have subscribed before failing
-        addon.module.reset();
+        ReleasePlugin(addon); // the plugin may have registered things before failing; on_unload is not called
         string64 code;
         xr_sprintf(code, "%d", static_cast<int>(result));
-        addon.reason = xr_string(GWP_PLUGIN_ENTRY_NAME) + " returned " + code;
+        addon.reason = !init_ran ? xr_string(GWP_PLUGIN_ENTRY_NAME) + " crashed"
+            : !addon.load_crash.empty() ? "crashed in " + addon.load_crash + " during " + GWP_PLUGIN_ENTRY_NAME
+                                        : xr_string(GWP_PLUGIN_ENTRY_NAME) + " returned " + code;
         MarkPluginUnavailable(addon);
         return;
     }
@@ -967,8 +1099,7 @@ void LoadPlugin(AddonRecord& addon)
         desc.abi_major == GWP_API_VERSION_MAJOR && desc.api_min <= GWP_API_VERSION;
     if (!header_ok)
     {
-        events::RemovePluginSubscriptions(&addon.handle);
-        addon.module.reset();
+        ReleasePlugin(addon);
         addon.reason = "plugin header mismatch: abi " + VersionString(GWP_MAKE_VERSION(desc.abi_major, 0, 0)) +
             ", requires api " + VersionString(desc.api_min) + ", engine api " + VersionString(GWP_API_VERSION);
         MarkPluginUnavailable(addon);
@@ -982,6 +1113,16 @@ void LoadPlugin(AddonRecord& addon)
     addon.state = EAddonState::Active;
     addon.reason.clear();
     Logf("* ", AddonTag(addon).c_str(), "plugin '%s' loaded: %s", addon.plugin_name.c_str(), addon.plugin_path.c_str());
+}
+
+// Unloads what is loaded (a crashed plugin too) and loads the library again: the copy is made anew, so a library
+// rebuilt meanwhile is the one loaded. No plugin code may be on the stack.
+void ReloadPlugin(AddonRecord& addon)
+{
+    if (addon.module)
+        UnloadPlugin(addon);
+    addon.plugin_state = EPluginState::None;
+    LoadPlugin(addon);
 }
 } // namespace detail
 
@@ -1012,6 +1153,7 @@ void Initialize()
         DiscoverInRoot(root);
     }
 
+    console::LoadCvarsFile(); // appdata/plugins.ltx: the saved values, before the plugins register variables
     for (auto& addon : *g_addons)
     {
         if (addon->state == EAddonState::Discovered)
@@ -1037,14 +1179,11 @@ void Shutdown()
     for (auto it = g_addons->rbegin(); it != g_addons->rend(); ++it)
     {
         AddonRecord& addon = **it;
-        if (addon.plugin_state != EPluginState::Loaded)
-            continue;
-        if (addon.desc.on_unload)
-            addon.desc.on_unload(addon.desc.user);
-        events::RemovePluginSubscriptions(&addon.handle); // handlers point into the library being unloaded
-        console::RemovePluginCvars(&addon.handle);        // the console keeps a pointer into the host, not the plugin
-        ini::ClosePluginFiles(&addon.handle);
-        addon.module.reset();
+        if (!addon.module)
+            continue; // no plugin, not loaded, or a crashed one unloaded already
+        // on_unload, then everything that points into the library: handlers, binder vtables, callbacks, the
+        // evaluator and action proxies (back to Lua), planners, exports, variables and ini files of the plugin
+        UnloadPlugin(addon);
         addon.plugin_state = EPluginState::Unavailable;
     }
     xr_delete(g_addons);
@@ -1053,6 +1192,13 @@ void Shutdown()
     ini::Shutdown();
     console::Shutdown();
     timers::Shutdown();
+    binders::Shutdown();
+    storage::Shutdown();
+    callbacks::Shutdown();
+    goap::Shutdown();
+    goap::ShutdownPlanners();
+    ShutdownNpcApi();
+    ShutdownExports();
     events::Shutdown();
     g_initialized = false;
 }
@@ -1136,6 +1282,138 @@ void ReadSaveData(IReader& stream)
     reader->close();
     if (g_debug_log)
         Logf("  ", "addons", "plugin save data: %u chunk(s) loaded", static_cast<u32>(g_save_data.size()));
+}
+
+void OnPluginCrashed(const GwpPlugin* plugin, pcstr what)
+{
+    using namespace detail;
+    AddonRecord* addon = plugin ? plugin->addon : nullptr;
+    if (!addon)
+        return;
+    const pcstr where = what && what[0] ? what : "?";
+    if (addon->loading)
+    {
+        // A callback the plugin got while it registered (on_spawn of an online object): the load fails
+        if (addon->load_crash.empty())
+            addon->load_crash = where;
+        StopPlugin(plugin);
+        return;
+    }
+    if (addon->plugin_state == EPluginState::Crashed)
+    {
+        // Stopped already: a second crash before the unload. An outer frame of the plugin may have subscribed or
+        // registered again after the first stop - that goes too (StopPlugin may run any number of times)
+        StopPlugin(plugin);
+        return;
+    }
+    if (addon->plugin_state != EPluginState::Loaded)
+        return;
+    addon->plugin_state = EPluginState::Crashed;
+    addon->reason = xr_string("crashed in ") + where;
+    StopPlugin(plugin);
+    g_plugin_work = true;
+    const u32 left = addon->restarts < kMaxAutoRestarts ? kMaxAutoRestarts - addon->restarts : 0;
+    Logf("! ", AddonTag(*addon).c_str(),
+        "plugin '%s' crashed in %s and is stopped, what it took over goes back to Lua. The library is unloaded at the "
+        "next frame and loaded again at the next game load (%u automatic restart(s) left in this run), or now with "
+        "the console command plugin_reload %s. NPCs it already ran may misbehave until a save is loaded",
+        addon->plugin_name.c_str(), where, left, addon->id.c_str());
+}
+
+void OnFrame()
+{
+    using namespace detail;
+    // Only at the top of a frame: a plugin function on the stack would return into an unloaded library
+    if (!g_plugin_work || !g_addons || events::PluginCallDepth() != 0)
+        return;
+    g_plugin_work = false;
+    for (auto& entry : *g_addons)
+    {
+        AddonRecord& addon = *entry;
+        if (addon.reload_requested)
+        {
+            addon.reload_requested = false;
+            Logf("* ", AddonTag(addon).c_str(), "plugin_reload: reloading plugin '%s'", addon.plugin_name.c_str());
+            ReloadPlugin(addon);
+            if (addon.plugin_state == EPluginState::Loaded && g_pGameLevel)
+            {
+                Logf("~ ", AddonTag(addon).c_str(), "plugin '%s' reloaded inside a game: it got no alife_on_start of "
+                    "this game. The objects online keep what the old instance gave them, unless the plugin sets them "
+                    "up again itself (gw_npc does); otherwise load a save", addon.plugin_name.c_str());
+            }
+            continue;
+        }
+        if (addon.plugin_state == EPluginState::Crashed && addon.module)
+        {
+            UnloadPlugin(addon);
+            Logf("~ ", AddonTag(addon).c_str(), "plugin '%s' unloaded after its crash", addon.plugin_name.c_str());
+        }
+    }
+}
+
+void OnGameStart()
+{
+    using namespace detail;
+    if (!g_addons)
+        return;
+    for (auto& entry : *g_addons)
+    {
+        AddonRecord& addon = *entry;
+        if (addon.plugin_state != EPluginState::Crashed)
+            continue;
+        if (events::PluginCallDepth() != 0)
+        {
+            // The game started from inside a plugin function: its library cannot go now, the next load tries
+            g_plugin_work = true;
+            continue;
+        }
+        if (addon.restarts >= kMaxAutoRestarts)
+        {
+            if (!addon.restart_refused_logged)
+            {
+                addon.restart_refused_logged = true;
+                Logf("! ", AddonTag(addon).c_str(), "plugin '%s' stays stopped: it crashed after %u automatic "
+                    "restart(s) in this run (console: plugin_reload %s)", addon.plugin_name.c_str(), addon.restarts,
+                    addon.id.c_str());
+            }
+            continue;
+        }
+        ++addon.restarts;
+        Logf("* ", AddonTag(addon).c_str(), "plugin '%s' is loaded again (it %s; restart %u of %u)",
+            addon.plugin_name.c_str(), addon.reason.c_str(), addon.restarts, kMaxAutoRestarts);
+        ReloadPlugin(addon);
+    }
+}
+
+bool RequestPluginReload(pcstr addon_id, xr_string& reason)
+{
+    using namespace detail;
+    if (!g_addons || !addon_id || !addon_id[0])
+    {
+        reason = "no addon id";
+        return false;
+    }
+    for (auto& entry : *g_addons)
+    {
+        AddonRecord& addon = *entry;
+        if (!EqualsNoCase(addon.id, addon_id))
+            continue;
+        // A duplicate, a disabled addon or one with a broken manifest (its plugin name may be unchecked) is no
+        // reload target; an addon failed by its required plugin is, as a plugin that did not load at the start
+        if (addon.state == EAddonState::Skipped || addon.state == EAddonState::Discovered ||
+            (addon.state == EAddonState::Failed && addon.plugin_state != EPluginState::Unavailable))
+            continue;
+        if (addon.plugin_name.empty())
+        {
+            reason = "the addon has no plugin";
+            return false;
+        }
+        addon.reload_requested = true;
+        g_plugin_work = true;
+        return true;
+    }
+    reason = "no such addon (addon_list shows them)";
+    return false;
 }
 
 pcstr PluginAddonId(const GwpPlugin* plugin)

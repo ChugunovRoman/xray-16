@@ -778,7 +778,10 @@ void CCustomMonster::UpdatePositionAnimation()
     ZoneScopedN("ucl_cm_select_animation");
     // Animation LOD: skip animation selection for throttled (far, non-combat) NPCs; movement stays every frame.
     if (!bfScriptAnimation() && should_update_animation(Device.dwTimeGlobal))
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterSelectAnimation);
         SelectAnimation(XFORM().k, movement().detail().direction(), movement().speed());
+    }
     STOP_PROFILE
 }
 

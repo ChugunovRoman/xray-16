@@ -66,6 +66,21 @@ int GWP_CALL ApiObjectDirection(GwpObjectId id, float out_xyz[3])
     return 1;
 }
 
+// CLASS_ID as the text the class was registered with ("AI_STL_S"): CLSID2TEXT pads it with spaces to 8
+// characters, which are not part of the name.
+int GWP_CALL ApiObjectClassId(GwpObjectId id, char out[9])
+{
+    if (out)
+        out[0] = 0;
+    const CGameObject* object = FindObject(id);
+    if (!object || !out)
+        return 0;
+    CLSID2TEXT(object->CLS_ID, out);
+    for (int i = 7; i >= 0 && out[i] == ' '; --i)
+        out[i] = 0;
+    return 1;
+}
+
 int GWP_CALL ApiObjectIsAlive(GwpObjectId id)
 {
     const CEntity* entity = smart_cast<const CEntity*>(FindObject(id));
@@ -91,5 +106,6 @@ void FillObjectsApi(GwpEngineApi& api)
     api.object_is_alive = &ApiObjectIsAlive;
     api.actor_id = &ApiActorId;
     api.object_direction = &ApiObjectDirection;
+    api.object_class_id = &ApiObjectClassId;
 }
 } // namespace gw::addons

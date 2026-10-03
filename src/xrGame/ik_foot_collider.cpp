@@ -175,6 +175,11 @@ IC bool get_plane(ik_pick_result& r, Fvector& next_pos, float& next_range, const
 
 IC bool rq_pick_hit(const collide::rq_result& R) { return R.element >= 0; }
 
+// npc_perf_ik_foot_static_only: 1 = the feet look for the static geometry only (terrain, buildings); 0 = also the
+// dynamic objects (physic objects, other NPCs). In a crowd every foot ray tested the skeletons of the neighbours
+// and was re-cast through them (PickContinueAfterFirstHit): milliseconds per NPC
+IC collide::rq_target ik_foot_target() { return npc_perf_ik_foot_static_only ? collide::rqtStatic : collide::rqtBoth; }
+
 static bool PickContinueAfterFirstHit(ik_pick_result& r, const ik_pick_query& q, IGameObject* ignore_object,
     collide::rq_result R, Fvector pos, float range)
 {
@@ -198,7 +203,7 @@ static bool PickContinueAfterFirstHit(ik_pick_result& r, const ik_pick_query& q,
             collided = false;
             break;
         }
-        if (!g_pGameLevel->ObjectSpace.RayPick(pos, q.dir(), range, collide::rqtBoth, R, ignore_object))
+        if (!g_pGameLevel->ObjectSpace.RayPick(pos, q.dir(), range, ik_foot_target(), R, ignore_object))
         {
             collided = false;
             break;
@@ -228,7 +233,7 @@ bool Pick(ik_pick_result& r, const ik_pick_query& q, IGameObject* ignore_object)
     const float range = q.range();
     const Fvector pos = q.pos();
     collide::rq_result R;
-    if (!g_pGameLevel->ObjectSpace.RayPick(pos, q.dir(), range, collide::rqtBoth, R, ignore_object))
+    if (!g_pGameLevel->ObjectSpace.RayPick(pos, q.dir(), range, ik_foot_target(), R, ignore_object))
         return false;
     return PickContinueAfterFirstHit(r, q, ignore_object, R, pos, range);
 }
@@ -411,9 +416,9 @@ void ik_foot_collider::collide(SIKCollideData& cld, const ik_foot_geom& foot_geo
     {
         collide::rq_result R[3];
         CObjectSpace::RayPickBatchItem batch[3];
-        batch[0] = { q[0].pos(), q[0].dir(), q[0].range(), collide::rqtBoth, O, &R[0] };
-        batch[1] = { q[1].pos(), q[1].dir(), q[1].range(), collide::rqtBoth, O, &R[1] };
-        batch[2] = { q[2].pos(), q[2].dir(), q[2].range(), collide::rqtBoth, O, &R[2] };
+        batch[0] = { q[0].pos(), q[0].dir(), q[0].range(), ik_foot_target(), O, &R[0] };
+        batch[1] = { q[1].pos(), q[1].dir(), q[1].range(), ik_foot_target(), O, &R[1] };
+        batch[2] = { q[2].pos(), q[2].dir(), q[2].range(), ik_foot_target(), O, &R[2] };
         g_pGameLevel->ObjectSpace.RayPickBatch(batch, 3);
 
         toe_collided = rq_pick_hit(R[0]) && PickContinueAfterFirstHit(r_toe, q[0], O, R[0], q[0].pos(), q[0].range());
