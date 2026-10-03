@@ -40,6 +40,16 @@ u32 g_enemy_count = 0;
 u32 g_patrol_count = 0;
 GwpCallbackId g_next_id = 1;
 u32 g_dispatch_depth = 0;
+
+// The depth comes back down also when something unwinds through a dispatch: a depth stuck above zero would keep the
+// dead callbacks in the list for the rest of the run
+struct DispatchDepthScope
+{
+    DispatchDepthScope() { ++g_dispatch_depth; }
+    ~DispatchDepthScope() { --g_dispatch_depth; }
+    DispatchDepthScope(const DispatchDepthScope&) = delete;
+    DispatchDepthScope& operator=(const DispatchDepthScope&) = delete;
+};
 bool g_has_dead = false; // entries removed during a dispatch, erased after it
 
 bool CheckCall(pcstr function)
@@ -118,15 +128,11 @@ void Thunk(void* context)
                                                 : callback.patrol(callback.user, call.npc, call.point);
 }
 
-// Asks every callback of the kind; false as soon as one says no. A crash counts as yes.
-bool Ask(EKind kind, u16 npc, u16 enemy, u32 point)
+// The walk of Ask, inside the dispatch depth (dead entries are only marked meanwhile)
+bool AskAll(EKind kind, u16 npc, u16 enemy, u32 point)
 {
-    // Plugins run on the game logic thread only (their API refuses any other): a question from elsewhere is
-    // answered as without them.
-    if (!IsMainThread())
-        return true;
+    const DispatchDepthScope depth;
     bool answer = true;
-    ++g_dispatch_depth;
     // Index loop over the size at the start: a callback may register another one (push_back) meanwhile.
     const size_t count = g_callbacks->size();
     for (size_t i = 0; i < count && answer; ++i)
@@ -154,7 +160,17 @@ bool Ask(EKind kind, u16 npc, u16 enemy, u32 point)
             answer = false;
         }
     }
-    --g_dispatch_depth;
+    return answer;
+}
+
+// Asks every callback of the kind; false as soon as one says no. A crash counts as yes.
+bool Ask(EKind kind, u16 npc, u16 enemy, u32 point)
+{
+    // Plugins run on the game logic thread only (their API refuses any other): a question from elsewhere is
+    // answered as without them.
+    if (!IsMainThread())
+        return true;
+    const bool answer = AskAll(kind, npc, enemy, point);
     EraseDead();
     return answer;
 }

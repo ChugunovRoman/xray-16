@@ -50,6 +50,16 @@ constexpr u8 kDestroying = 2; // OnObjectDestroy is sending on_destroy: a binder
 // A binder unregistered from inside a callback (its own or another one's) is deleted after the outermost
 // dispatch returns: the frame that called it may still hold the pointer.
 u32 g_dispatch_depth = 0;
+
+// The depth comes back down also when something unwinds through a dispatch: a depth stuck above zero would keep the
+// graveyard from being emptied for the rest of the run
+struct DispatchDepthScope
+{
+    DispatchDepthScope() { ++g_dispatch_depth; }
+    ~DispatchDepthScope() { --g_dispatch_depth; }
+    DispatchDepthScope(const DispatchDepthScope&) = delete;
+    DispatchDepthScope& operator=(const DispatchDepthScope&) = delete;
+};
 xr_vector<Binder*>* g_graveyard = nullptr;
 
 // Plugins that crashed in a binder callback: binder_register refuses them until the library is unloaded
@@ -221,9 +231,11 @@ bool Invoke(Binder& binder, ECallback kind, u16 id, pcstr section = nullptr, u32
     Call call{ &binder, kind, id, section, count, updates };
     const GwpPlugin* const plugin = binder.plugin;
     const pcstr name = kCallbackNames[static_cast<size_t>(kind)];
-    ++g_dispatch_depth;
-    const bool ok = events::CallPluginGuarded(callback, name, &Thunk, &call);
-    --g_dispatch_depth;
+    bool ok;
+    {
+        const DispatchDepthScope depth;
+        ok = events::CallPluginGuarded(callback, name, &Thunk, &call);
+    }
     if (!ok)
     {
         if (!g_crashed)

@@ -1383,7 +1383,9 @@ typedef struct GwpEngineApi
     /* The patrol path of an NPC. npc_set_patrol_path: npc:set_patrol_path(name, start, route, random) - a stalker;
        refused for a path the level has not (Lua asserts there) or a start / route outside GWP_PATROL_START_* /
        GWP_PATROL_ROUTE_*. npc_set_start_point: npc:set_start_point(i) - a stalker or a monster with a path that
-       has the point (Lua logs "Path not specified" otherwise). npc_patrol_point_index:
+       has the point (Lua logs "Path not specified" otherwise). With GWP_PATROL_START_POINT set the path first, the
+       point after it: a new path resets the start point (without one the NPC heads for where it stands and the
+       engine logs its restrictions every update). npc_patrol_point_index:
        npc:get_current_point_index() - GWP_INVALID_PATROL_POINT without a path or for anything but an online NPC.
        npc_patrol_path_name: the name of its patrol path into out (zero-terminated, cut to cap - 1), the length of
        the full name as the result; 0 without a path (Lua's patrol() logs "Path not specified" there).

@@ -530,19 +530,75 @@ void LogPluginException(DWORD code, const void* address, pcstr what)
         code == EXCEPTION_STACK_OVERFLOW ? ": a stack overflow, no stack trace" : "");
 }
 
+HMODULE ModuleOfAddress(const void* address)
+{
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            static_cast<LPCSTR>(address), &module))
+        return nullptr;
+    return module;
+}
+
+// The C/C++ runtime a plugin calls directly: memcpy, strlen and the like fault there on a bad argument of the plugin
+bool IsRuntimeModule(HMODULE module)
+{
+    string_path path{};
+    if (!GetModuleFileNameA(module, path, sizeof(path)))
+        return false;
+    const pcstr slash = strrchr(path, '\\');
+    const pcstr name = slash ? slash + 1 : path;
+    return !_strnicmp(name, "vcruntime", 9) || !_strnicmp(name, "ucrtbase", 8) || !_strnicmp(name, "msvcp", 5);
+}
+
+// The fault is the plugin's: its own code faulted, or the first frame outside the runtime is in its module - a call
+// through a null or dangling function pointer (the fault address is no code at all) or a bad argument to the
+// runtime. The frames above are found with the unwind data (x64); a fault in the engine stays the engine's.
+bool FaultOfPlugin(const EXCEPTION_POINTERS* info, HMODULE plugin_module, DWORD code)
+{
+    HMODULE module = ModuleOfAddress(info->ExceptionRecord->ExceptionAddress);
+    if (module == plugin_module)
+        return true;
+#if defined(_M_X64)
+    // Not for a stack overflow: too little stack is left to walk
+    if (code == EXCEPTION_STACK_OVERFLOW || (module && !IsRuntimeModule(module)))
+        return false;
+    CONTEXT context = *info->ContextRecord;
+    for (int frame = 0; frame < 8; ++frame)
+    {
+        DWORD64 image_base = 0;
+        if (PRUNTIME_FUNCTION function = RtlLookupFunctionEntry(context.Rip, &image_base, nullptr))
+        {
+            void* handler_data = nullptr;
+            DWORD64 establisher_frame = 0;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context.Rip, function, &context, &handler_data,
+                &establisher_frame, nullptr);
+        }
+        else
+        {
+            // A leaf function, or no code at all (the call through a bad pointer): the return address is on top
+            context.Rip = *reinterpret_cast<const DWORD64*>(context.Rsp);
+            context.Rsp += sizeof(DWORD64);
+        }
+        module = context.Rip ? ModuleOfAddress(reinterpret_cast<const void*>(context.Rip)) : nullptr;
+        if (module == plugin_module)
+            return true;
+        if (!module || !IsRuntimeModule(module))
+            return false;
+    }
+#else
+    (void)code;
+#endif
+    return false;
+}
+
 int PluginCrashFilter(EXCEPTION_POINTERS* info, HMODULE plugin_module, pcstr what, DWORD& code, void*& address)
 {
     code = info->ExceptionRecord->ExceptionCode;
     address = info->ExceptionRecord->ExceptionAddress;
     if (code == EXCEPTION_BREAKPOINT || code == EXCEPTION_SINGLE_STEP || !plugin_module)
         return EXCEPTION_CONTINUE_SEARCH;
-    HMODULE fault_module = nullptr;
-    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-            static_cast<LPCSTR>(address), &fault_module) ||
-        fault_module != plugin_module)
-    {
+    if (!FaultOfPlugin(info, plugin_module, code))
         return EXCEPTION_CONTINUE_SEARCH;
-    }
     if (code != EXCEPTION_STACK_OVERFLOW)
         LogPluginCrash(info, plugin_module, what);
     return EXCEPTION_EXECUTE_HANDLER;
