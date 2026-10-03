@@ -40,6 +40,17 @@ void path_file_name_no_ext(string_path& io)
         *e = 0;
     xr_strlwr(io);
 }
+
+// RTTI-free substitute for dynamic_cast<CKinematics*>: Instance_Create maps exactly
+// these OGF types to CKinematics-derived classes, and dynamic_cast applied to a
+// dangling LOD pointer throws std::__non_rtti_object (unhandled C++ exception,
+// 0xE06D7363) instead of returning null
+CKinematics* AsSkeletonVisual(dxRender_Visual* visual)
+{
+    if (visual && (visual->Type == MT_SKELETON_ANIM || visual->Type == MT_SKELETON_RIGID))
+        return static_cast<CKinematics*>(visual);
+    return nullptr;
+}
 } // namespace
 
 int psSkeletonUpdate = 32;
@@ -153,12 +164,10 @@ CKinematics::~CKinematics()
 
     if (m_lod)
     {
-        if (CKinematics* lod_kinematics = dynamic_cast<CKinematics*>(m_lod))
+        CKinematics* lod_kinematics = AsSkeletonVisual(m_lod);
+        if (lod_kinematics && lod_kinematics->m_is_original_lod)
         {
-            if (lod_kinematics->m_is_original_lod)
-            {
-                lod_kinematics->Release();
-            }
+            lod_kinematics->Release();
         }
 
         xr_delete(m_lod);
@@ -257,7 +266,8 @@ void CKinematics::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
                 m_lod = (dxRender_Visual*)RImplementation.model_CreateChild(lod_name, nullptr);
                 --s_skeleton_lod_load_depth;
 
-                if (CKinematics* lod_kinematics = dynamic_cast<CKinematics*>(m_lod))
+                CKinematics* lod_kinematics = AsSkeletonVisual(m_lod);
+                if (lod_kinematics)
                 {
                     lod_kinematics->m_is_original_lod = true;
                 }

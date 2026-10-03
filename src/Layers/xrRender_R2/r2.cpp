@@ -81,11 +81,14 @@ public:
         if (!name || !name[0])
         {
             shader.destroy();
+            shader_occlusion.destroy();
             return;
         }
 
         // Reuse the existing flare additive shader for world-space glow sprites.
         shader.create("effects\\flare", name);
+        // Depth-tested variant for occluded world glows (see CGlowManager::Render).
+        shader_occlusion.create("effects\\gw_glow", name);
     }
 
     void set_color(const Fcolor& C) override
@@ -107,11 +110,21 @@ public:
     Fvector direction{ 0.f, 0.f, 0.f };
     float radius{ 0.1f };
     Fcolor color;
+    // shader: no depth test, for ignore_occlusion glows (the laser dot lies
+    // right on the picked surface and would z-fight with a Z-test).
+    // shader_occlusion: depth-tested sprite for world glows.
     ref_shader shader;
+    ref_shader shader_occlusion;
 };
 
 namespace
 {
+// The glow sprite is shifted along the beam by up to this distance (capped by
+// the glow radius) to keep its quad plane out of the owner's geometry: torch
+// guide bones sit inside the NPC's body and would self-occlude a depth-tested
+// glow sprite.
+constexpr float MAX_GLOW_LENS_OFFSET = 0.3f;
+
 IC void FillGlowSprite(FVF::LIT*& pv, const Fvector& pos, float radius, u32 color)
 {
     const Fvector& top = Device.vCameraTop;
@@ -237,15 +250,27 @@ void CGlowManager::Render()
 
     for (CGlow* glow : glows)
     {
-        Fvector to_camera;
-        to_camera.sub(camera_pos, glow->position);
-        const float dist_sq = to_camera.square_magnitude();
+        // Lens position: shift the sprite out of the owner's geometry along
+        // the beam, so the occlusion tests below don't always cull the glow
+        // with the owner itself (torch guide bones sit inside the NPC's body).
+        const bool has_direction = glow->direction.square_magnitude() > EPS_S;
+        Fvector lens_pos = glow->position;
+        if (has_direction)
+            lens_pos.mad(glow->direction, _min(glow->radius, MAX_GLOW_LENS_OFFSET));
+
+        Fvector to_glow;
+        to_glow.sub(lens_pos, camera_pos);
+        const float dist_sq = to_glow.square_magnitude();
         if (dist_sq <= EPS_S)
             continue;
 
         const float dist = _sqrt(dist_sq);
+        // The occlusion ray must go camera -> glow; the old code normalized
+        // glow -> camera and shot from the camera, testing only the space
+        // behind the camera, so obstacles between camera and glow were
+        // never sampled.
         Fvector ray_dir;
-        ray_dir.div(to_camera, dist);
+        ray_dir.div(to_glow, dist);
 
         if (!glow->m_ignore_occlusion && g_pGameLevel && dist > 0.05f)
         {
@@ -255,7 +280,7 @@ void CGlowManager::Render()
             {
                 u32 visible_samples = 0;
 
-                if (IsGlowSampleVisible(camera_pos, glow->position))
+                if (IsGlowSampleVisible(camera_pos, lens_pos))
                     ++visible_samples;
 
                 const float sample_radius = glow->radius * 0.75f;
@@ -267,19 +292,19 @@ void CGlowManager::Render()
 
                     Fvector sample_pos;
 
-                    sample_pos.add(glow->position, right_offset);
+                    sample_pos.add(lens_pos, right_offset);
                     if (IsGlowSampleVisible(camera_pos, sample_pos))
                         ++visible_samples;
 
-                    sample_pos.sub(glow->position, right_offset);
+                    sample_pos.sub(lens_pos, right_offset);
                     if (IsGlowSampleVisible(camera_pos, sample_pos))
                         ++visible_samples;
 
-                    sample_pos.add(glow->position, top_offset);
+                    sample_pos.add(lens_pos, top_offset);
                     if (IsGlowSampleVisible(camera_pos, sample_pos))
                         ++visible_samples;
 
-                    sample_pos.sub(glow->position, top_offset);
+                    sample_pos.sub(lens_pos, top_offset);
                     if (IsGlowSampleVisible(camera_pos, sample_pos))
                         ++visible_samples;
                 }
@@ -306,11 +331,13 @@ void CGlowManager::Render()
         const float distance_fade = 1.f - dist_sq * inv_far_plane_sq;
         alpha_scale *= clampr(distance_fade, 0.f, 1.f);
 
-        if (glow->direction.square_magnitude() > EPS_S && dist_sq > EPS_S)
+        if (has_direction)
         {
-            Fvector camera_to_glow;
-            camera_to_glow.invert(ray_dir);
-            alpha_scale *= clampr(camera_to_glow.dotproduct(glow->direction), 0.f, 1.f);
+            // Lens-flare fade: brightest when the beam faces the viewer
+            // (the old dot product had the sign inverted).
+            Fvector glow_to_camera;
+            glow_to_camera.invert(ray_dir);
+            alpha_scale *= clampr(glow_to_camera.dotproduct(glow->direction), 0.f, 1.f);
         }
 
         if (alpha_scale <= EPS_S)
@@ -320,14 +347,12 @@ void CGlowManager::Render()
         draw_color.a = alpha_scale;
         const u32 packed_color = draw_color.get();
         Fvector draw_position;
-        draw_position.mad(
-            glow->position,
-            Device.vCameraDirection,
-            -0.001f
-        );
+        draw_position.mad(lens_pos, Device.vCameraDirection, -0.001f);
 
         vertex_offsets.push_back(v_offset + draw_count * 4);
-        shaders.push_back(glow->shader);
+        // Depth-tested sprite for world glows; the plain flare shader stays
+        // only for ignore_occlusion glows (they lie on the picked surface).
+        shaders.push_back(glow->m_ignore_occlusion ? glow->shader : glow->shader_occlusion);
         FillGlowSprite(cursor, draw_position, glow->radius, packed_color);
         ++draw_count;
     }

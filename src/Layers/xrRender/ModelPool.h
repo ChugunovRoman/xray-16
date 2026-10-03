@@ -43,7 +43,6 @@ class ECORE_API CModelPool
     POOL Pool; // Unused / Inactive
     BOOL bLogging;
     BOOL bForceDiscard;
-    BOOL bAllowChildrenDuplicate;
 
     void Destroy();
 

@@ -251,7 +251,6 @@ CModelPool::CModelPool()
 {
     bLogging = TRUE;
     bForceDiscard = FALSE;
-    bAllowChildrenDuplicate = TRUE;
     g_pMotionsContainer = xr_new<motions_container>();
 }
 
@@ -315,12 +314,10 @@ dxRender_Visual* CModelPool::Create(LPCSTR name, LPCSTR suffix, IReader* data)
         if (nullptr == Base)
         {
             // 2. If not found
-            bAllowChildrenDuplicate = FALSE;
             if (data)
                 Base = Instance_Load(low_name, suffix, data, TRUE);
             else
                 Base = Instance_Load(low_name, suffix, TRUE);
-            bAllowChildrenDuplicate = TRUE;
             if (!Base)
                 return nullptr;
         }
@@ -350,6 +347,7 @@ dxRender_Visual* CModelPool::CreateChild(LPCSTR name, LPCSTR suffix, IReader* da
 
     // 1. Search for already loaded model
     dxRender_Visual* Base = Instance_Find(low_name_suffix);
+    const bool registered_base = (nullptr != Base);
     if (nullptr == Base)
     {
         if (data)
@@ -361,8 +359,22 @@ dxRender_Visual* CModelPool::CreateChild(LPCSTR name, LPCSTR suffix, IReader* da
     if (!Base)
         return nullptr;
 
-    dxRender_Visual* Model = bAllowChildrenDuplicate ? Instance_Duplicate(Base) : Base;
-    return Model;
+    // A registered Models base must never be handed out for ownership: nested owners
+    // (skeleton LOD in ~CKinematics, hierrarhy children in ~FHierrarhyVisual) free
+    // visuals with xr_delete, which would leave a dangling Models entry and a
+    // use-after-free for every other user of that base. A duplicate would not do
+    // either: CKinematics::Copy shares bones/pUserData/bone_map with the base, and
+    // the owner marks the child m_is_original_lod and calls Release() on it - the
+    // shared data of the base would be freed twice. The child gets a private load.
+    if (registered_base)
+    {
+        Msg("! [ModelPool] CreateChild: child '%s' matches a registered base model, "
+            "loaded privately to own its data", low_name_suffix);
+        if (data)
+            return Instance_Load(low_name, suffix, data, FALSE);
+        return Instance_Load(low_name, suffix, FALSE);
+    }
+    return Base;
 }
 
 void CModelPool::DeleteInternal(dxRender_Visual*& V, BOOL bDiscard)
