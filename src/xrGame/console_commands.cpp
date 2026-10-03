@@ -289,6 +289,8 @@ int ai_evaluator_solve_cache = 1;
 int npc_anim_lod = 1;
 int npc_anim_lod_far_interval_ms = 120;
 
+int ps_ui_single_onframe = 0;
+
 u32 npc_preview_scene_budget_per_frame = 1;
 u32 npc_preview_disk_cache_warm_per_frame = 16;
 
@@ -3171,6 +3173,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_walker_camp_once", &npc_perf_walker_camp_once, 0, 1);
     CMD4(CCC_Integer, "npc_perf_scheme_condlist_ttl_ms", &npc_perf_scheme_condlist_ttl_ms, 0, 5000);
     CMD4(CCC_Integer, "npc_perf_move_mgr_fixes", &npc_perf_move_mgr_fixes, 0, 1);
+    CMD4(CCC_Integer, "ui_single_onframe", &ps_ui_single_onframe, 0, 1);
     CMD4(CCC_Integer, "npc_preview_scene_budget_per_frame", (int*)&npc_preview_scene_budget_per_frame, 1, 500);
     CMD4(CCC_Integer, "npc_preview_disk_cache_warm_per_frame", (int*)&npc_preview_disk_cache_warm_per_frame, 0, 500);
 

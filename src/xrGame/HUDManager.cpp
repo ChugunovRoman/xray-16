@@ -12,6 +12,7 @@
 #include "UIGameCustom.h"
 #include "xrUICore/Cursor/UICursor.h"
 #include "game_cl_base.h"
+#include "performance_cvars.h"
 #ifdef DEBUG
 #include "PHDebug.h"
 #endif
@@ -43,7 +44,7 @@ void CHUDManager::OnFrame()
     if (!b_online)
         return;
 
-    if (pUIGame)
+    if (!ps_ui_single_onframe && pUIGame)
         pUIGame->OnFrame();
 
     m_pHUDTarget->CursorOnFrame();

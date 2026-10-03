@@ -160,4 +160,6 @@ extern int npc_perf_visible_value_native;
 // counted (_gw_internal.logic.stats prints them).
 extern int npc_perf_condlist_native;
 
+extern int ps_ui_single_onframe;
+
 #endif // PERFORMANCE_CVARS_H_INCLUDED
