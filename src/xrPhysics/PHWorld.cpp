@@ -556,11 +556,26 @@ void CPHWorld::Step()
         // IslandReinit (Unmerge). Merged-away members report IsActive()==false and are skipped;
         // each active root steps its own merged dxWorld exactly once -> no cross-thread aliasing.
         m_island_solve_batch.clear();
+        // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): same O(N) pass - deliberately crude,
+        // no velocity/settle check and no island-wide synchronization (that required every member of a
+        // merged group to qualify at once, which in a busy fight almost never happened - any live NPC
+        // transiently merged into the same island via contact blocked the whole group forever). Just:
+        // old enough + far enough from the camera -> force-disable, full stop. A far corpse not reacting
+        // correctly to a later impact is preferable to paying its simulation cost every step.
+        const bool corpse_sleep_enabled = ph_console::ph_corpse_sleep_ms > 0;
+        if (corpse_sleep_enabled)
+            m_corpses_to_sleep.clear();
         for (i_object = m_objects.begin(); m_objects.end() != i_object; ++i_object)
         {
             CPHObject* obj = (*i_object);
             if (obj->Island().IsActive())
                 m_island_solve_batch.push_back(obj);
+
+            if (corpse_sleep_enabled && CPHCollideValidator::IsRagDollObject(*obj) &&
+                ShouldForceSleepCorpse(obj))
+            {
+                m_corpses_to_sleep.push_back(obj);
+            }
         }
 
         const size_t island_count = m_island_solve_batch.size();
@@ -615,6 +630,16 @@ void CPHWorld::Step()
         }
 
         ReinitMerged();
+    }
+
+    // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): must run after ReinitMerged() above, not
+    // inside the post-Collide/pre-reinit window where m_corpses_to_sleep was collected - deactivate()
+    // asserts the island is not mid-merge, which is only true once Unmerge() has run on this object.
+    if (ph_console::ph_corpse_sleep_ms > 0)
+    {
+        ZoneScopedN("ph_corpse_sleep");
+        PERF_SCOPE(ph_corpse_sleep_apply);
+        SleepCorpses();
     }
 
 #ifdef DEBUG
@@ -680,6 +705,50 @@ void CPHWorld::ReinitMerged()
     for (CPHObject* obj : m_merged_objects)
         obj->IslandReinit();
     m_merged_objects.clear();
+}
+
+bool CPHWorld::ShouldForceSleepCorpse(CPHObject* obj)
+{
+    // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): deliberately crude - no "settled for N ms"
+    // wait, no island-wide synchronization. Old enough + far enough from the camera, plus two cheap guards
+    // against freezing a broken pose (see below). safe cast: cbClassRagDoll is only ever set by
+    // CPHShell::SetRagDoll().
+    CPHShell* shell = static_cast<CPHShell*>(obj);
+    const u32 age_ms = Device.dwTimeGlobal - shell->m_ragdoll_since_ms;
+    if (age_ms < static_cast<u32>(ph_console::ph_corpse_sleep_ms))
+        return false;
+    IPhysicsShellHolder* holder = shell->PhysicsRefObject();
+    if (!holder)
+        return false; // нет привязки к игровому объекту - не трогаем
+    Fvector to_cam;
+    to_cam.sub(holder->ObjectPosition(), StepCameraPosition()); // snapshot: DoRender() may be overriding the live camera
+    const float far_dist_sq = ph_console::ph_corpse_sleep_far_dist * ph_console::ph_corpse_sleep_far_dist;
+    if (to_cam.square_magnitude() <= far_dist_sq)
+        return false;
+    // After an explosion the elements fly apart and ODE pulls them back to the joints over the next steps
+    // (fast corrective motion). Disabling during that window froze the ragdoll mid-air or with metres-long
+    // limbs/neck forever. Distance/age are checked first: these walk all elements/joints of the shell.
+    const float max_stretch = ph_console::ph_corpse_sleep_max_stretch;
+    if (max_stretch > 0.f && shell->get_MaxJointStretchSq() > max_stretch * max_stretch)
+        return false;
+    const float max_vel = ph_console::ph_corpse_sleep_max_vel;
+    if (max_vel > 0.f && shell->get_MaxElementLinearVelSq() > max_vel * max_vel)
+        return false;
+    return true;
+}
+
+void CPHWorld::SleepCorpses()
+{
+    // Called after ReinitMerged() (see Step()) - deactivate()'s VERIFY2(m_island.IsActive()) only holds
+    // once Unmerge() has run for this object this step.
+    for (CPHObject* obj : m_corpses_to_sleep)
+    {
+        CPHShell* shell = static_cast<CPHShell*>(obj);
+        shell->Disable();
+        shell->m_force_slept = true;
+        PERF_INC(ph_corpse_force_slept);
+    }
+    m_corpses_to_sleep.clear();
 }
 
 u32 CPHWorld::CalcNumSteps(u32 dTime)

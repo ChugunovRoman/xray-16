@@ -18,4 +18,16 @@ struct XRPHYSICS_API ph_console
     static int ph_spawn_activation_shape_early_exit; //= 1; skip the push-out Step() loop in CPHActivationShape::Activate when StepTouch already found no penetration and the shape size isn't changing
     static int ph_spawn_skip_correct_on_load; //= 1; skip CollisionCorrectObjPos for characters spawned in the initial level/save load burst (their positions are already valid)
     static int ph_dbg_spawn_stats; //= 0; log CPHActivationShape::Activate calls that run an unusually large number of physics steps or wake many objects
+
+    // Ф2 (PHYSICS_ACTIVE_SET_PLAN): принудительный сон дальних трупов — максимально грубо, без проверки
+    // скорости и без ожидания "устаканивания": старше ph_corpse_sleep_ms и дальше ph_corpse_sleep_far_dist
+    // от камеры -> Disable() безусловно. Труп может не среагировать на следующий удар — это приемлемая
+    // цена против постоянной стоимости его симуляции. 0 = выкл (старое поведение, только естественный сон ODE).
+    static int ph_corpse_sleep_ms; //= 3000; минимальный возраст трупа (мс) прежде чем гасить физику
+    static float ph_corpse_sleep_far_dist; //= 60.f; дистанция (м) от камеры, дальше которой труп гасится безусловно
+    // Защита от "замороженной растяжки": не гасить труп, пока он ещё летит/кувыркается или пока его суставы
+    // разошлись (после взрыва ODE стягивает элементы обратно за несколько шагов - если усыпить в этот момент,
+    // растянутая поза остаётся навсегда). 0 = проверка выключена.
+    static float ph_corpse_sleep_max_vel; //= 1.f; м/с, максимальная линейная скорость любого элемента рэгдолла
+    static float ph_corpse_sleep_max_stretch; //= 0.1f; м, максимальное расхождение точек крепления любого сустава
 };

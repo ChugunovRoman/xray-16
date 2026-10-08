@@ -113,6 +113,10 @@ protected:
 
 protected:
     NEAREST_OBJECTS m_nearest_objects;
+    // Ф1 (PHYSICS_ACTIVE_SET_PLAN, far-NPC kinematic): hysteresis state for should_force_far_kinematic() -
+    // engage beyond ph_npc_kinematic_far_dist, release only once back under (dist - ph_npc_kinematic_far_hyst).
+    // Transient, not saved: safely starts false, next tick recomputes correctly from actual distance.
+    bool m_kinematic_far_forced = false;
 
 protected:
     float m_speed;
@@ -155,6 +159,11 @@ private:
     void verify_detail_path();
 #endif // USE_FREE_IN_RESTRICTIONS
     void apply_collision_hit(CPHMovementControl* movement_control);
+    // Ф1 (PHYSICS_ACTIVE_SET_PLAN, far-NPC kinematic): true if this NPC is far enough from the actor (with
+    // hysteresis via m_kinematic_far_forced) to skip GetNearest()/TryPosition() entirely this tick and fall
+    // straight into move_along_path's existing kinematic (SetPosition+DisableCharacter) branch. See
+    // movement_manager_physic.cpp for the full rationale and the bypass conditions.
+    bool should_force_far_kinematic(CPHMovementControl* movement_control, const Fvector& dest_position);
 
 protected:
     virtual void teleport(u32 game_vertex_id);

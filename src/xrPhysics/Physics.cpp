@@ -61,6 +61,12 @@ xray::perf::Metric PhWakeMetric(CPHObject* obj) noexcept
     return M::ph_wake_other;
 }
 #endif // XR_PERF_METRICS
+
+// Caller has already checked IsRagDollObject(): cbClassRagDoll is only ever set on a CPHShell.
+bool IsForceSleptCorpse(const CPHObject* obj) noexcept
+{
+    return !obj->is_active() && static_cast<const CPHShell*>(obj)->m_force_slept;
+}
 } // namespace
 // PhysicsStepTimeCallback		*physics_step_time_callback				= 0;
 
@@ -309,6 +315,24 @@ void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2)
     CPHIsland* island1 = obj1->DActiveIsland();
     CPHIsland* island2 = obj2->DActiveIsland();
     obj2->near_callback(obj1);
+
+    // Ф2 (distance-based corpse sleep, PHYSICS_ISLAND_CORPSE_SLEEP_2026-10-06.md): a force-slept corpse must
+    // not be reactivated by touching another corpse. Without this guard any pile of 2+ overlapping corpses
+    // cycles endlessly - CPHWorld::SleepCorpses() re-disables every one of them every physics step, and the
+    // very next corpse-vs-corpse contact calls EnableObject() again via the code below. Measured on a
+    // 587-NPC grenade-kill scene: corpse_force_slept/wake_ragdoll climbed into the thousands *per frame*
+    // while physics/island_batch (actually active objects per solve) never dropped below ~80 - the loop
+    // just burns CPU reactivating/deactivating the same bodies every step without ever shrinking the active
+    // set. A live NPC, the player, a bullet or an explosion still wakes a sleeping corpse normally - this
+    // only skips corpse-vs-corpse contact, and only against a corpse that SleepCorpses() itself put to sleep
+    // (CPHShell::m_force_slept, i.e. far from the camera). Naturally-slept corpses near the player keep the
+    // original behaviour (a fresh ragdoll landing on them wakes them and collides instead of passing
+    // through). The whole contact is skipped, not just the wake: a contact joint against a disabled body
+    // would get it re-enabled by ODE's island step anyway, behind the CPHObject's back.
+    if (CPHCollideValidator::IsRagDollObject(*obj1) && CPHCollideValidator::IsRagDollObject(*obj2) &&
+        (IsForceSleptCorpse(obj1) || IsForceSleptCorpse(obj2)))
+        return;
+
     int MAX_CONTACTS = -1;
     const bool counting = ph_world->Processing();
     if (counting)

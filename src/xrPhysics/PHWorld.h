@@ -72,6 +72,12 @@ private:
     PH_UPDATE_OBJECT_STORAGE m_freezed_update_objects;
     // P1: reused snapshot of active-island roots for parallel solve (see CPHWorld::Step).
     xr_vector<CPHObject*> m_island_solve_batch;
+    // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): ragdolls collected this step that are far
+    // enough from the camera and old enough to force-disable, regardless of their current velocity -
+    // intentionally crude (a far corpse not reacting correctly to a later impact is an acceptable trade
+    // for not paying its simulation cost). Actually disabled AFTER ReinitMerged() (see SleepCorpses()) -
+    // deactivate() asserts the island is not mid-merge, which only holds true once Unmerge() has run.
+    xr_vector<CPHObject*> m_corpses_to_sleep;
     // Objects whose island was merged (NearCallback) during the current step. They may be absent from
     // m_objects / m_update_objects (frozen world, CPHStaticGeomShell, deactivated mid-step), so the regular
     // IslandReinit loops would leave a stale m_self_active pointing to a soon-destroyed island -> crash in
@@ -161,6 +167,9 @@ public:
     void StepTouch();
     void RegisterMerged(CPHObject* obj);
     void ReinitMerged();
+    // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): see Step() for call sites/ordering.
+    bool ShouldForceSleepCorpse(CPHObject* obj);
+    void SleepCorpses();
     void CutVelocity(float l_limit, float a_limit);
     void GetState(V_PH_WORLD_STATE& state);
     void Freeze();

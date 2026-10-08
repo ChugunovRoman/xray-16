@@ -21,3 +21,9 @@ int ph_console::ph_spawn_char_no_collide_chars = 1;
 int ph_console::ph_spawn_activation_shape_early_exit = 1;
 int ph_console::ph_spawn_skip_correct_on_load = 1;
 int ph_console::ph_dbg_spawn_stats = 0;
+
+// Ф2 (PHYSICS_ACTIVE_SET_PLAN): force-sleep far corpses, distance-based.
+int ph_console::ph_corpse_sleep_ms = 3000;
+float ph_console::ph_corpse_sleep_far_dist = 60.f;
+float ph_console::ph_corpse_sleep_max_vel = 1.f;
+float ph_console::ph_corpse_sleep_max_stretch = 0.1f;

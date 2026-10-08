@@ -26,6 +26,7 @@
 #include "debug_output.h"
 #endif
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrEngine/device.h"
 
 CPHShell::~CPHShell()
 {
@@ -60,12 +61,14 @@ CPHShell::CPHShell()
 
 void CPHShell::EnableObject(CPHObject* obj)
 {
+    m_force_slept = false;
     CPHObject::activate();
     if (m_spliter_holder)
         m_spliter_holder->Activate();
 }
 void CPHShell::DisableObject()
 {
+    m_force_slept = false; // CPHWorld::SleepCorpses() sets it back right after its own Disable()
     IPhysicsShellHolder* ref_object = elements.front()->PhysicsRefObject();
     //. if (!ref_object) return;
 
@@ -1411,8 +1414,66 @@ void CPHShell::RegisterToCLGroup(CGID g) { CPHCollideValidator::RegisterObjToGro
 bool CPHShell::IsGroupObject() { return CPHCollideValidator::IsGroupObject(*this); };
 void CPHShell::SetIgnoreStatic() { CPHCollideValidator::SetStaticNotCollide(*this); }
 void CPHShell::SetIgnoreDynamic() { CPHCollideValidator::SetDynamicNotCollide(*this); }
-void CPHShell::SetRagDoll() { CPHCollideValidator::SetRagDollClass(*this); }
+void CPHShell::SetRagDoll()
+{
+    // Ф2 (island-aware corpse sleep): stamp the death moment only once - IsRagDollObject() is still false
+    // before the first call (CharacterPhysicsSupport.cpp's in_Die()), and the class bit is never cleared
+    // afterwards, but this function is called every in_UpdateCL() tick for as long as the corpse exists,
+    // so a bare assignment would reset the age every frame.
+    if (!CPHCollideValidator::IsRagDollObject(*this))
+        m_ragdoll_since_ms = Device.dwTimeGlobal;
+    CPHCollideValidator::SetRagDollClass(*this);
+}
 void CPHShell::SetIgnoreRagDoll() { CPHCollideValidator::SetRagDollClassNotCollide(*this); }
+
+float CPHShell::get_MaxElementLinearVelSq() const
+{
+    float max_sq = 0.f;
+    for (const CPHElement* e : elements)
+    {
+        Fvector v;
+        e->get_LinearVel(v);
+        max_sq = _max(max_sq, v.square_magnitude());
+    }
+    return max_sq;
+}
+
+float CPHShell::get_MaxJointStretchSq() const
+{
+    float max_sq = 0.f;
+    for (CPHJoint* j : joints)
+    {
+        const dJointID dj = j ? j->GetDJoint() : nullptr;
+        if (!dj)
+            continue; // not created / deactivated / broken
+        dVector3 a1, a2;
+        switch (dJointGetType(dj))
+        {
+        case dJointTypeBall:
+            dJointGetBallAnchor(dj, a1);
+            dJointGetBallAnchor2(dj, a2);
+            break;
+        case dJointTypeHinge:
+            dJointGetHingeAnchor(dj, a1);
+            dJointGetHingeAnchor2(dj, a2);
+            break;
+        case dJointTypeHinge2:
+            dJointGetHinge2Anchor(dj, a1);
+            dJointGetHinge2Anchor2(dj, a2);
+            break;
+        case dJointTypeUniversal:
+            dJointGetUniversalAnchor(dj, a1);
+            dJointGetUniversalAnchor2(dj, a2);
+            break;
+        default: continue; // fixed (welding), slider, amotor: no anchor pair to compare
+        }
+        const float dx = float(a1[0] - a2[0]);
+        const float dy = float(a1[1] - a2[1]);
+        const float dz = float(a1[2] - a2[2]);
+        max_sq = _max(max_sq, dx * dx + dy * dy + dz * dz);
+    }
+    return max_sq;
+}
 //Makes this physical object animated
 void CPHShell::CreateShellAnimator(CInifile const* ini, LPCSTR section)
 {

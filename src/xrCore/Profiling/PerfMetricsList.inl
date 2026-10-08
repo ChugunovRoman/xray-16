@@ -70,6 +70,16 @@ PERF_GAUGE(ph_frozen, "physics/frozen")
 // Sticky all-time max (xray::perf::UpdateMax), not a per-window peak - see the worst linear speed among
 // enabled, dead (corpse) ragdoll shells. Scaled mm/s so it fits SetGauge/UpdateMax's s64 (no raw float gauge).
 PERF_GAUGE(ph_corpse_max_vel_mm_s, "physics/corpse_max_vel_mm_s")
+// Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based): corpses force-disabled by CPHWorld::SleepCorpses()
+// (distinct from ph_shell_disabled, which also counts ODE's own natural all-elements auto-sleep for
+// every shell type, not just this forced corpse path).
+PERF_COUNTER(ph_corpse_force_slept, "physics/corpse_force_slept")
+// Cost of the post-ReinitMerged SleepCorpses() apply step (the decision itself runs inside ph_solve's
+// snapshot loop and isn't separately timed).
+PERF_TIMER(ph_corpse_sleep_apply, "physics/corpse_sleep_apply")
+// Ф1 (PHYSICS_ACTIVE_SET_PLAN): live AI NPCs forced into pure kinematic (skip GetNearest/TryPosition)
+// by movement_manager_physic.cpp when farther than ph_npc_kinematic_far_dist from the actor.
+PERF_COUNTER(ph_npc_kinematic_far_forced, "physics/npc_kinematic_far_forced")
 PERF_TIMER(ph_collide_static, "physics/collide_static")
 PERF_COUNTER(ph_collide_static_contacts, "physics/collide_static/contacts")
 PERF_COUNTER(ph_near_calls, "physics/near/calls")

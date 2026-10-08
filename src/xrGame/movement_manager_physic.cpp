@@ -13,9 +13,11 @@
 #include "detail_path_manager.h"
 #include "Level.h"
 #include "CustomMonster.h"
+#include "Actor.h"
 #include "xrPhysics/IColisiondamageInfo.h"
 
 #include "xrEngine/profiler.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 // Lain: added
 #include "steering_behaviour.h"
@@ -29,6 +31,13 @@
 #endif // DEBUG
 
 #define DISTANCE_PHISICS_ENABLE_CHARACTERS 2.f
+
+// Ф1 (PHYSICS_ACTIVE_SET_PLAN, far-NPC kinematic): distance to the actor beyond which a live AI NPC is
+// forced into pure kinematic movement (SetPosition+DisableCharacter, see should_force_far_kinematic()
+// below), regardless of nearby dynamic physics objects. 0 = feature off (old behavior). Registered in
+// console_commands.cpp.
+float ph_npc_kinematic_far_dist = 100.f;
+float ph_npc_kinematic_far_hyst = 20.f;
 
 float CMovementManager::speed(CPHMovementControl* movement_control) const
 {
@@ -85,6 +94,43 @@ void CMovementManager::apply_collision_hit(CPHMovementControl* movement_control)
     // which is skipped while the character is disabled/kinematic (including the Ф1 far-kinematic branches).
     // Left as is, the last collision's damage was re-applied on every idle tick until the next Calculate().
     movement_control->gcontact_HealthLost = 0.f;
+}
+
+// Ф1 (PHYSICS_ACTIVE_SET_PLAN, far-NPC kinematic): see move_along_path() for the call site. Deliberately a
+// fresh, independent distance-to-actor check rather than reusing CAI_Stalker::get_cached_update_lod() -
+// that LOD is stalker-only (ai_stalker.h/.cpp), while move_along_path() is shared by every CCustomMonster
+// mover (stalkers, mutants, rats); reusing it would silently leave non-stalker AI unoptimized.
+bool CMovementManager::should_force_far_kinematic(CPHMovementControl* movement_control, const Fvector& dest_position)
+{
+    if (ph_npc_kinematic_far_dist <= 0.f)
+    {
+        m_kinematic_far_forced = false;
+        return false; // feature off, old behavior
+    }
+
+    CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
+    if (!actor)
+    {
+        m_kinematic_far_forced = false;
+        return false; // fail-safe: no actor (e.g. certain non-gameplay states) -> behave as before
+    }
+
+    // Hysteresis tracks distance independently of bypass flags, so a one-tick impulse/jump inside
+    // the band does not lose the "already far" latch.
+    float const engage_dist = ph_npc_kinematic_far_dist;
+    float const release_dist = _max(0.f, engage_dist - ph_npc_kinematic_far_hyst);
+    float const threshold = m_kinematic_far_forced ? release_dist : engage_dist;
+    m_kinematic_far_forced = dest_position.distance_to_sqr(actor->Position()) > threshold * threshold;
+    if (!m_kinematic_far_forced)
+        return false;
+
+    // Never override while something else needs the real physics step this tick - forcing kinematic here
+    // would snap a jump arc, cut a NoGravityZone/impulse short, or teleport an NPC that just lost footing.
+    if (movement_control->JumpState() || movement_control->ForcedPhysicsControl() ||
+        movement_control->bExernalImpulse || movement_control->IsLosingControl())
+        return false;
+
+    return true;
 }
 
 bool CMovementManager::move_along_path() const
@@ -222,8 +268,18 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
         })
         if (movement_control->IsCharacterEnabled())
         {
-            movement_control->Calculate(detail().path(), 0.f, detail().m_current_travel_point, precision);
-            movement_control->GetPosition(dest_position);
+            // Ф1: idle far NPCs still pay a full physics step via Calculate() while enabled - force them
+            // out of m_objects the same way the moving kinematic branch does (except jump/impulse/etc.).
+            if (should_force_far_kinematic(movement_control, dest_position))
+            {
+                movement_control->DisableCharacter();
+                PERF_INC(ph_npc_kinematic_far_forced);
+            }
+            else
+            {
+                movement_control->Calculate(detail().path(), 0.f, detail().m_current_travel_point, precision);
+                movement_control->GetPosition(dest_position);
+            }
         }
 
         // проверка на хит
@@ -285,10 +341,18 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
     // Физика устанавливает новую позицию
     // получить физ. объекты в радиусе
     m_nearest_objects.clear();
+    if (!should_force_far_kinematic(movement_control, dest_position))
     {
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementNearestQuery);
         Level().ObjectSpace.GetNearest(m_nearest_objects, dest_position,
             DISTANCE_PHISICS_ENABLE_CHARACTERS + (movement_control->IsCharacterEnabled() ? 0.5f : 0.f), &object());
+    }
+    else
+    {
+        // Ф1: skip the neighbor query entirely - m_nearest_objects stays empty, which already routes into
+        // the existing kinematic branch below (SetPosition+DisableCharacter), same code path the engine
+        // already takes whenever no dynamic physics object is nearby.
+        PERF_INC(ph_npc_kinematic_far_forced);
     }
 
     // установить позицию

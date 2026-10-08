@@ -119,6 +119,10 @@ extern float g_smart_cover_factor;
 extern int g_upgrades_log;
 extern float g_smart_cover_animation_speed_factor;
 
+// Ф1 (PHYSICS_ACTIVE_SET_PLAN): defined in movement_manager_physic.cpp
+extern float ph_npc_kinematic_far_dist;
+extern float ph_npc_kinematic_far_hyst;
+
 extern BOOL g_ai_use_old_vision;
 float g_aim_predict_time = 0.40f;
 int g_keypress_on_start = 1;
@@ -3190,6 +3194,17 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "ph_mt_island_min", &ph_console::ph_mt_island_min, 1, 4096);
     // Cap physics substeps per frame to break the spiral-of-death under heavy load (0 = uncapped).
     CMD4(CCC_Integer, "ph_max_substeps", &ph_console::ph_max_substeps, 0, 30);
+
+    // Ф2 (PHYSICS_ACTIVE_SET_PLAN): force-sleep far corpses, distance-based. ph_corpse_sleep_ms=0 disables.
+    CMD4(CCC_Integer, "ph_corpse_sleep_ms", &ph_console::ph_corpse_sleep_ms, 0, 60000);
+    CMD4(CCC_FloatBlock, "ph_corpse_sleep_far_dist", &ph_console::ph_corpse_sleep_far_dist, 0.f, 500.f);
+    // ...but never while the ragdoll still moves fast or its joints are pulled apart (0 = no check).
+    CMD4(CCC_FloatBlock, "ph_corpse_sleep_max_vel", &ph_console::ph_corpse_sleep_max_vel, 0.f, 100.f);
+    CMD4(CCC_FloatBlock, "ph_corpse_sleep_max_stretch", &ph_console::ph_corpse_sleep_max_stretch, 0.f, 10.f);
+
+    // Ф1 (PHYSICS_ACTIVE_SET_PLAN): far live NPCs -> pure kinematic. ph_npc_kinematic_far_dist=0 disables.
+    CMD4(CCC_FloatBlock, "ph_npc_kinematic_far_dist", &ph_npc_kinematic_far_dist, 0.f, 500.f);
+    CMD4(CCC_FloatBlock, "ph_npc_kinematic_far_hyst", &ph_npc_kinematic_far_hyst, 0.f, 200.f);
 
     // P1: NPC spawn / level-load optimizations (see plans/optimization_spawn/plan.md) — runtime kill-switches.
     CMD4(CCC_Integer, "ph_spawn_char_no_collide_chars", &ph_console::ph_spawn_char_no_collide_chars, 0, 1);

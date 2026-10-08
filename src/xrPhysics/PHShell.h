@@ -37,6 +37,22 @@ protected:
 
 public:
     Fmatrix m_object_in_root;
+    // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): Device.dwTimeGlobal at the moment this
+    // shell was first classed as a ragdoll (death) - stamped once in SetRagDoll(). Lets CPHWorld::Step()
+    // decide "how long has this corpse been dead" entirely within xrPhysics, without reaching into
+    // xrGame's CEntityAlive on the physics thread. Public: read/written directly by CPHWorld, same spirit
+    // as the other plain public state on this class (m_object_in_root above, etc.).
+    u32 m_ragdoll_since_ms{0};
+    // Ф2: the current inactive state was imposed by CPHWorld::SleepCorpses() (far + old enough), not by
+    // ODE's natural auto-disable. Set right after SleepCorpses()' Disable(), reset by every DisableObject()
+    // (natural sleep path) and by EnableObject(). NearCallback skips corpse-vs-corpse contact only against
+    // such shells, so naturally-slept corpses near the camera still collide/wake as before.
+    bool m_force_slept{false};
+    // Ф2 guards for CPHWorld::ShouldForceSleepCorpse(): squared max linear speed over all elements, and
+    // squared max distance between the two bodies' anchor points over all ball/hinge/hinge2/universal joints
+    // (0 for a perfectly satisfied joint; meters after an explosion pulled the ragdoll apart).
+    float get_MaxElementLinearVelSq() const;
+    float get_MaxJointStretchSq() const;
     CPHShell();
     virtual ~CPHShell();
     virtual void applyImpulseTrace(const Fvector& pos, const Fvector& dir, float val, const u16 id);

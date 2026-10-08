@@ -69,6 +69,7 @@ public:
     void Jump(const Fvector& end_point, float time);
     float Jump(const Fvector& end_point);
     bool JumpState();
+    bool IsLosingControl();
     ///
     bool PhysicsOnlyMode();
     void GetJumpMinVelParam(Fvector& min_vel, float& time, JumpType& type,

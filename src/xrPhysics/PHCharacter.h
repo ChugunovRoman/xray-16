@@ -126,6 +126,11 @@ public:
     virtual void SetAcceleration(Fvector accel) = 0;
     virtual void SetForcedPhysicsControl(bool v) {}
     virtual bool ForcedPhysicsControl() { return false; }
+    // Ф1 (PHYSICS_ACTIVE_SET_PLAN, far-NPC kinematic): true if this character recently lost reliable ground
+    // contact/control (falling, mid-impulse) - movement_manager_physic.cpp must not force it into kinematic
+    // mode while this holds, or a fall/stumble snaps into a teleport. Default false (base/non-character
+    // objects); overridden in CPHSimpleCharacter to report its own b_lose_ground.
+    virtual bool IsLosingControl() { return false; }
     virtual void SetCamDir(const Fvector& cam_dir) = 0;
     virtual const Fvector& CamDir() const = 0;
     virtual Fvector GetAcceleration() = 0;

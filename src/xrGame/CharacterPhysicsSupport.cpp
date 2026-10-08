@@ -867,6 +867,11 @@ void CCharacterPhysicsSupport::in_UpdateCL()
                 npc_cpp_profile::count(ENpcCppProfileStage::CharacterPhysicsCorpseAge15_60);
             else
                 npc_cpp_profile::count(ENpcCppProfileStage::CharacterPhysicsCorpseAge60p);
+
+            // Ф2 (PHYSICS_ACTIVE_SET_PLAN): force-sleeping far corpses moved to CPHWorld::ShouldForceSleepCorpse()/
+            // SleepCorpses() (PHWorld.cpp) - a per-corpse check here needed xrGame-side CEntityAlife/viewer
+            // access that the physics thread can't safely reach; distance+age alone is decided entirely
+            // within xrPhysics. See plans/optimization_arch/PHYSICS_ISLAND_CORPSE_SLEEP_2026-10-06.md.
         }
         {
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsShellSetRagdoll);

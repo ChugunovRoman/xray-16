@@ -1765,6 +1765,10 @@ bool CPHMovementControl::JumpState()
 {
     return (m_character && m_character->b_exist && m_character->IsEnabled() && m_character->JumpState());
 }
+bool CPHMovementControl::IsLosingControl()
+{
+    return (m_character && m_character->b_exist && m_character->IsEnabled() && m_character->IsLosingControl());
+}
 ///
 bool CPHMovementControl::PhysicsOnlyMode()
 {

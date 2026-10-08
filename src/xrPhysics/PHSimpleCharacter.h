@@ -228,6 +228,7 @@ public:
     virtual dReal GetMaximumVelocity() { return m_max_velocity; }
     virtual void SetJupmUpVelocity(dReal velocity) { jump_up_velocity = velocity; }
     virtual bool JumpState() { return b_jumping || b_jump; };
+    virtual bool IsLosingControl() { return b_lose_ground; }
     virtual const Fvector& ControlAccel() const { return m_acceleration; }
     virtual bool TouchRestrictor(ERestrictionType rttype);
     virtual float& FrictionFactor() { return m_friction_factor; }
