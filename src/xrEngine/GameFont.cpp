@@ -17,8 +17,9 @@
 #include <freetype/ftfntfmt.h>
 
 #include <sstream>
+#include <atomic>
 
-extern ENGINE_API bool g_bRendering;
+extern ENGINE_API std::atomic<bool> g_bRendering;
 ENGINE_API Fvector2 g_current_font_scale = { 1.0f, 1.f };
 
 // Global text scale multiplier (cvar `ui_text_scale`). Multiplies the width and

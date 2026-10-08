@@ -629,6 +629,7 @@ void CAI_Stalker::reload(LPCSTR section)
 
 void CAI_Stalker::Die(IGameObject* who)
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerDie);
     movement().on_death();
 
     notify_on_wounded_or_killed(who);

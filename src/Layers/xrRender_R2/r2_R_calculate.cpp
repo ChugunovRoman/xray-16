@@ -6,6 +6,7 @@
 #include "xrEngine/Render.h"
 #include "Layers/xrRender/xrRender_console.h"
 #include "xrCore/Threading/TaskManager.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -198,7 +199,7 @@ void CRender::calculate_for(bool second_pass)
 
             const auto& entity_pos = spatial->spatial_sector_point();
             spatial->spatial_updatesector(dsgraph_main.detect_sector(entity_pos));
-            const auto sector_id = spatial->GetSpatialData().sector_id;
+            const auto sector_id = spatial->GetSpatialData().sector_id.load(std::memory_order_relaxed);
             if (sector_id == IRender_Sector::INVALID_SECTOR_ID)
                 continue; // disassociated from S/P structure
 
@@ -225,7 +226,10 @@ void CRender::calculate_for(bool second_pass)
     }
     r_main_dsgraph_override = second_pass ? svp_dsgraph : nullptr;
 
-    TaskScheduler->Wait(*ProcessHOMTask);
+    {
+        PERF_WAIT_SITE(xray::perf::wait_site::Hom);
+        TaskScheduler->Wait(*ProcessHOMTask);
+    }
 
     r_main.init();
     const bool skip_svp_sun_csm =

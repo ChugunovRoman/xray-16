@@ -7,6 +7,7 @@
 #include "xrServerEntities/ai_sounds.h"
 
 #include "xrCore/Threading/TaskManager.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 extern u32 psSoundModel;
 extern float psSoundVEffects;
@@ -97,23 +98,39 @@ void CSoundRender_Emitter::Event_Propagade()
         s_f_def_event_pulse * pulse_mult - 0.030f,
         s_f_def_event_pulse * pulse_mult + 0.030f);
     if (!owner_data)
+    {
+        PERF_INC(snd_event_dropped);
         return;
+    }
     if (!owner_data->g_type)
+    {
+        PERF_INC(snd_event_dropped);
         return;
+    }
     if (!owner_data->g_object)
+    {
+        PERF_INC(snd_event_dropped);
         return;
+    }
     if (!scene->get_events_handler())
+    {
+        PERF_INC(snd_event_dropped);
         return;
+    }
 
     VERIFY(_valid(p_source.volume));
     // Calculate range
     const float clip = p_source.max_ai_distance * p_source.volume;
     const float range = std::min(p_source.max_ai_distance, clip);
     if (range < 0.1f)
+    {
+        PERF_INC(snd_event_dropped);
         return;
+    }
 
     // Inform objects
     scene->get_events().emplace_back(owner_data, range);
+    PERF_INC(snd_event_queued);
 }
 
 void CSoundRender_Emitter::switch_to_2D()
@@ -169,7 +186,10 @@ void CSoundRender_Emitter::move_cursor(int offset)
 void CSoundRender_Emitter::fill_data(void* dest, u32 offset, u32 size)
 {
     if (!ovf)
+    {
         ovf = source()->open();
+        PERF_INC(snd_ogg_open_lazy);
+    }
     source()->decompress(dest, offset, size, ovf);
 }
 
@@ -279,7 +299,9 @@ void CSoundRender_Emitter::dispatch_prefill()
     if (filled_blocks >= sdef_target_count_prefill)
         return;
 
-    const auto task = &TaskScheduler->AddTask([this]
+    // Raised before the push, so a fast worker can never finish (and clear it) ahead of us.
+    prefill_busy.store(true, std::memory_order_release);
+    TaskScheduler->AddTask([this]
     {
         size_t next_block_to_fill = (current_block + filled_blocks) % sdef_target_count_prefill;
 
@@ -293,16 +315,19 @@ void CSoundRender_Emitter::dispatch_prefill()
             filled_blocks++;
         }
 
-        prefill_task.store(nullptr, std::memory_order_release);
+        // Must stay the last access to `this`: the emitter may be destroyed right after wait_prefill() sees it.
+        prefill_busy.store(false, std::memory_order_release);
     });
-
-    prefill_task.store(task, std::memory_order_release);
 }
 
 void CSoundRender_Emitter::wait_prefill() const
 {
-    if (const auto task = prefill_task.load(std::memory_order_acquire))
-        TaskScheduler->Wait(*task);
+    // Same help-while-waiting loop as TaskManager::Wait(), keyed on our own flag instead of a Task*.
+    while (prefill_busy.load(std::memory_order_acquire))
+    {
+        if (!TaskScheduler->ExecuteOneTask())
+            std::this_thread::yield();
+    }
 }
 
 u32 CSoundRender_Emitter::get_bytes_total() const

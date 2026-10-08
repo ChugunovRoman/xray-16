@@ -2,6 +2,7 @@
 
 #include "FHierrarhyVisual.h"
 #include "xrCore/Animation/Bone.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "Include/xrRender/Kinematics.h"
 
 class CInifile;
@@ -18,10 +19,43 @@ class CKinematics;
 class CSkeletonX;
 
 // MT-locker
+inline thread_local int g_ucalc_lock_depth = 0;
+
 struct UCalc_mtlock
 {
-    UCalc_mtlock() { UCalc_Mutex.Enter(); }
-    ~UCalc_mtlock() { UCalc_Mutex.Leave(); }
+    u64 t_hold0{};
+    bool outer{};
+
+    UCalc_mtlock()
+    {
+        outer = (g_ucalc_lock_depth == 0);
+        ++g_ucalc_lock_depth;
+#if XR_PERF_METRICS
+        if (!UCalc_Mutex.TryEnter())
+        {
+            PERF_INC(bones_lock_contend);
+            const bool metrics_active = xray::perf::g_perf_metrics_active;
+            const u64 t0 = metrics_active ? xray::perf::Ticks() : 0;
+            UCalc_Mutex.Enter();
+            if (metrics_active)
+                xray::perf::AddTimeSlow(xray::perf::Metric::bones_lock_wait, xray::perf::Ticks() - t0);
+        }
+#else
+        UCalc_Mutex.Enter();
+#endif
+#if XR_PERF_METRICS
+        if (outer && xray::perf::g_perf_metrics_active)
+            t_hold0 = xray::perf::Ticks();
+#endif
+    }
+
+    ~UCalc_mtlock()
+    {
+        if (outer && xray::perf::g_perf_metrics_active)
+            xray::perf::AddTimeSlow(xray::perf::Metric::bones_lock_hold, xray::perf::Ticks() - t_hold0);
+        UCalc_Mutex.Leave();
+        --g_ucalc_lock_depth;
+    }
 };
 
 #pragma warning(push)
@@ -153,7 +187,11 @@ protected:
     accel* bone_map_P; // bones associations (shared) - sorted by name-pointer
 
     BOOL Update_Visibility;
-    u32 UCalc_Time;
+    u32 UCalc_Time; // start of the current/last recompute; recursion + re-check guard (under UCalc_mtlock)
+    // Device.dwTimeGlobal of the last *finished* recompute - the only value the unlocked fast-out may
+    // trust: UCalc_Time is set before Bone_Calculate, so another render thread used to bail out on it and
+    // read half-written bone_instances.
+    std::atomic<u32> UCalc_DoneTime{0};
     s32 UCalc_Visibox;
 
     Flags64 visimask;

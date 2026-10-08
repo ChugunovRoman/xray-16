@@ -23,6 +23,7 @@
 #include "xrAICore/Navigation/graph_engine.h"
 #include "restriction_space.h"
 #include "xrEngine/profiler.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "mt_config.h"
 #include "xrNetServer/NET_Messages.h"
 #include "xrServerEntities/xrServer_Objects_Alife_Smartcovers.h"
@@ -117,6 +118,8 @@ void CALifeUpdateManager::update_scheduled(bool init_ef)
 
 void CALifeUpdateManager::update()
 {
+    ZoneScopedN("alife_update");
+    PERF_SCOPE(alife_update);
     update_switch();
     update_scheduled(false);
 }

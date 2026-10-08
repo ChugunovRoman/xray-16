@@ -1,5 +1,6 @@
 #include "stdafx.h"
 
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrCore/PostProcess/PPInfo.hpp"
 
 #include "xrEngine/device.h"
@@ -190,6 +191,7 @@ void CGlowManager::Destroy()
 
 void CGlowManager::Register(IRender_Glow* glow)
 {
+    GW_OVERLAP_HAZARD("CGlowManager::Register");
     if (!glow)
         return;
 
@@ -199,6 +201,7 @@ void CGlowManager::Register(IRender_Glow* glow)
 
 void CGlowManager::Unregister(IRender_Glow* glow)
 {
+    GW_OVERLAP_HAZARD("CGlowManager::Unregister");
     if (!glow || m_active.empty())
         return;
 
@@ -1201,7 +1204,11 @@ void CRender::MakeContextCurrent(RenderContext context)
 // Implementation
 IRender_ObjectSpecific* CRender::ros_create(IRenderable* parent) { return xr_new<CROS_impl>(); }
 void CRender::ros_destroy(IRender_ObjectSpecific*& p) { xr_delete(p); }
-void CRender::emplace_texture_replacements(shared_str material_key, shared_str dds_path) { texture_replacements.emplace(material_key, dds_path); }
+void CRender::emplace_texture_replacements(shared_str material_key, shared_str dds_path)
+{
+    TextureReplacementsScopeLock scope(texture_replacements_lock);
+    texture_replacements.emplace(material_key, dds_path);
+}
 IRenderVisual* CRender::model_Create(LPCSTR name, IReader* data) { return Models->Create(name, data); }
 IRenderVisual* CRender::model_Create(LPCSTR name, LPCSTR suffix, IReader* data) { return Models->Create(name, suffix, data); }
 IRenderVisual* CRender::model_CreateChild(LPCSTR name, IReader* data) { return Models->CreateChild(name, data); }

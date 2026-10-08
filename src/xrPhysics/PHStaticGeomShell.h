@@ -11,6 +11,7 @@ class CPHStaticGeomShell : public CPHGeometryOwner, public CPHObject, public CPH
 #endif
 
     void get_spatial_params();
+    virtual ECastType CastType() { return CPHObject::tpStaticShell; }
     virtual void EnableObject(CPHObject* obj) { CPHUpdateObject::Activate(); }
     virtual dGeomID dSpacedGeom() { return dSpacedGeometry(); }
     virtual void PhDataUpdate(dReal step);

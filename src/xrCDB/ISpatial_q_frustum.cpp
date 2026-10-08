@@ -60,12 +60,16 @@ public:
 
 void ISpatial_DB::q_frustum(xr_vector<ISpatial*>& R, u32 _o, u32 _mask, const CFrustum& _frustum)
 {
-    ZoneScoped;
-    std::shared_lock<std::shared_mutex> shlock(rw);
+    SpatialIncQFrustum();
+    SpatialIncDb(db_index, xray::perf::Metric::spatial_q_frustum_db0, xray::perf::Metric::spatial_q_frustum_db1);
+    PERF_HOT_ZONE("q_frustum");
+    PERF_SCOPE(spatial_q_frustum_time);
+    auto shlock = SpatialLockShared(rw);
     {
         ScopeStatTimer scope(Stats.Query, query_stats_lock);
         R.clear();
         walker W(&R, _mask, &_frustum);
         W.walk(m_root, m_center, m_bounds, _frustum.getMask());
     }
+    PERF_ADD(spatial_q_frustum_results, R.size());
 }

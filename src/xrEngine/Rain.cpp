@@ -4,7 +4,7 @@
 #include "IGame_Persistent.h"
 #include "Environment.h"
 
-#include "xrCore/Threading/ScopeLock.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #ifdef _EDITOR
 #include "ui_toolscustom.h"
@@ -58,6 +58,7 @@ CEffect_Rain::~CEffect_Rain()
 void CEffect_Rain::Born(Item& dest, float radius)
 {
     ZoneScoped;
+    PERF_INC(rain_born);
 
     Fvector axis;
     axis.set(0, -1, 0);
@@ -85,6 +86,7 @@ void CEffect_Rain::Born(Item& dest, float radius)
 bool CEffect_Rain::RayPick(const Fvector& s, const Fvector& d, float& range, collide::rq_target tgt)
 {
     ZoneScoped;
+    PERF_INC(rain_raypick);
 
     bool bRes = true;
 #ifdef _EDITOR
@@ -92,6 +94,7 @@ bool CEffect_Rain::RayPick(const Fvector& s, const Fvector& d, float& range, col
 #else
     collide::rq_result RQ;
     IGameObject* E = g_pGameLevel->CurrentViewEntity();
+    SpatialCaller spatial_caller(SpatialQueryCaller::rain);
     bRes = g_pGameLevel->ObjectSpace.RayPick(s, d, range, tgt, RQ, E);
     if (bRes)
         range = RQ.range;
@@ -193,7 +196,16 @@ void CEffect_Rain::UpdateItems()
         return;
 #endif
 
-    ScopeLock guard(&rain_items_lock);
+    if (!rain_items_lock.TryEnter())
+    {
+        PERF_SCOPE(rain_lock_wait);
+        rain_items_lock.Enter();
+    }
+    struct RainItemsUnlock
+    {
+        Lock* lock;
+        ~RainItemsUnlock() { lock->Leave(); }
+    } rain_unlock{&rain_items_lock};
 
     // Keep in sync with `dxRainRender.cpp` (rain streak simulation).
     static constexpr int max_desired_items = 2500;

@@ -688,6 +688,13 @@ public:
     void Save(IWriter* F) override {}
 };
 
+class CCC_OverlapHazardProbe : public CCC_Integer
+{
+public:
+    using CCC_Integer::CCC_Integer;
+    void Save(IWriter* F) override {}
+};
+
 class ENGINE_API CCC_HideConsole : public IConsole_Command
 {
 public:
@@ -705,6 +712,19 @@ public:
     {
         Device.editor().SetState(xray::editor::ide::visible_state::full);
     }
+};
+
+// GAME_RENDER_OVERLAP_PLAN P1.6: Device.IsFrameOverlapActive() is set by ProcessFrame for the
+// Kick..Join window every frame (Phase 3 landed) and cleared at the end of it. This command only forces
+// it on between frames for manual testing of the deferred CModelPool::Delete(bDiscard=TRUE) path: the
+// next frame overwrites it, so it is effectively a single pulse, not a sticky mode.
+class CCC_DbgForceFrameOverlap : public IConsole_Command
+{
+public:
+    CCC_DbgForceFrameOverlap(pcstr N) : IConsole_Command(N) {}
+    void Execute(pcstr args) override { Device.SetFrameOverlapActive(atoi(args) != 0); }
+    void GetStatus(TStatus& S) override { xr_itoa(Device.IsFrameOverlapActive() ? 1 : 0, S, 10); }
+    void Info(TInfo& I) override { xr_sprintf(I, sizeof(I), "0/1, force Device.IsFrameOverlapActive() for manual testing"); }
 };
 
 ENGINE_API float g_fov = 75.0f;
@@ -752,7 +772,6 @@ extern int ps_fps_limit_in_menu;
 
 extern int ps_obj_preupdate_mt;
 extern int ps_obj_postupdate_mt;
-extern ENGINE_API int ps_mt_scheduler_physics_overlap;
 
 void CCC_Register()
 {
@@ -764,7 +783,13 @@ void CCC_Register()
     CMD1(CCC_SaveCFG, "cfg_save");
     CMD1(CCC_LoadCFG, "cfg_load");
 
+    // Bits: 1 = Tracy plots, 2 = 5 s Msg log, 4 = hide the engine's existing per-call hot-path Tracy zones
+    // while measuring (xray::perf::HideHotZones(), PERF_HOT_ZONE). Not saved to user.ltx, see CCC_PerfMetrics.
     CMD4(CCC_PerfMetrics, "perf_metrics", &::xray::perf::g_perf_metrics, 0, 7);
+
+    // GW_OVERLAP_HAZARD (METRICS_PLAN §8.7): warns when a render/main-only resource is touched from the
+    // GameThread while it is running. Off by default, own cvar so it works without perf_metrics. Not saved.
+    CMD4(CCC_OverlapHazardProbe, "overlap_hazard_probe", &::xray::perf::g_overlap_hazard_probe, 0, 1);
 
 #ifdef DEBUG
     CMD3(CCC_Mask, "mt_particles", &psDeviceFlags, mtParticles);
@@ -781,6 +806,8 @@ void CCC_Register()
     CMD1(CCC_E_Signal, "e_signal");
 
     CMD3(CCC_Mask, "rs_clear_bb", &psDeviceFlags, rsClearBB);
+
+    CMD1(CCC_DbgForceFrameOverlap, "dbg_force_frame_overlap");
 
     // CMD4(CCC_Float, "r__dtex_range", &r__dtex_range, 5, 175 );
     // CMD3(CCC_Mask, "rs_constant_fps", &psDeviceFlags, rsConstantFPS );
@@ -908,7 +935,6 @@ void CCC_Register()
     CMD4(CCC_Float, "snd_ai_burst_coalesce_dist", &g_snd_ai_burst_coalesce_dist, 0.f, 100.f);
     CMD4(CCC_Integer, "obj_preupdate_mt", &ps_obj_preupdate_mt, 0, 1);
     CMD4(CCC_Integer, "obj_postupdate_mt", &ps_obj_postupdate_mt, 0, 1);
-    CMD4(CCC_Integer, "mt_scheduler_physics_overlap", &ps_mt_scheduler_physics_overlap, 0, 1);
 
     // Spatial query cache tunables for CObjectSpace::GetNearest.
     CMD4(CCC_Float, "obj_nearest_cache_quant", &CObjectSpace::ps_obj_nearest_cache_quant, 0.01f, 10.0f);

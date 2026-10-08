@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "light.h"
 
 namespace xray::render::RENDER_NAMESPACE
@@ -32,6 +33,7 @@ void dbg_report_invalid_light(const light& L, const char* what, const Fvector& P
 
 light::light() : SpatialBase(g_pGamePersistent->SpatialSpace)
 {
+    GW_OVERLAP_HAZARD("light::light");
     spatial.type = STYPE_LIGHTSOURCE;
     flags.type = POINT;
     flags.bStatic = false;
@@ -76,6 +78,7 @@ light::light() : SpatialBase(g_pGamePersistent->SpatialSpace)
 
 light::~light()
 {
+    GW_OVERLAP_HAZARD("light::~light");
 #if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)
     for (auto& f : omnipart)
         xr_delete(f);
@@ -148,6 +151,7 @@ void light::set_texture(LPCSTR name) {}
 
 void light::set_active(bool a)
 {
+    GW_OVERLAP_HAZARD("light::set_active");
     if (a)
     {
         if (flags.bActive)
@@ -257,6 +261,7 @@ void light::spatial_refresh_bounds()
 
 void light::spatial_move()
 {
+    GW_OVERLAP_HAZARD("light::spatial_move");
     if (!spatial.node_ptr)
         spatial_refresh_bounds();
 
@@ -418,7 +423,8 @@ void light::Export(light_Package& package)
                 L->omnipart_owner = this;
                 L->set_virtual_size(virtual_size);
                 L->set_color(color);
-                L->spatial.sector_id = spatial.sector_id; //. dangerous?
+                L->spatial.sector_id.store(spatial.sector_id.load(std::memory_order_relaxed),
+                    std::memory_order_relaxed); //. dangerous?
                 L->s_spot = s_spot;
                 L->s_point = s_point;
 

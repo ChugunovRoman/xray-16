@@ -452,6 +452,16 @@ public:
     // that test everywhere. Actual values say which stage stops carrying the image.
     void dbg_probe_dump(const char* label, const ref_rt& rt);
     void dbg_probe_targets(const char* where);
+    // G-buffer sample taken while the G-buffer is still intact - see phase_accumulator.
+    void dbg_probe_gbuffer();
+    // Draw calls the backend had issued when the light accumulation stage started and when it
+    // ended. Equal numbers mean the stage submitted nothing at all, which separates "the lights
+    // never drew" from "they drew and were rejected".
+    u32 dbg_accum_calls_begin{};
+    u32 dbg_accum_calls_end{};
+    // Set by the dump command and by the went-dark transition; consumed on the next frame's
+    // accumulator entry, so the capture lands before anything reuses rt_Color.
+    int dbg_gbuffer_probe_pending{};
     // Brightest byte found in a handful of pixels of the presented image, or -1 when unavailable.
     // Replaces the old all-zero test, which could never fire: the bug paints the world a UNIFORM
     // very dark colour, so "not all zero" was true on every stage while the screen looked black.

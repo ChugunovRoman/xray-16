@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "player_hud.h"
 #include "HudItem.h"
 #include "xrUICore/ui_base.h"
@@ -969,6 +970,7 @@ player_hud::~player_hud()
 
 void player_hud::load(const shared_str& player_hud_sect)
 {
+    GW_OVERLAP_HAZARD("player_hud::load");
     if (player_hud_sect == m_sect_name)
         return;
 
@@ -1465,6 +1467,7 @@ void player_hud::hot_reload_attached_weapon_hud(CHudItem* item)
 
 void player_hud::attach_item(CHudItem* item)
 {
+    GW_OVERLAP_HAZARD("player_hud::attach_item");
     attachable_hud_item* pi = create_hud_item(item->HudSection());
     const int item_idx = pi->m_attach_place_idx;
 
@@ -1492,6 +1495,7 @@ void player_hud::attach_item(CHudItem* item)
 
 void player_hud::detach_item_idx()
 {
+    GW_OVERLAP_HAZARD("player_hud::detach_item_idx");
     if (nullptr == attached_item())
         return;
 
@@ -1567,6 +1571,7 @@ void player_hud::hide_detector()
 
 void player_hud::detach_item(CHudItem* item)
 {
+    GW_OVERLAP_HAZARD("player_hud::detach_item");
     attachable_hud_item* itm = item->HudItemData();
     if (!itm)
         return;

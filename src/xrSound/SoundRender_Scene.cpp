@@ -6,6 +6,7 @@
 #include "SoundRender_Core.h"
 #include "SoundRender_Scene.h"
 #include "SoundRender_Emitter.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace
 {
@@ -240,6 +241,7 @@ void CSoundRender_Scene::update()
     ZoneScoped;
 
     s_events_prev_count = s_events.size();
+    xray::perf::SetGauge(xray::perf::Metric::snd_events_frame, static_cast<s64>(s_events_prev_count));
 
     for (auto& [sound, range] : s_events)
         sound_event_handler(sound, range);
@@ -265,7 +267,8 @@ void CSoundRender_Scene::object_relcase(IGameObject* obj)
 
 float CSoundRender_Scene::get_occlusion_to(const Fvector& hear_pt, const Fvector& snd_pt, float dispersion)
 {
-    ZoneScoped;
+    PERF_HOT_ZONE("get_occlusion_to");
+    PERF_INC(snd_occ_ai);
 
     float occ_value = 1.f;
 
@@ -278,11 +281,14 @@ float CSoundRender_Scene::get_occlusion_to(const Fvector& hear_pt, const Fvector
         pos.add(snd_pt);
         dir.sub(pos, hear_pt);
         const float range = dir.magnitude();
+        if (range < EPS_L)
+            return occ_value; // listener sits on the sample point: nothing in between, avoid NaN dir
         dir.div(range);
 
         CDB::COLLIDER& geom_DB = sound_scene_ray_collider();
         geom_DB.ray_query(CDB::OPT_CULL, geom_SOM, hear_pt, dir, range);
         const auto r_cnt = geom_DB.r_count();
+        PERF_ADD(snd_occ_tris, r_cnt);
         if (0 != r_cnt)
         {
             CDB::RESULT* begin = geom_DB.r_begin();
@@ -298,7 +304,8 @@ float CSoundRender_Scene::get_occlusion_to(const Fvector& hear_pt, const Fvector
 
 float CSoundRender_Scene::get_occlusion(const Fvector& P, float R, Fvector* occ)
 {
-    ZoneScoped;
+    PERF_HOT_ZONE("get_occlusion");
+    PERF_INC(snd_occ_emitter);
 
     float occ_value = 1.f;
 
@@ -310,6 +317,8 @@ float CSoundRender_Scene::get_occlusion(const Fvector& P, float R, Fvector* occ)
     pos.add(P);
     dir.sub(pos, base);
     const float range = dir.magnitude();
+    if (range < EPS_L)
+        return occ_value; // listener sits on the sample point: nothing in between, avoid NaN dir
     dir.div(range);
 
     CDB::COLLIDER& geom_DB = sound_scene_ray_collider();
@@ -328,6 +337,7 @@ float CSoundRender_Scene::get_occlusion(const Fvector& P, float R, Fvector* occ)
         if (bNeedFullTest)
         {
             geom_DB.ray_query(CDB::OPT_ONLYNEAREST, geom_MODEL, base, dir, range);
+            PERF_ADD(snd_occ_tris, geom_DB.r_count());
             if (0 != geom_DB.r_count())
             {
                 // cache polygon
@@ -345,6 +355,7 @@ float CSoundRender_Scene::get_occlusion(const Fvector& P, float R, Fvector* occ)
     {
         geom_DB.ray_query(CDB::OPT_CULL, geom_SOM, base, dir, range);
         const auto r_cnt = geom_DB.r_count();
+        PERF_ADD(snd_occ_tris, r_cnt);
         if (0 != r_cnt)
         {
             CDB::RESULT* begin = geom_DB.r_begin();

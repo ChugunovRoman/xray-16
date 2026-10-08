@@ -2,6 +2,7 @@
 #include "UIDialogHolder.h"
 #include "ui/UIDialogWnd.h"
 #include "UIGameCustom.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrUICore/Cursor/UICursor.h"
 #include "Level.h"
 #include "Actor.h"
@@ -104,6 +105,7 @@ void CDialogHolder::StopMenu(CUIDialogWnd* pDialog)
 
 void CDialogHolder::AddDialogToRender(CUIWindow* pDialog)
 {
+    GW_OVERLAP_HAZARD("CDialogHolder::AddDialogToRender");
     dlgItem itm(pDialog);
     itm.enabled = true;
 
@@ -126,6 +128,7 @@ void CDialogHolder::AddDialogToRender(CUIWindow* pDialog)
 
 void CDialogHolder::RemoveDialogToRender(CUIWindow* pDialog)
 {
+    GW_OVERLAP_HAZARD("CDialogHolder::RemoveDialogToRender");
     dlgItem itm(pDialog);
     itm.enabled = true;
     xr_vector<dlgItem>::iterator it = std::find(m_dialogsToRender.begin(), m_dialogsToRender.end(), itm);
@@ -250,6 +253,8 @@ void CDialogHolder::StartStopMenu(CUIDialogWnd* pDialog, bool bDoHideIndicators)
 void CDialogHolder::OnFrame()
 {
     ZoneScoped;
+    xray::perf::ScopedTime ui_time(
+        smart_cast<CUIGameCustom*>(this) ? xray::perf::Metric::ui_dialog_game : xray::perf::Metric::ui_dialog_menu);
 
     m_b_in_update = true;
 

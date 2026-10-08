@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "xrCore/Threading/TaskManager.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include "xrEngine/IGame_Persistent.h"
 #include "xrEngine/IGame_Level.h"
@@ -158,6 +159,8 @@ void dbg_render_state_audit(const char* where)
     target.dbg_dump_state();
     target.dbg_probe_targets("dump");
     dbg_log_resource_pressure("dump");
+    // The G-buffer is long gone by now; arm a capture for the next frame's accumulator entry.
+    target.dbg_gbuffer_probe_pending = 1;
     for (u32 i = 0; i < HW.Caps.iGPUNum * 2; ++i)
     {
         float v = 0.f;
@@ -518,7 +521,10 @@ void CRender::Render()
         q_sync_point.End();
     }
 
-    r_main.sync();
+    {
+        PERF_WAIT_SITE(xray::perf::wait_site::RMain);
+        r_main.sync();
+    }
 
     if (ps_r2_ls_flags.test(R2FLAG_ZFILL) && !(svp_pass && ps_r__svp_skip_zfill))
     {
@@ -793,7 +799,10 @@ void CRender::Render()
     {
         ZoneScopedN("Render/RainSync");
         if (!(svp_pass && ps_r__svp_skip_rain_sync))
+        {
+            PERF_WAIT_SITE(xray::perf::wait_site::RRain);
             r_rain.sync();
+        }
     }
 
     // Directional light - fucking sun
@@ -812,6 +821,7 @@ void CRender::Render()
         const bool sun_reuse = svp_pass && svp_sun_reuse_active() && svp_sun_slices_ready;
         if (!(svp_pass && svp_sun_off) && !sun_reuse)
         {
+            PERF_WAIT_SITE(xray::perf::wait_site::RSun);
             if (!RImplementation.o.oldshadowcascades)
                 r_sun.sync();
             else
@@ -1018,6 +1028,11 @@ void CRender::Render()
         }
     }
 
+    // The accumulation stage is over by now: everything between the two counters was submitted by
+    // the light passes. Zero means the stage drew nothing at all.
+    if (ps_r__gpu_diag && !svp_pass)
+        Target->dbg_accum_calls_end = RCache.stat.render.calls;
+
     // Postprocess
     {
         ZoneScopedN("Render/Combine");
@@ -1080,6 +1095,7 @@ void CRender::Render()
                     // command would produce - the capture must not depend on anyone being quick.
                     Target->dbg_probe_targets(dark ? "went-dark" : "recovered");
                     dbg_log_resource_pressure(dark ? "went-dark" : "recovered");
+                    Target->dbg_gbuffer_probe_pending = 1;
                     g_dbg_probe_before_ui = 1;
                     if (dark)
                         Target->dbg_dump_state();
@@ -1092,10 +1108,12 @@ void CRender::Render()
             s_collapsed = collapsed;
             s_last_frame = Device.dwFrame;
             Msg("%s [scene] frame %u: draws=%u verts=%u polys=%u | lights total=%u vis=%u shadowed=%u smaps=%d"
-                " | marker=%u overflows=%u clear_mark=%u | lum=%g/%g%s | svp parallel=%d stage=%d transfer=%d",
+                " | marker=%u overflows=%u clear_mark=%u | accum_draws=%u | lum=%g/%g%s"
+                " | svp parallel=%d stage=%d transfer=%d",
                 collapsed ? "!" : "*", Device.dwFrame, st.calls, st.verts, st.polys,
                 Stats.l_total, Stats.l_visible, Stats.l_shadowed, Stats.s_merged,
                 Target->dwLightMarkerID, Target->dbg_marker_overflows(), Target->dbg_accum_clear_mark(),
+                Target->dbg_accum_calls_end - Target->dbg_accum_calls_begin,
                 s_lum[0], s_lum[1], lum_bad ? " <== NOT FINITE" : "",
                 svp_parallel ? 1 : 0, svp_shadow_stage, svp_shadow_transfer ? 1 : 0);
             dbg_log_resource_pressure("census");

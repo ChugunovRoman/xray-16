@@ -6,6 +6,8 @@
 #include "vis_common.h"
 #include "Include/xrRender/FactoryPtr.h"
 #include "xrCore/xr_resource.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Threading/Lock.hpp"
 
 class IUIShader;
 typedef FactoryPtr<IUIShader> wm_shader;
@@ -418,6 +420,13 @@ public:
     virtual void models_Clear(bool b_complete) = 0;
     virtual void emplace_texture_replacements(shared_str material_key, shared_str dds_path) = 0;
 
+    // GAME_RENDER_OVERLAP_PLAN P1.6: texture_replacements had no lock. Its own lock, not shared with
+    // CModelPool_Mutex: the one reader (FBasicVisual.cpp::Load) already runs nested inside
+    // CModelPool::Instance_Load under that lock, but the writers (GameObject.cpp's cNameVisual_set,
+    // player_hud.cpp) run outside it - sharing would make them contend for ModelPool's whole
+    // operation range for nothing. Lock-ordering invariant if both are ever needed together:
+    // ModelPool_Mutex first, then this one - never the other way (avoid ABBA).
+    Lock texture_replacements_lock;
     xr_map<shared_str, shared_str> texture_replacements;
 
     // Occlusion culling
@@ -622,4 +631,44 @@ public:
     // Sun/rain tail of the sequential second Calculate(); must be called after
     // BeginSecondViewportRender() has switched the Device projection to the scope camera.
     virtual void SecondVPPostCalculate() {}
+};
+
+// RAII for IRender::texture_replacements_lock (GAME_RENDER_OVERLAP_PLAN P1.6). Not recursive like
+// ModelPool_mtlock/UCalc_mtlock - this lock has exactly one writer and one reader, neither ever
+// nested inside the other, so no depth-guard is needed.
+struct TextureReplacementsScopeLock
+{
+    Lock& lock;
+    u64 t_hold0{};
+
+    explicit TextureReplacementsScopeLock(Lock& l) noexcept : lock(l)
+    {
+#if XR_PERF_METRICS
+        if (!lock.TryEnter())
+        {
+            PERF_INC(texrepl_lock_contend);
+            const bool metrics_active = xray::perf::g_perf_metrics_active;
+            const u64 t0 = metrics_active ? xray::perf::Ticks() : 0;
+            lock.Enter();
+            if (metrics_active)
+                xray::perf::AddTimeSlow(xray::perf::Metric::texrepl_lock_wait, xray::perf::Ticks() - t0);
+        }
+#else
+        lock.Enter();
+#endif
+#if XR_PERF_METRICS
+        if (xray::perf::g_perf_metrics_active)
+            t_hold0 = xray::perf::Ticks();
+#endif
+    }
+
+    ~TextureReplacementsScopeLock()
+    {
+        if (xray::perf::g_perf_metrics_active)
+            xray::perf::AddTimeSlow(xray::perf::Metric::texrepl_lock_hold, xray::perf::Ticks() - t_hold0);
+        lock.Leave();
+    }
+
+    TextureReplacementsScopeLock(const TextureReplacementsScopeLock&) = delete;
+    TextureReplacementsScopeLock& operator=(const TextureReplacementsScopeLock&) = delete;
 };

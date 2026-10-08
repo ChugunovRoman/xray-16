@@ -3,6 +3,7 @@
 #include "Layers/xrRender/xrRender_console.h"
 #include "r2_R_sun_support.h"
 #include "xrCore/Threading/ParallelFor.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -275,6 +276,7 @@ void render_sun::calculate()
                 dsgraph.o.view_frustum = cull_frustum[cascade_ind];
                 dsgraph.o.view_pos = cull_COP[cascade_ind];
 
+                PERF_PASS(xray::perf::pass::Sun0 + cascade_ind);
                 // Fill the database
                 dsgraph.build_subspace();
             }

@@ -11,6 +11,7 @@
 #include "xr_object.h"
 #include "Feel_Sound.h"
 #include "xrServerEntities/ai_sounds.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <algorithm>
 
@@ -363,30 +364,52 @@ static const u32 SND_PRIORITY_TYPE_MASK =
 
 void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
 {
+    ZoneScopedN("IGame_Level::SoundEvent_Register");
+
     if (!g_bLoaded)
+    {
+        PERF_INC(snd_reg_not_loaded);
         return;
+    }
     if (!S)
+    {
+        PERF_INC(snd_reg_not_loaded);
         return;
+    }
     if (S->g_object && S->g_object->getDestroy())
     {
         S->g_object = 0;
+        PERF_INC(snd_reg_destroyed);
         return;
     }
     if (0 == S->feedback)
+    {
+        PERF_INC(snd_reg_no_feedback);
         return;
+    }
+
+    const bool is_priority = (u32(S->g_type) & SND_PRIORITY_TYPE_MASK) != 0;
 
     // B-1: coalesce rapid same-source AI sound propagation (see g_snd_ai_coalesce_ms). Lock-free: events
     // run on one thread; an aligned u32 store is atomic, and a missed/extra coalesce is harmless.
-    if (g_snd_ai_coalesce_ms > 0 && S->g_object)
+    // The source is marked only once the sound actually propagates (after the burst/budget gates below):
+    // a sound dropped there must not silence the next one from the same source. A priority sound (shot,
+    // explosion) is also never swallowed by a preceding non-priority one (footstep, voice) from it.
+    static u32 s_last_ai_snd_ms[0x10000] = {}; // [source object id] -> last AI-propagation time (ms)
+    static bool s_last_ai_snd_priority[0x10000] = {}; // [source object id] -> that propagation was priority
+    const bool coalesce = g_snd_ai_coalesce_ms > 0 && S->g_object;
+    u16 coalesce_sid = 0;
+    if (coalesce)
     {
-        static u32 s_last_ai_snd_ms[0x10000] = {}; // [source object id] -> last AI-propagation time (ms)
-        const u16 sid = S->g_object->ID();
-        R_ASSERT(sid < std::size(s_last_ai_snd_ms));
+        coalesce_sid = S->g_object->ID();
+        R_ASSERT(coalesce_sid < std::size(s_last_ai_snd_ms));
         const u32 now = Device.dwTimeGlobal;
-        const u32 last = s_last_ai_snd_ms[sid];
-        if (last && now - last < u32(g_snd_ai_coalesce_ms))
+        const u32 last = s_last_ai_snd_ms[coalesce_sid];
+        if (last && now - last < u32(g_snd_ai_coalesce_ms) && (s_last_ai_snd_priority[coalesce_sid] || !is_priority))
+        {
+            PERF_INC(snd_reg_merged);
             return; // this source already alerted nearby listeners just now -> skip redundant query
-        s_last_ai_snd_ms[sid] = now;
+        }
     }
 
     // Burst coalescence: merge nearby same-type sounds within a short window (e.g. full-auto burst).
@@ -408,6 +431,7 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
                 continue;
             if (eff_pos.distance_to(s_snd_burst_ring[i].pos) > g_snd_ai_burst_coalesce_dist)
                 continue;
+            PERF_INC(snd_reg_burst);
             return; // burst-coalesced: a similar sound was already propagated nearby
         }
     }
@@ -420,20 +444,29 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
         {
             s_snd_ai_budget_counter = 0;
             s_snd_ai_budget_last_frame = Device.dwFrame;
-            s_snd_burst_ring_idx = 0;
-            ZeroMemory(s_snd_burst_ring, sizeof(s_snd_burst_ring));
+            // The burst ring is NOT reset here: its entries expire by time (g_snd_ai_burst_coalesce_time_ms,
+            // checked above) - wiping it every frame shrank the burst window to a single frame.
         }
 
-        const bool is_priority = (u32(S->g_type) & SND_PRIORITY_TYPE_MASK) != 0;
         if (s_snd_ai_budget_counter >= u32(g_snd_ai_budget_per_frame))
         {
             if (g_snd_ai_priority_only_beyond_budget && !is_priority)
+            {
+                PERF_INC(snd_reg_budget);
                 return; // budget exhausted, skip non-priority sounds
+            }
+            if (is_priority)
+                PERF_INC(snd_reg_budget_priority);
         }
         s_snd_ai_budget_counter++;
     }
 
-    // Record burst-coalescence entry after all gates pass
+    // Record the coalescence marks only after all gates pass
+    if (coalesce)
+    {
+        s_last_ai_snd_ms[coalesce_sid] = Device.dwTimeGlobal;
+        s_last_ai_snd_priority[coalesce_sid] = is_priority;
+    }
     if (g_snd_ai_burst_coalesce_enable && S->g_type && S->feedback)
     {
         const u32 now = Device.dwTimeGlobal;
@@ -464,24 +497,37 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
 
     // Query objects
     Fvector bb_size = {range, range, range};
+    SpatialCaller spatial_caller(SpatialQueryCaller::sound);
     g_pGamePersistent->SpatialSpace.q_box(snd_ER, 0, STYPE_REACTTOSOUND, snd_position, bb_size);
+    PERF_INC(snd_reg_passed);
+    xray::perf::SetGauge(xray::perf::Metric::snd_reg_listeners, static_cast<s64>(snd_ER.size()));
+    ZoneTextF("%zu listeners", snd_ER.size());
 
     // Iterate
     for (auto& it : snd_ER)
     {
         Feel::Sound* L = it->dcast_FeelSound();
         if (0 == L)
+        {
+            PERF_INC(snd_lst_not_feel);
             continue;
+        }
         IGameObject* CO = it->dcast_GameObject();
         VERIFY(CO);
         if (CO->getDestroy())
+        {
+            PERF_INC(snd_lst_destroyed);
             continue;
+        }
 
         // Energy and signal
         VERIFY(_valid(it->GetSpatialData().sphere.P));
         const float dist = snd_position.distance_to(it->GetSpatialData().sphere.P);
         if (dist > p->max_ai_distance)
+        {
+            PERF_INC(snd_lst_too_far);
             continue;
+        }
         VERIFY(_valid(dist));
         VERIFY2(!fis_zero(p->max_ai_distance), S->handle->file_name());
         float Power = (1.f - dist / p->max_ai_distance) * p->volume;
@@ -494,10 +540,12 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
             if (g_snd_ai_occlusion_skip_threshold > 0.f && Power < g_snd_ai_occlusion_skip_threshold)
             {
                 occ = g_snd_ai_occlusion_skip_default;
+                PERF_INC(snd_lst_occ_skip);
             }
             else
             {
                 occ = Sound->get_occlusion_to(it->GetSpatialData().sphere.P, snd_position);
+                PERF_INC(snd_lst_occ_ray);
             }
             VERIFY(_valid(occ));
             Power *= occ;
@@ -505,7 +553,16 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
             {
                 _esound_delegate D = {L, S, Power};
                 snd_Events.push_back(D);
+                PERF_INC(snd_lst_dispatched);
             }
+            else
+            {
+                PERF_INC(snd_lst_occ_power_eps);
+            }
+        }
+        else
+        {
+            PERF_INC(snd_lst_power_eps);
         }
     }
     snd_ER.clear();
@@ -516,6 +573,7 @@ void IGame_Level::SoundEvent_Dispatch()
     ZoneScopedN("IGame_Level::SoundEvent_Dispatch");
     const size_t dispatch_count = snd_Events.size();
     ZoneTextF("%zu events", dispatch_count);
+    xray::perf::SetGauge(xray::perf::Metric::snd_delegates, static_cast<s64>(dispatch_count));
 
     if (dispatch_count == 0)
         return;

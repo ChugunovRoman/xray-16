@@ -13,6 +13,14 @@ public:
     virtual ~CPHReqBase() {}
     virtual bool obsolete() const = 0;
     virtual bool compare(const CPHReqComparerV* v) const { return false; };
+    // GAME_RENDER_OVERLAP_PLAN Phase 3: true for any subclass that touches a lua_State (PHScriptCall.h).
+    // CPHWorld::AddCall() refuses such calls, because that commander is drained on CPHWorld's dedicated
+    // physics thread (PHWorld.cpp Step() -> update_threadsafety()), and invoking a Lua callback off
+    // GameThread is a lua_State/LuaJIT-GC thread-safety violation.
+    // Level().ph_commander()/ph_commander_scripts() are a *different* CPHCommander instance, always
+    // drained on GameThread -- script-wrapping conditions/actions are the correct, intended use there,
+    // and this flag must not (and does not) gate those.
+    virtual bool touches_script() const { return false; }
 };
 
 class CPHCondition : public CPHReqBase

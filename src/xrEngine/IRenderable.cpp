@@ -5,6 +5,8 @@
 
 #include "xrCDB/ISpatial.h"
 
+#include <atomic>
+
 RenderableBase::RenderableBase()
 {
     renderable.xform.identity();
@@ -18,7 +20,7 @@ RenderableBase::RenderableBase()
         self->GetSpatialData().type |= STYPE_RENDERABLE;
 }
 
-extern ENGINE_API bool g_bRendering;
+extern ENGINE_API std::atomic<bool> g_bRendering;
 RenderableBase::~RenderableBase()
 {
     VERIFY(!g_bRendering);

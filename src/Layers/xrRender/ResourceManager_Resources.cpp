@@ -1,5 +1,7 @@
 #include "stdafx.h"
 
+#include "xrCore/Threading/ScopeLock.hpp"
+
 #include <FlexibleVertexFormat.h>
 
 namespace xray::render::RENDER_NAMESPACE
@@ -185,6 +187,11 @@ SGeometry* CResourceManager::CreateGeom(const VertexElement* decl, VertexBufferH
 {
     R_ASSERT(decl && vb);
 
+    // GAME_RENDER_OVERLAP_PLAN P1.6: v_geoms had no lock at all. _CreateDecl() below touches
+    // v_declarations, which remains unprotected (out of scope for this pass) - only v_geoms itself
+    // is covered here.
+    ScopeLock scope(&v_geoms_lock);
+
     SDeclaration* dcl = _CreateDecl(decl);
     u32 vb_stride = GetDeclVertexSize(decl, 0);
 
@@ -219,6 +226,7 @@ void CResourceManager::DeleteGeom(const SGeometry* Geom)
 {
     if (0 == (Geom->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    ScopeLock scope(&v_geoms_lock);
     if (reclaim(v_geoms, Geom))
         return;
     Msg("! ERROR: Failed to find compiled geometry-declaration");
@@ -247,6 +255,10 @@ CTexture* CResourceManager::_CreateTexture(LPCSTR _Name)
     if (0 == xr_strcmp(_Name, "null"))
         return nullptr;
     R_ASSERT(_Name && _Name[0]);
+    // GAME_RENDER_OVERLAP_PLAN P1.6: m_textures had no lock at all. The other containers of this
+    // class (v_states/m_rtargets/v_declarations/v_constant_tables/m_matrices/m_constants/lst_*/
+    // v_passes/v_elements) remain unprotected - out of scope for this pass.
+    ScopeLock scope(&m_textures_lock);
     string_path Name;
     xr_strcpy(Name, _Name); //. andy if (strext(Name)) *strext(Name)=0;
     fix_texture_name(Name);
@@ -276,6 +288,8 @@ void CResourceManager::_DeleteTexture(const CTexture* T)
 
     if (0 == (T->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    // Same lock as _CreateTexture(): textures are released from whichever thread drops the last ref.
+    ScopeLock scope(&m_textures_lock);
     pstr N = pstr(T->cName.c_str());
     map_Texture::iterator I = m_textures.find(N);
     if (I != m_textures.end())
@@ -289,6 +303,7 @@ void CResourceManager::_DeleteTexture(const CTexture* T)
 #ifdef DEBUG
 void CResourceManager::DBG_VerifyTextures()
 {
+    ScopeLock scope(&m_textures_lock);
     map_Texture::iterator I = m_textures.begin();
     map_Texture::iterator E = m_textures.end();
     for (; I != E; ++I)

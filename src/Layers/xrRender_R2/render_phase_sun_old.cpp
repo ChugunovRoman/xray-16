@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "Layers/xrRender/xrRender_console.h"
 #include "r2_R_sun_support.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -148,8 +149,10 @@ void render_sun_old::render_sun()
         dsgraph.o.view_pos = cull_COP;
         dsgraph.set_Recorder(&s_casters);
 
-        // Fill the database
-        dsgraph.build_subspace();
+        {
+            PERF_PASS(xray::perf::pass::SunOld);
+            dsgraph.build_subspace();
+        }
 
         // IGNORE PORTALS
         if (ps_r2_ls_flags.test(R2FLAG_SUN_IGNORE_PORTALS))
@@ -683,8 +686,10 @@ void render_sun_old::render_sun_near()
         dsgraph.o.view_pos = cull_COP;
         dsgraph.o.mt_calculate = o.mt_calc_enabled;
 
-        // Fill the database
-        dsgraph.build_subspace();
+        {
+            PERF_PASS(xray::perf::pass::SunOld);
+            dsgraph.build_subspace();
+        }
     }
 
     // Render shadow-map

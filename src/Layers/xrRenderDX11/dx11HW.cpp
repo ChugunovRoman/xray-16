@@ -4,6 +4,7 @@
 
 #include "StateManager/dx11SamplerStateCache.h"
 #include "dx11TextureUtils.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <SDL_syswm.h>
 
@@ -731,6 +732,7 @@ void CHW::CheckImmThread(const char* where)
     if (tid == owner)
         return;
     const u32 n = m_immForeignCalls.fetch_add(1, std::memory_order_relaxed) + 1;
+    xray::perf::SetGauge(xray::perf::Metric::hw_imm_foreign, static_cast<s64>(n));
     // First 32 occurrences verbatim, then every 1000th: enough to see the pattern, no flood.
     if (n <= 32 || (n % 1000) == 0)
     {

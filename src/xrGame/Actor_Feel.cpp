@@ -14,6 +14,7 @@
 #include "ExplosiveRocket.h"
 #include "game_cl_base.h"
 #include "Level.h"
+#include "xrCDB/ISpatial.h"
 #include "clsid_game.h"
 #include "HUDManager.h"
 
@@ -162,6 +163,7 @@ void CActor::PickupModeUpdate_COD()
     frustum.CreateFromMatrix(Device.mFullTransform, FRUSTUM_P_LRTB | FRUSTUM_P_FAR);
 
     ISpatialResult.clear();
+    SpatialCaller spatial_caller(SpatialQueryCaller::actor);
     g_pGamePersistent->SpatialSpace.q_frustum(ISpatialResult, 0, STYPE_COLLIDEABLE, frustum);
 
     float maxlen = 1000.0f;
@@ -259,6 +261,7 @@ void CActor::Check_for_AutoPickUp()
     APU_Box.set(Fvector().sub(bc, m_AutoPickUp_AABB), Fvector().add(bc, m_AutoPickUp_AABB));
 
     xr_vector<ISpatial*> ISpatialResult;
+    SpatialCaller spatial_caller(SpatialQueryCaller::actor);
     g_pGamePersistent->SpatialSpace.q_box(ISpatialResult, 0, STYPE_COLLIDEABLE, bc, m_AutoPickUp_AABB);
 
     // Determine visibility for dynamic part of scene

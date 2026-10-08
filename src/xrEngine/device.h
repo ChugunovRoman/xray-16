@@ -146,14 +146,21 @@ public:
     /** Runs on `PreRenderThread` before optional particle worker (ixray `seqParallelRender`). */
     xr_vector<fastdelegate::FastDelegate0<>> seqParallelRender;
     std::function<void()> ParticleWorkerCallback;
-    /** B-1: physics step, run after the GameThread scheduler launch (overlaps it) when
-     *  ps_mt_scheduler_physics_overlap != 0. Set by CPHWorld; CPHWorld::OnFrame (seqFrame) then no-ops. */
-    std::function<void()> PhysicsFrameOverlapCallback;
     /** B-1: open the scheduler-overlap frame window before GameThread launch. Set by CPHWorld. */
     std::function<void()> PhysicsBeginOverlapFrameCallback;
-    /** B-1: apply owner-level physics intents deferred during the overlap window. Called
-     *  after secondary_tasks.wait(). Set by CPHWorld. */
-    std::function<void()> PhysicsDeferredFlushCallback;
+    /** Phase 3: kick the physics step, called after Wait(GameThread) and before DoRender() (CPHWorld::
+     *  OnFrame (seqFrame) always no-ops now - the step only ever runs from here). Wakes CPHWorld's own
+     *  dedicated physics thread and returns immediately, so the step runs parallel to the DoRender()
+     *  that follows. Set by CPHWorld. */
+    std::function<void()> PhysicsKickOverlapCallback;
+    /** Phase 3: only waits for the kicked physics step to finish (no flush); no-op when no step is in
+     *  flight. Called from WaitForFrameTasks(), i.e. before Reset()/Destroy() - Reset can be triggered
+     *  from inside DoRender() (RenderBegin) while the step runs. Set by CPHWorld. */
+    std::function<void()> PhysicsWaitOverlapCallback;
+    /** Phase 3: called after DoRender(), before closing the overlap window. Waits for the dedicated
+     *  physics thread to finish this frame's step and then flushes deferred mutations (owner-level
+     *  physics intents the scheduler/render path deferred during the window). Set by CPHWorld. */
+    std::function<void()> PhysicsJoinOverlapCallback;
     /** P2: execute parallel vision batch and process results. Called in GameThread after Sheduler.Update(). */
     std::function<void()> PostSchedulerVisionBatch;
     /** Optional: flush model pool delete queue on main before `PreRenderThread` (ixray `ModelDefferClear`). Set from R2 `CRender::create`. */
@@ -223,6 +230,10 @@ public:
         m_SecondViewport.SetSecondCalculatePass(false);
         m_SecondViewport.isCamReady = false;
         m_SecondViewport.isR1 = false;
+
+        // GW_OVERLAP_HAZARD (METRICS_PLAN §8.7): only Device.seqRender opts into the probe - see the
+        // hazard_site field added to MessageRegistry in pure.h.
+        seqRender.SetHazardSite("Device.seqRender");
     }
 
     void Pause(bool bOn, bool bTimer, bool bSound, pcstr reason);
@@ -296,11 +307,33 @@ public:
     }
 
 public:
-    // Multi-threading (ixray `secondary_tasks`: PreRenderThread + GameThread per frame)
+    // Multi-threading (ixray `secondary_tasks`: PreRenderThread + GameThread per frame).
+    // Dead code (nothing calls .run() on it): Phase 3 gave physics its own dedicated std::thread
+    // (CPHWorld::m_physics_thread), owned and joined by CPHWorld itself, not a TaskManager task -
+    // this group ended up unused for that purpose. Left as-is, not repurposed.
     xr_frame_task_group secondary_tasks;
     const Task* m_pre_render_task{};
     const Task* m_game_task{};
     void WaitForFrameTasks();
+
+    // Three different "is overlap happening" flags exist in the engine - do not merge them:
+    //  - XRay::Engine::IsGameThreadRunning()/IsGameLogicThread() (EngineThreading.h): the GameThread
+    //    producer is active right now. Enough on its own for consumers whose only concurrent writer
+    //    is GameThread (ModelPool, ResourceManager, texture_replacements, MessageRegistry).
+    //  - CPHWorld::m_scheduler_overlap_active / m_step_running (PHWorld.cpp): physics-internal only,
+    //    drive ShouldDeferSchedulerPhysicsMutation() - never read from outside xrPhysics.
+    //  - IsFrameOverlapActive() (here): the broad "some frame overlap is in flight" signal, true from
+    //    BeginSchedulerOverlapFrame() (before GameThread is kicked) until the physics join after
+    //    DoRender() (ProcessFrame clears it after PhysicsJoinOverlapCallback), i.e. while physics is
+    //    running on its own dedicated thread parallel to DoRender() (Phase 3). Gates "defer or do it
+    //    now" decisions (e.g. CModelPool::Delete).
+    bool IsFrameOverlapActive() const noexcept { return m_frame_overlap_active.load(std::memory_order_acquire); }
+    void SetFrameOverlapActive(bool active) noexcept { m_frame_overlap_active.store(active, std::memory_order_release); }
+
+private:
+    std::atomic<bool> m_frame_overlap_active{ false };
+
+public:
     Event PresentationFinished = nullptr;
 
     static constexpr u32 MaximalWaitTime = 16; // ms

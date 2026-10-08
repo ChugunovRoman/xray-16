@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstring>
 #include <algorithm>
+#include <thread>
 #include <SDL.h>
 
 #if defined(_MSC_VER)
@@ -16,6 +17,10 @@ namespace xray::perf
 {
 XRCORE_API int  g_perf_metrics = 0;
 XRCORE_API bool g_perf_metrics_active = false;
+XRCORE_API bool g_perf_hide_hot_zones = false;
+XRCORE_API std::atomic<std::thread::id> g_main_tid{};
+XRCORE_API std::atomic<std::thread::id> g_game_tid{};
+XRCORE_API int g_overlap_hazard_probe = 0;
 } // namespace xray::perf
 
 namespace
@@ -30,8 +35,22 @@ struct alignas(64) Slot
 
 Slot s_slots[kMaxSlots]{};
 Slot s_fallback_slot{};
+std::atomic<u64> s_gauges[kNumMetrics]{};
 std::atomic<u32> s_next_slot{0};
 thread_local size_t tl_slot = size_t(-1);
+thread_local u8 tl_pass_v = 0;
+thread_local u8 tl_crow_src_v = 0;
+thread_local u8 tl_bone_caller_v = 0;
+thread_local u8 tl_wait_site_v = 0;
+
+constexpr size_t kMaxBlendCb = 16;
+struct BlendCbEntry
+{
+    const void* fn{};
+    const char* name{};
+};
+BlendCbEntry s_blend_cb[kMaxBlendCb]{};
+std::atomic<u32> s_blend_cb_n{0};
 
 inline size_t GetThreadSlot() noexcept
 {
@@ -48,14 +67,17 @@ struct MetricDesc
     const char* base_name;
     bool is_timer_ticks;
     bool is_timer_calls;
+    bool is_gauge;
 };
 
-#define PERF_COUNTER(id, name) { name, name, false, false },
-#define PERF_TIMER(id, name)   { name "/ms", name, true, false }, { name "/calls", name, false, true },
+#define PERF_COUNTER(id, name) { name, name, false, false, false },
+#define PERF_GAUGE(id, name)   { name, name, false, false, true },
+#define PERF_TIMER(id, name)   { name "/ms", name, true, false, false }, { name "/calls", name, false, true, false },
 const MetricDesc s_metric_descs[kNumMetrics] = {
 #include "PerfMetricsList.inl"
 };
 #undef PERF_COUNTER
+#undef PERF_GAUGE
 #undef PERF_TIMER
 
 u64 CalibrateTicksFrequency() noexcept
@@ -137,6 +159,39 @@ u32 s_window_frames = 0;
 
 namespace xray::perf
 {
+XRCORE_API u8& TlPass() noexcept { return tl_pass_v; }
+XRCORE_API u8& TlCrowSrc() noexcept { return tl_crow_src_v; }
+XRCORE_API u8& TlBoneCaller() noexcept { return tl_bone_caller_v; }
+XRCORE_API u8& TlWaitSite() noexcept { return tl_wait_site_v; }
+
+XRCORE_API void RegisterBlendCb(const void* fn, const char* name) noexcept
+{
+    if (!fn)
+        return;
+    const u32 n = s_blend_cb_n.load(std::memory_order_relaxed);
+    for (u32 i = 0; i < n && i < kMaxBlendCb; ++i)
+    {
+        if (s_blend_cb[i].fn == fn)
+            return;
+    }
+    const u32 slot = s_blend_cb_n.fetch_add(1, std::memory_order_relaxed);
+    if (slot >= kMaxBlendCb)
+        return;
+    s_blend_cb[slot].fn = fn;
+    s_blend_cb[slot].name = name;
+}
+
+XRCORE_API const char* LookupBlendCb(const void* fn) noexcept
+{
+    const u32 n = s_blend_cb_n.load(std::memory_order_relaxed);
+    for (u32 i = 0; i < n && i < kMaxBlendCb; ++i)
+    {
+        if (s_blend_cb[i].fn == fn)
+            return s_blend_cb[i].name;
+    }
+    return nullptr;
+}
+
 XRCORE_API u64 Ticks() noexcept
 {
 #if defined(_MSC_VER) || defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
@@ -184,7 +239,20 @@ XRCORE_API void SetGauge(Metric m, s64 v) noexcept
     const size_t idx = static_cast<size_t>(m);
     if (idx >= kNumMetrics)
         return;
-    s_slots[0].v[idx].store(static_cast<u64>(v), std::memory_order_relaxed);
+    s_gauges[idx].store(static_cast<u64>(v), std::memory_order_relaxed);
+}
+
+XRCORE_API void UpdateMax(Metric m, s64 v) noexcept
+{
+    const size_t idx = static_cast<size_t>(m);
+    if (idx >= kNumMetrics)
+        return;
+    std::atomic<u64>& slot = s_gauges[idx];
+    u64 cur = slot.load(std::memory_order_relaxed);
+    const u64 desired = static_cast<u64>(v);
+    while (static_cast<s64>(cur) < v && !slot.compare_exchange_weak(cur, desired, std::memory_order_relaxed))
+    {
+    }
 }
 
 XRCORE_API void AddHist(Metric m, u32 bucket) noexcept
@@ -196,6 +264,10 @@ XRCORE_API void AddHist(Metric m, u32 bucket) noexcept
 
 XRCORE_API void Flush() noexcept
 {
+    // Latched on its own, ahead of the early return below: bit 2 is meant to work even with bits 0-1 both off
+    // (hide the hot zones while reading Tracy live, without also turning on plots or the 5 s log).
+    g_perf_hide_hot_zones = (g_perf_metrics & 4) != 0;
+
     const bool was_active = g_perf_metrics_active;
     g_perf_metrics_active = (g_perf_metrics & 1) != 0 || (g_perf_metrics & 2) != 0;
     const bool tracy_plots_enabled = (g_perf_metrics & 1) != 0;
@@ -212,6 +284,11 @@ XRCORE_API void Flush() noexcept
 
     for (size_t i = 0; i < kNumMetrics; ++i)
     {
+        if (s_metric_descs[i].is_gauge)
+        {
+            current_totals[i] = s_gauges[i].load(std::memory_order_relaxed);
+            continue;
+        }
         u64 sum = s_fallback_slot.v[i].load(std::memory_order_relaxed);
         for (u32 s = 0; s < slots_allocated; ++s)
         {
@@ -251,15 +328,12 @@ XRCORE_API void Flush() noexcept
 
         for (size_t i = 0; i < kNumMetrics; ++i)
         {
-            if (s_metric_descs[i].is_timer_ticks)
-            {
-                const double ms = TicksToMs(deltas[i]);
-                TracyPlot(s_metric_descs[i].name, ms);
-            }
+            if (s_metric_descs[i].is_gauge)
+                TracyPlot(s_metric_descs[i].name, static_cast<double>(current_totals[i]));
+            else if (s_metric_descs[i].is_timer_ticks)
+                TracyPlot(s_metric_descs[i].name, TicksToMs(deltas[i]));
             else
-            {
                 TracyPlot(s_metric_descs[i].name, static_cast<double>(deltas[i]));
-            }
         }
     }
 #endif
@@ -272,9 +346,10 @@ XRCORE_API void Flush() noexcept
     ++s_window_frames;
     for (size_t i = 0; i < kNumMetrics; ++i)
     {
-        s_window_deltas[i] += deltas[i];
-        if (deltas[i] > s_window_max_frame[i])
-            s_window_max_frame[i] = deltas[i];
+        const u64 frame_v = s_metric_descs[i].is_gauge ? current_totals[i] : deltas[i];
+        s_window_deltas[i] += frame_v;
+        if (frame_v > s_window_max_frame[i])
+            s_window_max_frame[i] = frame_v;
     }
 
     const u32 elapsed_ms = now_ms - s_window_start_ms;
@@ -301,6 +376,14 @@ XRCORE_API void Flush() noexcept
                             s_metric_descs[i].base_name, total_ms, total_calls, avg_us, max_frame_ms);
                     }
                 }
+                else if (s_metric_descs[i].is_gauge)
+                {
+                    if (s_window_max_frame[i] > 0)
+                    {
+                        const double avg_frame = s_window_frames > 0 ? (static_cast<double>(s_window_deltas[i]) / static_cast<double>(s_window_frames)) : 0.0;
+                        Msg("*   %s avg=%.1f max=%llu", s_metric_descs[i].name, avg_frame, s_window_max_frame[i]);
+                    }
+                }
                 else
                 {
                     const u64 total_count = s_window_deltas[i];
@@ -319,5 +402,22 @@ XRCORE_API void Flush() noexcept
         std::memset(s_window_deltas, 0, sizeof(s_window_deltas));
         std::memset(s_window_max_frame, 0, sizeof(s_window_max_frame));
     }
+}
+
+XRCORE_API void ReportOverlapHazard(OverlapHazardSite& site, const char* where) noexcept
+{
+    const u32 n = site.count.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n <= 8)
+    {
+        Msg("! [overlap-hazard] %s called from GameThread (logic thread) while it is running, hit #%u", where, n);
+        return;
+    }
+    const u64 now_ms = CPU::GetTicks();
+    u64 last = site.last_report_ms.load(std::memory_order_relaxed);
+    if (now_ms - last < 5000)
+        return;
+    if (!site.last_report_ms.compare_exchange_strong(last, now_ms, std::memory_order_relaxed))
+        return; // another thread just reported this site
+    Msg("! [overlap-hazard] %s called from GameThread (logic thread), %u hits so far", where, n);
 }
 } // namespace xray::perf

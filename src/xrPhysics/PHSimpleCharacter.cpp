@@ -25,6 +25,7 @@
 #include "xrCore/Animation/Bone.hpp"
 #include "xrEngine/xr_object.h"
 #include "ph_valid_ode.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 IC IPhysicsShellHolder* validated_contact_ref_object(dContact* c, bool bo1)
 {
@@ -531,6 +532,15 @@ void CPHSimpleCharacter::PhDataUpdate(dReal /**step**/)
     }
     if (is_contact && !is_control && !b_lose_ground)
         Disabling();
+    else
+    {
+        if (is_control)
+            PERF_INC(ph_ctrl_block_control);
+        if (!is_contact)
+            PERF_INC(ph_ctrl_block_no_contact);
+        if (b_lose_ground)
+            PERF_INC(ph_ctrl_block_lose_ground);
+    }
 
     ///////////////////////
     if (ph_world->m_steps_num > m_ext_impuls_stop_step)

@@ -2,6 +2,7 @@
 #include "addon_object_events.h"
 #include "addon_event_bus.h"
 #include <tracy/Tracy.hpp>
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "GameObject.h"
 
 #include "Include/xrRender/RenderVisual.h"
@@ -120,10 +121,16 @@ static bool corpse_ragdoll_settled(CEntityAlive* entity_alive)
 
 void CGameObject::MakeMeCrow()
 {
-    if (Props.crow)
+    if (m_is_crow.load(std::memory_order_relaxed))
+    {
+        PERF_INC(crow_early_already);
         return;
+    }
     if (!processing_enabled())
+    {
+        PERF_INC(crow_early_processing);
         return;
+    }
 
     // Optimization: skip MakeMeCrow for corpses whose ragdoll has already settled.
     // This reduces post-battle CPU tail significantly.
@@ -134,7 +141,7 @@ void CGameObject::MakeMeCrow()
             const u32 death_time = entity_alive->GetLevelDeathTime();
             if (death_time && (Device.dwTimeGlobal - death_time > 3000))
             {
-                // Settled corpse, dead for more than 3 seconds - no need to update as crow every frame
+                PERF_INC(crow_early_corpse);
                 return;
             }
         }
@@ -143,13 +150,20 @@ void CGameObject::MakeMeCrow()
     u32 const device_frame_id = Device.dwFrame;
     u32 object_frame_id = dwFrame_AsCrow.load(std::memory_order_relaxed);
     if (object_frame_id == device_frame_id)
+    {
+        PERF_INC(crow_early_same_frame);
         return;
+    }
 
     if (dwFrame_AsCrow.compare_exchange_strong(object_frame_id, device_frame_id, std::memory_order_acq_rel))
     {
         VERIFY(dwFrame_AsCrow.load(std::memory_order_acquire) == device_frame_id);
+        const u8 src = xray::perf::TlCrowSrc() ? xray::perf::TlCrowSrc()
+                                               : xray::perf::CrowSrcFromPass(xray::perf::TlPass());
+        m_crow_packed.store(xray::perf::PackCrow(src, device_frame_id), std::memory_order_relaxed);
+        xray::perf::IncCrowSrc(src);
         g_pGameLevel->Objects.o_crow(this);
-        Props.crow = 1;
+        m_is_crow.store(true, std::memory_order_relaxed);
     }
 }
 
@@ -157,6 +171,7 @@ void CGameObject::cName_set(shared_str N) { NameObject = N; }
 void CGameObject::cNameSect_set(shared_str N) { NameSection = N; }
 void CGameObject::cNameVisual_set(shared_str N)
 {
+    GW_OVERLAP_HAZARD("CGameObject::cNameVisual_set");
     // check if equal
     if (N.c_str() && NameVisual.c_str())
         if (N == NameVisual)
@@ -726,7 +741,7 @@ bool CGameObject::net_Spawn(CSE_Abstract* DC)
         if (O->m_flags.is(CSE_ALifeObject::flVisibleForAI))
             spatial.type |= STYPE_VISIBLEFORAI;
         else
-            spatial.type = (spatial.type | STYPE_VISIBLEFORAI) ^ STYPE_VISIBLEFORAI;
+            spatial.type.fetch_and(~STYPE_VISIBLEFORAI, std::memory_order_relaxed);
     }
 
     reload(cNameSect().c_str());
@@ -817,7 +832,10 @@ bool CGameObject::net_Spawn(CSE_Abstract* DC)
     // reinitialize flags
     processing_activate();
     setDestroy(false);
-    MakeMeCrow();
+    {
+        PERF_CROW_SRC(xray::perf::crow::Spawn);
+        MakeMeCrow();
+    }
     // ~
     m_bObjectRemoved = false;
     spawn_supplies();
@@ -1226,7 +1244,10 @@ IGameObject* CGameObject::H_SetParent(IGameObject* new_parent, bool just_before_
     else
         OnH_A_Independent(); // after detach
     // if (Parent) Parent->H_ChildAdd (this);
-    MakeMeCrow();
+    {
+        PERF_CROW_SRC(xray::perf::crow::SetParent);
+        MakeMeCrow();
+    }
     return old_parent;
 }
 
@@ -1302,6 +1323,8 @@ void CGameObject::renderable_Render(u32 context_id, IRenderable* root)
     // The dedicated SVP build thread renders objects outside the task scheduler; engine
     // registration queues (o_crow) are keyed by scheduler worker IDs and must not be touched
     // from there. The main pass renders the same objects and performs the registration.
+    if (xray::perf::TlPass() == xray::perf::pass::Main)
+        m_main_pass_frame.store(Device.dwFrame, std::memory_order_relaxed);
     if (!svp_worker_is_current_thread())
         MakeMeCrow();
     // ~
@@ -1464,6 +1487,7 @@ void CGameObject::shedule_Update(u32 dt)
     {
         ZoneScopedN("sh_CGameObject_shedule/MakeMeCrow");
         START_PROFILE("game_object/schedule_update/crow")
+        PERF_CROW_SRC(xray::perf::crow::Shedule);
         MakeMeCrow();
         STOP_PROFILE
     }
@@ -1529,6 +1553,8 @@ void CGameObject::shedule_Update(u32 dt)
             START_PROFILE("game_object/schedule_update/script_binder")
             if (binder_gate_update(now_ms)) // stage D, W3-1: false = the Lua binder has nothing due this pass
                 scriptBinder.shedule_Update(dt);
+            else
+                PERF_INC(binder_skip_gate);
             // W3-2: with the gate on, npc_on_update comes from the engine on the callback phase (Lua skips its emit)
             // Only for the binder that reads the mask: it is the one that skips its own emit then.
             if (m_binder_gate.consumer && (m_binder_gate.mask & kGatePhaseCallback))
@@ -1550,6 +1576,8 @@ void CGameObject::shedule_Update(u32 dt)
                 }
             }
         }
+        else
+            PERF_INC(binder_skip_throttle);
     }
     STOP_PROFILE
 }
@@ -1715,6 +1743,20 @@ IC bool similar(const Fmatrix& _0, const Fmatrix& _1, const float& epsilon = EPS
 void CGameObject::UpdateCL()
 {
     ZoneScopedN("ucl_CGameObject");
+    const u64 crow_packed = m_crow_packed.load(std::memory_order_relaxed);
+    const u32 crow_frame = xray::perf::UnpackCrowFrame(crow_packed);
+    const u8 crow_src = xray::perf::UnpackCrowSrc(crow_packed);
+    if (crow_frame + 1 == Device.dwFrame &&
+        (crow_src == xray::perf::crow::Sun || crow_src == xray::perf::crow::Light) &&
+        m_main_pass_frame.load(std::memory_order_relaxed) != crow_frame)
+    {
+        if (cast_stalker())
+            PERF_INC(crow_shadow_only_stalker);
+        else if (cast_base_monster())
+            PERF_INC(crow_shadow_only_monster);
+        else
+            PERF_INC(crow_shadow_only_other);
+    }
 // IGameObject::UpdateCL();
 // consistency check
 #ifdef DEBUG
@@ -1752,15 +1794,24 @@ void CGameObject::UpdateCL()
     {
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::GameObjectUpdateCLCrow);
         if (Parent == g_pGameLevel->CurrentViewEntity() || AlwaysTheCrow())
+        {
+            PERF_CROW_SRC(xray::perf::crow::UclView);
             MakeMeCrow();
+        }
         else
         {
             float dist = Device.vCameraPosition.distance_to_sqr(Position());
             if (dist < CROW_RADIUS * CROW_RADIUS)
+            {
+                PERF_CROW_SRC(xray::perf::crow::UclR30);
                 MakeMeCrow();
+            }
             else if ((Visual() && Visual()->getVisData().hom_frame + 2 > Device.dwFrame) &&
                 dist < CROW_RADIUS2 * CROW_RADIUS2)
+            {
+                PERF_CROW_SRC(xray::perf::crow::UclHom60);
                 MakeMeCrow();
+            }
         }
     }
     // ~

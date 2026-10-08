@@ -20,6 +20,48 @@ extern CPHWorld* ph_world;
 ///////////////////////////////////////////////////////////////////
 
 #include "ExtendedGeom.h"
+#include "IPhysicsShellHolder.h"
+#include "PHCharacter.h"
+#include "PHShell.h"
+#include "xrEngine/xr_object.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+
+namespace
+{
+#if XR_PERF_METRICS
+// Mirrors the per-object classification in CPHWorld::OnFrameStep (ph_obj_*): same 7 buckets, for the single
+// object that a live contact just woke up (obj2 in NearCallback), not a full pass over m_objects.
+xray::perf::Metric PhWakeMetric(CPHObject* obj) noexcept
+{
+    using M = xray::perf::Metric;
+    const CPHObject::ECastType tp = obj->CastType();
+    if (tp == CPHObject::tpCharacter)
+    {
+        CPHCharacter* ch = static_cast<CPHCharacter*>(obj);
+        if (ch->CastActorCharacter())
+            return M::ph_wake_actor;
+        if (ch->CastAICharacter())
+            return M::ph_wake_ai;
+        return M::ph_wake_other;
+    }
+    if (CPHCollideValidator::IsRagDollObject(*obj))
+        return M::ph_wake_ragdoll;
+    if (tp == CPHObject::tpStaticShell)
+        return M::ph_wake_static;
+    if (tp == CPHObject::tpShell)
+    {
+        IPhysicsShellHolder* holder = static_cast<CPHShell*>(obj)->PhysicsRefObject();
+        IGameObject* go = holder ? holder->IObject() : nullptr;
+        if (go && go->cast_holder_custom())
+            return M::ph_wake_vehicle;
+        if (holder && holder->IsInventoryItem())
+            return M::ph_wake_item;
+        return M::ph_wake_other;
+    }
+    return M::ph_wake_other;
+}
+#endif // XR_PERF_METRICS
+} // namespace
 // PhysicsStepTimeCallback		*physics_step_time_callback				= 0;
 
 const float default_w_limit = 9.8174770f; //(M_PI/16.f/(fixed_step=0.02f));
@@ -268,26 +310,47 @@ void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2)
     CPHIsland* island2 = obj2->DActiveIsland();
     obj2->near_callback(obj1);
     int MAX_CONTACTS = -1;
+    const bool counting = ph_world->Processing();
+    if (counting)
+        PERF_INC(ph_near_calls);
     if (!island1->CanMerge(island2, MAX_CONTACTS))
-        return;
-    if (CollideIntoGroup(o1, o2, ContactGroup, island1, MAX_CONTACTS) != 0)
     {
+        if (counting)
+            PERF_INC(ph_near_merge_reject);
+        return;
+    }
+    const int contacts = CollideIntoGroup(o1, o2, ContactGroup, island1, MAX_CONTACTS);
+    if (contacts != 0)
+    {
+        if (counting)
+            PERF_ADD(ph_near_dyn_contacts, u64(contacts));
         obj1->MergeIsland(obj2);
         // obj2 may never reach the IslandReinit loops of Step/StepTouch (frozen world, CPHStaticGeomShell
         // whose EnableObject does not activate it, deactivation mid-step) -> guarantee its Unmerge.
         ph_world->RegisterMerged(obj2);
         if (!obj2->is_active())
+        {
+            if (counting)
+            {
+                PERF_INC(ph_wake);
+#if XR_PERF_METRICS
+                // Classification makes virtual calls into game objects - pay for it only when metrics are on.
+                if (xray::perf::g_perf_metrics_active)
+                    xray::perf::Add(PhWakeMetric(obj2));
+#endif
+            }
             obj2->EnableObject(obj1);
+        }
     }
 }
 
 void CollideStatic(dGeomID o2, CPHObject* obj2)
 {
-    // P1 (plans/optimization_spawn): candidate for where per-Step() time actually goes during spawn
-    // (dCollide against level statics via CDB::box_query), as opposed to the cheap ISpatial_DB::q_box.
-    ZoneScoped;
+    PERF_SCOPE(ph_collide_static);
     CPHIsland* island2 = obj2->DActiveIsland();
-    CollideIntoGroup(ph_world->GetMeshGeom(), o2, ContactGroup, island2, island2->MaxJoints());
+    const int contacts =
+        CollideIntoGroup(ph_world->GetMeshGeom(), o2, ContactGroup, island2, island2->MaxJoints());
+    PERF_ADD(ph_collide_static_contacts, u64(contacts));
 }
 
 // half square time

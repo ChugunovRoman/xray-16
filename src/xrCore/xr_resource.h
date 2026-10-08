@@ -62,8 +62,9 @@ protected:
     {
         if (0 == p_)
             return;
-        --p_->ref_count;
-        if (0 == p_->ref_count)
+        // Single atomic decrement-and-test: a separate load after the decrement lets two threads
+        // releasing the last two refs both observe 0 and double-delete.
+        if (0 == --p_->ref_count)
             xr_delete(p_);
     }
 

@@ -11,6 +11,7 @@
 #include "ParticlesObject.h"
 #include "Level.h"
 #include "VisionBatch.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "HUDManager.h"
 #include "xrServer.h"
 #include "NET_Queue.h"
@@ -269,7 +270,7 @@ bool g_bDebugEvents = false;
 void CLevel::cl_Process_Event(u16 dest, u16 type, NET_Packet& P)
 {
     ZoneNamedN(___tracy_cl_process_event, "CLevel::cl_Process_Event", true);
-    ZoneTextVF(___tracy_cl_process_event, "dest=%u type=%u", (unsigned)dest, (unsigned)type);
+    ZoneTextVF(___tracy_cl_process_event, "type=%u dest=%u", (unsigned)type, (unsigned)dest);
 
     // Msg("--- event[%d] for [%d]",type,dest);
     IGameObject* O = nullptr;
@@ -353,14 +354,17 @@ void CLevel::ProcessGameEvents()
     {
         NET_Packet P;
         u32 svT = timeServer() - NET_Latency;
+        u32 processed = 0;
         while (game_events->available(svT))
         {
+            ++processed;
             u16 ID, dest, type;
             game_events->get(ID, dest, type, P);
             switch (ID)
             {
             case M_SPAWN:
             {
+                PERF_INC(ge_spawn);
                 u16 dummy16;
                 P.r_begin(dummy16);
                 cl_Process_Spawn(P);
@@ -368,11 +372,13 @@ void CLevel::ProcessGameEvents()
             }
             case M_EVENT:
             {
+                PERF_INC(ge_event);
                 cl_Process_Event(dest, type, P);
                 break;
             }
             case M_MOVE_PLAYERS:
             {
+                PERF_INC(ge_other);
                 u8 Count = P.r_u8();
                 for (u8 i = 0; i < Count; i++)
                 {
@@ -392,28 +398,34 @@ void CLevel::ProcessGameEvents()
             }
             case M_STATISTIC_UPDATE:
             {
+                PERF_INC(ge_other);
                 if (GameID() != eGameIDSingle)
                     Game().m_WeaponUsageStatistic->OnUpdateRequest(&P);
                 break;
             }
             case M_FILE_TRANSFER:
             {
+                PERF_INC(ge_other);
                 if (m_file_transfer) // in case of net_Stop
                     m_file_transfer->on_message(&P);
                 break;
             }
             case M_GAMEMESSAGE:
             {
+                PERF_INC(ge_other);
                 Game().OnGameMessage(P);
                 break;
             }
             default:
             {
+                PERF_INC(ge_other);
                 VERIFY(0);
                 break;
             }
             }
         }
+        if (xray::perf::g_perf_metrics_active)
+            xray::perf::SetGauge(xray::perf::Metric::ge_total_frame, static_cast<s64>(processed));
     }
     if (OnServer() && GameID() != eGameIDSingle)
         Game().m_WeaponUsageStatistic->Send_Check_Respond();
@@ -451,6 +463,8 @@ void CLevel::VisionBatchPostScheduler()
     {
         ZoneScopedN("VisionBatchPostScheduler/vision_batch");
         ZoneTextF("%u NPC", g_vision_batch.GetEntryCount());
+        xray::perf::SetGauge(xray::perf::Metric::vision_entries, g_vision_batch.GetEntryCount());
+        xray::perf::SetGauge(xray::perf::Metric::vision_rays, g_vision_batch.GetRayCount());
         g_vision_batch.ExecuteParallel();
     }
     {
@@ -473,6 +487,71 @@ void CLevel::VisionBatchPostScheduler()
 void CLevel::OnFrame()
 {
     ZoneScoped;
+
+    if (xray::perf::g_perf_metrics_active)
+    {
+        static u32 s_npc_r_hist_ms = 0;
+        const u32 now = Device.dwTimeContinual;
+        if (now - s_npc_r_hist_ms >= 5000)
+        {
+            s_npc_r_hist_ms = now;
+            // Both radius sources (§8.6): the visual sphere drives render culling, the spatial sphere
+            // drives AI/physics range checks - they can differ (e.g. a crouching stalker's visual sphere
+            // shrinks, the spatial one may not). Stalkers and monsters are counted into separate buckets.
+            using M = xray::perf::Metric;
+            struct RadiusBuckets
+            {
+                M b0_05, b05_1, b1_15, b15_2, b2_3, b3p, bgt1;
+            };
+            static const RadiusBuckets vis_stlk{M::npc_r_vis_stlk_0_05, M::npc_r_vis_stlk_05_1,
+                M::npc_r_vis_stlk_1_15, M::npc_r_vis_stlk_15_2, M::npc_r_vis_stlk_2_3, M::npc_r_vis_stlk_3p,
+                M::npc_r_vis_stlk_gt1};
+            static const RadiusBuckets vis_mon{M::npc_r_vis_mon_0_05, M::npc_r_vis_mon_05_1,
+                M::npc_r_vis_mon_1_15, M::npc_r_vis_mon_15_2, M::npc_r_vis_mon_2_3, M::npc_r_vis_mon_3p,
+                M::npc_r_vis_mon_gt1};
+            static const RadiusBuckets spt_stlk{M::npc_r_spt_stlk_0_05, M::npc_r_spt_stlk_05_1,
+                M::npc_r_spt_stlk_1_15, M::npc_r_spt_stlk_15_2, M::npc_r_spt_stlk_2_3, M::npc_r_spt_stlk_3p,
+                M::npc_r_spt_stlk_gt1};
+            static const RadiusBuckets spt_mon{M::npc_r_spt_mon_0_05, M::npc_r_spt_mon_05_1,
+                M::npc_r_spt_mon_1_15, M::npc_r_spt_mon_15_2, M::npc_r_spt_mon_2_3, M::npc_r_spt_mon_3p,
+                M::npc_r_spt_mon_gt1};
+            auto inc_bucket = [](float r, const RadiusBuckets& b) {
+                // gt1 is not an 8th bucket; it shares the same >1m boundary as the start of b1_15, so the
+                // "fraction above 1m" reading is always exactly the sum of b1_15+b15_2+b2_3+b3p.
+                // PERF_INC can't be used here: it macro-expands to xray::perf::Metric::<arg>, but the
+                // bucket to hit is a runtime field of `b`, not a compile-time Metric name.
+                if (r > 1.f)
+                    xray::perf::Add(b.bgt1);
+                if (r < 0.5f)
+                    xray::perf::Add(b.b0_05);
+                else if (r <= 1.f)
+                    xray::perf::Add(b.b05_1);
+                else if (r < 1.5f)
+                    xray::perf::Add(b.b1_15);
+                else if (r < 2.f)
+                    xray::perf::Add(b.b15_2);
+                else if (r < 3.f)
+                    xray::perf::Add(b.b2_3);
+                else
+                    xray::perf::Add(b.b3p);
+            };
+            const u32 n = Objects.o_count();
+            for (u32 i = 0; i < n; ++i)
+            {
+                IGameObject* O = Objects.o_get_by_iterator(i);
+                if (!O)
+                    continue;
+                const bool is_stalker = O->cast_stalker() != nullptr;
+                if (!is_stalker && !O->cast_base_monster())
+                    continue;
+                CEntityAlive* ea = O->cast_entity_alive();
+                if (!ea || !ea->g_Alive())
+                    continue;
+                inc_bucket(O->Radius(), is_stalker ? vis_stlk : vis_mon);
+                inc_bucket(O->GetSpatialData().sphere.R, is_stalker ? spt_stlk : spt_mon);
+            }
+        }
+    }
 
 #ifdef DEBUG
     DBG_RenderUpdate();
@@ -661,6 +740,10 @@ void CLevel::script_gc()
 {
     ZoneScoped;
     AIStats.LuaGC.Begin();
+    lua_State* L = GEnv.ScriptEngine ? GEnv.ScriptEngine->lua() : nullptr;
+    if (L)
+        xray::perf::SetGauge(xray::perf::Metric::lua_gc_kb, lua_gc(L, LUA_GCCOUNT, 0));
+    PERF_SCOPE(lua_gc_step);
 
     switch (ps_lua_gc_method)
     {
@@ -717,32 +800,48 @@ void CLevel::OnRender()
     inherited::OnRender();
     if (!game)
         return;
-    Game().OnRender();
-
-    // Dedicated second VP: tracers are drawn in IGame_Level (main RT, then scope RT). Otherwise once here.
     {
-        IMainMenu* pMainMenu = g_pGamePersistent ? g_pGamePersistent->m_pMainMenu : nullptr;
-        const bool bMenu = pMainMenu && pMainMenu->CanSkipSceneRendering();
-        const bool tracers_done_in_level =
-            ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame() && !bMenu;
-        if (!tracers_done_in_level)
-            BulletManager().Render();
+        ZoneScopedN("lvl_post3d");
+        Game().OnRender();
+
+        // Dedicated second VP: tracers are drawn in IGame_Level (main RT, then scope RT). Otherwise once here.
+        {
+            IMainMenu* pMainMenu = g_pGamePersistent ? g_pGamePersistent->m_pMainMenu : nullptr;
+            const bool bMenu = pMainMenu && pMainMenu->CanSkipSceneRendering();
+            const bool tracers_done_in_level =
+                ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame() && !bMenu;
+            if (!tracers_done_in_level)
+                BulletManager().Render();
+        }
+
+        GEnv.Render->AfterWorldRender(); //--#SM+#-- +SecondVP+
+        // HUD overlay scope (g_3d_scopes 3): snapshot the live HUD into $user$hud_overlay before UI.
+        GEnv.Render->RenderHudOverlayToTexture();
+        // Blend the snapshot over the backbuffer (GL native path; explicit stencil/blend/depth state).
+        // Drawn here — after the overlay RT is filled, before HUD().RenderUI() so indicators/reticle
+        // render on top of the composited HUD.
+        GEnv.Render->CompositeHudOverlay();
+        WorldRendered(true);
     }
 
-    GEnv.Render->AfterWorldRender(); //--#SM+#-- +SecondVP+
-    // HUD overlay scope (g_3d_scopes 3): snapshot the live HUD into $user$hud_overlay before UI.
-    GEnv.Render->RenderHudOverlayToTexture();
-    // Blend the snapshot over the backbuffer (GL native path; explicit stencil/blend/depth state).
-    // Drawn here — after the overlay RT is filled, before HUD().RenderUI() so indicators/reticle
-    // render on top of the composited HUD.
-    GEnv.Render->CompositeHudOverlay();
-    WorldRendered(true);
-
-    if (!Device.IsAnselActive)
-        HUD().RenderUI();
-    debug_renderer().render();
+    {
+        ZoneScopedN("lvl_RenderUI");
+        if (!Device.IsAnselActive)
+            HUD().RenderUI();
+    }
+    {
+        ZoneScopedN("lvl_debug");
+        debug_renderer().render();
 #ifdef DEBUG
-    physics_world()->OnRender();
+    // GAME_RENDER_OVERLAP_PLAN Phase 3, P3 "known/accepted risk" category (see physics_game.cpp's
+    // TContactShotMark comment for the sibling case): physics_world()->OnRender() -> PH_DBG_Render()
+    // reads physics debug-draw state (PHDebug.cpp) which the dedicated physics thread may be mid-Step()
+    // writing. ph_dbg_draw_mask is opt-in/off by default, so skipping one frame of debug visualization
+    // while overlap is active is an acceptable trade-off vs adding a lock to a DEBUG/MIXED-only path.
+    // Note xray_build.props' "Mixed" config defines both MIXED and DEBUG, so this guard is live there
+    // too, not just in pure Debug builds.
+    if (!Device.IsFrameOverlapActive())
+        physics_world()->OnRender();
 #endif
 #ifdef DEBUG
     if (ai().get_level_graph())
@@ -849,6 +948,7 @@ void CLevel::OnRender()
         }
     }
 #endif
+    }
 }
 
 void CLevel::OnEvent(EVENT E, u64 P1, u64 /**P2**/)

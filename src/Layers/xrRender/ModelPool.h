@@ -38,7 +38,9 @@ class ECORE_API CModelPool
     typedef REGISTRY::iterator REGISTRY_IT;
 
     xr_vector<ModelDef> Models; // Reference / Base
-    xr_vector<dxRender_Visual*> ModelsToDelete; //
+    // Deferred Delete() calls (GAME_RENDER_OVERLAP_PLAN P1.6): visual + the bDiscard it was called
+    // with, so DeleteQueue() can replay it faithfully instead of always defaulting to FALSE.
+    xr_vector<std::pair<dxRender_Visual*, BOOL>> ModelsToDelete;
     REGISTRY Registry; // Just pairing of pointer / Name
     POOL Pool; // Unused / Inactive
     BOOL bLogging;

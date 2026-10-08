@@ -15,6 +15,7 @@
 #include "script_game_object.h"
 #include "GameObject.h"
 #include "Level.h"
+#include "smart_zone.h"
 #include "xrEngine/profiler.h"
 #include "npc_cpp_profile.h"
 
@@ -153,6 +154,21 @@ void CScriptBinder::set_object(CScriptBinderObject* object)
 void CScriptBinder::shedule_Update(u32 time_delta)
 {
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptBinderUpdate);
+    ENpcCppProfileStage binder_type_stage = ENpcCppProfileStage::ScriptBinderUpdateOther;
+    // The classification below costs a dynamic_cast (smart_cast<CSmartZone*>); skip it entirely when the
+    // profiler is off instead of paying that cast on every bound object's shedule_Update every tick.
+    if (npc_cpp_profile::enabled() && owner)
+    {
+        if (owner->cast_stalker())
+            binder_type_stage = ENpcCppProfileStage::ScriptBinderUpdateStalker;
+        else if (owner->cast_base_monster())
+            binder_type_stage = ENpcCppProfileStage::ScriptBinderUpdateMonster;
+        else if (smart_cast<CSmartZone*>(owner))
+            binder_type_stage = ENpcCppProfileStage::ScriptBinderUpdateSmartZone;
+        else if (owner->cast_inventory_item())
+            binder_type_stage = ENpcCppProfileStage::ScriptBinderUpdateItem;
+    }
+    NPC_CPP_PROFILE_SCOPE(binder_type_stage);
     if (m_object)
     {
         try

@@ -311,6 +311,46 @@ IC void CBackend::Compute(u32 ThreadGroupCountX, u32 ThreadGroupCountY, u32 Thre
 
 IC void CBackend::dbg_CheckDrawState()
 {
+    if (dbg_capture_next_draw)
+    {
+        dbg_capture_next_draw = 0;
+        auto cap = HW.get_context(context_id);
+        ID3D11RenderTargetView* rt[4]{};
+        ID3D11DepthStencilView* ds{};
+        cap->OMGetRenderTargets(4, rt, &ds);
+
+        ID3D11BlendState* blend{};
+        FLOAT factor[4]{};
+        UINT sample_mask{};
+        cap->OMGetBlendState(&blend, factor, &sample_mask);
+        D3D11_BLEND_DESC bd{};
+        if (blend)
+            blend->GetDesc(&bd);
+
+        ID3D11DepthStencilState* dss{};
+        UINT stencil_ref = 0;
+        cap->OMGetDepthStencilState(&dss, &stencil_ref);
+        D3D11_DEPTH_STENCIL_DESC dd{};
+        if (dss)
+            dss->GetDesc(&dd);
+
+        Msg("~ [accum-draw] frame %u ctx %u: device rt0=%p rt1=%p dsv=%p | blend enable=%d src=%d dst=%d op=%d "
+            "write_mask=0x%x | stencil enable=%d func=%d ref=%u read=0x%x write=0x%x | depth test=%d write=%d",
+            Device.dwFrame, context_id, (void*)rt[0], (void*)rt[1], (void*)ds,
+            blend ? int(bd.RenderTarget[0].BlendEnable) : -1, blend ? int(bd.RenderTarget[0].SrcBlend) : -1,
+            blend ? int(bd.RenderTarget[0].DestBlend) : -1, blend ? int(bd.RenderTarget[0].BlendOp) : -1,
+            blend ? u32(bd.RenderTarget[0].RenderTargetWriteMask) : 0u,
+            dss ? int(dd.StencilEnable) : -1, dss ? int(dd.FrontFace.StencilFunc) : -1, stencil_ref,
+            dss ? u32(dd.StencilReadMask) : 0u, dss ? u32(dd.StencilWriteMask) : 0u,
+            dss ? int(dd.DepthEnable) : -1, dss ? int(dd.DepthWriteMask) : -1);
+
+        for (auto*& v : rt)
+            _RELEASE(v);
+        _RELEASE(ds);
+        _RELEASE(blend);
+        _RELEASE(dss);
+    }
+
     if (context_id != CHW::IMM_CTX_ID)
         return;
 

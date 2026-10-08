@@ -177,8 +177,18 @@ public:
 
 void ISpatial_DB::q_box(xr_vector<ISpatial*>& R, u32 _o, u32 _mask, const Fvector& _center, const Fvector& _size)
 {
-    ZoneScoped;
-    std::shared_lock<std::shared_mutex> shlock(rw);
+    SpatialIncQBox();
+    SpatialIncDb(db_index, xray::perf::Metric::spatial_q_box_db0, xray::perf::Metric::spatial_q_box_db1);
+    PERF_HOT_ZONE("q_box");
+    auto shlock = SpatialLockShared(rw);
+    xray::perf::ScopedTime timed(xray::perf::Metric::spatial_q_box_time);
+#if XR_PERF_METRICS
+    {
+        thread_local u32 sample = 0;
+        if ((++sample & 7u) != 0)
+            timed.active = false;
+    }
+#endif
     {
         ScopeStatTimer scope(Stats.Query, query_stats_lock);
         R.clear();
@@ -193,13 +203,17 @@ void ISpatial_DB::q_box(xr_vector<ISpatial*>& R, u32 _o, u32 _mask, const Fvecto
             W.walk(m_root, m_center, m_bounds);
         }
     }
+    PERF_ADD(spatial_q_box_results, R.size());
 }
 
 void ISpatial_DB::q_sphere(
     xr_vector<ISpatial*>& R, u32 _o, u32 _mask, const Fvector& _center, const float _radius)
 {
-    ZoneScoped;
-    std::shared_lock<std::shared_mutex> shlock(rw);
+    SpatialIncQSphere();
+    SpatialIncDb(db_index, xray::perf::Metric::spatial_q_sphere_db0, xray::perf::Metric::spatial_q_sphere_db1);
+    PERF_HOT_ZONE("q_sphere");
+    PERF_SCOPE(spatial_q_sphere_time);
+    auto shlock = SpatialLockShared(rw);
     {
         ScopeStatTimer scope(Stats.Query, query_stats_lock);
         R.clear();
@@ -214,4 +228,5 @@ void ISpatial_DB::q_sphere(
             W.walk(m_root, m_center, m_bounds);
         }
     }
+    PERF_ADD(spatial_q_sphere_results, R.size());
 }

@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "attachment_owner.h"
 #include "attachable_item.h"
 #include "Include/xrRender/Kinematics.h"
@@ -76,6 +77,7 @@ static void AttachmentCallback(IKinematics* tpKinematics)
 
 void CAttachmentOwner::attach(CInventoryItem* inventory_item)
 {
+    GW_OVERLAP_HAZARD("CAttachmentOwner::attach");
     xr_vector<CAttachableItem*>::const_iterator I = m_attached_objects.begin();
     xr_vector<CAttachableItem*>::const_iterator E = m_attached_objects.end();
     for (; I != E; ++I)
@@ -104,6 +106,7 @@ void CAttachmentOwner::attach(CInventoryItem* inventory_item)
 
 void CAttachmentOwner::detach(CInventoryItem* inventory_item)
 {
+    GW_OVERLAP_HAZARD("CAttachmentOwner::detach");
     xr_vector<CAttachableItem*>::iterator I = m_attached_objects.begin();
     xr_vector<CAttachableItem*>::iterator E = m_attached_objects.end();
     for (; I != E; ++I)

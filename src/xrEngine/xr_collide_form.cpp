@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "IGame_Level.h"
 #include "xr_collide_form.h"
 #include "xr_object.h"
@@ -101,7 +102,10 @@ void CCF_Skeleton::BuildState()
     dwFrame = Device.dwFrame;
     IRenderVisual* pVisual = owner->Visual();
     IKinematics* K = PKinematics(pVisual);
-    K->CalculateBones();
+    {
+        PERF_BONE_CALLER(xray::perf::bone::Ccf);
+        K->CalculateBones();
+    }
     const Fmatrix& L2W = owner->XFORM();
 
     if (vis_mask != K->LL_GetBonesVisible())

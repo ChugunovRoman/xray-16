@@ -195,6 +195,24 @@ constexpr const char* g_npc_cpp_profile_stage_names[NPC_CPP_PROFILE_STAGE_COUNT]
     "agent_enemy/distribute",
     "agent_enemy/distribute/fill",
     "agent_enemy/distribute/assign",
+    "script_binder/update/stalker",
+    "script_binder/update/monster",
+    "script_binder/update/smartzone",
+    "script_binder/update/item",
+    "script_binder/update/other",
+    "movement/move_along_path/try_position_fail",
+    "movement/move_along_path/kinematic",
+    "character_physics/corpse_enabled",
+    "character_physics/corpse_age_0_3",
+    "character_physics/corpse_age_3_15",
+    "character_physics/corpse_age_15_60",
+    "character_physics/corpse_age_60p",
+    "entity_alive/die",
+    "stalker/die",
+    "character_physics/activate_shell",
+    "character_physics/in_die",
+    "character_physics/in_hit",
+    "explosive/explode",
 };
 
 static_assert((sizeof(g_npc_cpp_profile_stage_names) / sizeof(g_npc_cpp_profile_stage_names[0])) == NPC_CPP_PROFILE_STAGE_COUNT);
@@ -397,7 +415,8 @@ void flush_snapshots(const u32 now_ms)
         const u64 total_qpc = counters.total_qpc.exchange(0, std::memory_order_relaxed);
         const u64 calls = counters.calls.exchange(0, std::memory_order_relaxed);
         const u64 max_qpc = counters.max_qpc.exchange(0, std::memory_order_relaxed);
-        if (!calls || !total_qpc)
+        // A pure count() row has calls>0 and total_qpc==0: keep it. Only drop a row nothing touched this window.
+        if (!calls && !total_qpc)
             continue;
 
         snapshots.push_back({g_npc_cpp_profile_stage_names[i], total_qpc, calls, max_qpc});
@@ -423,6 +442,13 @@ void flush_snapshots(const u32 now_ms)
     for (size_t i = 0; i < shown; ++i)
     {
         const NpcCppProfileSnapshot& row = snapshots[i];
+        if (!row.total_qpc)
+        {
+            // count()-only stage: nothing was timed, so print how many times it happened and stop there.
+            Msg("*   %s count=%llu", row.name, static_cast<unsigned long long>(row.calls));
+            continue;
+        }
+
         const double total_ms = 1000.0 * static_cast<double>(row.total_qpc) / CPU::qpc_freq;
         const double avg_us = 1000000.0 * static_cast<double>(row.total_qpc) / (CPU::qpc_freq * row.calls);
         const double max_us = 1000000.0 * static_cast<double>(row.max_qpc) / CPU::qpc_freq;
@@ -492,6 +518,19 @@ void npc_cpp_profile::flush_if_needed()
     }
 
     g_npc_cpp_profile_flush_lock.Leave();
+}
+
+void npc_cpp_profile::count(const ENpcCppProfileStage stage, const u64 n)
+{
+    if (!enabled())
+        return;
+
+    // Only calls is touched: total_qpc stays 0, which is exactly what flush_snapshots now uses (below) to tell
+    // a counter row apart from a timed one, instead of reading a missing total_qpc as "nothing happened".
+    NpcCppProfileCounters& counters = g_npc_cpp_profile_counters[to_index(stage)];
+    counters.calls.fetch_add(n, std::memory_order_relaxed);
+
+    flush_if_needed();
 }
 
 void npc_cpp_profile::add(const ENpcCppProfileStage stage, const u64 qpc_delta)

@@ -8,6 +8,8 @@
 #include "IGame_Persistent.h"
 #include "ParticleWorker.h"
 
+#include <atomic>
+
 CPS_Instance::CPS_Instance(bool destroy_on_game_load)
     : SpatialBase(g_pGamePersistent->SpatialSpace), m_destroy_on_game_load(destroy_on_game_load)
 {
@@ -18,7 +20,7 @@ CPS_Instance::CPS_Instance(bool destroy_on_game_load)
     m_bAutoRemove = true;
     m_bDead = false;
 }
-extern ENGINE_API bool g_bRendering;
+extern ENGINE_API std::atomic<bool> g_bRendering;
 
 //----------------------------------------------------
 CPS_Instance::~CPS_Instance()

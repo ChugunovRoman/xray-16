@@ -41,6 +41,7 @@ extern BOOL death_anim_debug;
 
 #include "xrEngine/device.h"
 #include "npc_cpp_profile.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "performance_cvars.h"
 
 #define USE_SMART_HITS
@@ -707,6 +708,7 @@ void CCharacterPhysicsSupport::KillHitImpl(SHit& H)
 const u32 hit_valide_time = 1000;
 void CCharacterPhysicsSupport::in_Hit(SHit& H, bool is_killing)
 {
+    npc_cpp_profile::count(ENpcCppProfileStage::CharacterPhysicsInHit);
     m_sv_hit = H;
     m_hit_valide_time = Device.dwTimeGlobal + hit_valide_time;
     if (esRemoved == m_eState)
@@ -846,6 +848,26 @@ void CCharacterPhysicsSupport::in_UpdateCL()
         }
         ZoneScopedN("cph_ragdoll_shell");
         VERIFY(m_pPhysicsShell->isFullActive());
+        if (m_pPhysicsShell->isEnabled() && !m_EntityAlife.g_Alive())
+        {
+            npc_cpp_profile::count(ENpcCppProfileStage::CharacterPhysicsCorpseEnabled);
+            if (xray::perf::g_perf_metrics_active)
+            {
+                Fvector vel;
+                m_pPhysicsShell->get_LinearVel(vel);
+                xray::perf::UpdateMax(xray::perf::Metric::ph_corpse_max_vel_mm_s,
+                    static_cast<s64>(vel.magnitude() * 1000.f));
+            }
+            const u32 age_ms = Device.dwTimeGlobal - m_EntityAlife.GetLevelDeathTime();
+            if (age_ms < 3000)
+                npc_cpp_profile::count(ENpcCppProfileStage::CharacterPhysicsCorpseAge0_3);
+            else if (age_ms < 15000)
+                npc_cpp_profile::count(ENpcCppProfileStage::CharacterPhysicsCorpseAge3_15);
+            else if (age_ms < 60000)
+                npc_cpp_profile::count(ENpcCppProfileStage::CharacterPhysicsCorpseAge15_60);
+            else
+                npc_cpp_profile::count(ENpcCppProfileStage::CharacterPhysicsCorpseAge60p);
+        }
         {
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsShellSetRagdoll);
             m_pPhysicsShell->SetRagDoll(); //Теперь шела относиться к классу объектов cbClassRagDoll
@@ -1116,6 +1138,7 @@ BOOL dbg_draw_ragdoll_spawn = FALSE;
 #endif
 void CCharacterPhysicsSupport::ActivateShell(IGameObject* who)
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsActivateShell);
     R_ASSERT(_valid(m_EntityAlife.Position()));
     Fvector start;
     start.set(m_EntityAlife.Position());
@@ -1664,6 +1687,9 @@ bool CCharacterPhysicsSupport::can_drop_active_weapon()
 
 void CCharacterPhysicsSupport::in_Die()
 {
+    // Timed, not just counted: this fires once per death (same rate as Die()/ActivateShell(), which are
+    // already timed) and covers DestroyCharacter(), which otherwise has no timing of its own at all.
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsInDie);
     if (m_hit_valide_time < Device.dwTimeGlobal || !m_sv_hit.is_valide())
     {
         // B-1: activate the death shell AND destroy the capsule together (atomic). Defer the whole pair

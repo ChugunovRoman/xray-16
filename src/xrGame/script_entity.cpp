@@ -7,6 +7,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "addon_object_events.h"
 #include "script_entity.h"
 #include "CustomMonster.h"
@@ -626,6 +627,17 @@ void ScriptCallBack(CBlend* B)
         if (l_tpScriptMonster->GetActionCount())
             l_tpScriptMonster->ProcessScripts();
     }
+}
+
+namespace
+{
+struct RegisterScriptBlendCb
+{
+    RegisterScriptBlendCb()
+    {
+        xray::perf::RegisterBlendCb(reinterpret_cast<const void*>(&ScriptCallBack), "script");
+    }
+} s_register_script_blend_cb;
 }
 
 bool CScriptEntity::bfScriptAnimation()

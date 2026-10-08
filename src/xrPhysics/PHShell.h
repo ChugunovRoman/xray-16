@@ -55,6 +55,7 @@ public:
     virtual bool AnimToVelocityState(float dt, float l_limit, float a_limit);
     virtual void SetBonesCallbacksOverwrite(bool v);
     void SetPhObjectInElements();
+    virtual ECastType CastType() { return CPHObject::tpShell; }
     virtual void EnableObject(CPHObject* obj);
     virtual void DisableObject();
     virtual void SetAirResistance(dReal linear = default_k_l, dReal angular = default_k_w)

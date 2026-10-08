@@ -7,6 +7,14 @@
 #include "HUDCrosshair.h"
 #include "xrUICore/ui_base.h"
 
+#include <atomic>
+
+// Moved up from its original spot after the #ifdef DEBUG block below: that block already used
+// g_bRendering before the old declaration, which only happened to compile because DEBUG builds
+// of this file were not exercised recently - not touching that is riskier than declaring it once,
+// here, before every use.
+extern ENGINE_API std::atomic<bool> g_bRendering;
+
 CHUDCrosshair::CHUDCrosshair()
 {
     hShader->create("hud" DELIMITER "crosshair");
@@ -95,7 +103,6 @@ void CHUDCrosshair::OnRenderFirstBulletDispertion()
 }
 #endif
 
-extern ENGINE_API bool g_bRendering;
 void CHUDCrosshair::OnRender()
 {
     VERIFY(g_bRendering);

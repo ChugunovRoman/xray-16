@@ -9,6 +9,7 @@
 #include "dRayMotions.h"
 #include "PHCollideValidator.h"
 #include "console_vars.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #ifdef DEBUG
 #include "debug_output.h"
 #endif
@@ -92,6 +93,12 @@ void CPHObject::spatial_move()
 {
     SpatialBase::spatial_move();
     m_flags.set(st_dirty, TRUE);
+    // Invalidate the broadphase caches here: they capture raw pointers at q_box time and must not
+    // outlive the processing pass that filled them. spatial_move() ends per-object processing in
+    // CPHWorld::Step()/StepTouch(); without this clear the raw ISpatial* persist across frames and
+    // dangle once a cached neighbor is destroyed (reinit_single walks them -> AV in smart_cast).
+    m_collide_spatial_overlap.clear();
+    m_collide_dyn_candidates.clear();
 }
 
 void CPHObject::CollideRayMotions()
@@ -114,8 +121,11 @@ void CPHObject::CollideRayMotions()
         dir.mul(1.f / magnitude);
         qResultVec& result = PhTlsSpatial();
         result.clear();
+        PERF_INC(ph_broadphase_calls);
+        SpatialCaller spatial_caller(SpatialQueryCaller::physics);
         g_pGamePersistent->SpatialSpacePhysic.q_ray(
             result, 0, STYPE_PHYSIC, *from, dir, magnitude); //|ISpatial_DB::O_ONLYFIRST
+        PERF_ADD(ph_broadphase_results, result.size());
 #ifdef DEBUG
         if (debug_output().ph_dbg_draw_mask().test(phDbgDrawRayMotions))
         {
@@ -127,6 +137,7 @@ void CPHObject::CollideRayMotions()
 
 #endif
         auto i = result.begin(), e = result.end();
+        u32 ray_candidates = 0;
         for (; i != e; ++i)
         {
             CPHObject* obj2 = smart_cast<CPHObject*>(*i);
@@ -134,11 +145,13 @@ void CPHObject::CollideRayMotions()
                 continue;
             if (obj2 == this || !obj2->m_flags.test(st_dirty))
                 continue;
+            ++ray_candidates;
             dGeomID motion_ray = ph_world->GetMotionRayGeom();
             dGeomRayMotionSetGeom(motion_ray, I.dGeom());
             dGeomRayMotionsSet(motion_ray, (const dReal*)from, (const dReal*)&dir, magnitude);
             NearCallback(this, obj2, motion_ray, obj2->dSpacedGeom());
         }
+        PERF_ADD(ph_broadphase_candidates, ray_candidates);
     }
 }
 
@@ -146,7 +159,10 @@ void CPHObject::CollideDynamicsBroadphase()
 {
     qResultVec& result = PhTlsSpatial();
     result.clear();
+    PERF_INC(ph_broadphase_calls);
+    SpatialCaller spatial_caller(SpatialQueryCaller::physics);
     g_pGamePersistent->SpatialSpacePhysic.q_box(result, 0, STYPE_PHYSIC, spatial.sphere.P, AABB);
+    PERF_ADD(ph_broadphase_results, result.size());
     m_collide_spatial_overlap.assign(result.begin(), result.end());
     m_collide_dyn_candidates.clear();
     m_collide_dyn_candidates.reserve(result.size());
@@ -160,6 +176,7 @@ void CPHObject::CollideDynamicsBroadphase()
         if (CPHCollideValidator::DoCollide(*this, *obj2))
             m_collide_dyn_candidates.push_back(obj2);
     }
+    PERF_ADD(ph_broadphase_candidates, m_collide_dyn_candidates.size());
 }
 
 void CPHObject::CollideDynamicsNarrow()
@@ -239,6 +256,13 @@ void CPHObject::step(float time) // it is still not a true step for object becau
                                  // subsequent collision is doing
 {
     PhTlsSpatial().clear();
+    // The collide caches may still hold raw ISpatial*/CPHObject* captured by CPHWorld::Step()'s Collide
+    // pass (the world step fills them but never consumes them). A neighbor cached there can already be
+    // freed by the time a local step runs (VirtualMoveTo is intermittent), and walking the entry state
+    // then UAFs inside smart_cast. The world step already unmerged every island - drop the stale set
+    // instead (restores pre-cache semantics, where step() cleared the shared query buffer first).
+    m_collide_spatial_overlap.clear();
+    m_collide_dyn_candidates.clear();
     reinit_single();
     Collide();
     IslandStep(time);

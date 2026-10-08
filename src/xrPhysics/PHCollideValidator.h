@@ -35,6 +35,7 @@ public:
     static void RestoreGroupObject(const CPHObject& obj);
     static bool IsGroupObject(const CPHObject& obj);
     static bool IsAnimatedObject(const CPHObject& obj);
+    static bool IsRagDollObject(const CPHObject& obj);
     static void SetStaticNotCollide(CPHObject& obj);
     static void SetNonDynamicObject(CPHObject& obj);
     static void SetDynamicNotCollide(CPHObject& obj);

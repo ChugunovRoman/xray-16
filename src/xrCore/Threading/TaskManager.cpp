@@ -339,12 +339,35 @@ void TaskManager::RunTask(Task& task)
     ExecuteTask(task);
 }
 
+namespace
+{
+// Nesting guard for TaskManager::Wait: a Wait() can steal and run a task that itself calls Wait()
+// on the same thread. Only the outermost call's duration means "this thread was blocked here" -
+// an inner one is already counted as exec time inside the outer call's loop.
+thread_local u32 s_tl_wait_depth = 0;
+}
+
 void TaskManager::Wait(const Task& task, bool updateSystemEvents /*= false*/) const
 {
     ZoneScoped;
+
+    ++s_tl_wait_depth;
+    // Per METRICS_PLAN §8.2: time only the outermost Wait() and only on main (worker id 0, the
+    // thread that constructed TaskManager) - everything else either double-counts a nested wait
+    // or measures a worker thread that has no single "the frame is blocked here" meaning.
+    const bool time_it = s_tl_wait_depth == 1 && s_tl_worker.id == 0 && xray::perf::g_perf_metrics_active;
+    const u64 wait_t0 = time_it ? xray::perf::Ticks() : 0;
+    u64 exec_ticks = 0;
+
     while (!task.IsFinished())
     {
-        if (!ExecuteOneTask())
+        const u64 iter_t0 = time_it ? xray::perf::Ticks() : 0;
+        if (ExecuteOneTask())
+        {
+            if (time_it)
+                exec_ticks += xray::perf::Ticks() - iter_t0;
+        }
+        else
         {
             ++s_tl_worker.waitSpin;
             PERF_INC(task_wait_spin);
@@ -352,6 +375,14 @@ void TaskManager::Wait(const Task& task, bool updateSystemEvents /*= false*/) co
         if (s_tl_worker.id == 0 && (xrDebug::ProcessingFailure() || updateSystemEvents))
             SDL_PumpEvents(); // Necessary to prevent dead locks
     }
+
+    if (time_it)
+    {
+        xray::perf::AddTimeSlow(xray::perf::Metric::task_wait_total, xray::perf::Ticks() - wait_t0);
+        xray::perf::AddTimeSlow(xray::perf::Metric::task_wait_exec, exec_ticks);
+        xray::perf::Add(xray::perf::WaitSiteCountMetric(xray::perf::TlWaitSite()));
+    }
+    --s_tl_wait_depth;
 }
 
 bool TaskManager::ExecuteOneTask() const

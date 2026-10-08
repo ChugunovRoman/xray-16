@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "poltergeist.h"
 #include "poltergeist_state_manager.h"
 #include "CharacterPhysicsSupport.h"
@@ -312,6 +313,7 @@ void CPoltergeist::UpdateCL()
 
     if (Actor()->memory().visual().visible_now(this) && Actor()->Position().distance_to(Position()) < 85.f)
     {
+        PERF_CROW_SRC(xray::perf::crow::Other);
         MakeMeCrow();
     }
 

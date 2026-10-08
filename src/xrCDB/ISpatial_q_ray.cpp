@@ -357,8 +357,11 @@ void ISpatial_DB::q_ray(xr_vector<ISpatial*>& R, u32 _o, u32 _mask_and, const Fv
 {
     using namespace Spatial;
 
-    ZoneScoped;
-    std::shared_lock<std::shared_mutex> shlock(rw);
+    SpatialIncQRay();
+    SpatialIncDb(db_index, xray::perf::Metric::spatial_q_ray_db0, xray::perf::Metric::spatial_q_ray_db1);
+    PERF_HOT_ZONE("q_ray");
+    PERF_SCOPE(spatial_q_ray_time);
+    auto shlock = SpatialLockShared(rw);
     {
         ScopeStatTimer scope(Stats.Query, query_stats_lock);
         R.clear();
@@ -421,4 +424,5 @@ void ISpatial_DB::q_ray(xr_vector<ISpatial*>& R, u32 _o, u32 _mask_and, const Fv
             }
         }
     }
+    PERF_ADD(spatial_q_ray_results, R.size());
 }

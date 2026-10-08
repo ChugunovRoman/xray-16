@@ -7,6 +7,7 @@
 
 #include "DetailManager.h"
 #include "xrCDB/Intersect.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #ifdef _EDITOR
 #include "ESceneClassList.h"
@@ -408,7 +409,10 @@ void CDetailManager::Render(CBackend& cmd_list)
     ZoneScoped;
 
     if (m_calc_task)
+    {
+        PERF_WAIT_SITE(xray::perf::wait_site::Detail);
         TaskScheduler->Wait(*m_calc_task);
+    }
 
     RImplementation.BasicStats.DetailRender.Begin();
     g_pGamePersistent->m_pGShaderConstants->m_blender_mode.w = 1.0f; //--#SM+#-- Флаг начала рендера травы [begin of grass render]
@@ -438,7 +442,10 @@ void CDetailManager::DispatchMTCalc()
     // CDetailManager (cache_task, slots). Overlapping tasks corrupt heap and crash inside
     // COLLIDER::r_add / vector growth even though each cache_Decompress uses a local xrXRC.
     if (m_calc_task)
+    {
+        PERF_WAIT_SITE(xray::perf::wait_site::Detail);
         TaskScheduler->Wait(*m_calc_task);
+    }
 
     m_calc_task = &TaskScheduler->AddTask([this]
     {

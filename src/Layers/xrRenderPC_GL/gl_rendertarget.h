@@ -428,6 +428,10 @@ public:
     void dbg_probe_rt(const ref_rt& rt, u32& nonzero, u32& sampled);
     void dbg_probe_dump(const char* label, const ref_rt& rt);
     void dbg_probe_targets(const char* where);
+    void dbg_probe_gbuffer();
+    u32 dbg_accum_calls_begin{};
+    u32 dbg_accum_calls_end{};
+    int dbg_gbuffer_probe_pending{};
     int dbg_final_peak();
     // Frame driver stage 1a: lazily create/release the dedicated SVP shadow-map atlas.
     // Ensure returns false when creation fails -> caller keeps scope lighting on the inline path.

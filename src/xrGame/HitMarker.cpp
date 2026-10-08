@@ -1,6 +1,7 @@
 // exxZERO Time Stamp AddIn. Document modified at : Thursday, March 07, 2002 14:12:50 , by user : Oles , from computer :
 // OLES
 #include "StdAfx.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "HitMarker.h"
 #include "xrEngine/Render.h"
 #include "xrEngine/LightAnimLibrary.h"
@@ -76,6 +77,7 @@ void CHitMarker::Render()
 
 void CHitMarker::Hit(const Fvector& dir)
 {
+    GW_OVERLAP_HAZARD("CHitMarker::Hit");
     Fvector hit_dir = dir;
     hit_dir.mul(-1.0f);
     m_HitMarks.push_back(xr_new<SHitMark>(hShader2, hit_dir));
@@ -83,6 +85,7 @@ void CHitMarker::Hit(const Fvector& dir)
 
 bool CHitMarker::AddGrenade_ForMark(CGrenade* grn)
 {
+    GW_OVERLAP_HAZARD("CHitMarker::AddGrenade_ForMark");
     if (!grn)
         return false;
     u16 new_id = grn->ID();

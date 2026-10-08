@@ -1592,6 +1592,23 @@ int CRenderTarget::dbg_final_peak()
 #endif
 }
 
+void CRenderTarget::dbg_probe_gbuffer()
+{
+    // Called at the top of phase_accumulator: the geometry pass has finished writing the G-buffer
+    // and nothing has reused those targets yet. rt_Color in particular becomes the LDR target later
+    // in phase_combine, which is why sampling it at the end of the frame says nothing about albedo.
+    Msg("~ [probe] gbuffer frame %u (sampled entering the light accumulator)", Device.dwFrame);
+    dbg_probe_dump("position", rt_Position);
+    dbg_probe_dump("normal", rt_Normal);
+    dbg_probe_dump("albedo", rt_Color);
+    dbg_probe_dump("accum(pre)", rt_Accumulator);
+    // Every accumulation quad is masked by "stencil >= 1", written by the geometry pass. If the
+    // stencil byte is zero where geometry exists, no light can ever reach the accumulator.
+    // D24S8 packs 24 bits of depth and 8 of stencil, so the stencil is the high byte of the
+    // little-endian word: the fourth byte printed for each sample.
+    dbg_probe_dump("depth+stencil", rt_Base_Depth);
+}
+
 void CRenderTarget::dbg_probe_targets(const char* where)
 {
 #if defined(USE_DX11)

@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include "UIScriptWnd.h"
 #include "xrScriptEngine/script_callback_ex.h"
@@ -66,6 +67,8 @@ struct CUIDialogWndExWrapperBase final : public CUIDialogWndEx, public luabind::
 
     void Update() override
     {
+        PERF_INC(ui_script_wnd_calls);
+        PERF_SCOPE(ui_script_wnd);
         try
         {
             try
@@ -75,10 +78,14 @@ struct CUIDialogWndExWrapperBase final : public CUIDialogWndEx, public luabind::
             }
             process_error catch (const std::exception&)
             {
+                PERF_INC(ui_script_wnd_ex);
                 GEnv.ScriptEngine->print_output(GEnv.ScriptEngine->lua(), "", 1);
             }
         }
-        catch (...) {}
+        catch (...)
+        {
+            PERF_INC(ui_script_wnd_ex);
+        }
         inherited::Update();
     }
 

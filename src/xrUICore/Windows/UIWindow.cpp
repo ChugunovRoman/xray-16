@@ -1,5 +1,7 @@
 #include "pch.hpp"
 
+#include "xrCore/Profiling/PerfMetrics.hpp"
+
 #include "UIWindow.h"
 
 #include <algorithm>
@@ -9,6 +11,7 @@
 
 void CUIWindow::DetachChildImpl(CUIWindow* self, CUIWindow* pChild)
 {
+    GW_OVERLAP_HAZARD("CUIWindow::DetachChildImpl");
     R_ASSERT(self);
     R_ASSERT(pChild);
     if (!pChild)
@@ -111,6 +114,7 @@ void CUIWindow::Update()
 
 void CUIWindow::AttachChild(CUIWindow* pChild)
 {
+    GW_OVERLAP_HAZARD("CUIWindow::AttachChild");
     R_ASSERT(pChild);
     if (!pChild)
         return;

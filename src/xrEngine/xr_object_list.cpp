@@ -11,6 +11,7 @@
 #include "CustomHUD.h"
 #include "GameFont.h"
 #include "PerformanceAlert.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <xrCore/Threading/ParallelFor.hpp>
 #include <xrCore/Threading/TaskManager.hpp>
@@ -91,7 +92,12 @@ CObjectList::CObjectList()
 {
     statsFrame = u32(-1);
     ZeroMemory(map_NETID, 0xffff * sizeof(IGameObject*));
-    m_secondary_crows.resize(TaskScheduler->GetWorkersCount());
+    // +1: reserved slot for threads that are NOT a registered TaskManager worker but can still legitimately
+    // reach o_crow() - today that's exactly CPHWorld::m_physics_thread (Threading::RunThread(), never calls
+    // RegisterThisThreadAsWorker()). get_crows() maps any out-of-range GetCurrentWorkerID() to this slot
+    // instead of indexing out of bounds (GetCurrentWorkerID() default-inits to size_t(-1) for an unknown
+    // thread - VERIFY below catches it in DEBUG, but silently reads/writes far out of bounds in Release).
+    m_secondary_crows.resize(TaskScheduler->GetWorkersCount() + 1);
 }
 
 CObjectList::~CObjectList()
@@ -153,6 +159,7 @@ void CObjectList::o_activate(IGameObject* O)
     if (!o_remove(objects_sleeping, O))
         return; // already active (not in sleeping list) -> do not duplicate it in objects_active
     objects_active.push_back(O);
+    PERF_CROW_SRC(xray::perf::crow::OlAct);
     O->MakeMeCrow();
 }
 void CObjectList::o_sleep(IGameObject* O)
@@ -161,6 +168,7 @@ void CObjectList::o_sleep(IGameObject* O)
     if (!o_remove(objects_active, O))
         return; // already sleeping (not in active list) -> do not duplicate it in objects_sleeping
     objects_sleeping.push_back(O);
+    PERF_CROW_SRC(xray::perf::crow::OlSleep);
     O->MakeMeCrow();
 }
 
@@ -197,7 +205,35 @@ void CObjectList::SingleUpdate(IGameObject* O)
 
     {
         ZoneScopedN("ol_ObjUpdateCL");
-        O->UpdateCL();
+        if (xray::perf::g_perf_metrics_active)
+        {
+            using M = xray::perf::Metric;
+            M metric = M::ucl_other;
+            if (O->cast_actor())
+                metric = M::ucl_actor;
+            else if (O->cast_stalker())
+                metric = M::ucl_stalker;
+            else if (O->cast_base_monster())
+                metric = M::ucl_monster;
+            else if (O->cast_custom_monster())
+                metric = M::ucl_custom_monster;
+            else if (O->cast_weapon())
+                metric = M::ucl_weapon;
+            else if (O->cast_artefact())
+                metric = M::ucl_artefact;
+            else if (O->cast_inventory_item())
+                metric = M::ucl_item;
+            else if (O->cast_custom_zone())
+                metric = M::ucl_zone;
+            else if (O->cast_restrictor())
+                metric = M::ucl_restrictor;
+            else if (O->cast_physics_shell_holder())
+                metric = M::ucl_psh;
+            xray::perf::ScopedTime ucl_time(metric);
+            O->UpdateCL();
+        }
+        else
+            O->UpdateCL();
     }
 
     VERIFY3(O->GetDbgUpdateFrame() == Device.dwFrame, "Broken sequence of calls to 'UpdateCL'", O->cName().c_str());
@@ -338,6 +374,7 @@ void CObjectList::Update(bool bForce)
 #endif
 
             stats.Crows = m_primary_crows.size();
+            xray::perf::SetGauge(xray::perf::Metric::objects_crows, static_cast<s64>(stats.Crows));
             Objects* workload;
             if (!psDeviceFlags.test(rsDisableObjectsAsCrows))
                 workload = &m_primary_crows;
@@ -392,6 +429,7 @@ void CObjectList::Update(bool bForce)
             }
 
             stats.Update.End();
+            xray::perf::SetGauge(xray::perf::Metric::objects_updated, static_cast<s64>(stats.Updated));
         }
     }
 
@@ -399,6 +437,13 @@ void CObjectList::Update(bool bForce)
     if (!destroy_queue.empty())
     {
         ZoneScopedN("ol_Destroy_relcase");
+        ZoneTextF("%u destroyed x %u active + %u sleeping, %u callbacks",
+            static_cast<u32>(destroy_queue.size()), static_cast<u32>(objects_active.size()),
+            static_cast<u32>(objects_sleeping.size()), static_cast<u32>(m_relcase_callbacks.size()));
+        PERF_ADD(ol_destroy, destroy_queue.size());
+        PERF_ADD(ol_destroy_active, objects_active.size());
+        PERF_ADD(ol_destroy_sleeping, objects_sleeping.size());
+        PERF_ADD(ol_destroy_cb, m_relcase_callbacks.size());
 
         {
             ZoneScopedN("ol_Destroy_relcase_act");
@@ -741,7 +786,11 @@ void CObjectList::register_object_to_destroy(IGameObject* object_to_destroy)
 IC CObjectList::Objects& CObjectList::get_crows()
 {
     const size_t list_id = TaskScheduler->GetCurrentWorkerID();
-    VERIFY(list_id < m_secondary_crows.size());
+    // Not a registered TaskManager worker (today: CPHWorld's dedicated physics thread, reachable via
+    // NearCallback -> EnableObject -> activate -> o_activate -> MakeMeCrow during Collide()) - route to the
+    // one reserved extra slot (see the +1 in CObjectList::CObjectList()) instead of indexing out of bounds.
+    if (list_id >= m_secondary_crows.size() - 1)
+        return m_secondary_crows.back();
     return m_secondary_crows[list_id];
 }
 

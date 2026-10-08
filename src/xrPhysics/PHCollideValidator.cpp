@@ -43,6 +43,11 @@ bool CPHCollideValidator::IsAnimatedObject(const CPHObject& obj)
     return !!obj.collide_class_bits().test(cbClassAnimated);
 }
 
+bool CPHCollideValidator::IsRagDollObject(const CPHObject& obj)
+{
+    return !!obj.collide_class_bits().test(cbClassRagDoll);
+}
+
 void CPHCollideValidator::RegisterObjToLastGroup(CPHObject& obj) { RegisterObjToGroup(LastGroupRegistred(), obj); }
 CGID CPHCollideValidator::LastGroupRegistred() { return freeGroupID - 1; }
 void CPHCollideValidator::RestoreGroupObject(const CPHObject& obj) {}

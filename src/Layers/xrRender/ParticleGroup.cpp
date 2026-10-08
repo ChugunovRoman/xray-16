@@ -1,5 +1,7 @@
 #include "stdafx.h"
 
+#include "xrCore/Profiling/PerfMetrics.hpp"
+
 #include "xrParticles/psystem.h"
 
 #ifndef _EDITOR
@@ -565,6 +567,10 @@ BOOL CParticleGroup::Compile(CPGDef* def)
 
 void CParticleGroup::Play()
 {
+    GW_OVERLAP_HAZARD("CParticleGroup::Play");
+    // Same lock as Stop()/OnFrame(): OnFrame runs on the PreRender particle worker and does RMW on
+    // m_CurrentTime/m_RT_Flags while Play() is called from UpdateCL/scheduler on other threads.
+    ScopeLock lock{ &render_lock };
     m_CurrentTime = 0;
     m_RT_Flags.set(flRT_DefferedStop, FALSE);
     m_RT_Flags.set(flRT_Playing, TRUE);
@@ -572,6 +578,7 @@ void CParticleGroup::Play()
 
 void CParticleGroup::Stop(BOOL bDefferedStop)
 {
+    GW_OVERLAP_HAZARD("CParticleGroup::Stop");
     ScopeLock lock{ &render_lock };
     if (bDefferedStop)
     {

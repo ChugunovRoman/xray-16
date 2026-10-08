@@ -4,6 +4,7 @@
 
 #include "xrCore/_fbox.h"
 #include "xrCore/Threading/Lock.hpp"
+#include <atomic>
 
 #include "xrEngine/Engine.h"
 
@@ -72,7 +73,7 @@ void SpatialBase::spatial_register()
         return;
 
     R_ASSERT(spatial.space);
-    std::unique_lock<std::shared_mutex> lock(spatial.space->query_rw_mutex());
+    auto lock = SpatialLockUnique(spatial.space->query_rw_mutex());
     spatial_refresh_bounds();
     spatial.space->insert_assuming_locked(this);
     spatial.sector_id = IRender_Sector::INVALID_SECTOR_ID;
@@ -92,7 +93,13 @@ void SpatialBase::spatial_unregister()
     {
         // remove
         const bool was_visible_for_ai = (spatial.type & STYPE_VISIBLEFORAI) != 0;
-        spatial.space->remove(this);
+        // GAME_RENDER_OVERLAP_PLAN Phase 3: hold ONE lock across the octree removal and the node_ptr/
+        // sector_id writes (mirrors spatial_register()'s correct pattern below) - calling the
+        // self-locking remove() and then writing these fields afterwards left them unlocked, racing
+        // spatial_updatesector_internal()'s unlocked sector_id write from the render thread.
+        R_ASSERT(spatial.space);
+        auto lock = SpatialLockUnique(spatial.space->query_rw_mutex());
+        spatial.space->remove_assuming_locked(this);
         spatial.node_ptr = NULL;
         spatial.sector_id = IRender_Sector::INVALID_SECTOR_ID;
 
@@ -108,18 +115,25 @@ void SpatialBase::spatial_unregister()
 
 void SpatialBase::spatial_move()
 {
-    ZoneScoped;
+    PERF_HOT_ZONE("spatial_move");
     if (!spatial.node_ptr)
         return;
 
+    PERF_INC(spatial_move_calls);
+    PERF_SCOPE(spatial_move_time);
     R_ASSERT(spatial.space);
-    // B-1 perf: refresh bounds + the spatial_inside() test run LOCK-FREE. spatial_move runs single-writer
-    // (physics PhDataUpdate / object UpdateCL, both main thread); the only parallel accessors are AI q_ray
-    // readers (shared_lock). sphere.P / spatial.type are single-writer fields — a parallel reader may see a
-    // torn position for one frame (object off by cm), which is cosmetic and how the engine ran for years.
-    // Only the actual octree restructure (remove+insert, rare: object changed node) needs the exclusive
-    // lock vs those readers. Taking the unique_lock on every move (incl. the common no-op) starved the
-    // parallel vision readers and inflated both q_ray and spatial_move under overlap.
+    // B-1 perf: refresh bounds + the spatial_inside() test run LOCK-FREE. spatial_move is still
+    // single-writer per object instance, but "single writer" is no longer always "main thread": under
+    // GAME_RENDER_OVERLAP_PLAN Phase 3, a physics-driven object's
+    // spatial_move() (via CGameObject::spatial_move() from inside physics Step()/PhDataUpdate) runs on
+    // CPHWorld's dedicated physics thread, concurrently with DoRender()'s render-thread readers (AI q_ray,
+    // the main culling pass's spatial_updatesector(), q_box/q_frustum) — all shared_lock readers vs this
+    // lock-free writer. sphere.P / spatial.type / spatial.sector_id are single-writer fields — a parallel
+    // reader may see a torn/stale value for one frame (object off by cm, or culled against last frame's
+    // sector), which is cosmetic and how the engine ran for years. Only the actual octree restructure
+    // (remove+insert, rare: object changed node) needs the exclusive lock vs those readers. Taking the
+    // unique_lock on every move (incl. the common no-op) starved the parallel readers and inflated both
+    // q_ray and spatial_move under overlap.
     spatial_refresh_bounds();
 
     // B-1: invalidate AI vision dynamic-blocker cache only after an AI-visible object moved enough.
@@ -139,8 +153,12 @@ void SpatialBase::spatial_move()
 
     spatial.type |= STYPEFLAG_INVALIDSECTOR;
     if (spatial_inside())
+    {
+        PERF_INC(spatial_move_idle);
         return;
-    std::unique_lock<std::shared_mutex> lock(spatial.space->query_rw_mutex());
+    }
+    PERF_INC(spatial_move_rebuild);
+    auto lock = SpatialLockUnique(spatial.space->query_rw_mutex());
     spatial.space->remove_assuming_locked(this);
     spatial.space->insert_assuming_locked(this);
 }
@@ -180,11 +198,18 @@ void ISpatial_NODE::_remove(ISpatial* S)
 
 //////////////////////////////////////////////////////////////////////////
 
+namespace
+{
+std::atomic<u8> s_spatial_db_next{0};
+}
+
 ISpatial_DB::ISpatial_DB(pcstr name)
 #ifdef CONFIG_PROFILE_LOCKS
     : query_stats_lock(MUTEX_PROFILE_ID(ISpatial_DB)),
+      db_index(s_spatial_db_next.fetch_add(1, std::memory_order_relaxed))
+#else
+    : db_index(s_spatial_db_next.fetch_add(1, std::memory_order_relaxed))
 #endif // CONFIG_PROFILE_LOCKS
-
 {
     xr_strcpy(Name, name);
 }
@@ -294,7 +319,7 @@ void ISpatial_DB::_insert(ISpatial_NODE* N, Fvector& n_C, float n_R)
 
 void ISpatial_DB::insert(ISpatial* S)
 {
-    std::unique_lock<std::shared_mutex> ulock(rw);
+    auto ulock = SpatialLockUnique(rw);
     insert_assuming_locked(S);
 }
 
@@ -386,7 +411,7 @@ void ISpatial_DB::_remove(ISpatial_NODE* N, ISpatial_NODE* N_sub)
 
 void ISpatial_DB::remove(ISpatial* S)
 {
-    std::unique_lock<std::shared_mutex> ulock(rw);
+    auto ulock = SpatialLockUnique(rw);
     remove_assuming_locked(S);
 }
 
@@ -412,7 +437,7 @@ void ISpatial_DB::update(u32 /*nodes = 8 */)
 #ifdef DEBUG
     if (0 == m_root)
         return;
-    std::shared_lock<std::shared_mutex> shlock(rw);
+    auto shlock = SpatialLockShared(rw);
     VERIFY(verify());
 #endif
 }

@@ -5,6 +5,7 @@
 #include "SoundRender_Emitter.h"
 #include "SoundRender_Source.h"
 #include "SoundRender_Target.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 void CSoundRender_Emitter::start(const ref_sound& _owner, u32 flags, float delay)
 {
@@ -42,6 +43,7 @@ void CSoundRender_Emitter::start(const ref_sound& _owner, u32 flags, float delay
         buf.resize(source()->data_info().bytesPerBuffer);
 
     ovf = source()->open();
+    PERF_INC(snd_ogg_open_start);
 }
 
 void CSoundRender_Emitter::i_stop()

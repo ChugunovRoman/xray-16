@@ -6,6 +6,7 @@
 #include "IGame_Level.h"
 #include "IGame_Persistent.h"
 #include "xrCDB/Intersect.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 ENGINE_API int npc_perf_vision_skip_dynamic_ray = 1;
 ENGINE_API int npc_perf_vision_static_only = 0;
@@ -107,6 +108,7 @@ void Vision::feel_vision_query(Fmatrix& mFull, Fvector& P)
 
     // Traverse object database
     r_spatial.clear();
+    SpatialCaller spatial_caller(SpatialQueryCaller::vision);
     g_pGamePersistent->SpatialSpace.q_frustum(r_spatial, 0, STYPE_VISIBLEFORAI, Frustum);
 
     // Determine visibility for dynamic part of scene
@@ -290,12 +292,15 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold, u32 trace_pass_c
                 if (npc_perf_vision_dynamic_cache != 0 && feel_vision_dynamic_cache_reuse(
                     I->dynamic_cache, P, D, f, npc_perf_vision_cache_pos_slack_m))
                 {
+                    PERF_INC(vision_dyn_cache);
                     collision_found = I->dynamic_cache.blocked;
                 }
                 else
                 {
+                    PERF_INC(vision_dyn_ray);
                     r_spatial.clear();
                     ISpatial* owner_spatial = static_cast<ISpatial*>(const_cast<IGameObject*>(m_owner));
+                    SpatialCaller spatial_caller(SpatialQueryCaller::vision);
                 g_pGamePersistent->SpatialSpace.q_ray(
                     r_spatial, ISpatial_DB::O_ONLYFIRST | ISpatial_DB::O_ONLYNEAREST, STYPE_VISIBLEFORAI, P, D, f, owner_spatial);
 

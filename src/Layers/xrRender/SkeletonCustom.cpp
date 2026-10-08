@@ -2,6 +2,7 @@
 #include "stdafx.h"
 #pragma hdrstop
 
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "SkeletonCustom.h"
 #include "SkeletonX.h"
 #include "xrCore/FMesh.hpp"
@@ -514,6 +515,7 @@ void CKinematics::Copy(dxRender_Visual* P)
 void CKinematics::CalculateBones_Invalidate()
 {
     UCalc_Time = 0x0;
+    UCalc_DoneTime.store(0, std::memory_order_release);
     UCalc_Visibox = psSkeletonUpdate;
 }
 
@@ -574,6 +576,19 @@ void CKinematics::Release()
 
 void CKinematics::LL_SetBoneVisible(u16 bone_id, BOOL val, BOOL bRecursive)
 {
+    // GW_OVERLAP_HAZARD must fire once per call from outside, not once per bone touched by the
+    // recursion below (bRecursive descends into every child bone). RAII reentrancy guard, same
+    // idiom as ScopedTag in PerfMetrics.hpp: the first (outermost) call on this thread owns it.
+    static thread_local bool s_ll_set_bone_visible_active = false;
+    struct ReentryGuard
+    {
+        bool owns;
+        ReentryGuard() noexcept : owns(!s_ll_set_bone_visible_active) { if (owns) s_ll_set_bone_visible_active = true; }
+        ~ReentryGuard() noexcept { if (owns) s_ll_set_bone_visible_active = false; }
+    } reentry_guard;
+    if (reentry_guard.owns)
+        GW_OVERLAP_HAZARD("CKinematics::LL_SetBoneVisible");
+
     R_ASSERT1_CURE(bone_id < LL_BoneCount(), { return; });
 
     u64 mask = u64(1) << bone_id;

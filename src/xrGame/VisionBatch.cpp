@@ -13,6 +13,7 @@
 #include "xrCore/Threading/TaskManager.hpp"
 
 #include "performance_cvars.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 VisionBatch g_vision_batch;
 
@@ -130,6 +131,7 @@ void VisionBatch::ExecuteParallel()
     if (npc_perf_vision_parallel_batch && TaskScheduler
         && static_cast<int>(m_rays.size()) >= npc_perf_vision_parallel_batch_min_rays)
     {
+        PERF_INC(vision_parallel);
         xr_parallel_for(TaskRange(size_t(0), m_rays.size()),
             [this](const TaskRange<size_t>& range) {
                 for (size_t i = range.begin(); i != range.end(); ++i)
@@ -138,6 +140,7 @@ void VisionBatch::ExecuteParallel()
     }
     else
     {
+        PERF_INC(vision_serial);
         for (size_t i = 0; i < m_rays.size(); ++i)
             execute_one_ray(m_rays[i]);
     }

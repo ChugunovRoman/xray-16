@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "xrCore/Profiling/PerfMetrics.hpp"
+
 IC CALifeScheduleRegistry::CALifeScheduleRegistry() { m_objects_per_update = 1; }
 IC const u32& CALifeScheduleRegistry::objects_per_update() const { return (m_objects_per_update); }
 IC void CALifeScheduleRegistry::objects_per_update(const u32& objects_per_update)
@@ -18,7 +20,8 @@ IC void CALifeScheduleRegistry::objects_per_update(const u32& objects_per_update
 IC void CALifeScheduleRegistry::update()
 {
     //	u32							count =
-    objects().empty() ? 0 : inherited::update(CUpdatePredicate(m_objects_per_update), false);
+    const u32 count = objects().empty() ? 0 : inherited::update(CUpdatePredicate(m_objects_per_update), false);
+    PERF_ADD(alife_objects, count);
 #ifdef DEBUG
     if (psAI_Flags.test(aiALife))
     {

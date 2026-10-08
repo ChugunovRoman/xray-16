@@ -9,6 +9,8 @@
 #include "xrCore/FixedVector.h"
 #include "xrCDB/Frustum.h"
 
+#include <atomic>
+
 #ifdef XRAY_STATIC_BUILD
 #   define XRUICORE_API
 #else
@@ -71,4 +73,4 @@ public:
     sPoly2D* ClipPoly(sPoly2D& S, sPoly2D& D) const;
 };
 
-extern ENGINE_API bool g_bRendering;
+extern ENGINE_API std::atomic<bool> g_bRendering;

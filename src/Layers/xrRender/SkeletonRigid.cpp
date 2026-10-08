@@ -19,17 +19,37 @@ void check_kinematics(CKinematics* _k, LPCSTR s);
 
 void CKinematics::CalculateBones(BOOL bForceExact)
 {
-    ZoneScoped;
+    PERF_HOT_ZONE("CKinematics::CalculateBones");
+    PERF_INC(bones_calls);
 
-    // early out.
-    // check if the info is still relevant
-    // skip all the computations - assume nothing changes in a small period of time :)
-    if (Device.dwTimeGlobal == UCalc_Time)
-        return; // early out for "fast" update
+    if (Device.dwTimeGlobal == UCalc_DoneTime.load(std::memory_order_acquire))
+    {
+        PERF_INC(bones_fast_out);
+        return;
+    }
     UCalc_mtlock lock;
-    OnCalculateBones();
+    // Re-check under the lock: another render thread may have recomputed this tick while we waited
+    // (a forced call would otherwise rewrite bone_instances/children it is still reading), and the same
+    // thread may be recursing from inside its own recompute.
+    if (Device.dwTimeGlobal == UCalc_Time)
+    {
+        PERF_INC(bones_fast_out);
+        return;
+    }
+    {
+        PERF_SCOPE(bones_on_calc);
+        OnCalculateBones();
+    }
     if (!bForceExact && (Device.dwTimeGlobal < (UCalc_Time + UCalc_Interval)))
-        return; // early out for "slow" update
+    {
+        PERF_INC(bones_slow_skip);
+        return;
+    }
+    PERF_INC(bones_recompute);
+    // bones_forced is a tag on top of bones_recompute (every forced call is also a recompute), not a
+    // separate exclusive bucket - don't "fix" this into bones_recompute -= bones_forced.
+    if (bForceExact)
+        PERF_INC(bones_forced);
     if (Update_Visibility)
         Visibility_Update();
 
@@ -45,7 +65,10 @@ void CKinematics::CalculateBones(BOOL bForceExact)
     RImplementation.BasicStats.Animation.Begin();
 #endif
 
-    Bone_Calculate(bones->at(iRoot), &Fidentity);
+    {
+        xray::perf::ScopedTime bones_caller_time(xray::perf::BoneCallerMetric(xray::perf::TlBoneCaller()));
+        Bone_Calculate(bones->at(iRoot), &Fidentity);
+    }
 #ifdef DEBUG
     check_kinematics(this, dbg_name.c_str());
     RImplementation.BasicStats.Animation.End();
@@ -55,6 +78,7 @@ void CKinematics::CalculateBones(BOOL bForceExact)
     UCalc_Visibox++;
     if (UCalc_Visibox >= psSkeletonUpdate)
     {
+        PERF_INC(bones_visbox);
         ZoneScopedN("Skeleton update");
 
         // mark
@@ -106,6 +130,7 @@ void CKinematics::CalculateBones(BOOL bForceExact)
             static_cast<int>(bone_count) >= r__parallel_skeleton_visbox_min_bones;
         if (use_parallel)
         {
+            PERF_INC(bones_visbox_parallel);
             Lock merge_lock;
             xr_parallel_for(TaskRange<u32>(0, bone_count), true,
                 [&](const TaskRange<u32>& r)
@@ -155,7 +180,11 @@ void CKinematics::CalculateBones(BOOL bForceExact)
 
     //
     if (Update_Callback)
+    {
+        PERF_INC(bones_callback);
         Update_Callback(this);
+    }
+    UCalc_DoneTime.store(UCalc_Time, std::memory_order_release);
 }
 
 #ifdef DEBUG

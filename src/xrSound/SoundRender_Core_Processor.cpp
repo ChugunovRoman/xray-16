@@ -8,6 +8,7 @@
 #include "SoundRender_Emitter.h"
 #include "SoundRender_Target.h"
 #include "SoundRender_Source.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 // Multithreading audit:
 // - `CSoundRender_Core::update` stays on the caller thread: Tracy shows many child zones because each
@@ -28,6 +29,22 @@ void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector
         return;
     Stats.Update.Begin();
     isLocked = true;
+
+    if (xray::perf::g_perf_metrics_active)
+    {
+        s64 busy = 0;
+        for (CSoundRender_Target* T : s_targets)
+        {
+            if (T->get_emitter())
+                ++busy;
+        }
+        xray::perf::SetGauge(xray::perf::Metric::snd_targets_busy, busy);
+
+        s64 n_emitters = 0;
+        for (CSoundRender_Scene* scene : m_scenes)
+            n_emitters += static_cast<s64>(scene->get_emitters().size());
+        xray::perf::SetGauge(xray::perf::Metric::snd_emitters, n_emitters);
+    }
 
     Timer.time_factor(psSoundTimeFactor); //--#SM+#--
     {

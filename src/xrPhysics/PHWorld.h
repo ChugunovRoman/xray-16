@@ -7,6 +7,8 @@
 #include <mutex>
 #include <thread>
 
+#include "xrCore/Threading/Event.hpp"
+
 #include "xrEngine/pure.h"
 
 #include "Physics.h"
@@ -40,6 +42,7 @@ public:
 /////////////////////////////////////////////////////////////////////////////
 class CObjectSpace;
 class CObjectList;
+class IPhysicsShellHolder;
 class CPHWorld final : public IPHWorld,
                        public pureFrame,
                        private Noncopyable
@@ -76,12 +79,41 @@ private:
     xr_vector<CPHObject*> m_merged_objects;
     // B-1: scheduler overlap frame window (GameThread launched until post-wait flush).
     std::atomic<bool> m_scheduler_overlap_active{false};
+    // True for the whole Kick..Wait window (set on the main thread in KickPhysicsOverlap before the wake,
+    // cleared in WaitPhysicsStep after m_physics_done) - not just while FrameStep itself runs, so a
+    // mutation started on another thread right after the Kick is deferred too.
     std::atomic<bool> m_step_running{false};
-    std::thread::id m_step_thread_id; // thread that runs FrameStep; its own internal mutations are NOT deferred
+    std::thread::id m_step_thread_id; // m_physics_thread's id; its own internal mutations are NOT deferred
     std::mutex m_deferred_mutations_lock;
     xr_vector<std::function<void()>> m_deferred_mutations;
+    // CPHShell::vis_update_activate() on the physics thread: the game-side ObjectProcessingActivate()
+    // (CObjectList active/sleeping lists, CGameObject::Props counter, crow) is replayed here on the main
+    // thread after the join. Touched only by the physics thread during the step and by the main thread
+    // after m_physics_done (the Event orders them), so no lock.
+    xr_vector<IPhysicsShellHolder*> m_deferred_processing_activate;
+    // Phase 3: dedicated physics-step thread, by analogy with the SVP worker
+    // (Layers/xrRender_R2/r2_R_calculate.cpp's svp_worker_loop) - persistent, lazily started,
+    // woken/joined once per frame via an auto-reset Event pair, torn down only in Destroy(). Physics is
+    // not coupled to render targets, but Device.Reset() can still be triggered from inside DoRender()
+    // (RenderBegin, DX device reset) - WaitForFrameTasks() waits for the step via
+    // Device.PhysicsWaitOverlapCallback first (Reset's mem_compact etc. must not run beside the step).
+    std::thread m_physics_thread;
+    Event m_physics_wake, m_physics_done;
+    std::atomic<bool> m_physics_thread_exit{false};
+    // Main thread only: a Kick has woken the thread and its m_physics_done has not been consumed yet.
+    // m_physics_done is auto-reset, so waiting twice for one Kick would hang - every wait goes through
+    // WaitPhysicsStep(), which checks this.
+    bool m_physics_in_flight = false;
+    // Snapshot of Device.vCameraPosition taken on the main thread at Kick time: DoRender() temporarily
+    // overwrites the live field (HUD scope overlay, weapon icons, preview scene) while the step runs.
+    Fvector m_step_camera_pos{};
+    u64 m_steps_num_at_kick = 0;
     dGeomID m_motion_ray;
     CPHCommander* m_commander;
+    // physics_world():add_call() entries that wrap Lua (touches_script()): m_commander is drained on the
+    // physics thread, so these are kept here instead and drained on the main thread after the per-frame
+    // physics join (JoinPhysicsOverlap), only on frames that actually stepped.
+    CPHCommander* m_script_commander;
     CObjectSpace* m_object_space;
     CObjectList* m_level_objects;
 
@@ -165,18 +197,35 @@ public:
     virtual void OnRender();
 #endif
     virtual void OnFrame();
-    void OnFrameStep(); // B-1: actual physics step body; called by OnFrame (seqFrame) or Device.PhysicsFrameOverlapCallback
+    void OnFrameStep(); // B-1: actual physics step body; runs on m_physics_thread (PhysicsWorkerLoop) only
     // B-1: mark the overlap frame window (GameThread launched, flush not yet run).
     void BeginSchedulerOverlapFrame();
-    // B-1: true on GameThread during the overlap window — caller-level intents should defer, not low-level PHObject replay.
+    // Phase 3: Device.PhysicsKickOverlapCallback / PhysicsWaitOverlapCallback / PhysicsJoinOverlapCallback.
+    // Kick wakes m_physics_thread and returns; Wait only waits for the step (idempotent, used by
+    // Device.WaitForFrameTasks() before Reset()); Join = Wait + flush of deferred mutations.
+    void KickPhysicsOverlap();
+    void WaitPhysicsStep();
+    void JoinPhysicsOverlap();
+    // B-1: true on a thread other than the physics thread while a step is in flight (Kick..Wait) - i.e.
+    // main/render/PreRender/worker code during DoRender(). GameThread is joined before the Kick, so it never
+    // sees true. Caller-level intents should defer, not low-level PHObject replay.
     bool ShouldDeferSchedulerPhysicsMutation() const override;
     // B-1: queue owner-level apply callback for post-wait flush; returns false if caller should run immediately.
     bool defer_scheduler_mutation(std::function<void()> op) override;
-    void flush_deferred_mutations(); // run queued mutations after secondary_tasks.wait()
+    void flush_deferred_mutations(); // run queued mutations on the main thread after the step (JoinPhysicsOverlap)
+    // True on m_physics_thread while it runs this frame's step.
+    bool IsPhysicsStepThread() const;
+    // See m_deferred_processing_activate.
+    void DeferProcessingActivate(IPhysicsShellHolder* holder) { m_deferred_processing_activate.push_back(holder); }
+    // Camera position as of this frame's Kick (see m_step_camera_pos) while a kicked step is in flight; the
+    // live Device.vCameraPosition otherwise (Step()/StepTouch() run synchronously on the main thread during
+    // load/spawn, before any Kick). Read this, not Device.vCameraPosition, from code running inside a step.
+    const Fvector& StepCameraPosition() const override;
     virtual const PHWorldStatistics& GetStats() override { return stats; }
     virtual void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert) override;
 
 private:
+    void PhysicsWorkerLoop(); // Phase 3: body of m_physics_thread
     void StepNumIterations(int num_it);
     void set_step_time_callback(PhysicsStepTimeCallback* cb) { physics_step_time_callback = cb; }
 

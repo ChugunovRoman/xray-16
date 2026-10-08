@@ -3,6 +3,7 @@
 #include "SoundRender_Core.h"
 #include "SoundRender_Emitter.h"
 #include "SoundRender_Target.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "SoundRender_Source.h"
 
 void CSoundRender_Core::i_start(CSoundRender_Emitter* E) const
@@ -23,7 +24,10 @@ void CSoundRender_Core::i_start(CSoundRender_Emitter* E) const
 
     // Stop currently playing
     if (T->get_emitter())
+    {
+        PERF_INC(snd_target_steal);
         T->get_emitter()->cancel();
+    }
 
     // Associate
     E->target = T;

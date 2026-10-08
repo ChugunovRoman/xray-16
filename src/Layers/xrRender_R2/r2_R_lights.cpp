@@ -1,5 +1,7 @@
 #include "stdafx.h"
 #include "Layers/xrRender/du_box.h"
+#include "xrCDB/ISpatial.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -348,7 +350,10 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
         {
             task_data_t& item = per_batch[batch_id];
             if (item.task)
+            {
+                PERF_WAIT_SITE(xray::perf::wait_site::Light);
                 TaskScheduler->Wait(*item.task);
+            }
 
             auto& dsgraph = get_context(batch_id);
             light* L = item.L;
@@ -480,6 +485,7 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
         for (light* Ld : LP.v_shadowed)
             max_reach = _max(max_reach, Device.vCameraPosition.distance_to(Ld->spatial.sphere.P) + Ld->range);
         common_dynamic.clear();
+        SpatialCaller spatial_caller(SpatialQueryCaller::render);
         g_pGamePersistent->SpatialSpace.q_sphere(common_dynamic, 0, STYPE_RENDERABLE, Device.vCameraPosition, max_reach * 1.05f);
     }
 
@@ -542,7 +548,10 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
                     dsgraph.o.precomputed_dynamic = (ps_r2_light_common_dynamic > 0) ? &common_dynamic : nullptr;
                     dsgraph.o.shadow_owner = L->shadow_owner;
 
-                    dsgraph.build_subspace();
+                    {
+                        PERF_PASS(xray::perf::pass::Light);
+                        dsgraph.build_subspace();
+                    }
 
                     // Parallel mode: record the shadow map draw calls into the deferred context
                     // right here in the task. Stats/L_spot_s are NOT touched (race); the main
@@ -908,6 +917,7 @@ void CRender::record_second_vp_shadows()
         float max_reach = ps_r2_light_shadow_dist;
         for (light* Ld : kept)
             max_reach = _max(max_reach, Device.vCameraPosition.distance_to(Ld->spatial.sphere.P) + Ld->range);
+        SpatialCaller spatial_caller(SpatialQueryCaller::render);
         g_pGamePersistent->SpatialSpace.q_sphere(common_dynamic, 0, STYPE_RENDERABLE, Device.vCameraPosition,
             max_reach * 1.05f);
     }
@@ -966,7 +976,10 @@ void CRender::record_second_vp_shadows()
             // task path (is_main_pass is false for smap builds, so the shared-state branches
             // in build_subspace are off regardless).
 
-            dsgraph.build_subspace();
+            {
+                PERF_PASS(xray::perf::pass::SvpShadow);
+                dsgraph.build_subspace();
+            }
             render_light_smap(dsgraph, L, smap_target);
         }
 

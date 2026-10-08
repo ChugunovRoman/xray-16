@@ -22,6 +22,7 @@
 #include "material_manager.h"
 #include "game_base_space.h"
 #include "xrEngine/profiler.h"
+#include "npc_cpp_profile.h"
 #include "Actor.h"
 
 #define SMALL_ENTITY_RADIUS 0.6f
@@ -370,6 +371,7 @@ void CEntityAlive::Hit(SHit* pHDS)
 
 void CEntityAlive::Die(IGameObject* who)
 {
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::EntityAliveDie);
     if (IsGameTypeSingle())
         RELATION_REGISTRY().Action(smart_cast<CEntityAlive*>(who), this, RELATION_REGISTRY::KILL);
     inherited::Die(who);

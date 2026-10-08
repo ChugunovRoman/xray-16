@@ -216,6 +216,11 @@ public:
     } stat;
 
     u32 context_id{ CHW::IMM_CTX_ID };
+    // Diagnostics: set to 1 to have the next draw log what the DEVICE really has bound, after the
+    // deferred bindings were applied. Asking before the draw is useless - set_RT only marks the
+    // cache dirty and ApplyRTandZB does the actual OMSetRenderTargets. Declared for every backend
+    // so the call sites need no API guard; only the DX11 draw path acts on it.
+    u32 dbg_capture_next_draw{};
 
 public:
     CTexture* get_ActiveTexture(u32 stage)

@@ -32,6 +32,8 @@
 #include "xrPhysics/IPHWorld.h"
 #include "game_base_space.h"
 #include "xrEngine/profiler.h"
+#include "npc_cpp_profile.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include "Include/xrRender/Kinematics.h"
 #define EFFECTOR_RADIUS 30.f
@@ -315,6 +317,7 @@ float CExplosive::TestPassEffect(const Fvector& source_p, const Fvector& dir, fl
         SExpQParams ep;
 #endif
         g_pGameLevel->ObjectSpace.RayQuery(storage, RD, grenade_hit_callback, &ep, NULL, blasted_obj);
+        PERF_INC(explode_rays);
         shoot_factor = ep.shoot_factor;
     }
     else
@@ -323,6 +326,8 @@ float CExplosive::TestPassEffect(const Fvector& source_p, const Fvector& dir, fl
 }
 void CExplosive::Explode()
 {
+    ZoneScopedN("Explode");
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ExplosiveExplode);
     VERIFY(0xffff != Initiator());
     VERIFY(m_explosion_flags.test(flReadyToExplode)); // m_bReadyToExplode
     VERIFY(!physics_world()->Processing());
@@ -408,6 +413,7 @@ void CExplosive::Explode()
     ////////////////////////////////
     //---------------------------------------------------------------------
     xr_vector<ISpatial*> ISpatialResult;
+    SpatialCaller spatial_caller(SpatialQueryCaller::explode);
     g_pGamePersistent->SpatialSpace.q_sphere(ISpatialResult, 0, STYPE_COLLIDEABLE, pos, m_fBlastRadius);
 
     m_blasted_objects.clear();
@@ -420,6 +426,7 @@ void CExplosive::Explode()
         if (pGameObject && cast_game_object()->ID() != pGameObject->ID())
             m_blasted_objects.push_back(pGameObject);
     }
+    PERF_ADD(explode_hit, m_blasted_objects.size());
 
     GetExplosionBox(m_vExplodeSize);
     START_PROFILE("explosive/activate explosion box")
@@ -730,6 +737,7 @@ struct SRemovePred
 };
 void CExplosive::ExplodeWaveProcess()
 {
+    ZoneScopedN("ExplodeWaveProcess");
     auto I = std::remove_if(m_blasted_objects.begin(), m_blasted_objects.end(), SRemovePred());
     m_blasted_objects.erase(I, m_blasted_objects.end());
     rq_storage.r_clear();

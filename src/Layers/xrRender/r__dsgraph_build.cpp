@@ -15,6 +15,8 @@
 #include "LightTrack.h"
 #include "ParticleGroup.h"
 #include "FTreeVisual.h"
+#include "xrCDB/ISpatial.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -64,7 +66,8 @@ void R_dsgraph_structure::insert_dynamic(IRenderable* root, dxRender_Visual* pVi
     const bool cheapCorpse = root && root->renderable_CheapCorpsePath();
     if (cheapCorpse && o.phase == CRender::PHASE_SMAP)
     {
-        ++RImplementation.BasicStats.CorpseSmapSkipped;
+        ++RI.BasicStats.CorpseSmapSkipped;
+        PERF_INC(render_corpse_smap_skip);
         return;
     }
 
@@ -215,6 +218,7 @@ bool R_dsgraph_structure::shadow_hull_cull(const Fbox& caster_box) const
 
 void R_dsgraph_structure::insert_static(dxRender_Visual* pVisual)
 {
+    PERF_INC(render_static);
     if (pVisual->vis.marker[context_id] == marker)
         return;
     pVisual->vis.marker[context_id] = marker;
@@ -395,6 +399,7 @@ void R_dsgraph_structure::add_leafs_dynamic(
         if (root && root->renderable_CheapCorpsePath() && o.phase == CRender::PHASE_SMAP)
         {
             ++RImplementation.BasicStats.CorpseSmapSkipped;
+            PERF_INC(render_corpse_smap_skip);
             return; // Corpse cheap tier never participates in sun shadow-map traversal.
         }
 
@@ -405,12 +410,18 @@ void R_dsgraph_structure::add_leafs_dynamic(
         const bool corpse_pose_frozen = root && root->renderable_CorpsePoseFrozen();
 
         if (skinning_from_parent)
+        {
+            PERF_INC(render_skin_from_parent);
             pV->CopyBoneTransformsFrom(*lod_bind_source);
+        }
 
         // r2_smap_npc_blob 3: skip NPC entirely from shadow map (no CalculateBones,
         // no draw calls, no blob — NPC casts no shadow at all). Maximum CPU savings.
         if (o.phase == CRender::PHASE_SMAP && ps_r2_smap_npc_blob >= 3)
+        {
+            PERF_INC(render_blob_skip);
             return;
+        }
 
         // Cheap blob shadow in SMAP passes: for distant NPCs render a simple box instead of
         // the full skeleton (no CalculateBones, 12 tris). Matrix scales the unit cube to the
@@ -438,6 +449,7 @@ void R_dsgraph_structure::add_leafs_dynamic(
                     vCenter.y -= pV->vis.sphere.R * 0.5f; // drop to the ground: blob center at feet level
                     mBlob.c = vCenter;
                     npc_blobs.push_back(mBlob);
+                    PERF_INC(render_blob_add);
                     return; // skip the full skeleton entirely (no CalculateBones!)
                 }
             }
@@ -464,12 +476,18 @@ void R_dsgraph_structure::add_leafs_dynamic(
         {
             if (!corpse_pose_frozen)
                 pV->CalculateBones(TRUE);
+            else
+                PERF_INC(render_corpse_pose_skip);
+            PERF_INC(render_skel_lod);
             add_leafs_dynamic(root, pV->m_lod, xform, pV);
         }
         else
         {
             if (!skinning_from_parent && !corpse_pose_frozen)
                 pV->CalculateBones(TRUE);
+            else if (corpse_pose_frozen)
+                PERF_INC(render_corpse_pose_skip);
+            PERF_INC(render_skel_full);
             if (o.phase == CRender::PHASE_NORMAL && !skinning_from_parent && !corpse_pose_frozen)
             {
                 // Stage C: wallmark capture mutates the shared wallmark manager - the concurrent
@@ -711,6 +729,8 @@ void R_dsgraph_structure::add_static(dxRender_Visual* pVisual, const CFrustum& v
     if (o.use_hom && !RImplementation.HOM.visible(vis))
         return;
 
+    PERF_INC(render_static);
+
     // If we get here visual is visible or partially visible
     switch (pVisual->Type)
     {
@@ -870,6 +890,18 @@ void R_dsgraph_structure::unload()
 // sub-space rendering - main procedure
 void R_dsgraph_structure::build_subspace()
 {
+    u8 pass = xray::perf::TlPass();
+    if (!pass)
+    {
+        if (o.second_vp_pass)
+            pass = xray::perf::pass::Svp;
+        else if (o.is_main_pass)
+            pass = xray::perf::pass::Main;
+        else
+            pass = xray::perf::pass::SmapOther;
+    }
+    PERF_PASS(pass);
+    PERF_SCOPE(dsg_build_subspace);
     // Tracy zone is thread-safe; this runs on task workers for the 3 parallel sun cascades plus the
     // main pass (4 calls/frame). Coarse zone -> negligible overhead, reveals culling/render-list cost.
     // Main pass shows on the primary thread; cascades on task workers -> split is visible per-thread.
@@ -967,12 +999,15 @@ void R_dsgraph_structure::build_subspace()
             // Shared pre-fetched list (one query for all light passes): copy pointers, the
             // sector/frustum filters below drop everything this pass does not need.
             lstRenderables.assign(o.precomputed_dynamic->begin(), o.precomputed_dynamic->end());
+            PERF_INC(render_precomputed);
         }
         else
         {
             ZoneScopedN("dsg_q_frustum");
+            SpatialCaller spatial_caller(SpatialQueryCaller::render);
             g_pGamePersistent->SpatialSpace.q_frustum(lstRenderables, o.spatial_traverse_flags, o.spatial_types, o.view_frustum);
         }
+        PERF_ADD(render_in, lstRenderables.size());
 
         if (o.spatial_traverse_flags & ISpatial_DB::O_ORDERED) // this should be inside of query functions
         {
@@ -1044,11 +1079,21 @@ void R_dsgraph_structure::build_subspace()
                 spatial->spatial_updatesector(sector_id);
             }
             const auto& data = spatial->GetSpatialData();
-            const auto& [type, sphere, sector_id] = std::tuple(data.type, data.sphere, data.sector_id);
+            // data.type / data.sector_id are std::atomic - snapshot via .load(), not by copying the
+            // atomic objects themselves into the tuple (std::atomic has no copy constructor).
+            const auto& [type, sphere, sector_id] =
+                std::tuple(data.type.load(std::memory_order_relaxed), data.sphere,
+                    data.sector_id.load(std::memory_order_relaxed));
             if (sector_id == IRender_Sector::INVALID_SECTOR_ID)
+            {
+                PERF_INC(render_sector_cull);
                 continue; // disassociated from S/P structure
+            }
             if (sector_id >= Sectors.size())
+            {
+                PERF_INC(render_sector_cull);
                 continue;
+            }
             auto* sector = Sectors[sector_id];
 
             if (collect_lights && (type & STYPE_LIGHTSOURCE))
@@ -1068,12 +1113,18 @@ void R_dsgraph_structure::build_subspace()
             }
 
             if (PortalTraverser.i_marker != sector->r_marker)
+            {
+                PERF_INC(render_sector_cull);
                 continue; // inactive (untouched) sector
+            }
             for (u32 v_it = 0; v_it < sector->r_frustums.size(); v_it++)
             {
                 const CFrustum& view = sector->r_frustums[v_it];
                 if (!view.testSphere_dirty(spatial->GetSpatialData().sphere.P, spatial->GetSpatialData().sphere.R))
+                {
+                    PERF_INC(render_sphere_miss);
                     continue;
+                }
 
             // Stage C: the main-pass branch mutates shared state (HOM vis writeback into shared
             // visuals, CROS updates) - the concurrent SVP build takes the plain insert path.
@@ -1096,7 +1147,10 @@ void R_dsgraph_structure::build_subspace()
                         v_orig.hom_frame = v_copy.hom_frame;
                         v_orig.hom_tested = v_copy.hom_tested;
                         if (!bVisible)
+                        {
+                            PERF_INC(render_hom_cull);
                             break; // exit loop on frustums
+                        }
 
                         // update light-vis for selected entity
                         if (o_it == uID_LTRACK && renderable->renderable_ROS())
@@ -1107,6 +1161,7 @@ void R_dsgraph_structure::build_subspace()
                         }
 
                         // Rendering
+                        PERF_INC(renderable_render);
                         renderable->renderable_Render(context_id, renderable);
                     }
                     break; // exit loop on frustums
@@ -1122,7 +1177,10 @@ void R_dsgraph_structure::build_subspace()
                     // shadow-map caster build to prevent self-shadowing (e.g. an NPC's torch
                     // shadow-mapping the NPC's own skeleton, making the owner dark in the lens).
                     if (o.phase == CRender::PHASE_SMAP && o.shadow_owner && renderable == o.shadow_owner)
+                    {
+                        PERF_INC(render_shadow_owner_skip);
                         continue;
+                    }
 
                     // DARK-DYNAMICS ROOT-CAUSE FIX (bug introduced by commit 197d536a): this branch
                     // serves both the SMAP builds and the SVP scope build. The scope build passed
@@ -1136,6 +1194,7 @@ void R_dsgraph_structure::build_subspace()
                     // here (LOD flags, renderable_Invisible/HUD routing; MakeMeCrow is already
                     // guarded against the worker thread), while the shared-state mutations stay
                     // gated above (HOM writeback, CROS update, sector refresh, wallmarks, HUD).
+                    PERF_INC(renderable_render);
                     renderable->renderable_Render(context_id,
                         o.second_vp_pass ? renderable : nullptr);
                 }
@@ -1155,7 +1214,7 @@ void R_dsgraph_structure::build_subspace()
                         break;
                     const auto& entity_pos = viewEntity->spatial_sector_point();
                     viewEntity->spatial_updatesector(detect_sector(entity_pos));
-                    const auto sector_id = viewEntity->GetSpatialData().sector_id;
+                    const auto sector_id = viewEntity->GetSpatialData().sector_id.load(std::memory_order_relaxed);
                     if (sector_id == IRender_Sector::INVALID_SECTOR_ID)
                         break; // disassociated from S/P structure
                     if (sector_id >= Sectors.size())

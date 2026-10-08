@@ -11,6 +11,7 @@
 #include "movement_manager.h"
 #include "level_path_manager.h"
 #include "detail_path_builder.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 class CLevelPathBuilder : public CDetailPathBuilder
 {
@@ -75,8 +76,12 @@ public:
     {
         m_object->m_wait_for_distributed_computation = true;
         if (Device.dwTimeGlobal < m_last_fail_time + time_to_wait_after_fail)
+        {
+            PERF_INC(path_builder_delayed);
             return;
+        }
 
+        PERF_INC(path_builder_queued);
         Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CLevelPathBuilder::process));
     }
 
@@ -112,8 +117,12 @@ public:
     void process()
     {
         if (Device.dwTimeGlobal < m_last_fail_time + time_to_wait_after_fail)
+        {
+            PERF_INC(path_builder_delayed);
             return;
+        }
 
+        PERF_INC(path_builder_done);
         m_object->build_level_path();
     }
 

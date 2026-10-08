@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "weapon_inv_icon.h"
 #include "Weapon.h"
 #include "Level.h"
@@ -430,6 +431,7 @@ void ScheduleWeapon(CWeapon* w)
 
 void ScheduleItem(CInventoryItem* item, EWeaponInvIconPreset preset)
 {
+    GW_OVERLAP_HAZARD("weapon_inv_icon::ScheduleItem");
     if (!item || GEnv.isDedicatedServer)
         return;
     EnsureLoaded();

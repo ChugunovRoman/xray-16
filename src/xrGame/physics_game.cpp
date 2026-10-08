@@ -192,6 +192,16 @@ IC bool play_liquid_particle_criteria(dxGeomUserData& data, float vel_cret)
     //	return false;
 }
 
+// Phase 3 (GAME_RENDER_OVERLAP_PLAN) TODO: play_particles() and TContactShotMark() below use the
+// plain (non-threadsafe) Level().ph_commander().add_call()/has_call(), not the
+// add_call_threadsafety()/has_call_threadsafety() variants PHCommander already has (PHCommander.h).
+// Safe today only because of frame structure: these run inside the physics step, on CPHWorld's
+// dedicated physics thread, and the only reader, ph_commander().update() (CLevel::OnFrame tail,
+// Level.cpp), always runs on main at the start of
+// FrameMove() for frame N+1 - strictly after this frame's physics step is joined (Phase 3's
+// JoinPhysicsOverlap() is unconditional before ProcessFrame() returns). If a second writer into
+// m_calls is ever added inside the overlap window (Kick..Join, now spanning GameThread + the
+// physics step + DoRender), switch to the _threadsafety variants.
 template <class Pars>
 void play_particles(float vel_cret, dxGeomUserData* data, const dContactGeom* c, bool b_invert_normal,
     const SGameMtl* static_mtl, LPCSTR ps_name)
@@ -222,8 +232,13 @@ void TContactShotMark(CDB::TRI* T, dContactGeom* c)
     bool b_invert_normal = false;
     if (!ContactShotMarkGetEffectPars(c, data, vel_cret, b_invert_normal))
         return;
+    // Phase 3 TODO, known/accepted risk (GAME_RENDER_OVERLAP_PLAN "P3. Glitches"): this ODE contact
+    // callback runs inside the physics step, which runs parallel to DoRender() on CPHWorld's
+    // dedicated physics thread. Render temporarily overwrites Device.vCameraPosition in 3 places
+    // (r2_hud_overlay.cpp scope lens, r2_weapon_icon.cpp, PreviewSceneRenderer.cpp), so read the
+    // camera snapshot taken when this frame's step was kicked instead of the live field.
     Fvector to_camera;
-    to_camera.sub(cast_fv(c->pos), Device.vCameraPosition);
+    to_camera.sub(cast_fv(c->pos), physics_world()->StepCameraPosition());
     float square_cam_dist = to_camera.square_magnitude();
     if (data)
     {

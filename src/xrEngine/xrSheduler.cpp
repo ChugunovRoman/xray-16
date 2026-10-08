@@ -3,6 +3,7 @@
 #include "xr_object.h"
 #include "GameFont.h"
 #include "PerformanceAlert.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include <tracy/Tracy.hpp>
 
 //#define DEBUG_SCHEDULER
@@ -15,6 +16,75 @@ bool isSheduleInProgress = false;
 
 // Spread scheduler load: cap how many normal-priority shedule_Update calls run per frame (0 = vanilla, no cap).
 ENGINE_API int ps_scheduler_max_steps_per_frame = 128;
+
+namespace
+{
+enum : u32
+{
+    ShedCatOther = 0,
+    ShedCatStalker,
+    ShedCatMonster,
+    ShedCatActor,
+    ShedCatItem,
+};
+
+u32 ShedCategoryOf(ISheduled* object)
+{
+    auto* go = dynamic_cast<IGameObject*>(object);
+    if (!go)
+        return ShedCatOther;
+    if (go->cast_stalker())
+        return ShedCatStalker;
+    if (go->cast_base_monster())
+        return ShedCatMonster;
+    if (go->cast_actor())
+        return ShedCatActor;
+    if (go->cast_inventory_item())
+        return ShedCatItem;
+    return ShedCatOther;
+}
+
+void ShedLate(u32 late, u32 cat)
+{
+    if (late < 10)
+        PERF_INC(shed_late_0_10);
+    else if (late < 50)
+        PERF_INC(shed_late_10_50);
+    else if (late < 100)
+        PERF_INC(shed_late_50_100);
+    else if (late < 250)
+        PERF_INC(shed_late_100_250);
+    else if (late < 500)
+        PERF_INC(shed_late_250_500);
+    else if (late < 1000)
+        PERF_INC(shed_late_500_1000);
+    else
+        PERF_INC(shed_late_1000p);
+
+    // Average lateness per category = *_ms / *_n. `cat` is read from Item::dwPadding, set once at
+    // internal_Register time - no re-cast on every dequeue (see ShedCategoryOf).
+    switch (cat)
+    {
+    case ShedCatStalker: PERF_ADD(shed_late_cat_stalker_ms, late); PERF_INC(shed_late_cat_stalker_n); break;
+    case ShedCatMonster: PERF_ADD(shed_late_cat_monster_ms, late); PERF_INC(shed_late_cat_monster_n); break;
+    case ShedCatActor:   PERF_ADD(shed_late_cat_actor_ms, late);   PERF_INC(shed_late_cat_actor_n);   break;
+    case ShedCatItem:    PERF_ADD(shed_late_cat_item_ms, late);    PERF_INC(shed_late_cat_item_n);    break;
+    default:             PERF_ADD(shed_late_cat_other_ms, late);   PERF_INC(shed_late_cat_other_n);   break;
+    }
+}
+
+xray::perf::Metric ShedCatMetric(u32 cat)
+{
+    switch (cat)
+    {
+    case ShedCatStalker: return xray::perf::Metric::shed_cat_stalker;
+    case ShedCatMonster: return xray::perf::Metric::shed_cat_monster;
+    case ShedCatActor: return xray::perf::Metric::shed_cat_actor;
+    case ShedCatItem: return xray::perf::Metric::shed_cat_item;
+    default: return xray::perf::Metric::shed_cat_other;
+    }
+}
+} // namespace
 
 //-------------------------------------------------------------------------------------
 void CSheduler::Initialize()
@@ -120,6 +190,7 @@ void CSheduler::internal_Register(ISheduled* object, bool realTime)
     item.dwTimeOfLastExecute = Device.dwTimeGlobal;
     item.scheduled_name = object->shedule_Name();
     item.Object = object;
+    item.dwPadding = ShedCategoryOf(object);
 
     if (realTime)
     {
@@ -335,6 +406,9 @@ void CSheduler::ProcessStep()
     CTimer process_step_timer;
     process_step_timer.Start();
     const u32 time_budget_ms = _max(1u, u32(iFloor(psShedulerCurrent)));
+    xray::perf::SetGauge(xray::perf::Metric::shed_budget, time_budget_ms);
+    bool exit_limit = false;
+    bool exit_time = false;
 
     auto check_process_step_time = [&](pcstr last_sched_name) -> bool
     {
@@ -361,6 +435,7 @@ void CSheduler::ProcessStep()
         {
         // Update
         Item item = Top();
+        ShedLate(dwTime - item.dwTimeForExecute, item.dwPadding);
 
         if (!item.Object || !item.Object->shedule_Needed())
         {
@@ -368,6 +443,7 @@ void CSheduler::ProcessStep()
             Msg("SCHEDULER: process unregister [%s][%x][%s]", item.scheduled_name.c_str(), item.Object, "false");
 #endif
             ZoneScopedN("CSheduler::ProcessStep/PopStale");
+            PERF_INC(shed_pop_stale);
             // Erase element
             Pop();
             continue;
@@ -408,7 +484,8 @@ void CSheduler::ProcessStep()
             pcstr sched_name = item.scheduled_name.c_str();
             if (!sched_name || !sched_name[0])
                 sched_name = "(no name)";
-            ZoneTransientN(___sched_su, sched_name, true);
+            ZoneTransientN(___sched_su, sched_name, !xray::perf::HideHotZones());
+            xray::perf::ScopedTime cat_time(ShedCatMetric(item.dwPadding));
             item.Object->shedule_Update(
                 clampr(Elapsed, u32(1), u32(_max(u32(schedulerData.t_max), u32(1000)))));
         }
@@ -422,6 +499,7 @@ void CSheduler::ProcessStep()
             if (steps_done >= step_budget)
             {
                 psShedulerTarget += psShedulerReaction * 3;
+                exit_limit = true;
                 break;
             }
             {
@@ -429,7 +507,10 @@ void CSheduler::ProcessStep()
                 if (!sn || !sn[0])
                     sn = "(no name)";
                 if (check_process_step_time(sn))
+                {
+                    exit_time = true;
                     break;
+                }
             }
             continue;
         }
@@ -447,10 +528,14 @@ void CSheduler::ProcessStep()
         if (steps_done >= step_budget)
         {
             psShedulerTarget += psShedulerReaction * 3;
+            exit_limit = true;
             break;
         }
         if (check_process_step_time(sched_name_for_time))
+        {
+            exit_time = true;
             break;
+        }
 
 #if 0 //def DEBUG
         auto itemName = item.Object->shedule_Name().c_str();
@@ -466,6 +551,25 @@ void CSheduler::ProcessStep()
             Msg("* xrSheduler: too much time consumed by object [%s] (%dms)", itemName, execTime);
 #endif
         }
+    }
+
+    PERF_ADD(shed_steps, steps_done);
+    if (exit_limit)
+        PERF_INC(shed_exit_limit);
+    else if (exit_time)
+        PERF_INC(shed_exit_time);
+    else
+        PERF_INC(shed_exit_empty);
+
+    if (xray::perf::g_perf_metrics_active)
+    {
+        u32 behind = 0;
+        for (const auto& it : Items)
+        {
+            if (it.dwTimeForExecute < dwTime)
+                ++behind;
+        }
+        xray::perf::SetGauge(xray::perf::Metric::shed_behind, behind);
     }
 
     // Push "processed" back
@@ -526,7 +630,8 @@ void CSheduler::Update()
                 pcstr sched_name = item.scheduled_name.c_str();
                 if (!sched_name || !sched_name[0])
                     sched_name = "(no name)";
-                ZoneTransientN(___sched_rt, sched_name, true);
+                ZoneTransientN(___sched_rt, sched_name, !xray::perf::HideHotZones());
+                xray::perf::ScopedTime cat_time(ShedCatMetric(item.dwPadding));
                 item.Object->shedule_Update(Elapsed);
             }
             item.dwTimeOfLastExecute = dwTime;
@@ -542,6 +647,9 @@ void CSheduler::Update()
     clamp(psShedulerTarget, 3.f, 66.f);
     psShedulerCurrent = 0.9f * psShedulerCurrent + 0.1f * psShedulerTarget;
     stats.Load = psShedulerCurrent;
+    xray::perf::SetGauge(xray::perf::Metric::shed_current, s64(iFloor(psShedulerCurrent)));
+    xray::perf::SetGauge(xray::perf::Metric::shed_items, s64(Items.size()));
+    xray::perf::SetGauge(xray::perf::Metric::shed_items_rt, s64(ItemsRT.size()));
 
     // Finalize
     isSheduleInProgress = false;

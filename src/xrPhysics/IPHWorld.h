@@ -55,8 +55,11 @@ public:
     virtual void set_default_character_contact_shotmark(ContactCallbackFun* f) = 0;
     virtual void set_step_time_callback(PhysicsStepTimeCallback* cb) = 0;
     virtual void AddCall(CPHCondition* c, CPHAction* a) = 0;
-    // B-1: caller-level defer gate for scheduler overlap (GameThread intents until post-wait flush).
+    // B-1: caller-level defer gate while the physics step runs on its own thread (true for callers on any
+    // other thread between Kick and the post-step flush).
     virtual bool ShouldDeferSchedulerPhysicsMutation() const = 0;
+    // Camera position snapshot taken when this frame's step was kicked - for code running inside the step.
+    virtual const Fvector& StepCameraPosition() const = 0;
     virtual bool defer_scheduler_mutation(std::function<void()> op) = 0;
     virtual const PHWorldStatistics& GetStats() = 0;
     virtual void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert) = 0;

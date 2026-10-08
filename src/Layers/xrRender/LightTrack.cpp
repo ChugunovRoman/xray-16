@@ -506,6 +506,7 @@ void CROS_impl::prepare_lights(Fvector& position, IRenderable* O)
 
         xr_vector<ISpatial*> lstSpatial;
         lstSpatial.reserve(16);
+        SpatialCaller spatial_caller(SpatialQueryCaller::render);
 #if RENDER != R_R1
         g_pGamePersistent->SpatialSpace.q_box(lstSpatial, 0, STYPE_LIGHTSOURCEHEMI, position, bb_size);
 #else

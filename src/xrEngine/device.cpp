@@ -4,6 +4,7 @@
 
 #include "xrCore/FS_impl.h"
 #include "xrCore/Threading/TaskManager.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include "XR_IOConsole.h"
 #include "xr_input.h"
@@ -19,7 +20,7 @@
 ENGINE_API CRenderDevice Device;
 ENGINE_API CLoadScreenRenderer load_screen_renderer;
 
-ENGINE_API bool g_bRendering = false;
+ENGINE_API std::atomic<bool> g_bRendering = false;
 
 // Id of the dedicated SVP build thread (a plain std::thread, NOT a task-scheduler worker) while
 // it runs render stages that reach game code; std::thread::id{} while the worker is parked.
@@ -42,11 +43,6 @@ int ps_fps_limit_in_menu = 60;
 // CObjectList::Update — optional TaskScheduler parallel paths (see xr_object_list.cpp).
 int ps_obj_preupdate_mt = 0;
 int ps_obj_postupdate_mt = 0;
-// B-1: run physics step ‖ GameThread scheduler (1) vs old order physics-before-scheduler (0).
-// Default 0 — opt-in dev toggle for A/B; flip to 1 after validation.
-// ENGINE_API: read cross-module from xrPhysics (PHWorld.cpp).
-ENGINE_API int ps_mt_scheduler_physics_overlap = 1;
-
 bool g_bLoaded = false;
 ref_light precache_light = 0;
 
@@ -263,20 +259,33 @@ void CRenderDevice::DoRender()
             seqRender.Process(); // all rendering is done here
         }
 
-        CalcFrameStats();
-        Statistic->Show();
+        {
+            ZoneScopedN("stats");
+            CalcFrameStats();
+            Statistic->Show();
+        }
 
-        ImGui::Render();
-        m_imgui_render->Render(ImGui::GetDrawData());
+        {
+            ZoneScopedN("imgui");
+            ImGui::Render();
+            m_imgui_render->Render(ImGui::GetDrawData());
+        }
 
         // Present before ImGui platform viewports (same order as official ImGui DX11 examples). Rendering
         // child viewports first kept a very deep stack under IDXGISwapChain::Present with some GPU hooks.
-        RenderEnd(); // End + PresentFrame
+        {
+            ZoneScopedN("present");
+            RenderEnd(); // End + PresentFrame
+        }
 
-        UpdateViewports();
+        {
+            ZoneScopedN("UpdateViewports");
+            UpdateViewports();
+        }
     }
     else
     {
+        ZoneScopedN("UpdateViewports");
         UpdateViewports();
     }
     renderTotalReal.End();
@@ -286,15 +295,21 @@ void CRenderDevice::DoRender()
 
 void CRenderDevice::WaitForFrameTasks()
 {
+    // Physics step (Kick..Join window) first: Reset() (mem_compact, render resources) and Destroy() must
+    // not run beside it. Idempotent - the regular Join after DoRender() then only flushes.
+    if (PhysicsWaitOverlapCallback)
+        PhysicsWaitOverlapCallback();
     if (!TaskScheduler)
         return;
     if (m_game_task)
     {
+        PERF_WAIT_SITE(xray::perf::wait_site::Game);
         TaskScheduler->Wait(*m_game_task);
         m_game_task = nullptr;
     }
     if (m_pre_render_task)
     {
+        PERF_WAIT_SITE(xray::perf::wait_site::PreRender);
         TaskScheduler->Wait(*m_pre_render_task);
         m_pre_render_task = nullptr;
     }
@@ -348,8 +363,9 @@ void CRenderDevice::ProcessFrame()
     OnCameraUpdated();
 
     // B-1: open overlap window before GameThread launch so scheduler-side physics intents defer until flush.
-    if (ps_mt_scheduler_physics_overlap && PhysicsBeginOverlapFrameCallback)
+    if (PhysicsBeginOverlapFrameCallback)
         PhysicsBeginOverlapFrameCallback();
+    SetFrameOverlapActive(true);
 
     // GameThread (Sheduler.Update + seqFrameMT) runs in parallel with PreRenderThread / main-thread work.
     if (TaskScheduler)
@@ -364,34 +380,52 @@ void CRenderDevice::ProcessFrame()
     // ordering as overlap=0, where OnFrame runs inside GameThread after Sheduler.Update).
     if (TaskScheduler && m_game_task)
     {
+        PERF_WAIT_SITE(xray::perf::wait_site::Game);
         TaskScheduler->Wait(*m_game_task);
         m_game_task = nullptr;
     }
 
-    // B-1: when overlap enabled, the physics step runs here — after the GameThread scheduler joined
-    // (CPHWorld::OnFrame in seqFrame no-ops in this mode). When disabled, physics already ran in FrameMove.
-    if (ps_mt_scheduler_physics_overlap && PhysicsFrameOverlapCallback)
+    // B-1 / Phase 3: kick the physics step here — after the GameThread scheduler joined (CPHWorld::OnFrame
+    // in seqFrame always no-ops now). Wakes CPHWorld's dedicated physics thread and returns right away,
+    // so the step runs parallel to DoRender() below.
+    if (PhysicsKickOverlapCallback)
     {
-        ZoneScopedN("PhysicsOverlap");
-        PhysicsFrameOverlapCallback();
-    }
-
-    // B-1: scheduler joined and the physics step is done — apply mutations the scheduler deferred
-    // during the step now, fully serial (no concurrent reader/step), keeping the physics world consistent.
-    if (ps_mt_scheduler_physics_overlap && PhysicsDeferredFlushCallback)
-    {
-        ZoneScopedN("PhysicsDeferredFlush");
-        PhysicsDeferredFlushCallback();
+        ZoneScopedN("PhysicsOverlapKick");
+        PhysicsKickOverlapCallback();
     }
 
     DoRender();
 
-    // Join PreRenderThread (still overlapping with the physics step + DoRender above, as in the original design).
+    // Wait for the physics thread to finish this frame's step (no flush yet).
+    if (PhysicsWaitOverlapCallback)
+    {
+        ZoneScopedN("PhysicsOverlapJoin");
+        PERF_SCOPE(ph_overlap_join);
+        PhysicsWaitOverlapCallback();
+    }
+
+    // Join PreRenderThread (still overlapping with the physics step + DoRender above, as in the original
+    // design) BEFORE the deferred-mutation flush below: the flush (KillHit/ragdoll activation, shell
+    // destroy, bones) must not run beside PreRender's rain RayPick / particle worker.
     if (TaskScheduler && m_pre_render_task)
     {
+        PERF_WAIT_SITE(xray::perf::wait_site::PreRender);
         TaskScheduler->Wait(*m_pre_render_task);
         m_pre_render_task = nullptr;
     }
+
+    // Flush the mutations the scheduler/render path deferred during the window (the wait inside is a
+    // no-op now - the step was already waited for above).
+    if (PhysicsJoinOverlapCallback)
+    {
+        ZoneScopedN("PhysicsDeferredFlush");
+        PhysicsJoinOverlapCallback();
+    }
+
+    // Closed after the physics join above (not right after DoRender()): this flag models the actual
+    // overlap window, which spans the whole Kick..Join interval (GameThread + physics-on-its-own-thread
+    // running parallel to DoRender), not just DoRender() itself.
+    SetFrameOverlapActive(false);
 
     const u64 frameEndTime = TimerGlobal.GetElapsed_ms();
     const u64 frameTime = frameEndTime - frameStartTime;

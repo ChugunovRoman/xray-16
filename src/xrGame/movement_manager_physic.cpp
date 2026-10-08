@@ -81,6 +81,10 @@ void CMovementManager::apply_collision_hit(CPHMovementControl* movement_control)
             movement_control->ContactBone(), di->HitPos(), 0.f, di->HitType(), 0.0f, false);
         object().Hit(&HDS);
     }
+    // Consume the value: gcontact_HealthLost is recomputed only inside Calculate() (UpdateCollisionDamage),
+    // which is skipped while the character is disabled/kinematic (including the Ф1 far-kinematic branches).
+    // Left as is, the last collision's damage was re-applied on every idle tick until the next Calculate().
+    movement_control->gcontact_HealthLost = 0.f;
 }
 
 bool CMovementManager::move_along_path() const
@@ -315,6 +319,7 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
         if (DBG_PH_MOVE_CONDITIONS(!ph_dbg_draw_mask.test(phDbgNeverUseAiPhMove) &&) !movement_control->TryPosition(
                 dest_position))
         {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementTryPositionFail);
             movement_control->GetPosition(dest_position);
             movement_control->Calculate(detail().path(), desirable_speed, detail().m_current_travel_point, precision);
 
@@ -333,6 +338,7 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
     }
     else
     {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementKinematic);
         // DBG_PH_MOVE_CONDITIONS(
         // if(ph_dbg_draw_mask.test(phDbgNeverUseAiPhMove)){movement_control->SetPosition(dest_position);movement_control->DisableCharacter();})
         movement_control->SetPosition(dest_position);

@@ -157,7 +157,9 @@ IC void feel_vision_dynamic_cache_store(Vision::dynamic_blocker_cache& cache, co
 
 };
 
-// AI LOS / feel_vision ray tuning (defaults = vanilla behavior; see console_commands / user.ltx)
+// AI LOS / feel_vision ray tuning (see console_commands / user.ltx). Not all defaults are vanilla:
+// npc_perf_vision_skip_dynamic_ray defaults to 1 (deliberate perf trade-off - dynamic occluders such as
+// vehicles/props are not tested in the LOS ray, "worse detection around movers").
 ENGINE_API extern int npc_perf_vision_skip_dynamic_ray;   // 1 = skip dynamic cform ray pass after static query
 ENGINE_API extern int npc_perf_vision_static_only;        // 1 = static geometry only in main RayQuery (cheaper, less accurate)
 ENGINE_API extern float npc_perf_vision_cache_pos_slack_m; // >0 = reuse ray cache if eye moved less than this (meters)

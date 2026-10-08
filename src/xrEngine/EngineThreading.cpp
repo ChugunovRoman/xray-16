@@ -13,6 +13,7 @@
 #endif
 
 #include "xrCore/Threading/ThreadUtil.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <atomic>
 #include <thread>
@@ -27,8 +28,22 @@ std::atomic<std::thread::id> s_game_thread_id{};
 
 struct GameThreadScope
 {
-    GameThreadScope() { s_game_thread_id.store(std::this_thread::get_id(), std::memory_order_release); }
-    ~GameThreadScope() { s_game_thread_id.store(std::thread::id{}, std::memory_order_release); }
+    GameThreadScope()
+    {
+        const auto id = std::this_thread::get_id();
+        s_game_thread_id.store(id, std::memory_order_release);
+        xray::perf::g_game_tid.store(id, std::memory_order_release);
+        if (id == xray::perf::g_main_tid.load(std::memory_order_acquire))
+        {
+            PERF_INC(task_wait_game_on_main);
+            xray::perf::Add(xray::perf::GameOnMainSiteMetric(xray::perf::TlWaitSite()));
+        }
+    }
+    ~GameThreadScope()
+    {
+        s_game_thread_id.store(std::thread::id{}, std::memory_order_release);
+        xray::perf::g_game_tid.store(std::thread::id{}, std::memory_order_release);
+    }
 };
 } // namespace
 
@@ -44,7 +59,12 @@ bool XRay::Engine::IsGameThreadRunning()
     return s_game_thread_id.load(std::memory_order_acquire) != std::thread::id{};
 }
 
-void XRay::Engine::MarkMainThread() { s_main_thread_id.store(std::this_thread::get_id(), std::memory_order_release); }
+void XRay::Engine::MarkMainThread()
+{
+    const auto id = std::this_thread::get_id();
+    s_main_thread_id.store(id, std::memory_order_release);
+    xray::perf::g_main_tid.store(id, std::memory_order_release);
+}
 
 void XRay::Engine::PreRenderThread()
 {

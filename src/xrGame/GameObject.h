@@ -80,6 +80,17 @@ protected:
 #endif
     u32 dwFrame_UpdateCL;
     std::atomic_uint32_t dwFrame_AsCrow;
+    // (crow_src, crow_frame) packed via xray::perf::PackCrow/Unpack* - one atomic, read/written together.
+    // See xrCore/Profiling/PerfMetrics.hpp for why: two separate atomics let UpdateCL() observe a torn
+    // pair (an old frame with a new src, or vice versa) across two concurrent MakeMeCrow() writes.
+    std::atomic<u64> m_crow_packed{0};
+    std::atomic<u32> m_main_pass_frame{0};
+    // Props.crow used to live in the GameObjectProperties bitfield union alongside bEnabled/bVisible/
+    // bDestroy/net_*/bPreDestroy. MakeMeCrow() can run on a shadow-pass worker thread while those other
+    // bits are written from the main/game thread, and a bitfield write is a read-modify-write of the
+    // whole storage unit - a data race. Kept as its own atomic instead; Props.crow stays declared only
+    // as a DEBUG dump mirror (see DBGGetProps below), never the live state.
+    std::atomic<bool> m_is_crow{false};
 
 private:
     shared_str m_sTipText;
@@ -147,12 +158,16 @@ public:
     virtual u32 GetCrowUpdateFrame() const override { return dwFrame_AsCrow; }
     virtual void SetCrowUpdateFrame(u32 value) override { dwFrame_AsCrow = value; }
 #ifdef DEBUG
-    virtual void DBGGetProps(GameObjectProperties& p) const override { p = Props; }
+    virtual void DBGGetProps(GameObjectProperties& p) const override
+    {
+        p = Props;
+        p.crow = m_is_crow.load(std::memory_order_relaxed) ? 1 : 0;
+    }
 #endif
     virtual void MakeMeCrow() override;
-    virtual void IAmNotACrowAnyMore() override { Props.crow = false; }
+    virtual void IAmNotACrowAnyMore() override { m_is_crow.store(false, std::memory_order_relaxed); }
     virtual bool AlwaysTheCrow() override { return FALSE; }
-    virtual bool AmICrow() const override { return !!Props.crow; }
+    virtual bool AmICrow() const override { return m_is_crow.load(std::memory_order_relaxed); }
     // Network
     virtual bool Local() const override { return Props.net_Local; }
     virtual bool Remote() const override { return !Props.net_Local; }

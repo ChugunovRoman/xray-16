@@ -2,6 +2,7 @@
 
 #include "Layers/xrRender/xrRender_console.h"
 #include "r2_R_sun_support.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include "xrEngine/IGame_Persistent.h"
 #include "xrEngine/IRenderable.h"
@@ -290,8 +291,10 @@ void render_rain::calculate()
         dsgraph.o.view_pos = cull_COP;
         dsgraph.o.mt_calculate = o.mt_calc_enabled;
 
-        // Fill the database
-        dsgraph.build_subspace();
+        {
+            PERF_PASS(xray::perf::pass::Rain);
+            dsgraph.build_subspace();
+        }
     }
 
     // Finalize & Cleanup

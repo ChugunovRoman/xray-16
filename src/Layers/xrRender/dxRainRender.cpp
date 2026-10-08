@@ -4,7 +4,7 @@
 #include "xrEngine/IGame_Persistent.h"
 #include "xrEngine/Rain.h"
 
-#include "xrCore/Threading/ScopeLock.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <algorithm>
 
@@ -69,7 +69,16 @@ void dxRainRender::Render(CEffect_Rain& owner)
     const Fvector3 f_rain_color = g_pGamePersistent->Environment().CurrentEnv.rain_color;
     const u32 u_rain_color = color_rgba_f(f_rain_color.x, f_rain_color.y, f_rain_color.z, factor_visual);
 
-    ScopeLock rain_guard(&owner.rain_items_lock);
+    if (!owner.rain_items_lock.TryEnter())
+    {
+        PERF_SCOPE(rain_lock_wait);
+        owner.rain_items_lock.Enter();
+    }
+    struct RainItemsUnlock
+    {
+        Lock* lock;
+        ~RainItemsUnlock() { lock->Leave(); }
+    } rain_unlock{&owner.rain_items_lock};
 
     const u32 item_count = (u32)std::min(owner.items.size(), size_t(desired_items));
 

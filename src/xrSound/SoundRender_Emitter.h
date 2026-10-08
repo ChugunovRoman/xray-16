@@ -82,7 +82,10 @@ private:
     OggVorbis_File* ovf{};
 
     xr_vector<u8> temp_buf[sdef_target_count_prefill];
-    std::atomic<Task*> prefill_task{};
+    // True from just before the prefill task is pushed until the task's very last statement. A Task* is not
+    // kept: TaskManager recycles task storage (thread_local ring), so a pointer held across frames can end
+    // up naming an unrelated task.
+    std::atomic<bool> prefill_busy{false};
 
     size_t current_block{};
     int filled_blocks{};

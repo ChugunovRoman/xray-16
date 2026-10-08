@@ -10,6 +10,7 @@
 #include "xrCore/Threading/Lock.hpp"
 #include "xrCore/xrDebug_macros.h"
 #include "xrAICore/Navigation/ai_graph_engine_cvars.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace
 {
@@ -94,6 +95,7 @@ inline bool CGraphEngine::search(const _Graph& graph, const _index_type& start_n
     // Serialize search backends when `ps_ai_graph_engine_serialize` is set (see plans/optimization_arch/SHARED_AI_MT_AUDIT.md).
     GraphEngineSearchLock scope(&m_lock, true);
     GraphEngineConcurrencyProbe concurrent_probe(&g_ai_graph_engine_active_index_search, "index");
+    PERF_SCOPE(ai_path_search);
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/search")
     if (ps_ai_graph_engine_serialize)
@@ -103,6 +105,8 @@ inline bool CGraphEngine::search(const _Graph& graph, const _index_type& start_n
     CPathManagerGeneric path_manager;
     path_manager.setup(&graph, &m_algorithm->data_storage(), node_path, start_node, dest_node, parameters);
     bool successfull = m_algorithm->find(path_manager);
+    if (successfull)
+        PERF_INC(ai_path_ok);
     if (ps_ai_graph_engine_serialize)
         PathTimer.End();
     return successfull;
@@ -116,6 +120,7 @@ inline bool CGraphEngine::search(const _Graph& graph, const _index_type& start_n
 {
     GraphEngineSearchLock scope(&m_lock, true);
     GraphEngineConcurrencyProbe concurrent_probe(&g_ai_graph_engine_active_index_search, "index");
+    PERF_SCOPE(ai_path_search);
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/search")
     if (ps_ai_graph_engine_serialize)
@@ -125,6 +130,8 @@ inline bool CGraphEngine::search(const _Graph& graph, const _index_type& start_n
     CPathManagerGeneric path_manager;
     path_manager.setup(&graph, &m_algorithm->data_storage(), node_path, start_node, dest_node, parameters);
     bool successfull = m_algorithm->find(path_manager);
+    if (successfull)
+        PERF_INC(ai_path_ok);
     if (ps_ai_graph_engine_serialize)
         PathTimer.End();
     return successfull;
@@ -138,12 +145,15 @@ inline bool CGraphEngine::search(const _Graph& graph, const _index_type& start_n
 {
     GraphEngineSearchLock scope(&m_lock, true);
     GraphEngineConcurrencyProbe concurrent_probe(&g_ai_graph_engine_active_index_search, "index");
+    PERF_SCOPE(ai_path_search);
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/search")
     if (ps_ai_graph_engine_serialize)
         PathTimer.Begin();
     path_manager.setup(&graph, &m_algorithm->data_storage(), node_path, start_node, dest_node, parameters);
     bool successfull = m_algorithm->find(path_manager);
+    if (successfull)
+        PERF_INC(ai_path_ok);
     if (ps_ai_graph_engine_serialize)
         PathTimer.End();
     return successfull;
@@ -160,6 +170,7 @@ inline bool CGraphEngine::search(const CProblemSolver<T1, T2, T3, T4, T5, T6, T7
 {
     GraphEngineSearchLock scope(&m_lock, true);
     GraphEngineConcurrencyProbe concurrent_probe(&g_ai_graph_engine_active_solver_search, "solver");
+    PERF_SCOPE(ai_goap_solve);
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/problem_solver")
     if (ps_ai_graph_engine_serialize)
@@ -183,6 +194,7 @@ inline bool CGraphEngine::search(const _Graph& graph, const shared_str& start_no
 {
     GraphEngineSearchLock scope(&m_lock, true);
     GraphEngineConcurrencyProbe concurrent_probe(&g_ai_graph_engine_active_string_search, "string");
+    PERF_SCOPE(ai_path_search_string);
     START_PROFILE("graph_engine")
     START_PROFILE("graph_engine/search")
     if (ps_ai_graph_engine_serialize)
@@ -192,6 +204,8 @@ inline bool CGraphEngine::search(const _Graph& graph, const shared_str& start_no
     CPathManagerGeneric path_manager;
     path_manager.setup(&graph, &m_string_algorithm->data_storage(), node_path, start_node, dest_node, parameters);
     bool successfull = m_string_algorithm->find(path_manager);
+    if (successfull)
+        PERF_INC(ai_path_ok_string);
     if (ps_ai_graph_engine_serialize)
         PathTimer.End();
     return successfull;

@@ -128,6 +128,24 @@ enum class ENpcCppProfileStage : u32
     AgentEnemyDistribute,
     AgentEnemyFill,
     AgentEnemyAssign,
+    ScriptBinderUpdateStalker,
+    ScriptBinderUpdateMonster,
+    ScriptBinderUpdateSmartZone,
+    ScriptBinderUpdateItem,
+    ScriptBinderUpdateOther,
+    MovementTryPositionFail,
+    MovementKinematic,
+    CharacterPhysicsCorpseEnabled,
+    CharacterPhysicsCorpseAge0_3,
+    CharacterPhysicsCorpseAge3_15,
+    CharacterPhysicsCorpseAge15_60,
+    CharacterPhysicsCorpseAge60p,
+    EntityAliveDie,
+    StalkerDie,
+    CharacterPhysicsActivateShell,
+    CharacterPhysicsInDie,
+    CharacterPhysicsInHit,
+    ExplosiveExplode,
     Count
 };
 
@@ -135,6 +153,10 @@ namespace npc_cpp_profile
 {
 bool enabled();
 void add(ENpcCppProfileStage stage, u64 qpc_delta);
+// A pure counter for a stage: how many times something happened, with no per-call timing. Use this instead of
+// add() when there is nothing to time (add() would record a zero-length sample, which flush_snapshots keeps,
+// but at the cost of a meaningless avg/max of zero on every such row).
+void count(ENpcCppProfileStage stage, u64 n = 1);
 void add_script_evaluator(pcstr evaluator_name, u64 qpc_delta);
 void add_script_evaluator_cache_hit(pcstr evaluator_name);
 void add_script_evaluator_cache_miss(pcstr evaluator_name);

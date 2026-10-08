@@ -25,6 +25,7 @@
 #ifdef DEBUG
 #include "debug_output.h"
 #endif
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 CPHShell::~CPHShell()
 {
@@ -101,7 +102,13 @@ void CPHShell::vis_update_activate()
     if (ref_object && m_active_count > 0)
     {
         m_active_count = 0;
-        ref_object->ObjectProcessingActivate();
+        // On the physics thread (contact wake in NearCallback) the game-side part - CObjectList
+        // active/sleeping lists, CGameObject::Props counter, crow - must not run beside DoRender(), which
+        // can read those lists; it is replayed on the main thread right after the join instead.
+        if (ph_world && ph_world->IsPhysicsStepThread())
+            ph_world->DeferProcessingActivate(ref_object);
+        else
+            ref_object->ObjectProcessingActivate();
     }
 }
 
@@ -177,20 +184,30 @@ float CPHShell::getDensity() { return getMass() / getVolume(); }
 void CPHShell::PhDataUpdate(dReal step)
 {
     bool disable = true;
+    u32 enabled_bodies = 0;
     for (auto& it : elements)
     {
         it->PhDataUpdate(step);
         const dBodyID body = it->get_body();
-        if (body && disable && dBodyIsEnabled(body))
+        if (body && dBodyIsEnabled(body))
+        {
             disable = false;
+            ++enabled_bodies;
+        }
     }
     if (disable)
     {
+        PERF_INC(ph_shell_disabled);
         DisableObject();
         CPHObject::put_in_recently_deactivated();
     }
     else
+    {
+        PERF_INC(ph_shell_active);
+        if (CPHCollideValidator::IsRagDollObject(*this))
+            PERF_ADD(ph_shell_ragdoll_bodies, enabled_bodies);
         ReanableObject();
+    }
 #if 0
     DBG_OpenCashedDraw();
     dbg_draw_velocity   ( 0.1f, color_xrgb( 255, 0, 0 ) );

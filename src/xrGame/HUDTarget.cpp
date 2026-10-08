@@ -18,6 +18,8 @@
 #include "entity_alive.h"
 
 #include "inventory_item.h"
+
+#include <atomic>
 #include "Inventory.h"
 
 #include "ai/monsters/poltergeist/poltergeist.h"
@@ -113,7 +115,7 @@ void CHUDTarget::CursorOnFrame()
     }
 }
 
-extern ENGINE_API bool g_bRendering;
+extern ENGINE_API std::atomic<bool> g_bRendering;
 void CHUDTarget::Render()
 {
     using namespace ::detail::hud_target;

@@ -65,15 +65,18 @@ void dxRender_Visual::Load(const char* N, LPCSTR suffix, IReader* data, u32)
         string256 fnT, fnS;
         data->r_stringZ(fnT, sizeof(fnT));
         data->r_stringZ(fnS, sizeof(fnS));
-        if (GEnv.Render->texture_replacements.size() > 0)
         {
-            string_path low_name_suffix;
-            xr_strcpy(low_name_suffix, N);
-            if (strlen(suffix) > 0)
-                xr_strcat(low_name_suffix, suffix);
-            auto value = GEnv.Render->texture_replacements.find(low_name_suffix);
-            if (GEnv.Render->texture_replacements.find(low_name_suffix) != GEnv.Render->texture_replacements.end())
-                strncpy(fnT, value->second.c_str(), sizeof(fnT) - 1);
+            TextureReplacementsScopeLock scope(GEnv.Render->texture_replacements_lock);
+            if (GEnv.Render->texture_replacements.size() > 0)
+            {
+                string_path low_name_suffix;
+                xr_strcpy(low_name_suffix, N);
+                if (strlen(suffix) > 0)
+                    xr_strcat(low_name_suffix, suffix);
+                auto value = GEnv.Render->texture_replacements.find(low_name_suffix);
+                if (value != GEnv.Render->texture_replacements.end())
+                    strncpy(fnT, value->second.c_str(), sizeof(fnT) - 1);
+            }
         }
         shader.create(fnS, fnT);
     }

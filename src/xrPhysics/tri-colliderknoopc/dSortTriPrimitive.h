@@ -8,6 +8,7 @@
 #include "xrPhysics/console_vars.h"
 #include "xrPhysics/PHWorld.h"
 #include "xrCDB/xr_area.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #ifdef DEBUG
 #include "xrPhysics/debug_output.h"
@@ -102,6 +103,7 @@ IC int dcTriListCollider::dSortTriPrimitiveCollide(
         debug_output().dbg_total_saved_tries() -= data->cashed_tries.size();
         debug_output().dbg_new_queries_per_step()++;
 #endif
+        PERF_INC(ph_tri_new);
         data->cashed_tries.clear();
 
         for (auto &Res : *XRC.r_get())
@@ -113,10 +115,13 @@ IC int dcTriListCollider::dSortTriPrimitiveCollide(
         data->last_aabb_pos.set(cast_fv(p));
         data->last_aabb_size.set(aabb);
     }
-#ifdef DEBUG
     else
+    {
+#ifdef DEBUG
         debug_output().dbg_reused_queries_per_step()++;
 #endif
+        PERF_INC(ph_tri_reused);
+    }
     ///////////////////////////////////////////////////////////////////////////////////////////////
     int ret = 0;
 
@@ -192,12 +197,26 @@ IC int dcTriListCollider::dSortTriPrimitiveCollide(
 #ifdef DEBUG
         debug_output().dbg_saved_tries_for_active_objects()++;
 #endif
+#if XR_PERF_METRICS
+        bool sample_tri = false;
+        if (xray::perf::g_perf_metrics_active)
+        {
+            thread_local u32 s_tri = 0;
+            sample_tri = ((++s_tri & 7u) == 0);
+            if (sample_tri)
+                xray::perf::AddSlow(xray::perf::Metric::ph_tri_walk, 8);
+        }
+#endif
         // if(ignored_tries[I-B])continue;
 		CDB::TRI* Tr = T_array + *I;
 		const Point vertices[3] = {Point((dReal*)&V_array[Tr->verts[0]]), Point((dReal*)&V_array[Tr->verts[1]]),
 			Point((dReal*)&V_array[Tr->verts[2]])};
         if (!aabb_tri_aabb(Point(p), Point((float*)&AABB), vertices))
             continue;
+#if XR_PERF_METRICS
+        if (sample_tri)
+            xray::perf::AddSlow(xray::perf::Metric::ph_tri_aabb, 8);
+#endif
 #ifdef DEBUG
         if (debug_output().ph_dbg_draw_mask().test(phDBgDrawIntersectedTries))
 			debug_output().DBG_DrawTri(Tr, V_array, color_xrgb(0, 255, 0));

@@ -6,6 +6,7 @@
 #include "IGame_Persistent.h"
 #include "PS_instance.h"
 #include "xrCore/Threading/Lock.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <algorithm>
 
@@ -27,7 +28,11 @@ ENGINE_API void ParticleWorker_Enqueue(CPS_Instance* inst)
     if (!inst)
         return;
 
-    s_particle_worker_lock.Enter();
+    if (!s_particle_worker_lock.TryEnter())
+    {
+        PERF_SCOPE(particles_lock_wait);
+        s_particle_worker_lock.Enter();
+    }
     s_particle_worker_batch.push_back(inst);
     s_particle_worker_lock.Leave();
 }
@@ -39,7 +44,11 @@ void ParticleWorker_Remove(CPS_Instance* inst)
 
     // Blocks while the worker is inside ParticleWorker_RunBatch, which is exactly the point:
     // the instance cannot be freed until the batch is done with it.
-    s_particle_worker_lock.Enter();
+    if (!s_particle_worker_lock.TryEnter())
+    {
+        PERF_SCOPE(particles_lock_wait);
+        s_particle_worker_lock.Enter();
+    }
     const auto I = std::find(s_particle_worker_batch.begin(), s_particle_worker_batch.end(), inst);
     if (I != s_particle_worker_batch.end())
         s_particle_worker_batch.erase(I);
@@ -50,20 +59,47 @@ void ParticleWorker_BeginFrameCollect()
 {
     ZoneScopedN("ParticleWorker_BeginFrameCollect");
 
-    s_particle_worker_lock.Enter();
+    if (!s_particle_worker_lock.TryEnter())
+    {
+        PERF_SCOPE(particles_lock_wait);
+        s_particle_worker_lock.Enter();
+    }
     s_particle_worker_batch.clear();
     s_particle_worker_lock.Leave();
 
     if (!g_pGamePersistent)
+    {
+        if (xray::perf::g_perf_metrics_active)
+            xray::perf::SetGauge(xray::perf::Metric::particles_batch, 0);
         return;
+    }
 #ifndef _EDITOR
     if (GEnv.isDedicatedServer)
+    {
+        if (xray::perf::g_perf_metrics_active)
+            xray::perf::SetGauge(xray::perf::Metric::particles_batch, 0);
         return;
+    }
     if (!psDeviceFlags.test(mtParticles))
+    {
+        if (xray::perf::g_perf_metrics_active)
+            xray::perf::SetGauge(xray::perf::Metric::particles_batch, 0);
         return;
+    }
 
     for (CPS_Instance* inst : g_pGamePersistent->ps_active)
         inst->AsyncParticle_PreWorkerCollect();
+
+    if (xray::perf::g_perf_metrics_active)
+    {
+        if (!s_particle_worker_lock.TryEnter())
+        {
+            PERF_SCOPE(particles_lock_wait);
+            s_particle_worker_lock.Enter();
+        }
+        xray::perf::SetGauge(xray::perf::Metric::particles_batch, static_cast<s64>(s_particle_worker_batch.size()));
+        s_particle_worker_lock.Leave();
+    }
 #endif
 }
 
@@ -74,7 +110,13 @@ void ParticleWorker_RunBatch()
     if (GEnv.isDedicatedServer)
         return;
 
-    s_particle_worker_lock.Enter();
+    // This is the lock §7.5 of the plan names as the PreRenderThread spike suspect: main can be holding it
+    // in Enqueue/Remove/BeginFrameCollect while this runs, so measure the wait the same way those three do.
+    if (!s_particle_worker_lock.TryEnter())
+    {
+        PERF_SCOPE(particles_lock_wait);
+        s_particle_worker_lock.Enter();
+    }
     for (CPS_Instance* inst : s_particle_worker_batch)
     {
         if (inst)

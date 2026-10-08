@@ -23,12 +23,19 @@
 #include "xrCore/FS_internal.h"
 #include "xrCore/Threading/ParallelFor.hpp"
 #include "xrCore/Threading/TaskManager.hpp"
+#include "xrCore/Threading/ThreadUtil.h"
 
 #include "xrCDB/xr_area.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrEngine/defines.h"
 #include "xrEngine/device.h"
 #include "xrEngine/GameFont.h"
 #include "xrEngine/PerformanceAlert.hpp"
+#include "xrEngine/xr_object.h"
+
+#include "IPhysicsShellHolder.h"
+#include "PHCharacter.h"
+#include "PHShell.h"
 
 #ifdef DEBUG
 //				void DBG_ObjAfterPhDataUpdate	( CPHObject *obj );
@@ -138,11 +145,14 @@ void CPHWorld::Create(bool mt, CObjectSpace* os, CObjectList* lo)
     m_object_space = os;
     m_level_objects = lo;
     Device.AddSeqFrame(this, mt);
-    // B-1: overlap mode runs the step from ProcessFrame (after the GameThread launch) via this callback.
-    Device.PhysicsFrameOverlapCallback = [this] { OnFrameStep(); };
+    // B-1 / Phase 3: overlap mode runs the step from ProcessFrame (after the GameThread launch) via
+    // these callbacks - see KickPhysicsOverlap()/JoinPhysicsOverlap() for what each mode does.
     Device.PhysicsBeginOverlapFrameCallback = [this] { BeginSchedulerOverlapFrame(); };
-    Device.PhysicsDeferredFlushCallback = [this] { flush_deferred_mutations(); };
+    Device.PhysicsKickOverlapCallback = [this] { KickPhysicsOverlap(); };
+    Device.PhysicsWaitOverlapCallback = [this] { WaitPhysicsStep(); };
+    Device.PhysicsJoinOverlapCallback = [this] { JoinPhysicsOverlap(); };
     m_commander = xr_new<CPHCommander>();
+    m_script_commander = xr_new<CPHCommander>();
 
 // dVector3 extensions={2048,256,2048};
 /*
@@ -192,7 +202,24 @@ void CPHWorld::Destroy()
 {
     ZoneScoped;
 
+    // Phase 3: stop the dedicated physics thread first, before anything it could touch (Mesh,
+    // m_commander, ODE world) is torn down below. By the time Destroy() runs the frame cycle for
+    // this CPHWorld is normally not running (ProcessFrame always joins via PhysicsJoinOverlapCallback
+    // before returning), so the thread should already be parked in m_physics_wake.Wait() - the waits
+    // here are a safety net, not the normal per-frame path.
+    WaitPhysicsStep();
+    // Deferred game-side notifications target objects that are being destroyed with the level.
+    m_deferred_processing_activate.clear();
+    if (m_physics_thread.joinable())
+    {
+        m_physics_thread_exit.store(true, std::memory_order_release);
+        m_physics_wake.Set();
+        m_physics_thread.join();
+        m_physics_thread_exit.store(false, std::memory_order_release);
+    }
+
     xr_delete(m_commander);
+    xr_delete(m_script_commander);
     Mesh.Destroy();
 #ifdef PH_PLAIN
     dGeomDestroy(plane);
@@ -208,9 +235,10 @@ void CPHWorld::Destroy()
     dCloseODE();
     dCylinderClassUser = -1;
     dRayMotionsClassUser = -1;
-    Device.PhysicsFrameOverlapCallback = nullptr;
     Device.PhysicsBeginOverlapFrameCallback = nullptr;
-    Device.PhysicsDeferredFlushCallback = nullptr;
+    Device.PhysicsKickOverlapCallback = nullptr;
+    Device.PhysicsWaitOverlapCallback = nullptr;
+    Device.PhysicsJoinOverlapCallback = nullptr;
     Device.RemoveSeqFrame(this);
     b_exist = false;
 }
@@ -221,15 +249,12 @@ void CPHWorld::SetGravity(float g)
     dWorldSetGravity(phWorld, 0, -m_gravity, 0); //-2.f*9.81f
 }
 
-extern ENGINE_API int ps_mt_scheduler_physics_overlap;
-
 void CPHWorld::OnFrame()
 {
-    // B-1: when overlap is enabled, the step runs after the GameThread scheduler launch via
-    // Device.PhysicsFrameOverlapCallback (set in Create). Skip the seqFrame call here to avoid double-step.
-    if (ps_mt_scheduler_physics_overlap)
-        return;
-    OnFrameStep();
+    // B-1 / Phase 3: the step always runs after the GameThread scheduler launch, via
+    // Device.PhysicsKickOverlapCallback (set in Create) - on CPHWorld's dedicated physics thread,
+    // parallel to DoRender(). This seqFrame callback is kept registered (Device.AddSeqFrame in Create)
+    // but intentionally never steps anymore, to avoid double-stepping.
 }
 
 void CPHWorld::OnFrameStep()
@@ -257,11 +282,23 @@ void CPHWorld::BeginSchedulerOverlapFrame()
 
 bool CPHWorld::ShouldDeferSchedulerPhysicsMutation() const
 {
-    if (!ps_mt_scheduler_physics_overlap)
-        return false;
     if (!m_scheduler_overlap_active.load(std::memory_order_acquire))
         return false;
-    // Main thread runs FrameStep; only defer mutations from other threads (GameThread scheduler).
+    // B-1 fix: a step must actually be IN FLIGHT to need deferring. Without this check,
+    // flush_deferred_mutations() itself (called from JoinPhysicsOverlap() on the main thread, i.e.
+    // this_thread::get_id() != m_step_thread_id == the dedicated physics thread, AFTER
+    // m_physics_done.Wait() already returned) kept re-deferring its own queued ops forever: the
+    // deferred action (e.g. CPHMovementControl::ApplyDeferredBoxActivation -> ActivateBoxDynamic, used
+    // by crouch/walk-toggle) re-checks this predicate on every call and, seeing a non-matching thread
+    // id, requeues itself instead of actually running - a permanent stall. m_step_running covers the
+    // whole Kick..WaitPhysicsStep window (set on the main thread before the wake, cleared after
+    // m_physics_done) - once it's false, nothing is concurrently stepping, so mutating from any thread
+    // (including the post-join flush) is safe and must not defer again.
+    if (!m_step_running.load(std::memory_order_acquire))
+        return false;
+    // Whichever thread runs FrameStep (CPHWorld's dedicated physics thread) is stable across the whole
+    // window - only defer mutations from OTHER threads (GameThread scheduler, or render-path code
+    // running on main while the physics thread is mid-step).
     return std::this_thread::get_id() != m_step_thread_id;
 }
 
@@ -274,9 +311,28 @@ bool CPHWorld::defer_scheduler_mutation(std::function<void()> op)
     return true;
 }
 
+const Fvector& CPHWorld::StepCameraPosition() const
+{
+    return m_step_running.load(std::memory_order_acquire) ? m_step_camera_pos : Device.vCameraPosition;
+}
+
+bool CPHWorld::IsPhysicsStepThread() const
+{
+    return m_step_running.load(std::memory_order_acquire) && std::this_thread::get_id() == m_step_thread_id;
+}
+
 void CPHWorld::flush_deferred_mutations()
 {
-    // Called from ProcessFrame after secondary_tasks.wait() — apply owner-level intents serially.
+    // Called on the main thread from JoinPhysicsOverlap(), after the step finished - apply owner-level
+    // intents serially. Game-side activations first: they only re-register objects for processing.
+    if (!m_deferred_processing_activate.empty())
+    {
+        ZoneScopedN("PhysicsDeferredProcessingActivate");
+        xr_vector<IPhysicsShellHolder*> activations;
+        activations.swap(m_deferred_processing_activate);
+        for (IPhysicsShellHolder* holder : activations)
+            holder->ObjectProcessingActivate();
+    }
     xr_vector<std::function<void()>> local;
     {
         std::lock_guard<std::mutex> guard(m_deferred_mutations_lock);
@@ -291,6 +347,65 @@ void CPHWorld::flush_deferred_mutations()
     for (auto& op : local)
         op();
     m_scheduler_overlap_active.store(false, std::memory_order_release);
+}
+
+// Phase 3: body of m_physics_thread. By analogy with the SVP worker (r2_R_calculate.cpp's
+// svp_worker_loop) - auto-reset Event handshake, no mid-job abort (a physics step always runs to
+// completion, unlike SVP's lights stage). Thread name + per-thread FPU setup are done by
+// Threading::RunThread() (KickPhysicsOverlap below), not here - that also calls
+// _initialize_cpu_thread() (denormals-are-zero / xrDebug::OnThreadSpawn), which svp_worker_loop
+// skips; physics is dense enough float work that this is worth not skipping too.
+void CPHWorld::PhysicsWorkerLoop()
+{
+    for (;;)
+    {
+        m_physics_wake.Wait();
+        if (m_physics_thread_exit.load(std::memory_order_acquire))
+        {
+            m_physics_done.Set(); // never leave a waiter hanging, whatever the call order
+            return;
+        }
+        OnFrameStep();
+        m_physics_done.Set();
+    }
+}
+
+void CPHWorld::KickPhysicsOverlap()
+{
+    VERIFY(!m_physics_in_flight);
+    // Lazy, one-time start - like svp_build_thread, not recreated every frame.
+    if (!m_physics_thread.joinable())
+        m_physics_thread = Threading::RunThread("Physics", [this] { PhysicsWorkerLoop(); });
+    // Everything the step reads from the main thread's frame state is published before the wake (the
+    // Event gives the physics thread a happens-before on these plain stores).
+    m_step_camera_pos = Device.vCameraPosition;
+    m_steps_num_at_kick = m_steps_num;
+    m_step_thread_id = m_physics_thread.get_id();
+    m_step_running.store(true, std::memory_order_release);
+    m_physics_in_flight = true;
+    m_physics_done.Reset();
+    m_physics_wake.Set();
+}
+
+void CPHWorld::WaitPhysicsStep()
+{
+    // Only wait for this frame's job, not thread.join() - by analogy with
+    // EndSecondVPCalculateParallel(). Full thread teardown is Destroy()'s job.
+    if (!m_physics_in_flight)
+        return;
+    m_physics_done.Wait();
+    m_physics_in_flight = false;
+    m_step_running.store(false, std::memory_order_release);
+}
+
+void CPHWorld::JoinPhysicsOverlap()
+{
+    WaitPhysicsStep();
+    flush_deferred_mutations();
+    // Lua-wrapping physics_world():add_call() entries (see AddCall): drained here on the main thread, once
+    // per frame that actually stepped (FrameStep may run zero substeps, e.g. paused or a short frame).
+    if (m_steps_num != m_steps_num_at_kick)
+        m_script_commander->update_threadsafety();
 }
 
 void CPHWorld::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
@@ -342,20 +457,24 @@ void CPHWorld::Step()
     ++m_steps_short_num;
     stats.Collision.Begin();
 
-    // Collide must stay on one thread: q_box + smart_cast + NearCallback/ODE must not span a gap where
-    // another thread can spatial_unregister or destroy ISpatial* seen in the query (parallel broadphase
-    // alone caused use-after-free / invalid vptr in smart_cast).
-    for (i_object = m_objects.begin(); m_objects.end() != i_object;)
     {
-        CPHObject* obj = (*i_object);
+        ZoneScopedN("ph_collide");
+        PERF_SCOPE(ph_collide);
+        // Collide must stay on one thread: q_box + smart_cast + NearCallback/ODE must not span a gap where
+        // another thread can spatial_unregister or destroy ISpatial* seen in the query (parallel broadphase
+        // alone caused use-after-free / invalid vptr in smart_cast).
+        for (i_object = m_objects.begin(); m_objects.end() != i_object;)
+        {
+            CPHObject* obj = (*i_object);
 #ifdef DEBUG
-        debug_output().DBG_ObjBeforeCollision(obj);
+            debug_output().DBG_ObjBeforeCollision(obj);
 #endif
-        obj->Collide();
+            obj->Collide();
 #ifdef DEBUG
-        debug_output().DBG_ObjAfterCollision(obj);
+            debug_output().DBG_ObjAfterCollision(obj);
 #endif
-        ++i_object;
+            ++i_object;
+        }
     }
 
     stats.Collision.End();
@@ -370,128 +489,144 @@ void CPHWorld::Step()
     }
 #endif
 
-    for (i_object = m_objects.begin(); m_objects.end() != i_object;)
     {
-        CPHObject* obj = (*i_object);
-        ++i_object;
+        ZoneScopedN("ph_phtune");
+        PERF_SCOPE(ph_tune);
+        for (i_object = m_objects.begin(); m_objects.end() != i_object;)
+        {
+            CPHObject* obj = (*i_object);
+            ++i_object;
 
 #ifdef DEBUG
-        debug_output().DBG_ObjBeforePhTune(obj);
+            debug_output().DBG_ObjBeforePhTune(obj);
 #endif
 
-        obj->PhTune(fixed_step);
+            obj->PhTune(fixed_step);
 
 #ifdef DEBUG
-        debug_output().DBG_ObjeAfterPhTune(obj);
+            debug_output().DBG_ObjeAfterPhTune(obj);
 #endif
-    }
+        }
 
-    for (i_update_object = m_update_objects.begin(); m_update_objects.end() != i_update_object;)
-    {
-        CPHUpdateObject* obj = (*i_update_object);
-        ++i_update_object;
-        obj->PhTune(fixed_step);
+        for (i_update_object = m_update_objects.begin(); m_update_objects.end() != i_update_object;)
+        {
+            CPHUpdateObject* obj = (*i_update_object);
+            ++i_update_object;
+            obj->PhTune(fixed_step);
+        }
     }
 
     stats.Core.Begin();
 
-#ifdef DEBUG
-    debug_output().dbg_bodies_num() = 0;
-    debug_output().dbg_joints_num() = 0;
-    debug_output().dbg_islands_num() = 0;
-#endif
-    //////////////////////////////////////////////////////////////////////
-    m_commander->update_threadsafety();
-    //////////////////////////////////////////////////////////////////////
-    // P1: parallel island solve. Each active CPHIsland is an independent dxWorld, and the ODE
-    // stepper uses only stack/local scratch, so solving distinct active islands on worker threads
-    // is race-free. Collide (above) and PhDataUpdate/spatial_move (below) stay serial.
-#ifdef DEBUG
-    // DEBUG path stays serial: debug_output() touches global state.
-    for (i_object = m_objects.begin(); m_objects.end() != i_object;)
     {
-        CPHObject* obj = (*i_object);
-        ++i_object;
-        if (debug_output().ph_dbg_draw_mask().test(phDbgDrawObjectStatistics))
+        ZoneScopedN("ph_solve");
+        PERF_SCOPE(ph_solve);
+#ifdef DEBUG
+        debug_output().dbg_bodies_num() = 0;
+        debug_output().dbg_joints_num() = 0;
+        debug_output().dbg_islands_num() = 0;
+#endif
+        //////////////////////////////////////////////////////////////////////
+        m_commander->update_threadsafety();
+        //////////////////////////////////////////////////////////////////////
+        // P1: parallel island solve. Each active CPHIsland is an independent dxWorld, and the ODE
+        // stepper uses only stack/local scratch, so solving distinct active islands on worker threads
+        // is race-free. Collide (above) and PhDataUpdate/spatial_move (below) stay serial.
+#ifdef DEBUG
+        // DEBUG path stays serial: debug_output() touches global state.
+        for (i_object = m_objects.begin(); m_objects.end() != i_object;)
         {
-            if (obj->Island().IsActive())
+            CPHObject* obj = (*i_object);
+            ++i_object;
+            if (debug_output().ph_dbg_draw_mask().test(phDbgDrawObjectStatistics))
             {
-                debug_output().dbg_islands_num()++;
-                debug_output().dbg_joints_num() += obj->Island().nj;
-                debug_output().dbg_bodies_num() += obj->Island().nb;
+                if (obj->Island().IsActive())
+                {
+                    debug_output().dbg_islands_num()++;
+                    debug_output().dbg_joints_num() += obj->Island().nj;
+                    debug_output().dbg_bodies_num() += obj->Island().nb;
+                }
             }
-        }
-        debug_output().DBG_ObjBeforeStep(obj);
-        obj->IslandStep(fixed_step);
-        debug_output().DBG_ObjAfterStep(obj);
-    }
-#else
-    // Snapshot active-island roots. Valid only here: after Collide (merges done) and before
-    // IslandReinit (Unmerge). Merged-away members report IsActive()==false and are skipped;
-    // each active root steps its own merged dxWorld exactly once -> no cross-thread aliasing.
-    m_island_solve_batch.clear();
-    for (i_object = m_objects.begin(); m_objects.end() != i_object; ++i_object)
-    {
-        CPHObject* obj = (*i_object);
-        if (obj->Island().IsActive())
-            m_island_solve_batch.push_back(obj);
-    }
-
-    const size_t island_count = m_island_solve_batch.size();
-    if (ph_console::ph_mt_island_solve != 0 && TaskScheduler &&
-        island_count >= size_t(ph_console::ph_mt_island_min))
-    {
-        ZoneScopedN("ph_IslandStep_mt");
-        CPHObject** const islands = m_island_solve_batch.data();
-        xr_parallel_for(TaskRange(size_t(0), island_count), [islands](const TaskRange<size_t>& range)
-        {
-            for (size_t i = range.begin(); i != range.end(); ++i)
-                islands[i]->IslandStep(fixed_step);
-        });
-    }
-    else
-    {
-        for (CPHObject* obj : m_island_solve_batch)
+            debug_output().DBG_ObjBeforeStep(obj);
             obj->IslandStep(fixed_step);
-    }
+            debug_output().DBG_ObjAfterStep(obj);
+        }
+#else
+        // Snapshot active-island roots. Valid only here: after Collide (merges done) and before
+        // IslandReinit (Unmerge). Merged-away members report IsActive()==false and are skipped;
+        // each active root steps its own merged dxWorld exactly once -> no cross-thread aliasing.
+        m_island_solve_batch.clear();
+        for (i_object = m_objects.begin(); m_objects.end() != i_object; ++i_object)
+        {
+            CPHObject* obj = (*i_object);
+            if (obj->Island().IsActive())
+                m_island_solve_batch.push_back(obj);
+        }
+
+        const size_t island_count = m_island_solve_batch.size();
+        if (ph_console::ph_mt_island_solve != 0 && TaskScheduler &&
+            island_count >= size_t(ph_console::ph_mt_island_min))
+        {
+            ZoneScopedN("ph_IslandStep_mt");
+            CPHObject** const islands = m_island_solve_batch.data();
+            xr_parallel_for(TaskRange(size_t(0), island_count), [islands](const TaskRange<size_t>& range)
+            {
+                for (size_t i = range.begin(); i != range.end(); ++i)
+                    islands[i]->IslandStep(fixed_step);
+            });
+        }
+        else
+        {
+            for (CPHObject* obj : m_island_solve_batch)
+                obj->IslandStep(fixed_step);
+        }
 #endif
+    }
 
     stats.Core.End();
 
-    for (i_object = m_objects.begin(); m_objects.end() != i_object;)
     {
-        CPHObject* obj = (*i_object);
-        ++i_object;
-        obj->IslandReinit();
+        ZoneScopedN("ph_post_integrate");
+        PERF_SCOPE(ph_post_integrate);
+        for (i_object = m_objects.begin(); m_objects.end() != i_object;)
+        {
+            CPHObject* obj = (*i_object);
+            ++i_object;
+            obj->IslandReinit();
 
 #ifdef DEBUG
-        debug_output().DBG_ObjBeforePhDataUpdate(obj);
+            debug_output().DBG_ObjBeforePhDataUpdate(obj);
 #endif
 
-        obj->PhDataUpdate(fixed_step);
+            obj->PhDataUpdate(fixed_step);
 
 #ifdef DEBUG
-        debug_output().DBG_ObjAfterPhDataUpdate(obj);
+            debug_output().DBG_ObjAfterPhDataUpdate(obj);
 #endif
 
-        obj->spatial_move();
-    }
+            obj->spatial_move();
+        }
 
-    for (i_update_object = m_update_objects.begin(); m_update_objects.end() != i_update_object;)
-    {
-        CPHUpdateObject* obj = *i_update_object;
-        ++i_update_object;
-        obj->PhDataUpdate(fixed_step);
-    }
+        for (i_update_object = m_update_objects.begin(); m_update_objects.end() != i_update_object;)
+        {
+            CPHUpdateObject* obj = *i_update_object;
+            ++i_update_object;
+            obj->PhDataUpdate(fixed_step);
+        }
 
-    ReinitMerged();
+        ReinitMerged();
+    }
 
 #ifdef DEBUG
     debug_output().dbg_contacts_num() = ContactGroup->num;
 #endif
-    dJointGroupEmpty(ContactGroup); // this is to be called after PhDataUpdate!!!-the order is critical!!!
-    ContactFeedBacks.empty();
-    ContactEffectors.empty();
+    {
+        ZoneScopedN("ph_contact_cleanup");
+        PERF_SCOPE(ph_contact_cleanup);
+        dJointGroupEmpty(ContactGroup); // this is to be called after PhDataUpdate!!!-the order is critical!!!
+        ContactFeedBacks.empty();
+        ContactEffectors.empty();
+    }
 
     if (physics_step_time_callback)
     {
@@ -592,7 +727,14 @@ void CPHWorld::FrameStep(dReal step)
         // here DISCARDS the excess simulated time (physics runs slightly slow under extreme load instead
         // of spiraling: slow frame -> more substeps -> slower frame). 0 = uncapped (legacy) for A/B.
         if (ph_console::ph_max_substeps > 0 && it_number > u32(ph_console::ph_max_substeps))
+        {
+            // it_number before the clamp is otherwise lost: ph_substeps below reports only what actually ran,
+            // so without this there is no way to tell a 1-step clamp from a 50-step death-spiral clamp.
+            PERF_ADD(ph_substeps_discarded, it_number - u32(ph_console::ph_max_substeps));
             it_number = u32(ph_console::ph_max_substeps);
+            PERF_INC(ph_substeps_clipped);
+        }
+        PERF_ADD(ph_substeps, it_number);
         m_previous_frame_time = m_frame_time;
         m_frame_time = frame_time;
         b_frame_mark = !b_frame_mark;
@@ -608,15 +750,64 @@ void CPHWorld::FrameStep(dReal step)
     debug_output().DBG_DrawStatBeforeFrameStep();
 #endif
     b_processing = true;
-    m_step_thread_id = std::this_thread::get_id(); // B-1: remember the step thread so its own internal list mutations are not deferred
-    m_step_running.store(true, std::memory_order_release); // B-1: scheduler sees the step is running -> defers physics mutations
+    // m_step_thread_id / m_step_running are owned by KickPhysicsOverlap()/WaitPhysicsStep() on the main
+    // thread (they span the whole Kick..Wait window, not just this function).
 
     start_time = Device.dwTimeGlobal; // - u32(m_frame_time*1000);
     if (ph_console::g_bDebugDumpPhysicsStep && it_number > 20)
         Msg("!!! TOO MANY PHYSICS STEPS PER FRAME = %d !!!", it_number);
     for (u32 i = 0; i < it_number; ++i)
+    {
+        if (i == 0 && xray::perf::g_perf_metrics_active)
+        {
+            u32 n_actor = 0, n_ai = 0, n_ragdoll = 0, n_vehicle = 0, n_item = 0, n_static = 0, n_other = 0;
+            for (PH_OBJECT_I it = m_objects.begin(); it != m_objects.end(); ++it)
+            {
+                CPHObject* obj = *it;
+                const CPHObject::ECastType tp = obj->CastType();
+                if (tp == CPHObject::tpCharacter)
+                {
+                    CPHCharacter* ch = static_cast<CPHCharacter*>(obj);
+                    if (ch->CastActorCharacter())
+                        ++n_actor;
+                    else if (ch->CastAICharacter())
+                        ++n_ai;
+                    else
+                        ++n_other;
+                }
+                else if (CPHCollideValidator::IsRagDollObject(*obj))
+                    ++n_ragdoll;
+                else if (tp == CPHObject::tpStaticShell)
+                    ++n_static;
+                else if (tp == CPHObject::tpShell)
+                {
+                    IPhysicsShellHolder* holder = static_cast<CPHShell*>(obj)->PhysicsRefObject();
+                    IGameObject* go = holder ? holder->IObject() : nullptr;
+                    if (go && go->cast_holder_custom())
+                        ++n_vehicle;
+                    else if (holder && holder->IsInventoryItem())
+                        ++n_item;
+                    else
+                        ++n_other;
+                }
+                else
+                    ++n_other;
+            }
+            PERF_ADD(ph_obj_actor, n_actor);
+            PERF_ADD(ph_obj_ai, n_ai);
+            PERF_ADD(ph_obj_ragdoll, n_ragdoll);
+            PERF_ADD(ph_obj_vehicle, n_vehicle);
+            PERF_ADD(ph_obj_item, n_item);
+            PERF_ADD(ph_obj_static, n_static);
+            PERF_ADD(ph_obj_other, n_other);
+            xray::perf::SetGauge(xray::perf::Metric::ph_update_objects, m_update_objects.count());
+            xray::perf::SetGauge(xray::perf::Metric::ph_recently_disabled, m_recently_disabled_objects.count());
+            xray::perf::SetGauge(xray::perf::Metric::ph_frozen, m_freezed_objects.count());
+        }
         Step();
-    m_step_running.store(false, std::memory_order_release);
+        if (i == 0 && xray::perf::g_perf_metrics_active)
+            xray::perf::SetGauge(xray::perf::Metric::ph_island_batch, static_cast<s64>(m_island_solve_batch.size()));
+    }
     b_processing = false;
 #ifdef DEBUG
     debug_output().DBG_DrawStatAfterFrameStep();
@@ -692,6 +883,7 @@ void CPHWorld::NetRelcase(CPhysicsShell* s)
 {
     CPHReqComparerHasShell c(s);
     m_commander->remove_calls_threadsafety(&c);
+    m_script_commander->remove_calls_threadsafety(&c);
 
     PH_UPDATE_OBJECT_I i_update_object;
     for (i_update_object = m_update_objects.begin(); m_update_objects.end() != i_update_object;)
@@ -705,6 +897,16 @@ void CPHWorld::NetRelcase(CPhysicsShell* s)
 
 void CPHWorld::AddCall(CPHCondition* c,CPHAction* a)
 {
+    // GAME_RENDER_OVERLAP_PLAN Phase 3: this is the sole Lua entry point (physics_world():add_call(),
+    // PHWorldScript.cpp) reaching m_commander, which is drained from inside Step() on CPHWorld's
+    // dedicated physics thread - a lua_State must never be touched from there. Lua-wrapping calls go to
+    // m_script_commander instead, drained on the main thread after the physics join (once per frame that
+    // stepped, rather than once per substep as before - same as level.add_call granularity).
+    if (c->touches_script() || a->touches_script())
+    {
+        m_script_commander->add_call_threadsafety(c, a);
+        return;
+    }
     m_commander->add_call_threadsafety(c, a);
 }
 

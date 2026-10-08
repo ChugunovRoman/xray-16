@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "UIGameCustom.h"
 #include "Level.h"
 #include "ui/UIXmlInit.h"
@@ -143,6 +144,7 @@ void CUIGameCustom::Render()
 
 StaticDrawableWrapper* CUIGameCustom::AddCustomStatic(const char* id, bool singleInstance, float ttlDefault /*= -1.0f*/)
 {
+    GW_OVERLAP_HAZARD("CUIGameCustom::AddCustomStatic");
     if (singleInstance)
     {
         const auto it = std::find_if(CustomStatics.begin(), CustomStatics.end(), predicate_find_stat(id));
@@ -171,6 +173,7 @@ StaticDrawableWrapper* CUIGameCustom::GetCustomStatic(const char* id)
 
 void CUIGameCustom::RemoveCustomStatic(const char* id)
 {
+    GW_OVERLAP_HAZARD("CUIGameCustom::RemoveCustomStatic");
     auto it = std::find_if(CustomStatics.begin(), CustomStatics.end(), predicate_find_stat(id));
     if (it != CustomStatics.end())
     {

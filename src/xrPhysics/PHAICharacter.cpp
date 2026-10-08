@@ -8,6 +8,7 @@
 
 #include "PHAICharacter.h"
 #include "xrEngine/device.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #ifdef DEBUG
 
@@ -24,6 +25,7 @@ void CPHAICharacter::Create(dVector3 sizes)
 }
 bool CPHAICharacter::TryPosition(Fvector pos, bool exact_state)
 {
+    PERF_INC(ph_try_position_calls);
     if (!b_exist)
         return false;
     if (m_forced_physics_control || JumpState())
@@ -64,12 +66,15 @@ bool CPHAICharacter::TryPosition(Fvector pos, bool exact_state)
     bool ret = true;
     int save_gm = dBodyGetGravityMode(m_body);
     dBodySetGravityMode(m_body, 0);
+    u32 step_single_calls = 0;
     for (u32 i = 0; steps_num > i; ++i)
     {
         SetVelocity(vel);
         Enable();
+        ++step_single_calls;
         if (!step_single(fixed_step))
         {
+            PERF_INC(ph_try_cycle_fail);
             SetVelocity(cur_vel);
             ret = false;
             break;
@@ -79,7 +84,11 @@ bool CPHAICharacter::TryPosition(Fvector pos, bool exact_state)
     vel.mul(displace, rest / fixed_step / disp_mag);
     SetVelocity(vel);
     Enable();
+    ++step_single_calls;
     ret = step_single(fixed_step);
+    if (!ret)
+        PERF_INC(ph_try_final_fail);
+    PERF_ADD(ph_try_position_steps, step_single_calls);
 
     dBodySetGravityMode(m_body, save_gm);
     SetVelocity(cur_vel);

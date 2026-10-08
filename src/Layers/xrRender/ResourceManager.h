@@ -57,6 +57,11 @@ private:
     // data
     map_Blender m_blenders;
     map_Texture m_textures;
+    // GAME_RENDER_OVERLAP_PLAN P1.6: _CreateTexture()/m_textures had no lock at all (unlike
+    // v_shaders/ScriptEngine below, which already do). Other containers of this class
+    // (v_states/m_rtargets/v_declarations/v_constant_tables/m_matrices/m_constants/lst_*/v_passes/
+    // v_elements) remain unprotected too - out of scope for this pass, not forgotten.
+    Lock m_textures_lock;
     map_Matrix m_matrices;
     map_Constant m_constants;
     map_RT m_rtargets;
@@ -76,6 +81,7 @@ private:
     xr_vector<SState*> v_states;
     xr_vector<SDeclaration*> v_declarations;
     xr_vector<SGeometry*> v_geoms;
+    Lock v_geoms_lock; // GAME_RENDER_OVERLAP_PLAN P1.6: CreateGeom/DeleteGeom had no lock at all.
     xr_vector<R_constant_table*> v_constant_tables;
 
 #if defined(USE_DX11)

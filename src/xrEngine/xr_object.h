@@ -82,7 +82,7 @@ union GameObjectProperties
         u32 net_Local : 1;
         u32 net_Ready : 1;
         u32 net_SV_Update : 1;
-        u32 crow : 1;
+        u32 crow : 1; // DEBUG dump mirror only (DBGGetProps) - live state is CGameObject::m_is_crow, an atomic
         u32 bPreDestroy : 1;
     };
     u32 storage;

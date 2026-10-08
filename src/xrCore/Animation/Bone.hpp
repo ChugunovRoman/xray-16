@@ -9,6 +9,7 @@
 #include "xrCore/FixedVector.h"
 #include "xrCore/xrstring.h"
 #include "xrCommon/xr_vector.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 // refs
 class CBone;
@@ -54,6 +55,7 @@ public:
 
     void set_callback(u32 Type, BoneCallback C, void* Param, BOOL overwrite = FALSE)
     {
+        GW_OVERLAP_HAZARD("CBoneInstance::set_callback");
         Callback = C;
         Callback_Param = Param;
         Callback_overwrite = overwrite;

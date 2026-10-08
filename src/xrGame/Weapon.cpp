@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "Weapon.h"
 #include "ParticlesObject.h"
 #include "entity_alive.h"
@@ -379,7 +380,10 @@ void CWeapon::UpdateXForm()
     if ((HandDependence() == hd1Hand) || (GetState() == eReload) || (!E->g_Alive()))
         boneL = boneR2;
 
-    V->CalculateBones();
+    {
+        PERF_BONE_CALLER(xray::perf::bone::Weapon);
+        V->CalculateBones();
+    }
     Fmatrix& mL = V->LL_GetTransform(u16(boneL));
     Fmatrix& mR = V->LL_GetTransform(u16(boneR));
     // Calculate

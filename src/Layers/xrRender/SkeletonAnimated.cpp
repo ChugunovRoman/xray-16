@@ -8,6 +8,11 @@
 #include "SkeletonX.h"
 #include "xrCore/FMesh.hpp"
 #include "xrCore/xr_token.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrEngine/EngineThreading.h"
+#include "xrEngine/device.h"
+#include <thread>
+#include <cstring>
 #ifdef DEBUG
 #include "xrCore/dump_string.h"
 #endif
@@ -426,6 +431,20 @@ CBlend* CKinematicsAnimated::LL_SetInitialPartPose(u16 part, MotionID motion_ID,
 CBlend* CKinematicsAnimated::LL_PlayCycle(u16 part, MotionID motion_ID, BOOL bMixing, float blendAccrue,
     float blendFalloff, float Speed, BOOL noloop, PlayCallback Callback, LPVOID CallbackParam, u8 channel /*=0*/)
 {
+    // This is the common terminal point all LL_PlayCycle/PlayCycle overloads below funnel into
+    // (directly or through each other) - GW_OVERLAP_HAZARD lives only here, not in those thin
+    // argument-adapting wrappers, to avoid firing 2-3x per external call. It also recurses into
+    // itself once per part when part==BI_NONE, so the reentrancy guard covers that too.
+    static thread_local bool s_ll_play_cycle_active = false;
+    struct ReentryGuard
+    {
+        bool owns;
+        ReentryGuard() noexcept : owns(!s_ll_play_cycle_active) { if (owns) s_ll_play_cycle_active = true; }
+        ~ReentryGuard() noexcept { if (owns) s_ll_play_cycle_active = false; }
+    } reentry_guard;
+    if (reentry_guard.owns)
+        GW_OVERLAP_HAZARD("CKinematicsAnimated::LL_PlayCycle");
+
     // validate and unroll
     if (!motion_ID.valid())
         return nullptr;
@@ -476,6 +495,7 @@ CBlend* CKinematicsAnimated::LL_PlayCycle(u16 part, MotionID motion_ID, BOOL bMi
 CBlend* CKinematicsAnimated::LL_PlayCycle(
     u16 part, MotionID motion_ID, BOOL bMixIn, PlayCallback Callback, LPVOID CallbackParam, u8 channel /*=0*/)
 {
+    // No GW_OVERLAP_HAZARD here: forwards to the full LL_PlayCycle overload above, which fires it.
     VERIFY(motion_ID.valid());
     CMotionDef* m_def = m_Motions[motion_ID.slot].motions.motion_def(motion_ID.idx);
     VERIFY(m_def);
@@ -485,6 +505,8 @@ CBlend* CKinematicsAnimated::LL_PlayCycle(
 CBlend* CKinematicsAnimated::PlayCycle(
     LPCSTR N, BOOL bMixIn, PlayCallback Callback, LPVOID CallbackParam, u8 channel /*= 0*/)
 {
+    // No GW_OVERLAP_HAZARD here: forwards to the MotionID overload below, which forwards in turn
+    // to LL_PlayCycle, which fires it.
     MotionID motion_ID = ID_Cycle(N);
     R_ASSERT3_CURE(motion_ID.valid(), "! MODEL: can't find cycle:", N, { return nullptr; });
     return PlayCycle(motion_ID, bMixIn, Callback, CallbackParam, channel);
@@ -492,6 +514,7 @@ CBlend* CKinematicsAnimated::PlayCycle(
 CBlend* CKinematicsAnimated::PlayCycle(
     MotionID motion_ID, BOOL bMixIn, PlayCallback Callback, LPVOID CallbackParam, u8 channel /*= 0*/)
 {
+    // No GW_OVERLAP_HAZARD here: forwards to LL_PlayCycle, which fires it.
     VERIFY(motion_ID.valid());
     CMotionDef* m_def = nullptr;
     if (motion_ID.slot >= m_Motions.size())
@@ -506,6 +529,7 @@ CBlend* CKinematicsAnimated::PlayCycle(
 CBlend* CKinematicsAnimated::PlayCycle(
     u16 partition, MotionID motion_ID, BOOL bMixIn, PlayCallback Callback, LPVOID CallbackParam, u8 channel /*= 0*/)
 {
+    // No GW_OVERLAP_HAZARD here: forwards to LL_PlayCycle, which fires it.
     VERIFY(motion_ID.valid());
     CMotionDef* m_def = nullptr;
     if (motion_ID.slot >= m_Motions.size())
@@ -620,12 +644,37 @@ void CKinematicsAnimated::LL_UpdateTracks(float dt, bool b_force, bool leave_ble
             if (!b_force && B.dwFrame == Device.dwFrame)
                 continue;
             B.dwFrame = Device.dwFrame;
+            const auto cb = B.Callback;
+            const bool armed = cb && B.stop_at_end_callback;
             if (B.update(dt, B.Callback) && !leave_blends)
             {
                 DestroyCycle(B);
                 blend_cycles[part].erase(I);
                 E = blend_cycles[part].end();
                 I--;
+            }
+            if (armed && !B.stop_at_end_callback && !XRay::Engine::IsGameLogicThread())
+            {
+                if (xray::perf::g_perf_metrics_active)
+                {
+                    // Own explicit zone, not bare ZoneText: that macro refers to a ___tracy_scoped_zone
+                    // local declared by a ZoneScoped/ZoneNamedN in the SAME function - UpdateTracks' own
+                    // PERF_HOT_ZONE lives one call frame up and isn't visible here. Names the offending
+                    // callback ("unknown" = nobody called RegisterBlendCb() for it yet).
+                    ZoneNamedN(blend_cb_zone, "blend_cb_offlogic", true);
+                    const char* cb_name = xray::perf::LookupBlendCb(reinterpret_cast<const void*>(cb));
+                    if (!cb_name)
+                        cb_name = "unknown";
+                    // ZoneTextV, not blend_cb_zone.Text(): with TRACY_ENABLE off ZoneNamedN above expands
+                    // to nothing and the bare member call would not compile.
+                    ZoneTextV(blend_cb_zone, cb_name, strlen(cb_name));
+                }
+                if (svp_worker_is_current_thread())
+                    PERF_INC(blend_cb_offlogic_svp);
+                else if (std::this_thread::get_id() == xray::perf::g_main_tid.load(std::memory_order_acquire))
+                    PERF_INC(blend_cb_offlogic_main);
+                else
+                    PERF_INC(blend_cb_offlogic_worker);
             }
             // else{
             //	CMotionDef* m_def						= m_Motions[B.motionID.slot].motions.motion_def(B.motionID.idx);
@@ -692,10 +741,14 @@ void CKinematicsAnimated::LL_UpdateFxTracks(float dt)
 void CKinematicsAnimated::UpdateTracks()
 {
     _DBG_SINGLE_USE_MARKER;
+    PERF_INC(tracks_calls);
     if (Update_LastTime == Device.dwTimeGlobal)
+    {
+        PERF_INC(tracks_early);
         return;
+    }
 
-    ZoneScoped;
+    PERF_HOT_ZONE("CKinematicsAnimated::UpdateTracks");
 
     u32 DT = Device.dwTimeGlobal - Update_LastTime;
     if (DT > 66)
@@ -704,11 +757,13 @@ void CKinematicsAnimated::UpdateTracks()
 
     if (GetUpdateTracksCalback())
     {
+        PERF_INC(tracks_cb);
         if ((*GetUpdateTracksCalback())(float(Device.dwTimeGlobal - Update_LastTime) / 1000.f, *this))
             Update_LastTime = Device.dwTimeGlobal;
         return;
     }
     Update_LastTime = Device.dwTimeGlobal;
+    PERF_INC(tracks_ll);
     LL_UpdateTracks(dt, false, false);
 }
 
@@ -805,6 +860,7 @@ void CKinematicsAnimated::IBlend_Startup()
 
 CBlend* CKinematicsAnimated::IBlend_Create()
 {
+    GW_OVERLAP_HAZARD("CKinematicsAnimated::IBlend_Create");
     UpdateTracks();
     _DBG_SINGLE_USE_MARKER;
     for (auto &it : blend_pool)

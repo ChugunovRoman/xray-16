@@ -8,6 +8,7 @@
 #include "script_game_object.h"
 #include "GameObject.h"
 #include "Level.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "ai_space.h"
 #include "alife_simulator.h"
 #include "alife_object_registry.h"
@@ -2258,6 +2259,7 @@ GwpResult EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* resu
     if (!event)
         return GWP_ERROR_NOT_FOUND;
     ZoneTextF("%s%s", event->name.c_str(), from_engine ? " (engine)" : "");
+    PERF_INC(events_emit);
     ++event->emit_count;
     ++(from_engine ? event->engine_emits : event->plugin_emits);
     CheckSchema(*event, argv, argc, source);
@@ -2286,6 +2288,7 @@ GwpResult EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* resu
     if (event->subscribers.empty())
         return GWP_OK;
 
+    PERF_INC(events_emit_subs);
     DispatchScope scope(bus, *event, nullptr);
     if (scope.TooDeep())
     {
@@ -2297,10 +2300,16 @@ GwpResult EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* resu
     // Same order as a Lua emit: Lua subscribers first, then plugins.
     lua_State* L = event->lua_count ? ActiveLua(bus) : nullptr;
     if (L && lua_checkstack(L, 4))
+    {
+        PERF_SCOPE(events_dispatch_lua);
         DispatchLuaFromNative(bus, L, *event, argv, argc, result, from_engine);
+    }
 
     if (event->native_count)
+    {
+        PERF_SCOPE(events_dispatch_native);
         DispatchNative(bus, *event, id, from_engine ? GWP_EVENT_FLAG_ENGINE : 0u, argv, argc, result);
+    }
     return GWP_OK;
 }
 } // namespace

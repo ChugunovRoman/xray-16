@@ -3,6 +3,8 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "pch_script.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCDB/ISpatial.h"
 #include "ai_debug.h"
 #include "CustomMonster.h"
 #include "ai_space.h"
@@ -799,7 +801,10 @@ void CCustomMonster::eye_pp_s0()
 {
     // Eye matrix
     IKinematics* V = smart_cast<IKinematics*>(Visual());
-    V->CalculateBones();
+    {
+        PERF_BONE_CALLER(xray::perf::bone::EyePp);
+        V->CalculateBones();
+    }
     Fmatrix& mEye = V->LL_GetTransform(u16(eye_bone));
     Fmatrix X;
     X.mul_43(XFORM(), mEye);
@@ -977,7 +982,14 @@ void CCustomMonster::eye_pp_s2_prepare()
                 // Cache check: reuse — still update fuzzy from cached visibility
                 if (Feel::feel_vision_ray_cache_reuse(I->Cache, P, D, f, npc_perf_vision_cache_pos_slack_m))
                 {
-                    const float cached_vis = I->Cache_vis;
+                    // Cache_vis is the static-only result; like Feel::Vision::o_trace, still run the
+                    // dynamic-occluder pass on a hit, otherwise a cached "visible" sees through movers.
+                    float cached_vis = I->Cache_vis;
+                    if (npc_perf_vision_skip_dynamic_ray == 0 && cached_vis >= vis_threshold &&
+                        eye_pp_dynamic_blocked(I, P, D, f))
+                    {
+                        cached_vis = 0.f;
+                    }
                     if (cached_vis < vis_threshold)
                     {
                         I->fuzzy -= Feel::fuzzy_update_novis * dt;
@@ -1032,6 +1044,44 @@ void CCustomMonster::eye_pp_s2_prepare()
     Level().AIStats.VisRayTests.End();
 }
 
+// O_ONLYFIRST + ignore owner lets us stop at the first potential blocker.
+bool CCustomMonster::eye_pp_dynamic_blocked(feel_visible_Item* I, const Fvector& start, const Fvector& dir, float range)
+{
+    if (npc_perf_vision_dynamic_cache != 0 &&
+        Feel::feel_vision_dynamic_cache_reuse(I->dynamic_cache, start, dir, range, npc_perf_vision_cache_pos_slack_m))
+    {
+        return I->dynamic_cache.blocked;
+    }
+
+    bool collision_found = false;
+    r_spatial.clear();
+    ISpatial* owner_spatial = static_cast<ISpatial*>(const_cast<IGameObject*>(m_owner));
+    SpatialCaller spatial_caller(SpatialQueryCaller::vision);
+    g_pGamePersistent->SpatialSpace.q_ray(r_spatial, ISpatial_DB::O_ONLYFIRST | ISpatial_DB::O_ONLYNEAREST,
+        STYPE_VISIBLEFORAI, start, dir, range, owner_spatial);
+
+    collide::ray_defs RD(start, dir, range, CDB::OPT_ONLYFIRST,
+        collide::rq_target(collide::rqtStatic | collide::rqtObject | collide::rqtObstacle));
+
+    for (auto* spatial_obj : r_spatial)
+    {
+        if (spatial_obj == I->O)
+            continue;
+
+        IGameObject const* object = spatial_obj->dcast_GameObject();
+        RQR.r_clear();
+        if (object && object->GetCForm() && !object->GetCForm()->_RayQuery(RD, RQR))
+            continue;
+
+        collision_found = true;
+        break;
+    }
+
+    if (npc_perf_vision_dynamic_cache != 0)
+        Feel::feel_vision_dynamic_cache_store(I->dynamic_cache, start, dir, range, collision_found);
+    return collision_found;
+}
+
 void CCustomMonster::eye_pp_s2_process()
 {
     VisionBatchEntry* entry = nullptr;
@@ -1078,47 +1128,10 @@ void CCustomMonster::eye_pp_s2_process()
         float vis = ray.accumulated_vis;
 
         // Dynamic object pass: if static didn't fully block, check dynamic objects.
-        // O_ONLYFIRST + ignore owner lets us stop at the first potential blocker.
-        if (npc_perf_vision_skip_dynamic_ray == 0 && vis >= vis_threshold)
+        if (npc_perf_vision_skip_dynamic_ray == 0 && vis >= vis_threshold &&
+            eye_pp_dynamic_blocked(I, ray.start, ray.dir, ray.range))
         {
-            bool collision_found = false;
-            if (npc_perf_vision_dynamic_cache != 0 && Feel::feel_vision_dynamic_cache_reuse(
-                I->dynamic_cache, ray.start, ray.dir, ray.range, npc_perf_vision_cache_pos_slack_m))
-            {
-                collision_found = I->dynamic_cache.blocked;
-            }
-            else
-            {
-                r_spatial.clear();
-                ISpatial* owner_spatial = static_cast<ISpatial*>(const_cast<IGameObject*>(m_owner));
-                g_pGamePersistent->SpatialSpace.q_ray(r_spatial,
-                    ISpatial_DB::O_ONLYFIRST | ISpatial_DB::O_ONLYNEAREST, STYPE_VISIBLEFORAI, ray.start, ray.dir,
-                    ray.range, owner_spatial);
-
-                collide::ray_defs RD(ray.start, ray.dir, ray.range, CDB::OPT_ONLYFIRST,
-                    collide::rq_target(collide::rqtStatic | collide::rqtObject | collide::rqtObstacle));
-
-                for (auto* spatial_obj : r_spatial)
-                {
-                    if (spatial_obj == I->O)
-                        continue;
-
-                    IGameObject const* object = spatial_obj->dcast_GameObject();
-                    RQR.r_clear();
-                    if (object && object->GetCForm() && !object->GetCForm()->_RayQuery(RD, RQR))
-                        continue;
-
-                    collision_found = true;
-                    break;
-                }
-
-                if (npc_perf_vision_dynamic_cache != 0)
-                    Feel::feel_vision_dynamic_cache_store(
-                        I->dynamic_cache, ray.start, ray.dir, ray.range, collision_found);
-            }
-
-            if (collision_found)
-                vis = 0.f;
+            vis = 0.f;
         }
 
         // Fuzzy update

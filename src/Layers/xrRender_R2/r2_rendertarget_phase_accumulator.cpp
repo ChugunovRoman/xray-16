@@ -4,6 +4,12 @@ namespace xray::render::RENDER_NAMESPACE
 {
 void CRenderTarget::phase_accumulator(CBackend& cmd_list)
 {
+    if (dbg_gbuffer_probe_pending)
+    {
+        dbg_gbuffer_probe_pending = 0;
+        dbg_probe_gbuffer();
+    }
+
     // Targets
     if (dwAccumulatorClearMark == Device.dwFrame)
     {
@@ -49,6 +55,16 @@ void CRenderTarget::phase_accumulator(CBackend& cmd_list)
         cmd_list.set_Stencil(TRUE, D3DCMP_LESSEQUAL, 0x01, 0xff, 0x00);
         cmd_list.set_CullMode(CULL_NONE);
         cmd_list.set_ColorWriteEnable();
+
+        if (ps_r__gpu_diag)
+        {
+            // Snapshot the draw counter at the start of the stage and ask the backend to report
+            // the device state of its very first draw: that is where the accumulator, the blend
+            // state and the stencil test are all in effect at once.
+            dbg_accum_calls_begin = cmd_list.stat.render.calls;
+            dbg_accum_calls_end = dbg_accum_calls_begin;
+            cmd_list.dbg_capture_next_draw = 1;
+        }
     }
 
     //	Restore viewport after shadow map rendering

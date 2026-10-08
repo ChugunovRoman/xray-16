@@ -40,6 +40,9 @@ bool CObjectSpace::_RayTest(const Fvector& start, const Fvector& dir, float rang
         u32 d_flags =
             STYPE_COLLIDEABLE | ((tgt & rqtObstacle) ? STYPE_OBSTACLE : 0) | ((tgt & rqtShape) ? STYPE_SHAPE : 0);
         // traverse object database
+        // Default, not override: a caller that already tagged itself (e.g. Rain.cpp -> rain) keeps its tag;
+        // "ray" only applies when nothing more specific called in here directly.
+        SpatialCallerDefault spatial_caller(SpatialQueryCaller::ray);
         SpatialSpace->q_ray(r_spatial, 0, d_flags, start, dir, range);
         // Determine visibility for dynamic part of scene
         for (auto spatial : r_spatial)
@@ -175,6 +178,7 @@ bool CObjectSpace::_RayPick(
             STYPE_COLLIDEABLE | ((tgt & rqtObstacle) ? STYPE_OBSTACLE : 0) | ((tgt & rqtShape) ? STYPE_SHAPE : 0);
         {
             ZoneScopedN("os_rp_dyn_qray");
+            SpatialCallerDefault spatial_caller(SpatialQueryCaller::ray);
             SpatialSpace->q_ray(r_spatial, 0, d_flags, start, dir, range);
         }
         // Determine visibility for dynamic part of scene
@@ -253,6 +257,7 @@ bool CObjectSpace::_RayQuery2(collide::rq_results& r_dest, const collide::ray_de
     if (R.tgt & d_mask)
     {
         // Traverse object database
+        SpatialCallerDefault spatial_caller(SpatialQueryCaller::ray);
         SpatialSpace->q_ray(r_spatial, 0, d_flags, R.start, R.dir, R.range);
         for (auto& p_spatial : r_spatial)
         {
@@ -333,6 +338,7 @@ bool CObjectSpace::_RayQuery3(collide::rq_results& r_dest, const collide::ray_de
         if (R.tgt & d_mask)
         {
             // Traverse object database
+            SpatialCallerDefault spatial_caller(SpatialQueryCaller::ray);
             SpatialSpace->q_ray(r_spatial, 0, d_flags, d_rd.start, d_rd.dir, d_rd.range);
             for (auto& p_spatial : r_spatial)
             {
@@ -439,6 +445,7 @@ bool CObjectSpace::_RayQuery(collide::rq_results& r_dest, const collide::ray_def
             if (d_rd.range > EPS)
             {
                 // Traverse object database
+                SpatialCallerDefault spatial_caller(SpatialQueryCaller::ray);
                 SpatialSpace->q_ray(r_spatial, 0, d_flags, d_rd.start, d_rd.dir, d_rd.range);
                 // Determine visibility for dynamic part of scene
                 for (auto& p_spatial : r_spatial)

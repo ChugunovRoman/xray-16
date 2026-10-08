@@ -19,6 +19,7 @@ public:
     virtual ~CPHScriptCondition();
     virtual bool is_true();
     virtual bool obsolete() const;
+    virtual bool touches_script() const override { return true; }
     virtual bool compare(const CPHReqComparerV* v) const { return v->compare(this); }
     virtual bool compare(const CPHScriptCondition* v) const
     {
@@ -39,6 +40,7 @@ public:
     virtual ~CPHScriptAction();
     virtual void run();
     virtual bool obsolete() const;
+    virtual bool touches_script() const override { return true; }
     virtual bool compare(const CPHReqComparerV* v) const { return v->compare(this); }
     virtual bool compare(const CPHScriptAction* v) const
     {
@@ -59,6 +61,7 @@ public:
     virtual ~CPHScriptObjectCondition();
     virtual bool is_true();
     virtual bool obsolete() const;
+    virtual bool touches_script() const override { return true; }
     virtual bool compare(const luabind::object* v) const { return *m_lua_object == *v; }
     virtual bool compare(const CPHReqComparerV* v) const { return v->compare(this); }
     virtual bool compare(const CPHScriptObjectCondition* v) const;
@@ -76,6 +79,7 @@ public:
     virtual ~CPHScriptObjectAction();
     virtual void run();
     virtual bool obsolete() const;
+    virtual bool touches_script() const override { return true; }
     virtual bool compare(const luabind::object* v) const { return *m_lua_object == *v; }
     virtual bool compare(const CPHReqComparerV* v) const { return v->compare(this); }
     virtual bool compare(const CPHScriptObjectAction* v) const;
@@ -91,6 +95,7 @@ public:
     virtual ~CPHScriptObjectConditionN();
     virtual bool is_true();
     virtual bool obsolete() const;
+    virtual bool touches_script() const override { return true; }
     virtual bool compare(const luabind::object* v) const { return m_callback == (*v); }
     virtual bool compare(const CPHReqComparerV* v) const { return v->compare(this); }
     virtual bool compare(const CPHScriptObjectConditionN* v) const { return m_callback == v->m_callback; }
@@ -106,6 +111,7 @@ public:
     virtual ~CPHScriptObjectActionN();
     virtual void run();
     virtual bool obsolete() const;
+    virtual bool touches_script() const override { return true; }
     virtual bool compare(const luabind::object* v) const { return m_callback == *v; }
     virtual bool compare(const CPHReqComparerV* v) const { return v->compare(this); }
     virtual bool compare(const CPHScriptObjectActionN* v) const { return m_callback == v->m_callback; }

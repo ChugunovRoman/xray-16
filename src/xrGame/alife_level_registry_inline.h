@@ -9,6 +9,7 @@
 #pragma once
 
 #include "ai_space.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 IC CALifeLevelRegistry::CALifeLevelRegistry(const GameGraph::_LEVEL_ID& level_id) { m_level_id = level_id; }
 IC GameGraph::_LEVEL_ID CALifeLevelRegistry::level_id() const { return (m_level_id); }
@@ -41,7 +42,8 @@ template <typename _update_predicate>
 IC void CALifeLevelRegistry::update(const _update_predicate& predicate, bool const iterate_as_first_time_next_time)
 {
     //	u32					object_count =
-    inherited::update(predicate, iterate_as_first_time_next_time);
+    const u32 object_count = inherited::update(predicate, iterate_as_first_time_next_time);
+    PERF_ADD(alife_switches, object_count);
 #ifdef FULL_LEVEL_UPDATE
     m_first_update = true;
 #endif

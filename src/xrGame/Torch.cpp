@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "addon_object_events.h"
 #include "Torch.h"
 #include "Entity.h"
@@ -339,7 +340,10 @@ void CTorch::UpdateCL()
             GameID() != eGameIDSingle)
         {
             // near camera
-            smart_cast<IKinematics*>(H_Parent()->Visual())->CalculateBones();
+            {
+                PERF_BONE_CALLER(xray::perf::bone::Torch);
+                smart_cast<IKinematics*>(H_Parent()->Visual())->CalculateBones();
+            }
             M.mul_43(XFORM(), BI.mTransform);
         }
         else

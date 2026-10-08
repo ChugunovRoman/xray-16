@@ -1,5 +1,9 @@
 #include "stdafx.h"
 
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Threading/Lock.hpp"
+#include "xrEngine/device.h"
+
 #include "ModelPool.h"
 
 #include "xrMaterialSystem/GameMtlLib.h"
@@ -28,10 +32,62 @@
 #include "IGame_Persistent.h"
 #endif
 
-extern bool ENGINE_API g_bRendering;
+extern ENGINE_API std::atomic<bool> g_bRendering;
 
 namespace xray::render::RENDER_NAMESPACE
 {
+namespace
+{
+// GAME_RENDER_OVERLAP_PLAN P1.6: CModelPool had no lock at all in this fork (not "don't remove the
+// existing one" as the plan's wording from the IXray side implies - there was never one here).
+// Registry/Pool/Models/ModelsToDelete/bForceDiscard are mutated from GameThread (GameObject.cpp's
+// cNameVisual_set, Weapon.cpp, player_hud.cpp, ParticleGroup.cpp and others - see GW_OVERLAP_HAZARD
+// hits already recorded on Create/CreateChild/Delete/DeleteInternal/Instance_Duplicate). The call
+// graph is recursive (Create -> Instance_Duplicate; Destroy/DeleteQueue/ClearPool -> DeleteInternal
+// -> Discard), so this needs the same recursive-lock-with-depth-guard shape as UCalc_mtlock
+// (Layers/xrRender/SkeletonCustom.h) - copied here almost verbatim, with its own metric IDs so the
+// two don't get confused in a 5s perf_metrics dump.
+Lock ModelPool_Mutex;
+thread_local int g_modelpool_lock_depth = 0;
+
+struct ModelPool_mtlock
+{
+    u64 t_hold0{};
+    bool outer{};
+
+    ModelPool_mtlock()
+    {
+        outer = (g_modelpool_lock_depth == 0);
+        ++g_modelpool_lock_depth;
+#if XR_PERF_METRICS
+        if (!ModelPool_Mutex.TryEnter())
+        {
+            PERF_INC(modelpool_lock_contend);
+            const bool metrics_active = xray::perf::g_perf_metrics_active;
+            const u64 t0 = metrics_active ? xray::perf::Ticks() : 0;
+            ModelPool_Mutex.Enter();
+            if (metrics_active)
+                xray::perf::AddTimeSlow(xray::perf::Metric::modelpool_lock_wait, xray::perf::Ticks() - t0);
+        }
+#else
+        ModelPool_Mutex.Enter();
+#endif
+#if XR_PERF_METRICS
+        if (outer && xray::perf::g_perf_metrics_active)
+            t_hold0 = xray::perf::Ticks();
+#endif
+    }
+
+    ~ModelPool_mtlock()
+    {
+        if (outer && xray::perf::g_perf_metrics_active)
+            xray::perf::AddTimeSlow(xray::perf::Metric::modelpool_lock_hold, xray::perf::Ticks() - t_hold0);
+        ModelPool_Mutex.Leave();
+        --g_modelpool_lock_depth;
+    }
+};
+} // namespace
+
 dxRender_Visual* CModelPool::Instance_Create(u32 type)
 {
     dxRender_Visual* V = nullptr;
@@ -66,6 +122,8 @@ dxRender_Visual* CModelPool::Instance_Create(u32 type)
 
 dxRender_Visual* CModelPool::Instance_Duplicate(dxRender_Visual* V)
 {
+    GW_OVERLAP_HAZARD("CModelPool::Instance_Duplicate");
+    ModelPool_mtlock lock;
     R_ASSERT(V);
     dxRender_Visual* N = Instance_Create(V->Type);
     N->Copy(V);
@@ -220,6 +278,7 @@ void CModelPool::Instance_Register(LPCSTR N, dxRender_Visual* V)
 
 void CModelPool::Destroy()
 {
+    ModelPool_mtlock lock;
     // Pool
     Pool.clear();
 
@@ -277,10 +336,14 @@ dxRender_Visual* CModelPool::Instance_Find(LPCSTR N)
 
 dxRender_Visual* CModelPool::Create(const char* name, IReader* data)
 {
+    // No GW_OVERLAP_HAZARD here: this just forwards to the 3-arg overload below, which already
+    // fires it - tagging both would double-count every call through this path.
     return Create(name, "", data);
 }
 dxRender_Visual* CModelPool::Create(LPCSTR name, LPCSTR suffix, IReader* data)
 {
+    GW_OVERLAP_HAZARD("CModelPool::Create");
+    ModelPool_mtlock lock;
 #ifdef _EDITOR
     if (!name || !name[0])
         return 0;
@@ -330,10 +393,13 @@ dxRender_Visual* CModelPool::Create(LPCSTR name, LPCSTR suffix, IReader* data)
 
 dxRender_Visual* CModelPool::CreateChild(LPCSTR name, IReader* data)
 {
+    // No GW_OVERLAP_HAZARD here: forwards to the 3-arg overload below, which already fires it.
     return CreateChild(name, "", data);
 }
 dxRender_Visual* CModelPool::CreateChild(LPCSTR name, LPCSTR suffix, IReader* data)
 {
+    GW_OVERLAP_HAZARD("CModelPool::CreateChild");
+    ModelPool_mtlock lock;
     string256 low_name;
     string256 low_name_suffix;
     VERIFY(xr_strlen(name) < 256);
@@ -379,6 +445,8 @@ dxRender_Visual* CModelPool::CreateChild(LPCSTR name, LPCSTR suffix, IReader* da
 
 void CModelPool::DeleteInternal(dxRender_Visual*& V, BOOL bDiscard)
 {
+    GW_OVERLAP_HAZARD("CModelPool::DeleteInternal");
+    ModelPool_mtlock lock;
     VERIFY(!g_bRendering);
     if (!V)
         return;
@@ -407,12 +475,17 @@ void CModelPool::DeleteInternal(dxRender_Visual*& V, BOOL bDiscard)
 
 void CModelPool::Delete(dxRender_Visual*& V, BOOL bDiscard)
 {
+    GW_OVERLAP_HAZARD("CModelPool::Delete");
+    ModelPool_mtlock lock;
     if (nullptr == V)
         return;
-    if (g_bRendering)
+    // g_bRendering alone used to gate this (and only ever saw bDiscard=FALSE - bDiscard=TRUE was
+    // asserted against). Device.IsFrameOverlapActive() is the broader P1 overlap window (see device.h
+    // for why it is a separate flag from g_bRendering); with the overlap in place bDiscard=TRUE calls
+    // can happen inside the window same as FALSE ones, so both defer the same way.
+    if (g_bRendering || Device.IsFrameOverlapActive())
     {
-        VERIFY(!bDiscard);
-        ModelsToDelete.push_back(V);
+        ModelsToDelete.emplace_back(V, bDiscard);
     }
     else
     {
@@ -423,13 +496,21 @@ void CModelPool::Delete(dxRender_Visual*& V, BOOL bDiscard)
 
 void CModelPool::DeleteQueue()
 {
-    for (u32 it = 0; it < ModelsToDelete.size(); it++)
-        DeleteInternal(ModelsToDelete[it]);
-    ModelsToDelete.clear();
+    ModelPool_mtlock lock;
+    // A destructor run by DeleteInternal() may call Delete() again and push into ModelsToDelete - iterate a
+    // swapped-out copy so the vector we walk never reallocates, and repeat until nothing new was queued.
+    while (!ModelsToDelete.empty())
+    {
+        decltype(ModelsToDelete) local;
+        local.swap(ModelsToDelete);
+        for (auto& [visual, discard] : local)
+            DeleteInternal(visual, discard);
+    }
 }
 
 void CModelPool::Discard(dxRender_Visual*& V, BOOL b_complete)
 {
+    ModelPool_mtlock lock;
     //
     REGISTRY_IT it = Registry.find(V);
     if (it != Registry.end())
@@ -498,6 +579,7 @@ void CModelPool::Prefetch()
 
 void CModelPool::ClearPool(BOOL b_complete)
 {
+    ModelPool_mtlock lock;
     for (auto& v : Pool)
         Discard(v.second, b_complete);
     Pool.clear();

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "xr_area.h"
+#include "ISpatial.h"
 #include "xrEngine/xr_object.h"
 #include "Common/LevelStructure.hpp"
 #include "xrEngine/xr_collide_form.h"
@@ -71,6 +72,7 @@ int CObjectSpace::GetNearest(xr_vector<ISpatial*>& q_spatial, xr_vector<IGameObj
     float range, IGameObject* ignore_object)
 {
     ZoneScoped;
+    SpatialCaller spatial_caller(SpatialQueryCaller::nearest);
 
     q_nearest.clear();
 
@@ -81,6 +83,7 @@ int CObjectSpace::GetNearest(xr_vector<ISpatial*>& q_spatial, xr_vector<IGameObj
         auto it = m_nearest_cache.find(key);
         if (it != m_nearest_cache.end() && it->second.frame + ps_obj_nearest_cache_ttl >= m_nearest_cache_frame)
         {
+            PERF_INC(nearest_cache_hit);
             // Cache hit: validate ids, filter ignore_object per-query.
             q_nearest.reserve(it->second.object_ids.size());
             for (u16 id : it->second.object_ids)
@@ -95,6 +98,7 @@ int CObjectSpace::GetNearest(xr_vector<ISpatial*>& q_spatial, xr_vector<IGameObj
         {
             m_nearest_cache.erase(it);
         }
+        PERF_INC(nearest_cache_miss);
     }
 
     // Cache miss: query spatial DB.

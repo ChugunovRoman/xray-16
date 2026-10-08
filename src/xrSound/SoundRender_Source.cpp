@@ -2,6 +2,7 @@
 
 #include "SoundRender_Core.h"
 #include "SoundRender_Source.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <vorbis/vorbisfile.h>
 
@@ -11,6 +12,41 @@
 // B-1: global accounting of bytes held in per-source PCM caches, bounded by psSoundCacheSizeMB.
 // Touched only from load/unload (effectively main thread), atomic for safety.
 static std::atomic<size_t> s_cached_pcm_bytes{0};
+
+static void snd_pcm_cached_kb_gauge()
+{
+    xray::perf::SetGauge(xray::perf::Metric::snd_pcm_cached_kb,
+        static_cast<s64>(s_cached_pcm_bytes.load(std::memory_order_relaxed) / 1024));
+}
+
+#if XR_PERF_METRICS
+// xrSound does not link xrEngine (cycle), so it cannot call xrEngine's IsGameLogicThread() directly - but
+// xrCore::perf exports g_main_tid/g_game_tid for exactly this (set by xrEngine's EngineThreading.cpp), so
+// xray::perf::CurrentThreadKind() still tells GameThread apart from main and from TaskManager pool workers.
+struct SndDecodeTime
+{
+    bool active{false};
+    u64 t0{0};
+
+    SndDecodeTime() noexcept
+        : active(xray::perf::g_perf_metrics_active), t0(active ? xray::perf::Ticks() : 0)
+    {}
+
+    ~SndDecodeTime() noexcept
+    {
+        if (!active)
+            return;
+        const u64 dt = xray::perf::Ticks() - t0;
+        using M = xray::perf::Metric;
+        switch (xray::perf::CurrentThreadKind())
+        {
+        case xray::perf::ThreadKind::Game:   xray::perf::AddTimeSlow(M::snd_decode_game, dt); break;
+        case xray::perf::ThreadKind::Main:   xray::perf::AddTimeSlow(M::snd_decode_main, dt); break;
+        case xray::perf::ThreadKind::Worker: xray::perf::AddTimeSlow(M::snd_decode_worker, dt); break;
+        }
+    }
+};
+#endif
 
 CSoundRender_Source::~CSoundRender_Source() { unload(); }
 
@@ -51,7 +87,7 @@ bool ov_can_continue_read(long res)
 
 void CSoundRender_Source::decompress(void* dest, u32 byte_offset, u32 size, OggVorbis_File* ovf) const
 {
-    ZoneScoped;
+    PERF_HOT_ZONE("decompress");
 
     // B-1: short SFX are fully decoded once into m_cached_pcm (shared across all emitters of this source).
     // Serve the requested slice with a plain memcpy instead of re-running the OGG decoder per emitter/chunk.
@@ -68,8 +104,14 @@ void CSoundRender_Source::decompress(void* dest, u32 byte_offset, u32 size, OggV
         }
         if (copied < size) // past end of sound -> silence
             std::memset(d + copied, 0, size - copied);
+        PERF_ADD(snd_pcm_cache_bytes, size);
         return;
     }
+
+#if XR_PERF_METRICS
+    SndDecodeTime decode_time;
+#endif
+    PERF_ADD(snd_pcm_decode_bytes, size);
 
     // seek
     const auto sample_offset = ogg_int64_t(byte_offset / m_data_info.blockAlign);
@@ -162,6 +204,9 @@ constexpr ov_callbacks g_ov_callbacks =
 
 OggVorbis_File* CSoundRender_Source::open() const
 {
+    ZoneScopedN("CSoundRender_Source::open");
+    PERF_INC(snd_ogg_open);
+
     const auto file = FS.r_open(pname.c_str());
     R_ASSERT3(file && file->length(), "Can't open wave file:", pname.c_str());
 
@@ -187,27 +232,44 @@ bool CSoundRender_Source::should_cache_pcm() const
 
 void CSoundRender_Source::cache_pcm_if_short()
 {
+    ZoneScopedN("cache_pcm_if_short");
+
     if (!should_cache_pcm())
+    {
+        PERF_INC(snd_pcm_reject_len);
         return;
+    }
 
     // Stay within the global PCM cache budget (psSoundCacheSizeMB). Over budget -> keep streaming this one.
     const size_t budget = size_t(psSoundCacheSizeMB) * 1024u * 1024u;
     if (s_cached_pcm_bytes.load(std::memory_order_relaxed) + dwBytesTotal > budget)
+    {
+        PERF_INC(snd_pcm_reject_budget);
         return;
+    }
 
     OggVorbis_File* ovf = open();
+    PERF_INC(snd_ogg_open_cache);
     if (!ovf)
         return;
 
     m_cached_pcm.resize(dwBytesTotal);
-    // decode the whole sound from the start (open() positions at 0) into the shared buffer
-    if (m_data_info.format == SoundFormat::Float32)
-        i_decompress(ovf, reinterpret_cast<float*>(m_cached_pcm.data()), dwBytesTotal);
-    else
-        i_decompress(ovf, reinterpret_cast<char*>(m_cached_pcm.data()), dwBytesTotal);
+    {
+#if XR_PERF_METRICS
+        SndDecodeTime decode_time;
+#endif
+        PERF_ADD(snd_pcm_decode_bytes, dwBytesTotal);
+        // decode the whole sound from the start (open() positions at 0) into the shared buffer
+        if (m_data_info.format == SoundFormat::Float32)
+            i_decompress(ovf, reinterpret_cast<float*>(m_cached_pcm.data()), dwBytesTotal);
+        else
+            i_decompress(ovf, reinterpret_cast<char*>(m_cached_pcm.data()), dwBytesTotal);
+    }
     close(ovf);
 
     s_cached_pcm_bytes.fetch_add(dwBytesTotal, std::memory_order_relaxed);
+    PERF_INC(snd_pcm_accept);
+    snd_pcm_cached_kb_gauge();
 }
 
 bool CSoundRender_Source::LoadWave(pcstr pName)
@@ -358,6 +420,7 @@ void CSoundRender_Source::unload()
         s_cached_pcm_bytes.fetch_sub(m_cached_pcm.size(), std::memory_order_relaxed);
         m_cached_pcm.clear();
         m_cached_pcm.shrink_to_fit();
+        snd_pcm_cached_kb_gauge();
     }
     fTimeTotal = 0.0f;
     dwBytesTotal = 0;
