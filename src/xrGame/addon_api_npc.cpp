@@ -8,6 +8,9 @@
 #include "addon_api_common.h"
 #include "addon_event_bus.h"
 #include "addon_host.h"
+// CScriptGameObject::object() is an inline defined in script_game_object_impl.h: without it the CMake
+// unity builds (Linux, macOS) that group this file apart from that header fail to link
+#include "script_game_object_impl.h"
 #include "lua_spike_probe.h"
 
 #include "ai_space.h"

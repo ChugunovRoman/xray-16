@@ -1,4 +1,7 @@
 #include "StdAfx.h"
+// CScriptGameObject::object() is an inline defined in script_game_object_impl.h: without it the CMake
+// unity builds (Linux, macOS) that group this file apart from that header fail to link
+#include "script_game_object_impl.h"
 
 // Plugin API, groups npc_body, npc_sight, npc_anim, inventory, smart_cover: what a native plugin needs to drive a
 // stalker the way the Lua state manager does (plans/lua_to_cpp/09-stage-d-native-npc.md, wave W1).

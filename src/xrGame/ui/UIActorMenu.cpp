@@ -550,7 +550,7 @@ void CUIActorMenu::QuickUnloadWeapons()
         int const count = m_wpn->GetAmmoElapsed();
         m_wpn->SetAmmoElapsed(0);
         LPCSTR const ammo_sec = pSettings->r_string(m_wpn->m_section_id, "ammo_class");
-        R_ASSERT2(ammo_sec, make_string("! ERROR: Weapon [%s] doesn't contain property 'ammo_class' in config file!", m_wpn->m_section_id));
+        R_ASSERT2(ammo_sec, make_string("! ERROR: Weapon [%s] doesn't contain property 'ammo_class' in config file!", m_wpn->m_section_id.c_str()));
 
         string128 _ammoItem;
         int const count_type = _GetItemCount(ammo_sec);

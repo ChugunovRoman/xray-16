@@ -10,6 +10,9 @@
 #include "PhysicObject.h"
 #include "xrScriptEngine/script_callback_ex.h"
 #include "script_game_object.h"
+// CScriptGameObject::object() is an inline defined in script_game_object_impl.h: without it a CMake unity batch
+// (Linux, macOS) that holds no other includer of that header fails to link
+#include "script_game_object_impl.h"
 #include "doors.h"
 #include "doors_actor.h"
 
