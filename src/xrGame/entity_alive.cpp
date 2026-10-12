@@ -1,6 +1,7 @@
 #include "pch_script.h"
 #include "addon_object_events.h"
 #include "entity_alive.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "InventoryOwner.h"
 #include "Inventory.h"
 #include "xrPhysics/PhysicsShell.h"
@@ -301,6 +302,8 @@ bool CEntityAlive::net_Spawn(CSE_Abstract* DC)
 
     conditions().reinit();
     inherited::net_Spawn(DC);
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): own part of the class net_Spawn
+    PERF_STEP("cls_spawn/entity_alive", spawn_cls_entity_alive);
     m_force_lod_visual = false;
     m_force_cheap_corpse_path = false;
     m_corpse_pose_frozen = false;

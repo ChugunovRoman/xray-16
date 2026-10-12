@@ -53,6 +53,7 @@
 #include "debug_text_tree.h"
 #endif
 #include "addon_api_character.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #pragma warning(disable : 4355)
 #pragma warning(push)
@@ -347,7 +348,11 @@ void CBaseMonster::UpdateCL()
         update_pos_by_grouping_behaviour();
     }
 
-    control().update_frame();
+    {
+        ZoneScopedN("ucl_base_monster_control");
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MonsterUpdateCLControl);
+        control().update_frame();
+    }
 
     {
         ZoneScopedN("ucl_base_monster_physics");
@@ -766,15 +771,56 @@ IFactoryObject* CBaseMonster::_construct()
     return (this);
 }
 
+// P17 (plans/optimization_mt/12-relcase.md), always: net_Relcase for every destroyed object (the
+// derived monsters' overrides included), then the memory update net_Relcase used to repeat after each of them - once,
+// when all destroyed objects are already out of every memory (before, the update for the last one ran while it was
+// still in CorpseMemory and in the squads).
+// P17b (always): UpdateMemory here only refreshes what the memories hold - the chosen enemy and corpse,
+// the heard sounds, the hit flags (it also runs on the monster's own update). If no batch object was in any of them,
+// the refresh gives what the monster already had, and the 10-90 us per alive monster (the receivers of the relcase
+// report: CZombie, CAI_Dog, CAI_Bloodsucker...) on every frame with a destroy are skipped. Items (PDA and ammo released
+// from corpses, the bulk of the destroyed objects) are never in these memories.
+void CBaseMonster::net_RelcaseBatch(const RelcaseBatch& batch)
+{
+    PERF_SCOPE(relcase_monsters);
+    m_relcase_memory_touched = false;
+    inherited::net_RelcaseBatch(batch);
+    if (g_Alive())
+    {
+        if (!m_relcase_memory_touched)
+        {
+            PERF_INC(relcase_monster_memory_skips);
+            return;
+        }
+        ZoneScopedN("CBaseMonster::net_RelcaseBatch UpdateMemory");
+        PERF_SCOPE(relcase_monster_memory);
+        UpdateMemory();
+    }
+}
+
 void CBaseMonster::net_Relcase(IGameObject* O)
 {
     ZoneScopedN("CBaseMonster::net_Relcase");
     inherited::net_Relcase(O);
 
+    // P17: part of the batch of CObjectList's relcase pass (nullptr for a direct call) - see net_RelcaseBatch
+    const RelcaseBatch* batch = Level().Objects.relcase_batch();
+    const bool in_batch = batch && batch->contains(O);
+
     {
         ZoneScopedN("CBaseMonster::net_Relcase state_com");
         StateMan->remove_links(O);
         com_man().remove_links(O);
+    }
+
+    // P17b: what UpdateMemory works from, before the links are removed (see net_RelcaseBatch); only inside a batch
+    size_t memory_items = 0;
+    if (in_batch && g_Alive())
+    {
+        memory_items = EnemyMemory.get_enemies_count() + SoundMemory.GetNumSounds() + HitMemory.get_num_hits() +
+            CorpseMemory.get_corpse_count();
+        if (EnemyMan.refers_to(O) || CorpseMan.get_corpse() == O)
+            m_relcase_memory_touched = true;
     }
 
     // TODO: do not clear, remove only object O
@@ -788,14 +834,30 @@ void CBaseMonster::net_Relcase(IGameObject* O)
         EnemyMan.remove_links(O);
         CorpseMan.remove_links(O);
 
-        UpdateMemory();
-
-        monster_squad().remove_links(O);
+        if (!in_batch)
+        {
+            UpdateMemory();
+            monster_squad().remove_links(O);
+        }
+        // monster_squad() holds the squads of all monsters on the level: its first alive monster cleans it of the
+        // whole batch, the others skip it (with 0 every alive monster walked all squads for every destroyed object)
+        else if (Level().Objects.relcase_first_visit(&monster_squad()))
+        {
+            for (u32 it = batch->count; it-- > 0;)
+                monster_squad().remove_links(batch->objects[it]);
+        }
     }
     {
         ZoneScopedN("CBaseMonster::net_Relcase corpse_physics");
         CorpseMemory.remove_links(O);
         m_pPhysics_support->in_NetRelcase(O);
+    }
+
+    if (in_batch && g_Alive() &&
+        memory_items != EnemyMemory.get_enemies_count() + SoundMemory.GetNumSounds() + HitMemory.get_num_hits() +
+            CorpseMemory.get_corpse_count())
+    {
+        m_relcase_memory_touched = true;
     }
 }
 

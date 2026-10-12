@@ -2,6 +2,9 @@
 
 #include <cmath>
 #include <cfloat>
+#include <atomic>
+#include <memory>
+#include <thread>
 
 #include "FHierrarhyVisual.h"
 #include "SkeletonCustom.h"
@@ -475,19 +478,27 @@ void R_dsgraph_structure::add_leafs_dynamic(
         if (_use_lod)
         {
             if (!corpse_pose_frozen)
+            {
+                pV->BonesPrepass_MarkRendered(); // bones prepass: candidate of the next frame's prepass
                 pV->CalculateBones(TRUE);
+            }
             else
                 PERF_INC(render_corpse_pose_skip);
             PERF_INC(render_skel_lod);
+            PERF_ADD_IF(o.is_main_pass && !o.second_vp_pass, rmain_skel_lod, 1); // P15
             add_leafs_dynamic(root, pV->m_lod, xform, pV);
         }
         else
         {
             if (!skinning_from_parent && !corpse_pose_frozen)
+            {
+                pV->BonesPrepass_MarkRendered(); // bones prepass: candidate of the next frame's prepass
                 pV->CalculateBones(TRUE);
+            }
             else if (corpse_pose_frozen)
                 PERF_INC(render_corpse_pose_skip);
             PERF_INC(render_skel_full);
+            PERF_ADD_IF(o.is_main_pass && !o.second_vp_pass, rmain_skel_full, 1); // P15
             if (o.phase == CRender::PHASE_NORMAL && !skinning_from_parent && !corpse_pose_frozen)
             {
                 // Stage C: wallmark capture mutates the shared wallmark manager - the concurrent
@@ -887,6 +898,307 @@ void R_dsgraph_structure::unload()
 }
 
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Parallel main build (plans/optimization_mt/08-parallel-main-build.md) ////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// The dynamic part of the main-view build (sector refresh, HOM, renderable_Render -> add_Visual ->
+// add_leafs_dynamic -> insert_dynamic for every visible object) used to run as one loop on one worker
+// while the main thread waited in r_main.sync(). Here lstRenderables is cut into contiguous parts; task
+// workers claim parts one by one, and each part writes into its own shard (add_Visual is redirected by
+// insert_target() on the thread running the part). The shards are then appended to the main dsgraph in
+// part order: every map receives exactly the insertion sequence of the sequential loop, so the result
+// (sorted/transparent order included) is identical and deterministic.
+namespace
+{
+// Which shard add_Visual() of which dsgraph lands in on this thread (nested parts save/restore it).
+struct shard_binding
+{
+    const R_dsgraph_structure* owner{};
+    R_dsgraph_structure* shard{};
+};
+thread_local shard_binding t_shard_binding;
+
+constexpr u32 PARALLEL_MAIN_BUILD_MAX_PARTS = 64;
+
+// Results of one part besides its shard's lists, kept in list order for the merge.
+struct main_build_part
+{
+    xr_vector<light*> lights; // visible light sources to register (CLight_DB is not thread-safe)
+    IRenderable* ltrack{}; // the object whose lighting (CROS) is tracked this frame, if it is in this part
+    bool ran_here{}; // set by the thread that ran it (par_threads metric)
+};
+
+// Grown and used only by the main-view build (one at a time: the scope pass and the Z-prefill build never
+// take this path), reused between frames - the shards keep their map memory.
+xr_vector<std::unique_ptr<R_dsgraph_structure>> s_main_build_shards;
+main_build_part s_main_build_parts[PARALLEL_MAIN_BUILD_MAX_PARTS];
+} // namespace
+
+R_dsgraph_structure& R_dsgraph_structure::insert_target()
+{
+    const shard_binding& binding = t_shard_binding;
+    return binding.owner == this ? *binding.shard : *this;
+}
+
+void R_dsgraph_structure::clear_dynamic()
+{
+    for (auto& passes : mapMatrixPasses)
+    {
+        for (auto& map : passes)
+        {
+            // xr_fixed_map::clear() keeps the nodes: their item vectors are reused by the next insert.
+            for (auto* node = map.begin(); node != map.end(); ++node)
+            {
+                node->second.clear();
+                node->second.ssa = 0.f;
+            }
+            map.clear();
+        }
+    }
+    mapSorted.clear();
+    mapHUD.clear();
+    mapDistort.clear();
+    mapHUDSorted.clear();
+#if RENDER != R_R1
+    mapWmark.clear();
+    mapEmissive.clear();
+    mapHUDEmissive.clear();
+#endif
+    npc_blobs.clear();
+}
+
+void R_dsgraph_structure::merge_dynamic(R_dsgraph_structure& shard)
+{
+    // xr_fixed_map nodes are stored in insertion order: replaying them reproduces the shard's sequence.
+    for (u32 priority = 0; priority < 2; ++priority)
+    {
+        for (u32 pass_id = 0; pass_id < SHADER_PASSES_MAX; ++pass_id)
+        {
+            mapMatrix_T& from = shard.mapMatrixPasses[priority][pass_id];
+            mapMatrix_T& to = mapMatrixPasses[priority][pass_id];
+            for (auto* node = from.begin(); node != from.end(); ++node)
+            {
+                mapMatrixItems& items = to[node->first];
+                items.insert(items.end(), node->second.begin(), node->second.end());
+                if (node->second.ssa > items.ssa)
+                    items.ssa = node->second.ssa;
+            }
+        }
+    }
+
+    const auto merge_sorted = [](mapSorted_T& to, mapSorted_T& from)
+    {
+        for (auto* node = from.begin(); node != from.end(); ++node)
+            to.insert_anyway(node->first, node->second);
+    };
+    merge_sorted(mapSorted, shard.mapSorted);
+    merge_sorted(mapHUD, shard.mapHUD);
+    merge_sorted(mapDistort, shard.mapDistort);
+    merge_sorted(mapHUDSorted, shard.mapHUDSorted);
+#if RENDER != R_R1
+    merge_sorted(mapWmark, shard.mapWmark);
+    merge_sorted(mapEmissive, shard.mapEmissive);
+    merge_sorted(mapHUDEmissive, shard.mapHUDEmissive);
+#endif
+}
+
+bool R_dsgraph_structure::build_dynamic_main_parallel(u32 ltrack_index, bool collect_lights)
+{
+    const u32 count = static_cast<u32>(lstRenderables.size());
+    const u32 grain = static_cast<u32>(std::max(r__parallel_main_build_grain, 1));
+    const u32 parts = std::min((count + grain - 1) / grain, PARALLEL_MAIN_BUILD_MAX_PARTS);
+    const u32 workers = TaskScheduler ? static_cast<u32>(TaskScheduler->GetWorkersCount()) : 0;
+    // val_recorder (old sun cascades) is a shared vector the parts would race on - sequential then.
+    if (parts < 2 || workers < 2 || count < static_cast<u32>(std::max(r__parallel_main_build_min, 0)) || val_recorder)
+    {
+        PERF_INC(rmain_par_fallback);
+        return false;
+    }
+
+    ZoneScopedN("dsg_dynamic_parallel");
+    PERF_ADD(rmain_par_parts, parts);
+    PERF_ADD(rmain_par_objects, count);
+
+    while (s_main_build_shards.size() < parts)
+        s_main_build_shards.emplace_back(std::make_unique<R_dsgraph_structure>());
+    for (u32 p = 0; p < parts; ++p)
+    {
+        R_dsgraph_structure& shard = *s_main_build_shards[p];
+        // Same options, context (vis.marker slot) and marker as this build: insert_dynamic dedups with them.
+        shard.o = o;
+        shard.context_id = context_id;
+        shard.marker = marker;
+        shard.val_recorder = nullptr;
+        shard.val_feedback = nullptr;
+        main_build_part& part = s_main_build_parts[p];
+        part.lights.clear();
+        part.ltrack = nullptr;
+        part.ran_here = false;
+    }
+
+    // The loop body of the sequential main-pass branch of build_subspace(), with two differences:
+    //  - a sector is detected only for objects whose sector was invalidated (spatial_updatesector() ignores the
+    //    result otherwise), with the part's own collider;
+    //  - lights and the tracked object are collected and registered after the parts (merge, list order).
+    const auto process_item = [this, collect_lights, ltrack_index](
+                                  u32 o_it, xrXRC& xrc, main_build_part& part)
+    {
+        ISpatial* spatial = lstRenderables[o_it];
+        if (!spatial)
+            return;
+        if (spatial->GetSpatialData().type.load(std::memory_order_relaxed) & STYPEFLAG_INVALIDSECTOR)
+        {
+            PERF_SCOPE(rmain_build_sector);
+            PERF_INC(rmain_sector_detect);
+            spatial->spatial_updatesector(detect_sector(xrc, spatial->spatial_sector_point()));
+        }
+        const auto& data = spatial->GetSpatialData();
+        const u32 type = data.type.load(std::memory_order_relaxed);
+        const auto sector_id = data.sector_id.load(std::memory_order_relaxed);
+        if (sector_id == IRender_Sector::INVALID_SECTOR_ID || sector_id >= Sectors.size())
+        {
+            PERF_INC(render_sector_cull);
+            return; // disassociated from S/P structure
+        }
+        CSector* sector = Sectors[sector_id];
+
+        if (collect_lights && (type & STYPE_LIGHTSOURCE))
+        {
+            light* L = (light*)spatial->dcast_Light();
+            if (L && L->get_LOD() > EPS_L && RImplementation.HOM.visible(L->get_homdata()))
+                part.lights.push_back(L);
+            return;
+        }
+
+        if (PortalTraverser.i_marker != sector->r_marker)
+        {
+            PERF_INC(render_sector_cull);
+            return; // inactive (untouched) sector
+        }
+        for (const CFrustum& view : sector->r_frustums)
+        {
+            if (!view.testSphere_dirty(data.sphere.P, data.sphere.R))
+            {
+                PERF_INC(render_sphere_miss);
+                continue;
+            }
+            if (type & STYPE_RENDERABLE)
+            {
+                IRenderable* renderable = spatial->dcast_Renderable();
+                VERIFY(renderable);
+
+                // Occlusion (the visual and its vis_data belong to this object only)
+                vis_data& v_orig = ((dxRender_Visual*)renderable->GetRenderData().visual)->vis;
+                vis_data v_copy = v_orig;
+                v_copy.box.xform(renderable->GetRenderData().xform);
+                BOOL visible;
+                {
+                    PERF_SCOPE(rmain_build_hom);
+                    visible = RImplementation.HOM.visible(v_copy);
+                }
+                memcpy(v_orig.marker, v_copy.marker, sizeof(v_copy.marker));
+                v_orig.accept_frame = v_copy.accept_frame;
+                v_orig.hom_frame = v_copy.hom_frame;
+                v_orig.hom_tested = v_copy.hom_tested;
+                if (!visible)
+                {
+                    PERF_INC(render_hom_cull);
+                    return;
+                }
+
+                if (o_it == ltrack_index)
+                    part.ltrack = renderable;
+
+                PERF_INC(renderable_render);
+                PERF_SCOPE(rmain_build_renderable);
+                renderable->renderable_Render(context_id, renderable);
+            }
+            return; // exit loop on frustums
+        }
+    };
+
+    struct shared_state
+    {
+        std::atomic<u32> next{ 0 };
+        std::atomic<u32> done{ 0 };
+    } state;
+    const u8 perf_pass = xray::perf::TlPass();
+
+    const auto run_parts = [&]()
+    {
+        PERF_PASS(perf_pass); // CGameObject::renderable_Render and the crow/bones metrics read the pass tag
+        bool ran_any = false;
+        for (;;)
+        {
+            const u32 p = state.next.fetch_add(1, std::memory_order_relaxed);
+            if (p >= parts)
+                break;
+            {
+                ZoneScopedN("dsg_dynamic_part");
+                PERF_SCOPE(rmain_par_part);
+                R_dsgraph_structure& shard = *s_main_build_shards[p];
+                main_build_part& part = s_main_build_parts[p];
+                const u32 begin = static_cast<u32>(u64(count) * p / parts);
+                const u32 end = static_cast<u32>(u64(count) * (p + 1) / parts);
+                const shard_binding prev = t_shard_binding;
+                t_shard_binding = { this, &shard };
+                for (u32 o_it = begin; o_it < end; ++o_it)
+                    process_item(o_it, shard.Sectors_xrc, part);
+                t_shard_binding = prev;
+                if (!ran_any)
+                    part.ran_here = true; // one flag per thread: counts the threads, not the parts
+                ran_any = true;
+            }
+            state.done.fetch_add(1, std::memory_order_release);
+        }
+    };
+
+    {
+        PERF_SCOPE(rmain_par_wall);
+        // Helpers on other workers; this thread claims parts too, so it never idles while parts are left.
+        Task& root = TaskScheduler->CreateTask([] {});
+        const u32 helpers = std::min(parts - 1, workers - 1);
+        for (u32 h = 0; h < helpers; ++h)
+            TaskScheduler->AddTask(root, [&run_parts] { run_parts(); });
+        run_parts();
+        {
+            // Spin (no stealing) until the parts taken by others are done: TaskManager::Wait() could pick up an
+            // unrelated long task (a sun cascade) here and delay the main thread waiting for this build.
+            PERF_SCOPE(rmain_par_tail);
+            while (state.done.load(std::memory_order_acquire) < parts)
+                std::this_thread::yield();
+        }
+        // Helpers still queued find no parts and return at once; Wait() runs them first from this thread's queue.
+        TaskManager::RunTask(root);
+        TaskScheduler->Wait(root);
+    }
+
+    {
+        PERF_SCOPE(rmain_par_merge);
+        u32 threads = 0;
+        for (u32 p = 0; p < parts; ++p)
+        {
+            R_dsgraph_structure& shard = *s_main_build_shards[p];
+            main_build_part& part = s_main_build_parts[p];
+            merge_dynamic(shard);
+            shard.clear_dynamic(); // drop the pointers now, keep the memory
+            for (light* L : part.lights)
+                RImplementation.Lights.add_light(L);
+            if (part.ltrack)
+            {
+                if (auto* ros = (CROS_impl*)part.ltrack->renderable_ROS())
+                {
+                    PERF_SCOPE(rmain_build_ros);
+                    ros->update(part.ltrack);
+                }
+            }
+            threads += part.ran_here ? 1 : 0;
+        }
+        PERF_ADD(rmain_par_threads, threads);
+    }
+    return true;
+}
+
 // sub-space rendering - main procedure
 void R_dsgraph_structure::build_subspace()
 {
@@ -902,6 +1214,8 @@ void R_dsgraph_structure::build_subspace()
     }
     PERF_PASS(pass);
     PERF_SCOPE(dsg_build_subspace);
+    // render/main/* metrics: only the main view's build (not cascades, lights or the scope pass).
+    [[maybe_unused]] const bool perf_main = o.is_main_pass && !o.second_vp_pass;
     // Tracy zone is thread-safe; this runs on task workers for the 3 parallel sun cascades plus the
     // main pass (4 calls/frame). Coarse zone -> negligible overhead, reveals culling/render-list cost.
     // Main pass shows on the primary thread; cascades on task workers -> split is visible per-thread.
@@ -931,7 +1245,10 @@ void R_dsgraph_structure::build_subspace()
     // Traverse sector/portal structure (bounds-checked: OOB would be UB; keep traverser epoch if we skip)
     CSector* const start_sector = (o.sector_id < Sectors.size()) ? Sectors[o.sector_id] : nullptr;
     if (start_sector)
+    {
+        ZoneScopedN("dsg_portal_traverse");
         PortalTraverser.traverse(start_sector, o.view_frustum, o.view_pos, o.xform, o.portal_traverse_flags);
+    }
     else
     {
         PortalTraverser.i_marker++;
@@ -946,6 +1263,8 @@ void R_dsgraph_structure::build_subspace()
 
     if (psDeviceFlags.test(rsDrawStatic))
     {
+        ZoneScopedN("dsg_static");
+        PERF_SCOPE_IF(perf_main, rmain_build_static);
         for (u32 s_it = 0; s_it < PortalTraverser.r_sectors.size(); s_it++)
         {
             CSector* sector = PortalTraverser.r_sectors[s_it];
@@ -993,6 +1312,8 @@ void R_dsgraph_structure::build_subspace()
 
     if (collect_dynamic_any)
     {
+        ZoneScopedN("dsg_dynamic");
+        PERF_SCOPE_IF(perf_main, rmain_build_dynamic);
         // Traverse object database
         if (o.precomputed_dynamic)
         {
@@ -1004,6 +1325,7 @@ void R_dsgraph_structure::build_subspace()
         else
         {
             ZoneScopedN("dsg_q_frustum");
+            PERF_SCOPE_IF(perf_main, rmain_build_query);
             SpatialCaller spatial_caller(SpatialQueryCaller::render);
             g_pGamePersistent->SpatialSpace.q_frustum(lstRenderables, o.spatial_traverse_flags, o.spatial_types, o.view_frustum);
         }
@@ -1011,6 +1333,8 @@ void R_dsgraph_structure::build_subspace()
 
         if (o.spatial_traverse_flags & ISpatial_DB::O_ORDERED) // this should be inside of query functions
         {
+            ZoneScopedN("dsg_sort");
+            PERF_SCOPE_IF(perf_main, rmain_build_sort);
             // Exact sorting order (front-to-back). Precalculate distances: repeating GetSpatialData in the
             // comparator breaks strict weak ordering with NaNs / equality; MSVC std::sort can crash (AV in sort internals).
             struct SpatialDist
@@ -1057,15 +1381,24 @@ void R_dsgraph_structure::build_subspace()
                 {
                     CROS_impl* R = (CROS_impl*)O->ROS();
                     if (R)
+                    {
+                        PERF_SCOPE(rmain_build_ros); // main view only (this whole branch is)
                         R->update(O);
+                    }
                 }
             }
         }
 
         const bool collect_lights = o.spatial_types & STYPE_LIGHTSOURCE;
 
+        // Parallel main build: the main view's loop below split over task workers (same result, see
+        // build_dynamic_main_parallel); false - this frame runs the loop below (fallback: few objects, no workers...).
+        const bool parallel_done = o.is_main_pass && !o.second_vp_pass &&
+            o.phase == CRender::PHASE_NORMAL && !o.precomputed_dynamic &&
+            build_dynamic_main_parallel(uID_LTRACK, collect_lights);
+
         // Determine visibility for dynamic part of scene
-        for (u32 o_it = 0; o_it < lstRenderables.size(); o_it++)
+        for (u32 o_it = 0; !parallel_done && o_it < lstRenderables.size(); o_it++)
         {
             ISpatial* spatial = lstRenderables[o_it];
             if (!spatial)
@@ -1074,6 +1407,8 @@ void R_dsgraph_structure::build_subspace()
             // on the sectors the main build has already updated this frame.
             if (o.is_main_pass && !o.second_vp_pass)
             {
+                PERF_SCOPE(rmain_build_sector); // main view only (this whole branch is)
+                PERF_INC(rmain_sector_detect);
                 const auto& entity_pos = spatial->spatial_sector_point();
                 const auto sector_id = detect_sector(entity_pos);
                 spatial->spatial_updatesector(sector_id);
@@ -1141,7 +1476,11 @@ void R_dsgraph_structure::build_subspace()
                         vis_data& v_orig = ((dxRender_Visual*)renderable->GetRenderData().visual)->vis;
                         vis_data v_copy = v_orig;
                         v_copy.box.xform(renderable->GetRenderData().xform);
-                        BOOL bVisible = RImplementation.HOM.visible(v_copy);
+                        BOOL bVisible;
+                        {
+                            PERF_SCOPE(rmain_build_hom); // main view only (this whole branch is)
+                            bVisible = RImplementation.HOM.visible(v_copy);
+                        }
                         memcpy(v_orig.marker, v_copy.marker, sizeof(v_copy.marker));
                         v_orig.accept_frame = v_copy.accept_frame;
                         v_orig.hom_frame = v_copy.hom_frame;
@@ -1157,12 +1496,16 @@ void R_dsgraph_structure::build_subspace()
                         {
                             // track lighting environment
                             CROS_impl* T = (CROS_impl*)renderable->renderable_ROS();
+                            PERF_SCOPE(rmain_build_ros);
                             T->update(renderable);
                         }
 
                         // Rendering
                         PERF_INC(renderable_render);
-                        renderable->renderable_Render(context_id, renderable);
+                        {
+                            PERF_SCOPE(rmain_build_renderable); // bones, attachments, insert_dynamic
+                            renderable->renderable_Render(context_id, renderable);
+                        }
                     }
                     break; // exit loop on frustums
                 }
@@ -1237,7 +1580,10 @@ void R_dsgraph_structure::build_subspace()
 
         // Stage C: HUD queue is game-side shared state - only the main pass submits to it here.
         if (o.is_main_pass && !o.second_vp_pass)
+        {
+            PERF_SCOPE(rmain_build_hud);
             g_pGameLevel->pHUD->Render_Last(context_id);
+        }
         }
     }
 

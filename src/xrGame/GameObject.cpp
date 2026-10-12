@@ -3,6 +3,7 @@
 #include "addon_event_bus.h"
 #include <tracy/Tracy.hpp>
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Profiling/IniLoadStats.hpp"
 #include "GameObject.h"
 
 #include "Include/xrRender/RenderVisual.h"
@@ -657,7 +658,11 @@ bool CGameObject::net_Spawn(CSE_Abstract* DC)
     const CSE_Visual* visual = smart_cast<const CSE_Visual*>(E);
     if (visual)
     {
-        cNameVisual_set(visual_name(E));
+        {
+            // Spawn stage 0 (plans/spawn_optimization/SPEC.md): CGameObject::net_Spawn by phase, go_spawn/* + spawn/go/*
+            PERF_STEP("go_spawn/visual", spawn_go_visual);
+            cNameVisual_set(visual_name(E));
+        }
         if (visual->flags.test(CSE_Visual::flObstacle))
         {
             ISpatial* self = smart_cast<ISpatial*>(this);
@@ -709,9 +714,11 @@ bool CGameObject::net_Spawn(CSE_Abstract* DC)
     CSE_ALifeObject* O = smart_cast<CSE_ALifeObject*>(E);
     if (O && xr_strlen(O->m_ini_string))
     {
+        ZoneScopedN("go_spawn/custom_data_ini"); // the timer is ini/load/obj_custom_data (P20)
 #pragma warning(push)
 #pragma warning(disable : 4238)
         IReader reader((void*)((O->m_ini_string).c_str()), O->m_ini_string.size());
+        INI_SOURCE(ObjectCustomData, E->s_name.c_str()); // P20: parsed on every net_Spawn (going online)
         m_ini_file = xr_new<CInifile>(&reader, FS.get_path("$game_config$")->m_Path);
 #pragma warning(pop)
     }
@@ -744,16 +751,24 @@ bool CGameObject::net_Spawn(CSE_Abstract* DC)
             spatial.type.fetch_and(~STYPE_VISIBLEFORAI, std::memory_order_relaxed);
     }
 
-    reload(cNameSect().c_str());
+    {
+        PERF_STEP("go_spawn/reload", spawn_go_reload);
+        reload(cNameSect().c_str());
+    }
     if (!GEnv.isDedicatedServer)
     {
+        PERF_STEP("go_spawn/script_reload", spawn_go_script_reload);
         scriptBinder.reload(cNameSect().c_str());
         gw::addons::objevents::ObjectBinder(gw::addons::objevents::EBinder::Init, this);
     }
 
-    reinit();
+    {
+        PERF_STEP("go_spawn/reinit", spawn_go_reinit);
+        reinit();
+    }
     if (!GEnv.isDedicatedServer)
     {
+        PERF_STEP("go_spawn/script_reinit", spawn_go_script_reinit);
         scriptBinder.reinit();
         gw::addons::objevents::ObjectBinder(gw::addons::objevents::EBinder::Reinit, this);
     }
@@ -767,6 +782,7 @@ bool CGameObject::net_Spawn(CSE_Abstract* DC)
     // load custom user data from server
     if (!E->client_data.empty())
     {
+        PERF_STEP("go_spawn/net_load", spawn_go_net_load);
         //		Msg				("client data is present for object [%d][%s], load is processed",ID(),*cName());
         IReader ireader = IReader(&*E->client_data.begin(), E->client_data.size());
         net_Load(ireader);
@@ -779,6 +795,7 @@ bool CGameObject::net_Spawn(CSE_Abstract* DC)
     // if we have a parent
     if (ai().get_level_graph())
     {
+        PERF_STEP("go_spawn/ai_location", spawn_go_ai_location);
         if (E->ID_Parent == 0xffff)
         {
             CSE_ALifeObject* l_tpALifeObject = smart_cast<CSE_ALifeObject*>(E);
@@ -816,45 +833,65 @@ bool CGameObject::net_Spawn(CSE_Abstract* DC)
     PositionStack.clear();
     VERIFY(_valid(renderable.xform));
     if (0 == Visual() && pSettings->line_exist(cNameSect(), "visual"))
-        cNameVisual_set(pSettings->r_string(cNameSect(), "visual"));
-    if (0 == CForm)
     {
-        if (pSettings->line_exist(cNameSect(), "cform"))
-        {
-            VERIFY3(NameVisual.c_str(), "Model isn't assigned for object, but cform requisted", cName().c_str());
-            CForm = xr_new<CCF_Skeleton>(this);
-        }
+        PERF_STEP("go_spawn/visual", spawn_go_visual);
+        cNameVisual_set(pSettings->r_string(cNameSect(), "visual"));
     }
-    R_ASSERT(spatial.space);
-    spatial_register();
-    if (register_schedule())
-        shedule_register();
-    // reinitialize flags
-    processing_activate();
+    {
+        PERF_STEP("go_spawn/cform_spatial_shedule", spawn_go_cform_spatial);
+        if (0 == CForm)
+        {
+            if (pSettings->line_exist(cNameSect(), "cform"))
+            {
+                VERIFY3(NameVisual.c_str(), "Model isn't assigned for object, but cform requisted", cName().c_str());
+                CForm = xr_new<CCF_Skeleton>(this);
+            }
+        }
+        R_ASSERT(spatial.space);
+        spatial_register();
+        if (register_schedule())
+            shedule_register();
+        // reinitialize flags
+        processing_activate();
+    }
     setDestroy(false);
     {
+        PERF_STEP("go_spawn/crow", spawn_go_crow);
         PERF_CROW_SRC(xray::perf::crow::Spawn);
         MakeMeCrow();
     }
     // ~
     m_bObjectRemoved = false;
-    spawn_supplies();
+    {
+        PERF_STEP("go_spawn/spawn_supplies", spawn_go_supplies);
+        spawn_supplies();
+    }
 #ifdef DEBUG
     if (ph_dbg_draw_mask1.test(ph_m1_DbgTrackObject) && xr_stricmp(PH_DBG_ObjectTrackName(), cName().c_str()) == 0)
     {
         Msg("CGameObject::net_Spawn obj %s Before CScriptBinder::net_Spawn %f,%f,%f", PH_DBG_ObjectTrackName(),
             Position().x, Position().y, Position().z);
     }
-    BOOL ret = scriptBinder.net_Spawn(DC);
+    BOOL ret;
+    {
+        PERF_STEP("go_spawn/script_net_spawn", spawn_go_script_net_spawn);
+        ret = scriptBinder.net_Spawn(DC);
+    }
     if (ret)
     {
+        PERF_STEP("go_spawn/addon_events", spawn_go_addon_events);
         gw::addons::objevents::ObjectNetSpawn(this); // after the Lua binder: its db.storage entry and logic exist (B3.6)
         gw::addons::objevents::ObjectBinder(gw::addons::objevents::EBinder::NetSpawn, this);
     }
 #else
-    const BOOL ret = scriptBinder.net_Spawn(DC);
+    BOOL ret;
+    {
+        PERF_STEP("go_spawn/script_net_spawn", spawn_go_script_net_spawn);
+        ret = scriptBinder.net_Spawn(DC);
+    }
     if (ret)
     {
+        PERF_STEP("go_spawn/addon_events", spawn_go_addon_events);
         gw::addons::objevents::ObjectNetSpawn(this); // after the Lua binder: its db.storage entry and logic exist (B3.6)
         gw::addons::objevents::ObjectBinder(gw::addons::objevents::EBinder::NetSpawn, this); // on_game_load (actor)
     }
@@ -1108,10 +1145,19 @@ void CGameObject::spatial_refresh_bounds()
 
 void CGameObject::spatial_move()
 {
-    if (H_Parent())
-        setup_parent_ai_locations();
-    else if (Visual())
-        validate_ai_locations();
+    {
+        ZoneScopedN("go_spatial_move/ai_locations");
+        // P19 (plans/optimization_mt/14-spike-instrumentation.md): validate_ai_locations -> CLevelGraph::vertex, whose
+        // slow paths (full search, guess, nearest) are ai/level_graph/*; the actor apart from the other objects
+        const bool is_actor = xray::perf::g_perf_metrics_active && cast_actor();
+        PERF_SCOPE_IF(is_actor, go_ai_locations_actor);
+        PERF_SCOPE_IF(!is_actor, go_ai_locations_other);
+        PERF_SPIKE_OBJECT("go/ai_locations", this);
+        if (H_Parent())
+            setup_parent_ai_locations();
+        else if (Visual())
+            validate_ai_locations();
+    }
     SpatialBase::spatial_move();
 }
 
@@ -1317,6 +1363,12 @@ Fvector CGameObject::get_last_local_point_on_mesh(Fvector const& local_point, u1
     return result;
 }
 
+bool CGameObject::rendered_in_main_pass(u32 frames) const
+{
+    const u32 frame = m_main_pass_frame.load(std::memory_order_relaxed);
+    return frame && frame + frames >= Device.dwFrame;
+}
+
 void CGameObject::renderable_Render(u32 context_id, IRenderable* root)
 {
     //
@@ -1325,6 +1377,14 @@ void CGameObject::renderable_Render(u32 context_id, IRenderable* root)
     // from there. The main pass renders the same objects and performs the registration.
     if (xray::perf::TlPass() == xray::perf::pass::Main)
         m_main_pass_frame.store(Device.dwFrame, std::memory_order_relaxed);
+    // Bones prepass: the input of the next frame's prepass - every object the render draws, in any pass (main,
+    // shadows, lights, SVP), once per frame. The prepass keeps only those whose bones the render really computed.
+    {
+        const u32 frame = Device.dwFrame;
+        if (m_bones_prepass_note_frame.load(std::memory_order_relaxed) != frame &&
+            m_bones_prepass_note_frame.exchange(frame, std::memory_order_relaxed) != frame)
+            CLevel::BonesPrepassNote(ID());
+    }
     if (!svp_worker_is_current_thread())
         MakeMeCrow();
     // ~
@@ -1434,6 +1494,8 @@ void CGameObject::DestroyObject()
         if (GetTmpPreDestroy())
             return;
 
+        // P17: relcase report (perf_metrics) - destroyed by engine code (used up item, ammo, grenade...)
+        g_pGameLevel->Objects.destroy_origin_note(ID(), CObjectList::destroy_origin_engine);
         NET_Packet P;
         u_EventGen(P, GE_DESTROY, ID());
         u_EventSend(P);
@@ -1636,9 +1698,18 @@ u32 CGameObject::ef_detector_type() const
     return (u32(-1));
 }
 
+// The heavy overrides (CAI_Stalker, CCustomMonster, memory managers...) stay per object: what they share with other
+// objects (group memory lists, agent manager) checks CObjectList::relcase_batch() and is cleaned of the whole batch once.
+void CGameObject::net_RelcaseBatch(const RelcaseBatch& batch)
+{
+    for (u32 it = batch.count; it-- > 0;)
+        net_Relcase(batch.objects[it]);
+}
+
 void CGameObject::net_Relcase(IGameObject* O)
 {
-    ZoneScopedN("CGameObject::net_Relcase");
+    // objects x destroyed objects of them per frame with a destroy: hidden with perf_metrics bit 4 (P17)
+    PERF_HOT_ZONE("CGameObject::net_Relcase");
     if (GEnv.isDedicatedServer)
         return;
     if (npc_perf_skip_script_net_relcase)
@@ -1740,6 +1811,76 @@ IC bool similar(const Fmatrix& _0, const Fmatrix& _1, const float& epsilon = EPS
     return (true);
 }
 
+// The crow rules of UpdateCL: stay in the update list of the next frame or not. `position` - where the object is
+// for the distance rules (its own position; the root's one for a child whose XFORM was not refreshed)
+void CGameObject::UpdateCLCrow(const Fvector& position)
+{
+    if (Parent == g_pGameLevel->CurrentViewEntity() || AlwaysTheCrow())
+    {
+        PERF_CROW_SRC(xray::perf::crow::UclView);
+        MakeMeCrow();
+    }
+    else
+    {
+        float dist = Device.vCameraPosition.distance_to_sqr(position);
+        if (dist < CROW_RADIUS * CROW_RADIUS)
+        {
+            PERF_CROW_SRC(xray::perf::crow::UclR30);
+            MakeMeCrow();
+        }
+        else if ((Visual() && Visual()->getVisData().hom_frame + 2 > Device.dwFrame) &&
+            dist < CROW_RADIUS2 * CROW_RADIUS2)
+        {
+            PERF_CROW_SRC(xray::perf::crow::UclHom60);
+            MakeMeCrow();
+        }
+    }
+}
+
+void CGameObject::UpdateCLSkippedChild()
+{
+    VERIFY(H_Parent());
+#ifdef DEBUG
+    // CObjectList::SingleUpdate checks that UpdateCL reached CGameObject::UpdateCL this frame
+    if (Device.dwFrame == dbg_update_cl)
+        xrDebug::Fatal(DEBUG_INFO, "'UpdateCL' called twice per frame for %s", cName().c_str());
+    dbg_update_cl = Device.dwFrame;
+#endif
+    // spatial_update of CGameObject::UpdateCL: a child is not in the spatial DB, nothing to do
+    UpdateCLCrow(H_Root()->Position());
+}
+
+void CGameObject::UpdateCLSkippedRoot()
+{
+    VERIFY(!H_Parent());
+#ifdef DEBUG
+    // CObjectList::SingleUpdate checks that UpdateCL reached CGameObject::UpdateCL this frame
+    if (Device.dwFrame == dbg_update_cl)
+        xrDebug::Fatal(DEBUG_INFO, "'UpdateCL' called twice per frame for %s", cName().c_str());
+    dbg_update_cl = Device.dwFrame;
+#endif
+    m_ucl_lod_skip_frame = Device.dwFrame;
+    // The tail of CGameObject::UpdateCL. The XFORM of a skipped object normally stays where the last full UpdateCL
+    // left it, then both are no-ops; but scripts and teleports (ForceTransform) move it any frame - keep the spatial
+    // DB (what the render, the vision rays and the sound queries see) and the obstacle in step with it then
+    spatial_update(base_spu_epsP * 5, base_spu_epsR * 5);
+    UpdateCLCrow(Position());
+    if (similar(XFORM(), m_previous_matrix, EPS))
+        return;
+    on_matrix_change(m_previous_matrix);
+    m_previous_matrix = XFORM();
+}
+
+bool CGameObject::ucl_lod_skipped_this_frame() const
+{
+    return m_ucl_lod_skip_frame && m_ucl_lod_skip_frame == Device.dwFrame;
+}
+
+bool CGameObject::ucl_lod_skipped_last_frame() const
+{
+    return m_ucl_lod_skip_frame && m_ucl_lod_skip_frame + 1 == Device.dwFrame;
+}
+
 void CGameObject::UpdateCL()
 {
     ZoneScopedN("ucl_CGameObject");
@@ -1784,35 +1925,27 @@ void CGameObject::UpdateCL()
         is_dead_entity && !in_grace_period && (time_since_death > 5000) && corpse_ragdoll_settled(entity_alive);
 
     // For long-dead entities, skip expensive spatial update in UpdateCL
+    // P19 (plans/optimization_mt/14-spike-instrumentation.md): stages by actor / other objects (game_object/ucl/*) and
+    // the spike logger (perf_spike_us), the actor always with the thread CPU time
+    const bool perf_actor = (xray::perf::g_perf_metrics_active || xray::perf::SpikeActive()) && cast_actor();
     if (!is_long_dead)
     {
+        ZoneScopedN("ucl_go/spatial_update");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::GameObjectUpdateCLSpatial);
+        PERF_SCOPE_IF(perf_actor, go_ucl_spatial_actor);
+        PERF_SCOPE_IF(!perf_actor, go_ucl_spatial_other);
+        PERF_SPIKE_OBJECT_CPU("ucl_go/spatial_update", this, perf_actor);
         spatial_update(base_spu_epsP * 5, base_spu_epsR * 5);
     }
 
     // crow
     {
+        ZoneScopedN("ucl_go/crow");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::GameObjectUpdateCLCrow);
-        if (Parent == g_pGameLevel->CurrentViewEntity() || AlwaysTheCrow())
-        {
-            PERF_CROW_SRC(xray::perf::crow::UclView);
-            MakeMeCrow();
-        }
-        else
-        {
-            float dist = Device.vCameraPosition.distance_to_sqr(Position());
-            if (dist < CROW_RADIUS * CROW_RADIUS)
-            {
-                PERF_CROW_SRC(xray::perf::crow::UclR30);
-                MakeMeCrow();
-            }
-            else if ((Visual() && Visual()->getVisData().hom_frame + 2 > Device.dwFrame) &&
-                dist < CROW_RADIUS2 * CROW_RADIUS2)
-            {
-                PERF_CROW_SRC(xray::perf::crow::UclHom60);
-                MakeMeCrow();
-            }
-        }
+        PERF_SCOPE_IF(perf_actor, go_ucl_crow_actor);
+        PERF_SCOPE_IF(!perf_actor, go_ucl_crow_other);
+        PERF_SPIKE_OBJECT_CPU("ucl_go/crow", this, perf_actor);
+        UpdateCLCrow(Position());
     }
     // ~
     //	if (!is_ai_obstacle())
@@ -1829,7 +1962,11 @@ void CGameObject::UpdateCL()
         return;
 
     {
+        ZoneScopedN("ucl_go/matrix_change");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::GameObjectUpdateCLMatrixChange);
+        PERF_SCOPE_IF(perf_actor, go_ucl_matrix_actor);
+        PERF_SCOPE_IF(!perf_actor, go_ucl_matrix_other);
+        PERF_SPIKE_OBJECT_CPU("ucl_go/matrix_change", this, perf_actor);
         on_matrix_change(m_previous_matrix);
     }
     m_previous_matrix = XFORM();

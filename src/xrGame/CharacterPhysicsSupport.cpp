@@ -47,6 +47,11 @@ extern BOOL death_anim_debug;
 #define USE_SMART_HITS
 #define USE_IK
 
+// P16 (plans/optimization_mt/11-ragdoll-spikes.md): the skeleton of the ragdoll (m_physics_skeleton) of a live NPC is
+// always built ahead of its death on the scheduler (TryPrebuildSkeleton), not at the death on main.
+// Skeletons prebuilt per frame at most (a burst of NPCs switched online must not cost a spike of its own)
+static constexpr u32 ragdoll_prebuild_per_frame = 2;
+
 namespace
 {
 /*
@@ -75,20 +80,17 @@ IC u32 ik_update_offset(const u16 object_id, const u32 interval_ms)
     return (interval_ms * (object_id % buckets)) / buckets;
 }
 
-IC u32 get_character_ik_update_interval(CEntityAlive& entity, const CCharacterPhysicsSupport::EType type)
+// Which rule picked the IK interval of an update: the -npc_cpp_profile counters ik/run/* (stage 0 of
+// plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md)
+enum class EIkIntervalRule
 {
-    if (type == CCharacterPhysicsSupport::etActor)
-        return 0;
+    Actor,
+    EnemySelected,
+    Distance,
+};
 
-    const CAI_Stalker* stalker = entity.cast_stalker();
-    if (stalker && stalker->memory().enemy().selected())
-        return npc_perf_ik_interval_enemy_selected_ms;
-
-    CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
-    if (!actor)
-        return 0;
-
-    const float dist_sqr = entity.Position().distance_to_sqr(actor->Position());
+IC u32 get_distance_ik_update_interval(const float dist_sqr)
+{
     if (dist_sqr <= IK_LOD_NEAR_DIST_SQR)
         return npc_perf_ik_interval_near_idle_ms;
     if (dist_sqr <= IK_LOD_MEDIUM_DIST_SQR)
@@ -96,15 +98,52 @@ IC u32 get_character_ik_update_interval(CEntityAlive& entity, const CCharacterPh
     // P2-opt: beyond 100m IK is not visible anyway - skip it entirely
     if (dist_sqr > IK_LOD_DISABLE_DIST_SQR)
         return npc_perf_ik_interval_disabled_ms;
-
     return npc_perf_ik_interval_far_ms;
+}
+
+IC u32 get_character_ik_update_interval(
+    CEntityAlive& entity, const CCharacterPhysicsSupport::EType type, EIkIntervalRule& rule, bool& offscreen)
+{
+    rule = EIkIntervalRule::Actor;
+    offscreen = false;
+    if (type == CCharacterPhysicsSupport::etActor)
+        return 0;
+
+    // Not seen in the last main render pass. A second viewport (scope) renders a pass of its own: never "off
+    // screen" while it is active
+    offscreen = !Device.m_SecondViewport.IsSVPActive() && !entity.rendered_in_main_pass();
+
+    const CAI_Stalker* stalker = entity.cast_stalker();
+    const bool enemy = stalker && stalker->memory().enemy().selected();
+    CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
+    const float dist_sqr = actor ? entity.Position().distance_to_sqr(actor->Position()) : 0.f;
+
+    // npc_perf_ik_enemy_near_dist 0: the fight interval at any distance, as before; N: only within N m, the
+    // distance scale beyond (a fight 80 m away needs no feet IK every frame)
+    const float enemy_near = static_cast<float>(npc_perf_ik_enemy_near_dist);
+    u32 interval;
+    if (enemy && (!npc_perf_ik_enemy_near_dist || !actor || dist_sqr <= enemy_near * enemy_near))
+    {
+        rule = EIkIntervalRule::EnemySelected;
+        interval = npc_perf_ik_interval_enemy_selected_ms;
+    }
+    else
+    {
+        rule = EIkIntervalRule::Distance;
+        interval = actor ? get_distance_ik_update_interval(dist_sqr) : 0;
+    }
+
+    // npc_perf_ik_offscreen_interval_ms 0: as before; N: an NPC off screen runs IK at least N ms apart
+    if (npc_perf_ik_offscreen_interval_ms > 0 && offscreen)
+        interval = _max(interval, static_cast<u32>(npc_perf_ik_offscreen_interval_ms));
+    return interval;
 }
 
 IC bool should_run_character_ik_update(
     CEntityAlive& entity, const u16 object_id, const CCharacterPhysicsSupport::EType type,
-    u32& next_update_time, u32& current_interval, const u32 now_ms)
+    u32& next_update_time, u32& current_interval, const u32 now_ms, EIkIntervalRule& rule, bool& offscreen)
 {
-    const u32 new_interval = get_character_ik_update_interval(entity, type);
+    const u32 new_interval = get_character_ik_update_interval(entity, type, rule, offscreen);
     if (!new_interval)
     {
         current_interval = 0;
@@ -240,6 +279,8 @@ void CCharacterPhysicsSupport::update_interactive_anims()
 
 void CCharacterPhysicsSupport::in_NetSpawn(CSE_Abstract* e)
 {
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): physics of a character (movement control, death animations...)
+    PERF_STEP("cls_spawn/character_physics", spawn_cls_character_physics);
     m_sv_hit = SHit();
     CPHDestroyable::Init(); // this zerows colbacks !!;
     IRenderVisual* pVisual = m_EntityAlife.Visual();
@@ -575,6 +616,7 @@ void CCharacterPhysicsSupport::in_shedule_Update(u32 DT)
 
     CPHDestroyable::SheduleUpdate(DT);
     movement()->in_shedule_Update(DT);
+    TryPrebuildSkeleton();
 #if 0
 	if( anim_mov_state.active )
 	{
@@ -639,6 +681,7 @@ void CCharacterPhysicsSupport::KillHit(SHit& H)
     if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
     {
         SHit Hcopy = H;
+        npc_cpp_profile::count(ENpcCppProfileStage::CharacterPhysicsDeathDeferred);
         ph->defer_scheduler_mutation([this, Hcopy]() mutable { KillHitImpl(Hcopy); });
         return;
     }
@@ -647,6 +690,8 @@ void CCharacterPhysicsSupport::KillHit(SHit& H)
 
 void CCharacterPhysicsSupport::KillHitImpl(SHit& H)
 {
+    ZoneScopedN("CCharacterPhysicsSupport::KillHitImpl");
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsKillHit);
 #ifdef DEBUG
     if (death_anim_debug)
         Msg("death anim: kill hit  ");
@@ -665,29 +710,33 @@ void CCharacterPhysicsSupport::KillHitImpl(SHit& H)
 
     CreateShell(H.who, death_position, velocity);
 
-    //	if(Type() == etStalker && xr_strcmp(dbg_stalker_death_anim, "none") != 0)
-    float hit_angle = 0;
-    MotionID m = m_death_anims.motion(m_EntityAlife, H, hit_angle);
-
-    CAI_Stalker* const holder = m_EntityAlife.cast_stalker();
-    if (holder && (holder->wounded() || holder->movement().current_params().cover()))
-        m = MotionID();
-
-    if (m.valid()) //&& cmp( prev_pose, mXFORM )
     {
-        destroy(m_interactive_motion);
-        if (false && b_death_anim_velocity)
-            m_interactive_motion = xr_new<imotion_velocity>();
-        else
-            m_interactive_motion = xr_new<imotion_position>();
-        m_interactive_motion->setup(m, m_pPhysicsShell, hit_angle);
-    }
-    else
-        DestroyIKController();
-    // KA->SetUpdateTracksCalback( 0 );
+        ZoneNamedN(cph_death_motion_zone, "cph_death_motion", true);
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsDeathMotion);
+        //	if(Type() == etStalker && xr_strcmp(dbg_stalker_death_anim, "none") != 0)
+        float hit_angle = 0;
+        MotionID m = m_death_anims.motion(m_EntityAlife, H, hit_angle);
 
-    if (is_imotion(m_interactive_motion))
-        m_interactive_motion->play();
+        CAI_Stalker* const holder = m_EntityAlife.cast_stalker();
+        if (holder && (holder->wounded() || holder->movement().current_params().cover()))
+            m = MotionID();
+
+        if (m.valid()) //&& cmp( prev_pose, mXFORM )
+        {
+            destroy(m_interactive_motion);
+            if (false && b_death_anim_velocity)
+                m_interactive_motion = xr_new<imotion_velocity>();
+            else
+                m_interactive_motion = xr_new<imotion_position>();
+            m_interactive_motion->setup(m, m_pPhysicsShell, hit_angle);
+        }
+        else
+            DestroyIKController();
+        // KA->SetUpdateTracksCalback( 0 );
+
+        if (is_imotion(m_interactive_motion))
+            m_interactive_motion->play();
+    }
 
     m_character_shell_control.set_fatal_impulse(H);
 
@@ -911,9 +960,19 @@ void CCharacterPhysicsSupport::in_UpdateCL()
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsUpdateInteractiveAnims);
             update_interactive_anims();
         }
-        if (should_run_character_ik_update(
-                m_EntityAlife, m_EntityAlife.ID(), Type(), m_next_ik_update_time, m_ik_update_interval, Device.dwTimeGlobal))
+        EIkIntervalRule ik_rule = EIkIntervalRule::Actor;
+        bool ik_offscreen = false;
+        if (should_run_character_ik_update(m_EntityAlife, m_EntityAlife.ID(), Type(), m_next_ik_update_time,
+                m_ik_update_interval, Device.dwTimeGlobal, ik_rule, ik_offscreen))
         {
+            if (ik_rule != EIkIntervalRule::Actor && npc_cpp_profile::enabled())
+            {
+                npc_cpp_profile::count(ik_rule == EIkIntervalRule::EnemySelected ?
+                        ENpcCppProfileStage::IkRunEnemySelected :
+                        ENpcCppProfileStage::IkRunDistance);
+                if (ik_offscreen)
+                    npc_cpp_profile::count(ENpcCppProfileStage::IkRunOffscreen);
+            }
             ZoneScopedN("cph_ik_controller_update");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsIkUpdate);
             ik_controller()->Update();
@@ -949,11 +1008,12 @@ void CCharacterPhysicsSupport::in_UpdateCL()
 #endif
 }
 
-void CCharacterPhysicsSupport::CreateSkeleton(CPhysicsShell*& pShell)
+void CCharacterPhysicsSupport::CreateSkeleton(CPhysicsShell*& pShell, u16 root_bone /*= u16(-1)*/)
 {
     R_ASSERT2(!pShell, "pShell already initialized!!");
     if (!m_EntityAlife.Visual())
         return;
+    ZoneScopedN("CCharacterPhysicsSupport::CreateSkeleton");
 #ifdef DEBUG
     CTimer t;
     t.Start();
@@ -963,7 +1023,10 @@ void CCharacterPhysicsSupport::CreateSkeleton(CPhysicsShell*& pShell)
     IKinematics* k = smart_cast<IKinematics*>(m_EntityAlife.Visual());
 
     phys_shell_verify_object_model(m_EntityAlife);
-    pShell->preBuild_FromKinematics(k);
+    if (root_bone == u16(-1))
+        pShell->preBuild_FromKinematics(k);
+    else
+        pShell->preBuild_FromKinematicsRoot(k, root_bone);
 
     pShell->mXFORM.set(mXFORM);
 
@@ -978,6 +1041,66 @@ void CCharacterPhysicsSupport::CreateSkeleton(CPhysicsShell*& pShell)
 #ifdef DEBUG
     Msg("shell for %s[%d] created in %f ms", m_EntityAlife.cName().c_str(), m_EntityAlife.ID(), t.GetElapsed_sec() * 1000.f);
 #endif
+}
+
+u16 CCharacterPhysicsSupport::SkeletonRootBone(IKinematics& K) const
+{
+    return m_eType != etBitting ? K.LL_BoneID("bip01_pelvis") : K.LL_GetBoneRoot();
+}
+
+// P16 (plans/optimization_mt/11-ragdoll-spikes.md): the part of the death -> ragdoll that does
+// not depend on the pose or the place - the CPhysicsShell of the model (elements, geoms, masses, joints; built out of the
+// world: ODE bodies and joints with no world, no space, not in the spatial DB) - built ahead on the scheduler, so the death
+// only puts it into the world (CreateShell: RunSimulation). The same slot vanilla fills at the first CreateShell.
+// Thread: the scheduler (the Game thread, parallel to the physics step and, in a game/render overlap frame, to the render) -
+// reads the model only (bone data, visible bones mask, bone ids), so the bone root is passed, not set (LL_SetBoneRoot).
+void CCharacterPhysicsSupport::TryPrebuildSkeleton()
+{
+    if (m_eType == etActor)
+        return;
+    if (m_physics_skeleton || m_pPhysicsShell || m_eState != esAlive || !m_EntityAlife.g_Alive())
+        return;
+    IKinematics* K = m_EntityAlife.Visual() ? smart_cast<IKinematics*>(m_EntityAlife.Visual()) : nullptr;
+    if (!K)
+        return;
+    // The scheduler is serial: plain statics
+    static u32 budget_frame = u32(-1);
+    static u32 budget_used = 0;
+    if (budget_frame != Device.dwFrame)
+    {
+        budget_frame = Device.dwFrame;
+        budget_used = 0;
+    }
+    if (budget_used >= ragdoll_prebuild_per_frame)
+        return;
+    const u16 root = SkeletonRootBone(*K);
+    if (root == BI_NONE)
+        return;
+    ++budget_used;
+
+    ZoneScopedN("cph_skeleton_prebuild");
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsSkeletonPrebuild);
+    CPhysicsShell* skeleton = nullptr;
+    CreateSkeleton(skeleton, root);
+    if (!skeleton)
+        return;
+    m_skeleton_root = root;
+    m_skeleton_bones_visible = K->LL_GetBonesVisible();
+    m_skeleton_generation = m_visual_generation;
+    m_skeleton_prebuilt = true;
+    m_physics_skeleton = skeleton;
+}
+
+// A prebuilt skeleton that no longer fits the model. Main thread, no physics step running (CreateShell, in_ChangeVisual).
+void CCharacterPhysicsSupport::DiscardPrebuiltSkeleton()
+{
+    VERIFY(m_skeleton_prebuilt && m_physics_skeleton);
+    // Deactivate() of a shell that never ran calls processing_activate() of its object once (vis_update_activate) -
+    // paid back here, as in_ChangeVisual does for the skeleton it replaces
+    m_physics_skeleton->Deactivate();
+    xr_delete(m_physics_skeleton);
+    m_EntityAlife.processing_deactivate();
+    m_skeleton_prebuilt = false;
 }
 
 bool CCharacterPhysicsSupport::DoCharacterShellCollide()
@@ -1026,8 +1149,11 @@ bool CCharacterPhysicsSupport::CollisionCorrectObjPos(const Fvector& start_from,
     // during level/save load. The freshly spawned character still gets pushed out of the level geometry;
     // it just won't push against other characters via this activation shape (normal character-vs-character
     // collision resumes once both characters are simulating normally).
-    bool not_collide_characters = (!DoCharacterShellCollide() && !character_create) ||
-        (character_create && ph_console::ph_spawn_char_no_collide_chars != 0);
+    // P16 (plans/optimization_mt/11-ragdoll-spikes.md): !character_create is only the start of a free ragdoll
+    // (EndActivateFreeShell). Its box always ignores live characters too - in a crowd it cannot push out of them (they
+    // are frozen) and would run all 150 world steps; ph_death_correct_max_steps N: at most N.
+    bool not_collide_characters = !character_create || ph_console::ph_spawn_char_no_collide_chars != 0;
+    const u16 max_push_steps = character_create ? u16(0) : u16(ph_console::ph_death_correct_max_steps);
     bool set_rotation = !character_create;
 
     if (!_valid(activation_pos) || !_valid(vbox))
@@ -1036,8 +1162,8 @@ bool CCharacterPhysicsSupport::CollisionCorrectObjPos(const Fvector& start_from,
     Fvector activation_res = Fvector().set(0, 0, 0);
     ////////////////
 
-    bool ret = ActivateShapeCharacterPhysicsSupport(
-        activation_res, vbox, activation_pos, mXFORM, not_collide_characters, set_rotation, &m_EntityAlife);
+    bool ret = ActivateShapeCharacterPhysicsSupport(activation_res, vbox, activation_pos, mXFORM,
+        not_collide_characters, set_rotation, &m_EntityAlife, max_push_steps);
     //////////////////
 
     m_EntityAlife.Position().sub(activation_res, shift);
@@ -1143,6 +1269,7 @@ BOOL dbg_draw_ragdoll_spawn = FALSE;
 #endif
 void CCharacterPhysicsSupport::ActivateShell(IGameObject* who)
 {
+    ZoneScopedN("CCharacterPhysicsSupport::ActivateShell");
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsActivateShell);
     R_ASSERT(_valid(m_EntityAlife.Position()));
     Fvector start;
@@ -1270,6 +1397,8 @@ void CCharacterPhysicsSupport::AddActiveWeaponCollision()
 {
     if (m_eType != etStalker)
         return;
+    ZoneScopedN("CCharacterPhysicsSupport::AddActiveWeaponCollision");
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsWeaponCollision);
     VERIFY(!m_weapon_attach_bone);
     VERIFY(!m_active_item_obj);
     VERIFY(m_weapon_geoms.empty());
@@ -1335,6 +1464,8 @@ void CCharacterPhysicsSupport::AddActiveWeaponCollision()
 
 void CCharacterPhysicsSupport::CreateShell(IGameObject* who, Fvector& dp, Fvector& velocity)
 {
+    ZoneScopedN("CCharacterPhysicsSupport::CreateShell");
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsCreateShell);
     xr_delete(m_collision_activating_delay);
     xr_delete(m_interactive_animation);
     destroy_animation_collision();
@@ -1364,8 +1495,23 @@ void CCharacterPhysicsSupport::CreateShell(IGameObject* who, Fvector& dp, Fvecto
         K->LL_SetBoneRoot(physics_root);
     }
     //
+    // P16: a skeleton prebuilt on the scheduler (TryPrebuildSkeleton) - only if built for this model as it is now
+    if (m_physics_skeleton && m_skeleton_prebuilt)
+    {
+        if (m_skeleton_generation == m_visual_generation && m_skeleton_root == physics_root &&
+            m_skeleton_bones_visible == K->LL_GetBonesVisible())
+            npc_cpp_profile::count(ENpcCppProfileStage::CharacterPhysicsSkeletonPrebuiltUsed);
+        else
+        {
+            npc_cpp_profile::count(ENpcCppProfileStage::CharacterPhysicsSkeletonPrebuiltStale);
+            DiscardPrebuiltSkeleton();
+        }
+    }
     if (!m_physics_skeleton)
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsCreateSkeleton);
         CreateSkeleton(m_physics_skeleton);
+    }
 
     if (m_eType == etActor)
     {
@@ -1387,8 +1533,11 @@ void CCharacterPhysicsSupport::CreateShell(IGameObject* who, Fvector& dp, Fvecto
     if (anim_mov_ctrl) // we do not whant to move by long animation in root
         BR.set_callback_overwrite(TRUE);
     //
-    K->CalculateBones_Invalidate();
-    K->CalculateBones(TRUE);
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsCreateShellBones);
+        K->CalculateBones_Invalidate();
+        K->CalculateBones(TRUE);
+    }
     if (m_eType != etBitting)
         K->LL_SetBoneRoot(physics_root);
     ////////////////////////////////////////////////////////////////////////////
@@ -1411,10 +1560,14 @@ void CCharacterPhysicsSupport::CreateShell(IGameObject* who, Fvector& dp, Fvecto
     R_ASSERT2(m_physics_skeleton, "No skeleton created!!");
     m_pPhysicsShell = m_physics_skeleton;
     m_physics_skeleton = NULL;
-    m_pPhysicsShell->set_Kinematics(K);
-    m_pPhysicsShell->RunSimulation();
-    m_pPhysicsShell->mXFORM.set(mXFORM);
-    m_pPhysicsShell->SetCallbacks();
+    m_skeleton_prebuilt = false;
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsCreateShellRun);
+        m_pPhysicsShell->set_Kinematics(K);
+        m_pPhysicsShell->RunSimulation();
+        m_pPhysicsShell->mXFORM.set(mXFORM);
+        m_pPhysicsShell->SetCallbacks();
+    }
     //
 
     if (anim_mov_ctrl) // we do not whant to move by long animation in root
@@ -1426,8 +1579,11 @@ void CCharacterPhysicsSupport::CreateShell(IGameObject* who, Fvector& dp, Fvecto
     if (m_eType != etBitting)
         K->LL_SetBoneRoot(anim_root);
 
-    K->CalculateBones_Invalidate();
-    K->CalculateBones(TRUE);
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsCreateShellBones);
+        K->CalculateBones_Invalidate();
+        K->CalculateBones(TRUE);
+    }
 
     if (m_eType != etBitting)
         K->LL_SetBoneRoot(physics_root);
@@ -1452,6 +1608,8 @@ void CCharacterPhysicsSupport::CreateShell(IGameObject* who, Fvector& dp, Fvecto
 void CCharacterPhysicsSupport::EndActivateFreeShell(
     IGameObject* who, const Fvector& inital_entity_position, const Fvector& dp, const Fvector& velocity)
 {
+    ZoneScopedN("CCharacterPhysicsSupport::EndActivateFreeShell");
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsEndActivate);
     VERIFY(m_pPhysicsShell);
     VERIFY(m_eState == esDead);
 #ifdef DEBUG
@@ -1463,7 +1621,11 @@ void CCharacterPhysicsSupport::EndActivateFreeShell(
     }
 #endif
 
-    CollisionCorrectObjPos(dp);
+    {
+        ZoneNamedN(cph_death_correct_zone, "cph_death_correct", true);
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsDeathCorrect);
+        CollisionCorrectObjPos(dp);
+    }
     m_pPhysicsShell->SetGlTransformDynamic(mXFORM);
 
 #ifdef DEBUG
@@ -1547,6 +1709,16 @@ void CCharacterPhysicsSupport::in_ChangeVisual()
             m_hit_animations.SetupHitMotions(*KA);
     }
 
+    // P16: a skeleton prebuilt for the previous visual (TryPrebuildSkeleton) no longer fits - dropped here when no
+    // physics step can run beside (then the scheduler builds a new one), else left to CreateShell (it checks the generation)
+    ++m_visual_generation;
+    if (m_skeleton_prebuilt && m_physics_skeleton && !m_pPhysicsShell)
+    {
+        IPHWorld* ph = physics_world();
+        if (!ph || !ph->ShouldDeferSchedulerPhysicsMutation())
+            DiscardPrebuiltSkeleton();
+    }
+
     if (!m_physics_skeleton && !m_pPhysicsShell)
         return;
 
@@ -1626,6 +1798,8 @@ void CCharacterPhysicsSupport::FlyTo(const Fvector& disp)
     float ammount = disp.magnitude();
     if (fis_zero(ammount, EPS_L))
         return;
+    ZoneScopedN("CCharacterPhysicsSupport::FlyTo");
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsFlyTo);
     physics_world()->Freeze();
     bool g = m_pPhysicsShell->get_ApplyByGravity();
     m_pPhysicsShell->set_ApplyByGravity(false);
@@ -1694,6 +1868,7 @@ void CCharacterPhysicsSupport::in_Die()
 {
     // Timed, not just counted: this fires once per death (same rate as Die()/ActivateShell(), which are
     // already timed) and covers DestroyCharacter(), which otherwise has no timing of its own at all.
+    ZoneScopedN("CCharacterPhysicsSupport::in_Die");
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsInDie);
     if (m_hit_valide_time < Device.dwTimeGlobal || !m_sv_hit.is_valide())
     {
@@ -1703,6 +1878,7 @@ void CCharacterPhysicsSupport::in_Die()
         IPHWorld* ph = physics_world();
         if (ph && ph->ShouldDeferSchedulerPhysicsMutation())
         {
+            npc_cpp_profile::count(ENpcCppProfileStage::CharacterPhysicsDeathDeferred);
             ph->defer_scheduler_mutation([this]
             {
                 ActivateShell(NULL);

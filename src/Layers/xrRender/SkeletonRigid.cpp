@@ -27,22 +27,60 @@ void CKinematics::CalculateBones(BOOL bForceExact)
         PERF_INC(bones_fast_out);
         return;
     }
-    UCalc_mtlock lock;
-    // Re-check under the lock: another render thread may have recomputed this tick while we waited
-    // (a forced call would otherwise rewrite bone_instances/children it is still reading), and the same
-    // thread may be recursing from inside its own recompute.
+    // --- phases ------------------------------------------------------------------------------------------
+    // A (global UCalc_Mutex): OnCalculateBones (UpdateTracks can fire blend callbacks into Lua; the global lock is
+    //   what serializes that between render threads) and the slow_skip check. Never waits for a
+    //   model lock, so a thread holding the global lock can't take part in a lock cycle.
+    // B (per-model lock): Visibility_Update, Bone_Calculate,
+    //   visbox, Update_Callback. Models are independent here, so different models compute in parallel.
+    // Lock order: global -> (never) model. A thread holding a model lock may block on the global one (nested
+    // CalculateBones), but a global holder only TryEnters a model lock (see UCalc_model_lock).
+
+    // Returns true when phase B has to run.
+    const auto phase_a = [&]() -> bool
+    {
+        // Computation of this tick already started (finished, or in progress on another thread / in our own
+        // recursion). Skip A, but let phase B wait for the owner: the old global lock made a second caller wait
+        // until the bones were complete, and the caller reads them right after we return.
+        if (Device.dwTimeGlobal == UCalc_Time)
+            return true;
+        {
+            PERF_SCOPE(bones_on_calc);
+            OnCalculateBones();
+        }
+        if (!bForceExact && (Device.dwTimeGlobal < (UCalc_Time + UCalc_Interval)))
+        {
+            PERF_INC(bones_slow_skip);
+            return false;
+        }
+        return true;
+    };
+
+    bool need_b;
+    {
+        UCalc_mtlock lock;
+        need_b = phase_a();
+    } // global lock released before waiting for the model lock
+    if (!need_b)
+        return;
+    UCalc_model_lock model_lock(UCalc_ModelLock, this);
+    if (!model_lock.locked)
+    {
+        // We hold another model's (or the global) lock: waiting could deadlock, keep the previous pose.
+        PERF_INC(bones_lock_try_fail);
+        return;
+    }
+    CalculateBonesPhaseB(bForceExact);
+}
+
+// Phase B of CalculateBones; the caller holds the per-model lock.
+void CKinematics::CalculateBonesPhaseB(BOOL bForceExact)
+{
+    // Re-check under the lock: another thread may have recomputed this tick between phase A and now, we may have
+    // waited for it (the bones are complete then), or this is our own recursion from inside the recompute below.
     if (Device.dwTimeGlobal == UCalc_Time)
     {
         PERF_INC(bones_fast_out);
-        return;
-    }
-    {
-        PERF_SCOPE(bones_on_calc);
-        OnCalculateBones();
-    }
-    if (!bForceExact && (Device.dwTimeGlobal < (UCalc_Time + UCalc_Interval)))
-    {
-        PERF_INC(bones_slow_skip);
         return;
     }
     PERF_INC(bones_recompute);
@@ -50,6 +88,31 @@ void CKinematics::CalculateBones(BOOL bForceExact)
     // separate exclusive bucket - don't "fix" this into bones_recompute -= bones_forced.
     if (bForceExact)
         PERF_INC(bones_forced);
+    // Bones prepass: these bones were already computed by this frame's prepass and are recomputed again, i.e.
+    // something invalidated them after it (CalculateBones_Invalidate, bone visibility). A miss: the prepass work
+    // was wasted, so BonesPrepass_Wanted() leaves this model to the render for a while.
+    if (m_prepass_frame.load(std::memory_order_relaxed) == Device.dwFrame)
+    {
+        const u8 pass = xray::perf::TlPass();
+        if (pass != xray::perf::pass::Prepass)
+        {
+            m_prepass_miss_frame.store(Device.dwFrame, std::memory_order_relaxed);
+            if (pass == xray::perf::pass::None)
+                PERF_INC(prepass_miss_other);
+            else
+                PERF_INC(prepass_miss_render);
+        }
+    }
+#if XR_PERF_METRICS
+    // bones/bone_calc: the bone math (Visibility_Update + Bone_Calculate + visbox), as opposed to UpdateTracks
+    // (bones/on_calc) and Update_Callback.
+    u64 perf_bone_calc_t0 = 0;
+    if (xray::perf::g_perf_metrics_active)
+    {
+        xray::perf::Add(xray::perf::BonesRecomputePassMetric(xray::perf::TlPass()));
+        perf_bone_calc_t0 = xray::perf::Ticks();
+    }
+#endif
     if (Update_Visibility)
         Visibility_Update();
 
@@ -82,7 +145,9 @@ void CKinematics::CalculateBones(BOOL bForceExact)
         ZoneScopedN("Skeleton update");
 
         // mark
-        UCalc_Visibox = -(::Random.randI(psSkeletonUpdate - 1));
+        // Own generator per thread: ::Random is a shared plain counter, a data race once models compute in parallel.
+        static thread_local CRandom s_visbox_random;
+        UCalc_Visibox = -(s_visbox_random.randI(psSkeletonUpdate - 1));
 
         // the update itself
         Fbox Box;
@@ -126,6 +191,9 @@ void CKinematics::CalculateBones(BOOL bForceExact)
             X.transform_tiny(P, A);
             acc.modify(P);
         };
+        // Keep r__parallel_skeleton_visbox = 0 (default): xr_parallel_for lets this thread steal render tasks while
+        // it holds the model lock; a stolen task only TryEnters other models (UCalc_model_lock), so it can't
+        // deadlock, but it would skip recomputes (bones/lock_try_fail) and the nesting is hard to reason about.
         const bool use_parallel = r__parallel_skeleton_visbox != 0 &&
             static_cast<int>(bone_count) >= r__parallel_skeleton_visbox_min_bones;
         if (use_parallel)
@@ -178,13 +246,91 @@ void CKinematics::CalculateBones(BOOL bForceExact)
 #endif
     }
 
+#if XR_PERF_METRICS
+    if (perf_bone_calc_t0)
+        xray::perf::AddTimeSlow(xray::perf::Metric::bones_bone_calc, xray::perf::Ticks() - perf_bone_calc_t0);
+#endif
+
     //
     if (Update_Callback)
     {
         PERF_INC(bones_callback);
+        PERF_SCOPE(bones_update_cb);
         Update_Callback(this);
     }
     UCalc_DoneTime.store(UCalc_Time, std::memory_order_release);
+}
+
+// --- Bones prepass (always, CLevel::BonesPrepass, plans/optimization_mt/04-bones-prepass.md) ----------------------
+// The game calls these once per frame between the game logic and the render (device.cpp, RunBonesPrepass): phase A
+// for every candidate sequentially on the main thread, then phase B for all of them in parallel. Same work, locks and
+// lock order as CalculateBones(TRUE) - just phase A of all models before phase B of any. Afterwards UCalc_DoneTime ==
+// Device.dwTimeGlobal, so the render's CalculateBones(TRUE) takes the unlocked fast-out.
+
+// A model the prepass missed on (recomputed again after it in the same frame) is left to the render for this many
+// frames; then the prepass tries it again. Keeps the wasted work of always-missing models (a weapon with
+// bUseAttachmentSystem invalidates its bones in every renderable_Render) at about 1/64.
+static constexpr u32 bones_prepass_miss_cooldown = 64;
+
+void CKinematics::BonesPrepass_MarkRendered()
+{
+    const u32 frame = Device.dwFrame;
+    // Many render threads (main view, cascades, lights, SVP) hit the same model: store only on change.
+    if (m_render_bones_frame.load(std::memory_order_relaxed) != frame)
+        m_render_bones_frame.store(frame, std::memory_order_relaxed);
+}
+
+bool CKinematics::BonesPrepass_Wanted() const
+{
+    const u32 frame = Device.dwFrame;
+    const u32 rendered = m_render_bones_frame.load(std::memory_order_relaxed);
+    // The prepass runs after FrameMove (dwFrame already advanced), so the previous render stamped frame - 1.
+    if (rendered == 0 || rendered + 1 < frame)
+        return false;
+    const u32 miss = m_prepass_miss_frame.load(std::memory_order_relaxed);
+    if (miss != 0 && frame - miss < bones_prepass_miss_cooldown)
+    {
+        PERF_INC(prepass_cooldown);
+        return false;
+    }
+    return true;
+}
+
+bool CKinematics::BonesPrepass_PhaseA()
+{
+    // Already computed this tick (e.g. by UpdateCL: eye_pp, weapon xform, CCF) - nothing to do, the render fast-outs.
+    if (Device.dwTimeGlobal == UCalc_DoneTime.load(std::memory_order_acquire))
+        return false;
+    UCalc_mtlock lock;
+    // Started this tick by someone else (or our own recursion) - phase B would only wait for it; let the render
+    // handle the model as before.
+    if (Device.dwTimeGlobal == UCalc_Time)
+        return false;
+    {
+        PERF_SCOPE(bones_on_calc);
+        OnCalculateBones();
+    }
+    return true;
+}
+
+bool CKinematics::BonesPrepass_PhaseB()
+{
+    if (Device.dwTimeGlobal == UCalc_DoneTime.load(std::memory_order_acquire))
+        return false;
+    // Same rule as CalculateBones: blocking Enter only while this thread holds no other model lock and not the
+    // global one (a prepass task holds nothing when it gets here); nested computations only TryEnter.
+    UCalc_model_lock model_lock(UCalc_ModelLock, this);
+    if (!model_lock.locked)
+    {
+        PERF_INC(bones_lock_try_fail);
+        return false;
+    }
+    // Under the lock: computed in between (a bone callback of another model computed this one) - done.
+    if (Device.dwTimeGlobal == UCalc_Time)
+        return false;
+    m_prepass_frame.store(Device.dwFrame, std::memory_order_relaxed);
+    CalculateBonesPhaseB(TRUE);
+    return true;
 }
 
 #ifdef DEBUG

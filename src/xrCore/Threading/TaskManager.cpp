@@ -21,6 +21,7 @@
 #include "ScopeLock.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 
+#include <algorithm>
 #include <thread>
 #include <SDL_events.h>
 
@@ -43,6 +44,11 @@
 xr_unique_ptr<TaskManager> TaskScheduler;
 
 static constexpr size_t OTHER_THREADS_COUNT = 1; // Primary and Secondary thread
+// GW: worker slots for custom threads registered after SpawnThreads() - the game/render overlap "Game" thread
+// (EngineThreading.cpp) and CPHWorld's "Physics" thread (PHWorld.cpp). Reserved up
+// front so such a late RegisterThisThreadAsWorker() never reallocates `workers` while the pool threads read it
+// without the lock (TryToSteal). The pool size is not affected.
+static constexpr size_t CUSTOM_THREADS_RESERVE = 2;
 
 class TaskStorageSize
 {
@@ -158,7 +164,7 @@ public:
 TaskManager::TaskManager()
 {
     ZoneScoped;
-    workers.reserve(std::thread::hardware_concurrency());
+    workers.reserve(std::thread::hardware_concurrency() + CUSTOM_THREADS_RESERVE);
     RegisterThisThreadAsWorker();
 }
 
@@ -166,7 +172,7 @@ void TaskManager::SpawnThreads()
 {
     ZoneScoped;
 
-    const u32 threads = workers.capacity() - OTHER_THREADS_COUNT;
+    const u32 threads = std::thread::hardware_concurrency() - OTHER_THREADS_COUNT;
     workerThreads.reserve(threads);
 
     for (u32 i = 0; i < threads; ++i)
@@ -210,10 +216,18 @@ void TaskManager::RegisterThisThreadAsWorker()
     ZoneScoped;
     std::lock_guard guard{ workersLock };
 
-    R_ASSERT2(workers.size() < std::thread::hardware_concurrency(),
-        "You must change OTHER_THREADS_COUNT if you want to register more custom threads.");
+    // Never past the reserved capacity: the pool threads index `workers` without the lock.
+    R_ASSERT2(workers.size() < workers.capacity(),
+        "You must change CUSTOM_THREADS_RESERVE if you want to register more custom threads.");
 
-    s_tl_worker.id = workers.size();
+    // The lowest ID no registered worker holds, not workers.size(): UnregisterThisThreadAsWorker() erases from the
+    // middle without renumbering the others. Once one custom thread has left (the physics thread with its level),
+    // size() can equal the ID another one still holds, and the two would share their per-worker slots
+    // (CObjectList::m_secondary_crows). The result stays below workers.capacity() (GetMaxWorkersCount()).
+    size_t id = 0;
+    while (std::any_of(workers.begin(), workers.end(), [id](const TaskWorker* w) { return w->id == id; }))
+        ++id;
+    s_tl_worker.id = id;
     workers.emplace_back(&s_tl_worker);
 }
 
@@ -428,6 +442,11 @@ bool TaskManager::ExecuteOneTask() const
 size_t TaskManager::GetWorkersCount() const noexcept
 {
     return workers.size();
+}
+
+size_t TaskManager::GetMaxWorkersCount() const noexcept
+{
+    return workers.capacity();
 }
 
 void TaskManager::WakeAllWorkers() noexcept

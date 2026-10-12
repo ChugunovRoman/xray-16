@@ -8,6 +8,7 @@
 
 #include "pch_script.h"
 #include "inventory_item.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "inventory_item_impl.h"
 #include "Inventory.h"
 
@@ -346,6 +347,8 @@ bool CInventoryItem::Detach(const char* item_section_name, bool b_spawn_item)
 /////////// network ///////////////////////////////
 bool CInventoryItem::net_Spawn(CSE_Abstract* DC)
 {
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): a mixin, called after the physics part of the item
+    PERF_STEP("cls_spawn/inventory_item", spawn_cls_inventory_item);
     VERIFY(!m_pInventory);
 
     m_flags.set(FInInterpolation, FALSE);

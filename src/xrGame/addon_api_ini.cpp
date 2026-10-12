@@ -4,6 +4,7 @@
 #include "addon_host.h"
 
 #include "xrCore/xr_ini.h"
+#include "xrCore/Profiling/IniLoadStats.hpp"
 
 #include <cstdlib>
 
@@ -129,6 +130,7 @@ GwpIni GWP_CALL ApiIniOpen(const GwpPlugin* self, const char* path)
     }
 
     SystemHandle(); // keeps the system config at handle 1
+    INI_SOURCE(Plugin, PluginAddonId(self)); // P20
     CInifile* file = xr_new<CInifile>(full, true /*read only*/);
     g_files->push_back({ file, self, true });
     return static_cast<GwpIni>(g_files->size());

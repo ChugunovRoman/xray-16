@@ -791,6 +791,15 @@ void CCC_Register()
     // GameThread while it is running. Off by default, own cvar so it works without perf_metrics. Not saved.
     CMD4(CCC_OverlapHazardProbe, "overlap_hazard_probe", &::xray::perf::g_overlap_hazard_probe, 0, 1);
 
+    // P19 spike logger (plans/optimization_mt/14-spike-instrumentation.md, xray::perf::SpikeScope): a call of a marked
+    // place (object UpdateCL / shedule_Update and their stages, CLevel::OnFrame phases, relcase, physics step...) longer
+    // than perf_spike_us microseconds -> "! [perf-spike]" line in the log; 0 = off. perf_spike_cpu 1 - per-object places
+    // read the thread CPU time too (phases always do; costs a system call per object). perf_spike_lines - lines per 5 s
+    // window, the rest only counted in the summary. Independent of perf_metrics. Not saved (same class).
+    CMD4(CCC_PerfMetrics, "perf_spike_us", &::xray::perf::g_perf_spike_us, 0, 1000000);
+    CMD4(CCC_PerfMetrics, "perf_spike_cpu", &::xray::perf::g_perf_spike_cpu, 0, 1);
+    CMD4(CCC_PerfMetrics, "perf_spike_lines", &::xray::perf::g_perf_spike_lines, 0, 1000);
+
 #ifdef DEBUG
     CMD3(CCC_Mask, "mt_particles", &psDeviceFlags, mtParticles);
 

@@ -45,6 +45,10 @@ public:
     IC float switch_distance() const noexcept;
     IC void set_switch_distance(float switch_distance) noexcept;
     IC void set_switch_factor(float switch_factor) noexcept;
+
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): a running total of the M_SPAWN sent by add_online - the object
+    // and one per inventory item (add_online_impl). update_switch takes its difference over a pass (alife/switch/pass_spawns).
+    std::atomic<u32> m_online_spawns{0};
 };
 
 #include "alife_switch_manager_inline.h"

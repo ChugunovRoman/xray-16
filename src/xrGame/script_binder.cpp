@@ -18,6 +18,7 @@
 #include "smart_zone.h"
 #include "xrEngine/profiler.h"
 #include "npc_cpp_profile.h"
+#include "lua_spike_probe.h"
 
 // comment next string when commiting
 //#define DBG_DISABLE_SCRIPTS
@@ -174,7 +175,13 @@ void CScriptBinder::shedule_Update(u32 time_delta)
         try
         {
             START_PROFILE("script_binder/update")
+            // P18 (plans/optimization_mt/13-lua-spikes.md): an update over npc_perf_lua_spike_us goes to the log
+            gw::lua_spike::Probe spike(
+                gw::lua_spike::Enabled() && GEnv.ScriptEngine ? GEnv.ScriptEngine->lua() : nullptr,
+                gw::lua_spike::ECategory::Binder);
             m_object->shedule_Update(time_delta);
+            if (spike.Finish() && owner)
+                spike.Report(owner->cNameSect().c_str(), owner->ID(), gw::lua_spike::kNoId);
             STOP_PROFILE
         }
         catch (...)

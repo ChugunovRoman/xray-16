@@ -11,6 +11,7 @@
 #include "player_hud.h"
 #include "CustomDetector.h"
 #include "ActorEffector.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 CEatableItemObject::CEatableItemObject() {}
 CEatableItemObject::~CEatableItemObject() {}
@@ -127,11 +128,17 @@ void CEatableItemObject::load(IReader& packet)
     SwitchState(state);
 }
 
+// The original code made up to three add_Visual of the same visual by the same XFORM: CHudItem (XFORM refresh, then -
+// gated by the HUD mode / hidden state - on_renderable_Render -> CInventoryItem -> CAttachableItem), CPhysicItem ->
+// CGameObject (always, with the main pass frame, bones prepass note, MakeMeCrow) and CEatableItem -> CAttachableItem
+// (always); the render dropped the repeats by the visual's marker. As the CGameObject one is unconditional, the item
+// is drawn whatever the gate says. plans/optimization_mt/07-item-single-render.md: only that is kept - the XFORM
+// refresh of CHudItem and the CGameObject add_Visual, once.
 void CEatableItemObject::renderable_Render(u32 context_id, IRenderable* root)
 {
-    CHudItem::renderable_Render(context_id, root);
+    render_refresh_xform();
+    PERF_INC(item_render_add_visual);
     CPhysicItem::renderable_Render(context_id, root);
-    CEatableItem::renderable_Render(context_id, root);
 }
 
 void CEatableItemObject::reload(LPCSTR section)
@@ -378,6 +385,8 @@ void CEatableItemObject::DeactivateItem()
     CHudItem::DeactivateItem();
 }
 
+// Pure virtual of CHudItem; renderable_Render above does not go through CHudItem::renderable_Render, so it is not
+// reached from there (07-item-single-render.md)
 void CEatableItemObject::on_renderable_Render(u32 context_id, IRenderable* root)
 {
     CInventoryItem::renderable_Render(context_id, root);

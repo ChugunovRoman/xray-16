@@ -234,6 +234,10 @@ void CBackend::ResetDeferredCache()
 
     // THE difference from Invalidate(): do NOT touch context_id - a pooled deferred context
     // keeps its slot identity (overwriting it to IMM_CTX_ID caused GPU device-removed crashes).
+
+    // A new command list starts on this deferred context: the GPU copies of its dynamic constant buffers
+    // are undefined until re-mapped, so drop the "unchanged since last upload" knowledge (dx11ConstantBuffer::Write skips equal sets).
+    RImplementation.Resources->MarkConstantBuffersChanged(context_id);
 #endif // USE_DX11
 
     for (u32 ps_it = 0; ps_it < CTexture::mtMaxPixelShaderTextures;)

@@ -15,6 +15,7 @@
 #include "xrCDB/xr_area.h"
 #include "xrEngine/IGame_Level.h"
 #include "performance_cvars.h"
+#include "npc_cpp_profile.h"
 #include <tracy/Tracy.hpp>
 #ifdef DEBUG
 #include "PHDebug.h"
@@ -355,6 +356,8 @@ void CIKLimbsController::ExecuteIKRayBatch()
         return;
 
     const size_t total_rays = m_ik_batch_groups.size() * 3;
+    if (npc_cpp_profile::enabled())
+        npc_cpp_profile::count(ENpcCppProfileStage::IkRays, total_rays);
     m_ik_batch_items.resize(total_rays);
     m_ik_batch_results.resize(total_rays);
 

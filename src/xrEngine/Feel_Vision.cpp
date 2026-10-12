@@ -17,7 +17,8 @@ ENGINE_API int npc_perf_vision_dynamic_cache = 1;
 namespace Feel
 {
 
-Vision::Vision(IGameObject const* owner) : pure_relcase(&Vision::feel_vision_relcase), m_owner(owner) {}
+Vision::Vision(IGameObject const* owner)
+    : pure_relcase(&Vision::feel_vision_relcase, &Vision::feel_vision_relcase_batch), m_owner(owner) {}
 Vision::~Vision() {}
 struct SFeelParam
 {
@@ -98,6 +99,32 @@ void Vision::feel_vision_relcase(IGameObject* object)
             feel_visible.erase(Ii);
             break;
         }
+}
+
+// Same result as feel_vision_relcase for every object of the batch (it removes the first match from each list, there is
+// at most one): the lists only lose pointers, nothing is called back.
+void Vision::feel_vision_relcase_batch(const RelcaseBatch& batch)
+{
+    PERF_SCOPE(relcase_cb_vision);
+    std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
+    const auto in_batch = [&batch](const IGameObject* object) { return batch.contains(object); };
+    const size_t query_size = query.size();
+    seen.erase(std::remove_if(seen.begin(), seen.end(), in_batch), seen.end());
+    query.erase(std::remove_if(query.begin(), query.end(), in_batch), query.end());
+    diff.erase(std::remove_if(diff.begin(), diff.end(), in_batch), diff.end());
+    // P17b (always): feel_visible holds exactly the objects of `query` - only o_new / o_delete change it,
+    // both from feel_vision_merge_after_frustum (o_new for seen - query, o_delete for query - seen, then query = seen),
+    // relcase drops an object from both, feel_vision_clear empties both, all under m_vision_mtx. So if no batch object
+    // left `query`, none is in feel_visible, and its walk (an item of ~180 bytes per object in sight, thousands of cache
+    // lines per frame over all NPCs) is skipped. The sizes must agree, otherwise it is walked as before.
+    if (query.size() == query_size && feel_visible.size() == query_size)
+    {
+        PERF_INC(relcase_vision_visible_skips);
+        return;
+    }
+    feel_visible.erase(std::remove_if(feel_visible.begin(), feel_visible.end(),
+                           [&batch](const feel_visible_Item& item) { return batch.contains(item.O); }),
+        feel_visible.end());
 }
 
 void Vision::feel_vision_query(Fmatrix& mFull, Fvector& P)

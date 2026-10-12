@@ -4,6 +4,7 @@
 #include "IGame_ObjectPool.h"
 #include "xr_object.h"
 #include "xrServerEntities/smart_cast.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 IGame_ObjectPool::IGame_ObjectPool(void) {}
 IGame_ObjectPool::~IGame_ObjectPool(void) { R_ASSERT(m_PrefetchObjects.empty()); }
@@ -42,11 +43,23 @@ void IGame_ObjectPool::clear()
 
 IGameObject* IGame_ObjectPool::create(pcstr name)
 {
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): CObjectList::Create of a client spawn by step, spawn/create/*
     CLASS_ID CLS = pSettings->r_clsid(name, "class");
-    IGameObject* O = smart_cast<IGameObject*>(NEW_INSTANCE(CLS));
+    IGameObject* O = nullptr;
+    {
+        PERF_STEP("object_pool/new_instance", spawn_create_new);
+        O = smart_cast<IGameObject*>(NEW_INSTANCE(CLS));
+    }
     O->cNameSect_set(name);
-    O->Load(name);
-    O->PostLoad(name); //--#SM+#--
+    {
+        PERF_STEP("object_pool/load", spawn_create_load);
+        ZoneText(name, xr_strlen(name));
+        O->Load(name);
+    }
+    {
+        PERF_STEP("object_pool/post_load", spawn_create_post_load);
+        O->PostLoad(name); //--#SM+#--
+    }
     return O;
 }
 

@@ -385,6 +385,8 @@ void CActor::cam_Update(float dt, float fFOV)
     }
     if (Level().CurrentEntity() == this)
     {
+        // P19b (14-spike-instrumentation.md): the camera box collides with the world and is stepped out (ODE)
+        PERF_STAGE("actor_ucl/cam_collide", actor_ucl_cam_collide);
         collide_camera(*cameras[eacFirstEye], _viewport_near, this);
     }
     Cameras().UpdateFromCamera(C);

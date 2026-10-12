@@ -3,6 +3,7 @@
 #include "addon_event_bus.h"
 #include "addon_goap.h"
 #include "addon_timers.h"
+#include "lua_spike_probe.h"
 #include <tracy/Tracy.hpp>
 #include "xrEngine/FDemoRecord.h"
 #include "xrEngine/FDemoPlay.h"
@@ -11,6 +12,10 @@
 #include "ParticlesObject.h"
 #include "Level.h"
 #include "VisionBatch.h"
+#include "Include/xrRender/Kinematics.h"
+#include "inventory_item.h" // render prepare of held items: CLevel::BonesPrepass collect step
+#include "HudItem.h"
+#include "xrCore/Threading/ParallelFor.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #include "HUDManager.h"
 #include "xrServer.h"
@@ -37,6 +42,7 @@
 #include "ClimableObject.h"
 #include "xrAICore/Navigation/level_graph.h"
 #include "mt_config.h"
+#include "script_entity.h"
 #include "map_manager.h"
 #include "xrEngine/CameraManager.h"
 #include "xrEngine/Render.h"
@@ -72,6 +78,10 @@
 
 extern CUISequencer* g_tutorial;
 extern CUISequencer* g_tutorial2;
+
+// P19 (plans/optimization_mt/14-spike-instrumentation.md): one phase of CLevel::OnFrame - Tracy zone, frame/level/*
+// timer of perf_metrics and the spike logger (perf_spike_us, with the CPU time of the thread). One per block.
+#define LEVEL_FRAME_PHASE(zone, metric) ZoneScopedN(zone); PERF_SCOPE(metric); PERF_SPIKE_PHASE(zone)
 
 float g_cl_lvInterp = 0.1;
 u32 lvInterpSteps = 0;
@@ -128,6 +138,7 @@ CLevel::CLevel()
     });
 
     Device.PostSchedulerVisionBatch = &CLevel::VisionBatchPostScheduler;
+    Device.BonesPrepassCallback = &CLevel::BonesPrepass;
 }
 
 CLevel::~CLevel()
@@ -135,6 +146,7 @@ CLevel::~CLevel()
     ZoneScoped;
 
     Device.PostSchedulerVisionBatch = nullptr;
+    Device.BonesPrepassCallback = nullptr;
 
     xr_delete(g_player_hud[0]);
     xr_delete(g_player_hud[1]);
@@ -280,6 +292,19 @@ void CLevel::cl_Process_Event(u16 dest, u16 type, NET_Packet& P)
     }
     if (0 == O)
     {
+        // Spawn stage 0 (plans/spawn_optimization/SPEC.md 3.3): an event to an object the client does not have is dropped.
+        // Hits to just destroyed objects are normal; a lost GE_OWNERSHIP_TAKE leaves the item without its owner on the
+        // client, so that one is logged in every build.
+        PERF_INC(ge_unknown_dest);
+        if (type == GE_OWNERSHIP_TAKE)
+        {
+            const u32 pos = P.r_tell();
+            const u16 child = P.r_u16();
+            P.r_seek(pos);
+            IGameObject* child_object = Objects.net_Find(child);
+            Msg("! WARNING: GE_OWNERSHIP_TAKE to [%u] that is not on the client: object [%u][%s] stays without its owner",
+                (unsigned)dest, (unsigned)child, child_object ? child_object->cNameSect().c_str() : "not on the client");
+        }
 #ifdef DEBUG
         Msg("* WARNING: c_EVENT[%d] to [%d]: unknown dest", type, dest);
 #endif
@@ -346,7 +371,152 @@ void CLevel::cl_Process_Event(u16 dest, u16 type, NET_Packet& P)
     }
 }
 
-void CLevel::ProcessGameEvents()
+// plans/spawn_optimization/SPEC.md 8.6: the head M_SPAWN waits while its ID is held by an object marked for destruction
+// (it is destroyed by CObjectList::Update of this very frame, right after ProcessGameEvents). The whole queue behind it
+// waits too, so the order of events is kept: its children come after it, events to it after it. If the old object is
+// still there after this many frames (should never happen: the destroy queue is processed every frame), stop waiting -
+// a stalled queue would freeze every spawn and event of the game; g_sv_Spawn then skips the spawn with an error.
+constexpr u32 spawn_id_wait_frames_max = 30;
+
+bool CLevel::SpawnMustWait(u16 id, pcstr section)
+{
+    if (GameID() != eGameIDSingle || id == u16(-1))
+        return false;
+    const IGameObject* holder = Objects.net_Find(id);
+    if (!holder || !holder->getDestroy())
+        return false; // the ID is free, or held by a live object (a real duplicate: g_sv_Spawn skips it with an error)
+
+    SpawnIdWait& wait = m_spawn_id_wait;
+    if (!wait.waiting || wait.id != id)
+    {
+        wait.id = id;
+        wait.section = section;
+        wait.first_frame = Device.dwFrame;
+        wait.frames = 0;
+        wait.waiting = true;
+        PERF_INC(spawn_id_reuse_deferred);
+        Msg("* spawn: id[%u] [%s] is still held by [%s][%s] being destroyed; the spawn and the %u events behind it wait "
+            "for the next frame", (unsigned)id, section, holder->cNameSect().c_str(), holder->cName().c_str(),
+            (unsigned)(game_events->size() - 1));
+        return true;
+    }
+    wait.frames = Device.dwFrame - wait.first_frame;
+    if (wait.frames <= spawn_id_wait_frames_max)
+        return true;
+
+    Msg("! ERROR: spawn: id[%u] [%s] is still held by [%s][%s] after %u frames; stop waiting, the spawn will be skipped",
+        (unsigned)id, section, holder->cNameSect().c_str(), holder->cName().c_str(), wait.frames);
+    wait.waiting = false;
+    return false;
+}
+
+void CLevel::SpawnWaitDone(u16 id)
+{
+    SpawnIdWait& wait = m_spawn_id_wait;
+    if (!wait.waiting || wait.id != id)
+        return;
+    wait.waiting = false;
+    const IGameObject* object = Objects.net_Find(id);
+    if (object && !object->getDestroy())
+        Msg("* spawn: id[%u] [%s] materialized after waiting %u frame(s)", (unsigned)id, object->cNameSect().c_str(),
+            Device.dwFrame - wait.first_frame);
+    else
+        Msg("! ERROR: spawn: id[%u] [%s] waited %u frame(s) but did not materialize", (unsigned)id,
+            wait.section.c_str(), Device.dwFrame - wait.first_frame);
+}
+
+// Spawn stage 2 (plans/spawn_optimization/SPEC.md 5.A, section 12): the budget of the client materialization of M_SPAWN
+// per frame. Temporary console variables, not saved (console_commands.cpp); spawn_budget_us 0 = as before: the whole
+// queue in one frame.
+int g_spawn_budget_us = 5000; // time of one pass of ProcessGameEvents (M_EVENT count too) after which no group starts
+int g_spawn_min_per_frame = 2; // groups materialized in every frame whatever the budget: the queue always moves
+int g_spawn_max_delay_ms = 500; // a head that waits longer goes on past the budget (player actions, quest items)...
+// ...but only up to spawn_catchup_us per pass: a wave of 1000+ spawns (session 2026-10-12) otherwise went in one frame
+// once its head was 500 ms old (forced/delay 1431 groups, 740 ms frame); the backlog now drains at this rate.
+// 0 = no limit (the old behaviour).
+int g_spawn_catchup_us = 20000;
+
+namespace
+{
+// An M_SPAWN joins the open group when its parent is the root or a child already in it (the server sends the
+// inventory right behind its owner: alife_trader_abstract.cpp, add_online_impl)
+bool spawn_joins_group(const xr_vector<u16>& group, u16 parent)
+{
+    return parent != u16(-1) && std::find(group.begin(), group.end(), parent) != group.end();
+}
+
+// Groups and M_SPAWN in the queue, by the rule of ProcessGameEvents. `group` is a scratch vector.
+void count_spawn_groups(const xr_deque<NET_Event>& queue, xr_vector<u16>& group, u32& groups, u32& spawns)
+{
+    group.clear();
+    groups = 0;
+    spawns = 0;
+    for (const NET_Event& event : queue)
+    {
+        if (event.ID != M_SPAWN)
+            continue;
+        ++spawns;
+        if (!spawn_joins_group(group, event.spawn_parent))
+        {
+            ++groups;
+            group.clear();
+        }
+        if (event.spawn_id != u16(-1))
+            group.push_back(event.spawn_id);
+    }
+    group.clear();
+}
+
+// How long the event has been in the client queue, ms (real time)
+u32 queue_wait_ms(const NET_Event& event, u32 now_ms) { return now_ms - event.time_queued; }
+} // namespace
+
+bool CLevel::SpawnBudgetSpent(SpawnBudgetPass& pass, const NET_Event& head)
+{
+    if (!pass.budget_ns || pass.groups < pass.min_groups || pass.timer.GetElapsed_ns() < pass.budget_ns)
+        return false;
+    // The budget of this frame is spent. The head goes on regardless while loading, on pause or when it has waited too
+    // long: then every head older than spawn_max_delay_ms goes (FIFO: the ones behind it are younger).
+    SpawnBudgetForce force = pass.force;
+    if (force == SpawnBudgetForce::None && queue_wait_ms(head, CPU::GetTicks()) >= pass.max_delay_ms)
+        force = SpawnBudgetForce::Delay;
+    switch (force)
+    {
+    case SpawnBudgetForce::None:
+        pass.stopped = true;
+        return true;
+    case SpawnBudgetForce::Loading: PERF_INC(spawn_forced_loading); break;
+    case SpawnBudgetForce::Pause: PERF_INC(spawn_forced_pause); break;
+    case SpawnBudgetForce::Delay:
+        if (pass.catchup_ns && pass.timer.GetElapsed_ns() >= pass.catchup_ns)
+        {
+            PERF_INC(spawn_catchup_stopped);
+            pass.stopped = true;
+            return true;
+        }
+        PERF_INC(spawn_forced_delay);
+        break;
+    default: break;
+    }
+    ++pass.forced[size_t(force)];
+    return false;
+}
+
+void CLevel::SpawnQueueNoteSave(pcstr where) const
+{
+    if (!game_events || GameID() != eGameIDSingle)
+        return;
+    xr_vector<u16> group;
+    u32 groups = 0;
+    u32 spawns = 0;
+    count_spawn_groups(game_events->queue, group, groups, spawns);
+    if (spawns)
+        Msg("* spawn: %s with %u M_SPAWN (%u groups) still in the client queue (spawn_budget_us %d): their objects are "
+            "saved from the server state",
+            where, spawns, groups, g_spawn_budget_us);
+}
+
+void CLevel::ProcessGameEvents(bool frame_budget)
 {
     ZoneScoped;
 
@@ -355,8 +525,57 @@ void CLevel::ProcessGameEvents()
         NET_Packet P;
         u32 svT = timeServer() - NET_Latency;
         u32 processed = 0;
+        // Spawn stage 0: the queue length, M_SPAWN of this pass and the longest "server sent it -> materialized"
+        const size_t queue_len = game_events->size();
+        u32 spawns = 0;
+        u32 spawn_delay_ms = 0;
+        u32 spawn_wait_ms = 0; // stage 2: the longest "entered the client queue -> materialized" of this pass
+        TracyPlot("ge_queue_len", static_cast<s64>(queue_len));
+
+        // Stage 2: the budget of this pass (see SpawnBudgetPass in Level.h)
+        SpawnBudgetPass budget;
+        if (frame_budget && g_spawn_budget_us > 0 && !g_bDebugEvents && GameID() == eGameIDSingle)
+        {
+            budget.timer.Start();
+            budget.budget_ns = u64(g_spawn_budget_us) * 1000;
+            budget.min_groups = u32(std::max(g_spawn_min_per_frame, 1));
+            budget.max_delay_ms = u32(std::max(g_spawn_max_delay_ms, 0));
+            budget.catchup_ns = g_spawn_catchup_us > 0 ? u64(std::max(g_spawn_catchup_us, g_spawn_budget_us)) * 1000 : 0;
+            if (load_screen_renderer.IsActive() || Device.dwPrecacheFrame > 0)
+                budget.force = SpawnBudgetForce::Loading;
+            else if (Device.Paused())
+                budget.force = SpawnBudgetForce::Pause;
+        }
+        xr_vector<u16> group; // IDs of the open group of this pass, the root first (local: the pass may nest)
+
         while (game_events->available(svT))
         {
+            u16 spawn_id = u16(-1);
+            {
+                const NET_Event& head = game_events->front();
+                if (head.ID == M_SPAWN)
+                {
+                    const bool joins_group = spawn_joins_group(group, head.spawn_parent);
+                    // Stage 2: the budget is checked in front of a root only, a group is never split by it
+                    if (!joins_group && SpawnBudgetSpent(budget, head))
+                        break; // this group and everything behind it go on in the next frame, in the same order
+                    if (SpawnMustWait(head.spawn_id, head.spawn_section()))
+                        break; // SPEC.md 8.6: this spawn and everything behind it go on in the next frame
+                    if (!joins_group)
+                    {
+                        group.clear();
+                        ++budget.groups;
+                    }
+                    if (head.spawn_id != u16(-1))
+                        group.push_back(head.spawn_id);
+                    budget.group_size_max = std::max(budget.group_size_max, static_cast<u32>(group.size()));
+                    spawn_wait_ms = std::max(spawn_wait_ms, queue_wait_ms(head, CPU::GetTicks()));
+                    spawn_id = head.spawn_id;
+                    const u32 now = timeServer_Async();
+                    if (head.time_receive && now >= head.time_receive)
+                        spawn_delay_ms = std::max(spawn_delay_ms, now - head.time_receive);
+                }
+            }
             ++processed;
             u16 ID, dest, type;
             game_events->get(ID, dest, type, P);
@@ -365,9 +584,11 @@ void CLevel::ProcessGameEvents()
             case M_SPAWN:
             {
                 PERF_INC(ge_spawn);
+                ++spawns;
                 u16 dummy16;
                 P.r_begin(dummy16);
                 cl_Process_Spawn(P);
+                SpawnWaitDone(spawn_id);
                 break;
             }
             case M_EVENT:
@@ -424,8 +645,53 @@ void CLevel::ProcessGameEvents()
             }
             }
         }
+
+        // Stage 2: the head left in the queue waits too (budget, SPEC.md 8.6); what the budget left for the next frame
+        if (game_events->size())
+            spawn_wait_ms = std::max(spawn_wait_ms, queue_wait_ms(game_events->front(), CPU::GetTicks()));
+        u32 deferred_groups = 0;
+        u32 deferred_spawns = 0;
+        if (budget.stopped)
+        {
+            PERF_INC(spawn_budget_frames);
+            count_spawn_groups(game_events->queue, group, deferred_groups, deferred_spawns);
+            PERF_ADD(spawn_budget_deferred, deferred_groups);
+        }
+        if (budget.budget_ns)
+        {
+            ZoneTextVF(___tracy_scoped_zone, "budget=%dus groups=%u (max %u spawns) deferred=%u groups/%u spawns",
+                g_spawn_budget_us, budget.groups, budget.group_size_max, deferred_groups, deferred_spawns);
+            TracyPlot("ge_spawn_deferred", static_cast<s64>(deferred_spawns));
+            if (budget.groups || budget.stopped)
+            {
+                SpawnBudgetFrame frame;
+                frame.budget_us = u32(g_spawn_budget_us);
+                frame.min_groups = budget.min_groups;
+                frame.max_delay_ms = budget.max_delay_ms;
+                frame.groups = budget.groups;
+                frame.group_size_max = budget.group_size_max;
+                frame.deferred_groups = deferred_groups;
+                frame.deferred_spawns = deferred_spawns;
+                frame.queue_wait_ms = spawn_wait_ms;
+                std::copy(std::begin(budget.forced), std::end(budget.forced), std::begin(frame.forced));
+                frame.stopped = budget.stopped;
+                SpawnBudgetReport(frame);
+            }
+        }
+
         if (xray::perf::g_perf_metrics_active)
-            xray::perf::SetGauge(xray::perf::Metric::ge_total_frame, static_cast<s64>(processed));
+        {
+            using xray::perf::Metric;
+            xray::perf::SetGauge(Metric::ge_total_frame, static_cast<s64>(processed));
+            xray::perf::SetGauge(Metric::ge_queue_len, static_cast<s64>(queue_len));
+            xray::perf::SetGauge(Metric::ge_spawn_delay_ms, static_cast<s64>(spawn_delay_ms));
+            xray::perf::SetGauge(Metric::spawn_deferred_frames_max,
+                m_spawn_id_wait.waiting ? static_cast<s64>(Device.dwFrame - m_spawn_id_wait.first_frame) + 1 : 0);
+            xray::perf::SetGauge(Metric::spawn_queue_wait_ms, static_cast<s64>(spawn_wait_ms));
+            xray::perf::SetGauge(Metric::spawn_groups_frame, static_cast<s64>(budget.groups));
+            xray::perf::SetGauge(Metric::spawn_group_size_max, static_cast<s64>(budget.group_size_max));
+        }
+        TracyPlot("ge_spawn_frame", static_cast<s64>(spawns));
     }
     if (OnServer() && GameID() != eGameIDSingle)
         Game().m_WeaponUsageStatistic->Send_Check_Respond();
@@ -484,9 +750,179 @@ void CLevel::VisionBatchPostScheduler()
     gw::addons::binders::FlushUpdates();
 }
 
+// --- Bones prepass (always, plans/optimization_mt/04-bones-prepass.md) -----------------------------------------------
+// The render used to compute the bones of every skeleton it drew itself (CalculateBones(TRUE) in add_leafs_dynamic,
+// main view + shadows, on the critical path of the render). The prepass computes, before the render, the bones of the
+// models the render computed in the previous frame: phase A (UpdateTracks, blend callbacks - game code, Lua) for all
+// of them sequentially on main, then phase B (bone math, bone callbacks, visbox, attachments) in parallel. The render
+// then takes the UCalc_DoneTime fast-out; anything new or invalidated after the prepass it still computes itself.
+namespace
+{
+// Object IDs the render noted during DoRender of frame N (CGameObject::renderable_Render, any render thread), consumed
+// by the prepass of frame N+1. One buffer is enough: the render (all its threads, the SVP one too, are joined inside
+// DoRender) and the prepass (main thread, after the game logic) never run at the same time. Every object is noted at
+// most once per frame (CGameObject::m_bones_prepass_note_frame) and IDs are u16, so 64K slots can't overflow.
+constexpr u32 bones_prepass_note_capacity = 0x10000;
+u16 s_bones_prepass_noted[bones_prepass_note_capacity];
+std::atomic<u32> s_bones_prepass_noted_count{0};
+// Main thread only (CLevel::BonesPrepass): kept between frames to keep their capacity.
+xr_vector<IKinematics*> s_bones_prepass_candidates;
+xr_vector<IKinematics*> s_bones_prepass_phase_b;
+// Render prepare: IDs of the held / dropped items (CHudItem) phase C prepares. IDs again: phase A runs game
+// code, the items are resolved anew after it.
+xr_vector<u16> s_render_prepare_items;
+
+// Render prepare of held items (plans/optimization_mt/05-render-prepare-weapons.md), collect step on main, for an object
+// the render drew last frame (already filtered: alive, not the view entity or held by it). A CHudItem (weapon,
+// grenade, detector, artefact... - held: noted through the owner's CInventoryOwner / CAttachmentOwner::renderable_Render,
+// which reach CGameObject::renderable_Render by the virtual call; or lying on the ground) goes to phase C: its
+// renderable_Render wrote XFORM / the shot light in every pass. A weapon with the attachment system adds its addon
+// models: the render drew them with add_Visual and computed their bones itself (they are no objects, never noted).
+// Attached items (helmet, torch, belt) need nothing here: they are noted themselves and their XFORM is written by the
+// owner's AttachmentCallback in the owner's phase B.
+void RenderPrepareCollect(IGameObject* O, xr_vector<IKinematics*>& models)
+{
+    CInventoryItem* inventory_item = O->cast_inventory_item();
+    CHudItem* hud_item = inventory_item ? inventory_item->cast_hud_item() : nullptr;
+    if (!hud_item)
+        return;
+    s_render_prepare_items.push_back(O->ID());
+    const size_t before = models.size();
+    hud_item->render_prepare_models(models);
+    PERF_ADD(prepare_addon_models, models.size() - before);
+}
+
+// Render prepare, phase C on main: after phase B (the owners' bones are final), before the render.
+// Sequential: UpdateXForm of a weapon whose owner the prepass didn't cover computes the owner's bones (as the render
+// did), and the shot light moves in the spatial DB.
+void RenderPreparePhaseC(CLevel& level, const IGameObject* view)
+{
+    if (s_render_prepare_items.empty())
+        return;
+    ZoneScopedN("BonesPrepass/prepare");
+    ZoneTextF("%u items", static_cast<u32>(s_render_prepare_items.size()));
+    PERF_SCOPE(prepare_time);
+    u32 prepared = 0;
+    for (const u16 id : s_render_prepare_items)
+    {
+        IGameObject* O = level.Objects.net_Find(id);
+        // Re-check after phase A (game code): gone, or taken by the view entity (its HUD path owns it).
+        if (!O || O->getDestroy() || (view && O->H_Root() == view))
+            continue;
+        CInventoryItem* inventory_item = O->cast_inventory_item();
+        CHudItem* hud_item = inventory_item ? inventory_item->cast_hud_item() : nullptr;
+        if (!hud_item)
+            continue;
+        hud_item->render_prepare();
+        ++prepared;
+    }
+    PERF_ADD(prepare_items, prepared);
+}
+} // namespace
+
+void CLevel::BonesPrepassNote(u16 id)
+{
+    const u32 slot = s_bones_prepass_noted_count.fetch_add(1, std::memory_order_relaxed);
+    if (slot < bones_prepass_note_capacity)
+        s_bones_prepass_noted[slot] = id;
+}
+
+void CLevel::BonesPrepass()
+{
+    // Take the previous render's notes and start an empty list for this frame's render - always, even when nothing
+    // is computed below (a level being loaded, or one that has just replaced another: stale IDs must not pile up).
+    const u32 noted = std::min(s_bones_prepass_noted_count.exchange(0, std::memory_order_relaxed),
+        bones_prepass_note_capacity);
+    if (!g_pGameLevel || !g_pGameLevel->bReady || noted == 0)
+        return;
+    PERF_ADD(prepass_noted, noted);
+
+    CLevel& level = Level();
+    const IGameObject* view = level.CurrentViewEntity();
+    auto& candidates = s_bones_prepass_candidates;
+    auto& phase_b = s_bones_prepass_phase_b;
+    candidates.clear();
+    phase_b.clear();
+    s_render_prepare_items.clear();
+    // Render prepare of held items (always, plans/optimization_mt/05-render-prepare-weapons.md): held items and the
+    // addon models of weapons are prepared here too (collect -> phases A/B -> phase C), and their renderable_Render
+    // only reads.
+
+    {
+        ZoneScopedN("BonesPrepass/phase_a");
+        PERF_SCOPE(prepass_phase_a);
+        // IDs, not pointers, cross the frame: an object may be gone (or its ID reused) since the render noted it.
+        // Collect everything first, then run phase A: its game code may move objects between the active and the
+        // sleeping list or change visuals; the IKinematics pointers stay valid meanwhile, because we are inside the
+        // overlap window and CModelPool::Delete only queues the model until ModelDeferredClear of the next frame.
+        for (u32 i = 0; i < noted; ++i)
+        {
+            IGameObject* O = level.Objects.net_Find(s_bones_prepass_noted[i]);
+            if (!O || O->getDestroy() || !O->Visual())
+                continue;
+            // The view entity (first-person actor) and what it holds or wears: the actor camera, player_hud and the
+            // HUD items own that path - left to the render exactly as before.
+            if (view && (O == view || O->H_Root() == view))
+                continue;
+            // Before the filters below: a weapon in the "cooldown" (and its addon models) is prepared all the same.
+            RenderPrepareCollect(O, candidates);
+            // The render doesn't compute the bones of a frozen corpse pose (renderable_CorpsePoseFrozen) - neither do we.
+            if (O->renderable_CorpsePoseFrozen())
+                continue;
+            IKinematics* K = PKinematics(O->Visual());
+            // Only the bones the render really computed last frame (not the LOD-blob / skipped shadow casters) and not
+            // a model the prepass recently missed on.
+            if (!K || !K->BonesPrepass_Wanted())
+                continue;
+            candidates.push_back(K);
+        }
+        PERF_ADD(prepass_candidates, candidates.size());
+        // Phase A on main for every candidate: the blend callbacks (animation ends, Lua ScriptCallBack) fire here, on
+        // the game logic thread, while nothing else runs game code (sequential frame: GameThread joined; game/render
+        // overlap frame: the Game thread is not woken yet) - instead of on render workers.
+        for (IKinematics* K : candidates)
+        {
+            if (K->BonesPrepass_PhaseA())
+                phase_b.push_back(K);
+        }
+    }
+    if (!phase_b.empty())
+    {
+        ZoneScopedN("BonesPrepass/phase_b");
+        ZoneTextF("%u of %u candidates", static_cast<u32>(phase_b.size()), static_cast<u32>(candidates.size()));
+        // Phase B in parallel, like the render's own build does it on its workers: per-model lock, nested computations
+        // of other models (IK rays -> CCF_Skeleton::BuildState -> CalculateBones) only TryEnter, so no lock cycle (the
+        // MX PR #576 AB-BA can't happen: no thread here waits for a model lock while it holds another one).
+        const u32 count = static_cast<u32>(phase_b.size());
+        const u32 workers = TaskScheduler ? std::max<u32>(static_cast<u32>(TaskScheduler->GetWorkersCount()), 1u) : 1u;
+        // A stalker costs many times a pistol: small chunks (about 4 per worker) keep the workers balanced.
+        const size_t grain = std::max<size_t>(1, count / (workers * 4));
+        std::atomic<u32> computed{0};
+        xr_parallel_for(TaskRange<u32>(0, count, grain), true, [&](const TaskRange<u32>& range)
+        {
+            ZoneScopedN("BonesPrepass/phase_b_task");
+            PERF_PASS(xray::perf::pass::Prepass);
+            PERF_SCOPE(prepass_phase_b);
+            u32 local = 0;
+            for (u32 i = range.begin(); i != range.end(); ++i)
+            {
+                if (phase_b[i]->BonesPrepass_PhaseB())
+                    ++local;
+            }
+            computed.fetch_add(local, std::memory_order_relaxed);
+        });
+        PERF_ADD(prepass_computed, computed.load(std::memory_order_relaxed));
+    }
+
+    // Phase C (render prepare of held items): after phase B - a held item's XFORM is built from its owner's bones,
+    // which are final now. Runs even if phase B had nothing to do (the owners computed by the game logic this frame).
+    RenderPreparePhaseC(level, view);
+}
+
 void CLevel::OnFrame()
 {
     ZoneScoped;
+    PERF_SCOPE(lvl_frame_total);
 
     if (xray::perf::g_perf_metrics_active)
     {
@@ -494,6 +930,7 @@ void CLevel::OnFrame()
         const u32 now = Device.dwTimeContinual;
         if (now - s_npc_r_hist_ms >= 5000)
         {
+            ZoneScopedN("level/npc_radius_hist"); // P19b: perf_metrics only, once per 5 s, walks every object
             s_npc_r_hist_ms = now;
             // Both radius sources (§8.6): the visual sphere drives render culling, the spatial sphere
             // drives AI/physics range checks - they can differ (e.g. a crouching stalker's visual sphere
@@ -557,15 +994,22 @@ void CLevel::OnFrame()
     DBG_RenderUpdate();
 #endif
     Fvector temp_vector;
-    m_feel_deny.feel_touch_update(temp_vector, 0.f);
+    {
+        // P19b (14-spike-instrumentation.md): the parts of CLevel::OnFrame P19 left without a phase
+        LEVEL_FRAME_PHASE("level/feel_deny", lvl_frame_feel_deny);
+        m_feel_deny.feel_touch_update(temp_vector, 0.f);
+    }
     if (GameID() != eGameIDSingle)
         psDeviceFlags.set(rsDisableObjectsAsCrows, true);
     else
         psDeviceFlags.set(rsDisableObjectsAsCrows, false);
     // commit events from bullet manager from prev-frame
-    stats.BulletManagerCommit.Begin();
-    BulletManager().CommitEvents();
-    stats.BulletManagerCommit.End();
+    {
+        LEVEL_FRAME_PHASE("level/bullets_commit", lvl_frame_bullets);
+        stats.BulletManagerCommit.Begin();
+        BulletManager().CommitEvents();
+        stats.BulletManagerCommit.End();
+    }
     // Client receive
     if (net_isDisconnected())
     {
@@ -581,20 +1025,30 @@ void CLevel::OnFrame()
     }
     else
     {
+        LEVEL_FRAME_PHASE("level/client_receive", lvl_frame_client_receive);
         stats.ClientRecv.Begin();
         ClientReceive();
         stats.ClientRecv.End();
     }
-    ProcessGameEvents();
+    {
+        LEVEL_FRAME_PHASE("level/game_events", lvl_frame_game_events);
+        ProcessGameEvents(true); // the only call with the spawn budget (spawn_budget_us, SPEC.md 5.A)
+    }
     if (m_bNeed_CrPr)
         make_NetCorrectionPrediction();
     if (!GEnv.isDedicatedServer)
     {
         if (IsGameTypeSingle() && ai().get_alife())
+        {
+            LEVEL_FRAME_PHASE("level/alife_positions", lvl_frame_alife_positions);
             ai().alife().update_positions_only();
+        }
         // CMapManager::Update may destroy CMapSpot (CUIWindow) — must not run on seqParallel/worker
         // (~CUIWindow detaches from UI hierarchy; off-main-thread caused crashes / inconsistent UI state).
-        MapManager().Update();
+        {
+            LEVEL_FRAME_PHASE("level/map_manager", lvl_frame_map_manager);
+            MapManager().Update();
+        }
         if (IsGameTypeSingle() && Device.dwPrecacheFrame == 0)
         {
             // XXX nitrocaster: was enabled in x-ray 1.5; to be restored or removed
@@ -604,19 +1058,24 @@ void CLevel::OnFrame()
             //    m_game_task_manager,&CGameTaskManager::UpdateTasks));
             //}
             // else
+            LEVEL_FRAME_PHASE("level/update_tasks", lvl_frame_tasks);
             GameTaskManager().UpdateTasks();
         }
     }
     // Inherited update
-    inherited::OnFrame();
+    {
+        // objects UpdateCL + destroy + HUD: no spike phase (tens of ms is normal), each object UpdateCL is a spike site
+        PERF_SCOPE(lvl_frame_objects);
+        inherited::OnFrame();
+    }
     if (!Device.Paused())
     {
-        if (gw::addons::events::HasSubscribers(gw::addons::events::EBuiltin::LevelOnFrame))
-        {
-            const GwpValue args[] = { gw::addons::events::Number(Device.fTimeDelta) };
-            gw::addons::events::Emit(gw::addons::events::EBuiltin::LevelOnFrame, args, 1);
-        }
-        gw::addons::timers::Update(Device.dwTimeDelta); // plugin timers (timer_start)
+        // 06-framemove-offload.md, B4: level_on_frame always goes to the game logic thread, OnGameLogicFrame of this
+        // frame (after UpdateCL, before the scheduler; in a game/render overlap frame parallel to the render)
+        m_level_on_frame_pending = true;
+        // Plugin timers (timer_start) stay here, on main: a timer may send any event, to any subscriber
+        LEVEL_FRAME_PHASE("level/plugin_timers", lvl_frame_plugin_timers);
+        gw::addons::timers::Update(Device.dwTimeDelta);
     }
     // Draw client/server stats
     if (!GEnv.isDedicatedServer && psDeviceFlags.test(rsStatistic))
@@ -694,14 +1153,30 @@ void CLevel::OnFrame()
             xr_delete(pStatGraphR);
 #endif
     }
-    g_pGamePersistent->Environment().SetGameTime(GetEnvironmentGameDayTimeSec(), game->GetEnvironmentGameTimeFactor());
+    {
+        LEVEL_FRAME_PHASE("level/game_time", lvl_frame_game_time);
+        g_pGamePersistent->Environment().SetGameTime(GetEnvironmentGameDayTimeSec(), game->GetEnvironmentGameTimeFactor());
+    }
     if (!GEnv.isDedicatedServer)
+    {
+        LEVEL_FRAME_PHASE("level/script_process", lvl_frame_script_process);
         GEnv.ScriptEngine->script_process(ScriptProcessor::Level)->update();
-    m_ph_commander->update();
-    m_ph_commander_scripts->update();
-    stats.BulletManagerCommit.Begin();
-    BulletManager().CommitRenderSet();
-    stats.BulletManagerCommit.End();
+    }
+    {
+        LEVEL_FRAME_PHASE("level/ph_commander", lvl_frame_ph_commander);
+        m_ph_commander->update();
+    }
+    {
+        LEVEL_FRAME_PHASE("level/add_call", lvl_frame_add_call);
+        m_ph_commander_scripts->update();
+    }
+    {
+        // the second part of frame/level/bullets (its calls = 2 per frame)
+        LEVEL_FRAME_PHASE("level/bullets_render_set", lvl_frame_bullets);
+        stats.BulletManagerCommit.Begin();
+        BulletManager().CommitRenderSet();
+        stats.BulletManagerCommit.End();
+    }
     // update static sounds
     if (!GEnv.isDedicatedServer)
     {
@@ -712,7 +1187,10 @@ void CLevel::OnFrame()
                 fastdelegate::FastDelegate0<>(m_level_sound_manager, &CLevelSoundManager::Update));
         }
         else
+        {
+            LEVEL_FRAME_PHASE("level/level_sounds", lvl_frame_level_sounds);
             m_level_sound_manager->Update();
+        }
 
         // defer LUA-GC-STEP
         if (g_mt_config.test(mtLUA_GC))
@@ -731,6 +1209,39 @@ void CLevel::OnFrame()
     }
 }
 
+#undef LEVEL_FRAME_PHASE
+
+void CLevel::EmitLevelOnFrame()
+{
+    if (!gw::addons::events::HasSubscribers(gw::addons::events::EBuiltin::LevelOnFrame))
+        return;
+    const GwpValue args[] = { gw::addons::events::Number(Device.fTimeDelta) };
+    gw::addons::events::Emit(gw::addons::events::EBuiltin::LevelOnFrame, args, 1);
+}
+
+// plans/optimization_mt/06-framemove-offload.md (B4/B5). The game logic thread of the frame: XRay::Engine::GameThread
+// (sequential frame, the main thread waits for it) or the game/render overlap Game thread (parallel to the 3D render).
+// Order: SoundEvent_Dispatch (the sounds heard this frame) -> the sound callbacks of the NPCs (they arm the script
+// danger of gw_npc) -> level_on_frame (the inputs gw_npc runs read that danger) -> the scheduler (the Think of the
+// NPCs reads the inputs).
+void CLevel::OnGameLogicFrame()
+{
+    ZoneScoped;
+    PERF_SCOPE(game_logic_frame);
+    {
+        ZoneScopedN("hear_callbacks");
+        PERF_SCOPE(game_hear_callbacks);
+        CScriptEntity::ProcessQueuedSoundCallbacks();
+    }
+    if (m_level_on_frame_pending)
+    {
+        m_level_on_frame_pending = false;
+        ZoneScopedN("level_on_frame");
+        PERF_SCOPE(game_level_on_frame);
+        EmitLevelOnFrame();
+    }
+}
+
 int psLUA_GCSTEP = 100; // 10
 int psLUA_GCTIMEOUT = 1000;
 
@@ -744,6 +1255,11 @@ void CLevel::script_gc()
     if (L)
         xray::perf::SetGauge(xray::perf::Metric::lua_gc_kb, lua_gc(L, LUA_GCCOUNT, 0));
     PERF_SCOPE(lua_gc_step);
+    // P18 (plans/optimization_mt/13-lua-spikes.md), npc_perf_lua_spike_us > 0: a long GC step goes to the log, and an
+    // atomic phase inside the step is counted apart (lua/gc_atomic_in_step of lua/gc_atomic)
+    const bool probe_atomic = gw::lua_spike::Enabled() && L;
+    const u32 atomic_before = probe_atomic ? gw::lua_spike::PollAtomic(L) : 0;
+    gw::lua_spike::Probe spike(L, gw::lua_spike::ECategory::GcStep);
 
     switch (ps_lua_gc_method)
     {
@@ -760,9 +1276,15 @@ void CLevel::script_gc()
         ps_lua_gc_method = 1;
 
     case 1:
-        lua_gc(GEnv.ScriptEngine->lua(), LUA_GCSTEP, psLUA_GCSTEP);
+        // The paced steps (lua_spike_probe.h): the GC of the frame works only here, psLUA_GCSTEP KB on top
+        gw::lua_spike::GcStepFrame(GEnv.ScriptEngine->lua(), psLUA_GCSTEP);
         break;
     }
+
+    if (probe_atomic && gw::lua_spike::PollAtomic(L) != atomic_before)
+        PERF_INC(lua_gc_atomic_in_step);
+    if (spike.Finish())
+        spike.Report(ps_lua_gc_method == 1 ? "paced" : "", gw::lua_spike::kNoId, gw::lua_spike::kNoId);
 
     AIStats.LuaGC.End();
 }
@@ -823,6 +1345,12 @@ void CLevel::OnRender()
         GEnv.Render->CompositeHudOverlay();
         WorldRendered(true);
     }
+
+    // GAME_RENDER_OVERLAP_PLAN P1 (game/render overlap frame): the join point. The 3D world (incl. scope pass,
+    // tracers, HUD overlay) was rendered in parallel with the Game thread; the UI below is drawn after it -
+    // custom statics, dialogs, news, hit marks and Lua-owned windows are changed by the game logic. No-op in a
+    // sequential frame.
+    Device.JoinGameLogicBeforeUI();
 
     {
         ZoneScopedN("lvl_RenderUI");

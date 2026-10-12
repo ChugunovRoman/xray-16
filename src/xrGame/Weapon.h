@@ -249,7 +249,25 @@ public:
     virtual void UpdateCL();
     virtual void shedule_Update(u32 dt);
 
+protected:
+    // Stage 2b of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md (always on in single player):
+    // true = this frame the UpdateCL of this hidden NPC weapon has nothing to do and was replaced with
+    // UpdateCLSkippedChild(); the caller (the UpdateCL of the most derived class first) returns at once
+    bool TrySkipHiddenUpdateCL();
+    // The UpdateCL LOD (stage 3): the same for an idle (or hidden) NPC weapon whose owner skipped its UpdateCL this
+    // frame by the distance LOD (CGameObject::ucl_lod_skipped_this_frame of the parent)
+    bool TrySkipOwnerLodUpdateCL();
+
+private:
+    // Shared by both: no action, motion, light, particles, vision, laser dot or weapon sound in flight
+    bool NpcUpdateCLNothingInFlight();
+
+public:
     void renderable_Render(u32 context_id, IRenderable* root) override;
+    // Render prepare of held items (always, plans/optimization_mt/05-render-prepare-weapons.md): + the shot light (RenderLight) and
+    // the render-hud flag, once per frame on main; the addon models go to the bones prepass with the weapon's own visual
+    void render_prepare() override;
+    void render_prepare_models(xr_vector<IKinematics*>& models) override;
     void SetWeaponIconSnapshot(bool v) { m_bWeaponIconSnapshot = v; }
     bool IsWeaponInventoryIconSnapshot() const override { return m_bWeaponIconSnapshot; }
     void render_hud_mode() override;

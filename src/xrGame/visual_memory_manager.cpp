@@ -34,6 +34,8 @@
 #ifndef MASTER_GOLD
 #include "Actor.h"
 #include "ai_debug.h"
+#include "xrEngine/xr_object_list.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #endif // MASTER_GOLD
 
 void SetActorVisibility(u16 who, float value);
@@ -711,9 +713,34 @@ void CVisualMemoryManager::remove_links(IGameObject* object)
     // release builds.
     if (m_objects)
     {
-        VISIBLES::iterator I = std::find_if(m_objects->begin(), m_objects->end(), CVisibleObjectPredicateEx(object));
-        if (I != m_objects->end())
-            m_objects->erase(I);
+        // P17 (plans/optimization_mt/12-relcase.md), batched relcase: the list is shared by the whole group - the
+        // first member that gets here cleans it of every object destroyed this frame in one pass (same match as
+        // CVisibleObjectPredicateEx: by ID), the other members and the other destroyed objects skip it.
+        const RelcaseBatch* batch = g_pGameLevel ? g_pGameLevel->Objects.relcase_batch() : nullptr;
+        if (batch && batch->contains(object))
+        {
+            if (g_pGameLevel->Objects.relcase_first_visit(m_objects))
+            {
+                PERF_INC(relcase_shared_purges);
+                PERF_ADD(relcase_shared_items, m_objects->size());
+                m_objects->erase(std::remove_if(m_objects->begin(), m_objects->end(),
+                                     [batch](const MemorySpace::CVisibleObject& visible_object)
+                                     {
+                                         return visible_object.m_object &&
+                                             batch->contains_id(object_id(visible_object.m_object));
+                                     }),
+                    m_objects->end());
+            }
+            else
+                PERF_INC(relcase_shared_skips);
+        }
+        else
+        {
+            PERF_ADD(relcase_shared_items, m_objects->size());
+            VISIBLES::iterator I = std::find_if(m_objects->begin(), m_objects->end(), CVisibleObjectPredicateEx(object));
+            if (I != m_objects->end())
+                m_objects->erase(I);
+        }
     }
     {
         NOT_YET_VISIBLES::iterator I = std::find_if(

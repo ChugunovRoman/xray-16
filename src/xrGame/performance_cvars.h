@@ -160,6 +160,49 @@ extern int npc_perf_visible_value_native;
 // counted (_gw_internal.logic.stats prints them).
 extern int npc_perf_condlist_native;
 
-extern int ps_ui_single_onframe;
+/** IK of NPCs in a fight (CharacterPhysicsSupport.cpp, get_character_ik_update_interval). 0 (default) = as before:
+    a stalker with a selected enemy runs IK at npc_perf_ik_interval_enemy_selected_ms at any distance. N > 0 = that
+    interval only within N m of the actor; farther the distance scale (near / medium / far / disabled) applies. */
+extern int npc_perf_ik_enemy_near_dist;
+
+/** IK of NPCs off screen. 0 (default) = as before. N > 0 = an NPC not seen in the last main render pass runs IK at
+    least N ms apart, whatever the other rules say (the feet keep the last ground contact meanwhile); not while a
+    second viewport (scope) renders. */
+extern int npc_perf_ik_offscreen_interval_ms;
+
+/** UpdateCL rate LOD of living stalkers by the distance to the camera, on screen too (ai_stalker.cpp,
+    CAI_Stalker::TrySkipUpdateCLLod; stage 3 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md), always
+    on in single player: a stalker farther than npc_perf_ucl_lod_dist runs its UpdateCL every 2nd frame,
+    farther than npc_perf_ucl_lod_dist2 every 3rd one; a skipped frame only keeps it in the spatial DB and in the
+    update list (the crow rules), the next full UpdateCL gets the whole time since the last one (movement, look,
+    sounds), up to npc_perf_ucl_lod_max_delta_ms. Never skipped: fight (enemy, recent hit, weapon firing), jump /
+    lost control / impulse, the current (view) entity, a second viewport, the first frames after the spawn,
+    animation-driven movement, active bone particles, the dead. The weapon in the hands skips with its owner when
+    idle (CWeapon::TrySkipOwnerLodUpdateCL). */
+/** Distance to the camera in m beyond which the UpdateCL LOD runs a stalker every 2nd frame (5..500, default 30).
+    A zoomed camera (smaller FOV) shrinks the distance accordingly. */
+extern int npc_perf_ucl_lod_dist;
+/** Distance to the camera in m beyond which the UpdateCL LOD runs a stalker every 3rd frame; 0 = no such tier
+    (0..500, default 45). Below npc_perf_ucl_lod_dist it has no effect. */
+extern int npc_perf_ucl_lod_dist2;
+/** The most time in ms a stalker may go without a full UpdateCL under the LOD (100..500, default 250): a frame is
+    not skipped if the time since the last full UpdateCL plus this frame's delta would exceed it, and the first
+    full UpdateCL after a skip gets up to this much time instead of the usual 100 ms clamp. */
+extern int npc_perf_ucl_lod_max_delta_ms;
+
+/** TryPosition coherence of moving NPCs in a crowd (movement_manager_physic.cpp, CMovementManager::try_position_skip;
+    stage 4 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md). A successful TryPosition is followed by
+    up to K frames that move the NPC the way the "no neighbours" branch does (SetPosition + DisableCharacter), then a
+    full check again; after a failed one every frame is checked until npc_perf_move_try_skip_recover successes in a
+    row. Never skipped: the actor or a body with a physics shell next to the NPC, the actor within
+    npc_perf_move_try_skip_actor_dist m, an awake / pushed / jumping character, the first frame after standing.
+    npc_perf_move_try_skip_frames: K of an NPC on screen within npc_perf_move_try_skip_far_dist m of the camera
+    (and of every NPC while a second viewport renders). npc_perf_move_try_skip_frames_far: K of an NPC off screen or
+    farther. Both 0 (default) = the whole mechanism is off, as before. */
+extern int npc_perf_move_try_skip_frames;
+extern int npc_perf_move_try_skip_frames_far;
+extern int npc_perf_move_try_skip_far_dist;
+extern int npc_perf_move_try_skip_recover;
+extern int npc_perf_move_try_skip_actor_dist;
 
 #endif // PERFORMANCE_CVARS_H_INCLUDED

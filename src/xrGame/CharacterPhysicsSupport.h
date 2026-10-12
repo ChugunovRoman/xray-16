@@ -97,6 +97,15 @@ private:
     // always runs the normal position correction.
     bool m_skip_spawn_position_correct{false};
 
+    // P16 (plans/optimization_mt/11-ragdoll-spikes.md): m_physics_skeleton built ahead of the
+    // death on the scheduler (TryPrebuildSkeleton) and what it was built for: the root bone, the visible bones of the
+    // model, the visual (m_visual_generation, ++ in in_ChangeVisual). At death CreateShell takes it only if all match.
+    bool m_skeleton_prebuilt{false};
+    u16 m_skeleton_root{u16(-1)};
+    u64 m_skeleton_bones_visible{0};
+    u32 m_skeleton_generation{0};
+    u32 m_visual_generation{0};
+
     // B-1: caller-level deferred physics intent (GameThread during scheduler overlap).
     // One intent per owner per overlap frame; last Request* wins (create/destroy/shell are mutually exclusive in practice).
     enum EDeferredPhysicsIntent : u8
@@ -136,6 +145,9 @@ public:
     IC CPHSoundPlayer* ph_sound_player() { return &m_ph_sound_player; }
     IC CIKLimbsController* ik_controller() { return m_ik_controller; }
     bool is_interactive_motion();
+    // A global animation with the collision callback runs (update_interactive_anims): it checks the collision of
+    // the animated body every UpdateCL (stage 3 UpdateCL LOD keeps such a stalker every frame)
+    IC bool interactive_animation_running() const { return m_interactive_animation != nullptr; }
     bool can_drop_active_weapon();
     void SetRemoved();
     bool IsRemoved() { return m_eState == esRemoved; }
@@ -194,7 +206,12 @@ public:
     virtual ~CCharacterPhysicsSupport();
 
 private:
-    void CreateSkeleton(CPhysicsShell*& pShell);
+    // root_bone: u16(-1) - from the current bone root of the model (as before), else from this bone (P16 prebuild)
+    void CreateSkeleton(CPhysicsShell*& pShell, u16 root_bone = u16(-1));
+    // P16: the bone the ragdoll is built from (bip01_pelvis, the bone root for etBitting) - CreateShell's physics_root
+    u16 SkeletonRootBone(IKinematics& K) const;
+    void TryPrebuildSkeleton();
+    void DiscardPrebuiltSkeleton();
 
     void ActivateShell(IGameObject* who);
     void CreateShell(IGameObject* who, Fvector& dp, Fvector& velocity);

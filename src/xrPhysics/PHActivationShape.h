@@ -34,8 +34,10 @@ public:
     void Create(const Fvector start_pos, const Fvector start_size, IPhysicsShellHolder* ref_obj, EType type = etBox,
         u16 flags = 0);
     void Destroy();
-    bool Activate(
-        const Fvector need_size, u16 steps, float max_displacement, float max_rotation, bool un_freeze_later = false);
+    // max_push_steps: P16 (plans/optimization_mt/11-ragdoll-spikes.md) - cap on the world steps of the push-out loop
+    // (up to 10 attempts x 15 steps otherwise); 0 = no cap
+    bool Activate(const Fvector need_size, u16 steps, float max_displacement, float max_rotation,
+        bool un_freeze_later = false, u16 max_push_steps = 0);
     const Fvector& Position();
     void Size(Fvector& size);
     dBodyID ODEBody() { return m_body; }

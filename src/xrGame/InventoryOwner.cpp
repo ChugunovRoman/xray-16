@@ -1,6 +1,7 @@
 #include "pch_script.h"
 #include "addon_object_events.h"
 #include "InventoryOwner.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "entity_alive.h"
 #include "PDA.h"
 #include "Actor.h"
@@ -91,6 +92,8 @@ void CInventoryOwner::reinit()
 // call this after CGameObject::net_Spawn
 bool CInventoryOwner::net_Spawn(CSE_Abstract* DC)
 {
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): a mixin, called by the owner after CGameObject::net_Spawn
+    PERF_STEP("cls_spawn/inventory_owner", spawn_cls_inventory_owner);
     if (!m_pTrade)
         m_pTrade = xr_new<CTrade>(this);
 

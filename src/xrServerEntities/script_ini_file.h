@@ -10,6 +10,8 @@
 
 #include "script_token_list.h"
 
+struct lua_State;
+
 class CScriptIniFile : public CInifile
 {
 protected:
@@ -19,6 +21,16 @@ public:
     CScriptIniFile(IReader* F, LPCSTR path = nullptr);
     CScriptIniFile(LPCSTR szFileName, BOOL ReadOnly = TRUE, BOOL bLoadAtStart = TRUE, BOOL SaveAtEnd = TRUE);
     CScriptIniFile(LPCSTR initial, LPCSTR szFileName, BOOL ReadOnly = TRUE, BOOL bLoadAtStart = TRUE, BOOL SaveAtEnd = TRUE);
+    // Lua ini_file(path) / ini_file(initial, path): L is the calling Lua thread. As the two above with the default
+    // flags; P20 (plans/optimization_mt/15-ini-cache.md): the parse is tagged with the Lua call site.
+    CScriptIniFile(lua_State* L, LPCSTR szFileName);
+    CScriptIniFile(lua_State* L, LPCSTR initial, LPCSTR szFileName);
+
+    // P20: the CInifile created next on this thread is tagged as made by Lua (from_text: create_ini_file) with the Lua
+    // call site, for the [ini-load] table of perf_metrics. Returns pass_through (for a mem-initializer list);
+    // EndLuaSource() puts back the previous tag. Nothing is read from L while perf_metrics is off.
+    static LPCSTR BeginLuaSource(lua_State* L, bool from_text, LPCSTR pass_through);
+    static void EndLuaSource();
 
     int r_clsid(LPCSTR S, LPCSTR L);
     int r_token(LPCSTR S, LPCSTR L, const CScriptTokenList& token_list);

@@ -77,6 +77,7 @@
     <ClCompile Include="PHSimpleCharacter.cpp" />
     <ClCompile Include="PHSplitedShell.cpp" />
     <ClCompile Include="PHStaticGeomShell.cpp" />
+    <ClCompile Include="PHStepDefer.cpp" />
     <ClCompile Include="phvalide.cpp" />
     <ClCompile Include="PHWorld.cpp" />
     <ClCompile Include="PHWorldScript.cpp" />
@@ -171,6 +172,7 @@
     <ClInclude Include="PHUpdateObject.h" />
     <ClInclude Include="phvalide.h" />
     <ClInclude Include="PHValideValues.h" />
+    <ClInclude Include="PHStepDefer.h" />
     <ClInclude Include="PHWorld.h" />
     <ClInclude Include="Physics.h" />
     <ClInclude Include="PhysicsCommon.h" />

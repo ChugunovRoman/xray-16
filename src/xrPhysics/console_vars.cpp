@@ -22,6 +22,9 @@ int ph_console::ph_spawn_activation_shape_early_exit = 1;
 int ph_console::ph_spawn_skip_correct_on_load = 1;
 int ph_console::ph_dbg_spawn_stats = 0;
 
+// P16 (plans/optimization_mt/11-ragdoll-spikes.md): the position correction at the start of a free ragdoll.
+int ph_console::ph_death_correct_max_steps = 15;
+
 // Ф2 (PHYSICS_ACTIVE_SET_PLAN): force-sleep far corpses, distance-based.
 int ph_console::ph_corpse_sleep_ms = 3000;
 float ph_console::ph_corpse_sleep_far_dist = 60.f;

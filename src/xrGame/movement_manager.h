@@ -117,6 +117,15 @@ protected:
     // engage beyond ph_npc_kinematic_far_dist, release only once back under (dist - ph_npc_kinematic_far_hyst).
     // Transient, not saved: safely starts false, next tick recomputes correctly from actual distance.
     bool m_kinematic_far_forced = false;
+    // Stage 4 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md (TryPosition coherence, cvars
+    // npc_perf_move_try_skip_*): the per-NPC state of try_position_skip(). Transient, not saved: a fresh NPC starts
+    // with no budget and no streak, so its first frames with neighbours are full checks.
+    u32 m_try_skip_frame = 0; // Device.dwFrame of the last skip decision (a gap = the NPC did not move meanwhile)
+    float m_try_skip_dist = 0.f; // path walked since the last TryPosition by the skipped frames
+    u8 m_try_skip_left = 0; // frames that may still skip TryPosition before the next full check
+    u8 m_try_skip_streak = 0; // successful TryPosition calls in a row (the hysteresis after a failure)
+    u8 m_try_skip_k = 0; // K of this NPC as of the last decision (refills m_try_skip_left on a success)
+    bool m_try_skip_after_skip = false; // the frame before the next check skipped TryPosition
 
 protected:
     float m_speed;
@@ -164,6 +173,13 @@ private:
     // straight into move_along_path's existing kinematic (SetPosition+DisableCharacter) branch. See
     // movement_manager_physic.cpp for the full rationale and the bypass conditions.
     bool should_force_far_kinematic(CPHMovementControl* movement_control, const Fvector& dest_position);
+    // Stage 4 (TryPosition coherence): true if this frame may move the NPC kinematically instead of paying
+    // TryPosition although it has neighbours; try_position_skip_result() feeds the outcome of each real
+    // TryPosition back. Called only while npc_perf_move_try_skip_frames or _far is non-zero. See
+    // movement_manager_physic.cpp for the rules and the reasoning.
+    bool try_position_skip(CPHMovementControl* movement_control, const Fvector& dest_position, float motion);
+    void try_position_skip_result(bool success);
+    void try_position_skip_reset();
 
 protected:
     virtual void teleport(u32 game_vertex_id);

@@ -10,6 +10,10 @@
 
 #include "xrScriptEngine/script_engine.hpp"
 
+#if defined(USE_DX11)
+#include <shared_mutex>
+#endif
+
 namespace xray::render::RENDER_NAMESPACE
 {
 class dx11ConstantBuffer;
@@ -85,7 +89,13 @@ private:
     xr_vector<R_constant_table*> v_constant_tables;
 
 #if defined(USE_DX11)
+    // One buffer per cbuffer layout and context (dx11ConstantBuffer::SameLayout), shared by every shader with that
+    // layout (P15b, plans/optimization_mt/10-submit-dynamic.md).
     xr_vector<dx11ConstantBuffer*> v_constant_buffer[R__NUM_CONTEXTS];
+    // Guards the registry above. Exclusive: create/unregister (shader creation and destruction, also on the Game
+    // thread while the render runs); shared: MarkConstantBuffersChanged, iterated by render threads (alloc_context /
+    // submit of a deferred context) - a push_back on another thread would invalidate that iteration.
+    std::shared_mutex v_constant_buffer_lock;
     xr_vector<SInputSignature*> v_input_signature;
 #endif
 
@@ -151,10 +161,15 @@ public:
     void _DeleteConstantTable(const R_constant_table* C);
 
 #if defined(USE_DX11)
+    // The registered buffer of the context with the same layout (dx11ConstantBuffer::SameLayout), or a new one.
     dx11ConstantBuffer* _CreateConstantBuffer(u32 context_id, ID3DShaderReflectionConstantBuffer* pTable);
     void _DeleteConstantBuffer(u32 context_id, const dx11ConstantBuffer* pBuffer);
     /// Unregister from all contexts; call from dx11ConstantBuffer destructor. Returns true if removed from at least one context.
     bool _UnregisterConstantBufferFromAllContexts(const dx11ConstantBuffer* pBuffer);
+    /// Forces every constant buffer of `context_id` to be re-uploaded on its next flush. A pooled deferred
+    /// context starting a new command list must call this: dynamic buffer contents are undefined there until
+    /// mapped with WRITE_DISCARD, and an "unchanged" buffer (equal sets are skipped) would never be mapped.
+    void MarkConstantBuffersChanged(u32 context_id);
 
     SInputSignature* _CreateInputSignature(ID3DBlob* pBlob);
     void _DeleteInputSignature(const SInputSignature* pSignature);

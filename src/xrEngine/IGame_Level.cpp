@@ -181,7 +181,10 @@ void IGame_Level::OnRender()
     // if (_abs(Device.fTimeDelta)<EPS_S) return;
 
     // Level render, only when no client output required
-    GEnv.Render->Calculate();
+    {
+        PERF_SCOPE(rframe_calculate);
+        GEnv.Render->Calculate();
+    }
 
     // Stage C (SVP parallelization): launch the scope-viewport visibility build on a worker while
     // the main pass renders below. Falls back to the legacy sequential path when parallelism is
@@ -196,15 +199,22 @@ void IGame_Level::OnRender()
     const bool svp_parallel =
         svp_have_project && GEnv.Render->BeginSecondVPCalculateParallel(svp_fov, svp_scope_project);
 
-    GEnv.Render->Render();
+    {
+        PERF_SCOPE(rframe_render);
+        GEnv.Render->Render();
+    }
 
     // Join the worker and publish its per-pass LOD globals before the scope pass drains.
     if (svp_parallel)
+    {
+        PERF_SCOPE(rframe_svp_join);
         GEnv.Render->EndSecondVPCalculateParallel();
+    }
 
     // IsSVPFrame(): SVP active + dwFrame % delay == 0; delay 0 from cvar → every frame (see CSecondVPParams::IsSVPFrame).
     if (svp_frame)
     {
+        PERF_SCOPE(rframe_svp);
         // Tracers on the main (full) framebuffer while Device still matches the first pass.
         g_pGameLevel->RenderBulletTracersForMainViewport();
 
@@ -214,16 +224,21 @@ void IGame_Level::OnRender()
             {
                 // Visibility was built on the worker; only the sun/rain tail remains - it needs
                 // the scope projection this Begin call has just installed into Device.
+                PERF_SCOPE(rframe_svp_calculate);
                 GEnv.Render->SecondVPPostCalculate();
             }
             else
             {
                 // Legacy sequential visibility build (stage A/B fallback path).
+                PERF_SCOPE(rframe_svp_calculate);
                 Device.m_SecondViewport.SetSecondCalculatePass(true);
                 GEnv.Render->Calculate();
                 Device.m_SecondViewport.SetSecondCalculatePass(false);
             }
-            GEnv.Render->RenderSecondViewport();
+            {
+                PERF_SCOPE(rframe_svp_render);
+                GEnv.Render->RenderSecondViewport();
+            }
             // Tracers into rt_secondVP (current RT after phase_combine) with scope camera matrices.
             g_pGameLevel->RenderBulletTracersForSecondViewport();
             g_pGameLevel->Cameras().EndSecondViewportRender();
@@ -260,6 +275,7 @@ void IGame_Level::OnFrame()
     }
     {
         ZoneScopedN("lvl_hud");
+        PERF_SCOPE(lvl_frame_hud); // P19b (14-spike-instrumentation.md): the game UI and the crosshair ray, hud/*
         pHUD->OnFrame();
     }
 

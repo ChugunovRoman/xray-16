@@ -17,6 +17,8 @@
 #include "game_location_selector.h"
 #include "GameTaskDefs.h"
 
+#include <functional>
+
 // fwd. decl.
 namespace ALife
 {
@@ -978,6 +980,11 @@ public:
     doors::door* m_door;
 
 private:
+    // B6 (plans/optimization_mt/09-physics-earlier-parallel.md): a teleport moves ODE bodies and geoms directly. While
+    // the physics step runs on another thread, queue `op` for the post-step flush (the object is looked up again by
+    // its ID then) and return true; return false when the caller must run it now.
+    bool DeferWhilePhysicsStep(const std::function<void(CScriptGameObject&)>& op);
+
     DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 

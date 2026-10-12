@@ -31,6 +31,11 @@ const u32 CULL_CCW = D3DCULL_CCW;
 const u32 CULL_CW = D3DCULL_CW;
 const u32 CULL_NONE = D3DCULL_NONE;
 
+// Perf metrics only (P15, plans/optimization_mt/10-submit-dynamic.md): non-zero while this thread submits the dynamic
+// part of the main view's render_graph, so CSkeletonX::_Render and dx11ConstantBuffer::Flush can attribute their
+// counters to render/main/* without a pass parameter. Set and restored by render_graph only when metrics are active.
+inline thread_local u8 g_perf_rmain_dyn = 0;
+
 ///		detailed statistic
 struct R_statistics_element
 {
@@ -481,6 +486,17 @@ public:
 #endif
         constants.seta(C, std::forward<Args>(args)...);
     }
+
+#ifdef USE_DX11
+    // `count` consecutive float4 elements of an array constant from element `e`, one write per buffer
+    // (bone palette of CSkeletonX) - same result as `count` set_ca calls.
+    ICF void set_ca_rows(R_constant* C, u32 e, const Fvector4* rows, u32 count)
+    {
+        if (!C)
+            return;
+        constants.seta_rows(C, e, rows, count);
+    }
+#endif
 
     // constants - raw string (slow)
     template<typename... Args>

@@ -12,7 +12,6 @@
 #include "UIGameCustom.h"
 #include "xrUICore/Cursor/UICursor.h"
 #include "game_cl_base.h"
-#include "performance_cvars.h"
 #ifdef DEBUG
 #include "PHDebug.h"
 #endif
@@ -44,10 +43,13 @@ void CHUDManager::OnFrame()
     if (!b_online)
         return;
 
-    if (!ps_ui_single_onframe && pUIGame)
-        pUIGame->OnFrame();
-
-    m_pHUDTarget->CursorOnFrame();
+    // P19b (14-spike-instrumentation.md): the ray under the crosshair, PERF_STAGE hud/*. The game UI (pUIGame) is not
+    // updated here: its OnFrame runs once a frame from Device.seqFrame (OnConnected), not twice
+    {
+        // RayQuery (static + dynamic geometry) from the camera up to the far plane: what is under the crosshair
+        PERF_STAGE("hud/cursor_pick", hud_cursor_pick);
+        m_pHUDTarget->CursorOnFrame();
+    }
 }
 //--------------------------------------------------------------------
 

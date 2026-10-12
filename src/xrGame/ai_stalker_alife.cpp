@@ -11,6 +11,8 @@
 #include "ai_space.h"
 #include "alife_simulator.h"
 #include "alife_space.h"
+#include "xrEngine/IGame_Level.h"
+#include "xrEngine/xr_object_list.h"
 #include "Inventory.h"
 #include "PDA.h"
 #include "eatable_item.h"
@@ -443,6 +445,8 @@ void CAI_Stalker::remove_personal_only_ammo(const CInventoryItem* item)
             if (xr_strcmp(*I, (*i)->object().cNameSect()))
                 continue;
 
+            // P17: relcase report (perf_metrics) - destroyed by engine code
+            g_pGameLevel->Objects.destroy_origin_note((*i)->object().ID(), CObjectList::destroy_origin_engine);
             NET_Packet packet;
             u_EventGen(packet, GE_DESTROY, (*i)->object().ID());
             u_EventSend(packet);

@@ -614,12 +614,22 @@ void CGamePersistent::OnFrame()
 {
     ZoneScoped;
 
+    // P19b (plans/optimization_mt/14-spike-instrumentation.md): stages of the persistent's frame, PERF_STAGE persistent/*
     // Addons: plugins stopped by a crash leave the process, plugin_reload reloads (no plugin code on the stack here).
-    gw::addons::OnFrame();
+    {
+        PERF_STAGE("persistent/addons", persist_addons);
+        gw::addons::OnFrame();
+    }
     // Addons: events collected since the previous frame go to batch subscribers of plugins.
-    gw::addons::events::FlushBatches();
+    {
+        PERF_STAGE("persistent/event_batches", persist_event_batches);
+        gw::addons::events::FlushBatches();
+    }
     // Addons: console commands of plugins queued with console_execute_deferred (they may unload the level).
-    gw::addons::console::OnFrame();
+    {
+        PERF_STAGE("persistent/addons_console", persist_addons);
+        gw::addons::console::OnFrame();
+    }
 
     if (Device.dwPrecacheFrame == 5 && m_intro_event.empty())
     {
@@ -638,7 +648,10 @@ void CGamePersistent::OnFrame()
         xr_delete(g_tutorial);
     }
     if (0 == Device.dwFrame % 200)
+    {
+        ZoneScopedN("persistent/free_ui_shaders");
         CUITextureMaster::FreeCachedShaders();
+    }
 
 #ifdef DEBUG
     ++m_frame_counter;
@@ -757,7 +770,10 @@ void CGamePersistent::OnFrame()
 
     // update weathers ambient
     if (!Device.Paused())
+    {
+        PERF_STAGE("persistent/weathers", persist_weathers);
         WeathersUpdate();
+    }
 
     if (0 != pDemoFile)
     {
@@ -786,7 +802,10 @@ void CGamePersistent::OnFrame()
     if ((m_last_stats_frame + 1) < m_frame_counter)
         profiler().clear();
 #endif
-    UpdateDof();
+    {
+        PERF_STAGE("persistent/dof", persist_dof);
+        UpdateDof();
+    }
 }
 
 #include "game_sv_single.h"

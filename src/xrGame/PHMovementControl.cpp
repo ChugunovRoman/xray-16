@@ -26,6 +26,31 @@
 #endif
 
 #include "Include/xrRender/Kinematics.h"
+#include "xrPhysics/PHStepDefer.h"
+#include "CharacterPhysicsSupport.h"
+
+namespace
+{
+// B6 early physics kick (plans/optimization_mt/09-physics-earlier-parallel.md): a capture's joints and body take part
+// in the running step (its island merges with the dragged corpse's). Releasing or destroying it from the Game thread
+// (monster drag/eat states in Think, in_shedule_Update) waits for the post-step flush. The owner is found again by ID
+// and must still own this movement control. Creating a capture needs no deferral: the new capture reaches the step only
+// through CPHUpdateObject::Activate, which is itself postponed to the flush while the step runs.
+template <typename F>
+bool DeferCaptureWhileStep(CPHMovementControl& movement, IGameObject* owner, F op)
+{
+    if (!owner)
+        return false;
+    CPHMovementControl* const address = &movement;
+    return ph_step_defer::DeferForObject(ph_step_defer::Kind::Object, owner->ID(), [address, op](IGameObject& object)
+    {
+        CPhysicsShellHolder* holder = smart_cast<CPhysicsShellHolder*>(&object);
+        CCharacterPhysicsSupport* support = holder ? holder->character_physics_support() : nullptr;
+        if (support && support->movement() == address)
+            op(*address);
+    });
+}
+} // namespace
 
 #define GROUND_FRICTION 10.0f
 #define AIR_FRICTION 0.01f
@@ -150,7 +175,15 @@ void CPHMovementControl::in_shedule_Update(u32 DT)
     if (!m_capture)
         return;
     if (m_capture->Failed())
+    {
+        if (DeferCaptureWhileStep(*this, pObject, [](CPHMovementControl& movement)
+        {
+            if (movement.m_capture && movement.m_capture->Failed())
+                phcapture_destroy(movement.m_capture);
+        }))
+            return;
         phcapture_destroy(m_capture);
+    }
 }
 
 void CPHMovementControl::Calculate(
@@ -1150,8 +1183,15 @@ Fmatrix CPHMovementControl::PHCaptureGetNearestElemTransform(CPhysicsShellHolder
 
 void CPHMovementControl::PHReleaseObject()
 {
-    if (m_capture)
-        m_capture->Release();
+    if (!m_capture)
+        return;
+    if (DeferCaptureWhileStep(*this, pObject, [](CPHMovementControl& movement)
+    {
+        if (movement.m_capture)
+            movement.m_capture->Release();
+    }))
+        return;
+    m_capture->Release();
 }
 
 void CPHMovementControl::DestroyCharacter()

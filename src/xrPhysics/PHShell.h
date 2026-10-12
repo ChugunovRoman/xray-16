@@ -239,6 +239,7 @@ public:
     virtual CPHMoveStorage* MoveStorage() { return &m_traced_geoms; }
     virtual void build_FromKinematics(IKinematics* K, BONE_P_MAP* p_geting_map = NULL);
     virtual void preBuild_FromKinematics(IKinematics* K, BONE_P_MAP* p_geting_map);
+    virtual void preBuild_FromKinematicsRoot(IKinematics* K, u16 root_bone, BONE_P_MAP* p_geting_map = NULL);
     virtual void ActivatingBonePoses(IKinematics& K);
     virtual void ZeroCallbacks();
     virtual void ResetCallbacks(u16 id, Flags64& mask);

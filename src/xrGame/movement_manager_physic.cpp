@@ -9,12 +9,16 @@
 #include "StdAfx.h"
 #include "movement_manager.h"
 #include "npc_cpp_profile.h"
+#include "entity_alive.h"
+#include "PhysicsShellHolder.h"
 #include "PHMovementControl.h"
 #include "detail_path_manager.h"
 #include "Level.h"
 #include "CustomMonster.h"
 #include "Actor.h"
 #include "xrPhysics/IColisiondamageInfo.h"
+#include "xrPhysics/PhysicsShell.h"
+#include "performance_cvars.h"
 
 #include "xrEngine/profiler.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
@@ -131,6 +135,172 @@ bool CMovementManager::should_force_far_kinematic(CPHMovementControl* movement_c
         return false;
 
     return true;
+}
+
+// Stage 4 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md (U2b + U2c, TryPosition coherence).
+//
+// Measured in a crowd: almost every moving NPC has a neighbour within contact reach, yet TryPosition (1-15
+// step_single calls of 15-25 us) nearly always succeeds - it only confirms that nothing is in the way.
+// A successful CPHAICharacter::TryPosition ends with the character disabled at the destination (it calls
+// Disable() itself), i.e. in the very state the "no neighbours" branch of move_along_path leaves it in
+// (SetPosition + DisableCharacter): the body is out of the active list of the physics world, while its geoms
+// stay in the physics spatial space (SetPosition -> spatial_move; only CollisionEnable(FALSE) unregisters them).
+// So the actor, awake props and awake characters still collide with a disabled NPC and wake it up
+// (NearCallback -> EnableObject). A skipped frame therefore takes that same kinematic branch; what it gives up
+// is the check against bodies that are asleep as well: other skipped / kinematic NPCs and resting props.
+// The rules:
+// - budget: after a success up to K frames skip TryPosition, then a full check. A failure empties the budget
+//   and the streak; skipping resumes after npc_perf_move_try_skip_recover successes in a row;
+// - K per NPC: the near K (on screen within npc_perf_move_try_skip_far_dist of the camera, and every NPC while
+//   a second viewport renders - a scope shows far ones up close) or the far K (off screen or farther);
+// - distance budget: the path a run of skips walks unchecked is capped, so the overlap depth stays bounded at
+//   a low FPS too (at 80 ms a frame a running NPC walks ~0.35 m);
+// - never skip (a full check): the NPC is the current entity; its character is awake (woken by a contact,
+//   external impulse, non-interactive mode - IsCharacterEnabled), jumping, losing ground, under forced physics
+//   control or carrying a capture; a big height step; a frame gap (the first frame of moving after standing or
+//   after the NPC was not updated); the current entity within npc_perf_move_try_skip_actor_dist; the actor, an
+//   awake physics shell (a prop, a car, a falling corpse) among the neighbours, or a resting shell within
+//   contact reach. DoCollideObj() itself is the collision query TryPosition pays for - it cannot be asked
+//   for less; an awake body touching the NPC shows up as IsCharacterEnabled() on the next frame instead.
+// Two skipped neighbours may walk into each other for up to K frames. The next TryPosition of either one then
+// collides (DoCollideObj -> merged island -> false), that NPC goes through Calculate() with a real physics step
+// that pushes them apart and wakes the other one (NearCallback -> EnableObject -> a forced check on its next
+// frame), and the hysteresis keeps both on full checks until they are clear again.
+bool CMovementManager::try_position_skip(
+    CPHMovementControl* movement_control, const Fvector& dest_position, float motion)
+{
+    // An update gap longer than this: the NPC stood still or was not updated (offline, update LOD) - check.
+    constexpr u32 max_frame_gap = 4;
+    // A height change in one frame above this (stairs, a ledge, a path over an obstacle) - check.
+    constexpr float max_step_y = 0.3f;
+    // The path a run of skips may walk unchecked: about a capsule diameter near, more where nobody sees it.
+    constexpr float max_unchecked_near = 1.f;
+    constexpr float max_unchecked_far = 3.f;
+    // The contact reach of a resting body, as in the stage 0 close_contact estimate in move_along_path.
+    constexpr float self_radius = 0.4f;
+    constexpr float body_margin = 0.2f;
+
+    const u32 frame = Device.dwFrame;
+    const bool continuous =
+        m_try_skip_frame != 0 && frame >= m_try_skip_frame && frame - m_try_skip_frame <= max_frame_gap;
+    m_try_skip_frame = frame;
+
+    // K of this NPC now: it also refills the budget if this frame ends up checking and the check succeeds
+    bool far_tier = false;
+    if (!Device.m_SecondViewport.IsSVPActive())
+    {
+        const float far_dist = float(npc_perf_move_try_skip_far_dist);
+        far_tier = !object().rendered_in_main_pass() ||
+            (far_dist > 0.f && Device.vCameraPosition.distance_to_sqr(dest_position) > far_dist * far_dist);
+    }
+    const int k = far_tier ? npc_perf_move_try_skip_frames_far : npc_perf_move_try_skip_frames;
+    m_try_skip_k = u8(_max(0, _min(k, 255)));
+
+    // The NPC came from the far tier into the near one: the shorter budget applies at once
+    if (m_try_skip_left > m_try_skip_k)
+        m_try_skip_left = m_try_skip_k;
+    if (!m_try_skip_left)
+        return false; // the budget is spent (or K = 0 here): a regular full check
+
+    const bool profile = npc_cpp_profile::enabled();
+    IGameObject* const current = Level().CurrentEntity();
+
+    // From here on the budget would allow a skip: every early return below is a check the rules force
+    if (m_try_skip_dist + motion > (far_tier ? max_unchecked_far : max_unchecked_near))
+    {
+        m_try_skip_left = 0; // the distance budget is spent: a regular check, not counted as forced
+        return false;
+    }
+
+    if (!continuous || current == &object() || movement_control->IsCharacterEnabled() ||
+        movement_control->bExernalImpulse || movement_control->ForcedPhysicsControl() ||
+        movement_control->JumpState() || movement_control->IsLosingControl() || movement_control->PHCapture() ||
+        _abs(dest_position.y - object().Position().y) > max_step_y)
+    {
+        if (profile)
+            npc_cpp_profile::count(ENpcCppProfileStage::MovementTrySkipForcedState);
+        m_try_skip_left = 0;
+        return false;
+    }
+
+    bool body_near = false;
+    const float actor_dist = float(npc_perf_move_try_skip_actor_dist);
+    if (current && actor_dist > 0.f && current->Position().distance_to_sqr(dest_position) < actor_dist * actor_dist)
+        body_near = true;
+    for (auto it = m_nearest_objects.begin(); !body_near && it != m_nearest_objects.end(); ++it)
+    {
+        IGameObject* const neighbour = *it;
+        if (neighbour == current || smart_cast<CActor*>(neighbour))
+        {
+            body_near = true;
+            break;
+        }
+        // Living characters have no physics shell (their capsule is the CPHMovementControl character): they are
+        // what the skipping is for. A shell is a prop, a car, a door, an item or a corpse.
+        CPhysicsShellHolder* const holder = smart_cast<CPhysicsShellHolder*>(neighbour);
+        CPhysicsShell* const shell = holder ? holder->PPhysicsShell() : nullptr;
+        if (!shell || !shell->isActive())
+            continue;
+        if (shell->isEnabled())
+        {
+            body_near = true; // moving: it may come into the NPC this frame
+            break;
+        }
+        // Asleep: it would not wake for a disabled NPC walking into it, so only TryPosition sees it
+        const float reach = self_radius + neighbour->Radius() + motion + body_margin;
+        const float dx = neighbour->Position().x - dest_position.x;
+        const float dz = neighbour->Position().z - dest_position.z;
+        if (dx * dx + dz * dz < reach * reach)
+            body_near = true;
+    }
+    if (body_near)
+    {
+        if (profile)
+            npc_cpp_profile::count(ENpcCppProfileStage::MovementTrySkipForcedBody);
+        m_try_skip_left = 0;
+        return false;
+    }
+
+    --m_try_skip_left;
+    m_try_skip_dist += motion;
+    m_try_skip_after_skip = true;
+    if (profile)
+    {
+        npc_cpp_profile::count(
+            far_tier ? ENpcCppProfileStage::MovementTrySkipFar : ENpcCppProfileStage::MovementTrySkipNear);
+    }
+    return true;
+}
+
+// Stage 4: the outcome of a real TryPosition. A success refills the budget with this NPC's K once the streak
+// after the last failure is long enough; a failure empties both, so the next frames are full checks.
+void CMovementManager::try_position_skip_result(bool success)
+{
+    if (success)
+    {
+        if (m_try_skip_streak != u8(-1))
+            ++m_try_skip_streak;
+        m_try_skip_left = int(m_try_skip_streak) >= npc_perf_move_try_skip_recover ? m_try_skip_k : 0;
+    }
+    else
+    {
+        // The main sign of harm: the skipped frames let the NPC into something the check now has to resolve
+        if (m_try_skip_after_skip && npc_cpp_profile::enabled())
+            npc_cpp_profile::count(ENpcCppProfileStage::MovementTrySkipFailAfterSkip);
+        m_try_skip_streak = 0;
+        m_try_skip_left = 0;
+    }
+    m_try_skip_dist = 0.f;
+    m_try_skip_after_skip = false;
+}
+
+// Stage 4: the NPC stands or has no neighbours (the old kinematic branch) - its next frame with neighbours
+// is a full check. The streak is kept: standing does not mean a collision.
+void CMovementManager::try_position_skip_reset()
+{
+    m_try_skip_left = 0;
+    m_try_skip_dist = 0.f;
+    m_try_skip_after_skip = false;
 }
 
 bool CMovementManager::move_along_path() const
@@ -256,10 +426,15 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
 
     float precision = 0.5f;
 
+    // Stage 4 (TryPosition coherence): with both K = 0 nothing below touches its state - the old behaviour
+    const bool try_skip_on = npc_perf_move_try_skip_frames > 0 || npc_perf_move_try_skip_frames_far > 0;
+
     // Если нет движения по пути
     if (!move_along_path())
     {
         m_speed = 0.f;
+        if (try_skip_on)
+            try_position_skip_reset(); // the first frame of moving again is a full check
 
         DBG_PH_MOVE_CONDITIONS(if (ph_dbg_draw_mask.test(phDbgNeverUseAiPhMove)) {
             movement_control->SetPosition(dest_position);
@@ -374,7 +549,42 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
     if (!movement_control->PhysicsOnlyMode())
         movement_control->SetCharacterVelocity(velocity);
 
-    if (DBG_PH_MOVE_CONDITIONS(ph_dbg_draw_mask.test(phDbgNeverUseAiPhMove) ||
+    // -npc_cpp_profile only (stage 0 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md): does a
+    // neighbour with a body reach the destination this frame? Living ones: two character capsules (~0.4 m each);
+    // bodies with a physics shell: their bounding sphere. A margin on top: the estimate errs to "contact"
+    if (!m_nearest_objects.empty() && npc_cpp_profile::enabled())
+    {
+        constexpr float self_radius = 0.4f;
+        constexpr float margin = 0.2f;
+        const float reach_motion = motion.magnitude();
+        for (IGameObject* neighbour : m_nearest_objects)
+        {
+            CEntityAlive* alive = smart_cast<CEntityAlive*>(neighbour);
+            CPhysicsShellHolder* holder = smart_cast<CPhysicsShellHolder*>(neighbour);
+            const bool character = alive && alive->g_Alive();
+            if (!character && !(holder && holder->PPhysicsShell()))
+                continue;
+            const float reach = self_radius + (character ? 0.4f : neighbour->Radius()) + reach_motion + margin;
+            const float dx = neighbour->Position().x - dest_position.x;
+            const float dz = neighbour->Position().z - dest_position.z;
+            if (dx * dx + dz * dz < reach * reach)
+            {
+                npc_cpp_profile::count(ENpcCppProfileStage::MovementNearestCloseContact);
+                break;
+            }
+        }
+    }
+
+    // Stage 4: a frame inside the TryPosition budget of this NPC moves it the way the "no neighbours" branch
+    // below does - the same state a successful TryPosition leaves (see try_position_skip for why that is safe)
+    if (try_skip_on && DBG_PH_MOVE_CONDITIONS(!ph_dbg_draw_mask.test(phDbgAlwaysUseAiPhMove) &&)
+        !m_nearest_objects.empty() && try_position_skip(movement_control, dest_position, motion.magnitude()))
+    {
+        movement_control->SetPosition(dest_position);
+        movement_control->DisableCharacter();
+        movement_control->b_exect_position = true;
+    }
+    else if (DBG_PH_MOVE_CONDITIONS(ph_dbg_draw_mask.test(phDbgNeverUseAiPhMove) ||
             !ph_dbg_draw_mask.test(phDbgAlwaysUseAiPhMove) &&) !(m_nearest_objects.empty()))
     { //  физ. объект
         // calls = the frames a physical object was near: the share of the query that pays off
@@ -384,6 +594,8 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
                 dest_position))
         {
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementTryPositionFail);
+            if (try_skip_on)
+                try_position_skip_result(false);
             movement_control->GetPosition(dest_position);
             movement_control->Calculate(detail().path(), desirable_speed, detail().m_current_travel_point, precision);
 
@@ -397,12 +609,16 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
                 movement_control->DisableCharacter();
             })
             movement_control->b_exect_position = true;
+            if (try_skip_on)
+                try_position_skip_result(true);
         }
         movement_control->GetPosition(dest_position);
     }
     else
     {
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementKinematic);
+        if (try_skip_on)
+            try_position_skip_reset(); // no neighbours: the next frame with some is a full check
         // DBG_PH_MOVE_CONDITIONS(
         // if(ph_dbg_draw_mask.test(phDbgNeverUseAiPhMove)){movement_control->SetPosition(dest_position);movement_control->DisableCharacter();})
         movement_control->SetPosition(dest_position);

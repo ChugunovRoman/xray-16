@@ -9,6 +9,7 @@
 #include "Actor.h"
 #include "ActorEffector.h"
 #include "Level.h"
+#include "npc_cpp_profile.h"
 #include "xrEngine/xr_level_controller.h"
 #include "game_cl_base.h"
 #include "Include/xrRender/Kinematics.h"
@@ -1038,6 +1039,8 @@ void CWeapon::Load3DScopeParams(LPCSTR section)
 bool CWeapon::net_Spawn(CSE_Abstract* DC)
 {
     const bool bResult = inherited::net_Spawn(DC);
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): own part of the class net_Spawn
+    PERF_STEP("cls_spawn/weapon", spawn_cls_weapon);
     CSE_Abstract* e = (CSE_Abstract*)(DC);
     CSE_ALifeItemWeapon* E = smart_cast<CSE_ALifeItemWeapon*>(e);
 
@@ -1055,7 +1058,10 @@ bool CWeapon::net_Spawn(CSE_Abstract* DC)
     SetState(E->wpn_state);
     SetNextState(E->wpn_state);
 
-    SpawnDefaultAddons();
+    {
+        PERF_STEP("cls_spawn/weapon_addons", spawn_cls_weapon_addons);
+        SpawnDefaultAddons();
+    }
 
     m_DefaultCartridge.Load(m_ammoTypes[m_ammoType].c_str(), m_ammoType);
     if (iAmmoElapsed)
@@ -1441,9 +1447,101 @@ void CWeapon::OnH_B_Chield()
 }
 
 bool CWeapon::AllowBore() { return true; }
+// What the UpdateCL chain of a weapon does for a hidden one in a slot of an NPC, and why each of them can wait:
+//  CPhysicItem - only without a parent; CInventoryItem, make_Interpolation - multiplayer only;
+//  CHudItem - the motion marks and the end callback of a running motion (checked: none runs);
+//  CWeapon - HUD addons, laser dots, zoom vision, night vision: the actor's weapon only; the shot light and the
+//      flame particles: checked to be off;
+//  CWeaponMagazined - in eHidden the state switch does nothing; UpdateSounds moves the show / hide / reload sounds
+//      to the fire point, which recomputes the bones of the owner (UpdateXForm) - checked: none of them plays.
+// The XFORM of the weapon is not refreshed meanwhile; the drop (OnH_B_Independent) and the activation of the
+// physics shell call UpdateXForm themselves, and the first UpdateCL after the hidden state ends refreshes it.
+bool CWeapon::TrySkipHiddenUpdateCL()
+{
+    if (!IsGameTypeSingle())
+        return false;
+
+    IGameObject* parent = H_Parent();
+    if (!parent || parent == Level().CurrentEntity() || parent == Level().CurrentViewEntity() || ParentIsActor())
+        return false;
+    if (GetState() != eHidden || GetNextState() != eHidden)
+        return false;
+    if (!NpcUpdateCLNothingInFlight())
+        return false;
+
+    if (npc_cpp_profile::enabled())
+    {
+        npc_cpp_profile::count(ENpcCppProfileStage::WeaponUclNpcHidden);
+        npc_cpp_profile::count(ENpcCppProfileStage::WeaponUclNpcHiddenSkipped);
+    }
+    UpdateCLSkippedChild();
+    return true;
+}
+
+// The UpdateCL LOD (stage 3 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md): the owner stalker skipped
+// its UpdateCL this frame (CAI_Stalker::TrySkipUpdateCLLod; the parent is updated before its children). An idle
+// weapon in its hands (or a hidden one in a slot) has nothing to do meanwhile: in eIdle the UpdateCL of the weapon
+// only runs down the shot timer (required to be 0 here), moves its sounds to the fire point (none of them plays)
+// and refreshes its XFORM through the bones of the owner - and the render does that one itself
+// (CWeapon::renderable_Render -> UpdateXForm, or CHudItem::render_prepare before the
+// render), so the weapon on screen stays in the hands. The owner never skips in
+// a fight or while the weapon fires, switches or reloads, so neither does the weapon
+bool CWeapon::TrySkipOwnerLodUpdateCL()
+{
+    const CGameObject* owner = smart_cast<CGameObject*>(H_Parent());
+    if (!owner || !owner->ucl_lod_skipped_this_frame())
+        return false;
+    const u32 state = GetState();
+    if ((state != eIdle && state != eHidden) || GetNextState() != state || fShotTimeCounter > 0.f)
+        return false;
+    if (!NpcUpdateCLNothingInFlight())
+        return false;
+
+    if (npc_cpp_profile::enabled())
+        npc_cpp_profile::count(ENpcCppProfileStage::UclLodWeaponSkip);
+    UpdateCLSkippedChild();
+    return true;
+}
+
+// Shared by both skips above: nothing of the weapon runs on the UpdateCL now - no pending action, no motion with an
+// end stop, no shot light or flame particles, no zoom vision or night vision, no laser dot, no show / hide / reload
+// sound playing
+bool CWeapon::NpcUpdateCLNothingInFlight()
+{
+    if (IsPending() || m_bStopAtEndAnimIsRunning)
+        return false;
+    if (light_time > 0 || m_pFlameParticles || m_pFlameParticles2)
+        return false;
+    // particles attached to the bones of the weapon (CParticlesPlayer, e.g. start_particles from Lua): only the
+    // UpdateCL of CPhysicsShellHolder moves them with the weapon and runs down their life time
+    if (CParticlesPlayer::IsPlaying())
+        return false;
+    if (m_zoom_params.m_pVision || m_bRememberActorNVisnStatus)
+        return false;
+    for (const auto& [addon_id, item] : m_addon_items)
+    {
+        if (item && item->laser_glow && item->laser_glow->get_active())
+            return false;
+    }
+    for (pcstr alias : {"sndShow", "sndHide", "sndReload", "sndReloadEmpty"})
+    {
+        HUD_SOUND_ITEM* sound = m_sounds.FindSoundItem(alias, false);
+        if (sound && sound->playing())
+            return false;
+    }
+    return true;
+}
+
 void CWeapon::UpdateCL()
 {
     ZoneScopedN("ucl_CWeapon");
+    if (TrySkipHiddenUpdateCL() || TrySkipOwnerLodUpdateCL())
+        return;
+    // -npc_cpp_profile only (stage 0 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md): what the
+    // UpdateCL of weapons of NPCs consists of - the one in the hands or hidden ones in the slots
+    if (npc_cpp_profile::enabled() && H_Parent() && H_Parent() != Level().CurrentEntity())
+        npc_cpp_profile::count(GetState() == eHidden ? ENpcCppProfileStage::WeaponUclNpcHidden :
+                                                        ENpcCppProfileStage::WeaponUclNpcActive);
     inherited::UpdateCL();
     UpdateHUDAddonsVisibility();
     // Позиционирование точек ЛЦУ живёт в player_hud::update(), где трансформации худа уже
@@ -1533,14 +1631,62 @@ bool CWeapon::need_renderable()
     return !(IsZoomed() && ZoomTexture() && !IsRotatingToZoom());
 }
 
+// Render prepare of held items (always, plans/optimization_mt/05-render-prepare-weapons.md): main thread, CLevel::BonesPrepass
+// phase C (after the bones prepass, before the render). XFORM (CHudItem::render_prepare), then what renderable_Render
+// did in every pass: the shot light and the render-hud flag. The weapon's own bones and those of its addon models
+// were computed by the bones prepass (render_prepare_models).
+void CWeapon::render_prepare()
+{
+    inherited::render_prepare();
+
+    if (light_render && light_time > 0)
+    {
+        PERF_INC(prepare_light);
+        if (GetHUDmode() || dwFP_Frame == Device.dwFrame)
+            RenderLight(); // the fire point is fresh (or it's the HUD path): exactly as the render did it
+        else
+        {
+            // The 3rd-person fire point (UpdateFireDependencies_internal) from the XFORM just prepared, without
+            // stamping dwFP_Frame: same reason as dwXF_Frame in CHudItem::render_prepare - in
+            // a game/render overlap frame the logic of this frame computes its own fire point for its shots later.
+            Fvector fire_point;
+            XFORM().transform_tiny(fire_point, vLoadedFirePoint);
+            Light_Render(fire_point);
+        }
+    }
+
+    if (IsZoomed() && !IsRotatingToZoom() && ZoomTexture())
+        RenderHud(FALSE);
+    else
+        RenderHud(TRUE);
+}
+
+// Render prepare: main thread, CLevel::BonesPrepass collect step. The addon models of the attachment system
+// are drawn by renderable_Render (add_Visual) - the render computed their bones once per frame; the prepass does that
+// now, together with the weapon's own visual (a regular candidate, as the render no longer invalidates it).
+void CWeapon::render_prepare_models(xr_vector<IKinematics*>& models)
+{
+    if (!bUseAttachmentSystem)
+        return;
+    for (const auto& [addon_id, item] : m_addon_items)
+    {
+        if (item && item->addon_item_model && item->addon_item_model->BonesPrepass_Wanted())
+            models.push_back(item->addon_item_model);
+    }
+}
+
 void CWeapon::renderable_Render(u32 context_id, IRenderable* root)
 {
     ScopeLock lock{ &render_lock };
 
-    if (!m_bWeaponIconSnapshot)
+    // Render prepare: render_prepare() set XFORM, the shot light and the render-hud flag this frame, the
+    // bones prepass computed the bones of the weapon and its addons - this pass only reads (false for the icon render)
+    const bool prepared = render_prepared();
+
+    if (!m_bWeaponIconSnapshot && !prepared)
         UpdateXForm();
 
-    if (!m_bWeaponIconSnapshot)
+    if (!m_bWeaponIconSnapshot && !prepared)
     {
         //нарисовать подсветку
         RenderLight();
@@ -1555,8 +1701,15 @@ void CWeapon::renderable_Render(u32 context_id, IRenderable* root)
     if (bUseAttachmentSystem)
     {
         IKinematics* wpn_k = Visual() ? Visual()->dcast_PKinematics() : nullptr;
-        if (wpn_k)
+        if (wpn_k && prepared)
         {
+            // Fast-out: the bones prepass computed them this frame. Only if something invalidated them after it (a
+            // bone visibility change, the icon render) are they computed here - once, as add_leafs_dynamic would.
+            wpn_k->CalculateBones(TRUE);
+        }
+        else if (wpn_k)
+        {
+            PERF_INC(prepare_render_weapon_bones);
             if (IKinematicsAnimated* ka = wpn_k->dcast_PKinematicsAnimated())
             {
                 ka->UpdateTracks();
@@ -1573,18 +1726,21 @@ void CWeapon::renderable_Render(u32 context_id, IRenderable* root)
         Fmatrix m_item_transform = XFORM();
         for (auto [addon_id, item]: m_addon_items)
         {
-            item->addon_item_transform.set(m_item_transform);
+            // prepared: into a local matrix - the render writes nothing to the weapon (add_Visual copies the matrix)
+            Fmatrix addon_local;
+            Fmatrix& addon_xform = prepared ? addon_local : item->addon_item_transform;
+            addon_xform.set(m_item_transform);
 
             if (wpn_k && !item->bone_name.empty())
             {
                 const u16 bone_id = wpn_k->LL_BoneID(item->bone_name.c_str());
                 if (bone_id != BI_NONE)
-                    item->addon_item_transform.mulB_43(wpn_k->LL_GetTransform(bone_id));
+                    addon_xform.mulB_43(wpn_k->LL_GetTransform(bone_id));
             }
 
-            item->addon_item_transform.mulB_43(item->addon_item_pos_world);
+            addon_xform.mulB_43(item->addon_item_pos_world);
 
-            GEnv.Render->add_Visual(context_id, root, item->addon_item_model->dcast_RenderVisual(), item->addon_item_transform);
+            GEnv.Render->add_Visual(context_id, root, item->addon_item_model->dcast_RenderVisual(), addon_xform);
         }
     }
 

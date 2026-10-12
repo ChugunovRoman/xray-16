@@ -587,7 +587,25 @@ void CCustomMonster::UpdateCL()
     START_PROFILE("CustomMonster/client_update")
     {
         ZoneScopedN("ucl_cm_client_delta");
-        m_client_update_delta = (u32)std::min(Device.dwTimeGlobal - m_last_client_update_time, u32(100));
+        const u32 elapsed = Device.dwTimeGlobal - m_last_client_update_time;
+        // The UpdateCL LOD (stage 3 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md): the first full
+        // UpdateCL after a run of LOD skips covers 2-3 frames, 160-240 ms at 80 ms a frame. The usual 100 ms clamp
+        // would take the rest away from the movement along the path (move_along_path), the look (Exec_Look) and
+        // the sound player: the NPC would walk slower than its neighbours. Lift it to the LOD time cap then (the
+        // LOD itself does not skip past that cap, CAI_Stalker::TrySkipUpdateCLLod); every other UpdateCL keeps 100
+        u32 clamp_ms = 100;
+        if (ucl_lod_skipped_last_frame())
+        {
+            clamp_ms = _max(clamp_ms, u32(npc_perf_ucl_lod_max_delta_ms));
+            if (npc_cpp_profile::enabled())
+            {
+                npc_cpp_profile::count(ENpcCppProfileStage::UclLodAfterSkip);
+                npc_cpp_profile::count(ENpcCppProfileStage::UclLodAfterSkipMs, _min(elapsed, clamp_ms));
+                if (elapsed > clamp_ms)
+                    npc_cpp_profile::count(ENpcCppProfileStage::UclLodDeltaCapHit);
+            }
+        }
+        m_client_update_delta = _min(elapsed, clamp_ms);
         m_last_client_update_time = Device.dwTimeGlobal;
     }
 
@@ -612,11 +630,8 @@ void CCustomMonster::UpdateCL()
     if (!g_Alive())
         return;
 
-    {
-        ZoneScopedN("ucl_cm_sound_callbacks");
-        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLProcessSoundCallbacks);
-        CScriptEntity::process_sound_callbacks();
-    }
+    // The sound callbacks (plans/optimization_mt/06-framemove-offload.md, B5) run on the game logic thread, not here
+    // (CScriptEntity::ProcessQueuedSoundCallbacks), at the rate of this UpdateCL
 
     /*	//. hack just to skip 'CalculateBones'
     if (sound().need_bone_data()) {

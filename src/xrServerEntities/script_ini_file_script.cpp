@@ -11,6 +11,7 @@
 #include "script_ini_file.h"
 #include "addon_api_ini.h"
 #include "xrScriptEngine/Functor.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 bool r_line(const CScriptIniFile* self, pcstr S, int L, luabind::string& N, luabind::string& V)
 {
@@ -48,10 +49,14 @@ bool r_line2(CScriptIniFile* self, pcstr S, pcstr L, luabind::string& N, luabind
 
 #pragma warning(push)
 #pragma warning(disable : 4238)
-CScriptIniFile* create_ini_file(pcstr ini_string)
+CScriptIniFile* create_ini_file(lua_State* L, pcstr ini_string)
 {
     IReader reader((void*)ini_string, xr_strlen(ini_string));
-    return (CScriptIniFile*)xr_new<CInifile>(&reader, FS.get_path("$game_config$")->m_Path);
+    // P20 (plans/optimization_mt/15-ini-cache.md): the parse is tagged with the Lua call site
+    CScriptIniFile::BeginLuaSource(L, true, nullptr);
+    CScriptIniFile* const result = (CScriptIniFile*)xr_new<CInifile>(&reader, FS.get_path("$game_config$")->m_Path);
+    CScriptIniFile::EndLuaSource();
+    return result;
 }
 #pragma warning(pop)
 
@@ -97,8 +102,9 @@ void CScriptIniFile::script_register(lua_State* luaState)
     module(luaState)
     [
         class_<CScriptIniFile>("ini_file")
-            .def(constructor<pcstr>())
-            .def(constructor<pcstr, pcstr>())
+            // lua_State*: the calling Lua thread, takes no Lua argument (P20: the call site of the parse)
+            .def(constructor<lua_State*, pcstr>())
+            .def(constructor<lua_State*, pcstr, pcstr>())
             //Alundaio: Extend script ini file
             .def("w_bool", &CScriptIniFile::w_bool)
             .def("w_color", &CScriptIniFile::w_color)
@@ -195,7 +201,12 @@ void CScriptIniFile::script_register(lua_State* luaState)
 #endif
             }),
             //Alundaio:: END
-            def("create_ini_file", &create_ini_file, adopt<0>()
-        )
+            def("create_ini_file", &create_ini_file, adopt<0>()),
+            // P20 (plans/optimization_mt/15-ini-cache.md): utils.ini_cached answered from its cache -
+            // perf_metrics counter ini/lua_cache_hit (nothing in a build without XR_PERF_METRICS)
+            def("perf_count_ini_cache_hit", +[]()
+            {
+                PERF_INC(ini_lua_cache_hit);
+            })
     ];
 }

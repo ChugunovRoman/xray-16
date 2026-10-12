@@ -255,6 +255,10 @@ extern ECORE_API int r__particle_render_parallel;
 extern ECORE_API int r__particle_render_parallel_min_count;
 extern ECORE_API int r__parallel_skeleton_visbox;
 extern ECORE_API int r__parallel_skeleton_visbox_min_bones;
+// Parallel main build (plans/optimization_mt/08-parallel-main-build.md): dynamic part of the main-view build split
+// over task workers. grain - spatial entries per part, min - fewer entries -> sequential loop.
+extern ECORE_API int r__parallel_main_build_grain;
+extern ECORE_API int r__parallel_main_build_min;
 
 extern void xrRender_initconsole();
 extern BOOL xrRender_test_hw();

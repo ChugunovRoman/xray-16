@@ -26,6 +26,7 @@
 #include "xrEngine/xr_object.h"
 #include "ph_valid_ode.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "PHStepDefer.h"
 
 IC IPhysicsShellHolder* validated_contact_ref_object(dContact* c, bool bo1)
 {
@@ -263,6 +264,7 @@ void CPHSimpleCharacter::Create(dVector3 sizes)
 {
     if (b_exist)
         return;
+    PH_STEP_HAZARD("CPHSimpleCharacter::Create");
 
     b_air_contact_state = false;
     lastMaterialIDX = GAMEMTL_NONE_IDX;
@@ -397,6 +399,7 @@ void CPHSimpleCharacter::Destroy()
 {
     if (!b_exist)
         return;
+    PH_STEP_HAZARD("CPHSimpleCharacter::Destroy");
 
     SetPhysicsRefObject(NULL);
 
@@ -483,6 +486,7 @@ void CPHSimpleCharacter::ApplyImpulse(const Fvector& dir, dReal P)
 {
     if (!b_exist || b_external_impulse)
         return;
+    PH_STEP_HAZARD("CPHSimpleCharacter::ApplyImpulse");
     // if(!dBodyIsEnabled(m_body)) dBodyEnable(m_body);
     m_ext_imulse.set(dir);
     if (b_lose_control || b_jumping || b_jump)
@@ -1111,6 +1115,7 @@ void CPHSimpleCharacter::SetPosition(const Fvector& pos)
     VERIFY_BOUNDARIES(pos, phBoundaries, PhysicsRefObject());
     if (!b_exist)
         return;
+    PH_STEP_HAZARD("CPHSimpleCharacter::SetPosition");
     m_death_position[0] = pos.x;
     m_death_position[1] = pos.y + m_radius;
     m_death_position[2] = pos.z;
@@ -1171,6 +1176,7 @@ void CPHSimpleCharacter::SetVelocity(Fvector vel)
 {
     if (!b_exist)
         return;
+    PH_STEP_HAZARD("CPHSimpleCharacter::SetVelocity");
     float sq_mag = vel.square_magnitude();
     if (sq_mag > default_l_limit * default_l_limit)
     {

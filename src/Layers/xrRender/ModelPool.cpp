@@ -34,6 +34,12 @@
 
 extern ENGINE_API std::atomic<bool> g_bRendering;
 
+namespace
+{
+// Spawn stage 0 (plans/spawn_optimization/SPEC.md): the level / save is still loading (loading screen, precache frames)
+bool modelpool_loading() { return load_screen_renderer.IsActive() || Device.dwPrecacheFrame > 0; }
+} // namespace
+
 namespace xray::render::RENDER_NAMESPACE
 {
 namespace
@@ -125,6 +131,8 @@ dxRender_Visual* CModelPool::Instance_Duplicate(dxRender_Visual* V)
     GW_OVERLAP_HAZARD("CModelPool::Instance_Duplicate");
     ModelPool_mtlock lock;
     R_ASSERT(V);
+    PERF_HOT_ZONE("model_pool/duplicate");
+    PERF_SCOPE(modelpool_duplicate);
     dxRender_Visual* N = Instance_Create(V->Type);
     N->Copy(V);
     N->Spawn();
@@ -343,6 +351,8 @@ dxRender_Visual* CModelPool::Create(const char* name, IReader* data)
 dxRender_Visual* CModelPool::Create(LPCSTR name, LPCSTR suffix, IReader* data)
 {
     GW_OVERLAP_HAZARD("CModelPool::Create");
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): pool hit / find / cold load / copy, see modelpool/* metrics
+    PERF_SCOPE(modelpool_create);
     ModelPool_mtlock lock;
 #ifdef _EDITOR
     if (!name || !name[0])
@@ -364,6 +374,8 @@ dxRender_Visual* CModelPool::Create(LPCSTR name, LPCSTR suffix, IReader* data)
     if (it != Pool.end())
     {
         // 1. Instance found
+        PERF_HOT_ZONE("model_pool/pool_hit");
+        PERF_INC(modelpool_pool_hit);
         dxRender_Visual* Model = it->second;
         Model->Spawn();
         Pool.erase(it);
@@ -372,11 +384,21 @@ dxRender_Visual* CModelPool::Create(LPCSTR name, LPCSTR suffix, IReader* data)
     else
     {
         // 1. Search for already loaded model (reference, base model)
-        dxRender_Visual* Base = Instance_Find(low_name_suffix);
+        dxRender_Visual* Base;
+        {
+            PERF_HOT_ZONE("model_pool/find");
+            PERF_SCOPE(modelpool_find);
+            Base = Instance_Find(low_name_suffix);
+        }
 
         if (nullptr == Base)
         {
-            // 2. If not found
+            // 2. If not found: a cold load of the ogf (under ModelPool_Mutex), in play / inside a client spawn apart
+            ZoneScopedN("model_pool/instance_load");
+            ZoneText(low_name_suffix, xr_strlen(low_name_suffix));
+            PERF_SCOPE(modelpool_instance_load);
+            PERF_SCOPE_IF(!modelpool_loading(), modelpool_instance_load_play);
+            PERF_SCOPE_IF(xray::perf::TlSpawn() != 0, modelpool_instance_load_spawn);
             if (data)
                 Base = Instance_Load(low_name, suffix, data, TRUE);
             else

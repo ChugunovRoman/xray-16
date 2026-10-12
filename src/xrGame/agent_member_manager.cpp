@@ -16,6 +16,7 @@
 #include "sound_player.h"
 #include "cover_point.h"
 #include "Grenade.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 class CMemberPredicate2
 {
@@ -83,6 +84,7 @@ void CAgentMemberManager::remove(CEntity* member)
 void CAgentMemberManager::update() {}
 void CAgentMemberManager::remove_links(IGameObject* object)
 {
+    PERF_ADD(relcase_agent_members, m_members.size()); // P17: members x destroyed (batched relcase)
     MEMBER_STORAGE::iterator I = m_members.begin();
     MEMBER_STORAGE::iterator E = m_members.end();
     for (; I != E; ++I)

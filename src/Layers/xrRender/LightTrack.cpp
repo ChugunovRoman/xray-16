@@ -7,6 +7,7 @@
 #include "Include/xrRender/RenderVisual.h"
 #include "xrEngine/xr_object.h"
 #include "xrEngine/device.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #ifdef _EDITOR
 #include "IGame_Persistent.h"
@@ -172,6 +173,7 @@ void CROS_impl::update(IRenderable* O)
         return;
     if (nullptr == O->GetRenderData().visual)
         return;
+    PERF_SCOPE(ros_update);
     VERIFY(dynamic_cast<CROS_impl*>(O->renderable_ROS()));
     // float	dt			=	Device.fTimeDelta;
 
@@ -397,6 +399,7 @@ void CROS_impl::update_smooth(IRenderable* O)
         return;
 
     dwFrameSmooth = Device.dwFrame;
+    PERF_INC(ros_smooth);
 
 #if RENDER == R_R1
     if (O && (0 == result_count))
@@ -427,6 +430,7 @@ void CROS_impl::calc_sun_value(Fvector& position, IGameObject* _object)
             result_sun += ::Random.randI(lt_hemisamples / 4, lt_hemisamples / 2);
             Fvector direction;
             direction.set(sun->direction).invert().normalize();
+            PERF_INC(ros_rays);
             sun_value = !(g_pGameLevel->ObjectSpace.RayTest(
                             position, direction, 500.f, collide::rqtBoth, &cache_sun, _object)) ?
                 1.f :
@@ -464,6 +468,7 @@ void CROS_impl::calc_sky_hemi_value(Fvector& position, IGameObject* _object)
             direction.set(hdir[sample][0], hdir[sample][1], hdir[sample][2]).normalize();
             //.			result[sample]	=
             //! g_pGameLevel->ObjectSpace.RayTest(position,direction,50.f,collide::rqtBoth,&cache[sample],_object);
+            PERF_INC(ros_rays);
             result[sample] = !g_pGameLevel->ObjectSpace.RayTest(
                 position, direction, 50.f, collide::rqtStatic, &cache[sample], _object);
             //	Msg				("%d:-- %s",sample,result[sample]?"true":"false");
@@ -566,6 +571,7 @@ void CROS_impl::prepare_lights(Fvector& position, IRenderable* O)
 
             // point/spot
             float f = D.sub(P, LP).magnitude();
+            PERF_INC(ros_rays);
             if (g_pGameLevel->ObjectSpace.RayTest(LP, D.div(f), f, collide::rqtStatic, &I->cache, _object))
                 amount -= lt_dec;
             else

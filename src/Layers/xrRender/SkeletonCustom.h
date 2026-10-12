@@ -25,37 +25,103 @@ struct UCalc_mtlock
 {
     u64 t_hold0{};
     bool outer{};
+    xray::perf::ThreadKind kind{xray::perf::ThreadKind::Worker};
 
     UCalc_mtlock()
     {
         outer = (g_ucalc_lock_depth == 0);
         ++g_ucalc_lock_depth;
 #if XR_PERF_METRICS
+        const bool metrics_active = xray::perf::g_perf_metrics_active;
+        if (metrics_active)
+            kind = xray::perf::CurrentThreadKind();
         if (!UCalc_Mutex.TryEnter())
         {
             PERF_INC(bones_lock_contend);
-            const bool metrics_active = xray::perf::g_perf_metrics_active;
             const u64 t0 = metrics_active ? xray::perf::Ticks() : 0;
             UCalc_Mutex.Enter();
             if (metrics_active)
-                xray::perf::AddTimeSlow(xray::perf::Metric::bones_lock_wait, xray::perf::Ticks() - t0);
+            {
+                const u64 waited = xray::perf::Ticks() - t0;
+                xray::perf::AddTimeSlow(xray::perf::Metric::bones_lock_wait, waited);
+                xray::perf::AddTimeSlow(xray::perf::BonesLockWaitMetric(kind), waited);
+            }
         }
+        if (outer && metrics_active)
+            t_hold0 = xray::perf::Ticks();
 #else
         UCalc_Mutex.Enter();
-#endif
-#if XR_PERF_METRICS
-        if (outer && xray::perf::g_perf_metrics_active)
-            t_hold0 = xray::perf::Ticks();
 #endif
     }
 
     ~UCalc_mtlock()
     {
-        if (outer && xray::perf::g_perf_metrics_active)
-            xray::perf::AddTimeSlow(xray::perf::Metric::bones_lock_hold, xray::perf::Ticks() - t_hold0);
+#if XR_PERF_METRICS
+        if (outer && t_hold0)
+        {
+            const u64 held = xray::perf::Ticks() - t_hold0;
+            xray::perf::AddTimeSlow(xray::perf::Metric::bones_lock_hold, held);
+            xray::perf::AddTimeSlow(xray::perf::BonesLockHoldMetric(kind), held);
+        }
+#endif
         UCalc_Mutex.Leave();
         --g_ucalc_lock_depth;
     }
+};
+
+// Per-model lock for the bone math of CKinematics::CalculateBones (phase B), see the phase comment there.
+// Owner = the model whose lock this thread took last (nullptr = none held). Used by the deadlock rules below.
+inline thread_local const void* g_ucalc_model_lock_owner = nullptr;
+
+struct UCalc_model_lock
+{
+    Lock* lock{};
+    const void* prev_owner{};
+    bool locked{};
+
+    // Blocking Enter is allowed only when this thread holds nothing that another thread may wait for in the opposite
+    // order: no other model's lock (ABBA across models) and not the global UCalc_Mutex (a thread holding a model lock
+    // may block on the global one, so the global holder must never block on a model lock). Otherwise TryEnter, and the
+    // caller skips the recompute on failure. Re-entering the same model is always safe (recursive lock).
+    UCalc_model_lock(Lock& l, const void* model) : lock(&l), prev_owner(g_ucalc_model_lock_owner)
+    {
+        const bool may_block = (prev_owner == nullptr || prev_owner == model) && g_ucalc_lock_depth == 0;
+#if XR_PERF_METRICS
+        const bool metrics_active = xray::perf::g_perf_metrics_active;
+        if (l.TryEnter())
+            locked = true;
+        else if (may_block)
+        {
+            PERF_INC(bones_model_lock_contend);
+            const u64 t0 = metrics_active ? xray::perf::Ticks() : 0;
+            l.Enter();
+            locked = true;
+            if (metrics_active)
+                xray::perf::AddTimeSlow(xray::perf::Metric::bones_model_lock_wait, xray::perf::Ticks() - t0);
+        }
+#else
+        if (may_block)
+        {
+            l.Enter();
+            locked = true;
+        }
+        else
+            locked = l.TryEnter();
+#endif
+        if (locked)
+            g_ucalc_model_lock_owner = model;
+    }
+
+    ~UCalc_model_lock()
+    {
+        if (!locked)
+            return;
+        g_ucalc_model_lock_owner = prev_owner;
+        lock->Leave();
+    }
+
+    UCalc_model_lock(const UCalc_model_lock&) = delete;
+    UCalc_model_lock& operator=(const UCalc_model_lock&) = delete;
 };
 
 #pragma warning(push)
@@ -187,12 +253,33 @@ protected:
     accel* bone_map_P; // bones associations (shared) - sorted by name-pointer
 
     BOOL Update_Visibility;
-    u32 UCalc_Time; // start of the current/last recompute; recursion + re-check guard (under UCalc_mtlock)
+    // Start of the current/last recompute; recursion + re-check guard. Written under the per-model lock (phase B),
+    // read under the global lock (phase A) too, hence atomic.
+    std::atomic<u32> UCalc_Time{0};
+    // Serializes the bone math of this model between render threads (phase B of CalculateBones). Recursive.
+#ifdef CONFIG_PROFILE_LOCKS
+    Lock UCalc_ModelLock{"CKinematics::UCalc_ModelLock"};
+#else
+    Lock UCalc_ModelLock;
+#endif
     // Device.dwTimeGlobal of the last *finished* recompute - the only value the unlocked fast-out may
     // trust: UCalc_Time is set before Bone_Calculate, so another render thread used to bail out on it and
     // read half-written bone_instances.
     std::atomic<u32> UCalc_DoneTime{0};
     s32 UCalc_Visibox;
+
+    // Bones prepass (always), all Device.dwFrame values, 0 = never:
+    // the last frame the render build asked for these bones (add_leafs_dynamic, BonesPrepass_MarkRendered);
+    std::atomic<u32> m_render_bones_frame{0};
+    // the frame the prepass recomputed them (phase B);
+    std::atomic<u32> m_prepass_frame{0};
+    // the last frame they were recomputed again after the prepass (invalidated after it: a miss). The prepass then
+    // leaves the model to the render for a while (e.g. a weapon that invalidates its own bones in renderable_Render).
+    std::atomic<u32> m_prepass_miss_frame{0};
+
+    // Perf metrics only (P15, render/main/skin_repeat): Device.dwFrame + 1 of the last GPU-skinned draw of this model in
+    // the main view's dynamic submit. Read and written by CSkeletonX::_Render on the main thread only.
+    u32 m_perf_rmain_palette_frame{0};
 
     Flags64 visimask;
 
@@ -308,7 +395,15 @@ public:
 
     // Main functionality
     void CalculateBones(BOOL bForceExact = FALSE) override; // Recalculate skeleton
+    void CalculateBonesPhaseB(BOOL bForceExact); // bone math under the model lock, see CalculateBones
     void CalculateBones_Invalidate() override;
+
+    // Bones prepass (always), see IKinematics. The render build calls BonesPrepass_MarkRendered() right
+    // before its own CalculateBones(TRUE): that is the candidate list of the next frame's prepass.
+    void BonesPrepass_MarkRendered();
+    bool BonesPrepass_Wanted() const override;
+    bool BonesPrepass_PhaseA() override;
+    bool BonesPrepass_PhaseB() override;
     void Callback(UpdateCallback C, void* Param) override
     {
         Update_Callback = C;

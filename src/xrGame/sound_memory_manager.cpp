@@ -20,6 +20,8 @@
 #include "agent_manager.h"
 #include "agent_member_manager.h"
 #include "ai/stalker/ai_stalker.h"
+#include "xrEngine/xr_object_list.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "ai/stalker/ai_stalker_impl.h"
 #include "xrEngine/profiler.h"
 #include "client_spawn_manager.h"
@@ -368,9 +370,37 @@ void CSoundMemoryManager::remove_links(IGameObject* object)
     // Group-owned list, null for a member outside any group - see CVisualMemoryManager::remove_links.
     if (m_sounds)
     {
-        SOUNDS::iterator I = std::find_if(m_sounds->begin(), m_sounds->end(), CSoundObjectPredicate(object));
-        if (I != m_sounds->end())
-            m_sounds->erase(I);
+        // P17: cleaned of the whole batch by the first member, see CVisualMemoryManager::remove_links.
+        // Same match as CSoundObjectPredicate: by ID, by pointer when the ID cannot be read.
+        const RelcaseBatch* batch = g_pGameLevel ? g_pGameLevel->Objects.relcase_batch() : nullptr;
+        if (batch && batch->contains(object))
+        {
+            if (g_pGameLevel->Objects.relcase_first_visit(m_sounds))
+            {
+                PERF_INC(relcase_shared_purges);
+                PERF_ADD(relcase_shared_items, m_sounds->size());
+                m_sounds->erase(std::remove_if(m_sounds->begin(), m_sounds->end(),
+                                    [batch](const MemorySpace::CSoundObject& sound_object)
+                                    {
+                                        if (!sound_object.m_object)
+                                            return false;
+                                        const u16 id = object_id(sound_object.m_object);
+                                        if (id != u16(-1))
+                                            return batch->contains_id(id);
+                                        return batch->contains(sound_object.m_object);
+                                    }),
+                    m_sounds->end());
+            }
+            else
+                PERF_INC(relcase_shared_skips);
+        }
+        else
+        {
+            PERF_ADD(relcase_shared_items, m_sounds->size());
+            SOUNDS::iterator I = std::find_if(m_sounds->begin(), m_sounds->end(), CSoundObjectPredicate(object));
+            if (I != m_sounds->end())
+                m_sounds->erase(I);
+        }
     }
 
 #ifdef USE_SELECTED_SOUND

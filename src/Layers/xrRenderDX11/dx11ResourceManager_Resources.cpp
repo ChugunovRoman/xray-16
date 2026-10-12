@@ -171,32 +171,57 @@ dx11ConstantBuffer* CResourceManager::_CreateConstantBuffer(u32 context_id, ID3D
     VERIFY(pTable);
     dx11ConstantBuffer* pTempBuffer = xr_new<dx11ConstantBuffer>(pTable);
 
-    for (dx11ConstantBuffer* buf : v_constant_buffer[context_id])
+    // One buffer per cbuffer layout in the context, shared by every shader with it (the vertex and pixel shader of a
+    // pass write and map one cbuffer dynamic_transforms per draw).
+    dx11ConstantBuffer* found = nullptr;
     {
-        if (pTempBuffer->Similar(*buf))
+        std::unique_lock lock(v_constant_buffer_lock);
+        auto& pool = v_constant_buffer[context_id];
+        for (dx11ConstantBuffer* buf : pool)
         {
-            xr_delete(pTempBuffer);
-            return buf;
+            if (pTempBuffer->SameLayout(*buf))
+            {
+                found = buf;
+                break;
+            }
+        }
+
+        if (!found)
+        {
+            pTempBuffer->CreateGpuBuffer();
+            pTempBuffer->dwFlags |= xr_resource_flagged::RF_REGISTERED;
+            pool.emplace_back(pTempBuffer);
+            return pTempBuffer;
         }
     }
-
-    pTempBuffer->dwFlags |= xr_resource_flagged::RF_REGISTERED;
-    v_constant_buffer[context_id].emplace_back(pTempBuffer);
-    return pTempBuffer;
+    // Not registered: its destructor does not touch the registries (outside the lock anyway).
+    xr_delete(pTempBuffer);
+    return found;
 }
 
 void CResourceManager::_DeleteConstantBuffer(u32 context_id, const dx11ConstantBuffer* pBuffer)
 {
     if (0 == (pBuffer->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    std::unique_lock lock(v_constant_buffer_lock);
     reclaim(v_constant_buffer[context_id], pBuffer);
     // Do not Msg here: each buffer is registered in only one context; other contexts correctly "don't find" it.
+}
+
+void CResourceManager::MarkConstantBuffersChanged(u32 context_id)
+{
+    VERIFY(context_id < R__NUM_CONTEXTS);
+    // Render threads, possibly while the Game thread creates or destroys shaders (their constant buffers).
+    std::shared_lock lock(v_constant_buffer_lock);
+    for (dx11ConstantBuffer* buf : v_constant_buffer[context_id])
+        buf->MarkChanged();
 }
 
 bool CResourceManager::_UnregisterConstantBufferFromAllContexts(const dx11ConstantBuffer* pBuffer)
 {
     if (0 == (pBuffer->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return true;
+    std::unique_lock lock(v_constant_buffer_lock);
     for (u32 id = 0; id < R__NUM_CONTEXTS; ++id)
     {
         if (reclaim(v_constant_buffer[id], pBuffer))

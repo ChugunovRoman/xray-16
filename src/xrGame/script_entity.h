@@ -61,6 +61,8 @@ public:
 protected:
     ref_sound* m_current_sound;
     xr_vector<CSavedSound> m_saved_sounds;
+    // This NPC is in the queue of ProcessQueuedSoundCallbacks (game logic thread only)
+    bool m_sound_callbacks_queued = false;
 
 public:
     CScriptEntity();
@@ -109,6 +111,11 @@ public:
     virtual CEntity* GetCurrentCorpse();
     virtual int get_enemy_strength();
     void process_sound_callbacks();
+    // plans/optimization_mt/06-framemove-offload.md, B5: the sound callbacks of the NPCs that heard something always
+    // run here, on the game logic thread (CLevel::OnGameLogicFrame, right after SoundEvent_Dispatch), not in
+    // CCustomMonster::UpdateCL on main. Same rate: a frame whose UpdateCL the NPC skips (the UpdateCL LOD, processing
+    // off) keeps its sounds for the next one.
+    static void ProcessQueuedSoundCallbacks();
 
     void set_script_capture(bool val = true) { m_can_capture = val; }
     bool can_script_capture() { return m_can_capture; }

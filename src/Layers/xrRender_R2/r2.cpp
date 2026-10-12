@@ -1323,7 +1323,8 @@ bool CRender::occ_visible(Fbox& P) { return HOM.visible(P); }
 void CRender::add_Visual(u32 context_id, IRenderable* root, IRenderVisual* V, Fmatrix& m)
 {
     // TODO: this whole function should be replaced by a list of renderables+xforms returned from `renderable_Render` call
-    auto& dsgraph = get_context(context_id);
+    // Inside a part of the parallel main-view build this is the part's own shard.
+    auto& dsgraph = get_context(context_id).insert_target();
     dsgraph.add_leafs_dynamic(root, (dxRender_Visual*)V, m);
 }
 void CRender::add_StaticWallmark(ref_shader& S, const Fvector& P, float s, CDB::TRI* T, Fvector* verts)

@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "addon_object_events.h"
 #include "HudItem.h"
 #include "physic_item.h"
@@ -63,10 +64,32 @@ void CHudItem::PlaySound(pcstr alias, const Fvector& position, u8 index)
 }
 //-Alundaio
 
+// Render prepare of held items (always, plans/optimization_mt/05-render-prepare-weapons.md): main thread, CLevel::BonesPrepass
+// phase C. The owner's bones are final for the frame by now (game logic done, bones prepass phase B joined).
+// UpdateXForm here instead of in every render pass (main view, shadow cascades, lights, SVP) - the render then only
+// reads XFORM. dwXF_Frame is restored: this is a render-side refresh, and in a game/render overlap frame the game logic
+// of this frame runs after the prepass and must still refresh the XFORM (and the fire point from it) itself, as
+// without the prepare - otherwise its shots would come from where the owner stood at the start of the frame.
+void CHudItem::render_prepare()
+{
+    const u32 xf_frame = dwXF_Frame;
+    UpdateXForm();
+    dwXF_Frame = xf_frame;
+    m_render_prepared_frame = Device.dwFrame;
+}
+
+void CHudItem::render_refresh_xform()
+{
+    if (!IsWeaponInventoryIconSnapshot() && !render_prepared())
+    {
+        PERF_INC(prepare_render_xform);
+        UpdateXForm();
+    }
+}
+
 void CHudItem::renderable_Render(u32 context_id, IRenderable* root)
 {
-    if (!IsWeaponInventoryIconSnapshot())
-        UpdateXForm();
+    render_refresh_xform();
     const bool _hud_render = root && root->renderable_HUD() && GetHUDmode();
 
     if (IsWeaponInventoryIconSnapshot())

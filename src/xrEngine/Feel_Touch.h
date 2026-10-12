@@ -30,6 +30,9 @@ public:
 
 public:
     void feel_touch_relcase(IGameObject* O);
+    // P17b: feel_touch_relcase for the batch objects front to back (the order of the per-object calls); nothing at
+    // all when both lists are empty (no call would find anything).
+    void feel_touch_relcase_batch(const RelcaseBatch& batch);
 
 public:
     Touch();

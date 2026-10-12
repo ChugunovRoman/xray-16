@@ -61,6 +61,10 @@ public:
     // Camera position snapshot taken when this frame's step was kicked - for code running inside the step.
     virtual const Fvector& StepCameraPosition() const = 0;
     virtual bool defer_scheduler_mutation(std::function<void()> op) = 0;
+    // B6 (plans/optimization_mt/09-physics-earlier-parallel.md): true while a kicked step is in flight (Kick..Wait)
+    // and the caller is not the thread running it. Narrower than ShouldDeferSchedulerPhysicsMutation(), which in a
+    // game/render overlap frame is true on every thread but the physics one until the Game thread is joined.
+    virtual bool IsStepRunningOnOtherThread() const = 0;
     virtual const PHWorldStatistics& GetStats() = 0;
     virtual void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert) = 0;
 #ifdef DEBUG

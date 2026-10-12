@@ -6,6 +6,13 @@
 #include "Debug/xrSentry.hpp"
 #include "FileSystem.h"
 #include "xrCore/xr_token.h"
+#include "xrCore/Profiling/IniLoadStats.hpp"
+
+#if XR_PERF_METRICS
+#include <algorithm>
+#include <mutex>
+#include "xrCommon/xr_map.h"
+#endif
 
 XRCORE_API CInifile const* pSettings = nullptr;
 XRCORE_API CInifile const* pSettingsAuth = nullptr;
@@ -238,6 +245,216 @@ uint64_t _cdecl _strtoui64(const char *nptr, char **endptr, int base)
 }
 #endif
 
+// P20 (plans/optimization_mt/15-ini-cache.md): who parses ltx while the game runs, see Profiling/IniLoadStats.hpp.
+namespace
+{
+// The name of the next Load on this thread, set right before the call: the file, an #include, null = from memory
+thread_local pcstr tl_ini_load_name = nullptr;
+thread_local u32 tl_ini_load_depth = 0; // Load is recursive (#include): only the outermost one is timed
+thread_local xray::ini_stats::Source tl_ini_source{};
+
+constexpr pcstr ini_layer_names[] = {"engine", "lua_file", "lua_string", "obj_custom_data", "se_custom_data",
+    "spawn_supplies", "trader_custom_data", "plugin"};
+static_assert(sizeof(ini_layer_names) / sizeof(ini_layer_names[0]) == static_cast<size_t>(xray::ini_stats::Layer::Count),
+    "a name for every layer");
+
+constexpr pcstr ini_text_name = "<text>"; // a parse from memory (custom data, create_ini_file, model user data...)
+
+#if XR_PERF_METRICS
+struct IniSourceStat
+{
+    u64 count{0};
+    u64 ticks{0};
+    u64 max_ticks{0};
+};
+
+constexpr size_t ini_max_sources = 2048; // distinct sources in one window, the rest goes to "<other sources>"
+constexpr size_t ini_report_lines = 15;
+
+std::mutex ini_stats_mutex;
+xr_map<xr_string, IniSourceStat>* ini_stats_window = nullptr; // created by the first parse while active
+u64 ini_window_count = 0;
+u64 ini_window_ticks = 0;
+string_path ini_game_config_prefix{}; // $game_config$ in lower case: stripped from the file names of the table
+size_t ini_game_config_prefix_len = 0;
+bool ini_game_config_prefix_read = false;
+
+xray::perf::Metric IniLayerMetric(xray::ini_stats::Layer layer) noexcept
+{
+    using xray::ini_stats::Layer;
+    using xray::perf::Metric;
+    switch (layer)
+    {
+    case Layer::LuaFile: return Metric::ini_load_lua_file;
+    case Layer::LuaString: return Metric::ini_load_lua_string;
+    case Layer::ObjectCustomData: return Metric::ini_load_obj_custom_data;
+    case Layer::ServerCustomData: return Metric::ini_load_se_custom_data;
+    case Layer::SpawnSupplies: return Metric::ini_load_spawn_supplies;
+    case Layer::TraderCustomData: return Metric::ini_load_trader_custom_data;
+    case Layer::Plugin: return Metric::ini_load_plugin;
+    default: return Metric::ini_load_engine;
+    }
+}
+
+// The file name without the $game_config$ prefix (case-insensitive), as Lua names it: "scripts\beh_hunter.ltx"
+pcstr IniShortName(pcstr name) noexcept
+{
+    if (!ini_game_config_prefix_read)
+    {
+        ini_game_config_prefix_read = true;
+        FS_Path* game_config = nullptr;
+        if (FS.get_path("$game_config$", &game_config) && game_config && game_config->m_Path)
+        {
+            xr_strcpy(ini_game_config_prefix, game_config->m_Path);
+            xr_strlwr(ini_game_config_prefix);
+            ini_game_config_prefix_len = xr_strlen(ini_game_config_prefix);
+        }
+    }
+    if (!ini_game_config_prefix_len)
+        return name;
+    for (size_t i = 0; i < ini_game_config_prefix_len; ++i)
+    {
+        const char c = name[i];
+        if (!c || static_cast<char>(tolower(static_cast<u8>(c))) != ini_game_config_prefix[i])
+            return name;
+    }
+    return name + ini_game_config_prefix_len;
+}
+
+// One outermost parse: the perf_metrics timers and the table of sources (only while perf_metrics is active)
+void IniRecordLoad(pcstr name, u64 ticks) noexcept
+{
+    const xray::ini_stats::Source source = tl_ini_source;
+    const size_t layer = static_cast<size_t>(source.layer) < static_cast<size_t>(xray::ini_stats::Layer::Count) ?
+        static_cast<size_t>(source.layer) : 0;
+    xray::perf::AddTimeSlow(xray::perf::Metric::ini_load, ticks);
+    xray::perf::AddTimeSlow(IniLayerMetric(static_cast<xray::ini_stats::Layer>(layer)), ticks);
+
+    std::lock_guard<std::mutex> lock(ini_stats_mutex);
+    if (!ini_stats_window)
+        ini_stats_window = xr_new<xr_map<xr_string, IniSourceStat>>();
+
+    xr_string key = ini_layer_names[layer];
+    key += ' ';
+    key += name ? IniShortName(name) : ini_text_name;
+    if (source.detail && source.detail[0])
+    {
+        key += ' ';
+        key += source.detail;
+    }
+    auto it = ini_stats_window->find(key);
+    if (it == ini_stats_window->end())
+    {
+        if (ini_stats_window->size() >= ini_max_sources)
+            key = "<other sources>";
+        it = ini_stats_window->emplace(std::move(key), IniSourceStat{}).first;
+    }
+    IniSourceStat& stat = it->second;
+    ++stat.count;
+    stat.ticks += ticks;
+    stat.max_ticks = std::max(stat.max_ticks, ticks);
+    ++ini_window_count;
+    ini_window_ticks += ticks;
+}
+#endif
+
+// Around one CInifile::Load: the Tracy zone text (the file name) and, for the outermost call, the timing above
+struct IniLoadScope
+{
+    pcstr name;
+#if XR_PERF_METRICS
+    u64 t0{0};
+    bool timed{false};
+#endif
+
+    explicit IniLoadScope(pcstr name_) noexcept : name(name_)
+    {
+        const bool outermost = tl_ini_load_depth++ == 0;
+#if XR_PERF_METRICS
+        if (!outermost)
+            PERF_INC(ini_load_include);
+        timed = outermost && xray::ini_stats::Active();
+        if (timed)
+            t0 = xray::perf::Ticks();
+#else
+        (void)outermost;
+#endif
+    }
+
+    ~IniLoadScope() noexcept
+    {
+        --tl_ini_load_depth;
+#if XR_PERF_METRICS
+        if (timed)
+            IniRecordLoad(name, xray::perf::Ticks() - t0);
+#endif
+    }
+
+    IniLoadScope(const IniLoadScope&) = delete;
+    IniLoadScope& operator=(const IniLoadScope&) = delete;
+};
+} // namespace
+
+namespace xray::ini_stats
+{
+XRCORE_API pcstr LayerName(Layer layer) noexcept
+{
+    const size_t index = static_cast<size_t>(layer);
+    return index < static_cast<size_t>(Layer::Count) ? ini_layer_names[index] : "?";
+}
+
+XRCORE_API Source& TlSource() noexcept { return tl_ini_source; }
+
+XRCORE_API void WindowReport(bool print) noexcept
+{
+#if XR_PERF_METRICS
+    struct Line
+    {
+        const xr_string* key;
+        IniSourceStat stat;
+    };
+    xr_map<xr_string, IniSourceStat>* window = nullptr;
+    u64 total_count = 0;
+    u64 total_ticks = 0;
+    {
+        std::lock_guard<std::mutex> lock(ini_stats_mutex);
+        window = ini_stats_window;
+        ini_stats_window = nullptr;
+        total_count = ini_window_count;
+        total_ticks = ini_window_ticks;
+        ini_window_count = 0;
+        ini_window_ticks = 0;
+    }
+    if (!window)
+        return;
+    if (print && total_count)
+    {
+        xr_vector<Line> lines;
+        lines.reserve(window->size());
+        for (const auto& [key, stat] : *window)
+            lines.push_back(Line{&key, stat});
+        const size_t shown = std::min(lines.size(), ini_report_lines);
+        std::partial_sort(lines.begin(), lines.begin() + shown, lines.end(),
+            [](const Line& a, const Line& b) { return a.stat.ticks > b.stat.ticks; });
+        Msg("* [ini-load] window: %llu parses %.2fms, %u sources; top %u by time (count total avg max | layer file "
+            "caller)", static_cast<unsigned long long>(total_count), xray::perf::TicksToMilliseconds(total_ticks),
+            static_cast<u32>(lines.size()), static_cast<u32>(shown));
+        for (size_t i = 0; i < shown; ++i)
+        {
+            const IniSourceStat& stat = lines[i].stat;
+            const double total_ms = xray::perf::TicksToMilliseconds(stat.ticks);
+            Msg("*   [ini-load] %llu %.2fms avg=%.1fus max=%.1fus | %s", static_cast<unsigned long long>(stat.count),
+                total_ms, total_ms * 1000.0 / static_cast<double>(stat.count),
+                xray::perf::TicksToMilliseconds(stat.max_ticks) * 1000.0, lines[i].key->c_str());
+        }
+    }
+    xr_delete(window);
+#else
+    (void)print;
+#endif
+}
+} // namespace xray::ini_stats
+
 CInifile* CInifile::Create(pcstr fileName, bool readOnly)
 {
     return xr_new<CInifile>(fileName, readOnly);
@@ -340,6 +557,7 @@ CInifile::CInifile(IReader* F, pcstr path, allow_include_func_t allow_include_fu
     m_flags.set(eSaveAtEnd, false);
     m_flags.set(eReadOnly, true);
     m_flags.set(eOverrideNames, false);
+    tl_ini_load_name = nullptr; // from memory
     Load(F, path, allow_include_func);
 }
 
@@ -364,6 +582,7 @@ CInifile::CInifile(pcstr fileName, bool readOnly, bool loadAtStart, bool saveAtE
             const xr_string path = EFS_Utils::ExtractFilePath(m_file_name);
             if (sect_count)
                 DATA.reserve(sect_count);
+            tl_ini_load_name = m_file_name;
             Load(R, path.c_str(), allow_include_func);
             FS.r_close(R);
         }
@@ -373,6 +592,7 @@ CInifile::CInifile(pcstr fileName, bool readOnly, bool loadAtStart, bool saveAtE
 CInifile::~CInifile()
 {
     ZoneScoped;
+    PERF_INC(ini_destroy);
 
     if (!m_flags.test(eReadOnly) && m_flags.test(eSaveAtEnd))
     {
@@ -430,6 +650,20 @@ IC bool is_empty_line_now(IReader* F)
 void CInifile::Load(IReader* F, pcstr path, allow_include_func_t allow_include_func)
 {
     ZoneScoped;
+    // P20: the name of this parse, set by the caller right before the call (the file, an #include; null = memory)
+    const pcstr load_name = tl_ini_load_name;
+    tl_ini_load_name = nullptr;
+    ZoneText(load_name ? load_name : ini_text_name, xr_strlen(load_name ? load_name : ini_text_name));
+    if (tl_ini_load_depth == 0 && tl_ini_source.layer != xray::ini_stats::Layer::Engine)
+    {
+        ZoneText(xray::ini_stats::LayerName(tl_ini_source.layer),
+            xr_strlen(xray::ini_stats::LayerName(tl_ini_source.layer)));
+        if (tl_ini_source.detail)
+        {
+            ZoneText(tl_ini_source.detail, xr_strlen(tl_ini_source.detail));
+        }
+    }
+    IniLoadScope load_scope(load_name);
 
     R_ASSERT(F);
     Sect* Current = nullptr;
@@ -516,6 +750,7 @@ void CInifile::Load(IReader* F, pcstr path, allow_include_func_t allow_include_f
                         }
 #endif
                         R_ASSERT3(I, "Can't find include file:", name);
+                        tl_ini_load_name = _fn;
                         Load(I, inc_path, allow_include_func);
                         FS.r_close(I);
                     }

@@ -4,27 +4,37 @@ namespace xray::render::RENDER_NAMESPACE
 {
 IRender_Sector::sector_id_t R_dsgraph_structure::detect_sector(const Fvector& P)
 {
+    return detect_sector(Sectors_xrc, P);
+}
+
+IRender_Sector::sector_id_t R_dsgraph_structure::detect_sector(const Fvector& P, Fvector& dir)
+{
+    return detect_sector(Sectors_xrc, P, dir);
+}
+
+IRender_Sector::sector_id_t R_dsgraph_structure::detect_sector(xrXRC& xrc, const Fvector& P)
+{
     Fvector dir{ 0, -1, 0 };
-    auto sector = detect_sector(P, dir);
+    auto sector = detect_sector(xrc, P, dir);
     if (sector == IRender_Sector::INVALID_SECTOR_ID)
     {
         dir = { 0, 1, 0 };
-        sector = detect_sector(P, dir);
+        sector = detect_sector(xrc, P, dir);
     }
     return sector;
 }
 
-IRender_Sector::sector_id_t R_dsgraph_structure::detect_sector(const Fvector& P, Fvector& dir)
+IRender_Sector::sector_id_t R_dsgraph_structure::detect_sector(xrXRC& xrc, const Fvector& P, Fvector& dir)
 {
     // Portals model
     int id1 = -1;
     float range1 = 500.f;
     if (RImplementation.rmPortals)
     {
-        Sectors_xrc.ray_query(CDB::OPT_ONLYNEAREST, RImplementation.rmPortals, P, dir, range1);
-        if (Sectors_xrc.r_count())
+        xrc.ray_query(CDB::OPT_ONLYNEAREST, RImplementation.rmPortals, P, dir, range1);
+        if (xrc.r_count())
         {
-            CDB::RESULT* RP1 = Sectors_xrc.r_begin();
+            CDB::RESULT* RP1 = xrc.r_begin();
             id1 = RP1->id;
             range1 = RP1->range;
         }
@@ -33,10 +43,10 @@ IRender_Sector::sector_id_t R_dsgraph_structure::detect_sector(const Fvector& P,
     // Geometry model
     int id2 = -1;
     float range2 = range1;
-    Sectors_xrc.ray_query(CDB::OPT_ONLYNEAREST, g_pGameLevel->ObjectSpace.GetStaticModel(), P, dir, range2);
-    if (Sectors_xrc.r_count())
+    xrc.ray_query(CDB::OPT_ONLYNEAREST, g_pGameLevel->ObjectSpace.GetStaticModel(), P, dir, range2);
+    if (xrc.r_count())
     {
-        CDB::RESULT* RP2 = Sectors_xrc.r_begin();
+        CDB::RESULT* RP2 = xrc.r_begin();
         id2 = RP2->id;
         range2 = RP2->range;
     }

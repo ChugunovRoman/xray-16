@@ -6,6 +6,7 @@
 #include "hit_immunity.h"
 #include "damage_manager.h"
 #include "DestroyablePhysicsObject.h"
+#include "xrPhysics/PHStepDefer.h"
 
 void CPhysicObject::script_register(lua_State* luaState)
 {
@@ -22,8 +23,18 @@ void CPhysicObject::script_register(lua_State* luaState)
             .def("anim_time_set", &CPhysicObject::anim_time_set)
             .def("play_bones_sound", &CPhysicObject::play_bones_sound)
             .def("stop_bones_sound", &CPhysicObject::stop_bones_sound)
-            .def("set_door_ignore_dynamics", &CPhysicObject::set_door_ignore_dynamics)
-            .def("unset_door_ignore_dynamics", &CPhysicObject::unset_door_ignore_dynamics),
+            // Contact callback lists of an active door shell: queued while the physics step runs on another thread
+            // (B6 early physics kick, xrPhysics/PHStepDefer.h); the scope counts it as physics/defer/lua.
+            .def("set_door_ignore_dynamics", +[](CPhysicObject* self)
+            {
+                ph_step_defer::ScriptCallScope script_call;
+                self->set_door_ignore_dynamics();
+            })
+            .def("unset_door_ignore_dynamics", +[](CPhysicObject* self)
+            {
+                ph_step_defer::ScriptCallScope script_call;
+                self->unset_door_ignore_dynamics();
+            }),
 
         class_<CDestroyablePhysicsObject, CPhysicObject>("CDestroyablePhysicsObject")
             .def(constructor<>())

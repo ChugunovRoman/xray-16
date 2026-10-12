@@ -22,6 +22,7 @@ class CParticlesObject;
 class xrServer;
 class game_cl_GameState;
 class NET_Queue_Event;
+class NET_Event;
 class CSE_Abstract;
 class CSpaceRestrictionManager;
 class CSeniorityHierarchyHolder;
@@ -292,6 +293,9 @@ public:
     // Events
     void OnEvent(EVENT E, u64 P1, u64 P2) override;
     void OnFrame(void) override;
+    // The game logic thread, after SoundEvent_Dispatch and before the scheduler (06-framemove-offload.md, B4/B5):
+    // the queued NPC sound callbacks and level_on_frame when OnFrame of this frame left it there.
+    void OnGameLogicFrame() override;
     void OnRender() override;
     void RenderBulletTracersForMainViewport() override;
     void RenderBulletTracersForSecondViewport() override;
@@ -300,8 +304,82 @@ public:
     void net_StartPlayDemo() override;
     void cl_Process_Event(u16 dest, u16 type, NET_Packet& P);
     void cl_Process_Spawn(NET_Packet& P);
-    void ProcessGameEvents();
+    // frame_budget: the call of CLevel::OnFrame, the only one the spawn budget (spawn_budget_us) applies to; every other
+    // call (level stop, ClearAllObjects, g_bDebugEvents) drains the whole queue
+    void ProcessGameEvents(bool frame_budget = false);
     void ProcessGameSpawns();
+    // Spawn stage 2: a save or a level change that finds M_SPAWN still in the client queue logs it. Their objects are
+    // saved from the server state, as when they come online (the server is the source of truth), so it is no error.
+    void SpawnQueueNoteSave(pcstr where) const;
+
+private:
+    // plans/spawn_optimization/SPEC.md 8.6: the server frees an ID on entity_Destroy and may hand it to a new object in
+    // the same frame, while the client still holds the old object (GE_DESTROY only marks it, CObjectList::Update destroys
+    // it after ProcessGameEvents). An M_SPAWN that finds its ID held by an object marked for destruction is not dropped:
+    // ProcessGameEvents stops in front of it and the rest of the queue (its children, its events) waits for the next frame.
+    struct SpawnIdWait
+    {
+        shared_str section; // of the waiting spawn
+        u32 first_frame{};
+        u32 frames{}; // frames it has waited so far
+        u16 id{u16(-1)};
+        bool waiting{};
+    };
+    SpawnIdWait m_spawn_id_wait;
+    // true: the head M_SPAWN must wait for the next frame (see SpawnIdWait); false: process it now
+    bool SpawnMustWait(u16 id, pcstr section);
+    // after an M_SPAWN left the queue: if it is the one that waited, log whether it materialized
+    void SpawnWaitDone(u16 id);
+
+    // Spawn stage 2 (plans/spawn_optimization/SPEC.md 5.A, section 12): a budget of the client materialization of
+    // M_SPAWN per frame. The queue is taken from its head only, nothing overtakes anything. An "atomic group" - a root
+    // M_SPAWN and the M_SPAWN of its children right behind it (parent = the root or a child already in the group;
+    // M_EVENT between them do not break it) - is materialized whole in one frame: the budget is checked only in front
+    // of a root. When it is spent, the root and everything behind it (its children, events to it and to anyone else)
+    // wait for the next frame, in the same order.
+public: // the reasons are named by the spawn report too (Level_network_spawn.cpp)
+    enum class SpawnBudgetForce : u8
+    {
+        None,
+        Loading, // loading screen / precache frames: the initial spawn of the level
+        Pause, // the game is paused: nothing to protect, and the queue is empty before a save from the menu
+        Delay, // the head waits longer than spawn_max_delay_ms
+        Count
+    };
+
+private:
+    struct SpawnBudgetPass
+    {
+        CTimerBase timer; // from the start of the pass: M_EVENT count too
+        u64 budget_ns{}; // 0 = no budget (spawn_budget_us 0, not the call of OnFrame, g_bDebugEvents, not single)
+        u32 min_groups{};
+        u32 max_delay_ms{};
+        u64 catchup_ns{}; // the limit of a pass that goes past the budget for an old head (spawn_catchup_us), 0 = none
+        SpawnBudgetForce force{}; // Loading / Pause: the budget only counts what it would have deferred
+        u32 groups{}; // groups materialized in this pass (one started counts)
+        u32 group_size_max{}; // M_SPAWN of the largest group of this pass
+        u32 forced[size_t(SpawnBudgetForce::Count)]{}; // groups materialized past the spent budget, by reason
+        bool stopped{}; // the budget left the head group for the next frame
+    };
+    // In front of a root M_SPAWN: true = the budget of this frame is spent, stop here
+    bool SpawnBudgetSpent(SpawnBudgetPass& pass, const NET_Event& head);
+    // "*   [spawn] budget ..." line of the spawn report (Level_network_spawn.cpp), once per pass with the budget on
+    struct SpawnBudgetFrame
+    {
+        u32 budget_us{};
+        u32 min_groups{};
+        u32 max_delay_ms{};
+        u32 groups{};
+        u32 group_size_max{};
+        u32 deferred_groups{}; // groups left in the queue when the budget stopped (0 = it did not)
+        u32 deferred_spawns{};
+        u32 queue_wait_ms{};
+        u32 forced[size_t(SpawnBudgetForce::Count)]{};
+        bool stopped{};
+    };
+    void SpawnBudgetReport(const SpawnBudgetFrame& frame);
+
+public:
     void ProcessCompressedUpdate(NET_Packet& P, const Flags8& compression_type);
 
     // Input
@@ -358,8 +436,20 @@ public:
 private:
     // Device.PostSchedulerVisionBatch: right after Sheduler.Update on the game thread (EngineThreading.cpp).
     static void VisionBatchPostScheduler();
+    // level_on_frame of the event bus (only when it has subscribers).
+    void EmitLevelOnFrame();
+    // Set by OnFrame (main, unpaused frame), consumed by OnGameLogicFrame of the same frame.
+    // The kick of the logic thread (task / Event) orders the write before the read.
+    bool m_level_on_frame_pending = false;
+    // Device.BonesPrepassCallback (always, plans/optimization_mt/04-bones-prepass.md): main thread,
+    // between the game logic and the render (device.cpp, RunBonesPrepass).
+    static void BonesPrepass();
 
 public:
+    // Bones prepass: CGameObject::renderable_Render notes the object (once per frame, any render thread); the next
+    // frame's BonesPrepass resolves the IDs (net_Find) and computes the bones the render computed last time.
+    static void BonesPrepassNote(u16 id);
+
     // название текущего уровня
     shared_str name() const override;
     // this method can be used ONLY from CCC_ChangeGameType

@@ -85,6 +85,20 @@ protected:
     // pair (an old frame with a new src, or vice versa) across two concurrent MakeMeCrow() writes.
     std::atomic<u64> m_crow_packed{0};
     std::atomic<u32> m_main_pass_frame{0};
+    // Bones prepass: the frame this object was last noted for the next frame's bones prepass (renderable_Render,
+    // any pass, any render thread); dedups the note to once per frame. See CLevel::BonesPrepassNote.
+    std::atomic<u32> m_bones_prepass_note_frame{0};
+    // The frame of the last UpdateCLSkippedRoot() (stage 3, the UpdateCL LOD); 0 = never. Main thread only
+    u32 m_ucl_lod_skip_frame{0};
+
+public:
+    // Seen in the main render pass (frustum + HOM passed; shadow passes do not count) within the last `frames`
+    // frames. The render of frame F runs before the UpdateCL of frame F+1, so 1 = "on screen last frame".
+    bool rendered_in_main_pass(u32 frames = 1) const;
+
+protected:
+    void UpdateCLCrow(const Fvector& position);
+
     // Props.crow used to live in the GameObjectProperties bitfield union alongside bEnabled/bVisible/
     // bDestroy/net_*/bPreDestroy. MakeMeCrow() can run on a shadow-pass worker thread while those other
     // bits are written from the main/game thread, and a bitfield write is a read-modify-write of the
@@ -277,6 +291,22 @@ public:
     void PostLoad(LPCSTR section) override; //--#SM+#--
     void PreUpdateCL() override;
     virtual void UpdateCL() override; // Called each frame, so no need for dt
+    // For an override of UpdateCL that has nothing to do this frame and returns without calling the inherited one:
+    // what CGameObject::UpdateCL would still have done for a child object - stay in the update list by the crow
+    // rules (by the position of the root: the own XFORM of a skipped child is not refreshed). A child only
+    // (H_Parent() != nullptr): a root object also needs its spatial and physics part
+    void UpdateCLSkippedChild();
+    // The same for a root object (no parent) whose UpdateCL is skipped by the update-rate LOD (CAI_Stalker,
+    // stage 3 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md): what CGameObject::UpdateCL would still
+    // have done - the spatial DB, the crow rules (by the own position), the obstacle on a moved XFORM - and the mark
+    // ucl_lod_skipped_this_frame() for the children, updated right after their root (CObjectList::SingleUpdate)
+    void UpdateCLSkippedRoot();
+    // UpdateCLSkippedRoot() ran this frame: the UpdateCL of this root object was skipped by the LOD. A child (the
+    // weapon in the hands) may then skip its own one if it has nothing to do (CWeapon::TrySkipOwnerLodUpdateCL)
+    bool ucl_lod_skipped_this_frame() const;
+    // UpdateCLSkippedRoot() ran in the previous frame: this full UpdateCL ends a run of LOD skips, its time delta
+    // covers several frames (CCustomMonster::UpdateCL lifts its 100 ms clamp for it)
+    bool ucl_lod_skipped_last_frame() const;
     void PostUpdateCL(bool bUpdateCL_disabled) override; //--#SM+#--
     virtual void OnChangeVisual() override;
     // object serialization
@@ -292,6 +322,8 @@ public:
     virtual void net_MigrateInactive(NET_Packet& packet) override { Props.net_Local = FALSE; }
     virtual void net_MigrateActive(NET_Packet& packet) override { Props.net_Local = TRUE; }
     virtual void net_Relcase(IGameObject* O) override; // destroy all links to another objects
+    // P17: net_Relcase for batch.objects back to front, as vanilla CObjectList did per destroyed object
+    virtual void net_RelcaseBatch(const RelcaseBatch& batch) override;
     virtual void save(NET_Packet& output_packet) override;
     virtual void load(IReader& input_packet);
     // Position stack

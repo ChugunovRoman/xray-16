@@ -32,6 +32,7 @@
 #include "game_object_space.h"
 #include "xrEngine/profiler.h"
 #include "npc_cpp_profile.h"
+#include "Level.h"
 
 namespace
 {
@@ -40,6 +41,13 @@ namespace
 // LOD-based memory throttle (P1) further reduces call frequency for FAR NPCs.
 constexpr size_t SCRIPT_ENTITY_SOUND_CALLBACKS_PER_UPDATE = 2;
 constexpr size_t SCRIPT_ENTITY_SAVED_SOUND_LIMIT = 12; // slightly larger buffer to compensate
+
+// IDs of the NPCs with saved sounds, for CScriptEntity::ProcessQueuedSoundCallbacks.
+// Written and read on the game logic thread only (sound_callback: SoundEvent_Dispatch there, or a hit in FrameMove
+// while that thread is not running), so no lock. IDs, not pointers: an NPC may be destroyed between the sound and
+// the next logic frame (net_Find then misses it).
+xr_vector<u16> s_sound_callback_queue;
+xr_vector<u16> s_sound_callback_batch; // kept between frames: no allocation per frame
 }
 
 void ActionCallback(IKinematics* tpKinematics);
@@ -710,6 +718,13 @@ void CScriptEntity::sound_callback(
     if (!this->object().callback(GameObject::eSound) && !gw::addons::objevents::WantsHear())
         return;
 
+    // B5: the callbacks of this NPC always run in the next CLevel::OnGameLogicFrame, not in its UpdateCL
+    if (!m_sound_callbacks_queued)
+    {
+        m_sound_callbacks_queued = true;
+        s_sound_callback_queue.push_back(this->object().ID()); // `object` here is the source of the sound
+    }
+
     for (CSavedSound& saved_sound : m_saved_sounds)
     {
         if (saved_sound.m_game_object_id != object->ID() || saved_sound.m_sound_type != sound_type)
@@ -762,4 +777,48 @@ void CScriptEntity::process_sound_callbacks()
     }
 
     m_saved_sounds.erase(m_saved_sounds.begin(), m_saved_sounds.begin() + processed_count);
+}
+
+void CScriptEntity::ProcessQueuedSoundCallbacks()
+{
+    if (s_sound_callback_queue.empty())
+        return;
+    // The callbacks (Lua, plugins) may queue more sounds of other NPCs: they go to the next frame
+    s_sound_callback_batch.clear();
+    s_sound_callback_batch.swap(s_sound_callback_queue);
+    u32 processed = 0;
+    for (const u16 id : s_sound_callback_batch)
+    {
+        IGameObject* object = Level().Objects.net_Find(id);
+        CCustomMonster* monster = object ? object->cast_custom_monster() : nullptr;
+        // Destroyed (or the ID belongs to another object now): its sounds go with it
+        if (!monster || monster->getDestroy())
+            continue;
+        CScriptEntity& entity = *monster;
+        if (!entity.m_sound_callbacks_queued)
+            continue; // a reused ID: this object did not queue itself
+        // The dead do not process sounds (CCustomMonster::UpdateCL returns before them) and hear nothing new
+        if (!monster->g_Alive())
+        {
+            entity.m_sound_callbacks_queued = false;
+            continue;
+        }
+        // The rate of the UpdateCL path: no callbacks in a frame without the UpdateCL of the NPC
+        if (!monster->processing_enabled() || monster->ucl_lod_skipped_this_frame())
+        {
+            s_sound_callback_queue.push_back(id);
+            continue;
+        }
+        entity.m_sound_callbacks_queued = false;
+        entity.process_sound_callbacks();
+        ++processed;
+        // More than SCRIPT_ENTITY_SOUND_CALLBACKS_PER_UPDATE saved: the rest in the next frame, as in UpdateCL.
+        // A callback may also have queued this NPC again already
+        if (!entity.m_saved_sounds.empty() && !entity.m_sound_callbacks_queued)
+        {
+            entity.m_sound_callbacks_queued = true;
+            s_sound_callback_queue.push_back(id);
+        }
+    }
+    PERF_ADD(game_hear_npcs, processed);
 }

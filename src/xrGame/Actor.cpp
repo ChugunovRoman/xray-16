@@ -1069,6 +1069,8 @@ float CActor::currentFOV()
 void CActor::UpdateCL()
 {
     ZoneScopedN("ucl_CActor");
+    // P19b (plans/optimization_mt/14-spike-instrumentation.md, "FrameMove и актор"): every stage below is PERF_STAGE -
+    // a Tracy zone actor_ucl/*, an actor/ucl/* timer of perf_metrics and a spike site with the thread CPU time
     if (g_Alive() && Level().CurrentViewEntity() == this)
     {
         if (CurrentGameUI() && !CurrentGameUI()->TopInputReceiver() && !m_holder)
@@ -1088,10 +1090,14 @@ void CActor::UpdateCL()
         }
     }
 
-    UpdateInventoryOwner(Device.dwTimeDelta);
+    {
+        PERF_STAGE("actor_ucl/inventory", actor_ucl_inventory);
+        UpdateInventoryOwner(Device.dwTimeDelta);
+    }
 
     if (m_feel_touch_characters > 0)
     {
+        PERF_STAGE("actor_ucl/touch_boxes", actor_ucl_touch_boxes);
         for (auto& it : feel_touch)
         {
             auto sh = smart_cast<CPhysicsShellHolder*>(it);
@@ -1104,25 +1110,51 @@ void CActor::UpdateCL()
         }
     }
     if (m_holder)
+    {
+        PERF_STAGE("actor_ucl/holder", actor_ucl_holder);
         m_holder->UpdateEx(currentFOV());
+    }
 
     m_snd_noise -= 0.3f * Device.fTimeDelta;
 
-    inherited::UpdateCL();
-    m_pPhysics_support->in_UpdateCL();
+    {
+        // CPhysicsShellHolder (attached particles) and CGameObject (spatial, crow, matrix: game_object/ucl/*)
+        PERF_STAGE("actor_ucl/base", actor_ucl_base);
+        inherited::UpdateCL();
+    }
+    {
+        PERF_STAGE("actor_ucl/ph_support", actor_ucl_ph_support);
+        m_pPhysics_support->in_UpdateCL();
+    }
 
     if (g_Alive())
+    {
+        PERF_STAGE("actor_ucl/pickup", actor_ucl_pickup);
         PickupModeUpdate();
+    }
 
-    PickupModeUpdate_COD();
+    {
+        PERF_STAGE("actor_ucl/pickup_cod", actor_ucl_pickup_cod);
+        PickupModeUpdate_COD();
+    }
 
     SetZoomAimingMode(false);
     CWeapon* pWeapon = smart_cast<CWeapon*>(inventory().ActiveItem());
 
-    cam_Update(float(Device.dwTimeDelta) / 1000.0f, currentFOV());
+    {
+        PERF_STAGE("actor_ucl/cam_update", actor_ucl_cam);
+        cam_Update(float(Device.dwTimeDelta) / 1000.0f, currentFOV());
+    }
 
-    Device.OnCameraUpdated();
+    {
+        // The first (real) Device.OnCameraUpdated of the frame: the render kicks its HOM and details tasks here, the
+        // latter after waiting for the previous one (frame/camera_updated/render, device.cpp)
+        PERF_STAGE("actor_ucl/camera_updated", actor_ucl_camera_updated);
+        Device.OnCameraUpdated();
+    }
 
+    { // P19b stage actor_ucl/weapon_hud, up to UpdateDefferedMessages (the block is not re-indented: smaller diff)
+    PERF_STAGE("actor_ucl/weapon_hud", actor_ucl_weapon);
     if (Level().CurrentEntity() && this->ID() == Level().CurrentEntity()->ID())
     {
         psHUD_Flags.set(HUD_CROSSHAIR_RT2, true);
@@ -1212,14 +1244,23 @@ void CActor::UpdateCL()
             GEnv.Render->SetHudOverlayActive(false); // g_3d_scopes 3: HUD overlay scope off
         }
     }
+    } // P19b stage actor_ucl/weapon_hud
 
-    UpdateDefferedMessages();
+    {
+        PERF_STAGE("actor_ucl/messages", actor_ucl_messages);
+        UpdateDefferedMessages();
+    }
 
     if (g_Alive())
+    {
+        PERF_STAGE("actor_ucl/steps", actor_ucl_steps);
         CStepManager::update(this == Level().CurrentViewEntity());
+    }
 
     spatial.type |= STYPE_REACTTOSOUND;
 
+    { // P19b stage actor_ucl/effects: sound shock effector and controller feedback (not re-indented)
+    PERF_STAGE("actor_ucl/effects", actor_ucl_effects);
     if (m_sndShockEffector)
     {
         if (this == Level().CurrentViewEntity())
@@ -1260,7 +1301,10 @@ void CActor::UpdateCL()
         }
 
     }
+    } // P19b stage actor_ucl/effects
 
+    { // P19b stage actor_ucl/player_hud (not re-indented)
+    PERF_STAGE("actor_ucl/player_hud", actor_ucl_player_hud);
     Fmatrix trans, trans2;
     if (cam_Active() == cam_FirstEye())
     {
@@ -1278,6 +1322,7 @@ void CActor::UpdateCL()
         g_player_hud[0]->update(trans);
         g_player_hud[1]->update(trans2);
     }
+    } // P19b stage actor_ucl/player_hud
 
     if (psActorFlags.test(AF_MULTI_ITEM_PICKUP))
         m_bPickupMode = false;
@@ -1354,7 +1399,11 @@ void CActor::shedule_Update(u32 DT)
     if (Level().CurrentControlEntity() == this && !Level().IsDemoPlay())
     //------------------------------------------------
     {
-        g_cl_CheckControls(mstate_wishful, NET_SavedAccel, NET_Jump, dt);
+        // P19b (14-spike-instrumentation.md): stages of the actor's scheduler update, PERF_STAGE actor_shed/*
+        {
+            PERF_STAGE("actor_shed/controls", actor_shed_controls);
+            g_cl_CheckControls(mstate_wishful, NET_SavedAccel, NET_Jump, dt);
+        }
         {
             /*
             if (mstate_real & mcJump)
@@ -1367,13 +1416,19 @@ void CActor::shedule_Update(u32 DT)
             }
             */
         }
-        g_cl_Orientate(mstate_real, dt);
-        g_Orientate(mstate_real, dt);
+        {
+            PERF_STAGE("actor_shed/physics", actor_shed_physics);
+            g_cl_Orientate(mstate_real, dt);
+            g_Orientate(mstate_real, dt);
 
-        g_Physics(NET_SavedAccel, NET_Jump, dt);
+            g_Physics(NET_SavedAccel, NET_Jump, dt);
+        }
 
-        g_cl_ValidateMState(dt, mstate_wishful);
-        g_SetAnimation(mstate_real);
+        {
+            PERF_STAGE("actor_shed/mstate_anim", actor_shed_mstate);
+            g_cl_ValidateMState(dt, mstate_wishful);
+            g_SetAnimation(mstate_real);
+        }
 
         // Check for game-contacts
         Fvector C;
@@ -1382,8 +1437,14 @@ void CActor::shedule_Update(u32 DT)
 
         Center(C);
         R = Radius();
-        feel_touch_update(C, R);
-        Feel_Grenade_Update(m_fFeelGrenadeRadius);
+        {
+            PERF_STAGE("actor_shed/feel_touch", actor_shed_feel_touch);
+            feel_touch_update(C, R);
+        }
+        {
+            PERF_STAGE("actor_shed/feel_grenade", actor_shed_grenade);
+            Feel_Grenade_Update(m_fFeelGrenadeRadius);
+        }
 
         // Dropping
         if (b_DropActivated)
@@ -1435,8 +1496,14 @@ void CActor::shedule_Update(u32 DT)
     };
     NET_Jump = 0;
 
-    inherited::shedule_Update(DT);
+    {
+        // conditions, ... CGameObject::shedule_Update (the actor's Lua binder)
+        PERF_STAGE("actor_shed/base", actor_shed_base);
+        inherited::shedule_Update(DT);
+    }
 
+    { // P19b stage actor_shed/sounds: bobbing effector and the condition sounds (not re-indented)
+    PERF_STAGE("actor_shed/sounds", actor_shed_sounds);
     //эффектор включаемый при ходьбе
     if (!pCamBobbing)
     {
@@ -1512,7 +1579,10 @@ void CActor::shedule_Update(u32 DT)
         if (!g_Alive() && m_DangerSnd._feedback())
             m_DangerSnd.stop();
     }
+    } // P19b stage actor_shed/sounds
 
+    { // P19b stage actor_shed/look_at (not re-indented)
+    PERF_STAGE("actor_shed/look_at", actor_shed_look_at);
     //если в режиме HUD, то сама модель актера не рисуется
     if (!character_physics_support()->IsRemoved())
         setVisible(!HUDview());
@@ -1590,10 +1660,18 @@ void CActor::shedule_Update(u32 DT)
 
     //	UpdateSleep									();
 
+    } // P19b stage actor_shed/look_at
+
     //для свойст артефактов, находящихся на поясе
-    UpdateArtefactsOnBeltAndOutfit();
-    m_pPhysics_support->in_shedule_Update(DT);
-    Check_for_AutoPickUp();
+    {
+        PERF_STAGE("actor_shed/artefacts", actor_shed_artefacts);
+        UpdateArtefactsOnBeltAndOutfit();
+    }
+    {
+        PERF_STAGE("actor_shed/ph_support", actor_shed_ph_support);
+        m_pPhysics_support->in_shedule_Update(DT);
+        Check_for_AutoPickUp();
+    }
 };
 #include "debug_renderer.h"
 void CActor::renderable_Render(u32 context_id, IRenderable* root)

@@ -10,6 +10,7 @@
 #include "PHCollideValidator.h"
 #include "console_vars.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "PHStepDefer.h"
 #ifdef DEBUG
 #include "debug_output.h"
 #endif
@@ -36,6 +37,9 @@ void CPHObject::activate()
     R_ASSERT2(dSpacedGeom(), "trying to activate destroyed or not created object!");
     if (m_flags.test(st_activated))
         return;
+    // Edits CPHWorld::m_objects, which the step walks. Shell/element wake-ups from other threads are deferred before
+    // they get here (PHStepDefer.h); what still arrives is a path left to find.
+    PH_STEP_HAZARD("CPHObject::activate");
     if (m_flags.test(st_freezed))
     {
         UnFreeze();
@@ -53,6 +57,7 @@ void CPHObject::deactivate()
 {
     if (!m_flags.test(st_activated))
         return;
+    PH_STEP_HAZARD("CPHObject::deactivate");
     VERIFY2(m_island.IsActive(), "can not do it during processing");
 
     if (!m_island.IsActive())
@@ -303,12 +308,22 @@ void CPHObject::spatial_register()
     m_flags.set(st_dirty, TRUE);
 }
 
-void CPHObject::collision_disable() { SpatialBase::spatial_unregister(); }
-void CPHObject::collision_enable() { SpatialBase::spatial_register(); }
+void CPHObject::collision_disable()
+{
+    // The physics spatial DB is queried by Collide() (q_box) during the step.
+    PH_STEP_HAZARD("CPHObject::collision_disable");
+    SpatialBase::spatial_unregister();
+}
+void CPHObject::collision_enable()
+{
+    PH_STEP_HAZARD("CPHObject::collision_enable");
+    SpatialBase::spatial_register();
+}
 void CPHObject::Freeze()
 {
     if (!m_flags.test(st_activated))
         return;
+    PH_STEP_HAZARD("CPHObject::Freeze");
     ph_world->RemoveObject(this);
     ph_world->AddFreezedObject(this);
     FreezeContent();
@@ -318,24 +333,52 @@ void CPHObject::UnFreeze()
 {
     if (!m_flags.test(st_freezed))
         return;
+    PH_STEP_HAZARD("CPHObject::UnFreeze");
     UnFreezeContent();
     ph_world->RemoveFreezedObject(this);
     ph_world->AddObject(this);
 }
 
 CPHUpdateObject::CPHUpdateObject() { b_activated = false; }
+// B6 early physics kick: m_update_objects is walked by the step (PhTune / PhDataUpdate of telekinesis, captures,
+// cars, shell splitters). From another thread during the step only the activated flag changes right away; the list
+// edit waits for the flush (PHStepDefer.h).
 void CPHUpdateObject::Activate()
 {
     if (b_activated)
         return;
-    ph_world->AddUpdateObject(this);
     b_activated = true;
+    if (ph_step_defer::DeferUpdateObjectActivate(*this))
+        return;
+    ph_world->AddUpdateObject(this);
 }
 
 void CPHUpdateObject::Deactivate()
 {
     if (!b_activated)
         return;
-    ph_world->RemoveUpdateObject(this);
     b_activated = false;
+    if (ph_step_defer::DeferUpdateObjectDeactivate(*this))
+        return;
+    ph_world->RemoveUpdateObject(this);
+}
+
+void CPHUpdateObject::DeactivateOnDestroy()
+{
+    // Deactivated (explicitly, or by a derived destructor such as ~CPHCapture) while the step ran: the removal is still
+    // queued and the object is still in the list - unlink it now, it must not stay there freed.
+    if (ph_step_defer::CancelUpdateObjectDeactivate(*this))
+    {
+        PH_STEP_HAZARD("CPHUpdateObject destroyed");
+        ph_world->RemoveUpdateObject(this);
+        return;
+    }
+    if (!b_activated)
+        return;
+    b_activated = false;
+    // A queued removal would touch this object after it is freed - only a pending activation can be dropped here.
+    if (ph_step_defer::CancelUpdateObjectActivate(*this))
+        return;
+    PH_STEP_HAZARD("CPHUpdateObject destroyed");
+    ph_world->RemoveUpdateObject(this);
 }

@@ -6,6 +6,7 @@
 CTelekinesis::CTelekinesis() { active = false; }
 CTelekinesis::~CTelekinesis()
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     for (auto it = objects.begin(); it != objects.end(); ++it)
     {
         (*it)->release();
@@ -16,6 +17,7 @@ CTelekinesis::~CTelekinesis()
 CTelekineticObject* CTelekinesis::activate(
     CPhysicsShellHolder* obj, float strength, float height, u32 max_time_keep, bool rot)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     active = true;
 
     CTelekineticObject* tele_object = alloc_tele_object();
@@ -33,9 +35,14 @@ CTelekineticObject* CTelekinesis::activate(
     return tele_object;
 }
 
-void CTelekinesis::clear() { objects.clear(); }
+void CTelekinesis::clear()
+{
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
+    objects.clear();
+}
 void CTelekinesis::deactivate()
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     active = false;
 
     // отпустить все объекты
@@ -52,6 +59,7 @@ void CTelekinesis::deactivate()
 
 void CTelekinesis::clear_deactivate()
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     active = false;
 
     // отпустить все объекты
@@ -73,6 +81,7 @@ struct SFindPred
 };
 void CTelekinesis::deactivate(CPhysicsShellHolder* obj)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     // найти объект
 
     auto it = std::find_if(objects.begin(), objects.end(), SFindPred(obj));
@@ -88,6 +97,7 @@ void CTelekinesis::deactivate(CPhysicsShellHolder* obj)
 
 void CTelekinesis::remove_object(CPhysicsShellHolder* obj)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     // найти объект
     auto it = std::find_if(objects.begin(), objects.end(), SFindPred(obj));
     if (it == objects.end())
@@ -98,6 +108,7 @@ void CTelekinesis::remove_object(CPhysicsShellHolder* obj)
 
 void CTelekinesis::remove_object(TELE_OBJECTS_IT it)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     // release memory
     xr_delete(*it);
 
@@ -114,6 +125,7 @@ void CTelekinesis::remove_object(TELE_OBJECTS_IT it)
 }
 void CTelekinesis::fire_all(const Fvector& target)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     if (!active)
         return;
 
@@ -126,6 +138,7 @@ void CTelekinesis::fire_all(const Fvector& target)
 // бросить объект 'obj' в позицию 'target' с учетом коэф силы
 void CTelekinesis::fire(CPhysicsShellHolder* obj, const Fvector& target, float power)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     // найти объект
 
     auto it = std::find_if(objects.begin(), objects.end(), SFindPred(obj));
@@ -138,6 +151,7 @@ void CTelekinesis::fire(CPhysicsShellHolder* obj, const Fvector& target, float p
 
 void CTelekinesis::fire_t(CPhysicsShellHolder* obj, const Fvector& target, float time)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     auto it = std::find_if(objects.begin(), objects.end(), SFindPred(obj));
     if (it == objects.end())
         return;
@@ -148,6 +162,7 @@ void CTelekinesis::fire_t(CPhysicsShellHolder* obj, const Fvector& target, float
 
 bool CTelekinesis::is_active_object(CPhysicsShellHolder* obj)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     // найти объект
     auto it = std::find_if(objects.begin(), objects.end(), SFindPred(obj));
     if (it == objects.end())
@@ -158,6 +173,7 @@ bool CTelekinesis::is_active_object(CPhysicsShellHolder* obj)
 
 void CTelekinesis::schedule_update()
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     if (!active)
         return;
 
@@ -173,6 +189,7 @@ void CTelekinesis::schedule_update()
 
 void CTelekinesis::PhDataUpdate(float step)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     if (!active)
         return;
 
@@ -201,6 +218,7 @@ void CTelekinesis::clear_notrelevant()
 
 void CTelekinesis::PhTune(float step)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     if (!active)
         return;
     clear_notrelevant();
@@ -220,6 +238,7 @@ void CTelekinesis::PhTune(float step)
 
 u32 CTelekinesis::get_objects_count()
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     u32 count = 0;
     for (u32 i = 0; i < objects.size(); i++)
     {

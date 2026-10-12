@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #pragma hdrstop
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include "xrCore/Threading/ParallelForEach.hpp"
 
@@ -364,6 +365,7 @@ void CResourceManager::DeferredUpload()
         return;
 
     ZoneScoped;
+    PERF_SCOPE(tex_deferred_upload); // spawn stage 0: level load, CTexture::Load of every texture (texture/load/*)
 
 #if defined(USE_DX11)
     xr_parallel_for_each(m_textures, [&](auto m_tex) { m_tex.second->Load(); });

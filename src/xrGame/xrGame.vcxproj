@@ -860,6 +860,7 @@
     <ClInclude Include="inventory_upgrade_root_inline.h" />
     <ClInclude Include="item_manager.h" />
     <ClInclude Include="Level.h" />
+    <ClInclude Include="lua_spike_probe.h" />
     <ClInclude Include="LevelGraphDebugRender.hpp" />
     <ClInclude Include="Level_Bullet_Manager.h" />
     <ClInclude Include="level_changer.h" />
@@ -2547,6 +2548,10 @@
     <ClCompile Include="Needles.cpp" />
     <ClCompile Include="NoGravityZone.cpp" />
     <ClCompile Include="npc_cpp_profile.cpp" />
+    <ClCompile Include="lua_spike_probe.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
     <ClCompile Include="object_actions.cpp" />
     <ClCompile Include="object_handler.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>

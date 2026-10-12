@@ -52,6 +52,7 @@
 #include "EffectorShot.h"
 #include "visual_memory_manager.h"
 #include "enemy_manager.h"
+#include "hit_memory_manager.h"
 #include "xrServerEntities/alife_human_brain.h"
 #include "xrEngine/profiler.h"
 #include "npc_cpp_profile.h"
@@ -71,6 +72,7 @@
 #include "Level.h"
 #include "map_location.h"
 #include "map_manager.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #endif // DEBUG
 
 using namespace StalkerSpace;
@@ -716,6 +718,8 @@ bool CAI_Stalker::net_Spawn(CSE_Abstract* DC)
     if (!CObjectHandler::net_Spawn(DC) || !inherited::net_Spawn(DC))
         return (false);
 
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): own part (animations, sight, locations, character physics)
+    PERF_STEP("cls_spawn/stalker", spawn_cls_stalker);
     set_money(tpHuman->m_dwMoney, false);
 
     animation().reload();
@@ -1048,9 +1052,154 @@ void CAI_Stalker::destroy_anim_mov_ctrl()
     }
 }
 
+// Stage 3, U1' of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md (always on in single player): UpdateCL
+// rate LOD by the distance to the camera, on screen too. In a crowd 650-750 stalkers pass UpdateCL every frame (all of
+// them within 30 m or seen within 60 m - the crow rules of CGameObject::UpdateCL), 12-29 ms a frame; those off
+// screen are mostly crows already. At 30+ m a step of the position every 2nd-3rd frame is hardly seen.
+//
+// Why here (an early return at the top of the UpdateCL chain) and not in CObjectList::SingleUpdate: no change of the
+// engine interface IGameObject, the decision needs the AI state anyway (enemy, hit memory, the weapon, the physics
+// movement control), and the children are not skipped blindly: the parent is updated before its children
+// (SingleUpdate recurses into H_Parent() first), so the weapon in the hands sees ucl_lod_skipped_this_frame() of
+// its owner and skips itself only when idle (CWeapon::TrySkipOwnerLodUpdateCL); a torch or any other child item
+// keeps its full UpdateCL.
+//
+// What a skipped frame leaves out, and why it can wait:
+//  - the movement along the path, the look (Exec_Look), the sound player: they run on m_client_update_delta, the
+//    time since the last full UpdateCL. The next full one gets all of it (CCustomMonster::UpdateCL lifts its 100 ms
+//    clamp after a skip), so the NPC walks the same distance - in steps of 2-3 frames;
+//  - the animation tracks: not here at all - a stalker on screen gets them from the render every frame
+//    (CKinematics::CalculateBones -> OnCalculateBones -> UpdateTracks); the animation selection (SelectAnimation),
+//    the end callbacks checked in UpdateCL and the switch of animations come a skip later;
+//  - the step manager: steps by absolute time, a skip delays a step; no sound or particles beyond 20 m anyway;
+//  - the object handler (weapon planner, pushed to seqParallel), the sight manager, IK (it has its own interval):
+//    a frame or two later;
+//  - the bone particles: their life time counts Device.dwTimeDelta per UpdateCL - never skipped while they play.
+// The spatial DB and the update list are kept by UpdateCLSkippedRoot(), the DEBUG check of SingleUpdate as well.
+namespace
+{
+// A hit taken within this time counts as a fight
+constexpr u32 UCL_LOD_RECENT_HIT_MS = 5000;
+// The first frames after the spawn run in full: the net state, the physics movement control and the animation
+// get settled there
+constexpr u32 UCL_LOD_SPAWN_FRAMES = 30;
+} // namespace
+
+bool CAI_Stalker::TrySkipUpdateCLLod()
+{
+    if (!IsGameTypeSingle())
+        return false;
+    // The dead have their own path (the ragdoll, the corpse sleep); one on the way out has nothing to save
+    if (!g_Alive() || getDestroy() || H_Parent())
+        return false;
+
+    // The tier by the distance to the camera. A zoomed camera without a second viewport (a 2D scope, binoculars)
+    // shows far NPCs as big as near ones: shrink the distance by the zoom (the ratio of the half-angle tangents)
+    float dist = Position().distance_to(Device.vCameraPosition);
+    if (Device.fFOV > EPS && g_fov > EPS && Device.fFOV < g_fov)
+        dist *= std::tan(deg2rad(Device.fFOV) * 0.5f) / std::tan(deg2rad(g_fov) * 0.5f);
+    if (dist < float(npc_perf_ucl_lod_dist))
+        return false; // near: every frame, not counted
+    const bool far_tier =
+        npc_perf_ucl_lod_dist2 > 0 && dist >= float(_max(npc_perf_ucl_lod_dist2, npc_perf_ucl_lod_dist));
+    const u32 interval = far_tier ? 3 : 2;
+
+    const bool profile = npc_cpp_profile::enabled();
+
+    // A fight: the target, the hit reaction, the shots and the recoil need every frame (and the fight is what the
+    // player looks at, at any distance)
+    bool fight = memory().enemy().selected() != nullptr;
+    if (!fight)
+    {
+        const u32 last_hit = memory().hit().last_hit_time();
+        fight = last_hit && Device.dwTimeGlobal - last_hit < UCL_LOD_RECENT_HIT_MS;
+    }
+    if (!fight)
+        fight = weapon_shot_effector().IsActive();
+    // The weapon in the hands: firing - a fight; switching, reloading - its state machine runs from the UpdateCL of
+    // the weapon, keep the owner (and the hands) in step with it
+    bool weapon_busy = false;
+    if (!fight)
+    {
+        CInventoryItem* active_item = inventory().ActiveItem();
+        CWeapon* weapon = active_item ? active_item->cast_weapon() : nullptr;
+        if (weapon)
+        {
+            const u32 state = weapon->GetState();
+            if (state == CWeapon::eFire || state == CWeapon::eFire2 || state == CWeapon::eMisfire ||
+                state == CWeapon::eMagEmpty)
+                fight = true;
+            else if (state != CWeapon::eIdle && state != CWeapon::eHidden)
+                weapon_busy = true;
+            else if (weapon->GetNextState() != state)
+                weapon_busy = true;
+        }
+    }
+    if (fight)
+    {
+        if (profile)
+            npc_cpp_profile::count(ENpcCppProfileStage::UclLodDenyCombat);
+        return false;
+    }
+
+    // Everything else that needs every frame:
+    //  - the current (view) entity: the camera sits in it;
+    //  - a second viewport (a 3D scope, binoculars): far NPCs are big in it;
+    //  - the first frames after the spawn;
+    //  - a jump, a lost footing, an external impulse, a forced physics control: the physics movement control
+    //    drives the body there, a 2-3 frame step would snap it (the same rules as should_force_far_kinematic);
+    //  - the movement driven by the animation (animation_movement_controlled: smart covers, animpoints, scripted
+    //    animations with a root motion): the XFORM follows the animation in update_animation_movement_controller;
+    //  - the animated collision body after a hit, an interactive motion or animation;
+    //  - bone particles (their life time counts the frame delta per UpdateCL);
+    //  - a busy weapon (see above)
+    CPHMovementControl* movement_control = character_physics_support()->movement();
+    const bool other = weapon_busy || this == Level().CurrentEntity() || this == Level().CurrentViewEntity() ||
+        Device.m_SecondViewport.IsSVPActive() || Device.dwFrame - spawn_time() < UCL_LOD_SPAWN_FRAMES ||
+        (movement_control &&
+            (movement_control->JumpState() || movement_control->ForcedPhysicsControl() ||
+                movement_control->bExernalImpulse || movement_control->IsLosingControl())) ||
+        animation_movement_controlled() || character_physics_support()->animation_collision() ||
+        character_physics_support()->is_interactive_motion() ||
+        character_physics_support()->interactive_animation_running() || CParticlesPlayer::IsPlaying();
+    if (other)
+    {
+        if (profile)
+            npc_cpp_profile::count(ENpcCppProfileStage::UclLodDenyOther);
+        return false;
+    }
+
+    // The own frame of the tier: by frames, not by time - at 80 ms a frame any "not before N ms" rule below the frame
+    // time would never skip. The ID spreads the NPCs of a tier evenly over the frames
+    if ((Device.dwFrame + ID()) % interval == 0)
+    {
+        if (profile)
+            npc_cpp_profile::count(ENpcCppProfileStage::UclLodFull);
+        return false;
+    }
+
+    // The time cap: the next full UpdateCL comes a frame later at the earliest; do not let the time it gets grow
+    // past npc_perf_ucl_lod_max_delta_ms (this frame's delta predicts the next one). At 80 ms a frame both tiers
+    // fit into 250 ms; at 130+ ms a frame the cap turns the LOD off by itself
+    const u32 elapsed = Device.dwTimeGlobal - last_client_update_time();
+    if (elapsed + Device.dwTimeDelta > u32(npc_perf_ucl_lod_max_delta_ms))
+    {
+        if (profile)
+            npc_cpp_profile::count(ENpcCppProfileStage::UclLodDenyTimeCap);
+        return false;
+    }
+
+    UpdateCLSkippedRoot();
+    if (profile)
+        npc_cpp_profile::count(far_tier ? ENpcCppProfileStage::UclLodSkipD2 : ENpcCppProfileStage::UclLodSkipD1);
+    return true;
+}
+
 void CAI_Stalker::UpdateCL()
 {
     ZoneScopedN("ucl_CAI_Stalker");
+    if (TrySkipUpdateCLLod())
+        return;
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCL);
     START_PROFILE("stalker")
     START_PROFILE("stalker/client_update")
@@ -1058,6 +1207,17 @@ void CAI_Stalker::UpdateCL()
 
     // DEBUG/STRESS gate only (default 0).
     const bool run_ucl_step_alive = npc_perf_disable_ucl_stalker_step_manager == 0;
+
+    // -npc_cpp_profile only (stage 0 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md): updates of a
+    // living NPC off screen, and of those also farther than 25 m from the camera without an enemy - what an
+    // update-rate LOD could skip (not seen in the last main pass; never while a second viewport renders)
+    if (g_Alive() && npc_cpp_profile::enabled() && !Device.m_SecondViewport.IsSVPActive() && !rendered_in_main_pass())
+    {
+        npc_cpp_profile::count(ENpcCppProfileStage::UclLodOffscreen);
+        if (!memory().enemy().selected() && this != Level().CurrentEntity() &&
+            Position().distance_to_sqr(Device.vCameraPosition) > 25.f * 25.f)
+            npc_cpp_profile::count(ENpcCppProfileStage::UclLodCandidate);
+    }
 
     if (g_Alive())
     {
@@ -1251,6 +1411,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
         START_PROFILE("stalker/schedule_update/precalc")
         {
             ZoneScopedN("sh_stalker_anim_delayed_callbacks");
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerSchedulePrecalc);
             animation().play_delayed_callbacks();
         }
 
@@ -1264,6 +1425,9 @@ void CAI_Stalker::shedule_Update(u32 DT)
         
             if (run_agent_manager)
             {
+                // calls = the stalkers whose throttle let it through; CAgentManager::update itself runs the group
+                // update (agent_enemy/distribute and the rest) at most once per its update rate
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleAgentManager);
                 agent_manager().update();
             }
         }
@@ -1315,6 +1479,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
                 get_stalker_enemy_scan_interval(*this, update_lod), now_ms);
             if (run_process_enemies)
             {
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleProcessEnemies);
                 process_enemies();
             }
             STOP_PROFILE
@@ -1345,6 +1510,9 @@ void CAI_Stalker::shedule_Update(u32 DT)
     {
         ZoneScopedN("sh_stalker_CEntityAlive_shedule_Update");
         START_PROFILE("stalker/schedule_update/inherited")
+        // CEntityAlive -> ... -> CGameObject::shedule_Update: the script binder (the Lua update of the NPC:
+        // script_binder/update/stalker) and the rest of the base chain
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleInherited);
         CEntityAlive::shedule_Update(DT);
         STOP_PROFILE
     }
@@ -1403,6 +1571,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
         {
             ZoneScopedN("sh_stalker_ProcessScripts");
             START_PROFILE("stalker/schedule_update/script_control")
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleScriptControl);
             ProcessScripts();
             m_dwLastUpdateTime = Device.dwTimeGlobal;
             STOP_PROFILE
@@ -1438,6 +1607,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
             {
                 ZoneScopedN("sh_stalker_feel_touch_update");
                 START_PROFILE("stalker/schedule_update/feel_touch")
+                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleFeelTouch);
                 Fvector C;
                 float R;
                 Center(C);
@@ -1481,6 +1651,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
     {
         ZoneScopedN("sh_stalker_UpdateInventoryOwner");
         START_PROFILE("stalker/schedule_update/inventory_owner")
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleInventoryOwner);
         UpdateInventoryOwner(DT);
         STOP_PROFILE
     }
@@ -1494,6 +1665,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
     {
         ZoneScopedN("sh_stalker_physics_in_shedule_Update");
         START_PROFILE("stalker/schedule_update/physics")
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerSchedulePhysics);
         VERIFY(_valid(Position()));
         m_pPhysics_support->in_shedule_Update(DT);
         VERIFY(_valid(Position()));
@@ -1638,7 +1810,22 @@ void CAI_Stalker::net_Relcase(IGameObject* O)
 
     {
         ZoneScopedN("CAI_Stalker::net_Relcase agent_physics");
-        agent_manager().remove_links(O);
+        // P17 (plans/optimization_mt/12-relcase.md): the agent manager belongs to the whole group - inside the batched
+        // relcase its first alive member cleans it of every object destroyed this frame (back to front, as the
+        // per-object relcase did), the other members skip it. Outside a batch (a direct net_Relcase): per object.
+        const RelcaseBatch* batch = Level().Objects.relcase_batch();
+        if (batch && batch->contains(O))
+        {
+            if (Level().Objects.relcase_first_visit(&agent_manager()))
+            {
+                for (u32 it = batch->count; it-- > 0;)
+                    agent_manager().remove_links(batch->objects[it]);
+            }
+            else
+                PERF_INC(relcase_agent_skips);
+        }
+        else
+            agent_manager().remove_links(O);
         m_pPhysics_support->in_NetRelcase(O);
     }
 }

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "ParticleWorker.h"
+#include "EngineThreading.h"
 #include "Render.h"
 #include "xr_input.h"
 
@@ -12,6 +13,15 @@ void CRenderDevice::Destroy()
     ZoneScoped;
     Log("Destroying Render...");
     WaitForFrameTasks();
+    // Game/render overlap: stop the parked dedicated Game thread (WaitForFrameTasks already joined its frame).
+    XRay::Engine::ShutdownGameLogicThread();
+    {
+        // Post-join commands target the frame that will never end now (P1.3) - drop them.
+        std::lock_guard<std::mutex> guard(m_post_join_lock);
+        if (!m_post_join_queue.empty())
+            Msg("! Device destroy: dropping %u post-join command(s)", u32(m_post_join_queue.size()));
+        m_post_join_queue.clear();
+    }
     ParticleWorker_ShutdownBeforeNullCallback();
     ParticleWorkerCallback = nullptr;
     ModelDeferredClear = nullptr;

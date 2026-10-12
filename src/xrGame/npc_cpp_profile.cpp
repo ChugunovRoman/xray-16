@@ -21,7 +21,8 @@ constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_PROBE = 8;
 // good: the report is the only place they go. 16 rows hid about half of the calls of a session, and the profiler
 // only runs with -npc_cpp_profile anyway, where a longer table is what is wanted.
 constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_TOP_COUNT = 64;
-constexpr size_t NPC_CPP_PROFILE_TOP_COUNT = 48; // 32 hid the movement/* and script_entity/sound/* sub-stages
+constexpr size_t NPC_CPP_PROFILE_TOP_COUNT = 64; // 32 hid the movement/* and script_entity/sound/* sub-stages; 48 the
+                                                // stalker/schedule_update/* breakdown of stage 7
 
 struct NpcCppProfileCounters
 {
@@ -67,6 +68,10 @@ ScriptEvaluatorProfileBucket g_script_evaluator_profile_buckets[NPC_CPP_PROFILE_
 ScriptEvaluatorProfileBucket g_script_action_profile_buckets[NPC_CPP_PROFILE_SCRIPT_EVALUATOR_BUCKET_COUNT];
 Lock g_npc_cpp_profile_flush_lock;
 std::atomic<u32> g_npc_cpp_profile_next_flush_ms{0};
+// Start of the window the next report covers: the frame number and the time, so the report can say how many frames
+// it holds and give every row per frame (the sums of 5 s alone cannot be compared with a frame in Tracy)
+std::atomic<u32> g_npc_cpp_profile_window_frame{0};
+std::atomic<u32> g_npc_cpp_profile_window_ms{0};
 std::atomic<u32> g_npc_cpp_profile_debug_heartbeat_ms{0};
 std::atomic_ullong g_npc_cpp_profile_total_add_calls{0};
 std::atomic_bool g_npc_cpp_profile_logged_enabled{false};
@@ -142,6 +147,7 @@ constexpr const char* g_npc_cpp_profile_stage_names[NPC_CPP_PROFILE_STAGE_COUNT]
     "stalker/update_cl/exec_look",
     "stalker/update_cl/step_manager",
     "stalker/update_cl/weapon_effector",
+    "monster/update_cl/control",
     "stalker/schedule_update/visibility",
     "stalker/schedule_update/think_apply",
     "character_physics/update_cl",
@@ -157,7 +163,6 @@ constexpr const char* g_npc_cpp_profile_stage_names[NPC_CPP_PROFILE_STAGE_COUNT]
     "custom_monster/schedule_update",
     "custom_monster/update_cl",
     "custom_monster/update_cl/inherited",
-    "custom_monster/update_cl/process_sound_callbacks",
     "custom_monster/update_cl/network_extrapolation",
     "custom_monster/update_cl/update_position_animation",
     "custom_monster/update_cl/apply_net_state",
@@ -213,6 +218,55 @@ constexpr const char* g_npc_cpp_profile_stage_names[NPC_CPP_PROFILE_STAGE_COUNT]
     "character_physics/in_die",
     "character_physics/in_hit",
     "explosive/explode",
+    "ik/run/enemy_selected",
+    "ik/run/distance",
+    "ik/run/offscreen",
+    "ik/rays",
+    "movement/nearest/close_contact",
+    "ucl_lod/offscreen",
+    "ucl_lod/candidate",
+    "ucl_lod/skip_d1",
+    "ucl_lod/skip_d2",
+    "ucl_lod/full",
+    "ucl_lod/deny_combat",
+    "ucl_lod/deny_other",
+    "ucl_lod/deny_time_cap",
+    "ucl_lod/after_skip",
+    "ucl_lod/after_skip_ms",
+    "ucl_lod/delta_cap_hit",
+    "ucl_lod/weapon_skip",
+    "weapon_ucl/npc_active",
+    "weapon_ucl/npc_hidden",
+    "weapon_ucl/npc_hidden_skipped",
+    "movement/try_skip/near",
+    "movement/try_skip/far",
+    "movement/try_skip/forced_state",
+    "movement/try_skip/forced_body",
+    "movement/try_skip/fail_after_skip",
+    "stalker/schedule_update/precalc",
+    "stalker/schedule_update/agent_manager",
+    "stalker/schedule_update/process_enemies",
+    "stalker/schedule_update/inherited",
+    "stalker/schedule_update/script_control",
+    "stalker/schedule_update/feel_touch",
+    "stalker/schedule_update/inventory_owner",
+    "stalker/schedule_update/physics",
+    "stalker/enemy/useful_callback/lua",
+    "stalker/enemy/useful_callback/plugin",
+    "character_physics/kill_hit",
+    "character_physics/create_shell",
+    "character_physics/create_skeleton",
+    "character_physics/create_shell/bones",
+    "character_physics/create_shell/run_simulation",
+    "character_physics/weapon_collision",
+    "character_physics/end_activate",
+    "character_physics/death_correct",
+    "character_physics/fly_to",
+    "character_physics/death_motion",
+    "character_physics/death_deferred",
+    "character_physics/skeleton_prebuild",
+    "character_physics/skeleton_prebuilt_used",
+    "character_physics/skeleton_prebuilt_stale",
 };
 
 static_assert((sizeof(g_npc_cpp_profile_stage_names) / sizeof(g_npc_cpp_profile_stage_names[0])) == NPC_CPP_PROFILE_STAGE_COUNT);
@@ -424,6 +478,12 @@ void flush_snapshots(const u32 now_ms)
 
     g_npc_cpp_profile_next_flush_ms.store(now_ms + NPC_CPP_PROFILE_FLUSH_INTERVAL_MS, std::memory_order_relaxed);
 
+    // The window of this report: frames and time since the previous one (or since the first scheduled flush)
+    const u32 frame_now = Device.dwFrame;
+    const u32 window_frames = frame_now - g_npc_cpp_profile_window_frame.exchange(frame_now, std::memory_order_relaxed);
+    const u32 window_ms = now_ms - g_npc_cpp_profile_window_ms.exchange(now_ms, std::memory_order_relaxed);
+    const double per_frame = window_frames ? 1.0 / window_frames : 0.0;
+
     if (snapshots.empty())
     {
         Msg("* npc_cpp_profile debug flush_empty now=%u next=%u add_calls=%llu",
@@ -436,8 +496,25 @@ void flush_snapshots(const u32 now_ms)
         return left.total_qpc > right.total_qpc;
     });
 
+    // count() rows have no time and sort last: they go to a block of their own, all of them, after the time top
+    xr_vector<NpcCppProfileSnapshot> counters;
+    for (auto it = snapshots.begin(); it != snapshots.end();)
+    {
+        if (!it->total_qpc)
+        {
+            counters.push_back(*it);
+            it = snapshots.erase(it);
+        }
+        else
+            ++it;
+    }
+
     const size_t shown = std::min<size_t>(snapshots.size(), NPC_CPP_PROFILE_TOP_COUNT);
-    Msg("* npc_cpp_profile top=%u interval=%ums", static_cast<u32>(shown), NPC_CPP_PROFILE_FLUSH_INTERVAL_MS);
+    // frames / frame_avg: the rows below are sums over this window; per_frame and calls/frame divide them by the frames
+    // (the calls of stalker/update_cl per frame are the stalkers updated in a frame, crows excluded)
+    Msg("* npc_cpp_profile top=%u interval=%ums frames=%u window=%ums frame_avg=%.2fms", static_cast<u32>(shown),
+        NPC_CPP_PROFILE_FLUSH_INTERVAL_MS, window_frames, window_ms,
+        window_frames ? static_cast<double>(window_ms) / window_frames : 0.0);
 
     for (size_t i = 0; i < shown; ++i)
     {
@@ -445,7 +522,8 @@ void flush_snapshots(const u32 now_ms)
         if (!row.total_qpc)
         {
             // count()-only stage: nothing was timed, so print how many times it happened and stop there.
-            Msg("*   %s count=%llu", row.name, static_cast<unsigned long long>(row.calls));
+            Msg("*   %s count=%llu count/frame=%.1f", row.name, static_cast<unsigned long long>(row.calls),
+                static_cast<double>(row.calls) * per_frame);
             continue;
         }
 
@@ -453,8 +531,21 @@ void flush_snapshots(const u32 now_ms)
         const double avg_us = 1000000.0 * static_cast<double>(row.total_qpc) / (CPU::qpc_freq * row.calls);
         const double max_us = 1000000.0 * static_cast<double>(row.max_qpc) / CPU::qpc_freq;
 
-        Msg("*   %s total=%.2fms calls=%llu avg=%.2fus max=%.2fus", row.name, total_ms,
-            static_cast<unsigned long long>(row.calls), avg_us, max_us);
+        Msg("*   %s total=%.2fms calls=%llu avg=%.2fus max=%.2fus per_frame=%.3fms calls/frame=%.1f", row.name,
+            total_ms, static_cast<unsigned long long>(row.calls), avg_us, max_us, total_ms * per_frame,
+            static_cast<double>(row.calls) * per_frame);
+    }
+
+    if (!counters.empty())
+    {
+        std::sort(counters.begin(), counters.end(),
+            [](const NpcCppProfileSnapshot& left, const NpcCppProfileSnapshot& right) {
+                return xr_strcmp(left.name, right.name) < 0;
+            });
+        Msg("* npc_cpp_profile counters=%u", static_cast<u32>(counters.size()));
+        for (const NpcCppProfileSnapshot& row : counters)
+            Msg("*   %s count=%llu count/frame=%.1f", row.name, static_cast<unsigned long long>(row.calls),
+                static_cast<double>(row.calls) * per_frame);
     }
 
     flush_script_evaluator_snapshots();
@@ -485,6 +576,9 @@ void npc_cpp_profile::flush_if_needed()
         const u32 scheduled_flush_ms = now_ms + NPC_CPP_PROFILE_FLUSH_INTERVAL_MS;
         if (g_npc_cpp_profile_next_flush_ms.compare_exchange_strong(next_flush_ms, scheduled_flush_ms, std::memory_order_relaxed))
         {
+            // The first window starts here
+            g_npc_cpp_profile_window_frame.store(Device.dwFrame, std::memory_order_relaxed);
+            g_npc_cpp_profile_window_ms.store(now_ms, std::memory_order_relaxed);
             if (!g_npc_cpp_profile_logged_first_schedule.exchange(true, std::memory_order_relaxed))
             {
                 Msg("* npc_cpp_profile debug schedule_first now=%u next=%u", now_ms, scheduled_flush_ms);
@@ -510,6 +604,13 @@ void npc_cpp_profile::flush_if_needed()
     next_flush_ms = g_npc_cpp_profile_next_flush_ms.load(std::memory_order_relaxed);
     if (now_ms >= next_flush_ms)
     {
+        // P19b (plans/optimization_mt/14-spike-instrumentation.md): the report is printed right here, inside whichever
+        // profiled scope ended first after the 5 s mark - on main that is the actor's UpdateCL (CPhysicsShellHolder /
+        // CGameObject stages), which then "spikes" by the time of the report (sorting + hundreds of Msg lines). Marked so
+        // the trace and the spike line (in=...) show it; not moved out of here yet.
+        ZoneScopedN("npc_cpp_profile::flush");
+        PERF_SCOPE(npc_profile_flush);
+        PERF_SPIKE_PHASE("npc_cpp_profile/flush");
         Msg("* npc_cpp_profile debug flush_begin now=%u next=%u add_calls=%llu",
             now_ms, next_flush_ms,
             static_cast<unsigned long long>(g_npc_cpp_profile_total_add_calls.load(std::memory_order_relaxed)));

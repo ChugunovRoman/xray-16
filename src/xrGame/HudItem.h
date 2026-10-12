@@ -5,6 +5,7 @@ class CPhysicItem;
 class NET_Packet;
 class CInventoryItem;
 class CMotionDef;
+class IKinematics;
 
 #include "actor_defs.h"
 #include "inventory_space.h"
@@ -137,6 +138,23 @@ public:
     // True while rendering the inventory weapon icon to RT (bypass parent/visibility gating; skip UpdateXForm).
     virtual bool IsWeaponInventoryIconSnapshot() const { return false; }
 
+    // Render prepare of held items (always, plans/optimization_mt/05-render-prepare-weapons.md).
+    // Main thread, CLevel::BonesPrepass phase C - after the game logic and the bones prepass (the owner's bones are
+    // final), before the render: does once what renderable_Render did in every pass (UpdateXForm; CWeapon: the shot
+    // light), then stamps the frame. renderable_Render of a prepared item only reads.
+    virtual void render_prepare();
+    // Main thread, CLevel::BonesPrepass collect step: models the render draws for this item besides its own visual
+    // (CWeapon: the addon models of the attachment system) - into the bones prepass candidates.
+    virtual void render_prepare_models(xr_vector<IKinematics*>& models) {}
+    // True in the render of a frame render_prepare() ran for (never for the inventory icon render).
+    bool render_prepared() const
+    {
+        return m_render_prepared_frame == Device.dwFrame && !IsWeaponInventoryIconSnapshot();
+    }
+    // The XFORM part of renderable_Render: UpdateXForm unless render_prepare() did it this frame (or the icon render).
+    // Also for a class that draws its world model past renderable_Render (CEatableItemObject).
+    void render_refresh_xform();
+
     virtual void UpdateHudAdditional(Fmatrix&);
 
     virtual void UpdateXForm() = 0;
@@ -174,6 +192,8 @@ protected:
     //кадры момента пересчета XFORM и FirePos
     u32 dwFP_Frame;
     u32 dwXF_Frame;
+    // Render prepare: the frame render_prepare() ran (main thread; the render reads it after the prepass).
+    u32 m_render_prepared_frame{0};
 
     IC void EnableHudInertion(BOOL B) { m_huditem_flags.set(fl_inertion_enable, B); }
     IC void AllowHudInertion(BOOL B) { m_huditem_flags.set(fl_inertion_allow, B); }

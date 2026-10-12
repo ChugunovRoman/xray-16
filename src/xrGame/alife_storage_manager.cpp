@@ -284,6 +284,10 @@ void CALifeStorageManager::save(NET_Packet& net_packet)
 
 void CALifeStorageManager::prepare_objects_for_save()
 {
+    // Spawn stage 2 (SPEC.md 5.A): M_SPAWN still waiting in the client queue (spawn budget) are logged only. The queue
+    // is not drained here: a save may come from the Game thread, parallel to the render, where no object may be
+    // created; and nothing is lost - such an object has no client state yet, the server saves it as it would spawn.
+    Level().SpawnQueueNoteSave("save");
     Level().ClientSend();
     Level().ClientSave();
 }

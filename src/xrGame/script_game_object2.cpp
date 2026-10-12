@@ -9,6 +9,7 @@
 #include "pch_script.h"
 #include "script_game_object.h"
 #include "script_game_object_impl.h"
+#include "xrPhysics/PHStepDefer.h"
 #include "ai_space.h"
 #include "xrScriptEngine/script_engine.hpp"
 #include "Explosive.h"
@@ -38,6 +39,7 @@
 #include "movement_manager.h"
 #include "detail_path_manager.h"
 #include "Level.h"
+#include "xrPhysics/IPHWorld.h"
 
 namespace
 {
@@ -554,8 +556,25 @@ void CScriptGameObject::RestoreDefaultStartDialog()
     pDialogManager->RestoreDefaultStartDialog();
 }
 
+bool CScriptGameObject::DeferWhilePhysicsStep(const std::function<void(CScriptGameObject&)>& op)
+{
+    // Only while a step really runs beside this thread (B6 early physics kick: Game thread Lua, ALife Lua in
+    // seqParallel, the render): with no step in flight the teleport stays immediate, as before.
+    // (ph_step_defer::DeferForObject: the same queue and object lookup by ID as the physics API deferrals,
+    // counted as physics/defer/teleport.)
+    ph_step_defer::ScriptCallScope script_call;
+    return ph_step_defer::DeferForObject(ph_step_defer::Kind::Teleport, object().ID(), [op](IGameObject& owner)
+    {
+        // Main thread, after the step: no step in flight any more, so the call below runs for real.
+        if (CGameObject* obj = smart_cast<CGameObject*>(&owner))
+            op(*obj->lua_game_object());
+    });
+}
+
 void CScriptGameObject::SetActorPosition(Fvector pos)
 {
+    if (DeferWhilePhysicsStep([pos](CScriptGameObject& o) { o.SetActorPosition(pos); }))
+        return;
     CActor* actor = smart_cast<CActor*>(&object());
     if (actor)
     {
@@ -571,6 +590,8 @@ void CScriptGameObject::SetActorPosition(Fvector pos)
 
 void CScriptGameObject::SetNpcPosition(Fvector pos)
 {
+    if (DeferWhilePhysicsStep([pos](CScriptGameObject& o) { o.SetNpcPosition(pos); }))
+        return;
     CCustomMonster* obj = smart_cast<CCustomMonster*>(&object());
     if (obj)
     {

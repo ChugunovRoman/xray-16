@@ -64,6 +64,37 @@ class CCameraBase; //--#SM+#--
 template <typename TResult>
 class CScriptCallbackEx;
 
+class IGameObject;
+
+// P17 (plans/optimization_mt/12-relcase.md), always: all objects destroyed in this frame, handed to every
+// object at once (IGameObject::net_RelcaseBatch) instead of one net_Relcase per destroyed object. Owned by CObjectList
+// and valid only during its relcase pass (CObjectList::relcase_batch() returns it then, nullptr otherwise).
+struct RelcaseBatch
+{
+    IGameObject* const* objects = nullptr; // in destroy_queue order; net_Relcase walks them back to front
+    u32 count = 0;
+    const IGameObject* const* sorted = nullptr; // the same pointers, ascending: contains() never dereferences
+    const u8* id_marks = nullptr; // 0x10000 entries, non-zero for the ID of a destroyed object (0xffff never)
+    // P17b shortcuts that skip work the batch cannot need are always on: CBaseMonster - no UpdateMemory after the batch
+    // if none of it was in the memories; Feel::Vision - feel_visible walked only if a batch object left `query`;
+    // Feel::Touch - nothing done with empty lists.
+
+    bool contains(const IGameObject* object) const
+    {
+        u32 lo = 0, hi = count;
+        while (lo < hi)
+        {
+            const u32 mid = (lo + hi) / 2;
+            if (sorted[mid] < object)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        return lo < count && sorted[lo] == object;
+    }
+    bool contains_id(u16 id) const { return id_marks[id] != 0; }
+};
+
 struct GameObjectSavedPosition
 {
     u32 dwTime;
@@ -282,6 +313,9 @@ public:
     virtual void net_MigrateInactive(NET_Packet& packet) = 0;
     virtual void net_MigrateActive(NET_Packet& packet) = 0;
     virtual void net_Relcase(IGameObject* obj) = 0; // destroy all links to another objects
+    // P17: net_Relcase for all objects destroyed this frame in one call. Same result as calling
+    // net_Relcase for batch.objects back to front (what CGameObject does); shared containers are cleaned once per batch.
+    virtual void net_RelcaseBatch(const RelcaseBatch& batch) = 0;
     virtual void save(NET_Packet& packet) = 0;
     virtual void load(IReader& reader) = 0;
     virtual void OnEvent(NET_Packet& packet, u16 type) = 0;

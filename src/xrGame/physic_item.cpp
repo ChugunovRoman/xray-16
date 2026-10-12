@@ -8,6 +8,7 @@
 
 #include "StdAfx.h"
 #include "physic_item.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrPhysics/PhysicsShell.h"
 #include "xrServer_Objects.h"
 #include "Include/xrRender/RenderVisual.h"
@@ -71,6 +72,8 @@ bool CPhysicItem::net_Spawn(CSE_Abstract* DC)
 {
     if (!inherited::net_Spawn(DC))
         return (FALSE);
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): own part, the physics shell of an item on the ground
+    PERF_STEP("cls_spawn/physic_item", spawn_cls_physic_item);
     IKinematics* pK = smart_cast<IKinematics*>(Visual());
     pK->CalculateBones_Invalidate();
     pK->CalculateBones(TRUE);

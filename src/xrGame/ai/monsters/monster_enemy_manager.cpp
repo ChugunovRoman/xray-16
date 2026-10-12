@@ -297,6 +297,11 @@ void CMonsterEnemyManager::script_enemy(const CEntityAlive& enemy)
     m_script_enemy = &enemy;
 }
 
+bool CMonsterEnemyManager::refers_to(const IGameObject* O) const
+{
+    return enemy == O || prev_enemy == O || m_script_enemy == O;
+}
+
 void CMonsterEnemyManager::remove_links(IGameObject* O)
 {
     if (enemy == O)

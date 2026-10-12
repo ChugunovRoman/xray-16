@@ -9,6 +9,8 @@
 #include "alife_object_registry.h"
 #include "xrNetServer/NET_Messages.h"
 #include "xrServerEntities/xrMessages.h"
+#include "xrEngine/IGame_Level.h"
+#include "xrEngine/xr_object_list.h"
 
 xr_string xrServer::ent_name_safe(u16 eid)
 {
@@ -56,6 +58,13 @@ void xrServer::Process_event_destroy(NET_Packet& P, ClientID sender, u32 time, u
     NET_Packet P2, *pEventPack = pEPack;
     P2.w_begin(M_EVENT_PACK);
     //---------------------------------------------
+    // P17: relcase report (perf_metrics) - who asked for it, inherited by the children destroyed with the object
+    u8 origin = CObjectList::destroy_origin_server;
+    if (g_pGameLevel)
+    {
+        g_pGameLevel->Objects.destroy_origin_note(id_dest, CObjectList::destroy_origin_server);
+        origin = g_pGameLevel->Objects.destroy_origin(id_dest) & ~CObjectList::destroy_origin_child;
+    }
     // check if we have children
     if (!e_dest->children.empty())
     {
@@ -63,7 +72,12 @@ void xrServer::Process_event_destroy(NET_Packet& P, ClientID sender, u32 time, u
             pEventPack = &P2;
 
         while (!e_dest->children.empty())
+        {
+            if (g_pGameLevel)
+                g_pGameLevel->Objects.destroy_origin_note(
+                    *e_dest->children.begin(), origin | CObjectList::destroy_origin_child);
             Process_event_destroy(P, sender, time, *e_dest->children.begin(), pEventPack);
+        }
     };
 
     if (0xffff == parent_id && NULL == pEventPack)

@@ -214,6 +214,14 @@ public:
     virtual void load(IReader& input_packet);
 
     virtual void UpdateCL();
+
+private:
+    // The UpdateCL LOD (stage 3 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md): true = this frame
+    // the UpdateCL of this stalker is skipped by the distance LOD and was replaced with UpdateCLSkippedRoot(); the
+    // caller (CAI_Stalker::UpdateCL, the top of the chain) returns at once
+    bool TrySkipUpdateCLLod();
+
+public:
     virtual void shedule_Update(u32 dt);
     virtual void Think();
     virtual void SelectAnimation(const Fvector& _view, const Fvector& _move, float speed);

@@ -403,6 +403,11 @@ public:
     // call). Kept as members because they bridge two threads and two Render() invocations.
     light_Package LP_svp_normal;
     light_Package LP_svp_pending;
+    // Called from light::~light: the lists above (and svp_shadow_page_lights/svp_shadow_unshadowed) hold raw light
+    // pointers across the main pass -> scope pass gap (and, for LP_svp_*, until the scope pass consumes them), so
+    // a light destroyed in between left them dangling (crash in accum_point/accum_spot of the scope pass). Nulls
+    // the entries; the scope-pass loops skip nullptrs.
+    void svp_forget_light(light* L);
 
     xr_vector<Fbox3> main_coarse_structure;
 

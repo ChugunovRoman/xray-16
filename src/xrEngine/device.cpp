@@ -12,10 +12,14 @@
 #include "IGame_Level.h"
 #include "IGame_Persistent.h"
 #include "EngineThreading.h"
+#include "Engine.h"
 
 #include "xrScriptEngine/script_space.hpp"
 
 #include <SDL.h>
+
+#include <optional>
+#include <typeinfo>
 
 ENGINE_API CRenderDevice Device;
 ENGINE_API CLoadScreenRenderer load_screen_renderer;
@@ -226,7 +230,14 @@ void CRenderDevice::OnCameraUpdated()
     mInvView.invert(mView);
     mFullTransform.mul(mProject, mView);
     mInvFullTransform.invert_44(mFullTransform);
-    GEnv.Render->OnCameraUpdated();
+    {
+        // P19b (14-spike-instrumentation.md): CRender::OnCameraUpdated kicks the HOM task and the details task, the latter
+        // after waiting for the previous one (CDetailManager::DispatchMTCalc). The first call of the frame is inside the
+        // actor's UpdateCL (CActor::UpdateCL -> Device.OnCameraUpdated), the one after FrameMove is then a no-op.
+        ZoneScopedN("OnCameraUpdated/render");
+        PERF_SCOPE(frame_camera_render);
+        GEnv.Render->OnCameraUpdated();
+    }
     GEnv.Render->SetCacheXform(mView, mProject);
 
     frame = dwFrame;
@@ -256,17 +267,25 @@ void CRenderDevice::DoRender()
     {
         {
             ZoneScopedN("Render process");
+            PERF_SCOPE(frame_render_seq);
             seqRender.Process(); // all rendering is done here
         }
 
+        // Game/render overlap frame: CLevel::OnRender normally joined the Game thread before the UI already.
+        // Safety net for frames where it did not (no level/game, scene skipped) - before stats/ImGui/Present.
+        // No-op when nothing is in flight (always in a sequential frame).
+        JoinGameLogic();
+
         {
             ZoneScopedN("stats");
+            PERF_SCOPE(frame_render_stats);
             CalcFrameStats();
             Statistic->Show();
         }
 
         {
             ZoneScopedN("imgui");
+            PERF_SCOPE(frame_render_imgui);
             ImGui::Render();
             m_imgui_render->Render(ImGui::GetDrawData());
         }
@@ -275,11 +294,13 @@ void CRenderDevice::DoRender()
         // child viewports first kept a very deep stack under IDXGISwapChain::Present with some GPU hooks.
         {
             ZoneScopedN("present");
+            PERF_SCOPE(frame_render_present);
             RenderEnd(); // End + PresentFrame
         }
 
         {
             ZoneScopedN("UpdateViewports");
+            PERF_SCOPE(frame_render_viewports);
             UpdateViewports();
         }
     }
@@ -295,6 +316,11 @@ void CRenderDevice::DoRender()
 
 void CRenderDevice::WaitForFrameTasks()
 {
+    // Game/render overlap frame: the dedicated Game thread first - it runs beside the physics step and queues its
+    // physics mutations for the join, so the physics wait below is only race-free on CPHWorld's main-thread state
+    // after this join.
+    // No-op when nothing is in flight (always in a sequential frame).
+    JoinGameLogic();
     // Physics step (Kick..Join window) first: Reset() (mem_compact, render resources) and Destroy() must
     // not run beside it. Idempotent - the regular Join after DoRender() then only flushes.
     if (PhysicsWaitOverlapCallback)
@@ -316,6 +342,87 @@ void CRenderDevice::WaitForFrameTasks()
     secondary_tasks.wait();
 }
 
+// GAME_RENDER_OVERLAP_PLAN P1, variant B: when a frame may run the game logic parallel to the render. Checked after
+// FrameMove (which can pause, open the main menu or finish a level load) and before anything parallel starts.
+bool CRenderDevice::CanOverlapGameAndRender()
+{
+    if (GEnv.isDedicatedServer || !GEnv.Render)
+        return false;
+    // Plan section 2: D3D11 (r4) only - creating GL resources from the game thread already crashed once.
+    if (GEnv.Render->GetBackendAPI() != IRender::BackendAPI::D3D11)
+        return false;
+    if (!g_pGameLevel || !g_pGameLevel->bReady)
+        return false;
+    // Nothing to overlap with (DoRender skips the scene) or loading/precache frames: keep them sequential.
+    if (!b_is_Active || dwPrecacheFrame || load_screen_renderer.IsActive())
+        return false;
+    if (Paused())
+        return false;
+    if (g_pGamePersistent && g_pGamePersistent->m_pMainMenu && g_pGamePersistent->m_pMainMenu->IsActive())
+        return false;
+    return true;
+}
+
+// Bones prepass (always): see device.h, BonesPrepassCallback. Called inside the overlap window
+// (SetFrameOverlapActive(true)), so a model a blend callback releases is only queued (CModelPool::Delete) and the
+// pointers the prepass collected stay valid until ModelDeferredClear of the next frame.
+void CRenderDevice::RunBonesPrepass()
+{
+    if (!BonesPrepassCallback)
+        return;
+    // Same frames DoRender() would skip the scene for (nothing to prepare for) and loading/precache frames.
+    if (GEnv.isDedicatedServer || !b_is_Active || dwPrecacheFrame || load_screen_renderer.IsActive())
+        return;
+    ZoneScopedN("BonesPrepass");
+    PERF_SCOPE(prepass_time);
+    BonesPrepassCallback();
+}
+
+void CRenderDevice::JoinGameLogic()
+{
+    if (!XRay::Engine::IsGameLogicThreadInFlight())
+        return;
+    // Called on the Game logic thread itself (Lua on it ran a console command such as vid_reset -> Device.Reset ->
+    // WaitForFrameTasks): waiting for our own `done` would hang forever. Skip the join; the main thread joins as usual.
+    if (XRay::Engine::IsGameLogicThread())
+    {
+        static bool s_warned = false;
+        if (!s_warned)
+        {
+            s_warned = true;
+            Msg("! JoinGameLogic called on the Game logic thread itself (a device reset / quit from its Lua?); skipped");
+        }
+        return;
+    }
+    // Game/render overlap frame: frame/game_wait = how long the main thread waited for the Game thread here
+    // (normally before the UI, inside frame/render).
+    ZoneScopedN("GameLogicJoin");
+    PERF_SCOPE(frame_game_wait);
+    XRay::Engine::JoinGameLogicThread();
+}
+
+void CRenderDevice::JoinGameLogicBeforeUI() { JoinGameLogic(); }
+
+void CRenderDevice::PostJoin(std::function<void()> fn)
+{
+    std::lock_guard<std::mutex> guard(m_post_join_lock);
+    m_post_join_queue.emplace_back(std::move(fn));
+}
+
+void CRenderDevice::ApplyPostJoinQueue()
+{
+    xr_vector<std::function<void()>> local;
+    {
+        std::lock_guard<std::mutex> guard(m_post_join_lock);
+        if (m_post_join_queue.empty())
+            return;
+        local.swap(m_post_join_queue);
+    }
+    ZoneScopedN("PostJoinQueue");
+    for (auto& fn : local)
+        fn();
+}
+
 void CRenderDevice::ProcessFrame()
 {
     ZoneScoped;
@@ -324,9 +431,14 @@ void CRenderDevice::ProcessFrame()
         return;
 
     const u64 frameStartTime = TimerGlobal.GetElapsed_ms();
+#if XR_PERF_METRICS
+    // frame/total: from here to the fps-limit sleep (reset() below), i.e. the whole frame/* breakdown.
+    std::optional<xray::perf::ScopedTime> perf_frame_total(std::in_place, xray::perf::Metric::frame_total);
+#endif
 
     {
         ZoneScopedN("seqParallelBeforRender");
+        PERF_SCOPE(frame_before_prerender);
         xr_vector<fastdelegate::FastDelegate0<>> befor_batch;
         befor_batch.swap(seqParallelBeforRender);
         for (auto& d : befor_batch)
@@ -337,6 +449,7 @@ void CRenderDevice::ProcessFrame()
     if (g_pGamePersistent)
     {
         ZoneScopedN("OnFrameBeforePreRender");
+        PERF_SCOPE(frame_before_prerender);
         g_pGamePersistent->OnFrameBeforePreRender();
     }
 
@@ -345,12 +458,14 @@ void CRenderDevice::ProcessFrame()
     if (g_pGamePersistent)
     {
         ZoneScopedN("Environment_OnFrame");
+        PERF_SCOPE(frame_environment);
         g_pGamePersistent->OnFrameEnvironment();
     }
 
     if (ModelDeferredClear)
     {
         ZoneScopedN("ModelDeferredClear");
+        PERF_SCOPE(frame_model_clear);
         ModelDeferredClear();
     }
 
@@ -358,15 +473,62 @@ void CRenderDevice::ProcessFrame()
     if (TaskScheduler)
         m_pre_render_task = &TaskScheduler->AddTask([] { XRay::Engine::PreRenderThread(); });
 
-    FrameMove();
+    {
+        PERF_SCOPE(frame_move);
+        FrameMove();
+    }
 
-    OnCameraUpdated();
+    {
+        PERF_SCOPE(frame_camera);
+        OnCameraUpdated();
+    }
+
+    // GAME_RENDER_OVERLAP_PLAN P1 (variant B): decided once per frame, here - after FrameMove and before anything
+    // runs in parallel. Always on when the frame allows it (CanOverlapGameAndRender: D3D11, level ready, no loading,
+    // pause or main menu); otherwise the sequential frame below. Read by CPHWorld (deferral predicate, camera
+    // snapshot) for the whole window.
+    const bool game_render_overlap = CanOverlapGameAndRender();
+    m_game_render_overlap_frame.store(game_render_overlap, std::memory_order_release);
 
     // B-1: open overlap window before GameThread launch so scheduler-side physics intents defer until flush.
     if (PhysicsBeginOverlapFrameCallback)
         PhysicsBeginOverlapFrameCallback();
     SetFrameOverlapActive(true);
 
+    if (game_render_overlap)
+    {
+        // Game/render overlap frame (MX f76479197 RT-split): the real-time scheduler part (the actor: movement,
+        // g_Physics on its ODE body, camera-related state, actor binder) runs here on the main thread, inside the
+        // same window state as in a sequential frame and strictly before the Game thread and the physics step - so
+        // the a927f7153 race (actor scheduler || physics step) cannot come back.
+        const bool run_scheduler = !Paused();
+        if (run_scheduler)
+        {
+            PERF_SCOPE(frame_rt_sheduler);
+            XRay::Engine::GameThreadRT();
+        }
+        // Bones prepass: after the RT part, before the Game thread starts changing animations (and the render
+        // starts reading bones); the previous frame's physics step is joined and flushed. UpdateTracks (and its Lua
+        // blend callbacks) of the prepassed models thus runs here on main, not on render workers beside the Game
+        // thread. What the Game thread invalidates later is still recomputed by the render (prepass/miss_render).
+        RunBonesPrepass();
+        // Physics kick (plans/optimization_mt/09-physics-earlier-parallel.md, B6, always here): after the RT part and
+        // the bones prepass, before the Game thread is woken, so the step runs parallel to the whole Game thread.
+        // Mutations of simulated bodies made there meanwhile wait for the join (xrPhysics/PHStepDefer.h, flushed in
+        // PhysicsJoinOverlapCallback below).
+        if (PhysicsKickOverlapCallback)
+        {
+            ZoneScopedN("PhysicsOverlapKick");
+            PhysicsKickOverlapCallback();
+        }
+        // Dedicated Game thread: SoundEvent_Dispatch -> level OnGameLogicFrame (B4/B5) -> non-RT scheduler ->
+        // vision batch -> seqParallel -> seqFrameMT, parallel to DoRender() and the physics step. Joined in
+        // CLevel::OnRender before the UI
+        // (JoinGameLogicBeforeUI), with safety joins in DoRender() and right after it.
+        XRay::Engine::KickGameLogicThread(run_scheduler);
+    }
+    else
+    {
     // GameThread (Sheduler.Update + seqFrameMT) runs in parallel with PreRenderThread / main-thread work.
     if (TaskScheduler)
         m_game_task = &TaskScheduler->AddTask([] { XRay::Engine::GameThread(); });
@@ -381,9 +543,14 @@ void CRenderDevice::ProcessFrame()
     if (TaskScheduler && m_game_task)
     {
         PERF_WAIT_SITE(xray::perf::wait_site::Game);
+        PERF_SCOPE(frame_game_wait);
         TaskScheduler->Wait(*m_game_task);
         m_game_task = nullptr;
     }
+
+    // Bones prepass: the game logic of the frame is done (UpdateCL, scheduler) and the physics step is not kicked
+    // yet, so animations are final and the ODE bodies the ragdoll bone callbacks read are stable.
+    RunBonesPrepass();
 
     // B-1 / Phase 3: kick the physics step here — after the GameThread scheduler joined (CPHWorld::OnFrame
     // in seqFrame always no-ops now). Wakes CPHWorld's dedicated physics thread and returns right away,
@@ -393,8 +560,18 @@ void CRenderDevice::ProcessFrame()
         ZoneScopedN("PhysicsOverlapKick");
         PhysicsKickOverlapCallback();
     }
+    } // sequential frame (no game/render overlap): the block above is the unchanged path (kept unindented on purpose)
 
-    DoRender();
+    {
+        PERF_SCOPE(frame_render);
+        DoRender();
+    }
+
+    // Game/render overlap frame: final safety join (DoRender skipped the scene: !b_is_Active, failed RenderBegin,
+    // device reset). Must happen before the physics wait and flush below - the Game thread queues physics mutations
+    // for the join - and in any case before the next OnFrameBeforePreRender / ModelDeferredClear / FrameMove.
+    // No-op in a sequential frame.
+    JoinGameLogic();
 
     // Wait for the physics thread to finish this frame's step (no flush yet).
     if (PhysicsWaitOverlapCallback)
@@ -410,6 +587,7 @@ void CRenderDevice::ProcessFrame()
     if (TaskScheduler && m_pre_render_task)
     {
         PERF_WAIT_SITE(xray::perf::wait_site::PreRender);
+        PERF_SCOPE(frame_prerender_wait);
         TaskScheduler->Wait(*m_pre_render_task);
         m_pre_render_task = nullptr;
     }
@@ -419,6 +597,7 @@ void CRenderDevice::ProcessFrame()
     if (PhysicsJoinOverlapCallback)
     {
         ZoneScopedN("PhysicsDeferredFlush");
+        PERF_SCOPE(frame_ph_flush);
         PhysicsJoinOverlapCallback();
     }
 
@@ -426,6 +605,13 @@ void CRenderDevice::ProcessFrame()
     // overlap window, which spans the whole Kick..Join interval (GameThread + physics-on-its-own-thread
     // running parallel to DoRender), not just DoRender() itself.
     SetFrameOverlapActive(false);
+
+    // P1.3: post-join commands. After the physics flush on purpose: the deferred physics mutations hold raw
+    // pointers captured during the window, and post-join commands (P2: visual changes, model/light deletion) may
+    // invalidate them; and with the window closed (physics and IsFrameOverlapActive() both false) the commands
+    // execute their effects immediately instead of deferring them again. Empty (no-op) in a sequential frame today.
+    ApplyPostJoinQueue();
+    m_game_render_overlap_frame.store(false, std::memory_order_release);
 
     const u64 frameEndTime = TimerGlobal.GetElapsed_ms();
     const u64 frameTime = frameEndTime - frameStartTime;
@@ -438,8 +624,14 @@ void CRenderDevice::ProcessFrame()
     else if (Paused() || g_pGameLevel == nullptr)
         updateDelta = 1000 / ps_fps_limit_in_menu;
 
+#if XR_PERF_METRICS
+    perf_frame_total.reset();
+#endif
     if (frameTime < updateDelta)
+    {
+        PERF_SCOPE(frame_fps_sleep);
         Sleep(updateDelta - frameTime);
+    }
 
     if (!b_is_Active)
         Sleep(1);
@@ -573,6 +765,59 @@ void CRenderDevice::Shutdown()
 u32 app_inactive_time = 0;
 u32 app_inactive_time_start = 0;
 
+namespace
+{
+// P19b (plans/optimization_mt/14-spike-instrumentation.md, "FrameMove и актор"): one seqFrame subscriber of FrameMove -
+// a Tracy zone named by the subscriber's class (transient: one row per class in Tracy statistics), a frame/move/* timer of
+// perf_metrics and the spike site frame/move/subscriber. Not a spike site for the level: tens of ms there are normal, its
+// phases and objects are sites of their own (P19).
+#if XR_PERF_METRICS
+xray::perf::Metric SeqFrameMetric(pureFrame* object, pcstr cls, bool is_level)
+{
+    using M = xray::perf::Metric;
+    if (is_level)
+        return M::fm_level;
+    if (g_pGamePersistent && object == static_cast<pureFrame*>(g_pGamePersistent))
+        return M::fm_persistent;
+    if (object == static_cast<pureFrame*>(&Engine))
+        return M::fm_engine;
+    if (pInput && object == static_cast<pureFrame*>(pInput))
+        return M::fm_input;
+    if (Console && object == static_cast<pureFrame*>(Console))
+        return M::fm_console;
+    if (0 == xr_strcmp(cls, "SoundProcessor"))
+        return M::fm_sound;
+    if (0 == xr_strcmp(cls, "CRender"))
+        return M::fm_render;
+    if (0 == strncmp(cls, "CUI", 3) || 0 == xr_strcmp(cls, "CMainMenu"))
+        return M::fm_ui;
+    return M::fm_other;
+}
+
+void DescribeSeqFrameSubscriber(const void* ctx, char* buf, size_t size)
+{
+    xr_sprintf(buf, size, "cls=%s", static_cast<pcstr>(ctx));
+}
+#endif
+
+void SeqFrameCall(pureFrame* object)
+{
+    [[maybe_unused]] const pcstr cls = xray::perf::SpikeClassName(typeid(*object));
+    ZoneTransientN(seq_frame_zone, cls, true);
+#if XR_PERF_METRICS
+    const bool is_level = g_pGameLevel && object == static_cast<pureFrame*>(g_pGameLevel);
+    xray::perf::ScopedTime time(SeqFrameMetric(object, cls, is_level));
+    if (!is_level)
+    {
+        PERF_SPIKE_NAMED(spike, "frame/move/subscriber", cls, &DescribeSeqFrameSubscriber, true);
+        object->OnPure(object);
+        return;
+    }
+#endif
+    object->OnPure(object);
+}
+} // namespace
+
 void CRenderDevice::FrameMove()
 {
     ZoneScoped;
@@ -615,8 +860,12 @@ void CRenderDevice::FrameMove()
     }
     ImGui::GetIO().DeltaTime = fTimeDeltaReal;
 
-    m_imgui_render->Frame();
-    ImGui::NewFrame();
+    {
+        ZoneScopedN("FrameMove/imgui_begin");
+        PERF_SCOPE(fm_imgui);
+        m_imgui_render->Frame();
+        ImGui::NewFrame();
+    }
 
     // Frame move
     stats.EngineTotal.FrameStart();
@@ -624,6 +873,8 @@ void CRenderDevice::FrameMove()
     // TODO: HACK to test loading screen.
     // if(!g_bLoaded)
 
+    // P19b: each subscriber through SeqFrameCall (a zone by class, frame/move/*); set here, on the thread of Process()
+    seqFrame.SetCallHook(&SeqFrameCall);
     seqFrame.Process();
 
     g_bLoaded = true;
@@ -632,7 +883,11 @@ void CRenderDevice::FrameMove()
     stats.EngineTotal.End();
     stats.EngineTotal.FrameEnd();
 
-    ImGui::EndFrame();
+    {
+        ZoneScopedN("FrameMove/imgui_end");
+        PERF_SCOPE(fm_imgui);
+        ImGui::EndFrame();
+    }
 }
 
 ENGINE_API bool bShowPauseString = true;

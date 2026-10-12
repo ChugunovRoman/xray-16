@@ -28,6 +28,7 @@
 #include "agent_manager.h"
 #include "agent_enemy_manager.h"
 #include "npc_cpp_profile.h"
+#include "lua_spike_probe.h"
 
 static const u32 ENEMY_INERTIA_TIME_TO_SOMEBODY = 3000;
 static const u32 ENEMY_INERTIA_TIME_TO_ACTOR = 0;
@@ -167,9 +168,24 @@ bool CEnemyManager::useful(const CEntityAlive* entity_alive) const
 
         bool callback_result = true;
         if (m_useful_callback)
+        {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyUsefulCallbackLua);
+            // P18 (plans/optimization_mt/13-lua-spikes.md): a call over npc_perf_lua_spike_us goes to the log with
+            // the Lua function (source:line), both IDs and the GC state
+            lua_State* spike_lua = gw::lua_spike::Enabled() ? m_useful_callback.functor().interpreter() : nullptr;
+            gw::lua_spike::Probe spike(spike_lua, gw::lua_spike::ECategory::EnemyCallback);
             callback_result = m_useful_callback(m_object->lua_game_object(), entity_alive->lua_game_object());
+            if (spike.Finish())
+            {
+                m_useful_callback.functor().push(spike_lua);
+                spike.Report("", m_object->ID(), entity_alive->ID(), true);
+            }
+        }
         if (callback_result && native_filters)
+        {
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerEnemyUsefulCallbackPlugin);
             callback_result = gw::addons::callbacks::EnemyUseful(m_object, entity_alive);
+        }
         store_useful_callback_cache(entity_alive->ID(), callback_result);
         return callback_result;
     }

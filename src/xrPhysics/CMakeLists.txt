@@ -328,6 +328,8 @@ target_sources_grouped(
     params.cpp
     params.h
     PHItemList.h
+    PHStepDefer.cpp
+    PHStepDefer.h
     PHWorld.cpp
     PHWorld.h
     PHWorldScript.cpp

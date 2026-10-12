@@ -20,6 +20,8 @@ CTeleWhirlwind::CTeleWhirlwind()
 CTelekineticObject* CTeleWhirlwind::activate(
     CPhysicsShellHolder* obj, float strength, float height, u32 max_time_keep, bool rot)
 {
+    // objects.back() below must still be the object just added (see CTelekinesis::m_objects_lock).
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     if (inherited::activate(obj, strength, height, max_time_keep, rot))
     {
         CTeleWhirlwindObject* o = smart_cast<CTeleWhirlwindObject*>(objects.back());
@@ -30,20 +32,32 @@ CTelekineticObject* CTeleWhirlwind::activate(
     else
         return 0;
 }
-void CTeleWhirlwind::clear_impacts() { m_saved_impacts.clear(); }
+// m_saved_impacts: filled by destroy_object() from the physics step (raise, under m_objects_lock), drained by
+// CMincer::NotificateDestroy - the same lock.
+void CTeleWhirlwind::clear_impacts()
+{
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
+    m_saved_impacts.clear();
+}
 void CTeleWhirlwind::clear() { inherited::clear(); }
 void CTeleWhirlwind::add_impact(const Fvector& dir, float val)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     Fvector force, point;
     force.set(dir);
     force.mul(val);
     point.set(0.f, 0.f, 0.f);
     m_saved_impacts.push_back(SPHImpact(force, point, 0));
 }
-void CTeleWhirlwind::reserve_impact(const size_t count) { m_saved_impacts.reserve(count); }
+void CTeleWhirlwind::reserve_impact(const size_t count)
+{
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
+    m_saved_impacts.reserve(count);
+}
 void CTeleWhirlwind::set_throw_power(float throw_pow) { m_throw_power = throw_pow; }
 void CTeleWhirlwind::draw_out_impact(Fvector& dir, float& val)
 {
+    std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     VERIFY2(m_saved_impacts.size(), "NO IMPACTS ADDED!");
 
     if (m_saved_impacts.empty())

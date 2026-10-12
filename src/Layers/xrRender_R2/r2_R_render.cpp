@@ -479,6 +479,7 @@ void CRender::Render()
     if (ps_r2_ls_flags.test(R2FLAG_ZFILL) && !(svp_pass && ps_r__svp_skip_zfill))
     {
         ZoneScopedN("Render/ZPrefill/Build");
+        PERF_SCOPE_IF(!svp_pass, rpass_zprefill_build);
         PIX_EVENT(DEFER_Z_FILL);
         BasicStats.Culling.Begin();
         float z_distance = ps_r2_zfill;
@@ -513,6 +514,7 @@ void CRender::Render()
     // Sync point
     {
         ZoneScopedN("Render/SyncPoint");
+        PERF_SCOPE_IF(!svp_pass, rpass_sync_point);
         BasicStats.WaitS.Begin();
         {
             q_sync_point.Wait(ps_r2_wait_sleep, ps_r2_wait_timeout);
@@ -522,6 +524,10 @@ void CRender::Render()
     }
 
     {
+        // Main thread idles here until the main-view build (render_main::calculate_into on a worker)
+        // finishes - the bubble that the render/main/build_* metrics break down.
+        ZoneScopedN("Render/MainBuildWait");
+        PERF_SCOPE_IF(!svp_pass, rpass_build_wait);
         PERF_WAIT_SITE(xray::perf::wait_site::RMain);
         r_main.sync();
     }
@@ -529,6 +535,7 @@ void CRender::Render()
     if (ps_r2_ls_flags.test(R2FLAG_ZFILL) && !(svp_pass && ps_r__svp_skip_zfill))
     {
         ZoneScopedN("Render/ZPrefill/Flush");
+        PERF_SCOPE_IF(!svp_pass, rpass_zprefill_flush);
         // flush
         Target->phase_scene_prepare();
         dsgraph.cmd_list.set_ColorWriteEnable(FALSE);
@@ -556,6 +563,7 @@ void CRender::Render()
     if (!split_the_scene_to_minimize_wait)
     {
         ZoneScopedN("Render/MainPart0/NoSplit");
+        PERF_SCOPE_IF(!svp_pass, rpass_part0);
         PIX_EVENT(DEFER_PART0_NO_SPLIT);
         // level, DO NOT SPLIT
         if (svp_pass)
@@ -601,6 +609,7 @@ void CRender::Render()
     else
     {
         ZoneScopedN("Render/MainPart0/Split");
+        PERF_SCOPE_IF(!svp_pass, rpass_part0);
         PIX_EVENT(DEFER_PART0_SPLIT);
         // level, SPLIT
         Target->phase_scene_begin();
@@ -615,6 +624,7 @@ void CRender::Render()
     {
         //******* Occlusion testing of volume-limited light-sources
         ZoneScopedN("Render/Occlusion/Prepare");
+        PERF_SCOPE_IF(!svp_pass, rpass_occq);
         Target->phase_occq();
         LP_normal.clear();
         LP_pending.clear();
@@ -629,6 +639,7 @@ void CRender::Render()
     }
     {
         ZoneScopedN("Render/Occlusion/VisPrepare");
+        PERF_SCOPE_IF(!svp_pass, rpass_occq);
         PIX_EVENT(DEFER_TEST_LIGHT_VIS);
         light_Package& LP = Lights.package;
 
@@ -689,6 +700,7 @@ void CRender::Render()
     if (split_the_scene_to_minimize_wait)
     {
         PIX_EVENT(DEFER_PART1_SPLIT);
+        PERF_SCOPE_IF(!svp_pass, rpass_part1);
         // skybox can be drawn here
         if (false)
         {
@@ -723,6 +735,7 @@ void CRender::Render()
     if (g_pGameLevel->pHUD && g_pGameLevel->pHUD->RenderActiveItemUIQuery())
     {
         ZoneScopedN("Render/HUD_UI");
+        PERF_SCOPE_IF(!svp_pass, rpass_hud_ui);
         if (!m_SecondViewportPass)
         {
             Target->phase_wallmarks();
@@ -740,6 +753,7 @@ void CRender::Render()
     if (Wallmarks && !(svp_pass && ps_r__svp_skip_wallmarks))
     {
         ZoneScopedN("Render/Wallmarks");
+        PERF_SCOPE_IF(!svp_pass, rpass_wallmarks);
         PIX_EVENT(DEFER_WALLMARKS);
         Target->phase_wallmarks();
         g_r = 0;
@@ -758,6 +772,7 @@ void CRender::Render()
     if (!svp_pass)
     {
         ZoneScopedN("Render/Occlusion/FlushLastFrame");
+        PERF_SCOPE_IF(!svp_pass, rpass_occq_flush);
         PIX_EVENT(DEFER_FLUSH_OCCLUSION);
         u32 it = 0;
         for (it = 0; it < Lights_LastFrame.size(); it++)
@@ -792,12 +807,14 @@ void CRender::Render()
     if (o.msaa)
     {
         ZoneScopedN("Render/MSAA/MarkEdges");
+        PERF_SCOPE_IF(!svp_pass, rpass_msaa);
         PIX_EVENT(MARK_MSAA_EDGES);
         Target->mark_msaa_edges();
     }
 
     {
         ZoneScopedN("Render/RainSync");
+        PERF_SCOPE_IF(!svp_pass, rpass_rain_sync);
         if (!(svp_pass && ps_r__svp_skip_rain_sync))
         {
             PERF_WAIT_SITE(xray::perf::wait_site::RRain);
@@ -808,6 +825,7 @@ void CRender::Render()
     // Directional light - fucking sun
     {
         ZoneScopedN("Render/Sun");
+        PERF_SCOPE_IF(!svp_pass, rpass_sun);
         PIX_EVENT(DEFER_SUN);
         Stats.l_visible++;
         const bool svp_sun_off = ps_r__svp_skip_sun_csm != 0;
@@ -898,6 +916,7 @@ void CRender::Render()
 
     {
         ZoneScopedN("Render/SelfIllum");
+        PERF_SCOPE_IF(!svp_pass, rpass_selfillum);
         PIX_EVENT(DEFER_SELF_ILLUM);
         Target->phase_accumulator(dsgraph.cmd_list);
         // Render emissive geometry, stencil - write 0x0 at pixel pos
@@ -956,6 +975,7 @@ void CRender::Render()
     // Lighting, non dependant on OCCQ
     {
         ZoneScopedN("Render/LightsNoOccq");
+        PERF_SCOPE_IF(!svp_pass, rpass_lights_noocc);
         PIX_EVENT(DEFER_LIGHT_NO_OCCQ);
         // Stage 1b/1c: the scope package skips per-light occq visibility entirely - it was
         // prefiltered by the narrow lens frustum and (prebuilt mode) its shadows are already
@@ -967,6 +987,7 @@ void CRender::Render()
     // Lighting, dependant on OCCQ
     {
         ZoneScopedN("Render/LightsOccq");
+        PERF_SCOPE_IF(!svp_pass, rpass_lights_occ);
         PIX_EVENT(DEFER_LIGHT_OCCQ);
         // Same as above: pending lights are treated as visible for the scope pass - they passed
         // the frustum test, and their occq results belong to the MAIN pass's decision loop.
@@ -1036,9 +1057,13 @@ void CRender::Render()
     // Postprocess
     {
         ZoneScopedN("Render/Combine");
+        PERF_SCOPE_IF(!svp_pass, rpass_combine);
         PIX_EVENT(DEFER_LIGHT_COMBINE);
         Target->phase_combine();
     }
+
+    // render/pass/tail: everything from here to the end of Render() (main pass only).
+    PERF_SCOPE_IF(!svp_pass, rpass_tail);
 
     // phase_pp (inside phase_combine) has already presented the scaled scene into the real
     // backbuffer and left it bound with a full-size viewport: restore members/named textures.

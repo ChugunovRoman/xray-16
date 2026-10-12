@@ -9,10 +9,34 @@
 #include "SkeletonXSkinXW.h"
 #include "xrCore/FMesh.hpp"
 #include "xrCDB/Intersect.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
 {
 shared_str s_bones_array_const;
+
+#if XR_PERF_METRICS
+// P15 metrics, main view's dynamic submit only (g_perf_rmain_dyn, main thread): the model of the previous GPU-skinned
+// draw - its palette is what the bones buffer holds - and whether this model's palette was written earlier this frame.
+static thread_local const CKinematics* tl_perf_prev_palette_model = nullptr;
+
+static void perf_rmain_palette(const CKinematics* model, u32& model_frame, u32 rows)
+{
+    PERF_INC(rmain_skin_hw);
+    PERF_ADD(rmain_skin_bone_bytes, rows * sizeof(Fvector4));
+    if (tl_perf_prev_palette_model == model)
+        PERF_INC(rmain_skin_same_prev);
+    tl_perf_prev_palette_model = model;
+    const u32 stamp = Device.dwFrame + 1;
+    if (model_frame == stamp)
+        PERF_INC(rmain_skin_repeat);
+    else
+    {
+        model_frame = stamp;
+        PERF_INC(rmain_skin_models);
+    }
+}
+#endif
 
 //////////////////////////////////////////////////////////////////////
 // Body Part
@@ -47,12 +71,16 @@ void CSkeletonX::_Render(CBackend& cmd_list, ref_geom& hGeom, u32 vCount, u32 iO
     switch (RenderMode)
     {
     case RM_SKINNING_SOFT:
+        PERF_INC(skin_draw_soft);
+        PERF_ADD_IF(g_perf_rmain_dyn, rmain_skin_soft, 1);
         _Render_soft(cmd_list, hGeom, vCount, iOffset, pCount);
         cmd_list.stat.r.s_dynamic_sw.add(vCount);
         break;
     case RM_SINGLE:
     case RM_SINGLE_HQ:
     {
+        PERF_INC(skin_draw_single);
+        PERF_ADD_IF(g_perf_rmain_dyn, rmain_skin_single, 1);
         Fmatrix W;
         W.mul_43(cmd_list.xforms.m_w, Parent->LL_GetTransform_R(u16(RMS_boneid)));
         cmd_list.set_xform_world(W);
@@ -70,16 +98,48 @@ void CSkeletonX::_Render(CBackend& cmd_list, ref_geom& hGeom, u32 vCount, u32 iO
     case RM_SKINNING_4B:
     case RM_SKINNING_4B_HQ:
     {
+        PERF_INC(skin_draw_hw);
         // transfer matrices
         ref_constant array = cmd_list.get_c(s_bones_array_const);
         u32 count = RMS_bonecount;
-        for (u32 mid = 0; mid < count; mid++)
+#if XR_PERF_METRICS
+        if (g_perf_rmain_dyn)
+            perf_rmain_palette(Parent, Parent->m_perf_rmain_palette_frame, count * 3); // CSkeletonX is a friend
+#endif
         {
-            Fmatrix& M = Parent->LL_GetTransform_R(u16(mid));
-            u32 id = mid * 3;
-            cmd_list.set_ca(&*array, id + 0, M._11, M._21, M._31, M._41);
-            cmd_list.set_ca(&*array, id + 1, M._12, M._22, M._32, M._42);
-            cmd_list.set_ca(&*array, id + 2, M._13, M._23, M._33, M._43);
+            PERF_SCOPE(skin_bone_upload);
+            PERF_ADD(skin_bone_rows, count * 3);
+#ifdef USE_DX11
+            // Always on DX11: the palette (3 transposed rows of the 3x4 render transform per bone, the layout
+            // the skinning shaders read) is built on the stack and written with one memcmp + memcpy per buffer,
+            // instead of 3 set_ca per bone. RMS_bonecount <= hw_bones_cnt (<= 77 for 256 registers): 231 rows.
+            // The per-bone loop below stays for GL and for a palette that has no constant or does not fit.
+            constexpr u32 max_rows = 256 - 22;
+            if (array._get() && count * 3 <= max_rows)
+            {
+                Fvector4 rows[max_rows];
+                for (u32 mid = 0; mid < count; mid++)
+                {
+                    const Fmatrix& M = Parent->LL_GetTransform_R(u16(mid));
+                    Fvector4* r = rows + mid * 3;
+                    r[0].set(M._11, M._21, M._31, M._41);
+                    r[1].set(M._12, M._22, M._32, M._42);
+                    r[2].set(M._13, M._23, M._33, M._43);
+                }
+                cmd_list.set_ca_rows(array._get(), 0, rows, count * 3);
+            }
+            else
+#endif
+            {
+                for (u32 mid = 0; mid < count; mid++)
+                {
+                    Fmatrix& M = Parent->LL_GetTransform_R(u16(mid));
+                    u32 id = mid * 3;
+                    cmd_list.set_ca(&*array, id + 0, M._11, M._21, M._31, M._41);
+                    cmd_list.set_ca(&*array, id + 1, M._12, M._22, M._32, M._42);
+                    cmd_list.set_ca(&*array, id + 2, M._13, M._23, M._33, M._43);
+                }
+            }
         }
 
         // render

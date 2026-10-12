@@ -97,7 +97,12 @@ void CALifeUpdateManager::update_switch()
     const destruction_lock lock(*this);
 
     START_PROFILE("ALife/switch");
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): how many M_SPAWN one pass sends (a group of a squad and all the
+    // inventories is one pass): the gauge keeps the last pass, its window max is the biggest pass
+    const u32 spawns_before = m_online_spawns.load(std::memory_order_relaxed);
     graph().level().update(CSwitchPredicate(this), Device.dwPrecacheFrame > 0);
+    xray::perf::SetGauge(xray::perf::Metric::alife_switch_pass_spawns,
+        static_cast<s64>(m_online_spawns.load(std::memory_order_relaxed) - spawns_before));
     STOP_PROFILE
 }
 
@@ -216,6 +221,7 @@ bool CALifeUpdateManager::change_level(NET_Packet& net_packet)
     // Lua actor binder sent it from its save() inside ClientSave.
     gw::addons::objevents::LevelChanging();
 
+    Level().SpawnQueueNoteSave("level change"); // spawn stage 2: see CALifeStorageManager::prepare_objects_for_save
     Level().ClientSave();
 
     graph().actor()->o_torso.yaw = graph().actor()->o_Angle.y;

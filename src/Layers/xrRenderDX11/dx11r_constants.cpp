@@ -321,6 +321,7 @@ BOOL R_constant_table::parse(void* _desc, u32 destination)
                 parseConstants(pTable, updatedDest);
                 for (int id = 0; id < R__NUM_CONTEXTS; ++id)
                 {
+                    // The buffer shared by every shader of the context with this cbuffer layout.
                     ref_cbuffer tempBuffer = RImplementation.Resources->_CreateConstantBuffer(id, pTable);
                     m_CBTable[id].push_back(cb_table_record(uiBufferIndex, tempBuffer));
                 }

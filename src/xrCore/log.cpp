@@ -5,6 +5,7 @@
 #include "resource.h"
 #include "log.h"
 #include "xrCore/Threading/Lock.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #if defined(XR_PLATFORM_WINDOWS)
 #   include "xrCore/Text/Utf8Utils.hpp"
@@ -221,6 +222,9 @@ LogCallback LogCB = nullptr;
 
 bool ForceFlushLog = false;
 IWriter* LogWriter = nullptr;
+// P19b: Tracy zones of AddOne only between CreateLog and CloseLog - a log line written during static initialization or
+// destruction must not touch the profiler.
+std::atomic<bool> s_log_tracy_zones{false};
 
 void FlushLog()
 {
@@ -234,10 +238,23 @@ void FlushLog()
 
 void AddOne(pcstr split)
 {
+    // P19b (plans/optimization_mt/14-spike-instrumentation.md): every log line - log/lines, log/add (with the logCS wait)
+    // and a Tracy zone. OutputDebugString below: with a debugger attached each line is a debug event that suspends all
+    // threads of the process (log/debugger_attached = 1), the threads that do not log are stopped too.
+    [[maybe_unused]] const bool tracy_zones = s_log_tracy_zones.load(std::memory_order_relaxed);
+    ZoneNamedN(log_add_zone, "Log::AddOne", tracy_zones);
+    PERF_SCOPE(log_add);
+    PERF_INC(log_lines);
+#if defined(XR_PLATFORM_WINDOWS) && XR_PERF_METRICS
+    xray::perf::SetGauge(xray::perf::Metric::log_debugger, IsDebuggerPresent() ? 1 : 0);
+#endif
     ScopeLock scope{ &logCS };
 
-    OutputDebugString(split);
-    OutputDebugString("\n");
+    {
+        ZoneNamedN(log_ods_zone, "Log::OutputDebugString", tracy_zones);
+        OutputDebugString(split);
+        OutputDebugString("\n");
+    }
 
     LogFile.push_back(split);
 
@@ -474,6 +491,7 @@ void CreateLog(bool nl)
 
         LogWriter = w;
     }
+    s_log_tracy_zones.store(true, std::memory_order_relaxed);
 
     if (history.block)
         Memory.mem_free(history.block);
@@ -485,6 +503,7 @@ void CreateLog(bool nl)
 void CloseLog(void)
 {
     ZoneScoped;
+    s_log_tracy_zones.store(false, std::memory_order_relaxed);
     FlushLog();
 
     ScopeLock scope{ &logCS };

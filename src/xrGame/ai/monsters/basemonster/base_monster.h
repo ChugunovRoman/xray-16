@@ -98,6 +98,15 @@ public:
     virtual void net_Export(NET_Packet& P);
     virtual void net_Import(NET_Packet& P);
     virtual void net_Relcase(IGameObject* O);
+    // P17: UpdateMemory once after the whole batch instead of after every destroyed object
+    virtual void net_RelcaseBatch(const RelcaseBatch& batch);
+
+private:
+    // P17b: set by net_Relcase during a batch when a batch object was in the memories and the
+    // managers UpdateMemory works from (enemy, sound, hit and corpse memory, chosen enemy / corpse)
+    bool m_relcase_memory_touched{};
+
+public:
 
     // save/load server serialization
     virtual void save(NET_Packet& output_packet) { inherited::save(output_packet); }

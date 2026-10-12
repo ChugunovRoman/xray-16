@@ -7,6 +7,7 @@
 #include "xrMessages.h"
 #include "xrServer.h"
 #include "Level.h"
+#include "lua_spike_probe.h"
 #include "xrScriptEngine/script_debugger.hpp"
 #include "ai_debug.h"
 #include "alife_simulator.h"
@@ -122,6 +123,11 @@ extern float g_smart_cover_animation_speed_factor;
 // Ф1 (PHYSICS_ACTIVE_SET_PLAN): defined in movement_manager_physic.cpp
 extern float ph_npc_kinematic_far_dist;
 extern float ph_npc_kinematic_far_hyst;
+// Spawn stage 2 (plans/spawn_optimization/SPEC.md 5.A): the budget of the client materialization of M_SPAWN, Level.cpp
+extern int g_spawn_budget_us;
+extern int g_spawn_min_per_frame;
+extern int g_spawn_max_delay_ms;
+extern int g_spawn_catchup_us;
 
 extern BOOL g_ai_use_old_vision;
 float g_aim_predict_time = 0.40f;
@@ -280,11 +286,27 @@ int npc_perf_visible_value_native = 1;        // visual_memory_manager.cpp: get_
 // Stage D, W4-2: xr_logic.pick_section_from_condlist in the engine (gw_condlist_native.cpp);
 // 0 = Lua, 1 = native, 2 = shadow (dry native pass first, Lua decides, mismatches counted)
 int npc_perf_condlist_native = 0;
+int npc_perf_ik_enemy_near_dist = 0;       // CharacterPhysicsSupport.cpp: the fight IK interval only this near
+int npc_perf_ik_offscreen_interval_ms = 0; // CharacterPhysicsSupport.cpp: the IK interval of NPCs off screen
+// Stage 3 (ai_stalker.cpp, CAI_Stalker::TrySkipUpdateCLLod, always on): UpdateCL every 2nd / 3rd frame by the
+// camera distance
+int npc_perf_ucl_lod_dist = 30;            // m: beyond it every 2nd frame
+int npc_perf_ucl_lod_dist2 = 45;           // m: beyond it every 3rd frame (0 = no such tier)
+int npc_perf_ucl_lod_max_delta_ms = 250;   // ms: the most time between two full UpdateCL of a skipped stalker
+// Stage 4 (movement_manager_physic.cpp): frames without TryPosition after a successful one; both K = 0 -> off
+int npc_perf_move_try_skip_frames = 0;     // K of an NPC on screen and near the camera
+int npc_perf_move_try_skip_frames_far = 0; // K of an NPC off screen or beyond npc_perf_move_try_skip_far_dist
+int npc_perf_move_try_skip_far_dist = 30;  // m from the camera; 0 = only the visibility picks the far K
+int npc_perf_move_try_skip_recover = 3;    // successes in a row after a failure before skipping again
+int npc_perf_move_try_skip_actor_dist = 5; // m from the current entity: no skipping this near
 // Stage D, W5-1: switches of the Lua scheme actions, read by the scripts (utils.perf_cvar_int); 0 = as before
 int npc_perf_camper_lean = 0;             // xr_camper: move_mgr:continue() once per stretch of walking
 int npc_perf_walker_camp_once = 0;        // xr_walker: register_npc once per stay in a camp
 int npc_perf_scheme_condlist_ttl_ms = 0;  // xr_animpoint reach_movement, xr_cover anm: condlist answer kept (ms)
 int npc_perf_move_mgr_fixes = 0;          // move_mgr: a look point without ret drops the ret of the previous one
+// P17b (plans/optimization_mt/12-relcase.md), read by death_manager.script: the items a dead NPC must not keep are
+// released together once per this many ms (one frame with a destroy instead of one per death); 0 = at once. Not saved.
+int npc_perf_death_release_batch_ms = 1000;
 
 // Dev kill-switch: per-solve cache for script GOAP evaluators (read in script_property_evaluator_wrapper.cpp).
 int ai_evaluator_solve_cache = 1;
@@ -292,8 +314,6 @@ int ai_evaluator_solve_cache = 1;
 // Animation LOD: throttle SelectAnimation for far, non-combat NPCs (read in ai_stalker.cpp).
 int npc_anim_lod = 1;
 int npc_anim_lod_far_interval_ms = 120;
-
-int ps_ui_single_onframe = 0;
 
 u32 npc_preview_scene_budget_per_frame = 1;
 u32 npc_preview_disk_cache_warm_per_frame = 16;
@@ -2890,6 +2910,14 @@ public:
     }
 };
 
+// Experimental render switches of xrGame: like CCC_Integer, but not kept in user.ltx (always start at the default)
+class CCC_IntegerNotSaved : public CCC_Integer
+{
+public:
+    using CCC_Integer::CCC_Integer;
+    void Save(IWriter*) override {}
+};
+
 void CCC_RegisterCommands()
 {
     ZoneScoped;
@@ -2998,6 +3026,13 @@ void CCC_RegisterCommands()
     CMD1(CCC_LuaGCMethod, "lua_gc_method");
     CMD4(CCC_Integer, "lua_gcstep", &psLUA_GCSTEP, 1, 1000);
     CMD4(CCC_Integer, "lua_gc_timeout", &psLUA_GCTIMEOUT, 1000, 16000);
+    // P18 (plans/optimization_mt/13-lua-spikes.md). Temporary, not saved. A Lua call of the engine (enemy callback,
+    // event bus, script_call, binder update, GC step) longer than this many us goes to the log as "[lua-spike]" with the
+    // heap before/after and whether the atomic phase of the GC ran inside it; 0 = off
+    CMD4(CCC_IntegerNotSaved, "npc_perf_lua_spike_us", &gw::lua_spike::g_threshold_us, 0, 1000000);
+    // With lua_gc_method gc_step the GC always works only in script_gc, paced by the allocations of the frame (the
+    // implicit steps inside random Lua calls are held off): % of the LuaJIT pace (one step per KB)
+    CMD4(CCC_IntegerNotSaved, "lua_gc_paced_mul", &gw::lua_spike::g_paced_mul, 10, 1000);
 
 #ifdef DEBUG
     CMD3(CCC_Mask, "ai_debug", &psAI_Flags, aiDebug);
@@ -3173,11 +3208,21 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_script_action_weight_lookup", &npc_perf_script_action_weight_lookup, 0, 1);
     CMD4(CCC_Integer, "npc_perf_visible_value_native", &npc_perf_visible_value_native, 0, 1);
     CMD4(CCC_Integer, "npc_perf_condlist_native", &npc_perf_condlist_native, 0, 2);
+    CMD4(CCC_Integer, "npc_perf_ik_enemy_near_dist", &npc_perf_ik_enemy_near_dist, 0, 200);
+    CMD4(CCC_Integer, "npc_perf_ik_offscreen_interval_ms", &npc_perf_ik_offscreen_interval_ms, 0, 30000);
+    CMD4(CCC_Integer, "npc_perf_ucl_lod_dist", &npc_perf_ucl_lod_dist, 5, 500);
+    CMD4(CCC_Integer, "npc_perf_ucl_lod_dist2", &npc_perf_ucl_lod_dist2, 0, 500);
+    CMD4(CCC_Integer, "npc_perf_ucl_lod_max_delta_ms", &npc_perf_ucl_lod_max_delta_ms, 100, 500);
+    CMD4(CCC_Integer, "npc_perf_move_try_skip_frames", &npc_perf_move_try_skip_frames, 0, 8);
+    CMD4(CCC_Integer, "npc_perf_move_try_skip_frames_far", &npc_perf_move_try_skip_frames_far, 0, 16);
+    CMD4(CCC_Integer, "npc_perf_move_try_skip_far_dist", &npc_perf_move_try_skip_far_dist, 0, 500);
+    CMD4(CCC_Integer, "npc_perf_move_try_skip_recover", &npc_perf_move_try_skip_recover, 1, 16);
+    CMD4(CCC_Integer, "npc_perf_move_try_skip_actor_dist", &npc_perf_move_try_skip_actor_dist, 0, 100);
     CMD4(CCC_Integer, "npc_perf_camper_lean", &npc_perf_camper_lean, 0, 1);
     CMD4(CCC_Integer, "npc_perf_walker_camp_once", &npc_perf_walker_camp_once, 0, 1);
     CMD4(CCC_Integer, "npc_perf_scheme_condlist_ttl_ms", &npc_perf_scheme_condlist_ttl_ms, 0, 5000);
     CMD4(CCC_Integer, "npc_perf_move_mgr_fixes", &npc_perf_move_mgr_fixes, 0, 1);
-    CMD4(CCC_Integer, "ui_single_onframe", &ps_ui_single_onframe, 0, 1);
+    CMD4(CCC_IntegerNotSaved, "npc_perf_death_release_batch_ms", &npc_perf_death_release_batch_ms, 0, 5000);
     CMD4(CCC_Integer, "npc_preview_scene_budget_per_frame", (int*)&npc_preview_scene_budget_per_frame, 1, 500);
     CMD4(CCC_Integer, "npc_preview_disk_cache_warm_per_frame", (int*)&npc_preview_disk_cache_warm_per_frame, 0, 500);
 
@@ -3211,6 +3256,19 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "ph_spawn_activation_shape_early_exit", &ph_console::ph_spawn_activation_shape_early_exit, 0, 1);
     CMD4(CCC_Integer, "ph_spawn_skip_correct_on_load", &ph_console::ph_spawn_skip_correct_on_load, 0, 1);
     CMD4(CCC_Integer, "ph_dbg_spawn_stats", &ph_console::ph_dbg_spawn_stats, 0, 1);
+    // P16 (plans/optimization_mt/11-ragdoll-spikes.md): death -> ragdoll spikes. Not saved. The box of a starting free
+    // ragdoll (it always ignores live characters) makes at most N world steps (vanilla up to 150)
+    CMD4(CCC_IntegerNotSaved, "ph_death_correct_max_steps", &ph_console::ph_death_correct_max_steps, 0, 150);
+    // Spawn stage 2 (plans/spawn_optimization/SPEC.md 5.A, section 12): CLevel::ProcessGameEvents materializes M_SPAWN
+    // within spawn_budget_us per frame, by whole groups (a root + its inventory right behind it), from the head of the
+    // queue only: what does not fit and every event behind it wait for the next frame, in the same order. At least
+    // spawn_min_per_frame groups per frame; a head that waits spawn_max_delay_ms goes on without the budget, the same
+    // while loading and on pause. Temporary, not saved; spawn_budget_us 0 = as before (the whole queue in one frame).
+    CMD4(CCC_IntegerNotSaved, "spawn_budget_us", &g_spawn_budget_us, 0, 100000);
+    CMD4(CCC_IntegerNotSaved, "spawn_min_per_frame", &g_spawn_min_per_frame, 1, 1000);
+    CMD4(CCC_IntegerNotSaved, "spawn_max_delay_ms", &g_spawn_max_delay_ms, 1, 60000);
+    // A pass that goes past the budget for a head older than spawn_max_delay_ms stops at spawn_catchup_us (0 = no limit)
+    CMD4(CCC_IntegerNotSaved, "spawn_catchup_us", &g_spawn_catchup_us, 0, 1000000);
 
 #ifdef DEBUG
     CMD1(CCC_PHGravity, "ph_gravity");

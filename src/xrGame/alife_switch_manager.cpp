@@ -17,6 +17,7 @@
 #include "ai_space.h"
 #include "xrAICore/Navigation/level_graph.h"
 #include "xrNetServer/NET_Messages.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #ifdef DEBUG
 #include "Level.h"
@@ -60,6 +61,8 @@ void CALifeSwitchManager::add_online(CSE_ALifeDynamicObject* object, bool update
     clientID.set(server().GetServerClient() ? server().GetServerClient()->ID.value() : 0);
     server().Process_spawn(tNetPacket, clientID, FALSE, l_tpAbstract);
     object->s_flags._and (u16(-1) ^ M_SPAWN_UPDATE);
+    PERF_INC(alife_online_objects); // spawn stage 0: the source of a spawn wave
+    m_online_spawns.fetch_add(1, std::memory_order_relaxed);
 
 	//Alundaio: Workaround for crash with corpses that end up outside AI map
     //R_ASSERT3(!object->used_ai_locations() || ai().level_graph().valid_vertex_id(object->m_tNodeID),
@@ -88,6 +91,9 @@ void CALifeSwitchManager::remove_online(CSE_ALifeDynamicObject* object, bool upd
             m_saved_chidren.end());
     }
 
+    // P17: relcase report (perf_metrics) - the client object is destroyed because ALife switched it offline
+    if (g_pGameLevel)
+        g_pGameLevel->Objects.destroy_origin_note(object->ID, CObjectList::destroy_origin_switch);
     server().Perform_destroy(object, net_flags(TRUE, TRUE));
     VERIFY(object->children.empty());
 

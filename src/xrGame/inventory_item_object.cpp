@@ -8,6 +8,7 @@
 
 #include "pch_script.h"
 #include "inventory_item_object.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 CInventoryItemObject::CInventoryItemObject() {}
 CInventoryItemObject::~CInventoryItemObject() {}
@@ -112,10 +113,16 @@ void CInventoryItemObject::load(IReader& packet)
     CInventoryItem::load(packet);
 }
 
+// Both bases draw the same thing: CPhysicItem -> CGameObject::renderable_Render (add_Visual(Visual(), XFORM()) plus
+// the main pass frame, the bones prepass note, MakeMeCrow, hom_frame) and CInventoryItem -> CAttachableItem (only
+// add_Visual(object().Visual(), object().XFORM()) - the same object, visual and matrix). The second one is a leftover
+// of the original code: the render drops its leaves by the visual's marker (R_dsgraph_structure::insert_dynamic), but
+// walks the model again (add_leafs_dynamic: SMAP blob of distant skeletons, CalculateBones / wallmarks fast-outs).
+// plans/optimization_mt/07-item-single-render.md: always only the CGameObject one.
 void CInventoryItemObject::renderable_Render(u32 context_id, IRenderable* root)
 {
+    PERF_INC(item_render_add_visual);
     CPhysicItem::renderable_Render(context_id, root);
-    CInventoryItem::renderable_Render(context_id, root);
 }
 
 void CInventoryItemObject::reload(LPCSTR section)

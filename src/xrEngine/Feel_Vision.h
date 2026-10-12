@@ -92,6 +92,8 @@ public:
     /** Same merge as `feel_vision_update`, then trace at most `trace_pass_cap` rays (`0` = merge only). */
     void feel_vision_update_staged(IGameObject* parent, Fvector& P, float dt, float vis_threshold, u32 trace_pass_cap);
     void feel_vision_relcase(IGameObject* object);
+    // P17: feel_vision_relcase for all objects of the batch - one lock, one pass per list
+    void feel_vision_relcase_batch(const RelcaseBatch& batch);
     void feel_vision_get(xr_vector<IGameObject*>& R)
     {
         std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);

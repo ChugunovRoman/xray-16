@@ -102,6 +102,11 @@ public:
         seta(C, e, data);
     }
 
+    // fp array, `count` consecutive float4 elements from `e` in one write per destination buffer
+    // (bone palette of CSkeletonX). Same result as `count` seta(C, e + i, rows[i]) calls.
+    // Defined below the GetCBuffer specializations.
+    void seta_rows(R_constant* C, u32 e, const Fvector4* rows, u32 count);
+
     //
     ICF void flush()
     {
@@ -176,4 +181,22 @@ template<> dx11ConstantBuffer& R_constants::GetCBuffer<R_constants::BT_GeometryB
 template<> dx11ConstantBuffer& R_constants::GetCBuffer<R_constants::BT_ComputeBuffer>(R_constant* C) const;
 template<> dx11ConstantBuffer& R_constants::GetCBuffer<R_constants::BT_HullBuffer>(R_constant* C) const;
 template<> dx11ConstantBuffer& R_constants::GetCBuffer<R_constants::BT_DomainBuffer>(R_constant* C) const;
+
+inline void R_constants::seta_rows(R_constant* C, u32 e, const Fvector4* rows, u32 count)
+{
+    if (C->destination & RC_dest_pixel)
+        GetCBuffer<BT_PixelBuffer>(C).seta_rows(C, C->ps, e, rows, count);
+    if (C->destination & RC_dest_vertex)
+        GetCBuffer<BT_VertexBuffer>(C).seta_rows(C, C->vs, e, rows, count);
+    if (C->destination & RC_dest_geometry)
+        GetCBuffer<BT_GeometryBuffer>(C).seta_rows(C, C->gs, e, rows, count);
+#ifdef USE_DX11
+    if (C->destination & RC_dest_hull)
+        GetCBuffer<BT_HullBuffer>(C).seta_rows(C, C->hs, e, rows, count);
+    if (C->destination & RC_dest_domain)
+        GetCBuffer<BT_DomainBuffer>(C).seta_rows(C, C->ds, e, rows, count);
+    if (C->destination & RC_dest_compute)
+        GetCBuffer<BT_ComputeBuffer>(C).seta_rows(C, C->cs, e, rows, count);
+#endif
+}
 } // namespace xray::render::RENDER_NAMESPACE

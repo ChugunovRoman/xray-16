@@ -95,6 +95,20 @@ public:
     virtual IRenderVisual* dcast_RenderVisual() = 0;
     virtual IKinematicsAnimated* dcast_PKinematicsAnimated() = 0;
 
+    // Bones prepass (always, CLevel::BonesPrepass, plans/optimization_mt/04-bones-prepass.md).
+    // CalculateBones(TRUE) split in two so the game can run it for many models before the render:
+    // phase A sequentially on the main thread, phase B in parallel. Engine-internal (not Plugin API).
+    //
+    // True when the render build computed these bones in the previous frame (add_leafs_dynamic) and the prepass has
+    // not missed on this model recently (see CKinematics::m_prepass_miss_frame).
+    virtual bool BonesPrepass_Wanted() const = 0;
+    // Phase A: UpdateTracks with its blend callbacks (game code, may call Lua), under the global bones lock.
+    // Main thread, while nothing else runs game code. Returns true when phase B still has to run this tick.
+    virtual bool BonesPrepass_PhaseA() = 0;
+    // Phase B: bone math, bone callbacks (IK, head, ragdoll), visbox, Update_Callback (attachments), under the
+    // per-model lock. Any thread. Returns true when it recomputed the bones (UCalc_Time = Device.dwTimeGlobal after).
+    virtual bool BonesPrepass_PhaseB() = 0;
+
 // debug
 #ifdef DEBUG
     virtual void DebugRender(Fmatrix& XFORM) = 0;

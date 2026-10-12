@@ -69,6 +69,8 @@ enum class ENpcCppProfileStage : u32
     StalkerUpdateCLExecLook,
     StalkerUpdateCLStepManager,
     StalkerUpdateCLWeaponEffector,
+    // CBaseMonster::UpdateCL: control().update_frame(), the per-frame work of the monster controllers
+    MonsterUpdateCLControl,
     StalkerScheduleVisibility,
     StalkerScheduleThinkApply,
     CharacterPhysicsUpdateCL,
@@ -84,7 +86,6 @@ enum class ENpcCppProfileStage : u32
     CustomMonsterScheduleUpdate,
     CustomMonsterUpdateCL,
     CustomMonsterUpdateCLInherited,
-    CustomMonsterUpdateCLProcessSoundCallbacks,
     CustomMonsterUpdateCLNetworkExtrapolation,
     CustomMonsterUpdateCLUpdatePositionAnimation,
     CustomMonsterUpdateCLApplyNetState,
@@ -146,6 +147,84 @@ enum class ENpcCppProfileStage : u32
     CharacterPhysicsInDie,
     CharacterPhysicsInHit,
     ExplosiveExplode,
+    // Stage 0 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md (count() rows, no time):
+    // IK updates by the rule that picked their interval, those of NPCs not seen in the last main pass, foot rays
+    IkRunEnemySelected,
+    IkRunDistance,
+    IkRunOffscreen,
+    IkRays,
+    // move_along_path with neighbours: the calls where one of them has a body within contact reach this frame
+    // (an estimate from the bounding spheres) - the rest pay TryPosition to learn there is no contact
+    MovementNearestCloseContact,
+    // Stalker UpdateCL calls of an NPC not seen in the last main pass, and those also farther than 25 m from the
+    // camera without an enemy: what an update-rate LOD (U1) could skip
+    UclLodOffscreen,
+    UclLodCandidate,
+    // Stage 3 (the UpdateCL LOD, CAI_Stalker::TrySkipUpdateCLLod), stalkers beyond npc_perf_ucl_lod_dist only:
+    // UpdateCL skipped in the 2nd-frame tier (D1) and in the 3rd-frame tier (D2); full UpdateCL on the own frame of
+    // the tier; skips refused by a fight (enemy, recent hit, weapon firing), by any other rule, and by the time cap
+    // (npc_perf_ucl_lod_max_delta_ms); full UpdateCL right after a skip and the sum of their time deltas in ms
+    // (avg = after_skip_ms / after_skip); those of them whose real elapsed time was clamped by the time cap; idle
+    // weapons in the hands skipped together with their owner
+    UclLodSkipD1,
+    UclLodSkipD2,
+    UclLodFull,
+    UclLodDenyCombat,
+    UclLodDenyOther,
+    UclLodDenyTimeCap,
+    UclLodAfterSkip,
+    UclLodAfterSkipMs,
+    UclLodDeltaCapHit,
+    UclLodWeaponSkip,
+    // Weapon UpdateCL of NPC weapons: the one in the hands and the hidden ones in the slots
+    WeaponUclNpcActive,
+    WeaponUclNpcHidden,
+    // Stage 2b: of those hidden ones, the UpdateCL calls skipped (CWeapon::TrySkipHiddenUpdateCL)
+    WeaponUclNpcHiddenSkipped,
+    // Stage 4 (move_along_path, npc_perf_move_try_skip_*): TryPosition calls skipped by the near K (on screen,
+    // close to the camera) and by the far K (off screen / far); checks the "never skip" rules took from the skip
+    // budget - by the NPC's own state and by the actor or a body close by; and TryPosition failures on the first
+    // check after a run of skips (what the skipping let in)
+    MovementTrySkipNear,
+    MovementTrySkipFar,
+    MovementTrySkipForcedState,
+    MovementTrySkipForcedBody,
+    MovementTrySkipFailAfterSkip,
+    // Stage 7 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md: the parts of CAI_Stalker::shedule_Update
+    // that had no row of their own (with visibility, memory_update and think_apply they cover the whole of it)
+    StalkerSchedulePrecalc,
+    StalkerScheduleAgentManager,
+    StalkerScheduleProcessEnemies,
+    StalkerScheduleInherited,
+    StalkerScheduleScriptControl,
+    StalkerScheduleFeelTouch,
+    StalkerScheduleInventoryOwner,
+    StalkerSchedulePhysics,
+    // The useful callback of the enemy manager split: the Lua callback of the NPC and the enemy filters of plugins
+    StalkerEnemyUsefulCallbackLua,
+    StalkerEnemyUsefulCallbackPlugin,
+    // P16 (plans/optimization_mt/11-ragdoll-spikes.md): death -> ragdoll, the parts of character_physics/in_die and
+    // activate_shell. kill_hit is the in_Hit path (KillHitImpl, also run deferred from the post-step flush, then outside
+    // in_die); create_shell with its parts create_skeleton (the shell built at death), bones (CalculateBones around the
+    // start), run_simulation (into the world); weapon_collision (the held weapon's geoms moved into the ragdoll);
+    // end_activate (start of a free ragdoll) with death_correct (CollisionCorrectObjPos - the box pushed out in a frozen
+    // world) and fly_to (the ragdoll flown back after it, 10 steps); death_motion (death animation set up and started);
+    // death_deferred - deaths queued by defer_scheduler_mutation (count); skeleton_prebuild (TryPrebuildSkeleton,
+    // on the scheduler) and, at death, prebuilt skeletons used / found stale (counts)
+    CharacterPhysicsKillHit,
+    CharacterPhysicsCreateShell,
+    CharacterPhysicsCreateSkeleton,
+    CharacterPhysicsCreateShellBones,
+    CharacterPhysicsCreateShellRun,
+    CharacterPhysicsWeaponCollision,
+    CharacterPhysicsEndActivate,
+    CharacterPhysicsDeathCorrect,
+    CharacterPhysicsFlyTo,
+    CharacterPhysicsDeathMotion,
+    CharacterPhysicsDeathDeferred,
+    CharacterPhysicsSkeletonPrebuild,
+    CharacterPhysicsSkeletonPrebuiltUsed,
+    CharacterPhysicsSkeletonPrebuiltStale,
     Count
 };
 

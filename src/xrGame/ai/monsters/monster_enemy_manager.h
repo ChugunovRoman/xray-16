@@ -84,4 +84,6 @@ public:
     void script_enemy(const CEntityAlive& enemy);
 
     void remove_links(IGameObject* O);
+    // P17b: remove_links(O) would change something (O is the current, previous or script enemy)
+    [[nodiscard]] bool refers_to(const IGameObject* O) const;
 };

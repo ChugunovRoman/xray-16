@@ -1,6 +1,7 @@
 #include "pch_script.h"
 
 #include "PhysicsShellHolder.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrPhysics/PhysicsShell.h"
 #include "xrMessages.h"
 #include "ph_shell_interface.h"
@@ -92,6 +93,8 @@ bool CPhysicsShellHolder::net_Spawn(CSE_Abstract* DC)
     st_enable_state = (u8)stNotDefitnite;
     b_sheduled = true;
     BOOL ret = inherited::net_Spawn(DC); // load
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): own part of the class net_Spawn
+    PERF_STEP("cls_spawn/physics_holder", spawn_cls_physics_holder);
     // create_physic_shell			();
     if (PPhysicsShell() && PPhysicsShell()->isFullActive())
     {

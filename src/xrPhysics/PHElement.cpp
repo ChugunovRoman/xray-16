@@ -27,7 +27,29 @@
 #include "PHShell.h"
 #include "PHElement.h"
 #include "PHElementInline.h"
+#include "PHStepDefer.h"
 extern CPHWorld* ph_world;
+
+// B6 early physics kick (PHStepDefer.h): an active element mutated on another thread while the step runs - queue this
+// very call and re-run it on the element after the step is joined (found again by its owner's ID). Arguments are
+// captured by value.
+#define PH_DEFER_ELEMENT(kind, call)                                                                                 \
+    if (isActive() &&                                                                                                \
+        ::ph_step_defer::DeferElement(                                                                               \
+            *this, ::ph_step_defer::Kind::kind, [=](CPHElement& deferred_element_) { deferred_element_.call; }))     \
+        return
+
+// A move of a body in the simulated world that is not deferred, made on another thread while the step runs: counted in
+// physics/defer/hazard and physics/defer/hazard_transform, logged with overlap_hazard_probe 1 (PH_STEP_HAZARD).
+#define PH_TRANSFORM_HAZARD(where)                                                                                  \
+    do                                                                                                              \
+    {                                                                                                               \
+        if (IsInSimulatedWorld() && ::ph_step_defer::StepRunningOnOtherThread())                                    \
+        {                                                                                                           \
+            PERF_INC(ph_defer_hazard_transform);                                                                    \
+            PH_STEP_HAZARD(where);                                                                                  \
+        }                                                                                                           \
+    } while (0)
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////Implementation for CPhysicsElement
@@ -132,7 +154,8 @@ void CPHElement::calculate_it_data(const Fvector& mc, float mas)
     calculate_it_data_use_density(mc, density);
 }
 
-static float static_dencity;
+// thread_local: shells are built on main and (the ragdoll prebuild of P16) on the Game logic thread too
+static thread_local float static_dencity;
 void CPHElement::calc_it_fract_data_use_density(const Fvector& mc, float density)
 {
     m_mass_center.set(mc);
@@ -203,6 +226,14 @@ void CPHElement::SetTransform(const Fmatrix& m0, motion_history_state history_st
 {
     VERIFY2(_valid(m0), make_string("invalid_form_in_set_transform") + (PhysicsRefObject()->dump(full_capped)));
     VERIFY2(valid_pos(m0.c), dbg_valide_pos_string(m0.c, PhysicsRefObject(), "invalid_form_in_set_transform"));
+    // B6 early physics kick (PHStepDefer.h): a teleport of a body in the simulated world from another thread while the
+    // step runs (dBodySetPosition/Rotation, dGeomMoved, the shell's physics spatial DB entry and broadphase caches - all
+    // read and written by the step) is applied after the step is joined, the last pose of the window wins. A body out of
+    // the world is private to its builder and is set right away. Such bodies were what the old check (isActive())
+    // reported in the 2026-10-11 sessions: the scheduler's ragdoll skeleton prebuild (P16, CPHShell::Build ->
+    // CPHElement::build sets flActive before its SetTransform), ~11 hits per prebuilt skeleton.
+    if (IsInSimulatedWorld() && ::ph_step_defer::DeferElementTransform(*this, m0, u8(history_state), false))
+        return;
     Fvector mc;
     CPHGeometryOwner::get_mc_vs_transform(mc, m0);
     VERIFY_BOUNDARIES2(mc, phBoundaries, PhysicsRefObject(), "mass	center	in set transform");
@@ -220,6 +251,18 @@ void CPHElement::SetTransform(const Fmatrix& m0, motion_history_state history_st
     m_shell->spatial_move();
     if (history_state != mh_not_clear)
         CPHGeometryOwner::clear_motion_history(mh_unspecified == history_state);
+}
+
+bool CPHElement::IsInSimulatedWorld() const { return isActive() && m_body && m_body->world; }
+
+bool CPHElement::ApplyDeferredTransform(const Fmatrix& m0, motion_history_state history_state, bool fill_interpolation)
+{
+    if (!IsInSimulatedWorld())
+        return false;
+    SetTransform(m0, history_state); // the step is joined: applied right away
+    if (fill_interpolation)
+        FillInterpolation(); // ToBonePos
+    return true;
 }
 
 void CPHElement::getQuaternion(Fquaternion& quaternion)
@@ -253,6 +296,7 @@ void CPHElement::SetGlobalPositionDynamic(const Fvector& position)
 {
     if (!isActive())
         return;
+    PH_TRANSFORM_HAZARD("CPHElement::SetGlobalPositionDynamic");
     VERIFY(_valid(position));
     VERIFY_BOUNDARIES2(position, phBoundaries, PhysicsRefObject(), "SetGlobalPosition argument ");
     dBodySetPosition(m_body, position.x, position.y, position.z);
@@ -265,6 +309,10 @@ void CPHElement::TransformPosition(const Fmatrix& form, motion_history_state his
 {
     if (!isActive())
         return;
+    // Relative move (new pose = form * pose now): deferring it would apply it to the pose after the step. Callers that
+    // need it while a step may run go through an absolute deferral instead (CPHShell::SetGlTransformDynamic, Lua
+    // teleports); what is left is only detected.
+    PH_TRANSFORM_HAZARD("CPHElement::TransformPosition");
     VERIFY(_valid(form));
     R_ASSERT2(m_body, "body is not created");
     Fmatrix bm;
@@ -538,6 +586,7 @@ void CPHElement::Enable()
 {
     if (!isActive())
         return;
+    PH_DEFER_ELEMENT(Enable, Enable());
     m_shell->EnableObject(0);
     if (dBodyIsEnabled(m_body))
         return;
@@ -582,6 +631,7 @@ void CPHElement::applyImpulseVsMC(const Fvector& pos, const Fvector& dir, float 
 {
     if (!isActive() || m_flags.test(flFixed))
         return;
+    PH_DEFER_ELEMENT(Force, applyImpulseVsMC(pos, dir, val));
     if (!dBodyIsEnabled(m_body))
         dBodyEnable(m_body);
     /////////////////////////////////////////////////////////////////////////
@@ -608,6 +658,7 @@ void CPHElement::applyImpulseVsGF(const Fvector& pos, const Fvector& dir, float 
     VERIFY(_valid(pos) && _valid(dir) && _valid(val));
     if (!isActive() || m_flags.test(flFixed))
         return;
+    PH_DEFER_ELEMENT(Force, applyImpulseVsGF(pos, dir, val));
     if (!dBodyIsEnabled(m_body))
         dBodyEnable(m_body);
 /////////////////////////////////////////////////////////////////////////
@@ -634,6 +685,8 @@ void CPHElement::applyImpulseTrace(const Fvector& pos, const Fvector& dir, float
     VERIFY(_valid(pos) && _valid(dir) && _valid(val));
     if (!isActive() || m_flags.test(flFixed))
         return;
+    // Deferred whole: it also feeds the fracture holder (m_fratures_holder->AddImpact), which the step reads.
+    PH_DEFER_ELEMENT(Force, applyImpulseTrace(pos, dir, val, id));
     Fvector body_pos;
     if (id != BI_NONE)
     {
@@ -926,6 +979,12 @@ void CPHElement::ToBonePos(const Fmatrix& BoneTransform, motion_history_state hi
 
     // Fmatrix global_transform;
     BoneGlPos(mXFORM, BoneTransform);
+    // B6 early physics kick (PHStepDefer.h): ActivatingPos from a bone callback (CalculateBones of the render or the
+    // Game thread), physics_shell_animated, imotion_position. The logical pose (mXFORM: what the bone callbacks and
+    // CPHShell::InterpolateGlobalTransform read) is taken right away; the body and the interpolation reset follow after
+    // the step is joined.
+    if (IsInSimulatedWorld() && ::ph_step_defer::DeferElementTransform(*this, mXFORM, u8(history_state), true))
+        return;
     SetTransform(mXFORM, history_state);
     FillInterpolation();
 }
@@ -977,14 +1036,17 @@ void CPHElement::set_PhysicsRefObject(IPhysicsShellHolder* ref_object)
 
 void CPHElement::set_ObjectContactCallback(ObjectContactCallbackFun* callback)
 {
+    PH_DEFER_ELEMENT(Contact, set_ObjectContactCallback(callback));
     CPHGeometryOwner::set_ObjectContactCallback(callback);
 }
 void CPHElement::add_ObjectContactCallback(ObjectContactCallbackFun* callback)
 {
+    PH_DEFER_ELEMENT(Contact, add_ObjectContactCallback(callback));
     CPHGeometryOwner::add_ObjectContactCallback(callback);
 }
 void CPHElement::remove_ObjectContactCallback(ObjectContactCallbackFun* callback)
 {
+    PH_DEFER_ELEMENT(Contact, remove_ObjectContactCallback(callback));
     CPHGeometryOwner::remove_ObjectContactCallback(callback);
 }
 ObjectContactCallbackFun* CPHElement::get_ObjectContactCallback()
@@ -995,6 +1057,7 @@ void CPHElement::set_CallbackData(void* cd) { CPHGeometryOwner::set_CallbackData
 void* CPHElement::get_CallbackData() { return CPHGeometryOwner::get_CallbackData(); }
 void CPHElement::set_ContactCallback(ContactCallbackFun* callback)
 {
+    PH_DEFER_ELEMENT(Contact, set_ContactCallback(callback));
     // push_untill=0;
     CPHGeometryOwner::set_ContactCallback(callback);
 }
@@ -1043,6 +1106,7 @@ void CPHElement::set_LinearVel(const Fvector& velocity)
 {
     if (!isActive() || m_flags.test(flFixed))
         return;
+    PH_DEFER_ELEMENT(Velocity, set_LinearVel(velocity));
     VERIFY2(_valid(velocity), "not valid arqument velocity");
     Fvector vel = velocity;
 #ifdef DEBUG
@@ -1059,6 +1123,7 @@ void CPHElement::set_AngularVel(const Fvector& velocity)
     VERIFY(_valid(velocity));
     if (!isActive() || m_flags.test(flFixed))
         return;
+    PH_DEFER_ELEMENT(Velocity, set_AngularVel(velocity));
 
     Fvector vel = velocity;
 #ifdef DEBUG
@@ -1087,6 +1152,7 @@ void CPHElement::setForce(const Fvector& force)
 {
     if (!isActive() || m_flags.test(flFixed))
         return;
+    PH_DEFER_ELEMENT(Velocity, setForce(force));
     if (!dBodyIsEnabled(m_body))
         dBodyEnable(m_body);
     m_shell->EnableObject(0);
@@ -1098,6 +1164,7 @@ void CPHElement::setTorque(const Fvector& torque)
 {
     if (!isActive() || m_flags.test(flFixed))
         return;
+    PH_DEFER_ELEMENT(Velocity, setTorque(torque));
     if (!dBodyIsEnabled(m_body))
         dBodyEnable(m_body);
     m_shell->EnableObject(0);
@@ -1117,6 +1184,7 @@ void CPHElement::applyForce(float x, float y, float z) // called anywhere ph sta
         return; // hack??
     if (m_flags.test(flFixed))
         return;
+    PH_DEFER_ELEMENT(Force, applyForce(x, y, z));
     if (!dBodyIsEnabled(m_body))
         dBodyEnable(m_body);
     m_shell->EnableObject(0);
@@ -1481,6 +1549,7 @@ void CPHElement::set_ApplyByGravity(bool flag)
 {
     if (!isActive() || m_flags.test(flFixed))
         return;
+    PH_DEFER_ELEMENT(Fix, set_ApplyByGravity(flag));
     dBodySetGravityMode(m_body, flag);
 }
 bool CPHElement::get_ApplyByGravity() { return (!!dBodyGetGravityMode(m_body)); }
@@ -1488,6 +1557,8 @@ void CPHElement::Fix()
 {
     if (isFixed())
         return;
+    // Not active (being built, e.g. a geometry-less element in build()): private to its creator, fixed right away.
+    PH_DEFER_ELEMENT(Fix, Fix());
 
     dBodySetNoUpdatePosMode(m_body, 1);
     m_flags.set(flFixed, TRUE);
@@ -1500,6 +1571,7 @@ void CPHElement::ReleaseFixed()
 {
     if (!isFixed())
         return;
+    PH_DEFER_ELEMENT(Fix, ReleaseFixed());
 
     dBodySetNoUpdatePosMode(m_body, 0);
     m_flags.set(flFixed, FALSE);
@@ -1515,6 +1587,7 @@ void CPHElement::applyGravityAccel(const Fvector& accel)
     VERIFY(_valid(accel));
     if (m_flags.test(flFixed))
         return;
+    PH_DEFER_ELEMENT(Force, applyGravityAccel(accel));
     if (!dBodyIsEnabled(m_body))
         dBodyEnable(m_body);
     m_shell->EnableObject(0);

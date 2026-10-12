@@ -8623,6 +8623,12 @@
     <ClCompile Include="npc_cpp_profile.cpp">
       <Filter>Core\Client\Objects\base</Filter>
     </ClCompile>
+    <ClCompile Include="lua_spike_probe.cpp">
+      <Filter>Core\Client\Objects\base</Filter>
+    </ClCompile>
+    <ClInclude Include="lua_spike_probe.h">
+      <Filter>Core\Client\Objects\base</Filter>
+    </ClInclude>
     <ClCompile Include="ZoneVisual.cpp">
       <Filter>Core\Client\Objects\zones\ZoneVisual</Filter>
     </ClCompile>

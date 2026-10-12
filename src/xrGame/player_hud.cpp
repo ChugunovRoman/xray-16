@@ -1196,7 +1196,11 @@ void player_hud::update(const Fmatrix& cam_trans)
     if (item0)
         item0->hud_transform.set(trans);
 
-    update_inertion(trans);
+    // P19b (14-spike-instrumentation.md): stages of the HUD update, PERF_STAGE actor_hud/* (two calls per frame)
+    {
+        PERF_STAGE("actor_hud/inertion", actor_hud_inertion);
+        update_inertion(trans);
+    }
 
     // База позы покоя для ЛЦУ. update_inertion() даёт компенсацию наклона камеры - она
     // зависит только от текущего питча, а не от движения, поэтому это часть покоя, а не
@@ -1205,7 +1209,10 @@ void player_hud::update(const Fmatrix& cam_trans)
     rest_cam.set(trans);
 
     // Заполняет CWeapon::m_hud_zoom_offset смещением прицеливания текущего кадра.
-    update_additional(trans);
+    {
+        PERF_STAGE("actor_hud/additional", actor_hud_additional);
+        update_additional(trans);
+    }
 
 
     const bool monolithic = item0 && item0->m_monolithic;
@@ -1239,6 +1246,7 @@ void player_hud::update(const Fmatrix& cam_trans)
             m_rest_transform.mul(rest_cam, m_attach_offset);
         }
 
+        PERF_STAGE("actor_hud/hands_bones", actor_hud_hands);
         m_model->UpdateTracks();
         m_model->dcast_PKinematics()->CalculateBones_Invalidate();
         m_model->dcast_PKinematics()->CalculateBones(TRUE);
@@ -1252,12 +1260,18 @@ void player_hud::update(const Fmatrix& cam_trans)
 
     if (item0)
     {
-        item0->update(true);
+        {
+            PERF_STAGE("actor_hud/item_bones", actor_hud_item);
+            item0->update(true);
+        }
 
         // Точку ЛЦУ считаем здесь, а не в CWeapon::UpdateCL(): иначе луч строился бы по
         // трансформациям худа прошлого кадра и отставал при поворотах камеры.
         if (CWeapon* wpn = smart_cast<CWeapon*>(item0->m_parent_hud_item))
+        {
+            PERF_STAGE("actor_hud/laser_dots", actor_hud_laser);
             wpn->UpdateLaserDots();
+        }
     }
 }
 

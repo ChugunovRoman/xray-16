@@ -19,6 +19,12 @@ struct XRPHYSICS_API ph_console
     static int ph_spawn_skip_correct_on_load; //= 1; skip CollisionCorrectObjPos for characters spawned in the initial level/save load burst (their positions are already valid)
     static int ph_dbg_spawn_stats; //= 0; log CPHActivationShape::Activate calls that run an unusually large number of physics steps or wake many objects
 
+    // P16 (plans/optimization_mt/11-ragdoll-spikes.md): the position correction at the start of a free ragdoll
+    // (CCharacterPhysicsSupport::EndActivateFreeShell -> CollisionCorrectObjPos) - a box of the ragdoll is pushed out of
+    // everything around in a frozen world, up to 150 world steps when it cannot get out (a crowd, a pile of corpses).
+    // The box always ignores characters (live NPCs, actor). Not saved.
+    static int ph_death_correct_max_steps; //= 0; >0 = at most this many world steps in the push-out loop
+
     // Ф2 (PHYSICS_ACTIVE_SET_PLAN): принудительный сон дальних трупов — максимально грубо, без проверки
     // скорости и без ожидания "устаканивания": старше ph_corpse_sleep_ms и дальше ph_corpse_sleep_far_dist
     // от камеры -> Disable() безусловно. Труп может не среагировать на следующий удар — это приемлемая

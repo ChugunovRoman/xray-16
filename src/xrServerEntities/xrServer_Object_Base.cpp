@@ -13,6 +13,7 @@
 #include "script_value_container_impl.h"
 #include "clsid_game.h"
 #include "xrCore/xr_token.h"
+#include "xrCore/Profiling/IniLoadStats.hpp"
 
 #ifndef AI_COMPILER
 #include "object_factory.h"
@@ -147,6 +148,7 @@ CInifile& CSE_Abstract::spawn_ini()
 #pragma warning(disable : 4238)
         // XXX: what a casting mess.. Do we need to use shared_str for m_ini_string?
         IReader reader((void*)m_ini_string.c_str(), m_ini_string.size());
+        INI_SOURCE(ServerCustomData, s_name.c_str()); // P20
         m_ini_file = xr_new<CInifile>(&reader, FS.get_path(_game_config_)->m_Path);
 #pragma warning(pop)
     }

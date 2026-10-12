@@ -7,9 +7,9 @@
 #include <atomic>
 
 #include "xrEngine/Engine.h"
+#include "xrEngine/xr_object.h" // P19: spike detail of a game object (SpatialBase::spatial_move)
 
 #ifdef DEBUG
-#include "xrEngine/xr_object.h"
 #include "xrEngine/PS_instance.h"
 #endif
 
@@ -158,6 +158,21 @@ void SpatialBase::spatial_move()
         return;
     }
     PERF_INC(spatial_move_rebuild);
+    ZoneScopedN("spatial_move/rebuild");
+    // P19 (plans/optimization_mt/14-spike-instrumentation.md): lock wait + remove + insert, time and spikes
+    PERF_SCOPE(spatial_move_rebuild_time);
+#if XR_PERF_METRICS
+    const xray::perf::SpikeDescribeFn describe_spike = [](const void* ctx, char* buf, size_t size) {
+        // only called for a spike, after the rebuild, on the thread that moved the object
+        SpatialBase* self = const_cast<SpatialBase*>(static_cast<const SpatialBase*>(ctx));
+        const IGameObject* object = self->dcast_GameObject();
+        if (object)
+            xray::perf::DescribeSpikeObject<IGameObject>(object, buf, size);
+        else
+            xr_sprintf(buf, size, "spatial=%s", xray::perf::SpikeClassName(typeid(*self)));
+    };
+    PERF_SPIKE_NAMED(rebuild_spike, "spatial_move/rebuild", static_cast<const SpatialBase*>(this), describe_spike, false);
+#endif
     auto lock = SpatialLockUnique(spatial.space->query_rw_mutex());
     spatial.space->remove_assuming_locked(this);
     spatial.space->insert_assuming_locked(this);

@@ -1,50 +1,85 @@
 #pragma once
 
+#include "xrCore/Profiling/PerfMetrics.hpp"
+
 namespace xray::render::RENDER_NAMESPACE
 {
-IC Fvector4* dx11ConstantBuffer::Access(u16 offset)
+IC void dx11ConstantBuffer::Write(u32 offset, const void* src, size_t size)
 {
-    //	TODO: DX11: Implement code which will check if set actually changes code.
-    m_bChanged = true;
-
     //	Check buffer size in client code: don't know if actual data will cross
     //	buffer boundaries.
-    VERIFY(offset < (int)m_uiBufferSize);
-    u8* res = ((u8*)m_pBufferData) + offset;
-    return (Fvector4*)res;
+    VERIFY(offset + size <= m_uiBufferSize);
+    u8* dst = static_cast<u8*>(m_pBufferData) + offset;
+    // Most per-draw sets re-send equal values (hemi/material/xform of the same object, bones shared by the
+    // children of one skeleton). Marking the buffer changed on every set turned each of them into a full
+    // Map(WRITE_DISCARD) + copy + Unmap in Flush() - ~2.3 per dynamic draw in the main view.
+    // Equal bytes may be skipped only if the GPU copy holds them: after a partial flush (see WriteRows)
+    // the palette rows past the uploaded prefix are undefined on the GPU.
+    const u32 end = offset + u32(size);
+    if (ValidOnGpu(offset, end) && memcmp(dst, src, size) == 0)
+    {
+        PERF_INC(cb_write_same);
+        return;
+    }
+    CopyMemory(dst, src, size);
+    if (end <= m_uiArrayOffset || offset >= m_uiArrayEnd)
+    {
+        // A member outside the palette array (m_invW of parallax shaders sits after it in $Globals): always copied,
+        // so a partial Flush stays possible - it only has to keep the palette rows the GPU copy holds now.
+        if (!m_bChanged)
+        {
+            m_bChanged = true;
+            m_uiFlushEnd = std::max(m_uiArrayOffset, m_uiUploadEnd);
+        }
+        return;
+    }
+    m_bChanged = true;
+    m_uiFlushEnd = m_uiBufferSize; // an ordinary set: the whole buffer goes up
+}
+
+IC void dx11ConstantBuffer::WriteRows(u32 offset, const void* src, u32 size)
+{
+    const u32 end = offset + size;
+    VERIFY(end <= m_uiBufferSize);
+    u8* dst = static_cast<u8*>(m_pBufferData) + offset;
+    if (ValidOnGpu(offset, end) && memcmp(dst, src, size) == 0)
+    {
+        PERF_INC(cb_write_same);
+        return;
+    }
+    CopyMemory(dst, src, size);
+
+    // A partial upload only for rows inside the palette array: the draw that follows reads no element of it past
+    // `end` (CSkeletonX writes the whole [0, RMS_bonecount * 3) range its vertices can index), every other member is
+    // always copied. Anything else - the whole buffer, as before.
+    if (offset < m_uiArrayOffset || end > m_uiArrayEnd)
+    {
+        m_bChanged = true;
+        m_uiFlushEnd = m_uiBufferSize;
+        return;
+    }
+    if (m_bChanged)
+        m_uiFlushEnd = std::max(m_uiFlushEnd, end); // a whole-buffer flush stays whole, a partial one grows
+    else
+    {
+        m_bChanged = true;
+        m_uiFlushEnd = end;
+    }
 }
 
 IC void dx11ConstantBuffer::set(R_constant* C, R_constant_load& L, const Fmatrix& A)
 {
     VERIFY(RC_float == C->type);
-    //	TEST
-    // return;
-
-    // Fvector4*	it	= c_f.access	(L.index);
-    Fvector4* it = Access(L.index);
+    Fvector4 rows[4];
+    rows[0].set(A._11, A._21, A._31, A._41);
+    rows[1].set(A._12, A._22, A._32, A._42);
+    rows[2].set(A._13, A._23, A._33, A._43);
+    rows[3].set(A._14, A._24, A._34, A._44);
     switch (L.cls)
     {
-    case RC_2x4:
-        // c_f.dirty			(L.index,L.index+2);
-        VERIFY(u32((u32)L.index + 2 * lineSize) <= m_uiBufferSize);
-        it[0].set(A._11, A._21, A._31, A._41);
-        it[1].set(A._12, A._22, A._32, A._42);
-        break;
-    case RC_3x4:
-        // c_f.dirty			(L.index,L.index+3);
-        VERIFY(u32((u32)L.index + 3 * lineSize) <= m_uiBufferSize);
-        it[0].set(A._11, A._21, A._31, A._41);
-        it[1].set(A._12, A._22, A._32, A._42);
-        it[2].set(A._13, A._23, A._33, A._43);
-        break;
-    case RC_4x4:
-        // c_f.dirty			(L.index,L.index+4);
-        VERIFY(u32((u32)L.index + 4 * lineSize) <= m_uiBufferSize);
-        it[0].set(A._11, A._21, A._31, A._41);
-        it[1].set(A._12, A._22, A._32, A._42);
-        it[2].set(A._13, A._23, A._33, A._43);
-        it[3].set(A._14, A._24, A._34, A._44);
-        break;
+    case RC_2x4: Write(L.index, rows, 2 * lineSize); break;
+    case RC_3x4: Write(L.index, rows, 3 * lineSize); break;
+    case RC_4x4: Write(L.index, rows, 4 * lineSize); break;
     default:
 #ifdef DEBUG
         xrDebug::Fatal(DEBUG_INFO, "Invalid constant run-time-type for '%s'", C->name.c_str());
@@ -58,11 +93,7 @@ IC void dx11ConstantBuffer::set(R_constant* C, R_constant_load& L, const Fvector
 {
     VERIFY(RC_float == C->type);
     VERIFY(RC_1x4 == L.cls || RC_1x3 == L.cls || RC_1x2 == L.cls);
-    // Fvector4*	it	= Access(L.index);
-    // it->set	(A);
-
     VERIFY(u32((u32)L.index + lineSize) <= m_uiBufferSize);
-    float* it = (float*)Access(L.index);
 
     size_t count = 4;
     switch (L.cls)
@@ -73,78 +104,36 @@ IC void dx11ConstantBuffer::set(R_constant* C, R_constant_load& L, const Fvector
     default: break;
     }
 
-    CopyMemory(it, &A[0], count * sizeof(float));
-
-    // c_f.access	(L.index)->set	(A);
-    // c_f.dirty	(L.index,L.index+1);
+    Write(L.index, &A[0], count * sizeof(float));
 }
 
 IC void dx11ConstantBuffer::set(R_constant* C, R_constant_load& L, float A)
 {
     VERIFY(RC_float == C->type);
     VERIFY(RC_1x1 == L.cls);
-    float* it = (float*)Access(L.index);
-    VERIFY(u32((u32)L.index + sizeof(float)) <= m_uiBufferSize);
-    *it = A;
-
-    // c_f.access	(L.index)->set	(A);
-    // c_f.dirty	(L.index,L.index+1);
+    Write(L.index, &A, sizeof(float));
 }
 
 IC void dx11ConstantBuffer::set(R_constant* C, R_constant_load& L, int A)
 {
     VERIFY(RC_int == C->type);
     VERIFY(RC_1x1 == L.cls);
-    int* it = (int*)Access(L.index);
-    VERIFY(u32((u32)L.index + sizeof(int)) <= m_uiBufferSize);
-    *it = A;
-
-    // c_f.access	(L.index)->set	(A);
-    // c_f.dirty	(L.index,L.index+1);
+    Write(L.index, &A, sizeof(int));
 }
 
 IC void dx11ConstantBuffer::seta(R_constant* C, R_constant_load& L, u32 e, const Fmatrix& A)
 {
-    //	TEST
-    // return;
     VERIFY(RC_float == C->type);
-    u32 base;
-    Fvector4* it;
+    Fvector4 rows[4];
+    rows[0].set(A._11, A._21, A._31, A._41);
+    rows[1].set(A._12, A._22, A._32, A._42);
+    rows[2].set(A._13, A._23, A._33, A._43);
+    rows[3].set(A._14, A._24, A._34, A._44);
     switch (L.cls)
     {
-    case RC_2x4:
-        // base				= L.index + 2*e;
-        // it					= c_f.access	(base);
-        // c_f.dirty			(base,base+2);
-        base = (u32)L.index + 2 * lineSize * e;
-        it = Access((u16)base);
-        VERIFY((base + 2 * lineSize) <= m_uiBufferSize);
-        it[0].set(A._11, A._21, A._31, A._41);
-        it[1].set(A._12, A._22, A._32, A._42);
-        break;
-    case RC_3x4:
-        // base				= L.index + 3*e;
-        // it					= c_f.access	(base);
-        // c_f.dirty			(base,base+3);
-        base = (u32)L.index + 3 * lineSize * e;
-        it = Access((u16)base);
-        VERIFY((base + 3 * lineSize) <= m_uiBufferSize);
-        it[0].set(A._11, A._21, A._31, A._41);
-        it[1].set(A._12, A._22, A._32, A._42);
-        it[2].set(A._13, A._23, A._33, A._43);
-        break;
-    case RC_4x4:
-        // base				= L.index + 4*e;
-        // it					= c_f.access	(base);
-        // c_f.dirty			(base,base+4);
-        base = (u32)L.index + 4 * lineSize * e;
-        it = Access((u16)base);
-        VERIFY((base + 4 * lineSize) <= m_uiBufferSize);
-        it[0].set(A._11, A._21, A._31, A._41);
-        it[1].set(A._12, A._22, A._32, A._42);
-        it[2].set(A._13, A._23, A._33, A._43);
-        it[3].set(A._14, A._24, A._34, A._44);
-        break;
+    case RC_2x4: Write((u32)L.index + 2 * lineSize * e, rows, 2 * lineSize); break;
+    case RC_3x4: Write((u32)L.index + 3 * lineSize * e, rows, 3 * lineSize); break;
+    case RC_4x4: Write((u32)L.index + 4 * lineSize * e, rows, 4 * lineSize); break;
     default:
 #ifdef DEBUG
         xrDebug::Fatal(DEBUG_INFO, "Invalid constant run-time-type for '%s'", C->name.c_str());
@@ -156,20 +145,19 @@ IC void dx11ConstantBuffer::seta(R_constant* C, R_constant_load& L, u32 e, const
 
 IC void dx11ConstantBuffer::seta(R_constant* C, R_constant_load& L, u32 e, const Fvector4& A)
 {
-    //	TEST
-    // return;
     VERIFY(RC_float == C->type);
     VERIFY(RC_1x4 == L.cls || RC_1x3 == L.cls || RC_1x2 == L.cls);
 
-    static const u16 lineSize = 4 * sizeof(float);
-    u32 base = (u32)L.index + lineSize * e;
-    Fvector4* it = Access((u16)base);
-    VERIFY((base + lineSize) <= m_uiBufferSize);
-    it->set(A);
+    // Arrays of vectors always occupy whole 16-byte registers (bones: 3 rows per bone via set_ca).
+    Write((u32)L.index + lineSize * e, &A, lineSize);
+}
 
-    // u32			base	= L.index + e;
-    // c_f.access	(base)->set	(A);
-    // c_f.dirty	(base,base+1);
+IC void dx11ConstantBuffer::seta_rows(R_constant* C, R_constant_load& L, u32 e, const Fvector4* rows, u32 count)
+{
+    VERIFY(RC_float == C->type);
+    VERIFY(RC_1x4 == L.cls || RC_1x3 == L.cls || RC_1x2 == L.cls);
+    // Same layout as `count` seta(Fvector4) calls: one 16-byte register per element, back to back.
+    WriteRows((u32)L.index + lineSize * e, rows, lineSize * count);
 }
 
 IC void* dx11ConstantBuffer::AccessDirect(R_constant_load& L, size_t DataSize)
@@ -181,7 +169,9 @@ IC void* dx11ConstantBuffer::AccessDirect(R_constant_load& L, size_t DataSize)
 
     if ((size_t)L.index + DataSize <= m_uiBufferSize)
     {
+        // The caller writes through the pointer itself - no way to tell whether anything changed.
         m_bChanged = true;
+        m_uiFlushEnd = m_uiBufferSize;
         return res;
     }
     else

@@ -93,6 +93,19 @@ class MessageRegistry
     // for Device.seqRender. Left nullptr (disabled) for every instance except the one SetHazardSite()
     // is called on - see CRenderDevice's constructor in device.h.
     const char* hazard_site = nullptr;
+    // P19b (plans/optimization_mt/14-spike-instrumentation.md): optional wrapper of each OnPure() call of Process() (a
+    // Tracy zone by the subscriber's class, a perf_metrics timer). nullptr (the default) - the plain call. Set for
+    // Device.seqFrame only (CRenderDevice::FrameMove).
+    using CallHook = void (*)(T* object);
+    CallHook call_hook = nullptr;
+
+    void Call(T* object)
+    {
+        if (call_hook)
+            call_hook(object);
+        else
+            object->OnPure(object);
+    }
 
     // add_msg_mtx must be held.
     bool IsForeignThreadDuringProcess() const
@@ -135,6 +148,9 @@ public:
     // Opt-in GW_OVERLAP_HAZARD label for this particular instance; nullptr (default) keeps the probe
     // disabled for Add()/Remove() on this MessageRegistry.
     void SetHazardSite(const char* site) { hazard_site = site; }
+
+    // See call_hook. Called on the thread that runs Process(), outside of it.
+    void SetCallHook(CallHook hook) { call_hook = hook; }
 
     constexpr void Add(T* object, const int priority = REG_PRIORITY_NORMAL)
     {
@@ -217,14 +233,14 @@ public:
         }
 
         if (messages[0].Prio == REG_PRIORITY_CAPTURE)
-            messages[0].Object->OnPure(messages[0].Object);
+            Call(messages[0].Object);
         else
         {
             for (size_t i = 0; i < messages.size(); ++i)
             {
                 const auto& message = messages[i];
                 if (message.Prio != REG_PRIORITY_INVALID)
-                    message.Object->OnPure(message.Object);
+                    Call(message.Object);
             }
         }
 

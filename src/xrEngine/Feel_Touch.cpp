@@ -3,9 +3,10 @@
 #include "IGame_Level.h"
 #include "Feel_Touch.h"
 #include "xr_object.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 using namespace Feel;
 
-Touch::Touch() : pure_relcase(&Touch::feel_touch_relcase) {}
+Touch::Touch() : pure_relcase(&Touch::feel_touch_relcase, &Touch::feel_touch_relcase_batch) {}
 Touch::~Touch() {}
 bool Touch::feel_touch_contact(IGameObject* O) { return true; }
 void Touch::feel_touch_deny(IGameObject* O, u32 T)
@@ -100,4 +101,18 @@ void Touch::feel_touch_relcase(IGameObject* O)
             feel_touch_disable.erase(Id);
             break;
         }
+}
+
+void Touch::feel_touch_relcase_batch(const RelcaseBatch& batch)
+{
+    PERF_SCOPE(relcase_cb_touch);
+    // ~3500 subscribers (a Feel::Touch of every NPC and monster, the PDA in every NPC inventory, zones...), most with
+    // empty lists: feel_touch_delete is called only for a found object, so with empty lists no call changes anything
+    if (feel_touch.empty() && feel_touch_disable.empty())
+    {
+        PERF_INC(relcase_touch_skips);
+        return;
+    }
+    for (u32 it = 0; it < batch.count; ++it)
+        feel_touch_relcase(batch.objects[it]);
 }

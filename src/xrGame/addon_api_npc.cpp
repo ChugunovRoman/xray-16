@@ -8,6 +8,7 @@
 #include "addon_api_common.h"
 #include "addon_event_bus.h"
 #include "addon_host.h"
+#include "lua_spike_probe.h"
 
 #include "ai_space.h"
 #include "alife_object_registry.h"
@@ -805,9 +806,19 @@ GwpResult GWP_CALL ApiScriptCall(
     ZoneScopedN("plugin/script_call"); // Tracy: the Lua function a plugin calls, text = its name
     ZoneTextF("%s", function);
     const u64 start = CPU::QPC();
+    // P18 (plans/optimization_mt/13-lua-spikes.md): a call over npc_perf_lua_spike_us goes to the log by its name
+    gw::lua_spike::Probe spike(L, gw::lua_spike::ECategory::ScriptCall);
     const int status = lua_pcall(L, static_cast<int>(argc), 1, 0);
     entry.ticks += CPU::QPC() - start;
     --g_script_depth;
+    if (spike.Finish())
+    {
+        const auto arg_id = [argv, argc](u32 index) {
+            return argv && index < argc && argv[index].type == GWP_T_OBJECT ? static_cast<u32>(argv[index].u.id) :
+                                                                              gw::lua_spike::kNoId;
+        };
+        spike.Report(function, arg_id(0), arg_id(1));
+    }
     if (status != 0)
     {
         ++entry.errors;

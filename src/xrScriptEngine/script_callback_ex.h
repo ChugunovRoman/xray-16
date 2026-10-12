@@ -67,6 +67,8 @@ public:
     }
 
     bool operator==(const object_type& object) const { return compare_safe(m_object, object); }
+    // The Lua function itself (e.g. to name it by its debug info: source and line)
+    const luabind::object& functor() const { return m_functor; }
     void set(const functor_type& functor)
     {
         clear();

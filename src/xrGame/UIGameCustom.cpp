@@ -62,27 +62,46 @@ void CUIGameCustom::OnUIReset()
 
 void CUIGameCustom::OnFrame()
 {
+    // P19b (14-spike-instrumentation.md): the game UI update, once a frame from Device.seqFrame (CHUDManager::
+    // OnConnected), hud/ui and its parts hud/ui/* (dialogs: ui/dialog/game)
+    PERF_STAGE("hud/ui", hud_ui);
     CDialogHolder::OnFrame();
-    for (auto item : CustomStatics)
-        item->Update();
-    auto comparer = [](
-        const StaticDrawableWrapper* s1, const StaticDrawableWrapper* s2) { return s1->IsActual() > s2->IsActual(); };
-    std::sort(CustomStatics.begin(), CustomStatics.end(), comparer);
-    while (!CustomStatics.empty() && !CustomStatics.back()->IsActual())
     {
-        delete_data(CustomStatics.back());
-        CustomStatics.pop_back();
+        ZoneScopedN("hud/ui/statics");
+        PERF_SCOPE(hud_ui_statics);
+        for (auto item : CustomStatics)
+            item->Update();
+        auto comparer = [](
+            const StaticDrawableWrapper* s1, const StaticDrawableWrapper* s2) { return s1->IsActual() > s2->IsActual(); };
+        std::sort(CustomStatics.begin(), CustomStatics.end(), comparer);
+        while (!CustomStatics.empty() && !CustomStatics.back()->IsActual())
+        {
+            delete_data(CustomStatics.back());
+            CustomStatics.pop_back();
+        }
+        if (g_b_ClearGameCaptions)
+        {
+            delete_data(CustomStatics);
+            g_b_ClearGameCaptions = false;
+        }
     }
-    if (g_b_ClearGameCaptions)
     {
-        delete_data(CustomStatics);
-        g_b_ClearGameCaptions = false;
+        ZoneScopedN("hud/ui/window");
+        PERF_SCOPE(hud_ui_window);
+        Window->Update();
     }
-    Window->Update();
     // update windows
     if (GameIndicatorsShown() && psHUD_Flags.is(HUD_DRAW | HUD_DRAW_RT))
+    {
+        ZoneScopedN("hud/ui/main_wnd");
+        PERF_SCOPE(hud_ui_main_wnd);
         UIMainIngameWnd->Update();
-    m_pMessagesWnd->Update();
+    }
+    {
+        ZoneScopedN("hud/ui/messages");
+        PERF_SCOPE(hud_ui_messages);
+        m_pMessagesWnd->Update();
+    }
 }
 
 void CUIGameCustom::Render()

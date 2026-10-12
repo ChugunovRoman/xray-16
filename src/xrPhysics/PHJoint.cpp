@@ -13,6 +13,17 @@
 #include "PHElement.h"
 #include "PHJoint.h"
 #include "PHShell.h"
+#include "PHStepDefer.h"
+
+// B6 early physics kick (PHStepDefer.h): an active joint changed on another thread while the step runs (Lua doors:
+// set_max_force_and_velocity; car wheels from Lua CCar::Action) - queue this very call and re-run it on the joint after
+// the step is joined (found again through its shell's owner ID). All setters are deferred alike, so that a Lua sequence
+// such as "set axis, then set limits" keeps its order.
+#define PH_DEFER_JOINT(call)                                                                                         \
+    if (bActive &&                                                                                                   \
+        ::ph_step_defer::DeferJoint(                                                                                 \
+            pShell, *this, ::ph_step_defer::Kind::Joint, [=](CPHJoint& deferred_joint_) { deferred_joint_.call; }))  \
+        return
 
 const float hinge2_spring = 20000.f;
 const float hinge2_damping = 1000.f;
@@ -407,24 +418,28 @@ void CPHJoint::CreateFullControl()
 
 void CPHJoint::SetAnchor(const float x, const float y, const float z)
 {
+    PH_DEFER_JOINT(SetAnchor(x, y, z));
     vs_anchor = vs_global;
     anchor.set(x, y, z);
 }
 
 void CPHJoint::SetAnchorVsFirstElement(const float x, const float y, const float z)
 {
+    PH_DEFER_JOINT(SetAnchorVsFirstElement(x, y, z));
     vs_anchor = vs_first;
     anchor.set(x, y, z);
 }
 
 void CPHJoint::SetAnchorVsSecondElement(const float x, const float y, const float z)
 {
+    PH_DEFER_JOINT(SetAnchorVsSecondElement(x, y, z));
     vs_anchor = vs_second;
     anchor.set(x, y, z);
 }
 
 void CPHJoint::SetAxisDir(const float x, const float y, const float z, const int axis_num)
 {
+    PH_DEFER_JOINT(SetAxisDir(x, y, z, axis_num));
     int ax = axis_num;
     LimitAxisNum(ax);
     // if(-1==ax) return;
@@ -469,6 +484,7 @@ void CPHJoint::SetAxisDirDynamic(const Fvector& orientation, const int axis_num)
 
 void CPHJoint::SetAxisDirVsFirstElement(const float x, const float y, const float z, const int axis_num)
 {
+    PH_DEFER_JOINT(SetAxisDirVsFirstElement(x, y, z, axis_num));
     int ax = axis_num;
     LimitAxisNum(ax);
     if (-1 == ax)
@@ -479,6 +495,7 @@ void CPHJoint::SetAxisDirVsFirstElement(const float x, const float y, const floa
 
 void CPHJoint::SetAxisDirVsSecondElement(const float x, const float y, const float z, const int axis_num)
 {
+    PH_DEFER_JOINT(SetAxisDirVsSecondElement(x, y, z, axis_num));
     int ax = axis_num;
     LimitAxisNum(ax);
     if (-1 == ax)
@@ -489,6 +506,7 @@ void CPHJoint::SetAxisDirVsSecondElement(const float x, const float y, const flo
 
 void CPHJoint::SetLimits(const float low, const float high, const int axis_num)
 {
+    PH_DEFER_JOINT(SetLimits(low, high, axis_num));
     if (!(pFirst_element && pSecond_element))
         return;
 
@@ -647,6 +665,7 @@ void CPHJoint::ReattachFirstElement(CPHElement* new_element)
 }
 void CPHJoint::SetForceAndVelocity(const float force, const float velocity, const int axis_num)
 {
+    PH_DEFER_JOINT(SetForceAndVelocity(force, velocity, axis_num));
     if (pShell && pShell->isActive())
         pShell->Enable();
     SetForce(force, axis_num);
@@ -661,6 +680,7 @@ void CPHJoint::GetMaxForceAndVelocity(float& force, float& velocity, int axis_nu
 
 void CPHJoint::SetForce(const float force, const int axis_num)
 {
+    PH_DEFER_JOINT(SetForce(force, axis_num));
     int ax;
     ax = axis_num;
     LimitAxisNum(ax);
@@ -740,6 +760,7 @@ void CPHJoint::SetForceActive(const int axis_num)
 
 void CPHJoint::SetVelocity(const float velocity, const int axis_num)
 {
+    PH_DEFER_JOINT(SetVelocity(velocity, axis_num));
     int ax;
     ax = axis_num;
     LimitAxisNum(ax);
@@ -818,6 +839,7 @@ void CPHJoint::SetVelocityActive(const int axis_num)
 }
 void CPHJoint::SetLoLimitDynamic(int axis_num, float limit)
 {
+    PH_DEFER_JOINT(SetLoLimitDynamic(axis_num, limit));
     VERIFY(axis_num >= 0);
     VERIFY(axis_num <= 2);
     VERIFY(bActive);
@@ -874,6 +896,7 @@ void CPHJoint::SetLoLimitDynamic(int axis_num, float limit)
 
 void CPHJoint::SetHiLimitDynamic(int axis_num, float limit)
 {
+    PH_DEFER_JOINT(SetHiLimitDynamic(axis_num, limit));
     VERIFY(axis_num >= 0);
     VERIFY(axis_num <= 2);
     VERIFY(bActive);
@@ -1127,6 +1150,7 @@ void CPHJoint::SetAxis(const SPHAxis& axis, const int axis_num)
 void CPHJoint::SetAxisSDfactors(float spring_factor, float damping_factor, int axis_num)
 
 {
+    PH_DEFER_JOINT(SetAxisSDfactors(spring_factor, damping_factor, axis_num));
     int ax = axis_num;
     LimitAxisNum(ax);
     if (ax == -1)
@@ -1161,6 +1185,7 @@ void CPHJoint::SetAxisSDfactors(float spring_factor, float damping_factor, int a
 
 void CPHJoint::SetJointSDfactors(float spring_factor, float damping_factor)
 {
+    PH_DEFER_JOINT(SetJointSDfactors(spring_factor, damping_factor));
     switch (eType)
     {
     case hinge2:
@@ -1276,6 +1301,7 @@ void CPHJoint::SetAxisSDfactorsActive(int axis_num)
 
 void CPHJoint::SetJointFudgefactorActive(float factor)
 {
+    PH_DEFER_JOINT(SetJointFudgefactorActive(factor));
     VERIFY(bActive);
     switch (eType)
     {

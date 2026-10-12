@@ -23,6 +23,8 @@
 
 #include "xrNetServer/NET_Messages.h"
 #include "addon_api_alife_ext.h"
+#include "xrEngine/IGame_Level.h"
+#include "xrEngine/xr_object_list.h"
 
 typedef xr_vector<std::pair<shared_str, int>> STORY_PAIRS;
 typedef STORY_PAIRS SPAWN_STORY_PAIRS;
@@ -316,6 +318,8 @@ void CALifeSimulator__release(CALifeSimulator* self, CSE_Abstract* object, bool)
     }
 
     // awful hack, for stohe only
+    // P17: relcase report (perf_metrics) - destroyed by a Lua release
+    Level().Objects.destroy_origin_note(object->ID, CObjectList::destroy_origin_lua);
     NET_Packet packet;
     packet.w_begin(M_EVENT);
     packet.w_u32(Level().timeServer());

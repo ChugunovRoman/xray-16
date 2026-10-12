@@ -101,6 +101,8 @@ light::~light()
     for (auto& p_light : RImplementation.Lights_LastFrame)
         if (this == p_light)
             p_light = nullptr;
+    // ...and from the scope-pass (SVP) light lists, which also outlive the frame step that filled them.
+    RImplementation.svp_forget_light(this);
 #endif // (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4) || (RENDER==R_GL)
 }
 

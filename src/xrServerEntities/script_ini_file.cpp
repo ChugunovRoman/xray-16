@@ -12,12 +12,88 @@
 #include "ai_space.h"
 #include "object_factory.h"
 #include "xrCore/xrDebug.h"
+#include "xrCore/Profiling/IniLoadStats.hpp"
+
+// P20 (plans/optimization_mt/15-ini-cache.md): the Lua call site of ini_file / create_ini_file for the [ini-load] table
+// of perf_metrics (xrCore/Profiling/IniLoadStats.hpp).
+namespace
+{
+#if XR_PERF_METRICS
+thread_local string512 tl_lua_ini_caller{};
+thread_local xray::ini_stats::Source tl_lua_ini_prev{};
+
+// "xr_logic.script" of "...gamedata/scripts/xr_logic.script" (either separator)
+pcstr LuaFileName(pcstr source)
+{
+    pcstr name = source;
+    for (pcstr c = source; *c; ++c)
+    {
+        if (*c == '\\' || *c == '/')
+            name = c + 1;
+    }
+    return name;
+}
+
+// Up to three Lua frames from the innermost, "file:line < file:line < file:line" (C frames - luabind - are skipped):
+// the line that called ini_file and who called that function. ini_file_ex and utils.ini_cached are frames of their own.
+void DescribeLuaCaller(lua_State* L, string512& out)
+{
+    out[0] = 0;
+    if (!L)
+        return;
+    lua_Debug ar{};
+    u32 frames = 0;
+    for (int level = 0; level < 16 && frames < 3 && lua_getstack(L, level, &ar); ++level)
+    {
+        if (!lua_getinfo(L, "Sl", &ar) || ar.currentline < 0 || !ar.what || 0 == xr_strcmp(ar.what, "C"))
+            continue;
+        string128 frame;
+        xr_sprintf(frame, "%s%s:%d", frames ? " < " : "", LuaFileName(ar.short_src), ar.currentline);
+        xr_strcat(out, frame);
+        ++frames;
+    }
+}
+#endif
+} // namespace
+
+LPCSTR CScriptIniFile::BeginLuaSource(lua_State* L, bool from_text, LPCSTR pass_through)
+{
+#if XR_PERF_METRICS
+    tl_lua_ini_prev = xray::ini_stats::TlSource();
+    tl_lua_ini_caller[0] = 0;
+    if (xray::ini_stats::Active())
+        DescribeLuaCaller(L, tl_lua_ini_caller);
+    using xray::ini_stats::Layer;
+    xray::ini_stats::TlSource() = xray::ini_stats::Source{from_text ? Layer::LuaString : Layer::LuaFile, tl_lua_ini_caller};
+#else
+    (void)L;
+    (void)from_text;
+#endif
+    return pass_through;
+}
+
+void CScriptIniFile::EndLuaSource()
+{
+#if XR_PERF_METRICS
+    xray::ini_stats::TlSource() = tl_lua_ini_prev;
+#endif
+}
 
 CScriptIniFile::CScriptIniFile(IReader* F, LPCSTR path) : inherited(F, path) {}
 CScriptIniFile::CScriptIniFile(LPCSTR szFileName, BOOL ReadOnly, BOOL bLoadAtStart, BOOL SaveAtEnd)
     : inherited(update("$game_config$", szFileName), ReadOnly, bLoadAtStart, SaveAtEnd) {}
 CScriptIniFile::CScriptIniFile(LPCSTR initial, LPCSTR szFileName, BOOL ReadOnly, BOOL bLoadAtStart, BOOL SaveAtEnd)
     : inherited(update(initial, szFileName), ReadOnly, bLoadAtStart, SaveAtEnd) {}
+CScriptIniFile::CScriptIniFile(lua_State* L, LPCSTR szFileName)
+    : inherited(BeginLuaSource(L, false, update("$game_config$", szFileName)), TRUE, TRUE, TRUE)
+{
+    EndLuaSource();
+}
+CScriptIniFile::CScriptIniFile(lua_State* L, LPCSTR initial, LPCSTR szFileName)
+    : inherited(BeginLuaSource(L, false, update(initial, szFileName)), TRUE, TRUE, TRUE)
+{
+    EndLuaSource();
+}
 
 LPCSTR CScriptIniFile::update(LPCSTR initial, LPCSTR file_name)
 {

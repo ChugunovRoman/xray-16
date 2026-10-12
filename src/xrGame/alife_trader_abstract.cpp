@@ -17,6 +17,8 @@
 #include "xrServer.h"
 #include "alife_schedule_registry.h"
 #include "xrServerEntities/xrMessages.h"
+#include "xrCore/Profiling/IniLoadStats.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #ifdef DEBUG
 extern Flags32 psAI_Flags;
@@ -48,6 +50,7 @@ void CSE_ALifeTraderAbstract::spawn_supplies()
 #pragma warning(push)
 #pragma warning(disable : 4238)
             IReader reader((void*)dynamic_object->m_ini_string.c_str(), xr_strlen(dynamic_object->m_ini_string));
+            INI_SOURCE(TraderCustomData, dynamic_object->s_name.c_str()); // P20
             CInifile ini(&reader, FS.get_path("$game_config$")->m_Path);
 #pragma warning(pop)
 
@@ -194,6 +197,8 @@ void add_online_impl(CSE_ALifeDynamicObject* object, const bool& update_registri
         l_tpALifeDynamicObject->o_Position = object->o_Position;
         l_tpALifeDynamicObject->m_tNodeID = object->m_tNodeID;
         object->alife().server().Process_spawn(tNetPacket, clientID, FALSE, l_tpALifeInventoryItem->base());
+        PERF_INC(alife_online_items); // spawn stage 0: an M_SPAWN per item right behind its owner
+        object->alife().m_online_spawns.fetch_add(1, std::memory_order_relaxed);
         l_tpALifeDynamicObject->s_flags._and (u16(-1) ^ M_SPAWN_UPDATE);
         l_tpALifeDynamicObject->m_bOnline = true;
     }

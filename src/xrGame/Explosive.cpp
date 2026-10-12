@@ -770,6 +770,10 @@ void CExplosive::net_Relcase(IGameObject* O)
             m_iCurrentParentID = u16(-1);
     }
 
+    // P17: every explosive (grenades in all inventories) gets this for every destroyed object - skip the
+    // dynamic_cast when there is nothing to search (almost always: the list lives only while exploding)
+    if (m_blasted_objects.empty())
+        return;
     auto I =
         std::find(m_blasted_objects.begin(), m_blasted_objects.end(), smart_cast<CPhysicsShellHolder*>(O));
     if (m_blasted_objects.end() != I)

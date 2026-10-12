@@ -3,6 +3,7 @@
 #include "addon_event_bus.h"
 #include "addon_host.h"
 #include "addon_object_events.h"
+#include "lua_spike_probe.h"
 
 #include "xrScriptEngine/script_engine.hpp"
 #include "script_game_object.h"
@@ -2297,18 +2298,33 @@ GwpResult EmitFrom(GwpEventId id, const GwpValue* argv, u32 argc, GwpValue* resu
         return GWP_ERROR_INVALID_STATE;
     }
 
+    // P18 (plans/optimization_mt/13-lua-spikes.md), npc_perf_lua_spike_us > 0: a dispatch over the threshold goes to
+    // the log with the event name and its first two object arguments (the NPC and the other side)
+    const auto spike_arg_id = [argv, argc](u32 index) {
+        return argv && index < argc && argv[index].type == GWP_T_OBJECT ? static_cast<u32>(argv[index].u.id) :
+                                                                          gw::lua_spike::kNoId;
+    };
+
     // Same order as a Lua emit: Lua subscribers first, then plugins.
     lua_State* L = event->lua_count ? ActiveLua(bus) : nullptr;
     if (L && lua_checkstack(L, 4))
     {
         PERF_SCOPE(events_dispatch_lua);
+        gw::lua_spike::Probe spike(L, gw::lua_spike::ECategory::EventLua);
         DispatchLuaFromNative(bus, L, *event, argv, argc, result, from_engine);
+        if (spike.Finish())
+            spike.Report(event->name.c_str(), spike_arg_id(0), spike_arg_id(1));
     }
 
     if (event->native_count)
     {
         PERF_SCOPE(events_dispatch_native);
+        // The plugins may call Lua (script_call) or step the GC through the engine: the Lua state the bus would use
+        gw::lua_spike::Probe spike(gw::lua_spike::Enabled() ? ActiveLua(bus) : nullptr,
+            gw::lua_spike::ECategory::EventNative);
         DispatchNative(bus, *event, id, from_engine ? GWP_EVENT_FLAG_ENGINE : 0u, argv, argc, result);
+        if (spike.Finish())
+            spike.Report(event->name.c_str(), spike_arg_id(0), spike_arg_id(1));
     }
     return GWP_OK;
 }

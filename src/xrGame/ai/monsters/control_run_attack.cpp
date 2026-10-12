@@ -10,11 +10,23 @@ void CControlRunAttack::load(LPCSTR section)
 {
     read_distance(section, "Run_Attack_Dist", m_min_dist, m_max_dist);
     read_delay(section, "Run_Attack_Delay", m_min_delay, m_max_delay);
+    m_loaded = true;
 }
 
 void CControlRunAttack::reinit()
 {
     CControl_ComCustom<>::reinit();
+
+    // CAI_Bloodsucker / CAI_Boar::Load add this ability after inherited::Load, i.e. after CBaseMonster::Load has
+    // loaded the control manager (the same in OGSR and IX-Ray): load() was never called, the delays and distances
+    // stayed uninitialized, and Random.randI(m_min_delay, m_max_delay) divided by zero when they were equal.
+    // Load from the monster's own section here (reinit runs on every net_Spawn, before the ability can start).
+    if (!m_loaded && m_object)
+    {
+        pcstr section = m_object->cNameSect().c_str();
+        if (pSettings->line_exist(section, "Run_Attack_Dist") && pSettings->line_exist(section, "Run_Attack_Delay"))
+            load(section);
+    }
 
     m_time_next_attack = 0;
 }
@@ -89,7 +101,9 @@ void CControlRunAttack::on_event(ControlCom::EEventType type, ControlCom::IEvent
     {
     case ControlCom::eventAnimationEnd:
     {
-        m_time_next_attack = time() + Random.randI(m_min_delay, m_max_delay);
+        // randI(min, max) divides by (max - min): a fixed delay (min == max) or an unloaded control must not crash
+        m_time_next_attack =
+            time() + (m_max_delay > m_min_delay ? Random.randI(m_min_delay, m_max_delay) : m_min_delay);
         m_man->notify(ControlCom::eventRunAttackEnd, 0);
         break;
     }

@@ -228,9 +228,20 @@ void CCameraManager::Update(const Fvector& P, const Fvector& D, const Fvector& N
     {
         fFovSecond = 0;
     }
-    UpdateCamEffectors();
+    // P19b (14-spike-instrumentation.md): camera and postprocess effectors (the value is how many there are)
+    {
+        ZoneScopedN("CCameraManager::UpdateCamEffectors");
+        ZoneValue(m_EffectorsCam.size());
+        PERF_SCOPE(cam_effectors);
+        UpdateCamEffectors();
+    }
 
-    UpdatePPEffectors();
+    {
+        ZoneScopedN("CCameraManager::UpdatePPEffectors");
+        ZoneValue(m_EffectorsPP.size());
+        PERF_SCOPE(cam_pp_effectors);
+        UpdatePPEffectors();
+    }
 
     if (!m_cam_info.dont_apply && m_bAutoApply)
         ApplyDevice();

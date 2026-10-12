@@ -7,6 +7,22 @@
 #include "SkeletonCustom.h"
 #include "FLOD.h"
 
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#ifdef USE_DX11
+#include "Layers/xrRenderDX11/dx11ConstantBuffer.h"
+#endif
+
+// DX11-only constant-buffer flush deltas for render/main/*_cb_flush (g_cb_flush_* are per-thread totals).
+#if defined(USE_DX11) && XR_PERF_METRICS
+#define PERF_CB_SNAPSHOT(name) [[maybe_unused]] const u32 name##_n = g_cb_flush_count; [[maybe_unused]] const u64 name##_b = g_cb_flush_bytes
+#define PERF_CB_DELTA(cond, m_count, name) PERF_ADD_IF(cond, m_count, g_cb_flush_count - name##_n)
+#define PERF_CB_BYTES(cond, m_bytes, name) PERF_ADD_IF(cond, m_bytes, g_cb_flush_bytes - name##_b)
+#else
+#define PERF_CB_SNAPSHOT(name) ((void)0)
+#define PERF_CB_DELTA(cond, m_count, name) ((void)0)
+#define PERF_CB_BYTES(cond, m_bytes, name) ((void)0)
+#endif
+
 extern ENGINE_API float psHUD_FOV;
 
 namespace xray::render::RENDER_NAMESPACE
@@ -41,6 +57,9 @@ void R_dsgraph_structure::render_graph(u32 _priority)
 
     cmd_list.set_xform_world(Fidentity);
 
+    // render/main/* metrics: only the main view's graph (not cascades, lights or the scope pass).
+    [[maybe_unused]] const bool perf_main = o.is_main_pass && !o.second_vp_pass;
+
     // **************************************************** NORMAL
     // Perform sorting based on ScreenSpaceArea
     // Sorting by SSA and changes minimizations
@@ -48,6 +67,9 @@ void R_dsgraph_structure::render_graph(u32 _priority)
     {
         ZoneScopedN("dsgraph_render_static");
         PIX_EVENT_CTX(cmd_list, dsgraph_render_static);
+        PERF_SCOPE_IF(perf_main, rmain_submit_static);
+        [[maybe_unused]] const u32 perf_draws0 = cmd_list.stat.render.calls;
+        PERF_CB_SNAPSHOT(perf_cb_static);
 
         for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
         {
@@ -62,6 +84,8 @@ void R_dsgraph_structure::render_graph(u32 _priority)
 
                 mapNormalItems& items = it->second;
                 items.ssa = 0;
+                PERF_ADD_IF(perf_main, rmain_static_passes, 1);
+                PERF_ADD_IF(perf_main, rmain_static_items, items.size());
 
                 std::sort(items.begin(), items.end(), cmp_ssa<_NormalItem>);
                 for (const auto& item : items)
@@ -81,6 +105,8 @@ void R_dsgraph_structure::render_graph(u32 _priority)
             nrmPasses.clear();
             map.clear();
         }
+        PERF_ADD_IF(perf_main, rmain_static_draws, cmd_list.stat.render.calls - perf_draws0);
+        PERF_CB_DELTA(perf_main, rmain_static_cb_flush, perf_cb_static);
     }
 
     // **************************************************** MATRIX
@@ -90,6 +116,15 @@ void R_dsgraph_structure::render_graph(u32 _priority)
     {
         ZoneScopedN("dsgraph_render_dynamic");
         PIX_EVENT_CTX(cmd_list, dsgraph_render_dynamic);
+        PERF_SCOPE_IF(perf_main, rmain_submit_dynamic);
+        [[maybe_unused]] const u32 perf_draws0 = cmd_list.stat.render.calls;
+        [[maybe_unused]] const u32 perf_states0 = cmd_list.stat.states;
+        [[maybe_unused]] const u32 perf_textures0 = cmd_list.stat.textures;
+        PERF_CB_SNAPSHOT(perf_cb_dyn);
+#if XR_PERF_METRICS
+        // P15: lets CSkeletonX::_Render / dx11ConstantBuffer::Flush count render/main/skin_* and dyn_cb_* (restored on exit).
+        xray::perf::ScopedTag perf_dyn_tag(g_perf_rmain_dyn, (perf_main && xray::perf::g_perf_metrics_active) ? 1 : 0);
+#endif
 
         auto render_matrix_passes = [&](R_dsgraph::mapMatrixPasses_T& passSet, u32& statsCounter)
         {
@@ -102,6 +137,7 @@ void R_dsgraph_structure::render_graph(u32 _priority)
                 for (const auto& it : matPasses)
                 {
                     cmd_list.set_Pass(it->first);
+                    PERF_ADD_IF(perf_main, rmain_dyn_passes, 1);
 
                     mapMatrixItems& items = it->second;
                     items.ssa = 0;
@@ -110,7 +146,10 @@ void R_dsgraph_structure::render_graph(u32 _priority)
                     for (auto& item : items)
                     {
                         cmd_list.set_xform_world(item.Matrix);
-                        RImplementation.apply_object(cmd_list, item.pObject);
+                        {
+                            PERF_SCOPE_IF(perf_main, rmain_dyn_apply_object);
+                            RImplementation.apply_object(cmd_list, item.pObject);
+                        }
                         cmd_list.apply_lmaterial();
 
                         const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R);
@@ -120,7 +159,10 @@ void R_dsgraph_structure::render_graph(u32 _priority)
                         // --#SM+#-- Обновляем шейдерные данные модели [update shader values for this model]
                         // RCache.hemi.c_update(item.pVisual);
 
-                        item.pVisual->Render(cmd_list, LOD, o.phase == CRender::PHASE_SMAP);
+                        {
+                            PERF_SCOPE_IF(perf_main, rmain_dyn_visual_render);
+                            item.pVisual->Render(cmd_list, LOD, o.phase == CRender::PHASE_SMAP);
+                        }
                         ++statsCounter;
                         if (item.pObject && item.pObject->renderable_ForceLodCharacter())
                             ++RImplementation.BasicStats.CorpseRegularSubmissions;
@@ -133,6 +175,11 @@ void R_dsgraph_structure::render_graph(u32 _priority)
         };
 
         render_matrix_passes(mapMatrixPasses[_priority], RImplementation.BasicStats.DynamicRegularSubmissions);
+        PERF_ADD_IF(perf_main, rmain_dyn_draws, cmd_list.stat.render.calls - perf_draws0);
+        PERF_ADD_IF(perf_main, rmain_dyn_states, cmd_list.stat.states - perf_states0);
+        PERF_ADD_IF(perf_main, rmain_dyn_textures, cmd_list.stat.textures - perf_textures0);
+        PERF_CB_DELTA(perf_main, rmain_dyn_cb_flush, perf_cb_dyn);
+        PERF_CB_BYTES(perf_main, rmain_dyn_cb_bytes, perf_cb_dyn);
     }
 
     RImplementation.BasicStats.Primitives.End(); // XXX: Refactor a bit later
@@ -498,3 +545,8 @@ void R_dsgraph_structure::render_R1_box(IRender_Sector::sector_id_t sector_id, F
     }
 }
 } // namespace xray::render::RENDER_NAMESPACE
+
+// Local to this file (unity builds glue several .cpp into one TU).
+#undef PERF_CB_SNAPSHOT
+#undef PERF_CB_DELTA
+#undef PERF_CB_BYTES

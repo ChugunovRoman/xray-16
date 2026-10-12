@@ -124,6 +124,40 @@ static void apply_light_shadow_budget(xr_vector<light*>& kept, size_t budget)
 // The scope pass renders the full main light package. A narrow-frustum filter was tried here
 // (r__svp_light_filter) but it dropped the directional sun from the lens - dark day-time
 // dynamics. Any future filter must whitelist directional lights and lights near frustum planes.
+void CRender::svp_forget_light(light* L)
+{
+    bool found = false;
+    const auto forget = [L, &found](xr_vector<light*>& v)
+    {
+        for (light*& p : v)
+        {
+            if (p == L)
+            {
+                p = nullptr;
+                found = true;
+            }
+        }
+    };
+    for (light_Package* lp : { &LP_svp_normal, &LP_svp_pending })
+    {
+        forget(lp->v_point);
+        forget(lp->v_spot);
+        forget(lp->v_shadowed);
+    }
+    for (auto& page : svp_shadow_page_lights)
+        forget(page);
+    forget(svp_shadow_unshadowed);
+
+    // Diagnostic: tells whether this is what crashed the scope pass (first few hits only).
+    static u32 s_reported = 0;
+    if (found && s_reported < 8)
+    {
+        ++s_reported;
+        Msg("~ light %p destroyed while still listed for the scope pass (SVP) - entry nulled, frame %u", L,
+            Device.dwFrame);
+    }
+}
+
 void CRender::filter_light_package_for_svp(const light_Package& src, light_Package& dst)
 {
     dst.v_shadowed = src.v_shadowed;
@@ -1060,6 +1094,8 @@ void CRender::svp_accumulate_prebuilt(light_Package& LP)
                 PIX_EVENT(ACCUM_SPOT);
                 for (light* p_light : page)
                 {
+                    if (!p_light)
+                        continue; // destroyed since the list was built (svp_forget_light)
                     Target->accum_spot(cmd_list, p_light);
                     render_indirect(p_light);
                 }
@@ -1067,7 +1103,8 @@ void CRender::svp_accumulate_prebuilt(light_Package& LP)
                 PIX_EVENT(ACCUM_VOLUMETRIC);
                 if (RImplementation.o.advancedpp && ps_r2_ls_flags.is(R2FLAG_VOLUMETRIC_LIGHTS))
                     for (light* p_light : page)
-                        Target->accum_volumetric(cmd_list, p_light);
+                        if (p_light)
+                            Target->accum_volumetric(cmd_list, p_light);
             }
         }
 #endif
@@ -1077,6 +1114,8 @@ void CRender::svp_accumulate_prebuilt(light_Package& LP)
         // right after the draw.
         for (light* p_light : svp_shadow_unshadowed)
         {
+            if (!p_light)
+                continue; // destroyed since the list was built (svp_forget_light)
             const bool wasShadow = p_light->flags.bShadow != 0;
             p_light->flags.bShadow = false;
             Target->accum_spot(cmd_list, p_light);
@@ -1108,6 +1147,8 @@ void CRender::svp_accumulate_prebuilt(light_Package& LP)
                 PIX_EVENT(ACCUM_SPOT);
                 for (light* p_light : page)
                 {
+                    if (!p_light)
+                        continue; // destroyed since the list was built (svp_forget_light)
                     Target->accum_spot(cmd_list, p_light);
                     render_indirect(p_light);
                 }
@@ -1115,13 +1156,16 @@ void CRender::svp_accumulate_prebuilt(light_Package& LP)
                 PIX_EVENT(ACCUM_VOLUMETRIC);
                 if (RImplementation.o.advancedpp && ps_r2_ls_flags.is(R2FLAG_VOLUMETRIC_LIGHTS))
                     for (light* p_light : page)
-                        Target->accum_volumetric(cmd_list, p_light);
+                        if (p_light)
+                            Target->accum_volumetric(cmd_list, p_light);
             }
         }
 
         // Unshadowed fallback (page-cap overflow), same semantics as stage 1.
         for (light* p_light : svp_shadow_unshadowed)
         {
+            if (!p_light)
+                continue; // destroyed since the list was built (svp_forget_light)
             const bool wasShadow = p_light->flags.bShadow != 0;
             p_light->flags.bShadow = false;
             Target->accum_spot(cmd_list, p_light);
@@ -1145,6 +1189,8 @@ void CRender::svp_accumulate_prebuilt(light_Package& LP)
     PIX_EVENT(POINT_LIGHTS_ACCUM);
     for (light* p_light : LP.v_point)
     {
+        if (!p_light)
+            continue; // destroyed since the main pass filled the package (svp_forget_light)
         render_indirect(p_light);
         Target->accum_point(cmd_list, p_light);
     }
@@ -1153,6 +1199,8 @@ void CRender::svp_accumulate_prebuilt(light_Package& LP)
     PIX_EVENT(SPOT_LIGHTS_ACCUM);
     for (light* p_light : LP.v_spot)
     {
+        if (!p_light)
+            continue; // destroyed since the main pass filled the package (svp_forget_light)
         LR.compute_xf_spot(p_light);
         render_indirect(p_light);
         Target->accum_spot(cmd_list, p_light);

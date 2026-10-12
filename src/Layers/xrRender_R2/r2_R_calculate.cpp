@@ -129,6 +129,10 @@ void CRender::calculate_for(bool second_pass)
         svp_parallel = false;
         svp_frame_driver = false; // frame driver gate is re-resolved by Begin...Parallel each frame
         svp_shadow_stage = 0;     // scope shadow prebuild state is per-frame (stage machine)
+        // The scope-pass light packages are refilled by this frame's main pass; whatever a previous frame left
+        // there (its scope pass skipped/aborted) would be stale light pointers by now.
+        LP_svp_normal.clear();
+        LP_svp_pending.clear();
         svp_shadow_transfer = false; // transfer mode is re-resolved by Begin...Parallel each frame
         svp_sun_slices_ready = false; // sun-reuse copies (if any) happen later, in main Render/Sun
         svp_geom_on_main = false;

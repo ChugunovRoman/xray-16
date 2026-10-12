@@ -910,6 +910,8 @@ target_sources(xrGame PRIVATE
     NoGravityZone.h
     npc_cpp_profile.cpp
     npc_cpp_profile.h
+    lua_spike_probe.cpp
+    lua_spike_probe.h
     object_actions.cpp
     object_actions.h
     object_actions_inline.h

@@ -27,6 +27,17 @@
 #endif
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrEngine/device.h"
+#include "PHStepDefer.h"
+
+// B6 early physics kick (PHStepDefer.h): an active shell mutated on another thread while the step runs - queue this
+// very call and re-run it on the shell after the step is joined (found again by its owner's ID). Used for the shell-level
+// operations that wake the shell (EnableObject -> CPHObject::activate edits CPHWorld::m_objects) or touch the physics
+// spatial DB; per-element ones are deferred in CPHElement.
+#define PH_DEFER_SHELL(kind, call)                                                                                   \
+    if (isActive() &&                                                                                                \
+        ::ph_step_defer::DeferShell(                                                                                 \
+            *this, ::ph_step_defer::Kind::kind, [=](CPHShell& deferred_shell_) { deferred_shell_.call; }))           \
+        return
 
 CPHShell::~CPHShell()
 {
@@ -85,13 +96,22 @@ void CPHShell::DisableObject()
 void CPHShell::DisableCharacterCollision() { CPHCollideValidator::SetCharacterClassNotCollide(*this); }
 void CPHShell::Disable()
 {
+    PH_DEFER_SHELL(Enable, Disable());
     DisableObject();
     for (auto& it : elements)
         it->Disable();
     ClearCashedTries();
 }
-void CPHShell::DisableCollision() { CPHObject::collision_disable(); }
-void CPHShell::EnableCollision() { CPHObject::collision_enable(); }
+void CPHShell::DisableCollision()
+{
+    PH_DEFER_SHELL(Contact, DisableCollision());
+    CPHObject::collision_disable();
+}
+void CPHShell::EnableCollision()
+{
+    PH_DEFER_SHELL(Contact, EnableCollision());
+    CPHObject::collision_enable();
+}
 void CPHShell::ReanableObject()
 {
     // if(b_contacts_saved) dJointGroupEmpty(m_saved_contacts);
@@ -260,6 +280,7 @@ void CPHShell::applyForce(const Fvector& dir, float val)
 {
     if (!isActive())
         return;
+    PH_DEFER_SHELL(Force, applyForce(dir, val));
     val /= getMass();
     for (auto& it : elements)
         it->applyForce(dir, val * it->getMass());
@@ -280,6 +301,7 @@ void CPHShell::applyImpulse(const Fvector& dir, float val)
 {
     if (!isActive())
         return;
+    PH_DEFER_SHELL(Force, applyImpulse(dir, val));
     elements.front()->applyImpulse(dir, val);
     EnableObject(nullptr);
 };
@@ -287,6 +309,7 @@ void CPHShell::applyImpulseTrace(const Fvector& pos, const Fvector& dir, float v
 {
     if (!isActive())
         return;
+    PH_DEFER_SHELL(Force, applyImpulseTrace(pos, dir, val));
     elements.front()->applyImpulseTrace(pos, dir, val, 0);
     EnableObject(nullptr);
 }
@@ -295,6 +318,7 @@ void CPHShell::applyImpulseTrace(const Fvector& pos, const Fvector& dir, float v
 {
     if (!isActive())
         return;
+    PH_DEFER_SHELL(Force, applyImpulseTrace(pos, dir, val, id));
     VERIFY(m_pKinematics);
     CBoneInstance& instance = m_pKinematics->LL_GetBoneInstance(id);
     if (instance.callback_type() != bctPhysics || !instance.callback_param())
@@ -412,16 +436,21 @@ void CPHShell::StataticRootBonesCallBack(CBoneInstance* B)
 
 void CPHShell::SetTransform(const Fmatrix& m0, motion_history_state history_state)
 {
-    mXFORM.set(m0);
+    mXFORM.set(m0); // the logical pose right away, also while the step runs
     for (auto& it : elements)
         it->SetTransform(m0, history_state);
-    spatial_move();
+    // B6 early physics kick (PHStepDefer.h): while the step runs on another thread, the elements in the world above
+    // only queued their pose, and each of them moves the shell in the physics spatial DB when it is applied after the
+    // join (CPHElement::SetTransform calls spatial_move itself); the spatial DB the step queries is not touched here.
+    if (!(isActive() && ::ph_step_defer::StepRunningOnOtherThread()))
+        spatial_move();
 }
 
 void CPHShell::Enable()
 {
     if (!isActive())
         return;
+    PH_DEFER_SHELL(Enable, Enable());
 
 
     for (auto& it : elements)
@@ -515,6 +544,16 @@ void CPHShell::SetGlTransformDynamic(const Fmatrix& form)
 {
     VERIFY(isActive());
     VERIFY(_valid(form));
+    // B6 early physics kick (PHStepDefer.h): an absolute target - queued as a whole and computed against the pose the
+    // bodies have after the step (the relative TransformPosition below would be off by the step's motion otherwise).
+    // Callers keep the object's XFORM right away (CArtefact::ForceTransform).
+    if (isActive() && !elements.empty() && elements.front()->IsInSimulatedWorld() &&
+        ::ph_step_defer::DeferShell(*this, ::ph_step_defer::Kind::Transform,
+            [form](CPHShell& deferred_shell_) {
+                if (deferred_shell_.isActive()) // not deactivated by an earlier operation of the flush
+                    deferred_shell_.SetGlTransformDynamic(form);
+            }))
+        return;
     Fmatrix current, replace;
     GetGlobalTransformDynamic(&current);
     current.invert();
@@ -561,7 +600,9 @@ void CPHShell::addEquelInertiaToEls(const dMass& M)
     for (auto& it : elements)
         it->addInertia(M);
 }
-static BONE_P_MAP* spGetingMap = nullptr;
+// P16 (plans/optimization_mt/11-ragdoll-spikes.md): thread_local - a skeleton of an NPC ragdoll may now be prebuilt on
+// the Game thread (CCharacterPhysicsSupport::TryPrebuildSkeleton) while main builds another shell; the map belongs to one build call.
+static thread_local BONE_P_MAP* spGetingMap = nullptr;
 void CPHShell::build_FromKinematics(IKinematics* K, BONE_P_MAP* p_geting_map)
 {
     VERIFY(K);
@@ -583,6 +624,15 @@ void CPHShell::build_FromKinematics(IKinematics* K, BONE_P_MAP* p_geting_map)
 void CPHShell::preBuild_FromKinematics(IKinematics* K, BONE_P_MAP* p_geting_map)
 {
     VERIFY(K);
+    preBuild_FromKinematicsRoot(K, K->LL_GetBoneRoot(), p_geting_map);
+}
+
+// P16: the same with the root bone given - CCharacterPhysicsSupport builds its skeleton from bip01_pelvis, which it
+// otherwise sets as the bone root of the model for the call (LL_SetBoneRoot), and that cannot be done while the model is
+// animated / rendered on another thread (prebuild on the Game thread). Reads the model only.
+void CPHShell::preBuild_FromKinematicsRoot(IKinematics* K, u16 root_bone, BONE_P_MAP* p_geting_map)
+{
+    VERIFY(K);
     phys_shell_verify_model(*K);
     m_pKinematics = K;
     spGetingMap = p_geting_map;
@@ -590,7 +640,7 @@ void CPHShell::preBuild_FromKinematics(IKinematics* K, BONE_P_MAP* p_geting_map)
     if (!m_spliter_holder)
         m_spliter_holder = xr_new<CPHShellSplitterHolder>(this);
     bool vis_check = false;
-    AddElementRecursive(nullptr, m_pKinematics->LL_GetBoneRoot(), Fidentity, 0, &vis_check);
+    AddElementRecursive(nullptr, root_bone, Fidentity, 0, &vis_check);
     // R_ASSERT2(elements.front()->numberOfGeoms(),"No physics shapes was assigned for model or no shapes in main
     // root bone!!!");
     if (m_spliter_holder->isEmpty())
@@ -1263,6 +1313,7 @@ void CPHShell::applyGravityAccel(const Fvector& accel)
 {
     if (!isActive())
         return;
+    PH_DEFER_SHELL(Force, applyGravityAccel(accel));
 
     Fvector a;
     a.set(accel);

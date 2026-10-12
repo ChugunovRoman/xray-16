@@ -10,6 +10,7 @@
 #include "level_graph.h"
 #include "xrCore/xrDebug_macros.h"
 #include "xrEngine/profiler.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <algorithm>
 #include <queue>
@@ -165,14 +166,28 @@ u32 CLevelGraph::VertexInternal(u32 current_node_id, const Fvector& position) co
     {
         // so, we do not have a correct current node
         // performing very slow full search
+        // P19 (plans/optimization_mt/14-spike-instrumentation.md): O(vertex count), a suspect of rare UpdateCL peaks
+        ZoneScopedN("level_graph/full_search");
+        PERF_SCOPE(lg_vertex_full_search);
+        PERF_SPIKE("level_graph/full_search");
         id = vertex(position);
         VERIFY(valid_vertex_id(id));
         return (id);
     }
 
-    u32 new_vertex_id = guess_vertex_id(current_node_id, position);
+    u32 new_vertex_id;
+    {
+        // P19: no vertex under the position (off the AI map, in the air...): 9x9 cells around, binary search each
+        PERF_HOT_ZONE("level_graph/guess");
+        PERF_SCOPE(lg_vertex_guess);
+        PERF_SPIKE("level_graph/guess");
+        new_vertex_id = guess_vertex_id(current_node_id, position);
+    }
     if (new_vertex_id != current_node_id)
         return (new_vertex_id);
+
+    PERF_HOT_ZONE("level_graph/nearest");
+    PERF_SCOPE(lg_vertex_nearest);
 
     // so, our position is outside the level graph bounding box
     // or
@@ -207,6 +222,7 @@ u32 CLevelGraph::VertexInternal(u32 current_node_id, const Fvector& position) co
 u32 CLevelGraph::vertex(u32 current_node_id, const Fvector& position) const
 {
     START_PROFILE("Level_Graph::find vertex")
+    PERF_SCOPE(lg_vertex); // P19: every call; the slow paths are ai/level_graph/full_search, guess, nearest
     NodeTime.Begin();
     u32 result = VertexInternal(current_node_id, position);
     NodeTime.End();

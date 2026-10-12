@@ -17,6 +17,7 @@
 #include "agent_memory_manager.h"
 #include "agent_manager_planner.h"
 #include "xrEngine/profiler.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 CAgentManager::CAgentManager()
 {
@@ -74,6 +75,7 @@ void CAgentManager::remove_components()
 
 void CAgentManager::remove_links(IGameObject* object)
 {
+    PERF_INC(relcase_agent_runs); // P17: once per agent manager and destroyed object (batched relcase)
     corpse().remove_links(object);
     enemy().remove_links(object);
     explosive().remove_links(object);

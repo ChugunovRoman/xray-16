@@ -10,9 +10,10 @@ class XRPHYSICS_API CPHUpdateObject
 
 public:
     CPHUpdateObject();
-    virtual ~CPHUpdateObject() { Deactivate(); }
+    virtual ~CPHUpdateObject() { DeactivateOnDestroy(); }
     void Activate();
     void Deactivate();
+    void DeactivateOnDestroy(); // the destructor's Deactivate: never queues (see PHObject.cpp)
     IC bool IsActive() { return b_activated; }
     virtual void PhDataUpdate(float step) = 0;
     virtual void PhTune(float step) = 0;

@@ -294,6 +294,9 @@
     <ClCompile Include="params.cpp">
       <Filter>physics\Base\Objects\World</Filter>
     </ClCompile>
+    <ClCompile Include="PHStepDefer.cpp">
+      <Filter>physics\Base\Objects\World</Filter>
+    </ClCompile>
     <ClCompile Include="PHWorld.cpp">
       <Filter>physics\Base\Objects\World</Filter>
     </ClCompile>
@@ -570,6 +573,9 @@
       <Filter>physics\Base\Objects\World</Filter>
     </ClInclude>
     <ClInclude Include="PHItemList.h">
+      <Filter>physics\Base\Objects\World</Filter>
+    </ClInclude>
+    <ClInclude Include="PHStepDefer.h">
       <Filter>physics\Base\Objects\World</Filter>
     </ClInclude>
     <ClInclude Include="PHWorld.h">

@@ -11,6 +11,7 @@
 #include "alife_simulator.h"
 #include "xrServer_Objects_ALife_Items.h"
 #include "xrCommon/xr_vector.h"
+#include "xrCore/Profiling/IniLoadStats.hpp"
 
 void CSE_ALifeObject::spawn_supplies() { spawn_supplies(m_ini_string.c_str()); }
 
@@ -32,6 +33,7 @@ void CSE_ALifeObject::spawn_supplies(LPCSTR ini_string)
 #pragma warning(push)
 #pragma warning(disable : 4238)
     IReader reader((void*)ini_string, xr_strlen(ini_string));
+    INI_SOURCE(SpawnSupplies, s_name.c_str()); // P20
     CInifile ini(&reader, FS.get_path("$game_config$")->m_Path);
 #pragma warning(pop)
     u8 loadoutIndex = 0;

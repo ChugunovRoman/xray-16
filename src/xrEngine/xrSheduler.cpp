@@ -73,6 +73,25 @@ void ShedLate(u32 late, u32 cat)
     }
 }
 
+#if XR_PERF_METRICS
+// P19 spike logger (plans/optimization_mt/14-spike-instrumentation.md): detail of a slow shedule_Update
+struct ShedSpikeInfo
+{
+    pcstr name;         // Item::scheduled_name, a copy owned by the item
+    ISheduled* object;  // set after the update only if the object is still registered (else may be gone)
+};
+
+void DescribeShedSpike(const void* ctx, char* buf, size_t size)
+{
+    const auto* info = static_cast<const ShedSpikeInfo*>(ctx);
+    const IGameObject* go = info->object ? dynamic_cast<const IGameObject*>(info->object) : nullptr;
+    if (go)
+        xray::perf::DescribeSpikeObject<IGameObject>(go, buf, size);
+    else
+        xr_sprintf(buf, size, "sched=%s", info->name);
+}
+#endif
+
 xray::perf::Metric ShedCatMetric(u32 cat)
 {
     switch (cat)
@@ -117,7 +136,10 @@ void CSheduler::Destroy()
     ItemsRT.clear();
     Items.clear();
     ItemsProcessed.clear();
-    Registration.clear();
+    {
+        std::lock_guard<std::mutex> guard(m_registration_lock);
+        Registration.clear();
+    }
 }
 
 void CSheduler::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
@@ -135,22 +157,32 @@ void CSheduler::DumpStatistics(IGameFont& font, IPerformanceAlert* alert)
 void CSheduler::internal_Registration()
 {
     ZoneScopedN("CSheduler::internal_Registration");
-    for (u32 it = 0; it < Registration.size(); it++)
+    // Take the queue under the lock and process the local copy: internal_Register/internal_Unregister never
+    // call Register/Unregister, so the result is the same as processing Registration in place, but a
+    // Register()/Unregister() from another thread (game/render overlap frame) cannot reallocate the vector
+    // under this loop. Never runs on two threads at once: the main thread calls it only in UpdateRT()
+    // before the Game thread is woken, the Game thread only in UpdateNonRT() before the join.
+    xr_vector<ItemReg> pending;
     {
-        ItemReg& R = Registration[it];
+        std::lock_guard<std::mutex> guard(m_registration_lock);
+        pending.swap(Registration);
+    }
+    for (u32 it = 0; it < pending.size(); it++)
+    {
+        ItemReg& R = pending[it];
         if (R.OP)
         {
             ZoneScopedN("CSheduler::internal_Registration/register_op");
             // register
             // search for paired "unregister"
             bool foundAndErased = false;
-            for (u32 pair = it + 1; pair < Registration.size(); pair++)
+            for (u32 pair = it + 1; pair < pending.size(); pair++)
             {
-                ItemReg& R_pair = Registration[pair];
+                ItemReg& R_pair = pending[pair];
                 if (!R_pair.OP && R_pair.Object == R.Object)
                 {
                     foundAndErased = true;
-                    Registration.erase(Registration.begin() + pair);
+                    pending.erase(pending.begin() + pair);
                     break;
                 }
             }
@@ -177,7 +209,11 @@ void CSheduler::internal_Registration()
             internal_Unregister(R.Object, R.RT);
         }
     }
-    Registration.clear();
+    // Give the (cleared) buffer back to keep its capacity, unless something was queued meanwhile.
+    pending.clear();
+    std::lock_guard<std::mutex> guard(m_registration_lock);
+    if (Registration.empty())
+        Registration.swap(pending);
 }
 
 void CSheduler::internal_Register(ISheduled* object, bool realTime)
@@ -293,6 +329,7 @@ bool CSheduler::Registered(ISheduled* object) const
         }
     }
 
+    std::lock_guard<std::mutex> guard(m_registration_lock);
     for (const auto& it : Registration)
     {
         if (it.Object == object)
@@ -338,6 +375,7 @@ void CSheduler::Register(ISheduled* A, bool RT)
     Msg("SCHEDULER: register [%s][%x]", A->shedule_Name().c_str(), A);
 #endif
 
+    std::lock_guard<std::mutex> guard(m_registration_lock);
     Registration.push_back(R);
 }
 
@@ -351,7 +389,7 @@ void CSheduler::Unregister(ISheduled* A)
     Msg("SCHEDULER: unregister [%s][%x]", A->shedule_Name().c_str(), A);
 #endif
 
-    if (m_processing_now)
+    if (ProcessingOnThisThread())
     {
         if (internal_Unregister(A, A->GetSchedulerData().b_RT, false))
             return;
@@ -362,7 +400,17 @@ void CSheduler::Unregister(ISheduled* A)
     R.RT = A->GetSchedulerData().b_RT;
     R.Object = A;
 
+    std::lock_guard<std::mutex> guard(m_registration_lock);
     Registration.push_back(R);
+}
+
+bool CSheduler::ProcessingOnThisThread() const
+{
+    if (!m_processing_now)
+        return false;
+    // Classic Update(): no owner recorded - same as before the split (m_processing_now alone).
+    const std::thread::id owner = m_processing_tid.load(std::memory_order_acquire);
+    return owner == std::thread::id{} || owner == std::this_thread::get_id();
 }
 
 void CSheduler::EnsureOrder(ISheduled* Before, ISheduled* After)
@@ -486,8 +534,18 @@ void CSheduler::ProcessStep()
                 sched_name = "(no name)";
             ZoneTransientN(___sched_su, sched_name, !xray::perf::HideHotZones());
             xray::perf::ScopedTime cat_time(ShedCatMetric(item.dwPadding));
+#if XR_PERF_METRICS
+            // P19 spike logger: the object is described only if it is still registered after its update
+            ShedSpikeInfo spike_info{sched_name, nullptr};
+            PERF_SPIKE_NAMED(shed_spike, "shedule_update", &spike_info, &DescribeShedSpike,
+                xray::perf::SpikeActive() && item.dwPadding == ShedCatActor);
+#endif
             item.Object->shedule_Update(
                 clampr(Elapsed, u32(1), u32(_max(u32(schedulerData.t_max), u32(1000)))));
+#if XR_PERF_METRICS
+            if (m_current_step_obj)
+                spike_info.object = item.Object;
+#endif
         }
         if (!m_current_step_obj)
         {
@@ -586,12 +644,8 @@ void CSheduler::ProcessStep()
     psShedulerTarget -= psShedulerReaction;
 }
 
-void CSheduler::Update()
+void CSheduler::UpdateRTImpl()
 {
-    ZoneScopedN("CSheduler::Update");
-
-    // Initialize
-    stats.Update.Begin();
     {
         ZoneScopedN("CSheduler::Update/internal_Registration_pre");
         internal_Registration();
@@ -632,12 +686,23 @@ void CSheduler::Update()
                     sched_name = "(no name)";
                 ZoneTransientN(___sched_rt, sched_name, !xray::perf::HideHotZones());
                 xray::perf::ScopedTime cat_time(ShedCatMetric(item.dwPadding));
+#if XR_PERF_METRICS
+                ShedSpikeInfo spike_info{sched_name, nullptr};
+                PERF_SPIKE_NAMED(shed_spike, "shedule_update_rt", &spike_info, &DescribeShedSpike,
+                    xray::perf::SpikeActive() && item.dwPadding == ShedCatActor);
+#endif
                 item.Object->shedule_Update(Elapsed);
+#if XR_PERF_METRICS
+                spike_info.object = item.Object;
+#endif
             }
             item.dwTimeOfLastExecute = dwTime;
         }
     }
+}
 
+void CSheduler::UpdateNonRTImpl()
+{
     // Normal (sheduled)
     ProcessStep();
     m_processing_now = false;
@@ -657,5 +722,41 @@ void CSheduler::Update()
         ZoneScopedN("CSheduler::Update/internal_Registration_post");
         internal_Registration();
     }
+}
+
+void CSheduler::Update()
+{
+    ZoneScopedN("CSheduler::Update");
+
+    // Initialize
+    stats.Update.Begin();
+    UpdateRTImpl();
+    UpdateNonRTImpl();
+    stats.Update.End();
+}
+
+// Game/render overlap frame (GAME_RENDER_OVERLAP_PLAN P1, MX f76479197): the device calls UpdateRT() on the
+// main thread right before it wakes the Game thread, and the Game thread calls UpdateNonRT(). They never run
+// at the same time (the wake comes after UpdateRT returns, the join before the next frame), so ItemsRT/Items
+// and internal_Registration stay single-threaded; only Registration may be appended from both (its lock).
+void CSheduler::UpdateRT()
+{
+    ZoneScopedN("CSheduler::UpdateRT");
+    stats.Update.Begin();
+    m_processing_tid.store(std::this_thread::get_id(), std::memory_order_release);
+    UpdateRTImpl();
+    m_processing_now = false;
+    m_processing_tid.store(std::thread::id{}, std::memory_order_release);
+    stats.Update.End();
+}
+
+void CSheduler::UpdateNonRT()
+{
+    ZoneScopedN("CSheduler::UpdateNonRT");
+    stats.Update.Begin();
+    m_processing_tid.store(std::this_thread::get_id(), std::memory_order_release);
+    m_processing_now = true;
+    UpdateNonRTImpl();
+    m_processing_tid.store(std::thread::id{}, std::memory_order_release);
     stats.Update.End();
 }

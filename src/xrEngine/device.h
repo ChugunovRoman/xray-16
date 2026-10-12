@@ -16,6 +16,7 @@
 #include "xrCore/ModuleLookup.hpp"
 
 #include <atomic>
+#include <mutex>
 #include <thread>
 
 #define DEVICE_RESET_PRECACHE_FRAME_COUNT 10
@@ -151,7 +152,9 @@ public:
     /** Phase 3: kick the physics step, called after Wait(GameThread) and before DoRender() (CPHWorld::
      *  OnFrame (seqFrame) always no-ops now - the step only ever runs from here). Wakes CPHWorld's own
      *  dedicated physics thread and returns immediately, so the step runs parallel to the DoRender()
-     *  that follows. Set by CPHWorld. */
+     *  that follows. Set by CPHWorld.
+     *  Game/render overlap frame: called on main in ProcessFrame before the Game thread is woken, so the step runs
+     *  parallel to the whole Game thread and to DoRender() (plans/optimization_mt/09-physics-earlier-parallel.md). */
     std::function<void()> PhysicsKickOverlapCallback;
     /** Phase 3: only waits for the kicked physics step to finish (no flush); no-op when no step is in
      *  flight. Called from WaitForFrameTasks(), i.e. before Reset()/Destroy() - Reset can be triggered
@@ -163,6 +166,11 @@ public:
     std::function<void()> PhysicsJoinOverlapCallback;
     /** P2: execute parallel vision batch and process results. Called in GameThread after Sheduler.Update(). */
     std::function<void()> PostSchedulerVisionBatch;
+    /** Bones prepass (always, plans/optimization_mt/04-bones-prepass.md): compute, before the render,
+     *  the bones the render computed in the previous frame. Main thread, called by ProcessFrame (RunBonesPrepass)
+     *  while no game logic and no physics step run: sequential frame - after the GameThread join, before the physics
+     *  kick; game/render overlap frame - after the RT scheduler, before the Game thread is woken. Set by CLevel. */
+    std::function<void()> BonesPrepassCallback;
     /** Optional: flush model pool delete queue on main before `PreRenderThread` (ixray `ModelDefferClear`). Set from R2 `CRender::create`. */
     std::function<void()> ModelDeferredClear;
     CSecondVPParams m_SecondViewport; // --#SM+#-- +SecondVP+
@@ -327,11 +335,34 @@ public:
     //    DoRender() (ProcessFrame clears it after PhysicsJoinOverlapCallback), i.e. while physics is
     //    running on its own dedicated thread parallel to DoRender() (Phase 3). Gates "defer or do it
     //    now" decisions (e.g. CModelPool::Delete).
+    //  - IsGameRenderOverlapFrame() (below): game/render overlap frame - the GameThread producer
+    //    (dedicated "Game" thread) runs parallel to DoRender() until JoinGameLogicBeforeUI().
     bool IsFrameOverlapActive() const noexcept { return m_frame_overlap_active.load(std::memory_order_acquire); }
     void SetFrameOverlapActive(bool active) noexcept { m_frame_overlap_active.store(active, std::memory_order_release); }
 
+    // GAME_RENDER_OVERLAP_PLAN P1, variant B (always when CanOverlapGameAndRender()).
+    // True for the frame (set after FrameMove, cleared at the end of ProcessFrame) when the non-RT game logic runs
+    // on the dedicated Game thread in parallel with DoRender(). Menu / pause / loading / no level / non-D3D11: false.
+    bool IsGameRenderOverlapFrame() const noexcept { return m_game_render_overlap_frame.load(std::memory_order_acquire); }
+    // Main thread: wait for this frame's Game thread. CLevel::OnRender calls it right before HUD().RenderUI();
+    // ProcessFrame/DoRender/WaitForFrameTasks call it again as a safety net. No-op if nothing is in flight.
+    void JoinGameLogicBeforeUI();
+    // P1.3: queue a command to run on the main thread at the end of the current frame, after the Game thread,
+    // the physics step and PreRender are joined, the deferred physics mutations are flushed and the overlap
+    // window is closed. Any thread. Pass object IDs and resolve them when the command runs, not raw pointers.
+    // A command queued while the queue is being applied runs at the end of the next frame.
+    void PostJoin(std::function<void()> fn);
+
 private:
+    bool CanOverlapGameAndRender();
+    void RunBonesPrepass();
+    void JoinGameLogic();
+    void ApplyPostJoinQueue();
+
     std::atomic<bool> m_frame_overlap_active{ false };
+    std::atomic<bool> m_game_render_overlap_frame{ false };
+    std::mutex m_post_join_lock;
+    xr_vector<std::function<void()>> m_post_join_queue;
 
 public:
     Event PresentationFinished = nullptr;

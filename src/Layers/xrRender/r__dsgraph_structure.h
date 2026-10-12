@@ -198,6 +198,9 @@ struct R_dsgraph_structure
     }
     IRender_Sector::sector_id_t detect_sector(const Fvector& P);
     IRender_Sector::sector_id_t detect_sector(const Fvector& P, Fvector& D);
+    // Same with a caller-owned collider: Sectors_xrc keeps query results, so concurrent callers need their own.
+    IRender_Sector::sector_id_t detect_sector(xrXRC& xrc, const Fvector& P);
+    IRender_Sector::sector_id_t detect_sector(xrXRC& xrc, const Fvector& P, Fvector& D);
 
     void add_static(dxRender_Visual* pVisual, const CFrustum& view, u32 planes);
     // lod_bind_source: when following m_lod, pass hi CKinematics so LOD skinning uses hi bone matrices (LOD has no animation blends).
@@ -229,5 +232,19 @@ struct R_dsgraph_structure
     void render_R1_box(IRender_Sector::sector_id_t sector_id, Fbox& _bb, int _element);
 
     void build_subspace();
+
+    // Parallel main build (plans/optimization_mt/08-parallel-main-build.md): the dynamic part of the main-view
+    // build split into parts over task workers. Each part fills its own shard - a private R_dsgraph_structure - and the
+    // shards are appended to this structure in part order, which reproduces the sequential insertion order exactly.
+    //
+    // The structure add_Visual() fills for this context on the calling thread: the shard of the part running on this
+    // thread, otherwise this structure.
+    R_dsgraph_structure& insert_target();
+    // Appends the dynamic lists of a shard in its insertion order (mapMatrixPasses, the sorted/HUD maps).
+    void merge_dynamic(R_dsgraph_structure& shard);
+    // Empties the dynamic lists, keeping their memory for the next frame (unlike reset()).
+    void clear_dynamic();
+    // Runs the main view's loop over lstRenderables split into parts; false - not this frame (the sequential loop runs).
+    bool build_dynamic_main_parallel(u32 ltrack_index, bool collect_lights);
 };
 } // namespace xray::render::RENDER_NAMESPACE

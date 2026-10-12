@@ -185,7 +185,9 @@ void CSoundRender_Emitter::move_cursor(int offset)
 
 void CSoundRender_Emitter::fill_data(void* dest, u32 offset, u32 size)
 {
-    if (!ovf)
+    // Lazy ogg open: a source with cached PCM is played without its ogg file (decompress() does not use ovf). The
+    // source is checked on every fill: set_cursor() may switch owner_data->handle to an attached sound without cache.
+    if (!ovf && !source()->has_cached_pcm())
     {
         ovf = source()->open();
         PERF_INC(snd_ogg_open_lazy);

@@ -109,6 +109,9 @@ public:
 
 public:
     [[nodiscard]] size_t GetWorkersCount() const noexcept;
+    // Upper bound of GetCurrentWorkerID() + 1 for any registered thread, including custom threads registered
+    // later (GetWorkersCount() may still grow). For per-worker arrays sized once.
+    [[nodiscard]] size_t GetMaxWorkersCount() const noexcept;
     [[nodiscard]] static size_t GetCurrentWorkerID() noexcept;
     void GetStats(size_t& allocated, size_t& pushed, size_t& finished);
 };

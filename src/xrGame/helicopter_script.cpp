@@ -2,6 +2,7 @@
 
 #include "helicopter.h"
 #include "script_game_object.h"
+#include "xrPhysics/PHStepDefer.h"
 
 int CHelicopter::GetMovementState() { return m_movement.type; }
 int CHelicopter::GetHuntState() { return m_enemy.type; }
@@ -77,7 +78,20 @@ void CHelicopter::script_register(lua_State* luaState)
             .def("UseFireTrail", (bool (CHelicopter::*)(void)) & CHelicopter::UseFireTrail)
             .def("UseFireTrail", (void (CHelicopter::*)(bool)) & CHelicopter::UseFireTrail)
 
-            .def("Die", &CHelicopter::DieHelicopter)
+            // The death turns the flying shell into a falling wreck (contact callbacks, velocities, Enable, bone
+            // callbacks) - with the B6 early physics kick the whole call waits for the physics step's join, the helicopter
+            // being found again by ID (xrPhysics/PHStepDefer.h). Lua sees GetState() == eDead from the next frame.
+            .def("Die", +[](CHelicopter* self)
+            {
+                ph_step_defer::ScriptCallScope script_call;
+                if (ph_step_defer::DeferForObject(ph_step_defer::Kind::Object, self->ID(), [](IGameObject& owner)
+                {
+                    if (CHelicopter* heli = smart_cast<CHelicopter*>(&owner))
+                        heli->DieHelicopter();
+                }))
+                    return;
+                self->DieHelicopter();
+            })
             .def("StartFlame", &CHelicopter::StartFlame)
             .def("Explode", &CHelicopter::ExplodeHelicopter)
 

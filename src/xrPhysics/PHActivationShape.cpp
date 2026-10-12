@@ -18,6 +18,7 @@
 #endif // DEBUG
 
 #include "PHDynamicData.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrServerEntities/PHSynchronize.h"
 #include "xrServerEntities/PHNetState.h"
 
@@ -218,8 +219,8 @@ void CPHActivationShape::Destroy()
     dBodyDestroy(m_body);
     m_body = nullptr;
 }
-bool CPHActivationShape::Activate(
-    const Fvector need_size, u16 steps, float max_displacement, float max_rotation, bool un_freeze_later /*	=false*/)
+bool CPHActivationShape::Activate(const Fvector need_size, u16 steps, float max_displacement, float max_rotation,
+    bool un_freeze_later /*	=false*/, u16 max_push_steps /*= 0*/)
 {
     using namespace ::detail::activation_shape;
 
@@ -229,6 +230,9 @@ bool CPHActivationShape::Activate(
     // and static-mesh collision for every currently-active object, which is what shows up under
     // CLevel::g_sv_Spawn in Tracy when many NPCs are on the level.
     ZoneNamedN(___tracy_activation_shape_activate, "CPHActivationShape::Activate", true);
+    // P16 (plans/optimization_mt/11-ragdoll-spikes.md): every caller (spawn of a character, start of a ragdoll, items,
+    // explosives, cars) - the split by caller is in npc_cpp_profile (character_physics/death_correct).
+    PERF_SCOPE(ph_act_shape);
     int dbg_step_count = 0;
     const u16 dbg_objects_before = ph_world->ObjectsNumber();
 
@@ -246,7 +250,10 @@ bool CPHActivationShape::Activate(
 #endif
     VERIFY(m_geom && m_body);
     CPHObject::activate();
-    ph_world->Freeze();
+    {
+        PERF_SCOPE(ph_act_shape_freeze);
+        ph_world->Freeze();
+    }
     UnFreeze();
     max_depth = 0.f;
 
@@ -268,8 +275,12 @@ bool CPHActivationShape::Activate(
         dGeomBoxGetLengths(m_geom, cast_fp(early_exit_from_size));
         if (early_exit_from_size.similar(need_size))
         {
+            PERF_INC(ph_act_shape_early_exit);
             if (!un_freeze_later)
+            {
+                PERF_SCOPE(ph_act_shape_freeze);
                 ph_world->UnFreeze();
+            }
             if (ph_console::ph_dbg_spawn_stats)
             {
                 const u16 dbg_objects_after = ph_world->ObjectsNumber();
@@ -326,9 +337,11 @@ bool CPHActivationShape::Activate(
     step_size.mul(fnum_steps_r);
     size.set(from_size);
     bool ret = false;
+    // P16: the push-out loop below stops after max_push_steps world steps when the cap is set (see Activate's header)
+    bool capped = false;
     V_PH_WORLD_STATE temp_state;
     ph_world->GetState(temp_state);
-    for (int m = 0; steps > m; ++m)
+    for (int m = 0; steps > m && !capped; ++m)
     {
         // float param =fnum_steps_r*(1+m);
         // InterpolateBox(id,param);
@@ -352,17 +365,28 @@ bool CPHActivationShape::Activate(
                     ret = true;
                     break;
                 }
+                if (max_push_steps && dbg_step_count >= int(max_push_steps))
+                {
+                    capped = true;
+                    break;
+                }
             }
             attempts--;
-        } while (!ret && attempts > 0);
+        } while (!ret && attempts > 0 && !capped);
 #ifdef DEBUG
 //		Msg("correction attempts %d",10-attempts);
 #endif
     }
     RestoreVelocityState(temp_state);
     CHECK_POS(Position(), "pos after RestoreVelocityState(temp_state);", true);
+    PERF_ADD(ph_act_shape_steps, u64(dbg_step_count));
+    PERF_ADD_IF(!ret, ph_act_shape_unresolved, 1);
+    PERF_ADD_IF(capped, ph_act_shape_capped, 1);
     if (!un_freeze_later)
+    {
+        PERF_SCOPE(ph_act_shape_freeze);
         ph_world->UnFreeze();
+    }
     if (ph_console::ph_dbg_spawn_stats)
     {
         const u16 dbg_objects_after = ph_world->ObjectsNumber();

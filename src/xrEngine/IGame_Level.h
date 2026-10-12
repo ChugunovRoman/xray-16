@@ -116,6 +116,10 @@ public:
     virtual void Load_GameSpecific_CFORM_SetMaterials(CDB::TRI* tris, u32 count, xr_map<u16, shared_str>& gameMtls) = 0;
 
     virtual void OnFrame(void);
+    /// The per-frame part of the level that runs on the game logic thread (06-framemove-offload.md, B4/B5):
+    /// XRay::Engine::GameThread (sequential frame, after FrameMove) and the game/render overlap Game thread, right
+    /// after SoundEvent_Dispatch and before the non-RT scheduler. Only for a ready, unpaused level.
+    virtual void OnGameLogicFrame() {}
     virtual void OnRender(void);
     /// When r__dedicated_second_vp is on, optional split: main framebuffer then scope RT (see IGame_Level::OnRender).
     virtual void RenderBulletTracersForMainViewport() {}

@@ -14,6 +14,7 @@
 #include "xrEngine/xr_input.h"
 #include "xrUICore/ui_base.h"
 #include "xrEngine/GameFont.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 CAttachableItem* CAttachableItem::m_dbgItem = NULL;
 
@@ -55,8 +56,12 @@ void CAttachableItem::OnH_A_Chield()
         object().setVisible(true);
 }
 
+// Was reached only by the explicit CInventoryItem::renderable_Render calls of CInventoryItemObject / CEatableItemObject
+// (the virtual call of CAttachmentOwner / CInventoryOwner goes to their override); they no longer make them - see
+// inventory_item_object.cpp.
 void CAttachableItem::renderable_Render(u32 context_id, IRenderable* root)
 {
+    PERF_INC(item_render_add_visual);
     GEnv.Render->add_Visual(context_id, root, object().Visual(), object().XFORM());
 }
 

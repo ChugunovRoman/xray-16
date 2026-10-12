@@ -222,6 +222,13 @@ public: //
     ///////////////////////////////////////////////////Position///////////////////////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     virtual void SetTransform(const Fmatrix& m0, motion_history_state history_state); //
+    // B6 early physics kick (PHStepDefer.h): the body has been put into the simulated world (RunSimulation) and is
+    // not destroyed yet - the step can reach it. A teleport of it from another thread while the step runs is deferred;
+    // one of a body still being built (a ragdoll skeleton prebuilt on the scheduler, P16) is not.
+    bool IsInSimulatedWorld() const;
+    // The post-step flush of a deferred SetTransform / ToBonePos (PHStepDefer.cpp). False - nothing done - if the body
+    // left the world meanwhile.
+    bool ApplyDeferredTransform(const Fmatrix& m0, motion_history_state history_state, bool fill_interpolation);
     virtual void TransformPosition(const Fmatrix& form, motion_history_state history_state);
     virtual void getQuaternion(Fquaternion& quaternion); //
     virtual void setQuaternion(const Fquaternion& quaternion); //

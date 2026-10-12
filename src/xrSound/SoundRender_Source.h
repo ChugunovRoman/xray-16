@@ -71,6 +71,9 @@ public:
 
     void decompress(void* dest, u32 byte_offset, u32 size, OggVorbis_File* ovf) const;
 
+    // B-1: the whole sound is decoded in m_cached_pcm, decompress() never touches the ogg file (ovf may be null)
+    [[nodiscard]] bool has_cached_pcm() const { return !m_cached_pcm.empty(); }
+
     [[nodiscard]] const auto& data_info() const { return m_data_info; }
     [[nodiscard]] const auto&      info() const { return m_info; }
 

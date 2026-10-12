@@ -399,6 +399,8 @@ public:
     virtual CPhysicsElement* NearestToPoint(const Fvector& point, NearestToPointCallback* cb = 0) = 0;
     virtual void build_FromKinematics(IKinematics* K, BONE_P_MAP* p_geting_map = NULL) = 0;
     virtual void preBuild_FromKinematics(IKinematics* K, BONE_P_MAP* p_geting_map = NULL) = 0;
+    // P16: preBuild_FromKinematics from the given root bone instead of K->LL_GetBoneRoot() (reads the model only)
+    virtual void preBuild_FromKinematicsRoot(IKinematics* K, u16 root_bone, BONE_P_MAP* p_geting_map = NULL) = 0;
     virtual void Build(bool disable = false) = 0;
     virtual void ActivatingBonePoses(IKinematics& K) = 0;
     virtual void SetMaxAABBRadius(float size){};

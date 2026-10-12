@@ -42,8 +42,13 @@ void CSoundRender_Emitter::start(const ref_sound& _owner, u32 flags, float delay
     for (auto& buf : temp_buf)
         buf.resize(source()->data_info().bytesPerBuffer);
 
-    ovf = source()->open();
-    PERF_INC(snd_ogg_open_start);
+    // Lazy ogg open (plans/spawn_optimization/SPEC.md, stage 1), always: do not open the ogg on the thread that starts
+    // the sound (main for GO->OnEvent: hits, shots, items). A source with cached PCM never needs it (decompress() reads
+    // the cache); a streamed one is opened by its first fill_data(), on the TaskScheduler worker of the prefill - the
+    // same lazy open a sound coming back from stSimulating already does. This emitter is new
+    // (CSoundRender_Scene::i_play), not yet seen by update()/render(), so ovf is null here.
+    if (source()->has_cached_pcm())
+        PERF_INC(snd_ogg_open_skipped);
 }
 
 void CSoundRender_Emitter::i_stop()

@@ -16,8 +16,11 @@
 #include "PHElement.h"
 #include "PHElementInline.h"
 #include "PHShell.h"
+#include "PHStepDefer.h"
 void CPHShell::activate(bool disable)
 {
+    // Shell activation (every CPHShell::Activate overload) adds bodies, geoms and joints to the simulated world.
+    PH_STEP_HAZARD("CPHShell::Activate");
     PresetActive();
     if (!CPHObject::is_active())
         vis_update_deactivate();
@@ -219,6 +222,7 @@ void CPHShell::PresetActive()
 void CPHShell::Deactivate()
 {
     VERIFY(ph_world);
+    PH_STEP_HAZARD("CPHShell::Deactivate");
     ph_world->NetRelcase(this);
 
     if (m_pPhysicsShellAnimatorC)

@@ -1545,6 +1545,8 @@ float CScriptGameObject::GetLuminocity()
 
 void CScriptGameObject::ForceSetPosition(Fvector pos, bool bActivate)
 {
+    if (DeferWhilePhysicsStep([pos, bActivate](CScriptGameObject& o) { o.ForceSetPosition(pos, bActivate); }))
+        return;
     CPhysicsShellHolder* sh = object().cast_physics_shell_holder();
     if (!sh)
         return;

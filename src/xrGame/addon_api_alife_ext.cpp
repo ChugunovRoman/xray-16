@@ -669,6 +669,8 @@ GwpResult GWP_CALL ApiAlifeRelease(const GwpPlugin* self, GwpObjectId id)
     }
     if (!g_pGameLevel)
         return GWP_ERROR_INVALID_STATE;
+    // P17: relcase report (perf_metrics) - destroyed by a plugin release
+    Level().Objects.destroy_origin_note(object->ID, CObjectList::destroy_origin_plugin);
     NET_Packet packet;
     packet.w_begin(M_EVENT);
     packet.w_u32(Level().timeServer());

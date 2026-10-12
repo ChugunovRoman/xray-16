@@ -28,6 +28,8 @@
 #ifndef MASTER_GOLD
 #include "Actor.h"
 #include "ai_debug.h"
+#include "xrEngine/xr_object_list.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #endif // MASTER_GOLD
 
 struct CHitObjectPredicate
@@ -252,9 +254,37 @@ void CHitMemoryManager::remove_links(IGameObject* object)
     // Group-owned list, null for a member outside any group - see CVisualMemoryManager::remove_links.
     if (m_hits)
     {
-        HITS::iterator I = std::find_if(m_hits->begin(), m_hits->end(), CHitObjectPredicate(object));
-        if (I != m_hits->end())
-            m_hits->erase(I);
+        // P17: cleaned of the whole batch by the first member, see CVisualMemoryManager::remove_links.
+        // Same match as CHitObjectPredicate: by ID, by pointer when the ID cannot be read.
+        const RelcaseBatch* batch = g_pGameLevel ? g_pGameLevel->Objects.relcase_batch() : nullptr;
+        if (batch && batch->contains(object))
+        {
+            if (g_pGameLevel->Objects.relcase_first_visit(m_hits))
+            {
+                PERF_INC(relcase_shared_purges);
+                PERF_ADD(relcase_shared_items, m_hits->size());
+                m_hits->erase(std::remove_if(m_hits->begin(), m_hits->end(),
+                                  [batch](const MemorySpace::CHitObject& hit_object)
+                                  {
+                                      if (!hit_object.m_object)
+                                          return false;
+                                      const u16 id = object_id(hit_object.m_object);
+                                      if (id != u16(-1))
+                                          return batch->contains_id(id);
+                                      return batch->contains(hit_object.m_object);
+                                  }),
+                    m_hits->end());
+            }
+            else
+                PERF_INC(relcase_shared_skips);
+        }
+        else
+        {
+            PERF_ADD(relcase_shared_items, m_hits->size());
+            HITS::iterator I = std::find_if(m_hits->begin(), m_hits->end(), CHitObjectPredicate(object));
+            if (I != m_hits->end())
+                m_hits->erase(I);
+        }
     }
 
 #ifdef USE_SELECTED_HIT

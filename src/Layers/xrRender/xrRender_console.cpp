@@ -293,6 +293,10 @@ int r__particle_render_parallel = 0;
 int r__particle_render_parallel_min_count = 256;
 int r__parallel_skeleton_visbox = 0;
 int r__parallel_skeleton_visbox_min_bones = 64;
+// Parallel main build (plans/optimization_mt/08-parallel-main-build.md): dynamic part of the main-view build split
+// over task workers. grain - spatial entries per part (at most 64 parts), min - fewer entries -> sequential loop.
+int r__parallel_main_build_grain = 32;
+int r__parallel_main_build_min = 128;
 int ps_r2_mt_render = 1;
 int ps_r__phase_mt = 0;
 
@@ -305,6 +309,15 @@ float ps_r2_gloss_factor = 4.0f;
 //- Mad Max
 
 //AVO: detail draw radius
+// Temporary A/B switches of the render optimizations: like CCC_Integer, but not kept in user.ltx (always start at
+// the default) - the behaviour of "1" becomes permanent once measured, the switch is then removed.
+class CCC_IntegerNotSavedR final : public CCC_Integer
+{
+public:
+    using CCC_Integer::CCC_Integer;
+    void Save(IWriter*) override {}
+};
+
 class CCC_detail_radius : public CCC_Integer
 {
 public:
@@ -1030,5 +1043,7 @@ void xrRender_initconsole()
     CMD4(CCC_Integer, "r__particle_render_parallel_min_count", &r__particle_render_parallel_min_count, 64, 65536);
     CMD4(CCC_Integer, "r__parallel_skeleton_visbox", &r__parallel_skeleton_visbox, 0, 1);
     CMD4(CCC_Integer, "r__parallel_skeleton_visbox_min_bones", &r__parallel_skeleton_visbox_min_bones, 8, 512);
+    CMD4(CCC_Integer, "r__parallel_main_build_grain", &r__parallel_main_build_grain, 4, 4096);
+    CMD4(CCC_Integer, "r__parallel_main_build_min", &r__parallel_main_build_min, 0, 65536);
 }
 } // namespace xray::render::RENDER_NAMESPACE

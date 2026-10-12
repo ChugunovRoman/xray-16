@@ -10,6 +10,7 @@
 #include "IPhysicsShellHolder.h"
 #include "xrCore/Animation/Bone.hpp"
 #include "xrEngine/device.h"
+#include "PHStepDefer.h"
 extern class CPHWorld* ph_world;
 ///////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////
@@ -208,6 +209,8 @@ void CPHCapture::Release()
 {
     if (e_state == cstReleased || e_state == cstFree)
         return;
+    // Captures are created, released and destroyed by CPHMovementControl, which defers these while the step runs.
+    PH_STEP_HAZARD("CPHCapture::Release");
     VERIFY(m_island.DActiveIsland() == &m_island);
 
     if (m_joint)
@@ -251,6 +254,7 @@ void CPHCapture::Release()
 #include "PHElement.h"
 void CPHCapture::Deactivate()
 {
+    PH_STEP_HAZARD("CPHCapture::Deactivate");
     Release();
     if (m_taget_element)
     {

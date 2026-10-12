@@ -164,7 +164,14 @@ void CActor::PickupModeUpdate_COD()
 
     ISpatialResult.clear();
     SpatialCaller spatial_caller(SpatialQueryCaller::actor);
-    g_pGamePersistent->SpatialSpace.q_frustum(ISpatialResult, 0, STYPE_COLLIDEABLE, frustum);
+    {
+        // P19b (14-spike-instrumentation.md): every collideable object in the view frustum up to the far plane, every
+        // frame; the loop below keeps the items within 2 m (the value / actor/ucl/pickup_cod/found - how many came back)
+        ZoneScopedN("actor_ucl/pickup_cod/q_frustum");
+        g_pGamePersistent->SpatialSpace.q_frustum(ISpatialResult, 0, STYPE_COLLIDEABLE, frustum);
+        ZoneValue(ISpatialResult.size());
+    }
+    PERF_ADD(actor_ucl_pickup_cod_found, ISpatialResult.size());
 
     float maxlen = 1000.0f;
     CInventoryItem* pNearestItem = NULL;
@@ -211,6 +218,7 @@ void CActor::PickupModeUpdate_COD()
 
     if (pNearestItem)
     {
+        ZoneScopedN("actor_ucl/pickup_cod/ray");
         CFrustum frustum;
         frustum.CreateFromMatrix(Device.mFullTransform, FRUSTUM_P_LRTB | FRUSTUM_P_FAR);
         if (!CanPickItem(frustum, Device.vCameraPosition, &pNearestItem->object()))

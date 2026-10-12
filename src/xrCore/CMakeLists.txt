@@ -400,6 +400,7 @@ target_sources_grouped(
     TARGET xrCore
     NAME "Profiling"
     FILES
+    Profiling/IniLoadStats.hpp
     Profiling/PerfMetrics.cpp
     Profiling/PerfMetrics.hpp
     Profiling/PerfMetricsList.inl

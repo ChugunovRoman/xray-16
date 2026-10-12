@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #pragma hdrstop
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include "../xrRender/ResourceManager.h"
 #include "Layers/xrRenderGL/glUploadContext.hpp"
@@ -69,7 +70,11 @@ void CTexture::PostLoad()
 void CTexture::apply_load(CBackend& cmd_list, u32 dwStage)
 {
     CHK_GL(glActiveTexture(GL_TEXTURE0 + dwStage));
-    if (!flags.bLoaded) Load();
+    if (!flags.bLoaded)
+    {
+        PERF_INC(tex_apply_load); // spawn stage 0: loaded by its first bind (render)
+        Load();
+    }
     else PostLoad();
     bind(cmd_list, dwStage);
 };
@@ -156,6 +161,8 @@ void CTexture::Load()
     flags.bLoaded = true;
     desc_cache = 0;
     if (pSurface) return;
+    // Spawn stage 0 (plans/spawn_optimization/SPEC.md): by thread - main / Game / workers (DeferredUpload at level load)
+    PERF_SCOPE_BY_THREAD(tex_load_main, tex_load_game, tex_load_worker);
 
     flags.bUser = false;
     flags.MemoryUsage = 0;

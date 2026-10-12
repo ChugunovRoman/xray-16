@@ -50,7 +50,8 @@ void ActivateShapePhysShellHolder(
 }
 
 bool ActivateShapeCharacterPhysicsSupport(Fvector& out_pos, const Fvector& vbox, const Fvector& activation_pos,
-    const Fmatrix& mXFORM, bool not_collide_characters, bool set_rotation, IPhysicsShellHolder* m_EntityAlife)
+    const Fmatrix& mXFORM, bool not_collide_characters, bool set_rotation, IPhysicsShellHolder* m_EntityAlife,
+    u16 max_push_steps /*= 0*/)
 {
     // P1 (plans/optimization_spawn): entry point of the per-NPC-spawn position correction that
     // freezes the physics world and re-steps it — see CPHActivationShape::Activate for the cost.
@@ -65,7 +66,7 @@ bool ActivateShapeCharacterPhysicsSupport(Fvector& out_pos, const Fvector& vbox,
     }
     if (set_rotation)
         activation_shape.set_rotation(mXFORM);
-    bool ret = activation_shape.Activate(vbox, 1, 1.f, float(M_PI) / 8.f);
+    bool ret = activation_shape.Activate(vbox, 1, 1.f, float(M_PI) / 8.f, false, max_push_steps);
     out_pos.set(activation_shape.Position());
     activation_shape.Destroy();
     return ret;

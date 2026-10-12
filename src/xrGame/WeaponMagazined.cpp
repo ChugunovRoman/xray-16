@@ -567,6 +567,10 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
 void CWeaponMagazined::UpdateCL()
 {
     ZoneNamedN(___wpn_ucl, "ucl_CWeaponMagazined", true);
+    // A hidden NPC weapon skips the whole chain, CWeapon::UpdateCL included (TrySkipHiddenUpdateCL);
+    // an idle NPC weapon whose owner skipped its UpdateCL by the distance LOD - the same
+    if (TrySkipHiddenUpdateCL() || TrySkipOwnerLodUpdateCL())
+        return;
     {
         ZoneNamedN(___wpn_ucl_inh, "ucl_CWeaponMagazined/inherited", true);
         inherited::UpdateCL();

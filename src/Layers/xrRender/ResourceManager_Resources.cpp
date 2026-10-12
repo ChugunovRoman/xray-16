@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "xrCore/Threading/ScopeLock.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <FlexibleVertexFormat.h>
 
@@ -278,7 +279,16 @@ CTexture* CResourceManager::_CreateTexture(LPCSTR _Name)
     m_textures.emplace(T->set_name(Name), T);
     T->Preload();
     if (Device.b_is_Ready && !bDeferredLoad)
+    {
+        // Spawn stage 0 (plans/spawn_optimization/SPEC.md): a synchronous load after the level load (DeferredUpload):
+        // in play (not loading screen / precache) and inside a client spawn apart. Still under m_textures_lock.
+        ZoneScopedN("texture_create_sync");
+        ZoneText(Name, xr_strlen(Name));
+        PERF_SCOPE(tex_create_sync);
+        PERF_SCOPE_IF(!load_screen_renderer.IsActive() && Device.dwPrecacheFrame == 0, tex_create_sync_play);
+        PERF_SCOPE_IF(xray::perf::TlSpawn() != 0, tex_create_sync_spawn);
         T->Load();
+    }
     return T;
 }
 

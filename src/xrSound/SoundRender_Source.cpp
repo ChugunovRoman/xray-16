@@ -206,6 +206,7 @@ OggVorbis_File* CSoundRender_Source::open() const
 {
     ZoneScopedN("CSoundRender_Source::open");
     PERF_INC(snd_ogg_open);
+    PERF_SCOPE_BY_THREAD(snd_ogg_open_main, snd_ogg_open_game, snd_ogg_open_worker); // stage 1: where it is paid
 
     const auto file = FS.r_open(pname.c_str());
     R_ASSERT3(file && file->length(), "Can't open wave file:", pname.c_str());

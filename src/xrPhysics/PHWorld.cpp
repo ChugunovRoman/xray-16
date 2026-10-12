@@ -29,6 +29,7 @@
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrEngine/defines.h"
 #include "xrEngine/device.h"
+#include "xrEngine/EngineThreading.h"
 #include "xrEngine/GameFont.h"
 #include "xrEngine/PerformanceAlert.hpp"
 #include "xrEngine/xr_object.h"
@@ -36,6 +37,7 @@
 #include "IPhysicsShellHolder.h"
 #include "PHCharacter.h"
 #include "PHShell.h"
+#include "PHStepDefer.h"
 
 #ifdef DEBUG
 //				void DBG_ObjAfterPhDataUpdate	( CPHObject *obj );
@@ -52,6 +54,20 @@
 ///////////////////////////////////////////////////////////
 // BOOL		g_bDebugDumpPhysicsStep				= 0;
 CPHWorld* ph_world = 0;
+
+namespace
+{
+// B8 (plans/optimization_mt/09-physics-earlier-parallel.md): true on CPHWorld's physics thread once it is a registered
+// TaskManager worker (always, from its first step). Thread-local, not a member: Step() also runs synchronously on the
+// main thread (load, spawn), which must keep its own parallel island solve.
+thread_local bool s_tl_physics_task_worker = false;
+// B8: true on the thread running Step() while it waits for the parallel island solve. TaskManager::Wait may run foreign
+// tasks on it meanwhile (render work, Game thread work it steals) - they are not part of the step, and with the islands
+// solved by the pool at the same time an immediate physics mutation from them would race with it. The deferral
+// predicates therefore treat this thread like any other one while the flag is set (IsStepThreadCaller). The island
+// tasks themselves are pure ODE and never ask.
+thread_local bool s_tl_island_wait = false;
+} // namespace
 
 IPHWorld* physics_world() { return ph_world; }
 void create_physics_world(
@@ -210,6 +226,7 @@ void CPHWorld::Destroy()
     WaitPhysicsStep();
     // Deferred game-side notifications target objects that are being destroyed with the level.
     m_deferred_processing_activate.clear();
+    ph_step_defer::ClearPending();
     if (m_physics_thread.joinable())
     {
         m_physics_thread_exit.store(true, std::memory_order_release);
@@ -277,6 +294,10 @@ void CPHWorld::OnFrameStep()
 
 void CPHWorld::BeginSchedulerOverlapFrame()
 {
+    m_begin_camera_pos = Device.vCameraPosition; // used by the Kick only in game/render overlap frames
+#if XR_PERF_METRICS
+    m_overlap_begin_ticks = xray::perf::Ticks();
+#endif
     m_scheduler_overlap_active.store(true, std::memory_order_release);
 }
 
@@ -284,6 +305,15 @@ bool CPHWorld::ShouldDeferSchedulerPhysicsMutation() const
 {
     if (!m_scheduler_overlap_active.load(std::memory_order_acquire))
         return false;
+    // GAME_RENDER_OVERLAP_PLAN P1.2, game/render overlap frame: from the Game thread kick until the main thread's
+    // join (IsGameThreadRunning() covers exactly that interval there) the scheduler on the Game thread and the
+    // render on main run at the same time, and the physics step (kicked by main right before) runs beside both.
+    // Every thread except the physics step thread defers - deterministic, independent of timing and of which
+    // stage the Game thread is in. After the join this falls through to the step-in-flight rule below (main
+    // keeps deferring while the step still runs), and once WaitPhysicsStep() returns, the flush runs for real.
+    // A sequential frame never takes this branch (IsGameRenderOverlapFrame() is false).
+    if (Device.IsGameRenderOverlapFrame() && XRay::Engine::IsGameThreadRunning())
+        return !IsStepThreadCaller();
     // B-1 fix: a step must actually be IN FLIGHT to need deferring. Without this check,
     // flush_deferred_mutations() itself (called from JoinPhysicsOverlap() on the main thread, i.e.
     // this_thread::get_id() != m_step_thread_id == the dedicated physics thread, AFTER
@@ -299,7 +329,12 @@ bool CPHWorld::ShouldDeferSchedulerPhysicsMutation() const
     // Whichever thread runs FrameStep (CPHWorld's dedicated physics thread) is stable across the whole
     // window - only defer mutations from OTHER threads (GameThread scheduler, or render-path code
     // running on main while the physics thread is mid-step).
-    return std::this_thread::get_id() != m_step_thread_id;
+    return !IsStepThreadCaller();
+}
+
+bool CPHWorld::IsStepThreadCaller() const
+{
+    return !s_tl_island_wait && std::this_thread::get_id() == m_step_thread_id.load(std::memory_order_acquire);
 }
 
 bool CPHWorld::defer_scheduler_mutation(std::function<void()> op)
@@ -311,6 +346,11 @@ bool CPHWorld::defer_scheduler_mutation(std::function<void()> op)
     return true;
 }
 
+bool CPHWorld::IsStepRunningOnOtherThread() const
+{
+    return m_step_running.load(std::memory_order_acquire) && !IsStepThreadCaller();
+}
+
 const Fvector& CPHWorld::StepCameraPosition() const
 {
     return m_step_running.load(std::memory_order_acquire) ? m_step_camera_pos : Device.vCameraPosition;
@@ -318,7 +358,7 @@ const Fvector& CPHWorld::StepCameraPosition() const
 
 bool CPHWorld::IsPhysicsStepThread() const
 {
-    return m_step_running.load(std::memory_order_acquire) && std::this_thread::get_id() == m_step_thread_id;
+    return m_step_running.load(std::memory_order_acquire) && IsStepThreadCaller();
 }
 
 void CPHWorld::flush_deferred_mutations()
@@ -344,6 +384,9 @@ void CPHWorld::flush_deferred_mutations()
         local.swap(m_deferred_mutations);
     }
     ZoneScopedN("PhysicsDeferredMutations");
+    ZoneValue(local.size());
+    // physics/defer/flushed: every queued intent (B-1 Request* ones and the mode-2 ones of PHStepDefer.h).
+    PERF_ADD(ph_defer_flushed, local.size());
     for (auto& op : local)
         op();
     m_scheduler_overlap_active.store(false, std::memory_order_release);
@@ -362,10 +405,33 @@ void CPHWorld::PhysicsWorkerLoop()
         m_physics_wake.Wait();
         if (m_physics_thread_exit.load(std::memory_order_acquire))
         {
+            // B8: like the Game thread (EngineThreading.cpp, GameLogicThreadLoop) - run what is still queued here
+            // (not stolen yet; an unregistered queue is invisible to everyone), then give the worker slot back.
+            if (s_tl_physics_task_worker && TaskScheduler)
+            {
+                while (TaskScheduler->ExecuteOneTask()) {}
+                TaskScheduler->UnregisterThisThreadAsWorker();
+                s_tl_physics_task_worker = false;
+            }
             m_physics_done.Set(); // never leave a waiter hanging, whatever the call order
             return;
         }
-        OnFrameStep();
+        // B8 (always): become a TaskManager worker before the first step. Only registered workers' queues are
+        // visible to the pool (TryToSteal); unregistered, the parallel island solve below (xr_parallel_for in
+        // Step()) and every task the step pushed would run on this thread alone. Registration takes a slot reserved
+        // by TaskManager (CUSTOM_THREADS_RESERVE) and gives this thread its own crow list in CObjectList
+        // (GetCurrentWorkerID() < GetMaxWorkersCount()). It is kept until the thread exits (Destroy):
+        // unregistering mid-game would pause the whole pool.
+        if (!s_tl_physics_task_worker && TaskScheduler)
+        {
+            ZoneScopedN("PhysicsRegisterTaskWorker");
+            TaskScheduler->RegisterThisThreadAsWorker();
+            s_tl_physics_task_worker = true;
+        }
+        {
+            PERF_SCOPE(ph_step_wall);
+            OnFrameStep();
+        }
         m_physics_done.Set();
     }
 }
@@ -378,9 +444,17 @@ void CPHWorld::KickPhysicsOverlap()
         m_physics_thread = Threading::RunThread("Physics", [this] { PhysicsWorkerLoop(); });
     // Everything the step reads from the main thread's frame state is published before the wake (the
     // Event gives the physics thread a happens-before on these plain stores).
-    m_step_camera_pos = Device.vCameraPosition;
+    // Game/render overlap frame: the step runs parallel to DoRender - take the camera snapshotted on main in
+    // BeginSchedulerOverlapFrame, not the live Device field (the same value as the snapshot unless something
+    // changed it after BeginSchedulerOverlapFrame).
+    m_step_camera_pos = Device.IsGameRenderOverlapFrame() ? m_begin_camera_pos : Device.vCameraPosition;
     m_steps_num_at_kick = m_steps_num;
-    m_step_thread_id = m_physics_thread.get_id();
+#if XR_PERF_METRICS
+    // physics/kick_delay: how far into the overlap window the step starts.
+    if (xray::perf::g_perf_metrics_active && m_overlap_begin_ticks)
+        xray::perf::AddTimeSlow(xray::perf::Metric::ph_kick_delay, xray::perf::Ticks() - m_overlap_begin_ticks);
+#endif
+    m_step_thread_id.store(m_physics_thread.get_id(), std::memory_order_release);
     m_step_running.store(true, std::memory_order_release);
     m_physics_in_flight = true;
     m_physics_done.Reset();
@@ -429,6 +503,20 @@ void CPHWorld::Step()
     // issues (one CollideDynamicsBroadphase per object) — see ISpatial_DB::q_box call volume during spawn.
     ZoneNamedN(___tracy_ph_world_step, "CPHWorld::Step", true);
     ZoneTextVF(___tracy_ph_world_step, "objects=%u freezed=%d", (unsigned)m_objects.count(), (int)IsFreezed());
+#if XR_PERF_METRICS
+    // P19 (plans/optimization_mt/14-spike-instrumentation.md): one physics substep longer than perf_spike_us
+    struct StepSpikeInfo
+    {
+        u32 objects, update_objects, islands;
+    };
+    StepSpikeInfo spike_info{static_cast<u32>(m_objects.count()), static_cast<u32>(m_update_objects.count()), 0};
+    const xray::perf::SpikeDescribeFn describe_spike = [](const void* ctx, char* buf, size_t size) {
+        const auto* info = static_cast<const StepSpikeInfo*>(ctx);
+        xr_sprintf(buf, size, "objects=%u update_objects=%u islands=%u ph_mt_island_solve=%d", info->objects,
+            info->update_objects, info->islands, ph_console::ph_mt_island_solve);
+    };
+    PERF_SPIKE_NAMED(step_spike, "physics/step", &spike_info, describe_spike, true);
+#endif
 
 #ifdef DEBUG
     debug_output().dbg_reused_queries_per_step() = 0;
@@ -579,16 +667,27 @@ void CPHWorld::Step()
         }
 
         const size_t island_count = m_island_solve_batch.size();
+        PERF_ADD(ph_islands, island_count);
+#if XR_PERF_METRICS
+        spike_info.islands = static_cast<u32>(island_count);
+#endif
         if (ph_console::ph_mt_island_solve != 0 && TaskScheduler &&
             island_count >= size_t(ph_console::ph_mt_island_min))
         {
             ZoneScopedN("ph_IslandStep_mt");
             CPHObject** const islands = m_island_solve_batch.data();
-            xr_parallel_for(TaskRange(size_t(0), island_count), [islands](const TaskRange<size_t>& range)
+            const std::thread::id step_thread = std::this_thread::get_id();
+            s_tl_island_wait = true;
+            xr_parallel_for(TaskRange(size_t(0), island_count), [islands, step_thread](const TaskRange<size_t>& range)
             {
+                ZoneScopedN("ph_IslandStep_part");
+                // physics/islands_offthread: a pool worker took this part (B8: the stepping thread is a worker).
+                if (std::this_thread::get_id() != step_thread)
+                    PERF_ADD(ph_islands_offthread, range.size());
                 for (size_t i = range.begin(); i != range.end(); ++i)
                     islands[i]->IslandStep(fixed_step);
             });
+            s_tl_island_wait = false;
         }
         else
         {

@@ -2,6 +2,8 @@
 #include "telekinetic_object.h"
 #include "xrPhysics/PHUpdateObject.h"
 
+#include <mutex>
+
 class CTelekinesis : public CPHUpdateObject
 {
 protected:
@@ -10,6 +12,13 @@ protected:
     TELE_OBJECTS objects;
     xr_vector<IGameObject*> m_nearest;
     bool active;
+    // B6 early physics kick (plans/optimization_mt/09-physics-earlier-parallel.md): `objects` and the telekinetic
+    // objects' states are walked by the physics step (PhTune / PhDataUpdate on the physics thread) while the Game
+    // thread updates them (schedule_update, activate / deactivate from monster and anomaly logic) - every entry point
+    // takes this lock. Recursive: the public methods call each other (fire_all -> deactivate, remove_object, ...).
+    // The body mutations done under it from the Game thread are queued by xrPhysics (PHStepDefer.h), so the step
+    // thread never waits for anything the Game thread holds.
+    std::recursive_mutex m_objects_lock;
 
 public:
     CTelekinesis();
@@ -51,12 +60,20 @@ public:
     u32 get_objects_count();
 
     // вернуть количество контролируемых объектов (всех)
-    u32 get_objects_total_count() { return objects.size(); }
+    u32 get_objects_total_count()
+    {
+        std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
+        return objects.size();
+    }
     // вернуть объект по индексу в массиве
     // a	copy of the object!
     CTelekineticObject get_object_by_index(u32 index)
     {
-        VERIFY(objects.size() > index);
+        std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
+        // The physics step may drop an object (PhTune -> clear_notrelevant) between the caller's
+        // get_objects_total_count() and this call: an empty object (TS_None) is returned then.
+        if (index >= objects.size())
+            return CTelekineticObject();
         return *objects[index];
     }
 
