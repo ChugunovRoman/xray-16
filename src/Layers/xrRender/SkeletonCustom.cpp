@@ -842,13 +842,14 @@ void CKinematics::CalculateWallmarks(bool hud)
     {
         wm_frame = Device.dwFrame;
         // Expired marks are deleted immediately; alive marks inside frustum are queued for rendering
-        std::erase_if(wallmarks, [&](const intrusive_ptr<CSkeletonWallmark>& wm) {
+        // erase/remove_if, not std::erase_if: the CMake builds (Linux, macOS) use C++17
+        wallmarks.erase(std::remove_if(wallmarks.begin(), wallmarks.end(), [&](const intrusive_ptr<CSkeletonWallmark>& wm) {
             if ((Device.fTimeGlobal - wm->TimeStart()) / ps_r__WallmarkTTL >= 1.f)
                 return true;
             if (!hud && RImplementation.ViewBase.testSphere_dirty(wm->m_Bounds.P, wm->m_Bounds.R))
                 RImplementation.add_SkeletonWallmark(wm);
             return false;
-        });
+        }), wallmarks.end());
     }
 }
 
