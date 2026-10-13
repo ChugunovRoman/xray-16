@@ -7,6 +7,8 @@
 #include "SkeletonX.h"
 #include "xrCore/FMesh.hpp"
 #include "xrCDB/Intersect.hpp"
+#include "xrEngine/EngineThreading.h"
+#include "xrEngine/device.h"
 
 #ifndef _EDITOR
 #include "xrServerEntities/smart_cast.h"
@@ -576,19 +578,19 @@ void CKinematics::Release()
 
 void CKinematics::LL_SetBoneVisible(u16 bone_id, BOOL val, BOOL bRecursive)
 {
-    // GW_OVERLAP_HAZARD must fire once per call from outside, not once per bone touched by the
-    // recursion below (bRecursive descends into every child bone). RAII reentrancy guard, same
-    // idiom as ScopedTag in PerfMetrics.hpp: the first (outermost) call on this thread owns it.
-    static thread_local bool s_ll_set_bone_visible_active = false;
-    struct ReentryGuard
-    {
-        bool owns;
-        ReentryGuard() noexcept : owns(!s_ll_set_bone_visible_active) { if (owns) s_ll_set_bone_visible_active = true; }
-        ~ReentryGuard() noexcept { if (owns) s_ll_set_bone_visible_active = false; }
-    } reentry_guard;
-    if (reentry_guard.owns)
+    // visimask and the bone matrices written below are read by phase B of CalculateBones (render threads, the bones
+    // prepass): take the model lock once for the whole recursion, so the change and its invalidation are serialized
+    // with a computation of this model in progress. Same lock rules as CalculateBones (a thread holding another
+    // model's lock or the global one only TryEnters); on failure go on unlocked, as before.
+    UCalc_model_lock model_lock(UCalc_ModelLock, this);
+    if (!model_lock.locked)
         GW_OVERLAP_HAZARD("CKinematics::LL_SetBoneVisible");
+    LL_SetBoneVisibleImpl(bone_id, val, bRecursive);
+}
 
+// LL_SetBoneVisible without the lock, recursing into the children
+void CKinematics::LL_SetBoneVisibleImpl(u16 bone_id, BOOL val, BOOL bRecursive)
+{
     R_ASSERT1_CURE(bone_id < LL_BoneCount(), { return; });
 
     u64 mask = u64(1) << bone_id;
@@ -607,13 +609,15 @@ void CKinematics::LL_SetBoneVisible(u16 bone_id, BOOL val, BOOL bRecursive)
     {
         for (xr_vector<CBoneData*>::iterator C = (*bones)[bone_id]->children.begin();
              C != (*bones)[bone_id]->children.end(); ++C)
-            LL_SetBoneVisible((*C)->GetSelfID(), val, bRecursive);
+            LL_SetBoneVisibleImpl((*C)->GetSelfID(), val, bRecursive);
     }
     Visibility_Invalidate();
 }
 
 void CKinematics::LL_SetBonesVisible(u64 mask)
 {
+    // Serialized with phase B of this model (or unlocked if declined), see LL_SetBoneVisible
+    UCalc_model_lock model_lock(UCalc_ModelLock, this);
     visimask.assign(0);
     for (u32 b = 0; b < bones->size(); b++)
     {
@@ -634,11 +638,17 @@ void CKinematics::LL_SetBonesVisible(u64 mask)
     Visibility_Invalidate();
 }
 
+// The render build traverses children without a lock (r__dsgraph_build.cpp, right after CalculateBones). The moves
+// below never reallocate children (it only ever gets back what it gave to children_invisible, so its size never
+// exceeds its loaded size), so a render thread traversing it meanwhile reads valid child pointers and at worst
+// adds a hidden child (its bones are scaled to zero) or misses one for that pass. What has to be avoided is doing it
+// all the time beside the render: on the game logic thread in an overlap frame (Visibility_UpdateLocked).
 void CKinematics::Visibility_Update()
 {
     ZoneScoped;
 
-    Update_Visibility = FALSE;
+    Update_Visibility.store(false, std::memory_order_relaxed);
+    m_visibility_deferred.store(false, std::memory_order_relaxed);
     // check visible
     for (u32 c_it = 0; c_it < children.size(); c_it++)
     {
@@ -650,7 +660,7 @@ void CKinematics::Visibility_Update()
             children_invisible.push_back(children[c_it]);
             std::swap(children[c_it], children.back());
             children.pop_back();
-            Update_Visibility = true;
+            Update_Visibility.store(true, std::memory_order_relaxed);
         }
     }
 
@@ -665,10 +675,61 @@ void CKinematics::Visibility_Update()
             children.push_back(children_invisible[_it]);
             std::swap(children_invisible[_it], children_invisible.back());
             children_invisible.pop_back();
-            Update_Visibility = true;
+            Update_Visibility.store(true, std::memory_order_relaxed);
         }
     }
 }
+
+// The game logic thread of a game/render overlap frame: the render runs in parallel and traverses children right after
+// its own CalculateBones. Same predicate as the other overlap deferrals (xrEngine/Render.cpp, CGameObject).
+static bool skeleton_on_game_logic_beside_render()
+{
+    return Device.IsGameRenderOverlapFrame() && XRay::Engine::IsGameThreadRunning() &&
+        XRay::Engine::IsGameLogicThread();
+}
+
+void CKinematics::Visibility_UpdateLocked()
+{
+    // Not on the game logic thread beside the render (LL_SetBoneVisible from UpdateCL, scheduler, Lua): leave the flag
+    // set and let the render's next CalculateBones of this model (Visibility_ApplyDeferred, even on its fast-out path)
+    // or the next frame's bones prepass do it. The bone math itself doesn't depend on children.
+    if (skeleton_on_game_logic_beside_render())
+    {
+        m_visibility_deferred.store(true, std::memory_order_relaxed);
+        return;
+    }
+    Visibility_Update();
+}
+
+void CKinematics::Visibility_ApplyDeferred()
+{
+    if (skeleton_on_game_logic_beside_render())
+        return;
+    // Lock rules as in CalculateBones: a thread that holds another model's lock or the global one only TryEnters; on
+    // failure the update stays pending for the next call.
+    UCalc_model_lock model_lock(UCalc_ModelLock, this);
+    if (!model_lock.locked)
+    {
+        PERF_INC(bones_lock_try_fail);
+        return;
+    }
+    if (m_visibility_deferred.load(std::memory_order_relaxed))
+        Visibility_Update();
+}
+
+bool CKinematics::LockBones(const void*& unlock_token)
+{
+    // Same bookkeeping as UCalc_model_lock: nested CalculateBones of this model on this thread re-enter the recursive
+    // lock, other models only TryEnter while it's held.
+    if (!UCalc_model_lock_take(UCalc_ModelLock, this, unlock_token))
+    {
+        PERF_INC(bones_lock_try_fail);
+        return false;
+    }
+    return true;
+}
+
+void CKinematics::UnlockBones(const void* unlock_token) { UCalc_model_lock_release(UCalc_ModelLock, unlock_token); }
 
 IC static void RecursiveBindTransform(CKinematics* K, xr_vector<Fmatrix>& matrices, u16 bone_id, const Fmatrix& parent)
 {

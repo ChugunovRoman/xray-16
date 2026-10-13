@@ -949,6 +949,18 @@ void CActor::ChangeVisual(shared_str NewVisual)
 {
     if (!NewVisual.size())
         return;
+    // B2.2 (plans/optimization_mt/16-b2-overlap-races.md): an outfit moved by Lua or a plugin on the Game thread
+    // (CCustomOutfit::ApplySkinModel) would replace the model the render is drawing - the whole change (model,
+    // OnChangeVisual, animation, bones) runs at the end of the frame. Before the "same visual" check: a change queued
+    // earlier this frame is not applied yet, the check is made when the queue runs.
+    if (ShouldDeferToPostJoin())
+    {
+        PostJoinForObject(ID(), [NewVisual](CGameObject& obj) {
+            if (CActor* actor = smart_cast<CActor*>(&obj))
+                actor->ChangeVisual(NewVisual);
+        });
+        return;
+    }
     if (cNameVisual().size())
     {
         if (cNameVisual() == NewVisual)

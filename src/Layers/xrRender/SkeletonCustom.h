@@ -73,51 +73,69 @@ struct UCalc_mtlock
 // Owner = the model whose lock this thread took last (nullptr = none held). Used by the deadlock rules below.
 inline thread_local const void* g_ucalc_model_lock_owner = nullptr;
 
+// Enters the per-model lock l of model; true when locked. The thread bookkeeping is UCalc_model_lock_take's.
+// Blocking Enter is allowed only when this thread holds nothing that another thread may wait for in the opposite
+// order: no other model's lock (ABBA across models) and not the global UCalc_Mutex (a thread holding a model lock
+// may block on the global one, so the global holder must never block on a model lock). Otherwise TryEnter, and the
+// caller skips its work on failure. Re-entering the same model is always safe (recursive lock).
+inline bool UCalc_model_lock_enter(Lock& l, const void* model)
+{
+    const void* const prev_owner = g_ucalc_model_lock_owner;
+    const bool may_block = (prev_owner == nullptr || prev_owner == model) && g_ucalc_lock_depth == 0;
+#if XR_PERF_METRICS
+    if (l.TryEnter())
+        return true;
+    if (!may_block)
+        return false;
+    const bool metrics_active = xray::perf::g_perf_metrics_active;
+    PERF_INC(bones_model_lock_contend);
+    const u64 t0 = metrics_active ? xray::perf::Ticks() : 0;
+    l.Enter();
+    if (metrics_active)
+        xray::perf::AddTimeSlow(xray::perf::Metric::bones_model_lock_wait, xray::perf::Ticks() - t0);
+    return true;
+#else
+    if (!may_block)
+        return l.TryEnter();
+    l.Enter();
+    return true;
+#endif
+}
+
+// The only acquire/release pair of a per-model lock (UCalc_model_lock, CKinematics::LockBones/UnlockBones), so the
+// thread bookkeeping stays balanced: the owner (deadlock rules above) and xray::perf::TlBonesLocked (bone callbacks
+// written under any model lock - phase B, KinematicsBonesLock - are serialized with the render, the overlap detector
+// of CBoneInstance::set_callback skips them). prev_owner must be passed back to UCalc_model_lock_release as is.
+inline bool UCalc_model_lock_take(Lock& l, const void* model, const void*& prev_owner)
+{
+    prev_owner = g_ucalc_model_lock_owner;
+    if (!UCalc_model_lock_enter(l, model))
+        return false;
+    g_ucalc_model_lock_owner = model;
+    ++xray::perf::TlBonesLocked();
+    return true;
+}
+
+inline void UCalc_model_lock_release(Lock& l, const void* prev_owner)
+{
+    --xray::perf::TlBonesLocked();
+    g_ucalc_model_lock_owner = prev_owner;
+    l.Leave();
+}
+
 struct UCalc_model_lock
 {
     Lock* lock{};
     const void* prev_owner{};
     bool locked{};
 
-    // Blocking Enter is allowed only when this thread holds nothing that another thread may wait for in the opposite
-    // order: no other model's lock (ABBA across models) and not the global UCalc_Mutex (a thread holding a model lock
-    // may block on the global one, so the global holder must never block on a model lock). Otherwise TryEnter, and the
-    // caller skips the recompute on failure. Re-entering the same model is always safe (recursive lock).
-    UCalc_model_lock(Lock& l, const void* model) : lock(&l), prev_owner(g_ucalc_model_lock_owner)
-    {
-        const bool may_block = (prev_owner == nullptr || prev_owner == model) && g_ucalc_lock_depth == 0;
-#if XR_PERF_METRICS
-        const bool metrics_active = xray::perf::g_perf_metrics_active;
-        if (l.TryEnter())
-            locked = true;
-        else if (may_block)
-        {
-            PERF_INC(bones_model_lock_contend);
-            const u64 t0 = metrics_active ? xray::perf::Ticks() : 0;
-            l.Enter();
-            locked = true;
-            if (metrics_active)
-                xray::perf::AddTimeSlow(xray::perf::Metric::bones_model_lock_wait, xray::perf::Ticks() - t0);
-        }
-#else
-        if (may_block)
-        {
-            l.Enter();
-            locked = true;
-        }
-        else
-            locked = l.TryEnter();
-#endif
-        if (locked)
-            g_ucalc_model_lock_owner = model;
-    }
+    // Lock rules: UCalc_model_lock_enter.
+    UCalc_model_lock(Lock& l, const void* model) : lock(&l), locked(UCalc_model_lock_take(l, model, prev_owner)) {}
 
     ~UCalc_model_lock()
     {
-        if (!locked)
-            return;
-        g_ucalc_model_lock_owner = prev_owner;
-        lock->Leave();
+        if (locked)
+            UCalc_model_lock_release(*lock, prev_owner);
     }
 
     UCalc_model_lock(const UCalc_model_lock&) = delete;
@@ -252,11 +270,18 @@ protected:
     accel* bone_map_N; // bones associations (shared) - sorted by name
     accel* bone_map_P; // bones associations (shared) - sorted by name-pointer
 
-    BOOL Update_Visibility;
+    // Visibility_Update pending (children <-> children_invisible). Set from any thread (LL_SetBoneVisible), hence
+    // atomic. Starts set (the BOOL it replaced was left uninitialized until Spawn): the first recompute sorts them.
+    std::atomic<bool> Update_Visibility{true};
+    // The game logic thread skipped a pending Visibility_Update in a game/render overlap frame (Visibility_UpdateLocked):
+    // the next CalculateBones outside it applies it even on its fast-out path (Visibility_ApplyDeferred), before the
+    // render traverses children.
+    std::atomic<bool> m_visibility_deferred{false};
     // Start of the current/last recompute; recursion + re-check guard. Written under the per-model lock (phase B),
     // read under the global lock (phase A) too, hence atomic.
     std::atomic<u32> UCalc_Time{0};
-    // Serializes the bone math of this model between render threads (phase B of CalculateBones). Recursive.
+    // Serializes the bone math of this model between render threads (phase B of CalculateBones), and its animation
+    // blends (UpdateTracks, PlayCycle & co., Bone_GetAnimPos; SkeletonAnimated.cpp) with the game. Recursive.
 #ifdef CONFIG_PROFILE_LOCKS
     Lock UCalc_ModelLock{"CKinematics::UCalc_ModelLock"};
 #else
@@ -289,8 +314,15 @@ protected:
     virtual CBoneData* CreateBoneData(u16 ID) { return xr_new<CBoneData>(ID); }
     virtual void IBoneInstances_Create();
     virtual void IBoneInstances_Destroy();
-    void Visibility_Invalidate() { Update_Visibility = TRUE; }
+    void Visibility_Invalidate() { Update_Visibility.store(true, std::memory_order_relaxed); }
+    void LL_SetBoneVisibleImpl(u16 bone_id, BOOL val, BOOL bRecursive); // LL_SetBoneVisible minus the model lock
+    // Reorders children. Caller holds the model lock; another render thread may still traverse children unlocked
+    // meanwhile (a recompute or a deferred update mid-frame), see the comment in the definition.
     void Visibility_Update();
+    // Phase B (model lock held): Visibility_Update, or mark it deferred on the game logic thread in an overlap frame.
+    void Visibility_UpdateLocked();
+    // Applies a deferred Visibility_Update (takes the model lock); no-op on the game logic thread in an overlap frame.
+    void Visibility_ApplyDeferred();
 
     void LL_Validate();
 
@@ -404,6 +436,9 @@ public:
     bool BonesPrepass_Wanted() const override;
     bool BonesPrepass_PhaseA() override;
     bool BonesPrepass_PhaseB() override;
+    // Game-side access to UCalc_ModelLock, see IKinematics. The token is the thread's previous lock owner.
+    bool LockBones(const void*& unlock_token) override;
+    void UnlockBones(const void* unlock_token) override;
     void Callback(UpdateCallback C, void* Param) override
     {
         Update_Callback = C;

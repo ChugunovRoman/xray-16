@@ -82,8 +82,9 @@ void RunSeqFrameMT()
 }
 
 // Body of one game/render overlap frame on the dedicated thread. No GameThreadScope here: s_game_thread_id /
-// g_game_tid were set by KickGameLogicThread() before the wake and are cleared by the main thread's join - the
-// scope's destructor would hand "logic thread" back to main while main is still rendering.
+// g_game_tid (and g_game_overlap_tid, which only this path sets: GW_OVERLAP_HAZARD) were set by KickGameLogicThread()
+// before the wake and are cleared by the main thread's join - the scope's destructor would hand "logic thread" back
+// to main while main is still rendering.
 // The thread is a registered TaskManager worker (GameLogicThreadLoop): xr_parallel_for issued here
 // (PostSchedulerVisionBatch...) is spread over the pool, and fire-and-forget tasks it pushes are stolen by the pool.
 // The physics step was kicked by the main thread before the wake (CRenderDevice::ProcessFrame) and runs parallel to
@@ -277,6 +278,8 @@ void XRay::Engine::KickGameLogicThread(bool run_scheduler)
     const std::thread::id id = s.thread.get_id();
     s_game_thread_id.store(id, std::memory_order_release);
     xray::perf::g_game_tid.store(id, std::memory_order_release);
+    // Only here, not in GameThreadScope: the render runs parallel to this thread until the join (GW_OVERLAP_HAZARD).
+    xray::perf::g_game_overlap_tid.store(id, std::memory_order_release);
     s.in_flight = true;
     s.done.Reset(); // drop a stale release, auto-reset event
     s.wake.Set();
@@ -292,6 +295,7 @@ bool XRay::Engine::JoinGameLogicThread()
     s.in_flight = false;
     s_game_thread_id.store(std::thread::id{}, std::memory_order_release);
     xray::perf::g_game_tid.store(std::thread::id{}, std::memory_order_release);
+    xray::perf::g_game_overlap_tid.store(std::thread::id{}, std::memory_order_release);
     return true;
 }
 

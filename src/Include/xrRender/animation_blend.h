@@ -48,6 +48,11 @@ public:
     u32 mem_usage() { return sizeof(*this); }
     IC bool update_time(float dt);
     IC void update_play(float dt, PlayCallback _Callback);
+    // update_play in two steps: update_play_advance (true when a stop@end blend reached its end), then play_end (the
+    // end callback, once, and fall_at_end). A thread that must not run game code calls only the first and leaves the
+    // second to the game logic thread (CKinematicsAnimated::LL_UpdateTracks, deferred blend events).
+    IC bool update_play_advance(float dt);
+    IC void play_end(PlayCallback _Callback);
     IC bool update_falloff(float dt);
     IC bool update(float dt, PlayCallback _Callback);
     ECurvature blend_state() const { return blend; }
@@ -96,6 +101,12 @@ public:
 
 IC void CBlend::update_play(float dt, PlayCallback _Callback)
 {
+    if (update_play_advance(dt))
+        play_end(_Callback);
+}
+
+IC bool CBlend::update_play_advance(float dt)
+{
     float pow_dt = dt;
     if (pow_dt < 0.f)
     {
@@ -112,9 +123,11 @@ IC void CBlend::update_play(float dt, PlayCallback _Callback)
 
     clamp(blendAmount, 0.f, blendPower);
 
-    if (!update_time(dt)) // reached end
-        return;
+    return update_time(dt); // reached end
+}
 
+IC void CBlend::play_end(PlayCallback _Callback)
+{
     if (_Callback && stop_at_end_callback)
         _Callback(this); // callback only once
 

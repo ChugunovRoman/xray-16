@@ -15,15 +15,19 @@ class dxRender_Visual;
 class light : public IRender_Light, public SpatialBase
 {
 public:
+    // Separate fields, not a bit-field (B2.6): the bit-fields of one word are one memory location, so a write to
+    // one of them is a read-modify-write of all of them. The game code writes bActive/bShadow/bVolumetric/bHudMode
+    // (on an overlap frame from the Game logic thread) while the render writes bShadow (CLight_DB::add_light under
+    // noshadows, the scope pass unshadowed fallback) - a concurrent render write could revert bActive and desync it
+    // from the spatial registration done by set_active (a light that cannot be switched off or on again).
     struct
     {
-        u32 type : 4;
-        u32 bStatic : 1;
-        u32 bActive : 1;
-        u32 bShadow : 1;
-        u32 bVolumetric : 1;
-        u32 bHudMode : 1;
-
+        u32 type;
+        bool bStatic;
+        bool bActive;
+        bool bShadow;
+        bool bVolumetric;
+        bool bHudMode;
     } flags;
     Fvector position;
     Fvector direction;
@@ -71,7 +75,15 @@ public:
 
     smapvis svis[R__NUM_CONTEXTS]; // used for 6-cubemap faces
 
+    // B2.6: set by spatial_move() on any thread - the game code moves lights from the Game logic thread while the
+    // render runs in parallel (overlap frame), the render moves its OMNIPART children from build workers. The
+    // render-owned state derived from the placement (svis caster caches, occlusion query slots, GI photons in
+    // 'indirect') is refreshed only by the render itself, in render_apply_move() on the main thread right before
+    // the light is used in the frame (Render(), the light visibility loop), never by the mover.
+    std::atomic<bool> render_moved{ false };
+
     // smapvis cache anchor: last state snapshot that fully invalidated the caster cache
+    // (render side only, see render_apply_move)
     bool svis_cache_valid{ false };
     Fvector svis_last_pos{};
     Fvector svis_last_dir{};
@@ -189,6 +201,8 @@ public:
 
 #if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)
     void gi_generate();
+    // Render main thread only: applies a pending move recorded by spatial_move() (see render_moved).
+    void render_apply_move();
     void xform_calc();
     void vis_prepare(CBackend& cmd_list);
     void vis_update();

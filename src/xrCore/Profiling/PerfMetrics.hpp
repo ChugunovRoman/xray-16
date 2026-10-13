@@ -94,6 +94,11 @@ XRCORE_API extern bool g_perf_hide_hot_zones;
 
 XRCORE_API extern std::atomic<std::thread::id> g_main_tid;
 XRCORE_API extern std::atomic<std::thread::id> g_game_tid;
+// The dedicated "Game logic" thread while it runs parallel to the render: set by xrEngine's KickGameLogicThread()
+// before the wake, cleared by JoinGameLogicThread(); the empty id otherwise. Unlike g_game_tid it stays empty for the
+// sequential GameThread task (loading, precache, pause, menu, overlap off), where nothing renders beside the game
+// logic, so GW_OVERLAP_HAZARD compares against it and counts only true game/render overlap.
+XRCORE_API extern std::atomic<std::thread::id> g_game_overlap_tid;
 
 enum class ThreadKind : u8 { Main, Game, Worker };
 
@@ -118,6 +123,11 @@ XRCORE_API u8& TlWaitSite() noexcept;
 // Spawn stage 0 (plans/spawn_optimization/SPEC.md): non-zero while this thread materializes an M_SPAWN on the client
 // (CLevel::g_sv_Spawn, PERF_SPAWN_TAG). Lets the render and the sound tell a cold load inside a spawn from any other.
 XRCORE_API u8& TlSpawn() noexcept;
+// B2.4: depth of the per-model bone locks (CKinematics::UCalc_ModelLock: phase B of CalculateBones, KinematicsBonesLock
+// in Include/xrRender/Kinematics.h, LL_SetBoneVisible) held by this thread, recursive re-entries included. Bone
+// callbacks written inside one are serialized with the render's bone calculation of that model, so the overlap
+// detector of CBoneInstance::set_callback skips them and counts only the writes still racing the render.
+XRCORE_API u32& TlBonesLocked() noexcept;
 
 XRCORE_API void AddSlow(Metric m, u64 v) noexcept;
 XRCORE_API void AddTimeSlow(Metric m, u64 ticks) noexcept;
@@ -367,13 +377,25 @@ struct ScopedTimeByThread
 // g_perf_metrics, so it stays usable with metrics collection off.
 XRCORE_API extern int g_overlap_hazard_probe; // cvar overlap_hazard_probe (xrEngine), 0/1, not saved to user.ltx
 
+// Distinct call stacks logged per hazard site (GW_OVERLAP_HAZARD and xrPhysics' PH_STEP_HAZARD).
+constexpr size_t kHazardStacksPerSite = 6;
+
 struct OverlapHazardSite
 {
     std::atomic<u32> count{0};
     std::atomic<u64> last_report_ms{0};
+    // Hashes of the call stacks already logged for this site, filled in order (0 = free slot), see IsNewHazardStack.
+    std::atomic<u64> stacks[kHazardStacksPerSite]{};
 };
 
-// Logs the first 8 hits at `where` in full, then at most once per ~5s after that (with the running count).
+// True the first time a call path (hash of the return addresses) reaches `site`, for up to kHazardStacksPerSite
+// distinct paths per site; the caller then logs the whole stack (xrDebug::LogStackTrace, symbolized - slow, but only
+// once per new path). Lock-free and allocation-free; once all slots of the site are taken it returns false without
+// capturing anything. Always false off Windows (no stacks there).
+XRCORE_API bool IsNewHazardStack(OverlapHazardSite& site) noexcept;
+
+// Logs the call stack of each new distinct caller (IsNewHazardStack), the first 8 hits at `where` in full, then at
+// most once per ~5s after that (with the running count).
 XRCORE_API void ReportOverlapHazard(OverlapHazardSite& site, const char* where) noexcept;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -515,12 +537,16 @@ void DescribeSpikeObject(const void* ctx, char* buf, size_t size) noexcept
 
 // Always compiled (not gated by XR_PERF_METRICS): overlap_hazard_probe is its own opt-in cvar, meant to
 // stay available for diagnosing plan-1 overlap races even in builds where perf_metrics is off.
+// Fires only on the dedicated "Game logic" thread of an overlap frame (g_game_overlap_tid), i.e. while the render
+// really runs in parallel; the sequential GameThread task (loading, precache, pause, menu) is not a hazard. The
+// cvar stays the first check, so the probe costs one load when it is off.
 #define GW_OVERLAP_HAZARD(where)                                                                         \
     do                                                                                                   \
     {                                                                                                     \
         if (::xray::perf::g_overlap_hazard_probe)                                                         \
         {                                                                                                  \
-            const std::thread::id _goh_game = ::xray::perf::g_game_tid.load(std::memory_order_acquire);    \
+            const std::thread::id _goh_game =                                                              \
+                ::xray::perf::g_game_overlap_tid.load(std::memory_order_acquire);                           \
             if (_goh_game != std::thread::id{} && std::this_thread::get_id() == _goh_game)                  \
             {                                                                                                \
                 static ::xray::perf::OverlapHazardSite _goh_site;                                             \

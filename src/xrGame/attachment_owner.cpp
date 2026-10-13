@@ -13,8 +13,96 @@
 #include "Include/xrRender/Kinematics.h"
 #include "inventory_item.h"
 #include "PhysicsShellHolder.h"
+#include "xrEngine/IGame_Level.h"
 
 static void AttachmentCallback(IKinematics* tpKinematics);
+
+namespace
+{
+// B2.2 (plans/optimization_mt/16-b2-overlap-races.md): attach/detach asked on the Game logic thread in a game/render
+// overlap frame. The render meanwhile walks m_attached_objects (push_back may reallocate it under the walk) and calls
+// AttachmentCallback through VisualCallback (the last detach resets the kinematics callback with two plain stores:
+// Param may be read as null), so the changes wait for the end of the frame. Written only on the Game thread inside
+// the window, applied and cleared only on the main thread after the join: no lock.
+struct AttachmentOwnerQueuedChange
+{
+    u16 owner_id;
+    u16 item_id;
+    bool attach;
+    bool set_visible; // CAttachableItem::enable: setVisible of the item together with the change
+};
+xr_vector<AttachmentOwnerQueuedChange> s_attachment_owner_queue;
+u32 s_attachment_owner_queue_frame = u32(-1); // the frame whose PostJoin applies the queue
+
+void AttachmentOwnerApplyQueue()
+{
+    xr_vector<AttachmentOwnerQueuedChange> changes;
+    changes.swap(s_attachment_owner_queue);
+    if (!g_pGameLevel)
+        return;
+    for (const AttachmentOwnerQueuedChange& change : changes)
+    {
+        // By IDs: both objects are looked up again
+        CGameObject* owner_object = smart_cast<CGameObject*>(g_pGameLevel->Objects.net_Find(change.owner_id));
+        CGameObject* item_object = smart_cast<CGameObject*>(g_pGameLevel->Objects.net_Find(change.item_id));
+        CAttachmentOwner* owner = owner_object ? smart_cast<CAttachmentOwner*>(owner_object) : nullptr;
+        CInventoryItem* item = item_object ? smart_cast<CInventoryItem*>(item_object) : nullptr;
+        if (!owner || !item)
+            continue;
+        const bool owned = item_object->H_Parent() == owner_object;
+        if (change.attach)
+        {
+            // What OnItemTake/OnItemSlot/enable relied on when they asked: both alive, the item is still the owner's
+            if (!owned || owner_object->getDestroy() || item_object->getDestroy() || !owner_object->Visual())
+                continue;
+            // Virtual (CObjectHandler switches the torch on after it) and immediate now: the window is closed.
+            // It checks "already attached" and can_attach itself.
+            owner->attach(item);
+            if (change.set_visible)
+                item_object->setVisible(true);
+        }
+        else
+        {
+            owner->detach(item); // a no-op when it is not attached (any more)
+            if (change.set_visible && owned)
+                item_object->setVisible(false);
+        }
+    }
+}
+} // namespace
+
+bool CAttachmentOwner::queue_attachment_change(const CInventoryItem* inventory_item, bool attach, bool set_visible)
+{
+    if (!CGameObject::ShouldDeferToPostJoin())
+        return false;
+
+    const u16 owner_id = cast_game_object()->ID();
+    const u16 item_id = inventory_item->object().ID();
+    if (!set_visible)
+    {
+        // Nothing of this owner is queued: m_attached_objects is current, so the immediate call's own early-outs are
+        // decided here and most calls (OnItemRuck/OnItemDrop of never attached items, attach of not attachable ones)
+        // queue nothing. Otherwise queue: the apply replays the calls in order with the same checks.
+        const bool owner_queued = std::any_of(s_attachment_owner_queue.begin(), s_attachment_owner_queue.end(),
+            [owner_id](const AttachmentOwnerQueuedChange& change) { return change.owner_id == owner_id; });
+        if (!owner_queued)
+        {
+            const bool is_attached = attachedItem(item_id) != nullptr;
+            if (attach ? (is_attached || !can_attach(inventory_item)) : !is_attached)
+                return true;
+        }
+    }
+
+    // One PostJoin per frame; by the frame number, not by "the queue was empty", so a queue never applied (the frame
+    // loop stopped) cannot block the next ones.
+    if (s_attachment_owner_queue_frame != Device.dwFrame)
+    {
+        s_attachment_owner_queue_frame = Device.dwFrame;
+        Device.PostJoin(AttachmentOwnerApplyQueue);
+    }
+    s_attachment_owner_queue.push_back({ owner_id, item_id, attach, set_visible });
+    return true;
+}
 
 CAttachmentOwner::~CAttachmentOwner() {}
 void CAttachmentOwner::reload(LPCSTR section)
@@ -77,6 +165,8 @@ static void AttachmentCallback(IKinematics* tpKinematics)
 
 void CAttachmentOwner::attach(CInventoryItem* inventory_item)
 {
+    if (queue_attachment_change(inventory_item, true, false))
+        return;
     GW_OVERLAP_HAZARD("CAttachmentOwner::attach");
     xr_vector<CAttachableItem*>::const_iterator I = m_attached_objects.begin();
     xr_vector<CAttachableItem*>::const_iterator E = m_attached_objects.end();
@@ -106,6 +196,8 @@ void CAttachmentOwner::attach(CInventoryItem* inventory_item)
 
 void CAttachmentOwner::detach(CInventoryItem* inventory_item)
 {
+    if (queue_attachment_change(inventory_item, false, false))
+        return;
     GW_OVERLAP_HAZARD("CAttachmentOwner::detach");
     xr_vector<CAttachableItem*>::iterator I = m_attached_objects.begin();
     xr_vector<CAttachableItem*>::iterator E = m_attached_objects.end();

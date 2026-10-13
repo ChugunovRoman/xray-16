@@ -79,17 +79,26 @@ public:
 
     void set_texture(LPCSTR name) override
     {
-        if (!name || !name[0])
+        // B2.6: called by the game code - on an overlap frame from the Game logic thread while CGlowManager::Render
+        // takes its references to the shaders of the registered glows. Create the new shaders outside any lock,
+        // publish them under the manager's leaf lock (the one Render snapshots under) and release the old ones
+        // after it: the last reference destroys a shader, which must not happen under the leaf lock nor while
+        // Render is about to add a reference to it.
+        ref_shader new_shader, new_shader_occlusion;
+        if (name && name[0])
         {
-            shader.destroy();
-            shader_occlusion.destroy();
-            return;
+            // Reuse the existing flare additive shader for world-space glow sprites.
+            new_shader.create("effects\\flare", name);
+            // Depth-tested variant for occluded world glows (see CGlowManager::Render).
+            new_shader_occlusion.create("effects\\gw_glow", name);
         }
 
-        // Reuse the existing flare additive shader for world-space glow sprites.
-        shader.create("effects\\flare", name);
-        // Depth-tested variant for occluded world glows (see CGlowManager::Render).
-        shader_occlusion.create("effects\\gw_glow", name);
+        std::unique_lock<std::mutex> guard;
+        if (RImplementation.Glows)
+            guard = RImplementation.Glows->LockActive();
+        shader.swap(new_shader);
+        shader_occlusion.swap(new_shader_occlusion);
+        guard = {}; // unlock before the old shaders (now in new_*) are released at the end of the scope
     }
 
     void set_color(const Fcolor& C) override
@@ -185,7 +194,10 @@ void CGlowManager::Initialize()
 
 void CGlowManager::Destroy()
 {
-    m_active.clear();
+    {
+        std::lock_guard<std::mutex> guard(m_active_lock);
+        m_active.clear();
+    }
     m_hGeom.destroy();
 }
 
@@ -195,6 +207,7 @@ void CGlowManager::Register(IRender_Glow* glow)
     if (!glow)
         return;
 
+    std::lock_guard<std::mutex> guard(m_active_lock);
     if (std::find(m_active.begin(), m_active.end(), glow) == m_active.end())
         m_active.push_back(glow);
 }
@@ -202,38 +215,54 @@ void CGlowManager::Register(IRender_Glow* glow)
 void CGlowManager::Unregister(IRender_Glow* glow)
 {
     GW_OVERLAP_HAZARD("CGlowManager::Unregister");
-    if (!glow || m_active.empty())
+    if (!glow)
         return;
 
+    std::lock_guard<std::mutex> guard(m_active_lock);
     m_active.erase(std::remove(m_active.begin(), m_active.end(), glow), m_active.end());
 }
 
 void CGlowManager::Render()
 {
-    if (m_active.empty())
-        return;
+    // A drawable glow and its own reference to the shader to draw it with (B2.6, see CGlow::set_texture).
+    struct glow_item
+    {
+        CGlow* glow;
+        ref_shader shader;
+    };
+    xr_vector<glow_item> glows;
+    {
+        // B2.1: the game code (Game logic thread on an overlap frame) registers/unregisters glows while this runs in
+        // the combine phase - copy the drawable ones under the lock and draw from the copy. The copied glows stay
+        // alive until the end of the frame: their last ref_glow released on the Game thread is deferred to PostJoin.
+        // B2.6: the shader references are taken here too, under the lock set_texture swaps the shaders under.
+        std::lock_guard<std::mutex> guard(m_active_lock);
+        if (m_active.empty())
+            return;
+
+        glows.reserve(m_active.size());
+        for (IRender_Glow* glow_itf : m_active)
+        {
+            auto* glow = static_cast<CGlow*>(glow_itf);
+            if (!glow->m_active || !glow->shader || glow->radius <= EPS_L)
+                continue;
+            if (RImplementation.IsSecondViewportRenderPass() && !glow->m_render_in_second_viewport)
+                continue;
+
+            // Depth-tested sprite for world glows; the plain flare shader stays
+            // only for ignore_occlusion glows (they lie on the picked surface).
+            glows.push_back({ glow, glow->m_ignore_occlusion ? glow->shader : glow->shader_occlusion });
+        }
+    }
 
     Initialize();
-
-    xr_vector<CGlow*> glows;
-    glows.reserve(m_active.size());
-    for (IRender_Glow* glow_itf : m_active)
-    {
-        auto* glow = static_cast<CGlow*>(glow_itf);
-        if (!glow->m_active || !glow->shader || glow->radius <= EPS_L)
-            continue;
-        if (RImplementation.IsSecondViewportRenderPass() && !glow->m_render_in_second_viewport)
-            continue;
-
-        glows.push_back(glow);
-    }
 
     if (glows.empty())
         return;
 
-    std::sort(glows.begin(), glows.end(), [](const CGlow* left, const CGlow* right)
+    std::sort(glows.begin(), glows.end(), [](const glow_item& left, const glow_item& right)
     {
-        return left->shader < right->shader;
+        return left.shader._get() < right.shader._get();
     });
 
     const Fvector camera_pos = Device.vCameraPosition;
@@ -251,8 +280,9 @@ void CGlowManager::Render()
     shaders.reserve(glows.size());
     u32 draw_count = 0;
 
-    for (CGlow* glow : glows)
+    for (glow_item& item : glows)
     {
+        CGlow* const glow = item.glow;
         // Lens position: shift the sprite out of the owner's geometry along
         // the beam, so the occlusion tests below don't always cull the glow
         // with the owner itself (torch guide bones sit inside the NPC's body).
@@ -353,9 +383,7 @@ void CGlowManager::Render()
         draw_position.mad(lens_pos, Device.vCameraDirection, -0.001f);
 
         vertex_offsets.push_back(v_offset + draw_count * 4);
-        // Depth-tested sprite for world glows; the plain flare shader stays
-        // only for ignore_occlusion glows (they lie on the picked surface).
-        shaders.push_back(glow->m_ignore_occlusion ? glow->shader : glow->shader_occlusion);
+        shaders.push_back(item.shader);
         FillGlowSprite(cursor, draw_position, glow->radius, packed_color);
         ++draw_count;
     }

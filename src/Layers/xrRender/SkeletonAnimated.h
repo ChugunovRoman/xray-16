@@ -6,6 +6,8 @@
 
 #include "Include/xrRender/KinematicsAnimated.h"
 
+#include <bitset>
+
 namespace xray::render::RENDER_NAMESPACE
 {
 //*** Bone Instance *******************************************************************************
@@ -38,6 +40,18 @@ public:
 #pragma pack(pop)
 
 // typedef void	( * MotionMarkCallback)		(CBlend*		P);
+
+class CKinematicsAnimated;
+
+// An end callback or a blend destroy a render thread reached while the Game thread ran in parallel, run on main after
+// the join instead (CKinematicsAnimated::DeferBlendEvent).
+struct DeferredBlendEvent
+{
+    CKinematicsAnimated* model;
+    float time; // end callback: timeCurrent the blend froze at (a rewound blend is not at its end any more)
+    u16 slot; // blend_pool index
+    bool end_callback; // true: the end callback (update_play reached the end); false: DestroyCycle (faded out)
+};
 
 //*** The visual itself ***************************************************************************
 class ECORE_API CKinematicsAnimated : public CKinematics, public IKinematicsAnimated
@@ -78,7 +92,8 @@ public:
 #else
 private:
 #endif
-    u32 Update_LastTime{};
+    // Device.dwTimeGlobal of the last UpdateTracks. Written under the model lock, read before it too (the early-out).
+    std::atomic<u32> Update_LastTime{0};
 
     CBlendInstance* blend_instances{};
 
@@ -99,6 +114,28 @@ private:
     BlendSVec blend_cycles[MAX_PARTS];
     BlendSVec blend_fx;
     animation::channels channels;
+
+    // Blend events a render thread deferred to main after the join (DeferBlendEvent): the blend_pool slots with one
+    // pending (model lock; setting a slot up anew drops its event), whether this model is in the dispatch list
+    // (written under the list's lock, read without it to skip that lock), and whether its owner gave it up since the
+    // last Spawn (DeferredBlendEvents_OwnerRelease: no events are taken or run any more).
+    std::bitset<MAX_BLENDED_POOL> m_deferred_blends;
+    std::atomic<bool> m_deferred_blends_listed{false};
+    std::atomic<bool> m_deferred_blends_owner_released{false};
+
+    u16 BlendSlot(const CBlend& B) const { return u16(&B - blend_pool.begin()); }
+    void DeferBlendEvent(CBlend& B, bool end_callback);
+    void DeferredBlendEvents_Run(const DeferredBlendEvent* events, size_t count);
+    void DeferredBlendEvents_Unlist();
+    void DeferredBlendEvents_Forget();
+    static void DispatchDeferredBlendEvents();
+
+public:
+    // CModelPool::Delete: the owner gives this model up and may be destroyed before the post-join dispatch, while the
+    // deferred callbacks would call into it - drop them and take no new ones until the model is spawned again
+    void DeferredBlendEvents_OwnerRelease();
+
+private:
 
 protected:
     // internal functions
@@ -211,6 +248,7 @@ public:
     virtual void Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags);
     virtual void Release();
     virtual void Spawn();
+    virtual void Depart();
     virtual IKinematicsAnimated* dcast_PKinematicsAnimated() { return this; }
     virtual IRenderVisual* dcast_RenderVisual() { return this; }
     virtual IKinematics* dcast_PKinematics() { return this; }

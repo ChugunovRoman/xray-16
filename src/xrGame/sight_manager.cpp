@@ -594,6 +594,10 @@ void CSightManager::compute_aiming(float const time_delta, float const angular_s
         VERIFY(m_animation_id.size());
         VERIFY(m_animation_frame != animation_frame_none);
 
+        // The render may compute this skeleton in parallel (game/render overlap frame). Hold its bone lock from here
+        // to the end of the case: remove -> aimer (its callbacks point at this stack frame) -> assign, and the
+        // m_current rotations the assigned callbacks read, so the render only sees the state before or after.
+        KinematicsBonesLock bones_lock(PKinematics(object().Visual()));
         bool forward_blend_callbacks = object().animation().forward_blend_callbacks();
         bool backward_blend_callbacks = object().animation().backward_blend_callbacks();
         object().animation().remove_bone_callbacks();
@@ -655,6 +659,8 @@ void CSightManager::compute_aiming(float const time_delta, float const angular_s
             pSettings->r_string(object().cNameSect().c_str(), "bone_head"),
         };
 
+        // Bone lock to the end of the case, see aiming_weapon above.
+        KinematicsBonesLock bones_lock(PKinematics(object().Visual()));
         bool forward_blend_callbacks = object().animation().forward_blend_callbacks();
         bool backward_blend_callbacks = object().animation().backward_blend_callbacks();
         object().animation().remove_bone_callbacks();

@@ -81,8 +81,13 @@ void CAttachableItem::enable(bool value)
         if (owner)
         {
             m_enabled = value;
-            owner->attach(&item());
-            object().setVisible(true);
+            // B2.2: m_enabled changes now (enabled() and can_attach read it), the attachment and the visibility of
+            // the item change together at the end of the frame when this runs on the Game thread beside the render
+            if (!owner->queue_attachment_change(&item(), true, true))
+            {
+                owner->attach(&item());
+                object().setVisible(true);
+            }
         }
     }
 
@@ -93,8 +98,11 @@ void CAttachableItem::enable(bool value)
         if (owner)
         {
             m_enabled = value;
-            owner->detach(&item());
-            object().setVisible(false);
+            if (!owner->queue_attachment_change(&item(), false, true)) // B2.2, see above
+            {
+                owner->detach(&item());
+                object().setVisible(false);
+            }
         }
     }
 }

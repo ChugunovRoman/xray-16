@@ -540,6 +540,19 @@ PERF_COUNTER(tracks_ll, "tracks/ll")
 PERF_COUNTER(blend_cb_offlogic_svp, "bones/blend_cb/svp")
 PERF_COUNTER(blend_cb_offlogic_main, "bones/blend_cb/main")
 PERF_COUNTER(blend_cb_offlogic_worker, "bones/blend_cb/worker")
+// B2.5: blend events (end callbacks, blend destroy callbacks) a render thread reached while the Game thread ran in
+// parallel - queued for main after the join instead of run there (blend_cb/svp|main|worker above count the end
+// callbacks among them, by thread); fired by that dispatch; dropped there because the game logic changed the blend
+// first (closed, faded, rewound, reused - as if the game logic ran before the render, like a sequential frame).
+PERF_COUNTER(blend_cb_deferred, "bones/blend_cb/deferred")
+PERF_COUNTER(blend_cb_dispatched, "bones/blend_cb/dispatched")
+PERF_COUNTER(blend_cb_stale, "bones/blend_cb/stale")
+// UpdateTracks skipped (the time catches up on the next call): the model lock was busy and this thread could only
+// TryEnter it (the render's phase A holds the global lock) - normally the game thread changing the model's blends.
+PERF_COUNTER(tracks_lock_skip, "tracks/lock_skip")
+// An animation mutator (PlayCycle & co., Bone_GetAnimPos) went on without the model lock: this thread held another
+// model's lock or the global one and the TryEnter failed (deadlock avoidance; unserialized with the render as before).
+PERF_COUNTER(anim_mut_unlocked, "tracks/mut_unlocked")
 // sphere.R histogram of alive stalkers/monsters, both radius sources (visual vs spatial sphere), each
 // split by class, per §8.6: "Брать оба радиуса ... сталкеры и монстры раздельно". gt1 is IXray's R>1 cull
 // rule reference fraction, not an 8th bucket - it overlaps 1_15/15_2/2_3/3p by design (same >=1.0 test).

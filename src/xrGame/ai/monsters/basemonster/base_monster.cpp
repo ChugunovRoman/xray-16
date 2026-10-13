@@ -1107,11 +1107,19 @@ void CBaseMonster::update_eyes_visibility()
 
     bool eyes_visible = !g_Alive() || get_screen_space_coverage_diagonal() > 0.05f;
 
-    bool const was_visible = !!skeleton->LL_GetBoneVisible(left_eye_bone_id);
-    skeleton->LL_SetBoneVisible(left_eye_bone_id, eyes_visible, true);
-    skeleton->LL_SetBoneVisible(right_eye_bone_id, eyes_visible, true);
+    // Touch the bones only when the state actually changes. This runs on every shedule_Update of
+    // every monster on the game logic thread, in parallel with the render; an unconditional
+    // LL_SetBoneVisible invalidated the bone cache and visibility lists each time, so the render
+    // recalculated the model inside the overlap window. The current visimask (not a member cache)
+    // is the reference, so a fresh visual after net_Spawn / visual change still gets its state.
+    bool const left_was_visible = !!skeleton->LL_GetBoneVisible(left_eye_bone_id);
+    bool const right_was_visible = !!skeleton->LL_GetBoneVisible(right_eye_bone_id);
+    if (left_was_visible != eyes_visible)
+        skeleton->LL_SetBoneVisible(left_eye_bone_id, eyes_visible, true);
+    if (right_was_visible != eyes_visible)
+        skeleton->LL_SetBoneVisible(right_eye_bone_id, eyes_visible, true);
 
-    if (!was_visible && eyes_visible)
+    if (eyes_visible && (!left_was_visible || !right_was_visible))
     {
         skeleton->CalculateBones_Invalidate();
         skeleton->CalculateBones();

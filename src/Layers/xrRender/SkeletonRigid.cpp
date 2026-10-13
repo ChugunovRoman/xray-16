@@ -25,14 +25,22 @@ void CKinematics::CalculateBones(BOOL bForceExact)
     if (Device.dwTimeGlobal == UCalc_DoneTime.load(std::memory_order_acquire))
     {
         PERF_INC(bones_fast_out);
+        // The game logic thread computed these bones this tick in an overlap frame and left a pending visibility
+        // update to us (Visibility_UpdateLocked): the render traverses children right after this call.
+        if (m_visibility_deferred.load(std::memory_order_relaxed))
+            Visibility_ApplyDeferred();
         return;
     }
     // --- phases ------------------------------------------------------------------------------------------
     // A (global UCalc_Mutex): OnCalculateBones (UpdateTracks can fire blend callbacks into Lua; the global lock is
     //   what serializes that between render threads) and the slow_skip check. Never waits for a
-    //   model lock, so a thread holding the global lock can't take part in a lock cycle.
-    // B (per-model lock): Visibility_Update, Bone_Calculate,
-    //   visbox, Update_Callback. Models are independent here, so different models compute in parallel.
+    //   model lock, so a thread holding the global lock can't take part in a lock cycle: UpdateTracks only TryEnters
+    //   the model lock (serialized with the game's PlayCycle & co.) and skips when it is busy. A render thread beside
+    //   the Game thread defers the blend callbacks to main after the join (SkeletonAnimated.cpp, DeferBlendEvent).
+    // B (per-model lock): Visibility_Update (not on the game logic thread beside the render, see
+    //   Visibility_UpdateLocked), Bone_Calculate, visbox, Update_Callback. The game also holds this lock while it
+    //   swaps bone callbacks of the live skeleton (IKinematics::LockBones, CSightManager::compute_aiming). Models
+    //   are independent here, so different models compute in parallel.
     // Lock order: global -> (never) model. A thread holding a model lock may block on the global one (nested
     // CalculateBones), but a global holder only TryEnters a model lock (see UCalc_model_lock).
 
@@ -81,6 +89,8 @@ void CKinematics::CalculateBonesPhaseB(BOOL bForceExact)
     if (Device.dwTimeGlobal == UCalc_Time)
     {
         PERF_INC(bones_fast_out);
+        if (m_visibility_deferred.load(std::memory_order_relaxed))
+            Visibility_ApplyDeferred(); // see the fast-out in CalculateBones (we hold the lock: recursive)
         return;
     }
     PERF_INC(bones_recompute);
@@ -113,8 +123,8 @@ void CKinematics::CalculateBonesPhaseB(BOOL bForceExact)
         perf_bone_calc_t0 = xray::perf::Ticks();
     }
 #endif
-    if (Update_Visibility)
-        Visibility_Update();
+    if (Update_Visibility.load(std::memory_order_relaxed))
+        Visibility_UpdateLocked();
 
     _DBG_SINGLE_USE_MARKER;
     // here we have either:
@@ -457,6 +467,11 @@ void CKinematics::CLBone(const CBoneData* bd, CBoneInstance& bi, const Fmatrix* 
 void CKinematics::Bone_GetAnimPos(Fmatrix& pos, u16 id, u8 mask_channel, bool ignore_callbacks)
 {
     R_ASSERT(id < LL_BoneCount());
+    // Reads the blends (CLBone -> BuildBoneMatrix) the render's UpdateTracks advances and the game's PlayCycle & co.
+    // change: under the model lock like them (lock rules: UCalc_model_lock_enter; declined - unlocked, as before).
+    UCalc_model_lock model_lock(UCalc_ModelLock, this);
+    if (!model_lock.locked)
+        PERF_INC(anim_mut_unlocked);
     CBoneInstance bi = LL_GetBoneInstance(id);
     BoneChain_Calculate(&LL_GetData(id), bi, mask_channel, ignore_callbacks);
 #ifndef MASTER_GOLD
@@ -480,18 +495,16 @@ void CKinematics::BoneChain_Calculate(const CBoneData* bd, CBoneInstance& bi, u8
     u16 SelfID = bd->GetSelfID();
     // CBlendInstance& BLEND_INST	= LL_GetBlendInstance(SelfID);
     // CBlendInstance::BlendSVec &Blend = BLEND_INST.blend_vector();
-    // ignore callbacks
-    BoneCallback bc = bi.callback();
-    BOOL ow = bi.callback_overwrite();
+    // bi is always a scratch copy (Bone_GetAnimPos / parrent_bi below); only its mTransform is
+    // used afterwards. So the callback is dropped with the plain reset_callback() (CLBone then
+    // just builds the anim matrix, as with the old nullptr/no-overwrite set_callback) and never
+    // restored: set_callback() on these thread-local copies only did useless stores and flooded
+    // the overlap hazard detector (CBoneInstance::set_callback, ~13M hits per session).
     if (ignore_callbacks)
-    {
-        bi.set_callback(bi.callback_type(), nullptr, bi.callback_param(), 0);
-    }
+        bi.reset_callback();
     if (SelfID == LL_GetBoneRoot())
     {
         CLBone(bd, bi, &Fidentity, mask_channel);
-        // restore callback
-        bi.set_callback(bi.callback_type(), bc, bi.callback_param(), ow);
         return;
     }
     u16 ParentID = bd->GetParentID();
@@ -500,7 +513,5 @@ void CKinematics::BoneChain_Calculate(const CBoneData* bd, CBoneInstance& bi, u8
     CBoneInstance parrent_bi = LL_GetBoneInstance(ParentID);
     BoneChain_Calculate(ParrentDT, parrent_bi, mask_channel, ignore_callbacks);
     CLBone(bd, bi, &parrent_bi.mTransform, mask_channel);
-    // restore callback
-    bi.set_callback(bi.callback_type(), bc, bi.callback_param(), ow);
 }
 } // namespace xray::render::RENDER_NAMESPACE

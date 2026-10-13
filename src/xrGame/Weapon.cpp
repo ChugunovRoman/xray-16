@@ -2777,7 +2777,7 @@ void CWeapon::UpdateAddonsVisibility()
         {
             if (mainScopeSlotIsBusy() && pWeaponVisual->LL_GetBoneVisible(bone_id))
                 pWeaponVisual->LL_SetBoneVisible(bone_id, FALSE, TRUE);
-            else
+            else if (!pWeaponVisual->LL_GetBoneVisible(bone_id)) // only on change, like the calls above
                 pWeaponVisual->LL_SetBoneVisible(bone_id, TRUE, TRUE);
         }
     }
@@ -5172,7 +5172,8 @@ void CWeapon::addAddon(AddAddonData data)
         new_addon->laser_glow->set_active(false);
 
         // У основной модели ЛЦУ скрываем только кость dot (точку)
-        new_addon->addon_item_model->LL_SetBoneVisible(bone_id, FALSE, FALSE);
+        if (new_addon->addon_item_model->LL_GetBoneVisible(bone_id))
+            new_addon->addon_item_model->LL_SetBoneVisible(bone_id, FALSE, FALSE);
         m_zoom_params.m_bZoomSecondEnabled = true;
         new_addon->has_second_aim_offset = true;
     }

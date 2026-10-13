@@ -665,6 +665,18 @@ void CAI_Bloodsucker::animation_end_jump(CBlend* B)
 
 void CAI_Bloodsucker::predator_start()
 {
+    // B2.2 (plans/optimization_mt/16-b2-overlap-races.md): on the Game thread beside the render the model swap
+    // (cNameVisual_set publishes the new visual before its callbacks) and what uses the new model right after it
+    // (damage bones, animation restart) run at the end of the frame, as one step. Before the m_predator checks: a
+    // swap queued earlier this frame has not changed them yet.
+    if (ShouldDeferToPostJoin())
+    {
+        PostJoinForObject(ID(), [](CGameObject& obj) {
+            if (CAI_Bloodsucker* bloodsucker = smart_cast<CAI_Bloodsucker*>(&obj))
+                bloodsucker->predator_start();
+        });
+        return;
+    }
     // if m_predator==false  is_invisible
     if (m_vis_state != 0)
     {
@@ -691,6 +703,14 @@ void CAI_Bloodsucker::predator_start()
 
 void CAI_Bloodsucker::predator_stop()
 {
+    if (ShouldDeferToPostJoin()) // B2.2, see predator_start
+    {
+        PostJoinForObject(ID(), [](CGameObject& obj) {
+            if (CAI_Bloodsucker* bloodsucker = smart_cast<CAI_Bloodsucker*>(&obj))
+                bloodsucker->predator_stop();
+        });
+        return;
+    }
     if (m_vis_state != 0)
     {
         if (m_vis_state == -1)

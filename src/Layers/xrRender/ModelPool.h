@@ -84,4 +84,15 @@ public:
     void RenderSingle(dxRender_Visual* m_pVisual, const Fmatrix& mTransform, float m_fLOD);
 #endif
 };
+
+// While one is alive (on any thread), CModelPool::Delete queues the visual for the next DeleteQueue
+// (ModelDeferredClear) exactly as inside the game/render overlap window. For code that runs game callbacks after the
+// window closed and goes on using the models they may release (CKinematicsAnimated::DispatchDeferredBlendEvents).
+struct ModelPoolDeferDeletes
+{
+    ModelPoolDeferDeletes();
+    ~ModelPoolDeferDeletes();
+    ModelPoolDeferDeletes(const ModelPoolDeferDeletes&) = delete;
+    ModelPoolDeferDeletes& operator=(const ModelPoolDeferDeletes&) = delete;
+};
 } // namespace xray::render::RENDER_NAMESPACE

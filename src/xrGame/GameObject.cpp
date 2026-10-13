@@ -27,6 +27,7 @@
 #include "xrAICore/Navigation/game_graph.h"
 #include "ai_debug.h"
 #include "xrEngine/IGame_Level.h"
+#include "xrEngine/EngineThreading.h"
 #include "Level.h"
 #include "xrScriptEngine/script_callback_ex.h"
 #include "xrEngine/profiler.h"
@@ -262,6 +263,27 @@ void CGameObject::ReloadVisualFromDisk()
     OnChangeVisual();
 
     cNameVisual_set(v);
+}
+
+bool CGameObject::ShouldDeferToPostJoin()
+{
+    // IsGameThreadRunning: from KickGameLogicThread until the join before the UI, i.e. while DoRender may read the
+    // objects; IsGameLogicThread then is true only on the dedicated Game thread (main runs the render).
+    return Device.IsGameRenderOverlapFrame() && XRay::Engine::IsGameThreadRunning() &&
+        XRay::Engine::IsGameLogicThread();
+}
+
+void CGameObject::PostJoinForObject(u16 id, std::function<void(CGameObject&)> fn)
+{
+    // By ID, not by pointer: the object is looked up again when the command runs
+    Device.PostJoin([id, fn = std::move(fn)] {
+        if (!g_pGameLevel)
+            return;
+        CGameObject* object = smart_cast<CGameObject*>(Level().Objects.net_Find(id));
+        if (!object || object->getDestroy())
+            return;
+        fn(*object);
+    });
 }
 
 // flagging

@@ -109,6 +109,17 @@ public:
     // per-model lock. Any thread. Returns true when it recomputed the bones (UCalc_Time = Device.dwTimeGlobal after).
     virtual bool BonesPrepass_PhaseB() = 0;
 
+    // Per-model bone lock: the recursive lock phase B of CalculateBones (and of the prepass) holds while it computes
+    // the bones and runs their callbacks. Game code that changes bone callbacks (or the data they read) on the live
+    // skeleton holds it across the whole change, so a render thread computing this model in parallel (the game logic
+    // thread runs beside the render in a game/render overlap frame) never sees a half-done state. Engine-internal
+    // (not Plugin API). Use KinematicsBonesLock below rather than these two directly.
+    // LockBones returns false and locks nothing when blocking could deadlock (this thread already holds another
+    // model's bone lock or the global bones lock, see UCalc_model_lock); the caller then goes on unlocked, as before.
+    // unlock_token must be passed back to UnlockBones as is.
+    virtual bool LockBones(const void*& unlock_token) = 0;
+    virtual void UnlockBones(const void* unlock_token) = 0;
+
 // debug
 #ifdef DEBUG
     virtual void DebugRender(Fmatrix& XFORM) = 0;
@@ -117,4 +128,26 @@ public:
 };
 
 IC IKinematics* PKinematics(IRenderVisual* V) { return V ? V->dcast_PKinematics() : 0; }
+
+// RAII for IKinematics::LockBones/UnlockBones over a scope. Null kinematics (or a lock LockBones declined) is a no-op.
+class KinematicsBonesLock
+{
+    IKinematics* m_kinematics{};
+    const void* m_unlock_token{};
+
+public:
+    explicit KinematicsBonesLock(IKinematics* kinematics)
+    {
+        // LockBones also counts the scope in xray::perf::TlBonesLocked (the overlap detector of set_callback)
+        if (kinematics && kinematics->LockBones(m_unlock_token))
+            m_kinematics = kinematics;
+    }
+    ~KinematicsBonesLock()
+    {
+        if (m_kinematics)
+            m_kinematics->UnlockBones(m_unlock_token);
+    }
+    KinematicsBonesLock(const KinematicsBonesLock&) = delete;
+    KinematicsBonesLock& operator=(const KinematicsBonesLock&) = delete;
+};
 #endif //	Kinematics_included

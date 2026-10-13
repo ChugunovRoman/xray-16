@@ -152,8 +152,11 @@ void cover::evaluate_loophole(Fvector const& position, smart_cover::loophole*& s
     if (distance_to_target > source->range())
         return;
 
+    // m_object, not object(): inside cover, "object" names the type smart_cover::object (a CGameObject), so the
+    // original object() built and destroyed a whole temporary game object per evaluated loophole and read its
+    // uninitialized distances instead of the ones of this smart cover (loaded in object::net_Spawn)
     float const min_enemy_distance =
-        is_smart_cover_entered ? object().enter_min_enemy_distance() : object().exit_min_enemy_distance();
+        is_smart_cover_entered ? m_object.enter_min_enemy_distance() : m_object.exit_min_enemy_distance();
     if (distance_to_target <= min_enemy_distance)
         return;
 

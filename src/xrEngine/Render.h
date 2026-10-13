@@ -96,9 +96,21 @@ public:
 
     virtual ~IRender_Light();
 };
+// Light/glow "graveyard" (plans/optimization_mt/16-b2-overlap-races.md, B2.1). On a game/render overlap frame the
+// Game logic thread runs parallel to the 3D render, and the render keeps raw light/glow pointers for the frame
+// (Lights_LastFrame, LP_normal/LP_pending, the SVP packages, CGlowManager::Render's local list). Deleting one
+// there (CArtefact::StopLights, NPC shot flashes, Lua GC of a script light) made ~light walk Lights_LastFrame
+// while the render push_backs into it and left dangling pointers in the packages. So _dec()/_set() below hide
+// resptr_base's: when the LAST reference is released on the Game logic thread inside the overlap window, the
+// reference is handed to Device.PostJoin and the object is deleted on the main thread after the join, when the
+// render no longer walks this frame's lists. Every release path (destroy(), assignment, ref destructor) of a
+// ref_light/ref_glow goes through them. Anywhere else (main thread, sequential frames) - immediate, as before.
 struct ENGINE_API resptrcode_light : public resptr_base<IRender_Light>
 {
     void destroy() { _set(NULL); }
+    void _dec();
+    void _set(IRender_Light* rhs);
+    void _set(resptr_base<IRender_Light> const& rhs) { _set(rhs._get()); }
 };
 typedef resptr_core<IRender_Light, resptrcode_light> ref_light;
 
@@ -123,9 +135,13 @@ public:
     virtual void set_color(float r, float g, float b) = 0;
     virtual ~IRender_Glow();
 };
+// Same graveyard as resptrcode_light (see above): CGlowManager::Render keeps raw CGlow pointers for the frame.
 struct ENGINE_API resptrcode_glow : public resptr_base<IRender_Glow>
 {
     void destroy() { _set(NULL); }
+    void _dec();
+    void _set(IRender_Glow* rhs);
+    void _set(resptr_base<IRender_Glow> const& rhs) { _set(rhs._get()); }
 };
 typedef resptr_core<IRender_Glow, resptrcode_glow> ref_glow;
 

@@ -97,6 +97,9 @@ light::~light()
 #endif // (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4) || (RENDER==R_GL)
 
 // remove from Lights_LastFrame
+// Not reached on the Game logic thread during a game/render overlap frame: the last ref_light released there is
+// deferred to Device.PostJoin (graveyard, xrEngine/Render.h), so this runs on the main thread after the render and
+// the SVP worker job of the frame are done - no race with push_back into Lights_LastFrame or with the SVP lists.
 #if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)
     for (auto& p_light : RImplementation.Lights_LastFrame)
         if (this == p_light)
@@ -151,9 +154,12 @@ void light::set_texture(LPCSTR name)
 void light::set_texture(LPCSTR name) {}
 #endif
 
+// Called by the game code, on an overlap frame from the Game logic thread while the render runs (B2.6, no overlap
+// hazard any more): bActive is a field of its own (light.h), the spatial (un)registration is done under the
+// ISpatial_DB lock, and spatial_move() only records the move for the render. A light switched off here stays alive
+// for the render of the frame (its last ref_light is released through the graveyard, xrEngine/Render.h).
 void light::set_active(bool a)
 {
-    GW_OVERLAP_HAZARD("light::set_active");
     if (a)
     {
         if (flags.bActive)
@@ -263,13 +269,32 @@ void light::spatial_refresh_bounds()
 
 void light::spatial_move()
 {
-    GW_OVERLAP_HAZARD("light::spatial_move");
     if (!spatial.node_ptr)
         spatial_refresh_bounds();
 
     SpatialBase::spatial_move();
 
 #if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)
+    // B2.6: only record the move. The svis invalidation and gi_generate used to run right here, i.e. on the
+    // Game logic thread on an overlap frame, against the smap tasks of the render (svis begin/mark/end/flushoccq
+    // on the same 'invisible' vectors and query slots) and render_indirect (reallocated 'indirect'), and on the
+    // build workers for the OMNIPART children. The render applies it in render_apply_move().
+    render_moved.store(true, std::memory_order_release);
+#endif // (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4) || (RENDER == R_GL)
+}
+
+#if (RENDER == R_R2) || (RENDER == R_R3) || (RENDER == R_R4) || (RENDER == R_GL)
+void light::render_apply_move()
+{
+    // Cheap common case first: a still light is not touched (no RMW on its cache line).
+    if (!render_moved.load(std::memory_order_relaxed))
+        return;
+    // A move recorded after the exchange (the game thread keeps running) is applied next frame.
+    if (!render_moved.exchange(false, std::memory_order_acq_rel))
+        return;
+
+    // The placement (position/direction/range/cone) may be torn by a concurrent game write: one frame of a
+    // slightly wrong GI / cache decision at worst, the next move re-applies.
     if (flags.bActive)
         gi_generate();
     // Keep the learned smapvis caster cache across micro-movements (moving torches otherwise
@@ -291,8 +316,8 @@ void light::spatial_move()
         svis_last_range = range;
         svis_last_cone = cone;
     }
-#endif // (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4) || (RENDER == R_GL)
 }
+#endif // (RENDER==R_R2) || (RENDER==R_R3) || (RENDER==R_R4) || (RENDER == R_GL)
 
 vis_data& light::get_homdata()
 {

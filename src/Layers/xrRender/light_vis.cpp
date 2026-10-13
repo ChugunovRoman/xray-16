@@ -12,6 +12,10 @@ const u32 cullfragments = 4;
 
 void light::vis_prepare(CBackend& cmd_list)
 {
+    // B2.6: refresh what a move recorded by spatial_move() invalidates (svis caster caches, GI photons). Main
+    // thread, main pass, before this frame's smap tasks and render_indirect use them; every light of the main
+    // package (OMNIPART children included) comes through here.
+    render_apply_move();
     if (int(indirect_photons) != ps_r2_GI_photons)
         gi_generate();
 

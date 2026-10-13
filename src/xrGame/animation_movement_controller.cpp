@@ -37,13 +37,18 @@ animation_movement_controller::animation_movement_controller(
         DBG_ClosedCashedDraw(50000);
     }
 #endif
-    CBoneInstance& B = m_pKinematicsC->LL_GetBoneInstance(m_pKinematicsC->LL_GetBoneRoot());
-    VERIFY(!B.callback() && !B.callback_param());
-    B.set_callback(bctCustom, RootBoneCallback, this, TRUE);
-    B.mTransform = Fidentity;
-    GetInitalPositionBlenSpeed();
-    // m_pKinematicsC->LL_VisBoxInvalidate();
-    m_pKinematicsA->SetBlendDestroyCallback(this);
+    {
+        // The root bone callback and the blend destroy callback are installed on the live skeleton, which a render
+        // thread may compute meanwhile (the Game thread runs beside the render): under its bone lock, see Kinematics.h
+        KinematicsBonesLock bones_lock(m_pKinematicsC);
+        CBoneInstance& B = m_pKinematicsC->LL_GetBoneInstance(m_pKinematicsC->LL_GetBoneRoot());
+        VERIFY(!B.callback() && !B.callback_param());
+        B.set_callback(bctCustom, RootBoneCallback, this, TRUE);
+        B.mTransform = Fidentity;
+        GetInitalPositionBlenSpeed();
+        // m_pKinematicsC->LL_VisBoxInvalidate();
+        m_pKinematicsA->SetBlendDestroyCallback(this);
+    }
     m_pKinematicsC->CalculateBones_Invalidate();
     m_pKinematicsC->CalculateBones(TRUE);
     SetPosesBlending();
@@ -77,6 +82,9 @@ void animation_movement_controller::deinitialize()
     }
 #endif
 
+    // After this returns no render thread is inside RootBoneCallback with this as its parameter (the controller is
+    // deleted right after, see the destructor): the bone math runs under the same lock
+    KinematicsBonesLock bones_lock(m_pKinematicsC);
     CBoneInstance& B = m_pKinematicsC->LL_GetBoneInstance(m_pKinematicsC->LL_GetBoneRoot());
     VERIFY(B.callback() == RootBoneCallback);
     VERIFY(B.callback_param() == (void*)this);
@@ -97,6 +105,9 @@ void animation_movement_controller::deinitialize()
 
 void animation_movement_controller::GetInitalPositionBlenSpeed()
 {
+    // Rewinds the live control blend for a moment (and get_animation_root_position its weight): not while a render
+    // thread updates or reads it (UpdateTracks, the bone math)
+    KinematicsBonesLock bones_lock(m_pKinematicsC);
     float sv_blend_time = m_control_blend->timeCurrent;
 
     // u16 root = m_pKinematicsC->LL_GetBoneRoot();
@@ -217,7 +228,10 @@ void animation_movement_controller::OnFrame()
 
     // m_pKinematicsC->Bone_GetAnimPos( root_pos, m_pKinematicsC->LL_GetBoneRoot( ), u8(-1), true );
     Fmatrix root_pos;
-    animation_root_position(root_pos);
+    {
+        KinematicsBonesLock bones_lock(m_pKinematicsC); // see GetInitalPositionBlenSpeed
+        animation_root_position(root_pos);
+    }
 
     Fmatrix obj_pos = Fmatrix().mul_43(m_startObjXForm, root_pos);
     // Fvector prv_pos = m_pObjXForm.c;
@@ -311,6 +325,7 @@ anim: %s anim set: %s",
     }
     else if (local_animation)
     {
+        KinematicsBonesLock bones_lock(m_pKinematicsC); // see GetInitalPositionBlenSpeed
         float blend_time = m_control_blend->timeCurrent;
         m_control_blend->timeCurrent = m_control_blend->timeTotal - SAMPLE_SPF; //(SAMPLE_SPF+EPS);
         Fmatrix root;
@@ -377,6 +392,7 @@ const float percent_blending = 0.2f;
 void animation_movement_controller::SetPosesBlending()
 {
     VERIFY(IsActive());
+    KinematicsBonesLock bones_lock(m_pKinematicsC); // see GetInitalPositionBlenSpeed
     float blending_time = percent_blending * m_control_blend->timeTotal;
 
     float sv_time = m_control_blend->timeCurrent;

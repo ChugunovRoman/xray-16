@@ -5,6 +5,7 @@
 #include "SkeletonAnimated.h"
 
 #include "AnimationKeyCalculate.h"
+#include "ModelPool.h"
 #include "SkeletonX.h"
 #include "xrCore/FMesh.hpp"
 #include "xrCore/xr_token.h"
@@ -13,6 +14,7 @@
 #include "xrEngine/device.h"
 #include <thread>
 #include <cstring>
+#include <mutex>
 #ifdef DEBUG
 #include "xrCore/dump_string.h"
 #endif
@@ -25,6 +27,74 @@ extern int psSkeletonUpdate;
 using namespace animation;
 
 constexpr cpcstr WPN_HAND_ANIMATION_FOLDER = "globalwar_weapons" DELIMITER "wpn_hand_animations" DELIMITER;
+
+// --- Animation vs the game/render overlap (plans/optimization_mt/16-b2-overlap-races.md, B2.5) ---------------------
+// The blends of a model (blend_pool, blend_cycles, blend_fx, the per-bone blend vectors) are changed by the game
+// (PlayCycle & co., on the Game thread beside the render) and by UpdateTracks (the render's phase A of CalculateBones,
+// the game's own calls), and read by the bone math (phase B). All of them hold the per-model lock (UCalc_ModelLock)
+// now, with its lock rules (UCalc_model_lock_enter): a thread holding no other bone lock blocks for it; a thread that
+// holds another model's lock or the global UCalc_Mutex (the render's phase A) only TryEnters. On failure UpdateTracks
+// skips (the time catches up on the next call), a mutator goes on unlocked, as before (a game change must not be lost).
+// The end callbacks and the blend destroy callback run game code (stalker/monster animation logic, ScriptCallBack ->
+// Lua, animation_movement_controller): a render thread beside the Game thread doesn't run them but defers them to
+// main after the join (DeferBlendEvent, DispatchDeferredBlendEvents).
+namespace
+{
+// A thread that must not run game code: any but the game logic thread while the Game thread runs in parallel (the
+// render threads of a game/render overlap frame: main, SVP, workers). The other side of the predicate of the overlap
+// deferrals on the Game thread (xrEngine/Render.cpp, CGameObject::ShouldDeferToPostJoin).
+bool skeleton_anim_beside_game_logic()
+{
+    return Device.IsGameRenderOverlapFrame() && XRay::Engine::IsGameThreadRunning() &&
+        !XRay::Engine::IsGameLogicThread();
+}
+
+// The model lock of an animation mutator, see above
+struct SkeletonAnimMutatorLock : UCalc_model_lock
+{
+    SkeletonAnimMutatorLock(Lock& l, const void* model) : UCalc_model_lock(l, model)
+    {
+        if (!locked)
+            PERF_INC(anim_mut_unlocked);
+    }
+};
+
+// The deferred blend events of all models (normally a few per frame) and the dispatch that drains them
+struct SkeletonDeferredBlendEvents
+{
+    std::mutex lock; // leaf
+    xr_vector<DeferredBlendEvent> events;
+    u32 queued_frame{u32(-1)}; // Device.dwFrame of the last Device.PostJoin of the dispatch
+};
+
+SkeletonDeferredBlendEvents& skeleton_deferred_blend_events()
+{
+    static SkeletonDeferredBlendEvents s_events;
+    return s_events;
+}
+
+// An end callback reached off the game logic thread (run there in a sequential frame, deferred in an overlap frame):
+// bones/blend_cb/<thread>, and a Tracy zone naming the callback ("unknown" = nobody called RegisterBlendCb() for it).
+void count_blend_cb_offlogic(PlayCallback cb)
+{
+    if (xray::perf::g_perf_metrics_active)
+    {
+        // ZoneTextV, not blend_cb_zone.Text(): with TRACY_ENABLE off ZoneNamedN expands to nothing and the bare member
+        // call would not compile.
+        ZoneNamedN(blend_cb_zone, "blend_cb_offlogic", true);
+        const char* cb_name = xray::perf::LookupBlendCb(reinterpret_cast<const void*>(cb));
+        if (!cb_name)
+            cb_name = "unknown";
+        ZoneTextV(blend_cb_zone, cb_name, strlen(cb_name));
+    }
+    if (svp_worker_is_current_thread())
+        PERF_INC(blend_cb_offlogic_svp);
+    else if (std::this_thread::get_id() == xray::perf::g_main_tid.load(std::memory_order_acquire))
+        PERF_INC(blend_cb_offlogic_main);
+    else
+        PERF_INC(blend_cb_offlogic_worker);
+}
+} // namespace
 
 //////////////////////////////////////////////////////////////////////////
 // BoneInstance methods
@@ -148,12 +218,16 @@ void CKinematicsAnimated::LL_DumpBlends_dbg()
 u32 CKinematicsAnimated::LL_PartBlendsCount(u32 bone_part_id) { return blend_cycle(bone_part_id).size(); }
 CBlend* CKinematicsAnimated::LL_PartBlend(u32 bone_part_id, u32 n)
 {
+    // The count and the element of the same state (UpdateTracks may destroy a cycle in between)
+    SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
     if (LL_PartBlendsCount(bone_part_id) <= n)
         return nullptr;
     return blend_cycle(bone_part_id)[n];
 }
 void CKinematicsAnimated::LL_IterateBlends(IterateBlendsCallback& callback)
 {
+    // The game's callback changes the blends (imotion_position): a mutator
+    SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
     for (auto &it : blend_pool)
         if (it.blend_state() != CBlend::eFREE_SLOT)
             callback(it);
@@ -253,6 +327,7 @@ MotionID CKinematicsAnimated::ID_Cycle(LPCSTR N)
 }
 void CKinematicsAnimated::LL_FadeCycle(u16 part, float falloff, u8 mask_channel /*= (1<<0)*/)
 {
+    SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
     BlendSVec& Blend = blend_cycles[part];
 
     for (u32 I = 0; I < Blend.size(); I++)
@@ -275,6 +350,7 @@ void CKinematicsAnimated::LL_CloseCycle(u16 part, u8 mask_channel /*= (1<<0)*/)
     if (part >= MAX_PARTS)
         return;
 
+    SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
     // destroy cycle(s)
     BlendSVecIt I = blend_cycles[part].begin(), E = blend_cycles[part].end();
     for (; I != E; I++)
@@ -319,6 +395,7 @@ void CKinematicsAnimated::IBlendSetup(CBlend& B, u16 part, u8 channel, MotionID 
     float blendAccrue, float /*blendFalloff*/, float Speed, BOOL noloop, PlayCallback Callback, LPVOID CallbackParam)
 {
     VERIFY(B.channel < MAX_CHANNELS);
+    m_deferred_blends.reset(BlendSlot(B)); // a new blend in this slot: an event deferred for the old one is void
     // Setup blend params
     if (bMixing)
     {
@@ -353,6 +430,7 @@ void CKinematicsAnimated::IBlendSetup(CBlend& B, u16 part, u8 channel, MotionID 
 void CKinematicsAnimated::IFXBlendSetup(
     CBlend& B, MotionID motion_ID, float blendAccrue, float blendFalloff, float Power, float Speed, u16 bone)
 {
+    m_deferred_blends.reset(BlendSlot(B)); // see IBlendSetup
     // B.blend			= CBlend::eAccrue;
     B.set_accrue_state();
     B.blendAmount = EPS_S;
@@ -379,6 +457,7 @@ void CKinematicsAnimated::IFXBlendSetup(
 CBlend* CKinematicsAnimated::LL_SetInitialPartPose(u16 part, MotionID motion_ID, BOOL bMixing, float blendAccrue,
     float blendFalloff, float Speed, BOOL noloop, PlayCallback Callback, LPVOID CallbackParam, u8 channel /*=0*/)
 {
+    SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
     // validate and unroll
     if (!motion_ID.valid())
         return nullptr;
@@ -442,7 +521,10 @@ CBlend* CKinematicsAnimated::LL_PlayCycle(u16 part, MotionID motion_ID, BOOL bMi
         ReentryGuard() noexcept : owns(!s_ll_play_cycle_active) { if (owns) s_ll_play_cycle_active = true; }
         ~ReentryGuard() noexcept { if (owns) s_ll_play_cycle_active = false; }
     } reentry_guard;
-    if (reentry_guard.owns)
+    // The model lock serializes it with the render (see the top of the file); the detector counts only the calls
+    // that went on without it.
+    SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
+    if (reentry_guard.owns && !model_lock.locked)
         GW_OVERLAP_HAZARD("CKinematicsAnimated::LL_PlayCycle");
 
     // validate and unroll
@@ -593,6 +675,7 @@ CBlend* CKinematicsAnimated::LL_PlayFX(
 {
     if (!motion_ID.valid())
         return nullptr;
+    SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
     if (blend_fx.size() >= MAX_BLENDED)
         return nullptr;
     if (BI_NONE == bone)
@@ -630,6 +713,12 @@ void CKinematicsAnimated::DestroyCycle(CBlend& B)
 
 void CKinematicsAnimated::LL_UpdateTracks(float dt, bool b_force, bool leave_blends)
 {
+    // UpdateTracks holds the lock already (recursive); game code calling this directly (imotion_position) is a mutator
+    SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
+    // A render thread beside the Game thread must not run game code: the end callbacks and the blend destroy callback
+    // become deferred blend events for main after the join (DeferBlendEvent). Meanwhile the blend waits at its end
+    // (or at zero weight), so this frame's pose is the one the original order gives.
+    const bool defer_events = skeleton_anim_beside_game_logic();
     BlendSVecIt I, E;
     // Cycles
     for (u16 part = 0; part < MAX_PARTS; part++)
@@ -646,6 +735,35 @@ void CKinematicsAnimated::LL_UpdateTracks(float dt, bool b_force, bool leave_ble
             B.dwFrame = Device.dwFrame;
             const auto cb = B.Callback;
             const bool armed = cb && B.stop_at_end_callback;
+            if (defer_events)
+            {
+                if (armed && B.blend_state() == CBlend::eAccrue)
+                {
+                    // update_play without its end transition (play_end: the callback, fall_at_end) - main runs that
+                    if (B.update_play_advance(dt))
+                    {
+                        count_blend_cb_offlogic(cb);
+                        DeferBlendEvent(B, true);
+                    }
+                    continue;
+                }
+                // Not armed: update() calls no callback
+                if (B.update(dt, B.Callback) && !leave_blends)
+                {
+                    // Faded out. With a blend destroy callback (animation_movement_controller) DestroyCycle is game
+                    // code: the blend stays (zero weight) until main destroys it after the join.
+                    if (GetBlendDestroyCallback())
+                    {
+                        DeferBlendEvent(B, false);
+                        continue;
+                    }
+                    DestroyCycle(B);
+                    blend_cycles[part].erase(I);
+                    E = blend_cycles[part].end();
+                    I--;
+                }
+                continue;
+            }
             if (B.update(dt, B.Callback) && !leave_blends)
             {
                 DestroyCycle(B);
@@ -653,29 +771,9 @@ void CKinematicsAnimated::LL_UpdateTracks(float dt, bool b_force, bool leave_ble
                 E = blend_cycles[part].end();
                 I--;
             }
+            // A sequential frame (no Game thread in parallel): a render thread still runs the callback, as always
             if (armed && !B.stop_at_end_callback && !XRay::Engine::IsGameLogicThread())
-            {
-                if (xray::perf::g_perf_metrics_active)
-                {
-                    // Own explicit zone, not bare ZoneText: that macro refers to a ___tracy_scoped_zone
-                    // local declared by a ZoneScoped/ZoneNamedN in the SAME function - UpdateTracks' own
-                    // PERF_HOT_ZONE lives one call frame up and isn't visible here. Names the offending
-                    // callback ("unknown" = nobody called RegisterBlendCb() for it yet).
-                    ZoneNamedN(blend_cb_zone, "blend_cb_offlogic", true);
-                    const char* cb_name = xray::perf::LookupBlendCb(reinterpret_cast<const void*>(cb));
-                    if (!cb_name)
-                        cb_name = "unknown";
-                    // ZoneTextV, not blend_cb_zone.Text(): with TRACY_ENABLE off ZoneNamedN above expands
-                    // to nothing and the bare member call would not compile.
-                    ZoneTextV(blend_cb_zone, cb_name, strlen(cb_name));
-                }
-                if (svp_worker_is_current_thread())
-                    PERF_INC(blend_cb_offlogic_svp);
-                else if (std::this_thread::get_id() == xray::perf::g_main_tid.load(std::memory_order_acquire))
-                    PERF_INC(blend_cb_offlogic_main);
-                else
-                    PERF_INC(blend_cb_offlogic_worker);
-            }
+                count_blend_cb_offlogic(cb);
             // else{
             //	CMotionDef* m_def						= m_Motions[B.motionID.slot].motions.motion_def(B.motionID.idx);
             //	float timeCurrent						= B.timeCurrent;
@@ -740,9 +838,25 @@ void CKinematicsAnimated::LL_UpdateFxTracks(float dt)
 }
 void CKinematicsAnimated::UpdateTracks()
 {
-    _DBG_SINGLE_USE_MARKER;
     PERF_INC(tracks_calls);
-    if (Update_LastTime == Device.dwTimeGlobal)
+    if (Update_LastTime.load(std::memory_order_relaxed) == Device.dwTimeGlobal)
+    {
+        PERF_INC(tracks_early);
+        return;
+    }
+    // Serialized with the game's changes of these blends and with the bone math of this model (top of the file). The
+    // render's phase A (CalculateBones, the bones prepass) holds the global UCalc_Mutex here, so it only TryEnters: when
+    // the lock is busy (normally the Game thread changing this model right now), skip - Update_LastTime stays, the
+    // next call catches the time up (the pose of this pass is computed from the blends as they are).
+    UCalc_model_lock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
+    if (!model_lock.locked)
+    {
+        PERF_INC(tracks_lock_skip);
+        return;
+    }
+    _DBG_SINGLE_USE_MARKER;
+    const u32 last_time = Update_LastTime.load(std::memory_order_relaxed);
+    if (last_time == Device.dwTimeGlobal) // updated by the previous holder of the lock
     {
         PERF_INC(tracks_early);
         return;
@@ -750,7 +864,7 @@ void CKinematicsAnimated::UpdateTracks()
 
     PERF_HOT_ZONE("CKinematicsAnimated::UpdateTracks");
 
-    u32 DT = Device.dwTimeGlobal - Update_LastTime;
+    u32 DT = Device.dwTimeGlobal - last_time;
     if (DT > 66)
         DT = 66;
     float dt = float(DT) / 1000.f;
@@ -758,13 +872,178 @@ void CKinematicsAnimated::UpdateTracks()
     if (GetUpdateTracksCalback())
     {
         PERF_INC(tracks_cb);
-        if ((*GetUpdateTracksCalback())(float(Device.dwTimeGlobal - Update_LastTime) / 1000.f, *this))
-            Update_LastTime = Device.dwTimeGlobal;
+        if ((*GetUpdateTracksCalback())(float(Device.dwTimeGlobal - last_time) / 1000.f, *this))
+            Update_LastTime.store(Device.dwTimeGlobal, std::memory_order_relaxed);
         return;
     }
-    Update_LastTime = Device.dwTimeGlobal;
+    Update_LastTime.store(Device.dwTimeGlobal, std::memory_order_relaxed);
     PERF_INC(tracks_ll);
     LL_UpdateTracks(dt, false, false);
+}
+
+// A render thread beside the Game thread (LL_UpdateTracks, model lock held) reached the end of blend B with an end
+// callback (end_callback), or B faded out and DestroyCycle would call the blend destroy callback: remember it, and
+// make sure the dispatch runs on main after the join. Another pass over the same blend before that updates the entry.
+void CKinematicsAnimated::DeferBlendEvent(CBlend& B, bool end_callback)
+{
+    // The owner gave the model up (it is still rendered this frame): its callbacks must not run any more. The blend
+    // simply stays where it is.
+    if (m_deferred_blends_owner_released.load(std::memory_order_acquire))
+        return;
+    const u16 slot = BlendSlot(B);
+    VERIFY(slot < MAX_BLENDED_POOL);
+    m_deferred_blends.set(slot);
+    SkeletonDeferredBlendEvents& list = skeleton_deferred_blend_events();
+    std::lock_guard<std::mutex> guard(list.lock);
+    bool found = false;
+    for (DeferredBlendEvent& e : list.events)
+    {
+        if (e.model == this && e.slot == slot)
+        {
+            e.time = B.timeCurrent;
+            e.end_callback = end_callback;
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+    {
+        PERF_INC(blend_cb_deferred);
+        list.events.push_back({this, B.timeCurrent, slot, end_callback});
+        m_deferred_blends_listed.store(true, std::memory_order_relaxed);
+    }
+    // Once per frame: the dispatch drains the whole list. A dispatch lost with the post-join queue (Device destroy)
+    // is thus queued again by the next deferral - an updated entry included (otherwise an event still listed from a
+    // lost dispatch would only ever be updated, never dispatched).
+    if (list.queued_frame != Device.dwFrame)
+    {
+        list.queued_frame = Device.dwFrame;
+        Device.PostJoin(&CKinematicsAnimated::DispatchDeferredBlendEvents);
+    }
+}
+
+// Device.PostJoin: main after the join and the physics flush - the game logic thread now, nothing else runs game code.
+void CKinematicsAnimated::DispatchDeferredBlendEvents()
+{
+    ZoneScoped;
+    // The callbacks may release models (e.g. Lua switching a visual), and with the overlap window closed Delete would
+    // free them at once: this model, still used below, or one whose events still wait in the list. Keep the window's
+    // guarantee instead - deletes queue until the next ModelDeferredClear, as for callbacks run inside the window.
+    ModelPoolDeferDeletes defer_deletes;
+    SkeletonDeferredBlendEvents& list = skeleton_deferred_blend_events();
+    xr_vector<DeferredBlendEvent> events;
+    for (;;)
+    {
+        CKinematicsAnimated* model;
+        {
+            std::lock_guard<std::mutex> guard(list.lock);
+            if (list.events.empty())
+                break;
+            // One model at a time, its events in the order they came; the others stay in the list, where
+            // DeferredBlendEvents_Unlist still finds them if a callback releases their model.
+            model = list.events.front().model;
+            events.clear();
+            auto keep = list.events.begin();
+            for (auto it = list.events.begin(); it != list.events.end(); ++it)
+            {
+                if (it->model == model)
+                    events.push_back(*it);
+                else
+                    *keep++ = *it;
+            }
+            list.events.erase(keep, list.events.end());
+            model->m_deferred_blends_listed.store(false, std::memory_order_relaxed);
+        }
+        model->DeferredBlendEvents_Run(events.data(), events.size());
+    }
+}
+
+// Runs the deferred events of this model as LL_UpdateTracks would have, unless the game logic changed the blend first
+// (closed, faded, rewound or set up anew in that slot): then the event is dropped, as if the game logic had run before
+// the render, like in a sequential frame, and the blend's next update handles its new state.
+void CKinematicsAnimated::DeferredBlendEvents_Run(const DeferredBlendEvent* events, size_t count)
+{
+    // Main holds no bone lock here: blocks if needed, never fails
+    UCalc_model_lock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
+    for (size_t i = 0; i < count; ++i)
+    {
+        const DeferredBlendEvent& e = events[i];
+        // The owner gave the model up meanwhile - before this dispatch or in one of the callbacks just run - and may be
+        // gone: the remaining callbacks would call into it (the flag is set before the join or on this thread)
+        if (m_deferred_blends_owner_released.load(std::memory_order_acquire))
+        {
+            PERF_ADD(blend_cb_stale, count - i);
+            break;
+        }
+        if (!m_deferred_blends.test(e.slot)) // the slot was set up anew (IBlendSetup)
+        {
+            PERF_INC(blend_cb_stale);
+            continue;
+        }
+        m_deferred_blends.reset(e.slot);
+        CBlend& B = blend_pool[e.slot];
+        if (e.end_callback)
+        {
+            // Still waiting at the end it reached: update_play's end transition (the callback if still armed,
+            // fall_at_end). Not there any more (closed, faded, rewound): the normal update takes it from here.
+            // "At the end" as update_time leaves it, not the exact time deferred: the game may rewrite the time of a
+            // blend standing at its end (CStalkerAnimationPair::synchronize copies the legs' time every UpdateCL), and
+            // an exact compare would then drop the callback for good - the AI would wait for it forever
+            const float end_time = std::max(0.f, B.timeTotal - (SAMPLE_SPF + EPS));
+            const bool at_end = B.speed > 0.f ? B.timeCurrent >= end_time - EPS :
+                B.speed < 0.f ? B.timeCurrent <= 0.f : B.timeCurrent == e.time;
+            if (B.blend_state() == CBlend::eAccrue && B.playing && B.stop_at_end && at_end)
+            {
+                PERF_INC(blend_cb_dispatched);
+                B.play_end(B.Callback);
+            }
+            else
+                PERF_INC(blend_cb_stale);
+            continue;
+        }
+        // The faded-out cycle LL_UpdateTracks kept for its destroy callback: DestroyCycle and erase, as there
+        if (B.blend_state() == CBlend::eFalloff && B.blendAmount <= 0.f && B.bone_or_part < MAX_PARTS)
+        {
+            BlendSVec& cycle = blend_cycles[B.bone_or_part];
+            const BlendSVecIt it = std::find(cycle.begin(), cycle.end(), &B);
+            if (it != cycle.end())
+            {
+                PERF_INC(blend_cb_dispatched);
+                DestroyCycle(B);
+                cycle.erase(it);
+                continue;
+            }
+        }
+        PERF_INC(blend_cb_stale);
+    }
+}
+
+// The model leaves its owner (Depart: back to the pool) or dies: its deferred events go with it
+void CKinematicsAnimated::DeferredBlendEvents_Forget()
+{
+    m_deferred_blends.reset();
+    DeferredBlendEvents_Unlist();
+}
+
+void CKinematicsAnimated::DeferredBlendEvents_OwnerRelease()
+{
+    // No model lock needed: whatever a render thread still defers for this model this frame is dropped by
+    // DeferredBlendEvents_Run, which sees the flag (set before the join, or on main itself)
+    m_deferred_blends_owner_released.store(true, std::memory_order_release);
+    DeferredBlendEvents_Unlist();
+}
+
+// Removes this model's entries from the dispatch list
+void CKinematicsAnimated::DeferredBlendEvents_Unlist()
+{
+    if (!m_deferred_blends_listed.load(std::memory_order_relaxed))
+        return;
+    SkeletonDeferredBlendEvents& list = skeleton_deferred_blend_events();
+    std::lock_guard<std::mutex> guard(list.lock);
+    const auto keep_end = std::remove_if(list.events.begin(), list.events.end(),
+        [this](const DeferredBlendEvent& e) { return e.model == this; });
+    list.events.erase(keep_end, list.events.end());
+    m_deferred_blends_listed.store(false, std::memory_order_relaxed);
 }
 
 void CKinematicsAnimated::Release()
@@ -785,7 +1064,18 @@ void CKinematicsAnimated::Release()
     inherited::Release();
 }
 
-CKinematicsAnimated::~CKinematicsAnimated() { IBoneInstances_Destroy(); }
+CKinematicsAnimated::~CKinematicsAnimated()
+{
+    DeferredBlendEvents_Forget();
+    IBoneInstances_Destroy();
+}
+
+void CKinematicsAnimated::Depart()
+{
+    // Back to the pool: the next owner must not get callbacks deferred for the previous one
+    DeferredBlendEvents_Forget();
+    inherited::Depart();
+}
 
 void CKinematicsAnimated::IBoneInstances_Create()
 {
@@ -855,12 +1145,16 @@ void CKinematicsAnimated::IBlend_Startup()
     for (u32 i = 0; i < MAX_PARTS; i++)
         blend_cycles[i].clear();
     blend_fx.clear();
+    m_deferred_blends.reset();
+    m_deferred_blends_owner_released.store(false, std::memory_order_relaxed); // a new owner (Spawn) or none yet
     ChannelFactorsStartup();
 }
 
 CBlend* CKinematicsAnimated::IBlend_Create()
 {
-    GW_OVERLAP_HAZARD("CKinematicsAnimated::IBlend_Create");
+    // The mutators call it holding this model's lock; the detector counts only the calls without it
+    if (g_ucalc_model_lock_owner != static_cast<const CKinematics*>(this))
+        GW_OVERLAP_HAZARD("CKinematicsAnimated::IBlend_Create");
     UpdateTracks();
     _DBG_SINGLE_USE_MARKER;
     for (auto &it : blend_pool)

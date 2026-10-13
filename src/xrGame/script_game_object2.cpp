@@ -847,5 +847,18 @@ void CScriptGameObject::ResetBoneProtections(pcstr imm_sect, pcstr bone_sect)
     stalker->ResetBoneProtections(imm_sect, bone_sect);
 }
 
-void CScriptGameObject::set_visual_name(pcstr visual) { object().cNameVisual_set(visual); }
+void CScriptGameObject::set_visual_name(pcstr visual)
+{
+    // B2.2 (plans/optimization_mt/16-b2-overlap-races.md): Lua on the Game thread runs beside the render, which reads
+    // renderable.visual (published before its callbacks and OnChangeVisual, null for an empty name): the model is
+    // changed at the end of the frame, get_visual_name returns the old one until then
+    if (CGameObject::ShouldDeferToPostJoin())
+    {
+        const shared_str name = visual;
+        CGameObject::PostJoinForObject(object().ID(), [name](CGameObject& obj) { obj.cNameVisual_set(name); });
+        return;
+    }
+    object().cNameVisual_set(visual);
+}
+
 pcstr CScriptGameObject::get_visual_name() const { return object().cNameVisual().c_str(); }

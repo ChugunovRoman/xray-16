@@ -66,14 +66,21 @@ static void callback_rotation_blend(CBoneInstance* const bone)
     VERIFY(parameter);
     VERIFY(parameter->m_rotation);
     VERIFY(parameter->m_object);
-    VERIFY(parameter->m_blend);
+    // No VERIFY on m_blend: assign_bone_callbacks() zeroes it in the same params on the game logic
+    // thread while the render may still run this callback (overlap window) - a legal state now, not
+    // a bug. The bone just keeps its anim matrix for this pass. (Normally the bone lock of the assign_* functions
+    // keeps the render out meanwhile; this is the fallback for a lock LockBones declined.)
+    // m_blend is read once: a second load could see the null the game thread stored after the check.
+    CBlend const* const* const blend_slot = parameter ? parameter->m_blend : nullptr;
+    if (!parameter || !parameter->m_rotation || !blend_slot)
+        return;
     //	VERIFY2							( *parameter->m_blend, make_string( "%d %s[%s]", Device.dwTimeGlobal,
     // parameter->m_object->cName().c_str(), parameter->m_object->g_Alive() ? "+" : "-") );
 
     float multiplier = 1.f;
-    if (*parameter->m_blend)
+    if (CBlend const* const current_blend = *blend_slot)
     {
-        CBlend const& blend = **parameter->m_blend;
+        CBlend const& blend = *current_blend;
         multiplier = blend.timeCurrent / blend.timeTotal;
     }
 
@@ -112,6 +119,9 @@ void CStalkerAnimationManager::assign_bone_callbacks()
 {
     IKinematics* kinematics = smart_cast<IKinematics*>(m_visual);
     VERIFY(kinematics);
+    // Callbacks and the params they read change together under the bone lock: the render may run them in parallel
+    // (game/render overlap frame). Recursive: compute_aiming already holds it around remove -> aimer -> assign.
+    KinematicsBonesLock bones_lock(kinematics);
 
 #ifdef DEBUG
     m_head_params.invalidate();
@@ -152,6 +162,7 @@ void CStalkerAnimationManager::assign_bone_blend_callbacks(bool const& forward_d
 {
     IKinematics* kinematics = smart_cast<IKinematics*>(m_visual);
     VERIFY(kinematics);
+    KinematicsBonesLock bones_lock(kinematics); // see assign_bone_callbacks
 
 #ifdef DEBUG
     m_head_params.invalidate();
@@ -193,6 +204,7 @@ void CStalkerAnimationManager::remove_bone_callbacks()
 {
     IKinematics* kinematics = smart_cast<IKinematics*>(m_visual);
     VERIFY(kinematics);
+    KinematicsBonesLock bones_lock(kinematics); // see assign_bone_callbacks
 
 #ifdef DEBUG
     m_head_params.invalidate();

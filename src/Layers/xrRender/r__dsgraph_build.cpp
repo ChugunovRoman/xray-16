@@ -371,6 +371,11 @@ void R_dsgraph_structure::add_leafs_dynamic(
     {
         // Add all children, doesn't perform any tests
         PS::CParticleGroup* pG = (PS::CParticleGroup*)pVisual;
+        // OnFrame (PreRender particle worker) and Play/Stop (game logic thread) reallocate/erase the
+        // child vectors under render_lock while this view build runs - walk them under the same lock.
+        // Children are CParticleEffect leaves (no nested group lock) and insert_dynamic takes no locks,
+        // so the hold is a few pointer pushes; render threads only contend with each other that briefly.
+        ScopeLock lock{ &pG->GetRenderLock() };
         for (auto& it : pG->items)
         {
             PS::CParticleGroup::SItem& I = it;

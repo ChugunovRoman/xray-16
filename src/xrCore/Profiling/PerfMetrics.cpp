@@ -23,6 +23,7 @@ XRCORE_API bool g_perf_metrics_active = false;
 XRCORE_API bool g_perf_hide_hot_zones = false;
 XRCORE_API std::atomic<std::thread::id> g_main_tid{};
 XRCORE_API std::atomic<std::thread::id> g_game_tid{};
+XRCORE_API std::atomic<std::thread::id> g_game_overlap_tid{};
 XRCORE_API int g_overlap_hazard_probe = 0;
 XRCORE_API int g_perf_spike_us = 0;
 XRCORE_API int g_perf_spike_cpu = 0;
@@ -50,6 +51,7 @@ thread_local u8 tl_crow_src_v = 0;
 thread_local u8 tl_bone_caller_v = 0;
 thread_local u8 tl_wait_site_v = 0;
 thread_local u8 tl_spawn_v = 0;
+thread_local u32 tl_bones_locked_v = 0;
 
 constexpr size_t kMaxBlendCb = 16;
 struct BlendCbEntry
@@ -193,6 +195,7 @@ XRCORE_API u8& TlCrowSrc() noexcept { return tl_crow_src_v; }
 XRCORE_API u8& TlBoneCaller() noexcept { return tl_bone_caller_v; }
 XRCORE_API u8& TlWaitSite() noexcept { return tl_wait_site_v; }
 XRCORE_API u8& TlSpawn() noexcept { return tl_spawn_v; }
+XRCORE_API u32& TlBonesLocked() noexcept { return tl_bones_locked_v; }
 
 XRCORE_API void RegisterBlendCb(const void* fn, const char* name) noexcept
 {
@@ -647,12 +650,56 @@ XRCORE_API void Flush() noexcept
     }
 }
 
+XRCORE_API bool IsNewHazardStack(OverlapHazardSite& site) noexcept
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    // Slots fill in order, so a taken last slot means the site is full: no capture any more (the hot path of a site
+    // hit millions of times per session).
+    if (site.stacks[kHazardStacksPerSite - 1].load(std::memory_order_relaxed) != 0)
+        return false;
+    constexpr DWORD hash_frames = 24;
+    void* frames[hash_frames];
+    const USHORT count = CaptureStackBackTrace(1, hash_frames, frames, nullptr); // skip this function
+    u64 hash = 14695981039346656037ull; // FNV-1a over the return addresses
+    for (USHORT i = 0; i < count; ++i)
+    {
+        hash ^= u64(reinterpret_cast<uintptr_t>(frames[i]));
+        hash *= 1099511628211ull;
+    }
+    if (hash == 0)
+        hash = 1; // 0 marks a free slot
+    for (std::atomic<u64>& slot : site.stacks)
+    {
+        u64 logged = slot.load(std::memory_order_relaxed);
+        // Claim the first free slot; a lost race leaves the winner's hash in `logged` (the same path from another
+        // thread is then not logged twice).
+        if (logged == 0 && slot.compare_exchange_strong(logged, hash, std::memory_order_relaxed))
+            return true;
+        if (logged == hash)
+            return false;
+    }
+    return false;
+#else
+    (void)site;
+    return false;
+#endif
+}
+
 XRCORE_API void ReportOverlapHazard(OverlapHazardSite& site, const char* where) noexcept
 {
     const u32 n = site.count.fetch_add(1, std::memory_order_relaxed) + 1;
+    // Names the caller: the whole stack of the first few distinct call paths of this site (symbolized by the same
+    // code as the crash log, at most kHazardStacksPerSite per site).
+    if (IsNewHazardStack(site))
+    {
+        string512 header;
+        xr_sprintf(header, "! [overlap-hazard] %s: hit #%u, call stack of a new caller:", where, n);
+        xrDebug::LogStackTrace(header);
+    }
     if (n <= 8)
     {
-        Msg("! [overlap-hazard] %s called from GameThread (logic thread) while it is running, hit #%u", where, n);
+        Msg("! [overlap-hazard] %s called from GameThread (logic thread) while the render runs in parallel, hit #%u",
+            where, n);
         return;
     }
     const u64 now_ms = CPU::GetTicks();

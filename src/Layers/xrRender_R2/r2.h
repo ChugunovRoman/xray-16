@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <mutex>
 #include <thread>
 
 #include "xrCore/Threading/Event.hpp"
@@ -213,12 +214,24 @@ public:
     void Register(IRender_Glow* glow);
     void Unregister(IRender_Glow* glow);
     void Render();
-    bool Empty() const { return m_active.empty(); }
+    bool Empty() const
+    {
+        std::lock_guard<std::mutex> guard(m_active_lock);
+        return m_active.empty();
+    }
+    // B2.6: CGlow::set_texture publishes new shaders of a glow under the same leaf lock Render() takes its shader
+    // references under (nothing else is locked or called while it is held).
+    [[nodiscard]] std::unique_lock<std::mutex> LockActive() const { return std::unique_lock<std::mutex>(m_active_lock); }
 
 private:
     void Initialize();
 
 private:
+    // Register/Unregister come from CGlow::set_active, i.e. from the game code - on an overlap frame from the Game
+    // logic thread while the main thread walks m_active in Render() (combine phase). Leaf lock: held only around the
+    // vector itself (Render copies the active glows under it and draws from the copy), nothing else is locked or
+    // called back under it. The glows themselves are kept alive for the frame by the ref_glow graveyard (Render.h).
+    mutable std::mutex m_active_lock;
     xr_vector<IRender_Glow*> m_active;
     ref_geom m_hGeom;
 };

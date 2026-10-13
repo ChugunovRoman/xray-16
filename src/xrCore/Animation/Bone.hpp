@@ -55,7 +55,9 @@ public:
 
     void set_callback(u32 Type, BoneCallback C, void* Param, BOOL overwrite = FALSE)
     {
-        GW_OVERLAP_HAZARD("CBoneInstance::set_callback");
+        // Writes under a model's bone lock (phase B, KinematicsBonesLock) are serialized with the render: not a hazard
+        if (::xray::perf::g_overlap_hazard_probe && !::xray::perf::TlBonesLocked())
+            GW_OVERLAP_HAZARD("CBoneInstance::set_callback");
         Callback = C;
         Callback_Param = Param;
         Callback_overwrite = overwrite;

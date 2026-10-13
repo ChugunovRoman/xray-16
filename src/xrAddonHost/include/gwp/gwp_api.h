@@ -2478,7 +2478,9 @@ typedef struct GwpEngineApi
        cannot while online (the engine keeps its skeleton in the animation and physics managers, a corpse in its
        ragdoll), and so cannot an object with a physics shell (a box, a barrel, an item on the ground, a car: the shell
        keeps the bones of the old model): change it while it is offline, it comes online with the new model. An offline object changes its
-       server object only. GWP_ERROR_NOT_FOUND: neither online nor in ALife, no such model file;
+       server object only. Called on the game logic thread while the render of the frame runs beside it, the online
+       model (the actor's too) changes at the end of that frame, after the render: GWP_OK is returned at once, the
+       old model (and visual name) stays until then; the server object is written at once. GWP_ERROR_NOT_FOUND: neither online nor in ALife, no such model file;
        GWP_ERROR_INVALID_ARGUMENT: an empty or too long name, an object without a model; GWP_ERROR_INVALID_STATE: an
        offline object without a game; GWP_ERROR_NOT_SUPPORTED: an online creature other than the actor, an online
        object with a physics shell.

@@ -92,7 +92,13 @@ struct ModelPool_mtlock
         --g_modelpool_lock_depth;
     }
 };
+
+// Live ModelPoolDeferDeletes scopes, see ModelPool.h
+std::atomic<int> s_modelpool_defer_deletes{0};
 } // namespace
+
+ModelPoolDeferDeletes::ModelPoolDeferDeletes() { s_modelpool_defer_deletes.fetch_add(1, std::memory_order_relaxed); }
+ModelPoolDeferDeletes::~ModelPoolDeferDeletes() { s_modelpool_defer_deletes.fetch_sub(1, std::memory_order_relaxed); }
 
 dxRender_Visual* CModelPool::Instance_Create(u32 type)
 {
@@ -498,14 +504,23 @@ void CModelPool::DeleteInternal(dxRender_Visual*& V, BOOL bDiscard)
 void CModelPool::Delete(dxRender_Visual*& V, BOOL bDiscard)
 {
     GW_OVERLAP_HAZARD("CModelPool::Delete");
+    // The owner gives the model up now, even if it is freed only later: blend callbacks a render thread deferred to
+    // after the join must not call into an owner that may be destroyed by then
+    if (V)
+    {
+        if (CKinematicsAnimated* animated = PKinematicsAnimated(V))
+            animated->DeferredBlendEvents_OwnerRelease();
+    }
     ModelPool_mtlock lock;
     if (nullptr == V)
         return;
     // g_bRendering alone used to gate this (and only ever saw bDiscard=FALSE - bDiscard=TRUE was
     // asserted against). Device.IsFrameOverlapActive() is the broader P1 overlap window (see device.h
     // for why it is a separate flag from g_bRendering); with the overlap in place bDiscard=TRUE calls
-    // can happen inside the window same as FALSE ones, so both defer the same way.
-    if (g_bRendering || Device.IsFrameOverlapActive())
+    // can happen inside the window same as FALSE ones, so both defer the same way. ModelPoolDeferDeletes: game
+    // callbacks run on main after the window (deferred blend events) get the same guarantee.
+    if (g_bRendering || Device.IsFrameOverlapActive() ||
+        s_modelpool_defer_deletes.load(std::memory_order_relaxed) > 0)
     {
         ModelsToDelete.emplace_back(V, bDiscard);
     }

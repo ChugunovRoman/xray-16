@@ -28,8 +28,8 @@ void smapvis::release()
 }
 void smapvis::invalidate()
 {
-    // light::spatial_move() invalidates on every noticeable move; the query issued last frame
-    // is not flushed yet at that point (flush runs inside Render()) - return it instead.
+    // light::render_apply_move() invalidates on every noticeable move; the query issued last frame
+    // is not flushed yet at that point (the flush runs later in Render()) - return it instead.
     release();
     state = state_counting;
     frame_sleep = Device.dwFrame + ps_r__LightSleepFrames;

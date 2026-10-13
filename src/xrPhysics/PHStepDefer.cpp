@@ -147,35 +147,6 @@ void ApplyPendingTransform(const CPHElement* key)
     }
     CountDropped();
 }
-
-#if defined(XR_PLATFORM_WINDOWS)
-// overlap_hazard_probe 1: the call stacks already logged per hazard site (hash of the return addresses), so that every
-// distinct caller of a site is logged once, up to a few per site.
-constexpr size_t hazard_stacks_per_site = 6;
-constexpr DWORD hazard_stack_hash_frames = 24;
-std::mutex s_hazard_stacks_lock;
-xr_map<const void*, xr_vector<u64>> s_hazard_stacks;
-
-bool IsNewHazardStack(const void* site)
-{
-    void* frames[hazard_stack_hash_frames];
-    const USHORT count = CaptureStackBackTrace(2, hazard_stack_hash_frames, frames, nullptr); // skip this + ReportHazard
-    u64 hash = 14695981039346656037ull; // FNV-1a over the addresses
-    for (USHORT i = 0; i < count; ++i)
-    {
-        hash ^= u64(reinterpret_cast<uintptr_t>(frames[i]));
-        hash *= 1099511628211ull;
-    }
-    std::lock_guard<std::mutex> guard(s_hazard_stacks_lock);
-    xr_vector<u64>& logged = s_hazard_stacks[site];
-    if (logged.size() >= hazard_stacks_per_site)
-        return false;
-    if (std::find(logged.begin(), logged.end(), hash) != logged.end())
-        return false;
-    logged.push_back(hash);
-    return true;
-}
-#endif
 } // namespace
 
 bool StepRunningOnOtherThread() { return ph_world && ph_world->IsStepRunningOnOtherThread(); }
@@ -418,16 +389,14 @@ void ReportHazard(xray::perf::OverlapHazardSite& site, const char* where) noexce
     if (!xray::perf::g_overlap_hazard_probe)
         return;
     const u32 n = site.count.fetch_add(1, std::memory_order_relaxed) + 1;
-#if defined(XR_PLATFORM_WINDOWS)
     // Names the caller: the whole stack of the first few distinct call paths of this site (probe only, symbolized by
-    // the same code as the crash log; up to hazard_stacks_per_site per site, so the cost is bounded).
-    if (IsNewHazardStack(&site))
+    // the same code as the crash log; up to kHazardStacksPerSite per site, so the cost is bounded; Windows only).
+    if (xray::perf::IsNewHazardStack(site))
     {
         string512 header;
         xr_sprintf(header, "! [physics-step-hazard] %s: hit #%u, call stack of a new caller:", where, n);
         xrDebug::LogStackTrace(header);
     }
-#endif
     if (n <= 8)
     {
         Msg("! [physics-step-hazard] %s: called on a non-physics thread while the physics step runs, hit #%u", where, n);

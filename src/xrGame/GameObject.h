@@ -7,6 +7,7 @@
 #define AFX_GAMEOBJECT_H__3DA72D03_C759_4688_AEBB_89FA812AA873__INCLUDED_
 
 #include <atomic>
+#include <functional>
 
 #include "xrEngine/xr_object.h"
 
@@ -236,6 +237,13 @@ public:
     virtual void cNameVisual_set(shared_str N) override;
     // Recreate render model from disk even when cNameVisual is unchanged (dev: mesh/bone edits).
     void ReloadVisualFromDisk();
+    // Game/render overlap (plans/optimization_mt/16-b2-overlap-races.md, B2.2). True on the dedicated Game logic
+    // thread while it runs in parallel with the main-thread render: a change of what the render reads (the visual,
+    // the attachments) made there must wait for the end of the frame, see PostJoinForObject.
+    static bool ShouldDeferToPostJoin();
+    // Runs fn on the main thread at the end of the frame (CRenderDevice::PostJoin: the Game thread, the physics step
+    // and the render are joined) if the object with this ID is still online and not being destroyed.
+    static void PostJoinForObject(u16 id, std::function<void(CGameObject&)> fn);
     virtual shared_str shedule_Name() const override { return cName(); };
     // Properties
     virtual void processing_activate() override; // request to enable UpdateCL

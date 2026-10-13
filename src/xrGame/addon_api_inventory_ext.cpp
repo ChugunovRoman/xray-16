@@ -595,6 +595,24 @@ GwpResult GWP_CALL ApiObjectSetVisual(const GwpPlugin* self, GwpObjectId id, con
             // only for a null visual): a box, a barrel, an item on the ground, a car change their model only offline
             return api::PluginRefusal(self, function, GWP_ERROR_NOT_SUPPORTED,
                 "an object with a physics shell changes its model only offline");
+        else if (CGameObject::ShouldDeferToPostJoin())
+        {
+            // B2.2: a plugin called on the Game thread beside the render - the model changes at the end of the frame
+            // (as set_visual_name of Lua there; the actor branch above defers inside CActor::ChangeVisual)
+            const shared_str name = visual;
+            CGameObject::PostJoinForObject(id, [name](CGameObject& obj) {
+                // Re-checked when it runs: a shell may have appeared meanwhile (the item was dropped this frame),
+                // and that is exactly the case refused above
+                if (CPhysicsShellHolder* shell_holder = smart_cast<CPhysicsShellHolder*>(&obj);
+                    shell_holder && shell_holder->PPhysicsShell())
+                {
+                    Msg("! object_set_visual: [%s] got a physics shell before the deferred model change, [%s] skipped",
+                        obj.cName().c_str(), name.c_str());
+                    return;
+                }
+                obj.cNameVisual_set(name);
+            });
+        }
         else
             object->cNameVisual_set(visual); // set_visual_name of Lua
         if (server_visual)

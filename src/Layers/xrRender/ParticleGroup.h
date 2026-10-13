@@ -118,6 +118,12 @@ public:
     using SItemVec = xr_vector<SItem>;
     SItemVec items;
 
+    // Guards items[i]._children_related/_children_free: OnFrame (PreRender particle worker) and
+    // Play/Stop/UpdateParent (game logic thread) push_back/swap-pop/erase them while render threads
+    // walk them in R_dsgraph_structure::add_leafs_dynamic. Recursive. Order: outer object locks
+    // (CHUDManager/CWeapon render_lock) -> this -> ModelPool_Mutex; nothing under it takes the outer ones.
+    Lock& GetRenderLock() { return render_lock; }
+
 public:
     enum
     {

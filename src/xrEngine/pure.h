@@ -74,9 +74,10 @@ class MessageRegistry
     // not touch `messages` directly - it goes here instead, under add_msg_mtx, and Process() merges
     // it in right after the loop. The reentrant same-thread path is unaffected, same as before.
     // One queue in call order (not separate add/remove lists): a foreign Remove(X); Add(X) must end
-    // with X registered. Caveat: a deferred Remove() returns before the running loop has finished, so
-    // a foreign thread must not destroy the object right after Remove() while Process() may still be
-    // iterating - today no registry is touched from a foreign thread during Process().
+    // with X registered. A foreign Remove() also marks the live entry REG_PRIORITY_INVALID in place, so
+    // the loop does not call the object afterwards. Caveat: an OnPure() of that object that has already
+    // started is not waited for, so a foreign thread destroying the object right after Remove() can
+    // still race with that one call (the game logic thread does this to Device.seqRender UI).
     struct PendingOp
     {
         T* Object;
@@ -196,6 +197,16 @@ public:
 
         if (IsForeignThreadDuringProcess())
         {
+            // Also invalidate the live entry in place (no reallocation, just the Prio word), so the
+            // running loop skips the object from its next check on instead of only after the merge:
+            // the game logic thread removes UI from seqRender during the render (overlap window) and
+            // may delete it right after Remove(). Safe against reallocation: `messages` only grows
+            // under add_msg_mtx, which is held here. The loop reads Prio unlocked (benign aligned int
+            // store, reloaded every iteration since Call() is opaque); an OnPure() already past its
+            // check still finishes, see the caveat on m_pending.
+            for (auto& message : messages)
+                if (message.Object == object)
+                    message.Prio = REG_PRIORITY_INVALID;
             m_pending.push_back({ object, REG_PRIORITY_INVALID });
             return;
         }
