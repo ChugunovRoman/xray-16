@@ -70,6 +70,20 @@ struct CRemoveByTimePredicate
     }
 };
 
+// m_selected is a pointer into m_objects: the index of the selected element, or size_t(-1) when nothing is selected
+// (or the pointer is not inside the vector any more, which must not happen)
+static size_t danger_selected_index(const CDangerManager::OBJECTS& objects, const CDangerObject* selected)
+{
+    if (!selected)
+        return size_t(-1);
+
+    for (size_t i = 0, n = objects.size(); i < n; ++i)
+        if (&objects[i] == selected)
+            return i;
+
+    return size_t(-1);
+}
+
 CDangerManager::~CDangerManager() {}
 void CDangerManager::Load(LPCSTR section) {}
 void CDangerManager::reinit()
@@ -118,7 +132,16 @@ void CDangerManager::remove_links(const IGameObject* object)
     if (m_selected && (m_selected->object() == object))
         m_selected = 0;
 
+    // The erase below moves the kept elements forward. m_selected left as it was would point at another element or,
+    // past the new end, at a leftover copy of the selected one: the loop below does not clear its dependent_object()
+    // (a grenade), so the next GetBestDanger() reads a destroyed object (several objects destroyed in one frame, one
+    // relcase batch, make it likely). Re-pointed at the same element: minus the removed ones before it.
+    size_t selected = danger_selected_index(m_objects, m_selected);
+    if (selected != size_t(-1))
+        selected -= size_t(std::count_if(m_objects.begin(), m_objects.begin() + selected, CDangerPredicate(object)));
+
     m_objects.erase(std::remove_if(m_objects.begin(), m_objects.end(), CDangerPredicate(object)), m_objects.end());
+    m_selected = (selected != size_t(-1)) ? &m_objects[selected] : 0;
 
     {
         OBJECTS::iterator I = m_objects.begin();
@@ -321,7 +344,10 @@ void CDangerManager::add(const CDangerObject& object)
         }
     }
 
+    // push_back may reallocate the vector m_selected points into: re-pointed at the same element
+    const size_t selected = danger_selected_index(m_objects, m_selected);
     m_objects.push_back(object);
+    m_selected = (selected != size_t(-1)) ? &m_objects[selected] : 0;
 }
 
 void CDangerManager::ignore(const CGameObject* object)
