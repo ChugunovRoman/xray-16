@@ -112,6 +112,10 @@ public:
         IKinematics::pick_result& r, float dist, const Fvector& start, const Fvector& dir, u16 bone_id) = 0;
     virtual void FillVertices(
         const Fmatrix& view, CSkeletonWallmark& wm, const Fvector& normal, float size, u16 bone_id) = 0;
+
+    // CPU skinning (RM_SKINNING_SOFT) writes the shared dynamic VB (RImplementation.Vertex, mapped on the immediate
+    // context), so such a mesh may be recorded by the main thread only (see R_dsgraph_structure::render_graph_main_parallel).
+    bool IsSoftwareSkinned() const { return RenderMode == RM_SKINNING_SOFT; }
 };
 
 template <typename T_vertex, typename T_buffer>

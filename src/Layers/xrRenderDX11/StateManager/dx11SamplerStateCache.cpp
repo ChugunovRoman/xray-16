@@ -10,7 +10,10 @@ dx11SamplerStateCache SSManager;
 
 dx11SamplerStateCache::dx11SamplerStateCache() : m_uiMaxAnisotropy(1), m_uiMipLODBias(0.0f)
 {
-    static const int iMaxRSStates = 10;
+    // D3D11 allows at most 4096 unique sampler state objects per device. Reserving them all means push_back in
+    // GetState never reallocates, so the recording threads (shadows, SVP, the parallel main-view submit) can read
+    // m_StateArray[h] in ApplySamplers without a lock while the Game logic thread creates a shader's samplers
+    static const int iMaxRSStates = 4096;
     m_StateArray.reserve(iMaxRSStates);
 }
 
@@ -29,6 +32,8 @@ dx11SamplerStateCache::SHandle dx11SamplerStateCache::GetState(D3D_SAMPLER_DESC&
 
     u32 crc = dx11StateUtils::GetHash(desc);
 
+    // Creators may run on several threads (shader loading on main and on the Game logic thread)
+    std::lock_guard<std::mutex> lock(m_create_lock);
     hResult = FindState(desc, crc);
 
     if (hResult == hInvalidHandle)
@@ -37,6 +42,7 @@ dx11SamplerStateCache::SHandle dx11SamplerStateCache::GetState(D3D_SAMPLER_DESC&
         rec.m_crc = crc;
         CreateState(desc, &rec.m_pState);
         hResult = m_StateArray.size();
+        R_ASSERT2(m_StateArray.size() < m_StateArray.capacity(), "dx11SamplerStateCache: more than 4096 sampler states");
         m_StateArray.push_back(rec);
     }
 

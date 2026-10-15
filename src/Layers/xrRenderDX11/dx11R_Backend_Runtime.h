@@ -626,21 +626,30 @@ IC void CBackend::ApplyVertexLayout()
     }
     else
     {
-        xr_map<ID3DBlob*, ID3DInputLayout*>::iterator it;
-
-        it = decl->vs_to_layout.find(m_pInputSignature);
-
-        if (it == decl->vs_to_layout.end())
+        // Backends of several threads search and fill the same declaration's map (g_dx11_input_layout_lock).
+        layout = nullptr;
         {
-            ID3DInputLayout* pLayout;
+            std::shared_lock<std::shared_mutex> lock{ g_dx11_input_layout_lock };
+            const auto it = decl->vs_to_layout.find(m_pInputSignature);
+            if (it != decl->vs_to_layout.end())
+                layout = it->second;
+        }
+        if (!layout)
+        {
+            std::unique_lock<std::shared_mutex> lock{ g_dx11_input_layout_lock };
+            auto it = decl->vs_to_layout.find(m_pInputSignature);
+            if (it == decl->vs_to_layout.end())
+            {
+                ID3DInputLayout* pLayout;
 
-            CHK_DX(HW.pDevice->CreateInputLayout(&decl->dx11_dcl_code[0], decl->dx11_dcl_code.size() - 1,
-                m_pInputSignature->GetBufferPointer(), m_pInputSignature->GetBufferSize(), &pLayout));
+                CHK_DX(HW.pDevice->CreateInputLayout(&decl->dx11_dcl_code[0], decl->dx11_dcl_code.size() - 1,
+                    m_pInputSignature->GetBufferPointer(), m_pInputSignature->GetBufferSize(), &pLayout));
 
-            it = decl->vs_to_layout.insert(std::pair<ID3DBlob*, ID3DInputLayout*>(m_pInputSignature, pLayout)).first;
+                it = decl->vs_to_layout.insert(std::pair<ID3DBlob*, ID3DInputLayout*>(m_pInputSignature, pLayout)).first;
+            }
+            layout = it->second;
         }
 
-        layout = it->second;
         m_layoutDecl = decl;
         m_layoutSignature = m_pInputSignature;
         m_layoutCached = layout;

@@ -297,6 +297,11 @@ int r__parallel_skeleton_visbox_min_bones = 64;
 // over task workers. grain - spatial entries per part (at most 64 parts), min - fewer entries -> sequential loop.
 int r__parallel_main_build_grain = 32;
 int r__parallel_main_build_min = 128;
+// P19 (d), plans/optimization_mt/19-part0-submit.md: the main view's render_graph(0) recorded in parallel on D3D11
+// deferred contexts (R4 only, always on). parts - units incl. the main thread's own one,
+// min - fewer draw items -> the serial render_graph(0).
+int ps_r__main_parallel_parts = 4;
+int ps_r__main_parallel_submit_min = 1500;
 int ps_r2_mt_render = 1;
 int ps_r__phase_mt = 0;
 
@@ -1037,6 +1042,8 @@ void xrRender_initconsole()
     CMD4(CCC_Integer, "r__phase_mt", &ps_r__phase_mt, 0, 3);
 #if RENDER == R_R4
     CMD4(CCC_Integer, "r2_mt_render",       &ps_r2_mt_render,    0, 1);
+    CMD4(CCC_Integer, "r__main_parallel_parts", &ps_r__main_parallel_parts, 2, 8);
+    CMD4(CCC_Integer, "r__main_parallel_submit_min", &ps_r__main_parallel_submit_min, 0, 100000);
 #endif
 
     CMD4(CCC_Integer, "r__particle_render_parallel", &r__particle_render_parallel, 0, 1);

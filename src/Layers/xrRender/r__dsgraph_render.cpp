@@ -10,6 +10,12 @@
 
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #ifdef USE_DX11
+#include <atomic>
+#include <thread>
+
+#include "FSkinned.h"
+#include "LightTrack.h"
+#include "xrCore/Threading/TaskManager.hpp"
 #include "Layers/xrRenderDX11/dx11ConstantBuffer.h"
 #endif
 
@@ -51,6 +57,66 @@ bool cmp_pass(const T& left, const T& right)
     return left->second.ssa > right->second.ssa;
 }
 
+// The group bodies of render_graph, shared with the parallel main-view submit (render_graph_main_parallel below): a run of
+// SSA-sorted items of one SPass group drawn on cmd_list. Static (mapNormal) items keep the world transform the caller
+// set (identity); dynamic (mapMatrix) items set their own.
+static void render_normal_items(CBackend& cmd_list, SPass* pass, const _NormalItem* items, size_t count,
+    bool use_fast_geo, [[maybe_unused]] bool perf_main)
+{
+    cmd_list.set_Pass(pass);
+    cmd_list.apply_lmaterial();
+    PERF_ADD_IF(perf_main, rmain_static_passes, 1);
+    PERF_ADD_IF(perf_main, rmain_static_items, count);
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        const _NormalItem& item = items[i];
+        const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R);
+#ifdef USE_DX11
+        cmd_list.LOD.set_LOD(LOD);
+#endif
+        // --#SM+#-- Обновляем шейдерные данные модели [update shader values for this model]
+        // RCache.hemi.c_update(item.pVisual);
+
+        item.pVisual->Render(cmd_list, LOD, use_fast_geo);
+    }
+}
+
+// Returns the number of items whose object is forced to the character LOD (BasicStats.CorpseRegularSubmissions).
+static u32 render_matrix_items(CBackend& cmd_list, SPass* pass, const _MatrixItem* items, size_t count,
+    bool use_fast_geo, [[maybe_unused]] bool perf_main)
+{
+    cmd_list.set_Pass(pass);
+    PERF_ADD_IF(perf_main, rmain_dyn_passes, 1);
+
+    u32 corpses = 0;
+    for (size_t i = 0; i < count; ++i)
+    {
+        const _MatrixItem& item = items[i];
+        cmd_list.set_xform_world(item.Matrix);
+        {
+            PERF_SCOPE_IF(perf_main, rmain_dyn_apply_object);
+            RImplementation.apply_object(cmd_list, item.pObject);
+        }
+        cmd_list.apply_lmaterial();
+
+        const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R);
+#ifdef USE_DX11
+        cmd_list.LOD.set_LOD(LOD);
+#endif
+        // --#SM+#-- Обновляем шейдерные данные модели [update shader values for this model]
+        // RCache.hemi.c_update(item.pVisual);
+
+        {
+            PERF_SCOPE_IF(perf_main, rmain_dyn_visual_render);
+            item.pVisual->Render(cmd_list, LOD, use_fast_geo);
+        }
+        if (item.pObject && item.pObject->renderable_ForceLodCharacter())
+            ++corpses;
+    }
+    return corpses;
+}
+
 void R_dsgraph_structure::render_graph(u32 _priority)
 {
     PIX_EVENT_CTX(cmd_list, dsgraph_render_graph);
@@ -60,6 +126,7 @@ void R_dsgraph_structure::render_graph(u32 _priority)
 
     // render/main/* metrics: only the main view's graph (not cascades, lights or the scope pass).
     [[maybe_unused]] const bool perf_main = o.is_main_pass && !o.second_vp_pass;
+    const bool use_fast_geo = o.phase == CRender::PHASE_SMAP;
 #if defined(USE_DX11) && XR_PERF_METRICS
     // P19 step 2: backend redundancy counters of this graph (static + dynamic), see CBackend::_stats.
     const u32 perf_layout_skip0 = cmd_list.stat.layout_skip;
@@ -88,28 +155,12 @@ void R_dsgraph_structure::render_graph(u32 _priority)
             std::sort(nrmPasses.begin(), nrmPasses.end(), cmp_pass<mapNormal_T::value_type*>);
             for (const auto& it : nrmPasses)
             {
-                cmd_list.set_Pass(it->first);
-                cmd_list.apply_lmaterial();
-
                 mapNormalItems& items = it->second;
                 items.ssa = 0;
-                PERF_ADD_IF(perf_main, rmain_static_passes, 1);
-                PERF_ADD_IF(perf_main, rmain_static_items, items.size());
 
                 std::sort(items.begin(), items.end(), cmp_ssa<_NormalItem>);
-                for (const auto& item : items)
-                {
-                    const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R);
-#ifdef USE_DX11
-                    cmd_list.LOD.set_LOD(LOD);
-#endif
-                    // --#SM+#-- Обновляем шейдерные данные модели [update shader values for this model]
-                    // RCache.hemi.c_update(item.pVisual);
-
-                    item.pVisual->Render(cmd_list, LOD, o.phase == CRender::PHASE_SMAP);
-                }
+                render_normal_items(cmd_list, it->first, items.data(), items.size(), use_fast_geo, perf_main);
                 items.clear();
-
             }
             nrmPasses.clear();
             map.clear();
@@ -145,37 +196,13 @@ void R_dsgraph_structure::render_graph(u32 _priority)
                 std::sort(matPasses.begin(), matPasses.end(), cmp_pass<mapMatrix_T::value_type*>);
                 for (const auto& it : matPasses)
                 {
-                    cmd_list.set_Pass(it->first);
-                    PERF_ADD_IF(perf_main, rmain_dyn_passes, 1);
-
                     mapMatrixItems& items = it->second;
                     items.ssa = 0;
 
                     std::sort(items.begin(), items.end(), cmp_ssa<_MatrixItem>);
-                    for (auto& item : items)
-                    {
-                        cmd_list.set_xform_world(item.Matrix);
-                        {
-                            PERF_SCOPE_IF(perf_main, rmain_dyn_apply_object);
-                            RImplementation.apply_object(cmd_list, item.pObject);
-                        }
-                        cmd_list.apply_lmaterial();
-
-                        const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R);
-#ifdef USE_DX11
-                        cmd_list.LOD.set_LOD(LOD);
-#endif
-                        // --#SM+#-- Обновляем шейдерные данные модели [update shader values for this model]
-                        // RCache.hemi.c_update(item.pVisual);
-
-                        {
-                            PERF_SCOPE_IF(perf_main, rmain_dyn_visual_render);
-                            item.pVisual->Render(cmd_list, LOD, o.phase == CRender::PHASE_SMAP);
-                        }
-                        ++statsCounter;
-                        if (item.pObject && item.pObject->renderable_ForceLodCharacter())
-                            ++RImplementation.BasicStats.CorpseRegularSubmissions;
-                    }
+                    RImplementation.BasicStats.CorpseRegularSubmissions +=
+                        render_matrix_items(cmd_list, it->first, items.data(), items.size(), use_fast_geo, perf_main);
+                    statsCounter += static_cast<u32>(items.size());
                     items.clear();
                 }
                 matPasses.clear();
@@ -201,6 +228,527 @@ void R_dsgraph_structure::render_graph(u32 _priority)
 
     RImplementation.BasicStats.Primitives.End(); // XXX: Refactor a bit later
 }
+
+//////////////////////////////////////////////////////////////////////////
+// P19 (d), plans/optimization_mt/19-part0-submit.md: the main view's render_graph(0) recorded in parallel.
+//
+// The SSA-sorted SPass groups of render_graph(0) (static, then dynamic - the same order) are cut into contiguous units
+// of similar recording cost. Unit 0 is recorded by the main thread straight on the immediate context; the following
+// units are recorded by task workers (and by the main thread when it gets to one nobody has taken) into pooled D3D11
+// deferred contexts, then executed on the immediate context in unit order. The command stream the GPU sees is the
+// serial one cut into pieces, so the draw order - and with it every depth/stencil tie - is unchanged.
+//
+// Recording off the main thread is limited to what only writes into its own backend:
+//  - per context: CBackend state cache, constant buffers (per-context pools), transforms, LOD/hemi/tree constants;
+//  - CROS (apply_object -> update_smooth writes the object's smoothed lighting once per frame): every object of the
+//    graph is refreshed on the main thread before the units start, apply_object in the units then only reads it;
+//  - groups whose visuals touch shared immediate-context resources stay on the main thread, inline at their place in
+//    the order: particles, LODs, fluid volumes and CPU-skinned meshes fill the shared dynamic VB (Vertex.Lock maps the
+//    immediate context), video textures upload through the immediate context, a texture not bound yet loads itself
+//    or switches its bind delegate on the first bind.
+#if defined(USE_DX11)
+namespace
+{
+constexpr u32 MAIN_PAR_INLINE = u32(-1);
+constexpr u32 MAIN_PAR_MAX_SLOTS = R__NUM_PARALLEL_CONTEXTS;
+// Recording cost weights for cutting the graph (P19 journal: ~0.4 us per static draw, ~0.9 us per dynamic draw).
+constexpr u32 MAIN_PAR_WEIGHT_STATIC = 1;
+constexpr u32 MAIN_PAR_WEIGHT_DYNAMIC = 2;
+
+// A run of SSA-sorted items of one SPass group (a whole group before the cut).
+struct main_par_piece
+{
+    SPass* pass;
+    const _NormalItem* normal; // static items, or nullptr
+    const _MatrixItem* matrix; // dynamic items, or nullptr
+    u32 count;
+    bool main_only; // drawn by the main thread on the immediate context
+};
+
+// Pieces [piece_begin, piece_end), recorded into a deferred slot or inline on the immediate context.
+struct main_par_unit
+{
+    u32 piece_begin;
+    u32 piece_end;
+    u32 slot; // index into s_main_par_slots, MAIN_PAR_INLINE - the main thread records it on the immediate context
+};
+
+// A deferred unit: its pooled context and the sealed command list.
+struct main_par_slot
+{
+    u32 unit{};
+    u32 context_id{ R_dsgraph_structure::INVALID_CONTEXT_ID };
+    CBackend* cmd{};
+    ID3D11CommandList* list{};
+    u32 corpses{};
+    std::atomic<u32> done{ 0 }; // 1 - recorded and sealed (release; the main thread acquires before executing)
+};
+
+// The state render_graph(0) inherits on the immediate context from phase_scene_begin() and the frame setup (G-buffer
+// targets, stencil 0x01 marking, cull, color writes, viewport, camera, the last apply_object ambient used by the static
+// groups' apply_lmaterial). A deferred context inherits nothing, and the immediate one is at D3D11 defaults after
+// ExecuteCommandList(.., FALSE) - both get this seed. Captured on the main thread, read-only for the units.
+struct main_par_seed
+{
+    ref_rt rt0, rt1, rt2, zb; // rt2 empty: two G-buffer targets (o.gbuffer_opt)
+    D3D_VIEWPORT viewport{};
+    Fmatrix view{}, project{};
+    float o_hemi{}, o_sun{};
+    float o_hemi_cube[6]{};
+
+    void capture(CBackend& imm)
+    {
+        // Same targets as CRenderTarget::phase_scene_begin().
+        const auto& T = *RImplementation.Target;
+        rt0 = T.rt_Position;
+        if (!RImplementation.o.gbuffer_opt)
+        {
+            rt1 = T.rt_Normal;
+            rt2 = RImplementation.o.albedo_wo ? T.rt_Accumulator : T.rt_Color;
+        }
+        else
+            rt1 = RImplementation.o.albedo_wo ? T.rt_Accumulator : T.rt_Color;
+        zb = T.rt_MSAADepth;
+
+        // The viewport the graph would draw with (rmNormal at the frame start, scaled with r__render_scale).
+        UINT count = 1;
+        HW.get_context(CHW::IMM_CTX_ID)->RSGetViewports(&count, &viewport);
+        if (count == 0)
+            viewport = { 0.f, 0.f, float(rt0->dwWidth), float(rt0->dwHeight), 0.f, 1.f };
+
+        view = imm.get_xform_view();
+        project = imm.get_xform_project();
+        o_hemi = imm.o_hemi;
+        o_sun = imm.o_sun;
+        static_assert(sizeof(o_hemi_cube) == sizeof(imm.o_hemi_cube));
+        CopyMemory(o_hemi_cube, imm.o_hemi_cube, sizeof(o_hemi_cube));
+    }
+
+    void apply(CBackend& cmd) const
+    {
+        auto& T = *RImplementation.Target;
+        if (rt2)
+            T.u_setrt(cmd, rt0, rt1, rt2, zb);
+        else
+            T.u_setrt(cmd, rt0, rt1, zb);
+        cmd.set_Stencil(TRUE, D3DCMP_ALWAYS, 0x01, 0xff, 0x7f, D3DSTENCILOP_KEEP, D3DSTENCILOP_REPLACE, D3DSTENCILOP_KEEP);
+        cmd.set_CullMode(CULL_CCW);
+        cmd.set_ColorWriteEnable();
+        cmd.SetViewport(viewport);
+        cmd.set_xform_world(Fidentity);
+        cmd.set_xform_view(view);
+        cmd.set_xform_project(project);
+        cmd.o_hemi = o_hemi;
+        cmd.o_sun = o_sun;
+        CopyMemory(cmd.o_hemi_cube, o_hemi_cube, sizeof(o_hemi_cube));
+    }
+};
+
+// Main-thread scratch reused every frame (the pieces point into this frame's dsgraph maps).
+xr_vector<main_par_piece> s_main_par_groups;
+xr_vector<main_par_piece> s_main_par_pieces;
+xr_vector<main_par_unit> s_main_par_units;
+main_par_slot s_main_par_slots[MAIN_PAR_MAX_SLOTS];
+
+// A visual whose Render() only records into the backend it is given.
+bool main_par_visual_ok(dxRender_Visual* V)
+{
+    switch (V->Type)
+    {
+    case MT_NORMAL:
+    case MT_PROGRESSIVE:
+    case MT_TREE_ST:
+    case MT_TREE_PM:
+        return true;
+    case MT_SKELETON_GEOMDEF_PM:
+        return !static_cast<CSkeletonX_PM*>(V)->IsSoftwareSkinned();
+    case MT_SKELETON_GEOMDEF_ST:
+        return !static_cast<CSkeletonX_ST*>(V)->IsSoftwareSkinned();
+    default:
+        return false; // particles, LODs (Vertex.Lock), fluid volumes, anything new
+    }
+}
+
+// The pass's textures can be bound off the main thread: no video upload through the immediate context, and the
+// texture is past its first bind (apply_load loads it or switches the bind delegate - not for concurrent callers).
+bool main_par_textures_ok(SPass* pass)
+{
+    const STextureList* list = pass->T._get();
+    if (!list)
+        return true;
+    for (const auto& stage_texture : *list)
+    {
+        CTexture* texture = stage_texture.second._get();
+        if (!texture)
+            continue;
+        if (texture->pAVI || texture->pTheora)
+            return false;
+        if (texture->bind == fastdelegate::FastDelegate2<CBackend&, u32>(texture, &CTexture::apply_load))
+            return false;
+    }
+    return true;
+}
+
+// Records units' pieces into cmd with the render/main/* counters of render_graph (sums over the units).
+void main_par_record(CBackend& cmd, const main_par_unit& unit, u32& corpses)
+{
+    PIX_EVENT_CTX(cmd, dsgraph_render_graph_part);
+#if XR_PERF_METRICS
+    const u32 perf_layout_skip0 = cmd.stat.layout_skip;
+    const u32 perf_layout_set0 = cmd.stat.layout_set;
+    const u32 perf_sampler_skip0 = cmd.stat.sampler_skip;
+    const u32 perf_sampler_set0 = cmd.stat.sampler_set;
+    const u32 perf_cb_flush_slots0 = cmd.stat.cb_flush_slots;
+#endif
+    constexpr bool use_fast_geo = false; // PHASE_NORMAL only
+    // As at the top of render_graph: static items draw with the identity world (the immediate context's first unit
+    // follows render_hud, which leaves the last HUD item's transform).
+    cmd.set_xform_world(Fidentity);
+    for (u32 i = unit.piece_begin; i < unit.piece_end; ++i)
+    {
+        const main_par_piece& piece = s_main_par_pieces[i];
+        if (piece.normal)
+        {
+            PERF_SCOPE(rmain_submit_static);
+            [[maybe_unused]] const u32 perf_draws0 = cmd.stat.render.calls;
+            PERF_CB_SNAPSHOT(perf_cb_static);
+            render_normal_items(cmd, piece.pass, piece.normal, piece.count, use_fast_geo, true);
+            PERF_ADD(rmain_static_draws, cmd.stat.render.calls - perf_draws0);
+            PERF_CB_DELTA(true, rmain_static_cb_flush, perf_cb_static);
+        }
+        else
+        {
+            PERF_SCOPE(rmain_submit_dynamic);
+            [[maybe_unused]] const u32 perf_draws0 = cmd.stat.render.calls;
+            [[maybe_unused]] const u32 perf_states0 = cmd.stat.states;
+            [[maybe_unused]] const u32 perf_textures0 = cmd.stat.textures;
+            PERF_CB_SNAPSHOT(perf_cb_dyn);
+#if XR_PERF_METRICS
+            xray::perf::ScopedTag perf_dyn_tag(g_perf_rmain_dyn, xray::perf::g_perf_metrics_active ? 1 : 0);
+#endif
+            corpses += render_matrix_items(cmd, piece.pass, piece.matrix, piece.count, use_fast_geo, true);
+            PERF_ADD(rmain_dyn_draws, cmd.stat.render.calls - perf_draws0);
+            PERF_ADD(rmain_dyn_states, cmd.stat.states - perf_states0);
+            PERF_ADD(rmain_dyn_textures, cmd.stat.textures - perf_textures0);
+            PERF_CB_DELTA(true, rmain_dyn_cb_flush, perf_cb_dyn);
+            PERF_CB_BYTES(true, rmain_dyn_cb_bytes, perf_cb_dyn);
+        }
+    }
+#if XR_PERF_METRICS
+    PERF_ADD(rmain_layout_skip, cmd.stat.layout_skip - perf_layout_skip0);
+    PERF_ADD(rmain_layout_set, cmd.stat.layout_set - perf_layout_set0);
+    PERF_ADD(rmain_sampler_skip, cmd.stat.sampler_skip - perf_sampler_skip0);
+    PERF_ADD(rmain_sampler_set, cmd.stat.sampler_set - perf_sampler_set0);
+    PERF_ADD(rmain_cb_flush_slots, cmd.stat.cb_flush_slots - perf_cb_flush_slots0);
+#endif
+}
+} // namespace
+
+bool R_dsgraph_structure::render_graph_main_parallel()
+{
+    // Only the main view's G-buffer graph on the immediate context (the scope pass, shadows, Z-prefill and the split
+    // scene keep render_graph). RenderDoc: its hooks are not safe with deferred recording on several threads (see
+    // BeginSecondVPCalculateParallel) - serial, like the scope pass.
+    const u32 workers = TaskScheduler ? static_cast<u32>(TaskScheduler->GetWorkersCount()) : 0;
+    if (!o.is_main_pass || o.second_vp_pass || o.phase != CRender::PHASE_NORMAL ||
+        cmd_list.context_id != CHW::IMM_CTX_ID || workers < 2 || D3DXRenderBase::RenderDocActive())
+    {
+        PERF_INC(rmain_par_submit_fallback);
+        return false;
+    }
+
+    // Small graphs: the serial loop is cheaper than the setup.
+    u32 total_items = 0;
+    for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
+    {
+        for (auto* node = mapNormalPasses[0][iPass].begin(); node != mapNormalPasses[0][iPass].end(); ++node)
+            total_items += static_cast<u32>(node->second.size());
+        for (auto* node = mapMatrixPasses[0][iPass].begin(); node != mapMatrixPasses[0][iPass].end(); ++node)
+            total_items += static_cast<u32>(node->second.size());
+    }
+    if (total_items < static_cast<u32>(std::max(ps_r__main_parallel_submit_min, 0)))
+    {
+        PERF_INC(rmain_par_submit_fallback);
+        return false;
+    }
+
+    // One pooled deferred context per deferred unit. At this point the sun cascades (3), rain and the scope worker
+    // may hold some of the pool; a short pool just means fewer units.
+    const u32 slots_wanted = std::min(static_cast<u32>(std::clamp(ps_r__main_parallel_parts, 2, 8)) - 1, MAIN_PAR_MAX_SLOTS);
+    u32 slots = 0;
+    for (; slots < slots_wanted; ++slots)
+    {
+        const u32 id = RImplementation.alloc_context(/*alloc_cmd_list=*/true);
+        if (id == INVALID_CONTEXT_ID)
+            break;
+        main_par_slot& slot = s_main_par_slots[slots];
+        slot.context_id = id;
+        slot.cmd = &RImplementation.get_context(id).cmd_list;
+        slot.list = nullptr;
+        slot.corpses = 0;
+        slot.done.store(0, std::memory_order_relaxed);
+    }
+    if (slots < slots_wanted)
+        PERF_INC(rmain_par_submit_ctx_short);
+    if (slots == 0)
+    {
+        PERF_INC(rmain_par_submit_fallback);
+        return false;
+    }
+
+    ZoneScopedN("dsgraph_render_graph_parallel");
+    PIX_EVENT_CTX(cmd_list, dsgraph_render_graph);
+    PERF_SCOPE(rmain_par_submit_wall);
+    RImplementation.BasicStats.Primitives.Begin(); // XXX: Refactor a bit later
+
+    // 1. The groups in render_graph(0) order, sorted the same way; which of them must stay on the main thread; the
+    //    once-per-frame CROS refresh of every dynamic object (apply_object in the units only reads it then).
+    u32 dynamic_items = 0;
+    u32 main_items = 0;
+    u64 weight_total = 0;
+    s_main_par_groups.clear();
+    {
+        PERF_SCOPE(rmain_par_submit_prepare);
+        for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
+        {
+            auto& map = mapNormalPasses[0][iPass];
+            map.get_any_p(nrmPasses);
+            std::sort(nrmPasses.begin(), nrmPasses.end(), cmp_pass<mapNormal_T::value_type*>);
+            for (const auto& it : nrmPasses)
+            {
+                mapNormalItems& items = it->second;
+                items.ssa = 0;
+                std::sort(items.begin(), items.end(), cmp_ssa<_NormalItem>);
+                bool main_only = !main_par_textures_ok(it->first);
+                for (size_t i = 0; i < items.size() && !main_only; ++i)
+                    main_only = !main_par_visual_ok(items[i].pVisual);
+                s_main_par_groups.push_back({ it->first, items.data(), nullptr, static_cast<u32>(items.size()), main_only });
+            }
+            nrmPasses.clear();
+        }
+        for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
+        {
+            auto& map = mapMatrixPasses[0][iPass];
+            map.get_any_p(matPasses);
+            std::sort(matPasses.begin(), matPasses.end(), cmp_pass<mapMatrix_T::value_type*>);
+            for (const auto& it : matPasses)
+            {
+                mapMatrixItems& items = it->second;
+                items.ssa = 0;
+                std::sort(items.begin(), items.end(), cmp_ssa<_MatrixItem>);
+                bool main_only = !main_par_textures_ok(it->first);
+                for (const _MatrixItem& item : items)
+                {
+                    if (!main_only)
+                        main_only = !main_par_visual_ok(item.pVisual);
+                    // The same refresh apply_object would do on the first draw of the object this frame.
+                    if (item.pObject)
+                    {
+                        if (auto* ros = static_cast<CROS_impl*>(item.pObject->renderable_ROS()))
+                            ros->update_smooth(item.pObject);
+                    }
+                }
+                s_main_par_groups.push_back({ it->first, nullptr, items.data(), static_cast<u32>(items.size()), main_only });
+                dynamic_items += static_cast<u32>(items.size());
+            }
+            matPasses.clear();
+        }
+
+        for (const main_par_piece& group : s_main_par_groups)
+        {
+            if (group.main_only)
+                main_items += group.count;
+            else
+                weight_total += u64(group.count) * (group.matrix ? MAIN_PAR_WEIGHT_DYNAMIC : MAIN_PAR_WEIGHT_STATIC);
+        }
+
+        // 2. Cut into units of ~equal weight: the first one is the main thread's own (inline), then the deferred
+        //    slots; once they run out, the last deferred unit takes the rest. A main-only group closes the current
+        //    unit and becomes an inline unit at its place.
+        s_main_par_pieces.clear();
+        s_main_par_units.clear();
+        const u64 target = std::max<u64>(1, (weight_total + slots) / (slots + 1));
+        u32 slots_used = 0;
+        bool main_unit_given = false;
+        u32 current = MAIN_PAR_INLINE; // index of the open unit
+        u64 current_weight = 0;
+        for (const main_par_piece& group : s_main_par_groups)
+        {
+            if (group.main_only)
+            {
+                current = MAIN_PAR_INLINE;
+                const u32 piece = static_cast<u32>(s_main_par_pieces.size());
+                s_main_par_pieces.push_back(group);
+                s_main_par_units.push_back({ piece, piece + 1, MAIN_PAR_INLINE });
+                continue;
+            }
+            const u64 weight = group.matrix ? MAIN_PAR_WEIGHT_DYNAMIC : MAIN_PAR_WEIGHT_STATIC;
+            u32 taken = 0;
+            while (taken < group.count)
+            {
+                if (current == MAIN_PAR_INLINE)
+                {
+                    u32 slot = MAIN_PAR_INLINE;
+                    if (main_unit_given && slots_used < slots)
+                        slot = slots_used++;
+                    main_unit_given = true;
+                    current = static_cast<u32>(s_main_par_units.size());
+                    current_weight = 0;
+                    const u32 piece = static_cast<u32>(s_main_par_pieces.size());
+                    s_main_par_units.push_back({ piece, piece, slot });
+                }
+                const u64 room = target > current_weight ? target - current_weight : 0;
+                const u32 take = static_cast<u32>(std::min<u64>(group.count - taken, std::max<u64>(1, room / weight)));
+                main_par_piece piece = group;
+                piece.normal = group.normal ? group.normal + taken : nullptr;
+                piece.matrix = group.matrix ? group.matrix + taken : nullptr;
+                piece.count = take;
+                s_main_par_pieces.push_back(piece);
+                s_main_par_units[current].piece_end = static_cast<u32>(s_main_par_pieces.size());
+                current_weight += u64(take) * weight;
+                taken += take;
+                // The last deferred unit (no slot left) is never closed: it takes the remainder.
+                const bool last_slot_unit = s_main_par_units[current].slot != MAIN_PAR_INLINE && slots_used == slots;
+                if (current_weight >= target && !last_slot_unit)
+                    current = MAIN_PAR_INLINE;
+            }
+        }
+
+        // Unused contexts go back to the pool; the used ones learn their unit.
+        for (u32 s = slots_used; s < slots; ++s)
+            RImplementation.release_context(s_main_par_slots[s].context_id);
+        slots = slots_used;
+        for (u32 u = 0; u < s_main_par_units.size(); ++u)
+        {
+            if (s_main_par_units[u].slot != MAIN_PAR_INLINE)
+                s_main_par_slots[s_main_par_units[u].slot].unit = u;
+        }
+    }
+
+    main_par_seed seed;
+    seed.capture(cmd_list);
+
+    // 3. Deferred units: claimed in order through `next` by the helper tasks and by the main thread.
+    std::atomic<u32> next{ 0 };
+    const auto record_slot = [&seed](u32 s)
+    {
+        main_par_slot& slot = s_main_par_slots[s];
+        {
+            ZoneScopedN("dsgraph_render_graph_part");
+            PERF_SCOPE(rmain_par_submit_record_cpu);
+            seed.apply(*slot.cmd);
+            main_par_record(*slot.cmd, s_main_par_units[slot.unit], slot.corpses);
+            // Sealed here, by the recording thread; the main thread only executes. The next owner of this pooled
+            // context resets the backend's state cache (alloc_context -> ResetDeferredCache).
+            ID3D11CommandList* list = nullptr;
+            const HRESULT hr = HW.get_context(slot.context_id)->FinishCommandList(FALSE, &list);
+            if (FAILED(hr) || !list)
+            {
+                FATAL_F("FinishCommandList failed on context %u (hr=0x%08x) - parallel main submit aborted",
+                    slot.context_id, u32(hr));
+            }
+            slot.list = list;
+        }
+        slot.done.store(1, std::memory_order_release);
+    };
+    const auto run_slots = [&next, &record_slot, slots]
+    {
+        for (;;)
+        {
+            const u32 s = next.fetch_add(1, std::memory_order_relaxed);
+            if (s >= slots)
+                break;
+            record_slot(s);
+        }
+    };
+
+    Task& root = TaskScheduler->CreateTask([] {});
+    const u32 helpers = std::min(slots, workers - 1);
+    for (u32 h = 0; h < helpers; ++h)
+        TaskScheduler->AddTask(root, [&run_slots] { run_slots(); });
+
+    // 4. On the main thread, in unit order: record the inline units on the immediate context, execute the sealed
+    //    lists. ExecuteCommandList(.., FALSE) leaves the immediate context at D3D11 defaults: before the next inline
+    //    unit and before returning (lods and details follow) its backend cache is dropped and the seed re-applied
+    //    (lesson f756f8939: never reuse a cache across an executed list).
+    u32 corpses = 0;
+    bool imm_dirty = false;
+    const auto reseed_immediate = [&]
+    {
+        PERF_SCOPE(rmain_par_submit_execute);
+        cmd_list.Invalidate();
+        seed.apply(cmd_list);
+        imm_dirty = false;
+    };
+    for (const main_par_unit& unit : s_main_par_units)
+    {
+        if (unit.slot == MAIN_PAR_INLINE)
+        {
+            if (imm_dirty)
+                reseed_immediate();
+            PERF_SCOPE(rmain_par_submit_record_cpu);
+            main_par_record(cmd_list, unit, corpses);
+            continue;
+        }
+
+        main_par_slot& slot = s_main_par_slots[unit.slot];
+        while (!slot.done.load(std::memory_order_acquire))
+        {
+            // Take the units nobody has started yet (lowest first, so this one comes first); then wait for the ones
+            // running on workers. Spin, no stealing: TaskManager::Wait() could pick up an unrelated long task.
+            const u32 s = next.fetch_add(1, std::memory_order_relaxed);
+            if (s < slots)
+            {
+                record_slot(s);
+                continue;
+            }
+            PERF_SCOPE(rmain_par_submit_tail);
+            while (!slot.done.load(std::memory_order_acquire))
+                std::this_thread::yield();
+        }
+        {
+            PERF_SCOPE(rmain_par_submit_execute);
+            HW.get_context(CHW::IMM_CTX_ID)->ExecuteCommandList(slot.list, FALSE);
+            _RELEASE(slot.list);
+        }
+        imm_dirty = true;
+        corpses += slot.corpses;
+        RImplementation.release_context(slot.context_id);
+    }
+    if (imm_dirty)
+        reseed_immediate();
+
+    // Helpers still queued find no units and return at once; Wait() runs them first from this thread's queue.
+    TaskManager::RunTask(root);
+    TaskScheduler->Wait(root);
+
+    // 5. Empty the maps as render_graph does (keeping their memory).
+    for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
+    {
+        auto& normal = mapNormalPasses[0][iPass];
+        for (auto* node = normal.begin(); node != normal.end(); ++node)
+            node->second.clear();
+        normal.clear();
+        auto& matrix = mapMatrixPasses[0][iPass];
+        for (auto* node = matrix.begin(); node != matrix.end(); ++node)
+            node->second.clear();
+        matrix.clear();
+    }
+    RImplementation.BasicStats.DynamicRegularSubmissions += dynamic_items;
+    RImplementation.BasicStats.CorpseRegularSubmissions += corpses;
+    PERF_ADD(rmain_par_submit_parts, s_main_par_units.size());
+    PERF_ADD(rmain_par_submit_lists, slots);
+    PERF_ADD(rmain_par_submit_main_items, main_items);
+    s_main_par_groups.clear();
+    s_main_par_pieces.clear();
+    s_main_par_units.clear();
+
+    RImplementation.BasicStats.Primitives.End(); // XXX: Refactor a bit later
+    return true;
+}
+#else
+bool R_dsgraph_structure::render_graph_main_parallel() { return false; }
+#endif
 
 //////////////////////////////////////////////////////////////////////////
 // Helper classes and functions

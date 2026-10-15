@@ -34,6 +34,7 @@ dx11StateCache<IDeviceState, StateDecs>
 template <class IDeviceState, class StateDecs>
 void dx11StateCache<IDeviceState, StateDecs>::ClearStateArray()
 {
+    std::unique_lock<std::shared_mutex> lock{ m_lock };
     for (u32 i = 0; i < m_StateArray.size(); ++i)
     {
         _RELEASE(m_StateArray[i].m_pState);

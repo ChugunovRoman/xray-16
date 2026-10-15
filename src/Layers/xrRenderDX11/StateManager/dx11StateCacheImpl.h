@@ -41,17 +41,25 @@ IDeviceState* dx11StateCache<IDeviceState, StateDecs>::GetState(StateDecs& desc)
 
     u32 crc = dx11StateUtils::GetHash(desc);
 
-    pResult = FindState(desc, crc);
+    {
+        std::shared_lock<std::shared_mutex> lock{ m_lock };
+        pResult = FindState(desc, crc);
+    }
 
     if (!pResult)
     {
-        StateRecord rec;
-        rec.m_crc = crc;
-        rec.m_pState = nullptr;
-        CreateState(desc, &rec.m_pState);
-        pResult = rec.m_pState;
-        if (pResult)
-            m_StateArray.push_back(rec);
+        std::unique_lock<std::shared_mutex> lock{ m_lock };
+        pResult = FindState(desc, crc); // another thread may have created it meanwhile
+        if (!pResult)
+        {
+            StateRecord rec;
+            rec.m_crc = crc;
+            rec.m_pState = nullptr;
+            CreateState(desc, &rec.m_pState);
+            pResult = rec.m_pState;
+            if (pResult)
+                m_StateArray.push_back(rec);
+        }
     }
 
     return pResult;

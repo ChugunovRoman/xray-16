@@ -603,7 +603,9 @@ void CRender::Render()
                     dsgraph.render_hud();
             }
 
-            dsgraph.render_graph(0);
+            // P19 (d): recorded in parallel on deferred contexts (D3D11).
+            if (!dsgraph.render_graph_main_parallel())
+                dsgraph.render_graph(0);
             dsgraph.render_lods(true, true);
             if (Details && !(svp_pass && ps_r__svp_skip_details))
                 Details->Render(dsgraph.cmd_list);

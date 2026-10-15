@@ -1,5 +1,7 @@
 #pragma once
 
+#include <shared_mutex>
+
 namespace xray::render::RENDER_NAMESPACE
 {
 template <class IDeviceState, class StateDecs>
@@ -36,6 +38,10 @@ private:
 private:
     //	This must be cleared on device destroy
     xr_vector<StateRecord> m_StateArray;
+    // dx11StateManager::Apply looks states up (and creates the missing ones) on every recording thread: the pooled
+    // deferred contexts of shadows, the scope pass and the parallel main-view submit. Shared for a lookup, exclusive
+    // for an insert or a clear.
+    std::shared_mutex m_lock;
 };
 
 extern dx11StateCache<ID3DRasterizerState, D3D_RASTERIZER_DESC> RSManager;

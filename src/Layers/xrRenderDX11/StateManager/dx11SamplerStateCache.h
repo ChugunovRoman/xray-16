@@ -91,6 +91,8 @@ private:
 private:
     //	This must be cleared on device destroy
     xr_vector<StateRecord> m_StateArray;
+    // GetState: FindState + push_back of a new record (the readers rely on the reserve, see the constructor)
+    std::mutex m_create_lock;
 
     BoundSamplers m_bound[R__NUM_CONTEXTS]{};
 

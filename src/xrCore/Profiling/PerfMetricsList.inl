@@ -1245,3 +1245,23 @@ PERF_COUNTER(rbackend_layout_set, "render/backend/layout_set")
 PERF_COUNTER(rbackend_sampler_skip, "render/backend/sampler_skip")
 PERF_COUNTER(rbackend_sampler_set, "render/backend/sampler_set")
 PERF_COUNTER(rbackend_cb_flush_slots, "render/backend/cb_flush_slots")
+
+// 19-part0-submit.md, step 4 (d): the main view's render_graph(0) recorded in parallel on D3D11 deferred contexts
+// (R_dsgraph_structure::render_graph_main_parallel). par_submit_wall - the whole replacement of
+// render_graph(0) on main (plan + recording + execution); par_submit_prepare - sorting, the safety scan and the CROS
+// pre-pass on main; par_submit_record_cpu - one unit recorded (sum over threads = CPU, calls = units); par_submit_execute -
+// ExecuteCommandList + re-seeding the immediate context on main; par_submit_tail - main waiting for units recorded on
+// workers; par_submit_parts - units (deferred + inline), par_submit_lists - command lists executed, par_submit_main_items -
+// items kept on the immediate context (particles, LODs, CPU skinning, video or not yet bound textures); par_submit_fallback -
+// frames that took the serial render_graph(0); par_submit_ctx_short - frames that got fewer pooled
+// contexts than r__main_parallel_parts - 1. In this mode render/main/submit_static / submit_dynamic are CPU sums over units.
+PERF_TIMER(rmain_par_submit_wall, "render/main/par_submit_wall")
+PERF_TIMER(rmain_par_submit_prepare, "render/main/par_submit_prepare")
+PERF_TIMER(rmain_par_submit_record_cpu, "render/main/par_submit_record_cpu")
+PERF_TIMER(rmain_par_submit_execute, "render/main/par_submit_execute")
+PERF_TIMER(rmain_par_submit_tail, "render/main/par_submit_tail")
+PERF_COUNTER(rmain_par_submit_parts, "render/main/par_submit_parts")
+PERF_COUNTER(rmain_par_submit_lists, "render/main/par_submit_lists")
+PERF_COUNTER(rmain_par_submit_main_items, "render/main/par_submit_main_items")
+PERF_COUNTER(rmain_par_submit_fallback, "render/main/par_submit_fallback")
+PERF_COUNTER(rmain_par_submit_ctx_short, "render/main/par_submit_ctx_short")

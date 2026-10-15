@@ -4,6 +4,8 @@
 #include "tss_def.h"
 
 #if defined(USE_DX11)
+#include <shared_mutex>
+
 #include "Layers/xrRenderDX11/StateManager/dx11State.h"
 #elif defined(USE_OGL)
 #include "Layers/xrRenderGL/glState.h"
@@ -165,6 +167,10 @@ typedef resptr_core<SDeclaration, resptr_base<SDeclaration>> ref_declaration;
 // destroyed. CBackend::ApplyVertexLayout trusts its cached (declaration, signature) -> layout pair only while this
 // value is unchanged, so a declaration or signature recreated at a reused address never gets a released layout.
 inline std::atomic<u32> g_dx11_input_layout_epoch{ 1 };
+// Guards SDeclaration::vs_to_layout: CBackend::ApplyVertexLayout looks layouts up and creates the missing ones on the
+// recording threads (pooled deferred contexts of shadows, the scope pass, the parallel main-view submit) - shared for
+// a lookup, exclusive for an insert or an erase.
+inline std::shared_mutex g_dx11_input_layout_lock;
 #endif
 
 #pragma pack(pop)

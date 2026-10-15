@@ -259,6 +259,9 @@ extern ECORE_API int r__parallel_skeleton_visbox_min_bones;
 // over task workers. grain - spatial entries per part, min - fewer entries -> sequential loop.
 extern ECORE_API int r__parallel_main_build_grain;
 extern ECORE_API int r__parallel_main_build_min;
+// P19 (d): parallel recording of the main view's render_graph(0) on D3D11 deferred contexts (R4 only, temporary).
+extern ECORE_API int ps_r__main_parallel_parts;
+extern ECORE_API int ps_r__main_parallel_submit_min;
 
 extern void xrRender_initconsole();
 extern BOOL xrRender_test_hw();

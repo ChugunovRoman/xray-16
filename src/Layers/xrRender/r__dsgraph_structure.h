@@ -218,6 +218,12 @@ struct R_dsgraph_structure
 
     // render primitives
     void render_graph(u32 _priority);
+    // P19 (d), plans/optimization_mt/19-part0-submit.md: render_graph(0) of the main view (immediate context, after
+    // render_hud) recorded in parallel on pooled D3D11 deferred contexts and executed in graph order.
+    // true - the graph is drawn and its maps are empty, the immediate context is re-seeded with the G-buffer state of
+    // phase_scene_begin(); false - not this frame (not D3D11, RenderDoc, few draws, no free context), the
+    // caller runs render_graph(0).
+    bool render_graph_main_parallel();
     void render_hud();
     void render_hud_ui();
     // HUD overlay scope (g_3d_scopes 3): drain only HUD forward passes (scope lens, emissive).
