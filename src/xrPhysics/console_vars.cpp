@@ -30,9 +30,3 @@ int ph_console::ph_corpse_sleep_ms = 3000;
 float ph_console::ph_corpse_sleep_far_dist = 60.f;
 float ph_console::ph_corpse_sleep_max_vel = 1.f;
 float ph_console::ph_corpse_sleep_max_stretch = 0.1f;
-// plans/optimization_mt/21-physics-step.md: early sleep of settled corpses (the switch is temporary).
-int ph_console::ph_corpse_sleep_settled = 0;
-int ph_console::ph_corpse_settle_min_age_ms = 2000;
-int ph_console::ph_corpse_settle_ms = 700;
-float ph_console::ph_corpse_settle_vel = 0.1f;
-float ph_console::ph_corpse_settle_ang_vel = 0.5f;

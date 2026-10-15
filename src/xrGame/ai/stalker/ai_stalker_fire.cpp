@@ -734,26 +734,23 @@ IC bool ray_query_callback(collide::rq_result& result, LPVOID params)
 }
 } // namespace detail::stalker::fire
 
-// 22-game-thread.md, step 1b (plans/optimization_mt): the fast friendly-fire pick. TEMPORARY switch, not saved
-// (console_commands.cpp). update_can_kill_info casts up to 5 rays from the muzzle (CAI_Stalker::can_kill_entity_from:
-// the aim direction and 4 side rays a safety angle off it). Each ray decides by the first thing it meets in distance
-// order (ray_query_callback): a living creature stops it (an enemy -> m_can_kill_enemy, anybody else - a friend, a
-// neutral, the actor, a corpse -> m_can_kill_member), the level geometry and other objects let it through while
-// their vision transparency keeps the power above the threshold.
-// 0 (default) = as before: every ray is a full ObjectSpace.RayQuery - a q_ray through the spatial tree, then the
-//   precise (bone-level) test of EVERY collidable object whose bounding sphere the ray crosses (~47 a ray in a crowd
-//   fight), the hits sorted and handed to the callback up to the first stop. Everything behind the first stop is
-//   tested for nothing.
-// 1 = the same answer, cheaper:
-//   - one q_frustum around the cone that holds all 5 rays instead of a q_ray per ray (stalker_ff_gather);
-//   - per ray: the level geometry as before (a static-only RayQuery), the candidates the ray crosses (the very
-//     sphere test q_ray does), ordered by where the ray enters their sphere, and the precise test of a candidate only
-//     when the walk gets to it, so nothing behind the first stop is tested (stalker_ff_ray).
-//   The hits reach ray_query_callback in the same order as with RayQuery, so m_can_kill_member, m_can_kill_enemy and
-//   m_pick_distance come out the same, the friendly actor and allies behind a wall included.
-// 2 = shadow: both picks, the original one decides, the differences are counted (npc/ff/mismatch) and the first
-//   few logged.
-int npc_perf_friendly_fire_fast = 0;
+// 22-game-thread.md, step 1b (plans/optimization_mt): the fast friendly-fire pick. update_can_kill_info casts up to
+// 5 rays from the muzzle (CAI_Stalker::can_kill_entity_from: the aim direction and 4 side rays a safety angle off
+// it). Each ray decides by the first thing it meets in distance order (ray_query_callback): a living creature stops
+// it (an enemy -> m_can_kill_enemy, anybody else - a friend, a neutral, the actor, a corpse -> m_can_kill_member),
+// the level geometry and other objects let it through while their vision transparency keeps the power above the
+// threshold.
+// The original pick made every ray a full ObjectSpace.RayQuery - a q_ray through the spatial tree, then the precise
+// (bone-level) test of EVERY collidable object whose bounding sphere the ray crosses (~47 a ray in a crowd fight), the
+// hits sorted and handed to the callback up to the first stop: everything behind the first stop was tested for
+// nothing. The fast pick gives the same answer, cheaper:
+// - one q_frustum around the cone that holds all 5 rays instead of a q_ray per ray (stalker_ff_gather);
+// - per ray: the level geometry as before (a static-only RayQuery), the candidates the ray crosses (the very sphere
+//   test q_ray does), ordered by where the ray enters their sphere, and the precise test of a candidate only when the
+//   walk gets to it, so nothing behind the first stop is tested (stalker_ff_ray).
+// The hits reach ray_query_callback in the same order as with RayQuery, so m_can_kill_member, m_can_kill_enemy and
+// m_pick_distance come out the same, the friendly actor and allies behind a wall included (2026-10-15: a shadow run of
+// both picks in a crowd fight found no difference).
 
 namespace
 {
@@ -768,8 +765,6 @@ constexpr float stalker_ff_far_margin = 1.f;
 // A precise hit may lie a little outside the object's bounding sphere (a bone shape vs the spatial sphere): an object
 // is tested this much before the ray enters its sphere, so its hits are still handed over in distance order
 constexpr float stalker_ff_order_margin = .5f;
-// Shadow mode (2): how many mismatches go to the log
-constexpr u32 stalker_ff_mismatch_log_max = 32;
 
 struct stalker_ff_candidate
 {
@@ -791,11 +786,9 @@ struct stalker_ff_context
     xr_vector<stalker_ff_entry> entries;
     collide::rq_results object_hits; // the hits of one precise test
     xr_vector<collide::rq_result> pending; // precise hits not handed over yet
-    bool active{}; // CAI_Stalker::can_kill_entity runs stalker_ff_ray instead of RayQuery
 };
 
 thread_local stalker_ff_context stalker_ff;
-u32 stalker_ff_mismatch_logged = 0;
 
 // Gathers the candidates of one pick: the objects RayQuery would test (collidable game objects with an object
 // collision form, the stalker itself left out) whose bounding sphere touches the cone around the aim direction
@@ -936,11 +929,8 @@ void CAI_Stalker::can_kill_entity(
 
     ray_query_param params(this, memory().visual().transparency_threshold(), distance);
 
-    // 22-game-thread.md, step 1b: the fast pick of update_can_kill_info (npc_perf_friendly_fire_fast)
-    if (stalker_ff.active)
-        stalker_ff_ray(this, ray_defs, rq_storage, params);
-    else
-        Level().ObjectSpace.RayQuery(rq_storage, ray_defs, ray_query_callback, &params, NULL, this);
+    // 22-game-thread.md, step 1b: the fast pick, over the candidates update_can_kill_info gathered
+    stalker_ff_ray(this, ray_defs, rq_storage, params);
     m_can_kill_enemy = m_can_kill_enemy || params.m_can_kill_enemy;
     m_can_kill_member = m_can_kill_member || params.m_can_kill_member;
     m_pick_distance = _max(m_pick_distance, params.m_pick_distance);
@@ -1004,7 +994,7 @@ void CAI_Stalker::update_can_kill_info()
         return;
 
     // 22-game-thread.md, step 1: a firing stalker nobody sees keeps its last pick for a while (see
-    // CAI_Stalker::can_kill_pick_lod_reuse, npc_perf_object_handler_lod); m_pick_time stays the time of the real pick
+    // CAI_Stalker::can_kill_pick_lod_reuse); m_pick_time stays the time of the real pick
     if (can_kill_pick_lod_reuse())
     {
         m_pick_frame_id = Device.dwFrame;
@@ -1021,46 +1011,14 @@ void CAI_Stalker::update_can_kill_info()
     Fvector position, direction;
     VERIFY(inventory().ActiveItem());
     g_fireParams(0, position, direction);
-    // 22-game-thread.md, step 1b: npc/ff/pick - the time of the cast picks in every mode (an A/B of
-    // npc_perf_friendly_fire_fast)
+    // 22-game-thread.md, step 1b: npc/ff/pick - the time of the cast picks
     PERF_SCOPE(npc_ff_pick);
-    if (!npc_perf_friendly_fire_fast)
-    {
-        can_kill_entity_from(position, direction, start_pick_distance());
-        return;
-    }
 
-    // The fast pick (see npc_perf_friendly_fire_fast): the same 5 rays, can_kill_entity walks them over the
-    // candidates gathered once
+    // The fast pick (see above): the same 5 rays, can_kill_entity walks them over the candidates gathered once
     const float distance = start_pick_distance();
     stalker_ff_gather(this, position, direction, distance);
-    stalker_ff.active = true;
     can_kill_entity_from(position, direction, distance);
-    stalker_ff.active = false;
     stalker_ff.candidates.clear();
-    if (npc_perf_friendly_fire_fast != 2)
-        return;
-
-    // Shadow mode: the original pick decides, a difference is counted and the first few are logged
-    const bool fast_member = m_can_kill_member;
-    const bool fast_enemy = m_can_kill_enemy;
-    const float fast_distance = m_pick_distance;
-    m_can_kill_member = false;
-    m_can_kill_enemy = false;
-    can_kill_entity_from(position, direction, distance);
-    if (fast_member == m_can_kill_member && fast_enemy == m_can_kill_enemy &&
-        fsimilar(fast_distance, m_pick_distance, .01f))
-        return;
-
-    PERF_INC(npc_ff_mismatch);
-    if (stalker_ff_mismatch_logged < stalker_ff_mismatch_log_max)
-    {
-        ++stalker_ff_mismatch_logged;
-        Msg("! [npc_perf_friendly_fire_fast] mismatch [%s]: member %d/%d, enemy %d/%d, pick distance %.2f/%.2f "
-            "(fast/original)",
-            cName().c_str(), fast_member ? 1 : 0, m_can_kill_member ? 1 : 0, fast_enemy ? 1 : 0,
-            m_can_kill_enemy ? 1 : 0, fast_distance, m_pick_distance);
-    }
 }
 
 bool CAI_Stalker::undetected_anomaly()

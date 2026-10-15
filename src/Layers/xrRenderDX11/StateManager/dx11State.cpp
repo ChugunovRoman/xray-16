@@ -55,12 +55,16 @@ HRESULT dx11State::Apply(CBackend& cmd_list)
     cmd_list.StateManager.SetBlendState(m_pBlendState);
     cmd_list.StateManager.SetAlphaRef(m_uiAlphaRef);
 
-    SSManager.GSApplySamplers(context_id, m_GSSamplers);
-    SSManager.VSApplySamplers(context_id, m_VSSamplers);
-    SSManager.PSApplySamplers(context_id, m_PSSamplers);
-    SSManager.HSApplySamplers(context_id, m_HSSamplers);
-    SSManager.DSApplySamplers(context_id, m_DSSamplers);
-    SSManager.CSApplySamplers(context_id, m_CSSamplers);
+    // Each returns whether it issued a *SetSamplers call (a stage that already holds these samplers is skipped).
+    u32 sampler_sets = 0;
+    sampler_sets += SSManager.GSApplySamplers(context_id, m_GSSamplers) ? 1 : 0;
+    sampler_sets += SSManager.VSApplySamplers(context_id, m_VSSamplers) ? 1 : 0;
+    sampler_sets += SSManager.PSApplySamplers(context_id, m_PSSamplers) ? 1 : 0;
+    sampler_sets += SSManager.HSApplySamplers(context_id, m_HSSamplers) ? 1 : 0;
+    sampler_sets += SSManager.DSApplySamplers(context_id, m_DSSamplers) ? 1 : 0;
+    sampler_sets += SSManager.CSApplySamplers(context_id, m_CSSamplers) ? 1 : 0;
+    cmd_list.stat.sampler_set += sampler_sets;
+    cmd_list.stat.sampler_skip += 6 - sampler_sets;
 
     //	static const float BlendFactor[4] = {0.000f, 0.000f, 0.000f, 0.000f};
     //	static const UINT SampleMask = 0xffffffff;

@@ -160,5 +160,12 @@ struct ECORE_API SDeclaration : public xr_resource_flagged
 };
 typedef resptr_core<SDeclaration, resptr_base<SDeclaration>> ref_declaration;
 
+#if defined(USE_DX11)
+// Bumped whenever an input layout leaves SDeclaration::vs_to_layout (CResourceManager::_DeleteVS) or a declaration is
+// destroyed. CBackend::ApplyVertexLayout trusts its cached (declaration, signature) -> layout pair only while this
+// value is unchanged, so a declaration or signature recreated at a reused address never gets a released layout.
+inline std::atomic<u32> g_dx11_input_layout_epoch{ 1 };
+#endif
+
 #pragma pack(pop)
 } // namespace xray::render::RENDER_NAMESPACE

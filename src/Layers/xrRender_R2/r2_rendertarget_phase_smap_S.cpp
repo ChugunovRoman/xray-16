@@ -21,7 +21,11 @@ void CRenderTarget::phase_smap_spot_clear(CBackend& cmd_list, const ref_rt& smap
     // context (frame-driver stage C records page clears on the SVP worker), poking IMM here
     // executes immediately and wipes the main render's bound state mid-frame -> black screen.
     if (cmd_list.context_id == CHW::IMM_CTX_ID)
+    {
         HW.get_context(CHW::IMM_CTX_ID)->ClearState();
+        // The samplers are gone from the device: the next set_States must send them again.
+        SSManager.ResetBound(CHW::IMM_CTX_ID);
+    }
 #endif
 }
 

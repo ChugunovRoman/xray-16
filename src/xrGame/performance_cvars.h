@@ -190,9 +190,8 @@ extern int npc_perf_ucl_lod_dist2;
     full UpdateCL after a skip gets up to this much time instead of the usual 100 ms clamp. */
 extern int npc_perf_ucl_lod_max_delta_ms;
 
-/** The object handler LOD (plans/optimization_mt/22-game-thread.md, step 1; ai_stalker.cpp,
-    CAI_Stalker::TrySkipObjectHandlerLod / can_kill_pick_lod_reuse). TEMPORARY switch, not saved, 0 (default) = as
-    before. 1 = two things:
+/* The object handler LOD (plans/optimization_mt/22-game-thread.md, step 1; ai_stalker.cpp,
+    CAI_Stalker::TrySkipObjectHandlerLod / can_kill_pick_lod_reuse), always on in single player. Two things:
     - an idle stalker farther than npc_perf_object_handler_lod_dist m from the camera runs its object handler (the
       weapon planner, a seqParallel delegate of UpdateCL) on every npc_perf_object_handler_lod_every_seen-th UpdateCL
       when on screen and every npc_perf_object_handler_lod_every_unseen-th one when not, but at least once in
@@ -202,8 +201,8 @@ extern int npc_perf_ucl_lod_max_delta_ms;
       a new item) runs every UpdateCL as before;
     - a firing stalker that nobody sees (off screen, farther than npc_perf_object_handler_lod_dist m, not fighting
       the actor) keeps its friendly-fire pick (CAI_Stalker::update_can_kill_info, up to 5 ray queries a frame) for up
-      to npc_perf_object_handler_lod_pick_ms instead of casting it every frame. */
-extern int npc_perf_object_handler_lod;
+      to npc_perf_object_handler_lod_pick_ms instead of casting it every frame.
+    The tunables below. */
 /** Distance to the camera in m within which the object handler LOD never applies (5..500, default 20). A zoomed
     camera shrinks the distance the way the UpdateCL LOD does. */
 extern int npc_perf_object_handler_lod_dist;
@@ -217,13 +216,12 @@ extern int npc_perf_object_handler_lod_max_ms;
     every frame, as before). */
 extern int npc_perf_object_handler_lod_pick_ms;
 
-/** The scheduler interval of corpses (22-game-thread.md, step 1; ai_stalker.cpp, CAI_Stalker::UpdateDeadShedLod).
-    TEMPORARY switch, not saved, 0 (default) = as before (100..625 ms like the living). 1 = a dead stalker whose
-    death is older than 10 s, whose ragdoll sleeps and whose hands are empty (the weapon dropped by the dead action)
-    gets npc_perf_dead_shed_interval_ms. */
-extern int npc_perf_dead_shed_lod;
-/** The scheduler interval in ms of a settled corpse under npc_perf_dead_shed_lod (1000..8000, default 5000; the
-    upper bound comes from the 14-bit shedule.t_max). */
+/** The scheduler interval of corpses (22-game-thread.md, step 1; ai_stalker.cpp, CAI_Stalker::UpdateDeadShedLod):
+    a dead stalker whose death is older than 10 s, whose ragdoll sleeps and whose hands are empty (the weapon dropped
+    by the dead action) gets npc_perf_dead_shed_interval_ms instead of the living 100..625 ms; once it stops being
+    settled (the ragdoll woken, an item in the hands, revived) it gets the living interval back.
+    npc_perf_dead_shed_interval_ms: the interval in ms of a settled corpse (1000..8000, default 5000; the upper bound
+    comes from the 14-bit shedule.t_max). */
 extern int npc_perf_dead_shed_interval_ms;
 
 /** TryPosition coherence of moving NPCs in a crowd (movement_manager_physic.cpp, CMovementManager::try_position_skip;

@@ -123,7 +123,6 @@ extern float g_smart_cover_animation_speed_factor;
 // Ф1 (PHYSICS_ACTIVE_SET_PLAN): defined in movement_manager_physic.cpp
 extern float ph_npc_kinematic_far_dist;
 extern float ph_npc_kinematic_far_hyst;
-extern int ph_npc_kinematic_unseen;
 extern float ph_npc_kinematic_unseen_dist;
 // Spawn stage 2 (plans/spawn_optimization/SPEC.md 5.A): the budget of the client materialization of M_SPAWN, Level.cpp
 extern int g_spawn_budget_us;
@@ -131,13 +130,10 @@ extern int g_spawn_min_per_frame;
 extern int g_spawn_max_delay_ms;
 extern int g_spawn_catchup_us;
 // plans/optimization_mt/22-game-thread.md, step 2: the cap and dedupe of the sound delegates, Level.cpp
-extern int npc_perf_sound_dispatch;
 extern float npc_perf_sound_dispatch_near_dist;
 extern float npc_perf_sound_dispatch_actor_dist;
 extern int npc_perf_sound_dispatch_max_combat;
 extern int npc_perf_sound_dispatch_max;
-// plans/optimization_mt/22-game-thread.md, step 1b: the fast friendly-fire pick, ai_stalker_fire.cpp
-extern int npc_perf_friendly_fire_fast;
 
 extern BOOL g_ai_use_old_vision;
 float g_aim_predict_time = 0.40f;
@@ -304,17 +300,13 @@ int npc_perf_ucl_lod_dist = 30;            // m: beyond it every 2nd frame
 int npc_perf_ucl_lod_dist2 = 45;           // m: beyond it every 3rd frame (0 = no such tier)
 int npc_perf_ucl_lod_max_delta_ms = 250;   // ms: the most time between two full UpdateCL of a skipped stalker
 // 22-game-thread.md, step 1 (ai_stalker.cpp): the object handler LOD of idle stalkers and the friendly-fire pick LOD of
-// unseen firing ones; the switch is temporary and not saved, on by default until the scene with NPCs spread over
-// the level (the main one) is checked (2026-10-14), the tunables are ordinary cvars
-int npc_perf_object_handler_lod = 1;
+// unseen firing ones (always on in single player); the tunables
 int npc_perf_object_handler_lod_dist = 20;        // m: nearer to the camera - every UpdateCL
 int npc_perf_object_handler_lod_every_seen = 3;   // on screen: every N-th UpdateCL
 int npc_perf_object_handler_lod_every_unseen = 12; // off screen: every N-th UpdateCL
 int npc_perf_object_handler_lod_max_ms = 200;     // ms: the most time between two runs of a skipped handler
 int npc_perf_object_handler_lod_pick_ms = 100;    // ms: the age of a kept friendly-fire pick (0 = every frame)
-// 22-game-thread.md, step 1 (ai_stalker.cpp): the scheduler interval of settled corpses; temporary, not saved, on by
-// default (2026-10-14, as npc_perf_object_handler_lod)
-int npc_perf_dead_shed_lod = 1;
+// 22-game-thread.md, step 1 (ai_stalker.cpp): the scheduler interval in ms of settled corpses (always on)
 int npc_perf_dead_shed_interval_ms = 5000;
 // Stage 4 (movement_manager_physic.cpp): frames without TryPosition after a successful one; both K = 0 -> off
 int npc_perf_move_try_skip_frames = 0;     // K of an NPC on screen and near the camera
@@ -3236,14 +3228,12 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_ucl_lod_dist", &npc_perf_ucl_lod_dist, 5, 500);
     CMD4(CCC_Integer, "npc_perf_ucl_lod_dist2", &npc_perf_ucl_lod_dist2, 0, 500);
     CMD4(CCC_Integer, "npc_perf_ucl_lod_max_delta_ms", &npc_perf_ucl_lod_max_delta_ms, 100, 500);
-    // 22-game-thread.md, step 1: TEMPORARY switches (not saved, default 0) + their tunables
-    CMD4(CCC_IntegerNotSaved, "npc_perf_object_handler_lod", &npc_perf_object_handler_lod, 0, 1);
+    // 22-game-thread.md, step 1: the tunables of the object handler LOD and of the corpse scheduler interval
     CMD4(CCC_Integer, "npc_perf_object_handler_lod_dist", &npc_perf_object_handler_lod_dist, 5, 500);
     CMD4(CCC_Integer, "npc_perf_object_handler_lod_every_seen", &npc_perf_object_handler_lod_every_seen, 1, 16);
     CMD4(CCC_Integer, "npc_perf_object_handler_lod_every_unseen", &npc_perf_object_handler_lod_every_unseen, 1, 32);
     CMD4(CCC_Integer, "npc_perf_object_handler_lod_max_ms", &npc_perf_object_handler_lod_max_ms, 50, 1000);
     CMD4(CCC_Integer, "npc_perf_object_handler_lod_pick_ms", &npc_perf_object_handler_lod_pick_ms, 0, 500);
-    CMD4(CCC_IntegerNotSaved, "npc_perf_dead_shed_lod", &npc_perf_dead_shed_lod, 0, 1);
     CMD4(CCC_Integer, "npc_perf_dead_shed_interval_ms", &npc_perf_dead_shed_interval_ms, 1000, 8000);
     CMD4(CCC_Integer, "npc_perf_move_try_skip_frames", &npc_perf_move_try_skip_frames, 0, 8);
     CMD4(CCC_Integer, "npc_perf_move_try_skip_frames_far", &npc_perf_move_try_skip_frames_far, 0, 16);
@@ -3255,18 +3245,13 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_scheme_condlist_ttl_ms", &npc_perf_scheme_condlist_ttl_ms, 0, 5000);
     CMD4(CCC_Integer, "npc_perf_move_mgr_fixes", &npc_perf_move_mgr_fixes, 0, 1);
     CMD4(CCC_IntegerNotSaved, "npc_perf_death_release_batch_ms", &npc_perf_death_release_batch_ms, 0, 5000);
-    // 22-game-thread.md, step 2: TEMPORARY switch (not saved, default 0) - a sound goes to the listeners near it or
-    // near the actor, those with an xr_hear on_sound section, and at most N of the others (the loudest); the actor's
-    // own sounds go to everyone. The tunables are ordinary cvars
-    CMD4(CCC_IntegerNotSaved, "npc_perf_sound_dispatch", &npc_perf_sound_dispatch, 0, 1);
+    // 22-game-thread.md, step 2: the sound dispatch filter (Level.cpp, CLevel::SoundEvent_Filter, always on) - a sound
+    // goes to the listeners near it or near the actor, those with an xr_hear on_sound section, and at most N of the
+    // others (the loudest); the actor's own sounds go to everyone. Its tunables
     CMD4(CCC_Float, "npc_perf_sound_dispatch_near_dist", &npc_perf_sound_dispatch_near_dist, 0.f, 500.f);
     CMD4(CCC_Float, "npc_perf_sound_dispatch_actor_dist", &npc_perf_sound_dispatch_actor_dist, 0.f, 500.f);
     CMD4(CCC_Integer, "npc_perf_sound_dispatch_max_combat", &npc_perf_sound_dispatch_max_combat, 0, 4096);
     CMD4(CCC_Integer, "npc_perf_sound_dispatch_max", &npc_perf_sound_dispatch_max, 0, 4096);
-    // 22-game-thread.md, step 1b: TEMPORARY switch (not saved, default 0) - the friendly-fire pick of a firing stalker
-    // walks its rays over the objects of one cone query and tests an object precisely only when the ray reaches it
-    // (1), the same answer as before; 2 = shadow (both picks, the original decides, differences in npc/ff/mismatch)
-    CMD4(CCC_IntegerNotSaved, "npc_perf_friendly_fire_fast", &npc_perf_friendly_fire_fast, 0, 2);
     CMD4(CCC_Integer, "npc_preview_scene_budget_per_frame", (int*)&npc_preview_scene_budget_per_frame, 1, 500);
     CMD4(CCC_Integer, "npc_preview_disk_cache_warm_per_frame", (int*)&npc_preview_disk_cache_warm_per_frame, 0, 500);
 
@@ -3290,20 +3275,12 @@ void CCC_RegisterCommands()
     // ...but never while the ragdoll still moves fast or its joints are pulled apart (0 = no check).
     CMD4(CCC_FloatBlock, "ph_corpse_sleep_max_vel", &ph_console::ph_corpse_sleep_max_vel, 0.f, 100.f);
     CMD4(CCC_FloatBlock, "ph_corpse_sleep_max_stretch", &ph_console::ph_corpse_sleep_max_stretch, 0.f, 10.f);
-    // plans/optimization_mt/21-physics-step.md: sleep a far corpse before ph_corpse_sleep_ms once it has settled.
-    // The switch is temporary and not saved; the tunables below are ordinary cvars.
-    CMD4(CCC_IntegerNotSaved, "ph_corpse_sleep_settled", &ph_console::ph_corpse_sleep_settled, 0, 1);
-    CMD4(CCC_Integer, "ph_corpse_settle_min_age_ms", &ph_console::ph_corpse_settle_min_age_ms, 0, 60000);
-    CMD4(CCC_Integer, "ph_corpse_settle_ms", &ph_console::ph_corpse_settle_ms, 20, 10000);
-    CMD4(CCC_FloatBlock, "ph_corpse_settle_vel", &ph_console::ph_corpse_settle_vel, 0.001f, 10.f);
-    CMD4(CCC_FloatBlock, "ph_corpse_settle_ang_vel", &ph_console::ph_corpse_settle_ang_vel, 0.001f, 50.f);
 
     // Ф1 (PHYSICS_ACTIVE_SET_PLAN): far live NPCs -> pure kinematic. ph_npc_kinematic_far_dist=0 disables.
     CMD4(CCC_FloatBlock, "ph_npc_kinematic_far_dist", &ph_npc_kinematic_far_dist, 0.f, 500.f);
     CMD4(CCC_FloatBlock, "ph_npc_kinematic_far_hyst", &ph_npc_kinematic_far_hyst, 0.f, 200.f);
-    // Ф3 (plans/optimization_mt/21-physics-step.md): also nearer NPCs that are not drawn in the main pass. The switch
-    // is temporary and not saved; the distance is saved and never below 10 m (an NPC next to the player keeps physics).
-    CMD4(CCC_IntegerNotSaved, "ph_npc_kinematic_unseen", &ph_npc_kinematic_unseen, 0, 1);
+    // Ф3 (plans/optimization_mt/21-physics-step.md): also nearer NPCs that are not drawn in the main pass (always on).
+    // The distance is saved and never below 10 m (an NPC next to the player keeps physics).
     CMD4(CCC_FloatBlock, "ph_npc_kinematic_unseen_dist", &ph_npc_kinematic_unseen_dist, 10.f, 500.f);
 
     // P1: NPC spawn / level-load optimizations (see plans/optimization_spawn/plan.md) — runtime kill-switches.

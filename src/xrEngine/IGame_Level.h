@@ -147,7 +147,7 @@ public:
     void SoundEvent_Dispatch();
     void SoundEvent_OnDestDestroy(Feel::Sound*);
     /// Called by SoundEvent_Dispatch on the game logic thread before the delegates go out: the game may remove some of
-    /// them (npc_perf_sound_dispatch, plans/optimization_mt/22-game-thread.md, step 2), keeping the order of the rest.
+    /// them (CLevel: cap and dedupe, plans/optimization_mt/22-game-thread.md, step 2), keeping the order of the rest.
     virtual void SoundEvent_Filter(xr_vector<_esound_delegate>& /*events*/) {}
 
     // Loader interface

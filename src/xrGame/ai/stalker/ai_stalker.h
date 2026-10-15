@@ -221,10 +221,10 @@ private:
     // caller (CAI_Stalker::UpdateCL, the top of the chain) returns at once
     bool TrySkipUpdateCLLod();
 
-    // The object handler LOD (plans/optimization_mt/22-game-thread.md, step 1; npc_perf_object_handler_lod): true =
+    // The object handler LOD (plans/optimization_mt/22-game-thread.md, step 1; npc_perf_object_handler_lod_*): true =
     // this UpdateCL does not run the object handler (the weapon planner) of an idle stalker far from the camera
     bool TrySkipObjectHandlerLod();
-    // The scheduler interval of a settled corpse (22-game-thread.md, step 1; npc_perf_dead_shed_lod)
+    // The scheduler interval of a settled corpse (22-game-thread.md, step 1; npc_perf_dead_shed_interval_ms)
     void UpdateDeadShedLod();
     u32 m_object_handler_lod_last_time{0}; // Device.dwTimeGlobal of the last object handler run from UpdateCL
     u32 m_object_handler_lod_skips{u32(-1)}; // skips since that run; -1 = not counted yet (the phase is set by ID)

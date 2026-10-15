@@ -614,23 +614,43 @@ IC void CBackend::ApplyVertexLayout()
     VERIFY(decl);
     VERIFY(m_pInputSignature);
 
-    xr_map<ID3DBlob*, ID3DInputLayout*>::iterator it;
-
-    it = decl->vs_to_layout.find(m_pInputSignature);
-
-    if (it == decl->vs_to_layout.end())
+    // (declaration, VS input signature) -> input layout is a pure lookup, and consecutive draws almost always repeat
+    // the pair (same pass, same geometry format): reuse the last answer instead of searching the xr_map on every draw.
+    // The epoch guards against a declaration or signature recreated at a reused address (see SH_Atomic.h).
+    const u32 epoch = g_dx11_input_layout_epoch.load(std::memory_order_relaxed);
+    ID3DInputLayout* layout;
+    if (decl == m_layoutDecl && m_pInputSignature == m_layoutSignature && epoch == m_layoutEpoch)
     {
-        ID3DInputLayout* pLayout;
+        layout = m_layoutCached;
+        ++stat.layout_skip;
+    }
+    else
+    {
+        xr_map<ID3DBlob*, ID3DInputLayout*>::iterator it;
 
-        CHK_DX(HW.pDevice->CreateInputLayout(&decl->dx11_dcl_code[0], decl->dx11_dcl_code.size() - 1,
-            m_pInputSignature->GetBufferPointer(), m_pInputSignature->GetBufferSize(), &pLayout));
+        it = decl->vs_to_layout.find(m_pInputSignature);
 
-        it = decl->vs_to_layout.insert(std::pair<ID3DBlob*, ID3DInputLayout*>(m_pInputSignature, pLayout)).first;
+        if (it == decl->vs_to_layout.end())
+        {
+            ID3DInputLayout* pLayout;
+
+            CHK_DX(HW.pDevice->CreateInputLayout(&decl->dx11_dcl_code[0], decl->dx11_dcl_code.size() - 1,
+                m_pInputSignature->GetBufferPointer(), m_pInputSignature->GetBufferSize(), &pLayout));
+
+            it = decl->vs_to_layout.insert(std::pair<ID3DBlob*, ID3DInputLayout*>(m_pInputSignature, pLayout)).first;
+        }
+
+        layout = it->second;
+        m_layoutDecl = decl;
+        m_layoutSignature = m_pInputSignature;
+        m_layoutCached = layout;
+        m_layoutEpoch = epoch;
     }
 
-    if (m_pInputLayout != it->second)
+    if (m_pInputLayout != layout)
     {
-        m_pInputLayout = it->second;
+        m_pInputLayout = layout;
+        ++stat.layout_set;
         HW.get_context(context_id)->IASetInputLayout(m_pInputLayout);
     }
 }
@@ -724,6 +744,20 @@ IC void CBackend::set_Constants(R_constant_table* C)
         // Each buffer of m_CBTable is shared by every shader of this context with the same cbuffer layout (P15b,
         // plans/optimization_mt/10-submit-dynamic.md): the vertex and pixel shader of a pass write and map one
         // cbuffer dynamic_transforms per draw, not two.
+        // m_aFlushList is rebuilt alongside: every buffer stored into an array below, each one once.
+        m_uiFlushCount = 0;
+        const auto track_flush = [this](dx11ConstantBuffer* buffer)
+        {
+            if (!buffer)
+                return;
+            for (u32 i = 0; i < m_uiFlushCount; ++i)
+            {
+                if (m_aFlushList[i] == buffer)
+                    return;
+            }
+            VERIFY(m_uiFlushCount < 6 * MaxCBuffers);
+            m_aFlushList[m_uiFlushCount++] = buffer;
+        };
         for (const R_constant_table::cb_table_record& record : C->m_CBTable[context_id])
         {
             const ref_cbuffer& cb = record.second;
@@ -733,32 +767,38 @@ IC void CBackend::set_Constants(R_constant_table* C)
             {
                 VERIFY((uiBufferIndex & CB_BufferIndexMask) < MaxCBuffers);
                 m_aPixelConstants[uiBufferIndex & CB_BufferIndexMask] = cb;
+                track_flush(cb._get());
             }
             else if ((uiBufferIndex & CB_BufferTypeMask) == CB_BufferVertexShader)
             {
                 VERIFY((uiBufferIndex & CB_BufferIndexMask) < MaxCBuffers);
                 m_aVertexConstants[uiBufferIndex & CB_BufferIndexMask] = cb;
+                track_flush(cb._get());
             }
             else if ((uiBufferIndex & CB_BufferTypeMask) == CB_BufferGeometryShader)
             {
                 VERIFY((uiBufferIndex & CB_BufferIndexMask) < MaxCBuffers);
                 m_aGeometryConstants[uiBufferIndex & CB_BufferIndexMask] = cb;
+                track_flush(cb._get());
             }
 #ifdef USE_DX11
             else if ((uiBufferIndex & CB_BufferTypeMask) == CB_BufferHullShader)
             {
                 VERIFY((uiBufferIndex & CB_BufferIndexMask) < MaxCBuffers);
                 m_aHullConstants[uiBufferIndex & CB_BufferIndexMask] = cb;
+                track_flush(cb._get());
             }
             else if ((uiBufferIndex & CB_BufferTypeMask) == CB_BufferDomainShader)
             {
                 VERIFY((uiBufferIndex & CB_BufferIndexMask) < MaxCBuffers);
                 m_aDomainConstants[uiBufferIndex & CB_BufferIndexMask] = cb;
+                track_flush(cb._get());
             }
             else if ((uiBufferIndex & CB_BufferTypeMask) == CB_BufferComputeShader)
             {
                 VERIFY((uiBufferIndex & CB_BufferIndexMask) < MaxCBuffers);
                 m_aComputeConstants[uiBufferIndex & CB_BufferIndexMask] = cb;
+                track_flush(cb._get());
             }
 #endif
             else

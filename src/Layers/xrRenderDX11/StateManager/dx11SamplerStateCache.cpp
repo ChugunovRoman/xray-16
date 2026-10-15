@@ -85,9 +85,11 @@ void dx11SamplerStateCache::ClearStateArray()
     }
 
     m_StateArray.clear();
+    // The device (and its contexts) goes away with the states: start every context record from scratch.
+    ResetBoundAll();
 }
 
-void dx11SamplerStateCache::PrepareSamplerStates(HArray& samplers,
+void dx11SamplerStateCache::PrepareSamplerStates(const HArray& samplers,
     ID3DSamplerState* pSS[D3D_COMMONSHADER_SAMPLER_SLOT_COUNT]) const
 {
     VERIFY(samplers.size() <= D3D_COMMONSHADER_SAMPLER_SLOT_COUNT);
@@ -101,46 +103,78 @@ void dx11SamplerStateCache::PrepareSamplerStates(HArray& samplers,
     }
 }
 
-void dx11SamplerStateCache::VSApplySamplers(u32 context_id, HArray& samplers)
+bool dx11SamplerStateCache::ApplySamplers(u32 context_id, u32 stage, const HArray& samplers)
 {
-    ID3DSamplerState* pSS[D3D_COMMONSHADER_SAMPLER_SLOT_COUNT] = {};
+    constexpr u32 slots = D3D_COMMONSHADER_SAMPLER_SLOT_COUNT;
+    ID3DSamplerState* pSS[slots] = {};
     PrepareSamplerStates(samplers, pSS);
-    HW.get_context(context_id)->VSSetSamplers(0, D3D_COMMONSHADER_SAMPLER_SLOT_COUNT, pSS);
+
+    VERIFY(context_id < R__NUM_CONTEXTS);
+    BoundSamplers& bound = m_bound[context_id];
+    ID3DSamplerState** cached = bound.states[stage];
+    const u32 stage_bit = 1u << stage;
+
+    // Only the [first, last] changed slots go out, nothing when the stage already holds these samplers (consecutive
+    // passes mostly share the sampler set); all 16 slots while the record of the stage is not valid (P19 step 2).
+    u32 first = 0;
+    u32 last = slots - 1;
+    if (bound.valid & stage_bit)
+    {
+        while (first < slots && cached[first] == pSS[first])
+            ++first;
+        if (first == slots)
+            return false;
+        while (cached[last] == pSS[last])
+            --last;
+    }
+
+    for (u32 i = first; i <= last; ++i)
+        cached[i] = pSS[i];
+    bound.valid |= stage_bit;
+
+    auto* context = HW.get_context(context_id);
+    const u32 count = last - first + 1;
+    switch (stage)
+    {
+    case StageVS: context->VSSetSamplers(first, count, &pSS[first]); break;
+    case StagePS: context->PSSetSamplers(first, count, &pSS[first]); break;
+    case StageGS: context->GSSetSamplers(first, count, &pSS[first]); break;
+    case StageHS: context->HSSetSamplers(first, count, &pSS[first]); break;
+    case StageDS: context->DSSetSamplers(first, count, &pSS[first]); break;
+    case StageCS: context->CSSetSamplers(first, count, &pSS[first]); break;
+    default: NODEFAULT;
+    }
+    return true;
 }
 
-void dx11SamplerStateCache::PSApplySamplers(u32 context_id, HArray& samplers)
+bool dx11SamplerStateCache::VSApplySamplers(u32 context_id, HArray& samplers)
 {
-    ID3DSamplerState* pSS[D3D_COMMONSHADER_SAMPLER_SLOT_COUNT] = {};
-    PrepareSamplerStates(samplers, pSS);
-    HW.get_context(context_id)->PSSetSamplers(0, D3D_COMMONSHADER_SAMPLER_SLOT_COUNT, pSS);
+    return ApplySamplers(context_id, StageVS, samplers);
 }
 
-void dx11SamplerStateCache::GSApplySamplers(u32 context_id, HArray& samplers)
+bool dx11SamplerStateCache::PSApplySamplers(u32 context_id, HArray& samplers)
 {
-    ID3DSamplerState* pSS[D3D_COMMONSHADER_SAMPLER_SLOT_COUNT] = {};
-    PrepareSamplerStates(samplers, pSS);
-    HW.get_context(context_id)->GSSetSamplers(0, D3D_COMMONSHADER_SAMPLER_SLOT_COUNT, pSS);
+    return ApplySamplers(context_id, StagePS, samplers);
 }
 
-void dx11SamplerStateCache::HSApplySamplers(u32 context_id, HArray& samplers)
+bool dx11SamplerStateCache::GSApplySamplers(u32 context_id, HArray& samplers)
 {
-    ID3DSamplerState* pSS[D3D_COMMONSHADER_SAMPLER_SLOT_COUNT] = {};
-    PrepareSamplerStates(samplers, pSS);
-    HW.get_context(context_id)->HSSetSamplers(0, D3D_COMMONSHADER_SAMPLER_SLOT_COUNT, pSS);
+    return ApplySamplers(context_id, StageGS, samplers);
 }
 
-void dx11SamplerStateCache::DSApplySamplers(u32 context_id, HArray& samplers)
+bool dx11SamplerStateCache::HSApplySamplers(u32 context_id, HArray& samplers)
 {
-    ID3DSamplerState* pSS[D3D_COMMONSHADER_SAMPLER_SLOT_COUNT] = {};
-    PrepareSamplerStates(samplers, pSS);
-    HW.get_context(context_id)->DSSetSamplers(0, D3D_COMMONSHADER_SAMPLER_SLOT_COUNT, pSS);
+    return ApplySamplers(context_id, StageHS, samplers);
 }
 
-void dx11SamplerStateCache::CSApplySamplers(u32 context_id, HArray& samplers)
+bool dx11SamplerStateCache::DSApplySamplers(u32 context_id, HArray& samplers)
 {
-    ID3DSamplerState* pSS[D3D_COMMONSHADER_SAMPLER_SLOT_COUNT] = {};
-    PrepareSamplerStates(samplers, pSS);
-    HW.get_context(context_id)->CSSetSamplers(0, D3D_COMMONSHADER_SAMPLER_SLOT_COUNT, pSS);
+    return ApplySamplers(context_id, StageDS, samplers);
+}
+
+bool dx11SamplerStateCache::CSApplySamplers(u32 context_id, HArray& samplers)
+{
+    return ApplySamplers(context_id, StageCS, samplers);
 }
 
 void dx11SamplerStateCache::SetMaxAnisotropy(u32 uiMaxAniso)
@@ -151,6 +185,8 @@ void dx11SamplerStateCache::SetMaxAnisotropy(u32 uiMaxAniso)
         return;
 
     m_uiMaxAnisotropy = uiMaxAniso;
+    // Every state object is re-created below: re-send all stages on the next Apply.
+    ResetBoundAll();
 
     for (u32 i = 0; i < m_StateArray.size(); ++i)
     {
@@ -178,6 +214,8 @@ void dx11SamplerStateCache::SetMipLODBias(float uiMipLODBias)
         return;
 
     m_uiMipLODBias = uiMipLODBias;
+    // Every state object is re-created below: re-send all stages on the next Apply.
+    ResetBoundAll();
 
     for (u32 i = 0; i < m_StateArray.size(); ++i)
     {

@@ -76,6 +76,8 @@ void CResourceManager::_DeleteVS(const SVS* vs)
         return;
     if (DestroyShader(vs))
     {
+        // Layouts of this signature are released below: drop the cached pairs of CBackend::ApplyVertexLayout.
+        g_dx11_input_layout_epoch.fetch_add(1, std::memory_order_relaxed);
         for (const auto& iDecl : v_declarations)
         {
             const auto iLayout = iDecl->vs_to_layout.find(vs->signature->signature);

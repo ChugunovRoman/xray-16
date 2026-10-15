@@ -60,6 +60,14 @@ void R_dsgraph_structure::render_graph(u32 _priority)
 
     // render/main/* metrics: only the main view's graph (not cascades, lights or the scope pass).
     [[maybe_unused]] const bool perf_main = o.is_main_pass && !o.second_vp_pass;
+#if defined(USE_DX11) && XR_PERF_METRICS
+    // P19 step 2: backend redundancy counters of this graph (static + dynamic), see CBackend::_stats.
+    const u32 perf_layout_skip0 = cmd_list.stat.layout_skip;
+    const u32 perf_layout_set0 = cmd_list.stat.layout_set;
+    const u32 perf_sampler_skip0 = cmd_list.stat.sampler_skip;
+    const u32 perf_sampler_set0 = cmd_list.stat.sampler_set;
+    const u32 perf_cb_flush_slots0 = cmd_list.stat.cb_flush_slots;
+#endif
 
     // **************************************************** NORMAL
     // Perform sorting based on ScreenSpaceArea
@@ -182,6 +190,14 @@ void R_dsgraph_structure::render_graph(u32 _priority)
         PERF_CB_DELTA(perf_main, rmain_dyn_cb_flush, perf_cb_dyn);
         PERF_CB_BYTES(perf_main, rmain_dyn_cb_bytes, perf_cb_dyn);
     }
+
+#if defined(USE_DX11) && XR_PERF_METRICS
+    PERF_ADD_IF(perf_main, rmain_layout_skip, cmd_list.stat.layout_skip - perf_layout_skip0);
+    PERF_ADD_IF(perf_main, rmain_layout_set, cmd_list.stat.layout_set - perf_layout_set0);
+    PERF_ADD_IF(perf_main, rmain_sampler_skip, cmd_list.stat.sampler_skip - perf_sampler_skip0);
+    PERF_ADD_IF(perf_main, rmain_sampler_set, cmd_list.stat.sampler_set - perf_sampler_set0);
+    PERF_ADD_IF(perf_main, rmain_cb_flush_slots, cmd_list.stat.cb_flush_slots - perf_cb_flush_slots0);
+#endif
 
     RImplementation.BasicStats.Primitives.End(); // XXX: Refactor a bit later
 }

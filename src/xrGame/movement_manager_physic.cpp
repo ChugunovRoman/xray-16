@@ -45,9 +45,7 @@
 float ph_npc_kinematic_far_dist = 100.f;
 float ph_npc_kinematic_far_hyst = 20.f;
 // Ф3 (plans/optimization_mt/21-physics-step.md): nearer NPCs that nobody sees -> the same kinematic movement, see
-// unseen_kinematic(). The switch is temporary and not saved, on by default (2026-10-14: kept on while the scene with
-// NPCs spread over the level - the main one - is checked); the distance is an ordinary cvar.
-int ph_npc_kinematic_unseen = 1;
+// unseen_kinematic(). Always on; the distance is a cvar.
 float ph_npc_kinematic_unseen_dist = 30.f;
 
 float CMovementManager::speed(CPHMovementControl* movement_control) const
@@ -114,13 +112,6 @@ void CMovementManager::apply_collision_hit(CPHMovementControl* movement_control)
 bool CMovementManager::should_force_far_kinematic(CPHMovementControl* movement_control, const Fvector& dest_position)
 {
     m_kinematic_by_unseen = false;
-    const bool unseen_on = ph_npc_kinematic_unseen != 0;
-    if (ph_npc_kinematic_far_dist <= 0.f && !unseen_on)
-    {
-        m_kinematic_far_forced = false;
-        m_kinematic_unseen_band = false;
-        return false; // feature off, old behavior
-    }
 
     CActor* actor = smart_cast<CActor*>(Level().CurrentEntity());
     if (!actor)
@@ -143,12 +134,8 @@ bool CMovementManager::should_force_far_kinematic(CPHMovementControl* movement_c
     else
         m_kinematic_far_forced = false;
 
-    // Ф3: nearer than the far rule, but unseen. Evaluated on every call while on, so its latch stays current.
-    bool unseen = false;
-    if (unseen_on)
-        unseen = unseen_kinematic(dist_sq, actor);
-    else
-        m_kinematic_unseen_band = false;
+    // Ф3: nearer than the far rule, but unseen. Evaluated on every call, so its latch stays current.
+    const bool unseen = unseen_kinematic(dist_sq, actor);
     if (!m_kinematic_far_forced && !unseen)
         return false;
     m_kinematic_by_unseen = !m_kinematic_far_forced;
@@ -162,7 +149,7 @@ bool CMovementManager::should_force_far_kinematic(CPHMovementControl* movement_c
     return true;
 }
 
-// Ф3 (plans/optimization_mt/21-physics-step.md, ph_npc_kinematic_unseen): with hundreds of NPCs around the player the
+// Ф3 (plans/optimization_mt/21-physics-step.md): with hundreds of NPCs around the player the
 // far rule (ph_npc_kinematic_far_dist, 100 m) catches few of them, and the live NPC controllers dominate the physics
 // step (session 2026-10-14 17:02:53: 250-690 active controllers, 17-35 ms of step a frame). Nobody sees most of them:
 // behind the camera, behind walls. Such an NPC moves the way the far ones do (move_along_path's kinematic branch:

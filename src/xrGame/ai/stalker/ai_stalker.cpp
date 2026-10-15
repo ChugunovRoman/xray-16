@@ -1201,8 +1201,8 @@ bool CAI_Stalker::TrySkipUpdateCLLod()
     return true;
 }
 
-// Step 1 of plans/optimization_mt/22-game-thread.md: the object handler LOD (npc_perf_object_handler_lod, temporary,
-// default 0). Session 2026-10-14 18:42 (~1000 NPCs around the player): game/pseq/object_handler 12 ms a frame, ~820
+// Step 1 of plans/optimization_mt/22-game-thread.md: the object handler LOD (always on in single
+// player). Session 2026-10-14 18:42 (~1000 NPCs around the player): game/pseq/object_handler 12 ms a frame, ~820
 // runs a frame - every living stalker with a full UpdateCL runs its object handler (CObjectHandler::update ->
 // CObjectHandlerPlanner::update, a seqParallel delegate) every frame. A run costs ~1.2 us in a quiet scene and 16-25 us
 // in a fight: the fire actions ask can_kill_member() every frame, i.e. the friendly-fire pick of update_can_kill_info
@@ -1216,7 +1216,7 @@ bool CAI_Stalker::TrySkipUpdateCLLod()
 // UpdateCL of the weapon, not here. The planner uses no frame delta: its timers are Device.dwTimeGlobal stamps, so a
 // later run sees the real elapsed time.
 //
-// Skipped (only while the LOD is on): an idle stalker farther than npc_perf_object_handler_lod_dist from the camera -
+// Skipped: an idle stalker farther than npc_perf_object_handler_lod_dist from the camera -
 // the planner is initialized, nothing changed since its last solve (solution_actual_flag), the goal is reached (one
 // action in the solution) and that action is idle / strapped / aiming-ready; the item in the hands (if any) is idle or
 // hidden with no pending or next state; no enemy, no hit in the last 5 s, no recoil. Such a run only re-checks the
@@ -1242,13 +1242,13 @@ float ai_stalker_oh_lod_camera_distance(const CAI_Stalker& stalker)
 
 bool CAI_Stalker::TrySkipObjectHandlerLod()
 {
-    // Every run (the LOD on or off) stamps its time: the time cap below counts from it
+    // Every run stamps its time: the time cap below counts from it
     const auto run = [this]() {
         m_object_handler_lod_last_time = Device.dwTimeGlobal;
         PERF_INC(npc_oh_full);
         return false;
     };
-    if (!npc_perf_object_handler_lod || !IsGameTypeSingle())
+    if (!IsGameTypeSingle())
         return run();
 
     // Near: the view entity, the first frames after the spawn, within the distance
@@ -1337,7 +1337,7 @@ bool CAI_Stalker::TrySkipObjectHandlerLod()
     return true;
 }
 
-// The friendly-fire pick LOD (npc_perf_object_handler_lod, see above): update_can_kill_info casts up to 5 ray queries
+// The friendly-fire pick LOD (with the object handler LOD above): update_can_kill_info casts up to 5 ray queries
 // from the muzzle every frame for every stalker whose fire action, sight or fire_make_sense asks can_kill_member /
 // can_kill_enemy / pick_distance. A stalker nobody sees (off screen, no second viewport, farther than
 // npc_perf_object_handler_lod_dist from the camera, not the view entity, not fighting the actor) keeps its last pick
@@ -1345,7 +1345,7 @@ bool CAI_Stalker::TrySkipObjectHandlerLod()
 // fire (or starts again) up to that much later. The actor's fight is never affected.
 bool CAI_Stalker::can_kill_pick_lod_reuse() const
 {
-    if (!npc_perf_object_handler_lod || npc_perf_object_handler_lod_pick_ms <= 0 || !IsGameTypeSingle())
+    if (npc_perf_object_handler_lod_pick_ms <= 0 || !IsGameTypeSingle())
         return false;
     if (!m_pick_frame_id || Device.dwTimeGlobal - m_pick_time >= u32(npc_perf_object_handler_lod_pick_ms))
         return false;
@@ -1360,7 +1360,7 @@ bool CAI_Stalker::can_kill_pick_lod_reuse() const
     return ai_stalker_oh_lod_camera_distance(*this) >= float(npc_perf_object_handler_lod_dist);
 }
 
-// Step 1 of 22-game-thread.md, part B: corpses in the scheduler (npc_perf_dead_shed_lod, temporary, default 0).
+// Step 1 of 22-game-thread.md, part B: corpses in the scheduler (always on).
 // A dead stalker stays registered with the living interval (100..625 ms, CCustomMonster::net_Spawn). Its update
 // (session 2026-10-14 18:42: stalker/shed/dead 2-14 a frame, i.e. a count, not ms; dead_think 2-12 us) does:
 // the NET queue, the forget-killer event after FORGET_KILLER_TIME, the corpse render tier and the pose freeze
@@ -1370,13 +1370,15 @@ bool CAI_Stalker::can_kill_pick_lod_reuse() const
 // Lua binder only for the first npc_perf_long_dead_skip_binder_ms (5 s). Measured cost of all of it: a few us an update,
 // ~0.1-0.2 ms a frame. What the corpses cost is scheduler steps: the scheduler runs a fixed 128 steps a frame and
 // every object is ~14 s late, so each corpse update takes a step from a living stalker or an item.
-// With the switch on, a corpse that is settled - dead for more than 10 s (the death handling and the binder are
-// done), the ragdoll asleep or gone, nothing in the hands (the weapon dropped by the dead action) - gets
+// A corpse that is settled - dead for more than 10 s (the death handling and the binder are done), the ragdoll
+// asleep or gone, nothing in the hands (the weapon dropped by the dead action) - gets
 // npc_perf_dead_shed_interval_ms instead; the next update after it sees the whole elapsed time (DT is clamped to
 // t_max by the scheduler). Late by that much: the forget-killer event, the pose freeze, burn particles and blood
 // drops of the corpse. Not affected: a corpse that still holds an item (the drop keeps its pace), searching the
 // corpse (the use callback is set by the binder in the first seconds). Note: the steps freed go to other objects,
 // living stalkers among them - the AI reacts sooner, but the scheduler time a frame may grow, not shrink.
+// A corpse that stops being settled (the ragdoll woken by a hit or a push, an item put in its hands, revived) gets
+// the living interval back at its next update.
 namespace
 {
 constexpr u32 AI_STALKER_DEAD_SHED_SETTLE_MS = 10000;
@@ -1388,7 +1390,7 @@ constexpr u32 AI_STALKER_SHED_T_MAX = 250;
 void CAI_Stalker::UpdateDeadShedLod()
 {
     bool settled = false;
-    if (npc_perf_dead_shed_lod && !g_Alive() && !getDestroy())
+    if (!g_Alive() && !getDestroy())
     {
         const u32 death_time = GetLevelDeathTime();
         const CPhysicsShell* shell = PPhysicsShell();
@@ -1445,7 +1447,7 @@ void CAI_Stalker::UpdateCL()
     {
         {
             ZoneScopedN("ucl_stalker_object_handler");
-            // 22-game-thread.md, step 1: the object handler LOD of idle far stalkers (npc_perf_object_handler_lod)
+            // 22-game-thread.md, step 1: the object handler LOD of idle far stalkers (TrySkipObjectHandlerLod)
             if (TrySkipObjectHandlerLod())
             {
                 // not this UpdateCL (npc/object_handler/skipped)
@@ -1936,8 +1938,9 @@ void CAI_Stalker::shedule_Update(u32 DT)
         STOP_PROFILE
     }
 
-    // 22-game-thread.md, step 1: the scheduler interval of a settled corpse (npc_perf_dead_shed_lod), after the dead
-    // Think and UpdateInventoryOwner above have had their say this update
+    // 22-game-thread.md, step 1: the scheduler interval of a settled corpse (UpdateDeadShedLod), after the dead Think
+    // and UpdateInventoryOwner above have had their say this update; a revived stalker with the corpse interval gets
+    // the living one back
     if (!g_Alive() || m_dead_shed_lod_applied)
         UpdateDeadShedLod();
     STOP_PROFILE

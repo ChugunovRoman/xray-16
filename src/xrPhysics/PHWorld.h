@@ -43,7 +43,6 @@ public:
 class CObjectSpace;
 class CObjectList;
 class IPhysicsShellHolder;
-class CPHShell;
 class CPHWorld final : public IPHWorld,
                        public pureFrame,
                        private Noncopyable
@@ -79,9 +78,6 @@ private:
     // for not paying its simulation cost). Actually disabled AFTER ReinitMerged() (see SleepCorpses()) -
     // deactivate() asserts the island is not mid-merge, which only holds true once Unmerge() has run.
     xr_vector<CPHObject*> m_corpses_to_sleep;
-    // ph_corpse_sleep_settled: Step() calls of the frame step only (b_processing). The world steps on main (activation
-    // shape, FlyTo) run with a frozen world - counting them would break every corpse's settle run on each death.
-    u64 m_frame_steps_num{0};
     // Objects whose island was merged (NearCallback) during the current step. They may be absent from
     // m_objects / m_update_objects (frozen world, CPHStaticGeomShell, deactivated mid-step), so the regular
     // IslandReinit loops would leave a stale m_self_active pointing to a soon-destroyed island -> crash in
@@ -186,7 +182,6 @@ public:
     void ReinitMerged();
     // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): see Step() for call sites/ordering.
     bool ShouldForceSleepCorpse(CPHObject* obj);
-    bool UpdateCorpseSettled(CPHShell* shell);
     void SleepCorpses();
     void CutVelocity(float l_limit, float a_limit);
     void GetState(V_PH_WORLD_STATE& state);

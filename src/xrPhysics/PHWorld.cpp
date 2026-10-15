@@ -609,8 +609,6 @@ void CPHWorld::Step()
 
     ++m_steps_num;
     ++m_steps_short_num;
-    if (frame_step)
-        ++m_frame_steps_num; // physics time of the corpse settle runs (UpdateCorpseSettled)
     stats.Collision.Begin();
 
     {
@@ -718,9 +716,8 @@ void CPHWorld::Step()
         // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): same O(N) pass, per corpse, no island-wide
         // synchronization (that required every member of a merged group to qualify at once, which in a busy fight
         // almost never happened - any live NPC transiently merged into the same island via contact blocked the whole
-        // group forever). Old enough (or settled, ph_corpse_sleep_settled) + far enough from the camera ->
-        // force-disable. A far corpse not reacting correctly to a later impact is preferable to paying its
-        // simulation cost every step.
+        // group forever). Old enough + far enough from the camera -> force-disable. A far corpse not reacting
+        // correctly to a later impact is preferable to paying its simulation cost every step.
         const bool corpse_sleep_enabled = ph_console::ph_corpse_sleep_ms > 0;
         if (corpse_sleep_enabled)
             m_corpses_to_sleep.clear();
@@ -904,19 +901,15 @@ void CPHWorld::ReinitMerged()
 
 bool CPHWorld::ShouldForceSleepCorpse(CPHObject* obj)
 {
-    // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): per corpse, no island-wide synchronization. Old
-    // enough + far enough from the camera, plus two cheap guards against freezing a broken pose (see below); with
-    // ph_corpse_sleep_settled also earlier, once settled. safe cast: cbClassRagDoll is only ever set by
+    // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): per corpse, no "settled for N ms" wait, no
+    // island-wide synchronization. Old enough + far enough from the camera, plus two cheap guards against freezing a
+    // broken pose (see below; SleepCorpses() repeats them after the solve). The early sleep of settled corpses
+    // (ph_corpse_sleep_settled) was tried and removed: ODE's own sleep with the 50 Hz thresholds puts a settled corpse
+    // to sleep earlier (plans/optimization_mt/21-physics-step.md). safe cast: cbClassRagDoll is only ever set by
     // CPHShell::SetRagDoll().
     CPHShell* shell = static_cast<CPHShell*>(obj);
     const u32 age_ms = Device.dwTimeGlobal - shell->m_ragdoll_since_ms;
-    const bool old_enough = age_ms >= static_cast<u32>(ph_console::ph_corpse_sleep_ms);
-    // ph_corpse_sleep_settled (plans/optimization_mt/21-physics-step.md): a younger corpse may sleep once it has settled
-    // - see UpdateCorpseSettled. Not before ph_corpse_settle_min_age_ms: a fall, an explosion throw and the joint
-    // recovery after it must finish first. Frame steps only, the settle run counts them.
-    const bool settle = !old_enough && ph_console::ph_corpse_sleep_settled != 0 && b_processing &&
-        age_ms >= static_cast<u32>(ph_console::ph_corpse_settle_min_age_ms);
-    if (!old_enough && !settle)
+    if (age_ms < static_cast<u32>(ph_console::ph_corpse_sleep_ms))
         return false;
     IPhysicsShellHolder* holder = shell->PhysicsRefObject();
     if (!holder)
@@ -926,67 +919,15 @@ bool CPHWorld::ShouldForceSleepCorpse(CPHObject* obj)
     const float far_dist_sq = ph_console::ph_corpse_sleep_far_dist * ph_console::ph_corpse_sleep_far_dist;
     if (to_cam.square_magnitude() <= far_dist_sq)
         return false;
-    // Before the joint walk below: the settle run has to be updated on every frame step, and it is cheaper.
-    if (settle)
-    {
-        PERF_INC(ph_corpse_settle_candidates); // physics/corpse_sleep/settle_*: see PerfMetricsList.inl
-        if (!UpdateCorpseSettled(shell))
-            return false;
-    }
     // After an explosion the elements fly apart and ODE pulls them back to the joints over the next steps
     // (fast corrective motion). Disabling during that window froze the ragdoll mid-air or with metres-long
     // limbs/neck forever. Distance/age are checked first: these walk all elements/joints of the shell.
     const float max_stretch = ph_console::ph_corpse_sleep_max_stretch;
     if (max_stretch > 0.f && shell->get_MaxJointStretchSq() > max_stretch * max_stretch)
-    {
-        if (settle)
-            PERF_INC(ph_corpse_settle_stretch_fail);
         return false;
-    }
-    if (settle)
-    {
-        PERF_INC(ph_corpse_sleep_settled); // every corpse returned here is put to sleep by SleepCorpses()
-        return true;
-    }
     const float max_vel = ph_console::ph_corpse_sleep_max_vel;
     if (max_vel > 0.f && shell->get_MaxElementLinearVelSq() > max_vel * max_vel)
         return false;
-    return true;
-}
-
-bool CPHWorld::UpdateCorpseSettled(CPHShell* shell)
-{
-    // History (plans/optimization_arch/PHYSICS_ISLAND_CORPSE_SLEEP_2026-10-06.md): a settle wait existed twice and was
-    // dropped. Per corpse on main (in_UpdateCL, frame time) it never shrank the active set because the slept corpses were
-    // woken by the next contact; per island ("every member of the merged island is a settled corpse") it never fired
-    // because live NPCs touching a pile merged into its island. The wakes are gone now (corpse-vs-corpse is skipped, items
-    // and live NPCs meet a force-slept corpse one-sided, Physics.cpp NearCallback), and this check is per corpse: nothing
-    // else in its island matters.
-    // Settled = every element slower than ph_corpse_settle_vel / ph_corpse_settle_ang_vel for ph_corpse_settle_ms of
-    // physics time without a break. A falling body passes 0.1 m/s within ~5 ms (gravity 2 x 9.81) and a stretched joint
-    // pulls its bodies back fast, so neither can stay below the thresholds for the window; a corpse that slides on a
-    // slope slower than ph_corpse_settle_vel for the whole window is frozen there (it would have moved centimetres).
-    bool angular_fail = false;
-    if (!shell->AllElementsSlowerThan(
-            ph_console::ph_corpse_settle_vel, ph_console::ph_corpse_settle_ang_vel, &angular_fail))
-    {
-        PERF_INC(ph_corpse_settle_vel_fail);
-        if (angular_fail)
-            PERF_INC(ph_corpse_settle_ang_fail);
-        shell->m_settle_steps = 0;
-        return false;
-    }
-    // A gap in the frame steps (the corpse was asleep, near the camera or too young) starts a new run. Both counters
-    // advance in the same Step(): m_frame_steps_num at its start, this check in the solve phase after it, so the next
-    // frame step of a corpse still in the run sees m_settle_last_step + 1 == m_frame_steps_num.
-    shell->m_settle_steps = shell->m_settle_last_step + 1 == m_frame_steps_num ? shell->m_settle_steps + 1 : 1;
-    shell->m_settle_last_step = m_frame_steps_num;
-    const float steps_needed = float(ph_console::ph_corpse_settle_ms) / (fixed_step * 1000.f);
-    if (float(shell->m_settle_steps) < steps_needed)
-    {
-        PERF_INC(ph_corpse_settle_run);
-        return false;
-    }
     return true;
 }
 

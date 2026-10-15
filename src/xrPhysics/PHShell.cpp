@@ -233,15 +233,16 @@ void CPHShell::PhDataUpdate(dReal step)
     {
         PERF_INC(ph_shell_disabled);
 #if XR_PERF_METRICS
-        // physics/sleep/auto_disable_ragdoll*: the natural sleep of a corpse, by its age (ph_corpse_sleep_settled
-        // diagnostics, plans/optimization_mt/21-physics-step.md)
+        // physics/sleep/auto_disable_ragdoll*: the natural sleep of a corpse, by its age
+        // (plans/optimization_mt/21-physics-step.md)
         if (CPHCollideValidator::IsRagDollObject(*this))
         {
+            constexpr u32 early_ms = 2000; // physics/sleep/auto_disable_ragdoll_early
             const u32 age_ms = Device.dwTimeGlobal - m_ragdoll_since_ms;
             PERF_INC(ph_auto_disable_ragdoll);
             if (age_ms < static_cast<u32>(ph_console::ph_corpse_sleep_ms))
                 PERF_INC(ph_auto_disable_ragdoll_young);
-            if (age_ms < static_cast<u32>(ph_console::ph_corpse_settle_min_age_ms))
+            if (age_ms < early_ms)
                 PERF_INC(ph_auto_disable_ragdoll_early);
         }
 #endif
@@ -1517,27 +1518,6 @@ float CPHShell::get_MaxElementLinearVelSq() const
         max_sq = _max(max_sq, v.square_magnitude());
     }
     return max_sq;
-}
-
-bool CPHShell::AllElementsSlowerThan(float lin_vel, float ang_vel, bool* angular_fail) const
-{
-    const float lin_sq = lin_vel * lin_vel;
-    const float ang_sq = ang_vel * ang_vel;
-    for (const CPHElement* e : elements)
-    {
-        Fvector v;
-        e->get_LinearVel(v);
-        if (v.square_magnitude() > lin_sq)
-            return false;
-        e->get_AngularVel(v);
-        if (v.square_magnitude() > ang_sq)
-        {
-            if (angular_fail)
-                *angular_fail = true;
-            return false;
-        }
-    }
-    return true;
 }
 
 float CPHShell::get_MaxJointStretchSq() const

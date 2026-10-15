@@ -26,6 +26,13 @@ public:
     void CreateGpuBuffer();
     ID3DBuffer* GetBuffer() { return m_pBuffer; }
     void Flush(u32 context_id);
+    // Per-draw entry of R_constants::flush_cache: the m_bChanged test inline, the out-of-line Flush only when there
+    // is something to upload.
+    void FlushIfChanged(u32 context_id)
+    {
+        if (m_bChanged)
+            Flush(context_id);
+    }
 
     //	Set copy data into constant buffer
     //	Plain buffer member

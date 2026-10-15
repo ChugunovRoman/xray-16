@@ -75,26 +75,12 @@ void R_constants::flush_cache()
 {
     const auto context_id = cmd_list.context_id; // TODO: constant buffer should be encapsulated, so no ctx ID needed
 
-    for (int i = 0; i < CBackend::MaxCBuffers; ++i)
-    {
-        if (cmd_list.m_aVertexConstants[i])
-            cmd_list.m_aVertexConstants[i]->Flush(context_id);
-
-        if (cmd_list.m_aPixelConstants[i])
-            cmd_list.m_aPixelConstants[i]->Flush(context_id);
-
-        if (cmd_list.m_aGeometryConstants[i])
-            cmd_list.m_aGeometryConstants[i]->Flush(context_id);
-
-        if (cmd_list.m_aHullConstants[i])
-            cmd_list.m_aHullConstants[i]->Flush(context_id);
-
-        if (cmd_list.m_aDomainConstants[i])
-            cmd_list.m_aDomainConstants[i]->Flush(context_id);
-
-        if (cmd_list.m_aComputeConstants[i])
-            cmd_list.m_aComputeConstants[i]->Flush(context_id);
-    }
+    // Only the distinct buffers bound to some stage (CBackend::m_aFlushList, kept by set_Constants) instead of the
+    // 6 stages x MaxCBuffers slots: the same set of buffers, a buffer shared by the vertex and pixel shader once.
+    const u32 count = cmd_list.m_uiFlushCount;
+    cmd_list.stat.cb_flush_slots += count;
+    for (u32 i = 0; i < count; ++i)
+        cmd_list.m_aFlushList[i]->FlushIfChanged(context_id);
 }
 
 /*

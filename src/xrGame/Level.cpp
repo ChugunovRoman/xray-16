@@ -1246,10 +1246,8 @@ void CLevel::OnGameLogicFrame()
 // plans/optimization_mt/22-game-thread.md, step 2: the sound delegates of a frame (SoundEvent_Register queues one per
 // listener in range, ~500 per sound in a crowd) cost ~1.2 us each in feel_sound_new, and every NPC that heard
 // something also runs its hear callbacks (npc_on_hear_callback emits) in the next OnGameLogicFrame.
-// npc_perf_sound_dispatch: TEMPORARY switch, not saved, on by default (2026-10-14: the developer accepts that cut far
-// listeners lose npc_on_hear_callback of such a sound). 0 = every listener in range gets every sound, as before.
-// The tunables are ordinary cvars (console_commands.cpp).
-int npc_perf_sound_dispatch = 1;
+// CLevel::SoundEvent_Filter below caps and dedupes them, always (2026-10-14: the developer accepts that cut far
+// listeners lose npc_on_hear_callback of such a sound). The tunables are cvars (console_commands.cpp).
 // A listener closer to the sound than this always gets it: gw_npc and xr_danger arm the script danger only within 30 m
 // of the sound (npc_on_hear_callback, dist_sqr < 900), plus a margin for the listener moving until its callbacks run
 float npc_perf_sound_dispatch_near_dist = 35.f;
@@ -1317,7 +1315,7 @@ xr_vector<SoundDispatchCopy> s_sound_dispatch_copies;
 //   the same source and type into one saved sound, so the quieter copy changes nothing there.
 void CLevel::SoundEvent_Filter(xr_vector<_esound_delegate>& events)
 {
-    if (!npc_perf_sound_dispatch || events.empty())
+    if (events.empty())
         return;
     ZoneScoped;
     PERF_SCOPE(npc_sound_filter);

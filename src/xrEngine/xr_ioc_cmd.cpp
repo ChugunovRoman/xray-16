@@ -1046,4 +1046,9 @@ void CCC_Register()
     CMD4(CCC_Integer, "shed_max_steps", &ps_shed_max_steps, 16, 65535);
     CMD4(CCC_Integer, "shed_scan", &ps_shed_scan, 0, 8192);
     CMD4(CCC_IntegerNotSavedE, "shed_services_near", &ps_shed_services_near, 0, 1);
+    // Step 4c: the adaptive near radius of the living creatures (only with shed_priority 1; shed_near_dist and
+    // shed_near_seen_dist are then the maxima)
+    CMD4(CCC_Integer, "shed_near_adaptive", &ps_shed_near_adaptive, 0, 1);
+    CMD4(CCC_Integer, "shed_near_target", &ps_shed_near_target, 1, 2000);
+    CMD4(CCC_Integer, "shed_near_dist_min", &ps_shed_near_dist_min, 0, 300);
 };

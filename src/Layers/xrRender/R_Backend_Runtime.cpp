@@ -4,6 +4,7 @@
 #include "LightTrack.h"
 #include "xrEngine/IRenderable.h"
 #include "xrEngine/device.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #if defined(USE_DX11)
 #include <DirectXMath.h>
@@ -16,7 +17,22 @@ void CBackend::OnFrameEnd()
     if (!GEnv.isDedicatedServer)
     {
 #if defined(USE_DX11)
+        // render/backend/*: this backend's redundancy counters of the frame (deferred backends included - D3DXRenderBase::End
+        // calls OnFrameEnd on every pooled one), then restart them; render_graph takes its own deltas meanwhile.
+        PERF_ADD(rbackend_layout_skip, stat.layout_skip);
+        PERF_ADD(rbackend_layout_set, stat.layout_set);
+        PERF_ADD(rbackend_sampler_skip, stat.sampler_skip);
+        PERF_ADD(rbackend_sampler_set, stat.sampler_set);
+        PERF_ADD(rbackend_cb_flush_slots, stat.cb_flush_slots);
+        stat.layout_skip = 0;
+        stat.layout_set = 0;
+        stat.sampler_skip = 0;
+        stat.sampler_set = 0;
+        stat.cb_flush_slots = 0;
+
         HW.get_context(CHW::IMM_CTX_ID)->ClearState();
+        // ClearState unbinds the samplers of the immediate context, whichever context this backend is labelled with.
+        SSManager.ResetBound(CHW::IMM_CTX_ID);
 #endif
         Invalidate();
     }
@@ -111,6 +127,13 @@ void CBackend::Invalidate()
         m_aDomainConstants[i] = 0;
         m_aComputeConstants[i] = 0;
     }
+    m_uiFlushCount = 0;
+    m_layoutDecl = nullptr;
+    m_layoutSignature = nullptr;
+    m_layoutCached = nullptr;
+    // The real sampler bindings of this device context may be anything now (ClearState, a finished command list):
+    // the next set_States re-emits every stage (dx11SamplerStateCache keeps them per device context).
+    SSManager.ResetBound(context_id);
     StateManager.Reset();
     // Redundant call. Just no note that we need to unmap const
     // if we create dedicated class.
@@ -219,6 +242,13 @@ void CBackend::ResetDeferredCache()
         m_aDomainConstants[i] = 0;
         m_aComputeConstants[i] = 0;
     }
+    m_uiFlushCount = 0;
+    m_layoutDecl = nullptr;
+    m_layoutSignature = nullptr;
+    m_layoutCached = nullptr;
+    // The real sampler bindings of this device context may be anything now (ClearState, a finished command list):
+    // the next set_States re-emits every stage (dx11SamplerStateCache keeps them per device context).
+    SSManager.ResetBound(context_id);
     StateManager.Reset();
     StateManager.UnmapConstants();
     SRVSManager.ResetDeviceState();

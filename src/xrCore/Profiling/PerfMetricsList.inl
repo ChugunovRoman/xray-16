@@ -1065,31 +1065,15 @@ PERF_COUNTER(ph_oneway_npc_contacts, "physics/corpse_oneway/npc_contacts")
 // Ф8 (sleep thresholds scaled to 100 Hz): bodies auto-disabled by CBaseDisableData::Disabling (elements and
 // controllers, all paths) - the natural sleep rate
 PERF_COUNTER(ph_auto_disable, "physics/sleep/auto_disable")
-// ph_corpse_sleep_settled 1: corpses CPHWorld::SleepCorpses put to sleep before ph_corpse_sleep_ms because they had
-// settled (a part of physics/corpse_force_slept)
-PERF_COUNTER(ph_corpse_sleep_settled, "physics/corpse_sleep/settled")
-// ph_corpse_sleep_settled 1, why a corpse did (not) settle (CPHWorld::ShouldForceSleepCorpse / UpdateCorpseSettled), per
-// frame step and corpse - summed over the substeps of a frame:
-// candidates = active corpses old enough (ph_corpse_settle_min_age_ms), younger than ph_corpse_sleep_ms, farther than
-// ph_corpse_sleep_far_dist; vel_fail = of them some element faster than ph_corpse_settle_vel / _ang_vel (the run starts
-// anew), ang_fail = of vel_fail the first fast element was over the angular limit only; run = slow, the run still shorter
-// than ph_corpse_settle_ms; stretch_fail = the run complete but a joint stretched beyond ph_corpse_sleep_max_stretch.
-// candidates = vel_fail + run + stretch_fail + settled.
-PERF_COUNTER(ph_corpse_settle_candidates, "physics/corpse_sleep/settle_candidates")
-PERF_COUNTER(ph_corpse_settle_vel_fail, "physics/corpse_sleep/settle_vel_fail")
-PERF_COUNTER(ph_corpse_settle_ang_fail, "physics/corpse_sleep/settle_ang_fail")
-PERF_COUNTER(ph_corpse_settle_run, "physics/corpse_sleep/settle_run")
-PERF_COUNTER(ph_corpse_settle_stretch_fail, "physics/corpse_sleep/settle_stretch_fail")
 // The natural sleep of ragdolls (CPHShell::PhDataUpdate: every element asleep -> the shell leaves the active list), any
-// path: all / younger than ph_corpse_sleep_ms (asleep before the age rule) / younger than ph_corpse_settle_min_age_ms
-// (asleep before the settled rule may start). Woken old corpses that fall asleep again count in the first one only.
+// path: all / younger than ph_corpse_sleep_ms (asleep before the age rule) / younger than 2 s. Woken old corpses that
+// fall asleep again count in the first one only.
 PERF_COUNTER(ph_auto_disable_ragdoll, "physics/sleep/auto_disable_ragdoll")
 PERF_COUNTER(ph_auto_disable_ragdoll_young, "physics/sleep/auto_disable_ragdoll_young")
 PERF_COUNTER(ph_auto_disable_ragdoll_early, "physics/sleep/auto_disable_ragdoll_early")
 // Corpses picked by CPHWorld::ShouldForceSleepCorpse (pre-solve state) but left active by SleepCorpses, because after the
 // substep's solve a joint was stretched beyond ph_corpse_sleep_max_stretch or an element was faster than
-// ph_corpse_sleep_max_vel (a hit / an explosion integrated in that very substep). Not counted in corpse_force_slept
-// (a settled candidate rejected here is still counted in corpse_sleep/settled).
+// ph_corpse_sleep_max_vel (a hit / an explosion integrated in that very substep). Not counted in corpse_force_slept.
 PERF_COUNTER(ph_corpse_sleep_post_reject, "physics/corpse_sleep/post_reject")
 // physics/corpse_wake/path/contact_local split by the other object (obj1 of NearCallback outside the frame step on the
 // physics thread): activation = CPHActivationShape (a death, a movement box switch, FlyTo), ai = an NPC controller that
@@ -1101,7 +1085,7 @@ PERF_COUNTER(ph_corpse_wake_local_by_item, "physics/corpse_wake/local_by/item")
 PERF_COUNTER(ph_corpse_wake_local_by_prop, "physics/corpse_wake/local_by/prop")
 PERF_COUNTER(ph_corpse_wake_local_by_activation, "physics/corpse_wake/local_by/activation")
 PERF_COUNTER(ph_corpse_wake_local_by_other, "physics/corpse_wake/local_by/other")
-// Ф3 (plans/optimization_mt/21-physics-step.md), ph_npc_kinematic_unseen 1: live NPCs moved kinematically because they
+// Ф3 (plans/optimization_mt/21-physics-step.md): live NPCs moved kinematically because they
 // are farther than ph_npc_kinematic_unseen_dist from the actor and not drawn in the main pass for a while (counted like
 // physics/npc_kinematic_far_forced: per NPC update that took the kinematic branch; not included in it);
 // skip_combat = the same NPCs kept on the physics path because the actor is their selected enemy.
@@ -1176,12 +1160,11 @@ PERF_TIMER(pseq_bullets, "game/pseq/bullets")               // CBulletManager::U
 PERF_TIMER(pseq_level_sounds, "game/pseq/level_sounds")     // CLevelSoundManager::Update, once a frame
 PERF_TIMER(pseq_level_path, "game/pseq/level_path")         // CLevelPathBuilder::process, on demand
 PERF_TIMER(pseq_detail_path, "game/pseq/detail_path")       // CDetailPathBuilder::process, on demand
-// 22-game-thread.md, step 1 (plans/optimization_mt): the object handler LOD (npc_perf_object_handler_lod) and the
-// corpse scheduler LOD (npc_perf_dead_shed_lod), ai_stalker.cpp / ai_stalker_fire.cpp. full = object handler runs from
-// UpdateCL (with the LOD off too), skipped = runs left out by the LOD; keep_* = why a run was not skipped while the LOD
-// is on (busy: the planner or the item in the hands mid-action, a new goal; fight: an enemy, a recent hit, recoil;
-// near: within npc_perf_object_handler_lod_dist m, the view entity, the first frames); pick_full / pick_reused =
-// friendly-fire picks cast (up to 5 ray queries each) / kept by the pick LOD
+// 22-game-thread.md, step 1 (plans/optimization_mt): the object handler LOD and the corpse scheduler LOD,
+// ai_stalker.cpp / ai_stalker_fire.cpp. full = object handler runs from UpdateCL, skipped = runs left out by the LOD;
+// keep_* = why a run was not skipped (busy: the planner or the item in the hands mid-action, a new goal; fight: an
+// enemy, a recent hit, recoil; near: within npc_perf_object_handler_lod_dist m, the view entity, the first frames);
+// pick_full / pick_reused = friendly-fire picks cast (up to 5 rays each) / kept by the pick LOD
 PERF_COUNTER(npc_oh_full, "npc/object_handler/full")
 PERF_COUNTER(npc_oh_skipped, "npc/object_handler/skipped")
 PERF_COUNTER(npc_oh_keep_busy, "npc/object_handler/keep_busy")
@@ -1194,8 +1177,8 @@ PERF_COUNTER(npc_oh_pick_reused, "npc/object_handler/pick_reused")
 PERF_TIMER(stk_shed_dead_total, "stalker/shed/dead_total")
 PERF_COUNTER(stk_shed_dead_lod, "stalker/shed/dead_lod")
 
-// 22-game-thread.md, step 2 (npc_perf_sound_dispatch): the sound delegates of IGame_Level::SoundEvent_Dispatch.
-// delivered = feel_sound_new calls (with the switch off too); capped / deduped = delegates CLevel::SoundEvent_Filter
+// 22-game-thread.md, step 2: the sound delegates of IGame_Level::SoundEvent_Dispatch.
+// delivered = feel_sound_new calls; capped / deduped = delegates CLevel::SoundEvent_Filter
 // dropped (beyond the loudest npc_perf_sound_dispatch_max[_combat] listeners / the same source and type to a listener
 // again in the frame); filter = its own time; below_threshold = deliveries too quiet for CSoundMemoryManager (only the
 // hear callbacks get them)
@@ -1205,18 +1188,15 @@ PERF_COUNTER(npc_sound_deduped, "npc/sound/deduped")
 PERF_TIMER(npc_sound_filter, "npc/sound/filter")
 PERF_COUNTER(npc_sound_below_threshold, "npc/sound/below_threshold")
 
-// 22-game-thread.md, step 1b (npc_perf_friendly_fire_fast, ai_stalker_fire.cpp): the friendly-fire pick of
-// CAI_Stalker::update_can_kill_info. pick = the time of the cast picks in every mode (calls = picks; with the switch at
-// 0 the same picks as npc/object_handler/pick_full); checks = fast picks (one q_frustum each, spatial/q_frustum/ray);
-// rays = their rays (up to 5 a pick); candidates = objects the cone gathered; precise_rays = precise (bone-level) tests
-// of single objects (RayQuery tests every object whose sphere a ray crosses); mismatch = shadow mode (2) picks whose
-// fast answer differs from the original one
+// 22-game-thread.md, step 1b (ai_stalker_fire.cpp): the friendly-fire pick of CAI_Stalker::update_can_kill_info.
+// pick = the time of the cast picks (calls = picks, the same as npc/object_handler/pick_full); checks = picks (one
+// q_frustum each, spatial/q_frustum/ray); rays = their rays (up to 5 a pick); candidates = objects the cone gathered;
+// precise_rays = precise (bone-level) tests of single objects (RayQuery tests every object whose sphere a ray crosses)
 PERF_TIMER(npc_ff_pick, "npc/ff/pick")
 PERF_COUNTER(npc_ff_checks, "npc/ff/checks")
 PERF_COUNTER(npc_ff_rays, "npc/ff/rays")
 PERF_COUNTER(npc_ff_candidates, "npc/ff/candidates")
 PERF_COUNTER(npc_ff_precise_rays, "npc/ff/precise_rays")
-PERF_COUNTER(npc_ff_mismatch, "npc/ff/mismatch")
 
 // 22-game-thread.md, step 4 (shed_priority, xrEngine/xrSheduler.cpp): the near/far classes of the non-RT scheduler.
 // near_* / far_* = executed steps by class: *_late_ms / *_late_n = their average lateness (with shed_priority 0 too:
@@ -1241,3 +1221,27 @@ PERF_TIMER(shed_phase_near, "shed/phase_near")
 PERF_TIMER(shed_phase_far, "shed/phase_far")
 PERF_COUNTER(shed_dt_clamped, "shed/dt_clamped")
 PERF_COUNTER(shed_dt_lost_ms, "shed/dt_lost_ms")
+
+// 22-game-thread.md, step 4c (shed_near_adaptive, xrEngine/xrSheduler.cpp): the adaptive near radius of the living
+// creatures under shed_priority 1. near_radius = the effective plain radius in cm (shed_near_dist times the scale of the
+// controller; the configured one with shed_priority 0 or shed_near_adaptive 0); demoted = near items moved back to the
+// far heap by the scan of the near heap (the radius shrank, the camera moved away, the creature died)
+PERF_GAUGE(shed_near_radius, "shed/near_radius")
+PERF_COUNTER(shed_demoted, "shed/demoted")
+
+// 19-part0-submit.md, step 2 (f): DX11 backend per-draw redundancy (CBackend::_stats). render/main/* - the main view's
+// render_graph (static + dynamic, same scope as render/main/submit_*); render/backend/* - all backends of the frame
+// (immediate + pooled deferred, flushed in CBackend::OnFrameEnd). layout_skip = input-layout lookups answered by the
+// last (declaration, VS signature) pair (no xr_map search), layout_set = IASetInputLayout calls; sampler_set /
+// sampler_skip = per-stage *SetSamplers of set_States issued / left out (the stage already holds those samplers);
+// cb_flush_slots = constant buffers visited by constants.flush() (was 84 slots per draw, now the distinct bound ones).
+PERF_COUNTER(rmain_layout_skip, "render/main/layout_skip")
+PERF_COUNTER(rmain_layout_set, "render/main/layout_set")
+PERF_COUNTER(rmain_sampler_skip, "render/main/sampler_skip")
+PERF_COUNTER(rmain_sampler_set, "render/main/sampler_set")
+PERF_COUNTER(rmain_cb_flush_slots, "render/main/cb_flush_slots")
+PERF_COUNTER(rbackend_layout_skip, "render/backend/layout_skip")
+PERF_COUNTER(rbackend_layout_set, "render/backend/layout_set")
+PERF_COUNTER(rbackend_sampler_skip, "render/backend/sampler_skip")
+PERF_COUNTER(rbackend_sampler_set, "render/backend/sampler_set")
+PERF_COUNTER(rbackend_cb_flush_slots, "render/backend/cb_flush_slots")

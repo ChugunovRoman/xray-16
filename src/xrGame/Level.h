@@ -296,7 +296,7 @@ public:
     // The game logic thread, after SoundEvent_Dispatch and before the scheduler (06-framemove-offload.md, B4/B5):
     // the queued NPC sound callbacks and level_on_frame when OnFrame of this frame left it there.
     void OnGameLogicFrame() override;
-    // npc_perf_sound_dispatch (plans/optimization_mt/22-game-thread.md, step 2): cap and dedupe of the sound delegates
+    // plans/optimization_mt/22-game-thread.md, step 2: cap and dedupe of the sound delegates
     void SoundEvent_Filter(xr_vector<_esound_delegate>& events) override;
     void OnRender() override;
     void RenderBulletTracersForMainViewport() override;

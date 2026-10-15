@@ -11,6 +11,9 @@ void dx11ShaderResourceStateCache::ResetDeviceState()
     ZeroMemory(m_VSViews, sizeof(m_VSViews));
     ZeroMemory(m_HSViews, sizeof(m_HSViews));
     ZeroMemory(m_DSViews, sizeof(m_DSViews));
+    // The compute stage was left out here: after ClearState/Invalidate its cache kept claiming views the device no
+    // longer had (a repeated CS resource was then never re-bound), and m_bUpdateCSViews started uninitialized.
+    ZeroMemory(m_CSViews, sizeof(m_CSViews));
 
     m_uiMinPSView = 0xFFFFFFFF;
     m_uiMaxPSView = 0xFFFFFFFF;
@@ -27,11 +30,15 @@ void dx11ShaderResourceStateCache::ResetDeviceState()
     m_uiMinDSView = 0xFFFFFFFF;
     m_uiMaxDSView = 0xFFFFFFFF;
 
+    m_uiMinCSView = 0xFFFFFFFF;
+    m_uiMaxCSView = 0xFFFFFFFF;
+
     m_bUpdatePSViews = false;
     m_bUpdateGSViews = false;
     m_bUpdateVSViews = false;
     m_bUpdateDSViews = false;
     m_bUpdateHSViews = false;
+    m_bUpdateCSViews = false;
 }
 
 void dx11ShaderResourceStateCache::Apply(u32 context_id)

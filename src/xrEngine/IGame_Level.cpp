@@ -624,7 +624,7 @@ void IGame_Level::SoundEvent_Dispatch()
     if (dispatch_count == 0)
         return;
 
-    // npc_perf_sound_dispatch (22-game-thread.md, step 2): the game may drop delegates here (cap, dedupe)
+    // 22-game-thread.md, step 2: the game may drop delegates here (cap, dedupe)
     SoundEvent_Filter(snd_Events);
 
     u32 delivered = 0;

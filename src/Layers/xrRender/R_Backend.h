@@ -20,6 +20,7 @@
 #include "Layers/xrRenderDX11/StateManager/dx11StateManager.h"
 #include "Layers/xrRenderDX11/StateManager/dx11ShaderResourceStateCache.h"
 #include "Layers/xrRenderDX11/StateManager/dx11StateCache.h"
+#include "Layers/xrRenderDX11/StateManager/dx11SamplerStateCache.h"
 #endif
 
 #include "FVF.h"
@@ -95,6 +96,13 @@ public:
 
     ref_cbuffer m_aHullConstants[MaxCBuffers];
     ref_cbuffer m_aDomainConstants[MaxCBuffers];
+
+    // The distinct buffers held by the six m_a*Constants arrays above, rebuilt together with them in set_Constants
+    // and emptied by Invalidate/ResetDeferredCache. R_constants::flush_cache walks this list (usually 2-5 buffers)
+    // instead of 6 x MaxCBuffers slots on every draw; a buffer bound to several stages or slots is listed once.
+    // Raw pointers: the arrays keep the references.
+    dx11ConstantBuffer* m_aFlushList[6 * MaxCBuffers];
+    u32 m_uiFlushCount{};
 
     D3D_PRIMITIVE_TOPOLOGY m_PrimitiveTopology;
     ID3DInputLayout* m_pInputLayout;
@@ -221,6 +229,14 @@ public:
         u32 xforms;
         u32 target_rt;
         u32 target_zb;
+
+        // DX11 per-draw redundancy counters (P19 step 2, plans/optimization_mt/19-part0-submit.md). Plain
+        // increments; render_graph and OnFrameEnd turn their deltas into render/main/* and render/backend/*.
+        u32 layout_skip; // ApplyVertexLayout: (declaration, VS signature) lookups answered by the last-pair cache
+        u32 layout_set; // IASetInputLayout calls
+        u32 sampler_skip; // *SetSamplers calls of set_States left out (stage already holds the same samplers)
+        u32 sampler_set; // *SetSamplers calls of set_States issued
+        u32 cb_flush_slots; // constant buffers visited by constants.flush() (distinct bound buffers per draw)
 
         R_statistics r;
     } stat;
@@ -565,6 +581,9 @@ public:
         }
         HW.get_context(CHW::IMM_CTX_ID)->ExecuteCommandList(pCommandList, false);
         _RELEASE(pCommandList);
+        // ExecuteCommandList(.., FALSE) leaves the immediate context at D3D11 defaults: its samplers are re-emitted by
+        // the next set_States (the callers also Invalidate() the immediate backend for the rest of its cache).
+        SSManager.ResetBound(CHW::IMM_CTX_ID);
         // FinishCommandList resets the REAL deferred-context state to D3D11 defaults while
         // this CPU cache still holds the recorded state - drop it so the next recording on
         // this context re-emits everything (diff-vs-defaults, never diff-vs-stale).
@@ -654,6 +673,13 @@ private:
 
 private:
     ID3DBlob* m_pInputSignature{ nullptr };
+    // ApplyVertexLayout: the last (declaration, VS input signature) pair and the input layout its vs_to_layout lookup
+    // returned. Valid while m_layoutEpoch equals g_dx11_input_layout_epoch (bumped whenever a layout map loses an
+    // entry or a declaration dies, so a reused address can never hit a stale layout).
+    SDeclaration* m_layoutDecl{ nullptr };
+    ID3DBlob* m_layoutSignature{ nullptr };
+    ID3DInputLayout* m_layoutCached{ nullptr };
+    u32 m_layoutEpoch{};
     ID3DUserDefinedAnnotation* pAnnotation{ nullptr };
 
     bool m_bChangedRTorZB;

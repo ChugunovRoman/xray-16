@@ -66,6 +66,21 @@ ENGINE_API int ps_shed_max_steps = 512;
 ENGINE_API int ps_shed_scan = 512;
 ENGINE_API int ps_shed_services_near = 0;
 
+// 22-game-thread.md, step 4c: the adaptive near radius (shed_near_adaptive, only with shed_priority 1). In a crowd of
+// ~1000 NPCs around the actor nearly all of them are within shed_near_dist / shed_near_seen_dist: 600 living near
+// creatures share the near part of the budget (~8 stalker steps a frame) and are still 5-8 s late. A fixed smaller
+// radius fits the crowd but starves a normal scene. So the radius of the living creatures is scaled: a controller looks
+// at the count of the living creatures in the near heap at most every ShedAdaptPeriodMs and multiplies both radii by
+// 0.9 (0.8 far over the band) while the count is above shed_near_target + 25 %, by 1.05 (1.15 far under it) while it is
+// below shed_near_target - 25 %, between shed_near_dist_min m for the plain radius and the configured values (the
+// maxima). A step is taken only once the scan that shows its effect has gone over its whole heap since the last change
+// (the near heap for a shrink: DemoteFarFromNear; the far heap for a growth: PromoteNearFromFar), otherwise the count
+// would lag and the radius would overshoot. Only the living creatures follow the radius: vehicles, explosives, touch
+// triggers, particles, items and the actor keep their own fixed rules.
+ENGINE_API int ps_shed_near_adaptive = 1;
+ENGINE_API int ps_shed_near_target = 80;
+ENGINE_API int ps_shed_near_dist_min = 8;
+
 extern ENGINE_API float g_fov; // unzoomed camera fov (console "fov"), xr_ioc_cmd.cpp
 
 namespace
@@ -140,20 +155,34 @@ bool ShedAlive(IGameObject& go)
     return (go.GetSpatialData().type.load(std::memory_order_relaxed) & STYPE_REACTTOSOUND) != 0;
 }
 
-// A creature or a machine: within shed_near_dist m of the camera, or within shed_near_seen_dist m and drawn recently.
-// The distance is shrunk by the zoom (view_zoom), as in the UpdateCL LOD of CAI_Stalker
-bool ShedNearByView(IGameObject& go, const Fvector& view_pos, float view_zoom)
+// Step 4c: the controller of the adaptive near radius (see the comment at ps_shed_near_adaptive)
+constexpr u32 ShedAdaptPeriodMs = 250; // the count is looked at no more often
+constexpr u32 ShedAdaptLogMs = 5000; // a changed radius is logged no more often
+constexpr float ShedAdaptShrink = 0.9f;
+constexpr float ShedAdaptShrinkFast = 0.8f; // the count is above twice the upper edge of the band
+constexpr float ShedAdaptGrow = 1.05f;
+constexpr float ShedAdaptGrowFast = 1.15f; // the count is below half the lower edge of the band
+// The hysteresis of the demotion scan (IsNear with keep): a near creature leaves the near heap only beyond the radius
+// times ShedKeepMargin, or (for the "seen" rule) when it was not drawn for ShedKeepSeenFrames frames
+constexpr float ShedKeepMargin = 1.15f;
+constexpr u32 ShedSeenFrames = 3;
+constexpr u32 ShedKeepSeenFrames = 30;
+
+// A creature or a machine: within near_dist m of the camera, or within seen_dist m and drawn in the last seen_frames
+// frames. The distance is shrunk by the zoom (view_zoom), as in the UpdateCL LOD of CAI_Stalker
+bool ShedNearByView(
+    IGameObject& go, const Fvector& view_pos, float view_zoom, float near_dist, float seen_dist, u32 seen_frames)
 {
     const float dist = go.Position().distance_to(view_pos) * view_zoom;
-    if (dist <= float(ps_shed_near_dist))
+    if (dist <= near_dist)
         return true;
-    if (dist > float(ps_shed_near_seen_dist))
+    if (dist > seen_dist)
         return false;
-    // Drawn recently: the test of the crow rules (CGameObject::UpdateCLCrow). hom_frame is stamped by
+    // Drawn recently: the test of the crow rules (CGameObject::UpdateCLCrow, 3 frames). hom_frame is stamped by
     // renderable_Render and the HOM test of the render, which may run meanwhile (a plain aligned u32: any value read is
     // a valid frame number, the class is a heuristic anyway)
     IRenderVisual* visual = go.Visual();
-    return visual && visual->getVisData().hom_frame + 3 > Device.dwFrame;
+    return visual && visual->getVisData().hom_frame + seen_frames > Device.dwFrame;
 }
 
 // An item, a prop, a corpse: near only when the player can touch it - within shed_near_item_dist m of the camera (no
@@ -269,6 +298,7 @@ void CSheduler::Destroy()
         Items.emplace_back(std::move(item));
     ItemsNear.clear();
     m_far_scan_cursor = 0;
+    m_near_scan_cursor = 0;
 
     for (u32 it = 0; it < Items.size(); it++)
     {
@@ -660,18 +690,28 @@ void CSheduler::HeapErase(xr_vector<Item>& heap, size_t index)
 // Step 4: the near/far class (see the comment at ps_shed_priority). Called on the Game thread (the step, the requeue,
 // the scan) and in internal_Register (main or Game thread, never both at once). Reads the position of a registered
 // object - as shedule_Scale() did there already - and m_view_pos / m_view_zoom, the snapshot of UpdateRTImpl.
-bool CSheduler::IsNear(const Item& item) const
+bool CSheduler::IsNear(const Item& item, bool keep) const
 {
+    const float margin = keep ? ShedKeepMargin : 1.f;
+    const u32 seen_frames = keep ? ShedKeepSeenFrames : ShedSeenFrames;
     switch (item.NearKind)
     {
     case ShedNearCreature:
+        // Step 4c: by the adaptive radii (m_near_dist / m_near_seen_dist; the configured ones unless shed_priority 1
+        // and shed_near_adaptive 1)
         if (ShedAlive(*item.GameObject))
-            return ShedNearByView(*item.GameObject, m_view_pos, m_view_zoom);
+        {
+            return ShedNearByView(*item.GameObject, m_view_pos, m_view_zoom, m_near_dist * margin,
+                m_near_seen_dist * margin, seen_frames);
+        }
         // A corpse: its updates no longer drive any reaction, it is an item for the class (its loot is near when the
         // player comes up to it)
         return ShedNearByTouch(*item.GameObject, m_view_pos);
     case ShedNearActor: return true;
-    case ShedNearMachine: return ShedNearByView(*item.GameObject, m_view_pos, m_view_zoom);
+    case ShedNearMachine:
+        // A few objects with a crew or a gun of their own: the configured radii, not the adaptive ones of the crowd
+        return ShedNearByView(*item.GameObject, m_view_pos, m_view_zoom, float(ps_shed_near_dist) * margin,
+            float(ps_shed_near_seen_dist) * margin, seen_frames);
     case ShedNearExplosive:
     {
         // In the world (thrown, lying, flying): its fuse - CMissile::shedule_Update destroys (explodes) a grenade at its
@@ -691,6 +731,7 @@ bool CSheduler::IsNear(const Item& item) const
         return bounds.P.distance_to(m_view_pos) - bounds.R <= float(ps_shed_near_dist);
     }
     case ShedNearItem: return ShedNearByTouch(*item.GameObject, m_view_pos);
+    // (explosives, triggers, items and particles: no hysteresis, their rules do not flicker with the drawing)
     case ShedNearParticles:
         // CPS_Instance: by the center of their spatial sphere, no visibility test - cheap updates, all of those that
         // can be seen well are within the "seen" distance
@@ -723,6 +764,9 @@ u32 CSheduler::CountNearCreatures() const
 void CSheduler::SetPriorityMode(bool on)
 {
     ZoneScopedN("CSheduler::SetPriorityMode");
+    // Step 4c: both ways the radius starts from the configured one (the controller shrinks it from there)
+    m_near_scale = 1.f;
+    ApplyNearRadius();
     if (on)
     {
         xr_vector<Item> all;
@@ -746,19 +790,121 @@ void CSheduler::SetPriorityMode(bool on)
     }
     m_priority_active = on;
     m_far_scan_cursor = 0;
+    m_near_scan_cursor = 0;
+    // Every item was just classified by the current radius: as if both scans had gone over their heaps (the counters
+    // wrap, only differences are used)
+    m_adapt_near_mark = m_near_scanned - ItemsNear.size();
+    m_adapt_far_mark = m_far_scanned - Items.size();
+    m_adapt_time = Device.dwTimeGlobal;
+    m_adapt_log_time = Device.dwTimeGlobal;
+    m_adapt_logged_scale = m_near_scale;
 #ifndef MASTER_GOLD
     Msg("* [scheduler] shed_priority %d: near %u (living creatures %u), far %u", on ? 1 : 0, u32(ItemsNear.size()),
         CountNearCreatures(), u32(Items.size()));
 #endif
 }
 
+// Step 4c: the radii of the living creatures by m_near_scale, kept between shed_near_dist_min m (for the plain radius;
+// none if shed_near_dist is not above it) and the configured ones - the cvars may change at any time
+void CSheduler::ApplyNearRadius()
+{
+    const float max_dist = float(ps_shed_near_dist);
+    const float min_dist = float(_max(0, ps_shed_near_dist_min));
+    const float scale_min = max_dist > min_dist ? min_dist / max_dist : 1.f;
+    m_near_scale = std::clamp(m_near_scale, scale_min, 1.f);
+    m_near_dist = max_dist * m_near_scale;
+    m_near_seen_dist = float(ps_shed_near_seen_dist) * m_near_scale;
+    xray::perf::SetGauge(xray::perf::Metric::shed_near_radius, s64(iFloor(m_near_dist * 100.f)));
+}
+
+// Step 4c: the controller of the adaptive near radius (see the comment at ps_shed_near_adaptive). At the start of
+// ProcessStep, on the Game thread. Off (shed_priority 0 or shed_near_adaptive 0): the configured radii
+void CSheduler::UpdateNearRadius(u32 now)
+{
+    if (!m_priority_active || ps_shed_near_adaptive == 0)
+    {
+        m_near_scale = 1.f;
+        ApplyNearRadius();
+        return;
+    }
+    if (now - m_adapt_time < ShedAdaptPeriodMs)
+    {
+        ApplyNearRadius();
+        return;
+    }
+    m_adapt_time = now;
+
+    const u32 count = CountNearCreatures();
+    const u32 target = u32(_max(1, ps_shed_near_target));
+    const u32 band = target / 4;
+    const u32 high = target + band;
+    const u32 low = target - band;
+    // Has the scan shown the effect of the last change yet (with no scan at all - shed_scan 0 - only the requeue
+    // reclassifies, nothing to wait for)
+    const bool scans = ps_shed_scan > 0;
+    const bool near_seen = !scans || m_near_scanned - m_adapt_near_mark >= u64(ItemsNear.size());
+    const bool far_seen = !scans || m_far_scanned - m_adapt_far_mark >= u64(Items.size());
+
+    const float before = m_near_scale;
+    if (count > high && near_seen)
+        m_near_scale *= count > 2 * high ? ShedAdaptShrinkFast : ShedAdaptShrink;
+    else if (count < low && far_seen)
+        m_near_scale *= count < low / 2 ? ShedAdaptGrowFast : ShedAdaptGrow;
+    ApplyNearRadius();
+    if (m_near_scale != before)
+    {
+        m_adapt_near_mark = m_near_scanned;
+        m_adapt_far_mark = m_far_scanned;
+    }
+#ifndef MASTER_GOLD
+    // Rarely: the radius moves every few hundred ms while it adapts (the value it settled at is logged too, at the
+    // first look of the controller ShedAdaptLogMs after the previous line)
+    if (now - m_adapt_log_time >= ShedAdaptLogMs && std::abs(m_near_scale - m_adapt_logged_scale) > 0.01f)
+    {
+        Msg("* [scheduler] shed_near_adaptive: near radius %.1f m (seen %.1f m), living near creatures %u, target %u",
+            m_near_dist, m_near_seen_dist, count, target);
+        m_adapt_log_time = now;
+        m_adapt_logged_scale = m_near_scale;
+    }
+#endif
+}
+
+// Step 4c: a near object that is no longer near (the radius shrank, the camera moved away, the creature died) would
+// stay in the near heap until its next update - or for good if the near heap is overloaded. Each frame shed_scan / 2 near
+// items are checked round-robin (the near heap is small: ~1000 items at most in a crowd, a whole pass in a few frames)
+// and those clearly far (IsNear with keep - the hysteresis) are moved to the far heap, their due time kept. O(log n)
+// a move, no full rebuild when the radius shrinks.
+void CSheduler::DemoteFarFromNear()
+{
+    ZoneScopedN("CSheduler::DemoteFarFromNear");
+    u32 count = ps_shed_scan > 0 ? u32(_max(1, ps_shed_scan / 2)) : 0;
+    if (count > ItemsNear.size())
+        count = u32(ItemsNear.size());
+    for (u32 k = 0; k < count && !ItemsNear.empty(); ++k)
+    {
+        if (m_near_scan_cursor >= ItemsNear.size())
+            m_near_scan_cursor = 0;
+        ++m_near_scanned;
+        Item& item = ItemsNear[m_near_scan_cursor];
+        // A nulled (unregistered) item stays: it is dropped as stale when it comes to the top
+        if (item.Object && !IsNear(item, true))
+        {
+            Item moved = std::move(item);
+            HeapErase(ItemsNear, m_near_scan_cursor);
+            Push(Items, moved);
+            PERF_INC(shed_demoted);
+            continue; // another item is at the cursor now
+        }
+        ++m_near_scan_cursor;
+    }
+}
+
 // A far object that came near (the camera moved, it was drawn) would wait for its turn in the far heap - seconds.
 // Each frame shed_scan far items are checked round-robin and the near ones are moved to the near heap (~1-2 s for the
-// whole heap of 14-16k at 20 FPS). The other way needs no scan: a near item is requeued often and reclassified then.
+// whole heap of 14-16k at 20 FPS). The other way: the requeue after the update and DemoteFarFromNear (step 4c).
 void CSheduler::PromoteNearFromFar()
 {
     ZoneScopedN("CSheduler::PromoteNearFromFar");
-    PERF_SCOPE(shed_promote_scan);
     u32 count = ps_shed_scan > 0 ? u32(ps_shed_scan) : 0;
     if (count > Items.size())
         count = u32(Items.size());
@@ -766,6 +912,7 @@ void CSheduler::PromoteNearFromFar()
     {
         if (m_far_scan_cursor >= Items.size())
             m_far_scan_cursor = 0;
+        ++m_far_scanned;
         Item& item = Items[m_far_scan_cursor];
         if (item.Object && IsNear(item))
         {
@@ -885,6 +1032,9 @@ void CSheduler::ProcessStep()
     const bool priority = ps_shed_priority != 0;
     if (priority != m_priority_active)
         SetPriorityMode(priority);
+    // Step 4c: the radii of the living creatures for this frame (shed_priority 0: always the configured ones, they
+    // only classify the steps for the metrics there)
+    UpdateNearRadius(Device.dwTimeGlobal);
     if (priority)
     {
         ProcessStepPriority();
@@ -991,7 +1141,13 @@ void CSheduler::ProcessStepPriority()
     const u32 near_min_steps = u32(_max(0, ps_shed_near_min_steps));
     xray::perf::SetGauge(xray::perf::Metric::shed_budget, budget_ms);
 
-    PromoteNearFromFar();
+    {
+        // Both scans of the class, shed/promote_scan is their time. A demoted item is not promoted back by the far scan:
+        // it failed the wider test (keep), so it fails the plain one too
+        PERF_SCOPE(shed_promote_scan);
+        DemoteFarFromNear();
+        PromoteNearFromFar();
+    }
 
     CTimer timer;
     timer.Start();
