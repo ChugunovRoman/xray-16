@@ -695,6 +695,15 @@ public:
     void Save(IWriter* F) override {}
 };
 
+// 22-game-thread.md, step 4: temporary A/B switches of the scheduler - like CCC_Integer, but not kept in user.ltx
+// (always start at the default); the behaviour of "1" becomes permanent once measured, the switch is then removed
+class CCC_IntegerNotSavedE final : public CCC_Integer
+{
+public:
+    using CCC_Integer::CCC_Integer;
+    void Save(IWriter*) override {}
+};
+
 class ENGINE_API CCC_HideConsole : public IConsole_Command
 {
 public:
@@ -1024,4 +1033,17 @@ void CCC_Register()
 
     extern int ps_scheduler_max_steps_per_frame;
     CMD4(CCC_Integer, "scheduler_max_steps_per_frame", &ps_scheduler_max_steps_per_frame, 0, 65535);
+
+    // 22-game-thread.md, step 4 (xrSheduler.cpp, see the comment at ps_shed_priority): near objects first and a fixed
+    // time budget of the non-RT scheduler pass. shed_priority is temporary (not saved, 0 = as before); the rest tune it
+    CMD4(CCC_IntegerNotSavedE, "shed_priority", &ps_shed_priority, 0, 1);
+    CMD4(CCC_Integer, "shed_budget_ms", &ps_shed_budget_ms, 1, 50);
+    CMD4(CCC_Integer, "shed_near_dist", &ps_shed_near_dist, 0, 300);
+    CMD4(CCC_Integer, "shed_near_seen_dist", &ps_shed_near_seen_dist, 0, 500);
+    CMD4(CCC_Integer, "shed_near_item_dist", &ps_shed_near_item_dist, 0, 100);
+    CMD4(CCC_Integer, "shed_far_share", &ps_shed_far_share, 0, 90);
+    CMD4(CCC_Integer, "shed_near_min_steps", &ps_shed_near_min_steps, 0, 64);
+    CMD4(CCC_Integer, "shed_max_steps", &ps_shed_max_steps, 16, 65535);
+    CMD4(CCC_Integer, "shed_scan", &ps_shed_scan, 0, 8192);
+    CMD4(CCC_IntegerNotSavedE, "shed_services_near", &ps_shed_services_near, 0, 1);
 };

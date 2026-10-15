@@ -53,6 +53,7 @@
 #include "MainMenu.h"
 #include "xrEngine/XR_IOConsole.h"
 #include "Actor.h"
+#include "Explosive.h"
 #include "player_hud.h"
 #include "ui/UIGameTutorial.h"
 #include "file_transfer.h"
@@ -1242,6 +1243,209 @@ void CLevel::OnGameLogicFrame()
     }
 }
 
+// plans/optimization_mt/22-game-thread.md, step 2: the sound delegates of a frame (SoundEvent_Register queues one per
+// listener in range, ~500 per sound in a crowd) cost ~1.2 us each in feel_sound_new, and every NPC that heard
+// something also runs its hear callbacks (npc_on_hear_callback emits) in the next OnGameLogicFrame.
+// npc_perf_sound_dispatch: TEMPORARY switch, not saved, on by default (2026-10-14: the developer accepts that cut far
+// listeners lose npc_on_hear_callback of such a sound). 0 = every listener in range gets every sound, as before.
+// The tunables are ordinary cvars (console_commands.cpp).
+int npc_perf_sound_dispatch = 1;
+// A listener closer to the sound than this always gets it: gw_npc and xr_danger arm the script danger only within 30 m
+// of the sound (npc_on_hear_callback, dist_sqr < 900), plus a margin for the listener moving until its callbacks run
+float npc_perf_sound_dispatch_near_dist = 35.f;
+// A listener closer to the actor than this always gets every sound: what the player can see reacts as before
+float npc_perf_sound_dispatch_actor_dist = 50.f;
+// Beyond those, a sound goes to at most this many of the other listeners, the loudest ones (power with occlusion):
+// combat sounds (shot, bullet hit, explosion, monster attack / injury / death) and the rest
+int npc_perf_sound_dispatch_max_combat = 64;
+int npc_perf_sound_dispatch_max = 32;
+
+namespace
+{
+// The sound type is a bit mask: a sound is of a type when it has all bits of that type
+constexpr u32 SoundDispatchCombatTypes[] = { SOUND_TYPE_WEAPON_SHOOTING, SOUND_TYPE_WEAPON_BULLET_HIT,
+    SOUND_TYPE_OBJECT_EXPLODING, SOUND_TYPE_MONSTER_ATTACKING, SOUND_TYPE_MONSTER_INJURING, SOUND_TYPE_MONSTER_DYING };
+
+bool SoundDispatchIsCombat(int type)
+{
+    const u32 mask = static_cast<u32>(type);
+    for (const u32 combat : SoundDispatchCombatTypes)
+    {
+        if ((mask & combat) == combat)
+            return true;
+    }
+    return false;
+}
+
+// One sound event of the frame: the run [begin, end) of the delegates
+struct SoundDispatchRun
+{
+    u32 begin;
+    u32 end;
+    const IGameObject* source;
+    int type;
+};
+
+struct SoundDispatchCandidate
+{
+    float power;
+    u32 index;
+};
+
+struct SoundDispatchCopy
+{
+    const Feel::Sound* dest;
+    float power;
+    u32 index;
+};
+
+// Scratch of CLevel::SoundEvent_Filter, kept between frames (no allocation per frame); game logic thread only
+xr_vector<SoundDispatchRun> s_sound_dispatch_runs;
+xr_vector<SoundDispatchCandidate> s_sound_dispatch_candidates;
+xr_vector<SoundDispatchCopy> s_sound_dispatch_copies;
+} // namespace
+
+// The game logic thread, from SoundEvent_Dispatch before any delegate goes out. A delegate is dropped by setting its
+// dest to null; the rest keep their order.
+// - Cap: a sound goes to every listener within npc_perf_sound_dispatch_near_dist of it, within
+//   npc_perf_sound_dispatch_actor_dist of the actor, or with the Lua sound callback set (an xr_hear on_sound section),
+//   and to at most npc_perf_sound_dispatch_max[_combat] of the other listeners, the loudest. The sounds of the actor
+//   and of what it holds or shot (steps, shots, items, bullet hits and whines: their object is the actor) are not
+//   capped at all - stealth and the reaction to the player stay as before.
+// - Dedupe: the same source and sound type reaches a listener once a frame, the loudest delegate (of equal ones the
+//   later). CSoundMemoryManager raises its threshold to each sound it hears and CScriptEntity::sound_callback merges
+//   the same source and type into one saved sound, so the quieter copy changes nothing there.
+void CLevel::SoundEvent_Filter(xr_vector<_esound_delegate>& events)
+{
+    if (!npc_perf_sound_dispatch || events.empty())
+        return;
+    ZoneScoped;
+    PERF_SCOPE(npc_sound_filter);
+
+    const IGameObject* actor = CurrentEntity();
+    const float near_dist = npc_perf_sound_dispatch_near_dist;
+    const float actor_dist_sqr = _sqr(npc_perf_sound_dispatch_actor_dist);
+    u32 capped = 0;
+    u32 deduped = 0;
+
+    // The runs of the sound events: SoundEvent_Register queues the listeners of one event back to back
+    xr_vector<SoundDispatchRun>& runs = s_sound_dispatch_runs;
+    runs.clear();
+    const u32 count = static_cast<u32>(events.size());
+    for (u32 begin = 0; begin < count;)
+    {
+        u32 end = begin + 1;
+        while (end < count && events[end].event == events[begin].event)
+            ++end;
+        const ref_sound& sound = events[begin].source;
+        // A stopped sound (no feedback) is skipped by the dispatch, and its object may be destroyed already (the
+        // relcase clears g_object only for live emitters): no source, so H_Root below never touches it
+        runs.push_back({ begin, end, sound->feedback ? sound->g_object : nullptr, sound->g_type });
+        begin = end;
+    }
+
+    // Cap
+    xr_vector<SoundDispatchCandidate>& candidates = s_sound_dispatch_candidates;
+    for (const SoundDispatchRun& run : runs)
+    {
+        if (actor && run.source && (run.source == actor || run.source->H_Root() == actor))
+            continue;
+        // A grenade or a charge of the actor: no parent any more after the throw, its initiator tells whose it is
+        if (actor && run.source)
+        {
+            // const_cast: smart_cast and CExplosive::Initiator() are non-const, the object is only read
+            CExplosive* explosive = smart_cast<CExplosive*>(const_cast<IGameObject*>(run.source));
+            if (explosive && explosive->Initiator() == actor->ID())
+                continue;
+        }
+        const u32 limit = static_cast<u32>(
+            SoundDispatchIsCombat(run.type) ? npc_perf_sound_dispatch_max_combat : npc_perf_sound_dispatch_max);
+        if (run.end - run.begin <= limit)
+            continue;
+        candidates.clear();
+        for (u32 i = run.begin; i < run.end; ++i)
+        {
+            const _esound_delegate& entry = events[i];
+            if (entry.dist <= near_dist)
+                continue;
+            if (actor && entry.dest_object->Position().distance_to_sqr(actor->Position()) <= actor_dist_sqr)
+                continue;
+            candidates.push_back({ entry.power, i });
+        }
+        if (candidates.size() <= limit)
+            continue;
+        std::nth_element(candidates.begin(), candidates.begin() + limit, candidates.end(),
+            [](const SoundDispatchCandidate& a, const SoundDispatchCandidate& b) { return a.power > b.power; });
+        for (auto it = candidates.begin() + limit; it != candidates.end(); ++it)
+        {
+            _esound_delegate& entry = events[it->index];
+            // xr_hear.reset_hear_callback sets the Lua sound callback for a section with on_sound only: its condlists
+            // react to sounds at the distance and power they name, so such a listener keeps every sound
+            CCustomMonster* monster = entry.dest_object->cast_custom_monster();
+            if (monster && monster->callback(GameObject::eSound))
+                continue;
+            entry.dest = nullptr;
+            ++capped;
+        }
+    }
+
+    // Dedupe: only a source heard in two or more events of the frame can reach a listener twice
+    if (runs.size() > 1)
+    {
+        std::sort(runs.begin(), runs.end(), [](const SoundDispatchRun& a, const SoundDispatchRun& b)
+        {
+            if (a.source != b.source)
+                return std::less<const IGameObject*>()(a.source, b.source);
+            return a.type < b.type;
+        });
+        xr_vector<SoundDispatchCopy>& copies = s_sound_dispatch_copies;
+        for (size_t first = 0; first < runs.size();)
+        {
+            size_t last = first + 1;
+            while (last < runs.size() && runs[last].source == runs[first].source && runs[last].type == runs[first].type)
+                ++last;
+            // A sound without an object (the world) has no source to compare: never merged
+            if (last - first > 1 && runs[first].source)
+            {
+                copies.clear();
+                for (size_t r = first; r < last; ++r)
+                {
+                    for (u32 i = runs[r].begin; i < runs[r].end; ++i)
+                    {
+                        if (events[i].dest)
+                            copies.push_back({ events[i].dest, events[i].power, i });
+                    }
+                }
+                std::sort(copies.begin(), copies.end(), [](const SoundDispatchCopy& a, const SoundDispatchCopy& b)
+                {
+                    if (a.dest != b.dest)
+                        return std::less<const Feel::Sound*>()(a.dest, b.dest);
+                    if (a.power != b.power)
+                        return a.power > b.power;
+                    return a.index > b.index;
+                });
+                for (size_t k = 1; k < copies.size(); ++k)
+                {
+                    if (copies[k].dest != copies[k - 1].dest)
+                        continue;
+                    events[copies[k].index].dest = nullptr;
+                    ++deduped;
+                }
+            }
+            first = last;
+        }
+    }
+
+    if (capped || deduped)
+    {
+        events.erase(std::remove_if(events.begin(), events.end(),
+                         [](const _esound_delegate& entry) { return !entry.dest; }),
+            events.end());
+    }
+    PERF_ADD(npc_sound_capped, capped);
+    PERF_ADD(npc_sound_deduped, deduped);
+}
+
 int psLUA_GCSTEP = 100; // 10
 int psLUA_GCTIMEOUT = 1000;
 
@@ -1324,7 +1528,11 @@ void CLevel::OnRender()
         return;
     {
         ZoneScopedN("lvl_post3d");
-        Game().OnRender();
+        {
+            ZoneScopedN("lvl_game_on_render");
+            PERF_SCOPE(rlvl_game_on_render);
+            Game().OnRender();
+        }
 
         // Dedicated second VP: tracers are drawn in IGame_Level (main RT, then scope RT). Otherwise once here.
         {
@@ -1333,16 +1541,28 @@ void CLevel::OnRender()
             const bool tracers_done_in_level =
                 ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame() && !bMenu;
             if (!tracers_done_in_level)
+            {
+                ZoneScopedN("lvl_bullets");
+                PERF_SCOPE(rlvl_bullets);
                 BulletManager().Render();
+            }
         }
 
-        GEnv.Render->AfterWorldRender(); //--#SM+#-- +SecondVP+
-        // HUD overlay scope (g_3d_scopes 3): snapshot the live HUD into $user$hud_overlay before UI.
-        GEnv.Render->RenderHudOverlayToTexture();
-        // Blend the snapshot over the backbuffer (GL native path; explicit stencil/blend/depth state).
-        // Drawn here — after the overlay RT is filled, before HUD().RenderUI() so indicators/reticle
-        // render on top of the composited HUD.
-        GEnv.Render->CompositeHudOverlay();
+        {
+            ZoneScopedN("lvl_after_world");
+            PERF_SCOPE(rlvl_after_world);
+            GEnv.Render->AfterWorldRender(); //--#SM+#-- +SecondVP+
+        }
+        {
+            ZoneScopedN("lvl_hud_overlay");
+            PERF_SCOPE(rlvl_hud_overlay);
+            // HUD overlay scope (g_3d_scopes 3): snapshot the live HUD into $user$hud_overlay before UI.
+            GEnv.Render->RenderHudOverlayToTexture();
+            // Blend the snapshot over the backbuffer (GL native path; explicit stencil/blend/depth state).
+            // Drawn here — after the overlay RT is filled, before HUD().RenderUI() so indicators/reticle
+            // render on top of the composited HUD.
+            GEnv.Render->CompositeHudOverlay();
+        }
         WorldRendered(true);
     }
 
@@ -1354,6 +1574,7 @@ void CLevel::OnRender()
 
     {
         ZoneScopedN("lvl_RenderUI");
+        PERF_SCOPE(rlvl_ui);
         if (!Device.IsAnselActive)
             HUD().RenderUI();
     }

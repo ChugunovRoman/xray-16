@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "ParticleEffectDef.h"
 #ifdef _EDITOR
 #include "Layers/xrRender/FBasicVisual.h"
@@ -27,6 +29,12 @@ protected:
     s32 m_MemDT;
 
     Fvector m_InitialPosition;
+
+    // Particle count as of the last OnFrame step / Stop / Compile - the only places that change it (births and
+    // deaths happen in ParticleManager()->Update and ExecuteCollision inside OnFrame, StopEffect kills all).
+    // Read lock-free by the render (IsEmptyForRender) instead of GetParticlesCount, which takes the global pm_lock
+    // that the PreRender particle worker hammers. Same staleness as reading p_count while a step is in flight.
+    std::atomic<u32> m_RenderParticleCount{ 0 };
 
 public:
     CPEDef* m_Def;
@@ -62,7 +70,7 @@ public:
     virtual void Render(CBackend& cmd_list, float LOD, bool use_fast_geo) override;
 
 private:
-    void ParticleRenderStream(FVF::LIT* pv, u32 count, PAPI::Particle* particles);
+    void ParticleRenderStream(FVF::LIT* pv_start, u32 count, PAPI::Particle* particles);
 
 public:
     virtual void Copy(dxRender_Visual* pFrom);
@@ -99,6 +107,14 @@ public:
     void SetBirthDeadCB(PAPI::OnBirthParticleCB bc, PAPI::OnDeadParticleCB dc, void* owner, u32 p) const;
 
     virtual u32 ParticlesCount();
+
+    // Render() would draw nothing: no sprite definition or no particles alive (not started yet, finished, between
+    // bursts). Lets the dsgraph keep such effects out of mapSorted/mapDistort/... (plans/optimization_mt/18-combine-pass.md, E3).
+    bool IsEmptyForRender() const
+    {
+        return !m_Def || !m_Def->m_Flags.is(CPEDef::dfSprite) ||
+            m_RenderParticleCount.load(std::memory_order_relaxed) == 0;
+    }
 };
 void OnEffectParticleBirth(void* owner, u32 param, PAPI::Particle& m, u32 idx);
 void OnEffectParticleDead(void* owner, u32 param, PAPI::Particle& m, u32 idx);

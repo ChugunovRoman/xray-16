@@ -19,6 +19,10 @@ namespace
 {
 // > 0 inside a Lua export of the physics API (ScriptCallScope) - only for the lua/cpp split of the counters.
 thread_local int s_tl_script_call_depth = 0;
+#if XR_PERF_METRICS
+// The ph_wake tag the outermost ScriptCallScope replaced with ph_wake::Script (physics/corpse_wake/path/script).
+thread_local u8 s_tl_script_prev_wake_tag = 0;
+#endif
 
 // CPHUpdateObject activations waiting for the flush (DeferUpdateObjectActivate). Only the address is compared until
 // the flush finds it still here: a later Deactivate (the destructor too) takes it out, so a queued entry never
@@ -101,6 +105,18 @@ void CountDropped() { PERF_INC(ph_defer_dropped); }
 
 bool Queue(Kind kind, std::function<void()> op)
 {
+#if XR_PERF_METRICS
+    // physics/corpse_wake/path/*: the flush runs the mutation on main, outside the caller's scope - carry the caller's
+    // ph_wake tag over (a deferred hit stays a hit, not an untagged wake).
+    if (const u8 wake_tag = xray::perf::TlPhWake())
+    {
+        op = [wake_tag, inner = std::move(op)]
+        {
+            PERF_PH_WAKE(wake_tag);
+            inner();
+        };
+    }
+#endif
     if (!ph_world->defer_scheduler_mutation(std::move(op)))
         return false;
     CountDeferred(kind);
@@ -151,8 +167,26 @@ void ApplyPendingTransform(const CPHElement* key)
 
 bool StepRunningOnOtherThread() { return ph_world && ph_world->IsStepRunningOnOtherThread(); }
 
-ScriptCallScope::ScriptCallScope() { ++s_tl_script_call_depth; }
-ScriptCallScope::~ScriptCallScope() { --s_tl_script_call_depth; }
+ScriptCallScope::ScriptCallScope()
+{
+#if XR_PERF_METRICS
+    if (s_tl_script_call_depth == 0)
+    {
+        u8& wake_tag = xray::perf::TlPhWake();
+        s_tl_script_prev_wake_tag = wake_tag;
+        wake_tag = xray::perf::ph_wake::Script;
+    }
+#endif
+    ++s_tl_script_call_depth;
+}
+ScriptCallScope::~ScriptCallScope()
+{
+    --s_tl_script_call_depth;
+#if XR_PERF_METRICS
+    if (s_tl_script_call_depth == 0)
+        xray::perf::TlPhWake() = s_tl_script_prev_wake_tag;
+#endif
+}
 
 bool DeferForObject(Kind kind, u16 object_id, std::function<void(IGameObject&)> op)
 {

@@ -5,6 +5,7 @@
 #include "PHObject.h"
 #include "PHWorld.h"
 #include "PHShell.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 void CPHElement::get_State(SPHNetState& state)
 {
@@ -25,6 +26,8 @@ void CPHElement::get_State(SPHNetState& state)
 }
 void CPHElement::set_State(const SPHNetState& state)
 {
+    // physics/corpse_wake/path/activation: a net / saved state applied (setForce below would tag it as an impulse).
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Activation);
     // bUpdate=true;
     m_flags.set(flUpdate, TRUE);
     SetGlobalPositionDynamic(state.position);

@@ -43,16 +43,24 @@ public:
     // xrGame's CEntityAlive on the physics thread. Public: read/written directly by CPHWorld, same spirit
     // as the other plain public state on this class (m_object_in_root above, etc.).
     u32 m_ragdoll_since_ms{0};
-    // Ф2: the current inactive state was imposed by CPHWorld::SleepCorpses() (far + old enough), not by
+    // Ф2: the current inactive state was imposed by CPHWorld::SleepCorpses() (far + old enough or settled), not by
     // ODE's natural auto-disable. Set right after SleepCorpses()' Disable(), reset by every DisableObject()
     // (natural sleep path) and by EnableObject(). NearCallback skips corpse-vs-corpse contact only against
     // such shells, so naturally-slept corpses near the camera still collide/wake as before.
     bool m_force_slept{false};
+    // ph_corpse_sleep_settled (CPHWorld::UpdateCorpseSettled): the corpse has stayed below the settle velocities for
+    // m_settle_steps frame steps in a row, the last of them CPHWorld::m_frame_steps_num == m_settle_last_step. A gap (the
+    // corpse was asleep, near the camera or too young) restarts the count.
+    u64 m_settle_last_step{0};
+    u32 m_settle_steps{0};
     // Ф2 guards for CPHWorld::ShouldForceSleepCorpse(): squared max linear speed over all elements, and
     // squared max distance between the two bodies' anchor points over all ball/hinge/hinge2/universal joints
     // (0 for a perfectly satisfied joint; meters after an explosion pulled the ragdoll apart).
     float get_MaxElementLinearVelSq() const;
     float get_MaxJointStretchSq() const;
+    // ph_corpse_sleep_settled: every element slower than lin_vel (m/s) and ang_vel (rad/s); stops at the first fast one.
+    // angular_fail (optional, physics/corpse_sleep/settle_ang_fail): that element was within lin_vel, over ang_vel.
+    bool AllElementsSlowerThan(float lin_vel, float ang_vel, bool* angular_fail = nullptr) const;
     CPHShell();
     virtual ~CPHShell();
     virtual void applyImpulseTrace(const Fvector& pos, const Fvector& dir, float val, const u16 id);

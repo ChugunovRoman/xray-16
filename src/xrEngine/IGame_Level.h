@@ -90,8 +90,13 @@ public: // deferred sound events
         Feel::Sound* dest;
         ref_sound source;
         float power;
+        // For SoundEvent_Filter (plans/optimization_mt/22-game-thread.md, step 2), filled by SoundEvent_Register:
+        IGameObject* dest_object; // the listener as a game object (dest is its Feel::Sound part)
+        float dist; // listener to sound distance at the registration
+        u32 event; // serial of the SoundEvent_Register call: the delegates of one sound event are one contiguous run
     };
     xr_vector<_esound_delegate> snd_Events;
+    u32 snd_Event_serial{};
 
 public:
     // Main, global functions
@@ -141,6 +146,9 @@ public:
     void SoundEvent_Register(const ref_sound& S, float range);
     void SoundEvent_Dispatch();
     void SoundEvent_OnDestDestroy(Feel::Sound*);
+    /// Called by SoundEvent_Dispatch on the game logic thread before the delegates go out: the game may remove some of
+    /// them (npc_perf_sound_dispatch, plans/optimization_mt/22-game-thread.md, step 2), keeping the order of the rest.
+    virtual void SoundEvent_Filter(xr_vector<_esound_delegate>& /*events*/) {}
 
     // Loader interface
     // ref_shader LL_CreateShader (int S, int T, int M, int C);

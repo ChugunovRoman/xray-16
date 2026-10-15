@@ -43,6 +43,7 @@ public:
 class CObjectSpace;
 class CObjectList;
 class IPhysicsShellHolder;
+class CPHShell;
 class CPHWorld final : public IPHWorld,
                        public pureFrame,
                        private Noncopyable
@@ -78,6 +79,9 @@ private:
     // for not paying its simulation cost). Actually disabled AFTER ReinitMerged() (see SleepCorpses()) -
     // deactivate() asserts the island is not mid-merge, which only holds true once Unmerge() has run.
     xr_vector<CPHObject*> m_corpses_to_sleep;
+    // ph_corpse_sleep_settled: Step() calls of the frame step only (b_processing). The world steps on main (activation
+    // shape, FlyTo) run with a frozen world - counting them would break every corpse's settle run on each death.
+    u64 m_frame_steps_num{0};
     // Objects whose island was merged (NearCallback) during the current step. They may be absent from
     // m_objects / m_update_objects (frozen world, CPHStaticGeomShell, deactivated mid-step), so the regular
     // IslandReinit loops would leave a stale m_self_active pointing to a soon-destroyed island -> crash in
@@ -123,6 +127,10 @@ private:
     // Read by the Kick, i.e. after it on the same thread or on the Game thread woken after it (Event-ordered).
     u64 m_overlap_begin_ticks = 0;
     u64 m_steps_num_at_kick = 0;
+    // Ф0 (plans/optimization_mt/21-physics-step.md): the largest island of this frame's step (over its substeps), for
+    // physics/island/max_bodies|max_joints. Physics thread only, filled only while perf_metrics is active.
+    u32 m_frame_island_max_nb = 0;
+    u32 m_frame_island_max_nj = 0;
     dGeomID m_motion_ray;
     CPHCommander* m_commander;
     // physics_world():add_call() entries that wrap Lua (touches_script()): m_commander is drained on the
@@ -178,6 +186,7 @@ public:
     void ReinitMerged();
     // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): see Step() for call sites/ordering.
     bool ShouldForceSleepCorpse(CPHObject* obj);
+    bool UpdateCorpseSettled(CPHShell* shell);
     void SleepCorpses();
     void CutVelocity(float l_limit, float a_limit);
     void GetState(V_PH_WORLD_STATE& state);

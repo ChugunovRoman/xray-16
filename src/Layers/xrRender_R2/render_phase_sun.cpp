@@ -52,6 +52,7 @@ void render_sun::init()
 void render_sun::calculate()
 {
     ZoneScopedN("sun/calculate");
+    PERF_SPLIT(Build); // C1.0: only when main runs the task itself (render/split/build)
 
     need_to_render_sunshafts = RImplementation.Target->need_to_render_sunshafts();
     last_cascade_chain_mode = m_sun_cascades[R__NUM_SUN_CASCADES - 1].reset_chain;
@@ -277,6 +278,7 @@ void render_sun::calculate()
                 dsgraph.o.view_pos = cull_COP[cascade_ind];
 
                 PERF_PASS(xray::perf::pass::Sun0 + cascade_ind);
+                PERF_SCOPE(rsun_build_cpu);
                 // Fill the database
                 dsgraph.build_subspace();
             }
@@ -296,6 +298,7 @@ void render_sun::calculate()
 void render_sun::render()
 {
     ZoneScopedN("sun/render");
+    PERF_SPLIT(Submit); // C1.0: recording, when it runs on main (inside r_sun.sync or a stolen draw task)
     if (!o.active)
         return;
 
@@ -310,6 +313,7 @@ void render_sun::render()
         {
             ZoneScopedN("sun/render/cascade");
             ZoneTextF("cascade=%u", cascade_ind);
+            PERF_SCOPE(rsun_record_cpu);
 #if defined(USE_DX11)
             //TracyD3D11Zone(HW.profiler_ctx, "render_sun::render_cascade");
 #endif
@@ -379,6 +383,10 @@ void render_sun::flush()
 {
     if (!o.active)
         return;
+
+    ZoneScopedN("sun/flush");
+    PERF_SCOPE(rsun_flush);
+    PERF_SPLIT(Submit);
 
     if (RImplementation.o.support_rt_arrays)
     {

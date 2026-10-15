@@ -50,6 +50,7 @@ thread_local u8 tl_pass_v = 0;
 thread_local u8 tl_crow_src_v = 0;
 thread_local u8 tl_bone_caller_v = 0;
 thread_local u8 tl_wait_site_v = 0;
+thread_local u8 tl_ph_wake_v = 0;
 thread_local u8 tl_spawn_v = 0;
 thread_local u32 tl_bones_locked_v = 0;
 
@@ -194,6 +195,7 @@ XRCORE_API u8& TlPass() noexcept { return tl_pass_v; }
 XRCORE_API u8& TlCrowSrc() noexcept { return tl_crow_src_v; }
 XRCORE_API u8& TlBoneCaller() noexcept { return tl_bone_caller_v; }
 XRCORE_API u8& TlWaitSite() noexcept { return tl_wait_site_v; }
+XRCORE_API u8& TlPhWake() noexcept { return tl_ph_wake_v; }
 XRCORE_API u8& TlSpawn() noexcept { return tl_spawn_v; }
 XRCORE_API u32& TlBonesLocked() noexcept { return tl_bones_locked_v; }
 
@@ -295,6 +297,40 @@ XRCORE_API void AddHist(Metric m, u32 bucket) noexcept
     const size_t idx = static_cast<size_t>(m) + bucket;
     if (idx < kNumMetrics)
         AddSlow(static_cast<Metric>(idx), 1);
+}
+
+// C1.0 split (PerfMetrics.hpp, ScopedSplit): the class the main thread's time goes to now and since when. Main thread
+// only (ScopedSplit is inert elsewhere), so plain variables. Every DoRender scope ends inside the frame, so a segment
+// never spans Flush().
+namespace
+{
+u8 s_split_kind = split::None;
+u64 s_split_t0 = 0;
+
+void SplitSwitch(u8 kind) noexcept
+{
+    const u64 now = Ticks();
+    if (s_split_kind == split::Build)
+        AddSlow(Metric::rsplit_build, now - s_split_t0);
+    else if (s_split_kind == split::Submit)
+        AddSlow(Metric::rsplit_submit, now - s_split_t0);
+    s_split_kind = kind;
+    s_split_t0 = now;
+}
+} // namespace
+
+XRCORE_API u8 SplitEnter(u8 kind) noexcept
+{
+    const u8 prev = s_split_kind;
+    if (kind != prev)
+        SplitSwitch(kind);
+    return prev;
+}
+
+XRCORE_API void SplitLeave(u8 prev) noexcept
+{
+    if (prev != s_split_kind)
+        SplitSwitch(prev);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

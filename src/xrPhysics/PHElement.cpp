@@ -584,6 +584,7 @@ void CPHElement::PhDataUpdate(dReal step)
 
 void CPHElement::Enable()
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Activation); // physics/corpse_wake/path/*
     if (!isActive())
         return;
     PH_DEFER_ELEMENT(Enable, Enable());
@@ -1150,6 +1151,7 @@ void CPHElement::getTorque(Fvector& torque)
 }
 void CPHElement::setForce(const Fvector& force)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Impulse); // physics/corpse_wake/path/*
     if (!isActive() || m_flags.test(flFixed))
         return;
     PH_DEFER_ELEMENT(Velocity, setForce(force));
@@ -1162,6 +1164,7 @@ void CPHElement::setForce(const Fvector& force)
 }
 void CPHElement::setTorque(const Fvector& torque)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Impulse); // physics/corpse_wake/path/*
     if (!isActive() || m_flags.test(flFixed))
         return;
     PH_DEFER_ELEMENT(Velocity, setTorque(torque));
@@ -1179,6 +1182,7 @@ void CPHElement::applyForce(const Fvector& dir, float val) // aux
 }
 void CPHElement::applyForce(float x, float y, float z) // called anywhere ph state influent
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Impulse); // physics/corpse_wake/path/*
     VERIFY(_valid(x) && _valid(y) && _valid(z));
     if (!isActive())
         return; // hack??
@@ -1584,6 +1588,7 @@ void CPHElement::ReleaseFixed()
 }
 void CPHElement::applyGravityAccel(const Fvector& accel)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Impulse); // physics/corpse_wake/path/*
     VERIFY(_valid(accel));
     if (m_flags.test(flFixed))
         return;

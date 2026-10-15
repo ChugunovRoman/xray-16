@@ -230,6 +230,12 @@ void CMapLocation::InitUserSpot(const shared_str& level_name, const Fvector& pos
 
 void CMapLocation::CalcPosition()
 {
+    // The smoothing step is the time since the previous call: a second call in the same frame does not step again,
+    // and a location not computed for a while (another level, PDA closed) catches up at once (t is clamped to 1)
+    const u32 elapsed_ms = Device.dwTimeGlobal - m_position_time;
+    m_position_time = Device.dwTimeGlobal;
+    m_position_frame = Device.dwFrame;
+
     if (m_flags.test(ePosToActor) && Level().CurrentEntity())
     {
         m_position_global = Level().CurrentEntity()->Position();
@@ -260,7 +266,7 @@ void CMapLocation::CalcPosition()
                 }
                 else
                 {
-                    float t = (Device.dwTimeDelta / 1000.f) * ps_map_spot_smooth_speed;
+                    float t = (elapsed_ms / 1000.f) * ps_map_spot_smooth_speed;
                     if (t > 1.f)
                         t = 1.f;
                     m_display_position.x += (m_cached.m_Position.x - m_display_position.x) * t;
@@ -276,6 +282,12 @@ void CMapLocation::CalcPosition()
         m_display_position = m_cached.m_Position;
         m_display_position_valid = true;
     }
+}
+
+void CMapLocation::RefreshPosition()
+{
+    if (m_position_frame != Device.dwFrame)
+        CalcPosition();
 }
 
 const Fvector2& CMapLocation::GetDisplayPosition() const
@@ -335,7 +347,7 @@ void CMapLocation::CalcLevelName()
     }
 }
 
-bool CMapLocation::Update() // returns actual
+bool CMapLocation::Update(const shared_str& current_level) // returns actual
 {
     R_ASSERT1_CURE(m_cached.m_updatedFrame != Device.dwFrame, return m_cached.m_Actuality);
 
@@ -357,7 +369,10 @@ bool CMapLocation::Update() // returns actual
         if (IsGameTypeSingle())
             CalcLevelName();
 
-        CalcPosition();
+        // Locations of other levels are shown only by the PDA maps: CMapLocation::UpdateSpot computes their
+        // position on demand (RefreshPosition), so the frames with the PDA closed do not pay for them
+        if (m_flags.test(ePosToActor) || m_cached.m_LevelName == current_level)
+            CalcPosition();
     }
     else
         m_cached.m_Actuality = false;
@@ -433,7 +448,8 @@ void CMapLocation::UpdateSpot(CUICustomMap* map, CMapSpot* sp)
             }
         }
 
-        // update spot position (smoothed for offline objects)
+        // update spot position (smoothed for offline objects); not computed yet this frame for another level
+        RefreshPosition();
         Fvector2 position = GetDisplayPosition();
 
         m_position_on_map =
@@ -857,11 +873,9 @@ CRelationMapLocation::CRelationMapLocation(const shared_str& type, u16 object_id
     m_b_levelmap_visible = true;
 }
 
-xr_vector<CMapLocation*> find_locations_res;
-
-bool CRelationMapLocation::Update()
+bool CRelationMapLocation::Update(const shared_str& current_level)
 {
-    if (false == inherited::Update())
+    if (false == inherited::Update(current_level))
         return false;
 
     bool bAlive = true;
@@ -975,23 +989,21 @@ bool CRelationMapLocation::Update()
         m_b_minimap_visible = true;
         m_b_levelmap_visible = true;
 
-        if (Level().MapManager().GetMapLocationsForObject(m_objectID, find_locations_res))
-        {
-            xr_vector<CMapLocation*>::iterator it = find_locations_res.begin();
-            xr_vector<CMapLocation*>::iterator it_e = find_locations_res.end();
-            for (; it != it_e; ++it)
-            {
-                CMapLocation* ml = (*it);
-                if (ml == this)
-                    continue;
-
-                m_b_minimap_visible = m_b_minimap_visible && (ml->MiniMapSpot() == NULL);
-                m_b_levelmap_visible = m_b_levelmap_visible && (ml->LevelMapSpot() == NULL);
-            }
-        }
+        // The other locations of the object (HideSpotsCoveredBy) are matched by CMapManager::Update in one pass over
+        // all locations after they are updated, instead of a pass over all locations per relation location
+        Level().MapManager().QueueRelationSpotCheck(this);
     }
 
     return true;
+}
+
+void CRelationMapLocation::HideSpotsCoveredBy(CMapLocation* other)
+{
+    if (other == this)
+        return;
+
+    m_b_minimap_visible = m_b_minimap_visible && (other->MiniMapSpot() == nullptr);
+    m_b_levelmap_visible = m_b_levelmap_visible && (other->LevelMapSpot() == nullptr);
 }
 
 void CRelationMapLocation::UpdateMiniMap(CUICustomMap* map)

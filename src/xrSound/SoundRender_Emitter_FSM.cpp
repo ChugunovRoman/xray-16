@@ -375,10 +375,16 @@ void CSoundRender_Emitter::update_environment(float dt)
 
 void CSoundRender_Emitter::render()
 {
+    // CSoundRender_Core::render() passes only an emitter that owns its target. target->update()/render() can still
+    // release it on this thread: obtain_block() -> wait_prefill() runs queued tasks, and a sound stop in one of them
+    // passes the (recursive) m_emitters_lock. A stopped emitter needs no prefill (owner_data may be gone).
+    if (!target)
+        return;
     target->fill_parameters();
     if (target->get_Rendering())
         target->update();
     else
         target->render();
-    dispatch_prefill();
+    if (target)
+        dispatch_prefill();
 }

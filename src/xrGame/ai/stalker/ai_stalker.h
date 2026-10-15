@@ -221,6 +221,22 @@ private:
     // caller (CAI_Stalker::UpdateCL, the top of the chain) returns at once
     bool TrySkipUpdateCLLod();
 
+    // The object handler LOD (plans/optimization_mt/22-game-thread.md, step 1; npc_perf_object_handler_lod): true =
+    // this UpdateCL does not run the object handler (the weapon planner) of an idle stalker far from the camera
+    bool TrySkipObjectHandlerLod();
+    // The scheduler interval of a settled corpse (22-game-thread.md, step 1; npc_perf_dead_shed_lod)
+    void UpdateDeadShedLod();
+    u32 m_object_handler_lod_last_time{0}; // Device.dwTimeGlobal of the last object handler run from UpdateCL
+    u32 m_object_handler_lod_skips{u32(-1)}; // skips since that run; -1 = not counted yet (the phase is set by ID)
+    bool m_dead_shed_lod_applied{false}; // shedule.t_min / t_max hold the long corpse interval
+    // Device.dwTimeGlobal of the last shedule_Update while alive (22-game-thread.md: the real update period, the DT
+    // the scheduler passes is clamped to max(t_max, 1000) ms); 0 = none yet
+    u32 m_shed_alive_last_ms{0};
+
+public:
+    // The friendly-fire pick LOD (22-game-thread.md, step 1): true = update_can_kill_info may keep the last pick
+    bool can_kill_pick_lod_reuse() const;
+
 public:
     virtual void shedule_Update(u32 dt);
     virtual void Think();
@@ -316,6 +332,7 @@ private:
     bool m_can_kill_enemy;
     float m_pick_distance;
     u32 m_pick_frame_id;
+    u32 m_pick_time{0}; // Device.dwTimeGlobal of the last real pick (the friendly-fire pick LOD)
     collide::rq_results rq_storage;
 
 private:

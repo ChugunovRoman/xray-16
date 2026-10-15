@@ -709,6 +709,85 @@ PERF_TIMER(rpass_lights_noocc, "render/pass/lights_noocc")     // render_lights:
 PERF_TIMER(rpass_lights_occ, "render/pass/lights_occ")
 PERF_TIMER(rpass_combine, "render/pass/combine")               // phase_combine: forward, sorted, distort, postprocess
 PERF_TIMER(rpass_tail, "render/pass/tail")                     // after combine (MainScaleEnd, gpu_diag census)
+// render/pass/combine split into its steps (plans/optimization_mt/18-combine-pass.md), MAIN pass only (the thread-local
+// g_perf_combine_main of R_Backend.h is set around phase_combine), in phase_combine order. The steps add up to
+// render/pass/combine minus a few state calls between them.
+PERF_TIMER(rcomb_ssao, "render/combine/ssao")                   // phase_hdao / phase_downsamp / phase_ssao
+PERF_TIMER(rcomb_sky, "render/combine/sky")                     // RenderSky + RenderClouds
+PERF_TIMER(rcomb_quad1, "render/combine/combine_1")             // stencil optimize + combine_1 quad (ambient, sun, fog)
+PERF_TIMER(rcomb_forward, "render/combine/forward")             // render_forward: render_graph(1) + faded portals
+PERF_TIMER(rcomb_sorted, "render/combine/sorted")               // render_forward: render_sorted (particles, blended)
+PERF_TIMER(rcomb_rain, "render/combine/rain_last")              // render_forward: RenderLast (rain, thunderbolts)
+PERF_TIMER(rcomb_ppui, "render/combine/ppui")                   // OnRenderPPUI_main
+PERF_TIMER(rcomb_volumetric, "render/combine/volumetric")       // phase_combine_volumetric
+PERF_TIMER(rcomb_bloom, "render/combine/bloom")                 // phase_bloom (bloom, luminance)
+PERF_TIMER(rcomb_distort, "render/combine/distort")             // distortion mask: render_distort (+ SVP deferred flush)
+PERF_TIMER(rcomb_quad2, "render/combine/combine_2")             // AA / DOF / mblur quad
+PERF_TIMER(rcomb_glows, "render/combine/glows")                 // CGlowManager::Render: occlusion rays + sprites
+PERF_TIMER(rcomb_flares, "render/combine/flares")               // lens flares
+PERF_TIMER(rcomb_pp, "render/combine/pp")                       // phase_pp (+ depth upscale under r__render_scale)
+PERF_COUNTER(rcomb_draws, "render/combine/draws")               // all draw calls of the main combine
+PERF_COUNTER(rcomb_forward_draws, "render/combine/forward_draws")
+PERF_COUNTER(rcomb_sorted_items, "render/combine/sorted_items") // mapSorted + mapHUDSorted entries drained
+PERF_COUNTER(rcomb_sorted_draws, "render/combine/sorted_draws")
+PERF_COUNTER(rcomb_distort_items, "render/combine/distort_items")
+// Sprite particles drawn by render_sorted (CParticleEffect::Render).
+PERF_TIMER(rcomb_ps_effect, "render/combine/ps_effect")         // one effect: VB lock + vertex build + draw, calls = effects
+PERF_TIMER(rcomb_ps_fill, "render/combine/ps_fill")             // ParticleRenderStream (with the xr_parallel_for wait)
+PERF_COUNTER(rcomb_ps_empty, "render/combine/ps_empty")         // effects reaching the combine with no particles (emptied after the build)
+PERF_COUNTER(rcomb_ps_sprites, "render/combine/ps_sprites")     // particles turned into sprites
+PERF_COUNTER(rcomb_ps_parallel, "render/combine/ps_parallel")   // effects built by xr_parallel_for (r__particle_render_parallel)
+// The dynamic VB (_VertexStream::Lock: the stream mutex + Map) from anything inside the main combine.
+PERF_TIMER(rcomb_vb_lock, "render/combine/vb_lock")             // calls = locks
+PERF_COUNTER(rcomb_vb_discard, "render/combine/vb_discard")     // locks that wrapped the stream (Map DISCARD)
+PERF_COUNTER(rcomb_vb_bytes, "render/combine/vb_bytes")
+// CGlowManager::Render (GW glows: torches, searchlights, car lights, LSA lasers).
+PERF_COUNTER(rcomb_glows_active, "render/combine/glows_active") // drawable registered glows walked
+PERF_TIMER(rcomb_glows_occ, "render/combine/glows_occ")         // occlusion RayTest (rqtBoth) of one glow, calls = glows tested
+PERF_COUNTER(rcomb_glows_world, "render/combine/glows_world")   // of them world glows: 5 rays instead of 1
+PERF_COUNTER(rcomb_glows_drawn, "render/combine/glows_drawn")
+// C1.0 (plans/optimization_mt/17-c1-semi-pipeline.md, §2 and §4): the main thread's time inside DoRender split along the
+// future hand-off point. Each moment goes to the innermost PERF_SPLIT scope (PerfMetrics.hpp, ScopedSplit), never twice.
+// build = what touches game objects or waits for build tasks: Calculate (lights, HOM wait, icons, task kicks),
+// ZPrefill/Build, MainBuildWait, r_rain/r_sun.sync waits, shadowed lights selection and their task waits, SVP build (kick,
+// join, BeginSecondViewportRender, post-calculate). submit = everything else of DoRender: draws from the built lists, HUD,
+// wallmarks, accumulation, combine, tracers, UI, seqRender subscribers, stats, ImGui, Present. Not counted: the join with
+// the Game thread (frame/game_wait). build + submit + frame/game_wait ~ frame/render. calls = time segments.
+PERF_TIMER(rsplit_build, "render/split/build")
+PERF_TIMER(rsplit_submit, "render/split/submit")
+// render_lights, MAIN pass only (as render/pass/*): shadowed point/spot lights (smaps) and the accumulation.
+PERF_TIMER(rlights_prep, "render/lights/prep")                 // main: occq visibility, distance/budget cut, smap packing, common q_sphere
+PERF_TIMER(rlights_build_cpu, "render/lights/build_cpu")       // build_subspace of one light, any thread (sum = CPU), calls = lights
+PERF_TIMER(rlights_record_cpu, "render/lights/record_cpu")     // smap recording of one light: in its task (mt) or in flush on main (serial)
+PERF_TIMER(rlights_build_wait, "render/lights/build_wait")     // main waits for a light task (its build + its recording in mt mode)
+PERF_TIMER(rlights_execute, "render/lights/execute")           // main after that wait: ExecuteCommandList (mt) / recording (serial), release
+PERF_TIMER(rlights_accum, "render/lights/accum")               // main: accumulator, accum_point/spot/volumetric, indirect, unshadowed lights
+// Sun cascades and rain, every pass (the scope pass too when it rebuilds them: calls double on scope frames).
+PERF_TIMER(rsun_build_cpu, "render/sun/build_cpu")             // build_subspace of one cascade, any thread (sum = CPU), calls = cascades
+PERF_TIMER(rsun_record_cpu, "render/sun/record_cpu")           // recording of one cascade (draw task worker, or main inside r_sun.sync)
+PERF_TIMER(rsun_wait, "render/sun/wait")                       // main waits in r_sun.sync for the build task and the draw subtask
+PERF_TIMER(rsun_flush, "render/sun/flush")                     // main, in r_sun.sync: cascades accumulation (rt arrays), xforms restore
+PERF_TIMER(rrain_build_cpu, "render/rain/build_cpu")           // render_rain::calculate (build_subspace inside), any thread
+PERF_TIMER(rrain_record_cpu, "render/rain/record_cpu")         // render_rain::render: rain smap recording
+PERF_TIMER(rrain_wait, "render/rain/wait")                     // main waits in r_rain.sync
+PERF_TIMER(rrain_flush, "render/rain/flush")                   // main, in r_rain.sync: rain smap list submit, wet surfaces accumulation
+// Game calls inside the render (main). Calculate: render/frame/icons; CLevel::OnRender after the 3D world: render/level/*.
+PERF_TIMER(rframe_icons, "render/frame/icons")                 // OnWeaponIconRenderPass in the main Calculate (draws live objects on IMM)
+PERF_TIMER(rlvl_game_on_render, "render/level/game_on_render") // Game().OnRender
+PERF_TIMER(rlvl_bullets, "render/level/bullets")               // bullet tracers: BulletManager().Render or the two SVP-frame calls
+PERF_TIMER(rlvl_after_world, "render/level/after_world")       // AfterWorldRender (scope image copy)
+PERF_TIMER(rlvl_hud_overlay, "render/level/hud_overlay")       // RenderHudOverlayToTexture + CompositeHudOverlay
+PERF_TIMER(rlvl_ui, "render/level/ui")                         // HUD().RenderUI, after the join with the Game thread
+PERF_TIMER(rhud_active_item_ui, "render/hud/active_item_ui")   // render_hud_ui -> pHUD->RenderActiveItemUI, every pass (part of pass/hud_ui)
+PERF_TIMER(frame_render_seq_level, "frame/render/seq_level")   // seqRender: the level subscriber (CLevel::OnRender, whole)
+PERF_TIMER(frame_render_seq_other, "frame/render/seq_other")   // seqRender: every other subscriber (cursor, console, cell items, stats...)
+// Scope pass (SVP), next to render/frame/svp_*: what render/frame/svp_join waits for, and the main-side build steps.
+PERF_TIMER(rsvp_kick, "render/svp/kick")                       // main: BeginSecondVPCalculateParallel (snapshot, wake of the SVP thread)
+PERF_TIMER(rsvp_begin_vp, "render/svp/begin_vp")               // main: BeginSecondViewportRender (Device camera to the scope)
+PERF_TIMER(rsvp_worker_build, "render/svp/worker_build")       // SVP thread: visibility build (calculate_into)
+PERF_TIMER(rsvp_worker_geom, "render/svp/worker_geom")         // SVP thread: render_graph(0) recording into the deferred list
+PERF_TIMER(rsvp_worker_lights_wait, "render/svp/worker_lights_wait") // SVP thread idles until main finished its own lighting
+PERF_TIMER(rsvp_worker_shadows, "render/svp/worker_shadows")   // SVP thread: record_second_vp_shadows (worker shadow build mode)
 // P19 (plans/optimization_mt/14-spike-instrumentation.md): where the rare FrameMove / Game-thread peaks come from.
 // Spikes of the spike logger (perf_spike_us), all sites and threads; per site - "! [perf-spike]" lines in the log.
 PERF_COUNTER(perf_spike_hits, "spike/hits")
@@ -939,3 +1018,226 @@ PERF_COUNTER(snd_ogg_open_skipped, "sound/ogg/open_skipped")   // a start of a c
 PERF_TIMER(snd_ogg_open_main, "sound/ogg/open_time/main")      // CSoundRender_Source::open by thread
 PERF_TIMER(snd_ogg_open_game, "sound/ogg/open_time/game")
 PERF_TIMER(snd_ogg_open_worker, "sound/ogg/open_time/worker")
+// Physics step Ф0/Ф1 (plans/optimization_mt/21-physics-step.md). physics/step/*: the frame step on the physics thread only
+// (CPHWorld::FrameStep, b_processing) - the world steps on main (CPHActivationShape, FlyTo, MovementBoxDynamicActivate)
+// stay out of them, unlike physics/collide|phtune|solve|post_integrate above.
+PERF_TIMER(ph_step_substep, "physics/step/substep")         // one Step() of FrameStep: avg = cost of a substep, calls = substeps
+PERF_TIMER(ph_step_collide, "physics/step/collide")
+PERF_TIMER(ph_step_phtune, "physics/step/phtune")
+PERF_TIMER(ph_step_solve, "physics/step/solve")             // island solve, wall time (parallel at >= ph_mt_island_min islands)
+PERF_TIMER(ph_step_solve_cpu, "physics/step/solve_cpu")     // the same, summed over the threads: solve_cpu / solve = parallelism
+PERF_TIMER(ph_step_post, "physics/step/post_integrate")
+// physics/step/collide split, per object (calls = objects collided): q_box + DoCollide filter / dynamic pairs (ray
+// motions, NearCallback: dCollide, contacts, island merges, wakes) / the level mesh (CollideStatic).
+PERF_TIMER(ph_step_broadphase, "physics/step/broadphase")
+PERF_TIMER(ph_step_narrow, "physics/step/narrow")
+PERF_TIMER(ph_step_static, "physics/step/static")
+PERF_GAUGE(ph_island_max_nb, "physics/island/max_bodies")  // largest island of the frame (all substeps): bodies
+PERF_GAUGE(ph_island_max_nj, "physics/island/max_joints")  // most joints in one island (contact joints included)
+// Who wakes force-slept corpses (CPHWorld::SleepCorpses, CPHShell::m_force_slept).
+PERF_COUNTER(ph_corpse_wake, "physics/corpse_wake/total")  // any path (CPHShell::EnableObject): contact, hit, script, grab
+// ... of them by a contact on the physics thread (NearCallback), by the type of the other object
+PERF_COUNTER(ph_corpse_wake_by_actor, "physics/corpse_wake/by/actor")
+PERF_COUNTER(ph_corpse_wake_by_ai, "physics/corpse_wake/by/ai")           // a live NPC controller
+PERF_COUNTER(ph_corpse_wake_by_ragdoll, "physics/corpse_wake/by/ragdoll") // a corpse that was not force-slept
+PERF_COUNTER(ph_corpse_wake_by_vehicle, "physics/corpse_wake/by/vehicle")
+PERF_COUNTER(ph_corpse_wake_by_item, "physics/corpse_wake/by/item")       // an inventory item, weapons included
+PERF_COUNTER(ph_corpse_wake_by_prop, "physics/corpse_wake/by/prop")       // any other shell (physic objects, doors)
+PERF_COUNTER(ph_corpse_wake_by_other, "physics/corpse_wake/by/other")
+// Ф1: a loose body against a force-slept corpse, the corpse acting as static geometry
+PERF_COUNTER(ph_oneway_pairs, "physics/corpse_oneway/pairs")       // NearCallback pairs taken one-sided
+PERF_COUNTER(ph_oneway_contacts, "physics/corpse_oneway/contacts") // contact joints made on the loose body only
+// The same wakes (physics/corpse_wake/total) by the path that reached CPHShell::EnableObject: the ph_wake::* tag of the
+// calling thread (PerfMetrics.hpp; carried over to the post-step flush for mutations deferred from other threads).
+PERF_COUNTER(ph_corpse_wake_path_contact, "physics/corpse_wake/path/contact")             // NearCallback, frame step (~ sum of by/*)
+PERF_COUNTER(ph_corpse_wake_path_contact_local, "physics/corpse_wake/path/contact_local") // NearCallback elsewhere: TryPosition, activation shape, FlyTo
+PERF_COUNTER(ph_corpse_wake_path_hit, "physics/corpse_wake/path/hit")                     // applyHit: bullets, melee, hit events (zone hits too)
+PERF_COUNTER(ph_corpse_wake_path_explosion, "physics/corpse_wake/path/explosion")         // ExplosionHit
+PERF_COUNTER(ph_corpse_wake_path_impulse, "physics/corpse_wake/path/impulse")             // applyImpulse/applyForce/setForce from C++ game code
+PERF_COUNTER(ph_corpse_wake_path_script, "physics/corpse_wake/path/script")               // Lua physics API
+PERF_COUNTER(ph_corpse_wake_path_grab, "physics/corpse_wake/path/grab")                   // CPHCapture, CTelekinesis
+PERF_COUNTER(ph_corpse_wake_path_zone, "physics/corpse_wake/path/zone")                   // CCustomZone update (gravi pull start, ...)
+PERF_COUNTER(ph_corpse_wake_path_activation, "physics/corpse_wake/path/activation")       // CPHShell/CPHElement::Enable, net state
+PERF_COUNTER(ph_corpse_wake_path_other, "physics/corpse_wake/path/other")                 // untagged
+// NPC one-way: a live NPC controller against a force-slept corpse, the corpse acting as static
+PERF_COUNTER(ph_oneway_npc_pairs, "physics/corpse_oneway/npc_pairs")
+PERF_COUNTER(ph_oneway_npc_contacts, "physics/corpse_oneway/npc_contacts")
+// Ф8 (sleep thresholds scaled to 100 Hz): bodies auto-disabled by CBaseDisableData::Disabling (elements and
+// controllers, all paths) - the natural sleep rate
+PERF_COUNTER(ph_auto_disable, "physics/sleep/auto_disable")
+// ph_corpse_sleep_settled 1: corpses CPHWorld::SleepCorpses put to sleep before ph_corpse_sleep_ms because they had
+// settled (a part of physics/corpse_force_slept)
+PERF_COUNTER(ph_corpse_sleep_settled, "physics/corpse_sleep/settled")
+// ph_corpse_sleep_settled 1, why a corpse did (not) settle (CPHWorld::ShouldForceSleepCorpse / UpdateCorpseSettled), per
+// frame step and corpse - summed over the substeps of a frame:
+// candidates = active corpses old enough (ph_corpse_settle_min_age_ms), younger than ph_corpse_sleep_ms, farther than
+// ph_corpse_sleep_far_dist; vel_fail = of them some element faster than ph_corpse_settle_vel / _ang_vel (the run starts
+// anew), ang_fail = of vel_fail the first fast element was over the angular limit only; run = slow, the run still shorter
+// than ph_corpse_settle_ms; stretch_fail = the run complete but a joint stretched beyond ph_corpse_sleep_max_stretch.
+// candidates = vel_fail + run + stretch_fail + settled.
+PERF_COUNTER(ph_corpse_settle_candidates, "physics/corpse_sleep/settle_candidates")
+PERF_COUNTER(ph_corpse_settle_vel_fail, "physics/corpse_sleep/settle_vel_fail")
+PERF_COUNTER(ph_corpse_settle_ang_fail, "physics/corpse_sleep/settle_ang_fail")
+PERF_COUNTER(ph_corpse_settle_run, "physics/corpse_sleep/settle_run")
+PERF_COUNTER(ph_corpse_settle_stretch_fail, "physics/corpse_sleep/settle_stretch_fail")
+// The natural sleep of ragdolls (CPHShell::PhDataUpdate: every element asleep -> the shell leaves the active list), any
+// path: all / younger than ph_corpse_sleep_ms (asleep before the age rule) / younger than ph_corpse_settle_min_age_ms
+// (asleep before the settled rule may start). Woken old corpses that fall asleep again count in the first one only.
+PERF_COUNTER(ph_auto_disable_ragdoll, "physics/sleep/auto_disable_ragdoll")
+PERF_COUNTER(ph_auto_disable_ragdoll_young, "physics/sleep/auto_disable_ragdoll_young")
+PERF_COUNTER(ph_auto_disable_ragdoll_early, "physics/sleep/auto_disable_ragdoll_early")
+// Corpses picked by CPHWorld::ShouldForceSleepCorpse (pre-solve state) but left active by SleepCorpses, because after the
+// substep's solve a joint was stretched beyond ph_corpse_sleep_max_stretch or an element was faster than
+// ph_corpse_sleep_max_vel (a hit / an explosion integrated in that very substep). Not counted in corpse_force_slept
+// (a settled candidate rejected here is still counted in corpse_sleep/settled).
+PERF_COUNTER(ph_corpse_sleep_post_reject, "physics/corpse_sleep/post_reject")
+// physics/corpse_wake/path/contact_local split by the other object (obj1 of NearCallback outside the frame step on the
+// physics thread): activation = CPHActivationShape (a death, a movement box switch, FlyTo), ai = an NPC controller that
+// is not one-sided there (a sleeping or not live one)
+PERF_COUNTER(ph_corpse_wake_local_by_actor, "physics/corpse_wake/local_by/actor")
+PERF_COUNTER(ph_corpse_wake_local_by_ai, "physics/corpse_wake/local_by/ai")
+PERF_COUNTER(ph_corpse_wake_local_by_ragdoll, "physics/corpse_wake/local_by/ragdoll")
+PERF_COUNTER(ph_corpse_wake_local_by_item, "physics/corpse_wake/local_by/item")
+PERF_COUNTER(ph_corpse_wake_local_by_prop, "physics/corpse_wake/local_by/prop")
+PERF_COUNTER(ph_corpse_wake_local_by_activation, "physics/corpse_wake/local_by/activation")
+PERF_COUNTER(ph_corpse_wake_local_by_other, "physics/corpse_wake/local_by/other")
+// Ф3 (plans/optimization_mt/21-physics-step.md), ph_npc_kinematic_unseen 1: live NPCs moved kinematically because they
+// are farther than ph_npc_kinematic_unseen_dist from the actor and not drawn in the main pass for a while (counted like
+// physics/npc_kinematic_far_forced: per NPC update that took the kinematic branch; not included in it);
+// skip_combat = the same NPCs kept on the physics path because the actor is their selected enemy.
+PERF_COUNTER(ph_npc_kinematic_unseen_forced, "physics/npc_kinematic_unseen_forced")
+PERF_COUNTER(ph_npc_kinematic_unseen_skip_combat, "physics/npc_kinematic_unseen_skip_combat")
+// F1/F4 (plans/optimization_mt/20-framemove-reduction.md): CMapManager::Update - locations updated a frame (all levels;
+// the position only for the current level) and visible relation locations matched against them in one pass
+PERF_COUNTER(mapmgr_locations, "map/locations")
+PERF_COUNTER(mapmgr_relation_checks, "map/relation")
+// E3 (plans/optimization_mt/18-combine-pass.md): empty particle effects kept out of the render lists by
+// add_leafs_dynamic, main view build only. ps_empty_skip + render/combine/ps_empty ~ the former render/combine/ps_empty.
+PERF_COUNTER(rmain_ps_empty_skip, "render/main/ps_empty_skip")
+
+// 22-game-thread.md (plans/optimization_mt): where the Game logic thread goes in heavy scenes. Diagnostics only, no
+// behaviour change. CAI_Stalker::shedule_Update by stage, calls = stalker updates that ran the stage (the LOD of
+// ai_stalker.cpp skips a stage between its intervals): inherited = CEntityAlive..CGameObject incl. the Lua binder,
+// think = brain + movement (or script_control instead of it), dead_think = the Think of dead stalkers.
+PERF_TIMER(stk_shed_anim_callbacks, "stalker/shed/anim_callbacks")
+PERF_TIMER(stk_shed_agent_manager, "stalker/shed/agent_manager")
+PERF_TIMER(stk_shed_vision, "stalker/shed/vision_prepare")
+PERF_TIMER(stk_shed_process_enemies, "stalker/shed/process_enemies")
+PERF_TIMER(stk_shed_memory, "stalker/shed/memory")
+PERF_TIMER(stk_shed_inherited, "stalker/shed/inherited")
+PERF_TIMER(stk_shed_script_control, "stalker/shed/script_control")
+PERF_TIMER(stk_shed_think, "stalker/shed/think")
+PERF_TIMER(stk_shed_dead_think, "stalker/shed/dead_think")
+PERF_TIMER(stk_shed_feel_touch, "stalker/shed/feel_touch")
+PERF_TIMER(stk_shed_inventory_owner, "stalker/shed/inventory_owner")
+PERF_TIMER(stk_shed_physics, "stalker/shed/physics")
+PERF_TIMER(stk_think_brain, "stalker/think/brain")
+PERF_TIMER(stk_think_movement, "stalker/think/movement")
+// CStalkerPlanner::update (= stalker/think/brain): solve = actuality check (evaluators) + graph_search; execute = the
+// current action, the three planners apart (the rest: death, anomaly, gather items, other)
+PERF_TIMER(stk_brain_solve, "stalker/brain/solve")
+PERF_TIMER(stk_brain_graph_search, "stalker/brain/graph_search")
+PERF_TIMER(stk_brain_transition, "stalker/brain/transition")
+PERF_TIMER(stk_brain_execute, "stalker/brain/execute")
+PERF_TIMER(stk_brain_exec_alife, "stalker/brain/exec_alife")
+PERF_TIMER(stk_brain_exec_combat, "stalker/brain/exec_combat")
+PERF_TIMER(stk_brain_exec_danger, "stalker/brain/exec_danger")
+// The stalker updates by LOD tier (near <= 35 m or an enemy selected, medium <= 80 m, far) and dead; dt_ms = sum of
+// the DT they got: dt_ms / (near + medium + far + dead) = the real update period, the scheduler lateness included
+PERF_COUNTER(stk_shed_lod_near, "stalker/shed/lod_near")
+PERF_COUNTER(stk_shed_lod_medium, "stalker/shed/lod_medium")
+PERF_COUNTER(stk_shed_lod_far, "stalker/shed/lod_far")
+PERF_COUNTER(stk_shed_dead, "stalker/shed/dead")
+PERF_COUNTER(stk_shed_dt_ms, "stalker/shed/dt_ms")
+// The real gap between two shedule_Update of a live stalker (own timestamp, not the clamped DT):
+// alive_period_ms / alive_period_n = the real update period
+PERF_COUNTER(stk_shed_alive_period_ms, "stalker/shed/alive_period_ms")
+PERF_COUNTER(stk_shed_alive_period_n, "stalker/shed/alive_period_n")
+// CMemoryManager::update by part, stalkers and monsters together (stalker/shed/memory is the stalker total)
+PERF_TIMER(ai_mem_visual, "ai/memory/visual")
+PERF_TIMER(ai_mem_sound, "ai/memory/sound")
+PERF_TIMER(ai_mem_hit, "ai/memory/hit")
+PERF_TIMER(ai_mem_collect, "ai/memory/collect")
+PERF_TIMER(ai_mem_enemies, "ai/memory/enemies")
+PERF_TIMER(ai_mem_item, "ai/memory/item")
+PERF_TIMER(ai_mem_danger, "ai/memory/danger")
+// CGameObject::shedule_Update: the Lua binder update (xr_motivator, bind_monster...) by class, and the engine
+// npc_on_update emit of the native binder gate
+PERF_TIMER(go_shed_binder_stalker, "game_object/shed/binder/stalker")
+PERF_TIMER(go_shed_binder_monster, "game_object/shed/binder/monster")
+PERF_TIMER(go_shed_binder_other, "game_object/shed/binder/other")
+PERF_TIMER(go_shed_npc_update_emit, "game_object/shed/npc_update_emit")
+// game/parallel_seq (Device.seqParallel, run one by one on the game logic thread) by delegate: items = delegates a
+// frame; the rest of it is lua/gc_step (script_gc), alife/update and CUILogsWnd (PDA open)
+PERF_GAUGE(game_pseq_items, "game/pseq/items")
+PERF_TIMER(pseq_object_handler, "game/pseq/object_handler") // CAI_Stalker::update_object_handler, per stalker UpdateCL
+PERF_TIMER(pseq_sound_player, "game/pseq/sound_player")     // CCustomMonster::update_sound_player, per NPC UpdateCL
+PERF_TIMER(pseq_bullets, "game/pseq/bullets")               // CBulletManager::UpdateWorkload, once a frame
+PERF_TIMER(pseq_level_sounds, "game/pseq/level_sounds")     // CLevelSoundManager::Update, once a frame
+PERF_TIMER(pseq_level_path, "game/pseq/level_path")         // CLevelPathBuilder::process, on demand
+PERF_TIMER(pseq_detail_path, "game/pseq/detail_path")       // CDetailPathBuilder::process, on demand
+// 22-game-thread.md, step 1 (plans/optimization_mt): the object handler LOD (npc_perf_object_handler_lod) and the
+// corpse scheduler LOD (npc_perf_dead_shed_lod), ai_stalker.cpp / ai_stalker_fire.cpp. full = object handler runs from
+// UpdateCL (with the LOD off too), skipped = runs left out by the LOD; keep_* = why a run was not skipped while the LOD
+// is on (busy: the planner or the item in the hands mid-action, a new goal; fight: an enemy, a recent hit, recoil;
+// near: within npc_perf_object_handler_lod_dist m, the view entity, the first frames); pick_full / pick_reused =
+// friendly-fire picks cast (up to 5 ray queries each) / kept by the pick LOD
+PERF_COUNTER(npc_oh_full, "npc/object_handler/full")
+PERF_COUNTER(npc_oh_skipped, "npc/object_handler/skipped")
+PERF_COUNTER(npc_oh_keep_busy, "npc/object_handler/keep_busy")
+PERF_COUNTER(npc_oh_keep_fight, "npc/object_handler/keep_fight")
+PERF_COUNTER(npc_oh_keep_near, "npc/object_handler/keep_near")
+PERF_COUNTER(npc_oh_pick_full, "npc/object_handler/pick_full")
+PERF_COUNTER(npc_oh_pick_reused, "npc/object_handler/pick_reused")
+// The whole CAI_Stalker::shedule_Update of a dead stalker (stalker/shed/dead counts them); dead_lod = the dead updates
+// after which the long corpse interval holds
+PERF_TIMER(stk_shed_dead_total, "stalker/shed/dead_total")
+PERF_COUNTER(stk_shed_dead_lod, "stalker/shed/dead_lod")
+
+// 22-game-thread.md, step 2 (npc_perf_sound_dispatch): the sound delegates of IGame_Level::SoundEvent_Dispatch.
+// delivered = feel_sound_new calls (with the switch off too); capped / deduped = delegates CLevel::SoundEvent_Filter
+// dropped (beyond the loudest npc_perf_sound_dispatch_max[_combat] listeners / the same source and type to a listener
+// again in the frame); filter = its own time; below_threshold = deliveries too quiet for CSoundMemoryManager (only the
+// hear callbacks get them)
+PERF_COUNTER(npc_sound_delivered, "npc/sound/delivered")
+PERF_COUNTER(npc_sound_capped, "npc/sound/capped")
+PERF_COUNTER(npc_sound_deduped, "npc/sound/deduped")
+PERF_TIMER(npc_sound_filter, "npc/sound/filter")
+PERF_COUNTER(npc_sound_below_threshold, "npc/sound/below_threshold")
+
+// 22-game-thread.md, step 1b (npc_perf_friendly_fire_fast, ai_stalker_fire.cpp): the friendly-fire pick of
+// CAI_Stalker::update_can_kill_info. pick = the time of the cast picks in every mode (calls = picks; with the switch at
+// 0 the same picks as npc/object_handler/pick_full); checks = fast picks (one q_frustum each, spatial/q_frustum/ray);
+// rays = their rays (up to 5 a pick); candidates = objects the cone gathered; precise_rays = precise (bone-level) tests
+// of single objects (RayQuery tests every object whose sphere a ray crosses); mismatch = shadow mode (2) picks whose
+// fast answer differs from the original one
+PERF_TIMER(npc_ff_pick, "npc/ff/pick")
+PERF_COUNTER(npc_ff_checks, "npc/ff/checks")
+PERF_COUNTER(npc_ff_rays, "npc/ff/rays")
+PERF_COUNTER(npc_ff_candidates, "npc/ff/candidates")
+PERF_COUNTER(npc_ff_precise_rays, "npc/ff/precise_rays")
+PERF_COUNTER(npc_ff_mismatch, "npc/ff/mismatch")
+
+// 22-game-thread.md, step 4 (shed_priority, xrEngine/xrSheduler.cpp): the near/far classes of the non-RT scheduler.
+// near_* / far_* = executed steps by class: *_late_ms / *_late_n = their average lateness (with shed_priority 0 too:
+// then each step is classified only for these metrics); *_stalker_* = the same for stalkers only. near_items = the near
+// heap (0 with shed_priority 0; shed/items is both heaps), near_creatures = the living stalkers and monsters in it;
+// promoted = far items moved to the near heap by the scan
+// (promote_scan = its time); phase_near / phase_far = the time of the two passes (shed_priority 1); dt_clamped /
+// dt_lost_ms = steps whose real elapsed time was cut to max(t_max, 1000) ms for shedule_Update, and the time cut off
+PERF_COUNTER(shed_near_late_ms, "shed/near_late_ms")
+PERF_COUNTER(shed_near_late_n, "shed/near_late_n")
+PERF_COUNTER(shed_far_late_ms, "shed/far_late_ms")
+PERF_COUNTER(shed_far_late_n, "shed/far_late_n")
+PERF_COUNTER(shed_near_stalker_late_ms, "shed/near_stalker_late_ms")
+PERF_COUNTER(shed_near_stalker_late_n, "shed/near_stalker_late_n")
+PERF_COUNTER(shed_far_stalker_late_ms, "shed/far_stalker_late_ms")
+PERF_COUNTER(shed_far_stalker_late_n, "shed/far_stalker_late_n")
+PERF_GAUGE(shed_near_items, "shed/near_items")
+PERF_GAUGE(shed_near_creatures, "shed/near_creatures")
+PERF_COUNTER(shed_promoted, "shed/promoted")
+PERF_TIMER(shed_promote_scan, "shed/promote_scan")
+PERF_TIMER(shed_phase_near, "shed/phase_near")
+PERF_TIMER(shed_phase_far, "shed/phase_far")
+PERF_COUNTER(shed_dt_clamped, "shed/dt_clamped")
+PERF_COUNTER(shed_dt_lost_ms, "shed/dt_lost_ms")

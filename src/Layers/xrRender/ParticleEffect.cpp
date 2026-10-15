@@ -3,6 +3,7 @@
 #include "ParticleEffect.h"
 
 #include "xrCore/Threading/ParallelFor.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrRender_console.h"
 
 #ifndef _EDITOR
@@ -118,6 +119,8 @@ void CParticleEffect::Stop(BOOL bDefferedStop)
     else
     {
         m_RT_Flags.set(flRT_Playing, FALSE);
+        // StopEffect killed all particles (p_count = 0)
+        m_RenderParticleCount.store(0, std::memory_order_relaxed);
     }
 }
 void CParticleEffect::RefreshShader()
@@ -156,6 +159,7 @@ void CParticleEffect::OnFrame(u32 frame_dt)
             clamp(StepCount, 0, 3);
         }
 
+        bool stepped = false;
         for (; StepCount; StepCount--)
         {
             if (m_Def->m_Flags.is(CPEDef::dfTimeLimit))
@@ -172,6 +176,7 @@ void CParticleEffect::OnFrame(u32 frame_dt)
                 }
             }
             ParticleManager()->Update(m_HandleEffect, m_HandleActionList, fDT_STEP);
+            stepped = true;
 
             PAPI::Particle* particles;
             u32 p_cnt;
@@ -208,6 +213,10 @@ void CParticleEffect::OnFrame(u32 frame_dt)
                 break;
             }
         }
+        // Publish the count for IsEmptyForRender after the steps (ExecuteCollision may have removed particles
+        // after the GetParticles above). No step - no birth or death, the published count is still exact.
+        if (stepped)
+            m_RenderParticleCount.store(ParticlesCount(), std::memory_order_relaxed);
     }
     else
     {
@@ -229,6 +238,7 @@ BOOL CParticleEffect::Compile(CPEDef* def)
         IReader F(m_Def->m_Actions.pointer(), m_Def->m_Actions.size());
         ParticleManager()->LoadActions(m_HandleActionList, F);
         ParticleManager()->SetMaxParticles(m_HandleEffect, m_Def->m_MaxParticles);
+        m_RenderParticleCount.store(ParticlesCount(), std::memory_order_relaxed); // SetMaxParticles may cut it
         ParticleManager()->SetCallback(m_HandleEffect, OnEffectParticleBirth, OnEffectParticleDead, this, 0);
         // time limit
         if (m_Def->m_Flags.is(CPEDef::dfTimeLimit))
@@ -343,14 +353,13 @@ IC void FillSprite_fpu(FVF::LIT*& pv, const Fvector& pos, const Fvector& dir, co
 
 #ifndef _EDITOR
 //----------------------------------------------------
-Lock m_sprite_section;
-
+// No lock here: ParticleRenderStream gives every particle its own 4 vertices (pv_start + i * 4), so the parallel
+// build never shares a write position. The former global Lock per sprite cost a CRITICAL_SECTION + 2 atomics on each
+// sprite even single-threaded (plans/optimization_mt/18-combine-pass.md, E1).
 #if defined(XR_ARCHITECTURE_X86) || defined(XR_ARCHITECTURE_X64) || defined(XR_ARCHITECTURE_E2K) || defined(XR_ARCHITECTURE_PPC64)
 IC void FillSprite(FVF::LIT*& pv, const Fvector& T, const Fvector& R, const Fvector& pos, const Fvector2& lt,
     const Fvector2& rb, float r1, float r2, u32 clr, float sina, float cosa)
 {
-    m_sprite_section.Enter();
-
     __m128 Vr, Vt, T_, R_, _pos, _zz, _sa, _ca, a, b, c, d;
 
     _sa = _mm_set1_ps(sina);
@@ -403,7 +412,6 @@ IC void FillSprite(FVF::LIT*& pv, const Fvector& T, const Fvector& R, const Fvec
     pv->color = clr;
     pv->t.set(rb.x, lt.y);
     pv++;
-    m_sprite_section.Leave();
 }
 
 IC void FillSprite(FVF::LIT*& pv, const Fvector& pos, const Fvector& dir, const Fvector2& lt, const Fvector2& rb,
@@ -496,17 +504,22 @@ ICF void magnitude_sse(Fvector& vec, float& res)
 #error Specify your platform explicitly
 #endif
 
-void CParticleEffect::ParticleRenderStream(FVF::LIT* pv, u32 count, PAPI::Particle * particles)
+void CParticleEffect::ParticleRenderStream(FVF::LIT* pv_start, u32 count, PAPI::Particle * particles)
 {
-    float sina = 0.0f, cosa = 0.0f;
-    // Xottab_DUTY: changed angle to be float instead of DWORD
-    // But it must be 0xFFFFFFFF or otherwise some particles won't play
-    float angle = float(0xFFFFFFFF); // XXX: check if we can replace with flt_max
-
     const auto renderParticles = [&, this](const TaskRange<u32>& range)
     {
+        // The rotation cache is per range: xr_parallel_for tasks used to share (and race on) one copy.
+        // sin/cos are a pure function of m.rot.x, so the cache only saves work and the output is unchanged.
+        float sina = 0.0f, cosa = 0.0f;
+        // Xottab_DUTY: changed angle to be float instead of DWORD
+        // But it must be 0xFFFFFFFF or otherwise some particles won't play
+        float angle = float(0xFFFFFFFF); // XXX: check if we can replace with flt_max
+
         for (u32 i = range.begin(); i != range.end(); ++i)
         {
+            // Every branch below writes exactly one sprite (4 vertices) per particle: write it by index, so the
+            // serial order is the same as before and parallel tasks never share a write position.
+            FVF::LIT* pv = pv_start + size_t(i) * 4;
             PAPI::Particle& m = particles[i];
             Fvector2 lt, rb;
             lt.set(0.f, 0.f);
@@ -619,10 +632,17 @@ void CParticleEffect::ParticleRenderStream(FVF::LIT* pv, u32 count, PAPI::Partic
             }
         }
     };
+    // render/combine/ps_fill (main pass combine only, see g_perf_combine_main)
+    [[maybe_unused]] const bool perf_main = g_perf_combine_main != 0;
+    PERF_SCOPE_IF(perf_main, rcomb_ps_fill);
+    PERF_ADD_IF(perf_main, rcomb_ps_sprites, count);
     // Optional parallel build of sprite vertices (cvar r__particle_render_parallel).
     if (r__particle_render_parallel != 0 &&
         static_cast<int>(count) >= r__particle_render_parallel_min_count)
+    {
+        PERF_ADD_IF(perf_main, rcomb_ps_parallel, 1);
         xr_parallel_for(TaskRange<u32>(0, count), true, renderParticles);
+    }
     else
         renderParticles(TaskRange<u32>(0, count));
 }
@@ -643,11 +663,16 @@ void CParticleEffect::Render(CBackend& cmd_list, float, bool use_fast_geo)
         return;
 #endif
 
+    // render/combine/ps_effect, ps_empty (main pass combine only, see g_perf_combine_main)
+    [[maybe_unused]] const bool perf_main = g_perf_combine_main != 0;
+    PERF_SCOPE_IF(perf_main, rcomb_ps_effect);
+
     u32 dwOffset, dwCount;
     // Get a pointer to the particles in gp memory
     PAPI::Particle* particles;
     u32 p_cnt;
     ParticleManager()->GetParticles(m_HandleEffect, particles, p_cnt);
+    PERF_ADD_IF(perf_main && p_cnt == 0, rcomb_ps_empty, 1);
 
     if (p_cnt > 0)
     {

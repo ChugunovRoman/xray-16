@@ -80,6 +80,8 @@ void render_rain::init()
 void render_rain::calculate()
 {
     ZoneScoped;
+    PERF_SCOPE(rrain_build_cpu);
+    PERF_SPLIT(Build); // C1.0: only when main runs the task itself (render/split/build)
 
     // static const float	source_offset		= 40.f;
 
@@ -305,6 +307,9 @@ void render_rain::render()
 {
     if (o.active)
     {
+        ZoneScopedN("rain/render");
+        PERF_SCOPE(rrain_record_cpu);
+        PERF_SPLIT(Submit); // C1.0: recording, when it runs on main
 #if defined(USE_DX11)
         //TracyD3D11Zone(HW.profiler_ctx, "render_rain::render");
 #endif
@@ -330,6 +335,9 @@ void render_rain::render()
 
 void render_rain::flush()
 {
+    ZoneScopedN("rain/flush");
+    PERF_SCOPE(rrain_flush);
+    PERF_SPLIT(Submit);
     if (o.active)
     {
 #if defined(USE_DX11)

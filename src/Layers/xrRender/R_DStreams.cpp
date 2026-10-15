@@ -2,6 +2,7 @@
 #pragma hdrstop
 #include "ResourceManager.h"
 #include "R_DStreams.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -41,10 +42,15 @@ void* _VertexStream::Lock(u32 vl_Count, u32 Stride, u32& vOffset)
     dbg_lock++;
 #endif
 
+    // render/combine/vb_* (main pass combine only, see g_perf_combine_main): the mutex wait counts too
+    [[maybe_unused]] const bool perf_main = g_perf_combine_main != 0;
+    PERF_SCOPE_IF(perf_main, rcomb_vb_lock);
+
     std::lock_guard<std::mutex> lock(mt); // Phase 2 (SVP): worker + main thread share this stream
 
     // Ensure there is enough space in the VB for this data
     const u32 bytes_need = vl_Count * Stride;
+    PERF_ADD_IF(perf_main, rcomb_vb_bytes, bytes_need);
     R_ASSERT2((bytes_need <= mSize) && vl_Count,
         make_string("bytes_need = %d, mSize = %d, vl_Count = %d", bytes_need, mSize, vl_Count));
 
@@ -61,6 +67,7 @@ void* _VertexStream::Lock(u32 vl_Count, u32 Stride, u32& vOffset)
         vOffset = 0;
         mDiscardID++;
         bFlush = true;
+        PERF_ADD_IF(perf_main, rcomb_vb_discard, 1);
     }
     else
     {

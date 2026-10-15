@@ -10,6 +10,7 @@
 #include "IPhysicsShellHolder.h"
 #include "xrCore/Animation/Bone.hpp"
 #include "xrEngine/device.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "MathUtilsOde.h"
 #include "PHElement.h"
 
@@ -58,6 +59,7 @@ bool CPHCapture::Invalid()
 
 void CPHCapture::PhDataUpdate(dReal /**step**/)
 {
+    PERF_PH_WAKE(xray::perf::ph_wake::Grab); // physics/corpse_wake/path/grab
     switch (e_state)
     {
     case cstFree: break;
@@ -70,6 +72,7 @@ void CPHCapture::PhDataUpdate(dReal /**step**/)
 
 void CPHCapture::PhTune(dReal /**step**/)
 {
+    PERF_PH_WAKE(xray::perf::ph_wake::Grab); // physics/corpse_wake/path/grab
     if (e_state == cstFree)
         return;
 
@@ -308,6 +311,7 @@ void CPHCapture::ReleaseInCallBack()
 void CPHCapture::object_contactCallbackFun(
     bool& do_colide, bool bo1, dContact& c, SGameMtl* /*material_1*/, SGameMtl* /*material_2*/)
 {
+    PERF_PH_WAKE(xray::perf::ph_wake::Grab); // physics/corpse_wake/path/grab
     dxGeomUserData* l_pUD1 = NULL;
     dxGeomUserData* l_pUD2 = NULL;
     l_pUD1 = retrieveGeomUserData(c.geom.g1);

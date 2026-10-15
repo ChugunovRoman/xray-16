@@ -410,6 +410,7 @@ void CDetailManager::Render(CBackend& cmd_list)
 
     if (m_calc_task)
     {
+        PERF_SPLIT(Build); // C1.0: waiting for the detail cache build (render/split/build), on main
         PERF_WAIT_SITE(xray::perf::wait_site::Detail);
         TaskScheduler->Wait(*m_calc_task);
     }

@@ -53,6 +53,11 @@
 #include "Inventory.h"
 #include "trajectories.h"
 #include "addon_api_character.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrEngine/IGame_Persistent.h"
+#include "xrEngine/xr_collide_form.h"
+#include "xrCDB/Frustum.h"
+#include <algorithm>
 
 using namespace StalkerSpace;
 
@@ -729,6 +734,196 @@ IC bool ray_query_callback(collide::rq_result& result, LPVOID params)
 }
 } // namespace detail::stalker::fire
 
+// 22-game-thread.md, step 1b (plans/optimization_mt): the fast friendly-fire pick. TEMPORARY switch, not saved
+// (console_commands.cpp). update_can_kill_info casts up to 5 rays from the muzzle (CAI_Stalker::can_kill_entity_from:
+// the aim direction and 4 side rays a safety angle off it). Each ray decides by the first thing it meets in distance
+// order (ray_query_callback): a living creature stops it (an enemy -> m_can_kill_enemy, anybody else - a friend, a
+// neutral, the actor, a corpse -> m_can_kill_member), the level geometry and other objects let it through while
+// their vision transparency keeps the power above the threshold.
+// 0 (default) = as before: every ray is a full ObjectSpace.RayQuery - a q_ray through the spatial tree, then the
+//   precise (bone-level) test of EVERY collidable object whose bounding sphere the ray crosses (~47 a ray in a crowd
+//   fight), the hits sorted and handed to the callback up to the first stop. Everything behind the first stop is
+//   tested for nothing.
+// 1 = the same answer, cheaper:
+//   - one q_frustum around the cone that holds all 5 rays instead of a q_ray per ray (stalker_ff_gather);
+//   - per ray: the level geometry as before (a static-only RayQuery), the candidates the ray crosses (the very
+//     sphere test q_ray does), ordered by where the ray enters their sphere, and the precise test of a candidate only
+//     when the walk gets to it, so nothing behind the first stop is tested (stalker_ff_ray).
+//   The hits reach ray_query_callback in the same order as with RayQuery, so m_can_kill_member, m_can_kill_enemy and
+//   m_pick_distance come out the same, the friendly actor and allies behind a wall included.
+// 2 = shadow: both picks, the original one decides, the differences are counted (npc/ff/mismatch) and the first
+//   few logged.
+int npc_perf_friendly_fire_fast = 0;
+
+namespace
+{
+// The safety angle of CAI_Stalker::can_kill_entity_from (its local safety_fire_angle): every side ray is this far
+// from the aim direction or nearer
+constexpr float stalker_ff_side_angle = PI_DIV_8 * .125f;
+// The candidate cone: wider than the side rays, its apex behind the muzzle and its far end past the ray range, so it
+// holds every bounding sphere one of the rays may cross
+constexpr float stalker_ff_cone_angle = stalker_ff_side_angle * 1.5f;
+constexpr float stalker_ff_apex_back = 1.f;
+constexpr float stalker_ff_far_margin = 1.f;
+// A precise hit may lie a little outside the object's bounding sphere (a bone shape vs the spatial sphere): an object
+// is tested this much before the ray enters its sphere, so its hits are still handed over in distance order
+constexpr float stalker_ff_order_margin = .5f;
+// Shadow mode (2): how many mismatches go to the log
+constexpr u32 stalker_ff_mismatch_log_max = 32;
+
+struct stalker_ff_candidate
+{
+    ICollisionForm* cform;
+    Fsphere sphere; // the spatial sphere, the one q_ray tests
+};
+
+struct stalker_ff_entry
+{
+    float t; // the distance along the ray at which the precise test is due
+    u32 index; // into stalker_ff_context::candidates
+};
+
+// The buffers of the pick in progress (thread_local like the buffers of CObjectSpace)
+struct stalker_ff_context
+{
+    xr_vector<ISpatial*> spatial;
+    xr_vector<stalker_ff_candidate> candidates;
+    xr_vector<stalker_ff_entry> entries;
+    collide::rq_results object_hits; // the hits of one precise test
+    xr_vector<collide::rq_result> pending; // precise hits not handed over yet
+    bool active{}; // CAI_Stalker::can_kill_entity runs stalker_ff_ray instead of RayQuery
+};
+
+thread_local stalker_ff_context stalker_ff;
+u32 stalker_ff_mismatch_logged = 0;
+
+// Gathers the candidates of one pick: the objects RayQuery would test (collidable game objects with an object
+// collision form, the stalker itself left out) whose bounding sphere touches the cone around the aim direction
+void stalker_ff_gather(const CAI_Stalker* self, const Fvector& position, const Fvector& direction, float distance)
+{
+    stalker_ff_context& ctx = stalker_ff;
+    ctx.candidates.clear();
+    PERF_INC(npc_ff_checks);
+
+    Fvector axis = direction;
+    const float length = axis.magnitude();
+    axis.normalize_safe();
+    Fvector helper;
+    if (_abs(axis.y) < .99f)
+        helper.set(0.f, 1.f, 0.f);
+    else
+        helper.set(1.f, 0.f, 0.f);
+    Fvector right, up;
+    right.crossproduct(helper, axis).normalize();
+    up.crossproduct(axis, right);
+
+    Fvector apex;
+    apex.mad(position, axis, -stalker_ff_apex_back);
+    const float cos_a = _cos(stalker_ff_cone_angle);
+    const float sin_a = _sin(stalker_ff_cone_angle);
+
+    // CFrustum keeps what lies on the negative side of its planes: the normals look out of the cone. The 4 side
+    // planes go through the apex; the far one is past the end of the longest ray
+    CFrustum frustum;
+    frustum._clear();
+    Fplane plane;
+    Fvector normal;
+    normal.mul(right, cos_a).mad(axis, -sin_a);
+    frustum._add(plane.build(apex, normal));
+    normal.mul(right, -cos_a).mad(axis, -sin_a);
+    frustum._add(plane.build(apex, normal));
+    normal.mul(up, cos_a).mad(axis, -sin_a);
+    frustum._add(plane.build(apex, normal));
+    normal.mul(up, -cos_a).mad(axis, -sin_a);
+    frustum._add(plane.build(apex, normal));
+    Fvector far_point;
+    far_point.mad(apex, axis, stalker_ff_apex_back + distance * _max(1.f, length) + stalker_ff_far_margin);
+    frustum._add(plane.build(far_point, axis));
+
+    {
+        // counted as spatial/q_frustum/ray: it stands for the q_ray of the rays
+        SpatialCallerDefault spatial_caller(SpatialQueryCaller::ray);
+        g_pGamePersistent->SpatialSpace.q_frustum(ctx.spatial, 0, STYPE_COLLIDEABLE, frustum);
+    }
+
+    for (ISpatial* spatial : ctx.spatial)
+    {
+        IGameObject* object = spatial->dcast_GameObject();
+        if (!object || object == self)
+            continue;
+        ICollisionForm* cform = object->GetCForm();
+        if (!cform || cform->Type() != cftObject)
+            continue;
+        ctx.candidates.push_back({cform, spatial->GetSpatialData().sphere});
+    }
+    ctx.spatial.clear();
+    PERF_ADD(npc_ff_candidates, ctx.candidates.size());
+}
+
+// One ray of the fast pick. Hands the hits over to ray_query_callback in distance order, as RayQuery does, but an
+// object gets its precise test only once the walk has reached its bounding sphere: the walk stops at the first living
+// creature or opaque thing, and nothing behind it is tested
+void stalker_ff_ray(CAI_Stalker* self, const collide::ray_defs& ray, collide::rq_results& static_hits,
+    ::detail::stalker::fire::ray_query_param& params)
+{
+    stalker_ff_context& ctx = stalker_ff;
+    PERF_INC(npc_ff_rays);
+
+    // The level geometry: the static part of RayQuery (every triangle along the ray, sorted)
+    const collide::ray_defs static_ray(ray.start, ray.dir, ray.range, ray.flags, collide::rqtStatic);
+    Level().ObjectSpace.RayQuery(static_hits, static_ray, nullptr, nullptr, nullptr, self);
+
+    // The candidates the ray crosses: the sphere test of q_ray (ISpatial_q_ray.cpp, ray_walker::walk)
+    ctx.entries.clear();
+    for (u32 i = 0, n = u32(ctx.candidates.size()); i < n; ++i)
+    {
+        int quantity;
+        float afT[2];
+        const Fsphere::ERP_Result result =
+            ctx.candidates[i].sphere.intersect(ray.start, ray.dir, ray.range, quantity, afT);
+        if (result == Fsphere::rpOriginInside)
+            ctx.entries.push_back({0.f, i});
+        else if (result == Fsphere::rpOriginOutside && afT[0] < ray.range)
+            ctx.entries.push_back({_max(0.f, afT[0] - stalker_ff_order_margin), i});
+    }
+    std::sort(ctx.entries.begin(), ctx.entries.end(),
+        [](const stalker_ff_entry& a, const stalker_ff_entry& b) { return a.t < b.t; });
+
+    ctx.pending.clear();
+    const u32 static_count = u32(static_hits.r_count());
+    const u32 entry_count = u32(ctx.entries.size());
+    u32 static_next = 0, entry_next = 0, pending_next = 0;
+    for (;;)
+    {
+        const float t_static = static_next < static_count ? (*static_hits.r_get())[static_next].range : flt_max;
+        const float t_pending = pending_next < ctx.pending.size() ? ctx.pending[pending_next].range : flt_max;
+        const float t_hit = _min(t_static, t_pending);
+        if (entry_next < entry_count && ctx.entries[entry_next].t <= t_hit)
+        {
+            // The walk got to this object: its precise test with the same ray, as RayQuery runs it
+            ICollisionForm* cform = ctx.candidates[ctx.entries[entry_next].index].cform;
+            ++entry_next;
+            PERF_INC(npc_ff_precise_rays);
+            Level().ObjectSpace.RayQuery(ctx.object_hits, cform, ray);
+            for (const collide::rq_result& hit : *ctx.object_hits.r_get())
+            {
+                const auto where = std::upper_bound(ctx.pending.begin() + pending_next, ctx.pending.end(), hit.range,
+                    [](float range, const collide::rq_result& r) { return range < r.range; });
+                ctx.pending.insert(where, hit);
+            }
+            continue;
+        }
+        if (static_next >= static_count && pending_next >= ctx.pending.size())
+            break;
+
+        collide::rq_result hit =
+            t_pending < t_static ? ctx.pending[pending_next++] : (*static_hits.r_get())[static_next++];
+        if (!::detail::stalker::fire::ray_query_callback(hit, &params))
+            break;
+    }
+}
+} // namespace
+
 void CAI_Stalker::can_kill_entity(
     const Fvector& position, const Fvector& direction, float distance, collide::rq_results& rq_storage)
 {
@@ -741,7 +936,11 @@ void CAI_Stalker::can_kill_entity(
 
     ray_query_param params(this, memory().visual().transparency_threshold(), distance);
 
-    Level().ObjectSpace.RayQuery(rq_storage, ray_defs, ray_query_callback, &params, NULL, this);
+    // 22-game-thread.md, step 1b: the fast pick of update_can_kill_info (npc_perf_friendly_fire_fast)
+    if (stalker_ff.active)
+        stalker_ff_ray(this, ray_defs, rq_storage, params);
+    else
+        Level().ObjectSpace.RayQuery(rq_storage, ray_defs, ray_query_callback, &params, NULL, this);
     m_can_kill_enemy = m_can_kill_enemy || params.m_can_kill_enemy;
     m_can_kill_member = m_can_kill_member || params.m_can_kill_member;
     m_pick_distance = _max(m_pick_distance, params.m_pick_distance);
@@ -804,14 +1003,64 @@ void CAI_Stalker::update_can_kill_info()
     if (m_pick_frame_id == Device.dwFrame)
         return;
 
+    // 22-game-thread.md, step 1: a firing stalker nobody sees keeps its last pick for a while (see
+    // CAI_Stalker::can_kill_pick_lod_reuse, npc_perf_object_handler_lod); m_pick_time stays the time of the real pick
+    if (can_kill_pick_lod_reuse())
+    {
+        m_pick_frame_id = Device.dwFrame;
+        PERF_INC(npc_oh_pick_reused);
+        return;
+    }
+
     m_pick_frame_id = Device.dwFrame;
+    m_pick_time = Device.dwTimeGlobal;
+    PERF_INC(npc_oh_pick_full);
     m_can_kill_member = false;
     m_can_kill_enemy = false;
 
     Fvector position, direction;
     VERIFY(inventory().ActiveItem());
     g_fireParams(0, position, direction);
-    can_kill_entity_from(position, direction, start_pick_distance());
+    // 22-game-thread.md, step 1b: npc/ff/pick - the time of the cast picks in every mode (an A/B of
+    // npc_perf_friendly_fire_fast)
+    PERF_SCOPE(npc_ff_pick);
+    if (!npc_perf_friendly_fire_fast)
+    {
+        can_kill_entity_from(position, direction, start_pick_distance());
+        return;
+    }
+
+    // The fast pick (see npc_perf_friendly_fire_fast): the same 5 rays, can_kill_entity walks them over the
+    // candidates gathered once
+    const float distance = start_pick_distance();
+    stalker_ff_gather(this, position, direction, distance);
+    stalker_ff.active = true;
+    can_kill_entity_from(position, direction, distance);
+    stalker_ff.active = false;
+    stalker_ff.candidates.clear();
+    if (npc_perf_friendly_fire_fast != 2)
+        return;
+
+    // Shadow mode: the original pick decides, a difference is counted and the first few are logged
+    const bool fast_member = m_can_kill_member;
+    const bool fast_enemy = m_can_kill_enemy;
+    const float fast_distance = m_pick_distance;
+    m_can_kill_member = false;
+    m_can_kill_enemy = false;
+    can_kill_entity_from(position, direction, distance);
+    if (fast_member == m_can_kill_member && fast_enemy == m_can_kill_enemy &&
+        fsimilar(fast_distance, m_pick_distance, .01f))
+        return;
+
+    PERF_INC(npc_ff_mismatch);
+    if (stalker_ff_mismatch_logged < stalker_ff_mismatch_log_max)
+    {
+        ++stalker_ff_mismatch_logged;
+        Msg("! [npc_perf_friendly_fire_fast] mismatch [%s]: member %d/%d, enemy %d/%d, pick distance %.2f/%.2f "
+            "(fast/original)",
+            cName().c_str(), fast_member ? 1 : 0, m_can_kill_member ? 1 : 0, fast_enemy ? 1 : 0,
+            m_can_kill_enemy ? 1 : 0, fast_distance, m_pick_distance);
+    }
 }
 
 bool CAI_Stalker::undetected_anomaly()

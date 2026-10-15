@@ -253,6 +253,27 @@ static void UpdateViewports()
     }
 }
 
+namespace
+{
+// C1.0 (plans/optimization_mt/17-c1-semi-pipeline.md): one seqRender subscriber of DoRender - the level (frame/render/
+// seq_level, CLevel::OnRender has its own zones) apart from all the others (frame/render/seq_other: cursor, console, drag
+// item, debug renders, stats...), these with a Tracy zone named by the subscriber's class, as in SeqFrameCall.
+void SeqRenderCall(pureRender* object)
+{
+#if XR_PERF_METRICS
+    if (g_pGameLevel && object == static_cast<pureRender*>(g_pGameLevel))
+    {
+        PERF_SCOPE(frame_render_seq_level);
+        object->OnPure(object);
+        return;
+    }
+    PERF_SCOPE(frame_render_seq_other);
+#endif
+    ZoneTransientN(seq_render_zone, xray::perf::SpikeClassName(typeid(*object)), true);
+    object->OnPure(object);
+}
+} // namespace
+
 void CRenderDevice::DoRender()
 {
     if (GEnv.isDedicatedServer)
@@ -265,9 +286,15 @@ void CRenderDevice::DoRender()
     renderTotalReal.Begin();
     if (b_is_Active && RenderBegin())
     {
+        // C1.0: everything below is submit (render/split/submit) unless a nested PERF_SPLIT says otherwise (the build
+        // phases of the level render, the join with the Game thread).
+        PERF_SPLIT(Submit);
         {
             ZoneScopedN("Render process");
             PERF_SCOPE(frame_render_seq);
+            // C1.0: each subscriber through SeqRenderCall (frame/render/seq_level / seq_other); set here, on the thread
+            // of Process(), like the seqFrame hook in FrameMove
+            seqRender.SetCallHook(&SeqRenderCall);
             seqRender.Process(); // all rendering is done here
         }
 
@@ -398,6 +425,7 @@ void CRenderDevice::JoinGameLogic()
     // (normally before the UI, inside frame/render).
     ZoneScopedN("GameLogicJoin");
     PERF_SCOPE(frame_game_wait);
+    PERF_SPLIT(None); // C1.0: neither build nor submit of the render (render/split/*)
     XRay::Engine::JoinGameLogicThread();
 }
 

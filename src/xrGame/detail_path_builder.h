@@ -10,6 +10,7 @@
 
 #include "movement_manager.h"
 #include "detail_path_manager.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 class CDetailPathBuilder
 {
@@ -58,7 +59,11 @@ public:
             m_object->m_path_state = CMovementManager::ePathStatePathVerification;
     }
 
-    void process() { process_impl(); }
+    void process()
+    {
+        PERF_SCOPE(pseq_detail_path); // 22-game-thread.md: a seqParallel delegate (mt_detail_path)
+        process_impl();
+    }
     IC void remove()
     {
         if (m_object->m_wait_for_distributed_computation)

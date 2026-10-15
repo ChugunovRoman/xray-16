@@ -46,8 +46,17 @@ void CMapLocation::script_register(lua_State* luaState)
             {
                 return self->GetLevelName().c_str();
             })
-            .def("GetPosition", &CMapLocation::GetPosition)
+            // CMapManager::Update computes positions only on the current level: the rest are computed when asked
+            .def("GetPosition", +[](CMapLocation* self) -> const Fvector2&
+            {
+                self->RefreshPosition();
+                return self->GetPosition();
+            })
             .def("ObjectID", &CMapLocation::ObjectID)
-            .def("GetLastPosition", &CMapLocation::GetLastPosition)
+            .def("GetLastPosition", +[](CMapLocation* self)
+            {
+                self->RefreshPosition();
+                return self->GetLastPosition();
+            })
     ];
 }

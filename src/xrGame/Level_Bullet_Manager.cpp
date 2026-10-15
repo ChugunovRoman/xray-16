@@ -14,6 +14,7 @@
 
 #include "Include/xrRender/UIRender.h"
 #include "Include/xrRender/Kinematics.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #ifdef DEBUG
 #include "debug_renderer.h"
@@ -207,6 +208,7 @@ void CBulletManager::AddBullet(const Fvector& position, const Fvector& direction
 void CBulletManager::UpdateWorkload()
 {
     ZoneScoped;
+    PERF_SCOPE(pseq_bullets); // 22-game-thread.md: a seqParallel delegate (mt_bullets)
 
     VERIFY(g_mt_config.test(mtBullets) || m_thread_id == std::this_thread::get_id());
 

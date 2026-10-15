@@ -28,6 +28,7 @@
 #include "performance_cvars.h"
 #include "xrAICore/Components/ai_planner_search_limits.h"
 #include "xrEngine/profiler.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 //#define GOAP_DEBUG
 
@@ -313,6 +314,7 @@ void CStalkerPlanner::update(u32 time_delta)
     {
         ZoneScopedN("brain_update/solve");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerSolve);
+        PERF_SCOPE(stk_brain_solve);
 
         m_solution_changed = false;
         const bool can_skip_actuality_check = m_actuality && !m_current_state.conditions().empty() &&
@@ -357,6 +359,7 @@ void CStalkerPlanner::update(u32 time_delta)
                     max_nodes = npc_perf_planner_graph_search_max_nodes_danger;
                 ZoneTextF("max_nodes=%u combat=%d danger=%d", max_nodes, combat_active ? 1 : 0, danger_active ? 1 : 0);
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerGraphSearch);
+                PERF_SCOPE(stk_brain_graph_search);
                 m_failed = !GEnv.AISpace->graph_engine().search(*this, reverse_search ? target_state() : current_state(),
                     reverse_search ? current_state() : target_state(), &m_solution,
                     GraphEngineSpace::CSolverBaseParameters(
@@ -409,6 +412,7 @@ void CStalkerPlanner::update(u32 time_delta)
     {
         ZoneScopedN("brain_update/transition");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerTransition);
+        PERF_SCOPE(stk_brain_transition);
         if (initialized())
         {
             if (!this->solution().empty() && this->solution().size() > 0 && current_action_id() != this->solution().front())
@@ -437,6 +441,7 @@ void CStalkerPlanner::update(u32 time_delta)
         ZoneScopedN("brain_update/execute");
         ZoneTextF("action_id=%d", int(current_action_id()));
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerExecute);
+        PERF_SCOPE(stk_brain_execute);
         switch (current_action_id())
         {
         case eWorldOperatorDeathPlanner:
@@ -450,6 +455,7 @@ void CStalkerPlanner::update(u32 time_delta)
         {
             ZoneScopedN("brain_update/exec_alife");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerExecuteALife);
+            PERF_SCOPE(stk_brain_exec_alife);
             current_action().execute();
             break;
         }
@@ -457,6 +463,7 @@ void CStalkerPlanner::update(u32 time_delta)
         {
             ZoneScopedN("brain_update/exec_combat");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerExecuteCombat);
+            PERF_SCOPE(stk_brain_exec_combat);
             current_action().execute();
             break;
         }
@@ -464,6 +471,7 @@ void CStalkerPlanner::update(u32 time_delta)
         {
             ZoneScopedN("brain_update/exec_danger");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerPlannerExecuteDanger);
+            PERF_SCOPE(stk_brain_exec_danger);
             current_action().execute();
             break;
         }

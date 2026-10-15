@@ -2,6 +2,9 @@
 
 #include "xrCommon/xr_unordered_map.h"
 
+#include <atomic>
+#include <thread>
+
 #include "SoundRender.h"
 #include "SoundRender_Environment.h"
 #include "SoundRender_Effects.h"
@@ -21,7 +24,9 @@ protected:
     };
 
 private:
-    volatile bool isLocked;
+    // The thread inside update()/render() (under m_emitters_lock), or the empty id. i_locked() (VerSndUnlocked)
+    // flags only a call made from inside them on that same thread; other threads just wait for m_emitters_lock.
+    std::atomic<std::thread::id> m_locked_by{};
 
 public:
     struct SListener
@@ -58,6 +63,13 @@ public:
 
     bool bPresent;
     bool bReady;
+
+    // Emitters, their scene lists and the emitter<->target pairs (plans/optimization_mt/16-b2-overlap-races.md,
+    // "CSoundRender_Emitter::render: target == nullptr"). In a game/render overlap frame update() runs on main, but
+    // render() runs on the Game logic thread, beside the physics step (ODE contact callbacks -> CPHSoundPlayer ->
+    // play_at_pos) and the main thread's render: play/stop come from several threads at once. Recursive: a sound
+    // call nested in update()/render() on the same thread (wait_prefill() runs queued tasks) does not deadlock.
+    Lock m_emitters_lock;
 
     CTimer Timer;
     CTimer TimerPersistent; // time-factor is always 1.0f
@@ -123,7 +135,7 @@ public:
     void i_destroy_source(CSoundRender_Source* S);
     void i_start(CSoundRender_Emitter* E) const;
     bool i_allow_play(const CSoundRender_Emitter* E);
-    bool i_locked() override { return isLocked; }
+    bool i_locked() override { return m_locked_by.load(std::memory_order_relaxed) == std::this_thread::get_id(); }
 
     void env_apply();
 };

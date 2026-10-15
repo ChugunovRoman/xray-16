@@ -254,6 +254,7 @@ void CPHCapture::Release()
 #include "PHElement.h"
 void CPHCapture::Deactivate()
 {
+    PERF_PH_WAKE(xray::perf::ph_wake::Grab); // physics/corpse_wake/path/grab
     PH_STEP_HAZARD("CPHCapture::Deactivate");
     Release();
     if (m_taget_element)

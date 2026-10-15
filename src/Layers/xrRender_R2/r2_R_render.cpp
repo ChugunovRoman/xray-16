@@ -480,6 +480,9 @@ void CRender::Render()
     {
         ZoneScopedN("Render/ZPrefill/Build");
         PERF_SCOPE_IF(!svp_pass, rpass_zprefill_build);
+        // C1.0: the rest of Render() is submit (render/split/submit, from DoRender) except this, MainBuildWait, the
+        // waits inside r_rain/r_sun.sync (i_render_phase::sync) and the shadowed lights' build in render_lights
+        PERF_SPLIT(Build);
         PIX_EVENT(DEFER_Z_FILL);
         BasicStats.Culling.Begin();
         float z_distance = ps_r2_zfill;
@@ -528,6 +531,7 @@ void CRender::Render()
         // finishes - the bubble that the render/main/build_* metrics break down.
         ZoneScopedN("Render/MainBuildWait");
         PERF_SCOPE_IF(!svp_pass, rpass_build_wait);
+        PERF_SPLIT(Build);
         PERF_WAIT_SITE(xray::perf::wait_site::RMain);
         r_main.sync();
     }
@@ -1058,8 +1062,14 @@ void CRender::Render()
     {
         ZoneScopedN("Render/Combine");
         PERF_SCOPE_IF(!svp_pass, rpass_combine);
+#if XR_PERF_METRICS
+        // render/combine/*: lets the combine's steps and callees time themselves for the main pass only.
+        xray::perf::ScopedTag perf_combine_tag(g_perf_combine_main, (!svp_pass && xray::perf::g_perf_metrics_active) ? 1 : 0);
+        [[maybe_unused]] const u32 perf_draws0 = RCache.stat.render.calls;
+#endif
         PIX_EVENT(DEFER_LIGHT_COMBINE);
         Target->phase_combine();
+        PERF_ADD_IF(!svp_pass, rcomb_draws, RCache.stat.render.calls - perf_draws0);
     }
 
     // render/pass/tail: everything from here to the end of Render() (main pass only).
@@ -1240,12 +1250,30 @@ void CRender::render_forward()
     //******* Main render - second order geometry (the one, that doesn't support deffering)
     //.todo: should be done inside "combine" with estimation of of luminance, tone-mapping, etc.
     {
+        // render/combine/* (main pass only, see g_perf_combine_main)
+        [[maybe_unused]] const bool perf_main = g_perf_combine_main != 0;
         //	Igor: we don't want to render old lods on next frame.
         dsgraph.mapLOD.clear();
-        dsgraph.render_graph(1); // normal level, secondary priority
-        dsgraph.PortalTraverser.fade_render(); // faded-portals
-        dsgraph.render_sorted(); // strict-sorted geoms
-        g_pGamePersistent->Environment().RenderLast(); // rain/thunder-bolts
+        {
+            ZoneScopedN("combine/forward");
+            PERF_SCOPE_IF(perf_main, rcomb_forward);
+            [[maybe_unused]] const u32 perf_draws0 = dsgraph.cmd_list.stat.render.calls;
+            dsgraph.render_graph(1); // normal level, secondary priority
+            dsgraph.PortalTraverser.fade_render(); // faded-portals
+            PERF_ADD_IF(perf_main, rcomb_forward_draws, dsgraph.cmd_list.stat.render.calls - perf_draws0);
+        }
+        {
+            PERF_SCOPE_IF(perf_main, rcomb_sorted);
+            PERF_ADD_IF(perf_main, rcomb_sorted_items, dsgraph.mapSorted.size() + dsgraph.mapHUDSorted.size());
+            [[maybe_unused]] const u32 perf_draws0 = dsgraph.cmd_list.stat.render.calls;
+            dsgraph.render_sorted(); // strict-sorted geoms
+            PERF_ADD_IF(perf_main, rcomb_sorted_draws, dsgraph.cmd_list.stat.render.calls - perf_draws0);
+        }
+        {
+            ZoneScopedN("combine/rain_last");
+            PERF_SCOPE_IF(perf_main, rcomb_rain);
+            g_pGamePersistent->Environment().RenderLast(); // rain/thunder-bolts
+        }
     }
 }
 

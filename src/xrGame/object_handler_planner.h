@@ -71,6 +71,9 @@ public:
     IC void add_condition(CSActionBase* action, u16 id, EWorldProperties property, _value_type value);
     IC void add_effect(CSActionBase* action, u16 id, EWorldProperties property, _value_type value);
     IC CAI_Stalker& object() const;
+    // false = the target state, an operator or an evaluator changed since the last solve: the next update re-plans.
+    // Read by the object handler LOD (CAI_Stalker::TrySkipObjectHandlerLod), which never skips such an update
+    bool solution_actual_flag() const { return m_actuality; }
 
 public:
     virtual void setup(CAI_Stalker* object);

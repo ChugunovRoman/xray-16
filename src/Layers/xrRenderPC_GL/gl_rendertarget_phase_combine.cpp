@@ -3,6 +3,7 @@
 #include "xrEngine/Render.h"
 #include "xrEngine/Environment.h"
 #include "Layers/xrRender/dxEnvironmentRender.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #define STENCIL_CULL 0
 
@@ -36,6 +37,8 @@ void CRenderTarget::phase_combine()
     // after its swap) through both names, compute no luminance and do not swap the pool below.
     // See the same block in r4_rendertarget_phase_combine.cpp.
     const bool svp_pass = RImplementation.IsSecondViewportRenderPass();
+    // render/combine/* (plans/optimization_mt/18-combine-pass.md): main pass only, set by CRender::Render.
+    [[maybe_unused]] const bool perf_main = g_perf_combine_main != 0;
     if (svp_pass)
     {
         t_LUM_src->surface_set(GL_TEXTURE_2D, rt_LUM_pool[gpu_id * 2 + 0]->pRT);
@@ -53,6 +56,8 @@ void CRenderTarget::phase_combine()
     // slightly misaligned but visually negligible approximation through the scope lens.
     if (!svp_set.swapped)
     {
+        ZoneScopedN("combine/ssao");
+        PERF_SCOPE_IF(perf_main, rcomb_ssao);
         if (RImplementation.o.ssao_hdao)
         {
             //phase_downsamp();
@@ -87,6 +92,8 @@ void CRenderTarget::phase_combine()
     // draw skybox
     if (1)
     {
+        ZoneScopedN("combine/sky");
+        PERF_SCOPE_IF(perf_main, rcomb_sky);
         //	Moved to shader!
         // RCache.set_ColorWriteEnable					();
         //	Moved to shader!
@@ -128,6 +135,8 @@ void CRenderTarget::phase_combine()
     if (!_menu_pp)
     {
         PIX_EVENT(combine_1);
+        ZoneScopedN("combine/combine_1");
+        PERF_SCOPE_IF(perf_main, rcomb_quad1);
         // Compute params
         const auto& envdesc = g_pGamePersistent->Environment().CurrentEnv;
         const float minamb = 0.001f;
@@ -256,13 +265,19 @@ void CRenderTarget::phase_combine()
         // g_pGamePersistent->Environment().RenderClouds	();
         RImplementation.render_forward();
         if (g_pGamePersistent)
+        {
+            PERF_SCOPE_IF(perf_main, rcomb_ppui);
             g_pGamePersistent->OnRenderPPUI_main(); // PP-UI
+        }
     }
 
     //	Igor: for volumetric lights
     //	combine light volume here
     if (m_bHasActiveVolumetric)
+    {
+        PERF_SCOPE_IF(perf_main, rcomb_volumetric);
         phase_combine_volumetric();
+    }
 
     // Perform blooming filter and distortion if needed
     RCache.set_Stencil(FALSE);
@@ -275,7 +290,11 @@ void CRenderTarget::phase_combine()
     }
 
     // for msaa we need a resolved color buffer - Holger
-    phase_bloom(); // HDR RT invalidated here
+    {
+        ZoneScopedN("combine/bloom");
+        PERF_SCOPE_IF(perf_main, rcomb_bloom);
+        phase_bloom(); // HDR RT invalidated here
+    }
 
     // RImplementation.rmNormal();
     // u_setrt(rt_Generic_1,0,0,get_base_zb());
@@ -289,6 +308,8 @@ void CRenderTarget::phase_combine()
         if (bDistort)
         {
             PIX_EVENT(render_distort_objects);
+            PERF_SCOPE_IF(perf_main, rcomb_distort);
+            PERF_ADD_IF(perf_main, rcomb_distort_items, dsgraph.mapDistort.size());
             u_setrt(RCache, rt_Generic_1_r, nullptr, nullptr, rt_MSAADepth); // Now RT is a distortion mask
             RCache.ClearRT(rt_Generic_1_r, color_rgba(127, 127, 0, 127));
             RCache.set_CullMode(CULL_CCW);
@@ -334,6 +355,8 @@ void CRenderTarget::phase_combine()
     if (1)
     {
         PIX_EVENT(combine_2);
+        ZoneScopedN("combine/combine_2");
+        PERF_SCOPE_IF(perf_main, rcomb_quad2);
 
         struct v_aa
         {
@@ -439,15 +462,25 @@ void CRenderTarget::phase_combine()
     //	if FP16-BLEND !not! supported - draw flares here, overwise they are already in the bloom target
     /* if (!RImplementation.o.fp16_blend)*/
     if (RImplementation.Glows && !RImplementation.Glows->Empty())
+    {
+        ZoneScopedN("combine/glows");
+        PERF_SCOPE_IF(perf_main, rcomb_glows);
         RImplementation.Glows->Render();
+    }
 
     PIX_EVENT(LENS_FLARES);
-    g_pGamePersistent->Environment().RenderFlares(); // lens-flares
+    {
+        ZoneScopedN("combine/flares");
+        PERF_SCOPE_IF(perf_main, rcomb_flares);
+        g_pGamePersistent->Environment().RenderFlares(); // lens-flares
+    }
 
     //	PP-if required
     if (PP_Complex)
     {
         PIX_EVENT(phase_pp);
+        ZoneScopedN("combine/pp");
+        PERF_SCOPE_IF(perf_main, rcomb_pp);
         phase_pp();
     }
 

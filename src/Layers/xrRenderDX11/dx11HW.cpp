@@ -144,18 +144,23 @@ void CHW::CreateDevice(SDL_Window* sdlWnd)
         createDeviceFlags |= D3D_CREATE_DEVICE_DEBUG;
 #endif
 
-    // EscapeCB / CheckMultiplaneOverlaySupport can run on DXGI/driver threads with a small default stack;
-    // deep UMD chains (notably NVIDIA) overflow (0xC00000FD) even when the game exe uses a huge /STACK.
-    // This flag reduces D3D runtime internal threading that triggers that path.
+    // The runtime/driver internal threading is allowed by default: it takes the driver work of every draw and Map
+    // off the main thread (2026-10-14 A/B in a heavy fight: dynamic draw 1.87 -> 1.26 us, static 0.72 -> 0.44 us,
+    // -3..5 ms of submit per frame; plans/optimization_mt/19-part0-submit.md).
+    // -d3d11_prevent_internal_threads brings back PREVENT_INTERNAL_THREADING_OPTIMIZATIONS, which was forced since
+    // 2026-04 against 0xC00000FD: EscapeCB / CheckMultiplaneOverlaySupport can run on DXGI/driver threads with a
+    // small default stack, and deep UMD chains (notably NVIDIA) overflowed it even with the game exe's huge /STACK.
     constexpr u32 kPciVendorNvidia = 0x10DE;
-    if (!strstr(Core.Params, "-d3d11_allow_internal_threads"))
+    if (strstr(Core.Params, "-d3d11_prevent_internal_threads"))
     {
         createDeviceFlags |= D3D11_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS;
         if (Caps.id_vendor == kPciVendorNvidia)
-            Msg("* D3D11: PREVENT_INTERNAL_THREADING_OPTIMIZATIONS (NVIDIA; -d3d11_allow_internal_threads to disable)");
+            Msg("* D3D11: PREVENT_INTERNAL_THREADING_OPTIMIZATIONS (NVIDIA, -d3d11_prevent_internal_threads)");
         else
-            Msg("* D3D11: PREVENT_INTERNAL_THREADING_OPTIMIZATIONS (-d3d11_allow_internal_threads to disable)");
+            Msg("* D3D11: PREVENT_INTERNAL_THREADING_OPTIMIZATIONS (-d3d11_prevent_internal_threads)");
     }
+    else
+        Msg("* D3D11: driver internal threading allowed (-d3d11_prevent_internal_threads to forbid it)");
 
     HRESULT R;
 

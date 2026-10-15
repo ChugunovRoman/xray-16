@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "xrCore/Threading/Event.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrEngine/device.h"
 
 #include "Layers/xrRender/D3DXRenderBase.h"
@@ -97,20 +98,31 @@ struct i_render_phase
 
     ICF void sync()
     {
-        if (main_task)
-            TaskScheduler->Wait(*main_task);
-        main_task = nullptr;
-
-        if (o.mt_draw_enabled && draw_task)
+        bool drawn_in_task = false;
         {
-            // The draw subtask records into the phase's DEFERRED contexts; flush() below
-            // submits those lists and records the accumulation on the same contexts. It MUST
-            // be finished first - the old VERIFY was a no-op in release builds, leaving a race
-            // (partially recorded depth lists + concurrent recording into the same context).
-            TaskScheduler->Wait(*draw_task);
-            draw_task = nullptr;
+            // C1.0 (plans/optimization_mt/17-c1-semi-pipeline.md): the main thread's wait for the phase's build task
+            // and its draw subtask is build time of the frame (render/split/build); perf_wait is the phase's own
+            // timer (render/sun/wait, render/rain/wait), Metric::Count = none.
+            PERF_SPLIT(Build);
+#if XR_PERF_METRICS
+            ::xray::perf::ScopedTime perf_wait_time(perf_wait, perf_wait != ::xray::perf::Metric::Count);
+#endif
+            if (main_task)
+                TaskScheduler->Wait(*main_task);
+            main_task = nullptr;
+
+            if (o.mt_draw_enabled && draw_task)
+            {
+                // The draw subtask records into the phase's DEFERRED contexts; flush() below
+                // submits those lists and records the accumulation on the same contexts. It MUST
+                // be finished first - the old VERIFY was a no-op in release builds, leaving a race
+                // (partially recorded depth lists + concurrent recording into the same context).
+                TaskScheduler->Wait(*draw_task);
+                draw_task = nullptr;
+                drawn_in_task = true;
+            }
         }
-        else
+        if (!drawn_in_task)
         {
             render();
         }
@@ -134,6 +146,8 @@ struct i_render_phase
     Task* main_task{ nullptr };
     Task* draw_task{ nullptr };
     xr_string name{ "<UNKNOWN>" };
+    // perf_metrics timer of the main thread's wait in sync() (C1.0), Metric::Count = not timed
+    ::xray::perf::Metric perf_wait{ ::xray::perf::Metric::Count };
 };
 
 struct render_main : public i_render_phase
@@ -153,7 +167,7 @@ struct render_main : public i_render_phase
 
 struct render_rain : public i_render_phase
 {
-    render_rain() : i_render_phase("rain_render") {}
+    render_rain() : i_render_phase("rain_render") { perf_wait = ::xray::perf::Metric::rrain_wait; }
 
     void init() override;
     void calculate() override;
@@ -167,7 +181,7 @@ struct render_rain : public i_render_phase
 
 struct render_sun : public i_render_phase
 {
-    render_sun() : i_render_phase("sun_render") {}
+    render_sun() : i_render_phase("sun_render") { perf_wait = ::xray::perf::Metric::rsun_wait; }
 
     void init() override;
     void calculate() override;

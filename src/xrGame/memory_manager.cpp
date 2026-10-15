@@ -27,6 +27,7 @@
 #include "script_game_object.h"
 #include "Actor.h"
 #include "npc_cpp_profile.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 CMemoryManager::CMemoryManager(CEntityAlive* entity_alive, CSound_UserDataVisitor* visitor)
 {
@@ -177,16 +178,19 @@ void CMemoryManager::update(float time_delta)
     {
         ZoneNamedN(___tracy_mm_visual, "CMemoryManager::update/visual", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryVisualUpdate);
+        PERF_SCOPE(ai_mem_visual);
         visual().update(time_delta);
     }
     {
         ZoneNamedN(___tracy_mm_sound, "CMemoryManager::update/sound", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemorySoundUpdate);
+        PERF_SCOPE(ai_mem_sound);
         sound().update();
     }
     {
         ZoneNamedN(___tracy_mm_hit, "CMemoryManager::update/hit", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryHitUpdate);
+        PERF_SCOPE(ai_mem_hit);
         hit().update();
     }
 
@@ -213,6 +217,7 @@ void CMemoryManager::update(float time_delta)
     {
         ZoneNamedN(___tracy_mm_collect, "CMemoryManager::update/collect", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryCollectObjects);
+        PERF_SCOPE(ai_mem_collect);
         if (visual().enabled())
             update(visual().objects(), true, process_items, m_visual_update_cursor,
                 effective_memory_collect_budget(limited_collect_mode, visual().objects().size(), STALKER_MEMORY_VISUAL_COMBAT_BUDGET, lod_multiplier));
@@ -226,17 +231,20 @@ void CMemoryManager::update(float time_delta)
     {
         ZoneNamedN(___tracy_mm_upd_en, "CMemoryManager::update/update_enemies", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryUpdateEnemies);
+        PERF_SCOPE(ai_mem_enemies);
         update_enemies(registered_in_combat);
     }
     if (process_items)
     {
         ZoneNamedN(___tracy_mm_item, "CMemoryManager::update/item", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryItemUpdate);
+        PERF_SCOPE(ai_mem_item);
         item().update();
     }
     {
         ZoneNamedN(___tracy_mm_danger, "CMemoryManager::update/danger", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerMemoryDangerUpdate);
+        PERF_SCOPE(ai_mem_danger);
         danger().update();
     }
 

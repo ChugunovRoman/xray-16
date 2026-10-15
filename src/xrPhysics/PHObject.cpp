@@ -197,8 +197,12 @@ void CPHObject::CollideDynamicsNarrow()
 
 void CPHObject::CollideStepPostBroadphase()
 {
-    CollideRayMotions();
-    CollideDynamicsNarrow();
+    {
+        // F0 (plans/optimization_mt/21-physics-step.md): dynamic pairs, the frame step on the physics thread only.
+        PERF_SCOPE_IF(ph_world->Processing(), ph_step_narrow);
+        CollideRayMotions();
+        CollideDynamicsNarrow();
+    }
     if (CPHCollideValidator::DoCollideStatic(*this))
         CollideStatic(dSpacedGeom(), this);
     CollideClearDirty();
@@ -206,7 +210,11 @@ void CPHObject::CollideStepPostBroadphase()
 
 void CPHObject::Collide()
 {
-    CollideDynamicsBroadphase();
+    {
+        // F0 (plans/optimization_mt/21-physics-step.md): q_box + filter, the frame step on the physics thread only.
+        PERF_SCOPE_IF(ph_world->Processing(), ph_step_broadphase);
+        CollideDynamicsBroadphase();
+    }
     CollideStepPostBroadphase();
 }
 

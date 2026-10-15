@@ -3,6 +3,7 @@
 
 #include "Level.h"
 #include "level_sounds.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 //-----------------------------------------------------------------------------
 // static level sounds
@@ -225,6 +226,7 @@ void CLevelSoundManager::Unload()
 void CLevelSoundManager::Update()
 {
     ZoneScoped;
+    PERF_SCOPE(pseq_level_sounds); // 22-game-thread.md: a seqParallel delegate (mt_level_sounds)
 
     if (Device.Paused())
         return;

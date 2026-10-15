@@ -2,6 +2,7 @@
 #include "telekinesis.h"
 #include "entity_alive.h"
 #include "xrPhysics/PhysicsShell.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 CTelekinesis::CTelekinesis() { active = false; }
 CTelekinesis::~CTelekinesis()
@@ -17,6 +18,7 @@ CTelekinesis::~CTelekinesis()
 CTelekineticObject* CTelekinesis::activate(
     CPhysicsShellHolder* obj, float strength, float height, u32 max_time_keep, bool rot)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Grab); // physics/corpse_wake/path/grab (a zone's call stays a zone)
     std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     active = true;
 
@@ -42,6 +44,7 @@ void CTelekinesis::clear()
 }
 void CTelekinesis::deactivate()
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Grab); // physics/corpse_wake/path/grab (a zone's call stays a zone)
     std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     active = false;
 
@@ -125,6 +128,7 @@ void CTelekinesis::remove_object(TELE_OBJECTS_IT it)
 }
 void CTelekinesis::fire_all(const Fvector& target)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Grab); // physics/corpse_wake/path/grab (a zone's call stays a zone)
     std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     if (!active)
         return;
@@ -138,6 +142,7 @@ void CTelekinesis::fire_all(const Fvector& target)
 // бросить объект 'obj' в позицию 'target' с учетом коэф силы
 void CTelekinesis::fire(CPhysicsShellHolder* obj, const Fvector& target, float power)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Grab); // physics/corpse_wake/path/grab (a zone's call stays a zone)
     std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     // найти объект
 
@@ -151,6 +156,7 @@ void CTelekinesis::fire(CPhysicsShellHolder* obj, const Fvector& target, float p
 
 void CTelekinesis::fire_t(CPhysicsShellHolder* obj, const Fvector& target, float time)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Grab); // physics/corpse_wake/path/grab (a zone's call stays a zone)
     std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     auto it = std::find_if(objects.begin(), objects.end(), SFindPred(obj));
     if (it == objects.end())
@@ -173,6 +179,7 @@ bool CTelekinesis::is_active_object(CPhysicsShellHolder* obj)
 
 void CTelekinesis::schedule_update()
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Grab); // physics/corpse_wake/path/grab (a zone's call stays a zone)
     std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     if (!active)
         return;
@@ -189,6 +196,7 @@ void CTelekinesis::schedule_update()
 
 void CTelekinesis::PhDataUpdate(float step)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Grab); // physics/corpse_wake/path/grab (a zone's call stays a zone)
     std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     if (!active)
         return;
@@ -218,6 +226,7 @@ void CTelekinesis::clear_notrelevant()
 
 void CTelekinesis::PhTune(float step)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Grab); // physics/corpse_wake/path/grab (a zone's call stays a zone)
     std::lock_guard<std::recursive_mutex> guard(m_objects_lock);
     if (!active)
         return;

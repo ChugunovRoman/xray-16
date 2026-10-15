@@ -3,11 +3,28 @@
 #include "PhysicsCommon.h"
 #include "Physics.h"
 #include "MathUtilsOde.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #ifdef DEBUG
 #include "debug_output.h"
 #endif
 
 extern CPHWorld* ph_world;
+
+namespace
+{
+// Ф8 (plans/optimization_mt/21-physics-step.md): the sleep thresholds (worldDisablingParams,
+// the "disable" sections of objects, the controllers' own in CPHCharacter) were tuned for fixed_step 0.01 (100 Hz) and
+// are compared with per-step values: the displacement and the velocity change over one step (L1), and the same summed
+// over the L2 window and divided by its step count (L2). With another step the same motion gives values scaled by
+// fixed_step / 0.01 - at 50 Hz twice the 100 Hz value, so a body had to be twice as slow to fall asleep (and to stay
+// asleep: the re-enable check uses the same values). Scaled back here: 0.5 at 50 Hz, 1 at 100 Hz (fixed_step follows
+// ph_frequency, so it is read on every call). The L2 window stays L2frames steps (1.28 s at 50 Hz, 0.64 s at 100 Hz).
+float SleepValueScale()
+{
+    constexpr float tuned_step = 0.01f;
+    return tuned_step / fixed_step;
+}
+} // namespace
 SDisableVector::SDisableVector() { Init(); }
 void SDisableVector::Reset() { sum.set(0.f, 0.f, 0.f); }
 void SDisableVector::Init()
@@ -96,7 +113,12 @@ void CBaseDisableData::Disabling()
         }
     }
     if (m_disabled)
+    {
+        // Ф8: bodies the natural auto-disable puts to sleep (physics/sleep/auto_disable).
+        if (dBodyIsEnabled(body))
+            PERF_INC(ph_auto_disable);
         Disable(); // dBodyDisable(body);
+    }
 }
 
 void CPHDisablingBase::Reinit()
@@ -112,24 +134,26 @@ void CPHDisablingBase::Reinit()
 }
 void CPHDisablingBase::UpdateValues(const Fvector& new_pos, const Fvector& new_vel)
 {
+    const float scale = SleepValueScale(); // Ф8: 0.5 at 50 Hz
     if (m_count < m_frames)
     {
         float velocity_param = m_mean_velocity.Update(new_pos);
         float acceleration_param = m_mean_acceleration.Update(new_vel);
-        CheckState(m_stateL1, velocity_param * m_frames, acceleration_param * m_frames);
+        CheckState(m_stateL1, velocity_param * m_frames * scale, acceleration_param * m_frames * scale);
     }
     else
     {
         float velocity_param = m_mean_velocity.UpdatePrevious(new_pos);
         float acceleration_param = m_mean_acceleration.UpdatePrevious(new_vel);
-        CheckState(m_stateL1, velocity_param * m_frames, acceleration_param * m_frames);
+        CheckState(m_stateL1, velocity_param * m_frames * scale, acceleration_param * m_frames * scale);
     }
 }
 void CPHDisablingBase::UpdateL2()
 {
     m_stateL2.Reset();
-    float velocity_param = m_mean_velocity.SumMagnitude() / m_frames;
-    float acceleration_param = m_mean_acceleration.SumMagnitude() / m_frames;
+    const float scale = SleepValueScale(); // Ф8: 0.5 at 50 Hz
+    float velocity_param = m_mean_velocity.SumMagnitude() / m_frames * scale;
+    float acceleration_param = m_mean_acceleration.SumMagnitude() / m_frames * scale;
 
     CheckState(m_stateL2, velocity_param, acceleration_param);
 

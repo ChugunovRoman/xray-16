@@ -6,6 +6,7 @@
 #include "FBasicVisual.h"
 #include "SkeletonCustom.h"
 #include "FLOD.h"
+#include "ParticleEffect.h"
 
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #ifdef USE_DX11
@@ -268,6 +269,13 @@ void __fastcall render_item(u32 context_id, const T& item)
 
     dxRender_Visual* V = item.second.pVisual;
     VERIFY(V && V->shader._get());
+    // 18-combine-pass.md (E3): the build already drops empty effects (add_leafs_dynamic); this catches the ones whose
+    // last particles died on the PreRender particle worker since. Render() would draw nothing - skip its state setup too.
+    if (V->Type == MT_PARTICLE_EFFECT && static_cast<PS::CParticleEffect*>(V)->IsEmptyForRender())
+    {
+        PERF_ADD_IF(g_perf_combine_main != 0, rcomb_ps_empty, 1);
+        return;
+    }
     dsgraph.cmd_list.set_Element(item.second.se);
     dsgraph.cmd_list.set_xform_world(item.second.Matrix);
     RImplementation.apply_object(dsgraph.cmd_list, item.second.pObject);
@@ -369,7 +377,12 @@ void R_dsgraph_structure::render_hud_ui()
         rt_null, rt_null, zb);
 #endif // RENDER!=R_R1
 
-    levelHud->RenderActiveItemUI();
+    {
+        // C1.0: a call into the game from the submit (plans/optimization_mt/17-c1-semi-pipeline.md, §2)
+        ZoneScopedN("render_hud_ui/RenderActiveItemUI");
+        PERF_SCOPE(rhud_active_item_ui);
+        levelHud->RenderActiveItemUI();
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////

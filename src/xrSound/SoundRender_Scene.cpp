@@ -167,6 +167,7 @@ void CSoundRender_Scene::play(ref_sound& S, IGameObject* O, u32 flags, float del
 {
     if (!SoundRender->bPresent || !S._handle())
         return;
+    ScopeLock lock(&SoundRender->m_emitters_lock); // i_play: s_emitters, see CSoundRender_Core::m_emitters_lock
     S->g_object = O;
     if (S._feedback())
         ((CSoundRender_Emitter*)S._feedback())->rewind();
@@ -184,6 +185,7 @@ void CSoundRender_Scene::play_no_feedback(
 {
     if (!SoundRender->bPresent || !S._handle())
         return;
+    ScopeLock lock(&SoundRender->m_emitters_lock);
     const ref_sound orig = S;
     S._set(xr_new<CSound>(orig->handle));
     S->g_type = orig->g_type;
@@ -213,6 +215,10 @@ void CSoundRender_Scene::play_at_pos(ref_sound& S, IGameObject* O, const Fvector
 {
     if (!SoundRender->bPresent || !S._handle())
         return;
+    // Also the physics step's thread: ODE contact callback -> CPHSoundPlayer::Play (physics_game.cpp), beside the
+    // Game logic thread's own play() in an overlap frame - two unlocked s_emitters.emplace_back() lost or duplicated
+    // emitters (a duplicate is deleted twice by update()).
+    ScopeLock lock(&SoundRender->m_emitters_lock);
     S->g_object = O;
     if (S._feedback())
         ((CSoundRender_Emitter*)S._feedback())->rewind();
@@ -255,6 +261,7 @@ void CSoundRender_Scene::object_relcase(IGameObject* obj)
 
     if (obj)
     {
+        ScopeLock lock(&SoundRender->m_emitters_lock);
         for (const auto& emit : s_emitters)
         {
             if (emit)

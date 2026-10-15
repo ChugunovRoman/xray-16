@@ -21,14 +21,37 @@
 //   assignment + deferred deletes + fixing `get_environment` static fallback, etc.).
 // - Target emitters loop is small (hardware voices) — keep serial.
 
+namespace
+{
+// The emitter a target (voice) plays, or nullptr. A target whose emitter does not own it (emitter->target != T) is
+// released here instead of being rendered: CSoundRender_Emitter::render() and update() use emitter->target, so such a
+// pair crashed in render() ("emitter->target was nullptr", 2026-10-15). With m_emitters_lock held by update()/render()
+// and by every play/stop the pairs stay consistent; this is the guard against a pair broken anyway.
+CSoundRender_Emitter* owned_emitter(CSoundRender_Target* T)
+{
+    CSoundRender_Emitter* E = T->get_emitter();
+    if (!E || E->target == T)
+        return E;
+    static u32 s_reported = 0;
+    if (s_reported < 16)
+    {
+        ++s_reported;
+        Msg("! sound: voice %p referenced emitter %p which plays on voice %p; voice released", T, E, E->target);
+    }
+    T->stop();
+    return nullptr;
+}
+} // namespace
+
 void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector& N, const Fvector& R)
 {
     ZoneScoped;
 
     if (0 == bReady)
         return;
+    ScopeLock lock(&m_emitters_lock);
     Stats.Update.Begin();
-    isLocked = true;
+    m_locked_by.store(std::this_thread::get_id(), std::memory_order_relaxed);
 
     if (xray::perf::g_perf_metrics_active)
     {
@@ -70,7 +93,7 @@ void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector
     // Firstly update emitters, which are now being rendered
     for (CSoundRender_Target* T : s_targets)
     {
-        if (CSoundRender_Emitter* E = T->get_emitter())
+        if (CSoundRender_Emitter* E = owned_emitter(T))
         {
             update_emitter(E);
         }
@@ -104,7 +127,7 @@ void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector
     for (CSoundRender_Scene* scene : m_scenes)
         scene->update();
 
-    isLocked = false;
+    m_locked_by.store(std::thread::id{}, std::memory_order_relaxed);
     Stats.Update.End();
 }
 
@@ -112,23 +135,27 @@ void CSoundRender_Core::render()
 {
     ZoneScoped;
 
-    isLocked = true;
+    // Game/render overlap frame: this runs on the Game logic thread (seqFrameMT) while the physics step and the main
+    // thread's render may play/stop sounds - they wait for this loop (m_emitters_lock), so no pair changes under it.
+    ScopeLock lock(&m_emitters_lock);
+    m_locked_by.store(std::this_thread::get_id(), std::memory_order_relaxed);
     Stats.Render.Begin();
 
     for (CSoundRender_Target* T : s_targets)
     {
-        if (CSoundRender_Emitter* emitter = T->get_emitter())
+        if (CSoundRender_Emitter* emitter = owned_emitter(T))
         {
             emitter->render();
         }
     }
 
     Stats.Render.End();
-    isLocked = false;
+    m_locked_by.store(std::thread::id{}, std::memory_order_relaxed);
 }
 
 void CSoundRender_Core::statistic(CSound_stats* dest, CSound_stats_ext* ext)
 {
+    ScopeLock lock(&m_emitters_lock); // main thread (stats, debug UI) beside the physics step's play_at_pos
     if (dest)
     {
         dest->_rendered = 0;

@@ -19,6 +19,8 @@
 #include "xrPhysics/IColisiondamageInfo.h"
 #include "xrPhysics/PhysicsShell.h"
 #include "performance_cvars.h"
+#include "memory_manager.h"
+#include "enemy_manager.h"
 
 #include "xrEngine/profiler.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
@@ -42,6 +44,11 @@
 // console_commands.cpp.
 float ph_npc_kinematic_far_dist = 100.f;
 float ph_npc_kinematic_far_hyst = 20.f;
+// Ф3 (plans/optimization_mt/21-physics-step.md): nearer NPCs that nobody sees -> the same kinematic movement, see
+// unseen_kinematic(). The switch is temporary and not saved, on by default (2026-10-14: kept on while the scene with
+// NPCs spread over the level - the main one - is checked); the distance is an ordinary cvar.
+int ph_npc_kinematic_unseen = 1;
+float ph_npc_kinematic_unseen_dist = 30.f;
 
 float CMovementManager::speed(CPHMovementControl* movement_control) const
 {
@@ -106,9 +113,12 @@ void CMovementManager::apply_collision_hit(CPHMovementControl* movement_control)
 // mover (stalkers, mutants, rats); reusing it would silently leave non-stalker AI unoptimized.
 bool CMovementManager::should_force_far_kinematic(CPHMovementControl* movement_control, const Fvector& dest_position)
 {
-    if (ph_npc_kinematic_far_dist <= 0.f)
+    m_kinematic_by_unseen = false;
+    const bool unseen_on = ph_npc_kinematic_unseen != 0;
+    if (ph_npc_kinematic_far_dist <= 0.f && !unseen_on)
     {
         m_kinematic_far_forced = false;
+        m_kinematic_unseen_band = false;
         return false; // feature off, old behavior
     }
 
@@ -116,17 +126,32 @@ bool CMovementManager::should_force_far_kinematic(CPHMovementControl* movement_c
     if (!actor)
     {
         m_kinematic_far_forced = false;
+        m_kinematic_unseen_band = false;
         return false; // fail-safe: no actor (e.g. certain non-gameplay states) -> behave as before
     }
 
     // Hysteresis tracks distance independently of bypass flags, so a one-tick impulse/jump inside
     // the band does not lose the "already far" latch.
-    float const engage_dist = ph_npc_kinematic_far_dist;
-    float const release_dist = _max(0.f, engage_dist - ph_npc_kinematic_far_hyst);
-    float const threshold = m_kinematic_far_forced ? release_dist : engage_dist;
-    m_kinematic_far_forced = dest_position.distance_to_sqr(actor->Position()) > threshold * threshold;
-    if (!m_kinematic_far_forced)
+    const float dist_sq = dest_position.distance_to_sqr(actor->Position());
+    if (ph_npc_kinematic_far_dist > 0.f)
+    {
+        float const engage_dist = ph_npc_kinematic_far_dist;
+        float const release_dist = _max(0.f, engage_dist - ph_npc_kinematic_far_hyst);
+        float const threshold = m_kinematic_far_forced ? release_dist : engage_dist;
+        m_kinematic_far_forced = dist_sq > threshold * threshold;
+    }
+    else
+        m_kinematic_far_forced = false;
+
+    // Ф3: nearer than the far rule, but unseen. Evaluated on every call while on, so its latch stays current.
+    bool unseen = false;
+    if (unseen_on)
+        unseen = unseen_kinematic(dist_sq, actor);
+    else
+        m_kinematic_unseen_band = false;
+    if (!m_kinematic_far_forced && !unseen)
         return false;
+    m_kinematic_by_unseen = !m_kinematic_far_forced;
 
     // Never override while something else needs the real physics step this tick - forcing kinematic here
     // would snap a jump arc, cut a NoGravityZone/impulse short, or teleport an NPC that just lost footing.
@@ -135,6 +160,56 @@ bool CMovementManager::should_force_far_kinematic(CPHMovementControl* movement_c
         return false;
 
     return true;
+}
+
+// Ф3 (plans/optimization_mt/21-physics-step.md, ph_npc_kinematic_unseen): with hundreds of NPCs around the player the
+// far rule (ph_npc_kinematic_far_dist, 100 m) catches few of them, and the live NPC controllers dominate the physics
+// step (session 2026-10-14 17:02:53: 250-690 active controllers, 17-35 ms of step a frame). Nobody sees most of them:
+// behind the camera, behind walls. Such an NPC moves the way the far ones do (move_along_path's kinematic branch:
+// SetPosition + DisableCharacter, no GetNearest / TryPosition, no Calculate), if
+// - farther than ph_npc_kinematic_unseen_dist (at least 10 m, see console_commands.cpp) from the actor - an NPC right
+//   behind the player is never taken: the actor collides with it and pushes it as before. Engages beyond the distance,
+//   releases under it minus a band, so an NPC walking along the boundary does not flip every frame;
+// - not drawn in the main pass for unseen_frames frames in a row (CGameObject::rendered_in_main_pass: the frustum and
+//   occlusion result of the render's own main pass, stamped per object, no extra rays). Shadows and the second viewport
+//   do not count; while a second viewport (scope) renders, the rule is off - a scope shows far NPCs up close. Becoming
+//   visible again releases it on the next update;
+// - the actor is not its selected enemy (memory().enemy()): an NPC fighting the player keeps its full movement, cover
+//   approach included, even off screen (physics/npc_kinematic_unseen_skip_combat).
+// The safety exclusions of the far rule (jump, forced physics control, a pending impulse, losing ground) are applied by
+// the caller. What is given up while kinematic: NPC-vs-NPC and NPC-vs-prop/door/corpse pushing (they pass through each
+// other along the AI-map path; the level geometry is respected by the path itself). Hits and explosions still reach the
+// NPC (bExernalImpulse puts it back on the physics path), bullets do not use the controller.
+bool CMovementManager::unseen_kinematic(float dist_sq, const IGameObject* actor)
+{
+    // ~0.3-0.7 s at 15-30 FPS: a look around does not flip NPCs that only left the screen for a moment
+    constexpr u32 unseen_frames = 10;
+    // the distance band of the latch
+    constexpr float release_band = 5.f;
+
+    const float engage_dist = ph_npc_kinematic_unseen_dist;
+    const float release_dist = _max(0.f, engage_dist - release_band);
+    const float threshold = m_kinematic_unseen_band ? release_dist : engage_dist;
+    m_kinematic_unseen_band = engage_dist > 0.f && dist_sq > threshold * threshold;
+    if (!m_kinematic_unseen_band)
+        return false;
+    if (Device.m_SecondViewport.IsSVPActive() || object().rendered_in_main_pass(unseen_frames))
+        return false;
+    const CEntityAlive* enemy = object().memory().enemy().selected();
+    if (enemy && static_cast<const IGameObject*>(enemy) == actor)
+    {
+        PERF_INC(ph_npc_kinematic_unseen_skip_combat);
+        return false;
+    }
+    return true;
+}
+
+void CMovementManager::count_forced_kinematic() const
+{
+    if (m_kinematic_by_unseen)
+        PERF_INC(ph_npc_kinematic_unseen_forced);
+    else
+        PERF_INC(ph_npc_kinematic_far_forced);
 }
 
 // Stage 4 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md (U2b + U2c, TryPosition coherence).
@@ -448,7 +523,7 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
             if (should_force_far_kinematic(movement_control, dest_position))
             {
                 movement_control->DisableCharacter();
-                PERF_INC(ph_npc_kinematic_far_forced);
+                count_forced_kinematic();
             }
             else
             {
@@ -526,8 +601,8 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
     {
         // Ф1: skip the neighbor query entirely - m_nearest_objects stays empty, which already routes into
         // the existing kinematic branch below (SetPosition+DisableCharacter), same code path the engine
-        // already takes whenever no dynamic physics object is nearby.
-        PERF_INC(ph_npc_kinematic_far_forced);
+        // already takes whenever no dynamic physics object is nearby. Ф3: or unseen, see unseen_kinematic().
+        count_forced_kinematic();
     }
 
     // установить позицию

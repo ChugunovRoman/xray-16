@@ -254,7 +254,12 @@ void CRender::calculate_for(bool second_pass)
         BasicStats.Culling.Begin();
     {
         if (g_pGamePersistent)
+        {
+            // C1.0: inventory icons draw live game objects on the immediate context (build side, §2 of 17-c1-semi-pipeline.md)
+            ZoneScopedN("r2_calculate/icons");
+            PERF_SCOPE_IF(main_pass, rframe_icons);
             g_pGamePersistent->OnWeaponIconRenderPass();
+        }
         // Stage C: target captured at task creation - an async main build must not re-read the
         // override member that the scope launcher mutates right after this function returns.
         // For the scope pass (second_pass=true), r_main_dsgraph_override points to the dedicated
@@ -366,14 +371,22 @@ void CRender::svp_worker_loop()
             auto* const params = &svp_calc_params;
             // Stage A2: visibility build - pure CPU culling into the dedicated dsgraph (no
             // Device reads, no shared-state mutation, see the Begin comment).
-            r_main.calculate_into(*ds, params);
+            {
+                ZoneScopedN("SVP/worker_build");
+                PERF_SCOPE(rsvp_worker_build);
+                r_main.calculate_into(*ds, params);
+            }
             if (!svp_build_abort.load(std::memory_order_relaxed))
             {
                 // Stage B: record render_graph(0) into the deferred cmd list - submitted later
                 // on the main thread (SubmitSVPDeferred), overlapping the main render's
                 // lighting/combine tail.
                 if (!svp_geom_on_main)
+                {
+                    ZoneScopedN("SVP/worker_geom");
+                    PERF_SCOPE(rsvp_worker_geom);
                     record_second_vp_geometry_into(*ds);
+                }
                 // Frame driver stage C: build the scope pass's shadow maps into the dedicated
                 // atlas. Blocked until the main pass finished ITS lighting (from then on the
                 // context pool and the shared light objects belong to this thread); abort
@@ -381,10 +394,17 @@ void CRender::svp_worker_loop()
                 // copies the pages itself, there is nothing for the worker to build.
                 if (svp_frame_driver && !svp_shadow_transfer)
                 {
-                    while (!svp_build_abort.load(std::memory_order_relaxed) && !svp_lights_go.Wait(1))
-                        ;
+                    {
+                        ZoneScopedN("SVP/worker_lights_wait");
+                        PERF_SCOPE(rsvp_worker_lights_wait);
+                        while (!svp_build_abort.load(std::memory_order_relaxed) && !svp_lights_go.Wait(1))
+                            ;
+                    }
                     if (!svp_build_abort.load(std::memory_order_relaxed))
+                    {
+                        PERF_SCOPE(rsvp_worker_shadows);
                         record_second_vp_shadows();
+                    }
                 }
             }
         }

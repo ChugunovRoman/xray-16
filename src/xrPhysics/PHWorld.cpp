@@ -67,6 +67,69 @@ thread_local bool s_tl_physics_task_worker = false;
 // predicates therefore treat this thread like any other one while the flag is set (IsStepThreadCaller). The island
 // tasks themselves are pure ODE and never ask.
 thread_local bool s_tl_island_wait = false;
+
+#ifndef DEBUG
+// Ф2 (plans/optimization_mt/21-physics-step.md): balanced parts of the parallel island solve. TaskRange's default grain
+// cut the islands, in m_objects order, into contiguous chunks of equal COUNT, so one chunk could get most of the big
+// islands (ragdolls merged with their loot and contacts) and the whole solve waited for it. Here the islands go into
+// `parts` groups of about equal estimated cost - the largest first, each into the currently lightest group (LPT) - and
+// the batch is reordered so that every group is contiguous: part p is [part_begin[p], part_begin[p + 1]). The estimate
+// is the merged island's bodies + joints (contacts included). Every island is still solved exactly once and islands are
+// independent dxWorlds, so the result does not depend on the order or on the grouping. Stepping thread only.
+struct IslandSolveJob
+{
+    CPHObject* object;
+    u32 cost;
+    u32 order; // position in the batch: ties keep it (std::sort, no temporary buffer of std::stable_sort)
+    u32 part;
+};
+thread_local xr_vector<IslandSolveJob> s_tl_island_jobs;
+thread_local xr_vector<u64> s_tl_island_part_load;
+thread_local xr_vector<u32> s_tl_island_part_fill;
+thread_local xr_vector<u32> s_tl_island_part_begin;
+
+// Returns the number of parts (<= max_parts, <= batch size); fills s_tl_island_part_begin with parts + 1 offsets.
+size_t BalanceIslandSolve(xr_vector<CPHObject*>& batch, size_t max_parts)
+{
+    const size_t parts = std::max<size_t>(1, std::min(max_parts, batch.size()));
+    xr_vector<IslandSolveJob>& jobs = s_tl_island_jobs;
+    jobs.clear();
+    for (CPHObject* obj : batch)
+    {
+        const CPHIsland& island = obj->Island();
+        jobs.push_back({obj, static_cast<u32>(island.nb + island.nj), static_cast<u32>(jobs.size()), 0});
+    }
+    std::sort(jobs.begin(), jobs.end(), [](const IslandSolveJob& a, const IslandSolveJob& b)
+    {
+        return a.cost != b.cost ? a.cost > b.cost : a.order < b.order;
+    });
+
+    xr_vector<u64>& load = s_tl_island_part_load;
+    load.assign(parts, 0);
+    xr_vector<u32>& part_begin = s_tl_island_part_begin;
+    part_begin.assign(parts + 1, 0);
+    for (IslandSolveJob& job : jobs)
+    {
+        size_t lightest = 0;
+        for (size_t p = 1; p < parts; ++p)
+        {
+            if (load[p] < load[lightest])
+                lightest = p;
+        }
+        load[lightest] += job.cost;
+        job.part = static_cast<u32>(lightest);
+        ++part_begin[lightest + 1];
+    }
+    for (size_t p = 0; p < parts; ++p)
+        part_begin[p + 1] += part_begin[p];
+
+    xr_vector<u32>& fill = s_tl_island_part_fill;
+    fill.assign(part_begin.begin(), part_begin.end() - 1);
+    for (const IslandSolveJob& job : jobs)
+        batch[fill[job.part]++] = job.object;
+    return parts;
+}
+#endif // !DEBUG
 } // namespace
 
 IPHWorld* physics_world() { return ph_world; }
@@ -524,6 +587,9 @@ void CPHWorld::Step()
 #endif
 
     VERIFY(b_processing || IsFreezed());
+    // Ф0 (plans/optimization_mt/21-physics-step.md): physics/step/* time only the frame step (FrameStep on the physics
+    // thread sets b_processing); the world steps on main (activation shape, FlyTo, ...) run with a frozen world instead.
+    [[maybe_unused]] const bool frame_step = b_processing;
 
     PH_OBJECT_I i_object;
     PH_UPDATE_OBJECT_I i_update_object;
@@ -543,11 +609,14 @@ void CPHWorld::Step()
 
     ++m_steps_num;
     ++m_steps_short_num;
+    if (frame_step)
+        ++m_frame_steps_num; // physics time of the corpse settle runs (UpdateCorpseSettled)
     stats.Collision.Begin();
 
     {
         ZoneScopedN("ph_collide");
         PERF_SCOPE(ph_collide);
+        PERF_SCOPE_IF(frame_step, ph_step_collide);
         // Collide must stay on one thread: q_box + smart_cast + NearCallback/ODE must not span a gap where
         // another thread can spatial_unregister or destroy ISpatial* seen in the query (parallel broadphase
         // alone caused use-after-free / invalid vptr in smart_cast).
@@ -580,6 +649,7 @@ void CPHWorld::Step()
     {
         ZoneScopedN("ph_phtune");
         PERF_SCOPE(ph_tune);
+        PERF_SCOPE_IF(frame_step, ph_step_phtune);
         for (i_object = m_objects.begin(); m_objects.end() != i_object;)
         {
             CPHObject* obj = (*i_object);
@@ -609,6 +679,7 @@ void CPHWorld::Step()
     {
         ZoneScopedN("ph_solve");
         PERF_SCOPE(ph_solve);
+        PERF_SCOPE_IF(frame_step, ph_step_solve);
 #ifdef DEBUG
         debug_output().dbg_bodies_num() = 0;
         debug_output().dbg_joints_num() = 0;
@@ -644,12 +715,12 @@ void CPHWorld::Step()
         // IslandReinit (Unmerge). Merged-away members report IsActive()==false and are skipped;
         // each active root steps its own merged dxWorld exactly once -> no cross-thread aliasing.
         m_island_solve_batch.clear();
-        // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): same O(N) pass - deliberately crude,
-        // no velocity/settle check and no island-wide synchronization (that required every member of a
-        // merged group to qualify at once, which in a busy fight almost never happened - any live NPC
-        // transiently merged into the same island via contact blocked the whole group forever). Just:
-        // old enough + far enough from the camera -> force-disable, full stop. A far corpse not reacting
-        // correctly to a later impact is preferable to paying its simulation cost every step.
+        // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): same O(N) pass, per corpse, no island-wide
+        // synchronization (that required every member of a merged group to qualify at once, which in a busy fight
+        // almost never happened - any live NPC transiently merged into the same island via contact blocked the whole
+        // group forever). Old enough (or settled, ph_corpse_sleep_settled) + far enough from the camera ->
+        // force-disable. A far corpse not reacting correctly to a later impact is preferable to paying its
+        // simulation cost every step.
         const bool corpse_sleep_enabled = ph_console::ph_corpse_sleep_ms > 0;
         if (corpse_sleep_enabled)
             m_corpses_to_sleep.clear();
@@ -670,27 +741,51 @@ void CPHWorld::Step()
         PERF_ADD(ph_islands, island_count);
 #if XR_PERF_METRICS
         spike_info.islands = static_cast<u32>(island_count);
+        // Ф0: the largest island (merged root: nb/nj already include the merged members and this substep's contacts).
+        if (frame_step && xray::perf::g_perf_metrics_active)
+        {
+            for (CPHObject* obj : m_island_solve_batch)
+            {
+                const CPHIsland& island = obj->Island();
+                m_frame_island_max_nb = std::max(m_frame_island_max_nb, static_cast<u32>(island.nb));
+                m_frame_island_max_nj = std::max(m_frame_island_max_nj, static_cast<u32>(island.nj));
+            }
+        }
 #endif
         if (ph_console::ph_mt_island_solve != 0 && TaskScheduler &&
             island_count >= size_t(ph_console::ph_mt_island_min))
         {
             ZoneScopedN("ph_IslandStep_mt");
+            // Ф2: two groups per worker of about equal estimated cost (see BalanceIslandSolve), one task each - the
+            // same task count as the former equal-count chunks, with the spare groups left for work stealing.
+            const size_t parts =
+                BalanceIslandSolve(m_island_solve_batch, 2 * std::max<size_t>(1, TaskScheduler->GetWorkersCount()));
             CPHObject** const islands = m_island_solve_batch.data();
+            const u32* const part_begin = s_tl_island_part_begin.data();
             const std::thread::id step_thread = std::this_thread::get_id();
             s_tl_island_wait = true;
-            xr_parallel_for(TaskRange(size_t(0), island_count), [islands, step_thread](const TaskRange<size_t>& range)
+            xr_parallel_for(TaskRange<size_t>(0, parts, 1),
+                [islands, part_begin, step_thread](const TaskRange<size_t>& range)
             {
                 ZoneScopedN("ph_IslandStep_part");
-                // physics/islands_offthread: a pool worker took this part (B8: the stepping thread is a worker).
-                if (std::this_thread::get_id() != step_thread)
-                    PERF_ADD(ph_islands_offthread, range.size());
-                for (size_t i = range.begin(); i != range.end(); ++i)
-                    islands[i]->IslandStep(fixed_step);
+                // Ф0: CPU time of this part, any thread (b_processing is set before the parts are pushed).
+                PERF_SCOPE_IF(ph_world->Processing(), ph_step_solve_cpu);
+                for (size_t part = range.begin(); part != range.end(); ++part)
+                {
+                    const size_t first = part_begin[part];
+                    const size_t last = part_begin[part + 1];
+                    // physics/islands_offthread: a pool worker took this part (B8: the stepping thread is a worker).
+                    if (std::this_thread::get_id() != step_thread)
+                        PERF_ADD(ph_islands_offthread, last - first);
+                    for (size_t i = first; i != last; ++i)
+                        islands[i]->IslandStep(fixed_step);
+                }
             });
             s_tl_island_wait = false;
         }
         else
         {
+            PERF_SCOPE_IF(frame_step, ph_step_solve_cpu);
             for (CPHObject* obj : m_island_solve_batch)
                 obj->IslandStep(fixed_step);
         }
@@ -702,6 +797,7 @@ void CPHWorld::Step()
     {
         ZoneScopedN("ph_post_integrate");
         PERF_SCOPE(ph_post_integrate);
+        PERF_SCOPE_IF(frame_step, ph_step_post);
         for (i_object = m_objects.begin(); m_objects.end() != i_object;)
         {
             CPHObject* obj = (*i_object);
@@ -808,13 +904,19 @@ void CPHWorld::ReinitMerged()
 
 bool CPHWorld::ShouldForceSleepCorpse(CPHObject* obj)
 {
-    // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): deliberately crude - no "settled for N ms"
-    // wait, no island-wide synchronization. Old enough + far enough from the camera, plus two cheap guards
-    // against freezing a broken pose (see below). safe cast: cbClassRagDoll is only ever set by
+    // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): per corpse, no island-wide synchronization. Old
+    // enough + far enough from the camera, plus two cheap guards against freezing a broken pose (see below); with
+    // ph_corpse_sleep_settled also earlier, once settled. safe cast: cbClassRagDoll is only ever set by
     // CPHShell::SetRagDoll().
     CPHShell* shell = static_cast<CPHShell*>(obj);
     const u32 age_ms = Device.dwTimeGlobal - shell->m_ragdoll_since_ms;
-    if (age_ms < static_cast<u32>(ph_console::ph_corpse_sleep_ms))
+    const bool old_enough = age_ms >= static_cast<u32>(ph_console::ph_corpse_sleep_ms);
+    // ph_corpse_sleep_settled (plans/optimization_mt/21-physics-step.md): a younger corpse may sleep once it has settled
+    // - see UpdateCorpseSettled. Not before ph_corpse_settle_min_age_ms: a fall, an explosion throw and the joint
+    // recovery after it must finish first. Frame steps only, the settle run counts them.
+    const bool settle = !old_enough && ph_console::ph_corpse_sleep_settled != 0 && b_processing &&
+        age_ms >= static_cast<u32>(ph_console::ph_corpse_settle_min_age_ms);
+    if (!old_enough && !settle)
         return false;
     IPhysicsShellHolder* holder = shell->PhysicsRefObject();
     if (!holder)
@@ -824,15 +926,67 @@ bool CPHWorld::ShouldForceSleepCorpse(CPHObject* obj)
     const float far_dist_sq = ph_console::ph_corpse_sleep_far_dist * ph_console::ph_corpse_sleep_far_dist;
     if (to_cam.square_magnitude() <= far_dist_sq)
         return false;
+    // Before the joint walk below: the settle run has to be updated on every frame step, and it is cheaper.
+    if (settle)
+    {
+        PERF_INC(ph_corpse_settle_candidates); // physics/corpse_sleep/settle_*: see PerfMetricsList.inl
+        if (!UpdateCorpseSettled(shell))
+            return false;
+    }
     // After an explosion the elements fly apart and ODE pulls them back to the joints over the next steps
     // (fast corrective motion). Disabling during that window froze the ragdoll mid-air or with metres-long
     // limbs/neck forever. Distance/age are checked first: these walk all elements/joints of the shell.
     const float max_stretch = ph_console::ph_corpse_sleep_max_stretch;
     if (max_stretch > 0.f && shell->get_MaxJointStretchSq() > max_stretch * max_stretch)
+    {
+        if (settle)
+            PERF_INC(ph_corpse_settle_stretch_fail);
         return false;
+    }
+    if (settle)
+    {
+        PERF_INC(ph_corpse_sleep_settled); // every corpse returned here is put to sleep by SleepCorpses()
+        return true;
+    }
     const float max_vel = ph_console::ph_corpse_sleep_max_vel;
     if (max_vel > 0.f && shell->get_MaxElementLinearVelSq() > max_vel * max_vel)
         return false;
+    return true;
+}
+
+bool CPHWorld::UpdateCorpseSettled(CPHShell* shell)
+{
+    // History (plans/optimization_arch/PHYSICS_ISLAND_CORPSE_SLEEP_2026-10-06.md): a settle wait existed twice and was
+    // dropped. Per corpse on main (in_UpdateCL, frame time) it never shrank the active set because the slept corpses were
+    // woken by the next contact; per island ("every member of the merged island is a settled corpse") it never fired
+    // because live NPCs touching a pile merged into its island. The wakes are gone now (corpse-vs-corpse is skipped, items
+    // and live NPCs meet a force-slept corpse one-sided, Physics.cpp NearCallback), and this check is per corpse: nothing
+    // else in its island matters.
+    // Settled = every element slower than ph_corpse_settle_vel / ph_corpse_settle_ang_vel for ph_corpse_settle_ms of
+    // physics time without a break. A falling body passes 0.1 m/s within ~5 ms (gravity 2 x 9.81) and a stretched joint
+    // pulls its bodies back fast, so neither can stay below the thresholds for the window; a corpse that slides on a
+    // slope slower than ph_corpse_settle_vel for the whole window is frozen there (it would have moved centimetres).
+    bool angular_fail = false;
+    if (!shell->AllElementsSlowerThan(
+            ph_console::ph_corpse_settle_vel, ph_console::ph_corpse_settle_ang_vel, &angular_fail))
+    {
+        PERF_INC(ph_corpse_settle_vel_fail);
+        if (angular_fail)
+            PERF_INC(ph_corpse_settle_ang_fail);
+        shell->m_settle_steps = 0;
+        return false;
+    }
+    // A gap in the frame steps (the corpse was asleep, near the camera or too young) starts a new run. Both counters
+    // advance in the same Step(): m_frame_steps_num at its start, this check in the solve phase after it, so the next
+    // frame step of a corpse still in the run sees m_settle_last_step + 1 == m_frame_steps_num.
+    shell->m_settle_steps = shell->m_settle_last_step + 1 == m_frame_steps_num ? shell->m_settle_steps + 1 : 1;
+    shell->m_settle_last_step = m_frame_steps_num;
+    const float steps_needed = float(ph_console::ph_corpse_settle_ms) / (fixed_step * 1000.f);
+    if (float(shell->m_settle_steps) < steps_needed)
+    {
+        PERF_INC(ph_corpse_settle_run);
+        return false;
+    }
     return true;
 }
 
@@ -840,9 +994,25 @@ void CPHWorld::SleepCorpses()
 {
     // Called after ReinitMerged() (see Step()) - deactivate()'s VERIFY2(m_island.IsActive()) only holds
     // once Unmerge() has run for this object this step.
+    const float max_stretch = ph_console::ph_corpse_sleep_max_stretch;
+    const float max_vel = ph_console::ph_corpse_sleep_max_vel;
     for (CPHObject* obj : m_corpses_to_sleep)
     {
         CPHShell* shell = static_cast<CPHShell*>(obj);
+        // ShouldForceSleepCorpse() ran before this substep's solve, but Disable() freezes the pose AFTER it. A hit or an
+        // explosion queued before the step (impulses go into the force accumulators: applyImpulseTrace, ExplosionHit)
+        // is invisible to that check - velocities and joints are still calm - and is integrated by the solve: the
+        // elements of a light limb get up to default_l_limit (150 m/s = 3 m per 20 ms step), each in its own random
+        // direction (ExplosionHit). Disabling right then froze the corpse in the air with metres-long "stick" limbs
+        // until the next explosion (a force-slept corpse ignores ragdoll contacts and is one-sided for items and NPCs).
+        // Typical case: an old far corpse woken by an explosion was re-slept after exactly one step. Re-check the same
+        // guards on the state that is actually frozen; a rejected corpse stays active and is retried every step.
+        if ((max_stretch > 0.f && shell->get_MaxJointStretchSq() > max_stretch * max_stretch) ||
+            (max_vel > 0.f && shell->get_MaxElementLinearVelSq() > max_vel * max_vel))
+        {
+            PERF_INC(ph_corpse_sleep_post_reject);
+            continue;
+        }
         shell->Disable();
         shell->m_force_slept = true;
         PERF_INC(ph_corpse_force_slept);
@@ -971,10 +1141,20 @@ void CPHWorld::FrameStep(dReal step)
             xray::perf::SetGauge(xray::perf::Metric::ph_update_objects, m_update_objects.count());
             xray::perf::SetGauge(xray::perf::Metric::ph_recently_disabled, m_recently_disabled_objects.count());
             xray::perf::SetGauge(xray::perf::Metric::ph_frozen, m_freezed_objects.count());
+            m_frame_island_max_nb = 0;
+            m_frame_island_max_nj = 0;
         }
-        Step();
+        {
+            PERF_SCOPE(ph_step_substep); // Ф0: avg = cost of one substep, independent of the frame length
+            Step();
+        }
         if (i == 0 && xray::perf::g_perf_metrics_active)
             xray::perf::SetGauge(xray::perf::Metric::ph_island_batch, static_cast<s64>(m_island_solve_batch.size()));
+    }
+    if (xray::perf::g_perf_metrics_active)
+    {
+        xray::perf::SetGauge(xray::perf::Metric::ph_island_max_nb, static_cast<s64>(m_frame_island_max_nb));
+        xray::perf::SetGauge(xray::perf::Metric::ph_island_max_nj, static_cast<s64>(m_frame_island_max_nj));
     }
     b_processing = false;
 #ifdef DEBUG

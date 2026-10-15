@@ -117,6 +117,11 @@ protected:
     // engage beyond ph_npc_kinematic_far_dist, release only once back under (dist - ph_npc_kinematic_far_hyst).
     // Transient, not saved: safely starts false, next tick recomputes correctly from actual distance.
     bool m_kinematic_far_forced = false;
+    // Ф3 (plans/optimization_mt/21-physics-step.md, ph_npc_kinematic_unseen): the distance latch of the "far enough and
+    // unseen" rule (engage beyond ph_npc_kinematic_unseen_dist, release under it minus a band), and whether the last
+    // true of should_force_far_kinematic() came from that rule (physics/npc_kinematic_unseen_forced). Transient.
+    bool m_kinematic_unseen_band = false;
+    bool m_kinematic_by_unseen = false;
     // Stage 4 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md (TryPosition coherence, cvars
     // npc_perf_move_try_skip_*): the per-NPC state of try_position_skip(). Transient, not saved: a fresh NPC starts
     // with no budget and no streak, so its first frames with neighbours are full checks.
@@ -173,6 +178,12 @@ private:
     // straight into move_along_path's existing kinematic (SetPosition+DisableCharacter) branch. See
     // movement_manager_physic.cpp for the full rationale and the bypass conditions.
     bool should_force_far_kinematic(CPHMovementControl* movement_control, const Fvector& dest_position);
+    // Ф3 (ph_npc_kinematic_unseen): the second rule of should_force_far_kinematic() - farther than
+    // ph_npc_kinematic_unseen_dist from the actor and not drawn in the main pass for a while; updates
+    // m_kinematic_unseen_band. dist_sq: squared distance from the destination to the actor.
+    bool unseen_kinematic(float dist_sq, const IGameObject* actor);
+    // the kinematic branch of move_along_path taken on should_force_far_kinematic(): count it by the rule
+    void count_forced_kinematic() const;
     // Stage 4 (TryPosition coherence): true if this frame may move the NPC kinematically instead of paying
     // TryPosition although it has neighbours; try_position_skip_result() feeds the outcome of each real
     // TryPosition back. Called only while npc_perf_move_try_skip_frames or _far is non-zero. See

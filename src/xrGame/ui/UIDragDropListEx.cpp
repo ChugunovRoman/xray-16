@@ -443,6 +443,8 @@ void CUIDragDropListEx::Compact()
     for (; it != it_e; ++it)
     {
         CUICellItem* itm = smart_cast<CUICellItem*>(*it);
+        if (!itm)
+            continue; // destroyed during a walk
         SetItem(itm);
     }
 }
@@ -633,14 +635,26 @@ void CUIDragDropListEx::ResetAllSelected()
     m_container->ResetAllSelected();
 }
 
-u32 CUIDragDropListEx::ItemsCount() { return m_container->GetChildWndList().size(); }
+// Slots of cells destroyed while the container walks its children are nullptr until the walk ends
+// (CUIWindow::ForgetDestroyedChild): they are not items
+u32 CUIDragDropListEx::ItemsCount()
+{
+    const auto& list = m_container->GetChildWndList();
+    return static_cast<u32>(list.size() - std::count(list.begin(), list.end(), nullptr));
+}
+
 bool CUIDragDropListEx::IsOwner(CUICellItem* itm) { return m_container->IsChild(itm); }
 CUICellItem* CUIDragDropListEx::GetItemIdx(u32 idx)
 {
     R_ASSERT(idx < ItemsCount());
-    auto it = m_container->GetChildWndList().begin();
-    std::advance(it, idx);
-    return smart_cast<CUICellItem*>(*it);
+    for (CUIWindow* w : m_container->GetChildWndList())
+    {
+        if (!w)
+            continue; // a cell destroyed during the walk, see ItemsCount
+        if (idx-- == 0)
+            return smart_cast<CUICellItem*>(w);
+    }
+    return nullptr;
 }
 
 void CUIDragDropListEx::clear_select_armament() { m_container->clear_select_armament(); }
@@ -724,6 +738,8 @@ void CUICellContainer::ResetAllSelected()
 {
     for (auto& it : m_ChildWndList)
     {
+        if (!it)
+            continue; // destroyed during a walk
         auto i = (CUICellItem*)it;
         i->m_select_armament = false;
     }
@@ -732,6 +748,8 @@ void CUICellContainer::IterItems(std::function<void(CUICellItem*)> functor)
 {
     for (auto& it : m_ChildWndList)
     {
+        if (!it)
+            continue; // destroyed during a walk
         auto i = (CUICellItem*)it;
         functor(i);
     }
@@ -740,6 +758,8 @@ CUICellItem* CUICellContainer::FindByKey(shared_str sect)
 {
     for (auto& it : m_ChildWndList)
     {
+        if (!it)
+            continue; // destroyed during a walk
         auto i = (CUICellItem*)it;
         if (i->data_is_string && xr_strcmp(i->m_section_attachs_id.c_str(), sect.c_str()) == 0)
             return i;
@@ -751,6 +771,8 @@ CUICellItem* CUICellContainer::FindBySect(shared_str sect)
 {
     for (auto& it : m_ChildWndList)
     {
+        if (!it)
+            continue; // destroyed during a walk
         auto i = (CUICellItem*)it;
         if (xr_strcmp(i->m_section_id.c_str(), sect.c_str()) == 0)
             return i;
@@ -763,6 +785,8 @@ CUICellItem* CUICellContainer::FindSimilar(CUICellItem* itm)
 {
     for (auto& it : m_ChildWndList)
     {
+        if (!it)
+            continue; // destroyed during a walk
 #ifdef DEBUG
         auto i = smart_cast<CUICellItem*>(it);
 #else
@@ -840,6 +864,8 @@ CUICellItem* CUICellContainer::RemoveItem(CUICellItem* itm, bool force_root)
     for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
     {
         CUICellItem* i = (CUICellItem*)(*it);
+        if (!i)
+            continue; // destroyed during a walk
 
         if (i->HasChild(itm))
         {

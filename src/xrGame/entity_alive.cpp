@@ -34,7 +34,7 @@ int ps_r_disable_character_lod_render = 1;
 // Freezing the corpse pose stops CalculateBones() for that corpse in the render graph (r__dsgraph_build.cpp), so the
 // skeleton stays exactly as it was when the timer expired. The old hardcoded 1000 ms fired long before the ragdoll had
 // settled, leaving corpses stuck mid-fall. 0 = never freeze (default); a non-zero delay must comfortably exceed the
-// time a ragdoll needs to come to rest.
+// time a ragdoll needs to come to rest. The pose is frozen only while the ragdoll shell is asleep (UpdateDeadNpcRenderTier).
 u32 ps_r_corpse_pose_freeze_ms = 0;
 
 namespace
@@ -67,7 +67,14 @@ void UpdateDeadNpcRenderTier(CEntityAlive& entity)
 
     const u32 corpseAgeMs = Device.dwTimeGlobal - deathTime;
     entity.SetForceCheapCorpsePath(true);
-    entity.SetCorpsePoseFrozen(ps_r_corpse_pose_freeze_ms != 0 && corpseAgeMs >= ps_r_corpse_pose_freeze_ms);
+    // Only while the ragdoll is asleep (naturally or force-slept by CPHWorld::SleepCorpses): age alone froze the pose of
+    // a corpse that was still moving - a corpse thrown by an explosion later flew as a rigid statue, and a pose caught
+    // mid-explosion (limbs torn metres apart for a few steps) stayed on screen after the physics had pulled the joints
+    // back. A woken shell unfreezes on the next update. The flag is read without sync, like UpdateDeadShedLod does: a
+    // stale value only delays the switch by one update.
+    const CPhysicsShell* shell = entity.PPhysicsShell();
+    entity.SetCorpsePoseFrozen(ps_r_corpse_pose_freeze_ms != 0 && corpseAgeMs >= ps_r_corpse_pose_freeze_ms &&
+        (!shell || !shell->isEnabled()));
 }
 } // namespace
 

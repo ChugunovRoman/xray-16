@@ -116,6 +116,7 @@ public:
 
     void process()
     {
+        PERF_SCOPE(pseq_level_path); // 22-game-thread.md: a seqParallel delegate (mt_level_path)
         if (Device.dwTimeGlobal < m_last_fail_time + time_to_wait_after_fail)
         {
             PERF_INC(path_builder_delayed);

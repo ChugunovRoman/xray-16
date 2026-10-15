@@ -578,6 +578,7 @@ void CCustomMonster::net_update::lerp(CCustomMonster::net_update& A, CCustomMons
 void CCustomMonster::update_sound_player()
 {
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterSoundPlayerUpdate);
+    PERF_SCOPE(pseq_sound_player); // 22-game-thread.md: a seqParallel delegate (mt_sound_player)
     sound().update(client_update_fdelta());
 }
 void CCustomMonster::UpdateCL()

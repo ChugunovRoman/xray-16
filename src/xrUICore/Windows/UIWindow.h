@@ -395,8 +395,16 @@ protected:
     bool m_bCursorOverWindow : 1 {};
     bool m_bCustomDraw : 1 {};
     u8 m_iterating_depth{};
+    // A child was destroyed while this window walked m_ChildWndList: its slot holds nullptr until the walk ends
+    bool m_has_dead_children{};
 
     WINDOW_LIST m_deferred_detach;
+
+    // ~CUIWindow of a child during this window's Draw/Update walk: the deferred DetachChild would keep a dangling
+    // pointer in m_ChildWndList until the walk ends, so the slot is nulled instead (the walks skip nullptr)
+    void ForgetDestroyedChild(CUIWindow* child);
+    // End of the outermost Draw/Update walk: deferred detaches, then the nulled slots of destroyed children
+    void FinishChildWalk();
 
     EWindowAlignment m_alignment{};
     Fvector2 m_wndPos{};

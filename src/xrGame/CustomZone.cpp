@@ -17,6 +17,7 @@
 #include "zone_effector.h"
 #include "BreakableObject.h"
 #include "GamePersistent.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 //////////////////////////////////////////////////////////////////////////
 #define PREFETCHED_ARTEFACTS_NUM 1	//количество предварительно проспавненых артефактов
@@ -529,6 +530,8 @@ void CCustomZone::UpdateWorkload(u32 dt)
 void CCustomZone::UpdateCL()
 {
     ZoneScopedN("ucl_CCustomZone");
+    // physics/corpse_wake/path/zone: what the zone's workload does to physics (gravi pull start, direct hits).
+    PERF_PH_WAKE(xray::perf::ph_wake::Zone);
     inherited::UpdateCL();
     if (m_zone_flags.test(eFastMode))
         UpdateWorkload(Device.dwTimeDelta);
@@ -537,6 +540,7 @@ void CCustomZone::UpdateCL()
 // called as usual
 void CCustomZone::shedule_Update(u32 dt)
 {
+    PERF_PH_WAKE(xray::perf::ph_wake::Zone); // physics/corpse_wake/path/zone
     m_zone_flags.set(eZoneIsActive, FALSE);
 
     if (IsEnabled())

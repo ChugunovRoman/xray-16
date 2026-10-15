@@ -17,6 +17,7 @@
 
 #include "LightTrack.h"
 #include "ParticleGroup.h"
+#include "ParticleEffect.h"
 #include "FTreeVisual.h"
 #include "xrCDB/ISpatial.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
@@ -386,6 +387,24 @@ void R_dsgraph_structure::add_leafs_dynamic(
             for (auto& pit : I._children_free)
                 add_leafs_dynamic(root, pit, xform, nullptr);
         }
+    }
+        return;
+    case MT_PARTICLE_EFFECT:
+    {
+        // plans/optimization_mt/18-combine-pass.md (E3): an effect with nothing to draw (group children not started
+        // yet or finished, emitters between bursts - up to half of mapSorted in a heavy fight) used to cost a node
+        // in mapSorted/mapDistort/... and, in render_item, set_Element + xform + ROS + lmaterial for a Render()
+        // that draws nothing. Lock-free read: the PreRender particle worker may be stepping this effect right now,
+        // exactly as when Render() reads the count later; an effect whose first particles are born after this
+        // build shows up from the next frame (as an effect created after it already does).
+        if (static_cast<PS::CParticleEffect*>(pVisual)->IsEmptyForRender())
+        {
+            PERF_ADD_IF(o.is_main_pass && !o.second_vp_pass, rmain_ps_empty_skip, 1);
+            return;
+        }
+        Fvector Tpos;
+        xform.transform_tiny(Tpos, pVisual->vis.sphere.P);
+        insert_dynamic(root, pVisual, xform, Tpos);
     }
         return;
     case MT_HIERRARHY:

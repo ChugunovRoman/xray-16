@@ -74,7 +74,12 @@ void CSoundRender_Emitter::stop(bool isDeffered)
     if (isDeffered)
         bStopping = TRUE;
     else
+    {
+        // Any thread (ref_sound::stop, ~CSound): not in the middle of CSoundRender_Core::update()/render() on another
+        // one - i_stop() breaks the emitter<->target pair and closes ovf that render()'s prefill reads.
+        ScopeLock lock(&SoundRender->m_emitters_lock);
         i_stop();
+    }
 }
 
 void CSoundRender_Emitter::rewind()

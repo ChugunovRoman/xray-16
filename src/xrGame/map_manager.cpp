@@ -11,6 +11,7 @@
 #include "xrServer.h"
 #include "game_object_space.h"
 #include "xrScriptEngine/script_callback_ex.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 struct FindLocationBySpotID
 {
@@ -250,23 +251,56 @@ void CMapManager::GetMapLocations(const shared_str& spot_type, u16 id, xr_vector
     }
 }
 
+void CMapManager::QueueRelationSpotCheck(CRelationMapLocation* location)
+{
+    m_relation_spot_checks.emplace_back(location->ObjectID(), location);
+}
+
+void CMapManager::ResolveRelationSpotChecks()
+{
+    if (m_relation_spot_checks.empty())
+        return;
+
+    PERF_ADD(mapmgr_relation_checks, m_relation_spot_checks.size());
+    const auto by_id = [](const std::pair<u16, CRelationMapLocation*>& a, const std::pair<u16, CRelationMapLocation*>& b) {
+        return a.first < b.first;
+    };
+    std::sort(m_relation_spot_checks.begin(), m_relation_spot_checks.end(), by_id);
+    const u16 min_id = m_relation_spot_checks.front().first;
+    const u16 max_id = m_relation_spot_checks.back().first;
+
+    // Same set as GetMapLocationsForObject per relation location: the actual locations of the object, but one pass
+    for (const SLocationKey& key : Locations())
+    {
+        if (!key.actual || key.object_id < min_id || key.object_id > max_id)
+            continue;
+
+        const std::pair<u16, CRelationMapLocation*> probe(key.object_id, nullptr);
+        auto range = std::equal_range(m_relation_spot_checks.begin(), m_relation_spot_checks.end(), probe, by_id);
+        for (auto it = range.first; it != range.second; ++it)
+            it->second->HideSpotsCoveredBy(key.location);
+    }
+    m_relation_spot_checks.clear();
+}
+
 void CMapManager::Update()
 {
     ZoneScoped;
     delete_data(m_deffered_destroy_queue); // from prev frame
 
-    auto it = Locations().begin();
-    auto it_e = Locations().end();
+    // CMapLocation::Update computes the position only for the current level (and ePosToActor): the PDA maps compute
+    // the others on demand. The old extra CalcPosition of every third location here repeated the one in Update.
+    const shared_str current_level = Level().name();
+    vLocations& locations = Locations();
+    PERF_ADD(mapmgr_locations, locations.size());
+    for (SLocationKey& key : locations)
+        key.actual = key.location->Update(current_level);
 
-    for (u32 idx = 0; it != it_e; ++it, ++idx)
-    {
-        bool bForce = Device.dwFrame % 3 == idx % 3;
-        (*it).actual = (*it).location->Update();
+    ResolveRelationSpotChecks();
 
-        if ((*it).actual && bForce)
-            (*it).location->CalcPosition();
-    }
-    std::sort(Locations().begin(), Locations().end());
+    // Usually already sorted (no new or expired locations): skip the resort, the order is the same either way
+    if (!std::is_sorted(Locations().begin(), Locations().end()))
+        std::sort(Locations().begin(), Locations().end());
 
     while ((!Locations().empty()) && (!Locations().back().actual))
     {

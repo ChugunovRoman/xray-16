@@ -1636,13 +1636,22 @@ void CGameObject::shedule_Update(u32 dt)
             ZoneScopedN("sh_CGameObject_shedule/scriptBinder");
             START_PROFILE("game_object/schedule_update/script_binder")
             if (binder_gate_update(now_ms)) // stage D, W3-1: false = the Lua binder has nothing due this pass
+            {
+                // 22-game-thread.md (diagnostics only): the Lua binder update (xr_motivator, bind_monster...) by class
+                xray::perf::ScopedTime binder_time(cast_stalker() ? xray::perf::Metric::go_shed_binder_stalker :
+                        cast_base_monster() ? xray::perf::Metric::go_shed_binder_monster :
+                                              xray::perf::Metric::go_shed_binder_other);
                 scriptBinder.shedule_Update(dt);
+            }
             else
                 PERF_INC(binder_skip_gate);
             // W3-2: with the gate on, npc_on_update comes from the engine on the callback phase (Lua skips its emit)
             // Only for the binder that reads the mask: it is the one that skips its own emit then.
             if (m_binder_gate.consumer && (m_binder_gate.mask & kGatePhaseCallback))
+            {
+                PERF_SCOPE(go_shed_npc_update_emit);
                 gw::addons::objevents::NpcUpdate(this);
+            }
             gw::addons::objevents::ObjectBinderUpdate(this, dt); // actor_on_update* (actor only)
             STOP_PROFILE
 

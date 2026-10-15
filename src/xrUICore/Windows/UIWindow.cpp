@@ -31,6 +31,11 @@ void CUIWindow::DetachChildImpl(CUIWindow* self, CUIWindow* pChild)
     }
     self->m_ChildWndList.erase(it);
 
+    // A deferred detach whose child was attached elsewhere meanwhile (moved between lists during the walk): the
+    // new parent owns it now - neither unparent nor delete it
+    if (pChild->GetParent() != self)
+        return;
+
     pChild->SetParent(NULL);
 
     if (pChild->IsAutoDelete())
@@ -50,9 +55,45 @@ CUIWindow::~CUIWindow()
     CUIWindow* parent = GetParent();
     bool ad = IsAutoDelete();
     if (parent && !ad)
-        parent->CUIWindow::DetachChild(this);
+    {
+        // The parent walks its children right now (e.g. a cell removed from a drag-drop list and deleted inside
+        // the list's Update): DetachChild would only defer, leaving this dead pointer in the parent's list
+        if (parent->m_iterating_depth > 0)
+            parent->ForgetDestroyedChild(this);
+        else
+            parent->CUIWindow::DetachChild(this);
+    }
 
     DetachAll();
+}
+
+void CUIWindow::ForgetDestroyedChild(CUIWindow* child)
+{
+    if (m_pMouseCapturer == child)
+        SetCapture(child, false);
+
+    auto it = std::find(m_ChildWndList.begin(), m_ChildWndList.end(), child);
+    if (it != m_ChildWndList.end())
+    {
+        *it = nullptr; // no erase: the walk in progress iterates this vector
+        m_has_dead_children = true;
+    }
+    m_deferred_detach.erase(std::remove(m_deferred_detach.begin(), m_deferred_detach.end(), child),
+        m_deferred_detach.end());
+}
+
+void CUIWindow::FinishChildWalk()
+{
+    for (CUIWindow* child : m_deferred_detach)
+        DetachChildImpl(this, child);
+    m_deferred_detach.clear();
+
+    if (m_has_dead_children)
+    {
+        m_ChildWndList.erase(std::remove(m_ChildWndList.begin(), m_ChildWndList.end(), nullptr),
+            m_ChildWndList.end());
+        m_has_dead_children = false;
+    }
 }
 
 void CUIWindow::Draw()
@@ -65,11 +106,7 @@ void CUIWindow::Draw()
         child->Draw();
     }
     if (--m_iterating_depth == 0)
-    {
-        for (CUIWindow* child : m_deferred_detach)
-            DetachChildImpl(this, child);
-        m_deferred_detach.clear();
-    }
+        FinishChildWalk();
 }
 
 void CUIWindow::Draw(float x, float y)
@@ -105,11 +142,7 @@ void CUIWindow::Update()
         child->Update();
     }
     if (--m_iterating_depth == 0)
-    {
-        for (CUIWindow* child : m_deferred_detach)
-            DetachChildImpl(this, child);
-        m_deferred_detach.clear();
-    }
+        FinishChildWalk();
 }
 
 void CUIWindow::AttachChild(CUIWindow* pChild)
@@ -140,10 +173,9 @@ void CUIWindow::DetachChild(CUIWindow* pChild)
 
 void CUIWindow::DetachAll()
 {
-    // Process any deferred detaches first to avoid double-free
-    for (CUIWindow* child : m_deferred_detach)
-        DetachChildImpl(this, child);
-    m_deferred_detach.clear();
+    // Process any deferred detaches first to avoid double-free, and drop the slots of children destroyed
+    // during a walk (nullptr)
+    FinishChildWalk();
 
     while (!m_ChildWndList.empty())
         DetachChildImpl(this, m_ChildWndList.back());
@@ -257,6 +289,8 @@ bool CUIWindow::OnMouseAction(float x, float y, EUIMessages mouse_action)
     for (; it != children_snapshot.rend(); ++it)
     {
         CUIWindow* w = (*it);
+        if (!w)
+            continue; // destroyed during a walk (ForgetDestroyedChild)
         const Frect& wndRect = w->GetWndRect();
         if (wndRect.in(cursor_pos))
         {
@@ -350,7 +384,7 @@ bool CUIWindow::OnKeyboardAction(int dik, EUIMessages keyboard_action)
 
     for (; it != m_ChildWndList.rend(); ++it)
     {
-        if ((*it)->IsEnabled())
+        if (*it && (*it)->IsEnabled())
         {
             result = (*it)->OnKeyboardAction(dik, keyboard_action);
 
@@ -381,7 +415,7 @@ bool CUIWindow::OnControllerAction(int axis, const ControllerAxisState& state, E
 
     for (; it != m_ChildWndList.rend(); ++it)
     {
-        if ((*it)->IsEnabled())
+        if (*it && (*it)->IsEnabled())
         {
             result = (*it)->OnControllerAction(axis, state, controller_action);
 
@@ -410,7 +444,7 @@ bool CUIWindow::OnTextInput(pcstr text)
 
     for (; it != m_ChildWndList.rend(); ++it)
     {
-        if ((*it)->IsEnabled())
+        if (*it && (*it)->IsEnabled())
         {
             result = (*it)->OnTextInput(text);
 
@@ -461,7 +495,7 @@ void CUIWindow::SendMessage(CUIWindow* pWnd, s16 msg, void* pData)
     //оповестить дочерние окна
     for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
     {
-        if ((*it)->IsEnabled())
+        if (*it && (*it)->IsEnabled())
             (*it)->SendMessage(pWnd, msg, pData);
     }
 }
@@ -474,6 +508,8 @@ CUIWindow* CUIWindow::GetChildMouseHandler()
 
     for (; it != m_ChildWndList.rend(); ++it)
     {
+        if (!*it)
+            continue;
         Frect wndRect = (*it)->GetWndRect();
         // very strange code.... i can't understand difference between
         // first and second condition. I Got It from OnMouseAction() method;
@@ -504,7 +540,8 @@ void CUIWindow::ResetAll()
 {
     for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
     {
-        (*it)->Reset();
+        if (*it)
+            (*it)->Reset();
     }
 }
 
@@ -534,6 +571,8 @@ CUIWindow* CUIWindow::FindChild(const shared_str name)
     WINDOW_LIST::const_iterator it_e = m_ChildWndList.end();
     for (; it != it_e; ++it)
     {
+        if (!*it)
+            continue;
         CUIWindow* pRes = (*it)->FindChild(name);
         if (pRes != NULL)
             return pRes;
@@ -551,7 +590,8 @@ void CUIWindow::SetParent(CUIWindow* pNewParent)
 void CUIWindow::ShowChildren(bool show)
 {
     for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
-        (*it)->Show(show);
+        if (*it)
+            (*it)->Show(show);
 }
 
 static bool is_in(Frect const& a, Frect const& b) // b in a
@@ -669,7 +709,8 @@ bool CUIWindow::FillDebugTree(const CUIDebugState& debugState)
     {
         for (const auto& child : m_ChildWndList)
         {
-            child->FillDebugTree(debugState);
+            if (child)
+                child->FillDebugTree(debugState);
         }
         if (!m_ChildWndList.empty())
             ImGui::TreePop();

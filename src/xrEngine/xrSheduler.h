@@ -2,12 +2,15 @@
 
 #include "xrCore/xrstring.h"
 #include "xrCore/FTimer.h"
+#include "xrCore/_vector3d.h"
 
 #include <atomic>
 #include <mutex>
 #include <thread>
 
 class ISheduled;
+class IGameObject;
+class ISpatial;
 
 class ENGINE_API CSheduler
 {
@@ -18,7 +21,13 @@ private:
         u32 dwTimeOfLastExecute;
         shared_str scheduled_name;
         ISheduled* Object;
-        u32 dwPadding; // for align-issues
+        // dynamic_cast<IGameObject*>(Object), once at internal_Register (nullptr: not a game object), and for the rest
+        // dynamic_cast<ISpatial*>(Object) (particles; nullptr for a game object or a non-spatial service). Read only
+        // while Object is not null (the object is still registered): the near/far class of shed_priority (IsNear)
+        IGameObject* GameObject;
+        ISpatial* Spatial;
+        u32 dwPadding; // the category (ShedCat* in xrSheduler.cpp), set once at internal_Register
+        u32 NearKind; // what the object is for the near/far class (ShedNear* in xrSheduler.cpp), set with dwPadding
 
         ICF bool operator<(const Item& I) const { return dwTimeForExecute > I.dwTimeForExecute; }
     };
@@ -62,8 +71,21 @@ private:
     std::atomic<std::thread::id> m_processing_tid{};
     SchedulerStatistics stats;
 
-    IC void Push(Item& I);
-    IC void Pop();
+    // 22-game-thread.md, step 4 (plans/optimization_mt): shed_priority 1 splits the normal queue in two heaps by the
+    // kind of the object and its distance to the camera (IsNear) - ItemsNear (served first, within the time budget) and Items (the far ones, the rest of
+    // the budget and at least one step a frame). With shed_priority 0 ItemsNear is empty and Items is the only heap.
+    xr_vector<Item> ItemsNear;
+    bool m_priority_active{}; // the heaps are split (follows ps_shed_priority at the start of ProcessStep)
+    u32 m_far_scan_cursor{}; // the round-robin scan of Items for objects that came near (PromoteNearFromFar)
+    // The camera snapshot for the near/far class, taken in UpdateRTImpl: on the main thread right before the Game
+    // thread is woken (overlap frame) or before the non-RT part on the same thread (sequential frame) - never the live
+    // Device.vCameraPosition that the render may move while the Game thread runs.
+    Fvector m_view_pos{};
+    float m_view_zoom{1.f}; // distance factor of a zoomed camera (tan(fov/2) / tan(g_fov/2), 1 unzoomed)
+
+    IC static void Push(xr_vector<Item>& heap, Item& I);
+    IC static void Pop(xr_vector<Item>& heap);
+    static void HeapErase(xr_vector<Item>& heap, size_t index);
     IC Item& Top() { return Items.front(); }
     void internal_Register(ISheduled* A, bool RT = false);
     bool internal_Unregister(ISheduled* A, bool RT, bool warn_on_not_found = true);
@@ -71,6 +93,14 @@ private:
     void UpdateRTImpl(); // internal_Registration + ItemsRT; leaves m_processing_now == true
     void UpdateNonRTImpl(); // ProcessStep + adaptive budget + internal_Registration; clears m_processing_now
     bool ProcessingOnThisThread() const;
+    // One step: run the due top item of `heap` (false: it was stale and only dropped, not a step). tier: 1 near,
+    // 0 far (the heap it came from), -1 classify here for the metrics only (shed_priority 0).
+    bool ExecuteTop(xr_vector<Item>& heap, u32 dwTime, int tier, shared_str& last_name);
+    bool IsNear(const Item& item) const;
+    u32 CountNearCreatures() const;
+    void SetPriorityMode(bool on);
+    void PromoteNearFromFar();
+    void ProcessStepPriority();
 
 public:
     void ProcessStep();
@@ -103,3 +133,16 @@ public:
 // Console: scheduler_max_steps_per_frame — max shedule_Update calls per ProcessStep per frame (0 = unlimited).
 // ProcessStep also stops when elapsed wall time exceeds floor(psShedulerCurrent) ms (skipped during precache), same scale as adaptive scheduler load.
 ENGINE_API extern int ps_scheduler_max_steps_per_frame;
+
+// 22-game-thread.md, step 4 (plans/optimization_mt). shed_priority (TEMPORARY A/B switch, not saved, default 0):
+// near objects first and a fixed time budget instead of the adaptive one and the step limit above.
+ENGINE_API extern int ps_shed_priority;
+ENGINE_API extern int ps_shed_budget_ms; // time budget of the non-RT pass, ms
+ENGINE_API extern int ps_shed_near_dist; // m from the camera: a living creature or a vehicle is near
+ENGINE_API extern int ps_shed_near_seen_dist; // m from the camera: near if drawn recently
+ENGINE_API extern int ps_shed_near_item_dist; // m from the camera: an item, a prop or a corpse is near (else far)
+ENGINE_API extern int ps_shed_far_share; // % of the budget kept for the far heap while it has due items
+ENGINE_API extern int ps_shed_near_min_steps; // near steps a frame even past the budget
+ENGINE_API extern int ps_shed_max_steps; // safety cap of steps a frame (the time budget is the real limit)
+ENGINE_API extern int ps_shed_scan; // far items checked a frame for coming near
+ENGINE_API extern int ps_shed_services_near; // 1: ALife, agent managers and other non-object services are near

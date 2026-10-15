@@ -36,4 +36,14 @@ struct XRPHYSICS_API ph_console
     // растянутая поза остаётся навсегда). 0 = проверка выключена.
     static float ph_corpse_sleep_max_vel; //= 1.f; м/с, максимальная линейная скорость любого элемента рэгдолла
     static float ph_corpse_sleep_max_stretch; //= 0.1f; м, максимальное расхождение точек крепления любого сустава
+
+    // plans/optimization_mt/21-physics-step.md: put a corpse to sleep before ph_corpse_sleep_ms (which stays the upper
+    // limit) once it has settled - older than ph_corpse_settle_min_age_ms, every element slower than ph_corpse_settle_vel
+    // and ph_corpse_settle_ang_vel for ph_corpse_settle_ms of physics time in a row, no joint stretched beyond
+    // ph_corpse_sleep_max_stretch, farther than ph_corpse_sleep_far_dist. TEMPORARY A/B switch, not saved.
+    static int ph_corpse_sleep_settled; //= 0;
+    static int ph_corpse_settle_min_age_ms; //= 2000; lets falls, explosions and the joint recovery after them finish
+    static int ph_corpse_settle_ms; //= 700; continuous settled time (frame steps of the physics thread)
+    static float ph_corpse_settle_vel; //= 0.1f; m/s, max linear speed of any element
+    static float ph_corpse_settle_ang_vel; //= 0.5f; rad/s, max angular speed of any element
 };

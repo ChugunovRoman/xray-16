@@ -340,9 +340,20 @@ void CTorch::UpdateCL()
             GameID() != eGameIDSingle)
         {
             // near camera
+            // F4 (plans/optimization_mt/20-framemove-reduction.md): an NPC the render drew last frame gets its bones
+            // from the bones prepass this frame (CLevel::BonesPrepass, same filters) - in a game/render overlap frame
+            // before this UpdateCL (the call only fast-outs then), in a sequential one after it, on the workers. The
+            // torch XFORM written by the owner's AttachmentCallback at the last compute is then at most a frame old, as
+            // it already is in an overlap frame. The actor, the view entity, a frozen corpse and an NPC off the screen
+            // (no prepass for it) compute here as before.
+            IGameObject* parent = H_Parent();
+            IKinematics* parent_kinematics = smart_cast<IKinematics*>(parent->Visual());
+            const bool bones_by_prepass = !actor && parent != Level().CurrentViewEntity() &&
+                !parent->renderable_CorpsePoseFrozen() && parent_kinematics->BonesPrepass_Wanted();
+            if (!bones_by_prepass)
             {
                 PERF_BONE_CALLER(xray::perf::bone::Torch);
-                smart_cast<IKinematics*>(H_Parent()->Visual())->CalculateBones();
+                parent_kinematics->CalculateBones();
             }
             M.mul_43(XFORM(), BI.mTransform);
         }

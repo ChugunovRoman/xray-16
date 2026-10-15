@@ -56,6 +56,7 @@
 #include "xrServerEntities/alife_human_brain.h"
 #include "xrEngine/profiler.h"
 #include "npc_cpp_profile.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "performance_cvars.h"
 #include "BoneProtections.h"
 #include "stalker_animation_names.h"
@@ -312,6 +313,10 @@ void CAI_Stalker::reinit()
     m_can_kill_member = false;
     m_pick_distance = 0.f;
     m_pick_frame_id = 0;
+    m_pick_time = 0;
+    m_object_handler_lod_last_time = 0;
+    m_object_handler_lod_skips = u32(-1);
+    m_dead_shed_lod_applied = false;
 
     m_weapon_shot_random_seed = s32(Level().timeServer_Async());
 
@@ -982,6 +987,7 @@ void CAI_Stalker::net_Import(NET_Packet& P)
 void CAI_Stalker::update_object_handler()
 {
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerObjectHandlerUpdate);
+    PERF_SCOPE(pseq_object_handler); // 22-game-thread.md: a seqParallel delegate (mt_object_handler)
     if (!g_Alive())
         return;
 
@@ -1195,6 +1201,222 @@ bool CAI_Stalker::TrySkipUpdateCLLod()
     return true;
 }
 
+// Step 1 of plans/optimization_mt/22-game-thread.md: the object handler LOD (npc_perf_object_handler_lod, temporary,
+// default 0). Session 2026-10-14 18:42 (~1000 NPCs around the player): game/pseq/object_handler 12 ms a frame, ~820
+// runs a frame - every living stalker with a full UpdateCL runs its object handler (CObjectHandler::update ->
+// CObjectHandlerPlanner::update, a seqParallel delegate) every frame. A run costs ~1.2 us in a quiet scene and 16-25 us
+// in a fight: the fire actions ask can_kill_member() every frame, i.e. the friendly-fire pick of update_can_kill_info
+// (up to 5 ObjectSpace ray queries against a crowd, spatial/q_ray ~600 a frame with ~47 results a ray).
+//
+// What a run does: the GOAP planner of the weapon / missile in the hands. solve() checks the evaluators of the current
+// world state (the item state, ammo, the queue, aim timers...) and re-plans when one changed or the target changed
+// (set_goal from the brain or a scheme, an item taken or dropped); then the current action executes: show / hide /
+// strap, aim (inertia timers by absolute time), fire (inventory Action kWPN_FIRE start / stop, the friendly-fire
+// check), queue wait, reload. The weapon's own state machine (shots, reload animation, switching) runs from the
+// UpdateCL of the weapon, not here. The planner uses no frame delta: its timers are Device.dwTimeGlobal stamps, so a
+// later run sees the real elapsed time.
+//
+// Skipped (only while the LOD is on): an idle stalker farther than npc_perf_object_handler_lod_dist from the camera -
+// the planner is initialized, nothing changed since its last solve (solution_actual_flag), the goal is reached (one
+// action in the solution) and that action is idle / strapped / aiming-ready; the item in the hands (if any) is idle or
+// hidden with no pending or next state; no enemy, no hit in the last 5 s, no recoil. Such a run only re-checks the
+// evaluators and executes an idle action; skipping it delays the reaction to a world change the planner does not hear
+// of (the item state changed by someone else) by at most npc_perf_object_handler_lod_max_ms. A new goal, a new or
+// dropped item reset the actuality and run at once; everything mid-action (fire, queue wait, aim, reload, show, hide,
+// strapping, switch, throw) runs every UpdateCL as before. Never skipped: the view entity, the first frames after the
+// spawn. On screen (or with a second viewport): every npc_perf_object_handler_lod_every_seen-th UpdateCL; off screen:
+// every npc_perf_object_handler_lod_every_unseen-th one (the counter counts UpdateCL passes, so it stacks with the
+// UpdateCL LOD; the time cap bounds both). The per-NPC counter starts at ID % N to spread the runs over the frames.
+// update_sound_player is not included: 0.1 us a run, 0.06-0.1 ms a frame in all.
+namespace
+{
+// The camera distance of the object handler LOD, shrunk by a zoomed camera the way TrySkipUpdateCLLod does
+float ai_stalker_oh_lod_camera_distance(const CAI_Stalker& stalker)
+{
+    float dist = stalker.Position().distance_to(Device.vCameraPosition);
+    if (Device.fFOV > EPS && g_fov > EPS && Device.fFOV < g_fov)
+        dist *= std::tan(deg2rad(Device.fFOV) * 0.5f) / std::tan(deg2rad(g_fov) * 0.5f);
+    return dist;
+}
+} // namespace
+
+bool CAI_Stalker::TrySkipObjectHandlerLod()
+{
+    // Every run (the LOD on or off) stamps its time: the time cap below counts from it
+    const auto run = [this]() {
+        m_object_handler_lod_last_time = Device.dwTimeGlobal;
+        PERF_INC(npc_oh_full);
+        return false;
+    };
+    if (!npc_perf_object_handler_lod || !IsGameTypeSingle())
+        return run();
+
+    // Near: the view entity, the first frames after the spawn, within the distance
+    if (this == Level().CurrentEntity() || this == Level().CurrentViewEntity() ||
+        Device.dwFrame - spawn_time() < UCL_LOD_SPAWN_FRAMES ||
+        ai_stalker_oh_lod_camera_distance(*this) < float(npc_perf_object_handler_lod_dist))
+    {
+        PERF_INC(npc_oh_keep_near);
+        m_object_handler_lod_skips = 0;
+        return run();
+    }
+
+    // A fight: the enemy, a recent hit, the recoil
+    bool fight = memory().enemy().selected() != nullptr || weapon_shot_effector().IsActive();
+    if (!fight)
+    {
+        const u32 last_hit = memory().hit().last_hit_time();
+        fight = last_hit && Device.dwTimeGlobal - last_hit < UCL_LOD_RECENT_HIT_MS;
+    }
+    if (fight)
+    {
+        PERF_INC(npc_oh_keep_fight);
+        m_object_handler_lod_skips = 0;
+        return run();
+    }
+
+    // Busy: the planner is about to re-plan or mid-way to its goal, its action is not an idle one, or the item in
+    // the hands is not settled
+    CObjectHandlerPlanner& oh_planner = CObjectHandler::planner();
+    bool busy = !oh_planner.initialized() || !oh_planner.solution_actual_flag() || oh_planner.solution().size() != 1;
+    if (!busy)
+    {
+        switch (oh_planner.current_action_state_id())
+        {
+        case ObjectHandlerSpace::eWorldOperatorIdle: // eWorldOperatorNoItemsIdle too (the same state id)
+        case ObjectHandlerSpace::eWorldOperatorStrapped: break;
+        case ObjectHandlerSpace::eWorldOperatorAimingReady1:
+        case ObjectHandlerSpace::eWorldOperatorAimingReady2:
+        {
+            // Aiming ready (CObjectActionAim): its execute sets the aimed property once the aim time is over - idle
+            // only after a run past that moment did it
+            const auto& action = oh_planner.current_action();
+            const u32 start = action.start_level_time();
+            busy = m_object_handler_lod_last_time < start ||
+                m_object_handler_lod_last_time - start < action.inertia_time();
+            break;
+        }
+        default: busy = true;
+        }
+    }
+    if (!busy)
+    {
+        CInventoryItem* active_item = inventory().ActiveItem();
+        CHudItem* hud_item = active_item ? active_item->cast_hud_item() : nullptr;
+        if (hud_item)
+        {
+            const u32 state = hud_item->GetState();
+            busy = hud_item->IsPending() || state != hud_item->GetNextState() ||
+                (state != CHUDState::eIdle && state != CHUDState::eHidden);
+        }
+    }
+    if (busy)
+    {
+        PERF_INC(npc_oh_keep_busy);
+        m_object_handler_lod_skips = 0;
+        return run();
+    }
+
+    // Idle and far: every N-th UpdateCL, at least once in npc_perf_object_handler_lod_max_ms (this frame's delta
+    // predicts the next one)
+    const bool seen = Device.m_SecondViewport.IsSVPActive() || rendered_in_main_pass();
+    const u32 every =
+        u32(_max(1, seen ? npc_perf_object_handler_lod_every_seen : npc_perf_object_handler_lod_every_unseen));
+    if (m_object_handler_lod_skips == u32(-1))
+        m_object_handler_lod_skips = u32(ID()) % every;
+    const u32 elapsed = Device.dwTimeGlobal - m_object_handler_lod_last_time;
+    if (m_object_handler_lod_skips + 1 >= every ||
+        elapsed + Device.dwTimeDelta > u32(npc_perf_object_handler_lod_max_ms))
+    {
+        m_object_handler_lod_skips = 0;
+        return run();
+    }
+
+    ++m_object_handler_lod_skips;
+    PERF_INC(npc_oh_skipped);
+    return true;
+}
+
+// The friendly-fire pick LOD (npc_perf_object_handler_lod, see above): update_can_kill_info casts up to 5 ray queries
+// from the muzzle every frame for every stalker whose fire action, sight or fire_make_sense asks can_kill_member /
+// can_kill_enemy / pick_distance. A stalker nobody sees (off screen, no second viewport, farther than
+// npc_perf_object_handler_lod_dist from the camera, not the view entity, not fighting the actor) keeps its last pick
+// for up to npc_perf_object_handler_lod_pick_ms: it fires at the same rate, but stops for a friend crossing its line of
+// fire (or starts again) up to that much later. The actor's fight is never affected.
+bool CAI_Stalker::can_kill_pick_lod_reuse() const
+{
+    if (!npc_perf_object_handler_lod || npc_perf_object_handler_lod_pick_ms <= 0 || !IsGameTypeSingle())
+        return false;
+    if (!m_pick_frame_id || Device.dwTimeGlobal - m_pick_time >= u32(npc_perf_object_handler_lod_pick_ms))
+        return false;
+    if (Device.m_SecondViewport.IsSVPActive() || rendered_in_main_pass())
+        return false;
+    if (this == Level().CurrentEntity() || this == Level().CurrentViewEntity())
+        return false;
+    const CEntityAlive* enemy = memory().enemy().selected();
+    const CActor* actor = Actor();
+    if (enemy && actor && enemy->ID() == actor->ID())
+        return false;
+    return ai_stalker_oh_lod_camera_distance(*this) >= float(npc_perf_object_handler_lod_dist);
+}
+
+// Step 1 of 22-game-thread.md, part B: corpses in the scheduler (npc_perf_dead_shed_lod, temporary, default 0).
+// A dead stalker stays registered with the living interval (100..625 ms, CCustomMonster::net_Spawn). Its update
+// (session 2026-10-14 18:42: stalker/shed/dead 2-14 a frame, i.e. a count, not ms; dead_think 2-12 us) does:
+// the NET queue, the forget-killer event after FORGET_KILLER_TIME, the corpse render tier and the pose freeze
+// (UpdateDeadNpcRenderTier), fire particles and blood drops, KillEntity once, the dead Think (CStalkerActionDead:
+// fire on death, then the drop of the items in the slots once the ragdoll allows it), UpdateInventoryOwner (the
+// actual drop), the physics support (the collision activation delay, CPHDestroyable, the movement control), and the
+// Lua binder only for the first npc_perf_long_dead_skip_binder_ms (5 s). Measured cost of all of it: a few us an update,
+// ~0.1-0.2 ms a frame. What the corpses cost is scheduler steps: the scheduler runs a fixed 128 steps a frame and
+// every object is ~14 s late, so each corpse update takes a step from a living stalker or an item.
+// With the switch on, a corpse that is settled - dead for more than 10 s (the death handling and the binder are
+// done), the ragdoll asleep or gone, nothing in the hands (the weapon dropped by the dead action) - gets
+// npc_perf_dead_shed_interval_ms instead; the next update after it sees the whole elapsed time (DT is clamped to
+// t_max by the scheduler). Late by that much: the forget-killer event, the pose freeze, burn particles and blood
+// drops of the corpse. Not affected: a corpse that still holds an item (the drop keeps its pace), searching the
+// corpse (the use callback is set by the binder in the first seconds). Note: the steps freed go to other objects,
+// living stalkers among them - the AI reacts sooner, but the scheduler time a frame may grow, not shrink.
+namespace
+{
+constexpr u32 AI_STALKER_DEAD_SHED_SETTLE_MS = 10000;
+// CCustomMonster::net_Spawn
+constexpr u32 AI_STALKER_SHED_T_MIN = 100;
+constexpr u32 AI_STALKER_SHED_T_MAX = 250;
+} // namespace
+
+void CAI_Stalker::UpdateDeadShedLod()
+{
+    bool settled = false;
+    if (npc_perf_dead_shed_lod && !g_Alive() && !getDestroy())
+    {
+        const u32 death_time = GetLevelDeathTime();
+        const CPhysicsShell* shell = PPhysicsShell();
+        settled = death_time && Device.dwTimeGlobal > death_time &&
+            Device.dwTimeGlobal - death_time > AI_STALKER_DEAD_SHED_SETTLE_MS && (!shell || !shell->isEnabled()) &&
+            !inventory().ActiveItem();
+    }
+
+    if (settled)
+    {
+        // The scheduler takes dwMin = t_min, dwMax = (1000 + t_max) / 2 (xrSheduler.cpp): t_max = 2 * t - 1000 gives
+        // dwMax = t. 14-bit fields: t <= 8000 (the cvar range)
+        const u32 interval = u32(_max(1000, _min(npc_perf_dead_shed_interval_ms, 8000)));
+        shedule.t_min = interval;
+        shedule.t_max = 2 * interval - 1000;
+        m_dead_shed_lod_applied = true;
+        PERF_INC(stk_shed_dead_lod);
+        return;
+    }
+
+    if (m_dead_shed_lod_applied)
+    {
+        shedule.t_min = AI_STALKER_SHED_T_MIN;
+        shedule.t_max = AI_STALKER_SHED_T_MAX;
+        m_dead_shed_lod_applied = false;
+    }
+}
+
 void CAI_Stalker::UpdateCL()
 {
     ZoneScopedN("ucl_CAI_Stalker");
@@ -1223,7 +1445,12 @@ void CAI_Stalker::UpdateCL()
     {
         {
             ZoneScopedN("ucl_stalker_object_handler");
-            if (g_mt_config.test(mtObjectHandler) && CObjectHandler::planner().initialized())
+            // 22-game-thread.md, step 1: the object handler LOD of idle far stalkers (npc_perf_object_handler_lod)
+            if (TrySkipObjectHandlerLod())
+            {
+                // not this UpdateCL (npc/object_handler/skipped)
+            }
+            else if (g_mt_config.test(mtObjectHandler) && CObjectHandler::planner().initialized())
             {
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLObjectHandlerDispatch);
                 // XXX: task scheduler
@@ -1371,6 +1598,8 @@ void CAI_Stalker::shedule_Update(u32 DT)
     ZoneScopedN("sh_CAI_Stalker");
     ZoneTextF("%s", cName().c_str());
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleUpdate);
+    // 22-game-thread.md, step 1: the whole update of a corpse (stalker/shed/dead counts them)
+    PERF_SCOPE_IF(!g_Alive(), stk_shed_dead_total);
     START_PROFILE("stalker")
     START_PROFILE("stalker/schedule_update")
     VERIFY2(getEnabled() || PPhysicsShell(), cName().c_str());
@@ -1404,6 +1633,29 @@ void CAI_Stalker::shedule_Update(u32 DT)
         *this, m_next_visibility_update_time, m_visibility_update_interval, get_stalker_visibility_interval(*this, update_lod), now_ms);
     const bool run_think = should_run_stalker_lod_stage(
         *this, m_next_think_update_time, m_think_update_interval, get_stalker_think_interval(*this, update_lod), now_ms);
+    // 22-game-thread.md (diagnostics only): the LOD tier of this update and the interval it covers (DT, the scheduler
+    // lateness included): stalker/shed/dt_ms / (lod_near + lod_medium + lod_far + dead) = the real update period
+    PERF_ADD(stk_shed_dt_ms, DT);
+    // DT is clamped by the scheduler to max(t_max, 1000) ms (xrSheduler.cpp), so dt_ms tops out at 1 s a stalker under
+    // overload; the real gap between two updates of a live stalker comes from its own timestamp:
+    // stalker/shed/alive_period_ms / alive_period_n = the real update period of live stalkers
+    if (g_Alive())
+    {
+        if (m_shed_alive_last_ms)
+        {
+            PERF_ADD(stk_shed_alive_period_ms, now_ms - m_shed_alive_last_ms);
+            PERF_INC(stk_shed_alive_period_n);
+        }
+        m_shed_alive_last_ms = now_ms;
+    }
+    if (!g_Alive())
+        PERF_INC(stk_shed_dead);
+    else if (update_lod == EStalkerUpdateLod::Near)
+        PERF_INC(stk_shed_lod_near);
+    else if (update_lod == EStalkerUpdateLod::Medium)
+        PERF_INC(stk_shed_lod_medium);
+    else
+        PERF_INC(stk_shed_lod_far);
 
     if (g_Alive())
     {
@@ -1412,6 +1664,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
         {
             ZoneScopedN("sh_stalker_anim_delayed_callbacks");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerSchedulePrecalc);
+            PERF_SCOPE(stk_shed_anim_callbacks);
             animation().play_delayed_callbacks();
         }
 
@@ -1428,6 +1681,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
                 // calls = the stalkers whose throttle let it through; CAgentManager::update itself runs the group
                 // update (agent_enemy/distribute and the rest) at most once per its update rate
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleAgentManager);
+                PERF_SCOPE(stk_shed_agent_manager);
                 agent_manager().update();
             }
         }
@@ -1443,6 +1697,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
             START_PROFILE("stalker/schedule_update/vision")
             {
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleVisibility);
+                PERF_SCOPE(stk_shed_vision);
                 if (npc_perf_vision_parallel_batch)
                 {
                     Exec_Visibility_Prepare();
@@ -1480,6 +1735,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
             if (run_process_enemies)
             {
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleProcessEnemies);
+                PERF_SCOPE(stk_shed_process_enemies);
                 process_enemies();
             }
             STOP_PROFILE
@@ -1497,6 +1753,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
             
                 if (run_memory_update)
                 {
+                    PERF_SCOPE(stk_shed_memory);
                     memory().update(dt);
                 }
             }
@@ -1513,6 +1770,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
         // CEntityAlive -> ... -> CGameObject::shedule_Update: the script binder (the Lua update of the NPC:
         // script_binder/update/stalker) and the rest of the base chain
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleInherited);
+        PERF_SCOPE(stk_shed_inherited);
         CEntityAlive::shedule_Update(DT);
         STOP_PROFILE
     }
@@ -1553,6 +1811,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
 #endif
             {
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleThinkApply);
+                PERF_SCOPE(stk_shed_dead_think);
                 Think();
                 m_dwLastUpdateTime = Device.dwTimeGlobal;
             }
@@ -1572,6 +1831,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
             ZoneScopedN("sh_stalker_ProcessScripts");
             START_PROFILE("stalker/schedule_update/script_control")
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleScriptControl);
+            PERF_SCOPE(stk_shed_script_control);
             ProcessScripts();
             m_dwLastUpdateTime = Device.dwTimeGlobal;
             STOP_PROFILE
@@ -1586,6 +1846,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
                 START_PROFILE("stalker/schedule_update/think_apply")
                 {
                     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleThinkApply);
+                    PERF_SCOPE(stk_shed_think);
                     Think();
                 }
                 m_dwLastUpdateTime = Device.dwTimeGlobal;
@@ -1608,6 +1869,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
                 ZoneScopedN("sh_stalker_feel_touch_update");
                 START_PROFILE("stalker/schedule_update/feel_touch")
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleFeelTouch);
+                PERF_SCOPE(stk_shed_feel_touch);
                 Fvector C;
                 float R;
                 Center(C);
@@ -1652,6 +1914,7 @@ void CAI_Stalker::shedule_Update(u32 DT)
         ZoneScopedN("sh_stalker_UpdateInventoryOwner");
         START_PROFILE("stalker/schedule_update/inventory_owner")
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleInventoryOwner);
+        PERF_SCOPE(stk_shed_inventory_owner);
         UpdateInventoryOwner(DT);
         STOP_PROFILE
     }
@@ -1666,11 +1929,17 @@ void CAI_Stalker::shedule_Update(u32 DT)
         ZoneScopedN("sh_stalker_physics_in_shedule_Update");
         START_PROFILE("stalker/schedule_update/physics")
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerSchedulePhysics);
+        PERF_SCOPE(stk_shed_physics);
         VERIFY(_valid(Position()));
         m_pPhysics_support->in_shedule_Update(DT);
         VERIFY(_valid(Position()));
         STOP_PROFILE
     }
+
+    // 22-game-thread.md, step 1: the scheduler interval of a settled corpse (npc_perf_dead_shed_lod), after the dead
+    // Think and UpdateInventoryOwner above have had their say this update
+    if (!g_Alive() || m_dead_shed_lod_applied)
+        UpdateDeadShedLod();
     STOP_PROFILE
     STOP_PROFILE
 }
@@ -1703,6 +1972,7 @@ void CAI_Stalker::Think()
         START_PROFILE("stalker/schedule_update/think/brain")
         {
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerBrainUpdate);
+            PERF_SCOPE(stk_think_brain);
             //	try {
             //		try {
             brain().update(update_delta);
@@ -1742,6 +2012,7 @@ void CAI_Stalker::Think()
     {
         ZoneScopedN("sh_stalker_movement_update");
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerThinkMovementUpdate);
+        PERF_SCOPE(stk_think_movement);
         movement().update(update_delta);
     }
 //	}

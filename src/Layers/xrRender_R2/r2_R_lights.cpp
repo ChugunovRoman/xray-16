@@ -168,6 +168,10 @@ void CRender::filter_light_package_for_svp(const light_Package& src, light_Packa
 void CRender::render_lights(light_Package& LP, bool svp_no_vis)
 {
     ZoneScoped;
+    // C1.0 (plans/optimization_mt/17-c1-semi-pipeline.md): render/lights/* time the main pass only, as render/pass/*.
+    // render/split/build here: the selection/packing, the common query, the light tasks' build and main's waits for
+    // them; the rest (smap clears, executing the recorded lists, accumulation) stays submit.
+    [[maybe_unused]] const bool perf_main = !m_SecondViewportPass;
 
     // P2.3 optimization: DISABLED — the multi-page smap design (each page re-packs from rect 0,0
     // and requires a full atlas clear before rendering) is architecturally incompatible with
@@ -221,6 +225,9 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
     // const	u16		smap_unassigned		= u16(-1);
     if (!reuse_shadowmaps)
     {
+        ZoneScopedN("render_lights/select");
+        PERF_SCOPE_IF(perf_main, rlights_prep);
+        PERF_SPLIT(Build);
         xr_vector<light*>& source = LP.v_shadowed;
         xr_vector<light*> kept;
         kept.reserve(source.size());
@@ -296,6 +303,9 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
     // 2. refactor - infact we could go from the backside and sort in ascending order
     if (!reuse_shadowmaps)
     {
+        ZoneScopedN("render_lights/pack");
+        PERF_SCOPE_IF(perf_main, rlights_prep);
+        PERF_SPLIT(Build);
         xr_vector<light*>& source = LP.v_shadowed;
         xr_vector<light*> refactored;
         refactored.reserve(source.size());
@@ -385,9 +395,14 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
             task_data_t& item = per_batch[batch_id];
             if (item.task)
             {
+                ZoneScopedN("flush lights/wait");
+                PERF_SCOPE_IF(perf_main, rlights_build_wait);
+                PERF_SPLIT(Build);
                 PERF_WAIT_SITE(xray::perf::wait_site::Light);
                 TaskScheduler->Wait(*item.task);
             }
+            // The rest of this light on main: execute its sealed list (mt) or record it (serial) - submit.
+            PERF_SCOPE_IF(perf_main, rlights_execute);
 
             auto& dsgraph = get_context(batch_id);
             light* L = item.L;
@@ -421,6 +436,7 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
             else
             {
                 // Serial mode: recording happens here on the main thread (original behavior)
+                PERF_SCOPE_IF(perf_main, rlights_record_cpu);
                 if (render_light_smap(dsgraph, L, {}))
                 {
                     Stats.s_merged++;
@@ -515,6 +531,8 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
     if (!reuse_shadowmaps && ps_r2_light_common_dynamic > 0 && !LP.v_shadowed.empty())
     {
         ZoneScopedN("light_common_dynamic_query");
+        PERF_SCOPE_IF(perf_main, rlights_prep);
+        PERF_SPLIT(Build);
         float max_reach = ps_r2_light_shadow_dist;
         for (light* Ld : LP.v_shadowed)
             max_reach = _max(max_reach, Device.vCameraPosition.distance_to(Ld->spatial.sphere.P) + Ld->range);
@@ -564,6 +582,9 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
             const auto& calc_lights = [this, item_ptr = &item, mt_light]
             {
                 ZoneScopedN("calc lights");
+                // C1.0: the light's build and its recording, timed apart (render/lights/build_cpu, record_cpu). The
+                // PERF_SPLITs count only when main runs this task itself (no mt_calculate, or inside a Wait).
+                [[maybe_unused]] const bool perf_main_pass = !m_SecondViewportPass;
                 auto& dsgraph = RImplementation.get_context(item_ptr->batch_id);
                 {
                     auto* L = item_ptr->L;
@@ -583,6 +604,9 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
                     dsgraph.o.shadow_owner = L->shadow_owner;
 
                     {
+                        ZoneScopedN("calc lights/build");
+                        PERF_SCOPE_IF(perf_main_pass, rlights_build_cpu);
+                        PERF_SPLIT(Build);
                         PERF_PASS(xray::perf::pass::Light);
                         dsgraph.build_subspace();
                     }
@@ -592,6 +616,9 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
                     // thread handles them in flush_lights after Wait.
                     if (mt_light)
                     {
+                        ZoneScopedN("calc lights/record");
+                        PERF_SCOPE_IF(perf_main_pass, rlights_record_cpu);
+                        PERF_SPLIT(Submit);
                         if (render_light_smap(dsgraph, L, {}))
                             item_ptr->rendered = true;
 
@@ -668,6 +695,10 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
 
         PIX_EVENT(UNSHADOWED_LIGHTS);
 
+        // render/lights/accum: the rest of this smap page (the accumulation)
+        ZoneScopedN("render_lights/accum");
+        PERF_SCOPE_IF(perf_main, rlights_accum);
+
         //		switch-to-accumulator
         Target->phase_accumulator(cmd_list);
 
@@ -737,6 +768,8 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
     // Point lighting (unshadowed, if left)
     if (!LP.v_point.empty())
     {
+        ZoneScopedN("render_lights/accum_point");
+        PERF_SCOPE_IF(perf_main, rlights_accum);
         xr_vector<light*>& Lvec = LP.v_point;
         for (light* p_light : Lvec)
         {
@@ -756,6 +789,8 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
     // Spot lighting (unshadowed, if left)
     if (!LP.v_spot.empty())
     {
+        ZoneScopedN("render_lights/accum_spot");
+        PERF_SCOPE_IF(perf_main, rlights_accum);
         xr_vector<light*>& Lvec = LP.v_spot;
         for (light* p_light : Lvec)
         {

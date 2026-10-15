@@ -183,6 +183,7 @@ void IGame_Level::OnRender()
     // Level render, only when no client output required
     {
         PERF_SCOPE(rframe_calculate);
+        PERF_SPLIT(Build); // C1.0: render/split/build
         GEnv.Render->Calculate();
     }
 
@@ -196,8 +197,14 @@ void IGame_Level::OnRender()
     const float svp_fov = svp_frame ? g_pGameLevel->Cameras().SecondVPFov() : 0.f;
     Fmatrix svp_scope_project;
     const bool svp_have_project = svp_frame && g_pGameLevel->Cameras().BuildSecondVPProjection(svp_scope_project);
-    const bool svp_parallel =
-        svp_have_project && GEnv.Render->BeginSecondVPCalculateParallel(svp_fov, svp_scope_project);
+    bool svp_parallel = false;
+    if (svp_have_project)
+    {
+        ZoneScopedN("SVP/kick");
+        PERF_SCOPE(rsvp_kick);
+        PERF_SPLIT(Build);
+        svp_parallel = GEnv.Render->BeginSecondVPCalculateParallel(svp_fov, svp_scope_project);
+    }
 
     {
         PERF_SCOPE(rframe_render);
@@ -207,7 +214,9 @@ void IGame_Level::OnRender()
     // Join the worker and publish its per-pass LOD globals before the scope pass drains.
     if (svp_parallel)
     {
+        ZoneScopedN("SVP/join");
         PERF_SCOPE(rframe_svp_join);
+        PERF_SPLIT(Build);
         GEnv.Render->EndSecondVPCalculateParallel();
     }
 
@@ -216,31 +225,50 @@ void IGame_Level::OnRender()
     {
         PERF_SCOPE(rframe_svp);
         // Tracers on the main (full) framebuffer while Device still matches the first pass.
-        g_pGameLevel->RenderBulletTracersForMainViewport();
+        {
+            PERF_SCOPE(rlvl_bullets);
+            g_pGameLevel->RenderBulletTracersForMainViewport();
+        }
 
-        if (g_pGameLevel->Cameras().BeginSecondViewportRender())
+        bool svp_begun;
+        {
+            // C1.0: switches the Device camera to the scope - part of the SVP build (render/split/build)
+            ZoneScopedN("SVP/begin_vp");
+            PERF_SCOPE(rsvp_begin_vp);
+            PERF_SPLIT(Build);
+            svp_begun = g_pGameLevel->Cameras().BeginSecondViewportRender();
+        }
+        if (svp_begun)
         {
             if (svp_parallel)
             {
                 // Visibility was built on the worker; only the sun/rain tail remains - it needs
                 // the scope projection this Begin call has just installed into Device.
+                ZoneScopedN("SVP/post_calculate");
                 PERF_SCOPE(rframe_svp_calculate);
+                PERF_SPLIT(Build);
                 GEnv.Render->SecondVPPostCalculate();
             }
             else
             {
                 // Legacy sequential visibility build (stage A/B fallback path).
                 PERF_SCOPE(rframe_svp_calculate);
+                PERF_SPLIT(Build);
                 Device.m_SecondViewport.SetSecondCalculatePass(true);
                 GEnv.Render->Calculate();
                 Device.m_SecondViewport.SetSecondCalculatePass(false);
             }
             {
+                // Submit, with the build phases of the scope pass's own Render() (its waits) nested inside.
+                ZoneScopedN("SVP/render");
                 PERF_SCOPE(rframe_svp_render);
                 GEnv.Render->RenderSecondViewport();
             }
             // Tracers into rt_secondVP (current RT after phase_combine) with scope camera matrices.
-            g_pGameLevel->RenderBulletTracersForSecondViewport();
+            {
+                PERF_SCOPE(rlvl_bullets);
+                g_pGameLevel->RenderBulletTracersForSecondViewport();
+            }
             g_pGameLevel->Cameras().EndSecondViewportRender();
             // Second pass ends on rt_secondVP + small viewport; restore swapchain before HUD().RenderUI().
             GEnv.Render->BindBackbufferForUI();
@@ -518,6 +546,8 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
     PERF_INC(snd_reg_passed);
     xray::perf::SetGauge(xray::perf::Metric::snd_reg_listeners, static_cast<s64>(snd_ER.size()));
     ZoneTextF("%zu listeners", snd_ER.size());
+    // One serial per sound event: SoundEvent_Filter tells the events apart by it (22-game-thread.md, step 2)
+    const u32 event_serial = ++snd_Event_serial;
 
     // Iterate
     for (auto& it : snd_ER)
@@ -567,7 +597,7 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
             Power *= occ;
             if (Power > EPS_S)
             {
-                _esound_delegate D = {L, S, Power};
+                _esound_delegate D = {L, S, Power, CO, dist, event_serial};
                 snd_Events.push_back(D);
                 PERF_INC(snd_lst_dispatched);
             }
@@ -594,12 +624,17 @@ void IGame_Level::SoundEvent_Dispatch()
     if (dispatch_count == 0)
         return;
 
-    const auto dispatch_one = [](const _esound_delegate& D)
+    // npc_perf_sound_dispatch (22-game-thread.md, step 2): the game may drop delegates here (cap, dedupe)
+    SoundEvent_Filter(snd_Events);
+
+    u32 delivered = 0;
+    const auto dispatch_one = [&delivered](const _esound_delegate& D)
     {
         VERIFY(D.dest && D.source);
         if (!D.source->feedback)
             return;
         ZoneScopedN("feel_sound_new");
+        ++delivered;
         D.dest->feel_sound_new(D.source->g_object, D.source->g_type, D.source->g_userdata,
             D.source->feedback->is_2D() ? Device.vCameraPosition : D.source->feedback->get_params()->position,
             D.power);
@@ -613,6 +648,8 @@ void IGame_Level::SoundEvent_Dispatch()
         snd_Events.pop_back();
         dispatch_one(D);
     }
+    PERF_ADD(npc_sound_delivered, delivered); // the feel_sound_new calls of the frame (after SoundEvent_Filter)
+    (void)delivered; // without XR_PERF_METRICS
 }
 
 // Lain: added

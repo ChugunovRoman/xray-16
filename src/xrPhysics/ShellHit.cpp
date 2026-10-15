@@ -9,9 +9,12 @@
 
 #include "PHElement.h"
 #include "PHShell.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 void CPHShell::applyHit(const Fvector& pos, const Fvector& dir, float val, const u16 id, ALife::EHitType hit_type)
 {
+    // physics/corpse_wake/path/hit|explosion, unless a more specific caller tagged the thread (a zone, a script).
+    PERF_PH_WAKE_DEFAULT(hit_type == ALife::eHitTypeExplosion ? xray::perf::ph_wake::Explosion : xray::perf::ph_wake::Hit);
     if (id == u16(-1))
         return; //
 #pragma todo("Kosya to kosya:this code shold treat all hit types")
@@ -29,6 +32,7 @@ void CPHShell::applyHit(const Fvector& pos, const Fvector& dir, float val, const
 
 void CPHShell::ExplosionHit(const Fvector& pos, const Fvector& dir, float val, const u16 id)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Explosion); // physics/corpse_wake/path/*
     if (!isActive())
         return;
     EnableObject(0);

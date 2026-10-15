@@ -165,10 +165,13 @@ void CActor::PickupModeUpdate_COD()
     ISpatialResult.clear();
     SpatialCaller spatial_caller(SpatialQueryCaller::actor);
     {
-        // P19b (14-spike-instrumentation.md): every collideable object in the view frustum up to the far plane, every
-        // frame; the loop below keeps the items within 2 m (the value / actor/ucl/pickup_cod/found - how many came back)
-        ZoneScopedN("actor_ucl/pickup_cod/q_frustum");
-        g_pGamePersistent->SpatialSpace.q_frustum(ISpatialResult, 0, STYPE_COLLIDEABLE, frustum);
+        // P19b (14-spike-instrumentation.md): was q_frustum - every collideable object in the view up to the far plane
+        // (~850 a frame), while the loop below keeps only the items within 2 m of Position(). A sphere around the actor
+        // finds the same items (its test is dist <= radius + R; 1 m of margin for a spatial sphere not moved yet), and
+        // the frustum test of q_frustum (bounding sphere against the planes) is kept per candidate below.
+        // The value / actor/ucl/pickup_cod/found - how many came back from the sphere.
+        ZoneScopedN("actor_ucl/pickup_cod/q_sphere");
+        g_pGamePersistent->SpatialSpace.q_sphere(ISpatialResult, 0, STYPE_COLLIDEABLE, Position(), 3.f);
         ZoneValue(ISpatialResult.size());
     }
     PERF_ADD(actor_ucl_pickup_cod_found, ISpatialResult.size());
@@ -179,6 +182,10 @@ void CActor::PickupModeUpdate_COD()
     for (u32 o_it = 0; o_it < ISpatialResult.size(); o_it++)
     {
         ISpatial* spatial = ISpatialResult[o_it];
+        // In the view: the test q_frustum did (testSphere against all planes accepts what testSphere_dirty does)
+        const Fsphere& bounds = spatial->GetSpatialData().sphere;
+        if (!frustum.testSphere_dirty(bounds.P, bounds.R))
+            continue;
         CInventoryItem* pIItem = smart_cast<CInventoryItem*>(spatial->dcast_GameObject());
 
         if (0 == pIItem)

@@ -66,6 +66,10 @@ protected:
     // Smoothed position for map spot display (offline ALife objects only)
     Fvector2 m_display_position{10000, 10000};
     bool m_display_position_valid{false};
+    // Frame and time of the last CalcPosition: positions are computed on demand (RefreshPosition), and the smoothing
+    // steps by the time elapsed since the previous call, not by one frame
+    u32 m_position_frame{u32(-1)};
+    u32 m_position_time{};
 
 protected:
     void UpdateSpot(CUICustomMap* map, CMapSpot* sp);
@@ -114,6 +118,8 @@ public:
     virtual void UpdateLevelMap(CUICustomMap* map);
 
     void CalcPosition();
+    /** CalcPosition if it was not done this frame: CMapManager::Update keeps only locations of the current level fresh. */
+    void RefreshPosition();
     const Fvector2& CalcDirection();
     IC const shared_str& GetLevelName() { return m_cached.m_LevelName; }
     const Fvector2& GetPosition() const { return m_cached.m_Position; }
@@ -121,7 +127,8 @@ public:
     const Fvector2& GetDisplayPosition() const;
 
     u16 ObjectID() { return m_objectID; }
-    virtual bool Update();
+    /** Returns actual. current_level = Level().name(): the position is computed only for locations on it. */
+    virtual bool Update(const shared_str& current_level);
     void UpdateTTL();
     Fvector GetLastPosition() const { return m_position_global; }
     bool Serializable() const { return !!m_flags.test(eSerailizable); }
@@ -157,7 +164,9 @@ public:
 
     pcstr SpotTypeForXmlReload() const override { return m_curr_spot_name.c_str(); }
 
-    virtual bool Update();
+    virtual bool Update(const shared_str& current_level);
+    /** Another actual location of the same object: its spots hide the relation spots (CMapManager::Update). */
+    void HideSpotsCoveredBy(CMapLocation* other);
 
     virtual void UpdateMiniMap(CUICustomMap* map);
     virtual void UpdateLevelMap(CUICustomMap* map);

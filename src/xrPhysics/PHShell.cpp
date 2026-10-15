@@ -28,6 +28,7 @@
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrEngine/device.h"
 #include "PHStepDefer.h"
+#include "console_vars.h"
 
 // B6 early physics kick (PHStepDefer.h): an active shell mutated on another thread while the step runs - queue this
 // very call and re-run it on the shell after the step is joined (found again by its owner's ID). Used for the shell-level
@@ -72,6 +73,16 @@ CPHShell::CPHShell()
 
 void CPHShell::EnableObject(CPHObject* obj)
 {
+    // Ф0 (plans/optimization_mt/21-physics-step.md): a force-slept corpse woken by any path - a contact (NearCallback,
+    // split by the other object's type in physics/corpse_wake/by/*), a hit impulse, a grab, a script. physics/corpse_wake/
+    // path/*: by the ph_wake tag of the calling thread (PERF_PH_WAKE at the callers, PerfMetrics.hpp).
+    if (m_force_slept && !is_active())
+    {
+        PERF_INC(ph_corpse_wake);
+#if XR_PERF_METRICS
+        xray::perf::Add(xray::perf::PhWakePathMetric(xray::perf::TlPhWake()));
+#endif
+    }
     m_force_slept = false;
     CPHObject::activate();
     if (m_spliter_holder)
@@ -221,6 +232,19 @@ void CPHShell::PhDataUpdate(dReal step)
     if (disable)
     {
         PERF_INC(ph_shell_disabled);
+#if XR_PERF_METRICS
+        // physics/sleep/auto_disable_ragdoll*: the natural sleep of a corpse, by its age (ph_corpse_sleep_settled
+        // diagnostics, plans/optimization_mt/21-physics-step.md)
+        if (CPHCollideValidator::IsRagDollObject(*this))
+        {
+            const u32 age_ms = Device.dwTimeGlobal - m_ragdoll_since_ms;
+            PERF_INC(ph_auto_disable_ragdoll);
+            if (age_ms < static_cast<u32>(ph_console::ph_corpse_sleep_ms))
+                PERF_INC(ph_auto_disable_ragdoll_young);
+            if (age_ms < static_cast<u32>(ph_console::ph_corpse_settle_min_age_ms))
+                PERF_INC(ph_auto_disable_ragdoll_early);
+        }
+#endif
         DisableObject();
         CPHObject::put_in_recently_deactivated();
     }
@@ -278,6 +302,7 @@ void CPHShell::UnFreezeContent()
 }
 void CPHShell::applyForce(const Fvector& dir, float val)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Impulse); // physics/corpse_wake/path/*
     if (!isActive())
         return;
     PH_DEFER_SHELL(Force, applyForce(dir, val));
@@ -299,6 +324,7 @@ void CPHShell::applyForce(float x, float y, float z)
 };
 void CPHShell::applyImpulse(const Fvector& dir, float val)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Impulse); // physics/corpse_wake/path/*
     if (!isActive())
         return;
     PH_DEFER_SHELL(Force, applyImpulse(dir, val));
@@ -307,6 +333,7 @@ void CPHShell::applyImpulse(const Fvector& dir, float val)
 };
 void CPHShell::applyImpulseTrace(const Fvector& pos, const Fvector& dir, float val)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Impulse); // physics/corpse_wake/path/*
     if (!isActive())
         return;
     PH_DEFER_SHELL(Force, applyImpulseTrace(pos, dir, val));
@@ -316,6 +343,7 @@ void CPHShell::applyImpulseTrace(const Fvector& pos, const Fvector& dir, float v
 
 void CPHShell::applyImpulseTrace(const Fvector& pos, const Fvector& dir, float val, const u16 id)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Impulse); // physics/corpse_wake/path/*
     if (!isActive())
         return;
     PH_DEFER_SHELL(Force, applyImpulseTrace(pos, dir, val, id));
@@ -448,6 +476,7 @@ void CPHShell::SetTransform(const Fmatrix& m0, motion_history_state history_stat
 
 void CPHShell::Enable()
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Activation); // physics/corpse_wake/path/*
     if (!isActive())
         return;
     PH_DEFER_SHELL(Enable, Enable());
@@ -1311,6 +1340,7 @@ bool CPHShell::get_ApplyByGravity()
 
 void CPHShell::applyGravityAccel(const Fvector& accel)
 {
+    PERF_PH_WAKE_DEFAULT(xray::perf::ph_wake::Impulse); // physics/corpse_wake/path/*
     if (!isActive())
         return;
     PH_DEFER_SHELL(Force, applyGravityAccel(accel));
@@ -1487,6 +1517,27 @@ float CPHShell::get_MaxElementLinearVelSq() const
         max_sq = _max(max_sq, v.square_magnitude());
     }
     return max_sq;
+}
+
+bool CPHShell::AllElementsSlowerThan(float lin_vel, float ang_vel, bool* angular_fail) const
+{
+    const float lin_sq = lin_vel * lin_vel;
+    const float ang_sq = ang_vel * ang_vel;
+    for (const CPHElement* e : elements)
+    {
+        Fvector v;
+        e->get_LinearVel(v);
+        if (v.square_magnitude() > lin_sq)
+            return false;
+        e->get_AngularVel(v);
+        if (v.square_magnitude() > ang_sq)
+        {
+            if (angular_fail)
+                *angular_fail = true;
+            return false;
+        }
+    }
+    return true;
 }
 
 float CPHShell::get_MaxJointStretchSq() const

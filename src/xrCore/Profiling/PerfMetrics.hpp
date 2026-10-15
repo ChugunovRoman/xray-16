@@ -73,6 +73,23 @@ constexpr u8 Light = 7;
 constexpr u8 Detail = 8;
 }
 
+// Who wakes a force-slept corpse (plans/optimization_mt/21-physics-step.md, physics/corpse_wake/path/*): the reason
+// tag of the thread that reaches CPHShell::EnableObject. PERF_PH_WAKE sets it (the outer, specific caller: a zone, a
+// grab, a Lua call); PERF_PH_WAKE_DEFAULT only when nothing is set yet (the generic shell API: a hit, an impulse).
+namespace ph_wake
+{
+constexpr u8 None = 0;
+constexpr u8 Contact = 1;      // NearCallback inside the frame step on the physics thread (= physics/corpse_wake/by/*)
+constexpr u8 ContactLocal = 2; // NearCallback outside it: TryPosition, activation shape, FlyTo, StepTouch on main
+constexpr u8 Hit = 3;          // CPHShell::applyHit (bullets, melee, hit events)
+constexpr u8 Explosion = 4;    // CPHShell::ExplosionHit
+constexpr u8 Impulse = 5;      // applyImpulse* / applyForce / applyGravityAccel / setForce / setTorque
+constexpr u8 Script = 6;       // a Lua export of the physics API (ph_step_defer::ScriptCallScope)
+constexpr u8 Grab = 7;         // CPHCapture (actor grab), CTelekinesis (monsters, gravi zones' pull)
+constexpr u8 Zone = 8;         // an anomaly zone update (CCustomZone)
+constexpr u8 Activation = 9;   // CPHShell::Enable / CPHElement::Enable, net state
+}
+
 enum class Metric : u16
 {
 #define PERF_COUNTER(id, name) id,
@@ -120,6 +137,8 @@ XRCORE_API u8& TlPass() noexcept;
 XRCORE_API u8& TlCrowSrc() noexcept;
 XRCORE_API u8& TlBoneCaller() noexcept;
 XRCORE_API u8& TlWaitSite() noexcept;
+// ph_wake::* of this thread (PERF_PH_WAKE, PERF_PH_WAKE_DEFAULT), read by CPHShell::EnableObject.
+XRCORE_API u8& TlPhWake() noexcept;
 // Spawn stage 0 (plans/spawn_optimization/SPEC.md): non-zero while this thread materializes an M_SPAWN on the client
 // (CLevel::g_sv_Spawn, PERF_SPAWN_TAG). Lets the render and the sound tell a cold load inside a spawn from any other.
 XRCORE_API u8& TlSpawn() noexcept;
@@ -154,6 +173,40 @@ struct ScopedTag
     ScopedTag(const ScopedTag&) = delete;
     ScopedTag& operator=(const ScopedTag&) = delete;
 };
+
+// ScopedTag that leaves an already set tag alone: a generic entry point under a more specific caller.
+struct ScopedTagIfUnset
+{
+    u8& slot;
+    u8  prev;
+
+    ScopedTagIfUnset(u8& s, u8 v) noexcept : slot(s), prev(s)
+    {
+        if (!s)
+            s = v;
+    }
+    ~ScopedTagIfUnset() noexcept { slot = prev; }
+    ScopedTagIfUnset(const ScopedTagIfUnset&) = delete;
+    ScopedTagIfUnset& operator=(const ScopedTagIfUnset&) = delete;
+};
+
+// physics/corpse_wake/path/* bucket for a ph_wake tag.
+inline Metric PhWakePathMetric(u8 tag) noexcept
+{
+    switch (tag)
+    {
+    case ph_wake::Contact:      return Metric::ph_corpse_wake_path_contact;
+    case ph_wake::ContactLocal: return Metric::ph_corpse_wake_path_contact_local;
+    case ph_wake::Hit:          return Metric::ph_corpse_wake_path_hit;
+    case ph_wake::Explosion:    return Metric::ph_corpse_wake_path_explosion;
+    case ph_wake::Impulse:      return Metric::ph_corpse_wake_path_impulse;
+    case ph_wake::Script:       return Metric::ph_corpse_wake_path_script;
+    case ph_wake::Grab:         return Metric::ph_corpse_wake_path_grab;
+    case ph_wake::Zone:         return Metric::ph_corpse_wake_path_zone;
+    case ph_wake::Activation:   return Metric::ph_corpse_wake_path_activation;
+    default:                    return Metric::ph_corpse_wake_path_other;
+    }
+}
 
 inline u8 CrowSrcFromPass(u8 p) noexcept
 {
@@ -371,6 +424,44 @@ struct ScopedTimeByThread
     ScopedTimeByThread& operator=(const ScopedTimeByThread&) = delete;
 };
 
+// C1.0 (plans/optimization_mt/17-c1-semi-pipeline.md): render/split/build and render/split/submit - the main thread's
+// time inside DoRender split along the future hand-off point between building a frame and submitting it. A scope
+// switches the class the main thread's time goes to until it ends, then the enclosing class resumes: nested scopes
+// give each moment to the innermost one, nothing is counted twice and no re-indented blocks are needed. Main thread
+// only - elsewhere (task workers, the Game and SVP threads) it is inert, so a task body may carry one for the case main
+// runs the task itself inside a Wait. See PERF_SPLIT.
+namespace split
+{
+constexpr u8 None = 0; // not counted (the join with the Game thread)
+constexpr u8 Build = 1;
+constexpr u8 Submit = 2;
+}
+
+XRCORE_API u8 SplitEnter(u8 kind) noexcept; // returns the class to restore
+XRCORE_API void SplitLeave(u8 prev) noexcept;
+
+struct ScopedSplit
+{
+    u8   prev{split::None};
+    bool active;
+
+    explicit ScopedSplit(u8 kind) noexcept
+        : active(g_perf_metrics_active && std::this_thread::get_id() == g_main_tid.load(std::memory_order_relaxed))
+    {
+        if (active)
+            prev = SplitEnter(kind);
+    }
+
+    ~ScopedSplit() noexcept
+    {
+        if (active)
+            SplitLeave(prev);
+    }
+
+    ScopedSplit(const ScopedSplit&) = delete;
+    ScopedSplit& operator=(const ScopedSplit&) = delete;
+};
+
 // GW_OVERLAP_HAZARD (METRICS_PLAN §8.7): flags a render/main-only resource being touched from the game
 // logic thread while that thread is running - a data race waiting to happen under plan 1's overlap, not
 // something perf_metrics should gate. Own cvar (overlap_hazard_probe, set from xrEngine), independent of
@@ -484,6 +575,8 @@ void DescribeSpikeObject(const void* ctx, char* buf, size_t size) noexcept
 #   define PERF_SCOPE_BY_THREAD(m_main, m_game, m_worker)                                                            \
         ::xray::perf::ScopedTimeByThread CONCATENIZE(_perf_thr_, __LINE__)(::xray::perf::Metric::m_main,               \
             ::xray::perf::Metric::m_game, ::xray::perf::Metric::m_worker)
+// C1.0: the main thread's time until the end of the scope goes to render/split/<kind> (Build / Submit / None).
+#   define PERF_SPLIT(kind) ::xray::perf::ScopedSplit CONCATENIZE(_perf_split_, __LINE__)(::xray::perf::split::kind)
 // Drop-in replacement for ZoneScopedN(name) on an existing hot-path zone: same zone, but perf_metrics bit 2
 // (xray::perf::HideHotZones()) can turn it off for the session without recompiling, because Tracy's
 // ScopedZone/ZoneNamed decide whether to send ZoneBegin/ZoneEnd from the is_active argument at construction.
@@ -495,6 +588,7 @@ void DescribeSpikeObject(const void* ctx, char* buf, size_t size) noexcept
 #   define PERF_SCOPE_IF(cond, m) ((void)0)
 #   define PERF_ADD_IF(cond, m, v) ((void)0)
 #   define PERF_SCOPE_BY_THREAD(m_main, m_game, m_worker) ((void)0)
+#   define PERF_SPLIT(kind) ((void)0)
 #   define PERF_HOT_ZONE(name) ZoneScopedN(name)
 #endif
 
@@ -534,6 +628,14 @@ void DescribeSpikeObject(const void* ctx, char* buf, size_t size) noexcept
 #define PERF_BONE_CALLER(v) ::xray::perf::ScopedTag CONCATENIZE(_perf_bone_, __LINE__)(::xray::perf::TlBoneCaller(), static_cast<u8>(v))
 #define PERF_WAIT_SITE(v) ::xray::perf::ScopedTag CONCATENIZE(_perf_wait_, __LINE__)(::xray::perf::TlWaitSite(), static_cast<u8>(v))
 #define PERF_SPAWN_TAG() ::xray::perf::ScopedTag CONCATENIZE(_perf_spawn_, __LINE__)(::xray::perf::TlSpawn(), 1)
+// physics/corpse_wake/path/* (ph_wake::*): nothing at all in builds without XR_PERF_METRICS, a thread-local byte otherwise.
+#if XR_PERF_METRICS
+#   define PERF_PH_WAKE(v) ::xray::perf::ScopedTag CONCATENIZE(_perf_ph_wake_, __LINE__)(::xray::perf::TlPhWake(), static_cast<u8>(v))
+#   define PERF_PH_WAKE_DEFAULT(v) ::xray::perf::ScopedTagIfUnset CONCATENIZE(_perf_ph_wake_, __LINE__)(::xray::perf::TlPhWake(), static_cast<u8>(v))
+#else
+#   define PERF_PH_WAKE(v) ((void)0)
+#   define PERF_PH_WAKE_DEFAULT(v) ((void)0)
+#endif
 
 // Always compiled (not gated by XR_PERF_METRICS): overlap_hazard_probe is its own opt-in cvar, meant to
 // stay available for diagnosing plan-1 overlap races even in builds where perf_metrics is off.

@@ -40,7 +40,6 @@ CSoundRender_Core::CSoundRender_Core(CSoundManager& p)
     e_current.set_identity();
     e_target.set_identity();
     bReady = false;
-    isLocked = false;
     fTimer_Value = Timer.GetElapsed_sec();
     fTimer_Delta = 0.0f;
     fTimerPersistent_Value = TimerPersistent.GetElapsed_sec();
@@ -82,12 +81,14 @@ void CSoundRender_Core::destroy_scene(ISoundScene*& sound_scene)
 
 void CSoundRender_Core::stop_emitters()
 {
+    ScopeLock lock(&m_emitters_lock);
     for (const auto& scene : m_scenes)
         scene->stop_emitters();
 }
 
 int CSoundRender_Core::pause_emitters(bool pauseState)
 {
+    ScopeLock lock(&m_emitters_lock);
     int cnt = 0;
     for (const auto& scene : m_scenes)
         cnt += scene->pause_emitters(pauseState);
@@ -150,6 +151,7 @@ void CSoundRender_Core::attach_tail(CSound& snd, pcstr fName)
     CSoundRender_Source* s = i_create_source(fn);
     snd.dwBytesTotal += s->bytes_total();
     snd.fTimeTotal += s->length_sec();
+    ScopeLock lock(&m_emitters_lock); // snd.feedback: an emitter update() may stop and delete meanwhile
     if (snd.feedback)
         ((CSoundRender_Emitter*)snd.feedback)->fTimeToStop += s->length_sec();
 
@@ -211,6 +213,7 @@ void CSoundRender_Core::update_listener(const Fvector& P, const Fvector& D, cons
 
 void CSoundRender_Core::refresh_sources()
 {
+    ScopeLock lock(&m_emitters_lock); // no play() between the stop and the reload
     stop_emitters();
 
     for (const auto& kv : s_sources)

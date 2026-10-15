@@ -257,6 +257,10 @@ void CGlowManager::Render()
 
     Initialize();
 
+    // render/combine/glows_* (main pass combine only, see g_perf_combine_main)
+    [[maybe_unused]] const bool perf_main = g_perf_combine_main != 0;
+    PERF_ADD_IF(perf_main, rcomb_glows_active, glows.size());
+
     if (glows.empty())
         return;
 
@@ -307,6 +311,8 @@ void CGlowManager::Render()
 
         if (!glow->m_ignore_occlusion && g_pGameLevel && dist > 0.05f)
         {
+            PERF_SCOPE_IF(perf_main, rcomb_glows_occ);
+            PERF_ADD_IF(perf_main && glow->m_world_glow, rcomb_glows_world, 1);
             bool is_visible = true;
 
             if (glow->m_world_glow)
@@ -390,6 +396,7 @@ void CGlowManager::Render()
 
     const u32 vertices_count = draw_count * 4;
     RImplementation.Vertex.Unlock(vertices_count, vb_stride);
+    PERF_ADD_IF(perf_main, rcomb_glows_drawn, draw_count);
     if (!draw_count)
         return;
 

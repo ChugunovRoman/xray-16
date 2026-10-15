@@ -5,12 +5,18 @@
 class CMapLocationWrapper;
 class CInventoryOwner;
 class CMapLocation;
+class CRelationMapLocation;
 
 class CMapManager : public CUIResetNotifier
 {
     CMapLocationWrapper* m_locations_wrapper;
     vLocations* m_locations;
     xr_vector<CMapLocation*> m_deffered_destroy_queue;
+    // Visible relation locations of the running Update by object id: their spots are hidden by the other locations
+    // of the same object, matched in one pass over all locations (ResolveRelationSpotChecks)
+    xr_vector<std::pair<u16, CRelationMapLocation*>> m_relation_spot_checks;
+
+    void ResolveRelationSpotChecks();
 
 public:
     CMapManager();
@@ -29,6 +35,8 @@ public:
     void DisableAllPointers();
     bool GetMapLocationsForObject(u16 id, xr_vector<CMapLocation*>& res);
     void OnObjectDestroyNotify(u16 id);
+    /** Called by CRelationMapLocation::Update of a visible relation location (only inside Update). */
+    void QueueRelationSpotCheck(CRelationMapLocation* location);
     void ResetStorage() { m_locations = nullptr; }
 #ifdef DEBUG
     void Dump();

@@ -68,6 +68,8 @@ void RunParallelSequence()
     PERF_SPIKE_PHASE("game/parallel_seq"); // P19 spike logger (14-spike-instrumentation.md)
     xr_vector<fastdelegate::FastDelegate0<>> parallel_batch;
     parallel_batch.swap(Device.seqParallel);
+    // 22-game-thread.md (diagnostics only): delegates a frame; their parts are the game/pseq/* timers
+    xray::perf::SetGauge(xray::perf::Metric::game_pseq_items, static_cast<s64>(parallel_batch.size()));
     for (u32 pit = 0; pit < parallel_batch.size(); pit++)
         parallel_batch[pit]();
     parallel_batch.clear();

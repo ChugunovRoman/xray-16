@@ -194,6 +194,11 @@ void CSoundMemoryManager::feel_sound_new(
             }
         }
     }
+    else
+    {
+        // 22-game-thread.md, step 2: a delivery too quiet for the sound memory (it only reaches the hear callbacks)
+        PERF_INC(npc_sound_below_threshold);
+    }
 
     m_last_sound_time = Device.dwTimeGlobal;
     VERIFY(_valid(m_sound_threshold));

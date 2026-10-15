@@ -35,6 +35,11 @@ const u32 CULL_NONE = D3DCULL_NONE;
 // part of the main view's render_graph, so CSkeletonX::_Render and dx11ConstantBuffer::Flush can attribute their
 // counters to render/main/* without a pass parameter. Set and restored by render_graph only when metrics are active.
 inline thread_local u8 g_perf_rmain_dyn = 0;
+// Perf metrics only (plans/optimization_mt/18-combine-pass.md): non-zero while this thread runs phase_combine of the
+// MAIN pass, so render_forward, CParticleEffect::Render, CGlowManager::Render and _VertexStream::Lock can attribute
+// their time to render/combine/* without a pass parameter. Set and restored by CRender::Render only when metrics are
+// active.
+inline thread_local u8 g_perf_combine_main = 0;
 
 ///		detailed statistic
 struct R_statistics_element

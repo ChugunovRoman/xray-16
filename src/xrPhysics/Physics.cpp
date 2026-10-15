@@ -23,42 +23,107 @@ extern CPHWorld* ph_world;
 #include "IPhysicsShellHolder.h"
 #include "PHCharacter.h"
 #include "PHShell.h"
+#include "PHActivationShape.h"
 #include "xrEngine/xr_object.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 
 namespace
 {
 #if XR_PERF_METRICS
-// Mirrors the per-object classification in CPHWorld::OnFrameStep (ph_obj_*): same 7 buckets, for the single
-// object that a live contact just woke up (obj2 in NearCallback), not a full pass over m_objects.
-xray::perf::Metric PhWakeMetric(CPHObject* obj) noexcept
+// Mirrors the per-object classification in CPHWorld::OnFrameStep (ph_obj_*), with the shells that are neither
+// vehicles nor inventory items (physic objects, doors) split out of "other" as Prop. One object, not a pass over
+// m_objects: makes virtual calls into game objects, so callers pay for it only when metrics are on.
+enum class PhObjKind : u8
 {
-    using M = xray::perf::Metric;
+    Actor,
+    Ai,
+    Ragdoll,
+    Vehicle,
+    Item,
+    Prop,
+    Static,
+    Other
+};
+
+PhObjKind ClassifyPhObject(CPHObject* obj) noexcept
+{
     const CPHObject::ECastType tp = obj->CastType();
     if (tp == CPHObject::tpCharacter)
     {
         CPHCharacter* ch = static_cast<CPHCharacter*>(obj);
         if (ch->CastActorCharacter())
-            return M::ph_wake_actor;
+            return PhObjKind::Actor;
         if (ch->CastAICharacter())
-            return M::ph_wake_ai;
-        return M::ph_wake_other;
+            return PhObjKind::Ai;
+        return PhObjKind::Other;
     }
     if (CPHCollideValidator::IsRagDollObject(*obj))
-        return M::ph_wake_ragdoll;
+        return PhObjKind::Ragdoll;
     if (tp == CPHObject::tpStaticShell)
-        return M::ph_wake_static;
+        return PhObjKind::Static;
     if (tp == CPHObject::tpShell)
     {
         IPhysicsShellHolder* holder = static_cast<CPHShell*>(obj)->PhysicsRefObject();
         IGameObject* go = holder ? holder->IObject() : nullptr;
         if (go && go->cast_holder_custom())
-            return M::ph_wake_vehicle;
+            return PhObjKind::Vehicle;
         if (holder && holder->IsInventoryItem())
-            return M::ph_wake_item;
-        return M::ph_wake_other;
+            return PhObjKind::Item;
+        return PhObjKind::Prop;
     }
-    return M::ph_wake_other;
+    return PhObjKind::Other;
+}
+
+// physics/wake/*: the object a live contact just woke up (obj2 in NearCallback). Props stay in "other" as before.
+xray::perf::Metric PhWakeMetric(PhObjKind kind) noexcept
+{
+    using M = xray::perf::Metric;
+    switch (kind)
+    {
+    case PhObjKind::Actor: return M::ph_wake_actor;
+    case PhObjKind::Ai: return M::ph_wake_ai;
+    case PhObjKind::Ragdoll: return M::ph_wake_ragdoll;
+    case PhObjKind::Vehicle: return M::ph_wake_vehicle;
+    case PhObjKind::Item: return M::ph_wake_item;
+    case PhObjKind::Static: return M::ph_wake_static;
+    default: return M::ph_wake_other;
+    }
+}
+
+// physics/corpse_wake/by/*: the object whose contact woke a force-slept corpse (obj1 in NearCallback).
+xray::perf::Metric PhCorpseWakerMetric(PhObjKind kind) noexcept
+{
+    using M = xray::perf::Metric;
+    switch (kind)
+    {
+    case PhObjKind::Actor: return M::ph_corpse_wake_by_actor;
+    case PhObjKind::Ai: return M::ph_corpse_wake_by_ai;
+    case PhObjKind::Ragdoll: return M::ph_corpse_wake_by_ragdoll;
+    case PhObjKind::Vehicle: return M::ph_corpse_wake_by_vehicle;
+    case PhObjKind::Item: return M::ph_corpse_wake_by_item;
+    case PhObjKind::Prop: return M::ph_corpse_wake_by_prop;
+    default: return M::ph_corpse_wake_by_other;
+    }
+}
+
+// physics/corpse_wake/local_by/*: the same outside the frame step on the physics thread (path/contact_local). The
+// activation shape (CPHActivationShape: a death, a movement box switch, FlyTo) is split out of "other".
+xray::perf::Metric PhCorpseLocalWakerMetric(CPHObject* obj1) noexcept
+{
+    using M = xray::perf::Metric;
+    switch (ClassifyPhObject(obj1))
+    {
+    case PhObjKind::Actor: return M::ph_corpse_wake_local_by_actor;
+    case PhObjKind::Ai: return M::ph_corpse_wake_local_by_ai;
+    case PhObjKind::Ragdoll: return M::ph_corpse_wake_local_by_ragdoll;
+    case PhObjKind::Item: return M::ph_corpse_wake_local_by_item;
+    case PhObjKind::Prop: return M::ph_corpse_wake_local_by_prop;
+    case PhObjKind::Other:
+        if (dynamic_cast<CPHActivationShape*>(obj1))
+            return M::ph_corpse_wake_local_by_activation;
+        return M::ph_corpse_wake_local_by_other;
+    default: return M::ph_corpse_wake_local_by_other;
+    }
 }
 #endif // XR_PERF_METRICS
 
@@ -66,6 +131,31 @@ xray::perf::Metric PhWakeMetric(CPHObject* obj) noexcept
 bool IsForceSleptCorpse(const CPHObject* obj) noexcept
 {
     return !obj->is_active() && static_cast<const CPHShell*>(obj)->m_force_slept;
+}
+
+// Ф1 (plans/optimization_mt/21-physics-step.md): the bodies that see a force-slept corpse as static geometry - loose
+// shells: inventory items (weapons included) and physic props. Not ragdolls (corpse-vs-corpse is skipped whole in
+// NearCallback), not characters (live NPCs: IsLiveNpcController below; the actor keeps pushing and waking corpses),
+// not vehicles (a car still shoves a corpse aside), not animated shells (a door driven by its animation must not stop
+// against a corpse).
+bool IsLooseDynamicShell(CPHObject* obj)
+{
+    if (obj->CastType() != CPHObject::tpShell)
+        return false;
+    if (CPHCollideValidator::IsRagDollObject(*obj) || CPHCollideValidator::IsAnimatedObject(*obj))
+        return false;
+    IPhysicsShellHolder* holder = static_cast<CPHShell*>(obj)->PhysicsRefObject();
+    IGameObject* go = holder ? holder->IObject() : nullptr;
+    return !(go && go->cast_holder_custom());
+}
+
+// NPC one-way contacts (plans/optimization_mt/21-physics-step.md): a live NPC's movement controller (CPHAICharacter),
+// not the actor's (CPHActorCharacter: the player keeps shoving corpses around). Characters DO collide with corpses here:
+// Common/Config.hpp defines DEAD_BODY_COLLISION, so CCharacterPhysicsSupport::CreateShell never sets
+// flRemoveCharacterCollisionAfterDisable and a sleeping corpse keeps colliding with every controller.
+bool IsLiveNpcController(CPHObject* obj)
+{
+    return obj->CastType() == CPHObject::tpCharacter && static_cast<CPHCharacter*>(obj)->CastAICharacter() != nullptr;
 }
 } // namespace
 // PhysicsStepTimeCallback		*physics_step_time_callback				= 0;
@@ -129,8 +219,11 @@ IC void add_contact_body_effector(dBodyID body, const dContact& c, SGameMtl* mat
     }
 }
 
-IC static int CollideIntoGroup(
-    dGeomID o1, dGeomID o2, dJointGroupID jointGroup, CPHIsland* world, const int& MAX_CONTACTS)
+// static_world (Ф1, one-sided contacts): the island of a sleeping object that must act as static geometry here - its
+// bodies are left out of every contact joint (attached as body 0, like the level mesh), so the solver neither moves nor
+// enables them and the joint does not tie its island to `world`.
+IC static int CollideIntoGroup(dGeomID o1, dGeomID o2, dJointGroupID jointGroup, CPHIsland* world,
+    const int& MAX_CONTACTS, const dxWorld* static_world = nullptr)
 {
     const int RS = 800 + 10;
     const int N = RS;
@@ -297,6 +390,18 @@ IC static int CollideIntoGroup(
 
         if (do_collide && collided_contacts < MAX_CONTACTS)
         {
+            dBodyID body_1 = dGeomGetBody(g1);
+            dBodyID body_2 = dGeomGetBody(g2);
+            if (static_world)
+            {
+                // dxBody::world is the CPHIsland the body was added to (CPHIsland::AddBody); merges never change it.
+                if (body_1 && body_1->world == static_world)
+                    body_1 = nullptr;
+                if (body_2 && body_2->world == static_world)
+                    body_2 = nullptr;
+                if (!body_1 && !body_2)
+                    continue;
+            }
             ++collided_contacts;
 #ifdef DEBUG
             if (debug_output().ph_dbg_draw_mask().test(phDbgDrawContacts))
@@ -304,7 +409,8 @@ IC static int CollideIntoGroup(
 #endif
             dJointID contact_joint = dJointCreateContact(0, jointGroup, &c);
             world->ConnectJoint(contact_joint);
-            dJointAttach(contact_joint, dGeomGetBody(g1), dGeomGetBody(g2));
+            // A zero body1 is swapped to body2 by dJointAttach (dJOINT_REVERSE flips the normal), as for the mesh.
+            dJointAttach(contact_joint, body_1, body_2);
         }
     }
     return collided_contacts;
@@ -333,8 +439,69 @@ void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2)
         (IsForceSleptCorpse(obj1) || IsForceSleptCorpse(obj2)))
         return;
 
-    int MAX_CONTACTS = -1;
     const bool counting = ph_world->Processing();
+
+    // Ф1 (plans/optimization_mt/21-physics-step.md): a loose body (item, weapon, prop) against a force-slept corpse.
+    // Measured: corpse_force_slept ~ wake/ragdoll ~ 1.3 x active ragdolls per frame - every corpse SleepCorpses() put to
+    // sleep was woken by a contact on the very next substep, so the far corpses (and the loot lying on them) stayed
+    // active for good. Here the corpse acts as static geometry for the loose body: its contacts are attached to the
+    // loose body only, the islands are not merged and the corpse is not enabled - the body still rests on the corpse
+    // (no falling through), the corpse stays asleep. Hits, explosions, grabs and scripts still wake it (impulses and
+    // CPHShell::EnableObject, not contacts); the actor and vehicles are not loose bodies and collide as before.
+    // The same for a live NPC's controller - measured (session 14:10:43) as about half of the wakes left after the
+    // items were taken out (physics/corpse_wake/by/ai). The NPC then meets the corpse as it meets the level mesh (stands
+    // on it, steps over it, stops at it) instead of pushing it away; its own contact logic
+    // (CPHSimpleCharacter::InitContact) still sees an object contact, only the joint has no second body.
+    {
+        CPHObject* loose = nullptr;
+        CPHObject* corpse = nullptr;
+        // Not both: a corpse-vs-corpse pair with a force-slept one has returned above.
+        if (CPHCollideValidator::IsRagDollObject(*obj2) && IsForceSleptCorpse(obj2))
+        {
+            loose = obj1;
+            corpse = obj2;
+        }
+        else if (CPHCollideValidator::IsRagDollObject(*obj1) && IsForceSleptCorpse(obj1))
+        {
+            loose = obj2;
+            corpse = obj1;
+        }
+        bool npc = false;
+        if (loose)
+        {
+            // An active loose body only: its island is the one Step() unmerges (IslandReinit), so the joints connected
+            // to it here never outlive the substep. A sleeping one keeps the old path (merge + RegisterMerged). An NPC
+            // controller may also be obj1 of a local step (CPHAICharacter::TryPosition -> DoCollideObj / step_single):
+            // reinit_single() unmerges obj1 and empties ContactGroup right after, active or not.
+            if ((loose == obj1 || loose->is_active()) && IsLiveNpcController(loose))
+                npc = true;
+            else if (!(loose->is_active() && IsLooseDynamicShell(loose)))
+                loose = nullptr;
+        }
+        if (loose)
+        {
+            if (counting)
+                PERF_INC(ph_near_calls);
+            // NPC pairs are counted on every path: most of them come from TryPosition on main, outside the frame step.
+            if (npc)
+                PERF_INC(ph_oneway_npc_pairs);
+            else if (counting)
+                PERF_INC(ph_oneway_pairs);
+            // The contacts go into the loose body's island only: its own joint budget, as for the level mesh.
+            CPHIsland* island = loose->DActiveIsland();
+            const int max_contacts = island->MaxJoints();
+            if (max_contacts <= 0)
+                return;
+            const int contacts = CollideIntoGroup(o1, o2, ContactGroup, island, max_contacts, corpse->DWorld());
+            if (npc)
+                PERF_ADD(ph_oneway_npc_contacts, u64(contacts));
+            else if (counting)
+                PERF_ADD(ph_oneway_contacts, u64(contacts));
+            return;
+        }
+    }
+
+    int MAX_CONTACTS = -1;
     if (counting)
         PERF_INC(ph_near_calls);
     if (!island1->CanMerge(island2, MAX_CONTACTS))
@@ -360,9 +527,28 @@ void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2)
 #if XR_PERF_METRICS
                 // Classification makes virtual calls into game objects - pay for it only when metrics are on.
                 if (xray::perf::g_perf_metrics_active)
-                    xray::perf::Add(PhWakeMetric(obj2));
+                {
+                    const PhObjKind woken = ClassifyPhObject(obj2);
+                    xray::perf::Add(PhWakeMetric(woken));
+                    // Ф0: who wakes force-slept corpses (read before EnableObject clears m_force_slept).
+                    if (woken == PhObjKind::Ragdoll && static_cast<CPHShell*>(obj2)->m_force_slept)
+                        xray::perf::Add(PhCorpseWakerMetric(ClassifyPhObject(obj1)));
+                }
 #endif
             }
+            // physics/corpse_wake/path/contact (the frame step on its own thread) or contact_local (TryPosition, the
+            // activation shape and other local steps, or a frame step on another thread than the caller).
+            PERF_PH_WAKE(counting && !ph_world->IsStepRunningOnOtherThread() ? xray::perf::ph_wake::Contact :
+                                                                              xray::perf::ph_wake::ContactLocal);
+#if XR_PERF_METRICS
+            // physics/corpse_wake/local_by/*: who wakes force-slept corpses in the local steps (the same condition as
+            // ContactLocal above; read before EnableObject clears m_force_slept).
+            if (xray::perf::g_perf_metrics_active && !(counting && !ph_world->IsStepRunningOnOtherThread()) &&
+                CPHCollideValidator::IsRagDollObject(*obj2) && static_cast<CPHShell*>(obj2)->m_force_slept)
+            {
+                xray::perf::Add(PhCorpseLocalWakerMetric(obj1));
+            }
+#endif
             obj2->EnableObject(obj1);
         }
     }
@@ -371,6 +557,7 @@ void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2)
 void CollideStatic(dGeomID o2, CPHObject* obj2)
 {
     PERF_SCOPE(ph_collide_static);
+    PERF_SCOPE_IF(ph_world->Processing(), ph_step_static); // Ф0: the frame step on the physics thread only
     CPHIsland* island2 = obj2->DActiveIsland();
     const int contacts =
         CollideIntoGroup(ph_world->GetMeshGeom(), o2, ContactGroup, island2, island2->MaxJoints());
