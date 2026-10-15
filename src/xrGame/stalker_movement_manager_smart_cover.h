@@ -57,6 +57,8 @@ public:
     virtual void remove_links(IGameObject* object);
     void cleanup_after_animation_selector();
     bool in_smart_cover() const;
+    // Ground snap (CMovementManager::ground_snap): a loophole may hold the stalker off the AI floor
+    virtual bool ground_snap_allowed() const { return !in_smart_cover(); }
     inline bool check_can_kill_enemy() const;
     inline void check_can_kill_enemy(bool value);
 

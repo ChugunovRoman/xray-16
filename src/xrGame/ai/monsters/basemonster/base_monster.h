@@ -113,6 +113,9 @@ public:
     virtual void load(IReader& input_packet) { inherited::load(input_packet); }
     virtual void UpdateCL();
     virtual void shedule_Update(u32 dt);
+    // 22-game-thread.md, step 4d (the urgent near heap): an enemy or a recent hit - first in the near class of the
+    // scheduler (base_monster_misc.cpp)
+    virtual bool shedule_Urgent() const override;
 
     virtual void InitThink() {}
     virtual void Think();

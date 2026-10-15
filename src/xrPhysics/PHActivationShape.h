@@ -44,6 +44,10 @@ public:
     void set_rotation(const Fmatrix& rot);
 
 private:
+    // F1 (plans/optimization_mt/24-critical-path.md): StepTouch() / Step() of the push-out on the shape alone (see Activate)
+    void LocalTouch();
+    void LocalStep();
+    void LocalStepCleanup();
     virtual void PhDataUpdate(dReal step);
     virtual void PhTune(dReal step);
     virtual void CutVelocity(float l_limit, float a_limit);

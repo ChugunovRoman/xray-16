@@ -56,7 +56,7 @@ extern ECORE_API float ps_r__WallmarkSHIFT_V;
 extern ECORE_API float ps_r__GLOD_ssa_start;
 extern ECORE_API float ps_r__GLOD_ssa_end;
 extern ECORE_API float ps_r__LOD;
-// Second viewport: rt_secondVP size = main resolution * this factor (r__dedicated_second_vp 1). Console: r__second_vp_render_scale.
+// Second viewport: rt_secondVP size = main resolution * this factor. Console: r__second_vp_render_scale.
 extern ECORE_API float ps_r__second_vp_render_scale;
 // Main render scale: the main deferred chain renders at Device size * this factor and phase_pp
 // stretches it to the backbuffer (UI stays native). 1 = off (path fully bypassed). Console: r__render_scale.
@@ -171,11 +171,7 @@ extern ECORE_API float ps_r2_static_light_range; // affect only lights with rang
 extern ECORE_API int ps_r2_light_editor_spot; // 1 = honor Flight::Type::Spot from level data (direction + phi)
 extern ECORE_API float ps_r2_light_degrade_lod; // skip shadowed lights below this LOD entirely, 0 = off
 extern ECORE_API float ps_r2_light_shadow_dist; // max distance from camera to light volume edge for shadow rendering, 0 = off
-extern ECORE_API int ps_r2_smap_hull_cull; // 1 = cull shadow casters whose shadow hull misses the camera frustum
-extern ECORE_API int ps_r2_light_occq_async; // 1 = non-blocking occq reads for light visibility
-extern ECORE_API int ps_r2_mt_light_render; // 1 = record light shadow maps on deferred contexts in worker tasks (DX11 only, ignored on GL)
 extern ECORE_API int ps_r2_smap_npc_blob; // shadow-map NPC blob: 0=off, 1=when no LOD model, 2=always, 3=skip entirely
-extern ECORE_API int ps_r2_light_common_dynamic; // 1 = single shared spatial query for all light SMAP passes
 extern ECORE_API int ps_r2_wait_sleep;
 extern ECORE_API int ps_r2_wait_timeout;
 
@@ -251,8 +247,6 @@ enum
     R3FLAGEXT_SSR_JITTER = (1 << 11),
 };
 
-extern ECORE_API int r__particle_render_parallel;
-extern ECORE_API int r__particle_render_parallel_min_count;
 extern ECORE_API int r__parallel_skeleton_visbox;
 extern ECORE_API int r__parallel_skeleton_visbox_min_bones;
 // Parallel main build (plans/optimization_mt/08-parallel-main-build.md): dynamic part of the main-view build split

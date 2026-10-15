@@ -124,6 +124,9 @@ extern float g_smart_cover_animation_speed_factor;
 extern float ph_npc_kinematic_far_dist;
 extern float ph_npc_kinematic_far_hyst;
 extern float ph_npc_kinematic_unseen_dist;
+// Live NPCs left high in the air (plans/optimization_mt/21-physics-step.md, 2026-10-15): movement_manager_physic.cpp
+extern float ai_npc_ground_snap_height;
+extern float ai_npc_ground_snap_speed;
 // Spawn stage 2 (plans/spawn_optimization/SPEC.md 5.A): the budget of the client materialization of M_SPAWN, Level.cpp
 extern int g_spawn_budget_us;
 extern int g_spawn_min_per_frame;
@@ -180,8 +183,6 @@ int net_cl_inputupdaterate = 50;
 Flags32 g_mt_config = {mtLevelPath | mtDetailPath | mtObjectHandler | mtSoundPlayer | mtBullets | mtLUA_GC |
     mtLevelSounds | mtALife | mtMap};
 
-int ps_r__mt_ai_vision_parallel = 1;
-
 Flags32 g_map_spot_config = {MAP_SPOT_SMOOTH};
 float ps_map_spot_smooth_speed = 0.6f;
 
@@ -227,10 +228,8 @@ int npc_perf_cover_best_max_evaluate = 32;
 int npc_perf_cover_nearest_max_points = 128;
 int npc_perf_cover_best_max_accessible = 48;
 int npc_perf_cover_find_eval_budget_total = 64;
-int npc_perf_cover_find_skip_near_10m = 1;
 u32 g_npc_perf_cover_find_eval_budget_remaining = u32(-1);
 u32 npc_perf_long_dead_skip_binder_ms = 5000;
-int npc_perf_skip_script_net_relcase = 1;
 float npc_perf_binder_far_dist = 300.f;
 u32 npc_perf_binder_far_interval_ms = 250;
 u32 npc_perf_binder_far_phases = 6;
@@ -239,7 +238,6 @@ u32 npc_perf_binder_far_throttle_ms = 450;
 int npc_perf_stalker_vis_interval_near_ms = 0;
 int npc_perf_stalker_vis_interval_medium_ms = 350;
 int npc_perf_stalker_vis_interval_far_ms = 900;
-int npc_perf_vision_parallel_batch = 1;
 int npc_perf_vision_parallel_batch_min_rays = 32;
 float npc_perf_vision_small_physics_radius = 0.25f;
 float npc_perf_monster_vis_near_dist = 35.f;
@@ -251,11 +249,7 @@ u32 npc_perf_ik_interval_medium_ms = 200;
 u32 npc_perf_ik_interval_far_ms = 450;
 u32 npc_perf_ik_interval_disabled_ms = 30000;
 u32 npc_perf_ik_interval_enemy_selected_ms = 0;
-int npc_perf_ik_foot_raypick_batch = 2;
 int npc_perf_ik_foot_raypick_batch_min_rays = 12;
-int npc_perf_ik_foot_static_only = 1; // IK foot rays: 1 = static geometry only (a crowd), 0 = also dynamic objects
-int npc_perf_mt_stalker_physics = 0;
-int npc_perf_disable_ucl_stalker_step_manager = 0;
 int ai_evaluator_ttl_ms = 500;
 u32 npc_perf_state_mgr_animstate_ttl_ms = 120;
 u32 npc_perf_script_combat_ttl_ms = 100;
@@ -284,10 +278,6 @@ u32 npc_perf_motivator_dead_interval = 3000;
 u32 npc_perf_motivator_native_gate = 0;
 u32 npc_perf_sim_brain_actor_update_interval = 10000;
 int npc_perf_agent_enemy_fill_squads_trace_members = 0;
-int npc_perf_agent_distribute_once_per_frame = 1; // agent_enemy_manager.cpp: one distribution per group a frame
-int npc_perf_agent_fill_skip_no_enemy = 1; // agent_enemy_manager.cpp: members without enemies are not walked
-int npc_perf_step_far_skip_material = 1;   // step_manager.cpp: no material pick for a step beyond 20 m
-int npc_perf_script_action_weight_lookup = 1; // script_action_wrapper.cpp: no Lua call for a default weight
 int npc_perf_visible_value_native = 1;        // visual_memory_manager.cpp: get_visible_value in C++
 // Stage D, W4-2: xr_logic.pick_section_from_condlist in the engine (gw_condlist_native.cpp);
 // 0 = Lua, 1 = native, 2 = shadow (dry native pass first, Lua decides, mismatches counted)
@@ -320,14 +310,10 @@ int npc_perf_walker_camp_once = 0;        // xr_walker: register_npc once per st
 int npc_perf_scheme_condlist_ttl_ms = 0;  // xr_animpoint reach_movement, xr_cover anm: condlist answer kept (ms)
 int npc_perf_move_mgr_fixes = 0;          // move_mgr: a look point without ret drops the ret of the previous one
 // P17b (plans/optimization_mt/12-relcase.md), read by death_manager.script: the items a dead NPC must not keep are
-// released together once per this many ms (one frame with a destroy instead of one per death); 0 = at once. Not saved.
+// released together once per this many ms (one frame with a destroy instead of one per death); 0 = at once.
 int npc_perf_death_release_batch_ms = 1000;
 
-// Dev kill-switch: per-solve cache for script GOAP evaluators (read in script_property_evaluator_wrapper.cpp).
-int ai_evaluator_solve_cache = 1;
-
-// Animation LOD: throttle SelectAnimation for far, non-combat NPCs (read in ai_stalker.cpp).
-int npc_anim_lod = 1;
+// Animation LOD (always on): the animation update interval of far, non-combat NPCs (read in ai_stalker.cpp).
 int npc_anim_lod_far_interval_ms = 120;
 
 u32 npc_preview_scene_budget_per_frame = 1;
@@ -2933,6 +2919,14 @@ public:
     void Save(IWriter*) override {}
 };
 
+// The same for a float
+class CCC_FloatNotSaved : public CCC_Float
+{
+public:
+    using CCC_Float::CCC_Float;
+    void Save(IWriter*) override {}
+};
+
 void CCC_RegisterCommands()
 {
     ZoneScoped;
@@ -2999,10 +2993,9 @@ void CCC_RegisterCommands()
 
 #ifndef MASTER_GOLD
     // ai
-    // Bit kept for console compatibility. Default vision runs on the scheduler / GameThread; optional `seqParallel`
-    // path uses the same GameThread batch (see `CAI_Stalker::shedule_Update` + `EngineThreading::GameThread`).
+    // Bit kept for console compatibility, no effect: NPC vision always goes through the shared batch
+    // (g_vision_batch, CLevel::VisionBatchPostScheduler), the vanilla seqParallel Exec_Visibility is not used.
     CMD3(CCC_Mask, "mt_ai_vision", &g_mt_config, mtAiVision);
-    CMD4(CCC_Integer, "r__mt_ai_vision_parallel", &ps_r__mt_ai_vision_parallel, 0, 1);
     CMD3(CCC_Mask, "mt_level_path", &g_mt_config, mtLevelPath);
     CMD3(CCC_Mask, "mt_detail_path", &g_mt_config, mtDetailPath);
     CMD3(CCC_Mask, "mt_object_handler", &g_mt_config, mtObjectHandler);
@@ -3122,9 +3115,7 @@ void CCC_RegisterCommands()
 #endif // DEBUG
 
     // Performance / NPC throttling and cache (user.ltx)
-    CMD4(CCC_Integer, "ai_evaluator_solve_cache", &ai_evaluator_solve_cache, 0, 1);
     CMD4(CCC_Integer, "ai_evaluator_ttl_ms", &ai_evaluator_ttl_ms, 0, 1000);
-    CMD4(CCC_Integer, "npc_anim_lod", &npc_anim_lod, 0, 1);
     CMD4(CCC_Integer, "npc_anim_lod_far_interval_ms", &npc_anim_lod_far_interval_ms, 1, 5000);
     CMD4(CCC_Float, "npc_perf_planner_near_dist", &npc_perf_planner_near_dist, 1.f, 2000.f);
     CMD4(CCC_Float, "npc_perf_planner_medium_dist", &npc_perf_planner_medium_dist, 1.f, 2000.f);
@@ -3143,16 +3134,12 @@ void CCC_RegisterCommands()
         32000);
     CMD4(CCC_Integer, "ai_graph_engine_serialize", &ps_ai_graph_engine_serialize, 0, 1);
     CMD4(CCC_Integer, "ai_graph_engine_detect_concurrent", &ps_ai_graph_engine_detect_concurrent, 0, 1);
-    CMD4(CCC_Integer, "ai_path_build_tls_scratch", &ps_ai_path_build_use_tls_scratch, 0, 1);
-    CMD4(CCC_Integer, "ai_patrol_remap_invalid_vertex", &ps_ai_patrol_remap_invalid_vertex, 0, 1);
     CMD4(CCC_Integer, "ai_patrol_remap_log", &ps_ai_patrol_remap_log, 0, 1);
     CMD4(CCC_Integer, "npc_perf_cover_best_max_evaluate", &npc_perf_cover_best_max_evaluate, 0, 4096);
     CMD4(CCC_Integer, "npc_perf_cover_nearest_max_points", &npc_perf_cover_nearest_max_points, 0, 4096);
     CMD4(CCC_Integer, "npc_perf_cover_best_max_accessible", &npc_perf_cover_best_max_accessible, 0, 4096);
     CMD4(CCC_Integer, "npc_perf_cover_find_eval_budget_total", &npc_perf_cover_find_eval_budget_total, 0, 4096);
-    CMD4(CCC_Integer, "npc_perf_cover_find_skip_near_10m", &npc_perf_cover_find_skip_near_10m, 0, 1);
     CMD4(CCC_Integer, "npc_perf_long_dead_skip_binder_ms", (int*)&npc_perf_long_dead_skip_binder_ms, 0, 120000);
-    CMD4(CCC_Integer, "npc_perf_skip_script_net_relcase", &npc_perf_skip_script_net_relcase, 0, 1);
     CMD4(CCC_Float, "npc_perf_binder_far_dist", &npc_perf_binder_far_dist, 1.f, 2000.f);
     CMD4(CCC_Integer, "npc_perf_binder_far_interval_ms", (int*)&npc_perf_binder_far_interval_ms, 10, 10000);
     CMD4(CCC_Integer, "npc_perf_binder_far_phases", (int*)&npc_perf_binder_far_phases, 1, 64);
@@ -3168,14 +3155,10 @@ void CCC_RegisterCommands()
     // Ms after death before a corpse stops recalculating its bones. 0 = never freeze (a corpse frozen while the
     // ragdoll is still moving stays stuck mid-air).
     CMD4(CCC_Integer, "r_corpse_pose_freeze_ms", (int*)&ps_r_corpse_pose_freeze_ms, 0, 120000);
-    CMD4(CCC_Integer, "npc_perf_vision_parallel_batch", &npc_perf_vision_parallel_batch, 0, 1);
     CMD4(CCC_Integer, "npc_perf_vision_parallel_batch_min_rays", &npc_perf_vision_parallel_batch_min_rays, 0, 10000);
     CMD4(CCC_Float, "npc_perf_vision_small_physics_radius", &npc_perf_vision_small_physics_radius, 0.f, 10.f);
-    CMD4(CCC_Integer, "npc_perf_vision_skip_dynamic_ray", &npc_perf_vision_skip_dynamic_ray, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_vision_static_only", &npc_perf_vision_static_only, 0, 1);
     CMD4(CCC_Float, "npc_perf_vision_cache_pos_slack_m", &npc_perf_vision_cache_pos_slack_m, 0.f, 5.f);
     CMD4(CCC_Integer, "npc_perf_vision_rays_per_npc", &npc_perf_vision_rays_per_npc, 0, 256);
-    CMD4(CCC_Integer, "npc_perf_vision_dynamic_cache", &npc_perf_vision_dynamic_cache, 0, 1);
     CMD4(CCC_Float, "npc_perf_monster_vis_near_dist", &npc_perf_monster_vis_near_dist, 1.f, 500.f);
     CMD4(CCC_Float, "npc_perf_monster_vis_medium_dist", &npc_perf_monster_vis_medium_dist, 1.f, 500.f);
     CMD4(CCC_Integer, "npc_perf_monster_vis_interval_medium_ms", (int*)&npc_perf_monster_vis_interval_medium_ms, 10, 30000);
@@ -3185,11 +3168,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_ik_interval_far_ms", (int*)&npc_perf_ik_interval_far_ms, 10, 60000);
     CMD4(CCC_Integer, "npc_perf_ik_interval_disabled_ms", (int*)&npc_perf_ik_interval_disabled_ms, 1000, 120000);
     CMD4(CCC_Integer, "npc_perf_ik_interval_enemy_selected_ms", (int*)&npc_perf_ik_interval_enemy_selected_ms, 0, 60000);
-    CMD4(CCC_Integer, "npc_perf_ik_foot_raypick_batch", &npc_perf_ik_foot_raypick_batch, 0, 2);
     CMD4(CCC_Integer, "npc_perf_ik_foot_raypick_batch_min_rays", &npc_perf_ik_foot_raypick_batch_min_rays, 0, 128);
-    CMD4(CCC_Integer, "npc_perf_ik_foot_static_only", &npc_perf_ik_foot_static_only, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_mt_stalker_physics", &npc_perf_mt_stalker_physics, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_disable_ucl_stalker_step_manager", &npc_perf_disable_ucl_stalker_step_manager, 0, 1);
     CMD4(CCC_Integer, "npc_perf_state_mgr_animstate_ttl_ms", (int*)&npc_perf_state_mgr_animstate_ttl_ms, 10, 30000);
     CMD4(CCC_Integer, "npc_perf_script_combat_ttl_ms", (int*)&npc_perf_script_combat_ttl_ms, 10, 30000);
     CMD4(CCC_Integer, "npc_perf_evaluator_combat_enemy_cache_ttl_ms", (int*)&npc_perf_evaluator_combat_enemy_cache_ttl_ms, 10, 30000);
@@ -3217,10 +3196,6 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_motivator_native_gate", (int*)&npc_perf_motivator_native_gate, 0, 1);
     CMD4(CCC_Integer, "npc_perf_sim_brain_actor_update_interval", (int*)&npc_perf_sim_brain_actor_update_interval, 1000, 120000);
     CMD4(CCC_Integer, "npc_perf_agent_enemy_fill_squads_trace_members", &npc_perf_agent_enemy_fill_squads_trace_members, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_agent_distribute_once_per_frame", &npc_perf_agent_distribute_once_per_frame, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_agent_fill_skip_no_enemy", &npc_perf_agent_fill_skip_no_enemy, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_step_far_skip_material", &npc_perf_step_far_skip_material, 0, 1);
-    CMD4(CCC_Integer, "npc_perf_script_action_weight_lookup", &npc_perf_script_action_weight_lookup, 0, 1);
     CMD4(CCC_Integer, "npc_perf_visible_value_native", &npc_perf_visible_value_native, 0, 1);
     CMD4(CCC_Integer, "npc_perf_condlist_native", &npc_perf_condlist_native, 0, 2);
     CMD4(CCC_Integer, "npc_perf_ik_enemy_near_dist", &npc_perf_ik_enemy_near_dist, 0, 200);
@@ -3244,7 +3219,7 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_walker_camp_once", &npc_perf_walker_camp_once, 0, 1);
     CMD4(CCC_Integer, "npc_perf_scheme_condlist_ttl_ms", &npc_perf_scheme_condlist_ttl_ms, 0, 5000);
     CMD4(CCC_Integer, "npc_perf_move_mgr_fixes", &npc_perf_move_mgr_fixes, 0, 1);
-    CMD4(CCC_IntegerNotSaved, "npc_perf_death_release_batch_ms", &npc_perf_death_release_batch_ms, 0, 5000);
+    CMD4(CCC_Integer, "npc_perf_death_release_batch_ms", &npc_perf_death_release_batch_ms, 0, 5000);
     // 22-game-thread.md, step 2: the sound dispatch filter (Level.cpp, CLevel::SoundEvent_Filter, always on) - a sound
     // goes to the listeners near it or near the actor, those with an xr_hear on_sound section, and at most N of the
     // others (the loudest); the actor's own sounds go to everyone. Its tunables
@@ -3263,8 +3238,7 @@ void CCC_RegisterCommands()
     CMD1(CCC_PHFps, "ph_frequency");
     CMD1(CCC_PHIterations, "ph_iterations");
 
-    // P1: parallel island solve (dev toggles for A/B; keep available in release builds)
-    CMD4(CCC_Integer, "ph_mt_island_solve", &ph_console::ph_mt_island_solve, 0, 1);
+    // P1: parallel island solve (permanent): the minimum count of active islands to solve them in parallel
     CMD4(CCC_Integer, "ph_mt_island_min", &ph_console::ph_mt_island_min, 1, 4096);
     // Cap physics substeps per frame to break the spiral-of-death under heavy load (0 = uncapped).
     CMD4(CCC_Integer, "ph_max_substeps", &ph_console::ph_max_substeps, 0, 30);
@@ -3283,24 +3257,37 @@ void CCC_RegisterCommands()
     // The distance is saved and never below 10 m (an NPC next to the player keeps physics).
     CMD4(CCC_FloatBlock, "ph_npc_kinematic_unseen_dist", &ph_npc_kinematic_unseen_dist, 10.f, 500.f);
 
-    // P1: NPC spawn / level-load optimizations (see plans/optimization_spawn/plan.md) — runtime kill-switches.
-    CMD4(CCC_Integer, "ph_spawn_char_no_collide_chars", &ph_console::ph_spawn_char_no_collide_chars, 0, 1);
-    CMD4(CCC_Integer, "ph_spawn_activation_shape_early_exit", &ph_console::ph_spawn_activation_shape_early_exit, 0, 1);
-    CMD4(CCC_Integer, "ph_spawn_skip_correct_on_load", &ph_console::ph_spawn_skip_correct_on_load, 0, 1);
+    // P1: NPC spawn / level-load optimizations (see plans/optimization_spawn/plan.md) are permanent; only the log is left.
     CMD4(CCC_Integer, "ph_dbg_spawn_stats", &ph_console::ph_dbg_spawn_stats, 0, 1);
-    // P16 (plans/optimization_mt/11-ragdoll-spikes.md): death -> ragdoll spikes. Not saved. The box of a starting free
-    // ragdoll (it always ignores live characters) makes at most N world steps (vanilla up to 150)
-    CMD4(CCC_IntegerNotSaved, "ph_death_correct_max_steps", &ph_console::ph_death_correct_max_steps, 0, 150);
+    // P16 (plans/optimization_mt/11-ragdoll-spikes.md): death -> ragdoll spikes. Saved. The box of a starting free
+    // ragdoll (it always ignores live characters) makes at most N world steps (vanilla up to 150), 0 = no cap
+    CMD4(CCC_Integer, "ph_death_correct_max_steps", &ph_console::ph_death_correct_max_steps, 0, 150);
+    // Launched NPCs and corpses, live NPCs thrown up in a dense crowd (plans/optimization_mt/21-physics-step.md,
+    // 2026-10-15/16): the fixes are permanent, these are their saved limits (0 = no limit / the check off).
+    // ph_contact_max_correct_vel: the contact push-out speed cap in the frame step, m/s; ph_ai_max_rise_vel: the rise
+    // speed cap of live NPC controllers, m/s (the rise of the substep over it is taken back); ph_ai_try_max_dy, m: a
+    // TryPosition result further up / down than that is refused; ph_ai_step_max_rise, m: a rise over that in one frame
+    // substep is undone.
+    CMD4(CCC_Float, "ph_contact_max_correct_vel", &ph_console::ph_contact_max_correct_vel, 0.f, 100.f);
+    CMD4(CCC_Float, "ph_ai_max_rise_vel", &ph_console::ph_ai_max_rise_vel, 0.f, 100.f);
+    CMD4(CCC_Float, "ph_ai_try_max_dy", &ph_console::ph_ai_try_max_dy, 0.f, 50.f);
+    CMD4(CCC_Float, "ph_ai_step_max_rise", &ph_console::ph_ai_step_max_rise, 0.f, 50.f);
+    // Live NPCs left high in the air (plans/optimization_mt/21-physics-step.md, 2026-10-15; always on): a destination the
+    // NPC is moved to without gravity (the kinematic branches of move_along_path, a successful TryPosition, a standing NPC
+    // with a disabled character) that hangs more than ai_npc_ground_snap_height m above the AI floor is lowered to it at
+    // ai_npc_ground_snap_speed m/s (0 = at once). Both are saved.
+    CMD4(CCC_Float, "ai_npc_ground_snap_height", &ai_npc_ground_snap_height, 0.3f, 10.f);
+    CMD4(CCC_Float, "ai_npc_ground_snap_speed", &ai_npc_ground_snap_speed, 0.f, 100.f);
     // Spawn stage 2 (plans/spawn_optimization/SPEC.md 5.A, section 12): CLevel::ProcessGameEvents materializes M_SPAWN
     // within spawn_budget_us per frame, by whole groups (a root + its inventory right behind it), from the head of the
     // queue only: what does not fit and every event behind it wait for the next frame, in the same order. At least
     // spawn_min_per_frame groups per frame; a head that waits spawn_max_delay_ms goes on without the budget, the same
-    // while loading and on pause. Temporary, not saved; spawn_budget_us 0 = as before (the whole queue in one frame).
-    CMD4(CCC_IntegerNotSaved, "spawn_budget_us", &g_spawn_budget_us, 0, 100000);
-    CMD4(CCC_IntegerNotSaved, "spawn_min_per_frame", &g_spawn_min_per_frame, 1, 1000);
-    CMD4(CCC_IntegerNotSaved, "spawn_max_delay_ms", &g_spawn_max_delay_ms, 1, 60000);
+    // while loading and on pause. spawn_budget_us 0 = as before (the whole queue in one frame).
+    CMD4(CCC_Integer, "spawn_budget_us", &g_spawn_budget_us, 0, 100000);
+    CMD4(CCC_Integer, "spawn_min_per_frame", &g_spawn_min_per_frame, 1, 1000);
+    CMD4(CCC_Integer, "spawn_max_delay_ms", &g_spawn_max_delay_ms, 1, 60000);
     // A pass that goes past the budget for a head older than spawn_max_delay_ms stops at spawn_catchup_us (0 = no limit)
-    CMD4(CCC_IntegerNotSaved, "spawn_catchup_us", &g_spawn_catchup_us, 0, 1000000);
+    CMD4(CCC_Integer, "spawn_catchup_us", &g_spawn_catchup_us, 0, 1000000);
 
 #ifdef DEBUG
     CMD1(CCC_PHGravity, "ph_gravity");

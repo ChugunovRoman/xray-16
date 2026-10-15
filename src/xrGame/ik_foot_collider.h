@@ -62,10 +62,7 @@ class ik_foot_collider
 public:
     ik_foot_collider();
 
-    /** Legacy serial/per-limb path. */
-    void collide(SIKCollideData& cld, const ik_foot_geom& foot_geom, CGameObject* O, bool foot_step);
-
-    /** Two-phase path for per-NPC batching.
+    /** Two-phase path for per-NPC batching (the vanilla one-call collide() is gone).
      *  Phase 1: check cache; returns true if cld is already valid.
      *  Phase 1b: build_queries fills 3 primary ray queries for the foot.
      *  Phase 2: solve processes 3 rq_results from a batch execution.

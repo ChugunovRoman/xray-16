@@ -180,10 +180,8 @@ enum class DeviceState
     NeedReset
 };
 
-// 1: full second render to rt_secondVP each frame while 3D scope is active; main view keeps HUD. 0: legacy alternating frame + backbuffer copy.
-extern ENGINE_API int ps_r__dedicated_second_vp;
-
-// Tuning for the extra scope render pass (only when r__dedicated_second_vp 1). See comment on CRender::Render() in r2_R_render.cpp.
+// Second viewport (3D scope): a full second render to rt_secondVP on SVP frames; the main view keeps the HUD.
+// Tuning for the extra scope render pass. See comment on CRender::Render() in r2_R_render.cpp.
 extern ENGINE_API int ps_r__svp_skip_details;     // 1 = skip DetailManager (grass etc.)
 extern ENGINE_API int ps_r__svp_skip_wallmarks;  // 1 = skip Wallmarks
 extern ENGINE_API int ps_r__svp_skip_rain_sync;  // 1 = skip r_rain.sync()
@@ -196,12 +194,8 @@ extern ENGINE_API int ps_r__svp_frame_delay;     // Second VP: IsSVPFrame uses d
 extern ENGINE_API int ps_r__svp_smap_pages;        // max packing batches per frame in the SVP atlas
 
 // Diagnostics for the 'black world, UI still visible' bug and the SVP crash class.
-// r__svp_pipeline 0        = fully sequential scope pass (kill-switch, no rebuild needed).
-// r__svp_shadow_transfer 0 = worker-built scope shadows instead of the main-pass atlas copy.
 // r__gpu_diag 1            = per-frame render-state audits + periodic telemetry in the log.
 // r__dump_render_state 1   = one-shot dump of the immediate-context state, self-clears.
-extern ENGINE_API int ps_r__svp_pipeline;
-extern ENGINE_API int ps_r__svp_shadow_transfer;
 extern ENGINE_API int ps_r__gpu_diag;
 extern ENGINE_API int ps_r__dump_render_state;
 // r__svp_restore_surfaces 1 = force the named G-buffer textures back onto their own surfaces.

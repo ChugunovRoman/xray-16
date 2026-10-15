@@ -412,28 +412,9 @@ void CCustomMonster::shedule_Update(u32 DT)
         {
             ZoneScopedN("sh_cm_Exec_Visibility");
             START_PROFILE("CustomMonster/schedule_update/vision")
-            if (npc_perf_vision_parallel_batch)
-            {
-                Exec_Visibility_Prepare();
-            }
-            else
-            {
-                const bool par_vision = ps_r__mt_ai_vision_parallel != 0 && g_mt_config.test(mtAiVision);
-                if (par_vision)
-                {
-#ifdef DEBUG
-                    fastdelegate::FastDelegate0<> fv =
-                        fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility);
-                    xr_vector<fastdelegate::FastDelegate0<>>::const_iterator I;
-                    I = std::find(Device.seqParallel.begin(), Device.seqParallel.end(), fv);
-                    VERIFY(I == Device.seqParallel.end());
-#endif
-                    Device.seqParallel.push_back(
-                        fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
-                }
-                else
-                    Exec_Visibility();
-            }
+            // Rays go to the shared vision batch (g_vision_batch), traced for all NPCs at once after the scheduler
+            // (CLevel::VisionBatchPostScheduler); the vanilla Exec_Visibility on seqParallel is not used.
+            Exec_Visibility_Prepare();
             STOP_PROFILE
         }
 
@@ -952,6 +933,7 @@ void CCustomMonster::eye_pp_s2_prepare()
 
         std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
         feel_vision_merge_after_frustum(this);
+        PERF_SCOPE(stk_vision_s2_rays); // 24-critical-path.md M10: the ray preparation below (to EndEntry)
 
         const u32 total = static_cast<u32>(feel_visible.size());
         const u32 budget = _min(total, vision_rays_budget()); // LOD-aware cap on rays per NPC per pass
@@ -980,6 +962,8 @@ void CCustomMonster::eye_pp_s2_prepare()
 
             I->cp_LR_dst = I->O->Position();
             I->cp_LR_src = P;
+            if (I->mesh_point_pending) // 24-critical-path.md G6b: added by the merge, the first ray at it
+                feel_vision_init_mesh_point(*I, false);
             I->cp_LAST = I->O->get_last_local_point_on_mesh(I->cp_LP, I->bone_id);
 
             Fvector D, OP = I->cp_LAST;
@@ -998,14 +982,9 @@ void CCustomMonster::eye_pp_s2_prepare()
                 // Cache check: reuse — still update fuzzy from cached visibility
                 if (Feel::feel_vision_ray_cache_reuse(I->Cache, P, D, f, npc_perf_vision_cache_pos_slack_m))
                 {
-                    // Cache_vis is the static-only result; like Feel::Vision::o_trace, still run the
-                    // dynamic-occluder pass on a hit, otherwise a cached "visible" sees through movers.
-                    float cached_vis = I->Cache_vis;
-                    if (npc_perf_vision_skip_dynamic_ray == 0 && cached_vis >= vis_threshold &&
-                        eye_pp_dynamic_blocked(I, P, D, f))
-                    {
-                        cached_vis = 0.f;
-                    }
+                    // Cache_vis is the static-only result; as in Feel::Vision::o_trace there is no dynamic-occluder
+                    // pass on top of it (deliberate perf trade-off, see Feel_Vision.h).
+                    const float cached_vis = I->Cache_vis;
                     if (cached_vis < vis_threshold)
                     {
                         I->fuzzy -= Feel::fuzzy_update_novis * dt;
@@ -1060,44 +1039,6 @@ void CCustomMonster::eye_pp_s2_prepare()
     Level().AIStats.VisRayTests.End();
 }
 
-// O_ONLYFIRST + ignore owner lets us stop at the first potential blocker.
-bool CCustomMonster::eye_pp_dynamic_blocked(feel_visible_Item* I, const Fvector& start, const Fvector& dir, float range)
-{
-    if (npc_perf_vision_dynamic_cache != 0 &&
-        Feel::feel_vision_dynamic_cache_reuse(I->dynamic_cache, start, dir, range, npc_perf_vision_cache_pos_slack_m))
-    {
-        return I->dynamic_cache.blocked;
-    }
-
-    bool collision_found = false;
-    r_spatial.clear();
-    ISpatial* owner_spatial = static_cast<ISpatial*>(const_cast<IGameObject*>(m_owner));
-    SpatialCaller spatial_caller(SpatialQueryCaller::vision);
-    g_pGamePersistent->SpatialSpace.q_ray(r_spatial, ISpatial_DB::O_ONLYFIRST | ISpatial_DB::O_ONLYNEAREST,
-        STYPE_VISIBLEFORAI, start, dir, range, owner_spatial);
-
-    collide::ray_defs RD(start, dir, range, CDB::OPT_ONLYFIRST,
-        collide::rq_target(collide::rqtStatic | collide::rqtObject | collide::rqtObstacle));
-
-    for (auto* spatial_obj : r_spatial)
-    {
-        if (spatial_obj == I->O)
-            continue;
-
-        IGameObject const* object = spatial_obj->dcast_GameObject();
-        RQR.r_clear();
-        if (object && object->GetCForm() && !object->GetCForm()->_RayQuery(RD, RQR))
-            continue;
-
-        collision_found = true;
-        break;
-    }
-
-    if (npc_perf_vision_dynamic_cache != 0)
-        Feel::feel_vision_dynamic_cache_store(I->dynamic_cache, start, dir, range, collision_found);
-    return collision_found;
-}
-
 void CCustomMonster::eye_pp_s2_process()
 {
     VisionBatchEntry* entry = nullptr;
@@ -1141,14 +1082,8 @@ void CCustomMonster::eye_pp_s2_process()
             I->Cache.set(ray.start, ray.dir, ray.range, ray.accumulated_vis >= vis_threshold);
         }
 
-        float vis = ray.accumulated_vis;
-
-        // Dynamic object pass: if static didn't fully block, check dynamic objects.
-        if (npc_perf_vision_skip_dynamic_ray == 0 && vis >= vis_threshold &&
-            eye_pp_dynamic_blocked(I, ray.start, ray.dir, ray.range))
-        {
-            vis = 0.f;
-        }
+        // No dynamic-object pass after the static result (deliberate perf trade-off, see Feel_Vision.h)
+        const float vis = ray.accumulated_vis;
 
         // Fuzzy update
         if (vis < vis_threshold)

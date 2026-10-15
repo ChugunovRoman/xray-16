@@ -48,8 +48,6 @@ public:
     bool GetFootStepMatrix(ik_goal_matrix& m, const Fmatrix& gl_nim, const SIKCollideData& cld, bool collide,
         bool rotate, bool make_shift = true) const;
     void SetFootGeom(ik_foot_geom& fg, const Fmatrix& ref_bone, const Fmatrix& object_matrix) const;
-    void Collide(SIKCollideData& cld, ik_foot_collider& collider, const Fmatrix& ref_bone, const Fmatrix& object_matrix,
-        CGameObject* O, bool foot_step) const;
 
 private:
     ik_goal_matrix::e_collide_state CollideFoot(float angle, float& out_angle, const Fvector& global_toe,

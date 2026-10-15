@@ -133,7 +133,6 @@ void CRender::calculate_for(bool second_pass)
         // there (its scope pass skipped/aborted) would be stale light pointers by now.
         LP_svp_normal.clear();
         LP_svp_pending.clear();
-        svp_shadow_transfer = false; // transfer mode is re-resolved by Begin...Parallel each frame
         svp_sun_slices_ready = false; // sun-reuse copies (if any) happen later, in main Render/Sun
         svp_geom_on_main = false;
     }
@@ -387,25 +386,8 @@ void CRender::svp_worker_loop()
                     PERF_SCOPE(rsvp_worker_geom);
                     record_second_vp_geometry_into(*ds);
                 }
-                // Frame driver stage C: build the scope pass's shadow maps into the dedicated
-                // atlas. Blocked until the main pass finished ITS lighting (from then on the
-                // context pool and the shared light objects belong to this thread); abort
-                // exits the wait immediately. Shadow-transfer mode skips it: the main pass
-                // copies the pages itself, there is nothing for the worker to build.
-                if (svp_frame_driver && !svp_shadow_transfer)
-                {
-                    {
-                        ZoneScopedN("SVP/worker_lights_wait");
-                        PERF_SCOPE(rsvp_worker_lights_wait);
-                        while (!svp_build_abort.load(std::memory_order_relaxed) && !svp_lights_go.Wait(1))
-                            ;
-                    }
-                    if (!svp_build_abort.load(std::memory_order_relaxed))
-                    {
-                        PERF_SCOPE(rsvp_worker_shadows);
-                        record_second_vp_shadows();
-                    }
-                }
+                // Scope shadows are not built here: the main pass copies its smap pages into the
+                // dedicated SVP atlas itself (shadow-transfer, see render_lights).
             }
         }
         svp_worker_done.Set();
@@ -433,11 +415,6 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
     // Guards mirrored from what the sequential second pass tolerated.
     // GL: no deferred contexts exist - recording geometry on a worker thread would interleave
     // GL calls with the main thread's immediate rendering. Fall back to the sequential path.
-    // Runtime kill-switch: 0 = fully sequential scope pass. Togglable from the console, which
-    // makes it the fastest A/B when a rendering glitch appears mid-session.
-    if (ps_r__svp_pipeline == 0)
-        return false;
-
     if (m_bFirstFrameAfterReset || o.oldshadowcascades || second_vp_fov <= EPS_L ||
         !svp_frame_driver_available())
         return false;
@@ -449,22 +426,15 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
     // calculate/geometry.
     svp_frame_driver = svp_frame_driver_available();
     // Shadow-transfer: the main pass copies each smap page into the dedicated SVP atlas itself
-    // (see render_lights) and the worker skips its shadow build stage entirely.
-    // Console kill-switch r__svp_shadow_transfer 0 switches to the worker-build path (stage 1).
-    svp_shadow_transfer = ps_r__svp_shadow_transfer != 0;
+    // (see render_lights); the worker builds no scope shadows.
     if (svp_frame_driver && !Target->SVPSmapAtlasEnsure())
         svp_frame_driver = false;
-    // Stage machine: 1 = the worker is expected to deliver sealed shadow lists this frame,
-    // 3 = shadow-transfer: the MAIN pass delivers copied atlas slices instead of worker lists.
-    svp_shadow_stage = svp_frame_driver ? (svp_shadow_transfer ? 3 : 1) : 0;
-    svp_lights_go.Reset();
-    if (svp_shadow_transfer)
-    {
-        // Transfer-mode page groups are filled by the MAIN pass page loop (render_lights),
-        // not by the worker - start the frame clean.
-        svp_shadow_page_lights.clear();
-        svp_shadow_unshadowed.clear();
-    }
+    // Stage machine: 3 = shadow-transfer, the MAIN pass delivers copied atlas slices.
+    svp_shadow_stage = svp_frame_driver ? 3 : 0;
+    // Transfer page groups are filled by the MAIN pass page loop (render_lights) - start the
+    // frame clean.
+    svp_shadow_page_lights.clear();
+    svp_shadow_unshadowed.clear();
 
     // P2.3: DEFERRED cmd list - the dedicated thread builds visibility AND records
     // render_graph(0) into this list while the main pass renders; the recorded commands are
@@ -534,7 +504,7 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
     // scheduler starves this build behind the main render's own subtasks, which serializes
     // the pass again. Created lazily on the first scope frame and parked on svp_worker_wake
     // between jobs - the job contents (stage A2 visibility build, stage B deferred geometry
-    // recording, stage C shadow build) live in svp_worker_loop above.
+    // recording) live in svp_worker_loop above.
     svp_build_abort.store(false);
     if (!svp_build_thread.joinable())
         svp_build_thread = std::thread([this] { svp_worker_loop(); });
@@ -588,7 +558,6 @@ void CRender::AbortSecondVPCalculate()
 
     // Let the worker skip its remaining stages instead of finishing them pointlessly.
     svp_build_abort.store(true);
-    svp_lights_go.Set(); // unblock the stage-C wait so the wait below cannot stall
     // Stop THIS job but keep the persistent worker alive - it parks on svp_worker_wake; the
     // thread itself is joined only by reset/teardown. Wait for the park BEFORE freeing the
     // job state below (dsgraph/overrides the worker may still touch inside the job).
@@ -609,10 +578,10 @@ void CRender::AbortSecondVPCalculate()
 bool CRender::svp_sun_reuse_active() const
 {
     // Stage 2 (sun-reuse): reuse the MAIN pass sun cascades in the scope view. Requires this
-    // frame's shadow-transfer path - the sun slices are copied into the dedicated SVP atlas
-    // right after the main pass Render/Sun (see r2_R_render.cpp). Otherwise the legacy
+    // frame's frame driver (shadow-transfer) - the sun slices are copied into the dedicated SVP
+    // atlas right after the main pass Render/Sun (see r2_R_render.cpp). Otherwise the legacy
     // rebuild/skip flags (r__svp_skip_sun_csm) keep ruling.
-    return svp_parallel && svp_frame_driver && svp_shadow_transfer;
+    return svp_parallel && svp_frame_driver;
 }
 
 void CRender::SecondVPPostCalculate()

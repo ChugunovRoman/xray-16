@@ -53,6 +53,16 @@ public:
     // (0 for a perfectly satisfied joint; meters after an explosion pulled the ragdoll apart).
     float get_MaxElementLinearVelSq() const;
     float get_MaxJointStretchSq() const;
+    // Stretched ragdolls (plans/optimization_mt/21-physics-step.md, 2026-10-15), the watchdog of
+    // CPHWorld::CheckActiveCorpses (physics thread, the frame step after the solve): stretched checks in a row; repairs
+    // since m_stretch_repair_since_ms.
+    u8 m_stretch_hits{0};
+    u8 m_stretch_repairs{0};
+    u32 m_stretch_repair_since_ms{0};
+    // Moves every child element by the gap between its joint anchors (joints are in the parent-first order of
+    // AddElementRecursive, so a parent is already moved when its children are), then zeroes the velocities, forces and
+    // torques of all elements. Physics thread, between substeps. Returns the number of moved elements.
+    u32 RepairJointStretch();
     CPHShell();
     virtual ~CPHShell();
     virtual void applyImpulseTrace(const Fvector& pos, const Fvector& dir, float val, const u16 id);

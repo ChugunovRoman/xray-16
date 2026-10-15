@@ -427,8 +427,8 @@ void CLevel::SpawnWaitDone(u16 id)
 }
 
 // Spawn stage 2 (plans/spawn_optimization/SPEC.md 5.A, section 12): the budget of the client materialization of M_SPAWN
-// per frame. Temporary console variables, not saved (console_commands.cpp); spawn_budget_us 0 = as before: the whole
-// queue in one frame.
+// per frame. Saved console variables (console_commands.cpp); spawn_budget_us 0 = as before: the whole queue in one
+// frame.
 int g_spawn_budget_us = 5000; // time of one pass of ProcessGameEvents (M_EVENT count too) after which no group starts
 int g_spawn_min_per_frame = 2; // groups materialized in every frame whatever the budget: the queue always moves
 int g_spawn_max_delay_ms = 500; // a head that waits longer goes on past the budget (player actions, quest items)...
@@ -1536,8 +1536,7 @@ void CLevel::OnRender()
         {
             IMainMenu* pMainMenu = g_pGamePersistent ? g_pGamePersistent->m_pMainMenu : nullptr;
             const bool bMenu = pMainMenu && pMainMenu->CanSkipSceneRendering();
-            const bool tracers_done_in_level =
-                ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame() && !bMenu;
+            const bool tracers_done_in_level = Device.m_SecondViewport.IsSVPFrame() && !bMenu;
             if (!tracers_done_in_level)
             {
                 ZoneScopedN("lvl_bullets");

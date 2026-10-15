@@ -128,8 +128,7 @@ void VisionBatch::ExecuteParallel()
     g_cached_static_tris  = g_pGameLevel->ObjectSpace.GetStaticTris();
     g_cached_static_verts  = g_pGameLevel->ObjectSpace.GetStaticVerts();
 
-    if (npc_perf_vision_parallel_batch && TaskScheduler
-        && static_cast<int>(m_rays.size()) >= npc_perf_vision_parallel_batch_min_rays)
+    if (TaskScheduler && static_cast<int>(m_rays.size()) >= npc_perf_vision_parallel_batch_min_rays)
     {
         PERF_INC(vision_parallel);
         xr_parallel_for(TaskRange(size_t(0), m_rays.size()),

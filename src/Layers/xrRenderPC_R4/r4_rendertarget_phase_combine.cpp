@@ -25,16 +25,6 @@ void CRenderTarget::phase_combine()
 
     //*** exposure-pipeline
     u32 gpu_id = Device.dwFrame % HW.Caps.iGPUNum;
-    if (Device.m_SecondViewport.IsSVPActive() && !ps_r__dedicated_second_vp) // --#SM+#-- +SecondVP+ Fix for screen flickering
-    {
-        // clang-format off
-        gpu_id = (Device.dwFrame - 1) % HW.Caps.iGPUNum;    // Фикс "мерцания" tonemapping (HDR) после выключения двойного рендера. 
-                                                            // Побочный эффект - при работе двойного рендера скорость изменения tonemapping (HDR) падает в два раза
-                                                            // Мерцание связано с тем, что HDR для своей работы хранит уменьшенние копии "прошлых кадров"
-                                                            // Эти кадры относительно похожи друг на друга, однако при включЄнном двойном рендере
-                                                            // в половине кадров оказывается картинка из второго рендера, и поскольку она часто может отличатся по цвету\яркости
-                                                            // то при попытке создания "плавного" перехода между ними получается эффект мерцания
-    }
     // Scope second viewport pass: the main pass of this frame has already run its luminance step
     // and swapped the pool, so slot [0] holds the freshest adaptation value. The scope pass reads
     // it through BOTH names ($user$tonemap is what combine/sky/water sample), computes no luminance

@@ -9,7 +9,6 @@
 #include "GameObject.h"
 #include "entity_alive.h"
 #include "xrCDB/xr_area.h"
-#include "performance_cvars.h"
 
 #include "xrPhysics/MathUtils.h"
 
@@ -175,10 +174,10 @@ IC bool get_plane(ik_pick_result& r, Fvector& next_pos, float& next_range, const
 
 IC bool rq_pick_hit(const collide::rq_result& R) { return R.element >= 0; }
 
-// npc_perf_ik_foot_static_only: 1 = the feet look for the static geometry only (terrain, buildings); 0 = also the
-// dynamic objects (physic objects, other NPCs). In a crowd every foot ray tested the skeletons of the neighbours
-// and was re-cast through them (PickContinueAfterFirstHit): milliseconds per NPC
-IC collide::rq_target ik_foot_target() { return npc_perf_ik_foot_static_only ? collide::rqtStatic : collide::rqtBoth; }
+// The feet look for the static geometry only (terrain, buildings); vanilla also took the dynamic objects (physic
+// objects, other NPCs). In a crowd every foot ray tested the skeletons of the neighbours and was re-cast through them
+// (PickContinueAfterFirstHit): milliseconds per NPC. CIKLimbsController::ExecuteIKRayBatch uses the same target.
+IC collide::rq_target ik_foot_target() { return collide::rqtStatic; }
 
 static bool PickContinueAfterFirstHit(ik_pick_result& r, const ik_pick_query& q, IGameObject* ignore_object,
     collide::rq_result R, Fvector pos, float range)
@@ -224,18 +223,6 @@ static bool PickContinueAfterFirstHit(ik_pick_result& r, const ik_pick_query& q,
     }
 #endif
     return collided;
-}
-
-bool Pick(ik_pick_result& r, const ik_pick_query& q, IGameObject* ignore_object)
-{
-    VERIFY(q.is_valid());
-
-    const float range = q.range();
-    const Fvector pos = q.pos();
-    collide::rq_result R;
-    if (!g_pGameLevel->ObjectSpace.RayPick(pos, q.dir(), range, ik_foot_target(), R, ignore_object))
-        return false;
-    return PickContinueAfterFirstHit(r, q, ignore_object, R, pos, range);
 }
 
 void ik_foot_collider::build_queries(
@@ -395,57 +382,3 @@ void ik_foot_collider::solve(SIKCollideData& cld, const ik_foot_geom& foot_geom,
     set_previous_queries(q);
 }
 
-void ik_foot_collider::collide(SIKCollideData& cld, const ik_foot_geom& foot_geom, CGameObject* O, bool foot_step)
-{
-    ZoneScopedN("ik_foot_collider::collide");
-    if (try_cache(cld, foot_geom))
-        return;
-
-    ik_pick_query q[3];
-    build_queries(foot_geom, cld.m_pick_dir, q);
-
-    ik_pick_result r_toe(ik_foot_geom::toe);
-    ik_pick_result r_heel(ik_foot_geom::heel);
-    ik_pick_result r_side(ik_foot_geom::side);
-
-    bool heel_collided = false;
-    bool side_collided = false;
-    bool toe_collided = false;
-
-    if (npc_perf_ik_foot_raypick_batch)
-    {
-        collide::rq_result R[3];
-        CObjectSpace::RayPickBatchItem batch[3];
-        batch[0] = { q[0].pos(), q[0].dir(), q[0].range(), ik_foot_target(), O, &R[0] };
-        batch[1] = { q[1].pos(), q[1].dir(), q[1].range(), ik_foot_target(), O, &R[1] };
-        batch[2] = { q[2].pos(), q[2].dir(), q[2].range(), ik_foot_target(), O, &R[2] };
-        g_pGameLevel->ObjectSpace.RayPickBatch(batch, 3);
-
-        toe_collided = rq_pick_hit(R[0]) && PickContinueAfterFirstHit(r_toe, q[0], O, R[0], q[0].pos(), q[0].range());
-        cld.collided = toe_collided;
-        cld.m_plane = r_toe.p;
-        cld.m_collide_point = ik_foot_geom::toe;
-
-        heel_collided = rq_pick_hit(R[1]) && PickContinueAfterFirstHit(r_heel, q[1], O, R[1], q[1].pos(), q[1].range());
-        side_collided = rq_pick_hit(R[2]) && PickContinueAfterFirstHit(r_side, q[2], O, R[2], q[2].pos(), q[2].range());
-    }
-    else
-    {
-        toe_collided = Pick(r_toe, q[0], O);
-        cld.collided = toe_collided;
-        cld.m_plane = r_toe.p;
-        cld.m_collide_point = ik_foot_geom::toe;
-
-        heel_collided = Pick(r_heel, q[1], O);
-        side_collided = Pick(r_side, q[2], O);
-    }
-
-    r_toe.point = toe_collided ? ik_foot_geom::toe : ik_foot_geom::none;
-    r_heel.point = heel_collided ? ik_foot_geom::heel : ik_foot_geom::none;
-    r_side.point = side_collided ? ik_foot_geom::side : ik_foot_geom::none;
-
-    compute_cld(cld, foot_geom, r_toe, r_heel, r_side);
-
-    // Cache queries only after results are validated — prevents stale cache on failed solves.
-    set_previous_queries(q);
-}

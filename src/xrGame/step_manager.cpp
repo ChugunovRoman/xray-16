@@ -9,7 +9,6 @@
 #include "xrEngine/profiler.h"
 #include "IKLimbsController.h"
 #include "npc_cpp_profile.h"
-#include "performance_cvars.h"
 
 #ifdef DEBUG
 BOOL debug_step_info = FALSE;
@@ -193,9 +192,8 @@ void CStepManager::update(bool b_hud_view)
         {
             // Beyond 20 m (b_play false) the step plays neither its sound nor its particles, the only users of the
             // material pair; event_on_step (the earthquake of the pseudogiant) does not read it. The pick is a ray
-            // under the foot (os_RayPick), skipped there (npc_perf_step_far_skip_material)
-            const bool need_material = b_play || !npc_perf_step_far_skip_material;
-            if (need_material && !material_picked)
+            // under the foot (os_RayPick), skipped there
+            if (b_play && !material_picked)
             {
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StepMaterialPick);
                 mtl_pair = m_object->material().get_current_pair();
@@ -203,7 +201,7 @@ void CStepManager::update(bool b_hud_view)
                 material_picked = true;
             }
 
-            if (need_material && !mtl_pair)
+            if (b_play && !mtl_pair)
                 break;
 
             // Играть звук

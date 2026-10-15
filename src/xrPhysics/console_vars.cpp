@@ -12,14 +12,10 @@ float ph_console::phRigidBreakWeaponFactor = 1.f;
 
 float ph_console::ph_step_time = fixed_step; // keep in sync with the global physics timestep
 
-int ph_console::ph_mt_island_solve = 1;
 int ph_console::ph_mt_island_min = 16;
 int ph_console::ph_max_substeps = 0; // 0 = uncapped (default); >0 caps substeps but slows actor under load
 
-// P1: NPC spawn / level-load optimizations (see plans/optimization_spawn/plan.md).
-int ph_console::ph_spawn_char_no_collide_chars = 1;
-int ph_console::ph_spawn_activation_shape_early_exit = 1;
-int ph_console::ph_spawn_skip_correct_on_load = 1;
+// P1: NPC spawn / level-load optimizations (see plans/optimization_spawn/plan.md; permanent, only the log is left).
 int ph_console::ph_dbg_spawn_stats = 0;
 
 // P16 (plans/optimization_mt/11-ragdoll-spikes.md): the position correction at the start of a free ragdoll.
@@ -30,3 +26,9 @@ int ph_console::ph_corpse_sleep_ms = 3000;
 float ph_console::ph_corpse_sleep_far_dist = 60.f;
 float ph_console::ph_corpse_sleep_max_vel = 1.f;
 float ph_console::ph_corpse_sleep_max_stretch = 0.1f;
+
+// Launched NPCs and corpses (plans/optimization_mt/21-physics-step.md, 2026-10-15/16): the limits of the permanent fix.
+float ph_console::ph_contact_max_correct_vel = 5.f;
+float ph_console::ph_ai_max_rise_vel = 5.f;
+float ph_console::ph_ai_try_max_dy = 1.5f;
+float ph_console::ph_ai_step_max_rise = 2.f;

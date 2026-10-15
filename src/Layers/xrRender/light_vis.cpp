@@ -27,7 +27,7 @@ void light::vis_prepare(CBackend& cmd_list)
     u32 frame = Device.dwFrame;
 
     // Resolve a still-pending async query before considering a new one (avoids query slot leak)
-    if (vis.pending && ps_r2_light_occq_async)
+    if (vis.pending)
     {
         R_occlusion::occq_result fragments;
         if (!RImplementation.occq_try_get(vis.query_id, fragments))
@@ -66,11 +66,7 @@ void light::vis_prepare(CBackend& cmd_list)
         return;
     }
 
-    // testing
-    // Sync mode only (async resolved or returned above): a query still pending here was never
-    // read - return its slot before issuing a new one instead of overwriting the id.
-    if (vis.pending)
-        RImplementation.occq_free(vis.query_id);
+    // testing (a pending query was resolved or returned above)
     vis.pending = true;
     xform_calc();
     cmd_list.set_xform_world(m_xform);
@@ -99,15 +95,9 @@ void light::vis_update()
 
     const u32 frame = Device.dwFrame;
     R_occlusion::occq_result fragments;
-    if (ps_r2_light_occq_async)
-    {
-        if (!RImplementation.occq_try_get(vis.query_id, fragments))
-            return; // not ready yet: keep pending, resolve on a later frame
-    }
-    else
-    {
-        fragments = RImplementation.occq_get(vis.query_id);
-    }
+    // Non-blocking read: not ready yet -> keep pending, resolve on a later frame.
+    if (!RImplementation.occq_try_get(vis.query_id, fragments))
+        return;
     // Log					("",fragments);
     vis.visible = (fragments > cullfragments);
     vis.pending = false;

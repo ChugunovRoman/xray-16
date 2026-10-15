@@ -339,10 +339,10 @@ void CCharacterPhysicsSupport::CreateCharacterSafe()
     // P1 (plans/optimization_spawn): skip CollisionCorrectObjPos once for characters spawning in the
     // initial level/save load burst — their position is already valid (server-side / saved), so the
     // correction (freezes the physics world, re-steps it via CPHActivationShape::Activate) is redundant
-    // and, with many NPCs on the level, dominates load time. Consume the flag before the CharacterExist
-    // early-out and regardless of the console var, so a later real recreation (RequestCreateCharacterSafe
-    // from gameplay code) can never inherit a stale skip from spawn time.
-    const bool skip_correct = m_skip_spawn_position_correct && ph_console::ph_spawn_skip_correct_on_load != 0;
+    // and, with many NPCs on the level, dominates load time (permanent). Consume the flag before the
+    // CharacterExist early-out, so a later real recreation (RequestCreateCharacterSafe from gameplay code)
+    // can never inherit a stale skip from spawn time.
+    const bool skip_correct = m_skip_spawn_position_correct;
     m_skip_spawn_position_correct = false;
 
     if (m_PhysicMovementControl->CharacterExist())
@@ -904,8 +904,13 @@ void CCharacterPhysicsSupport::in_UpdateCL()
             {
                 Fvector vel;
                 m_pPhysicsShell->get_LinearVel(vel);
-                xray::perf::UpdateMax(xray::perf::Metric::ph_corpse_max_vel_mm_s,
-                    static_cast<s64>(vel.magnitude() * 1000.f));
+                const float speed = vel.magnitude();
+                // Per-frame maximum (UpdateMax is reset by Flush every frame).
+                xray::perf::UpdateMax(xray::perf::Metric::ph_corpse_max_vel_mm_s, static_cast<s64>(speed * 1000.f));
+                // physics/corpse_vel_cap: corpses at the velocity cap of the elements (default_l_limit, 150 m/s) - a
+                // torn ragdoll wedged in the level stays there (21-physics-step.md, 2026-10-15).
+                if (speed >= 0.99f * default_l_limit)
+                    xray::perf::Add(xray::perf::Metric::ph_corpse_vel_cap);
             }
             const u32 age_ms = Device.dwTimeGlobal - m_EntityAlife.GetLevelDeathTime();
             if (age_ms < 3000)
@@ -1148,11 +1153,11 @@ bool CCharacterPhysicsSupport::CollisionCorrectObjPos(const Fvector& start_from,
     // neighbors in turn — a cascade that shows up as a huge ISpatial_DB::q_box count under one net_Spawn
     // during level/save load. The freshly spawned character still gets pushed out of the level geometry;
     // it just won't push against other characters via this activation shape (normal character-vs-character
-    // collision resumes once both characters are simulating normally).
+    // collision resumes once both characters are simulating normally). Permanent.
     // P16 (plans/optimization_mt/11-ragdoll-spikes.md): !character_create is only the start of a free ragdoll
     // (EndActivateFreeShell). Its box always ignores live characters too - in a crowd it cannot push out of them (they
     // are frozen) and would run all 150 world steps; ph_death_correct_max_steps N: at most N.
-    bool not_collide_characters = !character_create || ph_console::ph_spawn_char_no_collide_chars != 0;
+    const bool not_collide_characters = true;
     const u16 max_push_steps = character_create ? u16(0) : u16(ph_console::ph_death_correct_max_steps);
     bool set_rotation = !character_create;
 

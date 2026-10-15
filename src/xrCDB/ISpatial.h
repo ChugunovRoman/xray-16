@@ -187,13 +187,7 @@ public:
     virtual Feel::Sound* dcast_FeelSound() override { return nullptr; }
     virtual IRenderable* dcast_Renderable() override { return nullptr; }
     virtual IRender_Light* dcast_Light() override { return nullptr; }
-private:
-    // B-1: last position at which we invalidated the AI vision dynamic-blocker cache.
-    // Used by spatial_move() to throttle cache invalidation to meaningful displacements.
-    Fvector m_spatial_ai_vis_last_invalidate_pos{0.f, 0.f, 0.f};
-    bool m_spatial_ai_vis_last_pos_initialized{false};
 
-public:
     SpatialBase(ISpatial_DB& space);
     virtual ~SpatialBase();
 };
@@ -485,6 +479,3 @@ inline std::unique_lock<std::shared_mutex> SpatialLockUnique(std::shared_mutex& 
         rw.lock();
     return std::unique_lock<std::shared_mutex>(rw, std::adopt_lock);
 }
-
-// B-1: incremented whenever a STYPE_VISIBLEFORAI object moves; used to invalidate AI vision dynamic-blocker cache.
-XRCDB_API extern std::atomic<u32> g_spatial_visible_for_ai_version;

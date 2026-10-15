@@ -1741,11 +1741,9 @@ void CGameObject::net_Relcase(IGameObject* O)
 {
     // objects x destroyed objects of them per frame with a destroy: hidden with perf_metrics bit 4 (P17)
     PERF_HOT_ZONE("CGameObject::net_Relcase");
-    if (GEnv.isDedicatedServer)
-        return;
-    if (npc_perf_skip_script_net_relcase)
-        return;
-    scriptBinder.net_Relcase(O);
+    // The script binders are not told about destroyed objects (vanilla called scriptBinder.net_Relcase here: an
+    // O(N*M) broadcast to every binder for every destroyed object), so the body is empty.
+    (void)O;
 }
 
 CGameObject::CScriptCallbackExVoid& CGameObject::callback(GameObject::ECallbackType type) const

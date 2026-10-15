@@ -28,7 +28,7 @@ public:
 private:
     // Does the Lua class of this action define its own weight()? Looked up once: the planner asks the weight of
     // every edge of every search, and without an override the Lua call only comes back to CScriptActionBase::weight.
-    // -1 = not looked up yet, 0 = no, 1 = yes (npc_perf_script_action_weight_lookup)
+    // -1 = not looked up yet, 0 = no, 1 = yes
     bool weight_overridden() const;
     mutable s8 m_weight_override = -1;
 

@@ -11,6 +11,8 @@
 #include "console_vars.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #include "PHStepDefer.h"
+#include "PHCharacter.h"
+#include <atomic>
 #ifdef DEBUG
 #include "debug_output.h"
 #endif
@@ -21,6 +23,65 @@ namespace
 {
 thread_local xr_vector<ISpatial*> tls_ph_spatial;
 IC qResultVec& PhTlsSpatial() { return tls_ph_spatial; }
+
+// Crowd broadphase (plans/optimization_mt/21-physics-step.md, journal 2026-10-15): ISpatial* -> CPHObject* without
+// dynamic_cast. ISpatial is a virtual base of SpatialBase, so a static_cast cannot reach CPHObject from it and smart_cast
+// is a full dynamic_cast (~33 ns hot, MSVC, measured on the same class layout) - paid for every q_box result: ~46 000
+// per substep in a crowd of ~600 NPCs. Every ISpatial of SpatialSpacePhysic is a CPHObject (its constructor is the only
+// SpatialBase built on that DB), and SpatialBase::GetSpatialData() (final) returns its own member `spatial`, which lies
+// at the same offset in every SpatialBase subobject (the non-virtual part of a class has one layout). The offset is
+// taken from a real object in the constructor below - no offsetof on a class with a virtual base. Before the first
+// CPHObject is built the offset is unknown and the dynamic_cast is used; DEBUG checks the fast result against it.
+std::atomic<ptrdiff_t> s_spatial_data_offset{-1};
+
+IC CPHObject* PhObjectFromSpatial(ISpatial* sp)
+{
+    const ptrdiff_t offset = s_spatial_data_offset.load(std::memory_order_relaxed);
+    if (offset < 0)
+        return smart_cast<CPHObject*>(sp);
+    char* data = reinterpret_cast<char*>(&sp->GetSpatialData());
+    CPHObject* obj = static_cast<CPHObject*>(reinterpret_cast<SpatialBase*>(data - offset));
+    VERIFY(obj == smart_cast<CPHObject*>(sp));
+    return obj;
+}
+
+// Objects whose CPHObject::AABB is the exact AABB of the geometry NearCallback collides (dSpacedGeom): shells
+// (CPHShell::get_spatial_params, the split shell too) and characters (CPHSimpleCharacter::get_spatial_params, the
+// movement-test cap included). Not CPHStaticGeomShell (its get_spatial_params fills a local AABB - the member is never
+// set; ladders also need near_callback for every q_box hit) and not the activation shape.
+IC bool HasExactPhAABB(CPHObject* obj)
+{
+    const CPHObject::ECastType tp = obj->CastType();
+    return tp == CPHObject::tpShell || tp == CPHObject::tpCharacter;
+}
+
+// A live NPC's movement controller (CPHAICharacter), not the actor's.
+IC bool IsAiController(CPHObject* obj)
+{
+    return obj->CastType() == CPHObject::tpCharacter && static_cast<CPHCharacter*>(obj)->CastAICharacter() != nullptr;
+}
+
+#if XR_PERF_METRICS
+// physics/broadphase/pair/*: the candidates that go on to NearCallback, by pair type (this object x the other one).
+void CountBroadphasePair(CPHObject* obj1, CPHObject* obj2)
+{
+    using M = xray::perf::Metric;
+    const bool ai1 = IsAiController(obj1);
+    const bool ai2 = IsAiController(obj2);
+    const bool rd1 = CPHCollideValidator::IsRagDollObject(*obj1);
+    const bool rd2 = CPHCollideValidator::IsRagDollObject(*obj2);
+    if (ai1 && ai2)
+        xray::perf::Add(M::ph_bp_pair_ai_ai, 1);
+    else if ((ai1 && rd2) || (rd1 && ai2))
+        xray::perf::Add(M::ph_bp_pair_ai_ragdoll, 1);
+    else if (ai1 || ai2)
+        xray::perf::Add(M::ph_bp_pair_ai_other, 1);
+    else if (rd1 || rd2)
+        xray::perf::Add(M::ph_bp_pair_ragdoll, 1);
+    else
+        xray::perf::Add(M::ph_bp_pair_other, 1);
+}
+#endif
 } // namespace
 
 CPHObject::CPHObject() : SpatialBase(g_pGamePersistent->SpatialSpacePhysic)
@@ -30,6 +91,10 @@ CPHObject::CPHObject() : SpatialBase(g_pGamePersistent->SpatialSpacePhysic)
     m_island.Init();
     m_check_count = 0;
     CPHCollideValidator::InitObject(*this);
+    // The same value from every object (see PhObjectFromSpatial).
+    s_spatial_data_offset.store(
+        reinterpret_cast<char*>(&spatial) - reinterpret_cast<char*>(static_cast<SpatialBase*>(this)),
+        std::memory_order_relaxed);
 }
 
 void CPHObject::activate()
@@ -171,15 +236,43 @@ void CPHObject::CollideDynamicsBroadphase()
     m_collide_spatial_overlap.assign(result.begin(), result.end());
     m_collide_dyn_candidates.clear();
     m_collide_dyn_candidates.reserve(result.size());
+    // Crowd broadphase (plans/optimization_mt/21-physics-step.md, journal 2026-10-15), exact AABB filter: q_box tests
+    // the query box (this object's exact AABB) against the CUBE of the other object's bounding sphere (radius = its
+    // largest half-extent). For an upright NPC controller that cube is 0.88 m in x/z instead of 0.4 m, so ~60 % of
+    // the neighbours it returns in a crowd cannot touch: NearCallback still collides them space x space (dSpaceCollide2
+    // does not test the two space AABBs first - every geom of one space against every geom of the other). The exact
+    // AABB of both sides drops them first. Both AABBs come from the last spatial_move (end of the previous substep or a
+    // teleport), i.e. from the same body positions dCollide sees now; the margin only absorbs float rounding. Only when
+    // both AABBs are exact (HasExactPhAABB) and this object is in the spatial DB (an unregistered one keeps a stale AABB).
+    const bool aabb_filter = spatial.node_ptr != nullptr && HasExactPhAABB(this);
+    constexpr float aabb_margin = 0.02f;
+    [[maybe_unused]] const bool count_pairs = xray::perf::g_perf_metrics_active && ph_world->Processing();
     for (ISpatial* sp : result)
     {
-        CPHObject* obj2 = smart_cast<CPHObject*>(sp);
+        CPHObject* obj2 = PhObjectFromSpatial(sp);
         if (!obj2)
             continue;
         if (obj2 == this || !obj2->m_flags.test(st_dirty))
             continue;
-        if (CPHCollideValidator::DoCollide(*this, *obj2))
-            m_collide_dyn_candidates.push_back(obj2);
+        if (!CPHCollideValidator::DoCollide(*this, *obj2))
+            continue;
+        if (aabb_filter && HasExactPhAABB(obj2))
+        {
+            const Fvector& c1 = spatial.sphere.P;
+            const Fvector& c2 = obj2->spatial.sphere.P;
+            const Fvector& e2 = obj2->AABB;
+            if (_abs(c1.x - c2.x) > AABB.x + e2.x + aabb_margin || _abs(c1.y - c2.y) > AABB.y + e2.y + aabb_margin ||
+                _abs(c1.z - c2.z) > AABB.z + e2.z + aabb_margin)
+            {
+                PERF_INC(ph_broadphase_aabb_reject);
+                continue;
+            }
+        }
+#if XR_PERF_METRICS
+        if (count_pairs)
+            CountBroadphasePair(this, obj2);
+#endif
+        m_collide_dyn_candidates.push_back(obj2);
     }
     PERF_ADD(ph_broadphase_candidates, m_collide_dyn_candidates.size());
 }
@@ -204,12 +297,21 @@ void CPHObject::CollideStepPostBroadphase()
         CollideDynamicsNarrow();
     }
     if (CPHCollideValidator::DoCollideStatic(*this))
+    {
+        // physics/step/static_ai: the level mesh part of physics/step/static paid by live NPC controllers.
+        PERF_SCOPE_IF(xray::perf::g_perf_metrics_active && ph_world->Processing() && IsAiController(this),
+            ph_step_static_ai);
         CollideStatic(dSpacedGeom(), this);
+    }
     CollideClearDirty();
 }
 
 void CPHObject::Collide()
 {
+    // physics/step/collide_ai: the whole Collide() (q_box + pairs + level mesh) of live NPC controllers, the frame step
+    // on the physics thread only - their share of physics/step/collide.
+    PERF_SCOPE_IF(xray::perf::g_perf_metrics_active && ph_world->Processing() && IsAiController(this),
+        ph_step_collide_ai);
     {
         // F0 (plans/optimization_mt/21-physics-step.md): q_box + filter, the frame step on the physics thread only.
         PERF_SCOPE_IF(ph_world->Processing(), ph_step_broadphase);
@@ -229,7 +331,7 @@ void CPHObject::reinit_single()
     IslandReinit();
     for (ISpatial* sp : m_collide_spatial_overlap)
     {
-        CPHObject* obj = smart_cast<CPHObject*>(sp);
+        CPHObject* obj = PhObjectFromSpatial(sp);
         if (!obj)
             continue;
         obj->IslandReinit();

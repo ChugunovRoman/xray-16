@@ -31,7 +31,6 @@ private:
     float LegLengthShiftLimit(float current_shift, const SCalculateData cd[max_size]);
     bool PredictObjectShift(const SCalculateData cd[max_size]);
     void ObjectShift(float static_shift, const SCalculateData cd[max_size]);
-    void LimbUpdate(CIKLimb& L);
     void LimbSetup();
 
     /** Per-NPC IK ray batch state. */

@@ -46,8 +46,8 @@ struct GraphEngineConcurrencyProbe
         if (budget_before == 0)
             return;
 
-        Msg("! [ai_mt] concurrent graph_engine search backend=%s in_flight=%u serialize=%d tls_scratch=%d", backend,
-            in_flight_before + 1, ps_ai_graph_engine_serialize, ps_ai_path_build_use_tls_scratch);
+        Msg("! [ai_mt] concurrent graph_engine search backend=%s in_flight=%u serialize=%d", backend,
+            in_flight_before + 1, ps_ai_graph_engine_serialize);
     }
 
     ~GraphEngineConcurrencyProbe() { active->fetch_sub(1, std::memory_order_acq_rel); }

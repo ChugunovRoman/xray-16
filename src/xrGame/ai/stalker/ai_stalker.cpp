@@ -988,6 +988,7 @@ void CAI_Stalker::update_object_handler()
 {
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerObjectHandlerUpdate);
     PERF_SCOPE(pseq_object_handler); // 22-game-thread.md: a seqParallel delegate (mt_object_handler)
+    PERF_FF_CALLER(xray::perf::ff_caller::ObjectHandler); // 24-critical-path.md, M11: npc/ff/pick_oh
     if (!g_Alive())
         return;
 
@@ -1429,9 +1430,6 @@ void CAI_Stalker::UpdateCL()
     START_PROFILE("stalker/client_update")
     VERIFY2(PPhysicsShell() || getEnabled(), cName().c_str());
 
-    // DEBUG/STRESS gate only (default 0).
-    const bool run_ucl_step_alive = npc_perf_disable_ucl_stalker_step_manager == 0;
-
     // -npc_cpp_profile only (stage 0 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md): updates of a
     // living NPC off screen, and of those also farther than 25 m from the camera without an enemy - what an
     // update-rate LOD could skip (not seen in the last main pass; never while a second viewport renders)
@@ -1500,7 +1498,6 @@ void CAI_Stalker::UpdateCL()
     }
     STOP_PROFILE
 
-    // npc_perf_mt_stalker_physics: reserved (see CharacterPhysicsSupport.cpp); deferred physics would run after sight order.
     START_PROFILE("stalker/client_update/physics")
     {
         ZoneScopedN("ucl_stalker_physics");
@@ -1537,16 +1534,13 @@ void CAI_Stalker::UpdateCL()
         }
         STOP_PROFILE
 
-        if (run_ucl_step_alive)
+        START_PROFILE("stalker/client_update/step_manager")
         {
-            START_PROFILE("stalker/client_update/step_manager")
-            {
-                ZoneScopedN("ucl_stalker_step_manager");
-                NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);
-                CStepManager::update(false);
-            }
-            STOP_PROFILE
+            ZoneScopedN("ucl_stalker_step_manager");
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);
+            CStepManager::update(false);
         }
+        STOP_PROFILE
 
         START_PROFILE("stalker/client_update/weapon_shot_effector")
         {
@@ -1700,28 +1694,8 @@ void CAI_Stalker::shedule_Update(u32 DT)
             {
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerScheduleVisibility);
                 PERF_SCOPE(stk_shed_vision);
-                if (npc_perf_vision_parallel_batch)
-                {
-                    Exec_Visibility_Prepare();
-                }
-                else
-                {
-                    const bool par_vision = ps_r__mt_ai_vision_parallel != 0 && g_mt_config.test(mtAiVision);
-                    if (par_vision)
-                    {
-#ifdef DEBUG
-                        fastdelegate::FastDelegate0<> fv =
-                            fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility);
-                        xr_vector<fastdelegate::FastDelegate0<>>::const_iterator I;
-                        I = std::find(Device.seqParallel.begin(), Device.seqParallel.end(), fv);
-                        VERIFY(I == Device.seqParallel.end());
-#endif
-                        Device.seqParallel.push_back(
-                            fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));
-                    }
-                    else
-                        Exec_Visibility();
-                }
+                // the shared vision batch, as in CCustomMonster::shedule_Update
+                Exec_Visibility_Prepare();
             }
             STOP_PROFILE
         }
@@ -1967,6 +1941,7 @@ void CAI_Stalker::Think()
     ZoneScopedN("CAI_Stalker::Think");
     ZoneTextF("%s", cName().c_str());
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerThink);
+    PERF_FF_CALLER(xray::perf::ff_caller::Think); // 24-critical-path.md, M11: npc/ff/pick_think
     START_PROFILE("stalker/schedule_update/think")
     const u32 update_delta = (m_dwLastUpdateTime == u32(-1)) ? 0 : (Device.dwTimeGlobal - m_dwLastUpdateTime);
 
@@ -2056,8 +2031,6 @@ bool CAI_Stalker::should_update_animation(u32 now_ms)
     // an enemy is selected). Only far, non-combat NPCs are throttled; movement().on_frame still runs every
     // frame, so position/path stay correct -- only animation blending updates at a lower rate (imperceptible
     // at >80m). On Far->Near the interval drops to 0 and animation resumes immediately.
-    if (!npc_anim_lod)
-        return true;
     if (get_stalker_update_lod(*this) != EStalkerUpdateLod::Far)
         return true;
     if (now_ms < m_next_animation_update_time)

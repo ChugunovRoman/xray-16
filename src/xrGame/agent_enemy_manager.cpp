@@ -317,8 +317,8 @@ void CAgentEnemyManager::fill_enemies()
                 // No enemy in its own list: a heuristic, not the walk's answer. The list is the one of its last
                 // memory update, made under the collect budget, without the enemies assigned to other members
                 // (useful_enemy) and with the squad mask; the walk could still find an enemy only this member
-                // sees, which then joins the distribution later (npc_perf_agent_fill_skip_no_enemy)
-                if (npc_perf_agent_fill_skip_no_enemy && member_order->object().memory().enemy().objects().empty())
+                // sees, which then joins the distribution later
+                if (member_order->object().memory().enemy().objects().empty())
                     continue;
                 const CEnemyFiller filler(
                     &m_enemies, object().member().mask(&member_order->object()), &enemy_index);
@@ -883,7 +883,7 @@ void CAgentEnemyManager::distribute_enemies()
     // Once per frame for the group: each combat member without an enemy calls this on its memory update, and each
     // call walks the visual memory of every member (fill_enemies) - O(members^2) a frame in a big group. The
     // memories hardly change within a frame, so the first call of the frame distributes for everybody.
-    if (npc_perf_agent_distribute_once_per_frame && m_distributed_frame == Device.dwFrame)
+    if (m_distributed_frame == Device.dwFrame)
         return;
     m_distributed_frame = Device.dwFrame;
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::AgentEnemyDistribute);

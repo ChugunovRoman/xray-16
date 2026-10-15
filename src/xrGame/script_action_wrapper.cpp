@@ -12,7 +12,7 @@
 #include "ai_space.h"
 #include "xrScriptEngine/script_engine.hpp"
 #include "npc_cpp_profile.h"
-#include "performance_cvars.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #ifndef LUABIND_NO_EXCEPTIONS
 #include "luabind/error.hpp"
 #endif
@@ -93,6 +93,9 @@ void CScriptActionWrapper::setup_static(CScriptActionBase* action, CScriptGameOb
 void CScriptActionWrapper::initialize()
 {
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptActionInitialize);
+    // 24-critical-path.md, M9: Lua in the action planners, the combat planner's share apart
+    PERF_SCOPE(ai_script_action_init_fin);
+    PERF_SCOPE_IF(xray::perf::TlAiContext() == xray::perf::ai_planner::Combat, stk_combat_lua_exec);
     const u64 start = npc_cpp_profile::enabled() ? CPU::QPC() : 0; // script_action_top by the name of the action
 #ifndef LUABIND_NO_EXCEPTIONS
     script_action_try_void("initialize", [&]() { luabind::call_member<void>(this, "initialize"); });
@@ -108,6 +111,8 @@ void CScriptActionWrapper::initialize_static(CScriptActionBase* action) { action
 void CScriptActionWrapper::execute()
 {
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptActionUpdate);
+    PERF_SCOPE(ai_script_action_execute);
+    PERF_SCOPE_IF(xray::perf::TlAiContext() == xray::perf::ai_planner::Combat, stk_combat_lua_exec);
     const u64 start = npc_cpp_profile::enabled() ? CPU::QPC() : 0;
 #ifndef LUABIND_NO_EXCEPTIONS
     script_action_try_void("execute", [&]() { luabind::call_member<void>(this, "execute"); });
@@ -121,6 +126,8 @@ void CScriptActionWrapper::execute()
 void CScriptActionWrapper::execute_static(CScriptActionBase* action) { action->CScriptActionBase::execute(); }
 void CScriptActionWrapper::finalize()
 {
+    PERF_SCOPE(ai_script_action_init_fin);
+    PERF_SCOPE_IF(xray::perf::TlAiContext() == xray::perf::ai_planner::Combat, stk_combat_lua_exec);
     const u64 start = npc_cpp_profile::enabled() ? CPU::QPC() : 0;
 #ifndef LUABIND_NO_EXCEPTIONS
     script_action_try_void("finalize", [&]() { luabind::call_member<void>(this, "finalize"); });
@@ -161,7 +168,7 @@ bool CScriptActionWrapper::weight_overridden() const
 CScriptActionWrapper::edge_value_type CScriptActionWrapper::weight(const CSConditionState& condition0, const CSConditionState& condition1) const
 {
     // No script action overrides weight() today: the default is answered here instead of a Lua round trip per edge
-    if (npc_perf_script_action_weight_lookup && !weight_overridden())
+    if (!weight_overridden())
         return CScriptActionBase::weight(condition0, condition1);
 #ifndef LUABIND_NO_EXCEPTIONS
     auto _weight = script_action_try_r(

@@ -752,7 +752,6 @@ extern Flags32 psEnvFlags;
 extern int g_ErrorLineCount;
 
 ENGINE_API int ps_r__Supersample = 1;
-ENGINE_API int ps_r__dedicated_second_vp = 1;
 ENGINE_API int ps_r__svp_skip_details = 0;
 ENGINE_API int ps_r__svp_skip_wallmarks = 0;
 ENGINE_API int ps_r__svp_skip_rain_sync = 0;
@@ -762,9 +761,7 @@ ENGINE_API int ps_r__svp_frame_delay = 2;
 // SVP frame driver: records scope lighting/combine on the dedicated worker into deferred command
 // lists (DX11 only).
 ENGINE_API int ps_r__svp_smap_pages = 8;        // max packing batches per frame in the SVP atlas
-// Diagnostics / kill-switches - see the comment in xrEngine/Render.h.
-ENGINE_API int ps_r__svp_pipeline = 1;
-ENGINE_API int ps_r__svp_shadow_transfer = 1;
+// Diagnostics - see the comment in xrEngine/Render.h.
 ENGINE_API int ps_r__gpu_diag = 0;
 ENGINE_API int ps_r__dump_render_state = 0;
 ENGINE_API int ps_r__svp_restore_surfaces = 0;
@@ -778,9 +775,6 @@ ENGINE_API shared_str current_player_hud_sect{};
 
 extern int ps_fps_limit;
 extern int ps_fps_limit_in_menu;
-
-extern int ps_obj_preupdate_mt;
-extern int ps_obj_postupdate_mt;
 
 void CCC_Register()
 {
@@ -841,7 +835,6 @@ void CCC_Register()
 
     // Render device states
     CMD4(CCC_Integer, "r__supersample", &ps_r__Supersample, 1, 4);
-    CMD4(CCC_Integer, "r__dedicated_second_vp", &ps_r__dedicated_second_vp, 0, 1);
     CMD4(CCC_Integer, "r__svp_skip_details", &ps_r__svp_skip_details, 0, 1);
     CMD4(CCC_Integer, "r__svp_skip_wallmarks", &ps_r__svp_skip_wallmarks, 0, 1);
     CMD4(CCC_Integer, "r__svp_skip_rain_sync", &ps_r__svp_skip_rain_sync, 0, 1);
@@ -849,8 +842,6 @@ void CCC_Register()
     CMD4(CCC_Integer, "r__svp_skip_zfill", &ps_r__svp_skip_zfill, 0, 1);
     CMD4(CCC_Integer, "r__svp_frame_delay", &ps_r__svp_frame_delay, 0, 255);
     CMD4(CCC_Integer, "r__svp_smap_pages", &ps_r__svp_smap_pages, 1, 8);
-    CMD4(CCC_Integer, "r__svp_pipeline", &ps_r__svp_pipeline, 0, 1);
-    CMD4(CCC_Integer, "r__svp_shadow_transfer", &ps_r__svp_shadow_transfer, 0, 1);
     CMD4(CCC_Integer, "r__gpu_diag", &ps_r__gpu_diag, 0, 1);
     CMD4(CCC_Integer, "r__dump_render_state", &ps_r__dump_render_state, 0, 1);
     CMD4(CCC_Integer, "r__svp_restore_surfaces", &ps_r__svp_restore_surfaces, 0, 1);
@@ -925,16 +916,12 @@ void CCC_Register()
     // Снижает нагрузку q_box при автоматическом огне. 0 = выкл.
     CMD4(CCC_Integer, "snd_ai_coalesce_ms", &g_snd_ai_coalesce_ms, 0, 1000);
 
-    extern int g_snd_ai_budget_enable;
-    // Главный kill-switch бюджетирования AI-реакций на звук. 0 = всё как раньше, 1 = все оптимизации ниже активны.
-    CMD4(CCC_Integer, "snd_ai_budget_enable", &g_snd_ai_budget_enable, 0, 1);
+    // The AI sound-reaction budget, the priority gate beyond it and the burst coalescence are permanent
+    // (IGame_Level::SoundEvent_Register); their numeric limits below are saved tunables.
     extern int g_snd_ai_budget_per_frame;
     // Макс. число полностью обработанных звуковых событий (q_box + occlusion) за кадр.
     // При превышении некритичные звуки отсекаются. Увеличить если AI плохо слышит.
     CMD4(CCC_Integer, "snd_ai_budget_per_frame", &g_snd_ai_budget_per_frame, 1, 10000);
-    extern int g_snd_ai_priority_only_beyond_budget;
-    // При исчерпании бюджета пропускать только боевые звуки (выстрелы, взрывы, атаки монстров). 0 = FIFO без приоритета.
-    CMD4(CCC_Integer, "snd_ai_priority_only_beyond_budget", &g_snd_ai_priority_only_beyond_budget, 0, 1);
     extern float g_snd_ai_occlusion_skip_threshold;
     // Порог мощности звука, ниже которого дорогой occlusion-рейкаст заменяется консервативной оценкой.
     // 0 = всегда делать occlusion. Значение подбирать по FPS/поведению AI.
@@ -942,17 +929,12 @@ void CCC_Register()
     extern float g_snd_ai_occlusion_skip_default;
     // Консервативный множитель occlusion взамен пропущенного рейкаста. Выше = AI лучше слышит слабые звуки за стенами.
     CMD4(CCC_Float, "snd_ai_occlusion_skip_default", &g_snd_ai_occlusion_skip_default, 0.f, 1.f);
-    extern int g_snd_ai_burst_coalesce_enable;
-    // Склеивать близкие одновременные звуки одного типа (автоматная очередь, серия шагов) в одно событие. 0 = выкл.
-    CMD4(CCC_Integer, "snd_ai_burst_coalesce_enable", &g_snd_ai_burst_coalesce_enable, 0, 1);
     extern int g_snd_ai_burst_coalesce_time_ms;
     // Временное окно склейки burst-событий в миллисекундах. Меньше = строже, больше = агрессивнее склейка.
     CMD4(CCC_Integer, "snd_ai_burst_coalesce_time_ms", &g_snd_ai_burst_coalesce_time_ms, 0, 500);
     extern float g_snd_ai_burst_coalesce_dist;
     // Радиус склейки burst-событий в метрах. Звуки одного типа в этом радиусе считаются одним событием.
     CMD4(CCC_Float, "snd_ai_burst_coalesce_dist", &g_snd_ai_burst_coalesce_dist, 0.f, 100.f);
-    CMD4(CCC_Integer, "obj_preupdate_mt", &ps_obj_preupdate_mt, 0, 1);
-    CMD4(CCC_Integer, "obj_postupdate_mt", &ps_obj_postupdate_mt, 0, 1);
 
     // Spatial query cache tunables for CObjectSpace::GetNearest.
     CMD4(CCC_Float, "obj_nearest_cache_quant", &CObjectSpace::ps_obj_nearest_cache_quant, 0.01f, 10.0f);
@@ -1031,12 +1013,12 @@ void CCC_Register()
     extern int ps_disable_lens_flare;
     CMD4(CCC_Integer, "disable_lens_flare", &ps_disable_lens_flare, 0, 1);
 
+    // No longer read by the scheduler (replaced by shed_budget_ms), kept for the saved configs and the options menu
     extern int ps_scheduler_max_steps_per_frame;
     CMD4(CCC_Integer, "scheduler_max_steps_per_frame", &ps_scheduler_max_steps_per_frame, 0, 65535);
 
-    // 22-game-thread.md, step 4 (xrSheduler.cpp, see the comment at ps_shed_priority): near objects first and a fixed
-    // time budget of the non-RT scheduler pass. shed_priority is temporary (not saved, 0 = as before); the rest tune it
-    CMD4(CCC_IntegerNotSavedE, "shed_priority", &ps_shed_priority, 0, 1);
+    // 22-game-thread.md, step 4 (xrSheduler.cpp, see the comment at ps_shed_budget_ms): near objects first and a fixed
+    // time budget of the non-RT scheduler pass; these tune it
     CMD4(CCC_Integer, "shed_budget_ms", &ps_shed_budget_ms, 1, 50);
     CMD4(CCC_Integer, "shed_near_dist", &ps_shed_near_dist, 0, 300);
     CMD4(CCC_Integer, "shed_near_seen_dist", &ps_shed_near_seen_dist, 0, 500);
@@ -1045,10 +1027,12 @@ void CCC_Register()
     CMD4(CCC_Integer, "shed_near_min_steps", &ps_shed_near_min_steps, 0, 64);
     CMD4(CCC_Integer, "shed_max_steps", &ps_shed_max_steps, 16, 65535);
     CMD4(CCC_Integer, "shed_scan", &ps_shed_scan, 0, 8192);
-    CMD4(CCC_IntegerNotSavedE, "shed_services_near", &ps_shed_services_near, 0, 1);
-    // Step 4c: the adaptive near radius of the living creatures (only with shed_priority 1; shed_near_dist and
-    // shed_near_seen_dist are then the maxima)
-    CMD4(CCC_Integer, "shed_near_adaptive", &ps_shed_near_adaptive, 0, 1);
+    // Step 4c: the adaptive near radius of the living creatures (permanent; shed_near_dist and shed_near_seen_dist are
+    // the maxima): the target count of the living near creatures and the minimum plain radius are tunables
     CMD4(CCC_Integer, "shed_near_target", &ps_shed_near_target, 1, 2000);
     CMD4(CCC_Integer, "shed_near_dist_min", &ps_shed_near_dist_min, 0, 300);
+    // Step 4d: inside the near class those who have to react go first (xrSheduler.cpp, see the comment at
+    // ps_shed_urgent_share; always on): the share of the near budget and the hit memory are tunables
+    CMD4(CCC_Integer, "shed_urgent_share", &ps_shed_urgent_share, 10, 100);
+    CMD4(CCC_Integer, "shed_urgent_hit_ms", &ps_shed_urgent_hit_ms, 0, 60000);
 };

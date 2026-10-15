@@ -131,6 +131,18 @@ protected:
     u8 m_try_skip_streak = 0; // successful TryPosition calls in a row (the hysteresis after a failure)
     u8 m_try_skip_k = 0; // K of this NPC as of the last decision (refills m_try_skip_left on a success)
     bool m_try_skip_after_skip = false; // the frame before the next check skipped TryPosition
+    // Live NPCs left high in the air (plans/optimization_mt/21-physics-step.md, 2026-10-15; ground snap): the
+    // diagnostics state of ground_diag() - the height above the AI floor at the previous update, how that update moved
+    // the NPC (a ground_branch value, movement_manager_physic.cpp), the latch of "higher than 3 m" and the updates spent
+    // in the air (above 0.5 m) by kind since the NPC last stood on the floor. Transient, not saved.
+    float m_ground_prev_height = 0.f;
+    u32 m_ground_prev_frame = 0;
+    u8 m_ground_prev_branch = 0;
+    bool m_ground_prev_valid = false;
+    bool m_ground_high = false;
+    u16 m_ground_air_updates[4] = {}; // kinematic, TryPosition, physics, other
+    // ground_snap(): the NPC is being lowered to the floor - keep on until it is there, not just under the threshold
+    bool m_ground_snapping = false;
 
 protected:
     float m_speed;
@@ -191,8 +203,19 @@ private:
     bool try_position_skip(CPHMovementControl* movement_control, const Fvector& dest_position, float motion);
     void try_position_skip_result(bool success);
     void try_position_skip_reset();
+    // Live NPCs left high in the air (ground snap, see movement_manager_physic.cpp): the body of
+    // move_along_path() that also reports how it moved the NPC (branch), the AI floor under a position, the lowering
+    // of a kinematic destination that hangs above it, and the lift diagnostics.
+    void move_along_path_body(CPHMovementControl* movement_control, Fvector& dest_position, float time_delta, u8& branch);
+    bool ground_floor_y(const Fvector& position, float refine_above, float& floor_y) const;
+    bool ground_snap(CPHMovementControl* movement_control, Fvector& dest_position, float time_delta);
+    bool ground_snap_excluded(CPHMovementControl* movement_control) const;
+    void ground_diag(CPHMovementControl* movement_control, const Fvector& position, u8 branch);
 
 protected:
+    // false: this mover's NPC is legitimately off the AI floor while it walks (a poltergeist, a stalker in a smart cover)
+    // and ground_snap() never lowers it
+    virtual bool ground_snap_allowed() const { return true; }
     virtual void teleport(u32 game_vertex_id);
 
 public:

@@ -78,6 +78,11 @@ private:
     // for not paying its simulation cost). Actually disabled AFTER ReinitMerged() (see SleepCorpses()) -
     // deactivate() asserts the island is not mid-merge, which only holds true once Unmerge() has run.
     xr_vector<CPHObject*> m_corpses_to_sleep;
+    // Stretched ragdolls (21-physics-step.md, 2026-10-15): the active ragdolls of this frame substep
+    // (collected with m_corpses_to_sleep, checked by CheckActiveCorpses() after the solve). Physics thread only.
+    xr_vector<CPHObject*> m_corpses_active;
+    // physics/corpse_near/awake_old: active ragdolls older than ph_corpse_sleep_ms in the last substep of the frame.
+    u32 m_corpses_awake_old = 0;
     // Objects whose island was merged (NearCallback) during the current step. They may be absent from
     // m_objects / m_update_objects (frozen world, CPHStaticGeomShell, deactivated mid-step), so the regular
     // IslandReinit loops would leave a stale m_self_active pointing to a soon-destroyed island -> crash in
@@ -183,6 +188,8 @@ public:
     // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): see Step() for call sites/ordering.
     bool ShouldForceSleepCorpse(CPHObject* obj);
     void SleepCorpses();
+    // Stretch watchdog over m_corpses_active (+ the physics/corpse_near/awake_old count).
+    void CheckActiveCorpses();
     void CutVelocity(float l_limit, float a_limit);
     void GetState(V_PH_WORLD_STATE& state);
     void Freeze();

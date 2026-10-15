@@ -227,8 +227,6 @@ PERF_GAUGE(vision_entries, "ai/vision/entries")
 PERF_GAUGE(vision_rays, "ai/vision/rays")
 PERF_COUNTER(vision_parallel, "ai/vision/parallel")
 PERF_COUNTER(vision_serial, "ai/vision/serial")
-PERF_COUNTER(vision_dyn_ray, "ai/vision/dyn_ray")
-PERF_COUNTER(vision_dyn_cache, "ai/vision/dyn_cache")
 PERF_TIMER(ai_path_search, "ai/path/search")
 PERF_COUNTER(ai_path_ok, "ai/path/ok")
 // Index-graph search above (3 CGraphEngine::search overloads); the shared_str-graph overload is timed apart,
@@ -733,10 +731,9 @@ PERF_COUNTER(rcomb_sorted_draws, "render/combine/sorted_draws")
 PERF_COUNTER(rcomb_distort_items, "render/combine/distort_items")
 // Sprite particles drawn by render_sorted (CParticleEffect::Render).
 PERF_TIMER(rcomb_ps_effect, "render/combine/ps_effect")         // one effect: VB lock + vertex build + draw, calls = effects
-PERF_TIMER(rcomb_ps_fill, "render/combine/ps_fill")             // ParticleRenderStream (with the xr_parallel_for wait)
+PERF_TIMER(rcomb_ps_fill, "render/combine/ps_fill")             // ParticleRenderStream (sprite vertex build)
 PERF_COUNTER(rcomb_ps_empty, "render/combine/ps_empty")         // effects reaching the combine with no particles (emptied after the build)
 PERF_COUNTER(rcomb_ps_sprites, "render/combine/ps_sprites")     // particles turned into sprites
-PERF_COUNTER(rcomb_ps_parallel, "render/combine/ps_parallel")   // effects built by xr_parallel_for (r__particle_render_parallel)
 // The dynamic VB (_VertexStream::Lock: the stream mutex + Map) from anything inside the main combine.
 PERF_TIMER(rcomb_vb_lock, "render/combine/vb_lock")             // calls = locks
 PERF_COUNTER(rcomb_vb_discard, "render/combine/vb_discard")     // locks that wrapped the stream (Map DISCARD)
@@ -786,8 +783,6 @@ PERF_TIMER(rsvp_kick, "render/svp/kick")                       // main: BeginSec
 PERF_TIMER(rsvp_begin_vp, "render/svp/begin_vp")               // main: BeginSecondViewportRender (Device camera to the scope)
 PERF_TIMER(rsvp_worker_build, "render/svp/worker_build")       // SVP thread: visibility build (calculate_into)
 PERF_TIMER(rsvp_worker_geom, "render/svp/worker_geom")         // SVP thread: render_graph(0) recording into the deferred list
-PERF_TIMER(rsvp_worker_lights_wait, "render/svp/worker_lights_wait") // SVP thread idles until main finished its own lighting
-PERF_TIMER(rsvp_worker_shadows, "render/svp/worker_shadows")   // SVP thread: record_second_vp_shadows (worker shadow build mode)
 // P19 (plans/optimization_mt/14-spike-instrumentation.md): where the rare FrameMove / Game-thread peaks come from.
 // Spikes of the spike logger (perf_spike_us), all sites and threads; per site - "! [perf-spike]" lines in the log.
 PERF_COUNTER(perf_spike_hits, "spike/hits")
@@ -1198,12 +1193,11 @@ PERF_COUNTER(npc_ff_rays, "npc/ff/rays")
 PERF_COUNTER(npc_ff_candidates, "npc/ff/candidates")
 PERF_COUNTER(npc_ff_precise_rays, "npc/ff/precise_rays")
 
-// 22-game-thread.md, step 4 (shed_priority, xrEngine/xrSheduler.cpp): the near/far classes of the non-RT scheduler.
-// near_* / far_* = executed steps by class: *_late_ms / *_late_n = their average lateness (with shed_priority 0 too:
-// then each step is classified only for these metrics); *_stalker_* = the same for stalkers only. near_items = the near
-// heap (0 with shed_priority 0; shed/items is both heaps), near_creatures = the living stalkers and monsters in it;
-// promoted = far items moved to the near heap by the scan
-// (promote_scan = its time); phase_near / phase_far = the time of the two passes (shed_priority 1); dt_clamped /
+// 22-game-thread.md, step 4 (xrEngine/xrSheduler.cpp): the near/far classes of the non-RT scheduler.
+// near_* / far_* = executed steps by class (the heap they came from): *_late_ms / *_late_n = their average lateness;
+// *_stalker_* = the same for stalkers only. near_items = the near heap (shed/items is both heaps), near_creatures = the
+// living stalkers and monsters in it; promoted = far items moved to the near heap by the scan
+// (promote_scan = the time of both scans); phase_near / phase_far = the time of the two passes; dt_clamped /
 // dt_lost_ms = steps whose real elapsed time was cut to max(t_max, 1000) ms for shedule_Update, and the time cut off
 PERF_COUNTER(shed_near_late_ms, "shed/near_late_ms")
 PERF_COUNTER(shed_near_late_n, "shed/near_late_n")
@@ -1222,9 +1216,9 @@ PERF_TIMER(shed_phase_far, "shed/phase_far")
 PERF_COUNTER(shed_dt_clamped, "shed/dt_clamped")
 PERF_COUNTER(shed_dt_lost_ms, "shed/dt_lost_ms")
 
-// 22-game-thread.md, step 4c (shed_near_adaptive, xrEngine/xrSheduler.cpp): the adaptive near radius of the living
-// creatures under shed_priority 1. near_radius = the effective plain radius in cm (shed_near_dist times the scale of the
-// controller; the configured one with shed_priority 0 or shed_near_adaptive 0); demoted = near items moved back to the
+// 22-game-thread.md, step 4c (the adaptive near radius, xrEngine/xrSheduler.cpp; permanent): the adaptive near radius of
+// the living creatures. near_radius = the effective plain radius in cm (shed_near_dist times the scale of the
+// controller); demoted = near items moved back to the
 // far heap by the scan of the near heap (the radius shrank, the camera moved away, the creature died)
 PERF_GAUGE(shed_near_radius, "shed/near_radius")
 PERF_COUNTER(shed_demoted, "shed/demoted")
@@ -1265,3 +1259,219 @@ PERF_COUNTER(rmain_par_submit_lists, "render/main/par_submit_lists")
 PERF_COUNTER(rmain_par_submit_main_items, "render/main/par_submit_main_items")
 PERF_COUNTER(rmain_par_submit_fallback, "render/main/par_submit_fallback")
 PERF_COUNTER(rmain_par_submit_ctx_short, "render/main/par_submit_ctx_short")
+
+// 24-critical-path.md, M10 + G6b: vision of NPCs (Feel::Vision / CCustomMonster), in practice stalkers.
+// s1_query - q_frustum of eye_pp_s1 (Feel::Vision::feel_vision_query), s1_filter - the feel_vision_isRelevant filter
+// + sort + unique of its result; s2_merge - feel_vision_merge_after_frustum (the diff of seen / query, adding, removal);
+// s2_rays - preparing / tracing the rays after the merge (eye_pp_s2_prepare loop, o_trace). query_results - objects
+// returned by q_frustum, query_relevant - left after the filter, o_new / o_delete - feel_visible items added / removed
+// by the merge. G6b: s2_o_new / s2_o_delete - the adding / removal parts of s2_merge; mesh_point_lazy - mesh points
+// chosen on the first use (the merge adds items without them), mesh_point_skipped - items removed before any ray at
+// them (the get_new/get_last_local_point_on_mesh calls saved outright).
+PERF_TIMER(stk_vision_s1_query, "stalker/vision/s1_query")
+PERF_TIMER(stk_vision_s1_filter, "stalker/vision/s1_filter")
+PERF_TIMER(stk_vision_s2_merge, "stalker/vision/s2_merge")
+PERF_TIMER(stk_vision_s2_rays, "stalker/vision/s2_rays")
+PERF_COUNTER(vision_query_results, "ai/vision/query_results")
+PERF_COUNTER(vision_query_relevant, "ai/vision/query_relevant")
+PERF_COUNTER(vision_o_new, "ai/vision/o_new")
+PERF_COUNTER(vision_o_delete, "ai/vision/o_delete")
+PERF_TIMER(stk_vision_s2_o_new, "stalker/vision/s2_o_new")
+PERF_TIMER(stk_vision_s2_o_delete, "stalker/vision/s2_o_delete")
+PERF_COUNTER(vision_mesh_point_lazy, "ai/vision/mesh_point_lazy")
+PERF_COUNTER(vision_mesh_point_skipped, "ai/vision/mesh_point_skipped")
+
+// 24-critical-path.md, M8 / M9 / M11 / M12: what one stalker scheduler pass spends in a fight (diagnostics only).
+// M8, stalker/brain/exec_combat by part (CStalkerCombatPlanner::update): solve = the combat planner's actuality check +
+// graph search (its evaluators, Lua ones included), transition = finalize/initialize of its actions, exec = the
+// current action, react = react_on_grenades + react_on_member_death. act/* = exec by the current action of the combat
+// planner (calls = combat updates that ran it): kill_enemy (+ kill_if_not_visible / _critically_wounded /
+// _player_on_the_path), ready_to_kill (get_ready_to_kill / _detour), hold = hold_position, sudden = sudden attack,
+// smart_cover = in smart cover, search / subplanner = the nested planners (search enemy; get distance, low cover,
+// kill wounded), post_combat = post_combat_wait (Lua in GW), other = the rest (grenades, items, retreat, actions
+// added from Lua). Only the combat planner's own update is timed: nested planners take the tag (action_planner_inline.h)
+// and time nothing, so exec = sum of act/*. danger/* = the same for CStalkerDangerPlanner (exec_danger).
+PERF_TIMER(stk_combat_solve, "stalker/combat/solve")
+PERF_TIMER(stk_combat_transition, "stalker/combat/transition")
+PERF_TIMER(stk_combat_exec, "stalker/combat/exec")
+PERF_TIMER(stk_combat_react, "stalker/combat/react")
+PERF_TIMER(stk_combat_act_kill_enemy, "stalker/combat/act/kill_enemy")
+PERF_TIMER(stk_combat_act_take_cover, "stalker/combat/act/take_cover")
+PERF_TIMER(stk_combat_act_look_out, "stalker/combat/act/look_out")
+PERF_TIMER(stk_combat_act_hold, "stalker/combat/act/hold")
+PERF_TIMER(stk_combat_act_ready_to_kill, "stalker/combat/act/ready_to_kill")
+PERF_TIMER(stk_combat_act_detour, "stalker/combat/act/detour")
+PERF_TIMER(stk_combat_act_sudden, "stalker/combat/act/sudden")
+PERF_TIMER(stk_combat_act_smart_cover, "stalker/combat/act/smart_cover")
+PERF_TIMER(stk_combat_act_search, "stalker/combat/act/search")
+PERF_TIMER(stk_combat_act_subplanner, "stalker/combat/act/subplanner")
+PERF_TIMER(stk_combat_act_post_combat, "stalker/combat/act/post_combat")
+PERF_TIMER(stk_combat_act_other, "stalker/combat/act/other")
+PERF_TIMER(stk_danger_solve, "stalker/danger/solve")
+PERF_TIMER(stk_danger_transition, "stalker/danger/transition")
+PERF_TIMER(stk_danger_exec, "stalker/danger/exec")
+// Covers. stalker/cover/best = CAI_Stalker::best_cover (actuality check + search); find (find_best_cover) and value
+// (best_cover_value) are nested in it (value is also called on its own). ai/cover/query = CCoverManager::best_cover,
+// every caller (stalker actions, danger actions, monsters, Lua), nested in the stalker ones; nearest = cover points the
+// quadtree returned, evaluated = points scored by the evaluator, inertia = queries answered by the inertia (no scan).
+PERF_TIMER(stk_cover_best, "stalker/cover/best")
+PERF_TIMER(stk_cover_find, "stalker/cover/find")
+PERF_TIMER(stk_cover_value, "stalker/cover/value")
+PERF_TIMER(ai_cover_query, "ai/cover/query")
+PERF_COUNTER(ai_cover_nearest, "ai/cover/nearest")
+PERF_COUNTER(ai_cover_evaluated, "ai/cover/evaluated")
+PERF_COUNTER(ai_cover_inertia, "ai/cover/inertia")
+// M9, Lua in the action planners (all planners, all threads): script_action/execute = CScriptActionWrapper::execute
+// into Lua, init_fin = its initialize + finalize; script_evaluator/evaluate = Lua calls of
+// CScriptPropertyEvaluatorWrapper (calls = real Lua calls), cached = evaluate() answered from its cache without Lua.
+// The two overlap where a Lua action updates a planner of its own (state_mgr): do not add them up.
+// stalker/combat/lua_exec / lua_eval = the same Lua time inside CStalkerCombatPlanner::update (nested planners too):
+// lua_eval is part of combat/solve (and of exec when a nested planner solves), lua_exec of exec/transition.
+PERF_TIMER(ai_script_action_execute, "ai/script_action/execute")
+PERF_TIMER(ai_script_action_init_fin, "ai/script_action/init_fin")
+PERF_TIMER(ai_script_evaluator_evaluate, "ai/script_evaluator/evaluate")
+PERF_COUNTER(ai_script_evaluator_cached, "ai/script_evaluator/cached")
+PERF_TIMER(stk_combat_lua_exec, "stalker/combat/lua_exec")
+PERF_TIMER(stk_combat_lua_eval, "stalker/combat/lua_eval")
+// M11, npc/ff/pick by the caller that paid for the pick (the first one in the frame): pick_oh = from
+// update_object_handler (UpdateCL, game/pseq/object_handler), pick_think = from CAI_Stalker::Think (shedule_Update:
+// fire_make_sense, combat actions, movement), pick_other = anything else. pick_oh + pick_think + pick_other = pick.
+// gather = the spatial part of a pick (cone q_frustum + candidate list), the rest of npc/ff/pick is the rays.
+PERF_TIMER(npc_ff_pick_oh, "npc/ff/pick_oh")
+PERF_TIMER(npc_ff_pick_think, "npc/ff/pick_think")
+PERF_TIMER(npc_ff_pick_other, "npc/ff/pick_other")
+PERF_TIMER(npc_ff_gather, "npc/ff/gather")
+// M12, CEnemyManager::useful past the native checks: useful_lua = the Lua useful callback of the NPC (calls = Lua
+// calls), useful_plugin = the enemy filters of plugins, useful_cached = answers from the per-enemy callback cache.
+PERF_TIMER(stk_enemy_useful_lua, "stalker/enemy/useful_lua")
+PERF_TIMER(stk_enemy_useful_plugin, "stalker/enemy/useful_plugin")
+PERF_COUNTER(stk_enemy_useful_cached, "stalker/enemy/useful_cached")
+// 22-game-thread.md, step 4d (urgent near heap, xrEngine/xrSheduler.cpp): inside the near class those who have to
+// react go first. urgent_items = the urgent near heap; urgent_creatures = the living near creatures urgent right now
+// (ISheduled::shedule_Urgent) in both near heaps; urgent_steps = steps from the urgent heap; phase_urgent = its pass
+// (inside the budget, before phase_near). The lateness of the living near creatures by their urgency when they run
+// (not by their heap): urgent_late_ms / urgent_late_n and near_calm_late_ms / near_calm_late_n. urgent_in /
+// urgent_out = moved into / out of the urgent heap by the scans (not the requeue).
+PERF_GAUGE(shed_urgent_items, "shed/urgent_items")
+PERF_GAUGE(shed_urgent_creatures, "shed/urgent_creatures")
+PERF_COUNTER(shed_urgent_steps, "shed/urgent_steps")
+PERF_TIMER(shed_phase_urgent, "shed/phase_urgent")
+PERF_COUNTER(shed_urgent_late_ms, "shed/urgent_late_ms")
+PERF_COUNTER(shed_urgent_late_n, "shed/urgent_late_n")
+PERF_COUNTER(shed_calm_late_ms, "shed/near_calm_late_ms")
+PERF_COUNTER(shed_calm_late_n, "shed/near_calm_late_n")
+PERF_COUNTER(shed_urgent_in, "shed/urgent_in")
+PERF_COUNTER(shed_urgent_out, "shed/urgent_out")
+// Crowd broadphase (plans/optimization_mt/21-physics-step.md, journal 2026-10-15; CPHObject::CollideDynamicsBroadphase).
+// aabb_reject = q_box results dropped by the exact AABB test. pair/* = the candidates that go on to NearCallback by
+// pair type, the frame step only: ai_ai, ai_ragdoll, ai_other (an NPC controller x the actor, items, props, static
+// shells), ragdoll (a ragdoll x anything but an NPC controller), other. collide_ai = Collide() of
+// live NPC controllers (q_box + pairs + level mesh), static_ai = their level mesh part (inside physics/step/static).
+PERF_COUNTER(ph_broadphase_aabb_reject, "physics/broadphase/aabb_reject")
+PERF_COUNTER(ph_bp_pair_ai_ai, "physics/broadphase/pair/ai_ai")
+PERF_COUNTER(ph_bp_pair_ai_ragdoll, "physics/broadphase/pair/ai_ragdoll")
+PERF_COUNTER(ph_bp_pair_ai_other, "physics/broadphase/pair/ai_other")
+PERF_COUNTER(ph_bp_pair_ragdoll, "physics/broadphase/pair/ragdoll")
+PERF_COUNTER(ph_bp_pair_other, "physics/broadphase/pair/other")
+PERF_TIMER(ph_step_collide_ai, "physics/step/collide_ai")
+PERF_TIMER(ph_step_static_ai, "physics/step/static_ai")
+// Stretched ragdolls (plans/optimization_mt/21-physics-step.md, 2026-10-15). collide_static/starved = level mesh
+// collisions of an object whose island had no joint budget left (JOINTS_LIMIT 1500: no level contacts at all before
+// the reserve of 32 level contacts in CollideStatic); reserve_contacts = the level contacts added over the limit by it.
+// corpse_vel_cap = corpses whose root speed is >= 99% of default_l_limit (150 m/s), counted per frame in
+// CCharacterPhysicsSupport::in_UpdateCL (avg/frame = such corpses per frame). corpse_stretch/*: the watchdog
+// (CPHWorld::CheckActiveCorpses) - vel_cap = ragdoll substeps with an element >= 95% of the cap, detected = series of
+// stretched checks started, repaired = ragdolls put back together, gave_up = put to sleep after 3 repairs in 5 s;
+// corpse_check = its pass. corpse_near/awake_old (gauge) = active ragdolls older than ph_corpse_sleep_ms in the last
+// substep of the frame (counted by the watchdog pass; the name is kept for log comparisons).
+PERF_COUNTER(ph_static_starved, "physics/collide_static/starved")
+PERF_COUNTER(ph_static_reserve_contacts, "physics/collide_static/reserve_contacts")
+PERF_COUNTER(ph_corpse_vel_cap, "physics/corpse_vel_cap")
+PERF_COUNTER(ph_corpse_stretch_vel_cap, "physics/corpse_stretch/vel_cap")
+PERF_COUNTER(ph_corpse_stretch_detected, "physics/corpse_stretch/detected")
+PERF_COUNTER(ph_corpse_stretch_repaired, "physics/corpse_stretch/repaired")
+PERF_COUNTER(ph_corpse_stretch_gave_up, "physics/corpse_stretch/gave_up")
+PERF_TIMER(ph_corpse_check, "physics/corpse_check")
+PERF_GAUGE(ph_corpse_near_awake_old, "physics/corpse_near/awake_old")
+// F1 (plans/optimization_mt/24-critical-path.md, 21-physics-step.md): CPHActivationShape::Activate.
+// local_path = activations pushed out on the shape alone; fallback = the frozen-world path ran instead (un_freeze_later,
+// a step in flight). step_time = one push-out step (both paths, the
+// physics/activation_shape/steps loop); step_objects = objects that ran Collide() in those steps (world path: the shape +
+// everything woken so far; local: 1); step_neighbours = neighbours the local shape collided as static obstacles;
+// woken = objects the world path left awake when it ended (the shape not counted).
+PERF_COUNTER(ph_act_shape_local_path, "physics/activation_shape/local")
+PERF_COUNTER(ph_act_shape_fallback, "physics/activation_shape/fallback")
+PERF_TIMER(ph_act_shape_step_time, "physics/activation_shape/step_time")
+PERF_COUNTER(ph_act_shape_step_objects, "physics/activation_shape/step_objects")
+PERF_COUNTER(ph_act_shape_step_neighbours, "physics/activation_shape/step_neighbours")
+PERF_COUNTER(ph_act_shape_woken, "physics/activation_shape/woken")
+// Launched NPCs and corpses (plans/optimization_mt/21-physics-step.md, 2026-10-15; the frame step only, except
+// ai_rise_capped). near/same_island_fixed = pairs already in one island that got contacts only because CanMerge no longer
+// counts that island twice; near/merge_reject_same = the refused pairs (inside
+// near/merge_reject) that were already in one island. merge_reject_fix/*: refused pairs collided anyway
+// (not two live NPC controllers) - pairs (= same + static + split), same = one island without budget (a contact between the
+// bodies over JOINTS_LIMIT), static = the other object asleep (one-sided for obj1), split = two active islands (one
+// one-sided joint per body), contacts = their contact points, oneway_full = one-sided pairs against a force-slept corpse
+// that got the same reserve in a full island. contact/vel_capped = contact joints whose depth was cut to the push-out
+// cap (ph_contact_max_correct_vel); contact/max_depth_mm = per-frame maximum of the geometric depth of the contacts that
+// got a joint (level mesh included). ai_rise_capped = live NPC controller steps whose rise speed was cut
+// (ph_ai_max_rise_vel), any step.
+PERF_COUNTER(ph_near_same_island_fixed, "physics/near/same_island_fixed")
+PERF_COUNTER(ph_near_merge_reject_same, "physics/near/merge_reject_same")
+PERF_COUNTER(ph_reject_fix_pairs, "physics/merge_reject_fix/pairs")
+PERF_COUNTER(ph_reject_fix_same, "physics/merge_reject_fix/same")
+PERF_COUNTER(ph_reject_fix_static, "physics/merge_reject_fix/static")
+PERF_COUNTER(ph_reject_fix_split, "physics/merge_reject_fix/split")
+PERF_COUNTER(ph_reject_fix_contacts, "physics/merge_reject_fix/contacts")
+PERF_COUNTER(ph_reject_fix_oneway_full, "physics/merge_reject_fix/oneway_full")
+PERF_COUNTER(ph_contact_vel_capped, "physics/contact/vel_capped")
+PERF_GAUGE(ph_contact_max_depth_mm, "physics/contact/max_depth_mm")
+PERF_COUNTER(ph_ai_rise_capped, "physics/ai_rise_capped")
+// Island list guards (21-physics-step.md, 2026-10-15; crash AV 0xB4 in quickstep compute_invM_JT). island/bad_lists_skipped
+// = island solves skipped by CPHIsland::Step because a joint in the island list has no body 1 (a detached contact) or
+// a body of another island, or a list is longer than nb / nj (any step; the first lines are also logged).
+// contact/foreign_body_dropped = contacts CollideIntoGroup did not attach because a body of the pair is in neither of the
+// islands the joint may go to (any step, logged too).
+PERF_COUNTER(ph_island_bad_lists_skipped, "physics/island/bad_lists_skipped")
+PERF_COUNTER(ph_contact_foreign_body_dropped, "physics/contact/foreign_body_dropped")
+// Live NPCs left high in the air (plans/optimization_mt/21-physics-step.md, 2026-10-15; xrGame movement_manager_physic.cpp,
+// ground_snap(), always on). npc_ground/snap_kinematic = kinematic moves (far / unseen / no neighbours / TryPosition skipped,
+// and an idle disabled NPC) whose destination hung more than ai_npc_ground_snap_height above the AI floor and was
+// lowered toward it; snap_try = the same for a TryPosition destination that then succeeded (no gravity in its local
+// step either); snap_excluded = such a hanging NPC left as is (jump, physics control, impulse, losing control, capture,
+// ladder, animation movement, smart cover, poltergeist, attached, the current entity); no_floor = no reliable AI floor
+// under it (no level vertex, off the AI map). npc_ground/high = updates of live NPCs more than 3 m above the floor;
+// max_height_mm = the highest of them in the frame. lift/* = an NPC crossing 3 m above the floor, by how the crossing
+// update moved it: kinematic (SetPosition branches), try_position (a successful TryPosition), physics (Calculate, the
+// frame step), other (not moved by move_along_path); lift/crowd = crossings with another live NPC within 1 m (xz),
+// lift/stacked = with one of them at least 0.5 m below (standing on it). The first 16 crossings of a session are logged
+// ("! [npc_ground]"). physics/ai_rise_slow = live NPC controller steps rising faster than 1.5 m/s under the
+// ph_ai_max_rise_vel cap without a jump, impulse or ladder (a slow lift ai_rise_capped misses); _on_object = of them
+// standing on another object or character (b_on_object), _climb = of them in the step-up climb (b_clamb_jump).
+PERF_COUNTER(ai_npc_ground_snap_kinematic, "ai/npc_ground/snap_kinematic")
+PERF_COUNTER(ai_npc_ground_snap_try, "ai/npc_ground/snap_try")
+PERF_COUNTER(ai_npc_ground_snap_excluded, "ai/npc_ground/snap_excluded")
+PERF_COUNTER(ai_npc_ground_no_floor, "ai/npc_ground/no_floor")
+PERF_COUNTER(ai_npc_ground_high, "ai/npc_ground/high")
+PERF_GAUGE(ai_npc_ground_max_height_mm, "ai/npc_ground/max_height_mm")
+PERF_COUNTER(ai_npc_ground_lift_kinematic, "ai/npc_ground/lift/kinematic")
+PERF_COUNTER(ai_npc_ground_lift_try, "ai/npc_ground/lift/try_position")
+PERF_COUNTER(ai_npc_ground_lift_physics, "ai/npc_ground/lift/physics")
+PERF_COUNTER(ai_npc_ground_lift_other, "ai/npc_ground/lift/other")
+PERF_COUNTER(ai_npc_ground_lift_crowd, "ai/npc_ground/lift/crowd")
+PERF_COUNTER(ai_npc_ground_lift_stacked, "ai/npc_ground/lift/stacked")
+PERF_COUNTER(ph_ai_rise_slow, "physics/ai_rise_slow")
+PERF_COUNTER(ph_ai_rise_slow_on_object, "physics/ai_rise_slow_on_object")
+PERF_COUNTER(ph_ai_rise_slow_climb, "physics/ai_rise_slow_climb")
+// Live NPCs thrown up in a dense crowd (plans/optimization_mt/21-physics-step.md, 2026-10-16; xrPhysics
+// PHSimpleCharacter.cpp / PHAICharacter.cpp). ai_rise_rollback = ph_ai_max_rise_vel cuts that also took back the rise of
+// the substep; ai_rise_rollback_max_mm = the largest rise taken back in one substep, in the frame;
+// ai_climb_char_skipped = contacts of a live NPC controller with another character's capsule left without the
+// step-climb override; ai_step_rise_restored = live NPC controllers put back after rising more
+// than ph_ai_step_max_rise in one frame substep; try_position/jump_rejected = TryPosition results refused by
+// ph_ai_try_max_dy. The first 16 rollbacks over 0.5 m, restores and rejections are logged ("! [ai_jump]").
+PERF_COUNTER(ph_ai_rise_rollback, "physics/ai_rise_rollback")
+PERF_GAUGE(ph_ai_rise_rollback_max_mm, "physics/ai_rise_rollback_max_mm")
+PERF_COUNTER(ph_ai_climb_char_skipped, "physics/ai_climb_char_skipped")
+PERF_COUNTER(ph_ai_step_rise_restored, "physics/ai_step_rise_restored")
+PERF_COUNTER(ph_try_jump_rejected, "physics/try_position/jump_rejected")

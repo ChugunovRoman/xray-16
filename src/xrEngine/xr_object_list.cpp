@@ -20,16 +20,15 @@
 #include <xrCore/Threading/ParallelFor.hpp>
 #include <xrCore/Threading/TaskManager.hpp>
 
-extern int ps_obj_preupdate_mt;
-extern int ps_obj_postupdate_mt;
-
 namespace
 {
+// PreUpdateCL / PostUpdateCL of all objects are spread over the task workers (formerly obj_preupdate_mt /
+// obj_postupdate_mt, on in every developer test; now permanent). Serial without a task scheduler.
 void dispatch_preupdate_cl(IGameObject** b, IGameObject** e)
 {
     if (b == e)
         return;
-    if (ps_obj_preupdate_mt != 0 && TaskScheduler)
+    if (TaskScheduler)
     {
         xr_parallel_for(TaskRange(b, e), [&](const TaskRange<IGameObject**>& range)
         {
@@ -50,7 +49,7 @@ void dispatch_postupdate_vec(Vec& vec, bool sleeping_flag)
     const size_t n = vec.size();
     if (!n)
         return;
-    if (ps_obj_postupdate_mt != 0 && TaskScheduler)
+    if (TaskScheduler)
     {
         xr_parallel_for(TaskRange(size_t(0), n), [&](const TaskRange<size_t>& range)
         {

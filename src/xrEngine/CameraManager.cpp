@@ -360,17 +360,9 @@ void CCameraManager::ApplyDevice()
     // Device.mProject.build_projection(deg2rad(m_cam_info.fFov), m_cam_info.fAspect, m_cam_info.fNear, m_cam_info.fFar);
 
     // --#SM+# Begin-- +SecondVP+
-    if (ps_r__dedicated_second_vp)
-    {
-        Device.m_SecondViewport.isCamReady = false;
-    }
-    else if (Device.m_SecondViewport.IsSVPFrame())
-    {
-        Device.fFOV = fFovSecond;
-        Device.m_SecondViewport.isCamReady = true;
-    }
-    else
-        Device.m_SecondViewport.isCamReady = false;
+    // The scope view is a dedicated second render pass (see IGame_Level::OnRender): the main
+    // camera always keeps the player FOV.
+    Device.m_SecondViewport.isCamReady = false;
 
     Device.mProject.build_projection(deg2rad(Device.fFOV), aspect, m_cam_info.fNear, m_cam_info.fFar);
     // --#SM+# End--

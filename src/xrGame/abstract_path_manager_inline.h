@@ -12,7 +12,6 @@
 
 #include "ai_space.h"
 #include "xrAICore/Navigation/graph_engine.h"
-#include "xrAICore/Navigation/ai_graph_engine_cvars.h"
 #include "xrCore/xrDebug_macros.h"
 #include "xrAICore/Navigation/game_graph.h"
 #include "xrAICore/Navigation/level_graph.h"
@@ -65,11 +64,10 @@ IC void CAbstractPathManager<CGameGraph, SGameVertex<float, u32, u32>, u32, u32>
     }
 
     before_search(start_vertex_id, dest_vertex_id);
-    if (ps_ai_path_build_use_tls_scratch)
-        m_failed = !m_graph->Search(start_vertex_id, dest_vertex_id, m_path, m_evaluator->m_vertex_types,
-            m_evaluator->max_range, m_evaluator->max_iteration_count, m_evaluator->max_visited_node_count);
-    else
-        m_failed = !ai().graph_engine().search(*m_graph, start_vertex_id, dest_vertex_id, &m_path, *m_evaluator);
+    // CGameGraph::Search keeps its scratch data in thread-local storage (ixray), so paths of different NPCs can be
+    // built without the shared graph_engine
+    m_failed = !m_graph->Search(start_vertex_id, dest_vertex_id, m_path, m_evaluator->m_vertex_types,
+        m_evaluator->max_range, m_evaluator->max_iteration_count, m_evaluator->max_visited_node_count);
     after_search();
 
     m_current_index = u32(-1);
@@ -102,11 +100,9 @@ IC void CAbstractPathManager<CLevelGraph, SBaseParameters<float, u32, u32>, u32,
     }
 
     before_search(start_vertex_id, dest_vertex_id);
-    if (ps_ai_path_build_use_tls_scratch)
-        m_failed = !m_graph->Search(start_vertex_id, dest_vertex_id, m_path, m_evaluator->max_range,
-            m_evaluator->max_iteration_count, m_evaluator->max_visited_node_count);
-    else
-        m_failed = !ai().graph_engine().search(*m_graph, start_vertex_id, dest_vertex_id, &m_path, *m_evaluator);
+    // CLevelGraph::Search keeps its scratch data in thread-local storage (ixray), as CGameGraph::Search above
+    m_failed = !m_graph->Search(start_vertex_id, dest_vertex_id, m_path, m_evaluator->max_range,
+        m_evaluator->max_iteration_count, m_evaluator->max_visited_node_count);
     after_search();
 
     m_current_index = u32(-1);

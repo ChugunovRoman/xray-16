@@ -1180,9 +1180,7 @@ void CActor::UpdateCL()
 
             fire_disp_full = m_fdisp_controller.GetCurrentDispertion();
 
-            // --#SM+#-- +SecondVP+ Чтобы перекрестие не скакало из за смены FOV (Sin!) [fix for crosshair shaking while SecondVP]
-            if (ps_r__dedicated_second_vp || !Device.m_SecondViewport.IsSVPFrame())
-                HUD().SetCrosshairDisp(fire_disp_full, 0.02f);
+            HUD().SetCrosshairDisp(fire_disp_full, 0.02f);
 
             HUD().ShowCrosshair(pWeapon->use_crosshair());
 #ifdef DEBUG

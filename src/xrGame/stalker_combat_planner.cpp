@@ -41,9 +41,48 @@
 #include "Inventory.h"
 #include "WeaponMagazined.h"
 #include <tracy/Tracy.hpp>
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 using namespace StalkerSpace;
 using namespace StalkerDecisionSpace;
+
+#if XR_PERF_METRICS
+// 24-critical-path.md, M8: the timers of CActionPlanner::update (action_planner_inline.h) for a tagged planner
+xray::perf::Metric ai_planner_stage_perf_metric(u8 role, u8 stage)
+{
+    using xray::perf::Metric;
+    if (role == xray::perf::ai_planner::Danger)
+        return stage == 0 ? Metric::stk_danger_solve : stage == 1 ? Metric::stk_danger_transition : Metric::stk_danger_exec;
+    return stage == 0 ? Metric::stk_combat_solve : stage == 1 ? Metric::stk_combat_transition : Metric::stk_combat_exec;
+}
+
+// stalker/combat/act/* by the id of the current action of the combat planner (see add_actions)
+xray::perf::Metric stalker_combat_action_perf_metric(u32 action_id)
+{
+    using xray::perf::Metric;
+    switch (action_id)
+    {
+    case eWorldOperatorKillEnemy:
+    case eWorldOperatorKillEnemyIfNotVisible:
+    case eWorldOperatorKillEnemyIfCriticallyWounded:
+    case eWorldOperatorKillEnemyIfPlayerOnThePath: return Metric::stk_combat_act_kill_enemy;
+    case eWorldOperatorTakeCover: return Metric::stk_combat_act_take_cover;
+    case eWorldOperatorLookOut: return Metric::stk_combat_act_look_out;
+    case eWorldOperatorHoldPosition: return Metric::stk_combat_act_hold;
+    case eWorldOperatorGetReadyToKill:
+    case eWorldOperatorGetReadyToDetour: return Metric::stk_combat_act_ready_to_kill;
+    case eWorldOperatorDetourEnemy: return Metric::stk_combat_act_detour;
+    case eWorldOperatorSuddenAttack: return Metric::stk_combat_act_sudden;
+    case eWorldOperatorInSmartCover: return Metric::stk_combat_act_smart_cover;
+    case eWorldOperatorSearchEnemy: return Metric::stk_combat_act_search;
+    case eWorldOperatorGetDistance:
+    case eWorldOperatorLowCover:
+    case eWorldOperatorKillWoundedEnemy: return Metric::stk_combat_act_subplanner;
+    case eWorldOperatorPostCombatWait: return Metric::stk_combat_act_post_combat;
+    default: return Metric::stk_combat_act_other;
+    }
+}
+#endif
 
 CStalkerCombatPlanner::CStalkerCombatPlanner(CAI_Stalker* object, LPCSTR action_name) : inherited(object, action_name)
 {
@@ -102,8 +141,12 @@ void CStalkerCombatPlanner::execute()
 
 void CStalkerCombatPlanner::update()
 {
+    // 24-critical-path.md, M8/M9: Lua of this update (nested planners too) -> stalker/combat/lua_*; the stages of
+    // this planner's own update -> stalker/combat/{solve,transition,exec,act/*} (action_planner_inline.h)
+    PERF_AI_CONTEXT(xray::perf::ai_planner::Combat);
     {
         ZoneScopedN("combat_planner/update_inner");
+        PERF_AI_PLANNER(xray::perf::ai_planner::Combat);
         inherited::update();
     }
 
@@ -137,6 +180,7 @@ void CStalkerCombatPlanner::update()
         return;
     }
 
+    PERF_SCOPE(stk_combat_react);
     {
         ZoneScopedN("combat_planner/react_on_grenades");
         object().react_on_grenades();

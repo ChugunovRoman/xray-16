@@ -147,8 +147,6 @@ public:
     void eye_pp_s2();
     void eye_pp_s2_prepare();         // P2: prepare rays (no execution)
     void eye_pp_s2_process();         // P2: process batch results
-    // Dynamic-occluder pass of one vision ray (same as Feel::Vision::o_trace's second pass); m_vision_mtx held.
-    bool eye_pp_dynamic_blocked(feel_visible_Item* I, const Fvector& start, const Fvector& dir, float range);
 
     virtual void UpdateCamera();
 

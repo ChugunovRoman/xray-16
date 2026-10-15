@@ -167,10 +167,6 @@ u32 CPatrolPoint::level_vertex_id() const
     if (levelGraph.valid_vertex_id(m_level_vertex_id) && levelGraph.inside(m_level_vertex_id, m_position))
         return m_level_vertex_id;
 
-    // kill-switch: restore the old behaviour, callers assert on the invalid id themselves
-    if (!ps_ai_patrol_remap_invalid_vertex)
-        return m_level_vertex_id;
-
     // A point of another level keeps an id which is correct for ITS level.ai, and the offline
     // ALife (CALifeSmartTerrainTask / CALifeMonsterPatrolPathManager) feeds exactly such ids to
     // CALifeMonsterDetailPathManager::target for squads on levels that are not loaded. Remapping

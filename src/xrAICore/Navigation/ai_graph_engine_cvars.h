@@ -13,17 +13,8 @@ extern XRAICORE_API int ps_ai_graph_engine_serialize;
 
 
 
-/** When 1, `CAbstractPathManager` for level/game graphs calls `CLevelGraph::Search` / `CGameGraph::Search` (ixray TLS scratch). Default 0 uses `graph_engine` (stable). */
-
-extern XRAICORE_API int ps_ai_path_build_use_tls_scratch;
-
 /** When 1, logs concurrent in-flight `CGraphEngine::search` calls per backend when serialization is disabled. */
 extern XRAICORE_API int ps_ai_graph_engine_detect_concurrent;
-
-/** When 1 (default), an out-of-range or mismatched patrol point level_vertex_id is lazily remapped
-    from the point position instead of asserting. 0 restores the old fatal behavior.
-    See plans/patrol_point_remap/plan.md */
-extern XRAICORE_API int ps_ai_patrol_remap_invalid_vertex;
 
 /** When 1, logs every patrol point remap (point name, old/new vertex id). The first remap per
     session is logged unconditionally regardless of this switch. */

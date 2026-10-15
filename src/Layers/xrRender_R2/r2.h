@@ -410,24 +410,17 @@ public:
     CLight_Compute_XFORM_and_VIS LR;
     xr_vector<light*> Lights_LastFrame;
     SMAP_Allocator LP_smap_pool;
-    // Frame driver: scope-pass shadow packer, isolated from LP_smap_pool - the worker records
-    // lighting into the dedicated $user$sv_smap_depth atlas while the main pass owns its own.
-    SMAP_Allocator svp_LP_smap_pool;
-    // Frame driver stage 1c results, filled by the worker (record_second_vp_shadows) and
-    // consumed once per frame by svp_accumulate_prebuilt: per-page light groups (page i pairs
-    // with svp_smap_replay_lists[i]) and lights that passed the culls but not the page cap
-    // (accumulated UNSHADOWED - light without shadow lookup, instead of going dark).
-    // Per-page grouping is REQUIRED: every page list starts with a full atlas clear, so a
-    // page's shadows survive only until the next page list replays - each page's lights must
-    // be accumulated before the next page executes.
+    // Frame driver (shadow-transfer) results, filled by the MAIN pass page loop (render_lights)
+    // and consumed once per frame by svp_accumulate_prebuilt: per-page light groups (page i pairs
+    // with SVP atlas slice i) and lights over the slice budget (accumulated UNSHADOWED - light
+    // without shadow lookup, instead of going dark).
     xr_vector<xr_vector<light*>> svp_shadow_page_lights;
     xr_vector<light*> svp_shadow_unshadowed;
     light_Package LP_normal;
     light_Package LP_pending;
-    // Frame driver stage 1c: PRE-FILTERED copies filled by the main pass right before it
-    // unblocks the worker's shadow build (record_second_vp_shadows reads their union); the
-    // scope pass then accumulates from and consumes these very vectors (one per render_lights
-    // call). Kept as members because they bridge two threads and two Render() invocations.
+    // Frame driver: PRE-FILTERED copies filled by the main pass before its own lighting drains
+    // the packages; the scope pass then accumulates from and consumes these very vectors (one per
+    // render_lights call). Kept as members because they bridge two Render() invocations.
     light_Package LP_svp_normal;
     light_Package LP_svp_pending;
     // Called from light::~light: the lists above (and svp_shadow_page_lights/svp_shadow_unshadowed) hold raw light
@@ -477,20 +470,14 @@ public:
     bool svp_frame_driver{};
     // Cooperative abort checked by the worker thread between stages; set by AbortSecondVPCalculate.
     std::atomic<bool> svp_build_abort{ false };
-    // Frame driver stage C sync: the MAIN pass sets it once its own lighting drained - from that
-    // moment the context pool and the shared light objects belong to the worker (the pool has no
-    // internal locking, so concurrent alloc_context calls are forbidden).
-    Event svp_lights_go;
-    // Roadmap A.2 (shadow-transfer): snapshot of r__svp_shadow_transfer, resolved per accepted
-    // SVP frame in BeginSecondVPCalculateParallel. When set, the MAIN pass copies every smap
-    // page into a dedicated SVP atlas slice right after the page's flush (see render_lights),
-    // the worker skips its shadow build (stage C) entirely, and the scope pass accumulates
-    // against those copies using the main pass's X.S placements (they stay valid all frame).
-    bool svp_shadow_transfer{};
-    // Scope shadow prebuild state: 0 = off/legacy path, 1 = worker lists await replay,
-    // 2 = replay consumed (the second filtered package of the frame accumulates w/o rebuilding),
+    // Roadmap A.2 (shadow-transfer, always on with the frame driver): the MAIN pass copies every
+    // smap page into a dedicated SVP atlas slice right after the page's flush (see render_lights)
+    // and the scope pass accumulates against those copies using the main pass's X.S placements
+    // (they stay valid all frame). The worker builds no scope shadows.
+    // Scope shadow state: 0 = off/legacy path (no frame driver),
+    // 2 = transfer consumed (the second filtered package of the frame accumulates w/o rebuilding),
     // 3 = shadow-transfer: pages were copied into SVP atlas slices by the main pass, the scope
-    // pass accumulates them per-slice without replaying any sealed command lists.
+    // pass accumulates them per-slice.
     u8 svp_shadow_stage{};
     // Stage 2 sun-reuse (r__svp_sun_mode 1): set by the MAIN pass right after it copied the sun
     // cascade slices into the SVP atlas tail (Render/Sun); consumed by the scope pass Render/Sun
@@ -718,14 +705,11 @@ public:
     // P2.3: the worker part is record_second_vp_geometry_into() (seed + render_graph(0), deferred);
     // lods/Details/submit happen on the main thread in Render() after the join.
     void record_second_vp_geometry_into(R_dsgraph_structure& ds);
-    // Frame driver stage C (worker): build the scope pass shadow maps into the dedicated atlas,
-    // sealing one command list per page into svp_smap_replay_lists. DX11-only no-op elsewhere.
-    void record_second_vp_shadows();
-    // Shared by the inline serial flush and the worker shadow builder: records one light's smap
-    // into dsgraph.cmd_list. smap_target = {} renders into the regular rt_smap_depth member.
+    // Shared by the serial flush and the light tasks: records one light's smap into
+    // dsgraph.cmd_list. smap_target = {} renders into the regular rt_smap_depth member.
     bool render_light_smap(R_dsgraph_structure& dsgraph, light* L, const ref_rt& smap_target);
-    // Frame driver stage 1 consumer (scope pass): replay prebuilt worker lists + accumulate this
-    // package's lights against them; also handles the already-consumed follow-up package.
+    // Frame driver consumer (scope pass): accumulate this package's lights against the
+    // transferred SVP atlas slices; also handles the already-consumed follow-up package.
     void svp_accumulate_prebuilt(light_Package& LP);
     // Executes the recorded deferred commands; no-op when the svp cmd list is immediate
     // (legacy sequential path).
@@ -830,7 +814,7 @@ private:
     float m_HudOverlayAlpha{ 1.f }; // crossfade alpha (0 = transparent, 1 = opaque)
     CPreviewSceneRenderer* m_preview_scene{};
 
-    void CopyBackbufferToSecondVPRT(); // shared by legacy SVP and HUD overlay scope (AfterWorldRender)
+    void CopyBackbufferToSecondVPRT(); // HUD overlay scope (AfterWorldRender)
     void ReleaseHudOverlayRT(); // called from destroy(): static overlay RTs must die before the resource manager
 
     // HUD overlay scope (g_3d_scopes 3): scene camera captured at Render() start — post-processing

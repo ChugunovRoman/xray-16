@@ -126,7 +126,7 @@ public:
     /// after SoundEvent_Dispatch and before the non-RT scheduler. Only for a ready, unpaused level.
     virtual void OnGameLogicFrame() {}
     virtual void OnRender(void);
-    /// When r__dedicated_second_vp is on, optional split: main framebuffer then scope RT (see IGame_Level::OnRender).
+    /// Second viewport split: main framebuffer then scope RT (see IGame_Level::OnRender).
     virtual void RenderBulletTracersForMainViewport() {}
     virtual void RenderBulletTracersForSecondViewport() {}
     virtual void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert);

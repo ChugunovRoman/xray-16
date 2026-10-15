@@ -1520,6 +1520,34 @@ float CPHShell::get_MaxElementLinearVelSq() const
     return max_sq;
 }
 
+namespace
+{
+// World anchors of a joint: a1 on body 0, a2 on body 1 (dJointGetBody). False for joints without an anchor pair.
+bool GetJointAnchors(dJointID dj, dVector3 a1, dVector3 a2)
+{
+    switch (dJointGetType(dj))
+    {
+    case dJointTypeBall:
+        dJointGetBallAnchor(dj, a1);
+        dJointGetBallAnchor2(dj, a2);
+        return true;
+    case dJointTypeHinge:
+        dJointGetHingeAnchor(dj, a1);
+        dJointGetHingeAnchor2(dj, a2);
+        return true;
+    case dJointTypeHinge2:
+        dJointGetHinge2Anchor(dj, a1);
+        dJointGetHinge2Anchor2(dj, a2);
+        return true;
+    case dJointTypeUniversal:
+        dJointGetUniversalAnchor(dj, a1);
+        dJointGetUniversalAnchor2(dj, a2);
+        return true;
+    default: return false; // fixed (welding), slider, amotor: no anchor pair to compare
+    }
+}
+} // namespace
+
 float CPHShell::get_MaxJointStretchSq() const
 {
     float max_sq = 0.f;
@@ -1529,32 +1557,68 @@ float CPHShell::get_MaxJointStretchSq() const
         if (!dj)
             continue; // not created / deactivated / broken
         dVector3 a1, a2;
-        switch (dJointGetType(dj))
-        {
-        case dJointTypeBall:
-            dJointGetBallAnchor(dj, a1);
-            dJointGetBallAnchor2(dj, a2);
-            break;
-        case dJointTypeHinge:
-            dJointGetHingeAnchor(dj, a1);
-            dJointGetHingeAnchor2(dj, a2);
-            break;
-        case dJointTypeHinge2:
-            dJointGetHinge2Anchor(dj, a1);
-            dJointGetHinge2Anchor2(dj, a2);
-            break;
-        case dJointTypeUniversal:
-            dJointGetUniversalAnchor(dj, a1);
-            dJointGetUniversalAnchor2(dj, a2);
-            break;
-        default: continue; // fixed (welding), slider, amotor: no anchor pair to compare
-        }
+        if (!GetJointAnchors(dj, a1, a2))
+            continue;
         const float dx = float(a1[0] - a2[0]);
         const float dy = float(a1[1] - a2[1]);
         const float dz = float(a1[2] - a2[2]);
         max_sq = _max(max_sq, dx * dx + dy * dy + dz * dz);
     }
     return max_sq;
+}
+
+u32 CPHShell::RepairJointStretch()
+{
+    // Joints follow AddElementRecursive: depth first, the joint of a bone (parent element first, the bone's element
+    // second) before the joints of its children. Moving the second element by the anchor gap puts it back on its
+    // parent; its children are moved by their own joints later, already against its new position. Translation only:
+    // the orientations are kept, the joint ERP straightens the rest over the next steps.
+    u32 moved = 0;
+    for (CPHJoint* j : joints)
+    {
+        const dJointID dj = j ? j->GetDJoint() : nullptr;
+        if (!dj)
+            continue;
+        CPHElement* child = j->PSecondElement();
+        const dBodyID body = child && child->isActive() ? child->get_body() : nullptr;
+        if (!body)
+            continue;
+        dVector3 a1, a2;
+        if (!GetJointAnchors(dj, a1, a2))
+            continue;
+        dReal dx, dy, dz;
+        if (dJointGetBody(dj, 1) == body)
+        {
+            dx = a1[0] - a2[0];
+            dy = a1[1] - a2[1];
+            dz = a1[2] - a2[2];
+        }
+        else if (dJointGetBody(dj, 0) == body)
+        {
+            dx = a2[0] - a1[0];
+            dy = a2[1] - a1[1];
+            dz = a2[2] - a1[2];
+        }
+        else
+            continue;
+        if (dx * dx + dy * dy + dz * dz < 1e-6f)
+            continue;
+        const dReal* p = dBodyGetPosition(body);
+        dBodySetPosition(body, p[0] + dx, p[1] + dy, p[2] + dz);
+        ++moved;
+    }
+    for (CPHElement* e : elements)
+    {
+        const dBodyID body = e->isActive() ? e->get_body() : nullptr;
+        if (!body)
+            continue;
+        dBodySetLinearVel(body, 0.f, 0.f, 0.f);
+        dBodySetAngularVel(body, 0.f, 0.f, 0.f);
+        dBodySetForce(body, 0.f, 0.f, 0.f);
+        dBodySetTorque(body, 0.f, 0.f, 0.f);
+    }
+    ClearCashedTries();
+    return moved;
 }
 //Makes this physical object animated
 void CPHShell::CreateShellAnimator(CInifile const* ini, LPCSTR section)

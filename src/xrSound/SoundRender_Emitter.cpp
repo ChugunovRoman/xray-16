@@ -14,8 +14,7 @@ extern float psSoundVEffects;
 
 // Per-type propagation interval for AI sound event pressure control.
 // Combat-critical sounds keep the default ~0.5s pulse; non-critical sounds
-// (footsteps, reloads, ambient) get longer intervals.
-// Disable via snd_ai_budget_enable=0 if needed.
+// (footsteps, reloads, ambient) get longer intervals. Always on (it never had a switch of its own).
 static float get_propagate_pulse_mult(u32 g_type)
 {
     if (g_type & (SOUND_TYPE_WEAPON_SHOOTING | SOUND_TYPE_WEAPON_BULLET_HIT |

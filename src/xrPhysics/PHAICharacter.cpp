@@ -9,12 +9,23 @@
 #include "PHAICharacter.h"
 #include "xrEngine/device.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "console_vars.h"
+#include "IPhysicsShellHolder.h"
+
+#include <atomic>
 
 #ifdef DEBUG
 
 #include "debug_output.h"
 
 #endif
+
+namespace
+{
+// "! [ai_jump]" TryPosition rejections (21-physics-step.md, 2026-10-16): the first cases of a session.
+constexpr u32 try_jump_log_max = 16;
+std::atomic<u32> s_try_jump_logged{0};
+} // namespace
 
 CPHAICharacter::CPHAICharacter() { m_forced_physics_control = false; }
 void CPHAICharacter::Create(dVector3 sizes)
@@ -94,6 +105,27 @@ bool CPHAICharacter::TryPosition(Fvector pos, bool exact_state)
     SetVelocity(cur_vel);
     Fvector pos_new;
     GetPosition(pos_new);
+
+    // Watchdog (21-physics-step.md, 2026-10-16; ph_ai_try_max_dy). The local steps above run without gravity and without
+    // any velocity limit (PhDataUpdate / SafeAndLimitVelocity are not called): each one moves the body by the requested
+    // velocity plus the push-out of its contacts (one-sided ones with a force-slept corpse pile, the step-climb depth
+    // c_pos + radius) - up to 16 steps in one call. A walk from the start toward pos never ends up higher or lower than
+    // both of them by more than a step: such a result (seen: 26 m up in one call from an NPC standing on the floor) is
+    // refused - the NPC stays where it was, TryPosition fails and the frame step with gravity moves it instead.
+    const float max_dy = ph_console::ph_ai_try_max_dy;
+    if (max_dy > 0.f &&
+        (pos_new.y > _max(current_pos.y, pos.y) + max_dy || pos_new.y < _min(current_pos.y, pos.y) - max_dy ||
+            !_valid(pos_new)))
+    {
+        PERF_INC(ph_try_jump_rejected);
+        if (s_try_jump_logged.fetch_add(1, std::memory_order_relaxed) < try_jump_log_max)
+            Msg("! [ai_jump] TryPosition of '%s' refused: result y %.2f, start y %.2f, destination y %.2f (pos %.2f %.2f "
+                "%.2f), %u local steps, the last one %s",
+                m_phys_ref_object ? m_phys_ref_object->ObjectName() : "?", pos_new.y, current_pos.y, pos.y,
+                pos_new.x, pos_new.y, pos_new.z, step_single_calls, ret ? "free" : "touched an object");
+        pos_new = current_pos;
+        ret = false;
+    }
 
 #if 0
 	Fvector	dif;dif .sub( pos, pos_new );

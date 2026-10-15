@@ -156,7 +156,22 @@ void stalker_movement_manager_obstacles::move_along_path_impl(
 void stalker_movement_manager_obstacles::move_along_path(
     CPHMovementControl* movement_control, Fvector& dest_position, float time_delta)
 {
-    VERIFY(m_doors_actor);
+    // on_death() deletes the doors actor, but g_Alive() is health > 0: a stalker healed after Die() (scripts, a medkit
+    // applied in the same frame as the killing hit) moves again with m_doors_actor == nullptr. Without it the doors
+    // are not actualized for it - the movement itself is the plain one.
+    if (!m_doors_actor)
+    {
+        static bool reported = false;
+        if (!reported)
+        {
+            reported = true;
+            Msg("! stalker_movement_manager_obstacles::move_along_path: [%s] moves after on_death() (health %f), "
+                "doors skipped (reported once)",
+                object().cName().c_str(), object().GetfHealth());
+        }
+        move_along_path_impl(movement_control, dest_position, time_delta);
+        return;
+    }
 
     if (!ai().doors().actualize_doors_state(*m_doors_actor, old_desirable_speed()))
     {

@@ -27,6 +27,9 @@
 #include "ph_valid_ode.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #include "PHStepDefer.h"
+#include "console_vars.h"
+
+#include <atomic>
 
 IC IPhysicsShellHolder* validated_contact_ref_object(dContact* c, bool bo1)
 {
@@ -206,6 +209,7 @@ CPHSimpleCharacter::CPHSimpleCharacter()
     b_collision_restrictor_touch = false;
     b_foot_mtl_check = true;
     b_non_interactive = false;
+    m_safe_position_valid = false;
 }
 
 void CPHSimpleCharacter::TestPathCallback(
@@ -279,6 +283,7 @@ void CPHSimpleCharacter::Create(dVector3 sizes)
         m_cyl_hight = 0.01f;
 
     b_exist = true;
+    m_safe_position_valid = false; // a new body: SetPosition places it
     const dReal k = 1.20f;
     dReal doun = m_radius * _sqrt(1.f - 1.f / k / k) / 2.f;
 
@@ -1122,6 +1127,7 @@ void CPHSimpleCharacter::SetPosition(const Fvector& pos)
     m_safe_position[0] = pos.x;
     m_safe_position[1] = pos.y + m_radius;
     m_safe_position[2] = pos.z;
+    m_safe_position_valid = true;
     b_death_pos = false;
 
     dGeomGetUserData(m_wheel)->pushing_b_neg = false;
@@ -1289,11 +1295,100 @@ void CPHSimpleCharacter::doCaptureExist(bool& do_exist)
 }
 */
 // float max_hit_vel_limit = 3000.f;
+namespace
+{
+// "! [ai_jump]" (21-physics-step.md, 2026-10-16): the first cases of a session of the frame-step watchdog and of the rise
+// cap rollbacks over ai_jump_log_rollback metres - what was moving the NPC (control, losing control, on an object,
+// step-climb, contacts) when it was thrown up.
+constexpr u32 ai_jump_log_max = 16;
+constexpr dReal ai_jump_log_rollback = 0.5f;
+std::atomic<u32> s_ai_jump_restore_logged{0};
+std::atomic<u32> s_ai_jump_rollback_logged{0};
+} // namespace
+
 void CPHSimpleCharacter::SafeAndLimitVelocity()
 {
     const float* linear_velocity = dBodyGetLinearVel(m_body);
     if (dV_valid(linear_velocity))
     {
+        // Launched NPCs (plans/optimization_mt/21-physics-step.md, 2026-10-15; ph_ai_max_rise_vel): a live NPC controller
+        // never rises fast on its own - hits do not push it (CPHMovementControl::ApplyHit is the actor's only), its jumps
+        // set b_jump / b_jumping, scripted and anomaly impulses b_external_impulse. Anything else that sends it up is a
+        // contact push-out (a controller that went into a corpse pile or another NPC) and, once it loses the ground, only
+        // default_l_limit (150 m/s) held it. The vertical part is cut here, before the limits below.
+        const bool ai_on_its_own = !b_external_impulse && !b_jump && !b_jumping && !m_elevator_state.ClimbingState() &&
+            CastAICharacter();
+        // Watchdog (21-physics-step.md, 2026-10-16; ph_ai_step_max_rise): this runs right after the substep that moved
+        // the body (CPHWorld::Step: solve -> PhDataUpdate), and m_safe_position is where the body was before it (the
+        // previous call or SetPosition / TryPosition). A live NPC controller rising more than the limit in one substep
+        // (100 m/s at 2 m) is not walking, climbing a step or being pushed by a crowd - it is put back and stopped. On the
+        // step thread, for its own body: nothing else touches it now.
+        const float max_rise = ph_console::ph_ai_step_max_rise;
+        if (max_rise > 0.f && ai_on_its_own && m_safe_position_valid && dBodyIsEnabled(m_body))
+        {
+            const dReal* const pos = dBodyGetPosition(m_body);
+            const dReal rise = pos[1] - m_safe_position[1];
+            if (dV_valid(pos) && rise > max_rise)
+            {
+                PERF_INC(ph_ai_step_rise_restored);
+                if (s_ai_jump_restore_logged.fetch_add(1, std::memory_order_relaxed) < ai_jump_log_max)
+                    Msg("! [ai_jump] '%s' rose %.2f m in one physics substep (from %.2f %.2f %.2f to %.2f %.2f %.2f, vy "
+                        "%.1f): put back and stopped; losing control %d, control %d, on object %d, climb %d, contacts %d",
+                        m_phys_ref_object ? m_phys_ref_object->ObjectName() : "?", rise, m_safe_position[0],
+                        m_safe_position[1], m_safe_position[2], pos[0], pos[1], pos[2], linear_velocity[1],
+                        int(b_lose_control), int(is_control), int(b_on_object || b_was_on_object), int(b_clamb_jump),
+                        int(m_contact_count));
+                dBodySetPosition(m_body, m_safe_position[0], m_safe_position[1], m_safe_position[2]);
+                dBodySetLinearVel(m_body, 0.f, 0.f, 0.f);
+            }
+        }
+        const float rise_cap = ph_console::ph_ai_max_rise_vel;
+        if (rise_cap > 0.f && linear_velocity[1] > rise_cap && ai_on_its_own)
+        {
+            // Rise rollback (21-physics-step.md, 2026-10-16): the body has already been moved by this velocity (ODE
+            // integrates the position with the solved one), so cutting only the velocity kept the whole rise of the
+            // substep - and it bypassed the vanilla limit below, which rolls the position back with the velocity
+            // (CutVelocity -> dxStepBody with the difference). The rise over rise_cap * fixed_step is taken back the same
+            // way. An enabled body only: a disabled one was not moved by this velocity.
+            if (dBodyIsEnabled(m_body))
+            {
+                const dReal* const pos = dBodyGetPosition(m_body);
+                const dReal back = (linear_velocity[1] - rise_cap) * fixed_step;
+                PERF_INC(ph_ai_rise_rollback);
+#if XR_PERF_METRICS
+                if (xray::perf::g_perf_metrics_active)
+                    xray::perf::UpdateMax(xray::perf::Metric::ph_ai_rise_rollback_max_mm, s64(back * 1000.f));
+#endif
+                if (back > ai_jump_log_rollback && s_ai_jump_rollback_logged.fetch_add(1, std::memory_order_relaxed) <
+                    ai_jump_log_max)
+                {
+                    Msg("! [ai_jump] '%s' rise speed %.1f m/s cut to %.1f, %.2f m of the substep taken back (y %.2f -> "
+                        "%.2f); losing control %d, control %d, on object %d, climb %d, contacts %d, ground normal y %.2f",
+                        m_phys_ref_object ? m_phys_ref_object->ObjectName() : "?", linear_velocity[1], rise_cap, back,
+                        pos[1], pos[1] - back, int(b_lose_control), int(is_control),
+                        int(b_on_object || b_was_on_object), int(b_clamb_jump), int(m_contact_count),
+                        b_valide_ground_contact ? m_ground_contact_normal[1] : 0.f);
+                }
+                dBodySetPosition(m_body, pos[0], pos[1] - back, pos[2]);
+            }
+            dBodySetLinearVel(m_body, linear_velocity[0], rise_cap, linear_velocity[2]);
+            PERF_INC(ph_ai_rise_capped);
+        }
+#if XR_PERF_METRICS
+        // NPCs left high in the air (21-physics-step.md, 2026-10-15; xrGame ground snap): the cap above almost never
+        // fires, so a lift by the frame step, if any, is slower than it. Count the steady rise under the cap, and
+        // whether the NPC stands on another object / character or climbs a step at that moment.
+        constexpr float slow_rise_vel = 1.5f;
+        if (xray::perf::g_perf_metrics_active && linear_velocity[1] > slow_rise_vel && dBodyIsEnabled(m_body) &&
+            !b_external_impulse && !b_jump && !b_jumping && !m_elevator_state.ClimbingState() && CastAICharacter())
+        {
+            PERF_INC(ph_ai_rise_slow);
+            if (b_on_object || b_was_on_object)
+                PERF_INC(ph_ai_rise_slow_on_object);
+            if (b_clamb_jump)
+                PERF_INC(ph_ai_rise_slow_climb);
+        }
+#endif
         dReal mag = _sqrt(linear_velocity[0] * linear_velocity[0] + linear_velocity[1] * linear_velocity[1] +
             linear_velocity[2] * linear_velocity[2]); //;
         // limit velocity
@@ -1358,6 +1453,7 @@ void CPHSimpleCharacter::SafeAndLimitVelocity()
             m_safe_position[1] - m_safe_velocity[1] * fixed_step, m_safe_position[2] - m_safe_velocity[2] * fixed_step);
 
     dVectorSet(m_safe_position, dBodyGetPosition(m_body));
+    m_safe_position_valid = true;
     dVectorSet(m_safe_velocity, linear_velocity);
 }
 
@@ -1684,8 +1780,26 @@ void CPHSimpleCharacter::FootProcess(dContact* c, bool& do_collide, bool bo)
         g = g2;
         sign = -1.f;
     }
-    if (m_elevator_state.ClimbingState() || !is_control || !b_clamb_jump || b_was_side_contact || b_side_contact ||
-        b_jumping || b_jump)
+    bool no_climb = m_elevator_state.ClimbingState() || !is_control || !b_clamb_jump || b_was_side_contact ||
+        b_side_contact || b_jumping || b_jump;
+    // Live NPCs thrown up in a dense crowd (21-physics-step.md, 2026-10-16; always on). The step-climb below
+    // turns the contact into a vertical one with depth c_pos + radius (up to the wheel's diameter) at the stiff erp of a
+    // vertical object contact (~0.86) - about 30 m/s of push-out per contact, which ph_contact_max_correct_vel keeps on
+    // purpose (a callback depth). Against the level or a crate that lifts the controller onto a step. Against another
+    // character's capsule - a walking NPC pressed into a crowd, where the capsules overlap - it lifts the NPC onto its
+    // neighbour, the neighbour's neighbour pushes the pair, and the solver adds the corrections up along the column of
+    // capsules: hundreds of m/s in one substep. A live NPC controller no longer climbs a character: the contact keeps
+    // its geometric normal and depth, as when the NPC does not climb.
+    if (!no_climb && CastAICharacter())
+    {
+        dxGeomUserData* const other = retrieveGeomUserData(bo ? g2 : g1);
+        if (other && other->ph_object && other->ph_object->CastType() == tpCharacter)
+        {
+            no_climb = true;
+            PERF_INC(ph_ai_climb_char_skipped);
+        }
+    }
+    if (no_climb)
     {
         if (g == m_wheel && sign * normal[1] < 0.f)
             do_collide = false;

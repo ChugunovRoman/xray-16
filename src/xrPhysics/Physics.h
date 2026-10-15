@@ -36,6 +36,8 @@ extern CBlockAllocator<CPHContactBodyEffector, 128> ContactEffectors;
 // void NearCallback(void* /*data*/, dGeomID o1, dGeomID o2);
 void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2);
 void CollideStatic(dGeomID o2, CPHObject* obj2);
+// physics/contact/max_depth_mm (Physics.cpp): hands the deepest contact of this frame substep to the gauge.
+void FlushFrameContactMetrics();
 
 class CPHElement;
 class CPHShell;

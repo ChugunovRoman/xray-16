@@ -26,6 +26,7 @@ extern CPHWorld* ph_world;
 #include "PHActivationShape.h"
 #include "xrEngine/xr_object.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "console_vars.h"
 
 namespace
 {
@@ -219,11 +220,86 @@ IC void add_contact_body_effector(dBodyID body, const dContact& c, SGameMtl* mat
     }
 }
 
+// Launched NPCs and corpses (21-physics-step.md, 2026-10-15). ODE corrects a contact's penetration with the velocity
+// fps * erp * (depth - surface layer) (contactGetInfo2), and its limit contactp.max_vel is dInfinity: ~27 m/s per metre
+// of depth at 50 Hz. Bodies that went deep into each other (pairs left without contacts in a full island, NPCs moved
+// kinematically through corpses) were shot out at tens of m/s. The cap is applied by cutting the depth of a new contact
+// joint (not by dWorldSetContactMaxCorrectingVel: that is one static value for every island and every step, while the
+// activation shape, TryPosition and the step-climbing contacts of the characters must keep the old push-out).
+namespace
+{
+struct ContactDepthCap
+{
+    bool frame = false; // the frame step on its own thread (physics/contact/* are counted only there)
+    bool on = false; // the cap applies
+    dReal vel_x_step = 0.f; // cap * fixed_step: the depth one step may correct at erp 1
+    dReal layer = 0.f; // dWorldGetContactSurfaceLayer: the depth ODE does not correct
+};
+
+ContactDepthCap FrameContactDepthCap()
+{
+    ContactDepthCap cap;
+    if (!ph_world || !ph_world->Processing() || ph_world->IsStepRunningOnOtherThread())
+        return cap;
+    cap.frame = true;
+    const float vel = ph_console::ph_contact_max_correct_vel;
+    if (vel > 0.f)
+    {
+        cap.on = true;
+        cap.vel_x_step = vel * fixed_step;
+        cap.layer = dWorldGetContactSurfaceLayer(phWorld);
+    }
+    return cap;
+}
+
+#if XR_PERF_METRICS
+// physics/contact/max_depth_mm: the deepest contact that got a joint in the frame step (geometric depth, before the
+// cap), kept by the step thread and handed to the gauge by FlushFrameContactMetrics() at the end of each frame substep.
+float s_frame_contact_max_depth = 0.f;
+#endif
+} // namespace
+
+void FlushFrameContactMetrics()
+{
+#if XR_PERF_METRICS
+    if (s_frame_contact_max_depth > 0.f)
+    {
+        if (xray::perf::g_perf_metrics_active)
+            xray::perf::UpdateMax(xray::perf::Metric::ph_contact_max_depth_mm, s64(s_frame_contact_max_depth * 1000.f));
+        s_frame_contact_max_depth = 0.f;
+    }
+#endif
+}
+
 // static_world (Ф1, one-sided contacts): the island of a sleeping object that must act as static geometry here - its
 // bodies are left out of every contact joint (attached as body 0, like the level mesh), so the solver neither moves nor
 // enables them and the joint does not tie its island to `world`.
+// world2 (a pair NearCallback could not merge, see CollideRejectedPair): the bodies are in two islands that stay apart -
+// every contact becomes up to two one-sided joints, body 1 against the world into `world` and body 2 against the world
+// into world2, each with half of the depth correction (together as much as one joint between the bodies).
+// merge_with (the ordinary pair of NearCallback): the island of obj2, merged into `world` right after the contacts - a
+// two-body joint in `world` may hold a body of it.
+// Body ownership (21-physics-step.md, 2026-10-15, crash AV 0xB4 in quickstep compute_invM_JT): ODE solves an island from
+// its own lists, a joint body of another island indexes the solver arrays with that island's tag. Every body a joint
+// gets must therefore be in the merge root of `world` or of world2 / merge_with; a one-sided joint goes into the root
+// that owns its body. A contact that fails this (or has no body at all) is dropped, counted and logged.
+namespace
+{
+void DropForeignBodyContact(const char* why)
+{
+    PERF_INC(ph_contact_foreign_body_dropped);
+    static u32 s_logged = 0; // the collide phase is serial: one thread at a time
+    if (s_logged < 16)
+    {
+        ++s_logged;
+        Msg("! CollideIntoGroup: contact dropped: %s", why);
+    }
+}
+} // namespace
+
 IC static int CollideIntoGroup(dGeomID o1, dGeomID o2, dJointGroupID jointGroup, CPHIsland* world,
-    const int& MAX_CONTACTS, const dxWorld* static_world = nullptr)
+    const int& MAX_CONTACTS, const dxWorld* static_world = nullptr, CPHIsland* world2 = nullptr,
+    CPHIsland* merge_with = nullptr)
 {
     const int RS = 800 + 10;
     const int N = RS;
@@ -242,11 +318,20 @@ IC static int CollideIntoGroup(dGeomID o1, dGeomID o2, dJointGroupID jointGroup,
         n = N - 1;
     int i;
 
+    // Contact push-out speed cap (21-physics-step.md, 2026-10-15; ph_contact_max_correct_vel): the frame step only.
+    const ContactDepthCap depth_cap = FrameContactDepthCap();
+#if XR_PERF_METRICS
+    u32 capped_contacts = 0;
+#endif
+
     for (i = 0; i < n; ++i)
     {
         dContact& c = contacts[i];
         dContactGeom& cgeom = c.geom;
         dSurfaceParameters& surface = c.surface;
+        // The geometric depth, before the callbacks: CPHSimpleCharacter::InitContact sets its own depth to lift a
+        // character onto a step (b_clamb_jump) - such a contact is left out of the push-out cap.
+        const dReal depth0 = cgeom.depth;
         dGeomID g1 = cgeom.g1;
         dGeomID g2 = cgeom.g2;
         bool pushing_neg = false;
@@ -402,19 +487,135 @@ IC static int CollideIntoGroup(dGeomID o1, dGeomID o2, dJointGroupID jointGroup,
                 if (!body_1 && !body_2)
                     continue;
             }
+            // Body ownership (see above): the roots now - a merge in an earlier contact callback is seen.
+            CPHIsland* const root_1 = world->ActiveRootReadOnly();
+            CPHIsland* const other = world2 ? world2 : merge_with;
+            CPHIsland* const root_2 = other ? other->ActiveRootReadOnly() : nullptr;
+            CPHIsland* const owner_1 = body_1 ? CPHIsland::BodyActiveRoot(body_1) : nullptr;
+            CPHIsland* const owner_2 = body_2 ? CPHIsland::BodyActiveRoot(body_2) : nullptr;
+            if (!body_1 && !body_2)
+            {
+                DropForeignBodyContact("no body on either side");
+                continue;
+            }
+            if ((body_1 && (!owner_1 || (owner_1 != root_1 && owner_1 != root_2))) ||
+                (body_2 && (!owner_2 || (owner_2 != root_1 && owner_2 != root_2))))
+            {
+                DropForeignBodyContact("a body is outside the islands of the pair");
+                continue;
+            }
+            const bool split = world2 && body_1 && body_2;
+            if (split)
+                surface.soft_erp *= 0.5f;
+#if XR_PERF_METRICS
+            if (depth_cap.frame && depth0 > s_frame_contact_max_depth)
+                s_frame_contact_max_depth = depth0;
+#endif
+            if (depth_cap.on && cgeom.depth == depth0)
+            {
+                // ODE pushes the contact out at fps * erp * (depth - surface layer) per step, without any limit
+                // (contactp.max_vel = dInfinity in every fork): the depth is cut so that this stays <= the cap.
+                const dReal erp = (surface.mode & dContactSoftERP) ? surface.soft_erp : world_erp;
+                if (erp > 0.f)
+                {
+                    const dReal max_depth = depth_cap.vel_x_step / erp + depth_cap.layer;
+                    if (cgeom.depth > max_depth)
+                    {
+                        cgeom.depth = max_depth;
+#if XR_PERF_METRICS
+                        ++capped_contacts;
+#endif
+                    }
+                }
+            }
             ++collided_contacts;
 #ifdef DEBUG
             if (debug_output().ph_dbg_draw_mask().test(phDbgDrawContacts))
                 debug_output().DBG_DrawContact(c);
 #endif
+            if (world2)
+            {
+                // Two islands that must not be merged: one one-sided joint per body, each into the island that owns
+                // that body (checked above). A body missing on one side (static geometry) leaves just the other joint,
+                // at the full correction.
+                if (body_1)
+                {
+                    dJointID joint_1 = dJointCreateContact(0, jointGroup, &c);
+                    owner_1->ConnectJoint(joint_1);
+                    dJointAttach(joint_1, body_1, nullptr);
+                }
+                if (body_2)
+                {
+                    dJointID joint_2 = dJointCreateContact(0, jointGroup, &c);
+                    owner_2->ConnectJoint(joint_2);
+                    dJointAttach(joint_2, nullptr, body_2); // reversed: body 2 is pushed along -normal
+                }
+                continue;
+            }
             dJointID contact_joint = dJointCreateContact(0, jointGroup, &c);
             world->ConnectJoint(contact_joint);
             // A zero body1 is swapped to body2 by dJointAttach (dJOINT_REVERSE flips the normal), as for the mesh.
             dJointAttach(contact_joint, body_1, body_2);
         }
     }
+#if XR_PERF_METRICS
+    if (capped_contacts != 0)
+        PERF_ADD(ph_contact_vel_capped, u64(capped_contacts));
+#endif
     return collided_contacts;
 }
+
+namespace
+{
+// Pairs left without contacts by a full island (21-physics-step.md, 2026-10-15; always on). CPHIsland caps an
+// island at BODIES_LIMIT 500 / JOINTS_LIMIT 1500; past that NearCallback refused the merge and the pair got NO contact
+// (physics/near/merge_reject 300-7000 per frame while physics/island/max_bodies was 499 for minutes): corpses in a pile
+// and NPCs in it went into each other, and when a later substep (another collide order, the island rebuilt) gave them
+// contacts again, ODE shot them out at fps * erp * depth. Such a pair now gets at most this many contacts per substep
+// over the limit, without merging (quickstep moves its arrays to the heap above 2048 entries, as for the level reserve).
+constexpr int reject_pair_contacts = 8;
+
+// The frame step on its own thread only: the local steps (TryPosition -> step_single, DoCollideObj) read the island
+// growth as "touches another object" and run with small islands anyway. Pairs of two live NPC controllers are left as
+// they were (a dense crowd has thousands of them, the controllers are capped by their own velocity limit and
+// ph_ai_max_rise_vel).
+bool RejectFixHere(CPHObject* obj1, CPHObject* obj2, bool counting)
+{
+    if (!counting || ph_world->IsStepRunningOnOtherThread())
+        return false;
+    return !(IsLiveNpcController(obj1) && IsLiveNpcController(obj2));
+}
+
+void CollideRejectedPair(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2, CPHIsland* island1, CPHIsland* island2)
+{
+    PERF_INC(ph_reject_fix_pairs);
+    int contacts;
+    if (island1 == island2)
+    {
+        // One island without joint budget: the ordinary contact between the two bodies, over JOINTS_LIMIT (nothing to
+        // merge, the island does not get more bodies).
+        PERF_INC(ph_reject_fix_same);
+        contacts = CollideIntoGroup(o1, o2, ContactGroup, island1, reject_pair_contacts);
+    }
+    else if (!obj2->is_active())
+    {
+        // Asleep: static geometry for obj1, as a force-slept corpse for an item (Ф1) - obj1 rests on it, it is not woken.
+        // obj1 is active (the frame step walks it), its island is unmerged by Step().
+        PERF_INC(ph_reject_fix_static);
+        contacts = CollideIntoGroup(o1, o2, ContactGroup, island1, reject_pair_contacts, obj2->DWorld());
+    }
+    else
+    {
+        // Two active islands: one one-sided joint per body into its own island, half of the correction each.
+        PERF_INC(ph_reject_fix_split);
+        contacts = CollideIntoGroup(o1, o2, ContactGroup, island1, reject_pair_contacts, nullptr, island2);
+        // island2 got joints: make sure it is unmerged before ContactGroup is emptied, as for a merged obj2.
+        if (contacts != 0)
+            ph_world->RegisterMerged(obj2);
+    }
+    PERF_ADD(ph_reject_fix_contacts, u64(contacts));
+}
+} // namespace
 
 void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2)
 {
@@ -489,9 +690,15 @@ void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2)
                 PERF_INC(ph_oneway_pairs);
             // The contacts go into the loose body's island only: its own joint budget, as for the level mesh.
             CPHIsland* island = loose->DActiveIsland();
-            const int max_contacts = island->MaxJoints();
+            int max_contacts = island->MaxJoints();
             if (max_contacts <= 0)
-                return;
+            {
+                // A full island: the NPC / item would sink into the corpse (the reject fix, see RejectFixHere).
+                if (!RejectFixHere(obj1, obj2, counting))
+                    return;
+                PERF_INC(ph_reject_fix_oneway_full);
+                max_contacts = reject_pair_contacts;
+            }
             const int contacts = CollideIntoGroup(o1, o2, ContactGroup, island, max_contacts, corpse->DWorld());
             if (npc)
                 PERF_ADD(ph_oneway_npc_contacts, u64(contacts));
@@ -504,13 +711,36 @@ void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2)
     int MAX_CONTACTS = -1;
     if (counting)
         PERF_INC(ph_near_calls);
-    if (!island1->CanMerge(island2, MAX_CONTACTS))
+    bool can_merge;
+    if (island1 == island2)
+    {
+        // Both already in one island (merged earlier in this substep - every pair inside a corpse pile or a crowd after
+        // the first object's pass). CPHIsland::CanMerge would count that island twice (MaxJoints(island) =
+        // JOINTS_LIMIT - 2 nj, nb + nb < BODIES_LIMIT): from 250 bodies / 750 joints on, no pair inside it got a contact
+        // at all, though nothing is merged here. Its own budget instead.
+        MAX_CONTACTS = island1->MaxJoints();
+        can_merge = MAX_CONTACTS > 0;
+#if XR_PERF_METRICS
+        int vanilla_budget;
+        if (counting && can_merge && !island1->CanMerge(island2, vanilla_budget))
+            PERF_INC(ph_near_same_island_fixed);
+#endif
+    }
+    else
+        can_merge = island1->CanMerge(island2, MAX_CONTACTS);
+    if (!can_merge)
     {
         if (counting)
+        {
             PERF_INC(ph_near_merge_reject);
+            if (island1 == island2)
+                PERF_INC(ph_near_merge_reject_same);
+        }
+        if (RejectFixHere(obj1, obj2, counting))
+            CollideRejectedPair(obj1, obj2, o1, o2, island1, island2);
         return;
     }
-    const int contacts = CollideIntoGroup(o1, o2, ContactGroup, island1, MAX_CONTACTS);
+    const int contacts = CollideIntoGroup(o1, o2, ContactGroup, island1, MAX_CONTACTS, nullptr, nullptr, island2);
     if (contacts != 0)
     {
         if (counting)
@@ -559,9 +789,24 @@ void CollideStatic(dGeomID o2, CPHObject* obj2)
     PERF_SCOPE(ph_collide_static);
     PERF_SCOPE_IF(ph_world->Processing(), ph_step_static); // Ф0: the frame step on the physics thread only
     CPHIsland* island2 = obj2->DActiveIsland();
-    const int contacts =
-        CollideIntoGroup(ph_world->GetMeshGeom(), o2, ContactGroup, island2, island2->MaxJoints());
+    // Stretched ragdolls (21-physics-step.md, 2026-10-15): the dynamic pairs of every object are collided before its
+    // level mesh (CPHObject::CollideStepPostBroadphase), so in an island grown to JOINTS_LIMIT (a pile of corpses with
+    // a crowd around it: physics/island/max_joints 1500 for minutes) the objects collided later got NO contact with
+    // the level at all - their bodies sank into the ground / a boat, and once a later substep gave them contacts again
+    // ODE pushed them out at fps * erp * depth (no max correcting velocity), cut to default_l_limit = 150 m/s, the
+    // joints torn apart. Up to static_contact_reserve contacts with the level are allowed over the limit (quickstep
+    // moves its arrays to the heap above 2048 entries, the island only gets bigger). A constant: in the tests a starved
+    // call got ~4 contacts over the limit on average (physics/collide_static/reserve_contacts / starved), so 32 is not the binding cap,
+    // and a lower one only brings the sinking bodies back.
+    constexpr int static_contact_reserve = 32;
+    const int budget = island2->MaxJoints();
+    if (budget <= 0)
+        PERF_INC(ph_static_starved);
+    const int contacts = CollideIntoGroup(ph_world->GetMeshGeom(), o2, ContactGroup, island2,
+        budget < static_contact_reserve ? static_contact_reserve : budget);
     PERF_ADD(ph_collide_static_contacts, u64(contacts));
+    if (contacts > 0 && contacts > budget)
+        PERF_ADD(ph_static_reserve_contacts, u64(contacts - (budget > 0 ? budget : 0)));
 }
 
 // half square time

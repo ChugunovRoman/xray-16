@@ -14,6 +14,14 @@
 #include <tracy/Tracy.hpp>
 
 #include "xrAICore/Components/ai_planner_search_limits.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+
+#if XR_PERF_METRICS
+// 24-critical-path.md, M8 (stalker_combat_planner.cpp): the timer of a stage of a tagged planner update
+// (ai_planner::* role; stage: 0 solve, 1 transition, 2 execute) and of the current action of the combat planner
+xray::perf::Metric ai_planner_stage_perf_metric(u8 role, u8 stage);
+xray::perf::Metric stalker_combat_action_perf_metric(u32 action_id);
+#endif
 
 #define TEMPLATE_SPECIALIZATION                                                                                     \
     template <typename _object_type, bool _reverse_search, typename _world_operator, typename _condition_evaluator, \
@@ -54,9 +62,20 @@ IC _object_type& CPlanner::object() const
 TEMPLATE_SPECIALIZATION
 void CPlanner::update()
 {
+#if XR_PERF_METRICS
+    // 24-critical-path.md, M8: CStalkerCombatPlanner / CStalkerDangerPlanner::update tag the planner update they call
+    // (PERF_AI_PLANNER). The tag is taken here: the planners nested in this one see None and time nothing, so the
+    // stages are not counted twice
+    const u8 perf_role = xray::perf::TlAiPlanner();
+    xray::perf::ScopedTag perf_role_taken(xray::perf::TlAiPlanner(), xray::perf::ai_planner::None);
+#endif
     m_solving = true;
     {
         ZoneScopedN("planner_update/solve");
+#if XR_PERF_METRICS
+        xray::perf::ScopedTime perf_solve(
+            perf_role ? ai_planner_stage_perf_metric(perf_role, 0) : xray::perf::Metric::Count, perf_role != 0);
+#endif
         this->solve();
     }
     m_solving = false;
@@ -109,6 +128,10 @@ void CPlanner::update()
 
     {
         ZoneScopedN("planner_update/transition");
+#if XR_PERF_METRICS
+        xray::perf::ScopedTime perf_transition(
+            perf_role ? ai_planner_stage_perf_metric(perf_role, 1) : xray::perf::Metric::Count, perf_role != 0);
+#endif
         if (initialized())
         {
             if (!this->solution().empty() && this->solution().size() > 0 && current_action_id() != this->solution().front())
@@ -147,6 +170,15 @@ void CPlanner::update()
             ZoneScopedN("planner_update/child_execute/execute");
             if (current_action().m_action_name)
                 ZoneTextF("%s", current_action().m_action_name);
+#if XR_PERF_METRICS
+            xray::perf::ScopedTime perf_exec(
+                perf_role ? ai_planner_stage_perf_metric(perf_role, 2) : xray::perf::Metric::Count, perf_role != 0);
+            const bool perf_combat = perf_role == xray::perf::ai_planner::Combat;
+            xray::perf::ScopedTime perf_act(perf_combat ?
+                    stalker_combat_action_perf_metric(static_cast<u32>(m_current_action_id)) :
+                    xray::perf::Metric::Count,
+                perf_combat);
+#endif
             current_action().execute();
         }
     }

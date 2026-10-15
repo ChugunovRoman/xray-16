@@ -26,6 +26,12 @@ public:
     // XXX nitrocaster: return (const char *) to reduce string pool spoiling
     virtual shared_str shedule_Name() const = 0;
     virtual bool shedule_Needed() = 0;
+    // 22-game-thread.md, step 4d (the urgent near heap, xrSheduler.cpp): the object has to react now (an NPC in a fight,
+    // hit recently) - in the near class of the scheduler it goes before the calm near objects. Only the order changes,
+    // never the interval. Called on the thread that runs the non-RT scheduler pass, between the updates (the requeue
+    // after its own update and the round-robin scan of the near heap): must be cheap and read only the state of the
+    // game logic thread. Asked only of the living stalkers and monsters
+    virtual bool shedule_Urgent() const { return false; }
 };
 
 inline ISheduled::~ISheduled() = default;

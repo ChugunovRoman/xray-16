@@ -797,6 +797,7 @@ void stalker_ff_gather(const CAI_Stalker* self, const Fvector& position, const F
     stalker_ff_context& ctx = stalker_ff;
     ctx.candidates.clear();
     PERF_INC(npc_ff_checks);
+    PERF_SCOPE(npc_ff_gather); // 24-critical-path.md, M11: the spatial part of npc/ff/pick
 
     Fvector axis = direction;
     const float length = axis.magnitude();
@@ -1013,6 +1014,10 @@ void CAI_Stalker::update_can_kill_info()
     g_fireParams(0, position, direction);
     // 22-game-thread.md, step 1b: npc/ff/pick - the time of the cast picks
     PERF_SCOPE(npc_ff_pick);
+    // 24-critical-path.md, M11: the same time by the caller that paid for the pick of this frame
+    PERF_SCOPE_IF(xray::perf::TlFfCaller() == xray::perf::ff_caller::ObjectHandler, npc_ff_pick_oh);
+    PERF_SCOPE_IF(xray::perf::TlFfCaller() == xray::perf::ff_caller::Think, npc_ff_pick_think);
+    PERF_SCOPE_IF(xray::perf::TlFfCaller() == xray::perf::ff_caller::None, npc_ff_pick_other);
 
     // The fast pick (see above): the same 5 rays, can_kill_entity walks them over the candidates gathered once
     const float distance = start_pick_distance();

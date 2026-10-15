@@ -19,6 +19,7 @@
 #include "WeaponMagazined.h"
 #include "Missile.h"
 #include "ai_monster_space.h"
+#include <atomic>
 
 using namespace ObjectHandlerSpace;
 
@@ -63,6 +64,31 @@ void CObjectHandlerPlanner::set_goal(MonsterSpace::EObjectAction object_action, 
         if (weapon && (goal == eWorldPropertyIdleStrap) && !weapon->can_be_strapped())
             goal = eWorldPropertyIdle;
         condition_id = uid(game_object->ID(), goal);
+
+        // The goal is a property of the item, and only the properties add_item gave it have an evaluator: a missile
+        // has none for aim / strap / fire2 / no-reload fire, a weapon none for "used", and an item this planner does
+        // not hold (not a weapon or a missile, someone else's, already dropped) none at all. Lua set_item passes any
+        // object (xrs_facer aims with the active item - a grenade in the middle of a throw), and such a target failed
+        // the next solve with THROW(evaluators().end() != I) in CProblemSolver::evaluator (is_goal_reached).
+        // An item of this NPC without that property goes to its idle, like a weapon that cannot be strapped above;
+        // for an item the planner does not know the goal stays as it is (always a valid one: remove_item resets it).
+        if (evaluators().find(condition_id) == evaluators().end())
+        {
+            const u32 idle_id = uid(game_object->ID(), eWorldPropertyIdle);
+            const bool known_item = evaluators().find(idle_id) != evaluators().end();
+            static std::atomic<bool> reported{ false };
+            if (!reported.exchange(true, std::memory_order_relaxed))
+            {
+                Msg("! [CObjectHandlerPlanner::set_goal] npc [%s]: object action [%u] with item [%s][%u] has no "
+                    "evaluator for property [%u], %s (reported once)",
+                    object().cName().c_str(), u32(object_action), game_object->cName().c_str(), u32(game_object->ID()),
+                    u32(goal), known_item ? "the item goes to idle" : "the item is not in the planner, goal kept");
+            }
+            if (!known_item)
+                return;
+            goal = eWorldPropertyIdle;
+            condition_id = idle_id;
+        }
     }
     else
         condition_id = u32(eWorldPropertyNoItemsIdle);

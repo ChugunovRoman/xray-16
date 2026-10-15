@@ -22,8 +22,14 @@
 #include "memory_manager.h"
 #include "enemy_manager.h"
 
+#include "ai_space.h"
+#include "xrAICore/Navigation/level_graph.h"
+#include "xrPhysics/IElevatorState.h"
+
 #include "xrEngine/profiler.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+
+#include <atomic>
 
 // Lain: added
 #include "steering_behaviour.h"
@@ -47,6 +53,57 @@ float ph_npc_kinematic_far_hyst = 20.f;
 // Ф3 (plans/optimization_mt/21-physics-step.md): nearer NPCs that nobody sees -> the same kinematic movement, see
 // unseen_kinematic(). Always on; the distance is a cvar.
 float ph_npc_kinematic_unseen_dist = 30.f;
+// Live NPCs left high in the air (plans/optimization_mt/21-physics-step.md, 2026-10-15): see ground_snap(). Always on;
+// the threshold and the speed are saved cvars, registered in console_commands.cpp.
+float ai_npc_ground_snap_height = 1.f;
+float ai_npc_ground_snap_speed = 10.f;
+
+namespace
+{
+// How move_along_path() moved the NPC this update (CMovementManager::m_ground_prev_branch, the "! [npc_ground]" lines).
+enum ground_branch : u8
+{
+    gb_none, // returned before moving it (no character, no time, the travel point reached)
+    gb_idle, // not on a path, the character disabled: left where it is
+    gb_idle_physics, // not on a path, the character enabled: Calculate(), the frame step
+    gb_idle_kinematic, // not on a path, the character disabled by the far / unseen rule
+    gb_kinematic_forced, // on a path, SetPosition by the far / unseen rule (no neighbour query)
+    gb_kinematic_free, // on a path, SetPosition: no physical neighbour within reach
+    gb_try_skip, // on a path, SetPosition: TryPosition skipped (stage 4 budget)
+    gb_try_ok, // on a path, a successful TryPosition (local steps without gravity)
+    gb_physics, // on a path, TryPosition failed: Calculate(), the frame step
+    gb_count
+};
+
+const char* const ground_branch_names[gb_count] = {"none", "idle", "idle_physics", "idle_kinematic_forced",
+    "kinematic_forced", "kinematic_no_neighbours", "try_position_skipped", "try_position_ok", "physics"};
+
+// m_ground_air_updates / lift metrics: 0 kinematic (SetPosition), 1 TryPosition, 2 physics, 3 other
+u8 ground_branch_kind(u8 branch)
+{
+    switch (branch)
+    {
+    case gb_idle_kinematic:
+    case gb_kinematic_forced:
+    case gb_kinematic_free:
+    case gb_try_skip: return 0;
+    case gb_try_ok: return 1;
+    case gb_idle_physics:
+    case gb_physics: return 2;
+    default: return 3;
+    }
+}
+
+// The diagnostics: "high" above the floor, the release of that latch, "stands on the floor" (resets the air counts)
+constexpr float ground_high = 3.f;
+constexpr float ground_high_release = 2.f;
+constexpr float ground_on_floor = 0.5f;
+// ground_snap(): the lowering goes on until the NPC is this close to the floor
+constexpr float ground_snap_done = 0.05f;
+// the first lifts of a session that go to the log
+constexpr u32 ground_log_max = 16;
+std::atomic<u32> s_ground_logged{0};
+} // namespace
 
 float CMovementManager::speed(CPHMovementControl* movement_control) const
 {
@@ -477,7 +534,211 @@ Fvector CMovementManager::path_position(const float& time_to_check)
         dist_to_target, dir_to_target));
 }
 
+// Live NPCs left high in the air (plans/optimization_mt/21-physics-step.md, 2026-10-15). In a dense crowd living NPCs
+// ended up tens of metres up and kept walking there, sinking slowly. Every branch of move_along_path() below except a
+// failed TryPosition moves the NPC without gravity: SetPosition (far / unseen / no neighbours / TryPosition skipped) puts
+// it at the path position, and a successful CPHAICharacter::TryPosition steps it with gravity off; the path position
+// comes from the NPC's own position moved toward the next travel point in 3D (path_position), so an NPC that got high
+// stays there and only descends along the slope to the travel point - and not at all while it stands. Whatever lifted it,
+// such an NPC is now lowered to the AI floor (ground_snap). The diagnostics (ground_diag) tell what lifts it.
+
+// The AI floor under a position: the plane of the NPC's level vertex. Extrapolated outside its cell (the vertex lags
+// behind a moving NPC by a cell or so) unless that says the position is higher than refine_above - then the vertex under
+// the position is looked up (a few cells around; at the height of the extrapolated floor, so it is the same storey and a
+// position above the level box is still found) and must contain it, else there is no reliable floor (off the AI map).
+bool CMovementManager::ground_floor_y(const Fvector& position, float refine_above, float& floor_y) const
+{
+    if (!ai().get_level_graph())
+        return false;
+    const CLevelGraph& graph = ai().level_graph();
+    u32 vertex_id = object().ai_location().level_vertex_id();
+    if (!graph.valid_vertex_id(vertex_id))
+        return false;
+    floor_y = graph.vertex_plane_y(vertex_id, position.x, position.z);
+    if (position.y - floor_y <= refine_above)
+        return true;
+    const Fvector probe = {position.x, floor_y, position.z};
+    if (graph.inside(vertex_id, probe))
+        return true;
+    vertex_id = graph.vertex(vertex_id, probe);
+    if (!graph.valid_vertex_id(vertex_id) || !graph.inside(vertex_id, probe))
+        return false;
+    floor_y = graph.vertex_plane_y(vertex_id, position.x, position.z);
+    return true;
+}
+
+// The NPC is legitimately off the floor or its position is not ours to change: a jump, physics control (script,
+// NoGravityZone), a pending impulse, losing ground (falls by itself under physics), a capture, a ladder, an animation
+// moving it (smart cover transitions, animpoints), a smart cover or a poltergeist (ground_snap_allowed), attached to a
+// parent, the current entity (a possessed NPC).
+bool CMovementManager::ground_snap_excluded(CPHMovementControl* movement_control) const
+{
+    if (!movement_control->CharacterExist() || movement_control->JumpState() ||
+        movement_control->ForcedPhysicsControl() || movement_control->bExernalImpulse ||
+        movement_control->IsLosingControl() || movement_control->PHCapture())
+        return true;
+    if (IElevatorState* elevator = movement_control->ElevatorState())
+    {
+        const Estate state = elevator->State();
+        if (state == clbClimbingUp || state == clbClimbingDown || state == clbDepart)
+            return true;
+    }
+    CCustomMonster& npc = object();
+    return !npc.g_Alive() || npc.animation_movement_controlled() || npc.H_Parent() ||
+        Level().CurrentEntity() == static_cast<IGameObject*>(&npc) || !ground_snap_allowed();
+}
+
+// Ground snap (always on): a destination the NPC is about to be moved to without gravity that hangs more than
+// ai_npc_ground_snap_height above the AI floor (the floor of the NPC's own level vertex - the right storey in a building,
+// the plane the path itself lies on) is lowered toward it at ai_npc_ground_snap_speed (0 = at once), and the lowering
+// goes on until the NPC is on the floor. Why not "leave it to physics": a fall from tens of metres under the frame step
+// is a collision hit that kills or cripples the NPC for a bug it did not cause, and a hanging NPC far away or off screen
+// would need its controller enabled and stepped - the very cost the kinematic branches remove. A controlled descent at
+// about a falling speed reads as a fall where it is seen and costs nothing. Lowered by up to a frame's descent before
+// TryPosition too: it steps the NPC with gravity off, and its collisions keep it on whatever it really stands on
+// (a TryPosition that touches another object fails and the frame step with gravity takes over).
+// Returns true if dest_position was lowered.
+bool CMovementManager::ground_snap(CPHMovementControl* movement_control, Fvector& dest_position, float time_delta)
+{
+    const float threshold = m_ground_snapping ? ground_snap_done : ai_npc_ground_snap_height;
+    float floor_y;
+    if (!ground_floor_y(dest_position, threshold, floor_y))
+    {
+        PERF_INC(ai_npc_ground_no_floor);
+        m_ground_snapping = false;
+        return false;
+    }
+    if (dest_position.y - floor_y <= threshold)
+    {
+        m_ground_snapping = false;
+        return false;
+    }
+    if (ground_snap_excluded(movement_control))
+    {
+        PERF_INC(ai_npc_ground_snap_excluded);
+        m_ground_snapping = false;
+        return false;
+    }
+    m_ground_snapping = true;
+    float y = floor_y;
+    if (ai_npc_ground_snap_speed > 0.f)
+        y = _max(floor_y, dest_position.y - ai_npc_ground_snap_speed * _max(time_delta, 0.f));
+    dest_position.y = y;
+    return true;
+}
+
+// The lift diagnostics (every update of a live NPC): the height of the final position above the
+// AI floor; crossing 3 m counts ai/npc_ground/lift/<how this update moved it>, and the first crossings of a session are
+// logged with the previous update, the updates spent in the air by kind and the live NPCs within 1 m (a crowd, standing
+// on someone's head) - what lifts the NPC.
+void CMovementManager::ground_diag(CPHMovementControl* movement_control, const Fvector& position, u8 branch)
+{
+    float floor_y;
+    if (!ground_floor_y(position, ground_high_release, floor_y))
+    {
+        m_ground_prev_valid = false;
+        return;
+    }
+    const float height = position.y - floor_y;
+    const u8 kind = ground_branch_kind(branch);
+    if (height > ground_on_floor)
+    {
+        if (m_ground_air_updates[kind] != u16(-1))
+            ++m_ground_air_updates[kind];
+    }
+    else
+    {
+        for (u16& updates : m_ground_air_updates)
+            updates = 0;
+    }
+
+    if (height > ground_high)
+    {
+        PERF_INC(ai_npc_ground_high);
+#if XR_PERF_METRICS
+        if (xray::perf::g_perf_metrics_active)
+            xray::perf::UpdateMax(xray::perf::Metric::ai_npc_ground_max_height_mm, s64(height * 1000.f));
+#endif
+        if (!m_ground_high)
+        {
+            m_ground_high = true;
+            switch (kind)
+            {
+            case 0: PERF_INC(ai_npc_ground_lift_kinematic); break;
+            case 1: PERF_INC(ai_npc_ground_lift_try); break;
+            case 2: PERF_INC(ai_npc_ground_lift_physics); break;
+            default: PERF_INC(ai_npc_ground_lift_other); break;
+            }
+
+            // The neighbours at the moment of the lift (once per crossing): live NPCs within 1 m in xz and 3 m in height,
+            // those of them at least 0.5 m below (this one stands on them), corpses there
+            u32 live = 0, below = 0, corpses = 0;
+            xr_vector<IGameObject*> nearest;
+            Level().ObjectSpace.GetNearest(nearest, position, 1.5f, &object());
+            for (IGameObject* neighbour : nearest)
+            {
+                CEntityAlive* alive = smart_cast<CEntityAlive*>(neighbour);
+                if (!alive)
+                    continue;
+                const Fvector& p = neighbour->Position();
+                const float dx = p.x - position.x;
+                const float dz = p.z - position.z;
+                const float dy = p.y - position.y;
+                if (dx * dx + dz * dz > 1.f || _abs(dy) > 3.f)
+                    continue;
+                if (!alive->g_Alive())
+                {
+                    ++corpses;
+                    continue;
+                }
+                ++live;
+                if (dy < -0.5f)
+                    ++below;
+            }
+            if (live)
+                PERF_INC(ai_npc_ground_lift_crowd);
+            if (below)
+                PERF_INC(ai_npc_ground_lift_stacked);
+
+            if (s_ground_logged.fetch_add(1, std::memory_order_relaxed) < ground_log_max)
+            {
+                Fvector velocity;
+                movement_control->GetCharacterVelocity(velocity);
+                Msg("! [npc_ground] '%s' %.1f m above the AI floor (vertex %u, floor %.2f, pos %.1f %.1f %.1f): this update "
+                    "%s, the previous %s at %.1f m %u frames ago; updates in the air since the floor: kinematic %u, "
+                    "try_position %u, physics %u, other %u; character %s, vy %.2f, jump %d, losing control %d, "
+                    "impulse %d, forced physics %d; live NPCs within 1 m: %u (%u at least 0.5 m below), corpses %u",
+                    object().cName().c_str(), height, object().ai_location().level_vertex_id(), floor_y, position.x,
+                    position.y, position.z, ground_branch_names[branch < gb_count ? branch : gb_none],
+                    m_ground_prev_valid ? ground_branch_names[m_ground_prev_branch] : "-",
+                    m_ground_prev_valid ? m_ground_prev_height : 0.f,
+                    m_ground_prev_valid ? Device.dwFrame - m_ground_prev_frame : 0u, u32(m_ground_air_updates[0]),
+                    u32(m_ground_air_updates[1]), u32(m_ground_air_updates[2]), u32(m_ground_air_updates[3]),
+                    movement_control->IsCharacterEnabled() ? "enabled" : "disabled", velocity.y,
+                    int(movement_control->JumpState()), int(movement_control->IsLosingControl()),
+                    int(movement_control->bExernalImpulse), int(movement_control->ForcedPhysicsControl()), live, below,
+                    corpses);
+            }
+        }
+    }
+    else if (height < ground_high_release)
+        m_ground_high = false;
+
+    m_ground_prev_height = height;
+    m_ground_prev_frame = Device.dwFrame;
+    m_ground_prev_branch = branch < gb_count ? branch : u8(gb_none);
+    m_ground_prev_valid = true;
+}
+
 void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fvector& dest_position, float time_delta)
+{
+    u8 branch = gb_none;
+    move_along_path_body(movement_control, dest_position, time_delta, branch);
+    ground_diag(movement_control, dest_position, branch);
+}
+
+void CMovementManager::move_along_path_body(
+    CPHMovementControl* movement_control, Fvector& dest_position, float time_delta, u8& branch)
 {
     START_PROFILE("Build Path/Move Along Path")
 
@@ -503,6 +764,7 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
             if (movement_control->CharacterExist())
                 movement_control->DisableCharacter();
         })
+        branch = gb_idle;
         if (movement_control->IsCharacterEnabled())
         {
             // Ф1: idle far NPCs still pay a full physics step via Calculate() while enabled - force them
@@ -511,12 +773,21 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
             {
                 movement_control->DisableCharacter();
                 count_forced_kinematic();
+                branch = gb_idle_kinematic;
             }
             else
             {
                 movement_control->Calculate(detail().path(), 0.f, detail().m_current_travel_point, precision);
                 movement_control->GetPosition(dest_position);
+                branch = gb_idle_physics;
             }
+        }
+        // Ground snap: a standing NPC with its character disabled is never moved at all - one left in the air
+        // would hang there until it walks again
+        if (!movement_control->IsCharacterEnabled() && ground_snap(movement_control, dest_position, time_delta))
+        {
+            movement_control->SetPosition(dest_position);
+            PERF_INC(ai_npc_ground_snap_kinematic);
         }
 
         // проверка на хит
@@ -578,7 +849,8 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
     // Физика устанавливает новую позицию
     // получить физ. объекты в радиусе
     m_nearest_objects.clear();
-    if (!should_force_far_kinematic(movement_control, dest_position))
+    const bool forced_kinematic = should_force_far_kinematic(movement_control, dest_position);
+    if (!forced_kinematic)
     {
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementNearestQuery);
         Level().ObjectSpace.GetNearest(m_nearest_objects, dest_position,
@@ -598,6 +870,9 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
     //	VERIFY				(dist <= dist_to_target);
     motion.mul(dir_to_target, dist / dist_to_target);
     dest_position.add(motion);
+
+    // Ground snap: every branch below but a failed TryPosition moves the NPC to this point without gravity
+    const bool ground_snapped = ground_snap(movement_control, dest_position, time_delta);
 
     Fvector velocity = dir_to_target;
     velocity.normalize_safe();
@@ -645,6 +920,9 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
         movement_control->SetPosition(dest_position);
         movement_control->DisableCharacter();
         movement_control->b_exect_position = true;
+        branch = gb_try_skip;
+        if (ground_snapped)
+            PERF_INC(ai_npc_ground_snap_kinematic);
     }
     else if (DBG_PH_MOVE_CONDITIONS(ph_dbg_draw_mask.test(phDbgNeverUseAiPhMove) ||
             !ph_dbg_draw_mask.test(phDbgAlwaysUseAiPhMove) &&) !(m_nearest_objects.empty()))
@@ -656,6 +934,7 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
                 dest_position))
         {
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementTryPositionFail);
+            branch = gb_physics;
             if (try_skip_on)
                 try_position_skip_result(false);
             movement_control->GetPosition(dest_position);
@@ -671,6 +950,9 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
                 movement_control->DisableCharacter();
             })
             movement_control->b_exect_position = true;
+            branch = gb_try_ok;
+            if (ground_snapped)
+                PERF_INC(ai_npc_ground_snap_try);
             if (try_skip_on)
                 try_position_skip_result(true);
         }
@@ -686,6 +968,9 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
         movement_control->SetPosition(dest_position);
         movement_control->DisableCharacter();
         movement_control->b_exect_position = true;
+        branch = forced_kinematic ? gb_kinematic_forced : gb_kinematic_free;
+        if (ground_snapped)
+            PERF_INC(ai_npc_ground_snap_kinematic);
     }
     /*
     } else { // есть физ. объекты

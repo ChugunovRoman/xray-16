@@ -192,8 +192,7 @@ void IGame_Level::OnRender()
     // not possible (first frame after reset, old shadow cascades, no free dsgraph context).
     IMainMenu* pMainMenu = g_pGamePersistent ? g_pGamePersistent->m_pMainMenu : nullptr;
     const bool bMenu = pMainMenu && pMainMenu->CanSkipSceneRendering();
-    const bool svp_frame =
-        ps_r__dedicated_second_vp && g_pGameLevel && Device.m_SecondViewport.IsSVPFrame() && !bMenu;
+    const bool svp_frame = g_pGameLevel && Device.m_SecondViewport.IsSVPFrame() && !bMenu;
     const float svp_fov = svp_frame ? g_pGameLevel->Cameras().SecondVPFov() : 0.f;
     Fmatrix svp_scope_project;
     const bool svp_have_project = svp_frame && g_pGameLevel->Cameras().BuildSecondVPProjection(svp_scope_project);
@@ -376,15 +375,13 @@ void IGame_Level::SetViewEntity(IGameObject* O)
 // already propagated within the window. 0 = off (kill-switch).
 int g_snd_ai_coalesce_ms = 180;
 
-// Sound AI optimization: per-frame budget, burst coalescence, occlusion skip
+// Sound AI optimization: per-frame budget (beyond it only combat sounds pass), burst coalescence, occlusion skip.
+// The budget, its priority gate and the burst coalescence are permanent; the numbers below are saved tunables.
 int g_snd_ai_budget_per_frame = 100; // max fully-processed sound events per frame
-int g_snd_ai_budget_enable = 1; // kill-switch for budget
-int g_snd_ai_priority_only_beyond_budget = 1; // after budget exhausted, only allow combat sounds
 float g_snd_ai_occlusion_skip_threshold = 0.15f; // skip occlusion below this power
 float g_snd_ai_occlusion_skip_default = 0.3f; // conservative occlusion replacement
 int g_snd_ai_burst_coalesce_time_ms = 50; // burst coalescence window (ms)
 float g_snd_ai_burst_coalesce_dist = 5.0f; // burst coalescence radius (meters)
-int g_snd_ai_burst_coalesce_enable = 1; // kill-switch for burst coalescence
 
 // Per-frame budget state
 static u32 s_snd_ai_budget_counter = 0;
@@ -458,7 +455,7 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
 
     // Burst coalescence: merge nearby same-type sounds within a short window (e.g. full-auto burst).
     // Independent from per-source coalescence above — handles different source objects at close positions.
-    if (g_snd_ai_burst_coalesce_enable && S->g_type && S->feedback)
+    if (S->g_type && S->feedback)
     {
         const u32 now = Device.dwTimeGlobal;
         Fvector eff_pos = S->feedback->get_params()->position;
@@ -482,28 +479,24 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
 
     // Per-frame budget: cap the number of fully-processed (q_box + occlusion) sound events.
     // Beyond budget, only combat-critical sounds (weapon fire, explosions, monster attacks) pass through.
-    if (g_snd_ai_budget_enable)
+    if (Device.dwFrame != s_snd_ai_budget_last_frame)
     {
-        if (Device.dwFrame != s_snd_ai_budget_last_frame)
-        {
-            s_snd_ai_budget_counter = 0;
-            s_snd_ai_budget_last_frame = Device.dwFrame;
-            // The burst ring is NOT reset here: its entries expire by time (g_snd_ai_burst_coalesce_time_ms,
-            // checked above) - wiping it every frame shrank the burst window to a single frame.
-        }
-
-        if (s_snd_ai_budget_counter >= u32(g_snd_ai_budget_per_frame))
-        {
-            if (g_snd_ai_priority_only_beyond_budget && !is_priority)
-            {
-                PERF_INC(snd_reg_budget);
-                return; // budget exhausted, skip non-priority sounds
-            }
-            if (is_priority)
-                PERF_INC(snd_reg_budget_priority);
-        }
-        s_snd_ai_budget_counter++;
+        s_snd_ai_budget_counter = 0;
+        s_snd_ai_budget_last_frame = Device.dwFrame;
+        // The burst ring is NOT reset here: its entries expire by time (g_snd_ai_burst_coalesce_time_ms,
+        // checked above) - wiping it every frame shrank the burst window to a single frame.
     }
+
+    if (s_snd_ai_budget_counter >= u32(g_snd_ai_budget_per_frame))
+    {
+        if (!is_priority)
+        {
+            PERF_INC(snd_reg_budget);
+            return; // budget exhausted, skip non-priority sounds
+        }
+        PERF_INC(snd_reg_budget_priority);
+    }
+    s_snd_ai_budget_counter++;
 
     // Record the coalescence marks only after all gates pass
     if (coalesce)
@@ -511,7 +504,7 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
         s_last_ai_snd_ms[coalesce_sid] = Device.dwTimeGlobal;
         s_last_ai_snd_priority[coalesce_sid] = is_priority;
     }
-    if (g_snd_ai_burst_coalesce_enable && S->g_type && S->feedback)
+    if (S->g_type && S->feedback)
     {
         const u32 now = Device.dwTimeGlobal;
         Fvector eff_pos = S->feedback->get_params()->position;

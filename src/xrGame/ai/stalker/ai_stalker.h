@@ -825,6 +825,9 @@ public:
 
 public:
     virtual float shedule_Scale() const;
+    // 22-game-thread.md, step 4d (the urgent near heap): in a fight or hit recently - first in the near class of the
+    // scheduler (ai_stalker_misc.cpp)
+    virtual bool shedule_Urgent() const override;
 
 private:
     bool m_sniper_update_rate;

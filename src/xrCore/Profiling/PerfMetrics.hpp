@@ -90,6 +90,22 @@ constexpr u8 Zone = 8;         // an anomaly zone update (CCustomZone)
 constexpr u8 Activation = 9;   // CPHShell::Enable / CPHElement::Enable, net state
 }
 
+// 24-critical-path.md, M8/M9 (plans/optimization_mt): the stalker planner a thread is in (TlAiPlanner, TlAiContext).
+namespace ai_planner
+{
+constexpr u8 None = 0;
+constexpr u8 Combat = 1; // CStalkerCombatPlanner::update
+constexpr u8 Danger = 2; // CStalkerDangerPlanner::update
+}
+
+// 24-critical-path.md, M11: who asked for the friendly-fire pick of CAI_Stalker::update_can_kill_info (TlFfCaller).
+namespace ff_caller
+{
+constexpr u8 None = 0;
+constexpr u8 ObjectHandler = 1; // CAI_Stalker::update_object_handler (UpdateCL, seqParallel)
+constexpr u8 Think = 2;         // CAI_Stalker::Think (shedule_Update: brain + movement, fire_make_sense included)
+}
+
 enum class Metric : u16
 {
 #define PERF_COUNTER(id, name) id,
@@ -147,13 +163,20 @@ XRCORE_API u8& TlSpawn() noexcept;
 // callbacks written inside one are serialized with the render's bone calculation of that model, so the overlap
 // detector of CBoneInstance::set_callback skips them and counts only the writes still racing the render.
 XRCORE_API u32& TlBonesLocked() noexcept;
+// 24-critical-path.md, M8/M9/M11 (xrGame, set only with XR_PERF_METRICS through PERF_AI_PLANNER / PERF_AI_CONTEXT /
+// PERF_FF_CALLER). TlAiPlanner: ai_planner::* of the next CActionPlanner::update, which takes it (resets it for its
+// own duration), so the planners nested in the tagged one see None. TlAiContext: ai_planner::* for the whole update of
+// that planner, nested planners and Lua included. TlFfCaller: ff_caller::*.
+XRCORE_API u8& TlAiPlanner() noexcept;
+XRCORE_API u8& TlAiContext() noexcept;
+XRCORE_API u8& TlFfCaller() noexcept;
 
 XRCORE_API void AddSlow(Metric m, u64 v) noexcept;
 XRCORE_API void AddTimeSlow(Metric m, u64 ticks) noexcept;
 XRCORE_API void SetGauge(Metric m, s64 v) noexcept;
-// A sticky running maximum (e.g. "worst corpse velocity seen"), lock-free compare-exchange into the same
-// gauge storage as SetGauge. Unlike SetGauge it never goes down and is not reset on Flush(): it is an
-// all-time high-water-mark for the session, not a per-5s-window peak (there is no per-metric reset hook).
+// A running maximum within one frame (e.g. "worst corpse velocity of the frame"), lock-free compare-exchange into the
+// same gauge storage as SetGauge. Flush() takes it and resets it to 0 every frame, so the 5 s window prints the average
+// of the per-frame maxima and its peak (before 2026-10-15 it was never reset: a session high-water mark).
 XRCORE_API void UpdateMax(Metric m, s64 v) noexcept;
 XRCORE_API void AddHist(Metric m, u32 bucket) noexcept;
 XRCORE_API u64  Ticks() noexcept;
@@ -635,6 +658,16 @@ void DescribeSpikeObject(const void* ctx, char* buf, size_t size) noexcept
 #else
 #   define PERF_PH_WAKE(v) ((void)0)
 #   define PERF_PH_WAKE_DEFAULT(v) ((void)0)
+#endif
+// 24-critical-path.md, M8/M9/M11: the AI tags (TlAiPlanner, TlAiContext, TlFfCaller); nothing without XR_PERF_METRICS.
+#if XR_PERF_METRICS
+#   define PERF_AI_PLANNER(v) ::xray::perf::ScopedTag CONCATENIZE(_perf_ai_planner_, __LINE__)(::xray::perf::TlAiPlanner(), static_cast<u8>(v))
+#   define PERF_AI_CONTEXT(v) ::xray::perf::ScopedTag CONCATENIZE(_perf_ai_context_, __LINE__)(::xray::perf::TlAiContext(), static_cast<u8>(v))
+#   define PERF_FF_CALLER(v) ::xray::perf::ScopedTag CONCATENIZE(_perf_ff_caller_, __LINE__)(::xray::perf::TlFfCaller(), static_cast<u8>(v))
+#else
+#   define PERF_AI_PLANNER(v) ((void)0)
+#   define PERF_AI_CONTEXT(v) ((void)0)
+#   define PERF_FF_CALLER(v) ((void)0)
 #endif
 
 // Always compiled (not gated by XR_PERF_METRICS): overlap_hazard_probe is its own opt-in cvar, meant to

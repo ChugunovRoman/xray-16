@@ -56,11 +56,10 @@ public:
     void SolveBones(SCalculateData& cd);
     void ApplyState(SCalculateData& cd);
     void SetGoal(SCalculateData& cd);
-    void Update(CGameObject* O, const CBlend* b, const extrapolation::points& object_pose_extrapolation);
 
-    /** Per-NPC batch path. GatherRays fills out with ray groups that need execution.
-     *  ProcessResults reads back results from the same collector.
-     *  If raypick_batch_level < 2 these are not used (Update() takes the legacy path). */
+    /** Per-NPC batch path (the only one; replaced the vanilla per-limb Update / step_predict).
+     *  GatherRays fills out with ray groups that need execution (current foot + step prediction);
+     *  ProcessGroup reads back the results of one group after CIKLimbsController::ExecuteIKRayBatch. */
     void GatherRays(CGameObject* O, const CBlend* b, const extrapolation::points& object_pose_extrapolation,
         xr_vector<IKRayGroup>& out);
     void ProcessGroup(const IKRayGroup& group, const collide::rq_result* results);
@@ -75,8 +74,6 @@ public:
     Fmatrix& transform(Fmatrix& m, u16 bone0, u16 bone1) const;
     float time_to_footstep() const { return state_predict.time_to_footstep; }
     float footstep_shift() const { return state_predict.footstep_shift; }
-    void step_predict(CGameObject* O, const CBlend* b, ik_limb_state_predict& state,
-        const extrapolation::points& object_pose_extrapolation); // const;
     bool foot_step() const { return sv_state.foot_step(); }
     u16 foot_matrix_predict(Fmatrix& foot, Fmatrix& toe, float time, IKinematicsAnimated* K) const;
 #ifdef DEBUG

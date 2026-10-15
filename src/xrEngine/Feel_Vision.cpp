@@ -8,11 +8,8 @@
 #include "xrCDB/Intersect.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 
-ENGINE_API int npc_perf_vision_skip_dynamic_ray = 1;
-ENGINE_API int npc_perf_vision_static_only = 0;
 ENGINE_API float npc_perf_vision_cache_pos_slack_m = 0.55f;
 ENGINE_API int npc_perf_vision_rays_per_npc = 24;
-ENGINE_API int npc_perf_vision_dynamic_cache = 1;
 
 namespace Feel
 {
@@ -46,28 +43,20 @@ IC bool feel_vision_callback(collide::rq_result& result, LPVOID params)
     }
     return (fp->vis > fp->vis_threshold);
 }
-void Vision::o_new(IGameObject* O)
+// 24-critical-path.md G6b. What this defers (per item, from the call graph, not timed): CEntityAlive::get_new_local_point_on_mesh =
+// smart_cast to IKinematics + two passes over the hit-bone surface areas (LL_GetBoneVisible per bone) + Random;
+// CEntityAlive::get_last_local_point_on_mesh = IKinematics::Bone_GetAnimPos: the model lock + BoneChain_Calculate from
+// the root to the bone (CLBone = blend of all animations of each bone, 5-10 bones deep) - microseconds per living
+// object; CGameObject (physics items) - a random_dir and a bbox transform. The vanilla o_new paid both for every object
+// entering the frustum, though o_trace recomputes cp_LAST before each use, and with ~2000 items and a 24-ray budget
+// most new items leave the frustum before their first ray (ai/vision/mesh_point_skipped).
+void Vision::feel_vision_init_mesh_point(feel_visible_Item& item, bool with_last)
 {
-    feel_visible.push_back(feel_visible_Item());
-    feel_visible_Item& I = feel_visible.back();
-    I.O = O;
-    I.Cache_vis = 1.f;
-    I.Cache.verts[0].set(0, 0, 0);
-    I.Cache.verts[1].set(0, 0, 0);
-    I.Cache.verts[2].set(0, 0, 0);
-    I.fuzzy = -EPS_S;
-    I.cp_LP = O->get_new_local_point_on_mesh(I.bone_id);
-    I.cp_LAST = O->get_last_local_point_on_mesh(I.cp_LP, I.bone_id);
-}
-void Vision::o_delete(IGameObject* O)
-{
-    xr_vector<feel_visible_Item>::iterator I = feel_visible.begin(), TE = feel_visible.end();
-    for (; I != TE; ++I)
-        if (I->O == O)
-        {
-            feel_visible.erase(I);
-            return;
-        }
+    item.mesh_point_pending = false;
+    item.cp_LP = item.O->get_new_local_point_on_mesh(item.bone_id);
+    if (with_last)
+        item.cp_LAST = item.O->get_last_local_point_on_mesh(item.cp_LP, item.bone_id);
+    PERF_INC(vision_mesh_point_lazy);
 }
 
 void Vision::feel_vision_clear()
@@ -76,6 +65,8 @@ void Vision::feel_vision_clear()
     seen.clear();
     query.clear();
     diff.clear();
+    m_diff_new.clear();
+    m_seen_merged = false;
     feel_visible.clear();
 }
 
@@ -112,8 +103,8 @@ void Vision::feel_vision_relcase_batch(const RelcaseBatch& batch)
     seen.erase(std::remove_if(seen.begin(), seen.end(), in_batch), seen.end());
     query.erase(std::remove_if(query.begin(), query.end(), in_batch), query.end());
     diff.erase(std::remove_if(diff.begin(), diff.end(), in_batch), diff.end());
-    // P17b (always): feel_visible holds exactly the objects of `query` - only o_new / o_delete change it,
-    // both from feel_vision_merge_after_frustum (o_new for seen - query, o_delete for query - seen, then query = seen),
+    // P17b (always): feel_visible holds exactly the objects of `query` - only feel_vision_merge_after_frustum adds to it
+    // (seen - query) and removes from it (query - seen, then `seen` becomes `query`),
     // relcase drops an object from both, feel_vision_clear empties both, all under m_vision_mtx. So if no batch object
     // left `query`, none is in feel_visible, and its walk (an item of ~180 bytes per object in sight, thousands of cache
     // lines per frame over all NPCs) is skipped. The sizes must agree, otherwise it is walked as before.
@@ -134,12 +125,18 @@ void Vision::feel_vision_query(Fmatrix& mFull, Fvector& P)
     Frustum.CreateFromMatrix(mFull, FRUSTUM_P_LRTB | FRUSTUM_P_FAR);
 
     // Traverse object database
-    r_spatial.clear();
-    SpatialCaller spatial_caller(SpatialQueryCaller::vision);
-    g_pGamePersistent->SpatialSpace.q_frustum(r_spatial, 0, STYPE_VISIBLEFORAI, Frustum);
+    {
+        PERF_SCOPE(stk_vision_s1_query); // 24-critical-path.md M10
+        r_spatial.clear();
+        SpatialCaller spatial_caller(SpatialQueryCaller::vision);
+        g_pGamePersistent->SpatialSpace.q_frustum(r_spatial, 0, STYPE_VISIBLEFORAI, Frustum);
+    }
+    PERF_ADD(vision_query_results, r_spatial.size());
 
     // Determine visibility for dynamic part of scene
+    PERF_SCOPE(stk_vision_s1_filter);
     seen.clear();
+    m_seen_merged = false; // G6b: a fresh `seen` for the next merge
     for (u32 o_it = 0; o_it < r_spatial.size(); o_it++)
     {
         ISpatial* spatial = r_spatial[o_it];
@@ -154,44 +151,102 @@ void Vision::feel_vision_query(Fmatrix& mFull, Fvector& P)
         if (end != seen.end())
             seen.erase(end, seen.end());
     }
+    PERF_ADD(vision_query_relevant, seen.size());
 }
 
+// 24-critical-path.md G6b: the merge of the new frustum result (`seen`) into the tracked list (`query` / feel_visible).
+// Same visible set and the same items in feel_visible in the same order as the vanilla merge (the kept ones in their
+// order, then the new ones in ascending pointer order), `query` = the new `seen` without `parent`. Only the mesh point
+// of a new item is chosen on its first use (feel_vision_init_mesh_point) instead of on adding it, so the random point
+// (and the Random stream) differs from vanilla. Measured s2_merge 1.25 -> 0.09 ms/frame. Against vanilla:
+//  - `parent`: a binary search in the sorted `seen` instead of std::remove over all of it;
+//  - one merge pass over seen / query gives both differences (two set_difference before);
+//  - removal: one stable remove_if over feel_visible with a binary search in the sorted `diff`; vanilla o_delete walked
+//    feel_visible (~180-byte items) for each removed object and erased it, shifting the tail each time (O(n*k)).
+//    Done before adding, which only appends, so the order equals vanilla o_new + o_delete. m_trace_cursor is an index
+//    and is kept as is, exactly as with the vanilla erase calls (o_trace / eye_pp_s2_prepare wrap it);
+//  - adding: no get_new_local_point_on_mesh / get_last_local_point_on_mesh (see feel_vision_init_mesh_point);
+//  - query.swap(seen) instead of copying ~2000 pointers; m_seen_merged marks `seen` as consumed, so a merge without a
+//    feel_vision_query in between is a no-op (vanilla found seen == query then).
+// The caller holds m_vision_mtx (feel_vision_update*, CCustomMonster::eye_pp_s2_prepare).
 void Vision::feel_vision_merge_after_frustum(IGameObject* parent)
 {
-    // B-A = objects, that become visible
-    if (!seen.empty())
-    {
-        xr_vector<IGameObject*>::iterator E = std::remove(seen.begin(), seen.end(), parent);
-        seen.resize(E - seen.begin());
+    PERF_SCOPE(stk_vision_s2_merge); // 24-critical-path.md M10
+    if (m_seen_merged)
+        return;
 
+    // feel_vision_query leaves `seen` sorted and unique, relcase only erases; `query` is the previous `seen`.
+    const auto self = std::lower_bound(seen.begin(), seen.end(), parent);
+    if (self != seen.end() && *self == parent)
+        seen.erase(self);
+
+    diff.clear(); // A-B = objects, that are invisible
+    m_diff_new.clear(); // B-A = objects, that become visible
+    {
+        auto s = seen.cbegin();
+        const auto s_end = seen.cend();
+        auto q = query.cbegin();
+        const auto q_end = query.cend();
+        while (s != s_end && q != q_end)
         {
-            diff.resize(_max(seen.size(), query.size()));
-            xr_vector<IGameObject*>::iterator E2 =
-                std::set_difference(seen.begin(), seen.end(), query.begin(), query.end(), diff.begin());
-            diff.resize(E2 - diff.begin());
-            for (u32 i = 0; i < diff.size(); i++)
-                o_new(diff[i]);
+            if (*s < *q)
+                m_diff_new.push_back(*s++);
+            else if (*q < *s)
+                diff.push_back(*q++);
+            else
+            {
+                ++s;
+                ++q;
+            }
         }
+        m_diff_new.insert(m_diff_new.end(), s, s_end);
+        diff.insert(diff.end(), q, q_end);
     }
 
-    // A-B = objects, that are invisible
-    if (!query.empty())
+    if (!diff.empty())
     {
-        diff.resize(_max(seen.size(), query.size()));
-        xr_vector<IGameObject*>::iterator E =
-            std::set_difference(query.begin(), query.end(), seen.begin(), seen.end(), diff.begin());
-        diff.resize(E - diff.begin());
-        for (u32 i = 0; i < diff.size(); i++)
-            o_delete(diff[i]);
+        PERF_SCOPE(stk_vision_s2_o_delete);
+        u32 never_traced = 0;
+        const auto gone = [this, &never_traced](const feel_visible_Item& item) {
+            if (!std::binary_search(diff.cbegin(), diff.cend(), item.O))
+                return false;
+            if (item.mesh_point_pending)
+                ++never_traced;
+            return true;
+        };
+        feel_visible.erase(std::remove_if(feel_visible.begin(), feel_visible.end(), gone), feel_visible.end());
+        PERF_ADD(vision_o_delete, diff.size());
+        PERF_ADD(vision_mesh_point_skipped, never_traced);
     }
 
-    query = seen;
+    if (!m_diff_new.empty())
+    {
+        PERF_SCOPE(stk_vision_s2_o_new);
+        feel_visible.reserve(feel_visible.size() + m_diff_new.size());
+        for (IGameObject* O : m_diff_new)
+        {
+            // A new item without the mesh point (cp_LP / bone_id / cp_LAST stay zero until feel_vision_init_mesh_point);
+            // Cache.verts are zeroed by ray_cache(), as vanilla o_new did.
+            feel_visible.push_back(feel_visible_Item());
+            feel_visible_Item& I = feel_visible.back();
+            I.O = O;
+            I.Cache_vis = 1.f;
+            I.fuzzy = -EPS_S;
+            I.mesh_point_pending = true;
+        }
+        PERF_ADD(vision_o_new, m_diff_new.size());
+        m_diff_new.clear();
+    }
+
+    query.swap(seen);
+    m_seen_merged = true;
 }
 
 void Vision::feel_vision_update(IGameObject* parent, Fvector& P, float dt, float vis_threshold)
 {
     std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
     feel_vision_merge_after_frustum(parent);
+    PERF_SCOPE(stk_vision_s2_rays); // 24-critical-path.md M10
     o_trace(P, dt, vis_threshold, static_cast<u32>(npc_perf_vision_rays_per_npc));
 }
 
@@ -200,6 +255,7 @@ void Vision::feel_vision_update_staged(
 {
     std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
     feel_vision_merge_after_frustum(parent);
+    PERF_SCOPE(stk_vision_s2_rays); // 24-critical-path.md M10
     o_trace(P, dt, vis_threshold, trace_pass_cap);
 }
 
@@ -243,6 +299,8 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold, u32 trace_pass_c
 
         I->cp_LR_dst = I->O->Position();
         I->cp_LR_src = P;
+        if (I->mesh_point_pending) // G6b: added by the merge, the first ray at it
+            feel_vision_init_mesh_point(*I, false);
         I->cp_LAST = I->O->get_last_local_point_on_mesh(I->cp_LP, I->bone_id);
 
         //
@@ -259,10 +317,8 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold, u32 trace_pass_c
         {
             D.div(f);
             // setup ray defs & feel params
-            const collide::rq_target rq_tgt = npc_perf_vision_static_only != 0
-                ? collide::rqtStatic
-                : collide::rq_target(collide::rqtStatic | collide::rqtObject | collide::rqtObstacle);
-            collide::ray_defs RD(P, D, f, CDB::OPT_CULL, rq_tgt);
+            collide::ray_defs RD(P, D, f, CDB::OPT_CULL,
+                collide::rq_target(collide::rqtStatic | collide::rqtObject | collide::rqtObstacle));
             SFeelParam feel_params(this, &*I, vis_threshold);
             // check cache
             if (feel_vision_ray_cache_reuse(I->Cache, P, D, f, npc_perf_vision_cache_pos_slack_m))
@@ -275,7 +331,7 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold, u32 trace_pass_c
             {
                 float _u, _v, _range;
                 // Only use cached static triangle after a successful prior query filled verts; never
-                // TestRayTri on o_new zeros / degenerate tris (undefined + can upset collide state under load).
+                // TestRayTri on the zeros of a new item / degenerate tris (undefined + can upset collide state under load).
                 bool cached_static_tri = false;
                 if (I->Cache.result)
                 {
@@ -311,52 +367,8 @@ void Vision::o_trace(Fvector& P, float dt, float vis_threshold, u32 trace_pass_c
                     // Log("query");
                 }
             }
-            // If the static/material query already failed visibility, skip the extra dynamic-object ray pass.
-            // O_ONLYFIRST + ignore owner stops at the first potential blocker.
-            if (npc_perf_vision_skip_dynamic_ray == 0 && feel_params.vis >= feel_params.vis_threshold)
-            {
-                bool collision_found = false;
-                if (npc_perf_vision_dynamic_cache != 0 && feel_vision_dynamic_cache_reuse(
-                    I->dynamic_cache, P, D, f, npc_perf_vision_cache_pos_slack_m))
-                {
-                    PERF_INC(vision_dyn_cache);
-                    collision_found = I->dynamic_cache.blocked;
-                }
-                else
-                {
-                    PERF_INC(vision_dyn_ray);
-                    r_spatial.clear();
-                    ISpatial* owner_spatial = static_cast<ISpatial*>(const_cast<IGameObject*>(m_owner));
-                    SpatialCaller spatial_caller(SpatialQueryCaller::vision);
-                g_pGamePersistent->SpatialSpace.q_ray(
-                    r_spatial, ISpatial_DB::O_ONLYFIRST | ISpatial_DB::O_ONLYNEAREST, STYPE_VISIBLEFORAI, P, D, f, owner_spatial);
-
-                    RD.flags = CDB::OPT_ONLYFIRST;
-
-                    xr_vector<ISpatial*>::const_iterator i = r_spatial.begin();
-                    xr_vector<ISpatial*>::const_iterator e = r_spatial.end();
-                    for (; i != e; ++i)
-                    {
-                        if (*i == I->O)
-                            continue;
-
-                        IGameObject const* object = (*i)->dcast_GameObject();
-                        RQR.r_clear();
-                        if (object && object->GetCForm() && !object->GetCForm()->_RayQuery(RD, RQR))
-                            continue;
-
-                        collision_found = true;
-                        break;
-                    }
-
-                    if (npc_perf_vision_dynamic_cache != 0)
-                        feel_vision_dynamic_cache_store(I->dynamic_cache, P, D, f, collision_found);
-                }
-
-                if (collision_found)
-                    feel_params.vis = 0.f;
-            }
-
+            // No separate pass over dynamic occluders (vehicles, props) after this query: a deliberate perf
+            // trade-off, NPCs see through movers a little more often.
             if (feel_params.vis < feel_params.vis_threshold)
             {
                 // INVISIBLE, choose next point

@@ -418,7 +418,7 @@ public:
     }
 
     // weight stays the business of the Lua action: the wrapper already answers without Lua when the script class
-    // does not override it (npc_perf_script_action_weight_lookup)
+    // does not override it (CScriptActionWrapper::weight_overridden)
     edge_value_type weight(const CSConditionState& condition0, const CSConditionState& condition1) const override
     {
         return m_lua ? m_lua->weight(condition0, condition1) : inherited::weight(condition0, condition1);

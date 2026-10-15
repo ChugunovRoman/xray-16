@@ -44,6 +44,8 @@ struct alignas(64) Slot
 Slot s_slots[kMaxSlots]{};
 Slot s_fallback_slot{};
 std::atomic<u64> s_gauges[kNumMetrics]{};
+// Gauges written by UpdateMax(): read and reset to 0 by Flush() every frame (a per-frame maximum).
+std::atomic<bool> s_gauge_is_max[kNumMetrics]{};
 std::atomic<u32> s_next_slot{0};
 thread_local size_t tl_slot = size_t(-1);
 thread_local u8 tl_pass_v = 0;
@@ -53,6 +55,9 @@ thread_local u8 tl_wait_site_v = 0;
 thread_local u8 tl_ph_wake_v = 0;
 thread_local u8 tl_spawn_v = 0;
 thread_local u32 tl_bones_locked_v = 0;
+thread_local u8 tl_ai_planner_v = 0;
+thread_local u8 tl_ai_context_v = 0;
+thread_local u8 tl_ff_caller_v = 0;
 
 constexpr size_t kMaxBlendCb = 16;
 struct BlendCbEntry
@@ -198,6 +203,9 @@ XRCORE_API u8& TlWaitSite() noexcept { return tl_wait_site_v; }
 XRCORE_API u8& TlPhWake() noexcept { return tl_ph_wake_v; }
 XRCORE_API u8& TlSpawn() noexcept { return tl_spawn_v; }
 XRCORE_API u32& TlBonesLocked() noexcept { return tl_bones_locked_v; }
+XRCORE_API u8& TlAiPlanner() noexcept { return tl_ai_planner_v; }
+XRCORE_API u8& TlAiContext() noexcept { return tl_ai_context_v; }
+XRCORE_API u8& TlFfCaller() noexcept { return tl_ff_caller_v; }
 
 XRCORE_API void RegisterBlendCb(const void* fn, const char* name) noexcept
 {
@@ -284,6 +292,8 @@ XRCORE_API void UpdateMax(Metric m, s64 v) noexcept
     const size_t idx = static_cast<size_t>(m);
     if (idx >= kNumMetrics)
         return;
+    if (!s_gauge_is_max[idx].load(std::memory_order_relaxed))
+        s_gauge_is_max[idx].store(true, std::memory_order_relaxed);
     std::atomic<u64>& slot = s_gauges[idx];
     u64 cur = slot.load(std::memory_order_relaxed);
     const u64 desired = static_cast<u64>(v);
@@ -565,7 +575,9 @@ XRCORE_API void Flush() noexcept
     {
         if (s_metric_descs[i].is_gauge)
         {
-            current_totals[i] = s_gauges[i].load(std::memory_order_relaxed);
+            current_totals[i] = s_gauge_is_max[i].load(std::memory_order_relaxed) ?
+                s_gauges[i].exchange(0, std::memory_order_relaxed) :
+                s_gauges[i].load(std::memory_order_relaxed);
             continue;
         }
         u64 sum = s_fallback_slot.v[i].load(std::memory_order_relaxed);

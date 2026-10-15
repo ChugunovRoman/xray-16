@@ -8,10 +8,7 @@
 
 XRAICORE_API int ps_ai_graph_engine_serialize = 0;
 
-XRAICORE_API int ps_ai_path_build_use_tls_scratch = 1;
 XRAICORE_API int ps_ai_graph_engine_detect_concurrent = 0;
-
-XRAICORE_API int ps_ai_patrol_remap_invalid_vertex = 1;
 
 XRAICORE_API int ps_ai_patrol_remap_log = 0;
 

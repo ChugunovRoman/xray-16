@@ -87,6 +87,25 @@ public:
         while (!m_self_active->m_flags.is_active())
             m_self_active = m_self_active->m_self_active;
     }
+    // The merge root whose lists hold this island's bodies and joints now, read-only: unlike DActiveIsland() it does
+    // not shorten the chain (no writes), so the parallel island solve may call it. nullptr for a broken chain.
+    CPHIsland* ActiveRootReadOnly()
+    {
+        CPHIsland* island = this;
+        for (int link = 0; island && link < 4096; ++link)
+        {
+            if (island->m_flags.is_active())
+                return island;
+            island = island->m_self_active;
+        }
+        return nullptr;
+    }
+    // The merge root of the island the body was added to (AddBody: dxBody::world is that CPHIsland, merges never
+    // change it); nullptr for a body outside the islands.
+    static CPHIsland* BodyActiveRoot(dxBody* body)
+    {
+        return body && body->world ? static_cast<CPHIsland*>(body->world)->ActiveRootReadOnly() : nullptr;
+    }
     IC void Merge(CPHIsland* island)
     {
         // VERIFY2(b_active&&island->b_active,"no active island");
@@ -211,6 +230,8 @@ public:
         m_nj--;
     }
     void SetPrefereExactIntegration() { m_flags.set_prefere_exact_integration(); }
+    // Solve guard (Step): nullptr when the lists are what the ODE stepper expects, else what is wrong with them.
+    const char* CheckSolveLists();
     void Step(dReal step);
     void Enable();
     void Repair();

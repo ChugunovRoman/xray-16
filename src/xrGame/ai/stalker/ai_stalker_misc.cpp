@@ -32,6 +32,10 @@
 #include "danger_manager.h"
 #include "visual_memory_manager.h"
 #include "agent_enemy_manager.h"
+#include "hit_memory_manager.h"
+#include "stalker_planner.h"
+#include "stalker_decision_space.h"
+#include "xrEngine/xrSheduler.h"
 
 const u32 TOLLS_INTERVAL = 2000;
 const u32 GRENADE_INTERVAL = 0 * 1000;
@@ -256,4 +260,31 @@ void CAI_Stalker::process_enemies()
         memory().make_object_visible_somewhen(member->memory().enemy().selected());
         break;
     }
+}
+
+// 22-game-thread.md, step 4d (urgent near heap, xrEngine/xrSheduler.cpp): the stalker has to react now - its combat or
+// danger planner is active, an enemy is selected (seen, heard or remembered and useful), or it was hit within
+// shed_urgent_hit_ms ms. Asked by the scheduler on the thread of its non-RT pass, between the updates (the requeue after
+// this stalker's own shedule_Update, the scans of the near heaps), only while alive and near. Everything read here is
+// the state of the game logic and is not written meanwhile: the planner and the enemy selection change only in this
+// stalker's Think / memory update (that same thread), the health and the hit time in Hit - the events of FrameMove on
+// the main thread before the Game thread is woken, or a hit from an update on the Game thread itself (the overlap frame
+// runs only the render and the physics step in parallel, both never touch them). A few loads and compares
+bool CAI_Stalker::shedule_Urgent() const
+{
+    if (!g_Alive())
+        return false;
+    if (brain().initialized())
+    {
+        const auto action = brain().current_action_id();
+        if (action == StalkerDecisionSpace::eWorldOperatorCombatPlanner ||
+            action == StalkerDecisionSpace::eWorldOperatorDangerPlanner)
+        {
+            return true;
+        }
+    }
+    if (memory().enemy().selected())
+        return true;
+    const u32 hit_time = memory().hit().last_hit_time();
+    return hit_time != 0 && Device.dwTimeGlobal - hit_time <= u32(_max(0, ps_shed_urgent_hit_ms));
 }

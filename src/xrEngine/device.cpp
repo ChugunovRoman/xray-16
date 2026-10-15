@@ -44,9 +44,6 @@ string512 g_sBenchmarkName;
 int ps_fps_limit = 501;
 int ps_fps_limit_in_menu = 60;
 
-// CObjectList::Update — optional TaskScheduler parallel paths (see xr_object_list.cpp).
-int ps_obj_preupdate_mt = 0;
-int ps_obj_postupdate_mt = 0;
 bool g_bLoaded = false;
 ref_light precache_light = 0;
 

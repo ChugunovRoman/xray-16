@@ -132,6 +132,9 @@ protected:
     bool b_foot_mtl_check;
     dReal m_friction_factor;
     bool b_non_interactive;
+    // m_safe_position holds the body position of the last SafeAndLimitVelocity / SetPosition (not before the first one):
+    // the frame-step watchdog (ph_ai_step_max_rise) compares the substep's result with it.
+    bool m_safe_position_valid;
 
 public:
     CPHSimpleCharacter();

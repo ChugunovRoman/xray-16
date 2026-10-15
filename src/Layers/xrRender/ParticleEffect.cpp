@@ -353,9 +353,8 @@ IC void FillSprite_fpu(FVF::LIT*& pv, const Fvector& pos, const Fvector& dir, co
 
 #ifndef _EDITOR
 //----------------------------------------------------
-// No lock here: ParticleRenderStream gives every particle its own 4 vertices (pv_start + i * 4), so the parallel
-// build never shares a write position. The former global Lock per sprite cost a CRITICAL_SECTION + 2 atomics on each
-// sprite even single-threaded (plans/optimization_mt/18-combine-pass.md, E1).
+// No lock here: ParticleRenderStream gives every particle its own 4 vertices (pv_start + i * 4). The former global
+// Lock per sprite cost a CRITICAL_SECTION + 2 atomics on each sprite (plans/optimization_mt/18-combine-pass.md, E1).
 #if defined(XR_ARCHITECTURE_X86) || defined(XR_ARCHITECTURE_X64) || defined(XR_ARCHITECTURE_E2K) || defined(XR_ARCHITECTURE_PPC64)
 IC void FillSprite(FVF::LIT*& pv, const Fvector& T, const Fvector& R, const Fvector& pos, const Fvector2& lt,
     const Fvector2& rb, float r1, float r2, u32 clr, float sina, float cosa)
@@ -508,8 +507,7 @@ void CParticleEffect::ParticleRenderStream(FVF::LIT* pv_start, u32 count, PAPI::
 {
     const auto renderParticles = [&, this](const TaskRange<u32>& range)
     {
-        // The rotation cache is per range: xr_parallel_for tasks used to share (and race on) one copy.
-        // sin/cos are a pure function of m.rot.x, so the cache only saves work and the output is unchanged.
+        // Rotation cache: sin/cos are a pure function of m.rot.x, so the cache only saves work.
         float sina = 0.0f, cosa = 0.0f;
         // Xottab_DUTY: changed angle to be float instead of DWORD
         // But it must be 0xFFFFFFFF or otherwise some particles won't play
@@ -517,8 +515,7 @@ void CParticleEffect::ParticleRenderStream(FVF::LIT* pv_start, u32 count, PAPI::
 
         for (u32 i = range.begin(); i != range.end(); ++i)
         {
-            // Every branch below writes exactly one sprite (4 vertices) per particle: write it by index, so the
-            // serial order is the same as before and parallel tasks never share a write position.
+            // Every branch below writes exactly one sprite (4 vertices) per particle: write it by index.
             FVF::LIT* pv = pv_start + size_t(i) * 4;
             PAPI::Particle& m = particles[i];
             Fvector2 lt, rb;
@@ -636,15 +633,7 @@ void CParticleEffect::ParticleRenderStream(FVF::LIT* pv_start, u32 count, PAPI::
     [[maybe_unused]] const bool perf_main = g_perf_combine_main != 0;
     PERF_SCOPE_IF(perf_main, rcomb_ps_fill);
     PERF_ADD_IF(perf_main, rcomb_ps_sprites, count);
-    // Optional parallel build of sprite vertices (cvar r__particle_render_parallel).
-    if (r__particle_render_parallel != 0 &&
-        static_cast<int>(count) >= r__particle_render_parallel_min_count)
-    {
-        PERF_ADD_IF(perf_main, rcomb_ps_parallel, 1);
-        xr_parallel_for(TaskRange<u32>(0, count), true, renderParticles);
-    }
-    else
-        renderParticles(TaskRange<u32>(0, count));
+    renderParticles(TaskRange<u32>(0, count));
 }
 
 void CParticleEffect::Render(CBackend& cmd_list, float, bool use_fast_geo)

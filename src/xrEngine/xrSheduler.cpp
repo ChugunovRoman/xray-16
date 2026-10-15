@@ -11,25 +11,29 @@
 //#define DEBUG_SCHEDULER
 //#define DEBUG_SCHEDULERMT
 
+// The time budget of the non-RT pass for the stats only (stats.Load, shed/ps_current): psShedulerTarget is set to
+// shed_budget_ms every pass and psShedulerCurrent follows it smoothly. The pass itself uses shed_budget_ms directly.
 float psShedulerCurrent = 10.f;
 float psShedulerTarget = 10.f;
-const float psShedulerReaction = 0.1f;
 bool isSheduleInProgress = false;
 
-// Spread scheduler load: cap how many normal-priority shedule_Update calls run per frame (0 = vanilla, no cap).
+// The former cap of the normal-priority shedule_Update calls a frame. No longer read: the pass is limited by the
+// time budget shed_budget_ms (and the safety cap shed_max_steps) below. The console command is kept for the saved
+// configs and the options menu (ui_mm_opt_optimizations.script).
 ENGINE_API int ps_scheduler_max_steps_per_frame = 128;
 
 // 22-game-thread.md, step 4 (plans/optimization_mt/22-game-thread.md): near objects first and a real time budget.
 //
-// Why. With ~1000 NPCs around the actor the non-RT pass always stopped by the step limit above (128), never by time:
-// the adaptive budget psShedulerCurrent grows by 0.3 on every limit exit too and sits at its cap of 65 ms, so it limits
-// nothing. The heap is ordered by the due time only, ~92 % of its 14-16k items are overdue and the pass became a
-// carousel: every object, the stalker next to the player as well as a can on the other side of the level, got its
-// turn once in 5-14 s. shedule_Scale() (the distance stretch of the interval, CGameObject: dist / 200) does not help
-// under such a load: it only moves the next due time between t_min and (1000 + t_max) / 2, while the queue is seconds
-// behind - a near stalker requeued at "now + 100 ms" still waits behind every overdue item.
+// Why. With ~1000 NPCs around the actor the former non-RT pass (one heap, a limit of scheduler_max_steps_per_frame
+// steps (128) and the adaptive budget psShedulerCurrent) always stopped by the step limit, never by time: the adaptive
+// budget grew by 0.3 on every limit exit too and sat at its cap of 65 ms, so it limited nothing. The heap is ordered
+// by the due time only, ~92 % of its 14-16k items were overdue and the pass became a carousel: every object, the
+// stalker next to the player as well as a can on the other side of the level, got its turn once in 5-14 s.
+// shedule_Scale() (the distance stretch of the interval, CGameObject: dist / 200) does not help under such a load: it
+// only moves the next due time between t_min and (1000 + t_max) / 2, while the queue is seconds behind - a near
+// stalker requeued at "now + 100 ms" still waits behind every overdue item.
 //
-// shed_priority 1:
+// The pass:
 //  - two heaps: ItemsNear and Items (the rest, the "far" heap). Near are only the objects whose own update matters for
 //    how fast the world around the player reacts (IsNear, by the kind of the object, ShedNear*): living stalkers and
 //    monsters and the vehicles within shed_near_dist m of the camera, or within shed_near_seen_dist m and drawn
@@ -38,24 +42,25 @@ ENGINE_API int ps_scheduler_max_steps_per_frame = 128;
 //    shed_near_seen_dist m. Items, weapons, props, inventory boxes and corpses - the bulk of the
 //    objects around a crowd (one session: 10.7k of 18k items near, the near stalkers got lost among them) - are near
 //    only within shed_near_item_dist m of the camera or in the actor's inventory. The services that are neither game
-//    objects nor spatial (ALife, agent managers, autosave) are near only with shed_services_near 1. The class is
+//    objects nor spatial (ALife, agent managers, autosave) are always far. The class is
 //    taken when an item is registered and every time it is requeued after its update; a far item that came near is
-//    found by a round-robin scan of shed_scan far items a frame (PromoteNearFromFar). Both are plain heaps by the due
-//    time, so t_min / t_max / shedule_Scale keep their meaning inside a class;
-//  - a fixed time budget shed_budget_ms for the whole pass (replaces psShedulerCurrent, which then just follows it).
+//    found by a round-robin scan of shed_scan far items a frame (PromoteNearFromFar), a near item that went far by the
+//    scan of the near heap (DemoteFarFromNear). Once a level is loaded every item is classified anew (RebuildNearFar,
+//    see ProcessStep). Both are plain heaps by the due time, so t_min / t_max / shedule_Scale keep their meaning
+//    inside a class;
+//  - a fixed time budget shed_budget_ms for the whole pass (psShedulerCurrent only follows it, for the stats).
 //    The near heap is served first, up to (100 - shed_far_share) % of the budget while the far heap has due items, and
 //    at least shed_near_min_steps steps even past it; the far heap gets the rest of the budget and at least one step
 //    a frame. The far heap is ordered by the due time (oldest first), so with one step a frame it still moves on and
 //    nothing starves (the aging); a far object is late by "far backlog / far throughput" seconds;
-//  - shed_max_steps: only a safety cap (512); the step limit of shed_priority 0 (scheduler_max_steps_per_frame) is
-//    not used - with a real time budget the cheap items (~1 us) no longer have to be limited by count.
+//  - shed_max_steps: only a safety cap (512); the former step limit (scheduler_max_steps_per_frame) is not used -
+//    with a real time budget the cheap items (~1 us) no longer have to be limited by count.
 //
-// DT. shedule_Update gets min(real elapsed, max(t_max, 1000)) ms in both modes - kept on purpose: shedule_Update code
+// DT. shedule_Update gets min(real elapsed, max(t_max, 1000)) ms - kept on purpose: shedule_Update code
 // integrates with dt, e.g. the visual memory of an NPC (CCustomMonster / CAI_Stalker -> memory().update(dt) ->
 // CVisualMemoryManager::get_visible_value: += time_delta / time_quant): a 5-14 s dt of an object late in the queue
 // would make it "see" at once whom it should notice gradually. A near object is updated close to its interval now and
 // does not hit the clamp; shed/dt_clamped and shed/dt_lost_ms show how much time is cut.
-ENGINE_API int ps_shed_priority = 0;
 ENGINE_API int ps_shed_budget_ms = 8;
 ENGINE_API int ps_shed_near_dist = 30;
 ENGINE_API int ps_shed_near_seen_dist = 60;
@@ -64,9 +69,8 @@ ENGINE_API int ps_shed_far_share = 25;
 ENGINE_API int ps_shed_near_min_steps = 4;
 ENGINE_API int ps_shed_max_steps = 512;
 ENGINE_API int ps_shed_scan = 512;
-ENGINE_API int ps_shed_services_near = 0;
 
-// 22-game-thread.md, step 4c: the adaptive near radius (shed_near_adaptive, only with shed_priority 1). In a crowd of
+// 22-game-thread.md, step 4c: the adaptive near radius (permanent). In a crowd of
 // ~1000 NPCs around the actor nearly all of them are within shed_near_dist / shed_near_seen_dist: 600 living near
 // creatures share the near part of the budget (~8 stalker steps a frame) and are still 5-8 s late. A fixed smaller
 // radius fits the crowd but starves a normal scene. So the radius of the living creatures is scaled: a controller looks
@@ -77,9 +81,28 @@ ENGINE_API int ps_shed_services_near = 0;
 // (the near heap for a shrink: DemoteFarFromNear; the far heap for a growth: PromoteNearFromFar), otherwise the count
 // would lag and the radius would overshoot. Only the living creatures follow the radius: vehicles, explosives, touch
 // triggers, particles, items and the actor keep their own fixed rules.
-ENGINE_API int ps_shed_near_adaptive = 1;
 ENGINE_API int ps_shed_near_target = 80;
 ENGINE_API int ps_shed_near_dist_min = 8;
+
+// 22-game-thread.md, step 4d (24-critical-path.md, the journal of 2026-10-15): inside the near class those who have to
+// react go first (the urgent near heap; always on: in the A/B of a heavy fight the urgent near creatures were late
+// 4.6 s -> 2.1 s, the calm near ones 0.79 -> 0.86 s, the far ones 8.4 -> 9.0 s). In a heavy fight the near heap holds
+// up to ~370 living creatures, a stalker update costs 0.5-2.3 ms and only 5-11 stalker updates fit into a frame: a near
+// stalker that is shot at would wait behind the calm ones by its due time, 0.1-6 s. So the near class is kept in two
+// heaps: ItemsUrgent - the living creatures whose ISheduled::shedule_Urgent() is true (CAI_Stalker: its
+// combat or danger planner is active, an enemy is selected, or it was hit within shed_urgent_hit_ms ms; CBaseMonster: an
+// enemy or a recent hit) - and ItemsNear, the rest of the near class. The urgency of an item is taken only when it moves
+// between the heaps: the requeue after its own update (its state is fresh then), the round-robin scans of the near heaps
+// (DemoteFarFromNear moves a calm one that became urgent - a stalker hit while it waits is found in a few frames -,
+// ScanUrgent a calm one back) and the promotion of a far one; never while it is inside a heap, the keys of a heap do not
+// change. Both heaps are by the due time, so an urgent object never runs before its interval (t_min / t_max /
+// shedule_Scale as before): only the order of the due ones changes, no update is added.
+// The pass: the urgent heap first, up to shed_urgent_share % of the near budget while the calm near heap has due items
+// (the whole near budget otherwise); then the calm near heap up to the near budget and at least one step a frame when the
+// urgent heap took any (it is served oldest first, so it always moves on - the aging of the far heap); then the far heap
+// as before. shed_near_min_steps holds for the two near heaps together.
+ENGINE_API int ps_shed_urgent_share = 70;
+ENGINE_API int ps_shed_urgent_hit_ms = 3000;
 
 extern ENGINE_API float g_fov; // unzoomed camera fov (console "fov"), xr_ioc_cmd.cpp
 
@@ -109,7 +132,7 @@ u32 ShedCategoryOf(IGameObject* go) // go: dynamic_cast<IGameObject*> of the sch
     return ShedCatOther;
 }
 
-// Step 4: what a scheduled object is for the near/far class of shed_priority (Item::NearKind, see IsNear). Taken once
+// Step 4: what a scheduled object is for the near/far class of the scheduler (Item::NearKind, see IsNear). Taken once
 // at internal_Register by the cheap cast_* virtuals of IGameObject (xrEngine does not know the game classes); the state
 // that changes (alive or dead, the position, the owner) is read in IsNear
 enum : u32
@@ -155,7 +178,7 @@ bool ShedAlive(IGameObject& go)
     return (go.GetSpatialData().type.load(std::memory_order_relaxed) & STYPE_REACTTOSOUND) != 0;
 }
 
-// Step 4c: the controller of the adaptive near radius (see the comment at ps_shed_near_adaptive)
+// Step 4c: the controller of the adaptive near radius (see the comment at ps_shed_near_target)
 constexpr u32 ShedAdaptPeriodMs = 250; // the count is looked at no more often
 constexpr u32 ShedAdaptLogMs = 5000; // a changed radius is logged no more often
 constexpr float ShedAdaptShrink = 0.9f;
@@ -225,6 +248,14 @@ void ShedLate(u32 late, u32 cat)
     }
 }
 
+// The heap a step came from (CSheduler::ExecuteTop). Near and urgent are both the near class for the metrics of step 4
+enum : u32
+{
+    ShedTierFar = 0,
+    ShedTierNear,
+    ShedTierUrgent,
+};
+
 // Step 4: lateness of an executed step by the near/far class (average = *_late_ms / *_late_n), stalkers apart
 void ShedTierLate(u32 late, bool is_near, u32 cat)
 {
@@ -293,12 +324,16 @@ void CSheduler::Destroy()
 {
     internal_Registration();
 
-    // shed_priority: one list again (the order does not matter any more, it is cleared below)
+    // The near and far heaps: one list again for the check below (the order does not matter any more, it is cleared)
     for (auto& item : ItemsNear)
         Items.emplace_back(std::move(item));
     ItemsNear.clear();
+    for (auto& item : ItemsUrgent)
+        Items.emplace_back(std::move(item));
+    ItemsUrgent.clear();
     m_far_scan_cursor = 0;
     m_near_scan_cursor = 0;
+    m_urgent_scan_cursor = 0;
 
     for (u32 it = 0; it < Items.size(); it++)
     {
@@ -424,9 +459,12 @@ void CSheduler::internal_Register(ISheduled* object, bool realTime)
     {
         object->GetSchedulerData().b_RT = false;
 
-        // Insert into priority Queue (shed_priority: by the class - a new object near the camera must not wait
-        // behind the far backlog)
-        Push(m_priority_active && IsNear(item) ? ItemsNear : Items, item);
+        // Insert into the heap of its class - a new object near the camera must not wait behind the far backlog. By
+        // the camera snapshot of this frame (UpdateRTImpl takes it before internal_Registration); the objects
+        // registered while a level loads, when the camera may not be in place yet, are classified again once the
+        // loading is over (RebuildNearFar, see ProcessStep). Step 4d: never to the urgent heap here - a new object has
+        // not thought yet (and this may be the main thread); the scan of the near heap moves it there if it is urgent
+        Push(IsNear(item) ? ItemsNear : Items, item);
     }
 }
 
@@ -450,11 +488,12 @@ bool CSheduler::internal_Unregister(ISheduled* object, bool realTime, bool warn_
     }
     else
     {
-        // ItemsNear: shed_priority 1 (empty otherwise). ItemsProcessed: an object updated earlier in this pass and
-        // unregistered later in it (by another object's update) - it used to be nulled only after the requeue, by the
-        // queued unregister in internal_Registration; now at once, the same result. Required by shed_priority: the
-        // requeue classifies the processed items (IsNear reads the object) before that internal_Registration.
-        for (xr_vector<Item>* list : { &Items, &ItemsNear, &ItemsProcessed })
+        // ItemsNear: the near heap. ItemsProcessed: an object updated earlier in this pass and unregistered later in
+        // it (by another object's update) - it used to be nulled only after the requeue, by the queued unregister in
+        // internal_Registration; now at once, the same result. Required by the near/far classes: the requeue
+        // classifies the processed items (IsNear reads the object) before that internal_Registration. ItemsUrgent: the
+        // urgent near heap (step 4d).
+        for (xr_vector<Item>* list : { &Items, &ItemsNear, &ItemsUrgent, &ItemsProcessed })
         {
             for (auto& item : *list)
             {
@@ -513,13 +552,16 @@ bool CSheduler::Registered(ISheduled* object) const
         }
     }
 
-    for (const auto& it : ItemsNear) // shed_priority 1
+    for (const xr_vector<Item>* list : { &ItemsNear, &ItemsUrgent }) // the near heaps
     {
-        if (it.Object == object)
+        for (const auto& it : *list)
         {
-            VERIFY(!count);
-            count = 1;
-            break;
+            if (it.Object == object)
+            {
+                VERIFY(!count);
+                count = 1;
+                break;
+            }
         }
     }
 
@@ -687,7 +729,7 @@ void CSheduler::HeapErase(xr_vector<Item>& heap, size_t index)
     }
 }
 
-// Step 4: the near/far class (see the comment at ps_shed_priority). Called on the Game thread (the step, the requeue,
+// Step 4: the near/far class (see the comment at ps_shed_budget_ms). Called on the Game thread (the step, the requeue,
 // the scan) and in internal_Register (main or Game thread, never both at once). Reads the position of a registered
 // object - as shedule_Scale() did there already - and m_view_pos / m_view_zoom, the snapshot of UpdateRTImpl.
 bool CSheduler::IsNear(const Item& item, bool keep) const
@@ -697,8 +739,7 @@ bool CSheduler::IsNear(const Item& item, bool keep) const
     switch (item.NearKind)
     {
     case ShedNearCreature:
-        // Step 4c: by the adaptive radii (m_near_dist / m_near_seen_dist; the configured ones unless shed_priority 1
-        // and shed_near_adaptive 1)
+        // Step 4c: by the adaptive radii (m_near_dist / m_near_seen_dist)
         if (ShedAlive(*item.GameObject))
         {
             return ShedNearByView(*item.GameObject, m_view_pos, m_view_zoom, m_near_dist * margin,
@@ -739,68 +780,86 @@ bool CSheduler::IsNear(const Item& item, bool keep) const
             float(ps_shed_near_seen_dist);
     default:
         // Neither a game object nor spatial: a global service (ALife, the agent managers of the NPC groups, autosave,
-        // the game). Far by default (shed_services_near 0): served oldest first as before, at the pace of the far heap.
-        // Near would put them back to their nominal intervals - ALife (schedule_min/max 1 ms -> ~265 ms) would then run
-        // ~4 times a second instead of once in 5 s, and one ALife update costs 10-37 ms in a heavy scene
-        // (22-game-thread.md, 1.2): its cadence is a separate topic (V9), so near only on demand
-        return ps_shed_services_near != 0;
+        // the game). Always far: served oldest first as before, at the pace of the far heap. Near would put them back
+        // to their nominal intervals - ALife (schedule_min/max 1 ms -> ~265 ms) would then run ~4 times a second
+        // instead of once in 5 s, and one ALife update costs 10-37 ms in a heavy scene (22-game-thread.md, 1.2): its
+        // cadence is a separate topic (V9; the untested switch shed_services_near is removed)
+        return false;
     }
 }
 
-// The living stalkers and monsters in the near heap (the log line of SetPriorityMode, shed/near_creatures)
+// Step 4d: see the comment at ps_shed_urgent_share. Only the living creatures are asked (one virtual call): the rest of
+// the near class is never urgent. On the Game thread between the updates (the requeue, the scans, RebuildNearFar);
+// shedule_Urgent reads the state of the game logic (see CAI_Stalker::shedule_Urgent)
+bool CSheduler::IsUrgent(const Item& item)
+{
+    return item.Object && item.NearKind == ShedNearCreature && ShedAlive(*item.GameObject) &&
+        item.Object->shedule_Urgent();
+}
+
+xr_vector<CSheduler::Item>& CSheduler::NearHeapOf(const Item& item)
+{
+    return IsUrgent(item) ? ItemsUrgent : ItemsNear;
+}
+
+// The living stalkers and monsters in the near heaps (the log line of RebuildNearFar, shed/near_creatures, the adaptive
+// radius): the urgent heap is a part of the near class
 u32 CSheduler::CountNearCreatures() const
 {
     u32 count = 0;
-    for (const auto& item : ItemsNear)
+    for (const xr_vector<Item>* list : { &ItemsNear, &ItemsUrgent })
     {
-        if (item.Object && item.NearKind == ShedNearCreature && ShedAlive(*item.GameObject))
-            ++count;
+        for (const auto& item : *list)
+        {
+            if (item.Object && item.NearKind == ShedNearCreature && ShedAlive(*item.GameObject))
+                ++count;
+        }
     }
     return count;
 }
 
-// Switches the heaps of the normal queue between one (shed_priority 0) and near + far (1). At the start of ProcessStep
-// on the Game thread, between the steps: the order of each heap is rebuilt, nothing is lost or run twice.
-void CSheduler::SetPriorityMode(bool on)
+// Classifies every item of the normal queue anew: both heaps are merged and split again by IsNear. Once a level is
+// loaded (see ProcessStep): the objects registered during the loading frames were classified by the camera of those
+// frames, which may not be in place yet. At the start of ProcessStep on the Game thread, between the steps: the order
+// of each heap is rebuilt, nothing is lost or run twice.
+void CSheduler::RebuildNearFar()
 {
-    ZoneScopedN("CSheduler::SetPriorityMode");
-    // Step 4c: both ways the radius starts from the configured one (the controller shrinks it from there)
+    ZoneScopedN("CSheduler::RebuildNearFar");
+    // Step 4c: the radius starts from the configured one (the controller shrinks it from there)
     m_near_scale = 1.f;
     ApplyNearRadius();
-    if (on)
+    xr_vector<Item> all;
+    all.swap(Items);
+    for (xr_vector<Item>* list : { &ItemsNear, &ItemsUrgent })
     {
-        xr_vector<Item> all;
-        all.swap(Items);
-        for (auto& item : all)
-        {
-            if (item.Object && IsNear(item))
-                ItemsNear.emplace_back(std::move(item));
-            else
-                Items.emplace_back(std::move(item));
-        }
-        std::make_heap(ItemsNear.begin(), ItemsNear.end());
-        std::make_heap(Items.begin(), Items.end());
+        for (auto& item : *list)
+            all.emplace_back(std::move(item));
+        list->clear();
     }
-    else
+    for (auto& item : all)
     {
-        for (auto& item : ItemsNear)
+        if (item.Object && IsNear(item))
+            NearHeapOf(item).emplace_back(std::move(item)); // step 4d: the urgent ones apart
+        else
             Items.emplace_back(std::move(item));
-        ItemsNear.clear();
-        std::make_heap(Items.begin(), Items.end());
     }
-    m_priority_active = on;
+    std::make_heap(ItemsNear.begin(), ItemsNear.end());
+    std::make_heap(ItemsUrgent.begin(), ItemsUrgent.end());
+    std::make_heap(Items.begin(), Items.end());
     m_far_scan_cursor = 0;
     m_near_scan_cursor = 0;
-    // Every item was just classified by the current radius: as if both scans had gone over their heaps (the counters
+    m_urgent_scan_cursor = 0;
+    // Every item was just classified by the current radius: as if the scans had gone over their heaps (the counters
     // wrap, only differences are used)
     m_adapt_near_mark = m_near_scanned - ItemsNear.size();
     m_adapt_far_mark = m_far_scanned - Items.size();
+    m_adapt_urgent_mark = m_urgent_scanned - ItemsUrgent.size();
     m_adapt_time = Device.dwTimeGlobal;
     m_adapt_log_time = Device.dwTimeGlobal;
     m_adapt_logged_scale = m_near_scale;
 #ifndef MASTER_GOLD
-    Msg("* [scheduler] shed_priority %d: near %u (living creatures %u), far %u", on ? 1 : 0, u32(ItemsNear.size()),
-        CountNearCreatures(), u32(Items.size()));
+    Msg("* [scheduler] near/far rebuilt: near %u (urgent %u, living creatures %u), far %u",
+        u32(ItemsNear.size() + ItemsUrgent.size()), u32(ItemsUrgent.size()), CountNearCreatures(), u32(Items.size()));
 #endif
 }
 
@@ -817,16 +876,10 @@ void CSheduler::ApplyNearRadius()
     xray::perf::SetGauge(xray::perf::Metric::shed_near_radius, s64(iFloor(m_near_dist * 100.f)));
 }
 
-// Step 4c: the controller of the adaptive near radius (see the comment at ps_shed_near_adaptive). At the start of
-// ProcessStep, on the Game thread. Off (shed_priority 0 or shed_near_adaptive 0): the configured radii
+// Step 4c: the controller of the adaptive near radius (see the comment at ps_shed_near_target; permanent). At the
+// start of ProcessStep, on the Game thread
 void CSheduler::UpdateNearRadius(u32 now)
 {
-    if (!m_priority_active || ps_shed_near_adaptive == 0)
-    {
-        m_near_scale = 1.f;
-        ApplyNearRadius();
-        return;
-    }
     if (now - m_adapt_time < ShedAdaptPeriodMs)
     {
         ApplyNearRadius();
@@ -842,7 +895,10 @@ void CSheduler::UpdateNearRadius(u32 now)
     // Has the scan shown the effect of the last change yet (with no scan at all - shed_scan 0 - only the requeue
     // reclassifies, nothing to wait for)
     const bool scans = ps_shed_scan > 0;
-    const bool near_seen = !scans || m_near_scanned - m_adapt_near_mark >= u64(ItemsNear.size());
+    // (the near class: both near heaps, step 4d)
+    const bool near_seen = !scans ||
+        (m_near_scanned - m_adapt_near_mark >= u64(ItemsNear.size()) &&
+            m_urgent_scanned - m_adapt_urgent_mark >= u64(ItemsUrgent.size()));
     const bool far_seen = !scans || m_far_scanned - m_adapt_far_mark >= u64(Items.size());
 
     const float before = m_near_scale;
@@ -855,13 +911,14 @@ void CSheduler::UpdateNearRadius(u32 now)
     {
         m_adapt_near_mark = m_near_scanned;
         m_adapt_far_mark = m_far_scanned;
+        m_adapt_urgent_mark = m_urgent_scanned;
     }
 #ifndef MASTER_GOLD
     // Rarely: the radius moves every few hundred ms while it adapts (the value it settled at is logged too, at the
     // first look of the controller ShedAdaptLogMs after the previous line)
     if (now - m_adapt_log_time >= ShedAdaptLogMs && std::abs(m_near_scale - m_adapt_logged_scale) > 0.01f)
     {
-        Msg("* [scheduler] shed_near_adaptive: near radius %.1f m (seen %.1f m), living near creatures %u, target %u",
+        Msg("* [scheduler] adaptive near: near radius %.1f m (seen %.1f m), living near creatures %u, target %u",
             m_near_dist, m_near_seen_dist, count, target);
         m_adapt_log_time = now;
         m_adapt_logged_scale = m_near_scale;
@@ -895,7 +952,57 @@ void CSheduler::DemoteFarFromNear()
             PERF_INC(shed_demoted);
             continue; // another item is at the cursor now
         }
+        // Step 4d: a calm near creature that has to react now (hit, saw an enemy while it waited) - to the urgent heap,
+        // its due time kept
+        if (IsUrgent(item))
+        {
+            Item moved = std::move(item);
+            HeapErase(ItemsNear, m_near_scan_cursor);
+            Push(ItemsUrgent, moved);
+            PERF_INC(shed_urgent_in);
+            continue;
+        }
         ++m_near_scan_cursor;
+    }
+}
+
+// Step 4d: the scan of the urgent heap, the pair of DemoteFarFromNear (shed_scan / 2 items a frame, round-robin): an
+// item that is no longer near goes to the far heap (the same hysteresis), one that is no longer urgent to the calm near
+// heap - both with their due time kept. Most urgent items are requeued (and classified anew) after their own update
+// sooner; the scan covers those that wait while the urgent heap is overloaded
+void CSheduler::ScanUrgent()
+{
+    ZoneScopedN("CSheduler::ScanUrgent");
+    u32 count = ps_shed_scan > 0 ? u32(_max(1, ps_shed_scan / 2)) : 0;
+    if (count > ItemsUrgent.size())
+        count = u32(ItemsUrgent.size());
+    for (u32 k = 0; k < count && !ItemsUrgent.empty(); ++k)
+    {
+        if (m_urgent_scan_cursor >= ItemsUrgent.size())
+            m_urgent_scan_cursor = 0;
+        ++m_urgent_scanned;
+        Item& item = ItemsUrgent[m_urgent_scan_cursor];
+        if (item.Object)
+        {
+            const bool to_far = !IsNear(item, true);
+            if (to_far || !IsUrgent(item))
+            {
+                Item moved = std::move(item);
+                HeapErase(ItemsUrgent, m_urgent_scan_cursor);
+                if (to_far)
+                {
+                    Push(Items, moved);
+                    PERF_INC(shed_demoted);
+                }
+                else
+                {
+                    Push(ItemsNear, moved);
+                    PERF_INC(shed_urgent_out);
+                }
+                continue; // another item is at the cursor now
+            }
+        }
+        ++m_urgent_scan_cursor;
     }
 }
 
@@ -918,7 +1025,7 @@ void CSheduler::PromoteNearFromFar()
         {
             Item moved = std::move(item);
             HeapErase(Items, m_far_scan_cursor);
-            Push(ItemsNear, moved);
+            Push(NearHeapOf(moved), moved); // step 4d: an urgent one to the urgent heap
             PERF_INC(shed_promoted);
             continue; // another item is at the cursor now
         }
@@ -926,8 +1033,9 @@ void CSheduler::PromoteNearFromFar()
     }
 }
 
-bool CSheduler::ExecuteTop(xr_vector<Item>& heap, u32 dwTime, int tier, shared_str& last_name)
+bool CSheduler::ExecuteTop(xr_vector<Item>& heap, u32 dwTime, u32 tier, shared_str& last_name)
 {
+    const bool is_near = tier != ShedTierFar;
     // Update
     Item item = heap.front();
     const u32 late = dwTime - item.dwTimeForExecute;
@@ -946,7 +1054,26 @@ bool CSheduler::ExecuteTop(xr_vector<Item>& heap, u32 dwTime, int tier, shared_s
     }
 
     if (xray::perf::g_perf_metrics_active)
-        ShedTierLate(late, tier < 0 ? IsNear(item) : tier != 0, item.dwPadding);
+    {
+        ShedTierLate(late, is_near, item.dwPadding);
+        // Step 4d: the lateness of the living near creatures, urgent or calm by their state right now (not by the heap
+        // they came from: one that became urgent while it waited in the calm heap counts as urgent)
+        if (is_near && item.NearKind == ShedNearCreature && ShedAlive(*item.GameObject))
+        {
+            if (IsUrgent(item))
+            {
+                PERF_ADD(shed_urgent_late_ms, late);
+                PERF_INC(shed_urgent_late_n);
+            }
+            else
+            {
+                PERF_ADD(shed_calm_late_ms, late);
+                PERF_INC(shed_calm_late_n);
+            }
+        }
+    }
+    if (tier == ShedTierUrgent)
+        PERF_INC(shed_urgent_steps);
 
     auto& schedulerData = item.Object->GetSchedulerData();
 
@@ -976,7 +1103,7 @@ bool CSheduler::ExecuteTop(xr_vector<Item>& heap, u32 dwTime, int tier, shared_s
         clamp(dwUpdate, u32(_max(dwMin, u32(20))), dwMax);
     }
 
-    // The DT clamp: see the comment at ps_shed_priority (kept in both modes)
+    // The DT clamp: see the comment at ps_shed_budget_ms
     const u32 dt_max = _max(u32(schedulerData.t_max), u32(1000));
     if (Elapsed > dt_max)
     {
@@ -1027,113 +1154,21 @@ void CSheduler::ProcessStep()
 {
     ZoneScopedN("CSheduler::ProcessStep");
     // shedule_Update is not parallelized: objects touch shared state and Register/Unregister the scheduler.
+    // Step 4: the near heap first, then the far one, both within one fixed time budget (see the comment at
+    // ps_shed_budget_ms). The adaptive psShedulerCurrent is not used: it only follows the budget (stats).
 
-    // Step 4 (shed_priority, read once a frame here)
-    const bool priority = ps_shed_priority != 0;
-    if (priority != m_priority_active)
-        SetPriorityMode(priority);
-    // Step 4c: the radii of the living creatures for this frame (shed_priority 0: always the configured ones, they
-    // only classify the steps for the metrics there)
+    // A level was loaded: at the first pass after its loading frames (the load screen, the precache) every item is
+    // classified anew by the camera that is in place now. A pass that never saw a loading frame needs none: the
+    // objects were registered by the camera of a normal frame
+    const bool loading = load_screen_renderer.IsActive() || Device.dwPrecacheFrame != 0;
+    if (m_was_loading && !loading)
+        RebuildNearFar();
+    m_was_loading = loading;
+    // Step 4c: the radii of the living creatures for this frame
     UpdateNearRadius(Device.dwTimeGlobal);
-    if (priority)
-    {
-        ProcessStepPriority();
-        return;
-    }
 
-    // Normal priority
     const u32 dwTime = Device.dwTimeGlobal;
-    u32 steps_done = 0;
-    const u32 step_budget = ps_scheduler_max_steps_per_frame > 0 ? u32(ps_scheduler_max_steps_per_frame) : u32(-1);
-
-    CTimer process_step_timer;
-    process_step_timer.Start();
-    const u32 time_budget_ms = _max(1u, u32(iFloor(psShedulerCurrent)));
-    xray::perf::SetGauge(xray::perf::Metric::shed_budget, time_budget_ms);
-    bool exit_limit = false;
-    bool exit_time = false;
-
-    auto check_process_step_time = [&](pcstr last_sched_name) -> bool
-    {
-        if (Device.dwPrecacheFrame != 0)
-            return false;
-        if (process_step_timer.GetElapsed_ms() <= time_budget_ms)
-            return false;
-        psShedulerTarget += psShedulerReaction * 3;
-#ifndef MASTER_GOLD
-        if (steps_done == 1 && last_sched_name)
-            Msg("! [scheduler] ProcessStep time budget (~%u ms) exhausted after a single shedule_Update: \"%s\"",
-                time_budget_ms, last_sched_name);
-#endif
-        return true;
-    };
-
-    {
-        ZoneScopedN("CSheduler::ProcessStep/drain_normal_heap");
-        shared_str last_name;
-        while (!Items.empty() && Top().dwTimeForExecute < dwTime)
-        {
-            if (!ExecuteTop(Items, dwTime, -1, last_name))
-                continue;
-            ++steps_done;
-            if (steps_done >= step_budget)
-            {
-                psShedulerTarget += psShedulerReaction * 3;
-                exit_limit = true;
-                break;
-            }
-            pcstr sn = last_name.c_str();
-            if (!sn || !sn[0])
-                sn = "(no name)";
-            if (check_process_step_time(sn))
-            {
-                exit_time = true;
-                break;
-            }
-        }
-    }
-
-    PERF_ADD(shed_steps, steps_done);
-    if (exit_limit)
-        PERF_INC(shed_exit_limit);
-    else if (exit_time)
-        PERF_INC(shed_exit_time);
-    else
-        PERF_INC(shed_exit_empty);
-
-    if (xray::perf::g_perf_metrics_active)
-    {
-        u32 behind = 0;
-        for (const auto& it : Items)
-        {
-            if (it.dwTimeForExecute < dwTime)
-                ++behind;
-        }
-        xray::perf::SetGauge(xray::perf::Metric::shed_behind, behind);
-        xray::perf::SetGauge(xray::perf::Metric::shed_near_items, 0);
-        xray::perf::SetGauge(xray::perf::Metric::shed_near_creatures, 0);
-    }
-
-    // Push "processed" back
-    {
-        ZoneScopedN("CSheduler::ProcessStep/RequeueHeap");
-        while (ItemsProcessed.size())
-        {
-            Push(Items, ItemsProcessed.back());
-            ItemsProcessed.pop_back();
-        }
-    }
-
-    // always try to decrease target
-    psShedulerTarget -= psShedulerReaction;
-}
-
-// Step 4, shed_priority 1: the near heap first, then the far one, both within one fixed time budget (see the comment
-// at ps_shed_priority). The adaptive psShedulerCurrent is not used: it only follows the budget (stats, the switch back).
-void CSheduler::ProcessStepPriority()
-{
-    const u32 dwTime = Device.dwTimeGlobal;
-    // Precache frames: no time limit, as in shed_priority 0 (the step cap still holds)
+    // Precache frames: no time limit (the step cap still holds)
     const bool timed = Device.dwPrecacheFrame == 0;
     const u32 budget_ms = u32(_max(1, ps_shed_budget_ms));
     const u64 budget_ns = u64(budget_ms) * 1000000ull;
@@ -1146,6 +1181,7 @@ void CSheduler::ProcessStepPriority()
         // it failed the wider test (keep), so it fails the plain one too
         PERF_SCOPE(shed_promote_scan);
         DemoteFarFromNear();
+        ScanUrgent(); // step 4d
         PromoteNearFromFar();
     }
 
@@ -1160,14 +1196,52 @@ void CSheduler::ProcessStepPriority()
     bool exit_limit = false;
     bool exit_time = false;
     shared_str last_name;
+    // The steps of both near heaps (shed_near_min_steps holds for them together)
+    u32 near_steps = 0;
+    u32 urgent_steps = 0;
+
+    if (!ItemsUrgent.empty())
+    {
+        // Step 4d: the urgent near heap first (see the comment at ps_shed_urgent_share). Its share of the near budget only
+        // while the calm near heap has due items, otherwise the whole near budget
+        ZoneScopedN("CSheduler::ProcessStep/urgent");
+        PERF_SCOPE(shed_phase_urgent);
+        const bool calm_due = !ItemsNear.empty() && ItemsNear.front().dwTimeForExecute < dwTime;
+        const u64 urgent_share = u64(std::clamp(ps_shed_urgent_share, 10, 100));
+        const u64 urgent_budget_ns = calm_due ? near_budget_ns * urgent_share / 100 : near_budget_ns;
+        while (!ItemsUrgent.empty() && ItemsUrgent.front().dwTimeForExecute < dwTime)
+        {
+            if (near_steps >= near_min_steps)
+            {
+                if (steps >= max_steps)
+                {
+                    exit_limit = true;
+                    break;
+                }
+                if (timed && timer.GetElapsed_ns() >= urgent_budget_ns)
+                {
+                    exit_time = true;
+                    break;
+                }
+            }
+            if (!ExecuteTop(ItemsUrgent, dwTime, ShedTierUrgent, last_name))
+                continue;
+            ++steps;
+            ++near_steps;
+            ++urgent_steps;
+        }
+    }
 
     {
         ZoneScopedN("CSheduler::ProcessStep/near");
         PERF_SCOPE(shed_phase_near);
-        u32 near_steps = 0;
+        // Step 4d: at least one calm near step a frame once the urgent heap took any - the calm heap is served oldest
+        // first, so it always moves on (no starvation). None needed otherwise (no urgent step: the near heap as before)
+        const u32 calm_min_steps = urgent_steps > 0 ? 1 : 0;
+        u32 calm_steps = 0;
         while (!ItemsNear.empty() && ItemsNear.front().dwTimeForExecute < dwTime)
         {
-            if (near_steps >= near_min_steps)
+            if (near_steps >= near_min_steps && calm_steps >= calm_min_steps)
             {
                 if (steps >= max_steps)
                 {
@@ -1180,10 +1254,11 @@ void CSheduler::ProcessStepPriority()
                     break;
                 }
             }
-            if (!ExecuteTop(ItemsNear, dwTime, 1, last_name))
+            if (!ExecuteTop(ItemsNear, dwTime, ShedTierNear, last_name))
                 continue;
             ++steps;
             ++near_steps;
+            ++calm_steps;
         }
     }
 
@@ -1208,7 +1283,7 @@ void CSheduler::ProcessStepPriority()
                     break;
                 }
             }
-            if (!ExecuteTop(Items, dwTime, 0, last_name))
+            if (!ExecuteTop(Items, dwTime, ShedTierFar, last_name))
                 continue;
             ++steps;
             ++far_steps;
@@ -1226,7 +1301,7 @@ void CSheduler::ProcessStepPriority()
     if (xray::perf::g_perf_metrics_active)
     {
         u32 behind = 0;
-        for (const xr_vector<Item>* list : { &Items, &ItemsNear })
+        for (const xr_vector<Item>* list : { &Items, &ItemsNear, &ItemsUrgent })
         {
             for (const auto& it : *list)
             {
@@ -1234,24 +1309,37 @@ void CSheduler::ProcessStepPriority()
                     ++behind;
             }
         }
+        // Step 4d: the living near creatures that are urgent right now, in both near heaps (the calm heap holds those
+        // that became urgent while they wait, until the scan moves them); one virtual call each, only with metrics on
+        u32 urgent_creatures = 0;
+        for (const xr_vector<Item>* list : { &ItemsNear, &ItemsUrgent })
+        {
+            for (const auto& it : *list)
+            {
+                if (IsUrgent(it))
+                    ++urgent_creatures;
+            }
+        }
         xray::perf::SetGauge(xray::perf::Metric::shed_behind, behind);
-        xray::perf::SetGauge(xray::perf::Metric::shed_near_items, s64(ItemsNear.size()));
+        // The near class: both near heaps (step 4d)
+        xray::perf::SetGauge(xray::perf::Metric::shed_near_items, s64(ItemsNear.size() + ItemsUrgent.size()));
         xray::perf::SetGauge(xray::perf::Metric::shed_near_creatures, s64(CountNearCreatures()));
+        xray::perf::SetGauge(xray::perf::Metric::shed_urgent_creatures, s64(urgent_creatures));
     }
 
     // Push "processed" back, each by its class now (an unregistered one - Object nulled - to the far heap, it is
-    // dropped there as stale)
+    // dropped there as stale). Step 4d: a near one by its urgency after its update - its state is fresh now
     {
         ZoneScopedN("CSheduler::ProcessStep/RequeueHeap");
         while (ItemsProcessed.size())
         {
             Item& item = ItemsProcessed.back();
-            Push(item.Object && IsNear(item) ? ItemsNear : Items, item);
+            Push(item.Object && IsNear(item) ? NearHeapOf(item) : Items, item);
             ItemsProcessed.pop_back();
         }
     }
 
-    // The adaptive budget only follows the fixed one: stats.Load shows it, and shed_priority 0 starts from it again
+    // The adaptive budget only follows the fixed one: stats.Load and shed/ps_current show it
     psShedulerTarget = float(budget_ms);
 }
 
@@ -1333,7 +1421,8 @@ void CSheduler::UpdateNonRTImpl()
     psShedulerCurrent = 0.9f * psShedulerCurrent + 0.1f * psShedulerTarget;
     stats.Load = psShedulerCurrent;
     xray::perf::SetGauge(xray::perf::Metric::shed_current, s64(iFloor(psShedulerCurrent)));
-    xray::perf::SetGauge(xray::perf::Metric::shed_items, s64(Items.size() + ItemsNear.size()));
+    xray::perf::SetGauge(xray::perf::Metric::shed_items, s64(Items.size() + ItemsNear.size() + ItemsUrgent.size()));
+    xray::perf::SetGauge(xray::perf::Metric::shed_urgent_items, s64(ItemsUrgent.size()));
     xray::perf::SetGauge(xray::perf::Metric::shed_items_rt, s64(ItemsRT.size()));
 
     // Finalize

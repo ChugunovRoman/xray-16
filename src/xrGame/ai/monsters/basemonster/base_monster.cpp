@@ -4,7 +4,6 @@
 #include "Hit.h"
 #include "PHDestroyable.h"
 #include "CharacterPhysicsSupport.h"
-#include "performance_cvars.h"
 #include "xrAICore/Navigation/game_level_cross_table.h"
 #include "xrAICore/Navigation/game_graph.h"
 #include "xrAICore/Navigation/level_graph.h"
@@ -338,7 +337,6 @@ void CBaseMonster::UpdateCL()
     if (g_Alive())
     {
         update_enemy_accessible_and_at_home_info();
-        if (npc_perf_disable_ucl_stalker_step_manager == 0)
         {
             ZoneScopedN("ucl_base_monster_step_manager");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);

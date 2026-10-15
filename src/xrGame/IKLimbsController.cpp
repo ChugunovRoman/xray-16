@@ -68,13 +68,6 @@ void CIKLimbsController::LimbCalculate(SCalculateData& cd)
     cd.m_limb->ApplyState(cd);
 }
 
-void CIKLimbsController::LimbUpdate(CIKLimb& L)
-{
-    [[maybe_unused]] auto skeleton_animated = m_object->Visual()->dcast_PKinematicsAnimated();
-    VERIFY(skeleton_animated);
-    L.Update(m_object, m_legs_blend, _pose_extrapolation);
-}
-
 IC void update_blend(CBlend*& b)
 {
     if (b && CBlend::eFREE_SLOT == b->blend_state())
@@ -372,7 +365,7 @@ void CIKLimbsController::ExecuteIKRayBatch()
             item.start = q.pos();
             item.dir = q.dir();
             item.range = q.range();
-            item.tgt = npc_perf_ik_foot_static_only ? collide::rqtStatic : collide::rqtBoth; // see ik_foot_collider.cpp
+            item.tgt = collide::rqtStatic; // the static geometry only, see ik_foot_target() in ik_foot_collider.cpp
             item.ignore_object = group.owner;
             item.result = &m_ik_batch_results[group.first_ray + r];
         }
@@ -410,22 +403,16 @@ void CIKLimbsController::Update()
 
     _pose_extrapolation.update(m_object->XFORM());
 
-    if (npc_perf_ik_foot_raypick_batch >= 2)
-    {
-        m_ik_batch_groups.clear();
-        for (CIKLimb& limb : _bone_chains)
-            limb.GatherRays(m_object, m_legs_blend, _pose_extrapolation, m_ik_batch_groups);
+    // All foot rays of this NPC (current feet and step prediction of every limb) go in one batch: gather, cast
+    // (ExecuteIKRayBatch), then solve each limb from the results. Vanilla cast them limb by limb (CIKLimb::Update).
+    m_ik_batch_groups.clear();
+    for (CIKLimb& limb : _bone_chains)
+        limb.GatherRays(m_object, m_legs_blend, _pose_extrapolation, m_ik_batch_groups);
 
-        ExecuteIKRayBatch();
+    ExecuteIKRayBatch();
 
-        for (const IKRayGroup& group : m_ik_batch_groups)
-            group.limb->ProcessGroup(group, m_ik_batch_results.data());
-    }
-    else
-    {
-        for (CIKLimb& limb : _bone_chains)
-            LimbUpdate(limb);
-    }
+    for (const IKRayGroup& group : m_ik_batch_groups)
+        group.limb->ProcessGroup(group, m_ik_batch_results.data());
 
     /*
     Fmatrix predict;

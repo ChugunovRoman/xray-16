@@ -11,6 +11,7 @@
 #include <algorithm>
 
 #include "performance_cvars.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include <tracy/Tracy.hpp>
 
 IC CCoverManager::CPointQuadTree& CCoverManager::covers() const
@@ -62,10 +63,12 @@ IC const CCoverPoint* CCoverManager::best_cover(
     ZoneNamedN(___tracy_cover_bc, "cover_mgr/best_cover", true);
     ZoneTextVF(___tracy_cover_bc, "r=%.0f", double(radius));
     START_PROFILE("Covers/best_cover")
+    PERF_SCOPE(ai_cover_query); // 24-critical-path.md, M8: ai/cover/{query,inertia,nearest,evaluated}
 
     if (inertia(position, radius, evaluator, restrictor))
     {
         ZoneNamedN(___tracy_cover_bc_inert, "cover_mgr/best_cover/inertia", true);
+        PERF_INC(ai_cover_inertia);
         return (evaluator.selected());
     }
 
@@ -87,6 +90,7 @@ IC const CCoverPoint* CCoverManager::best_cover(
         ZoneNamedN(___tracy_cover_bc_near, "cover_mgr/best_cover/nearest", true);
         covers().nearest(position, radius, m_nearest);
     }
+    PERF_ADD(ai_cover_nearest, m_nearest.size());
 
     const int nearest_cap = npc_perf_cover_nearest_max_points;
     if (nearest_cap > 0 && m_nearest.size() > static_cast<size_t>(nearest_cap))
@@ -145,6 +149,7 @@ IC const CCoverPoint* CCoverManager::best_cover(
                     break;
             }
         }
+        PERF_ADD(ai_cover_evaluated, static_cast<u64>(eval_done));
         const int find_left = (g_npc_perf_cover_find_eval_budget_remaining == u32(-1))
             ? -1
             : (int)g_npc_perf_cover_find_eval_budget_remaining;

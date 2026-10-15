@@ -255,11 +255,7 @@ float ps_r2_static_light_range = 0.f; // affect only lights with range greater t
 int ps_r2_light_editor_spot = 0; // 1 = honor Flight::Type::Spot from level data (direction + phi)
 float ps_r2_light_degrade_lod = 1.f; // skip shadowed lights below this LOD entirely, 0 = off
 float ps_r2_light_shadow_dist = 20.f; // max distance from camera to light volume edge for shadow rendering, 0 = off
-int ps_r2_smap_hull_cull = 1; // 1 = cull shadow casters whose shadow hull misses the camera frustum
-int ps_r2_light_occq_async = 1; // 1 = non-blocking occq reads for light visibility
-int ps_r2_mt_light_render = 1; // 1 = record light shadow maps on deferred contexts in worker tasks (DX11 only, ignored on GL)
 int ps_r2_smap_npc_blob = 2; // shadow-map NPC blob: 0=off, 1=when no LOD model, 2=always, 3=skip entirely
-int ps_r2_light_common_dynamic = 1; // 1 = single shared spatial query for all light SMAP passes
 
 //  x - min (0), y - focus (1.4), z - max (100)
 Fvector3 ps_r2_dof = Fvector3().set(-1.25f, 1.4f, 600.f);
@@ -289,8 +285,6 @@ float ps_current_detail_height = 1.f;
 
 int ps_r2_mt_calculate = 1;
 
-int r__particle_render_parallel = 0;
-int r__particle_render_parallel_min_count = 256;
 int r__parallel_skeleton_visbox = 0;
 int r__parallel_skeleton_visbox_min_bones = 64;
 // Parallel main build (plans/optimization_mt/08-parallel-main-build.md): dynamic part of the main-view build split
@@ -314,15 +308,6 @@ float ps_r2_gloss_factor = 4.0f;
 //- Mad Max
 
 //AVO: detail draw radius
-// Temporary A/B switches of the render optimizations: like CCC_Integer, but not kept in user.ltx (always start at
-// the default) - the behaviour of "1" becomes permanent once measured, the switch is then removed.
-class CCC_IntegerNotSavedR final : public CCC_Integer
-{
-public:
-    using CCC_Integer::CCC_Integer;
-    void Save(IWriter*) override {}
-};
-
 class CCC_detail_radius : public CCC_Integer
 {
 public:
@@ -802,7 +787,7 @@ void xrRender_initconsole()
     CMD4(CCC_Integer, "r__supersample", &ps_r__Supersample, 1, 8);
 
     CMD4(CCC_Float, "r__geometry_lod", &ps_r__LOD, 0.1f, 2.f);
-    // Second viewport RT size as a fraction of main resolution (r__dedicated_second_vp 1). Applied live; smaller = cheaper PP target for scope texture.
+    // Second viewport RT size as a fraction of main resolution. Applied live; smaller = cheaper PP target for scope texture.
     CMD4(CCC_Float, "r__second_vp_render_scale", &ps_r__second_vp_render_scale, 0.05f, 1.f);
     // Main pass internal resolution as a fraction of the window resolution. Applied live (the
     // downsized target set is (re)created lazily); UI, HUD overlay, menu and screenshots stay native.
@@ -955,11 +940,7 @@ void xrRender_initconsole()
     CMD4(CCC_Integer, "r2_light_editor_spot", &ps_r2_light_editor_spot, 0, 1);
     CMD4(CCC_Float, "r2_light_degrade_lod", &ps_r2_light_degrade_lod, 0.f, 1.f);
     CMD4(CCC_Float, "r2_light_shadow_dist", &ps_r2_light_shadow_dist, 0.f, 200.f);
-    CMD4(CCC_Integer, "r2_smap_hull_cull", &ps_r2_smap_hull_cull, 0, 1);
-    CMD4(CCC_Integer, "r2_light_occq_async", &ps_r2_light_occq_async, 0, 1);
-    CMD4(CCC_Integer, "r2_mt_light_render", &ps_r2_mt_light_render, 0, 1);
     CMD4(CCC_Integer, "r2_smap_npc_blob", &ps_r2_smap_npc_blob, 0, 3);
-    CMD4(CCC_Integer, "r2_light_common_dynamic", &ps_r2_light_common_dynamic, 0, 1);
     CMD3(CCC_Token, "r2_smap_size", &ps_r2_smapsize, qsmapsize_token);
 
     Fvector tw_min, tw_max;
@@ -1046,8 +1027,6 @@ void xrRender_initconsole()
     CMD4(CCC_Integer, "r__main_parallel_submit_min", &ps_r__main_parallel_submit_min, 0, 100000);
 #endif
 
-    CMD4(CCC_Integer, "r__particle_render_parallel", &r__particle_render_parallel, 0, 1);
-    CMD4(CCC_Integer, "r__particle_render_parallel_min_count", &r__particle_render_parallel_min_count, 64, 65536);
     CMD4(CCC_Integer, "r__parallel_skeleton_visbox", &r__parallel_skeleton_visbox, 0, 1);
     CMD4(CCC_Integer, "r__parallel_skeleton_visbox_min_bones", &r__parallel_skeleton_visbox_min_bones, 8, 512);
     CMD4(CCC_Integer, "r__parallel_main_build_grain", &r__parallel_main_build_grain, 4, 4096);

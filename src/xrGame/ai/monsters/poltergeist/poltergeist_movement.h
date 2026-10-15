@@ -15,6 +15,8 @@ public:
     CPoltergeisMovementManager(CPoltergeist* monster) : inherited((CCustomMonster*)monster), m_monster(monster) {}
     virtual ~CPoltergeisMovementManager() {}
     virtual void move_along_path(CPHMovementControl* movement_control, Fvector& dest_position, float time_delta);
+    // Ground snap (CMovementManager::ground_snap): a poltergeist flies above the AI floor
+    virtual bool ground_snap_allowed() const { return false; }
 
     Fvector CalculateRealPosition();
 };

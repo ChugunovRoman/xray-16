@@ -29,6 +29,7 @@
 #include "stalker_danger_in_direction_planner.h"
 #include "stalker_danger_grenade_planner.h"
 #include "stalker_danger_by_sound_planner.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 using namespace StalkerSpace;
 using namespace StalkerDecisionSpace;
@@ -66,6 +67,8 @@ void CStalkerDangerPlanner::update()
 
     {
         ZoneScopedN("danger/update/base_planner");
+        // 24-critical-path.md, M8: stalker/danger/{solve,transition,exec} (action_planner_inline.h)
+        PERF_AI_PLANNER(xray::perf::ai_planner::Danger);
         inherited::update();
     }
 

@@ -457,7 +457,7 @@ void CRender::Render()
     // HUD overlay scope (g_3d_scopes 3): capture the scene camera while it is still intact
     // (a protective snapshot - used by RenderHudOverlayToTexture to render the HUD with the SAME
     // view/proj/FOV the world pass used, regardless of later camera edits).
-    // Only capture in the MAIN pass: a second viewport pass (RenderSecondViewport, ps_r__dedicated_second_vp)
+    // Only capture in the MAIN pass: a second viewport pass (RenderSecondViewport)
     // re-enters Render() with the scope camera and would otherwise overwrite m_hudOvlCam with a wrong one.
     if (!svp_pass)
     {
@@ -595,10 +595,8 @@ void CRender::Render()
         {
             Target->phase_scene_begin();
             {
-                // Skip 3D HUD only for legacy alternating SVP (no dedicated RT). Dedicated second pass draws HUD here + hud_ui below.
                 // HUD overlay scope (g_3d_scopes 3): HUD goes to the offscreen overlay instead of the world pass.
-                const bool skip_world_hud = m_SecondViewportPass || m_HudOverlayActive ||
-                    (!ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame());
+                const bool skip_world_hud = m_SecondViewportPass || m_HudOverlayActive;
                 if (!skip_world_hud)
                     dsgraph.render_hud();
             }
@@ -724,10 +722,8 @@ void CRender::Render()
         // level
         Target->phase_scene_begin();
         {
-            // Skip 3D HUD only for legacy alternating SVP (no dedicated RT). Dedicated second pass draws HUD here + hud_ui below.
             // HUD overlay scope (g_3d_scopes 3): HUD goes to the offscreen overlay instead of the world pass.
-            const bool skip_world_hud = m_SecondViewportPass || m_HudOverlayActive ||
-                (!ps_r__dedicated_second_vp && Device.m_SecondViewport.IsSVPFrame());
+            const bool skip_world_hud = m_SecondViewportPass || m_HudOverlayActive;
             if (!skip_world_hud)
                 dsgraph.render_hud();
         }
@@ -747,7 +743,7 @@ void CRender::Render()
             Target->phase_wallmarks();
             dsgraph.render_hud_ui();
         }
-        else if (ps_r__dedicated_second_vp)
+        else
         {
             dsgraph.render_hud_ui();
             // P2.3: flush the deferred segment before lighting reads the accumulator/albedo.
@@ -952,16 +948,16 @@ void CRender::Render()
     // view skip shadow-map building and accumulation entirely. The main package is untouched.
     // Only when the parallel path built the frustum snapshot (svp_parallel).
     //
-    // Frame driver (stage 1c): when the worker is going to pre-build shadows, the filtering
-    // happened EARLIER - on the main pass, into the LP_svp_* members, so the builder consumed
-    // exactly what the scope pass accumulates below (svp_use_prebuilt branch).
+    // Frame driver (shadow-transfer): the filtering happened EARLIER - on the main pass, into
+    // the LP_svp_* members, so the transferred pages match exactly what the scope pass
+    // accumulates below (svp_use_prebuilt branch).
     light_Package svp_lp_normal, svp_lp_pending;
     const bool svp_filter_lights = svp_pass && svp_parallel;
     const bool svp_use_prebuilt = svp_pass && svp_shadow_stage != 0;
 
     // Frame driver: pre-filter into the LP_svp_* members BEFORE the main pass consumes its own
     // packages (render_lights drains them) - this is a snapshot of light pointers that the
-    // worker (after the signal) and the scope pass both consume.
+    // scope pass consumes.
     if (!svp_pass && svp_parallel && svp_frame_driver)
     {
         filter_light_package_for_svp(LP_normal, LP_svp_normal);
@@ -984,8 +980,8 @@ void CRender::Render()
         PERF_SCOPE_IF(!svp_pass, rpass_lights_noocc);
         PIX_EVENT(DEFER_LIGHT_NO_OCCQ);
         // Stage 1b/1c: the scope package skips per-light occq visibility entirely - it was
-        // prefiltered by the narrow lens frustum and (prebuilt mode) its shadows are already
-        // built by the worker.
+        // prefiltered by the narrow lens frustum and (prebuilt mode) its shadows were already
+        // transferred by the main pass.
         const bool no_vis = svp_use_prebuilt || svp_filter_lights;
         render_lights(svp_use_prebuilt ? LP_svp_normal : (svp_filter_lights ? svp_lp_normal : LP_normal), no_vis);
     }
@@ -1001,19 +997,8 @@ void CRender::Render()
         render_lights(svp_use_prebuilt ? LP_svp_pending : (svp_filter_lights ? svp_lp_pending : LP_pending), no_vis);
     }
 
-    // Release the MAIN pass's sealed smap lists BEFORE unblocking the SVP worker: the worker
-    // pushes its own page lists into the same vector, and releasing after the signal would
-    // destroy the worker's fresh lists (use-after-free at the scope-pass replay).
+    // Release the sealed smap lists of this pass's light tasks (executed on IMM already).
     ReleaseSVPReplayLists();
-
-    // Frame driver stage C kickoff: the main pass has drained its own lighting - from here the
-    // context pool and the shared light objects belong to the worker (the pool has no internal
-    // locking, which is exactly why the worker waits for this signal before allocating).
-    // The LP_svp_* member packages were snapshotted BEFORE the main lighting drained them.
-    if (!svp_pass && svp_parallel && svp_frame_driver)
-    {
-        svp_lights_go.Set();
-    }
 
     // P2.3: execute all deferred-recorded lighting before the combine reads the
     // G-buffer/accumulator.
@@ -1146,13 +1131,13 @@ void CRender::Render()
             s_last_frame = Device.dwFrame;
             Msg("%s [scene] frame %u: draws=%u verts=%u polys=%u | lights total=%u vis=%u shadowed=%u smaps=%d"
                 " | marker=%u overflows=%u clear_mark=%u | accum_draws=%u | lum=%g/%g%s"
-                " | svp parallel=%d stage=%d transfer=%d",
+                " | svp parallel=%d stage=%d",
                 collapsed ? "!" : "*", Device.dwFrame, st.calls, st.verts, st.polys,
                 Stats.l_total, Stats.l_visible, Stats.l_shadowed, Stats.s_merged,
                 Target->dwLightMarkerID, Target->dbg_marker_overflows(), Target->dbg_accum_clear_mark(),
                 Target->dbg_accum_calls_end - Target->dbg_accum_calls_begin,
                 s_lum[0], s_lum[1], lum_bad ? " <== NOT FINITE" : "",
-                svp_parallel ? 1 : 0, svp_shadow_stage, svp_shadow_transfer ? 1 : 0);
+                svp_parallel ? 1 : 0, svp_shadow_stage);
             dbg_log_resource_pressure("census");
         }
     }
@@ -1175,7 +1160,7 @@ void CRender::BindBackbufferForUI()
 
 void CRender::RenderSecondViewport()
 {
-    // Only invoked when ps_r__dedicated_second_vp (see IGame_Level).
+    // Invoked by IGame_Level::OnRender on scope (SVP) frames.
     const float sc = clampr(ps_r__second_vp_render_scale, 0.05f, 1.f);
     const u32 sw = _max(1u, (u32)iFloor(float(Device.dwWidth) * sc + 0.5f));
     const u32 sh = _max(1u, (u32)iFloor(float(Device.dwHeight) * sc + 0.5f));
@@ -1283,7 +1268,7 @@ void CRender::render_forward()
 void CRender::BeforeWorldRender() {}
 
 // Копия бэкбуфера (текущего экрана) в рендер-таргет второго вьюпорта.
-// Общий код для legacy SVP и HUD-overlay прицела (g_3d_scopes 3).
+// Используется HUD-overlay прицелом (g_3d_scopes 3).
 void CRender::CopyBackbufferToSecondVPRT()
 {
     if (Target->rt_secondVP && (Target->rt_secondVP->dwWidth != Device.dwWidth || Target->rt_secondVP->dwHeight != Device.dwHeight))
@@ -1374,11 +1359,6 @@ void CRender::AfterWorldRender()
 {
     // HUD overlay scope (g_3d_scopes 3): clean zoomed frame (no HUD) for the scope lens.
     if (m_HudOverlayActive)
-        CopyBackbufferToSecondVPRT();
-
-    if (ps_r__dedicated_second_vp)
-        return;
-    if (Device.m_SecondViewport.IsSVPFrame())
         CopyBackbufferToSecondVPRT();
 }
 } // namespace xray::render::RENDER_NAMESPACE

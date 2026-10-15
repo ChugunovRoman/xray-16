@@ -155,6 +155,41 @@ void GetMaxDepthCallback(bool& do_colide, bool bo1, dContact& c, SGameMtl* mater
     detail::activation_shape::max_depth += test_depth;
 }
 
+// F1 (plans/optimization_mt/24-critical-path.md, 21-physics-step.md): the push-out on the shape alone (the local path of
+// Activate). Called after ActivateTestDepthCallback (it is added behind it), so the depth is already recorded and the
+// contact already tuned (frictionless, hard cfm/erp). A contact with anything but the level mesh is attached to the
+// shape's body only - the neighbour (a corpse, an item, a prop, a character if the shape collides with them) acts as
+// static geometry, like the level: do_colide = false keeps CollideIntoGroup from making the two-body joint, so
+// NearCallback neither merges the islands nor wakes the neighbour, and no other object is stepped. The level mesh keeps
+// the usual path (CollideStatic already attaches it to the shape alone). A contact some earlier callback refused
+// (a passable material, door_ignore, ...) stays refused.
+static void LocalStaticNeighbours(bool& do_colide, bool bo1, dContact& c, SGameMtl* material_1, SGameMtl* material_2)
+{
+    if (!do_colide)
+        return;
+    if (dTriListClass == dGeomGetClass(bo1 ? c.geom.g2 : c.geom.g1))
+        return;
+    do_colide = false;
+    CPHActivationShape* shape = (CPHActivationShape*)(retrieveGeomUserData(bo1 ? c.geom.g1 : c.geom.g2)->callback_data);
+    CPHIsland* island = shape->DActiveIsland();
+    // The same joint budget CollideIntoGroup gives a merge (JOINTS_LIMIT per island).
+    if (island->MaxJoints() <= 0)
+        return;
+    dJointID contact_joint = dJointCreateContact(nullptr, ContactGroup, &c);
+    island->ConnectJoint(contact_joint);
+    if (bo1)
+        dJointAttach(contact_joint, shape->ODEBody(), nullptr);
+    else
+        dJointAttach(contact_joint, nullptr, shape->ODEBody());
+}
+
+// F1: the touch pass of the local path - only the summed depth (GetMaxDepthCallback, set before it), no joints at all, so
+// nothing is merged or woken (StepTouch creates the joints and throws them away, but wakes what the shape touches).
+static void LocalTouchNoJoints(bool& do_colide, bool bo1, dContact& c, SGameMtl* material_1, SGameMtl* material_2)
+{
+    do_colide = false;
+}
+
 void RestoreVelocityState(V_PH_WORLD_STATE& state)
 {
     for (auto& it : state)
@@ -249,17 +284,42 @@ bool CPHActivationShape::Activate(const Fvector need_size, u16 steps, float max_
     }
 #endif
     VERIFY(m_geom && m_body);
-    CPHObject::activate();
+    // F1 (plans/optimization_mt/24-critical-path.md §4, 21-physics-step.md): the push-out runs on the shape alone - it
+    // is collided and stepped by itself, its neighbours as static obstacles (LocalStaticNeighbours): no Freeze, nothing
+    // woken, merged or moved, the cost of a step is one q_box + the shape's own pairs and level mesh (measured 3.46 ms ->
+    // 39 us per activation in a crowd). The loop, its limits and the result are the same as with the vanilla world path,
+    // which freezes every active object, then StepTouch()/Step() collide everything in CPHWorld::m_objects - the shape
+    // plus every object one of its contacts woke, and every object THEY woke on the next step (a corpse touched by the
+    // box collides with live NPCs, those with their neighbours...): in a crowd each step collided hundreds of objects
+    // (~1.3 ms) on main in FrameMove. The world path is kept only as the fallback: un_freeze_later (the caller wants the
+    // world left frozen), or a step in flight on another thread (Activate runs on main between the physics join and the
+    // next kick - death, spawn, dropped items - so normally never; the world path has the same hazard) - counted as
+    // physics/activation_shape/fallback.
+    const bool local = !un_freeze_later && !ph_world->IsStepRunningOnOtherThread();
+    PERF_ADD_IF(local, ph_act_shape_local_path, 1);
+    PERF_ADD_IF(!local, ph_act_shape_fallback, 1);
+    if (!local)
     {
-        PERF_SCOPE(ph_act_shape_freeze);
-        ph_world->Freeze();
+        CPHObject::activate();
+        {
+            PERF_SCOPE(ph_act_shape_freeze);
+            ph_world->Freeze();
+        }
+        UnFreeze();
     }
-    UnFreeze();
     max_depth = 0.f;
 
     dGeomUserDataSetObjectContactCallback(m_geom, GetMaxDepthCallback);
-    // ph_world->Step();
-    ph_world->StepTouch();
+    if (local)
+    {
+        dGeomUserDataAddObjectContactCallback(m_geom, LocalTouchNoJoints);
+        LocalTouch();
+    }
+    else
+    {
+        // ph_world->Step();
+        ph_world->StepTouch();
+    }
 
     const float resolve_depth = 0.01f;
 
@@ -269,14 +329,17 @@ bool CPHActivationShape::Activate(const Fvector need_size, u16 steps, float max_
     // no meaningful penetration, the push-out loop would do nothing but still cost one full ODE Step()
     // (dWorldStep + static-mesh collision query) per spawned object — skip it. The size-match guard makes
     // this a no-op fallback to the original behavior for any future caller that resizes over multiple steps.
-    if (ph_console::ph_spawn_activation_shape_early_exit && steps == 1 && max_depth < resolve_depth)
+    // Permanent (the former kill-switch ph_spawn_activation_shape_early_exit is removed).
+    if (steps == 1 && max_depth < resolve_depth)
     {
         Fvector early_exit_from_size;
         dGeomBoxGetLengths(m_geom, cast_fp(early_exit_from_size));
         if (early_exit_from_size.similar(need_size))
         {
             PERF_INC(ph_act_shape_early_exit);
-            if (!un_freeze_later)
+            // F1: objects the world path left awake (the shape itself not counted).
+            PERF_ADD_IF(!local, ph_act_shape_woken, u64(ph_world->ObjectsNumber() - 1));
+            if (!local && !un_freeze_later)
             {
                 PERF_SCOPE(ph_act_shape_freeze);
                 ph_world->UnFreeze();
@@ -326,7 +389,11 @@ bool CPHActivationShape::Activate(const Fvector need_size, u16 steps, float max_
     // ph_world->CutVelocity(0.f,0.f);
     dGeomUserDataSetCallbackData(m_geom, this);
     dGeomUserDataSetObjectContactCallback(m_geom, ActivateTestDepthCallback);
-    if (m_flags.test(flStaticEnvironment))
+    // F1: LocalStaticNeighbours already attaches every non-mesh contact to the shape alone (StaticEnvironment would add
+    // a second joint for each of them; nobody sets flStaticEnvironment today).
+    if (local)
+        dGeomUserDataAddObjectContactCallback(m_geom, LocalStaticNeighbours);
+    else if (m_flags.test(flStaticEnvironment))
         dGeomUserDataAddObjectContactCallback(m_geom, StaticEnvironment);
     max_depth = 0.f;
 
@@ -340,7 +407,9 @@ bool CPHActivationShape::Activate(const Fvector need_size, u16 steps, float max_
     // P16: the push-out loop below stops after max_push_steps world steps when the cap is set (see Activate's header)
     bool capped = false;
     V_PH_WORLD_STATE temp_state;
-    ph_world->GetState(temp_state);
+    // F1: the local path moves no other object (and the world is not frozen - m_objects is the whole active world here).
+    if (!local)
+        ph_world->GetState(temp_state);
     for (int m = 0; steps > m && !capped; ++m)
     {
         // float param =fnum_steps_r*(1+m);
@@ -354,10 +423,26 @@ bool CPHActivationShape::Activate(const Fvector need_size, u16 steps, float max_
             for (int i = 0; num_it > i; ++i)
             {
                 max_depth = 0.f;
-                ph_world->Step();
+                {
+                    // F1: one push-out step; step_objects = objects that ran Collide() in it.
+                    PERF_SCOPE(ph_act_shape_step_time);
+                    if (local)
+                    {
+                        PERF_INC(ph_act_shape_step_objects);
+                        LocalStep();
+                    }
+                    else
+                    {
+                        PERF_ADD(ph_act_shape_step_objects, u64(ph_world->ObjectsNumber()));
+                        ph_world->Step();
+                    }
+                }
                 ++dbg_step_count;
                 CHECK_POS(Position(), "pos after ph_world->Step()", false);
-                ph_world->CutVelocity(max_vel, max_a_vel);
+                if (local)
+                    CutVelocity(max_vel, max_a_vel);
+                else
+                    ph_world->CutVelocity(max_vel, max_a_vel);
                 CHECK_POS(Position(), "pos after CutVelocity", true);
                 // if(m==0&&i==0)ph_world->GetState(temp_state);
                 if (max_depth < resolve_depth)
@@ -382,7 +467,8 @@ bool CPHActivationShape::Activate(const Fvector need_size, u16 steps, float max_
     PERF_ADD(ph_act_shape_steps, u64(dbg_step_count));
     PERF_ADD_IF(!ret, ph_act_shape_unresolved, 1);
     PERF_ADD_IF(capped, ph_act_shape_capped, 1);
-    if (!un_freeze_later)
+    PERF_ADD_IF(!local, ph_act_shape_woken, u64(ph_world->ObjectsNumber() - 1));
+    if (!local && !un_freeze_later)
     {
         PERF_SCOPE(ph_act_shape_freeze);
         ph_world->UnFreeze();
@@ -409,6 +495,41 @@ bool CPHActivationShape::Activate(const Fvector need_size, u16 steps, float max_
 #endif
     return ret;
 }
+// F1: StepTouch() for the shape alone (Collide with GetMaxDepthCallback + LocalTouchNoJoints: the depth, no joints).
+void CPHActivationShape::LocalTouch()
+{
+    Collide();
+    Island().Enable();
+    IslandReinit();
+    spatial_move();
+    LocalStepCleanup();
+}
+
+// F1: CPHWorld::Step() for the shape alone, the same order: Collide (q_box, its pairs with the neighbours as static
+// obstacles, the level mesh), PhTune (empty), the island solve (the shape's body and its contacts), reinit, PhDataUpdate,
+// spatial_move, the contact cleanup.
+void CPHActivationShape::LocalStep()
+{
+    Collide();
+    // The neighbours the shape met (after the collide validator), each collided as static geometry.
+    PERF_ADD(ph_act_shape_step_neighbours, u64(m_collide_dyn_candidates.size()));
+    PhTune(fixed_step);
+    IslandStep(fixed_step);
+    IslandReinit();
+    PhDataUpdate(fixed_step);
+    spatial_move();
+    LocalStepCleanup();
+}
+
+void CPHActivationShape::LocalStepCleanup()
+{
+    // Nothing is merged on this path (no two-body joints); kept for a contact callback of a neighbour that merges.
+    ph_world->ReinitMerged();
+    dJointGroupEmpty(ContactGroup);
+    ContactFeedBacks.empty();
+    ContactEffectors.empty();
+}
+
 const Fvector& CPHActivationShape::Position() { return cast_fv(dBodyGetPosition(m_body)); }
 void CPHActivationShape::Size(Fvector& size) { dGeomBoxGetLengths(m_geom, cast_fp(size)); }
 void CPHActivationShape::PhDataUpdate(dReal step) { m_safe_state.new_state(m_body); }

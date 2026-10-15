@@ -13,6 +13,7 @@
 #include "xrScriptEngine/script_engine.hpp"
 #include "npc_cpp_profile.h"
 #include "performance_cvars.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "addon_event_bus.h"
 #include "xrAICore/Components/ai_planner_search_limits.h"
 
@@ -131,8 +132,7 @@ void ai_evaluator_cache_print()
 {
     if (!g_policy_overrides_loaded)
         load_policy_overrides();
-    Msg("- [evaluator_cache] ttl %u ms, solve cache %s, %u override(s):", ai_evaluator_ttl_ms,
-        ai_evaluator_solve_cache ? "on" : "off",
+    Msg("- [evaluator_cache] ttl %u ms, %u override(s):", ai_evaluator_ttl_ms,
         g_policy_overrides ? static_cast<u32>(g_policy_overrides->size()) : 0u);
     if (g_policy_overrides)
     {
@@ -237,7 +237,7 @@ static CachePolicySetting get_script_evaluator_cache_policy(pcstr evaluator_name
     // Default: cache for the duration of one GOAP solve. The world is frozen during a synchronous
     // solve (actions execute after planning, not during), so reusing an evaluator's value across the
     // solve cannot go stale. Collapses redundant Lua calls (actual() + Search re-evaluate the same
-    // conditions). Disable via dev cvar ai_evaluator_solve_cache (reverts these to NeverCache).
+    // conditions).
     return { EScriptEvaluatorCachePolicy::CachePerSolve, 0 };
 }
 
@@ -273,10 +273,6 @@ bool CScriptPropertyEvaluatorWrapper::evaluate()
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::ScriptEvaluatorEvaluate);
     const u64 evaluator_start_qpc = npc_cpp_profile::enabled() ? CPU::QPC() : 0;
     EScriptEvaluatorCachePolicy policy = cache_policy();
-    // Dev kill-switch: revert the per-solve default to NeverCache for A/B. Whitelisted per-frame
-    // policies are pre-existing and not gated by this switch.
-    if (policy == EScriptEvaluatorCachePolicy::CachePerSolve && ai_evaluator_solve_cache == 0)
-        policy = EScriptEvaluatorCachePolicy::NeverCache;
     // Dev kill-switch for TTL: if ai_evaluator_ttl_ms == 0, fall back to per-solve caching.
     if (policy == EScriptEvaluatorCachePolicy::CacheForTTL && ai_evaluator_ttl_ms == 0)
         policy = EScriptEvaluatorCachePolicy::CachePerSolve;
@@ -312,6 +308,7 @@ bool CScriptPropertyEvaluatorWrapper::evaluate()
 
     if (cache_valid)
     {
+        PERF_INC(ai_script_evaluator_cached); // 24-critical-path.md, M9
         npc_cpp_profile::add_script_evaluator_cache_hit(m_evaluator_name);
         if (evaluator_start_qpc)
             npc_cpp_profile::add_script_evaluator(m_evaluator_name, CPU::QPC() - evaluator_start_qpc);
@@ -351,6 +348,9 @@ bool CScriptPropertyEvaluatorWrapper::evaluate_uncached()
 // False: the Lua method failed (logged), result stays false and is not cached
 bool CScriptPropertyEvaluatorWrapper::call_lua_evaluate(bool& result)
 {
+    // 24-critical-path.md, M9: the Lua calls of the evaluators (calls = Lua calls), the combat planner's share apart
+    PERF_SCOPE(ai_script_evaluator_evaluate);
+    PERF_SCOPE_IF(xray::perf::TlAiContext() == xray::perf::ai_planner::Combat, stk_combat_lua_eval);
     try
     {
         result = luabind::call_member<bool>(this, "evaluate");

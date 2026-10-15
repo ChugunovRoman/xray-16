@@ -1077,6 +1077,8 @@ void draw_visiblity_rays(CCustomMonster* self, const IGameObject* object, collid
     if (!item)
         return;
 
+    if (item->mesh_point_pending) // 24-critical-path.md G6b: no ray at it yet, choose the point now
+        self->feel_vision_init_mesh_point(*item, true);
     Fvector start_position = self->eye_matrix.c;
     Fvector dest_position = item->cp_LAST;
     Fvector direction = Fvector().sub(dest_position, start_position);

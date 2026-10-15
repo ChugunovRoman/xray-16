@@ -575,8 +575,8 @@ void CPHWorld::Step()
     StepSpikeInfo spike_info{static_cast<u32>(m_objects.count()), static_cast<u32>(m_update_objects.count()), 0};
     const xray::perf::SpikeDescribeFn describe_spike = [](const void* ctx, char* buf, size_t size) {
         const auto* info = static_cast<const StepSpikeInfo*>(ctx);
-        xr_sprintf(buf, size, "objects=%u update_objects=%u islands=%u ph_mt_island_solve=%d", info->objects,
-            info->update_objects, info->islands, ph_console::ph_mt_island_solve);
+        xr_sprintf(buf, size, "objects=%u update_objects=%u islands=%u ph_mt_island_min=%d", info->objects,
+            info->update_objects, info->islands, ph_console::ph_mt_island_min);
     };
     PERF_SPIKE_NAMED(step_spike, "physics/step", &spike_info, describe_spike, true);
 #endif
@@ -721,6 +721,8 @@ void CPHWorld::Step()
         const bool corpse_sleep_enabled = ph_console::ph_corpse_sleep_ms > 0;
         if (corpse_sleep_enabled)
             m_corpses_to_sleep.clear();
+        // Stretch watchdog (CheckActiveCorpses): the frame step only.
+        m_corpses_active.clear();
         for (i_object = m_objects.begin(); m_objects.end() != i_object; ++i_object)
         {
             CPHObject* obj = (*i_object);
@@ -732,6 +734,8 @@ void CPHWorld::Step()
             {
                 m_corpses_to_sleep.push_back(obj);
             }
+            if (frame_step && obj->is_active() && CPHCollideValidator::IsRagDollObject(*obj))
+                m_corpses_active.push_back(obj);
         }
 
         const size_t island_count = m_island_solve_batch.size();
@@ -749,8 +753,8 @@ void CPHWorld::Step()
             }
         }
 #endif
-        if (ph_console::ph_mt_island_solve != 0 && TaskScheduler &&
-            island_count >= size_t(ph_console::ph_mt_island_min))
+        // P1: the islands are solved in parallel from ph_mt_island_min islands on (permanent; serial below it).
+        if (TaskScheduler && island_count >= size_t(ph_console::ph_mt_island_min))
         {
             ZoneScopedN("ph_IslandStep_mt");
             // Ф2: two groups per worker of about equal estimated cost (see BalanceIslandSolve), one task each - the
@@ -833,6 +837,17 @@ void CPHWorld::Step()
         PERF_SCOPE(ph_corpse_sleep_apply);
         SleepCorpses();
     }
+    // After SleepCorpses(): a corpse it has just put to sleep is skipped there.
+    if (!m_corpses_active.empty())
+    {
+        ZoneScopedN("ph_corpse_check");
+        PERF_SCOPE(ph_corpse_check);
+        CheckActiveCorpses();
+    }
+    else if (frame_step)
+        m_corpses_awake_old = 0;
+    if (frame_step)
+        FlushFrameContactMetrics();
 
 #ifdef DEBUG
     debug_output().dbg_contacts_num() = ContactGroup->num;
@@ -959,6 +974,79 @@ void CPHWorld::SleepCorpses()
         PERF_INC(ph_corpse_force_slept);
     }
     m_corpses_to_sleep.clear();
+}
+
+void CPHWorld::CheckActiveCorpses()
+{
+    // Stretched ragdolls (plans/optimization_mt/21-physics-step.md, 2026-10-15). Runs on the frame step after
+    // ReinitMerged() and SleepCorpses() (Disable() needs the island unmerged), over the ragdolls that were active in this
+    // substep's collide phase.
+    const u32 step = static_cast<u32>(m_steps_num);
+    const u32 now = Device.dwTimeGlobal;
+
+    // Watchdog: a ragdoll whose joints stay pulled apart (anchor gap > fix_dist on fix_hits checks in a row) is put
+    // back together around its root element and stopped. An explosion stretches a ragdoll for a few substeps only
+    // (the joint ERP pulls it back); a ragdoll wedged in the level (a body on the far side of a thin mesh, see
+    // CollideStatic) stays torn and at the velocity cap for good. The check walks the joints: every 4th substep per
+    // shell, every substep while an element is at the cap. fix_max_repairs repairs within fix_window_ms -> sleep.
+    constexpr float fix_dist = 0.5f;
+    constexpr u8 fix_hits = 10;
+    constexpr u8 fix_max_repairs = 3;
+    constexpr u32 fix_window_ms = 5000;
+    const float cap = 0.95f * default_l_limit;
+    const float cap_sq = cap * cap;
+
+    // physics/corpse_near/awake_old: the active ragdolls older than ph_corpse_sleep_ms (0 = the corpse sleep is off).
+    const u32 min_age_ms = static_cast<u32>(ph_console::ph_corpse_sleep_ms);
+    u32 awake_old = 0;
+
+    for (CPHObject* obj : m_corpses_active)
+    {
+        CPHShell* shell = static_cast<CPHShell*>(obj); // cbClassRagDoll is only ever set on a CPHShell
+        if (shell->m_force_slept)
+            continue; // SleepCorpses() has just put it to sleep
+        if (!shell->is_active())
+            continue;
+        const bool at_cap = shell->get_MaxElementLinearVelSq() >= cap_sq;
+        if (at_cap)
+            PERF_INC(ph_corpse_stretch_vel_cap);
+        if (at_cap || ((step + static_cast<u32>(reinterpret_cast<size_t>(shell) >> 6)) & 3u) == 0)
+        {
+            if (shell->get_MaxJointStretchSq() > fix_dist * fix_dist)
+            {
+                if (shell->m_stretch_hits == 0)
+                    PERF_INC(ph_corpse_stretch_detected);
+                if (++shell->m_stretch_hits >= fix_hits)
+                {
+                    shell->m_stretch_hits = 0;
+                    if (shell->m_stretch_repairs == 0 || now - shell->m_stretch_repair_since_ms > fix_window_ms)
+                    {
+                        shell->m_stretch_repairs = 0;
+                        shell->m_stretch_repair_since_ms = now;
+                    }
+                    shell->RepairJointStretch();
+                    shell->spatial_move();
+                    PERF_INC(ph_corpse_stretch_repaired);
+                    if (++shell->m_stretch_repairs >= fix_max_repairs)
+                    {
+                        // Keeps tearing (wedged for good): stop simulating it, in the repaired pose.
+                        shell->m_stretch_repairs = 0;
+                        shell->Disable();
+                        shell->m_force_slept = true;
+                        PERF_INC(ph_corpse_stretch_gave_up);
+                        continue;
+                    }
+                }
+            }
+            else
+                shell->m_stretch_hits = 0;
+        }
+
+        if (min_age_ms != 0 && now - shell->m_ragdoll_since_ms >= min_age_ms)
+            ++awake_old;
+    }
+    m_corpses_awake_old = awake_old;
+    m_corpses_active.clear();
 }
 
 u32 CPHWorld::CalcNumSteps(u32 dTime)
@@ -1096,6 +1184,7 @@ void CPHWorld::FrameStep(dReal step)
     {
         xray::perf::SetGauge(xray::perf::Metric::ph_island_max_nb, static_cast<s64>(m_frame_island_max_nb));
         xray::perf::SetGauge(xray::perf::Metric::ph_island_max_nj, static_cast<s64>(m_frame_island_max_nj));
+        xray::perf::SetGauge(xray::perf::Metric::ph_corpse_near_awake_old, static_cast<s64>(m_corpses_awake_old));
     }
     b_processing = false;
 #ifdef DEBUG
