@@ -374,6 +374,12 @@ void IGame_Level::SetViewEntity(IGameObject* O)
 // same listeners every ~100ms; skip the expensive listener q_box + per-listener occlusion if this source
 // already propagated within the window. 0 = off (kill-switch).
 int g_snd_ai_coalesce_ms = 180;
+// plans/optimization_mt/24-critical-path.md, G3 (always on since 2026-10-16). The coalescence above was keyed by the
+// source object only, and a bullet hit has the shooter as its object (Level_bullet_manager_firetrace.cpp): during auto
+// fire the shots swallowed the hits, so the listeners near the impact never heard them (gw_npc / xr_danger arm the
+// danger on WPN_hit within 30 m of the sound). A sound farther than SND_AI_REMOTE_DIST from its object is therefore
+// coalesced on its own key (the object's "remote" sounds), apart from the sounds at the object.
+static constexpr float SND_AI_REMOTE_DIST = 5.f;
 
 // Sound AI optimization: per-frame budget (beyond it only combat sounds pass), burst coalescence, occlusion skip.
 // The budget, its priority gate and the burst coalescence are permanent; the numbers below are saved tunables.
@@ -438,15 +444,41 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
     // explosion) is also never swallowed by a preceding non-priority one (footstep, voice) from it.
     static u32 s_last_ai_snd_ms[0x10000] = {}; // [source object id] -> last AI-propagation time (ms)
     static bool s_last_ai_snd_priority[0x10000] = {}; // [source object id] -> that propagation was priority
+    // The same for the remote sounds of an object (24-critical-path.md, G3)
+    static u32 s_last_ai_remote_ms[0x10000] = {};
+    static bool s_last_ai_remote_priority[0x10000] = {};
     const bool coalesce = g_snd_ai_coalesce_ms > 0 && S->g_object;
     u16 coalesce_sid = 0;
+    u32* coalesce_ms = s_last_ai_snd_ms;
+    bool* coalesce_priority = s_last_ai_snd_priority;
     if (coalesce)
     {
         coalesce_sid = S->g_object->ID();
         R_ASSERT(coalesce_sid < std::size(s_last_ai_snd_ms));
         const u32 now = Device.dwTimeGlobal;
-        const u32 last = s_last_ai_snd_ms[coalesce_sid];
-        if (last && now - last < u32(g_snd_ai_coalesce_ms) && (s_last_ai_snd_priority[coalesce_sid] || !is_priority))
+        const auto merges = [&](const u32* times, const bool* priorities)
+        {
+            const u32 last = times[coalesce_sid];
+            return last && now - last < u32(g_snd_ai_coalesce_ms) && (priorities[coalesce_sid] || !is_priority);
+        };
+        if (S->feedback)
+        {
+            Fvector snd_pos = S->feedback->get_params()->position;
+            if (S->feedback->is_2D())
+                snd_pos.add(GEnv.Sound->listener_position());
+            if (snd_pos.distance_to_sqr(S->g_object->Position()) > _sqr(SND_AI_REMOTE_DIST))
+            {
+                // sound/reg/remote_split: a remote sound that the object key alone would have swallowed
+                if (!merges(s_last_ai_remote_ms, s_last_ai_remote_priority) &&
+                    merges(s_last_ai_snd_ms, s_last_ai_snd_priority))
+                {
+                    PERF_INC(snd_reg_remote_split);
+                }
+                coalesce_ms = s_last_ai_remote_ms;
+                coalesce_priority = s_last_ai_remote_priority;
+            }
+        }
+        if (merges(coalesce_ms, coalesce_priority))
         {
             PERF_INC(snd_reg_merged);
             return; // this source already alerted nearby listeners just now -> skip redundant query
@@ -501,8 +533,8 @@ void IGame_Level::SoundEvent_Register(const ref_sound& S, float range)
     // Record the coalescence marks only after all gates pass
     if (coalesce)
     {
-        s_last_ai_snd_ms[coalesce_sid] = Device.dwTimeGlobal;
-        s_last_ai_snd_priority[coalesce_sid] = is_priority;
+        coalesce_ms[coalesce_sid] = Device.dwTimeGlobal;
+        coalesce_priority[coalesce_sid] = is_priority;
     }
     if (S->g_type && S->feedback)
     {

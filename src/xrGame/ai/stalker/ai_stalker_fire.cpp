@@ -57,6 +57,8 @@
 #include "xrEngine/IGame_Persistent.h"
 #include "xrEngine/xr_collide_form.h"
 #include "xrCDB/Frustum.h"
+#include "Actor.h"
+#include "game_type.h"
 #include <algorithm>
 
 using namespace StalkerSpace;
@@ -751,6 +753,27 @@ IC bool ray_query_callback(collide::rq_result& result, LPVOID params)
 // The hits reach ray_query_callback in the same order as with RayQuery, so m_can_kill_member, m_can_kill_enemy and
 // m_pick_distance come out the same, the friendly actor and allies behind a wall included (2026-10-15: a shadow run of
 // both picks in a crowd fight found no difference).
+//
+// 24-critical-path.md, G2 (always on since 2026-10-16; heavy fight: ~37 picks a frame, 97 us each, ~100 precise
+// skeleton tests a pick):
+// - G2a, the pick cache: any stalker - seen or not - keeps its real pick for up to npc_ff_pick_cache_ms and
+//   npc_ff_pick_cache_frames frames while the selected enemy and the item in the hands are the same, the muzzle moved
+//   less than 0.5 m and the aim turned less than the safety angle of the side rays (so the new fan of rays stays
+//   within the old one). Never when the enemy is the actor, the stalker is the view entity, or the actor is within
+//   npc_ff_pick_cache_actor_dist m of the line of fire. A friend stepping into the line is noticed up to that much
+//   later (as with the unseen-stalker LOD of 22-game-thread.md, step 1, which is checked first and is not changed);
+//   the object handler and Think already share the pick of the frame (m_pick_frame_id).
+// - G2b, the cut: with a selected enemy, the rays see objects only up to the enemy distance +
+//   npc_ff_pick_cut_behind m (the gather cone ends there too, so it holds far fewer objects); the level geometry is
+//   tested up to the same distance and the pick distance of a clear ray stays the full range. The actor is the
+//   exception: a ray that crosses the actor's sphere behind the cut keeps its full length (geometry and the actor).
+//   What changes: a side ray that misses the enemy no longer stops at a friend (or another enemy) far behind it.
+//   The coarse sphere test before the bone shapes is CCF_Skeleton::_RayQuery's own (bv_sphere before BuildState).
+// The tunables, saved (console_commands.cpp, CCC_Integer):
+int npc_ff_pick_cache_ms = 100; // ms: the oldest real pick the cache hands out
+int npc_ff_pick_cache_frames = 2; // the most frames in a row served from the cache
+int npc_ff_pick_cache_actor_dist = 4; // m: the actor nearer to the line of fire -> a real pick
+int npc_ff_pick_cut_behind = 5; // m: how far behind the enemy the rays still see objects
 
 namespace
 {
@@ -786,16 +809,27 @@ struct stalker_ff_context
     xr_vector<stalker_ff_entry> entries;
     collide::rq_results object_hits; // the hits of one precise test
     xr_vector<collide::rq_result> pending; // precise hits not handed over yet
+    // 24-critical-path.md, G2b: the enemy distance + npc_ff_pick_cut_behind along the ray (flt_max without an enemy),
+    // whether the rays stop seeing objects there (the cut is nearer than the ray range), and the actor among the
+    // candidates (u32(-1) = not there)
+    float cut{flt_max};
+    bool apply_cut{false};
+    u32 actor_index{u32(-1)};
 };
 
 thread_local stalker_ff_context stalker_ff;
 
 // Gathers the candidates of one pick: the objects RayQuery would test (collidable game objects with an object
-// collision form, the stalker itself left out) whose bounding sphere touches the cone around the aim direction
-void stalker_ff_gather(const CAI_Stalker* self, const Fvector& position, const Fvector& direction, float distance)
+// collision form, the stalker itself left out) whose bounding sphere touches the cone around the aim direction.
+// With the cut (G2b) the cone ends at the cut and the actor is added wherever it is (each ray tests its sphere)
+void stalker_ff_gather(
+    const CAI_Stalker* self, const Fvector& position, const Fvector& direction, float distance, float cut)
 {
     stalker_ff_context& ctx = stalker_ff;
     ctx.candidates.clear();
+    ctx.cut = cut;
+    ctx.apply_cut = cut < distance;
+    ctx.actor_index = u32(-1);
     PERF_INC(npc_ff_checks);
     PERF_SCOPE(npc_ff_gather); // 24-critical-path.md, M11: the spatial part of npc/ff/pick
 
@@ -831,7 +865,8 @@ void stalker_ff_gather(const CAI_Stalker* self, const Fvector& position, const F
     normal.mul(up, -cos_a).mad(axis, -sin_a);
     frustum._add(plane.build(apex, normal));
     Fvector far_point;
-    far_point.mad(apex, axis, stalker_ff_apex_back + distance * _max(1.f, length) + stalker_ff_far_margin);
+    const float far_distance = ctx.apply_cut ? ctx.cut : distance * _max(1.f, length);
+    far_point.mad(apex, axis, stalker_ff_apex_back + far_distance + stalker_ff_far_margin);
     frustum._add(plane.build(far_point, axis));
 
     {
@@ -840,6 +875,7 @@ void stalker_ff_gather(const CAI_Stalker* self, const Fvector& position, const F
         g_pGamePersistent->SpatialSpace.q_frustum(ctx.spatial, 0, STYPE_COLLIDEABLE, frustum);
     }
 
+    IGameObject* actor = Actor();
     for (ISpatial* spatial : ctx.spatial)
     {
         IGameObject* object = spatial->dcast_GameObject();
@@ -848,9 +884,22 @@ void stalker_ff_gather(const CAI_Stalker* self, const Fvector& position, const F
         ICollisionForm* cform = object->GetCForm();
         if (!cform || cform->Type() != cftObject)
             continue;
+        if (object == actor)
+            ctx.actor_index = u32(ctx.candidates.size());
         ctx.candidates.push_back({cform, spatial->GetSpatialData().sphere});
     }
     ctx.spatial.clear();
+
+    // G2b: the actor behind the cut is still a candidate (the filter of the loop above)
+    if (ctx.apply_cut && actor && ctx.actor_index == u32(-1))
+    {
+        ICollisionForm* cform = actor->GetCForm();
+        if (cform && cform->Type() == cftObject && (actor->GetSpatialData().type & STYPE_COLLIDEABLE))
+        {
+            ctx.actor_index = u32(ctx.candidates.size());
+            ctx.candidates.push_back({cform, actor->GetSpatialData().sphere});
+        }
+    }
     PERF_ADD(npc_ff_candidates, ctx.candidates.size());
 }
 
@@ -863,11 +912,35 @@ void stalker_ff_ray(CAI_Stalker* self, const collide::ray_defs& ray, collide::rq
     stalker_ff_context& ctx = stalker_ff;
     PERF_INC(npc_ff_rays);
 
-    // The level geometry: the static part of RayQuery (every triangle along the ray, sorted)
-    const collide::ray_defs static_ray(ray.start, ray.dir, ray.range, ray.flags, collide::rqtStatic);
-    Level().ObjectSpace.RayQuery(static_hits, static_ray, nullptr, nullptr, nullptr, self);
+    // G2b: how far this ray sees objects and the level geometry - up to the cut, or its full length when it crosses
+    // the actor's sphere behind the cut
+    float range = ray.range;
+    if (ctx.apply_cut && ctx.cut < ray.range)
+    {
+        range = ctx.cut;
+        if (ctx.actor_index != u32(-1))
+        {
+            int quantity;
+            float afT[2];
+            const Fsphere::ERP_Result result =
+                ctx.candidates[ctx.actor_index].sphere.intersect(ray.start, ray.dir, ray.range, quantity, afT);
+            if (result == Fsphere::rpOriginOutside && afT[0] < ray.range && afT[0] >= range)
+            {
+                range = ray.range;
+                PERF_INC(npc_ff_cut_full);
+            }
+        }
+    }
 
-    // The candidates the ray crosses: the sphere test of q_ray (ISpatial_q_ray.cpp, ray_walker::walk)
+    // The level geometry: the static part of RayQuery (every triangle along the ray, sorted)
+    {
+        PERF_SCOPE(npc_ff_static); // 24-critical-path.md, G2: the level geometry part of npc/ff/pick
+        const collide::ray_defs static_ray(ray.start, ray.dir, range, ray.flags, collide::rqtStatic);
+        Level().ObjectSpace.RayQuery(static_hits, static_ray, nullptr, nullptr, nullptr, self);
+    }
+
+    // The candidates the ray crosses: the sphere test of q_ray (ISpatial_q_ray.cpp, ray_walker::walk); with the cut
+    // only those it enters before the cut
     ctx.entries.clear();
     for (u32 i = 0, n = u32(ctx.candidates.size()); i < n; ++i)
     {
@@ -878,7 +951,14 @@ void stalker_ff_ray(CAI_Stalker* self, const collide::ray_defs& ray, collide::rq
         if (result == Fsphere::rpOriginInside)
             ctx.entries.push_back({0.f, i});
         else if (result == Fsphere::rpOriginOutside && afT[0] < ray.range)
+        {
+            if (afT[0] >= range)
+            {
+                PERF_INC(npc_ff_cut_skipped);
+                continue;
+            }
             ctx.entries.push_back({_max(0.f, afT[0] - stalker_ff_order_margin), i});
+        }
     }
     std::sort(ctx.entries.begin(), ctx.entries.end(),
         [](const stalker_ff_entry& a, const stalker_ff_entry& b) { return a.t < b.t; });
@@ -896,6 +976,9 @@ void stalker_ff_ray(CAI_Stalker* self, const collide::ray_defs& ray, collide::rq
         {
             // The walk got to this object: its precise test with the same ray, as RayQuery runs it
             ICollisionForm* cform = ctx.candidates[ctx.entries[entry_next].index].cform;
+            // G2: precise tests of objects behind the cut (the enemy distance + npc_ff_pick_cut_behind) - the actor's
+            // full-length rays
+            PERF_ADD_IF(ctx.entries[entry_next].t + stalker_ff_order_margin >= ctx.cut, npc_ff_precise_behind, 1);
             ++entry_next;
             PERF_INC(npc_ff_precise_rays);
             Level().ObjectSpace.RayQuery(ctx.object_hits, cform, ray);
@@ -1003,15 +1086,25 @@ void CAI_Stalker::update_can_kill_info()
         return;
     }
 
+    Fvector position, direction;
+    VERIFY(inventory().ActiveItem());
+    g_fireParams(0, position, direction);
+
+    // 24-critical-path.md, G2a: the pick cache of any firing stalker (see above the fast pick and ff_pick_cache_reuse)
+    if (ff_pick_cache_reuse(position, direction))
+    {
+        m_pick_frame_id = Device.dwFrame;
+        ++m_ff_cache_reused;
+        PERF_INC(npc_ff_cache_hit);
+        return;
+    }
+
     m_pick_frame_id = Device.dwFrame;
     m_pick_time = Device.dwTimeGlobal;
     PERF_INC(npc_oh_pick_full);
     m_can_kill_member = false;
     m_can_kill_enemy = false;
 
-    Fvector position, direction;
-    VERIFY(inventory().ActiveItem());
-    g_fireParams(0, position, direction);
     // 22-game-thread.md, step 1b: npc/ff/pick - the time of the cast picks
     PERF_SCOPE(npc_ff_pick);
     // 24-critical-path.md, M11: the same time by the caller that paid for the pick of this frame
@@ -1021,9 +1114,105 @@ void CAI_Stalker::update_can_kill_info()
 
     // The fast pick (see above): the same 5 rays, can_kill_entity walks them over the candidates gathered once
     const float distance = start_pick_distance();
-    stalker_ff_gather(this, position, direction, distance);
+    // G2b: the cut - the enemy distance + npc_ff_pick_cut_behind. Only while the line of fire goes at the enemy (its
+    // bounding sphere within the gather cone): a stalker firing elsewhere (the last known position of an enemy that
+    // has moved, suppressive fire) keeps the full range, or a friend along that line beyond the cut is not seen
+    const CEntityAlive* enemy = memory().enemy().selected();
+    float cut = flt_max;
+    if (enemy)
+    {
+        Fvector aim = direction;
+        aim.normalize_safe();
+        Fvector center;
+        enemy->Center(center);
+        Fvector to_enemy;
+        to_enemy.sub(center, position);
+        const float along = to_enemy.dotproduct(aim);
+        const float reach = enemy->Radius() + _max(0.f, along) * std::tan(stalker_ff_cone_angle);
+        if (along > 0.f && to_enemy.square_magnitude() - _sqr(along) <= _sqr(reach))
+            cut = position.distance_to(enemy->Position()) + float(npc_ff_pick_cut_behind);
+    }
+    stalker_ff_gather(this, position, direction, distance, cut);
     can_kill_entity_from(position, direction, distance);
     stalker_ff.candidates.clear();
+
+    // G2a: the aim this pick was cast for
+    m_ff_cache_position = position;
+    m_ff_cache_direction = direction;
+    m_ff_cache_direction.normalize_safe();
+    m_ff_cache_range = distance;
+    m_ff_cache_enemy = enemy ? enemy->ID() : u16(-1);
+    m_ff_cache_item = inventory().ActiveItem() ? inventory().ActiveItem()->object_id() : u16(-1);
+    m_ff_cache_reused = 0;
+}
+
+// 24-critical-path.md, G2a: whether the last real pick still holds for this aim (the conditions are listed above the
+// fast pick). Counts the reason of every refusal
+bool CAI_Stalker::ff_pick_cache_reuse(const Fvector& position, const Fvector& direction)
+{
+    if (!IsGameTypeSingle())
+        return false;
+    if (!m_pick_frame_id || m_ff_cache_item == u16(-1))
+    {
+        PERF_INC(npc_ff_cache_miss_target);
+        return false;
+    }
+    if (Device.dwTimeGlobal - m_pick_time >= u32(npc_ff_pick_cache_ms) ||
+        m_ff_cache_reused >= u32(npc_ff_pick_cache_frames))
+    {
+        PERF_INC(npc_ff_cache_miss_age);
+        return false;
+    }
+
+    const CEntityAlive* enemy = memory().enemy().selected();
+    const u16 enemy_id = enemy ? enemy->ID() : u16(-1);
+    const CInventoryItem* item = inventory().ActiveItem();
+    if (enemy_id != m_ff_cache_enemy || !item || item->object_id() != m_ff_cache_item)
+    {
+        PERF_INC(npc_ff_cache_miss_target);
+        return false;
+    }
+
+    // The actor's fight and the actor near the line of fire always get a real pick
+    if (this == Level().CurrentEntity() || this == Level().CurrentViewEntity())
+    {
+        PERF_INC(npc_ff_cache_miss_actor);
+        return false;
+    }
+    if (const CActor* actor = Actor())
+    {
+        if (enemy_id == actor->ID())
+        {
+            PERF_INC(npc_ff_cache_miss_actor);
+            return false;
+        }
+        // The distance from the actor's body (its position + 0.9 m up) to the segment the pick was cast along
+        Fvector body = actor->Position();
+        body.y += .9f;
+        Fvector to_body;
+        to_body.sub(body, m_ff_cache_position);
+        const float along = _max(0.f, _min(m_ff_cache_range, to_body.dotproduct(m_ff_cache_direction)));
+        Fvector nearest;
+        nearest.mad(m_ff_cache_position, m_ff_cache_direction, along);
+        if (nearest.distance_to_sqr(body) < _sqr(float(npc_ff_pick_cache_actor_dist)))
+        {
+            PERF_INC(npc_ff_cache_miss_actor);
+            return false;
+        }
+    }
+
+    // The muzzle moved less than 0.5 m and the aim turned less than half the side ray angle: every ray of the new fan
+    // stays within half a ray spacing of a ray of the old one (a turn of a full side angle would put the new outer ray
+    // twice the side angle from the old centre, a sector the cached pick never tested)
+    Fvector aim = direction;
+    aim.normalize_safe();
+    if (position.distance_to_sqr(m_ff_cache_position) > _sqr(.5f) ||
+        aim.dotproduct(m_ff_cache_direction) < _cos(stalker_ff_side_angle * .5f))
+    {
+        PERF_INC(npc_ff_cache_miss_moved);
+        return false;
+    }
+    return true;
 }
 
 bool CAI_Stalker::undetected_anomaly()

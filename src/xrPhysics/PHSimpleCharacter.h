@@ -141,6 +141,16 @@ public:
     virtual ~CPHSimpleCharacter() { Destroy(); }
     /////////////////CPHObject//////////////////////////////////////////////
     virtual void PhDataUpdate(dReal step);
+    // Parallel post-integrate (permanent, CPHObject::PostIntegrateParallel): the whole PhDataUpdate touches
+    // only this controller's body, geoms and fields; the one list edit in it - CPHObject::deactivate() from Disable() (the
+    // sleep check, b_non_interactive, out of bounds) - is recorded and applied by the serial pass. No serial part of its
+    // own.
+    bool PhDataUpdateSplit() const override { return true; }
+
+protected:
+    void PhDataUpdateParallel(dReal step) override { PhDataUpdate(step); }
+
+public:
     virtual void PhTune(dReal step);
     virtual void InitContact(dContact* c, bool& do_collide, u16 /*material_idx_1*/, u16 /*material_idx_2*/);
     virtual dSpaceID dSpace() { return m_space; }

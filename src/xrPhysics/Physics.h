@@ -38,6 +38,20 @@ void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2);
 void CollideStatic(dGeomID o2, CPHObject* obj2);
 // physics/contact/max_depth_mm (Physics.cpp): hands the deepest contact of this frame substep to the gauge.
 void FlushFrameContactMetrics();
+// Collision probes of one object that never step a merged island (CPHObject::DoCollideObj, CPHObject::step_single -
+// CPHAICharacter::TryPosition): any merge only tells "touches another object". Only tags the wakes NearCallback counts
+// there (physics/wake/ai_by_ai_probe, 21-physics-step.md, 2026-10-16); the collision itself is the same. Per thread,
+// nests.
+struct PhProbeCollideScope
+{
+    PhProbeCollideScope();
+    ~PhProbeCollideScope();
+    PhProbeCollideScope(const PhProbeCollideScope&) = delete;
+    PhProbeCollideScope& operator=(const PhProbeCollideScope&) = delete;
+
+private:
+    bool m_prev;
+};
 
 class CPHElement;
 class CPHShell;

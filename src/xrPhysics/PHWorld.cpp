@@ -67,6 +67,12 @@ thread_local bool s_tl_physics_task_worker = false;
 // predicates therefore treat this thread like any other one while the flag is set (IsStepThreadCaller). The island
 // tasks themselves are pure ODE and never ask.
 thread_local bool s_tl_island_wait = false;
+// Parallel post-integrate (permanent, PostIntegrateGroups): true while an island-solve task runs the
+// post-integrate part of its own objects, on whichever thread. That is the step's own work on objects no other thread
+// touches now (the same calls the serial loop made on the stepping thread), so the deferral predicates treat it as the
+// stepping thread (IsStepThreadCaller): e.g. CPHSimpleCharacter::SetVelocity is not a hazard there. Set and cleared
+// inside the task body, never across a wait, so a foreign task stolen by this thread never sees it.
+thread_local bool s_tl_post_task = false;
 
 #ifndef DEBUG
 // Ф2 (plans/optimization_mt/21-physics-step.md): balanced parts of the parallel island solve. TaskRange's default grain
@@ -128,6 +134,70 @@ size_t BalanceIslandSolve(xr_vector<CPHObject*>& batch, size_t max_parts)
     for (const IslandSolveJob& job : jobs)
         batch[fill[job.part]++] = job.object;
     return parts;
+}
+
+struct PostTaskScope
+{
+    const bool previous = s_tl_post_task;
+    PostTaskScope() { s_tl_post_task = true; }
+    ~PostTaskScope() { s_tl_post_task = previous; }
+};
+
+// Parallel post-integrate (plans/optimization_mt/21-physics-step.md, permanent): the per-object part of the
+// post-integrate of members[begin, end) of solved groups: IslandReinit of every member (Unmerge writes only the member's
+// own island and the links of its own last body / first joint), then CPHObject::PostIntegrateParallel of the
+// split-capable ones (shells, character controllers). Members never share a body, so they are independent of each other
+// once their group is solved.
+void PostIntegrateMembers(CPHObject* const* members, u32 begin, u32 end, std::thread::id step_thread)
+{
+    if (begin == end)
+        return;
+    ZoneScopedN("ph_post_integrate_part");
+    PERF_SCOPE(ph_post_mt_cpu);
+    PostTaskScope post_task;
+    [[maybe_unused]] u32 split = 0;
+    for (u32 k = begin; k != end; ++k)
+    {
+        CPHObject* obj = members[k];
+        obj->IslandReinit();
+        if (obj->PhDataUpdateSplit())
+        {
+            obj->PostIntegrateParallel(fixed_step);
+            ++split;
+        }
+    }
+    PERF_ADD(ph_post_mt_objects, split);
+    if (std::this_thread::get_id() != step_thread)
+        PERF_ADD(ph_post_mt_offthread, split);
+}
+
+// In an island-solve task, right after it solved the merge roots [first, last) of the batch: the post-integrate part of
+// their objects (members[group_begin[first] .. group_begin[last]), list order within a group). A group is the whole merged
+// island, so no other task touches these bodies; the serial rest runs after the solve (Step, ph_post_integrate). A big
+// group (a crowd of controllers merged by contacts, a corpse pile) would put all its objects on the task that already
+// carries the longest solve, so its members go to the pool in chunks (nested parallel for; PostTaskScope is only held
+// inside the chunks, never across that wait).
+void PostIntegrateGroups(
+    CPHObject* const* members, const u32* group_begin, size_t first, size_t last, std::thread::id step_thread)
+{
+    constexpr u32 split_members = 16; // more members than this: chunks of split_grain on the pool
+    constexpr size_t split_grain = 8;
+    u32 run = group_begin[first];
+    for (size_t g = first; g != last; ++g)
+    {
+        const u32 begin = group_begin[g];
+        const u32 end = group_begin[g + 1];
+        if (end - begin <= split_members)
+            continue;
+        PostIntegrateMembers(members, run, begin, step_thread); // the small groups before this one
+        PERF_INC(ph_post_mt_split);
+        xr_parallel_for(TaskRange<u32>(begin, end, split_grain), [members, step_thread](const TaskRange<u32>& range)
+        {
+            PostIntegrateMembers(members, range.begin(), range.end(), step_thread);
+        });
+        run = end;
+    }
+    PostIntegrateMembers(members, run, group_begin[last], step_thread);
 }
 #endif // !DEBUG
 } // namespace
@@ -397,6 +467,8 @@ bool CPHWorld::ShouldDeferSchedulerPhysicsMutation() const
 
 bool CPHWorld::IsStepThreadCaller() const
 {
+    if (s_tl_post_task)
+        return true;
     return !s_tl_island_wait && std::this_thread::get_id() == m_step_thread_id.load(std::memory_order_acquire);
 }
 
@@ -674,6 +746,9 @@ void CPHWorld::Step()
 
     stats.Core.Begin();
 
+    // Parallel post-integrate (permanent): true once the island-solve tasks below have run the per-object part
+    // of the post-integrate; the post-integrate block then runs only the serial rest. Never in DEBUG.
+    [[maybe_unused]] bool post_mt = false;
     {
         ZoneScopedN("ph_solve");
         PERF_SCOPE(ph_solve);
@@ -688,7 +763,8 @@ void CPHWorld::Step()
         //////////////////////////////////////////////////////////////////////
         // P1: parallel island solve. Each active CPHIsland is an independent dxWorld, and the ODE
         // stepper uses only stack/local scratch, so solving distinct active islands on worker threads
-        // is race-free. Collide (above) and PhDataUpdate/spatial_move (below) stay serial.
+        // is race-free. Collide (above) stays serial; of PhDataUpdate/spatial_move (below) the per-object part runs in
+        // the island-solve tasks in the frame step (parallel post-integrate), the rest stays serial.
 #ifdef DEBUG
         // DEBUG path stays serial: debug_output() touches global state.
         for (i_object = m_objects.begin(); m_objects.end() != i_object;)
@@ -723,11 +799,18 @@ void CPHWorld::Step()
             m_corpses_to_sleep.clear();
         // Stretch watchdog (CheckActiveCorpses): the frame step only.
         m_corpses_active.clear();
+        // Parallel post-integrate: the frame step on the physics thread only (the world steps on main stay as they were),
+        // with the parallel island solve below (otherwise the serial loop after the solve). m_objects does not change from
+        // here to the post-integrate (the solve edits no list), so this snapshot is the list the serial loop would walk.
+        const bool post_mt_wanted = frame_step;
+        m_post_objects.clear();
         for (i_object = m_objects.begin(); m_objects.end() != i_object; ++i_object)
         {
             CPHObject* obj = (*i_object);
             if (obj->Island().IsActive())
                 m_island_solve_batch.push_back(obj);
+            if (post_mt_wanted)
+                m_post_objects.push_back(obj);
 
             if (corpse_sleep_enabled && CPHCollideValidator::IsRagDollObject(*obj) &&
                 ShouldForceSleepCorpse(obj))
@@ -764,22 +847,38 @@ void CPHWorld::Step()
             CPHObject** const islands = m_island_solve_batch.data();
             const u32* const part_begin = s_tl_island_part_begin.data();
             const std::thread::id step_thread = std::this_thread::get_id();
+            // Parallel post-integrate: the objects of every solved root, in the batch order BalanceIslandSolve left.
+            if (post_mt_wanted)
+            {
+                BuildPostIntegrateGroups();
+                post_mt = true;
+            }
+            const bool post_in_tasks = post_mt;
+            CPHObject* const* const post_members = m_post_members.data();
+            const u32* const post_group_begin = m_post_group_begin.data();
             s_tl_island_wait = true;
             xr_parallel_for(TaskRange<size_t>(0, parts, 1),
-                [islands, part_begin, step_thread](const TaskRange<size_t>& range)
+                [islands, part_begin, step_thread, post_in_tasks, post_members, post_group_begin](
+                    const TaskRange<size_t>& range)
             {
                 ZoneScopedN("ph_IslandStep_part");
-                // Ф0: CPU time of this part, any thread (b_processing is set before the parts are pushed).
-                PERF_SCOPE_IF(ph_world->Processing(), ph_step_solve_cpu);
                 for (size_t part = range.begin(); part != range.end(); ++part)
                 {
                     const size_t first = part_begin[part];
                     const size_t last = part_begin[part + 1];
                     // physics/islands_offthread: a pool worker took this part (B8: the stepping thread is a worker).
-                    if (std::this_thread::get_id() != step_thread)
+                    const bool offthread = std::this_thread::get_id() != step_thread;
+                    if (offthread)
                         PERF_ADD(ph_islands_offthread, last - first);
-                    for (size_t i = first; i != last; ++i)
-                        islands[i]->IslandStep(fixed_step);
+                    {
+                        // Ф0: CPU time of this part, any thread (b_processing is set before the parts are pushed).
+                        PERF_SCOPE_IF(ph_world->Processing(), ph_step_solve_cpu);
+                        for (size_t i = first; i != last; ++i)
+                            islands[i]->IslandStep(fixed_step);
+                    }
+                    // The same part's objects right after their solve, on the same thread (physics/post_mt/cpu).
+                    if (post_in_tasks)
+                        PostIntegrateGroups(post_members, post_group_begin, first, last, step_thread);
                 }
             });
             s_tl_island_wait = false;
@@ -799,6 +898,29 @@ void CPHWorld::Step()
         ZoneScopedN("ph_post_integrate");
         PERF_SCOPE(ph_post_integrate);
         PERF_SCOPE_IF(frame_step, ph_step_post);
+#ifndef DEBUG
+        if (post_mt)
+        {
+            // Parallel post-integrate, the serial rest: the old loop over the same list (m_post_objects is m_objects as it
+            // was before the solve; removals here unlink only the object being processed, as before). An object done in
+            // a task applies what it recorded: list edits, game callbacks, octree rebuilds - in this order, the same
+            // calls the loop below makes. Any other object (not split-capable, or not in a solved group) runs the old
+            // sequence here; IslandReinit again is a no-op for a member already unmerged in its task.
+            for (CPHObject* obj : m_post_objects)
+            {
+                if (obj->PostIntegrateDone())
+                    obj->PostIntegrateSerial(fixed_step);
+                else
+                {
+                    PERF_INC(ph_post_mt_serial);
+                    obj->IslandReinit();
+                    obj->PhDataUpdate(fixed_step);
+                    obj->spatial_move();
+                }
+            }
+        }
+        else
+#endif
         for (i_object = m_objects.begin(); m_objects.end() != i_object;)
         {
             CPHObject* obj = (*i_object);
@@ -912,6 +1034,46 @@ void CPHWorld::ReinitMerged()
     for (CPHObject* obj : m_merged_objects)
         obj->IslandReinit();
     m_merged_objects.clear();
+}
+
+void CPHWorld::BuildPostIntegrateGroups()
+{
+    // Parallel post-integrate (permanent): after Collide (all merges of the substep done) and before the solve,
+    // so every merge chain still leads to its root. Batch entry i is a root solved this step: stamp it, then hand every
+    // object of m_post_objects to the root its chain ends at (counting sort, list order kept within a group). An object
+    // whose root is not in the batch stays out of every group (u32(-1)) and runs the old serial sequence.
+    const size_t groups = m_island_solve_batch.size();
+    const u64 stamp = m_steps_num;
+    for (size_t i = 0; i < groups; ++i)
+    {
+        CPHIsland& root = m_island_solve_batch[i]->Island();
+        root.m_post_group_step = stamp;
+        root.m_post_group = static_cast<u32>(i);
+    }
+    const size_t count = m_post_objects.size();
+    m_post_object_group.resize(count);
+    m_post_group_begin.assign(groups + 1, 0);
+    for (size_t s = 0; s < count; ++s)
+    {
+        CPHIsland* root = m_post_objects[s]->Island().ActiveRootReadOnly();
+        u32 group = u32(-1);
+        if (root && root->m_post_group_step == stamp)
+        {
+            group = root->m_post_group;
+            ++m_post_group_begin[group + 1];
+        }
+        m_post_object_group[s] = group;
+    }
+    for (size_t g = 0; g < groups; ++g)
+        m_post_group_begin[g + 1] += m_post_group_begin[g];
+    m_post_members.resize(m_post_group_begin[groups]);
+    m_post_group_fill.assign(m_post_group_begin.begin(), m_post_group_begin.end() - 1);
+    for (size_t s = 0; s < count; ++s)
+    {
+        const u32 group = m_post_object_group[s];
+        if (group != u32(-1))
+            m_post_members[m_post_group_fill[group]++] = m_post_objects[s];
+    }
 }
 
 bool CPHWorld::ShouldForceSleepCorpse(CPHObject* obj)

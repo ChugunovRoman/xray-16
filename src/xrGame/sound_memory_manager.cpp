@@ -118,6 +118,9 @@ IC bool is_sound_type(int s, const ESoundTypes& t) { return ((s & t) == t); }
 void CSoundMemoryManager::feel_sound_new(
     IGameObject* object, int sound_type, CSound_UserDataPtr user_data, const Fvector& position, float sound_power)
 {
+    // 24-critical-path.md, G3: where the ~1.3 us of a delivery go (with npc/sound/t_callback, t_add, t_visible inside;
+    // the rest of game/sound_dispatch is the dispatch loop, CCustomMonster::feel_sound_new and npc/sound/filter)
+    PERF_SCOPE(npc_sound_t_memory);
 #ifndef MASTER_GOLD
     if (object && smart_cast<CActor*>(object) && psAI_Flags.test(aiIgnoreActor))
         return;
@@ -128,7 +131,10 @@ void CSoundMemoryManager::feel_sound_new(
         return;
 
     if (user_data)
+    {
+        PERF_SCOPE(npc_sound_t_visitor); // 26-framemove-game-next.md: the rest of t_memory
         user_data->accept(m_visitor);
+    }
 
     IGameObject* self = m_object;
     VERIFY(self);
@@ -139,7 +145,10 @@ void CSoundMemoryManager::feel_sound_new(
 #endif
 
     VERIFY(_valid(m_sound_threshold));
-    m_object->sound_callback(object, sound_type, position, sound_power);
+    {
+        PERF_SCOPE(npc_sound_t_callback); // the hear callback queue (CScriptEntity::sound_callback)
+        m_object->sound_callback(object, sound_type, position, sound_power);
+    }
     VERIFY(_valid(m_sound_threshold));
 
     update_sound_threshold();
@@ -177,7 +186,10 @@ void CSoundMemoryManager::feel_sound_new(
             CEntityAlive* _entity_alive = smart_cast<CEntityAlive*>(object);
             if (_entity_alive && (self->ID() != _entity_alive->ID()) &&
                 (_entity_alive->g_Team() != entity_alive->g_Team()))
+            {
+                PERF_SCOPE(npc_sound_t_hit_add);
                 m_object->memory().hit().add(_entity_alive);
+            }
         }
         if (!m_stalker || !m_stalker->memory().enemy().selected())
             add(object, sound_type, position, sound_power);
@@ -228,6 +240,7 @@ void CSoundMemoryManager::add(const CSoundObject& sound_object, bool check_for_e
 
 void CSoundMemoryManager::add(const IGameObject* object, int sound_type, const Fvector& position, float sound_power)
 {
+    PERF_SCOPE(npc_sound_t_add); // 24-critical-path.md, G3: the sound memory part of a delivery
 #ifndef SAVE_OWN_SOUNDS
     // we do not want to save our own sounds
     if (object && (m_object->ID() == object->ID()))
@@ -266,7 +279,12 @@ void CSoundMemoryManager::add(const IGameObject* object, int sound_type, const F
     const CEntityAlive* entity_alive = smart_cast<const CEntityAlive*>(object);
 #endif
     // we do not save sounds from the objects we see (?!)
-    if (m_object->memory().visual().visible_now(entity_alive))
+    bool seen;
+    {
+        PERF_SCOPE(npc_sound_t_visible); // 24-critical-path.md, G3: a linear search in the visual memory
+        seen = m_object->memory().visual().visible_now(entity_alive);
+    }
+    if (seen)
         return;
 #endif
 

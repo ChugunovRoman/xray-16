@@ -26,6 +26,12 @@ class CUIWindow;
 class CBinocularsVision;
 class CNightVisionEffector;
 
+// K5 of plans/optimization_mt/26-framemove-game-next.md, a temporary switch (not saved, default 0): a cheaper UpdateCL
+// of weapons that are not in the hands of the actor - the show / hide / reload sounds are positioned only while one of
+// them plays, state_Fire takes the fire point only on the frames that may shoot, the HUD addons and laser dots are
+// left out. 0 = everything as before
+extern int wpn_npc_ucl_lite;
+
 struct addon_slot {
     shared_str slot_name;
     shared_str parent_section;
@@ -108,6 +114,13 @@ struct AddAddonData {
     // When restoring addons without changing gameplay state (e.g. ini hot reload).
     bool skip_magazine_sync_on_add{};
 };
+
+// 24-critical-path.md, M4: tags the CalculateBones of the owner in CWeapon::UpdateXForm with its caller
+#if XR_PERF_METRICS
+#define WEAPON_XFORM_SOURCE(v) CWeapon::XFormSourceScope CONCATENIZE(_wpn_xfs_, __LINE__)(CWeapon::v)
+#else
+#define WEAPON_XFORM_SOURCE(v) ((void)0)
+#endif
 
 class CWeapon : public CHudItemObject, public CShootingObject
 {
@@ -261,6 +274,73 @@ protected:
 private:
     // Shared by both: no action, motion, light, particles, vision, laser dot or weapon sound in flight
     bool NpcUpdateCLNothingInFlight();
+    // K5: a laser dot of this weapon may be active (set by UpdateLaserDots, the only place that activates them; reset
+    // once wpn_npc_ucl_lite has deactivated them out of the actor's hands)
+    bool m_laser_dots_maybe_active{false};
+
+protected:
+    // K5 (wpn_npc_ucl_lite): the switch is on and the weapon is not in the hands of the actor (an NPC, a monster, the
+    // ground) - nothing of it is drawn in the HUD
+    bool NpcUclLite();
+    // K5: NpcUclLite() and none of the sounds of m_sounds plays - every m_sounds.SetPosition of this frame would be a
+    // no-op (CWeaponMagazined::UpdateSounds and its overrides; the XFORM is still refreshed by sounds_fire_point)
+    bool NpcSoundsQuiet();
+
+private:
+
+    // F3 of plans/optimization_mt/24-critical-path.md (always on): how UpdateXFormFromOwner gets the bones of the
+    // owner - computes them (CalculateBones, what UpdateXForm always did), only advances the animation tracks (an owner
+    // nobody draws: its blend callbacks keep their pace, the bone math waits for whoever needs the bones) or takes them
+    // as they are (the bones prepass computes them later this frame)
+    enum class EOwnerBones : u8
+    {
+        Calculate,
+        TracksOnly,
+        AsTheyAre,
+    };
+    // The body of UpdateXForm after its once-per-frame check: the XFORM from the hand bones of the owner
+    void UpdateXFormFromOwner(EOwnerBones bones);
+    // F3: how the bones of the owner may be taken for the sound fire point now (Calculate = the exact UpdateXForm);
+    // also counts bones/caller/weapon/sounds_* while perf_metrics runs
+    EOwnerBones SoundsOwnerBones();
+    // The frame dwXF_Frame was stamped by an XFORM built from the owner's bones as they were (F3); 0 = the XFORM of
+    // dwXF_Frame is exact. An exact request of the same frame (get_LastFP, the render prepare) recomputes it
+    u32 m_xf_lazy_frame{0};
+    // The owner the last exact XFORM was computed for (F3 takes the bones as they are only after one exact compute
+    // in the same hands: never the bones of a model nobody computed yet)
+    u16 m_xf_exact_owner_id{u16(-1)};
+    Fvector m_lazy_fp{};
+
+public:
+    // F3: the fire point for the show / hide / reload sounds (CWeaponMagazined::UpdateSounds and its overrides). For
+    // the actor, the view entity, a dead owner, a second viewport, an owner drawn but not by the bones prepass, or once
+    // the fire point of this frame is known (a shot, the flame): get_LastFP(). Otherwise the XFORM is built from the
+    // owner's current XFORM and its last computed bones (at most a frame old when the bones prepass computes the owner;
+    // older for an owner nobody draws), without stamping the fire point: the shots (state_Fire) and the render prepare
+    // of the same frame still get the exact one
+    const Fvector& sounds_fire_point();
+
+#if XR_PERF_METRICS
+    // 24-critical-path.md, M4: who asks UpdateXForm for the owner's bones (bones/caller/weapon/*): a thread-local tag
+    // set around the parts of UpdateCL (WEAPON_XFORM_SOURCE)
+    enum : u8
+    {
+        xfsOther = 0,
+        xfsSounds,
+        xfsFire,
+        xfsFlame,
+    };
+    struct XFormSourceScope
+    {
+        explicit XFormSourceScope(u8 source);
+        ~XFormSourceScope();
+        XFormSourceScope(const XFormSourceScope&) = delete;
+        XFormSourceScope& operator=(const XFormSourceScope&) = delete;
+
+    private:
+        u8 m_prev;
+    };
+#endif
 
 public:
     void renderable_Render(u32 context_id, IRenderable* root) override;

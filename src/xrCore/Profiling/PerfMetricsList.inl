@@ -1475,3 +1475,300 @@ PERF_GAUGE(ph_ai_rise_rollback_max_mm, "physics/ai_rise_rollback_max_mm")
 PERF_COUNTER(ph_ai_climb_char_skipped, "physics/ai_climb_char_skipped")
 PERF_COUNTER(ph_ai_step_rise_restored, "physics/ai_step_rise_restored")
 PERF_COUNTER(ph_try_jump_rejected, "physics/try_position/jump_rejected")
+// 24-critical-path.md, G2 (xrGame ai_stalker_fire.cpp): the friendly-fire pick. npc/ff/cache_hit = picks served by the
+// pick cache (not in npc/ff/pick, not in npc/object_handler/pick_full); cache_miss_* = why a pick was cast: age
+// (npc_ff_pick_cache_ms / _frames), target (another enemy or item, no pick yet), moved (muzzle > 0.5 m, aim turned
+// more than the side ray angle), actor (the actor's fight, the view entity, the actor near the line of fire).
+// npc/ff/static = the level geometry part of the rays; precise_behind = precise tests of objects past the enemy
+// distance + npc_ff_pick_cut_behind (the actor's full-length rays); cut_skipped = objects a ray crossed but left out
+// by the cut; cut_full = rays kept full length for the actor.
+PERF_COUNTER(npc_ff_cache_hit, "npc/ff/cache_hit")
+PERF_COUNTER(npc_ff_cache_miss_age, "npc/ff/cache_miss_age")
+PERF_COUNTER(npc_ff_cache_miss_target, "npc/ff/cache_miss_target")
+PERF_COUNTER(npc_ff_cache_miss_moved, "npc/ff/cache_miss_moved")
+PERF_COUNTER(npc_ff_cache_miss_actor, "npc/ff/cache_miss_actor")
+PERF_TIMER(npc_ff_static, "npc/ff/static")
+PERF_COUNTER(npc_ff_precise_behind, "npc/ff/precise_behind")
+PERF_COUNTER(npc_ff_cut_skipped, "npc/ff/cut_skipped")
+PERF_COUNTER(npc_ff_cut_full, "npc/ff/cut_full")
+// AI sound dispatch (plans/optimization_mt/24-critical-path.md, G3; xrGame Level.cpp CLevel::SoundEvent_Filter,
+// sound_memory_manager.cpp; xrEngine IGame_Level.cpp). kept_combat / kept_other / kept_actor = the deliveries that go
+// out (after all cuts) by the class of the sound: combat (shot, bullet hit, explosion, monster attack / injury / death),
+// other (steps, voices, reloads, items, world), the actor's own; noncombat_cut = non-combat deliveries dropped by
+// npc_sound_noncombat_dist that the old rules (near_dist, actor distance) would keep; listener_capped = dropped by
+// npc_sound_noncombat_per_listener. Timers of one delivery: t_memory = CSoundMemoryManager::feel_sound_new, inside
+// it t_callback = CScriptEntity::sound_callback (the hear callback queue) and t_add = the sound memory insertion, inside
+// that t_visible = the visual memory search (visible_now); calls = deliveries reaching each part. The rest of
+// game/sound_dispatch is npc/sound/filter and the dispatch loop with CCustomMonster::feel_sound_new (cache misses on
+// the listener). sound/reg/remote_split = remote sounds (bullet hits) let through the coalescence by their own key
+// that the object key alone would have merged (the burst / budget gates may still drop them).
+PERF_COUNTER(npc_sound_kept_combat, "npc/sound/kept_combat")
+PERF_COUNTER(npc_sound_kept_other, "npc/sound/kept_other")
+PERF_COUNTER(npc_sound_kept_actor, "npc/sound/kept_actor")
+PERF_COUNTER(npc_sound_noncombat_cut, "npc/sound/noncombat_cut")
+PERF_COUNTER(npc_sound_listener_capped, "npc/sound/listener_capped")
+PERF_TIMER(npc_sound_t_memory, "npc/sound/t_memory")
+PERF_TIMER(npc_sound_t_callback, "npc/sound/t_callback")
+PERF_TIMER(npc_sound_t_add, "npc/sound/t_add")
+PERF_TIMER(npc_sound_t_visible, "npc/sound/t_visible")
+PERF_COUNTER(snd_reg_remote_split, "sound/reg/remote_split")
+// Dense crowd of live NPCs (plans/optimization_mt/21-physics-step.md, 2026-10-16; xrPhysics Physics.cpp), diagnostics
+// only. wake/ai_by_ai = sleeping live NPCs woken by another live NPC's contact in the frame step (a part of
+// physics/wake/ai); wake/ai_by_ai_probe = the same in the TryPosition probes on main (DoCollideObj / step_single, not
+// in physics/wake/*).
+PERF_COUNTER(ph_wake_ai_by_ai, "physics/wake/ai_by_ai")
+PERF_COUNTER(ph_wake_ai_by_ai_probe, "physics/wake/ai_by_ai_probe")
+// UpdateCL of stalkers and weapons on main (plans/optimization_mt/24-critical-path.md, M1 / M2 / M4 and F2 / F3,
+// 2026-10-16). stalker/ucl_lod/* = one decision per CAI_Stalker::TrySkipUpdateCLLod of a living stalker without a
+// parent: near (within npc_perf_ucl_lod_dist, full), full (the own frame of its tier), skip_d1 / skip_d2 (skipped by
+// the distance tiers), skip_combat (skipped by the combat tier npc_ucl_lod_combat), deny_combat (a fight, the combat
+// tier refused or npc_ucl_lod_combat < 2), deny_other (jump, physics control, view entity, svp, spawn, animation
+// movement, bone particles, a busy weapon outside the combat tier), deny_timecap. stalker/ucl_lod/combat/* = the near
+// or fighting ones checked for the combat tier (with npc_ucl_lod_combat < 2 too while perf_metrics runs): cand = would
+// skip by it, deny_seen = drawn in the main pass last frame (or svp), deny_shadow_near = drawn only in shadows /
+// lights within npc_perf_ucl_lod_dist, deny_actor = its enemy is the actor, deny_hit = hit within 1.5 s, deny_other =
+// the list above. stalker/ucl/n_* = full UpdateCL runs by what the render did with the stalker last frame (dead apart).
+// stalker/ucl/{object_handler,inherited,physics,sight,exec_look,step_manager} = the stages of a full UpdateCL.
+PERF_COUNTER(stk_ucl_lod_near, "stalker/ucl_lod/near")
+PERF_COUNTER(stk_ucl_lod_full, "stalker/ucl_lod/full")
+PERF_COUNTER(stk_ucl_lod_skip_d1, "stalker/ucl_lod/skip_d1")
+PERF_COUNTER(stk_ucl_lod_skip_d2, "stalker/ucl_lod/skip_d2")
+PERF_COUNTER(stk_ucl_lod_skip_combat, "stalker/ucl_lod/skip_combat")
+PERF_COUNTER(stk_ucl_lod_deny_combat, "stalker/ucl_lod/deny_combat")
+PERF_COUNTER(stk_ucl_lod_deny_other, "stalker/ucl_lod/deny_other")
+PERF_COUNTER(stk_ucl_lod_deny_timecap, "stalker/ucl_lod/deny_timecap")
+PERF_COUNTER(stk_ucl_lod_combat_cand, "stalker/ucl_lod/combat/cand")
+PERF_COUNTER(stk_ucl_lod_combat_seen, "stalker/ucl_lod/combat/deny_seen")
+PERF_COUNTER(stk_ucl_lod_combat_shadow, "stalker/ucl_lod/combat/deny_shadow_near")
+PERF_COUNTER(stk_ucl_lod_combat_actor, "stalker/ucl_lod/combat/deny_actor")
+PERF_COUNTER(stk_ucl_lod_combat_hit, "stalker/ucl_lod/combat/deny_hit")
+PERF_COUNTER(stk_ucl_lod_combat_other, "stalker/ucl_lod/combat/deny_other")
+PERF_COUNTER(stk_ucl_n_onscreen, "stalker/ucl/n_onscreen")
+PERF_COUNTER(stk_ucl_n_shadow_only, "stalker/ucl/n_shadow_only")
+PERF_COUNTER(stk_ucl_n_offscreen, "stalker/ucl/n_offscreen")
+PERF_COUNTER(stk_ucl_n_dead, "stalker/ucl/n_dead")
+PERF_TIMER(stk_ucl_object_handler, "stalker/ucl/object_handler")
+PERF_TIMER(stk_ucl_inherited, "stalker/ucl/inherited")
+PERF_TIMER(stk_ucl_physics, "stalker/ucl/physics")
+PERF_TIMER(stk_ucl_sight, "stalker/ucl/sight")
+PERF_TIMER(stk_ucl_exec_look, "stalker/ucl/exec_look")
+PERF_TIMER(stk_ucl_step_manager, "stalker/ucl/step_manager")
+// weapon/ucl/* = the parts of a full CWeapon / CWeaponMagazined UpdateCL: inherited (CHudItemObject chain: spatial,
+// crow, HUD motions), addons_vis (HUD addons, laser dots), light_flame (shot light, flame particles), state (the
+// CWeaponMagazined state machine, state_Fire), sounds (UpdateSounds). bones/caller/weapon/{sounds,fire,flame,other} =
+// the owner's CalculateBones in CWeapon::UpdateXForm (the whole call: UpdateTracks + the bone math when due) by who
+// asked: UpdateSounds, the state machine (state_Fire), the flame / light, anything else (render, Game thread, events).
+// sounds_* = the UpdateSounds calls that need the owner's bones, by the owner: prepass = the bones prepass computes
+// them this frame anyway, unseen = drawn in no pass last frame (both left to F3), seen = drawn but not by the prepass,
+// exact = the actor, the view entity, a dead owner, svp (both computed). weapon/xform_lazy/* = F3 (always on): XFORMs
+// built from the owner's last bones (prepass / offscreen), reused in the same frame, upgraded later to the exact one
+// (render prepare, Game thread).
+PERF_TIMER(wpn_ucl_inherited, "weapon/ucl/inherited")
+PERF_TIMER(wpn_ucl_addons_vis, "weapon/ucl/addons_vis")
+PERF_TIMER(wpn_ucl_light_flame, "weapon/ucl/light_flame")
+PERF_TIMER(wpn_ucl_state, "weapon/ucl/state")
+PERF_TIMER(wpn_ucl_sounds, "weapon/ucl/sounds")
+PERF_TIMER(wpn_bones_sounds, "bones/caller/weapon/sounds")
+PERF_TIMER(wpn_bones_fire, "bones/caller/weapon/fire")
+PERF_TIMER(wpn_bones_flame, "bones/caller/weapon/flame")
+PERF_TIMER(wpn_bones_other, "bones/caller/weapon/other")
+PERF_COUNTER(wpn_bones_sounds_prepass, "bones/caller/weapon/sounds_prepass")
+PERF_COUNTER(wpn_bones_sounds_unseen, "bones/caller/weapon/sounds_unseen")
+PERF_COUNTER(wpn_bones_sounds_seen, "bones/caller/weapon/sounds_seen")
+PERF_COUNTER(wpn_bones_sounds_exact, "bones/caller/weapon/sounds_exact")
+PERF_COUNTER(wpn_xform_lazy_prepass, "weapon/xform_lazy/prepass")
+PERF_COUNTER(wpn_xform_lazy_offscreen, "weapon/xform_lazy/offscreen")
+PERF_COUNTER(wpn_xform_lazy_reused, "weapon/xform_lazy/reused")
+PERF_COUNTER(wpn_xform_lazy_upgraded, "weapon/xform_lazy/upgraded")
+// physics/broadphase/skip/* (21-physics-step.md, 2026-10-16; permanent, limits ph_corpse_vs_corpse_dist / _npc_dist):
+// candidates dropped in CPHObject::CollideDynamicsBroadphase after the exact AABB filter, i.e. NearCallback calls saved.
+// corpse_corpse - corpse x corpse; corpse_npc - corpse x live NPC controller beyond ph_corpse_vs_npc_dist (both: the
+// frame step, the same condition as pair/*, so pair/ragdoll_ragdoll + skip/corpse_corpse and pair/ai_ragdoll +
+// skip/corpse_npc are the counts without the rules); corpse_npc_local - the same on the other paths (TryPosition probes,
+// world steps on main). pair/ragdoll_ragdoll - the corpse x corpse part of pair/ragdoll that still reaches NearCallback.
+PERF_COUNTER(ph_bp_skip_corpse_corpse, "physics/broadphase/skip/corpse_corpse")
+PERF_COUNTER(ph_bp_skip_corpse_npc, "physics/broadphase/skip/corpse_npc")
+PERF_COUNTER(ph_bp_skip_corpse_npc_local, "physics/broadphase/skip/corpse_npc_local")
+PERF_COUNTER(ph_bp_pair_ragdoll_ragdoll, "physics/broadphase/pair/ragdoll_ragdoll")
+// Parallel post-integrate (plans/optimization_mt/21-physics-step.md, journal 2026-10-16; permanent, frame
+// step only). post_mt/cpu = the parallel part (IslandReinit + PhDataUpdate + spatial bounds) in the island-solve tasks,
+// summed over the threads - it is inside physics/step/solve then, and physics/step/post_integrate is the serial rest.
+// objects = objects whose post-integrate ran there, offthread = of them on a pool worker; serial = objects left wholly
+// to the serial loop (not a shell / controller, or not in a solved group); deactivate / rebuild = deferred list removals
+// of controllers and octree rebuilds applied by the serial pass.
+PERF_TIMER(ph_post_mt_cpu, "physics/post_mt/cpu")
+PERF_COUNTER(ph_post_mt_objects, "physics/post_mt/objects")
+PERF_COUNTER(ph_post_mt_offthread, "physics/post_mt/offthread")
+PERF_COUNTER(ph_post_mt_serial, "physics/post_mt/serial")
+PERF_COUNTER(ph_post_mt_deactivate, "physics/post_mt/deactivate")
+PERF_COUNTER(ph_post_mt_rebuild, "physics/post_mt/rebuild")
+PERF_COUNTER(ph_post_mt_split, "physics/post_mt/split")     // groups of > 16 objects whose objects went to the pool in chunks
+// K5 of plans/optimization_mt/26-framemove-game-next.md (1-B, temporary switch wpn_npc_ucl_lite; counted only while it
+// is on): weapon/lite/sounds_quiet - CWeaponMagazined::UpdateSounds of a weapon not in the actor's hands with nothing of
+// m_sounds playing (the SetPosition lookups left out); fire_lazy - state_Fire frames of such a weapon between the shots
+// (no fire point, no g_fireParams); fire_exact - its state_Fire frames that may shoot; addons_npc - CWeapon::UpdateCL
+// without UpdateHUDAddonsVisibility / LaserDotsAllowed. The time is in weapon/ucl/{sounds,state,addons_vis}.
+PERF_COUNTER(wpn_lite_sounds_quiet, "weapon/lite/sounds_quiet")
+PERF_COUNTER(wpn_lite_fire_lazy, "weapon/lite/fire_lazy")
+PERF_COUNTER(wpn_lite_fire_exact, "weapon/lite/fire_exact")
+PERF_COUNTER(wpn_lite_addons_npc, "weapon/lite/addons_npc")
+// 26-framemove-game-next.md, package 1-A (plans/optimization_mt, 2026-10-16): the parts of FrameMove and of the Game
+// thread that M1-M12 left unmeasured. Diagnostics only, no behaviour change; every timer is per stage, calls = runs.
+// cm/ucl/* (M3) = CCustomMonster::UpdateCL of stalkers and monsters (for stalkers inside stalker/ucl/inherited):
+// inherited = CEntityAlive..CGameObject::UpdateCL, position_anim = UpdatePositionAnimation (the movement on the frame and
+// the animation selection), select_anim = SelectAnimation inside it (calls = selections the animation LOD let run),
+// anim_mov_ctrl = update_animation_movement_controller.
+PERF_TIMER(cm_ucl_inherited, "cm/ucl/inherited")
+PERF_TIMER(cm_ucl_position_anim, "cm/ucl/position_anim")
+PERF_TIMER(cm_ucl_select_anim, "cm/ucl/select_anim")
+PERF_TIMER(cm_ucl_anim_mov_ctrl, "cm/ucl/anim_mov_ctrl")
+// movement/* (M3) = CMovementManager::move_along_path_body on a path (inside cm/ucl/position_anim): nearest = the neighbour
+// query (ObjectSpace.GetNearest); collision_move = the branch with neighbours, calls = such frames (TryPosition, and the
+// frame step Calculate when it fails); try_fail = that failed part (Calculate + the collision hit), calls = failures, so
+// TryPosition itself ~ collision_move - try_fail; try_skip = frames whose TryPosition the npc_perf_move_try_skip_frames
+// budget skipped.
+PERF_TIMER(mv_nearest, "movement/nearest")
+PERF_TIMER(mv_collision_move, "movement/collision_move")
+PERF_TIMER(mv_try_fail, "movement/try_fail")
+PERF_COUNTER(mv_try_skip, "movement/try_skip")
+// CCharacterPhysicsSupport::in_UpdateCL (M3; stalker/ucl/physics for stalkers, the actor and monsters too): ik/update =
+// CIKLimbsController::Update, calls = IK runs; ik/interval_skip = calls with an IK controller whose IK interval did not
+// come; cph/ucl/anim_collision = update_animation_collision; cph/ucl/ragdoll = the ragdoll of the dead (SetRagDoll, the
+// interpolation, death animations, friction).
+PERF_TIMER(ik_update, "ik/update")
+PERF_COUNTER(ik_interval_skip, "ik/interval_skip")
+PERF_TIMER(cph_ucl_anim_collision, "cph/ucl/anim_collision")
+PERF_TIMER(cph_ucl_ragdoll, "cph/ucl/ragdoll")
+// The rest of ucl/stalker (CAI_Stalker::UpdateCL): lod_decide = TrySkipUpdateCLLod of every call, lod_skip_path inside it
+// = a skipped frame (UpdateCLSkippedRoot + the recoil relax of the combat tier); dead = the whole full UpdateCL of a dead
+// stalker (its stalker/ucl/inherited and stalker/ucl/physics included); danger_sound = the run-in-danger voice;
+// shot_effector = the recoil effector of a full UpdateCL.
+PERF_TIMER(stk_ucl_lod_decide, "stalker/ucl/lod_decide")
+PERF_TIMER(stk_ucl_lod_skip_path, "stalker/ucl/lod_skip_path")
+PERF_TIMER(stk_ucl_dead, "stalker/ucl/dead")
+PERF_TIMER(stk_ucl_danger_sound, "stalker/ucl/danger_sound")
+PERF_TIMER(stk_ucl_shot_effector, "stalker/ucl/shot_effector")
+// The rest of ucl/weapon (declared for the weapon files, K5): skip_check = TrySkipHiddenUpdateCL() ||
+// TrySkipOwnerLodUpdateCL() at the top of CWeapon / CWeaponMagazined::UpdateCL (the check and the work of a skipped
+// frame), skipped = the UpdateCL calls it ended.
+PERF_TIMER(wpn_ucl_skip_check, "weapon/ucl/skip_check")
+PERF_COUNTER(wpn_ucl_skipped, "weapon/ucl/skipped")
+// CObjectList::SingleUpdate (inside objects/update/single): classify = choosing the ucl/* bucket (the cast chain, only
+// while perf_metrics runs); visits = SingleUpdate calls (the workload and the parents reached from their children),
+// skip_done = of them already updated this frame, skip_disabled = processing disabled. objects/update/single - ucl/* -
+// classify = the walk itself (the first touch of every object, the parent recursion).
+PERF_TIMER(ol_upd_classify, "objects/update/classify")
+PERF_COUNTER(ol_upd_visits, "objects/update/visits")
+PERF_COUNTER(ol_upd_skip_done, "objects/update/skip_done")
+PERF_COUNTER(ol_upd_skip_disabled, "objects/update/skip_disabled")
+// ge/time/* (M6) = CLevel::ProcessGameEvents (frame/level/game_events) by message, calls = messages: spawn = M_SPAWN;
+// M_EVENT by type: hit = GE_HIT, die = GE_DIE / GE_ASSIGN_KILLER, take = GE_OWNERSHIP_TAKE* / GE_TRADE_BUY, reject =
+// GE_OWNERSHIP_REJECT / GE_TRADE_SELL, destroy = GE_DESTROY / GE_DESTROY_REJECT, weapon = GE_WPN_* / GE_ADDON_* /
+// GE_INSTALL_UPGRADE / GE_TRANSFER_AMMO / GE_GRENADE_EXPLODE, event_other = any other GE_*; other = other messages.
+PERF_TIMER(ge_time_spawn, "ge/time/spawn")
+PERF_TIMER(ge_time_hit, "ge/time/hit")
+PERF_TIMER(ge_time_die, "ge/time/die")
+PERF_TIMER(ge_time_take, "ge/time/take")
+PERF_TIMER(ge_time_reject, "ge/time/reject")
+PERF_TIMER(ge_time_destroy, "ge/time/destroy")
+PERF_TIMER(ge_time_weapon, "ge/time/weapon")
+PERF_TIMER(ge_time_event_other, "ge/time/event_other")
+PERF_TIMER(ge_time_other, "ge/time/other")
+// map/* (M7) = CMapManager::Update (frame/level/map_manager): locations_time = CMapLocation::Update of every location
+// (map/locations = their count), relation_time = ResolveRelationSpotChecks (map/relation = the checks), tail = the
+// deferred deletes of the previous frame, the sort and the removal of expired locations (calls = 2 a frame).
+PERF_TIMER(map_locations_time, "map/locations_time")
+PERF_TIMER(map_relation_time, "map/relation_time")
+PERF_TIMER(map_tail, "map/tail")
+// The maps of the UI (M7; the minimap is inside hud/ui/main_wnd): ui/minimap/update_spots = CUIMiniMap::UpdateSpots
+// (DetachAll + UpdateMiniMap of every location), ui/minimap/detach = its DetachAll; ui/map/update = CUICustomMap::Update
+// of any map (the minimap every frame, the PDA maps while open), ui/map/children = its CUIStatic::Update (spot windows).
+PERF_TIMER(ui_minimap_update_spots, "ui/minimap/update_spots")
+PERF_TIMER(ui_minimap_detach, "ui/minimap/detach")
+PERF_TIMER(ui_map_update, "ui/map/update")
+PERF_TIMER(ui_map_children, "ui/map/children")
+// sound/update/* (M7) = CSoundRender_Core::update (frame/move/sound): lock_wait = waiting for m_emitters_lock (held by the
+// physics thread's play_at_pos, the Game thread's render), targets = the emitters on voices, emitters = the rest of the
+// scene emitters (and the deletion of stopped ones; calls = scenes), listener = update_listener, register = the events of
+// the scenes (SoundEvent_Register: q_box, occlusion rays). sound/render/lock_wait = the same lock in
+// CSoundRender_Core::render.
+PERF_TIMER(snd_update_lock_wait, "sound/update/lock_wait")
+PERF_TIMER(snd_update_targets, "sound/update/targets")
+PERF_TIMER(snd_update_emitters, "sound/update/emitters")
+PERF_TIMER(snd_update_listener, "sound/update/listener")
+PERF_TIMER(snd_update_register, "sound/update/register")
+PERF_TIMER(snd_render_lock_wait, "sound/render/lock_wait")
+// game/seq_frame_mt/* = the subscribers of seqFrameMT (game/seq_frame_mt): sound = GEnv.Sound->render(), net =
+// CLevel::net_Update (the client send and the server update; nearly empty in single player; on main with mtNetwork off).
+PERF_TIMER(game_seq_frame_mt_sound, "game/seq_frame_mt/sound")
+PERF_TIMER(game_seq_frame_mt_net, "game/seq_frame_mt/net")
+// npc/sound/* inside t_memory (CSoundMemoryManager::feel_sound_new): t_visitor = the sound user data visitor
+// (CStalkerSoundDataVisitor: the danger and the enemy of the sounding NPC), t_hit_add = the hit memory entry of an enemy
+// shot. t_memory - t_callback - t_add - t_visitor - t_hit_add = the threshold decay and the type factors.
+PERF_TIMER(npc_sound_t_visitor, "npc/sound/t_visitor")
+PERF_TIMER(npc_sound_t_hit_add, "npc/sound/t_hit_add")
+// M13: log/add by the thread that logs (main / Game thread / workers and the rest); log/perf_dump = the 5 s dump of
+// perf_metrics itself on main (its lines are counted in log/add and log/add/main of the frame after the dump).
+PERF_TIMER(log_add_main, "log/add/main")
+PERF_TIMER(log_add_game, "log/add/game")
+PERF_TIMER(log_add_worker, "log/add/worker")
+PERF_TIMER(log_perf_dump, "log/perf_dump")
+// K7 (plans/optimization_mt/26-framemove-game-next.md, 1-C). CAI_Stalker::best_cover went to search: why/none = no
+// current cover, why/bad = the current cover failed the checks against the threat (too close, worse by 1, no
+// loophole), why/event = an event dropped it (enemy change, danger location, blocked by a member, restrictions,
+// planner). scan = searches that scanned the cover points (the advance 10 m search not counted), none_found = scans
+// that found no cover, inertia_kept = inertia answers taken without a scan, inertia_rescan = inertia answers refused
+// (another cover, or the current one is bad now) and scanned, none_hold = searches skipped after a scan that found
+// nothing (npc_cover_none_hold_ms). Searches avoided = inertia_kept + none_hold.
+PERF_COUNTER(stk_cover_why_none, "stalker/cover/why/none")
+PERF_COUNTER(stk_cover_why_bad, "stalker/cover/why/bad")
+PERF_COUNTER(stk_cover_why_event, "stalker/cover/why/event")
+PERF_COUNTER(stk_cover_scan, "stalker/cover/scan")
+PERF_COUNTER(stk_cover_none_found, "stalker/cover/none_found")
+PERF_COUNTER(stk_cover_inertia_kept, "stalker/cover/inertia_kept")
+PERF_COUNTER(stk_cover_inertia_rescan, "stalker/cover/inertia_rescan")
+PERF_COUNTER(stk_cover_none_hold, "stalker/cover/none_hold")
+// The useful cache of CEnemyManager: useful_miss = lookups not answered by it (hit rate = useful_cached /
+// (useful_cached + useful_miss)), useful_drop = entries dropped by relcase and enemy change (the whole cache is
+// cleared on both).
+PERF_COUNTER(stk_enemy_useful_miss, "stalker/enemy/useful_miss")
+PERF_COUNTER(stk_enemy_useful_drop, "stalker/enemy/useful_drop")
+// K8 (plans/optimization_mt/26-framemove-game-next.md, 2-B; ai/stalker/ai_stalker.cpp). K8a: take_seen_far = fighters
+// drawn in the main pass last frame, at least npc_ucl_lod_combat_seen_dist m from the camera (zoomed distance; 50 m
+// while the switch is 0 - how many it would take, they stay in deny_seen then), not refused for the actor as the enemy,
+// a recent hit or an every-frame case; skip_seen_far = their skipped UpdateCL (inside skip_combat). K8c (npc_oh_lod_combat):
+// object handler runs of fighters farther than npc_perf_object_handler_lod_dist with a settled weapon and an actual
+// plan - cand_unseen / cand_seen (counted with the switch 0 too, inside keep_fight then), skip_unseen / skip_seen = runs
+// skipped (not in npc/object_handler/full).
+PERF_COUNTER(stk_ucl_lod_combat_seen_far, "stalker/ucl_lod/combat/take_seen_far")
+PERF_COUNTER(stk_ucl_lod_skip_seen_far, "stalker/ucl_lod/skip_seen_far")
+PERF_COUNTER(npc_oh_combat_cand_unseen, "npc/object_handler/combat/cand_unseen")
+PERF_COUNTER(npc_oh_combat_cand_seen, "npc/object_handler/combat/cand_seen")
+PERF_COUNTER(npc_oh_combat_skip_unseen, "npc/object_handler/combat/skip_unseen")
+PERF_COUNTER(npc_oh_combat_skip_seen, "npc/object_handler/combat/skip_seen")
+// 26-framemove-game-next.md, package 2-A (K2/K3/K4/K9; Level.cpp, lua_spike_probe.cpp, xrEngine EngineThreading.cpp).
+// K2a: gc_long_step = single paced GC steps of at least 2 ms (always with perf_metrics; in practice the atomic phase of
+// LuaJIT, so max_frame ~ its time and calls ~ GC cycles); gc_capped = frames where lua_gc_step_budget_us stopped the
+// steps with debt left, gc_uncapped = frames over the debt limit (paid off without the cap); gc_debt = the steps owed
+// after the frame. K2b (lua_gc_overlap): gc_in_early / gc_in_seq = GC steps run in phase 0 of the Game thread / by the
+// seqParallel delegate (frames without phase 0). K3 (mt_sound_dispatch_early) / K2b: game/early = phase 0 on the Game
+// thread (dispatch + GC; parallel to phase B/C of the prepass and the physics kick on main), early_dispatch = frames
+// whose dispatch ran there (game/sound_dispatch then counts it, outside game/total); game/start_delay = from
+// KickGameLogicThread to the start of the body (wake latency + what phase 0 did not finish before the kick).
+// K4 (mt_prepass_main_slot): prepass/map_update = CMapManager::Update in the phase B window (or on the way out of the
+// prepass), prepass/main_slot_wait = main waiting for the rest of phase B after it, map_update_late = updates left to
+// the next OnFrame (no prepass in that frame). K9 (mt_sound_render_task): game/sound_render_wait = the Game thread
+// waiting for the sound render task before seqFrameMT (the task itself is game/seq_frame_mt/sound).
+PERF_TIMER(lua_gc_long_step, "lua/gc_long_step")
+PERF_COUNTER(lua_gc_capped, "lua/gc_capped")
+PERF_COUNTER(lua_gc_uncapped, "lua/gc_uncapped")
+PERF_GAUGE(lua_gc_debt, "lua/gc_debt")
+PERF_COUNTER(lua_gc_in_early, "lua/gc_in_early")
+PERF_COUNTER(lua_gc_in_seq, "lua/gc_in_seq")
+PERF_TIMER(game_early, "game/early")
+PERF_COUNTER(game_early_dispatch, "game/early_dispatch")
+PERF_TIMER(game_start_delay, "game/start_delay")
+PERF_TIMER(game_sound_render_wait, "game/sound_render_wait")
+PERF_TIMER(prepass_map_update, "prepass/map_update")
+PERF_TIMER(prepass_main_slot_wait, "prepass/main_slot_wait")
+PERF_COUNTER(prepass_map_update_late, "prepass/map_update_late")

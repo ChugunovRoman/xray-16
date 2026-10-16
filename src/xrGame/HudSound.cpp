@@ -176,6 +176,31 @@ void HUD_SOUND_COLLECTION::StopAllSounds()
         HUD_SOUND_ITEM::StopSound(sound_item);
 }
 
+bool HUD_SOUND_COLLECTION::AnyPlaying()
+{
+    for (auto& sound_item : m_sound_items)
+    {
+        if (sound_item.playing())
+            return true;
+    }
+    return false;
+}
+
+bool HUD_SOUND_COLLECTION::AnyPlaying(std::initializer_list<pcstr> aliases)
+{
+    for (auto& sound_item : m_sound_items)
+    {
+        if (!sound_item.playing())
+            continue;
+        for (pcstr alias : aliases)
+        {
+            if (sound_item == alias)
+                return true;
+        }
+    }
+    return false;
+}
+
 void HUD_SOUND_COLLECTION::LoadSound(LPCSTR section, LPCSTR line, LPCSTR alias, bool exclusive, int type)
 {
     ZoneScoped;

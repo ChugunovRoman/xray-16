@@ -72,6 +72,15 @@ private:
     PH_UPDATE_OBJECT_STORAGE m_freezed_update_objects;
     // P1: reused snapshot of active-island roots for parallel solve (see CPHWorld::Step).
     xr_vector<CPHObject*> m_island_solve_batch;
+    // Parallel post-integrate (permanent, CPHWorld::Step; stepping thread only): m_objects of the step in list
+    // order (m_post_objects), the merge-root group of each of them (m_post_object_group: an index into the island-solve
+    // batch, u32(-1) = not in a solved group), and the same objects by group: m_post_members[m_post_group_begin[i] ..
+    // m_post_group_begin[i + 1]) for batch entry i, in list order.
+    xr_vector<CPHObject*> m_post_objects;
+    xr_vector<u32> m_post_object_group;
+    xr_vector<CPHObject*> m_post_members;
+    xr_vector<u32> m_post_group_begin;
+    xr_vector<u32> m_post_group_fill;
     // Ф2 (PHYSICS_ACTIVE_SET_PLAN, distance-based corpse sleep): ragdolls collected this step that are far
     // enough from the camera and old enough to force-disable, regardless of their current velocity -
     // intentionally crude (a far corpse not reacting correctly to a later impact is an acceptable trade
@@ -190,6 +199,9 @@ public:
     void SleepCorpses();
     // Stretch watchdog over m_corpses_active (+ the physics/corpse_near/awake_old count).
     void CheckActiveCorpses();
+    // Parallel post-integrate (permanent): groups m_post_objects by the merge root they were solved with
+    // (m_island_solve_batch, after BalanceIslandSolve). Step() only.
+    void BuildPostIntegrateGroups();
     void CutVelocity(float l_limit, float a_limit);
     void GetState(V_PH_WORLD_STATE& state);
     void Freeze();

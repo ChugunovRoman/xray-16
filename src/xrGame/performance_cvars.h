@@ -68,7 +68,8 @@ extern u32 npc_perf_ik_interval_near_idle_ms;
 extern u32 npc_perf_ik_interval_medium_ms;
 extern u32 npc_perf_ik_interval_far_ms;
 extern u32 npc_perf_ik_interval_disabled_ms;
-/** 0 = vanilla (IK every tick when enemy selected). >0 = min interval ms for stalker IK with selected enemy (crowds). */
+/** 0 = vanilla (IK every tick when enemy selected). >0 = min interval ms for stalker IK with selected enemy (crowds).
+    Default 100 (K10 of plans/optimization_mt/26-framemove-game-next.md: the tested value; was 0). */
 extern u32 npc_perf_ik_interval_enemy_selected_ms;
 
 // IK foot rays (IKLimbsController.cpp): all rays of an NPC in one batch (always), static geometry only (always);
@@ -120,14 +121,15 @@ extern int npc_perf_visible_value_native;
 // counted (_gw_internal.logic.stats prints them).
 extern int npc_perf_condlist_native;
 
-/** IK of NPCs in a fight (CharacterPhysicsSupport.cpp, get_character_ik_update_interval). 0 (default) = as before:
+/** IK of NPCs in a fight (CharacterPhysicsSupport.cpp, get_character_ik_update_interval). 0 = as before:
     a stalker with a selected enemy runs IK at npc_perf_ik_interval_enemy_selected_ms at any distance. N > 0 = that
-    interval only within N m of the actor; farther the distance scale (near / medium / far / disabled) applies. */
+    interval only within N m of the actor; farther the distance scale (near / medium / far / disabled) applies.
+    Default 20 (K10 of 26-framemove-game-next.md: the tested value; was 0). */
 extern int npc_perf_ik_enemy_near_dist;
 
-/** IK of NPCs off screen. 0 (default) = as before. N > 0 = an NPC not seen in the last main render pass runs IK at
+/** IK of NPCs off screen. 0 = as before. N > 0 = an NPC not seen in the last main render pass runs IK at
     least N ms apart, whatever the other rules say (the feet keep the last ground contact meanwhile); not while a
-    second viewport (scope) renders. */
+    second viewport (scope) renders. Default 450 (K10 of 26-framemove-game-next.md: the tested value; was 0). */
 extern int npc_perf_ik_offscreen_interval_ms;
 
 /** UpdateCL rate LOD of living stalkers by the distance to the camera, on screen too (ai_stalker.cpp,
@@ -149,6 +151,13 @@ extern int npc_perf_ucl_lod_dist2;
     not skipped if the time since the last full UpdateCL plus this frame's delta would exceed it, and the first
     full UpdateCL after a skip gets up to this much time instead of the usual 100 ms clamp. */
 extern int npc_perf_ucl_lod_max_delta_ms;
+/** The combat tier of the UpdateCL LOD (plans/optimization_mt/24-critical-path.md, F2; always on, saved tunable,
+    default 2): N = 2..4 = a stalker within npc_perf_ucl_lod_dist or in a fight runs its UpdateCL every N-th frame
+    if it was not drawn in the main pass last frame (no second viewport), is not drawn in shadows / lights within
+    npc_perf_ucl_lod_dist, the actor is not its enemy and it was not hit in the last 1.5 s; 0 / 1 = every frame. The
+    other refusals of the LOD (jump, physics control, animation movement...) and its time cap
+    npc_perf_ucl_lod_max_delta_ms stay. */
+extern int npc_ucl_lod_combat;
 
 /* The object handler LOD (plans/optimization_mt/22-game-thread.md, step 1; ai_stalker.cpp,
     CAI_Stalker::TrySkipObjectHandlerLod / can_kill_pick_lod_reuse), always on in single player. Two things:

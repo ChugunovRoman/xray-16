@@ -1,5 +1,6 @@
 #pragma once
 #include "xrSound/Sound.h"
+#include <initializer_list>
 
 struct HUD_SOUND_ITEM
 {
@@ -73,6 +74,15 @@ public:
 
     void SetPosition(LPCSTR alias, const Fvector& pos);
     void StopAllSounds();
+
+    // K5 of plans/optimization_mt/26-framemove-game-next.md (wpn_npc_ucl_lite): whether any item of the collection
+    // still plays (HUD_SOUND_ITEM::playing). Without one SetPosition of every alias is a no-op, so the alias lookups
+    // (xr_stricmp over the whole collection per alias) can be left out
+    bool AnyPlaying();
+    // Whether one of the aliases plays: the same answer as FindSoundItem(alias, false) + playing() for each of them
+    // (an alias is unique in a collection, LoadSound asserts it), but the cheap feedback test goes first and the
+    // aliases are compared only for the items that play
+    bool AnyPlaying(std::initializer_list<pcstr> aliases);
 };
 
 //Alundaio:

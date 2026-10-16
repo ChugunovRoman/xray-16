@@ -1083,6 +1083,18 @@ void CAI_Stalker::destroy_anim_mov_ctrl()
 //    a frame or two later;
 //  - the bone particles: their life time counts Device.dwTimeDelta per UpdateCL - never skipped while they play.
 // The spatial DB and the update list are kept by UpdateCLSkippedRoot(), the DEBUG check of SingleUpdate as well.
+
+// K8 of plans/optimization_mt/26-framemove-game-next.md (package 2-B), temporary A/B switches, not saved, 0 = as before:
+// - npc_ucl_lod_combat_seen_dist N (m): the combat tier also takes a fighting stalker drawn in the main pass last frame
+//   if it is at least N m from the camera, the distance shrunk by the zoom like all the tiers here (a target in a 2D
+//   scope or binoculars comes near and stays every frame; a second viewport - a 3D scope - keeps everybody every
+//   frame). Every 2nd frame, whatever npc_ucl_lod_combat says (the combat tier itself must be on, N >= 2);
+// - npc_oh_lod_combat: the object handler (the fire planner) of a fighting stalker farther than
+//   npc_perf_object_handler_lod_dist m (see TrySkipObjectHandlerCombatLod): 1 = of one not drawn last frame on every
+//   2nd UpdateCL, 2 = also of one drawn last frame on every 2nd frame.
+int npc_ucl_lod_combat_seen_dist = 50; // on by default for the long test (2026-10-16), still a temporary switch
+int npc_oh_lod_combat = 2; // on by default for the long test (2026-10-16), still a temporary switch
+
 namespace
 {
 // A hit taken within this time counts as a fight
@@ -1090,6 +1102,8 @@ constexpr u32 UCL_LOD_RECENT_HIT_MS = 5000;
 // The first frames after the spawn run in full: the net state, the physics movement control and the animation
 // get settled there
 constexpr u32 UCL_LOD_SPAWN_FRAMES = 30;
+// The combat tier (F2 of plans/optimization_mt/24-critical-path.md): a hit taken within this time keeps every frame
+constexpr u32 UCL_LOD_COMBAT_HIT_MS = 1500;
 } // namespace
 
 bool CAI_Stalker::TrySkipUpdateCLLod()
@@ -1105,11 +1119,21 @@ bool CAI_Stalker::TrySkipUpdateCLLod()
     float dist = Position().distance_to(Device.vCameraPosition);
     if (Device.fFOV > EPS && g_fov > EPS && Device.fFOV < g_fov)
         dist *= std::tan(deg2rad(Device.fFOV) * 0.5f) / std::tan(deg2rad(g_fov) * 0.5f);
-    if (dist < float(npc_perf_ucl_lod_dist))
-        return false; // near: every frame, not counted
-    const bool far_tier =
-        npc_perf_ucl_lod_dist2 > 0 && dist >= float(_max(npc_perf_ucl_lod_dist2, npc_perf_ucl_lod_dist));
-    const u32 interval = far_tier ? 3 : 2;
+    const bool near_tier = dist < float(npc_perf_ucl_lod_dist);
+
+    // F2 of plans/optimization_mt/24-critical-path.md: the combat tier (always on; npc_ucl_lod_combat N = 2..4, saved,
+    // default 2; 0 / 1 = every frame) also takes the near and the fighting stalkers nobody looks at - see below. While
+    // perf_metrics runs, it is checked with N < 2 too (stalker/ucl_lod/combat/*: how many it would take)
+    const u32 combat_interval = npc_ucl_lod_combat >= 2 ? u32(npc_ucl_lod_combat) : 0;
+#if XR_PERF_METRICS
+    const bool measure = xray::perf::g_perf_metrics_active;
+#else
+    constexpr bool measure = false;
+#endif
+    if (near_tier && !combat_interval && !measure)
+        return false; // near: every frame
+    const bool far_tier = !near_tier && npc_perf_ucl_lod_dist2 > 0 &&
+        dist >= float(_max(npc_perf_ucl_lod_dist2, npc_perf_ucl_lod_dist));
 
     const bool profile = npc_cpp_profile::enabled();
 
@@ -1142,12 +1166,6 @@ bool CAI_Stalker::TrySkipUpdateCLLod()
                 weapon_busy = true;
         }
     }
-    if (fight)
-    {
-        if (profile)
-            npc_cpp_profile::count(ENpcCppProfileStage::UclLodDenyCombat);
-        return false;
-    }
 
     // Everything else that needs every frame:
     //  - the current (view) entity: the camera sits in it;
@@ -1159,18 +1177,96 @@ bool CAI_Stalker::TrySkipUpdateCLLod()
     //    animations with a root motion): the XFORM follows the animation in update_animation_movement_controller;
     //  - the animated collision body after a hit, an interactive motion or animation;
     //  - bone particles (their life time counts the frame delta per UpdateCL);
-    //  - a busy weapon (see above)
-    CPHMovementControl* movement_control = character_physics_support()->movement();
-    const bool other = weapon_busy || this == Level().CurrentEntity() || this == Level().CurrentViewEntity() ||
-        Device.m_SecondViewport.IsSVPActive() || Device.dwFrame - spawn_time() < UCL_LOD_SPAWN_FRAMES ||
-        (movement_control &&
-            (movement_control->JumpState() || movement_control->ForcedPhysicsControl() ||
-                movement_control->bExernalImpulse || movement_control->IsLosingControl())) ||
-        animation_movement_controlled() || character_physics_support()->animation_collision() ||
-        character_physics_support()->is_interactive_motion() ||
-        character_physics_support()->interactive_animation_running() || CParticlesPlayer::IsPlaying();
-    if (other)
+    //  - a busy weapon (see above; not in the combat tier: the weapon runs its own UpdateCL every frame anyway)
+    const auto needs_every_frame = [this]() {
+        CPHMovementControl* movement_control = character_physics_support()->movement();
+        return this == Level().CurrentEntity() || this == Level().CurrentViewEntity() ||
+            Device.m_SecondViewport.IsSVPActive() || Device.dwFrame - spawn_time() < UCL_LOD_SPAWN_FRAMES ||
+            (movement_control &&
+                (movement_control->JumpState() || movement_control->ForcedPhysicsControl() ||
+                    movement_control->bExernalImpulse || movement_control->IsLosingControl())) ||
+            animation_movement_controlled() || character_physics_support()->animation_collision() ||
+            character_physics_support()->is_interactive_motion() ||
+            character_physics_support()->interactive_animation_running() || CParticlesPlayer::IsPlaying();
+    };
+
+    u32 interval = far_tier ? 3 : 2;
+    bool combat_tier = false;
+    bool seen_far = false; // K8a: taken by the combat tier while on screen
+    if (near_tier || fight)
     {
+        // The combat tier (F2): a near or fighting stalker the player does not see - not drawn in the main pass last
+        // frame (the render flags of the previous frame; no second viewport), not drawn in shadows or lights while
+        // within npc_perf_ucl_lod_dist (its shadow would step), the actor is not its enemy, no hit in the last
+        // UCL_LOD_COMBAT_HIT_MS (the hit reaction), and none of the every-frame cases above. Runs every
+        // npc_ucl_lod_combat-th frame (every 3rd at least beyond npc_perf_ucl_lod_dist2): the movement, the look and
+        // the sound player get the whole time since the last full UpdateCL as in the distance tiers (the 100 ms clamp
+        // of CCustomMonster::UpdateCL is lifted after a skip); the animation tracks come from whoever computes the
+        // bones, as for the distance tiers; the weapon in the hands keeps its own UpdateCL unless idle (shots, reload);
+        // the object handler (the fire planner) runs on the full frames only
+        bool combat_ok = false;
+        if (combat_interval || measure)
+        {
+            const CEntityAlive* enemy = memory().enemy().selected();
+            const CActor* actor = Actor();
+            const u32 last_hit = memory().hit().last_hit_time();
+            const bool svp = Device.m_SecondViewport.IsSVPActive();
+            if (svp || rendered_in_main_pass())
+            {
+                // K8a (npc_ucl_lod_combat_seen_dist): a far fighter on screen, under the same refusals as the unseen
+                // ones. While perf_metrics runs with the switch off, counted against 50 m (take_seen_far: how many it
+                // would take), deny_seen as before
+                const int seen_dist = npc_ucl_lod_combat_seen_dist > 0 ? npc_ucl_lod_combat_seen_dist :
+                                                                          (measure ? 50 : 0);
+                if (seen_dist > 0 && !svp && !near_tier && dist >= float(seen_dist) &&
+                    !(enemy && actor && enemy->ID() == actor->ID()) &&
+                    !(last_hit && Device.dwTimeGlobal - last_hit < UCL_LOD_COMBAT_HIT_MS) && !needs_every_frame())
+                {
+                    PERF_INC(stk_ucl_lod_combat_seen_far);
+                    if (npc_ucl_lod_combat_seen_dist > 0)
+                    {
+                        combat_ok = combat_interval != 0;
+                        seen_far = true;
+                    }
+                    else
+                        PERF_INC(stk_ucl_lod_combat_seen);
+                }
+                else
+                    PERF_INC(stk_ucl_lod_combat_seen);
+            }
+            else if (near_tier && rendered_in_any_pass())
+                PERF_INC(stk_ucl_lod_combat_shadow);
+            else if (enemy && actor && enemy->ID() == actor->ID())
+                PERF_INC(stk_ucl_lod_combat_actor);
+            else if (last_hit && Device.dwTimeGlobal - last_hit < UCL_LOD_COMBAT_HIT_MS)
+                PERF_INC(stk_ucl_lod_combat_hit);
+            else if (needs_every_frame())
+                PERF_INC(stk_ucl_lod_combat_other);
+            else
+            {
+                PERF_INC(stk_ucl_lod_combat_cand);
+                combat_ok = combat_interval != 0;
+            }
+        }
+        if (!combat_ok)
+        {
+            if (near_tier)
+                PERF_INC(stk_ucl_lod_near); // near: every frame, not counted by npc_cpp_profile
+            else
+            {
+                PERF_INC(stk_ucl_lod_deny_combat);
+                if (profile)
+                    npc_cpp_profile::count(ENpcCppProfileStage::UclLodDenyCombat);
+            }
+            return false;
+        }
+        combat_tier = true;
+        // K8a: a fighter on screen every 2nd frame (a step of 3 frames would show), the unseen by npc_ucl_lod_combat
+        interval = seen_far ? 2 : _max(interval, combat_interval);
+    }
+    else if (weapon_busy || needs_every_frame())
+    {
+        PERF_INC(stk_ucl_lod_deny_other);
         if (profile)
             npc_cpp_profile::count(ENpcCppProfileStage::UclLodDenyOther);
         return false;
@@ -1180,6 +1276,7 @@ bool CAI_Stalker::TrySkipUpdateCLLod()
     // time would never skip. The ID spreads the NPCs of a tier evenly over the frames
     if ((Device.dwFrame + ID()) % interval == 0)
     {
+        PERF_INC(stk_ucl_lod_full);
         if (profile)
             npc_cpp_profile::count(ENpcCppProfileStage::UclLodFull);
         return false;
@@ -1191,12 +1288,31 @@ bool CAI_Stalker::TrySkipUpdateCLLod()
     const u32 elapsed = Device.dwTimeGlobal - last_client_update_time();
     if (elapsed + Device.dwTimeDelta > u32(npc_perf_ucl_lod_max_delta_ms))
     {
+        PERF_INC(stk_ucl_lod_deny_timecap);
         if (profile)
             npc_cpp_profile::count(ENpcCppProfileStage::UclLodDenyTimeCap);
         return false;
     }
 
-    UpdateCLSkippedRoot();
+    // The combat tier: the recoil relaxes by the frame delta of each call (CWeaponShotEffector::Relax) - keep its pace
+    // on the skipped frames, the shots of the weapon (its own UpdateCL) read it
+    {
+        PERF_SCOPE(stk_ucl_lod_skip_path); // 26-framemove-game-next.md: the skipped frame itself, inside lod_decide
+        if (combat_tier && weapon_shot_effector().IsActive())
+            weapon_shot_effector().Update();
+
+        UpdateCLSkippedRoot();
+    }
+    if (combat_tier)
+    {
+        PERF_INC(stk_ucl_lod_skip_combat);
+        if (seen_far)
+            PERF_INC(stk_ucl_lod_skip_seen_far); // K8a: of them on screen
+    }
+    else if (far_tier)
+        PERF_INC(stk_ucl_lod_skip_d2);
+    else
+        PERF_INC(stk_ucl_lod_skip_d1);
     if (profile)
         npc_cpp_profile::count(far_tier ? ENpcCppProfileStage::UclLodSkipD2 : ENpcCppProfileStage::UclLodSkipD1);
     return true;
@@ -1246,6 +1362,8 @@ bool CAI_Stalker::TrySkipObjectHandlerLod()
     // Every run stamps its time: the time cap below counts from it
     const auto run = [this]() {
         m_object_handler_lod_last_time = Device.dwTimeGlobal;
+        m_object_handler_lod_last_frame = Device.dwFrame;
+        m_object_handler_lod_combat_skipped = false;
         PERF_INC(npc_oh_full);
         return false;
     };
@@ -1271,6 +1389,8 @@ bool CAI_Stalker::TrySkipObjectHandlerLod()
     }
     if (fight)
     {
+        if (TrySkipObjectHandlerCombatLod())
+            return true;
         PERF_INC(npc_oh_keep_fight);
         m_object_handler_lod_skips = 0;
         return run();
@@ -1335,6 +1455,83 @@ bool CAI_Stalker::TrySkipObjectHandlerLod()
 
     ++m_object_handler_lod_skips;
     PERF_INC(npc_oh_skipped);
+    return true;
+}
+
+// K8c of plans/optimization_mt/26-framemove-game-next.md (npc_oh_lod_combat, temporary, 0 = off): the object handler
+// of a fighting stalker farther than npc_perf_object_handler_lod_dist from the camera (checked by the caller). Called
+// from TrySkipObjectHandlerLod for a fight only. A run of the fire planner between two shot queues re-checks the
+// evaluators (ammo, the queue, aim timers - absolute time stamps, so a later run sees the real elapsed time) and
+// executes the aim / queue wait action; skipping it starts the next queue, a switch of the target or a reload a frame
+// later. Never skipped (the run goes on as before):
+//  - the weapon or missile in the hands is not settled: firing (eFire - the friendly-fire stop of CObjectActionFire
+//    keeps its pace), a misfire, an empty magazine, reloading, showing, hiding, a pending or next state;
+//  - the planner is not initialized or its world state changed since its last solve (a new goal from the brain, a new
+//    item): it re-plans at once;
+//  - the actor is the enemy, a hit in the last UCL_LOD_COMBAT_HIT_MS, a second viewport;
+//  - npc_perf_object_handler_lod_max_ms since the last run would pass by the next frame.
+// Not drawn in the main pass last frame (1, 2): every 2nd UpdateCL pass - it stacks with the combat tier of the
+// UpdateCL LOD (a run in 4 frames with npc_ucl_lod_combat 2; the time cap bounds it). Drawn (2): every 2nd frame by frames - a
+// stalker whose UpdateCL runs every 2nd frame anyway (the distance tiers, K8a) is not slowed down more.
+// Stats (counted while perf_metrics runs with the switch off too): npc/object_handler/combat/{cand_unseen, cand_seen}
+// - runs it could thin out, {skip_unseen, skip_seen} - runs skipped.
+bool CAI_Stalker::TrySkipObjectHandlerCombatLod()
+{
+#if XR_PERF_METRICS
+    const bool measure = xray::perf::g_perf_metrics_active;
+#else
+    constexpr bool measure = false;
+#endif
+    if (!npc_oh_lod_combat && !measure)
+        return false;
+    if (Device.m_SecondViewport.IsSVPActive())
+        return false;
+    const CEntityAlive* enemy = memory().enemy().selected();
+    const CActor* actor = Actor();
+    if (enemy && actor && enemy->ID() == actor->ID())
+        return false;
+    const u32 last_hit = memory().hit().last_hit_time();
+    if (last_hit && Device.dwTimeGlobal - last_hit < UCL_LOD_COMBAT_HIT_MS)
+        return false;
+
+    CInventoryItem* active_item = inventory().ActiveItem();
+    CHudItem* hud_item = active_item ? active_item->cast_hud_item() : nullptr;
+    if (hud_item)
+    {
+        const u32 state = hud_item->GetState();
+        if (hud_item->IsPending() || state != hud_item->GetNextState() ||
+            (state != CHUDState::eIdle && state != CHUDState::eHidden))
+            return false;
+    }
+    CObjectHandlerPlanner& oh_planner = CObjectHandler::planner();
+    if (!oh_planner.initialized() || !oh_planner.solution_actual_flag())
+        return false;
+
+    const bool seen = rendered_in_main_pass();
+    if (seen)
+        PERF_INC(npc_oh_combat_cand_seen);
+    else
+        PERF_INC(npc_oh_combat_cand_unseen);
+    if (!npc_oh_lod_combat || (seen && npc_oh_lod_combat < 2))
+        return false;
+
+    // The time cap (this frame's delta predicts the next one)
+    const u32 elapsed = Device.dwTimeGlobal - m_object_handler_lod_last_time;
+    if (elapsed + Device.dwTimeDelta > u32(npc_perf_object_handler_lod_max_ms))
+        return false;
+    if (seen)
+    {
+        if (Device.dwFrame - m_object_handler_lod_last_frame >= 2)
+            return false;
+        PERF_INC(npc_oh_combat_skip_seen);
+    }
+    else
+    {
+        if (m_object_handler_lod_combat_skipped)
+            return false;
+        PERF_INC(npc_oh_combat_skip_unseen);
+    }
+    m_object_handler_lod_combat_skipped = true;
     return true;
 }
 
@@ -1423,9 +1620,29 @@ void CAI_Stalker::UpdateDeadShedLod()
 void CAI_Stalker::UpdateCL()
 {
     ZoneScopedN("ucl_CAI_Stalker");
-    if (TrySkipUpdateCLLod())
+    bool lod_skip;
+    {
+        PERF_SCOPE(stk_ucl_lod_decide); // 26-framemove-game-next.md: the rest of ucl/stalker
+        lod_skip = TrySkipUpdateCLLod();
+    }
+    if (lod_skip)
         return;
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCL);
+    PERF_SCOPE_IF(!g_Alive(), stk_ucl_dead);
+#if XR_PERF_METRICS
+    // 24-critical-path.md, M1: the full UpdateCL runs by what the render did with this stalker last frame
+    if (xray::perf::g_perf_metrics_active)
+    {
+        if (!g_Alive())
+            PERF_INC(stk_ucl_n_dead);
+        else if (rendered_in_main_pass())
+            PERF_INC(stk_ucl_n_onscreen);
+        else if (rendered_in_any_pass())
+            PERF_INC(stk_ucl_n_shadow_only);
+        else
+            PERF_INC(stk_ucl_n_offscreen);
+    }
+#endif
     START_PROFILE("stalker")
     START_PROFILE("stalker/client_update")
     VERIFY2(PPhysicsShell() || getEnabled(), cName().c_str());
@@ -1445,6 +1662,7 @@ void CAI_Stalker::UpdateCL()
     {
         {
             ZoneScopedN("ucl_stalker_object_handler");
+            PERF_SCOPE(stk_ucl_object_handler); // 24-critical-path.md, M2: stalker/ucl/* - the stages of UpdateCL
             // 22-game-thread.md, step 1: the object handler LOD of idle far stalkers (TrySkipObjectHandlerLod)
             if (TrySkipObjectHandlerLod())
             {
@@ -1479,6 +1697,7 @@ void CAI_Stalker::UpdateCL()
             (eMovementTypeStand != movement().movement_type()) && (eMentalStateDanger == movement().mental_state()))
         {
             ZoneScopedN("ucl_stalker_danger_movement_sound");
+            PERF_SCOPE(stk_ucl_danger_sound);
             if ((eBodyStateStand == movement().body_state()) && (eMovementTypeRun == movement().movement_type()))
             {
                 sound().play(eStalkerSoundRunningInDanger);
@@ -1493,6 +1712,7 @@ void CAI_Stalker::UpdateCL()
     START_PROFILE("stalker/client_update/inherited")
     {
         ZoneScopedN("ucl_stalker_inherited");
+        PERF_SCOPE(stk_ucl_inherited);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLInherited);
         inherited::UpdateCL();
     }
@@ -1501,6 +1721,7 @@ void CAI_Stalker::UpdateCL()
     START_PROFILE("stalker/client_update/physics")
     {
         ZoneScopedN("ucl_stalker_physics");
+        PERF_SCOPE(stk_ucl_physics);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLPhysics);
         m_pPhysics_support->in_UpdateCL();
     }
@@ -1513,6 +1734,7 @@ void CAI_Stalker::UpdateCL()
         START_PROFILE("stalker/client_update/sight_manager")
         {
             ZoneScopedN("ucl_stalker_sight_update");
+            PERF_SCOPE(stk_ucl_sight);
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLSightManager);
             try
             {
@@ -1529,6 +1751,7 @@ void CAI_Stalker::UpdateCL()
         START_PROFILE("stalker/client_update/exec_look")
         {
             ZoneScopedN("ucl_stalker_exec_look");
+            PERF_SCOPE(stk_ucl_exec_look);
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLExecLook);
             Exec_Look(client_update_fdelta());
         }
@@ -1537,6 +1760,7 @@ void CAI_Stalker::UpdateCL()
         START_PROFILE("stalker/client_update/step_manager")
         {
             ZoneScopedN("ucl_stalker_step_manager");
+            PERF_SCOPE(stk_ucl_step_manager);
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLStepManager);
             CStepManager::update(false);
         }
@@ -1547,7 +1771,10 @@ void CAI_Stalker::UpdateCL()
             ZoneScopedN("ucl_stalker_weapon_shot_effector");
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCLWeaponEffector);
             if (weapon_shot_effector().IsActive())
+            {
+                PERF_SCOPE(stk_ucl_shot_effector);
                 weapon_shot_effector().Update();
+            }
         }
         STOP_PROFILE
     }

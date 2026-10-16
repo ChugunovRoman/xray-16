@@ -15,6 +15,7 @@ namespace gw::lua_spike
 {
 int g_threshold_us = 0;
 int g_paced_mul = 100;
+int g_step_budget_us = 1000; // on by default for the long test (2026-10-16), still a temporary switch
 
 namespace probe_detail
 {
@@ -107,6 +108,13 @@ PacedState paced;
 constexpr u32 paced_gap_reset_ms = 1000;
 // Safety net between the paced frames: the implicit GC resumes only if the heap grows by half
 constexpr int paced_hold_pct = 150;
+// K2a (26-framemove-game-next.md), lua_gc_step_budget_us > 0: a debt above this many steps (~16 MB allocated at mul
+// 100, tens of frames of a fight) is paid off in one frame without the time cap - the cap must not let the heap run
+// away from the GC (spawn waves, a long series of capped frames)
+constexpr s64 paced_debt_uncapped = 16 * 1024;
+// A single step at least this long is timed as lua/gc_long_step: the atomic phase (40-230 ms with a 230-270 MB heap in
+// the logs of 2026-10-16) or the traversal of one huge table; ordinary steps take a few us
+constexpr u64 paced_long_step_us = 2000;
 
 // threshold = heap * paced_hold_pct / 100: LUA_GCRESTART with -1 sets it to (heap / 100) * pause
 void HoldImplicitSteps(lua_State* L)
@@ -254,14 +262,30 @@ void GcStepFrame(lua_State* L, int step_kb) noexcept
 
     const bool probe = Enabled();
     u32 epoch = probe ? PollAtomic(L) : 0;
+    // K2a: the time cap (QPC: works without XR_PERF_METRICS too). A debt over paced_debt_uncapped goes uncapped.
+    const bool capped = g_step_budget_us > 0 && paced.due <= paced_debt_uncapped;
+    if (g_step_budget_us > 0 && !capped)
+        PERF_INC(lua_gc_uncapped);
+    const u64 budget_qpc = capped ? static_cast<u64>(g_step_budget_us) * CPU::qpc_freq / 1000000 : 0;
+    const u64 frame_start = capped ? CPU::QPC() : 0;
+    // lua/gc_long_step: perf_metrics ticks of a single step (rdtsc - cheap enough for every step)
+    const bool metrics = xray::perf::g_perf_metrics_active;
+    const double ms_per_tick = metrics ? xray::perf::TicksToMilliseconds(1) : 0.0;
+    const u64 long_ticks = ms_per_tick > 0.0 ? static_cast<u64>(paced_long_step_us / 1000.0 / ms_per_tick) : u64(-1);
     u64 steps = 0;
     while (paced.due > 0)
     {
-        const u64 t0 = probe ? xray::perf::Ticks() : 0;
+        const u64 t0 = probe || metrics ? xray::perf::Ticks() : 0;
         // data 0: exactly one lj_gc_step (more only to pay an old debt of LuaJIT); 1 = the cycle has finished
         const int finished = lua_gc(L, LUA_GCSTEP, 0);
         --paced.due;
         ++steps;
+        if (metrics)
+        {
+            const u64 dt = xray::perf::Ticks() - t0;
+            if (dt >= long_ticks)
+                PERF_ADD(lua_gc_long_step, dt);
+        }
         if (probe)
         {
             const u32 now_epoch = PollAtomic(L);
@@ -278,8 +302,15 @@ void GcStepFrame(lua_State* L, int step_kb) noexcept
             paced.due = 0;
             break;
         }
+        if (capped && paced.due > 0 && CPU::QPC() - frame_start >= budget_qpc)
+        {
+            // The rest of the debt waits for the next frames (paced.due lives between them, see above)
+            PERF_INC(lua_gc_capped);
+            break;
+        }
     }
     PERF_ADD(lua_gc_paced_steps, steps);
+    xray::perf::SetGauge(xray::perf::Metric::lua_gc_debt, static_cast<s64>(paced.due));
     paced.last_kb = lua_gc(L, LUA_GCCOUNT, 0);
     paced.last_ms = now_ms;
     HoldImplicitSteps(L);

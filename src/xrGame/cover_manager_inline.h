@@ -75,6 +75,8 @@ IC const CCoverPoint* CCoverManager::best_cover(
     const CCoverPoint* last = evaluator.selected();
 
     evaluator.initialize(position);
+    // K7: the inertia radius is the radius of the last real scan (vanilla inertia() already wrote the same value)
+    evaluator.set_last_radius(radius);
 
     if (last)
     {

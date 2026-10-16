@@ -27,6 +27,21 @@ ENGINE_API void MarkMainThread();
 // IsGameLogicThread()/IsGameThreadRunning(); the main thread is not.
 void GameThreadRT();
 void KickGameLogicThread(bool run_scheduler);
+// plans/optimization_mt/26-framemove-game-next.md, K3 / K2b (package 2-A): phase 0 of the Game thread. Main thread
+// only, in a game/render overlap frame, after the last Lua of main before the kick (phase A of the bones prepass,
+// CLevel::BonesPrepass) and before KickGameLogicThread() of the same frame (which must follow). Wakes the dedicated
+// thread early: it runs SoundEvent_Dispatch (sound_dispatch) and then work (may be null) while main still runs phase B
+// of the prepass, phase C and the physics kick - none of them runs Lua. The thread is NOT the game logic thread for
+// IsGameLogicThread()/IsGameThreadRunning() until the kick (main still is: the overlap deferrals keyed on them do not
+// apply before the render starts); the overlap hazard detector (GW_OVERLAP_HAZARD) covers it from here. The body
+// started by the kick runs after phase 0 on the same thread and skips the dispatch if phase 0 did it.
+ENGINE_API void KickGameLogicEarly(bool sound_dispatch, void (*work)());
+// K9 (26-framemove-game-next.md): 1 = GEnv.Sound->render() of a game/render overlap frame runs as a TaskManager task
+// started with seqParallel on the Game thread and waited for before seqFrameMT (instead of inside seqFrameMT).
+// Temporary, not saved (xrGame console_commands.cpp, mt_sound_render_task); 0 = as before.
+ENGINE_API extern int g_mt_sound_render_task;
+// Engine.cpp, SoundRenderer: true while the Game thread's task renders the sound of this frame (seqFrameMT skips it)
+bool SoundRenderTakenByTask();
 // Waits for the kicked frame; returns false (no wait) when nothing is in flight. Idempotent.
 bool JoinGameLogicThread();
 bool IsGameLogicThreadInFlight();

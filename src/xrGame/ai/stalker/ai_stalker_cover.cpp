@@ -32,8 +32,20 @@
 
 extern const float MIN_SUITABLE_ENEMY_DISTANCE = 3.f;
 
+// K7 (plans/optimization_mt/26-framemove-game-next.md, 1-C). The inertia of m_ce_best works (vanilla broke it):
+// best_cover_value uses its own evaluator (it no longer resets the pick of the last scan), the inertia radius is that
+// of the last real scan, a cover that failed the checks (too close, worse by 1, no loophole) or a danger / restriction
+// change forces a real scan, and an inertia answer is taken only for the current cover that still passes the checks
+// against the current threat. A search that found no cover is not repeated for npc_cover_none_hold_ms (saved,
+// console_commands.cpp; 0 = no hold) while the stalker stays within COVER_NONE_HOLD_MOVE m and the threat within
+// COVER_NONE_HOLD_THREAT_MOVE m of where they were.
+int npc_cover_none_hold_ms = 2500;
+
 namespace
 {
+constexpr float COVER_NONE_HOLD_MOVE = 2.f;
+constexpr float COVER_NONE_HOLD_THREAT_MOVE = 5.f;
+
 struct cover_find_eval_budget_guard
 {
     u32 m_saved{};
@@ -170,10 +182,15 @@ float CAI_Stalker::best_cover_value(const Fvector& position_to_cover_from)
 {
     ZoneNamedN(___tracy_sk_bcv, "stalker_cover/best_cover_value", true);
     PERF_SCOPE(stk_cover_value); // 24-critical-path.md, M8 (mostly nested in stalker/cover/best)
-    m_ce_best->setup(position_to_cover_from, MIN_SUITABLE_ENEMY_DISTANCE, 170.f, MIN_SUITABLE_ENEMY_DISTANCE);
-    m_ce_best->initialize(Position(), true);
-    m_ce_best->evaluate(m_best_cover, CStalkerMovementRestrictor(this, true).weight(m_best_cover));
-    return (m_ce_best->best_value());
+    // K7: an evaluator of its own - the shared m_ce_best keeps the pick of its last scan for the inertia
+    // (vanilla re-initialized it here and left the pick to the value check: the current cover or nothing)
+    CCoverEvaluatorBest evaluator(&movement().restrictions());
+    evaluator.can_use_smart_covers(m_ce_best->can_use_smart_covers());
+    evaluator.use_smart_covers_only(m_ce_best->use_smart_covers_only());
+    evaluator.setup(position_to_cover_from, MIN_SUITABLE_ENEMY_DISTANCE, 170.f, MIN_SUITABLE_ENEMY_DISTANCE);
+    evaluator.initialize(Position(), true);
+    evaluator.evaluate(m_best_cover, CStalkerMovementRestrictor(this, true).weight(m_best_cover));
+    return (evaluator.best_value());
 }
 
 void CAI_Stalker::best_cover_can_try_advance()
@@ -187,6 +204,43 @@ void CAI_Stalker::best_cover_can_try_advance()
     m_best_cover_can_try_advance = true;
 }
 
+// The checks of the current cover against the threat (moved out of update_best_cover_actuality; K7 also runs them on an
+// inertia answer). A failed check also drops the inertia of m_ce_best, so the next search really scans instead of
+// handing the same cover back (vanilla did that only for a smart cover without a loophole).
+bool CAI_Stalker::best_cover_still_good(const Fvector& position_to_cover_from)
+{
+    VERIFY(m_best_cover);
+    if (m_best_cover->m_is_smart_cover)
+    {
+        float value;
+        smart_cover::cover const* cover = static_cast<smart_cover::cover const*>(m_best_cover);
+        smart_cover::loophole* loophole = cover->best_loophole(
+            position_to_cover_from, value, false, movement().current_params().cover() == m_best_cover);
+        if (!loophole)
+        {
+            m_ce_best->invalidate();
+            return (false);
+        }
+    }
+
+    // the enemy is too close to the cover
+    if (m_best_cover->position().distance_to_sqr(position_to_cover_from) < _sqr(MIN_SUITABLE_ENEMY_DISTANCE))
+    {
+        m_ce_best->invalidate();
+        return (false);
+    }
+
+    // the cover became too bad
+    float cover_value = best_cover_value(position_to_cover_from);
+    if (cover_value >= m_best_cover_value + 1.f)
+    {
+        m_ce_best->invalidate();
+        return (false);
+    }
+
+    return (true);
+}
+
 void CAI_Stalker::update_best_cover_actuality(const Fvector& position_to_cover_from)
 {
     if (!m_best_cover_actual)
@@ -198,36 +252,9 @@ void CAI_Stalker::update_best_cover_actuality(const Fvector& position_to_cover_f
         return;
     }
 
-    if (m_best_cover->m_is_smart_cover)
-    {
-        float value;
-        smart_cover::cover const* cover = static_cast<smart_cover::cover const*>(m_best_cover);
-        smart_cover::loophole* loophole = cover->best_loophole(
-            position_to_cover_from, value, false, movement().current_params().cover() == m_best_cover);
-        if (!loophole)
-        {
-            m_ce_best->invalidate();
-            m_best_cover_actual = false;
-            return;
-        }
-    }
-
-    if (m_best_cover->position().distance_to_sqr(position_to_cover_from) < _sqr(MIN_SUITABLE_ENEMY_DISTANCE))
+    if (!best_cover_still_good(position_to_cover_from))
     {
         m_best_cover_actual = false;
-#if 0 // def _DEBUG
-		Msg								("* [%6d][%s] enemy too close",Device.dwTimeGlobal,*cName());
-#endif
-        return;
-    }
-
-    float cover_value = best_cover_value(position_to_cover_from);
-    if (cover_value >= m_best_cover_value + 1.f)
-    {
-        m_best_cover_actual = false;
-#if 0 // def _DEBUG
-		Msg								("* [%6d][%s] cover became too bad",Device.dwTimeGlobal,*cName());
-#endif
         return;
     }
 
@@ -255,8 +282,14 @@ void CAI_Stalker::update_best_cover_actuality(const Fvector& position_to_cover_f
     m_ce_best->setup(position_to_cover_from, MIN_SUITABLE_ENEMY_DISTANCE, 170.f, MIN_SUITABLE_ENEMY_DISTANCE);
     {
         ZoneNamedN(___tracy_sk_adv, "stalker_cover/advance_research", true);
-        m_best_cover =
+        const u32 scans_before = m_ce_best->scan_count();
+        const CCoverPoint* advanced =
             ai().cover_manager().best_cover(Position(), 10.f, *m_ce_best, CStalkerMovementRestrictor(this, true));
+        // K7: an inertia answer keeps the current cover (vanilla got the same, the value check had just put it into
+        // m_ce_best; now m_ce_best holds the pick of its last scan, which may be of a danger search)
+        if (m_ce_best->scan_count() == scans_before)
+            advanced = m_best_cover;
+        m_best_cover = advanced;
     }
 }
 
@@ -269,6 +302,7 @@ const CCoverPoint* CAI_Stalker::best_cover(const Fvector& position_to_cover_from
     //	if (cover_id != "")
     //		return							(ai().cover_manager().smart_cover(cover_id));
 
+    const bool was_actual = m_best_cover_actual;
     update_best_cover_actuality(position_to_cover_from);
 
     if (m_best_cover_actual)
@@ -280,9 +314,63 @@ const CCoverPoint* CAI_Stalker::best_cover(const Fvector& position_to_cover_from
         return (m_best_cover);
     }
 
+    // K7 metrics: why the search (no cover / the cover failed the checks / an event dropped it)
+    if (!m_best_cover)
+        PERF_INC(stk_cover_why_none);
+    else if (was_actual)
+        PERF_INC(stk_cover_why_bad);
+    else
+        PERF_INC(stk_cover_why_event);
+
+    if (!m_best_cover && m_cover_none_time &&
+        (Device.dwTimeGlobal < m_cover_none_time + u32(npc_cover_none_hold_ms)) &&
+        (Position().distance_to_sqr(m_cover_none_position) <= _sqr(COVER_NONE_HOLD_MOVE)) &&
+        (position_to_cover_from.distance_to_sqr(m_cover_none_threat) <= _sqr(COVER_NONE_HOLD_THREAT_MOVE)))
+    {
+        // K7: nothing was found from here against this threat a moment ago - no new search yet
+        PERF_INC(stk_cover_none_hold);
+        CMemberOrder* member_order = agent_manager().member().get_member(ID());
+        if (member_order)
+            member_order->cover(nullptr);
+        return (nullptr);
+    }
+
     m_best_cover_actual = true;
 
+    const u32 scans_before = m_ce_best->scan_count();
     const CCoverPoint* best_cover = find_best_cover(position_to_cover_from);
+    bool scanned = (m_ce_best->scan_count() != scans_before);
+    if (!scanned)
+    {
+        // K7: the inertia of m_ce_best answered (a scan less than its inertia time ago). Taken only for the current
+        // cover that still passes the checks against the current threat (or for "no cover" again); otherwise scan.
+        const bool keep =
+            (best_cover == m_best_cover) && (!m_best_cover || best_cover_still_good(position_to_cover_from));
+        if (keep)
+            PERF_INC(stk_cover_inertia_kept);
+        else
+        {
+            PERF_INC(stk_cover_inertia_rescan);
+            m_ce_best->invalidate();
+            best_cover = find_best_cover(position_to_cover_from);
+            scanned = (m_ce_best->scan_count() != scans_before);
+        }
+    }
+
+    if (scanned)
+    {
+        PERF_INC(stk_cover_scan);
+        if (!best_cover)
+        {
+            PERF_INC(stk_cover_none_found);
+            m_cover_none_time = Device.dwTimeGlobal;
+            m_cover_none_position = Position();
+            m_cover_none_threat = position_to_cover_from;
+        }
+    }
+    if (best_cover)
+        m_cover_none_time = 0;
+
     if (best_cover != m_best_cover)
     {
         on_best_cover_changed(best_cover, m_best_cover);
@@ -304,6 +392,7 @@ void CAI_Stalker::on_restrictions_change()
 {
     inherited::on_restrictions_change();
     m_best_cover_actual = false;
+    drop_cover_inertia_k7();
 #ifdef _DEBUG
     Msg("* [%6d][%s] on_restrictions_change", Device.dwTimeGlobal, cName().c_str());
 #endif
@@ -330,6 +419,7 @@ void CAI_Stalker::on_danger_location_add(const CDangerLocation& location)
 //		Msg								("* [%6d][%s] on_danger_add",Device.dwTimeGlobal,*cName());
 #endif
         m_best_cover_actual = false;
+        drop_cover_inertia_k7();
     }
 }
 
@@ -343,6 +433,7 @@ void CAI_Stalker::on_danger_location_remove(const CDangerLocation& location)
 //			Msg							("* [%6d][%s] on_danger_remove",Device.dwTimeGlobal,*cName());
 #endif
             m_best_cover_actual = false;
+            drop_cover_inertia_k7();
         }
 
         return;
@@ -354,6 +445,7 @@ void CAI_Stalker::on_danger_location_remove(const CDangerLocation& location)
 //		Msg								("* [%6d][%s] on_danger_remove",Device.dwTimeGlobal,*cName());
 #endif
         m_best_cover_actual = false;
+        drop_cover_inertia_k7();
     }
 }
 
@@ -365,7 +457,21 @@ void CAI_Stalker::on_cover_blocked(const CCoverPoint* cover)
     m_best_cover_actual = false;
 }
 
-void CAI_Stalker::best_cover_invalidate() { m_best_cover_actual = false; }
+void CAI_Stalker::best_cover_invalidate()
+{
+    m_best_cover_actual = false;
+    m_cover_none_time = 0; // K7: a planner asks for a new search
+}
+
+// K7: a danger location or a restriction change may make other covers usable or the current one bad: the next search
+// scans and a hold of "no cover" ends
+void CAI_Stalker::drop_cover_inertia_k7()
+{
+    m_cover_none_time = 0;
+    if (m_ce_best)
+        m_ce_best->invalidate();
+}
+
 bool CAI_Stalker::use_smart_covers_only() const
 {
     VERIFY(m_ce_best);

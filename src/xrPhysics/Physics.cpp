@@ -158,7 +158,13 @@ bool IsLiveNpcController(CPHObject* obj)
 {
     return obj->CastType() == CPHObject::tpCharacter && static_cast<CPHCharacter*>(obj)->CastAICharacter() != nullptr;
 }
+
+// PhProbeCollideScope (Physics.h): the collision of the current thread is a probe.
+thread_local bool tl_probe_collide = false;
 } // namespace
+
+PhProbeCollideScope::PhProbeCollideScope() : m_prev(tl_probe_collide) { tl_probe_collide = true; }
+PhProbeCollideScope::~PhProbeCollideScope() { tl_probe_collide = m_prev; }
 // PhysicsStepTimeCallback		*physics_step_time_callback				= 0;
 
 const float default_w_limit = 9.8174770f; //(M_PI/16.f/(fixed_step=0.02f));
@@ -751,6 +757,18 @@ void NearCallback(CPHObject* obj1, CPHObject* obj2, dGeomID o1, dGeomID o2)
         ph_world->RegisterMerged(obj2);
         if (!obj2->is_active())
         {
+#if XR_PERF_METRICS
+            // physics/wake/ai_by_ai (the frame step, a part of physics/wake/ai) and wake/ai_by_ai_probe (the TryPosition
+            // probes, not in physics/wake/*): a live NPC woken by another live NPC's contact - the crowd churn of a
+            // dense crowd (21-physics-step.md, 2026-10-16). Diagnostics only.
+            if (xray::perf::g_perf_metrics_active && IsLiveNpcController(obj2) && IsLiveNpcController(obj1))
+            {
+                if (counting && !ph_world->IsStepRunningOnOtherThread())
+                    PERF_INC(ph_wake_ai_by_ai);
+                else if (tl_probe_collide)
+                    PERF_INC(ph_wake_ai_by_ai_probe);
+            }
+#endif
             if (counting)
             {
                 PERF_INC(ph_wake);

@@ -1391,6 +1391,12 @@ bool CGameObject::rendered_in_main_pass(u32 frames) const
     return frame && frame + frames >= Device.dwFrame;
 }
 
+bool CGameObject::rendered_in_any_pass(u32 frames) const
+{
+    const u32 frame = m_bones_prepass_note_frame.load(std::memory_order_relaxed);
+    return frame && frame + frames >= Device.dwFrame;
+}
+
 void CGameObject::renderable_Render(u32 context_id, IRenderable* root)
 {
     //

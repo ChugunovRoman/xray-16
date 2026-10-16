@@ -217,6 +217,15 @@ float CPHShell::getVolume()
 float CPHShell::getDensity() { return getMass() / getVolume(); }
 void CPHShell::PhDataUpdate(dReal step)
 {
+    PhDataUpdateParallel(step);
+    PhDataUpdateSerial(step);
+}
+
+// Parallel post-integrate (permanent): may run in an island-solve task - the elements' own bodies, perf
+// counters and reads only. PhOutOfBoundaries is checked here, before DisableObject: nothing that runs in between moves a
+// body (DisableObject / put_in_recently_deactivated edit lists and flags only).
+void CPHShell::PhDataUpdateParallel(dReal step)
+{
     bool disable = true;
     u32 enabled_bodies = 0;
     for (auto& it : elements)
@@ -246,15 +255,12 @@ void CPHShell::PhDataUpdate(dReal step)
                 PERF_INC(ph_auto_disable_ragdoll_early);
         }
 #endif
-        DisableObject();
-        CPHObject::put_in_recently_deactivated();
     }
     else
     {
         PERF_INC(ph_shell_active);
         if (CPHCollideValidator::IsRagDollObject(*this))
             PERF_ADD(ph_shell_ragdoll_bodies, enabled_bodies);
-        ReanableObject();
     }
 #if 0
     DBG_OpenCashedDraw();
@@ -263,7 +269,26 @@ void CPHShell::PhDataUpdate(dReal step)
     DBG_ClosedCashedDraw( 10000 );
     //dbg_draw_geometry
 #endif
+    m_post_result = 0;
+    if (disable)
+        m_post_result |= post_disable;
     if (PhOutOfBoundaries(cast_fv(dBodyGetPosition(elements.front()->get_body()))))
+        m_post_result |= post_out_of_bounds;
+}
+
+// The stepping thread, in m_objects order (CPHObject::PostIntegrateSerial, or right after the parallel part above).
+void CPHShell::PhDataUpdateSerial(dReal /*step*/)
+{
+    const u8 result = m_post_result;
+    m_post_result = 0;
+    if (result & post_disable)
+    {
+        DisableObject();
+        CPHObject::put_in_recently_deactivated();
+    }
+    else
+        ReanableObject();
+    if (result & post_out_of_bounds)
         Disable();
 }
 

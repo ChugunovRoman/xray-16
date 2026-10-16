@@ -7,6 +7,8 @@
 
 #include "XR_IOConsole.h"
 #include "xr_ioc_cmd.h"
+#include "EngineThreading.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 struct SoundProcessor final : public pureFrame
 {
@@ -20,6 +22,10 @@ struct SoundRenderer final : public pureFrame
 {
     void OnFrame() override
     {
+        // K9 (26-framemove-game-next.md, mt_sound_render_task): the Game thread's task rendered this frame already
+        if (XRay::Engine::SoundRenderTakenByTask())
+            return;
+        PERF_SCOPE(game_seq_frame_mt_sound); // 26-framemove-game-next.md: game/seq_frame_mt/*
         GEnv.Sound->render();
     }
 } g_sound_renderer;

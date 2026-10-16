@@ -1,6 +1,7 @@
 #include "pch_script.h"
 #include "xrEngine/XR_IOConsole.h"
 #include "xrEngine/xr_ioc_cmd.h"
+#include "xrEngine/EngineThreading.h" // mt_sound_render_task (26-framemove-game-next.md, K9)
 #include "xrEngine/CustomHUD.h"
 #include "xrEngine/FDemoRecord.h"
 #include "xrEngine/FDemoPlay.h"
@@ -99,6 +100,10 @@ extern float psSqueezeVelocity;
 extern int psLUA_GCSTEP;
 extern int psLUA_GCTIMEOUT;
 extern u32 ps_lua_gc_method;
+// 26-framemove-game-next.md, package 2-A (Level.cpp): K3, K2b, K4
+extern int mt_sound_dispatch_early;
+extern int lua_gc_overlap;
+extern int mt_prepass_main_slot;
 extern int g_auto_ammo_unload;
 
 extern int x_m_x;
@@ -137,6 +142,8 @@ extern float npc_perf_sound_dispatch_near_dist;
 extern float npc_perf_sound_dispatch_actor_dist;
 extern int npc_perf_sound_dispatch_max_combat;
 extern int npc_perf_sound_dispatch_max;
+extern float npc_sound_noncombat_dist; // 24-critical-path.md, G3 (Level.cpp)
+extern int npc_sound_noncombat_per_listener;
 
 extern BOOL g_ai_use_old_vision;
 float g_aim_predict_time = 0.40f;
@@ -248,7 +255,9 @@ u32 npc_perf_ik_interval_near_idle_ms = 50;
 u32 npc_perf_ik_interval_medium_ms = 200;
 u32 npc_perf_ik_interval_far_ms = 450;
 u32 npc_perf_ik_interval_disabled_ms = 30000;
-u32 npc_perf_ik_interval_enemy_selected_ms = 0;
+// K10 of plans/optimization_mt/26-framemove-game-next.md: the tested values are the defaults (were 0 = IK of a fighting
+// stalker every frame at any distance, on screen or not)
+u32 npc_perf_ik_interval_enemy_selected_ms = 100;
 int npc_perf_ik_foot_raypick_batch_min_rays = 12;
 int ai_evaluator_ttl_ms = 500;
 u32 npc_perf_state_mgr_animstate_ttl_ms = 120;
@@ -282,13 +291,16 @@ int npc_perf_visible_value_native = 1;        // visual_memory_manager.cpp: get_
 // Stage D, W4-2: xr_logic.pick_section_from_condlist in the engine (gw_condlist_native.cpp);
 // 0 = Lua, 1 = native, 2 = shadow (dry native pass first, Lua decides, mismatches counted)
 int npc_perf_condlist_native = 0;
-int npc_perf_ik_enemy_near_dist = 0;       // CharacterPhysicsSupport.cpp: the fight IK interval only this near
-int npc_perf_ik_offscreen_interval_ms = 0; // CharacterPhysicsSupport.cpp: the IK interval of NPCs off screen
+int npc_perf_ik_enemy_near_dist = 20;        // CharacterPhysicsSupport.cpp: the fight IK interval only this near (K10)
+int npc_perf_ik_offscreen_interval_ms = 450; // CharacterPhysicsSupport.cpp: the IK interval of NPCs off screen (K10)
 // Stage 3 (ai_stalker.cpp, CAI_Stalker::TrySkipUpdateCLLod, always on): UpdateCL every 2nd / 3rd frame by the
 // camera distance
 int npc_perf_ucl_lod_dist = 30;            // m: beyond it every 2nd frame
 int npc_perf_ucl_lod_dist2 = 45;           // m: beyond it every 3rd frame (0 = no such tier)
 int npc_perf_ucl_lod_max_delta_ms = 250;   // ms: the most time between two full UpdateCL of a skipped stalker
+// 24-critical-path.md, F2 (ai_stalker.cpp, always on): the combat tier of the UpdateCL LOD - a full UpdateCL every N-th
+// frame (0 / 1 = every frame)
+int npc_ucl_lod_combat = 2;
 // 22-game-thread.md, step 1 (ai_stalker.cpp): the object handler LOD of idle stalkers and the friendly-fire pick LOD of
 // unseen firing ones (always on in single player); the tunables
 int npc_perf_object_handler_lod_dist = 20;        // m: nearer to the camera - every UpdateCL
@@ -296,6 +308,12 @@ int npc_perf_object_handler_lod_every_seen = 3;   // on screen: every N-th Updat
 int npc_perf_object_handler_lod_every_unseen = 12; // off screen: every N-th UpdateCL
 int npc_perf_object_handler_lod_max_ms = 200;     // ms: the most time between two runs of a skipped handler
 int npc_perf_object_handler_lod_pick_ms = 100;    // ms: the age of a kept friendly-fire pick (0 = every frame)
+// 24-critical-path.md, G2 (ai_stalker_fire.cpp, always on): the tunables of the friendly-fire pick cache of any firing
+// stalker and of the cut of the rays behind the enemy
+extern int npc_ff_pick_cache_ms;
+extern int npc_ff_pick_cache_frames;
+extern int npc_ff_pick_cache_actor_dist;
+extern int npc_ff_pick_cut_behind;
 // 22-game-thread.md, step 1 (ai_stalker.cpp): the scheduler interval in ms of settled corpses (always on)
 int npc_perf_dead_shed_interval_ms = 5000;
 // Stage 4 (movement_manager_physic.cpp): frames without TryPosition after a successful one; both K = 0 -> off
@@ -3041,6 +3059,21 @@ void CCC_RegisterCommands()
     // With lua_gc_method gc_step the GC always works only in script_gc, paced by the allocations of the frame (the
     // implicit steps inside random Lua calls are held off): % of the LuaJIT pace (one step per KB)
     CMD4(CCC_IntegerNotSaved, "lua_gc_paced_mul", &gw::lua_spike::g_paced_mul, 10, 1000);
+    // 26-framemove-game-next.md, package 2-A. Temporary A/B switches, not saved, 0 = as before.
+    // K2a: > 0 - the paced GC steps of a frame stop after this many us, the rest of the debt goes to the next frames
+    // (a debt over ~16 MB of allocations is paid off uncapped); one step (the atomic phase) is never cut
+    CMD4(CCC_IntegerNotSaved, "lua_gc_step_budget_us", &gw::lua_spike::g_step_budget_us, 0, 100000);
+    // K2b (with mt_script_gc on): 1 - the GC step of a game/render overlap frame runs in phase 0 of the Game thread,
+    // parallel to phase B/C of the bones prepass on main, instead of in seqParallel after the scheduler
+    CMD4(CCC_IntegerNotSaved, "lua_gc_overlap", &lua_gc_overlap, 0, 1);
+    // K3: 1 - SoundEvent_Dispatch of a game/render overlap frame runs in phase 0 of the Game thread (right after phase A
+    // of the bones prepass, parallel to phase B/C on main) instead of at the start of the Game thread's body
+    CMD4(CCC_IntegerNotSaved, "mt_sound_dispatch_early", &mt_sound_dispatch_early, 0, 1);
+    // K4: 1 - CMapManager::Update runs on main in the phase B window of the bones prepass instead of in CLevel::OnFrame
+    CMD4(CCC_IntegerNotSaved, "mt_prepass_main_slot", &mt_prepass_main_slot, 0, 1);
+    // K9: 1 - the sound render (GEnv.Sound->render) of a game/render overlap frame runs as a task beside seqParallel
+    // instead of in seqFrameMT on the Game thread
+    CMD4(CCC_IntegerNotSaved, "mt_sound_render_task", &XRay::Engine::g_mt_sound_render_task, 0, 1);
 
 #ifdef DEBUG
     CMD3(CCC_Mask, "ai_debug", &psAI_Flags, aiDebug);
@@ -3203,12 +3236,20 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_ucl_lod_dist", &npc_perf_ucl_lod_dist, 5, 500);
     CMD4(CCC_Integer, "npc_perf_ucl_lod_dist2", &npc_perf_ucl_lod_dist2, 0, 500);
     CMD4(CCC_Integer, "npc_perf_ucl_lod_max_delta_ms", &npc_perf_ucl_lod_max_delta_ms, 100, 500);
+    // 24-critical-path.md, F2: the combat tier of the UpdateCL LOD (always on), a full UpdateCL every N-th frame
+    // (0 / 1 = every frame)
+    CMD4(CCC_Integer, "npc_ucl_lod_combat", &npc_ucl_lod_combat, 0, 4);
     // 22-game-thread.md, step 1: the tunables of the object handler LOD and of the corpse scheduler interval
     CMD4(CCC_Integer, "npc_perf_object_handler_lod_dist", &npc_perf_object_handler_lod_dist, 5, 500);
     CMD4(CCC_Integer, "npc_perf_object_handler_lod_every_seen", &npc_perf_object_handler_lod_every_seen, 1, 16);
     CMD4(CCC_Integer, "npc_perf_object_handler_lod_every_unseen", &npc_perf_object_handler_lod_every_unseen, 1, 32);
     CMD4(CCC_Integer, "npc_perf_object_handler_lod_max_ms", &npc_perf_object_handler_lod_max_ms, 50, 1000);
     CMD4(CCC_Integer, "npc_perf_object_handler_lod_pick_ms", &npc_perf_object_handler_lod_pick_ms, 0, 500);
+    // 24-critical-path.md, G2: the tunables of the friendly-fire pick cache (G2a) and cut (G2b), both always on
+    CMD4(CCC_Integer, "npc_ff_pick_cache_ms", &npc_ff_pick_cache_ms, 20, 500);
+    CMD4(CCC_Integer, "npc_ff_pick_cache_frames", &npc_ff_pick_cache_frames, 1, 8);
+    CMD4(CCC_Integer, "npc_ff_pick_cache_actor_dist", &npc_ff_pick_cache_actor_dist, 0, 50);
+    CMD4(CCC_Integer, "npc_ff_pick_cut_behind", &npc_ff_pick_cut_behind, 1, 50);
     CMD4(CCC_Integer, "npc_perf_dead_shed_interval_ms", &npc_perf_dead_shed_interval_ms, 1000, 8000);
     CMD4(CCC_Integer, "npc_perf_move_try_skip_frames", &npc_perf_move_try_skip_frames, 0, 8);
     CMD4(CCC_Integer, "npc_perf_move_try_skip_frames_far", &npc_perf_move_try_skip_frames_far, 0, 16);
@@ -3227,6 +3268,11 @@ void CCC_RegisterCommands()
     CMD4(CCC_Float, "npc_perf_sound_dispatch_actor_dist", &npc_perf_sound_dispatch_actor_dist, 0.f, 500.f);
     CMD4(CCC_Integer, "npc_perf_sound_dispatch_max_combat", &npc_perf_sound_dispatch_max_combat, 0, 4096);
     CMD4(CCC_Integer, "npc_perf_sound_dispatch_max", &npc_perf_sound_dispatch_max, 0, 4096);
+    // 24-critical-path.md, G3 (always on, the deliveries go out grouped by listener): the always-zone of the non-combat
+    // sounds of other objects (no actor distance exemption) and at most N such sounds per listener a frame (0 = no
+    // cap). Combat and actor sounds are never cut by them
+    CMD4(CCC_Float, "npc_sound_noncombat_dist", &npc_sound_noncombat_dist, 0.f, 500.f);
+    CMD4(CCC_Integer, "npc_sound_noncombat_per_listener", &npc_sound_noncombat_per_listener, 0, 64);
     CMD4(CCC_Integer, "npc_preview_scene_budget_per_frame", (int*)&npc_preview_scene_budget_per_frame, 1, 500);
     CMD4(CCC_Integer, "npc_preview_disk_cache_warm_per_frame", (int*)&npc_preview_disk_cache_warm_per_frame, 0, 500);
 
@@ -3272,6 +3318,12 @@ void CCC_RegisterCommands()
     CMD4(CCC_Float, "ph_ai_max_rise_vel", &ph_console::ph_ai_max_rise_vel, 0.f, 100.f);
     CMD4(CCC_Float, "ph_ai_try_max_dy", &ph_console::ph_ai_try_max_dy, 0.f, 50.f);
     CMD4(CCC_Float, "ph_ai_step_max_rise", &ph_console::ph_ai_step_max_rise, 0.f, 50.f);
+    // Corpse pairs dropped in the broadphase (plans/optimization_mt/21-physics-step.md, 2026-10-16): permanent, these are
+    // the saved limits. Corpses never collide with each other beyond ph_corpse_vs_corpse_dist m of the camera (0 =
+    // everywhere); corpse x live NPC pairs with both beyond ph_corpse_vs_npc_dist m of the camera are not collided (0 =
+    // off; the actor always collides with corpses).
+    CMD4(CCC_Float, "ph_corpse_vs_corpse_dist", &ph_console::ph_corpse_vs_corpse_dist, 0.f, 500.f);
+    CMD4(CCC_Float, "ph_corpse_vs_npc_dist", &ph_console::ph_corpse_vs_npc_dist, 0.f, 500.f);
     // Live NPCs left high in the air (plans/optimization_mt/21-physics-step.md, 2026-10-15; always on): a destination the
     // NPC is moved to without gravity (the kinematic branches of move_along_path, a successful TryPosition, a standing NPC
     // with a disabled character) that hangs more than ai_npc_ground_snap_height m above the AI floor is lowered to it at
@@ -3633,6 +3685,25 @@ void CCC_RegisterCommands()
     CMD1(CCC_UI_Time_Factor, "ui_time_factor");
     CMD2(CCC_UI_Time_Dilation_Mode, "time_dilation_inventory", UITimeDilator::Inventory);
     CMD2(CCC_UI_Time_Dilation_Mode, "time_dilation_pda", UITimeDilator::Pda);
+
+    // K5 of plans/optimization_mt/26-framemove-game-next.md (1-B), temporary: a cheaper UpdateCL of weapons out of the
+    // actor's hands (Weapon.h). 0 = as before
+    extern int wpn_npc_ucl_lite;
+    CMD4(CCC_IntegerNotSaved, "wpn_npc_ucl_lite", &wpn_npc_ucl_lite, 0, 1);
+
+    // K7 (plans/optimization_mt/26-framemove-game-next.md, 1-C): how long a cover search of a stalker that found no
+    // cover is not repeated while the stalker and the threat stay in place (ai/stalker/ai_stalker_cover.cpp; 0 = no hold)
+    extern int npc_cover_none_hold_ms;
+    CMD4(CCC_Integer, "npc_cover_none_hold_ms", &npc_cover_none_hold_ms, 0, 10000);
+
+    // K8 (plans/optimization_mt/26-framemove-game-next.md, 2-B). Temporary A/B switches, not saved, 0 = as before
+    // (ai/stalker/ai_stalker.cpp): the combat tier of the UpdateCL LOD for fighters on screen at least N m from the
+    // camera (the zoomed distance; every 2nd frame) and the object handler of far fighters every 2nd pass / frame
+    // (1 = not drawn last frame, 2 = drawn too)
+    extern int npc_ucl_lod_combat_seen_dist;
+    extern int npc_oh_lod_combat;
+    CMD4(CCC_IntegerNotSaved, "npc_ucl_lod_combat_seen_dist", &npc_ucl_lod_combat_seen_dist, 0, 500);
+    CMD4(CCC_IntegerNotSaved, "npc_oh_lod_combat", &npc_oh_lod_combat, 0, 2);
 
     register_mp_console_commands();
 }

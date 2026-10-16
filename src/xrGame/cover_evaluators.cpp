@@ -46,7 +46,9 @@ bool CCoverEvaluatorBase::inertia(Fvector const& position, float radius)
     const bool radius_criteria = ((m_last_radius + EPS_L) >= radius);
     const bool time_criteria = (Device.dwTimeGlobal < m_last_update + m_inertia_time);
 
-    m_last_radius = radius;
+    // K7 (plans/optimization_mt/26-framemove-game-next.md): vanilla wrote the radius of every query here, so a
+    // 10 m query answered by the inertia (the advance search of a stalker) took the inertia from the next 30 m one.
+    // The radius is that of the last real scan now (CCoverManager::best_cover sets it).
 
     if (time_criteria && radius_criteria)
         return true;

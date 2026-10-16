@@ -877,6 +877,7 @@ void CCharacterPhysicsSupport::in_UpdateCL()
 #endif
     {
         ZoneScopedN("cph_anim_collision");
+        PERF_SCOPE(cph_ucl_anim_collision); // 26-framemove-game-next.md, M3: cph/ucl/*, ik/*
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsAnimationCollision);
         update_animation_collision();
     }
@@ -896,6 +897,7 @@ void CCharacterPhysicsSupport::in_UpdateCL()
             return;
         }
         ZoneScopedN("cph_ragdoll_shell");
+        PERF_SCOPE(cph_ucl_ragdoll);
         VERIFY(m_pPhysicsShell->isFullActive());
         if (m_pPhysicsShell->isEnabled() && !m_EntityAlife.g_Alive())
         {
@@ -979,9 +981,12 @@ void CCharacterPhysicsSupport::in_UpdateCL()
                     npc_cpp_profile::count(ENpcCppProfileStage::IkRunOffscreen);
             }
             ZoneScopedN("cph_ik_controller_update");
+            PERF_SCOPE(ik_update);
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsIkUpdate);
             ik_controller()->Update();
         }
+        else
+            PERF_INC(ik_interval_skip);
     }
 
 #ifdef DEBUG

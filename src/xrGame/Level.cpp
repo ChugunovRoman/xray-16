@@ -9,6 +9,7 @@
 #include "xrEngine/FDemoPlay.h"
 #include "xrEngine/Environment.h"
 #include "xrEngine/IGame_Persistent.h"
+#include "xrEngine/EngineThreading.h"
 #include "ParticlesObject.h"
 #include "Level.h"
 #include "VisionBatch.h"
@@ -517,6 +518,40 @@ void CLevel::SpawnQueueNoteSave(pcstr where) const
             where, spawns, groups, g_spawn_budget_us);
 }
 
+#if XR_PERF_METRICS
+// 26-framemove-game-next.md, M6: the ge/time/* bucket of a message of the game event queue
+static xray::perf::Metric GameEventTimeMetric(u16 msg, u16 type)
+{
+    using M = xray::perf::Metric;
+    if (msg == M_SPAWN)
+        return M::ge_time_spawn;
+    if (msg != M_EVENT)
+        return M::ge_time_other;
+    switch (type)
+    {
+    case GE_HIT: return M::ge_time_hit;
+    case GE_DIE:
+    case GE_ASSIGN_KILLER: return M::ge_time_die;
+    case GE_OWNERSHIP_TAKE:
+    case GE_OWNERSHIP_TAKE_MP_FORCED:
+    case GE_TRADE_BUY: return M::ge_time_take;
+    case GE_OWNERSHIP_REJECT:
+    case GE_TRADE_SELL: return M::ge_time_reject;
+    case GE_DESTROY:
+    case GE_DESTROY_REJECT: return M::ge_time_destroy;
+    case GE_WPN_AMMO_ADD:
+    case GE_WPN_STATE_CHANGE:
+    case GE_ADDON_ATTACH:
+    case GE_ADDON_DETACH:
+    case GE_ADDON_CHANGE:
+    case GE_INSTALL_UPGRADE:
+    case GE_TRANSFER_AMMO:
+    case GE_GRENADE_EXPLODE: return M::ge_time_weapon;
+    default: return M::ge_time_event_other;
+    }
+}
+#endif
+
 void CLevel::ProcessGameEvents(bool frame_budget)
 {
     ZoneScoped;
@@ -580,6 +615,9 @@ void CLevel::ProcessGameEvents(bool frame_budget)
             ++processed;
             u16 ID, dest, type;
             game_events->get(ID, dest, type, P);
+#if XR_PERF_METRICS
+            xray::perf::ScopedTime ge_time(GameEventTimeMetric(ID, type)); // the handling of this message
+#endif
             switch (ID)
             {
             case M_SPAWN:
@@ -751,6 +789,67 @@ void CLevel::VisionBatchPostScheduler()
     gw::addons::binders::FlushUpdates();
 }
 
+// --- 26-framemove-game-next.md, package 2-A: work moved off the critical path (temporary switches, not saved, 0 = as
+// before; console_commands.cpp) -----------------------------------------------------------------------------------------
+// K3 mt_sound_dispatch_early: SoundEvent_Dispatch of a game/render overlap frame runs on the Game thread in phase 0
+// (XRay::Engine::KickGameLogicEarly), right after phase A of the bones prepass - parallel to phase B/C on main.
+int mt_sound_dispatch_early = 1; // on by default for the long test (2026-10-16), still a temporary switch
+// K2b lua_gc_overlap (with mt_script_gc on): the Lua GC step of the frame (CLevel::script_gc) runs in phase 0 of the
+// Game thread too, after the dispatch - parallel to phase B/C on main, the physics kick and the start of the render,
+// instead of in seqParallel after the scheduler. Frames without phase 0 run it in seqParallel as before.
+int lua_gc_overlap = 1; // on by default for the long test (2026-10-16), still a temporary switch
+// K4 mt_prepass_main_slot: CMapManager::Update runs on main inside the phase B window of the bones prepass (the
+// workers compute the bones meanwhile) instead of in CLevel::OnFrame before the objects' UpdateCL.
+int mt_prepass_main_slot = 1; // on by default for the long test (2026-10-16), still a temporary switch
+
+namespace
+{
+// K2b: the GC step of this frame is still to be done (set by CLevel::OnFrame on main before the Game thread starts;
+// taken by phase 0 or by the seqParallel delegate - both on the game logic side, after the frame's kick)
+std::atomic<bool> s_script_gc_pending{ false };
+// K4: the map update of this frame waits for the prepass window (main thread only)
+bool s_map_update_pending = false;
+
+// K2b: the GC step of the frame, if it is still pending. early: phase 0 of the Game thread (lua/gc_in_early), else
+// the seqParallel delegate at the old place (lua/gc_in_seq; a no-op once phase 0 took it)
+void RunPendingScriptGc(bool early)
+{
+    if (!s_script_gc_pending.exchange(false, std::memory_order_acq_rel))
+        return;
+    if (!g_pGameLevel || !GEnv.ScriptEngine)
+        return;
+    if (early)
+        PERF_INC(lua_gc_in_early);
+    else
+        PERF_INC(lua_gc_in_seq);
+    Level().script_gc();
+}
+void RunEarlyScriptGc() { RunPendingScriptGc(true); }
+void RunSeqScriptGc() { RunPendingScriptGc(false); }
+
+// K4: the deferred map update of this frame (main thread), if it is still pending
+void RunPendingMapUpdate()
+{
+    if (!s_map_update_pending)
+        return;
+    s_map_update_pending = false;
+    if (!g_pGameLevel)
+        return;
+    ZoneScopedN("BonesPrepass/map_update");
+    PERF_SCOPE(prepass_map_update);
+    Level().MapManager().Update();
+}
+
+// K4: whatever way CLevel::BonesPrepass leaves, the map update of the frame is done before it returns
+struct PendingMapUpdateGuard
+{
+    PendingMapUpdateGuard() = default;
+    PendingMapUpdateGuard(const PendingMapUpdateGuard&) = delete;
+    PendingMapUpdateGuard& operator=(const PendingMapUpdateGuard&) = delete;
+    ~PendingMapUpdateGuard() { RunPendingMapUpdate(); }
+};
+} // namespace
+
 // --- Bones prepass (always, plans/optimization_mt/04-bones-prepass.md) -----------------------------------------------
 // The render used to compute the bones of every skeleton it drew itself (CalculateBones(TRUE) in add_leafs_dynamic,
 // main view + shadows, on the critical path of the render). The prepass computes, before the render, the bones of the
@@ -830,6 +929,8 @@ void CLevel::BonesPrepassNote(u16 id)
 
 void CLevel::BonesPrepass()
 {
+    // K4: the deferred map update runs in the phase B window below, or here on the way out (no prepass this frame)
+    const PendingMapUpdateGuard map_update_guard;
     // Take the previous render's notes and start an empty list for this frame's render - always, even when nothing
     // is computed below (a level being loaded, or one that has just replaced another: stale IDs must not pile up).
     const u32 noted = std::min(s_bones_prepass_noted_count.exchange(0, std::memory_order_relaxed),
@@ -887,6 +988,17 @@ void CLevel::BonesPrepass()
                 phase_b.push_back(K);
         }
     }
+    // K3 / K2b (26-framemove-game-next.md, package 2-A): the last Lua of main before the kick has run (phase A);
+    // phase B, the map update (K4), phase C and the physics kick are C++ only. Wake the Game thread for phase 0 now:
+    // the sound dispatch and/or the Lua GC step of the frame run beside them. Game/render overlap frames only - their
+    // KickGameLogicThread follows in CRenderDevice::ProcessFrame; a sequential frame has run its game logic already.
+    if (Device.IsGameRenderOverlapFrame())
+    {
+        const bool early_dispatch = mt_sound_dispatch_early != 0;
+        const bool early_gc = lua_gc_overlap != 0 && s_script_gc_pending.load(std::memory_order_acquire);
+        if (early_dispatch || early_gc)
+            XRay::Engine::KickGameLogicEarly(early_dispatch, early_gc ? &RunEarlyScriptGc : nullptr);
+    }
     if (!phase_b.empty())
     {
         ZoneScopedN("BonesPrepass/phase_b");
@@ -899,7 +1011,7 @@ void CLevel::BonesPrepass()
         // A stalker costs many times a pistol: small chunks (about 4 per worker) keep the workers balanced.
         const size_t grain = std::max<size_t>(1, count / (workers * 4));
         std::atomic<u32> computed{0};
-        xr_parallel_for(TaskRange<u32>(0, count, grain), true, [&](const TaskRange<u32>& range)
+        const auto phase_b_range = [&](const TaskRange<u32>& range)
         {
             ZoneScopedN("BonesPrepass/phase_b_task");
             PERF_PASS(xray::perf::pass::Prepass);
@@ -911,7 +1023,21 @@ void CLevel::BonesPrepass()
                     ++local;
             }
             computed.fetch_add(local, std::memory_order_relaxed);
-        });
+        };
+        if (s_map_update_pending && TaskScheduler)
+        {
+            // K4: main does its own C++ work while the workers take the phase B chunks, then helps with the rest
+            // (TaskManager::Wait runs queued chunks). The map update reads object positions (an attached item's XFORM
+            // may be written by phase B right then - a torn position of a map spot for one frame at worst) and
+            // creates/destroys map spots (CUIWindow, main thread only); no Lua, bones or ODE.
+            Task& phase_b_task = xr_parallel_for(TaskRange<u32>(0, count, grain), false, phase_b_range);
+            RunPendingMapUpdate();
+            ZoneScopedN("BonesPrepass/phase_b_wait");
+            PERF_SCOPE(prepass_main_slot_wait);
+            TaskScheduler->Wait(phase_b_task);
+        }
+        else
+            xr_parallel_for(TaskRange<u32>(0, count, grain), true, phase_b_range);
         PERF_ADD(prepass_computed, computed.load(std::memory_order_relaxed));
     }
 
@@ -1048,7 +1174,19 @@ void CLevel::OnFrame()
         // (~CUIWindow detaches from UI hierarchy; off-main-thread caused crashes / inconsistent UI state).
         {
             LEVEL_FRAME_PHASE("level/map_manager", lvl_frame_map_manager);
-            MapManager().Update();
+            // K4 (mt_prepass_main_slot): the update waits for the phase B window of the bones prepass of this frame
+            // (CLevel::BonesPrepass; it runs on main on every way out of it). Still pending here = the previous frame
+            // had no prepass (window inactive, loading): then this frame updates here, never twice in one frame
+            // (CMapLocation::Update asserts that).
+            if (mt_prepass_main_slot && !s_map_update_pending)
+                s_map_update_pending = true;
+            else
+            {
+                if (s_map_update_pending)
+                    PERF_INC(prepass_map_update_late);
+                s_map_update_pending = false;
+                MapManager().Update();
+            }
         }
         if (IsGameTypeSingle() && Device.dwPrecacheFrame == 0)
         {
@@ -1196,7 +1334,15 @@ void CLevel::OnFrame()
         // defer LUA-GC-STEP
         if (g_mt_config.test(mtLUA_GC))
         {
-            Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CLevel::script_gc));
+            if (lua_gc_overlap)
+            {
+                // K2b: phase 0 of the Game thread takes it (CLevel::BonesPrepass); if the frame has no phase 0, the
+                // seqParallel delegate runs it at the old place
+                s_script_gc_pending.store(true, std::memory_order_release);
+                Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(&RunSeqScriptGc));
+            }
+            else
+                Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CLevel::script_gc));
         }
         else
             script_gc();
@@ -1251,12 +1397,25 @@ void CLevel::OnGameLogicFrame()
 // A listener closer to the sound than this always gets it: gw_npc and xr_danger arm the script danger only within 30 m
 // of the sound (npc_on_hear_callback, dist_sqr < 900), plus a margin for the listener moving until its callbacks run
 float npc_perf_sound_dispatch_near_dist = 35.f;
-// A listener closer to the actor than this always gets every sound: what the player can see reacts as before
+// A listener closer to the actor than this always gets every combat sound: what the player can see reacts as before
+// (G3 below: the non-combat sounds of other objects use npc_sound_noncombat_dist instead of both of these limits)
 float npc_perf_sound_dispatch_actor_dist = 50.f;
 // Beyond those, a sound goes to at most this many of the other listeners, the loudest ones (power with occlusion):
 // combat sounds (shot, bullet hit, explosion, monster attack / injury / death) and the rest
 int npc_perf_sound_dispatch_max_combat = 64;
 int npc_perf_sound_dispatch_max = 32;
+
+// plans/optimization_mt/24-critical-path.md, G3 (always on since 2026-10-16; saved tunables, console_commands.cpp).
+// In a crowd fight nearly every listener is within npc_perf_sound_dispatch_actor_dist of the actor, so the cap above
+// cuts almost nothing (~2000 deliveries a frame, ~1.3 us each). Combat sounds and the sounds of the actor are never
+// touched by these limits.
+// m: a non-combat sound (step, voice, reload, item, world) of another object goes to every listener within this
+// distance of it, to the npc_perf_sound_dispatch_max loudest of the others and to the listeners with the Lua sound
+// callback; the actor distance exemption does not apply to it
+float npc_sound_noncombat_dist = 20.f;
+// > 0: a listener gets at most this many non-combat sounds of other objects a frame, the loudest (power with distance
+// and occlusion); a listener with the Lua sound callback keeps all of them. 0 = no cap
+int npc_sound_noncombat_per_listener = 0;
 
 namespace
 {
@@ -1297,22 +1456,57 @@ struct SoundDispatchCopy
     u32 index;
 };
 
+// The class of a delegate's sound (24-critical-path.md, G3): only SoundDispatchOther is cut by the G3 limits
+enum SoundDispatchClass : u8
+{
+    SoundDispatchOther,
+    SoundDispatchCombat,
+    SoundDispatchActor, // the actor's own sounds and those of what it holds, shot or threw
+    SoundDispatchClassCount
+};
+
+// A delivery in the listener order (24-critical-path.md, G3)
+struct SoundDispatchOrder
+{
+    const Feel::Sound* dest;
+    u32 index;
+};
+
 // Scratch of CLevel::SoundEvent_Filter, kept between frames (no allocation per frame); game logic thread only
 xr_vector<SoundDispatchRun> s_sound_dispatch_runs;
 xr_vector<SoundDispatchCandidate> s_sound_dispatch_candidates;
 xr_vector<SoundDispatchCopy> s_sound_dispatch_copies;
+xr_vector<u8> s_sound_dispatch_classes;
+xr_vector<SoundDispatchOrder> s_sound_dispatch_order;
+xr_vector<IGame_Level::_esound_delegate> s_sound_dispatch_grouped;
+
+// xr_hear.reset_hear_callback sets the Lua sound callback for a section with on_sound only: its condlists react to
+// sounds at the distance and power they name, so such a listener keeps every sound
+bool SoundDispatchKeepsAll(const IGame_Level::_esound_delegate& entry)
+{
+    CCustomMonster* monster = entry.dest_object->cast_custom_monster();
+    return monster && monster->callback(GameObject::eSound);
+}
 } // namespace
 
 // The game logic thread, from SoundEvent_Dispatch before any delegate goes out. A delegate is dropped by setting its
-// dest to null; the rest keep their order.
+// dest to null; the rest are grouped by listener (see below).
 // - Cap: a sound goes to every listener within npc_perf_sound_dispatch_near_dist of it, within
 //   npc_perf_sound_dispatch_actor_dist of the actor, or with the Lua sound callback set (an xr_hear on_sound section),
 //   and to at most npc_perf_sound_dispatch_max[_combat] of the other listeners, the loudest. The sounds of the actor
 //   and of what it holds or shot (steps, shots, items, bullet hits and whines: their object is the actor) are not
-//   capped at all - stealth and the reaction to the player stay as before.
+//   capped at all - stealth and the reaction to the player stay as before. A non-combat sound of another object
+//   (G3) uses npc_sound_noncombat_dist instead and no actor distance exemption.
 // - Dedupe: the same source and sound type reaches a listener once a frame, the loudest delegate (of equal ones the
 //   later). CSoundMemoryManager raises its threshold to each sound it hears and CScriptEntity::sound_callback merges
 //   the same source and type into one saved sound, so the quieter copy changes nothing there.
+// - G3, npc_sound_noncombat_per_listener (> 0): at most that many non-combat sounds of other objects per listener,
+//   the loudest.
+// - G3, grouped: the kept delegates are reordered so that the deliveries of one listener go out back to back (the
+//   memory managers of an NPC stay in the cache over its ~3 sounds of the frame instead of being reloaded for each).
+//   SoundEvent_Dispatch takes them from the back, so each listener still gets its sounds in the order it got them
+//   before; only the order between listeners changes (and with it the order of the NPCs in the hear callback queue
+//   of the next frame).
 void CLevel::SoundEvent_Filter(xr_vector<_esound_delegate>& events)
 {
     if (events.empty())
@@ -1323,8 +1517,13 @@ void CLevel::SoundEvent_Filter(xr_vector<_esound_delegate>& events)
     const IGameObject* actor = CurrentEntity();
     const float near_dist = npc_perf_sound_dispatch_near_dist;
     const float actor_dist_sqr = _sqr(npc_perf_sound_dispatch_actor_dist);
+    // G3 tunables, read once: the console runs on main while this runs on the game logic thread
+    const float noncombat_dist = npc_sound_noncombat_dist;
+    const u32 per_listener = npc_sound_noncombat_per_listener > 0 ? static_cast<u32>(npc_sound_noncombat_per_listener) : 0;
     u32 capped = 0;
     u32 deduped = 0;
+    u32 noncombat_cut = 0;
+    u32 listener_capped = 0;
 
     // The runs of the sound events: SoundEvent_Register queues the listeners of one event back to back
     xr_vector<SoundDispatchRun>& runs = s_sound_dispatch_runs;
@@ -1344,30 +1543,44 @@ void CLevel::SoundEvent_Filter(xr_vector<_esound_delegate>& events)
 
     // Cap
     xr_vector<SoundDispatchCandidate>& candidates = s_sound_dispatch_candidates;
+    xr_vector<u8>& classes = s_sound_dispatch_classes;
+    classes.resize(count);
     for (const SoundDispatchRun& run : runs)
     {
-        if (actor && run.source && (run.source == actor || run.source->H_Root() == actor))
-            continue;
+        bool actor_sound = actor && run.source && (run.source == actor || run.source->H_Root() == actor);
         // A grenade or a charge of the actor: no parent any more after the throw, its initiator tells whose it is
-        if (actor && run.source)
+        if (!actor_sound && actor && run.source)
         {
             // const_cast: smart_cast and CExplosive::Initiator() are non-const, the object is only read
             CExplosive* explosive = smart_cast<CExplosive*>(const_cast<IGameObject*>(run.source));
-            if (explosive && explosive->Initiator() == actor->ID())
-                continue;
+            actor_sound = explosive && explosive->Initiator() == actor->ID();
         }
-        const u32 limit = static_cast<u32>(
-            SoundDispatchIsCombat(run.type) ? npc_perf_sound_dispatch_max_combat : npc_perf_sound_dispatch_max);
+        const bool combat = SoundDispatchIsCombat(run.type);
+        const u8 sound_class = actor_sound ? SoundDispatchActor : (combat ? SoundDispatchCombat : SoundDispatchOther);
+        std::fill(classes.begin() + run.begin, classes.begin() + run.end, sound_class);
+        if (actor_sound)
+            continue;
+        // G3: a non-combat sound of another object - a smaller always-zone, no actor distance exemption
+        const bool noncombat_cap = !combat;
+        const u32 limit = static_cast<u32>(combat ? npc_perf_sound_dispatch_max_combat : npc_perf_sound_dispatch_max);
         if (run.end - run.begin <= limit)
             continue;
         candidates.clear();
         for (u32 i = run.begin; i < run.end; ++i)
         {
             const _esound_delegate& entry = events[i];
-            if (entry.dist <= near_dist)
-                continue;
-            if (actor && entry.dest_object->Position().distance_to_sqr(actor->Position()) <= actor_dist_sqr)
-                continue;
+            if (noncombat_cap)
+            {
+                if (entry.dist <= noncombat_dist)
+                    continue;
+            }
+            else
+            {
+                if (entry.dist <= near_dist)
+                    continue;
+                if (actor && entry.dest_object->Position().distance_to_sqr(actor->Position()) <= actor_dist_sqr)
+                    continue;
+            }
             candidates.push_back({ entry.power, i });
         }
         if (candidates.size() <= limit)
@@ -1377,11 +1590,14 @@ void CLevel::SoundEvent_Filter(xr_vector<_esound_delegate>& events)
         for (auto it = candidates.begin() + limit; it != candidates.end(); ++it)
         {
             _esound_delegate& entry = events[it->index];
-            // xr_hear.reset_hear_callback sets the Lua sound callback for a section with on_sound only: its condlists
-            // react to sounds at the distance and power they name, so such a listener keeps every sound
-            CCustomMonster* monster = entry.dest_object->cast_custom_monster();
-            if (monster && monster->callback(GameObject::eSound))
+            if (SoundDispatchKeepsAll(entry))
                 continue;
+            // The G3 share: dropped although the old rules (near_dist, actor distance) always keep it
+            if (noncombat_cap && (entry.dist <= near_dist ||
+                    (actor && entry.dest_object->Position().distance_to_sqr(actor->Position()) <= actor_dist_sqr)))
+            {
+                ++noncombat_cut;
+            }
             entry.dest = nullptr;
             ++capped;
         }
@@ -1434,14 +1650,78 @@ void CLevel::SoundEvent_Filter(xr_vector<_esound_delegate>& events)
         }
     }
 
-    if (capped || deduped)
+    // G3: the kept delegates in the listener order (by listener, then by the original index)
+    xr_vector<SoundDispatchOrder>& order = s_sound_dispatch_order;
+    order.clear();
+    for (u32 i = 0; i < count; ++i)
     {
-        events.erase(std::remove_if(events.begin(), events.end(),
-                         [](const _esound_delegate& entry) { return !entry.dest; }),
-            events.end());
+        if (events[i].dest)
+            order.push_back({ events[i].dest, i });
     }
+    std::sort(order.begin(), order.end(), [](const SoundDispatchOrder& a, const SoundDispatchOrder& b)
+    {
+        if (a.dest != b.dest)
+            return std::less<const Feel::Sound*>()(a.dest, b.dest);
+        return a.index < b.index;
+    });
+
+    // G3: per listener at most per_listener non-combat sounds of other objects, the loudest
+    if (per_listener)
+    {
+        for (size_t first = 0; first < order.size();)
+        {
+            size_t last = first + 1;
+            while (last < order.size() && order[last].dest == order[first].dest)
+                ++last;
+            candidates.clear();
+            for (size_t k = first; k < last; ++k)
+            {
+                const u32 index = order[k].index;
+                if (classes[index] == SoundDispatchOther)
+                    candidates.push_back({ events[index].power, index });
+            }
+            if (candidates.size() > per_listener && !SoundDispatchKeepsAll(events[order[first].index]))
+            {
+                std::nth_element(candidates.begin(), candidates.begin() + per_listener, candidates.end(),
+                    [](const SoundDispatchCandidate& a, const SoundDispatchCandidate& b) { return a.power > b.power; });
+                for (auto it = candidates.begin() + per_listener; it != candidates.end(); ++it)
+                {
+                    events[it->index].dest = nullptr;
+                    ++listener_capped;
+                }
+            }
+            first = last;
+        }
+    }
+
+    // What goes out, by class (24-critical-path.md, G3: how much of the dispatch the non-combat cuts can reach)
+    u32 kept[SoundDispatchClassCount] = {};
+    xr_vector<_esound_delegate>& out = s_sound_dispatch_grouped;
+    out.clear();
+    out.reserve(order.size());
+    for (const SoundDispatchOrder& entry : order)
+    {
+        _esound_delegate& delegate = events[entry.index];
+        if (!delegate.dest)
+            continue; // dropped by the per-listener cap
+        ++kept[classes[entry.index]];
+        out.push_back(std::move(delegate));
+    }
+    events.swap(out);
+    out.clear(); // the old delegates, all moved from or dropped: no sound is held between frames
     PERF_ADD(npc_sound_capped, capped);
     PERF_ADD(npc_sound_deduped, deduped);
+    PERF_ADD(npc_sound_noncombat_cut, noncombat_cut);
+    PERF_ADD(npc_sound_listener_capped, listener_capped);
+    PERF_ADD(npc_sound_kept_combat, kept[SoundDispatchCombat]);
+    PERF_ADD(npc_sound_kept_other, kept[SoundDispatchOther]);
+    PERF_ADD(npc_sound_kept_actor, kept[SoundDispatchActor]);
+    // without XR_PERF_METRICS
+    (void)capped;
+    (void)deduped;
+    (void)noncombat_cut;
+    (void)listener_capped;
+    (void)kept;
 }
 
 int psLUA_GCSTEP = 100; // 10

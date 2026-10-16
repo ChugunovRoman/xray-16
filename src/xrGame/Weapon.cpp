@@ -65,6 +65,7 @@ constexpr pcstr WPN_GRENADE_LAUNCHER = "wpn_launcher";
 constexpr pcstr WPN_GRENADE_LAUNCHER_SOC = "wpn_grenade_launcher";
 
 BOOL b_toggle_weapon_aim = FALSE;
+int wpn_npc_ucl_lite = 1; // K5 of plans/optimization_mt/26-framemove-game-next.md, see Weapon.h
 
 static class CUIWpnScopeXmlManager : public pureUIReset, public pureAppEnd
 {
@@ -341,13 +342,38 @@ CWeapon::~CWeapon()
 }
 
 void CWeapon::Hit(SHit* pHDS) { inherited::Hit(pHDS); }
+#if XR_PERF_METRICS
+namespace
+{
+// 24-critical-path.md, M4: the caller tag of CWeapon::XFormSourceScope (bones/caller/weapon/*)
+thread_local u8 s_weapon_xform_source = CWeapon::xfsOther;
+} // namespace
+
+CWeapon::XFormSourceScope::XFormSourceScope(u8 source) : m_prev(s_weapon_xform_source)
+{
+    s_weapon_xform_source = source;
+}
+
+CWeapon::XFormSourceScope::~XFormSourceScope() { s_weapon_xform_source = m_prev; }
+#endif
+
 void CWeapon::UpdateXForm()
 {
     if (Device.dwFrame == dwXF_Frame)
-        return;
+    {
+        if (m_xf_lazy_frame != Device.dwFrame)
+            return;
+        // F3: the XFORM of this frame was built from the owner's bones as they were - an exact request recomputes it
+        PERF_INC(wpn_xform_lazy_upgraded);
+    }
 
     dwXF_Frame = Device.dwFrame;
+    m_xf_lazy_frame = 0;
+    UpdateXFormFromOwner(EOwnerBones::Calculate);
+}
 
+void CWeapon::UpdateXFormFromOwner(EOwnerBones bones)
+{
     if (!H_Parent())
         return;
 
@@ -381,9 +407,33 @@ void CWeapon::UpdateXForm()
     if ((HandDependence() == hd1Hand) || (GetState() == eReload) || (!E->g_Alive()))
         boneL = boneR2;
 
+    switch (bones)
+    {
+    case EOwnerBones::Calculate:
     {
         PERF_BONE_CALLER(xray::perf::bone::Weapon);
+#if XR_PERF_METRICS
+        // 24-critical-path.md, M4: the whole call (UpdateTracks + the bone math when due) by the caller
+        const u8 source = s_weapon_xform_source;
+        PERF_SCOPE_IF(source == xfsSounds, wpn_bones_sounds);
+        PERF_SCOPE_IF(source == xfsFire, wpn_bones_fire);
+        PERF_SCOPE_IF(source == xfsFlame, wpn_bones_flame);
+        PERF_SCOPE_IF(source != xfsSounds && source != xfsFire && source != xfsFlame, wpn_bones_other);
+#endif
         V->CalculateBones();
+        m_xf_exact_owner_id = E->ID();
+        break;
+    }
+    case EOwnerBones::TracksOnly:
+        // F3, an owner nobody draws: what CalculateBones(FALSE) does below its 100 ms interval - the animation time and
+        // the blend callbacks go on every frame as before; the bone math is left to whoever needs the bones (vision,
+        // the collision form, IK, the render once the owner is seen)
+        if (IKinematicsAnimated* animated = V->dcast_PKinematicsAnimated())
+            animated->UpdateTracks();
+        break;
+    case EOwnerBones::AsTheyAre:
+        // F3: the bones prepass computes this owner later this frame (phase A on main, the bone math on the workers)
+        break;
     }
     Fmatrix& mL = V->LL_GetTransform(u16(boneL));
     Fmatrix& mR = V->LL_GetTransform(u16(boneR));
@@ -444,6 +494,72 @@ void CWeapon::UpdateFireDependencies_internal()
             VERIFY(_valid(m_current_firedeps.m_FireParticlesXForm));
         }
     }
+}
+
+// F3 of plans/optimization_mt/24-critical-path.md (always on, the former wpn_xform_lazy_owner_bones 2). Measured
+// (a session with ~1000 NPCs): ucl/weapon 3.7 ms a frame, ~0.9 ms of it the bones of the owners computed on main by
+// UpdateSounds (get_LastFP -> UpdateXForm -> CalculateBones), ~200 a frame - the call is unconditional, while the
+// sounds it places play rarely. The bone math of an owner the render draws is done anyway by the bones prepass right
+// after FrameMove (on the workers), and an owner nobody draws needs no exact hands for a sound position.
+// The fire point of the shots (state_Fire, OnShot, the flame) stays exact: it stamps dwFP_Frame, this one does not.
+const Fvector& CWeapon::sounds_fire_point()
+{
+    const u32 frame = Device.dwFrame;
+    // The fire point of this frame is known (a shot, the flame) or the XFORM is exact already: no bones are computed
+    if (dwFP_Frame == frame || (dwXF_Frame == frame && m_xf_lazy_frame != frame))
+        return get_LastFP();
+    if (m_xf_lazy_frame == frame)
+    {
+        // the overrides of UpdateSounds ask again in the same frame
+        PERF_INC(wpn_xform_lazy_reused);
+        XFORM().transform_tiny(m_lazy_fp, vLoadedFirePoint);
+        return m_lazy_fp;
+    }
+    const EOwnerBones bones = SoundsOwnerBones();
+    if (bones == EOwnerBones::Calculate)
+        return get_LastFP();
+    // dwXF_Frame is stamped as UpdateXForm does (use_parent_ai_locations: a spatial_move later in this frame must not
+    // put the weapon to the feet of the owner again), m_xf_lazy_frame tells an exact request of this frame to recompute
+    UpdateXFormFromOwner(bones);
+    dwXF_Frame = frame;
+    m_xf_lazy_frame = frame;
+    // the 3rd-person fire point, as UpdateFireDependencies_internal computes it (GetHUDmode() is false here)
+    XFORM().transform_tiny(m_lazy_fp, vLoadedFirePoint);
+    return m_lazy_fp;
+}
+
+CWeapon::EOwnerBones CWeapon::SoundsOwnerBones()
+{
+    // The same filters as the bones prepass (CLevel::BonesPrepass) and the torch (F4 of 20-framemove-reduction.md):
+    // the actor, the view entity and a frozen corpse pose are computed as before; a second viewport draws far NPCs
+    // close - exact too; and the first XFORM in these hands is exact (the bones have been computed at least once)
+    CEntityAlive* owner = smart_cast<CEntityAlive*>(H_Parent());
+    IKinematics* kinematics = owner ? smart_cast<IKinematics*>(owner->Visual()) : nullptr;
+    if (!owner || !kinematics || !owner->g_Alive() || GetHUDmode() || owner->cast_actor() ||
+        owner == Level().CurrentEntity() || owner == Level().CurrentViewEntity() ||
+        owner->renderable_CorpsePoseFrozen() || Device.m_SecondViewport.IsSVPActive() ||
+        m_xf_exact_owner_id != owner->ID())
+    {
+        PERF_INC(wpn_bones_sounds_exact);
+        return EOwnerBones::Calculate;
+    }
+    // Drawn last frame and its bones were computed by the render: the bones prepass computes them after FrameMove
+    if (kinematics->BonesPrepass_Wanted())
+    {
+        PERF_INC(wpn_bones_sounds_prepass);
+        PERF_INC(wpn_xform_lazy_prepass);
+        return EOwnerBones::AsTheyAre;
+    }
+    // Drawn in no pass last frame
+    if (!owner->rendered_in_any_pass())
+    {
+        PERF_INC(wpn_bones_sounds_unseen);
+        PERF_INC(wpn_xform_lazy_offscreen);
+        return EOwnerBones::TracksOnly;
+    }
+    // Drawn, but not by the prepass (its recent miss, a LOD shadow caster): as before
+    PERF_INC(wpn_bones_sounds_seen);
+    return EOwnerBones::Calculate;
 }
 
 void CWeapon::ForceUpdateFireParticles()
@@ -1523,6 +1639,9 @@ bool CWeapon::NpcUpdateCLNothingInFlight()
         if (item && item->laser_glow && item->laser_glow->get_active())
             return false;
     }
+    // K5 (wpn_npc_ucl_lite): the same answer without four xr_stricmp lookups over the whole collection
+    if (wpn_npc_ucl_lite)
+        return !m_sounds.AnyPlaying({"sndShow", "sndHide", "sndReload", "sndReloadEmpty"});
     for (pcstr alias : {"sndShow", "sndHide", "sndReload", "sndReloadEmpty"})
     {
         HUD_SOUND_ITEM* sound = m_sounds.FindSoundItem(alias, false);
@@ -1532,28 +1651,73 @@ bool CWeapon::NpcUpdateCLNothingInFlight()
     return true;
 }
 
+// K5 of plans/optimization_mt/26-framemove-game-next.md. Not the actor's: GetHUDmode() is false (it needs a CActor
+// parent), LaserDotsAllowed() too, its sounds are never 2D HUD ones. The actor's weapon always takes the old path
+bool CWeapon::NpcUclLite()
+{
+    if (!wpn_npc_ucl_lite)
+        return false;
+    IGameObject* parent = H_Parent();
+    return !parent || !parent->cast_actor();
+}
+
+bool CWeapon::NpcSoundsQuiet() { return NpcUclLite() && !m_sounds.AnyPlaying(); }
+
 void CWeapon::UpdateCL()
 {
     ZoneScopedN("ucl_CWeapon");
-    if (TrySkipHiddenUpdateCL() || TrySkipOwnerLodUpdateCL())
+    bool skip_ucl;
+    {
+        PERF_SCOPE(wpn_ucl_skip_check); // 26-framemove-game-next.md, metrics 1-A
+        skip_ucl = TrySkipHiddenUpdateCL() || TrySkipOwnerLodUpdateCL();
+    }
+    if (skip_ucl)
+    {
+        PERF_INC(wpn_ucl_skipped);
         return;
+    }
     // -npc_cpp_profile only (stage 0 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md): what the
     // UpdateCL of weapons of NPCs consists of - the one in the hands or hidden ones in the slots
     if (npc_cpp_profile::enabled() && H_Parent() && H_Parent() != Level().CurrentEntity())
         npc_cpp_profile::count(GetState() == eHidden ? ENpcCppProfileStage::WeaponUclNpcHidden :
                                                         ENpcCppProfileStage::WeaponUclNpcActive);
-    inherited::UpdateCL();
-    UpdateHUDAddonsVisibility();
-    // Позиционирование точек ЛЦУ живёт в player_hud::update(), где трансформации худа уже
-    // посчитаны для текущего кадра. Здесь только гасим их, пока оружие не в руках.
-    if (!LaserDotsAllowed())
-        DeactivateLaserDots();
-    //подсветка от выстрела
-    UpdateLight();
+    {
+        PERF_SCOPE(wpn_ucl_inherited); // 24-critical-path.md, M4: weapon/ucl/*
+        inherited::UpdateCL();
+    }
+    {
+        PERF_SCOPE(wpn_ucl_addons_vis);
+        if (NpcUclLite())
+        {
+            // K5: not in the actor's hands - UpdateHUDAddonsVisibility returns at !GetHUDmode() (after a copy of
+            // CHudTuner: GetHudTuner() returns it by value) and LaserDotsAllowed() is false; the laser dots are
+            // switched off once
+            PERF_INC(wpn_lite_addons_npc);
+            if (m_laser_dots_maybe_active)
+            {
+                DeactivateLaserDots();
+                m_laser_dots_maybe_active = false;
+            }
+        }
+        else
+        {
+            UpdateHUDAddonsVisibility();
+            // Позиционирование точек ЛЦУ живёт в player_hud::update(), где трансформации худа уже
+            // посчитаны для текущего кадра. Здесь только гасим их, пока оружие не в руках.
+            if (!LaserDotsAllowed())
+                DeactivateLaserDots();
+        }
+    }
+    {
+        PERF_SCOPE(wpn_ucl_light_flame);
+        WEAPON_XFORM_SOURCE(xfsFlame);
+        //подсветка от выстрела
+        UpdateLight();
 
-    //нарисовать партиклы
-    UpdateFlameParticles();
-    UpdateFlameParticles2();
+        //нарисовать партиклы
+        UpdateFlameParticles();
+        UpdateFlameParticles2();
+    }
 
     if (!IsGameTypeSingle())
         make_Interpolation();
@@ -5662,6 +5826,8 @@ void CWeapon::UpdateLaserDots()
         DeactivateLaserDots();
         return;
     }
+    // K5: below the dots may be activated - CWeapon::UpdateCL switches them off once out of the actor's hands
+    m_laser_dots_maybe_active = true;
 
     attachable_hud_item* hi = HudItemData();
     CActor* actor = smart_cast<CActor*>(H_Parent());

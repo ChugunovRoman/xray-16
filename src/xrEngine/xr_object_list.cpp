@@ -184,8 +184,10 @@ void CObjectList::o_sleep(IGameObject* O)
 
 void CObjectList::SingleUpdate(IGameObject* O)
 {
+    PERF_INC(ol_upd_visits); // 26-framemove-game-next.md: objects/update/* - the walk around ucl/*
     if (Device.dwFrame == O->GetUpdateFrame())
     {
+        PERF_INC(ol_upd_skip_done);
 #ifdef DEBUG
 // if (O->getDestroy())
 // Msg ("- !!!processing_enabled ->destroy_queue.push_back %s[%d] frame [%d]",O->cName().c_str(), O->ID(),
@@ -197,6 +199,7 @@ void CObjectList::SingleUpdate(IGameObject* O)
 
     if (!O->processing_enabled())
     {
+        PERF_INC(ol_upd_skip_disabled);
 #ifdef DEBUG
 // if (O->getDestroy())
 // Msg ("- !!!processing_enabled ->destroy_queue.push_back %s[%d] frame [%d]",O->cName().c_str(), O->ID(),
@@ -223,6 +226,9 @@ void CObjectList::SingleUpdate(IGameObject* O)
         if (xray::perf::g_perf_metrics_active)
         {
             using M = xray::perf::Metric;
+#if XR_PERF_METRICS
+            const u64 classify_t0 = xray::perf::Ticks(); // objects/update/classify: the cast chain below
+#endif
             M metric = M::ucl_other;
             if (O->cast_actor())
                 metric = M::ucl_actor;
@@ -246,6 +252,9 @@ void CObjectList::SingleUpdate(IGameObject* O)
                 metric = M::ucl_restrictor;
             else if (O->cast_physics_shell_holder())
                 metric = M::ucl_psh;
+#if XR_PERF_METRICS
+            xray::perf::AddTimeSlow(M::ol_upd_classify, xray::perf::Ticks() - classify_t0);
+#endif
             xray::perf::ScopedTime ucl_time(metric);
             O->UpdateCL();
         }

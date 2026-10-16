@@ -236,6 +236,12 @@ public:
     void Enable();
     void Repair();
 
+    // Parallel post-integrate (plans/optimization_mt/21-physics-step.md, permanent; CPHWorld::Step): a merge
+    // root solved in step m_post_group_step is entry m_post_group of that step's island-solve batch - its objects run
+    // their post-integrate in the task that solved it. Written and read by the stepping thread only, before the solve.
+    u64 m_post_group_step = u64(-1);
+    u32 m_post_group = 0;
+
 protected:
 private:
 };

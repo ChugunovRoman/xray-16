@@ -169,6 +169,7 @@ bool CEnemyManager::useful(const CEntityAlive* entity_alive) const
             PERF_INC(stk_enemy_useful_cached); // 24-critical-path.md, M12
             return cached_result;
         }
+        PERF_INC(stk_enemy_useful_miss); // K7: hit rate = useful_cached / (useful_cached + useful_miss)
 
         bool callback_result = true;
         if (m_useful_callback)
@@ -314,6 +315,8 @@ void CEnemyManager::remove_links(IGameObject* object)
     if (m_selected == object)
         m_selected = 0;
 
+    // K7: relcase comes for every object destroyed on the level - the whole cache is dropped
+    PERF_ADD(stk_enemy_useful_drop, m_useful_callback_cache.size());
     clear_useful_callback_cache();
 }
 
@@ -372,6 +375,7 @@ IC bool CEnemyManager::enemy_inertia(const CEntityAlive* previous_enemy) const
 
 void CEnemyManager::on_enemy_change(const CEntityAlive* previous_enemy)
 {
+    PERF_ADD(stk_enemy_useful_drop, m_useful_callback_cache.size()); // K7
     clear_useful_callback_cache();
 
     VERIFY(previous_enemy);

@@ -224,10 +224,15 @@ private:
     // The object handler LOD (plans/optimization_mt/22-game-thread.md, step 1; npc_perf_object_handler_lod_*): true =
     // this UpdateCL does not run the object handler (the weapon planner) of an idle stalker far from the camera
     bool TrySkipObjectHandlerLod();
+    // K8c of plans/optimization_mt/26-framemove-game-next.md (npc_oh_lod_combat): true = this UpdateCL does not run the
+    // object handler of a fighting stalker far from the camera
+    bool TrySkipObjectHandlerCombatLod();
     // The scheduler interval of a settled corpse (22-game-thread.md, step 1; npc_perf_dead_shed_interval_ms)
     void UpdateDeadShedLod();
     u32 m_object_handler_lod_last_time{0}; // Device.dwTimeGlobal of the last object handler run from UpdateCL
+    u32 m_object_handler_lod_last_frame{0}; // Device.dwFrame of that run (K8c)
     u32 m_object_handler_lod_skips{u32(-1)}; // skips since that run; -1 = not counted yet (the phase is set by ID)
+    bool m_object_handler_lod_combat_skipped{false}; // K8c: the last UpdateCL pass skipped the handler in a fight
     bool m_dead_shed_lod_applied{false}; // shedule.t_min / t_max hold the long corpse interval
     // Device.dwTimeGlobal of the last shedule_Update while alive (22-game-thread.md: the real update period, the DT
     // the scheduler passes is clamped to max(t_max, 1000) ms); 0 = none yet
@@ -334,12 +339,20 @@ private:
     u32 m_pick_frame_id;
     u32 m_pick_time{0}; // Device.dwTimeGlobal of the last real pick (the friendly-fire pick LOD)
     collide::rq_results rq_storage;
+    // 24-critical-path.md, G2a (the friendly-fire pick cache): the aim of the last real pick, how many frames reused it
+    Fvector m_ff_cache_position{};
+    Fvector m_ff_cache_direction{};
+    float m_ff_cache_range{0.f};
+    u16 m_ff_cache_enemy{u16(-1)};
+    u16 m_ff_cache_item{u16(-1)};
+    u32 m_ff_cache_reused{0};
 
 private:
     void can_kill_entity(
         const Fvector& position, const Fvector& direction, float distance, collide::rq_results& rq_storage);
     void can_kill_entity_from(const Fvector& position, Fvector direction, float distance);
     void update_can_kill_info();
+    bool ff_pick_cache_reuse(const Fvector& position, const Fvector& direction);
 
 public:
     bool can_kill_member();
@@ -683,6 +696,11 @@ private:
     bool m_best_cover_actual;
     bool m_best_cover_can_try_advance;
     const CCoverPoint* m_best_cover_advance_cover;
+    // K7 (plans/optimization_mt/26-framemove-game-next.md, npc_cover_none_hold_ms): the last cover search of
+    // best_cover that found nothing - when, from where and against which threat position (0 = no such search)
+    u32 m_cover_none_time{0};
+    Fvector m_cover_none_position{};
+    Fvector m_cover_none_threat{};
 
 public:
     const CCoverPoint* find_best_cover(const Fvector& position_to_cover_from);
@@ -691,6 +709,8 @@ private:
     float best_cover_value(const Fvector& position_to_cover_from);
     void compute_enemy_distances(float& minimum_enemy_distance, float& maximum_enemy_distance);
     void update_best_cover_actuality(const Fvector& position_to_cover_from);
+    bool best_cover_still_good(const Fvector& position_to_cover_from);
+    void drop_cover_inertia_k7();
     void on_best_cover_changed(const CCoverPoint* new_cover, const CCoverPoint* old_cover);
 
 public:

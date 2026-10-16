@@ -24,7 +24,10 @@ IC void CCoverEvaluatorBase::initialize(const Fvector& start_position, bool fake
     m_best_value = 1000.f;
     m_loophole = 0;
     if (!fake_call)
+    {
         m_last_update = Device.dwTimeGlobal;
+        ++m_scan_count;
+    }
 }
 
 IC void CCoverEvaluatorBase::finalize()
@@ -43,6 +46,8 @@ IC bool CCoverEvaluatorBase::use_smart_covers_only() const { return (m_use_smart
 IC void CCoverEvaluatorBase::use_smart_covers_only(bool value) { m_use_smart_covers_only = value; }
 IC bool CCoverEvaluatorBase::can_use_smart_covers() const { return (m_can_use_smart_covers); }
 IC void CCoverEvaluatorBase::can_use_smart_covers(bool value) { m_can_use_smart_covers = value; }
+IC u32 CCoverEvaluatorBase::scan_count() const { return (m_scan_count); }
+IC void CCoverEvaluatorBase::set_last_radius(float radius) { m_last_radius = radius; }
 IC CRestrictedObject& CCoverEvaluatorBase::object() const
 {
     VERIFY(m_object);

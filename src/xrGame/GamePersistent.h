@@ -123,7 +123,8 @@ public:
     void OnWeaponIconUserRtsReleased() override;
     void OnWeaponIconRtEvicted(pcstr texture_name) override;
 
-    CHudTuner GetHudTuner() { return m_hudTuner; }
+    // By reference: a copy (4 xr_maps) was made on every call - every weapon UpdateCL asks is_active()
+    const CHudTuner& GetHudTuner() const { return m_hudTuner; }
     CUITexturesAddonsPosition GetWpnTextureAddonsPosTool() const { return m_wpnTexturesPos; }
     CUICamAnmTool GetCamAnmLst() const { return m_camAnmLst; }
 };

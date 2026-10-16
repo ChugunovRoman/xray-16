@@ -27,7 +27,7 @@ struct XRPHYSICS_API ph_console
     // от камеры -> Disable() безусловно. Труп может не среагировать на следующий удар — это приемлемая
     // цена против постоянной стоимости его симуляции. 0 = выкл (старое поведение, только естественный сон ODE).
     static int ph_corpse_sleep_ms; //= 3000; минимальный возраст трупа (мс) прежде чем гасить физику
-    static float ph_corpse_sleep_far_dist; //= 60.f; дистанция (м) от камеры, дальше которой труп гасится безусловно
+    static float ph_corpse_sleep_far_dist; //= 10.f; дистанция (м) от камеры, дальше которой труп гасится безусловно
     // Защита от "замороженной растяжки": не гасить труп, пока он ещё летит/кувыркается или пока его суставы
     // разошлись (после взрыва ODE стягивает элементы обратно за несколько шагов - если усыпить в этот момент,
     // растянутая поза остаётся навсегда). 0 = проверка выключена.
@@ -49,4 +49,13 @@ struct XRPHYSICS_API ph_console
     // Watchdog of the frame step, m: a live NPC controller that rose more than this in one substep is put back where it
     // was before the substep, its velocity zeroed. 0 = off.
     static float ph_ai_step_max_rise; //= 2.f
+
+    // Corpse pairs dropped in the broadphase (plans/optimization_mt/21-physics-step.md, journal 2026-10-16;
+    // CPHObject::CollideDynamicsBroadphase). Permanent after the A/B test; these are its saved limits. A corpse = a
+    // ragdoll-class shell (the death shell of a character). Corpse x corpse pairs are never collided (corpses pass through
+    // each other) - beyond ph_corpse_vs_corpse_dist of the camera, m: > 0 = keep the pair when either corpse is within it.
+    static float ph_corpse_vs_corpse_dist; //= 0.f; 0 = skip everywhere
+    // m: > 0 = corpse x live NPC controller pairs with both beyond this of the camera are never collided (the NPC walks
+    // through, the corpse is not pushed or woken). The actor always collides with corpses.
+    static float ph_corpse_vs_npc_dist; //= 30.f; 0 = off
 };

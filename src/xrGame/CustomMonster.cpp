@@ -599,6 +599,7 @@ void CCustomMonster::UpdateCL()
     START_PROFILE("CustomMonster/client_update/inherited")
     {
         ZoneScopedN("ucl_cm_inherited");
+        PERF_SCOPE(cm_ucl_inherited); // 26-framemove-game-next.md, M3: cm/ucl/* - the parts of this UpdateCL
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLInherited);
         inherited::UpdateCL();
     }
@@ -645,6 +646,7 @@ void CCustomMonster::UpdateCL()
         {
             {
                 ZoneScopedN("ucl_cm_anim_movement_no_net");
+                PERF_SCOPE(cm_ucl_anim_mov_ctrl);
                 NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLAnimationController);
                 update_animation_movement_controller();
             }
@@ -716,6 +718,7 @@ void CCustomMonster::UpdateCL()
     {
 #pragma todo("Dima to All : this is FAKE, network is not supported here!")
         ZoneScopedN("ucl_cm_update_position_anim");
+        PERF_SCOPE(cm_ucl_position_anim);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLUpdatePositionAnimation);
         UpdatePositionAnimation();
     }
@@ -754,6 +757,7 @@ void CCustomMonster::UpdateCL()
 
     {
         ZoneScopedN("ucl_cm_anim_movement_controller");
+        PERF_SCOPE(cm_ucl_anim_mov_ctrl);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterUpdateCLAnimationController);
         update_animation_movement_controller();
     }
@@ -778,6 +782,7 @@ void CCustomMonster::UpdatePositionAnimation()
     // Animation LOD: skip animation selection for throttled (far, non-combat) NPCs; movement stays every frame.
     if (!bfScriptAnimation() && should_update_animation(Device.dwTimeGlobal))
     {
+        PERF_SCOPE(cm_ucl_select_anim);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CustomMonsterSelectAnimation);
         SelectAnimation(XFORM().k, movement().detail().direction(), movement().speed());
     }

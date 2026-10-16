@@ -49,7 +49,15 @@ void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector
 
     if (0 == bReady)
         return;
+#if XR_PERF_METRICS
+    // 26-framemove-game-next.md, M7: sound/update/* - the parts of this update
+    const u64 lock_t0 = xray::perf::g_perf_metrics_active ? xray::perf::Ticks() : 0;
+#endif
     ScopeLock lock(&m_emitters_lock);
+#if XR_PERF_METRICS
+    if (lock_t0)
+        xray::perf::AddTimeSlow(xray::perf::Metric::snd_update_lock_wait, xray::perf::Ticks() - lock_t0);
+#endif
     Stats.Update.Begin();
     m_locked_by.store(std::this_thread::get_id(), std::memory_order_relaxed);
 
@@ -91,17 +99,21 @@ void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector
     };
 
     // Firstly update emitters, which are now being rendered
-    for (CSoundRender_Target* T : s_targets)
     {
-        if (CSoundRender_Emitter* E = owned_emitter(T))
+        PERF_SCOPE(snd_update_targets);
+        for (CSoundRender_Target* T : s_targets)
         {
-            update_emitter(E);
+            if (CSoundRender_Emitter* E = owned_emitter(T))
+            {
+                update_emitter(E);
+            }
         }
     }
 
     // Update emitters
     for (CSoundRender_Scene* scene : m_scenes)
     {
+        PERF_SCOPE(snd_update_emitters);
         auto& emitters = scene->get_emitters();
         for (u32 it = 0; it < emitters.size(); it++)
         {
@@ -121,11 +133,17 @@ void CSoundRender_Core::update(const Fvector& P, const Fvector& D, const Fvector
     }
 
     // update listener
-    update_listener(P, D, N, R, fTimer_Delta);
+    {
+        PERF_SCOPE(snd_update_listener);
+        update_listener(P, D, N, R, fTimer_Delta);
+    }
 
     // Events
     for (CSoundRender_Scene* scene : m_scenes)
+    {
+        PERF_SCOPE(snd_update_register);
         scene->update();
+    }
 
     m_locked_by.store(std::thread::id{}, std::memory_order_relaxed);
     Stats.Update.End();
@@ -137,7 +155,14 @@ void CSoundRender_Core::render()
 
     // Game/render overlap frame: this runs on the Game logic thread (seqFrameMT) while the physics step and the main
     // thread's render may play/stop sounds - they wait for this loop (m_emitters_lock), so no pair changes under it.
+#if XR_PERF_METRICS
+    const u64 lock_t0 = xray::perf::g_perf_metrics_active ? xray::perf::Ticks() : 0;
+#endif
     ScopeLock lock(&m_emitters_lock);
+#if XR_PERF_METRICS
+    if (lock_t0)
+        xray::perf::AddTimeSlow(xray::perf::Metric::snd_render_lock_wait, xray::perf::Ticks() - lock_t0);
+#endif
     m_locked_by.store(std::this_thread::get_id(), std::memory_order_relaxed);
     Stats.Render.Begin();
 

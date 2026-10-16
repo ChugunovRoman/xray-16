@@ -61,6 +61,37 @@ IC bool IsAiController(CPHObject* obj)
     return obj->CastType() == CPHObject::tpCharacter && static_cast<CPHCharacter*>(obj)->CastAICharacter() != nullptr;
 }
 
+// Corpse pairs dropped in the broadphase (plans/optimization_mt/21-physics-step.md, journal 2026-10-16; permanent after
+// the A/B test, limits ph_corpse_vs_corpse_dist / ph_corpse_vs_npc_dist, see console_vars.h). A heavy fight (log s_m)
+// spends most of the narrowphase on pairs with a corpse: ~1.9 us per pair against ~0.5 us for two NPC capsules (a ragdoll
+// is ~11 bodies, space x space in NearCallback). The developer's call: corpse-vs-corpse contacts do not matter,
+// corpse-vs-NPC ones far from the camera do not either - such a pair never reaches NearCallback (no dCollide, no merge,
+// no wake).
+// "Corpse" = a ragdoll-class shell: cbClassRagDoll is set only by CPHShell::SetRagDoll(), called by
+// CCharacterPhysicsSupport for the death shell of a stalker / monster / the actor - never for props, items, vehicles,
+// the hit shell of a live NPC (physics_shell_animated) or the activation shape of a death (it is not a shell).
+enum class CorpseRuleSide : u8
+{
+    None, // neither rule applies to this object
+    Corpse,
+    Npc, // a live NPC's controller (not the actor: actor-corpse stays as it is)
+};
+
+IC CorpseRuleSide GetCorpseRuleSide(CPHObject* obj)
+{
+    if (CPHCollideValidator::IsRagDollObject(*obj))
+        return CorpseRuleSide::Corpse;
+    if (IsAiController(obj))
+        return CorpseRuleSide::Npc;
+    return CorpseRuleSide::None;
+}
+
+// dist > 0: the object's broadphase centre (spatial.sphere.P, the last spatial_move) is farther than dist from cam.
+IC bool FarFromCamera(const Fvector& pos, const Fvector& cam, float dist)
+{
+    return pos.distance_to_sqr(cam) > dist * dist;
+}
+
 #if XR_PERF_METRICS
 // physics/broadphase/pair/*: the candidates that go on to NearCallback, by pair type (this object x the other one).
 void CountBroadphasePair(CPHObject* obj1, CPHObject* obj2)
@@ -77,7 +108,12 @@ void CountBroadphasePair(CPHObject* obj1, CPHObject* obj2)
     else if (ai1 || ai2)
         xray::perf::Add(M::ph_bp_pair_ai_other, 1);
     else if (rd1 || rd2)
+    {
         xray::perf::Add(M::ph_bp_pair_ragdoll, 1);
+        // The corpse-vs-corpse part of pair/ragdoll (the rest: corpse x item / prop / vehicle / actor).
+        if (rd1 && rd2)
+            xray::perf::Add(M::ph_bp_pair_ragdoll_ragdoll, 1);
+    }
     else
         xray::perf::Add(M::ph_bp_pair_other, 1);
 }
@@ -90,6 +126,7 @@ CPHObject::CPHObject() : SpatialBase(g_pGamePersistent->SpatialSpacePhysic)
     spatial.type |= STYPE_PHYSIC;
     m_island.Init();
     m_check_count = 0;
+    m_post_flags = 0;
     CPHCollideValidator::InitObject(*this);
     // The same value from every object (see PhObjectFromSpatial).
     s_spatial_data_offset.store(
@@ -122,6 +159,14 @@ void CPHObject::deactivate()
 {
     if (!m_flags.test(st_activated))
         return;
+    // The parallel post-integrate part of this object (a character's sleep check in PhDataUpdate): m_objects is edited by
+    // PostIntegrateSerial on the stepping thread, in list order. The object stays activated until then; nothing in the
+    // rest of its PhDataUpdate reads that, and a repeated call is the same no-op it was before.
+    if (m_post_flags & pf_parallel)
+    {
+        m_post_flags |= pf_deactivate;
+        return;
+    }
     PH_STEP_HAZARD("CPHObject::deactivate");
     VERIFY2(m_island.IsActive(), "can not do it during processing");
 
@@ -171,6 +216,55 @@ void CPHObject::spatial_move()
     m_collide_dyn_candidates.clear();
 }
 
+// Parallel post-integrate (plans/optimization_mt/21-physics-step.md, permanent): the island-solve task of this
+// object's merge root, after IslandStep and this object's IslandReinit. Touches only this object: its bodies and geoms
+// (no joint or body of it is in another island), its own fields and spatial bounds. spatial_move() without the octree
+// rebuild: the bounds refresh and the node test are SpatialBase::spatial_move's lock-free part (single writer per
+// object, B-1 in xrCDB/ISpatial.cpp); the rebuild is left to PostIntegrateSerial, so that the octree items keep the order
+// of the serial loop (q_box result order -> contact order of the next substep).
+void CPHObject::PostIntegrateParallel(dReal step)
+{
+    VERIFY(PhDataUpdateSplit() && !m_post_flags);
+    m_post_flags = pf_parallel;
+    PhDataUpdateParallel(step);
+    if (spatial.node_ptr)
+    {
+        spatial_refresh_bounds();
+        spatial.type |= STYPEFLAG_INVALIDSECTOR;
+        if (spatial_inside())
+        {
+            PERF_INC(spatial_move_calls);
+            PERF_INC(spatial_move_idle);
+        }
+        else
+            m_post_flags |= pf_rebuild; // counted as a call (and a rebuild) by SpatialBase::spatial_move
+    }
+    m_flags.set(st_dirty, TRUE);
+    m_collide_spatial_overlap.clear();
+    m_collide_dyn_candidates.clear();
+    m_post_flags = u8((m_post_flags & ~pf_parallel) | pf_done);
+}
+
+// The serial rest on the stepping thread, in m_objects order: the deactivation recorded above, the type's own serial part
+// (CPHShell: DisableObject + put_in_recently_deactivated / Disable), the octree rebuild. The same order as in
+// PhDataUpdate() + spatial_move().
+void CPHObject::PostIntegrateSerial(dReal step)
+{
+    const u8 flags = m_post_flags;
+    m_post_flags = 0;
+    if (flags & pf_deactivate)
+    {
+        PERF_INC(ph_post_mt_deactivate);
+        deactivate();
+    }
+    PhDataUpdateSerial(step);
+    if (flags & pf_rebuild)
+    {
+        PERF_INC(ph_post_mt_rebuild);
+        SpatialBase::spatial_move(); // refreshes the same bounds again, then remove + insert under the exclusive lock
+    }
+}
+
 void CPHObject::CollideRayMotions()
 {
     if (!m_flags.test(fl_ray_motions))
@@ -208,12 +302,36 @@ void CPHObject::CollideRayMotions()
 #endif
         auto i = result.begin(), e = result.end();
         u32 ray_candidates = 0;
+        // The corpse pair rules of CollideDynamicsBroadphase for the ray motions too (a fast corpse after an explosion
+        // traces its motion here): per pair, ray motions are rare
+        const float corpse_corpse_dist = ph_console::ph_corpse_vs_corpse_dist;
+        const float corpse_npc_dist = ph_console::ph_corpse_vs_npc_dist;
+        const CorpseRuleSide s1 = GetCorpseRuleSide(this);
+        const auto corpse_pair_skipped = [&](CPHObject* obj2) {
+            if (s1 == CorpseRuleSide::None)
+                return false;
+            const CorpseRuleSide s2 = GetCorpseRuleSide(obj2);
+            const Fvector& cam = ph_world->StepCameraPosition();
+            if (s1 == CorpseRuleSide::Corpse && s2 == CorpseRuleSide::Corpse)
+            {
+                return corpse_corpse_dist <= 0.f || (FarFromCamera(spatial.sphere.P, cam, corpse_corpse_dist) &&
+                    FarFromCamera(obj2->spatial.sphere.P, cam, corpse_corpse_dist));
+            }
+            if (corpse_npc_dist > 0.f && s1 != CorpseRuleSide::None && s2 != CorpseRuleSide::None && s1 != s2)
+            {
+                return FarFromCamera(spatial.sphere.P, cam, corpse_npc_dist) &&
+                    FarFromCamera(obj2->spatial.sphere.P, cam, corpse_npc_dist);
+            }
+            return false;
+        };
         for (; i != e; ++i)
         {
             CPHObject* obj2 = smart_cast<CPHObject*>(*i);
             if (!obj2)
                 continue;
             if (obj2 == this || !obj2->m_flags.test(st_dirty))
+                continue;
+            if (corpse_pair_skipped(obj2))
                 continue;
             ++ray_candidates;
             dGeomID motion_ray = ph_world->GetMotionRayGeom();
@@ -247,6 +365,29 @@ void CPHObject::CollideDynamicsBroadphase()
     const bool aabb_filter = spatial.node_ptr != nullptr && HasExactPhAABB(this);
     constexpr float aabb_margin = 0.02f;
     [[maybe_unused]] const bool count_pairs = xray::perf::g_perf_metrics_active && ph_world->Processing();
+
+    // Corpse pairs (see CorpseRuleSide above), every path: the frame step and the local steps alike - a TryPosition
+    // probe of an NPC far away does not see the corpse either, so it walks through it instead of failing the probe and
+    // then passing through it in the frame step. A pair is near when either object is within the distance of the
+    // camera (StepCameraPosition: the Kick snapshot inside the frame step, the live camera on main). The side and the
+    // distances of this object are taken once per query; per candidate it is one class bit test unless a rule applies.
+    const float corpse_corpse_dist = ph_console::ph_corpse_vs_corpse_dist;
+    const float corpse_npc_dist = ph_console::ph_corpse_vs_npc_dist;
+    const CorpseRuleSide corpse_side = GetCorpseRuleSide(this);
+    const bool corpse_corpse_rule = corpse_side == CorpseRuleSide::Corpse;
+    const bool corpse_npc_rule = corpse_npc_dist > 0.f && corpse_side != CorpseRuleSide::None;
+    const Fvector* camera = nullptr;
+    bool this_far_corpse = true; // for ph_corpse_vs_corpse_dist (0 = everywhere: "far" always)
+    bool this_far_npc = false;
+    if (corpse_corpse_rule || corpse_npc_rule)
+    {
+        camera = &ph_world->StepCameraPosition();
+        if (corpse_corpse_rule && corpse_corpse_dist > 0.f)
+            this_far_corpse = FarFromCamera(spatial.sphere.P, *camera, corpse_corpse_dist);
+        if (corpse_npc_rule)
+            this_far_npc = FarFromCamera(spatial.sphere.P, *camera, corpse_npc_dist);
+    }
+
     for (ISpatial* sp : result)
     {
         CPHObject* obj2 = PhObjectFromSpatial(sp);
@@ -267,6 +408,37 @@ void CPHObject::CollideDynamicsBroadphase()
                 PERF_INC(ph_broadphase_aabb_reject);
                 continue;
             }
+        }
+        // After the exact AABB filter: the skip counters are the NearCallback calls saved.
+        if (corpse_corpse_rule && CPHCollideValidator::IsRagDollObject(*obj2))
+        {
+            // Corpse x corpse: everywhere or beyond ph_corpse_vs_corpse_dist of the camera.
+            if (this_far_corpse &&
+                (corpse_corpse_dist <= 0.f || FarFromCamera(obj2->spatial.sphere.P, *camera, corpse_corpse_dist)))
+            {
+#if XR_PERF_METRICS
+                if (count_pairs)
+                    xray::perf::Add(xray::perf::Metric::ph_bp_skip_corpse_corpse, 1);
+#endif
+                continue;
+            }
+        }
+        else if (corpse_npc_rule && this_far_npc &&
+            (corpse_side == CorpseRuleSide::Corpse ? IsAiController(obj2) :
+                                                     CPHCollideValidator::IsRagDollObject(*obj2)) &&
+            FarFromCamera(obj2->spatial.sphere.P, *camera, corpse_npc_dist))
+        {
+            // ph_corpse_vs_npc_dist N: corpse x live NPC controller, both beyond N m of the camera - the NPC walks
+            // through the corpse, the corpse is not pushed or woken. Within N m: NearCallback as before (incl. the
+            // one-sided contact of an NPC with a force-slept corpse).
+#if XR_PERF_METRICS
+            // The same frame-step condition as pair/*; _local = the other paths (TryPosition probes, world steps on main).
+            if (count_pairs)
+                xray::perf::Add(xray::perf::Metric::ph_bp_skip_corpse_npc, 1);
+            else if (xray::perf::g_perf_metrics_active)
+                xray::perf::Add(xray::perf::Metric::ph_bp_skip_corpse_npc_local, 1);
+#endif
+            continue;
         }
 #if XR_PERF_METRICS
         if (count_pairs)
@@ -351,6 +523,8 @@ void CPHObject::step_prediction(float time)
 }
 bool CPHObject::step_single(dReal step)
 {
+    // Both collisions below are probes: the island is stepped only when the first one merged nothing.
+    PhProbeCollideScope probe;
     CollideDynamics();
     bool ret = !m_island.IsObjGroun();
     if (ret)
@@ -386,6 +560,7 @@ void CPHObject::step(float time) // it is still not a true step for object becau
 
 bool CPHObject::DoCollideObj()
 {
+    PhProbeCollideScope probe;
     CollideDynamics();
     bool ret = m_island.IsObjGroun();
     reinit_single();

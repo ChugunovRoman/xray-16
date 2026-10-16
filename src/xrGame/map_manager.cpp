@@ -286,18 +286,28 @@ void CMapManager::ResolveRelationSpotChecks()
 void CMapManager::Update()
 {
     ZoneScoped;
-    delete_data(m_deffered_destroy_queue); // from prev frame
+    {
+        PERF_SCOPE(map_tail); // 26-framemove-game-next.md, M7: map/*
+        delete_data(m_deffered_destroy_queue); // from prev frame
+    }
 
     // CMapLocation::Update computes the position only for the current level (and ePosToActor): the PDA maps compute
     // the others on demand. The old extra CalcPosition of every third location here repeated the one in Update.
     const shared_str current_level = Level().name();
     vLocations& locations = Locations();
     PERF_ADD(mapmgr_locations, locations.size());
-    for (SLocationKey& key : locations)
-        key.actual = key.location->Update(current_level);
+    {
+        PERF_SCOPE(map_locations_time);
+        for (SLocationKey& key : locations)
+            key.actual = key.location->Update(current_level);
+    }
 
-    ResolveRelationSpotChecks();
+    {
+        PERF_SCOPE(map_relation_time);
+        ResolveRelationSpotChecks();
+    }
 
+    PERF_SCOPE(map_tail);
     // Usually already sorted (no new or expired locations): skip the resort, the order is the same either way
     if (!std::is_sorted(Locations().begin(), Locations().end()))
         std::sort(Locations().begin(), Locations().end());

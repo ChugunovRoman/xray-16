@@ -42,6 +42,9 @@ protected:
     smart_cover::loophole* m_loophole;
     bool m_use_smart_covers_only;
     bool m_can_use_smart_covers;
+    // K7 (plans/optimization_mt/26-framemove-game-next.md): real scans done (initialize without fake_call), so a caller
+    // can tell an answer of a scan from an answer of the inertia
+    u32 m_scan_count{};
 
 protected:
     virtual void evaluate_smart_cover(smart_cover::cover const* smart_cover, float const& weight) = 0;
@@ -67,6 +70,10 @@ public:
     IC void use_smart_covers_only(bool value);
     IC bool can_use_smart_covers() const;
     IC void can_use_smart_covers(bool value);
+    IC u32 scan_count() const;
+    // the radius of the last real scan: the inertia answers only queries of a radius not larger than it
+    // (vanilla inertia() wrote the radius of every query)
+    IC void set_last_radius(float radius);
 
     void evaluate(const CCoverPoint* cover_point, float weight);
 };

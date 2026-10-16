@@ -148,5 +148,7 @@ void CWeaponRevolver::OnShot()
 void CWeaponRevolver::UpdateSounds()
 {
     inherited::UpdateSounds();
-    m_sounds.SetPosition("sndClose", get_LastFP());
+    if (NpcSoundsQuiet()) // K5 of 26-framemove-game-next.md: a no-op SetPosition, the XFORM is refreshed above
+        return;
+    m_sounds.SetPosition("sndClose", sounds_fire_point()); // F3 of 24-critical-path.md
 }

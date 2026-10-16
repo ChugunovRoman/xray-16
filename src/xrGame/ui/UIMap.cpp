@@ -8,6 +8,7 @@
 #include "GamePersistent.h"
 #include "xrEngine/xr_input.h" //remove me !!!
 #include "xrCore/_fbox2.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 //const u32 activeLocalMapColor = 0xffffffff; // 0xffc80000;
 //const u32 inactiveLocalMapColor = 0xffffffff; // 0xff438cd1;
@@ -54,10 +55,12 @@ void CUICustomMap::Initialize(shared_str name, LPCSTR sh_name)
 
 void CUICustomMap::Update()
 {
+    PERF_SCOPE(ui_map_update); // 26-framemove-game-next.md, M7: ui/map/*, ui/minimap/*
     SetPointerDistance(0.0f);
     if (!Locked())
         UpdateSpots();
 
+    PERF_SCOPE(ui_map_children);
     CUIStatic::Update();
 }
 
@@ -888,7 +891,11 @@ void CUIMiniMap::UpdateSpots()
     if (!g_pGameLevel)
         return;
 
-    DetachAll();
+    PERF_SCOPE(ui_minimap_update_spots);
+    {
+        PERF_SCOPE(ui_minimap_detach);
+        DetachAll();
+    }
     vLocations& ls = Level().MapManager().Locations();
     for (auto it = ls.begin(); it != ls.end(); ++it)
         (*it).location->UpdateMiniMap(this);

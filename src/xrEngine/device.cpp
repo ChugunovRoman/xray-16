@@ -550,6 +550,9 @@ void CRenderDevice::ProcessFrame()
         // vision batch -> seqParallel -> seqFrameMT, parallel to DoRender() and the physics step. Joined in
         // CLevel::OnRender before the UI
         // (JoinGameLogicBeforeUI), with safety joins in DoRender() and right after it.
+        // 26-framemove-game-next.md, K3/K2b (mt_sound_dispatch_early, lua_gc_overlap): the bones prepass may have woken
+        // the thread already for phase 0 (XRay::Engine::KickGameLogicEarly after its phase A); the body below then
+        // starts when phase 0 is done and skips the dispatch phase 0 did.
         XRay::Engine::KickGameLogicThread(run_scheduler);
     }
     else

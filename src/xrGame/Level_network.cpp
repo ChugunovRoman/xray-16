@@ -1,6 +1,7 @@
 #include "pch_script.h"
 #include "addon_event_bus.h"
 #include "Level.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "Level_Bullet_Manager.h"
 #include "xrServer.h"
 #include "xrMessages.h"
@@ -338,6 +339,7 @@ struct _NetworkProcessor : public pureFrame
 {
     virtual void OnFrame()
     {
+        PERF_SCOPE(game_seq_frame_mt_net); // 26-framemove-game-next.md: game/seq_frame_mt/* (seqFrameMT)
         if (g_pGameLevel && !Device.Paused())
             g_pGameLevel->net_Update();
     }

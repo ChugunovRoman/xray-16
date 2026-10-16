@@ -917,7 +917,9 @@ void CWeaponMagazinedWGrenade::PlayAnimBore()
 void CWeaponMagazinedWGrenade::UpdateSounds()
 {
     inherited::UpdateSounds();
-    Fvector P = get_LastFP();
+    if (NpcSoundsQuiet()) // K5 of 26-framemove-game-next.md: no-op SetPositions, the XFORM is refreshed above
+        return;
+    Fvector P = sounds_fire_point(); // F3 of 24-critical-path.md, the same point as the inherited one
     m_sounds.SetPosition("sndShotG", P);
     m_sounds.SetPosition("sndReloadG", P);
     m_sounds.SetPosition("sndSwitch", P);

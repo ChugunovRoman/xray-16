@@ -244,6 +244,8 @@ void AddOne(pcstr split)
     [[maybe_unused]] const bool tracy_zones = s_log_tracy_zones.load(std::memory_order_relaxed);
     ZoneNamedN(log_add_zone, "Log::AddOne", tracy_zones);
     PERF_SCOPE(log_add);
+    // 26-framemove-game-next.md, M13: the same time by the thread that logs
+    PERF_SCOPE_BY_THREAD(log_add_main, log_add_game, log_add_worker);
     PERF_INC(log_lines);
 #if defined(XR_PLATFORM_WINDOWS) && XR_PERF_METRICS
     xray::perf::SetGauge(xray::perf::Metric::log_debugger, IsDebuggerPresent() ? 1 : 0);

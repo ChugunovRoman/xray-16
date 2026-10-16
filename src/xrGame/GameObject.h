@@ -96,6 +96,9 @@ public:
     // Seen in the main render pass (frustum + HOM passed; shadow passes do not count) within the last `frames`
     // frames. The render of frame F runs before the UpdateCL of frame F+1, so 1 = "on screen last frame".
     bool rendered_in_main_pass(u32 frames = 1) const;
+    // Drawn in any render pass (main view, shadows, lights, SVP) within the last `frames` frames: the note of the
+    // bones prepass (renderable_Render). Shadow-only = this and not rendered_in_main_pass() (24-critical-path.md, M1)
+    bool rendered_in_any_pass(u32 frames = 1) const;
 
 protected:
     void UpdateCLCrow(const Fvector& position);

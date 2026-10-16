@@ -648,6 +648,10 @@ XRCORE_API void Flush() noexcept
     {
         if (logging_enabled)
         {
+#if XR_PERF_METRICS
+            // 26-framemove-game-next.md, M13: log/perf_dump - this dump itself (counted in the next frame)
+            const u64 dump_t0 = Ticks();
+#endif
             Msg("* perf_metrics interval=%ums frames=%u", elapsed_ms, s_window_frames);
             for (size_t i = 0; i < kNumMetrics; ++i)
             {
@@ -686,6 +690,9 @@ XRCORE_API void Flush() noexcept
                     }
                 }
             }
+#if XR_PERF_METRICS
+            AddTimeSlow(Metric::log_perf_dump, Ticks() - dump_t0);
+#endif
         }
 
         // P20: the top sources of ltx parsing in this window (printed with the log bit), the table starts anew

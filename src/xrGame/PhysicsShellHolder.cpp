@@ -474,7 +474,9 @@ void CPhysicsShellHolder::on_physics_disable()
 
 Fmatrix& CPhysicsShellHolder::ObjectXFORM() { return XFORM(); }
 Fvector& CPhysicsShellHolder::ObjectPosition() { return Position(); }
-LPCSTR CPhysicsShellHolder::ObjectName() const { return cName().c_str(); }
+// NameObject directly, not cName(): cName() returns a shared_str copy (non-atomic refcount), and ObjectName() is also
+// called from physics worker tasks (the [ai_jump] log of the parallel post-integrate)
+LPCSTR CPhysicsShellHolder::ObjectName() const { return NameObject.c_str(); }
 LPCSTR CPhysicsShellHolder::ObjectNameVisual() const { return cNameVisual().c_str(); }
 LPCSTR CPhysicsShellHolder::ObjectNameSect() const { return cNameSect().c_str(); }
 bool CPhysicsShellHolder::ObjectGetDestroy() const { return CGameObject::getDestroy(); }

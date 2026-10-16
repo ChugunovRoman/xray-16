@@ -1,4 +1,5 @@
 #include "pch_script.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "addon_object_events.h"
 #include <tracy/Tracy.hpp>
 
@@ -569,8 +570,16 @@ void CWeaponMagazined::UpdateCL()
     ZoneNamedN(___wpn_ucl, "ucl_CWeaponMagazined", true);
     // A hidden NPC weapon skips the whole chain, CWeapon::UpdateCL included (TrySkipHiddenUpdateCL);
     // an idle NPC weapon whose owner skipped its UpdateCL by the distance LOD - the same
-    if (TrySkipHiddenUpdateCL() || TrySkipOwnerLodUpdateCL())
+    bool skip_ucl;
+    {
+        PERF_SCOPE(wpn_ucl_skip_check); // 26-framemove-game-next.md, metrics 1-A
+        skip_ucl = TrySkipHiddenUpdateCL() || TrySkipOwnerLodUpdateCL();
+    }
+    if (skip_ucl)
+    {
+        PERF_INC(wpn_ucl_skipped);
         return;
+    }
     {
         ZoneNamedN(___wpn_ucl_inh, "ucl_CWeaponMagazined/inherited", true);
         inherited::UpdateCL();
@@ -582,6 +591,8 @@ void CWeaponMagazined::UpdateCL()
     if (GetNextState() == GetState())
     {
         ZoneNamedN(___wpn_ucl_state, "ucl_CWeaponMagazined/state", true);
+        PERF_SCOPE(wpn_ucl_state); // 24-critical-path.md, M4
+        WEAPON_XFORM_SOURCE(xfsFire);
         switch (GetState())
         {
         case eShowing:
@@ -629,6 +640,8 @@ void CWeaponMagazined::UpdateCL()
 
     {
         ZoneNamedN(___wpn_ucl_snd, "ucl_CWeaponMagazined/UpdateSounds", true);
+        PERF_SCOPE(wpn_ucl_sounds); // 24-critical-path.md, M4
+        WEAPON_XFORM_SOURCE(xfsSounds);
         UpdateSounds();
     }
 }
@@ -640,7 +653,15 @@ void CWeaponMagazined::UpdateSounds()
 
     dwUpdateSounds_Frame = Device.dwFrame;
 
-    Fvector P = get_LastFP();
+    // F3 of 24-critical-path.md: without the owner's bones on main where the owner allows it (sounds_fire_point)
+    Fvector P = sounds_fire_point();
+    // K5 of 26-framemove-game-next.md (wpn_npc_ucl_lite): nothing of m_sounds plays - each SetPosition below is a
+    // no-op, only its xr_stricmp lookup costs. The XFORM refresh of sounds_fire_point above stays (F4(a) of 20)
+    if (NpcSoundsQuiet())
+    {
+        PERF_INC(wpn_lite_sounds_quiet);
+        return;
+    }
     m_sounds.SetPosition("sndShow", P);
     m_sounds.SetPosition("sndHide", P);
     //. nah	m_sounds.SetPosition("sndShot", P);
@@ -658,9 +679,22 @@ void CWeaponMagazined::state_Fire(float dt)
     {
         VERIFY(fOneShotTime > 0.f);
 
+        // K5 of 26-framemove-game-next.md (wpn_npc_ucl_lite): the fire point and the fire params of the owner are
+        // read below only by the shots of this frame (fShotTimeCounter < 0) and by the start of a queue
+        // (m_iShotNum == 0). On the frames between the shots of an NPC weapon they are left out: no exact owner bones
+        // on main (get_LastFP -> UpdateXForm), the sounds of the frame take the lazy XFORM (sounds_fire_point)
+        const bool fire_point_needed = fShotTimeCounter < 0.f || m_iShotNum == 0 || !NpcUclLite();
         Fvector p1, d;
-        p1.set(get_LastFP());
-        d.set(get_LastFD());
+        if (fire_point_needed)
+        {
+            p1.set(get_LastFP());
+            d.set(get_LastFD());
+        }
+        else
+        {
+            p1.set(0.f, 0.f, 0.f);
+            d.set(0.f, 0.f, 1.f);
+        }
 
         if (!H_Parent())
             return;
@@ -682,7 +716,17 @@ void CWeaponMagazined::state_Fire(float dt)
         }
 
         CEntity* E = smart_cast<CEntity*>(H_Parent());
-        E->g_fireParams(this, p1, d);
+        if (fire_point_needed)
+            E->g_fireParams(this, p1, d);
+#if XR_PERF_METRICS
+        if (wpn_npc_ucl_lite)
+        {
+            if (!fire_point_needed)
+                PERF_INC(wpn_lite_fire_lazy);
+            else if (NpcUclLite())
+                PERF_INC(wpn_lite_fire_exact);
+        }
+#endif
 
         if (!E->g_stateFire())
             StopShooting();

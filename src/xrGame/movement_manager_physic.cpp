@@ -853,6 +853,7 @@ void CMovementManager::move_along_path_body(
     if (!forced_kinematic)
     {
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementNearestQuery);
+        PERF_SCOPE(mv_nearest); // 26-framemove-game-next.md, M3: movement/*
         Level().ObjectSpace.GetNearest(m_nearest_objects, dest_position,
             DISTANCE_PHISICS_ENABLE_CHARACTERS + (movement_control->IsCharacterEnabled() ? 0.5f : 0.f), &object());
     }
@@ -921,6 +922,7 @@ void CMovementManager::move_along_path_body(
         movement_control->DisableCharacter();
         movement_control->b_exect_position = true;
         branch = gb_try_skip;
+        PERF_INC(mv_try_skip);
         if (ground_snapped)
             PERF_INC(ai_npc_ground_snap_kinematic);
     }
@@ -929,11 +931,13 @@ void CMovementManager::move_along_path_body(
     { //  физ. объект
         // calls = the frames a physical object was near: the share of the query that pays off
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementCollisionMove);
+        PERF_SCOPE(mv_collision_move); // TryPosition, and Calculate when it fails (movement/try_fail)
 
         if (DBG_PH_MOVE_CONDITIONS(!ph_dbg_draw_mask.test(phDbgNeverUseAiPhMove) &&) !movement_control->TryPosition(
                 dest_position))
         {
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementTryPositionFail);
+            PERF_SCOPE(mv_try_fail);
             branch = gb_physics;
             if (try_skip_on)
                 try_position_skip_result(false);

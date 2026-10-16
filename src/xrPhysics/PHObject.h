@@ -38,6 +38,16 @@ class CPHObject : public SpatialBase
     CPHIsland m_island;
     CLBits m_collide_bits;
     u8 m_check_count;
+    // Parallel post-integrate (permanent, see PostIntegrateParallel): written by the task that runs this
+    // object's parallel part, read and cleared by the serial pass of the same step.
+    enum : u8
+    {
+        pf_parallel = (1 << 0), // the parallel part runs now: deactivate() only records pf_deactivate
+        pf_deactivate = (1 << 1), // deactivate() requested by the parallel part, applied by PostIntegrateSerial
+        pf_rebuild = (1 << 2), // the object left its octree node: SpatialBase::spatial_move in PostIntegrateSerial
+        pf_done = (1 << 3), // the parallel part ran this step
+    };
+    u8 m_post_flags;
     _flags<CLClassBits> m_collide_class_bits;
 
 public:
@@ -83,6 +93,22 @@ public:
     virtual void PhDataUpdate(dReal step) = 0;
     virtual void PhTune(dReal step) = 0;
     virtual void spatial_move();
+    // Parallel post-integrate (plans/optimization_mt/21-physics-step.md, permanent; CPHWorld::Step). An
+    // object whose PhDataUpdateSplit() is true runs its post-integrate in two parts: PostIntegrateParallel() in the
+    // island-solve task of its merge root, right after that island is solved (own bodies, geoms and fields only: velocity
+    // limits, sleep checks, interpolation, bounds), and PostIntegrateSerial() on the stepping thread in m_objects order
+    // (list edits, game callbacks, octree rebuilds) - the same calls in the same order as PhDataUpdate() + spatial_move().
+    virtual bool PhDataUpdateSplit() const { return false; }
+    void PostIntegrateParallel(dReal step);
+    IC bool PostIntegrateDone() const { return !!(m_post_flags & pf_done); }
+    void PostIntegrateSerial(dReal step);
+
+protected:
+    // PhDataUpdate() == PhDataUpdateParallel() + PhDataUpdateSerial() for a split-capable object.
+    virtual void PhDataUpdateParallel(dReal step) {}
+    virtual void PhDataUpdateSerial(dReal step) {}
+
+public:
     virtual void InitContact(dContact* c, bool& do_collide, u16 /*material_idx_1*/, u16 /*material_idx_2*/) = 0;
     virtual void CutVelocity(float l_limit, float a_limit){};
 

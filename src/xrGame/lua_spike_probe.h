@@ -36,6 +36,11 @@ enum class ECategory : u8
 
 extern int g_threshold_us; // npc_perf_lua_spike_us: 0 = off
 extern int g_paced_mul; // lua_gc_paced_mul: % of the LuaJIT pace (100 = one step per KB allocated)
+// lua_gc_step_budget_us (plans/optimization_mt/26-framemove-game-next.md, K2a; temporary, not saved): > 0 - the paced
+// steps of a frame stop after this many us, the rest of the debt goes to the next frames (bounded, see GcStepFrame).
+// One step is never cut: the atomic phase of LuaJIT (lj_gc.c atomic()) is one step and stays as long as it is.
+// 0 = all steps of the frame at once, as before.
+extern int g_step_budget_us;
 
 inline bool Enabled() noexcept { return g_threshold_us > 0; }
 
@@ -89,5 +94,6 @@ constexpr u32 kNoId = u32(-1);
 u32 PollAtomic(lua_State* L) noexcept;
 
 // The GC step of CLevel::script_gc for the method gc_step (1): the paced steps, step_kb KB on top of the allocations.
+// With perf_metrics a single step of at least 2 ms is timed as lua/gc_long_step (in practice the atomic phase).
 void GcStepFrame(lua_State* L, int step_kb) noexcept;
 } // namespace gw::lua_spike

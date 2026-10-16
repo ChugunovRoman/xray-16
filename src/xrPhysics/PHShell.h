@@ -237,6 +237,22 @@ public:
     virtual void PureStep(float step);
     virtual void CollideAll();
     virtual void PhDataUpdate(dReal step);
+    // Parallel post-integrate (permanent, CPHObject::PostIntegrateParallel): the elements' PhDataUpdate in
+    // parallel; the shell-level sleep (DisableObject: a game callback, m_objects, the splitter) and the out-of-bounds
+    // Disable on the stepping thread. The result of the parallel part for the serial one: m_post_result.
+    bool PhDataUpdateSplit() const override { return true; }
+
+protected:
+    void PhDataUpdateParallel(dReal step) override;
+    void PhDataUpdateSerial(dReal step) override;
+    enum : u8
+    {
+        post_disable = (1 << 0), // no element body is enabled: DisableObject + put_in_recently_deactivated
+        post_out_of_bounds = (1 << 1), // the first body left the level boundaries: Disable
+    };
+    u8 m_post_result{0};
+
+public:
     virtual void PhTune(dReal step);
     virtual void InitContact(dContact* c, bool& do_collide, u16 /*material_idx_1*/, u16 /*material_idx_2*/){};
     virtual void FreezeContent();
