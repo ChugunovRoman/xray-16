@@ -22,6 +22,7 @@
 #include "xrServerEntities/xrServer_Objects.h"
 #include "xrServer_Objects_ALife_Items.h"
 #include "xrServer_Objects_ALife_Monsters.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <cctype>
 #include <cstring>
@@ -787,8 +788,13 @@ GwpResult GWP_CALL ApiAlifeSwitchOffline(const GwpPlugin* self, GwpObjectId id)
         return GWP_ERROR_INVALID_ARGUMENT; // a member switches with its squad: switch the squad itself
     if (!object->m_bOnline)
         return GWP_ERROR_INVALID_STATE;
-    // The switch the engine makes itself (CALifeSwitchManager::switch_offline): a squad takes its members along
+    // The switch the engine makes itself (CALifeSwitchManager::switch_offline): a squad takes its members along.
+    // 37-destroy-relcase-smooth.md: the client objects it destroys (alife/switch_offline_plugin)
+#if XR_PERF_METRICS
+    const u32 before = alife->m_offline_client_objects.load(std::memory_order_relaxed);
+#endif
     alife->switch_offline(object);
+    PERF_ADD(alife_switch_offline_plugin, alife->m_offline_client_objects.load(std::memory_order_relaxed) - before);
     return GWP_OK;
 }
 

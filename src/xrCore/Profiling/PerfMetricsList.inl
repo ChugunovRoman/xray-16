@@ -2508,3 +2508,32 @@ PERF_COUNTER(level_path_slice_forced, "level_path/slice_forced")
 // per-frame maximum). The heuristic (Manhattan x2) is not consistent, a vertex is expanded again when a cheaper way to
 // it turns up: pops / astar_visited_max is the work per vertex (1-2 in the open, 10-27 behind walls on the stand).
 PERF_GAUGE(level_path_astar_pops_max, "level_path/astar_pops_max")
+// 37-destroy-relcase-smooth.md (the offline wave of s_ao.log came from the gw_release bursts, not the switch pass):
+// client objects (each with its children) taken offline by the caller, parts of alife/switch_offline_frame:
+// switch_offline_plugin = Plugin API alife_switch_offline (gw_release takes online corpses / items / squads offline),
+// switch_offline_teleport = teleport_object of an online object (Lua TeleportObject / TeleportSquad, Plugin API
+// alife_teleport), switch_offline_full = the full switch pass (update_switch: the first update after a load, the
+// precache frames, sls_default). switch_offline_frame minus these and alife/switch_offline_spread = Lua directly
+// (se_obj:switch_offline() of the sim_squad_scripted removals, force_release_alife_object).
+PERF_COUNTER(alife_switch_offline_plugin, "alife/switch_offline_plugin")
+PERF_COUNTER(alife_switch_offline_teleport, "alife/switch_offline_teleport")
+PERF_COUNTER(alife_switch_offline_full, "alife/switch_offline_full")
+// 37-destroy-relcase-smooth.md: objects/relcase/net_destroy split. net_destroy_call = the O->net_Destroy() calls of
+// the destroy phase (calls = objects, avg = per object); net_free = CObjectList::Destroy of them (net_Unregister, the
+// crow lists, the linear find + erase in objects_active / objects_sleeping, the object pool / delete). net_free/lists
+// and net_free/pool = the two parts of CObjectList::Destroy (also at a level unload).
+PERF_TIMER(relcase_net_destroy_call, "objects/relcase/net_destroy_call")
+PERF_TIMER(relcase_net_free, "objects/relcase/net_free")
+PERF_TIMER(ol_destroy_lists, "objects/net_free/lists")
+PERF_TIMER(ol_destroy_pool, "objects/net_free/pool")
+// Inside net_Destroy (calls = objects): events = gw::addons::objevents::ObjectNetDestroy of every CGameObject (plugin
+// binders, npc_on_net_destroy to Lua and plugins, the storage and the planners of the object), binder =
+// scriptBinder.net_Destroy (the Lua binder net_destroy), subscriptions = RemoveObjectSubscriptions; stalker =
+// CAI_Stalker::net_Destroy as a whole (calls = stalkers; the three above are inside it for a stalker),
+// stalker_inventory = its CInventoryOwner::net_Destroy, stalker_physics = m_pPhysics_support->in_NetDestroy.
+PERF_TIMER(go_net_destroy_events, "objects/net_destroy/events")
+PERF_TIMER(go_net_destroy_binder, "objects/net_destroy/binder")
+PERF_TIMER(go_net_destroy_subs, "objects/net_destroy/subscriptions")
+PERF_TIMER(stalker_net_destroy, "objects/net_destroy/stalker")
+PERF_TIMER(stalker_net_destroy_inventory, "objects/net_destroy/stalker_inventory")
+PERF_TIMER(stalker_net_destroy_physics, "objects/net_destroy/stalker_physics")

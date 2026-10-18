@@ -866,9 +866,20 @@ bool CAI_Stalker::net_Spawn(CSE_Abstract* DC)
 
 void CAI_Stalker::net_Destroy()
 {
+    // 37-destroy-relcase-smooth.md: net_Destroy of a stalker (~54 us an object in the offline wave, objects/net_destroy/*)
+    ZoneScopedN("stalker_net_Destroy");
+    PERF_SCOPE(stalker_net_destroy);
     inherited::net_Destroy();
-    CInventoryOwner::net_Destroy();
-    m_pPhysics_support->in_NetDestroy();
+    {
+        ZoneScopedN("stalker_net_Destroy/inventory");
+        PERF_SCOPE(stalker_net_destroy_inventory);
+        CInventoryOwner::net_Destroy();
+    }
+    {
+        ZoneScopedN("stalker_net_Destroy/physics");
+        PERF_SCOPE(stalker_net_destroy_physics);
+        m_pPhysics_support->in_NetDestroy();
+    }
 
     // XXX: task scheduler
     //TaskScheduler->RemoveTask({ this, &CAI_Stalker::update_object_handler });

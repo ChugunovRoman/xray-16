@@ -354,6 +354,34 @@ CScriptGameObject* CScriptGameObject::GetBestEnemy()
     return alive->lua_game_object();
 }
 
+// 48-engine-lua-userdata.md: for scripts that need only the id or the presence of the best enemy. GetBestEnemy() itself
+// (the same per-frame cache and the alive/destroy checks), the enemy's id instead of its game_object.
+u16 CScriptGameObject::GetBestEnemyId()
+{
+    const CScriptGameObject* enemy = GetBestEnemy();
+    return enemy ? enemy->ID() : u16(-1);
+}
+
+bool CScriptGameObject::HasBestEnemy() { return GetBestEnemy() != nullptr; }
+
+// 48-engine-lua-userdata.md: best_weapon() (the same checks and its error for a non-stalker), the weapon's id
+u16 CScriptGameObject::best_weapon_id()
+{
+    const CScriptGameObject* weapon = best_weapon();
+    return weapon ? weapon->ID() : u16(-1);
+}
+
+// 48-engine-lua-userdata.md: what a:position():distance_to(b:position()) computes, from the same Position() values
+float CScriptGameObject::DistanceTo(const CScriptGameObject& other) const
+{
+    return Position().distance_to(other.Position());
+}
+
+float CScriptGameObject::DistanceToSqr(const CScriptGameObject& other) const
+{
+    return Position().distance_to_sqr(other.Position());
+}
+
 const CDangerObject* CScriptGameObject::GetBestDanger() const
 {
     const CCustomMonster* monster = smart_cast<const CCustomMonster*>(&object());

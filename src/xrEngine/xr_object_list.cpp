@@ -995,8 +995,22 @@ void CObjectList::process_destroy_queue()
                 Msg("Destroying object[%x][%x] [%d][%s] frame[%d]", dynamic_cast<void*>(O), O, O->ID(), O->cName().c_str(),
                     Device.dwFrame);
 #endif // DEBUG
-            O->net_Destroy();
-            Destroy(O);
+            // 37-destroy-relcase-smooth.md: net_Destroy (~54 us an object in the offline wave) split from the
+            // unregister + delete; the zone names the object (section) in Tracy
+            {
+                ZoneScopedN("ol_net_Destroy_obj");
+#ifdef TRACY_ENABLE
+                if (TracyIsConnected)
+                    ZoneText(O->cNameSect().c_str(), O->cNameSect().size());
+#endif
+                PERF_SCOPE(relcase_net_destroy_call);
+                O->net_Destroy();
+            }
+            {
+                ZoneScopedN("ol_Destroy_free");
+                PERF_SCOPE(relcase_net_free);
+                Destroy(O);
+            }
         }
     }
     destroy_queue.clear();
@@ -1433,23 +1447,30 @@ void CObjectList::Destroy(IGameObject* game_obj)
     // Remove the object from list of active objects if the object is active,
     // either remove it from list of sleeping objects if it is sleeping
     // and throw fatal error if the object is neither active nor sleeping
-    auto iter = std::find(objects_active.begin(), objects_active.end(), game_obj);
-    if (iter != objects_active.end())
+    // 37-destroy-relcase-smooth.md: the linear find + erase of the lists (objects/net_free/lists)
     {
-        // this object is active, so remove it from the list
-        objects_active.erase(iter);
-        // check that the object does not belong to list of sleeping object too
-        VERIFY(std::find(objects_sleeping.begin(), objects_sleeping.end(), game_obj) == objects_sleeping.end());
-    }
-    else
-    {
-        iter = std::find(objects_sleeping.begin(), objects_sleeping.end(), game_obj);
-        if (iter == objects_sleeping.end())
-            FATAL("! Unregistered object being destroyed");
-        objects_sleeping.erase(iter);
+        ZoneScopedN("ol_Destroy_lists");
+        PERF_SCOPE(ol_destroy_lists);
+        auto iter = std::find(objects_active.begin(), objects_active.end(), game_obj);
+        if (iter != objects_active.end())
+        {
+            // this object is active, so remove it from the list
+            objects_active.erase(iter);
+            // check that the object does not belong to list of sleeping object too
+            VERIFY(std::find(objects_sleeping.begin(), objects_sleeping.end(), game_obj) == objects_sleeping.end());
+        }
+        else
+        {
+            iter = std::find(objects_sleeping.begin(), objects_sleeping.end(), game_obj);
+            if (iter == objects_sleeping.end())
+                FATAL("! Unregistered object being destroyed");
+            objects_sleeping.erase(iter);
 
+        }
     }
 
+    ZoneScopedN("ol_Destroy_pool");
+    PERF_SCOPE(ol_destroy_pool);
     g_pGamePersistent->ObjectPool.destroy(game_obj);
 }
 

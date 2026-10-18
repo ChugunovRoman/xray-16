@@ -96,6 +96,9 @@ int alife_scheduled_budget_us = 1500;
 // once what already went this call reached N, whatever the estimate of the next object; the first object of a call
 // still always goes, a squad is never split (the stop is before an object, never inside its switch). alife/switch_offline_spread / alife/switch_offline_unestimated show how
 // much of the wave came through this pass and how much of it the estimate missed.
+// s_ao.log (2026-10-18): alife/switch_offline_spread stayed 0 through a wave of ~5000 objects - it was not this pass but
+// the gw_release plugin (Plugin API alife_switch_offline, 32 corpses a frame with their inventories); limited there by
+// client objects. alife/switch_offline_plugin / _teleport / _full tell the paths apart.
 int alife_switch_offline_per_frame_max = 32; // a tunable, not saved (the default since 2026-10-17, 41-cvar-cleanup.md)
 
 class CSwitchSpreadPredicate
@@ -222,7 +225,12 @@ void CALifeUpdateManager::update_switch()
     // Spawn stage 0 (plans/spawn_optimization/SPEC.md): how many M_SPAWN one pass sends (a group of a squad and all the
     // inventories is one pass): the gauge keeps the last pass, its window max is the biggest pass
     const u32 spawns_before = m_online_spawns.load(std::memory_order_relaxed);
+#if XR_PERF_METRICS
+    // 37-destroy-relcase-smooth.md: what the full pass took offline (alife/switch_offline_full)
+    const u32 offline_before = m_offline_client_objects.load(std::memory_order_relaxed);
+#endif
     graph().level().update(CSwitchPredicate(this), Device.dwPrecacheFrame > 0);
+    PERF_ADD(alife_switch_offline_full, m_offline_client_objects.load(std::memory_order_relaxed) - offline_before);
     xray::perf::SetGauge(xray::perf::Metric::alife_switch_pass_spawns,
         static_cast<s64>(m_online_spawns.load(std::memory_order_relaxed) - spawns_before));
     STOP_PROFILE
@@ -706,7 +714,14 @@ void CALifeUpdateManager::teleport_object(
 #endif
 
     if (object->m_bOnline)
+    {
+#if XR_PERF_METRICS
+        // 37-destroy-relcase-smooth.md: an online object teleported goes offline first (alife/switch_offline_teleport)
+        const u32 offline_before = m_offline_client_objects.load(std::memory_order_relaxed);
+#endif
         switch_offline(object);
+        PERF_ADD(alife_switch_offline_teleport, m_offline_client_objects.load(std::memory_order_relaxed) - offline_before);
+    }
     graph().change(object, object->m_tGraphID, game_vertex_id);
     object->m_tNodeID = level_vertex_id;
     object->o_Position = position;

@@ -85,6 +85,9 @@ luabind::class_<CScriptGameObject>& script_register_game_object1(luabind::class_
         .def("get_bleeding", &CScriptGameObject::GetBleeding)
         .def("center", &CScriptGameObject::Center)
         .def("position", &CScriptGameObject::Position)
+        // 48-engine-lua-userdata.md: obj:distance_to(other) = obj:position():distance_to(other:position()), no vectors
+        .def("distance_to", &CScriptGameObject::DistanceTo)
+        .def("distance_to_sqr", &CScriptGameObject::DistanceToSqr)
         .def("direction", &CScriptGameObject::Direction)
         .def("clsid", &CScriptGameObject::clsid)
         .def("id", &CScriptGameObject::ID)
@@ -180,6 +183,9 @@ luabind::class_<CScriptGameObject>& script_register_game_object1(luabind::class_
         .def("best_danger", &CScriptGameObject::GetBestDanger)
         .def("best_danger_snapshot", &CScriptGameObject::GetBestDangerSnapshot)
         .def("best_enemy", &CScriptGameObject::GetBestEnemy)
+        // 48-engine-lua-userdata.md: best_enemy() as an id (65535 without an enemy) / a bool, no game_object to Lua
+        .def("best_enemy_id", &CScriptGameObject::GetBestEnemyId)
+        .def("has_best_enemy", &CScriptGameObject::HasBestEnemy)
         .def("best_item", &CScriptGameObject::GetBestItem)
         .def("action_count", &CScriptGameObject::GetActionCount)
         .def("action_by_index", &CScriptGameObject::GetActionByIndex)
@@ -193,6 +199,7 @@ luabind::class_<CScriptGameObject>& script_register_game_object1(luabind::class_
         .def("memory_time", &CScriptGameObject::memory_time)
         .def("memory_position", &CScriptGameObject::memory_position)
         .def("best_weapon", &CScriptGameObject::best_weapon)
+        .def("best_weapon_id", &CScriptGameObject::best_weapon_id) // 48-engine-lua-userdata.md: 65535 = nil
         .def("explode", &CScriptGameObject::explode)
         .def("get_enemy", &CScriptGameObject::GetEnemy)
         .def("get_corpse", &CScriptGameObject::GetCorpse)

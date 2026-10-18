@@ -1244,10 +1244,24 @@ void CCustomMonster::Hit(SHit* pHDS)
 void CCustomMonster::OnEvent(NET_Packet& P, u16 type) { inherited::OnEvent(P, type); }
 void CCustomMonster::net_Destroy()
 {
-    inherited::net_Destroy();
-    CScriptEntity::net_Destroy();
-    sound().unload();
-    movement().net_Destroy();
+    // 37-destroy-relcase-smooth.md: Tracy zones of the net_Destroy chain of a stalker / monster (the CGameObject part
+    // has its own zones and metrics, objects/net_destroy/*)
+    {
+        ZoneScopedN("cm_net_Destroy/entity");
+        inherited::net_Destroy();
+    }
+    {
+        ZoneScopedN("cm_net_Destroy/script_entity");
+        CScriptEntity::net_Destroy();
+    }
+    {
+        ZoneScopedN("cm_net_Destroy/sound_unload");
+        sound().unload();
+    }
+    {
+        ZoneScopedN("cm_net_Destroy/movement");
+        movement().net_Destroy();
+    }
 
     Device.remove_from_seq_parallel(fastdelegate::FastDelegate0<>(this, &CCustomMonster::update_sound_player));
     Device.remove_from_seq_parallel(fastdelegate::FastDelegate0<>(this, &CCustomMonster::Exec_Visibility));

@@ -192,6 +192,10 @@ public:
     void play_cycle(LPCSTR anim);
     Fvector Center();
     _DECLARE_FUNCTION10(Position, Fvector);
+    // 48-engine-lua-userdata.md: a:position():distance_to(b:position()) / distance_to_sqr without the two vector
+    // userdata (luabind copies every returned Fvector into a new one) - the same Fvector math on the same positions
+    float DistanceTo(const CScriptGameObject& other) const;
+    float DistanceToSqr(const CScriptGameObject& other) const;
     _DECLARE_FUNCTION10(Direction, Fvector);
     _DECLARE_FUNCTION10(Mass, float);
     _DECLARE_FUNCTION10(ID, u16);
@@ -488,6 +492,10 @@ public:
     const CDangerObject* GetBestDanger() const;
     SScriptBestDangerSnapshot GetBestDangerSnapshot() const;
     CScriptGameObject* GetBestItem();
+    // 48-engine-lua-userdata.md (plans/optimization_mt): best_enemy() reduced to its id (u16(-1) without an enemy) or
+    // to "is there one" - the same GetBestEnemy() selection, only the game_object does not go to Lua
+    u16 GetBestEnemyId();
+    bool HasBestEnemy();
 
     _DECLARE_FUNCTION10(GetActionCount, u32);
 
@@ -506,6 +514,8 @@ public:
     u32 memory_time(const CScriptGameObject& lua_game_object);
     Fvector memory_position(const CScriptGameObject& lua_game_object);
     CScriptGameObject* best_weapon();
+    // 48-engine-lua-userdata.md: the id of best_weapon() (u16(-1) when it gives nil), the same checks
+    u16 best_weapon_id();
     void explode(u32 level_time);
     CScriptGameObject* GetEnemy() const;
     CScriptGameObject* GetCorpse() const;

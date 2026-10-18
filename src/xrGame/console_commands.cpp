@@ -2982,6 +2982,21 @@ public:
     void Execute(pcstr args) override { gw::lua_udata::Report(args); }
 };
 
+// 47-luabind-value-nogc.md: lua_value_nogc - the emergency switch (not saved, default 1) of the luabind instances that
+// hold a trivially destructible value (vector, CTime, matrix... returned by value, vector() / CTime() from Lua) made
+// without __gc (luabind set_value_instance_nogc). 0 = with __gc as before, for the instances made after it.
+static int g_lua_value_nogc = 1;
+class CCC_LuaValueNoGc : public CCC_IntegerNotSaved
+{
+public:
+    using CCC_IntegerNotSaved::CCC_IntegerNotSaved;
+    void Execute(pcstr args) override
+    {
+        CCC_IntegerNotSaved::Execute(args);
+        luabind::detail::set_value_instance_nogc(*value != 0);
+    }
+};
+
 // The same for a float
 class CCC_FloatNotSaved : public CCC_Float
 {
@@ -3140,6 +3155,9 @@ void CCC_RegisterCommands()
     // nothing; the GC frees them in the cycle they die in instead of queueing them for an empty finalizer) are always
     // on since 2026-10-18 (their switches lua_wrapper_cache, lua_wrapper_nogc removed, 41-cvar-cleanup.md)
     luabind::detail::set_nonowning_instance_nogc(true);
+    // 47-luabind-value-nogc.md: the same for the value instances of trivially destructible types (emergency switch)
+    CMD4(CCC_LuaValueNoGc, "lua_value_nogc", &g_lua_value_nogc, 0, 1);
+    luabind::detail::set_value_instance_nogc(g_lua_value_nogc != 0);
     // 26-framemove-game-next.md: K2b, K3, K4 (Level.cpp), the pipelined bones prepass and its early kick (Level.cpp) and
     // K9 (xrEngine/EngineThreading.cpp) are always on since 2026-10-18 (their switches lua_gc_overlap,
     // mt_sound_dispatch_early, mt_prepass_main_slot, r__bones_prepass_pipeline, r__bones_prepass_early_kick,

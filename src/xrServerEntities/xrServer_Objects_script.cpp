@@ -99,6 +99,22 @@ CScriptIniFile* get_spawn_ini(CSE_Abstract* abstract)
     return ((CScriptIniFile*)&abstract->spawn_ini());
 }
 
+namespace
+{
+// 48-engine-lua-userdata.md (plans/optimization_mt): a.position:distance_to(b.position) without the two vector
+// userdata - every read of the position field is a new one (luabind passes the member by reference: a wrapper over
+// &o_Position). The same Fvector math on the same o_Position values.
+float cse_abstract_distance_to(const CSE_Abstract& self, const CSE_Abstract& other)
+{
+    return self.o_Position.distance_to(other.o_Position);
+}
+
+float cse_abstract_distance_to_sqr(const CSE_Abstract& self, const CSE_Abstract& other)
+{
+    return self.o_Position.distance_to_sqr(other.o_Position);
+}
+} // namespace
+
 template <typename T>
 struct CSEAbstractWrapperBase : public T, public luabind::wrap_base
 {
@@ -162,6 +178,9 @@ void CSE_Abstract::script_register(lua_State* luaState)
             .def_readonly("parent_id", &BaseType::ID_Parent)
             .def_readonly("script_version", &BaseType::m_script_version)
             .def_readwrite("position", &BaseType::o_Position)
+            // 48-engine-lua-userdata.md: se:distance_to(other) = se.position:distance_to(other.position), no vectors
+            .def("distance_to", &cse_abstract_distance_to)
+            .def("distance_to_sqr", &cse_abstract_distance_to_sqr)
             .def_readwrite("angle", &BaseType::o_Angle)
             .def("section_name", &get_section_name)
             .def("name", &get_name)

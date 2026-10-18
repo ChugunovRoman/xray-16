@@ -524,7 +524,12 @@ void CGameObject::net_Destroy()
     VERIFY(m_spawned);
     // npc_on_net_destroy / actor_on_net_destroy: before the Lua binder (db.storage of the NPC is still there) and
     // before Objects.net_Unregister below, or the subscribers would get nil for the object (net_Find).
-    gw::addons::objevents::ObjectNetDestroy(this);
+    {
+        // 37-destroy-relcase-smooth.md: net_Destroy split (objects/net_destroy/*)
+        ZoneScopedN("go_net_Destroy/events");
+        PERF_SCOPE(go_net_destroy_events);
+        gw::addons::objevents::ObjectNetDestroy(this);
+    }
     if (m_anim_mov_ctrl)
         destroy_anim_mov_ctrl();
 
@@ -537,7 +542,10 @@ void CGameObject::net_Destroy()
     xr_delete(CForm);
     if (register_schedule())
         shedule_unregister();
-    spatial_unregister();
+    {
+        ZoneScopedN("go_net_Destroy/spatial");
+        spatial_unregister();
+    }
     // setDestroy (true); // commented in original src
     // remove visual
     cNameVisual_set(0);
@@ -566,10 +574,18 @@ void CGameObject::net_Destroy()
 
     //.	Parent									= 0;
 
-    scriptBinder.net_Destroy();
+    {
+        ZoneScopedN("go_net_Destroy/binder");
+        PERF_SCOPE(go_net_destroy_binder);
+        scriptBinder.net_Destroy();
+    }
     // Plugin subscriptions to this object end with it (GWP_SUBSCRIBE_OBJECT): after the Lua binder, whose
     // net_destroy may still send events about the object.
-    gw::addons::events::RemoveObjectSubscriptions(ID());
+    {
+        ZoneScopedN("go_net_Destroy/subscriptions");
+        PERF_SCOPE(go_net_destroy_subs);
+        gw::addons::events::RemoveObjectSubscriptions(ID());
+    }
     m_script_clsid = -1;
 
     xr_delete(m_lua_game_object);
