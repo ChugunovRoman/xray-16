@@ -32,7 +32,8 @@ public:
         } // a_pixel.b_dirty=TRUE;		}
         if (C->destination & RC_dest_vertex)
         {
-            set<BT_VertexBuffer>(C, C->vs, std::forward<Args>(args)...);
+            if (!pixel_shares_vertex(C)) // 46: the same member of the same buffer - Write would find the bytes equal
+                set<BT_VertexBuffer>(C, C->vs, std::forward<Args>(args)...);
         } //  a_vertex.b_dirty=TRUE;		}
         if (C->destination & RC_dest_geometry)
         {
@@ -72,7 +73,8 @@ public:
         } //  a_pixel.b_dirty=TRUE;	}
         if (C->destination & RC_dest_vertex)
         {
-            seta<BT_VertexBuffer>(C, C->vs, e, std::forward<Args>(args)...);
+            if (!pixel_shares_vertex(C)) // 46: see set()
+                seta<BT_VertexBuffer>(C, C->vs, e, std::forward<Args>(args)...);
         } //  a_vertex.b_dirty=TRUE;	}
         if (C->destination & RC_dest_geometry)
         {
@@ -106,6 +108,13 @@ public:
     // (bone palette of CSkeletonX). Same result as `count` seta(C, e + i, rows[i]) calls.
     // Defined below the GetCBuffer specializations.
     void seta_rows(R_constant* C, u32 e, const Fvector4* rows, u32 count);
+
+    // 46-engine-core-render-audit.md: since P15b the vertex and pixel shader of a pass share one buffer per cbuffer
+    // layout (dynamic_transforms: m_WVP/m_WV/m_W/L_material/hemi_cube_*, read by both stages). True when the pixel
+    // write of C went to the very bytes the vertex write would target: after it that Write is always skipped as equal
+    // (dx11ConstantBuffer::Write - the bytes are equal and ValidOnGpu holds in every branch), so it is not issued.
+    // Defined below the GetCBuffer specializations.
+    bool pixel_shares_vertex(R_constant* C) const;
 
     //
     ICF void flush()
@@ -181,6 +190,12 @@ template<> dx11ConstantBuffer& R_constants::GetCBuffer<R_constants::BT_GeometryB
 template<> dx11ConstantBuffer& R_constants::GetCBuffer<R_constants::BT_ComputeBuffer>(R_constant* C) const;
 template<> dx11ConstantBuffer& R_constants::GetCBuffer<R_constants::BT_HullBuffer>(R_constant* C) const;
 template<> dx11ConstantBuffer& R_constants::GetCBuffer<R_constants::BT_DomainBuffer>(R_constant* C) const;
+
+inline bool R_constants::pixel_shares_vertex(R_constant* C) const
+{
+    return (C->destination & RC_dest_pixel) && C->ps.index == C->vs.index && C->ps.cls == C->vs.cls &&
+        &GetCBuffer<BT_PixelBuffer>(C) == &GetCBuffer<BT_VertexBuffer>(C);
+}
 
 inline void R_constants::seta_rows(R_constant* C, u32 e, const Fvector4* rows, u32 count)
 {

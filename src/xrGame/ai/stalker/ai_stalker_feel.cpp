@@ -24,9 +24,11 @@ bool CAI_Stalker::feel_vision_isRelevant(IGameObject* O)
 {
     if (!g_Alive())
         return false;
-    CEntityAlive* E = smart_cast<CEntityAlive*>(O);
-    CInventoryItem* I = smart_cast<CInventoryItem*>(O);
-    if (!E && !I)
+    // 45-engine-ai-audit.md, F12: an entity is relevant without the second cast (both casts only read; the inventory
+    // item one is asked only when the first gave nothing) - ~4000 objects a frame go through here
+    if (smart_cast<CEntityAlive*>(O))
+        return (true);
+    if (!smart_cast<CInventoryItem*>(O))
         return (false);
     //	if (E && (E->g_Team() == g_Team()))			return false;
     return (true);

@@ -225,6 +225,28 @@ enum class ENpcCppProfileStage : u32
     CharacterPhysicsSkeletonPrebuild,
     CharacterPhysicsSkeletonPrebuiltUsed,
     CharacterPhysicsSkeletonPrebuiltStale,
+    // E0 of plans/lua_to_cpp/27-gw-eoc-e0.md, the offline simulation: CALifeUpdateManager::update and its two parts;
+    // the update() of every scheduled server object (CALifeScheduleRegistry::CUpdatePredicate) by its kind - offline
+    // squads, smart terrains, offline monsters/stalkers, the rest; counters: the size of the scheduled registry on
+    // every update_scheduled (count/frame = the average size when it runs once a frame) and the updates that took
+    // longer than 2 / 5 ms (a stand-in for p95, the profiler has no histograms)
+    AlifeUpdate,
+    AlifeUpdateSwitch,
+    AlifeUpdateScheduled,
+    AlifeScheduledSquad,
+    AlifeScheduledSmartTerrain,
+    AlifeScheduledMonster,
+    AlifeScheduledOther,
+    AlifeScheduledRegistrySize,
+    AlifeUpdateOver2ms,
+    AlifeUpdateOver5ms,
+    // 45-engine-ai-audit.md, F11 (diagnostics only): CAI_Stalker::update_best_item_info_impl - it runs on every
+    // best_weapon() and in four item evaluators; update = the whole call (calls = how often), lua_lookup = the
+    // lookup of the Lua function ai_stalker.update_best_weapon by its name (CScriptEngine::functor), lua_call = the
+    // call of it; the rest of update is the C++ scan of the inventory and of the remembered items
+    StalkerBestItemUpdate,
+    StalkerBestItemLuaLookup,
+    StalkerBestItemLuaCall,
     Count
 };
 

@@ -3,6 +3,8 @@
 
 #include <DirectXTex.h>
 
+#include <atomic>
+
 namespace xray::render::RENDER_NAMESPACE
 {
 void fix_texture_name(pstr fn)
@@ -94,6 +96,79 @@ IC void Reduce(size_t& w, size_t& h, size_t& l, int skip)
         h = 1;
 }
 
+// 40-parallel-prefetch.md (plans/optimization_mt): textures created by texture_load_direct (the deferred upload logs it)
+std::atomic<u32> g_texture_direct_loads{0};
+
+namespace
+{
+constexpr u32 kDdsPfFourCC = 0x4; // DDPIXELFORMAT.dwFlags: DDPF_FOURCC
+constexpr size_t kDdsHeaderSize = 4 + 124; // "DDS " + DDS_HEADER
+constexpr size_t kDdsHeaderDX10Size = 20; // DDS_HEADER_DXT10
+constexpr size_t kDdsMaxMips = 16;
+
+// 40-parallel-prefetch.md: a block-compressed 2D texture (BC1-BC7 by a FourCC: DXT1-5, ATI1/2, BC4/5, a DX10 header)
+// straight from the file: its mips are given to CreateTextureEx as they lie in the file. LoadFromDDSMemory copies such
+// a file into a ScratchImage first, unchanged (block-compressed formats are never converted): an allocation of the
+// size of the file, its page faults and a copy of every texture. Anything else (a cube, an array, a volume, another
+// format, a short file) or a failed create - false, and texture_load takes the common path, as before.
+bool texture_load_direct(const u8* src, size_t size, DirectX::DDS_FLAGS flags, pstr fn, ID3DBaseTexture*& out,
+    u32& ret_msize)
+{
+    DirectX::TexMetadata IMG;
+    DirectX::DDSMetaData pf{};
+    if (FAILED(DirectX::GetMetadataFromDDSMemoryEx(src, size, flags, IMG, &pf)))
+        return false;
+    if (!(pf.flags & kDdsPfFourCC) || !DirectX::IsCompressed(IMG.format) ||
+        IMG.dimension != DirectX::TEX_DIMENSION_TEXTURE2D || IMG.IsCubemap() || IMG.arraySize != 1 ||
+        IMG.depth != 1 || IMG.mipLevels < 1 || IMG.mipLevels > kDdsMaxMips)
+        return false;
+
+    // The mips one after another after the header, as LoadFromDDSMemory reads them (CP_FLAGS_NONE pitches)
+    DirectX::Image images[kDdsMaxMips];
+    size_t offset = kDdsHeaderSize + (pf.IsDX10() ? kDdsHeaderDX10Size : 0);
+    size_t w = IMG.width, h = IMG.height;
+    for (size_t level = 0; level < IMG.mipLevels; ++level)
+    {
+        size_t row_pitch, slice_pitch;
+        if (FAILED(DirectX::ComputePitch(IMG.format, w, h, row_pitch, slice_pitch)))
+            return false;
+        if (offset > size || slice_pitch > size - offset)
+            return false;
+        images[level] = { w, h, IMG.format, row_pitch, slice_pitch, const_cast<u8*>(src + offset) };
+        offset += slice_pitch;
+        w = std::max<size_t>(1, w / 2);
+        h = std::max<size_t>(1, h / 2);
+    }
+
+    if (strstr(fn, "terrain") || strstr(fn, "Terrain"))
+        Msg("[TERRAIN_TEX] Loaded OK: %s | size=%zu | %ux%u | mips=%zu | fmt=%d",
+            fn, size, (u32)IMG.width, (u32)IMG.height, IMG.mipLevels, (int)IMG.format);
+
+    // The same LOD reduction and size rounding as the common path below
+    xr_strlwr(fn);
+    const int img_loaded_lod = get_texture_load_lod(fn);
+    size_t mip_lod = 0;
+    if (img_loaded_lod)
+    {
+        const auto old_mipmap_cnt = IMG.mipLevels;
+        Reduce(IMG.width, IMG.height, IMG.mipLevels, img_loaded_lod);
+        mip_lod = old_mipmap_cnt - IMG.mipLevels;
+    }
+    IMG.width = (IMG.width + 3u) & ~0x3u;
+    IMG.height = (IMG.height + 3u) & ~0x3u;
+
+    ID3DBaseTexture* texture = nullptr;
+    const HRESULT hresult = DirectX::CreateTextureEx(HW.pDevice, images + mip_lod, IMG.mipLevels, IMG,
+        D3D_USAGE_IMMUTABLE, D3D_BIND_SHADER_RESOURCE, 0, IMG.miscFlags, DirectX::CREATETEX_DEFAULT, &texture);
+    if (FAILED(hresult) || !texture)
+        return false;
+    out = texture;
+    ret_msize = calc_texture_size(img_loaded_lod, IMG.mipLevels, size);
+    g_texture_direct_loads.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+} // namespace
+
 ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize)
 {
     ret_msize = 0;
@@ -162,6 +237,13 @@ ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize)
 #endif // DEBUG
 
     DirectX::DDS_FLAGS dds_flags{ DirectX::DDS_FLAGS_PERMISSIVE };
+
+    // 40-parallel-prefetch.md: block-compressed textures without the copy
+    if (texture_load_direct(static_cast<const u8*>(S->pointer()), img_size, dds_flags, fn, pTexture2D, ret_msize))
+    {
+        FS.r_close(S);
+        return pTexture2D;
+    }
 
     for (int i = 1; i <= 3; ++i) // 3 attempts
     {

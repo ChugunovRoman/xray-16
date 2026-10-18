@@ -2,6 +2,10 @@
 
 xr_vector<xr_string> BuildStackTrace(u16 maxFramesCount = 512);
 
+// Names of code addresses, one string per address (xrDebug::SymbolizeAddresses): module + RVA and the function
+// (Windows: dbghelp under its lock, one refresh of the module list for the batch), the dladdr symbol elsewhere
+xr_vector<xr_string> SymbolizeAddressList(const xr_vector<const void*>& addresses);
+
 #ifdef XR_PLATFORM_WINDOWS
 xr_vector<xr_string> BuildStackTrace(PCONTEXT threadCtx, u16 maxFramesCount);
 

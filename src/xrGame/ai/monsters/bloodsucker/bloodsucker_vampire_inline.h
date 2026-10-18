@@ -168,6 +168,8 @@ void CStateBloodsuckerVampireAbstract::setup_substates()
 TEMPLATE_SPECIALIZATION
 void CStateBloodsuckerVampireAbstract::remove_links(IGameObject* object)
 {
+    inherited::remove_links(object); // the substates keep their own pointers
+
     if (enemy == object)
         enemy = 0;
 }

@@ -66,8 +66,9 @@ void CStalkerActionCombatBase::fire()
 
     u32 min_queue_size, max_queue_size, min_queue_interval, max_queue_interval;
     float distance = enemy_position.distance_to(object_position);
-    select_queue_params(distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
-    object().CObjectHandler::set_goal(eObjectActionFire1, object().best_weapon(), min_queue_size, max_queue_size,
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    select_queue_params(best_item, distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
+    object().CObjectHandler::set_goal(eObjectActionFire1, best_item, min_queue_size, max_queue_size,
         min_queue_interval, max_queue_interval);
 }
 
@@ -75,8 +76,9 @@ void CStalkerActionCombatBase::aim_ready()
 {
     u32 min_queue_size, max_queue_size, min_queue_interval, max_queue_interval;
     float distance = object().memory().enemy().selected()->Position().distance_to(object().Position());
-    select_queue_params(distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
-    object().CObjectHandler::set_goal(eObjectActionAimReady1, object().best_weapon(), min_queue_size, max_queue_size,
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    select_queue_params(best_item, distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
+    object().CObjectHandler::set_goal(eObjectActionAimReady1, best_item, min_queue_size, max_queue_size,
         min_queue_interval, max_queue_interval);
 }
 
@@ -84,17 +86,25 @@ void CStalkerActionCombatBase::aim_ready_force_full()
 {
     u32 min_queue_size, max_queue_size, min_queue_interval, max_queue_interval;
     float distance = object().memory().enemy().selected()->Position().distance_to(object().Position());
-    select_queue_params(distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
-    object().CObjectHandler::set_goal(eObjectActionAimForceFull1, object().best_weapon(), min_queue_size,
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    select_queue_params(best_item, distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
+    object().CObjectHandler::set_goal(eObjectActionAimForceFull1, best_item, min_queue_size,
         max_queue_size, min_queue_interval, max_queue_interval);
 }
 
 void CStalkerActionCombatBase::select_queue_params(const float& distance, u32& min_queue_size, u32& max_queue_size,
     u32& min_queue_interval, u32& max_queue_interval) const
 {
+    select_queue_params(
+        object().best_weapon(), distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
+}
+
+void CStalkerActionCombatBase::select_queue_params(const CInventoryItem* best_item, const float& distance,
+    u32& min_queue_size, u32& max_queue_size, u32& min_queue_interval, u32& max_queue_interval) const
+{
     WeaponTypes weapon_type = WeaponTypes::Unknown;
-    if (object().best_weapon())
-        weapon_type = convert_weapon_type(object().best_weapon()->object().ef_weapon_type());
+    if (best_item)
+        weapon_type = convert_weapon_type(best_item->object().ef_weapon_type());
 
     switch (weapon_type)
     {

@@ -15,6 +15,7 @@
 #include "Include/xrRender/UIRender.h"
 #include "Include/xrRender/Kinematics.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Threading/TaskManager.hpp"
 
 #ifdef DEBUG
 #include "debug_renderer.h"
@@ -32,6 +33,9 @@ float air_resistance_epsilon = .1f;
 constexpr float air_resistance_epsilon = .1f;
 #endif // #ifdef DEBUG
 float g_bullet_time_factor = 1.f;
+// plans/optimization_mt/29-game-thread-next.md, A2: UpdateWorkload of a game/render overlap frame (mt_bullets on) runs
+// as a task from CLevel::OnGameLogicFrame to its old place in seqParallel. Always on since 2026-10-18 (its switch
+// mt_bullets_task removed, see plan 41).
 
 SBullet::SBullet(const Fvector& position, const Fvector& direction, float starting_speed, float power, float powerMonster,
     /*float power_critical,*/ float impulse, u16 sender_id, u16 sendersweapon_id, ALife::EHitType e_hit_type,
@@ -101,6 +105,10 @@ CBulletManager::CBulletManager()
 
 CBulletManager::~CBulletManager()
 {
+    // A2: never with a task in flight (the Game thread is joined first); its memory is this object
+    if (m_task && TaskScheduler)
+        TaskScheduler->Wait(*m_task);
+    m_task = nullptr;
     m_Bullets.clear();
     m_WhineSounds.clear();
     m_Events.clear();
@@ -171,12 +179,22 @@ void CBulletManager::PlayWhineSound(SBullet* bullet, IGameObject* object, const 
     if (bullet->hit_type != ALife::eHitTypeFireWound)
         return;
 
-    bullet->m_whine_snd = m_WhineSounds[Random.randI(0, m_WhineSounds.size())];
+    // m_rng: ::Random, or the generator of the A2 task (UpdateWorkload -> test_callback runs this)
+    bullet->m_whine_snd = m_WhineSounds[m_rng->randI(0, m_WhineSounds.size())];
+    // The A2 task may run it on a worker: play_at_pos takes m_emitters_lock (as the physics step's sounds do)
     bullet->m_whine_snd.play_at_pos(object, pos);
 }
 
 void CBulletManager::Clear()
 {
+    // A2: main between the frames (level start/stop) - no task in flight; a forgotten one is waited for, not merged
+    if (m_task && TaskScheduler)
+        TaskScheduler->Wait(*m_task);
+    m_task = nullptr;
+    m_task_active.store(false, std::memory_order_release);
+    m_workload_pending = false;
+    m_rng = &::Random;
+    m_BulletsPending.clear();
     m_Bullets.clear();
     m_Events.clear();
 }
@@ -194,7 +212,21 @@ void CBulletManager::AddBullet(const Fvector& position, const Fvector& direction
     VERIFY(u16(-1) != cartridge.bullet_material_idx);
     //	u32 CurID					= Level().CurrentControlEntity()->ID();
     //	u32 OwnerID					= sender_id;
-    SBullet& bullet = m_Bullets.emplace_back(position, direction, starting_speed, power, powerMonster, impulse, sender_id,
+    // A2 (29-game-thread-next.md): while the UpdateWorkload task moves m_Bullets, a new bullet waits in m_BulletsPending
+    // (a grenade's fragments in CExplosive::Explode from the scheduler, the object handler's shots): FinishTask moves it
+    // at the old place of UpdateWorkload in seqParallel, as before
+    xr_vector<SBullet>* bullets = &m_Bullets;
+    std::unique_lock<std::mutex> pending_guard;
+    if (m_task_active.load(std::memory_order_acquire))
+    {
+        pending_guard = std::unique_lock<std::mutex>(m_pending_lock);
+        if (m_task_active.load(std::memory_order_relaxed))
+        {
+            bullets = &m_BulletsPending;
+            PERF_INC(game_bullets_pending);
+        }
+    }
+    SBullet& bullet = bullets->emplace_back(position, direction, starting_speed, power, powerMonster, impulse, sender_id,
         sendersweapon_id, e_hit_type, maximum_distance, cartridge, air_resistance_factor, SendHit, iShotNum);
     //	bullet.frame_num			= Device.dwFrame;
     bullet.flags.aim_bullet = AimBullet;
@@ -212,6 +244,11 @@ void CBulletManager::UpdateWorkload()
 
     VERIFY(g_mt_config.test(mtBullets) || m_thread_id == std::this_thread::get_id());
 
+    ProcessBullets(0, m_Bullets.size());
+}
+
+void CBulletManager::ProcessBullets(size_t begin, size_t end)
+{
     rq_storage.r_clear();
 
     u32 const time_delta = Device.dwTimeDelta;
@@ -224,16 +261,83 @@ void CBulletManager::UpdateWorkload()
     // when index in vector passed through the tgt_material field
     // and we can remove them only in case when we iterate bullets
     // in the reversed order
-    auto i = m_Bullets.rbegin();
-    const auto e = m_Bullets.rend();
-    for (u16 j = u16(e - i); i != e; ++i, --j)
+    // (the index is the u16 of the position in m_Bullets, as before: the vanilla loop counted it down in a u16)
+    for (size_t idx = end; idx-- > begin;)
     {
-        if (process_bullet(rq_storage, *i, time_delta * g_bullet_time_factor))
+        SBullet& bullet = m_Bullets[idx];
+        if (process_bullet(rq_storage, bullet, time_delta * g_bullet_time_factor))
             continue;
 
-        VERIFY(j > 0);
-        RegisterEvent(EVENT_REMOVE, FALSE, &*i, Fvector().set(0, 0, 0), dummy, j - 1);
+        RegisterEvent(EVENT_REMOVE, FALSE, &bullet, Fvector().set(0, 0, 0), dummy, u16(idx));
     }
+}
+
+// A2: the task's body, on a worker (or on whichever thread's Wait took it). Moves the bullets of m_Bullets[0, count)
+// and writes m_Events - nothing else of the manager, and nothing of the game but the sounds of the whine (play_at_pos
+// under m_emitters_lock): the hits are applied by CommitEvents on main in the next frame, as before. It reads the
+// objects (positions, collision forms, bones of the actor's CForm) the way the render does beside the Game thread.
+void CBulletManager::RunWorkloadTask()
+{
+    ZoneScopedN("BulletsTask");
+    PERF_SCOPE(game_bullets_task);
+    if (xray::perf::CurrentThreadKind() == xray::perf::ThreadKind::Main)
+        PERF_INC(game_bullets_on_main); // main took it in a Wait() of its render
+    else if (xray::perf::CurrentThreadKind() == xray::perf::ThreadKind::Game)
+        PERF_INC(game_bullets_self); // no worker took it until FinishTask: the Game thread ran it there (no overlap)
+    ProcessBullets(0, m_task_count);
+}
+
+void CBulletManager::StartWorkloadTask()
+{
+    // Only a frame whose CommitRenderSet queued UpdateWorkloadOrFinishTask (mt_bullets on), once
+    if (!m_workload_pending || m_task || !TaskScheduler || m_Bullets.empty())
+        return;
+    m_task_count = m_Bullets.size();
+    m_rng = &m_task_rng;
+    m_task_active.store(true, std::memory_order_release);
+    m_task = &TaskScheduler->AddTask([this] { RunWorkloadTask(); });
+    // In the Game thread's queue the workers reach it only by a random steal after main's (render) queue: let them look
+    TaskScheduler->WakeAllWorkers();
+}
+
+void CBulletManager::UpdateWorkloadOrFinishTask()
+{
+    m_workload_pending = false;
+    if (m_task)
+        FinishTask();
+    else
+        UpdateWorkload(); // no task this frame (sequential frame, no bullets at its start): the vanilla delegate
+}
+
+void CBulletManager::FinishTask()
+{
+    ZoneScopedN("BulletsTask/finish");
+    PERF_SCOPE(pseq_bullets); // what the bullets cost the thread at the delegate's place: the wait + the new bullets
+    {
+        ZoneScopedN("BulletsTask/wait");
+        PERF_SCOPE(game_bullets_wait);
+        TaskScheduler->Wait(*m_task);
+    }
+    m_task = nullptr;
+    m_rng = &::Random;
+    {
+        std::lock_guard<std::mutex> guard(m_pending_lock);
+        m_task_active.store(false, std::memory_order_release);
+        m_BulletsPendingSwap.swap(m_BulletsPending);
+    }
+    if (m_BulletsPendingSwap.empty())
+        return;
+    // The bullets fired during the task: appended and moved now, as the old delegate moved everything fired before it
+    // in the frame. Its loop went from the newest bullet down, so their events (EVENT_REMOVE by descending index -
+    // CommitEvents removes by swapping with the back) come before those of the task's bullets.
+    VERIFY(m_Bullets.size() == m_task_count);
+    m_EventsSwap.swap(m_Events);
+    const size_t first_new = m_Bullets.size();
+    m_Bullets.insert(m_Bullets.end(), m_BulletsPendingSwap.begin(), m_BulletsPendingSwap.end());
+    m_BulletsPendingSwap.clear();
+    ProcessBullets(first_new, m_Bullets.size());
+    m_Events.insert(m_Events.end(), m_EventsSwap.begin(), m_EventsSwap.end());
+    m_EventsSwap.clear();
 }
 
 static Fvector parabolic_velocity(
@@ -919,8 +1023,11 @@ void CBulletManager::CommitRenderSet() // @ the end of frame
     m_BulletsRendered = m_Bullets;
     if (g_mt_config.test(mtBullets))
     {
+        // A2 (29-game-thread-next.md): CLevel::OnGameLogicFrame may start the task; the delegate joins it (or, without
+        // a task this frame, runs UpdateWorkload) at the same place in seqParallel
+        m_workload_pending = true;
         Device.seqParallel.push_back(
-            fastdelegate::FastDelegate0<>(this, &CBulletManager::UpdateWorkload));
+            fastdelegate::FastDelegate0<>(this, &CBulletManager::UpdateWorkloadOrFinishTask));
     }
     else
     {
@@ -930,6 +1037,11 @@ void CBulletManager::CommitRenderSet() // @ the end of frame
 void CBulletManager::CommitEvents() // @ the start of frame
 {
     ZoneScoped;
+
+    // A2: the Game thread always finishes the task in its seqParallel (UpdateWorkloadOrFinishTask); should the delegate
+    // ever be lost (seqParallel dropped), main finishes it here, before the events are applied
+    if (m_task)
+        FinishTask();
 
     if (m_Events.size() > 1000)
         Msg("! too many bullets during single frame: %d", m_Events.size());

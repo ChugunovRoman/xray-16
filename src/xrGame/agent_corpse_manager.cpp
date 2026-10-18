@@ -15,6 +15,10 @@
 #include "agent_manager.h"
 #include "agent_member_manager.h"
 
+// 26-framemove-game-next.md (always on since 2026-10-18, its switch npc_corpse_reaction_fix removed): react_on_member_death
+// repeats while the corpse assignment changes, but the vanilla loop kept only the LAST member's result
+// (changed = ...), so it stopped early and some combat members got no / a farther corpse to react to. Now |=.
+
 struct CRemoveMemberCorpsesPredicate
 {
     IC bool operator()(CMemberCorpse& corpse) const { return (!!corpse.reactor()); }
@@ -70,7 +74,10 @@ void CAgentCorpseManager::react_on_member_death()
         CAgentMemberManager::MEMBER_STORAGE::iterator E = object().member().combat_members().end();
         for (; I != E; ++I)
             if (!(*I)->member_death_reaction().m_processing)
-                changed = process_corpse(**I);
+            {
+                const bool member_changed = process_corpse(**I);
+                changed = changed || member_changed;
+            }
 
         if (!changed)
             break;

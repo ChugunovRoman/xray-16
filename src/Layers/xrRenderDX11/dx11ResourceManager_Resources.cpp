@@ -1,6 +1,8 @@
 #include "stdafx.h"
 #pragma hdrstop
 
+#include "xrCore/Threading/ScopeLock.hpp"
+
 #include "Layers/xrRender/ResourceManager.h"
 #include "Layers/xrRender/tss.h"
 #include "Layers/xrRender/blender.h"
@@ -14,11 +16,14 @@ namespace xray::render::RENDER_NAMESPACE
 //--------------------------------------------------------------------------------------------------------------
 SPass* CResourceManager::_CreatePass(const SPass& proto)
 {
-    for (SPass* pass : v_passes)
-        if (pass->equal(proto))
-            return pass;
+    // 40-parallel-prefetch.md (plans/optimization_mt): through the hash index, it was a walk over v_passes
+    ScopeLock scope(&m_create_lock);
+    const size_t hash = proto.hash();
+    if (SPass* pass = m_passes_index.find(hash, [&](const SPass& registered) { return registered.equal(proto); }))
+        return pass;
 
     SPass* P = v_passes.emplace_back(xr_new<SPass>());
+    m_passes_index.insert(hash, P); // the fields below are those of proto: the same hash
     P->dwFlags |= xr_resource_flagged::RF_REGISTERED;
     P->state = proto.state;
     P->ps = proto.ps;
@@ -44,7 +49,7 @@ SVS* CResourceManager::_CreateVS(cpcstr shader, u32 flags /*= 0*/)
 {
     string_path name;
     xr_strcpy(name, shader);
-    switch (RImplementation.m_skinning)
+    switch (RImplementation.shader_skinning()) // 40-parallel-prefetch.md: per thread
     {
     case 0:
         xr_strcat(name, "_0");

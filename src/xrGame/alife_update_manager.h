@@ -27,6 +27,14 @@ private:
     bool m_first_time;
     u32 m_position_update_interval_ms;
     mutable u32 m_last_position_update_time;
+    // plans/optimization_mt/32-frame-spikes.md, A1, the Game thread only: what the scheduler
+    // ticks (shedule_Update) gave and the frames (update_spread) have not done yet - scheduled objects (a bucket of
+    // tokens, objects_per_update a tick) and objects of the online/offline switch pass (the level registry a tick)
+    u32 m_spread_tokens;
+    u32 m_spread_switch_left;
+
+    void spread_tick();
+    void update_spread();
 
 protected:
     u64 m_max_process_time;
@@ -36,6 +44,9 @@ protected:
 
 public:
     void update();
+    // 32-frame-spikes.md, A1: CLevel::OnGameLogicFrame, the Game thread, every unpaused frame. Queues update_spread
+    // (seqParallel, as shedule_Update queues update) when the ticks left work; otherwise no-op
+    void spread_frame();
     /** Call from Level every frame (or at interval). 0 = every call, >0 = throttle ms. */
     void update_positions_only() const;
 

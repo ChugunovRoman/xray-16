@@ -28,14 +28,55 @@
 #include "enemy_manager.h"
 #include "memory_space_impl.h"
 #include "performance_cvars.h"
+#include "Level.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 extern const float wounded_enemy_reached_distance;
+
+// 26-framemove-game-next.md, scheduler overrun: the group's distribute_enemies is the tens-of-ms step of the
+// scheduler (ai/memory/enemies, stalker/shed/agent_manager). Always on since 2026-10-18 (its switch
+// npc_agent_distribute_fast removed, 41-cvar-cleanup.md): the same distribution, cheaper: the victory probability evaluate(member, enemy) (the ef_storage pattern function) is
+// computed once per pair within one distribute_enemies call (compute_enemy_danger, assign_enemies and permutate_enemies
+// ask it again for the same pairs; nothing the function reads changes within the call - healths, weapons, items), and
+// compute_enemy_danger builds the list of combat members once instead of once per enemy. The answers, their order and
+// all the writes are the same.
+// Temporary A/B switch, not saved, 0 = as before. N > 0: a combat member without an enemy asks for the distribution on
+// its memory update (CMemoryManager::update_enemies) - up to once a frame for the group while somebody lacks an enemy.
+// Then it runs at most once in N ms, except at once when an enemy the last distribution knew (its enemies and the
+// enemies the combat members had selected) died or went offline, or a combat member selected an enemy it did not know.
+// The agent manager's own call (kill_enemy, ~1 s) is not limited. Price: a member that sees an enemy assigned to
+// somebody else, or a member left without a target, waits up to N ms for its new assignment.
+int npc_agent_distribute_min_ms = 250; // a tunable, not saved (the default since 2026-10-16, 41-cvar-cleanup.md)
+// Always on since 2026-10-18 (its switch npc_agent_masks_batch removed): assign_enemy_masks (every combat member must
+// "know" every enemy:
+// make_object_visible_somewhen, E x M calls of O(visual memory + members)) does the full call only for the first member
+// of each shared visual memory and ORs the squad masks of the rest into the same record: the same writes in the same
+// order, so the same eviction of the visual memory (a record is only added by the first member, as before)
 
 /** Max enabled visual-memory slots per NPC considered in squad fill_enemies (nearest by remembered pos vs NPC). */
 constexpr u32 AGENT_FILL_ENEMIES_MAX_VISIBLE_CHECKS = 16;
 
 namespace
 {
+// The cheaper distribution: the evaluate() answers of the running distribute_enemies call, by (object0, object1) ID
+// pair. Only the Game thread distributes (the scheduler pass), the calls never nest
+bool s_eval_memo_on = false;
+xr_unordered_map<u32, float> s_eval_memo;
+
+struct eval_memo_scope
+{
+    eval_memo_scope()
+    {
+        s_eval_memo.clear();
+        s_eval_memo_on = true;
+    }
+    ~eval_memo_scope()
+    {
+        PERF_ADD(agent_dist_eval_pairs, s_eval_memo.size());
+        s_eval_memo_on = false;
+    }
+};
+
 struct squad_mem_slot
 {
     u32 level_time{};
@@ -396,11 +437,27 @@ float CAgentEnemyManager::evaluate(const CEntityAlive* object0, const CEntityAli
     if (!object0 || !object1 || !object0->g_Alive() || !object1->g_Alive())
         return 0.f;
 
+    u32 memo_key = 0;
+    if (s_eval_memo_on)
+    {
+        memo_key = (u32(object0->ID()) << 16) | u32(object1->ID());
+        const auto found = s_eval_memo.find(memo_key);
+        if (found != s_eval_memo.end())
+        {
+            PERF_INC(agent_dist_eval_hit);
+            return found->second;
+        }
+    }
+    PERF_INC(agent_dist_eval);
+
     ai().ef_storage().non_alife().clear();
     ai().ef_storage().alife().clear();
     ai().ef_storage().non_alife().member() = object0;
     ai().ef_storage().non_alife().enemy() = object1;
-    return (ai().ef_storage().m_pfVictoryProbability->ffGetValue() / 100.f);
+    const float value = ai().ef_storage().m_pfVictoryProbability->ffGetValue() / 100.f;
+    if (s_eval_memo_on)
+        s_eval_memo.emplace(memo_key, value);
+    return value;
 }
 
 void CAgentEnemyManager::exchange_enemies(CMemberOrder& member0, CMemberOrder& member1)
@@ -419,25 +476,25 @@ void CAgentEnemyManager::exchange_enemies(CMemberOrder& member0, CMemberOrder& m
 
 void CAgentEnemyManager::compute_enemy_danger()
 {
-    ENEMIES::iterator I = m_enemies.begin();
-    ENEMIES::iterator E = m_enemies.end();
-    for (; I != E; ++I)
+    // the combat members do not change within the loop: one list, one get_member per member
+    const xr_vector<ALife::_OBJECT_ID> member_ids = combat_member_ids(object().member().combat_members());
+    xr_vector<CMemberOrder*> member_orders;
+    member_orders.reserve(member_ids.size());
+    for (const ALife::_OBJECT_ID id : member_ids)
+        member_orders.push_back(object().member().get_member(id));
+    for (CMemberEnemy& enemy : m_enemies)
     {
         float best = -1.f;
-        const xr_vector<ALife::_OBJECT_ID> member_ids = combat_member_ids(object().member().combat_members());
-        xr_vector<ALife::_OBJECT_ID>::const_iterator i = member_ids.begin();
-        xr_vector<ALife::_OBJECT_ID>::const_iterator e = member_ids.end();
-        for (; i != e; ++i)
+        for (CMemberOrder* member_order : member_orders)
         {
-            CMemberOrder* member_order = object().member().get_member(*i);
             if (!member_order)
                 continue;
 
-            float value = evaluate((*I).m_object, &member_order->object());
+            float value = evaluate(enemy.m_object, &member_order->object());
             if (value > best)
                 best = value;
         }
-        (*I).m_probability = best;
+        enemy.m_probability = best;
     }
 
     std::sort(m_enemies.begin(), m_enemies.end());
@@ -669,26 +726,79 @@ IC void CAgentEnemyManager::setup_mask(CMemberEnemy& enemy, const squad_mask_typ
     setup_mask(object().memory().hits(), enemy, non_combat_members);
 }
 
-void CAgentEnemyManager::assign_enemy_masks()
+void CAgentEnemyManager::assign_enemy_masks_batched()
 {
+    // the combat members in the order of the original loop, each with the mask its own make_object_visible_somewhen
+    // would use and its visual memory (shared by the group: one record per enemy for all members)
+    struct member_visibility
     {
-        ENEMIES::iterator I = m_enemies.begin();
-        ENEMIES::iterator E = m_enemies.end();
+        CMemoryManager* memory;
+        squad_mask_type mask;
+        const void* buffer; // null: the member does the full call (no visual memory, or another agent manager)
+    };
+    xr_vector<member_visibility> members;
+    {
         const xr_vector<ALife::_OBJECT_ID> member_ids = combat_member_ids(object().member().combat_members());
-        for (; I != E; ++I)
+        members.reserve(member_ids.size());
+        for (const ALife::_OBJECT_ID id : member_ids)
         {
-            xr_vector<ALife::_OBJECT_ID>::const_iterator i = member_ids.begin();
-            xr_vector<ALife::_OBJECT_ID>::const_iterator e = member_ids.end();
-            for (; i != e; ++i)
-            {
-                CMemberOrder* member_order = object().member().get_member(*i);
-                if (!member_order)
-                    continue;
+            CMemberOrder* member_order = object().member().get_member(id);
+            if (!member_order)
+                continue;
 
-                member_order->object().memory().make_object_visible_somewhen((*I).m_object);
-            }
+            CAI_Stalker& stalker = member_order->object();
+            CVisualMemoryManager& visual = stalker.memory().visual();
+            // make_object_visible_somewhen takes the mask from the member's own agent manager
+            const bool batched = visual.has_objects() && (&stalker.agent_manager() == &object());
+            members.push_back({&stalker.memory(), batched ? object().member().mask(id) : squad_mask_type(0),
+                batched ? static_cast<const void*>(&visual.objects()) : nullptr});
         }
     }
+
+    struct buffer_record
+    {
+        const void* buffer;
+        MemorySpace::CVisibleObject* record;
+    };
+    xr_vector<buffer_record> records;
+    for (CMemberEnemy& enemy : m_enemies)
+    {
+        records.clear();
+        for (const member_visibility& member : members)
+        {
+            if (!member.buffer)
+            {
+                member.memory->make_object_visible_somewhen(enemy.m_object);
+                continue;
+            }
+
+            auto I = std::find_if(records.begin(), records.end(),
+                [&member](const buffer_record& record) { return record.buffer == member.buffer; });
+            if (I == records.end() || !I->record)
+            {
+                // the first member of this memory: the full call (adds the record if there is none, evicting the
+                // oldest one of a full memory, and keeps the member's "visible now" bit as it was)
+                member.memory->make_object_visible_somewhen(enemy.m_object);
+                MemorySpace::CVisibleObject* record = member.memory->visual().visible_object(enemy.m_object);
+                if (I == records.end())
+                    records.push_back({member.buffer, record});
+                else
+                    I->record = record;
+                continue;
+            }
+
+            // what the full call does to an existing record: the member's bit in the squad mask, enabled; its
+            // "visible now" bit is set and restored to the previous value, i.e. unchanged
+            PERF_INC(agent_dist_masks_batched);
+            I->record->m_squad_mask.assign(I->record->m_squad_mask.get() | member.mask);
+            I->record->m_enabled = true;
+        }
+    }
+}
+
+void CAgentEnemyManager::assign_enemy_masks()
+{
+    assign_enemy_masks_batched();
 
     squad_mask_type non_combat_members = object().member().non_combat_members_mask();
 
@@ -886,16 +996,102 @@ void CAgentEnemyManager::distribute_enemies()
     if (m_distributed_frame == Device.dwFrame)
         return;
     m_distributed_frame = Device.dwFrame;
+    m_distributed_time = Device.dwTimeGlobal;
+    m_unknown_enemy_selected = false;
+
+    distribute_enemies_impl();
+
+    if (npc_agent_distribute_min_ms > 0)
+        remember_known_enemies();
+}
+
+void CAgentEnemyManager::remember_known_enemies()
+{
+    m_known_enemies.clear();
+    // the enemies of this distribution are alive and online (fill_enemies, just now)
+    for (const CMemberEnemy& enemy : m_enemies)
+        m_known_enemies.push_back(enemy.m_object->ID());
+
+    for (const CMemberOrder* member_order : object().member().combat_members())
+    {
+        if (!member_order || !member_order->m_object)
+            continue;
+
+        const CEntityAlive* selected = member_order->object().memory().enemy().selected();
+        if (selected)
+            m_known_enemies.push_back(selected->ID());
+    }
+
+    std::sort(m_known_enemies.begin(), m_known_enemies.end());
+    m_known_enemies.erase(std::unique(m_known_enemies.begin(), m_known_enemies.end()), m_known_enemies.end());
+    m_known_enemies_check_frame = u32(-1);
+}
+
+bool CAgentEnemyManager::known_enemy_gone()
+{
+    // once a frame for the group: the members without an enemy ask on their memory updates
+    if (m_known_enemies_check_frame == Device.dwFrame)
+        return (m_known_enemy_gone);
+
+    m_known_enemies_check_frame = Device.dwFrame;
+    m_known_enemy_gone = false;
+    for (const ALife::_OBJECT_ID id : m_known_enemies)
+    {
+        const CEntityAlive* enemy = smart_cast<const CEntityAlive*>(Level().Objects.net_Find(id));
+        if (!enemy || !enemy->g_Alive())
+        {
+            m_known_enemy_gone = true;
+            break;
+        }
+    }
+
+    return (m_known_enemy_gone);
+}
+
+void CAgentEnemyManager::on_member_enemy_selected(const CEntityAlive* enemy)
+{
+    if (!enemy || m_unknown_enemy_selected || !m_distributed_time)
+        return;
+
+    if (!std::binary_search(m_known_enemies.begin(), m_known_enemies.end(), enemy->ID()))
+        m_unknown_enemy_selected = true;
+}
+
+void CAgentEnemyManager::distribute_enemies_from_memory()
+{
+    const u32 min_ms = u32(npc_agent_distribute_min_ms);
+    if (min_ms && m_distributed_time && (m_distributed_frame != Device.dwFrame) &&
+        (Device.dwTimeGlobal >= m_distributed_time) && (Device.dwTimeGlobal - m_distributed_time < min_ms))
+    {
+        if (!m_unknown_enemy_selected && !known_enemy_gone())
+        {
+            PERF_INC(agent_dist_throttled);
+            return;
+        }
+
+        PERF_INC(agent_dist_urgent);
+    }
+
+    distribute_enemies();
+}
+
+void CAgentEnemyManager::distribute_enemies_impl()
+{
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::AgentEnemyDistribute);
+    PERF_SCOPE(agent_dist);
+    const eval_memo_scope eval_memo;
 
     {
         ZoneNamedN(___tracy_am_dist_fill, "agent_enemy/dist_fill_enemies", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::AgentEnemyFill);
+        PERF_SCOPE(agent_dist_fill);
         fill_enemies();
     }
 
     if (m_enemies.empty())
         return;
+    PERF_ADD(agent_dist_enemies, m_enemies.size());
+    PERF_ADD(agent_dist_members, object().member().members().size());
 
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::AgentEnemyAssign);
 
@@ -908,20 +1104,24 @@ void CAgentEnemyManager::distribute_enemies()
     {
         {
             ZoneNamedN(___tracy_am_dist_dg, "agent_enemy/dist_compute_enemy_danger", true);
+            PERF_SCOPE(agent_dist_danger);
             compute_enemy_danger();
         }
         {
             ZoneNamedN(___tracy_am_dist_as, "agent_enemy/dist_assign_enemies", true);
+            PERF_SCOPE(agent_dist_assign);
             assign_enemies();
         }
         {
             ZoneNamedN(___tracy_am_dist_perm, "agent_enemy/dist_permutate_enemies", true);
+            PERF_SCOPE(agent_dist_permutate);
             permutate_enemies();
         }
     }
 
     {
         ZoneNamedN(___tracy_am_dist_mask, "agent_enemy/dist_assign_enemy_masks", true);
+        PERF_SCOPE(agent_dist_masks);
         assign_enemy_masks();
     }
 }
@@ -1009,12 +1209,15 @@ bool CAgentEnemyManager::assigned_wounded(const CEntityAlive* wounded, const CAI
 
 bool CAgentEnemyManager::useful_enemy(const CEntityAlive* enemy, const CAI_Stalker* member) const
 {
-    if (!object().member().registered_in_combat(member))
+    // 45-engine-ai-audit.md, F2: the member mask once (registered_in_combat is combat_mask & mask(member), and the
+    // answer below tested mask(member) again - a second linear search over the group members)
+    const squad_mask_type member_mask = object().member().mask(member);
+    if (!(object().member().combat_mask() & member_mask))
         return (true);
 
     ENEMIES::const_iterator I = std::find(m_enemies.begin(), m_enemies.end(), enemy);
     if (I == m_enemies.end())
         return (true);
 
-    return (!!(*I).m_distribute_mask.test(object().member().mask(member)));
+    return (!!(*I).m_distribute_mask.test(member_mask));
 }

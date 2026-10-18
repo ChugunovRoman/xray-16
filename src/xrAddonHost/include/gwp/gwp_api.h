@@ -2042,8 +2042,9 @@ typedef struct GwpEngineApi
     GwpResult(GWP_CALL* squad_teleport)(const GwpPlugin* self, GwpObjectId squad, uint32_t game_vertex,
         uint32_t level_vertex, const float position[3]);
 
-    /* squad_community: squad:get_squad_community() - the community of the squad ("stalker", "monster_predatory",
-       ...), the full length without the zero (`out` may be NULL), 0 for anything but a squad.
+    /* squad_community: squad:get_squad_community() - the community of the squad ("stalker", "monster" for every
+       squad of monsters, ...), the full length without the zero (`out` may be NULL), 0 for anything but a squad. Read in place (the
+       value of squad_community_by_behaviour[squad.player_id] the method answers, live), no Lua call.
        squad_set_community: squad:set_squad_community - the squad and every member (online ones too) change sides;
        GWP_ERROR_INVALID_ARGUMENT for a community the game or the squads do not know and for a squad of monsters.
        smart_find: the smart terrain by its name (SIMBOARD.smarts_by_names); GWP_INVALID_OBJECT_ID without one.
@@ -2486,6 +2487,38 @@ typedef struct GwpEngineApi
        object with a physics shell.
        @group object_ext @thread main */
     GwpResult(GWP_CALL* object_set_visual)(const GwpPlugin* self, GwpObjectId id, const char* visual);
+
+    /* More Lua fields of a smart terrain (se_smart_terrain, class id "SMRTTRRN"), read on demand like
+       alife_smart_arrive_dist (wiki/doc/plugins/api/alife.md): Lua (sim_smart.script) stays the only writer, these
+       read the live values of the server object, online or not. Anything but a smart terrain of a script class, or a
+       missing object, answers the "no" of the function.
+       alife_smart_owner: smart.owning_faction - the faction that holds the smart ("stalker", "dolg", ...). Lua writes
+       "none" for a smart without an owner (sim_smart.reset_owner): that is returned as the text "none". Before the
+       first update of the smart the field is nil: answered 0, the "none" of the scripts too (they read
+       `smart.owning_faction or "none"`). Copied into out zero-terminated and cut to cap - 1; the result is the full
+       length of the text (out may be NULL with cap 0 to ask it); 0 for nil, a value that is not a string, or no such
+       smart.
+       alife_smart_targets: the keys of smart.target_smarts ({[smart_id] = true}, filled by sim_smart.set_targets)
+       whose value is true for Lua (not nil, not false) and that are object ids (numbers 0 .. 65534), in ascending
+       order of the id; writes up to `max` of them and returns how many there are in all (out may be NULL with max 0
+       to count only); 0 for an empty or missing table or no such smart.
+       alife_smart_global_position: smart.global_position - the position of the smart in the common space of all
+       levels (its server position plus the offset of its level, sim_smart.get_smart_global_position): 1 and the
+       vector in out_xyz; 0 and out_xyz untouched while the field is nil (before the first update of the smart) or
+       not a vector, or for no such smart.
+       @group alife @thread main */
+    uint32_t(GWP_CALL* alife_smart_owner)(GwpObjectId smart, char* out, uint32_t cap);
+    uint32_t(GWP_CALL* alife_smart_targets)(GwpObjectId smart, GwpObjectId* out, uint32_t max);
+    int(GWP_CALL* alife_smart_global_position)(GwpObjectId smart, float out_xyz[3]);
+
+    /* One more squad field of the simulation, read on demand like alife_squad_always_arrived
+       (wiki/doc/plugins/api/alife.md): squad.registered_in_simultaion (the spelling of the scripts) with the truthiness
+       of Lua - 1 while the squad counts in the simulation (init_squad of the constructor of sim_squad_scripted sets
+       it unless the squad community is "trader" or "monster" there, sim_squad / sim_brain write it, remove_squad
+       clears it; it is not saved), 0 for nil and false. 0 too when the object is gone, is not a squad (class
+       "ON_OFF_S") or its class is pure C++.
+       @group alife @thread main */
+    int(GWP_CALL* alife_squad_registered)(GwpObjectId squad);
 } GwpEngineApi;
 
 /* True when the engine table provides the member `field` (minor compatibility check). */

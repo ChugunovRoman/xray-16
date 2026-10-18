@@ -28,6 +28,7 @@ IC void CObjectFactory::add(const CLASS_ID& clsid, LPCSTR script_clsid)
         typedef object_type_traits::is_base_and_derived<ServerObjectBaseClass, _server_type> a;
         static_assert(a::value, "Server object must derive ServerObjectBaseClass");
     }
+    ObjectFactory::client_type_registered<_client_type>(); // 37-destroy-relcase-smooth.md
     add(xr_new<CObjectItemClientServer<_client_type, _server_type>>(clsid, script_clsid));
 }
 
@@ -39,6 +40,8 @@ IC void CObjectFactory::add(const CLASS_ID& clsid, LPCSTR script_clsid)
         typedef object_type_traits::is_base_and_derived<ServerObjectBaseClass, _unknown_type> b;
         static_assert(a::value || b::value, "Class must derive ClientObjectBaseClass or ServerObjectBaseClass");
     }
+    if constexpr (object_type_traits::is_base_and_derived<ClientObjectBaseClass, _unknown_type>::value)
+        ObjectFactory::client_type_registered<_unknown_type>(); // 37-destroy-relcase-smooth.md
     add(xr_new<CObjectItemSingle<_unknown_type,
         object_type_traits::is_base_and_derived<ClientObjectBaseClass, _unknown_type>::value>>(clsid, script_clsid));
 }

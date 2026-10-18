@@ -137,6 +137,10 @@ protected:
     Flags16 m_flags;
     bool m_just_after_spawn;
     bool m_activated;
+    // 45-engine-ai-audit.md, F5: is_ai_obstacle of the section, read once in Load (-1 = not read: then the getter
+    // reads the ini as before). The getter runs for every physics object near a walking NPC (moving_objects) on the
+    // main thread and in the path search on the Game thread; it was a full ltx lookup with a shared_str built per call
+    s8 m_is_ai_obstacle = -1;
 
 private:
     DECLARE_SCRIPT_REGISTER_FUNCTION(CGameObject);

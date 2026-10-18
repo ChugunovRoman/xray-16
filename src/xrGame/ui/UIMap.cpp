@@ -886,6 +886,12 @@ void CUIMiniMap::Init_internal(const shared_str& name, const CInifile& pLtx, con
     CUIStatic::SetTextureColor(0x7fffffff);
 }
 
+// 26-framemove-game-next.md (FrameMove after the pipelined prepass; always on since 2026-10-18, its switch
+// ui_minimap_cull removed, 41-cvar-cleanup.md): the minimap does not walk the spots far outside it. In a big fight UpdateSpots walks ~3500 map
+// locations a frame (ui/minimap/update_spots ~1.1 ms on main in FrameMove); a spot far away pays the task lookup
+// (CGameTaskManager::HasGameTask - a walk over all tasks), the position and two map conversions only to stay
+// detached. ui/minimap/culled = the spots skipped, ui/minimap/update_spots shows what is left
+
 void CUIMiniMap::UpdateSpots()
 {
     if (!g_pGameLevel)
@@ -897,6 +903,27 @@ void CUIMiniMap::UpdateSpots()
         DetachAll();
     }
     vLocations& ls = Level().MapManager().Locations();
+    // Skip the spots that surely lie outside the round map (CMapLocation::MiniMapFarAway). The map
+    // shows the circle of WorkingArea().width() / 2 around the heading pivot (the camera at SetActivePoint, the same
+    // centre IsRectVisible measures from); the cut is twice that radius plus 10 m - the spot size and a position up to
+    // map_update_lod frames old fit into the margin
+    if (IsRounded() && GetCurrentZoom().x > EPS)
+    {
+        const Fvector2 center = ConvertLocalToReal(GetStaticItem()->GetHeadingPivot(), BoundRect());
+        const float cut = WorkingArea().width() / GetCurrentZoom().x + 10.f;
+        const float cut_sqr = cut * cut;
+        const shared_str& map_name = MapName();
+        for (auto it = ls.begin(); it != ls.end(); ++it)
+        {
+            if ((*it).location->MiniMapFarAway(map_name, center, cut_sqr))
+            {
+                PERF_INC(ui_minimap_culled);
+                continue;
+            }
+            (*it).location->UpdateMiniMap(this);
+        }
+        return;
+    }
     for (auto it = ls.begin(); it != ls.end(); ++it)
         (*it).location->UpdateMiniMap(this);
 }

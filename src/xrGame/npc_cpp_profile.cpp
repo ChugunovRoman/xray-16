@@ -21,8 +21,9 @@ constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_PROBE = 8;
 // good: the report is the only place they go. 16 rows hid about half of the calls of a session, and the profiler
 // only runs with -npc_cpp_profile anyway, where a longer table is what is wanted.
 constexpr size_t NPC_CPP_PROFILE_SCRIPT_EVALUATOR_TOP_COUNT = 64;
-constexpr size_t NPC_CPP_PROFILE_TOP_COUNT = 64; // 32 hid the movement/* and script_entity/sound/* sub-stages; 48 the
-                                                // stalker/schedule_update/* breakdown of stage 7
+constexpr size_t NPC_CPP_PROFILE_TOP_COUNT = 96; // 32 hid the movement/* and script_entity/sound/* sub-stages; 48 the
+                                                // stalker/schedule_update/* breakdown of stage 7; 64 the cheap
+                                                // alife/scheduled/* kinds of the offline simulation (gw_eoc E0)
 
 struct NpcCppProfileCounters
 {
@@ -267,6 +268,19 @@ constexpr const char* g_npc_cpp_profile_stage_names[NPC_CPP_PROFILE_STAGE_COUNT]
     "character_physics/skeleton_prebuild",
     "character_physics/skeleton_prebuilt_used",
     "character_physics/skeleton_prebuilt_stale",
+    "alife/update",
+    "alife/update/switch",
+    "alife/update/scheduled",
+    "alife/scheduled/squad",
+    "alife/scheduled/smart_terrain",
+    "alife/scheduled/monster",
+    "alife/scheduled/other",
+    "alife/scheduled/registry_size",
+    "alife/update/over_2ms",
+    "alife/update/over_5ms",
+    "stalker/best_item/update",
+    "stalker/best_item/lua_lookup",
+    "stalker/best_item/lua_call",
 };
 
 static_assert((sizeof(g_npc_cpp_profile_stage_names) / sizeof(g_npc_cpp_profile_stage_names[0])) == NPC_CPP_PROFILE_STAGE_COUNT);

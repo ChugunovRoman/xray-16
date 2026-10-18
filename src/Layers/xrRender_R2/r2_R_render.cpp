@@ -518,12 +518,64 @@ void CRender::Render()
     {
         ZoneScopedN("Render/SyncPoint");
         PERF_SCOPE_IF(!svp_pass, rpass_sync_point);
+        PERF_SCOPE_IF(svp_pass, rsvp_pass_sync_point); // 31-svp-scope.md (M): render/svp/pass/* - the scope pass
         BasicStats.WaitS.Begin();
         {
             q_sync_point.Wait(ps_r2_wait_sleep, ps_r2_wait_timeout);
         }
         BasicStats.WaitS.End();
         q_sync_point.End();
+    }
+
+    // R2 (27-render-main.md, always on since 2026-10-18): with the early main build the static half (static geometry, LODs)
+    // is complete since Calculate(), only the dynamic half is still running on a worker - and it fills only the dynamic
+    // lists (mapMatrixPasses, mapSorted, the HUD maps...). So the G-buffer gets the static geometry, the LODs and the
+    // grass now, in the time the main thread would wait in r_main.sync(); the HUD and the dynamic objects follow after
+    // it. The G-buffer pass is depth-tested opaque geometry with one stencil value: the order changes only exact depth
+    // ties. Not with Z-prefill (it needs the whole graph first) or the split scene; D3D11 only (the early build is).
+    bool part0_static_early = false;
+    if (!svp_pass)
+    {
+#if defined(USE_DX11)
+        part0_static_early = main_build_early_used &&
+            !ps_r2_ls_flags.test(R2FLAG_ZFILL) && !ps_r2_ls_flags.test(R2FLAG_EXP_SPLIT_SCENE) &&
+            !D3DXRenderBase::RenderDocActive();
+#endif
+        main_build_early_used = false;
+    }
+    if (part0_static_early)
+    {
+        ZoneScopedN("Render/MainPart0/StaticEarly");
+        PERF_SCOPE(rpart0_static_early);
+        PIX_EVENT(DEFER_PART0_STATIC_EARLY);
+        Target->phase_scene_prepare();
+        Target->phase_scene_begin();
+        {
+            // The static groups' apply_lmaterial takes the object ambient the backend holds: drawn after the HUD it
+            // was the HUD's - give them the last frame's one, then put back what the lods, grass and HUD expect.
+            auto& cmd = dsgraph.cmd_list;
+            part0_ambient saved{ true, cmd.o_hemi, cmd.o_sun };
+            CopyMemory(saved.hemi_cube, cmd.o_hemi_cube, sizeof(saved.hemi_cube));
+            if (part0_hud_ambient.valid)
+            {
+                cmd.o_hemi = part0_hud_ambient.hemi;
+                cmd.o_sun = part0_hud_ambient.sun;
+                CopyMemory(cmd.o_hemi_cube, part0_hud_ambient.hemi_cube, sizeof(part0_hud_ambient.hemi_cube));
+            }
+            dsgraph.render_graph_static(0);
+            cmd.o_hemi = saved.hemi;
+            cmd.o_sun = saved.sun;
+            CopyMemory(cmd.o_hemi_cube, saved.hemi_cube, sizeof(saved.hemi_cube));
+        }
+        {
+            PERF_SCOPE(rpart0_lods);
+            dsgraph.render_lods(true, true);
+        }
+        if (Details)
+        {
+            PERF_SCOPE(rpart0_details);
+            Details->Render(dsgraph.cmd_list);
+        }
     }
 
     {
@@ -546,7 +598,7 @@ void CRender::Render()
         dsgraph.render_graph(0);
         dsgraph.cmd_list.set_ColorWriteEnable();
     }
-    else
+    else if (!part0_static_early) // R2: prepared before the build wait
     {
         Target->phase_scene_prepare();
     }
@@ -568,6 +620,7 @@ void CRender::Render()
     {
         ZoneScopedN("Render/MainPart0/NoSplit");
         PERF_SCOPE_IF(!svp_pass, rpass_part0);
+        PERF_SCOPE_IF(svp_pass, rsvp_pass_part0);
         PIX_EVENT(DEFER_PART0_NO_SPLIT);
         // level, DO NOT SPLIT
         if (svp_pass)
@@ -589,24 +642,46 @@ void CRender::Render()
             dsgraph.render_lods(true, true);
             if (Details && !ps_r__svp_skip_details)
                 Details->Render(dsgraph.cmd_list);
-            SubmitSVPDeferred(dsgraph);
+            {
+                // the list the SVP worker recorded (render_graph(0)) + lods/details: Finish/ExecuteCommandList on main
+                PERF_SCOPE(rsvp_pass_submit0);
+                SubmitSVPDeferred(dsgraph);
+            }
         }
         else
         {
+            // R2: after the static early block too - the targets, stencil and cull mode the HUD starts with.
             Target->phase_scene_begin();
             {
+                PERF_SCOPE(rpart0_hud); // 27-render-main.md (M)
                 // HUD overlay scope (g_3d_scopes 3): HUD goes to the offscreen overlay instead of the world pass.
                 const bool skip_world_hud = m_SecondViewportPass || m_HudOverlayActive;
                 if (!skip_world_hud)
                     dsgraph.render_hud();
+                // R2: the ambient the static groups get next frame when they go first (see part0_hud_ambient).
+                const auto& cmd = dsgraph.cmd_list;
+                part0_hud_ambient.valid = true;
+                part0_hud_ambient.hemi = cmd.o_hemi;
+                part0_hud_ambient.sun = cmd.o_sun;
+                CopyMemory(part0_hud_ambient.hemi_cube, cmd.o_hemi_cube, sizeof(part0_hud_ambient.hemi_cube));
             }
 
-            // P19 (d): recorded in parallel on deferred contexts (D3D11).
+            // P19 (d): recorded in parallel on deferred contexts (D3D11). R2: the static maps are empty by now - the
+            // dynamic half only.
             if (!dsgraph.render_graph_main_parallel())
                 dsgraph.render_graph(0);
-            dsgraph.render_lods(true, true);
-            if (Details && !(svp_pass && ps_r__svp_skip_details))
-                Details->Render(dsgraph.cmd_list);
+            if (!part0_static_early)
+            {
+                {
+                    PERF_SCOPE(rpart0_lods); // 27-render-main.md (M)
+                    dsgraph.render_lods(true, true);
+                }
+                if (Details && !(svp_pass && ps_r__svp_skip_details))
+                {
+                    PERF_SCOPE(rpart0_details); // 27-render-main.md (M)
+                    Details->Render(dsgraph.cmd_list);
+                }
+            }
         }
         Target->phase_scene_end();
     }
@@ -738,6 +813,7 @@ void CRender::Render()
     {
         ZoneScopedN("Render/HUD_UI");
         PERF_SCOPE_IF(!svp_pass, rpass_hud_ui);
+        PERF_SCOPE_IF(svp_pass, rsvp_pass_hud_ui);
         if (!m_SecondViewportPass)
         {
             Target->phase_wallmarks();
@@ -828,6 +904,7 @@ void CRender::Render()
     {
         ZoneScopedN("Render/Sun");
         PERF_SCOPE_IF(!svp_pass, rpass_sun);
+        PERF_SCOPE_IF(svp_pass, rsvp_pass_sun);
         PIX_EVENT(DEFER_SUN);
         Stats.l_visible++;
         const bool svp_sun_off = ps_r__svp_skip_sun_csm != 0;
@@ -919,6 +996,7 @@ void CRender::Render()
     {
         ZoneScopedN("Render/SelfIllum");
         PERF_SCOPE_IF(!svp_pass, rpass_selfillum);
+        PERF_SCOPE_IF(svp_pass, rsvp_pass_selfillum);
         PIX_EVENT(DEFER_SELF_ILLUM);
         Target->phase_accumulator(dsgraph.cmd_list);
         // Render emissive geometry, stencil - write 0x0 at pixel pos
@@ -978,6 +1056,7 @@ void CRender::Render()
     {
         ZoneScopedN("Render/LightsNoOccq");
         PERF_SCOPE_IF(!svp_pass, rpass_lights_noocc);
+        PERF_SCOPE_IF(svp_pass, rsvp_pass_lights);
         PIX_EVENT(DEFER_LIGHT_NO_OCCQ);
         // Stage 1b/1c: the scope package skips per-light occq visibility entirely - it was
         // prefiltered by the narrow lens frustum and (prebuilt mode) its shadows were already
@@ -990,6 +1069,7 @@ void CRender::Render()
     {
         ZoneScopedN("Render/LightsOccq");
         PERF_SCOPE_IF(!svp_pass, rpass_lights_occ);
+        PERF_SCOPE_IF(svp_pass, rsvp_pass_lights);
         PIX_EVENT(DEFER_LIGHT_OCCQ);
         // Same as above: pending lights are treated as visible for the scope pass - they passed
         // the frustum test, and their occq results belong to the MAIN pass's decision loop.
@@ -1049,6 +1129,7 @@ void CRender::Render()
     {
         ZoneScopedN("Render/Combine");
         PERF_SCOPE_IF(!svp_pass, rpass_combine);
+        PERF_SCOPE_IF(svp_pass, rsvp_pass_combine);
 #if XR_PERF_METRICS
         // render/combine/*: lets the combine's steps and callees time themselves for the main pass only.
         xray::perf::ScopedTag perf_combine_tag(g_perf_combine_main, (!svp_pass && xray::perf::g_perf_metrics_active) ? 1 : 0);
@@ -1205,6 +1286,10 @@ void CRender::RenderSecondViewport()
     Render();
     m_SecondViewportOutputToRT = false;
     m_SecondViewportPass = false;
+    // 31-svp-scope.md: the sequential scope build (if any) was joined by the Render() above (r_main.sync) - the next
+    // build (KickMainBuildEarly, the next main Calculate) must not take the scope's frustum or mark.
+    svp_seq_build = false;
+    svp_seq_frustum_valid = false;
 
     // Stage B: release this frame's dedicated SVP dsgraph context - its visibility maps have been
     // drained by the Render() above. Next SVP frame allocates a fresh one.
@@ -1253,7 +1338,7 @@ void CRender::render_forward()
             PERF_SCOPE_IF(perf_main, rcomb_sorted);
             PERF_ADD_IF(perf_main, rcomb_sorted_items, dsgraph.mapSorted.size() + dsgraph.mapHUDSorted.size());
             [[maybe_unused]] const u32 perf_draws0 = dsgraph.cmd_list.stat.render.calls;
-            dsgraph.render_sorted(); // strict-sorted geoms
+            dsgraph.render_sorted(true); // strict-sorted geoms (main_combine: the R1 particle batch, ps_* metrics)
             PERF_ADD_IF(perf_main, rcomb_sorted_draws, dsgraph.cmd_list.stat.render.calls - perf_draws0);
         }
         {

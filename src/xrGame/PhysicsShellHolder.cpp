@@ -202,6 +202,9 @@ void CPhysicsShellHolder::correct_spawn_pos()
 
 void CPhysicsShellHolder::activate_physic_shell()
 {
+    // Pipelined bones prepass: a dropped item gets physics bone callbacks below (no bone lock) - an early task may be
+    // computing its bones (it went with its former owner)
+    CLevel::BonesPrepassEarlyJoin();
     VERIFY(!m_pPhysicsShell);
     create_physic_shell();
     Fvector l_fw, l_up;
@@ -255,6 +258,7 @@ void CPhysicsShellHolder::activate_physic_shell()
 
 void CPhysicsShellHolder::setup_physic_shell()
 {
+    CLevel::BonesPrepassEarlyJoin(); // see activate_physic_shell
     VERIFY(!m_pPhysicsShell);
     create_physic_shell();
     m_pPhysicsShell->Activate(XFORM(), 0, XFORM());

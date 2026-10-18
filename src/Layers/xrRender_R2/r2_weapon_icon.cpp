@@ -525,6 +525,9 @@ bool CRender::WeaponIcon_RenderToTexture(
     RCache.set_xform_view(Device.mView);
     RCache.set_xform_project(Device.mProject);
 
+    // Early main build (26-framemove-game-next.md): an icon rendered from game code while the static half of the main view
+    // is being built into this dsgraph - drop that half (the frame's Calculate() then builds as before).
+    main_build_early_discard();
     auto& dg = get_imm_context();
     const u32 phase_saved = dg.o.phase;
     const bool pm0 = dg.o.pmask[0];

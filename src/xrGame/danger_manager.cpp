@@ -163,6 +163,34 @@ void CDangerManager::remove_links(const IGameObject* object)
         m_ignored.erase(I);
 }
 
+// R1 (32-frame-spikes.md): remove_links for every object of the batch in one pass per list.
+// Nothing is re-selected there, so the order does not matter: the selected danger is dropped if its object is in the
+// batch, else re-pointed at the same element (minus the removed ones before it); the dependent objects of the kept
+// dangers are cleared if in the batch; the ignored IDs (each at most once) are removed by ID.
+void CDangerManager::remove_links_batch(const RelcaseBatch& batch)
+{
+    const auto in_batch = [&batch](const CDangerObject& danger) { return batch.contains(danger.object()); };
+    if (m_selected && batch.contains(m_selected->object()))
+        m_selected = 0;
+
+    size_t selected = danger_selected_index(m_objects, m_selected);
+    if (selected != size_t(-1))
+        selected -= size_t(std::count_if(m_objects.begin(), m_objects.begin() + selected, in_batch));
+
+    m_objects.erase(std::remove_if(m_objects.begin(), m_objects.end(), in_batch), m_objects.end());
+    m_selected = (selected != size_t(-1)) ? &m_objects[selected] : 0;
+
+    for (CDangerObject& danger : m_objects)
+    {
+        if (danger.dependent_object() && batch.contains(danger.dependent_object()))
+            danger.clear_dependent_object();
+    }
+
+    m_ignored.erase(std::remove_if(m_ignored.begin(), m_ignored.end(),
+                        [&batch](const ALife::_OBJECT_ID id) { return batch.contains_id(id); }),
+        m_ignored.end());
+}
+
 bool CDangerManager::useful(const CDangerObject& object) const
 {
     if (object.object() && !object.dependent_object())

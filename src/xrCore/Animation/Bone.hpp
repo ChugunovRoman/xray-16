@@ -472,7 +472,15 @@ public:
     [[nodiscard]] IC u16 GetSelfID() const override { return SelfID; }
     [[nodiscard]] IC u16 GetParentID() const override { return ParentID; }
     // assign face
-    void AppendFace(u16 child_idx, u16 idx) { child_faces[child_idx].push_back(idx); }
+    // 40-parallel-prefetch.md (plans/optimization_mt): the caller (CSkeletonX::_CollectBoneFaces) goes over the indices
+    // of the faces, so the same face comes three times in a row; a repeat of the last face is not stored again. The
+    // list is sorted and made unique once the model is loaded (CKinematics::Load), the result is the same.
+    void AppendFace(u16 child_idx, u16 idx)
+    {
+        FacesVec& faces = child_faces[child_idx];
+        if (faces.empty() || faces.back() != idx)
+            faces.push_back(idx);
+    }
     // Calculation
     void CalculateM2B(const Fmatrix& Parent);
 

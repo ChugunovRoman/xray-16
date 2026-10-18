@@ -11,6 +11,15 @@
 #include "script_sound.h"
 #include "script_game_object.h"
 
+// plans/optimization_mt/34-sound-cold-load.md: Lua sound_prefetch_dir(folder) - read ahead in the background the .ogg
+// files of a folder relative to $game_sounds$, e.g. "taunts\\actor_stalker\\"; one path component may be "*" (every
+// subfolder). Returns at once. Always on since 2026-10-18 (snd_source_prefetch removed, see plan 41).
+static void script_sound_prefetch_dir(pcstr folder)
+{
+    if (GEnv.Sound && folder)
+        GEnv.Sound->prefetch_sources(folder);
+}
+
 void CScriptSound::script_register(lua_State* luaState)
 {
     using namespace luabind;
@@ -53,6 +62,8 @@ void CScriptSound::script_register(lua_State* luaState)
             .def("stop_deferred", &CScriptSound::StopDeferred)
             .def("playing", &CScriptSound::IsPlaying)
             .def("length", &CScriptSound::Length)
-            .def("attach_tail", &CScriptSound::AttachTail)
+            .def("attach_tail", &CScriptSound::AttachTail),
+
+        def("sound_prefetch_dir", &script_sound_prefetch_dir)
     ];
 }

@@ -45,6 +45,8 @@ void OnWeaponDestroyed(CWeapon* w);
 void OnItemDestroyed(CInventoryItem* item);
 
 void ProcessRenderPass();
+// ProcessRenderPass() of this frame has items to render (r__main_build_early skips the frame then).
+bool RenderPassPending();
 void OnWeaponIconSnapshot(IRenderable* subject, bool begin);
 
 shared_str TextureResourceName(const CWeapon* w, EWeaponInvIconPreset preset);

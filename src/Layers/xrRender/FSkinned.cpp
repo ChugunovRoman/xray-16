@@ -19,6 +19,8 @@
 #ifdef DEBUG
 #include "xrCore/dump_string.h"
 #endif
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include "ModelPool.h"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -62,11 +64,15 @@ void CSkeletonX_PM::Load(const char* N, IReader* data, u32 dwFlags)
 }
 void CSkeletonX_PM::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
 {
-    _Load(N, data, vCount);
+    {
+        MODEL_LOAD_PART("model_load/skin", mload_skin); // 36-spawn-model-load.md
+        _Load(N, data, vCount);
+    }
     void* _verts_ = data->pointer();
     inherited1::Load(N, suffix, data, dwFlags | VLOAD_NOVERTICES);
     RImplementation.shader_option_skinning(-1);
     vBase = 0;
+    MODEL_LOAD_PART("model_load/skin", mload_skin);
     _Load_hw(*this, _verts_);
 }
 void CSkeletonX_ST::Load(const char* N, IReader* data, u32 dwFlags)
@@ -75,11 +81,15 @@ void CSkeletonX_ST::Load(const char* N, IReader* data, u32 dwFlags)
 }
 void CSkeletonX_ST::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
 {
-    _Load(N, data, vCount);
+    {
+        MODEL_LOAD_PART("model_load/skin", mload_skin); // 36-spawn-model-load.md
+        _Load(N, data, vCount);
+    }
     void* _verts_ = data->pointer();
     inherited1::Load(N, suffix, data, dwFlags | VLOAD_NOVERTICES);
     RImplementation.shader_option_skinning(-1);
     vBase = 0;
+    MODEL_LOAD_PART("model_load/skin", mload_skin);
     _Load_hw(*this, _verts_);
 }
 

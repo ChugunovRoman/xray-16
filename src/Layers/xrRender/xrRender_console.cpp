@@ -292,9 +292,23 @@ int r__parallel_skeleton_visbox_min_bones = 64;
 int r__parallel_main_build_grain = 32;
 int r__parallel_main_build_min = 128;
 // P19 (d), plans/optimization_mt/19-part0-submit.md: the main view's render_graph(0) recorded in parallel on D3D11
-// deferred contexts (R4 only, always on). parts - units incl. the main thread's own one,
+// deferred contexts (R4 only, always on). parts - units incl. the main thread's own one (2..12; 27-render-main.md R4: the
+// pool holds R__NUM_PARALLEL_CONTEXTS = 12 contexts, the sun cascades, rain and the scope pass hold some of them then),
 // min - fewer draw items -> the serial render_graph(0).
-int ps_r__main_parallel_parts = 4;
+int ps_r__main_parallel_parts = 8; // 4 -> 8 (2026-10-17): tested 6/8/12, 12 leaves no contexts for the lights/SVP
+// 2026-10-18 (plans/optimization_mt/41-cvar-cleanup.md): always on, their switches removed - the early main build
+// (r__main_build_early, 26-framemove-game-next.md), R1 r__ps_sorted_batch 2, R2 r__part0_static_early, R3
+// r__main_par_prepare_in_build, R10 r__main_build_par_merge, R13 r__dsgraph_reserve 3 (27-render-main.md), the scope
+// view's own LOD thresholds r__svp_lod_fix, L0 r__svp_lens_cull 2, H r__svp_hom, SV r__svp_light_filter2 and the light
+// dedup r__svp_light_dedup (31-svp-scope.md).
+// 2026-10-18, step 2 (41-cvar-cleanup.md): always on, their switches removed - the CModelPool name index
+// (r__model_pool_index, 36-spawn-model-load.md) and the parallel model prefetch on D3D11 (r__prefetch_mt,
+// 40-parallel-prefetch.md; GL loads one by one as before).
+// 31-svp-scope.md (3D scope, SVP), L0 (always on): the scope view's visibility build culls against a frustum cropped
+// to the square around a circle in the screen center, r__svp_lens_margin_pct % of the screen height in radius (the
+// lens samples up to ~6% beyond its rim: pincushion + chroma), while aimed through the scope and fully raised.
+// A tunable, not saved.
+int ps_r__svp_lens_margin_pct = 45;
 int ps_r__main_parallel_submit_min = 1500;
 int ps_r2_mt_render = 1;
 int ps_r__phase_mt = 0;
@@ -306,6 +320,14 @@ xr_token ext_quality_token[] = {{"qt_off", 0}, {"qt_low", 1}, {"qt_medium", 2},
 //- Mad Max
 float ps_r2_gloss_factor = 4.0f;
 //- Mad Max
+
+// Temporary A/B switches of the render: like CCC_Integer, but not kept in user.ltx (always start at the default)
+class CCC_IntegerNotSavedR final : public CCC_Integer
+{
+public:
+    using CCC_Integer::CCC_Integer;
+    void Save(IWriter*) override {}
+};
 
 //AVO: detail draw radius
 class CCC_detail_radius : public CCC_Integer
@@ -1023,7 +1045,7 @@ void xrRender_initconsole()
     CMD4(CCC_Integer, "r__phase_mt", &ps_r__phase_mt, 0, 3);
 #if RENDER == R_R4
     CMD4(CCC_Integer, "r2_mt_render",       &ps_r2_mt_render,    0, 1);
-    CMD4(CCC_Integer, "r__main_parallel_parts", &ps_r__main_parallel_parts, 2, 8);
+    CMD4(CCC_Integer, "r__main_parallel_parts", &ps_r__main_parallel_parts, 2, 12);
     CMD4(CCC_Integer, "r__main_parallel_submit_min", &ps_r__main_parallel_submit_min, 0, 100000);
 #endif
 
@@ -1031,5 +1053,6 @@ void xrRender_initconsole()
     CMD4(CCC_Integer, "r__parallel_skeleton_visbox_min_bones", &r__parallel_skeleton_visbox_min_bones, 8, 512);
     CMD4(CCC_Integer, "r__parallel_main_build_grain", &r__parallel_main_build_grain, 4, 4096);
     CMD4(CCC_Integer, "r__parallel_main_build_min", &r__parallel_main_build_min, 0, 65536);
+    CMD4(CCC_IntegerNotSavedR, "r__svp_lens_margin_pct", &ps_r__svp_lens_margin_pct, 10, 100);
 }
 } // namespace xray::render::RENDER_NAMESPACE

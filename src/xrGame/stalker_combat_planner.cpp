@@ -161,7 +161,7 @@ void CStalkerCombatPlanner::update()
         CScriptActionPlanner::m_storage.set_property(eWorldPropertyStartedToThrowGrenade, false);
 
         CAgentManager* const agent_mgr =
-            Level().seniority_holder().team(object().g_Team()).squad(object().g_Squad()).group(object().g_Group()).get_agent_manager();
+            Level().seniority_holder().team(object().g_Team()).squad(object().g_Squad()).group(object().hierarchy_group()).get_agent_manager();
         if (agent_mgr)
         {
             CMemberOrder* member_order = agent_mgr->member().get_member(object().ID());

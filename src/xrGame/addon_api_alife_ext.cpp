@@ -28,6 +28,9 @@
 
 namespace gw::addons
 {
+// addon_api_npc.cpp: squad:get_squad_community() read from the Lua fields of a squad, without a Lua call
+uint32_t ReadScriptSquadCommunity(CSE_Abstract* squad, char* out, uint32_t cap);
+
 namespace
 {
 // A spawn is refused below these many free ids: the engine stops the game when the id generator runs dry
@@ -1014,15 +1017,14 @@ GwpResult GWP_CALL ApiSquadTeleport(const GwpPlugin* self, GwpObjectId squad, ui
 
 uint32_t GWP_CALL ApiSquadCommunity(GwpObjectId squad, char* out, uint32_t cap)
 {
-    if (!AlifeExtCheckCall("squads", "squad_community") || !AlifeExtSquad(AlifeExtSimulator(), squad))
+    if (!AlifeExtCheckCall("squads", "squad_community"))
         return AlifeExtNone(out, cap);
-    const GwpValue args[] = { events::Number(squad) };
-    AlifeExtLuaResult result;
-    const xr_string function = AlifeExtSimFunction("squad_community");
-    if (AlifeExtCallLua(nullptr, "squad_community", function.c_str(), args, 1, &result) != GWP_OK ||
-        result.type != LUA_TSTRING)
+    CSE_ALifeOnlineOfflineGroup* group = AlifeExtSquad(AlifeExtSimulator(), squad);
+    if (!group)
         return AlifeExtNone(out, cap);
-    return AlifeExtCopy(result.text.c_str(), out, cap);
+    // Read in place, not through gw_plugin_sim.squad_community (a pcall and alife():object on every call): the same
+    // squad_community_by_behaviour[squad.player_id] the method get_squad_community answers, see addon_api_npc.cpp
+    return ReadScriptSquadCommunity(group, out, cap);
 }
 
 GwpResult GWP_CALL ApiSquadSetCommunity(const GwpPlugin* self, GwpObjectId squad, const char* community)

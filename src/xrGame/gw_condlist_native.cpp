@@ -712,6 +712,10 @@ void EnsureRegistryTables(lua_State* L)
     VERIFY(lua_gettop(L) == guard.top);
 }
 
+// Condlists compiled (a cache miss: a new userdata in the weak cache). Near calls = the condlist tables are new every
+// time (32-frame-spikes.md, U2); _gw_internal.logic.stats prints it
+u64 g_compiled = 0;
+
 CompiledCondlist* GetCompiled(lua_State* L, int tableIndex)
 {
     StackTopGuard guard(L);
@@ -731,6 +735,7 @@ CompiledCondlist* GetCompiled(lua_State* L, int tableIndex)
 
     auto* compiled = xr_new<CompiledCondlist>();
     CompileCondlist(L, tableIndex, *compiled);
+    ++g_compiled;
 
     if (canCache)
     {
@@ -1291,8 +1296,9 @@ int LuaShadowResult(lua_State* L)
 // _gw_internal.logic.stats(): counters of the native interpreter (npc_perf_condlist_native).
 int LuaStats(lua_State*)
 {
-    Msg("- [gw_condlist] npc_perf_condlist_native=%d calls=%llu covered=%llu", npc_perf_condlist_native,
-        static_cast<unsigned long long>(g_calls), static_cast<unsigned long long>(g_covered));
+    Msg("- [gw_condlist] npc_perf_condlist_native=%d calls=%llu covered=%llu compiled=%llu", npc_perf_condlist_native,
+        static_cast<unsigned long long>(g_calls), static_cast<unsigned long long>(g_covered),
+        static_cast<unsigned long long>(g_compiled));
     Msg("-   fallbacks: structure=%llu identity=%llu actions=%llu types=%llu prng=%llu",
         static_cast<unsigned long long>(g_fbStructure), static_cast<unsigned long long>(g_fbIdentity),
         static_cast<unsigned long long>(g_fbActions), static_cast<unsigned long long>(g_fbTypes),

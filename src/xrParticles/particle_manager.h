@@ -18,7 +18,7 @@ public:
     CParticleManager();
     virtual ~CParticleManager();
     // Return an index into the list of particle effects where
-    ParticleEffect* GetEffectPtr(int effect_id);
+    ParticleEffect* GetEffectPtr(int effect_id) override;
     ParticleActions* GetActionListPtr(int alist_id);
 
     // create&destroy

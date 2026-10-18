@@ -783,6 +783,10 @@ static void ProcessDynamicInvIconForSingleItem(CInventoryItem* item)
 // Defined below, next to OnInvIconRtEvicted which fills the queue it drains.
 static void DrainEvictedInvIconKeys();
 
+// Conservative (a disabled feature or a zero budget still counts): only decides whether the early main build
+// (r__main_build_early) may run this frame - the icons render on the render's immediate dsgraph in Calculate().
+bool RenderPassPending() { return !g_pending.empty(); }
+
 void ProcessRenderPass()
 {
     if (GEnv.isDedicatedServer || !GEnv.Render)

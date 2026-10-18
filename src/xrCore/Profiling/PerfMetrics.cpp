@@ -29,6 +29,7 @@ XRCORE_API int g_perf_spike_us = 0;
 XRCORE_API int g_perf_spike_cpu = 0;
 XRCORE_API int g_perf_spike_lines = 40;
 XRCORE_API u64 g_perf_spike_ticks = 0;
+XRCORE_API int g_perf_frame_peak_ms = 0;
 } // namespace xray::perf
 
 namespace
@@ -54,10 +55,12 @@ thread_local u8 tl_bone_caller_v = 0;
 thread_local u8 tl_wait_site_v = 0;
 thread_local u8 tl_ph_wake_v = 0;
 thread_local u8 tl_spawn_v = 0;
+thread_local u8 tl_game_event_v = 0;
 thread_local u32 tl_bones_locked_v = 0;
 thread_local u8 tl_ai_planner_v = 0;
 thread_local u8 tl_ai_context_v = 0;
 thread_local u8 tl_ff_caller_v = 0;
+thread_local u32 tl_cold_model_loads_v = 0; // 36-spawn-model-load.md
 
 constexpr size_t kMaxBlendCb = 16;
 struct BlendCbEntry
@@ -192,6 +195,13 @@ u64 s_window_deltas[kNumMetrics]{};
 u64 s_window_max_frame[kNumMetrics]{};
 u32 s_window_start_ms = 0;
 u32 s_window_frames = 0;
+
+// 32-frame-spikes.md, [frame-peak] (perf_frame_peak_ms): the wall time between two Flush() calls is the frame
+u64 s_frame_peak_prev_ticks = 0;
+constexpr u32 kFramePeakLinesPerWindow = 30; // per 5 s: a low threshold must not flood the log
+u32 s_frame_peak_window_start_ms = 0;
+u32 s_frame_peak_lines = 0;
+u32 s_frame_peak_dropped = 0;
 } // namespace
 
 namespace xray::perf
@@ -202,10 +212,12 @@ XRCORE_API u8& TlBoneCaller() noexcept { return tl_bone_caller_v; }
 XRCORE_API u8& TlWaitSite() noexcept { return tl_wait_site_v; }
 XRCORE_API u8& TlPhWake() noexcept { return tl_ph_wake_v; }
 XRCORE_API u8& TlSpawn() noexcept { return tl_spawn_v; }
+XRCORE_API u8& TlGameEvent() noexcept { return tl_game_event_v; }
 XRCORE_API u32& TlBonesLocked() noexcept { return tl_bones_locked_v; }
 XRCORE_API u8& TlAiPlanner() noexcept { return tl_ai_planner_v; }
 XRCORE_API u8& TlAiContext() noexcept { return tl_ai_context_v; }
 XRCORE_API u8& TlFfCaller() noexcept { return tl_ff_caller_v; }
+XRCORE_API u32& TlColdModelLoads() noexcept { return tl_cold_model_loads_v; }
 
 XRCORE_API void RegisterBlendCb(const void* fn, const char* name) noexcept
 {
@@ -548,6 +560,72 @@ XRCORE_API void SpikeScope::End() noexcept
     SpikeReport(*this, wall, cpu_ticks);
 }
 
+// 32-frame-spikes.md: a frame longer than perf_frame_peak_ms -> one "! [frame-peak]" line with the deltas of this frame
+// of what makes the peaks (Lua GC, relcase, ALife, game events, Lua binders, the bus, the waits of main). Timers in ms
+// (calls in parentheses where they say something), counters as they are.
+static void FramePeakReport(const u64* deltas, const u64* totals, u64 wall_ticks) noexcept
+{
+    const double wall_ms = TicksToMs(wall_ticks);
+    if (wall_ms < static_cast<double>(g_perf_frame_peak_ms))
+        return;
+    const u32 now_ms = CPU::GetTicks();
+    if (now_ms - s_frame_peak_window_start_ms >= 5000)
+    {
+        s_frame_peak_window_start_ms = now_ms;
+        s_frame_peak_lines = 0;
+    }
+    if (++s_frame_peak_lines > kFramePeakLinesPerWindow)
+    {
+        ++s_frame_peak_dropped;
+        return;
+    }
+    const auto ms = [deltas](Metric m) { return TicksToMs(deltas[static_cast<size_t>(m)]); };
+    const auto calls = [deltas](Metric m) { return deltas[static_cast<size_t>(m) + 1]; }; // a timer's "/calls"
+    const auto count = [deltas](Metric m) { return deltas[static_cast<size_t>(m)]; };
+    const auto gauge = [totals](Metric m) { return static_cast<s64>(totals[static_cast<size_t>(m)]); };
+
+    // The Lua binders by class: the sum and the most expensive class
+    struct BinderClass
+    {
+        Metric metric;
+        const char* name;
+    };
+    constexpr BinderClass binders[] = { { Metric::go_shed_binder_stalker, "stalker" },
+        { Metric::go_shed_binder_monster, "monster" }, { Metric::go_shed_binder_other, "other" } };
+    double binder_sum = 0.0, binder_top = 0.0;
+    const char* binder_top_name = "-";
+    u64 binder_calls = 0;
+    for (const BinderClass& b : binders)
+    {
+        const double v = ms(b.metric);
+        binder_sum += v;
+        binder_calls += calls(b.metric);
+        if (v > binder_top)
+        {
+            binder_top = v;
+            binder_top_name = b.name;
+        }
+    }
+
+    string32 dropped{};
+    if (s_frame_peak_dropped)
+    {
+        xr_sprintf(dropped, " (+%u not logged)", s_frame_peak_dropped);
+        s_frame_peak_dropped = 0;
+    }
+    Msg("! [frame-peak] frame=%u wall=%.1fms total=%.1fms | gc step=%.1fms atomic=%.1fms uncapped=%llu steps=%llu "
+        "debt=%lld heap=%lldKB | destroy=%llu relcase act=%.1fms sleep=%.1fms cb=%.1fms npc_batch=%.1fms | alife=%.1fms "
+        "game_events=%.1fms | binder=%.1fms(%llu) top=%s %.1fms | dispatch_lua=%.1fms(%llu) | game_wait=%.1fms "
+        "frame_move=%.1fms render=%.1fms%s",
+        Core.dwFrame, wall_ms, ms(Metric::frame_total), ms(Metric::lua_gc_step), ms(Metric::lua_gc_atomic_step),
+        count(Metric::lua_gc_uncapped), count(Metric::lua_gc_paced_steps), gauge(Metric::lua_gc_debt),
+        gauge(Metric::lua_gc_kb), count(Metric::ol_destroy), ms(Metric::ol_relcase_act), ms(Metric::ol_relcase_sleep),
+        ms(Metric::ol_relcase_cb), ms(Metric::relcase_npc_batch), ms(Metric::alife_update),
+        ms(Metric::lvl_frame_game_events), binder_sum, binder_calls, binder_top_name, binder_top,
+        ms(Metric::events_dispatch_lua), calls(Metric::events_dispatch_lua), ms(Metric::frame_game_wait),
+        ms(Metric::frame_move), ms(Metric::frame_render), dropped);
+}
+
 XRCORE_API void Flush() noexcept
 {
     // P19: before everything else - the spike logger works with perf_metrics 0 as well.
@@ -557,8 +635,14 @@ XRCORE_API void Flush() noexcept
     // (hide the hot zones while reading Tracy live, without also turning on plots or the 5 s log).
     g_perf_hide_hot_zones = (g_perf_metrics & 4) != 0;
 
+    // [frame-peak]: the wall time of the frame that ends here (0 for the first one)
+    const u64 frame_now_ticks = Ticks();
+    const u64 frame_wall_ticks = s_frame_peak_prev_ticks ? frame_now_ticks - s_frame_peak_prev_ticks : 0;
+    s_frame_peak_prev_ticks = frame_now_ticks;
+
     const bool was_active = g_perf_metrics_active;
-    g_perf_metrics_active = (g_perf_metrics & 1) != 0 || (g_perf_metrics & 2) != 0;
+    // perf_frame_peak_ms > 0 needs the per-frame deltas: it turns the collection on (without the plots and the log)
+    g_perf_metrics_active = (g_perf_metrics & 1) != 0 || (g_perf_metrics & 2) != 0 || g_perf_frame_peak_ms > 0;
     const bool tracy_plots_enabled = (g_perf_metrics & 1) != 0;
     const bool logging_enabled = (g_perf_metrics & 2) != 0;
 
@@ -602,6 +686,9 @@ XRCORE_API void Flush() noexcept
         }
         s_prev_totals[i] = current_totals[i];
     }
+
+    if (was_active && g_perf_frame_peak_ms > 0)
+        FramePeakReport(deltas, current_totals, frame_wall_ticks);
 
     // Tracy plots
 #if defined(TRACY_ENABLE)

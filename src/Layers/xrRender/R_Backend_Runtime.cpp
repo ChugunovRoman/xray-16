@@ -89,6 +89,8 @@ void CBackend::Invalidate()
     cs = 0;
 #endif
     ctable = nullptr;
+    m_ctable_sbase_known = false; // 46-engine-core-render-audit.md: name lookups of the table
+    m_ctable_last_c = nullptr;
 
     T = nullptr;
     M = nullptr;
@@ -206,6 +208,8 @@ void CBackend::ResetDeferredCache()
     cs = 0;
 #endif
     ctable = nullptr;
+    m_ctable_sbase_known = false; // 46-engine-core-render-audit.md: name lookups of the table
+    m_ctable_last_c = nullptr;
 
     T = nullptr;
     M = nullptr;
@@ -631,7 +635,16 @@ void CBackend::OnDeviceDestroy()
 
 void CBackend::apply_lmaterial()
 {
-    R_constant* C = get_c(c_sbase)._get(); // get sampler
+    if (!ctable)
+        return;
+    // 46-engine-core-render-audit.md: the sampler of the current table is searched by name (binary search with strcmp
+    // and two atomics on a constant shared by the recording threads) once per table instead of on every draw
+    if (!m_ctable_sbase_known)
+    {
+        m_ctable_sbase = ctable->get(c_sbase)._get();
+        m_ctable_sbase_known = true;
+    }
+    R_constant* C = m_ctable_sbase; // get sampler
 
     if (!C)
         return;

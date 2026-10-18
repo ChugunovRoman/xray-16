@@ -88,6 +88,12 @@ float CAI_Stalker::evaluate(const CItemManager* manager, const CGameObject* obje
 
 bool CAI_Stalker::useful(const CEnemyManager* manager, const CEntityAlive* object) const
 {
+    // 45-engine-ai-audit.md, F2: CEnemyManager::useful below answers false for a dead object before anything else,
+    // and useful_enemy only reads - so a corpse (memory lists are full of them in a fight) skips the group lookup,
+    // registered_in_combat and the search in the group enemies. The answer is the same
+    if (!object->g_Alive())
+        return (false);
+
     if (!agent_manager().enemy().useful_enemy(object, this))
         return (false);
 
@@ -239,10 +245,12 @@ void CAI_Stalker::process_enemies()
         if (!member)
             continue;
 
-        if (is_relation_enemy(member))
+        // 45-engine-ai-audit.md, F2: both checks only read and both skip the member, the cheap one first - a corpse
+        // no longer goes to the relation registry
+        if (!member->g_Alive())
             continue;
 
-        if (!member->g_Alive())
+        if (is_relation_enemy(member))
             continue;
 
         if (!member->memory().enemy().selected())

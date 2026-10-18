@@ -19,6 +19,7 @@
 #include "stream_reader.h"
 #include "file_stream_reader.h"
 #include "xrCore/Threading/Lock.hpp"
+#include "xrCore/Threading/ScopeLock.hpp"
 #include "Crypto/trivial_encryptor.h"
 
 constexpr size_t VFS_STANDARD_FILE = std::numeric_limits<size_t>::max();
@@ -156,9 +157,11 @@ XRCORE_API void _dump_open_files(int mode)
 
 CLocatorAPI::CLocatorAPI() :
 #ifdef CONFIG_PROFILE_LOCKS
-    m_auth_lock(xr_new<Lock>(MUTEX_PROFILE_ID(CLocatorAPI::m_auth_lock)))
+    m_auth_lock(xr_new<Lock>(MUTEX_PROFILE_ID(CLocatorAPI::m_auth_lock))),
+    m_files_lock(xr_new<Lock>(MUTEX_PROFILE_ID(CLocatorAPI::m_files_lock)))
 #else
-    m_auth_lock(xr_new<Lock>())
+    m_auth_lock(xr_new<Lock>()),
+    m_files_lock(xr_new<Lock>())
 #endif // CONFIG_PROFILE_LOCKS
 {
     m_Flags.zero();
@@ -182,6 +185,7 @@ CLocatorAPI::~CLocatorAPI()
 {
     VERIFY(0 == m_iLockRescan);
     xr_delete(m_auth_lock);
+    xr_delete(m_files_lock);
 }
 
 const CLocatorAPI::file* CLocatorAPI::RegisterExternal(pcstr name)
@@ -196,6 +200,7 @@ const CLocatorAPI::file* CLocatorAPI::Register(
     pcstr name, size_t vfs, u32 crc, u32 ptr, u32 size_real, u32 size_compressed, u32 modif)
 {
     ZoneScoped;
+    ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md
 
     string256 temp_file_name;
     xr_strcpy(temp_file_name, sizeof temp_file_name, name);
@@ -567,6 +572,7 @@ void CLocatorAPI::ProcessArchive(pcstr _path)
 
 void CLocatorAPI::unload_archive(CLocatorAPI::archive& A)
 {
+    ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md
     files_it I = m_files.begin();
     for (; I != m_files.end(); ++I)
     {
@@ -1200,6 +1206,7 @@ xr_vector<pstr>* CLocatorAPI::file_list_open(pcstr _path, u32 flags)
 
     file desc;
     desc.name = N;
+    ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md: the search and the walk below
     files_it I = m_files.find(desc);
     if (I == m_files.end())
         return nullptr;
@@ -1268,6 +1275,7 @@ size_t CLocatorAPI::file_list(FS_FileSet& dest, pcstr path, u32 flags /*= FS_Lis
 
     file desc;
     desc.name = N;
+    ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md: the search and the walk below
     files_it I = m_files.find(desc);
     if (I == m_files.end())
         return 0;
@@ -1622,7 +1630,11 @@ bool CLocatorAPI::check_for_file(pcstr path, pcstr _fname, string_path& fname, c
     // Search entry
     file desc_f;
     desc_f.name = fname;
-    files_it I = m_files.find(desc_f);
+    files_it I;
+    {
+        ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md
+        I = m_files.find(desc_f);
+    }
     if (I == m_files.end())
     {
         if (!exist(fname, FSType::External))
@@ -1753,6 +1765,8 @@ CLocatorAPI::files_it CLocatorAPI::file_find_it(pcstr fname)
     xr_strcpy(file_name, sizeof file_name, fname);
     desc_f.name = file_name;
 
+    // 40-parallel-prefetch.md: the iterator stays valid after the lock (an insert into the set invalidates none)
+    ScopeLock files_scope(m_files_lock);
     return m_files.find(desc_f);
 }
 
@@ -1764,6 +1778,7 @@ bool CLocatorAPI::dir_delete(pcstr initial, pcstr nm, bool remove_files)
     else
         xr_strcpy(fpath, sizeof fpath, nm);
 
+    ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md
     files_set folders;
     files_it I;
     // remove files
@@ -1820,6 +1835,7 @@ void CLocatorAPI::file_delete(pcstr path, pcstr nm)
     else
         xr_strcpy(fname, sizeof fname, nm);
 
+    ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md
     const files_it I = file_find_it(fname);
     if (I != m_files.end())
     {
@@ -1857,6 +1873,7 @@ void CLocatorAPI::file_copy(pcstr src, pcstr dest)
 
 void CLocatorAPI::file_rename(pcstr src, pcstr dest, bool overwrite)
 {
+    ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md
     files_it S = file_find_it(src);
     if (S != m_files.end())
     {
@@ -2004,6 +2021,7 @@ void CLocatorAPI::set_file_age(pcstr nm, u32 age)
 
 void CLocatorAPI::rescan_path(pcstr full_path, bool bRecurse)
 {
+    ScopeLock files_scope(m_files_lock); // 40-parallel-prefetch.md (Recurse -> Register locks it again: recursive)
     file desc;
     desc.name = full_path;
     files_it I = m_files.lower_bound(desc);

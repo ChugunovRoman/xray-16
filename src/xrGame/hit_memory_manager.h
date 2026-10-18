@@ -60,6 +60,8 @@ public:
     virtual void update();
     void remove(const MemorySpace::CHitObject* hit_object);
     void remove_links(IGameObject* object);
+    // R1 (32-frame-spikes.md): remove_links for every object of the batch, in one pass
+    void remove_links_batch(const struct RelcaseBatch& batch);
 
 public:
     void add(const CEntityAlive* who);

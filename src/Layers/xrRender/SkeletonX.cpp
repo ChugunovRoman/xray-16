@@ -11,6 +11,8 @@
 #include "xrCDB/Intersect.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 
+#include <bitset>
+
 namespace xray::render::RENDER_NAMESPACE
 {
 shared_str s_bones_array_const;
@@ -81,6 +83,7 @@ void CSkeletonX::_Render(CBackend& cmd_list, ref_geom& hGeom, u32 vCount, u32 iO
     {
         PERF_INC(skin_draw_single);
         PERF_ADD_IF(g_perf_rmain_dyn, rmain_skin_single, 1);
+        PERF_ADD_IF(g_perf_svp_geom, rsvp_geom_skin_single, 1);
         Fmatrix W;
         W.mul_43(cmd_list.xforms.m_w, Parent->LL_GetTransform_R(u16(RMS_boneid)));
         cmd_list.set_xform_world(W);
@@ -99,6 +102,7 @@ void CSkeletonX::_Render(CBackend& cmd_list, ref_geom& hGeom, u32 vCount, u32 iO
     case RM_SKINNING_4B_HQ:
     {
         PERF_INC(skin_draw_hw);
+        PERF_ADD_IF(g_perf_svp_geom, rsvp_geom_skin_hw, 1);
         // transfer matrices
         ref_constant array = cmd_list.get_c(s_bones_array_const);
         u32 count = RMS_bonecount;
@@ -215,8 +219,21 @@ void CSkeletonX::_Render_soft(CBackend& cmd_list, ref_geom& hGeom, u32 vCount, u
 
 void CSkeletonX::_Load(const char* N, IReader* data, u32& dwVertCount)
 {
-    s_bones_array_const = "sbones_array";
+    // set once: the parallel prefetch (40-parallel-prefetch.md) runs _Load on several threads, and an assignment of the
+    // global shared_str on each of them at once was a data race
+    static std::once_flag s_bones_array_const_once;
+    std::call_once(s_bones_array_const_once, [] { s_bones_array_const = "sbones_array"; });
     xr_vector<u16> bids;
+    // 40-parallel-prefetch.md (plans/optimization_mt): the bones used, in the order of first use (BonesUsed keeps that
+    // order), and a bit per bone id to see one is listed already (it was a find in the list for every link of every vertex)
+    std::bitset<65536> bone_listed;
+    const auto use_bone = [&](u16 id) {
+        if (!bone_listed.test(id))
+        {
+            bone_listed.set(id);
+            bids.push_back(id);
+        }
+    };
 
     // Load vertices
     R_ASSERT(data->find_chunk(OGF_VERTICES));
@@ -252,8 +269,7 @@ void CSkeletonX::_Load(const char* N, IReader* data, u32& dwVertCount)
             const vertBoned1W& VB = pVO[it];
             u16 mid = (u16)VB.matrix;
 
-            if (bids.end() == std::find(bids.begin(), bids.end(), mid))
-                bids.push_back(mid);
+            use_bone(mid);
 
             sw_bones_cnt = _max(sw_bones_cnt, mid);
         }
@@ -298,11 +314,8 @@ void CSkeletonX::_Load(const char* N, IReader* data, u32& dwVertCount)
             sw_bones_cnt = _max(sw_bones_cnt, VB.matrix0);
             sw_bones_cnt = _max(sw_bones_cnt, VB.matrix1);
 
-            if (bids.end() == std::find(bids.begin(), bids.end(), VB.matrix0))
-                bids.push_back(VB.matrix0);
-
-            if (bids.end() == std::find(bids.begin(), bids.end(), VB.matrix1))
-                bids.push_back(VB.matrix1);
+            use_bone(VB.matrix0);
+            use_bone(VB.matrix1);
         }
         //.			R_ASSERT(sw_bones_cnt<=hw_bones_cnt);
         if (sw_bones_cnt <= hw_bones_cnt)
@@ -334,8 +347,7 @@ void CSkeletonX::_Load(const char* N, IReader* data, u32& dwVertCount)
             {
                 sw_bones_cnt = _max(sw_bones_cnt, VB.m[i]);
 
-                if (bids.end() == std::find(bids.begin(), bids.end(), VB.m[i]))
-                    bids.push_back(VB.m[i]);
+                use_bone(VB.m[i]);
             }
         }
         //.			R_ASSERT(sw_bones_cnt<=hw_bones_cnt);
@@ -367,8 +379,7 @@ void CSkeletonX::_Load(const char* N, IReader* data, u32& dwVertCount)
             {
                 sw_bones_cnt = _max(sw_bones_cnt, VB.m[i]);
 
-                if (bids.end() == std::find(bids.begin(), bids.end(), VB.m[i]))
-                    bids.push_back(VB.m[i]);
+                use_bone(VB.m[i]);
             }
         }
         //.			R_ASSERT(sw_bones_cnt<=hw_bones_cnt);

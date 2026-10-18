@@ -65,7 +65,6 @@ constexpr pcstr WPN_GRENADE_LAUNCHER = "wpn_launcher";
 constexpr pcstr WPN_GRENADE_LAUNCHER_SOC = "wpn_grenade_launcher";
 
 BOOL b_toggle_weapon_aim = FALSE;
-int wpn_npc_ucl_lite = 1; // K5 of plans/optimization_mt/26-framemove-game-next.md, see Weapon.h
 
 static class CUIWpnScopeXmlManager : public pureUIReset, public pureAppEnd
 {
@@ -541,6 +540,23 @@ CWeapon::EOwnerBones CWeapon::SoundsOwnerBones()
         m_xf_exact_owner_id != owner->ID())
     {
         PERF_INC(wpn_bones_sounds_exact);
+#if XR_PERF_METRICS
+        // 28-updatecl-main.md: weapon/xform_exact/* - why (the first that applies, in this order)
+        if (xray::perf::g_perf_metrics_active)
+        {
+            if (!owner || !kinematics || GetHUDmode() || owner->cast_actor() || owner == Level().CurrentEntity() ||
+                owner == Level().CurrentViewEntity())
+                PERF_INC(wpn_xform_exact_other);
+            else if (owner->renderable_CorpsePoseFrozen())
+                PERF_INC(wpn_xform_exact_frozen);
+            else if (!owner->g_Alive())
+                PERF_INC(wpn_xform_exact_dead);
+            else if (Device.m_SecondViewport.IsSVPActive())
+                PERF_INC(wpn_xform_exact_svp);
+            else
+                PERF_INC(wpn_xform_exact_first);
+        }
+#endif
         return EOwnerBones::Calculate;
     }
     // Drawn last frame and its bones were computed by the render: the bones prepass computes them after FrameMove
@@ -1652,6 +1668,38 @@ bool CWeapon::TrySkipOwnerLodUpdateCL()
     return true;
 }
 
+// W1 of plans/optimization_mt/28-updatecl-main.md (always on since 2026-10-18). A weapon left in the hands of a dead NPC
+// (until the corpse drops it or is removed) runs its whole UpdateCL every frame, and UpdateSounds computes the bones of
+// the corpse exactly on main for it (weapon/xform_exact/dead). In eIdle / eHidden with the shot timer at 0 and nothing
+// in flight it has nothing to do - the same reasoning as TrySkipOwnerLodUpdateCL: the render refreshes the XFORM of a
+// drawn weapon itself (renderable_Render / render_prepare), a drop calls UpdateXForm. A shot at the death keeps the full
+// UpdateCL (eFire, then the shot timer running down). weapon/ucl/dead_owner = such skips
+bool CWeapon::TrySkipDeadOwnerUpdateCL()
+{
+    if (!IsGameTypeSingle())
+        return false;
+    IGameObject* parent = H_Parent();
+    if (!parent || parent == Level().CurrentEntity() || parent == Level().CurrentViewEntity() || ParentIsActor())
+        return false;
+    const CEntityAlive* owner = parent->cast_entity_alive();
+    if (!owner || owner->g_Alive())
+        return false;
+    const u32 state = GetState();
+    if ((state != eIdle && state != eHidden) || GetNextState() != state || fShotTimeCounter > 0.f)
+        return false;
+    if (!NpcUpdateCLNothingInFlight())
+        return false;
+
+    PERF_INC(wpn_ucl_dead_owner);
+    UpdateCLSkippedChild();
+    return true;
+}
+
+bool CWeapon::TrySkipNpcUpdateCL()
+{
+    return TrySkipHiddenUpdateCL() || TrySkipOwnerLodUpdateCL() || TrySkipDeadOwnerUpdateCL();
+}
+
 // Shared by both skips above: nothing of the weapon runs on the UpdateCL now - no pending action, no motion with an
 // end stop, no shot light or flame particles, no zoom vision or night vision, no laser dot, no show / hide / reload
 // sound playing
@@ -1672,24 +1720,14 @@ bool CWeapon::NpcUpdateCLNothingInFlight()
         if (item && item->laser_glow && item->laser_glow->get_active())
             return false;
     }
-    // K5 (wpn_npc_ucl_lite): the same answer without four xr_stricmp lookups over the whole collection
-    if (wpn_npc_ucl_lite)
-        return !m_sounds.AnyPlaying({"sndShow", "sndHide", "sndReload", "sndReloadEmpty"});
-    for (pcstr alias : {"sndShow", "sndHide", "sndReload", "sndReloadEmpty"})
-    {
-        HUD_SOUND_ITEM* sound = m_sounds.FindSoundItem(alias, false);
-        if (sound && sound->playing())
-            return false;
-    }
-    return true;
+    // K5: without four xr_stricmp lookups over the whole collection
+    return !m_sounds.AnyPlaying({"sndShow", "sndHide", "sndReload", "sndReloadEmpty"});
 }
 
 // K5 of plans/optimization_mt/26-framemove-game-next.md. Not the actor's: GetHUDmode() is false (it needs a CActor
 // parent), LaserDotsAllowed() too, its sounds are never 2D HUD ones. The actor's weapon always takes the old path
 bool CWeapon::NpcUclLite()
 {
-    if (!wpn_npc_ucl_lite)
-        return false;
     IGameObject* parent = H_Parent();
     return !parent || !parent->cast_actor();
 }
@@ -1698,17 +1736,22 @@ bool CWeapon::NpcSoundsQuiet() { return NpcUclLite() && !m_sounds.AnyPlaying(); 
 
 void CWeapon::UpdateCL()
 {
-    ZoneScopedN("ucl_CWeapon");
     bool skip_ucl;
     {
         PERF_SCOPE(wpn_ucl_skip_check); // 26-framemove-game-next.md, metrics 1-A
-        skip_ucl = TrySkipHiddenUpdateCL() || TrySkipOwnerLodUpdateCL();
+        skip_ucl = TrySkipNpcUpdateCL();
     }
     if (skip_ucl)
     {
         PERF_INC(wpn_ucl_skipped);
         return;
     }
+    UpdateCLChecked();
+}
+
+void CWeapon::UpdateCLChecked()
+{
+    ZoneScopedN("ucl_CWeapon");
     // -npc_cpp_profile only (stage 0 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md): what the
     // UpdateCL of weapons of NPCs consists of - the one in the hands or hidden ones in the slots
     if (npc_cpp_profile::enabled() && H_Parent() && H_Parent() != Level().CurrentEntity())

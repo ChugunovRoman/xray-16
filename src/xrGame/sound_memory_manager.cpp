@@ -447,6 +447,43 @@ void CSoundMemoryManager::remove_links(IGameObject* object)
 #endif
 }
 
+// R1 (32-frame-spikes.md), inside the relcase pass of CObjectList only: as remove_links for
+// every object of the batch - the group list as its batched branch, the selected sound by the same match (by ID, by
+// pointer when the ID of the stored object cannot be read; the ID of a batch object always can).
+void CSoundMemoryManager::remove_links_batch(const RelcaseBatch& batch)
+{
+    if (m_sounds)
+    {
+        if (g_pGameLevel->Objects.relcase_first_visit(m_sounds))
+        {
+            PERF_INC(relcase_shared_purges);
+            PERF_ADD(relcase_shared_items, m_sounds->size());
+            m_sounds->erase(std::remove_if(m_sounds->begin(), m_sounds->end(),
+                                [&batch](const MemorySpace::CSoundObject& sound_object)
+                                {
+                                    if (!sound_object.m_object)
+                                        return false;
+                                    const u16 id = object_id(sound_object.m_object);
+                                    if (id != u16(-1))
+                                        return batch.contains_id(id);
+                                    return batch.contains(sound_object.m_object);
+                                }),
+                m_sounds->end());
+        }
+        else
+            PERF_INC(relcase_shared_skips);
+    }
+
+#ifdef USE_SELECTED_SOUND
+    if (!m_selected_sound || !m_selected_sound->m_object)
+        return;
+    const IGameObject* const so = m_selected_sound->m_object;
+    const u16 sel_id = object_id(so);
+    if (sel_id != u16(-1) ? batch.contains_id(sel_id) : batch.contains(so))
+        xr_delete(m_selected_sound);
+#endif
+}
+
 void CSoundMemoryManager::save(NET_Packet& packet) const
 {
     if (!m_object->g_Alive())
@@ -506,9 +543,9 @@ void CSoundMemoryManager::load(IReader& packet)
 
         CSoundObject& object = delayed_object.m_sound_object;
         if (delayed_object.m_object_id != ALife::_OBJECT_ID(-1))
-            object.m_object = smart_cast<CGameObject*>(Level().Objects.net_Find(delayed_object.m_object_id));
+            object.set_object(smart_cast<CGameObject*>(Level().Objects.net_Find(delayed_object.m_object_id)));
         else
-            object.m_object = 0;
+            object.set_object(nullptr);
 
         // object params
         object.m_object_params.m_level_vertex_id = packet.r_u32();
@@ -595,7 +632,7 @@ void CSoundMemoryManager::on_requested_spawn(IGameObject* object)
 
         if (m_object->g_Alive())
         {
-            (*I).m_sound_object.m_object = smart_cast<CGameObject*>(object);
+            (*I).m_sound_object.set_object(smart_cast<CGameObject*>(object));
             VERIFY((*I).m_sound_object.m_object);
             add((*I).m_sound_object, true);
         }

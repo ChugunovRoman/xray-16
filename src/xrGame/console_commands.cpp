@@ -1,7 +1,6 @@
 #include "pch_script.h"
 #include "xrEngine/XR_IOConsole.h"
 #include "xrEngine/xr_ioc_cmd.h"
-#include "xrEngine/EngineThreading.h" // mt_sound_render_task (26-framemove-game-next.md, K9)
 #include "xrEngine/CustomHUD.h"
 #include "xrEngine/FDemoRecord.h"
 #include "xrEngine/FDemoPlay.h"
@@ -9,6 +8,7 @@
 #include "xrServer.h"
 #include "Level.h"
 #include "lua_spike_probe.h"
+#include "lua_udata_profile.h"
 #include "xrScriptEngine/script_debugger.hpp"
 #include "ai_debug.h"
 #include "alife_simulator.h"
@@ -100,10 +100,6 @@ extern float psSqueezeVelocity;
 extern int psLUA_GCSTEP;
 extern int psLUA_GCTIMEOUT;
 extern u32 ps_lua_gc_method;
-// 26-framemove-game-next.md, package 2-A (Level.cpp): K3, K2b, K4
-extern int mt_sound_dispatch_early;
-extern int lua_gc_overlap;
-extern int mt_prepass_main_slot;
 extern int g_auto_ammo_unload;
 
 extern int x_m_x;
@@ -137,6 +133,9 @@ extern int g_spawn_budget_us;
 extern int g_spawn_min_per_frame;
 extern int g_spawn_max_delay_ms;
 extern int g_spawn_catchup_us;
+// 36-spawn-model-load.md (plans/optimization_mt): Level.cpp, alife_switch_manager.cpp
+extern int g_spawn_cold_models;
+extern int g_model_prefetch_margin;
 // plans/optimization_mt/22-game-thread.md, step 2: the cap and dedupe of the sound delegates, Level.cpp
 extern float npc_perf_sound_dispatch_near_dist;
 extern float npc_perf_sound_dispatch_actor_dist;
@@ -258,7 +257,7 @@ u32 npc_perf_ik_interval_disabled_ms = 30000;
 // K10 of plans/optimization_mt/26-framemove-game-next.md: the tested values are the defaults (were 0 = IK of a fighting
 // stalker every frame at any distance, on screen or not)
 u32 npc_perf_ik_interval_enemy_selected_ms = 100;
-int npc_perf_ik_foot_raypick_batch_min_rays = 12;
+int npc_perf_ik_foot_raypick_batch_min_rays = 128; // 12 -> 128 (2026-10-16): the batch wait on main stole the prepass phase B tasks (ik/update 13 -> 7.6 us)
 int ai_evaluator_ttl_ms = 500;
 u32 npc_perf_state_mgr_animstate_ttl_ms = 120;
 u32 npc_perf_script_combat_ttl_ms = 100;
@@ -330,6 +329,19 @@ int npc_perf_move_mgr_fixes = 0;          // move_mgr: a look point without ret 
 // P17b (plans/optimization_mt/12-relcase.md), read by death_manager.script: the items a dead NPC must not keep are
 // released together once per this many ms (one frame with a destroy instead of one per death); 0 = at once.
 int npc_perf_death_release_batch_ms = 1000;
+// R0 (plans/optimization_mt/32-frame-spikes.md, a tunable, not saved), read by death_manager.script: > 0 - at most this
+// many queued releases per tick of the queue, the rest goes with the next ticks; 0 = 256 as before
+int npc_perf_death_release_batch_max = 64; // the default since 2026-10-17
+// 37-destroy-relcase-smooth.md: what a flush of the death_manager.script queue leaves (fewer than
+// npc_perf_death_release_batch_max) waits npc_perf_death_release_batch_ms again instead of going with the next tick -
+// always on since 2026-10-18 (npc_perf_death_release_coalesce removed, see plan 41).
+// 2026-10-18 (plans/optimization_mt/41-cvar-cleanup.md): the Lua switches npc_perf_death_lua_lite (B3 of
+// 30-game-events.md), npc_perf_smart_first_update_jitter (S1) and npc_perf_squad_pack_children (Q1 of 32-frame-spikes.md)
+// are removed, the scripts always take the new path.
+// S1 (plans/optimization_mt/32-frame-spikes.md, a tunable, not saved), read by sim_smart.script, 0 = as before: > 0 - at
+// most one squad created by spawn_defense_squad / spawn_attack_squad of all the smarts per this many ms; a smart that
+// finds the token taken leaves the spawn to its next update (its timers are not touched).
+int npc_perf_smart_spawn_gap_ms = 500; // the default since 2026-10-17
 
 // Animation LOD (always on): the animation update interval of far, non-combat NPCs (read in ai_stalker.cpp).
 int npc_anim_lod_far_interval_ms = 120;
@@ -1903,6 +1915,16 @@ public:
     }
 };
 
+// G2 (plans/optimization_mt/32-frame-spikes.md): lua_heap_census [full] - the census of the Lua heap at the next GC
+// step of a level (CLevel::script_gc, the thread that runs Lua); full = a full GC first
+class CCC_LuaHeapCensus : public IConsole_Command
+{
+public:
+    CCC_LuaHeapCensus(pcstr name) : IConsole_Command(name) { bEmptyArgsHandled = true; }
+
+    void Execute(pcstr args) override { gw::lua_spike::RequestHeapCensus(args && strstr(args, "full") != nullptr); }
+};
+
 // g_w_scope_hud_fov <weapon_section>;<scope_section> <abs_hud_fov>
 class CCC_ScopeHudFov : public IConsole_Command
 {
@@ -2937,6 +2959,29 @@ public:
     void Save(IWriter*) override {}
 };
 
+// U1 (plans/optimization_mt/32-frame-spikes.md): lua_udata_profile 0/1 - installs/removes the luabind hook that counts
+// the class instances made and samples their Lua call sites (lua_udata_profile.h); 1 starts a new window. U2: the same
+// with the LuaJIT hook luaJIT_gw_udata_hook for every userdata (by size, C function, native caller, Lua site)
+class CCC_LuaUdataProfile : public CCC_IntegerNotSaved
+{
+public:
+    using CCC_IntegerNotSaved::CCC_IntegerNotSaved;
+    void Execute(pcstr args) override
+    {
+        CCC_IntegerNotSaved::Execute(args);
+        gw::lua_udata::Apply(*value != 0);
+    }
+};
+
+// lua_udata_report [reset] [all | <class>] [top=N] - the "[lua-udata]" and "[lua-udata-all]" report of the window in the
+// log (all = only the section of all userdata)
+class CCC_LuaUdataReport : public IConsole_Command
+{
+public:
+    CCC_LuaUdataReport(pcstr name) : IConsole_Command(name) { bEmptyArgsHandled = true; }
+    void Execute(pcstr args) override { gw::lua_udata::Report(args); }
+};
+
 // The same for a float
 class CCC_FloatNotSaved : public CCC_Float
 {
@@ -3063,17 +3108,95 @@ void CCC_RegisterCommands()
     // K2a: > 0 - the paced GC steps of a frame stop after this many us, the rest of the debt goes to the next frames
     // (a debt over ~16 MB of allocations is paid off uncapped); one step (the atomic phase) is never cut
     CMD4(CCC_IntegerNotSaved, "lua_gc_step_budget_us", &gw::lua_spike::g_step_budget_us, 0, 100000);
-    // K2b (with mt_script_gc on): 1 - the GC step of a game/render overlap frame runs in phase 0 of the Game thread,
-    // parallel to phase B/C of the bones prepass on main, instead of in seqParallel after the scheduler
-    CMD4(CCC_IntegerNotSaved, "lua_gc_overlap", &lua_gc_overlap, 0, 1);
-    // K3: 1 - SoundEvent_Dispatch of a game/render overlap frame runs in phase 0 of the Game thread (right after phase A
-    // of the bones prepass, parallel to phase B/C on main) instead of at the start of the Game thread's body
-    CMD4(CCC_IntegerNotSaved, "mt_sound_dispatch_early", &mt_sound_dispatch_early, 0, 1);
-    // K4: 1 - CMapManager::Update runs on main in the phase B window of the bones prepass instead of in CLevel::OnFrame
-    CMD4(CCC_IntegerNotSaved, "mt_prepass_main_slot", &mt_prepass_main_slot, 0, 1);
-    // K9: 1 - the sound render (GEnv.Sound->render) of a game/render overlap frame runs as a task beside seqParallel
-    // instead of in seqFrameMT on the Game thread
-    CMD4(CCC_IntegerNotSaved, "mt_sound_render_task", &XRay::Engine::g_mt_sound_render_task, 0, 1);
+    // G1 (32-frame-spikes.md), with lua_gc_step_budget_us > 0: > 0 - the cap of a frame grows with the debt,
+    // clamp(base * (1 + debt / lua_gc_debt_soft), base, lua_gc_budget_max_us), instead of the K2a cliff; uncapped only
+    // past 64K steps of debt or when the heap passed lua_gc_heap_guard_pct % of its size at the cycle start (0 = no
+    // heap guard). lua_gc_budget_max_us 0 = K2a as before
+    CMD4(CCC_IntegerNotSaved, "lua_gc_budget_max_us", &gw::lua_spike::g_budget_max_us, 0, 100000);
+    CMD4(CCC_IntegerNotSaved, "lua_gc_debt_soft", &gw::lua_spike::g_debt_soft, 100, 1000000);
+    CMD4(CCC_IntegerNotSaved, "lua_gc_heap_guard_pct", &gw::lua_spike::g_heap_guard_pct, 0, 1000);
+    // G2 (32-frame-spikes.md; temporary, not saved). Needs LuaJIT with the GlobalWar patch (luajit.h LUAJIT_GW_GCSTATS).
+    // lua_gc_atomic_stats 1: a "[lua-gc-atomic]" line after every atomic phase of the GC, each part timed with what it
+    // walked (lua_spike_probe.h); lua_heap_census [full]: the census of the Lua heap ("[lua-census]" lines)
+    CMD4(CCC_IntegerNotSaved, "lua_gc_atomic_stats", &gw::lua_spike::g_atomic_stats, 0, 1);
+    CMD1(CCC_LuaHeapCensus, "lua_heap_census");
+    // A/B, 0 = untouched: lua_gc_pause - LUA_GCSETPAUSE, and the paced GC waits between the cycles until the heap passes
+    // this % of the heap at the end of the last one (100 = no wait); lua_gc_stepmul - LUA_GCSETSTEPMUL (LuaJIT: 200)
+    CMD4(CCC_IntegerNotSaved, "lua_gc_pause", &gw::lua_spike::g_gc_pause, 0, 1000);
+    CMD4(CCC_IntegerNotSaved, "lua_gc_stepmul", &gw::lua_spike::g_gc_stepmul, 0, 10000);
+    // 42-lua-gc-prewalk.md: the work moved out of the atomic phase of the GC into the steps (LuaJIT luaJIT_gw_prewalk)
+    // is always on since 2026-10-18 (its emergency switch lua_gc_prewalk removed, see plan 41)
+    // U1 (32-frame-spikes.md; diagnostics, not saved): who makes the temporary luabind userdata. lua_udata_profile 1 -
+    // count the class instances made (exact, by class) and sample the Lua call site of one in lua_udata_profile_sample
+    // (source:line, its caller, the C function, the Lua callback about to be called); lua_udata_report [reset]
+    // [<class>] [top=N] - the top sites by class and over all classes in the log. 0 = off (luabind: one load, a branch)
+    // U2: lua_udata_profile 1 also hooks every userdata in LuaJIT (lj_udata_new); lua_udata_report adds the section
+    // "[lua-udata-all]" (all userdata vs the luabind instances; by size, C function, native caller, Lua site), "all" = only it
+    CMD4(CCC_LuaUdataProfile, "lua_udata_profile", &gw::lua_udata::g_enabled, 0, 1);
+    CMD4(CCC_IntegerNotSaved, "lua_udata_profile_sample", &gw::lua_udata::g_sample, 1, 65536);
+    CMD1(CCC_LuaUdataReport, "lua_udata_report");
+    // 32-frame-spikes.md: the Lua wrapper cache (xrScriptEngine/script_wrapper_cache.hpp) and the luabind instances
+    // without __gc over a raw pointer (game_object, alife(), device(), a reference returned by a method: they own
+    // nothing; the GC frees them in the cycle they die in instead of queueing them for an empty finalizer) are always
+    // on since 2026-10-18 (their switches lua_wrapper_cache, lua_wrapper_nogc removed, 41-cvar-cleanup.md)
+    luabind::detail::set_nonowning_instance_nogc(true);
+    // 26-framemove-game-next.md: K2b, K3, K4 (Level.cpp), the pipelined bones prepass and its early kick (Level.cpp) and
+    // K9 (xrEngine/EngineThreading.cpp) are always on since 2026-10-18 (their switches lua_gc_overlap,
+    // mt_sound_dispatch_early, mt_prepass_main_slot, r__bones_prepass_pipeline, r__bones_prepass_early_kick,
+    // mt_sound_render_task removed)
+    // 29-game-thread-next.md (the Game thread on the critical path). A1 (mt_phase0_split, the phase 0 dispatch as a
+    // task beside the Lua GC step) removed 2026-10-18: no gain (41-cvar-cleanup.md); phase 0 dispatches on the Game
+    // thread.
+    // Always on since 2026-10-18 (41-cvar-cleanup.md, step 2; their switches removed): A3 mt_sound_render_early - the
+    // K9 sound render task starts in phase 0 right after its dispatch (xrEngine/EngineThreading.cpp); A2
+    // mt_bullets_task - with mt_bullets the bullets' UpdateWorkload runs as a task from the start of the Game thread's
+    // logic frame to its old place in seqParallel (Level_Bullet_Manager.cpp); A4 mt_game_wait_own_only - a Wait() of
+    // the Game thread runs only its own tasks and the pieces of the awaited one, after 1 ms without own work it steals
+    // (TaskManager.cpp).
+    // 26-framemove-game-next.md, the Game thread after package 2: temporary A/B switches, not saved, 0 = as before.
+    // net_sp_export_slices N > 1: the once-a-second single player object export to the server (CLevel::net_Update,
+    // seqFrameMT, a 4.5-5 ms spike) spread over N frames (Level_network.cpp)
+    extern int net_sp_export_slices;
+    CMD4(CCC_IntegerNotSaved, "net_sp_export_slices", &net_sp_export_slices, 0, 32);
+    // 26-framemove-game-next.md: the corpse reaction fix (agent_corpse_manager.cpp), the cheaper enemy distribution,
+    // the enemy masks batch (agent_enemy_manager.cpp), the agent group by the ALife squad (Entity.cpp) and the cover scan
+    // cache (space_restriction.cpp) are always on since 2026-10-18 (their switches npc_corpse_reaction_fix,
+    // npc_agent_distribute_fast, npc_agent_masks_batch, npc_agent_group_by_squad, npc_cover_scan_cache 2 removed)
+    // npc_cover_scan_frame_budget_us > 0: the cover searches of stalkers without a cover stop for the frame once they
+    // took this many us; the rest get "no cover" for this update and search on the next one (ai_stalker_cover.cpp)
+    extern int npc_cover_scan_frame_budget_us;
+    CMD4(CCC_IntegerNotSaved, "npc_cover_scan_frame_budget_us", &npc_cover_scan_frame_budget_us, 0, 100000);
+    // npc_agent_distribute_min_ms N > 0: the distribution a member without an enemy asks for on its memory update runs
+    // at most once in N ms unless an enemy died/went offline or a new one was selected (agent_enemy_manager.cpp)
+    extern int npc_agent_distribute_min_ms;
+    CMD4(CCC_IntegerNotSaved, "npc_agent_distribute_min_ms", &npc_agent_distribute_min_ms, 0, 5000);
+    // 32-frame-spikes.md, A1 (always on since 2026-10-18, its switch alife_update_spread removed): the ALife update of a
+    // turn of the scheduler (18-35 ms once in ~5 s) is done in parts every frame, alife_scheduled_budget_us a frame (at
+    // least one object); alife_update_manager.cpp
+    extern int alife_scheduled_budget_us;
+    CMD4(CCC_IntegerNotSaved, "alife_scheduled_budget_us", &alife_scheduled_budget_us, 0, 100000);
+    // alife_switch_offline_per_frame_max N > 0: the spread switch pass takes at most ~N client objects (with the NPC
+    // inventories) offline a frame, at least one object/squad; 0 = no limit (alife_update_manager.cpp)
+    extern int alife_switch_offline_per_frame_max;
+    CMD4(CCC_IntegerNotSaved, "alife_switch_offline_per_frame_max", &alife_switch_offline_per_frame_max, 0, 100000);
+    // S1: the Lua tunable of the smarts (see npc_perf_smart_spawn_gap_ms above)
+    CMD4(CCC_IntegerNotSaved, "npc_perf_smart_spawn_gap_ms", &npc_perf_smart_spawn_gap_ms, 0, 60000);
+    // 33-level-path.md (plans/optimization_mt): the level paths of the NPCs (the fast level A*, the vertex lookup on the
+    // row table, the cross table and the game graph in the memory - always on since 2026-10-18, their switches
+    // ai_level_search_fast, ai_level_vertex_fast, ai_cross_table_copy, ai_game_graph_copy removed, xrAICore
+    // ai_graph_engine_cvars.h). ai_level_path_spike_us N - a [path-spike] line for a level path delegate over N us;
+    // ai_level_path_budget_us N - the level path delegates over N us a frame wait for the next frame (the first of a
+    // frame always runs; movement_manager.cpp); ai_obstacle_path_visited_cap N - the stalkers' searches with obstacles
+    // open at most N vertices until the one without obstacles found a path; ai_obstacle_path_iters_max N - at most N
+    // passes of the obstacle loop, then the path without obstacles (stalker_movement_manager_obstacles_path.cpp)
+    extern int ai_level_path_spike_us;
+    extern int ai_level_path_budget_us;
+    extern int ai_obstacle_path_visited_cap;
+    extern int ai_obstacle_path_iters_max;
+    CMD4(CCC_IntegerNotSaved, "ai_level_path_spike_us", &ai_level_path_spike_us, 0, 1000000);
+    CMD4(CCC_IntegerNotSaved, "ai_level_path_budget_us", &ai_level_path_budget_us, 0, 100000);
+    CMD4(CCC_IntegerNotSaved, "ai_obstacle_path_visited_cap", &ai_obstacle_path_visited_cap, 0, 65500);
+    CMD4(CCC_IntegerNotSaved, "ai_obstacle_path_iters_max", &ai_obstacle_path_iters_max, 0, 64);
 
 #ifdef DEBUG
     CMD3(CCC_Mask, "ai_debug", &psAI_Flags, aiDebug);
@@ -3261,6 +3384,9 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "npc_perf_scheme_condlist_ttl_ms", &npc_perf_scheme_condlist_ttl_ms, 0, 5000);
     CMD4(CCC_Integer, "npc_perf_move_mgr_fixes", &npc_perf_move_mgr_fixes, 0, 1);
     CMD4(CCC_Integer, "npc_perf_death_release_batch_ms", &npc_perf_death_release_batch_ms, 0, 5000);
+    CMD4(CCC_IntegerNotSaved, "npc_perf_death_release_batch_max", &npc_perf_death_release_batch_max, 0, 4096);
+    // 30-game-events.md: B3 (Lua) and B2 (ai_stalker_events.cpp: a reject right before the destroy of the item skips
+    // the bones of the owner) are always on since 2026-10-18 (npc_perf_death_lua_lite, npc_reject_destroy_skip_bones)
     // 22-game-thread.md, step 2: the sound dispatch filter (Level.cpp, CLevel::SoundEvent_Filter, always on) - a sound
     // goes to the listeners near it or near the actor, those with an xr_hear on_sound section, and at most N of the
     // others (the loudest); the actor's own sounds go to everyone. Its tunables
@@ -3340,6 +3466,13 @@ void CCC_RegisterCommands()
     CMD4(CCC_Integer, "spawn_max_delay_ms", &g_spawn_max_delay_ms, 1, 60000);
     // A pass that goes past the budget for a head older than spawn_max_delay_ms stops at spawn_catchup_us (0 = no limit)
     CMD4(CCC_Integer, "spawn_catchup_us", &g_spawn_catchup_us, 0, 1000000);
+    // 36-spawn-model-load.md (tunables, not saved). spawn_cold_models (0 = off): a budgeted pass stops in front of the
+    // next spawn group after this many cold model loads. model_prefetch_margin: the model files of objects near the
+    // online distance (+ this %) are read ahead on a thread. The model prefetch itself (the level's creatures and all
+    // monster visuals into the pool on the loading screen, the files read ahead) is always on since 2026-10-18
+    // (model_prefetch removed, see plan 41).
+    CMD4(CCC_IntegerNotSaved, "spawn_cold_models", &g_spawn_cold_models, 0, 64);
+    CMD4(CCC_IntegerNotSaved, "model_prefetch_margin", &g_model_prefetch_margin, 0, 300);
 
 #ifdef DEBUG
     CMD1(CCC_PHGravity, "ph_gravity");
@@ -3686,24 +3819,33 @@ void CCC_RegisterCommands()
     CMD2(CCC_UI_Time_Dilation_Mode, "time_dilation_inventory", UITimeDilator::Inventory);
     CMD2(CCC_UI_Time_Dilation_Mode, "time_dilation_pda", UITimeDilator::Pda);
 
-    // K5 of plans/optimization_mt/26-framemove-game-next.md (1-B), temporary: a cheaper UpdateCL of weapons out of the
-    // actor's hands (Weapon.h). 0 = as before
-    extern int wpn_npc_ucl_lite;
-    CMD4(CCC_IntegerNotSaved, "wpn_npc_ucl_lite", &wpn_npc_ucl_lite, 0, 1);
+    // K5 of plans/optimization_mt/26-framemove-game-next.md (1-B): a cheaper UpdateCL of weapons out of the actor's
+    // hands (Weapon.h) - always on since 2026-10-18 (wpn_npc_ucl_lite)
 
     // K7 (plans/optimization_mt/26-framemove-game-next.md, 1-C): how long a cover search of a stalker that found no
     // cover is not repeated while the stalker and the threat stay in place (ai/stalker/ai_stalker_cover.cpp; 0 = no hold)
     extern int npc_cover_none_hold_ms;
     CMD4(CCC_Integer, "npc_cover_none_hold_ms", &npc_cover_none_hold_ms, 0, 10000);
 
-    // K8 (plans/optimization_mt/26-framemove-game-next.md, 2-B). Temporary A/B switches, not saved, 0 = as before
-    // (ai/stalker/ai_stalker.cpp): the combat tier of the UpdateCL LOD for fighters on screen at least N m from the
-    // camera (the zoomed distance; every 2nd frame) and the object handler of far fighters every 2nd pass / frame
-    // (1 = not drawn last frame, 2 = drawn too)
+    // K8 (plans/optimization_mt/26-framemove-game-next.md, 2-B). A tunable, not saved, 0 = off (ai/stalker/ai_stalker.cpp):
+    // the combat tier of the UpdateCL LOD for fighters on screen at least N m from the camera (the zoomed distance;
+    // every 2nd frame). K8c, the object handler of far fighters every 2nd pass / frame, is always on since 2026-10-18
+    // (npc_oh_lod_combat 2)
     extern int npc_ucl_lod_combat_seen_dist;
-    extern int npc_oh_lod_combat;
     CMD4(CCC_IntegerNotSaved, "npc_ucl_lod_combat_seen_dist", &npc_ucl_lod_combat_seen_dist, 0, 500);
-    CMD4(CCC_IntegerNotSaved, "npc_oh_lod_combat", &npc_oh_lod_combat, 0, 2);
+
+    // plans/optimization_mt/26-framemove-game-next.md (FrameMove after the pipelined prepass). Tunables, not saved,
+    // 0 = as before: the combat tier for unseen fighters of the actor N m from the camera (ai/stalker/ai_stalker.cpp),
+    // the map locations not near the camera updated every N-th frame (map_manager.cpp). The minimap cull (ui/UIMap.cpp,
+    // ui_minimap_cull) is always on since 2026-10-18
+    extern int npc_ucl_lod_combat_actor_dist;
+    extern int map_update_lod;
+    CMD4(CCC_IntegerNotSaved, "npc_ucl_lod_combat_actor_dist", &npc_ucl_lod_combat_actor_dist, 0, 500);
+    CMD4(CCC_IntegerNotSaved, "map_update_lod", &map_update_lod, 0, 16);
+
+    // plans/optimization_mt/28-updatecl-main.md: U1 - the feet IK of stalkers in phase B of their bones instead of their
+    // UpdateCL (IKLimbsController.h), W1 - no UpdateCL of an idle weapon in the hands of a dead NPC (Weapon.h) - always on
+    // since 2026-10-18 (npc_ik_in_bones, wpn_npc_dead_owner_skip)
 
     register_mp_console_commands();
 }

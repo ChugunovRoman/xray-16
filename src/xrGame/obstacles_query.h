@@ -49,6 +49,8 @@ public:
     bool remove_objects(const Fvector& position, const float& radius);
     IC bool update_objects(const Fvector& position, const float& radius);
     void remove_links(IGameObject* object);
+    // R1 (32-frame-spikes.md): remove_links for every object of the batch, in one pass
+    void remove_links_batch(const struct RelcaseBatch& batch);
 
 public:
     IC bool operator==(const obstacles_query& object) const;

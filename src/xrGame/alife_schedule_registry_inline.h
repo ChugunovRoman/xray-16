@@ -30,6 +30,20 @@ IC void CALifeScheduleRegistry::update()
 #endif
 }
 
+IC u32 CALifeScheduleRegistry::update_limited(u32 count, u64 deadline, bool& wrapped)
+{
+    if (objects().empty())
+    {
+        wrapped = true;
+        return (0);
+    }
+    const CUpdateSpreadPredicate predicate(count, deadline);
+    const u32 done = inherited::update(predicate, false);
+    PERF_ADD(alife_objects, done);
+    wrapped = predicate.m_wrapped;
+    return (done);
+}
+
 IC CSE_ALifeSchedulable* CALifeScheduleRegistry::object(const ALife::_OBJECT_ID& id, bool no_assert) const
 {
     _const_iterator I = objects().find(id);

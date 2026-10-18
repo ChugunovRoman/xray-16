@@ -29,6 +29,7 @@
 #include "CustomOutfit.h"
 #include "Bolt.h"
 #include "xrNetServer/NET_Messages.h"
+#include "lua_spike_probe.h"
 
 CInventoryOwner::CInventoryOwner()
     : m_inventory(xr_new<CInventory>()),
@@ -460,8 +461,24 @@ void CInventoryOwner::OnItemDrop(CInventoryItem* inventory_item, bool just_befor
 {
     CGameObject* object = smart_cast<CGameObject*>(this);
     VERIFY(object);
-    object->callback(GameObject::eOnItemDrop)(inventory_item->object().lua_game_object());
-    gw::addons::objevents::OwnerItem(gw::addons::objevents::EItem::Drop, object, &inventory_item->object());
+    {
+        PERF_SCOPE(item_drop_lua_binder); // 30-game-events.md
+        auto& drop_callback = object->callback(GameObject::eOnItemDrop);
+        // npc_perf_lua_spike_us > 0: a call over the threshold goes to the log ("binder_cb")
+        lua_State* spike_lua =
+            gw::lua_spike::Enabled() && drop_callback ? drop_callback.functor().interpreter() : nullptr;
+        gw::lua_spike::Probe spike(spike_lua, gw::lua_spike::ECategory::BinderCallback);
+        drop_callback(inventory_item->object().lua_game_object());
+        if (spike.Finish())
+        {
+            drop_callback.functor().push(spike_lua);
+            spike.Report("item_drop", object->ID(), inventory_item->object().ID(), true);
+        }
+    }
+    {
+        PERF_SCOPE(item_drop_bus); // 30-game-events.md: npc_on_item_drop and the like
+        gw::addons::objevents::OwnerItem(gw::addons::objevents::EItem::Drop, object, &inventory_item->object());
+    }
 
     detach(inventory_item);
 }

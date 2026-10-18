@@ -162,6 +162,20 @@ private:
     bool m_extrapolate_path;
     bool m_build_at_once;
     bool m_wait_for_distributed_computation;
+    // 33-level-path.md (plans/optimization_mt), M: who set the current level destination (a level_dest_source value),
+    // for the [path-spike] line only. set_level_dest_vertex() makes it "engine" when the vertex changes, the Lua method
+    // set_dest_level_vertex_id and the plugin API call npc_set_dest_level_vertex mark it after that. Transient.
+    u8 m_level_dest_source = 0;
+
+public:
+    enum level_dest_source : u8
+    {
+        level_dest_engine = 0,
+        level_dest_lua = 1, // CScriptGameObject::set_dest_level_vertex_id (script_game_object3.cpp)
+        level_dest_plugin = 2, // gw_npc / Plugin API npc_set_dest_level_vertex (addon_api_npc_control.cpp)
+    };
+    void set_level_dest_source(u8 source) { m_level_dest_source = source; }
+    u8 level_dest_source() const { return m_level_dest_source; }
 
 public:
     CGameVertexParams* m_base_game_selector;

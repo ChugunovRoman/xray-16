@@ -4,6 +4,10 @@
 
 //#include "_stl_extensions.h"
 #include "xrCommon/xr_vector.h"
+#include "xrCommon/xr_unordered_map.h"
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+#endif
 #include "Common/Noncopyable.hpp"
 
 // fwd. decl.
@@ -72,11 +76,41 @@ public:
     size_t stat_economy() const;
 
 private:
-    typedef xr_vector<smem_value*> cdb;
+    // 40-parallel-prefetch.md (plans/optimization_mt): a hash on (crc, length) instead of a vector sorted by them. A
+    // dock of a new value inserted into the middle of the vector - a move of half of it, and every key track of an omf
+    // is docked (hundreds of thousands of values by the end of the model prefetch). Values of equal crc and length are
+    // compared byte by byte, as before.
+    using cdb = std::unordered_multimap<u64, smem_value*, std::hash<u64>, std::equal_to<u64>,
+        xr_allocator<std::pair<const u64, smem_value*>>>;
     mutable Lock lock;
     cdb container;
 };
 XRCORE_API extern smem_container* g_pSharedMemoryContainer;
+
+// 40-parallel-prefetch.md: the reference count of smem_value is changed interlocked (as the one of str_value,
+// xrstring.h): skinned models load on several threads at once (CSkeletonX::_Load docks BonesUsed) while the main
+// thread copies loaded ones (CSkeletonX::_Copy); a lost increment frees a live value at the next clean(). The field
+// stays a plain u32 (layout; the readers in xrsharedmem.cpp run under the container lock).
+namespace xr_smem_detail
+{
+inline void ref_inc(u32& ref) noexcept
+{
+#if defined(_MSC_VER) && !defined(__clang__)
+    _InterlockedIncrement(reinterpret_cast<volatile long*>(&ref));
+#else
+    __atomic_add_fetch(&ref, 1u, __ATOMIC_RELAXED);
+#endif
+}
+
+[[nodiscard]] inline u32 ref_dec(u32& ref) noexcept
+{
+#if defined(_MSC_VER) && !defined(__clang__)
+    return static_cast<u32>(_InterlockedDecrement(reinterpret_cast<volatile long*>(&ref)));
+#else
+    return __atomic_sub_fetch(&ref, 1u, __ATOMIC_ACQ_REL);
+#endif
+}
+} // namespace xr_smem_detail
 
 //////////////////////////////////////////////////////////////////////////
 template <class T>
@@ -91,8 +125,7 @@ protected:
     {
         if (0 == p_)
             return;
-        p_->dwReference--;
-        if (0 == p_->dwReference)
+        if (0 == xr_smem_detail::ref_dec(p_->dwReference))
             p_ = 0;
     }
 
@@ -101,7 +134,7 @@ public:
     {
         smem_value* v = rhs.p_;
         if (0 != v)
-            ++v->dwReference;
+            xr_smem_detail::ref_inc(v->dwReference);
         _dec();
         p_ = v;
     }
@@ -121,7 +154,7 @@ public:
     {
         smem_value* v = g_pSharedMemoryContainer->dock(dwCRC, dwLength * sizeof(T), ptr);
         if (0 != v)
-            ++v->dwReference;
+            xr_smem_detail::ref_inc(v->dwReference);
         _dec();
         p_ = v;
     }

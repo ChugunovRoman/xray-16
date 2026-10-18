@@ -21,6 +21,8 @@ private:
     const CAgentManager* m_agent_manager;
     bool m_use_enemy_info;
     bool m_notify_agent_manager;
+    // The cover scan cache: the group as suitable() reads it, taken on the first call of the scan
+    mutable CAgentLocationManager::suitable_snapshot m_snapshot;
 
 public:
     IC CStalkerMovementRestrictor(CAI_Stalker* object, bool use_enemy_info, bool notify_agent_manager = true);

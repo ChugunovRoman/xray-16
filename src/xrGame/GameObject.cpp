@@ -1116,6 +1116,110 @@ void CGameObject::setup_parent_ai_locations(bool assign_position)
     //	ai_location().game_vertex	(l_tpGameObject->ai_location().game_vertex_id());
 }
 
+#if XR_PERF_METRICS
+#if defined(XR_PLATFORM_WINDOWS)
+#include <psapi.h> // QueryWorkingSetEx (K32QueryWorkingSetEx of kernel32 with _WIN32_WINNT >= Win7)
+#endif
+namespace
+{
+// 33-level-path.md (plans/optimization_mt), journal 34: the [perf-spike] go/ai_locations line says where its time went.
+// tl_ai_loc_cross_ticks = the cross table lookups of update_ai_locations on this thread (the cross table of the level
+// lives in the memory-mapped all.spawn); spatial_move resets it before its block.
+thread_local u64 tl_ai_loc_cross_ticks = 0;
+// 35 (33-level-path.md, journal): cross_ms by part. get = ai().cross_table(), read = the read of the cell (the page
+// fault of the mapped all.spawn is here), set = ai_location().game_vertex(); ws_miss = the lookups whose cell page was
+// not in the working set before the read (perf_metrics on, Windows); src: 0 = no lookup, 1 = the mapped file,
+// 2 = the copy in the memory (35)
+thread_local u64 tl_ai_loc_cross_get_ticks = 0;
+thread_local u64 tl_ai_loc_cross_read_ticks = 0;
+thread_local u64 tl_ai_loc_cross_set_ticks = 0;
+thread_local u32 tl_ai_loc_cross_ws_miss = 0;
+thread_local u8 tl_ai_loc_cross_src = 0;
+
+// 35: 1 = the bytes [address, address + size) are in the working set of the process (reading them is no page fault),
+// 0 = a page of them is not (the read faults: a soft fault from the standby list, or a read from the disk),
+// -1 = unknown (not Windows, or the query failed). A syscall, ~1 us: only with perf_metrics on.
+int AiLocCrossPagesResident(const void* address, size_t size) noexcept
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    PSAPI_WORKING_SET_EX_INFORMATION info[2]{};
+    const uintptr_t first = reinterpret_cast<uintptr_t>(address);
+    const uintptr_t last = first + size - 1;
+    info[0].VirtualAddress = reinterpret_cast<void*>(first);
+    info[1].VirtualAddress = reinterpret_cast<void*>(last);
+    const DWORD count = (first >> 12) == (last >> 12) ? 1 : 2; // a 6-byte cell may cross a 4 KB page
+    if (!QueryWorkingSetEx(GetCurrentProcess(), info, count * sizeof(info[0])))
+        return -1;
+    for (DWORD i = 0; i < count; ++i)
+        if (!info[i].VirtualAttributes.Valid)
+            return 0;
+    return 1;
+#else
+    (void)address;
+    (void)size;
+    return -1;
+#endif
+}
+
+const char* AiLocCrossSourceName(u8 src) noexcept
+{
+    switch (src)
+    {
+    case 1: return "map";
+    case 2: return "mem";
+    default: return "-";
+    }
+}
+
+// " get= read= set= ws_miss= src=" of the cross table lookups (35)
+void DescribeAiLocationsCross(char* buf, size_t size) noexcept
+{
+    xr_sprintf(buf, size, " get=%.3f read=%.3f set=%.3f ws_miss=%u src=%s",
+        xray::perf::TicksToMilliseconds(tl_ai_loc_cross_get_ticks),
+        xray::perf::TicksToMilliseconds(tl_ai_loc_cross_read_ticks),
+        xray::perf::TicksToMilliseconds(tl_ai_loc_cross_set_ticks), tl_ai_loc_cross_ws_miss,
+        AiLocCrossSourceName(tl_ai_loc_cross_src));
+}
+
+struct AiLocationsSpike
+{
+    const CGameObject* object;
+    u32 vertex_seq; // CLevelGraph::last_vertex_stats().seq before the block: another value = vertex() was called
+};
+
+// "<the object> lg=<path>[/fast][/fallback] lg_ms= cross_ms= get= read= set= ws_miss= src= dist= dy= cur= new=": the
+// path of CLevelGraph::vertex (current/xz/full/full_fast/guess/nearest, "-" = not called: the parent's vertex), its
+// time, the cross table time and its parts (35: DescribeAiLocationsCross), how far the position is from the contour
+// of the vertex found (dist, m) and above its plane (dy, m)
+void DescribeAiLocationsSpike(const void* ctx, char* buf, size_t size) noexcept
+{
+    const AiLocationsSpike& info = *static_cast<const AiLocationsSpike*>(ctx);
+    string256 object{};
+    xray::perf::DescribeSpikeObject<CGameObject>(info.object, object, sizeof(object));
+    const double cross_ms = xray::perf::TicksToMilliseconds(tl_ai_loc_cross_ticks);
+    string128 cross{};
+    DescribeAiLocationsCross(cross, sizeof(cross));
+    const CLevelGraph::VertexStats& lg = CLevelGraph::last_vertex_stats();
+    if (lg.seq == info.vertex_seq || !ai().get_level_graph())
+    {
+        xr_sprintf(buf, size, "%s lg=- cross_ms=%.3f%s", object, cross_ms, cross);
+        return;
+    }
+    const CLevelGraph& graph = ai().level_graph();
+    float dist = -1.f, dy = 0.f;
+    if (graph.valid_vertex_id(lg.result))
+    {
+        dist = _sqrt(graph.distance(lg.result, lg.position));
+        dy = lg.position.y - graph.vertex_plane_y(lg.result, lg.position.x, lg.position.z);
+    }
+    xr_sprintf(buf, size, "%s lg=%s%s%s lg_ms=%.3f cross_ms=%.3f%s dist=%.2f dy=%.2f cur=%d new=%u", object,
+        CLevelGraph::vertex_branch_name(lg.branch), lg.fast ? "/fast" : "", lg.fallback ? "/fallback" : "",
+        xray::perf::TicksToMilliseconds(lg.ticks), cross_ms, cross, dist, dy,
+        graph.valid_vertex_id(lg.current_id) ? int(lg.current_id) : -1, lg.result);
+}
+} // namespace
+#endif
+
 u32 CGameObject::new_level_vertex_id() const
 {
     Fvector center;
@@ -1137,7 +1241,40 @@ void CGameObject::update_ai_locations(bool decrement_reference)
     if (!ai().get_game_graph() && ai().get_cross_table())
         return;
 
+#if XR_PERF_METRICS
+    {
+        // 34: cross_ms of the [perf-spike] go/ai_locations line; 35: by part, the same lookup as below. The read of
+        // the cell is between two calls of Ticks() (opaque calls into xrCore: the load cannot move past them).
+        const u64 t0 = xray::perf::Ticks();
+        const CGameLevelCrossTable& cross_table = ai().cross_table();
+        const u64 t1 = xray::perf::Ticks();
+        const CGameLevelCrossTable::CCell& cell = cross_table.vertex(ai_location().level_vertex_id());
+        const bool active = xray::perf::g_perf_metrics_active;
+        const int resident = active ? AiLocCrossPagesResident(&cell, sizeof(cell)) : -1;
+        const u64 t2 = xray::perf::Ticks();
+        const GameGraph::_GRAPH_ID game_vertex_id = cell.game_vertex_id();
+        const u64 t3 = xray::perf::Ticks();
+        ai_location().game_vertex(game_vertex_id);
+        const u64 t4 = xray::perf::Ticks();
+        const u64 get_ticks = t1 - t0, read_ticks = t3 - t2, set_ticks = t4 - t3;
+        tl_ai_loc_cross_ticks += get_ticks + read_ticks + set_ticks;
+        tl_ai_loc_cross_get_ticks += get_ticks;
+        tl_ai_loc_cross_read_ticks += read_ticks;
+        tl_ai_loc_cross_set_ticks += set_ticks;
+        tl_ai_loc_cross_ws_miss += resident == 0 ? 1 : 0;
+        tl_ai_loc_cross_src = cross_table.in_memory() ? 2 : 1;
+        if (active)
+        {
+            xray::perf::AddTimeSlow(xray::perf::Metric::ai_cross_lookup, get_ticks + read_ticks + set_ticks);
+            xray::perf::AddTimeSlow(xray::perf::Metric::ai_cross_read, read_ticks);
+            if (xray::perf::TicksToMilliseconds(read_ticks) >= 0.5)
+                xray::perf::AddTimeSlow(xray::perf::Metric::ai_cross_slow, read_ticks);
+            PERF_ADD_IF(resident == 0, ai_cross_ws_miss, 1);
+        }
+    }
+#else
     ai_location().game_vertex(ai().cross_table().vertex(ai_location().level_vertex_id()).game_vertex_id());
+#endif
     VERIFY(ai().game_graph().valid_vertex_id(ai_location().game_vertex_id()));
 }
 
@@ -1174,7 +1311,15 @@ void CGameObject::spatial_move()
         const bool is_actor = xray::perf::g_perf_metrics_active && cast_actor();
         PERF_SCOPE_IF(is_actor, go_ai_locations_actor);
         PERF_SCOPE_IF(!is_actor, go_ai_locations_other);
-        PERF_SPIKE_OBJECT("go/ai_locations", this);
+#if XR_PERF_METRICS
+        // 34 (33-level-path.md, journal): the object, the path of CLevelGraph::vertex and the cross table time
+        tl_ai_loc_cross_ticks = 0;
+        tl_ai_loc_cross_get_ticks = tl_ai_loc_cross_read_ticks = tl_ai_loc_cross_set_ticks = 0; // 35
+        tl_ai_loc_cross_ws_miss = 0;
+        tl_ai_loc_cross_src = 0;
+        const AiLocationsSpike spike_info{this, CLevelGraph::last_vertex_stats().seq};
+        PERF_SPIKE_NAMED(ai_locations_spike, "go/ai_locations", &spike_info, &DescribeAiLocationsSpike, false);
+#endif
         if (H_Parent())
             setup_parent_ai_locations();
         else if (Visual())
@@ -1455,6 +1600,9 @@ void CGameObject::add_visual_callback(visual_callback callback)
     [[maybe_unused]] auto I = std::find(visual_callbacks().begin(), visual_callbacks().end(), callback);
     VERIFY(I == visual_callbacks().end());
 
+    // The list is walked by VisualCallback in phase B of the bones (a pipelined prepass task may run it beside main's
+    // UpdateCL): change it under the bone lock (waits for a running phase B; a no-op if this thread may not block).
+    const KinematicsBonesLock bones_lock(PKinematics(Visual()));
     if (m_visual_callback.empty())
         SetKinematicsCallback(true);
     //		smart_cast<IKinematics*>(Visual())->Callback(VisualCallback,this);
@@ -1463,6 +1611,7 @@ void CGameObject::add_visual_callback(visual_callback callback)
 
 void CGameObject::remove_visual_callback(visual_callback callback)
 {
+    const KinematicsBonesLock bones_lock(PKinematics(Visual())); // see add_visual_callback
     CALLBACK_VECTOR_IT I = std::find(m_visual_callback.begin(), m_visual_callback.end(), callback);
     VERIFY(I != m_visual_callback.end());
     m_visual_callback.erase(I);
@@ -1739,6 +1888,22 @@ u32 CGameObject::ef_detector_type() const
 // objects (group memory lists, agent manager) checks CObjectList::relcase_batch() and is cleaned of the whole batch once.
 void CGameObject::net_RelcaseBatch(const RelcaseBatch& batch)
 {
+    // 32-frame-spikes.md, the no-op skip (always on since 2026-10-18): the class of this object keeps the empty net_Relcase below and this
+    // function (game_object_relcase_noop of the type the factory created): the loop would only make empty calls
+    if (m_relcase_noop)
+    {
+        ++ol_relcase_noop_skipped;
+        return;
+    }
+    // 37-destroy-relcase-smooth.md (always on since 2026-10-18, see plan 41): the same for the script factory objects
+    // (weapons, food, outfits... of class_registrator.script), whose exact class was found noop
+    // (ObjectFactory::script_client_object_created)
+    if (m_relcase_noop_script)
+    {
+        ++ol_relcase_noop_skipped;
+        ++ol_relcase_noop_script_skipped;
+        return;
+    }
     for (u32 it = batch.count; it-- > 0;)
         net_Relcase(batch.objects[it]);
 }

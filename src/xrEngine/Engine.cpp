@@ -22,7 +22,7 @@ struct SoundRenderer final : public pureFrame
 {
     void OnFrame() override
     {
-        // K9 (26-framemove-game-next.md, mt_sound_render_task): the Game thread's task rendered this frame already
+        // K9 (26-framemove-game-next.md): the Game thread's task rendered this frame already
         if (XRay::Engine::SoundRenderTakenByTask())
             return;
         PERF_SCOPE(game_seq_frame_mt_sound); // 26-framemove-game-next.md: game/seq_frame_mt/*

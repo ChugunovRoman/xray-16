@@ -29,6 +29,8 @@ XRSOUND_API float psSoundVFactor = 1.0f;
 XRSOUND_API float psSoundVMusic = 1.f;
 XRSOUND_API int psSoundCacheSizeMB = 96;
 XRSOUND_API float psSoundCacheShortSec = 8.0f;
+// 34-sound-cold-load.md: the sound prefetch (read ahead) is always on since 2026-10-18 (snd_source_prefetch removed,
+// see plan 41)
 
 CSoundRender_Core* SoundRender = nullptr;
 
@@ -44,6 +46,12 @@ CSoundRender_Core::CSoundRender_Core(CSoundManager& p)
     fTimer_Delta = 0.0f;
     fTimerPersistent_Value = TimerPersistent.GetElapsed_sec();
     fTimerPersistent_Delta = 0.0f;
+    prefetch_create(); // 34-sound-cold-load.md
+}
+
+CSoundRender_Core::~CSoundRender_Core()
+{
+    prefetch_destroy(); // 34-sound-cold-load.md: the thread is joined before the sources go
 }
 
 void CSoundRender_Core::_initialize()
@@ -60,7 +68,12 @@ void CSoundRender_Core::_clear()
 {
     bReady = false;
 
+    // 34-sound-cold-load.md: the prefetch thread is stopped and its queue dropped (the next level reads its folders
+    // anew)
+    prefetch_shutdown();
+
     // remove sources
+    ScopeLock scope(&s_sources_lock);
     for (auto& kv : s_sources)
     {
         xr_delete(kv.second);
@@ -216,6 +229,7 @@ void CSoundRender_Core::refresh_sources()
     ScopeLock lock(&m_emitters_lock); // no play() between the stop and the reload
     stop_emitters();
 
+    ScopeLock sources_lock(&s_sources_lock); // i_create_source of another thread may insert meanwhile
     for (const auto& kv : s_sources)
     {
         CSoundRender_Source* s = kv.second;

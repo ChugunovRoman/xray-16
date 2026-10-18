@@ -245,13 +245,18 @@ CStalkerPropertyEvaluatorReadyToKill::CStalkerPropertyEvaluatorReadyToKill(
 _value_type CStalkerPropertyEvaluatorReadyToKill::evaluate()
 {
     PROPERTY_EVALUATOR_TRACY_ZONE_CPP();
-    if (!m_object->ready_to_kill() || !m_object->best_weapon())
+    if (!m_object->ready_to_kill())
+        return (false);
+
+    // 45-engine-ai-audit.md, N12: one best_weapon() call for the check and the ammo test below
+    CInventoryItem* const best_item = m_object->best_weapon();
+    if (!best_item)
         return (false);
 
     if (!m_min_ammo_count)
         return (true);
 
-    CWeapon& best_weapon = smart_cast<CWeapon&>(*m_object->best_weapon());
+    CWeapon& best_weapon = smart_cast<CWeapon&>(*best_item);
     if (best_weapon.GetAmmoElapsed() <= (int)m_min_ammo_count)
     {
         if (best_weapon.GetAmmoMagSize() <= (int)m_min_ammo_count)
@@ -297,7 +302,7 @@ _value_type CStalkerPropertyEvaluatorAnomaly::evaluate()
         return (true);
 
     u32 result = dwfChooseAction(2000, m_object->panic_threshold(), 0.f, 0.f, 0.f, m_object->g_Team(),
-        m_object->g_Squad(), m_object->g_Group(), 0, 1, 2, 3, 4, m_object, 300.f);
+        m_object->g_Squad(), m_object->hierarchy_group(), 0, 1, 2, 3, 4, m_object, 300.f);
     return (!result);
 }
 
@@ -321,7 +326,7 @@ _value_type CStalkerPropertyEvaluatorInsideAnomaly::evaluate()
         return (true);
 
     u32 result = dwfChooseAction(2000, m_object->panic_threshold(), 0.f, 0.f, 0.f, m_object->g_Team(),
-        m_object->g_Squad(), m_object->g_Group(), 0, 1, 2, 3, 4, m_object, 300.f);
+        m_object->g_Squad(), m_object->hierarchy_group(), 0, 1, 2, 3, 4, m_object, 300.f);
     return (!result);
 }
 
@@ -341,7 +346,7 @@ _value_type CStalkerPropertyEvaluatorPanic::evaluate()
         return (false);
 
     u32 result = dwfChooseAction(2000, m_object->panic_threshold(), 0.f, 0.f, 0.f, m_object->g_Team(),
-        m_object->g_Squad(), m_object->g_Group(), 0, 1, 2, 3, 4, m_object, 300.f);
+        m_object->g_Squad(), m_object->hierarchy_group(), 0, 1, 2, 3, 4, m_object, 300.f);
     return (!!result);
 }
 

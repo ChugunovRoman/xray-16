@@ -66,6 +66,38 @@ class CScriptCallbackEx;
 
 class IGameObject;
 
+// 32-frame-spikes.md, always on since 2026-10-18 (their switches ol_relcase_npc_batch, ol_relcase_vision_sorted,
+// ol_relcase_cb_scan, ol_relcase_skip_noop, ol_relcase_parallel removed, 41-cvar-cleanup.md):
+// R1 - CAI_Stalker::net_RelcaseBatch cleans its own lists of the whole batch in one pass each (batch.contains) instead
+// of the whole net_Relcase chain once per destroyed object;
+// R2 - RelcaseBatch::contains answers most misses from a 64K-bit pointer hash map (ptr_bits);
+// the callback scan - the relcase callbacks look for the batch by walking their lists once with that prefilter:
+// Feel::Vision walks a list not longer than 24 x the batch (a longer one - a binary search per batch object in its
+// sorted seen/query/diff; a wave of ~130 destroyed objects against ~600 objects in sight: 3 x 130 searches per NPC),
+// Feel::Touch calls its per-object relcase only if one of its lists holds a batch object. Same result as before.
+// The no-op skip - CGameObject::net_RelcaseBatch returns at once for an object whose class (the type the object
+// factory created) keeps CGameObject's empty net_Relcase and net_RelcaseBatch (weapons, ammo, food, outfits, PDA...):
+// vanilla called net_Relcase of every such object once per destroyed object (~8300 sleeping objects x the batch).
+// The parallel relcase (the cost of every frame with a destroy, ~4 ms for ~1900 stalkers at any batch size) - two parts
+// of the relcase run on the task workers, see CObjectList::relcase_objects_batch / relcase_callbacks_batch:
+// - the own lists of every active stalker (R1): conditions, memory, sight,
+//   movement. The stalker puts them off in the active pass (CObjectList::relcase_defer_parallel) and does there only
+//   what other objects share (the agent manager) or what touches physics; the put off parts run right after the active
+//   pass, on the workers. The group memory lists go to the first member that reaches them (relcase_first_visit, lock
+//   free in this phase);
+// - the Feel::Vision callbacks (own lists under own mutex, nothing called back), before the other callbacks.
+// Everything else (other classes, the sleeping objects, Feel::Touch, HUD, sound) stays serial, in the same order.
+// The objects CGameObject::net_RelcaseBatch skipped (the no-op skip), a running total; only the relcase pass of
+// CObjectList (main thread) calls it, which turns the differences into objects/relcase/active_skipped / sleeping_skipped
+ENGINE_API extern u32 ol_relcase_noop_skipped;
+// 37-destroy-relcase-smooth.md, always on since 2026-10-18 (ol_relcase_sleep_parallel, ol_relcase_skip_noop_script
+// removed, see plan 41): the sleeping pass puts off the own part of the stalkers as the active pass does (the corpses:
+// ~1000+ late in a fight, ~2 ms of every frame with a destroy), CObjectList::relcase_run_deferred runs it on the task
+// workers right after the sleeping pass; the objects the script factory creates (class_registrator.script: weapons,
+// food, outfits...) skip the batch too when their exact class keeps the empty net_Relcase of CGameObject.
+// Those of ol_relcase_noop_skipped that were script factory objects (a running total, see above)
+ENGINE_API extern u32 ol_relcase_noop_script_skipped;
+
 // P17 (plans/optimization_mt/12-relcase.md), always: all objects destroyed in this frame, handed to every
 // object at once (IGameObject::net_RelcaseBatch) instead of one net_Relcase per destroyed object. Owned by CObjectList
 // and valid only during its relcase pass (CObjectList::relcase_batch() returns it then, nullptr otherwise).
@@ -75,12 +107,28 @@ struct RelcaseBatch
     u32 count = 0;
     const IGameObject* const* sorted = nullptr; // the same pointers, ascending: contains() never dereferences
     const u8* id_marks = nullptr; // 0x10000 entries, non-zero for the ID of a destroyed object (0xffff never)
+    // R2 (the relcase pass of CObjectList, else nullptr): kPtrBits bits, set for ptr_hash() of every object of the batch - a
+    // clear bit means "not in the batch" without the binary search (most lookups miss: ~2000 objects in sight per NPC)
+    const u64* ptr_bits = nullptr;
+    static constexpr u32 kPtrBits = 0x10000;
     // P17b shortcuts that skip work the batch cannot need are always on: CBaseMonster - no UpdateMemory after the batch
     // if none of it was in the memories; Feel::Vision - feel_visible walked only if a batch object left `query`;
     // Feel::Touch - nothing done with empty lists.
 
+    static u32 ptr_hash(const IGameObject* object)
+    {
+        const uintptr_t p = reinterpret_cast<uintptr_t>(object);
+        return static_cast<u32>((p >> 4) ^ (p >> 20)) & (kPtrBits - 1);
+    }
+
     bool contains(const IGameObject* object) const
     {
+        if (ptr_bits)
+        {
+            const u32 h = ptr_hash(object);
+            if (!((ptr_bits[h >> 6] >> (h & 63)) & 1))
+                return false;
+        }
         u32 lo = 0, hi = count;
         while (lo < hi)
         {

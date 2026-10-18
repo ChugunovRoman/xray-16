@@ -53,6 +53,9 @@ struct SRVPCalcParams
     u32 width{};
     u32 height{};
     u32 sector_id{};
+    // The scope pass's own LOD thresholds (s_svp_lod), handed to its dsgraph by prepare_into (options_t::lod_own) -
+    // the build on the worker must not read the globals, which hold the main view's values until the join.
+    lod_thresholds_t lod{};
 };
 
 // TODO: move it into separate file.
@@ -159,9 +162,14 @@ struct render_main : public i_render_phase
     // Stage C: explicit-target build - an ASYNC task must never re-read mutable "current target"
     // state (override pointers) at execution time, or two passes can land in the same dsgraph.
     void calculate_into(R_dsgraph_structure& ds, const SRVPCalcParams* params);
+    // The options part of calculate_into (no build): camera inputs, pass flags, recorder.
+    void prepare_into(R_dsgraph_structure& ds, const SRVPCalcParams* params);
     // Creates+dispatches the build task; the task handle lands in *sink (defaults to the phase's
     // own main_task slot - the caller's sync() then joins exactly this build).
     void launch_build(R_dsgraph_structure& ds, const SRVPCalcParams* params, Task** sink = nullptr);
+    // Early main build (26-framemove-game-next.md): the same for the dynamic half only (the static half ran
+    // early on ds, see CRender::KickMainBuildEarly); joined by sync() like a full build.
+    void launch_build_late(R_dsgraph_structure& ds);
     void render() override;
 };
 
@@ -447,6 +455,23 @@ public:
     SRVPCalcParams svp_calc_params;
     const SRVPCalcParams* r_main_calc_params{}; // consumed by render_main::calculate()
     bool svp_parallel{}; // this frame's Calculate₂ was pushed to a worker
+    // 31-svp-scope.md, the sequential scope build (GL, RenderDoc, no free context): set by calculate_for(true) on the
+    // main thread before its build task, read by render_main::prepare_into (params == nullptr) in that task, cleared
+    // after the scope pass's Render() (it joins the task) and at the next main calculate_for. svp_seq_build marks the
+    // build as the scope view's (o.svp_view, metrics only); it culls against
+    // svp_seq_frustum (the scope's own narrow frustum, cropped to the lens when aimed) instead of the main ViewBase.
+    bool svp_seq_build{};
+    bool svp_seq_frustum_valid{};
+    CFrustum svp_seq_frustum;
+    // L0 (31-svp-scope.md): the scope build's frustum from full_transform (the scope projection x view), cropped
+    // to the square around the lens circle in the screen center when the player is aimed through the scope and fully
+    // raised (true; the share of the image kept goes to area_pct); false - not applicable this frame, out untouched.
+    // Main thread only (reads the HUD shader constants the Game thread writes - a float each, a frame stale at most).
+    bool svp_lens_crop(const Fmatrix& full_transform, u32 width, u32 height, CFrustum& out, float& area_pct) const;
+    // SV (31-svp-scope.md): whether the scope pass keeps light L - its volume sphere meets the scope frustum F
+    // (cropped with L0) or contains the eye; directional lights, player-attached ones and lights with GI bounces
+    // always stay.
+    static bool svp_light_keep(const light* L, const CFrustum& F, const Fvector& eye);
     // P2.3: sealed smap command lists from the main pass flush_lights, re-executed by the scope
     // pass (shadow map content is camera-independent — same light, same frame). DX11 only;
     // released after the scope pass accumulation or at the end of a non-svp frame.
@@ -529,6 +554,44 @@ public:
     // cascades from the transferred atlas slices instead of rebuilding them.
     bool svp_sun_reuse_active() const;
     void JoinSecondVPBuildThread();
+
+    // Early main build (plans/optimization_mt/26-framemove-game-next.md; always on since 2026-10-18).
+    // KickMainBuildEarly (main thread, right after FrameMove of a game/render overlap frame): camera sector, LOD
+    // thresholds, HOM wait and the main view's options on the immediate dsgraph, then its static half
+    // (build_scope::early_static) as a task - beside the RT scheduler part, the bones prepass and the physics kick.
+    // calculate_for joins it first (before anything else touches the immediate dsgraph) and launches only the
+    // dynamic half. The dynamic half can't go early: renderable_Render notes objects into the prepass input (read by
+    // its phase A), computes bones the prepass is computing (and their Lua blend callbacks), reads the vis boxes
+    // phase B writes and the held items' XFORM phase C writes.
+    bool KickMainBuildEarly() override;
+    void JoinMainBuildEarly() override;
+    // Waits for the kicked static half and takes it (true); false - none in flight.
+    bool main_build_early_join();
+    // Waits for a kicked static half and drops its lists (the immediate dsgraph is needed for something else: icon
+    // and preview renders, End(), reset); the frame's Calculate() then builds as before.
+    void main_build_early_discard();
+    // Before D3DXRenderBase::End() resets the contexts: no static half may still be writing into them.
+    void End() override;
+    // Main pass parts of calculate_for shared with KickMainBuildEarly (main thread): the LOD thresholds (g_fSCREEN,
+    // r_ssa*) and the camera sector (+ OnSectorChanged).
+    void publish_lod_globals();
+    void detect_camera_sector(R_dsgraph_structure& dsgraph_main);
+    std::atomic<Task*> main_build_early_task{ nullptr };
+    float main_build_early_screen{}; // g_fSCREEN the static half used (render/main/early_lod_diff)
+    // This frame's main Calculate() took the early static half (its static lists are complete before Render(), only
+    // the dynamic half is still building): set by calculate_for, taken by Render() (27-render-main.md, R2).
+    bool main_build_early_used{};
+    // R2 (27-render-main.md): the immediate backend's object ambient (o_hemi, o_sun, o_hemi_cube) as render_hud
+    // left it in the last frame. The static groups' apply_lmaterial reads it (a static visual with a model shader
+    // picks it up); drawn before the HUD, they get the previous frame's instead of whatever was left before part0.
+    struct part0_ambient
+    {
+        bool valid{};
+        float hemi{};
+        float sun{};
+        float hemi_cube[6]{};
+    } part0_hud_ambient;
+
     // Persistent SVP worker body (see the svp_worker_* members below).
     void svp_worker_loop();
     // Stage C: the scope visibility build runs on a DEDICATED thread, not the task scheduler -
@@ -567,8 +630,9 @@ public:
 
 public:
     auto get_largest_sector() const { return largest_sector_id; }
-    ShaderElement* rimp_select_sh_static(dxRender_Visual* pVisual, float cdist_sq, u32 phase);
-    ShaderElement* rimp_select_sh_dynamic(dxRender_Visual* pVisual, float cdist_sq, u32 phase);
+    // dtex_range - r_dtex_range of the pass being built (R_dsgraph_structure::options_t::lod_own)
+    ShaderElement* rimp_select_sh_static(dxRender_Visual* pVisual, float cdist_sq, u32 phase, float dtex_range);
+    ShaderElement* rimp_select_sh_dynamic(dxRender_Visual* pVisual, float cdist_sq, u32 phase, float dtex_range);
     VertexElement* getVB_Format(int id, bool alternative = false);
     VertexStagingBuffer* getVB(int id, bool alternative = false);
     IndexStagingBuffer* getIB(int id, bool alternative = false);
@@ -587,11 +651,15 @@ public:
         // No object / no ROS: keep the previous per-backend ambient constants - parity with the
         // main pass, which also skips the CROS refresh for ROS-less dynamics. (SVP callers now
         // always pass a real renderable - see the second_vp_pass fix in r__dsgraph_build.)
-        if (!O || !O->renderable_ROS())
+        // 46-engine-core-render-audit.md: one virtual renderable_ROS() call (it creates the ROS lazily, then returns the
+        // same pointer), and update_smooth only when not refreshed this frame yet (its own first-thing check)
+        IRender_ObjectSpecific* ros = O ? O->renderable_ROS() : nullptr;
+        if (!ros)
             return;
 
-        CROS_impl& LT = *(CROS_impl*)O->renderable_ROS();
-        LT.update_smooth(O);
+        CROS_impl& LT = *(CROS_impl*)ros;
+        if (LT.dwFrameSmooth != Device.dwFrame)
+            LT.update_smooth(O);
         cmd_list.o_hemi = 0.75f * LT.get_hemi();
         // o_hemi						= 0.5f*LT.get_hemi			()	;
         cmd_list.o_sun = 0.75f * LT.get_sun();
@@ -641,6 +709,18 @@ public:
     HRESULT shader_compile(pcstr name, IReader* fs,
         pcstr pFunctionName, pcstr pTarget, u32 Flags, void*& result) override;
 
+    // 40-parallel-prefetch.md (plans/optimization_mt): the skinning variant of the vertex shaders being created now
+    // (SKIN_*, the "_N" suffix of _CreateVS), per thread. It was IRender::m_skinning, one for all: CSkeletonX::_Load
+    // sets it and the shaders of the same load read it, and the models of the prefetch list load on several threads at
+    // once. Hides IRender::shader_option_skinning; IRender::m_skinning is no longer read.
+    static s32& shader_skinning_tl()
+    {
+        thread_local s32 mode = -1;
+        return mode;
+    }
+    void shader_option_skinning(s32 mode) { shader_skinning_tl() = mode; }
+    [[nodiscard]] s32 shader_skinning() const { return shader_skinning_tl(); }
+
     // Information
     void DumpStatistics(class IGameFont& font, class IPerformanceAlert* alert) override;
     ref_shader getShader(int id);
@@ -685,6 +765,9 @@ public:
     void model_Logging(bool bEnable) override { Models->Logging(bEnable); }
     void models_Prefetch() override;
     void models_Clear(bool b_complete) override;
+    bool model_Preload(LPCSTR name) override; // 36-spawn-model-load.md
+    void model_PrefetchFiles(LPCSTR name, u32 source) override;
+    void models_PrefetchList(const xr_vector<std::pair<shared_str, shared_str>>& visuals) override; // 40
     void emplace_texture_replacements(shared_str material_key, shared_str dds_path);
 
     // Occlusion culling

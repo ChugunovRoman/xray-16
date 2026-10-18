@@ -1,11 +1,11 @@
 [submodule "Externals/LuaJIT"]
 	path = Externals/LuaJIT
-	url = https://github.com/OpenXRay/LuaJIT.git
-	branch = v2.1
+	url = https://github.com/ChugunovRoman/LuaJIT.git
+	branch = globalwar
 [submodule "Externals/luabind"]
 	path = Externals/luabind
-	url = https://github.com/OpenXRay/luabind-deboostified.git
-	branch = xray
+	url = https://github.com/ChugunovRoman/luabind-deboostified.git
+	branch = globalwar
 [submodule "Externals/GameSpy"]
 	path = Externals/GameSpy
 	url = https://github.com/OpenXRay/GameSpy.git

@@ -16,6 +16,7 @@ void stats_manager::increment_stats(u32 size, enum_stats_buffer_type type, _D3DP
 
     R_ASSERT(type >= 0 && type < enum_stats_buffer_type_COUNT);
     R_ASSERT(location >= 0 && location <= D3DPOOL_SCRATCH);
+    std::lock_guard<std::mutex> lock(m_lock);
     memory_usage_summary[type][location] += size;
 }
 
@@ -27,6 +28,8 @@ void stats_manager::increment_stats(u32 size, enum_stats_buffer_type type, _D3DP
     R_ASSERT(buff_ptr != NULL);
     R_ASSERT(type >= 0 && type < enum_stats_buffer_type_COUNT);
     R_ASSERT(location >= 0 && location <= D3DPOOL_SCRATCH);
+    // 40-parallel-prefetch.md (plans/optimization_mt): vertex / index buffers of models are created on several threads
+    std::lock_guard<std::mutex> lock(m_lock);
     memory_usage_summary[type][location] += size;
 
 #ifdef DEBUG
@@ -152,6 +155,7 @@ void stats_manager::decrement_stats(u32 size, enum_stats_buffer_type type, _D3DP
 
     R_ASSERT(type >= 0 && type < enum_stats_buffer_type_COUNT);
     R_ASSERT(location >= 0 && location <= D3DPOOL_SCRATCH);
+    std::lock_guard<std::mutex> lock(m_lock);
     memory_usage_summary[type][location] -= size;
 }
 
@@ -160,6 +164,7 @@ void stats_manager::decrement_stats(u32 size, enum_stats_buffer_type type, _D3DP
     if (buff_ptr == nullptr || GEnv.isDedicatedServer)
         return;
 
+    std::lock_guard<std::mutex> lock(m_lock); // 40-parallel-prefetch.md
 #ifdef DEBUG
     xr_vector<stats_item>::iterator it = m_buffers_list.begin();
     xr_vector<stats_item>::const_iterator en = m_buffers_list.end();

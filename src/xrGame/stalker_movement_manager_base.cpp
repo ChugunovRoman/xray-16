@@ -788,3 +788,5 @@ void stalker_movement_manager_base::set_level_dest_vertex(u32 const& level_verte
 }
 
 void stalker_movement_manager_base::remove_links(IGameObject* object) { m_last_query_object = 0; }
+// R1 (32-frame-spikes.md): as remove_links for every object of the batch (never empty)
+void stalker_movement_manager_base::remove_links_batch(const RelcaseBatch& batch) { m_last_query_object = 0; }

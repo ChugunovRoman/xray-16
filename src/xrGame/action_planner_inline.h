@@ -157,19 +157,22 @@ void CPlanner::update()
 
     {
         ZoneScopedN("planner_update/child_execute");
-        if (current_action().m_action_name)
-            ZoneTextF("[child_execute] %s id=%u", current_action().m_action_name, static_cast<u32>(m_current_action_id));
+        // 45-engine-ai-audit.md, F8: the current action looked up once (current_action() is a binary search over the
+        // operators, it ran up to five times here); neither the action id nor the operators change before execute()
+        COperator& executing_action = current_action();
+        if (executing_action.m_action_name)
+            ZoneTextF("[child_execute] %s id=%u", executing_action.m_action_name, static_cast<u32>(m_current_action_id));
         else
             ZoneTextF("[child_execute] id=%u", static_cast<u32>(m_current_action_id));
         //Alundaio: More detailed logging for executing action; Knowing the last executing action before a crash can be very useful for debugging
         if (bDbgAct)
-            Msg("DEBUG: Action [%s] executing", current_action().m_action_name);
+            Msg("DEBUG: Action [%s] executing", executing_action.m_action_name);
         //-Alundaio: Debug Action
 
         {
             ZoneScopedN("planner_update/child_execute/execute");
-            if (current_action().m_action_name)
-                ZoneTextF("%s", current_action().m_action_name);
+            if (executing_action.m_action_name)
+                ZoneTextF("%s", executing_action.m_action_name);
 #if XR_PERF_METRICS
             xray::perf::ScopedTime perf_exec(
                 perf_role ? ai_planner_stage_perf_metric(perf_role, 2) : xray::perf::Metric::Count, perf_role != 0);
@@ -179,7 +182,7 @@ void CPlanner::update()
                     xray::perf::Metric::Count,
                 perf_combat);
 #endif
-            current_action().execute();
+            executing_action.execute();
         }
     }
 }

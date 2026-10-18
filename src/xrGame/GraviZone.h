@@ -24,6 +24,9 @@ public:
     virtual bool net_Spawn(CSE_Abstract* DC);
     virtual void net_Destroy();
     virtual void net_Relcase(IGameObject* O);
+    // M1 (37-destroy-relcase-smooth.md): the per object walk of CGameObject, without the skip of CCustomZone (the
+    // telekinesis may hold any object)
+    virtual void net_RelcaseBatch(const RelcaseBatch& batch) override;
 
     //воздействие зоной на объект
     virtual void Affect(SZoneObjectInfo* O);

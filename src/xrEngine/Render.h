@@ -428,6 +428,25 @@ public:
     virtual void model_Logging(bool bEnable) = 0;
     virtual void models_Prefetch() = 0;
     virtual void models_Clear(bool b_complete) = 0;
+    // 36-spawn-model-load.md (plans/optimization_mt, the model prefetch). model_Preload: main thread; loads the
+    // model into the pool (an instance left in the pool, as models_Prefetch does) unless it is there already or its ogf
+    // does not exist; true = it was loaded now. model_PrefetchFiles: any thread, cheap; queues the files of the model
+    // (ogf, LOD ogf, omf, textures) for the "Model prefetch" thread, which reads them into the OS cache. Each name once
+    // per session. source: 0 = ALife (near the online distance), 1 = a spawn the budget deferred (metrics only).
+    virtual bool model_Preload(pcstr name)
+    {
+        (void)name;
+        return false;
+    }
+    virtual void model_PrefetchFiles(pcstr name, u32 source)
+    {
+        (void)name;
+        (void)source;
+    }
+    // 40-parallel-prefetch.md (plans/optimization_mt): main thread. Loads the models (name, suffix - as model_Create
+    // takes them) into the pool on the load threads of the parallel prefetch, an instance of each left in the pool, as
+    // models_Prefetch does. Does nothing where the prefetch is sequential (GL).
+    virtual void models_PrefetchList(const xr_vector<std::pair<shared_str, shared_str>>& visuals) { (void)visuals; }
     virtual void emplace_texture_replacements(shared_str material_key, shared_str dds_path) = 0;
 
     // GAME_RENDER_OVERLAP_PLAN P1.6: texture_replacements had no lock. Its own lock, not shared with
@@ -641,6 +660,15 @@ public:
     // Sun/rain tail of the sequential second Calculate(); must be called after
     // BeginSecondViewportRender() has switched the Device projection to the scope camera.
     virtual void SecondVPPostCalculate() {}
+
+    // Early main build (plans/optimization_mt/26-framemove-game-next.md; r__main_build_early, temporary, 0 = off): the
+    // static part of the main view's build (camera sector, portal traversal, static geometry) pushed onto a task
+    // worker right after FrameMove - parallel to the RT scheduler part, the bones prepass and the physics kick;
+    // Calculate() then joins it and launches only the dynamic part. True when it was kicked. Main thread, game/render overlap frames only.
+    virtual bool KickMainBuildEarly() { return false; }
+    // Safety join (end of the frame, device reset/teardown): waits for a kicked static part nobody consumed and drops
+    // its result. No-op when Calculate() took it.
+    virtual void JoinMainBuildEarly() {}
 };
 
 // RAII for IRender::texture_replacements_lock (GAME_RENDER_OVERLAP_PLAN P1.6). Not recursive like

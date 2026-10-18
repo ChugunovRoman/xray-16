@@ -198,8 +198,12 @@ void CSE_ALifeDynamicObject::try_switch_online()
         return;
     }
 
-    if (alife().graph().actor()->o_Position.distance_to(o_Position) > alife().online_distance())
+    const float actor_distance = alife().graph().actor()->o_Position.distance_to(o_Position);
+    if (actor_distance > alife().online_distance())
     {
+        // 36-spawn-model-load.md (the model prefetch): near the online distance - read its model files ahead
+        if (model_prefetch_in_margin(actor_distance, alife().online_distance()))
+            model_prefetch_object(this);
         on_failed_switch_online();
         return;
     }

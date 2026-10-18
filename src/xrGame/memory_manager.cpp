@@ -142,13 +142,18 @@ void CMemoryManager::update_enemies(const bool& registered_in_combat)
         enemy().update();
     }
 
+    // npc_agent_distribute_min_ms (agent_enemy_manager.cpp): an enemy the last distribution of the group did not know
+    // lifts the interval for the members that wait for an assignment
+    if (m_stalker && registered_in_combat && npc_agent_distribute_min_ms > 0 && enemy().selected())
+        m_stalker->agent_manager().enemy().on_member_enemy_selected(enemy().selected());
+
     if (m_stalker && (!enemy().selected() || (smart_cast<const CAI_Stalker*>(enemy().selected()) &&
                                                  smart_cast<const CAI_Stalker*>(enemy().selected())->wounded())) &&
         registered_in_combat)
     {
         {
             ZoneNamedN(___tracy_ue_dist, "CMemoryManager::update_enemies/distribute_enemies", true);
-            m_stalker->agent_manager().enemy().distribute_enemies();
+            m_stalker->agent_manager().enemy().distribute_enemies_from_memory();
         }
 
         {
@@ -400,7 +405,7 @@ CMemoryInfo CMemoryManager::memory(const IGameObject* object) const
         if ((hit().objects().end() != I) && (level_time < (*I).m_level_time))
         {
             (CMemoryObject<CGameObject>&)result = (CMemoryObject<CGameObject>&)(*I);
-            result.m_object = game_object;
+            result.set_object(game_object);
             result.m_hit_info = true;
             VERIFY(result.m_object);
         }
@@ -507,6 +512,20 @@ void CMemoryManager::remove_links(IGameObject* object)
     danger().remove_links(object);
     enemy().remove_links(object);
     item().remove_links(object);
+}
+
+// R1 (32-frame-spikes.md; CAI_Stalker::net_RelcaseBatch): remove_links for every object of the
+// batch, each list walked once. Same managers in the same order; each of them gives the same result as its
+// remove_links called for every batch object (see there).
+void CMemoryManager::remove_links_batch(const RelcaseBatch& batch)
+{
+    visual().remove_links_batch(batch);
+    sound().remove_links_batch(batch);
+    hit().remove_links_batch(batch);
+
+    danger().remove_links_batch(batch);
+    enemy().remove_links_batch(batch);
+    item().remove_links_batch(batch);
 }
 
 void CMemoryManager::on_restrictions_change()

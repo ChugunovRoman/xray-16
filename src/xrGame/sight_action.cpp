@@ -113,6 +113,22 @@ void CSightAction::remove_links(IGameObject* object)
     m_vector3d.setHP(-this->object().movement().m_head.target.yaw, this->object().movement().m_head.target.pitch);
 }
 
+// R1 (32-frame-spikes.md): remove_links for every object of the batch - the object to look at
+// is one, matched by ID as there; relcase does not change the head target the direction is taken from
+void CSightAction::remove_links_batch(const RelcaseBatch& batch)
+{
+    if (!m_object_to_look)
+        return;
+
+    if (!batch.contains_id(m_object_to_look->ID()))
+        return;
+
+    m_object_to_look = 0;
+
+    m_sight_type = SightManager::eSightTypeDirection;
+    m_vector3d.setHP(-this->object().movement().m_head.target.yaw, this->object().movement().m_head.target.pitch);
+}
+
 bool CSightAction::target_reached()
 {
     return (!!fsimilar(angle_normalize_signed(object().movement().m_head.target.yaw),

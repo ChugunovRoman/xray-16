@@ -573,7 +573,7 @@ void CWeaponMagazined::UpdateCL()
     bool skip_ucl;
     {
         PERF_SCOPE(wpn_ucl_skip_check); // 26-framemove-game-next.md, metrics 1-A
-        skip_ucl = TrySkipHiddenUpdateCL() || TrySkipOwnerLodUpdateCL();
+        skip_ucl = TrySkipNpcUpdateCL();
     }
     if (skip_ucl)
     {
@@ -582,7 +582,8 @@ void CWeaponMagazined::UpdateCL()
     }
     {
         ZoneNamedN(___wpn_ucl_inh, "ucl_CWeaponMagazined/inherited", true);
-        inherited::UpdateCL();
+        // W3 of 28-updatecl-main.md: CWeapon::UpdateCL without its skip check - just made above
+        inherited::UpdateCLChecked();
     }
     float dt = Device.fTimeDelta;
 
@@ -655,7 +656,7 @@ void CWeaponMagazined::UpdateSounds()
 
     // F3 of 24-critical-path.md: without the owner's bones on main where the owner allows it (sounds_fire_point)
     Fvector P = sounds_fire_point();
-    // K5 of 26-framemove-game-next.md (wpn_npc_ucl_lite): nothing of m_sounds plays - each SetPosition below is a
+    // K5 of 26-framemove-game-next.md: nothing of m_sounds plays - each SetPosition below is a
     // no-op, only its xr_stricmp lookup costs. The XFORM refresh of sounds_fire_point above stays (F4(a) of 20)
     if (NpcSoundsQuiet())
     {
@@ -679,7 +680,7 @@ void CWeaponMagazined::state_Fire(float dt)
     {
         VERIFY(fOneShotTime > 0.f);
 
-        // K5 of 26-framemove-game-next.md (wpn_npc_ucl_lite): the fire point and the fire params of the owner are
+        // K5 of 26-framemove-game-next.md: the fire point and the fire params of the owner are
         // read below only by the shots of this frame (fShotTimeCounter < 0) and by the start of a queue
         // (m_iShotNum == 0). On the frames between the shots of an NPC weapon they are left out: no exact owner bones
         // on main (get_LastFP -> UpdateXForm), the sounds of the frame take the lazy XFORM (sounds_fire_point)
@@ -719,13 +720,10 @@ void CWeaponMagazined::state_Fire(float dt)
         if (fire_point_needed)
             E->g_fireParams(this, p1, d);
 #if XR_PERF_METRICS
-        if (wpn_npc_ucl_lite)
-        {
-            if (!fire_point_needed)
-                PERF_INC(wpn_lite_fire_lazy);
-            else if (NpcUclLite())
-                PERF_INC(wpn_lite_fire_exact);
-        }
+        if (!fire_point_needed)
+            PERF_INC(wpn_lite_fire_lazy);
+        else if (NpcUclLite())
+            PERF_INC(wpn_lite_fire_exact);
 #endif
 
         if (!E->g_stateFire())
@@ -762,6 +760,7 @@ void CWeaponMagazined::state_Fire(float dt)
 
             OnShot();
 
+            PERF_SCOPE(wpn_shot_trace); // 28-updatecl-main.md: weapon/shot/trace (the bullets of the shot)
             if (m_iShotNum > m_iBaseDispersionedBulletsCount)
                 FireTrace(p1, d);
             else
@@ -815,7 +814,10 @@ void CWeaponMagazined::OnShot()
 {
     // Sound
     //Alundaio: LAYERED_SND_SHOOT
-    m_layered_sounds.PlaySound(m_sSndShotCurrent.c_str(), get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1);
+    {
+        PERF_SCOPE(wpn_shot_sound); // 28-updatecl-main.md: weapon/shot/*
+        m_layered_sounds.PlaySound(m_sSndShotCurrent.c_str(), get_LastFP(), H_Root(), !!GetHUDmode(), false, (u8)-1);
+    }
     //-Alundaio
 
     // Camera
@@ -826,6 +828,7 @@ void CWeaponMagazined::OnShot()
 
     HUD_VisualBulletUpdate();
 
+    PERF_SCOPE(wpn_shot_fx); // the shell, the flame and the smoke below
     // Shell Drop
     Fvector vel;
     PHGetLinearVell(vel);

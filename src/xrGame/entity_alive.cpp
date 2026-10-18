@@ -25,6 +25,7 @@
 #include "xrEngine/profiler.h"
 #include "npc_cpp_profile.h"
 #include "Actor.h"
+#include "lua_spike_probe.h"
 
 #define SMALL_ENTITY_RADIUS 0.6f
 #define BLOOD_MARKS_SECT "bloody_marks"
@@ -360,6 +361,7 @@ void CEntityAlive::Hit(SHit* pHDS)
     if (HDS.hit_type != ALife::eHitTypeTelepatic)
     {
         //добавить кровь на стены
+        PERF_SCOPE(hit_wallmarks); // 30-game-events.md
         BloodyWallmarks(HDS.damage(), HDS.dir, HDS.bone(), HDS.p_in_bone_space);
     }
 
@@ -388,8 +390,24 @@ void CEntityAlive::Die(IGameObject* who)
     TryEnableDeadNpcLodRendering(*this);
 
     const CGameObject* who_object = smart_cast<const CGameObject*>(who);
-    callback(GameObject::eDeath)(lua_game_object(), who_object ? who_object->lua_game_object() : 0);
-    gw::addons::objevents::ObjectDeath(this, who);
+    {
+        PERF_SCOPE(death_lua_binder); // 30-game-events.md
+        auto& death_callback = callback(GameObject::eDeath);
+        // npc_perf_lua_spike_us > 0: a call over the threshold goes to the log ("binder_cb")
+        lua_State* spike_lua =
+            gw::lua_spike::Enabled() && death_callback ? death_callback.functor().interpreter() : nullptr;
+        gw::lua_spike::Probe spike(spike_lua, gw::lua_spike::ECategory::BinderCallback);
+        death_callback(lua_game_object(), who_object ? who_object->lua_game_object() : 0);
+        if (spike.Finish())
+        {
+            death_callback.functor().push(spike_lua);
+            spike.Report("death", ID(), who ? who->ID() : gw::lua_spike::kNoId, true);
+        }
+    }
+    {
+        PERF_SCOPE(death_bus); // 30-game-events.md: npc_on_death_callback and the like (Lua and plugin subscribers)
+        gw::addons::objevents::ObjectDeath(this, who);
+    }
 
     if (!getDestroy() && (GameID() == eGameIDSingle))
     {
@@ -404,7 +422,10 @@ void CEntityAlive::Die(IGameObject* who)
     if (self)
         self->GetSpatialData().type &= ~STYPE_REACTTOSOUND;
     if (character_physics_support())
+    {
+        PERF_SCOPE(death_in_die); // 30-game-events.md
         character_physics_support()->in_Die();
+    }
 }
 
 //вывзывает при подсчете хита
@@ -570,8 +591,10 @@ ALife::ERelationType CEntityAlive::tfGetRelationType(const CEntityAlive* tpEntit
 
 bool CEntityAlive::is_relation_enemy(const CEntityAlive* tpEntityAlive) const
 {
-    return ((tfGetRelationType(tpEntityAlive) == ALife::eRelationTypeEnemy) ||
-        (tfGetRelationType(tpEntityAlive) == ALife::eRelationTypeWorstEnemy));
+    // 45-engine-ai-audit.md, F1: the relation once (it was asked twice for every non-enemy). tfGetRelationType only
+    // reads (the community table, the relation registry of the stalkers and the traders), so the answer is the same
+    const ALife::ERelationType relation = tfGetRelationType(tpEntityAlive);
+    return ((relation == ALife::eRelationTypeEnemy) || (relation == ALife::eRelationTypeWorstEnemy));
 }
 
 void CEntityAlive::StartBloodDrops(CWound* pWound)
@@ -780,10 +803,11 @@ void CEntityAlive::set_collision_hit_callback(ICollisionHitCallback* cc)
 
 void CEntityAlive::net_Relcase(IGameObject* object)
 {
-    ZoneScopedN("CEntityAlive::net_Relcase");
+    // R5 (32-frame-spikes.md): per object x destroyed object - hidden with perf_metrics bit 4, like CGameObject's
+    PERF_HOT_ZONE("CEntityAlive::net_Relcase");
     inherited::net_Relcase(object);
     {
-        ZoneScopedN("CEntityAlive::net_Relcase conditions");
+        PERF_HOT_ZONE("CEntityAlive::net_Relcase conditions");
         conditions().remove_links(object);
     }
 }

@@ -16,6 +16,7 @@
 #include "xrEngine/IGame_Level.h"
 #include "performance_cvars.h"
 #include "npc_cpp_profile.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include <tracy/Tracy.hpp>
 #ifdef DEBUG
 #include "PHDebug.h"
@@ -44,6 +45,9 @@ void CIKLimbsController::Create(CGameObject* O)
     _bone_chains.reserve(sz);
     for (u16 i = 0; sz > i; ++i)
         LimbSetup();
+    // U1: a generator per limb, different for every NPC and limb (the stalkers' IK in phase B)
+    for (u16 i = 0; sz > i; ++i)
+        _bone_chains[i].SeedRandom(s32(O->ID()) * s32(max_size) + s32(i) + 1);
 
     bool already_has_callbacks = !O->visual_callbacks().empty();
     O->add_visual_callback(IKVisualCallback);
@@ -246,9 +250,12 @@ void CIKLimbsController::Calculate()
 
     SCalculateData cd[max_size];
 
+    // U1: phase B on a worker - the limbs' own generators instead of ::Random (stalkers only)
+    const bool own_random = m_in_bones.load(std::memory_order_relaxed);
     xr_vector<CIKLimb>::iterator i, b = _bone_chains.begin(), e = _bone_chains.end();
     for (i = b; e != i; ++i)
     {
+        i->SetOwnRandom(own_random);
         cd[i - b] = SCalculateData(*i, obj);
         LimbCalculate(cd[i - b]);
     }
@@ -325,6 +332,12 @@ void CIKLimbsController::IKVisualCallback(IKinematics* K)
     VERIFY(Sh);
     CIKLimbsController* ik = Sh->character_ik_controller();
     VERIFY(ik);
+    // U1: the foot rays this NPC's UpdateCL asked for, here in phase B of its bones - the bone math
+    // is done, the model lock is held (the blends, the bone callbacks of foot_matrix_predict), the XFORM of the owner
+    // is the one this phase B computes with. Once per request: a second phase B of the frame (a redo) only calculates
+    if (ik->m_in_bones_pending.load(std::memory_order_relaxed) &&
+        ik->m_in_bones_pending.exchange(false, std::memory_order_acquire))
+        ik->UpdateInBones();
     ik->Calculate();
 }
 
@@ -342,7 +355,7 @@ void CIKLimbsController::PlayLegs(CBlend* b)
         Msg("! No foot stseps for animation: animation name: %s, animation set: %s ", anim_name, anim_set_name);
 #endif
 }
-void CIKLimbsController::ExecuteIKRayBatch()
+void CIKLimbsController::ExecuteIKRayBatch(bool allow_batch)
 {
     ZoneScopedN("CIKLimbsController::ExecuteIKRayBatch");
     if (m_ik_batch_groups.empty())
@@ -351,6 +364,7 @@ void CIKLimbsController::ExecuteIKRayBatch()
     const size_t total_rays = m_ik_batch_groups.size() * 3;
     if (npc_cpp_profile::enabled())
         npc_cpp_profile::count(ENpcCppProfileStage::IkRays, total_rays);
+    PERF_ADD(ik_rays_n, total_rays);
     m_ik_batch_items.resize(total_rays);
     m_ik_batch_results.resize(total_rays);
 
@@ -371,8 +385,13 @@ void CIKLimbsController::ExecuteIKRayBatch()
         }
     }
 
-    if (static_cast<int>(m_ik_batch_items.size()) >= npc_perf_ik_foot_raypick_batch_min_rays)
+    // Never batched in phase B of the bones (U1): a nested xr_parallel_for there would wait inside a bone task
+    if (allow_batch && static_cast<int>(m_ik_batch_items.size()) >= npc_perf_ik_foot_raypick_batch_min_rays)
     {
+        // ik/rays_batch: the wall time of the batch on main; inside its wait main runs other tasks too
+        // (task/wait/ik_exec)
+        PERF_SCOPE(ik_rays_batch);
+        PERF_WAIT_SITE(xray::perf::wait_site::Ik);
         g_pGameLevel->ObjectSpace.RayPickBatch(m_ik_batch_items.data(), m_ik_batch_items.size());
     }
     else
@@ -383,6 +402,73 @@ void CIKLimbsController::ExecuteIKRayBatch()
     }
 }
 
+// All foot rays of this NPC (current feet and step prediction of every limb) go in one batch: gather, cast
+// (ExecuteIKRayBatch), then solve each limb from the results. Vanilla cast them limb by limb (CIKLimb::Update).
+void CIKLimbsController::SolveFootRays(bool allow_batch)
+{
+    {
+        PERF_SCOPE(ik_gather);
+        m_ik_batch_groups.clear();
+        for (CIKLimb& limb : _bone_chains)
+            limb.GatherRays(m_object, m_legs_blend, _pose_extrapolation, m_ik_batch_groups);
+    }
+    {
+        PERF_SCOPE(ik_rays);
+        ExecuteIKRayBatch(allow_batch);
+    }
+    {
+        PERF_SCOPE(ik_process);
+        for (const IKRayGroup& group : m_ik_batch_groups)
+            group.limb->ProcessGroup(group, m_ik_batch_results.data());
+    }
+}
+
+// U1, main, the stalker's UpdateCL. What stays here: the legs blend, the early out, UpdateTracks (its
+// blend callbacks are game code, Lua) and the pose extrapolation (sampled at the UpdateCL as before). The rest
+// (UpdateInBones) casts rays at the static geometry only (thread_local buffers of CObjectSpace) and reads this model,
+// its limbs and the XFORM of its owner - nothing of the game logic, no Lua, no event bus, no other model.
+void CIKLimbsController::RequestUpdateInBones()
+{
+    ZoneScopedN("CIKLimbsController::RequestUpdateInBones");
+#ifdef DEBUG
+    if (ph_dbg_draw_mask1.test(phDbgIKOff))
+        return;
+#endif
+    m_in_bones.store(true, std::memory_order_relaxed);
+    update_blend(m_legs_blend);
+
+    // As in Update(): nothing to refine. A request of an earlier frame no bones took yet stays pending
+    if (!m_legs_blend && fis_zero(_object_shift.shift(), EPS_L))
+        return;
+
+    IKinematicsAnimated* skeleton_animated = m_object->Visual()->dcast_PKinematicsAnimated();
+    VERIFY(skeleton_animated);
+
+    {
+        PERF_SCOPE(ik_tracks);
+        skeleton_animated->UpdateTracks();
+    }
+
+    _pose_extrapolation.update(m_object->XFORM());
+
+    m_in_bones_frame = Device.dwFrame;
+    m_in_bones_pending.store(true, std::memory_order_release);
+}
+
+// U1: phase B of this model's bones (IKVisualCallback): a worker of the bones prepass, a render thread, or main when
+// game code needs the bones first (the fire point of the weapon in the hands). The rays one by one: no xr_parallel_for
+// inside a bone task. ik/deferred_late = a request of an earlier frame (no bones were computed in its own frame: an
+// NPC nobody drew)
+void CIKLimbsController::UpdateInBones()
+{
+    ZoneScopedN("CIKLimbsController::UpdateInBones");
+    PERF_SCOPE_BY_THREAD(ik_deferred_run_main, ik_deferred_run_game, ik_deferred_run_worker);
+    if (m_in_bones_frame != Device.dwFrame)
+        PERF_INC(ik_deferred_late);
+    update_blend(m_legs_blend);
+    SolveFootRays(false);
+}
+
 void CIKLimbsController::Update()
 {
     ZoneScopedN("CIKLimbsController::Update");
@@ -390,6 +476,9 @@ void CIKLimbsController::Update()
     if (ph_dbg_draw_mask1.test(phDbgIKOff))
         return;
 #endif
+    // U1: back on main (the switch went off): a request still pending is replaced by this run
+    m_in_bones_pending.store(false, std::memory_order_relaxed);
+    m_in_bones.store(false, std::memory_order_relaxed);
     update_blend(m_legs_blend);
 
     // No active leg animation and no residual body shift means IK has nothing useful to refine this frame.
@@ -399,20 +488,14 @@ void CIKLimbsController::Update()
     IKinematicsAnimated* skeleton_animated = m_object->Visual()->dcast_PKinematicsAnimated();
     VERIFY(skeleton_animated);
 
-    skeleton_animated->UpdateTracks();
+    {
+        PERF_SCOPE(ik_tracks);
+        skeleton_animated->UpdateTracks();
+    }
 
     _pose_extrapolation.update(m_object->XFORM());
 
-    // All foot rays of this NPC (current feet and step prediction of every limb) go in one batch: gather, cast
-    // (ExecuteIKRayBatch), then solve each limb from the results. Vanilla cast them limb by limb (CIKLimb::Update).
-    m_ik_batch_groups.clear();
-    for (CIKLimb& limb : _bone_chains)
-        limb.GatherRays(m_object, m_legs_blend, _pose_extrapolation, m_ik_batch_groups);
-
-    ExecuteIKRayBatch();
-
-    for (const IKRayGroup& group : m_ik_batch_groups)
-        group.limb->ProcessGroup(group, m_ik_batch_results.data());
+    SolveFootRays(true);
 
     /*
     Fmatrix predict;

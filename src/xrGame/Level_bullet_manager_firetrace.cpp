@@ -119,7 +119,8 @@ bool CBulletManager::test_callback(const collide::ray_defs& rd, IGameObject* obj
                             ahp = dist_factor * actor->HitProbability() + (1.f - dist_factor) * 1.f;
                         }
 #endif
-                        if (Random.randF(0.f, 1.f) > (ahp * hpf))
+                        // m_rng: ::Random, or the own generator of the A2 task (29-game-thread-next.md)
+                        if (Level().BulletManager().m_rng->randF(0.f, 1.f) > (ahp * hpf))
                         {
                             bRes = FALSE; // don't hit actor
                             play_whine = true; // play whine sound
@@ -362,6 +363,48 @@ xr_vector<Fvector> g_hit[3];
 
 extern void random_dir(Fvector& tgt_dir, const Fvector& src_dir, float dispersion);
 
+namespace
+{
+// 29-game-thread-next.md, A2: random_dir (WeaponFire.cpp) with the given generator instead of ::Random - the same
+// computation and the same order of the draws, so with ::Random it is random_dir itself (called as such below)
+float bullet_nrand(float sigma, CRandom& rnd)
+{
+    constexpr float one_over_sigma_exp = 1.0f / 0.7975f;
+
+    if (sigma == 0)
+        return 0;
+
+    float y;
+    do
+    {
+        y = -logf(rnd.randF());
+    } while (rnd.randF() > expf(-_sqr(y - 1.0f) * 0.5f));
+    if (rand() & 0x1)
+        return y * sigma * one_over_sigma_exp;
+    else
+        return -y * sigma * one_over_sigma_exp;
+}
+
+void bullet_random_dir(Fvector& tgt_dir, const Fvector& src_dir, float dispersion, CRandom& rnd)
+{
+    if (&rnd == &::Random)
+    {
+        random_dir(tgt_dir, src_dir, dispersion);
+        return;
+    }
+    float sigma = dispersion / 3.f;
+    float alpha = clampr(bullet_nrand(sigma, rnd), -dispersion, dispersion);
+    float theta = rnd.randF(0, PI);
+    float r = tan(alpha);
+    Fvector U, V, T;
+    Fvector::generate_orthonormal_basis(src_dir, U, V);
+    U.mul(r * _sin(theta));
+    V.mul(r * _cos(theta));
+    T.add(U, V);
+    tgt_dir.add(src_dir, T).normalize();
+}
+} // namespace
+
 bool CBulletManager::ObjectHit(SBullet_Hit* hit_res, SBullet* bullet, const Fvector& end_point, collide::rq_result& R,
     u16 target_material, Fvector& hit_normal)
 {
@@ -473,10 +516,11 @@ bool CBulletManager::ObjectHit(SBullet_Hit* hit_res, SBullet* bullet, const Fvec
     Fvector new_dir;
     new_dir.reflect(bullet->dir, hit_normal);
     Fvector tgt_dir;
-    random_dir(tgt_dir, new_dir, deg2rad(10.0f));
+    // m_rng: ::Random, or the own generator of the A2 task (29-game-thread-next.md)
+    bullet_random_dir(tgt_dir, new_dir, deg2rad(10.0f), *m_rng);
     float ricoshet_factor = bullet->dir.dotproduct(tgt_dir);
 
-    float f = Random.randF(0.5f, 0.8f); //(0.5f,1.f);
+    float f = m_rng->randF(0.5f, 0.8f); //(0.5f,1.f);
     if ((f < ricoshet_factor) && !mtl->Flags.test(SGameMtl::flNoRicoshet) && bullet->flags.allow_ricochet)
     {
         // уменьшение скорости полета в зависимости от угла падения пули (чем прямее угол, тем больше потеря)
@@ -511,7 +555,7 @@ bool CBulletManager::ObjectHit(SBullet_Hit* hit_res, SBullet* bullet, const Fvec
         bullet->bullet_pos.mad(bullet->bullet_pos, bullet->dir, EPS); // fake
         //ввести коэффициент случайности при простреливании
         Fvector rand_normal;
-        rand_normal.random_dir(bullet->dir, deg2rad(2.0f), Random);
+        rand_normal.random_dir(bullet->dir, deg2rad(2.0f), *m_rng);
         bullet->dir.set(rand_normal);
 #ifdef DEBUG
         bullet_state = 2;

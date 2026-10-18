@@ -9,6 +9,7 @@
 #include "Navigation/graph_engine.h"
 #include "Navigation/ai_graph_engine_cvars.h"
 #include "Navigation/ai_graph_engine_epoch.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <cstring>
 
@@ -37,6 +38,21 @@ void AISpaceBase::Load(const char* levelName)
     const CGameGraph::SLevel& currentLevel = game_graph().header().level(levelName);
     m_level_graph = xr_new<CLevelGraph>();
     game_graph().set_current_level(currentLevel.id());
+    {
+        // 35 (plans/optimization_mt/33-level-path.md, journal; always on since 2026-10-18): the cross table out of the
+        // mapped all.spawn
+        CTimer copy_timer;
+        copy_timer.Start();
+        const bool copied = game_graph().copy_cross_table_to_memory();
+        const u32 cells = cross_table().header().level_vertex_count();
+        if (copied)
+            Msg("* [GW] AI level[%s]: cross table in memory, %u vertices, %.1f MB, %.1f ms", levelName, cells,
+                double(cells) * sizeof(CGameLevelCrossTable::CCell) / (1024.0 * 1024.0),
+                copy_timer.GetElapsed_sec() * 1000.f);
+        else
+            Msg("! [GW] AI level[%s]: cross table copy: the cross table (%u vertices) is shorter in the file, read "
+                "from the mapped file", levelName, cells);
+    }
     auto& crossHeader = cross_table().header();
     auto& levelHeader = level_graph().header();
     auto& gameHeader = game_graph().header();
@@ -237,6 +253,32 @@ void AISpaceBase::SetGameGraph(CGameGraph* gameGraph)
     if (gameGraph)
     {
         VERIFY(!m_game_graph);
+        {
+            // 36 (plans/optimization_mt/33-level-path.md, journal; always on since 2026-10-18): the game graph out of the mapped all.spawn. Here,
+            // before it is published: its creator (CALifeSpawnRegistry::load) has read only the header so far, nobody
+            // holds a vertex pointer into the mapped stream yet.
+            CTimer copy_timer;
+            copy_timer.Start();
+            size_t bytes = 0;
+            bool copied;
+            {
+                PERF_SCOPE(ai_game_graph_copy);
+                copied = gameGraph->copy_to_memory(bytes);
+            }
+            if (copied)
+            {
+                Msg("* [GW] AI: game graph in memory, %u vertices, %u edges, %u death points, %.1f MB, %.1f ms",
+                    u32(gameGraph->header().vertex_count()), gameGraph->header().edge_count(),
+                    gameGraph->header().death_point_count(), double(bytes) / (1024.0 * 1024.0),
+                    copy_timer.GetElapsed_sec() * 1000.f);
+#if XR_PERF_METRICS
+                xray::perf::SetGauge(xray::perf::Metric::ai_game_graph_copy_kb, s64(bytes / 1024));
+#endif
+            }
+            else
+                Msg("! [GW] AI: game graph copy: the game graph (%.1f MB) is shorter in the file, read from the "
+                    "mapped file", double(bytes) / (1024.0 * 1024.0));
+        }
         m_game_graph = gameGraph;
         xr_delete(m_graph_engine);
         ++g_ai_graph_engine_epoch;
@@ -247,6 +289,9 @@ void AISpaceBase::SetGameGraph(CGameGraph* gameGraph)
     {
         VERIFY(m_game_graph);
         m_game_graph = nullptr;
+#if XR_PERF_METRICS
+        xray::perf::SetGauge(xray::perf::Metric::ai_game_graph_copy_kb, 0); // 36: the copy goes with its graph
+#endif
         xr_delete(m_graph_engine);
         ++g_ai_graph_engine_epoch;
     }

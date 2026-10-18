@@ -11,6 +11,7 @@
 #include "stalker_base_action.h"
 
 class CCoverPoint;
+class CInventoryItem;
 
 class CStalkerActionCombatBase : public CStalkerActionBase
 {
@@ -26,6 +27,10 @@ protected:
     void setup_cover(CCoverPoint const& cover);
     void select_queue_params(const float& distance, u32& min_queue_size, u32& max_queue_size, u32& min_queue_interval,
         u32& max_queue_interval) const;
+    // 45-engine-ai-audit.md, N12: best_item = object().best_weapon() taken once by the caller and passed to set_goal too
+    // (each best_weapon() call runs update_best_item_info: the Lua lookup and a full inventory scan)
+    void select_queue_params(const CInventoryItem* best_item, const float& distance, u32& min_queue_size,
+        u32& max_queue_size, u32& min_queue_interval, u32& max_queue_interval) const;
     bool fire_make_sense() const;
     void fire();
     void aim_ready();

@@ -39,7 +39,9 @@ IC CObjectItemSingle<_unknown_type, true>::CObjectItemSingle(const CLASS_ID& cls
 template <typename _unknown_type>
 ObjectFactory::ClientObjectBaseClass* CObjectItemSingle<_unknown_type, true>::client_object() const
 {
-    return (xr_new<CLIENT_TYPE>())->_construct();
+    CLIENT_TYPE* object = xr_new<CLIENT_TYPE>();
+    ObjectFactory::client_object_created(object);
+    return object->_construct();
 }
 
 template <typename _unknown_type>

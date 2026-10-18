@@ -12,8 +12,36 @@
 #include "AISpaceBase.hpp"
 
 #include "xrScriptEngine/script_space.hpp"
+#include "xrScriptEngine/script_wrapper_cache.hpp"
 
 const CGameGraph* get_game_graph() { return &GEnv.AISpace->game_graph(); }
+
+// The Lua wrapper cache (xrScriptEngine/script_wrapper_cache.hpp): game_graph() gives one wrapper per Lua state.
+// game_graph() returns a pointer to
+// const: luabind passes it through const_pointer_converter, which asks get_back_reference with T = CGameGraph const*
+// (a const wrapper, as before). Only the current game graph (AISpaceBase::get_game_graph()) is cached: it is created
+// with the spawn registry of each game (load / new game) and deleted with it - the slot remembers the graph and
+// replaces the wrapper of the old one (a new graph at the old address: the same class and raw pointer, valid). A Lua
+// script that keeps the old wrapper across games keeps a dangling one, as before. CGameGraph has no luabind::wrap_base
+// class, the generic get_back_reference never finds anything for it. Only this file passes the graph to Lua (xrAICore;
+// xrGame has its own instantiation of the generic one and passes no graph): declared and defined here.
+static xray::script_wrapper_cache::ObjectSlot s_game_graph_lua_wrapper;
+
+namespace luabind
+{
+template <>
+bool get_back_reference<CGameGraph const*>(lua_State* L, CGameGraph const* const& x)
+{
+    using namespace xray::script_wrapper_cache;
+    if (!GEnv.AISpace || x != GEnv.AISpace->get_game_graph())
+        return false;
+    if (Push(L, s_game_graph_lua_wrapper, x))
+        return true;
+    luabind::detail::make_pointer_instance(L, x);
+    Store(L, s_game_graph_lua_wrapper);
+    return true;
+}
+} // namespace luabind
 const CGameGraph::CHeader* get_header(const CGameGraph* self_) { return (&self_->header()); }
 bool get_accessible1(const CGameGraph* self_, const u32& vertex_id) { return (self_->accessible(vertex_id)); }
 void get_accessible2(const CGameGraph* self_, const u32& vertex_id, bool value) { self_->accessible(vertex_id, value); }

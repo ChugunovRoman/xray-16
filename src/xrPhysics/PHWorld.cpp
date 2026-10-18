@@ -1087,24 +1087,56 @@ bool CPHWorld::ShouldForceSleepCorpse(CPHObject* obj)
     CPHShell* shell = static_cast<CPHShell*>(obj);
     const u32 age_ms = Device.dwTimeGlobal - shell->m_ragdoll_since_ms;
     if (age_ms < static_cast<u32>(ph_console::ph_corpse_sleep_ms))
+    {
+        shell->m_sleep_calm_steps = 0;
         return false;
+    }
     IPhysicsShellHolder* holder = shell->PhysicsRefObject();
     if (!holder)
+    {
+        shell->m_sleep_calm_steps = 0;
         return false; // нет привязки к игровому объекту - не трогаем
+    }
     Fvector to_cam;
     to_cam.sub(holder->ObjectPosition(), StepCameraPosition()); // snapshot: DoRender() may be overriding the live camera
     const float far_dist_sq = ph_console::ph_corpse_sleep_far_dist * ph_console::ph_corpse_sleep_far_dist;
     if (to_cam.square_magnitude() <= far_dist_sq)
+    {
+        shell->m_sleep_calm_steps = 0;
         return false;
+    }
     // After an explosion the elements fly apart and ODE pulls them back to the joints over the next steps
     // (fast corrective motion). Disabling during that window froze the ragdoll mid-air or with metres-long
     // limbs/neck forever. Distance/age are checked first: these walk all elements/joints of the shell.
     const float max_stretch = ph_console::ph_corpse_sleep_max_stretch;
     if (max_stretch > 0.f && shell->get_MaxJointStretchSq() > max_stretch * max_stretch)
+    {
+        shell->m_sleep_calm_steps = 0;
         return false;
+    }
     const float max_vel = ph_console::ph_corpse_sleep_max_vel;
     if (max_vel > 0.f && shell->get_MaxElementLinearVelSq() > max_vel * max_vel)
+    {
+        shell->m_sleep_calm_steps = 0;
         return false;
+    }
+    // The top of a flight (plans/optimization_mt/38-frozen-particles.md): a corpse an explosion threw up has every
+    // element slower than max_vel for 2 * max_vel / g seconds around the apex (~0.2 s at 1 m/s), the joints already
+    // pulled together - both guards pass, and Disable() hung it in the air for good (nothing wakes a far force-slept
+    // corpse but another hit). Gravity keeps changing the velocity of a body in flight, so it cannot stay under the
+    // threshold longer than that: require the guards to hold for 1.5 times this time in a row. A corpse at rest passes
+    // them on every substep and sleeps ~0.3 s later than before.
+    if (max_vel > 0.f && m_gravity > 0.f && fixed_step > 0.f)
+    {
+        const float apex_time = 2.f * max_vel / m_gravity;
+        const int need = std::clamp(iCeil(1.5f * apex_time / fixed_step), 1, 255);
+        if (shell->m_sleep_calm_steps < need)
+        {
+            ++shell->m_sleep_calm_steps;
+            if (shell->m_sleep_calm_steps < need)
+                return false;
+        }
+    }
     return true;
 }
 
@@ -1128,6 +1160,7 @@ void CPHWorld::SleepCorpses()
         if ((max_stretch > 0.f && shell->get_MaxJointStretchSq() > max_stretch * max_stretch) ||
             (max_vel > 0.f && shell->get_MaxElementLinearVelSq() > max_vel * max_vel))
         {
+            shell->m_sleep_calm_steps = 0; // the series starts over
             PERF_INC(ph_corpse_sleep_post_reject);
             continue;
         }

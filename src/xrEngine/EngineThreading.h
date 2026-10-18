@@ -36,10 +36,13 @@ void KickGameLogicThread(bool run_scheduler);
 // apply before the render starts); the overlap hazard detector (GW_OVERLAP_HAZARD) covers it from here. The body
 // started by the kick runs after phase 0 on the same thread and skips the dispatch if phase 0 did it.
 ENGINE_API void KickGameLogicEarly(bool sound_dispatch, void (*work)());
-// K9 (26-framemove-game-next.md): 1 = GEnv.Sound->render() of a game/render overlap frame runs as a TaskManager task
-// started with seqParallel on the Game thread and waited for before seqFrameMT (instead of inside seqFrameMT).
-// Temporary, not saved (xrGame console_commands.cpp, mt_sound_render_task); 0 = as before.
-ENGINE_API extern int g_mt_sound_render_task;
+// K9 (26-framemove-game-next.md, always on since 2026-10-18, its switch mt_sound_render_task removed):
+// GEnv.Sound->render() of a game/render overlap frame runs as a TaskManager task started with seqParallel on the Game
+// thread and waited for before seqFrameMT (instead of inside seqFrameMT).
+// plans/optimization_mt/29-game-thread-next.md, A3 (always on since 2026-10-18, its switch mt_sound_render_early
+// removed, see plan 41): the K9 sound render task of the frame starts in phase 0 right after the dispatch of phase 0
+// (which reads the emitters' params without the lock) instead of before seqParallel; a frame whose phase 0 did not
+// dispatch starts it at the old place.
 // Engine.cpp, SoundRenderer: true while the Game thread's task renders the sound of this frame (seqFrameMT skips it)
 bool SoundRenderTakenByTask();
 // Waits for the kicked frame; returns false (no wait) when nothing is in flight. Idempotent.

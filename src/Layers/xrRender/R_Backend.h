@@ -36,6 +36,9 @@ const u32 CULL_NONE = D3DCULL_NONE;
 // part of the main view's render_graph, so CSkeletonX::_Render and dx11ConstantBuffer::Flush can attribute their
 // counters to render/main/* without a pass parameter. Set and restored by render_graph only when metrics are active.
 inline thread_local u8 g_perf_rmain_dyn = 0;
+// Perf metrics only (plans/optimization_mt/31-svp-scope.md): the same for the scope view's render_graph (the SVP worker
+// or the sequential scope pass) - render/svp/geom_skin_* in CSkeletonX::_Render.
+inline thread_local u8 g_perf_svp_geom = 0;
 // Perf metrics only (plans/optimization_mt/18-combine-pass.md): non-zero while this thread runs phase_combine of the
 // MAIN pass, so render_forward, CParticleEffect::Render, CGlowManager::Render and _VertexStream::Lock can attribute
 // their time to render/combine/* without a pass parameter. Set and restored by CRender::Render only when metrics are
@@ -132,6 +135,11 @@ private:
     // Pixel/Vertex constants
     alignas(16) R_constants constants;
     R_constant_table* ctable;
+    // 46-engine-core-render-audit.md: lookups by name in ctable repeated on every draw, valid while ctable is the same
+    // (forgotten in set_Constants, Invalidate, ResetDeferredCache - every assignment of ctable)
+    R_constant* m_ctable_sbase{};     // apply_lmaterial: s_base
+    bool m_ctable_sbase_known{};
+    R_constant* m_ctable_last_c{};    // get_c(const shared_str&): the constant found last
 
     // Shaders/State
     ID3DState* state;
@@ -478,9 +486,18 @@ public:
 
     ICF ref_constant get_c(const shared_str& n)
     {
-        if (ctable)
-            return ctable->get(n);
-        return nullptr;
+        if (!ctable)
+            return nullptr;
+        // 46-engine-core-render-audit.md: CSkeletonX asks for its bone palette by name on every hw-skinned draw (a linear
+        // scan of the table). The constant found last in the current table answers the same name again (forgotten on
+        // every table change); it holds its own reference to the name, so the pointer compare is the very test the
+        // search does, and the first match of an unchanged table stays the first match.
+        if (m_ctable_last_c && m_ctable_last_c->name._get() == n._get())
+            return m_ctable_last_c;
+        ref_constant C = ctable->get(n);
+        if (C)
+            m_ctable_last_c = C._get();
+        return C;
     }
 
     // constants - direct (fast)

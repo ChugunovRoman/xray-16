@@ -55,7 +55,8 @@ public:
 
     virtual bool net_Spawn(CSE_Abstract* DC);
     virtual void net_Destroy();
-    virtual void net_Relcase(IGameObject* O);
+    // M1 (37-destroy-relcase-smooth.md): the telekinesis part of the relcase (physics), on the thread of the pass
+    void net_RelcaseSerial(IGameObject* O) override;
 
     virtual void UpdateCL();
     virtual void shedule_Update(u32 dt);

@@ -228,6 +228,7 @@ void CKinematicsAnimated::LL_IterateBlends(IterateBlendsCallback& callback)
 {
     // The game's callback changes the blends (imotion_position): a mutator
     SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
+    BonesPrepass_NoteMutation(); // pipelined prepass: early bones of this frame are stale now
     for (auto &it : blend_pool)
         if (it.blend_state() != CBlend::eFREE_SLOT)
             callback(it);
@@ -328,6 +329,7 @@ MotionID CKinematicsAnimated::ID_Cycle(LPCSTR N)
 void CKinematicsAnimated::LL_FadeCycle(u16 part, float falloff, u8 mask_channel /*= (1<<0)*/)
 {
     SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
+    BonesPrepass_NoteMutation(); // pipelined prepass: early bones of this frame are stale now
     BlendSVec& Blend = blend_cycles[part];
 
     for (u32 I = 0; I < Blend.size(); I++)
@@ -351,6 +353,7 @@ void CKinematicsAnimated::LL_CloseCycle(u16 part, u8 mask_channel /*= (1<<0)*/)
         return;
 
     SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
+    BonesPrepass_NoteMutation(); // pipelined prepass: early bones of this frame are stale now
     // destroy cycle(s)
     BlendSVecIt I = blend_cycles[part].begin(), E = blend_cycles[part].end();
     for (; I != E; I++)
@@ -458,6 +461,7 @@ CBlend* CKinematicsAnimated::LL_SetInitialPartPose(u16 part, MotionID motion_ID,
     float blendFalloff, float Speed, BOOL noloop, PlayCallback Callback, LPVOID CallbackParam, u8 channel /*=0*/)
 {
     SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
+    BonesPrepass_NoteMutation(); // pipelined prepass: early bones of this frame are stale now
     // validate and unroll
     if (!motion_ID.valid())
         return nullptr;
@@ -524,6 +528,7 @@ CBlend* CKinematicsAnimated::LL_PlayCycle(u16 part, MotionID motion_ID, BOOL bMi
     // The model lock serializes it with the render (see the top of the file); the detector counts only the calls
     // that went on without it.
     SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
+    BonesPrepass_NoteMutation(); // pipelined prepass: early bones of this frame are stale now
     if (reentry_guard.owns && !model_lock.locked)
         GW_OVERLAP_HAZARD("CKinematicsAnimated::LL_PlayCycle");
 
@@ -676,6 +681,7 @@ CBlend* CKinematicsAnimated::LL_PlayFX(
     if (!motion_ID.valid())
         return nullptr;
     SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
+    BonesPrepass_NoteMutation(); // pipelined prepass: early bones of this frame are stale now
     if (blend_fx.size() >= MAX_BLENDED)
         return nullptr;
     if (BI_NONE == bone)
@@ -715,6 +721,7 @@ void CKinematicsAnimated::LL_UpdateTracks(float dt, bool b_force, bool leave_ble
 {
     // UpdateTracks holds the lock already (recursive); game code calling this directly (imotion_position) is a mutator
     SkeletonAnimMutatorLock model_lock(UCalc_ModelLock, static_cast<const CKinematics*>(this));
+    BonesPrepass_NoteMutation(); // pipelined prepass: early bones of this frame are stale now
     // A render thread beside the Game thread must not run game code: the end callbacks and the blend destroy callback
     // become deferred blend events for main after the join (DeferBlendEvent). Meanwhile the blend waits at its end
     // (or at zero weight), so this frame's pose is the one the original order gives.
@@ -878,6 +885,8 @@ void CKinematicsAnimated::UpdateTracks()
     }
     Update_LastTime.store(Device.dwTimeGlobal, std::memory_order_relaxed);
     PERF_INC(tracks_ll);
+    // 28-updatecl-main.md: tracks/ll_time/{main,game,worker} (blend callbacks included)
+    PERF_SCOPE_BY_THREAD(tracks_ll_time_main, tracks_ll_time_game, tracks_ll_time_worker);
     LL_UpdateTracks(dt, false, false);
 }
 
@@ -1176,6 +1185,16 @@ void CKinematicsAnimated::Load(const char* N, LPCSTR suffix, IReader* data, u32 
     m_Partition = nullptr;
     Update_LastTime = 0;
 
+    // 40-parallel-prefetch.md (plans/optimization_mt): on a load thread of the parallel prefetch the motions part (of
+    // the model of the list or of its LOD) runs later, on the motions chain in the order of the list; the thread goes
+    // on with the load and the next model instead of waiting for the models before this one
+    if (ModelMotionsDefer(this, N, data))
+        return;
+    LoadMotions(N, data);
+}
+
+void CKinematicsAnimated::LoadMotions(const char* N, IReader* data)
+{
     const auto loadOMF = [&](LPCSTR _path)
     {
         string_path fn;
@@ -1199,6 +1218,12 @@ void CKinematicsAnimated::Load(const char* N, LPCSTR suffix, IReader* data, u32 
         bool create_res = true;
         if (!g_pMotionsContainer->has(_path)) //optimize fs operations
         {
+            // 36-spawn-model-load.md: an omf not loaded yet - its r_open, read (page faults) and parse (key docking)
+            const bool omf_cold = ModelPoolColdLoad();
+            (void)omf_cold;
+            ZoneNamedN(omf_zone, "model_load/omf_file", omf_cold);
+            ZoneTextV(omf_zone, _path, xr_strlen(_path));
+            PERF_SCOPE_IF(omf_cold, mload_omf_file);
             IReader* MS = FS.r_open(fn);
             create_res = m_Motions.back().motions.create(_path, MS, bones);
             FS.r_close(MS);
@@ -1211,6 +1236,14 @@ void CKinematicsAnimated::Load(const char* N, LPCSTR suffix, IReader* data, u32 
             Msg("! error in model [%s]. Unable to load motion file '%s', section '%s'.", N, _path, current_player_hud_sect.c_str());
         }
     };
+
+    // 40-parallel-prefetch.md: the motions part below works on shared data (g_pMotionsContainer, the shared
+    // motions_value and its partition): one at a time, and in the order of the list on the parallel prefetch
+    // (see ModelMotionsScope)
+    ModelMotionsScope motions_scope;
+
+    // 36-spawn-model-load.md: the motions of the model (to the end of the function: partition, bone motions, blends)
+    MODEL_LOAD_PART("model_load/motions", mload_motions);
 
     // Load animation
     if (data->find_chunk(OGF_S_MOTION_REFS))
@@ -1308,7 +1341,10 @@ void CKinematicsAnimated::Load(const char* N, LPCSTR suffix, IReader* data, u32 
     R_ASSERT2(m_Motions.size(), make_string("section '%s'\nmodel '%s'", current_player_hud_sect.c_str(), N).c_str());
 
     m_Partition = m_Motions[0].motions.partition();
-    m_Partition->load(this, N);
+    {
+        MODEL_LOAD_PART("model_load/partition", mload_partition); // 36-spawn-model-load.md
+        m_Partition->load(this, N);
+    }
 
     // initialize motions
     for (auto &m_it : m_Motions)

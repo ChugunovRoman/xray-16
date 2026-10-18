@@ -1437,6 +1437,29 @@ void CCustomZone::net_Relcase(IGameObject* O)
     inherited::net_Relcase(O);
 }
 
+// M1 (plans/optimization_mt/37-destroy-relcase-smooth.md, always): net_Relcase above does something only for an
+// object inside the zone (m_ObjectInfoMap, by pointer), the owner (by ID) or the actor of the effector (by ID). If no
+// object of the batch is any of them, the per object walk (D x a dynamic cast, a find, the Tracy zone; ~0.02 us a pair,
+// ~280 zones: ~0.6-0.8 ms of a frame of the offline wave) would change nothing - skipped. Else the walk as before, in
+// its order (exit_Zone of each object inside). CBaseGraviZone (its telekinesis) keeps the walk.
+void CCustomZone::net_RelcaseBatch(const RelcaseBatch& batch)
+{
+    if (batch.count && batch.id_marks)
+    {
+        bool touched = m_owner_id < 0xffff && batch.contains_id(static_cast<u16>(m_owner_id));
+        if (!touched && m_actor_effector && m_actor_effector->m_pActor)
+            touched = batch.contains_id(m_actor_effector->m_pActor->ID());
+        for (u32 i = 0, n = static_cast<u32>(m_ObjectInfoMap.size()); !touched && i < n; ++i)
+        {
+            const CGameObject* const object = m_ObjectInfoMap[i].object;
+            touched = object && batch.contains(object);
+        }
+        if (!touched)
+            return;
+    }
+    inherited::net_RelcaseBatch(batch);
+}
+
 void CCustomZone::enter_Zone(SZoneObjectInfo& io)
 {
     if (m_zone_flags.test(eAffectPickDOF) && Level().CurrentEntity())

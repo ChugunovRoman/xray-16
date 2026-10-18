@@ -154,8 +154,8 @@ str_value* str_container::dock(pcstr value) const
     if (nullptr == value)
         return nullptr;
 
-    impl->cs.Enter();
-
+    // 46-engine-core-render-audit.md: the length and the CRC read only `value` - computed before the global lock that
+    // every thread takes on each shared_str(pcstr)
     str_value* result = nullptr;
 
     // calc len
@@ -170,6 +170,7 @@ str_value* str_container::dock(pcstr value) const
     sv->dwLength = static_cast<u32>(s_len);
     sv->dwCRC = crc32(value, s_len);
 
+    impl->cs.Enter();
     // search
     result = impl->find(sv, value);
 

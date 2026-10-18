@@ -25,7 +25,29 @@
 
 static const float check_time_delta = 1.f;
 
+// 33-level-path.md (plans/optimization_mt), temporary console switches (not saved), 0 = as before:
+// ai_obstacle_path_visited_cap N > 0 (item a1): the searches with obstacles of build_level_path() below open at most N
+// vertices (instead of 65500) until the search without obstacles has found a path in this build; that one keeps 65500.
+// A destination locked by the obstacles then costs N, not 65500, before the search without them
+int ai_obstacle_path_visited_cap = 12288; // a tunable, not saved (the default since 2026-10-17, 41-cvar-cleanup.md)
+// ai_obstacle_path_iters_max N > 0 (item a2): at most N passes of the do..while (!simulate_path_navigation()) loop;
+// then the path without obstacles is built and kept (as when the search with obstacles fails now)
+int ai_obstacle_path_iters_max = 3; // a tunable, not saved (the default since 2026-10-17, 41-cvar-cleanup.md)
+
 bool stalker_movement_manager_obstacles::simulate_path_navigation()
+{
+    // 33-level-path.md, M: level_path/simulate_us and the simulate part of a [path-spike] line
+    ZoneScopedN("simulate_path_navigation");
+    PERF_SCOPE(level_path_simulate_us);
+    level_path_trace* const trace = level_path_trace::current();
+    const u64 t0 = trace ? xray::perf::Ticks() : 0;
+    const bool result = simulate_path_navigation_impl();
+    if (trace)
+        trace->simulate_ticks += xray::perf::Ticks() - t0;
+    return result;
+}
+
+bool stalker_movement_manager_obstacles::simulate_path_navigation_impl()
 {
     Fvector current_position = object().Position();
     Fvector previous_position = current_position;
@@ -143,25 +165,84 @@ void stalker_movement_manager_obstacles::build_level_path()
     bool pure_search_tried = false;
     bool pure_search_result = false;
 
+    // 33-level-path.md, items a1/a2 (see the switches above). The cap goes into the evaluator of the level path for
+    // the length of one search with obstacles and is put back right after it, so the search without obstacles and
+    // every other search of the NPC keep their limit. Only while the search without obstacles has not found a path in
+    // this build: after that the destination is known to be reachable, and a capped search could fail on a far one
+    // only because of the cap, leaving the level path failed
+    CBaseParameters* const level_params = base_level_params();
+    const u32 saved_visited_limit = level_params->max_visited_node_count;
+    const u32 visited_cap = ai_obstacle_path_visited_cap > 0 && level_path().evaluator() == level_params &&
+            u32(ai_obstacle_path_visited_cap) < saved_visited_limit ?
+        u32(ai_obstacle_path_visited_cap) :
+        0;
+    const u32 iters_max = ai_obstacle_path_iters_max > 0 ? u32(ai_obstacle_path_iters_max) : 0;
+    u32 iters = 0;
+    bool iters_capped = false;
+    level_path_trace* const trace = level_path_trace::current();
+    if (trace)
+        trace->visited_cap = visited_cap;
+
+    // 33-level-path.md, sliced A* (CLevelPathBuilder::process sets the slice): only the search without obstacles of
+    // the first pass may be put aside. The searches with obstacles run on an obstacle set taken from the NPC's
+    // position at this build and are capped (visited_cap); a later pass follows simulate_path_navigation(), whose
+    // state a repeated build would not have. That search starts from what a repeated build reaches again: its pair
+    // goes back to the cache of the failed one (the search with obstacles before it failed), and the next build goes
+    // straight to the same search without obstacles, which goes on from where it stopped
+    CLevelGraph::SearchSlice* const slice = CLevelGraph::search_slice();
+    const bool slice_allowed = slice && slice->allow;
+    if (slice)
+        slice->allow = false;
+    bool put_aside = false;
+
     do
     {
         if (m_failed_to_build_path)
             break;
 
+        if (iters_max && iters >= iters_max)
+        {
+            // a2: the path without obstacles, built and kept as when the search with obstacles fails
+            iters_capped = true;
+            PERF_INC(level_path_iters_capped);
+            m_static_obstacles.clear();
+            m_saved_current_iteration.clear();
+            level_path().invalidate_failed_info();
+            inherited::build_level_path();
+            break;
+        }
+        ++iters;
+
+        const bool capped = visited_cap && !pure_search_result;
+        if (capped)
+            level_params->max_visited_node_count = visited_cap;
         inherited::build_level_path();
+        if (capped)
+            level_params->max_visited_node_count = saved_visited_limit;
 
         if (level_path().failed())
         {
             if (!pure_search_tried)
             {
                 pure_search_tried = true;
+                PERF_INC(level_path_pure_fallback);
 
                 m_static_obstacles.clear();
                 m_saved_current_iteration.clear();
 
                 level_path().invalidate_failed_info();
 
+                if (slice)
+                    slice->allow = slice_allowed && iters == 1;
                 inherited::build_level_path();
+                if (slice)
+                    slice->allow = false;
+
+                if (CLevelGraph::search_put_aside())
+                {
+                    put_aside = true; // see above; the paths go back below
+                    break;
+                }
 
                 pure_search_result = !level_path().failed();
             }
@@ -188,7 +269,27 @@ void stalker_movement_manager_obstacles::build_level_path()
         }
     } while (!simulate_path_navigation());
 
+    if (trace)
+    {
+        trace->obstacle_iters = iters;
+        trace->pure_fallback = pure_search_tried;
+        trace->iters_capped = iters_capped;
+    }
+#if XR_PERF_METRICS
+    if (xray::perf::g_perf_metrics_active)
+        xray::perf::UpdateMax(xray::perf::Metric::level_path_obstacle_iters_max, static_cast<s64>(iters));
+#endif
+
     m_last_dest_vertex_id = level_path().dest_vertex_id();
+
+    if (put_aside)
+    {
+        // the build is repeated in the next frame: the NPC keeps the paths it had (save_current_state above)
+        level_path().set_failed_info(level_path_builder().start_vertex_id(), level_path_builder().dest_vertex_id());
+        restore_current_state();
+    }
+    if (slice)
+        slice->allow = slice_allowed;
     //	Msg								("[%6d][%6d][%s][%f]
     // build_level_path",Device.dwFrame,Device.dwTimeGlobal,*object().cName(),timer.GetElapsed_sec()*1000.f);
 }

@@ -76,6 +76,8 @@ public:
     void clear_useful_callback();
     void clear_useful_callback_cache();
     void remove_links(IGameObject* object);
+    // R1 (32-frame-spikes.md): remove_links for every object of the batch, in one pass
+    void remove_links_batch(const struct RelcaseBatch& batch);
 
 public:
     void ignore_monster_threshold(const float& ignore_monster_threshold);

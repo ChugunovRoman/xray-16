@@ -680,6 +680,9 @@ bool CPreviewSceneRenderer::RenderRenderableImpl(
     if (!Device.b_is_Ready || !m_owner.Target || !m_owner.Resources)
         return false;
 
+    // Early main build (26-framemove-game-next.md): never reset the dsgraph under its static half (normally not in flight
+    // here - the preview queue runs in CRender::OnFrame, before the kick).
+    m_owner.main_build_early_discard();
     auto& dg = m_owner.get_imm_context();
     dg.reset();
     dg.context_id = R_dsgraph_structure::IMM_CTX_ID;

@@ -256,6 +256,12 @@ extern ECORE_API int r__parallel_main_build_min;
 // P19 (d): parallel recording of the main view's render_graph(0) on D3D11 deferred contexts (R4 only, temporary).
 extern ECORE_API int ps_r__main_parallel_parts;
 extern ECORE_API int ps_r__main_parallel_submit_min;
+// 36-spawn-model-load.md: CModelPool finds a base model by name through a hash index (Instance_Find);
+// 40-parallel-prefetch.md: CModelPool::Prefetch loads the models of the list on several threads (D3D11 only). Both
+// always on since 2026-10-18 (r__model_pool_index, r__prefetch_mt removed, see plan 41).
+// 31-svp-scope.md (a tunable, not saved): the circle radius of the L0 lens crop of the scope build's frustum in % of the
+// screen height.
+extern ECORE_API int ps_r__svp_lens_margin_pct;
 
 extern void xrRender_initconsole();
 extern BOOL xrRender_test_hw();

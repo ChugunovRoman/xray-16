@@ -63,8 +63,12 @@ void CResourceManager::_DeletePass(const SPass* P)
 {
     if (0 == (P->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    ScopeLock scope(&m_create_lock); // 40-parallel-prefetch.md
     if (reclaim(v_passes, P))
+    {
+        m_passes_index.erase(P);
         return;
+    }
     Msg("! ERROR: Failed to find compiled pass");
 }
 
@@ -184,6 +188,18 @@ void	CResourceManager::_DeleteRTC(const CRTC* RT)
 }
 */
 
+namespace
+{
+// 40-parallel-prefetch.md (plans/optimization_mt): the hash of m_geoms_index - what CreateGeom compares
+size_t geom_hash(const SDeclaration* dcl, VertexBufferHandle vb, IndexBufferHandle ib, u32 vb_stride)
+{
+    size_t h = resource_hash_value(dcl);
+    h = resource_hash_combine(h, resource_hash_value(vb));
+    h = resource_hash_combine(h, resource_hash_value(ib));
+    return resource_hash_combine(h, vb_stride);
+}
+} // namespace
+
 SGeometry* CResourceManager::CreateGeom(const VertexElement* decl, VertexBufferHandle vb, IndexBufferHandle ib)
 {
     R_ASSERT(decl && vb);
@@ -196,12 +212,14 @@ SGeometry* CResourceManager::CreateGeom(const VertexElement* decl, VertexBufferH
     SDeclaration* dcl = _CreateDecl(decl);
     u32 vb_stride = GetDeclVertexSize(decl, 0);
 
-    // ***** first pass - search already loaded shader
-    for (SGeometry* geom : v_geoms)
+    // ***** first pass - search already loaded shader (40-parallel-prefetch.md: through the hash index, it was a walk
+    // over v_geoms - one entry per model buffer, tens of thousands after the model prefetch)
+    const size_t hash = geom_hash(dcl, vb, ib, vb_stride);
+    if (SGeometry* geom = m_geoms_index.find(hash, [&](const SGeometry& G) {
+            return G.dcl == dcl && G.vb == vb && G.ib == ib && G.vb_stride == vb_stride;
+        }))
     {
-        SGeometry& G = *geom;
-        if (G.dcl == dcl && G.vb == vb && G.ib == ib && G.vb_stride == vb_stride)
-            return geom;
+        return geom;
     }
 
     SGeometry* Geom = v_geoms.emplace_back(xr_new<SGeometry>());
@@ -210,8 +228,18 @@ SGeometry* CResourceManager::CreateGeom(const VertexElement* decl, VertexBufferH
     Geom->vb = vb;
     Geom->vb_stride = vb_stride;
     Geom->ib = ib;
+    m_geoms_index.insert(hash, Geom);
 
     return Geom;
+}
+
+void CResourceManager::_RebuildGeomsIndex()
+{
+    // 40-parallel-prefetch.md: after reset_end changed vb / ib of the geometries of the dynamic buffers in place
+    ScopeLock scope(&v_geoms_lock);
+    m_geoms_index.clear();
+    for (SGeometry* G : v_geoms)
+        m_geoms_index.insert(geom_hash(G->dcl._get(), G->vb, G->ib, G->vb_stride), G);
 }
 
 SGeometry* CResourceManager::CreateGeom(u32 FVF, VertexBufferHandle vb, IndexBufferHandle ib)
@@ -229,7 +257,10 @@ void CResourceManager::DeleteGeom(const SGeometry* Geom)
         return;
     ScopeLock scope(&v_geoms_lock);
     if (reclaim(v_geoms, Geom))
+    {
+        m_geoms_index.erase(Geom); // 40-parallel-prefetch.md
         return;
+    }
     Msg("! ERROR: Failed to find compiled geometry-declaration");
 }
 
@@ -413,14 +444,15 @@ bool cmp_tl(const std::pair<u32, ref_texture>& _1, const std::pair<u32, ref_text
 STextureList* CResourceManager::_CreateTextureList(STextureList& L)
 {
     std::sort(L.begin(), L.end(), cmp_tl);
-    for (STextureList* base : lst_textures)
-    {
-        if (L.equal(*base))
-            return base;
-    }
+    // 40-parallel-prefetch.md (plans/optimization_mt): through the hash index, it was a walk over lst_textures
+    ScopeLock scope(&m_create_lock);
+    const size_t hash = L.hash();
+    if (STextureList* base = m_texture_lists_index.find(hash, [&](const STextureList& B) { return !!L.equal(B); }))
+        return base;
 
     STextureList* lst = lst_textures.emplace_back(xr_new<STextureList>(L));
     lst->dwFlags |= xr_resource_flagged::RF_REGISTERED;
+    m_texture_lists_index.insert(hash, lst);
 
     return lst;
 }
@@ -429,8 +461,12 @@ void CResourceManager::_DeleteTextureList(const STextureList* L)
 {
     if (0 == (L->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    ScopeLock scope(&m_create_lock); // 40-parallel-prefetch.md
     if (reclaim(lst_textures, L))
+    {
+        m_texture_lists_index.erase(L);
         return;
+    }
     Msg("! ERROR: Failed to find compiled list of textures");
 }
 

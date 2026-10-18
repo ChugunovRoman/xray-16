@@ -524,6 +524,8 @@ void CScriptGameObject::set_dest_level_vertex_id(u32 level_vertex_id)
             return;
         }
         stalker->movement().set_level_dest_vertex(level_vertex_id);
+        // 33-level-path.md, M: the [path-spike] line names who set the destination (the plugin API marks its own after)
+        stalker->movement().set_level_dest_source(CMovementManager::level_dest_lua);
     }
 }
 

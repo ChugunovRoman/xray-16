@@ -8,6 +8,7 @@
 #endif
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <mutex>
 
 #define MODULE
 
@@ -175,6 +176,10 @@ public:
     }
 };
 static LZfs fs;
+// 40-parallel-prefetch.md (plans/optimization_mt): the coder keeps its state in the globals above (fs, the trees,
+// text_buf), so one call at a time. IReader::open_chunk of a compressed chunk ends up here, and the models of the
+// prefetch list are loaded (and their files read by the "Model warm" threads) on several threads at once.
+static std::mutex s_lz_mutex;
 //************************** Internal FS
 IC void InitTree(void) /* initialize trees */
 {
@@ -657,6 +662,7 @@ bool Decode(int total_size) /* recover */
 
 size_t _writeLZ(int hf, void* d, size_t size)
 {
+    std::lock_guard<std::mutex> lock(s_lz_mutex);
     u8* start = (u8*)d;
     fs.Init_Input(start, start + size);
 
@@ -672,6 +678,7 @@ size_t _writeLZ(int hf, void* d, size_t size)
 
 void _compressLZ(u8** dest, size_t* dest_sz, void* src, size_t src_sz)
 {
+    std::lock_guard<std::mutex> lock(s_lz_mutex);
     u8* start = (u8*)src;
     fs.Init_Input(start, start + src_sz);
     Encode();
@@ -681,6 +688,7 @@ void _compressLZ(u8** dest, size_t* dest_sz, void* src, size_t src_sz)
 
 bool _decompressLZ(u8** dest, size_t* dest_sz, void* src, size_t src_sz, size_t total_size /*= -1*/)
 {
+    std::lock_guard<std::mutex> lock(s_lz_mutex);
     u8* start = (u8*)src;
     fs.Init_Input(start, start + src_sz);
 
@@ -698,6 +706,7 @@ size_t _readLZ(int hf, void*& d, size_t size)
     u8* data = (u8*)xr_malloc(size);
     _read(hf, data, size);
 
+    std::lock_guard<std::mutex> lock(s_lz_mutex);
     fs.Init_Input(data, data + size);
 
     // Actual compression

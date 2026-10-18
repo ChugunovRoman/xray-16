@@ -22,6 +22,7 @@
 #include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <thread>
 #include <SDL_events.h>
 
@@ -89,6 +90,18 @@ public:
     }
 } static thread_local s_tl_allocator;
 
+// 29-game-thread-next.md, A4: `task` is the awaited task or one of its children (a piece of an xr_parallel_for) - the
+// work a Wait() for `awaited` may always run. The chain is short; the bound only guards a slot reused meanwhile.
+static bool IsPieceOf(const Task* task, const Task* awaited) noexcept
+{
+    for (int depth = 0; task && depth < 16; ++depth, task = task->GetParent())
+    {
+        if (task == awaited)
+            return true;
+    }
+    return false;
+}
+
 // Multi producer
 // Multi consumer
 class TaskQueue
@@ -124,6 +137,23 @@ public:
     Task* steal() noexcept
     {
         return pop();
+    }
+
+    // A4: pop() only when the head is a piece of `awaited` (IsPieceOf). The head is read before the CAS exactly as
+    // pop() reads it; if another thread takes it meanwhile, the CAS fails.
+    Task* steal_piece_of(const Task* awaited) noexcept
+    {
+        size_t head_pos = m_head_pos.load(std::memory_order_acquire);
+        Task* task = m_storage[head_pos & TASK_STORAGE_MASK];
+        if (!task || !IsPieceOf(task, awaited))
+            return nullptr;
+
+        if (m_head_pos.compare_exchange_weak(head_pos, head_pos + 1, std::memory_order_acq_rel))
+        {
+            m_storage[head_pos & TASK_STORAGE_MASK] = nullptr;
+            return task;
+        }
+        return nullptr;
     }
 
     size_t size() const noexcept
@@ -366,6 +396,15 @@ void TaskManager::Wait(const Task& task, bool updateSystemEvents /*= false*/) co
     ZoneScoped;
 
     ++s_tl_wait_depth;
+    // 29-game-thread-next.md, A4: the dedicated Game thread of a game/render overlap frame (phase 0 and the body; not the
+    // sequential GameThread task) has its own loop: task/wait_game/*, only its own work (WaitGameThread)
+    const std::thread::id overlap_game = xray::perf::g_game_overlap_tid.load(std::memory_order_relaxed);
+    if (overlap_game != std::thread::id{} && overlap_game == std::this_thread::get_id())
+    {
+        WaitGameThread(task);
+        --s_tl_wait_depth;
+        return;
+    }
     // Per METRICS_PLAN §8.2: time only the outermost Wait() and only on main (worker id 0, the
     // thread that constructed TaskManager) - everything else either double-counts a nested wait
     // or measures a worker thread that has no single "the frame is blocked here" meaning.
@@ -395,8 +434,118 @@ void TaskManager::Wait(const Task& task, bool updateSystemEvents /*= false*/) co
         xray::perf::AddTimeSlow(xray::perf::Metric::task_wait_total, xray::perf::Ticks() - wait_t0);
         xray::perf::AddTimeSlow(xray::perf::Metric::task_wait_exec, exec_ticks);
         xray::perf::Add(xray::perf::WaitSiteCountMetric(xray::perf::TlWaitSite()));
+        // 28-updatecl-main.md: what main ran inside the IK foot ray batch's wait (its rays, phase B of other models)
+        if (xray::perf::TlWaitSite() == xray::perf::wait_site::Ik)
+            xray::perf::AddTimeSlow(xray::perf::Metric::task_wait_ik_exec, exec_ticks);
     }
     --s_tl_wait_depth;
+}
+
+// 29-game-thread-next.md, A4 (always on since 2026-10-18, its switch mt_game_wait_own_only removed, see plan 41). Timed
+// by where the task came from: task/wait_game/total (outermost Wait), exec_own (its own queue, or a piece of the
+// awaited task taken elsewhere), exec_foreign (other threads' work, the fallback steals).
+// Its own queue, then a piece of the awaited task at the head of any other queue; nothing else. Waiting for a
+// task that runs elsewhere the thread spins, waking a sleeping worker now and then (a worker sleeps after a few
+// missed random steals, possibly past the awaited task); after kOwnOnlyFallback without own work it steals once as
+// before (task/wait_game/fallback): the awaited task may sit in the queue of a thread that will not serve it soon
+// (main in the join, a worker blocked on a lock this thread holds) - the old Wait() would have run it here.
+void TaskManager::WaitGameThread(const Task& task) const
+{
+    using clock = std::chrono::steady_clock;
+    constexpr auto kOwnOnlyFallback = std::chrono::milliseconds(1);
+    constexpr auto kWakePeriod = std::chrono::microseconds(100);
+
+    const bool time_it = s_tl_wait_depth == 1 && xray::perf::g_perf_metrics_active;
+    const u64 wait_t0 = time_it ? xray::perf::Ticks() : 0;
+    u64 own_ticks = 0;
+    u64 foreign_ticks = 0;
+    bool idle = false; // no own work since idle_since
+    clock::time_point idle_since{};
+    clock::time_point last_wake{};
+
+    while (!task.IsFinished())
+    {
+        const u64 iter_t0 = time_it ? xray::perf::Ticks() : 0;
+        bool foreign = false;
+        Task* t = s_tl_worker.pop();
+        if (t)
+        {
+            ++s_tl_worker.execOwn;
+            PERF_INC(task_exec_own);
+        }
+        else
+        {
+            for (TaskWorker* other : workers)
+            {
+                if (other == &s_tl_worker)
+                    continue;
+                t = other->steal_piece_of(&task);
+                if (t)
+                    break;
+            }
+            if (t)
+            {
+                ++s_tl_worker.execSteal;
+                PERF_INC(task_exec_steal);
+            }
+            else
+            {
+                const clock::time_point now = clock::now();
+                if (!idle)
+                {
+                    idle = true;
+                    idle_since = now;
+                    last_wake = now;
+                    newWorkArrived.Set();
+                }
+                else if (now - idle_since >= kOwnOnlyFallback)
+                {
+                    t = workers[0]->steal();
+                    if (!t)
+                        t = TryToSteal();
+                    if (t)
+                    {
+                        ++s_tl_worker.execSteal;
+                        PERF_INC(task_exec_steal);
+                        PERF_INC(task_wait_game_fallback);
+                        foreign = !IsPieceOf(t, &task);
+                    }
+                    idle_since = now; // the next fallback steal after another kOwnOnlyFallback
+                }
+                else if (now - last_wake >= kWakePeriod)
+                {
+                    last_wake = now;
+                    newWorkArrived.Set();
+                }
+                if (!t)
+                {
+                    ++s_tl_worker.execMiss;
+                    PERF_INC(task_exec_miss);
+                }
+            }
+        }
+
+        if (t)
+        {
+            ExecuteTask(*t);
+            if (!foreign)
+                idle = false;
+            if (time_it)
+                (foreign ? foreign_ticks : own_ticks) += xray::perf::Ticks() - iter_t0;
+        }
+        else
+        {
+            ++s_tl_worker.waitSpin;
+            PERF_INC(task_wait_spin);
+        }
+    }
+
+    if (time_it)
+    {
+        xray::perf::AddTimeSlow(xray::perf::Metric::task_wait_game_total, xray::perf::Ticks() - wait_t0);
+        xray::perf::AddTimeSlow(xray::perf::Metric::task_wait_game_exec_own, own_ticks);
+        xray::perf::AddTimeSlow(xray::perf::Metric::task_wait_game_exec_foreign, foreign_ticks);
+    }
 }
 
 bool TaskManager::ExecuteOneTask() const

@@ -419,24 +419,24 @@ void CGlowManager::Render()
 
 float r_dtex_range = 50.f;
 //////////////////////////////////////////////////////////////////////////
-ShaderElement* CRender::rimp_select_sh_dynamic(dxRender_Visual* pVisual, float cdist_sq, u32 phase)
+ShaderElement* CRender::rimp_select_sh_dynamic(dxRender_Visual* pVisual, float cdist_sq, u32 phase, float dtex_range)
 {
     int id = SE_R2_SHADOW;
     if (CRender::PHASE_NORMAL == phase)
     {
-        id = ((_sqrt(cdist_sq) - pVisual->vis.sphere.R) < r_dtex_range) ? SE_R2_NORMAL_HQ : SE_R2_NORMAL_LQ;
+        id = ((_sqrt(cdist_sq) - pVisual->vis.sphere.R) < dtex_range) ? SE_R2_NORMAL_HQ : SE_R2_NORMAL_LQ;
     }
     return pVisual->shader->E[id]._get();
 }
 //////////////////////////////////////////////////////////////////////////
-ShaderElement* CRender::rimp_select_sh_static(dxRender_Visual* pVisual, float cdist_sq, u32 phase)
+ShaderElement* CRender::rimp_select_sh_static(dxRender_Visual* pVisual, float cdist_sq, u32 phase, float dtex_range)
 {
     if (!pVisual->shader)
         return nullptr;
     int id = SE_R2_SHADOW;
     if (CRender::PHASE_NORMAL == phase)
     {
-        id = ((_sqrt(cdist_sq) - pVisual->vis.sphere.R) < r_dtex_range) ? SE_R2_NORMAL_HQ : SE_R2_NORMAL_LQ;
+        id = ((_sqrt(cdist_sq) - pVisual->vis.sphere.R) < dtex_range) ? SE_R2_NORMAL_HQ : SE_R2_NORMAL_LQ;
     }
     return pVisual->shader->E[id]._get();
 }
@@ -445,7 +445,18 @@ static class cl_parallax : public R_constant_setup
     void setup(CBackend& cmd_list, R_constant* C) override
     {
         float h = ps_r2_df_parallax_h;
-        cmd_list.set_c(C, h, -h / 2.f, 1.f / r_dtex_range, 1.f / r_dtex_range);
+        float dtex_range = r_dtex_range;
+#if defined(USE_DX11)
+        // 31-svp-scope.md: the scope geometry is recorded on the SVP worker (pooled deferred context) while
+        // r_dtex_range still holds the main view's value - take the range the scope build picked HQ/LQ with.
+        if (cmd_list.context_id != CHW::IMM_CTX_ID)
+        {
+            const auto& ds = RImplementation.get_context(cmd_list.context_id);
+            if (ds.o.lod_own)
+                dtex_range = ds.o.lod.dtex_range;
+        }
+#endif
+        cmd_list.set_c(C, h, -h / 2.f, 1.f / dtex_range, 1.f / dtex_range);
     }
 } binder_parallax;
 
@@ -1300,6 +1311,12 @@ bool CRender::model_ParticlesExist(LPCSTR name)
 }
 void CRender::models_Prefetch() { Models->Prefetch(); }
 void CRender::models_Clear(bool b_complete) { Models->ClearPool(b_complete); }
+bool CRender::model_Preload(LPCSTR name) { return Models->Preload(name); }
+void CRender::model_PrefetchFiles(LPCSTR name, u32 source) { Models->PrefetchFiles(name, source); }
+void CRender::models_PrefetchList(const xr_vector<std::pair<shared_str, shared_str>>& visuals)
+{
+    Models->PrefetchList(visuals); // 40-parallel-prefetch.md
+}
 ref_shader CRender::getShader(int id)
 {
     VERIFY(id < int(Shaders.size()));

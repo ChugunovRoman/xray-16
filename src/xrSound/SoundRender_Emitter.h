@@ -93,6 +93,8 @@ private:
     void fill_block(void* ptr, u32 size);
     void fill_data(void* dest, u32 offset, u32 size);
 
+    void alloc_blocks(); // 46-engine-core-render-audit.md: temp_buf, when the emitter gets a voice
+    u32 m_block_size{};  // the size of a temp_buf block, fixed by start() (bytesPerBuffer of the source started)
     void fill_all_blocks();
     void dispatch_prefill();
 

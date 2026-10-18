@@ -22,63 +22,50 @@ smem_container::~smem_container()
     clean();
 }
 
+namespace
+{
+// The key of the hash container: values of equal crc and length share it
+u64 smem_key(u32 dwCRC, u32 dwLength) { return (u64(dwCRC) << 32) | u64(dwLength); }
+} // namespace
+
 smem_value* smem_container::dock(u32 dwCRC, u32 dwLength, void* ptr)
 {
     VERIFY(dwCRC && dwLength && ptr);
 
     ScopeLock scope(&lock);
-    smem_value* result = nullptr;
 
-    // search a place to insert
-    u8 storage[sizeof(smem_value)];
-    smem_value* value = (smem_value*)storage;
-    value->dwReference = 0;
-    value->dwCRC = dwCRC;
-    value->dwLength = dwLength;
-    auto it = std::lower_bound(container.begin(), container.end(), value, smem_search);
-    const auto saved_place = it;
-    if (container.end() != it)
+    // search: the values of this crc and length, byte by byte
+    const u64 key = smem_key(dwCRC, dwLength);
+    const auto range = container.equal_range(key);
+    for (auto it = range.first; it != range.second; ++it)
     {
-        // supposedly found
-        for (;; ++it)
-        {
-            if (it == container.end())
-                break;
-            if ((*it)->dwCRC != dwCRC)
-                break;
-            if ((*it)->dwLength != dwLength)
-                break;
-            if (0 == memcmp((*it)->value, ptr, dwLength))
-            {
-                // really found
-                result = *it;
-                break;
-            }
-        }
+        if (0 == memcmp(it->second->value, ptr, dwLength))
+            return it->second; // really found
     }
 
-    // if not found - create new entry
-    if (nullptr == result)
-    {
-        result = (smem_value*)xr_malloc(sizeof(smem_value) + dwLength);
-        result->dwReference = 0;
-        result->dwCRC = dwCRC;
-        result->dwLength = dwLength;
-        CopyMemory(result->value, ptr, dwLength);
-        container.insert(saved_place, result);
-    }
-
-    // exit
+    // not found - create new entry
+    smem_value* result = (smem_value*)xr_malloc(sizeof(smem_value) + dwLength);
+    result->dwReference = 0;
+    result->dwCRC = dwCRC;
+    result->dwLength = dwLength;
+    CopyMemory(result->value, ptr, dwLength);
+    container.emplace(key, result);
     return result;
 }
 
 void smem_container::clean()
 {
     ScopeLock scope(&lock);
-    for (auto& v : container)
-        if (0 == v->dwReference)
-            xr_free(v);
-    container.erase(remove(container.begin(), container.end(), (smem_value*)nullptr), container.end());
+    for (auto it = container.begin(); it != container.end();)
+    {
+        if (0 == it->second->dwReference)
+        {
+            xr_free(it->second);
+            it = container.erase(it);
+        }
+        else
+            ++it;
+    }
     if (container.empty())
         container.clear();
 }
@@ -91,7 +78,7 @@ void smem_container::dump()
 #else
     FILE* F = fopen("x:\\$smem_dump$.txt", "w");
 #endif
-    for (auto& v : container)
+    for (const auto& [key, v] : container)
         fprintf(F, "%4u : crc[%6x], %u bytes\n", v->dwReference, v->dwCRC, v->dwLength);
     fclose(F);
 }
@@ -104,7 +91,7 @@ size_t smem_container::stat_economy() const
         counter -= sizeof(*this);
         counter -= sizeof(cdb::allocator_type);
         constexpr ptrdiff_t node_size = 20; // XXX: refactor
-        for (auto& v : container)
+        for (const auto& [key, v] : container)
         {
             counter -= 16;
             counter -= node_size;

@@ -6,6 +6,61 @@
 #include "xrServerEntities/smart_cast.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 
+#include <unordered_set>
+
+namespace
+{
+// 40-parallel-prefetch.md (plans/optimization_mt): the visuals the Load of the prefetch objects creates
+// (CGameObject::Load -> cNameVisual_set: `visual` without extension in lower case, `model_cache_suffix` of the section),
+// each once, in the order of its first section - the order the loads in Load would go. models_PrefetchList loads them
+// on the load threads of the model prefetch (R4) and Load then takes them from the pool. A visual whose first section
+// has world_material_N lines is left to Load: cNameVisual_set registers the texture replacements of the visual
+// (keys "<visual>:<child><suffix>") just before it creates it. Only the sections of the visual register them, so for
+// the other visuals nothing is registered before the load either way. A visual Load does not create (another class)
+// is just loaded into the pool earlier - the model prefetch list loads every mesh anyway.
+void collect_object_visuals(const CInifile::Sect& sect, xr_vector<std::pair<shared_str, shared_str>>& visuals)
+{
+    std::unordered_set<xr_string> seen;
+    for (const auto& item : sect.Data)
+    {
+        pcstr section = item.first.c_str();
+        if (!pSettings->section_exist(section) || !pSettings->line_exist(section, "visual"))
+            continue;
+        pcstr visual = pSettings->r_string(section, "visual");
+        if (!visual || !visual[0] || xr_strlen(visual) >= sizeof(string_path))
+            continue;
+        string_path name;
+        xr_strcpy(name, visual);
+        if (strext(name))
+            *strext(name) = 0;
+        xr_strlwr(name);
+        if (!name[0])
+            continue;
+        pcstr suffix = "";
+        if (pSettings->line_exist(section, "model_cache_suffix")) // as read_if_exists<pcstr> in cNameVisual_set
+            suffix = pSettings->r_string(section, "model_cache_suffix");
+        if (!suffix)
+            suffix = "";
+        xr_string key(name);
+        key += '|';
+        key += suffix;
+        if (!seen.insert(key).second)
+            continue;
+        bool materials = false;
+        for (const auto& line : pSettings->r_section(section).Data)
+        {
+            if (line.first.size() && 0 == strncmp(line.first.c_str(), "world_material_", 15))
+            {
+                materials = true;
+                break;
+            }
+        }
+        if (!materials)
+            visuals.emplace_back(shared_str(name), shared_str(suffix));
+    }
+}
+} // namespace
+
 IGame_ObjectPool::IGame_ObjectPool(void) {}
 IGame_ObjectPool::~IGame_ObjectPool(void) { R_ASSERT(m_PrefetchObjects.empty()); }
 void IGame_ObjectPool::prefetch()
@@ -19,6 +74,14 @@ void IGame_ObjectPool::prefetch()
     // prefetch objects
     strconcat(sizeof(section), section, "prefetch_objects_", g_pGamePersistent->m_game_params.m_game_type);
     CInifile::Sect const& sect = pSettings->r_section(section);
+
+    // 40-parallel-prefetch.md (plans/optimization_mt): their visuals first, on the load threads (R4)
+    {
+        xr_vector<std::pair<shared_str, shared_str>> visuals;
+        collect_object_visuals(sect, visuals);
+        GEnv.Render->models_PrefetchList(visuals);
+    }
+
     for (const auto& item : sect.Data)
     {
         CLASS_ID CLS = pSettings->r_clsid(item.first.c_str(), "class");

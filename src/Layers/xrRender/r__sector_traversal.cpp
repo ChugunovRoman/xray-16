@@ -203,14 +203,14 @@ void CPortalTraverser::traverse_sector(CSector* sector, CFrustum& F, _scissor& R
             float ssa = R * R / distSQ;
             dir2portal.div(_sqrt(distSQ));
             ssa *= _abs(PORTAL->P.n.dotproduct(dir2portal));
-            if (ssa < r_ssaDISCARD)
+            if (ssa < i_ssaDISCARD)
                 continue;
 
             if (i_options & CPortalTraverser::VQ_FADE)
             {
-                if (ssa < r_ssaLOD_A)
+                if (ssa < i_ssaLOD_A)
                     fade_portal(PORTAL, ssa);
-                if (ssa < r_ssaLOD_B)
+                if (ssa < i_ssaLOD_B)
                     continue;
             }
         }

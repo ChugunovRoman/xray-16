@@ -77,8 +77,10 @@ void CStalkerActionDangerGrenadeTakeCover::execute()
         else
         {
             CWeapon* weapon = smart_cast<CWeapon*>(&object().inventory().ActiveItem()->object());
-            if (weapon && weapon->can_be_strapped() && object().best_weapon() &&
-                (object().best_weapon()->object().ID() == weapon->ID()))
+            // 45-engine-ai-audit.md, N12: one best_weapon() call, still only when the active weapon can be strapped
+            const CInventoryItem* best_item = nullptr;
+            if (weapon && weapon->can_be_strapped() && (best_item = object().best_weapon()) != nullptr &&
+                (best_item->object().ID() == weapon->ID()))
             {
                 object().CObjectHandler::set_goal(eObjectActionStrapped, object().inventory().ActiveItem());
                 if (weapon->strapped_mode())

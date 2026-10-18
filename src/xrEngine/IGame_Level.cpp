@@ -166,6 +166,7 @@ bool IGame_Level::Load(u32 dwNum)
 }
 
 int psNET_DedicatedSleep = 5;
+extern u32 g_svp_scope_render_frame; // device.cpp, frame/game_wait_svp
 void IGame_Level::OnRender()
 {
     ZoneScoped;
@@ -223,6 +224,7 @@ void IGame_Level::OnRender()
     if (svp_frame)
     {
         PERF_SCOPE(rframe_svp);
+        g_svp_scope_render_frame = Device.dwFrame;
         // Tracers on the main (full) framebuffer while Device still matches the first pass.
         {
             PERF_SCOPE(rlvl_bullets);
@@ -656,13 +658,16 @@ void IGame_Level::SoundEvent_Dispatch()
     const auto dispatch_one = [&delivered](const _esound_delegate& D)
     {
         VERIFY(D.dest && D.source);
-        if (!D.source->feedback)
+        // Feedback read once (29-game-thread-next.md). Another thread may stop the sound between the check and the
+        // use (ref_sound::stop, the physics step: i_stop clears feedback under m_emitters_lock); the emitter object
+        // itself lives until CSoundRender_Core::update on main.
+        CSound_emitter* const feedback = D.source->feedback;
+        if (!feedback)
             return;
         ZoneScopedN("feel_sound_new");
         ++delivered;
         D.dest->feel_sound_new(D.source->g_object, D.source->g_type, D.source->g_userdata,
-            D.source->feedback->is_2D() ? Device.vCameraPosition : D.source->feedback->get_params()->position,
-            D.power);
+            feedback->is_2D() ? Device.vCameraPosition : feedback->get_params()->position, D.power);
     };
 
     // Single-threaded only: feel_sound_new -> CScriptEntity::sound_callback mutates m_saved_sounds and reads

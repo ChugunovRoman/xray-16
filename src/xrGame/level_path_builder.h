@@ -11,6 +11,8 @@
 #include "movement_manager.h"
 #include "level_path_manager.h"
 #include "detail_path_builder.h"
+#include "ai_space.h"
+#include "xrAICore/Navigation/level_graph.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 
 class CLevelPathBuilder : public CDetailPathBuilder
@@ -26,6 +28,12 @@ private:
     u32 m_last_fail_time;
     bool m_extrapolate_path;
     bool m_use_delay_after_fail;
+    // 33-level-path.md, item b (ai_level_path_budget_us): process() put itself into the next frame's seqParallel
+    bool m_deferred = false;
+    u32 m_deferred_frame = u32(-1); // Device.dwFrame of that push (one copy for the next frame per frame)
+    // 33-level-path.md, sliced A*: builds of this builder put aside in a row (the A* did not finish in its slice)
+    u32 m_put_aside = 0;
+    u32 m_restarts = 0; // of them: the search started anew (its call changed) after a build put aside
 
 private:
     enum
@@ -40,6 +48,7 @@ public:
     }
 
     IC const u32& dest_vertex_id() const { return (m_dest_vertex_id); }
+    IC const u32& start_vertex_id() const { return (m_start_vertex_id); }
     IC void use_delay_after_fail(bool const value) { m_use_delay_after_fail = value; }
     IC void setup(
         const u32& start_vertex_id, const u32& dest_vertex_id, bool extrapolate_path, const Fvector* precise_position)
@@ -81,6 +90,11 @@ public:
             return;
         }
 
+        // 33-level-path.md, item b: a delegate moved to the next frame is in seqParallel already and builds with what
+        // setup() gave it just now - a second copy would build the path twice
+        if (m_deferred)
+            return;
+
         PERF_INC(path_builder_queued);
         Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CLevelPathBuilder::process));
     }
@@ -88,7 +102,21 @@ public:
     void process_impl()
     {
         m_object->m_wait_for_distributed_computation = false;
+        // 33-level-path.md, M: the A* of this build_path for the [path-spike] line (none when the cache of the last
+        // failed start/destination pair answered)
+        level_path_trace* const trace = level_path_trace::current();
+        const u32 search_seq = trace ? CLevelGraph::last_search_stats().seq : 0;
         m_object->level_path().build_path(m_start_vertex_id, m_dest_vertex_id);
+        if (trace)
+            trace_search(*trace, search_seq);
+
+        // 33-level-path.md, sliced A*: the A* was put aside on the time slice of process(), the level path is as it
+        // was. The build waits for the next frame (process() queues it): the NPC keeps its current path meanwhile
+        if (CLevelGraph::search_put_aside())
+        {
+            m_object->m_wait_for_distributed_computation = true;
+            return;
+        }
 
         if (m_object->level_path().failed())
         {
@@ -114,21 +142,40 @@ public:
         inherited::process_impl(false);
     }
 
-    void process()
+    // the seqParallel delegate (mt_level_path): the path build, its Tracy zone and metrics, the frame budget (item b)
+    // and the [path-spike] line of 33-level-path.md; movement_manager.cpp
+    void process();
+
+#if XR_PERF_METRICS
+    // B5: level_path/search_max_us - the longest single search of the frame, level_path/searches_max - searches in the
+    // frame (both per-frame maxima, UpdateMax). The game logic thread only (seqParallel)
+    static void SearchMetrics(u64 ticks)
     {
-        PERF_SCOPE(pseq_level_path); // 22-game-thread.md: a seqParallel delegate (mt_level_path)
-        if (Device.dwTimeGlobal < m_last_fail_time + time_to_wait_after_fail)
+        static u32 s_frame = u32(-1);
+        static s64 s_searches = 0;
+        if (s_frame != Device.dwFrame)
         {
-            PERF_INC(path_builder_delayed);
-            return;
+            s_frame = Device.dwFrame;
+            s_searches = 0;
         }
-
-        PERF_INC(path_builder_done);
-        m_object->build_level_path();
+        ++s_searches;
+        xray::perf::UpdateMax(xray::perf::Metric::level_path_searches_max, s_searches);
+        xray::perf::UpdateMax(xray::perf::Metric::level_path_search_max_us,
+            static_cast<s64>(xray::perf::TicksToMilliseconds(ticks) * 1000.0));
     }
+#endif
 
+private:
+    // 33-level-path.md, M (movement_manager.cpp): adds the A* that ran since search_seq to the trace; the line
+    static void trace_search(level_path_trace& trace, u32 search_seq);
+    void report_spike(const level_path_trace& trace, u64 ticks) const;
+
+public:
     IC void remove()
     {
+        m_deferred = false;
+        m_put_aside = 0;
+        m_restarts = 0;
         if (m_object->m_wait_for_distributed_computation)
             m_object->m_wait_for_distributed_computation = false;
 

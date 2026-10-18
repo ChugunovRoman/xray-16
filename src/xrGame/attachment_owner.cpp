@@ -183,11 +183,16 @@ void CAttachmentOwner::attach(CInventoryItem* inventory_item)
         VERIFY(attachable_item);
         CGameObject* game_object = smart_cast<CGameObject*>(this);
         VERIFY(game_object && game_object->Visual());
-        if (m_attached_objects.empty())
-            game_object->add_visual_callback(AttachmentCallback);
-        attachable_item->set_bone_id(
-            smart_cast<IKinematics*>(game_object->Visual())->LL_BoneID(attachable_item->bone_name()));
-        m_attached_objects.push_back(smart_cast<CAttachableItem*>(inventory_item));
+        {
+            // AttachmentCallback walks the list in phase B of the owner's bones (a pipelined prepass task may run it
+            // beside main's UpdateCL): change it under the owner's bone lock (waits for a running phase B).
+            const KinematicsBonesLock bones_lock(PKinematics(game_object->Visual()));
+            if (m_attached_objects.empty())
+                game_object->add_visual_callback(AttachmentCallback);
+            attachable_item->set_bone_id(
+                smart_cast<IKinematics*>(game_object->Visual())->LL_BoneID(attachable_item->bone_name()));
+            m_attached_objects.push_back(smart_cast<CAttachableItem*>(inventory_item));
+        }
 
         inventory_item->object().setVisible(true);
         attachable_item->afterAttach();
@@ -206,16 +211,23 @@ void CAttachmentOwner::detach(CInventoryItem* inventory_item)
         if ((*I)->item().object().ID() == inventory_item->object().ID())
         {
             CAttachableItem* ai = *I;
-            m_attached_objects.erase(I);
-            ai->afterDetach();
-            if (m_attached_objects.empty())
+            CGameObject* game_object = smart_cast<CGameObject*>(this);
+            bool last = false;
             {
-                CGameObject* game_object = smart_cast<CGameObject*>(this);
-                VERIFY(game_object && game_object->Visual());
-                game_object->remove_visual_callback(AttachmentCallback);
-
-                inventory_item->object().setVisible(false);
+                // See attach: the list and the visual callback change under the owner's bone lock; the item's own
+                // reactions below run without it (they may compute other models' bones).
+                const KinematicsBonesLock bones_lock(game_object ? PKinematics(game_object->Visual()) : nullptr);
+                m_attached_objects.erase(I);
+                last = m_attached_objects.empty();
+                if (last)
+                {
+                    VERIFY(game_object && game_object->Visual());
+                    game_object->remove_visual_callback(AttachmentCallback);
+                }
             }
+            ai->afterDetach();
+            if (last)
+                inventory_item->object().setVisible(false);
             break;
         }
     }

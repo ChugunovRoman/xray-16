@@ -60,7 +60,7 @@ CIKLimb::CIKLimb() { Invalidate(); }
 CIKLimb::CIKLimb(const CIKLimb& l)
     : m_limb(l.m_limb), m_K(l.m_K), m_foot(l.m_foot), collider(l.collider),
       m_id(l.m_id), m_collide(l.m_collide), collide_data(l.collide_data),
-      anim_state(l.anim_state), state_predict(l.state_predict)
+      anim_state(l.anim_state), state_predict(l.state_predict), m_random(l.m_random), m_own_random(l.m_own_random)
 {
     m_bones[0] = l.m_bones[0];
     m_bones[1] = l.m_bones[1];
@@ -715,10 +715,10 @@ void CIKLimb::Blending(SCalculateData& cd)
 }
 static const s32 unstuck_time_delta_min = 500;
 static const s32 unstuck_time_delta_max = 1200;
-IC void new_foot_matrix(const ik_goal_matrix& m, SCalculateData& cd)
+IC void new_foot_matrix(const ik_goal_matrix& m, SCalculateData& cd, CRandom& random)
 {
     cd.state.collide_pos = m;
-    cd.state.unstuck_time = Device.dwTimeGlobal + Random.randI(unstuck_time_delta_min, unstuck_time_delta_max);
+    cd.state.unstuck_time = Device.dwTimeGlobal + random.randI(unstuck_time_delta_min, unstuck_time_delta_max);
     reset_blend_speed(cd);
 }
 static const float unstuck_tolerance_linear = 0.3f;
@@ -730,14 +730,14 @@ void CIKLimb::SetNewStepGoal(const SIKCollideData& cld, SCalculateData& cd)
     {
         ik_goal_matrix foot;
         m_foot.GetFootStepMatrix(foot, cd /* gl_goal*/, cld, false, true);
-        new_foot_matrix(foot, cd);
+        new_foot_matrix(foot, cd, random());
         return;
     }
     if (!sv_state.foot_step() || !anim_state.glue())
     {
         ik_goal_matrix foot;
         m_foot.GetFootStepMatrix(foot, cd /*cl*/, cld, false, true); // find where we can place the foot
-        new_foot_matrix(foot, cd);
+        new_foot_matrix(foot, cd, random());
         // reset_blend_speed( cd );
         // cd.state.blending = true; ?
     }
@@ -763,7 +763,7 @@ void CIKLimb::SetNewStepGoal(const SIKCollideData& cld, SCalculateData& cd)
             (Device.dwTimeGlobal > cd.state.unstuck_time &&
                 !clamp_change(Fmatrix().set(cl_pos), foot.get(), 10.f * EPS_L, EPS_L, 10.f * EPS_L, EPS_L)))
         {
-            new_foot_matrix(foot, cd);
+            new_foot_matrix(foot, cd, random());
             // cd.state.collide_pos = foot;//.set( foot, ik_goal_matrix::cl_aligned );
             // reset_blend_speed( cd );
             cd.state.blending = true;

@@ -12,6 +12,7 @@
 
 #include "xrPhysics/IPHWorld.h"
 #include "physics_game.h"
+#include "alife_switch_manager.h"
 
 extern pureFrame* g_pNetProcessor;
 
@@ -215,6 +216,9 @@ bool CLevel::net_start_client5()
         // Textures
         if (!GEnv.isDedicatedServer)
         {
+            // 36-spawn-model-load.md (the model prefetch): models of the level's creatures / of all monsters into
+            // the pool now, while the textures are still deferred (ResourcesDeferredUpload below loads theirs too)
+            model_preload_level();
             g_pGamePersistent->LoadTitle("st_loading_textures");
             GEnv.Render->DeferredLoad(FALSE);
             GEnv.Render->ResourcesDeferredUpload();

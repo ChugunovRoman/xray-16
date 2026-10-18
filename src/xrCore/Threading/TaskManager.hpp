@@ -47,6 +47,9 @@ private:
 
     void SetThreadStatus(bool active) noexcept;
 
+    // plans/optimization_mt/29-game-thread-next.md, A4: Wait() of the dedicated Game thread of a game/render overlap frame
+    void WaitGameThread(const Task& task) const;
+
 public:
     TaskManager();
     ~TaskManager();
@@ -117,3 +120,9 @@ public:
 };
 
 extern XRCORE_API xr_unique_ptr<TaskManager> TaskScheduler;
+
+// plans/optimization_mt/29-game-thread-next.md, A4 (always on since 2026-10-18, its switch mt_game_wait_own_only
+// removed, see plan 41): a Wait() of the dedicated Game thread of a game/render overlap frame (phase 0 and the body,
+// xray::perf::g_game_overlap_tid) runs only the tasks of its own queue and the pieces of the awaited task (the awaited
+// task or its children at the head of another queue), not other threads' tasks (the render's, sound decoding); after
+// 1 ms without such work it steals as before (deadlock guard: the awaited task in a queue nobody serves).

@@ -111,7 +111,7 @@ public:
             return R_dsgraph_structure::INVALID_CONTEXT_ID;
         }
         contexts_used.set(id, true);
-        contexts_pool[id].reset();
+        contexts_pool[id].reset(/*frame_reset=*/true); // R13: keeps the maps' nodes
         contexts_pool[id].context_id = id;
         contexts_pool[id].cmd_list.context_id = alloc_cmd_list ? id : CHW::IMM_CTX_ID;
         // The REAL deferred-context state is at D3D11 defaults (any previous user finished
@@ -145,21 +145,33 @@ public:
         contexts_used.set(id, false);
     }
 
+    // Called from worker threads too: add_Visual(IMM) in the parallel parts of the main build, RCache. It writes
+    // only while the immediate context is not marked yet (cleanup_contexts marks it again right away): an
+    // unconditional write was a plain read-modify-write of contexts_used ("or [contexts_used], 1000h") racing with
+    // alloc_context on the main thread - it dropped the bit just set for a pooled context (the SVP context of
+    // BeginSecondVPCalculateParallel), the parallel main submit got that context a second time and reset it under
+    // the SVP worker's build (AV in insert_static with context_id == INVALID_CONTEXT_ID).
     ICF R_dsgraph_structure& get_imm_context()
     {
         auto& ctx = contexts_pool[R_dsgraph_structure::IMM_CTX_ID];
-        ctx.context_id = R_dsgraph_structure::IMM_CTX_ID;
-        contexts_used.set(ctx.context_id, true);
+        if (ctx.context_id != R_dsgraph_structure::IMM_CTX_ID)
+            ctx.context_id = R_dsgraph_structure::IMM_CTX_ID;
+        if (!contexts_used.test(R_dsgraph_structure::IMM_CTX_ID))
+            contexts_used.set(R_dsgraph_structure::IMM_CTX_ID, true);
         return ctx;
     }
 
-    ICF void cleanup_contexts()
+    // frame_end - the per-frame cleanup (End): R13 keeps the maps' nodes; false - level
+    // load/unload, device reset: everything freed.
+    ICF void cleanup_contexts(bool frame_end = false)
     {
         for (int id = 0; id < R__NUM_CONTEXTS; ++id)
         {
-            contexts_pool[id].reset();
+            contexts_pool[id].reset(frame_end);
         }
         contexts_used.reset();
+        // The immediate context stays marked: get_imm_context then never writes from the worker threads.
+        get_imm_context();
     }
 #else
     ICF R_dsgraph_structure& get_imm_context()
@@ -174,9 +186,9 @@ public:
         return get_imm_context();
     }
 
-    ICF void cleanup_contexts()
+    ICF void cleanup_contexts(bool frame_end = false)
     {
-        context_imm.reset();
+        context_imm.reset(frame_end);
     }
 #endif
 

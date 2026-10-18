@@ -3,11 +3,34 @@
 #include "xrCore/LocatorAPI.h"
 
 #include "base_client_classes_wrappers.h"
+#include "xrScriptEngine/script_wrapper_cache.hpp"
 
 #include <memory>
 
 LPCSTR get_file_age_str(CLocatorAPI* fs, LPCSTR nm);
 CLocatorAPI* getFS() { return &FS; }
+
+// The Lua wrapper cache (xrScriptEngine/script_wrapper_cache.hpp): getFS() gives one wrapper per Lua state. Only the file system itself (xr_FS) is
+// cached, the slot remembers it (created by Core before the Lua states, deleted after them). CLocatorAPI has no
+// luabind::wrap_base class, the generic get_back_reference never finds anything for it. Only this file passes
+// CLocatorAPI* to Lua (getFS(); the other functions here take it): declared and defined here, before the registration.
+static xray::script_wrapper_cache::ObjectSlot s_fs_lua_wrapper;
+
+namespace luabind
+{
+template <>
+bool get_back_reference<CLocatorAPI*>(lua_State* L, CLocatorAPI* const& x)
+{
+    using namespace xray::script_wrapper_cache;
+    if (x != xr_FS.get())
+        return false;
+    if (Push(L, s_fs_lua_wrapper, x))
+        return true;
+    luabind::detail::make_pointer_instance(L, x);
+    Store(L, s_fs_lua_wrapper);
+    return true;
+}
+} // namespace luabind
 LPCSTR update_path_script(CLocatorAPI* fs, LPCSTR initial, LPCSTR src)
 {
     string_path temp;

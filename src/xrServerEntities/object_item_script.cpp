@@ -26,6 +26,7 @@ ObjectFactory::ClientObjectBaseClass* CObjectItemScript::client_object() const
         return (0);
     }
     R_ASSERT(object);
+    ObjectFactory::script_client_object_created(object); // 37-destroy-relcase-smooth.md (the no-op skip)
     return (object->_construct());
 }
 

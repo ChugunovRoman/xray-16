@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "Common/_d3d_extensions.h"
 #include "Common/LevelStructure.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrEngine/IGame_Persistent.h"
 #include "xrEngine/device.h"
 #include "xrEngine/Environment.h"
@@ -187,6 +188,18 @@ void CLight_DB::add_light(light* L)
     const u32 seq = (Device.dwFrame << 1) | sub;
     if (L->add_light_pkg_seq == seq)
         return;
+    // 31-svp-scope.md, the light dedup (bug fix, always on since 2026-10-18, 41-cvar-cleanup.md). The sub bit above dates from f0782e153, when every
+    // Calculate() cleared `package` (Lights.Update()). Since 197d536a5 only the main pass clears it and the scope pass
+    // renders the main package, but the sequential scope Calculate() (GL, RenderDoc, no free dsgraph context) still
+    // collects the lights of its build here: a light the main pass exported this frame was exported a second time and
+    // accumulated twice in the lens (and its shadow map packed twice).
+    // The parallel scope build (SVP worker) never sets the second-pass flag, so it never gets here.
+    if (sub && L->add_light_pkg_seq == (Device.dwFrame << 1))
+    {
+        PERF_INC(rsvp_light_dup);
+        L->add_light_pkg_seq = seq; // counted once per light and frame
+        return;
+    }
     L->add_light_pkg_seq = seq;
     L->frame_render = Device.dwFrame;
 #if RENDER == R_R1

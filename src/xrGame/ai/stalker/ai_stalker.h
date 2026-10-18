@@ -208,7 +208,21 @@ public:
     virtual void net_Save(NET_Packet& P);
     virtual bool net_SaveRelevant();
     virtual void net_Relcase(IGameObject* O);
+    // R1 (32-frame-spikes.md): the whole chain of net_Relcase in one pass per list
+    virtual void net_RelcaseBatch(const RelcaseBatch& batch);
 
+private:
+    // The parallel relcase (32-frame-spikes.md): net_RelcaseBatch split in two. Own - the lists of this stalker
+    // (conditions, memory with the group lists through relcase_first_visit, sight, movement): put off by the active pass
+    // to CObjectList's parallel phase, may run on a task worker. Shared - the agent manager of the group and the physics
+    // support, on the calling thread. The parts read nothing the other one changes.
+    void net_RelcaseBatchOwn(const RelcaseBatch& batch);
+    void net_RelcaseBatchShared(const RelcaseBatch& batch);
+    static void net_RelcaseBatchOwnDeferred(void* self, const RelcaseBatch& batch);
+    // CObjectList::relcase_batch_stamp() of the batch whose own part was put off (0 = none): once per batch
+    u32 m_relcase_parallel_stamp = 0;
+
+public:
     // save/load server serialization
     virtual void save(NET_Packet& output_packet);
     virtual void load(IReader& input_packet);
@@ -224,7 +238,7 @@ private:
     // The object handler LOD (plans/optimization_mt/22-game-thread.md, step 1; npc_perf_object_handler_lod_*): true =
     // this UpdateCL does not run the object handler (the weapon planner) of an idle stalker far from the camera
     bool TrySkipObjectHandlerLod();
-    // K8c of plans/optimization_mt/26-framemove-game-next.md (npc_oh_lod_combat): true = this UpdateCL does not run the
+    // K8c of plans/optimization_mt/26-framemove-game-next.md: true = this UpdateCL does not run the
     // object handler of a fighting stalker far from the camera
     bool TrySkipObjectHandlerCombatLod();
     // The scheduler interval of a settled corpse (22-game-thread.md, step 1; npc_perf_dead_shed_interval_ms)
@@ -257,7 +271,8 @@ public:
     virtual void OnEvent(NET_Packet& P, u16 type);
     virtual void feel_touch_new(IGameObject* O);
     virtual void feel_touch_delete(IGameObject* O);
-    void on_ownership_reject(IGameObject* O, bool just_before_destroy);
+    // skip_bones (B2 of 30-game-events.md): no in_UpdateCL + CalculateBones(true) of the owner first
+    void on_ownership_reject(IGameObject* O, bool just_before_destroy, bool skip_bones = false);
     void renderable_Render(u32 context_id, IRenderable* root) override;
     virtual void Exec_Look(float dt);
     virtual void Hit(SHit* pHDS);
@@ -707,7 +722,9 @@ public:
 
 private:
     float best_cover_value(const Fvector& position_to_cover_from);
-    void compute_enemy_distances(float& minimum_enemy_distance, float& maximum_enemy_distance);
+    // 45-engine-ai-audit.md, N12: best_item = best_weapon() from find_best_cover (one call for both)
+    void compute_enemy_distances(
+        const CInventoryItem* best_item, float& minimum_enemy_distance, float& maximum_enemy_distance);
     void update_best_cover_actuality(const Fvector& position_to_cover_from);
     bool best_cover_still_good(const Fvector& position_to_cover_from);
     void drop_cover_inertia_k7();

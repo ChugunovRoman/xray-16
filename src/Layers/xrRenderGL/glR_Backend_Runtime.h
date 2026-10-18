@@ -495,6 +495,8 @@ IC void CBackend::set_Constants(R_constant_table* C)
     // caching
     if (ctable == C) return;
     ctable = C;
+    m_ctable_sbase_known = false; // 46-engine-core-render-audit.md: name lookups of the table
+    m_ctable_last_c = nullptr;
     xforms.unmap();
     hemi.unmap();
     tree.unmap();

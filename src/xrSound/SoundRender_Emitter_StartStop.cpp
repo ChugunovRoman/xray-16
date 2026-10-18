@@ -38,9 +38,10 @@ void CSoundRender_Emitter::start(const ref_sound& _owner, u32 flags, float delay
     bStopping = FALSE;
     bRewind = FALSE;
 
-    // Calc storage
-    for (auto& buf : temp_buf)
-        buf.resize(source()->data_info().bytesPerBuffer);
+    // Storage (temp_buf): allocated by alloc_blocks() when the emitter first gets a voice (46-engine-core-render-audit.md).
+    // An emitter that only simulates (no voice: ~500 of ~680 in a heavy fight) never needs the 10 prefill blocks
+    // (100 ms each, value-initialized as before). The size is the one start() always used.
+    m_block_size = source()->data_info().bytesPerBuffer;
 
     // Lazy ogg open (plans/spawn_optimization/SPEC.md, stage 1), always: do not open the ogg on the thread that starts
     // the sound (main for GO->OnEvent: hits, shots, items). A source with cached PCM never needs it (decompress() reads

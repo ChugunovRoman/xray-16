@@ -48,6 +48,7 @@
     <ClInclude Include="script_process.hpp" />
     <ClInclude Include="script_space.hpp" />
     <ClInclude Include="script_space_forward.hpp" />
+    <ClInclude Include="script_wrapper_cache.hpp" />
     <ClInclude Include="script_stack_tracker.hpp" />
     <ClInclude Include="script_thread.hpp" />
     <ClInclude Include="xrScriptEngine.hpp" />

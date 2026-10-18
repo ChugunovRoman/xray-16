@@ -10,6 +10,9 @@
 
 #include "xrScriptEngine/script_space_forward.hpp"
 #include "script_bind_macroses.h"
+#include "xrScriptEngine/script_wrapper_cache.hpp"
+
+#include <luabind/back_reference_fwd.hpp>
 
 #include "xr_time.h"
 #include "character_info_defs.h"
@@ -979,6 +982,10 @@ public:
 
     doors::door* m_door;
 
+    // The Lua wrapper cache: the one Lua wrapper of this object (luabind::get_back_reference below), released in the
+    // destructor. Lives in the object, so a new object at the same address never gets the wrapper of the old one.
+    xray::script_wrapper_cache::Slot m_lua_wrapper;
+
 private:
     // B6 (plans/optimization_mt/09-physics-earlier-parallel.md): a teleport moves ODE bodies and geoms directly. While
     // the physics step runs on another thread, queue `op` for the post-step flush (the object is looked up again by
@@ -987,6 +994,19 @@ private:
 
     DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
+
+// The Lua wrapper cache (xrScriptEngine/script_wrapper_cache.hpp): every luabind pass of a game_object to Lua - by pointer
+// (pointer_converter) and by reference (ref_converter, const_ref_converter) - asks luabind::get_back_reference for an
+// existing Lua object first. These give the cached wrapper (made on the first pass). A pointer to const (const_pointer_converter) is not cached: a const wrapper.
+// Defined in script_game_object_use.cpp. Declared right after the class: every translation unit that passes the
+// object to Lua needs the complete class, so all of them see these and none instantiates the generic template.
+namespace luabind
+{
+template <>
+bool get_back_reference<CScriptGameObject*>(lua_State* L, CScriptGameObject* const& x);
+template <>
+bool get_back_reference<CScriptGameObject>(lua_State* L, CScriptGameObject const& x);
+} // namespace luabind
 
 extern void sell_condition(CScriptIniFile* ini_file, LPCSTR section);
 extern void sell_condition(float friend_factor, float enemy_factor);

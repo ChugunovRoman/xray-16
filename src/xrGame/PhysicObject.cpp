@@ -316,6 +316,9 @@ void CPhysicObject::Load(LPCSTR section)
 {
     inherited::Load(section);
     CPHSkeleton::Load(section);
+    // F5: the same expression is_ai_obstacle evaluated on every call (the section of an object does not change and
+    // pSettings is read-only in the game)
+    m_is_ai_obstacle = READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "is_ai_obstacle", true) ? 1 : 0;
 }
 
 void CPhysicObject::shedule_Update(u32 dt)
@@ -507,6 +510,9 @@ Msg("%s",(*I).first);
 //////////////////////////////////////////////////////////////////////////
 bool CPhysicObject::is_ai_obstacle() const
 {
+    // F5: from Load; not loaded yet - the ini as before (no write here: the getter is called from two threads)
+    if (m_is_ai_obstacle >= 0)
+        return m_is_ai_obstacle != 0;
     return !!(READ_IF_EXISTS(pSettings, r_bool, cNameSect(), "is_ai_obstacle", true));
 }
 

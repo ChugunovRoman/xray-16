@@ -52,9 +52,15 @@ bool CSightManager::aim_target(Fvector& my_position, Fvector& aim_target, const 
 
     extern CActor* g_actor;
 
+    // 45-engine-ai-audit.md, F6: the head bone name built once - a shared_str from the literal on every call took the
+    // global string pool lock and a lookup (twice a frame for every NPC aiming at the actor or a stalker: the sight
+    // update on the Game thread and Exec_Look on main). Passed by reference, its counter is never touched after the
+    // thread-safe initialization
+    static const shared_str head_bone = "bip01_head";
+
     if (g_actor == object)
     {
-        ::aim_target("bip01_head", aim_target, object);
+        ::aim_target(head_bone, aim_target, object);
         return (true);
     }
 
@@ -62,7 +68,7 @@ bool CSightManager::aim_target(Fvector& my_position, Fvector& aim_target, const 
     {
         if (stalker->g_Alive())
         {
-            ::aim_target("bip01_head", aim_target, object);
+            ::aim_target(head_bone, aim_target, object);
             return (true);
         }
     }

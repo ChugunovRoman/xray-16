@@ -131,6 +131,64 @@ BOOL Shader::equal(Shader* S)
     return TRUE;
 }
 
+// 40-parallel-prefetch.md (plans/optimization_mt): the hashes of the indices of CResourceManager. Each takes exactly
+// what equal() compares, so equal entries hash equal.
+size_t STextureList::hash() const
+{
+    size_t h = size();
+    for (const auto& [stage, texture] : *this)
+    {
+        h = resource_hash_combine(h, stage);
+        h = resource_hash_combine(h, resource_hash_value(texture._get()));
+    }
+    return h;
+}
+
+size_t SPass::hash() const
+{
+    size_t h = resource_hash_value(state._get());
+    h = resource_hash_combine(h, resource_hash_value(ps._get()));
+    h = resource_hash_combine(h, resource_hash_value(vs._get()));
+    h = resource_hash_combine(h, resource_hash_value(gs._get()));
+#ifdef USE_DX11
+    h = resource_hash_combine(h, resource_hash_value(hs._get()));
+    h = resource_hash_combine(h, resource_hash_value(ds._get()));
+    h = resource_hash_combine(h, resource_hash_value(cs._get()));
+#elif defined(USE_OGL)
+    h = resource_hash_combine(h, resource_hash_value(pp._get()));
+#endif
+    h = resource_hash_combine(h, resource_hash_value(constants._get()));
+    h = resource_hash_combine(h, resource_hash_value(T._get()));
+    h = resource_hash_combine(h, resource_hash_value(C._get()));
+#ifdef _EDITOR
+    h = resource_hash_combine(h, resource_hash_value(M._get()));
+#endif
+    return h;
+}
+
+size_t ShaderElement::hash() const
+{
+    size_t h = flags.iPriority;
+    h = resource_hash_combine(h, flags.bStrictB2F);
+    h = resource_hash_combine(h, flags.bEmissive);
+    h = resource_hash_combine(h, flags.bWmark);
+    h = resource_hash_combine(h, flags.bDistort);
+    h = resource_hash_combine(h, flags.bScopeLens);
+    h = resource_hash_combine(h, passes.size());
+    for (const ref_pass& pass : passes)
+        h = resource_hash_combine(h, resource_hash_value(pass._get()));
+    return h;
+}
+
+size_t Shader::hash() const
+{
+    // equal() compares E[0..4] by content (ShaderElement::equal), E[5] not at all
+    size_t h = 0;
+    for (int i = 0; i < 5; i++)
+        h = resource_hash_combine(h, E[i] ? E[i]->hash() : 0);
+    return h;
+}
+
 void STextureList::clear()
 {
     iterator it = begin();

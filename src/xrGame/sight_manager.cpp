@@ -301,6 +301,13 @@ void CSightManager::remove_links(IGameObject* object)
         (*I).second->remove_links(object);
 }
 
+// R1 (32-frame-spikes.md): remove_links for every object of the batch, one pass over the actions
+void CSightManager::remove_links_batch(const RelcaseBatch& batch)
+{
+    for (auto& action : actions())
+        action.second->remove_links_batch(batch);
+}
+
 Fvector CSightManager::object_position() const
 {
     CGameObject const* object = &current_action().object();
@@ -583,7 +590,9 @@ void CSightManager::compute_aiming(float const time_delta, float const angular_s
             break;
         }
 
-        if (!object().best_weapon())
+        // 45-engine-ai-audit.md, N12: one best_weapon() call for the check and the aimer below
+        CInventoryItem* const best_item = object().best_weapon();
+        if (!best_item)
         {
             m_target.m_spine.m_rotation = Fidentity;
             m_target.m_shoulder.m_rotation = Fidentity;
@@ -601,15 +610,14 @@ void CSightManager::compute_aiming(float const time_delta, float const angular_s
         bool forward_blend_callbacks = object().animation().forward_blend_callbacks();
         bool backward_blend_callbacks = object().animation().backward_blend_callbacks();
         object().animation().remove_bone_callbacks();
-        VERIFY(object().best_weapon());
-        VERIFY(smart_cast<CWeapon const*>(object().best_weapon()));
+        VERIFY(smart_cast<CWeapon const*>(best_item));
         VERIFY(_valid(aiming_position()));
         aimers::weapon aimer(&object(), m_animation_id.c_str(), m_animation_frame == animation_frame_start,
             aiming_position(), pSettings->r_string(object().cNameSect().c_str(), "bone_spin"),
             pSettings->r_string(object().cNameSect().c_str(), "bone_shoulder"),
             pSettings->r_string(object().cNameSect().c_str(), "weapon_bone0"),
             pSettings->r_string(object().cNameSect().c_str(), "weapon_bone2"),
-            *smart_cast<CWeapon const*>(object().best_weapon()));
+            *smart_cast<CWeapon const*>(best_item));
         if (forward_blend_callbacks)
             object().animation().assign_bone_blend_callbacks(true);
         else

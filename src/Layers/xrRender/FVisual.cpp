@@ -4,6 +4,8 @@
 #include "xrCore/FMesh.hpp"
 #include "FVisual.h"
 #include "Layers/xrRender/BufferUtils.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include "ModelPool.h"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -25,6 +27,7 @@ void Fvisual::Load(const char* N, IReader* data, u32 dwFlags)
 void Fvisual::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
 {
     dxRender_Visual::Load(N, suffix, data, dwFlags);
+    MODEL_LOAD_PART("model_load/geom", mload_geom); // 36-spawn-model-load.md: the rest - vertex / index buffers
 
     u32 fvf = 0;
     VertexElement* vFormat = nullptr;

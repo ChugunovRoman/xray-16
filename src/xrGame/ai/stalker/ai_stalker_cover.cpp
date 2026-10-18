@@ -19,6 +19,7 @@
 #include "agent_member_manager.h"
 #include "memory_manager.h"
 #include "enemy_manager.h"
+#include "danger_manager.h"
 #include "stalker_movement_manager_smart_cover.h"
 #include "smart_cover.h"
 #include "smart_cover_planner_target_selector.h"
@@ -41,10 +42,57 @@ extern const float MIN_SUITABLE_ENEMY_DISTANCE = 3.f;
 // COVER_NONE_HOLD_THREAT_MOVE m of where they were.
 int npc_cover_none_hold_ms = 2500;
 
+// 26-framemove-game-next.md, scheduler overrun. Temporary A/B switch, not saved, 0 = as before. > 0 - the cover
+// searches of best_cover (the scans of a stalker that has no cover) of one frame stop once they took this many us
+// together: a stalker without a cover that comes after that gets "no cover" for this update (what ~85 % of the searches
+// in a crowd find anyway: the action holds the place, affect_cover) and searches again on its next update. The first
+// search of a frame always runs; a stalker whose cover failed the checks or was dropped by an event (restrictions,
+// enemy change) and a stalker with a selected danger (a grenade: HideFromGrenade, the danger planner) always search.
+int npc_cover_scan_frame_budget_us = 1500; // a tunable, not saved (the default since 2026-10-16, 41-cvar-cleanup.md)
+
 namespace
 {
 constexpr float COVER_NONE_HOLD_MOVE = 2.f;
 constexpr float COVER_NONE_HOLD_THREAT_MOVE = 5.f;
+
+// The cover search time of the current frame (npc_cover_scan_frame_budget_us). Only the Game thread (the scheduler
+// pass) calls best_cover
+u32 s_cover_scan_frame = u32(-1);
+u64 s_cover_scan_frame_ns = 0;
+
+bool cover_scan_frame_budget_spent()
+{
+    if (npc_cover_scan_frame_budget_us <= 0)
+        return false;
+    if (s_cover_scan_frame != Device.dwFrame)
+    {
+        s_cover_scan_frame = Device.dwFrame;
+        s_cover_scan_frame_ns = 0;
+    }
+    return s_cover_scan_frame_ns >= u64(npc_cover_scan_frame_budget_us) * 1000ull;
+}
+
+struct cover_scan_frame_timer
+{
+    CTimer m_timer;
+    bool m_on;
+    cover_scan_frame_timer() : m_on(npc_cover_scan_frame_budget_us > 0)
+    {
+        if (m_on)
+            m_timer.Start();
+    }
+    ~cover_scan_frame_timer()
+    {
+        if (!m_on)
+            return;
+        if (s_cover_scan_frame != Device.dwFrame)
+        {
+            s_cover_scan_frame = Device.dwFrame;
+            s_cover_scan_frame_ns = 0;
+        }
+        s_cover_scan_frame_ns += m_timer.GetElapsed_ns();
+    }
+};
 
 struct cover_find_eval_budget_guard
 {
@@ -102,15 +150,16 @@ void CAI_Stalker::on_best_cover_changed(const CCoverPoint* new_cover, const CCov
         (*I)(new_cover, old_cover);
 }
 
-void CAI_Stalker::compute_enemy_distances(float& minimum_enemy_distance, float& maximum_enemy_distance)
+void CAI_Stalker::compute_enemy_distances(
+    const CInventoryItem* best_item, float& minimum_enemy_distance, float& maximum_enemy_distance)
 {
     minimum_enemy_distance = MIN_SUITABLE_ENEMY_DISTANCE;
     maximum_enemy_distance = 170.f;
 
-    if (!best_weapon())
+    if (!best_item)
         return;
 
-    const int weapon_type = best_weapon()->object().ef_weapon_type();
+    const int weapon_type = best_item->object().ef_weapon_type();
     switch (StalkerSpace::convert_weapon_type(weapon_type))
     {
     case StalkerSpace::WeaponTypes::Pistol:
@@ -145,14 +194,16 @@ const CCoverPoint* CAI_Stalker::find_best_cover(const Fvector& position_to_cover
 #ifdef _DEBUG
     ++g_near_cover_search_count;
 #endif
+    // 45-engine-ai-audit.md, N12: one best_weapon() call instead of four (each one runs update_best_item_info)
+    CInventoryItem* const best_item = best_weapon();
     float minimum_enemy_distance, maximum_enemy_distance;
-    compute_enemy_distances(minimum_enemy_distance, maximum_enemy_distance);
+    compute_enemy_distances(best_item, minimum_enemy_distance, maximum_enemy_distance);
 
-    if (!best_weapon())
+    if (!best_item)
         m_ce_best->can_use_smart_covers(false);
     else
     {
-        CWeapon* weapon = smart_cast<CWeapon*>(best_weapon());
+        CWeapon* weapon = smart_cast<CWeapon*>(best_item);
         if (!weapon)
             m_ce_best->can_use_smart_covers(false);
         else
@@ -334,6 +385,18 @@ const CCoverPoint* CAI_Stalker::best_cover(const Fvector& position_to_cover_from
             member_order->cover(nullptr);
         return (nullptr);
     }
+
+    if (!m_best_cover && !memory().danger().selected() && cover_scan_frame_budget_spent())
+    {
+        // the cover searches of this frame are over budget (npc_cover_scan_frame_budget_us): no cover this update,
+        // m_best_cover_actual stays false - the next update searches
+        PERF_INC(stk_cover_frame_defer);
+        CMemberOrder* member_order = agent_manager().member().get_member(ID());
+        if (member_order)
+            member_order->cover(nullptr);
+        return (nullptr);
+    }
+    cover_scan_frame_timer scan_frame_timer;
 
     m_best_cover_actual = true;
 

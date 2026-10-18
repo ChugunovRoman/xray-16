@@ -9,6 +9,7 @@
 #include "TextureDescrManager.h"
 
 #include "xrScriptEngine/script_engine.hpp"
+#include "xrCommon/xr_unordered_map.h"
 
 #if defined(USE_DX11)
 #include <shared_mutex>
@@ -17,6 +18,64 @@
 namespace xray::render::RENDER_NAMESPACE
 {
 class dx11ConstantBuffer;
+
+// 40-parallel-prefetch.md (plans/optimization_mt): a hash index over one of the registries of CResourceManager
+// (v_passes, v_elements, v_shaders, lst_textures, v_geoms). Each create used to look for an equal entry by walking the
+// whole vector: thousands of entries by the end of the model prefetch, tens of thousands of creates - quadratic. The
+// vector stays the registry (order, Dump, reset); the index only finds. The hash of an entry is kept from its insertion:
+// an entry changed in place later (STextureList::create_texture, the geometry remap of reset_end) is still erased
+// right, and find() checks equality, so an out-of-date hash can only miss (a new, equal entry is made), never give a
+// wrong one. Not locked itself: the registry's lock guards it.
+template <typename T>
+class ResourceIndex
+{
+public:
+    template <typename Equal>
+    T* find(size_t hash, Equal&& equal) const
+    {
+        const auto range = by_hash.equal_range(hash);
+        for (auto it = range.first; it != range.second; ++it)
+        {
+            if (equal(*it->second))
+                return it->second;
+        }
+        return nullptr;
+    }
+
+    void insert(size_t hash, T* item)
+    {
+        by_hash.emplace(hash, item);
+        hash_of[item] = hash;
+    }
+
+    void erase(const T* item)
+    {
+        const auto it = hash_of.find(item);
+        if (it == hash_of.end())
+            return;
+        const auto range = by_hash.equal_range(it->second);
+        for (auto h = range.first; h != range.second; ++h)
+        {
+            if (h->second == item)
+            {
+                by_hash.erase(h);
+                break;
+            }
+        }
+        hash_of.erase(it);
+    }
+
+    void clear()
+    {
+        by_hash.clear();
+        hash_of.clear();
+    }
+
+private:
+    std::unordered_multimap<size_t, T*, std::hash<size_t>, std::equal_to<size_t>,
+        xr_allocator<std::pair<const size_t, T*>>> by_hash;
+    xr_unordered_map<const T*, size_t> hash_of;
+};
 
 // defs
 class ECORE_API CResourceManager
@@ -86,6 +145,7 @@ private:
     xr_vector<SDeclaration*> v_declarations;
     xr_vector<SGeometry*> v_geoms;
     Lock v_geoms_lock; // GAME_RENDER_OVERLAP_PLAN P1.6: CreateGeom/DeleteGeom had no lock at all.
+    ResourceIndex<SGeometry> m_geoms_index; // 40-parallel-prefetch.md, under v_geoms_lock
     xr_vector<R_constant_table*> v_constant_tables;
 
 #if defined(USE_DX11)
@@ -109,6 +169,17 @@ private:
     xr_vector<ShaderElement*> v_elements;
     xr_vector<Shader*> v_shaders;
     Lock v_shaders_lock;
+
+    // 40-parallel-prefetch.md (plans/optimization_mt): the models of the prefetch list load on several threads at once
+    // (D3D11), and each creates its shaders. m_create_lock makes one shader creation at a time - all of Create (blender
+    // compile, states, constant tables, passes, elements, the shader caches of D3D) - and guards the indices below; the
+    // creates and deletes of the indexed registries take it too, whichever thread they run on. Recursive (Lock).
+    // Order: CModelPool's lock -> m_create_lock -> ScriptEngineLock / m_textures_lock / v_constant_buffer_lock.
+    Lock m_create_lock;
+    ResourceIndex<STextureList> m_texture_lists_index;
+    ResourceIndex<SPass> m_passes_index;
+    ResourceIndex<ShaderElement> m_elements_index;
+    ResourceIndex<Shader> m_shaders_index;
 
     xr_vector<ref_texture> m_necessary;
     // misc
@@ -232,6 +303,9 @@ public:
         IBlender* B, LPCSTR s_shader = nullptr, LPCSTR s_textures = nullptr, LPCSTR s_constants = nullptr, LPCSTR s_matrices = nullptr);
     Shader* _lua_Create(LPCSTR s_shader, LPCSTR s_textures);
     BOOL _lua_HasShader(LPCSTR s_shader);
+    // 40-parallel-prefetch.md: the registered shader equal to S, or S moved into a new registered one (the end of
+    // _cpp_Create and _lua_Create)
+    Shader* _FindOrRegisterShader(Shader& S);
 
     CResourceManager() : bDeferredLoad(TRUE)
     {
@@ -267,6 +341,8 @@ public:
     SGeometry* CreateGeom(u32 FVF, VertexBufferHandle vb, IndexBufferHandle ib);
 
     void DeleteGeom(const SGeometry* VS);
+    // 40-parallel-prefetch.md: m_geoms_index anew, after the geometries were changed in place (reset_end)
+    void _RebuildGeomsIndex();
     void DeferredLoad(BOOL E) { bDeferredLoad = E; }
     void DeferredUpload();
     void DeferredUnload();

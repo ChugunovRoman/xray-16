@@ -10,6 +10,11 @@
 #include "xrCommon/xr_vector.h"
 #include "xrSound/Sound.h"
 
+#include <atomic>
+#include <mutex>
+
+class Task;
+
 //коэфициенты и параметры патрона
 struct SBullet_Hit
 {
@@ -170,6 +175,26 @@ protected:
     float m_fTracerLengthMax;
     float m_fTracerLengthMin;
 
+    // plans/optimization_mt/29-game-thread-next.md, A2 (always on since 2026-10-18). UpdateWorkload of a game/render
+    // overlap frame runs as a TaskManager task (StartWorkloadTask, CLevel::OnGameLogicFrame) until its old place in
+    // seqParallel (UpdateWorkloadOrFinishTask -> FinishTask on the Game thread). The task only moves the bullets that
+    // were in m_Bullets when it started and writes m_Events; nothing else of the manager is touched meanwhile:
+    // AddBullet puts new bullets aside (m_BulletsPending), FinishTask appends them and moves them right there - as the
+    // delegate did with the bullets fired before it in the frame, their events first (newest bullets first, the removal
+    // order).
+    Task* m_task = nullptr; // the game logic thread; CommitEvents/Clear on main finish a forgotten one
+    std::atomic<bool> m_task_active{ false }; // AddBullet: put new bullets aside
+    bool m_workload_pending = false; // CommitRenderSet queued UpdateWorkloadOrFinishTask, not run yet
+    size_t m_task_count = 0; // m_Bullets.size() at the start of the task: the bullets it moves
+    std::mutex m_pending_lock;
+    xr_vector<SBullet> m_BulletsPending; // fired while the task runs (under m_pending_lock)
+    xr_vector<SBullet> m_BulletsPendingSwap; // FinishTask scratch, kept between frames (no allocation per frame)
+    xr_vector<_event> m_EventsSwap; // FinishTask scratch: the task's events while the new bullets are moved
+    // The random numbers of the moving (hit probability of the actor, ricochets, whine sounds): ::Random, but the task
+    // has its own generator instead of racing the Game thread on the global one
+    CRandom m_task_rng{ 0x2B1E7 };
+    CRandom* m_rng = &::Random;
+
 protected:
     void PlayWhineSound(SBullet* bullet, IGameObject* object, const Fvector& pos);
     void PlayExplodePS(const Fmatrix& xf);
@@ -204,6 +229,12 @@ protected:
         Fvector const& gravity, float const ait_resistance, float const current_time);
     bool process_bullet(collide::rq_results& rq_storage, SBullet& bullet, float delta_time);
     void UpdateWorkload();
+    // The loop of UpdateWorkload over m_Bullets[begin, end), the newest first
+    void ProcessBullets(size_t begin, size_t end);
+    // A2: the seqParallel delegate of CommitRenderSet (mt_bullets on); the task's body; its join
+    void UpdateWorkloadOrFinishTask();
+    void RunWorkloadTask();
+    void FinishTask();
 
 public:
     CBulletManager();
@@ -218,6 +249,8 @@ public:
 
     void CommitEvents(); // @ the start of frame
     void CommitRenderSet(); // @ the end of frame
+    // A2 (29-game-thread-next.md): the game logic thread of a game/render overlap frame, CLevel::OnGameLogicFrame
+    void StartWorkloadTask();
     void Render();
 };
 

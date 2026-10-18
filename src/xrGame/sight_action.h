@@ -85,6 +85,8 @@ public:
     IC void set_memory_object(const CMemoryInfo* object_to_look);
     IC bool operator==(const CSightAction& sight_action) const;
     void remove_links(IGameObject* object);
+    // R1 (32-frame-spikes.md): remove_links for every object of the batch, in one pass
+    void remove_links_batch(const struct RelcaseBatch& batch);
     bool change_body_speed() const;
     float body_speed() const;
     bool change_head_speed() const;

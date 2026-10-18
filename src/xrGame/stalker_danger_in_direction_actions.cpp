@@ -55,8 +55,9 @@ void CStalkerActionDangerInDirectionTakeCover::initialize()
     object().movement().set_movement_type(::Random.randI(2) ? eMovementTypeRun : eMovementTypeWalk);
     u32 min_queue_size, max_queue_size, min_queue_interval, max_queue_interval;
     float distance = object().memory().danger().selected()->position().distance_to(object().Position());
-    select_queue_params(distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
-    object().CObjectHandler::set_goal(eObjectActionAimReady1, object().best_weapon(), min_queue_size, max_queue_size,
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    select_queue_params(best_item, distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
+    object().CObjectHandler::set_goal(eObjectActionAimReady1, best_item, min_queue_size, max_queue_size,
         min_queue_interval, max_queue_interval);
 }
 
@@ -133,8 +134,9 @@ void CStalkerActionDangerInDirectionLookOut::initialize()
 
     u32 min_queue_size, max_queue_size, min_queue_interval, max_queue_interval;
     float distance = object().memory().danger().selected()->position().distance_to(object().Position());
-    select_queue_params(distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
-    object().CObjectHandler::set_goal(eObjectActionAimReady1, object().best_weapon(), min_queue_size, max_queue_size,
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    select_queue_params(best_item, distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
+    object().CObjectHandler::set_goal(eObjectActionAimReady1, best_item, min_queue_size, max_queue_size,
         min_queue_interval, max_queue_interval);
 
     set_inertia_time(1000);
@@ -218,8 +220,9 @@ void CStalkerActionDangerInDirectionHoldPosition::initialize()
 
     u32 min_queue_size, max_queue_size, min_queue_interval, max_queue_interval;
     float distance = object().memory().danger().selected()->position().distance_to(object().Position());
-    select_queue_params(distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
-    object().CObjectHandler::set_goal(eObjectActionAimReady1, object().best_weapon(), min_queue_size, max_queue_size,
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    select_queue_params(best_item, distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
+    object().CObjectHandler::set_goal(eObjectActionAimReady1, best_item, min_queue_size, max_queue_size,
         min_queue_interval, max_queue_interval);
 
     set_inertia_time(5000 + ::Random32.random(5000));
@@ -256,8 +259,9 @@ void CStalkerActionDangerInDirectionHoldPosition::execute()
 
     u32 min_queue_size, max_queue_size, min_queue_interval, max_queue_interval;
     float distance = position.distance_to(object().Position());
-    select_queue_params(distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
-    object().CObjectHandler::set_goal(eObjectActionAimReady1, object().best_weapon(), min_queue_size, max_queue_size,
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    select_queue_params(best_item, distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
+    object().CObjectHandler::set_goal(eObjectActionAimReady1, best_item, min_queue_size, max_queue_size,
         min_queue_interval, max_queue_interval);
 }
 
@@ -285,8 +289,9 @@ void CStalkerActionDangerInDirectionDetour::initialize()
     object().movement().set_mental_state(eMentalStateDanger);
     u32 min_queue_size, max_queue_size, min_queue_interval, max_queue_interval;
     float distance = object().memory().danger().selected()->position().distance_to(object().Position());
-    select_queue_params(distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
-    object().CObjectHandler::set_goal(eObjectActionAimReady1, object().best_weapon(), min_queue_size, max_queue_size,
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    select_queue_params(best_item, distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
+    object().CObjectHandler::set_goal(eObjectActionAimReady1, best_item, min_queue_size, max_queue_size,
         min_queue_interval, max_queue_interval);
     if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))
         member_order->cover(0);
@@ -357,8 +362,9 @@ void CStalkerActionDangerInDirectionSearch::initialize()
 
     u32 min_queue_size, max_queue_size, min_queue_interval, max_queue_interval;
     float distance = object().memory().danger().selected()->position().distance_to(object().Position());
-    select_queue_params(distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
-    object().CObjectHandler::set_goal(eObjectActionAimReady1, object().best_weapon(), min_queue_size, max_queue_size,
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    select_queue_params(best_item, distance, min_queue_size, max_queue_size, min_queue_interval, max_queue_interval);
+    object().CObjectHandler::set_goal(eObjectActionAimReady1, best_item, min_queue_size, max_queue_size,
         min_queue_interval, max_queue_interval);
 
     if (CMemberOrder* member_order = object().agent_manager().member().get_member(object().ID()))

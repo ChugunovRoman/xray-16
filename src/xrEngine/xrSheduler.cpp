@@ -104,10 +104,56 @@ ENGINE_API int ps_shed_near_dist_min = 8;
 ENGINE_API int ps_shed_urgent_share = 70;
 ENGINE_API int ps_shed_urgent_hit_ms = 3000;
 
+// plans/optimization_mt/29-game-thread-next.md, the adaptive budget (always on since 2026-10-18, its switch
+// shed_budget_adaptive removed, 41-cvar-cleanup.md; shed_budget_min_ms = shed_budget_ms gives the fixed budget of
+// before). In a heavy fight the frame waits for the Game thread: the main thread sits in the
+// join 8-15 ms a frame (frame/game_wait) and the pass takes its whole budget (shed_budget_ms 7) - while in a light frame
+// the Game thread is done before the render (wait ~0) and the full budget costs nothing. So the budget follows the wait:
+// cut while the main thread waits, back to full while it does not. The price: the AI is updated less often exactly in
+// the heavy frames (shed/*_late_*).
+//  - the signal: the wait of the main thread for the Game thread at its join in a game/render overlap frame (r4 only),
+//    measured by CRenderDevice::JoinGameLogic in every build (CTimer, no XR_PERF_METRICS) and smoothed by an EMA of
+//    ~4 frames (ShedWaitEmaAlpha; frame/game_wait_ema_us). One sample a frame; the pass of frame N sees the joins up to
+//    N-1, and a cut shows in the wait of the very frame it is made in (the Game thread ends earlier by it);
+//  - the rule (an integral controller with a dead band and limited steps, on every new sample):
+//      err = wait_ema - shed_budget_wait_target_us (1 ms);
+//      err > +0.5 ms: budget -= min(0.25 * (err - 0.5), 0.5 ms);  err < -0.5 ms: budget += min(0.25 * (-err - 0.5), 0.1 ms);
+//      budget = clamp(budget, shed_budget_min_ms, shed_budget_ms).
+//    The wait answers a cut ~1:1 (the pass uses its whole budget under load), so the gain 0.25 per frame is far from the
+//    1.0 where it would start to swing; the step limits make it cut fast (7 -> 4 ms in ~6 frames) and give back slowly
+//    (4 -> 7 ms in ~30 frames, ~0.1 ms a frame); the dead band (target +- 0.5 ms) absorbs the noise of the EMA and the
+//    overshoot of the EMA lag (~4 frames x 0.1 ms of growth stays inside it), so it settles instead of hunting. A plain
+//    proportional rule (budget = base - k * (wait - target)) would keep a part of the wait for good; the integral one
+//    drives it to the target or rests at the minimum. No new sample for ShedAdaptStaleFrames passes (pause, sequential
+//    frames, loading, a renderer without the overlap) -> back to the base, and the next sample starts the EMA anew;
+//  - what is cut: the phases keep their windows of the base budget (urgent / calm near / far = cumulative deadlines from
+//    the start of the pass); the end of the whole pass moves to the effective budget, and the end of the near class to
+//    the effective budget minus the kept far part (shed_budget_far_keep_pct % of the far window, while the far heap has
+//    due items), the urgent deadline is clamped by the near one. Since the heaps run in this order, the cut takes the
+//    far window first (down to its kept part: ALife, the agent managers and the creatures outside the adaptive near
+//    radius - in a crowd many fighting ones - live there), then the calm near one, then the urgent one, the kept far
+//    part last. With the defaults (7 ms, far share 25 %, urgent share 70 %, keep 25 %, minimum 4 ms): far 1.75 ms ->
+//    0.44 ms, calm 1.58 -> 0, urgent 3.68 -> 3.56 ms (-3 %). The step minima stay (one far step, one calm step after an
+//    urgent one, shed_near_min_steps), so nothing starves;
+//  - shed_budget_scale_pct (read-only) = 100 * effective / base: plugins scale their own frame budgets by it
+//    (gw_npc_budget_adaptive). Metrics: shed/budget_effective_us, shed/budget_cut_frames, frame/game_wait_ema_us.
+ENGINE_API int ps_shed_budget_min_ms = 4;
+ENGINE_API int ps_shed_budget_wait_target_us = 1000;
+ENGINE_API int ps_shed_budget_far_keep_pct = 25;
+ENGINE_API int ps_shed_budget_scale_pct = 100;
+
 extern ENGINE_API float g_fov; // unzoomed camera fov (console "fov"), xr_ioc_cmd.cpp
 
 namespace
 {
+// The adaptive budget (see the comment at ps_shed_budget_min_ms)
+constexpr float ShedWaitEmaAlpha = 0.25f; // EMA of the wait of the main thread, ~4 frames
+constexpr float ShedAdaptDeadbandMs = 0.5f; // no change while |wait EMA - target| is within it
+constexpr float ShedAdaptGain = 0.25f; // ms of budget per ms of the error beyond the band, a frame
+constexpr float ShedAdaptMaxCutMs = 0.5f; // a frame: cut fast...
+constexpr float ShedAdaptMaxGrowMs = 0.1f; // ...give back slowly
+constexpr u32 ShedAdaptStaleFrames = 30; // passes without a new sample -> the base budget
+
 enum : u32
 {
     ShedCatOther = 0,
@@ -1150,6 +1196,60 @@ bool CSheduler::ExecuteTop(xr_vector<Item>& heap, u32 dwTime, u32 tier, shared_s
     return true;
 }
 
+void CSheduler::NoteGameWait(u64 wait_ns)
+{
+    // Main thread, at the join (the Game thread is idle): see the comment at ps_shed_budget_min_ms
+    const float wait_ms = float(double(wait_ns) * 1e-6);
+    float ema = m_game_wait_ema_ms.load(std::memory_order_relaxed);
+    if (m_game_wait_restart.exchange(false, std::memory_order_relaxed))
+        ema = wait_ms;
+    else
+        ema += ShedWaitEmaAlpha * (wait_ms - ema);
+    m_game_wait_ema_ms.store(ema, std::memory_order_relaxed);
+    m_game_wait_samples.fetch_add(1, std::memory_order_release);
+    xray::perf::SetGauge(xray::perf::Metric::frame_game_wait_ema_us, s64(ema * 1000.f));
+}
+
+u64 CSheduler::AdaptBudget(u32 base_ms, bool timed)
+{
+    // See the comment at ps_shed_budget_min_ms. Game thread (or the thread of a sequential frame), once a pass
+    const float base = float(base_ms);
+    const u32 samples = m_game_wait_samples.load(std::memory_order_acquire);
+    const bool fresh = samples != m_adapt_wait_seen;
+    m_adapt_wait_seen = samples;
+    if (!timed || m_budget_eff_ms <= 0.f)
+    {
+        // A loading / precache frame, or the first pass: the base budget
+        m_budget_eff_ms = base;
+        m_adapt_idle_passes = 0;
+    }
+    else if (fresh)
+    {
+        m_adapt_idle_passes = 0;
+        const float target = float(std::clamp(ps_shed_budget_wait_target_us, 0, 20000)) * 0.001f;
+        const float err = m_game_wait_ema_ms.load(std::memory_order_relaxed) - target;
+        if (err > ShedAdaptDeadbandMs)
+            m_budget_eff_ms -= std::min(ShedAdaptGain * (err - ShedAdaptDeadbandMs), ShedAdaptMaxCutMs);
+        else if (err < -ShedAdaptDeadbandMs)
+            m_budget_eff_ms += std::min(ShedAdaptGain * (-err - ShedAdaptDeadbandMs), ShedAdaptMaxGrowMs);
+    }
+    else if (++m_adapt_idle_passes >= ShedAdaptStaleFrames)
+    {
+        // No overlap frame for a while (pause, sequential frames, a renderer without the overlap): the wait says
+        // nothing about this load any more - the base budget, and the next sample starts the EMA anew
+        m_budget_eff_ms = base;
+        m_game_wait_restart.store(true, std::memory_order_relaxed);
+    }
+    const float lo = std::min(base, float(std::clamp(ps_shed_budget_min_ms, 1, 50)));
+    m_budget_eff_ms = std::clamp(m_budget_eff_ms, lo, base);
+
+    ps_shed_budget_scale_pct = std::clamp(iFloor(100.f * m_budget_eff_ms / base + 0.5f), 1, 100);
+    if (m_budget_eff_ms < base)
+        PERF_INC(shed_budget_cut_frames);
+    xray::perf::SetGauge(xray::perf::Metric::shed_budget_effective_us, s64(m_budget_eff_ms * 1000.f));
+    return u64(double(m_budget_eff_ms) * 1000000.0);
+}
+
 void CSheduler::ProcessStep()
 {
     ZoneScopedN("CSheduler::ProcessStep");
@@ -1175,6 +1275,10 @@ void CSheduler::ProcessStep()
     const u32 max_steps = ps_shed_max_steps > 0 ? u32(ps_shed_max_steps) : u32(-1);
     const u32 near_min_steps = u32(_max(0, ps_shed_near_min_steps));
     xray::perf::SetGauge(xray::perf::Metric::shed_budget, budget_ms);
+    // 29-game-thread-next.md: the effective budget (AdaptBudget). The phase windows below
+    // are of the base budget, clamped by it: the far window is cut first (down to its kept part), then the calm near
+    // one, then the urgent one, the kept far part last (see the comment at ps_shed_budget_min_ms)
+    const u64 eff_budget_ns = AdaptBudget(budget_ms, timed && !loading);
 
     {
         // Both scans of the class, shed/promote_scan is their time. A demoted item is not promoted back by the far scan:
@@ -1190,7 +1294,11 @@ void CSheduler::ProcessStep()
     // The far heap keeps its share only while it has due items; otherwise the near one may use the whole budget
     const bool far_due = !Items.empty() && Items.front().dwTimeForExecute < dwTime;
     const u64 far_share = u64(std::clamp(ps_shed_far_share, 0, 90));
-    const u64 near_budget_ns = far_due ? budget_ns * (100 - far_share) / 100 : budget_ns;
+    const u64 near_base_ns = far_due ? budget_ns * (100 - far_share) / 100 : budget_ns;
+    // Adaptive budget: the far window is cut first, but keeps shed_budget_far_keep_pct % of its base length (the near
+    // window ends that much before the effective budget); = near_base_ns with the effective budget at the base
+    const u64 far_keep_ns = (budget_ns - near_base_ns) * u64(std::clamp(ps_shed_budget_far_keep_pct, 0, 100)) / 100;
+    const u64 near_budget_ns = std::min(near_base_ns, eff_budget_ns > far_keep_ns ? eff_budget_ns - far_keep_ns : 0);
 
     u32 steps = 0;
     bool exit_limit = false;
@@ -1208,7 +1316,8 @@ void CSheduler::ProcessStep()
         PERF_SCOPE(shed_phase_urgent);
         const bool calm_due = !ItemsNear.empty() && ItemsNear.front().dwTimeForExecute < dwTime;
         const u64 urgent_share = u64(std::clamp(ps_shed_urgent_share, 10, 100));
-        const u64 urgent_budget_ns = calm_due ? near_budget_ns * urgent_share / 100 : near_budget_ns;
+        const u64 urgent_budget_ns =
+            std::min(calm_due ? near_base_ns * urgent_share / 100 : near_base_ns, near_budget_ns);
         while (!ItemsUrgent.empty() && ItemsUrgent.front().dwTimeForExecute < dwTime)
         {
             if (near_steps >= near_min_steps)
@@ -1277,7 +1386,7 @@ void CSheduler::ProcessStep()
                     exit_limit = true;
                     break;
                 }
-                if (timed && timer.GetElapsed_ns() >= budget_ns)
+                if (timed && timer.GetElapsed_ns() >= eff_budget_ns)
                 {
                     exit_time = true;
                     break;
@@ -1339,8 +1448,8 @@ void CSheduler::ProcessStep()
         }
     }
 
-    // The adaptive budget only follows the fixed one: stats.Load and shed/ps_current show it
-    psShedulerTarget = float(budget_ms);
+    // The adaptive psShedulerCurrent only follows the effective budget: stats.Load and shed/ps_current show it
+    psShedulerTarget = m_budget_eff_ms;
 }
 
 void CSheduler::UpdateRTImpl()

@@ -130,6 +130,10 @@ public:
     /** Returns actual. current_level = Level().name(): the position is computed only for locations on it. */
     virtual bool Update(const shared_str& current_level);
     void UpdateTTL();
+    /** map_update_lod (CMapManager::Update): may the Update of this frame be skipped - not hot (see map_manager.cpp). */
+    bool UpdateLodSkippable(u32 interval, const Fvector& camera, const shared_str& current_level) const;
+    /** The minimap cull (CUIMiniMap::UpdateSpots): the minimap spot is surely out of the map, nothing else to do. */
+    bool MiniMapFarAway(const shared_str& map_name, const Fvector2& center, float dist_sqr) const;
     Fvector GetLastPosition() const { return m_position_global; }
     bool Serializable() const { return !!m_flags.test(eSerailizable); }
     void SetSerializable(bool b) { m_flags.set(eSerailizable, b); }

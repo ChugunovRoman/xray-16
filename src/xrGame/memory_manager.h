@@ -60,6 +60,8 @@ public:
     virtual void reload(LPCSTR section);
     virtual void update(float time_delta);
     void remove_links(IGameObject* object);
+    // R1 (32-frame-spikes.md): remove_links for every object of the batch, in one pass
+    void remove_links_batch(const struct RelcaseBatch& batch);
     virtual void on_restrictions_change();
 
 public:

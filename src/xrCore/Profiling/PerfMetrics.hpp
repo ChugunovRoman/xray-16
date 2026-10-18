@@ -71,6 +71,8 @@ constexpr u8 RRain = 5;
 constexpr u8 RSun = 6;
 constexpr u8 Light = 7;
 constexpr u8 Detail = 8;
+// 28-updatecl-main.md: the foot ray batch of the IK (CIKLimbsController::ExecuteIKRayBatch -> RayPickBatch) in UpdateCL
+constexpr u8 Ik = 9;
 }
 
 // Who wakes a force-slept corpse (plans/optimization_mt/21-physics-step.md, physics/corpse_wake/path/*): the reason
@@ -158,6 +160,9 @@ XRCORE_API u8& TlPhWake() noexcept;
 // Spawn stage 0 (plans/spawn_optimization/SPEC.md): non-zero while this thread materializes an M_SPAWN on the client
 // (CLevel::g_sv_Spawn, PERF_SPAWN_TAG). Lets the render and the sound tell a cold load inside a spawn from any other.
 XRCORE_API u8& TlSpawn() noexcept;
+// 30-game-events.md (plans/optimization_mt): non-zero while this thread runs CLevel::ProcessGameEvents
+// (PERF_GAME_EVENT_TAG). The cold loads of the sound and the render inside it go to ge/cold/* too.
+XRCORE_API u8& TlGameEvent() noexcept;
 // B2.4: depth of the per-model bone locks (CKinematics::UCalc_ModelLock: phase B of CalculateBones, KinematicsBonesLock
 // in Include/xrRender/Kinematics.h, LL_SetBoneVisible) held by this thread, recursive re-entries included. Bone
 // callbacks written inside one are serialized with the render's bone calculation of that model, so the overlap
@@ -170,6 +175,10 @@ XRCORE_API u32& TlBonesLocked() noexcept;
 XRCORE_API u8& TlAiPlanner() noexcept;
 XRCORE_API u8& TlAiContext() noexcept;
 XRCORE_API u8& TlFfCaller() noexcept;
+// 36-spawn-model-load.md (plans/optimization_mt): cold model loads (CModelPool::Create had to load the ogf) made by this
+// thread, a running count. CLevel::ProcessGameEvents compares it before and after a spawn group (spawn_cold_models).
+// Counted with or without XR_PERF_METRICS.
+XRCORE_API u32& TlColdModelLoads() noexcept;
 
 XRCORE_API void AddSlow(Metric m, u64 v) noexcept;
 XRCORE_API void AddTimeSlow(Metric m, u64 ticks) noexcept;
@@ -306,6 +315,7 @@ inline Metric WaitSiteCountMetric(u8 site) noexcept
     case wait_site::RSun:      return Metric::task_wait_site_rsun;
     case wait_site::Light:     return Metric::task_wait_site_light;
     case wait_site::Detail:    return Metric::task_wait_site_detail;
+    case wait_site::Ik:        return Metric::task_wait_site_ik;
     default:                   return Metric::task_wait_site_other;
     }
 }
@@ -324,6 +334,7 @@ inline Metric GameOnMainSiteMetric(u8 site) noexcept
     case wait_site::RSun:      return Metric::task_wait_game_on_main_rsun;
     case wait_site::Light:     return Metric::task_wait_game_on_main_light;
     case wait_site::Detail:    return Metric::task_wait_game_on_main_detail;
+    case wait_site::Ik:        return Metric::task_wait_game_on_main_ik;
     default:                   return Metric::task_wait_game_on_main_other;
     }
 }
@@ -524,6 +535,10 @@ XRCORE_API extern int g_perf_spike_us;    // perf_spike_us: threshold in microse
 XRCORE_API extern int g_perf_spike_cpu;   // perf_spike_cpu: 1 = per-object sites read the thread CPU time too
 XRCORE_API extern int g_perf_spike_lines; // perf_spike_lines: lines per 5 s window before only the summary counts
 XRCORE_API extern u64 g_perf_spike_ticks; // perf_spike_us in Ticks(), latched once per frame in Flush(); 0 = off
+// perf_frame_peak_ms (32-frame-spikes.md; xrEngine cvar, not saved): a frame (wall time between two Flush() calls)
+// longer than this many ms -> one "! [frame-peak]" line with its deltas of GC / relcase / ALife / game events / Lua
+// binders / the bus / the waits of main; 0 = off. > 0 turns the metric collection on (not the plots or the 5 s log).
+XRCORE_API extern int g_perf_frame_peak_ms;
 
 inline bool SpikeActive() noexcept { return g_perf_spike_ticks != 0; }
 
@@ -651,6 +666,7 @@ void DescribeSpikeObject(const void* ctx, char* buf, size_t size) noexcept
 #define PERF_BONE_CALLER(v) ::xray::perf::ScopedTag CONCATENIZE(_perf_bone_, __LINE__)(::xray::perf::TlBoneCaller(), static_cast<u8>(v))
 #define PERF_WAIT_SITE(v) ::xray::perf::ScopedTag CONCATENIZE(_perf_wait_, __LINE__)(::xray::perf::TlWaitSite(), static_cast<u8>(v))
 #define PERF_SPAWN_TAG() ::xray::perf::ScopedTag CONCATENIZE(_perf_spawn_, __LINE__)(::xray::perf::TlSpawn(), 1)
+#define PERF_GAME_EVENT_TAG() ::xray::perf::ScopedTag CONCATENIZE(_perf_ge_, __LINE__)(::xray::perf::TlGameEvent(), 1)
 // physics/corpse_wake/path/* (ph_wake::*): nothing at all in builds without XR_PERF_METRICS, a thread-local byte otherwise.
 #if XR_PERF_METRICS
 #   define PERF_PH_WAKE(v) ::xray::perf::ScopedTag CONCATENIZE(_perf_ph_wake_, __LINE__)(::xray::perf::TlPhWake(), static_cast<u8>(v))

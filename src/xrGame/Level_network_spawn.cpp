@@ -439,6 +439,9 @@ void CLevel::g_sv_Spawn(CSE_Abstract* E)
     {
         if (IGameObject* existing = Objects.net_Find(E->ID))
         {
+            // 30-game-events.md, B1: a child of an object destroyed in this pass is marked by the batched walk only
+            if (!existing->getDestroy())
+                Objects.flush_destroy_child_scan();
             if (existing->getDestroy())
             {
                 PERF_INC(spawn_id_reuse_lost);

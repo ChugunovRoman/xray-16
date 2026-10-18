@@ -50,6 +50,10 @@ struct CNotYetVisibleObject
     float m_value;
     u32 m_update_time;
     u32 m_prev_time;
+    // 45-engine-ai-audit.md, F3: the ID of m_object (u16(-1) for none), written together with it - the list is
+    // searched by ID for every object an NPC sees, and reading the ID through each pointer cost a call and a cache
+    // miss per element. Sits in the tail padding, the size does not change
+    u16 m_object_id = u16(-1);
 };
 
 struct SObjectParams
@@ -92,6 +96,11 @@ struct SMemoryObject
     u32 m_update_count;
 #endif
     bool m_enabled;
+    // 45-engine-ai-audit.md, F3: the ID of CMemoryObject::m_object (u16(-1) for none), kept by CMemoryObject::set_object
+    // and fill - the memory lists are searched by ID (operator==) on every visual/sound/hit update, and reading the ID
+    // through each stored pointer cost a call (object_id, SEH) and a cache miss per element. In the padding after
+    // m_enabled, the size does not change
+    u16 m_object_id;
 
     SMemoryObject()
         :
@@ -116,7 +125,7 @@ struct SMemoryObject
 #ifdef USE_UPDATE_COUNT
           m_update_count(0),
 #endif
-          m_enabled(true)
+          m_enabled(true), m_object_id(u16(-1))
     {
     }
 
@@ -133,6 +142,8 @@ struct CMemoryObject : public SMemoryObject
 
     IC CMemoryObject();
     IC bool operator==(u16 id) const;
+    // m_object and m_object_id together: every write of m_object goes through here or fill
+    IC void set_object(const T* object);
     IC void fill(const T* game_object, const T* self, const squad_mask_type& mask);
 };
 

@@ -550,6 +550,79 @@ xr_vector<xr_string> BuildStackTrace(u16 maxFramesCount)
 
     return BuildStackTrace(&currentThreadCtx, maxFramesCount);
 }
+
+// SymbolizeAddressList: the function and the line of one address, appended. Caller holds the dbghelp lock.
+static void symbolize_address(const void* address, xr_string& out)
+{
+    const DWORD_PTR pc = reinterpret_cast<DWORD_PTR>(address);
+    char formatBuff[512]; // snprintf, never xr_sprintf: see GetNextStackFrameString
+    if (symGetSymFromAddr)
+    {
+        u8 arrSymBuffer[512]{};
+        PIMAGEHLP_SYMBOL functionInfo = reinterpret_cast<PIMAGEHLP_SYMBOL>(arrSymBuffer);
+        functionInfo->SizeOfStruct = sizeof(*functionInfo);
+        functionInfo->MaxNameLength = sizeof(arrSymBuffer) - sizeof(*functionInfo) + 1;
+        DWORD_PTR dwFunctionOffset = 0;
+        if (symGetSymFromAddr(GetCurrentProcess(), pc, &dwFunctionOffset, functionInfo))
+        {
+            std::snprintf(formatBuff, sizeof(formatBuff), " %s()+0x%llX", functionInfo->Name,
+                static_cast<u64>(dwFunctionOffset));
+            out.append(formatBuff);
+        }
+    }
+    if (symGetLineFromAddr)
+    {
+        DWORD dwLineOffset = 0;
+        IMAGEHLP_LINE sourceInfo = {};
+        sourceInfo.SizeOfStruct = sizeof(sourceInfo);
+        if (symGetLineFromAddr(GetCurrentProcess(), pc, &dwLineOffset, &sourceInfo))
+        {
+            std::snprintf(formatBuff, sizeof(formatBuff), " [%s:%u]", sourceInfo.FileName, sourceInfo.LineNumber);
+            out.append(formatBuff);
+        }
+    }
+}
+
+static void symbolize_address_list_impl(const xr_vector<const void*>& addresses, xr_vector<xr_string>& out)
+{
+    init_dbghelp();
+    ensure_sym_initialized();
+    const bool canName = s_sym_initialized;
+    if (canName)
+    {
+        apply_sym_options(); // Tracy may have replaced them since init
+        refresh_sym_modules(); // the game DLLs are loaded after PreloadStackTraceLibrary
+    }
+    out.reserve(addresses.size());
+    for (const void* address : addresses)
+    {
+        xr_string& str = out.emplace_back();
+        FormatModuleRelativeAddress(address, str);
+        if (canName && address)
+            symbolize_address(address, str);
+    }
+}
+
+// See CollectGameModules: the lock must survive an SEH exception thrown out of dbghelp.
+static void symbolize_address_list_locked(const xr_vector<const void*>* addresses, xr_vector<xr_string>* out)
+{
+    dbghelp_lock_enter();
+    __try
+    {
+        symbolize_address_list_impl(*addresses, *out);
+    }
+    __finally
+    {
+        dbghelp_lock_leave();
+    }
+}
+
+xr_vector<xr_string> SymbolizeAddressList(const xr_vector<const void*>& addresses)
+{
+    xr_vector<xr_string> result;
+    symbolize_address_list_locked(&addresses, &result);
+    return result;
+}
 #elif defined(BACKTRACE_AVAILABLE)
 xr_vector<xr_string> BuildStackTrace(u16 maxFramesCount)
 {
@@ -590,10 +663,60 @@ xr_vector<xr_string> BuildStackTrace(u16 maxFramesCount)
 
     return result;
 }
+
+xr_vector<xr_string> SymbolizeAddressList(const xr_vector<const void*>& addresses)
+{
+    xr_vector<xr_string> result;
+    result.reserve(addresses.size());
+    char buff[512];
+    for (const void* address : addresses)
+    {
+        std::snprintf(buff, sizeof(buff), "%p", address);
+        xr_string& str = result.emplace_back(buff);
+#   ifdef CXXABI_AVAILABLE
+        Dl_info info;
+        if (address && dladdr(address, &info))
+        {
+            if (info.dli_fname)
+            {
+                cpcstr slash = std::strrchr(info.dli_fname, '/');
+                std::snprintf(buff, sizeof(buff), " %s+0x%llx", slash ? slash + 1 : info.dli_fname,
+                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(address) -
+                        reinterpret_cast<uintptr_t>(info.dli_fbase)));
+                str.append(buff);
+            }
+            if (info.dli_sname)
+            {
+                int status = -1;
+                char* demangled = abi::__cxa_demangle(info.dli_sname, nullptr, nullptr, &status);
+                std::snprintf(buff, sizeof(buff), " %s+0x%llx", status == 0 && demangled ? demangled : info.dli_sname,
+                    static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(address) -
+                        reinterpret_cast<uintptr_t>(info.dli_saddr)));
+                ::free(demangled);
+                str.append(buff);
+            }
+        }
+#   endif
+    }
+    return result;
+}
 #else
 xr_vector<xr_string> BuildStackTrace(u16 maxFramesCount)
 {
 #   pragma todo("Implement stack trace for this platform")
     return { "Stack trace is not implemented for this platform." };
+}
+
+xr_vector<xr_string> SymbolizeAddressList(const xr_vector<const void*>& addresses)
+{
+    xr_vector<xr_string> result;
+    result.reserve(addresses.size());
+    char buff[64];
+    for (const void* address : addresses)
+    {
+        std::snprintf(buff, sizeof(buff), "%p", address);
+        result.emplace_back(buff);
+    }
+    return result;
 }
 #endif

@@ -41,6 +41,10 @@ private:
     bool ownReader;
     IReader* m_reader;
     CGameVertex* m_nodes;
+    // 36 (plans/optimization_mt/33-level-path.md, journal): the vertices, edges and death
+    // points copied out of the mapped all.spawn by copy_to_memory (m_nodes then points at it), nullptr = read from the
+    // mapped stream. The cross tables (m_cross_tables) stay in the stream.
+    u8* m_nodes_copy{};
     mutable ENABLED m_enabled;
     _GRAPH_ID m_current_level_some_vertex_id;
 
@@ -75,6 +79,15 @@ public:
     IC void set_invalid_vertex(_GRAPH_ID& vertex_id) const;
     IC _GRAPH_ID vertex_id(const CGameVertex* vertex) const;
     IC void set_current_level(u32 level_id);
+    // 35 (plans/optimization_mt/33-level-path.md, journal): the cross table of the current level
+    // into the process memory (CGameLevelCrossTable::copy_to_memory), until the next set_current_level
+    IC bool copy_cross_table_to_memory();
+    // 36 (plans/optimization_mt/33-level-path.md, journal): the vertices, edges and death points
+    // (the same bytes, the same layout) into the process memory. Only before the first vertex()/begin()/begin_spawn():
+    // the pointers handed out earlier would stay in the mapped stream, vertex_id() of them would be wrong.
+    // bytes = the size of that block; false = not copied (the stream is shorter than the header says).
+    IC bool copy_to_memory(size_t& bytes);
+    IC bool in_memory() const { return m_nodes_copy != nullptr; }
     IC const _GRAPH_ID& current_level_vertex() const;
 
     /** Thread-local scratch A* on game vertices (ixray-style). */

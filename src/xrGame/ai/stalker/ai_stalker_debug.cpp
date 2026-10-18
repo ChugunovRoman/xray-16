@@ -379,7 +379,7 @@ void CAI_Stalker::debug_text()
             float interval = (1.f - panic_threshold()) * .25f, left = -1.f, right = -1.f;
             LPCSTR description = "invalid";
             u32 result = dwfChooseAction(2000, 1.f - interval, 1.f - 2 * interval, 1.f - 3 * interval,
-                panic_threshold(), g_Team(), g_Squad(), g_Group(), 0, 1, 2, 3, 4, this, 300.f);
+                panic_threshold(), g_Team(), g_Squad(), hierarchy_group(), 0, 1, 2, 3, 4, this, 300.f);
             switch (result)
             {
             case 0:

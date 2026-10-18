@@ -1414,10 +1414,11 @@ IFactoryObject* CCustomMonster::_construct()
 
 void CCustomMonster::net_Relcase(IGameObject* object)
 {
-    ZoneScopedN("CCustomMonster::net_Relcase");
+    // R5 (32-frame-spikes.md): per object x destroyed object - hidden with perf_metrics bit 4
+    PERF_HOT_ZONE("CCustomMonster::net_Relcase");
     inherited::net_Relcase(object);
     {
-        ZoneScopedN("CCustomMonster::net_Relcase memory");
+        PERF_HOT_ZONE("CCustomMonster::net_Relcase memory");
         memory().remove_links(object);
     }
 }

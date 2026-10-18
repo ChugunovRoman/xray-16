@@ -42,11 +42,14 @@ void SetActorVisibility(u16 who, float value);
 
 struct SRemoveOfflinePredicate
 {
-    static bool stale_or_offline(const CGameObject* stored)
+    // 45-engine-ai-audit.md, F3: the entry's cached ID (m_object_id, written with the pointer) instead of reading it
+    // through the stored pointer, and no second read through the live one: the object is kept only when the live
+    // object with that ID is the stored pointer itself, and then both reads gave that same ID. A dangling pointer is
+    // removed as before (no live object by the ID, or another one)
+    static bool stale_or_offline(const CGameObject* stored, const u16 id)
     {
         if (!stored)
             return true;
-        const u16 id = object_id(stored);
         if (id == u16(-1))
             return true;
         auto* const raw_go = Level().Objects.net_Find(id);
@@ -54,9 +57,6 @@ struct SRemoveOfflinePredicate
             return true;
         CGameObject* const live = smart_cast<CGameObject*>(raw_go);
         if (!live)
-            return true;
-        const u16 live_id = object_id(live);
-        if (live_id != id)
             return true;
         // Same id but different pointer => stale ref in the list; remove so vision can re-add a valid ptr.
         if (live != stored)
@@ -76,9 +76,12 @@ struct SRemoveOfflinePredicate
 #endif
     }
 
-    bool operator()(const CVisibleObject& object) const { return stale_or_offline(object.m_object); }
+    bool operator()(const CVisibleObject& object) const { return stale_or_offline(object.m_object, object.m_object_id); }
 
-    bool operator()(const CNotYetVisibleObject& object) const { return stale_or_offline(object.m_object); }
+    bool operator()(const CNotYetVisibleObject& object) const
+    {
+        return stale_or_offline(object.m_object, object.m_object_id);
+    }
 };
 
 struct CVisibleObjectPredicate
@@ -92,19 +95,20 @@ struct CVisibleObjectPredicate
     }
 };
 
+// 45-engine-ai-audit.md, F3: the ID of the object asked once, the entries by their cached ID (CNotYetVisibleObject::
+// m_object_id) - no call and no pointer read per element. Same answer: no object or an entry without one never match
 struct CNotYetVisibleObjectPredicate
 {
-    const CGameObject* m_game_object;
+    u16 m_id;
 
-    IC CNotYetVisibleObjectPredicate(const CGameObject* game_object) { m_game_object = game_object; }
+    IC CNotYetVisibleObjectPredicate(const CGameObject* game_object)
+        : m_id(game_object ? u16(game_object->ID()) : u16(-1)) {}
     IC bool operator()(const CNotYetVisibleObject& object) const
     {
-        if (!m_game_object)
+        if (m_id == u16(-1))
             return false;
-        const u16 vis = object_id(object.m_object);
-        if (vis == u16(-1))
-            return false;
-        return (vis == m_game_object->ID());
+        VERIFY(object_id(object.m_object) == u16(-1) || object_id(object.m_object) == object.m_object_id);
+        return (object.m_object_id == m_id);
     }
 };
 
@@ -273,6 +277,14 @@ void CVisualMemoryManager::enable(const IGameObject* object, bool enable)
 
 float CVisualMemoryManager::object_visible_distance(const CGameObject* game_object, float& object_distance) const
 {
+    SEyeView eye;
+    return object_visible_distance(game_object, object_distance, eye);
+}
+
+// F14: the observer part of object_visible_distance, unchanged (the same calls in the same order; Center of the
+// object looked at, which used to sit between the eye and update_range_fov, only reads)
+void CVisualMemoryManager::eye_view(SEyeView& eye) const
+{
     Fvector eye_position = Fvector().set(0.f, 0.f, 0.f), eye_direction;
     Fmatrix eye_matrix;
     float object_range = flt_max, object_fov = flt_max;
@@ -302,14 +314,31 @@ float CVisualMemoryManager::object_visible_distance(const CGameObject* game_obje
         m_client->camera(eye_position, eye_direction, dummy, object_fov, _0, _1, object_range);
     }
 
+    if (m_object)
+        m_object->update_range_fov(object_range, object_fov, m_object->eye_range, deg2rad(m_object->eye_fov));
+
+    eye.position = eye_position;
+    eye.direction = eye_direction;
+    eye.range = object_range;
+    eye.fov = object_fov;
+    eye.ready = true;
+}
+
+float CVisualMemoryManager::object_visible_distance(
+    const CGameObject* game_object, float& object_distance, SEyeView& eye) const
+{
+    if (!eye.ready)
+        eye_view(eye);
+
+    const Fvector& eye_position = eye.position;
+    const Fvector& eye_direction = eye.direction;
+    const float object_range = eye.range, object_fov = eye.fov;
+
     Fvector object_direction;
     game_object->Center(object_direction);
     object_distance = object_direction.distance_to(eye_position);
     object_direction.sub(eye_position);
     object_direction.normalize_safe();
-
-    if (m_object)
-        m_object->update_range_fov(object_range, object_fov, m_object->eye_range, deg2rad(m_object->eye_fov));
 
     float fov = object_fov * .5f;
     float cos_alpha = eye_direction.dotproduct(object_direction);
@@ -439,6 +468,12 @@ u32 CVisualMemoryManager::get_prev_time(const CGameObject* game_object) const
 
 bool CVisualMemoryManager::visible(const CGameObject* game_object, float time_delta)
 {
+    return visible(game_object, time_delta, nullptr);
+}
+
+// F14: eye - the observer of the current update (nullptr: computed here for this object alone, as before)
+bool CVisualMemoryManager::visible(const CGameObject* game_object, float time_delta, SEyeView* eye)
+{
     VERIFY(game_object);
 
     if (should_ignore_object(game_object))
@@ -454,7 +489,8 @@ bool CVisualMemoryManager::visible(const CGameObject* game_object, float time_de
         return (true);
 #endif
 
-    float object_distance, distance = object_visible_distance(game_object, object_distance);
+    SEyeView own_eye;
+    float object_distance, distance = object_visible_distance(game_object, object_distance, eye ? *eye : own_eye);
 
     CNotYetVisibleObject* object = not_yet_visible_object(game_object);
 
@@ -476,6 +512,7 @@ bool CVisualMemoryManager::visible(const CGameObject* game_object, float time_de
     {
         CNotYetVisibleObject new_object;
         new_object.m_object = game_object;
+        new_object.m_object_id = game_object->ID(); // F3: the ID with the pointer (game_object is not null here)
         new_object.m_prev_time = 0;
         new_object.m_value = get_visible_value(game_object, distance, object_distance, time_delta,
             get_object_velocity(game_object, new_object), object_luminocity(game_object));
@@ -522,6 +559,16 @@ bool CVisualMemoryManager::should_ignore_object(IGameObject const* object) const
 
 void CVisualMemoryManager::add_visible_object(const IGameObject* object, float time_delta, bool fictitious)
 {
+    add_visible_object(object, time_delta, fictitious, nullptr, nullptr);
+}
+
+// 45-engine-ai-audit.md, F4: mask() (the group lookup and a linear search over its members) was taken twice per
+// visible object, both times right after the search below, with nothing in between - now once, or not at all when
+// update() passes the mask it took at its start (then nothing on the way here can change the group: the native
+// get_visible_value runs no Lua; with npc_perf_visible_value_native 0 update() passes nullptr)
+void CVisualMemoryManager::add_visible_object(
+    const IGameObject* object, float time_delta, bool fictitious, const squad_mask_type* known_mask, SEyeView* eye)
+{
     if (!fictitious && should_ignore_object(object))
     {
         return;
@@ -533,7 +580,7 @@ void CVisualMemoryManager::add_visible_object(const IGameObject* object, float t
 
     //	START_PROFILE("Memory Manager/visuals/update/add_visibles/visible")
     game_object = smart_cast<const CGameObject*>(object);
-    if (!game_object || (!fictitious && !visible(game_object, time_delta)))
+    if (!game_object || (!fictitious && !visible(game_object, time_delta, eye)))
         return;
     //	STOP_PROFILE
 
@@ -543,11 +590,12 @@ void CVisualMemoryManager::add_visible_object(const IGameObject* object, float t
     //	STOP_PROFILE
 
     //	START_PROFILE("Memory Manager/visuals/update/add_visibles/fill")
+    const squad_mask_type object_mask = known_mask ? *known_mask : mask();
     if (m_objects->end() == J)
     {
         CVisibleObject visible_object;
 
-        visible_object.fill(game_object, self, mask(), mask());
+        visible_object.fill(game_object, self, object_mask, object_mask);
 #ifdef USE_FIRST_GAME_TIME
         visible_object.m_first_game_time = Level().GetGameTime();
 #endif
@@ -568,11 +616,11 @@ void CVisualMemoryManager::add_visible_object(const IGameObject* object, float t
     else
     {
         if (!fictitious)
-            (*J).fill(game_object, self, (*J).m_squad_mask.get() | mask(), (*J).m_visible.get() | mask());
+            (*J).fill(game_object, self, (*J).m_squad_mask.get() | object_mask, (*J).m_visible.get() | object_mask);
         else
         {
-            (*J).m_visible.assign((*J).m_visible.get() | mask());
-            (*J).m_squad_mask.assign((*J).m_squad_mask.get() | mask());
+            (*J).m_visible.assign((*J).m_visible.get() | object_mask);
+            (*J).m_squad_mask.assign((*J).m_squad_mask.get() | object_mask);
             (*J).m_enabled = true;
         }
     }
@@ -750,6 +798,37 @@ void CVisualMemoryManager::remove_links(IGameObject* object)
     }
 }
 
+// R1 (32-frame-spikes.md), inside the relcase pass of CObjectList only: as remove_links for
+// every object of the batch. The group list - the batched branch above (the first member cleans it of the whole
+// batch); the own not-yet-visible list - by ID as CVisibleObjectPredicateEx (an ID is there at most once, so removing
+// every match equals removing the first one per destroyed object).
+void CVisualMemoryManager::remove_links_batch(const RelcaseBatch& batch)
+{
+    if (m_objects)
+    {
+        if (g_pGameLevel->Objects.relcase_first_visit(m_objects))
+        {
+            PERF_INC(relcase_shared_purges);
+            PERF_ADD(relcase_shared_items, m_objects->size());
+            m_objects->erase(std::remove_if(m_objects->begin(), m_objects->end(),
+                                 [&batch](const MemorySpace::CVisibleObject& visible_object)
+                                 {
+                                     return visible_object.m_object &&
+                                         batch.contains_id(object_id(visible_object.m_object));
+                                 }),
+                m_objects->end());
+        }
+        else
+            PERF_INC(relcase_shared_skips);
+    }
+    m_not_yet_visible_objects.erase(std::remove_if(m_not_yet_visible_objects.begin(), m_not_yet_visible_objects.end(),
+                                        [&batch](const MemorySpace::CNotYetVisibleObject& object)
+                                        {
+                                            return object.m_object && batch.contains_id(object_id(object.m_object));
+                                        }),
+        m_not_yet_visible_objects.end());
+}
+
 CVisibleObject* CVisualMemoryManager::visible_object(const CGameObject* game_object)
 {
     VISIBLES::iterator I = std::find_if(m_objects->begin(), m_objects->end(), CVisibleObjectPredicateEx(game_object));
@@ -805,8 +884,15 @@ void CVisualMemoryManager::update(float time_delta)
     {
         xr_vector<IGameObject*>::const_iterator I = m_visible_objects.begin();
         xr_vector<IGameObject*>::const_iterator E = m_visible_objects.end();
+        // F4: the mask of the start of the update when nothing on the way can run Lua (see add_visible_object).
+        // F14: the same for the observer (eye, view range and fov): nothing in this loop moves the NPC, turns its head
+        // or changes its zoom, so one eye serves every object; taken on the first object that needs it
+        const bool no_lua_on_the_way = !!npc_perf_visible_value_native;
+        const squad_mask_type* known_mask = no_lua_on_the_way ? &mask : nullptr;
+        SEyeView eye;
+        SEyeView* shared_eye = no_lua_on_the_way ? &eye : nullptr;
         for (; I != E; ++I)
-            add_visible_object(*I, time_delta);
+            add_visible_object(*I, time_delta, false, known_mask, shared_eye);
     }
     STOP_PROFILE
 
@@ -957,7 +1043,7 @@ void CVisualMemoryManager::load(IReader& packet)
         delayed_object.m_object_id = packet.r_u16();
 
         CVisibleObject& object = delayed_object.m_visible_object;
-        object.m_object = smart_cast<CGameObject*>(Level().Objects.net_Find(delayed_object.m_object_id));
+        object.set_object(smart_cast<CGameObject*>(Level().Objects.net_Find(delayed_object.m_object_id)));
         // object params
         object.m_object_params.m_level_vertex_id = packet.r_u32();
         packet.r_fvector3(object.m_object_params.m_position);
@@ -1044,7 +1130,7 @@ void CVisualMemoryManager::on_requested_spawn(IGameObject* object)
 
         if (m_object->g_Alive())
         {
-            (*I).m_visible_object.m_object = smart_cast<CGameObject*>(object);
+            (*I).m_visible_object.set_object(smart_cast<CGameObject*>(object));
             VERIFY((*I).m_visible_object.m_object);
             add_visible_object((*I).m_visible_object);
         }

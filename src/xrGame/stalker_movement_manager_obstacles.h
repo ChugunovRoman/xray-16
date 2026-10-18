@@ -31,6 +31,8 @@ public:
     virtual ~stalker_movement_manager_obstacles();
     virtual void move_along_path(CPHMovementControl* movement_control, Fvector& dest_position, float time_delta);
     virtual void remove_links(IGameObject* object);
+    // R1 (32-frame-spikes.md): remove_links for every object of the batch, in one pass
+    virtual void remove_links_batch(const struct RelcaseBatch& batch);
     virtual void Load(LPCSTR section);
     float is_going_through(Fmatrix const& matrix, Fvector const& vector, float max_distance) const;
     void on_death();
@@ -67,6 +69,7 @@ private:
     void save_current_state();
     void restore_current_state();
     bool simulate_path_navigation();
+    bool simulate_path_navigation_impl(); // 33-level-path.md: the body, simulate_path_navigation() times it
 
 public:
     virtual void build_level_path();

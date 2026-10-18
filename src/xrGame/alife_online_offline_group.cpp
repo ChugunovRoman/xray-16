@@ -320,6 +320,7 @@ void CSE_ALifeOnlineOfflineGroup::try_switch_online()
     }
     MEMBERS::iterator I = m_members.begin();
     MEMBERS::iterator E = m_members.end();
+    float nearest_member = flt_max; // 36-spawn-model-load.md
     for (; I != E; ++I)
     {
         VERIFY3((*I).second->g_Alive(), "Incorrect situation : some of the OnlineOffline group members is dead",
@@ -334,12 +335,21 @@ void CSE_ALifeOnlineOfflineGroup::try_switch_online()
             "personal "
             "properties",
             (*I).second->name_replace());
-        if (alife().graph().actor()->o_Position.distance_to((*I).second->o_Position) > alife().online_distance())
+        const float member_distance = alife().graph().actor()->o_Position.distance_to((*I).second->o_Position);
+        if (member_distance > alife().online_distance())
         {
+            nearest_member = std::min(nearest_member, member_distance);
             continue;
         }
         inherited1::try_switch_online();
         return;
+    }
+    // 36-spawn-model-load.md (the model prefetch): the squad comes online whole once one member is in - read the
+    // model files of all members ahead when the nearest one is within the margin
+    if (model_prefetch_in_margin(nearest_member, alife().online_distance()))
+    {
+        for (auto& member : m_members)
+            model_prefetch_object(member.second);
     }
     on_failed_switch_online();
 }

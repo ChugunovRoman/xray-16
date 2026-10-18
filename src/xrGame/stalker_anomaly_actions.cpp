@@ -56,9 +56,13 @@ void CStalkerActionGetOutOfAnomaly::initialize()
     object().movement().set_movement_type(eMovementTypeWalk);
     object().movement().set_mental_state(eMentalStateDanger);
     object().sight().setup(SightManager::eSightTypeCurrentDirection);
-    if (object().memory().enemy().selected() && object().inventory().ActiveItem() && object().best_weapon() &&
-        (object().inventory().ActiveItem()->object().ID() == object().best_weapon()->object().ID()))
-        object().CObjectHandler::set_goal(eObjectActionIdle, object().best_weapon());
+    // 45-engine-ai-audit.md, N12: best_weapon() once instead of up to three times; still not called without
+    // an enemy and an active item (short-circuit kept)
+    CInventoryItem* best_item = nullptr;
+    if (object().memory().enemy().selected() && object().inventory().ActiveItem() &&
+        (best_item = object().best_weapon()) != nullptr &&
+        (object().inventory().ActiveItem()->object().ID() == best_item->object().ID()))
+        object().CObjectHandler::set_goal(eObjectActionIdle, best_item);
     else
         object().CObjectHandler::set_goal(eObjectActionIdle);
     set_property(eWorldPropertyAnomaly, true);

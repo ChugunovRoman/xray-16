@@ -62,8 +62,9 @@ void CStalkerActionSolveZonePuzzle::initialize()
 
 #ifndef GRENADE_TEST
     m_stop_weapon_handling_time = Device.dwTimeGlobal;
-    if (object().inventory().ActiveItem() && object().best_weapon() &&
-        (object().inventory().ActiveItem()->object().ID() == object().best_weapon()->object().ID()))
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    if (object().inventory().ActiveItem() && best_item &&
+        (object().inventory().ActiveItem()->object().ID() == best_item->object().ID()))
         m_stop_weapon_handling_time += ::Random32.random(30000) + 30000;
 
     //	object().movement().set_desired_position	(0);
@@ -120,13 +121,14 @@ void CStalkerActionSolveZonePuzzle::execute()
     inherited::execute();
 
 #ifndef GRENADE_TEST
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
     if (Device.dwTimeGlobal >= m_stop_weapon_handling_time)
-        if (!object().best_weapon())
+        if (!best_item)
             object().CObjectHandler::set_goal(eObjectActionIdle);
         else
-            object().CObjectHandler::set_goal(eObjectActionStrapped, object().best_weapon());
+            object().CObjectHandler::set_goal(eObjectActionStrapped, best_item);
     else
-        object().CObjectHandler::set_goal(eObjectActionIdle, object().best_weapon());
+        object().CObjectHandler::set_goal(eObjectActionIdle, best_item);
 #else
 #if 1
     //		object().throw_target					(g_actor->Position(), g_actor);
@@ -209,7 +211,8 @@ void CStalkerActionSmartTerrain::initialize()
     object().movement().set_mental_state(eMentalStateFree);
     object().sight().setup(CSightAction(SightManager::eSightTypePathDirection));
 
-    if (!object().best_weapon())
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    if (!best_item)
     {
         object().CObjectHandler::set_goal(eObjectActionIdle);
         return;
@@ -217,11 +220,11 @@ void CStalkerActionSmartTerrain::initialize()
 
     object().CObjectHandler::set_goal(eObjectActionIdle);
 
-    CWeapon* best_weapon = smart_cast<CWeapon*>(object().best_weapon());
+    CWeapon* best_weapon = smart_cast<CWeapon*>(best_item);
     if (object().CObjectHandler::weapon_strapped(best_weapon))
         return;
 
-    object().CObjectHandler::set_goal(eObjectActionIdle, object().best_weapon());
+    object().CObjectHandler::set_goal(eObjectActionIdle, best_item);
 }
 
 void CStalkerActionSmartTerrain::finalize()

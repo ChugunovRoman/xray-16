@@ -117,6 +117,18 @@ void CItemManager::remove_links(IGameObject* object)
         m_selected = 0;
 }
 
+// R1 (32-frame-spikes.md): remove_links for every object of the batch in one pass (the items
+// are compared as pointers, each at most once in the list; the selected one by ID, as there).
+void CItemManager::remove_links_batch(const RelcaseBatch& batch)
+{
+    m_objects.erase(std::remove_if(m_objects.begin(), m_objects.end(),
+                        [&batch](const CGameObject* item) { return batch.contains(item); }),
+        m_objects.end());
+
+    if (m_selected && batch.contains_id(m_selected->ID()))
+        m_selected = 0;
+}
+
 void CItemManager::on_restrictions_change()
 {
     if (!m_selected)

@@ -33,11 +33,13 @@ public:
         for (auto& it : N->items)
         {
             ISpatial* S = it;
-            if (0 == (S->GetSpatialData().type & mask))
+            // 46-engine-core-render-audit.md: one virtual call per item (see ISpatial_q_box.cpp)
+            SpatialData& sd = S->GetSpatialData();
+            if (0 == (sd.type & mask))
                 continue;
 
-            Fvector& sC = S->GetSpatialData().sphere.P;
-            float sR = S->GetSpatialData().sphere.R;
+            Fvector& sC = sd.sphere.P;
+            float sR = sd.sphere.R;
             u32 tmask = fmask;
             if (fcvNone == F->testSphere(sC, sR, tmask))
                 continue;

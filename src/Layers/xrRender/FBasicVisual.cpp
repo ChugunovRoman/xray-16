@@ -7,6 +7,8 @@
 
 #include "FBasicVisual.h"
 #include "xrCore/FMesh.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include "ModelPool.h"
 
 namespace xray::render::RENDER_NAMESPACE
 {
@@ -78,6 +80,7 @@ void dxRender_Visual::Load(const char* N, LPCSTR suffix, IReader* data, u32)
                     strncpy(fnT, value->second.c_str(), sizeof(fnT) - 1);
             }
         }
+        MODEL_LOAD_PART("model_load/shader", mload_shader); // 36-spawn-model-load.md
         shader.create(fnS, fnT);
     }
 

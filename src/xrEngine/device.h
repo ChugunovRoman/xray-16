@@ -171,6 +171,11 @@ public:
      *  while no game logic and no physics step run: sequential frame - after the GameThread join, before the physics
      *  kick; game/render overlap frame - after the RT scheduler, before the Game thread is woken. Set by CLevel. */
     std::function<void()> BonesPrepassCallback;
+    /** Early kick of the bones prepass (r__bones_prepass_early_kick, 26-framemove-game-next.md): the game may hand bone
+     *  tasks to the workers at the end of its FrameMove and join them in BonesPrepassCallback. This one joins them
+     *  where that callback doesn't run first: a sequential frame (before its GameThread task), a frame that skips the
+     *  prepass, WaitForFrameTasks. Main thread, a no-op when nothing is in flight. Set by CLevel. */
+    std::function<void()> BonesPrepassJoinCallback;
     /** Optional: flush model pool delete queue on main before `PreRenderThread` (ixray `ModelDefferClear`). Set from R2 `CRender::create`. */
     std::function<void()> ModelDeferredClear;
     CSecondVPParams m_SecondViewport; // --#SM+#-- +SecondVP+

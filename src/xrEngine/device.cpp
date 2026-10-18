@@ -15,6 +15,7 @@
 #include "Engine.h"
 
 #include "xrScriptEngine/script_space.hpp"
+#include "xrScriptEngine/script_wrapper_cache.hpp"
 
 #include <SDL.h>
 
@@ -37,6 +38,10 @@ ENGINE_API bool svp_worker_is_current_thread()
 {
     return g_svp_worker_thread_id.load(std::memory_order_relaxed) == std::this_thread::get_id();
 }
+
+// 31-svp-scope.md (frame/game_wait_svp): Device.dwFrame of the last frame whose IGame_Level::OnRender ran the scope
+// pass (written there on the main thread, read by JoinGameLogic later in the same frame).
+u32 g_svp_scope_render_frame = u32(-1);
 
 ENGINE_API bool g_bBenchmark = false;
 string512 g_sBenchmarkName;
@@ -345,10 +350,16 @@ void CRenderDevice::WaitForFrameTasks()
     // after this join.
     // No-op when nothing is in flight (always in a sequential frame).
     JoinGameLogic();
+    // Early kick of the bones prepass (a reset requested from FrameMove's UI / Lua after the kick): its bone tasks
+    if (BonesPrepassJoinCallback)
+        BonesPrepassJoinCallback();
     // Physics step (Kick..Join window) first: Reset() (mem_compact, render resources) and Destroy() must
     // not run beside it. Idempotent - the regular Join after DoRender() then only flushes.
     if (PhysicsWaitOverlapCallback)
         PhysicsWaitOverlapCallback();
+    // Early main build: its static half writes into the render's immediate dsgraph, which Reset()/Destroy() reset.
+    if (GEnv.Render)
+        GEnv.Render->JoinMainBuildEarly();
     if (!TaskScheduler)
         return;
     if (m_game_task)
@@ -396,7 +407,12 @@ void CRenderDevice::RunBonesPrepass()
         return;
     // Same frames DoRender() would skip the scene for (nothing to prepare for) and loading/precache frames.
     if (GEnv.isDedicatedServer || !b_is_Active || dwPrecacheFrame || load_screen_renderer.IsActive())
+    {
+        // No prepass: the bone tasks of an early kick are joined here instead
+        if (BonesPrepassJoinCallback)
+            BonesPrepassJoinCallback();
         return;
+    }
     ZoneScopedN("BonesPrepass");
     PERF_SCOPE(prepass_time);
     BonesPrepassCallback();
@@ -422,8 +438,15 @@ void CRenderDevice::JoinGameLogic()
     // (normally before the UI, inside frame/render).
     ZoneScopedN("GameLogicJoin");
     PERF_SCOPE(frame_game_wait);
+    PERF_SCOPE_IF(g_svp_scope_render_frame == dwFrame, frame_game_wait_svp); // the same wait, frames with the scope pass
     PERF_SPLIT(None); // C1.0: neither build nor submit of the render (render/split/*)
+    // 29-game-thread-next.md: the same wait, measured in every build (no XR_PERF_METRICS needed), feeds the adaptive
+    // budget of the scheduler (see xrSheduler.cpp). One sample a frame: only the first join of
+    // the frame finds the thread in flight
+    CTimer wait_timer;
+    wait_timer.Start();
     XRay::Engine::JoinGameLogicThread();
+    ::Engine.Sheduler.NoteGameWait(wait_timer.GetElapsed_ns());
 }
 
 void CRenderDevice::JoinGameLogicBeforeUI() { JoinGameLogic(); }
@@ -526,6 +549,14 @@ void CRenderDevice::ProcessFrame()
         // g_Physics on its ODE body, camera-related state, actor binder) runs here on the main thread, inside the
         // same window state as in a sequential frame and strictly before the Game thread and the physics step - so
         // the a927f7153 race (actor scheduler || physics step) cannot come back.
+        // Early main build (26-framemove-game-next.md, r__main_build_early, 0 = no-op): the camera and the HOM of the
+        // frame are final now (CActor::UpdateCL -> OnCameraUpdated), so the static half of the main view's build starts
+        // on a worker here, beside the RT part, the bones prepass and the physics kick; Calculate() in DoRender joins
+        // it and launches the dynamic half (that one needs the prepass done).
+        {
+            ZoneScopedN("MainBuildEarlyKick");
+            GEnv.Render->KickMainBuildEarly();
+        }
         const bool run_scheduler = !Paused();
         if (run_scheduler)
         {
@@ -550,13 +581,17 @@ void CRenderDevice::ProcessFrame()
         // vision batch -> seqParallel -> seqFrameMT, parallel to DoRender() and the physics step. Joined in
         // CLevel::OnRender before the UI
         // (JoinGameLogicBeforeUI), with safety joins in DoRender() and right after it.
-        // 26-framemove-game-next.md, K3/K2b (mt_sound_dispatch_early, lua_gc_overlap): the bones prepass may have woken
+        // 26-framemove-game-next.md, K3/K2b: the bones prepass may have woken
         // the thread already for phase 0 (XRay::Engine::KickGameLogicEarly after its phase A); the body below then
         // starts when phase 0 is done and skips the dispatch phase 0 did.
         XRay::Engine::KickGameLogicThread(run_scheduler);
     }
     else
     {
+    // Early kick of the bones prepass: the frame turned sequential after it (pause, main
+    // menu) - its bone tasks must not run beside the scheduler of the GameThread task below.
+    if (BonesPrepassJoinCallback)
+        BonesPrepassJoinCallback();
     // GameThread (Sheduler.Update + seqFrameMT) runs in parallel with PreRenderThread / main-thread work.
     if (TaskScheduler)
         m_game_task = &TaskScheduler->AddTask([] { XRay::Engine::GameThread(); });
@@ -594,6 +629,11 @@ void CRenderDevice::ProcessFrame()
         PERF_SCOPE(frame_render);
         DoRender();
     }
+
+    // Early main build: a static half DoRender did not take (scene skipped, failed RenderBegin) must not outlive the
+    // frame - ModelDeferredClear / level unload of the next frame. No-op when Calculate() took it.
+    if (game_render_overlap)
+        GEnv.Render->JoinMainBuildEarly();
 
     // Game/render overlap frame: final safety join (DoRender skipped the scene: !b_is_Active, failed RenderBegin,
     // device reset). Must happen before the physics wait and flush below - the Game thread queues physics mutations
@@ -1035,6 +1075,28 @@ void CRenderDevice::RemoveSeqFrame(pureFrame* f)
     seqFrameMT.Remove(f);
     seqFrame.Remove(f);
 }
+
+// The Lua wrapper cache (xrScriptEngine/script_wrapper_cache.hpp): device() gives one wrapper per Lua state
+// (CRenderDevice is never a luabind::wrap_base).
+// The device outlives the Lua states: the epoch of the slot forgets the wrapper of a closed state, nothing releases
+// it. Only this file passes CRenderDevice* to Lua (device()), the specialization is declared and defined here.
+static xray::script_wrapper_cache::Slot s_device_lua_wrapper;
+
+namespace luabind
+{
+template <>
+bool get_back_reference<CRenderDevice*>(lua_State* L, CRenderDevice* const& x)
+{
+    using namespace xray::script_wrapper_cache;
+    if (x != &Device)
+        return false;
+    if (Push(L, s_device_lua_wrapper))
+        return true;
+    luabind::detail::make_pointer_instance(L, x);
+    Store(L, s_device_lua_wrapper);
+    return true;
+}
+} // namespace luabind
 
 void CRenderDevice::script_register(lua_State* luaState)
 {

@@ -168,6 +168,11 @@ void xrDebug::ForgetModuleSymbols(const void* moduleBase)
 #endif
 }
 
+xr_vector<xr_string> xrDebug::SymbolizeAddresses(const xr_vector<const void*>& addresses)
+{
+    return SymbolizeAddressList(addresses);
+}
+
 void xrDebug::LogStackTrace(const char* header)
 {
     xr_vector<xr_string> stackTrace = BuildStackTrace();

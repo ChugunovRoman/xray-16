@@ -40,6 +40,7 @@ IC CGameGraph::CGameGraph(IReader& stream) { Initialize(stream, false); }
 IC CGameGraph::~CGameGraph()
 {
     xr_delete(m_current_level_cross_table);
+    xr_free(m_nodes_copy);
     if (ownReader)
         FS.r_close(m_reader);
 }
@@ -298,6 +299,33 @@ IC const CGameLevelCrossTable& CGameGraph::cross_table() const
     return (*m_current_level_cross_table);
 }
 
+IC bool CGameGraph::copy_cross_table_to_memory()
+{
+    return m_current_level_cross_table && m_current_level_cross_table->copy_to_memory();
+}
+
+// 36 (plans/optimization_mt/33-level-path.md, journal): the game graph lives in the mapped
+// all.spawn (chunk 4, CVirtualFileReader) for the whole ALife session, and a page of it nobody read yet is a read from
+// the disk on the first access (~9 ms after the drive idled). The block [m_nodes, m_cross_tables) - the vertices, the
+// edges and the death points - is copied once: the edge and death point offsets are relative to m_nodes, so the same
+// bytes work from the copy as they are. The cross tables stay in the stream (the current level's one is copied by 35).
+IC bool CGameGraph::copy_to_memory(size_t& bytes)
+{
+    bytes = size_t(header().vertex_count()) * sizeof(CGameVertex) +
+        size_t(header().edge_count()) * sizeof(CEdge) + size_t(header().death_point_count()) * sizeof(CLevelPoint);
+    if (m_nodes_copy)
+        return true;
+    // the end of the stream: pointer() is data + Pos, elapsed() is Size - Pos
+    const u8* stream_end = (const u8*)m_reader->pointer() + m_reader->elapsed();
+    const u8* nodes = (const u8*)m_nodes;
+    if (!bytes || stream_end < nodes || bytes > size_t(stream_end - nodes))
+        return false;
+    m_nodes_copy = xr_alloc<u8>(bytes);
+    memcpy(m_nodes_copy, nodes, bytes);
+    m_nodes = (CGameVertex*)m_nodes_copy;
+    return true;
+}
+
 IC void CGameGraph::save(IWriter& stream)
 {
     m_header.save(&stream);
@@ -312,7 +340,10 @@ IC void CGameGraph::save(IWriter& stream)
     stream.w(buffer, header().death_point_count() * sizeof(CLevelPoint));
     buffer += header().death_point_count() * sizeof(CLevelPoint);
 
-    VERIFY((u8*)m_cross_tables == buffer);
+    // 36: with the copy (copy_to_memory) the block above is in the memory, the cross tables are still in the stream
+    VERIFY(m_nodes_copy || (u8*)m_cross_tables == buffer);
+    if (m_nodes_copy && m_cross_tables)
+        buffer = (u8*)m_cross_tables;
     GameGraph::LEVEL_MAP::const_iterator I = header().levels().begin();
     GameGraph::LEVEL_MAP::const_iterator E = header().levels().end();
     for (; I != E; ++I)

@@ -20,6 +20,21 @@ class CBlender_Compile;
 class IBlender;
 #define SHADER_PASSES_MAX 2
 
+// 40-parallel-prefetch.md (plans/optimization_mt): the hashes of the registries' indices (CResourceManager)
+inline size_t resource_hash_combine(size_t seed, size_t value)
+{
+    return seed ^ (value + size_t(0x9e3779b9) + (seed << 6) + (seed >> 2));
+}
+// A pointer (a handle of D3D) or an integer (a handle of GL)
+template <typename T>
+size_t resource_hash_value(const T& value)
+{
+    if constexpr (std::is_pointer_v<T>)
+        return static_cast<size_t>(reinterpret_cast<uintptr_t>(value) >> 4);
+    else
+        return static_cast<size_t>(value);
+}
+
 #pragma pack(push, 4)
 
 //////////////////////////////////////////////////////////////////////////
@@ -42,6 +57,8 @@ struct ECORE_API STextureList : public xr_resource_flagged, public xr_vector<std
         }
         return TRUE;
     }
+    // 40-parallel-prefetch.md: a hash consistent with equal() (CResourceManager's index of lst_textures)
+    [[nodiscard]] size_t hash() const;
     virtual void clear();
 
     // Avoid using these functions.
@@ -108,6 +125,8 @@ struct ECORE_API SPass : public xr_resource_flagged
     ~SPass();
 
     bool equal(const SPass& other) const;
+    // 40-parallel-prefetch.md: a hash consistent with equal() (CResourceManager's index of v_passes)
+    [[nodiscard]] size_t hash() const;
 };
 typedef resptr_core<SPass, resptr_base<SPass>> ref_pass;
 
@@ -135,6 +154,8 @@ struct ECORE_API ShaderElement : public xr_resource_flagged
     ShaderElement();
     ~ShaderElement();
     BOOL equal(ShaderElement& S);
+    // 40-parallel-prefetch.md: a hash consistent with equal() (CResourceManager's index of v_elements)
+    [[nodiscard]] size_t hash() const;
 };
 using ref_selement = resptr_core<ShaderElement, resptr_base<ShaderElement>>;
 
@@ -147,6 +168,9 @@ struct ECORE_API Shader : public xr_resource_flagged
     ~Shader();
     BOOL equal(Shader* S);
     BOOL equal(Shader* S, int index);
+    // 40-parallel-prefetch.md: a hash consistent with equal() - of the content of E[0..4] (CResourceManager's index of
+    // v_shaders)
+    [[nodiscard]] size_t hash() const;
 };
 
 struct ECORE_API resptrcode_shader : public resptr_base<Shader>

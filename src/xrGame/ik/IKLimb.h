@@ -76,6 +76,11 @@ public:
     float footstep_shift() const { return state_predict.footstep_shift; }
     bool foot_step() const { return sv_state.foot_step(); }
     u16 foot_matrix_predict(Fmatrix& foot, Fmatrix& toe, float time, IKinematicsAnimated* K) const;
+    // U1 of 28-updatecl-main.md: the random of the unstuck time of a new foot position comes from the
+    // own generator of this limb (seeded from the object ID) instead of the global ::Random, which is not thread safe -
+    // Calculate runs in phase B of the bones, on a worker. own = false: ::Random as before
+    void SeedRandom(s32 seed) { m_random.seed(seed); }
+    void SetOwnRandom(bool own) { m_own_random = own; }
 #ifdef DEBUG
     u16 dbg_ref_bone_id() const { return m_bones[m_foot.ref_bone()]; }
     const CIKFoot& dbg_ik_foot() const { return m_foot; }
@@ -83,6 +88,7 @@ public:
 private:
     float get_time_to_step_begin(const CBlend& B) const;
     void Invalidate();
+    CRandom& random() { return m_own_random ? m_random : ::Random; }
 
 private:
     void Solve(SCalculateData& cd);
@@ -126,6 +132,8 @@ private:
     ik_anim_state anim_state;
     ik_limb_state sv_state;
     ik_limb_state_predict state_predict;
+    CRandom m_random; // U1, see SeedRandom
+    bool m_own_random{false};
 #ifdef DEBUG
     bool dbg_disabled;
 #endif

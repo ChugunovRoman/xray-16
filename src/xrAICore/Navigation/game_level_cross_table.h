@@ -74,6 +74,11 @@ private:
 private:
     IReader* m_tpCrossTableVFS;
     IReader* m_chunk;
+    // 35 (plans/optimization_mt/33-level-path.md, journal): m_cells_size = the bytes of
+    // the cells available in the source (the mapped all.spawn or level.gct); m_cells_copy = the cells copied into the
+    // process memory by copy_to_memory (m_tpaCrossTable then points at it), nullptr = read from the mapped file
+    size_t m_cells_size{};
+    CCell* m_cells_copy{};
 
 public:
     IC CGameLevelCrossTable(const void* buffer, const u32& buffer_size);
@@ -83,6 +88,10 @@ public:
     IC virtual ~CGameLevelCrossTable();
     IC const CCell& vertex(u32 level_vertex_id) const;
     IC const CHeader& header() const;
+    // 35: copies the cells into the process memory, the same values; false = not copied (the source is shorter than
+    // the header says), the cells stay in the mapped file
+    IC bool copy_to_memory();
+    IC bool in_memory() const;
 };
 
 #include "xrAICore/Navigation/game_level_cross_table_inline.h"

@@ -16,6 +16,9 @@
 #include "Include/xrRender/Kinematics.h"
 #include "inventory_item.h" // render prepare of held items: CLevel::BonesPrepass collect step
 #include "HudItem.h"
+#include "PhysicsShellHolder.h" // pipelined bones prepass: physics shells (EarlyPhysicsAllowed)
+#include "CharacterPhysicsSupport.h"
+#include "xrPhysics/PhysicsShell.h"
 #include "xrCore/Threading/ParallelFor.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #include "HUDManager.h"
@@ -88,6 +91,14 @@ extern CUISequencer* g_tutorial2;
 float g_cl_lvInterp = 0.1;
 u32 lvInterpSteps = 0;
 
+namespace
+{
+// Pipelined bones prepass (26-framemove-game-next.md): the UpdateCL batch hooks, defined with the prepass below
+bool EarlyBegin(IGameObject* const* b, IGameObject* const* e, u32 batch_size);
+void EarlyBatchDone(u32 batch);
+void EarlyEnd();
+} // namespace
+
 CLevel::CLevel()
     : IPureClient(Device.GetTimerGlobal())
 #ifdef CONFIG_PROFILE_LOCKS
@@ -126,6 +137,8 @@ CLevel::CLevel()
     }
     m_ph_commander = xr_new<CPHCommander>();
     m_ph_commander_scripts = xr_new<CPHCommander>();
+    // 32-frame-spikes.md: per-call Tracy zones, ph_commander/* metrics and the "level/add_call/call" spike site
+    m_ph_commander_scripts->set_profiled(true);
     pObjects4CrPr.clear();
     pActors4CrPr.clear();
     pHUD = xr_new<CHUDManager>();
@@ -141,6 +154,11 @@ CLevel::CLevel()
 
     Device.PostSchedulerVisionBatch = &CLevel::VisionBatchPostScheduler;
     Device.BonesPrepassCallback = &CLevel::BonesPrepass;
+    Device.BonesPrepassJoinCallback = &CLevel::BonesPrepassEarlyKickJoin;
+    // Pipelined bones prepass (26-framemove-game-next.md): hooks of the UpdateCL batch loop
+    Objects.update_batch_hooks.begin = &EarlyBegin;
+    Objects.update_batch_hooks.batch_done = &EarlyBatchDone;
+    Objects.update_batch_hooks.end = &EarlyEnd;
 }
 
 CLevel::~CLevel()
@@ -148,7 +166,11 @@ CLevel::~CLevel()
     ZoneScoped;
 
     Device.PostSchedulerVisionBatch = nullptr;
+    // Early kick: nothing may still compute this level's models (normally joined in the frame of the kick already)
+    BonesPrepassEarlyKickJoin();
     Device.BonesPrepassCallback = nullptr;
+    Device.BonesPrepassJoinCallback = nullptr;
+    Objects.update_batch_hooks = {};
 
     xr_delete(g_player_hud[0]);
     xr_delete(g_player_hud[1]);
@@ -385,6 +407,10 @@ bool CLevel::SpawnMustWait(u16 id, pcstr section)
     if (GameID() != eGameIDSingle || id == u16(-1))
         return false;
     const IGameObject* holder = Objects.net_Find(id);
+    // 30-game-events.md, B1 (ol_destroy_child_scan_batch 1): a child of an object destroyed earlier in this pass is
+    // marked by the walk only - do it now, it may be this one (nothing queued: returns at once)
+    if (holder && !holder->getDestroy())
+        Objects.flush_destroy_child_scan();
     if (!holder || !holder->getDestroy())
         return false; // the ID is free, or held by a live object (a real duplicate: g_sv_Spawn skips it with an error)
 
@@ -437,6 +463,12 @@ int g_spawn_max_delay_ms = 500; // a head that waits longer goes on past the bud
 // once its head was 500 ms old (forced/delay 1431 groups, 740 ms frame); the backlog now drains at this rate.
 // 0 = no limit (the old behaviour).
 int g_spawn_catchup_us = 20000;
+// 36-spawn-model-load.md (plans/optimization_mt), spawn_cold_models - a tunable limit, not saved, 0 = off: once a
+// budgeted pass has made this many cold model loads (CModelPool::Create loading an ogf, ~12 ms each for a monster), it
+// stops in front of the next root M_SPAWN - also before spawn_min_per_frame groups and past spawn_max_delay_ms - so a
+// burst of new models spreads over frames. One group a frame always goes; a group is never split (an NPC with cold
+// weapons still loads them together).
+int g_spawn_cold_models = 1; // the default since 2026-10-17
 
 namespace
 {
@@ -545,16 +577,145 @@ static xray::perf::Metric GameEventTimeMetric(u16 msg, u16 type)
     case GE_ADDON_DETACH:
     case GE_ADDON_CHANGE:
     case GE_INSTALL_UPGRADE:
-    case GE_TRANSFER_AMMO:
-    case GE_GRENADE_EXPLODE: return M::ge_time_weapon;
+    case GE_TRANSFER_AMMO: return M::ge_time_weapon;
+    case GE_GRENADE_EXPLODE: return M::ge_time_explode; // 30-game-events.md: apart from weapon (cold model loads)
     default: return M::ge_time_event_other;
     }
 }
+
+namespace
+{
+// 30-game-events.md (plans/optimization_mt), section 4: ge/max_event_us, ge/max_event_type, ge/n_frame/* - the
+// statistics of the frame over every ProcessGameEvents call of it (the pass may nest: an event's time includes the
+// events handled inside it), and the longest event of the 5 s window for the "* ge: longest event" line (log bit).
+// Main thread only.
+struct GameEventFrameStats
+{
+    u32 frame = u32(-1);
+    u64 max_ticks = 0;
+    u32 max_code = 0; // GE_* of an M_EVENT, 1000 + the message ID otherwise
+    u32 n_die = 0, n_destroy = 0, n_reject = 0, n_hit = 0;
+};
+GameEventFrameStats s_ge_frame;
+
+struct GameEventWindow
+{
+    u32 start_ms = 0;
+    u64 max_ticks = 0;
+    u32 code = 0;
+    u16 dest = u16(-1);
+    u32 frame = 0;
+    u32 events_in_frame = 0; // events of that frame up to it
+    shared_str section; // of the destination object, when the client had it after the event
+};
+GameEventWindow s_ge_window;
+
+// Times one message of the queue (perf_metrics only)
+class GameEventTimer
+{
+public:
+    GameEventTimer(u16 msg, u16 dest, u16 type, u32 index) noexcept
+        : m_code(msg == M_EVENT ? u32(type) : 1000u + msg), m_dest(dest), m_index(index)
+    {
+        if (!xray::perf::g_perf_metrics_active)
+            return;
+        m_active = true;
+        if (msg == M_EVENT)
+        {
+            switch (type)
+            {
+            case GE_DIE: ++s_ge_frame.n_die; break;
+            case GE_HIT: ++s_ge_frame.n_hit; break;
+            case GE_DESTROY: ++s_ge_frame.n_destroy; break;
+            case GE_DESTROY_REJECT:
+                ++s_ge_frame.n_destroy;
+                ++s_ge_frame.n_reject;
+                break;
+            case GE_OWNERSHIP_REJECT:
+            case GE_TRADE_SELL: ++s_ge_frame.n_reject; break;
+            default: break;
+            }
+        }
+        m_t0 = xray::perf::Ticks();
+    }
+    ~GameEventTimer() noexcept
+    {
+        if (!m_active)
+            return;
+        const u64 ticks = xray::perf::Ticks() - m_t0;
+        if (ticks > s_ge_frame.max_ticks)
+        {
+            s_ge_frame.max_ticks = ticks;
+            s_ge_frame.max_code = m_code;
+        }
+        if (ticks > s_ge_window.max_ticks)
+        {
+            s_ge_window.max_ticks = ticks;
+            s_ge_window.code = m_code;
+            s_ge_window.dest = m_dest;
+            s_ge_window.frame = Device.dwFrame;
+            s_ge_window.events_in_frame = m_index;
+            const IGameObject* object = Level().Objects.net_Find(m_dest);
+            s_ge_window.section = object ? object->cNameSect() : shared_str();
+        }
+    }
+    GameEventTimer(const GameEventTimer&) = delete;
+    GameEventTimer& operator=(const GameEventTimer&) = delete;
+
+private:
+    u64 m_t0 = 0;
+    u32 m_code;
+    u16 m_dest;
+    u32 m_index;
+    bool m_active = false;
+};
+
+void GameEventFrameBegin()
+{
+    if (s_ge_frame.frame == Device.dwFrame)
+        return;
+    s_ge_frame = GameEventFrameStats();
+    s_ge_frame.frame = Device.dwFrame;
+}
+
+void GameEventFrameEnd()
+{
+    using xray::perf::Metric;
+    xray::perf::SetGauge(Metric::ge_max_event_us,
+        static_cast<s64>(xray::perf::TicksToMilliseconds(s_ge_frame.max_ticks) * 1000.0));
+    xray::perf::SetGauge(Metric::ge_max_event_type, static_cast<s64>(s_ge_frame.max_code));
+    xray::perf::SetGauge(Metric::ge_n_frame_die, static_cast<s64>(s_ge_frame.n_die));
+    xray::perf::SetGauge(Metric::ge_n_frame_destroy, static_cast<s64>(s_ge_frame.n_destroy));
+    xray::perf::SetGauge(Metric::ge_n_frame_reject, static_cast<s64>(s_ge_frame.n_reject));
+    xray::perf::SetGauge(Metric::ge_n_frame_hit, static_cast<s64>(s_ge_frame.n_hit));
+
+    const u32 now_ms = CPU::GetTicks();
+    if (!s_ge_window.start_ms)
+        s_ge_window.start_ms = now_ms;
+    if (now_ms - s_ge_window.start_ms < 5000)
+        return;
+    if ((xray::perf::g_perf_metrics & 2) && s_ge_window.max_ticks)
+    {
+        Msg("* ge: longest event of %u ms: %.0f us, %s %u, dest [%u][%s], frame %u (event #%u of the frame)",
+            now_ms - s_ge_window.start_ms, xray::perf::TicksToMilliseconds(s_ge_window.max_ticks) * 1000.0,
+            s_ge_window.code >= 1000 ? "message" : "GE type",
+            s_ge_window.code >= 1000 ? s_ge_window.code - 1000 : s_ge_window.code, (unsigned)s_ge_window.dest,
+            s_ge_window.section.c_str() ? s_ge_window.section.c_str() : "-", s_ge_window.frame,
+            s_ge_window.events_in_frame);
+    }
+    s_ge_window = GameEventWindow();
+    s_ge_window.start_ms = now_ms;
+}
+} // namespace
 #endif
 
 void CLevel::ProcessGameEvents(bool frame_budget)
 {
     ZoneScoped;
+    PERF_GAME_EVENT_TAG(); // 30-game-events.md: ge/cold/* - the cold loads of the sound and the render inside the pass
+#if XR_PERF_METRICS
+    GameEventFrameBegin();
+#endif
 
     // Game events
     {
@@ -583,6 +744,10 @@ void CLevel::ProcessGameEvents(bool frame_budget)
                 budget.force = SpawnBudgetForce::Pause;
         }
         xr_vector<u16> group; // IDs of the open group of this pass, the root first (local: the pass may nest)
+        // 36-spawn-model-load.md: cold model loads of this thread at the start of the pass, the limit (0 = none)
+        const u32 cold_models_at_start = xray::perf::TlColdModelLoads();
+        const u32 cold_models_limit = budget.budget_ns && budget.force != SpawnBudgetForce::Loading &&
+                budget.force != SpawnBudgetForce::Pause ? u32(std::max(g_spawn_cold_models, 0)) : 0;
 
         while (game_events->available(svT))
         {
@@ -592,6 +757,14 @@ void CLevel::ProcessGameEvents(bool frame_budget)
                 if (head.ID == M_SPAWN)
                 {
                     const bool joins_group = spawn_joins_group(group, head.spawn_parent);
+                    // 36-spawn-model-load.md: spawn_cold_models - after N cold model loads no new group in this frame
+                    if (!joins_group && cold_models_limit && budget.groups > 0 &&
+                        xray::perf::TlColdModelLoads() - cold_models_at_start >= cold_models_limit)
+                    {
+                        PERF_INC(spawn_cold_stopped);
+                        budget.stopped = true;
+                        break; // as the budget below: the group and everything behind it wait for the next frame
+                    }
                     // Stage 2: the budget is checked in front of a root only, a group is never split by it
                     if (!joins_group && SpawnBudgetSpent(budget, head))
                         break; // this group and everything behind it go on in the next frame, in the same order
@@ -617,6 +790,7 @@ void CLevel::ProcessGameEvents(bool frame_budget)
             game_events->get(ID, dest, type, P);
 #if XR_PERF_METRICS
             xray::perf::ScopedTime ge_time(GameEventTimeMetric(ID, type)); // the handling of this message
+            GameEventTimer ge_timer(ID, dest, type, processed); // 30-game-events.md: ge/max_event_*, ge/n_frame/*
 #endif
             switch (ID)
             {
@@ -685,6 +859,10 @@ void CLevel::ProcessGameEvents(bool frame_budget)
             }
         }
 
+        // 30-game-events.md, B1 (ol_destroy_child_scan_batch 1): the live children of the objects destroyed by this pass
+        // are destroyed now, before UpdateCL of the objects (as when every destruction walked for them at once)
+        Objects.flush_destroy_child_scan();
+
         // Stage 2: the head left in the queue waits too (budget, SPEC.md 8.6); what the budget left for the next frame
         if (game_events->size())
             spawn_wait_ms = std::max(spawn_wait_ms, queue_wait_ms(game_events->front(), CPU::GetTicks()));
@@ -695,6 +873,17 @@ void CLevel::ProcessGameEvents(bool frame_budget)
             PERF_INC(spawn_budget_frames);
             count_spawn_groups(game_events->queue, group, deferred_groups, deferred_spawns);
             PERF_ADD(spawn_budget_deferred, deferred_groups);
+            // 36-spawn-model-load.md (the model prefetch): read the model files of the deferred spawns ahead (the
+            // first ones of the queue; each model once per session, the render keeps the set)
+            u32 asked = 0;
+            for (const NET_Event& event : game_events->queue)
+            {
+                if (event.ID != M_SPAWN)
+                    continue;
+                model_prefetch_spawn(event.spawn_id);
+                if (++asked >= 32)
+                    break;
+            }
         }
         if (budget.budget_ns)
         {
@@ -729,6 +918,12 @@ void CLevel::ProcessGameEvents(bool frame_budget)
             xray::perf::SetGauge(Metric::spawn_queue_wait_ms, static_cast<s64>(spawn_wait_ms));
             xray::perf::SetGauge(Metric::spawn_groups_frame, static_cast<s64>(budget.groups));
             xray::perf::SetGauge(Metric::spawn_group_size_max, static_cast<s64>(budget.group_size_max));
+            // 36-spawn-model-load.md: cold model loads of this pass (max per frame)
+            xray::perf::UpdateMax(
+                Metric::ge_cold_model_frame, static_cast<s64>(xray::perf::TlColdModelLoads() - cold_models_at_start));
+#if XR_PERF_METRICS
+            GameEventFrameEnd();
+#endif
         }
         TracyPlot("ge_spawn_frame", static_cast<s64>(spawns));
     }
@@ -789,18 +984,15 @@ void CLevel::VisionBatchPostScheduler()
     gw::addons::binders::FlushUpdates();
 }
 
-// --- 26-framemove-game-next.md, package 2-A: work moved off the critical path (temporary switches, not saved, 0 = as
-// before; console_commands.cpp) -----------------------------------------------------------------------------------------
-// K3 mt_sound_dispatch_early: SoundEvent_Dispatch of a game/render overlap frame runs on the Game thread in phase 0
+// --- 26-framemove-game-next.md, package 2-A: work moved off the critical path (always on since 2026-10-18, their
+// switches mt_sound_dispatch_early, lua_gc_overlap, mt_prepass_main_slot removed; 41-cvar-cleanup.md) -----------------
+// K3: SoundEvent_Dispatch of a game/render overlap frame runs on the Game thread in phase 0
 // (XRay::Engine::KickGameLogicEarly), right after phase A of the bones prepass - parallel to phase B/C on main.
-int mt_sound_dispatch_early = 1; // on by default for the long test (2026-10-16), still a temporary switch
-// K2b lua_gc_overlap (with mt_script_gc on): the Lua GC step of the frame (CLevel::script_gc) runs in phase 0 of the
-// Game thread too, after the dispatch - parallel to phase B/C on main, the physics kick and the start of the render,
-// instead of in seqParallel after the scheduler. Frames without phase 0 run it in seqParallel as before.
-int lua_gc_overlap = 1; // on by default for the long test (2026-10-16), still a temporary switch
-// K4 mt_prepass_main_slot: CMapManager::Update runs on main inside the phase B window of the bones prepass (the
-// workers compute the bones meanwhile) instead of in CLevel::OnFrame before the objects' UpdateCL.
-int mt_prepass_main_slot = 1; // on by default for the long test (2026-10-16), still a temporary switch
+// K2b (with mt_script_gc on): the Lua GC step of the frame (CLevel::script_gc) runs in phase 0 of the Game thread too,
+// after the dispatch - parallel to phase B/C on main, the physics kick and the start of the render, instead of in
+// seqParallel after the scheduler. Frames without phase 0 run it in seqParallel as before.
+// K4: CMapManager::Update runs on main inside the phase B window of the bones prepass (the workers compute the bones
+// meanwhile) instead of in CLevel::OnFrame before the objects' UpdateCL.
 
 namespace
 {
@@ -867,7 +1059,11 @@ u16 s_bones_prepass_noted[bones_prepass_note_capacity];
 std::atomic<u32> s_bones_prepass_noted_count{0};
 // Main thread only (CLevel::BonesPrepass): kept between frames to keep their capacity.
 xr_vector<IKinematics*> s_bones_prepass_candidates;
+xr_vector<u16> s_bones_prepass_candidate_ids; // the object of each candidate (a weapon for its addon models)
 xr_vector<IKinematics*> s_bones_prepass_phase_b;
+// Phase C owners (pipeline on): Device.dwFrame per object ID of the models the prepass took this frame, so an owner is
+// handed to phase B once and never next to its own regular candidate.
+u32 s_bones_prepass_taken_frame[0x10000];
 // Render prepare: IDs of the held / dropped items (CHudItem) phase C prepares. IDs again: phase A runs game
 // code, the items are resolved anew after it.
 xr_vector<u16> s_render_prepare_items;
@@ -894,7 +1090,8 @@ void RenderPrepareCollect(IGameObject* O, xr_vector<IKinematics*>& models)
 
 // Render prepare, phase C on main: after phase B (the owners' bones are final), before the render.
 // Sequential: UpdateXForm of a weapon whose owner the prepass didn't cover computes the owner's bones (as the render
-// did), and the shot light moves in the spatial DB.
+// did), and the shot light moves in the spatial DB. With the pipelined prepass the prepass covers those owners too
+// (phase C owners in CLevel::BonesPrepass).
 void RenderPreparePhaseC(CLevel& level, const IGameObject* view)
 {
     if (s_render_prepare_items.empty())
@@ -913,12 +1110,635 @@ void RenderPreparePhaseC(CLevel& level, const IGameObject* view)
         CHudItem* hud_item = inventory_item ? inventory_item->cast_hud_item() : nullptr;
         if (!hud_item)
             continue;
+#if XR_PERF_METRICS
+        // prepare/owner_bones_main: the item's UpdateXForm will compute the owner's bones here, on main (phase A, and
+        // phase B unless they are younger than UCalc_Interval)
+        bool owner_pending = false;
+        if (xray::perf::g_perf_metrics_active)
+        {
+            const IGameObject* owner = O->H_Parent();
+            const IKinematics* owner_kinematics = owner ? PKinematics(owner->Visual()) : nullptr;
+            owner_pending = owner_kinematics && !owner_kinematics->BonesPrepass_Done();
+        }
+        PERF_SCOPE_IF(owner_pending, prepare_owner_bones_main);
+#endif
         hud_item->render_prepare();
         ++prepared;
     }
     PERF_ADD(prepare_items, prepared);
 }
 } // namespace
+
+// --- Pipelined bones prepass (plans/optimization_mt/26-framemove-game-next.md; always on since 2026-10-18) -------------
+// The UpdateCL loop of the frame keeps the workers idle for ~11 ms, the prepass after it computes ~2700 models on them in
+// a ~2-3 ms window on main. With the pipeline, right after an UpdateCL batch (CObjectList::update_batch_hooks) main runs
+// phase A of the models whose objects the loop is done with (the object and everything it holds - the held items run
+// their UpdateCL after the owner and write state the owner's bone callbacks read: shot effector, attached XFORM), and
+// phase B of them goes to the workers while main goes on with the next batches. The last batch and everything left (or
+// redone) stay with the prepass, which then finds DoneTime == now and skips them.
+// The models are those the render drew last frame (its notes, as the prepass reads them): roots, held and attached
+// items, weapon addon models - every one goes when the loop is done with its root and everything under it, in chunks of
+// 64 objects (xr_object_list.cpp); a root outside the loop after the first chunk. The last chunk is left to the prepass
+// (beside the map update there). prepass/skip/* say why a model was still computed by the prepass.
+// Phase A stays on main: its blend callbacks are game code (Lua ScriptCallBack, AI planner properties, PlayCycle,
+// visual swaps of the bloodsucker, CollideAll of imotion_position).
+// What may change the pose input after the early compute: animation mutators on main (PlayCycle & co. take the model
+// lock - they wait for a running phase B - and mark the early bones dirty), invalidation (UCalc reset - recomputed by
+// the next reader as before), the owner's XFORM (checked against a snapshot at the prepass: AttachmentCallback and the
+// IK used the old one). Dirty bones are recomputed by the prepass (prepass/dirty, prepass/redone).
+// Concurrency of phase B beside main's UpdateCL: no physics step runs in FrameMove; physics-shell owners (ragdolls, physic
+// objects, vehicles) are left to the prepass (an activating ragdoll moves ODE bodies in its bone callback) except corpses
+// whose shell is fully active (EarlyPhysicsAllowed); the code that swaps or removes a shell or a visual inside the loop
+// joins the early tasks first (CLevel::BonesPrepassEarlyJoin); model deletes
+// are deferred (SetFrameOverlapActive) until the next ModelDeferredClear; attach/detach and the visual callback list take
+// the owner's bone lock (attachment_owner.cpp, GameObject.cpp); nested CalculateBones of another model that would need
+// its phase A is skipped on the task (SkeletonRigid.cpp, prepass/early_nested_skip). All tasks are joined at the end of
+// the loop, before PostUpdateCL and the destroy queue.
+// Early kick (26-framemove-game-next.md; always on since 2026-10-18): after the UpdateCL loop the
+// main thread still runs the rest of FrameMove (SoundProcessor, the UI subscribers) and the RT scheduler before the
+// prepass, ~4 ms with the workers idle. At the end of CLevel::OnFrame (all of the level's game code of the frame is done:
+// PostUpdateCL, the destroy queue, the HUD pick, plugin timers, script_process, add_call) main runs phase A of what the
+// pipeline left to the prepass - the last chunk and the phase C owners - and hands their phase B to the workers without
+// waiting. The prepass joins them first (main helps), then checks moved owners and mutated blends as for the pipeline.
+// What runs beside the tasks and how it is guarded:
+// - animation mutators (PlayCycle & co.) take the model lock (wait for a running phase B) and mark early bones dirty -
+//   the prepass recomputes them (prepass/redone_after_kick); a moved owner the same way (EarlyCheckMoved);
+// - the view entity, the RT scheduler (the actor) and script-controlled NPCs (ActionCallback moves a sound emitter from
+//   phase B): their models are not kicked (prepass/skip/kick_excluded); Lua bone_position takes the model lock;
+// - shell / visual swaps (CreateShell, SetRemoved, in_ChangeVisual, activate/setup_physic_shell) join the tasks first
+//   (CLevel::BonesPrepassEarlyJoin), model deletes are deferred (SetFrameOverlapActive stays on until the frame's end);
+// - a frame that turns sequential (pause, main menu) joins before its Game thread task (Device.BonesPrepassJoinCallback).
+// Not covered by GW_OVERLAP_HAZARD (the detector fires on the Game thread only) - like the pipeline's own window.
+// The Game thread's phase 0 (KickGameLogicEarly) is NOT moved here: its sound events are produced by SoundProcessor
+// after this point, and its Lua GC step can't run beside the UI / actor binder Lua. It starts earlier anyway: the
+// prepass phase A in front of it is shorter by the kicked models (game/early_start_ms).
+
+namespace
+{
+// Why a model the prepass computes itself was not pipelined (prepass/skip/*): set per object ID by the pipeline, read by
+// the prepass for the models it still computes (a byte per object; the counters need perf metrics).
+enum EarlyReason : u8
+{
+    early_reason_none = 0, // not examined by the pipeline
+    early_reason_kicked, // handed to a task (recomputed by the prepass all the same: lost)
+    early_reason_tail_own, // the object's own UpdateCL is in the last chunk of the loop
+    early_reason_tail_holder, // the object is earlier, its root (or another object under the root) is in the last chunk
+    early_reason_physics, // a physics shell the pipeline may not touch
+    early_reason_cooldown, // recently redone
+    early_reason_filtered, // gone / reparented / no model / the view entity's at its turn
+    early_reason_phase_a, // nothing to do at its turn (computed or started this tick)
+    early_reason_full, // no room left in the model list of the frame
+    early_reason_kick, // handed to the early kick and still computed by the prepass: redone
+    early_reason_kick_excluded, // the early kick left it: its root is in the RT scheduler or script-controlled
+};
+
+// Per object ID, valid for the pipeline of one frame (epoch): as a root - the last workload index of the root or of
+// anything under it; the object's own workload index; the reason of its own model (and of its weapon addon models).
+struct EarlySlot
+{
+    u32 epoch;
+    u32 root_last;
+    u32 own;
+    u8 reason;
+    u8 kick_lazy; // early kick: examined as a phase C owner already (an owner holds several items)
+};
+constexpr u32 early_id_slots = 0x10000;
+constexpr u32 early_index_none = u32(-1);
+EarlySlot s_early_slots[early_id_slots];
+u32 s_early_epoch = 0;
+u32 s_early_frame = u32(-1); // Device.dwFrame of the last pipeline (the slots are read by its prepass)
+
+EarlySlot& EarlySlotOf(u16 id)
+{
+    EarlySlot& s = s_early_slots[id];
+    if (s.epoch != s_early_epoch)
+        s = {s_early_epoch, early_index_none, early_index_none, early_reason_none, 0};
+    return s;
+}
+
+// An object the render drew last frame and the chunk after which the loop is done with its root.
+struct EarlyItem
+{
+    u32 ready_chunk;
+    u16 id;
+    u16 root_id;
+};
+struct EarlyModel
+{
+    IKinematics* model;
+    u16 id;
+    // The root's own model: AttachmentCallback and the IK used its XFORM (EarlyCheckMoved). A held item's bones don't
+    // depend on its XFORM (phase C writes that from the owner's bones; attached items get it from AttachmentCallback).
+    bool check_xform;
+    Fmatrix xform;
+};
+xr_vector<EarlyItem> s_early_items; // sorted by ready_chunk
+size_t s_early_cursor = 0;
+// Capacity fixed in EarlyBegin: push_back never reallocates while tasks read their ranges (EarlyModelRoom).
+xr_vector<EarlyModel> s_early_models;
+xr_vector<IKinematics*> s_early_addons; // scratch: the addon models of one weapon
+u32 s_early_models_frame = u32(-1);
+xr_vector<Task*> s_early_tasks;
+std::atomic<u32> s_early_computed{0};
+bool s_early_overlap_prev = false;
+// Between EarlyBegin and EarlyEnd of a pipelined loop (main thread); read by CLevel::BonesPrepassEarlyJoin.
+std::atomic<bool> s_early_in_loop{false};
+std::thread::id s_early_tid;
+// Early kick (main thread): the switch as EarlyBegin read it - the last chunk's items stay in s_early_items for the kick
+bool s_kick_wanted = false;
+// Device.dwFrame of the last kick (s_kick_lazy and the dirty check of its phase C owners in the prepass belong to it)
+u32 s_kick_frame = u32(-1);
+// Kicked and not joined yet: read by CLevel::BonesPrepassEarlyJoin (the guards) and by the joins
+std::atomic<bool> s_kick_open{false};
+// perf_metrics: Ticks() at the end of the kick (prepass/early_kick), main time of its phase A (game/early_start_ms)
+u64 s_kick_end_ticks = 0;
+u64 s_kick_main_ticks = 0;
+u64 s_kick_wait_ticks = 0;
+// The phase C owners the kick computes (pointers stay valid: model deletes are deferred until the next frame)
+xr_vector<IKinematics*> s_kick_lazy;
+
+// The frames the prepass will run in as a game/render overlap frame (CRenderDevice::CanOverlapGameAndRender decides
+// after FrameMove - this is its condition): in a sequential frame the whole scheduler runs between the early bones and
+// the prepass (correct with the dirty checks, but mostly redone).
+bool EarlyPipelineFrame()
+{
+    if (!TaskScheduler || GEnv.isDedicatedServer || !GEnv.Render)
+        return false;
+    if (!g_pGameLevel || !g_pGameLevel->bReady)
+        return false;
+    if (!Device.b_is_Active || Device.dwPrecacheFrame || load_screen_renderer.IsActive() || Device.Paused())
+        return false;
+    if (GEnv.Render->GetBackendAPI() != IRender::BackendAPI::D3D11)
+        return false;
+    if (g_pGamePersistent && g_pGamePersistent->m_pMainMenu && g_pGamePersistent->m_pMainMenu->IsActive())
+        return false;
+    return true;
+}
+
+// Physics shells (xrPhysics: CPHElement::BonesCallBack). While a shell or any of its elements is activating, the bone
+// callback moves ODE bodies and the physics spatial DB (ActivatingPos -> ToBonePos -> SetTransform); once everything is
+// fully active it only reads the element's and the shell's matrices (written by the physics step, which doesn't run in
+// FrameMove, and by the object's own UpdateCL, which is done) and writes the bone matrix. Taken: corpses only (a dead
+// CEntityAlive without an interactive death motion - imotion swaps the callbacks and moves the shell from its phase A),
+// with the shell and every element fully active, asleep or not. A corpse's shell is created, removed or swapped inside
+// the loop only by KillHit/CreateShell, SetRemoved and in_ChangeVisual (CharacterPhysicsSupport.cpp) - they join the
+// early tasks first (CLevel::BonesPrepassEarlyJoin) - and by net_Destroy after the loop. Physic objects, items on the
+// ground and vehicles stay with the prepass (their shells are changed from more places).
+bool EarlyPhysicsAllowed(IGameObject* O)
+{
+    CPhysicsShellHolder* holder = O->cast_physics_shell_holder();
+    const CPhysicsShell* shell = holder ? holder->PPhysicsShell() : nullptr;
+    if (!shell)
+        return true;
+    const CEntityAlive* entity = O->cast_entity_alive();
+    if (!entity || entity->g_Alive())
+        return false;
+    CCharacterPhysicsSupport* support = holder->character_physics_support();
+    if (!support || support->is_interactive_motion() || !shell->isFullActive())
+        return false;
+    const u16 elements = shell->get_ElementsNumber();
+    for (u16 i = 0; i < elements; ++i)
+    {
+        const CPhysicsElement* element = shell->get_ElementByStoreOrder(i);
+        if (!element || !element->isFullActive())
+            return false;
+    }
+    PERF_INC(prepass_early_corpses);
+    return true;
+}
+
+bool EarlyModelRoom() { return s_early_models.size() < s_early_models.capacity(); }
+
+bool EarlyBegin(IGameObject* const* b, IGameObject* const* e, u32 chunk)
+{
+    s_early_items.clear();
+    s_early_cursor = 0;
+    s_early_models.clear();
+    s_early_models_frame = u32(-1);
+    s_early_tasks.clear();
+    s_early_computed.store(0, std::memory_order_relaxed);
+    s_kick_wanted = false;
+    if (!EarlyPipelineFrame())
+        return false;
+    s_kick_wanted = true;
+    ZoneScopedN("BonesPrepass/early_begin");
+    PERF_SCOPE(prepass_early_main);
+    if (++s_early_epoch == 0)
+    {
+        for (EarlySlot& s : s_early_slots)
+            s.epoch = 0;
+        s_early_epoch = 1;
+    }
+    s_early_frame = Device.dwFrame;
+    // SingleUpdate updates the parent first, the held items come in any chunk (before or after the owner's own place in
+    // the list): a root is ready after the last chunk that holds it or any object under it.
+    const u32 n = static_cast<u32>(e - b);
+    for (u32 i = 0; i < n; ++i)
+    {
+        IGameObject* O = b[i];
+        EarlySlotOf(O->ID()).own = i;
+        EarlySlotOf(O->H_Root()->ID()).root_last = i;
+    }
+    const u32 last_chunk = (n - 1) / chunk;
+    // The models: what the render drew last frame - its notes, read again (and filtered the same way) by the prepass.
+    // Every object, not only the roots: the held items, the attached ones and the weapon addon models go with their
+    // root. A root outside the loop (no UpdateCL this frame: processing off, a settled corpse) goes after the first chunk.
+    const u32 noted = std::min(s_bones_prepass_noted_count.load(std::memory_order_relaxed), bones_prepass_note_capacity);
+    CObjectList& objects = g_pGameLevel->Objects;
+    const IGameObject* view = Level().CurrentViewEntity();
+    for (u32 k = 0; k < noted; ++k)
+    {
+        const u16 id = s_bones_prepass_noted[k];
+        IGameObject* O = objects.net_Find(id);
+        if (!O || O->getDestroy() || !O->Visual())
+            continue;
+        IGameObject* root = O->H_Root();
+        if (view && (O == view || root == view))
+            continue;
+        const u32 root_last = EarlySlotOf(root->ID()).root_last;
+        u32 ready = root_last == early_index_none ? 0 : root_last / chunk;
+        EarlySlot& s = EarlySlotOf(id);
+        if (ready >= last_chunk)
+        {
+            s.reason = (s.own != early_index_none && s.own / chunk >= last_chunk) ? early_reason_tail_own :
+                                                                                    early_reason_tail_holder;
+            if (!s_kick_wanted)
+                continue;
+            // Early kick: kept for EarlyKickTail at the end of CLevel::OnFrame (batch_done never reaches last_chunk)
+            ready = last_chunk;
+        }
+        s_early_items.push_back({ready, id, root->ID()});
+    }
+    std::sort(s_early_items.begin(), s_early_items.end(),
+        [](const EarlyItem& l, const EarlyItem& r) { return l.ready_chunk < r.ready_chunk; });
+    // Room for the frame's models (a weapon with the attachment system adds its addon models): what doesn't fit is left
+    // to the prepass (prepass/skip/full).
+    s_early_models.reserve(s_early_items.size() * 2 + 64);
+    s_early_models_frame = Device.dwFrame;
+    // A model released meanwhile (a visual swap by game code) is only queued until ModelDeferredClear of the next frame,
+    // so a running phase B never computes a freed model. Restored in EarlyEnd (ProcessFrame sets it after FrameMove).
+    s_early_overlap_prev = Device.IsFrameOverlapActive();
+    Device.SetFrameOverlapActive(true);
+    s_early_tid = std::this_thread::get_id();
+    s_early_in_loop.store(true, std::memory_order_relaxed);
+    return true;
+}
+
+// Main, after the chunk that made the item's root ready: filters, phase A, the model(s) to the list of the next task.
+void EarlyTake(const EarlyItem& item, const IGameObject* view)
+{
+    EarlySlot& s = EarlySlotOf(item.id);
+    IGameObject* O = g_pGameLevel->Objects.net_Find(item.id);
+    // Same filters as the prepass (the view entity and what it holds: the HUD path; frozen corpse pose: no bones); an
+    // object another root took meanwhile is left to the prepass (the new root may not be through the loop yet).
+    if (!O || O->getDestroy() || !O->Visual() || O->H_Root()->ID() != item.root_id || O == view ||
+        (view && O->H_Root() == view) || O->renderable_CorpsePoseFrozen())
+    {
+        s.reason = early_reason_filtered;
+        return;
+    }
+    if (!EarlyPhysicsAllowed(O))
+    {
+        s.reason = early_reason_physics;
+        return;
+    }
+    s.reason = early_reason_phase_a;
+    if (IKinematics* K = PKinematics(O->Visual()))
+    {
+        // EarlyWanted is BonesPrepass_Wanted plus the redo cooldown: for a model the prepass computes, a refusal here
+        // is the cooldown.
+        if (!K->BonesPrepass_EarlyWanted())
+            s.reason = early_reason_cooldown;
+        else if (!EarlyModelRoom())
+            s.reason = early_reason_full;
+        else if (K->BonesPrepass_PhaseA()) // here, on main: the blend callbacks (game code, Lua) stay on this thread
+        {
+            s.reason = early_reason_kicked;
+            s_early_models.push_back({K, item.id, item.id == item.root_id, O->XFORM()});
+        }
+    }
+    // A held weapon with the attachment system: its addon models (no objects of their own), as the prepass collects them.
+    CInventoryItem* inventory_item = O->cast_inventory_item();
+    if (CHudItem* hud_item = inventory_item ? inventory_item->cast_hud_item() : nullptr)
+    {
+        s_early_addons.clear();
+        hud_item->render_prepare_models(s_early_addons);
+        for (IKinematics* addon : s_early_addons)
+        {
+            if (!addon->BonesPrepass_EarlyWanted())
+                continue;
+            if (!EarlyModelRoom())
+            {
+                s.reason = early_reason_full;
+                break;
+            }
+            if (addon->BonesPrepass_PhaseA())
+                s_early_models.push_back({addon, item.id, false, Fidentity});
+        }
+    }
+}
+
+// Phase B of [first, end of the list) on the workers, main goes on with the loop.
+void EarlyKick(size_t first)
+{
+    const u32 count = static_cast<u32>(s_early_models.size() - first);
+    if (!count)
+        return;
+    // One task per chunk, split by xr_parallel_for into about two pieces per worker.
+    const u32 workers = std::max<u32>(static_cast<u32>(TaskScheduler->GetWorkersCount()), 1u);
+    const size_t grain = std::max<size_t>(1, count / (workers * 2));
+    EarlyModel* const models = s_early_models.data();
+    Task& task = xr_parallel_for(TaskRange<u32>(static_cast<u32>(first), static_cast<u32>(first) + count, grain), false,
+        [models](const TaskRange<u32>& range)
+        {
+            ZoneScopedN("BonesPrepass/early_task");
+            PERF_PASS(xray::perf::pass::Prepass);
+            PERF_SCOPE(prepass_early_phase_b);
+            PERF_SCOPE_BY_THREAD(prepass_early_phase_b_main, prepass_early_phase_b_game, prepass_early_phase_b_worker);
+            u32 local = 0;
+            for (u32 i = range.begin(); i != range.end(); ++i)
+            {
+                if (models[i].model->BonesPrepass_PhaseBEarly())
+                    ++local;
+            }
+            s_early_computed.fetch_add(local, std::memory_order_relaxed);
+        });
+    s_early_tasks.push_back(&task);
+}
+
+void EarlyBatchDone(u32 chunk)
+{
+    ZoneScopedN("BonesPrepass/early_batch");
+    PERF_SCOPE(prepass_early_main);
+    // A Task of main's ring is reused 4096 allocations later: don't keep finished ones.
+    s_early_tasks.erase(std::remove_if(s_early_tasks.begin(), s_early_tasks.end(),
+                            [](const Task* t) { return t->IsFinished(); }),
+        s_early_tasks.end());
+    const size_t first = s_early_models.size();
+    const IGameObject* view = Level().CurrentViewEntity();
+    {
+        PERF_SCOPE(prepass_early_main_take);
+        while (s_early_cursor < s_early_items.size() && s_early_items[s_early_cursor].ready_chunk <= chunk)
+            EarlyTake(s_early_items[s_early_cursor++], view);
+    }
+    ZoneValue(s_early_models.size() - first);
+    PERF_SCOPE(prepass_early_main_kick);
+    EarlyKick(first);
+}
+
+void EarlyJoinTasks()
+{
+    for (const Task* t : s_early_tasks)
+        TaskScheduler->Wait(*t);
+    s_early_tasks.clear();
+}
+
+void EarlyEnd()
+{
+    {
+        ZoneScopedN("BonesPrepass/early_tail_wait");
+        PERF_SCOPE(prepass_tail_wait);
+        // Before PostUpdateCL and the destroy queue (net_Destroy of objects whose bones may be in flight). Main helps.
+        // The last chunk stays with the prepass: there its phase B runs beside the map update (K4), here main would
+        // only wait for it.
+        EarlyJoinTasks();
+    }
+    s_early_in_loop.store(false, std::memory_order_relaxed);
+    PERF_ADD(prepass_pipelined, s_early_computed.exchange(0, std::memory_order_relaxed));
+    Device.SetFrameOverlapActive(s_early_overlap_prev);
+}
+
+// At the prepass: early bones whose owner moved after them (Lua teleport, set_position...) - AttachmentCallback and the
+// IK used the old XFORM: recomputed by the prepass. By ID: the object may be gone; the model pointer is only compared.
+void EarlyCheckMoved()
+{
+    if (s_early_models_frame != Device.dwFrame || !g_pGameLevel)
+    {
+        s_early_models.clear();
+        return;
+    }
+    CObjectList& objects = g_pGameLevel->Objects;
+    for (const EarlyModel& m : s_early_models)
+    {
+        if (!m.check_xform)
+            continue;
+        IGameObject* O = objects.net_Find(m.id);
+        if (!O || O->getDestroy() || PKinematics(O->Visual()) != m.model)
+            continue;
+        if (std::memcmp(&O->XFORM(), &m.xform, sizeof(Fmatrix)) != 0)
+            m.model->BonesPrepass_MarkEarlyDirty();
+    }
+    s_early_models.clear();
+    s_early_models_frame = u32(-1);
+}
+
+// At the prepass, for a model it computes itself in a pipelined frame: why the pipeline didn't (prepass/skip/*).
+void EarlyCountSkip(u16 id)
+{
+#if XR_PERF_METRICS
+    if (s_early_frame != Device.dwFrame || !xray::perf::g_perf_metrics_active)
+        return;
+    const EarlySlot& s = s_early_slots[id];
+    switch (s.epoch == s_early_epoch ? s.reason : u8(early_reason_none))
+    {
+    case early_reason_kicked: PERF_INC(prepass_skip_lost); break;
+    case early_reason_tail_own: PERF_INC(prepass_skip_tail_own); break;
+    case early_reason_tail_holder: PERF_INC(prepass_skip_tail_holder); break;
+    case early_reason_physics: PERF_INC(prepass_skip_physics); break;
+    case early_reason_cooldown: PERF_INC(prepass_skip_cooldown); break;
+    case early_reason_filtered: PERF_INC(prepass_skip_filtered); break;
+    case early_reason_phase_a: PERF_INC(prepass_skip_phase_a); break;
+    case early_reason_full: PERF_INC(prepass_skip_full); break;
+    case early_reason_kick: PERF_INC(prepass_redone_after_kick); break;
+    case early_reason_kick_excluded: PERF_INC(prepass_skip_kick_excluded); break;
+    default: PERF_INC(prepass_skip_unseen); break;
+    }
+#else
+    (void)id;
+#endif
+}
+
+// Early kick: roots whose models stay with the prepass. (1) In the RT scheduler (the actor - CActor::shedule_Update runs
+// after FrameMove: movement, animations, attach/detach of HUD models, its binder's Lua). (2) Script-controlled
+// (CScriptEntity::GetScriptControl): its visual callback (ActionCallback, script_entity.cpp) moves the current sound's
+// emitter (_feedback()->set_position, no lock) and particles from phase B - beside SoundProcessor's update, which may
+// delete that emitter.
+bool EarlyKickExcluded(IGameObject* root)
+{
+    if (root->GetSchedulerData().b_RT)
+        return true;
+    const CScriptEntity* script_entity = root->cast_script_entity();
+    return script_entity && script_entity->GetScriptControl();
+}
+
+// Early kick, main thread, at the end of CLevel::OnFrame of a pipelined frame (see the early kick above): phase A
+// of what the pipeline left (the last chunk's models and the phase C owners), their phase B to the workers, no wait.
+void EarlyKickTail()
+{
+    if (!s_kick_wanted || s_early_frame != Device.dwFrame || s_kick_open.load(std::memory_order_relaxed))
+        return;
+    s_kick_wanted = false;
+    // Paused or the main menu opened by the level's own code meanwhile: nothing to overlap with, the prepass does it
+    if (!EarlyPipelineFrame() || !g_pGameLevel)
+        return;
+    ZoneScopedN("BonesPrepass/early_kick");
+    PERF_SCOPE(prepass_early_main);
+    const u64 t0 = xray::perf::g_perf_metrics_active ? xray::perf::Ticks() : 0;
+    const u32 frame = Device.dwFrame;
+    s_kick_frame = frame;
+    s_kick_lazy.clear();
+    // The loop's tasks were joined by EarlyEnd; the guards join the kick's from now on (BonesPrepassEarlyJoin). A model a
+    // blend callback or the code after this point releases is only queued: FrameMove's window is open until
+    // ProcessFrame sets it for the frame (and closes it after the physics join) - no restore here.
+    s_early_tasks.clear();
+    Device.SetFrameOverlapActive(true);
+    s_kick_open.store(true, std::memory_order_relaxed);
+    CObjectList& objects = g_pGameLevel->Objects;
+    const IGameObject* view = Level().CurrentViewEntity();
+    const size_t first = s_early_models.size();
+    // prepass/early_main/take: the phase A of the items below and of the phase C owners (up to the kick)
+    const u64 take_t0 = t0 ? xray::perf::Ticks() : 0;
+    // The last chunk's items (and any the batches left: none, every chunk but the last was handed over)
+    while (s_early_cursor < s_early_items.size())
+    {
+        const EarlyItem& item = s_early_items[s_early_cursor++];
+        IGameObject* root = objects.net_Find(item.root_id);
+        if (root && EarlyKickExcluded(root))
+        {
+            EarlySlotOf(item.id).reason = early_reason_kick_excluded;
+            continue;
+        }
+        EarlyTake(item, view);
+        EarlySlot& s = EarlySlotOf(item.id);
+        if (s.reason == early_reason_kicked)
+            s.reason = early_reason_kick;
+    }
+    // Phase C owners (as the prepass takes them, the pipelined prepass): the owner of a held item the render drew
+    // whose bones nobody computes before phase C (an NPC drawn as a shadow blob, a model in a cooldown). Same filters as
+    // the prepass, plus the pipeline's physics rule and EarlyKickExcluded; not one the kick or the loop already took.
+    const u32 noted = std::min(s_bones_prepass_noted_count.load(std::memory_order_relaxed), bones_prepass_note_capacity);
+    for (u32 k = 0; k < noted; ++k)
+    {
+        IGameObject* O = objects.net_Find(s_bones_prepass_noted[k]);
+        if (!O || O->getDestroy())
+            continue;
+        CInventoryItem* inventory_item = O->cast_inventory_item();
+        if (!inventory_item || !inventory_item->cast_hud_item())
+            continue;
+        IGameObject* owner = O->H_Parent();
+        if (!owner || owner->getDestroy() || !owner->Visual() || owner == view || owner->H_Root() == view ||
+            !owner->cast_entity_alive() || owner->renderable_CorpsePoseFrozen() || EarlyKickExcluded(owner->H_Root()))
+            continue;
+        EarlySlot& s = EarlySlotOf(owner->ID());
+        if (s.kick_lazy || s.reason == early_reason_kick || s.reason == early_reason_kicked)
+            continue;
+        s.kick_lazy = 1;
+        IKinematics* K = PKinematics(owner->Visual());
+        if (!K || K->BonesPrepass_Done() || !EarlyPhysicsAllowed(owner))
+            continue;
+        if (K->BonesPrepass_LazyPhaseA()) // on main: the blend callbacks
+            s_kick_lazy.push_back(K);
+    }
+#if XR_PERF_METRICS
+    if (take_t0)
+        xray::perf::AddTimeSlow(xray::perf::Metric::prepass_early_main_take, xray::perf::Ticks() - take_t0);
+#else
+    (void)take_t0;
+#endif
+    PERF_ADD(prepare_owner_lazy, s_kick_lazy.size());
+    const u32 count_models = static_cast<u32>(s_early_models.size() - first);
+    const u32 count_lazy = static_cast<u32>(s_kick_lazy.size());
+    ZoneValue(count_models + count_lazy);
+    if (count_models + count_lazy && TaskScheduler)
+    {
+        PERF_SCOPE(prepass_early_main_kick);
+        const u32 count = count_models + count_lazy;
+        const u32 workers = std::max<u32>(static_cast<u32>(TaskScheduler->GetWorkersCount()), 1u);
+        // A stalker costs many times a pistol: small chunks (about 4 per worker), as the prepass splits its phase B
+        const size_t grain = std::max<size_t>(1, count / (workers * 4));
+        EarlyModel* const models = s_early_models.data() + first;
+        IKinematics* const* const lazy = s_kick_lazy.data();
+        Task& task = xr_parallel_for(TaskRange<u32>(0, count, grain), false,
+            [models, lazy, count_models](const TaskRange<u32>& range)
+            {
+                ZoneScopedN("BonesPrepass/early_kick_task");
+                PERF_PASS(xray::perf::pass::Prepass);
+                PERF_SCOPE(prepass_early_phase_b);
+                PERF_SCOPE_BY_THREAD(prepass_early_phase_b_main, prepass_early_phase_b_game,
+                    prepass_early_phase_b_worker);
+                u32 local = 0;
+                for (u32 i = range.begin(); i != range.end(); ++i)
+                {
+                    if (i >= count_models)
+                        lazy[i - count_models]->BonesPrepass_LazyPhaseBEarly();
+                    else if (models[i].model->BonesPrepass_PhaseBEarly())
+                        ++local;
+                }
+                s_early_computed.fetch_add(local, std::memory_order_relaxed);
+            });
+        s_early_tasks.push_back(&task);
+    }
+    if (t0)
+    {
+        const u64 t1 = xray::perf::Ticks();
+        s_kick_main_ticks = t1 - t0;
+        s_kick_end_ticks = t1;
+    }
+    else
+        s_kick_main_ticks = s_kick_end_ticks = 0;
+}
+
+// Early kick: wait for its tasks (main helps). at_prepass: the regular join at the prepass, with the metrics of the
+// window; otherwise a frame that turned sequential (before its Game thread task), a device reset or the level's end.
+void EarlyKickJoin(bool at_prepass)
+{
+    if (!s_kick_open.load(std::memory_order_relaxed) || std::this_thread::get_id() != s_early_tid)
+        return;
+    const u64 t0 = s_kick_end_ticks ? xray::perf::Ticks() : 0;
+#if XR_PERF_METRICS
+    // prepass/early_kick: the overlapped window - from the end of the kick to this join (sound, UI, RT scheduler)
+    if (at_prepass && t0)
+        xray::perf::AddTimeSlow(xray::perf::Metric::prepass_early_kick, t0 - s_kick_end_ticks);
+#endif
+    {
+        ZoneScopedN("BonesPrepass/early_kick_wait");
+        PERF_SCOPE_IF(at_prepass, prepass_early_kick_wait);
+        EarlyJoinTasks();
+    }
+    s_kick_wait_ticks = t0 ? xray::perf::Ticks() - t0 : 0;
+    s_kick_open.store(false, std::memory_order_relaxed);
+    PERF_ADD(prepass_pipelined, s_early_computed.exchange(0, std::memory_order_relaxed));
+}
+} // namespace
+
+// Main thread, inside the UpdateCL loop of a pipelined frame: game code that is about to swap or remove a physics shell
+// or a visual (its bone callbacks and the elements they read) waits for the early tasks first - one of them may be
+// computing that model. Deadlock-free: an early task blocks only on a model lock it doesn't hold, never on the global
+// bones lock (SkeletonRigid.cpp); so main may hold the global lock here (a blend callback in phase A), but not a model
+// lock - then it can't wait and goes on as before (prepass/early_guard_skip). Elsewhere a no-op.
+void CLevel::BonesPrepassEarlyJoin()
+{
+    // The UpdateCL loop of a pipelined frame, or the early kick's window (end of CLevel::OnFrame .. the prepass)
+    if (!(s_early_in_loop.load(std::memory_order_relaxed) || s_kick_open.load(std::memory_order_relaxed)) ||
+        std::this_thread::get_id() != s_early_tid)
+        return;
+    if (s_early_tasks.empty())
+        return;
+    if (xray::perf::TlBonesLocked() != 0)
+    {
+        PERF_INC(prepass_early_guard_skip);
+        return;
+    }
+    ZoneScopedN("BonesPrepass/early_guard_join");
+    PERF_SCOPE(prepass_early_guard_join);
+    EarlyJoinTasks();
+}
+
+// Device.BonesPrepassJoinCallback: the early kick's tasks must not outlive a frame that turned sequential (its Game
+// thread task runs the scheduler), a frame without the prepass, a device reset or the level. Main thread; else a no-op.
+void CLevel::BonesPrepassEarlyKickJoin() { EarlyKickJoin(false); }
+
+bool CLevel::BonesPrepassEarlyKickOpen() { return s_kick_open.load(std::memory_order_relaxed); }
 
 void CLevel::BonesPrepassNote(u16 id)
 {
@@ -931,6 +1751,12 @@ void CLevel::BonesPrepass()
 {
     // K4: the deferred map update runs in the phase B window below, or here on the way out (no prepass this frame)
     const PendingMapUpdateGuard map_update_guard;
+    // Early kick: its phase B first - the dirty marks below need the early stamps of its
+    // models, and phase A must not race them. Normally done by now (the sound update, the UI and the RT scheduler ran
+    // beside it); main helps with what is left. Before the Game thread's phase 0 below, so the map update stays after it.
+    EarlyKickJoin(true);
+    // Pipelined prepass: early bones whose owner moved since are marked dirty - phase A below recomputes them.
+    EarlyCheckMoved();
     // Take the previous render's notes and start an empty list for this frame's render - always, even when nothing
     // is computed below (a level being loaded, or one that has just replaced another: stale IDs must not pile up).
     const u32 noted = std::min(s_bones_prepass_noted_count.exchange(0, std::memory_order_relaxed),
@@ -942,9 +1768,14 @@ void CLevel::BonesPrepass()
     CLevel& level = Level();
     const IGameObject* view = level.CurrentViewEntity();
     auto& candidates = s_bones_prepass_candidates;
+    auto& candidate_ids = s_bones_prepass_candidate_ids;
     auto& phase_b = s_bones_prepass_phase_b;
     candidates.clear();
+    candidate_ids.clear();
     phase_b.clear();
+    const u32 frame = Device.dwFrame;
+    // The regular candidates in phase_b (before the phase C owners)
+    size_t phase_b_regular = 0;
     s_render_prepare_items.clear();
     // Render prepare of held items (always, plans/optimization_mt/05-render-prepare-weapons.md): held items and the
     // addon models of weapons are prepared here too (collect -> phases A/B -> phase C), and their renderable_Render
@@ -968,6 +1799,7 @@ void CLevel::BonesPrepass()
                 continue;
             // Before the filters below: a weapon in the "cooldown" (and its addon models) is prepared all the same.
             RenderPrepareCollect(O, candidates);
+            candidate_ids.resize(candidates.size(), O->ID());
             // The render doesn't compute the bones of a frozen corpse pose (renderable_CorpsePoseFrozen) - neither do we.
             if (O->renderable_CorpsePoseFrozen())
                 continue;
@@ -977,16 +1809,56 @@ void CLevel::BonesPrepass()
             if (!K || !K->BonesPrepass_Wanted())
                 continue;
             candidates.push_back(K);
+            candidate_ids.push_back(O->ID());
+            s_bones_prepass_taken_frame[O->ID()] = frame;
         }
         PERF_ADD(prepass_candidates, candidates.size());
         // Phase A on main for every candidate: the blend callbacks (animation ends, Lua ScriptCallBack) fire here, on
         // the game logic thread, while nothing else runs game code (sequential frame: GameThread joined; game/render
         // overlap frame: the Game thread is not woken yet) - instead of on render workers.
-        for (IKinematics* K : candidates)
+        for (size_t i = 0; i < candidates.size(); ++i)
         {
-            if (K->BonesPrepass_PhaseA())
+            if (candidates[i]->BonesPrepass_PhaseA())
+            {
+                phase_b.push_back(candidates[i]);
+                EarlyCountSkip(candidate_ids[i]); // pipelined frame: why it wasn't computed early (perf metrics)
+            }
+        }
+        phase_b_regular = phase_b.size();
+        // Phase C owners (the pipelined prepass): a held item's UpdateXForm in phase C computes its owner's bones
+        // (CalculateBones(FALSE)) when the render drew the owner without computing them (an NPC drawn only as a shadow
+        // blob: noted, not BonesPrepass_Wanted) - one owner after another on main, a burst whenever their 100 ms
+        // UCalc_Interval runs out together. The same computation here: phase A on main (the blend callbacks stay on
+        // this thread), phase B on the workers with the candidates; phase C then fast-outs. Same filters as phase C and
+        // UpdateXFormFromOwner (a living or dead CEntityAlive holder, not the view entity's path); a frozen corpse pose
+        // is left as it was.
+        for (const u16 id : s_render_prepare_items)
+        {
+            IGameObject* O = level.Objects.net_Find(id);
+            IGameObject* owner = O && !O->getDestroy() ? O->H_Parent() : nullptr;
+            if (!owner || owner->getDestroy() || !owner->Visual() || owner == view || !owner->cast_entity_alive() ||
+                owner->renderable_CorpsePoseFrozen())
+                continue;
+            if (s_bones_prepass_taken_frame[owner->ID()] == frame)
+                continue;
+            s_bones_prepass_taken_frame[owner->ID()] = frame;
+            IKinematics* K = PKinematics(owner->Visual());
+            if (!K)
+                continue;
+            if (s_kick_frame == frame && K->BonesPrepass_Done())
+            {
+                // Early kick: computed by the kick (LazyPhaseBEarly) and a mutator changed its blends since - the
+                // dirty path of phase A recomputes it (a no-op for bones that are still valid)
+                if (K->BonesPrepass_PhaseA())
+                {
+                    phase_b.push_back(K);
+                    PERF_INC(prepass_redone_after_kick);
+                }
+            }
+            else if (K->BonesPrepass_LazyPhaseA())
                 phase_b.push_back(K);
         }
+        PERF_ADD(prepare_owner_lazy, phase_b.size() - phase_b_regular);
     }
     // K3 / K2b (26-framemove-game-next.md, package 2-A): the last Lua of main before the kick has run (phase A);
     // phase B, the map update (K4), phase C and the physics kick are C++ only. Wake the Game thread for phase 0 now:
@@ -994,10 +1866,14 @@ void CLevel::BonesPrepass()
     // KickGameLogicThread follows in CRenderDevice::ProcessFrame; a sequential frame has run its game logic already.
     if (Device.IsGameRenderOverlapFrame())
     {
-        const bool early_dispatch = mt_sound_dispatch_early != 0;
-        const bool early_gc = lua_gc_overlap != 0 && s_script_gc_pending.load(std::memory_order_acquire);
-        if (early_dispatch || early_gc)
-            XRay::Engine::KickGameLogicEarly(early_dispatch, early_gc ? &RunEarlyScriptGc : nullptr);
+        const bool early_gc = s_script_gc_pending.load(std::memory_order_acquire);
+#if XR_PERF_METRICS
+        // game/early_start_ms: how much sooner phase 0 starts thanks to the early kick - the phase A work it took off
+        // this point, less the wait for its tasks it added here (an estimate, the kick's own share of main)
+        if (s_kick_frame == frame && s_kick_main_ticks > s_kick_wait_ticks)
+            xray::perf::AddTimeSlow(xray::perf::Metric::game_early_start_ms, s_kick_main_ticks - s_kick_wait_ticks);
+#endif
+        XRay::Engine::KickGameLogicEarly(true, early_gc ? &RunEarlyScriptGc : nullptr);
     }
     if (!phase_b.empty())
     {
@@ -1019,7 +1895,11 @@ void CLevel::BonesPrepass()
             u32 local = 0;
             for (u32 i = range.begin(); i != range.end(); ++i)
             {
-                if (phase_b[i]->BonesPrepass_PhaseB())
+                // The phase C owners after the regular candidates: no prepass stamps (see LazyPhaseB), not counted in
+                // prepass/computed (prepare/owner_lazy)
+                if (i >= phase_b_regular)
+                    phase_b[i]->BonesPrepass_LazyPhaseB();
+                else if (phase_b[i]->BonesPrepass_PhaseB())
                     ++local;
             }
             computed.fetch_add(local, std::memory_order_relaxed);
@@ -1174,11 +2054,11 @@ void CLevel::OnFrame()
         // (~CUIWindow detaches from UI hierarchy; off-main-thread caused crashes / inconsistent UI state).
         {
             LEVEL_FRAME_PHASE("level/map_manager", lvl_frame_map_manager);
-            // K4 (mt_prepass_main_slot): the update waits for the phase B window of the bones prepass of this frame
-            // (CLevel::BonesPrepass; it runs on main on every way out of it). Still pending here = the previous frame
-            // had no prepass (window inactive, loading): then this frame updates here, never twice in one frame
-            // (CMapLocation::Update asserts that).
-            if (mt_prepass_main_slot && !s_map_update_pending)
+            // K4: the update waits for the phase B window of the bones prepass of this frame (CLevel::BonesPrepass; it
+            // runs on main on every way out of it). Still pending here = the previous frame had no prepass (window
+            // inactive, loading): then this frame updates here, never twice in one frame (CMapLocation::Update asserts
+            // that).
+            if (!s_map_update_pending)
                 s_map_update_pending = true;
             else
             {
@@ -1307,7 +2187,15 @@ void CLevel::OnFrame()
     }
     {
         LEVEL_FRAME_PHASE("level/add_call", lvl_frame_add_call);
+        // 32-frame-spikes.md, npc_perf_lua_spike_us > 0: the phase over the threshold goes to the log as
+        // "[lua-spike] add_call" with its slowest call (the Lua source of its condition/action), the heap and the GC
+        const bool lua_spike = gw::lua_spike::Enabled();
+        m_ph_commander_scripts->set_describe_slowest(lua_spike);
+        gw::lua_spike::Probe spike(lua_spike && GEnv.ScriptEngine ? GEnv.ScriptEngine->lua() : nullptr,
+            gw::lua_spike::ECategory::AddCall);
         m_ph_commander_scripts->update();
+        if (spike.Finish())
+            spike.Report(m_ph_commander_scripts->slowest_call(), gw::lua_spike::kNoId, gw::lua_spike::kNoId);
     }
     {
         // the second part of frame/level/bullets (its calls = 2 per frame)
@@ -1334,19 +2222,17 @@ void CLevel::OnFrame()
         // defer LUA-GC-STEP
         if (g_mt_config.test(mtLUA_GC))
         {
-            if (lua_gc_overlap)
-            {
-                // K2b: phase 0 of the Game thread takes it (CLevel::BonesPrepass); if the frame has no phase 0, the
-                // seqParallel delegate runs it at the old place
-                s_script_gc_pending.store(true, std::memory_order_release);
-                Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(&RunSeqScriptGc));
-            }
-            else
-                Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(this, &CLevel::script_gc));
+            // K2b: phase 0 of the Game thread takes it (CLevel::BonesPrepass); if the frame has no phase 0, the
+            // seqParallel delegate runs it at the old place
+            s_script_gc_pending.store(true, std::memory_order_release);
+            Device.seqParallel.push_back(fastdelegate::FastDelegate0<>(&RunSeqScriptGc));
         }
         else
             script_gc();
     }
+    // Early kick: the level's game code of the frame is done - the rest of the prepass's
+    // phase A here, its phase B beside SoundProcessor, the UI and the RT scheduler (a no-op unless the pipeline ran)
+    EarlyKickTail();
     if (pStatGraphR)
     {
         static float fRPC_Mult = 10.0f;
@@ -1375,6 +2261,12 @@ void CLevel::OnGameLogicFrame()
 {
     ZoneScoped;
     PERF_SCOPE(game_logic_frame);
+    // 29-game-thread-next.md, A2: UpdateWorkload of the bullets of a game/render overlap frame as a
+    // task from here (the dispatch of the frame is over - nothing on the Game thread plays or reads the bullets' sounds
+    // beside it any more) to its old place in seqParallel, where the Game thread waits for it (no-op unless
+    // CommitRenderSet of this frame asked for it)
+    if (Device.IsGameRenderOverlapFrame())
+        BulletManager().StartWorkloadTask();
     {
         ZoneScopedN("hear_callbacks");
         PERF_SCOPE(game_hear_callbacks);
@@ -1387,6 +2279,10 @@ void CLevel::OnGameLogicFrame()
         PERF_SCOPE(game_level_on_frame);
         EmitLevelOnFrame();
     }
+    // 32-frame-spikes.md, A1: a part of the ALife update every frame (seqParallel of this frame)
+    // instead of the whole of it on the turn of the scheduler; a no-op with the switch off
+    if (CALifeSimulator* alife = const_cast<CALifeSimulator*>(ai().get_alife()))
+        alife->spread_frame();
 }
 
 // plans/optimization_mt/22-game-thread.md, step 2: the sound delegates of a frame (SoundEvent_Register queues one per
@@ -1729,6 +2625,21 @@ int psLUA_GCTIMEOUT = 1000;
 
 u32 ps_lua_gc_method = 1;
 
+#if XR_PERF_METRICS
+namespace
+{
+// G1 (plans/optimization_mt/32-frame-spikes.md): the detail of a long paced GC frame in "[perf-spike] lua/script_gc"
+void DescribeGcSpike(const void* ctx, char* buf, size_t size) noexcept
+{
+    const auto& gc = *static_cast<const gw::lua_spike::GcFrameStats*>(ctx);
+    xr_sprintf(buf, size, "steps=%llu debt=%lld->%lld budget=%uus uncapped=%d%s atomic=%s max_step=%uus heap=%dKB "
+        "cycle_start=%dKB", static_cast<unsigned long long>(gc.steps), static_cast<long long>(gc.due_before),
+        static_cast<long long>(gc.due_after), gc.budget_us, gc.uncapped ? 1 : 0, gc.heap_guard ? "(heap)" : "",
+        gc.atomic < 0 ? "?" : gc.atomic ? "1" : "0", gc.max_step_us, gc.heap_kb, gc.cycle_start_kb);
+}
+} // namespace
+#endif
+
 void CLevel::script_gc()
 {
     ZoneScoped;
@@ -1736,6 +2647,17 @@ void CLevel::script_gc()
     lua_State* L = GEnv.ScriptEngine ? GEnv.ScriptEngine->lua() : nullptr;
     if (L)
         xray::perf::SetGauge(xray::perf::Metric::lua_gc_kb, lua_gc(L, LUA_GCCOUNT, 0));
+#if XR_PERF_METRICS
+    {
+        // The luabind instances without __gc (32-frame-spikes.md): luabind keeps a running total, the metric gets what was made since
+        static u64 nogc_seen = 0;
+        const u64 nogc_now = luabind::detail::nonowning_instance_nogc_created();
+        PERF_ADD(lua_udata_nogc_created, nogc_now - nogc_seen);
+        nogc_seen = nogc_now;
+    }
+#endif
+    // G2 (32-frame-spikes.md): lua_gc_pause/lua_gc_stepmul, lua_gc_atomic_stats, lua_heap_census - outside lua/gc_step
+    gw::lua_spike::ServiceGcDiagnostics(L);
     PERF_SCOPE(lua_gc_step);
     // P18 (plans/optimization_mt/13-lua-spikes.md), npc_perf_lua_spike_us > 0: a long GC step goes to the log, and an
     // atomic phase inside the step is counted apart (lua/gc_atomic_in_step of lua/gc_atomic)
@@ -1758,9 +2680,14 @@ void CLevel::script_gc()
         ps_lua_gc_method = 1;
 
     case 1:
+    {
+        // G1 (32-frame-spikes.md), perf_spike_us: a long paced GC frame -> "[perf-spike] lua/script_gc" with its steps,
+        // debt, budget, whether it went uncapped, the atomic phase and the heap (gw::lua_spike::LastGcFrame)
+        PERF_SPIKE_NAMED(gc_spike, "lua/script_gc", &gw::lua_spike::LastGcFrame(), &DescribeGcSpike, true);
         // The paced steps (lua_spike_probe.h): the GC of the frame works only here, psLUA_GCSTEP KB on top
         gw::lua_spike::GcStepFrame(GEnv.ScriptEngine->lua(), psLUA_GCSTEP);
         break;
+    }
     }
 
     if (probe_atomic && gw::lua_spike::PollAtomic(L) != atomic_before)

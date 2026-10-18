@@ -418,6 +418,8 @@ GwpResult GWP_CALL ApiNpcSetDestLevelVertex(const GwpPlugin* self, GwpObjectId i
     if (!stalker->movement().restrictions().accessible(level_vertex))
         return ControlRefusal(self, function, GWP_ERROR_INVALID_ARGUMENT, "the restrictors of the NPC forbid the vertex");
     stalker->lua_game_object()->set_dest_level_vertex_id(level_vertex);
+    // 33-level-path.md (plans/optimization_mt), M: the [path-spike] line names a destination of a plugin (gw_npc)
+    stalker->movement().set_level_dest_source(CMovementManager::level_dest_plugin);
     return GWP_OK;
 }
 

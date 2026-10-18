@@ -15,7 +15,8 @@ namespace Feel
 {
 
 Vision::Vision(IGameObject const* owner)
-    : pure_relcase(&Vision::feel_vision_relcase, &Vision::feel_vision_relcase_batch), m_owner(owner) {}
+    // The parallel relcase: the batch form only drops pointers from the own lists under m_vision_mtx (see there)
+    : pure_relcase(&Vision::feel_vision_relcase, &Vision::feel_vision_relcase_batch, true), m_owner(owner) {}
 Vision::~Vision() {}
 struct SFeelParam
 {
@@ -92,17 +93,70 @@ void Vision::feel_vision_relcase(IGameObject* object)
         }
 }
 
+namespace
+{
+// R2 (32-frame-spikes.md): `list` is sorted by pointer and unique (seen / query / diff, see
+// feel_vision_query and feel_vision_merge_after_frustum; relcase and clear only erase). Every batch object (ascending,
+// batch.sorted) is looked up by binary search, each search starting where the previous one stopped: O(D log N) when
+// none is there - the usual case. Only if one is found, the list is compacted from the first found position with the
+// same predicate as before: the elements before it are not in the batch (every batch object in the list was found).
+// Same result as remove_if over the whole list.
+void erase_batch_sorted(xr_vector<IGameObject*>& list, const RelcaseBatch& batch)
+{
+    VERIFY(std::is_sorted(list.begin(), list.end()));
+    auto from = list.begin();
+    auto first_found = list.end();
+    for (u32 i = 0; i < batch.count && from != list.end(); ++i)
+    {
+        IGameObject* const object = const_cast<IGameObject*>(batch.sorted[i]);
+        from = std::lower_bound(from, list.end(), object);
+        if (from != list.end() && *from == object)
+        {
+            first_found = from;
+            break;
+        }
+    }
+    if (first_found == list.end())
+        return;
+    list.erase(std::remove_if(first_found, list.end(),
+                   [&batch](const IGameObject* object) { return batch.contains(object); }),
+        list.end());
+}
+
+// 32-frame-spikes.md, the callback scan (the offline wave: ~130 destroyed objects, ~600 objects in sight of an NPC, a
+// search per batch object in 3 lists of each of ~1900 NPCs cost 12-15 ms): a list not longer than 24 x the batch is
+// walked once - contains() answers almost every element from the pointer hash bits (ptr_bits, set by the relcase pass
+// of CObjectList), a sequential pass of ~1 ns an element; a longer list is searched as erase_batch_sorted does (a small batch).
+// The first batch object found starts the same compaction as there: same result as remove_if over the whole list, in
+// any order of the list.
+void erase_batch_scan(xr_vector<IGameObject*>& list, const RelcaseBatch& batch)
+{
+    if (list.empty())
+        return;
+    if (!batch.ptr_bits || list.size() > static_cast<size_t>(batch.count) * 24)
+    {
+        erase_batch_sorted(list, batch);
+        return;
+    }
+    const auto in_batch = [&batch](const IGameObject* object) { return batch.contains(object); };
+    const auto first_found = std::find_if(list.begin(), list.end(), in_batch);
+    if (first_found == list.end())
+        return;
+    list.erase(std::remove_if(first_found, list.end(), in_batch), list.end());
+}
+} // namespace
+
 // Same result as feel_vision_relcase for every object of the batch (it removes the first match from each list, there is
 // at most one): the lists only lose pointers, nothing is called back.
 void Vision::feel_vision_relcase_batch(const RelcaseBatch& batch)
 {
     PERF_SCOPE(relcase_cb_vision);
     std::lock_guard<std::recursive_mutex> lock(m_vision_mtx);
-    const auto in_batch = [&batch](const IGameObject* object) { return batch.contains(object); };
     const size_t query_size = query.size();
-    seen.erase(std::remove_if(seen.begin(), seen.end(), in_batch), seen.end());
-    query.erase(std::remove_if(query.begin(), query.end(), in_batch), query.end());
-    diff.erase(std::remove_if(diff.begin(), diff.end(), in_batch), diff.end());
+    PERF_INC(relcase_vision_scan);
+    erase_batch_scan(seen, batch);
+    erase_batch_scan(query, batch);
+    erase_batch_scan(diff, batch);
     // P17b (always): feel_visible holds exactly the objects of `query` - only feel_vision_merge_after_frustum adds to it
     // (seen - query) and removes from it (query - seen, then `seen` becomes `query`),
     // relcase drops an object from both, feel_vision_clear empties both, all under m_vision_mtx. So if no batch object

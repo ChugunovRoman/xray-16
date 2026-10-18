@@ -12,10 +12,15 @@
 #include "space_restriction_holder.h"
 #include "space_restriction_bridge.h"
 #include "space_restriction_abstract.h"
+#include "xrCommon/xr_unordered_map.h"
 
 //#define USE_FREE_IN_RESTRICTIONS
 
 class CSpaceRestrictionManager;
+
+// The cover scan cache (space_restriction.cpp): a space restrictor moved, appeared or went - the answers of accessible
+// kept by every CSpaceRestriction are dropped
+void space_restriction_shapes_changed();
 
 class CSpaceRestriction : public RestrictionSpace::CTimeIntrusiveBase, public CSpaceRestrictionAbstract
 {
@@ -53,6 +58,35 @@ protected:
 #ifdef USE_FREE_IN_RESTRICTIONS
     FREE_IN_RESTRICTIONS m_free_in_restrictions;
 #endif
+
+private:
+    // The cover scan cache: the answers of accessible(sphere) by the exact sphere, valid until the shapes change, for
+    // the same bridges; filled and read on the game logic thread only
+    struct accessible_key
+    {
+        u32 x, y, z, r;
+        bool operator==(const accessible_key& other) const
+        {
+            return x == other.x && y == other.y && z == other.z && r == other.r;
+        }
+    };
+    struct accessible_key_hash
+    {
+        size_t operator()(const accessible_key& key) const
+        {
+            u64 h = key.x;
+            h = h * 0x9E3779B97F4A7C15ull + key.y;
+            h = h * 0x9E3779B97F4A7C15ull + key.z;
+            h = h * 0x9E3779B97F4A7C15ull + key.r;
+            return size_t(h ^ (h >> 29));
+        }
+    };
+    xr_unordered_map<accessible_key, bool, accessible_key_hash> m_accessible_cache;
+    u32 m_accessible_cache_gen = u32(-1);
+    const void* m_accessible_cache_out = nullptr;
+    const void* m_accessible_cache_in = nullptr;
+
+    bool accessible_uncached(const Fsphere& sphere);
 
 private:
     IC bool intersects(CBaseRestrictionPtr bridge);

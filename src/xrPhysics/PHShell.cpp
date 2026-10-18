@@ -84,6 +84,7 @@ void CPHShell::EnableObject(CPHObject* obj)
 #endif
     }
     m_force_slept = false;
+    m_sleep_calm_steps = 0;
     CPHObject::activate();
     if (m_spliter_holder)
         m_spliter_holder->Activate();
@@ -91,6 +92,7 @@ void CPHShell::EnableObject(CPHObject* obj)
 void CPHShell::DisableObject()
 {
     m_force_slept = false; // CPHWorld::SleepCorpses() sets it back right after its own Disable()
+    m_sleep_calm_steps = 0;
     IPhysicsShellHolder* ref_object = elements.front()->PhysicsRefObject();
     //. if (!ref_object) return;
 

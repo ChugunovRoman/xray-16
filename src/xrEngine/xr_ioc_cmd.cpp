@@ -704,6 +704,17 @@ public:
     void Save(IWriter*) override {}
 };
 
+// 29-game-thread-next.md: a value the engine publishes (shed_budget_scale_pct) - readable from the console and by the
+// plugins (cvar_get_int), not settable and not saved
+class CCC_IntegerReadOnlyE final : public CCC_Integer
+{
+public:
+    using CCC_Integer::CCC_Integer;
+    void Execute(pcstr) override { Msg("! %s is read-only (set by the engine)", cName); }
+    void Save(IWriter*) override {}
+    void Info(TInfo& I) override { xr_sprintf(I, sizeof(I), "read-only integer, set by the engine"); }
+};
+
 class ENGINE_API CCC_HideConsole : public IConsole_Command
 {
 public:
@@ -802,6 +813,15 @@ void CCC_Register()
     CMD4(CCC_PerfMetrics, "perf_spike_us", &::xray::perf::g_perf_spike_us, 0, 1000000);
     CMD4(CCC_PerfMetrics, "perf_spike_cpu", &::xray::perf::g_perf_spike_cpu, 0, 1);
     CMD4(CCC_PerfMetrics, "perf_spike_lines", &::xray::perf::g_perf_spike_lines, 0, 1000);
+    // 32-frame-spikes.md: a frame (wall time) longer than perf_frame_peak_ms ms -> "! [frame-peak]" with the deltas of
+    // that frame (Lua GC, relcase, ALife, game events, Lua binders, the bus, game_wait / frame_move / render), at most
+    // 30 lines per 5 s; 0 = off. > 0 collects the metrics even with perf_metrics 0. Not saved (same class).
+    CMD4(CCC_PerfMetrics, "perf_frame_peak_ms", &::xray::perf::g_perf_frame_peak_ms, 0, 10000);
+    // 32-frame-spikes.md: the relcase switches R1, R2, the callback scan, the no-op skip and the parallel relcase
+    // (ol_relcase_npc_batch, ol_relcase_vision_sorted, ol_relcase_cb_scan, ol_relcase_skip_noop, ol_relcase_parallel)
+    // are always on since 2026-10-18 (41-cvar-cleanup.md, see xr_object.h). So are, since the same day (step 2), the
+    // relcase of the sleeping stalkers on the workers and the no-op skip of the script factory objects
+    // (37-destroy-relcase-smooth.md; ol_relcase_sleep_parallel, ol_relcase_skip_noop_script removed).
 
 #ifdef DEBUG
     CMD3(CCC_Mask, "mt_particles", &psDeviceFlags, mtParticles);
@@ -909,8 +929,12 @@ void CCC_Register()
     CMD3(CCC_Mask, "snd_efx", &psSoundFlags, ss_EFX);
     CMD3(CCC_Mask, "snd_use_float32", &psSoundFlags, ss_UseFloat32);
     CMD4(CCC_Integer, "snd_targets", &psSoundTargets, 4, 256);
-    CMD4(CCC_Integer, "snd_cache_size", &psSoundCacheSizeMB, 4, 96);
+    // 46-engine-core-render-audit.md: the PCM cache is filled by use now (sounds played twice), the cap is up to 512 MB
+    CMD4(CCC_Integer, "snd_cache_size", &psSoundCacheSizeMB, 4, 512);
     CMD4(CCC_Float, "snd_cache_short_sec", &psSoundCacheShortSec, 0.0f, 30.0f);
+    // plans/optimization_mt/34-sound-cold-load.md: the sound prefetch (a background thread reads ahead the .ogg of the
+    // folders named by scripts and of a sound loaded cold in a game event) is always on since 2026-10-18
+    // (snd_source_prefetch removed, see plan 41)
     extern int g_snd_ai_coalesce_ms;
     // Пропускать повторные звуковые события от одного источника в течение N мс.
     // Снижает нагрузку q_box при автоматическом огне. 0 = выкл.
@@ -1035,4 +1059,12 @@ void CCC_Register()
     // ps_shed_urgent_share; always on): the share of the near budget and the hit memory are tunables
     CMD4(CCC_Integer, "shed_urgent_share", &ps_shed_urgent_share, 10, 100);
     CMD4(CCC_Integer, "shed_urgent_hit_ms", &ps_shed_urgent_hit_ms, 0, 60000);
+    // 29-game-thread-next.md: the adaptive budget (xrSheduler.cpp, see the comment at ps_shed_budget_min_ms; always on
+    // since 2026-10-18, shed_budget_min_ms 50 = the fixed budget shed_budget_ms): tunables, not saved.
+    // shed_budget_scale_pct is what it publishes for the plugins (100 * effective / base)
+    CMD4(CCC_IntegerNotSavedE, "shed_budget_min_ms", &ps_shed_budget_min_ms, 1, 50);
+    CMD4(CCC_IntegerNotSavedE, "shed_budget_wait_target_us", &ps_shed_budget_wait_target_us, 0, 20000);
+    CMD4(CCC_IntegerNotSavedE, "shed_budget_far_keep_pct", &ps_shed_budget_far_keep_pct, 0, 100);
+    CMD4(CCC_IntegerReadOnlyE, "shed_budget_scale_pct", &ps_shed_budget_scale_pct, 1, 100);
+    // 30-game-events.md, B1 (xr_object_list.h; ol_destroy_child_scan_batch): always on since 2026-10-18
 };

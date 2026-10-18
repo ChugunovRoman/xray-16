@@ -176,6 +176,9 @@ public:
 
     // Called at the start of the main scene render pass (after level exists); used for dynamic weapon inventory icons.
     virtual void OnWeaponIconRenderPass() {}
+    // True when OnWeaponIconRenderPass() of this frame would render icons (they use the render's immediate dsgraph):
+    // the early main build (r__main_build_early) keeps the old order in such frames. Main thread.
+    virtual bool WeaponIconRenderPassPending() const { return false; }
 
     // begin=true: prepare subject (e.g. identity XFORM) before renderable_Render; begin=false: restore.
     virtual void OnWeaponIconSnapshot(IRenderable* subject, bool begin) { (void)subject; (void)begin; }

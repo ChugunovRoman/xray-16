@@ -26,11 +26,12 @@ class CUIWindow;
 class CBinocularsVision;
 class CNightVisionEffector;
 
-// K5 of plans/optimization_mt/26-framemove-game-next.md, a temporary switch (not saved, default 0): a cheaper UpdateCL
-// of weapons that are not in the hands of the actor - the show / hide / reload sounds are positioned only while one of
-// them plays, state_Fire takes the fire point only on the frames that may shoot, the HUD addons and laser dots are
-// left out. 0 = everything as before
-extern int wpn_npc_ucl_lite;
+// Always on since 2026-10-18 (their switches wpn_npc_ucl_lite, wpn_npc_dead_owner_skip removed, 41-cvar-cleanup.md):
+// K5 of plans/optimization_mt/26-framemove-game-next.md - a cheaper UpdateCL of weapons that are not in the hands of the
+// actor: the show / hide / reload sounds are positioned only while one of them plays, state_Fire takes the fire point
+// only on the frames that may shoot, the HUD addons and laser dots are left out;
+// W1 of plans/optimization_mt/28-updatecl-main.md - the UpdateCL of an idle (or hidden) weapon in the hands of a dead
+// owner is skipped like the one of a hidden NPC weapon (CWeapon::TrySkipDeadOwnerUpdateCL).
 
 struct addon_slot {
     shared_str slot_name;
@@ -263,6 +264,16 @@ public:
     virtual void shedule_Update(u32 dt);
 
 protected:
+    // W3 of plans/optimization_mt/28-updatecl-main.md: CWeapon::UpdateCL after its skip check.
+    // CWeaponMagazined::UpdateCL makes the same check first and calls this one, not CWeapon::UpdateCL - the check is not
+    // repeated (a second call right after a "no" would answer "no" again: nothing changes in between)
+    void UpdateCLChecked();
+    // TrySkipHiddenUpdateCL() || TrySkipOwnerLodUpdateCL() || TrySkipDeadOwnerUpdateCL(), the check at the top of the
+    // UpdateCL of the most derived class
+    bool TrySkipNpcUpdateCL();
+    // W1: the same for an idle (or hidden) weapon in the hands of a dead NPC with no shot
+    // timer running (a shot fired at the death still runs its UpdateCL: eFire, then the timer)
+    bool TrySkipDeadOwnerUpdateCL();
     // Stage 2b of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md (always on in single player):
     // true = this frame the UpdateCL of this hidden NPC weapon has nothing to do and was replaced with
     // UpdateCLSkippedChild(); the caller (the UpdateCL of the most derived class first) returns at once
@@ -275,12 +286,12 @@ private:
     // Shared by both: no action, motion, light, particles, vision, laser dot or weapon sound in flight
     bool NpcUpdateCLNothingInFlight();
     // K5: a laser dot of this weapon may be active (set by UpdateLaserDots, the only place that activates them; reset
-    // once wpn_npc_ucl_lite has deactivated them out of the actor's hands)
+    // once K5 has deactivated them out of the actor's hands)
     bool m_laser_dots_maybe_active{false};
 
 protected:
-    // K5 (wpn_npc_ucl_lite): the switch is on and the weapon is not in the hands of the actor (an NPC, a monster, the
-    // ground) - nothing of it is drawn in the HUD
+    // K5: the weapon is not in the hands of the actor (an NPC, a monster, the ground) - nothing of it is drawn in the
+    // HUD
     bool NpcUclLite();
     // K5: NpcUclLite() and none of the sounds of m_sounds plays - every m_sounds.SetPosition of this frame would be a
     // no-op (CWeaponMagazined::UpdateSounds and its overrides; the XFORM is still refreshed by sounds_fire_point)

@@ -15,6 +15,7 @@ bool CSoundRender_TargetA::_initialize()
     const ALenum error = alGetError();
     if (AL_NO_ERROR == error)
     {
+        cache_params_valid = false; // a new AL source: fill_parameters() sends everything
         A_CHK(alSourcei(pSource, AL_LOOPING, AL_FALSE));
         A_CHK(alSourcef(pSource, AL_MIN_GAIN, 0.f));
         A_CHK(alSourcef(pSource, AL_MAX_GAIN, 1.f));
@@ -73,6 +74,7 @@ void CSoundRender_TargetA::stop()
         A_CHK(alSourcei(pSource, AL_BUFFER, 0));
         A_CHK(alSourcei(pSource, AL_SOURCE_RELATIVE, TRUE));
     }
+    cache_params_valid = false; // the next emitter on this voice sends all its 3D parameters
     inherited::stop();
 }
 
@@ -149,11 +151,38 @@ void CSoundRender_TargetA::fill_parameters()
     const auto& src = m_pEmitter->p_source;
     const auto& pos = src.position;
 
-    A_CHK(alSourcef (pSource, AL_REFERENCE_DISTANCE, src.min_distance));
-    A_CHK(alSourcef (pSource, AL_MAX_DISTANCE,       src.max_distance));
-    A_CHK(alSource3f(pSource, AL_POSITION,           pos.x, pos.y, -pos.z));
-    A_CHK(alSourcei (pSource, AL_SOURCE_RELATIVE,    m_pEmitter->b2D));
-    A_CHK(alSourcef (pSource, AL_ROLLOFF_FACTOR,     psSoundRolloff));
+    // 46-engine-core-render-audit.md: only what changed, in the same order. Each set of OpenAL Soft takes the context
+    // locks and, on a playing source, rebuilds its props for the mixer; ~165 voices x 5 sets every frame on the Game
+    // thread (game/seq_frame_mt/sound ~0.48 ms/frame), while mostly only the position of a moving source changes.
+    // The AL source ends up in the same state as with the five sets every frame.
+    const ALint relative = m_pEmitter->b2D;
+    const bool all = !cache_params_valid;
+    if (all || cache_ref_dist != src.min_distance)
+    {
+        cache_ref_dist = src.min_distance;
+        A_CHK(alSourcef(pSource, AL_REFERENCE_DISTANCE, src.min_distance));
+    }
+    if (all || cache_max_dist != src.max_distance)
+    {
+        cache_max_dist = src.max_distance;
+        A_CHK(alSourcef(pSource, AL_MAX_DISTANCE, src.max_distance));
+    }
+    if (all || cache_pos.x != pos.x || cache_pos.y != pos.y || cache_pos.z != pos.z)
+    {
+        cache_pos = pos;
+        A_CHK(alSource3f(pSource, AL_POSITION, pos.x, pos.y, -pos.z));
+    }
+    if (all || cache_relative != relative)
+    {
+        cache_relative = relative;
+        A_CHK(alSourcei(pSource, AL_SOURCE_RELATIVE, relative));
+    }
+    if (all || cache_rolloff != psSoundRolloff)
+    {
+        cache_rolloff = psSoundRolloff;
+        A_CHK(alSourcef(pSource, AL_ROLLOFF_FACTOR, psSoundRolloff));
+    }
+    cache_params_valid = true;
 
     float _gain = m_pEmitter->smooth_volume;
     clamp(_gain, EPS_S, 1.f);

@@ -24,6 +24,10 @@
 #include "client_spawn_manager.h"
 #include "memory_manager.h"
 #include "xrEngine/IGame_Persistent.h"
+#include "xrEngine/xr_object_list.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include "Level.h"
+#include "lua_spike_probe.h"
 
 #ifndef MASTER_GOLD
 #include "Actor.h"
@@ -109,9 +113,25 @@ void CHitMemoryManager::add(float amount, const Fvector& vLocalDir, const IGameO
         m_last_hit_time = Device.dwTimeGlobal;
     }
 
-    object().callback(GameObject::eHit)(m_object->lua_game_object(), amount, vLocalDir,
-        smart_cast<const CGameObject*>(who)->lua_game_object(), element);
-    gw::addons::objevents::ObjectHit(m_object, amount, vLocalDir, who, element);
+    {
+        PERF_SCOPE(hit_lua_binder); // 30-game-events.md
+        auto& hit_callback = object().callback(GameObject::eHit);
+        // npc_perf_lua_spike_us > 0: a call over the threshold goes to the log ("binder_cb")
+        lua_State* spike_lua =
+            gw::lua_spike::Enabled() && hit_callback ? hit_callback.functor().interpreter() : nullptr;
+        gw::lua_spike::Probe spike(spike_lua, gw::lua_spike::ECategory::BinderCallback);
+        hit_callback(m_object->lua_game_object(), amount, vLocalDir,
+            smart_cast<const CGameObject*>(who)->lua_game_object(), element);
+        if (spike.Finish())
+        {
+            hit_callback.functor().push(spike_lua);
+            spike.Report("hit", m_object->ID(), who ? who->ID() : gw::lua_spike::kNoId, true);
+        }
+    }
+    {
+        PERF_SCOPE(hit_bus); // 30-game-events.md
+        gw::addons::objevents::ObjectHit(m_object, amount, vLocalDir, who, element);
+    }
 
     Fvector direction;
     m_object->XFORM().transform_dir(direction, vLocalDir);
@@ -308,6 +328,48 @@ void CHitMemoryManager::remove_links(IGameObject* object)
 #endif
 }
 
+// R1 (32-frame-spikes.md), inside the relcase pass of CObjectList only: as remove_links for
+// every object of the batch (see CSoundMemoryManager::remove_links_batch).
+void CHitMemoryManager::remove_links_batch(const RelcaseBatch& batch)
+{
+    if (batch.contains_id(m_last_hit_object_id))
+    {
+        m_last_hit_object_id = ALife::_OBJECT_ID(-1);
+        m_last_hit_time = 0;
+    }
+
+    if (m_hits)
+    {
+        if (g_pGameLevel->Objects.relcase_first_visit(m_hits))
+        {
+            PERF_INC(relcase_shared_purges);
+            PERF_ADD(relcase_shared_items, m_hits->size());
+            m_hits->erase(std::remove_if(m_hits->begin(), m_hits->end(),
+                              [&batch](const MemorySpace::CHitObject& hit_object)
+                              {
+                                  if (!hit_object.m_object)
+                                      return false;
+                                  const u16 id = object_id(hit_object.m_object);
+                                  if (id != u16(-1))
+                                      return batch.contains_id(id);
+                                  return batch.contains(hit_object.m_object);
+                              }),
+                m_hits->end());
+        }
+        else
+            PERF_INC(relcase_shared_skips);
+    }
+
+#ifdef USE_SELECTED_HIT
+    if (!m_selected_hit || !m_selected_hit->m_object)
+        return;
+    const IGameObject* const ho = m_selected_hit->m_object;
+    const u16 sel_id = object_id(ho);
+    if (sel_id != u16(-1) ? batch.contains_id(sel_id) : batch.contains(ho))
+        xr_delete(m_selected_hit);
+#endif
+}
+
 void CHitMemoryManager::save(NET_Packet& packet) const
 {
     if (!m_object->g_Alive())
@@ -368,7 +430,7 @@ void CHitMemoryManager::load(IReader& packet)
         delayed_object.m_object_id = packet.r_u16();
 
         CHitObject& object = delayed_object.m_hit_object;
-        object.m_object = smart_cast<CEntityAlive*>(Level().Objects.net_Find(delayed_object.m_object_id));
+        object.set_object(smart_cast<CEntityAlive*>(Level().Objects.net_Find(delayed_object.m_object_id)));
         // object params
         object.m_object_params.m_level_vertex_id = packet.r_u32();
         packet.r_fvector3(object.m_object_params.m_position);
@@ -455,7 +517,7 @@ void CHitMemoryManager::on_requested_spawn(IGameObject* object)
 
         if (m_object->g_Alive())
         {
-            (*I).m_hit_object.m_object = smart_cast<CEntityAlive*>(object);
+            (*I).m_hit_object.set_object(smart_cast<CEntityAlive*>(object));
             VERIFY((*I).m_hit_object.m_object);
             add((*I).m_hit_object);
         }

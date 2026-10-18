@@ -270,8 +270,11 @@ bool CController::is_community_friend_overrides(const CEntityAlive* entity_alive
     if (const_cast<CEntityAlive*>(entity_alive)->cast_base_monster())
         return false;
 
-    return (std::find(m_friend_community_overrides.begin(), m_friend_community_overrides.end(),
-                IO->CharacterInfo().Community().id()) != m_friend_community_overrides.end());
+    // No shared_str by value (CHARACTER_COMMUNITY::id() returns a copy): this runs in the sound dispatch for every
+    // delivery to a controller - no refcount traffic per call (made for A1 of 29-game-thread-next.md, removed)
+    const COMMUNITY_DATA* community = CHARACTER_COMMUNITY::GetByIndex(IO->CharacterInfo().Community().index(), true);
+    return community && std::find(m_friend_community_overrides.begin(), m_friend_community_overrides.end(),
+        community->id) != m_friend_community_overrides.end();
 }
 
 bool CController::net_Spawn(CSE_Abstract* DC)
@@ -683,7 +686,7 @@ void CController::TranslateActionToPathParams()
 bool CController::is_relation_enemy(const CEntityAlive* tpEntityAlive) const
 {
     //	MONSTER_COMMUNITY_ID
-    if (xr_strcmp(tpEntityAlive->cNameSect().c_str(), "stalker_zombied") == 0)
+    if (xr_strcmp(tpEntityAlive->cNameSect_str(), "stalker_zombied") == 0) // no shared_str copy, see above
         return false;
     if (is_community_friend_overrides(tpEntityAlive))
         return false;

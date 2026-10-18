@@ -83,6 +83,8 @@ bool CStateMonsterEatingAbstract::check_completion()
 TEMPLATE_SPECIALIZATION
 void CStateMonsterEatingAbstract::remove_links(IGameObject* object)
 {
+    inherited::remove_links(object); // the substates keep their own pointers
+
     if (corpse == object)
         corpse = nullptr;
 }

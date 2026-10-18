@@ -64,6 +64,7 @@ void CResourceManager::reset_end()
             }
         }
     }
+    _RebuildGeomsIndex(); // 40-parallel-prefetch.md: vb / ib of some geometries changed above
 
     // create RTs in the same order as them was first created
     {

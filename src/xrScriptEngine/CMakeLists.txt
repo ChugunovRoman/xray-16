@@ -30,6 +30,7 @@ target_sources_grouped(
     script_engine.hpp
     script_space.hpp
     script_space_forward.hpp
+    script_wrapper_cache.hpp
     ScriptEngineScript.cpp
     ScriptEngineScript.hpp
 )

@@ -8,6 +8,8 @@
 
 #include <atomic>
 #include <functional>
+#include <type_traits>
+#include <utility>
 
 #include "xrEngine/xr_object.h"
 
@@ -162,6 +164,12 @@ protected:
 #ifdef DEBUG
     bool m_should_process_onrender{};
 #endif
+    // 32-frame-spikes.md, the no-op skip: the class keeps the empty net_Relcase / net_RelcaseBatch of CGameObject
+    // (set by the object factory from the type it created, ObjectFactory::client_object_created)
+    bool m_relcase_noop{};
+    // 37-destroy-relcase-smooth.md (always on since 2026-10-18): the same for an object of the script factory
+    // (class_registrator.script), by its exact class (ObjectFactory::script_client_object_created)
+    bool m_relcase_noop_script{};
 
 public:
     CGameObject();
@@ -335,6 +343,8 @@ public:
     virtual void net_Relcase(IGameObject* O) override; // destroy all links to another objects
     // P17: net_Relcase for batch.objects back to front, as vanilla CObjectList did per destroyed object
     virtual void net_RelcaseBatch(const RelcaseBatch& batch) override;
+    void relcase_noop(bool value) { m_relcase_noop = value; }
+    void relcase_noop_script(bool value) { m_relcase_noop_script = value; }
     virtual void save(NET_Packet& output_packet) override;
     virtual void load(IReader& input_packet);
     // Position stack
@@ -489,5 +499,23 @@ private:
     DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
 #pragma pack(pop)
+
+// 32-frame-spikes.md, the no-op skip: true if T keeps the empty net_Relcase and net_RelcaseBatch of CGameObject.
+// &T::f has the type of a pointer to member of the class that declares f last: an override in T or in a base between
+// it and CGameObject gives that class; f declared by another base too (CExplosive...) is ambiguous unless T declares
+// it, the substitution fails and the answer is false - as for any doubt (an inaccessible f included).
+// The member pointers are taken in function template deduction (access checked there as a substitution failure on
+// all compilers; clang does not do it in the arguments of a class template partial specialization).
+template <typename T>
+auto game_object_relcase_members(int) -> std::pair<decltype(&T::net_Relcase), decltype(&T::net_RelcaseBatch)>;
+template <typename T>
+void game_object_relcase_members(...);
+template <typename T>
+struct game_object_relcase_noop
+    : std::bool_constant<std::is_base_of_v<CGameObject, T> &&
+          std::is_same_v<decltype(game_object_relcase_members<T>(0)),
+              std::pair<void (CGameObject::*)(IGameObject*), void (CGameObject::*)(const RelcaseBatch&)>>>
+{
+};
 
 #endif // !defined(AFX_GAMEOBJECT_H__3DA72D03_C759_4688_AEBB_89FA812AA873__INCLUDED_)

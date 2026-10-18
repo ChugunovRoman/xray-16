@@ -119,6 +119,11 @@ public:
     Fmatrix i_mXFORM; // input:	4x4 xform
     Fmatrix i_mXFORM_01; //
     CSector* i_start; // input:	starting point
+    // input: VQ_SSA / VQ_FADE thresholds of the pass (r_ssaDISCARD, r_ssaLOD_A, r_ssaLOD_B or the pass's own
+    // snapshot) - set by the caller before traverse()
+    float i_ssaDISCARD{};
+    float i_ssaLOD_A{};
+    float i_ssaLOD_B{};
     xr_vector<CSector*> r_sectors; // result
     xr_vector<std::pair<CPortal*, float>> f_portals; //
 

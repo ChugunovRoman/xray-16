@@ -14,6 +14,7 @@
 #include "ai/stalker/ai_stalker.h"
 #include "cover_point.h"
 #include "member_order.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 const float MIN_SUITABLE_ENEMY_DISTANCE = 3.f; // 10.f;
 
@@ -105,6 +106,72 @@ bool CAgentLocationManager::suitable(CAI_Stalker* object, const CCoverPoint* loc
         CAgentEnemyManager::ENEMIES::const_iterator E = this->object().enemy().enemies().end();
         for (; I != E; ++I)
             if ((*I).m_enemy_position.distance_to_sqr(location->position()) < _sqr(MIN_SUITABLE_ENEMY_DISTANCE))
+                return (false);
+    }
+
+    return (true);
+}
+
+bool CAgentLocationManager::suitable(
+    CAI_Stalker* object, const CCoverPoint* location, bool use_enemy_info, suitable_snapshot& snapshot) const
+{
+    if (!snapshot.ready)
+    {
+        // the reads of the loop above, once: registered_in_combat is a search of the member list per call (O(M) per
+        // member and cover point), here it is the member's bit of the combat mask by its index
+        PERF_INC(ai_cover_suitable_snapshot);
+        snapshot.ready = true;
+        snapshot.self_position = object->Position();
+        snapshot.members.clear();
+        snapshot.enemy_positions.clear();
+
+        const CAgentMemberManager& members = this->object().member();
+        const auto& storage = members.members();
+        snapshot.members.reserve(storage.size());
+        for (u32 i = 0, n = u32(storage.size()); i < n; ++i)
+        {
+            const CMemberOrder* member_order = storage[i];
+            if (!member_order || !member_order->m_object || (member_order->object().ID() == object->ID()))
+                continue;
+
+            suitable_snapshot::member member;
+            member.position = member_order->object().Position();
+            member.has_cover = !!member_order->cover();
+            member.cover_position = member.has_cover ? member_order->cover()->m_position : Fvector().set(0.f, 0.f, 0.f);
+            member.to_cover_sqr = member.has_cover ? member.position.distance_to_sqr(member.cover_position) : 0.f;
+            member.in_combat = (i < sizeof(MemorySpace::squad_mask_type) * 8) ?
+                !!(members.combat_mask() & (MemorySpace::squad_mask_type(1) << i)) :
+                members.registered_in_combat(&member_order->object());
+            snapshot.members.push_back(member);
+        }
+
+        for (const CMemberEnemy& enemy : this->object().enemy().enemies())
+            snapshot.enemy_positions.push_back(enemy.m_enemy_position);
+    }
+
+    const Fvector& position = location->position();
+    for (const suitable_snapshot::member& member : snapshot.members)
+    {
+        if (!member.has_cover)
+        {
+            if (member.in_combat)
+                continue;
+
+            if (member.position.distance_to_sqr(position) <= _sqr(5.f))
+                return (false);
+
+            continue;
+        }
+
+        if (member.cover_position.distance_to_sqr(position) <= _sqr(5.f))
+            if (member.to_cover_sqr <= snapshot.self_position.distance_to_sqr(position) + 2.f)
+                return (false);
+    }
+
+    if (use_enemy_info)
+    {
+        for (const Fvector& enemy_position : snapshot.enemy_positions)
+            if (enemy_position.distance_to_sqr(position) < _sqr(MIN_SUITABLE_ENEMY_DISTANCE))
                 return (false);
     }
 

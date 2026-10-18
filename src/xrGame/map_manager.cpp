@@ -283,6 +283,16 @@ void CMapManager::ResolveRelationSpotChecks()
     m_relation_spot_checks.clear();
 }
 
+// 26-framemove-game-next.md (FrameMove after the pipelined prepass), a temporary A/B switch, not saved, 0 = as before:
+// map_update_lod N (2..16, try 4). In a big fight this update walks ~3500 locations a frame (map/locations_time
+// ~1.9 ms on main; with K4 it runs inside the phase B window of the bones prepass, which the pipelined
+// prepass made too short to hide it). With N a location that is not hot is updated on every N-th frame only; hot ones
+// (CMapLocation::UpdateLodSkippable: new, TTL, actor-bound, on this level within 100 m of the camera) every frame.
+// What a skipped location keeps for up to N - 1 frames: its actuality (a location whose owner is gone goes away a few
+// frames later), the relation spot (friend / enemy / dead body icon), the "seen now" of an enemy spot. The positions do
+// not lag: the maps compute them on demand (CMapLocation::RefreshPosition). map/lod_skipped = the updates skipped
+int map_update_lod = 4; // a tunable, not saved (the default since 2026-10-16, 41-cvar-cleanup.md)
+
 void CMapManager::Update()
 {
     ZoneScoped;
@@ -298,8 +308,29 @@ void CMapManager::Update()
     PERF_ADD(mapmgr_locations, locations.size());
     {
         PERF_SCOPE(map_locations_time);
-        for (SLocationKey& key : locations)
-            key.actual = key.location->Update(current_level);
+        // map_update_lod N >= 2: a location that is not hot (CMapLocation::UpdateLodSkippable) is updated on its own
+        // frame of every N - by the object ID, so the locations of a frame are spread evenly and none waits longer
+        const u32 lod = map_update_lod >= 2 ? u32(map_update_lod) : 0;
+        if (!lod)
+        {
+            for (SLocationKey& key : locations)
+                key.actual = key.location->Update(current_level);
+        }
+        else
+        {
+            const u32 frame = Device.dwFrame;
+            const Fvector& camera = Device.vCameraPosition;
+            for (SLocationKey& key : locations)
+            {
+                if ((frame + key.object_id) % lod != 0 &&
+                    key.location->UpdateLodSkippable(lod, camera, current_level))
+                {
+                    PERF_INC(map_lod_skipped);
+                    continue;
+                }
+                key.actual = key.location->Update(current_level);
+            }
+        }
     }
 
     {

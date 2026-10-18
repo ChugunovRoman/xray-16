@@ -309,9 +309,11 @@ public:
             ISpatial* S = it;
             if (S == ignore)
                 continue;
-            if (mask != (S->GetSpatialData().type & mask))
+            // 46-engine-core-render-audit.md: one virtual call per item (see ISpatial_q_box.cpp)
+            SpatialData& sd = S->GetSpatialData();
+            if (mask != (sd.type & mask))
                 continue;
-            Fsphere& sS = S->GetSpatialData().sphere;
+            Fsphere& sS = sd.sphere;
             int quantity;
             float afT[2];
             Fsphere::ERP_Result result = sS.intersect(ray.pos, ray.fwd_dir, range, quantity, afT);

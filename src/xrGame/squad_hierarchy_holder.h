@@ -9,6 +9,7 @@
 #pragma once
 
 #include "seniority_hierarchy_space.h"
+#include "xrCommon/xr_map.h"
 
 class CGroupHierarchyHolder;
 class CEntity;
@@ -33,6 +34,10 @@ private:
 private:
     CTeamHierarchyHolder* m_team;
     mutable GROUP_REGISTRY m_groups;
+    // Group ids >= max_group_count: the stalker groups keyed by their ALife squad (the group by squad) and the
+    // overflow groups of a full one (64 members, the squad masks of the agent manager) - see CEntity in Entity.cpp -
+    // and a group id >= 32 from the scripts (change_team), which used to index past m_groups (VERIFY only)
+    mutable xr_map<u32, CGroupHierarchyHolder*> m_extra_groups;
 
 #ifdef SQUAD_HIERARCHY_HOLDER_USE_LEADER
 private:

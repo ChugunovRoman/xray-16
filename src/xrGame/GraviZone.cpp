@@ -247,6 +247,8 @@ void CBaseGraviZone::StopTeleParticles(CGameObject* pObject)
     PP->StopParticles(particle_str, BI_NONE, true);
 }
 
+void CBaseGraviZone::net_RelcaseBatch(const RelcaseBatch& batch) { CSpaceRestrictor::net_RelcaseBatch(batch); }
+
 void CBaseGraviZone::net_Relcase(IGameObject* O)
 {
     inherited::net_Relcase(O);

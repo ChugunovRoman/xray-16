@@ -53,6 +53,8 @@ public:
     virtual void on_restrictions_change();
     virtual void set_level_dest_vertex(u32 const& level_vertex_id);
     virtual void remove_links(IGameObject* object);
+    // R1 (32-frame-spikes.md): remove_links for every object of the batch, in one pass
+    virtual void remove_links_batch(const struct RelcaseBatch& batch);
     void initialize();
     IC float path_direction_angle();
     IC bool turn_in_place() const;

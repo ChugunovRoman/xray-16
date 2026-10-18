@@ -23,9 +23,10 @@ IC CGameLevelCrossTable::CGameLevelCrossTable(LPCSTR fName)
     m_chunk = m_tpCrossTableVFS->open_chunk(CROSS_TABLE_CHUNK_DATA);
     R_ASSERT2(m_chunk, "Cross table is corrupted!");
     m_tpaCrossTable = (CCell*)m_chunk->pointer();
+    m_cells_size = m_chunk->length();
 }
 
-IC CGameLevelCrossTable::CGameLevelCrossTable(const void* buffer, const u32& /*buffer_size*/)
+IC CGameLevelCrossTable::CGameLevelCrossTable(const void* buffer, const u32& buffer_size)
 {
     memcpy(&m_tCrossTableHeader, buffer, sizeof(m_tCrossTableHeader));
     buffer = (const u8*)buffer + sizeof(m_tCrossTableHeader);
@@ -35,10 +36,33 @@ IC CGameLevelCrossTable::CGameLevelCrossTable(const void* buffer, const u32& /*b
     m_tpaCrossTable = (CCell*)buffer;
     m_chunk = nullptr;
     m_tpCrossTableVFS = nullptr;
+    // 35: buffer_size is the size of the record of the level in the game graph (CGameGraph::set_current_level)
+    m_cells_size = buffer_size > sizeof(m_tCrossTableHeader) ? buffer_size - sizeof(m_tCrossTableHeader) : 0;
 }
+
+// 35 (plans/optimization_mt/33-level-path.md, journal): the cells of the mapped file are read
+// on demand, and the page of a cell nobody read yet is a read from the disk on the first lookup (update_ai_locations of
+// an NPC that walked into a new area). After an idle second the drive answers it in ~9 ms (its power state), so the
+// copy is made once at the level load: the same bytes, then read from the process memory.
+IC bool CGameLevelCrossTable::copy_to_memory()
+{
+    if (m_cells_copy)
+        return true;
+    const size_t count = header().level_vertex_count();
+    const size_t size = count * sizeof(CCell);
+    if (!count || size > m_cells_size)
+        return false;
+    m_cells_copy = xr_alloc<CCell>(count);
+    memcpy(m_cells_copy, m_tpaCrossTable, size);
+    m_tpaCrossTable = m_cells_copy;
+    return true;
+}
+
+IC bool CGameLevelCrossTable::in_memory() const { return m_cells_copy != nullptr; }
 
 IC CGameLevelCrossTable::~CGameLevelCrossTable()
 {
+    xr_free(m_cells_copy);
     if (m_chunk)
         m_chunk->close();
     FS.r_close(m_tpCrossTableVFS);

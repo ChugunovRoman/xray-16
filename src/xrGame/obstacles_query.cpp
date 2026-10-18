@@ -150,3 +150,15 @@ void obstacles_query::remove_links(IGameObject* object)
 
     m_obstacles.erase(iterator);
 }
+
+// R1 (32-frame-spikes.md): remove_links for every object of the batch in one pass. The keys
+// are compared as pointers (upcast, nothing is dereferenced; a key is there at most once); remove_if keeps the order,
+// so the vector stays sorted. Like remove_links, the area and the crc are not recomputed.
+void obstacles_query::remove_links_batch(const RelcaseBatch& batch)
+{
+    if (m_obstacles.empty())
+        return;
+    m_obstacles.erase(std::remove_if(m_obstacles.begin(), m_obstacles.end(),
+                          [&batch](const OBSTACLES::value_type& obstacle) { return batch.contains(obstacle.first); }),
+        m_obstacles.end());
+}

@@ -734,6 +734,7 @@ void CMovementManager::move_along_path(CPHMovementControl* movement_control, Fve
 {
     u8 branch = gb_none;
     move_along_path_body(movement_control, dest_position, time_delta, branch);
+    PERF_SCOPE(mv_ground); // 28-updatecl-main.md: movement/ground (ground_diag here, ground_snap in the body)
     ground_diag(movement_control, dest_position, branch);
 }
 
@@ -777,6 +778,7 @@ void CMovementManager::move_along_path_body(
             }
             else
             {
+                PERF_SCOPE(mv_idle_calc); // 28-updatecl-main.md: the frame step of a standing NPC with its character on
                 movement_control->Calculate(detail().path(), 0.f, detail().m_current_travel_point, precision);
                 movement_control->GetPosition(dest_position);
                 branch = gb_idle_physics;
@@ -784,7 +786,13 @@ void CMovementManager::move_along_path_body(
         }
         // Ground snap: a standing NPC with its character disabled is never moved at all - one left in the air
         // would hang there until it walks again
-        if (!movement_control->IsCharacterEnabled() && ground_snap(movement_control, dest_position, time_delta))
+        bool idle_snapped;
+        {
+            PERF_SCOPE(mv_ground);
+            idle_snapped =
+                !movement_control->IsCharacterEnabled() && ground_snap(movement_control, dest_position, time_delta);
+        }
+        if (idle_snapped)
         {
             movement_control->SetPosition(dest_position);
             PERF_INC(ai_npc_ground_snap_kinematic);
@@ -813,8 +821,11 @@ void CMovementManager::move_along_path_body(
     Fvector dir_to_target;
     float dist_to_target;
     u32 current_travel_point = detail().m_current_travel_point;
-    dest_position = path_position(old_desirable_speed(), object().Position(), time_delta, current_travel_point, dist,
-        dist_to_target, dir_to_target);
+    {
+        PERF_SCOPE(mv_path_position); // 28-updatecl-main.md: movement/path_position
+        dest_position = path_position(old_desirable_speed(), object().Position(), time_delta, current_travel_point,
+            dist, dist_to_target, dir_to_target);
+    }
 
     // Lain: added steering behaviour
     // 	Fvector target;
@@ -873,7 +884,11 @@ void CMovementManager::move_along_path_body(
     dest_position.add(motion);
 
     // Ground snap: every branch below but a failed TryPosition moves the NPC to this point without gravity
-    const bool ground_snapped = ground_snap(movement_control, dest_position, time_delta);
+    bool ground_snapped;
+    {
+        PERF_SCOPE(mv_ground);
+        ground_snapped = ground_snap(movement_control, dest_position, time_delta);
+    }
 
     Fvector velocity = dir_to_target;
     velocity.normalize_safe();
@@ -965,6 +980,7 @@ void CMovementManager::move_along_path_body(
     else
     {
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::MovementKinematic);
+        PERF_SCOPE(mv_kinematic); // 28-updatecl-main.md: the branch without neighbours (SetPosition, DisableCharacter)
         if (try_skip_on)
             try_position_skip_reset(); // no neighbours: the next frame with some is a full check
         // DBG_PH_MOVE_CONDITIONS(

@@ -393,7 +393,21 @@ void D3DXRenderBase::End()
 #endif
 
     // we're done with rendering
-    cleanup_contexts();
+    // R13 (27-render-main.md, always on since 2026-10-18, 41-cvar-cleanup.md): the per-frame cleanup keeps the nodes of
+    // the dsgraph maps (cleanup_contexts(true) -> reset_maps).
+    cleanup_contexts(/*frame_end=*/true);
+#if XR_PERF_METRICS && RENDER != R_R1
+    if (xray::perf::g_perf_metrics_active)
+    {
+        // render/dsgraph/capacity_*: what the maps hold into the next frame.
+        size_t max_map = 0;
+        size_t total = 0;
+        for (int id = 0; id < R__NUM_CONTEXTS; ++id)
+            total += contexts_pool[id].maps_capacity(max_map);
+        xray::perf::SetGauge(xray::perf::Metric::rdsg_capacity_nodes, static_cast<s64>(total));
+        xray::perf::UpdateMax(xray::perf::Metric::rdsg_capacity_max, static_cast<s64>(max_map));
+    }
+#endif
 
     HW.EndScene();
 }

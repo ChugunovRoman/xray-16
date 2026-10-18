@@ -570,3 +570,15 @@ void stalker_movement_manager_smart_cover::remove_links(IGameObject* object)
     if (m_current.cover_fire_object() == object)
         m_current.cover_fire_object(0);
 }
+
+// R1 (32-frame-spikes.md): remove_links for every object of the batch (pointers, as there)
+void stalker_movement_manager_smart_cover::remove_links_batch(const RelcaseBatch& batch)
+{
+    inherited::remove_links_batch(batch);
+
+    if (m_target.cover_fire_object() && batch.contains(m_target.cover_fire_object()))
+        m_target.cover_fire_object(0);
+
+    if (m_current.cover_fire_object() && batch.contains(m_current.cover_fire_object()))
+        m_current.cover_fire_object(0);
+}

@@ -31,6 +31,18 @@ public:
         g_pGameLevel->Objects.relcase_register(CObjectList::RELCASE_CALLBACK(self, function_to_bind),
             CObjectList::RELCASE_BATCH_CALLBACK(self, batch_function_to_bind), &m_ID);
     }
+    // 32-frame-spikes.md, the parallel relcase: batch_parallel - the batch form touches only what this subscriber owns
+    // (under its own lock, if anything else reads it meanwhile) and calls nothing back, so it may run on a task worker
+    // at the same time as the batch form of other such subscribers (Feel::Vision).
+    template <typename class_type>
+    pure_relcase(void (class_type::*function_to_bind)(IGameObject*),
+        void (class_type::*batch_function_to_bind)(const RelcaseBatch&), bool batch_parallel)
+    {
+        R_ASSERT(g_pGameLevel);
+        class_type* self = static_cast<class_type*>(this);
+        g_pGameLevel->Objects.relcase_register(CObjectList::RELCASE_CALLBACK(self, function_to_bind),
+            CObjectList::RELCASE_BATCH_CALLBACK(self, batch_function_to_bind), &m_ID, batch_parallel);
+    }
     virtual ~pure_relcase();
 };
 

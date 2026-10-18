@@ -58,8 +58,9 @@ void CStalkerActionNoALife::initialize()
     object().sight().setup(CSightAction(SightManager::eSightTypeCover, false, true));
 
     m_stop_weapon_handling_time = Device.dwTimeGlobal;
-    if (object().inventory().ActiveItem() && object().best_weapon() &&
-        (object().inventory().ActiveItem()->object().ID() == object().best_weapon()->object().ID()))
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    if (object().inventory().ActiveItem() && best_item &&
+        (object().inventory().ActiveItem()->object().ID() == best_item->object().ID()))
         m_stop_weapon_handling_time += ::Random32.random(30000) + 30000;
 
 #else
@@ -94,13 +95,14 @@ void CStalkerActionNoALife::execute()
     inherited::execute();
 #ifndef STALKER_DEBUG_MODE
     object().sound().play(eStalkerSoundHumming, 60000, 10000);
+    CInventoryItem* const best_item = object().best_weapon(); // 45-engine-ai-audit.md, N12: one call
     if (Device.dwTimeGlobal >= m_stop_weapon_handling_time)
-        if (!object().best_weapon())
+        if (!best_item)
             object().CObjectHandler::set_goal(eObjectActionIdle);
         else
-            object().CObjectHandler::set_goal(eObjectActionStrapped, object().best_weapon());
+            object().CObjectHandler::set_goal(eObjectActionStrapped, best_item);
     else
-        object().CObjectHandler::set_goal(eObjectActionIdle, object().best_weapon());
+        object().CObjectHandler::set_goal(eObjectActionIdle, best_item);
 #else
 //	object().movement().set_movement_type		(eMovementTypeRun);
 #endif

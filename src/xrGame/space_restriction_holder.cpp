@@ -14,6 +14,7 @@
 #include "space_restriction_shape.h"
 #include "space_restriction_composition.h"
 #include "restriction_space.h"
+#include "space_restriction.h"
 
 CSpaceRestrictionHolder::~CSpaceRestrictionHolder() { clear(); }
 void CSpaceRestrictionHolder::clear()
@@ -106,6 +107,7 @@ SpaceRestrictionHolder::CBaseRestrictionPtr CSpaceRestrictionHolder::restriction
 void CSpaceRestrictionHolder::register_restrictor(
     CSpaceRestrictor* space_restrictor, const RestrictionSpace::ERestrictorTypes& restrictor_type)
 {
+    space_restriction_shapes_changed(); // the cover scan cache: the cached answers of accessible are stale
     string4096 m_temp_string;
     shared_str space_restrictors = space_restrictor->cName();
     if (restrictor_type != RestrictionSpace::eDefaultRestrictorTypeNone)
@@ -172,6 +174,7 @@ bool try_remove_string(shared_str& search_string, const shared_str& string_to_se
 
 void CSpaceRestrictionHolder::unregister_restrictor(CSpaceRestrictor* space_restrictor)
 {
+    space_restriction_shapes_changed(); // the cover scan cache: the cached answers of accessible are stale
     shared_str restrictor_id = space_restrictor->cName();
     RESTRICTIONS::iterator I = m_restrictions.find(restrictor_id);
     VERIFY(I != m_restrictions.end());

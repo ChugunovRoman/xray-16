@@ -8,8 +8,27 @@
 
 #include "StdAfx.h"
 #include "alife_schedule_registry.h"
+#include "xrServer_Objects_ALife_Monsters.h"
 
 CALifeScheduleRegistry::~CALifeScheduleRegistry() {}
+
+// Only with -npc_cpp_profile (CUpdatePredicate checks it). The kind is taken before update(): an update can release
+// the object (the delete is postponed until the pass ends, CALifeUpdateManager::update_scheduled), so it is not
+// asked afterwards. Squads before monsters; offline stalkers are monsters too (CSE_ALifeHumanAbstract).
+void CALifeScheduleRegistry::update_profiled(CSE_ALifeSchedulable& object)
+{
+    CSE_Abstract* base = object.base();
+    ENpcCppProfileStage stage = ENpcCppProfileStage::AlifeScheduledOther;
+    if (smart_cast<CSE_ALifeOnlineOfflineGroup*>(base))
+        stage = ENpcCppProfileStage::AlifeScheduledSquad;
+    else if (smart_cast<CSE_ALifeSmartZone*>(base))
+        stage = ENpcCppProfileStage::AlifeScheduledSmartTerrain;
+    else if (smart_cast<CSE_ALifeMonsterAbstract*>(base))
+        stage = ENpcCppProfileStage::AlifeScheduledMonster;
+
+    NPC_CPP_PROFILE_SCOPE(stage);
+    object.update();
+}
 void CALifeScheduleRegistry::add(CSE_ALifeDynamicObject* object)
 {
     CSE_ALifeSchedulable* schedulable = smart_cast<CSE_ALifeSchedulable*>(object);
@@ -29,4 +48,18 @@ void CALifeScheduleRegistry::remove(CSE_ALifeDynamicObject* object, bool no_asse
         return;
 
     inherited::remove(object->ID, no_assert || !schedulable->need_update(object));
+}
+
+// 32-frame-spikes.md, A1: "[perf-spike] alife/object" (CUpdateSpreadPredicate). The Game thread, inside the pass
+void CALifeScheduleRegistry::describe_spike(const void* ctx, char* buf, size_t size) noexcept
+{
+    const CSE_Abstract* base = static_cast<const CSE_ALifeSchedulable*>(ctx)->base();
+    if (!base)
+    {
+        xr_sprintf(buf, size, "obj=?");
+        return;
+    }
+    LPCSTR name = base->name_replace();
+    xr_sprintf(buf, size, "obj=%s sect=%s id=%u", name ? name : "", base->s_name.c_str() ? base->s_name.c_str() : "",
+        static_cast<u32>(base->ID));
 }

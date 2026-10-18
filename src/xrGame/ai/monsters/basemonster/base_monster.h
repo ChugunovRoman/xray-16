@@ -101,7 +101,27 @@ public:
     // P17: UpdateMemory once after the whole batch instead of after every destroyed object
     virtual void net_RelcaseBatch(const RelcaseBatch& batch);
 
+protected:
+    // M1 (plans/optimization_mt/37-destroy-relcase-smooth.md): the part of net_Relcase of a derived monster that has to
+    // stay on the thread of the relcase pass (CBurer, CPoltergeist: the telekinesis - physics). Called for every
+    // destroyed object after the part of CBaseMonster, in the batched relcase and in net_Relcase alike.
+    virtual void net_RelcaseSerial(IGameObject* O) {}
+
 private:
+    // M1: net_RelcaseBatch split as CAI_Stalker's. Own - the lists of this monster (conditions, the memory manager with
+    // the group lists through relcase_first_visit, the state tree, the controls, the monster memories): put off by the
+    // relcase pass to CObjectList's parallel phase, may run on a task worker. Shared - the monster squads (all the
+    // monsters of the level, the first alive monster cleans them), the physics support and net_RelcaseSerial: on the
+    // thread of the pass. Finish - UpdateMemory if the batch touched the memories: on the thread of the pass after the
+    // phase (it reads the group visual list, cleaned by then).
+    void net_RelcaseBatchOwn(const RelcaseBatch& batch);
+    void net_RelcaseBatchShared(const RelcaseBatch& batch);
+    void net_RelcaseBatchFinish();
+    static void net_RelcaseBatchOwnDeferred(void* self, const RelcaseBatch& batch);
+    static void net_RelcaseBatchFinishDeferred(void* self, const RelcaseBatch& batch);
+    // CObjectList::relcase_batch_stamp() of the batch whose own part was put off (0 = none): once per batch
+    u32 m_relcase_parallel_stamp{};
+
     // P17b: set by net_Relcase during a batch when a batch object was in the memories and the
     // managers UpdateMemory works from (enemy, sound, hit and corpse memory, chosen enemy / corpse)
     bool m_relcase_memory_touched{};

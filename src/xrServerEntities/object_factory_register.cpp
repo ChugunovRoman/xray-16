@@ -9,6 +9,8 @@
 #include "pch_script.h"
 #pragma hdrstop
 
+#include <typeindex>
+
 #include "object_factory_impl.h"
 
 // server entities includes
@@ -176,6 +178,69 @@
 #include "actor_mp_server.h"
 #include "actor_mp_client.h"
 #include "smart_cover_object.h"
+
+// 32-frame-spikes.md, the no-op skip: a client object whose class keeps the empty net_Relcase / net_RelcaseBatch of
+// CGameObject is marked as such (CGameObject::net_RelcaseBatch then skips the batch); the other client types (game,
+// UI) are left alone. The checks below pin the trait on known classes of both kinds.
+namespace ObjectFactory
+{
+template <typename _client_type>
+void client_object_created(_client_type* object)
+{
+    if constexpr (std::is_base_of_v<CGameObject, _client_type>)
+        object->relcase_noop(game_object_relcase_noop<_client_type>::value);
+    else
+        (void)object;
+}
+
+// 37-destroy-relcase-smooth.md (the no-op skip of the script factory objects, always on since 2026-10-18): the script
+// factory (class_registrator.script, "CWeaponPM", "CFoodItem"...) creates its objects through luabind, which constructs
+// the exported C++ class itself, so the exact type of such an object is a class the C++ factory registers too. Here
+// every client class of the C++ factory is noted with its trait by exact type (CObjectFactory::add, register_classes:
+// once, before any object exists); an object of the script factory gets the flag of its exact type. A type not noted (a
+// luabind wrapper of a Lua class - CGameObjectWrapper etc., a class only the scripts register) gets false: its relcase
+// runs as before.
+namespace
+{
+xr_unordered_map<std::type_index, bool>& relcase_noop_types()
+{
+    static xr_unordered_map<std::type_index, bool> types;
+    return types;
+}
+} // namespace
+
+template <typename _client_type>
+void client_type_registered()
+{
+    if constexpr (std::is_base_of_v<CGameObject, _client_type>)
+        relcase_noop_types()[std::type_index(typeid(_client_type))] = game_object_relcase_noop<_client_type>::value;
+}
+
+void script_client_object_created(ClientObjectBaseClass* object)
+{
+    CGameObject* game_object = dynamic_cast<CGameObject*>(object);
+    if (!game_object)
+        return;
+    const auto& types = relcase_noop_types();
+    const auto it = types.find(std::type_index(typeid(*game_object)));
+    game_object->relcase_noop_script(it != types.end() && it->second);
+}
+} // namespace ObjectFactory
+
+static_assert(game_object_relcase_noop<CWeaponAmmo>::value);
+static_assert(game_object_relcase_noop<CFoodItem>::value);
+static_assert(game_object_relcase_noop<CStalkerOutfit>::value);
+static_assert(game_object_relcase_noop<CPda>::value);
+static_assert(!game_object_relcase_noop<CAI_Stalker>::value); // net_Relcase + net_RelcaseBatch
+static_assert(!game_object_relcase_noop<CActor>::value); // net_Relcase
+static_assert(!game_object_relcase_noop<CF1>::value); // CGrenade::net_Relcase (with CExplosive)
+static_assert(!game_object_relcase_noop<CMosquitoBald>::value); // CCustomZone::net_Relcase
+static_assert(!game_object_relcase_noop<CMincer>::value); // CBaseGraviZone::net_Relcase
+static_assert(!game_object_relcase_noop<CWeaponBinoculars>::value); // its own net_Relcase
+static_assert(!game_object_relcase_noop<CInventoryBox>::value); // its own net_Relcase
+static_assert(!game_object_relcase_noop<CScriptZone>::value); // its own net_Relcase
+static_assert(!game_object_relcase_noop<CBlackGraviArtefact>::value); // a protected net_Relcase
+static_assert(!game_object_relcase_noop<game_cl_Single>::value); // not a CGameObject
 
 #define ADD(a, b, c, d) add<a, b>(c, d)
 #define ADD_MP(a, b, c, d, e, f) add(xr_new<CObjectItemClientServerSingleMp<a, b, c, d>>(e, f))

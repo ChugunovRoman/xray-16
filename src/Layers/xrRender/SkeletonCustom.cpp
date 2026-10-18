@@ -5,6 +5,7 @@
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #include "SkeletonCustom.h"
 #include "SkeletonX.h"
+#include "ModelPool.h"
 #include "xrCore/FMesh.hpp"
 #include "xrCDB/Intersect.hpp"
 #include "xrEngine/EngineThreading.h"
@@ -266,7 +267,12 @@ void CKinematics::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
             {
                 ++s_skeleton_lod_load_depth;
                 //.         strconcat       (sizeof(name_load),name_load, short_name, ":lod:", lod_name.c_str());
-                m_lod = (dxRender_Visual*)RImplementation.model_CreateChild(lod_name, nullptr);
+                {
+                    // 36-spawn-model-load.md: the LOD is a whole load of its own (Tracy only: its parts count in
+                    // modelpool/load/*)
+                    ZoneNamedN(lod_zone, "model_load/lod", ModelPoolColdLoad());
+                    m_lod = (dxRender_Visual*)RImplementation.model_CreateChild(lod_name, nullptr);
+                }
                 --s_skeleton_lod_load_depth;
 
                 CKinematics* lod_kinematics = AsSkeletonVisual(m_lod);
@@ -290,11 +296,17 @@ void CKinematics::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
 
 #ifndef _EDITOR
     // User data
-    IReader* UD = data->open_chunk(OGF_S_USERDATA);
-    pUserData = UD ? xr_new<CInifile>(UD, FS.get_path("$game_config$")->m_Path) : 0;
-    if (UD)
-        UD->close();
+    {
+        MODEL_LOAD_PART("model_load/userdata", mload_userdata); // 36-spawn-model-load.md
+        IReader* UD = data->open_chunk(OGF_S_USERDATA);
+        pUserData = UD ? xr_new<CInifile>(UD, FS.get_path("$game_config$")->m_Path) : 0;
+        if (UD)
+            UD->close();
+    }
 #endif
+
+    // 36-spawn-model-load.md: bones, IK data, AfterLoad, unique bone faces, LL_Validate (to the end of the function)
+    MODEL_LOAD_PART("model_load/bones", mload_bones);
 
     // Globals
     bone_map_N = xr_new<accel>();
@@ -410,12 +422,10 @@ void CKinematics::Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags)
             CBoneData* B = (*bones)[bone_idx];
             for (u32 child_idx = 0; child_idx < children.size(); child_idx++)
             {
-                CBoneData::FacesVec faces = B->child_faces[child_idx];
+                // 40-parallel-prefetch.md: in place (it was sorted in a copy and copied back)
+                CBoneData::FacesVec& faces = B->child_faces[child_idx];
                 std::sort(faces.begin(), faces.end());
-                auto new_end = std::unique(faces.begin(), faces.end());
-                faces.erase(new_end, faces.end());
-                B->child_faces[child_idx].clear();
-                B->child_faces[child_idx] = faces;
+                faces.erase(std::unique(faces.begin(), faces.end()), faces.end());
             }
         }
     }

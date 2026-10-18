@@ -778,27 +778,141 @@ IFactoryObject* CBaseMonster::_construct()
 // the refresh gives what the monster already had, and the 10-90 us per alive monster (the receivers of the relcase
 // report: CZombie, CAI_Dog, CAI_Bloodsucker...) on every frame with a destroy are skipped. Items (PDA and ammo released
 // from corpses, the bulk of the destroyed objects) are never in these memories.
+// M1 (plans/optimization_mt/37-destroy-relcase-smooth.md, always): inside the relcase pass of CObjectList the chain
+// above runs split as CAI_Stalker's (R1 + the parallel relcase). The offline wave of 2026-10-18 (s_al.log, window 48):
+// 30 frames x ~97 destroyed objects, ~165 monsters x D at ~0.3 us a pair = ~5.4 ms of every such frame (CZombie alone
+// 3 ms) on the main thread, serially - the biggest part of serial_tail. Same end state as the per object chain:
+// - Own (net_RelcaseBatchOwn) - the lists of this monster only, each object of the batch dropped from each of them
+//   (the state tree, the controls, the monster memories - pointer compares per destroyed object as in net_Relcase;
+//   the memory manager - remove_links_batch of R1, the group lists by their first visitor). Nothing there re-selects,
+//   calls Lua, the sound or the physics. Put off to the parallel phase (a worker) while the pass accepts parts.
+// - Shared (net_RelcaseBatchShared) - on the thread of the pass: the monster squads (all the monsters of the level:
+//   the first alive monster cleans them of the batch, as net_Relcase in a batch), the physics support and
+//   net_RelcaseSerial (the telekinesis of CBurer / CPoltergeist).
+// - Finish (net_RelcaseBatchFinish) - UpdateMemory if the batch touched the memories (P17b), on the thread of the pass
+//   after the phase: it reads the group visual list, which the phase cleans. Before, it ran in the pass right after the
+//   monster's own chain - the selection it refreshes reads nothing the other objects' relcase changes.
+// A second call in one batch (a callback moved the monster to the other list) does the shared part only, as for the
+// stalkers. Outside the pass (a direct call) or with an empty batch: the per object chain as before.
 void CBaseMonster::net_RelcaseBatch(const RelcaseBatch& batch)
 {
     PERF_SCOPE(relcase_monsters);
-    m_relcase_memory_touched = false;
-    inherited::net_RelcaseBatch(batch);
-    if (g_Alive())
+    CObjectList& objects = Level().Objects;
+    if (!batch.count || objects.relcase_batch() != &batch)
     {
-        if (!m_relcase_memory_touched)
-        {
-            PERF_INC(relcase_monster_memory_skips);
-            return;
-        }
-        ZoneScopedN("CBaseMonster::net_RelcaseBatch UpdateMemory");
-        PERF_SCOPE(relcase_monster_memory);
-        UpdateMemory();
+        m_relcase_memory_touched = false;
+        inherited::net_RelcaseBatch(batch);
+        net_RelcaseBatchFinish();
+        return;
     }
+    if (objects.relcase_parallel_accepting())
+    {
+        if (m_relcase_parallel_stamp != objects.relcase_batch_stamp())
+        {
+            m_relcase_parallel_stamp = objects.relcase_batch_stamp();
+            objects.relcase_defer_parallel(
+                this, &CBaseMonster::net_RelcaseBatchOwnDeferred, &CBaseMonster::net_RelcaseBatchFinishDeferred);
+        }
+        net_RelcaseBatchShared(batch);
+        return;
+    }
+    net_RelcaseBatchOwn(batch);
+    net_RelcaseBatchShared(batch);
+    net_RelcaseBatchFinish();
+}
+
+void CBaseMonster::net_RelcaseBatchOwnDeferred(void* self, const RelcaseBatch& batch)
+{
+    PERF_HOT_ZONE("CBaseMonster::net_RelcaseBatch own");
+    PERF_SCOPE(relcase_monster_own);
+    static_cast<CBaseMonster*>(self)->net_RelcaseBatchOwn(batch);
+}
+
+void CBaseMonster::net_RelcaseBatchFinishDeferred(void* self, const RelcaseBatch& /*batch*/)
+{
+    static_cast<CBaseMonster*>(self)->net_RelcaseBatchFinish();
+}
+
+// The own lists of the monster: the chain of net_Relcase without the monster squads, the physics support and
+// net_RelcaseSerial (see net_RelcaseBatch). Sets m_relcase_memory_touched as net_Relcase does in a batch.
+void CBaseMonster::net_RelcaseBatchOwn(const RelcaseBatch& batch)
+{
+    // CEntityAlive::net_Relcase: the last hitter (one pointer)
+    if (IGameObject* const who = conditions().GetWhoHitLastTime(); who && batch.contains(who))
+        conditions().remove_links(who);
+
+    // CCustomMonster::net_Relcase
+    memory().remove_links_batch(batch);
+
+    // CBaseMonster::net_Relcase, per destroyed object as there (back to front)
+    const bool alive = g_Alive();
+    const size_t memory_items_before = alive ?
+        EnemyMemory.get_enemies_count() + SoundMemory.GetNumSounds() + HitMemory.get_num_hits() +
+            CorpseMemory.get_corpse_count() :
+        0;
+    bool touched = false;
+    for (u32 it = batch.count; it-- > 0;)
+    {
+        IGameObject* const O = batch.objects[it];
+        StateMan->remove_links(O);
+        com_man().remove_links(O);
+        if (alive)
+        {
+            if (EnemyMan.refers_to(O) || CorpseMan.get_corpse() == O)
+                touched = true;
+            EnemyMemory.remove_links(O);
+            SoundMemory.remove_links(O);
+            HitMemory.remove_hit_info(O);
+            EnemyMan.remove_links(O);
+            CorpseMan.remove_links(O);
+        }
+        CorpseMemory.remove_links(O);
+    }
+    if (alive &&
+        memory_items_before != EnemyMemory.get_enemies_count() + SoundMemory.GetNumSounds() +
+            HitMemory.get_num_hits() + CorpseMemory.get_corpse_count())
+    {
+        touched = true;
+    }
+    m_relcase_memory_touched = touched;
+}
+
+// The thread of the pass: the monster squads, the physics support, net_RelcaseSerial (see net_RelcaseBatch)
+void CBaseMonster::net_RelcaseBatchShared(const RelcaseBatch& batch)
+{
+    if (g_Alive() && Level().Objects.relcase_first_visit(&monster_squad()))
+    {
+        for (u32 it = batch.count; it-- > 0;)
+            monster_squad().remove_links(batch.objects[it]);
+    }
+    for (u32 it = batch.count; it-- > 0;)
+    {
+        IGameObject* const O = batch.objects[it];
+        m_pPhysics_support->in_NetRelcase(O);
+        net_RelcaseSerial(O);
+    }
+}
+
+// P17b: UpdateMemory once after the batch, only if it touched the memories
+void CBaseMonster::net_RelcaseBatchFinish()
+{
+    if (!g_Alive())
+        return;
+    if (!m_relcase_memory_touched)
+    {
+        PERF_INC(relcase_monster_memory_skips);
+        return;
+    }
+    m_relcase_memory_touched = false;
+    PERF_HOT_ZONE("CBaseMonster::net_RelcaseBatch UpdateMemory"); // R5: per monster, hidden with perf_metrics bit 4
+    PERF_SCOPE(relcase_monster_memory);
+    UpdateMemory();
 }
 
 void CBaseMonster::net_Relcase(IGameObject* O)
 {
-    ZoneScopedN("CBaseMonster::net_Relcase");
+    // R5 (32-frame-spikes.md): per monster x destroyed object - hidden with perf_metrics bit 4
+    PERF_HOT_ZONE("CBaseMonster::net_Relcase");
     inherited::net_Relcase(O);
 
     // P17: part of the batch of CObjectList's relcase pass (nullptr for a direct call) - see net_RelcaseBatch
@@ -806,7 +920,7 @@ void CBaseMonster::net_Relcase(IGameObject* O)
     const bool in_batch = batch && batch->contains(O);
 
     {
-        ZoneScopedN("CBaseMonster::net_Relcase state_com");
+        PERF_HOT_ZONE("CBaseMonster::net_Relcase state_com");
         StateMan->remove_links(O);
         com_man().remove_links(O);
     }
@@ -824,7 +938,7 @@ void CBaseMonster::net_Relcase(IGameObject* O)
     // TODO: do not clear, remove only object O
     if (g_Alive())
     {
-        ZoneScopedN("CBaseMonster::net_Relcase alive_memories");
+        PERF_HOT_ZONE("CBaseMonster::net_Relcase alive_memories");
         EnemyMemory.remove_links(O);
         SoundMemory.remove_links(O);
         HitMemory.remove_hit_info(O);
@@ -846,7 +960,7 @@ void CBaseMonster::net_Relcase(IGameObject* O)
         }
     }
     {
-        ZoneScopedN("CBaseMonster::net_Relcase corpse_physics");
+        PERF_HOT_ZONE("CBaseMonster::net_Relcase corpse_physics");
         CorpseMemory.remove_links(O);
         m_pPhysics_support->in_NetRelcase(O);
     }
@@ -857,6 +971,9 @@ void CBaseMonster::net_Relcase(IGameObject* O)
     {
         m_relcase_memory_touched = true;
     }
+
+    // M1: what the derived monsters added after this chain (CBurer, CPoltergeist)
+    net_RelcaseSerial(O);
 }
 
 void CBaseMonster::create_base_controls()

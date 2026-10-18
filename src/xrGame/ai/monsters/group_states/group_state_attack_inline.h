@@ -516,6 +516,10 @@ bool CStateGroupAttackAbstract::check_behinder()
 TEMPLATE_SPECIALIZATION
 void CStateGroupAttackAbstract::remove_links(IGameObject* object)
 {
+    // the substates keep their own pointers (CStateMonsterAttackOnRun::m_enemy_to_attack): without this a destroyed
+    // enemy stayed there and update_aim_side read it (a crash in object_id)
+    inherited::remove_links(object);
+
     if (m_enemy == object)
     {
         m_enemy = 0;

@@ -47,6 +47,10 @@ bool g_b_ClearGameCaptions = false;
 
 CUIGameCustom::~CUIGameCustom()
 {
+    // The Lua wrapper cache: the wrapper leaves the Lua registry (on the next cached pass, under Lua); a script that still
+    // holds it keeps a dangling wrapper, as with the uncached ones
+    xray::script_wrapper_cache::Release(m_lua_wrapper);
+
     InventoryUtilities::DestroyShaders();
 
     xr_delete(m_pHudOverlay);

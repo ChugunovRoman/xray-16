@@ -134,6 +134,13 @@ public:
     static void ForgetModuleSymbols(const void* moduleBase);
 
     /**
+     * Names of code addresses for diagnostics (not for the crash path): one string per address, in order,
+     * "xrGame.dll+0x0012AB34 Foo::Bar()+0x1C [file.cpp:42]" on Windows (dbghelp under its lock; the name and
+     * the line only with a PDB), the symbol from dladdr elsewhere.
+     */
+    static xr_vector<xr_string> SymbolizeAddresses(const xr_vector<const void*>& addresses);
+
+    /**
      * Writes a "! [crash] ..." block (exception code, faulting address, thread, loaded modules,
      * native call stack, Lua call stack) to the log and flushes it. Safe to call from an SEH filter.
      * Only the first call per process produces output: the filter chain would otherwise log twice.

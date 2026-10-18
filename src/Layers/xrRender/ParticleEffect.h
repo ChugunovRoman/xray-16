@@ -11,6 +11,11 @@
 #include "Layers/xrRender/dxParticleCustom.h"
 #endif // _EDITOR
 
+namespace PAPI
+{
+struct ParticleEffect;
+}
+
 namespace xray::render::RENDER_NAMESPACE
 {
 namespace PS
@@ -35,6 +40,12 @@ protected:
     // Read lock-free by the render (IsEmptyForRender) instead of GetParticlesCount, which takes the global pm_lock
     // that the PreRender particle worker hammers. Same staleness as reading p_count while a step is in flight.
     std::atomic<u32> m_RenderParticleCount{ 0 };
+
+    // 27-render-main.md (R1): the particle manager's effect of m_HandleEffect, taken once in the
+    // constructor. It lives until DestroyEffect in the destructor and its particle array moves only in Compile
+    // (SetMaxParticles, main thread), so p_count / particles are read through it without GetParticles - pm_lock only
+    // guards the manager's effect vector against a concurrent CreateEffect, not the effect itself.
+    PAPI::ParticleEffect* m_PE{};
 
 public:
     CPEDef* m_Def;
@@ -69,8 +80,26 @@ public:
     u32 RenderTO();
     virtual void Render(CBackend& cmd_list, float LOD, bool use_fast_geo) override;
 
+    // 27-render-main.md (R1): the sorted pass's particle batch (R_dsgraph_structure::render_sorted).
+    // BatchPrepare - main thread: one snapshot of the particles (no pm_lock); false - this effect stays on Render()
+    // (HUD mode - it switches the projection, not a sprite, no particles). BatchFill - any thread: the sprites of
+    // particles [begin, end) of the snapshot into pv_start (the effect's first vertex), 4 vertices per particle.
+    // BatchDraw - main thread: the tail of Render() for vertices already in the stream (count - of one or of several
+    // adjacent effects with this one's ShaderElement and cull mode).
+    struct BatchSnapshot
+    {
+        PAPI::Particle* particles{};
+        u32 count{};
+    };
+    bool BatchPrepare(BatchSnapshot& snapshot) const;
+    void BatchFill(FVF::LIT* pv_start, const BatchSnapshot& snapshot, u32 begin, u32 end) const;
+    u32 BatchCullMode() const;
+    void BatchDraw(CBackend& cmd_list, u32 vertex_offset, u32 vertex_count);
+
 private:
     void ParticleRenderStream(FVF::LIT* pv_start, u32 count, PAPI::Particle* particles);
+    // The sprites of particles [begin, end) into pv_start + begin * 4 (no metrics: also runs on task workers).
+    void FillSprites(FVF::LIT* pv_start, u32 begin, u32 end, PAPI::Particle* particles) const;
 
 public:
     virtual void Copy(dxRender_Visual* pFrom);

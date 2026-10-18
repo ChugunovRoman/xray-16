@@ -86,6 +86,8 @@ public:
     virtual void reinit();
     virtual void reload(LPCSTR section);
     void remove_links(IGameObject* object);
+    // R1 (32-frame-spikes.md): remove_links for every object of the batch, in one pass
+    void remove_links_batch(const struct RelcaseBatch& batch);
     void Exec_Look(float dt);
     void SetPointLookAngles(const Fvector& tPosition, float& yaw, float& pitch, Fvector const& look_position,
         const CGameObject* object = 0);

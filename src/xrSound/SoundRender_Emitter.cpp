@@ -278,6 +278,7 @@ void CSoundRender_Emitter::fill_block(void* ptr, u32 size)
 std::pair<u8*, size_t> CSoundRender_Emitter::obtain_block()
 {
     wait_prefill();
+    alloc_blocks(); // normally done already (dispatch_prefill / fill_all_blocks)
     const std::pair result = { temp_buf[current_block].data(), temp_buf[current_block].size() };
     ++current_block;
     if (current_block >= sdef_target_count_prefill)
@@ -286,8 +287,19 @@ std::pair<u8*, size_t> CSoundRender_Emitter::obtain_block()
     return std::move(result);
 }
 
+void CSoundRender_Emitter::alloc_blocks()
+{
+    // The blocks start() used to allocate for every emitter, now only for one with a voice, of the size start() took
+    // (an emitter is started once). Called with no prefill task in flight (after wait_prefill).
+    if (!temp_buf[0].empty() || m_block_size == 0)
+        return;
+    for (auto& buf : temp_buf)
+        buf.resize(m_block_size);
+}
+
 void CSoundRender_Emitter::fill_all_blocks()
 {
+    alloc_blocks();
     current_block = 0;
     for (size_t i = 0; i < sdef_target_count_prefill; ++i)
         fill_block(temp_buf[i].data(), temp_buf[i].size());
@@ -299,6 +311,7 @@ void CSoundRender_Emitter::dispatch_prefill()
     wait_prefill();
     if (filled_blocks >= sdef_target_count_prefill)
         return;
+    alloc_blocks();
 
     // Raised before the push, so a fast worker can never finish (and clear it) ahead of us.
     prefill_busy.store(true, std::memory_order_release);

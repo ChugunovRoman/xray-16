@@ -446,11 +446,21 @@ private:
     // Device.BonesPrepassCallback (always, plans/optimization_mt/04-bones-prepass.md): main thread,
     // between the game logic and the render (device.cpp, RunBonesPrepass).
     static void BonesPrepass();
+    // Device.BonesPrepassJoinCallback (the early kick): main thread, waits for the early kick's bone tasks
+    // where the prepass won't (a sequential frame before its Game thread task, a device reset, the level's end).
+    static void BonesPrepassEarlyKickJoin();
 
 public:
     // Bones prepass: CGameObject::renderable_Render notes the object (once per frame, any render thread); the next
     // frame's BonesPrepass resolves the IDs (net_Find) and computes the bones the render computed last time.
     static void BonesPrepassNote(u16 id);
+    // Pipelined bones prepass (26-framemove-game-next.md): main thread, before game code swaps or removes a physics shell
+    // or a visual inside the UpdateCL loop - waits for the early bone tasks (one may compute that model). The same in the
+    // window of the early kick (end of CLevel::OnFrame .. the prepass). No-op elsewhere.
+    static void BonesPrepassEarlyJoin();
+    // Early kick: its bone tasks may be running (main thread: from the kick to the join). A reader of another model's
+    // bone matrices that doesn't go through CalculateBones (Lua bone_position) takes the model lock meanwhile.
+    static bool BonesPrepassEarlyKickOpen();
 
     // название текущего уровня
     shared_str name() const override;

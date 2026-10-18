@@ -20,6 +20,11 @@ protected:
 protected:
     /** Non-zero while a frame's `V->OnFrame` is queued for `PreRenderThread` (`mtParticles`). */
     u32 m_asyncParticlePendingDt{};
+    /** `Device.dwTimeGlobal` the pending dt was measured up to; `ParticleWorker_ApplyFrame` stores it in `dwLastTime`. */
+    u32 m_asyncParticleCollectTime{};
+    /** `Device.dwFrame` of `PSI_destroy`: a dead instance still in `ps_active` frames later lost its `ps_destroy` entry. */
+    u32 m_deadFrame{};
+    bool m_deadOrphanReported{};
 
 protected:
     virtual ~CParticlesObject();
@@ -42,6 +47,7 @@ public:
     virtual void Play(bool bHudMode);
     void Stop(BOOL bDefferedStop = TRUE);
     virtual bool Locked() { return m_asyncParticlePendingDt != 0; }
+    void PSI_destroy() override;
 
     void AsyncParticle_PreWorkerCollect() override;
     void ParticleWorker_ApplyFrame() override;

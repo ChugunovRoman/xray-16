@@ -100,10 +100,25 @@ IC void CAbstractPathManager<CLevelGraph, SBaseParameters<float, u32, u32>, u32,
     }
 
     before_search(start_vertex_id, dest_vertex_id);
+    // 33-level-path.md (plans/optimization_mt), sliced A*: only a search of the NPC whose level path delegate set the
+    // slice (CLevelPathBuilder::process, owner = its restricted object) may be put aside
+    CLevelGraph::SearchSlice*& thread_slice = CLevelGraph::search_slice();
+    CLevelGraph::SearchSlice* const slice = thread_slice;
+    const bool own_slice = slice && slice->owner == static_cast<const void*>(m_object);
+    if (slice && !own_slice)
+        thread_slice = nullptr;
     // CLevelGraph::Search keeps its scratch data in thread-local storage (ixray), as CGameGraph::Search above
-    m_failed = !m_graph->Search(start_vertex_id, dest_vertex_id, m_path, m_evaluator->max_range,
+    const bool found = m_graph->Search(start_vertex_id, dest_vertex_id, m_path, m_evaluator->max_range,
         m_evaluator->max_iteration_count, m_evaluator->max_visited_node_count);
+    thread_slice = slice;
     after_search();
+
+    // sliced A*: the search was put aside on its time slice. It did not fail and m_path is as it was: nothing here
+    // changes, the builder repeats the same call in the next frame and the search goes on from where it stopped
+    if (own_slice && slice->put_aside)
+        return;
+
+    m_failed = !found;
 
     m_current_index = u32(-1);
     m_intermediate_index = u32(-1);
@@ -410,6 +425,14 @@ IC void CPathManagerTemplate::invalidate_failed_info()
     reset();
     m_failed_start_vertex_id = u32(-1);
     m_failed_dest_vertex_id = u32(-1);
+}
+
+TEMPLATE_SPECIALIZATION
+IC void CPathManagerTemplate::set_failed_info(
+    const _vertex_id_type start_vertex_id, const _vertex_id_type dest_vertex_id)
+{
+    m_failed_start_vertex_id = start_vertex_id;
+    m_failed_dest_vertex_id = dest_vertex_id;
 }
 
 #undef CPathManagerTemplate

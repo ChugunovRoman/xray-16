@@ -58,6 +58,11 @@ public:
     // since m_stretch_repair_since_ms.
     u8 m_stretch_hits{0};
     u8 m_stretch_repairs{0};
+    // CPHWorld::ShouldForceSleepCorpse() (physics thread): consecutive substeps in which the corpse has passed the stretch
+    // and velocity guards. A corpse thrown up by an explosion passes them for a few substeps at the top of its flight
+    // (plans/optimization_mt/38-frozen-particles.md); a series longer than that apex is required before the force sleep.
+    // Reset by EnableObject() / DisableObject() and by every failed check.
+    u8 m_sleep_calm_steps{0};
     u32 m_stretch_repair_since_ms{0};
     // Moves every child element by the gap between its joint anchors (joints are in the parent-first order of
     // AddElementRecursive, so a parent is already moved when its children are), then zeroes the velocities, forces and

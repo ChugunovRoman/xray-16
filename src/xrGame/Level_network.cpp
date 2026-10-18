@@ -174,8 +174,68 @@ void CLevel::net_Stop()
 #endif // DEBUG
 }
 
+// 26-framemove-game-next.md, net_Update. Temporary A/B switch, not saved, 0 = as before. In single player the client
+// exports every net-relevant object (net_Export -> the server's UPDATE_Read, ~15 thousand objects) in one frame once a
+// second (NETFLAG_MINIMIZEUPDATES: interval 1000 ms) - a 4.5-5 ms spike of the Game thread (seqFrameMT). With N > 1
+// the same export is spread over the next N frames: the frame the interval opens and the N - 1 frames after it each
+// export the objects with ID % N == slice. Every object still goes to the server once per cycle, a cycle still starts
+// once a second; the server's copy of an object is at most N - 1 frames older than with 0.
+int net_sp_export_slices = 8; // a tunable, not saved (the default since 2026-10-16, 41-cvar-cleanup.md)
+
+namespace
+{
+u32 s_export_slices = 0; // slices of the running cycle, 0 = no cycle is running
+u32 s_export_slice = 0; // the slice to export next
+
+// One slice of the object export: what CObjectList::net_Export + the packet loop of CLevel::ClientSend do for all
+// objects, for the objects with ID % slices == slice. Walks the ID table (net_Find), not the object lists, so a slice
+// costs only its own objects; a registered object is in the object lists (CObjectList::Create puts it there before
+// net_Spawn registers it, net_Destroy unregisters it before it leaves them), objects being destroyed are skipped as
+// before.
+void ExportObjectsSlice(CLevel& level, u32 slice, u32 slices)
+{
+    NET_Packet P;
+    P.w_begin(M_UPDATE);
+    u32 position;
+    for (u32 id = slice; id < 0xffff; id += slices)
+    {
+        IGameObject* object = level.Objects.net_Find(u16(id));
+        if (!object || !object->net_Relevant() || object->getDestroy())
+            continue;
+        P.w_u16(u16(id));
+        P.w_chunk_open8(position);
+        object->net_Export(P);
+        P.w_chunk_close8(position);
+        PERF_INC(net_export_objects);
+        if (u32(max_objects_size) >= (NET_PacketSizeLimit - P.w_tell()))
+        {
+            level.Send(P, net_flags(FALSE));
+            P.w_begin(M_UPDATE);
+        }
+    }
+    if (P.B.count > 2)
+        level.Send(P, net_flags(FALSE));
+}
+
+bool ExportSlicedNow() { return net_sp_export_slices > 1 && IsGameTypeSingle(); }
+} // namespace
+
 void CLevel::ClientSend()
 {
+    if (s_export_slices != 0)
+    {
+        // a sliced export cycle is running: the next slice, no bandwidth check (the cycle started on one)
+        if (ExportSlicedNow() && OnServer())
+        {
+            PERF_SCOPE(net_export_slice);
+            ExportObjectsSlice(*this, s_export_slice, s_export_slices);
+            if (++s_export_slice >= s_export_slices)
+                s_export_slices = 0;
+            return;
+        }
+        s_export_slices = 0; // switched off in the middle of a cycle: back to the full export
+    }
+
     if (GameID() == eGameIDSingle || OnClient())
     {
         if (!net_HasBandwidth())
@@ -219,6 +279,14 @@ void CLevel::ClientSend()
         return;
     }
     //-------------------------------------------------
+    if (ExportSlicedNow())
+    {
+        PERF_SCOPE(net_export_slice);
+        s_export_slices = u32(net_sp_export_slices);
+        s_export_slice = 1;
+        ExportObjectsSlice(*this, 0, s_export_slices);
+        return;
+    }
     while (1)
     {
         P.w_begin(M_UPDATE);
@@ -326,13 +394,17 @@ void CLevel::net_Update()
     if (game_configured)
     {
         // If we have enought bandwidth - replicate client data on to server
+        PERF_SCOPE(net_client_send);
         stats.ClientSend.Begin();
         ClientSend();
         stats.ClientSend.End();
     }
     // If server - perform server-update
     if (Server && OnServer())
+    {
+        PERF_SCOPE(net_server_update);
         Server->Update();
+    }
 }
 
 struct _NetworkProcessor : public pureFrame

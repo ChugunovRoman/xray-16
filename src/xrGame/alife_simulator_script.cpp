@@ -35,6 +35,21 @@ SPAWN_STORY_PAIRS spawn_story_ids;
 
 CALifeSimulator* alife() { return (const_cast<CALifeSimulator*>(ai().get_alife())); }
 
+// The Lua wrapper cache (alife_simulator.h; CALifeSimulator is never a luabind::wrap_base): the wrapper made on the first pass and kept until the simulator dies.
+namespace luabind
+{
+template <>
+bool get_back_reference<CALifeSimulator*>(lua_State* L, CALifeSimulator* const& x)
+{
+    using namespace xray::script_wrapper_cache;
+    if (Push(L, x->m_lua_wrapper))
+        return true;
+    luabind::detail::make_pointer_instance(L, x);
+    Store(L, x->m_lua_wrapper);
+    return true;
+}
+} // namespace luabind
+
 // Plugin API: inside server_object_on_register / _on_unregister the engine may be walking the ALife registry (the
 // on_register loop of a load): a spawn or a release from a Lua handler of these events is refused with an error.
 static bool alife_registry_locked(pcstr what)
@@ -467,6 +482,110 @@ xr_vector<u16>& get_children(const CALifeSimulator* self, CSE_Abstract* object)
 }
 //-Alundaio
 
+// GW (plans/optimization_mt/32-frame-spikes.md, Q1): the direct children of a server object by its id, as plain
+// numbers - no userdata per object, unlike get_children(se_obj) + alife():object(id).
+//   alife():object_children(id[, ids[, sections]]) -> ids | nil
+// nil when there is no object with this id. Otherwise `ids` (a new table when it is not a table) gets the ids of the
+// registered objects in the children list of the object whose parent_id is this id, ascending, and its old tail
+// past them is cleared, so #ids is their count and the same table can be passed again and again. `sections` (a
+// table) gets the section of each child at the same index, cleared the same way.
+// The children list is the inventory the ALife keeps and saves (CALifeObjectRegistry::save walks it), so it holds
+// the same objects a scan of all ids for parent_id == id finds.
+namespace
+{
+// one buffer for all the calls: Lua runs on the main thread only
+xr_vector<std::pair<ALife::_OBJECT_ID, pcstr>> g_alife_object_children_buffer;
+
+// Clears [from, ...) of the array at the absolute stack index `table_index` (up to its first nil).
+void alife_object_children_clear_tail(lua_State* L, int table_index, int from)
+{
+    for (int i = from;; ++i)
+    {
+        lua_rawgeti(L, table_index, i);
+        const bool empty = lua_isnil(L, -1);
+        lua_pop(L, 1);
+        if (empty)
+            break;
+        lua_pushnil(L);
+        lua_rawseti(L, table_index, i);
+    }
+}
+
+luabind::object alife_object_children_impl(const CALifeSimulator* self, lua_State* L, ALife::_OBJECT_ID id,
+    const luabind::object* ids, const luabind::object* sections)
+{
+    const int top = lua_gettop(L);
+    const CSE_ALifeDynamicObject* parent = id != ALife::_OBJECT_ID(-1) ? self->objects().object(id, true) : nullptr;
+    if (!parent)
+        lua_pushnil(L);
+    else
+    {
+        auto& found = g_alife_object_children_buffer;
+        found.clear();
+        for (const ALife::_OBJECT_ID child_id : parent->children)
+        {
+            const CSE_ALifeDynamicObject* child = self->objects().object(child_id, true);
+            if (child && child->ID_Parent == id)
+                found.emplace_back(child_id, child->name());
+        }
+        std::sort(found.begin(), found.end(),
+            [](const std::pair<ALife::_OBJECT_ID, pcstr>& a, const std::pair<ALife::_OBJECT_ID, pcstr>& b)
+            { return a.first < b.first; });
+
+        if (ids && luabind::type(*ids) == LUA_TTABLE)
+            ids->push(L);
+        else
+            lua_createtable(L, static_cast<int>(found.size()), 0);
+        const int ids_index = lua_gettop(L);
+
+        int sections_index = 0;
+        if (sections && luabind::type(*sections) == LUA_TTABLE)
+        {
+            sections->push(L);
+            sections_index = lua_gettop(L);
+        }
+
+        const int count = static_cast<int>(found.size());
+        for (int i = 0; i < count; ++i)
+        {
+            lua_pushinteger(L, found[i].first);
+            lua_rawseti(L, ids_index, i + 1);
+            if (sections_index)
+            {
+                lua_pushstring(L, found[i].second);
+                lua_rawseti(L, sections_index, i + 1);
+            }
+        }
+        alife_object_children_clear_tail(L, ids_index, count + 1);
+        if (sections_index)
+            alife_object_children_clear_tail(L, sections_index, count + 1);
+
+        lua_settop(L, ids_index);
+    }
+
+    luabind::object result(luabind::from_stack(L, -1));
+    lua_settop(L, top);
+    return result;
+}
+
+luabind::object alife_object_children(const CALifeSimulator* self, lua_State* L, ALife::_OBJECT_ID id)
+{
+    return alife_object_children_impl(self, L, id, nullptr, nullptr);
+}
+
+luabind::object alife_object_children_to(
+    const CALifeSimulator* self, lua_State* L, ALife::_OBJECT_ID id, const luabind::object& ids)
+{
+    return alife_object_children_impl(self, L, id, &ids, nullptr);
+}
+
+luabind::object alife_object_children_to2(const CALifeSimulator* self, lua_State* L, ALife::_OBJECT_ID id,
+    const luabind::object& ids, const luabind::object& sections)
+{
+    return alife_object_children_impl(self, L, id, &ids, &sections);
+}
+} // namespace
+
 void iterate_objects(const CALifeSimulator* self, luabind::functor<bool> functor)
 {
     THROW(self);
@@ -568,7 +687,11 @@ void CALifeSimulator::script_register(lua_State* luaState)
             .def("register", &reprocess_spawn)
             .def("set_objects_per_update", &set_objects_per_update)
             .def("set_process_time", &CALifeSimulator::set_process_time)
-            .def("get_children", &get_children, return_stl_iterator()),
+            .def("get_children", &get_children, return_stl_iterator())
+            // GW (32-frame-spikes.md, Q1): the ids of the direct children without userdata, see object_children above
+            .def("object_children", &alife_object_children)
+            .def("object_children", &alife_object_children_to)
+            .def("object_children", &alife_object_children_to2),
             //Alundaio: END
 
         def("alife", &alife),

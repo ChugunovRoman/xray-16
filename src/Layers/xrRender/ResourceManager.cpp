@@ -7,6 +7,7 @@
 #include "xrCore/Profiling/PerfMetrics.hpp"
 
 #include "xrCore/Threading/ParallelForEach.hpp"
+#include "xrCore/Threading/ScopeLock.hpp"
 
 #include "ResourceManager.h"
 #include "tss.h"
@@ -17,6 +18,10 @@ namespace xray::render::RENDER_NAMESPACE
 {
 //	Already defined in Texture.cpp
 void fix_texture_name(pstr fn);
+#if defined(USE_DX11)
+// 40-parallel-prefetch.md (plans/optimization_mt): dx11Texture.cpp, textures created straight from the file
+extern std::atomic<u32> g_texture_direct_loads;
+#endif
 /*
 void fix_texture_name(LPSTR fn)
 {
@@ -124,14 +129,17 @@ ShaderElement* CResourceManager::_CreateElement(ShaderElement&& S)
     if (S.passes.empty())
         return nullptr;
 
-    // Search equal in shaders array
-    for (ShaderElement* elem : v_elements)
-        if (S.equal(*elem))
-            return elem;
+    ScopeLock scope(&m_create_lock); // 40-parallel-prefetch.md
+
+    // Search equal in shaders array (40-parallel-prefetch.md: through the hash index, it was a walk over v_elements)
+    const size_t hash = S.hash();
+    if (ShaderElement* elem = m_elements_index.find(hash, [&](ShaderElement& E) { return !!S.equal(E); }))
+        return elem;
 
     // Create _new_ entry
     ShaderElement* N = v_elements.emplace_back(xr_new<ShaderElement>(std::move(S)));
     N->dwFlags |= xr_resource_flagged::RF_REGISTERED;
+    m_elements_index.insert(hash, N);
     return N;
 }
 
@@ -139,9 +147,28 @@ void CResourceManager::_DeleteElement(const ShaderElement* S)
 {
     if (0 == (S->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    ScopeLock scope(&m_create_lock); // 40-parallel-prefetch.md
     if (reclaim(v_elements, S))
+    {
+        m_elements_index.erase(S);
         return;
+    }
     Msg("! ERROR: Failed to find compiled 'shader-element'");
+}
+
+Shader* CResourceManager::_FindOrRegisterShader(Shader& S)
+{
+    // 40-parallel-prefetch.md (plans/optimization_mt): through the hash index, it was a walk over v_shaders
+    ScopeLock scope(&m_create_lock);
+    const size_t hash = S.hash();
+    if (Shader* found = m_shaders_index.find(hash, [&](Shader& registered) { return !!S.equal(&registered); }))
+        return found;
+
+    // Create _new_ entry
+    Shader* N = v_shaders.emplace_back(xr_new<Shader>(std::move(S)));
+    N->dwFlags |= xr_resource_flagged::RF_REGISTERED;
+    m_shaders_index.insert(hash, N);
+    return N;
 }
 
 Shader* CResourceManager::_cpp_Create(
@@ -227,15 +254,8 @@ Shader* CResourceManager::_cpp_Create(
         S.E[5] = _CreateElement(std::move(E));
     }
 
-    // Search equal in shaders array
-    for (u32 it = 0; it < v_shaders.size(); it++)
-        if (S.equal(v_shaders[it]))
-            return v_shaders[it];
-
-    // Create _new_ entry
-    Shader* N = v_shaders.emplace_back(xr_new<Shader>(std::move(S)));
-    N->dwFlags |= xr_resource_flagged::RF_REGISTERED;
-    return N;
+    // Search equal in shaders array, or create _new_ entry
+    return _FindOrRegisterShader(S);
 }
 
 Shader* CResourceManager::_cpp_Create(LPCSTR s_shader, LPCSTR s_textures, LPCSTR s_constants, LPCSTR s_matrices)
@@ -310,6 +330,7 @@ Shader* CResourceManager::Create(IBlender* B, LPCSTR s_shader, LPCSTR s_textures
     if (GEnv.isDedicatedServer)
         return nullptr;
 
+    ScopeLock scope(&m_create_lock); // 40-parallel-prefetch.md: one shader creation at a time
     return _cpp_Create(B, s_shader, s_textures, s_constants, s_matrices);
 }
 
@@ -317,6 +338,9 @@ Shader* CResourceManager::Create(LPCSTR s_shader, LPCSTR s_textures, LPCSTR s_co
 {
     if (!GEnv.isDedicatedServer)
     {
+        // 40-parallel-prefetch.md (plans/optimization_mt): one shader creation at a time. The models of the prefetch
+        // list load on several threads (D3D11), the blender compile and the registries below are not thread-safe.
+        ScopeLock scope(&m_create_lock);
 #if defined(USE_DX9)
         const bool useCppBlender = RImplementation.o.ffp && _GetBlender(s_shader);
         if (!useCppBlender && _lua_HasShader(s_shader))
@@ -354,8 +378,12 @@ void CResourceManager::Delete(const Shader* S)
 {
     if (0 == (S->dwFlags & xr_resource_flagged::RF_REGISTERED))
         return;
+    ScopeLock scope(&m_create_lock); // 40-parallel-prefetch.md
     if (reclaim(v_shaders, S))
+    {
+        m_shaders_index.erase(S);
         return;
+    }
     Msg("! ERROR: Failed to find complete shader");
 }
 
@@ -368,7 +396,36 @@ void CResourceManager::DeferredUpload()
     PERF_SCOPE(tex_deferred_upload); // spawn stage 0: level load, CTexture::Load of every texture (texture/load/*)
 
 #if defined(USE_DX11)
-    xr_parallel_for_each(m_textures, [&](auto m_tex) { m_tex.second->Load(); });
+    // 40-parallel-prefetch.md (plans/optimization_mt): the textures one at a time from a shared counter. The range
+    // split of xr_parallel_for_each gave each worker one block of size / workers textures of the map, in name order,
+    // so the big textures of one folder fell to one worker and the rest spun idle at the end (task/steal_attempt).
+    // A texture costs 0.1-50 ms, a task per worker (and one for the waiting main thread) takes the next texture.
+    CTimer timer;
+    timer.Start();
+    xr_vector<CTexture*> textures;
+    {
+        ScopeLock scope(&m_textures_lock);
+        textures.reserve(m_textures.size());
+        for (const auto& it : m_textures)
+            textures.push_back(it.second);
+    }
+    const u32 direct_before = g_texture_direct_loads.load(std::memory_order_relaxed);
+    std::atomic<size_t> next{0};
+    const size_t tasks = std::max<size_t>(1, std::min<size_t>(textures.size(),
+        (TaskScheduler ? TaskScheduler->GetWorkersCount() : std::thread::hardware_concurrency()) + 1));
+    xr_parallel_for(TaskRange<size_t>(0, tasks, 1), [&](const TaskRange<size_t>&)
+    {
+        for (;;)
+        {
+            const size_t i = next.fetch_add(1, std::memory_order_relaxed);
+            if (i >= textures.size())
+                break;
+            textures[i]->Load();
+        }
+    });
+    Msg("* [textures] deferred upload: %u textures, %u straight from the file, %u ms on %u tasks",
+        static_cast<u32>(textures.size()), g_texture_direct_loads.load(std::memory_order_relaxed) - direct_before,
+        timer.GetElapsed_ms(), static_cast<u32>(tasks));
 #elif defined(USE_OGL) // XXX: OGL: Set additional contexts for all worker threads?
     for (auto& texture : m_textures)
         texture.second->Load();

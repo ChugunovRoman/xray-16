@@ -451,7 +451,8 @@ IC bool CProblemSolverAbstract::Search(const CState& FromID, const CState& dest_
 
     while (!TempPriorityNode.empty())
     {
-        const CState CurrentNodeID = TempPriorityNode.back().second;
+        // 45-engine-ai-audit.md, F9: moved out of the queue (the entry is popped right after) instead of copied
+        const CState CurrentNodeID = std::move(TempPriorityNode.back().second);
         TempPriorityNode.pop_back();
 
         const bool goal = is_goal_reached(CurrentNodeID);
@@ -570,11 +571,20 @@ IC bool CProblemSolverAbstract::Search(const CState& FromID, const CState& dest_
         const_iterator i, e;
         begin(CurrentNodeID, i, e);
 
+        // F9: what depends on the current node only, out of the neighbour loop: its equivalence to the start and its
+        // cost entry. The loop never writes the current node's entry (an equivalent neighbour is skipped below before
+        // any write) and std::map insertions keep iterators valid, so every neighbour reads the same values as before
+        const bool current_equiv_from = (!(CurrentNodeID < start_snapshot) && !(start_snapshot < CurrentNodeID));
+        const auto cost_here = TempCostSoFar.find(CurrentNodeID);
+
         for (; i != e; i++)
         {
-            const CState NeighborID = value(CurrentNodeID, i, reverse_search);
-            if (!IsAccessible(NeighborID))
+            // F9: the neighbour is copied out of m_temp only when the operator applied (IsAccessible looks at
+            // m_applied alone), right away as before - nothing runs between value() and the copy
+            const CState& neighbor_value = value(CurrentNodeID, i, reverse_search);
+            if (!IsAccessible(neighbor_value))
                 continue;
+            const CState NeighborID = neighbor_value;
             // Same abstract vertex for std::map: strict-weak equivalence is !(a<b)&&!(b<a). For CWorldState
             // (CConditionState) that can differ from operator== (hash vs lexicographic <), so find(NeighborID)
             // may alias CurrentNodeID's slot and set came_from to a self-parent (goal_self_parent_r0).
@@ -582,7 +592,6 @@ IC bool CProblemSolverAbstract::Search(const CState& FromID, const CState& dest_
                 continue;
             // Never change the start key's parent away from itself (neighbor may map-alias start_snapshot).
             const bool neighbor_equiv_from = (!(NeighborID < start_snapshot) && !(start_snapshot < NeighborID));
-            const bool current_equiv_from = (!(CurrentNodeID < start_snapshot) && !(start_snapshot < CurrentNodeID));
             if (neighbor_equiv_from && !current_equiv_from)
                 continue;
 
@@ -590,7 +599,6 @@ IC bool CProblemSolverAbstract::Search(const CState& FromID, const CState& dest_
                 continue;
             max_iteration_count--;
 
-            const auto cost_here = TempCostSoFar.find(CurrentNodeID);
             VERIFY(cost_here != TempCostSoFar.end());
             const GraphEngineSpace::_solver_dist_type NewCost =
                 cost_here->second + CalcCost(CurrentNodeID, NeighborID, i);
@@ -608,12 +616,13 @@ IC bool CProblemSolverAbstract::Search(const CState& FromID, const CState& dest_
                     TempCostSoFar.insert({NeighborID, NewCost});
 
                 const GraphEngineSpace::_solver_dist_type priority = NewCost + Distance;
+                // F9: the insertion point by the priority alone (the comparator only ever looked at .first) - the
+                // same position without building a pair with a copy of the state for the search
                 TempPriorityNode.insert(
-                    std::upper_bound(TempPriorityNode.begin(), TempPriorityNode.end(),
-                        std::pair<GraphEngineSpace::_solver_dist_type, CState>{priority, NeighborID},
-                        [](const std::pair<GraphEngineSpace::_solver_dist_type, CState>& Left,
+                    std::upper_bound(TempPriorityNode.begin(), TempPriorityNode.end(), priority,
+                        [](const GraphEngineSpace::_solver_dist_type Left,
                             const std::pair<GraphEngineSpace::_solver_dist_type, CState>& Right)
-                        { return Left.first > Right.first; }),
+                        { return Left > Right.first; }),
                     {priority, NeighborID});
 
                 auto TempCameFromIterator = TempCameFrom.find(NeighborID);

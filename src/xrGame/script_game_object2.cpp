@@ -187,8 +187,10 @@ CScriptGameObject* CScriptGameObject::best_weapon()
     else
     {
         //Alundaio: extra security
+        // 45-engine-ai-audit.md, N12: one best_weapon() call (each one runs update_best_item_info: the Lua lookup
+        // and a full inventory scan); the three former calls also could return different items.
         CInventoryItem* inv_object = object_handler->best_weapon();
-        CGameObject* game_object = object_handler->best_weapon() ? &object_handler->best_weapon()->object() : nullptr;
+        CGameObject* game_object = inv_object ? &inv_object->object() : nullptr;
         if (!game_object)
             return nullptr;
         if (!inv_object)

@@ -24,6 +24,7 @@
 #include "Inventory.h"
 #include "script_ini_file.h"
 #include "Include/xrRender/Kinematics.h"
+#include "Level.h" // CLevel::BonesPrepassEarlyKickOpen (bone_position)
 #include "HangingLamp.h"
 #include "patrol_path_manager.h"
 #include "xrAICore/Navigation/ai_object_location.h"
@@ -315,9 +316,13 @@ Fvector CScriptGameObject::bone_position(LPCSTR bone_name) const
     else
         bone_id = smart_cast<IKinematics*>(object().Visual())->LL_GetBoneRoot();
 
+    IKinematics* kinematics = smart_cast<IKinematics*>(object().Visual());
+    // Early kick of the bones prepass (Level.cpp): Lua of the UI / the actor binder may run
+    // while a worker computes this model - read the matrix under its bone lock then (waits for that model only; declined
+    // in a blend callback, as before). Otherwise unchanged.
+    KinematicsBonesLock bones_lock(CLevel::BonesPrepassEarlyKickOpen() ? kinematics : nullptr);
     Fmatrix matrix;
-    matrix.mul_43(
-        object().XFORM(), smart_cast<IKinematics*>(object().Visual())->LL_GetBoneInstance(bone_id).mTransform);
+    matrix.mul_43(object().XFORM(), kinematics->LL_GetBoneInstance(bone_id).mTransform);
     return (matrix.c);
 }
 

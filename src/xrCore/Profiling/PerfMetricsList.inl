@@ -1772,3 +1772,739 @@ PERF_TIMER(game_sound_render_wait, "game/sound_render_wait")
 PERF_TIMER(prepass_map_update, "prepass/map_update")
 PERF_TIMER(prepass_main_slot_wait, "prepass/main_slot_wait")
 PERF_COUNTER(prepass_map_update_late, "prepass/map_update_late")
+// 26-framemove-game-next.md, early main build (r__main_build_early; r2_R_calculate.cpp, r__dsgraph_build.cpp): the static
+// half of the main view's build (portal traversal + static geometry) runs as a task from right after FrameMove, beside
+// the RT scheduler part, the bones prepass and the physics kick. build_early = that task (wall, on its worker; includes
+// render/main/build_static), build_late = the dynamic half launched by Calculate() (wall, on its worker; includes
+// render/main/build_dynamic), build_early_wait = main waiting for the static half in Calculate() (normally ~0; the
+// rest is still render/pass/build_wait). early_frames = frames that took the early path, early_discard = static halves
+// dropped unconsumed (an icon/preview render on the immediate dsgraph, a frame without Calculate, reset),
+// early_skip_icons = frames kept on the old path because inventory icons were pending, early_lod_diff = frames whose LOD
+// thresholds (g_fSCREEN) at Calculate() differed from the ones the static half used.
+PERF_TIMER(rmain_build_early, "render/main/build_early")
+PERF_TIMER(rmain_build_late, "render/main/build_late")
+PERF_TIMER(rmain_build_early_wait, "render/main/build_early_wait")
+PERF_COUNTER(rmain_early_frames, "render/main/early_frames")
+PERF_COUNTER(rmain_early_discard, "render/main/early_discard")
+PERF_COUNTER(rmain_early_skip_icons, "render/main/early_skip_icons")
+PERF_COUNTER(rmain_early_lod_diff, "render/main/early_lod_diff")
+// Pipelined bones prepass (r__bones_prepass_pipeline, 26-framemove-game-next.md; xrGame/Level.cpp, SkeletonRigid.cpp):
+// pipelined = models whose phase B ran on the workers during the UpdateCL loop (the prepass then skips them); redone =
+// early bones computed again in the same frame (dirty - by the prepass, invalidated - by the next reader); dirty = early
+// bones the prepass recomputed because the pose input changed after them (animation mutator, the owner's XFORM);
+// tail_wait = main waiting for the early tasks at the end of the UpdateCL loop; early_main = main's part of the pipeline
+// inside FrameMove (root list, phase A after each batch, kicks); early_phase_b = CPU of the early tasks summed over the
+// workers; early_cooldown = models left to the prepass after a recent redo; early_nested_skip = nested CalculateBones of
+// another model on an early task that would need its phase A (skipped, previous pose).
+PERF_COUNTER(prepass_pipelined, "prepass/pipelined")
+PERF_COUNTER(prepass_redone, "prepass/redone")
+PERF_COUNTER(prepass_dirty, "prepass/dirty")
+PERF_TIMER(prepass_tail_wait, "prepass/tail_wait")
+PERF_TIMER(prepass_early_main, "prepass/early_main")
+PERF_TIMER(prepass_early_phase_b, "prepass/early_phase_b")
+PERF_COUNTER(prepass_early_cooldown, "prepass/early_cooldown")
+PERF_COUNTER(prepass_early_nested_skip, "prepass/early_nested_skip")
+// Why the prepass still computed a model itself in a pipelined frame (per model; with prepass/pipelined it gives the
+// pipelined share): tail_own = its object's UpdateCL is in the last chunk of the loop; tail_holder = the object is
+// earlier, but its root or another object under the root is in the last chunk; physics = a physics shell the pipeline
+// may not touch (moving/activating ragdoll, physic object, item on the ground, vehicle); cooldown = recently redone;
+// lost = handed to a task and still recomputed (lock fail, dirty, invalidated); filtered = gone, reparented or the view
+// entity's at its turn; phase_a = nothing to do at its turn (computed or started this tick); full = no room in the
+// model list; unseen = not examined by the pipeline. early_corpses = corpses with a fully active shell (no activation,
+// no interactive death motion) the pipeline took; early_guard_join = main joined the early tasks before it changed a
+// physics shell or a visual inside the loop (KillHit, corpse removal, visual swap, item drop); early_guard_skip = it
+// could not (this thread held a bone lock).
+PERF_COUNTER(prepass_skip_tail_own, "prepass/skip/tail_own")
+PERF_COUNTER(prepass_skip_tail_holder, "prepass/skip/tail_holder")
+PERF_COUNTER(prepass_skip_physics, "prepass/skip/physics")
+PERF_COUNTER(prepass_skip_cooldown, "prepass/skip/cooldown")
+PERF_COUNTER(prepass_skip_lost, "prepass/skip/lost")
+PERF_COUNTER(prepass_skip_filtered, "prepass/skip/filtered")
+PERF_COUNTER(prepass_skip_phase_a, "prepass/skip/phase_a")
+PERF_COUNTER(prepass_skip_full, "prepass/skip/full")
+PERF_COUNTER(prepass_skip_unseen, "prepass/skip/unseen")
+PERF_COUNTER(prepass_early_corpses, "prepass/early_corpses")
+PERF_TIMER(prepass_early_guard_join, "prepass/early_guard_join")
+PERF_COUNTER(prepass_early_guard_skip, "prepass/early_guard_skip")
+// Phase C owners (pipeline on): owners of held items the render drew without computing the owner's bones (an NPC
+// drawn only as a shadow blob) get them in the prepass - phase A on main, phase B on the workers - instead of
+// serially in the item's UpdateXForm in phase C. owner_lazy = such owners handed to phase B; owner_bones_main = phase C
+// items whose owner's bones were not computed this tick when the item came to its UpdateXForm (calls = items, time =
+// their whole render_prepare; measured with the pipeline off too).
+PERF_COUNTER(prepare_owner_lazy, "prepare/owner_lazy")
+PERF_TIMER(prepare_owner_bones_main, "prepare/owner_bones_main")
+// 26-framemove-game-next.md, the Game thread after package 2 (net_Update, scheduler overrun). net/client_send and
+// net/server_update = the two halves of CLevel::net_Update (Level_network.cpp; inside game/seq_frame_mt/net);
+// net/export_slice = one slice of the sliced single player object export (net_sp_export_slices > 1), export_objects =
+// objects exported by the slices. agent/dist = CAgentEnemyManager::distribute_enemies of a group (inside
+// ai/memory/enemies or stalker/shed/agent_manager - whoever calls it first in the frame), its stages fill / danger /
+// assign / permutate / masks; agent/dist/eval = victory probabilities computed (ef_storage), eval_hit = answered by
+// the per-call memo (npc_agent_distribute_fast 1), eval_pairs = distinct pairs of the memo; members / enemies = the
+// group size and its enemies summed over the calls. stalker/cover/frame_defer = cover searches put off by
+// npc_cover_scan_frame_budget_us (ai_stalker_cover.cpp).
+PERF_TIMER(net_client_send, "net/client_send")
+PERF_TIMER(net_server_update, "net/server_update")
+PERF_TIMER(net_export_slice, "net/export_slice")
+PERF_COUNTER(net_export_objects, "net/export_objects")
+PERF_TIMER(agent_dist, "agent/dist")
+PERF_TIMER(agent_dist_fill, "agent/dist/fill")
+PERF_TIMER(agent_dist_danger, "agent/dist/danger")
+PERF_TIMER(agent_dist_assign, "agent/dist/assign")
+PERF_TIMER(agent_dist_permutate, "agent/dist/permutate")
+PERF_TIMER(agent_dist_masks, "agent/dist/masks")
+PERF_COUNTER(agent_dist_eval, "agent/dist/eval")
+PERF_COUNTER(agent_dist_eval_hit, "agent/dist/eval_hit")
+PERF_COUNTER(agent_dist_eval_pairs, "agent/dist/eval_pairs")
+PERF_COUNTER(agent_dist_members, "agent/dist/members")
+PERF_COUNTER(agent_dist_enemies, "agent/dist/enemies")
+PERF_COUNTER(stk_cover_frame_defer, "stalker/cover/frame_defer")
+// 26-framemove-game-next.md, the group's distribute_enemies and the cover scan (items 1-4 of the developer's list).
+// agent/dist/throttled = distributions a member without an enemy asked for and npc_agent_distribute_min_ms put off,
+// agent/dist/urgent = asked inside the interval and run at once (an enemy the last one knew died or went offline, or a
+// member selected one it did not know); agent/dist/masks_batched = (enemy, member) pairs of assign_enemy_masks done by
+// an OR into the shared record (npc_agent_masks_batch 1) instead of the full make_object_visible_somewhen;
+// agent/group_overflow = stalkers registered in an overflow group because theirs had 64 (Entity.cpp, always on).
+// ai/cover/suitable_snapshot = cover scans that read the group from a snapshot, ai/cover/accessible_{hit,miss} = the
+// answers of CSpaceRestriction::accessible from its cache / computed (npc_cover_scan_cache 1/2).
+PERF_COUNTER(agent_dist_throttled, "agent/dist/throttled")
+PERF_COUNTER(agent_dist_urgent, "agent/dist/urgent")
+PERF_COUNTER(agent_dist_masks_batched, "agent/dist/masks_batched")
+PERF_COUNTER(agent_group_overflow, "agent/group_overflow")
+PERF_COUNTER(ai_cover_suitable_snapshot, "ai/cover/suitable_snapshot")
+PERF_COUNTER(ai_cover_accessible_hit, "ai/cover/accessible_hit")
+PERF_COUNTER(ai_cover_accessible_miss, "ai/cover/accessible_miss")
+// 26-framemove-game-next.md, FrameMove after the pipelined prepass. map/lod_skipped = map location updates skipped by
+// map_update_lod (map_manager.cpp), ui/minimap/culled = minimap spots skipped by ui_minimap_cull (ui/UIMap.cpp),
+// stalker/ucl_lod/combat/take_actor_far = unseen fighters of the actor the combat tier takes (or, with
+// npc_ucl_lod_combat_actor_dist 0, would take at 20 m - they stay in deny_actor then), skip_actor_far = of the skip_combat
+// frames those of them (ai/stalker/ai_stalker.cpp).
+PERF_COUNTER(map_lod_skipped, "map/lod_skipped")
+PERF_COUNTER(ui_minimap_culled, "ui/minimap/culled")
+PERF_COUNTER(stk_ucl_lod_combat_actor_far, "stalker/ucl_lod/combat/take_actor_far")
+PERF_COUNTER(stk_ucl_lod_skip_actor_far, "stalker/ucl_lod/skip_actor_far")
+// 26-framemove-game-next.md, early kick of the pipelined bones prepass (r__bones_prepass_early_kick, xrGame/Level.cpp).
+// prepass/early_kick = the overlapped window, from the end of the kick (end of CLevel::OnFrame) to its join at the
+// prepass (sound update, UI, RT scheduler beside the kicked phase B); prepass/early_kick_wait = main's wait there;
+// prepass/redone_after_kick = kicked models (and phase C owners) the prepass computed again (a mutator or a moved owner
+// after the kick, or a lost task); prepass/skip/kick_excluded = models the kick left to the prepass: the root is in the
+// RT scheduler (the actor) or script-controlled;
+// game/early_start_ms = how much sooner the Game thread's phase 0 starts (the phase A the kick took off the prepass, less
+// the wait it added there - an estimate).
+PERF_TIMER(prepass_early_kick, "prepass/early_kick")
+PERF_TIMER(prepass_early_kick_wait, "prepass/early_kick_wait")
+PERF_COUNTER(prepass_redone_after_kick, "prepass/redone_after_kick")
+PERF_COUNTER(prepass_skip_kick_excluded, "prepass/skip/kick_excluded")
+PERF_TIMER(game_early_start_ms, "game/early_start_ms")
+// 28-updatecl-main.md (ol_UpdateCL on main in a heavy fight). ik/* = the parts of CIKLimbsController's feet IK (in
+// ik/update on main; with npc_ik_in_bones 1 gather / rays / process run in phase B of the bones, on whatever thread
+// computes them): tracks = UpdateTracks, gather = GatherRays of the limbs, rays = the rays (rays_n = how many), process =
+// ProcessGroup; rays_batch = the RayPickBatch of npc_perf_ik_foot_raypick_batch_min_rays or more rays on main (wall
+// time, calls = batches); task/wait/site/ik, task/wait_game_on_main/ik = main's waits of that batch (wait_site::Ik),
+// task/wait/ik_exec = what main ran inside them (its rays, phase B of other models - stolen pipeline tasks).
+// prepass/early_phase_b/{main,game,worker} = prepass/early_phase_b by the thread that ran the early task (main: inside
+// a Wait - the IK batch, a join); tracks/ll_time/* = LL_UpdateTracks of CKinematicsAnimated::UpdateTracks by thread
+// (blend callbacks included); prepass/early_main/{take,kick} = inside prepass/early_main: the phase A of the taken
+// models (EarlyTake, the phase C owners of the kick), the kick of their phase B (task creation).
+PERF_TIMER(ik_tracks, "ik/tracks")
+PERF_TIMER(ik_gather, "ik/gather")
+PERF_TIMER(ik_rays, "ik/rays")
+PERF_COUNTER(ik_rays_n, "ik/rays_n")
+PERF_TIMER(ik_rays_batch, "ik/rays_batch")
+PERF_TIMER(ik_process, "ik/process")
+PERF_COUNTER(task_wait_site_ik, "task/wait/site/ik")
+PERF_COUNTER(task_wait_game_on_main_ik, "task/wait_game_on_main/ik")
+PERF_TIMER(task_wait_ik_exec, "task/wait/ik_exec")
+PERF_TIMER(prepass_early_phase_b_main, "prepass/early_phase_b/main")
+PERF_TIMER(prepass_early_phase_b_game, "prepass/early_phase_b/game")
+PERF_TIMER(prepass_early_phase_b_worker, "prepass/early_phase_b/worker")
+PERF_TIMER(tracks_ll_time_main, "tracks/ll_time/main")
+PERF_TIMER(tracks_ll_time_game, "tracks/ll_time/game")
+PERF_TIMER(tracks_ll_time_worker, "tracks/ll_time/worker")
+PERF_TIMER(prepass_early_main_take, "prepass/early_main/take")
+PERF_TIMER(prepass_early_main_kick, "prepass/early_main/kick")
+// The unmarked rest of cm/ucl/position_anim (CMovementManager::on_frame): update_path = update_path of the frame,
+// path_position = the point on the path, ground = ground_snap + ground_diag (calls = up to 2 per update), idle_calc = the
+// frame step (Calculate) of a standing NPC with its character on, kinematic = the branch without neighbours (SetPosition,
+// DisableCharacter), obstacles = the dynamic / static obstacle queries of stalkers and the path rebuild they ask for
+// (calls = up to 2 per update).
+PERF_TIMER(mv_update_path, "movement/update_path")
+PERF_TIMER(mv_path_position, "movement/path_position")
+PERF_TIMER(mv_ground, "movement/ground")
+PERF_TIMER(mv_idle_calc, "movement/idle_calc")
+PERF_TIMER(mv_kinematic, "movement/kinematic")
+PERF_TIMER(mv_obstacles, "movement/obstacles")
+// weapon/shot/* = a shot of CWeaponMagazined (state_Fire, inside weapon/ucl/state): sound = the shot sound (OnShot),
+// fx = the shell, the flame and the smoke (OnShot), trace = FireTrace (the bullets). weapon/ucl/dead_owner = UpdateCL
+// calls skipped by W1 (wpn_npc_dead_owner_skip; with it off, while perf_metrics runs, the ones it would skip).
+// weapon/xform_exact/* = bones/caller/weapon/sounds_exact by the reason (the first that applies): other (the actor's,
+// the view entity's, HUD mode, no owner model), frozen (a frozen corpse pose), dead, svp (a second viewport), first (the
+// first XFORM in these hands).
+PERF_TIMER(wpn_shot_sound, "weapon/shot/sound")
+PERF_TIMER(wpn_shot_fx, "weapon/shot/fx")
+PERF_TIMER(wpn_shot_trace, "weapon/shot/trace")
+PERF_COUNTER(wpn_ucl_dead_owner, "weapon/ucl/dead_owner")
+PERF_COUNTER(wpn_xform_exact_dead, "weapon/xform_exact/dead")
+PERF_COUNTER(wpn_xform_exact_frozen, "weapon/xform_exact/frozen")
+PERF_COUNTER(wpn_xform_exact_svp, "weapon/xform_exact/svp")
+PERF_COUNTER(wpn_xform_exact_first, "weapon/xform_exact/first")
+PERF_COUNTER(wpn_xform_exact_other, "weapon/xform_exact/other")
+// stalker/ucl_lod/combat/deny_seen_* = of deny_seen, the fighters on screen refused by the distance alone (the other
+// conditions of K8a hold), by the distance: < 30 m, 30-40 m, 40-50 m - what npc_ucl_lod_combat_seen_dist 40 / 30 adds.
+PERF_COUNTER(stk_ucl_lod_combat_seen_lt30, "stalker/ucl_lod/combat/deny_seen_lt30")
+PERF_COUNTER(stk_ucl_lod_combat_seen_30_40, "stalker/ucl_lod/combat/deny_seen_30_40")
+PERF_COUNTER(stk_ucl_lod_combat_seen_40_50, "stalker/ucl_lod/combat/deny_seen_40_50")
+// U1 (npc_ik_in_bones): ik/deferred_run/{main,game,worker} = the feet IK run in phase B of the bones (GatherRays, the
+// rays one by one, ProcessGroup) by the thread (main: game code asked for the bones first, e.g. the fire point);
+// ik/deferred_late = of them, requests of an earlier frame (no bones computed in their frame).
+PERF_TIMER(ik_deferred_run_main, "ik/deferred_run/main")
+PERF_TIMER(ik_deferred_run_game, "ik/deferred_run/game")
+PERF_TIMER(ik_deferred_run_worker, "ik/deferred_run/worker")
+PERF_COUNTER(ik_deferred_late, "ik/deferred_late")
+// 27-render-main.md (main thread in CRender::Render on R4). M: render/part0/hud, lods, details = those steps of part0
+// (render_hud, render_lods, Details->Render; main view, wherever they run), render/part0/static_early = R2
+// (r__part0_static_early 1): scene prepare + static geometry + LODs + grass before r_main.sync() (it then takes the
+// lods/details timers too). render/main/par_submit_main_unit = the main thread recording its own (inline) units of the
+// parallel G-buffer submit (part of par_submit_record_cpu, calls = units); render/main/par_merge_matrix, par_merge_sorted
+// = the two halves of render/main/par_merge (calls = shards). render/combine/sorted_other = render_item of the
+// non-particle items of mapSorted in the combine (calls = items), ps_adjacent_same = neighbours in the sorted order one
+// draw could take (sprite effects, same ShaderElement and cull mode), ps_hud = HUD-mode effects there.
+// render/main/ps_small_{4,8,16}px = non-empty particle effects of the main view under that many pixels on screen
+// (bounding sphere diameter, cumulative). render/main/skel_dist/<m> = skeletal models of the main view (not the HUD, not
+// the LOD mesh as a model of its own) closer than <m> metres (and further than the previous bucket; far = 100 m and
+// more), skel_parts/<m> = their meshes: children with the full mesh, 1 with the LOD mesh (~ draws per pass).
+// R1 (r__ps_sorted_batch 1/2, render_sorted of the combine): ps_prefill = snapshot + one Lock + fill + Unlock (wall, main),
+// ps_prefill_cpu = the fill of one chunk (sum over the main thread and workers, calls = chunks), ps_prepared = effects
+// drawn from the batch, ps_runs = their draw calls (= ps_prepared with 1, fewer with 2), ps_run_max = the longest run
+// of a frame (summed per frame: divide by frames), ps_fallback = effects that went back to Render() (the batch over half
+// of the stream, or the stream wrapped after the fill), ps_sim_late = frames whose PreRender task (the particle step)
+// had not finished when the batch read the particles.
+PERF_TIMER(rpart0_hud, "render/part0/hud")
+PERF_TIMER(rpart0_lods, "render/part0/lods")
+PERF_TIMER(rpart0_details, "render/part0/details")
+PERF_TIMER(rpart0_static_early, "render/part0/static_early")
+PERF_TIMER(rmain_par_submit_main_unit, "render/main/par_submit_main_unit")
+PERF_TIMER(rmain_par_merge_matrix, "render/main/par_merge_matrix")
+PERF_TIMER(rmain_par_merge_sorted, "render/main/par_merge_sorted")
+PERF_TIMER(rcomb_sorted_other, "render/combine/sorted_other")
+PERF_COUNTER(rcomb_ps_adjacent_same, "render/combine/ps_adjacent_same")
+PERF_COUNTER(rcomb_ps_hud, "render/combine/ps_hud")
+PERF_COUNTER(rmain_ps_small_4, "render/main/ps_small_4px")
+PERF_COUNTER(rmain_ps_small_8, "render/main/ps_small_8px")
+PERF_COUNTER(rmain_ps_small_16, "render/main/ps_small_16px")
+PERF_COUNTER(rmain_skel_dist_10, "render/main/skel_dist/10")
+PERF_COUNTER(rmain_skel_dist_25, "render/main/skel_dist/25")
+PERF_COUNTER(rmain_skel_dist_50, "render/main/skel_dist/50")
+PERF_COUNTER(rmain_skel_dist_100, "render/main/skel_dist/100")
+PERF_COUNTER(rmain_skel_dist_far, "render/main/skel_dist/far")
+PERF_COUNTER(rmain_skel_parts_10, "render/main/skel_parts/10")
+PERF_COUNTER(rmain_skel_parts_25, "render/main/skel_parts/25")
+PERF_COUNTER(rmain_skel_parts_50, "render/main/skel_parts/50")
+PERF_COUNTER(rmain_skel_parts_100, "render/main/skel_parts/100")
+PERF_COUNTER(rmain_skel_parts_far, "render/main/skel_parts/far")
+PERF_TIMER(rcomb_ps_prefill, "render/combine/ps_prefill")
+PERF_TIMER(rcomb_ps_prefill_cpu, "render/combine/ps_prefill_cpu")
+PERF_COUNTER(rcomb_ps_prepared, "render/combine/ps_prepared")
+PERF_COUNTER(rcomb_ps_runs, "render/combine/ps_runs")
+PERF_COUNTER(rcomb_ps_run_max, "render/combine/ps_run_max")
+PERF_COUNTER(rcomb_ps_fallback, "render/combine/ps_fallback")
+PERF_COUNTER(rcomb_ps_sim_late, "render/combine/ps_sim_late")
+// r__svp_lod_fix: skeletal models of the scope view (parallel SVP build on the SVP worker only) drawn with the character
+// LOD mesh (m_lod) - compare with r__svp_lod_fix 0 (the main view's thresholds) at zoom.
+PERF_COUNTER(rsvp_skel_lod, "render/svp/skel_lod")
+// 27-render-main.md R10 (r__main_build_par_merge 1): the merge of the parallel main build by jobs, one per destination
+// list - render/main/par_merge_matrix and par_merge_sorted then sum the jobs' CPU (calls = jobs: 4 matrix, 7 sorted maps
+// a frame), render/main/par_merge stays the wall on the build's thread; par_merge_par = frames merged by jobs.
+// par_jobs_tail = the build's thread waiting for the jobs other workers took (R10 merge, R3 sort).
+// R3 (r__main_par_prepare_in_build 1): par_prep_smooth = the CROS refresh (update_smooth) of the dynamic objects in the
+// parts of the parallel build (CPU, calls = parts), par_prep_sort = sorting the priority-0 dynamic groups and their
+// items at the end of the build (wall), par_prep_used = passes part0 took sorted, par_prep_stale = presorts dropped
+// because the map changed after the build (expected 0). render/main/par_submit_smooth_late = objects part0's prepare
+// (render_graph_main_parallel) still refreshed itself - with R3 only the tracked object and the late (HUD) inserts.
+PERF_COUNTER(rmain_par_merge_par, "render/main/par_merge_par")
+PERF_TIMER(rmain_par_jobs_tail, "render/main/par_jobs_tail")
+PERF_TIMER(rmain_par_prep_smooth, "render/main/par_prep_smooth")
+PERF_TIMER(rmain_par_prep_sort, "render/main/par_prep_sort")
+PERF_COUNTER(rmain_par_prep_used, "render/main/par_prep_used")
+PERF_COUNTER(rmain_par_prep_stale, "render/main/par_prep_stale")
+PERF_COUNTER(rmain_par_submit_smooth_late, "render/main/par_submit_smooth_late")
+// 29-game-thread-next.md (the Game thread on the critical path), temporary switches, not saved, 0 = as before.
+// A1 (mt_phase0_split): game/early_dispatch_wait = the Game thread waiting at the end of phase 0 for the dispatch task
+// after its own work (the GC step); game/sound_dispatch then is the task itself, game/early = the whole phase 0;
+// game/early_dispatch_on_main = dispatch tasks main took in one of its Wait()s (main's path got longer by them).
+// game/early_dispatch_self = dispatch tasks no worker took before the Game thread's work ended (it ran them itself in
+// the Wait: no overlap that frame).
+// A3 (mt_sound_render_early): game/sound_render_early = frames whose K9 sound render task started in phase 0, right
+// after the dispatch (game/sound_render_wait stays the body's wait for it before seqFrameMT).
+// A2 (mt_bullets_task): game/bullets_task = UpdateWorkload of the bullets in m_Bullets as a task (wherever it ran),
+// game/bullets_wait = the Game thread waiting for it at its old place in seqParallel (game/pseq/bullets = that wait plus
+// the bullets fired during the task, moved there), game/bullets_pending = bullets AddBullet put aside meanwhile,
+// game/bullets_on_main = tasks main took in a Wait() of its render, game/bullets_self = tasks no worker took until the
+// Game thread reached their join (it ran them itself there: no overlap that frame).
+// A4: task/wait_game/total = the outermost TaskManager::Wait() of the dedicated Game thread (phase 0 and the body);
+// exec_own = tasks of its own queue or pieces of the awaited task it ran inside, exec_foreign = other threads' tasks it
+// took (render, sound decoding...) - with mt_game_wait_own_only 0 the cost of stealing; the rest of total is spinning.
+// task/wait_game/fallback = with mt_game_wait_own_only 1, steals after 1 ms without own work (deadlock guard).
+// B5 (metric only): level_path/search_max_us = the longest single path search of the frame (CLevelPathBuilder::process:
+// the level path and its detail path, seqParallel) in us, level_path/searches_max = searches in the frame; both gauges
+// of per-frame maxima (the window prints their average and peak).
+PERF_TIMER(game_early_dispatch_wait, "game/early_dispatch_wait")
+PERF_COUNTER(game_early_dispatch_on_main, "game/early_dispatch_on_main")
+PERF_COUNTER(game_early_dispatch_self, "game/early_dispatch_self")
+PERF_COUNTER(game_sound_render_early, "game/sound_render_early")
+PERF_TIMER(game_bullets_task, "game/bullets_task")
+PERF_TIMER(game_bullets_wait, "game/bullets_wait")
+PERF_COUNTER(game_bullets_pending, "game/bullets_pending")
+PERF_COUNTER(game_bullets_on_main, "game/bullets_on_main")
+PERF_COUNTER(game_bullets_self, "game/bullets_self")
+PERF_TIMER(task_wait_game_total, "task/wait_game/total")
+PERF_TIMER(task_wait_game_exec_own, "task/wait_game/exec_own")
+PERF_TIMER(task_wait_game_exec_foreign, "task/wait_game/exec_foreign")
+PERF_COUNTER(task_wait_game_fallback, "task/wait_game/fallback")
+PERF_GAUGE(level_path_search_max_us, "level_path/search_max_us")
+PERF_GAUGE(level_path_searches_max, "level_path/searches_max")
+// A1 fix (mt_phase0_split): the dispatch task runs beside the Lua GC step, so the Lua it would call - the hit callback
+// and plugin event of the "fake" hit of an enemy shot an NPC hears (CHitMemoryManager::add) - is queued.
+// game/early_dispatch_deferred = the hit callbacks queued (a frame), game/early_dispatch_flush = the Game thread running
+// that queue right after the task (calls = frames with a queue), game/early_dispatch_dropped = queued ones whose NPC or
+// shooter was gone (or dead) by then - skipped, expected ~0.
+PERF_COUNTER(game_early_dispatch_deferred, "game/early_dispatch_deferred")
+PERF_TIMER(game_early_dispatch_flush, "game/early_dispatch_flush")
+PERF_COUNTER(game_early_dispatch_dropped, "game/early_dispatch_dropped")
+// 29-game-thread-next.md, the adaptive budget of the scheduler (shed_budget_adaptive, xrEngine/xrSheduler.cpp, see the
+// comment at ps_shed_budget_adaptive). shed/budget_effective_us = the effective budget of the non-RT pass in us (=
+// shed/budget * 1000 with shed_budget_adaptive 0); shed/budget_cut_frames = passes with the budget below the base;
+// frame/game_wait_ema_us = the EMA (~4 frames) of the wait of the main thread for the Game thread at its join, the
+// signal of the controller (measured in every overlap frame, also with the switch off). The freshness of the AI under a
+// cut: shed/urgent_late_ms / _n, shed/near_calm_late_ms / _n, shed/far_late_ms / _n (and shed/*_stalker_late_*).
+PERF_GAUGE(shed_budget_effective_us, "shed/budget_effective_us")
+PERF_COUNTER(shed_budget_cut_frames, "shed/budget_cut_frames")
+PERF_GAUGE(frame_game_wait_ema_us, "frame/game_wait_ema_us")
+// 32-frame-spikes.md (lua_spike_probe.cpp, xr_object_list.cpp, ai_stalker.cpp, CustomMonster.cpp, entity_alive.cpp,
+// Feel_Vision.cpp). G1 (lua_gc_budget_max_us > 0): lua/gc_budget_us = the time cap of the paced GC steps of the frame
+// in us (0 = uncapped that frame; with lua_gc_budget_max_us 0 it is lua_gc_step_budget_us), lua/gc_heap_growth_pct =
+// the heap in % of its size at the start of the GC cycle (G1 only), lua/gc_uncapped_heap = frames of lua/gc_uncapped
+// lifted by that growth (lua_gc_heap_guard_pct) rather than by the 64K debt. R1 (ol_relcase_npc_batch 1):
+// objects/relcase/npc_batch = net_RelcaseBatch of CAI_Stalker / CCustomMonster done in one pass over the personal lists
+// (calls = NPCs; part of objects/relcase/active|sleeping). R2 (ol_relcase_vision_sorted 1):
+// objects/relcase/vision_sorted = Feel::Vision subscribers whose query/seen were searched by binary search.
+PERF_GAUGE(lua_gc_budget_us, "lua/gc_budget_us")
+PERF_GAUGE(lua_gc_heap_growth_pct, "lua/gc_heap_growth_pct")
+PERF_COUNTER(lua_gc_uncapped_heap, "lua/gc_uncapped_heap")
+PERF_TIMER(relcase_npc_batch, "objects/relcase/npc_batch")
+PERF_COUNTER(relcase_vision_sorted, "objects/relcase/vision_sorted")
+// 31-svp-scope.md (3D scope, SVP). M - the scope pass on main, by phase (CRender::Render with m_SecondViewportPass,
+// next to render/pass/*, which are main-pass only): sync_point = q_sync_point.Wait; part0 = the geometry part (the
+// sequential path records render_graph(0) here, the parallel one only lods/details) incl. submit0 = SubmitSVPDeferred of
+// the big list the SVP worker recorded (Finish/ExecuteCommandList); hud_ui, sun, selfillum; lights = both render_lights
+// calls (calls = 2 a frame); combine = phase_combine.
+PERF_TIMER(rsvp_pass_sync_point, "render/svp/pass/sync_point")
+PERF_TIMER(rsvp_pass_part0, "render/svp/pass/part0")
+PERF_TIMER(rsvp_pass_submit0, "render/svp/pass/submit0")
+PERF_TIMER(rsvp_pass_hud_ui, "render/svp/pass/hud_ui")
+PERF_TIMER(rsvp_pass_sun, "render/svp/pass/sun")
+PERF_TIMER(rsvp_pass_selfillum, "render/svp/pass/selfillum")
+PERF_TIMER(rsvp_pass_lights, "render/svp/pass/lights")
+PERF_TIMER(rsvp_pass_combine, "render/svp/pass/combine")
+// The scope view's geometry recording (render_graph(0) of the scope dsgraph: the SVP worker, or main on the sequential
+// path): static / dynamic halves, their backend draw calls, GPU-skinned (palette written) and single-bone skin draws.
+PERF_TIMER(rsvp_geom_static, "render/svp/geom_static")
+PERF_TIMER(rsvp_geom_dynamic, "render/svp/geom_dynamic")
+PERF_COUNTER(rsvp_geom_static_draws, "render/svp/geom_static_draws")
+PERF_COUNTER(rsvp_geom_dyn_draws, "render/svp/geom_dyn_draws")
+PERF_COUNTER(rsvp_geom_skin_hw, "render/svp/geom_skin_hw")
+PERF_COUNTER(rsvp_geom_skin_single, "render/svp/geom_skin_single")
+// The scope view's visibility build (build_subspace of the scope dsgraph): traverse = sector/portal traversal, static =
+// add_static over the traversed sectors, query = q_frustum, dynamic = the whole dynamic part (query included);
+// objects = renderables it submitted (renderable_Render).
+PERF_TIMER(rsvp_build_traverse, "render/svp/build_traverse")
+PERF_TIMER(rsvp_build_static, "render/svp/build_static")
+PERF_TIMER(rsvp_build_query, "render/svp/build_query")
+PERF_TIMER(rsvp_build_dynamic, "render/svp/build_dynamic")
+PERF_COUNTER(rsvp_objects, "render/svp/objects")
+// Lights of the scope pass: lights_in = light entries the scope pass would accumulate (an OMNIPART = 1 of 6; the
+// frame driver: unshadowed packages + the transferred shadow pages), lights_kept = after r__svp_light_filter2 (= in
+// with the switch at 0).
+PERF_COUNTER(rsvp_lights_in, "render/svp/lights_in")
+PERF_COUNTER(rsvp_lights_kept, "render/svp/lights_kept")
+// The main thread waiting for the Game thread (frame/game_wait) in frames that rendered the scope pass.
+PERF_TIMER(frame_game_wait_svp, "frame/game_wait_svp")
+// L0 (r__svp_lens_cull 2): the scope build's frustum cropped to the square around the lens circle. lens_frames =
+// scope frames built with the crop, lens_area_pct = sum of the cropped square's share of the scope image in % (average
+// = lens_area_pct / lens_frames), lens_fallback = scope frames with the switch on but the crop not applied (not aimed
+// through the scope / not fully raised / alternative sight).
+PERF_COUNTER(rsvp_lens_frames, "render/svp/lens_frames")
+PERF_COUNTER(rsvp_lens_area_pct, "render/svp/lens_area_pct")
+PERF_COUNTER(rsvp_lens_fallback, "render/svp/lens_fallback")
+// H (r__svp_hom): dynamic renderables of the scope build culled by the main view's HOM (a copy of vis_data, no writes).
+PERF_COUNTER(rsvp_hom_cull, "render/svp/hom_cull")
+// 32-frame-spikes.md, A1 (alife_update_spread, xrGame alife_update_manager.cpp): the ALife update spread over the frames.
+// alife/spread_ticks = turns of the scheduler (shedule_Update; each gives objects_per_update tokens and one switch pass);
+// alife/spread_frames = frames that did a part of it (update_spread; alife/update then counts these parts: calls =
+// frames, max = the longest part); alife/update_switch, alife/update_scheduled = its two halves (the switch pass, the
+// scheduled objects); alife/spread_tokens = scheduled objects still due after the part of the frame (the bucket);
+// alife/spread_dropped = tokens over the cap of the bucket (4 turns) - the budget does not keep up;
+// alife/spread_switch_unfinished = turns that came before the switch pass of the previous one was done. The slowest
+// object of a part: "[perf-spike] alife/object" (perf_spike_us) with its name, section and ID.
+PERF_COUNTER(alife_spread_ticks, "alife/spread_ticks")
+PERF_COUNTER(alife_spread_frames, "alife/spread_frames")
+PERF_TIMER(alife_update_switch, "alife/update_switch")
+PERF_TIMER(alife_update_scheduled, "alife/update_scheduled")
+PERF_GAUGE(alife_spread_tokens, "alife/spread_tokens")
+PERF_COUNTER(alife_spread_dropped, "alife/spread_dropped")
+PERF_COUNTER(alife_spread_switch_unfinished, "alife/spread_switch_unfinished")
+// 30-game-events.md (plans/optimization_mt): the peaks of ProcessGameEvents on main (deaths, destructions).
+// ge/max_event_us = the longest single message of the frame's game event queue in us (gauge of per-frame maxima);
+// ge/max_event_type = what it was: the GE_* type of an M_EVENT, 1000 + the message ID otherwise (Tracy plot per frame;
+// in the log the "* ge: longest event" line of perf_metrics bit 2 names the longest event of the 5 s window).
+// ge/n_frame/* = events of the frame by kind (die = GE_DIE only, destroy = GE_DESTROY + GE_DESTROY_REJECT, reject =
+// GE_OWNERSHIP_REJECT + GE_TRADE_SELL + GE_DESTROY_REJECT, hit = GE_HIT). ge/time/explode = GE_GRENADE_EXPLODE (before
+// 2026-10-17 it was in ge/time/weapon, which no longer has it).
+// Death (CAI_Stalker::Die -> CEntityAlive::Die): death/stalker_pre = CAI_Stalker::Die before inherited::Die (movement,
+// notify_on_wounded_or_killed, the death animation, the death sound), death/lua_binder = the Lua eDeath callback (binder),
+// death/bus = the death event of the bus (npc_on_death_callback: Lua and plugin subscribers), death/in_die =
+// CCharacterPhysicsSupport::in_Die (shell or kill hit), death/create_shell = CreateShell, death/correct =
+// CollisionCorrectObjPos of EndActivateFreeShell, death/fly_to = FlyTo (Freeze + 10 steps of the world + UnFreeze),
+// physics/fly_to/freeze = its Freeze and UnFreeze of the world (calls = 2 per FlyTo).
+// Reject (CAI_Stalker::on_ownership_reject): reject/bones = in_UpdateCL + CalculateBones(true) of the owner,
+// reject/bones_skipped = rejects with just_before_destroy that skipped it (npc_reject_destroy_skip_bones 1),
+// reject/drop = inventory().DropItem; item_drop/lua_binder = the Lua eOnItemDrop callback, item_drop/bus = the item
+// drop event of the bus (npc_on_item_drop) - of any owner, not only in a reject.
+// objects/destroy_child_scan = the walk of all objects for live children of the destroyed ones (calls = walks: one per
+// register_object_to_destroy with ol_destroy_child_scan_batch 0, one per batch with 1), _objects = objects walked.
+// Hit: hit/kill_entity = CEntity::KillEntity in CEntity::Hit (GE_DIE to the server, its Lua on_death), hit/bus_before =
+// npc_on_before_hit of the bus (CAI_Stalker::Hit), hit/lua_binder = the Lua eHit callback of CHitMemoryManager::add,
+// hit/bus = its hit event of the bus, hit/wallmarks = BloodyWallmarks of CEntityAlive::Hit.
+// ge/cold/sound_load, ge/cold/model_load = cold loads (sound/source/load, modelpool/instance_load) on the thread that
+// runs ProcessGameEvents while inside it (the spawns of the queue included: modelpool/instance_load_spawn is that part).
+PERF_GAUGE(ge_max_event_us, "ge/max_event_us")
+PERF_GAUGE(ge_max_event_type, "ge/max_event_type")
+PERF_GAUGE(ge_n_frame_die, "ge/n_frame/die")
+PERF_GAUGE(ge_n_frame_destroy, "ge/n_frame/destroy")
+PERF_GAUGE(ge_n_frame_reject, "ge/n_frame/reject")
+PERF_GAUGE(ge_n_frame_hit, "ge/n_frame/hit")
+PERF_TIMER(ge_time_explode, "ge/time/explode")
+PERF_TIMER(death_stalker_pre, "death/stalker_pre")
+PERF_TIMER(death_lua_binder, "death/lua_binder")
+PERF_TIMER(death_bus, "death/bus")
+PERF_TIMER(death_in_die, "death/in_die")
+PERF_TIMER(death_create_shell, "death/create_shell")
+PERF_TIMER(death_correct, "death/correct")
+PERF_TIMER(death_fly_to, "death/fly_to")
+PERF_TIMER(ph_fly_to_freeze, "physics/fly_to/freeze")
+PERF_TIMER(reject_bones, "reject/bones")
+PERF_COUNTER(reject_bones_skipped, "reject/bones_skipped")
+PERF_TIMER(reject_drop, "reject/drop")
+PERF_TIMER(item_drop_lua_binder, "item_drop/lua_binder")
+PERF_TIMER(item_drop_bus, "item_drop/bus")
+PERF_TIMER(ol_destroy_child_scan, "objects/destroy_child_scan")
+PERF_COUNTER(ol_destroy_child_scan_objects, "objects/destroy_child_scan_objects")
+PERF_TIMER(hit_kill_entity, "hit/kill_entity")
+PERF_TIMER(hit_bus_before, "hit/bus_before")
+PERF_TIMER(hit_lua_binder, "hit/lua_binder")
+PERF_TIMER(hit_bus, "hit/bus")
+PERF_TIMER(hit_wallmarks, "hit/wallmarks")
+PERF_TIMER(ge_cold_sound_load, "ge/cold/sound_load")
+PERF_TIMER(ge_cold_model_load, "ge/cold/model_load")
+// 27-render-main.md, R13 (r__dsgraph_reserve, Layers/xrRender): the node arrays of the dsgraph maps (xr_fixed_map - its
+// only users). render/dsgraph/resize_us/{main,game,worker} = xr_fixed_map::resize() (a map outgrows its array: a new one
+// of twice the size, the nodes carried over) by the thread that grows the map, calls = resizes; resize_count = all of
+// them; resize_nodes = nodes carried over (copy relocation, r__dsgraph_reserve without bit 2: every item vector of a
+// matrix/normal node deep-copied and its old buffer leaked); resize_kb = KB of the new arrays. capacity_nodes = nodes
+// allocated in all pooled dsgraphs + the immediate one after the end-of-frame cleanup (0 without bit 1: freed every
+// frame, grown again by the next one); capacity_max = the largest single map of them (nodes); shrink = maps cut down to
+// the high-water mark of the last window by the slow decay (bit 1).
+PERF_TIMER(rdsg_resize_main, "render/dsgraph/resize_us/main")
+PERF_TIMER(rdsg_resize_game, "render/dsgraph/resize_us/game")
+PERF_TIMER(rdsg_resize_worker, "render/dsgraph/resize_us/worker")
+PERF_COUNTER(rdsg_resize_count, "render/dsgraph/resize_count")
+PERF_COUNTER(rdsg_resize_nodes, "render/dsgraph/resize_nodes")
+PERF_COUNTER(rdsg_resize_kb, "render/dsgraph/resize_kb")
+PERF_GAUGE(rdsg_capacity_nodes, "render/dsgraph/capacity_nodes")
+PERF_GAUGE(rdsg_capacity_max, "render/dsgraph/capacity_max")
+PERF_COUNTER(rdsg_shrink, "render/dsgraph/shrink")
+// 32-frame-spikes.md (xrPhysics/PHCommander.cpp UpdateProfiled): the commander of level.add_call and set_fastcall
+// (frame/level/add_call, main). ph_commander/calls = calls checked (each condition every frame until it is true),
+// ph_commander/lua_cond = the time of their Lua conditions (calls = conditions called), ph_commander/lua_action = the
+// time of the Lua actions that ran (once per call), ph_commander/max_us = the longest single call of the frame in us
+// (per-frame maximum). The call itself: Tracy zone and "[perf-spike] level/add_call/call" (perf_spike_us) with cond=/act=
+// (the Lua source of each part; "(up ...)" = the callback inside a wrapper such as AddUniqueCall of _g.script).
+PERF_COUNTER(ph_commander_calls, "ph_commander/calls")
+PERF_TIMER(ph_commander_lua_cond, "ph_commander/lua_cond")
+PERF_TIMER(ph_commander_lua_action, "ph_commander/lua_action")
+PERF_GAUGE(ph_commander_max_us, "ph_commander/max_us")
+// 33-level-path.md (plans/optimization_mt), M: the level paths (CLevelGraph::Search, CLevelPathBuilder).
+// level_path/astar_us = every level A* of every thread (calls = A* calls; monsters search synchronously, stalkers in
+// seqParallel), astar_calls = the same count, astar_fail = A* that found no path, astar_cap_hit = A* that refused a
+// vertex because of max_visited_node_count (65500, or ai_obstacle_path_visited_cap), astar_visited_max / astar_max_us =
+// per-frame maxima of one A* (vertices with a cost / us), fast_storage = A* on the fast data (ai_level_search_fast 1).
+// detail_us = the detail paths (CDetailPathBuilder::process_impl: inside the level path delegate and on their own),
+// simulate_us = simulate_path_navigation of the stalkers' obstacle loop, obstacle_iters_max = the passes of that loop
+// in one build (per-frame max), pure_fallback = builds where the search with obstacles failed and the one without
+// them was tried, iters_capped = builds stopped by ai_obstacle_path_iters_max, deferred = level path delegates moved
+// to the next frame by ai_level_path_budget_us, spikes = [path-spike] lines (ai_level_path_spike_us), spikes_dropped =
+// spikes over the line limit (4 a second).
+PERF_TIMER(level_path_astar_us, "level_path/astar_us")
+PERF_COUNTER(level_path_astar_calls, "level_path/astar_calls")
+PERF_COUNTER(level_path_astar_fail, "level_path/astar_fail")
+PERF_COUNTER(level_path_astar_cap_hit, "level_path/astar_cap_hit")
+PERF_GAUGE(level_path_astar_visited_max, "level_path/astar_visited_max")
+PERF_GAUGE(level_path_astar_max_us, "level_path/astar_max_us")
+PERF_COUNTER(level_path_fast_storage, "level_path/fast_storage")
+PERF_TIMER(level_path_detail_us, "level_path/detail_us")
+PERF_TIMER(level_path_simulate_us, "level_path/simulate_us")
+PERF_GAUGE(level_path_obstacle_iters_max, "level_path/obstacle_iters_max")
+PERF_COUNTER(level_path_pure_fallback, "level_path/pure_fallback")
+PERF_COUNTER(level_path_iters_capped, "level_path/iters_capped")
+PERF_COUNTER(level_path_deferred, "level_path/deferred")
+PERF_COUNTER(level_path_spikes, "level_path/spikes")
+PERF_COUNTER(level_path_spikes_dropped, "level_path/spikes_dropped")
+// 32-frame-spikes.md, the offline wave (2026-10-17 12:22: 120-138 destroyed objects a frame, 70-77 ms frames).
+// alife/switch_offline_frame = client objects (each with all its children) taken offline by ALife (remove_online, any
+// path); max_frame = the most in a frame of the Game thread. alife/switch_offline_deferred = spread switch passes stopped
+// by alife_switch_offline_per_frame_max (the rest went on the next frame).
+// objects/relcase/cb_hud = the HUD part of objects/relcase/callbacks (the rest: cb_vision, cb_touch, the loop);
+// vision_scan = Feel::Vision batch callbacks with ol_relcase_cb_scan 1, touch_scan_skips = Feel::Touch subscribers
+// whose lists held no batch object (the per-object walk skipped); active_skipped / sleeping_skipped = objects whose
+// net_RelcaseBatch returned at once (ol_relcase_skip_noop 1: the empty relcase of CGameObject).
+PERF_COUNTER(alife_switch_offline_frame, "alife/switch_offline_frame")
+PERF_COUNTER(alife_switch_offline_deferred, "alife/switch_offline_deferred")
+PERF_TIMER(relcase_cb_hud, "objects/relcase/cb_hud")
+PERF_COUNTER(relcase_vision_scan, "objects/relcase/vision_scan")
+PERF_COUNTER(relcase_touch_scan_skips, "objects/relcase/touch_scan_skips")
+PERF_COUNTER(relcase_active_skipped, "objects/relcase/active_skipped")
+PERF_COUNTER(relcase_sleeping_skipped, "objects/relcase/sleeping_skipped")
+// 32-frame-spikes.md, ol_relcase_parallel 1 (the fixed cost of a frame with a destroy). objects/relcase/parallel_wall =
+// the phase right after the active pass that runs the stalkers' own parts (CAI_Stalker::net_RelcaseBatchOwn) on the
+// task workers (wall time on the relcase thread; a part of objects/relcase/active), parallel_tasks = the parts run there
+// (stalkers; npc_batch is then the sum of their time over the threads, without the shared part); serial_tail = the
+// rest of the active pass in that mode (other classes, the stalkers' agent manager and physics). cb_parallel_wall =
+// the Feel::Vision batch callbacks on the workers (wall; a part of objects/relcase/callbacks, cb_vision = their sum),
+// cb_parallel_tasks = those callbacks.
+PERF_TIMER(relcase_parallel_wall, "objects/relcase/parallel_wall")
+PERF_COUNTER(relcase_parallel_tasks, "objects/relcase/parallel_tasks")
+PERF_TIMER(relcase_serial_tail, "objects/relcase/serial_tail")
+PERF_TIMER(relcase_cb_parallel_wall, "objects/relcase/cb_parallel_wall")
+PERF_COUNTER(relcase_cb_parallel_tasks, "objects/relcase/cb_parallel_tasks")
+// 32-frame-spikes.md, G2 (lua_gc_atomic_stats 1; LuaJIT with the GlobalWar patch, luajit.h LUAJIT_GW_GCSTATS): the
+// last atomic phase of the Lua GC part by part, in us - remark = the weak tables, the running thread and the roots
+// again; grayagain = the tables written behind the barrier since their traversal + all threads, with all they reach;
+// separateudata = the walk over all userdata; mmudata = marking the dead userdata with __gc; other = open upvalues,
+// the left-overs of the gray list, the sweep setup. The counts: grayagain_tables/entries (array + hash slots)/threads
+// = the 2nd chance list, udata = all userdata walked, udata_with_gc = moved to finalization, weak_tables/entries = the
+// weak tables cleared. lua/gc_atomic/recorded = atomic phases recorded (the log line "[lua-gc-atomic]").
+PERF_COUNTER(lua_gca_recorded, "lua/gc_atomic/recorded")
+PERF_GAUGE(lua_gca_total_us, "lua/gc_atomic/total_us")
+PERF_GAUGE(lua_gca_remark_us, "lua/gc_atomic/remark_us")
+PERF_GAUGE(lua_gca_grayagain_us, "lua/gc_atomic/grayagain_us")
+PERF_GAUGE(lua_gca_separate_us, "lua/gc_atomic/separateudata_us")
+PERF_GAUGE(lua_gca_mmudata_us, "lua/gc_atomic/mmudata_us")
+PERF_GAUGE(lua_gca_clearweak_us, "lua/gc_atomic/clearweak_us")
+PERF_GAUGE(lua_gca_other_us, "lua/gc_atomic/other_us")
+PERF_GAUGE(lua_gca_ga_tables, "lua/gc_atomic/grayagain_tables")
+PERF_GAUGE(lua_gca_ga_entries, "lua/gc_atomic/grayagain_entries")
+PERF_GAUGE(lua_gca_ga_threads, "lua/gc_atomic/grayagain_threads")
+PERF_GAUGE(lua_gca_udata, "lua/gc_atomic/udata")
+PERF_GAUGE(lua_gca_udata_gc, "lua/gc_atomic/udata_with_gc")
+PERF_GAUGE(lua_gca_weak_tables, "lua/gc_atomic/weak_tables")
+PERF_GAUGE(lua_gca_weak_entries, "lua/gc_atomic/weak_entries")
+// 33-level-path.md, journal 34 (ai_level_vertex_fast 1): CLevelGraph::vertex(current, position) on the table of the
+// rows of the packed xz. vertex_fast_hits = calls answered with the table (the vertex under the position, guess,
+// nearest, the fast full search; the current vertex needs no table), vertex_fallback = the cvar on, the old code
+// answered (no table, or nothing finite near the position), full_search_fast = the full search over the nearest rows
+// (current vertex invalid, nothing under the position; ai/level_graph/full_search is then the old loop only).
+PERF_COUNTER(lg_vertex_fast_hits, "ai/level_graph/vertex_fast_hits")
+PERF_COUNTER(lg_vertex_fallback, "ai/level_graph/vertex_fallback")
+PERF_TIMER(lg_vertex_full_fast, "ai/level_graph/full_search_fast")
+// 33-level-path.md, journal 35: the cross table lookup of CGameObject::update_ai_locations (level vertex -> game
+// vertex; the cells are in the mapped all.spawn, or in the memory with ai_cross_table_copy 1). lookup = the whole
+// lookup (= the cross_ms of [perf-spike] go/ai_locations), read = the read of the cell only (a page fault is here),
+// slow = the reads of 0.5 ms and more (the page read from the disk; calls = how many), ws_miss = the page of the cell
+// was not in the working set of the process before the read (Windows, a page fault followed).
+PERF_TIMER(ai_cross_lookup, "ai/cross_table/lookup")
+PERF_TIMER(ai_cross_read, "ai/cross_table/read")
+PERF_TIMER(ai_cross_slow, "ai/cross_table/slow")
+PERF_COUNTER(ai_cross_ws_miss, "ai/cross_table/ws_miss")
+// 32-frame-spikes.md, lua_wrapper_cache 1 (xrScriptEngine/script_wrapper_cache.hpp): one constant luabind wrapper per
+// game_object / alife() / device() instead of a new userdata on every pass to Lua. hits = passes answered with the
+// cached userdata, misses = wrappers made (the first pass of an object, then cached), live = cached wrappers alive (in
+// the Lua registry; their owners not dead yet).
+PERF_COUNTER(lua_wrapper_cache_hits, "lua/wrapper_cache_hits")
+PERF_COUNTER(lua_wrapper_cache_misses, "lua/wrapper_cache_misses")
+PERF_GAUGE(lua_wrapper_cache_live, "lua/wrapper_cache_live")
+// 32-frame-spikes.md, U1 (lua_udata_profile 1; luabind with the GlobalWar hook set_instance_create_hook, object_rep.hpp;
+// xrGame/lua_udata_profile.h): lua/udata/created = luabind class instances created (each a new Lua userdata: a C++
+// object pushed by pointer or by value, a constructor called from Lua); the same for the classes game_object, vector,
+// CTime, render_device (device()), alife_simulator (alife()). sampled = instances whose Lua call site was taken (one in
+// lua_udata_profile_sample), sample_time = the cost of those samples. All 0 with lua_udata_profile 0.
+PERF_COUNTER(lua_udata_created, "lua/udata/created")
+PERF_COUNTER(lua_udata_game_object, "lua/udata/game_object")
+PERF_COUNTER(lua_udata_vector, "lua/udata/vector")
+PERF_COUNTER(lua_udata_ctime, "lua/udata/CTime")
+PERF_COUNTER(lua_udata_device, "lua/udata/render_device")
+PERF_COUNTER(lua_udata_alife, "lua/udata/alife_simulator")
+PERF_COUNTER(lua_udata_sampled, "lua/udata/sampled")
+PERF_TIMER(lua_udata_sample_time, "lua/udata/sample_time")
+// 32-frame-spikes.md, U2 (lua_udata_profile 1; LuaJIT with the GlobalWar hook luaJIT_gw_udata_hook, luajit.h):
+// lua/udata/all = every Lua userdata created (luabind instances, luabind iterators and function objects, engine holders,
+// newproxy, io files); all_sampled = those whose creator was taken (one in lua_udata_profile_sample), all_sample_time =
+// the cost of those samples. All 0 with lua_udata_profile 0.
+PERF_COUNTER(lua_udata_all, "lua/udata/all")
+PERF_COUNTER(lua_udata_all_sampled, "lua/udata/all_sampled")
+PERF_TIMER(lua_udata_all_sample_time, "lua/udata/all_sample_time")
+// 31-svp-scope.md, r__svp_light_dedup (Light_DB.cpp, CLight_DB::add_light): the lights the sequential scope pass
+// (GL, RenderDoc, no free dsgraph context) tried to export into Lights.package again after the main pass of the same
+// frame had exported them (with r__svp_light_dedup 0 they are exported again and accumulated twice in the lens).
+PERF_COUNTER(rsvp_light_dup, "render/svp/light_dup")
+// 33-level-path.md, journal 36, ai_game_graph_copy 1 (AISpaceBase::SetGameGraph): copy = the copy of the game graph
+// (vertices, edges, death points) from the mapped all.spawn into the memory, once per ALife session; copy_kb = the size
+// of that copy while its graph lives (0 without it).
+PERF_TIMER(ai_game_graph_copy, "ai/game_graph/copy")
+PERF_GAUGE(ai_game_graph_copy_kb, "ai/game_graph/copy_kb")
+// 32-frame-spikes.md, lua_wrapper_nogc 1 (luabind with the GlobalWar patch set_nonowning_instance_nogc, object_rep.hpp):
+// lua/udata/nogc_created = luabind instances over a raw pointer (pointer_holder<T*>: game_object, alife(), device(), a
+// reference returned by a method) made without __gc - LuaJIT frees them in the GC cycle they die in, no finalizer
+// queue (mmudata). 0 with lua_wrapper_nogc 0.
+PERF_COUNTER(lua_udata_nogc_created, "lua/udata/nogc_created")
+// 34-sound-cold-load.md (xrSound, SoundRender_Source.cpp / SoundRender_Core_SourceManager.cpp). Where a cold load of a
+// sound source waits, any thread: sound/source/load_open = LoadWave's FS.r_open + ov_open_callbacks (headers, seek to
+// the end: the first reads of a file not in the OS cache), load_r_open = the FS.r_open alone (lookup, CreateFile,
+// mapping), load_pcm = cache_pcm_if_short (a second open + the full decode); ge/cold/sound_open, ge/cold/sound_pcm = the
+// same inside game events (parts of ge/cold/sound_load). sound/source/load_dup = a source loaded twice at once (two
+// threads), the later copy freed.
+PERF_TIMER(snd_load_open, "sound/source/load_open")
+PERF_TIMER(snd_load_r_open, "sound/source/load_r_open")
+PERF_TIMER(snd_load_pcm, "sound/source/load_pcm")
+PERF_TIMER(ge_cold_sound_open, "ge/cold/sound_open")
+PERF_TIMER(ge_cold_sound_pcm, "ge/cold/sound_pcm")
+PERF_COUNTER(snd_source_load_dup, "sound/source/load_dup")
+// snd_source_prefetch (temporary): queued = folders put in the queue (a script's sound_prefetch_dir and auto), auto = of
+// them the folder of a sound loaded cold in a game event, queue = folders waiting; files/kb = .ogg files read ahead
+// into the OS cache; loaded = sources loaded by the prefetch thread (2), src_hit = the first ask for such a source, dup =
+// one main loaded first (freed); warm_hit / warm_miss = cold loads (s_sources misses) whose folder had / had not been
+// read ahead, ge/cold/sound_warm_hit / _miss = the same inside game events; time = the thread's time per folder;
+// dir_missing / dir_skipped = no such folder / more than 256 .ogg in it; not_indexed = a file not in the FS index (2).
+PERF_COUNTER(snd_prefetch_queued, "sound/prefetch/queued")
+PERF_COUNTER(snd_prefetch_auto, "sound/prefetch/auto")
+PERF_GAUGE(snd_prefetch_queue, "sound/prefetch/queue")
+PERF_COUNTER(snd_prefetch_files, "sound/prefetch/files")
+PERF_COUNTER(snd_prefetch_kb, "sound/prefetch/kb")
+PERF_COUNTER(snd_prefetch_loaded, "sound/prefetch/loaded")
+PERF_COUNTER(snd_prefetch_src_hit, "sound/prefetch/src_hit")
+PERF_COUNTER(snd_prefetch_dup, "sound/prefetch/dup")
+PERF_COUNTER(snd_prefetch_warm_hit, "sound/prefetch/warm_hit")
+PERF_COUNTER(snd_prefetch_warm_miss, "sound/prefetch/warm_miss")
+PERF_COUNTER(ge_cold_sound_warm_hit, "ge/cold/sound_warm_hit")
+PERF_COUNTER(ge_cold_sound_warm_miss, "ge/cold/sound_warm_miss")
+PERF_TIMER(snd_prefetch_time, "sound/prefetch/time")
+PERF_COUNTER(snd_prefetch_dir_missing, "sound/prefetch/dir_missing")
+PERF_COUNTER(snd_prefetch_dir_skipped, "sound/prefetch/dir_skipped")
+PERF_COUNTER(snd_prefetch_not_indexed, "sound/prefetch/not_indexed")
+// 35-lua-gc-finobj.md, always on (LuaJIT with the GlobalWar patch luaJIT_gw_finobj, luajit.h LUAJIT_GW_FINOBJ):
+// the userdata with __gc in a list of their own. With lua_gc_atomic_stats 1, the last atomic phase: fin_udata = walked
+// in that list, plain_udata = in the other one (0 unless walked all: finobj just switched on, __gc added to a
+// watched metatable; without the patch = all userdata), fin_pending = userdata that got __gc while not the newest
+// one (moved by the sweep); fin_full = atomic phases that walked all userdata. Always (per frame
+// in CLevel::script_gc): lua/gc_finobj/moved_head = moved at lua_setmetatable (the newest userdata), pending = flagged
+// for the sweep, moved_sweep = moved by the sweep, moved_full = moved by a walk of all userdata, full_walks/full_mt =
+// such walks / of them for __gc added to a watched metatable, kept = flagged ones dead at the atomic phase (finalized a
+// cycle later); watched = metatables without __gc watched now.
+PERF_GAUGE(lua_gca_fin_udata, "lua/gc_atomic/fin_udata")
+PERF_GAUGE(lua_gca_plain_udata, "lua/gc_atomic/plain_udata")
+PERF_GAUGE(lua_gca_fin_pending, "lua/gc_atomic/fin_pending")
+PERF_COUNTER(lua_gca_fin_full, "lua/gc_atomic/fin_full")
+PERF_COUNTER(lua_finobj_moved_head, "lua/gc_finobj/moved_head")
+PERF_COUNTER(lua_finobj_pending, "lua/gc_finobj/pending")
+PERF_COUNTER(lua_finobj_moved_sweep, "lua/gc_finobj/moved_sweep")
+PERF_COUNTER(lua_finobj_moved_full, "lua/gc_finobj/moved_full")
+PERF_COUNTER(lua_finobj_full_walks, "lua/gc_finobj/full_walks")
+PERF_COUNTER(lua_finobj_full_mt, "lua/gc_finobj/full_mt")
+PERF_COUNTER(lua_finobj_kept, "lua/gc_finobj/kept")
+PERF_GAUGE(lua_finobj_watched, "lua/gc_finobj/watched")
+// 36-spawn-model-load.md (plans/optimization_mt), Layers/xrRender. What a cold model load (CModelPool::Create had to
+// load the ogf: modelpool/instance_load) is made of, any thread, counted only inside such a load (its LOD and children
+// included, so the parts of one nested load add up, they do not overlap): open = FS.exist + FS.r_open of an ogf (the
+// base, its LOD); shader = dxRender_Visual::Load's shader.create (blender, passes, constants, textures - a texture not
+// loaded yet is texture/create_sync inside it); geom = Fvisual::Load (vertex / index buffers); skin = CSkeletonX _Load +
+// _Load_hw (bone weights, the conversion of the vertices to the HW format, its vertex buffer); child_find =
+// CreateChild's Instance_Find (a linear walk of all base models for every child); userdata = the CInifile of
+// OGF_S_USERDATA; bones = bone names, IK data, AfterLoad and the unique bone faces; motions = CKinematicsAnimated's
+// motions (all omf of the model), omf_file = of it an omf not in the motions container yet (r_open + read + parse),
+// partition = of it CPartition::load (the CInifile of meshes\<model>.ltx, mostly a missing file); materials = the bone
+// game materials of Instance_Load.
+PERF_TIMER(mload_open, "modelpool/load/open")
+PERF_TIMER(mload_shader, "modelpool/load/shader")
+PERF_TIMER(mload_geom, "modelpool/load/geom")
+PERF_TIMER(mload_skin, "modelpool/load/skin")
+PERF_TIMER(mload_child_find, "modelpool/load/child_find")
+PERF_TIMER(mload_userdata, "modelpool/load/userdata")
+PERF_TIMER(mload_bones, "modelpool/load/bones")
+PERF_TIMER(mload_motions, "modelpool/load/motions")
+PERF_TIMER(mload_omf_file, "modelpool/load/omf_file")
+PERF_TIMER(mload_partition, "modelpool/load/partition")
+PERF_TIMER(mload_materials, "modelpool/load/materials")
+// ge/cold/model_frame = cold model loads of one ProcessGameEvents pass (max per frame); spawn/cold_stopped = passes the
+// spawn_cold_models limit stopped in front of a root M_SPAWN (temporary cvar, 0 = off).
+PERF_GAUGE(ge_cold_model_frame, "ge/cold/model_frame")
+PERF_COUNTER(spawn_cold_stopped, "spawn/cold_stopped")
+// model_prefetch bit 1 (temporary): the visuals of the creatures of the level (ALife objects, offline ones included)
+// loaded into the model pool on the loading screen (net_start_client5). models = loaded, already = were in the pool,
+// time = the whole preload.
+PERF_COUNTER(mpreload_models, "modelpool/preload/models")
+PERF_COUNTER(mpreload_already, "modelpool/preload/already")
+PERF_TIMER(mpreload_time, "modelpool/preload/time")
+// model_prefetch bit 2 (temporary): the "Model prefetch" thread reads the files of a model (ogf, its LOD ogf, its omf,
+// its textures) into the OS cache before the model comes online. queued = models queued (each once per session),
+// alife = asks from ALife (an offline object or squad nearer than the online distance + model_prefetch_margin %),
+// deferred = asks from spawns the budget left in the queue, queue = models waiting (gauge); files / kb = files read;
+// time = the thread's time per model; missing = a file of a model not found; cold_warm / cold_miss = cold loads of
+// a model the thread had / had not read before.
+PERF_COUNTER(mprefetch_queued, "modelpool/prefetch/queued")
+PERF_COUNTER(mprefetch_alife, "modelpool/prefetch/alife")
+PERF_COUNTER(mprefetch_deferred, "modelpool/prefetch/deferred")
+PERF_GAUGE(mprefetch_queue, "modelpool/prefetch/queue")
+PERF_COUNTER(mprefetch_files, "modelpool/prefetch/files")
+PERF_COUNTER(mprefetch_kb, "modelpool/prefetch/kb")
+PERF_TIMER(mprefetch_time, "modelpool/prefetch/time")
+PERF_COUNTER(mprefetch_missing, "modelpool/prefetch/missing")
+PERF_COUNTER(mprefetch_cold_warm, "modelpool/prefetch/cold_warm")
+PERF_COUNTER(mprefetch_cold_miss, "modelpool/prefetch/cold_miss")
+// 37-destroy-relcase-smooth.md: objects/relcase/total = the whole destroy phase of CObjectList::Update (child scan,
+// relcase, sound, callbacks, net_Destroy), calls = frames with a destroy, max_frame = the tallest such frame. With
+// ol_relcase_sleep_parallel 1: sleep_deferred = the own parts of the sleeping stalkers put off (corpses mostly; also in
+// parallel_tasks), sleep_parallel_wall = their phase (wall, a part of objects/relcase/sleeping). With
+// ol_relcase_skip_noop_script 1: script_noop_skipped = script factory objects that skipped the batch (also in
+// active_skipped / sleeping_skipped).
+PERF_TIMER(relcase_total, "objects/relcase/total")
+PERF_COUNTER(relcase_sleep_deferred, "objects/relcase/sleep_deferred")
+PERF_TIMER(relcase_sleep_parallel_wall, "objects/relcase/sleep_parallel_wall")
+PERF_COUNTER(relcase_script_noop_skipped, "objects/relcase/script_noop_skipped")
+// 39-ucl-stalker-spike.md: the time the main thread was off the CPU inside a batch of the UpdateCL loop (wall minus
+// the thread CPU time of ol_Batch256; calls = batches). ~0 normally; a stall (OS preemption, the debugger, a hard page
+// fault) shows as max_frame, with a "! [ucl-stall]" line naming the object.
+PERF_TIMER(ol_upd_offcpu, "objects/update/offcpu")
+// 37-destroy-relcase-smooth.md (offline wave): alife/switch_offline_spread = client objects the spread switch pass took
+// offline (a part of alife/switch_offline_frame - the rest came another way); alife/switch_offline_unestimated = those
+// of them whose object switch_offline_estimate gave 0 (the per frame limit could not foresee them).
+// objects/relcase/monster_own (M1) = the own parts of the monsters put off to the parallel phase (sum over the threads,
+// calls = parts; objects/relcase/monsters is then the part on the thread of the pass).
+PERF_COUNTER(alife_switch_offline_spread, "alife/switch_offline_spread")
+PERF_COUNTER(alife_switch_offline_unestimated, "alife/switch_offline_unestimated")
+PERF_TIMER(relcase_monster_own, "objects/relcase/monster_own")
+// 33-level-path.md, sliced A* (CLevelGraph::SearchSlice, CLevelPathBuilder::process): astar_put_aside = level A* slices
+// that stopped at the end of their time slice (the build goes on in the next frame), astar_resumed = slices that
+// went on with a search put aside, astar_no_slot = searches over their slice that ran to the end (every slot busy),
+// astar_dropped = searches put aside and never finished (the owner changed its call or went away), astar_slices_max /
+// astar_sliced_us_max = slices and the time of all of them of a sliced search finished in the frame (per-frame
+// maxima; the time is what that search would have taken in one go), slice_forced = level path builds run unsliced
+// (their call changed under 8 searches put aside in a row, or 600 builds put aside in a row).
+PERF_COUNTER(level_path_astar_put_aside, "level_path/astar_put_aside")
+PERF_COUNTER(level_path_astar_resumed, "level_path/astar_resumed")
+PERF_COUNTER(level_path_astar_no_slot, "level_path/astar_no_slot")
+PERF_COUNTER(level_path_astar_dropped, "level_path/astar_dropped")
+PERF_GAUGE(level_path_astar_slices_max, "level_path/astar_slices_max")
+PERF_GAUGE(level_path_astar_sliced_us_max, "level_path/astar_sliced_us_max")
+PERF_COUNTER(level_path_slice_forced, "level_path/slice_forced")
+// 33-level-path.md, sliced A*: astar_pops_max = heap pops of a level A* that finished in the frame (all its slices;
+// per-frame maximum). The heuristic (Manhattan x2) is not consistent, a vertex is expanded again when a cheaper way to
+// it turns up: pops / astar_visited_max is the work per vertex (1-2 in the open, 10-27 behind walls on the stand).
+PERF_GAUGE(level_path_astar_pops_max, "level_path/astar_pops_max")

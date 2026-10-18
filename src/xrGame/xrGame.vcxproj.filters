@@ -8629,6 +8629,12 @@
     <ClInclude Include="lua_spike_probe.h">
       <Filter>Core\Client\Objects\base</Filter>
     </ClInclude>
+    <ClCompile Include="lua_udata_profile.cpp">
+      <Filter>Core\Client\Objects\base</Filter>
+    </ClCompile>
+    <ClInclude Include="lua_udata_profile.h">
+      <Filter>Core\Client\Objects\base</Filter>
+    </ClInclude>
     <ClCompile Include="ZoneVisual.cpp">
       <Filter>Core\Client\Objects\zones\ZoneVisual</Filter>
     </ClCompile>

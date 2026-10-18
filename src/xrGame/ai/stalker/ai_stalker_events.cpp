@@ -15,9 +15,16 @@
 #include "Level.h"
 #include "ai_monster_space.h"
 #include "CharacterPhysicsSupport.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 using namespace StalkerSpace;
 using namespace MonsterSpace;
+
+// 30-game-events.md (plans/optimization_mt), B2 (always on since 2026-10-18, its switch npc_reject_destroy_skip_bones
+// removed, 41-cvar-cleanup.md): a reject with just_before_destroy (the server destroys the item right behind it: a
+// release of an item in the inventory) does not update the owner's physics and bones first (in_UpdateCL +
+// CalculateBones(true)) - they are for the position of an item that stays in the world; the item lives until the
+// destroy phase of this frame.
 
 #define SILENCE
 
@@ -104,24 +111,35 @@ void CAI_Stalker::OnEvent(NET_Packet& P, u16 type)
         bool dont_create_shell = (type == GE_TRADE_SELL) || just_before_destroy;
 
         O->SetTmpPreDestroy(just_before_destroy);
-        on_ownership_reject(O, dont_create_shell);
+        on_ownership_reject(O, dont_create_shell, just_before_destroy);
 
         break;
     }
     }
 }
 
-void CAI_Stalker::on_ownership_reject(IGameObject* O, bool just_before_destroy)
+void CAI_Stalker::on_ownership_reject(IGameObject* O, bool just_before_destroy, bool skip_bones)
 {
-    m_pPhysics_support->in_UpdateCL();
-    IKinematics* const kinematics = smart_cast<IKinematics*>(Visual());
-    kinematics->CalculateBones_Invalidate();
-    kinematics->CalculateBones(true);
+    if (skip_bones)
+        PERF_INC(reject_bones_skipped); // B2: the item is destroyed in this frame, its position does not matter
+    else
+    {
+        PERF_SCOPE(reject_bones); // 30-game-events.md
+        m_pPhysics_support->in_UpdateCL();
+        IKinematics* const kinematics = smart_cast<IKinematics*>(Visual());
+        kinematics->CalculateBones_Invalidate();
+        kinematics->CalculateBones(true);
+    }
 
     CGameObject* const game_object = smart_cast<CGameObject*>(O);
     VERIFY(game_object);
 
-    if (!inventory().DropItem(game_object, just_before_destroy, just_before_destroy))
+    bool dropped;
+    {
+        PERF_SCOPE(reject_drop); // 30-game-events.md: DropItem with the eOnItemDrop callback and the bus inside
+        dropped = inventory().DropItem(game_object, just_before_destroy, just_before_destroy);
+    }
+    if (!dropped)
         return;
 
     if (O->getDestroy())

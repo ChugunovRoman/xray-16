@@ -3,15 +3,38 @@
 #include "SoundRender_Core.h"
 #include "SoundRender_Source.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Threading/TaskManager.hpp"
 
 #include <vorbis/vorbisfile.h>
 
 #include <atomic>
 #include <cstring>
+#include <thread>
 
-// B-1: global accounting of bytes held in per-source PCM caches, bounded by psSoundCacheSizeMB.
-// Touched only from load/unload (effectively main thread), atomic for safety.
+// 46-engine-core-render-audit.md: CSoundRender_Source::m_pcm_state
+namespace
+{
+constexpr u8 snd_pcm_state_none = 0;   // not decided yet: streamed, the starts of play are counted
+constexpr u8 snd_pcm_state_queued = 1; // budget reserved, the decode task is queued or running
+constexpr u8 snd_pcm_state_done = 2;   // m_cached_pcm published
+constexpr u8 snd_pcm_state_off = 3;    // stays streamed (long, over the budget, no task manager, file not opened)
+} // namespace
+
+// B-1: global accounting of bytes held in per-source PCM caches, bounded by psSoundCacheSizeMB. Touched from
+// load/unload and the decode tasks: main, the Game thread and the workers, so the budget is reserved by a
+// compare-exchange (try_reserve_pcm) - a check and a later add could let two loads overshoot it.
 static std::atomic<size_t> s_cached_pcm_bytes{0};
+
+static bool try_reserve_pcm(size_t bytes, size_t limit)
+{
+    size_t cur = s_cached_pcm_bytes.load(std::memory_order_relaxed);
+    do
+    {
+        if (cur + bytes > limit)
+            return false;
+    } while (!s_cached_pcm_bytes.compare_exchange_weak(cur, cur + bytes, std::memory_order_relaxed));
+    return true;
+}
 
 static void snd_pcm_cached_kb_gauge()
 {
@@ -49,6 +72,19 @@ struct SndDecodeTime
 #endif
 
 CSoundRender_Source::~CSoundRender_Source() { unload(); }
+
+CSoundRender_Source::CSoundRender_Source(CSoundRender_Source&& other) noexcept
+    : pname(other.pname), fname(other.fname), fTimeTotal(other.fTimeTotal), dwBytesTotal(other.dwBytesTotal),
+      m_data_info(other.m_data_info), m_info(other.m_info),
+      m_cached_pcm(other.m_cached_pcm.exchange(nullptr, std::memory_order_relaxed)),
+      m_pcm_plays(other.m_pcm_plays.load(std::memory_order_relaxed)),
+      m_pcm_state(other.m_pcm_state.exchange(snd_pcm_state_none, std::memory_order_relaxed))
+{
+    VERIFY(m_pcm_state.load(std::memory_order_relaxed) != snd_pcm_state_queued);
+    // the PCM (if any) and its share of the budget belong to this one now: other.unload() gives back nothing
+    other.fTimeTotal = 0.0f;
+    other.dwBytesTotal = 0;
+}
 
 namespace
 {
@@ -91,22 +127,27 @@ void CSoundRender_Source::decompress(void* dest, u32 byte_offset, u32 size, OggV
 
     // B-1: short SFX are fully decoded once into m_cached_pcm (shared across all emitters of this source).
     // Serve the requested slice with a plain memcpy instead of re-running the OGG decoder per emitter/chunk.
-    if (!m_cached_pcm.empty())
+    if (const u8* const pcm = m_cached_pcm.load(std::memory_order_acquire))
     {
         ZoneScopedN("decompress_cached"); // diagnostic: count = cache hits (vs decompress count = total)
         auto* const d = static_cast<u8*>(dest);
-        const u32 total = static_cast<u32>(m_cached_pcm.size());
+        const u32 total = dwBytesTotal; // the size of m_cached_pcm
         u32 copied = 0;
         if (byte_offset < total)
         {
             copied = std::min(size, total - byte_offset);
-            std::memcpy(d, m_cached_pcm.data() + byte_offset, copied);
+            std::memcpy(d, pcm + byte_offset, copied);
         }
         if (copied < size) // past end of sound -> silence
             std::memset(d + copied, 0, size - copied);
         PERF_ADD(snd_pcm_cache_bytes, size);
         return;
     }
+
+    // 46-engine-core-render-audit.md: a start of play (looped sounds come back to 0 too) - this one is streamed, a
+    // repeated one queues the whole decode for the next ones
+    if (byte_offset == 0)
+        request_pcm_cache();
 
 #if XR_PERF_METRICS
     SndDecodeTime decode_time;
@@ -126,7 +167,7 @@ void CSoundRender_Source::decompress(void* dest, u32 byte_offset, u32 size, OggV
         i_decompress(ovf, static_cast<char*>(dest), size);
 }
 
-void CSoundRender_Source::i_decompress(OggVorbis_File* ovf, char* _dest, u32 size) const
+bool CSoundRender_Source::i_decompress(OggVorbis_File* ovf, char* _dest, u32 size) const
 {
     long TotalRet = 0;
 
@@ -135,12 +176,13 @@ void CSoundRender_Source::i_decompress(OggVorbis_File* ovf, char* _dest, u32 siz
     {
         const auto ret = ov_read(ovf, _dest + TotalRet, size - TotalRet, 0, 2, 1, nullptr);
         if (ret <= 0 && !ov_can_continue_read(ret))
-            break;
+            return false;
         TotalRet += ret;
     }
+    return true;
 }
 
-void CSoundRender_Source::i_decompress(OggVorbis_File* ovf, float* _dest, u32 size) const
+bool CSoundRender_Source::i_decompress(OggVorbis_File* ovf, float* _dest, u32 size) const
 {
     s32 left = s32(size / m_data_info.blockAlign);
     while (left)
@@ -149,7 +191,7 @@ void CSoundRender_Source::i_decompress(OggVorbis_File* ovf, float* _dest, u32 si
         long samples = ov_read_float(ovf, &pcm, left, nullptr);
 
         if (samples <= 0 && !ov_can_continue_read(samples))
-            break;
+            return false;
 
         if (samples > left)
             samples = left;
@@ -160,6 +202,7 @@ void CSoundRender_Source::i_decompress(OggVorbis_File* ovf, float* _dest, u32 si
 
         left -= samples;
     }
+    return true;
 }
 
 constexpr ov_callbacks g_ov_callbacks =
@@ -231,46 +274,122 @@ bool CSoundRender_Source::should_cache_pcm() const
         dwBytesTotal > 0 && m_data_info.blockAlign > 0;
 }
 
-void CSoundRender_Source::cache_pcm_if_short()
+struct CSoundRender_Source::PcmJob
 {
-    ZoneScopedN("cache_pcm_if_short");
+    OggVorbis_File* ovf{};
+    u8* pcm{};
+    u32 done{}; // bytes decoded so far
+};
 
-    if (!should_cache_pcm())
+// 46-engine-core-render-audit.md. The PCM cache is filled by use, not by load order. Before, every short source was
+// decoded whole at load while the budget lasted: the sounds created by the startup prefetch took all of it (heavy fight
+// log s_al: snd_cache_size 96 full already in the main menu, 2369 sources of the level over the budget), and the sounds
+// played in a fight were streamed - ogg decoded per emitter, per chunk (sound/decode/worker ~5.6 ms CPU per frame,
+// sound/pcm/decode_bytes ~0.97 MB/frame against cache_bytes ~0.35 MB/frame). Now a short sound is cached when it
+// starts playing the second time (a sound played once, as most voice lines, takes no budget), by a TaskScheduler task:
+// the start that asks is streamed as before, the later ones read the cache. The samples are the same either way (the
+// same decoder over the whole sound or from a seek), so what is heard does not change.
+void CSoundRender_Source::request_pcm_cache() const
+{
+    if (m_pcm_state.load(std::memory_order_relaxed) != snd_pcm_state_none)
+        return;
+
+    if (!should_cache_pcm() || !TaskScheduler)
     {
-        PERF_INC(snd_pcm_reject_len);
+        u8 expected = snd_pcm_state_none;
+        if (m_pcm_state.compare_exchange_strong(expected, snd_pcm_state_off, std::memory_order_relaxed))
+            PERF_INC(snd_pcm_reject_len);
         return;
     }
 
+    // the first start of play is only counted
+    if (m_pcm_plays.fetch_add(1, std::memory_order_relaxed) < 1)
+        return;
+
+    u8 expected = snd_pcm_state_none;
+    if (!m_pcm_state.compare_exchange_strong(expected, snd_pcm_state_queued, std::memory_order_acq_rel))
+        return; // another start took it
+
     // Stay within the global PCM cache budget (psSoundCacheSizeMB). Over budget -> keep streaming this one.
+    // Reserved before the decode (given back by the task if the file does not open), see try_reserve_pcm.
     const size_t budget = size_t(psSoundCacheSizeMB) * 1024u * 1024u;
-    if (s_cached_pcm_bytes.load(std::memory_order_relaxed) + dwBytesTotal > budget)
+    if (!try_reserve_pcm(dwBytesTotal, budget))
     {
+        m_pcm_state.store(snd_pcm_state_off, std::memory_order_release);
         PERF_INC(snd_pcm_reject_budget);
         return;
     }
 
-    OggVorbis_File* ovf = open();
-    PERF_INC(snd_ogg_open_cache);
-    if (!ovf)
-        return;
+    // The source outlives the task: a source is freed only after unload() (CSoundRender_Core::_clear,
+    // refresh_sources, the destructor), and unload() waits for the task (wait_pcm_task).
+    TaskScheduler->AddTask([this, job = xr_new<PcmJob>()] { cache_pcm_step(job); });
+}
 
-    m_cached_pcm.resize(dwBytesTotal);
+// One step decodes at most 128 KB (~0.7 ms of a worker), then queues the next one: a thread that waits in TaskManager
+// (Wait, wait_prefill) runs queued tasks itself, so one long task could stall main or the Game thread. The steps read
+// the stream in order with the same calls as one decode of the whole sound, so the samples are the same.
+void CSoundRender_Source::cache_pcm_step(PcmJob* job) const
+{
+    ZoneScopedN("snd_cache_pcm");
+
+    if (!job->ovf)
+    {
+        job->ovf = open();
+        PERF_INC(snd_ogg_open_cache);
+        if (!job->ovf)
+        {
+            s_cached_pcm_bytes.fetch_sub(dwBytesTotal, std::memory_order_relaxed);
+            xr_delete(job);
+            m_pcm_state.store(snd_pcm_state_off, std::memory_order_release);
+            return;
+        }
+        job->pcm = xr_alloc<u8>(dwBytesTotal);
+        std::memset(job->pcm, 0, dwBytesTotal); // as the zero-initialized vector before: a broken stream leaves silence
+    }
+
+    constexpr u32 step_bytes = 128 * 1024;
+    const u32 left = dwBytesTotal - job->done;
+    const u32 align = m_data_info.blockAlign; // > 0 (should_cache_pcm); dwBytesTotal is a multiple of it
+    const u32 size = left > step_bytes ? step_bytes / align * align : left;
+    bool complete;
     {
 #if XR_PERF_METRICS
         SndDecodeTime decode_time;
 #endif
-        PERF_ADD(snd_pcm_decode_bytes, dwBytesTotal);
-        // decode the whole sound from the start (open() positions at 0) into the shared buffer
+        PERF_ADD(snd_pcm_decode_bytes, size);
+        // decode the sound from the start (open() positions at 0) into the shared buffer
         if (m_data_info.format == SoundFormat::Float32)
-            i_decompress(ovf, reinterpret_cast<float*>(m_cached_pcm.data()), dwBytesTotal);
+            complete = i_decompress(job->ovf, reinterpret_cast<float*>(job->pcm + job->done), size);
         else
-            i_decompress(ovf, reinterpret_cast<char*>(m_cached_pcm.data()), dwBytesTotal);
+            complete = i_decompress(job->ovf, reinterpret_cast<char*>(job->pcm + job->done), size);
     }
-    close(ovf);
+    job->done += size;
 
-    s_cached_pcm_bytes.fetch_add(dwBytesTotal, std::memory_order_relaxed);
+    if (complete && job->done < dwBytesTotal)
+    {
+        TaskScheduler->AddTask([this, job] { cache_pcm_step(job); });
+        return;
+    }
+
+    // the whole sound (or as much as the stream gave, the rest is silence, as before)
+    close(job->ovf);
+    u8* const pcm = job->pcm;
+    xr_delete(job);
+    m_cached_pcm.store(pcm, std::memory_order_release);
+    m_pcm_state.store(snd_pcm_state_done, std::memory_order_release);
+
     PERF_INC(snd_pcm_accept);
     snd_pcm_cached_kb_gauge();
+}
+
+void CSoundRender_Source::wait_pcm_task() const
+{
+    // the same help-while-waiting loop as CSoundRender_Emitter::wait_prefill
+    while (m_pcm_state.load(std::memory_order_acquire) == snd_pcm_state_queued)
+    {
+        if (!TaskScheduler || !TaskScheduler->ExecuteOneTask())
+            std::this_thread::yield();
+    }
 }
 
 bool CSoundRender_Source::LoadWave(pcstr pName)
@@ -282,9 +401,24 @@ bool CSoundRender_Source::LoadWave(pcstr pName)
     // Load file into memory and parse WAV-format
     OggVorbis_File ovf;
     {
-        IReader* wave = FS.r_open(pname.c_str());
+        // 34-sound-cold-load.md: where a cold load waits. r_open = the FS lookup and the open of the file (a loose file
+        // of 16 KB and more is memory-mapped, a smaller one read whole; a file of a .db archive is a view of the
+        // archive mapping), ov_open = the vorbis headers and, the stream being seekable, the seek to its end for the
+        // length: the first reads of the mapped pages, i.e. the disk reads of a file not yet in the OS cache.
+        ZoneScopedN("snd_load_open");
+        PERF_SCOPE(snd_load_open);
+        PERF_SCOPE_IF(xray::perf::TlGameEvent() != 0, ge_cold_sound_open);
+        IReader* wave;
+        {
+            ZoneScopedN("snd_load_r_open");
+            PERF_SCOPE(snd_load_r_open);
+            wave = FS.r_open(pname.c_str());
+        }
         R_ASSERT3(wave && wave->length(), "Can't open wave file:", pname.c_str());
-        ov_open_callbacks(wave, &ovf, nullptr, 0, g_ov_callbacks);
+        {
+            ZoneScopedN("snd_load_ov_open");
+            ov_open_callbacks(wave, &ovf, nullptr, 0, g_ov_callbacks);
+        }
     }
 
     const vorbis_info* ovi = ov_info(&ovf, -1);
@@ -405,10 +539,7 @@ bool CSoundRender_Source::load(pcstr name)
     if (FS.exist(fn))
     {
         if (LoadWave(fn))
-        {
-            cache_pcm_if_short(); // B-1: decode-once short SFX into shared PCM (main thread, no race)
-            return true;
-        }
+            return true; // B-1: a short SFX is cached later, by use (request_pcm_cache)
     }
 
     return false;
@@ -416,13 +547,15 @@ bool CSoundRender_Source::load(pcstr name)
 
 void CSoundRender_Source::unload()
 {
-    if (!m_cached_pcm.empty())
+    wait_pcm_task();
+    if (u8* pcm = m_cached_pcm.exchange(nullptr, std::memory_order_acq_rel))
     {
-        s_cached_pcm_bytes.fetch_sub(m_cached_pcm.size(), std::memory_order_relaxed);
-        m_cached_pcm.clear();
-        m_cached_pcm.shrink_to_fit();
+        s_cached_pcm_bytes.fetch_sub(dwBytesTotal, std::memory_order_relaxed);
+        xr_free(pcm);
         snd_pcm_cached_kb_gauge();
     }
+    m_pcm_plays.store(0, std::memory_order_relaxed);
+    m_pcm_state.store(snd_pcm_state_none, std::memory_order_relaxed);
     fTimeTotal = 0.0f;
     dwBytesTotal = 0;
 }

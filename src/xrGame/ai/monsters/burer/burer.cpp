@@ -487,10 +487,10 @@ void CBurer::Die(IGameObject* who)
     CTelekinesis::Deactivate();
 }
 
-void CBurer::net_Relcase(IGameObject* O)
+// M1 (37-destroy-relcase-smooth.md): was net_Relcase after inherited::net_Relcase; CBaseMonster calls it at the same
+// point of its chain, in the batched relcase too
+void CBurer::net_RelcaseSerial(IGameObject* O)
 {
-    inherited::net_Relcase(O);
-
     CTelekinesis::remove_links(O);
 
     if (m_gravi_object.enemy == O)

@@ -448,11 +448,9 @@ CMovementManager* CPoltergeist::create_movement_manager()
     return (m_movement_manager);
 }
 
-void CPoltergeist::net_Relcase(IGameObject* O)
-{
-    inherited::net_Relcase(O);
-    CTelekinesis::remove_links(O);
-}
+// M1 (37-destroy-relcase-smooth.md): was net_Relcase after inherited::net_Relcase; CBaseMonster calls it at the same
+// point of its chain, in the batched relcase too
+void CPoltergeist::net_RelcaseSerial(IGameObject* O) { CTelekinesis::remove_links(O); }
 
 float CPoltergeist::get_detection_near_range_factor()
 {

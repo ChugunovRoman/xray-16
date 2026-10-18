@@ -117,3 +117,12 @@ void static_obstacles_avoider::remove_links(IGameObject* object)
     m_active_query.remove_links(object);
     m_last_iteration.remove_links(object);
 }
+
+// R1 (32-frame-spikes.md): remove_links for every object of the batch
+void static_obstacles_avoider::remove_links_batch(const RelcaseBatch& batch)
+{
+    m_current_iteration.remove_links_batch(batch);
+    m_inactive_query.remove_links_batch(batch);
+    m_active_query.remove_links_batch(batch);
+    m_last_iteration.remove_links_batch(batch);
+}

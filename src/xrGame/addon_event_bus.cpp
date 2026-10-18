@@ -57,6 +57,10 @@ struct Subscriber
     GwpEventHandler handler = nullptr;
     void* user = nullptr;
     GwpEventBatchHandler batch_handler = nullptr; // batch subscriber when not null
+    // plans/optimization_mt/29-game-thread-next.md, B2: the library (HMODULE) of handler / batch_handler for the crash
+    // guard, resolved once at the subscription instead of on every call (CallNativeGuardedSeh). The same answer: the
+    // code of a live subscription never moves (StopPlugin removes them all before its library is released)
+    const void* code_module = nullptr;
     xr_unique_ptr<BatchQueue> batch;               // queue of a batch subscriber
     u32 max_batch = 0;
     bool object_filter = false; // GWP_SUBSCRIBE_OBJECT / Lua {object = ...}: only emits about `object` (first argument)
@@ -180,8 +184,10 @@ constexpr LuaResultBinding kLuaResultBindings[] = {
     { "on_before_item_use", 3, "ret_value" },
 };
 
+// The offline simulation ones (squad_on_update, smart_terrain_on_update): plans/lua_to_cpp/27-gw-eoc-e0.md. Without
+// -actor_binder_profile an emit of these pays one lookup of the global ACTOR_BINDER_PROFILE (DispatchLua).
 constexpr pcstr kLuaProfiledEvents[] = { "actor_on_update", "actor_on_update_fast", "actor_on_update_slow",
-    "npc_on_hit_callback", "npc_on_death_callback" };
+    "npc_on_hit_callback", "npc_on_death_callback", "squad_on_update", "smart_terrain_on_update" };
 
 // Schemas of the built-in events, in the order of kBuiltinNames.
 constexpr pcstr kBuiltinSchemas[] = {
@@ -506,7 +512,26 @@ struct NativeCall
     void (*thunk)(void*) = nullptr; // set: called instead of the handlers
     void* thunk_context = nullptr;
     const void* plugin_code = nullptr; // thunk: an address inside the plugin library (the crash filter needs it)
+    // B2 (29-game-thread-next.md): set - code_module is the library of the handler (Subscriber::code_module, possibly
+    // null); not set - the crash guard asks the loader for it, as before (CallPluginGuarded)
+    const void* code_module = nullptr;
+    bool code_module_known = false;
 };
+
+// B2: the library (HMODULE) of a plugin code address, or null: exactly what CallNativeGuardedSeh asked the loader for
+// on every call. Null off Windows/MSVC (no SEH guard there, nothing reads it).
+const void* PluginCodeModule(const void* code)
+{
+#if defined(XR_PLATFORM_WINDOWS) && defined(_MSC_VER)
+    HMODULE module = nullptr;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        static_cast<LPCSTR>(code), &module);
+    return module;
+#else
+    (void)code;
+    return nullptr;
+#endif
+}
 
 // Plugin calls in progress: see PluginCallDepth. Atomic: task_parallel_for (addon_api_threads.cpp) runs plugin code
 // under the same guard on worker threads, while the game logic thread waits inside that plugin call
@@ -662,8 +687,11 @@ bool CallNativeGuardedSeh(const NativeCall& call)
         : call.batch_handler              ? reinterpret_cast<const void*>(call.batch_handler)
                                           : reinterpret_cast<const void*>(call.handler);
     HMODULE plugin_module = nullptr;
-    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        static_cast<LPCSTR>(code_address), &plugin_module);
+    if (call.code_module_known)
+        plugin_module = static_cast<HMODULE>(const_cast<void*>(call.code_module)); // B2: resolved at the subscription
+    else
+        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            static_cast<LPCSTR>(code_address), &plugin_module);
     DWORD code = 0;
     void* address = nullptr;
     __try
@@ -805,6 +833,8 @@ void DispatchNative(Bus& bus, Event& event, GwpEventId id, u32 flags, const GwpV
         call.user = subscriber.user;
         call.events = &data;
         call.event_name = event.name.c_str();
+        call.code_module = subscriber.code_module; // B2
+        call.code_module_known = true;
         const GwpPlugin* const plugin = subscriber.plugin;
         ZoneScopedN("events/plugin_handler"); // Tracy: one zone per handler call, text = addon id and event
         ZoneTextF("%s: %s", PluginAddonId(plugin), event.name.c_str());
@@ -1197,6 +1227,71 @@ void ProfileEnd(lua_State* L, int handle_index)
         lua_pop(L, 1);
 }
 
+// Called under lua_pcall with (object, name): object[name]. Only to name a {object} subscriber (DescribeHandler): a
+// failing __index stays inside the protected call.
+int LuaGetField(lua_State* L)
+{
+    lua_settop(L, 2);
+    lua_gettable(L, 1);
+    return 1;
+}
+
+// 32-frame-spikes.md: "fn=<short_src>:<line>" of the subscriber at stack `index` (its function, or the object whose
+// method event.name it calls: "fn=<event>@<short_src>:<line>"); "fn=?" when it cannot be named. Leaves the stack as it
+// was. Only for a spike line or the text of a Tracy zone.
+void DescribeHandler(lua_State* L, int index, ESubscriberKind kind, const Event& event, char* buf, size_t size)
+{
+    xr_strcpy(buf, size, "fn=?");
+    if (!index || !lua_checkstack(L, 4))
+        return;
+    const int top = lua_gettop(L);
+    if (kind == ESubscriberKind::LuaObject)
+    {
+        lua_pushcfunction(L, LuaGetField);
+        lua_pushvalue(L, index);
+        lua_pushlstring(L, event.name.c_str(), event.name.size());
+        if (lua_pcall(L, 2, 1, 0) != 0)
+        {
+            lua_settop(L, top);
+            return;
+        }
+    }
+    else
+        lua_pushvalue(L, index);
+    if (lua_isfunction(L, -1))
+    {
+        lua_Debug info{};
+        if (lua_getinfo(L, ">S", &info)) // pops the function
+        {
+            // capped: vsprintf_s of a longer line is a fatal invalid-parameter error
+            if (kind == ESubscriberKind::LuaObject)
+                xr_sprintf(buf, size, "fn=%.60s@%.100s:%d", event.name.c_str(), info.short_src, info.linedefined);
+            else
+                xr_sprintf(buf, size, "fn=%.100s:%d", info.short_src, info.linedefined);
+        }
+    }
+    lua_settop(L, top);
+}
+
+#if XR_PERF_METRICS
+// The detail of a "[perf-spike] events/lua_handler" line (perf_spike_us): the event and the subscriber
+struct HandlerSpikeCtx
+{
+    lua_State* L;
+    int index; // the copy of the subscriber on the stack (0 = none)
+    ESubscriberKind kind;
+    const Event* event;
+};
+
+void DescribeHandlerSpike(const void* ctx, char* buf, size_t size)
+{
+    const auto& c = *static_cast<const HandlerSpikeCtx*>(ctx);
+    string256 handler;
+    DescribeHandler(c.L, c.index, c.kind, *c.event, handler, sizeof(handler));
+    xr_sprintf(buf, size, "event=%.100s %.200s", c.event->name.c_str(), handler);
+}
+#endif
+
 void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
 {
     ZoneScopedN("events/dispatch_lua"); // Tracy: all Lua subscribers of one emit
@@ -1216,6 +1311,17 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
         profile = lua_toboolean(L, -1) != 0;
         lua_pop(L, 1);
     }
+
+#ifdef TRACY_ENABLE
+    const bool tracy_text = TracyIsConnected;
+#else
+    constexpr bool tracy_text = false;
+#endif
+    // 32-frame-spikes.md: name a slow subscriber (npc_perf_lua_spike_us -> "[lua-spike] event_handler", perf_spike_us ->
+    // "[perf-spike] events/lua_handler") or every subscriber in its Tracy zone. Needs a copy of the subscriber on the
+    // stack: a {once} one loses its registry reference before the call.
+    const bool lua_spike = gw::lua_spike::Enabled();
+    const bool name_handlers = lua_spike || xray::perf::SpikeActive() || tracy_text;
 
     u32 now = 0;
     bool now_set = false;
@@ -1275,6 +1381,13 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
             profile_handle = lua_gettop(L);
         }
 
+        int handler_index = 0;
+        if (name_handlers)
+        {
+            lua_rawgeti(L, LUA_REGISTRYINDEX, lua_ref);
+            handler_index = lua_gettop(L);
+        }
+
         int nargs;
         if (kind == ESubscriberKind::LuaObject)
         {
@@ -1293,10 +1406,34 @@ void DispatchLua(Bus& bus, lua_State* L, Event& event, const LuaArgs& args)
         if (once)
             RemoveAt(bus, event, i);
 
-        if (lua_pcall(L, nargs, 0, 0) != 0)
         {
-            const char* error = lua_tostring(L, -1);
-            Msg("! Script callback [%s] failed: %s", event.name.c_str(), error ? error : "(non-string error)");
+            ZoneScopedN("events/lua_handler"); // Tracy: one Lua subscriber, text = event and source:line
+#ifdef TRACY_ENABLE
+            if (tracy_text)
+            {
+                string256 handler;
+                DescribeHandler(L, handler_index, kind, event, handler, sizeof(handler));
+                ZoneTextF("%s %s", event.name.c_str(), handler);
+            }
+#endif
+#if XR_PERF_METRICS
+            const HandlerSpikeCtx spike_ctx{L, handler_index, kind, &event};
+#endif
+            PERF_SPIKE_NAMED(handler_spike, "events/lua_handler", &spike_ctx, &DescribeHandlerSpike, false);
+            gw::lua_spike::Probe spike(lua_spike ? L : nullptr, gw::lua_spike::ECategory::EventHandler);
+            if (lua_pcall(L, nargs, 0, 0) != 0)
+            {
+                const char* error = lua_tostring(L, -1);
+                Msg("! Script callback [%s] failed: %s", event.name.c_str(), error ? error : "(non-string error)");
+            }
+            if (spike.Finish())
+            {
+                string256 handler;
+                string512 what;
+                DescribeHandler(L, handler_index, kind, event, handler, sizeof(handler));
+                xr_sprintf(what, "%.200s %.250s", event.name.c_str(), handler);
+                spike.Report(what, gw::lua_spike::kNoId, gw::lua_spike::kNoId);
+            }
         }
 
         if (profile_handle)
@@ -1867,6 +2004,9 @@ GwpSubscriptionId SubscribeNative(const GwpPlugin* self, const char* name, const
     subscriber.object = object_filter ? options.object : 0;
     if (object_filter)
         ++bus.object_subscriptions;
+    // B2 (29-game-thread-next.md): the library of the code this subscription calls, once (the crash guard's question)
+    subscriber.code_module = PluginCodeModule(batch ? reinterpret_cast<const void*>(options.batch_handler)
+                                                    : reinterpret_cast<const void*>(handler));
     if (batch)
     {
         subscriber.batch_handler = options.batch_handler;
@@ -2144,6 +2284,8 @@ void DeliverBatch(Bus& bus, Event& event, GwpEventId id, size_t index, u32 now, 
     call.batch_handler = subscriber.batch_handler;
     call.user = subscriber.user;
     call.event_name = event.name.c_str();
+    call.code_module = subscriber.code_module; // B2
+    call.code_module_known = true;
     const GwpPlugin* const plugin = subscriber.plugin;
 
     // The values already point into queue.arena (deep copies made by Enqueue): nothing to fix up here

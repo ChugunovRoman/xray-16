@@ -9,6 +9,7 @@
 #include "StdAfx.h"
 #include "alife_switch_manager.h"
 #include "xrServer_Objects_ALife.h"
+#include "xrServer_Objects_ALife_Monsters.h"
 #include "alife_graph_registry.h"
 #include "alife_object_registry.h"
 #include "alife_schedule_registry.h"
@@ -18,6 +19,8 @@
 #include "xrAICore/Navigation/level_graph.h"
 #include "xrNetServer/NET_Messages.h"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "alife_simulator.h"
+#include "xrEngine/Render.h"
 
 #ifdef DEBUG
 #include "Level.h"
@@ -94,6 +97,10 @@ void CALifeSwitchManager::remove_online(CSE_ALifeDynamicObject* object, bool upd
     // P17: relcase report (perf_metrics) - the client object is destroyed because ALife switched it offline
     if (g_pGameLevel)
         g_pGameLevel->Objects.destroy_origin_note(object->ID, CObjectList::destroy_origin_switch);
+    // 32-frame-spikes.md: what the client is going to destroy (alife/switch_offline_frame, the limit of the spread pass)
+    const u32 client_count = client_objects(object);
+    m_offline_client_objects.fetch_add(client_count, std::memory_order_relaxed);
+    PERF_ADD(alife_switch_offline_frame, client_count);
     server().Perform_destroy(object, net_flags(TRUE, TRUE));
     VERIFY(object->children.empty());
 
@@ -107,6 +114,47 @@ void CALifeSwitchManager::remove_online(CSE_ALifeDynamicObject* object, bool upd
 
     object->add_offline(m_saved_chidren, update_registries);
     STOP_PROFILE
+}
+
+u32 CALifeSwitchManager::client_objects(const CSE_ALifeDynamicObject* object) const
+{
+    u32 count = 1;
+    for (const ALife::_OBJECT_ID child_id : object->children)
+    {
+        if (const CSE_ALifeDynamicObject* child = objects().object(child_id, true))
+            count += client_objects(child);
+        else
+            ++count; // not an ALife object (should not happen): still a client object
+    }
+    return count;
+}
+
+u32 CALifeSwitchManager::switch_offline_estimate(const CSE_ALifeDynamicObject* object) const
+{
+    if (!object->m_bOnline || object->ID_Parent != 0xffff)
+        return 0;
+    const CSE_ALifeCreatureActor* actor = graph().actor();
+    const float offline = offline_distance();
+    // A squad goes offline with all its members (CSE_ALifeOnlineOfflineGroup::try_switch_offline): none may be within
+    // offline_distance(). The members are taken by ID from the registry, not by the pointers of the squad (they can be
+    // stale until sanitize_members of the switch itself)
+    if (const auto* group = smart_cast<const CSE_ALifeOnlineOfflineGroup*>(object))
+    {
+        u32 count = 0;
+        for (const auto& it : group->squad_members())
+        {
+            const CSE_ALifeDynamicObject* member = objects().object(it.first, true);
+            if (!member || !member->m_bOnline)
+                continue;
+            if (actor && actor->o_Position.distance_to(member->o_Position) <= offline)
+                return 0;
+            count += client_objects(member);
+        }
+        return count;
+    }
+    if (actor && actor->o_Position.distance_to(object->o_Position) <= offline)
+        return 0;
+    return client_objects(object);
 }
 
 void CALifeSwitchManager::switch_online(CSE_ALifeDynamicObject* object)
@@ -260,4 +308,128 @@ void CALifeSwitchManager::switch_object(CSE_ALifeDynamicObject* I)
 
     if (I->redundant())
         release(I);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 36-spawn-model-load.md (plans/optimization_mt): model prefetch, always on since 2026-10-18 (model_prefetch removed,
+// see plan 41: all three parts, its former bits 1, 2 and 4). model_prefetch_margin: a tunable, not saved
+// (console_commands.cpp)
+int g_model_prefetch_margin = 25;
+
+namespace
+{
+// The models an object brings with it when it goes online: the visual of the server entity (CGameObject::net_Spawn
+// sets it), the visual of its section (CGameObject::Load creates that one first, object_pool/load) and a bloodsucker's
+// Predator_Visual (set in the game). The same name may come twice: the render keeps each once.
+template <typename F>
+void model_prefetch_for_each_visual(CSE_Abstract* object, F&& f)
+{
+    if (const CSE_Visual* visual = smart_cast<CSE_Visual*>(object))
+    {
+        const pcstr name = visual->get_visual();
+        if (name && name[0])
+            f(name);
+    }
+    const pcstr section = object->s_name.c_str();
+    if (!section || !pSettings->section_exist(section))
+        return;
+    for (const pcstr line : {"visual", "Predator_Visual"})
+    {
+        if (!pSettings->line_exist(section, line))
+            continue;
+        const pcstr name = pSettings->r_string(section, line);
+        if (name && name[0])
+            f(name);
+    }
+}
+
+void model_prefetch_files_of(CSE_Abstract* object, u32 source)
+{
+    model_prefetch_for_each_visual(object, [source](pcstr name) { GEnv.Render->model_PrefetchFiles(name, source); });
+}
+} // namespace
+
+bool model_prefetch_in_margin(float distance, float online_distance)
+{
+    return distance <= online_distance * (1.f + float(g_model_prefetch_margin) / 100.f);
+}
+
+void model_prefetch_object(CSE_ALifeDynamicObject* object)
+{
+    if (!object)
+        return;
+    model_prefetch_files_of(object, 0);
+    // its inventory comes online with it (alife_trader_abstract.cpp, add_online_impl)
+    for (const u16 child_id : object->children)
+    {
+        if (CSE_ALifeDynamicObject* child = ai().alife().objects().object(child_id, true))
+            model_prefetch_files_of(child, 0);
+    }
+}
+
+void model_prefetch_spawn(u16 id)
+{
+    if (id == u16(-1) || !ai().get_alife())
+        return;
+    if (CSE_ALifeDynamicObject* object = ai().alife().objects().object(id, true))
+        model_prefetch_files_of(object, 1);
+}
+
+void model_preload_level()
+{
+    if (!ai().get_alife() || !GEnv.Render)
+        return;
+    ZoneScoped;
+    PERF_SCOPE(mpreload_time);
+    CTimer timer;
+    timer.Start();
+    u32 loaded = 0;
+    u32 already = 0;
+    xr_set<shared_str> seen; // a name once (shared_str: the same string, one pointer)
+    const auto preload = [&](pcstr name) {
+        if (!seen.insert(shared_str(name)).second)
+            return;
+        if (GEnv.Render->model_Preload(name))
+        {
+            ++loaded;
+            PERF_INC(mpreload_models);
+        }
+        else
+        {
+            ++already;
+            PERF_INC(mpreload_already);
+        }
+    };
+    {
+        // The creatures of this level, offline ones included: they come online here (fight1: mutant waves)
+        const GameGraph::_LEVEL_ID level_id = ai().alife().graph().level().level_id();
+        for (const auto& [id, object] : ai().alife().objects().objects())
+        {
+            if (!smart_cast<CSE_ALifeCreatureAbstract*>(object))
+                continue;
+            if (ai().game_graph().vertex(object->m_tGraphID)->level_id() != level_id)
+                continue;
+            model_prefetch_for_each_visual(object, preload);
+        }
+    }
+    {
+        // Every section whose visual is a monster (meshes\monsters): none of them is in prefetch_visuals_single
+        for (CInifile::Sect* sect : pSettings->sections())
+        {
+            pcstr visual = nullptr;
+            if (!sect->line_exist("visual", &visual) || !visual || !visual[0])
+                continue;
+            string_path low;
+            xr_strcpy(low, visual);
+            xr_strlwr(low);
+            if (0 != strncmp(low, "monsters\\", 9))
+                continue;
+            preload(visual);
+            pcstr predator = nullptr;
+            if (sect->line_exist("Predator_Visual", &predator) && predator && predator[0])
+                preload(predator);
+        }
+    }
+    Msg("* [model_prefetch] preload: %u models loaded, %u already loaded or missing, %u ms", loaded, already,
+        timer.GetElapsed_ms());
 }

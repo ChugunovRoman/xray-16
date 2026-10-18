@@ -1006,6 +1006,11 @@ void CGamePersistent::OnWeaponIconRenderPass()
     weapon_inv_icon::ProcessRenderPass();
 }
 
+bool CGamePersistent::WeaponIconRenderPassPending() const
+{
+    return weapon_inv_icon::RenderPassPending();
+}
+
 void CGamePersistent::OnWeaponIconSnapshot(IRenderable* subject, bool begin)
 {
     weapon_inv_icon::OnWeaponIconSnapshot(subject, begin);

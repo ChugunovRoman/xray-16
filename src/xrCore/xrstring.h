@@ -6,6 +6,9 @@
 #include "xrMemory.h"
 
 #include <cstring>
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+#endif
 
 #pragma pack(push, 4)
 #pragma warning(push)
@@ -50,6 +53,32 @@ private:
 };
 XRCORE_API extern str_container* g_pStringContainer;
 
+// The reference count of str_value is atomic (2026-10-17, plans/optimization_mt/29-game-thread-next.md): shared_str
+// is copied off the main thread (task workers, the Game thread) while other threads - the Lua GC step's finalizers
+// among them - copy or release the same strings; a lost increment frees a live string at the next
+// str_container::clean (mem_compact), a lost decrement leaks it. The field stays a plain u32 (layout, readers in
+// xrstring.cpp under the container lock); only the shared_str increments and decrements are interlocked.
+namespace xr_shared_str_detail
+{
+inline void ref_inc(u32& ref) noexcept
+{
+#if defined(_MSC_VER) && !defined(__clang__)
+    _InterlockedIncrement(reinterpret_cast<volatile long*>(&ref));
+#else
+    __atomic_add_fetch(&ref, 1u, __ATOMIC_RELAXED);
+#endif
+}
+
+[[nodiscard]] inline u32 ref_dec(u32& ref) noexcept
+{
+#if defined(_MSC_VER) && !defined(__clang__)
+    return static_cast<u32>(_InterlockedDecrement(reinterpret_cast<volatile long*>(&ref)));
+#else
+    return __atomic_sub_fetch(&ref, 1u, __ATOMIC_ACQ_REL); // the reads of the string happen before a release to 0
+#endif
+}
+} // namespace xr_shared_str_detail
+
 //////////////////////////////////////////////////////////////////////////
 class shared_str
 {
@@ -61,8 +90,7 @@ protected:
     {
         if (nullptr == p_)
             return;
-        p_->dwReference--;
-        if (0 == p_->dwReference)
+        if (0 == xr_shared_str_detail::ref_dec(p_->dwReference))
             p_ = nullptr;
     }
 
@@ -71,7 +99,7 @@ public:
     {
         str_value* v = g_pStringContainer->dock(rhs);
         if (nullptr != v)
-            v->dwReference++;
+            xr_shared_str_detail::ref_inc(v->dwReference);
         _dec();
         p_ = v;
     }
@@ -79,7 +107,7 @@ public:
     {
         str_value* v = rhs.p_;
         if (nullptr != v)
-            v->dwReference++;
+            xr_shared_str_detail::ref_inc(v->dwReference);
         _dec();
         p_ = v;
     }
@@ -124,8 +152,12 @@ public:
     }
     shared_str& operator=(shared_str&& rhs) noexcept
     {
-        p_ = rhs.p_;
-        rhs.p_ = nullptr;
+        if (this != &rhs)
+        {
+            _dec(); // the old value's reference (was leaked: the string was never freed by str_container::clean)
+            p_ = rhs.p_;
+            rhs.p_ = nullptr;
+        }
         return *this;
     }
     shared_str& operator=(std::nullptr_t) noexcept

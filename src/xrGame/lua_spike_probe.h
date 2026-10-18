@@ -31,6 +31,13 @@ enum class ECategory : u8
     ScriptCall, // a plugin calls a Lua function by name
     Binder, // CScriptBinder::shedule_Update -> the update of the Lua binder of an object
     GcStep, // CLevel::script_gc - the GC step of the frame
+    // 30-game-events.md: a callback of a Lua binder from the engine's event handling (eDeath, eHit, eOnItemDrop)
+    BinderCallback,
+    // 32-frame-spikes.md: the whole phase level/add_call (level.add_call, set_fastcall, CreateTimeEvent through
+    // AddUniqueCall), named by its slowest call (CPHCommander::slowest_call)
+    AddCall,
+    // 32-frame-spikes.md: one Lua subscriber of a bus dispatch (inside event_lua), named by its source:line
+    EventHandler,
     Count
 };
 
@@ -41,6 +48,30 @@ extern int g_paced_mul; // lua_gc_paced_mul: % of the LuaJIT pace (100 = one ste
 // One step is never cut: the atomic phase of LuaJIT (lj_gc.c atomic()) is one step and stays as long as it is.
 // 0 = all steps of the frame at once, as before.
 extern int g_step_budget_us;
+// G1 (plans/optimization_mt/32-frame-spikes.md; temporary, not saved), with lua_gc_step_budget_us > 0:
+// lua_gc_budget_max_us > 0 - the time cap of a frame grows with the debt smoothly instead of the K2a cliff (debt over
+// 16K steps -> all of it uncapped in one frame): budget = clamp(base * (1 + debt / lua_gc_debt_soft), base, max).
+// Uncapped only when the debt passes 64K steps or the heap grew past lua_gc_heap_guard_pct % of its size at the start
+// of the GC cycle (the heap must not run away from the GC). 0 = as before (K2a).
+extern int g_budget_max_us;
+extern int g_debt_soft; // lua_gc_debt_soft: steps of debt per one more base budget
+extern int g_heap_guard_pct; // lua_gc_heap_guard_pct: heap growth (% of the cycle start) that lifts the cap, 0 = off
+
+// What GcStepFrame did in its last call: the detail of the "lua/script_gc" spike line (perf_spike_us)
+struct GcFrameStats
+{
+    u64 steps = 0;
+    s64 due_before = 0; // debt before the steps of the frame (after the allocations of the frame were added)
+    s64 due_after = 0;
+    u32 budget_us = 0; // the time cap of the frame, 0 = none (lua_gc_step_budget_us 0)
+    u32 max_step_us = 0; // the longest single step (0 unless perf_metrics, the probe or the spike logger is on)
+    int heap_kb = 0; // after the steps
+    int cycle_start_kb = 0; // the heap when the current GC cycle started
+    s8 atomic = -1; // 1 = the atomic phase ran in the steps of the frame, 0 = not, -1 = not checked
+    bool uncapped = false; // the debt was paid off without the time cap
+    bool heap_guard = false; // ... because of the heap growth (G1)
+};
+const GcFrameStats& LastGcFrame() noexcept;
 
 inline bool Enabled() noexcept { return g_threshold_us > 0; }
 
@@ -96,4 +127,33 @@ u32 PollAtomic(lua_State* L) noexcept;
 // The GC step of CLevel::script_gc for the method gc_step (1): the paced steps, step_kb KB on top of the allocations.
 // With perf_metrics a single step of at least 2 ms is timed as lua/gc_long_step (in practice the atomic phase).
 void GcStepFrame(lua_State* L, int step_kb) noexcept;
+
+// G2 (plans/optimization_mt/32-frame-spikes.md): what the atomic phase of the GC spends its time on and what the heap
+// is made of. Needs the local patch of LuaJIT (luajit.h: LUAJIT_GW_GCSTATS); without it they only say so in the log.
+// lua_gc_atomic_stats 1 (not saved): one "[lua-gc-atomic]" line after every atomic phase - each part of lj_gc.c atomic()
+// timed (the weak tables and roots again, the grayagain list, separateudata, the marks of the dead userdata with __gc,
+// clearweak) with what it walked, and the gauges lua/gc_atomic/*. 0 = off: atomic() pays one load and a branch per cycle.
+extern int g_atomic_stats;
+// A/B, not saved, 0 = untouched: lua_gc_pause - LUA_GCSETPAUSE of the state, and the paced GC (which starts a new cycle
+// right after the previous one) waits until the heap passes lua_gc_pause % of the heap at the end of the last cycle
+// (100 = no wait, as with 0); lua_gc_stepmul - LUA_GCSETSTEPMUL, the work of one GC step (LuaJIT default 200): more =
+// shorter cycles, less garbage at the atomic phase.
+extern int g_gc_pause;
+extern int g_gc_stepmul;
+// 35-lua-gc-finobj.md: LuaJIT keeps the userdata with __gc in a list of their own (luajit.h luaJIT_gw_finobj, a local
+// patch; LUAJIT_GW_FINOBJ) and the atomic phase walks only it, not all userdata. Always on: CScriptEngine::init
+// switches it on for a new state. With lua_gc_atomic_stats 1 the "[lua-gc-atomic]" line gets "finobj=" (what was
+// walked in each list).
+// 42-lua-gc-prewalk.md: work moved out of the atomic phase into the incremental steps (luajit.h luaJIT_gw_prewalk;
+// LUAJIT_GW_PREWALK): the live userdata with __gc are checked before it (the atomic phase walks only the dead ones and
+// the late ones), the tables written behind the barrier (grayagain) are traversed again before it. Always on
+// (CScriptEngine::init; its emergency switch lua_gc_prewalk removed 2026-10-18, see plan 41). The "[lua-gc-atomic]"
+// line gets "pre=" (what was done before the phase).
+// lua_heap_census [full]: the census of the Lua heap ("[lua-census]" lines) at the next CLevel::script_gc - objects by
+// type, luabind instances by class, userdata/tables by metatable, the largest tables with their path from _G or the
+// registry, the size of db.storage per entry. full: a full GC first (only the live objects; a hitch of up to a second).
+void RequestHeapCensus(bool full_gc) noexcept;
+// CLevel::script_gc, on the thread that runs Lua, before the GC step: applies lua_gc_pause / lua_gc_stepmul and
+// lua_gc_atomic_stats, logs an atomic phase that ran outside the paced steps, runs a requested census
+void ServiceGcDiagnostics(lua_State* L) noexcept;
 } // namespace gw::lua_spike

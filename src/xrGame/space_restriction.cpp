@@ -15,6 +15,30 @@
 #include "xrEngine/profiler.h"
 #include "xrCore/xrDebug_macros.h"
 #include "xrCore/buffer_vector.h"
+#include "xrEngine/EngineThreading.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include <atomic>
+#include <cstring>
+
+// 26-framemove-game-next.md, the cover scan cache (mode 2 always on since 2026-10-18, its switch npc_cover_scan_cache
+// removed, 41-cvar-cleanup.md); see agent_location_manager.h
+
+namespace
+{
+// bumped by space_restriction_shapes_changed (CSpaceRestrictor::spatial_move, CSpaceRestrictionHolder register and
+// unregister of a restrictor) from whatever thread does it; the caches compare it on the game logic thread
+std::atomic<u32> s_space_restriction_shapes_gen{0};
+constexpr size_t space_restriction_accessible_cache_max = 8192;
+
+u32 space_restriction_float_bits(float value)
+{
+    u32 bits;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+} // namespace
+
+void space_restriction_shapes_changed() { s_space_restriction_shapes_gen.fetch_add(1, std::memory_order_relaxed); }
 
 //const float dependent_distance = 100.f;
 
@@ -64,6 +88,40 @@ bool CSpaceRestriction::accessible(const Fsphere& sphere)
             return (true);
     }
 
+    if (!XRay::Engine::IsGameLogicThread())
+        return (accessible_uncached(sphere));
+
+    // The answer depends on the sphere, the level graph (static) and the shapes behind the two bridges: kept until a
+    // restrictor moves, appears or goes, and only for the same bridges
+    const u32 gen = s_space_restriction_shapes_gen.load(std::memory_order_relaxed);
+    const void* out = m_out_space_restriction.get();
+    const void* in = m_in_space_restriction.get();
+    if (m_accessible_cache_gen != gen || m_accessible_cache_out != out || m_accessible_cache_in != in ||
+        m_accessible_cache.size() >= space_restriction_accessible_cache_max)
+    {
+        m_accessible_cache.clear();
+        m_accessible_cache_gen = gen;
+        m_accessible_cache_out = out;
+        m_accessible_cache_in = in;
+    }
+
+    const accessible_key key{space_restriction_float_bits(sphere.P.x), space_restriction_float_bits(sphere.P.y),
+        space_restriction_float_bits(sphere.P.z), space_restriction_float_bits(sphere.R)};
+    const auto found = m_accessible_cache.find(key);
+    if (found != m_accessible_cache.end())
+    {
+        PERF_INC(ai_cover_accessible_hit);
+        return (found->second);
+    }
+
+    PERF_INC(ai_cover_accessible_miss);
+    const bool result = accessible_uncached(sphere);
+    m_accessible_cache.emplace(key, result);
+    return (result);
+}
+
+bool CSpaceRestriction::accessible_uncached(const Fsphere& sphere)
+{
     return (ai().level_graph().valid_vertex_position(sphere.P) &&
         (m_out_space_restriction ?
                 (m_out_space_restriction->inside(sphere) && !m_out_space_restriction->on_border(sphere.P) &&

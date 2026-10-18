@@ -1,12 +1,20 @@
 #pragma once
 
 #include "xrCommon/xr_allocator.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 // Both xr_fixed_map and xr_fixed_map_node doesn't support move operation
 // Trying to do so will result in a crash at some point
 // (at first it would be just fine, but this is a lie)
 
 // The container is just designed for copying, not moving
+// (the container and its nodes as objects: left/right point into the node array. Moving the VALUES of the nodes into
+// a new array, as relocate() does, is fine - the tree links are rebuilt there.)
+
+// 27-render-main.md, R13 (always on since 2026-10-18, 41-cvar-cleanup.md; the dsgraph maps of the render are the only
+// users of this container): a growing map moves the values of a non-POD T over to its new node array (the buffers
+// change hands, nothing is allocated or copied) and destroys the old nodes. Before, they were copy-assigned and the old
+// array freed WITHOUT the destructors of its nodes: every item vector was deep-copied and the old buffer leaked.
 
 template <class K, class T>
 struct xr_fixed_map_node
@@ -74,10 +82,13 @@ private:
     value_type* nodes;
     size_t pool;
     size_t limit;
+    size_t peak{}; // R13: the largest pool before a clear() since the last take_peak() / destroy()
 
     void resize()
     {
         ZoneScoped;
+        // render/dsgraph/resize_us/* (27-render-main.md, R13): the growth of a map, by the thread that grows it.
+        PERF_SCOPE_BY_THREAD(rdsg_resize_main, rdsg_resize_game, rdsg_resize_worker);
 
         size_t newLimit;
 
@@ -94,9 +105,20 @@ private:
             VERIFY(newLimit % SG_REALLOC_ADVANCE == 0);
         }
 
+        PERF_INC(rdsg_resize_count);
+        PERF_ADD(rdsg_resize_nodes, pool);
+        PERF_ADD(rdsg_resize_kb, (sizeof(value_type) * newLimit) >> 10);
+        relocate(newLimit);
+    }
+
+    // Moves the nodes to a new array of newLimit (> limit) nodes: the body of resize(), also used by reserve().
+    void relocate(size_t newLimit)
+    {
+        VERIFY(newLimit > limit);
         value_type* newNodes = allocator::allocate(newLimit);
         R_ASSERT2(newNodes, "xr_fixed_map::resize: allocation failed (would corrupt tree on next insert)");
 
+        bool linked = false; // the move below has rebuilt left/right already
         if constexpr (std::is_pod<T>::value)
         {
             ZeroMemory(newNodes, sizeof(value_type) * newLimit);
@@ -107,11 +129,27 @@ private:
         {
             for (value_type* cur = newNodes; cur != newNodes + newLimit; ++cur)
                 allocator::construct(cur);
-            if (pool)
-                std::copy(first(), last(), newNodes);
+            // R13: the values change hands (no allocation, no copy of the items) - all `limit` nodes, so the unused
+            // ones keep their (empty) item vectors' capacity too -, the tree links of the nodes in use point into the
+            // new array, the old nodes are destroyed (their moved-from values own nothing any more). The unused nodes
+            // get no links: add() sets them when it takes the node.
+            for (size_t i = 0; i < limit; ++i)
+            {
+                value_type& from = nodes[i];
+                value_type& to = newNodes[i];
+                to.first = from.first;
+                to.second = std::move(from.second);
+                if (i < pool)
+                {
+                    to.left = from.left ? newNodes + (from.left - nodes) : nullptr;
+                    to.right = from.right ? newNodes + (from.right - nodes) : nullptr;
+                }
+                from.~value_type();
+            }
+            linked = true;
         }
 
-        for (size_t i = 0; i < pool; ++i)
+        for (size_t i = 0; !linked && i < pool; ++i)
         {
             VERIFY(nodes);
             value_type* nodeOld = nodes + i;
@@ -236,6 +274,31 @@ public:
         nodes = 0;
         pool = 0;
         limit = 0;
+        peak = 0;
+    }
+
+    // R13 (27-render-main.md, r__dsgraph_reserve): at least n nodes allocated, the nodes in use (and the rest) kept.
+    void reserve(size_t n)
+    {
+        if (n > limit)
+            relocate(n);
+    }
+
+    // R13: the largest size() the map had before a clear() since the last call (or destroy()), the current one included;
+    // starts the next window.
+    size_t take_peak()
+    {
+        const size_t result = pool > peak ? pool : peak;
+        peak = 0;
+        return result;
+    }
+
+    // R13: an empty map frees its nodes and allocates n again (0 - none): the slow decay of the reserve.
+    void shrink(size_t n)
+    {
+        VERIFY(pool == 0);
+        destroy();
+        reserve(n);
     }
 
     value_type* insert(const K& key)
@@ -348,7 +411,12 @@ public:
     size_t allocated_memory() const { return limit * sizeof(value_type); }
 
     [[nodiscard]] bool empty() const { return pool == 0 ; }
-    void clear() { pool = 0; }
+    void clear()
+    {
+        if (pool > peak)
+            peak = pool;
+        pool = 0;
+    }
 
     value_type* begin() { return nodes; }
     value_type* end() { return nodes + pool; }

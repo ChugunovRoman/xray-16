@@ -69,6 +69,25 @@ public:
     void add_visible_object(const IGameObject* object, float time_delta, bool fictitious = false);
 
 protected:
+    // 45-engine-ai-audit.md, F14: the observer half of object_visible_distance - the eye position and direction, the
+    // view range and fov. It does not depend on the object looked at, so update() takes it once for all the visible
+    // objects (filled on the first use: ready = false until then)
+    struct SEyeView
+    {
+        Fvector position;
+        Fvector direction;
+        float range;
+        float fov;
+        bool ready = false;
+    };
+    void eye_view(SEyeView& eye) const;
+    float object_visible_distance(const CGameObject* game_object, float& object_distance, SEyeView& eye) const;
+    bool visible(const CGameObject* game_object, float time_delta, SEyeView* eye);
+    // 45-engine-ai-audit.md, F4: the same with the squad mask of this NPC already known (update() passes the one it
+    // took at its start); nullptr = take mask() once per object. F14: eye - the observer of this update (nullptr =
+    // computed per object, as before)
+    void add_visible_object(const IGameObject* object, float time_delta, bool fictitious,
+        const MemorySpace::squad_mask_type* known_mask, SEyeView* eye);
     IC void fill_object(CVisibleObject& visible_object, const CGameObject* game_object);
     bool should_ignore_object(IGameObject const* object) const;
     void add_visible_object(const CVisibleObject visible_object);
@@ -100,6 +119,8 @@ public:
     virtual float feel_vision_mtl_transp(IGameObject* O, u32 element);
     void remove(const MemorySpace::CVisibleObject* visible_object);
     void remove_links(IGameObject* object);
+    // R1 (32-frame-spikes.md): remove_links for every object of the batch, in one pass
+    void remove_links_batch(const struct RelcaseBatch& batch);
 
 public:
     bool visible(const CGameObject* game_object, float time_delta);

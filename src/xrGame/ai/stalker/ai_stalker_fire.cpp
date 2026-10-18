@@ -59,6 +59,7 @@
 #include "xrCDB/Frustum.h"
 #include "Actor.h"
 #include "game_type.h"
+#include "npc_cpp_profile.h"
 #include <algorithm>
 
 using namespace StalkerSpace;
@@ -240,7 +241,13 @@ void CAI_Stalker::Hit(SHit* pHDS)
 
     // Plugin API: npc_on_before_hit - the subscribers may change the power of the hit or cancel it. Not for an
     // invulnerable stalker: CCustomMonster::Hit drops its hits anyway (as CBaseMonster::Hit does before its event)
-    if (g_Alive() && !invulnerable() && !gw::addons::character::BeforeHit(this, HDS, false))
+    bool hit_cancelled = false;
+    if (g_Alive() && !invulnerable())
+    {
+        PERF_SCOPE(hit_bus_before); // 30-game-events.md
+        hit_cancelled = !gw::addons::character::BeforeHit(this, HDS, false);
+    }
+    if (hit_cancelled)
         return;
 
     //AVO: get bone names from IDs
@@ -444,6 +451,7 @@ void CAI_Stalker::update_best_item_info()
     if (m_bTrading || !m_can_select_weapon)
         return;
 
+    NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerBestItemUpdate); // 45-engine-ai-audit.md, F11
     update_best_item_info_impl();
 }
 
@@ -468,7 +476,12 @@ void CAI_Stalker::update_best_item_info_impl()
     }
 
     luabind::functor<CScriptGameObject*> funct;
-    if (GEnv.ScriptEngine->functor("ai_stalker.update_best_weapon", funct))
+    bool has_update_best_weapon;
+    {
+        NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerBestItemLuaLookup); // F11
+        has_update_best_weapon = GEnv.ScriptEngine->functor("ai_stalker.update_best_weapon", funct);
+    }
+    if (has_update_best_weapon)
     {
         CScriptGameObject* GO = nullptr;
         CGameObject* game_object = m_best_item_to_kill ? &m_best_item_to_kill->object() : nullptr;
@@ -477,6 +490,7 @@ void CAI_Stalker::update_best_item_info_impl()
         if (can_query_section && game_object->NameSection && pSettings->section_exist(game_object->NameSection))
         {
             CWeapon* cur_itm = smart_cast<CWeapon*>(m_best_item_to_kill);
+            NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerBestItemLuaCall); // F11
             GO = funct(lua_game_object(), cur_itm ? cur_itm->lua_game_object() : nullptr);
         }
 
@@ -1308,11 +1322,12 @@ bool CAI_Stalker::fire_make_sense()
         return (false);
 
     // if we do not have a weapon
-    if (!best_weapon())
+    const CInventoryItem* const best_item = best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    if (!best_item)
         return (false);
 
     // if we do not have automatic weapon
-    const int weapon_type = best_weapon()->object().ef_weapon_type();
+    const int weapon_type = best_item->object().ef_weapon_type();
     switch (StalkerSpace::convert_weapon_type(weapon_type))
     {
     case WeaponTypes::SubmashineGun:

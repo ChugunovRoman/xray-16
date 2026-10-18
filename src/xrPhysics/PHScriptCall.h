@@ -8,9 +8,17 @@
 #include "xrScriptEngine/script_engine.hpp"
 #include "xrScriptEngine/script_callback_ex.h"
 
+// 32-frame-spikes.md: the debug_source() of the Lua requests below - "short_src:line" of the Lua function (a wrapper
+// with a function upvalue, e.g. AddUniqueCall of _g.script, adds the first one: "(up file.script:line)"), computed on
+// the first call through the main Lua state and cached in `cache`. Main thread only.
+XRPHYSICS_API pcstr PHScriptDescribeFunction(shared_str& cache, const luabind::object& function);
+// The same for the method `method` of `object` (looked up in a protected call): "method@short_src:line"
+XRPHYSICS_API pcstr PHScriptDescribeMethod(shared_str& cache, const luabind::object& object, pcstr method);
+
 class XRPHYSICS_API CPHScriptCondition : public CPHCondition, public CPHReqComparerV
 {
     luabind::functor<bool>* m_lua_function;
+    mutable shared_str m_debug_source;
 
     CPHScriptCondition(const CPHScriptCondition& func);
 
@@ -20,6 +28,7 @@ public:
     virtual bool is_true();
     virtual bool obsolete() const;
     virtual bool touches_script() const override { return true; }
+    pcstr debug_source() const override { return PHScriptDescribeFunction(m_debug_source, *m_lua_function); }
     virtual bool compare(const CPHReqComparerV* v) const { return v->compare(this); }
     virtual bool compare(const CPHScriptCondition* v) const
     {
@@ -33,6 +42,7 @@ class XRPHYSICS_API CPHScriptAction : public CPHAction, public CPHReqComparerV
 {
     bool b_obsolete;
     luabind::functor<void>* m_lua_function;
+    mutable shared_str m_debug_source;
 
 public:
     CPHScriptAction(const luabind::functor<void>& func);
@@ -41,6 +51,7 @@ public:
     virtual void run();
     virtual bool obsolete() const;
     virtual bool touches_script() const override { return true; }
+    pcstr debug_source() const override { return PHScriptDescribeFunction(m_debug_source, *m_lua_function); }
     virtual bool compare(const CPHReqComparerV* v) const { return v->compare(this); }
     virtual bool compare(const CPHScriptAction* v) const
     {
@@ -54,6 +65,7 @@ class XRPHYSICS_API CPHScriptObjectCondition : public CPHCondition, public CPHRe
 {
     luabind::object* m_lua_object;
     shared_str m_method_name;
+    mutable shared_str m_debug_source;
 
 public:
     CPHScriptObjectCondition(const luabind::object& lua_object, LPCSTR method);
@@ -62,6 +74,10 @@ public:
     virtual bool is_true();
     virtual bool obsolete() const;
     virtual bool touches_script() const override { return true; }
+    pcstr debug_source() const override
+    {
+        return PHScriptDescribeMethod(m_debug_source, *m_lua_object, m_method_name.c_str());
+    }
     virtual bool compare(const luabind::object* v) const { return *m_lua_object == *v; }
     virtual bool compare(const CPHReqComparerV* v) const { return v->compare(this); }
     virtual bool compare(const CPHScriptObjectCondition* v) const;
@@ -72,6 +88,7 @@ class XRPHYSICS_API CPHScriptObjectAction : public CPHAction, public CPHReqCompa
     bool b_obsolete;
     luabind::object* m_lua_object;
     shared_str m_method_name;
+    mutable shared_str m_debug_source;
 
 public:
     CPHScriptObjectAction(const luabind::object& lua_object, LPCSTR method);
@@ -80,6 +97,10 @@ public:
     virtual void run();
     virtual bool obsolete() const;
     virtual bool touches_script() const override { return true; }
+    pcstr debug_source() const override
+    {
+        return PHScriptDescribeMethod(m_debug_source, *m_lua_object, m_method_name.c_str());
+    }
     virtual bool compare(const luabind::object* v) const { return *m_lua_object == *v; }
     virtual bool compare(const CPHReqComparerV* v) const { return v->compare(this); }
     virtual bool compare(const CPHScriptObjectAction* v) const;
@@ -89,6 +110,7 @@ public:
 class XRPHYSICS_API CPHScriptObjectConditionN : public CPHCondition, public CPHReqComparerV
 {
     CScriptCallbackEx<bool> m_callback;
+    mutable shared_str m_debug_source;
 
 public:
     CPHScriptObjectConditionN(const luabind::object& object, const luabind::functor<bool>& functor);
@@ -96,6 +118,7 @@ public:
     virtual bool is_true();
     virtual bool obsolete() const;
     virtual bool touches_script() const override { return true; }
+    pcstr debug_source() const override { return PHScriptDescribeFunction(m_debug_source, m_callback.functor()); }
     virtual bool compare(const luabind::object* v) const { return m_callback == (*v); }
     virtual bool compare(const CPHReqComparerV* v) const { return v->compare(this); }
     virtual bool compare(const CPHScriptObjectConditionN* v) const { return m_callback == v->m_callback; }
@@ -105,6 +128,7 @@ class XRPHYSICS_API CPHScriptObjectActionN : public CPHAction, public CPHReqComp
 {
     bool b_obsolete;
     CScriptCallbackEx<void> m_callback;
+    mutable shared_str m_debug_source;
 
 public:
     CPHScriptObjectActionN(const luabind::object& object, const luabind::functor<void>& functor);
@@ -112,6 +136,7 @@ public:
     virtual void run();
     virtual bool obsolete() const;
     virtual bool touches_script() const override { return true; }
+    pcstr debug_source() const override { return PHScriptDescribeFunction(m_debug_source, m_callback.functor()); }
     virtual bool compare(const luabind::object* v) const { return m_callback == *v; }
     virtual bool compare(const CPHReqComparerV* v) const { return v->compare(this); }
     virtual bool compare(const CPHScriptObjectActionN* v) const { return m_callback == v->m_callback; }

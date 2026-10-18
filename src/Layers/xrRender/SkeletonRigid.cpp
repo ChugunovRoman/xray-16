@@ -17,6 +17,14 @@ extern int psSkeletonUpdate;
 void check_kinematics(CKinematics* _k, LPCSTR s);
 #endif
 
+namespace
+{
+// Pipelined prepass (BonesPrepass_PhaseBEarly): this thread computes early bones while main runs the UpdateCL of other
+// objects. A nested CalculateBones of another model (a bone callback reading a neighbour) must not run that model's
+// phase A here - its blend callbacks are game code (Lua) and would run beside main's.
+thread_local bool t_bones_early_task = false;
+} // namespace
+
 void CKinematics::CalculateBones(BOOL bForceExact)
 {
     PERF_HOT_ZONE("CKinematics::CalculateBones");
@@ -65,6 +73,20 @@ void CKinematics::CalculateBones(BOOL bForceExact)
     };
 
     bool need_b;
+    if (t_bones_early_task)
+    {
+        // Pipelined prepass task: never the global lock (main may hold it in a phase A - blend callback, Lua - while it
+        // joins the early tasks, CLevel::BonesPrepassEarlyJoin) and never phase A of another model (game code): a model
+        // not started this tick keeps its previous pose (as on a failed TryEnter); one started this tick is waited for
+        // below (nested: TryEnter only). The unlocked read of UCalc_Time is the same check phase B repeats under the lock.
+        if (Device.dwTimeGlobal != UCalc_Time)
+        {
+            PERF_INC(prepass_early_nested_skip);
+            return;
+        }
+        need_b = true;
+    }
+    else
     {
         UCalc_mtlock lock;
         need_b = phase_a();
@@ -101,7 +123,16 @@ void CKinematics::CalculateBonesPhaseB(BOOL bForceExact)
     // Bones prepass: these bones were already computed by this frame's prepass and are recomputed again, i.e.
     // something invalidated them after it (CalculateBones_Invalidate, bone visibility). A miss: the prepass work
     // was wasted, so BonesPrepass_Wanted() leaves this model to the render for a while.
-    if (m_prepass_frame.load(std::memory_order_relaxed) == Device.dwFrame)
+    // Pipelined prepass: bones computed early in this frame and computed again (a mutator or a moved owner - by the
+    // prepass, or an invalidation - by whoever reads them next): a redo. The pipeline leaves the model to the prepass
+    // for a while; the redo itself is not a prepass miss (the regular stamp holds again after it).
+    if (m_prepass_early_frame.load(std::memory_order_relaxed) == Device.dwFrame)
+    {
+        m_prepass_early_frame.store(0, std::memory_order_relaxed);
+        m_prepass_early_redo_frame.store(Device.dwFrame, std::memory_order_relaxed);
+        PERF_INC(prepass_redone);
+    }
+    else if (m_prepass_frame.load(std::memory_order_relaxed) == Device.dwFrame)
     {
         const u8 pass = xray::perf::TlPass();
         if (pass != xray::perf::pass::Prepass)
@@ -310,7 +341,21 @@ bool CKinematics::BonesPrepass_PhaseA()
 {
     // Already computed this tick (e.g. by UpdateCL: eye_pp, weapon xform, CCF) - nothing to do, the render fast-outs.
     if (Device.dwTimeGlobal == UCalc_DoneTime.load(std::memory_order_acquire))
-        return false;
+    {
+        // Pipelined prepass: computed early, and the pose input changed after it (BonesPrepass_MarkEarlyDirty) -
+        // recompute now. UpdateTracks of this tick is done (Update_LastTime), the bone math takes the blends as they
+        // are now. Nothing else computes bones at this point (the pipeline tasks are joined, the render has not
+        // started), the model lock is taken for the order of the stores only.
+        const u32 frame = Device.dwFrame;
+        if (m_prepass_early_frame.load(std::memory_order_relaxed) != frame ||
+            m_prepass_early_dirty.load(std::memory_order_relaxed) != frame)
+            return false;
+        UCalc_model_lock model_lock(UCalc_ModelLock, this);
+        if (!model_lock.locked)
+            return false;
+        PERF_INC(prepass_dirty);
+        CalculateBones_Invalidate();
+    }
     UCalc_mtlock lock;
     // Started this tick by someone else (or our own recursion) - phase B would only wait for it; let the render
     // handle the model as before.
@@ -341,6 +386,139 @@ bool CKinematics::BonesPrepass_PhaseB()
     m_prepass_frame.store(Device.dwFrame, std::memory_order_relaxed);
     CalculateBonesPhaseB(TRUE);
     return true;
+}
+
+// --- Pipelined prepass (r__bones_prepass_pipeline, CLevel pipeline in xrGame/Level.cpp) ---------------------------------
+// Phase A of a model runs on main right after the UpdateCL batch that finished its object (and everything the object
+// holds), phase B on a worker while main goes on with the next batches. What changes the pose input after that marks
+// the bones dirty (animation mutators: BonesPrepass_NoteMutation; the owner's XFORM: the game's check at the prepass)
+// and the prepass recomputes them; invalidated bones are recomputed by whoever needs them next, as before.
+
+// Early bones recomputed again are left to the prepass for this many frames (same idea as the miss cooldown).
+// Shorter than the miss cooldown: a redo costs one extra phase B at the prepass (not a render-side recompute), and the
+// models that redo (a mutator after their chunk, a moved owner) mostly do it in bursts (an attack start, a teleport).
+static constexpr u32 bones_prepass_early_redo_cooldown = 16;
+
+bool CKinematics::BonesPrepass_EarlyWanted() const
+{
+    const u32 frame = Device.dwFrame;
+    const u32 rendered = m_render_bones_frame.load(std::memory_order_relaxed);
+    if (rendered == 0 || rendered + 1 < frame)
+        return false;
+    const u32 miss = m_prepass_miss_frame.load(std::memory_order_relaxed);
+    if (miss != 0 && frame - miss < bones_prepass_miss_cooldown)
+        return false;
+    const u32 redo = m_prepass_early_redo_frame.load(std::memory_order_relaxed);
+    if (redo != 0 && frame - redo < bones_prepass_early_redo_cooldown)
+    {
+        PERF_INC(prepass_early_cooldown);
+        return false;
+    }
+    return true;
+}
+
+bool CKinematics::BonesPrepass_PhaseBEarly()
+{
+    if (Device.dwTimeGlobal == UCalc_DoneTime.load(std::memory_order_acquire))
+        return false;
+    // The task holds no lock here: blocking Enter (main may hold the lock for a mutator - we wait for it). When main runs
+    // this chunk inside a Wait of its own while it holds another model's lock, only TryEnter - then the prepass does it.
+    UCalc_model_lock model_lock(UCalc_ModelLock, this);
+    if (!model_lock.locked)
+    {
+        PERF_INC(bones_lock_try_fail);
+        return false;
+    }
+    if (Device.dwTimeGlobal == UCalc_Time)
+        return false;
+    const u32 frame = Device.dwFrame;
+    m_prepass_frame.store(frame, std::memory_order_relaxed);
+    {
+        const bool prev = t_bones_early_task;
+        t_bones_early_task = true;
+        CalculateBonesPhaseB(TRUE);
+        t_bones_early_task = prev;
+    }
+    // After the compute, still under the lock: a mutator that waited for it marks the bones dirty from now on, one that
+    // came before is already in them.
+    m_prepass_early_frame.store(frame, std::memory_order_relaxed);
+    return true;
+}
+
+bool CKinematics::BonesPrepass_Done() const
+{
+    return Device.dwTimeGlobal == UCalc_DoneTime.load(std::memory_order_acquire);
+}
+
+// Phase C owners (pipeline on): the same work as CalculateBones(FALSE) of the item's UpdateXForm, split like the prepass.
+bool CKinematics::BonesPrepass_LazyPhaseA()
+{
+    if (Device.dwTimeGlobal == UCalc_DoneTime.load(std::memory_order_acquire))
+        return false;
+    UCalc_mtlock lock;
+    if (Device.dwTimeGlobal == UCalc_Time)
+        return false;
+    {
+        PERF_SCOPE(bones_on_calc);
+        OnCalculateBones();
+    }
+    if (Device.dwTimeGlobal < UCalc_Time + UCalc_Interval)
+    {
+        PERF_INC(bones_slow_skip);
+        return false;
+    }
+    return true;
+}
+
+bool CKinematics::BonesPrepass_LazyPhaseB()
+{
+    if (Device.dwTimeGlobal == UCalc_DoneTime.load(std::memory_order_acquire))
+        return false;
+    UCalc_model_lock model_lock(UCalc_ModelLock, this);
+    if (!model_lock.locked)
+    {
+        PERF_INC(bones_lock_try_fail);
+        return false;
+    }
+    if (Device.dwTimeGlobal == UCalc_Time)
+        return false;
+    CalculateBonesPhaseB(FALSE);
+    return true;
+}
+
+// Early kick (r__bones_prepass_early_kick, CLevel in xrGame/Level.cpp): a phase C owner computed on a worker while main
+// still runs the sound update, the UI and the RT scheduler. No prepass stamp (not the render's bones, no miss
+// bookkeeping), but the early one: a mutator that waited for this compute marks the bones dirty, and the prepass
+// recomputes them (BonesPrepass_PhaseA); a nested computation of another model never runs that model's phase A here.
+bool CKinematics::BonesPrepass_LazyPhaseBEarly()
+{
+    if (Device.dwTimeGlobal == UCalc_DoneTime.load(std::memory_order_acquire))
+        return false;
+    UCalc_model_lock model_lock(UCalc_ModelLock, this);
+    if (!model_lock.locked)
+    {
+        PERF_INC(bones_lock_try_fail);
+        return false;
+    }
+    if (Device.dwTimeGlobal == UCalc_Time)
+        return false;
+    {
+        const bool prev = t_bones_early_task;
+        t_bones_early_task = true;
+        CalculateBonesPhaseB(FALSE);
+        t_bones_early_task = prev;
+    }
+    m_prepass_early_frame.store(Device.dwFrame, std::memory_order_relaxed);
+    return true;
+}
+
+void CKinematics::BonesPrepass_MarkEarlyDirty()
+{
+    const u32 frame = Device.dwFrame;
+    if (m_prepass_early_frame.load(std::memory_order_relaxed) != frame)
+        return;
+    if (m_prepass_early_dirty.load(std::memory_order_relaxed) != frame)
+        m_prepass_early_dirty.store(frame, std::memory_order_relaxed);
 }
 
 #ifdef DEBUG

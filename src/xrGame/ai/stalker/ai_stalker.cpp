@@ -637,6 +637,10 @@ void CAI_Stalker::reload(LPCSTR section)
 void CAI_Stalker::Die(IGameObject* who)
 {
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerDie);
+#if XR_PERF_METRICS
+    // 30-game-events.md: death/stalker_pre - everything here before inherited::Die
+    const u64 perf_pre_t0 = xray::perf::g_perf_metrics_active ? xray::perf::Ticks() : 0;
+#endif
     movement().on_death();
 
     notify_on_wounded_or_killed(who);
@@ -659,6 +663,10 @@ void CAI_Stalker::Die(IGameObject* who)
         !CObjectHandler::planner().m_storage.property(ObjectHandlerSpace::eWorldPropertyStrapped) &&
         !::Random.randI(0, 2);
 
+#if XR_PERF_METRICS
+    if (perf_pre_t0)
+        xray::perf::AddTimeSlow(xray::perf::Metric::death_stalker_pre, xray::perf::Ticks() - perf_pre_t0);
+#endif
     inherited::Die(who);
 
     //запретить использование слотов в инвенторе
@@ -1089,11 +1097,20 @@ void CAI_Stalker::destroy_anim_mov_ctrl()
 //   if it is at least N m from the camera, the distance shrunk by the zoom like all the tiers here (a target in a 2D
 //   scope or binoculars comes near and stays every frame; a second viewport - a 3D scope - keeps everybody every
 //   frame). Every 2nd frame, whatever npc_ucl_lod_combat says (the combat tier itself must be on, N >= 2);
-// - npc_oh_lod_combat: the object handler (the fire planner) of a fighting stalker farther than
-//   npc_perf_object_handler_lod_dist m (see TrySkipObjectHandlerCombatLod): 1 = of one not drawn last frame on every
-//   2nd UpdateCL, 2 = also of one drawn last frame on every 2nd frame.
-int npc_ucl_lod_combat_seen_dist = 50; // on by default for the long test (2026-10-16), still a temporary switch
-int npc_oh_lod_combat = 2; // on by default for the long test (2026-10-16), still a temporary switch
+// - K8c (always on since 2026-10-18, its switch npc_oh_lod_combat 2 removed, 41-cvar-cleanup.md): the object handler
+//   (the fire planner) of a fighting stalker farther than npc_perf_object_handler_lod_dist m (see
+//   TrySkipObjectHandlerCombatLod): of one not drawn last frame on every 2nd UpdateCL, of one drawn last frame on every
+//   2nd frame.
+int npc_ucl_lod_combat_seen_dist = 50; // a tunable, not saved (the default since 2026-10-16)
+// 26-framemove-game-next.md (FrameMove after the pipelined prepass), a temporary A/B switch, not saved, 0 = as before:
+// npc_ucl_lod_combat_actor_dist N (m, try 20): the combat tier also takes a stalker whose enemy is the actor if nobody
+// sees it (not drawn in the main pass last frame, no shadow within npc_perf_ucl_lod_dist, no second viewport) and it is
+// N m or more from the camera (zoom-scaled), with no hit in the last UCL_LOD_COMBAT_HIT_MS and none of the every-frame
+// cases. Every 2nd frame, like K8a. Heavy fight (s_r): ~67 such full UpdateCL a frame (stalker/ucl_lod/combat/
+// deny_actor). What lags a frame: its movement step and look (it is off screen), the fire planner (the object handler
+// runs on the full frames only - the start and stop of a burst); the shots themselves come from the weapon's own
+// UpdateCL every frame, the hit reaction keeps every frame, turning the camera to it brings it back the next frame
+int npc_ucl_lod_combat_actor_dist = 20; // a tunable, not saved (the default since 2026-10-16, 41-cvar-cleanup.md)
 
 namespace
 {
@@ -1193,6 +1210,7 @@ bool CAI_Stalker::TrySkipUpdateCLLod()
     u32 interval = far_tier ? 3 : 2;
     bool combat_tier = false;
     bool seen_far = false; // K8a: taken by the combat tier while on screen
+    bool actor_far = false; // npc_ucl_lod_combat_actor_dist: taken while the actor is its enemy
     if (near_tier || fight)
     {
         // The combat tier (F2): a near or fighting stalker the player does not see - not drawn in the main pass last
@@ -1232,12 +1250,51 @@ bool CAI_Stalker::TrySkipUpdateCLLod()
                         PERF_INC(stk_ucl_lod_combat_seen);
                 }
                 else
+                {
                     PERF_INC(stk_ucl_lod_combat_seen);
+#if XR_PERF_METRICS
+                    // 28-updatecl-main.md: deny_seen_{lt30,30_40,40_50} = of them, the ones refused by the distance
+                    // alone (closer than 50 m and than the switch; every other condition of the take holds) - what
+                    // npc_ucl_lod_combat_seen_dist 40 / 30 would add
+                    if (measure && !svp && !near_tier && dist < 50.f &&
+                        !(enemy && actor && enemy->ID() == actor->ID()) &&
+                        !(last_hit && Device.dwTimeGlobal - last_hit < UCL_LOD_COMBAT_HIT_MS) && !needs_every_frame())
+                    {
+                        if (dist < 30.f)
+                            PERF_INC(stk_ucl_lod_combat_seen_lt30);
+                        else if (dist < 40.f)
+                            PERF_INC(stk_ucl_lod_combat_seen_30_40);
+                        else
+                            PERF_INC(stk_ucl_lod_combat_seen_40_50);
+                    }
+#endif
+                }
             }
             else if (near_tier && rendered_in_any_pass())
                 PERF_INC(stk_ucl_lod_combat_shadow);
             else if (enemy && actor && enemy->ID() == actor->ID())
-                PERF_INC(stk_ucl_lod_combat_actor);
+            {
+                // npc_ucl_lod_combat_actor_dist: a fighter of the actor nobody sees (not drawn last frame, no shadow
+                // near) N m or more from the camera, no hit within UCL_LOD_COMBAT_HIT_MS, none of the every-frame
+                // cases. While perf_metrics runs with the switch off, counted against 20 m (take_actor_far: how many
+                // it would take), deny_actor as before
+                const int actor_dist = npc_ucl_lod_combat_actor_dist > 0 ? npc_ucl_lod_combat_actor_dist :
+                                                                            (measure ? 20 : 0);
+                if (actor_dist > 0 && dist >= float(actor_dist) &&
+                    !(last_hit && Device.dwTimeGlobal - last_hit < UCL_LOD_COMBAT_HIT_MS) && !needs_every_frame())
+                {
+                    PERF_INC(stk_ucl_lod_combat_actor_far);
+                    if (npc_ucl_lod_combat_actor_dist > 0)
+                    {
+                        combat_ok = combat_interval != 0;
+                        actor_far = true;
+                    }
+                    else
+                        PERF_INC(stk_ucl_lod_combat_actor);
+                }
+                else
+                    PERF_INC(stk_ucl_lod_combat_actor);
+            }
             else if (last_hit && Device.dwTimeGlobal - last_hit < UCL_LOD_COMBAT_HIT_MS)
                 PERF_INC(stk_ucl_lod_combat_hit);
             else if (needs_every_frame())
@@ -1261,8 +1318,9 @@ bool CAI_Stalker::TrySkipUpdateCLLod()
             return false;
         }
         combat_tier = true;
-        // K8a: a fighter on screen every 2nd frame (a step of 3 frames would show), the unseen by npc_ucl_lod_combat
-        interval = seen_far ? 2 : _max(interval, combat_interval);
+        // K8a: a fighter on screen every 2nd frame (a step of 3 frames would show), the unseen by npc_ucl_lod_combat;
+        // a fighter of the actor every 2nd frame too (its aim and fire planner lag one frame at most)
+        interval = (seen_far || actor_far) ? 2 : _max(interval, combat_interval);
     }
     else if (weapon_busy || needs_every_frame())
     {
@@ -1308,6 +1366,8 @@ bool CAI_Stalker::TrySkipUpdateCLLod()
         PERF_INC(stk_ucl_lod_skip_combat);
         if (seen_far)
             PERF_INC(stk_ucl_lod_skip_seen_far); // K8a: of them on screen
+        if (actor_far)
+            PERF_INC(stk_ucl_lod_skip_actor_far); // of them fighting the actor
     }
     else if (far_tier)
         PERF_INC(stk_ucl_lod_skip_d2);
@@ -1458,7 +1518,7 @@ bool CAI_Stalker::TrySkipObjectHandlerLod()
     return true;
 }
 
-// K8c of plans/optimization_mt/26-framemove-game-next.md (npc_oh_lod_combat, temporary, 0 = off): the object handler
+// K8c of plans/optimization_mt/26-framemove-game-next.md (always on since 2026-10-18): the object handler
 // of a fighting stalker farther than npc_perf_object_handler_lod_dist from the camera (checked by the caller). Called
 // from TrySkipObjectHandlerLod for a fight only. A run of the fire planner between two shot queues re-checks the
 // evaluators (ammo, the queue, aim timers - absolute time stamps, so a later run sees the real elapsed time) and
@@ -1470,20 +1530,13 @@ bool CAI_Stalker::TrySkipObjectHandlerLod()
 //    item): it re-plans at once;
 //  - the actor is the enemy, a hit in the last UCL_LOD_COMBAT_HIT_MS, a second viewport;
 //  - npc_perf_object_handler_lod_max_ms since the last run would pass by the next frame.
-// Not drawn in the main pass last frame (1, 2): every 2nd UpdateCL pass - it stacks with the combat tier of the
-// UpdateCL LOD (a run in 4 frames with npc_ucl_lod_combat 2; the time cap bounds it). Drawn (2): every 2nd frame by frames - a
+// Not drawn in the main pass last frame: every 2nd UpdateCL pass - it stacks with the combat tier of the
+// UpdateCL LOD (a run in 4 frames with npc_ucl_lod_combat 2; the time cap bounds it). Drawn: every 2nd frame by frames - a
 // stalker whose UpdateCL runs every 2nd frame anyway (the distance tiers, K8a) is not slowed down more.
-// Stats (counted while perf_metrics runs with the switch off too): npc/object_handler/combat/{cand_unseen, cand_seen}
-// - runs it could thin out, {skip_unseen, skip_seen} - runs skipped.
+// Stats: npc/object_handler/combat/{cand_unseen, cand_seen} - runs it could thin out, {skip_unseen, skip_seen} - runs
+// skipped.
 bool CAI_Stalker::TrySkipObjectHandlerCombatLod()
 {
-#if XR_PERF_METRICS
-    const bool measure = xray::perf::g_perf_metrics_active;
-#else
-    constexpr bool measure = false;
-#endif
-    if (!npc_oh_lod_combat && !measure)
-        return false;
     if (Device.m_SecondViewport.IsSVPActive())
         return false;
     const CEntityAlive* enemy = memory().enemy().selected();
@@ -1512,8 +1565,6 @@ bool CAI_Stalker::TrySkipObjectHandlerCombatLod()
         PERF_INC(npc_oh_combat_cand_seen);
     else
         PERF_INC(npc_oh_combat_cand_unseen);
-    if (!npc_oh_lod_combat || (seen && npc_oh_lod_combat < 2))
-        return false;
 
     // The time cap (this frame's delta predicts the next one)
     const u32 elapsed = Device.dwTimeGlobal - m_object_handler_lod_last_time;
@@ -1620,8 +1671,13 @@ void CAI_Stalker::UpdateDeadShedLod()
 void CAI_Stalker::UpdateCL()
 {
     ZoneScopedN("ucl_CAI_Stalker");
+    // 39-ucl-stalker-spike.md: every piece of UpdateCL is in a subzone (lod_decide, prologue and the stages below), so
+    // the own time of ucl_CAI_Stalker is only the zone edges and the few compares between them. A long own time then
+    // means main stood still between the subzones (preempted / suspended, see the "! [ucl-stall]" line with offcpu),
+    // not code of UpdateCL.
     bool lod_skip;
     {
+        ZoneScopedN("ucl_stalker_lod_decide");
         PERF_SCOPE(stk_ucl_lod_decide); // 26-framemove-game-next.md: the rest of ucl/stalker
         lod_skip = TrySkipUpdateCLLod();
     }
@@ -1629,34 +1685,36 @@ void CAI_Stalker::UpdateCL()
         return;
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::StalkerUpdateCL);
     PERF_SCOPE_IF(!g_Alive(), stk_ucl_dead);
-#if XR_PERF_METRICS
-    // 24-critical-path.md, M1: the full UpdateCL runs by what the render did with this stalker last frame
-    if (xray::perf::g_perf_metrics_active)
     {
-        if (!g_Alive())
-            PERF_INC(stk_ucl_n_dead);
-        else if (rendered_in_main_pass())
-            PERF_INC(stk_ucl_n_onscreen);
-        else if (rendered_in_any_pass())
-            PERF_INC(stk_ucl_n_shadow_only);
-        else
-            PERF_INC(stk_ucl_n_offscreen);
-    }
+        ZoneScopedN("ucl_stalker_prologue");
+#if XR_PERF_METRICS
+        // 24-critical-path.md, M1: the full UpdateCL runs by what the render did with this stalker last frame
+        if (xray::perf::g_perf_metrics_active)
+        {
+            if (!g_Alive())
+                PERF_INC(stk_ucl_n_dead);
+            else if (rendered_in_main_pass())
+                PERF_INC(stk_ucl_n_onscreen);
+            else if (rendered_in_any_pass())
+                PERF_INC(stk_ucl_n_shadow_only);
+            else
+                PERF_INC(stk_ucl_n_offscreen);
+        }
 #endif
+        // -npc_cpp_profile only (stage 0 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md): updates of a
+        // living NPC off screen, and of those also farther than 25 m from the camera without an enemy - what an
+        // update-rate LOD could skip (not seen in the last main pass; never while a second viewport renders)
+        if (g_Alive() && npc_cpp_profile::enabled() && !Device.m_SecondViewport.IsSVPActive() && !rendered_in_main_pass())
+        {
+            npc_cpp_profile::count(ENpcCppProfileStage::UclLodOffscreen);
+            if (!memory().enemy().selected() && this != Level().CurrentEntity() &&
+                Position().distance_to_sqr(Device.vCameraPosition) > 25.f * 25.f)
+                npc_cpp_profile::count(ENpcCppProfileStage::UclLodCandidate);
+        }
+    }
     START_PROFILE("stalker")
     START_PROFILE("stalker/client_update")
     VERIFY2(PPhysicsShell() || getEnabled(), cName().c_str());
-
-    // -npc_cpp_profile only (stage 0 of plans/optimization_arch/NPC_UPDATECL_WORKERS_2026-10-08.md): updates of a
-    // living NPC off screen, and of those also farther than 25 m from the camera without an enemy - what an
-    // update-rate LOD could skip (not seen in the last main pass; never while a second viewport renders)
-    if (g_Alive() && npc_cpp_profile::enabled() && !Device.m_SecondViewport.IsSVPActive() && !rendered_in_main_pass())
-    {
-        npc_cpp_profile::count(ENpcCppProfileStage::UclLodOffscreen);
-        if (!memory().enemy().selected() && this != Level().CurrentEntity() &&
-            Position().distance_to_sqr(Device.vCameraPosition) > 25.f * 25.f)
-            npc_cpp_profile::count(ENpcCppProfileStage::UclLodCandidate);
-    }
 
     if (g_Alive())
     {
@@ -2270,11 +2328,12 @@ const SRotation CAI_Stalker::Orientation() const { return (movement().m_head.cur
 const MonsterSpace::SBoneRotation& CAI_Stalker::head_orientation() const { return (movement().head_orientation()); }
 void CAI_Stalker::net_Relcase(IGameObject* O)
 {
-    ZoneScopedN("CAI_Stalker::net_Relcase");
+    // R5 (32-frame-spikes.md): per stalker x destroyed object - hidden with perf_metrics bit 4
+    PERF_HOT_ZONE("CAI_Stalker::net_Relcase");
     inherited::net_Relcase(O);
 
     {
-        ZoneScopedN("CAI_Stalker::net_Relcase sight_movement");
+        PERF_HOT_ZONE("CAI_Stalker::net_Relcase sight_movement");
         sight().remove_links(O);
         movement().remove_links(O);
     }
@@ -2283,7 +2342,7 @@ void CAI_Stalker::net_Relcase(IGameObject* O)
         return;
 
     {
-        ZoneScopedN("CAI_Stalker::net_Relcase agent_physics");
+        PERF_HOT_ZONE("CAI_Stalker::net_Relcase agent_physics");
         // P17 (plans/optimization_mt/12-relcase.md): the agent manager belongs to the whole group - inside the batched
         // relcase its first alive member cleans it of every object destroyed this frame (back to front, as the
         // per-object relcase did), the other members skip it. Outside a batch (a direct net_Relcase): per object.
@@ -2302,6 +2361,89 @@ void CAI_Stalker::net_Relcase(IGameObject* O)
             agent_manager().remove_links(O);
         m_pPhysics_support->in_NetRelcase(O);
     }
+}
+
+// R1 (32-frame-spikes.md, always on since 2026-10-18): the whole net_Relcase chain of a stalker (CGameObject - empty,
+// CEntityAlive - conditions, CCustomMonster - memory, CAI_Stalker - sight, movement, agent manager, physics) once for
+// the batch, each list walked once with batch.contains / contains_id, instead of the chain once per destroyed object
+// (~1865 stalkers x D destroyed objects, each with a few virtual calls and finds in the group-list visited set).
+// The same end state: no part of the chain re-selects anything or reads what another part removes (see the
+// remove_links_batch of each manager), so the order of the objects and of the parts does not matter. Kept per object:
+// the agent manager (a group list: the first alive member walks the batch as net_Relcase does) and the physics
+// support (fields of one object each, a capture may be deactivated - at most once). Only inside the relcase pass of
+// CObjectList (relcase_first_visit), else per object as before.
+// The parallel relcase (32-frame-spikes.md): in the active pass the own part is put off to CObjectList's parallel phase that follows the
+// pass (once per batch - a callback may move the object to the other list, the second call does the shared part
+// again, as the whole chain was repeated before), the shared part is done here. The parallel phase gives every
+// stalker's own part the state it would see at the end of the active list: the classes left in the serial pass do not
+// read the stalkers' lists (the only Lua there - the zone exit callback of CScriptZone - then sees them not yet
+// cleaned, as for a stalker after the zone), and the own parts of the stalkers do not read each other's lists.
+void CAI_Stalker::net_RelcaseBatch(const RelcaseBatch& batch)
+{
+    CObjectList& objects = Level().Objects;
+    if (!batch.count || objects.relcase_batch() != &batch)
+    {
+        inherited::net_RelcaseBatch(batch);
+        return;
+    }
+    if (objects.relcase_parallel_accepting())
+    {
+        if (m_relcase_parallel_stamp != objects.relcase_batch_stamp())
+        {
+            m_relcase_parallel_stamp = objects.relcase_batch_stamp();
+            objects.relcase_defer_parallel(this, &CAI_Stalker::net_RelcaseBatchOwnDeferred);
+        }
+        net_RelcaseBatchShared(batch);
+        return;
+    }
+    PERF_HOT_ZONE("CAI_Stalker::net_RelcaseBatch");
+    PERF_SCOPE(relcase_npc_batch);
+    net_RelcaseBatchOwn(batch);
+    net_RelcaseBatchShared(batch);
+}
+
+// The parallel relcase: the own part on a task worker (or on the main thread for a small batch), see net_RelcaseBatch.
+// objects/relcase/npc_batch is then the sum over the threads and does not hold the shared part.
+void CAI_Stalker::net_RelcaseBatchOwnDeferred(void* self, const RelcaseBatch& batch)
+{
+    PERF_HOT_ZONE("CAI_Stalker::net_RelcaseBatch own");
+    PERF_SCOPE(relcase_npc_batch);
+    static_cast<CAI_Stalker*>(self)->net_RelcaseBatchOwn(batch);
+}
+
+// The own lists of the stalker (R1). The group memory lists (visual / sound / hit) are cleaned by the first member that
+// reaches them (relcase_first_visit; lock free in the parallel phase). Nothing here calls Lua, the sound or the physics,
+// or allocates beyond freeing the selected sound / hit (xrMemory is thread safe).
+void CAI_Stalker::net_RelcaseBatchOwn(const RelcaseBatch& batch)
+{
+    // CEntityAlive::net_Relcase: the last hitter (one pointer)
+    if (IGameObject* const who = conditions().GetWhoHitLastTime(); who && batch.contains(who))
+        conditions().remove_links(who);
+
+    // CCustomMonster::net_Relcase
+    memory().remove_links_batch(batch);
+
+    // CAI_Stalker::net_Relcase
+    sight().remove_links_batch(batch);
+    movement().remove_links_batch(batch);
+}
+
+// The agent manager of the group (the first alive member walks the batch) and the physics support (a capture may be
+// deactivated - ODE): always on the thread of the relcase pass.
+void CAI_Stalker::net_RelcaseBatchShared(const RelcaseBatch& batch)
+{
+    if (!g_Alive())
+        return;
+
+    if (Level().Objects.relcase_first_visit(&agent_manager()))
+    {
+        for (u32 it = batch.count; it-- > 0;)
+            agent_manager().remove_links(batch.objects[it]);
+    }
+    else
+        PERF_INC(relcase_agent_skips);
+    for (u32 it = batch.count; it-- > 0;)
+        m_pPhysics_support->in_NetRelcase(batch.objects[it]);
 }
 
 CMovementManager* CAI_Stalker::create_movement_manager()
@@ -2474,8 +2616,9 @@ bool CAI_Stalker::can_fire_right_now()
     if (!ready_to_kill())
         return (false);
 
-    VERIFY(best_weapon());
-    CWeapon& best_weapon = smart_cast<CWeapon&>(*this->best_weapon());
+    CInventoryItem* const best_item = this->best_weapon(); // 45-engine-ai-audit.md, N12: one call
+    VERIFY(best_item);
+    CWeapon& best_weapon = smart_cast<CWeapon&>(*best_item);
     return best_weapon.GetAmmoElapsed() > 0;
 }
 

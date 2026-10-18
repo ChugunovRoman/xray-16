@@ -301,6 +301,14 @@ protected:
     // the last frame they were recomputed again after the prepass (invalidated after it: a miss). The prepass then
     // leaves the model to the render for a while (e.g. a weapon that invalidates its own bones in renderable_Render).
     std::atomic<u32> m_prepass_miss_frame{0};
+    // Pipelined prepass (r__bones_prepass_pipeline): the frame phase B ran early (right after the UpdateCL batch of the
+    // object, BonesPrepass_PhaseBEarly; reset by the first recompute after it - prepass/redone);
+    std::atomic<u32> m_prepass_early_frame{0};
+    // the frame the pose input changed after the early compute (an animation mutator, the owner's XFORM): the prepass
+    // of that frame recomputes the bones (BonesPrepass_PhaseA);
+    std::atomic<u32> m_prepass_early_dirty{0};
+    // the last frame early bones were recomputed again: the pipeline then leaves the model to the prepass for a while.
+    std::atomic<u32> m_prepass_early_redo_frame{0};
 
     // Perf metrics only (P15, render/main/skin_repeat): Device.dwFrame + 1 of the last GPU-skinned draw of this model in
     // the main view's dynamic submit. Read and written by CSkeletonX::_Render on the main thread only.
@@ -436,6 +444,16 @@ public:
     bool BonesPrepass_Wanted() const override;
     bool BonesPrepass_PhaseA() override;
     bool BonesPrepass_PhaseB() override;
+    bool BonesPrepass_EarlyWanted() const override;
+    bool BonesPrepass_PhaseBEarly() override;
+    void BonesPrepass_MarkEarlyDirty() override;
+    bool BonesPrepass_LazyPhaseA() override;
+    bool BonesPrepass_LazyPhaseB() override;
+    bool BonesPrepass_LazyPhaseBEarly() override;
+    bool BonesPrepass_Done() const override;
+    // Pipelined prepass: an animation mutator (PlayCycle & co., under the model lock) changed the blends - early bones
+    // of this frame are stale, the prepass recomputes them.
+    void BonesPrepass_NoteMutation() { BonesPrepass_MarkEarlyDirty(); }
     // Game-side access to UCalc_ModelLock, see IKinematics. The token is the thread's previous lock owner.
     bool LockBones(const void*& unlock_token) override;
     void UnlockBones(const void* unlock_token) override;

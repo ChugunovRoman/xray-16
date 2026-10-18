@@ -55,6 +55,8 @@ public:
     virtual void update(u32 time_delta);
     virtual void on_frame(CPHMovementControl* movement_control, Fvector& dest_position);
     virtual void remove_links(IGameObject* object);
+    // R1 (32-frame-spikes.md): remove_links for every object of the batch, in one pass
+    virtual void remove_links_batch(const struct RelcaseBatch& batch);
     void cleanup_after_animation_selector();
     bool in_smart_cover() const;
     // Ground snap (CMovementManager::ground_snap): a loophole may hold the stalker off the AI floor

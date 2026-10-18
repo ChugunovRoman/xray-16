@@ -72,6 +72,8 @@ struct GameLogicThreadState
     bool early_dispatched{};
     // perf_metrics: xray::perf::Ticks() of KickGameLogicThread (game/start_delay); written before body_requested
     u64 kick_ticks{};
+    // 29-game-thread-next.md, A3: the K9 sound render task phase 0 started (the body waits for it). The Game thread only
+    Task* early_sound_task{};
 };
 // Created on the first kick and never deleted on purpose: a joinable std::thread in a static destructor calls
 // std::terminate() (e.g. exit after a fatal error without Device.Destroy). ShutdownGameLogicThread() joins it.
@@ -99,6 +101,27 @@ void RunSeqFrameMT()
     Device.seqFrameMT.Process();
 }
 
+// K9 (26-framemove-game-next.md): GEnv.Sound->render() of the frame as a TaskManager task
+void RunSoundRenderTask()
+{
+    ZoneScopedN("SoundRenderTask");
+    PERF_SCOPE(game_seq_frame_mt_sound);
+    GEnv.Sound->render();
+}
+
+// 29-game-thread-next.md, A3 (always on since 2026-10-18, see plan 41): the K9 task of the frame starts here, in phase
+// 0 right after its dispatch - SoundEvent_Dispatch reads the emitters' params (feedback->get_params()) without
+// m_emitters_lock, so the render must not start before it ends. The body then only waits for it (before seqFrameMT, as
+// before).
+void StartSoundRenderEarly(GameLogicThreadState& s)
+{
+    if (!TaskScheduler || !GEnv.Sound || s.early_sound_task)
+        return;
+    s_sound_render_taken = true;
+    s.early_sound_task = &TaskScheduler->AddTask([] { RunSoundRenderTask(); });
+    PERF_INC(game_sound_render_early);
+}
+
 // 26-framemove-game-next.md, K3/K2b: phase 0 (XRay::Engine::KickGameLogicEarly). Runs on the dedicated thread while
 // main finishes the bones prepass (phases B/C) and kicks the physics; the body of the frame follows on this thread.
 void GameThreadEarlyBody(GameLogicThreadState& s)
@@ -106,16 +129,21 @@ void GameThreadEarlyBody(GameLogicThreadState& s)
     ZoneScopedN("GameThreadEarly");
     PERF_SCOPE(game_early);
     s.early_dispatched = false;
-    if (s.early_sound_dispatch && g_pGameLevel && g_pGameLevel->bReady)
+    const bool dispatch = s.early_sound_dispatch && g_pGameLevel && g_pGameLevel->bReady;
+    if (dispatch)
     {
-        // C++ only (no Lua, animations, visuals, ODE): IGame_Level::SoundEvent_Dispatch. The sound events were
-        // registered by GEnv.Sound->update in FrameMove of main, before the prepass.
-        ZoneScopedN("SoundEvent_Dispatch");
-        PERF_SCOPE(game_sound_dispatch);
-        PERF_SPIKE_PHASE("game/sound_dispatch");
-        g_pGameLevel->SoundEvent_Dispatch();
+        // IGame_Level::SoundEvent_Dispatch (no animations, visuals, ODE; its only Lua - the hit callback of the "fake"
+        // hit of an enemy shot - runs here at once, the GC step comes after it). The sound events were registered by
+        // GEnv.Sound->update in FrameMove of main, before the prepass.
+        {
+            ZoneScopedN("SoundEvent_Dispatch");
+            PERF_SCOPE(game_sound_dispatch);
+            PERF_SPIKE_PHASE("game/sound_dispatch");
+            g_pGameLevel->SoundEvent_Dispatch();
+        }
         s.early_dispatched = true;
         PERF_INC(game_early_dispatch);
+        StartSoundRenderEarly(s); // A3: the dispatch is over
     }
     if (s.early_work)
     {
@@ -175,18 +203,16 @@ void GameThreadOverlapBody(GameLogicThreadState& s)
         }
     }
 
-    // K9 (26-framemove-game-next.md), mt_sound_render_task: the sound render of the frame (OpenAL sources, stream
+    // K9 (26-framemove-game-next.md, always on since 2026-10-18): the sound render of the frame (OpenAL sources, stream
     // prefill) as a task beside seqParallel instead of in seqFrameMT. It takes m_emitters_lock as before: what plays or
     // stops a sound meanwhile (object handler shots, sound players, the physics step) waits for its loop there.
-    Task* sound_task = nullptr;
-    if (XRay::Engine::g_mt_sound_render_task && TaskScheduler && GEnv.Sound)
+    // 29-game-thread-next.md, A3: phase 0 may have started it already
+    Task* sound_task = s.early_sound_task;
+    s.early_sound_task = nullptr;
+    if (!sound_task && TaskScheduler && GEnv.Sound)
     {
         s_sound_render_taken = true;
-        sound_task = &TaskScheduler->AddTask([] {
-            ZoneScopedN("SoundRenderTask");
-            PERF_SCOPE(game_seq_frame_mt_sound);
-            GEnv.Sound->render();
-        });
+        sound_task = &TaskScheduler->AddTask([] { RunSoundRenderTask(); });
     }
 
     RunParallelSequence();
@@ -235,8 +261,6 @@ void GameLogicThreadLoop(GameLogicThreadState& s)
     }
 }
 } // namespace
-
-int XRay::Engine::g_mt_sound_render_task = 1; // on by default for the long test (2026-10-16), still a temporary switch
 
 bool XRay::Engine::SoundRenderTakenByTask() { return s_sound_render_taken; }
 

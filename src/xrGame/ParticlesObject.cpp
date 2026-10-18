@@ -217,15 +217,53 @@ void CParticlesObject::PerformAllTheWork(u32 _dt)
     UpdateSpatial();
 }
 
+void CParticlesObject::PSI_destroy()
+{
+    if (!m_bDead)
+        m_deadFrame = Device.dwFrame;
+    inherited::PSI_destroy();
+}
+
 void CParticlesObject::AsyncParticle_PreWorkerCollect()
 {
-    if (GEnv.isDedicatedServer || m_bDead)
+    if (GEnv.isDedicatedServer)
         return;
+    if (m_bDead)
+    {
+        // Guard (plans/optimization_mt/38-frozen-particles.md). A dead instance is not stepped any more (here and in
+        // ParticleWorker_ApplyFrame) but stays in the spatial DB and is drawn by renderable_Render until
+        // OnFrameBeforePreRender deletes it through ps_destroy - at the start of the next frame. Still here two frames
+        // later, it is not in ps_destroy (the only other case, Locked(), is a ps_destroy entry waiting and logs
+        // "--locked"): its last particles hang in the air for good. Runs on main at the start of the frame, after the
+        // ps_destroy loop and with no other thread touching the lists, so the entry is put back safely.
+        if (Device.dwFrame - m_deadFrame > 2)
+        {
+            auto& destroy = g_pGamePersistent->ps_destroy;
+            if (std::find(destroy.begin(), destroy.end(), this) == destroy.end())
+            {
+                if (!m_deadOrphanReported)
+                {
+                    m_deadOrphanReported = true;
+                    Msg("! [particles] '%s' dead since frame %u is not in ps_destroy: queued again", Name().c_str(),
+                        m_deadFrame);
+                }
+                destroy.push_back(this);
+            }
+        }
+        return;
+    }
     if (!psDeviceFlags.test(mtParticles))
         return;
-    const u32 dt = Device.dwTimeGlobal - dwLastTime;
+    // One snapshot of the time for dt and for dwLastTime (plans/optimization_mt/38-frozen-particles.md): this runs at
+    // the start of the frame, before FrameMove moves Device.dwTimeGlobal on, while ParticleWorker_ApplyFrame runs on the
+    // PreRender task beside FrameMove and used to read the time anew - usually the new one. The next collect then found
+    // dt == 0 and the interval of the previous frame was never simulated: particles ran at about half speed against the
+    // real-time lifetime of the object.
+    const u32 now = Device.dwTimeGlobal;
+    const u32 dt = now - dwLastTime;
     if (!dt)
         return;
+    m_asyncParticleCollectTime = now;
     m_asyncParticlePendingDt = dt;
     ParticleWorker_Enqueue(this);
 }
@@ -251,7 +289,7 @@ void CParticlesObject::ParticleWorker_ApplyFrame()
         return;
     }
     V->OnFrame(m_asyncParticlePendingDt);
-    dwLastTime = Device.dwTimeGlobal;
+    dwLastTime = m_asyncParticleCollectTime; // the time dt was measured up to, not the current one (see the collect)
     m_asyncParticlePendingDt = 0;
 }
 

@@ -17,6 +17,9 @@
 #include "script_profiler.hpp"
 #include "script_thread.hpp"
 #include "BindingsDumper.hpp"
+#include "script_wrapper_cache.hpp"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrCore/Threading/ScopeLock.hpp"
 #ifdef USE_DEBUGGER
 #include "script_debugger.hpp"
 #endif
@@ -31,6 +34,7 @@
 #include <luabind/class_info.hpp>
 
 #include <stdarg.h>
+#include <atomic>
 
 Flags32 g_LuaDebug;
 int g_LuaDumpDepth = 0;
@@ -162,6 +166,8 @@ void CScriptEngine::reinit()
         if (m_profiler)
             m_profiler->OnDispose(m_virtual_machine);
 
+        // The Lua wrapper cache: the cached wrappers die with this state
+        xray::script_wrapper_cache::OnStateReset();
         lua_close(m_virtual_machine);
         UnregisterState(m_virtual_machine);
     }
@@ -172,6 +178,16 @@ void CScriptEngine::reinit()
         return;
     }
     RegisterState(m_virtual_machine, this);
+#ifdef LUAJIT_GW_FINOBJ
+    // 35-lua-gc-finobj.md: the userdata with __gc in a list of their own, the atomic phase of the GC walks only it.
+    // Switched on while the state is empty, so no walk of the existing userdata
+    luaJIT_gw_finobj(m_virtual_machine, 1);
+#endif
+#ifdef LUAJIT_GW_PREWALK
+    // 42-lua-gc-prewalk.md: the live userdata with __gc checked and grayagain drained in the GC steps, so the atomic
+    // phase walks only the dead userdata and the tables written since (always on since 2026-10-18, see plan 41)
+    luaJIT_gw_prewalk(m_virtual_machine, LUAJIT_GW_PREWALK_UDATA | LUAJIT_GW_PREWALK_GRAYAGAIN);
+#endif
     if (strstr(Core.Params, "-_g"))
         file_header = file_header_new;
     else
@@ -747,7 +763,10 @@ CScriptEngine::~CScriptEngine()
     }
 
     if (m_virtual_machine)
+    {
+        xray::script_wrapper_cache::OnStateReset();
         lua_close(m_virtual_machine);
+    }
     while (!m_script_processes.empty())
         remove_script_process(m_script_processes.begin()->first);
 #ifdef DEBUG
@@ -1271,3 +1290,105 @@ void CScriptEngine::DestroyScriptThread(const CScriptThread* thread)
 }
 
 bool CScriptEngine::is_editor() { return m_is_editor; }
+
+// --- The Lua wrapper cache (script_wrapper_cache.hpp; 32-frame-spikes.md; always on since 2026-10-18) ---
+namespace xray::script_wrapper_cache
+{
+
+namespace
+{
+// the Lua state of the references: moved by OnStateReset, a slot of another epoch is empty
+std::atomic<unsigned> s_epoch{1};
+// cached wrappers alive (lua/wrapper_cache_live)
+std::atomic<s64> s_live{0};
+// the references of the dead owners, unref'ed by the next Push (under Lua); {ref, epoch}
+Lock s_released_lock;
+xr_vector<std::pair<int, unsigned>> s_released;
+std::atomic<bool> s_has_released{false};
+
+void SetLiveGauge()
+{
+#if XR_PERF_METRICS
+    xray::perf::SetGauge(xray::perf::Metric::lua_wrapper_cache_live, s_live.load(std::memory_order_relaxed));
+#endif
+}
+
+void UnrefReleased(lua_State* L)
+{
+    thread_local xr_vector<std::pair<int, unsigned>> refs;
+    refs.clear();
+    {
+        ScopeLock lock(&s_released_lock);
+        refs.swap(s_released);
+        s_has_released.store(false, std::memory_order_relaxed);
+    }
+    const unsigned epoch = s_epoch.load(std::memory_order_relaxed);
+    for (const auto& [ref, ref_epoch] : refs)
+    {
+        if (ref_epoch == epoch) // the old state took its references with it
+            luaL_unref(L, LUA_REGISTRYINDEX, ref);
+    }
+}
+} // namespace
+
+bool Push(lua_State* L, Slot& slot)
+{
+    if (s_has_released.load(std::memory_order_relaxed))
+        UnrefReleased(L);
+    if (slot.ref != Slot::NoRef && slot.epoch == s_epoch.load(std::memory_order_relaxed))
+    {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, slot.ref);
+        if (lua_type(L, -1) == LUA_TUSERDATA)
+        {
+            PERF_INC(lua_wrapper_cache_hits);
+            return true;
+        }
+        // never expected: the registry slot holds something else; make a new wrapper, leave the slot alone
+        lua_pop(L, 1);
+        slot.ref = Slot::NoRef;
+        s_live.fetch_sub(1, std::memory_order_relaxed);
+        SetLiveGauge();
+    }
+    PERF_INC(lua_wrapper_cache_misses);
+    return false;
+}
+
+void Store(lua_State* L, Slot& slot)
+{
+    lua_pushvalue(L, -1);
+    slot.ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    slot.epoch = s_epoch.load(std::memory_order_relaxed);
+    s_live.fetch_add(1, std::memory_order_relaxed);
+    SetLiveGauge();
+}
+
+void Release(Slot& slot)
+{
+    if (slot.ref == Slot::NoRef)
+        return;
+    const int ref = slot.ref;
+    const unsigned ref_epoch = slot.epoch;
+    slot.ref = Slot::NoRef;
+    if (ref_epoch != s_epoch.load(std::memory_order_relaxed))
+        return; // the state of the wrapper is gone already (OnStateReset zeroed the count)
+    {
+        ScopeLock lock(&s_released_lock);
+        s_released.emplace_back(ref, ref_epoch);
+        s_has_released.store(true, std::memory_order_relaxed);
+    }
+    s_live.fetch_sub(1, std::memory_order_relaxed);
+    SetLiveGauge();
+}
+
+void OnStateReset()
+{
+    {
+        ScopeLock lock(&s_released_lock);
+        s_released.clear();
+        s_has_released.store(false, std::memory_order_relaxed);
+    }
+    s_epoch.fetch_add(1, std::memory_order_relaxed);
+    s_live.store(0, std::memory_order_relaxed);
+    SetLiveGauge();
+}
+} // namespace xray::script_wrapper_cache

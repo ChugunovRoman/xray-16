@@ -158,11 +158,55 @@ void CRender::svp_forget_light(light* L)
     }
 }
 
+// SV (31-svp-scope.md). The package never holds the sun (light::Export exports POINT/SPOT/OMNIPART
+// only - render_sun accumulates it on its own), but a DIRECT light is kept anyway. Also kept: HUD-mode lights and
+// player-attached ones (the torch: the eye sits at the origin), lights with GI bounces (their reflected lights stand
+// elsewhere), entries without a valid volume. The rest - the volume sphere (OMNIPART: the parent's position + range,
+// all 6 parts together; SPOT/POINT: the spatial sphere, at least the range around its center - it bounds the cone,
+// the shadow and the volumetric shaft too) with a margin, against the scope frustum or around the eye.
+bool CRender::svp_light_keep(const light* L, const CFrustum& F, const Fvector& eye)
+{
+    if (!L)
+        return true; // a destroyed entry (svp_forget_light) - the consumers skip it
+    if (L->flags.type == IRender_Light::DIRECT || L->flags.bHudMode || is_player_attached_light(L))
+        return true;
+    if (!L->indirect.empty() && ps_r2_ls_flags.test(R2FLAG_GI))
+        return true;
+    const bool part = L->flags.type == IRender_Light::OMNIPART;
+    const Fvector& P = part ? L->position : L->spatial.sphere.P;
+    const float R = part ? L->range : _max(L->spatial.sphere.R, L->range);
+    if (!_valid(P) || !_valid(R) || R <= 0.f)
+        return true;
+    const float Rm = R * 1.05f + 0.5f;
+    if (eye.distance_to_sqr(P) <= Rm * Rm)
+        return true; // the eye is inside the volume
+    return F.testSphere_dirty(P, Rm);
+}
+
 void CRender::filter_light_package_for_svp(const light_Package& src, light_Package& dst)
 {
-    dst.v_shadowed = src.v_shadowed;
-    dst.v_point = src.v_point;
-    dst.v_spot = src.v_spot;
+    // The frame driver accumulates its shadowed lights from the transferred pages (svp_accumulate_prebuilt counts
+    // them), the copy of v_shadowed is not used then.
+    [[maybe_unused]] const bool count_shadowed = svp_shadow_stage == 0;
+    // SV (31-svp-scope.md, always on since 2026-10-18, 41-cvar-cleanup.md). svp_calc_params: this frame's scope
+    // snapshot (the filter runs only with svp_parallel), its frustum cropped to the lens (L0).
+    const CFrustum& F = svp_calc_params.view_frustum;
+    const Fvector& eye = svp_calc_params.view_pos;
+    const auto filter = [&F, &eye](const xr_vector<light*>& from, xr_vector<light*>& to, [[maybe_unused]] bool count)
+    {
+        to.clear();
+        to.reserve(from.size());
+        for (light* L : from)
+        {
+            if (svp_light_keep(L, F, eye))
+                to.push_back(L);
+        }
+        PERF_ADD_IF(count, rsvp_lights_in, from.size());
+        PERF_ADD_IF(count, rsvp_lights_kept, to.size());
+    };
+    filter(src.v_shadowed, dst.v_shadowed, count_shadowed);
+    filter(src.v_point, dst.v_point, true);
+    filter(src.v_spot, dst.v_spot, true);
 }
 
 void CRender::render_lights(light_Package& LP, bool svp_no_vis)
@@ -528,6 +572,10 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
     // replaces a per-light q_frustum octree walk. Radius covers every light volume that
     // survived the distance cull (shadow_dist + max light range with margin).
     static xr_vector<ISpatial*> common_dynamic;
+    // 46-engine-core-render-audit.md: the fields the light passes' sector/frustum filters read (build_subspace), sampled
+    // once right after the query - it has just read the same SpatialData - instead of 3 virtual calls and 1-2 cache
+    // misses per object in every light pass (~3.4k objects x 10-30 lights a frame in a heavy fight, ~85% of them missed).
+    static xr_vector<precomputed_spatial_t> common_dynamic_data;
     if (!reuse_shadowmaps && !LP.v_shadowed.empty())
     {
         ZoneScopedN("light_common_dynamic_query");
@@ -539,6 +587,15 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
         common_dynamic.clear();
         SpatialCaller spatial_caller(SpatialQueryCaller::render);
         g_pGamePersistent->SpatialSpace.q_sphere(common_dynamic, 0, STYPE_RENDERABLE, Device.vCameraPosition, max_reach * 1.05f);
+        common_dynamic_data.clear();
+        common_dynamic_data.reserve(common_dynamic.size());
+        for (ISpatial* spatial : common_dynamic)
+        {
+            if (!spatial)
+                continue; // the passes skip it first thing
+            SpatialData& data = spatial->GetSpatialData();
+            common_dynamic_data.push_back({ spatial, data.sphere, data.sector_id.load(std::memory_order_relaxed) });
+        }
     }
 
     // P2.3: skipped entirely in the reuse mode (see above).
@@ -600,7 +657,7 @@ void CRender::render_lights(light_Package& LP, bool svp_no_vis)
                     dsgraph.o.use_shadow_hull_cull = true;
                     dsgraph.o.shadow_light_pos = L->position;
                     dsgraph.o.shadow_light_range = L->range;
-                    dsgraph.o.precomputed_dynamic = &common_dynamic;
+                    dsgraph.o.precomputed_dynamic = &common_dynamic_data;
                     dsgraph.o.shadow_owner = L->shadow_owner;
 
                     {
@@ -943,10 +1000,29 @@ void CRender::svp_accumulate_prebuilt(light_Package& LP)
         // quads (the per-slice SRV swap render_sun::accumulate_cascade uses per cascade) and
         // accumulate with the MAIN pass's X.S placements, valid for the whole frame.
         ZoneScopedN("SVP accum transfer");
+        // SV (31-svp-scope.md): the pages hold every shadowed light of the MAIN pass - accumulate only those the
+        // scope frustum (cropped with L0) can see.
+        const CFrustum& filter_frustum = svp_calc_params.view_frustum;
+        const Fvector& filter_eye = svp_calc_params.view_pos;
+        xr_vector<light*> page_kept;
+        [[maybe_unused]] const auto count_alive = [](const xr_vector<light*>& v)
+        {
+            return u64(std::count_if(v.begin(), v.end(), [](const light* L) { return L != nullptr; }));
+        };
         for (size_t i = 0; i < svp_shadow_page_lights.size(); ++i)
         {
             Target->rt_smap_depth->pTexture->set_slice(int(i));
-            const xr_vector<light*>& page = svp_shadow_page_lights[i];
+            const xr_vector<light*>* page_src = &svp_shadow_page_lights[i];
+            PERF_ADD(rsvp_lights_in, count_alive(*page_src));
+            page_kept.clear();
+            for (light* p_light : *page_src)
+            {
+                if (p_light && svp_light_keep(p_light, filter_frustum, filter_eye))
+                    page_kept.push_back(p_light);
+            }
+            page_src = &page_kept;
+            PERF_ADD(rsvp_lights_kept, count_alive(*page_src));
+            const xr_vector<light*>& page = *page_src;
             if (!page.empty())
             {
                 PIX_EVENT(ACCUM_SPOT);
@@ -972,6 +1048,10 @@ void CRender::svp_accumulate_prebuilt(light_Package& LP)
         {
             if (!p_light)
                 continue; // destroyed since the list was built (svp_forget_light)
+            PERF_INC(rsvp_lights_in);
+            if (!svp_light_keep(p_light, filter_frustum, filter_eye))
+                continue;
+            PERF_INC(rsvp_lights_kept);
             const bool wasShadow = p_light->flags.bShadow != 0;
             p_light->flags.bShadow = false;
             Target->accum_spot(cmd_list, p_light);

@@ -8,6 +8,7 @@
 
 #include "StdAfx.h"
 #include "stalker_movement_manager_obstacles.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 #include "stalker_movement_manager_space.h"
 #include "ai_space.h"
 #include "ai/stalker/ai_stalker.h"
@@ -128,7 +129,11 @@ void stalker_movement_manager_obstacles::move_along_path_impl(
     if (psAI_Flags.test(aiObstaclesAvoidingStatic))
 #endif // MASTER_GOLD
     {
-        m_dynamic_obstacles.update();
+        {
+            // 28-updatecl-main.md: movement/obstacles = the obstacle queries and the path rebuild they ask for
+            PERF_SCOPE(mv_obstacles);
+            m_dynamic_obstacles.update();
+        }
         if (!m_dynamic_obstacles.movement_enabled())
         {
             float desirable_speed = old_desirable_speed();
@@ -141,14 +146,17 @@ void stalker_movement_manager_obstacles::move_along_path_impl(
         }
     }
 
-    m_static_obstacles.update();
+    {
+        PERF_SCOPE(mv_obstacles);
+        m_static_obstacles.update();
 
-    if (
+        if (
 #ifndef MASTER_GOLD
-        (!psAI_Flags.test(aiObstaclesAvoidingStatic) && m_dynamic_obstacles.need_path_to_rebuild()) ||
+            (!psAI_Flags.test(aiObstaclesAvoidingStatic) && m_dynamic_obstacles.need_path_to_rebuild()) ||
 #endif // MASTER_GOLD
-        m_static_obstacles.need_path_to_rebuild())
-        rebuild_path();
+            m_static_obstacles.need_path_to_rebuild())
+            rebuild_path();
+    }
 
     inherited::move_along_path(movement_control, dest_position, time_delta);
 }
@@ -222,6 +230,14 @@ void stalker_movement_manager_obstacles::remove_links(IGameObject* object)
     inherited::remove_links(object);
     m_static_obstacles.remove_links(object);
     m_dynamic_obstacles.remove_links(object);
+}
+
+// R1 (32-frame-spikes.md): remove_links for every object of the batch in one pass per query
+void stalker_movement_manager_obstacles::remove_links_batch(const RelcaseBatch& batch)
+{
+    inherited::remove_links_batch(batch);
+    m_static_obstacles.remove_links_batch(batch);
+    m_dynamic_obstacles.remove_links_batch(batch);
 }
 
 static float get_distance(Fvector const& a_first, Fvector const& a_second, Fvector const& b_first,

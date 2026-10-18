@@ -54,6 +54,8 @@ public:
     virtual bool process_query(const bool& change_path_state);
     void update();
     void remove_links(IGameObject* object);
+    // R1 (32-frame-spikes.md): remove_links for every object of the batch, in one pass
+    void remove_links_batch(const struct RelcaseBatch& batch);
 };
 
 #include "static_obstacles_avoider_inline.h"

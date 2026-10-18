@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <mutex>
+
 namespace xray::render::RENDER_NAMESPACE
 {
 enum enum_stats_buffer_type
@@ -34,6 +36,10 @@ public:
     u32 memory_usage_summary[enum_stats_buffer_type_COUNT][4];
 
 private:
+    // 40-parallel-prefetch.md (plans/optimization_mt): the buffers of models are created on several threads during the
+    // model prefetch (D3D11 creates resources free-threaded); guards memory_usage_summary and m_buffers_list
+    std::mutex m_lock;
+
     void increment_stats(u32 size, enum_stats_buffer_type type, _D3DPOOL location, void* buff_ptr);
     void decrement_stats(u32 size, enum_stats_buffer_type type, _D3DPOOL location, void* buff_ptr);
 

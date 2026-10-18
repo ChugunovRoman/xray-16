@@ -39,9 +39,25 @@ using namespace R_dsgraph;
 extern float r_ssaHZBvsTEX;
 extern float r_ssaGLOD_start, r_ssaGLOD_end;
 
-ICF float calcLOD(float ssa /*fDistSq*/, float /*R*/)
+// Geometry LOD range of the pass being drawn: its own snapshot when the scope geometry is recorded on the SVP worker
+// while the globals still hold the main view's range (R_dsgraph_structure::options_t::lod_own),
+// otherwise the globals.
+struct glod_range_t
 {
-    return _sqrt(clampr((ssa - r_ssaGLOD_end) / (r_ssaGLOD_start - r_ssaGLOD_end), 0.f, 1.f));
+    float start;
+    float end;
+};
+
+ICF glod_range_t pass_glod(const R_dsgraph_structure::options_t& o)
+{
+    if (o.lod_own)
+        return { o.lod.GLOD_start, o.lod.GLOD_end };
+    return { r_ssaGLOD_start, r_ssaGLOD_end };
+}
+
+ICF float calcLOD(float ssa /*fDistSq*/, float /*R*/, const glod_range_t& glod)
+{
+    return _sqrt(clampr((ssa - glod.end) / (glod.start - glod.end), 0.f, 1.f));
 }
 
 template <class T>
@@ -61,7 +77,7 @@ bool cmp_pass(const T& left, const T& right)
 // SSA-sorted items of one SPass group drawn on cmd_list. Static (mapNormal) items keep the world transform the caller
 // set (identity); dynamic (mapMatrix) items set their own.
 static void render_normal_items(CBackend& cmd_list, SPass* pass, const _NormalItem* items, size_t count,
-    bool use_fast_geo, [[maybe_unused]] bool perf_main)
+    const glod_range_t& glod, bool use_fast_geo, [[maybe_unused]] bool perf_main)
 {
     cmd_list.set_Pass(pass);
     cmd_list.apply_lmaterial();
@@ -71,7 +87,7 @@ static void render_normal_items(CBackend& cmd_list, SPass* pass, const _NormalIt
     for (size_t i = 0; i < count; ++i)
     {
         const _NormalItem& item = items[i];
-        const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R);
+        const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R, glod);
 #ifdef USE_DX11
         cmd_list.LOD.set_LOD(LOD);
 #endif
@@ -84,7 +100,7 @@ static void render_normal_items(CBackend& cmd_list, SPass* pass, const _NormalIt
 
 // Returns the number of items whose object is forced to the character LOD (BasicStats.CorpseRegularSubmissions).
 static u32 render_matrix_items(CBackend& cmd_list, SPass* pass, const _MatrixItem* items, size_t count,
-    bool use_fast_geo, [[maybe_unused]] bool perf_main)
+    const glod_range_t& glod, bool use_fast_geo, [[maybe_unused]] bool perf_main)
 {
     cmd_list.set_Pass(pass);
     PERF_ADD_IF(perf_main, rmain_dyn_passes, 1);
@@ -100,7 +116,7 @@ static u32 render_matrix_items(CBackend& cmd_list, SPass* pass, const _MatrixIte
         }
         cmd_list.apply_lmaterial();
 
-        const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R);
+        const float LOD = calcLOD(item.ssa, item.pVisual->vis.sphere.R, glod);
 #ifdef USE_DX11
         cmd_list.LOD.set_LOD(LOD);
 #endif
@@ -117,6 +133,58 @@ static u32 render_matrix_items(CBackend& cmd_list, SPass* pass, const _MatrixIte
     return corpses;
 }
 
+void R_dsgraph_structure::render_graph_static_passes(u32 _priority, bool use_fast_geo, [[maybe_unused]] bool perf_main)
+{
+    // **************************************************** NORMAL
+    // Perform sorting based on ScreenSpaceArea
+    // Sorting by SSA and changes minimizations
+    // Render several passes
+    ZoneScopedN("dsgraph_render_static");
+    PIX_EVENT_CTX(cmd_list, dsgraph_render_static);
+    PERF_SCOPE_IF(perf_main, rmain_submit_static);
+    // render/svp/geom_* (31-svp-scope.md): the scope view's geometry recording (the SVP worker or the sequential pass).
+    [[maybe_unused]] const bool perf_svp = o.svp_view && _priority == 0;
+    PERF_SCOPE_IF(perf_svp, rsvp_geom_static);
+    [[maybe_unused]] const u32 perf_draws0 = cmd_list.stat.render.calls;
+    PERF_CB_SNAPSHOT(perf_cb_static);
+    const glod_range_t glod = pass_glod(o);
+
+    for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
+    {
+        auto& map = mapNormalPasses[_priority][iPass];
+
+        map.get_any_p(nrmPasses);
+        std::sort(nrmPasses.begin(), nrmPasses.end(), cmp_pass<mapNormal_T::value_type*>);
+        for (const auto& it : nrmPasses)
+        {
+            mapNormalItems& items = it->second;
+            items.ssa = 0;
+
+            std::sort(items.begin(), items.end(), cmp_ssa<_NormalItem>);
+            render_normal_items(cmd_list, it->first, items.data(), items.size(), glod, use_fast_geo, perf_main);
+            items.clear();
+        }
+        nrmPasses.clear();
+        map.clear();
+    }
+    PERF_ADD_IF(perf_main, rmain_static_draws, cmd_list.stat.render.calls - perf_draws0);
+    PERF_ADD_IF(perf_svp, rsvp_geom_static_draws, cmd_list.stat.render.calls - perf_draws0);
+    PERF_CB_DELTA(perf_main, rmain_static_cb_flush, perf_cb_static);
+}
+
+// 27-render-main.md (R2): the main view's static geometry before r_main.sync(), while the dynamic
+// half of the build is still running on a worker - it fills only the dynamic lists (mapMatrixPasses, mapSorted, the HUD
+// maps...), never mapNormalPasses, which the early static half has completed by then.
+void R_dsgraph_structure::render_graph_static(u32 _priority)
+{
+    PIX_EVENT_CTX(cmd_list, dsgraph_render_graph);
+    RImplementation.BasicStats.Primitives.Begin(); // XXX: Refactor a bit later
+    cmd_list.set_xform_world(Fidentity);
+    const bool perf_main = o.is_main_pass && !o.second_vp_pass;
+    render_graph_static_passes(_priority, o.phase == CRender::PHASE_SMAP, perf_main);
+    RImplementation.BasicStats.Primitives.End(); // XXX: Refactor a bit later
+}
+
 void R_dsgraph_structure::render_graph(u32 _priority)
 {
     PIX_EVENT_CTX(cmd_list, dsgraph_render_graph);
@@ -126,6 +194,7 @@ void R_dsgraph_structure::render_graph(u32 _priority)
 
     // render/main/* metrics: only the main view's graph (not cascades, lights or the scope pass).
     [[maybe_unused]] const bool perf_main = o.is_main_pass && !o.second_vp_pass;
+    [[maybe_unused]] const bool perf_svp = o.svp_view && _priority == 0; // render/svp/geom_* (31-svp-scope.md)
     const bool use_fast_geo = o.phase == CRender::PHASE_SMAP;
 #if defined(USE_DX11) && XR_PERF_METRICS
     // P19 step 2: backend redundancy counters of this graph (static + dynamic), see CBackend::_stats.
@@ -136,38 +205,8 @@ void R_dsgraph_structure::render_graph(u32 _priority)
     const u32 perf_cb_flush_slots0 = cmd_list.stat.cb_flush_slots;
 #endif
 
-    // **************************************************** NORMAL
-    // Perform sorting based on ScreenSpaceArea
-    // Sorting by SSA and changes minimizations
-    // Render several passes
-    {
-        ZoneScopedN("dsgraph_render_static");
-        PIX_EVENT_CTX(cmd_list, dsgraph_render_static);
-        PERF_SCOPE_IF(perf_main, rmain_submit_static);
-        [[maybe_unused]] const u32 perf_draws0 = cmd_list.stat.render.calls;
-        PERF_CB_SNAPSHOT(perf_cb_static);
-
-        for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
-        {
-            auto& map = mapNormalPasses[_priority][iPass];
-
-            map.get_any_p(nrmPasses);
-            std::sort(nrmPasses.begin(), nrmPasses.end(), cmp_pass<mapNormal_T::value_type*>);
-            for (const auto& it : nrmPasses)
-            {
-                mapNormalItems& items = it->second;
-                items.ssa = 0;
-
-                std::sort(items.begin(), items.end(), cmp_ssa<_NormalItem>);
-                render_normal_items(cmd_list, it->first, items.data(), items.size(), use_fast_geo, perf_main);
-                items.clear();
-            }
-            nrmPasses.clear();
-            map.clear();
-        }
-        PERF_ADD_IF(perf_main, rmain_static_draws, cmd_list.stat.render.calls - perf_draws0);
-        PERF_CB_DELTA(perf_main, rmain_static_cb_flush, perf_cb_static);
-    }
+    // NORMAL (static)
+    render_graph_static_passes(_priority, use_fast_geo, perf_main);
 
     // **************************************************** MATRIX
     // Perform sorting based on ScreenSpaceArea
@@ -177,13 +216,17 @@ void R_dsgraph_structure::render_graph(u32 _priority)
         ZoneScopedN("dsgraph_render_dynamic");
         PIX_EVENT_CTX(cmd_list, dsgraph_render_dynamic);
         PERF_SCOPE_IF(perf_main, rmain_submit_dynamic);
+        PERF_SCOPE_IF(perf_svp, rsvp_geom_dynamic);
         [[maybe_unused]] const u32 perf_draws0 = cmd_list.stat.render.calls;
         [[maybe_unused]] const u32 perf_states0 = cmd_list.stat.states;
         [[maybe_unused]] const u32 perf_textures0 = cmd_list.stat.textures;
         PERF_CB_SNAPSHOT(perf_cb_dyn);
+        const glod_range_t glod = pass_glod(o);
 #if XR_PERF_METRICS
         // P15: lets CSkeletonX::_Render / dx11ConstantBuffer::Flush count render/main/skin_* and dyn_cb_* (restored on exit).
         xray::perf::ScopedTag perf_dyn_tag(g_perf_rmain_dyn, (perf_main && xray::perf::g_perf_metrics_active) ? 1 : 0);
+        // 31-svp-scope.md: the same for render/svp/geom_skin_* of the scope view (its own thread-local tag).
+        xray::perf::ScopedTag perf_svp_tag(g_perf_svp_geom, (perf_svp && xray::perf::g_perf_metrics_active) ? 1 : 0);
 #endif
 
         auto render_matrix_passes = [&](R_dsgraph::mapMatrixPasses_T& passSet, u32& statsCounter)
@@ -192,16 +235,22 @@ void R_dsgraph_structure::render_graph(u32 _priority)
             {
                 auto& map = passSet[iPass];
 
-                map.get_any_p(matPasses);
-                std::sort(matPasses.begin(), matPasses.end(), cmp_pass<mapMatrix_T::value_type*>);
+                // R3 (27-render-main.md): the main view's groups may come sorted from the build already.
+                const bool presorted = _priority == 0 && take_main_presorted(iPass);
+                if (!presorted)
+                {
+                    map.get_any_p(matPasses);
+                    std::sort(matPasses.begin(), matPasses.end(), cmp_pass<mapMatrix_T::value_type*>);
+                }
                 for (const auto& it : matPasses)
                 {
                     mapMatrixItems& items = it->second;
                     items.ssa = 0;
 
-                    std::sort(items.begin(), items.end(), cmp_ssa<_MatrixItem>);
+                    if (!presorted)
+                        std::sort(items.begin(), items.end(), cmp_ssa<_MatrixItem>);
                     RImplementation.BasicStats.CorpseRegularSubmissions +=
-                        render_matrix_items(cmd_list, it->first, items.data(), items.size(), use_fast_geo, perf_main);
+                        render_matrix_items(cmd_list, it->first, items.data(), items.size(), glod, use_fast_geo, perf_main);
                     statsCounter += static_cast<u32>(items.size());
                     items.clear();
                 }
@@ -211,7 +260,10 @@ void R_dsgraph_structure::render_graph(u32 _priority)
         };
 
         render_matrix_passes(mapMatrixPasses[_priority], RImplementation.BasicStats.DynamicRegularSubmissions);
+        if (_priority == 0)
+            main_presorted_valid = false; // R3: drawn (or not taken)
         PERF_ADD_IF(perf_main, rmain_dyn_draws, cmd_list.stat.render.calls - perf_draws0);
+        PERF_ADD_IF(perf_svp, rsvp_geom_dyn_draws, cmd_list.stat.render.calls - perf_draws0);
         PERF_ADD_IF(perf_main, rmain_dyn_states, cmd_list.stat.states - perf_states0);
         PERF_ADD_IF(perf_main, rmain_dyn_textures, cmd_list.stat.textures - perf_textures0);
         PERF_CB_DELTA(perf_main, rmain_dyn_cb_flush, perf_cb_dyn);
@@ -227,6 +279,37 @@ void R_dsgraph_structure::render_graph(u32 _priority)
 #endif
 
     RImplementation.BasicStats.Primitives.End(); // XXX: Refactor a bit later
+}
+
+bool R_dsgraph_structure::take_main_presorted(u32 iPass)
+{
+    if (!main_presorted_valid)
+        return false;
+    // R3 (27-render-main.md): nothing may have touched the map since the end of the build (nothing inserts into it
+    // before part0) - the same nodes, the same item count; otherwise the caller sorts as before.
+    auto& groups = main_presorted[iPass];
+    mapMatrix_T& map = mapMatrixPasses[0][iPass];
+    const uintptr_t first = reinterpret_cast<uintptr_t>(map.begin());
+    const uintptr_t last = reinterpret_cast<uintptr_t>(map.end());
+    bool same = groups.size() == map.size();
+    size_t items = 0;
+    for (size_t i = 0; same && i < groups.size(); ++i)
+    {
+        const uintptr_t node = reinterpret_cast<uintptr_t>(groups[i]);
+        same = node >= first && node < last;
+        if (same)
+            items += groups[i]->second.size();
+    }
+    if (!same || items != main_presorted_items[iPass])
+    {
+        PERF_INC(rmain_par_prep_stale);
+        groups.clear();
+        return false;
+    }
+    PERF_INC(rmain_par_prep_used);
+    matPasses.clear();
+    matPasses.swap(groups);
+    return true;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -401,6 +484,7 @@ void main_par_record(CBackend& cmd, const main_par_unit& unit, u32& corpses)
     const u32 perf_cb_flush_slots0 = cmd.stat.cb_flush_slots;
 #endif
     constexpr bool use_fast_geo = false; // PHASE_NORMAL only
+    const glod_range_t glod = { r_ssaGLOD_start, r_ssaGLOD_end }; // the main view: always the globals
     // As at the top of render_graph: static items draw with the identity world (the immediate context's first unit
     // follows render_hud, which leaves the last HUD item's transform).
     cmd.set_xform_world(Fidentity);
@@ -412,7 +496,7 @@ void main_par_record(CBackend& cmd, const main_par_unit& unit, u32& corpses)
             PERF_SCOPE(rmain_submit_static);
             [[maybe_unused]] const u32 perf_draws0 = cmd.stat.render.calls;
             PERF_CB_SNAPSHOT(perf_cb_static);
-            render_normal_items(cmd, piece.pass, piece.normal, piece.count, use_fast_geo, true);
+            render_normal_items(cmd, piece.pass, piece.normal, piece.count, glod, use_fast_geo, true);
             PERF_ADD(rmain_static_draws, cmd.stat.render.calls - perf_draws0);
             PERF_CB_DELTA(true, rmain_static_cb_flush, perf_cb_static);
         }
@@ -426,7 +510,7 @@ void main_par_record(CBackend& cmd, const main_par_unit& unit, u32& corpses)
 #if XR_PERF_METRICS
             xray::perf::ScopedTag perf_dyn_tag(g_perf_rmain_dyn, xray::perf::g_perf_metrics_active ? 1 : 0);
 #endif
-            corpses += render_matrix_items(cmd, piece.pass, piece.matrix, piece.count, use_fast_geo, true);
+            corpses += render_matrix_items(cmd, piece.pass, piece.matrix, piece.count, glod, use_fast_geo, true);
             PERF_ADD(rmain_dyn_draws, cmd.stat.render.calls - perf_draws0);
             PERF_ADD(rmain_dyn_states, cmd.stat.states - perf_states0);
             PERF_ADD(rmain_dyn_textures, cmd.stat.textures - perf_textures0);
@@ -474,7 +558,7 @@ bool R_dsgraph_structure::render_graph_main_parallel()
 
     // One pooled deferred context per deferred unit. At this point the sun cascades (3), rain and the scope worker
     // may hold some of the pool; a short pool just means fewer units.
-    const u32 slots_wanted = std::min(static_cast<u32>(std::clamp(ps_r__main_parallel_parts, 2, 8)) - 1, MAIN_PAR_MAX_SLOTS);
+    const u32 slots_wanted = std::min(static_cast<u32>(std::clamp(ps_r__main_parallel_parts, 2, 12)) - 1, MAIN_PAR_MAX_SLOTS);
     u32 slots = 0;
     for (; slots < slots_wanted; ++slots)
     {
@@ -529,13 +613,20 @@ bool R_dsgraph_structure::render_graph_main_parallel()
         for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
         {
             auto& map = mapMatrixPasses[0][iPass];
-            map.get_any_p(matPasses);
-            std::sort(matPasses.begin(), matPasses.end(), cmp_pass<mapMatrix_T::value_type*>);
+            // R3 (27-render-main.md): the groups and their items may come sorted from the
+            // build, the CROS of most objects refreshed in its parts (the update_smooth below is then a no-op for them).
+            const bool presorted = take_main_presorted(iPass);
+            if (!presorted)
+            {
+                map.get_any_p(matPasses);
+                std::sort(matPasses.begin(), matPasses.end(), cmp_pass<mapMatrix_T::value_type*>);
+            }
             for (const auto& it : matPasses)
             {
                 mapMatrixItems& items = it->second;
                 items.ssa = 0;
-                std::sort(items.begin(), items.end(), cmp_ssa<_MatrixItem>);
+                if (!presorted)
+                    std::sort(items.begin(), items.end(), cmp_ssa<_MatrixItem>);
                 bool main_only = !main_par_textures_ok(it->first);
                 for (const _MatrixItem& item : items)
                 {
@@ -545,7 +636,10 @@ bool R_dsgraph_structure::render_graph_main_parallel()
                     if (item.pObject)
                     {
                         if (auto* ros = static_cast<CROS_impl*>(item.pObject->renderable_ROS()))
+                        {
+                            PERF_ADD_IF(ros->dwFrameSmooth != Device.dwFrame, rmain_par_submit_smooth_late, 1);
                             ros->update_smooth(item.pObject);
+                        }
                     }
                 }
                 s_main_par_groups.push_back({ it->first, nullptr, items.data(), static_cast<u32>(items.size()), main_only });
@@ -553,6 +647,7 @@ bool R_dsgraph_structure::render_graph_main_parallel()
             }
             matPasses.clear();
         }
+        main_presorted_valid = false; // R3: taken (or dropped)
 
         for (const main_par_piece& group : s_main_par_groups)
         {
@@ -687,6 +782,7 @@ bool R_dsgraph_structure::render_graph_main_parallel()
             if (imm_dirty)
                 reseed_immediate();
             PERF_SCOPE(rmain_par_submit_record_cpu);
+            PERF_SCOPE(rmain_par_submit_main_unit); // 27-render-main.md (M): the main thread's own units only
             main_par_record(cmd_list, unit, corpses);
             continue;
         }
@@ -847,7 +943,8 @@ void __fastcall render_item(u32 context_id, const T& item)
     hud_transform_helper::apply_custom_state(dsgraph.cmd_list);
     //--#SM+#-- Обновляем шейдерные данные модели [update shader values for this model]
     //RCache.hemi.c_update(V);
-    V->Render(dsgraph.cmd_list, calcLOD(item.first, V->vis.sphere.R), dsgraph.o.phase == CRender::PHASE_SMAP);
+    V->Render(dsgraph.cmd_list, calcLOD(item.first, V->vis.sphere.R, pass_glod(dsgraph.o)),
+        dsgraph.o.phase == CRender::PHASE_SMAP);
 }
 
 template<class T>
@@ -991,13 +1088,335 @@ void R_dsgraph_structure::render_hud_blends(void (*lens_depth_clear)(CBackend&))
 }
 
 //////////////////////////////////////////////////////////////////////////
+// 27-render-main.md (M, R1): mapSorted of the main view's combine.
+namespace
+{
+using sorted_node = mapSorted_T::value_type;
+
+// mapSorted in the order traverse_right_left visits it (back to front). Main thread only.
+xr_vector<sorted_node*> s_sorted_order;
+
+// render_item with render/combine/sorted_other around the non-particle items (particles time themselves:
+// render/combine/ps_effect).
+template <class T>
+void __fastcall render_item_sorted_main(u32 context_id, const T& item)
+{
+    if (item.second.pVisual->Type == MT_PARTICLE_EFFECT)
+    {
+        render_item(context_id, item);
+        return;
+    }
+    PERF_SCOPE_IF(g_perf_combine_main != 0, rcomb_sorted_other);
+    render_item(context_id, item);
+}
+
+#if XR_PERF_METRICS
+// render/combine/ps_adjacent_same - neighbours in the drawing order that one draw could take (sprite effects with the
+// same ShaderElement and cull mode, nothing drawn between; effects render_item skips as empty do not separate them),
+// render/combine/ps_hud - HUD-mode effects (they switch the projection, always drawn by Render()).
+void sorted_ps_stats(const xr_vector<sorted_node*>& order)
+{
+    const _MatrixItemS* prev = nullptr;
+    u32 prev_cull = 0;
+    u32 adjacent = 0;
+    u32 hud = 0;
+    for (sorted_node* node : order)
+    {
+        const _MatrixItemS& item = node->second;
+        if (item.pVisual->Type != MT_PARTICLE_EFFECT)
+        {
+            prev = nullptr;
+            continue;
+        }
+        auto* effect = static_cast<PS::CParticleEffect*>(item.pVisual);
+        if (effect->IsEmptyForRender())
+            continue;
+        if (effect->GetHudMode())
+        {
+            ++hud;
+            prev = nullptr;
+            continue;
+        }
+        const u32 cull = effect->BatchCullMode();
+        if (prev && prev->se == item.se && prev_cull == cull)
+            ++adjacent;
+        prev = &item;
+        prev_cull = cull;
+    }
+    PERF_ADD(rcomb_ps_adjacent_same, adjacent);
+    PERF_ADD(rcomb_ps_hud, hud);
+}
+#endif
+
+#if defined(USE_DX11)
+// One draw of QuadIB takes at most this many sprites (D3DXRenderBase::CreateQuadIB).
+constexpr u32 PS_BATCH_QUADS_MAX = 4 * 1024;
+// Fewer particles in the batch - filled by the main thread alone.
+constexpr u32 PS_BATCH_PARALLEL_MIN = 2048;
+constexpr u32 PS_BATCH_CHUNKS_MAX = 8;
+
+// A mapSorted node in drawing order; effect - its prepared particle effect (vertices at first_vertex of the batch),
+// nullptr - render_item draws the node.
+struct ps_batch_item
+{
+    sorted_node* node{};
+    PS::CParticleEffect* effect{};
+    PS::CParticleEffect::BatchSnapshot snapshot{};
+    u32 first_vertex{};
+};
+xr_vector<ps_batch_item> s_ps_items;
+xr_vector<u32> s_ps_prepared; // indices into s_ps_items of the prepared effects, in order
+
+bool ps_no_ros(IRenderable* object) { return !object || !object->renderable_ROS(); }
+
+// The sprites of all prepared effects into pv (the batch's first vertex): particle ranges of ~equal size claimed by
+// the main thread and task workers; no stealing while waiting (see render_graph_main_parallel).
+void ps_batch_fill(FVF::LIT* pv, u32 total_particles, [[maybe_unused]] bool perf)
+{
+    const auto fill_range = [pv](u32 range_begin, u32 range_end)
+    {
+        // The prepared effect holding range_begin, then on while they overlap the range.
+        auto it = std::upper_bound(s_ps_prepared.begin(), s_ps_prepared.end(), range_begin,
+            [](u32 particle, u32 index) { return particle < s_ps_items[index].first_vertex / 4; });
+        VERIFY(it != s_ps_prepared.begin());
+        --it;
+        for (; it != s_ps_prepared.end(); ++it)
+        {
+            const ps_batch_item& entry = s_ps_items[*it];
+            const u32 first = entry.first_vertex / 4;
+            if (first >= range_end)
+                break;
+            const u32 begin = std::max(range_begin, first) - first;
+            const u32 end = std::min(range_end, first + entry.snapshot.count) - first;
+            if (begin < end)
+                entry.effect->BatchFill(pv + entry.first_vertex, entry.snapshot, begin, end);
+        }
+    };
+
+    const u32 workers = static_cast<u32>(TaskScheduler->GetWorkersCount());
+    const u32 chunks = std::min({ total_particles / PS_BATCH_PARALLEL_MIN, workers, PS_BATCH_CHUNKS_MAX });
+    if (chunks < 2)
+    {
+        PERF_SCOPE_IF(perf, rcomb_ps_prefill_cpu);
+        fill_range(0, total_particles);
+        return;
+    }
+
+    std::atomic<u32> next{ 0 };
+    std::atomic<u32> done{ 0 };
+    const auto run_chunks = [&]
+    {
+        for (;;)
+        {
+            const u32 c = next.fetch_add(1, std::memory_order_relaxed);
+            if (c >= chunks)
+                break;
+            {
+                PERF_SCOPE_IF(perf, rcomb_ps_prefill_cpu);
+                fill_range(static_cast<u32>(u64(total_particles) * c / chunks),
+                    static_cast<u32>(u64(total_particles) * (c + 1) / chunks));
+            }
+            done.fetch_add(1, std::memory_order_release);
+        }
+    };
+    Task& root = TaskScheduler->CreateTask([] {});
+    const u32 helpers = std::min(chunks - 1, workers - 1);
+    for (u32 h = 0; h < helpers; ++h)
+        TaskScheduler->AddTask(root, [&run_chunks] { run_chunks(); });
+    run_chunks();
+    while (done.load(std::memory_order_acquire) < chunks)
+        std::this_thread::yield();
+    // Helpers still queued find no chunks and return at once; Wait() runs them first from this thread's queue.
+    TaskManager::RunTask(root);
+    TaskScheduler->Wait(root);
+}
+#endif
+} // namespace
+
+// R1 (27-render-main.md; mode 2 always on since 2026-10-18, 41-cvar-cleanup.md). mapSorted is drawn in the order of the plain loop (back to front);
+// what changes is where the sprite vertices of the particle effects come from:
+//  1. one pass over the order snapshots every drawable sprite effect (one read of its particle count, no pm_lock);
+//     HUD-mode effects (they switch the projection), empty ones and the rest stay with render_item;
+//  2. one Lock of the dynamic stream for all of them, the sprites filled in parallel into consecutive ranges, Unlock -
+//     instead of a Lock/fill/Unlock per effect in between the draws;
+//  3. the draws in order: per effect the state render_item sets (element, world, object ambient, lmaterial), then
+//     the tail of CParticleEffect::Render for its range. A run of such effects adjacent in the
+//     order, with the same ShaderElement and cull mode and owners without ROS (so apply_object leaves the ambient
+//     alone and apply_lmaterial sets the same values - they depend on the element's texture only) becomes one
+//     DrawIndexed: the sprite shaders read only m_WVP / m_WV (the world matrix is identity for every sprite),
+//     L_material.w and the frame constants; the primitives keep their order inside the draw.
+// A Lock that wraps the stream (Map DISCARD) after the fill - by an item drawn in between - drops the prepared
+// vertices: the effects after it go back to Render(), which fills them again (render/combine/ps_fallback).
+// The particles are read while the PreRender worker may still be stepping them (render/combine/ps_sim_late), as
+// Render() reads them now: earlier in the pass, still inside the max_particles array.
+bool R_dsgraph_structure::render_sorted_ps_batch()
+{
+#if defined(USE_DX11)
+    if (mapSorted.empty() || cmd_list.context_id != CHW::IMM_CTX_ID || !TaskScheduler ||
+        D3DXRenderBase::RenderDocActive())
+    {
+        return false;
+    }
+    ZoneScopedN("dsgraph_render_sorted_ps_batch");
+    [[maybe_unused]] const bool perf = g_perf_combine_main != 0;
+
+    s_sorted_order.clear();
+    mapSorted.get_right_left_p(s_sorted_order);
+#if XR_PERF_METRICS
+    if (perf)
+        sorted_ps_stats(s_sorted_order);
+#endif
+
+    // 1. The order and the snapshots. Half of the stream at most, so the batch never fills it alone.
+    constexpr u32 stride = sizeof(FVF::LIT);
+    const u32 vertex_cap = RImplementation.Vertex.GetSize() / stride / 2;
+    u32 total_vertices = 0;
+    u32 fallback = 0;
+    s_ps_items.clear();
+    s_ps_prepared.clear();
+    for (sorted_node* node : s_sorted_order)
+    {
+        ps_batch_item entry;
+        entry.node = node;
+        dxRender_Visual* V = node->second.pVisual;
+        if (V->Type == MT_PARTICLE_EFFECT)
+        {
+            auto* effect = static_cast<PS::CParticleEffect*>(V);
+            if (!effect->IsEmptyForRender() && effect->BatchPrepare(entry.snapshot))
+            {
+                const u32 vertices = entry.snapshot.count * 4;
+                if (total_vertices + vertices <= vertex_cap)
+                {
+                    VERIFY(effect->geom->vb_stride == stride);
+                    entry.effect = effect;
+                    entry.first_vertex = total_vertices;
+                    total_vertices += vertices;
+                    s_ps_prepared.push_back(static_cast<u32>(s_ps_items.size()));
+                }
+                else
+                    ++fallback; // does not fit: Render() locks its own range
+            }
+        }
+        s_ps_items.push_back(entry);
+    }
+
+    // 2. One lock, the fill, one unlock.
+    u32 base_vertex = 0;
+    u32 discard_id = 0;
+    if (total_vertices)
+    {
+        PERF_SCOPE_IF(perf, rcomb_ps_prefill);
+        PERF_ADD_IF(perf && Device.m_pre_render_task && !Device.m_pre_render_task->IsFinished(), rcomb_ps_sim_late, 1);
+        auto* pv = static_cast<FVF::LIT*>(RImplementation.Vertex.Lock(total_vertices, stride, base_vertex));
+        discard_id = RImplementation.Vertex.DiscardID();
+        ps_batch_fill(pv, total_vertices / 4, perf);
+        RImplementation.Vertex.Unlock(total_vertices, stride);
+        PERF_ADD_IF(perf, rcomb_ps_prepared, s_ps_prepared.size());
+        PERF_ADD_IF(perf, rcomb_ps_sprites, total_vertices / 4);
+    }
+
+    // 3. The draws, back to front.
+    u32 runs = 0;
+    u32 run_max = 0;
+    const size_t count = s_ps_items.size();
+    for (size_t i = 0; i < count;)
+    {
+        const ps_batch_item& entry = s_ps_items[i];
+        if (!entry.effect)
+        {
+            render_item_sorted_main(context_id, *entry.node);
+            ++i;
+            continue;
+        }
+        if (RImplementation.Vertex.DiscardID() != discard_id)
+        {
+            ++fallback; // the stream wrapped since the fill: the prepared vertices are gone
+            render_item(context_id, *entry.node);
+            ++i;
+            continue;
+        }
+
+        // render_item's state for this effect
+        const _MatrixItemS& item = entry.node->second;
+        cmd_list.set_Element(item.se);
+        cmd_list.set_xform_world(item.Matrix);
+        RImplementation.apply_object(cmd_list, item.pObject);
+        cmd_list.apply_lmaterial();
+        hud_transform_helper::apply_custom_state(cmd_list);
+
+        u32 vertex_count = entry.snapshot.count * 4;
+        u32 effects = 1;
+        size_t j = i + 1;
+        if (ps_no_ros(item.pObject))
+        {
+            const u32 cull = entry.effect->BatchCullMode();
+            for (; j < count; ++j)
+            {
+                const ps_batch_item& other = s_ps_items[j];
+                if (!other.effect)
+                {
+                    // An effect emptied since the build: render_item would return before touching any state.
+                    dxRender_Visual* V = other.node->second.pVisual;
+                    if (V->Type == MT_PARTICLE_EFFECT && static_cast<PS::CParticleEffect*>(V)->IsEmptyForRender())
+                    {
+                        PERF_ADD_IF(perf, rcomb_ps_empty, 1);
+                        continue;
+                    }
+                    break;
+                }
+                const u32 other_vertices = other.snapshot.count * 4;
+                if (other.node->second.se != item.se || other.effect->BatchCullMode() != cull ||
+                    other.first_vertex != entry.first_vertex + vertex_count ||
+                    (vertex_count + other_vertices) / 4 > PS_BATCH_QUADS_MAX || !ps_no_ros(other.node->second.pObject))
+                {
+                    break;
+                }
+                vertex_count += other_vertices;
+                ++effects;
+            }
+        }
+        entry.effect->BatchDraw(cmd_list, base_vertex + entry.first_vertex, vertex_count);
+        ++runs;
+        run_max = std::max(run_max, effects);
+        i = j;
+    }
+    PERF_ADD_IF(perf, rcomb_ps_runs, runs);
+    PERF_ADD_IF(perf, rcomb_ps_run_max, run_max);
+    PERF_ADD_IF(perf, rcomb_ps_fallback, fallback);
+
+    mapSorted.clear();
+    s_ps_items.clear();
+    s_ps_prepared.clear();
+    s_sorted_order.clear();
+    return true;
+#else
+    return false; // GL: the plain loop
+#endif
+}
+
+//////////////////////////////////////////////////////////////////////////
 // strict-sorted render
-void R_dsgraph_structure::render_sorted()
+void R_dsgraph_structure::render_sorted(bool main_combine)
 {
     ZoneScoped;
     PIX_EVENT_CTX(cmd_list, dsgraph_render_sorted);
 
-    sort_back_to_front_render_and_clean(context_id, mapSorted);
+    if (!main_combine)
+        sort_back_to_front_render_and_clean(context_id, mapSorted);
+    else if (!render_sorted_ps_batch())
+    {
+#if XR_PERF_METRICS
+        if (g_perf_combine_main && !mapSorted.empty())
+        {
+            s_sorted_order.clear();
+            mapSorted.get_right_left_p(s_sorted_order);
+            sorted_ps_stats(s_sorted_order);
+            s_sorted_order.clear();
+        }
+#endif
+        mapSorted.traverse_right_left(context_id, render_item_sorted_main);
+        mapSorted.clear();
+    }
 
     // HUD overlay scope (g_3d_scopes 3): HUD blends (scope lens etc.) are rendered in the offscreen
     // overlay pass, NOT in the world pass. Prevents lens recursion — the lens samples the clean

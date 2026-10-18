@@ -48,7 +48,12 @@ void render_main::calculate()
 void render_main::calculate_into(R_dsgraph_structure& dsgraph_main, const SRVPCalcParams* params)
 {
     ZoneScoped;
+    prepare_into(dsgraph_main, params);
+    dsgraph_main.build_subspace();
+}
 
+void render_main::prepare_into(R_dsgraph_structure& dsgraph_main, const SRVPCalcParams* params)
+{
     // Stage C: every camera input comes either from the argument snapshot (worker build) or from
     // the Device - never from mutable override members, which an async task must not re-read.
 
@@ -70,12 +75,22 @@ void render_main::calculate_into(R_dsgraph_structure& dsgraph_main, const SRVPCa
     dsgraph_main.o.spatial_types = STYPE_RENDERABLE | STYPE_LIGHTSOURCE;
     dsgraph_main.o.view_pos = params ? params->view_pos : Device.vCameraPosition;
     dsgraph_main.o.xform = params ? params->full_transform : Device.mFullTransform;
-    dsgraph_main.o.view_frustum = params ? params->view_frustum : RImplementation.ViewBase;
+    // 31-svp-scope.md: the sequential scope build culls against the scope's own frustum (svp_seq_frustum, set by
+    // calculate_for(true)); every other build - the main view's ViewBase.
+    dsgraph_main.o.view_frustum = params ? params->view_frustum
+        : (RImplementation.svp_seq_frustum_valid ? RImplementation.svp_seq_frustum : RImplementation.ViewBase);
     dsgraph_main.o.query_box_side = VIEWPORT_NEAR + EPS_L;
     dsgraph_main.o.precise_portals = true;
     dsgraph_main.o.mt_calculate = o.mt_calc_enabled;
-
-    dsgraph_main.build_subspace();
+    // The scope build on the SVP worker culls with the scope's thresholds (the globals are the main view's until
+    // EndSecondVPCalculateParallel), every other build keeps reading the globals (the LOD fix and H of 31-svp-scope.md,
+    // always on since 2026-10-18, 41-cvar-cleanup.md).
+    dsgraph_main.o.lod_own = params != nullptr;
+    if (dsgraph_main.o.lod_own)
+        dsgraph_main.o.lod = params->lod;
+    // 31-svp-scope.md: the scope view's build (metrics only) and the main view's HOM test (the worker's build only).
+    dsgraph_main.o.svp_view = params != nullptr || RImplementation.svp_seq_build;
+    dsgraph_main.o.svp_hom = params != nullptr;
 }
 
 // Stage C: create+dispatch the visibility build with the TARGET DSGRAPH captured at task-creation
@@ -94,6 +109,23 @@ void render_main::launch_build(R_dsgraph_structure& ds, const SRVPCalcParams* pa
         TaskScheduler->PushTask(*task);
     else
         TaskScheduler->RunTask(*task);
+}
+
+void render_main::launch_build_late(R_dsgraph_structure& ds)
+{
+    if (!o.active)
+        return;
+
+    main_task = &TaskScheduler->CreateTask([&ds]
+    {
+        ZoneScopedN("r_main_build_late");
+        PERF_SCOPE(rmain_build_late);
+        ds.build_subspace(R_dsgraph_structure::build_scope::late_dynamic);
+    });
+    if (o.mt_calc_enabled)
+        TaskScheduler->PushTask(*main_task);
+    else
+        TaskScheduler->RunTask(*main_task);
 }
 
 void render_main::render()
@@ -117,6 +149,13 @@ void CRender::calculate_for(bool second_pass)
 {
     const bool main_pass = !second_pass;
 
+    // Early main build: the static half of this build has been running since FrameMove.
+    // Joined first - everything below may touch the immediate dsgraph (sector collider, icon pass) or the LOD
+    // globals it reads.
+    const bool main_early = main_pass && main_build_early_join();
+    if (main_pass)
+        main_build_early_used = main_early; // R2 (27-render-main.md) reads it in Render()
+
     if (main_pass)
     {
         // Per-frame lifecycle: pool contexts were reset by D3DXRenderBase::End()->cleanup_contexts()
@@ -135,23 +174,16 @@ void CRender::calculate_for(bool second_pass)
         LP_svp_pending.clear();
         svp_sun_slices_ready = false; // sun-reuse copies (if any) happen later, in main Render/Sun
         svp_geom_on_main = false;
+        svp_seq_build = false; // 31-svp-scope.md: cleared after the scope pass already, here for safety
+        svp_seq_frustum_valid = false;
     }
 
     // Transfer to global space to avoid deep pointer access.
     // NOTE: published by BOTH passes for now - safe only while the passes stay sequential.
     // Per-pass copies land together with the parallel orchestration (stage C).
-    float fov_factor = _sqr(90.f / Device.fFOV);
-    g_fSCREEN = float(Target->get_width(RCache) * Target->get_height(RCache)) * fov_factor * (EPS_S + ps_r__LOD);
-    r_ssaDISCARD = _sqr(ps_r__ssaDISCARD) / g_fSCREEN;
-    r_ssaDONTSORT = _sqr(ps_r__ssaDONTSORT / 3) / g_fSCREEN;
-    r_ssaLOD_A = _sqr(ps_r2_ssaLOD_A / 3) / g_fSCREEN;
-    r_ssaLOD_B = _sqr(ps_r2_ssaLOD_B / 3) / g_fSCREEN;
-    r_ssaLOD_CHAR_A = _sqr(ps_r2_ssaLOD_CHAR_A / 3) / g_fSCREEN;
-    r_ssaLOD_CHAR_B = _sqr(ps_r2_ssaLOD_CHAR_B / 3) / g_fSCREEN;
-    r_ssaGLOD_start = _sqr(ps_r__GLOD_ssa_start / 3) / g_fSCREEN;
-    r_ssaGLOD_end = _sqr(ps_r__GLOD_ssa_end / 3) / g_fSCREEN;
-    r_ssaHZBvsTEX = _sqr(ps_r__ssaHZBvsTEX / 3) / g_fSCREEN;
-    r_dtex_range = ps_r2_df_parallax_range * g_fSCREEN / (1024.f * 768.f);
+    publish_lod_globals();
+    if (main_early && g_fSCREEN != main_build_early_screen)
+        PERF_INC(rmain_early_lod_diff); // the static half culled with other thresholds than the dynamic one
 
     // Configure (main pass only: the second one inherits the identical values already written
     // this frame; concurrent writes would race once the passes run in parallel).
@@ -173,17 +205,9 @@ void CRender::calculate_for(bool second_pass)
 
     // Detect camera-sector (main pass only): the scope camera shares the actor position, so the
     // result would be identical, and OnSectorChanged is a game-side callback.
-    if (main_pass && !Device.vCameraDirectionSaved.similar(Device.vCameraPosition, EPS_L))
-    {
-        const auto sector_id = dsgraph_main.detect_sector(Device.vCameraPosition);
-        if (sector_id != IRender_Sector::INVALID_SECTOR_ID)
-        {
-            if (sector_id != last_sector_id)
-                g_pGamePersistent->OnSectorChanged(sector_id);
-
-            last_sector_id = sector_id;
-        }
-    }
+    // Early main build: detected by KickMainBuildEarly already (the same camera).
+    if (main_pass && !main_early)
+        detect_camera_sector(dsgraph_main);
 
     // Collect lights (main pass only): same camera position -> identical light set, so the second
     // pass reuses the package gathered above instead of mutating CLight_DB a second time.
@@ -229,6 +253,30 @@ void CRender::calculate_for(bool second_pass)
     }
     r_main_dsgraph_override = second_pass ? svp_dsgraph : nullptr;
 
+    // 31-svp-scope.md: the sequential scope build (GL, RenderDoc, no free context). It used to cull against the main
+    // view's wide ViewBase; now it takes the scope's own frustum - BeginSecondViewportRender has put the scope
+    // projection into Device.mProject - cropped to the lens when aimed (L0, always on since 2026-10-18). Read by
+    // prepare_into in the build task below; cleared after the scope pass's Render() (RenderSecondViewport), which
+    // joins that task.
+    if (second_pass)
+    {
+        svp_seq_build = true;
+        Fmatrix scope_full;
+        scope_full.mul(Device.mProject, Device.mView);
+        float area_pct = 100.f;
+        if (svp_lens_crop(scope_full, Device.dwWidth, Device.dwHeight, svp_seq_frustum, area_pct))
+        {
+            PERF_INC(rsvp_lens_frames);
+            PERF_ADD(rsvp_lens_area_pct, u64(area_pct + 0.5f));
+        }
+        else
+        {
+            PERF_INC(rsvp_lens_fallback);
+            svp_seq_frustum.CreateFromMatrix(scope_full, FRUSTUM_P_LRTB | FRUSTUM_P_FAR);
+        }
+        svp_seq_frustum_valid = true;
+    }
+
     {
         PERF_WAIT_SITE(xray::perf::wait_site::Hom);
         TaskScheduler->Wait(*ProcessHOMTask);
@@ -252,7 +300,9 @@ void CRender::calculate_for(bool second_pass)
     if (main_pass)
         BasicStats.Culling.Begin();
     {
-        if (g_pGamePersistent)
+        // Early main build: not this frame - the icon pass drains the immediate dsgraph (render_graph) the static half
+        // has filled. KickMainBuildEarly ran only with no icons pending; icons queued since wait for the next frame.
+        if (g_pGamePersistent && !main_early)
         {
             // C1.0: inventory icons draw live game objects on the immediate context (build side, §2 of 17-c1-semi-pipeline.md)
             ZoneScopedN("r2_calculate/icons");
@@ -265,7 +315,10 @@ void CRender::calculate_for(bool second_pass)
         // svp dsgraph; the inner Render() reads from the same override, so the build must write
         // into it - otherwise the inner Render drains an empty graph (only skybox/fences render).
         auto& build_ds = r_main_dsgraph_override ? *r_main_dsgraph_override : get_imm_context();
-        r_main.launch_build(build_ds, nullptr);
+        if (main_early)
+            r_main.launch_build_late(build_ds); // the static half is in build_ds already, options set by the kick
+        else
+            r_main.launch_build(build_ds, nullptr);
     }
     if (main_pass)
         BasicStats.Culling.End();
@@ -285,12 +338,139 @@ void CRender::calculate_for(bool second_pass)
     }
 }
 
+void CRender::publish_lod_globals()
+{
+    const float fov_factor = _sqr(90.f / Device.fFOV);
+    g_fSCREEN = float(Target->get_width(RCache) * Target->get_height(RCache)) * fov_factor * (EPS_S + ps_r__LOD);
+    r_ssaDISCARD = _sqr(ps_r__ssaDISCARD) / g_fSCREEN;
+    r_ssaDONTSORT = _sqr(ps_r__ssaDONTSORT / 3) / g_fSCREEN;
+    r_ssaLOD_A = _sqr(ps_r2_ssaLOD_A / 3) / g_fSCREEN;
+    r_ssaLOD_B = _sqr(ps_r2_ssaLOD_B / 3) / g_fSCREEN;
+    r_ssaLOD_CHAR_A = _sqr(ps_r2_ssaLOD_CHAR_A / 3) / g_fSCREEN;
+    r_ssaLOD_CHAR_B = _sqr(ps_r2_ssaLOD_CHAR_B / 3) / g_fSCREEN;
+    r_ssaGLOD_start = _sqr(ps_r__GLOD_ssa_start / 3) / g_fSCREEN;
+    r_ssaGLOD_end = _sqr(ps_r__GLOD_ssa_end / 3) / g_fSCREEN;
+    r_ssaHZBvsTEX = _sqr(ps_r__ssaHZBvsTEX / 3) / g_fSCREEN;
+    r_dtex_range = ps_r2_df_parallax_range * g_fSCREEN / (1024.f * 768.f);
+}
+
+void CRender::detect_camera_sector(R_dsgraph_structure& dsgraph_main)
+{
+    if (Device.vCameraDirectionSaved.similar(Device.vCameraPosition, EPS_L))
+        return;
+    const auto sector_id = dsgraph_main.detect_sector(Device.vCameraPosition);
+    if (sector_id != IRender_Sector::INVALID_SECTOR_ID)
+    {
+        if (sector_id != last_sector_id)
+            g_pGamePersistent->OnSectorChanged(sector_id);
+
+        last_sector_id = sector_id;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Early main build (plans/optimization_mt/26-framemove-game-next.md, "early main build"; always on since 2026-10-18).
+// What the static half reads and why it is final at the kick (right after FrameMove, before the RT scheduler part):
+//  - camera: Device.vCameraPosition / mFullTransform (OnCameraUpdated in CActor::UpdateCL, frame-guarded, the call
+//    after FrameMove is a no-op) and ViewBase (CRender::OnCameraUpdated) - snapshotted into o.* by prepare_into;
+//    CalcSSA reads Device.vCameraPosition live, nothing writes it before DoRender (the icon / preview renders that
+//    do are guarded by main_build_early_discard, the scope camera switches after the main Render);
+//  - HOM: its task was kicked by the same OnCameraUpdated, waited for below;
+//  - LOD thresholds (r_ssa*): published below with the main-pass formula, compared again in calculate_for;
+//  - camera sector: detected below on main (OnSectorChanged is a game callback; Sectors_xrc of the immediate dsgraph
+//    is the static half's collider afterwards);
+//  - sectors, portals, static visuals: per-context copies / level data, nothing else touches them meanwhile.
+// It writes only the immediate dsgraph (lists, traverser, marker, vis.marker of static visuals) and the HOM stats.
+// ---------------------------------------------------------------------------
+bool CRender::KickMainBuildEarly()
+{
+    // A static half nobody consumed (a frame without Calculate): never two in flight on the same dsgraph.
+    main_build_early_discard();
+#if !defined(USE_DX11)
+    return false; // GL keeps the old path (its frames don't overlap game and render anyway)
+#else
+    if (m_bFirstFrameAfterReset || o.oldshadowcascades || !TaskScheduler || !ProcessHOMTask)
+        return false;
+    if (Device.m_SecondViewport.IsSecondCalculatePass())
+        return false;
+    // RenderDoc in-app capture: the old order, like the other parallel paths (SVP frame driver) do.
+    if (D3DXRenderBase::RenderDocActive())
+        return false;
+    if (!g_pGamePersistent || g_pGamePersistent->MainMenuActiveOrLevelNotExist())
+        return false;
+    // Inventory icons render on the immediate dsgraph in Calculate() (render_graph drains it): old path this frame.
+    if (g_pGamePersistent->WeaponIconRenderPassPending())
+    {
+        PERF_INC(rmain_early_skip_icons);
+        return false;
+    }
+    // A task only when the main build is one anyway (mt_calculate, no Z-prefill - it builds on the immediate dsgraph
+    // inside Render() -, no old sun cascades - their recorder).
+    r_main.init();
+    if (!r_main.o.mt_calc_enabled)
+        return false;
+
+    ZoneScopedN("r_main_build_kick");
+    auto& ds = get_imm_context();
+    publish_lod_globals();
+    main_build_early_screen = g_fSCREEN;
+    detect_camera_sector(ds);
+    {
+        PERF_WAIT_SITE(xray::perf::wait_site::Hom);
+        TaskScheduler->Wait(*ProcessHOMTask);
+    }
+    r_main.prepare_into(ds, nullptr);
+
+    Task& task = TaskScheduler->CreateTask([&ds]
+    {
+        ZoneScopedN("r_main_build_early");
+        PERF_SCOPE(rmain_build_early);
+        ds.build_subspace(R_dsgraph_structure::build_scope::early_static);
+    });
+    main_build_early_task.store(&task, std::memory_order_release);
+    TaskScheduler->PushTask(task);
+    PERF_INC(rmain_early_frames);
+    return true;
+#endif
+}
+
+bool CRender::main_build_early_join()
+{
+    Task* task = main_build_early_task.exchange(nullptr, std::memory_order_acq_rel);
+    if (!task)
+        return false;
+    ZoneScopedN("r_main_build_early_wait");
+    PERF_SCOPE(rmain_build_early_wait);
+    PERF_WAIT_SITE(xray::perf::wait_site::RMain);
+    TaskScheduler->Wait(*task);
+    return true;
+}
+
+void CRender::main_build_early_discard()
+{
+    if (!main_build_early_join())
+        return;
+    PERF_INC(rmain_early_discard);
+    // The frame's Calculate() (if any) then builds everything as before: marker++, traversal, static, dynamic.
+    get_imm_context().clear_build_lists();
+}
+
+void CRender::JoinMainBuildEarly() { main_build_early_discard(); }
+
+void CRender::End()
+{
+    main_build_early_discard(); // cleanup_contexts() below resets the dsgraph the static half writes into
+    D3DXRenderBase::End();
+}
+
 // ---------------------------------------------------------------------------
 // Stage C (SVP parallelization): the scope-viewport visibility build runs on a worker while the
 // main pass renders. The worker body below is deliberately restricted to pure CPU culling:
 //  - no Device.* reads (everything comes from the SRVPCalcParams snapshot);
 //  - no shared-global writes: LOD thresholds go into per-pass storage, published into the globals
-//    by ApplySecondVPLodGlobals() on the main thread right before this pass drains;
+//    by ApplySecondVPLodGlobals() on the main thread right before this pass drains; the build itself
+//    (and its geometry recording) reads the same values from SRVPCalcParams::lod -
+//    the globals still hold the MAIN view's thresholds while the worker runs;
 //  - no light collection / sector detection / stats / option writes (stage A gates);
 //  - no sun/rain shadow phases (GPU work): they run sequentially in SecondVPPostCalculate().
 // ---------------------------------------------------------------------------
@@ -394,6 +574,48 @@ void CRender::svp_worker_loop()
     }
 }
 
+// L0 (plans/optimization_mt/31-svp-scope.md, always on since 2026-10-18). model_scope_lense.ps (r3/r4/gl alike) reads
+// rt_secondVP pixel for pixel with the screen around the screen center (svp_uv: 0.5 + offset from the center in
+// screen heights; the pincushion and the chroma push the rim taps up to ~6% outward), so the lens shows only the part
+// of the scope image under the lens on the screen. With the weapon fully raised the lens sits on the eye axis - in the
+// screen center; the circle of r__svp_lens_margin_pct % of the screen height around it (a margin for the sway, the
+// recoil and a large ocular is the user's choice) is all the build has to see. Its bounding square in NDC: the screen
+// height is 2 units (a radius of k*H pixels = 2k), the width 2 units of W pixels (2k * H / W). The crop scales clip x
+// and y about the image center - the columns 1 and 2 of the row-vector transform - so the frustum planes of the
+// cropped matrix bound exactly that square; everything else (SSA, LODs, the recording) keeps the full transform.
+// Not applied (false): not aimed through this scope (hud_params.x = CWeapon::bInZoomRightNow, false on the
+// alternative sight, whose lens is off the eye axis) or not fully raised (hud_params_2.z = the ADS progress
+// GetZRotatingFactor, exactly 1 at the end of the raise) - the lens is moving or off-center then.
+bool CRender::svp_lens_crop(const Fmatrix& full_transform, u32 width, u32 height, CFrustum& out, float& area_pct) const
+{
+    if (!width || !height || !g_pGamePersistent || !g_pGamePersistent->m_pGShaderConstants)
+        return false;
+    const ShadersExternalData& shader_data = *g_pGamePersistent->m_pGShaderConstants;
+    if (shader_data.hud_params.x < 0.5f || shader_data.hud_params_2.z < 0.999f)
+        return false;
+
+    const float radius = float(clampr(ps_r__svp_lens_margin_pct, 10, 100)) / 100.f; // of the screen height
+    const float half_y = _min(2.f * radius, 1.f);
+    const float half_x = _min(2.f * radius * float(height) / float(width), 1.f);
+    if (half_x >= 1.f && half_y >= 1.f)
+        return false; // the circle covers the whole image: nothing to crop
+
+    Fmatrix cropped = full_transform;
+    const float sx = 1.f / half_x;
+    const float sy = 1.f / half_y;
+    cropped._11 *= sx;
+    cropped._21 *= sx;
+    cropped._31 *= sx;
+    cropped._41 *= sx;
+    cropped._12 *= sy;
+    cropped._22 *= sy;
+    cropped._32 *= sy;
+    cropped._42 *= sy;
+    out.CreateFromMatrix(cropped, FRUSTUM_P_LRTB | FRUSTUM_P_FAR);
+    area_pct = half_x * half_y * 100.f;
+    return true;
+}
+
 bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix& scope_project)
 {
     // RenderDoc in-app capture active: force the fully sequential scope path. The worker
@@ -462,8 +684,21 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
     full_transform.mul(scope_project, Device.mView);
 
     auto& p = svp_calc_params;
+    // full_transform stays the whole scope image: SSA/LOD, the portal projection and the recording read it.
     p.full_transform = full_transform;
-    p.view_frustum.CreateFromMatrix(full_transform, FRUSTUM_P_LRTB | FRUSTUM_P_FAR);
+    // L0 (31-svp-scope.md, always on since 2026-10-18, 41-cvar-cleanup.md): only the culling frustum is cropped to the
+    // lens. The light filter of the scope pass (SV) tests against the same p.view_frustum.
+    float lens_area_pct = 100.f;
+    if (svp_lens_crop(full_transform, Device.dwWidth, Device.dwHeight, p.view_frustum, lens_area_pct))
+    {
+        PERF_INC(rsvp_lens_frames);
+        PERF_ADD(rsvp_lens_area_pct, u64(lens_area_pct + 0.5f));
+    }
+    else
+    {
+        PERF_INC(rsvp_lens_fallback);
+        p.view_frustum.CreateFromMatrix(full_transform, FRUSTUM_P_LRTB | FRUSTUM_P_FAR);
+    }
     p.view_pos = Device.vCameraPosition;
     p.fov = second_vp_fov;
     p.width = Device.dwWidth;
@@ -497,6 +732,14 @@ bool CRender::BeginSecondVPCalculateParallel(float second_vp_fov, const Fmatrix&
     s_svp_lod.GLOD_end = _sqr(ps_r__GLOD_ssa_end / 3) / screen;
     s_svp_lod.HZBvsTEX = _sqr(ps_r__ssaHZBvsTEX / 3) / screen;
     s_svp_lod.dtex_range = ps_r2_df_parallax_range * screen / (1024.f * 768.f);
+    // The same values for the build itself (and its geometry recording) on the worker (prepare_into: lod_own).
+    p.lod.ssaDISCARD = s_svp_lod.ssaDISCARD;
+    p.lod.ssaLOD_A = s_svp_lod.ssaLOD_A;
+    p.lod.ssaLOD_B = s_svp_lod.ssaLOD_B;
+    p.lod.ssaLOD_CHAR_A = s_svp_lod.ssaLOD_CHAR_A;
+    p.lod.GLOD_start = s_svp_lod.GLOD_start;
+    p.lod.GLOD_end = s_svp_lod.GLOD_end;
+    p.lod.dtex_range = s_svp_lod.dtex_range;
 
     r_main.init();
 

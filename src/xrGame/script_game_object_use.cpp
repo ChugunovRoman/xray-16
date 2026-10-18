@@ -40,11 +40,43 @@ CScriptGameObject::CScriptGameObject(CGameObject* game_object) : m_game_object(g
 
 CScriptGameObject::~CScriptGameObject()
 {
+    // The Lua wrapper cache: the wrapper leaves the Lua registry (on the next pass of any object, under Lua); a script that
+    // still holds it keeps a dangling wrapper, as with the uncached ones
+    xray::script_wrapper_cache::Release(m_lua_wrapper);
+
     if (!m_door)
         return;
 
     unregister_door();
 }
+
+// The Lua wrapper cache (script_game_object.h; the generic get_back_reference looks for a luabind::wrap_base, which
+// CScriptGameObject never is): the cached wrapper, made
+// (as luabind does: a pointer_holder, the object not owned) and kept on the first pass.
+static bool push_cached_wrapper(lua_State* L, CScriptGameObject* object)
+{
+    using namespace xray::script_wrapper_cache;
+    if (Push(L, object->m_lua_wrapper))
+        return true;
+    luabind::detail::make_pointer_instance(L, object);
+    Store(L, object->m_lua_wrapper);
+    return true;
+}
+
+namespace luabind
+{
+template <>
+bool get_back_reference<CScriptGameObject*>(lua_State* L, CScriptGameObject* const& x)
+{
+    return push_cached_wrapper(L, x);
+}
+
+template <>
+bool get_back_reference<CScriptGameObject>(lua_State* L, CScriptGameObject const& x)
+{
+    return push_cached_wrapper(L, const_cast<CScriptGameObject*>(&x));
+}
+} // namespace luabind
 
 CScriptGameObject* CScriptGameObject::Parent() const
 {

@@ -85,6 +85,19 @@ protected:
     Lock s_sources_lock;
     xr_unordered_map<xr_string, CSoundRender_Source*> s_sources;
 
+    // 34-sound-cold-load.md (always on since 2026-10-18, see plan 41): the queue and the thread of the sound prefetch,
+    // SoundRender_Core_SourceManager.cpp. Created in the constructor, the thread on the first folder.
+    struct SourcePrefetch;
+    struct PrefetchJob;
+    SourcePrefetch* m_prefetch{};
+    void prefetch_create();
+    void prefetch_shutdown(); // stops and joins the thread (before the sources are freed); the queue is dropped
+    void prefetch_destroy();
+    void prefetch_enqueue(xr_string os_dir, bool auto_sibling);
+    void prefetch_after_cold_load(const CSoundRender_Source& source);
+    void prefetch_thread_proc();
+    void prefetch_run(const PrefetchJob& job);
+
     u32 s_emitters_u; // emitter update marker
     xr_vector<CSoundRender_Target*> s_targets;
 
@@ -95,6 +108,7 @@ public:
 
 public:
     CSoundRender_Core(CSoundManager& p);
+    ~CSoundRender_Core() override;
 
     // General
     virtual void _initialize_devices_list() = 0;
@@ -128,6 +142,7 @@ public:
     virtual void update_listener(const Fvector& P, const Fvector& D, const Fvector& N, const Fvector& R, float dt);
 
     void refresh_sources() override;
+    void prefetch_sources(pcstr folder) override;
 
 public:
     CSoundRender_Source* i_create_source(pcstr name);

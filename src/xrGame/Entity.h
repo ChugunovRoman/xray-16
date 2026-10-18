@@ -88,6 +88,11 @@ public:
     int g_Team() const { return id_Team; }
     int g_Squad() const { return id_Squad; }
     int g_Group() const { return id_Group; }
+    // The group of the seniority hierarchy the entity is registered in: Level().seniority_holder().team(g_Team())
+    // .squad(g_Squad()).group(hierarchy_group()) - its agent manager and the memory its group shares. g_Group() (the
+    // script value) unless a stalker went to the group of its ALife squad (the group by squad) or to an overflow
+    // group of a full one (64 stalkers, the squad masks of the agent manager), see Entity.cpp
+    u32 hierarchy_group() const { return m_hierarchy_group_set ? m_hierarchy_group : u32(id_Group); }
     // Health calculations
     virtual void Hit(SHit* pHDS);
     virtual void HitSignal(float P, Fvector& local_dir, IGameObject* who, s16 element) = 0;
@@ -122,4 +127,11 @@ public:
 
 private:
     bool m_registered_member;
+    // the group key of the last registration (hierarchy_group), kept after the unregistration (death) as g_Group() was
+    bool m_hierarchy_group_set;
+    u32 m_hierarchy_group;
+
+    u32 desired_hierarchy_group(ALife::_OBJECT_ID self_id) const;
+    u32 fit_hierarchy_group(u32 group) const;
+    void register_in_hierarchy(ALife::_OBJECT_ID self_id);
 };

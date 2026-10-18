@@ -381,6 +381,38 @@ bool CMapLocation::Update(const shared_str& current_level) // returns actual
     return m_cached.m_Actuality;
 }
 
+// map_update_lod (26-framemove-game-next.md, CMapManager::Update): a location is hot - updated every frame - if it was
+// never updated or not for a whole interval, has a TTL or follows the actor, or lies on the current level within
+// hot_dist of the camera (the minimap shows ~50 m around it: the relation icon and the "enemy seen now" of the spots
+// the player can see stay exact)
+bool CMapLocation::UpdateLodSkippable(u32 interval, const Fvector& camera, const shared_str& current_level) const
+{
+    constexpr float hot_dist = 100.f;
+    if (m_cached.m_updatedFrame == u32(-1) || Device.dwFrame - m_cached.m_updatedFrame >= interval)
+        return false;
+    if (m_flags.test(eTTL) || m_flags.test(ePosToActor))
+        return false;
+    if (m_cached.m_LevelName == current_level && m_position_global.distance_to_xz_sqr(camera) < hot_dist * hot_dist)
+        return false;
+    return true;
+}
+
+// The minimap cull (26-framemove-game-next.md, CUIMiniMap::UpdateSpots): UpdateSpot of a minimap spot that is not
+// visible only places it (SetWndPos, task border state, position on demand) - unless it has a pointer or a border
+// (drawn at the rim / attached whatever the distance), belongs to the actor, lies on another level (the pointer path)
+// or has no position yet. The last position (this frame's or at most map_update_lod frames old) is enough to tell
+// "far beyond the map" with the margin the caller puts into dist_sqr
+bool CMapLocation::MiniMapFarAway(const shared_str& map_name, const Fvector2& center, float dist_sqr) const
+{
+    if (!m_minimap_spot || m_flags.test(ePosToActor) || PointerEnabled() || m_spot_border_names[3].size() ||
+        m_position_frame == u32(-1) || m_cached.m_LevelName != map_name)
+        return false;
+    const Fvector2& position = GetDisplayPosition();
+    const float dx = position.x - center.x;
+    const float dy = position.y - center.y;
+    return dx * dx + dy * dy > dist_sqr;
+}
+
 void CMapLocation::UpdateTTL()
 {
     if (!m_flags.test(eTTL))

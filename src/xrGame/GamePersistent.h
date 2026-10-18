@@ -118,6 +118,7 @@ public:
     IRender_Sector::sector_id_t GetLastSectorId() const { return m_lastSectorId; }
 
     void OnWeaponIconRenderPass() override;
+    bool WeaponIconRenderPassPending() const override;
     void OnWeaponIconSnapshot(IRenderable* subject, bool begin) override;
     void OnSystemIniReloaded() override;
     void OnWeaponIconUserRtsReleased() override;

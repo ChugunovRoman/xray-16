@@ -2,6 +2,7 @@
 #pragma hdrstop
 #include "ParticleEffect.h"
 
+#include "xrParticles/particle_effect.h"
 #include "xrCore/Threading/ParallelFor.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
 #include "xrRender_console.h"
@@ -84,6 +85,7 @@ CParticleEffect::CParticleEffect()
 {
     m_HandleEffect = ParticleManager()->CreateEffect(1);
     VERIFY(m_HandleEffect >= 0);
+    m_PE = ParticleManager()->GetEffectPtr(m_HandleEffect);
     m_HandleActionList = ParticleManager()->CreateActionList();
     VERIFY(m_HandleActionList >= 0);
     m_RT_Flags.zero();
@@ -503,9 +505,8 @@ ICF void magnitude_sse(Fvector& vec, float& res)
 #error Specify your platform explicitly
 #endif
 
-void CParticleEffect::ParticleRenderStream(FVF::LIT* pv_start, u32 count, PAPI::Particle * particles)
+void CParticleEffect::FillSprites(FVF::LIT* pv_start, u32 begin, u32 end, PAPI::Particle* particles) const
 {
-    const auto renderParticles = [&, this](const TaskRange<u32>& range)
     {
         // Rotation cache: sin/cos are a pure function of m.rot.x, so the cache only saves work.
         float sina = 0.0f, cosa = 0.0f;
@@ -513,7 +514,7 @@ void CParticleEffect::ParticleRenderStream(FVF::LIT* pv_start, u32 count, PAPI::
         // But it must be 0xFFFFFFFF or otherwise some particles won't play
         float angle = float(0xFFFFFFFF); // XXX: check if we can replace with flt_max
 
-        for (u32 i = range.begin(); i != range.end(); ++i)
+        for (u32 i = begin; i != end; ++i)
         {
             // Every branch below writes exactly one sprite (4 vertices) per particle: write it by index.
             FVF::LIT* pv = pv_start + size_t(i) * 4;
@@ -628,12 +629,47 @@ void CParticleEffect::ParticleRenderStream(FVF::LIT* pv_start, u32 count, PAPI::
                 }
             }
         }
-    };
+    }
+}
+
+void CParticleEffect::ParticleRenderStream(FVF::LIT* pv_start, u32 count, PAPI::Particle * particles)
+{
     // render/combine/ps_fill (main pass combine only, see g_perf_combine_main)
     [[maybe_unused]] const bool perf_main = g_perf_combine_main != 0;
     PERF_SCOPE_IF(perf_main, rcomb_ps_fill);
     PERF_ADD_IF(perf_main, rcomb_ps_sprites, count);
-    renderParticles(TaskRange<u32>(0, count));
+    FillSprites(pv_start, 0, count, particles);
+}
+
+bool CParticleEffect::BatchPrepare(BatchSnapshot& snapshot) const
+{
+    if (!m_Def || !m_Def->m_Flags.is(CPEDef::dfSprite) || m_RT_Flags.is(flRT_HUDmode) || !m_PE)
+        return false;
+    // One read of the count: the PreRender particle worker may be stepping this effect (as when Render() reads it);
+    // the array holds max_particles, so any count it publishes stays inside it.
+    snapshot.particles = m_PE->particles;
+    snapshot.count = m_PE->p_count;
+    return snapshot.count > 0;
+}
+
+void CParticleEffect::BatchFill(FVF::LIT* pv_start, const BatchSnapshot& snapshot, u32 begin, u32 end) const
+{
+    FillSprites(pv_start, begin, end, snapshot.particles);
+}
+
+u32 CParticleEffect::BatchCullMode() const
+{
+    return m_Def->m_Flags.is(CPEDef::dfCulling) ? (m_Def->m_Flags.is(CPEDef::dfCullCCW) ? CULL_CCW : CULL_CW) : CULL_NONE;
+}
+
+void CParticleEffect::BatchDraw(CBackend& cmd_list, u32 vertex_offset, u32 vertex_count)
+{
+    // The non-HUD tail of Render() below.
+    cmd_list.set_xform_world(Fidentity);
+    cmd_list.set_Geometry(geom);
+    cmd_list.set_CullMode(BatchCullMode());
+    cmd_list.Render(D3DPT_TRIANGLELIST, vertex_offset, 0, vertex_count, 0, vertex_count / 2);
+    cmd_list.set_CullMode(CULL_CCW);
 }
 
 void CParticleEffect::Render(CBackend& cmd_list, float, bool use_fast_geo)
@@ -660,14 +696,25 @@ void CParticleEffect::Render(CBackend& cmd_list, float, bool use_fast_geo)
     // Get a pointer to the particles in gp memory
     PAPI::Particle* particles;
     u32 p_cnt;
-    ParticleManager()->GetParticles(m_HandleEffect, particles, p_cnt);
+    // 27-render-main.md, R1 (always on since 2026-10-18, 41-cvar-cleanup.md): the cached effect instead of GetParticles (no pm_lock), and a lock of
+    // exactly the vertices written (4 per particle) instead of 4 times that - the extra space only made the stream
+    // wrap (Map DISCARD) sooner.
+    const bool batch_fixes = m_PE != nullptr;
+    if (batch_fixes)
+    {
+        particles = m_PE->particles;
+        p_cnt = m_PE->p_count;
+    }
+    else
+        ParticleManager()->GetParticles(m_HandleEffect, particles, p_cnt);
     PERF_ADD_IF(perf_main && p_cnt == 0, rcomb_ps_empty, 1);
 
     if (p_cnt > 0)
     {
         if (m_Def && m_Def->m_Flags.is(CPEDef::dfSprite))
         {
-            FVF::LIT* pv_start = (FVF::LIT*)RImplementation.Vertex.Lock(p_cnt * 4 * 4, geom->vb_stride, dwOffset);
+            const u32 lock_count = batch_fixes ? p_cnt * 4 : p_cnt * 4 * 4;
+            FVF::LIT* pv_start = (FVF::LIT*)RImplementation.Vertex.Lock(lock_count, geom->vb_stride, dwOffset);
 
             ParticleRenderStream(pv_start, p_cnt, particles);
 

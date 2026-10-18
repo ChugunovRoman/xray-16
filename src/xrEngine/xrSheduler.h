@@ -108,6 +108,16 @@ private:
     u32 m_adapt_log_time{};
     float m_adapt_logged_scale{1.f};
 
+    // 29-game-thread-next.md, the adaptive budget (see the comment at ps_shed_budget_min_ms in xrSheduler.cpp). The wait of the main thread for the Game thread (its join in a game/render overlap frame): an
+    // EMA written by the main thread at the join (NoteGameWait) and read by the Game thread in the next ProcessStep -
+    // the kick of that frame orders them; atomics only to keep it formally clean (no XR_PERF_METRICS needed)
+    std::atomic<float> m_game_wait_ema_ms{};
+    std::atomic<u32> m_game_wait_samples{}; // joins measured so far (wrapping): a new sample since the last pass
+    std::atomic<bool> m_game_wait_restart{true}; // the next sample starts the EMA anew (set after a gap)
+    u32 m_adapt_wait_seen{}; // m_game_wait_samples at the last pass (Game thread)
+    u32 m_adapt_idle_passes{}; // passes in a row without a new sample (sequential frames, pause, loading)
+    float m_budget_eff_ms{}; // the effective budget of the pass, ms (0 = not set yet: the base)
+
     IC static void Push(xr_vector<Item>& heap, Item& I);
     IC static void Pop(xr_vector<Item>& heap);
     static void HeapErase(xr_vector<Item>& heap, size_t index);
@@ -134,8 +144,13 @@ private:
     void UpdateNearRadius(u32 now);
     void DemoteFarFromNear();
     void PromoteNearFromFar();
+    // The effective time budget of this pass in ns (Game thread, once a pass)
+    u64 AdaptBudget(u32 base_ms, bool timed);
 
 public:
+    // Main thread, right after it joined the Game thread of a game/render overlap frame: how long it waited (ns).
+    // Feeds the adaptive budget; measured in every build, with or without the perf metrics
+    void NoteGameWait(u64 wait_ns);
     void ProcessStep();
     void Process();
     // Classic single-call update: RT objects, then the normal heap. Used by a sequential frame
@@ -185,3 +200,12 @@ ENGINE_API extern int ps_shed_near_dist_min; // m: the adaptive plain radius nev
 // ps_shed_urgent_share in xrSheduler.cpp)
 ENGINE_API extern int ps_shed_urgent_share; // % of the near budget the urgent heap may take while calm near ones are due
 ENGINE_API extern int ps_shed_urgent_hit_ms; // ms: an NPC hit this recently is urgent (read by xrGame)
+// 29-game-thread-next.md: the adaptive budget, always on (see the comment at ps_shed_budget_min_ms in xrSheduler.cpp):
+// it cuts the budget while the main thread waits for the Game thread. Tunables, not saved
+ENGINE_API extern int ps_shed_budget_min_ms; // ms: the adaptive budget never goes below it
+ENGINE_API extern int ps_shed_budget_wait_target_us; // us: the wait of the main thread the controller aims at
+ENGINE_API extern int ps_shed_budget_far_keep_pct; // % of the far window the cut leaves to the far heap
+// Read-only for the console and the plugins (cvar shed_budget_scale_pct): 100 * effective / base budget of the last
+// pass, written by the scheduler on the Game thread. gw_npc scales its own budgets by
+// it (gw_npc_budget_adaptive)
+ENGINE_API extern int ps_shed_budget_scale_pct;

@@ -10,6 +10,8 @@
 
 #include "script_token_list.h"
 
+#include <luabind/back_reference_fwd.hpp>
+
 struct lua_State;
 
 class CScriptIniFile : public CInifile
@@ -65,3 +67,13 @@ public:
 private:
     DECLARE_SCRIPT_REGISTER_FUNCTION();
 };
+
+// The Lua wrapper cache (xrScriptEngine/script_wrapper_cache.hpp): system_ini() - the system ini itself (pSettings),
+// any pass of it to Lua by pointer - gives one wrapper per Lua state. Any other ini (ini_file(), create_ini_file(), spawn_ini(), game_ini()...) goes the old way: a new userdata.
+// Defined in script_ini_file_script.cpp; declared with the class, so no translation unit instantiates the generic
+// template (all of them are in xrGame: xrServerEntities is built into it).
+namespace luabind
+{
+template <>
+bool get_back_reference<CScriptIniFile*>(lua_State* L, CScriptIniFile* const& x);
+} // namespace luabind

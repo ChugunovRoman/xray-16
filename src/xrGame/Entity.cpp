@@ -19,15 +19,109 @@
 #include "ai_space.h"
 #include "alife_simulator.h"
 #include "alife_time_manager.h"
+#include "alife_object_registry.h"
+#include "agent_manager.h"
+#include "agent_member_manager.h"
 #include "xrNetServer/NET_Messages.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
 
 #define BODY_REMOVE_TIME 600000
+
+// 26-framemove-game-next.md, scheduler overrun (distribute_enemies of the group). Always on since 2026-10-18 (its switch
+// npc_agent_group_by_squad removed, 41-cvar-cleanup.md): a stalker that belongs to an ALife squad is registered in the group of that squad (its agent
+// manager and the memory its group shares) instead of the group the scripts give it (sim_board.script: every sim squad
+// of a faction on a smart gets group 1 - one agent manager for all of them, tens of members). g_Group() and everything
+// the scripts see stay the same. Applies when the stalker registers: on spawn (and so after a load) and on change_team
+// (the sim board calls it when a squad takes a smart; the same team/squad/group also moves the stalker when the group
+// it belongs to changed). Squads on one smart then do not share enemies, targets and memory.
+
+namespace
+{
+// group keys above the 32 slots of a squad holder (CSquadHierarchyHolder::m_extra_groups)
+constexpr u32 entity_hierarchy_squad_base = 0x10000; // + the ALife squad id (the group by squad)
+constexpr u32 entity_hierarchy_overflow_shift = 20; // base | n << 20: the n-th overflow group of a full one
+constexpr u32 entity_hierarchy_base_mask = (1u << entity_hierarchy_overflow_shift) - 1;
+constexpr u32 entity_hierarchy_max_overflow = 255;
+// an agent manager tells its members by a bit of MemorySpace::squad_mask_type (CAgentMemberManager::mask)
+constexpr size_t entity_hierarchy_max_agent_members = sizeof(MemorySpace::squad_mask_type) * 8;
+
+ALife::_OBJECT_ID entity_hierarchy_alife_squad(ALife::_OBJECT_ID id)
+{
+    if (!ai().get_alife() || id == ALife::_OBJECT_ID(-1))
+        return ALife::_OBJECT_ID(-1);
+
+    const CSE_ALifeMonsterAbstract* monster =
+        smart_cast<const CSE_ALifeMonsterAbstract*>(ai().alife().objects().object(id, true));
+    return monster ? monster->m_group_id : ALife::_OBJECT_ID(-1);
+}
+} // namespace
+
+// The group a stalker should be in, before the 64-member guard: the group of its ALife squad, or g_Group() outside
+// one. Other entities (monsters) always use g_Group()
+u32 CEntity::desired_hierarchy_group(ALife::_OBJECT_ID self_id) const
+{
+    const u32 group = u32(id_Group);
+    if (!const_cast<CEntity*>(this)->cast_stalker())
+        return group;
+
+    const ALife::_OBJECT_ID squad_id = entity_hierarchy_alife_squad(self_id);
+    if (squad_id == ALife::_OBJECT_ID(-1))
+        return group;
+
+    return entity_hierarchy_squad_base + u32(squad_id);
+}
+
+// Safety guard (always on): an agent manager holds at most 64 stalkers - the 65th used to get the mask 1 << 64
+// (undefined behaviour; on x86/ARM it aliased the first member: shared enemy marks, wrong member lookups). A stalker that
+// would be the 65th goes to an overflow group of the same team/squad (base | n << 20) instead, with its own agent
+// manager and shared memory
+u32 CEntity::fit_hierarchy_group(u32 group) const
+{
+    if (!const_cast<CEntity*>(this)->cast_stalker())
+        return group;
+
+    const CSquadHierarchyHolder& squad = Level().seniority_holder().team(g_Team()).squad(g_Squad());
+    const u32 base = group & entity_hierarchy_base_mask;
+    for (u32 n = 0; n <= entity_hierarchy_max_overflow; ++n)
+    {
+        const u32 key = n ? (base | (n << entity_hierarchy_overflow_shift)) : base;
+        const CAgentManager* agent_manager = squad.group(key).get_agent_manager();
+        if (agent_manager && agent_manager->member().members().size() >= entity_hierarchy_max_agent_members)
+            continue;
+
+        if (n)
+        {
+            PERF_INC(agent_group_overflow);
+            static u32 s_reported = 0;
+            ++s_reported;
+            if (s_reported <= 16 || !(s_reported % 512))
+                Msg("! [GW] agent group [team:%d][squad:%d][group:%u] has %u stalkers, [%s] goes to its overflow group %u",
+                    g_Team(), g_Squad(), base, u32(entity_hierarchy_max_agent_members),
+                    cName().size() ? cName().c_str() : "<spawning>", n);
+        }
+        return key;
+    }
+
+    return base;
+}
+
+void CEntity::register_in_hierarchy(ALife::_OBJECT_ID self_id)
+{
+    m_hierarchy_group = fit_hierarchy_group(desired_hierarchy_group(self_id));
+    m_hierarchy_group_set = true;
+    Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(m_hierarchy_group).register_member(this);
+}
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
-CEntity::CEntity() { m_registered_member = false; }
+CEntity::CEntity()
+{
+    m_registered_member = false;
+    m_hierarchy_group_set = false;
+    m_hierarchy_group = 0;
+}
 CEntity::~CEntity() { xr_delete(m_entity_condition); }
 CEntityConditionSimple* CEntity::create_entity_condition(CEntityConditionSimple* ec)
 {
@@ -83,7 +177,7 @@ void CEntity::Die(IGameObject* who)
     {
         m_registered_member = false;
         if (IsGameTypeSingle())
-            Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()).unregister_member(this);
+            Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(hierarchy_group()).unregister_member(this);
     }
 }
 
@@ -131,6 +225,7 @@ void CEntity::Hit(SHit* pHDS)
     // If Local() - perform some logic
     if (Local() && !g_Alive() && !AlreadyDie() && (m_killer_id == ALife::_OBJECT_ID(-1)))
     {
+        PERF_SCOPE(hit_kill_entity); // 30-game-events.md: GE_DIE to the server (its Lua on_death) inside
         KillEntity(pHDS->whoID);
     }
     // must be last!!! @slipch
@@ -212,11 +307,13 @@ bool CEntity::net_Spawn(CSE_Abstract* DC)
         }
     }
 
+    // the group key of a previous life of this object is not this life's one
+    m_hierarchy_group_set = false;
     if (g_Alive() && IsGameTypeSingle())
     {
         m_registered_member = true;
-        Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()).register_member(this);
-        ++Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()).m_dwAliveCount;
+        register_in_hierarchy(e->ID);
+        ++Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(hierarchy_group()).m_dwAliveCount;
     }
 
     if (!g_Alive())
@@ -251,7 +348,7 @@ void CEntity::net_Destroy()
     {
         m_registered_member = false;
         if (IsGameTypeSingle())
-            Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()).unregister_member(this);
+            Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(hierarchy_group()).unregister_member(this);
     }
 
     inherited::net_Destroy();
@@ -390,7 +487,13 @@ void CEntity::on_after_change_team() {}
 void CEntity::ChangeTeam(int team, int squad, int group)
 {
     if ((team == g_Team()) && (squad == g_Squad()) && (group == g_Group()))
-        return;
+    {
+        // The group by squad: the same team/squad/group still moves a registered stalker whose group key is not the
+        // one it should have now (it joined an ALife squad after it registered)
+        if (!m_registered_member || !IsGameTypeSingle() ||
+            desired_hierarchy_group(ID()) == (hierarchy_group() & entity_hierarchy_base_mask))
+            return;
+    }
 
     VERIFY2(g_Alive(), "Try to change team of a dead object");
 
@@ -400,13 +503,13 @@ void CEntity::ChangeTeam(int team, int squad, int group)
     }
     // remove from current team
     on_before_change_team();
-    Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()).unregister_member(this);
+    Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(hierarchy_group()).unregister_member(this);
 
     id_Team = team;
     id_Squad = squad;
     id_Group = group;
 
     // add to new team
-    Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group()).register_member(this);
+    register_in_hierarchy(ID());
     on_after_change_team();
 }

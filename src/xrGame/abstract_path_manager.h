@@ -59,6 +59,9 @@ public:
     IC virtual void select_intermediate_vertex();
     IC CRestrictedObject& object() const;
     IC void invalidate_failed_info();
+    // 33-level-path.md (plans/optimization_mt), sliced A*: the pair a later build_path answers "failed" without a
+    // search (the stalker obstacle loop puts it back when the search without obstacles after it was put aside)
+    IC void set_failed_info(const _vertex_id_type start_vertex_id, const _vertex_id_type dest_vertex_id);
 
 public:
     IC const PATH& path() const;

@@ -320,6 +320,25 @@ void CEnemyManager::remove_links(IGameObject* object)
     clear_useful_callback_cache();
 }
 
+// R1 (32-frame-spikes.md): remove_links for every object of the batch in one pass. The enemies
+// are compared as pointers (upcast, nothing is dereferenced; each one is in the list at most once), the cache is
+// dropped once - remove_links drops it on every call, the end state is the same (empty).
+void CEnemyManager::remove_links_batch(const RelcaseBatch& batch)
+{
+    m_objects.erase(std::remove_if(m_objects.begin(), m_objects.end(),
+                        [&batch](const CEntityAlive* enemy) { return batch.contains(enemy); }),
+        m_objects.end());
+
+    if (m_last_enemy && batch.contains(m_last_enemy))
+        m_last_enemy = 0;
+
+    if (m_selected && batch.contains(m_selected))
+        m_selected = 0;
+
+    PERF_ADD(stk_enemy_useful_drop, m_useful_callback_cache.size());
+    clear_useful_callback_cache();
+}
+
 void CEnemyManager::ignore_monster_threshold(const float& ignore_monster_threshold)
 {
     m_ignore_monster_threshold = ignore_monster_threshold;

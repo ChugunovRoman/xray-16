@@ -186,6 +186,7 @@ enum PActionEnum : u32
 };
 
 struct ParticleAction;
+struct ParticleEffect;
 
 class IParticleManager
 {
@@ -218,6 +219,10 @@ public:
     virtual ParticleAction* CreateAction(PActionEnum type) = 0;
     virtual size_t LoadActions(int alist_id, IReader& R) = 0;
     virtual void SaveActions(int alist_id, IWriter& W) = 0;
+
+    // The effect itself (27-render-main.md, R1): stable from CreateEffect to DestroyEffect, so the owner may keep the
+    // pointer and read p_count / particles without the manager's lock (appended last: the vtable above is unchanged).
+    virtual ParticleEffect* GetEffectPtr(int effect_id) = 0;
 };
 
 PARTICLES_API IParticleManager* ParticleManager();

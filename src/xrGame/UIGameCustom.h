@@ -7,6 +7,9 @@
 #include "xrEngine/CustomHUD.h"
 #include "script_game_object.h"
 #include "xrCommon/xr_string.h"
+#include "xrScriptEngine/script_wrapper_cache.hpp"
+
+#include <luabind/back_reference_fwd.hpp>
 
 // fwd. decl.
 class CTeamBaseZone;
@@ -134,8 +137,23 @@ public:
     bool FillDebugTree(const CUIDebugState& debugState) override;
     void FillDebugInfo() override;
 
+    // The Lua wrapper cache: the one Lua wrapper of this game UI (get_hud(); luabind::get_back_reference below), released
+    // in the destructor. Lives in the object: the UI of the next level / game - even at the same address and of
+    // another type - never gets the wrapper of the old one.
+    xray::script_wrapper_cache::Slot m_lua_wrapper;
+
 private:
     DECLARE_SCRIPT_REGISTER_FUNCTION(CDialogHolder);
 };
+
+// The Lua wrapper cache (xrScriptEngine/script_wrapper_cache.hpp): get_hud() and any other pass of the game UI to Lua
+// by pointer give the cached wrapper. A Lua-derived UI (a
+// luabind::wrap_base; UIGame_custom_script, not built now) would keep luabind's own path: its Lua object. Defined in
+// UIGameCustom_script.cpp; declared with the class, so no translation unit instantiates the generic template.
+namespace luabind
+{
+template <>
+bool get_back_reference<CUIGameCustom*>(lua_State* L, CUIGameCustom* const& x);
+} // namespace luabind
 
 extern CUIGameCustom* CurrentGameUI();

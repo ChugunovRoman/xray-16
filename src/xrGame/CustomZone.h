@@ -62,6 +62,8 @@ public:
 
     float effective_radius(float nearest_shape_radius);
     virtual void net_Relcase(IGameObject* O);
+    // M1 (plans/optimization_mt/37-destroy-relcase-smooth.md): nothing to do for the batch - skipped without the walk
+    virtual void net_RelcaseBatch(const RelcaseBatch& batch) override;
     virtual void OnEvent(NET_Packet& P, u16 type);
 
     float GetMaxPower() { return m_fMaxPower; }

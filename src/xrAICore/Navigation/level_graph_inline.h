@@ -564,14 +564,40 @@ IC void CLevelGraph::set_mask(u32 vertex_id)
     set_mask_no_check(vertex_id);
 }
 
-IC void CLevelGraph::set_mask_no_check(u32 vertex_id) { m_access_mask[vertex_id] = false; }
+// 33-level-path.md (plans/optimization_mt), sliced A*: the bit flips and m_mask_signature with it; a bit that already
+// has the value stays as it is (the same mask as the plain assignment before)
+IC void CLevelGraph::set_mask_no_check(u32 vertex_id)
+{
+    if (!m_access_mask[vertex_id])
+        return;
+    m_access_mask[vertex_id] = false;
+    m_mask_signature.fetch_xor(mask_hash(vertex_id), std::memory_order_relaxed);
+}
+
 IC void CLevelGraph::clear_mask(u32 vertex_id)
 {
     VERIFY(!m_access_mask[vertex_id]);
     clear_mask_no_check(vertex_id);
 }
 
-IC void CLevelGraph::clear_mask_no_check(u32 vertex_id) { m_access_mask[vertex_id] = true; }
+IC void CLevelGraph::clear_mask_no_check(u32 vertex_id)
+{
+    if (m_access_mask[vertex_id])
+        return;
+    m_access_mask[vertex_id] = true;
+    m_mask_signature.fetch_xor(mask_hash(vertex_id), std::memory_order_relaxed);
+}
+
+IC u64 CLevelGraph::mask_signature() const { return m_mask_signature.load(std::memory_order_relaxed); }
+
+// splitmix64 of the id: XOR of these over a set is its hash, independent of the order of the flips
+IC u64 CLevelGraph::mask_hash(u32 vertex_id)
+{
+    u64 z = (u64(vertex_id) + 1) * 0x9E3779B97F4A7C15ull;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    return z ^ (z >> 31);
+}
 template <typename P>
 IC void CLevelGraph::iterate_vertices(
     const Fvector& min_position, const Fvector& max_position, const P& predicate) const

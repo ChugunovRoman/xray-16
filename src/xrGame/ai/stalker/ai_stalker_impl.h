@@ -19,7 +19,7 @@
 
 IC CAgentManager& CAI_Stalker::agent_manager() const
 {
-    CGroupHierarchyHolder& group = Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(g_Group());
+    CGroupHierarchyHolder& group = Level().seniority_holder().team(g_Team()).squad(g_Squad()).group(hierarchy_group());
     if (!group.get_agent_manager())
         const_cast<CGroupHierarchyHolder&>(group).lazy_ensure_agent_manager_for_stalker(const_cast<CAI_Stalker*>(this));
 

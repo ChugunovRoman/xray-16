@@ -786,39 +786,9 @@ void CDetailPathManager::postprocess_key_points(const xr_vector<u32>& level_path
         STravelPoint key_point1 =
             compute_better_key_point(m_key_points[i + 1], m_key_points[i], m_key_points[i - 1], true);
 
-        // XXX: check out what is this
-        {
-            u32 vertex_id = ai().level_graph().check_position_in_direction(
-                m_key_points[i - 1].vertex_id, m_key_points[i - 1].position, key_point0.position);
-            if (!ai().level_graph().valid_vertex_id(vertex_id))
-            {
-                vertex_id = vertex_id;
-            }
-        }
-        {
-            u32 vertex_id = ai().level_graph().check_position_in_direction(
-                m_key_points[i - 1].vertex_id, m_key_points[i - 1].position, key_point1.position);
-            if (!ai().level_graph().valid_vertex_id(vertex_id))
-            {
-                vertex_id = vertex_id;
-            }
-        }
-        {
-            u32 vertex_id = ai().level_graph().check_position_in_direction(
-                key_point0.vertex_id, key_point0.position, m_key_points[i + 1].position);
-            if (!ai().level_graph().valid_vertex_id(vertex_id))
-            {
-                vertex_id = vertex_id;
-            }
-        }
-        {
-            u32 vertex_id = ai().level_graph().check_position_in_direction(
-                key_point1.vertex_id, key_point1.position, m_key_points[i + 1].position);
-            if (!ai().level_graph().valid_vertex_id(vertex_id))
-            {
-                vertex_id = vertex_id;
-            }
-        }
+        // 45-engine-ai-audit.md, F7: four check_position_in_direction calls whose results were thrown away
+        // ("vertex_id = vertex_id;" - a breakpoint spot of the original authors) are gone; the walk over the level
+        // graph only reads it, nothing depended on them
         if (better_key_point(m_key_points[i - 1], m_key_points[i + 1], key_point0, key_point1))
             m_key_points[i] = key_point0;
         else

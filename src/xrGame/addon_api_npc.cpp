@@ -19,6 +19,8 @@
 #include "xrCore/clsid.h"
 #include "xrAICore/Navigation/game_graph.h"
 #include <luabind/wrapper_base.hpp>
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include "CustomMonster.h"
@@ -582,6 +584,17 @@ int GWP_CALL ApiAlifeSquadIsMonster(GwpObjectId squad)
     return result;
 }
 
+int GWP_CALL ApiAlifeSquadRegistered(GwpObjectId squad)
+{
+    // squad.registered_in_simultaion (the spelling of the scripts): true while the squad counts in the simulation
+    // (init_squad of sim_squad_scripted, sim_squad, sim_brain write it; remove_squad clears it). Not a squad: 0,
+    // even for a script object that happens to have such a field
+    CSE_Abstract* object = FindServerObject(squad, "alife_squad_registered");
+    if (!smart_cast<CSE_ALifeOnlineOfflineGroup*>(object))
+        return 0;
+    return ScriptSelfTruthy(object, "registered_in_simultaion") ? 1 : 0;
+}
+
 uint32_t GWP_CALL ApiAlifeSquadMembers(GwpObjectId squad, GwpObjectId* out, uint32_t max)
 {
     const auto* group = smart_cast<const CSE_ALifeOnlineOfflineGroup*>(FindServerObject(squad, "alife_squad_members"));
@@ -669,6 +682,114 @@ float GWP_CALL ApiAlifeSmartArriveDist(GwpObjectId smart)
     return ScriptSelfNumber(FindServerObject(smart, "alife_smart_arrive_dist"), "arrive_dist", value)
         ? static_cast<float>(value)
         : -1.f; // -1.f: no such object or field (a smart of the mod always has one: its class reads it from ltx)
+}
+
+// smart.<field> of a smart terrain (the server object, online or not): pushes the Lua instance and the value of the
+// field, returns the state and the top captured AFTER the self push (the caller ends with lua_settop(L, top - 1),
+// as the other readers). nullptr with nothing pushed for no such object, an object that is not a smart zone, or a
+// smart zone of a pure C++ class (no Lua fields).
+lua_State* PushSmartScriptField(GwpObjectId smart, pcstr function, pcstr field, int& top)
+{
+    CSE_Abstract* object = FindServerObject(smart, function);
+    if (!object || !object->cast_smart_zone())
+        return nullptr;
+    lua_State* L = PushScriptSelf(object);
+    if (!L)
+        return nullptr;
+    top = lua_gettop(L);
+    lua_pushstring(L, field);
+    lua_gettable(L, -2);
+    return L;
+}
+
+uint32_t GWP_CALL ApiAlifeSmartOwner(GwpObjectId smart, char* out, uint32_t cap)
+{
+    if (out && cap)
+        out[0] = '\0';
+    int top = 0;
+    lua_State* L = PushSmartScriptField(smart, "alife_smart_owner", "owning_faction", top);
+    if (!L)
+        return 0;
+    uint32_t length = 0;
+    // lua_type, not lua_isstring: a number is no faction name (and lua_tolstring would turn it into a string in place)
+    if (lua_type(L, -1) == LUA_TSTRING)
+    {
+        size_t size = 0;
+        const char* text = lua_tolstring(L, -1, &size); // "none" for a smart without an owner (reset_owner)
+        length = static_cast<uint32_t>(size);
+        if (out && cap)
+        {
+            const uint32_t copied = length < cap - 1 ? length : cap - 1;
+            if (copied)
+                std::memcpy(out, text, copied);
+            out[copied] = '\0';
+        }
+    }
+    // nil (before the first update of the smart) and anything else: 0, out holds ""
+    lua_settop(L, top - 1); // top was captured AFTER the self push of PushScriptSelf: pop the self too
+    return length;
+}
+
+uint32_t GWP_CALL ApiAlifeSmartTargets(GwpObjectId smart, GwpObjectId* out, uint32_t max)
+{
+    int top = 0;
+    lua_State* L = PushSmartScriptField(smart, "alife_smart_targets", "target_smarts", top);
+    if (!L)
+        return 0;
+    // Main thread only (CheckNpcCall in FindServerObject): one buffer reused by every call
+    static xr_vector<GwpObjectId> ids;
+    ids.clear();
+    if (lua_istable(L, -1))
+    {
+        lua_pushnil(L); // the first key of lua_next
+        while (lua_next(L, -2) != 0)
+        {
+            // key at -2, value at -1. lua_type, not lua_isnumber: a string key must stay a string for lua_next
+            if (lua_toboolean(L, -1) && lua_type(L, -2) == LUA_TNUMBER)
+            {
+                const double key = lua_tonumber(L, -2);
+                if (key >= 0. && key < static_cast<double>(GWP_INVALID_OBJECT_ID) && key == std::floor(key))
+                    ids.push_back(static_cast<GwpObjectId>(key));
+            }
+            lua_pop(L, 1); // the value; the key stays for the next lua_next
+        }
+    }
+    // pairs() of Lua has no order: ascending ids make the answer the same on every call
+    std::sort(ids.begin(), ids.end());
+    const uint32_t count = static_cast<uint32_t>(ids.size());
+    if (out)
+    {
+        const uint32_t written = count < max ? count : max;
+        for (uint32_t i = 0; i < written; ++i)
+            out[i] = ids[i];
+    }
+    lua_settop(L, top - 1); // top was captured AFTER the self push of PushScriptSelf: pop the self too
+    return count;
+}
+
+int GWP_CALL ApiAlifeSmartGlobalPosition(GwpObjectId smart, float out_xyz[3])
+{
+    int top = 0;
+    lua_State* L = PushSmartScriptField(smart, "alife_smart_global_position", "global_position", top);
+    if (!L)
+        return 0;
+    int result = 0;
+    if (out_xyz && lua_type(L, -1) == LUA_TUSERDATA)
+    {
+        // vector():set(...) of sim_smart.get_smart_global_position: an Fvector instance of luabind
+        const luabind::object value(luabind::from_stack(L, -1));
+        if (const auto* vector =
+                luabind::object_cast_nothrow<const Fvector*>(value, static_cast<const Fvector*>(nullptr)))
+        {
+            out_xyz[0] = vector->x;
+            out_xyz[1] = vector->y;
+            out_xyz[2] = vector->z;
+            result = 1;
+        }
+    }
+    // nil before the first update of the smart (and anything that is not a vector): 0, out_xyz untouched
+    lua_settop(L, top - 1); // top was captured AFTER the self push of PushScriptSelf: pop the self too
+    return result;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -918,6 +1039,64 @@ GwpResult GWP_CALL ApiObjectSetTipText(const GwpPlugin* self, GwpObjectId id, co
 }
 } // namespace
 
+// squad:get_squad_community() of sim_squad_scripted without the Lua call, for squad_community of
+// addon_api_alife_ext.cpp (here for PushScriptSelf). Not in the anonymous namespace: the other file calls it.
+// The method is squad_community_by_behaviour[self.player_id] (the global table of _g.script, sim_brain adds
+// "trader"), read the same way: the dot of Lua on both, metatables included, the value live on every call
+// (set_squad_community changes player_id). `squad` is a squad the caller checked. The text when the value is a string
+// (the only answer the Lua path took), copied into out zero-terminated and cut to cap - 1, its length returned; 0 and
+// "" otherwise. For a nil value the method logged a line through printf: the global printf is called with the same
+// arguments, so the log stays as it was.
+uint32_t ReadScriptSquadCommunity(CSE_Abstract* squad, char* out, uint32_t cap)
+{
+    if (out && cap)
+        out[0] = '\0';
+    lua_State* L = squad ? PushScriptSelf(squad) : nullptr;
+    if (!L)
+        return 0;
+    const int top = lua_gettop(L);
+    uint32_t length = 0;
+    lua_pushstring(L, "player_id");
+    lua_gettable(L, -2); // top + 1: self.player_id
+    lua_getglobal(L, "squad_community_by_behaviour"); // top + 2
+    if (lua_istable(L, -1))
+    {
+        lua_pushvalue(L, -2); // player_id as the key (t[nil] reads nil, as in Lua)
+        lua_gettable(L, -2); // top + 3: the community
+        // lua_type, not lua_isstring: the Lua path took a string only (a number is no community)
+        if (lua_type(L, -1) == LUA_TSTRING)
+        {
+            const char* text = lua_tostring(L, -1);
+            length = xr_strlen(text); // up to the first zero, as the copy of the Lua path
+            if (out && cap)
+            {
+                const uint32_t copied = length < cap - 1 ? length : cap - 1;
+                if (copied)
+                    std::memcpy(out, text, copied);
+                out[copied] = '\0';
+            }
+        }
+        else if (lua_isnil(L, -1))
+        {
+            lua_getglobal(L, "printf"); // top + 4
+            if (lua_isfunction(L, -1))
+            {
+                lua_pushstring(L, "squad community is 'nil' for player_id [%s]");
+                lua_pushvalue(L, top + 1); // player_id, printf makes it text with tostring
+                if (lua_pcall(L, 2, 0, 0) != 0)
+                {
+                    const pcstr message = lua_isstring(L, -1) ? lua_tostring(L, -1) : "error without a message";
+                    Msg("! [squads] squad_community: printf: %s", message);
+                }
+            }
+        }
+    }
+    else
+        Msg("! [squads] squad_community: the global squad_community_by_behaviour is not a table");
+    lua_settop(L, top - 1); // top was captured AFTER the self push of PushScriptSelf: pop the self too
+    return length;
+}
+
 // Registered through the script export list: called for every new Lua state, before any script is loaded.
 // Not in the anonymous namespace: the export node must have a normal, always-emitted definition.
 struct CNpcScriptCache
@@ -947,6 +1126,7 @@ void FillNpcApi(GwpEngineApi& api)
     api.alife_squad_script_target = &ApiAlifeSquadScriptTarget;
     api.alife_squad_always_arrived = &ApiAlifeSquadAlwaysArrived;
     api.alife_squad_is_monster = &ApiAlifeSquadIsMonster;
+    api.alife_squad_registered = &ApiAlifeSquadRegistered;
     api.alife_squad_npc_count = &ApiAlifeSquadNpcCount;
     api.alife_squad_members = &ApiAlifeSquadMembers;
     api.alife_object_smart = &ApiAlifeObjectSmart;
@@ -956,6 +1136,9 @@ void FillNpcApi(GwpEngineApi& api)
     api.alife_object_level_id = &ApiAlifeObjectLevelId;
     api.alife_object_class_id = &ApiAlifeObjectClassId;
     api.alife_smart_arrive_dist = &ApiAlifeSmartArriveDist;
+    api.alife_smart_owner = &ApiAlifeSmartOwner;
+    api.alife_smart_targets = &ApiAlifeSmartTargets;
+    api.alife_smart_global_position = &ApiAlifeSmartGlobalPosition;
     api.npc_critically_wounded = &ApiNpcCriticallyWounded;
     api.npc_in_smart_cover = &ApiNpcInSmartCover;
     api.character_is_talking = &ApiCharacterIsTalking;

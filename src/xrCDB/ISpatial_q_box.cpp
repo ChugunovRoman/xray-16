@@ -74,11 +74,15 @@ public:
         for (auto& it : N->items)
         {
             ISpatial* S = it;
-            if (0 == (S->GetSpatialData().type & mask))
+            // 46-engine-core-render-audit.md: one virtual call per item instead of three - GetSpatialData() goes through
+            // the virtual base ISpatial (a this-adjusting thunk) and the compiler cannot merge the calls. Its only
+            // implementation (SpatialBase, final) returns its own member: the same fields are read in the same order.
+            SpatialData& sd = S->GetSpatialData();
+            if (0 == (sd.type & mask))
                 continue;
 
-            Fvector& sC = S->GetSpatialData().sphere.P;
-            float sR = S->GetSpatialData().sphere.R;
+            Fvector& sC = sd.sphere.P;
+            float sR = sd.sphere.R;
             Fvector obj_min, obj_max;
             obj_min.set(sC.x - sR, sC.y - sR, sC.z - sR);
             obj_max.set(sC.x + sR, sC.y + sR, sC.z + sR);
@@ -143,11 +147,12 @@ public:
         for (auto& it : N->items)
         {
             ISpatial* S = it;
-            if (0 == (S->GetSpatialData().type & mask))
+            SpatialData& sd = S->GetSpatialData(); // one virtual call per item (see box_walker)
+            if (0 == (sd.type & mask))
                 continue;
 
-            Fvector& sC = S->GetSpatialData().sphere.P;
-            float sR = S->GetSpatialData().sphere.R;
+            Fvector& sC = sd.sphere.P;
+            float sR = sd.sphere.R;
             const float radius_sum = radius + sR;
             if (center.distance_to_sqr(sC) > radius_sum * radius_sum)
                 continue;

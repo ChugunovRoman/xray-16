@@ -161,6 +161,8 @@ CALifeSimulator::CALifeSimulator(IPureServer* server, shared_str* command_line)
 CALifeSimulator::~CALifeSimulator()
 {
     VERIFY(!ai().get_alife());
+    // The Lua wrapper cache: alife() of the next simulator gets a new wrapper
+    xray::script_wrapper_cache::Release(m_lua_wrapper);
 
     configs_type::iterator i = m_configs_lru.begin();
     configs_type::iterator const e = m_configs_lru.end();

@@ -2,6 +2,9 @@
 
 #include "PHCommander.h"
 #include "PHSimpleCalls.h"
+#include "xrCore/Profiling/PerfMetrics.hpp"
+
+#include <typeinfo>
 
 #ifdef DEBUG
 //#include "PHWorld.h"
@@ -32,6 +35,42 @@ void CPHCall::check()
 {
     if (m_condition->is_true())
         m_action->run();
+}
+
+void CPHCall::check_timed(bool timed, u64& cond_ticks, u64& action_ticks)
+{
+    if (!timed)
+    {
+        check();
+        return;
+    }
+    const u64 t0 = xray::perf::Ticks();
+    const bool is_true = m_condition->is_true();
+    const u64 t1 = xray::perf::Ticks();
+    cond_ticks = t1 - t0;
+    if (is_true)
+    {
+        m_action->run();
+        action_ticks = xray::perf::Ticks() - t1;
+    }
+}
+
+namespace
+{
+pcstr DescribeReq(const CPHReqBase* req)
+{
+    if (!req)
+        return "-";
+    if (const pcstr source = req->debug_source())
+        return source;
+    return xray::perf::SpikeClassName(typeid(*req));
+}
+} // namespace
+
+void CPHCall::describe(char* buf, size_t size) const
+{
+    // each part capped: vsprintf_s of a longer line is a fatal invalid-parameter error
+    xr_sprintf(buf, size, "cond=%.110s act=%.110s", DescribeReq(m_condition), DescribeReq(m_action));
 }
 
 bool CPHCall::equal(CPHReqComparerV* cmp_condition, CPHReqComparerV* cmp_action)
@@ -100,6 +139,12 @@ void CPHCommander::update()
 
     UpdateDeferred();
 
+    if (m_profiled)
+    {
+        UpdateProfiled();
+        return;
+    }
+
     // One by one, using old style index-based cycle,
     // because when we call m_calls[i]->check()
     // scripts may call add_call or remove_call
@@ -111,6 +156,103 @@ void CPHCommander::update()
             m_calls[i]->check();
         }
         catch (...)
+        {
+            remove_call(m_calls.begin() + i);
+            i--;
+            continue;
+        }
+
+        if (m_calls[i]->obsolete())
+        {
+            remove_call(m_calls.begin() + i);
+            i--;
+            continue;
+        }
+    }
+}
+
+#if XR_PERF_METRICS
+namespace
+{
+// The detail of a "[perf-spike] level/add_call/call" line: the description written before the call (the call itself
+// may be gone after it: a Lua callback can remove it, an obsolete one is deleted)
+void DescribeCallSpike(const void* ctx, char* buf, size_t size) { xr_strcpy(buf, size, static_cast<pcstr>(ctx)); }
+} // namespace
+#endif
+
+// 32-frame-spikes.md: update() of the commander of level.add_call / set_fastcall (set_profiled). The same calls in the
+// same order with the same removal rules as the plain loop of update(); on top of it, per call: a Tracy zone
+// "level/add_call/call" (text = cond/act, while Tracy is connected), the perf_spike_us site of the same name, the
+// ph_commander/* metrics (perf_metrics) and the slowest call of this update (set_describe_slowest). The description
+// (the cached source of the Lua functions, see debug_source) is written only when one of them wants it.
+void CPHCommander::UpdateProfiled()
+{
+#ifdef TRACY_ENABLE
+    const bool tracy_text = TracyIsConnected;
+#else
+    constexpr bool tracy_text = false;
+#endif
+    const bool describe = m_describe_slowest || xray::perf::SpikeActive() || tracy_text;
+    const bool timed = describe || xray::perf::g_perf_metrics_active;
+    m_slowest_call[0] = 0;
+    u64 slowest_ticks = 0;
+
+    for (u32 i = 0; i < m_calls.size(); i++)
+    {
+        CPHCall* call = m_calls[i];
+        string256 name;
+        name[0] = 0;
+        if (describe)
+            call->describe(name, sizeof(name));
+        // read before the call: it may delete itself (level.remove_call from its own Lua callback)
+        const bool lua_cond = call->condition_touches_script();
+        const bool lua_action = call->action_touches_script();
+        u64 cond_ticks = 0;
+        u64 action_ticks = 0;
+        bool failed = false;
+        {
+            ZoneScopedN("level/add_call/call");
+#ifdef TRACY_ENABLE
+            if (tracy_text)
+                ZoneText(name, xr_strlen(name));
+#endif
+            PERF_SPIKE_NAMED(spike, "level/add_call/call", name, &DescribeCallSpike, false);
+            try
+            {
+                call->check_timed(timed, cond_ticks, action_ticks);
+            }
+            catch (...)
+            {
+                failed = true;
+            }
+        }
+
+        if (timed)
+        {
+            const u64 ticks = cond_ticks + action_ticks;
+#if XR_PERF_METRICS
+            if (xray::perf::g_perf_metrics_active)
+            {
+                xray::perf::AddSlow(xray::perf::Metric::ph_commander_calls, 1);
+                if (lua_cond)
+                    xray::perf::AddTimeSlow(xray::perf::Metric::ph_commander_lua_cond, cond_ticks);
+                if (lua_action && action_ticks)
+                    xray::perf::AddTimeSlow(xray::perf::Metric::ph_commander_lua_action, action_ticks);
+                xray::perf::UpdateMax(xray::perf::Metric::ph_commander_max_us,
+                    static_cast<s64>(xray::perf::TicksToMilliseconds(ticks) * 1000.0));
+            }
+#else
+            (void)lua_cond;
+            (void)lua_action;
+#endif
+            if (describe && ticks > slowest_ticks)
+            {
+                slowest_ticks = ticks;
+                xr_sprintf(m_slowest_call, "%.200s %.0fus", name, xray::perf::TicksToMilliseconds(ticks) * 1000.0);
+            }
+        }
+
+        if (failed)
         {
             remove_call(m_calls.begin() + i);
             i--;

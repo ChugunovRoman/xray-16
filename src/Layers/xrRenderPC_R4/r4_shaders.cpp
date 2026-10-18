@@ -324,24 +324,25 @@ HRESULT CRender::shader_compile(pcstr name, IReader* fs, pcstr pFunctionName,
         }
     }
 
-    // skinning
+    // skinning (40-parallel-prefetch.md: the variant of this thread, see CRender::shader_skinning)
+    const s32 skinning = shader_skinning();
     // SKIN_NONE
-    appendShaderOption(m_skinning < 0, "SKIN_NONE", "1");
+    appendShaderOption(skinning < 0, "SKIN_NONE", "1");
 
     // SKIN_0
-    appendShaderOption(0 == m_skinning, "SKIN_0", "1");
+    appendShaderOption(0 == skinning, "SKIN_0", "1");
 
     // SKIN_1
-    appendShaderOption(1 == m_skinning, "SKIN_1", "1");
+    appendShaderOption(1 == skinning, "SKIN_1", "1");
 
     // SKIN_2
-    appendShaderOption(2 == m_skinning, "SKIN_2", "1");
+    appendShaderOption(2 == skinning, "SKIN_2", "1");
 
     // SKIN_3
-    appendShaderOption(3 == m_skinning, "SKIN_3", "1");
+    appendShaderOption(3 == skinning, "SKIN_3", "1");
 
     // SKIN_4
-    appendShaderOption(4 == m_skinning, "SKIN_4", "1");
+    appendShaderOption(4 == skinning, "SKIN_4", "1");
 
     //	Igor: need restart options
     // Soft water

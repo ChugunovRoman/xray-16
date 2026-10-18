@@ -246,6 +246,9 @@ public:
     virtual void Copy(dxRender_Visual* pFrom);
     virtual void Load(const char* N, IReader* data, u32 dwFlags);
     virtual void Load(const char* N, LPCSTR suffix, IReader* data, u32 dwFlags);
+    // 40-parallel-prefetch.md (plans/optimization_mt): the motions part of Load (omf, partition, bone motions, blend
+    // pool); Load calls it, or the motions chain of the parallel prefetch later (ModelMotionsDefer)
+    void LoadMotions(const char* N, IReader* data);
     virtual void Release();
     virtual void Spawn();
     virtual void Depart();

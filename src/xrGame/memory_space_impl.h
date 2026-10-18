@@ -59,7 +59,18 @@ IC CMemoryObject<T>::CMemoryObject()
 template <typename T>
 IC bool CMemoryObject<T>::operator==(u16 id) const
 {
-    return (object_id(m_object) == id);
+    // 45-engine-ai-audit.md, F3: the cached ID instead of object_id(m_object) - the same answer for every live
+    // object (an object keeps its ID for life, m_object_id is written with m_object); only a dangling pointer, which
+    // object_id reported as a bug and treated as no object, now still compares by the ID it had
+    VERIFY(object_id(m_object) == u16(-1) || object_id(m_object) == m_object_id);
+    return (m_object_id == id);
+}
+
+template <typename T>
+IC void CMemoryObject<T>::set_object(const T* object)
+{
+    m_object = object;
+    m_object_id = object ? u16(object->ID()) : u16(-1);
 }
 
 template <typename T>
@@ -80,7 +91,7 @@ IC void CMemoryObject<T>::fill(const T* game_object, const T* self, const squad_
 #ifdef USE_LEVEL_TIME
     m_level_time = Device.dwTimeGlobal;
 #endif
-    m_object = game_object;
+    set_object(game_object);
     m_object_params.fill(game_object);
     m_self_params.fill(self);
     m_squad_mask.assign(mask);

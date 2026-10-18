@@ -23,7 +23,9 @@ IC CSObjectItemClientServer::CObjectItemClientServer(const CLASS_ID& clsid, LPCS
 TEMPLATE_SPECIALIZATION
 ObjectFactory::ClientObjectBaseClass* CSObjectItemClientServer::client_object() const
 {
-    return (xr_new<CLIENT_TYPE>())->_construct();
+    CLIENT_TYPE* object = xr_new<CLIENT_TYPE>();
+    ObjectFactory::client_object_created(object);
+    return object->_construct();
 }
 
 TEMPLATE_SPECIALIZATION
@@ -52,8 +54,19 @@ IC CSObjectItemClientServerSingleMp::CObjectItemClientServerSingleMp(const CLASS
 TEMPLATE_SPECIALIZATION
 ObjectFactory::ClientObjectBaseClass* CSObjectItemClientServerSingleMp::client_object() const
 {
-    ObjectFactory::ClientObjectBaseClass* result =
-        IsGameTypeSingle() ? xr_new<_client_type_single>() : xr_new<_client_type_mp>();
+    ObjectFactory::ClientObjectBaseClass* result;
+    if (IsGameTypeSingle())
+    {
+        _client_type_single* object = xr_new<_client_type_single>();
+        ObjectFactory::client_object_created(object);
+        result = object;
+    }
+    else
+    {
+        _client_type_mp* object = xr_new<_client_type_mp>();
+        ObjectFactory::client_object_created(object);
+        result = object;
+    }
 
     return (result->_construct());
 }

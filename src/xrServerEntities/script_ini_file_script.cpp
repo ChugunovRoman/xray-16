@@ -12,6 +12,7 @@
 #include "addon_api_ini.h"
 #include "xrScriptEngine/Functor.hpp"
 #include "xrCore/Profiling/PerfMetrics.hpp"
+#include "xrScriptEngine/script_wrapper_cache.hpp"
 
 bool r_line(const CScriptIniFile* self, pcstr S, int L, luabind::string& N, luabind::string& V)
 {
@@ -61,8 +62,31 @@ CScriptIniFile* create_ini_file(lua_State* L, pcstr ini_string)
 #pragma warning(pop)
 
 //Alundaio: The extended ability to reload system ini after application launch
+// The Lua wrapper cache (script_ini_file.h): the wrapper of the system ini. The slot remembers pSettings: a new one
+// (reload_system_ini) gets a new wrapper. CScriptIniFile has no luabind::wrap_base class, the generic
+// get_back_reference never finds anything for it: any other ini - false, the old path.
+static xray::script_wrapper_cache::ObjectSlot s_system_ini_lua_wrapper;
+
+namespace luabind
+{
+template <>
+bool get_back_reference<CScriptIniFile*>(lua_State* L, CScriptIniFile* const& x)
+{
+    using namespace xray::script_wrapper_cache;
+    if (static_cast<const CInifile*>(x) != pSettings)
+        return false;
+    if (Push(L, s_system_ini_lua_wrapper, x))
+        return true;
+    luabind::detail::make_pointer_instance(L, x);
+    Store(L, s_system_ini_lua_wrapper);
+    return true;
+}
+} // namespace luabind
+
 CScriptIniFile* reload_system_ini()
 {
+    // The Lua wrapper cache: the wrapper of the old system ini leaves the slot even if the new one lands at its address
+    xray::script_wrapper_cache::Release(s_system_ini_lua_wrapper.slot);
     pSettings->Destroy(const_cast<CInifile*>(pSettings));
     string_path fname;
     FS.update_path(fname, "$game_config$", "system.ltx");

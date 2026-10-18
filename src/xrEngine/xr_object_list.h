@@ -5,6 +5,11 @@
 extern ENGINE_API BOOL debug_destroy;
 #endif
 
+// 30-game-events.md (plans/optimization_mt), B1 (always on since 2026-10-18): register_object_to_destroy only queues the
+// object, the walk of all objects for its live children (vanilla: one per destroyed object, ~14.5 thousand objects each)
+// is made once for all of them by flush_destroy_child_scan: at the end of CLevel::ProcessGameEvents, before a spawn
+// that finds its ID taken and at the start of the destroy phase of Update().
+
 class IGameObject;
 class NET_Packet;
 struct RelcaseBatch;
@@ -58,9 +63,12 @@ public:
         int* m_ID;
         RELCASE_CALLBACK m_Callback;
         RELCASE_BATCH_CALLBACK m_BatchCallback;
+        // The parallel relcase (32-frame-spikes.md): m_BatchCallback may run on a task worker beside the other such ones
+        // (see pure_relcase)
+        bool m_BatchParallel = false;
         SRelcasePair(int* id, RELCASE_CALLBACK cb) : m_ID(id), m_Callback(cb) {}
-        SRelcasePair(int* id, RELCASE_CALLBACK cb, RELCASE_BATCH_CALLBACK batch_cb)
-            : m_ID(id), m_Callback(cb), m_BatchCallback(batch_cb) {}
+        SRelcasePair(int* id, RELCASE_CALLBACK cb, RELCASE_BATCH_CALLBACK batch_cb, bool batch_parallel = false)
+            : m_ID(id), m_Callback(cb), m_BatchCallback(batch_cb), m_BatchParallel(batch_parallel) {}
         bool operator==(const RELCASE_CALLBACK& cb) const { return m_Callback == cb; }
     };
     typedef xr_vector<SRelcasePair> RELCASE_CALLBACK_VEC;
@@ -68,6 +76,7 @@ public:
 
     void relcase_register(RELCASE_CALLBACK, int*);
     void relcase_register(RELCASE_CALLBACK, RELCASE_BATCH_CALLBACK, int*);
+    void relcase_register(RELCASE_CALLBACK, RELCASE_BATCH_CALLBACK, int*, bool batch_parallel);
     void relcase_unregister(int*);
 
     // P17: who asked for an object's destruction - only for the relcase report of perf_metrics (log bit). The first
@@ -96,6 +105,20 @@ public:
     // (shared by several objects) of all batch objects at once; false - it was already cleaned in this batch.
     bool relcase_first_visit(const void* container);
 
+    // The parallel relcase (32-frame-spikes.md): an object may put off the part of its batched relcase that touches only
+    // its own lists (relcase_defer_parallel, main thread, only while relcase_parallel_accepting() - the active pass of a
+    // batch). The put off parts run right after the active pass, on the task workers when
+    // there are enough of them, each fn(context, batch) once. relcase_batch_stamp() is unique per batch (never 0):
+    // the object remembers it to put its part off once per batch. The sleeping pass accepts too
+    // (37-destroy-relcase-smooth.md, always on since 2026-10-18), its parts run right after it.
+    // finish (37-destroy-relcase-smooth.md, M1; may be nullptr): after all the put off parts of the phase are done, on
+    // the thread of the pass, in the order they were put off - what must not run on a worker but needs the own part
+    // done (CBaseMonster: the memory refresh after its lists were cleaned).
+    using RELCASE_DEFERRED_FN = void (*)(void* context, const RelcaseBatch& batch);
+    bool relcase_parallel_accepting() const { return m_relcase_parallel_accepting; }
+    u32 relcase_batch_stamp() const { return m_relcase_batch_stamp; }
+    void relcase_defer_parallel(void* context, RELCASE_DEFERRED_FN fn, RELCASE_DEFERRED_FN finish = nullptr);
+
 public:
     const ObjectUpdateStatistics& GetStats()
     {
@@ -123,6 +146,18 @@ private:
 
 public:
     void Update(bool bForce);
+
+    // Pipelined bones prepass (xrGame/Level.cpp; set by CLevel): main thread, around the
+    // UpdateCL chunks of dispatch_singleupdate_workload (64 objects). begin(workload, chunk size) before the first chunk -
+    // false: no pipeline this frame; batch_done(index) after every chunk but the last; end() after the last one (joins
+    // the work still in flight, before PostUpdateCL and the destroy queue).
+    struct UpdateBatchHooks
+    {
+        bool (*begin)(IGameObject* const* b, IGameObject* const* e, u32 batch_size) = nullptr;
+        void (*batch_done)(u32 batch) = nullptr;
+        void (*end)() = nullptr;
+    };
+    UpdateBatchHooks update_batch_hooks;
 
     void net_Register(IGameObject* O);
     void net_Unregister(IGameObject* O);
@@ -160,6 +195,9 @@ public:
 
 public:
     void register_object_to_destroy(IGameObject* object_to_destroy);
+    // B1: looks for the live children of the objects queued for destruction since the
+    // last call and destroys them (with their children); nothing to do - returns at once
+    void flush_destroy_child_scan();
 #ifdef DEBUG
     bool registered_object_to_destroy(const IGameObject* object_to_destroy) const;
 #endif // #ifdef DEBUG
@@ -171,8 +209,13 @@ private:
     void process_destroy_queue();
     void relcase_objects_batch(const RelcaseBatch& batch);
     void relcase_callbacks_batch(const RelcaseBatch& batch);
+    void relcase_run_deferred(const RelcaseBatch& batch); // The parallel relcase: the parts put off by a pass
 
     u8 m_destroy_origin[0xffff];
+    // B1: the first object of destroy_queue whose children were not looked for yet, destroy_child_scan_none - none
+    static constexpr size_t destroy_child_scan_none = size_t(-1);
+    size_t m_destroy_child_scan_from = destroy_child_scan_none;
+    xr_vector<const IGameObject*> m_destroy_child_scan_parents; // sorted part of destroy_queue being walked for
     const RelcaseBatch* m_relcase_batch = nullptr;
     xr_vector<IGameObject*> m_relcase_objects; // copy of the destroy_queue part being relcased (it may grow meanwhile)
     xr_vector<const IGameObject*> m_relcase_sorted;
@@ -181,6 +224,21 @@ private:
     xr_vector<const void*> m_relcase_visited;
     const void* m_relcase_visited_recent[8];
     u32 m_relcase_visited_recent_pos = 0;
+    // The parallel relcase: the put off parts of the running batch, the latched switch, the batch stamp; during the
+    // parallel phase relcase_first_visit goes to the lock free set m_relcase_visited_mt (xr_object_list.cpp)
+    struct RelcaseDeferred
+    {
+        void* context;
+        RELCASE_DEFERRED_FN fn;
+        RELCASE_DEFERRED_FN finish; // nullptr: nothing after the phase
+    };
+    xr_vector<RelcaseDeferred> m_relcase_deferred;
+    bool m_relcase_parallel_accepting = false;
+    bool m_relcase_parallel_phase = false;
+    u32 m_relcase_batch_stamp = 0;
+    struct RelcaseVisitedSet;
+    RelcaseVisitedSet* m_relcase_visited_mt = nullptr;
+    xr_vector<SRelcasePair> m_relcase_callbacks_parallel; // the batch_parallel part of the snapshot (no allocation)
 
     static void clear_crow_vec(Objects& o);
     static void dump_list(Objects& v, pcstr reason);

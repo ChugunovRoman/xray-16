@@ -63,6 +63,9 @@
     <ClInclude Include="script_space_forward.hpp">
       <Filter>Engine</Filter>
     </ClInclude>
+    <ClInclude Include="script_wrapper_cache.hpp">
+      <Filter>Engine</Filter>
+    </ClInclude>
     <ClInclude Include="script_process.hpp">
       <Filter>Process</Filter>
     </ClInclude>

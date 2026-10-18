@@ -394,18 +394,27 @@ void IGame_Persistent::Prefetch()
     timer.Start();
     const auto memoryBefore = Memory.mem_usage();
 
+    // 36-spawn-model-load.md (plans/optimization_mt): the time of each stage (the model stage logs its own details)
+    CTimer stage;
+    stage.Start();
     Log("Loading objects...");
     ObjectPool.prefetch();
+    const u32 objects_ms = stage.GetElapsed_ms();
 
+    stage.Start();
     Log("Loading models...");
     GEnv.Render->models_Prefetch();
+    const u32 models_ms = stage.GetElapsed_ms();
 
+    stage.Start();
     Log("Loading textures...");
     GEnv.Render->ResourcesDeferredUpload();
+    const u32 textures_ms = stage.GetElapsed_ms();
 
     const auto memoryAfter = Memory.mem_usage() - memoryBefore;
 
     Msg("* [prefetch] time:   %d ms", timer.GetElapsed_ms());
+    Msg("* [prefetch] stages: objects %u ms, models %u ms, textures %u ms", objects_ms, models_ms, textures_ms);
     Msg("* [prefetch] memory: %d Kb", memoryAfter / 1024);
 }
 #endif

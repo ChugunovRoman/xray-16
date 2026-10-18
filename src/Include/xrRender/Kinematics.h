@@ -108,6 +108,29 @@ public:
     // Phase B: bone math, bone callbacks (IK, head, ragdoll), visbox, Update_Callback (attachments), under the
     // per-model lock. Any thread. Returns true when it recomputed the bones (UCalc_Time = Device.dwTimeGlobal after).
     virtual bool BonesPrepass_PhaseB() = 0;
+    // Pipelined prepass (r__bones_prepass_pipeline, 26-framemove-game-next.md): phase B of a model whose object (and
+    // everything it holds) is through UpdateCL, on a worker while main goes on with the next UpdateCL batches.
+    // EarlyWanted: BonesPrepass_Wanted() without its counter, and no early recompute of this model was redone lately.
+    virtual bool BonesPrepass_EarlyWanted() const = 0;
+    // Phase B as BonesPrepass_PhaseB, but it stamps the bones as "early": a later recompute in the same frame counts
+    // as prepass/redone, and a nested computation of another model that would need its phase A (game code) is skipped.
+    virtual bool BonesPrepass_PhaseBEarly() = 0;
+    // The pose input of early bones changed after them (the owner's XFORM moved): the prepass of this frame
+    // recomputes them (BonesPrepass_PhaseA). No-op unless the bones were computed early in this frame.
+    virtual void BonesPrepass_MarkEarlyDirty() = 0;
+    // Owner of a held item the render drew without computing the owner's bones (an NPC drawn only as a shadow blob): the
+    // item's UpdateXForm in phase C reads them through CalculateBones(FALSE). With the pipeline on, the prepass does
+    // that computation before phase C: LazyPhaseA = phase A of CalculateBones(FALSE) on main (UpdateTracks; false when
+    // the bones are computed or started this tick, or younger than UCalc_Interval), LazyPhaseB = the bone math on any
+    // thread, without the prepass stamps (these bones are not the render's: no miss bookkeeping).
+    virtual bool BonesPrepass_LazyPhaseA() = 0;
+    virtual bool BonesPrepass_LazyPhaseB() = 0;
+    // Early kick (r__bones_prepass_early_kick): LazyPhaseB on a worker while main still runs game code (sound, UI, the RT
+    // scheduler). Stamps the bones as early (a mutator after it marks them dirty, BonesPrepass_PhaseA recomputes them)
+    // and, like PhaseBEarly, never runs phase A of another model (game code) in a nested computation.
+    virtual bool BonesPrepass_LazyPhaseBEarly() = 0;
+    // The bones are computed for this tick (UCalc_DoneTime == Device.dwTimeGlobal): a CalculateBones call fast-outs.
+    virtual bool BonesPrepass_Done() const = 0;
 
     // Per-model bone lock: the recursive lock phase B of CalculateBones (and of the prepass) holds while it computes
     // the bones and runs their callbacks. Game code that changes bone callbacks (or the data they read) on the live

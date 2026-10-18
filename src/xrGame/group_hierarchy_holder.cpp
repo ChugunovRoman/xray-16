@@ -317,14 +317,16 @@ void CGroupHierarchyHolder::unregister_in_agent_manager(CEntity* member)
     // without re-registering, so a member can end up unregistering in a different group than the
     // one it is wired to). Emptying them keeps the memory bounded - one set per team/squad/group
     // triple - while a stale pointer now finds a valid empty vector instead of freed memory.
+    // The memory is released too (swap with an empty vector, the vector objects stay): with the group by squad
+    // a group per ALife squad and smart is left behind as squads move between smarts (Entity.cpp).
     if (m_members.empty())
     {
         if (m_visible_objects)
-            m_visible_objects->clear();
+            VISIBLE_OBJECTS().swap(*m_visible_objects);
         if (m_sound_objects)
-            m_sound_objects->clear();
+            SOUND_OBJECTS().swap(*m_sound_objects);
         if (m_hit_objects)
-            m_hit_objects->clear();
+            HIT_OBJECTS().swap(*m_hit_objects);
     }
 }
 

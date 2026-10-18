@@ -115,6 +115,7 @@ void CSpaceRestrictor::spatial_move()
 {
     inherited::spatial_move();
     actual(false);
+    space_restriction_shapes_changed(); // the cover scan cache: the cached answers of accessible are stale
 }
 
 void CSpaceRestrictor::prepare() const

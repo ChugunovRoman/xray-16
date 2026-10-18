@@ -565,15 +565,8 @@ Shader* CResourceManager::_lua_Create(LPCSTR d_shader, LPCSTR s_textures)
     ScriptEngineLock.Leave();
 
     ScopeLock scope(&v_shaders_lock);
-    // Search equal in shaders array
-    for (Shader* v_shader : v_shaders)
-        if (S.equal(v_shader))
-            return v_shader;
-
-    // Create _new_ entry
-    Shader* N = v_shaders.emplace_back(xr_new<Shader>(S));
-    N->dwFlags |= xr_resource_flagged::RF_REGISTERED;
-    return N;
+    // Search equal in shaders array, or create _new_ entry (40-parallel-prefetch.md: through the hash index)
+    return _FindOrRegisterShader(S);
 }
 
 ShaderElement* CBlender_Compile::_lua_Compile(LPCSTR namesp, LPCSTR name)

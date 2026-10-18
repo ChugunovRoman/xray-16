@@ -226,6 +226,8 @@ CCharacterPhysicsSupport::CCharacterPhysicsSupport(EType atype, CEntityAlive* ae
 
 void CCharacterPhysicsSupport::SetRemoved()
 {
+    // Pipelined bones prepass: an early task may be computing this corpse's bones with the shell's callbacks
+    CLevel::BonesPrepassEarlyJoin();
     m_eState = esRemoved;
     if (m_flags.test(fl_skeleton_in_shell))
     {
@@ -983,7 +985,12 @@ void CCharacterPhysicsSupport::in_UpdateCL()
             ZoneScopedN("cph_ik_controller_update");
             PERF_SCOPE(ik_update);
             NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsIkUpdate);
-            ik_controller()->Update();
+            // U1 of plans/optimization_mt/28-updatecl-main.md: the feet of a stalker in phase B of
+            // its bones; ik/update is then only the animation tracks and the request. The actor and monsters as before
+            if (Type() == etStalker)
+                ik_controller()->RequestUpdateInBones();
+            else
+                ik_controller()->Update();
         }
         else
             PERF_INC(ik_interval_skip);
@@ -1476,6 +1483,10 @@ void CCharacterPhysicsSupport::CreateShell(IGameObject* who, Fvector& dp, Fvecto
 {
     ZoneScopedN("CCharacterPhysicsSupport::CreateShell");
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsCreateShell);
+    PERF_SCOPE(death_create_shell); // 30-game-events.md (also the deferred and requested shells)
+    // Pipelined bones prepass: the bone callbacks of this model are reset and replaced below (no bone lock) - an early
+    // task may be computing its bones (a kill inside the UpdateCL loop)
+    CLevel::BonesPrepassEarlyJoin();
     xr_delete(m_collision_activating_delay);
     xr_delete(m_interactive_animation);
     destroy_animation_collision();
@@ -1634,6 +1645,7 @@ void CCharacterPhysicsSupport::EndActivateFreeShell(
     {
         ZoneNamedN(cph_death_correct_zone, "cph_death_correct", true);
         NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsDeathCorrect);
+        PERF_SCOPE(death_correct); // 30-game-events.md
         CollisionCorrectObjPos(dp);
     }
     m_pPhysicsShell->SetGlTransformDynamic(mXFORM);
@@ -1701,6 +1713,8 @@ void CCharacterPhysicsSupport::EndActivateFreeShell(
 
 void CCharacterPhysicsSupport::in_ChangeVisual()
 {
+    // Pipelined bones prepass: the shell (and its bone callbacks) of the old visual go away below
+    CLevel::BonesPrepassEarlyJoin();
     IKinematicsAnimated* KA = smart_cast<IKinematicsAnimated*>(m_EntityAlife.Visual());
     if (m_ik_controller)
     {
@@ -1810,7 +1824,11 @@ void CCharacterPhysicsSupport::FlyTo(const Fvector& disp)
         return;
     ZoneScopedN("CCharacterPhysicsSupport::FlyTo");
     NPC_CPP_PROFILE_SCOPE(ENpcCppProfileStage::CharacterPhysicsFlyTo);
-    physics_world()->Freeze();
+    PERF_SCOPE(death_fly_to); // 30-game-events.md
+    {
+        PERF_SCOPE(ph_fly_to_freeze); // 30-game-events.md: the walk of all physics objects (and UnFreeze below)
+        physics_world()->Freeze();
+    }
     bool g = m_pPhysicsShell->get_ApplyByGravity();
     m_pPhysicsShell->set_ApplyByGravity(false);
     m_pPhysicsShell->add_ObjectContactCallback(StaticEnvironmentCB);
@@ -1846,6 +1864,7 @@ void CCharacterPhysicsSupport::FlyTo(const Fvector& disp)
     m_pPhysicsShell->set_ApplyByGravity(g);
     m_pPhysicsShell->set_CallbackData(cd);
     m_pPhysicsShell->remove_ObjectContactCallback(StaticEnvironmentCB);
+    PERF_SCOPE(ph_fly_to_freeze);
     physics_world()->UnFreeze();
 }
 

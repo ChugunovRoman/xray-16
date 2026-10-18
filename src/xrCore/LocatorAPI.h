@@ -173,6 +173,11 @@ private:
 
     Lock* m_auth_lock;
     u64 m_auth_code{};
+    // 40-parallel-prefetch.md (plans/optimization_mt): m_files is searched from several threads (the model prefetch
+    // loads models on several threads, textures load in parallel) while a shader compiled for the first time writes its
+    // cache file and registers it (w_close -> Register: an insert into the tree). Each search, iteration, insert and
+    // erase of m_files runs under it. Recursive (Register -> exist -> file_find_it).
+    Lock* m_files_lock;
 
     const file* RegisterExternal(pcstr name);
     const file* Register(pcstr name, size_t vfs, u32 crc, u32 ptr, u32 size_real, u32 size_compressed, u32 modif);

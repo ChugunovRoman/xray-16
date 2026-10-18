@@ -52,7 +52,12 @@ XRSOUND_API extern int psSoundTargets;
 XRSOUND_API extern int psSoundCacheSizeMB;
 // B-1: fully decode + cache PCM for sounds <= this length (sec), shared across all emitters of a source
 // (decode-once instead of per-emitter per-chunk streaming). 0 = disabled. Bounded by psSoundCacheSizeMB.
+// 46-engine-core-render-audit.md: cached by use - when a source starts playing the second time, not at load.
 XRSOUND_API extern float psSoundCacheShortSec;
+// plans/optimization_mt/34-sound-cold-load.md: a background thread reads ahead (into the OS file cache) the .ogg files
+// of the folders a script names (ISoundManager::prefetch_sources, Lua sound_prefetch_dir) and of the folder of a sound
+// loaded cold inside a game event. Always on since 2026-10-18 (snd_source_prefetch removed, see plan 41; its mode 2,
+// loading such folders as sources, removed with it).
 XRSOUND_API extern u32 snd_device_id;
 
 XRSOUND_API extern ISoundScene* DefaultSoundScene;
@@ -237,6 +242,11 @@ public:
     virtual const Fvector& listener_position() = 0;
 
     virtual void refresh_sources() = 0;
+
+    // 34-sound-cold-load.md: read ahead in the background the .ogg files of a folder relative to $game_sounds$
+    // (e.g. "taunts\\actor_stalker\\"; one path component may be "*" = every subfolder). Returns at once. Each folder
+    // is taken once per session.
+    virtual void prefetch_sources(pcstr folder) = 0;
 };
 
 class XRSOUND_API CSoundManager

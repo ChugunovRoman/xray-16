@@ -20,7 +20,11 @@ void CUIWindow::DetachChildImpl(CUIWindow* self, CUIWindow* pChild)
     if (self->m_pMouseCapturer == pChild)
         self->SetCapture(pChild, false);
 
-    auto it = std::find(self->m_ChildWndList.begin(), self->m_ChildWndList.end(), pChild);
+    // DetachAll takes the children from the back: look there first. A walk from the front for each child made it
+    // O(n^2) (the minimap detaches all its spots every frame, ui/minimap/detach). The same answer: AttachChild
+    // refuses a child that is already in the list, so it is there once
+    WINDOW_LIST& list = self->m_ChildWndList;
+    auto it = (!list.empty() && list.back() == pChild) ? list.end() - 1 : std::find(list.begin(), list.end(), pChild);
     if (it == self->m_ChildWndList.end())
     {
         Msg("! CUIWindow::DetachChild: child is not attached [parent:%s child:%s]",
