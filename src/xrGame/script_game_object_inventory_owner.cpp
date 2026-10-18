@@ -29,6 +29,7 @@
 #include "InfoPortion.h"
 #include "ai/monsters/basemonster/base_monster.h"
 #include "WeaponMagazined.h"
+#include "Scope.h"
 #include "ai/stalker/ai_stalker.h"
 #include "agent_manager.h"
 #include "agent_member_manager.h"
@@ -1839,6 +1840,18 @@ void CScriptGameObject::Weapon_AddonAttach(CScriptGameObject* item)
     {
         GEnv.ScriptEngine->script_log(LuaMessageType::Error, "CWeaponMagazined : trying to attach non-CInventoryItem!");
         return;
+    }
+
+    // The attachment system needs the target slot and parent addon to be resolved first, as the UI does on drop
+    if (weapon->bUseAttachmentSystem && smart_cast<CScope*>(pItm))
+    {
+        PIItem weapon_item = weapon;
+        if (!weapon->DeterminateParentSlotForAddon(pItm, weapon_item))
+        {
+            GEnv.ScriptEngine->script_log(LuaMessageType::Error, "Weapon_AddonAttach: no free compatible slot for [%s] on [%s]",
+                pItm->m_section_id.c_str(), weapon->m_section_id.c_str());
+            return;
+        }
     }
 
     if (weapon->CanAttach(pItm))

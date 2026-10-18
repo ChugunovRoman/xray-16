@@ -1275,11 +1275,18 @@ bool CWeaponMagazined::CanDetach(const char* item_section_name)
 {
     if (bUseAttachmentSystem && m_addon_items.size() > 0)
     {
+        bool found_in_tree = false;
         for (auto [addon_id, addon]: m_addon_items)
         {
-            if (xr_strcmp(addon->addon_item_name.c_str(), item_section_name) == 0)
+            if (xr_strcmp(addon->addon_item_name.c_str(), item_section_name) != 0)
+                continue;
+            if (IsAddonCanBeDetached(addon))
                 return true;
+            found_in_tree = true;
         }
+        // A tree addon that cannot be detached must not fall through to the old flag-based branches
+        if (found_in_tree)
+            return false;
     }
 
     if (m_eScopeStatus == ALife::eAddonAttachable &&
@@ -1418,7 +1425,14 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
     {
         auto addon = GetAddonFromSlot(pIItem->parent_addon, pIItem->attach_to_slot_name);
         if (addon.second)
+        {
+            // Validate before freeing the slot: a replacement rejected afterwards would leave it empty,
+            // even a slot from dont_detachable_slots
+            if (!CanReplaceAddonInSlot(pIItem, addon.first))
+                return false;
+
             Detach(addon.first);
+        }
     }
 
     if (bUseAttachmentSystem)
@@ -1518,6 +1532,24 @@ bool CWeaponMagazined::Detach(u32 addon_id)
 }
 bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
 {
+    // Attachment system addons live in the addon tree: detach the tree node, otherwise the item is
+    // spawned while the addon stays installed (a duplicate). Detach(u32) always spawns the items.
+    if (bUseAttachmentSystem)
+    {
+        bool found_in_tree = false;
+        for (auto [addon_id, addon] : m_addon_items)
+        {
+            if (xr_strcmp(addon->addon_item_name.c_str(), item_section_name) != 0)
+                continue;
+            if (IsAddonCanBeDetached(addon))
+                return Detach(addon_id);
+            found_in_tree = true;
+        }
+        // The old branches would clear the silencer flag and spawn the item while the tree node stays
+        if (found_in_tree)
+            return false;
+    }
+
     if (m_eScopeStatus == ALife::eAddonAttachable && DetachScope(item_section_name, b_spawn_item))
     {
         if ((m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonScope) == 0 && !IsScopeAttached())

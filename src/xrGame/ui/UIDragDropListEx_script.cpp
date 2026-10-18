@@ -4,6 +4,7 @@
 #include "UICellItem.h"
 #include "UICellItemFactory.h"
 #include "UICellCustomItems.h"
+#include "Weapon.h"
 #include "xrScriptEngine/ScriptExporter.hpp"
 
 #include "xrCore/Threading/ParallelFor.hpp"
@@ -65,6 +66,7 @@ void CUIDragDropListEx::script_register(lua_State* luaState)
                 {
                     GEnv.ScriptEngine->script_log(
                         LuaMessageType::Error, "weapon section does not exist: %s", weapon_section_id);
+                    return;
                 }
                 if (
                     pSettings->line_exist(weapon_section_id, "silencer_status") &&
@@ -110,42 +112,112 @@ void CUIDragDropListEx::script_register(lua_State* luaState)
                     return;
                 }
 
-                auto get_slot_type = [&](pcstr slot_name) -> u32
+                // Root slots exactly as CWeapon::LoadAddonSlosts reads them: numbered and named slots,
+                // lines from parent_section, <slot>_addons white lists
+                struct root_slot
                 {
-                    if (!pSettings->line_exist(weapon_section_id, slot_name))
-                        return (u32)-1;
+                    u16 type;
+                    xr_vector<shared_str> allowed;
+                };
+                xr_vector<root_slot> root_slots;
 
-                    pcstr slot_str = pSettings->r_string(weapon_section_id, slot_name);
-                    string128 _slot_type;
-                    _GetItem(slot_str, 0, _slot_type);
+                const shared_str slot_sect = CWeapon::SectionForAddonSlotLines(weapon_section_id);
+                xr_vector<std::pair<shared_str, shared_str>> slot_lines;
+                CWeapon::GetAddonSlotLines(slot_sect.c_str(), slot_lines);
 
-                    return (u32)atoi(_slot_type);
+                for (const auto& [line_name, slot_key] : slot_lines)
+                {
+                    pcstr slot_str = pSettings->r_string(slot_sect.c_str(), line_name.c_str());
+                    if (!slot_str)
+                        continue;
+
+                    // The same rule as LoadAddonSlosts: a line with less than 7 fields (e.g. "none") makes no slot
+                    root_slot slot;
+                    Fvector pos, rot;
+                    if (sscanf(slot_str, "%hu,%f,%f,%f,%f,%f,%f", &slot.type, &pos.x, &pos.y, &pos.z, &rot.x, &rot.y, &rot.z) < 7)
+                        continue;
+
+                    string64 prop_name;
+                    xr_sprintf(prop_name, "%s_addons", slot_key.c_str());
+                    pcstr list_section = pSettings->line_exist(weapon_section_id, prop_name) ? weapon_section_id :
+                        pSettings->line_exist(slot_sect.c_str(), prop_name) ? slot_sect.c_str() : nullptr;
+                    pcstr list_str = list_section ? pSettings->r_string(list_section, prop_name) : nullptr;
+                    if (list_str)
+                    {
+                        string256 item_name;
+                        const int count = _GetItemCount(list_str);
+                        for (int i = 0; i < count; ++i)
+                        {
+                            _GetItem(list_str, i, item_name);
+                            if (item_name[0])
+                                slot.allowed.push_back(item_name);
+                        }
+                    }
+
+                    root_slots.push_back(slot);
+                }
+
+                const xr_vector<pcstr> sections = Dbg.GetSections(ESectionTypeName::scopes);
+                const u16 no_slot_type = u16(-1);
+
+                auto fits_root_slot = [&](pcstr name, u16 addon_slot_type)
+                {
+                    for (const root_slot& slot : root_slots)
+                    {
+                        if (slot.type != addon_slot_type)
+                            continue;
+                        if (slot.allowed.empty() ||
+                            std::find(slot.allowed.begin(), slot.allowed.end(), shared_str(name)) != slot.allowed.end())
+                            return true;
+                    }
+                    return false;
                 };
 
-                u32 slot_1_type = get_slot_type("addon_slot_1_offset");
-                u32 slot_2_type = get_slot_type("addon_slot_2_offset");
-                u32 slot_3_type = get_slot_type("addon_slot_3_offset");
-                u32 slot_4_type = get_slot_type("addon_slot_4_offset");
-                u32 slot_5_type = get_slot_type("addon_slot_5_offset");
-                u32 slot_6_type = get_slot_type("addon_slot_6_offset");
-
-                for (const auto& name : Dbg.GetSections(ESectionTypeName::scopes))
+                // Nested slots come from slot_N bones of the addon model, which a section alone cannot show;
+                // the types an addon can offer (provided_slot_type and explicit slot_N types) stand in for them.
+                // An addon is listed when it fits a root slot or a slot type offered by an already listed addon.
+                xr_vector<bool> listed(sections.size(), false);
+                xr_set<u16> nested_slot_types;
+                bool has_new = true;
+                while (has_new)
                 {
-                    u32 addon_slot_type = pSettings->read_if_exists<u32>(name, "slot_type", (u32)-1);
-                    u32 addon_provided_slot_type = pSettings->read_if_exists<u32>(name, "provided_slot_type", (u32)-1);
-
-                    if (
-                        addon_slot_type == slot_1_type || (addon_slot_type == 0 && addon_provided_slot_type == 0) ||
-                        addon_slot_type == slot_2_type || (addon_slot_type == 0 && addon_provided_slot_type == 0) ||
-                        addon_slot_type == slot_3_type || (addon_slot_type == 0 && addon_provided_slot_type == 0) ||
-                        addon_slot_type == slot_4_type || (addon_slot_type == 0 && addon_provided_slot_type == 0) ||
-                        addon_slot_type == slot_5_type || (addon_slot_type == 0 && addon_provided_slot_type == 0) ||
-                        addon_slot_type == slot_6_type || (addon_slot_type == 0 && addon_provided_slot_type == 0)
-                    )
+                    has_new = false;
+                    for (size_t i = 0; i < sections.size(); ++i)
                     {
-                        CUIInventoryCellItem* item = xr_new<CUIInventoryCellItem>(name);
-                        self->SetItem(item);
+                        if (listed[i])
+                            continue;
+
+                        pcstr name = sections[i];
+                        const u16 addon_slot_type = pSettings->read_if_exists<u16>(name, "slot_type", no_slot_type);
+                        if (addon_slot_type == no_slot_type)
+                            continue;
+                        if (!fits_root_slot(name, addon_slot_type) && !nested_slot_types.count(addon_slot_type))
+                            continue;
+
+                        listed[i] = true;
+                        has_new = true;
+
+                        const u16 provided = pSettings->read_if_exists<u16>(name, "provided_slot_type", no_slot_type);
+                        if (provided != no_slot_type)
+                            nested_slot_types.insert(provided);
+
+                        for (int slot_idx = 1; slot_idx <= 16; ++slot_idx)
+                        {
+                            string32 slot_key;
+                            xr_sprintf(slot_key, "slot_%d", slot_idx);
+                            if (pSettings->line_exist(name, slot_key))
+                                nested_slot_types.insert(pSettings->r_u16(name, slot_key));
+                        }
                     }
+                }
+
+                for (size_t i = 0; i < sections.size(); ++i)
+                {
+                    if (!listed[i])
+                        continue;
+
+                    CUIInventoryCellItem* item = xr_new<CUIInventoryCellItem>(sections[i]);
+                    self->SetItem(item);
                 }
             })
             .def("SetDraggingEnabled", +[](CUIDragDropListEx* self, bool enabled)

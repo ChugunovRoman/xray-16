@@ -199,8 +199,37 @@ BOOL motions_value::load(pcstr N, IReader* data, vecBones* bones)
         {
             const u16 bone_id = rm_bones[i];
             VERIFY2(bone_id != BI_NONE, "Invalid remap index.");
-            if ((bone_id == BI_NONE || bones->at(bone_id) == nullptr) || strstr(bones->at(bone_id)->name.c_str(), "addon_"))
+            if (bone_id == BI_NONE || bones->at(bone_id) == nullptr)
                 continue;
+
+            // 'addon_*' bones take no keys, but a motion exported with such a bone still stores them:
+            // skip its data, otherwise every following bone of the motion is read from a wrong offset
+            if (strstr(bones->at(bone_id)->name.c_str(), "addon_"))
+            {
+                const u8 flags = MS->r_u8();
+                if (flags & flRKeyAbsent)
+                    MS->advance(sizeof(CKeyQR));
+                else
+                {
+                    MS->r_u32(); // crc
+                    MS->advance(dwLen * sizeof(CKeyQR));
+                }
+
+                if (flags & flTKeyPresent)
+                {
+                    MS->r_u32(); // crc
+                    MS->advance(dwLen * ((flags & flTKey16IsBit) ? sizeof(CKeyQT16) : sizeof(CKeyQT8)));
+                    Fvector skip;
+                    MS->r_fvector3(skip); // _sizeT
+                    MS->r_fvector3(skip); // _initT
+                }
+                else
+                {
+                    Fvector skip;
+                    MS->r_fvector3(skip); // _initT
+                }
+                continue;
+            }
 
             CMotion& M = m_motions[bones->at(bone_id)->name][m_idx];
             M.set_count(dwLen);

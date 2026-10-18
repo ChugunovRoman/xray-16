@@ -168,7 +168,7 @@ public:
     );
     void CollectAttachmentsAI(TIItemContainer& l_list);
     bool DeterminateParentSlotForAddon(PIItem& item, PIItem weapon, bool for_ai = false);
-    bool HasAddonByName(shared_str name);
+    bool HasAddonByName(shared_str name) const;
     bool HasAddonWithMagSize();
     std::pair<u32, addon_item*> GetAddonFromSlot(u32 parent_id, shared_str slot_name) const;
     std::pair<u32, addon_item*> GetAddonMainScope() const;
@@ -514,6 +514,10 @@ public:
     void UpdateAddonsOffset();
     void UpdateAvailableSecondZoom();
     void LoadAddonSlosts(LPCSTR section);
+    // Section that holds the addon_slot_*_offset lines of a weapon: the weapon itself or its parent_section
+    static shared_str SectionForAddonSlotLines(pcstr weapon_section);
+    // Root slot lines of a slot-lines section in load order: (line name, slot key), e.g. ("addon_slot_mag_offset", "slot_mag")
+    static void GetAddonSlotLines(pcstr slot_lines_section, xr_vector<std::pair<shared_str, shared_str>>& out);
     shared_str GetInstalledMagType();
     shared_str GetInstalledTacGripType();
     bool ResolveAddonConflictsBeforeAttach(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id = 0);
@@ -521,6 +525,10 @@ public:
     // AI uses it to keep away from evicting addons: an evicted one respawns into the owner's
     // inventory and would immediately be attached back, ping-ponging every frame.
     bool CanAttachWithoutEviction(PIItem item) const;
+    // Everything AttachAttachment() would reject (white list, conflicts), checked before Attach() frees
+    // the target slot: a rejected replacement must not leave the slot empty. replaced_id is the addon
+    // that currently occupies the slot; it and its children are not counted as conflicts.
+    bool CanReplaceAddonInSlot(PIItem item, u32 replaced_id) const;
 
     void SetScopeOffset(Ivector2 pos) { m_iScopeX = pos.x; m_iScopeY = pos.y; }
     void SetSilencerOffset(Ivector2 pos) { m_iSilencerX = pos.x; m_iSilencerY = pos.y; }
@@ -712,8 +720,17 @@ private:
     void RemoveChildAddonConflicts(xr_vector<u32>& addon_ids) const;
     // Dry run of ResolveAddonConflictsBeforeAttach: collects the installed addons that would have
     // to be detached, without touching anything.
+    // Installed addons that are ancestors of the target slot are never conflicts; replaced_id (if any)
+    // and its children are skipped too, since a replacement detaches them anyway.
     void CollectAddonConflicts(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id,
-        xr_vector<u32>& conflict_ids, bool& deny) const;
+        xr_vector<u32>& conflict_ids, bool& deny, u32 replaced_id = u32(-1)) const;
+    // Collects conflicts and tells whether they can be resolved: false (with a log line) on a deny
+    // conflict or a conflicting addon that cannot be detached.
+    bool CheckAddonConflicts(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id,
+        u32 replaced_id, xr_vector<u32>& conflict_ids) const;
+    bool IsAddonDescendantOf(u32 addon_id, u32 ancestor_id) const;
+    bool CanRestoreSavedAddon(const AddAddonData& data) const;
+    void WarnDefaultAddonSlotTypeMismatch(pcstr addon_section, pcstr slot_key, u16 slot_type) const;
 
     // Ключ и операции для пресетов HUD FOV в прицеливании (per-weapon + per-scope)
     shared_str GetScopeHudFovKey() const;
@@ -898,7 +915,7 @@ public:
     using SCOPES_VECTOR = xr_vector<shared_str>;
     SCOPES_VECTOR m_scopes;
     SCOPES_VECTOR m_addons;
-    EWeaponAddonSlotType m_addon_slot_type;
+    EWeaponAddonSlotType m_addon_slot_type{eNone};
     u8 m_cur_scope;
 
     CWeaponAmmo* m_pCurrentAmmo;

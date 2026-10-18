@@ -170,7 +170,7 @@ public:
     bool m_highlight_equipped;
 
     shared_str attach_to_slot_name; // Name of slot where item should be attached
-    u32 parent_addon;
+    u32 parent_addon{0};
     EIIAddonOrt attach_to_ort{ FOrtNone };
 
     SInvItemPlace m_ItemCurrPlace;

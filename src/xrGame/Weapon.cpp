@@ -1354,6 +1354,36 @@ void CWeapon::save(NET_Packet& output_packet)
     }
 }
 
+// A save can outlive the configs: the addon section, its slot or its parent may be gone.
+// addAddon() dereferences all of them, so such an addon (and its children, whose parent is then missing) is dropped.
+bool CWeapon::CanRestoreSavedAddon(const AddAddonData& data) const
+{
+    pcstr reason = nullptr;
+    if (!data.item_section_id.size() || !pSettings->section_exist(data.item_section_id.c_str()))
+        reason = "addon section does not exist";
+    else if (data.parent_id == 0)
+    {
+        auto slot_it = m_addon_slots.find(data.slot_name);
+        if (slot_it == m_addon_slots.end() || !slot_it->second)
+            reason = "weapon has no such slot";
+    }
+    else
+    {
+        auto parent_it = m_addon_items.find(data.parent_id);
+        if (parent_it == m_addon_items.end() || !parent_it->second)
+            reason = "parent addon was not restored";
+        else if (parent_it->second->addon_slots.find(data.slot_name) == parent_it->second->addon_slots.end())
+            reason = "parent addon has no such slot";
+    }
+
+    if (!reason)
+        return true;
+
+    Msg("! [AttachmentSystem] [%s]: saved addon [%s] in slot [%s] is dropped: %s",
+        m_section_id.c_str(), data.item_section_id.c_str(), data.slot_name.c_str(), reason);
+    return false;
+}
+
 void CWeapon::load(IReader& input_packet)
 {
     inherited::load(input_packet);
@@ -1399,6 +1429,9 @@ void CWeapon::load(IReader& input_packet)
         data.scope_dynamic_zoom = input_packet.r_u8() == 1 ? true : false;
         data.has_mag_size = input_packet.r_u8() == 1 ? true : false;
         data.was_inited_in_default_slots = input_packet.r_u8() == 1 ? true : false;
+
+        if (!CanRestoreSavedAddon(data))
+            continue;
 
         addAddon(data);
     }
@@ -2389,8 +2422,18 @@ bool CWeapon::IsAddonCanBeDetached(addon_item* addon) const
     if (!bUseAttachmentSystem)
         return false;
 
-    if (addon->parent_id == 0 && sDontDetachableSlots.c_str() != nullptr && strstr(sDontDetachableSlots.c_str(), addon->slot.c_str()))
-        return false;
+    if (addon->parent_id != 0 || !sDontDetachableSlots.size() || !addon->slot.size())
+        return true;
+
+    // Whole-name match: a substring search made "slot_10" protect "slot_1"
+    string128 slot_name;
+    const int count = _GetItemCount(sDontDetachableSlots.c_str(), ',');
+    for (int i = 0; i < count; ++i)
+    {
+        _GetItem(sDontDetachableSlots.c_str(), i, slot_name, ',');
+        if (xr_strcmp(addon->slot, slot_name) == 0)
+            return false;
+    }
 
     return true;
 }
@@ -2581,7 +2624,7 @@ void CWeapon::LoadAltHudAim()
 }
 
 // Slot lines often live in [parent_section] while the weapon instance uses a derived [section].
-static shared_str SectionForAddonSlotLines(pcstr weapon_section)
+shared_str CWeapon::SectionForAddonSlotLines(pcstr weapon_section)
 {
     if (!weapon_section || !weapon_section[0] || !pSettings->section_exist(weapon_section))
         return shared_str(weapon_section ? weapon_section : "");
@@ -2595,6 +2638,33 @@ static shared_str SectionForAddonSlotLines(pcstr weapon_section)
             return parent;
     }
     return shared_str(weapon_section);
+}
+
+void CWeapon::GetAddonSlotLines(pcstr slot_lines_section, xr_vector<std::pair<shared_str, shared_str>>& out)
+{
+    out.clear();
+    if (!slot_lines_section || !slot_lines_section[0] || !pSettings->section_exist(slot_lines_section))
+        return;
+
+    // Numbered slots are read in a row: the first missing index ends the list
+    for (u16 index = 1;; ++index)
+    {
+        shared_str line_name = make_string("addon_slot_%d_offset", index).c_str();
+        if (!pSettings->line_exist(slot_lines_section, line_name.c_str()))
+            break;
+
+        out.emplace_back(line_name, make_string("slot_%d", index).c_str());
+    }
+
+    static constexpr pcstr named_slots[] = {
+        "bh", "mag", "dtk", "grip", "sight", "tac_grip", "cover", "cev_up", "cev_down" };
+
+    for (pcstr name : named_slots)
+    {
+        shared_str line_name = make_string("addon_slot_%s_offset", name).c_str();
+        if (pSettings->line_exist(slot_lines_section, line_name.c_str()))
+            out.emplace_back(line_name, make_string("slot_%s", name).c_str());
+    }
 }
 
 void CWeapon::LoadAddonSlosts(LPCSTR section)
@@ -2611,9 +2681,13 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
         if (!pSettings->line_exist(S, line_name.c_str()))
             return;
 
+        // An empty line reads as null: no slot, like any line with less than 7 fields
+        pcstr str = pSettings->r_string(S, line_name.c_str());
+        if (!str)
+            return;
+
         addon_slot* slot = xr_new<addon_slot>();
         shared_str line_name_world = make_string("%s_world", line_name.c_str()).c_str();
-        pcstr str = pSettings->r_string(S, line_name.c_str());
         string256 bone_work{};
         string128 bone_name = "";
         string128 bone_2_name = "";
@@ -2713,37 +2787,18 @@ void CWeapon::LoadAddonSlosts(LPCSTR section)
             }
         }
 
+        // The HUD tuner reloads slots of a live weapon: free the previous slot instead of leaking it
+        auto old_slot = m_addon_slots.find(slot_key);
+        if (old_slot != m_addon_slots.end())
+            xr_delete(old_slot->second);
+
         m_addon_slots[slot_key] = slot;
     };
-    auto load_slot_offsets = [&](const char* format) {
-        u16 index = 1;
-        shared_str line_name;
-        shared_str slot_key;
 
-        while (true)
-        {
-            line_name = make_string(format, index).c_str();
-            if (!pSettings->line_exist(S, line_name.c_str()))
-                break;
-
-            slot_key = make_string("slot_%d", index).c_str();
-
-            load_slot(line_name, slot_key);
-
-            index++;
-        }
-    };
-
-    load_slot_offsets("addon_slot_%d_offset");
-    load_slot("addon_slot_bh_offset", "slot_bh");
-    load_slot("addon_slot_mag_offset", "slot_mag");
-    load_slot("addon_slot_dtk_offset", "slot_dtk");
-    load_slot("addon_slot_grip_offset", "slot_grip");
-    load_slot("addon_slot_sight_offset", "slot_sight");
-    load_slot("addon_slot_tac_grip_offset", "slot_tac_grip");
-    load_slot("addon_slot_cover_offset", "slot_cover");
-    load_slot("addon_slot_cev_up_offset", "slot_cev_up");
-    load_slot("addon_slot_cev_down_offset", "slot_cev_down");
+    xr_vector<std::pair<shared_str, shared_str>> slot_lines;
+    GetAddonSlotLines(S, slot_lines);
+    for (const auto& [line_name, slot_key] : slot_lines)
+        load_slot(line_name, slot_key);
 }
 
 bool CWeapon::IsAddonAllowedInSlot(const shared_str& slot_key, shared_str addon_section) const
@@ -2777,6 +2832,23 @@ shared_str CWeapon::GetSlotKey(shared_str slot_name, u32 addon_parent_id, u32 ad
     }
 }
 
+// Default addons skip the slot type check that the attach path applies, so a mistyped default spawns anyway
+// and the player can never put it back after a detach. Report it for the content author.
+void CWeapon::WarnDefaultAddonSlotTypeMismatch(pcstr addon_section, pcstr slot_key, u16 slot_type) const
+{
+    const u16 addon_slot_type = pSettings->read_if_exists<u16>(addon_section, "slot_type", u16(eNone));
+    if (addon_slot_type == slot_type)
+        return;
+
+    // Every spawned instance (NPC weapons included) runs this: report each weapon/slot pair once
+    static xr_set<shared_str> reported;
+    if (!reported.insert(make_string("%s|%s", m_section_id.c_str(), slot_key).c_str()).second)
+        return;
+
+    Msg("! [AttachmentSystem] [%s]: default addon [%s] has slot_type %u, but slot [%s] has type %u",
+        m_section_id.c_str(), addon_section, addon_slot_type, slot_key, slot_type);
+}
+
 void CWeapon::SpawnDefaultAddons()
 {
     if (default_addons_was_loaded)
@@ -2789,7 +2861,8 @@ void CWeapon::SpawnDefaultAddons()
         shared_str default_addon = "";
         if (pSettings->line_exist(m_section_id.c_str(), slot_key.c_str()))
             default_addon = pSettings->r_string(m_section_id.c_str(), slot_key.c_str());
-        if (pSettings->section_exist(default_addon.c_str()))
+        // An empty "slot_X =" reads as null, and section_exist(nullptr) crashed
+        if (default_addon.size() && pSettings->section_exist(default_addon.c_str()))
         {
             auto addon = GetAddonFromSlot(0, slot_key);
             if (addon.second)
@@ -2797,6 +2870,8 @@ void CWeapon::SpawnDefaultAddons()
 
             if (!IsAddonAllowedInSlot(slot_key, default_addon))
                 continue;
+
+            WarnDefaultAddonSlotTypeMismatch(default_addon.c_str(), slot_key.c_str(), slot ? slot->slot_type : u16(eNone));
 
             AddAddonData data;
             data.item_section_id = default_addon;
@@ -2806,7 +2881,7 @@ void CWeapon::SpawnDefaultAddons()
             data.addon_id = ADDON_ID_NONE;
             data.parent_id = 0;
             if (pSettings->line_exist(default_addon.c_str(), "provided_slot_type"))
-                data.provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u8(default_addon.c_str(), "provided_slot_type");
+                data.provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u16(default_addon.c_str(), "provided_slot_type");
             else
                 data.provided_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
 
@@ -2836,6 +2911,10 @@ void CWeapon::SpawnDefaultAddons()
 
         R_ASSERT2(pSettings->section_exist(addon_section), make_string("Section of addon: %s doesn't exist", addon_section).c_str());
 
+        const auto& parent_slots = m_addon_items[parent]->addon_slots;
+        const auto parent_slot = parent_slots.find(slot_name);
+        WarnDefaultAddonSlotTypeMismatch(addon_section, key, parent_slot != parent_slots.end() ? parent_slot->second.slot_type : u16(eNone));
+
         AddAddonData data;
         data.item_section_id = addon_section;
         data.addon_type = pSettings->r_string(addon_section, "addon_type");
@@ -2844,7 +2923,7 @@ void CWeapon::SpawnDefaultAddons()
         data.addon_id = ADDON_ID_NONE;
         data.parent_id = parent;
         if (pSettings->line_exist(addon_section, "provided_slot_type"))
-            data.provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u8(addon_section, "provided_slot_type");
+            data.provided_slot_type = (CWeapon::EWeaponAddonSlotType)pSettings->r_u16(addon_section, "provided_slot_type");
         else
             data.provided_slot_type = CWeapon::EWeaponAddonSlotType::eNone;
         
@@ -3976,7 +4055,8 @@ float CWeapon::Weight() const
     {
         res += pSettings->r_float(GetScopeName(), "inv_weight");
     }
-    if (IsSilencerAttached() && GetSilencerName().size())
+    // A silencer of the attachment system is an addon item and was already counted above
+    if (IsSilencerAttached() && GetSilencerName().size() && !(bUseAttachmentSystem && HasAddonByName(GetSilencerName())))
     {
         res += pSettings->r_float(GetSilencerName(), "inv_weight");
     }
@@ -4757,7 +4837,7 @@ shared_str CWeapon::GetInstalledTacGripType()
 {
     shared_str type = "";
     for (auto [addon_id, addon]: m_addon_items)
-        if (xr_strcmp(addon->slot.c_str(), "tac_grip") == 0 && pSettings->line_exist(addon->addon_item_name.c_str(), "grip_type"))
+        if (xr_strcmp(addon->slot.c_str(), "slot_tac_grip") == 0 && pSettings->line_exist(addon->addon_item_name.c_str(), "grip_type"))
             return make_string("_%s", pSettings->r_string(addon->addon_item_name.c_str(), "grip_type")).c_str();
 
     return type;
@@ -4888,6 +4968,17 @@ CWeapon::SAddonConflictDesc CWeapon::GetAddonConflictDesc(const shared_str& addo
             desc.conflict_mode = pSettings->r_string(addon_section.c_str(), "attachment_conflict_mode");
     }
 
+    // An empty "*_conflict_mode =" reads as null and crashed the "deny" comparison: fall back to the default.
+    // The mode is compared case-insensitively, like the group names.
+    if (!desc.conflict_mode.size())
+        desc.conflict_mode = "detach";
+    else
+    {
+        string256 mode;
+        xr_strcpy(mode, desc.conflict_mode.c_str());
+        desc.conflict_mode = xr_strlwr(mode);
+    }
+
     return desc;
 }
 
@@ -4928,8 +5019,22 @@ void CWeapon::RemoveChildAddonConflicts(xr_vector<u32>& addon_ids) const
     addon_ids.erase(std::remove_if(addon_ids.begin(), addon_ids.end(), has_ancestor_in_list), addon_ids.end());
 }
 
+bool CWeapon::IsAddonDescendantOf(u32 addon_id, u32 ancestor_id) const
+{
+    auto addon_it = m_addon_items.find(addon_id);
+    while (addon_it != m_addon_items.end() && addon_it->second && addon_it->second->parent_id != 0)
+    {
+        if (addon_it->second->parent_id == ancestor_id)
+            return true;
+
+        addon_it = m_addon_items.find(addon_it->second->parent_id);
+    }
+
+    return false;
+}
+
 void CWeapon::CollectAddonConflicts(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id,
-    xr_vector<u32>& conflict_ids, bool& deny) const
+    xr_vector<u32>& conflict_ids, bool& deny, u32 replaced_id) const
 {
     conflict_ids.clear();
     deny = false;
@@ -4949,7 +5054,16 @@ void CWeapon::CollectAddonConflicts(const shared_str& addon_section, const share
 
     for (const auto& [installed_id, installed] : m_addon_items)
     {
-        if (!installed || installed_id == parent_id)
+        if (!installed)
+            continue;
+
+        // The addon is mounted on its whole ancestor chain: a container must not conflict with what
+        // it carries. Detaching any ancestor would also detach the direct parent and crash addAddon.
+        if (parent_id != 0 && (installed_id == parent_id || IsAddonDescendantOf(parent_id, installed_id)))
+            continue;
+
+        // The addon being replaced and its children are detached anyway
+        if (replaced_id != ADDON_ID_NONE && (installed_id == replaced_id || IsAddonDescendantOf(installed_id, replaced_id)))
             continue;
 
         shared_str installed_override_section;
@@ -4975,11 +5089,11 @@ void CWeapon::CollectAddonConflicts(const shared_str& addon_section, const share
     RemoveChildAddonConflicts(conflict_ids);
 }
 
-bool CWeapon::ResolveAddonConflictsBeforeAttach(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id)
+bool CWeapon::CheckAddonConflicts(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id,
+    u32 replaced_id, xr_vector<u32>& conflict_ids) const
 {
-    xr_vector<u32> conflict_ids;
     bool deny = false;
-    CollectAddonConflicts(addon_section, slot_name, parent_id, conflict_ids, deny);
+    CollectAddonConflicts(addon_section, slot_name, parent_id, conflict_ids, deny, replaced_id);
 
     if (conflict_ids.empty())
         return true;
@@ -5003,6 +5117,24 @@ bool CWeapon::ResolveAddonConflictsBeforeAttach(const shared_str& addon_section,
             return false;
         }
     }
+
+    return true;
+}
+
+bool CWeapon::CanReplaceAddonInSlot(PIItem item, u32 replaced_id) const
+{
+    if (item->parent_addon == 0 && !IsAddonAllowedInSlot(item->attach_to_slot_name, item->m_section_id))
+        return false;
+
+    xr_vector<u32> conflict_ids;
+    return CheckAddonConflicts(item->m_section_id, item->attach_to_slot_name, item->parent_addon, replaced_id, conflict_ids);
+}
+
+bool CWeapon::ResolveAddonConflictsBeforeAttach(const shared_str& addon_section, const shared_str& slot_name, u32 parent_id)
+{
+    xr_vector<u32> conflict_ids;
+    if (!CheckAddonConflicts(addon_section, slot_name, parent_id, ADDON_ID_NONE, conflict_ids))
+        return false;
 
     for (u32 conflict_id : conflict_ids)
     {
@@ -5035,7 +5167,7 @@ bool CWeapon::CanAttachWithoutEviction(PIItem item) const
     return conflict_ids.empty();
 }
 
-bool CWeapon::HasAddonByName(shared_str name)
+bool CWeapon::HasAddonByName(shared_str name) const
 {
     for (auto [addon_id, addon]: m_addon_items)
         if (xr_strcmp(addon->addon_item_name.c_str(), name.c_str()) == 0)
