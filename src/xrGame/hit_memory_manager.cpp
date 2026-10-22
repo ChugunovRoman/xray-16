@@ -215,7 +215,15 @@ void CHitMemoryManager::update()
 
     clear_delayed_objects();
 
-    VERIFY(m_hits);
+    // The list belongs to the group: null while the NPC is not registered in one (see CVisualMemoryManager::update)
+    if (!m_hits)
+    {
+        static std::atomic_bool s_reported{false};
+        if (!s_reported.exchange(true, std::memory_order_relaxed))
+            Msg("! [GW] hit memory update of [%s] without a squad list (not registered in a group), skipped",
+                m_object ? m_object->cName().c_str() : "?");
+        return;
+    }
     const auto it = std::remove_if(m_hits->begin(), m_hits->end(), [](const CHitObject& object)
     {
         VERIFY(object.m_object);

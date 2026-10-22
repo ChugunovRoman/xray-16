@@ -18,6 +18,7 @@
 #include "level_path_manager.h"
 #include "detail_path_manager.h"
 #include "xrAICore/Navigation/ai_object_location.h"
+#include "xrAICore/Navigation/game_level_cross_table.h"
 #include "CustomMonster.h"
 #include "level_path_builder.h"
 #include "detail_path_builder.h"
@@ -65,6 +66,48 @@ void CMovementManager::show_game_path_info()
     const_iterator E = m_location_manager->vertex_types().end();
     for (; I != E; ++I)
         Msg("!   [%d][%d][%d][%d]", (*I).tMask[0], (*I).tMask[1], (*I).tMask[2], (*I).tMask[3]);
+}
+
+// 50y (plans/optimization_mt/50y-invalid-dest-level-vertex.md): the level path of a game path got a game vertex of
+// another level (or one whose level vertex the level graph has not). It was an R_ASSERT2 "Can't setup path ...
+// dest_vertex_id" in CLevelPathBuilder::setup. The case seen: a squad member teleported offline through a level
+// changer was spawned with its squad on this level with the game vertex of the other one, the game path from it stayed
+// there and the level vertex of that vertex is not of this level graph. The game vertex of the object is taken from
+// the cross table of this level at its level vertex and the game path is built anew (a vertex of another level on it
+// is a teleport then, ePathStateContinueGamePath)
+void CMovementManager::reset_foreign_game_path(u32 game_vertex_id, u32 dest_level_vertex_id)
+{
+    const CGameGraph& game_graph = ai().game_graph();
+    const CLevelGraph& level_graph = ai().level_graph();
+    const bool foreign = !game_graph.valid_vertex_id(game_vertex_id) ||
+        game_graph.vertex(game_vertex_id)->level_id() != level_graph.level_id();
+
+    const GameGraph::_GRAPH_ID object_game_vertex_id = object().ai_location().game_vertex_id();
+    GameGraph::_GRAPH_ID own_game_vertex_id = object_game_vertex_id;
+    const u32 level_vertex_id = object().ai_location().level_vertex_id();
+    if (level_graph.valid_vertex_id(level_vertex_id))
+        own_game_vertex_id = ai().cross_table().vertex(level_vertex_id).game_vertex_id();
+    const bool corrected = (own_game_vertex_id != object_game_vertex_id) && game_graph.valid_vertex_id(own_game_vertex_id);
+
+    if (!m_foreign_game_path_reported)
+    {
+        m_foreign_game_path_reported = true;
+        Msg("! [GW] game path of [%s]: dest level vertex %u is not on this level (vertices %u), path reset (game vertex "
+            "%u of level [%s], the game vertex of the object %u -> %u)",
+            object().cName().c_str(), dest_level_vertex_id, level_graph.header().vertex_count(), game_vertex_id,
+            game_graph.valid_vertex_id(game_vertex_id) ?
+                game_graph.header().level(game_graph.vertex(game_vertex_id)->level_id()).name().c_str() :
+                "-",
+            u32(object_game_vertex_id), u32(corrected ? own_game_vertex_id : object_game_vertex_id));
+    }
+
+    if (corrected)
+        object().ai_location().game_vertex(own_game_vertex_id);
+
+    game_path().make_inactual();
+    // a vertex of this level that the level graph has not (level.ai and all.spawn of different builds) would come
+    // again from the same game path: the NPC stays until its game destination changes
+    m_path_state = (corrected || foreign) ? ePathStateBuildGamePath : ePathStatePathCompleted;
 }
 
 void CMovementManager::process_game_path()
@@ -133,7 +176,20 @@ void CMovementManager::process_game_path()
         VERIFY(ai().game_graph().vertex(object().ai_location().game_vertex_id())->level_id() ==
             ai().game_graph().vertex(game_path().intermediate_vertex_id())->level_id());
 
-        u32 dest_level_vertex_id = ai().game_graph().vertex(game_path().intermediate_vertex_id())->level_vertex_id();
+        // 50y: the intermediate vertex must be of this level and its level vertex on this level graph
+        const u32 intermediate_vertex_id = (game_path().intermediate_index() < game_path().path().size()) ?
+            game_path().intermediate_vertex_id() :
+            u32(-1);
+        u32 dest_level_vertex_id = ai().game_graph().valid_vertex_id(intermediate_vertex_id) ?
+            ai().game_graph().vertex(intermediate_vertex_id)->level_vertex_id() :
+            u32(-1);
+        if (!ai().game_graph().valid_vertex_id(intermediate_vertex_id) ||
+            (ai().game_graph().vertex(intermediate_vertex_id)->level_id() != ai().level_graph().level_id()) ||
+            !ai().level_graph().valid_vertex_id(dest_level_vertex_id))
+        {
+            reset_foreign_game_path(intermediate_vertex_id, dest_level_vertex_id);
+            break;
+        }
 
         if (!accessible(dest_level_vertex_id))
         {
@@ -144,7 +200,9 @@ void CMovementManager::process_game_path()
 
         Fvector temp =
             ai().level_graph().vertex_position(dest_level_vertex_id /**level_path().intermediate_vertex_id()**/);
-        level_path_builder().setup(object().ai_location().level_vertex_id(), dest_level_vertex_id, true, &temp);
+        // 50y: a vertex not on this level graph (accessible_nearest) is reported by setup(), the path is not built
+        if (!level_path_builder().setup(object().ai_location().level_vertex_id(), dest_level_vertex_id, true, &temp))
+            break;
 
         if (can_use_distributed_computations(mtLevelPath))
         {

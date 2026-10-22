@@ -23,8 +23,12 @@ void XRCORE_API xrSentry_CaptureSoftError(pcstr logger, pcstr message, pcstr lua
 // Script/engine error (caught Lua, etc.): ERROR level, native stack; lua_stack overrides provider when non-null.
 void XRCORE_API xrSentry_CaptureError(pcstr logger, pcstr message, pcstr lua_stack = nullptr);
 
-// xrDebug::Fail: compact assertion text + Lua stack (provider or empty).
+// xrDebug::Fail: compact assertion text + Lua stack (provider or empty). Only queues the event, never waits for the
+// upload: the error dialog comes right after it, and the player may continue the game.
 void XRCORE_API xrSentry_CaptureDebugFail(pcstr expr, pcstr desc, pcstr arg1 = nullptr, pcstr arg2 = nullptr);
+
+// Waits until the queued events are sent, at most timeoutMs. xrDebug::Fail calls it once the player chose to exit.
+void xrSentry_Flush(u32 timeoutMs);
 
 // CInifile::r_string before xrDebug::Fatal: error-level event, native stack, extra ini_file/section/key.
 void XRCORE_API xrSentry_CaptureIniRStringError(pcstr ini_path, pcstr section, pcstr key);

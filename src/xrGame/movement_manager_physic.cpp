@@ -770,7 +770,10 @@ void CMovementManager::move_along_path_body(
         {
             // Ф1: idle far NPCs still pay a full physics step via Calculate() while enabled - force them
             // out of m_objects the same way the moving kinematic branch does (except jump/impulse/etc.).
-            if (should_force_far_kinematic(movement_control, dest_position))
+            // Only for an existing character: a destroyed one (a wounded stalker) still reads as enabled through
+            // bNonInteractiveMode / bExernalImpulse - it takes the vanilla Calculate(), which handles that itself
+            // (plans/optimization_mt/50u-disable-destroyed-character.md).
+            if (movement_control->CharacterExist() && should_force_far_kinematic(movement_control, dest_position))
             {
                 movement_control->DisableCharacter();
                 count_forced_kinematic();

@@ -135,10 +135,34 @@ struct i_render_phase
         o.active = false;
     }
 
+    // Joins the phase's build task (and its draw subtask) without drawing anything, then gives back what init()
+    // allocated (discard). For a pass that skips the phase (the scope pass with r__svp_skip_rain_sync) and the
+    // frame-end safety net (CRender::End). A launched task must be joined before D3DXRenderBase::End() ->
+    // cleanup_contexts() resets the pool: otherwise it keeps building into a context that is reset or handed out again
+    // under it (50v-rain-context-race.md: AV in insert_static with context_id == INVALID_CONTEXT_ID), and main_task
+    // keeps pointing into the scheduler's task ring. Returns true when a task was in flight.
+    bool join_discard()
+    {
+        const bool in_flight = main_task != nullptr;
+        if (main_task)
+            TaskScheduler->Wait(*main_task);
+        main_task = nullptr;
+        if (o.mt_draw_enabled && draw_task)
+            TaskScheduler->Wait(*draw_task);
+        draw_task = nullptr;
+        if (o.active)
+            discard();
+        o.active = false;
+        return in_flight;
+    }
+
     virtual void init() = 0;
     virtual void calculate() = 0;
     virtual void render() = 0;
     virtual void flush() {}
+    // join_discard: the phase's per-frame resources back without drawing. Default - nothing: the pooled contexts the
+    // phase holds are reclaimed by cleanup_contexts at the frame end.
+    virtual void discard() {}
 
     struct options_t
     {
@@ -181,6 +205,7 @@ struct render_rain : public i_render_phase
     void calculate() override;
     void render() override;
     void flush() override;
+    void discard() override;
 
     light RainLight;
     u32 context_id{ R_dsgraph_structure::INVALID_CONTEXT_ID };
@@ -572,6 +597,9 @@ public:
     void main_build_early_discard();
     // Before D3DXRenderBase::End() resets the contexts: no static half may still be writing into them.
     void End() override;
+    // The same for the render phases (r_main, r_rain, r_sun, r_sun_old): a build task launched by a Calculate whose
+    // Render did not sync it is joined here (i_render_phase::join_discard), once-per-phase log (50v-rain-context-race.md).
+    void join_phases_at_frame_end();
     // Main pass parts of calculate_for shared with KickMainBuildEarly (main thread): the LOD thresholds (g_fSCREEN,
     // r_ssa*) and the camera sector (+ OnSectorChanged).
     void publish_lod_globals();

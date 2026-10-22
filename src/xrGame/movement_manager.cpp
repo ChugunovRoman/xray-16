@@ -103,6 +103,8 @@ void CMovementManager::reinit()
     m_speed = 0.f;
     m_old_desirable_speed = 0.f;
     m_build_at_once = false;
+    m_foreign_game_path_reported = false; // 50y: once per spawn (a pooled object is spawned again)
+    level_path_builder().reinit();
 
     enable_movement(true);
     CGameGraph* game_graph = ai().get_game_graph();

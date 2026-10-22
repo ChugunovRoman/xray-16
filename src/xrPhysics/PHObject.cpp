@@ -66,7 +66,8 @@ IC bool IsAiController(CPHObject* obj)
 // spends most of the narrowphase on pairs with a corpse: ~1.9 us per pair against ~0.5 us for two NPC capsules (a ragdoll
 // is ~11 bodies, space x space in NearCallback). The developer's call: corpse-vs-corpse contacts do not matter,
 // corpse-vs-NPC ones far from the camera do not either - such a pair never reaches NearCallback (no dCollide, no merge,
-// no wake).
+// no wake). Since plans/npc-corpse-collision.md corpse-vs-NPC is dropped at any distance (ph_npc_corpse_collide 0): a
+// live NPC stopped dead at a corpse it could not push (a force-slept one is a wall for it, see Physics.cpp).
 // "Corpse" = a ragdoll-class shell: cbClassRagDoll is set only by CPHShell::SetRagDoll(), called by
 // CCharacterPhysicsSupport for the death shell of a stalker / monster / the actor - never for props, items, vehicles,
 // the hit shell of a live NPC (physics_shell_animated) or the activation shape of a death (it is not a shell).
@@ -306,6 +307,7 @@ void CPHObject::CollideRayMotions()
         // traces its motion here): per pair, ray motions are rare
         const float corpse_corpse_dist = ph_console::ph_corpse_vs_corpse_dist;
         const float corpse_npc_dist = ph_console::ph_corpse_vs_npc_dist;
+        const bool npc_corpse_pass = ph_console::ph_npc_corpse_collide == 0;
         const CorpseRuleSide s1 = GetCorpseRuleSide(this);
         const auto corpse_pair_skipped = [&](CPHObject* obj2) {
             if (s1 == CorpseRuleSide::None)
@@ -317,6 +319,9 @@ void CPHObject::CollideRayMotions()
                 return corpse_corpse_dist <= 0.f || (FarFromCamera(spatial.sphere.P, cam, corpse_corpse_dist) &&
                     FarFromCamera(obj2->spatial.sphere.P, cam, corpse_corpse_dist));
             }
+            // Corpse x live NPC controller: at any distance by default (ph_npc_corpse_collide 0)
+            if (npc_corpse_pass && s2 != CorpseRuleSide::None && s1 != s2)
+                return true;
             if (corpse_npc_dist > 0.f && s1 != CorpseRuleSide::None && s2 != CorpseRuleSide::None && s1 != s2)
             {
                 return FarFromCamera(spatial.sphere.P, cam, corpse_npc_dist) &&
@@ -371,20 +376,23 @@ void CPHObject::CollideDynamicsBroadphase()
     // then passing through it in the frame step. A pair is near when either object is within the distance of the
     // camera (StepCameraPosition: the Kick snapshot inside the frame step, the live camera on main). The side and the
     // distances of this object are taken once per query; per candidate it is one class bit test unless a rule applies.
+    // ph_npc_corpse_collide 0 (default, plans/npc-corpse-collision.md): corpse x live NPC controller is skipped at any
+    // distance - "far" always, no camera needed for it.
     const float corpse_corpse_dist = ph_console::ph_corpse_vs_corpse_dist;
     const float corpse_npc_dist = ph_console::ph_corpse_vs_npc_dist;
+    const bool npc_corpse_pass = ph_console::ph_npc_corpse_collide == 0;
     const CorpseRuleSide corpse_side = GetCorpseRuleSide(this);
     const bool corpse_corpse_rule = corpse_side == CorpseRuleSide::Corpse;
-    const bool corpse_npc_rule = corpse_npc_dist > 0.f && corpse_side != CorpseRuleSide::None;
+    const bool corpse_npc_rule = (npc_corpse_pass || corpse_npc_dist > 0.f) && corpse_side != CorpseRuleSide::None;
     const Fvector* camera = nullptr;
     bool this_far_corpse = true; // for ph_corpse_vs_corpse_dist (0 = everywhere: "far" always)
-    bool this_far_npc = false;
-    if (corpse_corpse_rule || corpse_npc_rule)
+    bool this_far_npc = npc_corpse_pass;
+    if (corpse_corpse_rule || (corpse_npc_rule && !npc_corpse_pass))
     {
         camera = &ph_world->StepCameraPosition();
         if (corpse_corpse_rule && corpse_corpse_dist > 0.f)
             this_far_corpse = FarFromCamera(spatial.sphere.P, *camera, corpse_corpse_dist);
-        if (corpse_npc_rule)
+        if (corpse_npc_rule && !npc_corpse_pass)
             this_far_npc = FarFromCamera(spatial.sphere.P, *camera, corpse_npc_dist);
     }
 
@@ -426,11 +434,12 @@ void CPHObject::CollideDynamicsBroadphase()
         else if (corpse_npc_rule && this_far_npc &&
             (corpse_side == CorpseRuleSide::Corpse ? IsAiController(obj2) :
                                                      CPHCollideValidator::IsRagDollObject(*obj2)) &&
-            FarFromCamera(obj2->spatial.sphere.P, *camera, corpse_npc_dist))
+            (npc_corpse_pass || FarFromCamera(obj2->spatial.sphere.P, *camera, corpse_npc_dist)))
         {
-            // ph_corpse_vs_npc_dist N: corpse x live NPC controller, both beyond N m of the camera - the NPC walks
-            // through the corpse, the corpse is not pushed or woken. Within N m: NearCallback as before (incl. the
-            // one-sided contact of an NPC with a force-slept corpse).
+            // Corpse x live NPC controller: everywhere by default (ph_npc_corpse_collide 0) - the NPC walks through the
+            // corpse, the corpse is not pushed or woken. ph_npc_corpse_collide 1 (the old behaviour): only with both
+            // beyond ph_corpse_vs_npc_dist N m of the camera; within N m NearCallback as before (incl. the one-sided
+            // contact of an NPC with a force-slept corpse, where the corpse is a wall for the NPC).
 #if XR_PERF_METRICS
             // The same frame-step condition as pair/*; _local = the other paths (TryPosition probes, world steps on main).
             if (count_pairs)

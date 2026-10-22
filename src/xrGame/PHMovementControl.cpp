@@ -1729,6 +1729,11 @@ bool CPHMovementControl::IsCharacterEnabled()
 void CPHMovementControl::DisableCharacter()
 {
     VERIFY(m_character);
+    // A destroyed character has no body and no geoms: IsCharacterEnabled() can still say true for it through
+    // bNonInteractiveMode / bExernalImpulse, and the far-kinematic branch of move_along_path_body then disabled it -
+    // ODE read a null geom (crash 2026-10-20, plans/optimization_mt/50u-disable-destroyed-character.md)
+    if (!CharacterExist())
+        return;
     m_character->Disable();
 }
 

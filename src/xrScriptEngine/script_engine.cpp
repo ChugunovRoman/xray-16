@@ -192,8 +192,13 @@ void CScriptEngine::reinit()
         file_header = file_header_new;
     else
         file_header = file_header_old;
-    scriptBufferSize = 1024 * 1024;
-    scriptBuffer = xr_alloc<char>(scriptBufferSize);
+    // 50c-commit-growth-analysis.md (plans/optimization_mt): allocated once - reinit runs on every load (a new
+    // CALifeSimulator restarts the script engine) and leaked the previous buffer (1 MB or more, load_buffer grows it)
+    if (!scriptBuffer)
+    {
+        scriptBufferSize = 1024 * 1024;
+        scriptBuffer = xr_alloc<char>(scriptBufferSize);
+    }
 
     if (m_profiler)
         m_profiler->OnReinit(m_virtual_machine);

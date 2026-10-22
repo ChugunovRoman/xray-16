@@ -52,8 +52,10 @@ void CMovementManager::process_patrol_path()
     }
     case ePathStateBuildLevelPath:
     {
-        level_path_builder().setup(object().ai_location().level_vertex_id(), level_dest_vertex_id(),
-            patrol().extrapolate_path(), &patrol().destination_position());
+        // 50y: a vertex not on this level graph is reported by setup(), the path is not built (the state stays)
+        if (!level_path_builder().setup(object().ai_location().level_vertex_id(), level_dest_vertex_id(),
+                patrol().extrapolate_path(), &patrol().destination_position()))
+            break;
 
         if (can_use_distributed_computations(mtLevelPath))
         {

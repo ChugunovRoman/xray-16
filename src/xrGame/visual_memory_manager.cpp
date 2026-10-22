@@ -856,8 +856,20 @@ void CVisualMemoryManager::update(float time_delta)
 
     m_last_update_time = Device.dwTimeGlobal;
 
+    // The list belongs to the group (set_squad_objects): it is null while the NPC is not registered in one
+    // (unregister_in_group_senses). A heavy save on a weak laptop crashed here on the Game logic thread (read of
+    // address 0, plans/optimization_mt/50t-null-squad-memory.md); skip the update until the NPC is registered again.
+    if (!m_objects)
+    {
+        static std::atomic_bool s_reported{false};
+        if (!s_reported.exchange(true, std::memory_order_relaxed))
+            Msg("! [GW] visual memory update of [%s] without a squad list (not registered in a group), skipped",
+                m_object ? m_object->cName().c_str() : "?");
+        m_visible_objects.clear();
+        return;
+    }
+
     squad_mask_type mask = this->mask();
-    VERIFY(m_objects);
     m_visible_objects.clear();
 
     START_PROFILE("Memory Manager/visuals/update/feel_vision_get")

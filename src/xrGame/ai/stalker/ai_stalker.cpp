@@ -743,7 +743,11 @@ bool CAI_Stalker::net_Spawn(CSE_Abstract* DC)
 
     if (ai().get_game_graph())
     {
-        if (ai().game_graph().valid_vertex_id(tpHuman->m_tGraphID))
+        // 50y (plans/optimization_mt/50y-invalid-dest-level-vertex.md): not a game vertex of another level, as in
+        // CCustomMonster::net_Spawn (it reports the case): the vertex of the cross table stays
+        if (ai().game_graph().valid_vertex_id(tpHuman->m_tGraphID) &&
+            (!ai().get_level_graph() ||
+                ai().game_graph().vertex(tpHuman->m_tGraphID)->level_id() == ai().level_graph().level_id()))
             ai_location().game_vertex(tpHuman->m_tGraphID);
 
         if (ai().game_graph().valid_vertex_id(tpHuman->m_tNextGraphID))

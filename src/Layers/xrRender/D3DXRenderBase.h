@@ -169,9 +169,15 @@ public:
         {
             contexts_pool[id].reset(frame_end);
         }
-        contexts_used.reset();
-        // The immediate context stays marked: get_imm_context then never writes from the worker threads.
-        get_imm_context();
+        {
+            // Under the lock like alloc/release (the bitset ops are a plain read-modify-write of one word), and the
+            // immediate context marked in the same step: get_imm_context then never writes from the worker threads.
+            // The caller guarantees no build is running (CRender::End joins the phases, 50v-rain-context-race.md).
+            std::lock_guard<std::mutex> lock{ contexts_lock };
+            contexts_used.reset();
+            contexts_used.set(R_dsgraph_structure::IMM_CTX_ID, true);
+        }
+        get_imm_context(); // context_id of the immediate context
     }
 #else
     ICF R_dsgraph_structure& get_imm_context()

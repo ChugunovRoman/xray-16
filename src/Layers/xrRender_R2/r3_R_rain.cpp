@@ -74,6 +74,10 @@ void render_rain::init()
     // pre-allocate context
     context_id = RImplementation.alloc_context();
     VERIFY(context_id != R_dsgraph_structure::INVALID_CONTEXT_ID);
+    // The pool is exhausted (alloc_context refuses): no rain shadow this pass instead of get_context(INVALID_CONTEXT_ID)
+    // - an index far past contexts_pool - in calculate/render/flush.
+    if (context_id == R_dsgraph_structure::INVALID_CONTEXT_ID)
+        o.active = false;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -379,5 +383,13 @@ void render_rain::flush()
     );
     RImplementation.Target->draw_rain(cmd_list_imm, RainLight);
     RainLight.frame_render = Device.dwFrame;
+}
+
+void render_rain::discard()
+{
+    // i_render_phase::join_discard (the build is joined): nothing was recorded - rain draws only on main, in render()
+    // (o.mt_draw_enabled is always false) - so the context goes back to the pool as is.
+    if (context_id < R__NUM_PARALLEL_CONTEXTS)
+        RImplementation.release_context(context_id);
 }
 } // namespace xray::render::RENDER_NAMESPACE

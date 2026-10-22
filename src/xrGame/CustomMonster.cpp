@@ -1187,8 +1187,21 @@ bool CCustomMonster::net_Spawn(CSE_Abstract* DC)
 
     if (ai().get_level_graph() && ai().get_game_graph() && UsedAI_Locations() && (e->ID_Parent == 0xffff))
     {
+        // 50y (plans/optimization_mt/50y-invalid-dest-level-vertex.md): a game vertex of another level (a squad member
+        // teleported offline through a level changer and spawned with its squad here) is not taken: the game path from
+        // it would give the level path a level vertex of the other level. The vertex of the cross table, set by
+        // CGameObject::net_Spawn from the position, stays
         if (ai().game_graph().valid_vertex_id(E->m_tGraphID))
-            ai_location().game_vertex(E->m_tGraphID);
+        {
+            if (ai().game_graph().vertex(E->m_tGraphID)->level_id() == ai().level_graph().level_id())
+                ai_location().game_vertex(E->m_tGraphID);
+            else
+                Msg("! [GW] spawn of [%s]: game vertex %u is on level [%s], not on this one: kept game vertex %u of "
+                    "level vertex %u",
+                    cName().c_str(), u32(E->m_tGraphID),
+                    ai().game_graph().header().level(ai().game_graph().vertex(E->m_tGraphID)->level_id()).name().c_str(),
+                    u32(ai_location().game_vertex_id()), ai_location().level_vertex_id());
+        }
 
         if (ai().game_graph().valid_vertex_id(E->m_tNextGraphID) &&
             (ai().game_graph().vertex(E->m_tNextGraphID)->level_id() == ai().level_graph().level_id()))

@@ -16,12 +16,14 @@ pcstr s_sentry_command_line = nullptr;
 #include <SDL.h>
 
 #include <algorithm>
+#include <atomic>
 #include <csignal>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
 #if defined(XR_PLATFORM_WINDOWS)
+#   include "Text/Utf8Utils.hpp"
 #   include <dbghelp.h>
 #   include <direct.h>
 #   include <new.h> // for _set_new_mode
@@ -47,6 +49,119 @@ pcstr s_sentry_command_line = nullptr;
 #   endif
 #endif
 
+#if defined(XR_PLATFORM_LINUX)
+#   include <pthread.h> // pthread_getname_np
+#endif
+
+#if defined(XR_PLATFORM_WINDOWS)
+// PlatformWindows.inl hides DrawText (NODRAWTEXT) and the system colours (NOCOLOR) from the whole engine;
+// the error dialog of xrDebug::Fail needs DrawTextW to measure its header and the dialog background colour.
+#   ifndef DT_WORDBREAK
+#       define DT_WORDBREAK 0x00000010
+#   endif
+#   ifndef DT_CALCRECT
+#       define DT_CALCRECT 0x00000400
+#   endif
+#   ifndef DT_NOPREFIX
+#       define DT_NOPREFIX 0x00000800
+#   endif
+#   ifndef COLOR_BTNFACE
+#       define COLOR_BTNFACE 15
+#   endif
+#   ifdef NODRAWTEXT
+extern "C" __declspec(dllimport) int WINAPI DrawTextW(HDC, LPCWSTR, int, LPRECT, UINT);
+#   endif
+#endif
+
+extern pcstr log_name();
+
+namespace
+{
+// The thread that created the application window: xrDebug::SetWindowHandler is called right after SDL_CreateWindow.
+// The window may only be changed from that thread. SDL_SetWindowFullscreen, ShowWindow, EnableWindow and a message box
+// owned by the window all send messages to it and wait for the answer, and that thread may itself be waiting for the
+// failing one (the main thread joins the Game logic thread every frame): the dialog then never appeared and the
+// window turned "not responding".
+std::atomic<SDL_threadID> s_window_thread{ 0 };
+
+bool on_window_thread()
+{
+    const SDL_threadID owner = s_window_thread.load(std::memory_order_acquire);
+    return owner != 0 && owner == SDL_ThreadID();
+}
+
+// Before a dialog: the window handler (leave fullscreen, release the input grab) only on the window's own thread.
+// Returns true when it was called, and then it must be called again after the dialog.
+bool begin_error_dialog(IWindowHandler* handler)
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    // SDL relative mouse mode clips the cursor to the game window. ClipCursor is global and does not involve the
+    // window's thread, so it is safe from any thread; SDL clips again once the game window gets the focus back.
+    ClipCursor(nullptr);
+#endif
+    if (!handler || !on_window_thread())
+        return false;
+    handler->OnErrorDialog(true);
+    return true;
+}
+
+// Before the process goes down: hide the window (BugTrap shows its own dialog after the break).
+void hide_window_before_exit(IWindowHandler* handler)
+{
+    if (!handler)
+        return;
+    if (on_window_thread())
+    {
+        handler->OnFatalError();
+        return;
+    }
+#if defined(XR_PLATFORM_WINDOWS)
+    // ShowWindowAsync only posts the request; ShowWindow would wait for the window's thread.
+    if (const auto wnd = static_cast<HWND>(handler->GetApplicationWindowHandle()))
+        ShowWindowAsync(wnd, SW_HIDE);
+#endif
+}
+
+// Name of the calling thread as set by Threading::SetCurrentThreadName, empty if unknown.
+void get_current_thread_name(pstr out, size_t size)
+{
+    if (!out || !size)
+        return;
+    out[0] = 0;
+#if defined(XR_PLATFORM_WINDOWS)
+    // SetCurrentThreadName prefers SetThreadDescription, so the name is readable back the same way.
+    using GetThreadDescriptionProc = HRESULT(WINAPI*)(HANDLE, PWSTR*);
+    const HMODULE kernelHandle = GetModuleHandleA("kernel32.dll");
+    const auto getThreadDescription = kernelHandle
+        ? reinterpret_cast<GetThreadDescriptionProc>(GetProcAddress(kernelHandle, "GetThreadDescription"))
+        : nullptr;
+
+    if (getThreadDescription)
+    {
+        PWSTR description = nullptr;
+        if (SUCCEEDED(getThreadDescription(GetCurrentThread(), &description)) && description)
+        {
+            size_t converted = 0;
+            wcstombs_s(&converted, out, size, description, size - 1);
+            LocalFree(description);
+        }
+    }
+#elif defined(XR_PLATFORM_LINUX)
+    if (pthread_getname_np(pthread_self(), out, size) != 0)
+        out[0] = 0;
+#endif
+}
+
+u64 get_current_thread_id()
+{
+#if defined(XR_PLATFORM_WINDOWS)
+    return static_cast<u64>(GetCurrentThreadId());
+#else
+    return static_cast<u64>(SDL_ThreadID());
+#endif
+}
+} // namespace
+
 constexpr SDL_MessageBoxButtonData buttons[] =
 {
     /* .flags, .buttonid, .text */
@@ -60,19 +175,22 @@ constexpr SDL_MessageBoxButtonData buttons[] =
 
 AssertionResult xrDebug::ShowMessage(pcstr title, pcstr message, bool simpleMode)
 {
+    // Owned by the game window only on the window's own thread: an owned message box disables its owner and shares
+    // its input queue, which hangs both when the owner's thread waits for this one (see s_window_thread).
+    const bool ownedByWindow = windowHandler && on_window_thread();
 #ifdef XR_PLATFORM_WINDOWS // because Windows default Message box is fancy
     HWND hwnd = nullptr;
-    if (windowHandler)
+    if (ownedByWindow)
         hwnd = static_cast<HWND>(windowHandler->GetApplicationWindowHandle());
 
     if (simpleMode)
     {
-        MessageBox(hwnd, message, title, MB_OK | MB_ICONERROR | MB_SYSTEMMODAL);
+        MessageBox(hwnd, message, title, MB_OK | MB_ICONERROR | MB_SYSTEMMODAL | MB_SETFOREGROUND);
         return AssertionResult::ok;
     }
 
     const int result = MessageBox(hwnd, message, title,
-        MB_CANCELTRYCONTINUE | MB_ICONERROR | MB_SYSTEMMODAL);
+        MB_CANCELTRYCONTINUE | MB_ICONERROR | MB_SYSTEMMODAL | MB_SETFOREGROUND);
 
     switch (result)
     {
@@ -84,7 +202,7 @@ AssertionResult xrDebug::ShowMessage(pcstr title, pcstr message, bool simpleMode
 #else
     if (simpleMode)
     {
-        SDL_Window* parent = windowHandler ? windowHandler->GetApplicationWindow() : nullptr;
+        SDL_Window* parent = ownedByWindow ? windowHandler->GetApplicationWindow() : nullptr;
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, message, parent);
         return AssertionResult::ok;
     }
@@ -92,7 +210,7 @@ AssertionResult xrDebug::ShowMessage(pcstr title, pcstr message, bool simpleMode
     SDL_MessageBoxData data =
     {
         SDL_MESSAGEBOX_ERROR,
-        windowHandler ? windowHandler->GetApplicationWindow() : nullptr,
+        ownedByWindow ? windowHandler->GetApplicationWindow() : nullptr,
         title, message, SDL_arraysize(buttons), buttons, nullptr
     };
 
@@ -121,7 +239,9 @@ SDL_AssertState SDLAssertionHandler(const SDL_AssertData* data,
         return SDL_ASSERTION_ALWAYS_IGNORE;
 
     case AssertionResult::tryAgain:
-        return SDL_ASSERTION_RETRY;
+        // Continue in the error dialog: go on once. SDL_ASSERTION_RETRY would check the condition again
+        // and bring the same dialog right back.
+        return SDL_ASSERTION_IGNORE;
 
     case AssertionResult::abort:
         return SDL_ASSERTION_ABORT;
@@ -149,6 +269,12 @@ Lock xrDebug::failLock;
 #endif
 
 void xrDebug::SetBugReportFile(const char* fileName) { xr_strcpy(BugReportFile, fileName); }
+
+void xrDebug::SetWindowHandler(IWindowHandler* handler)
+{
+    windowHandler = handler;
+    s_window_thread.store(handler ? SDL_ThreadID() : 0, std::memory_order_release);
+}
 
 void xrDebug::AddSymbolSearchPath(pcstr dir)
 {
@@ -316,24 +442,7 @@ void log_multiline_with_prefix(pcstr text)
 void log_current_thread_name()
 {
     string256 threadName{};
-
-    // SetCurrentThreadName prefers SetThreadDescription, so the name is readable back the same way.
-    using GetThreadDescriptionProc = HRESULT(WINAPI*)(HANDLE, PWSTR*);
-    const HMODULE kernelHandle = GetModuleHandleA("kernel32.dll");
-    const auto getThreadDescription = kernelHandle
-        ? reinterpret_cast<GetThreadDescriptionProc>(GetProcAddress(kernelHandle, "GetThreadDescription"))
-        : nullptr;
-
-    if (getThreadDescription)
-    {
-        PWSTR description = nullptr;
-        if (SUCCEEDED(getThreadDescription(GetCurrentThread(), &description)) && description)
-        {
-            size_t converted = 0;
-            wcstombs_s(&converted, threadName, sizeof(threadName), description, sizeof(threadName) - 1);
-            LocalFree(description);
-        }
-    }
+    get_current_thread_name(threadName, sizeof(threadName));
 
     Msg("%sthread: 0x%X \"%s\"", kCrashPrefix, static_cast<u32>(GetCurrentThreadId()), threadName);
 }
@@ -598,6 +707,455 @@ void xrDebug::GatherInfo(char* assertionInfo, size_t bufferSize, const ErrorLoca
 #endif
 }
 
+namespace
+{
+// What the player chose in the error dialog of xrDebug::Fail
+enum class FailChoice : int
+{
+    Continue,     // return from Fail once: the code after the assertion runs
+    IgnoreAlways, // the same, and this file:line is not reported again in this session
+    Exit,         // crash report and exit, what every error did before the dialog had these buttons
+};
+
+// Depth of Fail on this thread. A failure inside the handling of another one (the stack walk, Sentry, the dialog
+// itself) must not open a second dialog on top of the first or recurse until the stack runs out.
+thread_local int s_tl_fail_depth = 0;
+
+// Set around a Fail whose caller cannot go on after it returns: a failed allocation (the new handler retries it and
+// would fail again), a fatal signal, a pure virtual call. The dialog then offers no Continue.
+thread_local bool s_tl_fail_no_continue = false;
+
+struct FailNoContinueScope
+{
+    const bool previous = s_tl_fail_no_continue;
+    FailNoContinueScope() { s_tl_fail_no_continue = true; }
+    ~FailNoContinueScope() { s_tl_fail_no_continue = previous; }
+};
+
+struct FailDepthScope
+{
+    FailDepthScope() { ++s_tl_fail_depth; }
+    ~FailDepthScope() { --s_tl_fail_depth; }
+};
+
+// Errors the player chose to ignore always, by file:line. R_ASSERT* and VERIFY* keep a static flag of their own, which
+// Fail sets; this list covers FATAL and the callers that pass a local flag. The file name is copied: the invalid
+// parameter handler passes a buffer on its stack. Only touched under failLock.
+struct IgnoredFailSite
+{
+    char file[256];
+    int line;
+};
+constexpr size_t kMaxIgnoredFailSites = 64;
+IgnoredFailSite s_ignored_fail_sites[kMaxIgnoredFailSites];
+size_t s_ignored_fail_site_count = 0;
+
+bool is_fail_site_ignored(const ErrorLocation& loc)
+{
+    for (size_t i = 0; i < s_ignored_fail_site_count; ++i)
+    {
+        const IgnoredFailSite& site = s_ignored_fail_sites[i];
+        if (site.line == loc.Line && 0 == std::strcmp(site.file, loc.File ? loc.File : ""))
+            return true;
+    }
+    return false;
+}
+
+void ignore_fail_site(const ErrorLocation& loc)
+{
+    if (s_ignored_fail_site_count >= kMaxIgnoredFailSites || is_fail_site_ignored(loc))
+        return;
+    IgnoredFailSite& site = s_ignored_fail_sites[s_ignored_fail_site_count++];
+    std::snprintf(site.file, sizeof(site.file), "%s", loc.File ? loc.File : "");
+    site.line = loc.Line;
+}
+
+// The dialog text is fixed English on purpose: the string table lives in the game modules and may be the very thing
+// that failed, and it may not be loaded yet (or any more) when an error happens.
+constexpr pcstr kFailHeaderContinue =
+    "The game has encountered an error. The details below are also written to the log.\n"
+    "Continue: ignore the error this time and keep playing. Ignore always: also skip it for the rest of the session. "
+    "Continuing may cause further errors or a crash; if the game goes on, save it to a new slot.\n"
+    "Exit: close the game and save the crash report.";
+constexpr pcstr kFailHeaderNoContinue =
+    "The game has encountered an error it cannot recover from. The details below are also written to the log.\n"
+    "Exit: close the game and save the crash report.";
+
+#if defined(XR_PLATFORM_WINDOWS)
+// Own Win32 window instead of MessageBox: MessageBox has no custom buttons, and a few kilobytes of stack trace need a
+// scrollable, selectable text field. The window has no owner and runs its own message loop on the failing thread, so
+// it does not depend on the game window's thread (which may be waiting for this one).
+constexpr int kFailIdHeader = 100;
+constexpr int kFailIdDetails = 101;
+constexpr int kFailIdContinue = 102;
+constexpr int kFailIdIgnore = 103;
+constexpr int kFailIdCopy = 104;
+constexpr int kFailIdExit = 105;
+constexpr UINT_PTR kFailEnableTimer = 1;
+// The player may be clicking or holding a key in the game when the dialog appears: its answer buttons are enabled
+// only after a moment, so that input meant for the game does not pick an answer.
+constexpr UINT kFailEnableDelayMs = 800;
+constexpr wchar_t kFailDialogClass[] = L"XRayFailDialog";
+
+struct FailDialogData
+{
+    std::wstring header;
+    std::wstring details;
+    bool allowContinue{};
+    int choice{ -1 }; // FailChoice once answered
+    bool answersEnabled{};
+    float scale{ 1.0f };
+    HFONT uiFont{};
+    HFONT monoFont{};
+    HWND headerWnd{};
+    HWND detailsWnd{};
+    HWND continueWnd{};
+    HWND ignoreWnd{};
+    HWND copyWnd{};
+    HWND exitWnd{};
+};
+
+int fail_px(const FailDialogData& d, int value) { return static_cast<int>(value * d.scale + 0.5f); }
+
+// Win32 edit controls break lines only at CRLF
+std::wstring fail_text_to_wide(pcstr text)
+{
+    xr_string crlf;
+    crlf.reserve(std::strlen(text) + 256);
+    for (pcstr p = text; *p; ++p)
+    {
+        if (*p == '\n' && (p == text || p[-1] != '\r'))
+            crlf += '\r';
+        crlf += *p;
+    }
+    return XRay::Utf8::ToWide(crlf.c_str());
+}
+
+HWND fail_create_child(HWND parent, const wchar_t* cls, const wchar_t* text, DWORD style, DWORD exStyle, int id,
+    HFONT font)
+{
+    const HWND wnd = CreateWindowExW(exStyle, cls, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, parent,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr);
+    if (wnd && font)
+        SendMessageW(wnd, WM_SETFONT, reinterpret_cast<WPARAM>(font), FALSE);
+    return wnd;
+}
+
+void fail_layout(FailDialogData& d, HWND wnd)
+{
+    RECT client{};
+    GetClientRect(wnd, &client);
+    const int margin = fail_px(d, 12);
+    const int gap = fail_px(d, 8);
+    const int buttonW = fail_px(d, 130);
+    const int buttonH = fail_px(d, 28);
+    const int width = std::max(static_cast<int>(client.right) - 2 * margin, 1);
+
+    int headerH = fail_px(d, 64);
+    if (const HDC dc = GetDC(wnd))
+    {
+        const HGDIOBJ previous = d.uiFont ? SelectObject(dc, d.uiFont) : nullptr;
+        RECT text{ 0, 0, width, 0 };
+        DrawTextW(dc, d.header.c_str(), -1, &text, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+        headerH = text.bottom - text.top;
+        if (previous)
+            SelectObject(dc, previous);
+        ReleaseDC(wnd, dc);
+    }
+
+    const int buttonsY = client.bottom - margin - buttonH;
+    const int detailsY = margin + headerH + gap;
+    MoveWindow(d.headerWnd, margin, margin, width, headerH, TRUE);
+    MoveWindow(d.detailsWnd, margin, detailsY, width, std::max(buttonsY - gap - detailsY, 0), TRUE);
+
+    // Copy on the left, the answers on the right with Exit last
+    MoveWindow(d.copyWnd, margin, buttonsY, buttonW, buttonH, TRUE);
+    int x = client.right - margin - buttonW;
+    for (const HWND button : { d.exitWnd, d.ignoreWnd, d.continueWnd })
+    {
+        if (!button)
+            continue;
+        MoveWindow(button, x, buttonsY, buttonW, buttonH, TRUE);
+        x -= buttonW + gap;
+    }
+}
+
+void fail_answer(FailDialogData& d, HWND wnd, FailChoice choice)
+{
+    d.choice = static_cast<int>(choice);
+    DestroyWindow(wnd);
+}
+
+LRESULT CALLBACK fail_dialog_proc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    auto* d = reinterpret_cast<FailDialogData*>(GetWindowLongPtrW(wnd, GWLP_USERDATA));
+    switch (msg)
+    {
+    case WM_NCCREATE:
+    {
+        const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+        SetWindowLongPtrW(wnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+        break;
+    }
+    case WM_CREATE:
+    {
+        if (!d)
+            return -1;
+        d->headerWnd = fail_create_child(wnd, L"STATIC", d->header.c_str(), SS_LEFT | SS_NOPREFIX, 0,
+            kFailIdHeader, d->uiFont);
+        d->detailsWnd = fail_create_child(wnd, L"EDIT", nullptr,
+            WS_TABSTOP | WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
+            WS_EX_CLIENTEDGE, kFailIdDetails, d->monoFont ? d->monoFont : d->uiFont);
+        if (d->detailsWnd)
+        {
+            SendMessageW(d->detailsWnd, EM_SETLIMITTEXT, 0, 0); // no 32K default limit
+            SetWindowTextW(d->detailsWnd, d->details.c_str());
+        }
+        constexpr DWORD answerStyle = WS_TABSTOP | BS_PUSHBUTTON | WS_DISABLED;
+        if (d->allowContinue)
+        {
+            d->continueWnd = fail_create_child(wnd, L"BUTTON", L"Continue", answerStyle, 0, kFailIdContinue, d->uiFont);
+            d->ignoreWnd = fail_create_child(wnd, L"BUTTON", L"Ignore always", answerStyle, 0, kFailIdIgnore, d->uiFont);
+        }
+        d->copyWnd = fail_create_child(wnd, L"BUTTON", L"Copy to clipboard", WS_TABSTOP | BS_PUSHBUTTON, 0,
+            kFailIdCopy, d->uiFont);
+        d->exitWnd = fail_create_child(wnd, L"BUTTON", L"Exit game", answerStyle, 0, kFailIdExit, d->uiFont);
+        SetTimer(wnd, kFailEnableTimer, kFailEnableDelayMs, nullptr);
+        return 0;
+    }
+    case WM_TIMER:
+        if (d && wParam == kFailEnableTimer)
+        {
+            KillTimer(wnd, kFailEnableTimer);
+            d->answersEnabled = true;
+            for (const HWND button : { d->continueWnd, d->ignoreWnd, d->exitWnd })
+            {
+                if (button)
+                    EnableWindow(button, TRUE);
+            }
+            return 0;
+        }
+        break;
+    case WM_SIZE:
+        if (d)
+            fail_layout(*d, wnd);
+        return 0;
+    case WM_GETMINMAXINFO:
+        // The first message a window gets, before WM_NCCREATE: d is null then
+        if (d)
+        {
+            auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
+            info->ptMinTrackSize.x = fail_px(*d, 600);
+            info->ptMinTrackSize.y = fail_px(*d, 320);
+            return 0;
+        }
+        break;
+    case WM_COMMAND:
+        if (!d)
+            break;
+        // IDOK and IDCANCEL (Enter and Escape through IsDialogMessage) are not answers: a key the player was
+        // pressing in the game must not close the dialog
+        switch (LOWORD(wParam))
+        {
+        case kFailIdContinue:
+            if (d->answersEnabled && d->allowContinue)
+                fail_answer(*d, wnd, FailChoice::Continue);
+            return 0;
+        case kFailIdIgnore:
+            if (d->answersEnabled && d->allowContinue)
+                fail_answer(*d, wnd, FailChoice::IgnoreAlways);
+            return 0;
+        case kFailIdExit:
+            if (d->answersEnabled)
+                fail_answer(*d, wnd, FailChoice::Exit);
+            return 0;
+        case kFailIdCopy:
+            // The edit control copies as Unicode text with CRLF, no SDL involved (its clipboard calls belong to
+            // the window's thread)
+            if (d->detailsWnd)
+            {
+                SendMessageW(d->detailsWnd, EM_SETSEL, 0, -1);
+                SendMessageW(d->detailsWnd, WM_COPY, 0, 0);
+                SetFocus(d->detailsWnd);
+            }
+            return 0;
+        default: break;
+        }
+        break;
+    case WM_CLOSE:
+        // The close box and Alt+F4 answer Exit, as Escape did in the old dialog
+        if (d && d->answersEnabled)
+            fail_answer(*d, wnd, FailChoice::Exit);
+        return 0;
+    default: break;
+    }
+    return DefWindowProcW(wnd, msg, wParam, lParam);
+}
+
+// The old three-button message box, for the case the window above cannot be created
+FailChoice show_fail_message_box(const std::wstring& title, const FailDialogData& d)
+{
+    std::wstring text = d.header;
+    text += L"\r\n\r\n";
+    if (d.allowContinue)
+        text += L"Retry = Continue, Ignore = Ignore always, Abort = Exit.\r\n\r\n";
+    text += d.details;
+    const UINT type = (d.allowContinue ? MB_ABORTRETRYIGNORE : MB_OK) | MB_ICONERROR | MB_SYSTEMMODAL |
+        MB_SETFOREGROUND | MB_TOPMOST;
+    switch (MessageBoxW(nullptr, text.c_str(), title.c_str(), type))
+    {
+    case IDRETRY: return FailChoice::Continue;
+    case IDIGNORE: return FailChoice::IgnoreAlways;
+    default: return FailChoice::Exit;
+    }
+}
+
+FailChoice show_fail_dialog(pcstr header, pcstr details, bool allowContinue, bool windowThread, HWND gameWnd)
+{
+    FailDialogData d;
+    d.header = fail_text_to_wide(header);
+    d.details = fail_text_to_wide(details);
+    d.allowContinue = allowContinue;
+
+    std::wstring title = XRay::Utf8::ToWide(Core.ApplicationTitle[0] ? Core.ApplicationTitle : "OpenXRay");
+    title += L" - error";
+
+    // Registered once, under failLock like the rest of the dialog code
+    static bool classRegistered = false;
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    if (!classRegistered)
+    {
+        WNDCLASSEXW wc{};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = fail_dialog_proc;
+        wc.hInstance = instance;
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        wc.hbrBackground = reinterpret_cast<HBRUSH>(static_cast<INT_PTR>(COLOR_BTNFACE + 1));
+        wc.lpszClassName = kFailDialogClass;
+        classRegistered = RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
+    }
+    if (!classRegistered)
+        return show_fail_message_box(title, d);
+
+    if (const HDC screen = GetDC(nullptr))
+    {
+        d.scale = std::max(GetDeviceCaps(screen, LOGPIXELSY) / 96.0f, 1.0f);
+        ReleaseDC(nullptr, screen);
+    }
+
+    NONCLIENTMETRICSW metrics{};
+    metrics.cbSize = sizeof(metrics);
+    if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0))
+    {
+        d.uiFont = CreateFontIndirectW(&metrics.lfMessageFont);
+        LOGFONTW mono = metrics.lfMessageFont;
+        wcsncpy_s(mono.lfFaceName, L"Consolas", _TRUNCATE);
+        mono.lfPitchAndFamily = FIXED_PITCH | FF_MODERN;
+        d.monoFont = CreateFontIndirectW(&mono);
+    }
+
+    // Centred on the monitor of the game window. MonitorFromWindow only reads the window rectangle.
+    RECT work{ 0, 0, 1280, 720 };
+    MONITORINFO monitor{};
+    monitor.cbSize = sizeof(monitor);
+    if (GetMonitorInfoW(MonitorFromWindow(gameWnd, MONITOR_DEFAULTTOPRIMARY), &monitor))
+        work = monitor.rcWork;
+    const int workW = work.right - work.left;
+    const int workH = work.bottom - work.top;
+    const int width = std::min(fail_px(d, 820), workW * 9 / 10);
+    const int height = std::min(fail_px(d, 580), workH * 9 / 10);
+
+    // Topmost and without an owner; WS_EX_APPWINDOW gives it a taskbar button of its own
+    const HWND wnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_APPWINDOW, kFailDialogClass, title.c_str(),
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_CLIPCHILDREN,
+        work.left + (workW - width) / 2, work.top + (workH - height) / 2, width, height,
+        nullptr, nullptr, instance, &d);
+
+    FailChoice choice = FailChoice::Exit;
+    if (!wnd)
+        choice = show_fail_message_box(title, d);
+    else
+    {
+        // Modal for the game window only on its own thread: EnableWindow from another thread waits for it
+        const bool disableGame = windowThread && gameWnd && IsWindowEnabled(gameWnd);
+        if (disableGame)
+            EnableWindow(gameWnd, FALSE);
+
+        ShowWindow(wnd, SW_SHOWNORMAL);
+        SetForegroundWindow(wnd);
+        if (d.detailsWnd)
+            SetFocus(d.detailsWnd); // not a button: a key still held in the game must not press one
+
+        // On the window's thread this also dispatches the game window's messages, as MessageBox did
+        MSG msg;
+        while (d.choice < 0)
+        {
+            const BOOL got = GetMessageW(&msg, nullptr, 0, 0);
+            if (got == 0)
+            {
+                PostQuitMessage(static_cast<int>(msg.wParam)); // leave WM_QUIT to the game's own loop
+                break;
+            }
+            if (got < 0)
+                break;
+            if (!IsDialogMessageW(wnd, &msg))
+            {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+
+        if (disableGame)
+            EnableWindow(gameWnd, TRUE); // before the dialog goes, so that the activation returns to the game
+        if (IsWindow(wnd))
+            DestroyWindow(wnd);
+        if (d.choice >= 0)
+            choice = static_cast<FailChoice>(d.choice);
+    }
+
+    if (d.uiFont)
+        DeleteObject(d.uiFont);
+    if (d.monoFont)
+        DeleteObject(d.monoFont);
+    return choice;
+}
+#else
+FailChoice show_fail_dialog(pcstr header, pcstr details, bool allowContinue, SDL_Window* parent)
+{
+    xr_string text = header;
+    text += "\n\n";
+    text += details;
+
+    SDL_MessageBoxButtonData failButtons[3]{};
+    int count = 0;
+    if (allowContinue)
+    {
+        failButtons[count++] = { 0, static_cast<int>(FailChoice::Continue), "Continue" };
+        failButtons[count++] = { 0, static_cast<int>(FailChoice::IgnoreAlways), "Ignore always" };
+    }
+    failButtons[count++] = { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, static_cast<int>(FailChoice::Exit), "Exit game" };
+
+    const SDL_MessageBoxData data =
+    {
+        SDL_MESSAGEBOX_ERROR, parent, "Error", text.c_str(), count, failButtons, nullptr
+    };
+
+    int button = -1;
+    if (SDL_ShowMessageBox(&data, &button) < 0)
+    {
+        Msg("! [debug] the error dialog failed: %s", SDL_GetError());
+        return FailChoice::Exit;
+    }
+    switch (button)
+    {
+    case static_cast<int>(FailChoice::Continue): return FailChoice::Continue;
+    case static_cast<int>(FailChoice::IgnoreAlways): return FailChoice::IgnoreAlways;
+    default: return FailChoice::Exit; // closed without an answer
+    }
+}
+#endif // XR_PLATFORM_WINDOWS
+} // namespace
+
 void xrDebug::Fatal(const ErrorLocation& loc, const char* format, ...)
 {
     string1024 desc;
@@ -618,69 +1176,141 @@ AssertionResult xrDebug::Fail(bool& ignoreAlways, const ErrorLocation& loc, cons
 AssertionResult xrDebug::Fail(bool& ignoreAlways, const ErrorLocation& loc, const char* expr, const char* desc, const char* arg1,
                    const char* arg2)
 {
+    // A second thread failing meanwhile waits here until the first dialog is answered: one dialog at a time.
     ScopeLock lock(&failLock);
 
-    if (windowHandler)
-        windowHandler->OnErrorDialog(true); // Call it only after locking so that multiple threads won't call this function simultaneously.
+    const bool allowContinue = !s_tl_fail_no_continue;
+    pcstr const file = loc.File ? loc.File : "<unknown file>";
+
+    // Failed again while this thread handles a failure (the lock is recursive): log it and go on with the outer one.
+    // A failure that does not allow going on is taken straight to the exit below, without a dialog.
+    const bool nested = s_tl_fail_depth > 0;
+    if (nested)
+    {
+        Msg("! [debug] error while handling another error, no dialog: %s | %s at %s:%d", expr ? expr : "",
+            desc ? desc : "", file, loc.Line);
+        FlushLog();
+        if (allowContinue)
+            return AssertionResult::tryAgain;
+    }
+    else if (allowContinue && is_fail_site_ignored(loc))
+    {
+        ignoreAlways = true;
+        return AssertionResult::ignore;
+    }
+
+    const FailDepthScope depth;
+
+    // Only after locking, so that two threads never change the window at once
+    const bool dialogPrepared = !nested && begin_error_dialog(windowHandler);
 
     ErrorAfterDialog = true;
     string4096 assertionInfo;
-    GatherInfo(assertionInfo, sizeof(assertionInfo), loc, expr, desc, arg1, arg2);
-
-    xrSentry_CaptureDebugFail(expr, desc, arg1, arg2);
-
-    if (ShowErrorMessage)
+    if (nested)
+        std::snprintf(assertionInfo, sizeof(assertionInfo), "%s", desc ? desc : "error while handling another error");
+    else
     {
-        append_tail_clamped(assertionInfo, sizeof(assertionInfo),
-            "\r\n"
-            "Press CANCEL to abort execution\r\n"
-            "Press TRY AGAIN to continue execution\r\n"
-            "Press CONTINUE to continue execution and ignore all the errors of this type\r\n"
-            "\r\n");
+        GatherInfo(assertionInfo, sizeof(assertionInfo), loc, expr, desc, arg1, arg2);
+        // Captured before the dialog: the report is queued even if the process never gets past it. No flush here.
+        xrSentry_CaptureDebugFail(expr, desc, arg1, arg2);
     }
 
+    string256 threadName{};
+    get_current_thread_name(threadName, sizeof(threadName));
+    Msg("! [debug] thread: 0x%llX \"%s\"", static_cast<unsigned long long>(get_current_thread_id()), threadName);
     FlushLog();
 
-    bool resetFullscreen = false;
+    FailChoice choice = FailChoice::Exit;
+    bool dialogShown = false;
     AssertionResult result = AssertionResult::abort;
     if (Core.PluginMode)
         /*result =*/ ShowMessage("X-Ray error", assertionInfo); // Do not assign 'result'
     else
     {
-        if (ShowErrorMessage)
-            result = ShowMessage("Fatal error", assertionInfo, false);
-
-        switch (result)
+        // No dialog (Master Gold without -show_error_window): exit, as before
+        if (ShowErrorMessage && !nested)
         {
-        case AssertionResult::tryAgain:
-            ErrorAfterDialog = false;
-            resetFullscreen = windowHandler != nullptr;
-            break;  
+            pcstr const logPath = log_name();
+            string_path logLine{};
+            std::snprintf(logLine, sizeof(logLine), "%s", logPath && *logPath ? logPath : "<not created yet>");
 
-        case AssertionResult::ignore:
-            ErrorAfterDialog = false;
-            ignoreAlways = true;
-            resetFullscreen = windowHandler != nullptr;
+            xr_string details;
+            details.reserve(sizeof(assertionInfo) + 512);
+            details += "Thread: ";
+            string64 threadId;
+            std::snprintf(threadId, sizeof(threadId), "0x%llX ", static_cast<unsigned long long>(get_current_thread_id()));
+            details += threadId;
+            details += '"';
+            details += threadName;
+            details += "\"\nLog: ";
+            details += logLine;
+            details += '\n';
+            details += assertionInfo; // starts with a line break
+
+            pcstr const header = allowContinue ? kFailHeaderContinue : kFailHeaderNoContinue;
+            const bool windowThread = on_window_thread();
+#if defined(XR_PLATFORM_WINDOWS)
+            const auto gameWnd = windowHandler ? static_cast<HWND>(windowHandler->GetApplicationWindowHandle()) : nullptr;
+            choice = show_fail_dialog(header, details.c_str(), allowContinue, windowThread, gameWnd);
+#else
+            SDL_Window* parent = windowHandler && windowThread ? windowHandler->GetApplicationWindow() : nullptr;
+            choice = show_fail_dialog(header, details.c_str(), allowContinue, parent);
+#endif
+            dialogShown = true;
+            if (!allowContinue)
+                choice = FailChoice::Exit;
+        }
+
+        switch (choice)
+        {
+        case FailChoice::Continue:
+            Msg("! [debug] fatal error ignored by the user (Continue) at %s:%d", file, loc.Line);
+            result = AssertionResult::tryAgain;
             break;
 
-        case AssertionResult::undefined:
-            append_tail_clamped(assertionInfo, sizeof(assertionInfo), SDL_GetError());
-            [[fallthrough]];
-        case AssertionResult::abort:
-            [[fallthrough]];
+        case FailChoice::IgnoreAlways:
+            Msg("! [debug] fatal error ignored by the user (Ignore always) at %s:%d", file, loc.Line);
+            ignore_fail_site(loc);
+            ignoreAlways = true;
+            result = AssertionResult::ignore;
+            break;
+
+        case FailChoice::Exit:
         default:
-#ifdef USE_BUG_TRAP 
+            if (dialogShown)
+                Msg("! [debug] fatal error: the user chose Exit at %s:%d", file, loc.Line);
+            FlushLog();
+            // The capture above only queued the report; send it before the process goes down
+            constexpr u32 kSentryExitFlushMs = 10000;
+            xrSentry_Flush(kSentryExitFlushMs);
+#ifdef USE_BUG_TRAP
             BT_SetUserMessage(assertionInfo);
 #endif
             // calling DEBUG_BREAK with no debugger will trigger BugTrap
             // we must hide the window
-            if (windowHandler && !DebuggerIsPresent())
-                windowHandler->OnFatalError();
+            if (!DebuggerIsPresent())
+                hide_window_before_exit(windowHandler);
             DEBUG_BREAK;
-        } // switch (result)
+            break;
+        } // switch (choice)
+
+        if (result != AssertionResult::abort)
+        {
+            ErrorAfterDialog = false;
+            FlushLog();
+#if defined(XR_PLATFORM_WINDOWS)
+            // Give the focus back to the game. Unlike ShowWindow, SetForegroundWindow does not wait for the window's
+            // thread; on that thread the dialog's EnableWindow already returned the activation.
+            if (dialogShown && windowHandler && !on_window_thread())
+            {
+                if (const auto gameWnd = static_cast<HWND>(windowHandler->GetApplicationWindowHandle()))
+                    SetForegroundWindow(gameWnd);
+            }
+#endif
+        }
     }
 
-    if (resetFullscreen)
+    if (dialogPrepared && result != AssertionResult::abort)
         windowHandler->OnErrorDialog(false); // Call it only before unlocking so that multiple threads won't call this function simultaneously.
 
     return result;
@@ -697,8 +1327,8 @@ void xrDebug::DoExit(const std::string& message)
 {
     ScopeLock lock(&failLock);
 
-    if (windowHandler)
-        windowHandler->OnErrorDialog(true);
+    // The window is changed only from its own thread (see s_window_thread)
+    const bool dialogPrepared = begin_error_dialog(windowHandler);
 
     FlushLog();
 
@@ -711,8 +1341,7 @@ void xrDebug::DoExit(const std::string& message)
     else
         ShowMessage(Core.ApplicationName, message.c_str());
 
-    if (windowHandler)
-        windowHandler->OnFatalError();
+    hide_window_before_exit(windowHandler);
 
 #if defined(XR_PLATFORM_WINDOWS)
     TerminateProcess(GetCurrentProcess(), 1);
@@ -720,7 +1349,7 @@ void xrDebug::DoExit(const std::string& message)
     exit(1);
 #endif
     // if you're under debugger, you can jump here manually
-    if (windowHandler)
+    if (dialogPrepared)
         windowHandler->OnErrorDialog(false);
 }
 
@@ -754,11 +1383,11 @@ int out_of_memory_handler(size_t size)
         Msg("* [x-ray]: shared strings: memory[%ld K], count[%lu]", ecoStringsBytes / 1024, ecoStringsCount);
         Msg("* [x-ray]: shared memory[%ld K]", ecoSmem);
     }
+    // The new handler retries the allocation when it returns: going on would only bring the dialog back
+    const FailNoContinueScope noContinue;
     xrDebug::Fatal(DEBUG_INFO, "Out of memory. Memory request: %zu K", size / 1024);
     return 1;
 }
-
-extern pcstr log_name();
 
 void WINAPI xrDebug::PreErrorHandler(INT_PTR)
 {
@@ -920,8 +1549,8 @@ LONG WINAPI xrDebug::UnhandledFilter(EXCEPTION_POINTERS* exPtrs)
 
     FlushLog();
 
-    if (windowHandler)
-        windowHandler->OnErrorDialog(true);
+    // The crash may be on any thread: the window is changed only from its own one (see s_window_thread)
+    const bool dialogPrepared = begin_error_dialog(windowHandler);
 
     static constexpr pcstr fatalError = "Fatal error";
 
@@ -957,12 +1586,11 @@ LONG WINAPI xrDebug::UnhandledFilter(EXCEPTION_POINTERS* exPtrs)
     // Typically, PrevFilter is BugTrap filter
     if (PrevFilter)
     {
-        if (windowHandler)
-            windowHandler->OnFatalError();
+        hide_window_before_exit(windowHandler);
         PrevFilter(exPtrs);
     }
 
-    if (windowHandler)
+    if (dialogPrepared)
         windowHandler->OnErrorDialog(false);
 
     return EXCEPTION_CONTINUE_SEARCH;
@@ -996,6 +1624,8 @@ void xr_terminate()
 
 static void handler_base(const char* reason)
 {
+    // Signals and the pure virtual call handler: the CRT aborts or the faulting instruction runs again on return
+    const FailNoContinueScope noContinue;
     bool ignoreAlways = false;
     xrDebug::Fail(ignoreAlways, DEBUG_INFO, nullptr, reason, nullptr, nullptr);
 }

@@ -898,6 +898,13 @@ void CRender::Render()
             PERF_WAIT_SITE(xray::perf::wait_site::RRain);
             r_rain.sync();
         }
+        else
+        {
+            // The scope pass launches no rain build with this cvar (calculate_for / SecondVPPostCalculate); a build
+            // launched anyway (the cvar flipped in between) is joined and dropped here, never left running into
+            // End() -> cleanup_contexts() (50v-rain-context-race.md). No-op otherwise.
+            r_rain.join_discard();
+        }
     }
 
     // Directional light - fucking sun

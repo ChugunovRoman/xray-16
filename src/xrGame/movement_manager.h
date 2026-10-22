@@ -166,6 +166,9 @@ private:
     // for the [path-spike] line only. set_level_dest_vertex() makes it "engine" when the vertex changes, the Lua method
     // set_dest_level_vertex_id and the plugin API call npc_set_dest_level_vertex mark it after that. Transient.
     u8 m_level_dest_source = 0;
+    // 50y (plans/optimization_mt/50y-invalid-dest-level-vertex.md): the game path gave the level path a game vertex of
+    // another level, reported once per object (process_game_path, reset_foreign_game_path)
+    bool m_foreign_game_path_reported = false;
 
 public:
     enum level_dest_source : u8
@@ -193,6 +196,7 @@ public:
 
 private:
     void process_game_path();
+    void reset_foreign_game_path(u32 game_vertex_id, u32 dest_level_vertex_id); // 50y
     void process_level_path();
     void process_patrol_path();
 #ifdef USE_FREE_IN_RESTRICTIONS

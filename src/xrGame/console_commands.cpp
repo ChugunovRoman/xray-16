@@ -3468,6 +3468,9 @@ void CCC_RegisterCommands()
     // off; the actor always collides with corpses).
     CMD4(CCC_Float, "ph_corpse_vs_corpse_dist", &ph_console::ph_corpse_vs_corpse_dist, 0.f, 500.f);
     CMD4(CCC_Float, "ph_corpse_vs_npc_dist", &ph_console::ph_corpse_vs_npc_dist, 0.f, 500.f);
+    // plans/npc-corpse-collision.md (always on, the emergency switch, not saved): live NPCs (stalkers, monsters) walk
+    // through corpses at any distance; the actor still collides with them. 1 = the old collision (ph_corpse_vs_npc_dist).
+    CMD4(CCC_IntegerNotSaved, "ph_npc_corpse_collide", &ph_console::ph_npc_corpse_collide, 0, 1);
     // Live NPCs left high in the air (plans/optimization_mt/21-physics-step.md, 2026-10-15; always on): a destination the
     // NPC is moved to without gravity (the kinematic branches of move_along_path, a successful TryPosition, a standing NPC
     // with a disabled character) that hangs more than ai_npc_ground_snap_height m above the AI floor is lowered to it at

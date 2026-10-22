@@ -70,17 +70,44 @@ void CEngineAPI::SelectRenderer()
     // or we don't comply with it's requirements (e.g. shaders missing)
     if (!selectedRenderer)
     {
-        // Select any suitable
-        for (const auto& [mode, renderer] : renderModes)
+        // Select the best suitable one. renderModes is ordered by the addresses of the mode strings, not by quality:
+        // "any first" picked renderer_r2 (D3D11 at feature level 10.x) on a first start without user.ltx (and for the
+        // shipped renderer_r2a, a mode that is not offered). GlobalWar targets r4 (the launcher writes RendererR4), so
+        // the modes are tried from the best down; any other suitable one after them.
+        static constexpr pcstr preferred_modes[] =
         {
-            if (renderer->CheckGameRequirements())
+            "renderer_r4", "renderer_r3", "renderer_r2.5", "renderer_r2", "renderer_rgl"
+        };
+        string64 wanted; // the value of the renderer command before the choice (GetString's buffer changes with it)
+        xr_strcpy(wanted, selected_mode ? selected_mode : "");
+        const auto choose = [&](pcstr mode, RendererModule* renderer)
+        {
+            selectedRenderer = renderer;
+            selected_mode = mode;
+            string64 buf;
+            xr_sprintf(buf, "renderer %s", selected_mode);
+            Console->Execute(buf);
+            Msg("* renderer: '%s' is not available, selected %s", wanted, selected_mode);
+        };
+        for (pcstr preferred : preferred_modes)
+        {
+            const auto found = std::find_if(renderModes.begin(), renderModes.end(),
+                [preferred](const auto& pair) { return xr_strcmp(preferred, pair.first) == 0; });
+            if (found != renderModes.end() && found->second->CheckGameRequirements())
             {
-                selectedRenderer = renderer;
-                selected_mode = mode;
-                string64 buf;
-                xr_sprintf(buf, "renderer %s", selected_mode);
-                Console->Execute(buf);
+                choose(found->first, found->second);
                 break;
+            }
+        }
+        if (!selectedRenderer)
+        {
+            for (const auto& [mode, renderer] : renderModes)
+            {
+                if (renderer->CheckGameRequirements())
+                {
+                    choose(mode, renderer);
+                    break;
+                }
             }
         }
     }

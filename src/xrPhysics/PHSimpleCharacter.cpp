@@ -1496,6 +1496,9 @@ void CPHSimpleCharacter::RemoveObjectContactCallback(ObjectContactCallbackFun* c
 
 void CPHSimpleCharacter::Disable()
 {
+    // Destroy() nulls the geoms and the body: nothing to disable (see CPHMovementControl::DisableCharacter)
+    if (!b_exist)
+        return;
     // if(is_contact&&!is_control&&!b_lose_ground)
     {
         dGeomGetUserData(m_wheel)->pushing_neg = false;

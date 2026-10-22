@@ -293,7 +293,11 @@ void CRender::calculate_for(bool second_pass)
             r_sun.init();
     }
 #if RENDER != R_R2
-    r_rain.init();
+    // The scope pass with r__svp_skip_rain_sync does not sync the rain phase in its Render() - so it must not launch
+    // it either (50v-rain-context-race.md: the never-joined build was reset under it by cleanup_contexts at End).
+    const bool skip_svp_rain = second_pass && ps_r__svp_skip_rain_sync;
+    if (!skip_svp_rain)
+        r_rain.init();
 #endif
 
     // Main calc
@@ -325,7 +329,8 @@ void CRender::calculate_for(bool second_pass)
 
     // Rain calc
 #if RENDER != R_R2
-    r_rain.run();
+    if (!skip_svp_rain)
+        r_rain.run();
 #endif
 
     // Sun calc (second dedicated-VP Calculate skips init/run when r__svp_skip_sun_csm — must match Render() skip sync)
@@ -460,7 +465,35 @@ void CRender::JoinMainBuildEarly() { main_build_early_discard(); }
 void CRender::End()
 {
     main_build_early_discard(); // cleanup_contexts() below resets the dsgraph the static half writes into
+    join_phases_at_frame_end(); // ... and the contexts the phase builds write into
     D3DXRenderBase::End();
+}
+
+void CRender::join_phases_at_frame_end()
+{
+    // Every phase task is joined by the Render() of its pass (sync, or join_discard where the pass skips the phase);
+    // reaching here with one in flight is a frame-loop bug - join it before cleanup_contexts() resets its context under
+    // the build (the 50v crash: the scope pass's rain build, never synced, reset by cleanup_contexts) and say so once.
+    i_render_phase* const phases[] =
+    {
+        &r_main,
+#if RENDER != R_R2
+        &r_rain,
+#endif
+        &r_sun,
+        &r_sun_old,
+    };
+    static u32 s_reported = 0; // main thread only (End)
+    for (u32 i = 0; i < std::size(phases); ++i)
+    {
+        if (!phases[i]->join_discard())
+            continue;
+        if (s_reported & (1u << i))
+            continue;
+        s_reported |= 1u << i;
+        Msg("! [render] frame %u: the %s task was still running at the frame end - joined before the contexts reset",
+            Device.dwFrame, phases[i]->name.c_str());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -844,10 +877,12 @@ void CRender::SecondVPPostCalculate()
             r_sun.init();
     }
 #if RENDER != R_R2
-    r_rain.init();
-#endif
-#if RENDER != R_R2
-    r_rain.run();
+    // Not with r__svp_skip_rain_sync: the scope Render() does not sync the rain phase then (see calculate_for).
+    if (!ps_r__svp_skip_rain_sync)
+    {
+        r_rain.init();
+        r_rain.run();
+    }
 #endif
     if (!skip_sun && !sun_reuse)
     {

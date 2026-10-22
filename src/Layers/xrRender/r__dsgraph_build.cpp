@@ -115,14 +115,33 @@ static void perf_skel_distance(const dxRender_Visual* V, const Fmatrix& xform, u
 }
 #endif
 
+// 50v-rain-context-race.md: a build whose dsgraph was reset under it (cleanup_contexts at End while its task still ran)
+// reads context_id == INVALID_CONTEXT_ID - vis.marker[context_id] is then 16 GB past the visual (the AV in
+// insert_static). The root cause is fixed (every phase task is joined before the pool reset, CRender::End); this keeps
+// a regression a log line: the insert is skipped, the lists of such a build are dropped anyway.
+static void report_invalid_context(const R_dsgraph_structure& ds, pcstr where)
+{
+    static std::atomic<bool> s_reported{ false };
+    if (s_reported.load(std::memory_order_relaxed) || s_reported.exchange(true, std::memory_order_relaxed))
+        return;
+    Msg("! [render] %s: dsgraph context_id 0x%x is invalid (phase %u, frame %u) - its build was reset under it, inserts "
+        "skipped", where, ds.context_id, ds.o.phase, Device.dwFrame);
+}
+
 void R_dsgraph_structure::insert_dynamic(IRenderable* root, dxRender_Visual* pVisual, Fmatrix& xform, Fvector& Center)
 {
     // No ZoneScoped: called from build_subspace() on task workers (sun SMAP mt_calc); Tracy rpmalloc/queue can AV.
     CRender& RI = RImplementation;
 
-    if (pVisual->vis.marker[context_id] == marker)
+    const u32 ctx = context_id; // read once: the guard and the marker index must agree
+    if (ctx >= R__NUM_CONTEXTS)
+    {
+        report_invalid_context(*this, "insert_dynamic");
         return;
-    pVisual->vis.marker[context_id] = marker;
+    }
+    if (pVisual->vis.marker[ctx] == marker)
+        return;
+    pVisual->vis.marker[ctx] = marker;
 
 #if RENDER == R_R1
     if (RI.o.vis_intersect && (pVisual->vis.accept_frame != Device.dwFrame))
@@ -290,9 +309,15 @@ bool R_dsgraph_structure::shadow_hull_cull(const Fbox& caster_box) const
 void R_dsgraph_structure::insert_static(dxRender_Visual* pVisual)
 {
     PERF_INC(render_static);
-    if (pVisual->vis.marker[context_id] == marker)
+    const u32 ctx = context_id; // read once, see report_invalid_context
+    if (ctx >= R__NUM_CONTEXTS)
+    {
+        report_invalid_context(*this, "insert_static");
         return;
-    pVisual->vis.marker[context_id] = marker;
+    }
+    if (pVisual->vis.marker[ctx] == marker)
+        return;
+    pVisual->vis.marker[ctx] = marker;
 
     // Shadow-caster culling: skip casters whose shadow hull (light apex extruded through the
     // caster AABB up to light range) cannot reach the main camera frustum at all.

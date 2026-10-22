@@ -14,6 +14,7 @@
 #include "alife_graph_registry.h"
 #include "alife_schedule_registry.h"
 #include "xrAICore/Navigation/game_level_cross_table.h"
+#include "xrAICore/Navigation/game_graph.h"
 #include "alife_online_offline_group_brain.h"
 #include "xrAICore/Navigation/level_graph.h"
 #include "alife_monster_movement_manager.h"
@@ -45,6 +46,45 @@ void log_squad_trace_basic(const char* tag, const CSE_ALifeOnlineOfflineGroup* s
     const ALife::_OBJECT_ID commander = !squad->squad_members().empty() ? squad->squad_members().begin()->first : 0xffff;
     Msg("[SQUAD_TRACE][%s] squad_id=%u name=%s online=%s members=%u commander=%u member=%u",
         tag, squad->ID, squad->name_replace(), squad->m_bOnline ? "true" : "false", squad->npc_count(), commander, memberId);
+}
+
+// 50y (plans/optimization_mt/50y-invalid-dest-level-vertex.md): an online member whose game path crosses a level
+// changer is teleported by its movement manager (CMovementManager::teleport -> CALifeUpdateManager::teleport_object):
+// it goes offline alone, onto the game vertex of the other level, and stays in m_members of its squad. When the squad
+// comes online again (a load of the save, or the actor coming back) the member is spawned on this level with the game
+// vertex, the level vertex and the position of the other one, and its path build asserts on the level vertex of the
+// other level. The member is put back to its squad (as update() of an offline squad does) before it goes online.
+void pull_member_to_squad_level(
+    CALifeSimulator& alife, const CSE_ALifeOnlineOfflineGroup& squad, CSE_ALifeMonsterAbstract& member)
+{
+    const CGameGraph& game_graph = ai().game_graph();
+    if (!game_graph.valid_vertex_id(squad.m_tGraphID) || !game_graph.valid_vertex_id(member.m_tGraphID))
+        return;
+
+    const GameGraph::_LEVEL_ID squad_level = game_graph.vertex(squad.m_tGraphID)->level_id();
+    const GameGraph::_LEVEL_ID member_level = game_graph.vertex(member.m_tGraphID)->level_id();
+    if (squad_level == member_level)
+        return;
+
+    Msg("! [GW] squad [%s] id=%u: member [%s] id=%u is on level [%s] (game vertex %u, level vertex %u), the squad on "
+        "[%s] (game vertex %u): the member is moved to the squad",
+        squad.name_replace(), u32(squad.ID), member.name_replace(), u32(member.ID),
+        game_graph.header().level(member_level).name().c_str(), u32(member.m_tGraphID), member.m_tNodeID,
+        game_graph.header().level(squad_level).name().c_str(), u32(squad.m_tGraphID));
+
+    // the teleport registered the member on its own (graph registry, scheduler) as register_member had not: undone
+    // here as register_member does it for an offline member
+    const CALifeGraphRegistry::OBJECT_REGISTRY& at_vertex = alife.graph().objects()[member.m_tGraphID].objects();
+    if (at_vertex.objects().find(member.ID) != at_vertex.objects().end())
+        alife.graph().remove(&member, member.m_tGraphID);
+    if (alife.scheduled().object(member.ID, true))
+        alife.scheduled().remove(&member);
+
+    member.o_Position = squad.o_Position;
+    member.m_tNodeID = squad.m_tNodeID;
+    member.m_tGraphID = squad.m_tGraphID;
+    member.m_fDistance = squad.m_fDistance;
+    member.m_tNextGraphID = member.m_tPrevGraphID = squad.m_tGraphID;
 }
 }
 
@@ -406,7 +446,10 @@ void CSE_ALifeOnlineOfflineGroup::switch_online()
     for (; I != E; ++I)
     {
         if ((*I).second->m_bOnline == false)
+        {
+            pull_member_to_squad_level(alife(), *this, *(*I).second); // 50y
             alife().add_online((*I).second, false);
+        }
     }
 
     alife().scheduled().remove(this);

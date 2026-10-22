@@ -37,3 +37,5 @@ float ph_console::ph_ai_step_max_rise = 2.f;
 // permanent rules (corpse x corpse always skipped).
 float ph_console::ph_corpse_vs_corpse_dist = 0.f;
 float ph_console::ph_corpse_vs_npc_dist = 30.f;
+// Live NPCs walk through corpses (plans/npc-corpse-collision.md): the emergency switch, 1 = the old collision.
+int ph_console::ph_npc_corpse_collide = 0;

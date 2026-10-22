@@ -58,4 +58,9 @@ struct XRPHYSICS_API ph_console
     // m: > 0 = corpse x live NPC controller pairs with both beyond this of the camera are never collided (the NPC walks
     // through, the corpse is not pushed or woken). The actor always collides with corpses.
     static float ph_corpse_vs_npc_dist; //= 30.f; 0 = off
+    // Live NPCs walk through corpses (plans/npc-corpse-collision.md; always on, the emergency switch, not saved): a live
+    // NPC controller (stalker, monster) never collides with a corpse, at any distance - it used to stop dead at a
+    // force-slept corpse (one-way contact in NearCallback: the corpse is a wall for it) or at a pile it cannot push.
+    // The actor still collides with corpses; corpses still collide with the level, props, items and vehicles.
+    static int ph_npc_corpse_collide; //= 0; 1 = the old behaviour (ph_corpse_vs_npc_dist rules only)
 };

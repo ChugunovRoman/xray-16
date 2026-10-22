@@ -482,7 +482,14 @@ CLevelGraph::CLevelVertex* CLevelGraph::lower_bound_xz(u32 xz) const
     return std::lower_bound(B, m_nodes->end(), xz);
 }
 
-CLevelGraph::~CLevelGraph() { FS.r_close(m_reader); }
+CLevelGraph::~CLevelGraph()
+{
+    // 50c-commit-growth-analysis.md (plans/optimization_mt): the manager was never deleted - the converted copy of the
+    // vertices of an older level.ai (GW ships version 10, ~25 bytes a vertex) leaked on every level load. It goes
+    // first: with the current version its vertices point into m_reader.
+    xr_delete(m_nodes);
+    FS.r_close(m_reader);
+}
 u32 CLevelGraph::vertex(const Fvector& position) const
 {
     CLevelGraph::CPosition _node_position;

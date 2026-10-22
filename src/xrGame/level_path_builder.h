@@ -34,6 +34,7 @@ private:
     // 33-level-path.md, sliced A*: builds of this builder put aside in a row (the A* did not finish in its slice)
     u32 m_put_aside = 0;
     u32 m_restarts = 0; // of them: the search started anew (its call changed) after a build put aside
+    bool m_invalid_vertex_reported = false; // 50y: setup() refused a vertex of another level, reported once
 
 private:
     enum
@@ -50,17 +51,27 @@ public:
     IC const u32& dest_vertex_id() const { return (m_dest_vertex_id); }
     IC const u32& start_vertex_id() const { return (m_start_vertex_id); }
     IC void use_delay_after_fail(bool const value) { m_use_delay_after_fail = value; }
-    IC void setup(
+    IC void reinit() { m_invalid_vertex_reported = false; } // 50y: CMovementManager::reinit, once per spawn
+    // false: a vertex is not on this level graph (it was an R_ASSERT2 "Can't setup path for object=..."), nothing is
+    // set up and the caller does not build the path (50y, plans/optimization_mt/50y-invalid-dest-level-vertex.md)
+    IC bool setup(
         const u32& start_vertex_id, const u32& dest_vertex_id, bool extrapolate_path, const Fvector* precise_position)
     {
-        R_ASSERT2(ai().level_graph().valid_vertex_id(start_vertex_id),
-            make_string(
-                "Can't setup path for object=[%s] start_vertex_id=[%d]", m_object->object().cName().c_str(), start_vertex_id));
+        const CLevelGraph& level_graph = ai().level_graph();
+        if (!level_graph.valid_vertex_id(start_vertex_id) || !level_graph.valid_vertex_id(dest_vertex_id))
+        {
+            // once per object: the caller tries again on its next update
+            if (!m_invalid_vertex_reported)
+            {
+                m_invalid_vertex_reported = true;
+                Msg("! [GW] level path of [%s]: start level vertex %u / dest level vertex %u, one is not on this level "
+                    "(vertices %u), the path is not built",
+                    m_object->object().cName().c_str(), start_vertex_id, dest_vertex_id,
+                    level_graph.header().vertex_count());
+            }
+            return false;
+        }
         m_start_vertex_id = start_vertex_id;
-
-        R_ASSERT2(ai().level_graph().valid_vertex_id(dest_vertex_id),
-            make_string(
-                "Can't setup path for object=[%s] dest_vertex_id=[%d]", m_object->object().cName().c_str(), dest_vertex_id));
         m_dest_vertex_id = dest_vertex_id;
 
         m_extrapolate_path = extrapolate_path;
@@ -79,6 +90,7 @@ public:
                     start_vertex_id, dest_vertex_id, extrapolate_path, precise_position->x, precise_position->y,
                     precise_position->z);
         }
+        return true;
     }
 
     void register_to_process()

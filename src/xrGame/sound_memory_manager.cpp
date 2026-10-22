@@ -327,7 +327,15 @@ void CSoundMemoryManager::update()
 
     clear_delayed_objects();
 
-    VERIFY(m_sounds);
+    // The list belongs to the group: null while the NPC is not registered in one (see CVisualMemoryManager::update)
+    if (!m_sounds)
+    {
+        static std::atomic_bool s_reported{false};
+        if (!s_reported.exchange(true, std::memory_order_relaxed))
+            Msg("! [GW] sound memory update of [%s] without a squad list (not registered in a group), skipped",
+                m_object ? m_object->cName().c_str() : "?");
+        return;
+    }
     const auto it = std::remove_if(m_sounds->begin(), m_sounds->end(), [](const CSoundObject& object)
     {
         if (!object.m_object)

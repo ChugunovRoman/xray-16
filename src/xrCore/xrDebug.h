@@ -98,7 +98,8 @@ public:
     static bool ProcessingFailure() { return failLock.IsLocked(); }
 
     static IWindowHandler* GetWindowHandler() { return windowHandler; }
-    static void SetWindowHandler(IWindowHandler* handler) { windowHandler = handler; }
+    /** Call on the thread that owns the window: Fail changes the window only from that thread. */
+    static void SetWindowHandler(IWindowHandler* handler);
     static IUserConfigHandler* GetUserConfigHandler() { return userConfigHandler; }
     static void SetUserConfigHandler(IUserConfigHandler* handler) { userConfigHandler = handler; }
     static OutOfMemoryCallbackFunc GetOutOfMemoryCallback() { return OutOfMemoryCallback; }

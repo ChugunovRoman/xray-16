@@ -164,15 +164,6 @@ bool write_minidump_to_path(const char* utf8Path, EXCEPTION_POINTERS* exPtrs)
     if (wide.empty())
         return false;
 
-    const HANDLE hFile = CreateFileW(wide.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile == INVALID_HANDLE_VALUE)
-        return false;
-
-    const MINIDUMP_TYPE dumpType = static_cast<MINIDUMP_TYPE>(
-        MiniDumpWithDataSegs | MiniDumpWithIndirectlyReferencedMemory | MiniDumpScanMemory |
-        MiniDumpWithProcessThreadData | MiniDumpWithThreadInfo);
-
     MINIDUMP_EXCEPTION_INFORMATION mei{};
     if (exPtrs)
     {
@@ -181,10 +172,39 @@ bool write_minidump_to_path(const char* utf8Path, EXCEPTION_POINTERS* exPtrs)
         mei.ClientPointers = FALSE;
     }
 
-    const BOOL ok = s_minidump_write_dump(GetCurrentProcess(), GetCurrentProcessId(), hFile, dumpType,
-        exPtrs ? &mei : nullptr, nullptr, nullptr);
-    CloseHandle(hFile);
-    return ok != FALSE;
+    // The full type first; if dbghelp fails on it (a huge or damaged address space, an out-of-memory state), once
+    // more with MiniDumpNormal - threads, stacks and modules are enough to read the crash. Each failure goes to the
+    // log with its error code (2026-10-20: a crash report was lost with a bare "failed to save").
+    const MINIDUMP_TYPE dumpTypes[] = {
+        static_cast<MINIDUMP_TYPE>(MiniDumpWithDataSegs | MiniDumpWithIndirectlyReferencedMemory | MiniDumpScanMemory |
+            MiniDumpWithProcessThreadData | MiniDumpWithThreadInfo),
+        MiniDumpNormal,
+    };
+    const pcstr dumpTypeNames[] = { "full", "normal" };
+    for (size_t attempt = 0; attempt < std::size(dumpTypes); ++attempt)
+    {
+        const HANDLE hFile = CreateFileW(wide.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (hFile == INVALID_HANDLE_VALUE)
+        {
+            Msg("! [Sentry]: minidump: cannot create [%s], win32 error %lu", utf8Path, GetLastError());
+            return false;
+        }
+
+        const BOOL ok = s_minidump_write_dump(GetCurrentProcess(), GetCurrentProcessId(), hFile, dumpTypes[attempt],
+            exPtrs ? &mei : nullptr, nullptr, nullptr);
+        // MiniDumpWriteDump reports its error as an HRESULT through GetLastError
+        const DWORD error = ok ? 0 : GetLastError();
+        CloseHandle(hFile);
+        if (ok)
+        {
+            if (attempt != 0)
+                Msg("! [Sentry]: minidump written with the %s type", dumpTypeNames[attempt]);
+            return true;
+        }
+        Msg("! [Sentry]: minidump (%s type) failed, error 0x%08lX", dumpTypeNames[attempt], error);
+    }
+    return false;
 }
 
 // Live process snapshot for xrDebug::Fail (not a crash). sentry_capture_minidump() reads the file into the envelope synchronously.
@@ -515,15 +535,33 @@ void save_local_crash_report_impl(EXCEPTION_POINTERS* exPtrs)
         return;
     }
 
+    // Every step that can fail records its name and the error codes: a bare "failed to save" told nothing
+    // (2026-10-20). win32 = GetLastError() right after the step; zip = the miniz error of the archive.
+    pcstr failedStep = nullptr;
+    DWORD failedWin32 = 0;
+    mz_zip_error failedZip = MZ_ZIP_NO_ERROR;
+
     mz_zip_archive zip{};
     void* zipBuf = nullptr;
     size_t zipSize = 0;
     char zipPath[kCrashPathSize]{};
+    const auto fail = [&](pcstr step, bool zipStep) {
+        failedStep = step;
+        failedWin32 = GetLastError();
+        if (zipStep)
+            failedZip = mz_zip_get_last_error(&zip);
+    };
     bool ok = mz_zip_writer_init_heap(&zip, 0, 0) != 0;
+    if (!ok)
+        fail("zip init", true);
     if (ok)
     {
         if (haveDump)
+        {
             ok = zip_add_win_file(&zip, dumpPath, "minidump.dmp");
+            if (!ok)
+                fail("zip: add minidump.dmp", true);
+        }
         if (ok && logPath && *logPath)
         {
             pcstr fileName = std::strrchr(logPath, '\\');
@@ -532,29 +570,72 @@ void save_local_crash_report_impl(EXCEPTION_POINTERS* exPtrs)
                 fileName = fileNameFwd;
             fileName = fileName ? fileName + 1 : logPath;
             ok = zip_add_win_file(&zip, logPath, fileName);
+            if (!ok)
+                fail("zip: add the log", true);
         }
         if (ok)
         {
             xr_string memStats;
             append_memory_stats(memStats);
             if (!memStats.empty())
+            {
                 ok = mz_zip_writer_add_mem(&zip, "memory_stats.txt", memStats.data(), memStats.size(), MZ_DEFAULT_LEVEL) != 0;
+                if (!ok)
+                    fail("zip: add memory_stats.txt", true);
+            }
         }
-        ok = ok && mz_zip_writer_finalize_heap_archive(&zip, &zipBuf, &zipSize) != 0 && zipBuf != nullptr;
+        if (ok)
+        {
+            ok = mz_zip_writer_finalize_heap_archive(&zip, &zipBuf, &zipSize) != 0 && zipBuf != nullptr;
+            if (!ok)
+                fail("zip finalize", true);
+        }
     }
     mz_zip_writer_end(&zip);
 
     if (ok)
+    {
         ok = write_crash_zip_unique(zipBuf, zipSize, zipPath, sizeof(zipPath));
+        if (!ok)
+            fail("write the zip to the reports folder", false);
+    }
     mz_free(zipBuf);
 
-    if (dumpPath[0])
-        DeleteFileW(XRay::Utf8::ToWide(dumpPath).c_str());
-
     if (ok && zipPath[0])
+    {
+        if (dumpPath[0])
+            DeleteFileW(XRay::Utf8::ToWide(dumpPath).c_str());
         Msg("! [Sentry]: local crash report saved to [%s] (%zu bytes)", zipPath, zipSize);
-    else
-        Msg("! [Sentry]: failed to save local crash report");
+        FlushLog();
+        return;
+    }
+
+    Msg("! [Sentry]: failed to save local crash report: %s (win32 error %lu, zip error %d %s)",
+        failedStep ? failedStep : "?", failedWin32, int(failedZip),
+        failedZip != MZ_ZIP_NO_ERROR ? mz_zip_get_error_string(failedZip) : "-");
+
+    // The zip failed but the minidump may be fine: keep it - move it from %TEMP% into the reports folder as a bare
+    // .dmp (the same place and naming as save_minidump_only) instead of deleting it.
+    bool dumpKept = false;
+    if (haveDump && dumpPath[0] && s_crash_reports_ready)
+    {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        char keptPath[kCrashPathSize];
+        std::snprintf(keptPath, sizeof(keptPath), "%scrash_%04u-%02u-%02u_%02u-%02u-%02u_%03u.dmp",
+            s_crash_reports_root, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+            st.wMilliseconds);
+        dumpKept = MoveFileExW(XRay::Utf8::ToWide(dumpPath).c_str(), XRay::Utf8::ToWide(keptPath).c_str(),
+                       MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING) != FALSE;
+        if (dumpKept)
+            Msg("! [Sentry]: the minidump is kept as [%s] (without the log)", keptPath);
+        else
+            Msg("! [Sentry]: cannot move the minidump [%s] to [%s], win32 error %lu - left in place", dumpPath,
+                keptPath, GetLastError());
+        dumpKept = true; // moved, or left in %TEMP% for a manual pick-up: never deleted on this path
+    }
+    if (!dumpKept && dumpPath[0])
+        DeleteFileW(XRay::Utf8::ToWide(dumpPath).c_str()); // an empty or failed temp file
     FlushLog();
 }
 
@@ -927,16 +1008,10 @@ void XRCORE_API xrSentry_CaptureDebugFail(pcstr expr, pcstr desc, pcstr arg1, pc
     const bool dumped = write_live_minidump_to_temp(dumpPath, sizeof(dumpPath));
     if (dumped)
     {
+        // The minidump is read into the envelope right here, so the file can go at once. No flush: the WinHTTP
+        // transport uploads in the background, and waiting for it here (up to 10 s, it timed out on players' machines)
+        // held up the error dialog. xrDebug::Fail flushes with xrSentry_Flush only when the player chose to exit.
         sentry_capture_minidump(dumpPath);
-        // WinHTTP transport queues uploads; xrDebug::Fail soon hits DEBUG_BREAK — flush so the envelope
-        // (minidump + log attachments) is sent before the process may terminate or hang in the dialog.
-        constexpr uint64_t kSentryFlushMs = 10000;
-        if (sentry_flush(kSentryFlushMs) != 0)
-        {
-#ifndef MASTER_GOLD
-            Msg("! [Sentry]: sentry_flush timed out after xrDebug::Fail minidump (report may be incomplete)");
-#endif
-        }
         DeleteFileW(XRay::Utf8::ToWide(dumpPath).c_str());
     }
 
@@ -950,6 +1025,18 @@ void XRCORE_API xrSentry_CaptureDebugFail(pcstr expr, pcstr desc, pcstr arg1, pc
 #endif
     {
         xrSentry_CaptureError("xrCore.xrDebug.Fail", m.c_str(), nullptr);
+    }
+}
+
+void xrSentry_Flush(u32 timeoutMs)
+{
+    if (!s_xr_sentry_started)
+        return;
+    if (sentry_flush(timeoutMs) != 0)
+    {
+#ifndef MASTER_GOLD
+        Msg("! [Sentry]: sentry_flush timed out after %u ms (report may be incomplete)", timeoutMs);
+#endif
     }
 }
 
@@ -989,6 +1076,7 @@ void XRCORE_API xrSentry_SetLuaStackProvider(xrSentry_LuaStackFn fn) { xrDebug::
 void XRCORE_API xrSentry_CaptureSoftError(pcstr /*logger*/, pcstr /*message*/, pcstr /*lua_stack*/) {}
 void XRCORE_API xrSentry_CaptureError(pcstr /*logger*/, pcstr /*message*/, pcstr /*lua_stack*/) {}
 void XRCORE_API xrSentry_CaptureDebugFail(pcstr /*expr*/, pcstr /*desc*/, pcstr /*arg1*/, pcstr /*arg2*/) {}
+void xrSentry_Flush(u32 /*timeoutMs*/) {}
 void XRCORE_API xrSentry_CaptureIniRStringError(pcstr /*ini_path*/, pcstr /*section*/, pcstr /*key*/) {}
 
 #endif // USE_SENTRY
